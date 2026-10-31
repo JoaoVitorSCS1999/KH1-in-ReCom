@@ -13,6 +13,8 @@
 //!   `0x1401F8150`, which Re:CoM's Field / Battle exes call each frame after their early-out)
 //!   runs one step per frame; otherwise it is one atomic load.
 //! - **Level-ups** are applied when the block is next read (`crate::mp::live`).
+//! - **The MP bar** (stage 7.2, `super::mp_bar`) is told every read and write's result; it
+//!   rescrubs only when that differs from what it shows.
 //!
 //! The API for later stages: [`current`], [`can_pay`], [`pay`], [`gain_charge`],
 //! [`restore_full`]. All are no-ops (None / false) at the Re:CoM setting, in Riku's story, or
@@ -96,6 +98,8 @@ fn with_state<R>(f: impl FnOnce(&mut Mp) -> R) -> Option<R> {
         unsafe { wr(at, block) };
     }
     REFILL_PENDING.store(l.mp.refill_ready(), Ordering::Relaxed);
+    // The MP bar (stage 7.2) shows what was just read or written: only a compare when unchanged.
+    super::mp_bar::sync(l.mp.view());
     Some(r)
 }
 

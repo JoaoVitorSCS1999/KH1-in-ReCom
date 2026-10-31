@@ -18,6 +18,8 @@
 //! - [`install`]: finding the files in the player's install and the Panacea mod folder;
 //! - [`ses`]: Re:CoM's per-motion sound events for the KH1-only clips (`PL0001.SES`);
 //! - [`stats`]: KH1 enemy twins' records and Sora's KH1 Strength (`kh1-stats.json`);
+//! - [`mp_bar`]: the MP bar (M7 stage 7.2): KH1's gauge colours as new groups in Re:CoM's
+//!   `Cockpit:00` (`FORM/0002/FO0002.SPR`) and `kh1-mp-bar.json`;
 //! - [`flip`]: the "Re:CoM's content in KH1" model-writer test (`kh1-flip-test`).
 //!
 //! No game data is embedded; everything is read from the user's files at run time.
@@ -35,6 +37,7 @@ pub mod kh2_keyblades;
 pub mod matching;
 pub mod math;
 pub mod mdl;
+pub mod mp_bar;
 pub mod rtm;
 pub mod ses;
 pub mod stats;

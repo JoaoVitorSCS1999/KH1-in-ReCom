@@ -5,6 +5,8 @@
 //! It also converts KH1's Keyblades, and the six KH2 ones Re:CoM has beyond KH1's (from the
 //! player's KH2 FM archives), into Re:CoM weapon models (`PLAYER/00GG/PL00GG.MDL` and
 //! `raw/PLAYER/00GG/PL00GG.RTM`, `docs/recom-keyblade-models.md`) and writes `kh1-stats.json`.
+//! For the MP bar (M7 stage 7.2) it writes `raw/FORM/0002/FO0002.SPR` (Re:CoM's HUD sprite file
+//! with KH1's MP gauge colours as new groups) and `kh1-mp-bar.json` (`docs/recom-m7-mp-bar.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -148,6 +150,14 @@ fn run() -> Result<(), String> {
         }
     }
     println!("Keyblades: {} converted in {:.2}s", keyblades.iter().filter(|k| k.1.is_some()).count(), t2.elapsed().as_secs_f64());
+    // The MP bar (M7 stage 7.2): built here, written with the other files below.
+    let mp_bar = match mp_bar_build(&game, keys.clone(), &arc) {
+        Ok(b) => Some(b),
+        Err(e) => {
+            println!("note: MP bar not built: {e}");
+            None
+        }
+    };
     if dry {
         return Ok(());
     }
@@ -211,6 +221,22 @@ fn run() -> Result<(), String> {
         if let Some(c) = c {
             for (rel, bytes) in kh1_recom_assets::keyblade::mod_files(m.group, c).map_err(|e| e.to_string())? {
                 write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), &bytes)?;
+            }
+        }
+    }
+    // The MP bar: Re:CoM's FO0002.SPR with the bar's groups (a raw PKG entry, every language's
+    // copy inside) and the manifest the DLL reads. Without it, an older manifest is removed so the
+    // DLL never adds groups the served file may not have.
+    let bar_manifest = root.join(kh1_recom_assets::mp_bar::MANIFEST);
+    match &mp_bar {
+        Some(b) => {
+            write(&root.join("raw").join(kh1_recom_assets::mp_bar::SPR_PATH.replace('/', std::path::MAIN_SEPARATOR_STR)), &b.entry)?;
+            write(&bar_manifest, b.manifest.as_bytes())?;
+        }
+        None => {
+            if bar_manifest.is_file() {
+                std::fs::remove_file(&bar_manifest).map_err(|e| format!("{}: {e}", bar_manifest.display()))?;
+                println!("removed {} (no MP bar this run)", bar_manifest.display());
             }
         }
     }
@@ -301,6 +327,74 @@ fn kh2_keyblades_step(game: &Path, keys: kh1_formats::egs::KeyTable, pl0002: Opt
         }
     }
     Ok((rows, models))
+}
+
+/// The MP bar's files (M7 stage 7.2): the raw `FO0002.SPR` entry and `kh1-mp-bar.json`.
+struct MpBar {
+    entry: Vec<u8>,
+    manifest: String,
+}
+
+/// Reads KH1's gauge look (`command2/uitex.bin`) and Re:CoM's neutral texel (`FO0002.RTM`), and adds
+/// the bar's groups to `Cockpit:00` in Re:CoM's `FO0002.SPR` and in each of its PC assets that is
+/// a `Cockpit.lad` or a whole container (the language copies), as a plain PKG entry with the same
+/// asset names, tags and date (`docs/recom-m7-mp-bar.md`).
+fn mp_bar_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive) -> Result<MpBar, String> {
+    use kh1_recom_assets::mp_bar::{self as mb, Patched};
+    let inst = install::kh1(game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
+    let (uitex, hd, _) = inst.read_full(mb::KH1_UITEX).map_err(|e| format!("{}: {e}", mb::KH1_UITEX))?;
+    if !hd.is_empty() {
+        let names: Vec<&str> = hd.iter().map(|a| a.name.as_str()).collect();
+        println!("note: {} has {} PC assets {:?}; the MP bar's colours are read from its PS2 pictures", mb::KH1_UITEX, hd.len(), names);
+    }
+    let look = mb::kh1_look(&uitex).map_err(|e| format!("{}: {e}", mb::KH1_UITEX))?;
+    let rtm = install::read_recom(arc, &keys, mb::RTM_PATH).map_err(|e| format!("{}: {e}", mb::RTM_PATH))?;
+    let neutral = mb::neutral_texel(&rtm).map_err(|e| format!("{}: {e}", mb::RTM_PATH))?;
+    let e = arc.find(mb::SPR_PATH).ok_or_else(|| format!("{} not in Recom.hed", mb::SPR_PATH))?;
+    let raw = arc.read_raw_entry(e).map_err(|e| format!("{}: {e}", mb::SPR_PATH))?;
+    let date = i32::from_le_bytes(raw.get(12..16).ok_or("short entry")?.try_into().unwrap());
+    let (spr, assets) = kh1_formats::egs::decode_entry_full(&keys, &raw).map_err(|e| format!("{}: {e}", mb::SPR_PATH))?;
+    let (base, first) = mb::patch_spr(&spr, &look, neutral).map_err(|e| format!("{}: {e}", mb::SPR_PATH))?;
+    let mut files = vec![(mb::SPR_PATH.to_string(), Patched::Bar(first))];
+    let mut out_assets = Vec::with_capacity(assets.len());
+    for a in &assets {
+        let (data, how) = mb::patch_asset(&a.name, &a.data, &look, neutral).map_err(|e| format!("{} asset {}: {e}", mb::SPR_PATH, a.name))?;
+        if let Patched::Bar(f) = how {
+            if f != first {
+                return Err(format!("{} asset {}: bar groups from {f}, the file's from {first}", mb::SPR_PATH, a.name));
+            }
+        }
+        files.push((a.name.clone(), how));
+        out_assets.push(kh1_formats::egs::HdAsset { name: a.name.clone(), orig_offset: a.orig_offset, data });
+    }
+    let entry = kh1_formats::egs::build_plain_entry(&base, &out_assets, date).map_err(|e| e.to_string())?;
+    let sources = [
+        ("uitex.bin sha256", kh1_formats::egs::sha256_hex(&uitex)),
+        ("FO0002.RTM sha256", kh1_formats::egs::sha256_hex(&rtm)),
+        ("FO0002.SPR sha256", kh1_formats::egs::sha256_hex(&spr)),
+    ];
+    let manifest = mb::manifest_json(first, &look, neutral, &files, &sources);
+    let patched: Vec<&str> = files.iter().filter(|f| matches!(f.1, Patched::Bar(_))).map(|f| f.0.as_str()).collect();
+    let kept: Vec<&str> = files.iter().filter(|f| f.1 == Patched::Kept).map(|f| f.0.as_str()).collect();
+    println!(
+        "MP bar: KH1 MP {:?}→{:?}, charge {:?}→{:?}, background {:?} / {:?}, segment {}×{} (charge {} high); Re:CoM neutral texel {:?}; groups {}..{} of {} added to {:?}{}",
+        look.mp_top,
+        look.mp_bottom,
+        look.charge_top,
+        look.charge_bottom,
+        look.back,
+        look.border,
+        look.slot_w,
+        look.mp_h,
+        look.charge_h,
+        neutral,
+        first,
+        first + mb::group::COUNT - 1,
+        mb::SET,
+        patched,
+        if kept.is_empty() { String::new() } else { format!("; kept as they are: {kept:?}") }
+    );
+    Ok(MpBar { entry, manifest })
 }
 
 fn kh1_stats(game: &std::path::Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive, models: &[KeybladeModel], kh2: &[Kh2Row]) -> Result<kh1_recom_assets::stats::StatsJson, String> {

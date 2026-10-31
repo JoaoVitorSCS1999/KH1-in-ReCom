@@ -367,6 +367,10 @@ pub unsafe extern "win64" fn camp_field(field: usize, open: i32, a3: usize, a4: 
     if open == 0 && INSTALLED.load(Ordering::Acquire) {
         camp_closed();
     }
+    if open == 0 {
+        // The MP bar shows a Keyblade's max MP (or the setting) changed in the camp.
+        super::mp_bar::refresh();
+    }
 }
 
 unsafe fn camp_closed() {

@@ -567,6 +567,75 @@ pub const MODEL_PTRS: &[PtrSite] = &[
     PtrSite { name: "PLAYER resource table pointer (0x1407EBF28)", rva: 0x007E_BF28, target: 0x0080_55D0 },
 ];
 
+/// The MP bar (M7 stage 7.2, `win::mp_bar`, `docs/recom-m7-mp-bar.md`): three wrappers on
+/// `Gauge::CPlayerGauge` (vtable `0x1405A6638`). Same rule as [`HOOKS`]. Checked (exe + decomp): the
+/// init's only caller is the ctor `0x140206E50`; the second-bar state `0x14020C190` is called by
+/// the init, the update `0x14020A0E0` (states 7 / 1: Re:CoM's HUD hide / show), `0x140209440` and
+/// `0x14020BC60`; the deleting dtor is reached only through the vtable (slot 0).
+pub const MP_BAR_HOOKS: &[Site] = &[
+    // mov rax,rsp; push rsi; push rdi; push r14; sub rsp,0x70 (rax is the entry rsp: the next
+    // instruction `mov [rax-0x50],-2` runs from Re:CoM's code on the same stack)
+    Site { name: "CPlayerGauge init (0x140208360)", rva: 0x0020_8360, expect: &[0x48, 0x8B, 0xC4, 0x56, 0x57, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x70] },
+    // push rbp; push rdi; sub rsp,0x48
+    Site { name: "CPlayerGauge second-bar state (0x14020C190)", rva: 0x0020_C190, expect: &[0x40, 0x55, 0x57, 0x48, 0x83, 0xEC, 0x48] },
+    // push rdi; sub rsp,0x30
+    Site { name: "CPlayerGauge deleting dtor (0x140207770)", rva: 0x0020_7770, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x30] },
+];
+
+/// Re:CoM's `D2::C2DSeqCtrl` functions the MP bar calls (the ctor `0x140247260` and `operator
+/// new` are already checked for the Keyblades page).
+pub const MP_BAR_CALLEES: &[Site] = &[
+    // movzx eax,byte [rcx+0x16D]; cmp edx,eax; jae: a layer's frame (× 50 units, `0x140245870`).
+    Site { name: "C2DSeqCtrl frame (0x140247C20)", rva: 0x0024_7C20, expect: &[0x0F, 0xB6, 0x81, 0x6D, 0x01, 0x00, 0x00, 0x3B, 0xD0, 0x73, 0x11] },
+    Site { name: "C2DSeqCtrl clear layers (0x140247C90)", rva: 0x0024_7C90, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57] },
+    Site { name: "C2DSeqCtrl all layers visible (0x140247EC0)", rva: 0x0024_7EC0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x48, 0x89, 0x6C, 0x24, 0x20, 0x56, 0x48, 0x83, 0xEC, 0x20] },
+    // lea rax,[rdx+0x10]; mov [rcx+0x130],rax; ret: the parent's transform.
+    Site { name: "C2DSeqCtrl parent (0x140248650)", rva: 0x0024_8650, expect: &[0x48, 0x8D, 0x42, 0x10, 0x48, 0x89, 0x81, 0x30, 0x01, 0x00, 0x00, 0xC3] },
+    // movaps xmm0,[rdx]; movdqa [rcx+0x110],xmm0: the scale (16-byte aligned argument).
+    Site { name: "C2DSeqCtrl scale (0x1402486D0)", rva: 0x0024_86D0, expect: &[0x0F, 0x28, 0x02, 0x66, 0x0F, 0x7F, 0x81, 0x10, 0x01, 0x00, 0x00] },
+    // vtable +8: add a layer (ctrl, set, group, x offset, flag); 10 at most (`cmp [rcx+0x16D],0xA`).
+    Site { name: "C2DSeqCtrl add layer (0x140247850)", rva: 0x0024_7850, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x80, 0xB9, 0x6D, 0x01, 0x00, 0x00, 0x0A] },
+    // vtable +0: the (vector) deleting dtor; flag 1 = destroy + delete.
+    Site { name: "C2DSeqCtrl deleting dtor (0x14015D230)", rva: 0x0015_D230, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF] },
+];
+
+/// Re:CoM code the MP bar's set check relies on (not called): the 2D registry walk and the
+/// SEQD's group count.
+pub const MP_BAR_CHECKED: &[Site] = &[
+    // 0x140245A20: `cmp [0x14087CE38],0` (the 2D manager), then `mov rax,[0x14087CE48]`, the
+    // first node `[rax+8]`, the next node `[node+8]`.
+    Site {
+        name: "2D set lookup (0x140245A20)",
+        rva: 0x0024_5A20,
+        expect: &[
+            0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0x83, 0x3D, 0x01, 0x74, 0x63, 0x00, 0x00, 0x49, 0x8B, 0xF8, 0x8B, 0xF2, 0x48, 0x8B, 0xD9, 0x75, 0x12, 0x33, 0xC0, 0x48, 0x8B, 0x5C, 0x24, 0x40, 0x48, 0x8B, 0x74,
+            0x24, 0x48, 0x48, 0x83, 0xC4, 0x30, 0x5F, 0xC3, 0x48, 0x8B, 0x05, 0xEE, 0x73, 0x63, 0x00, 0x45, 0x33, 0xDB, 0x4C, 0x8B, 0x50, 0x08, 0x4D, 0x85, 0xD2, 0x74, 0x06, 0x4D, 0x8B, 0x42, 0x08,
+        ],
+    },
+    // lea rax,[r10+0x14]: the node's name.
+    Site { name: "2D set lookup: name at +0x14 (0x140245A80)", rva: 0x0024_5A80, expect: &[0x49, 0x8D, 0x42, 0x14, 0x4C, 0x8B, 0xCB] },
+    // C2DSeq load: +0xE0 animations, +0xE8 groups, +0xF0 / +0xF4 their counts (SEQD +0x20 / +0x28).
+    Site {
+        name: "C2DSeq load: group count +0xF4 (0x140246DFE)",
+        rva: 0x0024_6DFE,
+        expect: &[
+            0x8B, 0x43, 0x24, 0x48, 0x03, 0xC3, 0x48, 0x89, 0x87, 0xE0, 0x00, 0x00, 0x00, 0x8B, 0x43, 0x2C, 0x48, 0x03, 0xC3, 0x48, 0x89, 0x87, 0xE8, 0x00, 0x00, 0x00, 0x8B, 0x43, 0x20, 0x89, 0x87, 0xF0, 0x00, 0x00, 0x00, 0x8B, 0x43, 0x28, 0x89, 0x87, 0xF4, 0x00, 0x00, 0x00,
+        ],
+    },
+    // C2DSeq vtable +0x10, the layer instantiation (its start; a group index at or past +0xF4 adds
+    // nothing: the check below).
+    Site { name: "C2DSeq instantiate (0x140246A40)", rva: 0x0024_6A40, expect: &[0x48, 0x8B, 0xC4, 0x57, 0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00, 0x48, 0xC7, 0x40, 0xD8, 0xFE, 0xFF, 0xFF, 0xFF] },
+    // mov rdi,rcx; cmp edx,[rcx+0xF4]; jb
+    Site { name: "C2DSeq instantiate: group bound (0x140246A6B)", rva: 0x0024_6A6B, expect: &[0x48, 0x8B, 0xF9, 0x3B, 0x91, 0xF4, 0x00, 0x00, 0x00, 0x72, 0x07] },
+];
+
+/// The vtable slots the MP bar calls through or compares. Checked (exe; relocated pointers).
+pub const MP_BAR_PTRS: &[PtrSite] = &[
+    PtrSite { name: "C2DSeqCtrl vtable +0 (0x140607340)", rva: 0x0060_7340, target: 0x0015_D230 },
+    PtrSite { name: "C2DSeqCtrl vtable +8 (0x140607348)", rva: 0x0060_7348, target: 0x0024_7850 },
+    PtrSite { name: "C2DSeq vtable +0x10 (0x140607270)", rva: 0x0060_7270, target: 0x0024_6A40 },
+];
+
 /// Data this version reads or calls through, with its address (Steam). Checked (exe).
 pub mod data {
     /// Sequence ids for label items (`u16[]`).
@@ -628,6 +697,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(MP_HOOKS)
         .chain(std::iter::once(&MP_CHECKPOINT_CALL))
         .chain(MP_CHECKED)
+        .chain(MP_BAR_HOOKS)
+        .chain(MP_BAR_CALLEES)
+        .chain(MP_BAR_CHECKED)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -720,7 +792,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
@@ -879,6 +951,35 @@ mod tests {
             assert!((start..start + size).contains(&c.rva), "{}", c.name);
             assert!(M6_ENEMY_UI_CHECKED.iter().any(|s| s.rva == start), "{}", c.name);
         }
+    }
+
+    #[test]
+    fn mp_bar_sites() {
+        // The three wrappers are no other stage's hook or callee, and move whole, position-free
+        // instructions (checked with the other hooks below).
+        let others = || HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS);
+        let called = || CALLEES.iter().chain(MOVE_CALLEES).chain(ATTACK_CALLEES).chain(STATS_CALLEES).chain(KEYBLADE_CALLEES).chain(MODEL_CALLEES).chain(M6_CALLEES).chain(M6_DECK_CALLEES).chain(MP_BAR_CALLEES);
+        for h in MP_BAR_HOOKS {
+            assert!(!others().chain(called()).any(|s| s.rva == h.rva), "{}", h.name);
+            assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
+            assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
+        }
+        // The ctor and allocator the bar also calls are the Keyblades page's checked ones.
+        assert!(KEYBLADE_CALLEES.iter().any(|s| s.rva == 0x0024_7260));
+        assert!(CALLEES.iter().any(|s| s.rva == 0x004A_CE54));
+        // The vtable slots point at checked functions; C2DSeqCtrl's vtable is the ctor's
+        // (`lea rax,[0x140607340]` in 0x140247260, checked bytes 0x48 0x8D 0x05 0xD3 0x00 0x3C 0x00).
+        for p in MP_BAR_PTRS {
+            assert!(all_sites().any(|s| s.rva == p.target), "{}", p.name);
+            assert!(!all_sites().any(|s| s.rva == p.rva), "{}", p.name);
+        }
+        let ctor = KEYBLADE_CALLEES.iter().find(|s| s.rva == 0x0024_7260).unwrap();
+        assert_eq!(&ctor.expect[6..9], &[0x48, 0x8D, 0x05]);
+        let disp = i32::from_le_bytes(ctor.expect[9..13].try_into().unwrap()) as i64;
+        assert_eq!((0x1_4024_7266i64 + 7 + disp) as u64, 0x1_4000_0000 + MP_BAR_PTRS[0].rva as u64);
+        assert_eq!(MP_BAR_PTRS[1].rva - MP_BAR_PTRS[0].rva, 8);
+        // The bound check sits inside the instantiation, after its checked start.
+        assert!(MP_BAR_CHECKED[3].rva + MP_BAR_CHECKED[3].expect.len() as u32 <= MP_BAR_CHECKED[4].rva);
     }
 
     #[test]

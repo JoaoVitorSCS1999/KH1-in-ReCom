@@ -10,7 +10,7 @@ bits, HUD and camp code run the feature; ours only adds data, wrappers and comma
 | Stage | System | Native host (Re:CoM) | Notes |
 |---|---|---|---|
 | 7.1 | **MP**: max MP by level, MP and charge, charge from hits, saved per save | save spare range (next to the Keyblade byte), the enemy-hit wrapper | KH1 rules: max MP 3 → 8 (+1 at levels 12/24/36/48/60); bar k needs 30·k charge; hits add 3 / 6 / 24 × level factor (1 + 0.2·Δlevel, 1..2.5×). Log + trace only. |
-| 7.2 | **MP bar** | a new layer in `Gauge::CPlayerGauge`, sequence data added to `gauge:01` at the asset step | straight bar under the HP bar, 26 units per MP (grows with max MP), KH1's MP colour read from the player's KH1 files. |
+| 7.2 | **MP bar** | a new layer object of `Gauge::CPlayerGauge` (made in its init, placed like Riku's Dark gauge), sequence data added to `Cockpit:00` (same `FO0002.SPR`; its neutral texel is readable, `gauge:01`'s isn't) at the asset step | straight bar under the HP bar, 26 units per MP (grows with max MP), KH1's MP colour read from the player's KH1 files. Built: `recom-m7-mp-bar.md`. |
 | 7.3 | **Command menu**: Attack / Magic / Items / context, Magic list | a `CTask` child of `CPlayerGauge`, Re:CoM's `Cockpit:00` plates, `C2DFnt` text, request bits | field and battle; KH1's layout (16, 260), rows 22; highlighted row = another plate colour; KH1's words from the player's KH1 message files; Items greyed until M8. |
 | 7.4 | **Cardless cast + Fire** | Re:CoM's magic action `0x13` (initMagic `0x1402203D0`), new KH1 attack rows | MP paid at release, interrupt = no spell / no MP, Fire chain from frame 14, cast from combo windows, air-cast hop. |
 | 7.5 | Blizzard | same | 7-shard cone. |

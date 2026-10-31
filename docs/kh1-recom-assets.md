@@ -43,6 +43,8 @@ kh1-recom-build [--game <KH 1.5+2.5 folder>] [--mod-dir <mod_path>] [--out <file
   on Re:CoM's own PL0002 (group 2). With `--out`, the `PLAYER/` and `raw/PLAYER/` folders go next
   to the pack. A Keyblade that can't be converted (e.g. a vertex on a joint outside 2–11) stops
   the step with its name. `--dry-run` converts and reports without writing.
+- It also builds the MP bar (M7 stage 7.2, § The MP bar below): `raw/FORM/0002/FO0002.SPR` and
+  `kh1-mp-bar.json`, under the same root as the manifest.
 - The six Keyblades Re:CoM has beyond KH1's (cards 0x13..0x18: Star Seeker, Monochrome, Follow
   the Wind, Hidden Dragon, Photon Debugger, Bond of Flame) come from KH2 FM: KH2's model
   (`obj/W_EX010_*.mdlx` + its HD `.dds`), converted on the same PL0002 template to groups
@@ -493,3 +495,66 @@ bones): local rotation (geodesic angle), translation and scale.
   pack. It also writes `PL0011.SES` with the same KH1 sound entries as `PL0001.SES`.
 - Test `g_halloween_pack_gets_the_same_slots` (needs `PL0011.ANN` in `KH1_TEST_DATA`).
 
+## The MP bar (`FORM/0002/FO0002.SPR`, M7 stage 7.2)
+
+Decision 34: a Re:CoM-style straight MP bar under the HP bar, 26 units per max-MP point, in KH1's
+colours read from the player's KH1 files. Module `mp_bar`; design, addresses and checks:
+`docs/recom-m7-mp-bar.md`.
+
+- **Reads:** KH1 `command2/uitex.bin` (the `kh1_*` archives; Checked (files): its name hash is in
+  `kh1_first.hed`): picture 5 (the gauge, at 0xA280) and 7 (its background, at 0x10740), where
+  KH1's loader takes them (Checked (decomp)). From them: the straight MP segment's top / bottom
+  row colours and size (24 × 12), the charge line's (24 × 4), the background piece's fill and
+  border. Re:CoM `FORM/0002/FO0002.RTM`: `Cockpit.imz`'s texel at (254, 47) (PS2-swizzled 8-bit,
+  decoded; 128 grey on the owner's file). Re:CoM `FORM/0002/FO0002.SPR`: the whole PKG entry
+  with its PC assets.
+- **Adds:** to `Cockpit:00` (SEQD 0 of `Cockpit.lad`), after Re:CoM's 151 animation groups: 4
+  sprites on Re:CoM's neutral texel with KH1's colours as vertex colours (KH1 texel × 128 /
+  Re:CoM texel), 5 parts, 4 sprite groups, 88 animations, 8 groups (151–158: track, MP,
+  charge, and five fade pieces). In the file itself and in every PC asset of the entry that is
+  a `Cockpit.lad` (any language prefix) or a whole container; any other asset is kept as it is.
+  A `Cockpit:00` with another group count stops the bar (the step says so and goes on).
+- **Writes**, under the manifest's root (`<mod_path>/recom/`, or next to `--out`):
+  - `raw/FORM/0002/FO0002.SPR`: a plain PKG entry (`egs::build_plain_entry`) with the patched
+    file and each asset (same names, tags, date), for Panacea's raw route, as the Keyblade RTMs
+    (`recom-keyblade-models.md` § 8);
+  - `kh1-mp-bar.json` (format `kh1-recom-assets mp-bar 1`): the set, base / first group, slot
+    geometry, KH1's colours and the vertex colours, which files were patched, the inputs'
+    sha256. The DLL makes no bar without it, and checks the loaded `Cockpit:00` has 159 groups.
+  - When the bar can't be built, an older `kh1-mp-bar.json` there is removed.
+- **Prints**, e.g. `MP bar: KH1 MP [45, 137, 224, 127]→[71, 65, 187, 128], charge
+  [254, 136, 1, 128]→[255, 173, 2, 126], background [24, 28, 42, 128] / [0, 0, 0, 128], segment
+  24×12 (charge 4 high); Re:CoM neutral texel [128, 128, 128, 128]; groups 151..158 of
+  "Cockpit:00" added to ["FORM/0002/FO0002.SPR", …]`, and a note listing `uitex.bin`'s PC assets
+  if it has any.
+- **Checked (files):** the readers write Re:CoM's `FO0002.SPR`, its three `.lad`s and all their
+  SEQDs back byte for byte (0xCD padding between files); the patched file parses with
+  OpenKH-layout readers (the research scripts) with Re:CoM's records unchanged. Tests:
+  `mp_bar::tests` (synthetic files), and `owner_files` with `KH1_RECOM_FORM` = a folder holding
+  `FO0002.SPR`, `FO0002.RTM` and `kh1_command2_uitex.bin`.
+- Not run on the owner's install yet: the PC assets of the `FO0002.SPR` entry (the language
+  copies `UK_`, `FR_`, `GR_`, `IT_`, `SP_` the extract shows) are not in this session; the step
+  prints which it patched.
+
+### Command for the owner
+
+From the game folder (the one with `Image/` and the exes), as for the earlier assets:
+
+```
+kh1-recom-build --game . --out kh1-playground/build-out/PL0001.ANN
+```
+
+It writes, next to the pack, `kh1-playground/build-out/raw/FORM/0002/FO0002.SPR` and
+`kh1-playground/build-out/kh1-mp-bar.json` (plus everything it wrote before). Copy both into the
+OpenKH mod folder (`mods/Recom/PM2CRAZY/KH1-in-ReCom/`) under the same relative paths and add to
+its `mod.yml`:
+
+```yaml
+- {name: raw/FORM/0002/FO0002.SPR, method: copy, source: [{name: raw/FORM/0002/FO0002.SPR}]}
+- {name: kh1-mp-bar.json, method: copy, source: [{name: kh1-mp-bar.json}]}
+```
+
+Then Build in the Mods Manager and restart the game (Panacea lists `raw/` files at start-up).
+Without `--out`, `kh1-recom-build --game .` writes both straight into
+`<mod_path>/recom/` (from `panacea_settings.txt`). Please send the step's printed `MP bar:` line
+and the `mp bar:` lines of `kh1-recom.log`.

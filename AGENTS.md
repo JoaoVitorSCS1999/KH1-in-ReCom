@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 39: M7 stage 7.2, the MP bar, version 0.16.0 (2026-10-31)
+
+> Decision 34: "Re:CoM-style bar" under the HP bar, "Grows with max MP", colour "From KH1's files"
+
+- A straight bar under Re:CoM's HP bar (where Riku's Dark gauge sits), field and battle, at
+  Combat = KH1 in Sora's story: one 24-unit slot per max-MP point, 26 apart (KH1's straight
+  segments), blue up to MP, KH1's orange charge line on top; KH1's fades (10 frames, ring part
+  only). Checked (KH1 decomp: pitch 26, 30 units per slot, caps, fade rule).
+- Drawn by Re:CoM: a `C2DSeqCtrl` built as the Dark gauge is, playing 8 animation groups the
+  asset step adds to `Cockpit:00` in `FO0002.SPR` (and its language copies), coloured by vertex
+  colours from the player's KH1 `command2/uitex.bin` (picture 5 / 7) over Re:CoM's 128-grey texel
+  (`FO0002.RTM`). Hooks: CPlayerGauge init `0x140208360` (`48 8B C4 56 57 41 56 48 83 EC 70`), the
+  second-bar state `0x14020C190` (`40 55 57 48 83 EC 48`), the deleting dtor `0x140207770`
+  (`40 57 48 83 EC 30`). Updates only on MP events. Re:CoM setting / Riku's story: nothing made.
+- Asset step: `raw/FORM/0002/FO0002.SPR` + `kh1-mp-bar.json`. Assumptions: texel × vertex / 128
+  on PC, vertex order, position (screenshot needed). `docs/recom-m7-mp-bar.md`. Not seen in game.
+
+---
+
 ## Stage 38: MP refills where HP refills; KH2 Keyblades' MP, version 0.15.2 (2026-10-31)
 
 > Owner's answers (decision 35): MP refill "Where HP refills"; KH2 Keyblades' MP "Use KH2 Magic"

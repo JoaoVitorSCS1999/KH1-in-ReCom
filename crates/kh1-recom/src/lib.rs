@@ -29,6 +29,9 @@
 //! - at `combat = kh1`, in Sora's story, Sora has KH1's MP: max MP by level and Keyblade, MP and
 //!   charge kept in a block of Re:CoM's own save, charge from KH1 hits, KH1's refill and payment
 //!   rules (`mp`; `docs/recom-m7-mp.md`);
+//! - at `combat = kh1`, in Sora's story, a KH1 MP bar under Re:CoM's HP bar: new groups the asset
+//!   step adds to Re:CoM's `Cockpit:00`, played on a `C2DSeqCtrl` of Re:CoM's player gauge, set
+//!   only when MP changes (`mp_bar`; `docs/recom-m7-mp-bar.md`);
 //! - F9 records a Re:CoM trace in kh1-trace's CSV schema (`trace`).
 //!
 //! `motions` (with `json`) reads the asset build step's manifest and `PL0001.ANN` header, for the
@@ -47,6 +50,7 @@ pub mod menu;
 pub mod motions;
 pub mod movement;
 pub mod mp;
+pub mod mp_bar;
 pub mod rows;
 pub mod settings;
 pub mod sites;
