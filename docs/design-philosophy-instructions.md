@@ -266,6 +266,15 @@ At KH1 setting:
     duel (Sora's reaction `0x21`) is a plain hit, so the duel never starts (Sora has no cards to
     duel with). `recom-m6-battles.md` § Marluxia 3's card duel.
 
+34. M7 magic (owner, 2026-10-31, "lets work on M7 ... FULLY implemented, also including a shortcut
+    menu, customize menu, MP bar"; answers):
+    - **Spell visuals and sounds: Re:CoM's** own effects and sounds.
+    - **Max MP grows on level up.**
+    - **Spells and spell levels are earned from certain bosses / events.**
+    - **Cure heals exactly as Re:CoM's Cure; Aero works as KH1's.**
+    - **Stop and Gravity against bosses exactly as in KH1.**
+    - Research: `m7-magic.md`, `m7-menus-mp.md` (kept with the decomp tools).
+
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.
