@@ -430,6 +430,13 @@ unsafe fn world(pl: usize) -> World {
         if let Some(s) = g.as_ref().filter(|s| s.player == pl) {
             w.state = s.sora.state;
             in_recoil = s.sora.abilities.counterattack && s.sora.clashed && s.sora.rec.head() == crate::rows::RECOIL;
+            // KH1's commit gate for spells (`0x140293480`), on the KH1 frame as last left, and
+            // only while Re:CoM's action is one KH1's frame runs (M7 stage 7.4). One update
+            // stale: the frame itself checks again (`Kh1Sora::accepts_spell`).
+            if mv::sync_ok(pl, s) {
+                w.gate_any = s.sora.accepts_spell(crate::magic::spell::BLIZZARD);
+                w.gate_fire = s.sora.accepts_spell(crate::magic::spell::FIRE);
+            }
         }
     }
     let target = if in_recoil || (0..7).any(|i| cm::spell::RANGED[i] && w.spells[i] > 0) { super::attack::attack_target(pl) } else { None };
@@ -487,9 +494,15 @@ pub unsafe fn frame(pl: usize) -> Option<Keep> {
     for (e, d) in out.events.iter().zip(&token_events) {
         event(d.clone());
         match e {
-            Event::Spell(c, locked) => note(|| format!("{d} [{c:#x}] {}: the cast comes in 7.4 (Re:CoM's refused sound)", if *locked { "greyed" } else { "chosen" })),
+            Event::Spell(c, _) => note(|| format!("{d} [{c:#x}] greyed (Re:CoM's refused sound)")),
+            Event::NotNow(c) => note(|| format!("{d} [{c:#x}]: KH1's gate refused it this frame (Sora busy)")),
+            Event::Cast(c) => note(|| format!("{d} [{c:#x}]: issued")),
             _ => note(|| d.clone()),
         }
+    }
+    // The spell issued (M7 stage 7.4): KH1's magic command for this frame's KH1 frame.
+    if let Some((s, lv)) = out.cast.and_then(cm::cmd::spell_of) {
+        super::magic::issue(s, lv);
     }
     Some(Keep { attack: out.attack, jump: out.jump, triangle: out.triangle })
 }
@@ -502,6 +515,8 @@ fn describe(e: &Event, m: &Menu) -> String {
         Event::Opened(_) => format!("open magic ({} spells, grey {:#x})", m.magic.cmds.len(), m.magic.grey & 0x7F),
         Event::Closed => "close".into(),
         Event::Spell(c, _) => format!("spell {}", name(c)),
+        Event::Cast(c) => format!("cast {}", name(c)),
+        Event::NotNow(c) => format!("not-now {}", name(c)),
         Event::Refused(c) => format!("refused {}", if c == 0 { "-".into() } else { name(c) }),
         Event::Context(c) => format!("context {}", name(c)),
     }

@@ -80,6 +80,11 @@ struct FakeRecom {
     untouchable: bool,
     clinks: u32,
     draws: u32,
+    /// M7 stage 7.4: KH1's MP test, the casts Re:CoM started, released and ended.
+    mp_ok: bool,
+    casts: Vec<crate::magic::CastStart>,
+    releases: Vec<(crate::magic::CastStart, u64)>,
+    cast_ends: usize,
 }
 
 impl FakeRecom {
@@ -94,7 +99,11 @@ impl FakeRecom {
             act: Action { id: action::STAND, sub: 0, phase: 0 },
             clip: None,
             ext: Extension::plan(|_| true),
-            motions: Moveset::kh1_defaults().motions,
+            motions: {
+                let mut m = Moveset::kh1_defaults().motions;
+                crate::magic::add_motions(&mut m);
+                m
+            },
             no_flinch: false,
             plays: Vec::new(),
             on_spring: false,
@@ -110,6 +119,10 @@ impl FakeRecom {
             untouchable: false,
             clinks: 0,
             draws: 0,
+            mp_ok: true,
+            casts: Vec::new(),
+            releases: Vec::new(),
+            cast_ends: 0,
         }
     }
 
@@ -244,6 +257,23 @@ impl Host for FakeRecom {
         self.swing_ends += 1;
         self.act = Action { id: action::STAND, sub: 0, phase: 0 };
     }
+    fn can_cast(&mut self, _spell: u8, _level: u8) -> bool {
+        self.mp_ok
+    }
+    fn start_cast(&mut self, c: &crate::magic::CastStart) -> bool {
+        // Our cast init: Re:CoM's magic action (the KH1 frame then plays the clips).
+        self.act = Action { id: crate::magic::RECOM_MAGIC_ACTION, sub: crate::magic::recom_attack_id(c.spell), phase: crate::magic::MAGIC_PHASE };
+        self.casts.push(*c);
+        true
+    }
+    fn release_cast(&mut self, c: &crate::magic::CastStart) -> Option<u32> {
+        self.releases.push((*c, self.tick));
+        Some(100 + self.releases.len() as u32)
+    }
+    fn end_cast(&mut self, _airborne: bool) {
+        self.cast_ends += 1;
+        self.act = Action { id: action::STAND, sub: 0, phase: 0 };
+    }
     fn spring_jump(&mut self) -> bool {
         if !spring::launches(spring::ABILITY, || if self.on_spring { spring::ON_SPRING } else { 0 }) {
             return false;
@@ -272,6 +302,8 @@ struct Pair {
     prev: Pad,
     first: bool,
     o_out: Option<kh1_core::Output>,
+    /// A magic command for the next frame (M7 stage 7.4; the oracle has none).
+    magic: Option<crate::magic::MagicCommand>,
 }
 
 #[derive(Debug)]
@@ -306,6 +338,7 @@ impl Pair {
             prev: Pad::default(),
             first: true,
             o_out: None,
+            magic: None,
         }
     }
 
@@ -323,7 +356,7 @@ impl Pair {
         self.prev = pad;
         let o = self.oracle.step(&Input { move_dir: dir, tilt, jump, square, attack, ..Default::default() }, &[], &mut self.world, step);
         self.o_out = Some(o.clone());
-        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false }, self.first);
+        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: self.magic.take() }, self.first);
         self.first = false;
         self.recom.after_exe();
         let airborne = !self.recom.contact;
@@ -758,7 +791,7 @@ fn step_with_target(p: &mut Pair, pad: Pad) -> FrameOut {
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
     let target = kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, 0.0, 150.0), radius: 30.0 };
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: Vec3::ZERO, tilt: 0.0, jump, square, lock_target: None, attack, target: Some(target), locked: false }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: Vec3::ZERO, tilt: 0.0, jump, square, lock_target: None, attack, target: Some(target), locked: false, magic: None }, p.first);
     p.first = false;
     p.recom.after_exe();
     out
@@ -828,4 +861,202 @@ fn without_the_ability_a_guard_success_offers_no_counterattack() {
         let out = step_with_target(&mut p, Pad { attack: k % 2 == 0, ..Default::default() });
         assert!(!out.events.iter().any(|e| matches!(e, Event::AttackStarted { .. })), "frame {k}");
     }
+}
+
+// ---- M7 stage 7.4: the cardless cast and Fire (`crate::magic`) ----
+
+/// One handler frame without the oracle (kh1-core's controller has no magic), with an optional
+/// magic command; returns the frame's output.
+fn step_cast(p: &mut Pair, pad: Pad, magic: Option<crate::magic::MagicCommand>) -> FrameOut {
+    let (dir, tilt) = Input::move_from_stick(pad.stick, 0.0);
+    let jump = Button::from_held(p.prev.jump, pad.jump);
+    let square = Button::from_held(p.prev.square, pad.square);
+    let attack = Button::from_held(p.prev.attack, pad.attack);
+    p.prev = pad;
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic }, p.first);
+    p.first = false;
+    p.recom.after_exe();
+    out
+}
+
+const FIRE1: crate::magic::MagicCommand = crate::magic::MagicCommand { spell: 0, level: 1 };
+
+fn released(out: &FrameOut) -> bool {
+    out.cast.iter().any(|e| matches!(e, crate::magic::CastEvent::Released { .. }))
+}
+
+#[test]
+fn ground_fire_releases_at_28_and_frees_sora_at_46_of_the_release_motion() {
+    use crate::magic::{cast_req, CastEvent, RECOM_MAGIC_ACTION};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = step_cast(&mut p, Pad::default(), Some(FIRE1));
+    assert_eq!(out.cast.first(), Some(&CastEvent::Started { spell: 0, level: 1, fast: false, air: false }));
+    assert_eq!(p.ours.rec.head(), cast_req::FIRE_WINDUP);
+    assert_eq!(p.recom.act.id, RECOM_MAGIC_ACTION, "Re:CoM's magic action runs the cast");
+    assert_eq!(p.recom.plays.last().map(|x| x.0), Some(cast_req::FIRE_WINDUP));
+    // KH1's script: the ball leaves in the frame the wind-up (28 frames) ends; our handler sees
+    // that frame's motion update (and the script run after it) at its start, one handler on.
+    let mut rel = None;
+    for k in 1..40 {
+        let out = step_cast(&mut p, Pad::default(), None);
+        if let Some(CastEvent::Released { frame, .. }) = out.cast.iter().find(|e| matches!(e, CastEvent::Released { .. })) {
+            rel = Some((k, *frame));
+            break;
+        }
+        assert!(p.recom.releases.is_empty(), "frame {k}");
+    }
+    assert_eq!(rel, Some((29, 28.0)), "released in KH1's frame 28 after the command");
+    assert_eq!(p.ours.rec.head(), cast_req::FIRE_RELEASE);
+    assert_eq!(p.recom.releases.len(), 1);
+    assert_eq!(p.recom.act.id, RECOM_MAGIC_ACTION);
+    // Locked until the release motion's free key (46), then the queued idle at its end (60).
+    let mut free_at = None;
+    for k in 1..80 {
+        step_cast(&mut p, Pad::default(), None);
+        if free_at.is_none() && !p.ours.lock {
+            free_at = Some(k);
+        }
+    }
+    assert!(matches!(free_at, Some(46) | Some(47)), "free near frame 46 of the release motion: {free_at:?}");
+    assert_eq!(p.recom.cast_ends, 1, "Re:CoM's magic action ended once, at the motion's end");
+    assert_eq!(p.recom.act.id, action::STAND);
+    assert!(p.ours.cast.is_none());
+}
+
+#[test]
+fn fire_rechains_from_frame_14_of_the_release_with_the_ball_8_frames_later() {
+    use crate::magic::CastEvent;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(FIRE1));
+    let mut k = 1;
+    while !released(&step_cast(&mut p, Pad::default(), None)) {
+        k += 1;
+    }
+    assert_eq!(k, 29);
+    // Fire every frame from here: refused until the release motion's frame 14.
+    let mut chained = None;
+    for j in 1..30 {
+        let out = step_cast(&mut p, Pad::default(), Some(FIRE1));
+        if out.cast.iter().any(|e| matches!(e, CastEvent::Started { fast: true, .. })) {
+            chained = Some(j);
+            break;
+        }
+        assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Refused { why: "not now", .. })), "frame {j}: {:?}", out.cast);
+    }
+    assert_eq!(chained, Some(14), "the re-cast is taken at frame 14 of the release motion");
+    // No wind-up: the release motion again, and the ball 8 frames after the command.
+    assert_eq!(p.ours.rec.head(), crate::magic::cast_req::FIRE_RELEASE);
+    let mut n = 0;
+    loop {
+        n += 1;
+        let out = step_cast(&mut p, Pad::default(), None);
+        if let Some(CastEvent::Released { frame, .. }) = out.cast.iter().find(|e| matches!(e, CastEvent::Released { .. })) {
+            assert_eq!(*frame, 8.0);
+            break;
+        }
+        assert!(n < 20);
+    }
+    assert_eq!(n, 9);
+    assert_eq!(p.recom.releases.len(), 2);
+    assert!(p.recom.casts[1].fast);
+    assert_eq!(p.recom.cast_ends, 0, "a re-cast keeps Re:CoM's magic action");
+    // Chained Fires: each command plays the release motion anew, so the next is taken 15 frames
+    // after the last (its motion's update at 14 is seen the frame after).
+    let mut j = 0;
+    loop {
+        j += 1;
+        let out = step_cast(&mut p, Pad::default(), Some(FIRE1));
+        if out.cast.iter().any(|e| matches!(e, CastEvent::Started { fast: true, .. })) {
+            break;
+        }
+        assert!(j < 30);
+    }
+    assert_eq!(n + j, 15, "the third Fire 15 frames after the second");
+}
+
+#[test]
+fn fire_from_swing_1s_window_skips_the_wind_up() {
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    // Swing 1 (row 13, request 200, combo window 22–40).
+    step_cast(&mut p, Pad { attack: true, ..Default::default() }, None);
+    assert_eq!(p.ours.rec.head(), 200);
+    p.recom.hit = true;
+    let mut started = None;
+    for j in 1..45 {
+        let out = step_cast(&mut p, Pad::default(), Some(FIRE1));
+        if let Some(e) = out.cast.iter().find(|e| matches!(e, crate::magic::CastEvent::Started { .. })) {
+            started = Some((j, e.clone(), p.ours.rec.frame));
+            break;
+        }
+    }
+    let (_, e, _) = started.expect("Fire taken in swing 1's window");
+    assert_eq!(e, crate::magic::CastEvent::Started { spell: 0, level: 1, fast: true, air: false });
+    assert_eq!(p.ours.rec.head(), crate::magic::cast_req::FIRE_RELEASE);
+    assert_eq!(p.recom.swing_ends, 1, "Re:CoM's attack action ended before the cast");
+    assert_eq!(p.recom.act.id, crate::magic::RECOM_MAGIC_ACTION);
+}
+
+#[test]
+fn an_interrupted_cast_casts_nothing_and_pays_nothing() {
+    use crate::magic::CastEvent;
+    // Re:CoM ran something else (a hit reaction) before the release.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(FIRE1));
+    for _ in 0..10 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = p.ours.frame(&mut p.recom, &FrameInput::default(), true);
+    assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Interrupted { .. })), "{:?}", out.cast);
+    assert!(p.recom.releases.is_empty());
+    assert!(p.ours.cast.is_none());
+    // An air cast that lands before its release: the landing replaces the cast motion.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad { jump: true, ..Default::default() }, None);
+    let mut cast_at = None;
+    for k in 0..80 {
+        let falling = p.ours.state == state::AIR && !p.ours.arc.rising() && p.recom.pos.y > -40.0;
+        let m = (falling && cast_at.is_none()).then_some(FIRE1);
+        let out = step_cast(&mut p, Pad::default(), m);
+        if m.is_some() {
+            assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Started { air: true, fast: false, .. })), "{:?}", out.cast);
+            cast_at = Some(k);
+        }
+    }
+    assert!(cast_at.is_some());
+    assert!(p.recom.releases.is_empty(), "landed before the release: no ball");
+    assert_eq!(p.recom.cast_ends, 1);
+    // Without MP for the cost the command does nothing.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    p.recom.mp_ok = false;
+    step_cast(&mut p, Pad::default(), None);
+    let out = step_cast(&mut p, Pad::default(), Some(FIRE1));
+    assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Refused { why: "mp", .. })));
+    assert!(p.recom.casts.is_empty());
+}
+
+#[test]
+fn an_air_cast_hops_30_and_halves_the_air_speed() {
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad { jump: true, stick: [0.0, 1.0], ..Default::default() }, None);
+    for _ in 0..10 {
+        step_cast(&mut p, Pad { jump: true, stick: [0.0, 1.0], ..Default::default() }, None);
+    }
+    assert_eq!(p.ours.state, state::AIR);
+    let v = p.ours.air_vel.flat().length();
+    let y = p.recom.pos.y;
+    step_cast(&mut p, Pad::default(), Some(FIRE1));
+    // × 0.5 at the command, then the frame's air drag with no stick (`0x1402AF6A0`).
+    let want = v * crate::magic::AIR_SPEED_SCALE * p.ours.params.air_drag.sqrt();
+    assert!((p.ours.air_vel.flat().length() - want).abs() < 1e-3, "{} vs {want}", p.ours.air_vel.flat().length());
+    assert_eq!(p.ours.rec.head(), crate::magic::cast_req::FIRE_AIR_WINDUP);
+    assert!((p.ours.arc.rise + crate::magic::AIR_HOP).abs() < 1e-3 && (p.ours.arc.y0 - y).abs() < 1e-3, "a 30 cm arc from here: {:?}", p.ours.arc);
+    assert_eq!(p.recom.act.id, crate::magic::RECOM_MAGIC_ACTION);
 }

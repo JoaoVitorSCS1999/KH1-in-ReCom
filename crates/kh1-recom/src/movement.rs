@@ -172,6 +172,8 @@ pub struct FrameInput {
     /// Re:CoM's attack target (`player+0x84C`) as a KH1 body part, and whether it is the lock-on.
     pub target: Option<kh1_core::TargetPart>,
     pub locked: bool,
+    /// A KH1 magic command this frame (the command menu's, M7 stage 7.4; a shortcut's in 7.12).
+    pub magic: Option<crate::magic::MagicCommand>,
 }
 
 /// A KH1 swing for Re:CoM to start (`crate::attack`): Re:CoM's field-swing init with the KH1 row.
@@ -252,6 +254,22 @@ pub trait Host {
     }
     /// Re:CoM ends its attack action (`0x1401F6660`): the weapon's volume, its effects, its fields.
     fn end_swing(&mut self, _airborne: bool) {}
+    /// KH1's usable test for a spell (`0x14028EFD0`: learned, MP for its cost, `0x1402A4C10`).
+    fn can_cast(&mut self, _spell: u8, _level: u8) -> bool {
+        false
+    }
+    /// Re:CoM's magic action starts for this KH1 cast (`crate::magic`): its fields as `initMagic`
+    /// sets them, cardless, with the KH1 row. False when it can't (no rows).
+    fn start_cast(&mut self, _c: &crate::magic::CastStart) -> bool {
+        false
+    }
+    /// KH1's release frame: Re:CoM's shot runtime fires the spell from the KH1 row and KH1's MP is
+    /// paid. Re:CoM's shot id, if one was made.
+    fn release_cast(&mut self, _c: &crate::magic::CastStart) -> Option<u32> {
+        None
+    }
+    /// Re:CoM ends its magic action (`0x1401F6660`, as `exeMagic` does).
+    fn end_cast(&mut self, _airborne: bool) {}
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -311,6 +329,8 @@ pub struct FrameOut {
     /// A jump press launched Re:CoM's own spring jump: Re:CoM owns Sora until it lands, and this
     /// frame wrote nothing to Re:CoM after the launch.
     pub recom_spring: bool,
+    /// What the cast did (M7 stage 7.4).
+    pub cast: Vec<crate::magic::CastEvent>,
 }
 
 /// KH1 Sora's fields Re:CoM has no place for, and the KH1 data the handlers use.
@@ -365,6 +385,9 @@ pub struct Kh1Sora {
     untouchable_counting: bool,
     untouchable_left: f32,
     untouchable_reported: bool,
+    /// The KH1 cast Re:CoM's magic action is playing for us (M7 stage 7.4), if any.
+    pub cast: Option<crate::magic::Cast>,
+    pub(crate) cast_log: Vec<crate::magic::CastEvent>,
 }
 
 /// The facing Re:CoM holds may differ from ours by rounding; more than this means Re:CoM turned
@@ -375,10 +398,13 @@ const PROBE: f32 = 70.0;
 
 impl Kh1Sora {
     pub fn new(params: Params, abilities: Abilities) -> Kh1Sora {
+        let mut motions = Moveset::kh1_defaults().motions;
+        // KH1's cast motions (M7 stage 7.4), from the player's mset.
+        crate::magic::add_motions(&mut motions);
         Kh1Sora {
             params,
             abilities,
-            motions: Moveset::kh1_defaults().motions,
+            motions,
             state: state::GROUND,
             prev_state: state::GROUND,
             state_changed: false,
@@ -414,6 +440,8 @@ impl Kh1Sora {
             untouchable_counting: false,
             untouchable_left: 0.0,
             untouchable_reported: false,
+            cast: None,
+            cast_log: Vec::new(),
         }
     }
 
@@ -449,8 +477,14 @@ impl Kh1Sora {
         self.last_disp = Vec3::ZERO;
         self.last_step = 0.0;
         self.last_start = pos;
-        // Whatever Re:CoM ran in between ended any swing of ours.
+        // Whatever Re:CoM ran in between ended any swing of ours, and any cast: a cast cut before
+        // its release casts nothing and pays no MP (KH1's script ends at its release check).
         self.swing = None;
+        if let Some(c) = self.cast.take() {
+            if !c.released && !c.cancelled {
+                self.cast_log.push(crate::magic::CastEvent::Interrupted { spell: c.start.spell, level: c.start.level, frame: c.age, by: 0xFFFF });
+            }
+        }
     }
 
     /// Re:CoM started a fall on its own (`0x1401F29F0(player, 1)`, e.g. the end of a knock-back in
@@ -474,6 +508,9 @@ impl Kh1Sora {
     pub fn recom_action(&self) -> Action {
         use action::*;
         if let Some(a) = self.swing_action() {
+            return a;
+        }
+        if let Some(a) = self.cast_action() {
             return a;
         }
         let a = |id, sub, phase| Action { id, sub, phase };
@@ -590,8 +627,10 @@ impl Kh1Sora {
                 let over = len.map_or(0.0, |l| (self.rec.frame - l).max(0.0));
                 self.rec.queue[0].start += over;
                 release = self.start_head(dt);
-                // A swing's motion ended into its queued idle / fall: Re:CoM ends its attack.
+                // A swing's motion ended into its queued idle / fall: Re:CoM ends its attack; a
+                // cast's: Re:CoM ends its magic action.
                 self.leave_swing(h);
+                self.leave_cast(h);
                 // KH1 started it in that update; Re:CoM starts it now, one step on.
                 let (r, b, s) = (self.rec.req, self.rec.blend, self.rec.frame);
                 self.rec.own_clock = !h.play(r, b, s + step);
@@ -690,6 +729,9 @@ impl Kh1Sora {
             // ---- the last frame's motion update ----
             let dt = if self.last_step > 0.0 { self.last_step } else { step };
             self.motion_update(h, dt, step);
+            // KH1's spell script of the last frame (M7 stage 7.4): its task runs after the actors'
+            // update (priority 137000, `0x14028F6B0`), so it sees that frame's motion update.
+            self.cast_step(h, dt);
         }
         let ev = &mut out.events;
         // A guarded hit since the last frame (Re:CoM's apply on Sora's body guard).
@@ -702,6 +744,11 @@ impl Kh1Sora {
         let attack_cmd = input.attack.pressed && !counter_cmd && self.accepts_attack();
         if input.attack.pressed && !attack_cmd && !counter_cmd {
             ev.push(Event::AttackRefused(kh1_core::Refused::NotAccepted));
+        }
+        // A magic command (M7 stage 7.4): the same accept (`0x140293480`), with the Fire re-cast.
+        let cast_cmd = input.magic.filter(|m| self.accepts_spell(m.spell));
+        if let Some(m) = input.magic.filter(|_| cast_cmd.is_none()) {
+            self.cast_log.push(crate::magic::CastEvent::Refused { spell: m.spell, level: m.level, why: "not now" });
         }
 
         // ---- think: pre-step ----
@@ -735,6 +782,8 @@ impl Kh1Sora {
                 self.command_counterattack(h, &mut dir, &mut w, input.target, pos, ev);
             } else if attack_cmd {
                 self.command_attack(h, &mut dir, &mut w, input.target, input.locked, pos, ev);
+            } else if let Some(m) = cast_cmd {
+                self.command_magic(h, &mut dir, &mut w, input.target, pos, m);
             }
         } else {
             if attack_cmd {
@@ -815,6 +864,8 @@ impl Kh1Sora {
             // A landing or walk-off replaced the swing's motion.
             self.leave_swing(h);
         }
+        // A landing, walk-off or another command replaced the cast's motion.
+        self.leave_cast(h);
         h.set_action(self.recom_action());
         self.issue(h);
         // KH1's guard object: live on the Guard motion's hit track (frames 10–36).
@@ -823,6 +874,7 @@ impl Kh1Sora {
             self.guard_on = guard;
             h.set_guard(guard);
         }
+        out.cast = self.take_cast_log();
         out
     }
 

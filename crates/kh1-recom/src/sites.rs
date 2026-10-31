@@ -661,6 +661,64 @@ pub const COMMAND_MENU_CHECKED: &[Site] = &[
 /// The vtable slot the menu calls through. Checked (exe; relocated pointer).
 pub const COMMAND_MENU_PTRS: &[PtrSite] = &[PtrSite { name: "C2DSeqCtrl vtable +0x60 (0x1406073A0)", rva: 0x0060_73A0, target: 0x0024_76F0 }];
 
+/// KH1's cardless cast and Fire (M7 stage 7.4, `win::magic`, `docs/recom-m7-magic.md`). Same rule
+/// as [`HOOKS`].
+pub const MAGIC_HOOKS: &[Site] = &[
+    // mov [rsp+8],rbx; mov [rsp+0x10],rsi: CPlayerSora::exeMagic (vtable +0x150, action 0x13's
+    // exe; the Battle exe calls it through the slot, the Field exe's new case directly).
+    Site { name: "exeMagic (0x140217EE0)", rva: 0x0021_7EE0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10] },
+];
+
+/// Re:CoM functions the cast calls: what `initMagic` and the spawn's Fire case call. Checked like
+/// the hook sites.
+pub const MAGIC_CALLEES: &[Site] = &[
+    // xor eax,eax; mov [rcx],edx; mov [rcx+8],eax; mov [rcx+4],r8d; mov dword [rcx+0xC],0x80000002
+    Site { name: "shot descriptor init (0x140156790)", rva: 0x0015_6790, expect: &[0x33, 0xC0, 0x89, 0x11, 0x89, 0x41, 0x08, 0x44, 0x89, 0x41, 0x04, 0xC7, 0x41, 0x0C, 0x02, 0x00, 0x00, 0x80] },
+    // push rbx; sub rsp,0x80 (then the cookie): the player's hand point (the weapon's).
+    Site { name: "player hand point (0x1401F0B30)", rva: 0x001F_0B30, expect: &[0x40, 0x53, 0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00] },
+    // mov rax,[rcx+0xF0]; add rax,0x50; ret: the actor's angles (its mover's +0x50).
+    Site { name: "actor angles (0x1401A4A00)", rva: 0x001A_4A00, expect: &[0x48, 0x8B, 0x81, 0xF0, 0x00, 0x00, 0x00, 0x48, 0x83, 0xC0, 0x50, 0xC3] },
+    // push rbx; sub rsp,0x30; mov qword [rsp+0x20],-2: the entity factory (made on first use).
+    Site { name: "entity factory (0x1401A8A80)", rva: 0x001A_8A80, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF] },
+    // push r14; sub rsp,0x30; mov qword [rsp+0x20],-2; mov [rsp+0x40],rbx: the shot manager.
+    Site { name: "shot manager (0x140158DD0)", rva: 0x0015_8DD0, expect: &[0x41, 0x56, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48, 0x89, 0x5C, 0x24, 0x40] },
+    // mov [rsp+8],rbx; push rdi; sub rsp,0x30; mov rbx,rcx; movaps [rsp+0x20],xmm6: the shot's
+    // mover set-up (radius, height, floor mode).
+    Site { name: "shot mover set-up (0x140157DA0)", rva: 0x0015_7DA0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0x8B, 0xD9, 0x0F, 0x29, 0x74, 0x24, 0x20] },
+    // mov [rsp+8],rbx; push rdi; sub rsp,0x20; mov rbx,rcx; xor edi,edi; mov ecx,[rcx+0x84C]:
+    // the homing target and its aim point (`+0x854`, `+0x860`).
+    Site { name: "homing target (0x1401F68A0)", rva: 0x001F_68A0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0x33, 0xFF, 0x8B, 0x89, 0x4C, 0x08, 0x00, 0x00] },
+    // The whole function: the target cursor's "busy" bit (8) and its saved value.
+    Site { name: "target cursor busy (0x140209800)", rva: 0x0020_9800, expect: &[0x85, 0xD2, 0x74, 0x14, 0x83, 0x89, 0xF8, 0x00, 0x00, 0x00, 0x08, 0x8B, 0x81, 0xD0, 0x00, 0x00, 0x00, 0x89, 0x81, 0xD8, 0x00, 0x00, 0x00, 0xC3] },
+];
+
+/// Exe bytes the cast patches or relies on.
+pub const MAGIC_DATA: &[Site] = &[
+    // The Field exe's jump table (`0x1401FA5F4`, actions 1..=0x1F), entry for action 0x13: the
+    // default `0x1401FA599` (an RVA), then the entry for 0x14 (`0x1401FA2D8`, not changed).
+    Site { name: "Field exe jump table, action 0x13", rva: 0x001F_A63C, expect: &[0x99, 0xA5, 0x1F, 0x00, 0xD8, 0xA2, 0x1F, 0x00] },
+    // int3 padding after a `ret` (`0x1401FB0E0`), before `0x1401FB0F0`: the 13-byte stub.
+    Site { name: "code cave 0x1401FB0E1", rva: 0x001F_B0E1, expect: &[0xCC; 15] },
+    // Re:CoM's attack rows 0x22 (Fire) and 0x29 / 0x2A (Fira, Firaga), the KH1 rows' templates.
+    Site { name: "attack row 0x22 (0x1407C6E90)", rva: 0x007C_6E90, expect: &crate::magic::RECOM_FIRE_ROWS[0] },
+    Site { name: "attack rows 0x29-0x2A (0x1407C6F00)", rva: 0x007C_6F00, expect: &[0x37, 0x01, 0x04, 0x00, 0x1E, 0x64, 0x00, 0x00, 0x0B, 0x0F, 0x00, 0x02, 0x0E, 0x14, 0x19, 0x00, 0x37, 0x01, 0x05, 0x00, 0x28, 0x7D, 0x00, 0x00, 0x0C, 0x0F, 0x00, 0x03, 0x0E, 0x14, 0x1E, 0x00] },
+];
+
+/// Re:CoM code the cast's routing relies on (not patched).
+pub const MAGIC_CHECKED: &[Site] = &[
+    // The Field exe's switch: mov eax,[rbx+0x40C]; dec eax; cmp eax,0x1E; ja 0x1401FA599; lea
+    // r8,[image base]; cdqe; mov ecx,[r8+rax*4+0x1FA5F4]: the player is rbx, the table above.
+    Site { name: "Field exe switch (0x1401FA1B0)", rva: 0x001F_A1B0, expect: &[0x8B, 0x83, 0x0C, 0x04, 0x00, 0x00, 0xFF, 0xC8, 0x83, 0xF8, 0x1E, 0x0F, 0x87, 0xD8, 0x03, 0x00, 0x00, 0x4C, 0x8D, 0x05, 0x38, 0x5E, 0xE0, 0xFF, 0x48, 0x98, 0x41, 0x8B, 0x8C, 0x80, 0xF4, 0xA5, 0x1F, 0x00] },
+    // The Field exe's default (`mov ecx,[rbx+0x460]; sub [rbx+0x7BC],ecx`): the timers after the
+    // action step, where every case goes on.
+    Site { name: "Field exe after the action (0x1401FA599)", rva: 0x001F_A599, expect: &[0x8B, 0x8B, 0x60, 0x04, 0x00, 0x00, 0x29, 0x8B, 0xBC, 0x07, 0x00, 0x00] },
+    // The Battle exe's case 0x13: mov rax,[rdi]; mov rcx,rdi; call [rax+0x150] (exeMagic).
+    Site { name: "Battle exe case 0x13 (0x1401F9B4D)", rva: 0x001F_9B4D, expect: &[0x48, 0x8B, 0x07, 0x48, 0x8B, 0xCF, 0xFF, 0x90, 0x50, 0x01, 0x00, 0x00] },
+];
+
+/// `CPlayerSora`'s exeMagic slot (vtable `0x1405A9938` + 0x150). Checked (exe; relocated).
+pub const MAGIC_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x150 (0x1405A9A88)", rva: 0x005A_9A88, target: 0x0021_7EE0 }];
+
 /// Data this version reads or calls through, with its address (Steam). Checked (exe).
 pub mod data {
     /// Sequence ids for label items (`u16[]`).
@@ -727,6 +785,10 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(MP_BAR_CHECKED)
         .chain(COMMAND_MENU_CALLEES)
         .chain(COMMAND_MENU_CHECKED)
+        .chain(MAGIC_HOOKS)
+        .chain(MAGIC_CALLEES)
+        .chain(MAGIC_DATA)
+        .chain(MAGIC_CHECKED)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -819,7 +881,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(MAGIC_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
@@ -1026,6 +1088,34 @@ mod tests {
         // ctor / add layer / layout position / raw position / scale / deleting dtor, the C2DFnt
         // ctor, the menu sound, the pad reads, handle → object.
         for rva in [0x004A_CE54u32, 0x0024_7260, 0x0024_7850, 0x0024_8660, 0x0024_85B0, 0x0024_86D0, 0x0015_D230, 0x0024_3F10, 0x002A_A360, 0x0029_B2F0, 0x0029_B410, 0x0029_B490, 0x002A_D350] {
+            assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
+        }
+    }
+
+    #[test]
+    fn magic_sites() {
+        // The exeMagic hook is no other stage's site; its slot holds it; the callees are new.
+        for s in MAGIC_HOOKS.iter().chain(MAGIC_CALLEES).chain(MAGIC_DATA).chain(MAGIC_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        assert_eq!(MAGIC_PTRS[0].target, MAGIC_HOOKS[0].rva);
+        assert_eq!(0x1_4000_0000u64 + MAGIC_PTRS[0].rva as u64, data::SORA_VTABLE + 0x150);
+        assert!(!all_sites().any(|s| s.rva == MAGIC_PTRS[0].rva));
+        // The Field exe's table entry for action 0x13 is the switch's base + (0x13 − 1) × 4, and
+        // holds the default the switch's `ja` goes to.
+        let sw = MAGIC_CHECKED[0].expect;
+        let base = u32::from_le_bytes(sw[30..34].try_into().unwrap());
+        assert_eq!(base + (crate::magic::RECOM_MAGIC_ACTION - 1) * 4, MAGIC_DATA[0].rva);
+        let ja = i32::from_le_bytes(sw[13..17].try_into().unwrap()) as i64;
+        let default = (0x001F_A1B0i64 + 17 + ja) as u32;
+        assert_eq!(default, MAGIC_CHECKED[1].rva);
+        assert_eq!(u32::from_le_bytes(MAGIC_DATA[0].expect[..4].try_into().unwrap()), default);
+        // The stub fits the cave, and both stay clear of the Attack's cave.
+        assert!(crate::magic::field_case::STUB_LEN <= MAGIC_DATA[1].expect.len());
+        assert_ne!(MAGIC_DATA[1].rva, crate::attack::battle_case::CAVE_RVA);
+        // The callees the cast also uses are checked by earlier stages: end attack, ground test,
+        // handle → object.
+        for rva in [0x001F_6660u32, 0x001F_3C00, 0x002A_D350] {
             assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
         }
     }

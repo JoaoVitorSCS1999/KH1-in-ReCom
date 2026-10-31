@@ -24,7 +24,8 @@
 //!   (without Triangle) is the roll / guard (no cursor that frame); then the cursor; then confirm
 //!   (and Right on the root's row 3) runs the row (`0x140293410` → `0x140293480`): a locked row
 //!   sounds 4, a row with a submenu opens it, a command is issued and the root cursor returns to
-//!   Attack. Confirm on the root's row 3 is the error sound (only Summon is opened from there).
+//!   Attack. A spell passes KH1's commit gate first (free or in a combo window; Fire also from
+//!   frame 14 of its release), else nothing happens and the list stays (M7 stage 7.4). Confirm on the root's row 3 is the error sound (only Summon is opened from there).
 //! - **Draw** (`0x14027B870`): root rows at (16, 260), 22 apart; the Magic list at x + 11, at the
 //!   Magic row's y when it has fewer than 3 rows, else bottom-anchored at 348 − 22 n. The top
 //!   list's rows ease ±32 brightness a frame between 0x73 (grey) and 0xE6; when the top list
@@ -151,6 +152,11 @@ pub struct World {
     pub target_dist: Option<f32>,
     /// The context command for row 3 (0: none).
     pub context: u8,
+    /// KH1's commit gate for a spell (`0x140293480`, M7 stage 7.4): Sora is free or in a combo
+    /// window (`0x1402A2EC0`) and not taking off, and Re:CoM's action is one KH1's frame runs.
+    pub gate_any: bool,
+    /// Fire alone is also taken from frame 14 of its release motion (`0x3D` / `0x8A`).
+    pub gate_fire: bool,
 }
 
 /// The fresh presses of one frame (Re:CoM's pad, mapped to KH1's buttons).
@@ -244,8 +250,12 @@ impl Sound {
 pub enum Event {
     Opened(Kind),
     Closed,
-    /// A spell row was chosen: the cast comes with stage 7.4. (command, locked)
+    /// A greyed (locked) spell row was confirmed: the error sound. (command, locked)
     Spell(u8, bool),
+    /// A spell was issued (M7 stage 7.4): the cast command, the stack unwinds to Attack.
+    Cast(u8),
+    /// KH1's commit gate refused the spell this frame (Sora busy): no sound, the list stays.
+    NotNow(u8),
     /// A locked row, or a row with nothing to run.
     Refused(u8),
     /// The context command went to Re:CoM's Triangle action.
@@ -265,6 +275,8 @@ pub struct Outcome {
     pub triangle: bool,
     pub sounds: Vec<Sound>,
     pub events: Vec<Event>,
+    /// The spell command issued this frame (M7 stage 7.4), for the cast.
+    pub cast: Option<u8>,
 }
 
 /// The context tab (`0x140277CF0`): 0 hidden, 1 sliding in, 2 in, 3 sliding out.
@@ -464,9 +476,20 @@ impl Menu {
             let row = self.magic.cursor;
             let c = self.magic.cmds.get(row as usize).copied().unwrap_or(0);
             let locked = self.magic.locked(row);
-            // Stage 7.3: no cast yet (7.4 hooks the spell to Re:CoM's magic action).
-            out.sounds.push(Sound::Error);
-            out.events.push(Event::Spell(c, locked));
+            // `0x140293480`: a locked row sounds 4; KH1's gate may refuse it (no sound, the list
+            // stays); else the command is issued and the stack unwinds to Attack.
+            let fire = cmd::spell_of(c).is_some_and(|(s, _)| s == 0);
+            if locked || c == 0 {
+                out.sounds.push(Sound::Error);
+                out.events.push(Event::Spell(c, true));
+            } else if !(w.gate_any || (fire && w.gate_fire)) {
+                out.events.push(Event::NotNow(c));
+            } else {
+                out.cast = Some(c);
+                out.events.push(Event::Cast(c));
+                self.open = false;
+                self.root.cursor = 0;
+            }
         }
         out
     }
@@ -828,7 +851,7 @@ mod tests {
     use super::*;
 
     fn world() -> World {
-        World { state: 0, mp: Some((3, 3, 0)), ..Default::default() }
+        World { state: 0, mp: Some((3, 3, 0)), gate_any: true, gate_fire: true, ..Default::default() }
     }
 
     fn all_spells() -> [u8; 7] {
@@ -949,15 +972,31 @@ mod tests {
         m.root.cursor = 1;
         let o = m.step(&w, press(|p| p.confirm = true));
         assert!(!o.attack && m.open);
-        // In the list: a spell is chosen; 7.3 buzzes (the cast is 7.4), no attack, no jump.
-        let o = m.step(&w, press(|p| p.confirm = true));
-        assert_eq!(o.events, vec![Event::Spell(9, false)]);
-        assert!(!o.attack && !o.jump && o.sounds == vec![Sound::Error] && m.open);
-        // A greyed spell: buzz, flagged locked.
+        // In the list, while KH1's gate refuses (Sora busy): nothing, no sound, the list stays.
+        let busy = World { gate_any: false, gate_fire: false, ..w };
+        let o = m.step(&busy, press(|p| p.confirm = true));
+        assert_eq!(o.events, vec![Event::NotNow(9)]);
+        assert!(o.sounds.is_empty() && o.cast.is_none() && m.open);
+        // Fire alone passes the release-motion gate.
+        let fire_only = World { gate_any: false, gate_fire: true, ..w };
+        m.magic.cursor = 1;
+        let o = m.step(&fire_only, press(|p| p.confirm = true));
+        assert_eq!(o.events, vec![Event::NotNow(12)], "Blizzard isn't taken from Fire's release");
+        m.magic.cursor = 0;
+        // A spell is issued (7.4): no attack, no jump, no sound; the stack unwinds to Attack.
+        let o = m.step(&fire_only, press(|p| p.confirm = true));
+        assert_eq!(o.events, vec![Event::Cast(9)]);
+        assert_eq!(o.cast, Some(9));
+        assert!(!o.attack && !o.jump && o.sounds.is_empty() && !m.open && m.root.cursor == 0);
+        // A greyed spell: buzz, flagged locked, nothing issued.
+        m.root.cursor = 1;
+        m.step(&w, press(|p| p.confirm = true));
+        assert!(m.open);
         let mut w2 = w;
         w2.mp = Some((0, 3, 0));
         let o = m.step(&w2, press(|p| p.confirm = true));
         assert_eq!(o.events, vec![Event::Spell(9, true)]);
+        assert!(o.cast.is_none() && o.sounds == vec![Sound::Error] && m.open);
         // On Items (locked): the error sound.
         let mut m = Menu::new();
         m.root.cursor = 2;

@@ -277,7 +277,7 @@ pub(super) unsafe fn read_sync(pl: usize) -> Sync {
 }
 
 /// Our last frame's action fields, one frame on (the exe added its delta to the action time).
-unsafe fn sync_ok(pl: usize, s: &Slot) -> bool {
+pub(super) unsafe fn sync_ok(pl: usize, s: &Slot) -> bool {
     let Some(want) = s.sync else { return false };
     let now = read_sync(pl);
     s.player == pl && now.action == want.action && now.prev == want.prev && now.time == want.time.wrapping_add(rd::<i32>(pl + p::DT))
@@ -531,6 +531,22 @@ impl Host for RecomHost {
     fn row_available(&mut self, r: usize) -> bool {
         super::attack::row_ready(r)
     }
+
+    fn can_cast(&mut self, spell: u8, level: u8) -> bool {
+        super::magic::can_cast(spell, level)
+    }
+
+    fn start_cast(&mut self, c: &crate::magic::CastStart) -> bool {
+        unsafe { super::magic::start_cast(self.pl, c) }
+    }
+
+    fn release_cast(&mut self, c: &crate::magic::CastStart) -> Option<u32> {
+        unsafe { super::magic::release(self.pl, c) }
+    }
+
+    fn end_cast(&mut self, airborne: bool) {
+        unsafe { super::magic::end_cast(self.pl, airborne) }
+    }
 }
 
 /// One KH1 frame for the player.
@@ -541,10 +557,18 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     }
     let Some(slot) = g.as_mut() else { return };
     slot.sora.abilities = abilities();
-    let input = trace::frame_input(&read_pad(pl));
+    let mut input = trace::frame_input(&read_pad(pl));
+    // A magic command from the command menu this frame (M7 stage 7.4), aimed at Re:CoM's target.
+    input.magic = super::magic::take_command();
+    if input.magic.is_some() && input.target.is_none() {
+        input.target = super::attack::attack_target(pl);
+    }
     let mut host = RecomHost::new(pl);
     slot.last = slot.sora.frame(&mut host, &input, fresh);
     slot.sync = Some(read_sync(pl));
+    if !slot.last.cast.is_empty() {
+        super::magic::on_events(&slot.last.cast);
+    }
 }
 
 /// Whether our last frame left this player's actions as they are now.

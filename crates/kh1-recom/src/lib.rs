@@ -36,6 +36,10 @@
 //!   the Magic list) in the field and in battle: Re:CoM's own text plates (new groups of
 //!   `Cockpit:00`) and `C2DFnt` text with KH1's own words, KH1's cursor rules, fades and greying;
 //!   confirm runs the highlighted row (`command_menu`; `docs/recom-m7-command-menu.md`);
+//! - at `combat = kh1`, in Sora's story, KH1's cardless cast and Fire: the command menu's spell
+//!   runs KH1's command on Re:CoM's own magic action `0x13` with KH1 rows in Re:CoM's attack-row
+//!   format, Re:CoM's cast clips and its shot runtime fire the ball at KH1's release frame, KH1's
+//!   MP is paid then, and the ball's hits take KH1's damage (`magic`; `docs/recom-m7-magic.md`);
 //! - F9 records a Re:CoM trace in kh1-trace's CSV schema (`trace`).
 //!
 //! `motions` (with `json`) reads the asset build step's manifest and `PL0001.ANN` header, for the
@@ -51,6 +55,7 @@ pub mod hookplan;
 pub mod json;
 pub mod keyblade_models;
 pub mod keyblades;
+pub mod magic;
 pub mod menu;
 pub mod motions;
 pub mod movement;

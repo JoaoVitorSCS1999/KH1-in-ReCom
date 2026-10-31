@@ -365,6 +365,24 @@ pub fn equipped_weapon() -> WeaponData {
     keyblade(equipped_card()).map(|k| k.weapon.clone()).unwrap_or_else(WeaponData::kingdom_key)
 }
 
+/// KH1's damage for a spell (M7 stage 7.4: `crate::magic::spell_damage`, power + max MP) on this
+/// enemy's twin or proxy, or None (Re:CoM's number stands).
+pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32) -> Option<i32> {
+    let t = match twin(enemy) {
+        Some((_, t)) => t.clone(),
+        None if !riku_story() => proxied(enemy)?,
+        None => return None,
+    };
+    let mut resist = [1.0f32; 16];
+    for (r, v) in resist.iter_mut().zip(t.resist.iter()) {
+        *r = *v as f32 / 100.0;
+    }
+    let def = kh1_core::DefenderStats { hp: t.hp, max_hp: t.hp, defence: t.defence, level: t.level, min_damage: t.min_damage, max_damage: t.max_damage, resist, ..Default::default() };
+    let mut g = RNG.lock().ok()?;
+    let rng = g.get_or_insert_with(|| kh1_core::Kh1Rand::new(1));
+    Some(crate::magic::spell_damage(data, max_mp, &def, rng))
+}
+
 /// KH1's damage for Sora's swing row on this enemy's twin, or None (Re:CoM's number stands).
 pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32) -> Option<i32> {
     // A twin, else a proxy / boss twin set up at its stats init (Sora's story only).

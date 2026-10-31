@@ -11,8 +11,8 @@ context row) bottom-left at KH1's place, and the Magic list. Re:CoM draws it: ea
 text plate, and the same plate in another colour for the highlighted row) with a `C2DFnt`
 carrying KH1's word, attached as Re:CoM attaches its own labels to these plates. KH1's rules run
 the menu: its cursor, its greying, its fades, its context tab. Confirm runs the highlighted row:
-on Attack it is today's Attack (unchanged); Magic opens the Magic list; choosing a spell plays
-Re:CoM's refused sound and logs "the cast comes in 7.4" (stage 7.4 hooks it to Re:CoM's magic
+on Attack it is today's Attack (unchanged); Magic opens the Magic list; choosing a spell casts
+it (stage 7.4, `recom-m7-magic.md`: KH1's commit gate, then KH1's command on Re:CoM's magic
 action). Items is greyed (M8). At Combat = Re:CoM, or in Riku's story, nothing is made and nothing
 runs.
 
@@ -128,8 +128,9 @@ fade (10 frames) or a brightness change (4 frames) runs; the tab's place only wh
 - Start: `command menu: KH1's command menu at combat = kh1 in Sora's story (M7 stage 7.3): words
   us (30 entries) from …; Re:CoM language index N; kh1_all_spells = off`.
 - Up to 60 lines: `command menu: built on the player gauge 0x…`, `open magic (7 spells, grey
-  0x0)`, `close`, `spell Firaga [0x9] chosen: the cast comes in 7.4 (Re:CoM's refused sound)`,
-  `refused Items`, `context Open`.
+  0x0)`, `close`, `cast Firaga [0x9]: issued` (7.4), `not-now Fire [0x7]: KH1's gate refused it
+  this frame (Sora busy)`, `spell Fire [0x7] greyed (Re:CoM's refused sound)`, `refused Items`,
+  `context Open`.
 - F9 trace, events column: `…; menu r:<cursor> g<root grey> [m:<cursor> mg<spell grey>]
   [tab<state>:<cmd>] [counter] [events]`, or `menu -`.
 
@@ -167,8 +168,8 @@ Already checked by earlier stages and called: `0x1404ACE54`, `0x140247260`, `0x1
   (the owner's "context row"): Attack stays Attack. Open question 2.
 - Confirm on a locked Attack row (a state without flag 0x10, e.g. the glide) gives no error sound
   here (today's Attack path is left as it was).
-- The Magic list's spells do nothing in 7.3 (refused sound); Cure / Aero's party list comes with
-  their casts.
+- The Magic list's spells cast from 7.4 (Fire first; Blizzard … Aero do nothing until their
+  stages); Cure / Aero's party list comes with their casts.
 - KH1's slide-in of a newly opened list (`0x14027A0B0`'s "fresh" flag) is not reproduced: lists
   appear at once.
 - Text without accents (Re:CoM's codes for them unknown).
@@ -215,7 +216,7 @@ Already checked by earlier stages and called: `0x1404ACE54`, `0x140247260`, `0x1
    reads "Counter" during the recoil).
 5. Cursor on Magic without spells: confirm buzzes. With `kh1_all_spells = on`: Right or confirm
    opens the list; Left closes it (cursor stays on Magic); cancel closes it (cursor back to
-   Attack, Sora doesn't jump); a spell: buzz and `spell … the cast comes in 7.4` in the log.
+   Attack, Sora doesn't jump); a spell: cast (7.4; Fire only so far), the menu back on Attack.
    With MP 0 the spells grey (over 4 frames), Fire / Blizzard come back at 30 charge.
 6. In the field next to a chest / NPC / door / box to carry: row 3 slides in (about a quarter
    second) with Open / Talk / Open / Lift; Triangle works once it is in, not before. In battle:
@@ -225,3 +226,12 @@ Already checked by earlier stages and called: `0x1404ACE54`, `0x140247260`, `0x1
    Riku's story: no menu.
 9. F9 trace: the `menu r:0 ge` token (no spells, no context: rows 1–3 grey), and its events when
    moving / opening.
+
+## Stage 7.4: confirm on a spell casts it
+
+`0x140293480` for a spell row (Checked (decomp)): locked (greyed) → the error sound; else KH1's
+commit gate (free or in a combo window, not in the take-off; Fire also from frame 14 of its
+release motion) → refused: no sound, the list stays open; taken: the command is issued
+(`win::magic::issue`), the stack unwinds and the root cursor returns to Attack. The gate is read
+from Sora's KH1 frame as last left (one motion update stale; the frame checks again exactly) and
+only while Re:CoM's action is one KH1's frame runs. `recom-m7-magic.md`.

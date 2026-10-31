@@ -100,7 +100,8 @@ Assumption, logged at the first camp open; the owner's level-99 save had the ran
 `current() -> Option<(mp, max, charge)>`, `can_pay(cost)`, `pay(cost, why)`,
 `gain_charge(units, why)`, `restore_full(why)`; costs in KH1's encoding (`mp::cost`: ≥ 100 whole
 points, < 100 charge units). None / false / no-op at the Re:CoM setting, in Riku's story or with
-no save block. `pay` follows KH1 and doesn't test `can_pay`.
+no save block. `pay` follows KH1 and doesn't test `can_pay`. Stage 7.4 uses them: `can_pay` in
+the cast's usable test, `pay(30)` at Fire's release frame (`recom-m7-magic.md`).
 
 ## Logs and trace
 

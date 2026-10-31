@@ -11,6 +11,28 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 43: M7 stage 7.4, the cardless cast and Fire, version 0.18.0 (2026-10-31)
+
+> Decision 34 (M7 "FULLY implemented"; Re:CoM's spell visuals and sounds)
+
+- Choosing Fire / Fira / Firaga in the command menu casts it through Re:CoM's own magic action
+  0x13, its cast clips and its homing-shot runtime, with Re:CoM's Fire effects. One entry point
+  `win::magic::issue(spell, level)` for the menu and (7.12) shortcuts.
+- KH1's timing (Checked, decomp + files): 28-frame wind-up, release motion 60 (air 52) free from
+  46, ball in frame 28; fast path (Fire's release motion from frame 14, swing 1 / lunge windows):
+  no wind-up, ball 8 frames after the command; cut before release = no ball, no MP; air hop 30 cm,
+  air speed halved. Ball 40 cm/frame × 30 frames, 3°/frame homing, radius 50, one hit.
+- MP: can_pay before (not on the fast path, as KH1), `pay(30)` at release. Damage: spell power +
+  max MP through KH1's curve, twin/proxy Defence, floor, cap and KH1 fire resistance (Re:CoM's weak
+  part and boss falloff on top).
+- Re:CoM's init isn't called (it reads the played card's table, not loaded in the field); the cast
+  does its writes cardlessly and points the row at KH1 rows built on Re:CoM's Fire rows
+  (`0x1407C6E90`, `0x1407C6F00`). Hook: magic exe `0x140217EE0` (`48 89 5C 24 08 48 89 74 24 10`).
+  The Field exe's jump table gets an action-0x13 case (`0x1401FA63C` → a 13-byte stub in the int3
+  cave `0x1401FB0E1`). `docs/recom-m7-magic.md`. Not seen in game.
+
+---
+
 ## Stage 42: HD atlas scale for the bar and the menu plates, version 0.17.1 (2026-10-31)
 
 - The owner's `FO0002.SPR` language copies are HD layouts with every UV × 2 (Checked, files), so

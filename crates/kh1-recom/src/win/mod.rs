@@ -8,6 +8,7 @@ mod deck;
 mod guard;
 mod hook;
 mod keyblades;
+mod magic;
 mod menu;
 mod models;
 mod movement;
@@ -257,8 +258,37 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         if mp_bar::install(base, bar_file) {
             command_menu::install(base, menu_file, s);
         }
+        install_magic(base);
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
+    }
+}
+
+/// KH1's cardless cast and Fire (M7 stage 7.4, `magic`): the KH1 rows, the Field exe's case for
+/// action 0x13, then the exeMagic hook. Needs the Attack's hooks (the request-bits wrapper and the
+/// enemy-hit wrapper carry its command and hits).
+fn install_magic(base: usize) {
+    // SAFETY: the vtable slot is a read of the mapped image.
+    let slot_ok = unsafe {
+        let p = &crate::sites::MAGIC_PTRS[0];
+        movement::rd::<usize>(base + p.rva as usize) == base + p.target as usize
+    };
+    if !slot_ok {
+        log("magic: CPlayerSora's exeMagic slot is not 0x140217EE0; no KH1 cast");
+        return;
+    }
+    // SAFETY: reads of the mapped exe; data patches with checked old values.
+    if !unsafe { magic::install(base) } {
+        return;
+    }
+    let site = |name: &str| crate::sites::MAGIC_HOOKS.iter().find(|h| h.name == name).expect("site");
+    let hooks = [hook::Hook { site: site("exeMagic (0x140217EE0)"), ours: magic::exe_magic as *const () as usize, original: &magic::ORIG_EXE_MAGIC }];
+    // SAFETY: the target's bytes are checked again inside, before anything is written.
+    if unsafe { hook::install_all(base, &hooks) } {
+        magic::mark_installed();
+        log(&magic::start_line());
+    } else {
+        log("magic: exeMagic not hooked; no KH1 cast (the Field case stays patched but is not reached: Re:CoM never casts in the field)");
     }
 }
 

@@ -48,6 +48,13 @@ pub mod row {
     pub const HIGH_JUMP_TOP: u32 = 0x15;
     /// Re:CoM's `p001_081` (KH1 entry 72's bake, Checked (files): the recoil 0x6E).
     pub const RECOIL: u32 = 0x24;
+    /// Re:CoM's Fire cast clips (`initMagic` plays the attack row's `+0` + `+0x478`, `exeMagic`
+    /// the next row): `p001_062` / `p001_063` ground, `p001_066` / `p001_067` air. Checked (exe:
+    /// the action table's names; the attack row 0x22's `+0` is 0x37).
+    pub const FIRE_WINDUP: u32 = 0x37;
+    pub const FIRE_RELEASE: u32 = 0x38;
+    pub const FIRE_AIR_WINDUP: u32 = 0x3B;
+    pub const FIRE_AIR_RELEASE: u32 = 0x3C;
 }
 
 /// KH1 requests for the KH1-only rows, in the order they are appended.
@@ -167,6 +174,13 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         // KH1's recoil has no travel; Re:CoM's bake of it is row 0x24.
         RECOIL => row::RECOIL,
         COUNTERATTACK => return ext.get(req).map(|r| (r, true)),
+        // KH1's Fire cast (M7 stage 7.4): Re:CoM's own cast clips (decision 10: the same moves,
+        // KH1's frame counts). The release motions have the root bit (KH1: back 15 / 42.4 cm),
+        // as `exeMagic` plays its release clip with root motion.
+        crate::magic::cast_req::FIRE_WINDUP => row::FIRE_WINDUP,
+        crate::magic::cast_req::FIRE_RELEASE => return Some((row::FIRE_RELEASE, true)),
+        crate::magic::cast_req::FIRE_AIR_WINDUP => row::FIRE_AIR_WINDUP,
+        crate::magic::cast_req::FIRE_AIR_RELEASE => return Some((row::FIRE_AIR_RELEASE, true)),
         _ => return None,
     };
     Some((r, false))
@@ -233,6 +247,22 @@ mod tests {
         assert_eq!(row_for(0xA, &s, &none), Some((row::HIGH_JUMP_TOP, false)));
         assert_eq!(row_for(GUARD, &s, &none), None);
         assert_eq!(row_for(200, &s, &none), None);
+    }
+
+    #[test]
+    fn fire_cast_rows_are_recoms_own_clips() {
+        let s = Stance::default();
+        let none = Extension::default();
+        assert_eq!(row_for(0x36, &s, &none), Some((0x37, false)));
+        assert_eq!(row_for(0x3D, &s, &none), Some((0x38, true)));
+        assert_eq!(row_for(0x83, &s, &none), Some((0x3B, false)));
+        assert_eq!(row_for(0x8A, &s, &none), Some((0x3C, true)));
+        // Each release clip is the row after its wind-up (`exeMagic` plays `+0x474 + 1`), and the
+        // air clips are the ground ones + 4 (`initMagic`'s `+0x478`).
+        assert_eq!(row::FIRE_RELEASE, row::FIRE_WINDUP + 1);
+        assert_eq!(row::FIRE_AIR_WINDUP, row::FIRE_WINDUP + 4);
+        assert_eq!(row::FIRE_AIR_RELEASE, row::FIRE_AIR_WINDUP + 1);
+        assert_eq!(crate::magic::RECOM_FIRE_ROWS[0][0] as u32, row::FIRE_WINDUP);
     }
 
     #[test]

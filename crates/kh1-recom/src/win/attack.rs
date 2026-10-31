@@ -330,6 +330,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     // KH1's MP refill runs in the actor pre-step, at the start of the frame (`0x1402A43A0` →
     // `0x1402A4CB0`): one point per frame while one is waiting (M7 stage 7.1).
     super::mp::frame();
+    // A magic command no KH1 frame took last frame is gone (M7 stage 7.4).
+    super::magic::new_frame();
     let battle: i32 = rd(pl + p::BATTLE);
     if battle != 0 && battle_guards_clear(pl, rd(pl + p::REQUEST)) {
         // Re:CoM's own field branch: the confirm press is the Attack, no card input.
@@ -566,6 +568,10 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
         return o(enemy);
     }
     let Some(part) = take_kh1_hit(enemy) else {
+        // M7 stage 7.4: one of our KH1 spell shots hit this enemy.
+        if let Some((part, s, lv)) = super::magic::take_hit(enemy) {
+            return spell_hit(enemy, part, s, lv, o);
+        }
         let hp: i32 = rd(enemy + 0x274);
         // Decision 28: a shot Sora's Guard turned back breaks into the card like a KH1 swing.
         let flags: u64 = rd(enemy + 0x260);
@@ -609,6 +615,48 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {
             g.push(format!("e{:x}:dmg {}:hp {}{}{}", enemy & 0x00FF_FFFF, hp - after, after, if force { ":card" } else { "" }, kh1.map_or(String::new(), |d| format!(":kh1 {d}"))));
+        }
+    }
+    r
+}
+
+/// A KH1 spell shot's hit (M7 stage 7.4): KH1's spell damage (power + max MP through KH1's curve,
+/// the twin's or proxy's Defence, floor, cap and the element's resistance) as the hit part's
+/// value, as for a swing; Re:CoM's own path then applies its weak part and boss falloff
+/// (decision 13). Re:CoM's own resistance for the shot's attribute is not applied on top (KH1's
+/// is in the number): the part's attribute reads as one Re:CoM's table doesn't cover for the
+/// call. The card-interrupt bit as for a swing (decision 14). Spells charge no MP (KH1 `+0x2C`
+/// = 0).
+unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64 {
+    let max_mp = super::mp::current().map(|v| v.1);
+    let data = crate::magic::fire_attack(lv);
+    let kh1 = if s == crate::magic::spell::FIRE { max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m)) } else { None };
+    let attr: u32 = rd(part + super::magic::PART_ATTR);
+    if let Some(d) = kh1 {
+        wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
+        wr(part + super::magic::PART_ATTR, super::magic::NEUTRAL_ATTR);
+    }
+    let flags: u64 = rd(enemy + 0x260);
+    let force = flags & 1 != 0 && flags & 0x200_0000 == 0;
+    if force {
+        wr(enemy + 0x260, flags | 0x200_0000);
+    }
+    let hp: i32 = rd(enemy + 0x274);
+    let r = o(enemy);
+    if force {
+        let now: u64 = rd(enemy + 0x260);
+        wr(enemy + 0x260, now & !0x200_0000);
+    }
+    if kh1.is_some() {
+        wr(part + super::magic::PART_ATTR, attr);
+    }
+    super::guard::after_enemy_hit(enemy, r, hp);
+    let after: i32 = rd(enemy + 0x274);
+    let name = crate::magic::spell::NAMES.get(s as usize).copied().unwrap_or("?");
+    super::magic::hit_line(|| format!("hit {name}{lv} on {:#x}: KH1 {} (max MP {}), Re:CoM took {} -> HP {after}{}", enemy & 0x00FF_FFFF, kh1.map_or("- (no KH1 numbers: Re:CoM's)".to_string(), |d| d.to_string()), max_mp.unwrap_or(0), hp - after, if force { " (card broken)" } else { "" }));
+    if let Ok(mut g) = HIT_LOG.lock() {
+        if g.len() < 16 {
+            g.push(format!("e{:x}:dmg {}:hp {after}{}:{name}{lv}{}", enemy & 0x00FF_FFFF, hp - after, if force { ":card" } else { "" }, kh1.map_or(String::new(), |d| format!(":kh1 {d}"))));
         }
     }
     r
@@ -714,7 +762,8 @@ pub unsafe extern "win64" fn root_step(ctrl: usize, out: *mut [f32; 4], yaw: *mu
         return;
     }
     let a: u32 = rd(pl + p::ACTION);
-    if a != crate::movement::action::AVOID && a != crate::movement::action::ATTACK {
+    let cast = a == crate::magic::RECOM_MAGIC_ACTION && super::magic::kh1_cast(pl);
+    if a != crate::movement::action::AVOID && a != crate::movement::action::ATTACK && !cast {
         return;
     }
     // `out` is an absolute position (the model's position `ctrl+0xF0` + this update's travel,

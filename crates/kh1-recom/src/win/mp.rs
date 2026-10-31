@@ -124,15 +124,14 @@ pub fn current() -> Option<(i32, i32, u16)> {
     with_state(|mp| mp.view())
 }
 
-/// KH1's MP test (`0x1402A4C10`), cost in KH1's encoding (`crate::mp::cost`).
-#[allow(dead_code)] // API for the spells (7.4+); the menu tests its cached view (`crate::mp::Mp`).
+/// KH1's MP test (`0x1402A4C10`), cost in KH1's encoding (`crate::mp::cost`). The cast's usable
+/// test (7.4, `super::magic::can_cast`); the menu tests its cached view (`crate::mp::Mp`).
 pub fn can_pay(cost: i32) -> bool {
     with_state(|mp| mp.can_pay(cost)).unwrap_or(false)
 }
 
 /// KH1's payment (`0x1402A5B60`). False when MP isn't live. Like KH1 it doesn't test
-/// [`can_pay`] itself.
-#[allow(dead_code)] // API for the spells (7.4+, paid at the release frame); no caller in 7.1.
+/// [`can_pay`] itself. The cast pays at its release frame (7.4, `super::magic::release`).
 pub fn pay(cost: i32, why: &str) -> bool {
     let r = with_state(|mp| {
         let before = mp.view();
