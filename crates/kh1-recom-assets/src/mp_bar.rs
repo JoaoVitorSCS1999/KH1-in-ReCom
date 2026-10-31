@@ -441,9 +441,22 @@ pub struct Kh1Look {
 
 /// The sprites, parts and groups added to `Cockpit:00`; returns the first new group's index.
 pub fn add_bar(seq: &mut Seqd, look: &Kh1Look, neutral: [u8; 4]) -> Result<usize> {
-    if seq.agroups.len() != BASE_GROUPS {
-        return bad(format!("{SET} has {} animation groups, expected Re:CoM Steam's {BASE_GROUPS} (already patched, or another build?)", seq.agroups.len()));
+    // Language copies have their own group counts (`FR_Cockpit.lad`: 157); ours go after them.
+    if seq.agroups.is_empty() || seq.agroups.len() > BASE_GROUPS + 64 {
+        return bad(format!("{SET} has {} animation groups (Re:CoM Steam's base file: {BASE_GROUPS})", seq.agroups.len()));
     }
+    // A set that already ends with our sprites (this step's output fed back) is refused.
+    let mut probe = seq.clone();
+    let p0 = probe.sprites.len();
+    add_bar_unchecked(&mut probe, look, neutral)?;
+    let ours = &probe.sprites[p0..];
+    if !ours.is_empty() && seq.sprites.len() >= ours.len() && seq.sprites[seq.sprites.len() - ours.len()..] == *ours {
+        return bad(format!("{SET} already ends with the MP bar's sprites (already patched)"));
+    }
+    add_bar_unchecked(seq, look, neutral)
+}
+
+fn add_bar_unchecked(seq: &mut Seqd, look: &Kh1Look, neutral: [u8; 4]) -> Result<usize> {
     let s0 = seq.sprites.len();
     let v = |c: [u8; 4]| vertex_colour(c, neutral);
     let flat = |c: u32| [c; 4];
@@ -815,7 +828,7 @@ pub fn neutral_texel(rtm: &[u8]) -> Result<[u8; 4]> {
 // The manifest.
 
 /// The `kh1-mp-bar.json` the DLL reads.
-pub fn manifest_json(first: usize, look: &Kh1Look, neutral: [u8; 4], files: &[(String, Patched)], sources: &[(&str, String)]) -> String {
+pub fn manifest_json(first: usize, firsts: &[usize], look: &Kh1Look, neutral: [u8; 4], files: &[(String, Patched)], sources: &[(&str, String)]) -> String {
     use std::fmt::Write;
     let hex = |c: u32| format!("\"{c:#010x}\"");
     let v = |c: [u8; 4]| hex(vertex_colour(c, neutral));
@@ -825,6 +838,7 @@ pub fn manifest_json(first: usize, look: &Kh1Look, neutral: [u8; 4], files: &[(S
     let _ = writeln!(s, "  \"set\": \"{SET}\",");
     let _ = writeln!(s, "  \"base_groups\": {BASE_GROUPS},");
     let _ = writeln!(s, "  \"first_group\": {first},");
+    let _ = writeln!(s, "  \"first_groups\": [{}],", firsts.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"group_count\": {},", group::COUNT);
     let _ = writeln!(s, "  \"slots\": {SLOTS},");
     let _ = writeln!(s, "  \"units_per_slot\": {UNITS_PER_SLOT},");

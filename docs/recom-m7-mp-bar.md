@@ -222,3 +222,15 @@ prefix) or a whole container, keeps the other assets as they are, and writes:
 7. A battle, then back to the field: the bar is there in both.
 8. Combat = Re:CoM in the Config: the bar goes when the camp closes; back to KH1: it comes back.
 9. Riku's story: no bar; the Dark gauge works as in Re:CoM.
+
+## Language copies (0.16.1)
+
+- Running the asset step on the owner's files (2026-10-31) showed that `FO0002.SPR`'s language
+  copies `FR_ / GR_ / IT_ / SP_ / UK_Cockpit.lad` have **157** animation groups of their own, the
+  base file 151. Checked (files). 0.16.0 refused them and built no bar.
+- Now each copy gets the bar's 8 groups after its own (151..158 in the base file, 157..164 in the
+  copies); `kh1-mp-bar.json` lists every first group (`first_groups`), and the DLL picks ours by
+  the loaded set's group count (`Layout::first_for`: 159 → 151, 165 → 157). A set that already
+  ends with the bar's sprites is refused (fed-back output).
+- The owner's mod was built with it on their PC: `raw/FORM/0002/FO0002.SPR` and
+  `kh1-mp-bar.json` in the mod folder and `mod.yml`.

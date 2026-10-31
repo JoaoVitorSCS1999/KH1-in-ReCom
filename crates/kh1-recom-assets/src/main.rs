@@ -361,7 +361,7 @@ fn mp_bar_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats
         let (data, how) = mb::patch_asset(&a.name, &a.data, &look, neutral).map_err(|e| format!("{} asset {}: {e}", mb::SPR_PATH, a.name))?;
         if let Patched::Bar(f) = how {
             if f != first {
-                return Err(format!("{} asset {}: bar groups from {f}, the file's from {first}", mb::SPR_PATH, a.name));
+                println!("note: {} asset {}: its own Cockpit:00 has {f} groups (the base file {first}); the bar's groups start at {f} there", mb::SPR_PATH, a.name);
             }
         }
         files.push((a.name.clone(), how));
@@ -373,7 +373,10 @@ fn mp_bar_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats
         ("FO0002.RTM sha256", kh1_formats::egs::sha256_hex(&rtm)),
         ("FO0002.SPR sha256", kh1_formats::egs::sha256_hex(&spr)),
     ];
-    let manifest = mb::manifest_json(first, &look, neutral, &files, &sources);
+    let mut firsts: Vec<usize> = files.iter().filter_map(|f| if let Patched::Bar(g) = f.1 { Some(g) } else { None }).collect();
+    firsts.sort_unstable();
+    firsts.dedup();
+    let manifest = mb::manifest_json(first, &firsts, &look, neutral, &files, &sources);
     let patched: Vec<&str> = files.iter().filter(|f| matches!(f.1, Patched::Bar(_))).map(|f| f.0.as_str()).collect();
     let kept: Vec<&str> = files.iter().filter(|f| f.1 == Patched::Kept).map(|f| f.0.as_str()).collect();
     println!(

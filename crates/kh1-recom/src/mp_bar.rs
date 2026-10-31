@@ -56,6 +56,9 @@ pub struct Layout {
     /// Re:CoM's own group count, and our first group (= it).
     pub base_groups: u32,
     pub first_group: u32,
+    /// Our first group in each language copy the asset step patched (their own group counts
+    /// differ: e.g. `FR_Cockpit.lad` has 157 of its own). The loaded set's count picks one.
+    pub first_groups: Vec<u32>,
     pub slots: i32,
     pub units_per_slot: i32,
     pub pitch: i32,
@@ -66,9 +69,15 @@ pub struct Layout {
 }
 
 impl Layout {
-    /// The group count the loaded set must have for our groups to be there.
+    /// The group count the base file's set has with our groups.
     pub fn total_groups(&self) -> u32 {
         self.first_group + group::COUNT
+    }
+
+    /// Our first group in a loaded set of `n` groups: the copy whose own count is `n − COUNT`.
+    pub fn first_for(&self, n: u32) -> Option<u32> {
+        let f = n.checked_sub(group::COUNT)?;
+        (f == self.first_group || self.first_groups.contains(&f)).then_some(f)
     }
 }
 
@@ -84,6 +93,11 @@ pub fn parse_manifest(text: &str) -> Result<Layout, String> {
         set: v.get("set").and_then(|s| s.as_str()).ok_or("no \"set\"")?.to_string(),
         base_groups: n("base_groups")? as u32,
         first_group: n("first_group")? as u32,
+        first_groups: v
+            .get("first_groups")
+            .and_then(|a| a.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_f64()).map(|x| x as u32).collect())
+            .unwrap_or_default(),
         slots: i("slots")?,
         units_per_slot: i("units_per_slot")?,
         pitch: i("pitch")?,
@@ -205,6 +219,9 @@ mod tests {
         assert_eq!((l.first_group, l.total_groups(), l.set.as_str(), l.x0), (151, 159, "Cockpit:00", 1));
         assert!(parse_manifest(&MANIFEST.replace("\"pitch\": 26", "\"pitch\": 30")).is_err());
         assert!(parse_manifest(&MANIFEST.replace("mp-bar 1", "mp-bar 2")).is_err());
+        assert_eq!((l.first_for(159), l.first_for(165), l.first_for(158)), (Some(151), None, None));
+        let m2 = parse_manifest(&MANIFEST.replace("\"first_group\": 151,", "\"first_group\": 151,\n  \"first_groups\": [151, 157],")).unwrap();
+        assert_eq!((m2.first_for(159), m2.first_for(165)), (Some(151), Some(157)));
         assert!(parse_manifest(&MANIFEST.replace("\"first_group\": 151", "\"first_group\": 150")).is_err());
     }
 

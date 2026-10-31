@@ -33,6 +33,9 @@ static LOG_LEFT: AtomicU32 = AtomicU32::new(60);
 static SET_LOGGED: AtomicBool = AtomicBool::new(false);
 static STATE: Mutex<State> = Mutex::new(State { gauges: Vec::new(), bars: Vec::new() });
 
+/// Our first group in the loaded language copy of the set (`Layout::first_for`).
+static FIRST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 // Re:CoM functions (RVAs; first bytes checked in `sites`).
 const NEW: u32 = 0x004A_CE54;
 const SEQ_CTOR: u32 = 0x0024_7260;
@@ -202,7 +205,7 @@ unsafe fn new_ctrl(hp: usize) -> Option<usize> {
 /// Adds group `first + k` as a layer (flag 1: held at the frame we set; 0: played over time).
 unsafe fn add(c: usize, l: &(Layout, Vec<u8>), k: u32, xoff: f32, flag: u32) {
     wr::<u8>(c + C_PRIORITY, PRIORITY_HUD);
-    func::<AddFn>(ADD)(c, l.1.as_ptr(), l.0.first_group + k, xoff, flag);
+    func::<AddFn>(ADD)(c, l.1.as_ptr(), FIRST.load(Ordering::Relaxed) + k, xoff, flag);
 }
 
 unsafe fn delete(c: usize) {
@@ -285,9 +288,10 @@ unsafe fn build(gauge: usize) {
     if hp == 0 {
         return;
     }
-    match set_groups(&l.1) {
-        Some(n) if n == l.0.total_groups() => {}
-        other => {
+    match set_groups(&l.1).and_then(|n| l.0.first_for(n).map(|f| (n, f))) {
+        Some((_, f)) => FIRST.store(f, Ordering::Relaxed),
+        None => {
+            let other = set_groups(&l.1);
             if !SET_LOGGED.swap(true, Ordering::Relaxed) {
                 log(&format!(
                     "mp bar: {} has {} groups, not {} (Panacea serves Re:CoM's own FORM/0002/FO0002.SPR, or this language's copy was not patched): no MP bar",

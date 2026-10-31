@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 40: MP bar in every language copy, version 0.16.1 (2026-10-31)
+
+- The asset step on the owner's files: `FO0002.SPR`'s language copies of `Cockpit.lad` have 157
+  groups (the base file 151). Checked (files). Each copy now gets the bar after its own groups;
+  `kh1-mp-bar.json` lists the first groups (151, 157) and the DLL picks by the loaded set's count.
+- Built on the owner's PC; `raw/FORM/0002/FO0002.SPR` and `kh1-mp-bar.json` added to the mod and
+  `mod.yml`. Not seen in game.
+
+---
+
 ## Stage 39: M7 stage 7.2, the MP bar, version 0.16.0 (2026-10-31)
 
 > Decision 34: "Re:CoM-style bar" under the HP bar, "Grows with max MP", colour "From KH1's files"
