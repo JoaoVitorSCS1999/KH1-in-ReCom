@@ -159,11 +159,12 @@ owner decision, 2026-10-30; see `recom-motion-switch.md`):
   (the message table is bypassed, not changed). Seen in game (owner's screenshot,
   2026-10-30): the rows render with Re:CoM's buttons, text and highlights. Checked (in game).
 - **Help line:** with the cursor on our rows the help line shows our text:
-  - Combat: "Re:CoM: card battles as in the original. KH1: Kingdom Hearts combat. (mod v0.6.2)"
-    (the version is the DLL's own, built in from `Cargo.toml` since 0.6.2);
-  - Guard reactions: "On: a blocked attacker flinches and a blocked shot flies back. KH1 combat
-    only." (79 characters; ours are kept within 90, `menu::HELP_MAX`. Assumption: that fits the
-    help box on one line, as the Combat help does in game). Mode 9 of the
+  - Combat: "Re:CoM: card battles. KH1: Kingdom Hearts combat. (mod v0.13.3)" (the version
+    is the DLL's own, built in from `Cargo.toml` since 0.6.2);
+  - Guard reactions: "On: blocked attackers flinch, blocked shots fly back. KH1 only."
+  - The box shows about 69 characters and cuts the rest: before 0.13.3 the Combat help ended at
+    "combat." and its version never showed. Checked (owner's screenshots, 2026-10-31). Ours are
+    kept within 66 (`menu::HELP_MAX`). Mode 9 of the
   original first sets help `0x50041A` (its highlighted item index stays 0 when the cursor is
   on row 5), then our hook sets ours on the same help object. `0x140259000` keeps the pointer
   as is when `help+0x9C` is 0, else formats it with `0x1402402B0`; our text is static and has

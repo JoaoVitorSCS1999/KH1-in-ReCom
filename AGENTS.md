@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 32: Config help lines fit the help box, version 0.13.3 (2026-10-31)
+
+> Owner's Config screenshots: the help line is cut at the box's right edge, so the Combat
+> row's "(mod v…)" never shows ("how can i check mod version in game?").
+
+- Checked (screenshot): the help box shows about 69 characters of one line; Combat's help showed
+  up to "combat." (68), Guard reactions' up to "KH1 com" (69).
+- Change: shorter help lines (63 characters each): "Re:CoM: card battles. KH1: Kingdom Hearts
+  combat. (mod v0.13.3)" and "On: blocked attackers flinch, blocked shots fly back. KH1 only."
+  `menu::HELP_MAX` 90 → 66 (test). Text only; no address changes.
+
+---
+
 ## Stage 31: Enemy pace setting, version 0.13.2 (2026-10-31)
 
 > "is there a way to make enemies less aggressive? is there a system within KH1 that makes it so

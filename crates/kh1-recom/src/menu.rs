@@ -99,7 +99,7 @@ pub const TEXT: [RowText; ROWS] = [
         label: b"Combat\0",
         options: [b"Re:CoM\0", b"KH1\0"],
         help: concat!(
-            "Re:CoM: card battles as in the original. KH1: Kingdom Hearts combat. (mod v",
+            "Re:CoM: card battles. KH1: Kingdom Hearts combat. (mod v",
             env!("CARGO_PKG_VERSION"),
             ")\0"
         )
@@ -109,14 +109,14 @@ pub const TEXT: [RowText; ROWS] = [
     RowText {
         label: b"Guard reactions\0",
         options: [b"Off\0", b"On\0"],
-        help: b"On: a blocked attacker flinches and a blocked shot flies back. KH1 combat only.\0",
+        help: b"On: blocked attackers flinch, blocked shots fly back. KH1 only.\0",
     },
 ];
 
-/// The longest help line of Re:CoM's own Config rows is not known (message files, not read);
-/// ours stay within the Combat row's length plus a little, which is seen in game. Assumption:
-/// the help box fits this many characters on one line.
-pub const HELP_MAX: usize = 90;
+/// The help box shows about 69 characters of one line and cuts the rest (owner's screenshots,
+/// 2026-10-31: the Combat help showed up to "combat." at 68 characters, the Guard reactions one
+/// up to "KH1 com" at 69). Checked (screenshot, at 1275 px wide); kept a few under.
+pub const HELP_MAX: usize = 66;
 
 /// Layout elements (group `0xB` of `camp.lad`, read with `0x140246100`) Re:CoM's rows use.
 /// Labels take x from the first and y from the second; values take x from the option's element
