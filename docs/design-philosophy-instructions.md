@@ -273,6 +273,12 @@ At KH1 setting:
     - **Spells and spell levels are earned from certain bosses / events.**
     - **Cure heals exactly as Re:CoM's Cure; Aero works as KH1's.**
     - **Stop and Gravity against bosses exactly as in KH1.**
+    - **MP bar: Re:CoM-style straight bar** under Re:CoM's HP bar, in KH1 blue (built like Riku's
+      Dark gauge).
+    - **Command menu: Re:CoM's own menu pieces** (buttons, cursor, text), laid out like KH1's.
+    - **Command menu shown in the field and in battle**, as in KH1.
+    - **Customize: one "KH1" camp entry** (our entry renamed) with a submenu: Keyblades,
+      Customize (later Abilities, Items).
     - Research: `m7-magic.md`, `m7-menus-mp.md` (kept with the decomp tools).
 
 ## Known open design questions (ask the owner, don't guess)
