@@ -21,7 +21,7 @@
 use super::movement::{self as mv, rd, wr};
 use super::{base, log, va};
 use crate::mp::{self as m, Live, Mp, SavedMp, BLOCK_FIRST, BLOCK_LEN};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// A point is waiting to be made by KH1's per-frame refill.
@@ -58,11 +58,11 @@ pub fn active() -> bool {
     mv::kh1_on() && !super::stats::riku_story() && save().is_some()
 }
 
-/// The equipped Keyblade's KH1 max-MP bonus (KH1 weapon `+0x38`, the stats file's `magic`), for
-/// Keyblades whose numbers are KH1's. The six KH2 Keyblades' `magic` is KH2's Magic stat, not an
-/// MP bonus: 0 (owner question). The Kingdom Key: 0.
+/// The equipped Keyblade's KH1 max-MP bonus (KH1 weapon `+0x38`, the stats file's `magic`). The
+/// six KH2 Keyblades use their KH2 Magic stat as the bonus (owner, 2026-10-31, decision 35). The
+/// Kingdom Key: 0.
 pub fn keyblade_bonus() -> i32 {
-    super::stats::keyblade(super::stats::equipped_card()).filter(|k| k.source == "kh1").map_or(0, |k| k.magic)
+    super::stats::keyblade(super::stats::equipped_card()).map_or(0, |k| k.magic)
 }
 
 /// Reads the block, syncs it (level-ups, Keyblade), runs `f`, writes back what KH1 would have
@@ -206,4 +206,87 @@ pub fn clear_events() {
     if let Ok(mut g) = EVENTS.lock() {
         g.clear();
     }
+}
+
+// ---- Decision 35: MP refills to full where Re:CoM refills Sora's HP ----
+//
+// Re:CoM sets HP = max HP (`*0x14087CBF8 = [1]`) in three places (Checked, decomp + exe):
+// - `0x1401AC9D0` (a game-state step): when its fade task reports 6, outside rooms 0x4B0..0x4E7
+//   and unless `0x140235F60()` sends it to `0x1401A9D20`, it fills HP and sets state `+0x580 = 8`;
+// - `0x140237CE0`: when `0x14087B84C & 2`, after the retry snapshot `0x1401B1410(0)`, it calls
+//   `0x1402374C0(0)` (the call at `0x140237F3A`) and fills HP;
+// - the level-up screen `0x14010EF10`: the HP choice raises max HP by 15 and fills HP.
+// Assumption: these are all of Re:CoM's full heals (no other writer of HP = max HP was found).
+
+pub static ORIG_HEAL_STATE: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_LEVEL_UP: AtomicUsize = AtomicUsize::new(0);
+/// Re:CoM's `0x1402374C0` (the callee of the retargeted call at `0x140237F3A`).
+const CHECKPOINT_CALLEE: u32 = 0x0023_74C0;
+/// The room id (`0x140233700` returns the i16 here).
+const ROOM: u64 = 0x1_4087_B838;
+const STATS_PTR: u64 = 0x1_4087_CBF8;
+const HEAL_STATE: usize = 0x580;
+
+type ThisFn = unsafe extern "win64" fn(usize);
+type IntFn = unsafe extern "win64" fn(i32);
+
+/// Sora's (HP, max HP) from Re:CoM's stat block.
+fn hp() -> Option<(i32, i32)> {
+    // SAFETY: a static pointer of the image, then the stat block it points at.
+    unsafe {
+        let p: usize = rd(va(base(), STATS_PTR));
+        (p != 0).then(|| (rd::<i32>(p), rd::<i32>(p + 4)))
+    }
+}
+
+/// Wrapper on `0x1401AC9D0`: after Re:CoM's step, the transition into state 8 on the HP-filling
+/// path (outside rooms 0x4B0..0x4E7, HP now full).
+pub unsafe extern "win64" fn heal_state(this: usize) {
+    let o: ThisFn = mv::orig(&ORIG_HEAL_STATE);
+    let before: i32 = rd(this + HEAL_STATE);
+    o(this);
+    if before == 8 || rd::<i32>(this + HEAL_STATE) != 8 || !active() {
+        return;
+    }
+    let room: i16 = rd(va(base(), ROOM));
+    if (room as u16).wrapping_sub(0x4B0) <= 0x37 {
+        return;
+    }
+    if hp().is_some_and(|(h, m)| h >= m) {
+        restore_full("Re:CoM's HP refill (0x1401AC9D0)");
+    }
+}
+
+/// The retargeted call at `0x140237F3A`: Re:CoM's `0x1402374C0(a)`, then (Re:CoM fills HP right
+/// after it) MP to full.
+pub unsafe extern "win64" fn checkpoint_call(a: i32) {
+    let f: IntFn = mv::func(CHECKPOINT_CALLEE);
+    f(a);
+    if active() {
+        restore_full("Re:CoM's HP refill (0x140237CE0)");
+    }
+}
+
+/// Wrapper on the level-up screen `0x14010EF10`: the HP choice (max HP raised during the call).
+pub unsafe extern "win64" fn level_up(this: usize) {
+    let o: ThisFn = mv::orig(&ORIG_LEVEL_UP);
+    let before = hp();
+    o(this);
+    if let (Some((_, m0)), Some((h, m1))) = (before, hp()) {
+        if m1 > m0 && h >= m1 && active() {
+            restore_full("Re:CoM's level-up HP choice (0x14010EF10)");
+        }
+    }
+}
+
+/// Retargets the call at `0x140237F3A` to [`checkpoint_call`] through a jump placed near it.
+/// The bytes there and around it are checked first (`sites::MP_CHECKPOINT_CALL`).
+pub unsafe fn install_checkpoint(bs: usize) -> bool {
+    let s = &crate::sites::MP_CHECKPOINT_CALL;
+    let at = bs + s.rva as usize;
+    let mut jmp = vec![0xFF, 0x25, 0, 0, 0, 0];
+    jmp.extend_from_slice(&(checkpoint_call as *const () as u64).to_le_bytes());
+    let Some(thunk) = super::hook::place_near(at, &jmp) else { return false };
+    let Some(call) = crate::hookplan::call_rel32(at as u64, thunk as u64) else { return false };
+    super::hook::patch(at, s.expect, &call, s.name)
 }

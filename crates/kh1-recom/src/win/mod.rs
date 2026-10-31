@@ -245,6 +245,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>) {
             crate::mp::BLOCK_LAST,
             crate::mp::LAYOUT_V1
         ));
+        install_mp_refills(base);
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
     }
@@ -253,6 +254,25 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>) {
 /// M6 stages 1 and 2 (`battle`, `deck`, decisions 29 / 30): at Combat = KH1 in Sora's story,
 /// Heartless attack without cards, several at once, and Sora has no deck. Needs the movement
 /// handlers (they carry the setting).
+/// Decision 35: MP to full where Re:CoM fills Sora's HP (two wrappers and one call retarget,
+/// `win::mp`). Each part on its own; a missing one only loses that refill.
+fn install_mp_refills(base: usize) {
+    let site = |name: &str| crate::sites::MP_HOOKS.iter().find(|h| h.name == name).expect("site");
+    let hooks = [
+        hook::Hook { site: site("HP refill state step (0x1401AC9D0)"), ours: mp::heal_state as *const () as usize, original: &mp::ORIG_HEAL_STATE },
+        hook::Hook { site: site("level-up screen (0x14010EF10)"), ours: mp::level_up as *const () as usize, original: &mp::ORIG_LEVEL_UP },
+    ];
+    // SAFETY: the targets' bytes are checked again inside, before anything is written.
+    let w = unsafe { hook::install_all(base, &hooks) };
+    // SAFETY: the call's bytes and context are checked inside `patch`.
+    let c = unsafe { mp::install_checkpoint(base) };
+    log(&format!(
+        "mp: refill to full where Re:CoM fills HP (decision 35): state step and level-up wrappers {}, checkpoint call 0x140237F3A {}",
+        if w { "in" } else { "NOT in" },
+        if c { "retargeted" } else { "NOT retargeted" }
+    ));
+}
+
 fn install_battles(base: usize) {
     if !movement::installed() {
         log("m6: movement not hooked; battles stay Re:CoM's");

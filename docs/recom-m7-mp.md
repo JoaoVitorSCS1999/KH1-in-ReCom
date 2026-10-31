@@ -160,3 +160,24 @@ no save block. `pay` follows KH1 and doesn't test `can_pay`.
    shows `v0`.
 5. Combat = Re:CoM: no `mp:` lines, the trace shows `mp -`.
 6. Riku's story: no `mp:` lines.
+
+## Refills and the KH2 Keyblades (0.15.2, decision 35)
+
+Owner: MP refills "where HP refills"; the KH2 Keyblades' max-MP bonus is their KH2 Magic.
+
+- Re:CoM sets HP = max HP (`*0x14087CBF8 = [1]`) in three places (Checked, decomp + exe):
+  - `0x1401AC9D0`, a game-state step: when its fade task reports 6, outside rooms
+    0x4B0..0x4E7 (`0x14087B838`, read by `0x140233700`) and unless `0x140235F60()` sends it to
+    `0x1401A9D20`, it fills HP and sets `+0x580 = 8`. Wrapper (`40 53 48 83 EC 20 48 8B D9`):
+    after it, a transition into 8 outside those rooms with HP full → MP full.
+  - `0x140237CE0`: when `0x14087B84C & 2`, after the retry snapshot `0x1401B1410(0)`, it calls
+    `0x1402374C0(0)` at `0x140237F3A` and fills HP. That call (`E8 81 F5 FF FF`, context checked:
+    `33 C9 E8 D8 94 F7 FF 33 C9` before, `48 8B 0D B2 4C 64 00 8B 41 04 89 01` after; no branch
+    lands inside it, `.text` scan) is retargeted to ours, which calls `0x1402374C0` and then fills
+    MP. The function's own prologue can't be hooked (its second instruction is RIP-relative).
+  - The level-up screen `0x14010EF10`: the HP choice raises max HP by 15 and fills HP. Wrapper
+    (`48 8B C4 55 41 56 41 57 48 8D 68 A1`): max HP raised during the call and HP full → MP full.
+- Assumption: these are all of Re:CoM's full heals (no other `HP = max HP` writer found); what
+  each moment is in play (save room, floor change, continue) is not traced.
+- MP is filled after the snapshot, as HP is, so a retry restores the earlier MP with the HP.
+- KH2 Keyblades: `keyblade_bonus` now uses every Keyblade's `magic` (KH2's Magic for the six).

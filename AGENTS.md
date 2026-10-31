@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 38: MP refills where HP refills; KH2 Keyblades' MP, version 0.15.2 (2026-10-31)
+
+> Owner's answers (decision 35): MP refill "Where HP refills"; KH2 Keyblades' MP "Use KH2 Magic"
+
+- Re:CoM's three `HP = max HP` writers (Checked, decomp + exe): the state step `0x1401AC9D0`
+  (wrapper), the checkpoint heal in `0x140237CE0` (its call `0x1402374C0(0)` at `0x140237F3A`
+  retargeted through a jump placed near it; context bytes checked; no branch into it), the level-up
+  HP choice in `0x14010EF10` (wrapper). After each, at KH1, MP goes to full (`restore_full`).
+- The six KH2 Keyblades' `magic` (KH2 Magic) is now their max-MP bonus.
+- Assumption: no other full heal; what each moment is in play isn't traced. Not seen in game.
+- `docs/recom-m7-mp.md` § Refills and the KH2 Keyblades.
+
+---
+
 ## Stage 37: KH1 numbers for enemies without a twin, version 0.15.1 (2026-10-31)
 
 > "it feels like any enemy that doesnt have a KH1 counterpart barely takes any damage in

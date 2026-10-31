@@ -530,6 +530,25 @@ pub const M6_BOSS_HOOKS: &[Site] = &[
     Site { name: "Sora card duel init (0x140220C40)", rva: 0x0022_0C40, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x40] },
 ];
 
+/// Decision 35 (MP to full where Re:CoM fills HP). Moved bytes are whole, position-independent
+/// instructions.
+pub const MP_HOOKS: &[Site] = &[
+    // push rbx; sub rsp,0x20; mov rbx,rcx
+    Site { name: "HP refill state step (0x1401AC9D0)", rva: 0x001A_C9D0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9] },
+    // mov rax,rsp; push rbp; push r14; push r15; lea rbp,[rax-0x5F]
+    Site { name: "level-up screen (0x14010EF10)", rva: 0x0010_EF10, expect: &[0x48, 0x8B, 0xC4, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D, 0x68, 0xA1] },
+];
+
+/// The call `0x1402374C0(0)` in `0x140237CE0`'s HP-filling branch (retargeted, decision 35).
+pub const MP_CHECKPOINT_CALL: Site = Site { name: "checkpoint call (0x140237F3A)", rva: 0x0023_7F3A, expect: &[0xE8, 0x81, 0xF5, 0xFF, 0xFF] };
+
+/// Its context, checked only: `xor ecx,ecx; call 0x1401B1410; xor ecx,ecx` before it and the HP
+/// fill `mov rcx,[0x14087CBF8]; mov eax,[rcx+4]; mov [rcx],eax` after it.
+pub const MP_CHECKED: &[Site] = &[
+    Site { name: "checkpoint snapshot call (0x140237F31)", rva: 0x0023_7F31, expect: &[0x33, 0xC9, 0xE8, 0xD8, 0x94, 0xF7, 0xFF, 0x33, 0xC9] },
+    Site { name: "checkpoint HP fill (0x140237F3F)", rva: 0x0023_7F3F, expect: &[0x48, 0x8B, 0x0D, 0xB2, 0x4C, 0x64, 0x00, 0x8B, 0x41, 0x04, 0x89, 0x01] },
+];
+
 /// A pointer in Re:CoM's data that holds another address of the image. The exe is relocated
 /// (ASLR, `DYNAMIC_BASE`), so these are checked at run time against `base + target`, not as
 /// bytes in the startup report.
@@ -606,6 +625,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(M6_ENEMY_UI_CALLS)
         .chain(M6_ENEMY_UI_CHECKED)
         .chain(M6_BOSS_HOOKS)
+        .chain(MP_HOOKS)
+        .chain(std::iter::once(&MP_CHECKPOINT_CALL))
+        .chain(MP_CHECKED)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -698,7 +720,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);

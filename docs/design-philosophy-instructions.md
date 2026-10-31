@@ -294,6 +294,10 @@ At KH1 setting:
     - Shortcuts saved per save (KH1).
     - Research: `m7-magic.md`, `m7-menus-mp.md` (kept with the decomp tools).
 
+35. M7 MP details (owner, 2026-10-31): **MP refills to full wherever Re:CoM refills Sora's HP**
+    (its HP-refill state step, its checkpoint heal, the level-up HP choice); **the six KH2
+    Keyblades use their KH2 Magic stat as their max-MP bonus**. `recom-m7-mp.md`.
+
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.
