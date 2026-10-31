@@ -11,6 +11,30 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 37: KH1 numbers for enemies without a twin, version 0.15.1 (2026-10-31)
+
+> "it feels like any enemy that doesnt have a KH1 counterpart barely takes any damage in
+> comparison to the KH1 enemies, why is this and fix it"
+
+- Cause (Checked, owner's F9 traces): twins took KH1 damage against KH1 HP (max-level Sora: 300
+  = the cap, one hit, which is KH1's own result against first-visit records); every other enemy,
+  every boss included, kept Re:CoM's floor HP and took Re:CoM's cardless AP = Sora's attack stat
+  `player+0x43c` = 10 per hit.
+- Re:CoM's enemy HP is the `@ENP` row of `ENEMY/<id>/EN<id>.EPD` picked by floor (the i16 at
+  `0x14087B844`, getter `0x1402337D0` `0f b7 05 6d 80 64 00 c3`). Checked (decomp + exe + files).
+- Asset step (`kh1-stats.json` format 5): Re:CoM HP rows of the twins and boss twins from
+  `Recom.pkg`, 11 KH1 boss records (Guard Armor 700, Tutorial Leon 120, Genie Jafar 750, Cloud 300,
+  Trickmaster 600, Parasite Cage 450, Oogie 450, giant Ursula 900, Hook 900, Dragon Maleficent 1200,
+  Darkside 300) and per world × floor ratios (KH1 HP ÷ Re:CoM HP, lower-median twin).
+- Runtime (no new hook; the stats-init wrapper `0x14017FF50` and max-HP getter `0x14017F5A0`):
+  boss twins take their KH1 record; other enemies get a proxy: Re:CoM HP × the cell's ratio, the
+  median twin's Defence / level / floor / cap, 100 % resistances; Re:CoM-only bosses the world's
+  boss ratio and decision 34's Gravity 2 % / Stop immune. MP charge reads the proxy's level.
+- The owner's `kh1-stats.json` was rebuilt on their PC with this build's asset step. Not seen in
+  game.
+
+---
+
 ## Stage 36: M7 stage 7.1, KH1 MP, version 0.15.0 (2026-10-31)
 
 > "lets work on M7. Make sure all of that is FULLY implemented, also including a shortcut menu,

@@ -434,6 +434,25 @@ bones): local rotation (geodesic angle), translation and scale.
 - Format 2 (0.7.5) adds per enemy `lock_radius` (its first kind-0 lock point's radius, KH1 units)
   and `lock_radii` (all of them), read from the twin's `.mdls` part 4 (`stats::lock_radii`). The
   runtime reads format 1 too (radius unknown, 0).
+- Format 5 (enemies without a twin; `recom-kh1-attack.md` § KH1 numbers for enemies without a
+  twin). The step now also reads **Re:CoM's** enemy stats files from `Recom.pkg`:
+  `ENEMY/<id>/EN<id>.EPD` for the 31 twins and the 11 boss twins (`stats::epd_name`,
+  `enp_hp_rows`: the first `@ENP` record's 13 per-floor row HPs). It also reads **KH1's** boss
+  models (`xa_tw_3000`, `xa_ex_1030`, `xa_al_3020`, `xa_ex_1150`, `xa_aw_3000`, `xa_pi_3000`,
+  `xa_nm_3000`, `xa_lm_3000`, `xa_pp_3000`, `xa_pc_3000`, `xa_di_3000`, and the final boss
+  `xa_ew_3020`) for their part-5 records. New keys:
+  - per enemy: `recom_id` (Re:CoM's enemy id) and `recom_hp` (13 rows; empty when its `.EPD`
+    is missing or unreadable, a console note);
+  - `recom_rows` (13), `final_boss` (`gravity`, `stop`);
+  - `bosses`: `recom_id`, `class`, `name`, `kh1_model`, `home_world`, `pool`, `assumed`,
+    `recom_hp`, `worlds` (13 records);
+  - `proxies`: `ordinary` and `boss`, each 13 worlds × 13 floor rows of cells (`null` when no
+    reference has Re:CoM HP on that row): `ratio`, `from`, `recom_hp`, `kh1_hp`, `record`.
+  - The console prints each twin's and boss twin's Re:CoM HP per floor and one line of ratios per
+    world (`proxy ordinary <world>: floors 1..13: …`).
+  - A missing boss model or `.EPD` is a note, not a stop. Older files (no `proxies`) still
+    read: the proxies are then off, and twins work as before.
+  - Not run on real files in the session (no `.EPD` here). Tests use synthetic records.
 - The local mod's `mod.yml` copies it like the other files.
 - Checked (files): the owner's install gives all 31 twins with valid records; the motion pack
   and manifest it rebuilt are byte-identical to the installed ones.

@@ -519,6 +519,134 @@ pub struct Kh1Stats {
     /// Re:CoM class name → its twin's first kind-0 lock-point radius (KH1 units), the radius
     /// KH1's ground picker subtracts (`0x1402A7320`). Absent in older files (format 1).
     pub lock_radius: Vec<(String, f32)>,
+    /// Re:CoM class name → its twin's Re:CoM HP per floor row (`@ENP`, format 5), for the log's
+    /// check against the live row.
+    pub recom_hp: Vec<(String, Vec<i32>)>,
+    /// Re:CoM's bosses with a KH1 equivalent (format 5).
+    pub bosses: Vec<BossTwin>,
+    /// The proxy tables for enemies without a twin (format 5; None before).
+    pub proxies: Option<Proxies>,
+}
+
+// ---- KH1 numbers for Re:CoM enemies without a KH1 twin (proxies) ----
+
+/// A Re:CoM boss with a KH1 equivalent (`kh1-stats.json` format 5 `bosses`): it takes its own KH1
+/// record per Re:CoM world, as an ordinary twin does. Matched by class and Re:CoM id (some
+/// sub-objects init with their boss's id, e.g. a Jafar-family class with 108).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BossTwin {
+    pub id: u16,
+    pub class: String,
+    pub name: String,
+    pub worlds: Vec<EnemyStats>,
+}
+
+/// One proxy cell: the reference's KH1 HP ÷ Re:CoM HP and its record (Defence, level, floor /
+/// cap, resistances; the HP is the reference's).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProxyCell {
+    pub ratio: f64,
+    pub from: String,
+    pub record: EnemyStats,
+}
+
+/// The proxy tables, `[world − 1][floor row]` (13 × 13).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Proxies {
+    pub ordinary: Vec<Vec<Option<ProxyCell>>>,
+    pub boss: Vec<Vec<Option<ProxyCell>>>,
+}
+
+/// What an enemy without an ordinary twin takes at the KH1 setting.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Proxy {
+    /// The KH1 record it fights with; `hp` is its KH1 HP.
+    pub stats: EnemyStats,
+    /// KH1 HP ÷ Re:CoM HP.
+    pub ratio: f64,
+    /// Where the numbers come from (the reference twin or boss twin).
+    pub from: String,
+    pub boss: bool,
+    /// A boss twin (its own KH1 record), not a scaled proxy.
+    pub own: bool,
+}
+
+/// Rows in the proxy tables (Sora's floors 1..13).
+pub const PROXY_ROWS: usize = 13;
+
+/// Re:CoM's floor id (`0x14087B844`) → the `@ENP` row its stats init reads (`0x14017FF50`): floor
+/// − 1, 0xE → 0, 0xF → 2, 100 (100 Acre Wood) → 0, below 1 → 0. Riku's floors (< 0) → None (his
+/// story keeps Re:CoM's numbers). Checked (decomp).
+pub fn enp_row(floor: i16) -> Option<usize> {
+    let row = match floor {
+        f if f < 0 => return None,
+        0xE | 100 => 0,
+        0xF => 2,
+        f => (f - 1).max(0) as usize,
+    };
+    (row < PROXY_ROWS).then_some(row)
+}
+
+/// The Re:CoM world a proxy scales for: 1..13 as is; 0 (no world: Castle Oblivion's floor halls,
+/// where Larxene, Riku, Vexen and Axel are fought) → 13, Castle Oblivion. Assumption: the getter
+/// answers 0 in the halls (its fallback); the log shows the world each proxy used.
+pub fn proxy_world(world: i32) -> Option<usize> {
+    match world {
+        0 => Some(13),
+        1..=13 => Some(world as usize),
+        _ => None,
+    }
+}
+
+/// Re:CoM's boss rule (`0x1401805A0`: id / 100 ≥ 1; the boss falloff in `0x14017F7E0` tests id
+/// 100..199). Checked (decomp).
+pub fn is_boss_id(id: u16) -> bool {
+    id >= 100
+}
+
+/// Ids that never take a proxy: 100 Acre Wood's minigame Beehive (37) and Bee (38) (factory
+/// `0x140188F40`; Re:CoM's minigame stays as it is).
+pub const NO_PROXY_IDS: [u16; 2] = [37, 38];
+
+/// A proxy's KH1 HP: its Re:CoM row HP (before Re:CoM's difficulty %, as the twins' KH1 HP) ×
+/// the ratio, rounded, at least 1.
+pub fn proxy_hp(recom_hp: i32, ratio: f64) -> i32 {
+    ((recom_hp as f64 * ratio).round() as i32).max(1)
+}
+
+impl Kh1Stats {
+    /// The KH1 numbers for a Re:CoM enemy without an ordinary twin: its class (RTTI name) and id,
+    /// Re:CoM's world and floor, and its Re:CoM row HP (`*(enemy+0x310)`). A boss twin takes its
+    /// own record; other bosses the world's boss cell; ordinary enemies the ordinary cell.
+    pub fn proxy(&self, class: &str, id: u16, world: i32, floor: i16, recom_hp: i32) -> Option<Proxy> {
+        if NO_PROXY_IDS.contains(&id) {
+            return None;
+        }
+        let w = proxy_world(world)?;
+        // Riku's floors (< 0) never reach here (his story keeps Re:CoM's numbers); refuse them anyway.
+        let row = enp_row(floor)?;
+        let boss = is_boss_id(id);
+        if boss {
+            if let Some(b) = self.bosses.iter().find(|b| b.id == id && b.class == class) {
+                let stats = b.worlds.get(w - 1)?.clone();
+                let ratio = if recom_hp > 0 { stats.hp as f64 / recom_hp as f64 } else { 0.0 };
+                return Some(Proxy { stats, ratio, from: b.name.clone(), boss, own: true });
+            }
+        }
+        if recom_hp <= 0 {
+            return None;
+        }
+        let p = self.proxies.as_ref()?;
+        let cell = (if boss { &p.boss } else { &p.ordinary }).get(w - 1)?.get(row)?.as_ref()?;
+        let mut stats = cell.record.clone();
+        stats.hp = proxy_hp(recom_hp, cell.ratio);
+        Some(Proxy { stats, ratio: cell.ratio, from: cell.from.clone(), boss, own: false })
+    }
+
+    /// A twin's Re:CoM HP on a floor row, from the asset step (format 5).
+    pub fn twin_recom_hp(&self, class: &str, row: usize) -> Option<i32> {
+        self.recom_hp.iter().find(|(c, _)| c == class)?.1.get(row).copied().filter(|h| *h > 0)
+    }
 }
 
 impl Kh1Stats {
@@ -598,36 +726,90 @@ pub fn parse_stats(text: &str) -> Result<Kh1Stats, String> {
     }
     let mut enemies = Vec::new();
     let mut lock_radius = Vec::new();
+    let mut recom_hp = Vec::new();
     for e in v.get("enemies").and_then(|e| e.as_array()).ok_or("no `enemies` array")? {
         let class = e.get("class").and_then(|c| c.as_str()).ok_or("enemy without `class`")?.to_string();
-        let mut worlds = Vec::new();
-        for w in e.get("worlds").and_then(|w| w.as_array()).ok_or_else(|| format!("{class}: no `worlds`"))? {
-            let num = |k: &str| w.get(k).and_then(|x| x.as_f64()).ok_or_else(|| format!("{class}: record without `{k}`"));
-            let res = ints(w.get("resist").ok_or_else(|| format!("{class}: no `resist`"))?, "resist")?;
-            let mut resist = [100; 16];
-            for (r, x) in resist.iter_mut().zip(res) {
-                *r = x;
-            }
-            worlds.push(EnemyStats {
-                hp: num("hp")? as i32,
-                strength: num("strength")? as i32,
-                defence: num("defence")? as i32,
-                min_damage: num("floor")? as u16,
-                max_damage: num("cap")? as u16,
-                level: num("level")? as i32,
-                exp: num("exp").unwrap_or(0.0) as i32,
-                resist,
-            });
-        }
-        if worlds.len() != 13 {
-            return Err(format!("{class}: {} worlds, not 13", worlds.len()));
-        }
+        let worlds = world_records(e, &class)?;
         if let Some(r) = e.get("lock_radius").and_then(|r| r.as_f64()) {
             lock_radius.push((class.clone(), r as f32));
         }
+        if let Some(h) = e.get("recom_hp") {
+            recom_hp.push((class.clone(), ints(h, "recom_hp")?));
+        }
         enemies.push((class, worlds));
     }
-    Ok(Kh1Stats { sora_strength, base_strength, keyblades, enemies, lock_radius })
+    // Format 5: the boss twins and the proxy tables.
+    let mut bosses = Vec::new();
+    for b in v.get("bosses").and_then(|b| b.as_array()).unwrap_or(&[]) {
+        let class = b.get("class").and_then(|c| c.as_str()).ok_or("boss without `class`")?.to_string();
+        let id = b.get("recom_id").and_then(|x| x.as_f64()).filter(|x| (0.0..65536.0).contains(x)).ok_or_else(|| format!("{class}: no `recom_id`"))? as u16;
+        let name = b.get("name").and_then(|n| n.as_str()).unwrap_or(&class).to_string();
+        bosses.push(BossTwin { id, worlds: world_records(b, &class)?, class, name });
+    }
+    let proxies = match v.get("proxies") {
+        None => None,
+        Some(p) => {
+            let table = |k: &str| -> Result<Vec<Vec<Option<ProxyCell>>>, String> {
+                let worlds = p.get(k).and_then(|t| t.as_array()).ok_or_else(|| format!("proxies: no `{k}`"))?;
+                if worlds.len() != 13 {
+                    return Err(format!("proxies.{k}: {} worlds, not 13", worlds.len()));
+                }
+                let mut out = Vec::new();
+                for (w, row) in worlds.iter().enumerate() {
+                    let cells = row.as_array().ok_or_else(|| format!("proxies.{k}[{w}]: not an array"))?;
+                    if cells.len() != PROXY_ROWS {
+                        return Err(format!("proxies.{k}[{w}]: {} rows, not {PROXY_ROWS}", cells.len()));
+                    }
+                    let mut r = Vec::new();
+                    for c in cells {
+                        if matches!(c, crate::json::Value::Null) {
+                            r.push(None);
+                            continue;
+                        }
+                        let who = format!("proxies.{k}[{w}]");
+                        let ratio = c.get("ratio").and_then(|x| x.as_f64()).filter(|x| x.is_finite() && *x > 0.0).ok_or_else(|| format!("{who}: bad `ratio`"))?;
+                        let from = c.get("from").and_then(|x| x.as_str()).unwrap_or("?").to_string();
+                        let record = record_of(c.get("record").ok_or_else(|| format!("{who}: no `record`"))?, &who)?;
+                        r.push(Some(ProxyCell { ratio, from, record }));
+                    }
+                    out.push(r);
+                }
+                Ok(out)
+            };
+            Some(Proxies { ordinary: table("ordinary")?, boss: table("boss")? })
+        }
+    };
+    Ok(Kh1Stats { sora_strength, base_strength, keyblades, enemies, lock_radius, recom_hp, bosses, proxies })
+}
+
+/// One KH1 record of `kh1-stats.json` (`hp`, `strength`, `defence`, `floor`, `cap`, `level`,
+/// `exp`, `resist`).
+fn record_of(w: &crate::json::Value, who: &str) -> Result<EnemyStats, String> {
+    let num = |k: &str| w.get(k).and_then(|x| x.as_f64()).ok_or_else(|| format!("{who}: record without `{k}`"));
+    let res = w.get("resist").and_then(|r| r.as_array()).ok_or_else(|| format!("{who}: no `resist`"))?;
+    let mut resist = [100; 16];
+    for (r, x) in resist.iter_mut().zip(res) {
+        *r = x.as_f64().ok_or_else(|| format!("{who}: `resist`: not a number"))? as i32;
+    }
+    Ok(EnemyStats {
+        hp: num("hp")? as i32,
+        strength: num("strength")? as i32,
+        defence: num("defence")? as i32,
+        min_damage: num("floor")? as u16,
+        max_damage: num("cap")? as u16,
+        level: num("level")? as i32,
+        exp: num("exp").unwrap_or(0.0) as i32,
+        resist,
+    })
+}
+
+/// An entry's 13 world records (`worlds`).
+fn world_records(e: &crate::json::Value, class: &str) -> Result<Vec<EnemyStats>, String> {
+    let worlds = e.get("worlds").and_then(|w| w.as_array()).ok_or_else(|| format!("{class}: no `worlds`"))?.iter().map(|w| record_of(w, class)).collect::<Result<Vec<_>, _>>()?;
+    if worlds.len() != 13 {
+        return Err(format!("{class}: {} worlds, not 13", worlds.len()));
+    }
+    Ok(worlds)
 }
 
 /// Re:CoM's hit reaction kinds on Sora (the damage check's switch, `0x1401E6DE0`): 1 the plain

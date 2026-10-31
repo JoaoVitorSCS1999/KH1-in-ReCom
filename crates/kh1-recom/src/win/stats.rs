@@ -11,10 +11,15 @@
 //!   through `0x14016FDB0`) becomes KH1's damage for Sora's swing row, his KH1 Strength and the
 //!   twin's Defence / floor / cap / resistance. Re:CoM's own path then applies its extras (weak
 //!   part, resistance %, boss falloff; decision 13).
+//! - Proxies (`docs/recom-kh1-attack.md` § KH1 numbers for enemies without a twin): an enemy
+//!   without an ordinary twin (Re:CoM-only enemies and every boss) takes, in the same wrapper,
+//!   its own Re:CoM row HP × the world's ratio (from the twins, or the world's boss twin) and the
+//!   reference's Defence / floor / cap / level / resistances; a boss with a KH1 equivalent takes
+//!   its own KH1 record. Its hits then take KH1's damage on that record, the same path as a twin.
 
 use super::movement::{orig, rd, wr};
 use super::{base, log, va};
-use crate::attack::{EnemyStats, Kh1Stats};
+use crate::attack::{enp_row, EnemyStats, Kh1Stats};
 use kh1_core::WeaponData;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Mutex, OnceLock};
@@ -29,6 +34,11 @@ static CLASSES: OnceLock<Vec<(usize, &'static str)>> = OnceLock::new();
 static KH1_HP: Mutex<Vec<(usize, i32)>> = Mutex::new(Vec::new());
 static RNG: Mutex<Option<kh1_core::Kh1Rand>> = Mutex::new(None);
 static LOGGED: Mutex<Vec<(&'static str, i32)>> = Mutex::new(Vec::new());
+/// Enemies without an ordinary twin that took KH1 numbers at their stats init (proxies and boss
+/// twins), with the record their hits use.
+static PROXIED: Mutex<Vec<(usize, EnemyStats)>> = Mutex::new(Vec::new());
+/// (class, world, floor) already logged for proxies and the twins' Re:CoM HP check.
+static LOGGED_PROXY: Mutex<Vec<(String, i32, i16)>> = Mutex::new(Vec::new());
 
 /// Re:CoM's current world (`0x1402339C0(0)`: the world chosen for the current floor, 0 none,
 /// 1 Traverse Town … 13 Castle Oblivion, the order of the name table `0x140506AA0`). Checked
@@ -37,6 +47,13 @@ const WORLD_FN: u32 = 0x0023_39C0;
 /// Riku's story (`0x1401AAAE0`: byte variable 0x60 ≠ 0). Checked (exe). Riku's story stays
 /// Re:CoM's (decision 6).
 const RIKU_FN: u32 = 0x001A_AAE0;
+/// Re:CoM's floor id (i16; `0x1402337D0` is `movzx eax, word [rip+0x64806D]` = this, Checked
+/// (exe)); the stats init reads the enemy's `@ENP` row from it (`crate::attack::enp_row`).
+const FLOOR: u64 = 0x1_4087_B844;
+/// Re:CoM's enemy category (`0x1401A8900`: 0xC builds through the enemy factory `0x140188F40`;
+/// the stats init's second argument). Checked (decomp).
+const ENEMY_KIND: i32 = 0xC;
+
 /// The save's player stats (`*0x14087CBF8` = save + 0x2818; level at `+0x1C`, the level the menu
 /// shows). Checked (exe `0x140239F70`, decomp `0x14010EF10`).
 const STATS_PTR: u64 = 0x1_4087_CBF8;
@@ -178,13 +195,16 @@ pub fn lock_radius(enemy: usize) -> Option<f32> {
     STATS.get()?.lock_radius(class)
 }
 
-/// The KH1 twin's level (record r5, KH1 stats `+0xDC`) for this enemy, where its twin applies
-/// (decision 21): the level KH1's MP charge reads (`0x1402BF330`, `super::mp`).
+/// The KH1 level (record r5, KH1 stats `+0xDC`) for this enemy: its twin's (decision 21), else
+/// its proxy's / boss twin's record set at its stats init. The level KH1's MP charge reads
+/// (`0x1402BF330`, `super::mp`).
 pub fn twin_level(enemy: usize) -> Option<i32> {
-    twin(enemy).map(|(_, t)| t.level)
+    twin(enemy).map(|(_, t)| t.level).or_else(|| proxied(enemy).map(|t| t.level))
 }
 
-/// Re:CoM's enemy stats init (`0x14017FF50(enemy, type, variant, …)`): at KH1, a twin's HP.
+/// Re:CoM's enemy stats init (`0x14017FF50(enemy, category, id, …)`; category 0xC for enemies,
+/// id = Re:CoM's enemy id, `EN<id>`): at KH1, a twin's HP, else (Sora's story) a proxy's or a
+/// boss twin's.
 pub unsafe extern "win64" fn stat_init(enemy: usize, kind: i32, variant: i32, x: i32) -> u64 {
     let o: StatInitFn = orig(&ORIG_STAT_INIT);
     let r = o(enemy, kind, variant, x);
@@ -193,16 +213,97 @@ pub unsafe extern "win64" fn stat_init(enemy: usize, kind: i32, variant: i32, x:
         Err(_) => return r,
     };
     g.retain(|(e, _)| *e != enemy);
+    if let Ok(mut p) = PROXIED.lock() {
+        p.retain(|(e, _)| *e != enemy);
+    }
     if r & 0xFF != 0 && super::movement::kh1_on() {
-        if let Some((_, t)) = twin(enemy) {
-            wr(enemy + 0x274, t.hp);
-            g.push((enemy, t.hp));
+        let hp = match twin(enemy) {
+            Some((class, t)) => {
+                check_twin_row(enemy, class);
+                Some(t.hp)
+            }
+            None if kind == ENEMY_KIND => proxy(enemy, variant),
+            None => None,
+        };
+        if let Some(hp) = hp {
+            wr(enemy + 0x274, hp);
+            g.push((enemy, hp));
             if g.len() > 256 {
                 g.remove(0);
             }
         }
     }
     r
+}
+
+/// The enemy's live `@ENP` row HP (`*(enemy+0x310)`, set by the original init; before
+/// Re:CoM's difficulty %) and Re:CoM's floor.
+unsafe fn recom_row(enemy: usize) -> Option<(i32, i16)> {
+    let row: usize = rd(enemy + 0x310);
+    if row == 0 {
+        return None;
+    }
+    Some((rd::<i32>(row), rd::<i16>(va(base(), FLOOR))))
+}
+
+/// Whether (class, world, floor) is new for the proxy log (bounded).
+fn first_log(class: &str, world: i32, floor: i16) -> bool {
+    let Ok(mut g) = LOGGED_PROXY.lock() else { return false };
+    if g.len() >= 128 || g.iter().any(|(c, w, f)| c == class && *w == world && *f == floor) {
+        return false;
+    }
+    g.push((class.to_string(), world, floor));
+    true
+}
+
+/// Once per twin class and floor: Re:CoM's live row HP against the asset step's `@ENP` reading,
+/// the check that the proxies' ratios rest on the right numbers.
+unsafe fn check_twin_row(enemy: usize, class: &'static str) {
+    let Some((live, floor)) = recom_row(enemy) else { return };
+    let Some(file) = enp_row(floor).and_then(|r| STATS.get()?.twin_recom_hp(class, r)) else { return };
+    if first_log(class, -1, floor) {
+        log(&format!("stats: check {class} floor {floor}: Re:CoM row HP {live}, kh1-stats.json {file}{}", if live == file { " (ok)" } else { " (MISMATCH: the proxies' ratios are off; tell the assistant)" }));
+    }
+}
+
+/// The class name of an enemy (its RTTI name without `.?AV` / `@@`).
+unsafe fn class_name(enemy: usize) -> String {
+    let n = rtti_name(base(), rd(enemy)).unwrap_or_default();
+    n.trim_start_matches(".?AV").trim_end_matches("@@").to_string()
+}
+
+/// An enemy without an ordinary twin, in Sora's story: its KH1 HP as a proxy or boss twin
+/// (`Kh1Stats::proxy`), with the record kept for its hits. None: Re:CoM's numbers stand.
+unsafe fn proxy(enemy: usize, id: i32) -> Option<i32> {
+    if riku_story() || !(0..=0xFFFF).contains(&id) {
+        return None;
+    }
+    let stats = STATS.get()?;
+    let (recom_hp, floor) = recom_row(enemy)?;
+    let w = world();
+    let class = class_name(enemy);
+    let p = stats.proxy(&class, id as u16, w, floor, recom_hp)?;
+    if first_log(&class, w, floor) {
+        let t = &p.stats;
+        let what = if p.own { "boss twin" } else if p.boss { "proxy boss" } else { "proxy" };
+        log(&format!(
+            "stats: {what} {class} (id {id}) world {w} floor {floor}: Re:CoM HP {recom_hp} -> KH1 HP {}, Defence {}, floor {} cap {}, level {}, gravity {} stop {}, ratio {:.3} (from {})",
+            t.hp, t.defence, t.min_damage, t.max_damage, t.level, t.resist[8], t.resist[9], p.ratio, p.from
+        ));
+    }
+    let hp = p.stats.hp;
+    if let Ok(mut g) = PROXIED.lock() {
+        g.push((enemy, p.stats));
+        if g.len() > 256 {
+            g.remove(0);
+        }
+    }
+    Some(hp)
+}
+
+/// The record a proxied enemy's hits use.
+fn proxied(enemy: usize) -> Option<EnemyStats> {
+    PROXIED.lock().ok()?.iter().find(|(e, _)| *e == enemy).map(|(_, s)| s.clone())
 }
 
 /// Re:CoM's max-HP getter: the KH1 HP of an enemy whose init set it.
@@ -266,11 +367,16 @@ pub fn equipped_weapon() -> WeaponData {
 
 /// KH1's damage for Sora's swing row on this enemy's twin, or None (Re:CoM's number stands).
 pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32) -> Option<i32> {
-    let (_, t) = twin(enemy)?;
+    // A twin, else a proxy / boss twin set up at its stats init (Sora's story only).
+    let t = match twin(enemy) {
+        Some((_, t)) => t.clone(),
+        None if !riku_story() => proxied(enemy)?,
+        None => return None,
+    };
     let w = equipped_weapon();
     let strength = STATS.get()?.strength_with(sora_level, &w)?;
     let mut g = RNG.lock().ok()?;
     let rng = g.get_or_insert_with(|| kh1_core::Kh1Rand::new(1));
-    let d = crate::attack::kh1_damage(super::attack::moveset(), kh1_row, strength, &w, t, rng)?;
+    let d = crate::attack::kh1_damage(super::attack::moveset(), kh1_row, strength, &w, &t, rng)?;
     Some(d.damage)
 }

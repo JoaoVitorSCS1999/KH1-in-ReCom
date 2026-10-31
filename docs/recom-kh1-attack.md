@@ -212,8 +212,8 @@ Steam bytes) that plays the same KH1 motion, with:
     Re:CoM classes, the twin's record for each Re:CoM world 1..13 (decision 21: the world's
     LV1 record; Twilight Town and Castle Oblivion, which KH1 lacks, get LV2). Pairings named
     only by internal names are tagged `assumed` (Barrel Spider, Sea Neon, Aquatank,
-    Screwdiver, Wyvern, Creeper Plant, Neoshadow). Tornado Step isn't identified and keeps
-    Re:CoM's numbers.
+    Screwdiver, Wyvern, Creeper Plant, Neoshadow). Tornado Step isn't identified; it and every
+    other enemy without a twin takes a proxy (§ KH1 numbers for enemies without a twin).
   - Runtime (`win/stats.rs`): the enemy's class is its vtable (31 Re:CoM `CEnemy*` vtables,
     RTTI-checked at start); the world is Re:CoM's `0x1402339C0(0)` (1 Traverse Town … 13 Castle
     Oblivion, the order of `0x140506AA0`; `0x14087B844` is the floor, not the world). Riku's
@@ -303,6 +303,108 @@ All Checked (decomp + files) unless tagged.
 - So Sora's KH1 Strength at Re:CoM level L = 4 + 0 + 3 + 2 × (number of 4s in the first L − 1
   entries of `0x3AC0`): 7 at level 1, 9 at 2, 13 at 10, 17 at 20, 27 at 50, 51 at 99. The asset
   step reads these from the player's btltbl.
+
+## KH1 numbers for enemies without a twin (proxies; owner, 2026-10-31)
+
+Owner: "it feels like any enemy that doesnt have a KH1 counterpart barely takes any damage in
+comparison to the KH1 enemies, why is this and fix it".
+
+### Why (Checked (trace): the owner's F9 traces of 2026-10-31, Sora at max level)
+
+- The 31 twin classes took KH1's HP (Shadow 12, Darkball 60 in world 12) and KH1's damage with
+  Sora's KH1 Strength 51: 300 per hit (the records' cap), so one hit.
+- Every other enemy kept Re:CoM's per-floor HP (e.g. 225) and Re:CoM's damage. Without a card,
+  Re:CoM's AP is Sora's Re:CoM attack stat `player+0x43C` (10 here; `0x1401F7520`, research
+  `recom-motion-hits-damage.md` §3c–4). So about 20+ hits against one.
+- The twins dying in one hit is **KH1-correct, not a bug**: it is KH1's own formula with a
+  max-level Sora against KH1's first-visit (LV1) records (decision 21), as KH1 would give.
+
+### Re:CoM's HP. Checked (decomp + exe)
+
+- The stats init `0x14017FF50(enemy, 0xC, id, …)`: `enemy+0x308` = the enemy's `@ENP` record
+  (resource type 0x15, id `0xC × 10000 + id`; file `ENEMY/<id>/EN<id>.EPD`, loader type 7 in the
+  exe's resource lists); `enemy+0x310` = its row for the floor; `+0x274` = row `+0` × the
+  difficulty % (`0x14052B4C8`: 75 / 100 / 100 / 100) / 100.
+- The row is the **floor**, not the world: `0x1402337D0` = `movzx eax, word [0x14087B844]`;
+  row = floor − 1 (0xE → 0, 0xF → 2, 100 → 0, ≤ 0 → 0, Riku's negative floors + 12).
+  Sora picks the world of floors 2–10, so Re:CoM's HP in a world depends on its floor.
+- `@ENP`: `+4` 1 in the file, `+8` row table offset (16-byte rows: HP, attack, prize count),
+  `+0x48` / `+0x50` / `+0x94` other tables (`0x14017B4B0` relocates the four).
+- Re:CoM's enemy ids (factory `0x140188F40`, ctor → vtable): 1–31 the Heartless (29 Tornado
+  Step and 30 Loudness are the two ordinary classes without a twin), 37 / 38 100 Acre Wood's
+  Beehive / Bee, 100–138 bosses and their parts, 201–209 Oogie's dice. Re:CoM's own boss rule is
+  id ≥ 100 (`0x1401805A0`).
+
+### The rule (`kh1-stats.json` format 5; asset step `stats::proxy_tables`, runtime `Kh1Stats::proxy`)
+
+At Combat = KH1, in Sora's story, in the same stats-init wrapper as the twins (no new hook):
+
+- **Ordinary enemy without a twin** (id < 100): KH1 HP = its own Re:CoM row HP (before the
+  difficulty %, as the twins' KH1 HP ignores it) × the cell's ratio, rounded, at least 1.
+  The cell for (world, floor row) is the **lower median, by KH1 HP ÷ Re:CoM HP on that row, of
+  all ordinary twins** (fixed-damage records left out: White Mushroom 10 / 10, Black Fungus
+  2 / 2; ties by class name). The proxy takes that twin's Defence, Strength, level, damage floor
+  and cap, and 100 % for every element (KH1's ordinary Heartless).
+  Assumption: "the twins of the same world" is all the twins, because Re:CoM's per-world rosters
+  are not in the files read. KH1's records already differ by world only for the Shadow and the
+  LV2 worlds (Twilight Town, Castle Oblivion).
+- **Boss twins** (Re:CoM's bosses with a KH1 equivalent; class **and** id must match, because
+  a Jafar-family part inits with Jafar's id 108). Each takes its own KH1 record, read from the
+  boss model's AI script (part 5, as for the ordinary twins; Checked (files)):
+
+  | Re:CoM (id) | Home world | KH1 model, LV1 / LV2 record | LV1: HP, Def, floor / cap, level |
+  |---|---|---|---|
+  | Guard Armor (102) | 1 Traverse Town | `xa_tw_3000` 0x14 / 0x14 (torso) | 700, 8, 2 / 30, 12 |
+  | Leon, tutorial (101) | none (not pooled) | `xa_ex_1030` 0x14 (Traverse Town Leon) | 120, 8, 2 / 10, 10 |
+  | Jafar (108) | 2 Agrabah | `xa_al_3020` 0x14 (Genie Jafar; Assumption) | 750, 15, 2 / 20, 29 |
+  | Cloud (106) | 3 Olympus Coliseum | `xa_ex_1150` 0x14 / 0x80 | 300, 10, 2 / 20, 15 |
+  | Trickmaster (105) | 4 Wonderland | `xa_aw_3000` 0x14 | 600, 9, 2 / 20, 15 |
+  | Parasite Cage (110) | 5 Monstro | `xa_pi_3000` 0x14 / 0xEC (pi05) | 450, 17, 2 / 15, 30 |
+  | Oogie Boogie (109) | 6 Halloween Town | `xa_nm_3000` 0x14 / 0x80 | 450, 20, 2 / 15, 38 |
+  | Ursula (111) | 7 Atlantica | `xa_lm_3000` 0x14 / 0x80 (giant; Assumption) | 900, 19, 2 / 20, 36 |
+  | Captain Hook (112) | 8 Neverland | `xa_pp_3000` 0x14 | 900, 21, 2 / 20, 42 |
+  | Dragon Maleficent (113) | 9 Hollow Bastion | `xa_pc_3000` 0x14 | 1200, 24, 2 / 20, 48 |
+  | Darkside (115) | 12 Destiny Islands | `xa_di_3000` 0x80 (di09) | 300, 6, 3 / 20, 0 |
+
+  Hades (107) is not paired: KH1 fights him only in the Hades Cup (1800 HP, level 64).
+- **Other bosses** (id ≥ 100 without their own record: Larxene, Riku / Riku Replica, Axel,
+  Vexen, Marluxia's forms and parts, Lexaeus / Zexion if met, the hooded tutorial figure, Hades,
+  Jafar's lamp and Iago, Oogie's dice…): KH1 HP = Re:CoM row HP × the world's boss cell. The
+  cell is the world's home boss twin (KH1 HP ÷ its Re:CoM HP on that row), else the lower
+  median of the pooled boss twins. The proxy takes that boss's Defence, level, floor / cap and
+  resistances, with **KH1's final boss's Gravity and Stop** (decision 34; read from
+  `xa_ew_3020` 0x14: Gravity 2 %, Stop 0 = immune; Checked (files)).
+- Worlds 11 / 13 (no KH1 world) use the LV2 records of twins and boss twins (decision 21).
+  World 0 (Castle Oblivion's floor halls) scales as world 13. Assumption: the world getter
+  answers 0 there; the log shows the world each proxy used. A twin class met in world 0 (where
+  its twin record doesn't apply) takes the world-13 ordinary proxy.
+- Not proxied: Riku's story (decision 6), ids 37 / 38 (100 Acre Wood's minigame), enemies
+  without a row or with 0 Re:CoM HP, and the Re:CoM setting.
+- Hits: `kh1_hit` uses the twin's record, else the proxy's, so a proxy takes KH1's damage
+  (`0x1402BFA80` through kh1-core) on the same path. Re:CoM's weak part, back bonus and boss
+  falloff still apply (decision 13). The trace keeps `:kh1 <damage>`. HP bars, deaths and boss
+  HP checks read `+0x274` and the max-HP getter `0x14017F5A0`, as for the twins.
+- Lock radius: unchanged for non-twins (Re:CoM's).
+
+### Logs (`kh1-recom.log`, once per class, world and floor)
+
+- `stats: proxy <class> (id n) world w floor f: Re:CoM HP x -> KH1 HP y, Defence d, floor a
+  cap b, level l, gravity g stop s, ratio r (from <twin>)`; `proxy boss` and `boss twin` lines
+  are the same for bosses.
+- `stats: check <twin class> floor f: Re:CoM row HP x, kh1-stats.json y (ok | MISMATCH …)`: the
+  twin's live `@ENP` row against the asset step's reading. A mismatch means the `.EPD` reading
+  is wrong, and every ratio with it.
+
+### Not checked
+
+- No `.EPD` was in this session. The `@ENP` reader follows the decomp. That the first `@ENP` in
+  the file is Re:CoM's default record is an Assumption (strong); the `check` log line confirms
+  it in game.
+- The ratio table itself: `kh1-recom-build` prints it from the owner's files.
+- Whether Re:CoM's Guard Armor (and other multi-part bosses) keep a separate part HP
+  (`+0x260` bit 24 path): not read. The KH1 record gives the torso's 700.
+- Scripted fights that compare an absolute HP value (not a fraction of the max HP): not
+  searched (the same risk as for the twins).
 
 ## Swings and a moving locked target (checked 2026-10-30)
 

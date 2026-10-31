@@ -217,10 +217,13 @@ fn run() -> Result<(), String> {
     // KH1 stats (decisions 12, 18, 21, 25): the enemy twins' records, Sora's Strength, the
     // Keyblades (with their model groups).
     let models: Vec<KeybladeModel> = keyblades.iter().map(|k| k.0.clone()).collect();
-    let (stats, n) = kh1_stats(&game, keys, &models, &kh2_rows)?;
+    let stats = kh1_stats(&game, keys, &arc, &models, &kh2_rows)?;
+    for n in &stats.notes {
+        println!("{n}");
+    }
     let sp = man.with_file_name(install::STATS);
-    std::fs::write(&sp, &stats).map_err(|e| format!("{}: {e}", sp.display()))?;
-    println!("wrote {} ({} KH1 enemy twins, {} bytes)", sp.display(), n, stats.len());
+    std::fs::write(&sp, &stats.json).map_err(|e| format!("{}: {e}", sp.display()))?;
+    println!("wrote {} ({} KH1 enemy twins, {} boss twins, {} bytes)", sp.display(), stats.twins, stats.bosses, stats.json.len());
     Ok(())
 }
 
@@ -300,14 +303,25 @@ fn kh2_keyblades_step(game: &Path, keys: kh1_formats::egs::KeyTable, pl0002: Opt
     Ok((rows, models))
 }
 
-fn kh1_stats(game: &std::path::Path, keys: kh1_formats::egs::KeyTable, models: &[KeybladeModel], kh2: &[Kh2Row]) -> Result<(String, usize), String> {
-    let inst = install::kh1(game, keys).map_err(|e| format!("KH1 files: {e}"))?;
+fn kh1_stats(game: &std::path::Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive, models: &[KeybladeModel], kh2: &[Kh2Row]) -> Result<kh1_recom_assets::stats::StatsJson, String> {
+    // Re:CoM's enemy stats files (`ENEMY/<id>/EN<id>.EPD`), for the proxies' ratios.
+    let mut recom = |name: &str| match arc.find(name) {
+        None => None,
+        Some(_) => match install::read_recom(arc, &keys, name) {
+            Ok(b) => Some(b),
+            Err(e) => {
+                println!("note: {name}: {e}");
+                None
+            }
+        },
+    };
+    let inst = install::kh1(game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
     let btl = inst.read("btltbl.bin").map_err(|e| format!("btltbl.bin: {e}"))?;
     let parsed = kh1_formats::btltbl::Btltbl::parse(btl.clone()).map_err(|e| format!("btltbl.bin: {e}"))?;
     // The Kingdom Key (item 0x51): its weapon row's Strength (+0x30).
     let kk = parsed.weapon_for_item(0x51).map_err(|e| format!("Kingdom Key: {e}"))?.strength as i32;
     let mut read = |name: &str| inst.read(name).map_err(|e| kh1_recom_assets::Error::Format(format!("{name}: {e}")));
-    kh1_recom_assets::stats::build_json(&mut read, &btl, kk, models, kh2).map_err(|e| e.to_string())
+    kh1_recom_assets::stats::build_json(&mut read, &mut recom, &btl, kk, models, kh2).map_err(|e| e.to_string())
 }
 
 fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {

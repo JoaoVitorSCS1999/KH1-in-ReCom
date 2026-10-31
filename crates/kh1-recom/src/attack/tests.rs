@@ -154,6 +154,101 @@ fn stats_json_reads_the_asset_steps_format() {
     assert!(parse_stats("{}").is_err());
 }
 
+#[test]
+fn enp_rows_and_proxy_worlds_follow_recoms_stats_init() {
+    // `0x14017FF50`: floor − 1; 0xE → 0, 0xF → 2, 100 → 0, 0 → 0; Riku's floors refused.
+    assert_eq!((enp_row(1), enp_row(13), enp_row(0), enp_row(0xE), enp_row(0xF), enp_row(100)), (Some(0), Some(12), Some(0), Some(0), Some(2), Some(0)));
+    assert_eq!((enp_row(-1), enp_row(-12), enp_row(16)), (None, None, None));
+    assert_eq!((proxy_world(0), proxy_world(5), proxy_world(13), proxy_world(14), proxy_world(-1)), (Some(13), Some(5), Some(13), None, None));
+    assert!(is_boss_id(102) && is_boss_id(201) && !is_boss_id(29) && !is_boss_id(99));
+    assert_eq!((proxy_hp(225, 0.5), proxy_hp(1, 0.1), proxy_hp(33, 12.0 / 33.0)), (113, 1, 12));
+}
+
+/// A format-5 file in the asset step's shape (`kh1-recom-assets` `stats::build_json`).
+fn stats_v5() -> String {
+    let rec = |hp: i32, def: i32, cap: i32, grav: i32, stop: i32| {
+        format!(r#"{{"hp": {hp}, "strength": {def}, "defence": {def}, "floor": 2, "cap": {cap}, "level": 30, "exp": 1, "resist": [50, 100, 49, 50, 100, 100, 100, 100, {grav}, {stop}, 50, 100, 100, 100, 100, 100]}}"#)
+    };
+    let worlds = |r: String| vec![r; 13].join(", ");
+    let strength = (1..=100).map(|l| (6 + l).to_string()).collect::<Vec<_>>().join(", ");
+    let hp = (0..13).map(|i| (33 + 3 * i).to_string()).collect::<Vec<_>>().join(", ");
+    let cell = |ratio: f64, from: &str, r: String| format!(r#"{{"ratio": {ratio:.6}, "from": "{from}", "recom_hp": 50, "kh1_hp": 20, "record": {r}}}"#);
+    // Ordinary: ratio 0.4 from the Soldier (Defence 8, cap 300); boss: ratio 2 from Guard Armor
+    // with the final boss's Gravity 2 / Stop 0; world 4 row 0 has no cell.
+    let orow = |w: usize| (0..13).map(|f| if w == 3 && f == 0 { "null".to_string() } else { cell(0.4, "CEnemySoldier", rec(20, 8, 300, 100, 100)) }).collect::<Vec<_>>().join(", ");
+    let brow = (0..13).map(|_| cell(2.0, "CBossGuardarmor", rec(700, 8, 30, 2, 0))).collect::<Vec<_>>().join(", ");
+    let ordinary = (0..13).map(|w| format!("[{}]", orow(w))).collect::<Vec<_>>().join(", ");
+    let boss = vec![format!("[{brow}]"); 13].join(", ");
+    format!(
+        r#"{{"format": "kh1-recom-assets stats 5", "sora_strength": [{strength}], "recom_rows": 13, "enemies": [{{"class": "CEnemyShadow", "lock_radius": 30, "recom_id": 1, "recom_hp": [{hp}], "worlds": [{}]}}], "final_boss": {{"kh1_model": "xa_ew_3020.mdls", "gravity": 2, "stop": 0}}, "bosses": [{{"recom_id": 102, "class": "CBossGuardarmor", "name": "Guard Armor", "kh1_model": "xa_tw_3000.mdls", "home_world": 1, "pool": true, "assumed": false, "recom_hp": [{hp}], "worlds": [{}]}}], "proxies": {{"ordinary": [{ordinary}], "boss": [{boss}]}}}}"#,
+        worlds(rec(12, 8, 300, 100, 100)),
+        worlds(rec(700, 8, 30, 4, 100))
+    )
+}
+
+#[test]
+fn stats_v5_reads_the_boss_twins_and_proxy_tables() {
+    let s = parse_stats(&stats_v5()).unwrap();
+    assert_eq!(s.twin_recom_hp("CEnemyShadow", 0), Some(33));
+    assert_eq!(s.twin_recom_hp("CEnemyShadow", 12), Some(69));
+    assert_eq!(s.twin_recom_hp("CEnemySoldier", 0), None);
+    assert_eq!((s.bosses.len(), s.bosses[0].id, s.bosses[0].worlds[0].hp), (1, 102, 700));
+    let p = s.proxies.as_ref().unwrap();
+    assert_eq!((p.ordinary.len(), p.ordinary[0].len(), p.boss.len()), (13, 13, 13));
+    assert!(p.ordinary[3][0].is_none());
+    // Older files (no proxies) still read: proxies off.
+    let old = parse_stats(&stats_v5().replace(r#""proxies":"#, r#""unused":"#)).unwrap();
+    assert!(old.proxies.is_none());
+    // A table with a world missing is refused.
+    let t = stats_v5();
+    let at = t.find(r#""ordinary": ["#).unwrap() + r#""ordinary": ["#.len();
+    let next = at + t[at..].find("], [").unwrap() + 3;
+    let short = format!("{}{}", &t[..at], &t[next..]);
+    assert!(parse_stats(&short).unwrap_err().contains("12 worlds"));
+    let bad = stats_v5().replace(r#""ratio": 0.400000"#, r#""ratio": -1"#);
+    assert!(parse_stats(&bad).is_err(), "a ratio must be positive");
+}
+
+#[test]
+fn proxies_scale_recoms_hp_and_boss_twins_take_their_own_record() {
+    let s = parse_stats(&stats_v5()).unwrap();
+    // An ordinary Re:CoM-only enemy (Tornado Step, id 29) with 225 Re:CoM HP on 12F (floor 12).
+    let p = s.proxy("CEnemyTornadostep", 29, 12, 12, 225).unwrap();
+    assert_eq!((p.stats.hp, p.stats.defence, p.stats.max_damage, p.boss, p.own), (90, 8, 300, false, false));
+    assert_eq!(p.stats.resist[8], 100);
+    assert_eq!(p.from, "CEnemySoldier");
+    // A Re:CoM-only boss (Larxene, id 117): × the boss ratio, Guard Armor's cap, KH1's
+    // final-boss Gravity 2 % and Stop immunity (decision 34).
+    let l = s.proxy("CBossLarxene", 117, 13, 7, 1000).unwrap();
+    assert_eq!((l.stats.hp, l.stats.max_damage, l.stats.resist[8], l.stats.resist[9], l.boss, l.own), (2000, 30, 2, 0, true, false));
+    // The boss twin itself: its own KH1 record (Gravity 4, Stop 100), whatever Re:CoM's HP.
+    let g = s.proxy("CBossGuardarmor", 102, 1, 1, 350).unwrap();
+    assert_eq!((g.stats.hp, g.stats.resist[8], g.stats.resist[9], g.own), (700, 4, 100, true));
+    assert!((g.ratio - 2.0).abs() < 1e-9);
+    // Another class with the boss's id (a boss part): the boss cell, not the twin's record.
+    let part = s.proxy("CBossJafarLamp", 102, 1, 1, 350).unwrap();
+    assert_eq!((part.stats.hp, part.own), (700, false));
+    // Floor halls (world 0) scale as Castle Oblivion.
+    assert_eq!(s.proxy("CBossRiku", 116, 0, 4, 400).unwrap().stats.hp, 800);
+    // No proxy: 100 Acre Wood's minigame, no Re:CoM HP, Riku's floors, an empty cell, no tables.
+    assert!(s.proxy("CEnemy100AcreBB_Bee", 38, 10, 100, 50).is_none());
+    assert!(s.proxy("CEnemyTornadostep", 29, 1, 1, 0).is_none());
+    assert!(s.proxy("CEnemyTornadostep", 29, 1, -3, 50).is_none());
+    assert!(s.proxy("CEnemyTornadostep", 29, 4, 1, 50).is_none(), "world 4 floor 1 has no cell");
+    assert!(s.proxy("CEnemyTornadostep", 29, 14, 1, 50).is_none());
+    let old = parse_stats(&stats_v5().replace(r#""proxies":"#, r#""unused":"#)).unwrap();
+    assert!(old.proxy("CEnemyTornadostep", 29, 1, 1, 50).is_none());
+    assert_eq!(old.proxy("CBossGuardarmor", 102, 1, 1, 350).unwrap().stats.hp, 700, "boss twins need no table");
+    // A proxy's hits take KH1's damage on its record: the Soldier's Defence 8, cap 300.
+    let m = Moveset::kh1_defaults();
+    let mut rng = kh1_core::Kh1Rand::new(1);
+    assert_eq!(kh1_damage(&m, 13, 10, &WeaponData::kingdom_key(), &p.stats, &mut rng).unwrap().damage, 2);
+    // Guard Armor's cap of 30 holds against a max-level Strength.
+    for _ in 0..20 {
+        assert!(kh1_damage(&m, 8, 51, &WeaponData::kingdom_key(), &l.stats, &mut rng).unwrap().damage <= 30);
+    }
+}
+
 /// Re:CoM's per-frame order (Battle exe `0x1401F9840`): the damage check (immune while
 /// `+0x7BC > 0`), the action step, then `+0x7BC -= dt`. The hold leaves KH1's 30 immune frames
 /// after the last reaction frame, then the 31st frame takes hits.
