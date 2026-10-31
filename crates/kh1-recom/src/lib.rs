@@ -33,6 +33,7 @@
 
 pub mod attack;
 pub mod battle;
+pub mod boss;
 pub mod deck;
 pub mod guard;
 pub mod hookplan;

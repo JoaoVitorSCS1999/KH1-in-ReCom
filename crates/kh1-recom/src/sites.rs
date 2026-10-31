@@ -435,6 +435,101 @@ pub const M6_DECK_CHECKED: &[Site] = &[
     Site { name: "card read refresh context (0x1401545B3)", rva: 0x0015_45B3, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0xFE, 0xC2, 0x05, 0x00, 0x85, 0xC0] },
 ];
 
+/// M6 stage 3, P5 (`crate::boss`, `win::battle`, `docs/recom-m6-battles.md` § Stage 3): Re:CoM's
+/// "Sora's action" getter `0x14017F720`, rewritten in place per battle. `expect` is the whole
+/// function (25 bytes) and its 7 `int3` up to the next function `0x14017F740`. Checked (exe): no
+/// branch lands inside it but its own `je`, and the only references are its 15 callers (below)
+/// and its `.pdata` entry.
+pub const M6_BOSS_PATCHES: &[Patch] = &[
+    // mov rax,[rip+…] (main player); test rax,rax; je → mov eax,[rax+0x40C]; ret / mov eax,2;
+    // ret. Ours: the same first 10 bytes; je +0x0E; mov eax,[rax+0x40C]; cmp eax,0xA; jne +2;
+    // mov al,0xB; ret; mov eax,2; ret.
+    Patch {
+        site: Site {
+            name: "P5 Sora's action getter (0x14017F720)",
+            rva: 0x0017_F720,
+            expect: &[0x48, 0x8B, 0x05, 0x59, 0xBC, 0x6F, 0x00, 0x48, 0x85, 0xC0, 0x74, 0x07, 0x8B, 0x80, 0x0C, 0x04, 0x00, 0x00, 0xC3, 0xB8, 0x02, 0x00, 0x00, 0x00, 0xC3, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC, 0xCC],
+        },
+        new: &[0x48, 0x8B, 0x05, 0x59, 0xBC, 0x6F, 0x00, 0x48, 0x85, 0xC0, 0x74, 0x0E, 0x8B, 0x80, 0x0C, 0x04, 0x00, 0x00, 0x83, 0xF8, 0x0A, 0x75, 0x02, 0xB0, 0x0B, 0xC3, 0xB8, 0x02, 0x00, 0x00, 0x00, 0xC3],
+    },
+];
+
+/// Every caller of the getter (Checked (exe): all 15 `call rel32` to it; no `jmp`, no other
+/// reference): the call and the compare after it. Checked so that a build where any reader
+/// differs is never patched. Not called. Order and owners: `crate::boss::READERS`.
+pub const M6_GETTER_CALLERS: &[Site] = &[
+    Site { name: "CHumanBoss card play reads Sora's action (0x140199B2B)", rva: 0x0019_9B2B, expect: &[0xE8, 0xF0, 0x5B, 0xFE, 0xFF, 0x83, 0xF8, 0x0B] },
+    Site { name: "Tutorial Leon think reads Sora's action (0x1403A9CFD)", rva: 0x003A_9CFD, expect: &[0xE8, 0x1E, 0x5A, 0xDD, 0xFF, 0x83, 0xF8, 0x0B] },
+    // call; mov rcx,rbx; cmp eax,0xB
+    Site { name: "Cloud state 1 reads Sora's action 1 (0x1403AFA7F)", rva: 0x003A_FA7F, expect: &[0xE8, 0x9C, 0xFC, 0xDC, 0xFF, 0x48, 0x8B, 0xCB, 0x83, 0xF8, 0x0B] },
+    Site { name: "Cloud state 1 reads Sora's action 2 (0x1403AFDB1)", rva: 0x003A_FDB1, expect: &[0xE8, 0x6A, 0xF9, 0xDC, 0xFF, 0x83, 0xF8, 0x0B] },
+    // call; movss xmm0,[rip+…]; cmp eax,0xB
+    Site { name: "Riku state 1 reads Sora's action (0x1403B7E06)", rva: 0x003B_7E06, expect: &[0xE8, 0x15, 0x79, 0xDC, 0xFF, 0xF3, 0x0F, 0x10, 0x05, 0x65, 0x0A, 0x1A, 0x00, 0x83, 0xF8, 0x0B] },
+    Site { name: "Larxene state 1 reads Sora's action (0x1403BD744)", rva: 0x003B_D744, expect: &[0xE8, 0xD7, 0x1F, 0xDC, 0xFF, 0x83, 0xF8, 0x0B] },
+    Site { name: "Axel state 1 reads Sora's action (0x1403C1998)", rva: 0x003C_1998, expect: &[0xE8, 0x83, 0xDD, 0xDB, 0xFF, 0x83, 0xF8, 0x0B] },
+    Site { name: "Parasite Cage think reads Sora's action (0x1403C273A)", rva: 0x003C_273A, expect: &[0xE8, 0xE1, 0xCF, 0xDB, 0xFF, 0x83, 0xF8, 0x0B] },
+    Site { name: "Hook state 1 reads Sora's action (0x1403C9F1A)", rva: 0x003C_9F1A, expect: &[0xE8, 0x01, 0x58, 0xDB, 0xFF, 0x83, 0xF8, 0x0B] },
+    Site { name: "Marluxia 1 state 1 reads Sora's action (0x140412B4E)", rva: 0x0041_2B4E, expect: &[0xE8, 0xCD, 0xCB, 0xD6, 0xFF, 0x83, 0xF8, 0x0B] },
+    Site { name: "Lexaeus card play reads Sora's action (0x140414F1E)", rva: 0x0041_4F1E, expect: &[0xE8, 0xFD, 0xA7, 0xD6, 0xFF, 0x83, 0xF8, 0x0B] },
+    Site { name: "Lexaeus reads Sora's action, 0x22 (0x14041801F)", rva: 0x0041_801F, expect: &[0xE8, 0xFC, 0x76, 0xD6, 0xFF, 0x83, 0xF8, 0x22] },
+    Site { name: "Ansem card play reads Sora's action (0x140424BCD)", rva: 0x0042_4BCD, expect: &[0xE8, 0x4E, 0xAB, 0xD5, 0xFF, 0x83, 0xF8, 0x0B] },
+    Site { name: "Ansem reads Sora's action, 0xC (0x140426890)", rva: 0x0042_6890, expect: &[0xE8, 0x8B, 0x8E, 0xD5, 0xFF, 0x83, 0xF8, 0x0C] },
+    Site { name: "Ansem shadow uppercut reads Sora's action, 0xC (0x14045FF38)", rva: 0x0045_FF38, expect: &[0xE8, 0xE3, 0xF7, 0xD1, 0xFF, 0x83, 0xF8, 0x0C] },
+];
+
+/// M6 stage 3: Re:CoM's HUD-hide mask reads (`call 0x1401B08C0`, ecx = 1, edx = 0xE2) that draw
+/// the enemy side's card UI, retargeted per battle with stage 2's reads (`win::deck`) to a stub
+/// that adds bit 4. `expect` is Re:CoM's call. Checked (exe): no branch or pointer lands inside
+/// any of them.
+pub const M6_ENEMY_UI_CALLS: &[Site] = &[
+    // The card-play cue sprite (CBTL +0x220): any nonzero mask stops it (`test eax,eax`).
+    Site { name: "enemy cue mask read (0x14015E3F3)", rva: 0x0015_E3F3, expect: &[0xE8, 0xC8, 0x24, 0x05, 0x00] },
+    Site { name: "enemy cue mask read, CBTL update (0x140161A64)", rva: 0x0016_1A64, expect: &[0xE8, 0x57, 0xEE, 0x04, 0x00] },
+    // The revolver's stock row 0x140169CA0 (`test edi,eax`, edi = 4 for side 2, 2 for side 1).
+    Site { name: "stock row mask read 1 (0x140169CE3)", rva: 0x0016_9CE3, expect: &[0xE8, 0xD8, 0x6B, 0x04, 0x00] },
+    Site { name: "stock row mask read 2 (0x140169D07)", rva: 0x0016_9D07, expect: &[0xE8, 0xB4, 0x6B, 0x04, 0x00] },
+    Site { name: "stock row mask read 3 (0x140169D48)", rva: 0x0016_9D48, expect: &[0xE8, 0x73, 0x6B, 0x04, 0x00] },
+    // The stock row's show 0x14016DE70: its value digits (`test ebx,eax`, ebx = 4 / 2).
+    Site { name: "stock row show mask read (0x14016E2B1)", rva: 0x0016_E2B1, expect: &[0xE8, 0x0A, 0x26, 0x04, 0x00] },
+    // Marluxia 3's CStockFolder 0x140169070 (`test al,4`).
+    Site { name: "stock folder mask read 1 (0x1401690A6)", rva: 0x0016_90A6, expect: &[0xE8, 0x15, 0x78, 0x04, 0x00] },
+    Site { name: "stock folder mask read 2 (0x1401690DD)", rva: 0x0016_90DD, expect: &[0xE8, 0xDE, 0x77, 0x04, 0x00] },
+    Site { name: "stock folder mask read 3 (0x140169103)", rva: 0x0016_9103, expect: &[0xE8, 0xB8, 0x77, 0x04, 0x00] },
+];
+
+/// The context of each read above (mov edx,0xE2; ecx = 1; the call; the test after it) and the
+/// starts of their functions. Checked so a build where they differ is never touched.
+pub const M6_ENEMY_UI_CHECKED: &[Site] = &[
+    Site { name: "cue read context (0x14015E3E9)", rva: 0x0015_E3E9, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0xC8, 0x24, 0x05, 0x00, 0x85, 0xC0] },
+    Site { name: "cue read context, CBTL update (0x140161A5A)", rva: 0x0016_1A5A, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0x57, 0xEE, 0x04, 0x00, 0x85, 0xC0] },
+    // lea ecx,[rbp-1] with ebp = 2 (0x140169CBE).
+    Site { name: "stock row read 1 context (0x140169CDB)", rva: 0x0016_9CDB, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0x8D, 0x4D, 0xFF, 0xE8, 0xD8, 0x6B, 0x04, 0x00, 0x85, 0xC7] },
+    Site { name: "stock row read 2 context (0x140169CFD)", rva: 0x0016_9CFD, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0xB4, 0x6B, 0x04, 0x00, 0x85, 0xC7] },
+    Site { name: "stock row read 3 context (0x140169D3E)", rva: 0x0016_9D3E, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0x73, 0x6B, 0x04, 0x00, 0x85, 0xC7] },
+    // mov eax,2; mov ebx,4; mov edx,0xE2; cmove ebx,eax; lea ecx,[rax-1]; the call; test ebx,eax.
+    Site { name: "stock row show read context (0x14016E29C)", rva: 0x0016_E29C, expect: &[0xB8, 0x02, 0x00, 0x00, 0x00, 0xBB, 0x04, 0x00, 0x00, 0x00, 0xBA, 0xE2, 0x00, 0x00, 0x00, 0x0F, 0x44, 0xD8, 0x8D, 0x48, 0xFF, 0xE8, 0x0A, 0x26, 0x04, 0x00, 0x85, 0xC3] },
+    Site { name: "stock folder read 1 context (0x14016909C)", rva: 0x0016_909C, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0x15, 0x78, 0x04, 0x00, 0xA8, 0x04] },
+    Site { name: "stock folder read 2 context (0x1401690D3)", rva: 0x0016_90D3, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0xDE, 0x77, 0x04, 0x00, 0xA8, 0x04] },
+    Site { name: "stock folder read 3 context (0x1401690F9)", rva: 0x0016_90F9, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0xB8, 0x77, 0x04, 0x00, 0xA8, 0x04] },
+    // The functions: 0x14015E390 (size 0xB2), the CBTL update 0x1401617F0 (0x363), the stock row
+    // 0x140169CA0 (0x23A; cmp [rcx+0x5C],1 / edi = 4 / ebp = 2 / cmove edi,ebp), its show
+    // 0x14016DE70 (0x54B), the stock folder 0x140169070 (0x3D3).
+    Site { name: "cue update start (0x14015E390)", rva: 0x0015_E390, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x40] },
+    Site { name: "CBTL update start (0x1401617F0)", rva: 0x0016_17F0, expect: &[0x40, 0x53, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x58] },
+    Site { name: "stock row start (0x140169CA0)", rva: 0x0016_9CA0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x83, 0x79, 0x5C, 0x01, 0xBF, 0x04, 0x00, 0x00, 0x00, 0x8B, 0x81, 0x58, 0x02, 0x00, 0x00, 0xBD, 0x02, 0x00, 0x00, 0x00, 0x0F, 0x44, 0xFD] },
+    Site { name: "stock row show start (0x14016DE70)", rva: 0x0016_DE70, expect: &[0x40, 0x55, 0x57, 0x48, 0x83, 0xEC, 0x78] },
+    Site { name: "stock folder start (0x140169070)", rva: 0x0016_9070, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x55, 0x48, 0x83, 0xEC, 0x30] },
+];
+
+/// M6 stage 3, log only: Sora's card-duel init (`CPlayerSora` vtable `+0x1E0`, action 0x24, from
+/// hit reaction 0x21 in `0x1401E6DE0`; Marluxia 3's countdown). A pass-through, installed apart.
+/// Same rule as [`HOOKS`]; Checked (exe): referenced only by the vtable and `.pdata`, no branch
+/// inside the moved bytes.
+pub const M6_BOSS_HOOKS: &[Site] = &[
+    // mov [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x40
+    Site { name: "Sora card duel init (0x140220C40)", rva: 0x0022_0C40, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x40] },
+];
+
 /// A pointer in Re:CoM's data that holds another address of the image. The exe is relocated
 /// (ASLR, `DYNAMIC_BASE`), so these are checked at run time against `base + target`, not as
 /// bytes in the startup report.
@@ -506,6 +601,11 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(M6_COCKPIT_CALLS)
         .chain(M6_CARD_CALLS)
         .chain(M6_DECK_CHECKED)
+        .chain(M6_BOSS_PATCHES.iter().map(|p| &p.site))
+        .chain(M6_GETTER_CALLERS)
+        .chain(M6_ENEMY_UI_CALLS)
+        .chain(M6_ENEMY_UI_CHECKED)
+        .chain(M6_BOSS_HOOKS)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -598,7 +698,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
@@ -709,6 +809,53 @@ mod tests {
         assert!(M6_COCKPIT_CALLS.iter().all(|c| (0x0016_89F0..0x0016_89F0 + 0x63B).contains(&c.rva)));
         for (c, (start, size)) in M6_CARD_CALLS.iter().zip([(0x0015_0340u32, 0x223u32), (0x0015_14B0, 0x253), (0x0015_45A0, 0x96)]) {
             assert!((start..start + size).contains(&c.rva), "{}", c.name);
+        }
+    }
+
+    #[test]
+    fn m6_boss_sites() {
+        // P5 is the getter's whole body: no other stage hooks, patches or calls it.
+        let p5 = &M6_BOSS_PATCHES[0];
+        assert_eq!(M6_BOSS_PATCHES.len(), 1);
+        let all_hooks = || HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS);
+        let all_callees = || CALLEES.iter().chain(MOVE_CALLEES).chain(ATTACK_CALLEES).chain(STATS_CALLEES).chain(KEYBLADE_CALLEES).chain(MODEL_CALLEES).chain(M6_CALLEES).chain(M6_DECK_CALLEES);
+        let overlaps = |a: &Site, b: &Site| a.rva < b.rva + b.expect.len() as u32 && b.rva < a.rva + a.expect.len() as u32;
+        for s in all_hooks().chain(all_callees()).chain(M6_PATCHES.iter().map(|p| &p.site)) {
+            assert!(!overlaps(s, &p5.site), "{}", s.name);
+        }
+        // The duel log hook is no other stage's hook or callee.
+        for h in M6_BOSS_HOOKS {
+            assert!(!all_hooks().chain(all_callees()).any(|s| s.rva == h.rva), "{}", h.name);
+        }
+        // Every enemy-UI read is Re:CoM's `call 0x1401B08C0` (the checked getter), inside its
+        // checked context right after `mov edx,0xE2` (and ecx = 1), and none is a stage-2 read.
+        let getter = M6_DECK_CALLEES.iter().find(|s| s.rva == 0x001B_08C0).unwrap();
+        for c in M6_ENEMY_UI_CALLS {
+            assert_eq!(c.expect.len(), 5, "{}", c.name);
+            assert_eq!(crate::hookplan::call_target(0x1_4000_0000 + c.rva as u64, c.expect), Some(0x1_4000_0000 + getter.rva as u64), "{}", c.name);
+            assert!(!M6_COCKPIT_CALLS.iter().chain(M6_CARD_CALLS).any(|s| overlaps(s, c)), "{}", c.name);
+            let ctx = M6_ENEMY_UI_CHECKED.iter().find(|s| s.rva < c.rva && c.rva + 5 <= s.rva + s.expect.len() as u32).unwrap_or_else(|| panic!("{}", c.name));
+            let off = (c.rva - ctx.rva) as usize;
+            assert_eq!(&ctx.expect[off..off + 5], c.expect, "{}", c.name);
+            let e = ctx.expect;
+            let dx = e.windows(5).position(|w| w == [0xBA, 0xE2, 0x00, 0x00, 0x00]).unwrap_or_else(|| panic!("{}", c.name));
+            assert!(dx < off, "{}", c.name);
+            // ecx = 1: `mov ecx,1`, or `lea ecx,[r-1]` with r = 2 set in the checked bytes.
+            let before = &e[..off];
+            assert!(before.ends_with(&[0xB9, 0x01, 0x00, 0x00, 0x00]) || before.ends_with(&[0x8D, 0x4D, 0xFF]) || before.ends_with(&[0x8D, 0x48, 0xFF]), "{}", c.name);
+        }
+        // The two `lea` forms: ebp = 2 at the stock row's start, eax = 2 in the show's context.
+        let row = M6_ENEMY_UI_CHECKED.iter().find(|s| s.rva == 0x0016_9CA0).unwrap();
+        assert!(row.expect.windows(5).any(|w| w == [0xBD, 0x02, 0x00, 0x00, 0x00]));
+        let show = M6_ENEMY_UI_CHECKED.iter().find(|s| s.rva == 0x0016_E29C).unwrap();
+        assert_eq!(&show.expect[..5], &[0xB8, 0x02, 0x00, 0x00, 0x00]);
+        // Each read sits in its function: the cue (0x14015E390, 0xB2; CBTL update 0x1401617F0,
+        // 0x363), the stock row (0x140169CA0, 0x23A), its show (0x14016DE70, 0x54B), the folder
+        // (0x140169070, 0x3D3).
+        let funcs = [(0x0015_E390u32, 0xB2u32), (0x0016_17F0, 0x363), (0x0016_9CA0, 0x23A), (0x0016_9CA0, 0x23A), (0x0016_9CA0, 0x23A), (0x0016_DE70, 0x54B), (0x0016_9070, 0x3D3), (0x0016_9070, 0x3D3), (0x0016_9070, 0x3D3)];
+        for (c, (start, size)) in M6_ENEMY_UI_CALLS.iter().zip(funcs) {
+            assert!((start..start + size).contains(&c.rva), "{}", c.name);
+            assert!(M6_ENEMY_UI_CHECKED.iter().any(|s| s.rva == start), "{}", c.name);
         }
     }
 

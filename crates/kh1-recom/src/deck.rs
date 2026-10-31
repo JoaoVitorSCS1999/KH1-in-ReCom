@@ -209,7 +209,7 @@ pub struct EmptyLine<'a> {
 
 pub fn empty_line(l: &EmptyLine) -> String {
     format!(
-        "battle without a deck: empty revolver {:#x} built by Re:CoM's ctor 0x140164D40 from its end-of-deck entry ({} cards, {} slot(s), flags {:#x}: {}); {}; deck HUD mask reads (cockpit 4, cards 3): {}; Friend-card drops off; tutorial flags set: {}",
+        "battle without a deck: empty revolver {:#x} built by Re:CoM's ctor 0x140164D40 from its end-of-deck entry ({} cards, {} slot(s), flags {:#x}: {}); {}; card HUD mask reads (cockpit 4, cards 3 with enemy cards, enemy card UI 9): {}; Friend-card drops off; tutorial flags set: {}",
         l.rev,
         l.cards,
         l.slots,

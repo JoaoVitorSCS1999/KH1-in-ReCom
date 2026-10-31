@@ -11,6 +11,32 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 34: M6 stage 3, bosses, version 0.14.0 (2026-10-31)
+
+> "Lets move onto the next thing, go ahead" (M6 stage 3 per decisions 29, 30: bosses react to
+> KH1 swings, human bosses keep a hidden move list, Marluxia 3's stock folder hidden)
+
+- **P5:** Re:CoM's "Sora's action" getter `0x14017F720` is rewritten in place (32 bytes, Re:CoM
+  `48 8B 05 59 BC 6F 00 48 85 C0 74 07 …`) so action 0xA (KH1 swings, air swings, Counterattack)
+  answers 0xB, Re:CoM's card attack. All 15 callers checked (12 compare with 0xB, 3 with 0xC /
+  0x22 in Riku's story; none with 0xA); nothing branches into the range. Switched per battle on
+  its own (only a KH1 battle in Sora's story). Checked (exe + decomp).
+- **Human bosses:** their revolver, CBTL and message 2 run as Re:CoM's; their card UI is hidden
+  by Re:CoM's event-hide mask: side-2 cards (0x40 in stage 2's card mask), the enemy cue
+  (`0x14015E3F3`, `0x140161A64`), the stock row (`0x140169CE3`, `0x140169D07`, `0x140169D48`,
+  `0x14016E2B1`). 16 mask reads switch together. Hiding is visual only. Checked (decomp).
+- **Marluxia 3's stock folder** hidden through its own mask reads (`0x1401690A6`,
+  `0x1401690DD`, `0x140169103`). The hidden folder parks in state 5; state 6 only plays its
+  cards in the card duel. Checked (decomp).
+- No boss waits for a Sora card or a card break, except Marluxia 3's card duel, which Sora
+  always loses at KH1 (only the Reload card): owner question. Readers of Sora's deck re-checked
+  against the empty revolver. 203 site byte lists re-read, 0 mismatches.
+- Assumption: bosses react to KH1 swings more often than to Re:CoM's attack cards.
+- `crates/kh1-recom/src/boss.rs`, `docs/recom-m6-battles.md` § Stage 3 (per-boss checklist). Not
+  seen in game.
+
+---
+
 ## Stage 33: Enemy pace in the Config menu, version 0.13.4 (2026-10-31)
 
 > "also do A" (Guard reactions and Enemy pace as Re:CoM's one-value "Game Mode" style rows, so

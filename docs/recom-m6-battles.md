@@ -2,7 +2,7 @@
 
 Steam addresses (Re:CoM image base `0x140000000`). Tags: Checked (decomp / exe / tests) or
 Assumption. Code: `crates/kh1-recom` (`battle.rs`, `win/battle.rs`, stage 2 `deck.rs`,
-`win/deck.rs`; `sites.rs` `M6_*`). Research:
+`win/deck.rs`, stage 3 `boss.rs`; `sites.rs` `M6_*`). Research:
 `m6-cardless-battles.md` and `recom-m6-patch-points.md` (kept with the decomp tools). This note
 supersedes `recom-cardless-battle-design.md` §8 ("CBTL is the only gate").
 
@@ -14,9 +14,12 @@ supersedes `recom-cardless-battle-design.md` §8 ("CBTL is the only gate").
   Sora has no deck in battle: an empty revolver built by Re:CoM's own constructor, no Friend-card
   drops, the deck HUD hidden through Re:CoM's own event-hide mask. Sora still collects cards.
   § Stage 2 below.
-- Stage 3 (bosses one at a time, starting with the action-0xB check P5; human bosses' hidden
-  move lists; Marluxia 3's stock folder hidden) is not built. Human bosses keep Re:CoM's card
-  path exactly.
+- **Stage 3 built (not versioned yet, not seen in game):** at Combat = KH1, in Sora's story,
+  bosses read KH1 swings and Counterattack as "Sora is attacking" (P5); human bosses keep their
+  decks as a hidden move list; every enemy card, the enemy card cue, the enemy revolver's stock
+  row and Marluxia 3's stock folder are hidden through Re:CoM's own event-hide mask. Open:
+  Marluxia 3's card duel (Sora can't win it without cards), the enemy enchant gauge. § Stage 3
+  below.
 
 ## Stage 1: what changes
 
@@ -275,7 +278,7 @@ Nothing on the collection path is hooked. Checked (decomp):
 | Cockpit frame and the two count digits | `0x1401689F0` (player side only), 4 reads `test al,2` at `0x140168A34`, `0x140168A93`, `0x140168B32`, `0x140168B90` | bit 2 for this battle's empty revolver: Re:CoM's own hide (state 4, slide-out seq 0x44, digits off) |
 | Sora's cards, the Reload card and its gauge (`0x140154750` draws it on the card's sprite) | per-frame show / hide `0x140150340` (`0x14015037C`, tests 0x20 for side 1, 0x40 for side 2); deal `0x1401514B0` (`0x140151625`) and refresh `0x1401545A0` (`0x1401545BD`) test the whole mask | bit 0x20 for side-1 cards while the main player holds the empty revolver: Re:CoM's hidden branch; the deal and refresh take their hidden branch too, so there is no one-frame show |
 | Stock row, `CEnchantGauge`, selected-card panel `+0x108`, cue `+0x248` | need a stocked or played card, a page switch | never shown at KH1; no change |
-| Enemy cards (side 2), Marluxia 3's `CStockFolder`, the enemy cue sprite | bits 0x40 / 4, CBTL | **untouched** (stage 3) |
+| Enemy cards (side 2), Marluxia 3's `CStockFolder`, the enemy cue sprite | bits 0x40 / 4, CBTL | untouched by stage 2; hidden by stage 3 (§ Stage 3) |
 
 - `CBattleCard`s are made only by CBTL and the revolvers (`0x14014F8C0`'s callers), so side-1
   cards exist only in battle. Checked (decomp).
@@ -389,8 +392,235 @@ trace's `tut=[…]` shows the flags frame by frame. Owner question if it soft-lo
    (`tut=[…]`).
 7. Switch Combat to Re:CoM, next battle: `battle with Re:CoM's deck (Combat = Re:CoM); deck HUD
    mask reads: Re:CoM's bytes (7 written)`, the full deck and HUD as Re:CoM, Friend cards drop.
-   Back to KH1: `ours (7 written)`.
-8. Bosses with enemy cards (human bosses, Marluxia 3's stock folder) still show their cards
-   (stage 2 hides Sora's side only).
+   Back to KH1: `ours (7 written)` (16 since stage 3).
+8. (Stage 2 alone) bosses with enemy cards still showed their cards; since stage 3 they are
+   hidden (§ Stage 3).
 9. Oogie Boogie's fight: no hang (it searches Sora's deck: `deck reader … value search`).
 10. Riku's story: `battle with Re:CoM's deck (Riku's story)`, everything as Re:CoM.
+
+## Stage 3: bosses (decisions 29, 30)
+
+At Combat = KH1, in Sora's story. Research: `m6-cardless-battles.md` §§ 2.5, 3, 5.1, 5.2, 6, 7 and
+`recom-m6-patch-points.md` §§ 4–6 (kept with the decomp tools); every address below was re-read
+for this stage. Code: `boss.rs`, `win/battle.rs` (P5, logs), `win/deck.rs` (enemy card UI);
+`sites::M6_BOSS_PATCHES`, `M6_GETTER_CALLERS`, `M6_ENEMY_UI_CALLS`, `M6_ENEMY_UI_CHECKED`,
+`M6_BOSS_HOOKS`.
+
+### P5: KH1 swings count as "Sora is attacking"
+
+- Re:CoM's getter `0x14017F720` returns the main player's action `player+0x40C` (2 without a
+  player). It is 25 bytes and 7 `int3` up to `0x14017F740`:
+  `48 8B 05 59 BC 6F 00 48 85 C0 74 07 8B 80 0C 04 00 00 C3 B8 02 00 00 00 C3 CC×7`.
+  Checked (exe).
+- **P5** rewrites those 32 bytes in place: the same first instruction (RIP-relative load, same
+  place, same displacement) and null test, then `mov eax,[rax+0x40C]; cmp eax,0xA; jne +2;
+  mov al,0xB; ret; mov eax,2; ret`:
+  `48 8B 05 59 BC 6F 00 48 85 C0 74 0E 8B 80 0C 04 00 00 83 F8 0A 75 02 B0 0B C3 B8 02 00 00 00 C3`.
+  Action 0xA answers 0xB; every other answer is unchanged. Checked (exe: the bytes disassembled,
+  both jumps land on whole instructions; tests `boss::p5_bytes`).
+- **Nothing else reaches those bytes.** The exe has exactly 15 `call rel32` to `0x14017F720` (no
+  `jmp`, no `jcc`), as the decomp lists; the only other references are its `.pdata` entry and one
+  coincidental 4-byte value inside a `jmp` displacement at `0x14012C22B` (no relocation there).
+  No branch lands inside the 32 bytes but the getter's own `je`. Checked (exe scan).
+- **Every caller** compares the answer at once (`cmp eax,imm8`, two with one unrelated instruction
+  between) and never stores it. None compares with 0xA, so the only test P5 changes is `== 0xB`
+  while Sora's action is 0xA. Checked (exe; the 15 contexts are `sites::M6_GETTER_CALLERS`, checked
+  at start; test `boss::no_reader_changes_but_the_0xb_ones`):
+
+| Call | Owner (RTTI) | Compares | What it does when equal | Story |
+|---|---|---|---|---|
+| `0x140199B2B` | `CHumanBoss` card play `0x140199A00` (Leon, Cloud, Hades, Vexen, Riku, Larxene, Axel, Hook, Marluxia 1, Zexion; vtable `+0x480`) | 0xB | holds its card back if it is below Sora's playing value `0x140160910(1)`, which is −1 at KH1 (side 1 never plays): never | Sora's |
+| `0x1403A9CFD` | `CTutorialLeon` think `0x1403A9CE0` | 0xB | plays his card (his only "attack"); message 2 then sets event flag (1, 0x1B) | Sora's |
+| `0x1403AFA7F`, `0x1403AFDB1` | `CBossCloud` state 1 `0x1403AF8E0` | 0xB | 1 in 10 per call, in range (`0x1401A7810`): a dodge (`0x1403AEAD0`, motion e106_005) | Sora's |
+| `0x1403B7E06` | `CBossRiku` state 1 `0x1403B7C80` | 0xB | close (< 25): 1 in 50 a reaction | Sora's |
+| `0x1403BD744` | `CBossLarxene` state 1 `0x1403BD320` | 0xB | close (≤ 9): 1 in 100 a reaction | Sora's |
+| `0x1403C1998` | `CBossAxel` state 1 `0x1403C1760` | 0xB | 1 in 80 a reaction (e118_003) | Sora's |
+| `0x1403C273A` | `CBossParasiteCage` think `0x1403C26F0` | 0xB | below 30% HP: an attack request at once (else 1 in 30) | Sora's |
+| `0x1403C9F1A` | `CBossHook` state 1 `0x1403C9AF0` | 0xB | close (≤ 9): 1 in 25 a reaction | Sora's |
+| `0x140412B4E` | `CBossMarluxia` (Marluxia 1) state 1 `0x140412850` | 0xB | close (≤ 6.25): 1 in 10 a reaction | Sora's |
+| `0x140414F1E` | `CBossLexaeus` card play `0x140414D80` | 0xB | as `CHumanBoss` | Riku's |
+| `0x14041801F` | `CBossLexaeus` `0x140417F80` | 0x22 | Riku's action 0x22 | Riku's |
+| `0x140424BCD` | `CBossAnsem` card play `0x140424A50` | 0xB | as `CHumanBoss` | Riku's |
+| `0x140426890` | `CBossAnsem` `0x1404266C0` | 0xC | longer wait while the player is in damage | Riku's |
+| `0x14045FF38` | `CEnemyAnsemShadowUppercut` `0x14045FF00` | 0xC | no shot while the player is in damage | Riku's |
+
+- **Switch:** the battle enemy manager's ctor wrapper (stage 1) switches P5 with P2–P4, as its
+  own all-or-none set (a foreign getter leaves P2–P4 working): ours in a KH1 battle (Combat = KH1,
+  Sora's story), Re:CoM's exact bytes otherwise, from the next battle on. Riku's story keeps
+  Re:CoM's bytes, so Lexaeus, Zexion and Ansem are untouched. Checked (code; tests).
+- **What runs as action 0xA at KH1:** every KH1 swing (ground and air) and **Counterattack**: all
+  of them start through Re:CoM's field-swing init `0x1401F0F70` (`Host::start_swing`; the
+  Counterattack is row 0x3E through the same path, `attack::command_counterattack` →
+  `row_exec`). Guard and the roll (action 6), jump (7), glide (8) are not 0xA and don't count.
+  Checked (code + `recom-kh1-attack.md`).
+- **Counterattack counts (decided here):** it is an attack, and Re:CoM counts every attack Sora
+  makes (all its attack cards are action 0xB). Telling it apart would need the getter to read
+  the KH1 row (`player+0x3C8`), which doesn't fit in place (32 bytes); it would need a hook. Say if
+  the owner wants it excluded.
+- **Assumption (not measured):** KH1 swings are free and chain, so Sora is in action 0xA more of
+  the time than Re:CoM's Sora is in 0xB. These per-frame rolls (Cloud's dodge 1 in 10 per call,
+  Parasite Cage's at-once request below 30% HP) will fire more often than in Re:CoM. Re:CoM's
+  own numbers are unchanged.
+- Not new: in the field between battles the getter keeps the last battle's bytes; only boss AIs
+  call it, and they exist only in battle. Minigame rooms build no manager and have no bosses.
+  Assumption: the battle build runs on the game thread (as P2–P4).
+
+### Human bosses keep their decks as a hidden move list (decision 30, option (a))
+
+- `CHumanBoss` users in Sora's story (Tutorial Leon, Cloud, Hades, Vexen, Riku, Larxene, Axel,
+  Hook, Marluxia 1) never reach P1: their `+0x98` is `0x1401829D0` (Checked (exe), vtables). They
+  pick an attack from the top card of their own revolver (`+0xC88`), play it through
+  `0x14016CEE0` → `0x140163830` (side 2) and start it from message 2, all as Re:CoM. Their reloads
+  (`0x140199130`) and sleights (`0x14019A1E0`) use their own revolver. All but Leon use the
+  generic handler `0x140181620` (Leon: `0x1403A9F40`). Checked (exe + decomp).
+- The Heartless bosses (Guard Armor, Trickmaster, Parasite Cage, Jafar, Ursula, Oogie,
+  `CBossMDragon`, Dark Side, Marluxia 2 and 3) attack through P1 (stage 1). Those that take
+  Re:CoM's card play at KH1 (Marluxia 3 while its `+0xCE4 & 4` mode is set, or CBTL locked) set a
+  side-2 card, hidden like the others below.
+- **Nothing they need comes from Sora's cards** (Checked (decomp) unless tagged):
+  - Their only read of Sora's card is `0x140160910(1)`, −1 at KH1.
+  - Boss code (`0x140170000..0x1401A0000`, `0x1403A0000..0x140430000`) calls no CBTL side-1
+    query (`0x1401616E0`, `0x140161610`, `0x140161530(1)`, `0x140160950(1)`) and reads no CBTL
+    duel / break counter (`+0x20C`, `+0x214`, `+0x216`). Checked (decomp, call and literal search).
+  - Message 3 (card broken) never comes at KH1: the generic handler makes it a reaction (state
+    13), not a step of the fight. Leon's handler sets flag (1, 0x1B) on messages 2, 3 and 4 alike.
+  - Leon's card ends on its own timer (`+0xD00` = 120 after message 2, counted down at 0.02 × dt,
+    then `0x14015E0C0`), so his tutorial never waits for a break.
+  - **Exception: Marluxia 3's card duel** (below).
+
+### Marluxia 3's card duel (open question)
+
+- A hit with reaction 0x21 (Re:CoM's damage check `0x1401E6DE0`) puts Sora into action 0x24,
+  the card duel (`CPlayerSora` vtable `+0x1E0` init `0x140220C40`, `+0x1E8` exe `0x1402184D0`).
+  The init sets a countdown of 7 (`+0x458`), locks CBTL and sets duel mode 9 (`0x140164130`).
+  Mode 10 sends Marluxia 3 message 0xD, whose handler (`0x1403F4550`, only in its `+0xCE4 & 4`
+  mode) sets the countdown time (CBTL `+0xAC`) and mode 0xB with six cards in its stock folder
+  (`0x140164040`). Each step of the countdown is a timer (Sora's `+0x160` from CBTL `+0xAC`);
+  Sora answers by playing cards from his revolver (`0x14016D8A0`). When the countdown runs out
+  (state 10), `0x140163EF0(CBTL, count left)` sends both sides message 0xF / 3 (count > 0) or 0xE
+  (count ≤ 0); Sora's 0xF sets `+0x428 |= 0x2000000`, which also ends the duel exe early; 0xE
+  sets `+0x428 |= 0x1000020`. Checked (decomp). How Sora's card plays turn into a win (CBTL's
+  duel resolution against Marluxia's six cards): not traced, Assumption.
+- **At KH1 Sora has no card to play**: the empty revolver's only card is the Reload card, which
+  the loader builds with type 8 (byte 3 = 0x88, `0x14016C970`), and the duel play `0x14016D8A0`
+  refuses types 6..8. Checked (decomp). So he can never win the duel at KH1. It does end (the
+  countdown is timer-driven): no soft-lock found. What "lost" costs Sora in the fight: not read (Assumption: Re:CoM's punishment for
+  losing the duel; Marluxia 3 gets `+0xCD4` = 10 instead of 200). Which attacks carry reaction
+  0x21: in the attack data files, not read (Assumption: Marluxia 3's only).
+- Logged: `m6: Sora's card duel (action 0x24, battle n) starts at KH1 …` (log-only hook on
+  `0x140220C40`, `48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40`, 15 bytes moved; referenced only
+  by the vtable and `.pdata`; Checked (exe)).
+- Owner question (not built; each changes the fight):
+  - (a) leave it as Re:CoM's duel, always lost at KH1;
+  - (b) count a KH1 action as Sora's duel card (for example each KH1 hit on Marluxia 3 during
+    the countdown breaks one of its six cards), through Re:CoM's own duel path;
+  - (c) at KH1, make reaction 0x21 a normal hit reaction so the duel never starts (Marluxia 3's
+    countdown attack becomes a plain hit).
+
+### The enemy card UI, hidden (decisions 15, 30)
+
+All through Re:CoM's own event-hide mask (system variable (1, 0xE2)) at the reads that draw
+each part, switched per battle with stage 2's seven reads (16 in all, all or none) at the
+battle revolver build: ours in a battle without a deck (Combat = KH1, Sora's story, not a
+minigame room), **Re:CoM's bytes otherwise**. A third 17-byte stub in stage 2's block
+(`mov r8,rbx; jmp [rip+0]`) calls `enemy_ui_mask`.
+
+| Part | Reads | At KH1 | What Re:CoM does then | Logic touched? |
+|---|---|---|---|---|
+| Every side-2 `CBattleCard` (enemy attack, sleight, reload cards; Marluxia 3's folder cards) | stage 2's `0x14015037C` (tests 0x40 for side 2), deal `0x140151625` and refresh `0x1401545BD` (whole mask) | `card_mask` adds 0x40 for a card whose side (`+0x26C`) isn't 1 | its hidden branch: `+0x264 & 0x80` off, sprite off | no: "in place" (`+0x264 & 2`, which lets CBTL post message 2) is set by the slide distance in `0x1401542F0`, not by visibility. A new card starts hidden (`0x14014F8C0`): no flash. Checked (decomp) |
+| The card-play cue over the enemy (CBTL `+0x220`) | `0x14015E3F3` (in `0x14015E390`), `0x140161A64` (CBTL update `0x1401617F0`), both `test eax,eax` | `enemy_ui_mask` adds 4 (nonzero) | clears CBTL `+0x208` bit 0, stops the sprite | no: bit 0 is set only by `0x1401613D0` (Heartless card play `0x1401634B0`, enemy duel card `0x140163570`) and read only by these two. Human bosses never set it. Checked (decomp) |
+| A side-2 revolver's stock row: the sleight name (`+0x250`, table `0x1407C25E0`), the stocked value digits (`+0x270`, `+0x278`), frame `+0x268` | `0x140169CE3`, `0x140169D07`, `0x140169D48` in `0x140169CA0` (`test edi,eax`, edi = 4 for side 2, 2 for side 1); `0x14016E2B1` in its show `0x14016DE70` (`test ebx,eax`) | adds 4: only the enemy side's test sees it; Sora's own row tests 2 | its hidden state 5, digits off | no: `+0x258`, `+0x25C`, `+0x260` are read only by these visual functions (`0x140168060`, `0x14016AF40`, `0x14016B430`, `0x14016DE70`, `0x140169CA0`). Checked (decomp) |
+| Marluxia 3's `CStockFolder` (`0x140169070`, CBTL `+0x1A0`) | `0x1401690A6`, `0x1401690DD`, `0x140169103` (`test al,4`) | adds 4 | its hidden state 5 | **yes, in the duel only**: state 6, which plays the folder's cards as "pronounce" cards (`0x140163630`) in duel mode 0xB, is entered from state 3 only, so a hidden folder skips it. Outside the card duel its states are visual. Checked (decomp). This is the change the owner accepted with "hide (changes the fight)" (research § 8 Q3 (b)); with the duel unwinnable at KH1 anyway, it only removes Marluxia's card plays inside that duel |
+
+- Each read is Re:CoM's `call 0x1401B08C0` right after `mov edx,0xE2` and ecx = 1 (`mov ecx,1`,
+  or `lea ecx,[rbp-1]` / `lea ecx,[rax-1]` with 2 loaded in the checked bytes). The contexts and
+  function starts are `sites::M6_ENEMY_UI_CHECKED`. No branch or pointer lands inside any of the
+  nine calls. Checked (exe scan; tests `sites::m6_boss_sites`).
+- `enemy_ui_mask` ignores the stub's third argument: at `0x14016E2B1` rbx holds the tested bit,
+  not an object. r8 is clobbered as in stage 2 (volatile; the getter ends in a vtable jump).
+- **Not hidden:** the enemy-side enchant gauge (`CEnchantGauge` `0x14016BB30`, when a boss plays a
+  room-effect card through `0x140163170`): its hidden state 5 skips `0x14015E010(side, 0, 0)`, a
+  step of the enchant counter, so hiding it through the mask would change how long the enchant
+  lasts. Whether a Sora's-story boss deck holds such a card: in the boss data files, not read.
+  Owner question if a tester sees one. Also not touched: the revolver deal gate `0x14016A058` and
+  the revolver play `0x14016CF53` (bit 4 there would stop the boss's own plays).
+- Assumption: a boss's stock row and Marluxia 3's folder may show for one frame when a card is
+  stocked (their show functions `0x14016DE70` / `0x14016E3C0` turn the frame on, and the hide
+  comes at the next update's mask read), as with Re:CoM's own event hide.
+
+### Readers of Sora's deck and cards, with the empty revolver (research § 5.1)
+
+| Reader | At KH1 | Tag |
+|---|---|---|
+| Heartless card play `0x140198870` (`0x140160910(1)`, card value) | skipped by P1; in a fallback −1 | Checked (decomp) |
+| `CHumanBoss` / Lexaeus / Ansem card play (`0x140160910(1)` when the answer is 0xB) | −1 now also during KH1 swings: never holds back | Checked (decomp) |
+| Oogie `0x1403D91C0` (`CBossBoogie` vtable `+0x448`, a search of Sora's revolver `0x140167CF0`) | called only by the Heartless card play's card value (`0x140198870`), which P1 skips; in a fallback it finds nothing on the empty revolver and returns 1 | Checked (decomp + exe RTTI) |
+| Enemy card value `0x140182500`, drop helper `0x140160620`, CBTL `0x14015E5D0`, `0x140161E10`, `0x140162140`, `0x140163C00`, `0x140163EF0` | read or write Sora's revolver behind a null test; the empty revolver is Re:CoM's own object | Checked (decomp, literal search outside player code) |
+| Marluxia 3's tornado `0x1403F3B60` (`rev+0x98 & 0x8000`) | the empty revolver still deals (stage 2) | Checked (decomp) |
+| Zexion `0x140420ED0`, `0x14041AF00` | Riku's story | not affected |
+
+### Logs and trace (stage 3)
+
+- Start: `m6: bosses (stage 3): P5 … switched with P2-P4 …`, `m6: card duel logged
+  (0x140220C40, log only)`, and stage 2's `m6: HUD stubs at … (enemy card UI …); 16 mask reads …`.
+  (`win/mod.rs`'s own line still says "the 7 deck HUD mask reads": it is not edited in this
+  stage.)
+- Battle start (first 100): `m6: battle start (battle n): …; Sora attacking for bosses (P5): ours,
+  Sora's action 0xA (KH1 swings, Counterattack) reads as 0xB (k written) | Re:CoM's (k written) |
+  UNCHANGED`. Stage 2's line: `card HUD mask reads (cockpit 4, cards 3 with enemy cards, enemy
+  card UI 9): ours (16 written)`.
+- Per battle (first 40 of each battle, 1200 in all):
+  - `m6: boss card (battle n, #k): <class> id=… sets a side-2 revolver card | new card (hidden |
+    SHOWN …); Sora's action 0x…, bosses read 0x…; CBTL duel mode …` (every side-2 card: a human
+    boss's attack, sleight or reload card, Leon's reaction, a Heartless fallback);
+  - `m6: boss attack without a card (battle n): <CBoss…> id=… state=… hp=… cooldown=…` (Heartless
+    bosses through P1);
+  - `m6: boss takes Re:CoM's card play (battle n, <why>): …` (e.g. Marluxia 3 in its sleight mode).
+- `m6: Sora's card duel (action 0x24, battle n) starts at KH1 …` (first 20).
+- F9 trace, `events` cell, after stage 1's token: `m6boss p5=ours|recom|other act=<Sora's
+  action> ans=<what bosses read> duel=<CBTL +0x20C> ui=hidden|shown`. Read only while recording.
+
+### Exe checks (stage 3)
+
+- New sites, all byte-checked at start: P5 (32 bytes), the 15 caller contexts, 9 calls, 14
+  contexts / function starts, 1 log hook. The 203 byte lists of `sites.rs` were re-read from the
+  Steam exe: 0 mismatches.
+
+### Not verified (stage 3)
+
+- Nothing seen in game.
+- How often the bosses' 0xB reactions fire with KH1's swing rate (Assumption: more often).
+- The tutorial scripts: whether Traverse Town's Leon step waits for (1, 0x1B) (which P5 now
+  lets fire) or for a card break (which can't happen at KH1). Scripts not in this session.
+- What losing Marluxia 3's card duel costs, and which attacks carry reaction 0x21.
+- Whether any Sora's-story boss deck holds an enchant (room-effect) card (its gauge stays shown).
+- Which bosses appear in Sora's story (game knowledge, not data).
+- One-frame shows of the stock row / folder when a card is stocked (Assumption).
+
+### In-game checklist (stage 3), per boss
+
+For each fight at Combat = KH1: no enemy card, card cue, sleight name / stock row or stock
+folder at any time; the boss attacks, reloads (a pause) and uses its sleights as in Re:CoM; it
+can be beaten; the log shows `boss card` lines (human bosses) or `boss attack without a card`
+lines (Heartless bosses), and the F9 trace shows `ans=0xb` while Sora swings.
+
+1. Log at start: every `site ok`, `m6: bosses (stage 3)`, `m6: card duel logged`, `HUD stubs …
+   16 mask reads`. Battle start: `P5: ours … (1 written)`, `ours (16 written)`.
+2. **Traverse Town, Leon** (`CTutorialLeon`): Leon reacts to KH1 swings (`boss card … CTutorialLeon
+   … Sora's action 0xa, bosses read 0xb`), event flag 0x1B in the F9 `tut=[…]`, the fight
+   finishes. If it stalls: F9 trace of the stuck moment.
+3. **Guard Armor, Trickmaster, Jafar, Ursula, Oogie Boogie, Dragon Maleficent (`CBossMDragon`),
+   Darkside**: Heartless bosses, P1 (`boss attack without a card`). Oogie: no hang.
+4. **Parasite Cage**: below 30% HP it attacks whenever its cooldown allows while Sora swings
+   (P5); compare with Re:CoM.
+5. **Cloud** (dodges KH1 swings), **Hades**, **Vexen**, **Larxene**, **Axel**, **Hook**,
+   **Riku** (each fight), **Marluxia 1**: `boss card` lines with `(hidden)`, their reactions to
+   KH1 swings; reload pauses and sleights still happen; no sleight name shown.
+6. **Marluxia 2**: P1, no card.
+7. **Marluxia 3**: no stock folder, no sleight cards; when its countdown attack hits, the log's
+   `Sora's card duel … starts at KH1` line, then what happens (it is lost; note the cost). Owner
+   question above.
+8. Combat = Re:CoM, any boss: cards, cue, sleight names, folder as Re:CoM; battle start shows
+   `P5: Re:CoM's (1 written)` and `Re:CoM's bytes (16 written)`.
+9. Riku's story (Lexaeus, Zexion, Ansem): `Re:CoM (Riku's story)`, P5 Re:CoM's, everything as
+   Re:CoM.

@@ -5,10 +5,15 @@
 //!   decides whether this battle has a deck. Without one it first builds the revolver with
 //!   Re:CoM's own constructor from Re:CoM's end-of-deck entry (0 cards + Reload), then lets
 //!   Re:CoM's build run (it sees a built revolver and only runs its tail). It also switches the
-//!   seven HUD-mask call retargets: ours without a deck, Re:CoM's bytes otherwise.
+//!   HUD-mask call retargets (stage 2's seven, stage 3's nine): ours without a deck, Re:CoM's
+//!   bytes otherwise.
 //! - `hit_drop` (`0x14017E190`): no Friend-card drop roll at KH1 in Sora's story.
 //! - `cockpit_mask` / `card_mask`: what the retargeted mask reads call (through a stub that passes
 //!   the caller's rbx): Re:CoM's getter, plus the hide bit for this battle's empty revolver only.
+//! - Stage 3 (`crate::boss`, decision 30): in the same battles, `card_mask` also adds 0x40 for
+//!   side-2 (enemy) cards, and nine more reads (the enemy card cue, the enemy revolver's stock
+//!   row, Marluxia 3's stock folder) call `enemy_ui_mask`, which adds 4. They are switched with
+//!   stage 2's seven, all or none.
 //! - Three log-only readers (`0x1401EA1A0`, `0x1401EA1E0`, `0x140167CF0`): once per battle, who
 //!   read the empty revolver.
 //!
@@ -20,7 +25,7 @@ use super::{base, hook, log, va};
 use crate::battle::{self as b, Bytes};
 use crate::deck::{self as d, Build, Reader};
 use crate::hookplan;
-use crate::sites::{data, M6_CARD_CALLS, M6_COCKPIT_CALLS};
+use crate::sites::{data, M6_CARD_CALLS, M6_COCKPIT_CALLS, M6_ENEMY_UI_CALLS};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
@@ -204,14 +209,28 @@ pub unsafe extern "win64" fn cockpit_mask(table: u32, index: u32, rev: usize) ->
     func::<GetFn>(VAR_GET)(table, index) | d::cockpit_bits(rev, EMPTY.load(Ordering::Relaxed))
 }
 
-/// A card's mask read (`0x140150340`, `0x1401514B0`, `0x1401545A0`, rbx = the card).
+/// A card's mask read (`0x140150340`, `0x1401514B0`, `0x1401545A0`, rbx = the card). Sora's
+/// cards (stage 2) and, stage 3, every enemy card in this battle.
 pub unsafe extern "win64" fn card_mask(table: u32, index: u32, card: usize) -> u32 {
     let v = func::<GetFn>(VAR_GET)(table, index);
     let e = EMPTY.load(Ordering::Relaxed);
     if e == 0 || card == 0 {
         return v;
     }
-    v | d::card_bits(rd(card + d::CARD_SIDE), main_player_revolver(), e)
+    let side: u8 = rd(card + d::CARD_SIDE);
+    v | d::card_bits(side, main_player_revolver(), e) | crate::boss::enemy_card_bits(side, true)
+}
+
+/// Stage 3: an enemy card UI read (the cue `0x14015E390` / `0x1401617F0`, the stock row
+/// `0x140169CA0` / `0x14016DE70`, Marluxia 3's stock folder `0x140169070`). The third argument
+/// (the caller's rbx) is not used: at `0x14016E2B1` it is the tested bit, not an object.
+pub unsafe extern "win64" fn enemy_ui_mask(table: u32, index: u32, _rbx: usize) -> u32 {
+    func::<GetFn>(VAR_GET)(table, index) | crate::boss::enemy_ui_bits(EMPTY.load(Ordering::Relaxed) != 0)
+}
+
+/// Whether this battle hides the enemy card UI (the reads are ours and the battle has no deck).
+pub fn enemy_ui_hidden() -> bool {
+    HUD_OURS.load(Ordering::Relaxed) && EMPTY.load(Ordering::Relaxed) != 0
 }
 
 /// An enemy's card drop (`0x14017E190(enemy, chance)`).
@@ -272,15 +291,17 @@ pub fn install(bs: usize) -> bool {
     // SAFETY: executable memory of our own near the exe; the call sites' bytes were checked at
     // start and are checked again before every write.
     unsafe {
-        let mut code = Vec::with_capacity(34);
+        let mut code = Vec::with_capacity(51);
         code.extend_from_slice(&hookplan::rbx_arg_stub(cockpit_mask as *const () as u64));
         code.extend_from_slice(&hookplan::rbx_arg_stub(card_mask as *const () as u64));
+        code.extend_from_slice(&hookplan::rbx_arg_stub(enemy_ui_mask as *const () as u64));
         let near = bs + M6_CARD_CALLS[0].rva as usize;
         let Some(block) = hook::place_near(near, &code) else {
             log("m6: no memory near the exe for the HUD stubs; no deck change");
             return false;
         };
-        let stubs = [(M6_COCKPIT_CALLS, block), (M6_CARD_CALLS, block + 17)];
+        // Stage 3's enemy card UI reads go with stage 2's: switched together, all or none.
+        let stubs = [(M6_COCKPIT_CALLS, block), (M6_CARD_CALLS, block + 17), (M6_ENEMY_UI_CALLS, block + 34)];
         let mut v = Vec::new();
         for (calls, stub) in stubs {
             for s in calls {
@@ -294,7 +315,12 @@ pub fn install(bs: usize) -> bool {
         if RETARGETS.set(v).is_err() {
             return false;
         }
-        log(&format!("m6: HUD stubs at {block:#x} (cockpit) and {:#x} (cards)", block + 17));
+        log(&format!(
+            "m6: HUD stubs at {block:#x} (cockpit), {:#x} (cards: Sora's, and enemy cards at KH1) and {:#x} (enemy card UI: cue, stock row, Marluxia 3's stock folder); {} mask reads switched at each battle start",
+            block + 17,
+            block + 34,
+            M6_COCKPIT_CALLS.len() + M6_CARD_CALLS.len() + M6_ENEMY_UI_CALLS.len()
+        ));
         let site = |name: &str| crate::sites::M6_DECK_HOOKS.iter().find(|h| h.name == name).expect("site");
         let hooks = [
             hook::Hook { site: site("battle revolver build (0x1401F43D0)"), ours: build_revolver as *const () as usize, original: &ORIG_BUILD },

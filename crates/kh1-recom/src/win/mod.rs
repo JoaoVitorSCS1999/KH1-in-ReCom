@@ -258,7 +258,7 @@ fn install_battles(base: usize) {
     }
     // Stage 2: no deck for Sora (decision 29), on its own: it doesn't need stage 1's hooks.
     if deck::install(base) {
-        log("m6: no-deck wrappers in (revolver build 0x1401F43D0, hit drop 0x14017E190); the 7 deck HUD mask reads are switched at each battle start by the setting");
+        log("m6: no-deck wrappers in (revolver build 0x1401F43D0, hit drop 0x14017E190); the 16 deck and enemy-card HUD mask reads are switched at each battle start by the setting");
     } else {
         log("m6: no-deck not hooked; Sora keeps Re:CoM's deck in battle");
     }
