@@ -279,6 +279,19 @@ At KH1 setting:
     - **Command menu shown in the field and in battle**, as in KH1.
     - **Customize: one "KH1" camp entry** (our entry renamed) with a submenu: Keyblades,
       Customize (later Abilities, Items).
+    - **Spell unlocks: each spell's base level when Sora first gets that Re:CoM magic card; the
+      -ra / -ga levels at Re:CoM bosses.**
+    - **Gravity and Stop on Re:CoM-only bosses** (Larxene, Riku Replica, Axel, Vexen, Marluxia,
+      the Riku fights): **KH1's final-boss values** (Gravity 2 %, immune to Stop).
+    - Cure heals Re:CoM's amounts: Cure 50, Cura 150, Curaga 300 HP (`SY0002.BIN`
+      BattleCardList / StockSkillList), with KH1's cast rules.
+    - **MP bar grows with max MP** (KH1's 26 units per MP); colour **read from the player's KH1
+      files** at the asset step.
+    - **Command menu cursor: plate colour** (the highlighted row uses another colour of Re:CoM's
+      command plate); row spacing KH1's 22 units.
+    - **Menu words: KH1's own text** from the player's KH1 message files.
+    - MP rule: the KH1 exe's (the k-th MP needs 30·k refill units; Fire / Blizzard cost 30 units).
+    - Shortcuts saved per save (KH1).
     - Research: `m7-magic.md`, `m7-menus-mp.md` (kept with the decomp tools).
 
 ## Known open design questions (ask the owner, don't guess)
