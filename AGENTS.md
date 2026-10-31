@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 36: M7 stage 7.1, KH1 MP, version 0.15.0 (2026-10-31)
+
+> "lets work on M7. Make sure all of that is FULLY implemented, also including a shortcut menu,
+> customize menu, MP bar" (decision 34; plan `docs/recom-m7-plan.md`)
+
+- KH1's MP at Combat = KH1 in Sora's story: max MP 3 + 1 at Sora's Re:CoM levels 12/24/36/48/60
+  (btltbl `0x3AC0`) + the equipped KH1 Keyblade's MP bonus (weapon `+0x38`); MP points and the
+  charge with KH1's exact rules: refill `0x1402A4CB0` (point k needs 30·k), add `0x1402A4A00` /
+  `0x1402A4AE0`, can-pay `0x1402A4C10`, pay `0x1402A5B60`, charge per hit `0x1402BF330` (attack
+  `+0x2C` × (1 + 0.2·Δlevel), 1..250 %), level-up `0x1402B51B0`. Checked (decomp + exe + files).
+- No new hook: the refill step runs in the existing request-bits wrapper (one flag check per frame
+  unless a point is waiting), the hit charge in the existing enemy-hit wrapper.
+- Saved per save in the spare range `save+0x2675..=0x2684` (versioned; room for 7.11's spell levels
+  and 7.12's shortcuts); all-zero = full MP. `docs/recom-m7-mp.md`.
+- No HUD yet (7.2); log `mp:` lines and the F9 trace's `mp` token. Damage-taken charge waits for
+  M9 (KH1 abilities). Not seen in game.
+
+---
+
 ## Stage 35: no card duel at KH1, version 0.14.1 (2026-10-31)
 
 > Owner: "c" (Marluxia 3's card duel: at KH1, the attack that starts it becomes a plain hit, so

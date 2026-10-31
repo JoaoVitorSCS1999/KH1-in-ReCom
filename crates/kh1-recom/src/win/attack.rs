@@ -5,7 +5,7 @@
 //!
 //! - request bits `0x1401F8150`: in battle, Re:CoM's field branch builds the request (confirm →
 //!   Attack `+0x424 & 4`; no card scroll, reload, stock or sleight input); a jump pressed on the same
-//!   frame wins (KH1's order).
+//!   frame wins (KH1's order). First, KH1's MP refill step while a point is waiting (`super::mp`).
 //! - use-card button `0x1401E8FF0`: skipped (no card plays at KH1).
 //! - initAttack `0x1401F0D90`: the card attack becomes the field swing.
 //! - field swing init `0x1401F0F70`: Re:CoM's command dispatch reached it, so KH1's frame runs with
@@ -18,7 +18,7 @@
 //!   tested with Re:CoM's own sphere / column primitives.
 //! - enemy hit handler `0x14017F7E0`: a KH1 hit lands during the enemy's card play (decision 14),
 //!   through Re:CoM's own interruptible-card path; a melee attacker Sora's Guard blocked plays
-//!   Re:CoM's own flinch (decision 27, `super::guard`).
+//!   Re:CoM's own flinch (decision 27, `super::guard`); a KH1 hit charges KH1's MP (`super::mp`).
 //! - the pair dispatch also hands its non-zero results to `super::guard` (decision 27: a blocked
 //!   shot is turned back there).
 //! - player damage check `0x1401E6DE0`: KH1's no-flinch frames (damage, no reaction).
@@ -327,6 +327,9 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     if !mv::kh1_sora(pl) {
         return o(pl);
     }
+    // KH1's MP refill runs in the actor pre-step, at the start of the frame (`0x1402A43A0` →
+    // `0x1402A4CB0`): one point per frame while one is waiting (M7 stage 7.1).
+    super::mp::frame();
     let battle: i32 = rd(pl + p::BATTLE);
     if battle != 0 && battle_guards_clear(pl, rd(pl + p::REQUEST)) {
         // Re:CoM's own field branch: the confirm press is the Attack, no card input.
@@ -584,6 +587,8 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
         wr(enemy + 0x260, now & !0x200_0000);
     }
     super::guard::after_enemy_hit(enemy, r, hp);
+    // KH1's MP charge for this hit (`0x1402BF330`: one per KH1 damage record; M7 stage 7.1).
+    super::mp::on_kh1_hit(enemy, row);
     let after: i32 = rd(enemy + 0x274);
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {

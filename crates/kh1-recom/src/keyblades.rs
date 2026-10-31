@@ -54,13 +54,15 @@ pub fn save_byte_for(card: u16) -> u8 {
     }
 }
 
-/// The offsets (from the save block) in the spare range that are not zero, our byte excepted.
+/// The offsets (from the save block) in the spare range that are not zero, our bytes excepted
+/// (the Keyblade byte and M7's MP block, `crate::mp::BLOCK_FIRST ..= BLOCK_LAST`).
 /// `range` is `save[SPARE_FIRST..=SPARE_LAST]`.
 pub fn spare_range_nonzero(range: &[u8]) -> Vec<usize> {
+    let ours = |o: usize| o == EQUIP_OFFSET || (crate::mp::BLOCK_FIRST..=crate::mp::BLOCK_LAST).contains(&o);
     range
         .iter()
         .enumerate()
-        .filter(|(i, b)| **b != 0 && SPARE_FIRST + i != EQUIP_OFFSET)
+        .filter(|(i, b)| **b != 0 && !ours(SPARE_FIRST + i))
         .map(|(i, _)| SPARE_FIRST + i)
         .collect()
 }
@@ -355,6 +357,13 @@ mod tests {
         assert!(spare_range_nonzero(&r).is_empty());
         r[EQUIP_OFFSET - SPARE_FIRST] = 5;
         assert!(spare_range_nonzero(&r).is_empty());
+        // M7's MP block (`crate::mp`) is ours too.
+        r[crate::mp::BLOCK_FIRST - SPARE_FIRST] = 1;
+        r[crate::mp::BLOCK_LAST - SPARE_FIRST] = 1;
+        assert!(spare_range_nonzero(&r).is_empty());
+        r[crate::mp::BLOCK_LAST + 1 - SPARE_FIRST] = 3;
+        assert_eq!(spare_range_nonzero(&r), vec![crate::mp::BLOCK_LAST + 1]);
+        r[crate::mp::BLOCK_LAST + 1 - SPARE_FIRST] = 0;
         r[0] = 1;
         r[SPARE_LAST - SPARE_FIRST] = 2;
         assert_eq!(spare_range_nonzero(&r), vec![SPARE_FIRST, SPARE_LAST]);

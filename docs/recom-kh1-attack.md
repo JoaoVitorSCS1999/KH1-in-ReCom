@@ -581,13 +581,13 @@ numbers of decisions 12 / 21 apply only to KH1 swings).
 - KH1: the per-attack recoil data (`+0x40` of KH1's enemy attack data) is not read (the flinch is
   a stand-in by decision 27).
 
-## MP charge (skipped, noted)
+## MP charge (M7 stage 7.1)
 
 - KH1 charges `record +0x2C` × (1 + (enemy level − Sora's level) × 0.2): 3 / 6 / 24 per hit, at
-  most 250 %, at least 1. 30 units = 1 MP (`0x1402BF330`, `0x1402A4AE0`). An enemy of level 0
-  charges nothing.
-- It needs the KH1 twin's level (the missing records above) and Sora's KH1 level. Not stored.
-  M7 builds the gauge.
+  most 250 %, at least 1 (`0x1402BF330`). Point k of MP needs 30·k units (`0x1402A4CB0`). An enemy
+  of level 0 charges nothing.
+- Built in M7 stage 7.1: the enemy-hit wrapper charges KH1's MP for each KH1 hit, with the twin's
+  level; see `recom-m7-mp.md`.
 
 ## The M4 follow-ups (decision 17)
 

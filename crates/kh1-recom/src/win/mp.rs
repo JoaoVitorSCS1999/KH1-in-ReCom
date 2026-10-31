@@ -1,0 +1,209 @@
+//! KH1's MP at the KH1 setting (M7 stage 7.1, decision 34; `crate::mp`, `docs/recom-m7-mp.md`).
+//!
+//! No hook of its own and no per-frame work in steady state:
+//!
+//! - **Store:** our block in Re:CoM's own save (`save + 0x2675 ..= 0x2684`, `crate::mp::SavedMp`),
+//!   read and written only when something happens. Re:CoM saves, checksums, loads, snapshots and
+//!   zeroes it with the rest of its save block.
+//! - **Charge from hits:** the existing enemy-hit wrapper (`0x14017F7E0`, `super::attack`) calls
+//!   [`on_kh1_hit`] for each KH1 hit an enemy takes (one per KH1 damage record, as KH1's
+//!   `0x1402BF330`).
+//! - **Refill:** KH1 makes at most one point per frame (`0x1402A4CB0` in the actor pre-step).
+//!   After a change that leaves a point to make, [`frame`] (from the existing request-bits wrapper
+//!   `0x1401F8150`, which Re:CoM's Field / Battle exes call each frame after their early-out)
+//!   runs one step per frame; otherwise it is one atomic load.
+//! - **Level-ups** are applied when the block is next read (`crate::mp::live`).
+//!
+//! The API for later stages: [`current`], [`can_pay`], [`pay`], [`gain_charge`],
+//! [`restore_full`]. All are no-ops (None / false) at the Re:CoM setting, in Riku's story, or
+//! with no save block.
+
+use super::movement::{self as mv, rd, wr};
+use super::{base, log, va};
+use crate::mp::{self as m, Live, Mp, SavedMp, BLOCK_FIRST, BLOCK_LEN};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Mutex;
+
+/// A point is waiting to be made by KH1's per-frame refill.
+static REFILL_PENDING: AtomicBool = AtomicBool::new(false);
+/// Log lines left this session (gains, payments, points, first read).
+static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
+static FIRST_READ_LOGGED: AtomicBool = AtomicBool::new(false);
+/// The trace's MP events since its last row (capped).
+static EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn note(line: impl FnOnce() -> String) {
+    if LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("mp: {}", line()));
+    }
+}
+
+fn event(e: String) {
+    if let Ok(mut g) = EVENTS.lock() {
+        if g.len() < 16 {
+            g.push(e);
+        }
+    }
+}
+
+/// Re:CoM's save block, when it is there.
+fn save() -> Option<usize> {
+    // SAFETY: a static pointer of the image.
+    let s: usize = unsafe { rd(va(base(), crate::keyblades::SAVE_PTR)) };
+    (s != 0).then_some(s)
+}
+
+/// KH1 MP is live: Combat = KH1, Sora's story, a save block.
+pub fn active() -> bool {
+    mv::kh1_on() && !super::stats::riku_story() && save().is_some()
+}
+
+/// The equipped Keyblade's KH1 max-MP bonus (KH1 weapon `+0x38`, the stats file's `magic`), for
+/// Keyblades whose numbers are KH1's. The six KH2 Keyblades' `magic` is KH2's Magic stat, not an
+/// MP bonus: 0 (owner question). The Kingdom Key: 0.
+pub fn keyblade_bonus() -> i32 {
+    super::stats::keyblade(super::stats::equipped_card()).filter(|k| k.source == "kh1").map_or(0, |k| k.magic)
+}
+
+/// Reads the block, syncs it (level-ups, Keyblade), runs `f`, writes back what KH1 would have
+/// written. None when MP isn't live.
+fn with_state<R>(f: impl FnOnce(&mut Mp) -> R) -> Option<R> {
+    if !active() {
+        REFILL_PENDING.store(false, Ordering::Relaxed);
+        return None;
+    }
+    let s = save()?;
+    let at = s + BLOCK_FIRST;
+    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST < 0x2818).
+    let mut block: [u8; BLOCK_LEN] = unsafe { rd(at) };
+    let saved = SavedMp::read(&block);
+    let level = super::stats::sora_level();
+    let bonus = keyblade_bonus();
+    let mut l: Live = m::live(&saved, level, bonus);
+    if !FIRST_READ_LOGGED.swap(true, Ordering::Relaxed) {
+        let (mp, max, c) = l.mp.view();
+        log(&format!(
+            "mp: save+{BLOCK_FIRST:#x}: layout v{} ({}), Sora level {level}, Keyblade MP bonus {bonus:+}: MP {mp}/{max}, charge {c}{}",
+            saved.version,
+            if l.fresh { "never written: full MP" } else { "written" },
+            if l.level_ups > 0 { format!(", {} max-MP level-up(s) since level {}", l.level_ups, saved.level) } else { String::new() }
+        ));
+    }
+    let r = f(&mut l.mp);
+    if let Some(new) = m::stored(&saved, &l) {
+        new.write(&mut block);
+        // SAFETY: as above.
+        unsafe { wr(at, block) };
+    }
+    REFILL_PENDING.store(l.mp.refill_ready(), Ordering::Relaxed);
+    Some(r)
+}
+
+/// (MP, max MP, charge), or None when MP isn't live.
+pub fn current() -> Option<(i32, i32, u16)> {
+    with_state(|mp| mp.view())
+}
+
+/// KH1's MP test (`0x1402A4C10`), cost in KH1's encoding (`crate::mp::cost`).
+#[allow(dead_code)] // API for the command menu (7.3) and the spells (7.4+); no caller in 7.1.
+pub fn can_pay(cost: i32) -> bool {
+    with_state(|mp| mp.can_pay(cost)).unwrap_or(false)
+}
+
+/// KH1's payment (`0x1402A5B60`). False when MP isn't live. Like KH1 it doesn't test
+/// [`can_pay`] itself.
+#[allow(dead_code)] // API for the spells (7.4+, paid at the release frame); no caller in 7.1.
+pub fn pay(cost: i32, why: &str) -> bool {
+    let r = with_state(|mp| {
+        let before = mp.view();
+        mp.pay(cost);
+        (before, mp.view())
+    });
+    let Some((b, a)) = r else { return false };
+    event(format!("pay{cost}"));
+    note(|| format!("paid {cost} ({why}): MP {}/{} c{} -> {}/{} c{}", b.0, b.1, b.2, a.0, a.1, a.2));
+    true
+}
+
+/// KH1's gauge add (`0x1402A4AE0`).
+pub fn gain_charge(units: i32, why: &str) {
+    let r = with_state(|mp| {
+        let before = mp.view();
+        mp.gain(units);
+        (before, mp.view())
+    });
+    let Some((b, a)) = r else { return };
+    event(format!("{units:+}"));
+    note(|| format!("charge {units:+} ({why}): MP {}/{} c{} -> {}/{} c{}", b.0, b.1, b.2, a.0, a.1, a.2));
+}
+
+/// KH1's full restore (`0x1402A56F0`): for a later stage, once the owner picks Re:CoM's
+/// equivalent (not wired in 7.1).
+#[allow(dead_code)] // Waits for the owner's answer on Re:CoM's refill points.
+pub fn restore_full(why: &str) {
+    if let Some((b, a)) = with_state(|mp| {
+        let before = mp.view();
+        mp.restore_full();
+        (before, mp.view())
+    }) {
+        event("full".into());
+        note(|| format!("restore ({why}): MP {}/{} c{} -> {}/{} c{}", b.0, b.1, b.2, a.0, a.1, a.2));
+    }
+}
+
+/// A KH1 hit on `enemy` from Sora's KH1 row `kh1_row` (`0x1402BF330`): the row's attack data
+/// `+0x2C` × KH1's level factor, with the enemy's KH1 twin's level (decision 21) or, without a
+/// twin, the provisional `crate::mp::no_twin_level`.
+pub fn on_kh1_hit(enemy: usize, kh1_row: Option<usize>) {
+    if !active() {
+        return;
+    }
+    let ms = super::attack::moveset();
+    let Some(record) = kh1_row.and_then(|r| ms.row(r)).and_then(|rw| ms.attack(rw.attack)) else {
+        note(|| format!("a KH1 hit on {:#x} with no KH1 row: no charge", enemy & 0x00FF_FFFF));
+        return;
+    };
+    let sora = super::stats::sora_level();
+    let twin = super::stats::twin_level(enemy);
+    let level = twin.unwrap_or_else(|| m::no_twin_level(sora));
+    let Some(units) = m::hit_units(record.mp_charge, level, sora) else {
+        event("+0lv0".into());
+        note(|| format!("hit on {:#x}: enemy level {level} (twin), no charge (KH1: level 0)", enemy & 0x00FF_FFFF));
+        return;
+    };
+    let why = format!(
+        "row {:#x} +0x2C {}, enemy level {level}{}, Sora level {sora}",
+        kh1_row.unwrap_or(0),
+        record.mp_charge,
+        if twin.is_some() { " (twin)" } else { " (no twin)" }
+    );
+    gain_charge(units, &why);
+}
+
+/// Once per frame of Sora's update at the KH1 setting (the request-bits wrapper): KH1's refill
+/// step (`0x1402A4CB0`) while a point is waiting; one atomic load otherwise.
+pub fn frame() {
+    if !REFILL_PENDING.load(Ordering::Relaxed) {
+        return;
+    }
+    if let Some((true, a)) = with_state(|mp| (mp.refill_step(), mp.view())) {
+        event(format!("pt{}", a.0));
+        note(|| format!("refill: point {} made: MP {}/{} c{}", a.0, a.0, a.1, a.2));
+    }
+}
+
+/// The F9 trace's MP token: `mp <MP>/<max> c<charge>` and the events since the last row.
+/// Recording only.
+pub fn trace_token() -> String {
+    // A read writes nothing (`crate::mp::stored` is None without a change).
+    let view = current();
+    let ev = EVENTS.lock().map(|mut g| std::mem::take(&mut *g)).unwrap_or_default();
+    m::trace_token(view, &ev)
+}
+
+/// Clears the trace's events (a new recording starts).
+pub fn clear_events() {
+    if let Ok(mut g) = EVENTS.lock() {
+        g.clear();
+    }
+}

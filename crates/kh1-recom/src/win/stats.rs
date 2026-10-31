@@ -178,6 +178,12 @@ pub fn lock_radius(enemy: usize) -> Option<f32> {
     STATS.get()?.lock_radius(class)
 }
 
+/// The KH1 twin's level (record r5, KH1 stats `+0xDC`) for this enemy, where its twin applies
+/// (decision 21): the level KH1's MP charge reads (`0x1402BF330`, `super::mp`).
+pub fn twin_level(enemy: usize) -> Option<i32> {
+    twin(enemy).map(|(_, t)| t.level)
+}
+
 /// Re:CoM's enemy stats init (`0x14017FF50(enemy, type, variant, …)`): at KH1, a twin's HP.
 pub unsafe extern "win64" fn stat_init(enemy: usize, kind: i32, variant: i32, x: i32) -> u64 {
     let o: StatInitFn = orig(&ORIG_STAT_INIT);

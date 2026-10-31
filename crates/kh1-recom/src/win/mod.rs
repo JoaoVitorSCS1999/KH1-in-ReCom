@@ -10,6 +10,7 @@ mod keyblades;
 mod menu;
 mod models;
 mod movement;
+mod mp;
 mod stats;
 mod sys;
 mod trace;
@@ -238,6 +239,12 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>) {
             ));
         }
         install_stats(base, stats_file);
+        log(&format!(
+            "mp: KH1 MP at combat = kh1 in Sora's story (M7 stage 7.1): save+{:#x}..={:#x} layout v{}; charge from KH1 hits in the enemy-hit wrapper, refill one point per frame in the request-bits wrapper; no hook of its own",
+            crate::mp::BLOCK_FIRST,
+            crate::mp::BLOCK_LAST,
+            crate::mp::LAYOUT_V1
+        ));
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
     }
