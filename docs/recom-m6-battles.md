@@ -94,7 +94,7 @@ What the skipped steps gave Re:CoM (Checked (decomp) unless tagged):
   each site must hold Re:CoM's or our bytes, else nothing is written (all or none, checked
   writes, undone on a failed write). At the Re:CoM setting the bytes are Re:CoM's own, byte for
   byte, from the next battle on. P1 follows the same decision for the whole battle.
-- **P4 follows `enemy_pace`** (0.13.3, decision 32; `battle::wanted`): in a KH1 battle P2 and P3
+- **P4 follows `enemy_pace`** (0.13.2, decision 32; `battle::wanted`): in a KH1 battle P2 and P3
   are ours, and P4 is ours only with `enemy_pace = kh1`. With `enemy_pace = recom` (the default)
   Re:CoM's crowd sharing stays: each ordinary enemy's think rate is multiplied by the number of
   enemies, so a crowd shares one attack budget, while several enemies can still attack at once
@@ -186,7 +186,8 @@ What the skipped steps gave Re:CoM (Checked (decomp) unless tagged):
 8. Human-boss fights: unchanged (`m6: class … plays a side-2 card at KH1`). Tutorial Leon's known
    P5 issue is stage 3.
 9. Riku's story: `battle start: Re:CoM (Riku's story)`, everything as Re:CoM.
-10. Feel: crowds attack as often as a lone enemy (P4).
+10. Feel: with `enemy_pace = recom` (default) a crowd shares one attack budget; with `kh1`
+    crowds attack as often as a lone enemy (P4).
 
 ## Stage 2: no deck for Sora (decision 29)
 

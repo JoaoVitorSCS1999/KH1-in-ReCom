@@ -11,6 +11,27 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 31: Enemy pace setting, version 0.13.2 (2026-10-31)
+
+> "is there a way to make enemies less aggressive? is there a system within KH1 that makes it so
+> that enemies dont attack as frequently?" … "lets try b for now" (decision 32)
+
+- Finding: KH1 has no shared attack limiter as far as checked (Shadow's script, the 26 common
+  syscalls: Checked (decomp + files); the other syscalls: Assumption). The extra aggression is
+  Stage 28's P4: Re:CoM's think rate `0x14017F380` is no longer multiplied by the enemy count,
+  but each Re:CoM enemy's solo rate was tuned to be shared. Checked (decomp).
+- Change: `enemy_pace = recom | kh1` in `kh1-recom.ini`, default `recom`. At each battle start
+  (manager ctor wrapper `0x1401859B0`) P2 and P3 follow the battle as before and P4
+  (`0x14017F3DE`, `83 F9 64 7D 26` <-> `83 F9 64 EB 26`) is ours only at `kh1`
+  (`battle::wanted`, `plan_each`). Enemies can still attack while others do (no card slot, P2,
+  P3).
+- Not in the Config menu: Re:CoM's item array has one free slot left (`recom-config-menu.md`).
+  Owner asked.
+- Not 1:1 at `recom` (it is Re:CoM's pacing); `kh1` is decision 30. Not seen in game.
+- The code went in with the previous commit; this one adds the version and notes.
+
+---
+
 ## Stage 30: KH1's post-hit invulnerability, version 0.13.1 (2026-10-31)
 
 > "Lets also carry over sora's KH1 mechanic where if he gets hit he has a period of time where
