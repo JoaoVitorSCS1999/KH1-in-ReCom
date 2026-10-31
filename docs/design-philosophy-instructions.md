@@ -298,6 +298,10 @@ At KH1 setting:
     (its HP-refill state step, its checkpoint heal, the level-up HP choice); **the six KH2
     Keyblades use their KH2 Magic stat as their max-MP bonus**. `recom-m7-mp.md`.
 
+36. M7 spells (owner, 2026-10-31): **Fire re-targets as KH1** (each frame, a ball with no live
+    target turns to the best enemy within 5 m: a wrapper on Re:CoM's homing step for our balls);
+    **spell hits use KH1's element resistances only** (no Re:CoM % on top).
+
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.
