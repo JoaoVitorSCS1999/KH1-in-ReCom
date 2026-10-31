@@ -510,7 +510,16 @@ for this stage. Code: `boss.rs`, `win/battle.rs` (P5, logs), `win/deck.rs` (enem
 - Logged: `m6: Sora's card duel (action 0x24, battle n) starts at KH1 …` (log-only hook on
   `0x140220C40`, `48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40`, 15 bytes moved; referenced only
   by the vtable and `.pdata`; Checked (exe)).
-- Owner question (not built; each changes the fight):
+- **Owner's choice (c), built in 0.14.1 (decision 33):** at KH1 the damage-check wrapper turns a
+  pending hit's reaction `0x21` (`player+0x710`, read once by `0x1401E6DE0` after its
+  hit-pending test `+0x720`) into the plain flinch 1 before Re:CoM's check runs. The damage is
+  unchanged (only kinds 8 and 0x22 change it). Sora never enters action 0x24. Marluxia 3 sets
+  its duel mode (`+0xCE4 |= 4`, `0x1403F3590`) only while Sora's action is 0x24, so it takes its
+  own no-duel branch (state 3: motion 0x34, `+0xCD4` = 100). Checked (decomp). Not seen in game.
+  Log: `attack: a card-duel hit (reaction 0x21) taken as a plain flinch at KH1`.
+  - The stock folder's hide (state 5 parking) no longer matters: the folder only plays cards in
+    the duel.
+- The question was:
   - (a) leave it as Re:CoM's duel, always lost at KH1;
   - (b) count a KH1 action as Sora's duel card (for example each KH1 hit on Marluxia 3 during
     the countdown breaks one of its six cards), through Re:CoM's own duel path;

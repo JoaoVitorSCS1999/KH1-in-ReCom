@@ -630,6 +630,11 @@ pub fn parse_stats(text: &str) -> Result<Kh1Stats, String> {
     Ok(Kh1Stats { sora_strength, base_strength, keyblades, enemies, lock_radius })
 }
 
+/// Re:CoM's hit reaction kinds on Sora (the damage check's switch, `0x1401E6DE0`): 1 the plain
+/// flinch, `0x21` the card duel (action `0x24`, `0x140220C40`). Checked (decomp).
+pub const RECOM_FLINCH_REACTION: u32 = 1;
+pub const RECOM_DUEL_REACTION: u32 = 0x21;
+
 /// KH1's post-hit invulnerability: every damage reaction (`0x14029CC40` … `0x14029D450`) calls
 /// `0x140297F30(Sora, 30.0)`: flag `0x80` (no damage, no reaction) with a 30-frame timer that
 /// `0x140297FE0` counts down by the frame step (1 at 60 fps) only once the reaction's lock is

@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 35: no card duel at KH1, version 0.14.1 (2026-10-31)
+
+> Owner: "c" (Marluxia 3's card duel: at KH1, the attack that starts it becomes a plain hit, so
+> the duel never starts; decision 33)
+
+- Re:CoM's damage check `0x1401E6DE0` reads the pending hit's reaction kind `player+0x710` once
+  (after the hit-pending test `+0x720`); kind `0x21` calls the card-duel init `0x140220C40`
+  (action 0x24). Kind 1 is the plain flinch. Damage depends only on kinds 8 and 0x22. Checked
+  (decomp).
+- Change: in the existing damage-check wrapper, at Combat = KH1 for the main Sora, a pending
+  kind `0x21` becomes 1 before Re:CoM's check runs. One read per frame. No new hook.
+- Marluxia 3 enters its duel mode (`+0xCE4 |= 4`, `0x1403F3590`) only while Sora's action is 0x24;
+  otherwise its state 3 plays its own no-duel branch (motion 0x34). Checked (decomp).
+- The hit also arms KH1's post-hit invulnerability (Stage 30). Not seen in game.
+
+---
+
 ## Stage 34: M6 stage 3, bosses, version 0.14.0 (2026-10-31)
 
 > "Lets move onto the next thing, go ahead" (M6 stage 3 per decisions 29, 30: bosses react to

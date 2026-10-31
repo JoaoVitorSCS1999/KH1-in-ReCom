@@ -31,7 +31,7 @@ use crate::movement::SwingStart;
 use crate::sites::data;
 use crate::units::to_kh1;
 use kh1_core::{Moveset, TargetPart, Vec3};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 pub static ORIG_REQUEST_BITS: AtomicUsize = AtomicUsize::new(0);
@@ -51,6 +51,11 @@ static TABLE: OnceLock<&'static [[u8; 16]]> = OnceLock::new();
 static MOVESET: OnceLock<Moveset> = OnceLock::new();
 /// The main player whose KH1 no-flinch is on.
 static NO_FLINCH: AtomicUsize = AtomicUsize::new(0);
+static DUEL_LINES: AtomicU32 = AtomicU32::new(0);
+/// The pending hit's reaction kind and the pending-hit count the damage check reads. Checked
+/// (decomp `0x1401E6DE0`).
+const HIT_KIND: usize = 0x710;
+const HIT_PENDING: usize = 0x720;
 /// The player in a hit reaction that started at the KH1 setting (decision 31).
 static HIT_ARMED: AtomicUsize = AtomicUsize::new(0);
 /// Re:CoM's hit reaction action, set only by the damage check `0x1401E6DE0`. Checked (decomp).
@@ -616,6 +621,9 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
         }
     }
     let kh1 = mv::kh1_sora(pl);
+    if kh1 {
+        no_card_duel(pl);
+    }
     let r = if NO_FLINCH.load(Ordering::Relaxed) != pl || !kh1 {
         o(pl)
     } else {
@@ -629,6 +637,22 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     };
     post_hit(pl, kh1);
     r
+}
+
+/// Decision 33: at KH1 a hit with Re:CoM's card-duel reaction (`0x21`, Marluxia 3) is a plain
+/// flinch (kind 1), so Sora never enters the duel (action `0x24`), which he can't win without
+/// cards. The damage check reads the kind from `+0x710` once, after its hit-pending test
+/// (`+0x720`), and the damage doesn't depend on it (only kinds 8 and 0x22 do). Marluxia 3
+/// starts its duel mode only while Sora's action is `0x24` (`0x1403F3590`, `+0xCE4 |= 4`; else its state 3 plays motion 0x34), so it
+/// takes its own no-duel branch. Checked (decomp).
+unsafe fn no_card_duel(pl: usize) {
+    if rd::<i16>(pl + HIT_PENDING) == 0 || rd::<u32>(pl + HIT_KIND) != atk::RECOM_DUEL_REACTION {
+        return;
+    }
+    wr(pl + HIT_KIND, atk::RECOM_FLINCH_REACTION);
+    if DUEL_LINES.fetch_add(1, Ordering::Relaxed) < 20 {
+        log("attack: a card-duel hit (reaction 0x21) taken as a plain flinch at KH1 (decision 33)");
+    }
 }
 
 /// KH1's post-hit invulnerability (decision 31) on Re:CoM's own hit-immunity timer `+0x7BC`.

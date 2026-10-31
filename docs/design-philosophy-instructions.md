@@ -262,6 +262,10 @@ At KH1 setting:
     style (one wide value) for Guard reactions and Enemy pace, so all three rows fit in Re:CoM's
     21 item slots (`recom-config-menu.md`).
 
+33. Marluxia 3's card duel (owner, 2026-10-31, "c"): at KH1 the attack that starts Re:CoM's card
+    duel (Sora's reaction `0x21`) is a plain hit, so the duel never starts (Sora has no cards to
+    duel with). `recom-m6-battles.md` § Marluxia 3's card duel.
+
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.
