@@ -3,8 +3,8 @@
 //! Re:CoM's Config screen is `CCamp`'s sub-screen run by `0x1400D3EB0` (input) and drawn by
 //! `0x1400DF1B0` (mode 9 rebuilds the rows). It has 5 rows (cursor `camp+0xBE8`, 0..4): rows 0-3
 //! are two-choice toggles kept in bytes `camp+0xBED + row`, row 4 shows a 4-value setting it
-//! cannot change. Checked (decomp + disasm). We add rows 5 ("Combat") and 6 ("Guard reactions",
-//! decision 27) below row 4, drawn by the same game code (its `CButton` items, its layout
+//! cannot change. Checked (decomp + disasm). We add rows 5 ("Combat"), 6 ("Guard reactions",
+//! decision 27) and 7 ("Enemy pace", decision 32) below row 4, drawn by the same game code (its `CButton` items, its layout
 //! positions, its cursor sprite and help line), and have Re:CoM's own 9-slice code draw its window
 //! panel one row taller per row we add (`panel`).
 //! See `docs/recom-config-menu.md`.
@@ -13,11 +13,12 @@
 pub const LAST_RECOM_ROW: i32 = 4;
 /// Our first row.
 pub const FIRST_ROW: i32 = 5;
-/// How many rows we add: 5 "Combat", 6 "Guard reactions".
-pub const ROWS: usize = 2;
+/// How many rows we add: 5 "Combat", 6 "Guard reactions", 7 "Enemy pace".
+pub const ROWS: usize = 3;
 /// Our row indices (`k`, row `FIRST_ROW + k`).
 pub const ROW_COMBAT: usize = 0;
 pub const ROW_GUARD_REACTIONS: usize = 1;
+pub const ROW_ENEMY_PACE: usize = 2;
 /// The last row the cursor can reach.
 pub const LAST_ROW: i32 = FIRST_ROW + ROWS as i32 - 1;
 
@@ -28,10 +29,30 @@ pub const SLOT_BASE: usize = 0xB38;
 pub const SLOT_COUNT: usize = 21;
 pub const FIRST_FREE_SLOT: usize = 14;
 
-/// Item slots our row `k` uses: label, option 0, option 1.
-pub fn slots(k: usize) -> [usize; 3] {
-    let s = FIRST_FREE_SLOT + 3 * k;
-    [s, s + 1, s + 2]
+/// How a row shows its values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Style {
+    /// Both options side by side, the chosen one highlighted (Re:CoM's rows 0..3; 3 items).
+    Pair,
+    /// One wide value showing the current option (Re:CoM's row 4, "Game Mode"; 2 items). Ours
+    /// flip with left / right.
+    Single,
+}
+
+/// Item slots our row `k` uses: the label, then its value items. The 7 free slots hold one
+/// pair row and two single rows (owner, 2026-10-31: option (a)).
+pub fn slots(k: usize) -> &'static [usize] {
+    const S: [&[usize]; ROWS] = [&[14, 15, 16], &[17, 18], &[19, 20]];
+    S[k]
+}
+
+/// The style a row's slots give it.
+pub fn style(k: usize) -> Style {
+    if slots(k).len() == 3 {
+        Style::Pair
+    } else {
+        Style::Single
+    }
 }
 
 /// What a frame of input does with the cursor on the Config screen.
@@ -111,6 +132,12 @@ pub const TEXT: [RowText; ROWS] = [
         options: [b"Off\0", b"On\0"],
         help: b"On: blocked attackers flinch, blocked shots fly back. KH1 only.\0",
     },
+    // Decision 32: only has an effect at Combat = KH1, from the next battle.
+    RowText {
+        label: b"Enemy pace\0",
+        options: [b"Re:CoM\0", b"KH1\0"],
+        help: b"Re:CoM: a crowd shares attacks. KH1: each attacks as if alone.\0",
+    },
 ];
 
 /// The help box shows about 69 characters of one line and cuts the rest (owner's screenshots,
@@ -148,6 +175,12 @@ pub fn selected(value: bool, option: usize) -> bool {
 pub const CURSOR_X_OFFSET: f32 = 150.0;
 /// Cursor animation for a toggle row (row 4 uses 0x100). Checked (disasm `0x1400DF93B`).
 pub const CURSOR_ANIM: u32 = 0xFA;
+/// Cursor animation on a single-value row (Re:CoM's row 4). Checked (decomp `0x1400DF1B0`).
+pub const CURSOR_ANIM_SINGLE: u32 = 0x100;
+
+/// Re:CoM's row 4 value item: sequence index 8 of `0x1407C1240`, x element 0x16, selected
+/// argument 0. Checked (decomp `0x1400DF1B0`).
+pub const SINGLE_VALUE_ITEM: usize = 8;
 
 /// The Config window panel (`camp+0xB30`, a `C2DSeqCtrl`), drawn taller by Re:CoM's own 9-slice
 /// code. Checked (decomp + disasm), see `docs/recom-config-menu.md`:
@@ -292,13 +325,15 @@ mod tests {
 
     #[test]
     fn edges_lead_to_our_rows() {
-        assert_eq!(LAST_ROW, 6);
+        assert_eq!(LAST_ROW, 7);
         assert_eq!(step(4, DOWN), Step::Move(5));
-        assert_eq!(step(0, UP), Step::Move(6));
+        assert_eq!(step(0, UP), Step::Move(7));
         assert_eq!(step(5, UP), Step::Move(4));
         assert_eq!(step(5, DOWN), Step::Move(6));
         assert_eq!(step(6, UP), Step::Move(5));
-        assert_eq!(step(6, DOWN), Step::Move(0));
+        assert_eq!(step(6, DOWN), Step::Move(7));
+        assert_eq!(step(7, UP), Step::Move(6));
+        assert_eq!(step(7, DOWN), Step::Move(0));
     }
 
     #[test]
@@ -310,6 +345,16 @@ mod tests {
         assert_eq!(step(6, LEFT), Step::Toggle(ROW_GUARD_REACTIONS));
         assert_eq!(step(6, RIGHT), Step::Toggle(ROW_GUARD_REACTIONS));
         assert_eq!(step(6, NONE), Step::Idle);
+        assert_eq!(step(7, LEFT), Step::Toggle(ROW_ENEMY_PACE));
+        assert_eq!(step(7, RIGHT), Step::Toggle(ROW_ENEMY_PACE));
+    }
+
+    #[test]
+    fn enemy_pace_row_text() {
+        let t = &TEXT[ROW_ENEMY_PACE];
+        assert_eq!(t.label, b"Enemy pace\0");
+        // Option 1 (true) is KH1, as for Combat.
+        assert_eq!(t.options, [&b"Re:CoM\0"[..], &b"KH1\0"[..]]);
     }
 
     #[test]
@@ -326,8 +371,9 @@ mod tests {
 
     #[test]
     fn slots_fit_in_the_free_ones() {
-        let all: Vec<usize> = (0..ROWS).flat_map(slots).collect();
-        assert_eq!(all, vec![14, 15, 16, 17, 18, 19]);
+        let all: Vec<usize> = (0..ROWS).flat_map(|k| slots(k).iter().copied()).collect();
+        assert_eq!(all, vec![14, 15, 16, 17, 18, 19, 20]);
+        assert_eq!([style(ROW_COMBAT), style(ROW_GUARD_REACTIONS), style(ROW_ENEMY_PACE)], [Style::Pair, Style::Single, Style::Single]);
         assert!(all.iter().all(|&s| (FIRST_FREE_SLOT..SLOT_COUNT).contains(&s)));
     }
 
@@ -403,8 +449,8 @@ mod tests {
     #[test]
     fn panel_grows_by_one_row_step_per_row() {
         assert_eq!(panel::grow(300.0, 319.5), 19.5 * ROWS as f32);
-        assert_eq!(ROWS, 2);
-        assert_eq!(panel::grow(300.0, 326.0), 52.0);
+        assert_eq!(ROWS, 3);
+        assert_eq!(panel::grow(300.0, 326.0), 78.0);
     }
 
     #[test]

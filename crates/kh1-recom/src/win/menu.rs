@@ -1,4 +1,4 @@
-//! Our rows in Re:CoM's Config screen ("Combat", "Guard reactions"), run by Re:CoM's own menu
+//! Our rows in Re:CoM's Config screen ("Combat", "Guard reactions", "Enemy pace"), run by Re:CoM's own menu
 //! code.
 //!
 //! - `cfg_input` wraps the screen's input handler `0x1400D3EB0`. Re:CoM's rows go to the
@@ -103,6 +103,7 @@ fn row_value(k: usize) -> bool {
     let s = super::settings();
     match k {
         menu::ROW_GUARD_REACTIONS => s.guard_reactions,
+        menu::ROW_ENEMY_PACE => s.enemy_pace == crate::settings::Mode::Kh1,
         _ => s.combat == crate::settings::Mode::Kh1,
     }
 }
@@ -331,8 +332,9 @@ unsafe fn build_rows(camp: *mut u8) {
     // Positions: below Re:CoM's last row, one row step at a time.
     let (lx, ly3, ly4) = (pos(lay, layout::LABEL[3].0), pos(lay, layout::LABEL[3].1), pos(lay, layout::LABEL[4].1));
     let (vx0, vx1) = (pos(lay, layout::VALUE_X[6]), pos(lay, layout::VALUE_X[7]));
+    let vxs = pos(lay, layout::VALUE_X[menu::SINGLE_VALUE_ITEM]);
     let (vy3, vy4) = (pos(lay, layout::VALUE_Y[3]), pos(lay, layout::VALUE_Y[4]));
-    let (Some(lx), Some(ly3), Some(ly4), Some(vx0), Some(vx1), Some(vy3), Some(vy4)) = (lx, ly3, ly4, vx0, vx1, vy3, vy4) else {
+    let (Some(lx), Some(ly3), Some(ly4), Some(vx0), Some(vx1), Some(vxs), Some(vy3), Some(vy4)) = (lx, ly3, ly4, vx0, vx1, vxs, vy3, vy4) else {
         if !LAYOUT_WARNED.swap(true, Ordering::Relaxed) {
             log("config menu: a camp.lad layout element was not found; our rows are not drawn");
         }
@@ -348,16 +350,17 @@ unsafe fn build_rows(camp: *mut u8) {
     let label_font = if !no_scale && (lang == 3 || lang == 6) { 0xC } else { 0xD };
     let label_seq = va(base(), sites::data::LABEL_SEQ) as *const u16;
     let value_seq = va(base(), sites::data::VALUE_SEQ) as *const *const u16;
-    // Row 3's value items (6 and 7) are the two-choice ones we copy.
+    // Row 3's value items (6 and 7) are the two-choice ones we copy; row 4's (8) the single one.
     let seq = [*value_seq.add(6), *value_seq.add(7)];
+    let seq_single = *value_seq.add(menu::SINGLE_VALUE_ITEM);
     let cursor = rd::<i32>(camp, CURSOR);
     let slots = camp.add(menu::SLOT_BASE) as *mut *mut u8;
-    let mut highlighted: Option<(usize, *mut u8)> = None;
+    let mut highlighted: Option<(usize, *mut u8, u32)> = None;
     for k in 0..menu::ROWS {
-        let [ls, v0, v1] = menu::slots(k);
+        let row_slots = menu::slots(k);
         let text = &menu::TEXT[k];
         let mut items = [std::ptr::null_mut::<u8>(); 3];
-        for (n, &slot) in [ls, v0, v1].iter().enumerate() {
+        for (n, &slot) in row_slots.iter().enumerate() {
             if !(*slots.add(slot)).is_null() {
                 // Not ours to replace (Re:CoM never fills these; another mod might).
                 log("config menu: item slot already in use; our rows are not drawn");
@@ -376,18 +379,27 @@ unsafe fn build_rows(camp: *mut u8) {
         setup(items[0], set, 0x10, label_seq, lp.0.as_ptr(), panel, text.label.as_ptr(), label_font, 0.0, f10, 0x42, std::ptr::null(), -1);
         let vy = menu::row_y(vy3.0[1], vy4.0[1], k);
         let value = row_value(k);
+        if menu::style(k) == menu::Style::Single {
+            // As Re:CoM's row 4: one wide value item showing the current option, selected 0.
+            let vp = Vec4([vxs.0[0], vy, 0.0, 1.0]);
+            setup(items[1], set, 0x10, seq_single, vp.0.as_ptr(), panel, text.options[value as usize].as_ptr(), 0xD, 0.0, f10, 0x42, std::ptr::null(), 0);
+            if row == cursor {
+                highlighted = Some((k, items[1], menu::CURSOR_ANIM_SINGLE));
+            }
+            continue;
+        }
         for opt in 0..2 {
             let x = if opt == 0 { vx0.0[0] } else { vx1.0[0] };
             let vp = Vec4([x, vy, 0.0, 1.0]);
             let sel = menu::selected(value, opt);
             setup(items[1 + opt], set, 0x10, seq[opt], vp.0.as_ptr(), panel, text.options[opt].as_ptr(), 0xD, 0.0, f10, 0x42, std::ptr::null(), sel as i32);
             if sel && row == cursor {
-                highlighted = Some((k, items[1 + opt]));
+                highlighted = Some((k, items[1 + opt], menu::CURSOR_ANIM));
             }
         }
     }
-    if let Some((k, item)) = highlighted {
-        move_cursor(camp, set, item);
+    if let Some((k, item, anim)) = highlighted {
+        move_cursor(camp, set, item, anim);
         let help: *mut u8 = rd(camp, HELP);
         if !help.is_null() {
             let set_text: SetTextFn = f(SET_TEXT_FN);
@@ -398,14 +410,14 @@ unsafe fn build_rows(camp: *mut u8) {
 
 /// Re:CoM's cursor sprite onto `item`, as the original does for a selected value
 /// (disasm `0x1400DF931..0x1400DF9EF`).
-unsafe fn move_cursor(camp: *mut u8, set: *const u8, item: *mut u8) {
+unsafe fn move_cursor(camp: *mut u8, set: *const u8, item: *mut u8, cursor_anim: u32) {
     let cur: *mut u8 = rd(camp, CURSOR_SPRITE);
     if cur.is_null() {
         return;
     }
     let vt: *const usize = rd(cur, 0);
     let anim: AnimFn = std::mem::transmute(*vt.add(0x20 / 8));
-    anim(cur, 0, set, menu::CURSOR_ANIM, 0.0, 0);
+    anim(cur, 0, set, cursor_anim, 0.0, 0);
     let sprite: *mut u8 = rd(item, 0x18);
     if sprite.is_null() {
         return;

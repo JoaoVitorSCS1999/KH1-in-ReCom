@@ -185,12 +185,19 @@ owner decision, 2026-10-30; see `recom-motion-switch.md`):
   the row under the cursor; the ini changes on each flip (`combat`, `guard_reactions`).
 - Opening and closing the camp and the Config screen repeatedly (item ownership and deletion).
 
-## Room for more rows (2026-10-31)
+## Room for more rows (2026-10-31; 0.13.4)
 
-- Each of our rows takes 3 item slots (label, 2 values) in `camp+0xB38`. Re:CoM's array has 21
-  slots and fills 0..13; our rows 5 and 6 take 14..19, so **only slot 20 is free**. Checked
-  (decomp, as above).
-- A third row (Enemy pace, decision 32) doesn't fit as a two-value row. Native options:
-  Re:CoM's row 4 style (label + one value item showing the current choice, 2 slots), used for
-  Guard reactions and Enemy pace (17..20); or a second page of rows. Owner question; until then
-  `enemy_pace` is set in `kh1-recom.ini` only.
+- Each two-value row takes 3 item slots (label, 2 values) in `camp+0xB38`. Re:CoM's array has
+  21 slots and fills 0..13, so 7 are free (14..20). Checked (decomp, as above).
+- Owner's choice (a): Combat stays a two-value row (14..16); **Guard reactions (17, 18) and Enemy
+  pace (19, 20) use Re:CoM's row 4 style** ("Game Mode"): the label and one wide value item that
+  shows the current option. All 21 slots are now used. `menu::slots`, `menu::Style`.
+- Row 4's item as Re:CoM builds it in mode 9 (Checked (decomp `0x1400DF1B0`)): value sequence
+  index 8 of `0x1407C1240`, x element `0x16`, the row's y element, selected argument 0, font 0xD;
+  with the cursor on it the cursor sprite plays animation `0x100` (not `0xFA`) and sits at the
+  item's position + the item's x offset. Our single rows build their value item the same way at
+  their own y; left / right flip the setting and the redraw shows the other option's text.
+- Enemy pace takes effect from the next battle (read at the battle manager's construction).
+- Assumption: the panel, now 3 rows taller, still ends above the camp's bottom bars (from the
+  owner's screenshot at 1275 × 716 there are about 60 px left below Guard reactions; one row is
+  about 49 px). Not seen in game.

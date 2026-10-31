@@ -58,6 +58,11 @@ pub(crate) fn toggle(k: usize) {
     let mut s = settings();
     if k == crate::menu::ROW_GUARD_REACTIONS {
         s.guard_reactions = !s.guard_reactions;
+    } else if k == crate::menu::ROW_ENEMY_PACE {
+        s.enemy_pace = match s.enemy_pace {
+            settings::Mode::Kh1 => settings::Mode::Recom,
+            settings::Mode::Recom => settings::Mode::Kh1,
+        };
     } else {
         s.combat = match s.combat {
             settings::Mode::Kh1 => settings::Mode::Recom,
@@ -72,6 +77,11 @@ pub(crate) fn toggle(k: usize) {
         if let Err(e) = std::fs::write(&p, settings::store(&text, &s)) {
             log(&format!("config menu: could not write {}: {e}", p.display()));
         }
+    }
+    if k == crate::menu::ROW_ENEMY_PACE {
+        // Read at each battle start (`battle::manager_ctor`).
+        log(&format!("config menu: enemy_pace = {} (from the next battle)", s.enemy_pace.as_str()));
+        return;
     }
     if k == crate::menu::ROW_GUARD_REACTIONS {
         attack::set_guard_reactions(s.guard_reactions);

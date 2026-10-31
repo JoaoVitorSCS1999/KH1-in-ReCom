@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 33: Enemy pace in the Config menu, version 0.13.4 (2026-10-31)
+
+> "also do A" (Guard reactions and Enemy pace as Re:CoM's one-value "Game Mode" style rows, so
+> both fit in the Config menu)
+
+- Re:CoM's Config items: 21 slots at `camp+0xB38`, Re:CoM uses 0..13. Combat keeps two values
+  (14..16); Guard reactions (17, 18) and the new Enemy pace (19, 20) are label + one wide value
+  item built like Re:CoM's row 4: value sequence 8 of `0x1407C1240`, x element `0x16`, selected
+  0, cursor animation `0x100`. Checked (decomp `0x1400DF1B0`).
+- Left / right on a single row flip the setting and redraw (the value shows the other option).
+  Enemy pace is written to `kh1-recom.ini` and read at the next battle start.
+- Help: "Re:CoM: a crowd shares attacks. KH1: each attacks as if alone." (62 characters).
+- Tests: slots 14..20 all used, styles, row 7 toggles, panel grows 3 rows. Assumption: the
+  taller panel still clears the camp's bottom bars. Not seen in game.
+
+---
+
 ## Stage 32: Config help lines fit the help box, version 0.13.3 (2026-10-31)
 
 > Owner's Config screenshots: the help line is cut at the box's right edge, so the Combat

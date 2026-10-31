@@ -258,8 +258,9 @@ At KH1 setting:
     the rest Assumption), but Re:CoM's enemies are tuned for its crowd sharing. Setting
     `enemy_pace = recom | kh1` (default `recom`): `recom` keeps Re:CoM's crowd sharing (P4 off),
     `kh1` is decision 30's "each attacks as if alone". Interim, until enemies get their KH1
-    twins' timing (M10). Only in the ini for now: the Config menu has no item slots left for a
-    third row (`recom-config-menu.md`); owner asked about the menu.
+    twins' timing (M10). Config row "Enemy pace" (0.13.4): the owner chose (a), Re:CoM's row 4
+    style (one wide value) for Guard reactions and Enemy pace, so all three rows fit in Re:CoM's
+    21 item slots (`recom-config-menu.md`).
 
 ## Known open design questions (ask the owner, don't guess)
 
