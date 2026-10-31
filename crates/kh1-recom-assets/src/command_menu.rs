@@ -22,7 +22,7 @@
 //! 0x6F is the glyph of KH1's blank command (0x42, message 305): read as '-' (GR / SP write that
 //! entry with 0x6E '-'; Assumption: a dash). Japanese uses another encoding: not decoded.
 
-use crate::mp_bar::{Seqd, NEUTRAL_UV};
+use crate::mp_bar::{scaled, uv_scale, Seqd, NEUTRAL_UV};
 use crate::{bad, Result};
 
 /// The manifest the DLL reads, next to `kh1-mp-bar.json`.
@@ -101,19 +101,32 @@ fn sprite_uv(seq: &Seqd, s: usize) -> [i32; 4] {
     [i32_at(r, 4), i32_at(r, 8), i32_at(r, 12), i32_at(r, 16)]
 }
 
-/// Re:CoM's plate animations (cap, strip) in this set, when they are where the base file has them.
-fn plate_anims(seq: &Seqd) -> Option<(usize, usize)> {
-    let r = group_anims(seq, SOURCE_PLATE)?;
+/// Re:CoM's plate animations (cap, strip) in group `g`, when it is Re:CoM's text plate.
+fn plate_at(seq: &Seqd, g: usize) -> Option<(usize, usize)> {
+    let r = group_anims(seq, g)?;
     if r.len() != 4 {
         return None;
     }
     let (cap, strip) = (r.start + 1, r.start + 2);
-    (sprite_uv(seq, anim_sprite(seq, cap)?) == CAP_UV && sprite_uv(seq, anim_sprite(seq, strip)?) == STRIP_UV).then_some((cap, strip))
+    let k = uv_scale(seq);
+    (sprite_uv(seq, anim_sprite(seq, cap)?) == scaled(CAP_UV, k) && sprite_uv(seq, anim_sprite(seq, strip)?) == scaled(STRIP_UV, k)).then_some((cap, strip))
 }
 
-/// The magic plate's icon colour (its 4th animation's sprite, top-left vertex).
+/// Re:CoM's text plate in this set: at the base file's group 0x19, else the first group with the
+/// same records (the language copies of `Cockpit.lad` have 6 more groups of their own, so their
+/// numbering is shifted; Checked (files), 2026-10-31). (group, cap, strip).
+fn plate_anims(seq: &Seqd) -> Option<(usize, usize, usize)> {
+    if let Some((c, s)) = plate_at(seq, SOURCE_PLATE) {
+        return Some((SOURCE_PLATE, c, s));
+    }
+    (0..seq.agroups.len()).find_map(|g| plate_at(seq, g).map(|(c, s)| (g, c, s)))
+}
+
+/// The magic plate's icon colour (its 4th animation's sprite, top-left vertex): group 0x1F, at the
+/// same shift as the text plate.
 pub fn highlight_colour(seq: &Seqd) -> Option<u32> {
-    let r = group_anims(seq, SOURCE_COLOUR)?;
+    let shift = plate_anims(seq).map_or(0isize, |(g, _, _)| g as isize - SOURCE_PLATE as isize);
+    let r = group_anims(seq, usize::try_from(SOURCE_COLOUR as isize + shift).ok()?)?;
     if r.len() != 4 {
         return None;
     }
@@ -125,7 +138,7 @@ pub fn highlight_colour(seq: &Seqd) -> Option<u32> {
 /// `colour` overrides the highlight colour (else the magic plate's, see [`highlight_colour`]).
 pub fn add_plates(seq: &mut Seqd, colour: Option<u32>) -> Result<(usize, Plates)> {
     let first = seq.agroups.len();
-    let Some((cap, strip)) = plate_anims(seq) else {
+    let Some((plate, cap, strip)) = plate_anims(seq) else {
         // Two empty groups keep every language copy's numbering the same.
         let mut g = seq.agroups[SOURCE_PLATE.min(seq.agroups.len() - 1)];
         g[0..4].copy_from_slice(&[0, 0, 0, 0]);
@@ -147,7 +160,7 @@ pub fn add_plates(seq: &mut Seqd, colour: Option<u32>) -> Result<(usize, Plates)
     let bound = rects.iter().fold([i32::MAX, i32::MAX, i32::MIN, i32::MIN], |b, r| [b[0].min(r[0]), b[1].min(r[1]), b[2].max(r[2]), b[3].max(r[3])]);
     let s = seq.sprites.len();
     let mut spr = [0u8; 0x2C];
-    for (i, v) in NEUTRAL_UV.iter().enumerate() {
+    for (i, v) in scaled(NEUTRAL_UV, uv_scale(seq)).iter().enumerate() {
         spr[4 + 4 * i..8 + 4 * i].copy_from_slice(&v.to_le_bytes());
     }
     for i in 0..4 {
@@ -169,7 +182,7 @@ pub fn add_plates(seq: &mut Seqd, colour: Option<u32>) -> Result<(usize, Plates)
     // new sprite group.
     let mut over = seq.anims[strip];
     over[4..8].copy_from_slice(&(g as i32).to_le_bytes());
-    let src = seq.agroups[SOURCE_PLATE];
+    let src = seq.agroups[plate];
     for anims in [vec![seq.anims[cap], seq.anims[strip]], vec![seq.anims[cap], seq.anims[strip], over]] {
         let a0 = seq.anims.len();
         let n = anims.len();

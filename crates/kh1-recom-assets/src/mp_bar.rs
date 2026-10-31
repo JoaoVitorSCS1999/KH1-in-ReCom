@@ -49,6 +49,31 @@ pub const BASE_GROUPS: usize = 151;
 /// a block of texels (128, 128, 128, opaque). Checked (files).
 pub const NEUTRAL_UV: [i32; 4] = [254, 47, 255, 48];
 
+/// The atlas scale of a `Cockpit:00`: 1 in the base file (PS2 atlas), 2 in the PC language copies
+/// (`UK_Cockpit.lad` …, HD atlas: every UV doubled, e.g. group 0's sprite [254, 49, 255, 50] →
+/// [508, 98, 510, 100]; Checked (files, owner's Recom.pkg, 2026-10-31)). From group 0's sprite.
+pub fn uv_scale(seq: &Seqd) -> i32 {
+    const BASE: [i32; 4] = [254, 49, 255, 50];
+    let uv = (|| {
+        let g = seq.agroups.first()?;
+        let a = i16::from_le_bytes([g[0], g[1]]);
+        let sg = i32::from_le_bytes(seq.anims.get(usize::try_from(a).ok()?)?[4..8].try_into().ok()?);
+        let p = i16::from_le_bytes(seq.sgroups.get(usize::try_from(sg).ok()?)?[0..2].try_into().ok()?);
+        let s = i32::from_le_bytes(seq.parts.get(usize::try_from(p).ok()?)?[16..20].try_into().ok()?);
+        let r = seq.sprites.get(usize::try_from(s).ok()?)?;
+        Some([0, 1, 2, 3].map(|k| i32::from_le_bytes(r[4 + 4 * k..8 + 4 * k].try_into().unwrap())))
+    })();
+    match uv {
+        Some(u) if u == BASE.map(|v| v * 2) => 2,
+        _ => 1,
+    }
+}
+
+/// `uv` in this set's atlas.
+pub fn scaled(uv: [i32; 4], scale: i32) -> [i32; 4] {
+    uv.map(|v| v * scale)
+}
+
 /// KH1 draws at most 20 MP (`0x14026C6E0` caps the straight segments at 0x14). Checked (decomp).
 pub const SLOTS: i32 = 20;
 /// Charge units per slot: point k needs 30·k (`0x1402A4CB0`), and the gauge draws charge c as c
@@ -458,15 +483,16 @@ pub fn add_bar(seq: &mut Seqd, look: &Kh1Look, neutral: [u8; 4]) -> Result<usize
 
 fn add_bar_unchecked(seq: &mut Seqd, look: &Kh1Look, neutral: [u8; 4]) -> Result<usize> {
     let s0 = seq.sprites.len();
+    let nuv = scaled(NEUTRAL_UV, uv_scale(seq));
     let v = |c: [u8; 4]| vertex_colour(c, neutral);
     let flat = |c: u32| [c; 4];
     // Vertex order TL, TR, BL, BR: Re:CoM's digit sprites shade top → bottom as (c, c, d, d).
     // Checked (files: gauge:01 sprites 23–32); the corner order itself: Assumption.
     let vertical = |top: u32, bottom: u32| [top, top, bottom, bottom];
-    seq.sprites.push(sprite(NEUTRAL_UV, flat(v(look.border)))); // +0 border
-    seq.sprites.push(sprite(NEUTRAL_UV, flat(v(look.back)))); // +1 track fill
-    seq.sprites.push(sprite(NEUTRAL_UV, vertical(v(look.mp_top), v(look.mp_bottom)))); // +2 MP
-    seq.sprites.push(sprite(NEUTRAL_UV, vertical(v(look.charge_top), v(look.charge_bottom)))); // +3 charge
+    seq.sprites.push(sprite(nuv, flat(v(look.border)))); // +0 border
+    seq.sprites.push(sprite(nuv, flat(v(look.back)))); // +1 track fill
+    seq.sprites.push(sprite(nuv, vertical(v(look.mp_top), v(look.mp_bottom)))); // +2 MP
+    seq.sprites.push(sprite(nuv, vertical(v(look.charge_top), v(look.charge_bottom)))); // +3 charge
     let (w, h, hc, bh) = (look.slot_w, look.mp_h, look.charge_h, look.border_h);
     let p0 = seq.parts.len();
     seq.parts.push(part([-1, Y0 - bh, w + 1, Y0 + h + bh], s0)); // +0 border

@@ -454,7 +454,7 @@ fn command_menu_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_f
     let raw = arc.read_raw_entry(e).map_err(|e| e.to_string())?;
     let (spr, spr_assets) = kh1_formats::egs::decode_entry_full(&keys, &raw).map_err(|e| e.to_string())?;
     let base = cm::probe_plates(&spr).ok_or("FO0002.SPR: no Cockpit.lad")?;
-    for a in &spr_assets {
+    for a in spr_assets.iter().filter(|a| !a.data.starts_with(b"LAYD") || a.name.to_ascii_lowercase().ends_with("cockpit.lad")) {
         if let Some(p) = cm::probe_plates(&a.data) {
             if !p.found {
                 println!("note: FO0002.SPR asset {}: Re:CoM's text plate is not where the base file has it; its menu rows have no plates", a.name);

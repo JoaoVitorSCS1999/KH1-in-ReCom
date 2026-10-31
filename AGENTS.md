@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 42: HD atlas scale for the bar and the menu plates, version 0.17.1 (2026-10-31)
+
+- The owner's `FO0002.SPR` language copies are HD layouts with every UV × 2 (Checked, files), so
+  0.17.0's asset step found no text plate there and wrote the bar's sprites at PS2 UVs. The step
+  now scales the bar's and the plates' UVs by each set's atlas scale and finds the plate in every
+  copy. Rebuilt and installed on the owner's PC. Not seen in game.
+
+---
+
 ## Stage 41: M7 stage 7.3, KH1's command menu, version 0.17.0 (2026-10-31)
 
 > Decision 34: command menu from Re:CoM's pieces, laid out like KH1's, field and battle, plate

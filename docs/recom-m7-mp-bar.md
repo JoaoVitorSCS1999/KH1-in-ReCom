@@ -242,3 +242,15 @@ prefix) or a whole container, keeps the other assets as they are, and writes:
   2`). The DLL expects the loaded `Cockpit:00` to have `first + 8 + extra` groups (161 / 167);
   a 7.2 manifest (no key) keeps 159 / 165. A 0.16.1 DLL with the new files finds 161 and makes
   no bar: the DLL and the asset step's files go together. `docs/recom-m7-command-menu.md`.
+
+## HD atlas in the language copies (0.17.1)
+
+- Dumping the owner's `FO0002.SPR` (2026-10-31): the language copies of `Cockpit.lad` are the PC's
+  HD layouts; every sprite UV is the base file's × 2 (group 0's [254, 49, 255, 50] →
+  [508, 98, 510, 100]; the text plate's cap [229, 110, 255, 135] → [458, 220, 510, 270]), and the
+  group numbering below 0x28 is the same. Checked (files).
+- The asset step now reads each set's atlas scale (`mp_bar::uv_scale`) and writes the bar's and
+  the plates' sprites at that scale, and finds the text plate in every copy. Assumption: the HD
+  atlas's texel at the doubled neutral UV is the same grey (the bar's colours are computed from the
+  PS2 texel 128); if the bar looks twice too dark or bright on screen, that is why.
+- Rebuilt on the owner's PC; `kh1-command-menu.json` added to the mod and `mod.yml`.
