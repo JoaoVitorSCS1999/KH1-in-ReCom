@@ -523,14 +523,28 @@ fn add_bar_unchecked(seq: &mut Seqd, look: &Kh1Look, neutral: [u8; 4]) -> Result
     Ok(first)
 }
 
-/// Adds the bar to a `Cockpit.lad` (its SEQD 0, `Cockpit:00`).
+/// Adds the bar, then the command menu's plates (M7 stage 7.3, `crate::command_menu`), to a
+/// `Cockpit.lad` (its SEQD 0, `Cockpit:00`). A set that already ends with what this adds (this
+/// step's output fed back) is refused.
 pub fn patch_layout(lad: &[u8], look: &Kh1Look, neutral: [u8; 4]) -> Result<(Vec<u8>, usize)> {
     let mut l = Layd::parse(lad)?;
     let mut s = Seqd::parse(&l.seqs[0])?;
+    let mut probe = s.clone();
+    let p0 = probe.sprites.len();
+    if add_bar_unchecked(&mut probe, look, neutral).is_ok() && crate::command_menu::add_plates(&mut probe, None).is_ok() {
+        let ours = &probe.sprites[p0..];
+        if !ours.is_empty() && s.sprites.len() >= ours.len() && s.sprites[s.sprites.len() - ours.len()..] == *ours {
+            return bad(format!("{SET} already ends with the MP bar's and the command menu's sprites (already patched)"));
+        }
+    }
     let first = add_bar(&mut s, look, neutral)?;
+    crate::command_menu::add_plates(&mut s, None)?;
     l.seqs[0] = s.write();
     Ok((l.write(), first))
 }
+
+/// Our groups after the bar's: the command menu's plates (`kh1-mp-bar.json` `extra_groups`).
+pub const EXTRA_GROUPS: usize = crate::command_menu::group::COUNT;
 
 /// Adds the bar to the `Cockpit.lad` inside an `FO0002.SPR` container.
 pub fn patch_spr(spr: &[u8], look: &Kh1Look, neutral: [u8; 4]) -> Result<(Vec<u8>, usize)> {
@@ -840,6 +854,7 @@ pub fn manifest_json(first: usize, firsts: &[usize], look: &Kh1Look, neutral: [u
     let _ = writeln!(s, "  \"first_group\": {first},");
     let _ = writeln!(s, "  \"first_groups\": [{}],", firsts.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"group_count\": {},", group::COUNT);
+    let _ = writeln!(s, "  \"extra_groups\": {EXTRA_GROUPS},");
     let _ = writeln!(s, "  \"slots\": {SLOTS},");
     let _ = writeln!(s, "  \"units_per_slot\": {UNITS_PER_SLOT},");
     let _ = writeln!(s, "  \"pitch\": {PITCH},");
@@ -1013,7 +1028,9 @@ mod tests {
         assert_eq!(first, BASE_GROUPS);
         let p = Layd::parse(&out).unwrap();
         assert_eq!(p.seqs[1], other);
-        assert_eq!(Seqd::parse(&p.seqs[0]).unwrap().agroups.len(), BASE_GROUPS + group::COUNT);
+        assert_eq!(Seqd::parse(&p.seqs[0]).unwrap().agroups.len(), BASE_GROUPS + group::COUNT + EXTRA_GROUPS);
+        // Fed back: refused.
+        assert!(patch_layout(&out, &look(), [128, 128, 128, 255]).is_err());
         // As an asset: a language's layout is patched by name, anything else kept.
         assert!(matches!(patch_asset("UK_Cockpit.lad", &l, &look(), [128; 4]).unwrap().1, Patched::Bar(_)));
         assert_eq!(patch_asset("UK_gauge.lad", &l, &look(), [128; 4]).unwrap(), (l.clone(), Patched::Kept));
@@ -1152,7 +1169,10 @@ mod tests {
         let p = Container::parse(&out).unwrap();
         assert_eq!(p.find("gauge.lad").unwrap().data, c.find("gauge.lad").unwrap().data);
         let s = Seqd::parse(&Layd::parse(&p.find(LAYOUT).unwrap().data).unwrap().seqs[0]).unwrap();
-        assert_eq!(s.agroups.len(), BASE_GROUPS + group::COUNT);
+        assert_eq!(s.agroups.len(), BASE_GROUPS + group::COUNT + EXTRA_GROUPS);
+        // The command menu's plates were found in Re:CoM's own records (not two empty groups).
+        let g = &s.agroups[BASE_GROUPS + group::COUNT + crate::command_menu::group::PLATE_HIGHLIGHT];
+        assert_eq!(i16::from_le_bytes([g[2], g[3]]), 3);
         if let Ok(o) = std::env::var("KH1_MP_BAR_OUT") {
             std::fs::write(o, &out).unwrap();
         }

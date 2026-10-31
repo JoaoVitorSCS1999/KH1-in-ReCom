@@ -3,6 +3,7 @@
 
 mod attack;
 mod battle;
+mod command_menu;
 mod deck;
 mod guard;
 mod hook;
@@ -184,7 +185,8 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     }
     let stats_file = recom_bases(dirs).into_iter().map(|b| b.join("kh1-stats.json")).find(|p| p.is_file());
     let bar_file = recom_bases(dirs).into_iter().map(|b| b.join("kh1-mp-bar.json")).find(|p| p.is_file());
-    install_attack(base, s, stats_file.as_deref(), bar_file.as_deref());
+    let menu_file = recom_bases(dirs).into_iter().map(|b| b.join("kh1-command-menu.json")).find(|p| p.is_file());
+    install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref());
     install_battles(base);
     let th = &crate::sites::TRACE_HOOKS;
     let hooks = [
@@ -202,7 +204,7 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
 
 /// KH1's Attack (`attack`, `docs/recom-kh1-attack.md`): the KH1 rows, the data patches, then the
 /// hooks, all or nothing. Needs the movement handlers.
-fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file: Option<&Path>) {
+fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file: Option<&Path>, menu_file: Option<&Path>) {
     if !movement::installed() {
         log("attack: movement not hooked; KH1 Attack not installed");
         return;
@@ -251,7 +253,10 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         ));
         install_mp_refills(base);
         // The MP bar (M7 stage 7.2): Re:CoM's player gauge draws it; needs the asset step's file.
-        mp_bar::install(base, bar_file);
+        // The command menu (7.3) runs from its wrappers and needs its plate groups.
+        if mp_bar::install(base, bar_file) {
+            command_menu::install(base, menu_file, s);
+        }
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
     }

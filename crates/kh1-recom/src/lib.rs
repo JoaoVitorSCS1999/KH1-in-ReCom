@@ -32,6 +32,10 @@
 //! - at `combat = kh1`, in Sora's story, a KH1 MP bar under Re:CoM's HP bar: new groups the asset
 //!   step adds to Re:CoM's `Cockpit:00`, played on a `C2DSeqCtrl` of Re:CoM's player gauge, set
 //!   only when MP changes (`mp_bar`; `docs/recom-m7-mp-bar.md`);
+//! - at `combat = kh1`, in Sora's story, KH1's command menu (Attack / Magic / Items / context,
+//!   the Magic list) in the field and in battle: Re:CoM's own text plates (new groups of
+//!   `Cockpit:00`) and `C2DFnt` text with KH1's own words, KH1's cursor rules, fades and greying;
+//!   confirm runs the highlighted row (`command_menu`; `docs/recom-m7-command-menu.md`);
 //! - F9 records a Re:CoM trace in kh1-trace's CSV schema (`trace`).
 //!
 //! `motions` (with `json`) reads the asset build step's manifest and `PL0001.ANN` header, for the
@@ -40,6 +44,7 @@
 pub mod attack;
 pub mod battle;
 pub mod boss;
+pub mod command_menu;
 pub mod deck;
 pub mod guard;
 pub mod hookplan;

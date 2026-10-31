@@ -326,7 +326,8 @@ unsafe fn build(gauge: usize) {
     }
 }
 
-/// `CPlayerGauge` init (`0x140208360`): Re:CoM's, then our bar.
+/// `CPlayerGauge` init (`0x140208360`): Re:CoM's, then our bar, then the command menu (M7
+/// stage 7.3, `super::command_menu`), which uses the plate groups after the bar's.
 pub unsafe extern "win64" fn gauge_init(gauge: usize) {
     orig::<GaugeFn>(&ORIG_INIT)(gauge);
     if let Ok(mut s) = STATE.lock() {
@@ -335,6 +336,16 @@ pub unsafe extern "win64" fn gauge_init(gauge: usize) {
         }
     }
     build(gauge);
+    super::command_menu::build(gauge);
+}
+
+/// The command menu's two plate groups (`kh1-mp-bar.json` `extra_groups`, after the bar's in the
+/// loaded copy of the set) and the set's NUL-terminated name. None before a bar was built on a
+/// set that has them.
+pub fn menu_groups() -> Option<(*const u8, u32)> {
+    let l = layout()?;
+    let f = FIRST.load(Ordering::Relaxed);
+    (l.0.extra_groups >= 2 && f != 0).then(|| (l.1.as_ptr(), f + mb::group::COUNT))
 }
 
 /// `CPlayerGauge` second-bar state (`0x14020C190(gauge, state)`): Re:CoM's (the Dark gauge),
@@ -360,11 +371,13 @@ pub unsafe extern "win64" fn gauge_state(gauge: usize, state: u32) {
     if show {
         refresh();
     }
+    super::command_menu::hud(gauge, state);
 }
 
 /// `CPlayerGauge`'s deleting dtor (`0x140207770`): our controls first (they hang from its HP
 /// control), then Re:CoM's.
 pub unsafe extern "win64" fn gauge_dtor(gauge: usize, flags: u32) -> usize {
+    super::command_menu::destroy(gauge);
     if let Ok(mut s) = STATE.lock() {
         s.gauges.retain(|&g| g != gauge);
         for mut b in s.bars.extract_if(.., |b| b.gauge == gauge) {
@@ -398,11 +411,15 @@ pub fn refresh() {
             unsafe { build(g) };
         }
         let _ = super::mp::current(); // calls `sync`
+        let gauges: Vec<usize> = STATE.lock().map(|s| s.gauges.clone()).unwrap_or_default();
+        super::command_menu::refresh(&gauges);
     } else if let Ok(mut s) = STATE.lock() {
         for mut b in s.bars.drain(..) {
             // SAFETY: as in `sync`.
             unsafe { b.destroy() };
         }
         note(|| "combat is not KH1 here: bars removed".to_string());
+        drop(s);
+        super::command_menu::refresh(&[]);
     }
 }

@@ -100,7 +100,23 @@ fn with_state<R>(f: impl FnOnce(&mut Mp) -> R) -> Option<R> {
     REFILL_PENDING.store(l.mp.refill_ready(), Ordering::Relaxed);
     // The MP bar (stage 7.2) shows what was just read or written: only a compare when unchanged.
     super::mp_bar::sync(l.mp.view());
+    // The command menu (stage 7.3) greys spells by it: one atomic store.
+    super::command_menu::mp_seen(l.mp.view());
     Some(r)
+}
+
+/// Sora's KH1 spell levels from the block (`crate::mp::off::SPELLS`; stage 7.11 writes them),
+/// Fire … Aero, 0 = not learned. All zero when MP isn't live. A read only.
+pub fn spell_levels() -> [u8; 7] {
+    if !active() {
+        return [0; 7];
+    }
+    let Some(s) = save() else { return [0; 7] };
+    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST < 0x2818).
+    let block: [u8; BLOCK_LEN] = unsafe { rd(s + BLOCK_FIRST) };
+    let mut out = [0u8; 7];
+    out.copy_from_slice(&block[m::off::SPELLS..m::off::SPELLS + m::off::SPELL_COUNT]);
+    out.map(|l| if l <= 3 { l } else { 0 })
 }
 
 /// (MP, max MP, charge), or None when MP isn't live.
@@ -109,7 +125,7 @@ pub fn current() -> Option<(i32, i32, u16)> {
 }
 
 /// KH1's MP test (`0x1402A4C10`), cost in KH1's encoding (`crate::mp::cost`).
-#[allow(dead_code)] // API for the command menu (7.3) and the spells (7.4+); no caller in 7.1.
+#[allow(dead_code)] // API for the spells (7.4+); the menu tests its cached view (`crate::mp::Mp`).
 pub fn can_pay(cost: i32) -> bool {
     with_state(|mp| mp.can_pay(cost)).unwrap_or(false)
 }

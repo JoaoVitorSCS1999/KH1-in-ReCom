@@ -66,17 +66,21 @@ pub struct Layout {
     pub x0: i32,
     pub frame_max: i32,
     pub fade_frames: i32,
+    /// Groups the asset step added after the bar's (M7 stage 7.3: the command menu's plates,
+    /// `crate::command_menu`); 0 in a 7.2 manifest.
+    pub extra_groups: u32,
 }
 
 impl Layout {
     /// The group count the base file's set has with our groups.
     pub fn total_groups(&self) -> u32 {
-        self.first_group + group::COUNT
+        self.first_group + group::COUNT + self.extra_groups
     }
 
-    /// Our first group in a loaded set of `n` groups: the copy whose own count is `n − COUNT`.
+    /// Our first group in a loaded set of `n` groups: the copy whose own count is
+    /// `n − COUNT − extra`.
     pub fn first_for(&self, n: u32) -> Option<u32> {
-        let f = n.checked_sub(group::COUNT)?;
+        let f = n.checked_sub(group::COUNT + self.extra_groups)?;
         (f == self.first_group || self.first_groups.contains(&f)).then_some(f)
     }
 }
@@ -105,7 +109,11 @@ pub fn parse_manifest(text: &str) -> Result<Layout, String> {
         x0: i("x0")?,
         frame_max: i("frame_max")?,
         fade_frames: i("fade_frames")?,
+        extra_groups: v.get("extra_groups").and_then(|x| x.as_f64()).map_or(0, |x| x as u32),
     };
+    if l.extra_groups > 16 {
+        return Err(format!("unexpected extra_groups {}", l.extra_groups));
+    }
     if n("group_count")? as u32 != group::COUNT || l.first_group != l.base_groups {
         return Err("group numbering is not this DLL's".into());
     }
@@ -223,6 +231,10 @@ mod tests {
         let m2 = parse_manifest(&MANIFEST.replace("\"first_group\": 151,", "\"first_group\": 151,\n  \"first_groups\": [151, 157],")).unwrap();
         assert_eq!((m2.first_for(159), m2.first_for(165)), (Some(151), Some(157)));
         assert!(parse_manifest(&MANIFEST.replace("\"first_group\": 151", "\"first_group\": 150")).is_err());
+        // 7.3's manifest: the command menu's two plate groups after the bar's.
+        assert_eq!(l.extra_groups, 0);
+        let m3 = parse_manifest(&MANIFEST.replace("\"first_group\": 151,", "\"first_group\": 151,\n  \"first_groups\": [151, 157],\n  \"extra_groups\": 2,")).unwrap();
+        assert_eq!((m3.total_groups(), m3.first_for(161), m3.first_for(167), m3.first_for(159)), (161, Some(151), Some(157), None));
     }
 
     #[test]

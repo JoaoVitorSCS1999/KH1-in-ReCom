@@ -20,6 +20,8 @@
 //! - [`stats`]: KH1 enemy twins' records and Sora's KH1 Strength (`kh1-stats.json`);
 //! - [`mp_bar`]: the MP bar (M7 stage 7.2): KH1's gauge colours as new groups in Re:CoM's
 //!   `Cockpit:00` (`FORM/0002/FO0002.SPR`) and `kh1-mp-bar.json`;
+//! - [`command_menu`]: KH1's command menu (M7 stage 7.3): its words from the player's KH1
+//!   `Word.bin` (`kh1-command-menu.json`) and Re:CoM's row plates as groups of `Cockpit:00`;
 //! - [`flip`]: the "Re:CoM's content in KH1" model-writer test (`kh1-flip-test`).
 //!
 //! No game data is embedded; everything is read from the user's files at run time.
@@ -29,6 +31,7 @@
 
 pub mod ann;
 pub mod build;
+pub mod command_menu;
 pub mod convert;
 pub mod flip;
 pub mod install;

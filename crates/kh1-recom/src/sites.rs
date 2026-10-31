@@ -636,6 +636,31 @@ pub const MP_BAR_PTRS: &[PtrSite] = &[
     PtrSite { name: "C2DSeq vtable +0x10 (0x140607270)", rva: 0x0060_7270, target: 0x0024_6A40 },
 ];
 
+/// The command menu (M7 stage 7.3, `win::command_menu`, `docs/recom-m7-command-menu.md`): no hook
+/// of its own (it runs from the MP bar's gauge wrappers and the request-bits wrapper). Re:CoM's
+/// `C2DSeqCtrl` functions it calls beyond the MP bar's and the Keyblades page's.
+pub const COMMAND_MENU_CALLEES: &[Site] = &[
+    // movaps xmm0,[rdx]; movdqa [rcx+0x120],xmm0; ret: the control's colour (RGBA floats, 1.0 =
+    // ×1), used when `+0x138` is set (`0x14024BB10`). Re:CoM's camp and HUD call it.
+    Site { name: "C2DSeqCtrl colour (0x140248590)", rva: 0x0024_8590, expect: &[0x0F, 0x28, 0x02, 0x66, 0x0F, 0x7F, 0x81, 0x20, 0x01, 0x00, 0x00, 0xC3] },
+    // vtable +0x60: add a text item (ctrl, set, item, x, y, screen x offset); `CStockFolder`
+    // (`0x1401658F0`) puts its labels on `Cockpit:00` plates with it.
+    Site { name: "C2DSeqCtrl add text (0x1402476F0)", rva: 0x0024_76F0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0x8B, 0x01, 0x0F, 0x29, 0x74, 0x24, 0x20] },
+];
+
+/// Re:CoM code the context row's reading relies on (not called).
+pub const COMMAND_MENU_CHECKED: &[Site] = &[
+    // The field action pick `0x1401E80C0`: the object is player +0x5FC's handle when > 0, else
+    // +0x84C's (mov esi,[rcx+0x5FC]; test; jg; mov esi,[rcx+0x84C]; test; jg).
+    Site { name: "field action pick: handles (0x1401E80E8)", rva: 0x001E_80E8, expect: &[0x8B, 0xB1, 0xFC, 0x05, 0x00, 0x00, 0x85, 0xF6, 0x7F, 0x11, 0x8B, 0xB1, 0x4C, 0x08, 0x00, 0x00, 0x85, 0xF6, 0x7F, 0x07] },
+    // CGimmickDoor's type getter (vtable 0x140572478 +0x28): 0x1006, or 0x1005 while
+    // `0x1401B0870(1)` (sub rsp,0x28; mov edx,0x24; lea ecx,[rdx-0x23]).
+    Site { name: "door type getter (0x1401B8A10)", rva: 0x001B_8A10, expect: &[0x48, 0x83, 0xEC, 0x28, 0xBA, 0x24, 0x00, 0x00, 0x00, 0x8D, 0x4A, 0xDD] },
+];
+
+/// The vtable slot the menu calls through. Checked (exe; relocated pointer).
+pub const COMMAND_MENU_PTRS: &[PtrSite] = &[PtrSite { name: "C2DSeqCtrl vtable +0x60 (0x1406073A0)", rva: 0x0060_73A0, target: 0x0024_76F0 }];
+
 /// Data this version reads or calls through, with its address (Steam). Checked (exe).
 pub mod data {
     /// Sequence ids for label items (`u16[]`).
@@ -700,6 +725,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(MP_BAR_HOOKS)
         .chain(MP_BAR_CALLEES)
         .chain(MP_BAR_CHECKED)
+        .chain(COMMAND_MENU_CALLEES)
+        .chain(COMMAND_MENU_CHECKED)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -980,6 +1007,27 @@ mod tests {
         assert_eq!(MP_BAR_PTRS[1].rva - MP_BAR_PTRS[0].rva, 8);
         // The bound check sits inside the instantiation, after its checked start.
         assert!(MP_BAR_CHECKED[3].rva + MP_BAR_CHECKED[3].expect.len() as u32 <= MP_BAR_CHECKED[4].rva);
+    }
+
+    #[test]
+    fn command_menu_sites() {
+        // New callees are no other stage's site; the slot points at the checked add-text.
+        for c in COMMAND_MENU_CALLEES.iter().chain(COMMAND_MENU_CHECKED) {
+            assert!(c.expect.len() >= 5, "{}", c.name);
+            assert_eq!(all_sites().filter(|s| s.rva == c.rva).count(), 1, "{}", c.name);
+        }
+        for p in COMMAND_MENU_PTRS {
+            assert!(COMMAND_MENU_CALLEES.iter().any(|s| s.rva == p.target), "{}", p.name);
+            assert!(!all_sites().any(|s| s.rva == p.rva), "{}", p.name);
+            // C2DSeqCtrl's vtable (0x140607340) + 0x60.
+            assert_eq!(p.rva, MP_BAR_PTRS[0].rva + 0x60);
+        }
+        // What the menu also calls is checked by earlier stages: operator new, the C2DSeqCtrl
+        // ctor / add layer / layout position / raw position / scale / deleting dtor, the C2DFnt
+        // ctor, the menu sound, the pad reads, handle → object.
+        for rva in [0x004A_CE54u32, 0x0024_7260, 0x0024_7850, 0x0024_8660, 0x0024_85B0, 0x0024_86D0, 0x0015_D230, 0x0024_3F10, 0x002A_A360, 0x0029_B2F0, 0x0029_B410, 0x0029_B490, 0x002A_D350] {
+            assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
+        }
     }
 
     #[test]

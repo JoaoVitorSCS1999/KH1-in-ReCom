@@ -558,3 +558,64 @@ Then Build in the Mods Manager and restart the game (Panacea lists `raw/` files 
 Without `--out`, `kh1-recom-build --game .` writes both straight into
 `<mod_path>/recom/` (from `panacea_settings.txt`). Please send the step's printed `MP bar:` line
 and the `mp bar:` lines of `kh1-recom.log`.
+
+## The command menu (`kh1-command-menu.json` and `FO0002.SPR`'s plates, M7 stage 7.3)
+
+Decision 34: KH1's command menu built from Re:CoM's own pieces, with KH1's own words. Module
+`command_menu`; design, addresses and checks: `docs/recom-m7-command-menu.md`.
+
+- **Reads:** KH1 `btltbl.bin` (the `kh1_*` archives) with its PC assets: `US_ UK_ FR_ GR_ IT_
+  SP_Word.bin` (Checked (files): the owner's entry also carries `JP_Word.bin` and
+  `<LANG>_btltbl_bin_Word.bin` copies, not used). String `k` of a `Word.bin` is KH1 message
+  `k + 1` (`0x14028F9D0`, walked as `0x14028F820` walks it; Checked (decomp)). The menu's
+  messages are decoded: 1 Attack, 2 Magic, 3 Items, 4 Talk, 7–27 the spells, 28 Lift, 294 Open,
+  305 the blank command, 313 Jump On, 343 Counter. Re:CoM `FORM/0002/FO0002.SPR` (the same entry
+  the MP bar patches) for its text plate.
+- **Adds**, in the same patch as the MP bar (`mp_bar::patch_layout`), after the bar's 8 groups:
+  2 groups of `Cockpit:00` (159, 160 in the base file; after the bar's in each language copy):
+  - the plate: copies of Re:CoM's `Cockpit:00` group 0x19's cap and strip animations (its text
+    plate as `CStockFolder` shows it, without the card icon), pointing at Re:CoM's own sprite
+    groups;
+  - the highlighted plate: the same two, plus one sprite on the atlas's neutral texel (the MP
+    bar's UV (254, 47)–(255, 48)) over the strip's parts ((0, −13)…(152, 6), X translate 13),
+    with the magic plate's colour (group 0x1F's icon vertex colour, 0x80FFA200 in the owner's
+    file), and one part and one sprite group for it.
+  A copy whose group 0x19 isn't Re:CoM's plate (checked by its sprites' UVs) gets two empty
+  groups instead, so every copy keeps the same numbering; the step prints it. A file that already
+  ends with the bar's and the plates' sprites is refused (fed-back output).
+  `kh1-mp-bar.json` now has `"extra_groups": 2` (the DLL adds them to the group count it expects:
+  161 in the base file, 167 in the language copies).
+- **Writes** `kh1-command-menu.json` (format `kh1-recom-assets command-menu 1`) next to
+  `kh1-mp-bar.json`: the words per language (`"words": {"us": {"1": "Attack", …}, "fr": …}`,
+  non-ASCII as `\u` escapes), the plates (`after_bar_groups` 8, `count` 2, `found`, the
+  highlight's vertex colour), the inputs' sha256. Not written (and an older one removed) when the
+  MP bar isn't built or `US_Word.bin` is missing.
+- **Prints** `command menu: us words 30 (1 "Attack", 2 "Magic", 3 "Items", 7 "Fire", 343
+  "Counter")` per language and `command menu: plates from Re:CoM's text plate (highlight vertex
+  colour 0x80ffa200), groups after the MP bar's`.
+- **Checked (files):** every menu word decodes in all six European languages of the owner's
+  `btltbl.bin` (test `command_menu::tests::owner_words` with `KH1_WORD_DIR` = a folder with the
+  `<LANG>_Word.bin` assets): US / UK "Attack, Magic, Items, Talk, Fire … Aeroga, Open, Counter",
+  FR "Attaquer", "Brasier +", "Gravité", GR "Öffnen". The plates on the owner's `FO0002.SPR`:
+  `mp_bar::tests::owner_files` (`KH1_RECOM_FORM`): 161 groups, the highlighted plate has its 3
+  animations. Not checked: the language copies of `FO0002.SPR` (not in this session; the step
+  prints any copy without the plate).
+
+### Command for the owner
+
+The same run as before writes it (no new option):
+
+```
+kh1-recom-build --game . --out kh1-playground/build-out/PL0001.ANN
+```
+
+It rewrites `raw/FORM/0002/FO0002.SPR` and `kh1-mp-bar.json` (now with the plates) and writes
+`kh1-playground/build-out/kh1-command-menu.json`. Copy all three into the OpenKH mod folder
+under the same relative paths, and add to `mod.yml`:
+
+```yaml
+- {name: kh1-command-menu.json, method: copy, source: [{name: kh1-command-menu.json}]}
+```
+
+Build in the Mods Manager and restart the game. Please send the `command menu:` lines the step
+prints and the `command menu:` lines of `kh1-recom.log`.

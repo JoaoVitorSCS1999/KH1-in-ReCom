@@ -62,7 +62,15 @@ pub struct Settings {
     pub abilities: Kh1Abilities,
     /// One-line logs of the Attack's decisions in `kh1-recom.log` (first 200 lines).
     pub debug_attack: bool,
+    /// Debug (M7, until stage 7.11 earns spells): Sora has all 7 spells at level 3.
+    pub kh1_all_spells: bool,
+    /// The language of the command menu's KH1 words (`kh1-command-menu.json`): us, uk, fr, gr,
+    /// it or sp.
+    pub menu_language: String,
 }
+
+/// The languages the asset step writes KH1's menu words in.
+pub const MENU_LANGUAGES: &[&str] = &["us", "uk", "fr", "gr", "it", "sp"];
 
 /// The movement abilities the KH1 handlers read (`kh1_core::Abilities`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,7 +117,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, menu_language: "us".into() }
     }
 }
 
@@ -153,6 +161,13 @@ combo_master = off
 ;
 ; debug_attack = on | off: log the Attack's decisions (first 200 lines) in kh1-recom.log
 debug_attack = off
+;
+; kh1_all_spells = on | off (debug, until spells are earned in the game): Sora has all 7 KH1
+;   spells at level 3 in the command menu's Magic list.
+kh1_all_spells = off
+;
+; menu_language = us | uk | fr | gr | it | sp: the language of the command menu's KH1 words.
+menu_language = us
 ";
 
 /// Parses the file. Unknown keys and bad values are reported and the default kept.
@@ -217,6 +232,18 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(b) => s.debug_attack = b,
                 None => warnings.push(bad("debug_attack must be on or off")),
             },
+            "kh1_all_spells" => match parse_switch(v) {
+                Some(b) => s.kh1_all_spells = b,
+                None => warnings.push(bad("kh1_all_spells must be on or off")),
+            },
+            "menu_language" => {
+                let l = v.trim().to_ascii_lowercase();
+                if MENU_LANGUAGES.contains(&l.as_str()) {
+                    s.menu_language = l;
+                } else {
+                    warnings.push(bad("menu_language must be us, uk, fr, gr, it or sp"));
+                }
+            }
             "combo_master" => match parse_switch(v) {
                 Some(b) => s.abilities.combo_master = b,
                 None => warnings.push(bad("combo_master must be on or off")),
@@ -278,7 +305,9 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "combo_plus", &a.combo_plus.to_string());
     let t = set_key(&t, "air_combo_plus", &a.air_combo_plus.to_string());
     let t = set_key(&t, "combo_master", switch_str(a.combo_master));
-    set_key(&t, "debug_attack", switch_str(s.debug_attack))
+    let t = set_key(&t, "debug_attack", switch_str(s.debug_attack));
+    let t = set_key(&t, "kh1_all_spells", switch_str(s.kh1_all_spells));
+    set_key(&t, "menu_language", &s.menu_language)
 }
 
 #[cfg(test)]
@@ -339,7 +368,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, menu_language: "fr".into() };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -387,6 +416,23 @@ mod guard_reaction_tests {
         assert_eq!(t2.lines().filter(|l| l.starts_with("guard_reactions")).count(), 1);
         assert!(t2.contains("; guard_reactions = on | off"), "comments survive");
         assert_eq!(parse(&t2).0, Settings { guard_reactions: false, ..Default::default() });
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    use super::*;
+
+    #[test]
+    fn menu_switches_default_off_and_us() {
+        let d = Settings::default();
+        assert!(!d.kh1_all_spells && d.menu_language == "us");
+        let (s, w) = parse("kh1_all_spells = on\nmenu_language = GR\nmenu_language = jp\n");
+        assert!(s.kh1_all_spells && s.menu_language == "gr");
+        assert_eq!(w.len(), 1, "{w:?}");
+        // An older file without the keys keeps the defaults without a warning.
+        let (s, w) = parse("combat = kh1\n");
+        assert!(!s.kh1_all_spells && s.menu_language == "us" && w.is_empty());
     }
 }
 

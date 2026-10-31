@@ -7,6 +7,9 @@
 //! `raw/PLAYER/00GG/PL00GG.RTM`, `docs/recom-keyblade-models.md`) and writes `kh1-stats.json`.
 //! For the MP bar (M7 stage 7.2) it writes `raw/FORM/0002/FO0002.SPR` (Re:CoM's HUD sprite file
 //! with KH1's MP gauge colours as new groups) and `kh1-mp-bar.json` (`docs/recom-m7-mp-bar.md`).
+//! For the command menu (M7 stage 7.3) the same `FO0002.SPR` also gets Re:CoM's row plates, and
+//! `kh1-command-menu.json` holds the menu's words from KH1's own `Word.bin` in every language
+//! (`docs/recom-m7-command-menu.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -158,6 +161,18 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // The command menu's words (M7 stage 7.3): KH1's own, from the player's btltbl.bin assets.
+    let menu = match (&mp_bar, command_menu_build(&game, keys.clone(), &arc)) {
+        (Some(_), Ok(m)) => Some(m),
+        (None, _) => {
+            println!("note: command menu not built: it needs the MP bar's FO0002.SPR (its plates are added there)");
+            None
+        }
+        (_, Err(e)) => {
+            println!("note: command menu not built: {e}");
+            None
+        }
+    };
     if dry {
         return Ok(());
     }
@@ -237,6 +252,17 @@ fn run() -> Result<(), String> {
             if bar_manifest.is_file() {
                 std::fs::remove_file(&bar_manifest).map_err(|e| format!("{}: {e}", bar_manifest.display()))?;
                 println!("removed {} (no MP bar this run)", bar_manifest.display());
+            }
+        }
+    }
+    // The command menu's manifest; without it (or without the bar) an older one is removed.
+    let menu_manifest = root.join(kh1_recom_assets::command_menu::MANIFEST);
+    match &menu {
+        Some(m) => write(&menu_manifest, m.as_bytes())?,
+        None => {
+            if menu_manifest.is_file() {
+                std::fs::remove_file(&menu_manifest).map_err(|e| format!("{}: {e}", menu_manifest.display()))?;
+                println!("removed {} (no command menu this run)", menu_manifest.display());
             }
         }
     }
@@ -398,6 +424,50 @@ fn mp_bar_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats
         if kept.is_empty() { String::new() } else { format!("; kept as they are: {kept:?}") }
     );
     Ok(MpBar { entry, manifest })
+}
+
+/// KH1's command words (`btltbl.bin`'s PC assets `<LANG>_Word.bin`, decoded for the menu's
+/// commands) and the plates found in Re:CoM's `Cockpit:00` (base file and language copies):
+/// `kh1-command-menu.json` (M7 stage 7.3, `docs/recom-m7-command-menu.md`).
+fn command_menu_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive) -> Result<String, String> {
+    use kh1_recom_assets::command_menu as cm;
+    let inst = install::kh1(game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
+    let (btl, assets, _) = inst.read_full("btltbl.bin").map_err(|e| format!("btltbl.bin: {e}"))?;
+    let mut langs = Vec::new();
+    for (lang, prefix) in cm::LANGUAGES {
+        let name = format!("{prefix}Word.bin");
+        let Some(a) = assets.iter().find(|a| a.name.eq_ignore_ascii_case(&name)) else {
+            println!("note: btltbl.bin has no PC asset {name}: no {lang} words");
+            continue;
+        };
+        let (w, missing) = cm::words(&a.data);
+        if !missing.is_empty() {
+            println!("note: {name}: messages {missing:?} not decoded (the DLL falls back to US English for them)");
+        }
+        langs.push((*lang, w));
+    }
+    if !langs.iter().any(|(l, _)| *l == "us") {
+        return Err("btltbl.bin has no US_Word.bin (the fallback language)".into());
+    }
+    // The plates: what the bar's patch added to the base file and to each language copy.
+    let e = arc.find(kh1_recom_assets::mp_bar::SPR_PATH).ok_or("FO0002.SPR not in Recom.hed")?;
+    let raw = arc.read_raw_entry(e).map_err(|e| e.to_string())?;
+    let (spr, spr_assets) = kh1_formats::egs::decode_entry_full(&keys, &raw).map_err(|e| e.to_string())?;
+    let base = cm::probe_plates(&spr).ok_or("FO0002.SPR: no Cockpit.lad")?;
+    for a in &spr_assets {
+        if let Some(p) = cm::probe_plates(&a.data) {
+            if !p.found {
+                println!("note: FO0002.SPR asset {}: Re:CoM's text plate is not where the base file has it; its menu rows have no plates", a.name);
+            }
+        }
+    }
+    for (lang, w) in &langs {
+        let show: Vec<String> = w.iter().filter(|(id, _)| [1u16, 2, 3, 7, 343].contains(id)).map(|(id, t)| format!("{id} {t:?}")).collect();
+        println!("command menu: {lang} words {} ({})", w.len(), show.join(", "));
+    }
+    println!("command menu: plates {} (highlight vertex colour {:#010x}), groups after the MP bar's", if base.found { "from Re:CoM's text plate" } else { "NOT found (empty groups)" }, base.colour);
+    let sources = [("btltbl.bin sha256", kh1_formats::egs::sha256_hex(&btl)), ("FO0002.SPR sha256", kh1_formats::egs::sha256_hex(&spr))];
+    Ok(cm::manifest_json(&langs, kh1_recom_assets::mp_bar::group::COUNT, base, &sources))
 }
 
 fn kh1_stats(game: &std::path::Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive, models: &[KeybladeModel], kh2: &[Kh2Row]) -> Result<kh1_recom_assets::stats::StatsJson, String> {

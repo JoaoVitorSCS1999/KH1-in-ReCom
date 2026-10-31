@@ -11,6 +11,28 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 41: M7 stage 7.3, KH1's command menu, version 0.17.0 (2026-10-31)
+
+> Decision 34: command menu from Re:CoM's pieces, laid out like KH1's, field and battle, plate
+> colour cursor, KH1's own words
+
+- Attack / Magic / Items / context row and the Magic list at Combat = KH1 in Sora's story, field
+  and battle: each row a Re:CoM `C2DSeqCtrl` playing a Re:CoM text plate (2 groups the asset step
+  adds to `Cockpit:00` after the MP bar's: plate, and plate with the magic plate's blue strip as
+  the highlight) with a `C2DFnt` label holding KH1's word (`kh1-command-menu.json`, decoded from
+  `btltbl.bin`'s `*_Word.bin`, 6 languages; ini `menu_language`, default `us`).
+- KH1's rules (Checked, decomp): layout (16, 260), rows 22, Magic list at x + 11; fresh d-pad only;
+  Right/confirm opens, Left/cancel back; brightness ±32 a frame, 10-frame fade, 14-frame context
+  tab; Counterattack shown as "Counter"; greying by `Mp::can_pay` and the 1100 range check.
+- Confirm on Attack is today's Attack path. Spells buzz until 7.4 (cast). Items greyed (M8).
+  Field context row from the object Re:CoM's Triangle uses (`0x1401E80C0`, read only): Open /
+  Talk / Lift / Jump On. `kh1_all_spells = on` gives all 7 spells at level 3 until 7.11.
+- No new hook or patch; runs from the MP bar's gauge wrappers and the request-bits wrapper.
+  Checked sites: `0x140248590`, `0x1402476F0` (vtable `0x1406073A0`), `0x1401E80E8`, `0x1401B8A10`.
+  `docs/recom-m7-command-menu.md`. Not seen in game.
+
+---
+
 ## Stage 40: MP bar in every language copy, version 0.16.1 (2026-10-31)
 
 - The asset step on the owner's files: `FO0002.SPR`'s language copies of `Cockpit.lad` have 157

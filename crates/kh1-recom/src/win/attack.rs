@@ -339,6 +339,22 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     } else {
         o(pl);
     }
+    // KH1's command menu (M7 stage 7.3): confirm runs the highlighted row (Attack only from the
+    // Attack row), the jump only from the root list (cancel closes a submenu), Triangle only
+    // when the context row's tab is in.
+    if let Some(k) = super::command_menu::frame(pl) {
+        let mut r: u32 = rd(pl + p::REQUEST);
+        if !k.attack {
+            r &= !4;
+        }
+        if !k.jump {
+            r &= !1;
+        }
+        if !k.triangle {
+            r &= !0x200;
+        }
+        wr(pl + p::REQUEST, r);
+    }
     // KH1: a jump on the same frame wins over the Attack (`0x1402A6220`).
     let r: u32 = rd(pl + p::REQUEST);
     if r & 1 != 0 && r & 4 != 0 {

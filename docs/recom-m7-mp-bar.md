@@ -234,3 +234,11 @@ prefix) or a whole container, keeps the other assets as they are, and writes:
   ends with the bar's sprites is refused (fed-back output).
 - The owner's mod was built with it on their PC: `raw/FORM/0002/FO0002.SPR` and
   `kh1-mp-bar.json` in the mod folder and `mod.yml`.
+
+## The command menu's groups (M7 stage 7.3)
+
+- The same patch now adds the command menu's two plate groups after the bar's 8 (159, 160 in the
+  base file; 165, 166 in the language copies), and `kh1-mp-bar.json` says so (`"extra_groups":
+  2`). The DLL expects the loaded `Cockpit:00` to have `first + 8 + extra` groups (161 / 167);
+  a 7.2 manifest (no key) keeps 159 / 165. A 0.16.1 DLL with the new files finds 161 and makes
+  no bar: the DLL and the asset step's files go together. `docs/recom-m7-command-menu.md`.
