@@ -253,6 +253,14 @@ At KH1 setting:
     combo locked". At Combat = KH1: KH1's 30 frames from the end of each hit reaction, on Re:CoM's
     own hit-immunity timer `player+0x7BC` (`recom-kh1-attack.md` § Post-hit invulnerability).
 
+32. Enemy pace (owner, 2026-10-31, "lets try b for now"): enemies felt too aggressive at KH1. KH1
+    has no shared attack limiter as far as checked (Shadow's script and the 26 common syscalls;
+    the rest Assumption), but Re:CoM's enemies are tuned for its crowd sharing. Setting
+    `enemy_pace = recom | kh1` (default `recom`): `recom` keeps Re:CoM's crowd sharing (P4 off),
+    `kh1` is decision 30's "each attacks as if alone". Interim, until enemies get their KH1
+    twins' timing (M10). Only in the ini for now: the Config menu has no item slots left for a
+    third row (`recom-config-menu.md`); owner asked about the menu.
+
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.

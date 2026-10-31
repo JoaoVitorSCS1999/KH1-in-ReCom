@@ -50,6 +50,10 @@ pub struct Settings {
     /// Enemy reactions to Sora's KH1 Guard (decision 27; only at `combat = kh1`): a blocked melee
     /// attacker plays Re:CoM's own flinch, a blocked shot flies back and can hurt enemies.
     pub guard_reactions: bool,
+    /// How often enemies attack in a crowd at `combat = kh1` (decision 32). `Recom`: Re:CoM's
+    /// crowd sharing stays (each enemy's think rate is multiplied by the number of enemies,
+    /// `0x14017F380`); `Kh1`: each enemy attacks as if alone (decision 30, patch P4).
+    pub enemy_pace: Mode,
     /// Our rows in Re:CoM's Config menu. `off` leaves the menu untouched (a safety switch while
     /// the rows are untested in game; the settings then come from this file only).
     pub config_menu: bool,
@@ -105,7 +109,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false }
     }
 }
 
@@ -124,6 +128,12 @@ combat = kh1
 ;        blocked shot flies back and can hurt enemies (Re:CoM's damage).
 ;   off: a blocked enemy carries on; a blocked shot just vanishes.
 guard_reactions = on
+;
+; enemy_pace = recom | kh1 (only at combat = kh1)
+;   recom: a crowd of enemies shares one attack budget, as in Re:CoM (four enemies each attack
+;          about four times less often than one alone).
+;   kh1:   each enemy attacks as often as when it is alone.
+enemy_pace = recom
 ;
 ; config_menu = on | off
 ;   off: don't add our rows to Re:CoM's Config menu (use this file instead).
@@ -170,6 +180,10 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
             "guard_reactions" => match parse_switch(v) {
                 Some(b) => s.guard_reactions = b,
                 None => warnings.push(bad("guard_reactions must be on or off")),
+            },
+            "enemy_pace" => match Mode::parse(v) {
+                Some(m) => s.enemy_pace = m,
+                None => warnings.push(bad("enemy_pace must be kh1 or recom")),
             },
             "config_menu" => match parse_switch(v) {
                 Some(b) => s.config_menu = b,
@@ -255,6 +269,7 @@ pub fn set_key(text: &str, key: &str, value: &str) -> String {
 pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(text, "combat", s.combat.as_str());
     let t = set_key(&t, "guard_reactions", switch_str(s.guard_reactions));
+    let t = set_key(&t, "enemy_pace", s.enemy_pace.as_str());
     let mut t = set_key(&t, "config_menu", switch_str(s.config_menu));
     let a = s.abilities;
     for (k, v) in [("high_jump", a.high_jump), ("glide", a.glide), ("superglide", a.superglide), ("dodge_roll", a.dodge_roll), ("guard", a.guard), ("counterattack", a.counterattack)] {
@@ -324,7 +339,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -338,6 +353,21 @@ mod tests {
 #[cfg(test)]
 mod guard_reaction_tests {
     use super::*;
+
+    #[test]
+    fn enemy_pace_default_recom_and_round_trip() {
+        assert_eq!(Settings::default().enemy_pace, Mode::Recom);
+        assert!(DEFAULT_FILE.contains("\nenemy_pace = recom\n"));
+        assert_eq!(parse(DEFAULT_FILE).0.enemy_pace, Mode::Recom);
+        // An older file without the key keeps the default.
+        assert_eq!(parse("combat = kh1\n").0.enemy_pace, Mode::Recom);
+        let (s, w) = parse("enemy_pace = kh1\nenemy_pace = fast\n");
+        assert_eq!(s.enemy_pace, Mode::Kh1);
+        assert_eq!(w.len(), 1);
+        let t = store(DEFAULT_FILE, &Settings { enemy_pace: Mode::Kh1, ..Default::default() });
+        assert_eq!(t.lines().filter(|l| l.starts_with("enemy_pace")).count(), 1);
+        assert_eq!(parse(&t).0.enemy_pace, Mode::Kh1);
+    }
 
     #[test]
     fn guard_reactions_default_on_and_round_trip() {

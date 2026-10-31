@@ -94,6 +94,12 @@ What the skipped steps gave Re:CoM (Checked (decomp) unless tagged):
   each site must hold Re:CoM's or our bytes, else nothing is written (all or none, checked
   writes, undone on a failed write). At the Re:CoM setting the bytes are Re:CoM's own, byte for
   byte, from the next battle on. P1 follows the same decision for the whole battle.
+- **P4 follows `enemy_pace`** (0.13.3, decision 32; `battle::wanted`): in a KH1 battle P2 and P3
+  are ours, and P4 is ours only with `enemy_pace = kh1`. With `enemy_pace = recom` (the default)
+  Re:CoM's crowd sharing stays: each ordinary enemy's think rate is multiplied by the number of
+  enemies, so a crowd shares one attack budget, while several enemies can still attack at once
+  (no card slot, P2, P3). Each site is still checked (Re:CoM's or our bytes, else nothing is
+  written). Re:CoM setting: all three Re:CoM's.
   - The revolver build `0x1401F43D0` (stage 2's switch) was not used: it is skipped when
     `player+0x418 & 0x20000000`, and the enemies' code doesn't depend on Sora's deck.
   - Minigame rooms (`0x140235360() != 0`) build no manager: no grant, so P1 is never reached
@@ -136,8 +142,9 @@ What the skipped steps gave Re:CoM (Checked (decomp) unless tagged):
 
 - Start: `m6: wrappers in (…)`.
 - Each battle start (first 100): `m6: battle start: KH1 | Re:CoM (…); no-card attacks (P1) on |
-  off; think gate (P2), grant all (P3), crowd pace (P4): ours (n written) | Re:CoM's bytes (n
-  written) | UNCHANGED…`.
+  off; think gate (P2) and grant all (P3): ours | Re:CoM's | UNCHANGED…; crowd pace (P4): ours,
+  each enemy as if alone (enemy_pace = kh1) | Re:CoM's crowd sharing (enemy_pace = recom) |
+  Re:CoM's (n site(s) written this battle)`.
 - Each cardless attack (first 100): `m6: attack without a card: <class> id=… state=…
   attacking_now=<enemies in bit 0 or states 2..10, this one included> flags …->… cooldown=…`.
 - Once per class: `m6: class <name>: attacks without a card (P1)`, `… Re:CoM's card play (<why>):

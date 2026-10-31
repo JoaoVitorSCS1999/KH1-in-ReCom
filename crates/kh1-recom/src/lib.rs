@@ -115,6 +115,7 @@ pub fn startup_report(
                 settings::switch_str(s.config_menu)
             );
             let _ = writeln!(r, "settings: guard_reactions = {} (only at combat = kh1)", settings::switch_str(s.guard_reactions));
+            let _ = writeln!(r, "settings: enemy_pace = {} (only at combat = kh1)", s.enemy_pace.as_str());
             let a = s.abilities;
             let _ = writeln!(
                 r,

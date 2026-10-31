@@ -227,6 +227,12 @@ pub fn bytes_state_of(recom: &[u8], ours: &[u8], have: &[u8]) -> Bytes {
     }
 }
 
+/// Which of `sites::M6_PATCHES` (P2 think gate, P3 grant all, P4 crowd pace) a battle wants as
+/// ours: P2 and P3 in every KH1 battle, P4 only with `enemy_pace = kh1` (decision 32).
+pub fn wanted(kh1_battle: bool, pace_kh1: bool) -> [bool; 3] {
+    [kh1_battle, kh1_battle, kh1_battle && pace_kh1]
+}
+
 /// One write of [`plan`]: (patch index, the bytes there now, the bytes to write).
 pub type Write<'a> = (usize, &'a [u8], &'a [u8]);
 
@@ -239,7 +245,13 @@ pub fn plan<'a>(patches: &'a [Patch], now: &[Bytes], ours: bool) -> Option<Vec<W
 
 /// [`plan`] over (Re:CoM's bytes, ours) pairs.
 pub fn plan_pairs<'a>(pairs: &[(&'a [u8], &'a [u8])], now: &[Bytes], ours: bool) -> Option<Vec<Write<'a>>> {
-    if now.len() != pairs.len() || now.contains(&Bytes::Other) {
+    plan_each(pairs, now, &vec![ours; pairs.len()])
+}
+
+/// [`plan_pairs`] with a wish per pair (`want[i]`: ours). Still all or nothing: None when any
+/// site holds other bytes.
+pub fn plan_each<'a>(pairs: &[(&'a [u8], &'a [u8])], now: &[Bytes], want: &[bool]) -> Option<Vec<Write<'a>>> {
+    if now.len() != pairs.len() || want.len() != pairs.len() || now.contains(&Bytes::Other) {
         return None;
     }
     Some(
@@ -247,7 +259,7 @@ pub fn plan_pairs<'a>(pairs: &[(&'a [u8], &'a [u8])], now: &[Bytes], ours: bool)
             .iter()
             .zip(now)
             .enumerate()
-            .filter_map(|(i, (&(recom, new), &b))| match (b, ours) {
+            .filter_map(|(i, (&(recom, new), &b))| match (b, want[i]) {
                 (Bytes::Recom, true) => Some((i, recom, new)),
                 (Bytes::Ours, false) => Some((i, new, recom)),
                 _ => None,
@@ -379,6 +391,24 @@ mod tests {
             assert_eq!(grant_recom(f), f & !bits::REQUEST);
             assert_eq!(grant_ours(f), (f & !bits::REQUEST) | bits::GRANT);
         }
+    }
+
+    #[test]
+    fn crowd_pace_follows_enemy_pace() {
+        let p = M6_PATCHES;
+        let pairs: Vec<(&[u8], &[u8])> = p.iter().map(|q| (q.site.expect, q.new)).collect();
+        let (r, o) = (Bytes::Recom, Bytes::Ours);
+        // KH1 battle, Re:CoM's pace: P2 and P3 ours, P4 stays Re:CoM's.
+        let w = plan_each(&pairs, &[r, r, r], &wanted(true, false)).unwrap();
+        assert_eq!(w.iter().map(|w| w.0).collect::<Vec<_>>(), vec![0, 1]);
+        // Switching the pace to KH1 later writes only P4; back to Re:CoM undoes only P4.
+        assert_eq!(plan_each(&pairs, &[o, o, r], &wanted(true, true)).unwrap().iter().map(|w| w.0).collect::<Vec<_>>(), vec![2]);
+        let back = plan_each(&pairs, &[o, o, o], &wanted(true, false)).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!((back[0].0, back[0].1, back[0].2), (2, p[2].new, p[2].site.expect));
+        // A Re:CoM battle wants none, whatever the pace.
+        assert_eq!(wanted(false, true), [false; 3]);
+        assert!(plan_each(&pairs, &[r, r, Bytes::Other], &wanted(true, true)).is_none());
     }
 
     #[test]

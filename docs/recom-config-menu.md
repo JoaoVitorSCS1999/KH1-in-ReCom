@@ -183,3 +183,13 @@ owner decision, 2026-10-30; see `recom-motion-switch.md`):
 - The cursor and help line on both our rows; up/down wrap through rows 0..6; left/right flip
   the row under the cursor; the ini changes on each flip (`combat`, `guard_reactions`).
 - Opening and closing the camp and the Config screen repeatedly (item ownership and deletion).
+
+## Room for more rows (2026-10-31)
+
+- Each of our rows takes 3 item slots (label, 2 values) in `camp+0xB38`. Re:CoM's array has 21
+  slots and fills 0..13; our rows 5 and 6 take 14..19, so **only slot 20 is free**. Checked
+  (decomp, as above).
+- A third row (Enemy pace, decision 32) doesn't fit as a two-value row. Native options:
+  Re:CoM's row 4 style (label + one value item showing the current choice, 2 slots), used for
+  Guard reactions and Enemy pace (17..20); or a second page of rows. Owner question; until then
+  `enemy_pace` is set in `kh1-recom.ini` only.

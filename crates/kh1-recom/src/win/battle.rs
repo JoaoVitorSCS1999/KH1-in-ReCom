@@ -25,8 +25,6 @@ pub static ORIG_SET_PLAY_CARD: AtomicUsize = AtomicUsize::new(0);
 
 /// This battle is a KH1 one (decided when Re:CoM built its battle enemy manager).
 static KH1_BATTLE: AtomicBool = AtomicBool::new(false);
-/// P2–P4 are ours right now.
-static PATCHED: AtomicBool = AtomicBool::new(false);
 static ATTACK_LINES: AtomicU32 = AtomicU32::new(0);
 static BATTLE_LINES: AtomicU32 = AtomicU32::new(0);
 static REFUSAL_LINES: AtomicU32 = AtomicU32::new(0);
@@ -175,31 +173,42 @@ pub unsafe extern "win64" fn card_play(e: usize) -> u64 {
 /// Re:CoM's battle enemy manager ctor (once per battle): the battle's setting and P2–P4.
 pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: usize) -> usize {
     let kh1 = mv::kh1_on() && !super::stats::riku_story();
-    let switched = switch_patches(kh1);
+    let pace_kh1 = super::settings().enemy_pace == crate::settings::Mode::Kh1;
+    let want = b::wanted(kh1, pace_kh1);
+    let switched = switch_patches(&want);
     KH1_BATTLE.store(kh1, Ordering::Release);
     capped(&BATTLE_LINES, b::BATTLE_LOG_LINES, || {
         format!(
-            "battle start: {}; no-card attacks (P1) {}; think gate (P2), grant all (P3), crowd pace (P4): {}",
+            "battle start: {}; no-card attacks (P1) {}; think gate (P2) and grant all (P3): {}; crowd pace (P4): {}",
             if kh1 { "KH1 (Combat = KH1, Sora's story)" } else if mv::kh1_on() { "Re:CoM (Riku's story)" } else { "Re:CoM (Combat = Re:CoM)" },
             if kh1 { "on" } else { "off" },
             match switched {
-                Some(n) if PATCHED.load(Ordering::Relaxed) => format!("ours ({n} written)"),
-                Some(n) => format!("Re:CoM's bytes ({n} written)"),
-                None => "UNCHANGED: a site held unexpected bytes (see above); Re:CoM's turn-taking may stay".into(),
+                Some(_) if want[0] => "ours",
+                Some(_) => "Re:CoM's",
+                None => "UNCHANGED: a site held unexpected bytes (see above); Re:CoM's turn-taking may stay",
+            },
+            match switched {
+                Some(n) => format!(
+                    "{} ({n} site(s) written this battle)",
+                    if want[2] { "ours, each enemy as if alone (enemy_pace = kh1)" } else if kh1 { "Re:CoM's crowd sharing (enemy_pace = recom)" } else { "Re:CoM's" }
+                ),
+                None => "UNCHANGED".into(),
             }
         )
     });
     orig::<CtorFn>(&ORIG_MANAGER_CTOR)(this, a, c, d)
 }
 
-/// Makes P2–P4 ours (or Re:CoM's), all or none. The number of sites written, or None.
-unsafe fn switch_patches(ours: bool) -> Option<usize> {
+/// Makes each of P2–P4 ours or Re:CoM's as `want` says, all or none. The number of sites
+/// written, or None.
+unsafe fn switch_patches(want: &[bool; 3]) -> Option<usize> {
     let bs = base();
     let now: Vec<Bytes> = M6_PATCHES
         .iter()
         .map(|p| b::bytes_state(p, std::slice::from_raw_parts((bs + p.site.rva as usize) as *const u8, p.site.expect.len())))
         .collect();
-    let Some(writes) = b::plan(M6_PATCHES, &now, ours) else {
+    let pairs: Vec<(&[u8], &[u8])> = M6_PATCHES.iter().map(|p| (p.site.expect, p.new)).collect();
+    let Some(writes) = b::plan_each(&pairs, &now, want) else {
         for (p, s) in M6_PATCHES.iter().zip(&now) {
             if *s == Bytes::Other {
                 log(&format!("m6: {} holds bytes that are neither Re:CoM's nor ours; no patch switched", p.site.name));
@@ -222,7 +231,6 @@ unsafe fn switch_patches(ours: bool) -> Option<usize> {
         done.push((i, from, to));
     }
     let n = done.len();
-    PATCHED.store(ours, Ordering::Release);
     Some(n)
 }
 
