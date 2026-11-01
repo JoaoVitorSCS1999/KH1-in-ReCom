@@ -9,7 +9,9 @@
 //! with KH1's MP gauge colours as new groups) and `kh1-mp-bar.json` (`docs/recom-m7-mp-bar.md`).
 //! For the command menu (M7 stage 7.3) the same `FO0002.SPR` also gets Re:CoM's row plates, and
 //! `kh1-command-menu.json` holds the menu's words from KH1's own `Word.bin` in every language
-//! (`docs/recom-m7-command-menu.md`).
+//! (`docs/recom-m7-command-menu.md`). For the KH1 HUD (decision 39, H1) it writes `kh1hud.lad` into
+//! the same `FO0002.SPR`, `raw/FORM/0002/FO0002.RTM` with `kh1hud.imz`, and `kh1-hud.json`
+//! (`docs/recom-kh1-hud.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -173,6 +175,22 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // The KH1 HUD set (decision 39, stage H1): kh1hud.lad into the bar's FO0002.SPR, kh1hud.imz
+    // into FO0002.RTM.
+    let mut mp_bar = mp_bar;
+    let hud = match mp_bar.as_mut() {
+        Some(b) => match kh1_hud_build(&game, keys.clone(), &arc, b) {
+            Ok(h) => Some(h),
+            Err(e) => {
+                println!("note: KH1 HUD not built: {e}");
+                None
+            }
+        },
+        None => {
+            println!("note: KH1 HUD not built: it needs the MP bar's FO0002.SPR");
+            None
+        }
+    };
     if dry {
         return Ok(());
     }
@@ -245,13 +263,29 @@ fn run() -> Result<(), String> {
     let bar_manifest = root.join(kh1_recom_assets::mp_bar::MANIFEST);
     match &mp_bar {
         Some(b) => {
-            write(&root.join("raw").join(kh1_recom_assets::mp_bar::SPR_PATH.replace('/', std::path::MAIN_SEPARATOR_STR)), &b.entry)?;
+            let entry = kh1_formats::egs::build_plain_entry(&b.spr, &b.assets, b.date).map_err(|e| e.to_string())?;
+            write(&root.join("raw").join(kh1_recom_assets::mp_bar::SPR_PATH.replace('/', std::path::MAIN_SEPARATOR_STR)), &entry)?;
             write(&bar_manifest, b.manifest.as_bytes())?;
         }
         None => {
             if bar_manifest.is_file() {
                 std::fs::remove_file(&bar_manifest).map_err(|e| format!("{}: {e}", bar_manifest.display()))?;
                 println!("removed {} (no MP bar this run)", bar_manifest.display());
+            }
+        }
+    }
+    // The KH1 HUD: the raw FO0002.RTM entry and kh1-hud.json; without them an older manifest is
+    // removed (the DLL then keeps Re:CoM's HUD).
+    let hud_manifest = root.join(kh1_recom_assets::kh1_hud::MANIFEST);
+    match &hud {
+        Some(h) => {
+            write(&root.join("raw").join(kh1_recom_assets::mp_bar::RTM_PATH.replace('/', std::path::MAIN_SEPARATOR_STR)), &h.rtm_entry)?;
+            write(&hud_manifest, h.manifest.as_bytes())?;
+        }
+        None => {
+            if hud_manifest.is_file() {
+                std::fs::remove_file(&hud_manifest).map_err(|e| format!("{}: {e}", hud_manifest.display()))?;
+                println!("removed {} (no KH1 HUD this run)", hud_manifest.display());
             }
         }
     }
@@ -357,7 +391,11 @@ fn kh2_keyblades_step(game: &Path, keys: kh1_formats::egs::KeyTable, pl0002: Opt
 
 /// The MP bar's files (M7 stage 7.2): the raw `FO0002.SPR` entry and `kh1-mp-bar.json`.
 struct MpBar {
-    entry: Vec<u8>,
+    /// The patched `FO0002.SPR`, its PC assets and the entry's date word (the entry is built at
+    /// write time, after the KH1 HUD's files are added).
+    spr: Vec<u8>,
+    assets: Vec<kh1_formats::egs::HdAsset>,
+    date: i32,
     manifest: String,
 }
 
@@ -393,7 +431,6 @@ fn mp_bar_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats
         files.push((a.name.clone(), how));
         out_assets.push(kh1_formats::egs::HdAsset { name: a.name.clone(), orig_offset: a.orig_offset, data });
     }
-    let entry = kh1_formats::egs::build_plain_entry(&base, &out_assets, date).map_err(|e| e.to_string())?;
     let sources = [
         ("uitex.bin sha256", kh1_formats::egs::sha256_hex(&uitex)),
         ("FO0002.RTM sha256", kh1_formats::egs::sha256_hex(&rtm)),
@@ -423,7 +460,67 @@ fn mp_bar_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats
         patched,
         if kept.is_empty() { String::new() } else { format!("; kept as they are: {kept:?}") }
     );
-    Ok(MpBar { entry, manifest })
+    Ok(MpBar { spr: base, assets: out_assets, date, manifest })
+}
+
+/// The KH1 HUD's files (stage H1): the raw `FO0002.RTM` entry and `kh1-hud.json`.
+struct Hud {
+    rtm_entry: Vec<u8>,
+    manifest: String,
+}
+
+/// Builds the `kh1hud` set from KH1's `uitex.bin` (+ PC assets), `UK_uibin_g_s.bin`,
+/// `UK_uibin_g_red.bin` and the party's faces, adds `kh1hud.lad` (+ `<LANG>_kh1hud.lad`) to the MP
+/// bar's `FO0002.SPR` and `kh1hud.imz` (+ `<LANG>_kh1hud.imz`) to Re:CoM's `FO0002.RTM`
+/// (`docs/recom-kh1-hud.md`).
+fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive, bar: &mut MpBar) -> Result<Hud, String> {
+    use kh1_recom_assets::kh1_hud as kh;
+    use kh1_recom_assets::mp_bar as mb;
+    let inst = install::kh1(game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
+    let (uitex, uitex_hd, _) = inst.read_full(mb::KH1_UITEX).map_err(|e| format!("{}: {e}", mb::KH1_UITEX))?;
+    let g_s = inst.read(kh::G_S).map_err(|e| format!("{}: {e}", kh::G_S))?;
+    let g_red = inst.read(kh::G_RED).map_err(|e| format!("{}: {e}", kh::G_RED))?;
+    let mut faces = Vec::new();
+    for n in kh::FACES {
+        let (m, a, _) = inst.read_full(n).map_err(|e| format!("{n}: {e}"))?;
+        faces.push(kh::face(&m, &a).map_err(|e| format!("{n}: {e}"))?);
+    }
+    let faces: [kh::Source; 3] = faces.try_into().map_err(|_| "faces")?;
+    let langs = kh::languages(&bar.assets);
+    if langs.is_empty() {
+        return Err("FO0002.SPR has no <LANG>_Cockpit.lad PC layouts (no language to build for)".into());
+    }
+    let lrefs: Vec<&str> = langs.iter().map(String::as_str).collect();
+    let src = kh::Sources { uitex: &uitex, uitex_hd: &uitex_hd, g_s: &g_s, g_red: &g_red, faces };
+    let b = kh::build(&src, &lrefs).map_err(|e| e.to_string())?;
+    bar.spr = kh::add_to_spr(&bar.spr, &mut bar.assets, &b, &langs).map_err(|e| format!("{}: {e}", mb::SPR_PATH))?;
+    let e = arc.find(mb::RTM_PATH).ok_or_else(|| format!("{} not in Recom.hed", mb::RTM_PATH))?;
+    let raw = arc.read_raw_entry(e).map_err(|e| format!("{}: {e}", mb::RTM_PATH))?;
+    let date = i32::from_le_bytes(raw.get(12..16).ok_or("short entry")?.try_into().unwrap());
+    let (rtm, mut rtm_assets) = kh1_formats::egs::decode_entry_full(&keys, &raw).map_err(|e| format!("{}: {e}", mb::RTM_PATH))?;
+    let rtm_new = kh::add_to_rtm(&rtm, &mut rtm_assets, &b, &langs).map_err(|e| format!("{}: {e}", mb::RTM_PATH))?;
+    let rtm_entry = kh1_formats::egs::build_plain_entry(&rtm_new, &rtm_assets, date).map_err(|e| e.to_string())?;
+    let sources = [
+        ("uitex.bin sha256", kh1_formats::egs::sha256_hex(&uitex)),
+        ("UK_uibin_g_s.bin sha256", kh1_formats::egs::sha256_hex(&g_s)),
+        ("UK_uibin_g_red.bin sha256", kh1_formats::egs::sha256_hex(&g_red)),
+        ("FO0002.RTM sha256", kh1_formats::egs::sha256_hex(&rtm)),
+    ];
+    let manifest = kh::manifest_json(&b, &langs, &sources);
+    println!(
+        "KH1 HUD: {} groups, {} sprites, {} atlas items; PS2 atlas {}×{}, PC atlas {}×{}; kh1hud.lad + {} language copies into FO0002.SPR, kh1hud.imz + {} into FO0002.RTM ({:?})",
+        kh::group::COUNT,
+        b.sprites,
+        b.pieces,
+        b.atlas.0,
+        b.atlas.1,
+        b.atlas.2,
+        b.atlas.3,
+        langs.len(),
+        langs.len(),
+        langs
+    );
+    Ok(Hud { rtm_entry, manifest })
 }
 
 /// KH1's command words (`btltbl.bin`'s PC assets `<LANG>_Word.bin`, decoded for the menu's

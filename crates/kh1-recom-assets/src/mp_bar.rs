@@ -104,14 +104,14 @@ pub const FADE_FRAMES: i32 = 10;
 /// Animation flags, each copied from a Re:CoM animation that does the same thing: a static piece
 /// (`gauge:01` 0x77FF1, the HP bar's pieces), a piece whose X scale runs 0 → 1 (0x77DB1, the HP
 /// bar's straight part), a colour fade (0x77B71, `Cockpit:00`'s tinted boxes). Checked (files).
-const FLAGS_STATIC: u32 = 0x77FF1;
-const FLAGS_GROW: u32 = 0x77DB1;
-const FLAGS_COLOUR: u32 = 0x77B71;
+pub(crate) const FLAGS_STATIC: u32 = 0x77FF1;
+pub(crate) const FLAGS_GROW: u32 = 0x77DB1;
+pub(crate) const FLAGS_COLOUR: u32 = 0x77B71;
 /// Animation group word +6 (not read by Re:CoM's instance set-up `0x140248F40`; Checked
 /// (decomp)), copied from Re:CoM groups of the same kind: `gauge:01` 0x12 (scrubbed) and
 /// `Cockpit:00` 0x38 (a fade).
-const GROUP_WORD_SCRUB: i16 = 1015;
-const GROUP_WORD_FADE: i16 = 623;
+pub(crate) const GROUP_WORD_SCRUB: i16 = 1015;
+pub(crate) const GROUP_WORD_FADE: i16 = 623;
 
 /// Our animation groups, from [`BASE_GROUPS`] on.
 pub mod group {
@@ -299,11 +299,11 @@ impl Layd {
 // ---------------------------------------------------------------------------------------------
 // SEQD.
 
-const SPRITE: usize = 0x2C;
-const PART: usize = 0x14;
-const SGROUP: usize = 4;
-const ANIM: usize = 0x90;
-const AGROUP: usize = 0x24;
+pub(crate) const SPRITE: usize = 0x2C;
+pub(crate) const PART: usize = 0x14;
+pub(crate) const SGROUP: usize = 4;
+pub(crate) const ANIM: usize = 0x90;
+pub(crate) const AGROUP: usize = 0x24;
 
 /// A SEQD as record tables.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -369,7 +369,7 @@ impl Seqd {
     }
 }
 
-fn sprite(uv: [i32; 4], colours: [u32; 4]) -> [u8; SPRITE] {
+pub(crate) fn sprite(uv: [i32; 4], colours: [u32; 4]) -> [u8; SPRITE] {
     let mut r = [0u8; SPRITE];
     for (i, v) in uv.iter().enumerate() {
         r[4 + 4 * i..8 + 4 * i].copy_from_slice(&v.to_le_bytes());
@@ -380,7 +380,7 @@ fn sprite(uv: [i32; 4], colours: [u32; 4]) -> [u8; SPRITE] {
     r
 }
 
-fn part(rect: [i32; 4], sprite: usize) -> [u8; PART] {
+pub(crate) fn part(rect: [i32; 4], sprite: usize) -> [u8; PART] {
     let mut r = [0u8; PART];
     for (i, v) in rect.iter().chain(std::iter::once(&(sprite as i32))).enumerate() {
         r[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
@@ -388,7 +388,7 @@ fn part(rect: [i32; 4], sprite: usize) -> [u8; PART] {
     r
 }
 
-fn sgroup(first: usize, count: usize) -> [u8; SGROUP] {
+pub(crate) fn sgroup(first: usize, count: usize) -> [u8; SGROUP] {
     let mut r = [0u8; SGROUP];
     r[..2].copy_from_slice(&(first as i16).to_le_bytes());
     r[2..].copy_from_slice(&(count as i16).to_le_bytes());
@@ -397,7 +397,7 @@ fn sgroup(first: usize, count: usize) -> [u8; SGROUP] {
 
 /// One animation: `frames` inclusive, X translate `tx`, X scale `sx` start → end, colour start →
 /// end (ABGR, 0x80 = ×1). Everything else as Re:CoM's static pieces have it.
-fn anim(flags: u32, sg: usize, frames: (i32, i32), tx: i32, sx: (f32, f32), colour: (u32, u32)) -> [u8; ANIM] {
+pub(crate) fn anim(flags: u32, sg: usize, frames: (i32, i32), tx: i32, sx: (f32, f32), colour: (u32, u32)) -> [u8; ANIM] {
     let mut r = [0u8; ANIM];
     let mut put = |at: usize, b: [u8; 4]| r[at..at + 4].copy_from_slice(&b);
     put(0x00, flags.to_le_bytes());
@@ -418,7 +418,7 @@ fn anim(flags: u32, sg: usize, frames: (i32, i32), tx: i32, sx: (f32, f32), colo
     r
 }
 
-fn agroup(first: usize, count: usize, once: bool, word: i16) -> [u8; AGROUP] {
+pub(crate) fn agroup(first: usize, count: usize, once: bool, word: i16) -> [u8; AGROUP] {
     let mut r = [0u8; AGROUP];
     r[0..2].copy_from_slice(&(first as i16).to_le_bytes());
     r[2..4].copy_from_slice(&(count as i16).to_le_bytes());

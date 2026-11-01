@@ -40,11 +40,13 @@ pub mod kh2_keyblades;
 pub mod matching;
 pub mod math;
 pub mod mdl;
+pub mod kh1_hud;
 pub mod mp_bar;
 pub mod rtm;
 pub mod ses;
 pub mod stats;
 pub mod texture;
+pub mod uibin;
 
 /// Errors.
 #[derive(Debug)]

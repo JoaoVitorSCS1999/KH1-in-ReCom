@@ -167,7 +167,7 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
 /// The group count of the loaded sprite set `name` (NUL-terminated), from Re:CoM's 2D registry
 /// (the walk `0x140245A20` does: list `[0x14087CE48] + 8`, next `+8`, name `+0x14`; a C2DSeq
 /// keeps its group count at `+0xF4`).
-unsafe fn set_groups(name: &[u8]) -> Option<u32> {
+pub(super) unsafe fn set_groups(name: &[u8]) -> Option<u32> {
     let b = base();
     if rd::<u64>(b + MANAGER as usize) == 0 {
         return None;
@@ -342,6 +342,7 @@ pub unsafe extern "win64" fn gauge_init(gauge: usize) {
     }
     build(gauge, list);
     super::command_menu::build(gauge, list);
+    super::kh1_hud::gauge_made(gauge, list);
     super::d2::census(|| format!("player gauge {gauge:#x} made (draw list {list})"));
 }
 

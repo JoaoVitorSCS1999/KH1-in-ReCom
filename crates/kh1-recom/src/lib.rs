@@ -56,6 +56,7 @@ pub mod hookplan;
 pub mod json;
 pub mod keyblade_models;
 pub mod keyblades;
+pub mod kh1_hud;
 pub mod magic;
 pub mod menu;
 pub mod motions;

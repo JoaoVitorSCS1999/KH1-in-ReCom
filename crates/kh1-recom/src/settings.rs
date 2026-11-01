@@ -67,6 +67,9 @@ pub struct Settings {
     /// The language of the command menu's KH1 words (`kh1-command-menu.json`): us, uk, fr, gr,
     /// it or sp.
     pub menu_language: String,
+    /// The HUD (decision 39): Re:CoM's, or KH1's elements drawn by Re:CoM from the `kh1hud` set
+    /// (`kh1-hud.json`). Interim switch until the KH1 camp entry has its row (stage 7.13).
+    pub hud: Mode,
 }
 
 /// The languages the asset step writes KH1's menu words in.
@@ -117,7 +120,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, menu_language: "us".into() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, menu_language: "us".into(), hud: Mode::Recom }
     }
 }
 
@@ -168,6 +171,11 @@ kh1_all_spells = off
 ;
 ; menu_language = us | uk | fr | gr | it | sp: the language of the command menu's KH1 words.
 menu_language = us
+;
+; hud = recom | kh1 (needs the asset step's kh1-hud.json)
+;   recom: Re:CoM's HUD.
+;   kh1:   KH1's HUD elements, drawn by Re:CoM (stage by stage; the rest stays Re:CoM's).
+hud = recom
 ";
 
 /// Parses the file. Unknown keys and bad values are reported and the default kept.
@@ -244,6 +252,10 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                     warnings.push(bad("menu_language must be us, uk, fr, gr, it or sp"));
                 }
             }
+            "hud" => match Mode::parse(v) {
+                Some(m) => s.hud = m,
+                None => warnings.push(bad("hud must be recom or kh1")),
+            },
             "combo_master" => match parse_switch(v) {
                 Some(b) => s.abilities.combo_master = b,
                 None => warnings.push(bad("combo_master must be on or off")),
@@ -307,7 +319,8 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "combo_master", switch_str(a.combo_master));
     let t = set_key(&t, "debug_attack", switch_str(s.debug_attack));
     let t = set_key(&t, "kh1_all_spells", switch_str(s.kh1_all_spells));
-    set_key(&t, "menu_language", &s.menu_language)
+    let t = set_key(&t, "menu_language", &s.menu_language);
+    set_key(&t, "hud", s.hud.as_str())
 }
 
 #[cfg(test)]
@@ -368,7 +381,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, menu_language: "fr".into() };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, menu_language: "fr".into(), hud: Mode::Kh1 };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -449,5 +462,15 @@ mod combo_tests {
         assert_eq!((c.combo_plus, c.air_combo_plus, c.combo_master), (2, 1, true));
         let back = parse(&store(DEFAULT_FILE, &s)).0;
         assert_eq!(back.abilities, s.abilities);
+    }
+
+    #[test]
+    fn hud_default_recom_and_round_trip() {
+        assert_eq!(parse(DEFAULT_FILE).0.hud, Mode::Recom);
+        let (s, w) = parse("hud = kh1\n");
+        assert!(w.is_empty());
+        assert_eq!(s.hud, Mode::Kh1);
+        assert_eq!(parse(&store(DEFAULT_FILE, &s)).0.hud, Mode::Kh1);
+        assert_eq!(parse("hud = maybe\n").1.len(), 1);
     }
 }

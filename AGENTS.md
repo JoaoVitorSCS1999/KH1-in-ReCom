@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 56: KH1 HUD H1, the kh1hud sprite set, version 0.25.0 (2026-10-31)
+
+> Decision 39: an option where Re:CoM's HUD is replaced by KH1's, KH1's exact graphics and places
+
+- KH1's HUD is data (Checked, files + decomp): 24 `exchange/<L>_uibin_*.bin` layouts ("TTUI" v2,
+  all 120 + com_battle + danger decoded from the owner's dump), `command2/uitex.bin` pictures,
+  portraits in `.mdls` section 2. The asset step builds `kh1hud.lad` into `FO0002.SPR` and
+  `kh1hud.imz` into `FO0002.RTM` (PS2 1024×512, HD 2048×1024, FR/GR/IT/SP/UK copies), KH1's arcs
+  baked by running KH1's fan code (`0x14026B790` / `0x14026E450`) over its ring textures.
+- Re:CoM registers `kh1hud:00` (632 groups) as its own; `kh1-hud.json`; interim switch
+  `hud = recom | kh1` in the ini (default recom) until the KH1 camp entry. `docs/recom-kh1-hud.md`.
+
+---
+
 ## Stage 55: 2D draw lists: no leak from Config flips; pool counter, version 0.24.4 (2026-10-31)
 
 - Re:CoM's 2D pool: 2047 usable entries (`0x140245293`); each C2DSeqCtrl layer (sprite group or
