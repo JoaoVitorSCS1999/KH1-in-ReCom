@@ -5,7 +5,7 @@ unlocks: each spell's base level when Sora first gets that Re:CoM magic card; th
 Re:CoM bosses." The table below is for the owner to review (owner away, 2026-11-01: "keep going").
 
 Code: `crates/kh1-recom/src/unlocks.rs` (the table and the rule, tested), `src/win/unlocks.rs` (the
-wrapper and the save), the one-time sync in `src/win/mp.rs` (`spell_levels`). The command menu
+wrapper and the save), the one-time sync in `src/win/mp.rs` (`spell_state`, formerly `spell_levels`). The command menu
 already lists the levels kept in the save (`docs/recom-m7-command-menu.md`); the debug switch
 `kh1_all_spells = on` still gives every spell at level 3.
 
@@ -118,9 +118,15 @@ Assumption (StrategyWiki says the ship's deck, where KH1's Hook is fought).
   game played at the Re:CoM setting has its spells when switched to KH1). Nothing in Riku's story.
   Guards: a save and its collection (`*0x14087A7E8 = save + 0x1A74`), else nothing.
 - **Older saves:** the first read of the spells at the KH1 setting (the command menu reads them each
-  frame through `win::mp::spell_levels`) runs the same sync once when the block's spare byte
+  frame through `win::mp::spell_state`) runs the same sync once when the block's spare byte
   (`save + 0x2684`) bit 0 is clear, then sets it. Saves from before this stage have it 0, so they get
   their spells at their first KH1 frame. A new game zeroes the block (Re:CoM zeroes the save).
+- **Shortcuts (stage 7.12):** the same sync fills the shortcut slots (`save + 0x2681..0x2683`) as
+  KH1's learn (`0x140285260`, Checked (decomp)): each spell learned (level 0 → more) takes the first
+  empty slot. A save whose spare bit 1 is clear (every save before 7.12) first gets the spells it
+  already had, in KH1's order, first three (owner, 2026-11-01), then the bit is set; the first read
+  runs the sync when either bit is missing. Logged `unlocks: shortcut 1 = Fire (…)`.
+  `recom-m7-command-menu.md` § 7.12.
 - **Per frame:** one byte test inside the read the menu already makes. The wrapper runs only when
   Re:CoM adds a card.
 - **Sites:** hooked `0x14015C7F0` `48 83 EC 28 B8 FF 00 00 00`; checked only `0x14015CDFB` (`0F B7 CB

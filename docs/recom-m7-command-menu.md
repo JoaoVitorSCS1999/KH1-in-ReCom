@@ -441,3 +441,120 @@ release motion) → refused: no sound, the list stays open; taken: the command i
 (`win::magic::issue`), the stack unwinds and the root cursor returns to Attack. The gate is read
 from Sora's KH1 frame as last left (one motion update stale; the frame checks again exactly) and
 only while Re:CoM's action is one KH1's frame runs. `recom-m7-magic.md`.
+
+## Stage 7.12: KH1's shortcut menu (L1)
+
+Owner (2026-11-01): "L1 like KH1. Take KH1's behaviour for the rest": Cure / Aero from a shortcut
+cast on Sora at once (as the Magic list); slots filled by KH1's learn rule, older saves once from
+the spells already learned (KH1's spell order, first three); Customize is 7.13; at a save / warp
+point with L1 held, KH1 casts only (no save menu); the panel is KH1's art in both menu looks
+(`hud_kh1_menu` on or off); keyboard: whatever key Re:CoM maps to its L1 bit.
+
+### KH1 (Steam)
+
+| what | where | tag |
+|---|---|---|
+| Slots: save `+0x844..0x846`, spell 0..6 or 0xFF none; spells only, cast at the spell's current level (`level + (spell + 2) × 3`). Get `0x140285090`, set `0x1402857C0`, new game all 0xFF `0x1402852C0`. | | Checked (decomp) |
+| Learn `0x140285260` (the script command `0x1401AF7C0`): sets the learned bit, then puts the spell in the first slot holding 0xFF, if any (no duplicate check). Level rises (-ra / -ga) don't go through it. | `0x140285260` | Checked (decomp) |
+| Build (`0x1402944C0`, with the Magic list, only when a spell is learned and the save's `+0x874` bits 3 / 0 (no magic / sealed) are clear): entry k = the slot's spell command, or the blank 0x42; grey = lock = all but the slots whose spell is usable this frame (the Magic list's test: the state's flag 0x20, MP, range for flag-8 spells); `0x142D53A5C` = 1 when a slot is set. | `0x1402944C0` | Checked (decomp) |
+| Swap (`0x1402937F0`, before its "Sora takes input" checks): the stack's base is the root and `0x142D53A5C` and L1 held (`0x14298CA94 & 0x40000`) → the base becomes the shortcut list (type 5, `0x140528A18`) and the stack above it is cleared (an open submenu closes). Base is the shortcut list and L1 released or `0x142D53A5C` 0 → the root, root cursor 0 (Attack). No sound. `0x140297950` (Sora `+0x444 & 1`) clears `0x142D53A5C` first. | `0x1402937F0` | Checked (decomp) |
+| With type 5 on top: the root's Triangle (context) / Square (roll / guard: `0x142D53A40 \|= 0x4000000`) block is skipped; the base list's jump check still runs (a fresh jump outside states 8 / 0x18 / 0x19 / 0x21 is the jump and ends the step); the cursor `0x1402931B0` returns at once (the list's cursor is −1), so the d-pad does nothing; then, with no command picked, fresh `0x80000` (Triangle) else `0x100000` (Square) else `0x200000` (Cross) runs entry 0 / 1 / 2 through `0x140293480`. | `0x1402937F0`, `0x1402931B0` | Checked (decomp) |
+| `0x140293480` on a slot: locked → sound 4 (the step set `0x142D53A40 = 0x2000000`); a command with a submenu opens it (Cure / Aero: the party list 4; not ours: owner, cast on Sora); KH1's commit gate (`0x1402A2EC0` free or combo window, else Fire from frame 14 of motions 0x3D / 0x8A) refuses silently (the press is gone, not buffered); else the command is written and returns 1, no sound. Works in the air (the gate decides). | `0x140293480` | Checked (decomp) |
+| Superglide / roll / guard read `0x142D53A40 & 0x4000000` (`0x1402A7B30`), so none starts while the shortcut list is up; the glide's hold reads the pad itself (`0x1402B2BF0`). | | Checked (decomp) |
+| Draw `0x14027B870` case 5 at (left margin + 16, 0x11A): `uibin_cut` objects 0 (`cut_fra_a`, picture 0: sprite def `0x1427F1460`, which `0x140266580` builds from `uitex.bin` offset 0) and 1 (`cut_shortcut`, picture 1: def `0x1427F1430`, offset 0x2080) through `0x14027A9F0`; glyphs 0x46, 0x45, 0x41 through `0x140279FC0` (size 14, RGB × 1, alpha the fade) at objects 2..4's places (91, 23 / 45 / 67); words through `0x14027A920` at the frame's place (0, 0) + (16, 2) + (0, 20 + 22 k), 0x73 when the grey bit is set, else 0xE6 (set from the bits, not the eased bytes). The root, its header and the context tab are not drawn. | `0x14027B870` | Checked (decomp + files) |
+| The `cut` objects are copied once (`0x140278180` → `0x14027E1C0(&0x140527B58)`); nothing starts their keys (`0x14027E710` is called in the draw only for the title layouts `0x142859390` / `0x1428592D0`, Checked (exe)), so the file's 2-frame alpha-in never plays: they are drawn static, × the menu's fade. (The research note's "each piece a 2-frame alpha-in" is the file's data, not what KH1 draws.) | | Checked (decomp + exe) |
+| The context tab's step `0x140277CF0` is called only from the root's draw (`0x140278B40`): while the shortcut list is up it does not step. | | Checked (decomp) |
+| Glyph 0x41 = the confirm button (`0x1402D4A50`: 3 without the confirm swap, 0 with it; `0x1403EFF90`'s PlayStation column: 0x43 → 0, 0x44 → 3, 0x45 → 2, 0x46 → 1). | | Checked (decomp + exe); 0 Circle / 2 Square / 3 Cross: Assumption (1 Triangle is the tab's) |
+
+### Re:CoM side (built)
+
+- **Slots:** our save block `save + 0x2681..0x2683` (`crate::mp::off::SHORTCUTS`), 0 = none,
+  else spell + 1; spare byte `save + 0x2684` bit 1 (`crate::unlocks::SHORTCUTS_SET`) = set up.
+  The unlocks' sync (`win/unlocks.rs`, the first-obtained wrapper and the first read at the KH1
+  setting) fills them: a save never set up first gets the spells it already had in KH1's order
+  (first three), then every spell learned (level 0 → more) takes the first empty slot
+  (`crate::unlocks::shortcuts`). `win::mp::spell_state` reads levels and slots in one read and
+  runs the sync once when either spare bit is missing. `kh1_all_spells = on` (debug) shows Fire /
+  Blizzard / Thunder while the save has no slot set (not written).
+- **Logic** (`crate::command_menu`, tested): `World.shortcuts`, `Pad.l1` (held), the shortcut list
+  built with the Magic list, the swap, `step_shortcut` (jump first; Triangle > Square > confirm;
+  greyed → error sound; gate refused → nothing; else `Outcome.cast`), the brightness reset when
+  the root comes back, the tab frozen while the list is up, `Scene.shortcut`.
+- **Input:** L1 held = Re:CoM's `0x14029C1D0(4, 0)` (pad bit 4: L1 by bit order, Assumption; the
+  card input `0x1401FEFE0` reads it; at the KH1 setting the card input doesn't run, so L1 is free),
+  read even while Sora's pad is off (KH1 swaps before its input test). Triangle / Square / confirm
+  are the menu's fresh reads (confirm = Re:CoM's configurable confirm). Keyboard: whatever key
+  Re:CoM's key config maps to its L1 bit (Assumption: not read).
+- **Request bits** (the request-bits wrapper): while the list is up Attack (`& 4`), Triangle
+  (`& 0x200`) and Square (`& 2`: roll, guard, Superglide start) are dropped; the jump stays.
+- **Cast:** `Outcome.cast` → `win::magic::issue(spell, level)`, as the Magic list (Cure / Aero on
+  Sora at once).
+- **Panel** (`win/command_menu.rs` `show_short`), in both looks: `kh1hud` controls at KH1's places
+  (`crate::command_menu::shortcut`): the panel group at (16, 282) with the left margin, the glyphs
+  at (107, 305 / 327 / 349) + the glyph drop (−37/16), the words (the menu's word groups) at
+  (32, 304 + 22 k); colours (1, 1, 1, fade), words (b, b, b, fade) with b = brightness / 255. The
+  third glyph follows Re:CoM's confirm key (`0x14083F3F0`, read by `0x140346BB0`): 0x2000 →
+  Circle, else Cross. Made when the list comes up (or a slot's word changes), colours written
+  only when the fade or a slot's greying changes; deleted when the list goes (the root's rows are
+  remade). Needs `kh1-hud.json`'s `"shortcut"` and `kh1hud:00` registered (checked when the panel
+  is made); without them the shortcuts cast with no panel (logged once).
+- **Save / warp points** (owner: "KH1 casts only"): their updates read Triangle from the pad
+  (`0x14029B550(0)`). The two calls (`0x1401C530E`, `0x1401CC31B`) are retargeted through one jump
+  near them to `point_triangle`: when the menu ran this frame with a slot set
+  (`SHORT_READY`), MP is live, and L1 is held, it returns 0 (not pressed); else Re:CoM's read.
+  So with L1 held Triangle casts slot 1 and the save / world-warp menu doesn't open; without L1
+  (or with no slot set) nothing changes. `0x14029B550`'s third caller (`0x140142A30`) is not
+  touched.
+
+### Sites (stage 7.12)
+
+| address | bytes | use |
+|---|---|---|
+| `0x1401C530E` save point Triangle call | `E8 3D 62 0D 00` | retargeted (call → our jump → `point_triangle`) |
+| `0x1401CC31B` warp point Triangle call | `E8 30 F2 0C 00` | retargeted |
+| `0x1401C530A` its context | `75 70 33 C9 E8 3D 62 0D 00 85 C0 74 65` | checked only |
+| `0x1401CC317` its context | `75 68 33 C9 E8 30 F2 0C 00 85 C0 74 5D` | checked only |
+| `0x14029B550` the Triangle read (whole) | `48 83 EC 28 8B D1 B9 10 00 00 00 E8 E0 0C 00 00 33 C9 85 C0 0F 95 C1 8B C1 48 83 C4 28 C3` | called by `point_triangle` |
+| `0x140346BB0` confirm key getter | `0F B7 05 39 88 4F 00 C3` | checked only (`0x14083F3F0` is read) |
+
+`0x14029C1D0` (held buttons) is the movement's checked site. Every byte set checked against
+`recomsteam.exe`.
+
+### Per frame
+
+The menu step already runs each frame; the shortcut list adds a held-pad read, the slots from the
+block read the menu already makes, and one atomic store. While the list is up: no 2D work but
+colour writes on a fade or greying change. `point_triangle` runs only when a save / warp point's
+update reaches its Triangle read (Sora targets it).
+
+### Logs and trace
+
+- Start: `command menu: KH1's shortcut list on L1 (M7 stage 7.12): slots at save+0x2681; the save
+  point's Triangle read 0x1401C530E retargeted, the warp point's 0x1401CC31B retargeted`.
+- Unlocks: `unlocks: shortcut 1 = Fire (KH1's learn: the first empty slot)` / `(set up once from
+  the spells this save had)`.
+- Menu events (log and F9 trace): `shortcuts on (L1)`, `shortcuts off`, `shortcut 1 Fira cast`,
+  `shortcut 3 - greyed`, `shortcut 2 Cure not-now`; trace token `menu sc g<grey bits>` while up.
+- Once: `command menu: save / warp point: Triangle with L1 held is shortcut 1 (KH1), not the
+  point's menu`; `… no shortcut panel (run this version's asset step) …`.
+
+### 1:1
+
+Checked (decomp): the swap rule and its timing (same frame, no sound, submenu dropped, root back
+on Attack), the slot commands and greying, the button order and single press, the error sound,
+the silent gate refusal, no sound on a cast, no roll / guard / context / Attack while up, the jump
+taking the frame, the panel's pieces, places, pictures and brightness, the frozen tab, the learn
+rule. Checked (files + offline render): the panel's art and layout (`builds_from_a_dump`, render
+`/tmp/sc/shortcut_panel.png` on the session machine). Not checked: in game; a KH1 trace or video
+of the shortcut list.
+
+Not 1:1 / Assumptions:
+- Cure / Aero cast on Sora at once (owner): KH1 opens the party list (`0x140293480`).
+- KH1's jump check exempts states 8 / 0x18 / 0x19 / 0x21 (flight and others Re:CoM has no use for
+  yet); ours, as the root's, always lets a fresh jump take the frame.
+- `0x140297950` (Sora `+0x444 & 1`, a KH1 no-command state) is not modelled.
+- L1 = Re:CoM's pad bit 4 and Circle = bit 0x20 (bit order); the keyboard key Re:CoM maps to L1;
+  the PC's glyph for 0x41 / 0x45 (by `FontIcon.inf`'s PlayStation names).
+- At a save / warp point: Triangle there still acts without waiting for the tab (7.3's known gap);
+  with L1 held it is shortcut 1 only.
+- An empty slot is drawn with the blank command's dash, greyed (KH1's 0x42).

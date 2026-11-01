@@ -156,6 +156,35 @@ pub mod menu {
     pub const SEL_WORD_AT: (f32, f32) = (29.0, 22.0);
 }
 
+/// Stage 7.12: KH1's shortcut panel (`kh1_recom_assets::kh1_hud::shortcut`), groups from its first
+/// (`kh1-hud.json` `"shortcut": {"first", "icons"}`). The words are the menu's
+/// ([`MenuGroups::word`]); KH1's places are `crate::command_menu::shortcut`.
+pub mod shortcut {
+    /// The frame (`cut_fra_a`, picture 0, its vertical gradient) with the title (`cut_shortcut`,
+    /// picture 1) on it, at the panel's origin.
+    pub const PANEL: u32 = 0;
+    /// The PC's PlayStation glyphs (`Icon.tm2`), each a 16 × 19 quad at its own origin (as the
+    /// context tab's Triangle): Triangle, Square, Cross, Circle (empty without `Icon.tm2`).
+    pub const TRIANGLE: u32 = 1;
+    /// Square.
+    pub const SQUARE: u32 = 2;
+    /// Cross (KH1's 0x41 with the confirm on Cross).
+    pub const CROSS: u32 = 3;
+    /// Circle (KH1's 0x41 with the confirm on Circle).
+    pub const CIRCLE: u32 = 4;
+    /// Groups.
+    pub const COUNT: u32 = 5;
+}
+
+/// The shortcut panel's groups of the manifest (stage 7.12).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ShortcutGroups {
+    /// First group.
+    pub first: u32,
+    /// The glyph groups hold the PC's button art.
+    pub icons: bool,
+}
+
 /// H5: the LOCK ON! plate and the target's HP gauge (`kh1_recom_assets::kh1_hud::target`). KH1's
 /// rules (`0x1402747F0`, `0x1402758B0`, `0x140275000`; Checked (decomp)).
 pub mod target {
@@ -249,6 +278,8 @@ pub struct Manifest {
     pub motion: Motion,
     /// The command menu look (H4), when built.
     pub menu: Option<MenuGroups>,
+    /// KH1's shortcut panel (stage 7.12), when built (needs `UK_uibin_cut.bin` and the menu).
+    pub shortcut: Option<ShortcutGroups>,
     /// The LOCK ON! plate and target gauge's first group (H5), when built.
     pub target: Option<u32>,
     /// Donald's and Goofy's gauge groups (H6), when built.
@@ -334,6 +365,17 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
             Some(MenuGroups { first, tab_icon, words })
         }
     };
+    let shortcut = match v.get("shortcut") {
+        None => None,
+        Some(t) => {
+            let first = t.get("first").and_then(|x| x.as_u32()).ok_or("shortcut without first")?;
+            if first + shortcut::COUNT > groups {
+                return Err("shortcut groups past the set".into());
+            }
+            let icons = matches!(t.get("icons"), Some(crate::json::Value::Bool(true)));
+            Some(ShortcutGroups { first, icons })
+        }
+    };
     let target = match v.get("target") {
         None => None,
         Some(t) => {
@@ -382,7 +424,7 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
             Some(first)
         }
     };
-    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party, cursor, level_up, recom_hp, mp_ring })
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, shortcut, target, party, cursor, level_up, recom_hp, mp_ring })
 }
 
 /// Re:CoM's HP gauge at KH1's place, its ring and bar turned 180° (owner, 2026-11-01; asset step
@@ -760,6 +802,12 @@ mod tests {
         assert_eq!((mm.word("fr", 1), mm.word("fr", 6), mm.word("gr", 1), mm.word("us", 2)), (Some(641), Some(642), Some(643), None));
         assert!(mm.tab_icon && menu::TAB == 23 && menu::WORDS == 25);
         assert!(parse_manifest(&ok.replace("kh1hud:00", "Cockpit:00")).is_err());
+        // Stage 7.12: the shortcut panel, optional (older manifests have none).
+        assert_eq!(m.shortcut, None);
+        let with = ok.replace("\"languages\"", "\"shortcut\": {\"first\": 639, \"icons\": true}, \"languages\"");
+        assert_eq!(parse_manifest(&with).unwrap().shortcut, Some(ShortcutGroups { first: 639, icons: true }));
+        assert!(parse_manifest(&with.replace("\"first\": 639", "\"first\": 640")).is_err(), "past the set");
+        assert_eq!(parse_manifest(&with.replace("true}", "false}")).unwrap().shortcut.map(|s| s.icons), Some(false));
         assert_eq!(m.recom_hp, None);
         let with = ok.replace("\"languages\"", "\"recom_hp\": {\"set\": \"gauge:01\", \"first\": 47, \"of\": [7, 8, 9]}, \"languages\"");
         assert_eq!(parse_manifest(&with).unwrap().recom_hp, Some(47));

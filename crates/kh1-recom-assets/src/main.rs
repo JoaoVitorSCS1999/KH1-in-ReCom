@@ -535,7 +535,15 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     }
     let lrefs: Vec<&str> = langs.iter().map(String::as_str).collect();
     let menu = match &menu_files {
-        Ok(m) => Some(kh::MenuSources { com: &m.com, com_battle: &m.com_battle, mag: &m.mag, font: [&m.font[0], &m.font[1]], words: m.words.clone(), icon: m.icon.as_ref().map(|[a, b]| [a.as_slice(), b.as_slice()]) }),
+        Ok(m) => Some(kh::MenuSources {
+            com: &m.com,
+            com_battle: &m.com_battle,
+            mag: &m.mag,
+            font: [&m.font[0], &m.font[1]],
+            words: m.words.clone(),
+            icon: m.icon.as_ref().map(|[a, b]| [a.as_slice(), b.as_slice()]),
+            cut: m.cut.as_deref(),
+        }),
         Err(e) => {
             println!("note: KH1 HUD: no KH1 command menu look: {e}");
             None
@@ -574,6 +582,15 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         println!("KH1 HUD: command menu look from group {}: {} glyphs of KH1's menu font, words for {:?}{}", m.first, m.glyphs, m.words.iter().map(|w| w.0.as_str()).collect::<Vec<_>>(), if m.missing.is_empty() { String::new() } else { format!("; no glyph for {:?} (drawn as a space)", m.missing) });
         println!("KH1 HUD: FM context tab from uitex.bin picture 2's PC rows; Triangle {}", if m.tab_icon { "from Theater's Icon.tm2 (the PlayStation glyph)" } else { "MISSING (no Icon.tm2 / FontIcon.inf): the tab shows without it" });
     }
+    match &b.shortcut {
+        Some(sc) => println!(
+            "KH1 HUD: shortcut panel (M7 stage 7.12) from group {}: {} (picture 0's frame, picture 1's title); button glyphs {}",
+            sc.first,
+            kh::CUT,
+            if sc.icons { "Triangle / Square / Cross / Circle from Theater's Icon.tm2" } else { "MISSING (no Icon.tm2 / FontIcon.inf): the panel shows without them" }
+        ),
+        None => println!("note: KH1 HUD: no shortcut panel (no {} or no command menu look): the DLL's shortcuts cast without a panel", kh::CUT),
+    }
     println!(
         "KH1 HUD: {} groups ({} motion units), {} sprites, {} atlas items; PS2 atlas {}×{}, PC atlas {}×{}; kh1hud.lad + {} language copies into FO0002.SPR, kh1hud.imz + {} into FO0002.RTM ({:?}); {} PC texture rects redrawn from the PS2 pictures (repacked on PC)",
         b.groups,
@@ -609,6 +626,8 @@ struct MenuFiles {
     words: Vec<(String, Vec<(u16, String)>)>,
     /// `Icon.tm2`, `FontIcon.inf` (`Image/dt/Theater`), for the context tab's Triangle.
     icon: Option<[Vec<u8>; 2]>,
+    /// `UK_uibin_cut.bin`, the shortcut panel (stage 7.12).
+    cut: Option<Vec<u8>>,
 }
 
 fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_formats::egs::Install) -> Result<MenuFiles, String> {
@@ -639,7 +658,14 @@ fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_for
             words.push((lang.to_string(), cm::words(&a.data).0));
         }
     }
-    Ok(MenuFiles { com, com_battle, mag, font, words, icon })
+    let cut = match rd(kh::CUT) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            println!("note: KH1 HUD: no shortcut panel: {e}");
+            None
+        }
+    };
+    Ok(MenuFiles { com, com_battle, mag, font, words, icon, cut })
 }
 
 /// KH1's command words (`btltbl.bin`'s PC assets `<LANG>_Word.bin`, decoded for the menu's

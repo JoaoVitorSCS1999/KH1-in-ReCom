@@ -271,11 +271,13 @@ pub mod off {
     pub const SPELLS: usize = 5;
     pub const SPELL_COUNT: usize = 7;
     /// Stage 7.12: the 3 shortcut slots (KH1 save `+0x844..0x846`); 0 = none, else spell + 1.
-    /// Reserved (zero) until then.
+    /// Filled by KH1's learn rule (`crate::unlocks::shortcuts`), once from the spells already
+    /// learned for an older save; Customize (7.13) will set them.
     pub const SHORTCUTS: usize = 0xC;
     pub const SHORTCUT_COUNT: usize = 3;
     /// Stage 7.11: bit 0 = the spell levels were synced from Re:CoM's card collection for this
-    /// save (`crate::unlocks::SYNCED`); the other bits reserved (zero).
+    /// save (`crate::unlocks::SYNCED`); stage 7.12: bit 1 = the shortcut slots were set up
+    /// (`crate::unlocks::SHORTCUTS_SET`); the other bits reserved (zero).
     pub const SPARE: usize = 0xF;
 }
 

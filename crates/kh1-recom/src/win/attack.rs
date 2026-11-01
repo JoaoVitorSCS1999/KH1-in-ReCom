@@ -364,6 +364,10 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
         if !k.triangle {
             r &= !0x200;
         }
+        // Stage 7.12: while the shortcut list is up Square is slot 2, not the roll / guard.
+        if !k.square {
+            r &= !2;
+        }
         wr(pl + p::REQUEST, r);
     }
     // KH1: a jump on the same frame wins over the Attack (`0x1402A6220`).

@@ -831,6 +831,29 @@ pub const COMMAND_MENU_CHECKED: &[Site] = &[
     Site { name: "warp point update: action 1..4 (0x1401CC32B)", rva: 0x001C_C32B, expect: &[0x8B, 0x88, 0x0C, 0x04, 0x00, 0x00, 0xFF, 0xC9, 0x83, 0xF9, 0x03, 0x77, 0x49] },
     // mov eax,[0x14087B84C]; and eax,1; ret: the warp point's stop flag.
     Site { name: "warp point stop flag (0x1402345D0)", rva: 0x0023_45D0, expect: &[0x8B, 0x05, 0x76, 0x72, 0x64, 0x00, 0x83, 0xE0, 0x01, 0xC3] },
+    // Stage 7.12. The retargeted calls' context: jne (not a save / warp point); xor ecx,ecx (port
+    // 0); call 0x14029B550; test eax,eax; je (no Triangle).
+    Site { name: "save point update: Triangle read (0x1401C530A)", rva: 0x001C_530A, expect: &[0x75, 0x70, 0x33, 0xC9, 0xE8, 0x3D, 0x62, 0x0D, 0x00, 0x85, 0xC0, 0x74, 0x65] },
+    Site { name: "warp point update: Triangle read (0x1401CC317)", rva: 0x001C_C317, expect: &[0x75, 0x68, 0x33, 0xC9, 0xE8, 0x30, 0xF2, 0x0C, 0x00, 0x85, 0xC0, 0x74, 0x5D] },
+    // The callee, whole: sub rsp,0x28; mov edx,ecx; mov ecx,0x10; call 0x14029C240 (fresh);
+    // xor ecx,ecx; test eax,eax; setne cl; mov eax,ecx; add rsp,0x28; ret (0 / 1 in eax). Its
+    // callers: 0x140142A30 (not ours), the save and warp points.
+    Site {
+        name: "point Triangle read (0x14029B550)",
+        rva: 0x0029_B550,
+        expect: &[0x48, 0x83, 0xEC, 0x28, 0x8B, 0xD1, 0xB9, 0x10, 0x00, 0x00, 0x00, 0xE8, 0xE0, 0x0C, 0x00, 0x00, 0x33, 0xC9, 0x85, 0xC0, 0x0F, 0x95, 0xC1, 0x8B, 0xC1, 0x48, 0x83, 0xC4, 0x28, 0xC3],
+    },
+    // movzx eax,word [0x14083F3F0]; ret: Re:CoM's confirm key (PS2 order), the shortcut panel's
+    // third glyph.
+    Site { name: "confirm key getter (0x140346BB0)", rva: 0x0034_6BB0, expect: &[0x0F, 0xB7, 0x05, 0x39, 0x88, 0x4F, 0x00, 0xC3] },
+];
+
+/// Stage 7.12: the save and warp points' fresh-Triangle calls (`call 0x14029B550`), retargeted to
+/// `win::command_menu::point_triangle` (the bytes the patch replaces; context in
+/// [`COMMAND_MENU_CHECKED`]).
+pub const COMMAND_MENU_POINT_CALLS: &[Site] = &[
+    Site { name: "save point Triangle call (0x1401C530E)", rva: 0x001C_530E, expect: &[0xE8, 0x3D, 0x62, 0x0D, 0x00] },
+    Site { name: "warp point Triangle call (0x1401CC31B)", rva: 0x001C_C31B, expect: &[0xE8, 0x30, 0xF2, 0x0C, 0x00] },
 ];
 
 /// Our HUD controls' 2D instances (`win::d2`, `crate::d2`): Re:CoM's draw-list setter, called to
@@ -1221,6 +1244,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(MP_BAR_CHECKED)
         .chain(COMMAND_MENU_CALLEES)
         .chain(COMMAND_MENU_CHECKED)
+        .chain(COMMAND_MENU_POINT_CALLS)
         .chain(HUD_2D_CALLEES)
         .chain(HUD_2D_CHECKED)
         .chain(MAGIC_HOOKS)
@@ -1557,6 +1581,17 @@ mod tests {
         assert_eq!(rip(find("warp point stop flag"), 0, 6), 0x1_4087_B84C);
         assert_eq!(find("save point type getter").expect[1..5], crate::command_menu::recom::kind::SAVE_POINT.to_le_bytes());
         assert_eq!(find("warp point type getter").expect[1..5], crate::command_menu::recom::kind::WARP_POINT.to_le_bytes());
+        // Stage 7.12: both retargeted calls go to the checked Triangle read, and are the bytes the
+        // context sites hold at +4; the confirm key getter reads 0x14083F3F0; the held-pad read
+        // the shortcut list uses is the movement's checked site.
+        for (c, ctx) in COMMAND_MENU_POINT_CALLS.iter().zip(["save point update: Triangle read", "warp point update: Triangle read"]) {
+            let ctx = find(ctx);
+            assert_eq!(crate::hookplan::call_target(0x1_4000_0000 + c.rva as u64, c.expect), Some(0x1_4029_B550), "{}", c.name);
+            assert_eq!((ctx.rva + 4, &ctx.expect[4..9]), (c.rva, c.expect), "{}", c.name);
+            assert_eq!(all_sites().filter(|s| s.rva == c.rva).count(), 1, "{}", c.name);
+        }
+        assert!(all_sites().any(|s| s.rva == 0x0029_B550) && all_sites().any(|s| s.rva == 0x0029_C1D0));
+        assert_eq!(rip(find("confirm key getter"), 0, 7), 0x1_4083_F3F0);
     }
 
     #[test]

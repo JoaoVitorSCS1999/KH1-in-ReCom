@@ -705,3 +705,19 @@ HP ring groups 7, 8, 9 turned 180° in the data, as groups 47, 48, 49; Re:CoM's 
 writes `"recom_hp": {"set": "gauge:01", "first": 47, "of": [7, 8, 9]}` into `kh1-hud.json`. It
 prints `KH1 HUD: Re:CoM's HP ring and bar turned 180° as gauge:01 groups 47..49 in [...]`. No new
 file: `raw/FORM/0002/FO0002.SPR` carries them (`docs/recom-kh1-hud.md` § Re:CoM's HP gauge at KH1's place).
+
+KH1's shortcut panel (M7 stage 7.12, `docs/recom-m7-command-menu.md` § 7.12): the same run also
+reads `exchange/UK_uibin_cut.bin` (KH1's shortcut layout) and adds five groups after the command
+menu's words: the panel (`cut_fra_a` from `uitex.bin` picture 0, its brown → purple vertex
+gradient, with `cut_shortcut`, "SHORT CUT", from picture 1) and the PC's PlayStation glyphs
+Triangle, Square, Cross, Circle from `Icon.tm2` (records `0xE411`, `0xE410`, `0xE412`, `0xE413`;
+each a 16 × 19 quad as the context tab's Triangle). It checks the layout's object names and that
+`cut_ico_a / b / c` sit at (91, 23 / 45 / 67), where the DLL places the glyphs, and writes
+`"shortcut": {"first": N, "icons": true}` into `kh1-hud.json` (format unchanged: an older
+manifest simply has no panel, and the DLL's shortcuts then cast without one). It prints
+`KH1 HUD: shortcut panel (M7 stage 7.12) from group N: exchange/UK_uibin_cut.bin (picture 0's
+frame, picture 1's title); button glyphs Triangle / Square / Cross / Circle from Theater's
+Icon.tm2`, or a `note:` when the layout is missing. No new file: `FO0002.SPR` / `.RTM` and
+`kh1-hud.json` carry it. Checked: the owner's dump (`builds_from_a_dump`, panel at group 5774 of
+6352; picture 0's PC art used as it is, no rect redrawn from the PS2 picture) and an offline
+render of the groups. Not run on the owner's PC yet.

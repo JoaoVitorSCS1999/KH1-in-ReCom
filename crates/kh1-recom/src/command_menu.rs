@@ -46,6 +46,10 @@
 //!   10/7 and opacity 0 → 1 by 1/7 per half-frame step) and fades out by the opacity. The
 //!   "scale" `0x142866D14` only multiplies the alpha of the tab's vertices (`0x142866A44`) and
 //!   word (`0x142866A40`): it is an opacity, not an X scale (7.3 read it as one).
+//! - **Shortcuts** (stage 7.12, `0x1402937F0`, `0x1402944C0`, `0x14027B870` case 5): while L1 is
+//!   held and a slot is set (and Sora has a spell), the shortcut list takes the root's place (any
+//!   submenu closes; released, the root returns on Attack); a fresh Triangle / Square / Cross casts
+//!   slot 1 / 2 / 3 through the same commit path as the menu (see [`shortcut`]).
 //!
 //! Re:CoM side: `win/command_menu.rs`; notes `docs/recom-m7-command-menu.md`.
 
@@ -235,6 +239,9 @@ pub struct World {
     pub gate_any: bool,
     /// Fire alone is also taken from frame 14 of its release motion (`0x3D` / `0x8A`).
     pub gate_fire: bool,
+    /// Stage 7.12: the three shortcut slots as our save block keeps them (KH1 save
+    /// `+0x844..0x846`): 0 = none, else spell + 1 ([`shortcut::slot_spell`]).
+    pub shortcuts: [u8; 3],
 }
 
 /// The fresh presses of one frame (Re:CoM's pad, mapped to KH1's buttons).
@@ -252,6 +259,9 @@ pub struct Pad {
     pub square: bool,
     /// Any other button (L1, R1, …): makes the word differ from a lone direction.
     pub other: bool,
+    /// L1 **held** (not a fresh press; KH1's held word `+4` & 0x40000): the shortcut list while
+    /// held (stage 7.12). Not part of [`Pad::word`].
+    pub l1: bool,
 }
 
 impl Pad {
@@ -271,6 +281,9 @@ impl Pad {
 pub enum Kind {
     Root,
     Magic,
+    /// Stage 7.12: KH1's shortcut list (type 5, `0x140528A18`), in the root's place while L1 is
+    /// held.
+    Shortcut,
 }
 
 /// One KH1 list.
@@ -352,6 +365,23 @@ pub enum Event {
     Refused(u8),
     /// The context command went to Re:CoM's Triangle action.
     Context(u8),
+    /// Stage 7.12: the shortcut list came on top (L1 held with a slot set) or went (the root
+    /// back on Attack).
+    ShortcutList(bool),
+    /// Stage 7.12: a shortcut button: (slot 0..2, its command, what happened).
+    Shortcut(u8, u8, ShortResult),
+}
+
+/// What a shortcut press did (`0x140293480` on the shortcut list).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShortResult {
+    /// Issued: the spell is cast this frame (no menu sound).
+    Cast,
+    /// A greyed slot (empty, not usable, MP short, out of range, a state that can't cast): the
+    /// error sound.
+    Greyed,
+    /// KH1's commit gate refused it (Sora busy): dropped, no sound, not buffered.
+    NotNow,
 }
 
 /// Re:CoM's request bits after the menu: which of the pad's actions stay.
@@ -365,6 +395,10 @@ pub struct Outcome {
     /// only from the root list and once its tab is in; with no context command shown, Re:CoM's own
     /// action is left to decide (an object this menu doesn't recognise keeps its Triangle).
     pub triangle: bool,
+    /// Re:CoM's Square request (`& 2`, KH1's roll / guard / Superglide start) may stay. Only the
+    /// shortcut list takes it (stage 7.12: KH1 sets no roll / guard request while the shortcut
+    /// list is on top, `0x1402937F0`).
+    pub square: bool,
     pub sounds: Vec<Sound>,
     pub events: Vec<Event>,
     /// The spell command issued this frame (M7 stage 7.4), for the cast.
@@ -412,6 +446,13 @@ pub struct Menu {
     pub tab: Tab,
     /// The name the tab last showed (it keeps it while sliding out).
     pub tab_cmd: u8,
+    /// Stage 7.12: the shortcut list (type 5): its three commands, grey = lock.
+    pub shortcut: List,
+    /// The shortcut list is on top (in the root's place).
+    pub short_on: bool,
+    /// KH1's "a shortcut can show" (`0x142D53A5C`, set by the build): a slot is set and Sora has a
+    /// spell (magic is never sealed in Re:CoM).
+    pub short_ok: bool,
 }
 
 impl Default for Menu {
@@ -424,7 +465,11 @@ impl Menu {
     pub fn new() -> Menu {
         let mut root = List::new(Kind::Root);
         root.cmds = vec![cmd::ATTACK, cmd::BLANK, cmd::BLANK, cmd::NONE];
-        Menu { root, magic: List::new(Kind::Magic), open: false, alpha: 0.0, alpha_speed: 0.0, top: None, tab: Tab::default(), tab_cmd: 0 }
+        let mut shortcut = List::new(Kind::Shortcut);
+        // The exe's defaults (`0x140528A18`): cursor −1 (no cursor), three entries.
+        shortcut.cursor = -1;
+        shortcut.cmds = vec![cmd::BLANK; 3];
+        Menu { root, magic: List::new(Kind::Magic), open: false, alpha: 0.0, alpha_speed: 0.0, top: None, tab: Tab::default(), tab_cmd: 0, shortcut, short_on: false, short_ok: false }
     }
 
     /// The menu appears (the player's HUD is built): KH1's fade-in (`0x140278AC0(1)`).
@@ -441,6 +486,8 @@ impl Menu {
         self.open = false;
         self.root.cursor = 0;
         self.tab = Tab::default();
+        // The stack's base goes back to the root (`0x1402937F0`): the shortcut list too.
+        self.short_on = false;
     }
 
     /// Re:CoM's HUD shows again: KH1's instant show (`0x140278AC0(2)`).
@@ -459,15 +506,46 @@ impl Menu {
         // Magic (`0x1402944C0`).
         let learned: Vec<(u8, u8)> = (0..spell::COUNT as u8).filter_map(|s| Some((s, w.spells[s as usize])).filter(|x| (1..=3).contains(&x.1))).collect();
         let mut usable = !0u32;
+        // Per spell (KH1's `local_98[spell]`), for the shortcut slots.
+        let mut usable_spell = [false; spell::COUNT];
         if flags & 0x20 != 0 {
             for (i, &(s, lv)) in learned.iter().enumerate() {
                 let pays = w.mp.is_some_and(|(mp, max, c)| crate::mp::Mp::new(mp, max, c).can_pay(spell::COSTS[s as usize]));
                 let in_range = !spell::RANGED[s as usize] || w.target_dist.is_none_or(|d| d <= spell::range(s, lv));
                 if pays && in_range {
                     usable &= !(1 << i);
+                    usable_spell[s as usize] = true;
                 }
             }
         }
+        // The shortcut list (stage 7.12, the same build `0x1402944C0`, only with a spell learned):
+        // slot k shows its spell at the spell's current level (`level + (spell + 2) × 3`) or the
+        // blank command 0x42; grey = lock = all but the slots whose spell is usable. A slot set
+        // makes the list available (`0x142D53A5C` = 1). Re:CoM never seals magic (KH1's save
+        // `+0x874` bits 0 / 3): not modelled.
+        let mut short_grey = !0u32;
+        let mut short_cmds = vec![cmd::BLANK; 3];
+        let mut short_ok = false;
+        if !learned.is_empty() {
+            for (k, &b) in w.shortcuts.iter().enumerate() {
+                let Some(s) = shortcut::slot_spell(b) else { continue };
+                short_ok = true;
+                let lv = w.spells[s as usize];
+                // A slot whose spell isn't learned (not reachable: slots only get learned spells)
+                // shows the blank command, greyed.
+                if (1..=3).contains(&lv) {
+                    short_cmds[k] = cmd::spell(s, lv);
+                }
+                if usable_spell[s as usize] {
+                    short_grey &= !(1 << k);
+                }
+            }
+        }
+        self.shortcut.cmds = short_cmds;
+        self.shortcut.grey = short_grey;
+        self.shortcut.lock = short_grey;
+        self.shortcut.bright.resize(3, BRIGHT_GREY);
+        self.short_ok = short_ok;
         self.magic.cmds = learned.iter().map(|&(s, lv)| cmd::spell(s, lv)).collect();
         self.magic.grey = usable;
         self.magic.lock = usable;
@@ -514,10 +592,29 @@ impl Menu {
         if self.open && self.magic.cursor >= self.magic.count() {
             self.magic.cursor = self.magic.count() - 1;
         }
+        // Stage 7.12, the stack's base (`0x1402937F0`, before its input checks): L1 held with the
+        // list available swaps the shortcut list in for the root and drops any submenu; L1 released
+        // (or the list no longer available) brings the root back with its cursor on Attack. The
+        // same frame, no sound.
+        let mut pre = Vec::new();
+        let want = pad.l1 && self.short_ok;
+        if want && !self.short_on {
+            self.short_on = true;
+            self.open = false;
+            pre.push(Event::ShortcutList(true));
+        } else if !want && self.short_on {
+            self.short_on = false;
+            self.open = false;
+            self.root.cursor = 0;
+            pre.push(Event::ShortcutList(false));
+        }
+        if self.short_on {
+            return self.step_shortcut(w, pad, pre);
+        }
         let was_open = self.open;
         let on_attack = !was_open && self.root.cursor == 0;
         let offered = self.row3_valid() || self.row0_offers();
-        let mut out = Outcome { attack: on_attack, jump: !was_open, triangle: !was_open && (!offered || self.tab.state == 2), ..Default::default() };
+        let mut out = Outcome { attack: on_attack, jump: !was_open, triangle: !was_open && (!offered || self.tab.state == 2), square: true, events: pre, ..Default::default() };
         let word = pad.word();
         // At the root a fresh jump is the jump: no menu input this frame.
         if !was_open && pad.cancel {
@@ -586,6 +683,43 @@ impl Menu {
                 self.root.cursor = 0;
             }
         }
+        out
+    }
+
+    /// Stage 7.12: a frame with the shortcut list on top (`0x1402937F0` with type 5). KH1 skips the
+    /// root's Triangle (context) and Square (roll / guard) block and has no cursor here (−1:
+    /// `0x1402931B0` returns at once); a fresh jump still jumps and takes the frame (the base
+    /// list's jump check); then a fresh Triangle, else Square, else Cross runs slot 1, 2 or 3
+    /// (only the first: bits 0x80000 / 0x100000 / 0x200000 tested in that order) through
+    /// `0x140293480`: a locked (greyed) slot plays the error sound, KH1's commit gate may refuse it
+    /// (dropped silently), else the spell is issued with no menu sound. Confirm is not Attack,
+    /// Triangle runs no context command, Square is no roll / guard.
+    fn step_shortcut(&mut self, w: &World, pad: Pad, pre: Vec<Event>) -> Outcome {
+        let mut out = Outcome { attack: false, jump: true, triangle: false, square: false, events: pre, ..Default::default() };
+        if pad.cancel {
+            return out;
+        }
+        let slot = if pad.triangle {
+            0
+        } else if pad.square {
+            1
+        } else if pad.confirm {
+            2
+        } else {
+            return out;
+        };
+        let c = self.shortcut.cmds[slot];
+        let fire = cmd::spell_of(c).is_some_and(|(s, _)| s == 0);
+        let result = if self.shortcut.locked(slot as i32) || cmd::spell_of(c).is_none() {
+            out.sounds.push(Sound::Error);
+            ShortResult::Greyed
+        } else if !(w.gate_any || (fire && w.gate_fire)) {
+            ShortResult::NotNow
+        } else {
+            out.cast = Some(c);
+            ShortResult::Cast
+        };
+        out.events.push(Event::Shortcut(slot as u8, c, result));
         out
     }
 
@@ -668,10 +802,21 @@ impl Menu {
         if self.alpha_speed != 0.0 {
             self.alpha = (self.alpha + step * self.alpha_speed).clamp(0.0, 1.0);
         }
-        let top = if self.open { Kind::Magic } else { Kind::Root };
+        // The stack's lists: the shortcut list replaces the root at its base (stage 7.12).
+        let top = if self.short_on {
+            Kind::Shortcut
+        } else if self.open {
+            Kind::Magic
+        } else {
+            Kind::Root
+        };
         if self.top != Some(top) {
             self.top = Some(top);
-            let (t, under) = if self.open { (&mut self.magic, Some(&mut self.root)) } else { (&mut self.root, None) };
+            let (t, under) = match top {
+                Kind::Shortcut => (&mut self.shortcut, None),
+                Kind::Magic => (&mut self.magic, Some(&mut self.root)),
+                Kind::Root => (&mut self.root, None),
+            };
             for (i, b) in t.bright.iter_mut().enumerate() {
                 *b = if i < 32 && t.grey >> i & 1 != 0 { BRIGHT_GREY } else { BRIGHT_ON };
             }
@@ -679,12 +824,20 @@ impl Menu {
                 u.bright.iter_mut().for_each(|b| *b = BRIGHT_GREY);
             }
         } else {
-            let t = if self.open { &mut self.magic } else { &mut self.root };
+            let t = match top {
+                Kind::Shortcut => &mut self.shortcut,
+                Kind::Magic => &mut self.magic,
+                Kind::Root => &mut self.root,
+            };
             for (i, b) in t.bright.iter_mut().enumerate() {
                 *b = if i < 32 && t.grey >> i & 1 != 0 { (*b - step * BRIGHT_STEP).trunc().max(BRIGHT_GREY) } else { (*b + step * BRIGHT_STEP).trunc().min(BRIGHT_ON) };
             }
         }
-        self.tab_step(step * TAB_STEP);
+        // The tab steps only inside the root's draw (`0x140277CF0` from `0x140278B40`): it keeps
+        // its state while the shortcut list is drawn instead (stage 7.12).
+        if !self.short_on {
+            self.tab_step(step * TAB_STEP);
+        }
     }
 
     fn tab_restart(&mut self, c: u8) {
@@ -753,6 +906,16 @@ impl Menu {
 
     /// What to draw.
     pub fn scene(&self) -> Scene {
+        // Stage 7.12 (`0x14027B870` case 5): only the shortcut panel (the root, its header and the
+        // context tab are not drawn); each slot's word at 0x73 when greyed, else 0xE6, set from
+        // the grey bits (not the eased bytes).
+        if self.short_on {
+            let slots = std::array::from_fn(|k| {
+                let c = self.shortcut.cmds.get(k).copied().unwrap_or(cmd::BLANK);
+                SlotView { name: cmd::name(c), bright: if self.shortcut.grey_row(k) { BRIGHT_GREY as u8 } else { BRIGHT_ON as u8 } }
+            });
+            return Scene { rows: Vec::new(), alpha: self.alpha, tab: None, shortcut: Some(slots) };
+        }
         let mut rows = Vec::new();
         let top_root = !self.open;
         for i in 0..4 {
@@ -788,11 +951,19 @@ impl Menu {
             let b = self.root.bright.get(3).copied().unwrap_or(BRIGHT_GREY);
             TabView { name: cmd::name(self.tab_cmd), x: self.tab.x, alpha: self.tab.alpha, bright: (if dim { b * 0.5 } else { b }) as u8, dim }
         });
-        Scene { rows, alpha: self.alpha, tab }
+        Scene { rows, alpha: self.alpha, tab, shortcut: None }
     }
 
     /// The F9 trace token.
     pub fn trace_token(&self, events: &[String]) -> String {
+        if self.short_on {
+            let mut t = format!("menu sc g{:x}", self.shortcut.grey & 7);
+            for e in events {
+                t.push(' ');
+                t.push_str(e);
+            }
+            return t;
+        }
         let mut t = if self.open { format!("menu m:{}", self.magic.cursor) } else { format!("menu r:{}", self.root.cursor) };
         t.push_str(&format!(" g{:x}", self.root.grey & 0xF));
         if self.open {
@@ -906,11 +1077,63 @@ pub struct Scene {
     pub alpha: f32,
     /// The context tab, while it shows.
     pub tab: Option<TabView>,
+    /// Stage 7.12: the shortcut panel's three slots, while the shortcut list is on top (then
+    /// `rows` is empty and `tab` None).
+    pub shortcut: Option<[SlotView; 3]>,
 }
 
 impl Scene {
     pub fn same_rows(&self, o: &Scene) -> bool {
-        self.rows.len() == o.rows.len() && self.rows.iter().zip(&o.rows).all(|(a, b)| a.key() == b.key())
+        self.rows.len() == o.rows.len() && self.rows.iter().zip(&o.rows).all(|(a, b)| a.key() == b.key()) && self.shortcut.map(|s| s.map(|v| v.name)) == o.shortcut.map(|s| s.map(|v| v.name))
+    }
+}
+
+/// One shortcut slot to draw: the KH1 message id of its word (the spell at its level, or the
+/// blank command's dash) and its brightness (0x73 greyed, 0xE6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SlotView {
+    pub name: u16,
+    pub bright: u8,
+}
+
+/// KH1's shortcut list (stage 7.12; `docs/recom-m7-command-menu.md` § 7.12). Checked (decomp +
+/// files) unless tagged:
+/// - slots: KH1's save `+0x844..0x846`, spell 0..6 or 0xFF (`0x140285090` get, `0x1402857C0` set);
+///   ours `save + 0x2681..0x2683`, 0 = none, else spell + 1 (`crate::mp::off::SHORTCUTS`);
+/// - drawn by `0x14027B870` case 5 at (left margin + 16, 0x11A): `uibin_cut` objects 0 (the
+///   frame, `cut_fra_a`, `uitex.bin` picture 0 through the sprite def `0x1427F1460`) and 1 (the
+///   title, `cut_shortcut`, picture 1 through `0x1427F1430`; `0x140266580` builds both defs), the
+///   button glyphs 0x46 / 0x45 / 0x41 (`0x140279FC0`, the font's button escape, at objects 2..4's
+///   places), then the three words (`0x14027A920`, which adds (16, 2)) at the frame's place + (0,
+///   20 + 22 k). The objects are drawn as the file stores them: nothing starts their colour keys
+///   (the file's 2-frame alpha-in is never played); every alpha is the menu's fade.
+pub mod shortcut {
+    /// The panel's origin (KH1's 512 × 384 space, before the left margin).
+    pub const ORIGIN: (f32, f32) = (16.0, 282.0);
+    /// A slot's word from the origin: (16, 22 + 22 k).
+    pub const WORD_AT: (f32, f32) = (16.0, 22.0);
+    /// Row pitch.
+    pub const PITCH: f32 = 22.0;
+    /// The button glyphs' places from the origin (`cut_ico_a / b / c`), before the glyph's own
+    /// drop (`super::tab::GLYPH_DY`).
+    pub const GLYPH_AT: [(f32, f32); 3] = [(91.0, 23.0), (91.0, 45.0), (91.0, 67.0)];
+
+    /// The spell of a slot byte (0 = none, else spell + 1; anything else: none).
+    pub fn slot_spell(b: u8) -> Option<u8> {
+        (1..=7).contains(&b).then(|| b - 1)
+    }
+
+    /// The slot byte of a spell.
+    pub fn slot_byte(spell: u8) -> u8 {
+        spell + 1
+    }
+
+    /// KH1's 0x41 glyph is the confirm button (`0x1402D4A50`: Cross unless the confirm swap is
+    /// set, then Circle). Re:CoM's confirm button is its key word `0x14083F3F0` (PS2 order, read by
+    /// `0x140346BB0`, byte-swapped by `0x14029B690`): Circle when it is 0x2000 (Re:CoM's pad bit
+    /// 0x20). Checked (decomp); bit 0x20 = Circle: Assumption (bit order).
+    pub fn confirm_is_circle(key: u16) -> bool {
+        key == 0x2000
     }
 }
 
@@ -1422,6 +1645,165 @@ mod tests {
         for c in [cmd::SAVE, cmd::EXAMINE] {
             assert!(cmd::spell_of(c).is_none() && cmd::submenu(c) == 0 && !cmd::row0_special(c));
         }
+    }
+
+    /// Fire 2, Blizzard 1, Cure 1, Stop 1; slots Fire, Cure, none.
+    fn short_world() -> World {
+        let mut spells = [0; 7];
+        spells[0] = 2;
+        spells[1] = 1;
+        spells[3] = 1;
+        spells[5] = 1;
+        World { spells, mp: Some((3, 3, 0)), shortcuts: [1, 4, 0], ..world() }
+    }
+
+    fn held(f: impl FnOnce(&mut Pad)) -> Pad {
+        let mut p = Pad { l1: true, ..Pad::default() };
+        f(&mut p);
+        p
+    }
+
+    #[test]
+    fn shortcut_list_builds_from_the_slots() {
+        let w = short_world();
+        let mut m = Menu::new();
+        m.build(&w);
+        // Fira (level 2), Cure, the blank command; the empty slot greyed.
+        assert_eq!(m.shortcut.cmds, vec![cmd::spell(0, 2), cmd::spell(3, 1), cmd::BLANK]);
+        assert_eq!(m.shortcut.grey & 7, 0b100);
+        assert!(m.short_ok);
+        // Out of MP: Fire (30 charge units) and Cure (1 MP) grey; the list still shows.
+        m.build(&World { mp: Some((0, 3, 0)), ..w });
+        assert_eq!((m.shortcut.grey & 7, m.short_ok), (0b111, true));
+        // A state without magic (glide 0x15): all greyed.
+        m.build(&World { state: 0x15, ..w });
+        assert_eq!(m.shortcut.grey & 7, 0b111);
+        // No slot set, or no spell learned: no list (L1 does nothing).
+        m.build(&World { shortcuts: [0; 3], ..w });
+        assert!(!m.short_ok);
+        m.build(&World { spells: [0; 7], ..w });
+        assert!(!m.short_ok);
+        // A ranged spell beyond its range greys (Stop, 1100).
+        m.build(&World { shortcuts: [6, 0, 0], target_dist: Some(1200.0), ..w });
+        assert_eq!((m.shortcut.cmds[0], m.shortcut.grey & 1), (cmd::spell(5, 1), 1));
+        // Slot bytes: 0 none, else spell + 1.
+        assert_eq!((shortcut::slot_spell(0), shortcut::slot_spell(1), shortcut::slot_spell(7), shortcut::slot_spell(8), shortcut::slot_byte(6)), (None, Some(0), Some(6), None, 7));
+    }
+
+    #[test]
+    fn l1_swaps_the_root_for_the_shortcut_list_and_back_on_attack() {
+        let w = short_world();
+        let mut m = Menu::new();
+        m.show();
+        // Magic open, cursor on Magic: L1 closes it and shows the list, no sound.
+        m.root.cursor = 1;
+        m.step(&w, press(|p| p.right = true));
+        assert!(m.open);
+        let o = m.step(&w, held(|_| {}));
+        assert!(m.short_on && !m.open && o.sounds.is_empty());
+        assert_eq!(o.events, vec![Event::ShortcutList(true)]);
+        // While held: confirm is not Attack, Triangle no context, Square no roll; the jump stays.
+        assert!(!o.attack && !o.triangle && !o.square && o.jump);
+        // The d-pad does nothing (no cursor in the list).
+        let o = m.step(&w, held(|p| p.down = true));
+        assert!(o.sounds.is_empty() && o.events.is_empty() && m.root.cursor == 1);
+        // Released: the root, cursor on Attack.
+        let o = m.step(&w, Pad::default());
+        assert!(!m.short_on && m.root.cursor == 0 && o.events == vec![Event::ShortcutList(false)]);
+        assert!(o.square && o.jump);
+        // No slot set: L1 changes nothing.
+        let mut n = Menu::new();
+        let o = n.step(&World { shortcuts: [0; 3], ..w }, held(|p| p.confirm = true));
+        assert!(!n.short_on && o.attack);
+        // The scene: the panel only (no rows, no tab), the empty slot's dash greyed.
+        m.step(&w, held(|_| {}));
+        m.tick(1.0);
+        let s = m.scene();
+        assert!(s.rows.is_empty() && s.tab.is_none());
+        let sc = s.shortcut.unwrap();
+        assert_eq!(sc.map(|v| v.name), [cmd::name(cmd::spell(0, 2)), cmd::name(cmd::spell(3, 1)), cmd::BLANK_NAME]);
+        assert_eq!(sc.map(|v| v.bright), [BRIGHT_ON as u8, BRIGHT_ON as u8, BRIGHT_GREY as u8]);
+        assert!(m.trace_token(&[]).starts_with("menu sc g4"));
+        // Hidden HUD (events): the base goes back to the root.
+        m.hide();
+        assert!(!m.short_on);
+    }
+
+    #[test]
+    fn shortcut_buttons_cast_the_slots_as_kh1() {
+        let w = short_world();
+        let mut m = Menu::new();
+        m.show();
+        m.step(&w, held(|_| {}));
+        // Triangle: slot 1 (Fira), issued with no menu sound; the list stays.
+        let o = m.step(&w, held(|p| p.triangle = true));
+        assert_eq!(o.cast, Some(cmd::spell(0, 2)));
+        assert!(o.sounds.is_empty() && m.short_on && !o.triangle);
+        assert_eq!(o.events, vec![Event::Shortcut(0, cmd::spell(0, 2), ShortResult::Cast)]);
+        // Square: slot 2 (Cure), cast at once (no party target list yet).
+        let o = m.step(&w, held(|p| p.square = true));
+        assert_eq!((o.cast, o.square), (Some(cmd::spell(3, 1)), false));
+        // Cross (Re:CoM's confirm): slot 3, empty: the error sound, nothing cast, no Attack.
+        let o = m.step(&w, held(|p| p.confirm = true));
+        assert_eq!((o.cast, o.attack, o.sounds.clone()), (None, false, vec![Sound::Error]));
+        assert_eq!(o.events, vec![Event::Shortcut(2, cmd::BLANK, ShortResult::Greyed)]);
+        // Only the first of a frame: Triangle before Square before Cross.
+        let o = m.step(&w, held(|p| {
+            p.square = true;
+            p.triangle = true;
+            p.confirm = true
+        }));
+        assert_eq!(o.events, vec![Event::Shortcut(0, cmd::spell(0, 2), ShortResult::Cast)]);
+        let o = m.step(&w, held(|p| {
+            p.square = true;
+            p.confirm = true
+        }));
+        assert_eq!(o.cast, Some(cmd::spell(3, 1)));
+        // A fresh jump takes the frame: no shortcut.
+        let o = m.step(&w, held(|p| {
+            p.cancel = true;
+            p.triangle = true
+        }));
+        assert!(o.jump && o.cast.is_none() && o.events.is_empty());
+        // Short of MP: greyed, the error sound.
+        let dry = World { mp: Some((0, 3, 0)), ..w };
+        let o = m.step(&dry, held(|p| p.triangle = true));
+        assert_eq!((o.cast, o.sounds.clone()), (None, vec![Sound::Error]));
+        // Sora busy: dropped silently (not buffered); Fire alone from frame 14 of its release.
+        let busy = World { gate_any: false, gate_fire: false, ..w };
+        let o = m.step(&busy, held(|p| p.triangle = true));
+        assert_eq!((o.cast, o.sounds.is_empty()), (None, true));
+        assert_eq!(o.events, vec![Event::Shortcut(0, cmd::spell(0, 2), ShortResult::NotNow)]);
+        assert_eq!(m.step(&busy, Pad::default()).cast, None, "not buffered");
+        m.step(&w, held(|_| {}));
+        let fire_only = World { gate_any: false, gate_fire: true, ..w };
+        assert_eq!(m.step(&fire_only, held(|p| p.triangle = true)).cast, Some(cmd::spell(0, 2)));
+        assert_eq!(m.step(&fire_only, held(|p| p.square = true)).cast, None, "Cure isn't taken from Fire's release");
+    }
+
+    #[test]
+    fn the_tab_waits_while_the_shortcut_list_is_up() {
+        let w = World { context: cmd::OPEN, ..short_world() };
+        let mut m = Menu::new();
+        m.show();
+        for _ in 0..4 {
+            m.step(&w, Pad::default());
+            m.tick(1.0);
+        }
+        let before = m.tab;
+        assert_eq!(before.state, 1);
+        for _ in 0..10 {
+            m.step(&w, held(|_| {}));
+            m.tick(1.0);
+        }
+        assert_eq!(m.tab, before, "the tab steps in the root's draw only");
+        // Back at the root: the root's brightness is set at once.
+        m.step(&w, Pad::default());
+        m.tick(1.0);
+        assert_eq!(m.root.bright[0], BRIGHT_ON);
+        assert!(m.tab.alpha > before.alpha);
+        // Re:CoM's confirm key: Circle (0x2000) or Cross.
+        assert!(shortcut::confirm_is_circle(0x2000) && !shortcut::confirm_is_circle(0x4000));
     }
 
     #[test]

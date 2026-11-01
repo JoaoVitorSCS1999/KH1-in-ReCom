@@ -57,6 +57,11 @@ pub const COM: &str = "exchange/UK_uibin_com.bin";
 pub const COM_BATTLE: &str = "exchange/UK_com_battle.bin";
 /// The Magic list.
 pub const MAG: &str = "exchange/UK_uibin_mag.bin";
+/// KH1's shortcut panel (M7 stage 7.12): `cut_fra_a` (the frame), `cut_shortcut` (the title),
+/// `cut_ico_a / b / c` (the button glyphs' places). `0x140278180` copies its objects 0..4 to
+/// `0x142853960` (`0x14027E1C0(&0x140527B58)`), `0x14027B870` case 5 draws them. Checked (decomp +
+/// files).
+pub const CUT: &str = "exchange/UK_uibin_cut.bin";
 /// `uitex.bin` pictures the menu draws from (`0x140278180` passes picture 2 for the root's panels,
 /// 3 for the submenus', 1 for the titles and icons): (index, TIM2 offset, pixel data offset).
 pub const MENU_PICTURES: [(usize, usize, usize); 3] = [(1, 0x2080, 0x20C0), (2, 0x4100, 0x4140), (3, 0x6180, 0x61C0)];
@@ -99,6 +104,16 @@ pub const FONT_TABLE: &str = "exchange/US_font_data_tbl.bin";
 pub const ICON_FILES: [&str; 2] = ["uk/font/Icon.tm2", "uk/font/FontIcon.inf"];
 /// The PlayStation Triangle's record in `FontIcon.inf`.
 pub const ICON_TRIANGLE: u16 = 0xE411;
+/// The PlayStation Square, Cross and Circle (stage 7.12's shortcut panel: KH1's glyphs 0x45, and
+/// 0x41 = the confirm button: `0x1402D4A50` gives 3 (as 0x44) without the confirm swap, 0 (as
+/// 0x43) with it; `0x1403EFF90`'s PlayStation rows: 0x43 → 0, 0x44 → 3, 0x45 → 2, 0x46 → 1).
+/// Checked (decomp + exe); 0 Circle / 1 Triangle / 2 Square / 3 Cross: Assumption (Triangle = 1
+/// is the tab's, the rest by the PlayStation order of `FontIcon.inf`'s names).
+pub const ICON_SQUARE: u16 = 0xE410;
+/// Cross.
+pub const ICON_CROSS: u16 = 0xE412;
+/// Circle.
+pub const ICON_CIRCLE: u16 = 0xE413;
 /// The party's model files whose section 2 is the face strip: Sora (Checked (files)), Donald
 /// and Goofy (Checked (files: their 48 × 48 faces in the owner's dump)).
 pub const FACES: [&str; 3] = ["xa_ex_0010.mdls", "xa_ex_0040.mdls", "xa_ex_0050.mdls"];
@@ -1185,6 +1200,8 @@ pub struct MenuSources<'a> {
     /// The PC's button icons (`Icon.tm2`, `FontIcon.inf`), for the context tab's Triangle. Without
     /// them the Triangle's group is empty.
     pub icon: Option<[&'a [u8]; 2]>,
+    /// Stage 7.12: `UK_uibin_cut.bin`, the shortcut panel. Without it no panel is built.
+    pub cut: Option<&'a [u8]>,
 }
 
 /// The built files.
@@ -1209,6 +1226,8 @@ pub struct Built {
     pub groups: usize,
     /// H4: the menu groups (None without menu sources).
     pub menu: Option<menu::Built>,
+    /// Stage 7.12: the shortcut panel's groups (None without `UK_uibin_cut.bin` or the menu).
+    pub shortcut: Option<shortcut::Built>,
     /// H5: the target groups' first group.
     pub target: Option<usize>,
     /// H6: Donald's and Goofy's gauge groups.
@@ -1530,7 +1549,9 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         let per = if per.iter().all(|p| *p == per[0]) { vec![per[0].clone()] } else { per };
         mp.push(atlas.add(ps2, per, scale));
     }
-    let p0 = {
+    // Picture 0: its corner (the LOCK ON! plate, H5) and, for the shortcut panel's frame (stage
+    // 7.12), the picture whole (taken as `raw`: split to the rects drawn).
+    let (p0, p0_whole) = {
         let (i, off, data) = PLATE_PICTURE;
         let t = tims.get(i).ok_or_else(|| crate::Error::Format(format!("uitex.bin: no picture {i}")))?;
         if t.offset != off || t.width != 128 || t.height != 128 {
@@ -1542,10 +1563,13 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
             per.push(uitex_asset(src.uitex_hd, data, l)?.ok_or_else(|| crate::Error::Format(format!("uitex.bin: no PC texture for picture {i}")))?);
         }
         let scale = hd_scale(&ps2, &per[0])?;
+        let whole: Vec<Pic> = per.iter().map(|p| p.crop(0, 0, 128 * scale, 128 * scale)).collect();
+        let whole = if whole.iter().all(|p| *p == whole[0]) { vec![whole[0].clone()] } else { whole };
         let c = PLATE_CORNER;
         let per: Vec<Pic> = per.into_iter().map(|p| p.crop(c * scale, c * scale, (128 - c) * scale, (128 - c) * scale)).collect();
         let per = if per.iter().all(|p| *p == per[0]) { vec![per[0].clone()] } else { per };
-        atlas.add(ps2.crop(c, c, 128 - c, 128 - c), per, scale)
+        let corner = atlas.add(ps2.crop(c, c, 128 - c, 128 - c), per, scale);
+        (corner, atlas.add(ps2, whole, scale))
     };
     // H4: KH1's command menu pieces and words.
     let menu_built = match &src.menu {
@@ -1553,6 +1577,11 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
             let (p2, s) = pic2_pc.as_ref().expect("picture 2 read");
             Some(menu::build(ms, &mut atlas, [mp[0], mp[1], mp[2]], (p2, *s), &mut groups)?)
         }
+        None => None,
+    };
+    // Stage 7.12: KH1's shortcut panel (with the menu: its words are the menu's).
+    let shortcut_built = match src.menu.as_ref().and_then(|ms| ms.cut.map(|c| (c, ms.icon))) {
+        Some((cut, icon)) => Some(shortcut::build(cut, &mut atlas, p0_whole, mp[0], icon, &mut groups)?),
         None => None,
     };
     // H5: the LOCK ON! plate and the target's HP gauge.
@@ -1609,7 +1638,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         groups.extend(ring::groups(&inputs, &mut ring_stats)?);
     }
     let groups_total = groups.len();
-    let mut raw = vec![it5, it6, it7, p0];
+    let mut raw = vec![it5, it6, it7, p0, p0_whole];
     raw.extend(&faces);
     raw.extend(&mp);
     raw.extend(cursor_item);
@@ -1631,6 +1660,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         motion,
         groups: groups_total,
         menu: menu_built,
+        shortcut: shortcut_built,
         target: target_built,
         party: party_built,
         cursor: cursor_built,
@@ -2033,7 +2063,7 @@ pub mod menu {
     }
 
     /// An object's piece: `ext` units (and texels) wider, its RGB replaced by `over`.
-    fn mpiece(o: &Obj, item: usize, dx: i32, dy: i32, ext: i32, over: Option<[i32; 3]>) -> Piece {
+    pub(super) fn mpiece(o: &Obj, item: usize, dx: i32, dy: i32, ext: i32, over: Option<[i32; 3]>) -> Piece {
         let (mut uv, ..) = o.texels();
         uv[2] += ext;
         let [x, y, w, h] = o.rect;
@@ -2049,14 +2079,14 @@ pub mod menu {
         Piece { item, uv, rect: [x + dx, y + dy, x + dx + w + ext, y + dy + h], colour: col(o.colours[0]), grad }
     }
 
-    fn held1(pieces: Vec<Piece>) -> Group {
+    pub(super) fn held1(pieces: Vec<Piece>) -> Group {
         let one = 0x8080_8080;
         Group { steps: vec![Step { pieces, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 }], once: true, word: GROUP_WORD_SCRUB }
     }
 
     /// Builds the menu groups (appended to `groups`) and the glyphs (into `atlas`).
     /// A picture at half size (the PS2 copy of art that exists only on PC; alpha kept PS2).
-    fn half(hd: &Pic) -> Pic {
+    pub(super) fn half(hd: &Pic) -> Pic {
         let (hw, hh) = (hd.w / 2, hd.h / 2);
         let mut p = Pic::blank(hw, hh);
         for j in 0..hh {
@@ -2099,9 +2129,14 @@ pub mod menu {
     /// The Triangle's PC cell: [`tab::TRIANGLE_CELL`] centred on the glyph's covered texels in
     /// its `FontIcon.inf` box.
     pub fn triangle_cell(icon: &Pic, inf: &[u8]) -> Result<Pic> {
-        let Some([x0, y0, x1, y1]) = icon_box(inf, ICON_TRIANGLE) else { return bad(format!("FontIcon.inf: no record {ICON_TRIANGLE:#x}")) };
+        icon_cell(icon, inf, ICON_TRIANGLE)
+    }
+
+    /// A button glyph's PC cell (`code`'s `FontIcon.inf` record), as [`triangle_cell`].
+    pub fn icon_cell(icon: &Pic, inf: &[u8], code: u16) -> Result<Pic> {
+        let Some([x0, y0, x1, y1]) = icon_box(inf, code) else { return bad(format!("FontIcon.inf: no record {code:#x}")) };
         if x1 > icon.w || y1 > icon.h || x0 >= x1 || y0 >= y1 {
-            return bad("FontIcon.inf: the triangle's box is outside Icon.tm2");
+            return bad(format!("FontIcon.inf: glyph {code:#x}'s box is outside Icon.tm2"));
         }
         let (mut a, mut b) = ((usize::MAX, usize::MAX), (0usize, 0usize));
         for y in y0..y1 {
@@ -2113,7 +2148,7 @@ pub mod menu {
             }
         }
         if a.0 == usize::MAX {
-            return bad("Icon.tm2: the triangle's box is empty");
+            return bad(format!("Icon.tm2: glyph {code:#x}'s box is empty"));
         }
         let (cw, ch) = tab::TRIANGLE_CELL;
         let cx = ((a.0 + b.0) / 2).saturating_sub(cw / 2).min(icon.w - cw);
@@ -2286,6 +2321,91 @@ pub mod menu {
             words.push((lang.clone(), list));
         }
         Ok(Built { first, words, glyphs: glyph_item.len(), missing, tab_icon })
+    }
+}
+
+/// M7 stage 7.12: KH1's shortcut panel (`0x14027B870` case 5; Checked (decomp + files) unless
+/// tagged). KH1 draws, at (left margin + 16, 0x11A):
+/// - `uibin_cut` object 0 `cut_fra_a` (110 × 86, UV (2, 2)–(111, 87), four vertex colours: brown
+///   (123, 69, 31) on top, purple (65, 55, 118) below) from `uitex.bin` **picture 0** (sprite def
+///   `0x1427F1460`, built by `0x140266580` at offset 0) and object 1 `cut_shortcut` ("SHORT CUT",
+///   83 × 8 at (7, 6), (130, 90, 50)) from **picture 1** (def `0x1427F1430`, offset 0x2080), both
+///   with `0x14027A9F0`: the objects as the file has them (their colour keys, a 2-frame alpha-in,
+///   are never started: nothing calls `0x14027E710` on `0x142853960`), alphas × the menu's fade;
+/// - the button glyphs 0x46, 0x45, 0x41 through the font (`0x140279FC0`, size 14, RGB × 1, alpha the
+///   fade) at objects 2..4's places (91, 23 / 45 / 67): `cut_ico_a..c`'s own pictures are not
+///   drawn;
+/// - the three slots' words (the DLL: the menu's word groups).
+///
+/// Groups from [`Built::first`]: [`g::PANEL`] (frame, then title), then the PC's PlayStation glyphs
+/// Triangle, Square, Cross, Circle, each a 16 × 19 quad at its own origin as the context tab's
+/// Triangle (`menu::tab::TRIANGLE_RECT`; empty groups without `Icon.tm2`).
+pub mod shortcut {
+    use super::*;
+
+    /// Groups from the first.
+    pub mod g {
+        /// The frame and the title.
+        pub const PANEL: usize = 0;
+        /// Triangle, Square, Cross, Circle.
+        pub const GLYPHS: usize = 1;
+        /// Groups in all.
+        pub const COUNT: usize = 5;
+    }
+
+    /// The glyphs' `FontIcon.inf` records, in the groups' order.
+    pub const GLYPH_CODES: [u16; 4] = [ICON_TRIANGLE, ICON_SQUARE, ICON_CROSS, ICON_CIRCLE];
+    /// `cut_ico_a / b / c`'s places (the DLL's `crate::command_menu::shortcut::GLYPH_AT`).
+    pub const GLYPH_AT: [(i32, i32); 3] = [(91, 23), (91, 45), (91, 67)];
+
+    /// The built panel.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Built {
+        /// First group.
+        pub first: usize,
+        /// The glyph groups hold the PC's button art.
+        pub icons: bool,
+    }
+
+    /// Builds the panel's groups (appended to `groups`): `p0` an atlas item of `uitex.bin`'s
+    /// picture 0 whole (PS2 texels), `p1` picture 1's (the menu's titles); `icon` the PC's
+    /// `Icon.tm2` and `FontIcon.inf`.
+    pub(crate) fn build(cut: &[u8], atlas: &mut Atlas, p0: usize, p1: usize, icon: Option<[&[u8]; 2]>, groups: &mut Vec<Group>) -> Result<Built> {
+        let u = Uibin::parse(cut)?;
+        for (i, want) in ["cut_fra_a", "cut_shortcut", "cut_ico_a", "cut_ico_b", "cut_ico_c"].iter().enumerate() {
+            if u.objs.get(i).map(|o| o.name.as_str()) != Some(want) {
+                return bad(format!("{CUT}: object {i} is not {want} (not KH1 FM Steam's layout)"));
+            }
+        }
+        for (k, &(x, y)) in GLYPH_AT.iter().enumerate() {
+            let r = u.objs[2 + k].rect;
+            if (r[0], r[1]) != (x, y) {
+                return bad(format!("{CUT}: {} at ({}, {}), KH1 FM Steam's is at ({x}, {y})", u.objs[2 + k].name, r[0], r[1]));
+            }
+        }
+        let first = groups.len();
+        groups.push(menu::held1(vec![menu::mpiece(&u.objs[0], p0, 0, 0, 0, None), menu::mpiece(&u.objs[1], p1, 0, 0, 0, None)]));
+        let pics = match icon {
+            Some([tm2, inf]) => {
+                let pic = menu::tim2_rgba(tm2)?;
+                Some(GLYPH_CODES.iter().map(|&c| menu::icon_cell(&pic, inf, c)).collect::<Result<Vec<Pic>>>()?)
+            }
+            None => None,
+        };
+        let icons = pics.is_some();
+        for k in 0..GLYPH_CODES.len() {
+            match &pics {
+                Some(p) => {
+                    let hd = p[k].clone();
+                    let (w, h) = (hd.w / 2, hd.h / 2);
+                    let item = atlas.add(menu::half(&hd), vec![hd], 2);
+                    groups.push(menu::held1(vec![Piece { item, uv: [0, 0, w as i32, h as i32], rect: menu::tab::TRIANGLE_RECT, colour: 0x8080_8080, grad: 0 }]));
+                }
+                None => groups.push(held(&[vec![]])),
+            }
+        }
+        debug_assert_eq!(groups.len() - first, g::COUNT);
+        Ok(Built { first, icons })
     }
 }
 
@@ -2676,6 +2796,9 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)], re
     if let Some(t) = b.target {
         let _ = writeln!(s, "  \"target\": {{\"first\": {t}}},");
     }
+    if let Some(sc) = &b.shortcut {
+        let _ = writeln!(s, "  \"shortcut\": {{\"first\": {}, \"icons\": {}}},", sc.first, sc.icons);
+    }
     if let Some(mn) = &b.menu {
         let words = mn.words.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, g)| format!("[{id}, {g}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
         let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"tab_icon\": {}, \"words\": {{{words}}}}},", mn.first, mn.tab_icon);
@@ -2845,6 +2968,7 @@ mod tests {
         let uitex_hd = assets("command2/uitex.bin.hd");
         let (com, com_battle, mag) = (rd("exchange/UK_uibin_com.bin"), rd("exchange/UK_com_battle.bin"), rd("exchange/UK_uibin_mag.bin"));
         let (lock, g_enm) = (rd("exchange/UK_uibin_lock.bin"), rd("exchange/UK_uibin_g_enm.bin"));
+        let cut = rd(CUT);
         let fonts: Vec<Vec<u8>> = vec![rd(&format!("fonts/menu/us/sysfont.bin.hd/{SYSFONT_HD}")), rd("fonts/exchange/US_font_data_tbl.bin")];
         let icon: Vec<Vec<u8>> = ICON_FILES.iter().map(|n| rd(&format!("fonts/{n}"))).collect();
         let src = Sources {
@@ -2862,8 +2986,9 @@ mod tests {
                 com_battle: &com_battle,
                 mag: &mag,
                 font: [&fonts[0], &fonts[1]],
-                words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (4, "Talk".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into())])],
+                words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (4, "Talk".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into()), (8, "Fira".into()), (16, "Cure".into()), (13, "Thunder".into())])],
                 icon: Some([&icon[0], &icon[1]]),
+                cut: Some(&cut),
             }),
             faces: [face("xa_ex_0010.mdls", 0xA2E80), face("xa_ex_0040.mdls", 0x75600), face("xa_ex_0050.mdls", 0x8D400)],
         };
@@ -2923,6 +3048,10 @@ mod tests {
         eprintln!("menu: first group {}, {} glyphs, missing {:?}, words {:?}", mn.first, mn.glyphs, mn.missing, mn.words);
         assert!(mn.missing.is_empty());
         assert!(mn.tab_icon, "the PlayStation triangle from Icon.tm2");
+        // Stage 7.12: the shortcut panel, its glyphs from Icon.tm2.
+        let sc = b.shortcut.unwrap();
+        eprintln!("shortcut panel: first group {}", sc.first);
+        assert!(sc.icons && sc.first + shortcut::g::COUNT <= b.ring.0);
         assert!(b.target.is_some());
         assert!(b.party.is_some());
         assert!(b.cursor.is_some());
@@ -2936,6 +3065,7 @@ mod tests {
             std::fs::write(o.join("UK_kh1hud.lad"), &b.lad_hd).unwrap();
             std::fs::write(o.join("kh1hud.imz"), &b.imz).unwrap();
             std::fs::write(o.join("UK_kh1hud.imz"), &b.imz_hd[4]).unwrap();
+            std::fs::write(o.join("kh1-hud.json"), manifest_json(&b, &langs.map(String::from), &[], None)).unwrap();
         }
     }
 }

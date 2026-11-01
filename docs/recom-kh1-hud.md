@@ -934,3 +934,12 @@ starts)"; "the room indicator should be in the top left of the screen".
 - Checked: decomp (layers, scissors), tests, offline render of the rebuilt ring (concentric with
   the HP ring's 29 / 43 circles, dividers every 30°, start on the centre line). Not checked: in
   game.
+
+## Stage 7.12: the shortcut panel in `kh1hud`
+
+Five groups after the command menu's words (`kh1-hud.json` `"shortcut": {"first", "icons"}`, an
+optional key: the format stays 3): the panel (`UK_uibin_cut.bin`'s `cut_fra_a` from picture 0,
+`cut_shortcut` from picture 1) and the PC's PlayStation glyphs Triangle / Square / Cross / Circle
+(`Icon.tm2` `0xE411` / `0xE410` / `0xE412` / `0xE413`). Drawn in both menu looks (owner,
+2026-11-01). KH1's rules and the DLL side: `recom-m7-command-menu.md` § 7.12. Checked (decomp +
+files + offline render).

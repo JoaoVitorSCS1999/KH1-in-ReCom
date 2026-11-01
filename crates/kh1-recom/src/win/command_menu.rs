@@ -23,10 +23,17 @@
 //!   written while a fade or a brightness change runs.
 //! - Only at Combat = KH1 in Sora's story (`super::mp::active`), with the asset step's
 //!   `kh1-command-menu.json` and the plate groups in the loaded `Cockpit:00`.
+//! - **Shortcuts** (stage 7.12): while L1 is held (Re:CoM's held pad bit 4, `0x14029C1D0`) and a
+//!   slot is set, KH1's shortcut list takes the root's place: KH1's panel (`kh1hud` groups, in
+//!   both menu looks) at KH1's place, Triangle / Square / confirm cast slot 1 / 2 / 3 through
+//!   `super::magic::issue`, and the request-bits wrapper drops Attack, Triangle and Square. The
+//!   save and warp points read Triangle from the pad themselves (`0x14029B550`): their two calls
+//!   are retargeted to [`point_triangle`], which says "not pressed" while L1 holds the list (KH1:
+//!   Triangle is shortcut 1 there, never the save point's command).
 
 use super::movement::{self as mv, body, func, p, rd, rd_vec, wr};
 use super::{base, log};
-use crate::command_menu::{self as cm, Event, Kind, Menu, Pad, RowView, Scene, TabView, Words, World};
+use crate::command_menu::{self as cm, Event, Kind, Menu, Pad, RowView, Scene, ShortResult, SlotView, TabView, Words, World};
 use crate::kh1_hud as kh;
 use crate::sites::COMMAND_MENU_PTRS;
 use crate::units::to_kh1;
@@ -45,6 +52,13 @@ static REBUILDS: AtomicU32 = AtomicU32::new(0);
 /// KH1's MP as last read or written (`super::mp`), packed; bit 63 = known.
 static MP_VIEW: AtomicU64 = AtomicU64::new(0);
 static EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Stage 7.12: the menu runs, shows, and its shortcut list is available (a slot set, a spell
+/// learned): L1 held then means the shortcut list, for [`point_triangle`]. Written each frame of
+/// the menu step.
+static SHORT_READY: AtomicBool = AtomicBool::new(false);
+/// "No shortcut panel art" logged once.
+static SHORT_ART_LOGGED: AtomicBool = AtomicBool::new(false);
+static POINT_LOGGED: AtomicBool = AtomicBool::new(false);
 static STATE: Mutex<State> = Mutex::new(State { menu: None, uis: Vec::new() });
 
 // Re:CoM functions (RVAs; first bytes checked in `sites`).
@@ -58,6 +72,16 @@ const SOUND: u32 = 0x002A_A360;
 const PAD_FRESH: u32 = 0x0029_B2F0;
 const PAD_CANCEL: u32 = 0x0029_B410;
 const PAD_CONFIRM: u32 = 0x0029_B490;
+/// Re:CoM's held-buttons test (`0x14029C1D0(mask, port)`: all of `mask` held; `sites`, the
+/// movement's), and L1's bit (`0x1401FEFE0`'s card input reads it; PS2 order byte-swapped).
+const BUTTONS_HELD: u32 = 0x0029_C1D0;
+const L1: u32 = 4;
+/// The save / warp points' fresh-Triangle read (`0x14029B550(port)`: pad bit 0x10 fresh, 0 / 1 in
+/// eax), called through [`point_triangle`] (stage 7.12).
+const POINT_TRIANGLE: u32 = 0x0029_B550;
+/// Re:CoM's confirm button (u16, PS2 order; `0x140346BB0` returns it, `sites::COMMAND_MENU_CHECKED`):
+/// the shortcut panel's third glyph.
+const CONFIRM_KEY: u32 = 0x0083_F3F0;
 /// CGimmickDoor's type getter (its vtable `+0x28`); the others are `mov eax, imm32; ret`.
 const DOOR_TYPE: u32 = 0x001B_8A10;
 const SEQ_CTRL_VTABLE: u32 = 0x0060_7340;
@@ -102,6 +126,7 @@ type PlayFn = unsafe extern "win64" fn(usize, u32, f32);
 const PLAY_FROM: u32 = 0x0024_8550;
 const UNITS: f32 = 50.0;
 type PadBtnFn = unsafe extern "win64" fn(u32) -> u32;
+type HeldFn = unsafe extern "win64" fn(u32, u32) -> u32;
 
 #[repr(C, align(16))]
 struct V4([f32; 4]);
@@ -153,6 +178,18 @@ struct Ui {
     shown: Option<Scene>,
     look: Option<Look>,
     tab: Option<TabCtl>,
+    /// Stage 7.12: the shortcut panel's controls while the shortcut list is on top.
+    short: Option<ShortCtl>,
+}
+
+/// The shortcut panel (stage 7.12): the frame + title, the three glyphs, the three words (0: not
+/// made), and what they show.
+struct ShortCtl {
+    panel: usize,
+    glyphs: [usize; 3],
+    words: [usize; 3],
+    view: [SlotView; 3],
+    alpha: f32,
 }
 
 struct State {
@@ -225,6 +262,16 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>, s: &crate::settings
     ));
     let _ = WORDS.set(words);
     INSTALLED.store(true, Ordering::Release);
+    // Stage 7.12: Triangle with L1 held is shortcut 1 at a save / warp point too.
+    // SAFETY: executable memory of our own near the exe; the calls' bytes are checked before the
+    // write.
+    let [sp, wp] = unsafe { install_point_calls(b) };
+    log(&format!(
+        "command menu: KH1's shortcut list on L1 (M7 stage 7.12): slots at save+{:#x}; the save point's Triangle read 0x1401C530E {}, the warp point's 0x1401CC31B {}",
+        crate::mp::BLOCK_FIRST + crate::mp::off::SHORTCUTS,
+        if sp { "retargeted" } else { "NOT retargeted (Triangle there still saves with L1 held)" },
+        if wp { "retargeted" } else { "NOT retargeted (Triangle there still warps with L1 held)" }
+    ));
     true
 }
 
@@ -249,7 +296,7 @@ pub unsafe fn build(gauge: usize, list: i32) {
         let _ = super::mp::current();
     }
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
-    let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None, look: None, tab: None };
+    let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None, look: None, tab: None, short: None };
     if let Ok(mut s) = STATE.lock() {
         for mut old in s.uis.extract_if(.., |u| u.gauge == gauge) {
             old.clear();
@@ -301,6 +348,9 @@ pub unsafe fn destroy(gauge: usize) {
             u.clear();
         }
         LIVE.store(!s.uis.is_empty(), Ordering::Release);
+        if s.uis.is_empty() {
+            SHORT_READY.store(false, Ordering::Relaxed);
+        }
     }
 }
 
@@ -324,12 +374,20 @@ pub fn refresh(gauges: &[(usize, i32)]) {
             unsafe { u.clear() };
         }
         LIVE.store(false, Ordering::Release);
+        SHORT_READY.store(false, Ordering::Relaxed);
         note(|| "combat is not KH1 here: menu removed".to_string());
     }
 }
 
 impl Ui {
+    /// Every control of ours on this gauge.
     unsafe fn clear(&mut self) {
+        self.clear_lists();
+        self.clear_short();
+    }
+
+    /// The lists' controls (rows, headers, the tab).
+    unsafe fn clear_lists(&mut self) {
         // The ctrl's dtor releases both layers; the text layer's object deletes its `C2DFnt`
         // (`crate::d2`), as `CStockFolder`'s labels go: the font is not deleted again here.
         for r in self.rows.drain(..) {
@@ -345,6 +403,88 @@ impl Ui {
         }
         self.clear_tab();
         self.shown = None;
+    }
+
+    unsafe fn clear_short(&mut self) {
+        if let Some(p) = self.short.take() {
+            for c in [p.panel].into_iter().chain(p.glyphs).chain(p.words).filter(|&c| c != 0) {
+                super::d2::delete(c, self.list);
+            }
+        }
+    }
+
+    /// Stage 7.12: KH1's shortcut panel (`0x14027B870` case 5) in both menu looks: the `kh1hud`
+    /// set's frame + title at (left margin + 16, 282), the button glyphs at `cut_ico_a / b / c`'s
+    /// places (Triangle, Square, then Re:CoM's confirm button: Cross or Circle), the slots' words in
+    /// KH1's menu font at (+ 16, + 22 + 22 k), 0x73 greyed / 0xE6; every alpha the menu's fade.
+    /// Made when the list comes on top (or a word changes), else only colours are written when the
+    /// fade or a slot's greying changes. Without the panel's groups (an older asset step) nothing
+    /// is drawn; the shortcuts still cast.
+    unsafe fn show_short(&mut self, slots: &[SlotView; 3], alpha: f32) {
+        if self.hidden {
+            return;
+        }
+        if let Some(p) = self.short.as_mut() {
+            if p.view.map(|v| v.name) == slots.map(|v| v.name) {
+                if p.alpha != alpha {
+                    for c in [p.panel].into_iter().chain(p.glyphs).filter(|&c| c != 0) {
+                        func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, alpha]).0.as_ptr());
+                    }
+                }
+                for k in 0..3 {
+                    if p.words[k] != 0 && (p.alpha != alpha || p.view[k].bright != slots[k].bright) {
+                        let b = kh1_word_level(slots[k].bright);
+                        func::<VecFn>(COLOUR)(p.words[k], V4([b, b, b, alpha]).0.as_ptr());
+                    }
+                }
+                p.view = *slots;
+                p.alpha = alpha;
+                return;
+            }
+        }
+        self.clear_short();
+        let Some(m) = super::kh1_hud::manifest() else { return };
+        let (Some(sg), Some(mg)) = (m.shortcut, m.menu.as_ref()) else {
+            if !SHORT_ART_LOGGED.swap(true, Ordering::Relaxed) {
+                log("command menu: kh1-hud.json has no shortcut panel (run this version's asset step): shortcuts cast, no panel drawn");
+            }
+            return;
+        };
+        if !super::kh1_hud::set_registered() {
+            if !SHORT_ART_LOGGED.swap(true, Ordering::Relaxed) {
+                log("command menu: kh1hud:00 is not registered (FO0002.SPR not served?): shortcuts cast, no panel drawn");
+            }
+            return;
+        }
+        use crate::kh1_hud::shortcut as g;
+        use cm::shortcut as at;
+        let lang = super::settings().menu_language.clone();
+        let o = at::ORIGIN;
+        let one = [1.0, 1.0, 1.0, alpha];
+        let colour = |c: usize, col: [f32; 4]| {
+            if c != 0 {
+                func::<VecFn>(COLOUR)(c, V4(col).0.as_ptr());
+            }
+        };
+        let panel = self.kh1_ctrl(PRIORITY_ROOT, o.0, o.1, 1.0, &[(sg.first + g::PANEL, None)]).unwrap_or(0);
+        colour(panel, one);
+        let confirm = if cm::shortcut::confirm_is_circle(rd::<u16>(base() + CONFIRM_KEY as usize)) { g::CIRCLE } else { g::CROSS };
+        let mut glyphs = [0; 3];
+        if sg.icons {
+            for (k, grp) in [g::TRIANGLE, g::SQUARE, confirm].into_iter().enumerate() {
+                let (x, y) = at::GLYPH_AT[k];
+                glyphs[k] = self.kh1_ctrl(PRIORITY_ROOT, o.0 + x, o.1 + y + cm::tab::GLYPH_DY, 1.0, &[(sg.first + grp, None)]).unwrap_or(0);
+                colour(glyphs[k], one);
+            }
+        }
+        let mut words = [0; 3];
+        for (k, v) in slots.iter().enumerate() {
+            let Some(wg) = mg.word(&lang, v.name) else { continue };
+            words[k] = self.kh1_ctrl(PRIORITY_ROOT, o.0 + at::WORD_AT.0, o.1 + at::WORD_AT.1 + at::PITCH * k as f32, 1.0, &[(wg, None)]).unwrap_or(0);
+            let b = kh1_word_level(v.bright);
+            colour(words[k], [b, b, b, alpha]);
+        }
+        self.short = Some(ShortCtl { panel, glyphs, words, view: *slots, alpha });
     }
 
     unsafe fn clear_tab(&mut self) {
@@ -690,10 +830,12 @@ unsafe fn place(c: usize, v: &RowView) {
     func::<VecFn>(SCALE)(c, V4([1.0, 1.0, 1.0, 1.0]).0.as_ptr());
 }
 
-/// Re:CoM's pad, this frame's fresh presses (pure reads), when Sora takes input.
+/// Re:CoM's pad, this frame's fresh presses (pure reads), when Sora takes input; L1 held always
+/// (KH1 swaps the shortcut list in before its "Sora takes input" test, `0x1402937F0`).
 unsafe fn read_pad(pl: usize) -> Pad {
+    let l1 = func::<HeldFn>(BUTTONS_HELD)(L1, 0) != 0;
     if rd::<u32>(pl + p::PAD) & 1 == 0 {
-        return Pad::default();
+        return Pad { l1, ..Pad::default() };
     }
     let fresh = func::<PadFn>(PAD_FRESH);
     let btn = |a: u32| func::<PadBtnFn>(a)(0) & 0xFF != 0;
@@ -708,6 +850,7 @@ unsafe fn read_pad(pl: usize) -> Pad {
         square: fresh(0x80, 0) != 0,
         // L2, R2, L1, R1, Select.
         other: fresh(0x10F, 0) != 0,
+        l1,
     }
 }
 
@@ -778,17 +921,21 @@ unsafe fn context(pl: usize) -> u8 {
     }
 }
 
-/// The spells Sora has: the debug switch, else the save block's levels (stage 7.11 writes them).
-fn spells() -> [u8; 7] {
-    if ALL_SPELLS.load(Ordering::Relaxed) {
-        [3; 7]
-    } else {
-        super::mp::spell_levels()
+/// The spells Sora has and his shortcut slots: the save block's (stages 7.11, 7.12), or with the
+/// debug switch every spell at level 3 and, while the save has no slot set, the slots KH1's learn
+/// would give them all (Fire, Blizzard, Thunder; not written to the save).
+fn spells() -> ([u8; 7], [u8; 3]) {
+    let (levels, slots) = super::mp::spell_state();
+    if !ALL_SPELLS.load(Ordering::Relaxed) {
+        return (levels, slots);
     }
+    let none = slots.iter().all(|&b| cm::shortcut::slot_spell(b).is_none());
+    ([3; 7], if none { [1, 2, 3] } else { slots })
 }
 
 unsafe fn world(pl: usize) -> World {
-    let mut w = World { mp: mp_view(), spells: spells(), ..Default::default() };
+    let (spells, shortcuts) = spells();
+    let mut w = World { mp: mp_view(), spells, shortcuts, ..Default::default() };
     let mut in_recoil = false;
     if let Ok(g) = mv::SORA.try_lock() {
         if let Some(s) = g.as_ref().filter(|s| s.player == pl) {
@@ -815,16 +962,26 @@ unsafe fn world(pl: usize) -> World {
     w
 }
 
-/// Re:CoM's request bits the menu lets through this frame: (Attack, jump, Triangle).
+/// Re:CoM's request bits the menu lets through this frame: (Attack, jump, Triangle, Square).
 pub struct Keep {
     pub attack: bool,
     pub jump: bool,
     pub triangle: bool,
+    /// Square (`& 2`): not while the shortcut list is on top (stage 7.12).
+    pub square: bool,
 }
 
 /// KH1's menu step for this frame of Sora's (from the request-bits wrapper, after Re:CoM's
 /// builder). None when there is no menu (nothing changes).
 pub unsafe fn frame(pl: usize) -> Option<Keep> {
+    let k = step_frame(pl);
+    if k.is_none() {
+        SHORT_READY.store(false, Ordering::Relaxed);
+    }
+    k
+}
+
+unsafe fn step_frame(pl: usize) -> Option<Keep> {
     if !LIVE.load(Ordering::Acquire) {
         return None;
     }
@@ -844,11 +1001,23 @@ pub unsafe fn frame(pl: usize) -> Option<Keep> {
             return None;
         }
         let out = m.step(&w, pad);
+        SHORT_READY.store(m.short_ok, Ordering::Relaxed);
         m.tick(step);
         let sc = m.scene();
         let kh1 = kh1_look();
         let battle = rd::<i32>(pl + p::BATTLE) != 0;
         for u in uis.iter_mut() {
+            // Stage 7.12: the shortcut list in the root's place (KH1's panel in both looks).
+            if let Some(slots) = &sc.shortcut {
+                if u.shown.is_some() || u.tab.is_some() {
+                    u.clear_lists();
+                }
+                u.show_short(slots, sc.alpha);
+                continue;
+            }
+            if u.short.is_some() {
+                u.clear_short();
+            }
             match kh1 {
                 Some(g) => u.show_kh1(&sc, g, battle),
                 None => {
@@ -873,6 +1042,7 @@ pub unsafe fn frame(pl: usize) -> Option<Keep> {
             Event::Spell(c, _) => note(|| format!("{d} [{c:#x}] greyed (Re:CoM's refused sound)")),
             Event::NotNow(c) => note(|| format!("{d} [{c:#x}]: KH1's gate refused it this frame (Sora busy)")),
             Event::Cast(c) => note(|| format!("{d} [{c:#x}]: issued")),
+            Event::Shortcut(_, c, _) => note(|| format!("{d} [{c:#x}]")),
             _ => note(|| d.clone()),
         }
     }
@@ -880,7 +1050,7 @@ pub unsafe fn frame(pl: usize) -> Option<Keep> {
     if let Some((s, lv)) = out.cast.and_then(cm::cmd::spell_of) {
         super::magic::issue(s, lv);
     }
-    Some(Keep { attack: out.attack, jump: out.jump, triangle: out.triangle })
+    Some(Keep { attack: out.attack, jump: out.jump, triangle: out.triangle, square: out.square })
 }
 
 fn describe(e: &Event, m: &Menu) -> String {
@@ -895,7 +1065,50 @@ fn describe(e: &Event, m: &Menu) -> String {
         Event::NotNow(c) => format!("not-now {}", name(c)),
         Event::Refused(c) => format!("refused {}", if c == 0 { "-".into() } else { name(c) }),
         Event::Context(c) => format!("context {}", name(c)),
+        Event::ShortcutList(on) => (if on { "shortcuts on (L1)" } else { "shortcuts off" }).into(),
+        Event::Shortcut(k, c, r) => format!(
+            "shortcut {} {} {}",
+            k + 1,
+            if c == cm::cmd::BLANK { "-".into() } else { name(c) },
+            match r {
+                ShortResult::Cast => "cast",
+                ShortResult::Greyed => "greyed",
+                ShortResult::NotNow => "not-now",
+            }
+        ),
     }
+}
+
+/// Stage 7.12: the save and warp points' fresh-Triangle read (their calls of `0x14029B550` at
+/// `0x1401C530E` / `0x1401CC31B`, retargeted here): "not pressed" while L1 holds KH1's shortcut
+/// list (the menu runs, shows, a slot is set), where KH1's Triangle is shortcut 1 and never the save
+/// point's command; else Re:CoM's own read. Two loads and a held-pad read each call (only while
+/// Sora targets the point).
+pub unsafe extern "win64" fn point_triangle(port: u32) -> u32 {
+    if SHORT_READY.load(Ordering::Relaxed) && super::mp::active() && func::<HeldFn>(BUTTONS_HELD)(L1, port) != 0 {
+        if func::<PadBtnFn>(POINT_TRIANGLE)(port) != 0 && !POINT_LOGGED.swap(true, Ordering::Relaxed) {
+            log("command menu: save / warp point: Triangle with L1 held is shortcut 1 (KH1), not the point's menu");
+        }
+        return 0;
+    }
+    func::<PadBtnFn>(POINT_TRIANGLE)(port)
+}
+
+/// Retargets the save and warp points' Triangle reads to [`point_triangle`] through one jump near
+/// them (`sites::COMMAND_MENU_POINT_CALLS`; each call's bytes are checked by `patch`, their
+/// context by the start-up check). Each on its own: one missing only keeps Re:CoM's read there.
+unsafe fn install_point_calls(b: usize) -> [bool; 2] {
+    let calls = crate::sites::COMMAND_MENU_POINT_CALLS;
+    let jmp = crate::hookplan::abs_jmp(point_triangle as *const () as u64);
+    let Some(thunk) = super::hook::place_near(b + calls[0].rva as usize, &jmp) else { return [false; 2] };
+    let mut done = [false; 2];
+    for (k, c) in calls.iter().enumerate() {
+        let at = b + c.rva as usize;
+        if let Some(call) = crate::hookplan::call_rel32(at as u64, thunk as u64) {
+            done[k] = super::hook::patch(at, c.expect, &call, c.name);
+        }
+    }
+    done
 }
 
 /// The F9 trace's menu token: list and cursor, greys, the tab, this frame's events.

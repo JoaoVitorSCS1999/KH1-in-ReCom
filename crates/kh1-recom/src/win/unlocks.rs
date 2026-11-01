@@ -6,8 +6,12 @@
 //!   card syncs Sora's spell levels from Re:CoM's discovery state ([`sync`]). In Sora's story, at
 //!   either Combat setting (it writes only our save block, which Re:CoM never reads).
 //! - **Older saves** (and saves played without the mod or at the Re:CoM setting before): the first
-//!   read of the spell levels at the KH1 setting (`super::mp::spell_levels`, the command menu's)
+//!   read of the spell levels at the KH1 setting (`super::mp::spell_state`, the command menu's)
 //!   runs the same sync once, then marks the block (`crate::unlocks::SYNCED`).
+//! - **Shortcuts** (stage 7.12): each spell learned (level 0 → more) fills the first empty shortcut
+//!   slot (KH1's `0x140285260`); a save whose slots were never set up (spare bit
+//!   `crate::unlocks::SHORTCUTS_SET` clear) first gets the spells it already had, in KH1's order
+//!   (`crate::unlocks::shortcuts`).
 //! - Each learn is logged. Nothing of ours runs per frame (one byte test in a read the menu already
 //!   makes).
 
@@ -40,10 +44,11 @@ pub fn mark_installed() {
 
 pub fn start_line() -> String {
     format!(
-        "unlocks: KH1 spell unlocks in Sora's story (M7 stage 7.11): a spell's base level with its Re:CoM magic card's first pickup, -ra / -ga with {} Re:CoM bosses (their enemy cards' first pickup, two per spell), wrapper on Re:CoM's first-obtained 0x14015C7F0; levels at save+{:#x} (7 bytes), sync flag save+{:#x} bit 0",
+        "unlocks: KH1 spell unlocks in Sora's story (M7 stage 7.11): a spell's base level with its Re:CoM magic card's first pickup, -ra / -ga with {} Re:CoM bosses (their enemy cards' first pickup, two per spell), wrapper on Re:CoM's first-obtained 0x14015C7F0; levels at save+{:#x} (7 bytes), sync flag save+{:#x} bit 0; stage 7.12: a learned spell fills the first empty shortcut slot (save+{:#x}, 3 bytes; set up once from the spells already learned, flag bit 1)",
         u::BOSS_LEARNS.iter().map(|b| b.card).collect::<std::collections::BTreeSet<_>>().len(),
         BLOCK_FIRST + off::SPELLS,
-        BLOCK_FIRST + off::SPARE
+        BLOCK_FIRST + off::SPARE,
+        BLOCK_FIRST + off::SHORTCUTS
     )
 }
 
@@ -74,7 +79,8 @@ pub fn sync_first() -> bool {
 
 /// Sora's spell levels from Re:CoM's discovery state (`crate::unlocks::levels`, Re:CoM's
 /// `0x14015B3F0` through `super::keyblades::ever_obtained`), merged into our save block (never
-/// lowered) and the block marked synced; each rise logged. Nothing in Riku's story, without a save
+/// lowered), the shortcut slots filled as KH1's learn fills them (stage 7.12), and the block marked
+/// synced and set up; each rise and slot logged. Nothing in Riku's story, without a save
 /// or a collection, or when the wrapper isn't in.
 unsafe fn sync(why: &str) -> bool {
     if !INSTALLED.load(Ordering::Acquire) || super::stats::riku_story() {
@@ -97,9 +103,26 @@ unsafe fn sync(why: &str) -> bool {
         let what = if from == 0 { format!("learned {}", u::level_name(s, to)) } else { format!("{} -> {}", u::level_name(s, from), u::level_name(s, to)) };
         note(|| format!("{what} (spell {s} level {from} -> {to}): {why}"));
     }
+    // Stage 7.12: KH1's learn fills the first empty shortcut slot (`0x140285260`); a save whose
+    // slots were never set up first gets the spells it already had, in KH1's order.
+    let mut slots = [0u8; 3];
+    slots.copy_from_slice(&old[off::SHORTCUTS..off::SHORTCUTS + off::SHORTCUT_COUNT]);
+    let set_up = old[off::SPARE] & u::SHORTCUTS_SET != 0;
+    let (new_slots, filled) = u::shortcuts(slots, set_up, before, merged);
+    for (k, s) in filled {
+        note(|| {
+            format!(
+                "shortcut {} = {} ({})",
+                k + 1,
+                u::level_name(s, 1),
+                if set_up || before[s as usize] == 0 { "KH1's learn: the first empty slot" } else { "set up once from the spells this save had" }
+            )
+        });
+    }
     let mut block = old;
     block[off::SPELLS..off::SPELLS + off::SPELL_COUNT].copy_from_slice(&merged);
-    block[off::SPARE] |= u::SYNCED;
+    block[off::SHORTCUTS..off::SHORTCUTS + off::SHORTCUT_COUNT].copy_from_slice(&new_slots);
+    block[off::SPARE] |= u::SYNCED | u::SHORTCUTS_SET;
     if block != old {
         wr(at, block);
     }

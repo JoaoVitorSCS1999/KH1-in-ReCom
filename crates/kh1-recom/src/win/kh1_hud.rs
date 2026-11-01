@@ -407,6 +407,13 @@ unsafe fn set_ready() -> bool {
     manifest().is_some_and(|m| super::mp_bar::set_groups(kh::SET) == Some(m.groups))
 }
 
+/// [`set_ready`], for the command menu's shortcut panel (stage 7.12), which draws `kh1hud` groups
+/// at either HUD setting. A lookup in Re:CoM's 2D registry: called when the panel is made.
+pub fn set_registered() -> bool {
+    // SAFETY: a read of Re:CoM's registry, as at each gauge build.
+    unsafe { set_ready() }
+}
+
 unsafe fn new_ctrl() -> Option<usize> {
     let c = func::<NewFn>(NEW)(0x170);
     if c == 0 {

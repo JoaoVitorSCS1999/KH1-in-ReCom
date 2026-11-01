@@ -123,7 +123,7 @@ pub fn levels(mut obtained: impl FnMut(u16) -> bool) -> [u8; SPELLS] {
 }
 
 /// What the save keeps: never lower than what it had (a later source of levels, e.g. KH1-style
-/// events, may have raised one), at most 3; a stored value above 3 counts as 0 (as `spell_levels`).
+/// events, may have raised one), at most 3; a stored value above 3 counts as 0 (as `win::mp::spell_state`).
 pub fn merged(stored: [u8; SPELLS], derived: [u8; SPELLS]) -> [u8; SPELLS] {
     let mut out = [0u8; SPELLS];
     for i in 0..SPELLS {
@@ -143,6 +143,51 @@ pub fn learns(before: [u8; SPELLS], after: [u8; SPELLS]) -> Vec<(u8, u8, u8)> {
 /// setting before, gets its levels at its first read at the KH1 setting). Zero in every save
 /// before this stage.
 pub const SYNCED: u8 = 1;
+
+/// The spare byte, bit 1 (stage 7.12): this save's shortcut slots were set up (zero in every save
+/// before this stage: the first sync at or after it fills them once from the spells already
+/// learned).
+pub const SHORTCUTS_SET: u8 = 2;
+
+/// KH1's learn (`0x140285260`, the script's learn-a-spell command): the spell goes into the first
+/// empty shortcut slot, if one is empty (no duplicate check; a learn happens once per spell).
+/// Checked (decomp). Slots: 0 = none, else spell + 1 (`crate::command_menu::shortcut`).
+pub fn fill_slot(slots: &mut [u8; 3], spell: u8) -> Option<usize> {
+    use crate::command_menu::shortcut as sc;
+    let k = slots.iter().position(|&b| sc::slot_spell(b).is_none())?;
+    slots[k] = sc::slot_byte(spell);
+    Some(k)
+}
+
+/// The shortcut slots after a sync from `before` to `after` (stage 7.12; owner, 2026-11-01:
+/// "Slots filled by KH1's fill-on-learn rule; existing saves: fill once from the spells already
+/// learned, in KH1's spell order, first three"):
+/// - a save whose slots were never set up (`set_up` false) first gets the spells it already had
+///   (`before`), in KH1's spell order, into the first three slots (bytes other than a spell + 1
+///   count as empty and are cleared);
+/// - then every spell learned now (level 0 → more), in spell order, fills the first empty slot.
+///
+/// Returns the slots and, per slot filled, the spell (for the log).
+pub fn shortcuts(slots: [u8; 3], set_up: bool, before: [u8; SPELLS], after: [u8; SPELLS]) -> ([u8; 3], Vec<(usize, u8)>) {
+    use crate::command_menu::shortcut as sc;
+    let mut s = slots.map(|b| if sc::slot_spell(b).is_some() { b } else { 0 });
+    let mut filled = Vec::new();
+    if !set_up {
+        for sp in (0..SPELLS as u8).filter(|&i| (1..=3).contains(&before[i as usize])) {
+            if let Some(k) = fill_slot(&mut s, sp) {
+                filled.push((k, sp));
+            }
+        }
+    }
+    for (sp, from, _) in learns(before, after) {
+        if from == 0 {
+            if let Some(k) = fill_slot(&mut s, sp) {
+                filled.push((k, sp));
+            }
+        }
+    }
+    (s, filled)
+}
 
 #[cfg(test)]
 mod tests {
@@ -206,5 +251,35 @@ mod tests {
         assert_eq!((spell_of_card(0x11C), spell_of_card(0x21), magic_card(6)), (Some(2), None, 0x20));
         // The flag lives in the block's spare byte.
         assert!(crate::mp::off::SPARE < crate::mp::BLOCK_LEN && SYNCED == 1);
+    }
+
+    #[test]
+    fn shortcuts_fill_as_kh1_learns() {
+        let none = [0u8; 7];
+        // A new game: nothing learned, slots empty; Fire learned → slot 1, then Cure → slot 2.
+        let (s, f) = shortcuts([0; 3], false, none, none);
+        assert_eq!((s, f), ([0; 3], vec![]));
+        let (s, f) = shortcuts(s, true, none, [1, 0, 0, 0, 0, 0, 0]);
+        assert_eq!((s, f), ([1, 0, 0], vec![(0, 0)]));
+        let (s, _) = shortcuts(s, true, [1, 0, 0, 0, 0, 0, 0], [1, 0, 0, 1, 0, 0, 0]);
+        assert_eq!(s, [1, 4, 0]);
+        // A level rise fills nothing.
+        let (s2, f) = shortcuts(s, true, [1, 0, 0, 1, 0, 0, 0], [2, 0, 0, 1, 0, 0, 0]);
+        assert_eq!((s2, f), (s, vec![]));
+        // Full slots: a new spell goes nowhere (KH1 keeps the three).
+        let (s, f) = shortcuts([1, 2, 3], true, [1, 1, 1, 0, 0, 0, 0], [1, 1, 1, 1, 0, 0, 0]);
+        assert_eq!((s, f), ([1, 2, 3], vec![]));
+        // An existing save (spells learned, never set up): its first three in KH1's order, once.
+        let had = [0, 2, 0, 1, 3, 1, 0];
+        let (s, f) = shortcuts([0; 3], false, had, had);
+        assert_eq!((s, f), ([2, 4, 5], vec![(0, 1), (1, 3), (2, 4)]));
+        // Set up already: not filled again (a cleared slot stays clear until the next learn).
+        assert_eq!(shortcuts([2, 0, 5], true, had, had).0, [2, 0, 5]);
+        // Never set up with a learn in the same sync: what it had first, then the new one.
+        let (s, _) = shortcuts([0; 3], false, [0, 0, 0, 1, 0, 0, 0], [1, 0, 0, 1, 0, 0, 0]);
+        assert_eq!(s, [4, 1, 0]);
+        // A bad byte counts as empty.
+        assert_eq!(shortcuts([9, 0, 0], true, none, [0, 0, 1, 0, 0, 0, 0]).0, [3, 0, 0]);
+        assert_eq!(SHORTCUTS_SET & SYNCED, 0);
     }
 }

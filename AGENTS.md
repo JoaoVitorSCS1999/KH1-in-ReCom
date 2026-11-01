@@ -11,6 +11,26 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 84: M7 stage 7.12: KH1's shortcut menu on L1, version 0.42.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "Finish everything up to M9"; shortcuts on L1 like KH1 (owner's choice). Owner's
+  M7–M9 decisions recorded in `docs/design-philosophy-instructions.md`.
+- KH1 (Checked (decomp + exe + files)): slots save +0x844..0x846, spells only; L1 held swaps the
+  shortcut list in (`0x1402937F0`); Triangle / Square / confirm cast slot 1 / 2 / 3 through the menu's
+  commit (`0x140293480`); greyed → error sound 4; busy → dropped; L1 suppresses Attack, roll / guard,
+  context; panel `exchange/UK_uibin_cut.bin` at (margin + 16, 282), words 0xE6 / 0x73.
+- Built: shortcut list in the command menu logic (`command_menu::step_shortcut`), slots in our save
+  block (save+0x2681..0x2683, KH1's fill-on-learn, old saves filled once in KH1's order), casts via
+  `magic::issue`, panel groups in `kh1hud:00` from KH1's `cut` layout and `Icon.tm2` glyphs; Square
+  withheld from Re:CoM's request bits while the list is up; save / warp point Triangle calls
+  (`0x1401C530E`, `0x1401CC31B`, 5 bytes each) retargeted so L1 + Triangle casts instead of saving.
+- Not KH1's: Cure / Aero cast on Sora at once (no party list); a jump always takes the frame.
+  Assumption: L1 = pad bit 4, the keyboard key is Re:CoM's L1 binding.
+- Checked: tests, Windows build, all site bytes against the Steam exe, offline render of the panel.
+  Not checked: in game.
+
+---
+
 ## Stage 83: MP ring draws; one centre with the HP ring; ticks; room plate top left; save point MP; spell voices, version 0.41.0 (2026-11-01)
 
 - Asks (owner, 2026-11-01): "the blue of the MP bar doesnt show"; "lets also make sure that all the MP

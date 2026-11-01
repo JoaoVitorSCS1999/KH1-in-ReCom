@@ -333,6 +333,21 @@ At KH1 setting:
       **baked into every piece's animation data at the asset step** (Re:CoM plays it; nothing of
       ours per frame). Owner to confirm when testing.
 
+- **M7–M9 choices (owner, 2026-11-01: "Finish everything up to M9"):**
+    - **Shortcuts (7.12):** L1 as in KH1. Small choices taken as KH1's (Cure / Aero from a
+      shortcut cast on Sora, slots filled as spells are learned, L1 + Triangle at a save point
+      casts, KH1's panel art).
+    - **Items (M8a):** sold in Re:CoM's Moogle shop **and** dropped by enemies (KH1's rates).
+      **Healing amounts: Re:CoM's own item-card amounts** (not KH1's 30 / 60 HP).
+    - **Summons (M8b):** each unlocks with its first Re:CoM summon card. **Wait for the party:**
+      summons are built after persistent Donald and Goofy (KH1's summon needs both and sends them
+      away), so M8b follows the party milestone.
+    - **Abilities (M9):** unlock with Re:CoM (its level-up sleights: Sliding Dash, Blitz, Stun
+      Impact, Zantetsuken, Strike Raid, Sonic Blade, Ars Arcanum, Ragnarok); the five with no
+      Re:CoM source (Vortex, Aerial Sweep, Hurricane Blast, Ripple Drive, Gravity Break) at
+      **KH1's learn levels** on Re:CoM's level; an **equip screen with KH1's AP** (KH1's costs,
+      AP +2 at KH1's levels, on Re:CoM's level).
+
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.
