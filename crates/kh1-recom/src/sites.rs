@@ -633,6 +633,13 @@ pub const KH1_HUD_PARTY_HOOKS: &[Site] = &[
     Site { name: "CFriend dtor (0x1401D90F0)", rva: 0x001D_90F0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF] },
 ];
 
+/// The KH1 HUD (decision 39, H7): Re:CoM's lock-on marker (`Gauge::CLockonMarker`) update, wrapped
+/// so KH1's cursor takes its place at `hud = kh1`. Bytes read from the Steam exe (2026-11-01).
+pub const KH1_HUD_CURSOR_HOOKS: &[Site] = &[
+    // push rdi; sub rsp,0x80 (the next instruction is rip-relative: not moved)
+    Site { name: "CLockonMarker update (0x140209D30)", rva: 0x0020_9D30, expect: &[0x40, 0x57, 0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00] },
+];
+
 /// The KH1 HUD (decision 39, H3): Re:CoM's HUD-hide mask reads (`call 0x1401B08C0`, ecx = 1,
 /// edx = 0xE2) of the enemy gauge (`CEnemyGauge` update `0x1402099B0`, bit 0x10) and the minimap
 /// (`CNaviMap` `0x1401E4700` ×3, `0x1401E43E0`, bit 8), retargeted to our getter, which adds the
@@ -669,6 +676,14 @@ pub const KH1_HUD_CALLEES: &[Site] = &[
     // [rcx+rax*4+0x144]; jmp 0x140246250: layer `edx`'s play time (the C2DSeqObj's +0x30, through
     // the set's vtable +0x68 `0x140246D60`).
     Site { name: "C2DSeqCtrl layer time (0x140248000)", rva: 0x0024_8000, expect: &[0x0F, 0xB6, 0x81, 0x6D, 0x01, 0x00, 0x00, 0x3B, 0xD0, 0x72, 0x03, 0x33, 0xC0, 0xC3, 0x8B, 0xC2, 0x8B, 0x8C, 0x81, 0x44, 0x01, 0x00, 0x00, 0xE9, 0x34, 0xE2, 0xFF, 0xFF] },
+    // H7: movzbl eax,[rcx+0x16D]; cmp edx,eax; jl: a layer's visible bit (`+0x140`).
+    Site { name: "C2DSeqCtrl layer visible? (0x140248090)", rva: 0x0024_8090, expect: &[0x0F, 0xB6, 0x81, 0x6D, 0x01, 0x00, 0x00, 0x3B, 0xD0, 0x7C, 0x03] },
+    // H7: mov [rsp+8],rbx; push rdi; sub rsp,0x20; lea rax,[C2DSeqCtrl vftable]: the ctor with a
+    // mode (2: `+0x13B` = 1, the lock-on marker's projected control, `0x140208120`).
+    Site { name: "C2DSeqCtrl ctor with mode (0x1402471D0)", rva: 0x0024_71D0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8D, 0x05, 0x5F, 0x01, 0x3C, 0x00] },
+    // H7: movaps xmm0,[rdx]; movdqa [rcx+0xF0],xmm0; mov dword [rcx+0xFC],1.0: the 3D anchor
+    // Re:CoM projects the control to (the lock-on marker's own call, `0x140209D30`).
+    Site { name: "C2DSeqCtrl 3D anchor (0x140248570)", rva: 0x0024_8570, expect: &[0x0F, 0x28, 0x02, 0x66, 0x0F, 0x7F, 0x81, 0xF0, 0x00, 0x00, 0x00, 0xC7, 0x81, 0xFC, 0x00, 0x00] },
 ];
 
 /// Re:CoM's `D2::C2DSeqCtrl` functions the MP bar calls (the ctor `0x140247260` and `operator
@@ -1102,6 +1117,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(MP_BAR_HOOKS)
         .chain(KH1_HUD_HOOKS)
         .chain(KH1_HUD_PARTY_HOOKS)
+        .chain(KH1_HUD_CURSOR_HOOKS)
         .chain(KH1_HUD_MASK_CALLS)
         .chain(KH1_HUD_MASK_CHECKED)
         .chain(KH1_HUD_CALLEES)
@@ -1210,7 +1226,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(KH1_HUD_CURSOR_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
@@ -1638,6 +1654,13 @@ mod tests {
         let time = KH1_HUD_CALLEES.iter().find(|s| s.rva == 0x0024_8000).unwrap();
         assert_eq!(jmp(time, 23), 0x0024_6250);
         assert!(KH1_HUD_CALLEES.iter().all(|s| s.expect.len() >= 5));
+        // The mode ctor writes C2DSeqCtrl's vtable (lea rip+disp at +10, 7 bytes).
+        let m = KH1_HUD_CALLEES.iter().find(|s| s.rva == 0x0024_71D0).unwrap();
+        assert_eq!(m.rva as i64 + 17 + i32::from_le_bytes(m.expect[13..17].try_into().unwrap()) as i64, 0x0060_7340);
+        // H6 / H7 wrappers move whole instructions only (no rip-relative operand, no call).
+        for h in KH1_HUD_PARTY_HOOKS.iter().chain(KH1_HUD_CURSOR_HOOKS) {
+            assert!(h.expect.len() >= 5 && !h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
+        }
     }
 
 }

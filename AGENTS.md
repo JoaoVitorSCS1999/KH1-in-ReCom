@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 68: KH1 HUD H7, KH1's lock-on cursor, version 0.32.0 (2026-10-31)
+
+- Wrapper on Re:CoM's lock-on marker update `0x140209D30` (`40 57 48 81 EC 80 00 00 00`): Re:CoM's
+  cursor layer hidden, KH1's `lockon_c` on our projected control (`0x1402471D0`) at the same
+  lock point, not scaled by distance (KH1). Not seen in game.
+
+---
+
 ## Stage 67: KH1 HUD H6, Donald's and Goofy's gauges, version 0.31.0 (2026-10-31)
 
 - KH1's geometry and faces top-right, shown while Re:CoM has them out as friends: hooks on

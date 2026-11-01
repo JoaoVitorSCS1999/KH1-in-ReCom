@@ -50,6 +50,7 @@ pub static ORIG_DONALD: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_GOOFY: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_EXIT: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_DTOR: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_MARKER: AtomicUsize = AtomicUsize::new(0);
 /// H6: the friend objects Re:CoM has out now (Donald, Goofy), 0 when not.
 static FRIEND: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
 static STATE: Mutex<State> = Mutex::new(State { gauges: Vec::new(), clusters: Vec::new() });
@@ -217,6 +218,16 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
         // SAFETY: executable memory of our own near the exe; the call sites' bytes were checked
         // at start and are checked again before the write.
         unsafe { install_masks(b) };
+        if MANIFEST.get().is_some_and(|m| m.cursor.is_some()) {
+            let site = crate::sites::KH1_HUD_CURSOR_HOOKS.iter().find(|h| h.name == "CLockonMarker update (0x140209D30)").expect("site");
+            let h = [super::hook::Hook { site, ours: marker_update as *const () as usize, original: &ORIG_MARKER }];
+            // SAFETY: as above.
+            if unsafe { super::hook::install_all(b, &h) } {
+                log("kh1 hud: KH1's lock-on cursor at hud = kh1 (H7): CLockonMarker update 0x140209D30 wrapped");
+            } else {
+                log("kh1 hud: lock-on marker not hooked; Re:CoM's cursor stays");
+            }
+        }
         if MANIFEST.get().is_some_and(|m| m.party.is_some()) {
             let ps = |n: &str| crate::sites::KH1_HUD_PARTY_HOOKS.iter().find(|h| h.name == n).expect("site");
             let party = [
@@ -731,6 +742,90 @@ pub unsafe fn hud(gauge: usize, state: u32) {
 }
 
 // -------------------------------------------------------------------------------------------------
+// H7: KH1's lock-on cursor in place of Re:CoM's.
+
+/// `Gauge::CLockonMarker` (Checked (decomp `0x140208120`, `0x140209D30`)): its cursor control
+/// `+0x60` (a `Cockpit:00` layer 0, group `+0x80`: 0x63, 0x92 or 0x62), the target handle
+/// `+0xD0`, "target found" `+0xEC`, the lock point `+0x90` (16-byte aligned; the control's 3D
+/// anchor, `0x140248570`), its distance scale `+0x104`.
+const M_CTRL: usize = 0x60;
+const M_TARGET: usize = 0xD0;
+const M_FOUND: usize = 0xEC;
+const M_POINT: usize = 0x90;
+const LAYER_VISIBLE: u32 = 0x0024_8090;
+const SLOT_VISIBLE: u32 = 0x0024_7E50;
+const ANCHOR: u32 = 0x0024_8570;
+const SEQ_CTOR_MODE: u32 = 0x0024_71D0;
+type CtorModeFn = unsafe extern "win64" fn(usize, i32) -> usize;
+type MarkerFn = unsafe extern "win64" fn(usize);
+type IsVisFn = unsafe extern "win64" fn(usize, i32) -> i32;
+type SlotVisFn = unsafe extern "win64" fn(usize, i32, i32);
+
+struct Cursor {
+    marker: usize,
+    ctrl: usize,
+    list: i32,
+    target: i32,
+}
+
+static CURSOR: Mutex<Option<Cursor>> = Mutex::new(None);
+
+/// `CLockonMarker` update (`0x140209D30(marker)`), each frame of a battle: Re:CoM's, then at
+/// `hud = kh1` its cursor layer is hidden and KH1's (`lockon_c`, played from its keys' start when
+/// the lock begins or moves to another target) is drawn on a control of ours at the same lock
+/// point (Re:CoM projects it; KH1's cursor is not scaled with the distance as Re:CoM's is).
+pub unsafe extern "win64" fn marker_update(m: usize) {
+    orig::<MarkerFn>(&ORIG_MARKER)(m);
+    let Some(group) = manifest().and_then(|x| x.cursor) else { return };
+    let Ok(mut cur) = CURSOR.lock() else { return };
+    let up = UP.load(Ordering::Relaxed) && STATE.lock().map(|s| s.clusters.iter().any(|c| !c.hidden)).unwrap_or(false);
+    if cur.as_ref().is_some_and(|c| c.marker != m) || !up {
+        if let Some(c) = cur.take() {
+            super::d2::delete(c.ctrl, c.list);
+        }
+        if !up {
+            return;
+        }
+    }
+    let ctrl: usize = rd(m + M_CTRL);
+    if ctrl == 0 {
+        return;
+    }
+    // Re:CoM's cursor layer stays made (its logic runs) but is not drawn.
+    if rd::<u8>(ctrl + C_LAYERS) > 0 && func::<IsVisFn>(LAYER_VISIBLE)(ctrl, 0) != 0 {
+        func::<SlotVisFn>(SLOT_VISIBLE)(ctrl, 0, 0);
+    }
+    let target: i32 = rd(m + M_TARGET);
+    let locked = target > 0 && rd::<i32>(m + M_FOUND) != 0;
+    if cur.is_none() {
+        // As Re:CoM makes its marker's control: `0x1402471D0(ctrl, 2)` (projected), priority 2.
+        let c = func::<NewFn>(NEW)(0x170);
+        if c == 0 {
+            return;
+        }
+        func::<CtorModeFn>(SEQ_CTOR_MODE)(c, 2);
+        if rd::<usize>(c) != base() + SEQ_CTRL_VTABLE as usize {
+            return;
+        }
+        super::d2::made();
+        *cur = Some(Cursor { marker: m, ctrl: c, list: super::d2::current_list(), target: 0 });
+    }
+    let Some(c) = cur.as_mut() else { return };
+    if locked {
+        func::<VecFn>(ANCHOR)(c.ctrl, (m + M_POINT) as *const f32);
+        if c.target != target {
+            super::d2::clear(c.ctrl, c.list);
+            add(c.ctrl, c.list, PRIORITY_BACK, group, 0.0, 1);
+            c.target = target;
+            note(|| format!("lock-on cursor: KH1's lockon_c on target {target:#x} (H7)"));
+        }
+    } else if c.target != 0 {
+        super::d2::clear(c.ctrl, c.list);
+        c.target = 0;
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
 // H6: Donald's and Goofy's gauges, while Re:CoM has them out as friends.
 
 type FriendFn = unsafe extern "win64" fn(usize);
@@ -962,6 +1057,13 @@ pub unsafe fn lock_tick(pl: usize) {
 
 /// The gauge's deleting dtor (before Re:CoM's): our controls go.
 pub unsafe fn destroy(gauge: usize) {
+    // The lock-on marker is made and deleted with the player's HUD (`0x1401FA6E0` makes both):
+    // our cursor goes with any player gauge.
+    if let Ok(mut c) = CURSOR.lock() {
+        if let Some(x) = c.take() {
+            super::d2::delete(x.ctrl, x.list);
+        }
+    }
     if let Ok(mut t) = TARGET.lock() {
         if t.as_ref().is_some_and(|x| x.gauge == gauge) {
             if let Some(mut x) = t.take() {

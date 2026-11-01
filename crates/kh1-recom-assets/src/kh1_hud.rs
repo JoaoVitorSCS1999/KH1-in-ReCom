@@ -55,6 +55,8 @@ pub const MAG: &str = "exchange/UK_uibin_mag.bin";
 /// `uitex.bin` pictures the menu draws from (`0x140278180` passes picture 2 for the root's panels,
 /// 3 for the submenus', 1 for the titles and icons): (index, TIM2 offset, pixel data offset).
 pub const MENU_PICTURES: [(usize, usize, usize); 3] = [(1, 0x2080, 0x20C0), (2, 0x4100, 0x4140), (3, 0x6180, 0x61C0)];
+/// Picture 10 (the lock-on cursors, H7; PC `-18080.dds` 2×).
+pub const CURSOR_PICTURE: (usize, usize, usize) = (10, 0x18040, 0x18080);
 /// Picture 0 (the LOCK ON! plate's art at texels 100..125 × 100..123, H5; the PC copy 4×).
 pub const PLATE_PICTURE: (usize, usize, usize) = (0, 0, 0x40);
 /// The corner of picture 0 taken into the atlas (texels 96..128 square).
@@ -897,6 +899,8 @@ pub struct Built {
     pub target: Option<usize>,
     /// H6: Donald's and Goofy's gauge groups.
     pub party: Option<[usize; 2]>,
+    /// H7: the lock-on cursor's group.
+    pub cursor: Option<usize>,
 }
 
 fn colour_of(o: &Obj) -> u32 {
@@ -1227,6 +1231,22 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         (Some(l), Some(e)) => Some(target::build(l, e, [p0, mp[0], it6], &mut groups)?),
         _ => None,
     };
+    // H7: KH1's lock-on cursor (`lock` object 2, `lockon_c`, picture 10).
+    let cursor_built = match src.lock {
+        Some(l) => {
+            let (i, off, data) = CURSOR_PICTURE;
+            let t = tims.get(i).ok_or_else(|| crate::Error::Format(format!("uitex.bin: no picture {i}")))?;
+            if t.offset != off || t.width != 128 || t.height != 128 {
+                return bad(format!("uitex.bin: picture {i} at {:#x} {}×{}", t.offset, t.width, t.height));
+            }
+            let ps2 = Pic { w: 128, h: 128, px: t.pixels.clone() };
+            let hd = uitex_asset(src.uitex_hd, data, langs[0])?.ok_or_else(|| crate::Error::Format(format!("uitex.bin: no PC texture for picture {i}")))?;
+            let scale = hd_scale(&ps2, &hd)?;
+            let item = atlas.add(ps2, vec![hd.crop(0, 0, 128 * scale, 128 * scale)], scale);
+            Some(cursor::build(l, item, &mut groups)?)
+        }
+        None => None,
+    };
     // H6: Donald's and Goofy's gauges, full (Re:CoM's friends have no HP or MP).
     let party_built = match src.g_c {
         Some(gc) => Some(party::build(gc, [it6, bk.src5_item(&mut atlas, &pics[p5], &pic_langs[p5])], [faces[1], faces[2]], [src.faces[1].ps2.h as i32, src.faces[2].ps2.h as i32], &mut groups)?),
@@ -1250,6 +1270,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         menu: menu_built,
         target: target_built,
         party: party_built,
+        cursor: cursor_built,
     })
 }
 
@@ -1894,6 +1915,63 @@ pub mod party {
     }
 }
 
+/// H7: KH1's lock-on cursor (`0x140274B20`; Checked (decomp + files)): a locked target (state 3,
+/// sub-state 0) draws `lock` object 2 (`lockon_c`, picture 10, 38 × 38) centred on the target's
+/// projected lock point: the quad at (−w / 2 + kx, −h / 2 + ky) of size (w, h) from its position
+/// keys (−4, −4, 46, 46 → 2, 2, 34, 34 → 0, 0, 38, 38 over 4 + 4 frames) and its colour keys
+/// (alpha 0 → 255 → 192), restarted when the cursor kind changes; drawn after the step (key time
+/// 0.5 first). Baked per frame (frame k = key time (k + 1) / 2), then held.
+pub mod cursor {
+    use super::*;
+
+    /// KH1's cursor of a lock (`DAT_14284F9E0` = object 2).
+    pub const OBJECT: &str = "lockon_c";
+
+    fn lerp(keys: &[crate::uibin::Key], t: f32) -> Vec<f32> {
+        let mut at = 0.0;
+        for w in keys.windows(2) {
+            if w[0].dur <= 0 {
+                break;
+            }
+            let d = w[0].dur as f32;
+            if t <= at + d {
+                let f = (t - at) / d;
+                return w[0].vals.iter().zip(&w[1].vals).map(|(a, b)| a + (b - a) * f).collect();
+            }
+            at += d;
+        }
+        keys.last().map(|k| k.vals.clone()).unwrap_or_default()
+    }
+
+    /// Builds the cursor's group (appended); returns it.
+    pub(crate) fn build(lock: &[u8], item: usize, groups: &mut Vec<Group>) -> Result<usize> {
+        let u = Uibin::parse(lock)?;
+        let o = u.objs.get(2).filter(|o| o.name == OBJECT).ok_or_else(|| crate::Error::Format(format!("{LOCK}: object 2 is not {OBJECT}")))?;
+        let ck = u.c_keys(o).ok_or_else(|| crate::Error::Format(format!("{LOCK}: {OBJECT} has no position keys")))?;
+        let (f0, n) = o.keys_a;
+        let ak = u.keys_a.get(f0.max(0) as usize..(f0 + n).max(0) as usize).unwrap_or(&[]);
+        let len = |k: &[crate::uibin::Key]| k.iter().take_while(|k| k.dur > 0).map(|k| k.dur).sum::<i32>();
+        let frames = 2 * len(ck).max(len(ak));
+        let (uv, ..) = o.texels();
+        let col = |v: &[f32]| v[0].clamp(0.0, 255.0) as u32 | (v[1].clamp(0.0, 255.0) as u32) << 8 | (v[2].clamp(0.0, 255.0) as u32) << 16 | (v[3].clamp(0.0, 255.0) as u32) << 24;
+        let piece = |t: f32| -> Piece {
+            let p = lerp(ck, t);
+            let (kx, ky, w, h) = (p[0] as i32, p[1] as i32, p[2] as i32, p[3] as i32);
+            let x0 = -w / 2 + kx;
+            let y0 = -h / 2 + ky;
+            Piece { item, uv, rect: [x0, y0, x0 + w, y0 + h], colour: if ak.is_empty() { colour_of(o) } else { col(&lerp(ak, t)) }, grad: 0 }
+        };
+        let one = 0x8080_8080;
+        let mut steps = Vec::new();
+        for k in 0..frames {
+            steps.push(Step { pieces: vec![piece((k + 1) as f32 / 2.0)], frames: (k, k), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+        }
+        steps.push(Step { pieces: vec![piece(frames as f32)], frames: (frames, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+        groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
+        Ok(groups.len() - 1)
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Adding the set to Re:CoM's files.
 
@@ -1961,6 +2039,9 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)]) ->
     );
     let _ = writeln!(s, "  \"units\": [{}],", (0..m.first.len()).map(|u| format!("[{}, {}]", m.first[u], m.programs_of(u).len())).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"runs\": [{}],", m.runs.iter().map(|r| format!("[{}, {}, {}, {}]", r.0, r.1, r.2, r.3)).collect::<Vec<_>>().join(", "));
+    if let Some(c) = b.cursor {
+        let _ = writeln!(s, "  \"cursor\": {c},");
+    }
     if let Some([d, g]) = b.party {
         let _ = writeln!(s, "  \"party\": [{d}, {g}],");
     }
@@ -2198,6 +2279,7 @@ mod tests {
         assert!(mn.missing.is_empty());
         assert!(b.target.is_some());
         assert!(b.party.is_some());
+        assert!(b.cursor.is_some());
         // KH1's g_act tracks at 2 frames a key unit: vibe_s 5 units, vibe_ss 11, vibe_sss 19,
         // the slides 10.
         assert_eq!(b.motion.programs.iter().map(|p| p.len).collect::<Vec<_>>(), vec![10, 22, 38, 10, 10, 20, 20]);

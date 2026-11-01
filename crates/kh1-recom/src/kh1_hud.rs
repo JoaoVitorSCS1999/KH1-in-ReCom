@@ -231,6 +231,8 @@ pub struct Manifest {
     pub target: Option<u32>,
     /// Donald's and Goofy's gauge groups (H6), when built.
     pub party: Option<[u32; 2]>,
+    /// KH1's lock-on cursor group (H7), when built.
+    pub cursor: Option<u32>,
 }
 
 /// Reads `kh1-hud.json`; refuses another format or group count than this DLL's.
@@ -316,7 +318,12 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
         Some(Some(p)) if p.len() == 2 && p.iter().all(|&g| g < groups) => Some([p[0], p[1]]),
         Some(_) => return Err("a bad party entry".into()),
     };
-    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party })
+    let cursor = match v.get("cursor").map(|c| c.as_u32()) {
+        None => None,
+        Some(Some(c)) if c < groups => Some(c),
+        Some(_) => return Err("a bad cursor entry".into()),
+    };
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party, cursor })
 }
 
 // -------------------------------------------------------------------------------------------------

@@ -378,6 +378,51 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
    KH1's place when he appears, and goes when he leaves. The same for Goofy (68, 20 further).
 2. Log: `kh1 hud: Donald out: KH1 gauge shown (H6)` / `gone: gauge hidden`.
 
+## H7: KH1's lock-on cursor in place of Re:CoM's
+
+### KH1 (Checked (decomp + files))
+
+- `0x140274B20`: lock state 3 (a target locked) with sub-state 0 draws `lock` object 2
+  (`lockon_c`, picture 10, 38 × 38), sub-states 1 / 2 objects 1 / 0, states 1, 2, 4 object 3
+  (`lockon_d`, the orange auto-target ring); centred on the target's projected lock point
+  (`0x1402B04C0`, `0x140277510`): the quad at (−w / 2 + kx, −h / 2 + ky), (w, h) from its
+  position keys (−4, −4, 46, 46 → 2, 2, 34, 34 → 0, 0, 38, 38, 4 + 4 frames) with its colour keys
+  (alpha 0 → 255 → 192), restarted when the kind changes. Not scaled with distance.
+
+### Re:CoM (Checked (decomp + exe))
+
+- `Gauge::CLockonMarker` (ctor `0x140206DF0`, init `0x140208120`): its control `+0x60` (made
+  with `0x1402471D0(ctrl, 2)`: a projected control) plays `Cockpit:00` group `+0x80` (0x63,
+  0x92 with `+0xF8 & 0x10`, 0x62 with `+0xE8`); its update `0x140209D30` anchors it each frame at
+  the lock point `+0x90` (`0x140248570`) and scales it with the distance (1.0 under 3.5 m, 0.5
+  past 14 m). Target handle `+0xD0`, found `+0xEC`.
+
+### Native build
+
+- **Data:** picture 10 joins the atlas; one played group: `lockon_c` baked per frame (frame k =
+  key time (k + 1) / 2) then held. `kh1-hud.json` `"cursor": group`.
+- **DLL:** a wrapper on `0x140209D30` (`sites::KH1_HUD_CURSOR_HOOKS`, `40 57 48 81 EC 80 00 00
+  00`): after Re:CoM's update at `hud = kh1`, Re:CoM's cursor layer is set not drawn
+  (`0x140247E50(ctrl, 0, 0)` when `0x140248090` says it is), and our projected control
+  (`0x1402471D0(c, 2)`, priority 2) gets the same lock point each frame (`0x140248570`); the
+  cursor group plays from its start when a lock begins or moves to another target. At `hud =
+  recom` Re:CoM's update runs alone (one lock and two loads of ours).
+
+### Not 1:1 / owner questions (H7)
+
+1. Only the locked cursor (`lockon_c`) is used: Re:CoM's marker groups 0x92 / 0x62 (other states
+   of its marker) also show `lockon_c`; KH1's auto-target ring (`lockon_d`) has no Re:CoM event
+   wired. Owner question: (a) keep; (b) map 0x92 / 0x62 to KH1's other kinds once their meaning
+   is read.
+2. Per frame while a battle runs: the wrapper copies the lock point (Re:CoM projects and draws).
+3. Assumption: Re:CoM's marker layer-add flag 1 and priority 2 suit a projected layer of ours.
+
+### What the in-game test must check (H7)
+
+1. Lock on: KH1's white ring pops in (shrinks from 46 to 34, settles at 38 over 8 frames) on the
+   target, the same size near and far; Re:CoM's marker is gone. Switching targets replays it.
+2. `hud = recom`: Re:CoM's marker as before.
+
 ## H3: Re:CoM's HUD hidden at `hud = kh1` (visual only)
 
 ### What owns what (Checked (decomp + exe: RTTI))
