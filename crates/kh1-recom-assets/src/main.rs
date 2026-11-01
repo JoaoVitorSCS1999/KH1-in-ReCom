@@ -589,6 +589,14 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         langs,
         b.refit
     );
+    let (rf, rs) = b.ring;
+    println!(
+        "KH1 HUD: MP ring built as Re:CoM's HP ring from group {rf} ({} groups: KH1's quarter pictures whole, scissor parts, turned max-MP end, closing outline); cuts between cells: {} scissor cells with texels on both sides (largest alpha {}), charge cuts inside a cell: {} (staircases)",
+        kh::ring_group::COUNT,
+        rs.gap_conflicts,
+        rs.gap_alpha,
+        rs.cell_conflicts
+    );
     Ok(Hud { rtm_entry, manifest })
 }
 

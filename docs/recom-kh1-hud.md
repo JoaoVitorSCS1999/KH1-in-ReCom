@@ -472,7 +472,7 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
 | FRIENDS row (label, friend cards) | `CFriendGauge` (vtable `0x1405A6788`, `+0x60`): 3 controls `+0x78`, `C2DCard`s `+0x70` parented to them with `+0x138` = 1 | colour alpha 0 on the 3 (the cards take it) | runs |
 | EXP + / NEXT LV / TOTAL MOOGLE P popups and their numbers | `CPrizeGauge` (vtable `0x1405A6718`, `+0x70`, global `[0x14087B690]`): controls `+0x70` ×6, `+0x88` ×6, `+0xA0` ×2, `C2DCard` `+0xA8`; `Cockpit:00` groups 0x51, 0x54, 0x69 | colour alpha 0 | runs (the battle end waits on it) |
 | enemy HP gauges | `CEnemyGauge` (vtable `0x1405A66A8`), update `0x1402099B0` | its own hide path: mask bit 0x10 (toggles its layers) | — |
-| minimap (+ the area layout it plays, the room plate: Assumption) | `CNaviMap` (vtable `0x14059F2A0`), 3D pieces (`+0x58`, lights) | its own hide path: mask bit 8 (`0x1401E4700` ×3, `0x1401E43E0`) | — |
+| minimap (+ the area layout it plays, and the room plate: its controls `+0x128`, see § The MP ring built as Re:CoM's HP ring) | `CNaviMap` (vtable `0x14059F2A0`), 3D pieces (`+0x58`, lights) | its own hide path: mask bit 8 (`0x1401E4700` ×3, `0x1401E43E0`) | — |
 | kept: "Guard" / "Recover" / "Resist" / "LEVEL UP!" | `CCommonGauge` (vtable `0x1405A66E0`, 7 controls `+0x60`: `Cockpit:00` 0xC, 0xD, 0x8F, 0x3D) | not touched (not on the owner's list) | |
 | kept: the level-up choice, the command menu, the camp | | not touched | |
 
@@ -763,3 +763,137 @@ owner's H0 dump, **Assumption**.
 6. `hud_kh1_mp_ring = off`: the MP bar runs left under the turned HP bar. `hud_recom_hp_kh1_place =
    off`: Re:CoM's gauge top left as before, the MP bar under it (the ring needs the gauge at KH1's
    place). `hud = recom`: everything Re:CoM's.
+
+## The MP ring built as Re:CoM's HP ring; it follows the gauge; the room plate up top (owner, 2026-11-01)
+
+- Asks (after 0.38.0, "it looks great! few minor things"): "the MP bar doesnt have the outline at
+  the bottom of the bar"; "in the video you'll notice that the health bar moves, can we make the
+  MP bar move at the same time?"; "the bottom right of the screen shows the type of room. can we
+  move this to the top right of the screen?"; "there also just seems to be a resolution
+  difference between the MP bar and the health bar, if it's possible to have these two bars
+  looking similar quality, maybe built the same way that would be perfect".
+
+### Why the MP ring looked softer (Checked (files + offline render))
+
+- The 0.34–0.38 MP ring was baked: each fan piece rendered by our step into new pictures (4 × 4
+  bilinear samples a PC texel, half a texel of slack at cut edges), then filtered again by Re:CoM
+  when drawn: two filterings, about one PC texel of blur. Re:CoM's ring is its texture sampled
+  once. The pictures themselves have the same density (2 PC texels a unit both).
+
+### How Re:CoM builds its HP ring (Checked (decomp + files) unless tagged)
+
+| what | where | tag |
+|---|---|---|
+| A sprite whose UVs are all 0 and that is alone in its sprite group becomes a `CScissoring` | `0x14024B910` | Checked (decomp) |
+| Its GS scissor = the part's transformed top-left and bottom-right corners `>> 4` (whole 2D units, inclusive; the reset is (0, 0)–(511, 383)), set for the sprites after it in the layer; the layer pushes a reset after its last sprite when it drew a scissor | `0x14024A3F0`, `0x140265F00`, `0x140265ED0`, `0x140248A90` | Checked (decomp) |
+| A layer's sprite objects are its group's animations in order (appended at the tail); inactive ones skip | `0x140248F40`, `0x140249150` | Checked (decomp) |
+| z rotation: file `+0x40` / `+0x44` negated on load (`+0x58` / `+0x68`); interpolated only when flags 0x20 and 0x100 are clear (0x77ED1); constant at 0x77FD1 (the HP ring's cap); the matrix is scale · rot(rows (c, s), (−s, c)) + translation, row vectors: a positive file angle turns counter-clockwise on screen | `0x14024B4E0`, `0x14024A7E0`, `0x14024BB10`, `0x1402EDB10`, `0x1402ECEB0` | Checked (decomp); with this reading Re:CoM's own group 9 grows clockwise from 3 o'clock in the offline render (the other reading draws nothing in frames 0..90) |
+| `gauge:01` 7..9: half / three-quarter ring pictures turned inside quadrant scissors, so the moving end is a picture's straight edge | `UK_gauge.lad` | Checked (files) |
+
+### KH1's ring pictures (Checked (files + decomp))
+
+- KH1's fan (`0x14026B790`, vertices `0x14026E450`) maps one quarter picture onto three quadrants:
+  top-left as is; top-right mirrored in u, bottom-right in u and v; the right and bottom halves
+  stretched over R + 1 units. MP ring (picture 5, centre (56.5, 56.5), R 55), charge (picture 5,
+  (113.5, 56.5), R 55), MP back (picture 7, (107.5, 94.5), R 57); on PC whole texels at 2×.
+- The MP and charge cells are separated by clear gaps about 2° wide at every 30°, on PC
+  (Checked (files): radial profiles). The MP back is a uniform band: black outline 2 units (4 PC
+  texels) at r 55..57 and 41..43, navy between; its ends have no outline (KH1 closes the start
+  with its "mp" / "HP" label plates, `g_s` 8 / 9 at y 316..331).
+
+### Native build (asset step `kh1_hud::ring`, DLL `win/kh1_hud.rs`)
+
+- **561 new groups** at the end of `kh1hud:00` (manifest `"mp_ring": {"first", "count"}`): MP back,
+  MP, charge (held: frames as the cluster's), MP gain / loss fades (9 + 9), charge gain / loss
+  fades (270 + 270). KH1's three quarter pictures are atlas items cropped whole at the PC
+  texture's texels; parts are KH1's quadrant rects about KH1's centre (443, 316) (`tr`).
+- **MP cells and whole charge cells:** the quarter pictures stay put; a cut between cells is a set
+  of scissor rects whose edges run inside KH1's clear gaps. The step computes them from the
+  picture's alpha (each texel's angle; filtering spread; Re:CoM's whole-unit cells with the
+  + 0.25 translation), merges rows into rects, and counts scissor cells holding texels on both
+  sides: 0 on the owner's files (Checked (files)).
+- **MP back:** whole quadrants plain; the quadrant where max MP ends: its scissor and the quarter
+  turned counter-clockwise by 90° − (30° or 60°), Re:CoM's way. Turned unstretched (about KH1's
+  centre; bottom-right about centre + (1, 0)): up to 0.9 unit from KH1's stretched half at the
+  end.
+- **Closing outline (ask 1):** a 2-unit black bar under the ring's start, r 57..40
+  (centre-relative (−57, 0)–(−40, 2)), from one texel of picture 7's black outline (black and
+  thickness measured from the picture at build time), drawn last in the MP back layer after a
+  full-screen scissor. KH1 draws its 15-unit label plates there; at this layout only the outline.
+- **Order inside a group:** plain pieces, then (scissor, image) pairs, then the outline pair; at
+  any frame the active animations are whole pairs (unit test).
+- **Size:** +6,184 animations (49,396 of 65,535), lad +0.93 MB, atlas unchanged (owner's files).
+- **DLL:** the MP-ring cluster takes `mp_ring`'s groups for MP back, MP, charge and every fade
+  (`mp_ring::ring_group`); the ticks stay. An older `kh1-hud.json` without `mp_ring`: the baked
+  groups, as 0.38.0. The full KH1 gauge (`hud_kh1_gauge`) keeps its baked rings.
+
+### What is not KH1's (scissors are whole units and axis-aligned)
+
+1. The charge's end inside a cell (1° a unit): a staircase of 1-unit steps across the 4.5-unit
+   orange band (up to half a unit off a radial line), and KH1's 0.7° fade at the end
+   (`0x14026B790` mode 4) is gone. The charge fades' pieces end the same way.
+2. The MP back's end quadrant turned unstretched (≤ 0.9 unit).
+3. KH1's fan centre is one unit below the quadrant corner (`fan` vertex 0): its affine pieces shear
+   the picture by up to 0.3 unit near the band; the parts don't.
+4. The ring's visual centre is now KH1's (443.75, 316.75) after Re:CoM's + 0.25, Re:CoM's HP
+   ring's (444, 317) (fitted to the old bake): a quarter unit apart.
+
+### The MP ring follows the HP gauge (ask 2)
+
+- Owner's video (30 fps, 1440p): on a hit the HP ring, the disc and the face move together
+  (−5, −12, −11, −3, −3, 3, 7, 8, 5, 2, −1, −3, −2, −1, 0 px, x only) while the MP ring and the
+  command menu stay (Checked (video)). None of the gauge's groups has a translation key
+  (`gauge:01` 10, 14..16, 47..49; Checked (files)), so the move is the HP control `+0x78`'s
+  transform. The code that moves it was not found (Assumption).
+- Built: the MP ring's controls (and their pooled fade controls) hang from `+0x78`
+  (`0x140248650` → `+0x130`, as the 7.2 MP bar and Re:CoM's Dark gauge), their positions made
+  relative to `+0x78`'s at the build (`+0xF0`). `+0x138` stays 0: their colour is their own
+  (Re:CoM's gauge code never colours `+0x78`; H3's colour hide of the HP gauge does not hide the
+  ring). Hide / show stays ours on Re:CoM's HUD state. A child reads its parent's matrix when
+  drawn (`0x14024BB10`); if the parent updates later in the frame the ring trails by a frame
+  (Assumption, as Re:CoM's own Dark gauge).
+
+### The room plate under the minimap (ask 3)
+
+| what | where | tag |
+|---|---|---|
+| The plate (room card, name, star): `CNaviMap` `+0x128`, two `C2DSeqCtrl` (count word 2 before them), made by the init `0x1401E39D0` when the room has a card | `0x1401E39D0` | Checked (decomp) |
+| `0x1401E44A0(navimap, area set, group)`: clears [0], adds group 4 (appear) or 5 (held) of `<world>_navi.lad`, attaches the room name (`0x140164CA0`), places [0] at layout (0, 0); [1] too for rooms with the extra object `+0x120`, which hangs from [1]. Called only by the minimap update `0x1401E4700` | `0x1401E44A0`, `0x1401E4700` | Checked (decomp) |
+| The plate's place is in the navi layouts' groups (`tr_navi.lad` … in `FORM/3001..`) | `0x1407C59F0` table | Checked (exe); the files are not in this session |
+| On the owner's 1440p screenshot: plate y 321..382 units, x from 396 to the right edge; minimap down to y 114 | screenshot | Checked (screenshot) |
+
+- Built: `hud_room_plate_top_right` (default on; only at `hud = kh1` with Re:CoM's gauge at KH1's
+  place, `place_wanted`): a wrapper on `0x1401E44A0` (`40 55 56 57 41 56 41 57 48 81 EC 80 00 00
+  00`, Steam exe) calls Re:CoM's, then puts both controls at layout (0, −200): the plate's top at
+  y 121, under the minimap, its x Re:CoM's. Once per plate set-up, nothing per frame. A setting
+  change shows at the next room. Assumption: the same place in every world's navi layout.
+
+### Checked / not checked
+
+- Checked: tests (assets: cut rects keep whole cells, staircases, pair order, turn direction; DLL:
+  manifest, group mapping, the ini key); the Windows type-check; the owner's files (cuts: 0
+  conflicts); offline render (`/tmp/mp-ring-preview.png`, `/tmp/mp-ring-zoom.png`, not in the
+  repo) with Re:CoM's scissor and rotation rules: KH1's art at its own sharpness, the outline
+  under the start, the max-MP end straight, cell cuts clean, the charge staircase visible at 12×.
+- Not checked: in game; Re:CoM's gauge texture (placeholder colours in the preview); the PC
+  renderer's scissor edge exactly as modelled (whole units, inclusive); the shake's code; the
+  plate's place in other worlds.
+
+### Owner questions
+
+1. **The charge's end inside a cell** (a 1-unit staircase, no 0.7° fade): (a) keep (built); (b)
+   that one partial cell from pre-cut copies of KH1's art at its own texels (KH1's exact edge
+   and fade, no resampling; 270 small atlas boxes).
+2. **The room plate's height:** (a) under the minimap at y 121 (built); (b) another place
+   (say where).
+
+### What the in-game test must check
+
+1. Log: `KH1's MP ring … built as Re:CoM's HP ring (groups N..) … hung from Re:CoM's HP control`,
+   `CNaviMap room plate 0x1401E44A0 wrapped`, `room plate (group 4) under the minimap`.
+2. Screenshot at 1440p: the MP ring as sharp as the green ring; a black line closing the MP
+   ring's bottom at 9 o'clock; the room plate top right under the minimap.
+3. MP 1..9 and max MP 1..9: whole cells, the MP back's end a straight edge; charge filling (look
+   at its end); casts and refills fade as before.
+4. Take a hit: the MP ring moves with the green ring and the face.
+5. `hud_room_plate_top_right = off`: the plate bottom right (next room).

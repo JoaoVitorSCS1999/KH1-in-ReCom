@@ -39,6 +39,14 @@
 //! disc and the face stay Re:CoM's, upright. Re:CoM runs it from then on. KH1's MP ring around it
 //! (`hud_kh1_mp_ring`) is the cluster with only its MP parts (`Cluster::mp_only`).
 //! `docs/recom-kh1-hud.md` § Re:CoM's HP gauge at KH1's place.
+//!
+//! The MP ring built as Re:CoM's HP ring (owner, 2026-11-01): its groups are the asset step's
+//! `mp_ring` groups (KH1's quarter pictures whole, cut by scissor parts and turned, as Re:CoM's
+//! `gauge:01` 7..9) when the manifest has them, and its controls hang from Re:CoM's HP control
+//! `+0x78` (`0x140248650`, as the 7.2 MP bar and Re:CoM's Dark gauge), so whatever moves that
+//! control (the hit shake) moves the MP ring with it. Re:CoM's room plate (`CNaviMap` `+0x128`)
+//! goes under the minimap at `hud_room_plate_top_right`. `docs/recom-kh1-hud.md` § The MP ring
+//! built as Re:CoM's HP ring.
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
@@ -63,6 +71,7 @@ pub static ORIG_EXIT: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_DTOR: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_MARKER: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_POPUP: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_PLATE: AtomicUsize = AtomicUsize::new(0);
 /// H6: the friend objects Re:CoM has out now (Donald, Goofy), 0 when not.
 static FRIEND: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
 static STATE: Mutex<State> = Mutex::new(State { gauges: Vec::new(), clusters: Vec::new() });
@@ -74,6 +83,9 @@ const FRAME: u32 = 0x0024_7C20;
 const ALL_VISIBLE: u32 = 0x0024_7EC0;
 const LAYOUT_POS: u32 = 0x0024_8660;
 const COLOUR: u32 = 0x0024_8590;
+/// `C2DSeqCtrl` parent (`0x140248650`: `+0x130` = the parent's transform node; checked in
+/// `sites::MP_BAR_CALLEES`).
+const PARENT: u32 = 0x0024_8650;
 const VAR_GET: u32 = 0x001B_08C0;
 const SEQ_CTRL_VTABLE: u32 = 0x0060_7340;
 /// H2b (`sites::KH1_HUD_CALLEES`): play a layer from a time (units of 1/50 frame), a layer's time.
@@ -94,6 +106,8 @@ const STATE_SHOW: u32 = 1;
 const STATE_HIDDEN: u32 = 7;
 /// `C2DSeqCtrl`: draw priority (a clear resets it to 0xFF).
 const C_PRIORITY: usize = 0x16E;
+/// `C2DSeqCtrl`: its position (x − 256, y − 192 as `0x140248660` writes it; Checked (decomp)).
+const C_POS: usize = 0xF0;
 /// The back at the HUD's priority (Re:CoM's HP gauge's 2), the HP ring and face over it.
 const PRIORITY_BACK: u8 = 2;
 const PRIORITY_FRONT: u8 = 3;
@@ -103,6 +117,7 @@ type CtorFn = unsafe extern "win64" fn(usize) -> usize;
 type FrameFn = unsafe extern "win64" fn(usize, u32, i32);
 type VisFn = unsafe extern "win64" fn(usize, i32);
 type VecFn = unsafe extern "win64" fn(usize, *const f32);
+type ParentFn = unsafe extern "win64" fn(usize, usize);
 type HpFn = unsafe extern "win64" fn(usize, u32, i32);
 type MaxFn = unsafe extern "win64" fn(usize, u32);
 type GetFn = unsafe extern "win64" fn(u32, u32) -> u32;
@@ -177,6 +192,12 @@ struct Cluster {
     /// Only KH1's MP ring (`hud_kh1_mp_ring`, around Re:CoM's HP ring): controls 0 (MP back, MP)
     /// and 1 (charge, ticks), no HP, face, flash or motions (`crate::kh1_hud::mp_ring`).
     mp_only: bool,
+    /// The MP ring's groups built as Re:CoM's HP ring (the manifest's `mp_ring` first group).
+    ring: Option<u32>,
+    /// Re:CoM's HP control our controls hang from (0: none) and its position when they were
+    /// placed (`+0xF0`), which their own positions are relative to.
+    parent: usize,
+    rel: (f32, f32),
 }
 
 struct State {
@@ -310,6 +331,14 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
                 log("kh1 hud: lock-on marker not hooked; Re:CoM's cursor stays");
             }
         }
+        // Re:CoM's room plate under the minimap (`hud_room_plate_top_right`).
+        let h = [super::hook::Hook { site: &crate::sites::KH1_HUD_PLATE_HOOKS[0], ours: room_plate as *const () as usize, original: &ORIG_PLATE }];
+        // SAFETY: as above.
+        if unsafe { super::hook::install_all(b, &h) } {
+            log("kh1 hud: CNaviMap room plate 0x1401E44A0 wrapped (the plate under the minimap at hud_room_plate_top_right)");
+        } else {
+            log("kh1 hud: room plate not hooked; Re:CoM's plate stays bottom right");
+        }
         // H8 (KH1's LEVEL UP!!) is off: the owner chose Re:CoM's level-up message, 2026-11-01.
         if LEVEL_UP_KH1 && MANIFEST.get().is_some_and(|m| m.level_up.is_some()) {
             let site = &crate::sites::KH1_HUD_POPUP_HOOKS[0];
@@ -406,6 +435,28 @@ fn class_of(v: &View) -> usize {
 }
 
 impl Cluster {
+    /// The group that shows what the cluster's group `g` shows: the MP ring's own when built.
+    fn grp(&self, g: u32) -> u32 {
+        match self.ring {
+            Some(first) if self.mp_only => mp_ring::ring_group(first, g),
+            _ => g,
+        }
+    }
+
+    /// Places control `c` at size class `class` + `dx` (KH1's absolute places): under Re:CoM's
+    /// HP control when the cluster hangs from it (its position relative to that control's), else
+    /// on its own.
+    unsafe fn put(&self, c: usize, class: usize, dx: f32) {
+        if self.parent == 0 {
+            place(c, class, dx);
+            return;
+        }
+        func::<ParentFn>(PARENT)(c, self.parent);
+        let (x, y) = kh::kh1::CLASS_OFFSET[class];
+        // `0x140248660` stores (x − 256, y − 192); the parent's own position is added when drawn.
+        func::<VecFn>(LAYOUT_POS)(c, V4([x + dx - self.rel.0, y - self.rel.1, 0.0, 1.0]).0.as_ptr());
+    }
+
     /// The control and layer of `kh::frames`' entry `k` (None: not drawn by this cluster).
     fn layer_of(&self, k: usize) -> Option<(usize, u32)> {
         if self.mp_only {
@@ -451,7 +502,7 @@ impl Cluster {
             Some(c) => c,
             None => new_ctrl()?,
         };
-        place(c, self.class, dx);
+        self.put(c, self.class, dx);
         add(c, self.list, prio, g, self.xoff, 0);
         Some(Piece { ctrl: c })
     }
@@ -491,10 +542,10 @@ impl Cluster {
         if class != self.class {
             self.class = class;
             for &c in self.ctrls.iter().filter(|&&c| c != 0) {
-                place(c, class, 0.0);
+                self.put(c, class, 0.0);
             }
             for p in self.mp.iter().chain(&self.charge) {
-                place(p.ctrl, class, 0.0);
+                self.put(p.ctrl, class, 0.0);
             }
             note(|| format!("size class {class} (max HP {}, max MP {})", v.max_hp, v.mp.map_or(0, |m| m.1)));
         }
@@ -515,7 +566,7 @@ impl Cluster {
                 if a.0 != b.0 {
                     self.release(0);
                     for g in kh::mp_fade(a.0, b.0) {
-                        if let Some(p) = self.piece(g, self.prio_mp(), 0.0) {
+                        if let Some(p) = self.piece(self.grp(g), self.prio_mp(), 0.0) {
                             self.mp.push(p);
                         }
                     }
@@ -524,7 +575,7 @@ impl Cluster {
             if oc != nc {
                 self.release(1);
                 for g in charge_pieces {
-                    if let Some(p) = self.piece(g, self.prio_charge(), 0.0) {
+                    if let Some(p) = self.piece(self.grp(g), self.prio_charge(), 0.0) {
                         self.charge.push(p);
                     }
                 }
@@ -810,7 +861,7 @@ unsafe fn build(gauge: usize, list: i32) {
     for (g, _) in kh::frames(&v).iter().skip(4) {
         add(ctrls[1], list, PRIORITY_FRONT, *g, xoff, 1);
     }
-    let mut cl = Cluster { gauge, list, xoff, class, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2], mp_only: false };
+    let mut cl = Cluster { gauge, list, xoff, class, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2], mp_only: false, ring: None, parent: 0, rel: (0.0, 0.0) };
     cl.party_build();
     cl.show(v, true);
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
@@ -832,38 +883,62 @@ unsafe fn build(gauge: usize, list: i32) {
 /// absolute places, size class 2: centred on [`recom_hp::CENTRE`], where Re:CoM's HP ring goes),
 /// at KH1's right margin, under Re:CoM's HP gauge (priorities 0 / 1 < 2). Frames, fades and the
 /// HUD's hide / show are the cluster's (`Cluster::show`, `hide`), on KH1's MP reads and writes.
+///
+/// The MP back, MP, charge and their fades are the asset step's `mp_ring` groups when the
+/// manifest has them (KH1's quarter pictures whole, cut by scissor parts and turned, as Re:CoM
+/// builds its HP ring: the same sharpness; owner, 2026-11-01), else the cluster's baked ones. The
+/// controls hang from Re:CoM's HP control `+0x78` (`0x140248650`; their colour stays their own,
+/// `+0x138` = 0: nothing of Re:CoM's colours that control, H3's colour hide aside): Re:CoM moves
+/// that control's transform when Sora is hit (the ring, the disc and the face move together in
+/// the owner's video; none of their groups has a translation key: Checked (files)), and the MP
+/// ring now moves with it. Assumption: the movement is the control's transform (the code that
+/// writes it was not found in the decomp).
 unsafe fn build_ring(gauge: usize, list: i32) {
     let v = view_of(gauge);
     let xoff = kh::right_margin(rd::<f32>(gauge + G_XOFF));
-    let mut ctrls = [0usize; 3];
-    for c in ctrls.iter_mut().take(2) {
+    let ring = manifest().and_then(|m| m.mp_ring);
+    let hp: usize = rd(gauge + G_HP_CTRL);
+    let parent = if hp != 0 && rd::<usize>(hp) == base() + SEQ_CTRL_VTABLE as usize { hp } else { 0 };
+    let rel = if parent != 0 { (rd::<f32>(parent + C_POS), rd::<f32>(parent + C_POS + 4)) } else { (0.0, 0.0) };
+    let mut cl = Cluster { gauge, list, xoff, class: mp_ring::CLASS, ctrls: [0; 3], view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2], mp_only: true, ring, parent, rel };
+    for k in 0..2 {
         match new_ctrl() {
-            Some(n) => *c = n,
+            Some(n) => cl.ctrls[k] = n,
             None => {
-                for &m in ctrls.iter().filter(|&&m| m != 0) {
+                for &m in cl.ctrls.iter().filter(|&&m| m != 0) {
                     super::d2::delete(m, list);
                 }
                 return;
             }
         }
     }
-    for &c in &ctrls[..2] {
-        place(c, mp_ring::CLASS, 0.0);
+    for k in 0..2 {
+        cl.put(cl.ctrls[k], mp_ring::CLASS, 0.0);
     }
     let frames = kh::frames(&v);
     for (k, (g, _)) in frames.iter().enumerate() {
         if let Some((ci, _)) = mp_ring::layer_of(k) {
             let prio = if ci == 0 { mp_ring::PRIORITY_MP } else { mp_ring::PRIORITY_CHARGE };
-            add(ctrls[ci], list, prio, *g, xoff, 1);
+            add(cl.ctrls[ci], list, prio, cl.grp(*g), xoff, 1);
         }
     }
-    let mut cl = Cluster { gauge, list, xoff, class: mp_ring::CLASS, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2], mp_only: true };
     cl.show(v, true);
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
     if hidden {
         cl.hide(true, true);
     }
-    note(|| format!("KH1's MP ring around Re:CoM's HP ring on the player gauge {gauge:#x}: MP {:?}, margin {xoff}{}", v.mp, if hidden { " (HUD hidden)" } else { "" }));
+    note(|| {
+        format!(
+            "KH1's MP ring around Re:CoM's HP ring on the player gauge {gauge:#x}: MP {:?}, margin {xoff}{}; {}; {}",
+            v.mp,
+            if hidden { " (HUD hidden)" } else { "" },
+            match ring {
+                Some(f) => format!("built as Re:CoM's HP ring (groups {f}..{})", f + mp_ring::group::COUNT - 1),
+                None => "the baked groups (kh1-hud.json has no mp_ring: run this version's asset step)".to_string(),
+            },
+            if parent != 0 { format!("hung from Re:CoM's HP control {parent:#x} at ({}, {})", rel.0, rel.1) } else { "not hung (no HP control)".to_string() }
+        )
+    });
     if let Ok(mut s) = STATE.lock() {
         for mut old in s.clusters.extract_if(.., |c| c.gauge == gauge) {
             old.destroy();
@@ -968,6 +1043,49 @@ pub unsafe fn hud(gauge: usize, state: u32) {
             c.hide(hide, false);
         }
     }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Re:CoM's room plate under the minimap (owner, 2026-11-01).
+
+/// `Gauge::CNaviMap`'s room plate controls (`0x1401E44A0`: an array of two `C2DSeqCtrl` made by
+/// the navi map's init `0x1401E39D0`, its count word before it; [0] the plate's art and the room
+/// name, [1] the second layer some rooms add, which an extra object hangs from). Checked (decomp).
+const NAVI_PLATES: usize = 0x128;
+/// How far the plate goes up (KH1 units): Re:CoM's plate (card, name, star) spans y 321..382 on
+/// the owner's 1440p screenshot, the minimap's lowest point (its red ribbons) is at y 114; the
+/// plate's top goes to y 121, under the minimap, its x (Re:CoM's, at the right edge) kept.
+/// Assumption: the plate's place comes from each world's `<world>_navi.lad` (groups 4 / 5), not
+/// in this session; measured on Destiny Islands only.
+const ROOM_PLATE_DY: f32 = -200.0;
+type PlateFn = unsafe extern "win64" fn(usize, usize, i32);
+
+/// The room plate goes under the minimap (`hud_room_plate_top_right`, with Re:CoM's HP gauge at
+/// KH1's place: it would sit on the gauge otherwise).
+pub fn plate_on() -> bool {
+    parts().room_plate_top && place_wanted()
+}
+
+/// `CNaviMap` room plate set-up (`0x1401E44A0(navimap, set, group)`, when a room's plate appears
+/// and settles): Re:CoM's, which puts its two controls at layout (0, 0) (the plate's place is in
+/// its groups), then at `hud_room_plate_top_right` both controls at (0, [`ROOM_PLATE_DY`]).
+/// Re:CoM plays, hides and draws the plate as before; once per plate set-up, nothing per frame.
+pub unsafe extern "win64" fn room_plate(navi: usize, set: usize, group: i32) {
+    orig::<PlateFn>(&ORIG_PLATE)(navi, set, group);
+    if navi == 0 || !plate_on() {
+        return;
+    }
+    let arr: usize = rd(navi + NAVI_PLATES);
+    if arr == 0 || rd::<u64>(arr - 0x10) != 2 {
+        return;
+    }
+    for k in 0..2 {
+        let c = arr + k * C_SIZE;
+        if rd::<usize>(c) == base() + SEQ_CTRL_VTABLE as usize {
+            func::<VecFn>(LAYOUT_POS)(c, V4([0.0, ROOM_PLATE_DY, 0.0, 1.0]).0.as_ptr());
+        }
+    }
+    note(|| format!("room plate (group {group}) under the minimap: up {}", -ROOM_PLATE_DY));
 }
 
 // -------------------------------------------------------------------------------------------------

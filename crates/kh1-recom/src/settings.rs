@@ -102,17 +102,22 @@ pub struct HudParts {
     pub hide_friends: bool,
     /// Re:CoM's EXP / NEXT LV / Moogle point pop-ups hidden.
     pub hide_prizes: bool,
+    /// With Re:CoM's HP gauge at KH1's place (bottom right): Re:CoM's room plate (the room card
+    /// and its name, bottom right) moved to the top right, under the minimap (owner, 2026-11-01:
+    /// "the bottom right of the screen shows the type of room. can we move this to the top right
+    /// of the screen?"); off: Re:CoM's place.
+    pub room_plate_top: bool,
 }
 
 impl Default for HudParts {
     fn default() -> Self {
-        HudParts { gauge: false, recom_hp_place: true, mp_ring: true, menu: true, party: true, hide_hp: false, hide_minimap: false, hide_friends: true, hide_prizes: false }
+        HudParts { gauge: false, recom_hp_place: true, mp_ring: true, menu: true, party: true, hide_hp: false, hide_minimap: false, hide_friends: true, hide_prizes: false, room_plate_top: true }
     }
 }
 
 impl HudParts {
     /// (ini key, value) for each piece, in the file's order.
-    pub fn keys(self) -> [(&'static str, bool); 9] {
+    pub fn keys(self) -> [(&'static str, bool); 10] {
         [
             ("hud_kh1_gauge", self.gauge),
             ("hud_recom_hp_kh1_place", self.recom_hp_place),
@@ -123,6 +128,7 @@ impl HudParts {
             ("hud_hide_minimap", self.hide_minimap),
             ("hud_hide_friends", self.hide_friends),
             ("hud_hide_prizes", self.hide_prizes),
+            ("hud_room_plate_top_right", self.room_plate_top),
         ]
     }
 
@@ -137,6 +143,7 @@ impl HudParts {
             "hud_hide_minimap" => self.hide_minimap = v,
             "hud_hide_friends" => self.hide_friends = v,
             "hud_hide_prizes" => self.hide_prizes = v,
+            "hud_room_plate_top_right" => self.room_plate_top = v,
             _ => return false,
         }
         true
@@ -259,6 +266,8 @@ hud = recom
 ;   hud_kh1_party: Donald's and Goofy's KH1 gauges (shown with hud_kh1_gauge)
 ;   hud_hide_recom_hp / hud_hide_minimap / hud_hide_friends / hud_hide_prizes: hide Re:CoM's
 ;     HP gauge / minimap / FRIENDS row / EXP, NEXT LV and Moogle point pop-ups
+;   hud_room_plate_top_right: with hud_recom_hp_kh1_place on, Re:CoM's room plate (the room card
+;     and its name) top right under the minimap, off the gauge (off: bottom right)
 hud_kh1_gauge = off
 hud_recom_hp_kh1_place = on
 hud_kh1_mp_ring = on
@@ -268,6 +277,7 @@ hud_hide_recom_hp = off
 hud_hide_minimap = off
 hud_hide_friends = on
 hud_hide_prizes = off
+hud_room_plate_top_right = on
 ";
 
 /// Parses the file. Unknown keys and bad values are reported and the default kept.
@@ -482,7 +492,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -576,6 +586,9 @@ mod combo_tests {
         assert!(!s.hud_parts.gauge && s.hud_parts.recom_hp_place && s.hud_parts.mp_ring && !s.hud_parts.hide_hp);
         let (s, _) = parse("hud_recom_hp_kh1_place = off\nhud_kh1_mp_ring = off\n");
         assert!(!s.hud_parts.recom_hp_place && !s.hud_parts.mp_ring);
+        assert!(s.hud_parts.room_plate_top, "on unless the file says off");
+        let (s, w) = parse("hud_room_plate_top_right = off\n");
+        assert!(!s.hud_parts.room_plate_top && w.is_empty());
     }
 
     #[test]

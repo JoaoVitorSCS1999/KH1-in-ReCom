@@ -11,6 +11,26 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 81: MP ring drawn as Re:CoM draws its HP ring; closing outline; follows the gauge; room plate top right, version 0.40.0 (2026-10-31)
+
+- Asks (owner, 2026-11-01): "the MP bar doesnt have the outline at the bottom of the bar", "the health
+  bar moves, can we make the MP bar move at the same time?", "the bottom right of the screen shows the
+  type of room. can we move this to the top right", "a resolution difference between the MP bar and the
+  health bar … maybe built the same way".
+- MP ring: 561 groups in kh1hud:00 (manifest "mp_ring"): KH1's three quarter-ring pictures whole in
+  the atlas, cut per frame by Re:CoM's scissor sprites (`0x14024B910`, reset `0x14024A3F0`) and rotated
+  as Re:CoM's HP ring (angles negated on load `0x14024B4E0`); no pre-rendered pictures. Differences:
+  the charge's partial end in 1-unit steps without KH1's soft fade; max-MP ends in the right
+  quadrants up to 0.9 unit off. Checked (decomp + offline render).
+- Outline: a 2-unit black bar under the ring's 9 o'clock start (KH1 closes it with the label plates).
+- Shake: the ring's controls hang from the HP control `+0x78` (`0x140248650`), own colour.
+  That Re:CoM moves `+0x78` itself: Assumption (no movement keys in its groups; Checked (files)).
+- Room plate: wrapper on `CNaviMap`'s plate set-up `0x1401E44A0` (15 bytes checked): its two
+  controls (`+0x128`) 200 units up, under the minimap; `hud_room_plate_top_right` (default on).
+  Measured on Destiny Islands only. Not seen in game.
+
+---
+
 ## Stage 80: KH1 menu sounds: se000's padding left out, version 0.39.2 (2026-10-31)
 
 - Owner's asset run of 0.39.1: "se000.win32.scd: SCD says 15277472 bytes, has 15278752" (refused).

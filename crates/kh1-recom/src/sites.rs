@@ -647,6 +647,18 @@ pub const KH1_HUD_POPUP_HOOKS: &[Site] = &[
     Site { name: "CCommonGauge popup (0x14020C9A0)", rva: 0x0020_C9A0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x56, 0x48, 0x83, 0xEC, 0x20] },
 ];
 
+/// The KH1 HUD (owner, 2026-11-01: "the bottom right of the screen shows the type of room. can we
+/// move this to the top right of the screen?"): `Gauge::CNaviMap`'s room plate set-up
+/// `0x1401E44A0(navimap, area set, group)` (the room card's plate and name on its controls
+/// `+0x128` [0] and [1], each placed at layout (0, 0)), called from the minimap's update
+/// `0x1401E4700` when a room's plate appears (group 4) and settles (group 5). Wrapped so the
+/// plate's controls go under the minimap at `hud_room_plate_top_right`. Bytes read from the
+/// Steam exe (2026-11-01).
+pub const KH1_HUD_PLATE_HOOKS: &[Site] = &[
+    // push rbp; push rsi; push rdi; push r14; push r15; sub rsp,0x80
+    Site { name: "CNaviMap room plate (0x1401E44A0)", rva: 0x001E_44A0, expect: &[0x40, 0x55, 0x56, 0x57, 0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00] },
+];
+
 /// The KH1 HUD (decision 39, H3): Re:CoM's HUD-hide mask reads (`call 0x1401B08C0`, ecx = 1,
 /// edx = 0xE2) of the enemy gauge (`CEnemyGauge` update `0x1402099B0`, bit 0x10) and the minimap
 /// (`CNaviMap` `0x1401E4700` ×3, `0x1401E43E0`, bit 8), retargeted to our getter, which adds the
@@ -1197,6 +1209,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(KH1_HUD_PARTY_HOOKS)
         .chain(KH1_HUD_CURSOR_HOOKS)
         .chain(KH1_HUD_POPUP_HOOKS)
+        .chain(KH1_HUD_PLATE_HOOKS)
         .chain(KH1_HUD_MASK_CALLS)
         .chain(KH1_HUD_MASK_CHECKED)
         .chain(KH1_HUD_CALLEES)
@@ -1307,7 +1320,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(KH1_HUD_CURSOR_HOOKS).chain(KH1_HUD_POPUP_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS).chain(MENU_SOUND_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(KH1_HUD_CURSOR_HOOKS).chain(KH1_HUD_POPUP_HOOKS).chain(KH1_HUD_PLATE_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS).chain(MENU_SOUND_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);

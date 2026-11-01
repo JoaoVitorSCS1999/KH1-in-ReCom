@@ -28,6 +28,9 @@ use crate::texture::{decode_dds, Image};
 use crate::uibin::{Obj, Uibin};
 use crate::{bad, Result};
 
+mod ring;
+pub use ring::{group as ring_group, CutStats};
+
 /// The layout file added to `FO0002.SPR` (Re:CoM registers `kh1hud` and `kh1hud:00`).
 pub const LAD: &str = "kh1hud.lad";
 /// The atlas added to `FO0002.RTM` (registered as `kh1hud:00`, bound to the sequence set).
@@ -907,8 +910,10 @@ pub(crate) struct Piece {
     grad: u32,
 }
 
-/// One animation of a group: its pieces over frames [f0, f1] with a colour start → end and a
-/// translation (x0, y0) → (x1, y1) (KH1 units).
+/// One animation of a group: its pieces over frames [f0, f1] with a colour start → end, a
+/// translation (x0, y0) → (x1, y1) (KH1 units) and a constant z rotation `rot` (radians, as the
+/// file stores it: Re:CoM negates it on load, `0x14024B4E0`, so a positive value turns the pieces
+/// counter-clockwise on screen about the translated origin; `ring`).
 #[derive(Clone, Default)]
 pub(crate) struct Step {
     pieces: Vec<Piece>,
@@ -916,6 +921,7 @@ pub(crate) struct Step {
     colour: (u32, u32),
     flags: u32,
     tr: [i32; 4],
+    rot: f32,
 }
 
 pub(crate) struct Group {
@@ -953,7 +959,7 @@ fn held(frames: &[Vec<Piece>]) -> Group {
     let mut steps = Vec::new();
     for (r, ps) in by_runs {
         for fr in r {
-            steps.push(Step { pieces: ps.clone(), frames: fr, colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+            steps.push(Step { pieces: ps.clone(), frames: fr, colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 });
         }
     }
     Group { steps, once: true, word: GROUP_WORD_SCRUB }
@@ -974,8 +980,14 @@ fn seqd(groups: &[Group], packed: &Packed, hd: bool) -> Result<Vec<u8>> {
                 None => {
                     let p0 = s.parts.len();
                     for p in &st.pieces {
-                        let (b, h) = packed.uv(Sub { item: p.item, rect: p.uv });
-                        let uv = if hd { h } else { b };
+                        // A scissor part (`ring`): a sprite whose UVs are all 0, alone in its
+                        // sprite group (Re:CoM's `CScissoring`, `0x14024B910`).
+                        let uv = if p.item == ring::SCISSOR {
+                            [0; 4]
+                        } else {
+                            let (b, h) = packed.uv(Sub { item: p.item, rect: p.uv });
+                            if hd { h } else { b }
+                        };
                         let g = if p.grad != 0 { p.grad } else { p.colour };
                         let si = *spr.entry((uv, p.colour, g)).or_insert_with(|| {
                             // Re:CoM's sprite colours: TL, TR, BL, BR (`mp_bar` assumption 3).
@@ -996,6 +1008,11 @@ fn seqd(groups: &[Group], packed: &Packed, hd: bool) -> Result<Vec<u8>> {
             let [x0, y0, x1, y1] = st.tr;
             for (at, v) in [(0x10, x0), (0x14, x1), (0x18, y0), (0x1C, y1)] {
                 a[at..at + 4].copy_from_slice(&v.to_le_bytes());
+            }
+            // z rotation start / end (`+0x40`, `+0x44`; `0x14024B4E0` → `+0x58` / `+0x68`).
+            if st.rot != 0.0 {
+                a[0x40..0x44].copy_from_slice(&st.rot.to_le_bytes());
+                a[0x44..0x48].copy_from_slice(&st.rot.to_le_bytes());
             }
             s.anims.push(a);
         }
@@ -1202,6 +1219,9 @@ pub struct Built {
     pub level_up: Option<usize>,
     /// PC texture rects redrawn from the PS2 pictures (repacked on PC, see [`fit_layouts`]).
     pub refit: usize,
+    /// KH1's MP ring as Re:CoM's HP ring: its first group ([`ring_group`]'s order) and what its
+    /// cuts resolved.
+    pub ring: (usize, CutStats),
 }
 
 fn colour_of(o: &Obj) -> u32 {
@@ -1411,8 +1431,8 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
             let t = &tracks[si];
             let mut steps = motion::steps(t, &[face_piece(1)]);
             steps.pop(); // the hold: expression 1 until the timer ends, then `after`
-            steps.push(Step { pieces: vec![face_piece(1)], frames: (t.len, n), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
-            steps.push(Step { pieces: vec![face_piece(after)], frames: (n + 1, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+            steps.push(Step { pieces: vec![face_piece(1)], frames: (t.len, n), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 });
+            steps.push(Step { pieces: vec![face_piece(after)], frames: (n + 1, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 });
             groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
         }
     }
@@ -1422,8 +1442,8 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     let grey = |c: u8| 0x8000_0000 | (c as u32) * 0x01_0101;
     let fade = |p: Piece, from: u32, to: u32, then: u32, held: bool| Group {
         steps: vec![
-            Step { pieces: vec![p], frames: (0, last), colour: (from, to), flags: FLAGS_COLOUR, tr: [0; 4] },
-            Step { pieces: vec![p], frames: (last + 1, if held { LONG } else { mb::FADE_FRAMES }), colour: (then, then), flags: FLAGS_COLOUR, tr: [0; 4] },
+            Step { pieces: vec![p], frames: (0, last), colour: (from, to), flags: FLAGS_COLOUR, tr: [0; 4], rot: 0.0 },
+            Step { pieces: vec![p], frames: (last + 1, if held { LONG } else { mb::FADE_FRAMES }), colour: (then, then), flags: FLAGS_COLOUR, tr: [0; 4], rot: 0.0 },
         ],
         once: true,
         word: GROUP_WORD_FADE,
@@ -1460,8 +1480,8 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     let step_a = peak / up as u32;
     let flash = |p: Piece| Group {
         steps: vec![
-            Step { pieces: vec![p], frames: (0, up - 1), colour: (rc(step_a), rc(peak)), flags: FLAGS_COLOUR, tr: [0; 4] },
-            Step { pieces: vec![p], frames: (up, up + down - 1), colour: (rc(peak - step_a), rc(0)), flags: FLAGS_COLOUR, tr: [0; 4] },
+            Step { pieces: vec![p], frames: (0, up - 1), colour: (rc(step_a), rc(peak)), flags: FLAGS_COLOUR, tr: [0; 4], rot: 0.0 },
+            Step { pieces: vec![p], frames: (up, up + down - 1), colour: (rc(peak - step_a), rc(0)), flags: FLAGS_COLOUR, tr: [0; 4], rot: 0.0 },
         ],
         once: false,
         word: GROUP_WORD_FADE,
@@ -1573,6 +1593,21 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         Some(l) => Some(popup::level_up(l, [mp[2], mp[0]], &mut groups)?),
         None => None,
     };
+    // KH1's MP ring built as Re:CoM's HP ring (`ring`): KH1's quarter pictures whole, cut by
+    // scissor parts and turned, for the MP ring around Re:CoM's HP gauge.
+    let ring_first = groups.len();
+    let mut ring_stats = CutStats::default();
+    {
+        let s7 = pics[p7].scale;
+        let back = ring::Quarter::new(&mut atlas, kh1::RING_MP_BACK, &pics[p7].ps2, &pic_langs[p7], s7)?;
+        // Picture 5 has one PC texture for every language (`-a2c0.dds`).
+        let mp_q = ring::Quarter::new(&mut atlas, kh1::RING_MP, &pics[p5].ps2, &pic_langs[p5][..1], pics[p5].scale)?;
+        let charge_q = ring::Quarter::new(&mut atlas, kh1::RING_CHARGE, &pics[p5].ps2, &pic_langs[p5][..1], pics[p5].scale)?;
+        let (bx, by) = ring::black_texel(&pics[p7].ps2, &pic_langs[p7], kh1::RING_MP_BACK, s7).ok_or_else(|| crate::Error::Format("uitex.bin: no black outline texel at picture 7's MP back end".into()))?;
+        let black = atlas.add(pics[p7].ps2.crop(bx, by, 1, 1), pic_langs[p7].iter().map(|p| p.crop(bx * s7, by * s7, s7, s7)).collect(), s7);
+        let inputs = ring::Inputs { objs, it5, it7, back, mp: mp_q, charge: charge_q, black };
+        groups.extend(ring::groups(&inputs, &mut ring_stats)?);
+    }
     let groups_total = groups.len();
     let mut raw = vec![it5, it6, it7, p0];
     raw.extend(&faces);
@@ -1601,6 +1636,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         cursor: cursor_built,
         level_up: level_built,
         refit,
+        ring: (ring_first, ring_stats),
     })
 }
 
@@ -1782,9 +1818,9 @@ pub mod motion {
         let mut v: Vec<Step> = t
             .segs
             .iter()
-            .map(|&(fr, a, b)| Step { pieces: pieces.to_vec(), frames: fr, colour: (one, one), flags: FLAGS_MOVE, tr: [a.0, a.1, b.0, b.1] })
+            .map(|&(fr, a, b)| Step { pieces: pieces.to_vec(), frames: fr, colour: (one, one), flags: FLAGS_MOVE, tr: [a.0, a.1, b.0, b.1], rot: 0.0 })
             .collect();
-        v.push(Step { pieces: pieces.to_vec(), frames: (t.len, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [t.end.0, t.end.1, t.end.0, t.end.1] });
+        v.push(Step { pieces: pieces.to_vec(), frames: (t.len, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [t.end.0, t.end.1, t.end.0, t.end.1], rot: 0.0 });
         v
     }
 
@@ -1797,8 +1833,8 @@ pub mod motion {
                 // 0.9 … 0.0 (out) or 0.1 … 1.0 (in) over frames 0..9, then held.
                 let (from, to) = if out { (115, 0) } else { (13, 128) };
                 vec![
-                    Step { pieces: pieces.to_vec(), frames: (0, p.len - 1), colour: (a(from), a(to)), flags: FLAGS_COLOUR, tr: [0; 4] },
-                    Step { pieces: pieces.to_vec(), frames: (p.len, LONG), colour: (a(to), a(to)), flags: FLAGS_COLOUR, tr: [0; 4] },
+                    Step { pieces: pieces.to_vec(), frames: (0, p.len - 1), colour: (a(from), a(to)), flags: FLAGS_COLOUR, tr: [0; 4], rot: 0.0 },
+                    Step { pieces: pieces.to_vec(), frames: (p.len, LONG), colour: (a(to), a(to)), flags: FLAGS_COLOUR, tr: [0; 4], rot: 0.0 },
                 ]
             }
         };
@@ -2015,7 +2051,7 @@ pub mod menu {
 
     fn held1(pieces: Vec<Piece>) -> Group {
         let one = 0x8080_8080;
-        Group { steps: vec![Step { pieces, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] }], once: true, word: GROUP_WORD_SCRUB }
+        Group { steps: vec![Step { pieces, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 }], once: true, word: GROUP_WORD_SCRUB }
     }
 
     /// Builds the menu groups (appended to `groups`) and the glyphs (into `atlas`).
@@ -2155,11 +2191,11 @@ pub mod menu {
                     break;
                 }
                 let f1 = f + 2 * w[0].dur;
-                steps.push(Step { pieces: vec![t], frames: (f, f1), colour: (col(rgba(&w[0])), col(rgba(&w[1]))), flags: FLAGS_COLOUR | 0x8000, tr: [0; 4] });
+                steps.push(Step { pieces: vec![t], frames: (f, f1), colour: (col(rgba(&w[0])), col(rgba(&w[1]))), flags: FLAGS_COLOUR | 0x8000, tr: [0; 4], rot: 0.0 });
                 f = f1;
             }
             let last = col(rgba(start.last().unwrap()));
-            steps.push(Step { pieces: vec![t], frames: (f, LONG), colour: (last, last), flags: FLAGS_COLOUR, tr: [0; 4] });
+            steps.push(Step { pieces: vec![t], frames: (f, LONG), colour: (last, last), flags: FLAGS_COLOUR, tr: [0; 4], rot: 0.0 });
             groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
         }
         // The Magic list (`0x14027A1C0`: the objects' own colours, no extra width).
@@ -2295,8 +2331,8 @@ pub mod target {
         let one = 0x8080_8080;
         Group {
             steps: vec![
-                Step { pieces: pieces.clone(), frames: (0, 150), colour: (one, one), flags: crate::mp_bar::FLAGS_GROW_PUB, tr: [0; 4] },
-                Step { pieces, frames: (151, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] },
+                Step { pieces: pieces.clone(), frames: (0, 150), colour: (one, one), flags: crate::mp_bar::FLAGS_GROW_PUB, tr: [0; 4], rot: 0.0 },
+                Step { pieces, frames: (151, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 },
             ],
             once: true,
             word: GROUP_WORD_SCRUB,
@@ -2348,15 +2384,15 @@ pub mod target {
                 }
                 let f1 = f + 2 * w[0].dur;
                 // The piece's own colour is the multiplier's base: draw with colour 0x80 and the keys.
-                steps.push(Step { pieces: vec![Piece { colour: 0x8080_8080, ..piece }], frames: (f, f1), colour: (col(&w[0]), col(&w[1])), flags: FLAGS_COLOUR | 0x8000, tr: [0; 4] });
+                steps.push(Step { pieces: vec![Piece { colour: 0x8080_8080, ..piece }], frames: (f, f1), colour: (col(&w[0]), col(&w[1])), flags: FLAGS_COLOUR | 0x8000, tr: [0; 4], rot: 0.0 });
                 f = f1;
             }
             let last = keys.last().map(col).unwrap_or(piece.colour);
-            steps.push(Step { pieces: vec![Piece { colour: 0x8080_8080, ..piece }], frames: (f, LONG), colour: (last, last), flags: FLAGS_COLOUR, tr: [0; 4] });
+            steps.push(Step { pieces: vec![Piece { colour: 0x8080_8080, ..piece }], frames: (f, LONG), colour: (last, last), flags: FLAGS_COLOUR, tr: [0; 4], rot: 0.0 });
         }
         groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
         let one = 0x8080_8080;
-        let held1 = |pieces: Vec<Piece>| Group { steps: vec![Step { pieces, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] }], once: true, word: GROUP_WORD_SCRUB };
+        let held1 = |pieces: Vec<Piece>| Group { steps: vec![Step { pieces, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 }], once: true, word: GROUP_WORD_SCRUB };
         let o = &e.objs;
         groups.push(held1(vec![tp(&o[0], p6, None, 0, 0), tp(&o[1], p1, None, 0, 0), tp(&o[2], p1, None, 0, 0), tp(&o[3], p1, None, 0, 0)]));
         // Body and bars from x = 0 (their control at the origin + 28): X scale = width / 150.
@@ -2412,7 +2448,7 @@ pub mod party {
             let (cx, cy) = CENTRE;
             v.push(Piece { item: faces[m], uv: [0, 0, h, h], rect: [cx - h / 2, cy - h / 2, cx + h / 2, cy + h / 2], colour: one, grad: 0 });
             out[m] = groups.len();
-            groups.push(Group { steps: vec![Step { pieces: v, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] }], once: true, word: GROUP_WORD_SCRUB });
+            groups.push(Group { steps: vec![Step { pieces: v, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 }], once: true, word: GROUP_WORD_SCRUB });
         }
         Ok(out)
     }
@@ -2467,9 +2503,9 @@ pub mod cursor {
         let one = 0x8080_8080;
         let mut steps = Vec::new();
         for k in 0..frames {
-            steps.push(Step { pieces: vec![piece((k + 1) as f32 / 2.0)], frames: (k, k), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+            steps.push(Step { pieces: vec![piece((k + 1) as f32 / 2.0)], frames: (k, k), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 });
         }
-        steps.push(Step { pieces: vec![piece(frames as f32)], frames: (frames, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+        steps.push(Step { pieces: vec![piece(frames as f32)], frames: (frames, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 });
         groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
         Ok(groups.len() - 1)
     }
@@ -2542,14 +2578,14 @@ pub mod popup {
         let mut steps = Vec::new();
         let hold = HOLD.max(keyed);
         for k in 0..hold {
-            steps.push(Step { pieces: pieces((k + 1) as f32 / 2.0, 1.0), frames: (k, k), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+            steps.push(Step { pieces: pieces((k + 1) as f32 / 2.0, 1.0), frames: (k, k), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 });
         }
         for j in 0..FADE {
             let f = 1.0 - 0.125 * (j + 1) as f32;
-            steps.push(Step { pieces: pieces(hold as f32, f), frames: (hold + j, hold + j), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+            steps.push(Step { pieces: pieces(hold as f32, f), frames: (hold + j, hold + j), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 });
         }
         // Over: the group's longest animation (kept drawn after the end) shows nothing.
-        steps.push(Step { pieces: pieces(hold as f32, 0.0), frames: (hold + FADE, LONG), colour: (0x0080_8080, 0x0080_8080), flags: FLAGS_STATIC, tr: [0; 4] });
+        steps.push(Step { pieces: pieces(hold as f32, 0.0), frames: (hold + FADE, LONG), colour: (0x0080_8080, 0x0080_8080), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 });
         groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
         Ok(groups.len() - 1)
     }
@@ -2630,6 +2666,7 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)], re
     if let Some(l) = b.level_up {
         let _ = writeln!(s, "  \"level_up\": {l},");
     }
+    let _ = writeln!(s, "  \"mp_ring\": {{\"first\": {}, \"count\": {}}},", b.ring.0, ring_group::COUNT);
     if let Some(c) = b.cursor {
         let _ = writeln!(s, "  \"cursor\": {c},");
     }
@@ -2873,6 +2910,13 @@ mod tests {
             sq.parts.len()
         );
         assert_eq!(sq.agroups.len(), b.groups);
+        // The MP ring as Re:CoM's HP ring: its groups last; cuts between cells drop no visible
+        // texel of KH1's art (the gaps are clear on PC).
+        let (rf, rs) = b.ring;
+        let ring_anims = sq.anims.len() - u16::from_le_bytes([sq.agroups[rf][0], sq.agroups[rf][1]]) as usize;
+        eprintln!("mp ring: groups {rf}..{}, {ring_anims} animations; cuts {rs:?}", rf + ring_group::COUNT);
+        assert_eq!(rf + ring_group::COUNT, b.groups);
+        assert!(rs.gap_alpha < 16, "{rs:?}");
         let mn = b.menu.as_ref().unwrap();
         eprintln!("refit {}", b.refit);
         assert!(b.refit > 0);

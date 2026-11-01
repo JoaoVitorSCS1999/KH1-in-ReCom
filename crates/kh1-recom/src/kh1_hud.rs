@@ -260,6 +260,9 @@ pub struct Manifest {
     /// The first of Re:CoM's HP ring groups turned 180° in `gauge:01` ([`recom_hp`]), when the
     /// asset step added them.
     pub recom_hp: Option<u32>,
+    /// The first of KH1's MP ring groups built as Re:CoM's HP ring ([`mp_ring::group`]), when
+    /// built (an older asset step: the cluster's baked MP groups).
+    pub mp_ring: Option<u32>,
 }
 
 /// Reads `kh1-hud.json`; refuses another format or group count than this DLL's.
@@ -368,7 +371,18 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
             Some(first)
         }
     };
-    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party, cursor, level_up, recom_hp })
+    let mp_ring = match v.get("mp_ring") {
+        None => None,
+        Some(r) => {
+            let first = r.get("first").and_then(|x| x.as_u32()).ok_or("mp_ring without first")?;
+            let count = r.get("count").and_then(|x| x.as_u32()).ok_or("mp_ring without count")?;
+            if count != mp_ring::group::COUNT || first < group::COUNT || first + count > groups {
+                return Err(format!("mp_ring {first} + {count}, this DLL expects {} groups inside the set", mp_ring::group::COUNT));
+            }
+            Some(first)
+        }
+    };
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party, cursor, level_up, recom_hp, mp_ring })
 }
 
 /// Re:CoM's HP gauge at KH1's place, its ring and bar turned 180° (owner, 2026-11-01; asset step
@@ -432,6 +446,46 @@ pub mod mp_ring {
     /// KH1's size class whose centre is [`super::recom_hp::CENTRE`] (offset (0, 0)): the ring
     /// stays put around Re:CoM's fixed-size ring.
     pub const CLASS: usize = 2;
+
+    /// The ring groups built as Re:CoM's HP ring (asset step `kh1_hud::ring`; owner, 2026-11-01:
+    /// "maybe built the same way"): KH1's quarter pictures whole, cut by scissor parts and turned,
+    /// so Re:CoM samples them once at screen resolution. Offsets from the manifest's `mp_ring`
+    /// first group; frames and fades as the cluster's groups.
+    pub mod group {
+        /// MP back (+ the closing outline under the ring's start).
+        pub const BACK: u32 = 0;
+        /// MP.
+        pub const MP: u32 = 1;
+        /// Charge.
+        pub const CHARGE: u32 = 2;
+        /// MP gain fades (9), loss fades (9), charge gain fades (270), loss fades (270).
+        pub const MP_GAIN: u32 = 3;
+        /// MP loss fades.
+        pub const MP_LOSS: u32 = 12;
+        /// Charge gain fades.
+        pub const CHARGE_GAIN: u32 = 21;
+        /// Charge loss fades.
+        pub const CHARGE_LOSS: u32 = 291;
+        /// Groups in all.
+        pub const COUNT: u32 = 561;
+    }
+
+    /// The ring group (from `first`) that shows what the cluster's group `g` shows; the ticks
+    /// (and anything else) stay the cluster's.
+    pub fn ring_group(first: u32, g: u32) -> u32 {
+        use super::group as c;
+        let off = match g {
+            c::MP_BACK => group::BACK,
+            c::MP => group::MP,
+            c::CHARGE => group::CHARGE,
+            _ if (c::MP_GAIN..c::MP_GAIN + 9).contains(&g) => group::MP_GAIN + (g - c::MP_GAIN),
+            _ if (c::MP_LOSS..c::MP_LOSS + 9).contains(&g) => group::MP_LOSS + (g - c::MP_LOSS),
+            _ if (c::CHARGE_GAIN..c::CHARGE_GAIN + 270).contains(&g) => group::CHARGE_GAIN + (g - c::CHARGE_GAIN),
+            _ if (c::CHARGE_LOSS..c::CHARGE_LOSS + 270).contains(&g) => group::CHARGE_LOSS + (g - c::CHARGE_LOSS),
+            _ => return g,
+        };
+        first + off
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -667,6 +721,34 @@ mod tests {
         assert_eq!(parse_manifest(&with).unwrap().recom_hp, Some(47));
         assert!(parse_manifest(&with.replace("[7, 8, 9]", "[7, 8]")).is_err());
         assert!(parse_manifest(&with.replace("\"first\": 47", "\"first\": 48")).is_err());
+        assert_eq!(m.mp_ring, None);
+        let with = ok.replace("\"groups\": 644", "\"groups\": 1205").replace("\"languages\"", "\"mp_ring\": {\"first\": 644, \"count\": 561}, \"languages\"");
+        assert_eq!(parse_manifest(&with).unwrap().mp_ring, Some(644));
+        assert!(parse_manifest(&with.replace("\"count\": 561", "\"count\": 560")).is_err());
+        assert!(parse_manifest(&with.replace("\"groups\": 1205", "\"groups\": 1204")).is_err(), "past the set");
+    }
+
+    #[test]
+    fn mp_ring_groups_stand_for_the_clusters() {
+        use mp_ring::{group as r, ring_group};
+        let f = 5785;
+        assert_eq!(ring_group(f, group::MP_BACK), f + r::BACK);
+        assert_eq!(ring_group(f, group::MP), f + r::MP);
+        assert_eq!(ring_group(f, group::CHARGE), f + r::CHARGE);
+        assert_eq!(ring_group(f, group::TICKS), group::TICKS, "the ticks stay the cluster's");
+        for j in 0..9 {
+            assert_eq!(ring_group(f, group::MP_GAIN + j), f + r::MP_GAIN + j);
+            assert_eq!(ring_group(f, group::MP_LOSS + j), f + r::MP_LOSS + j);
+        }
+        // Every fade the charge plan asks for maps one to one.
+        for (old, new) in [(0, 45), (45, 0), (100, 270), (270, 100), (29, 31)] {
+            for g in charge_plan(old, new).1 {
+                let k = ring_group(f, g) - f;
+                assert!((r::CHARGE_GAIN..r::COUNT).contains(&k));
+                assert_eq!(k - if g >= group::CHARGE_LOSS { r::CHARGE_LOSS } else { r::CHARGE_GAIN }, g - if g >= group::CHARGE_LOSS { group::CHARGE_LOSS } else { group::CHARGE_GAIN });
+            }
+        }
+        assert_eq!(r::CHARGE_LOSS + 270, r::COUNT);
     }
 
     #[test]
