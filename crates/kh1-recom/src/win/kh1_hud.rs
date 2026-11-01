@@ -15,6 +15,17 @@
 //! gauge's init / HUD state / dtor (the MP bar's wrappers). KH1's fades, hurt face and danger flash
 //! are time-played groups of the set on small controls of their own, made on those events; Re:CoM
 //! plays them. The 7.2 MP bar is not made at `hud = kh1`.
+//!
+//! Stage H3: Re:CoM's HUD pieces are hidden while the KH1 HUD is up, their logic untouched:
+//! - the HP gauge (`+0x78`), the FRIENDS row (`CFriendGauge`: its 3 controls `+0x78`; its cards
+//!   take their parent's colour) and the prize gauge (`CPrizeGauge`: EXP / NEXT LV / Moogle
+//!   points; controls `+0x70` ×6, `+0x88` ×6, `+0xA0` ×2, card `+0xA8`) get colour alpha 0
+//!   (`0x140248590`, `+0x138` = 1, as Re:CoM's camp fades its labels): they keep running (the
+//!   battle end waits on the prize gauge; the HP gauge plays Re:CoM's low-HP sound);
+//! - the enemy gauges and the minimap run their own hide paths: their reads of the HUD-hide mask
+//!   (1, 0xE2) go through our getter, which adds their bit (0x10, 8) while the KH1 HUD is up.
+//! Kept: the level-up choice, the "Guard" / "Recover" / "Resist" / "LEVEL UP!" popups
+//! (`CCommonGauge`), the command menu.
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
@@ -37,6 +48,8 @@ const SEQ_CTOR: u32 = 0x0024_7260;
 const FRAME: u32 = 0x0024_7C20;
 const ALL_VISIBLE: u32 = 0x0024_7EC0;
 const LAYOUT_POS: u32 = 0x0024_8660;
+const COLOUR: u32 = 0x0024_8590;
+const VAR_GET: u32 = 0x001B_08C0;
 const SEQ_CTRL_VTABLE: u32 = 0x0060_7340;
 
 /// `CPlayerGauge` fields (Checked (decomp `0x14020D6A0`, `0x14020D8E0`, `0x140208360`)): HP and
@@ -60,6 +73,24 @@ type VisFn = unsafe extern "win64" fn(usize, i32);
 type VecFn = unsafe extern "win64" fn(usize, *const f32);
 type HpFn = unsafe extern "win64" fn(usize, u32, i32);
 type MaxFn = unsafe extern "win64" fn(usize, u32);
+type GetFn = unsafe extern "win64" fn(u32, u32) -> u32;
+
+/// `CPlayerGauge` children (Checked (decomp `0x140208360`)): CFriendGauge, CPrizeGauge; the HP
+/// control `+0x78`.
+const G_FRIEND: usize = 0x60;
+const G_PRIZE: usize = 0x70;
+const G_HP_CTRL: usize = 0x78;
+/// `C2DSeqCtrl` "use the colour" (`0x14024BB10`, with the parent's).
+const C_COLOUR_ON: usize = 0x138;
+/// The controls the colour hides: (child field of the gauge, its array field, count). Counts as
+/// Re:CoM makes them (`_eh_vector_constructor_iterator_` in `0x140207F30` and `0x1402087C0`,
+/// checked against the count word before each array); 0 = one object (not an array).
+const HIDDEN_ARRAYS: [(usize, usize, usize); 5] = [(G_FRIEND, 0x78, 3), (G_PRIZE, 0x70, 6), (G_PRIZE, 0x88, 6), (G_PRIZE, 0xA0, 2), (G_PRIZE, 0xA8, 0)];
+/// The mask bits the enemy gauge (`0x1402099B0`) and the minimap (`0x1401E4700`, `0x1401E43E0`)
+/// hide on. Checked (decomp).
+const MASK_ENEMY_GAUGE: u32 = 0x10;
+const MASK_MINIMAP: u32 = 8;
+const C_SIZE: usize = 0x170;
 
 #[repr(C, align(16))]
 struct V4([f32; 4]);
@@ -146,6 +177,9 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
     if unsafe { super::hook::install_all(b, &hooks) } {
         HOOKED.store(true, Ordering::Relaxed);
         log("kh1 hud: Sora's KH1 gauge at hud = kh1 (H2): Re:CoM's HP setters 0x14020D6A0 / 0x14020D8E0 wrapped; frames on HP / MP events only");
+        // SAFETY: executable memory of our own near the exe; the call sites' bytes were checked
+        // at start and are checked again before the write.
+        unsafe { install_masks(b) };
     } else {
         log("kh1 hud: HP setters not hooked; no KH1 gauge");
     }
@@ -161,6 +195,9 @@ pub unsafe fn gauge_made(gauge: usize, list: i32) {
         s.gauges.push((gauge, list));
     }
     build(gauge, list);
+    let on = active();
+    UP.store(on, Ordering::Relaxed);
+    recom_hud(gauge, on);
     if CHECKED.swap(true, Ordering::Relaxed) {
         return;
     }
@@ -389,7 +426,7 @@ unsafe fn build(gauge: usize, list: i32) {
     if hidden {
         cl.hide(true);
     }
-    note(|| format!("built on the player gauge {gauge:#x}: HP {}/{}, MP {:?}, class {class}, margin {xoff}{}", v.hp, v.max_hp, v.mp, if hidden { " (HUD hidden)" } else { "" }));
+    note(|| format!("built on the player gauge {gauge:#x}: HP {}/{}, MP {:?}, class {class}, margin {xoff}{}; Re:CoM's HP gauge, FRIENDS row, prize gauge hidden (colour), enemy gauges and minimap by their mask bits", v.hp, v.max_hp, v.mp, if hidden { " (HUD hidden)" } else { "" }));
     if let Ok(mut s) = STATE.lock() {
         for mut old in s.clusters.extract_if(.., |c| c.gauge == gauge) {
             old.destroy();
@@ -453,6 +490,9 @@ pub unsafe fn hud(gauge: usize, state: u32) {
 
 /// The gauge's deleting dtor (before Re:CoM's): our controls go.
 pub unsafe fn destroy(gauge: usize) {
+    if let Ok(mut t) = TINTED.lock() {
+        t.retain(|&g| g != gauge);
+    }
     let Ok(mut s) = STATE.lock() else { return };
     s.gauges.retain(|g| g.0 != gauge);
     for mut c in s.clusters.extract_if(.., |c| c.gauge == gauge) {
@@ -464,6 +504,12 @@ pub unsafe fn destroy(gauge: usize) {
 pub fn refresh() {
     if manifest().is_none() {
         return;
+    }
+    let on = active();
+    UP.store(on, Ordering::Relaxed);
+    for (g, _) in STATE.lock().map(|s| s.gauges.clone()).unwrap_or_default() {
+        // SAFETY: a live gauge.
+        unsafe { recom_hud(g, on) };
     }
     if active() {
         let missing: Vec<(usize, i32)> = STATE.lock().map(|s| s.gauges.iter().copied().filter(|g| !s.clusters.iter().any(|c| c.gauge == g.0)).collect()).unwrap_or_default();
@@ -478,4 +524,110 @@ pub fn refresh() {
             unsafe { c.destroy() };
         }
     }
+}
+
+// -------------------------------------------------------------------------------------------------
+// H3: Re:CoM's HUD hidden.
+
+unsafe fn tint(c: usize, alpha: f32) {
+    if c == 0 || rd::<usize>(c) == 0 {
+        return;
+    }
+    wr::<u8>(c + C_COLOUR_ON, 1);
+    func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, alpha]).0.as_ptr());
+}
+
+/// Gauges whose Re:CoM pieces we tinted (only those are ever written back: at `hud = recom`
+/// nothing of Re:CoM's is touched).
+static TINTED: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+/// Re:CoM's HP gauge, FRIENDS row and prize gauge of `gauge`: colour alpha 0 (`hide`) or 1.
+unsafe fn recom_hud(gauge: usize, hide: bool) {
+    if !HOOKED.load(Ordering::Relaxed) {
+        return;
+    }
+    let Ok(mut t) = TINTED.lock() else { return };
+    let had = t.contains(&gauge);
+    if hide == had {
+        return;
+    }
+    if hide {
+        t.push(gauge);
+    } else {
+        t.retain(|&g| g != gauge);
+    }
+    drop(t);
+    let a = if hide { 0.0 } else { 1.0 };
+    tint(rd(gauge + G_HP_CTRL), a);
+    for (child, field, n) in HIDDEN_ARRAYS {
+        let o: usize = rd(gauge + child);
+        if o == 0 {
+            continue;
+        }
+        let arr: usize = rd(o + field);
+        if arr == 0 {
+            continue;
+        }
+        if n == 0 {
+            tint(arr, a);
+        } else if rd::<u64>(arr - 0x10) == n as u64 {
+            for k in 0..n {
+                tint(arr + k * C_SIZE, a);
+            }
+        } else {
+            note(|| format!("{child:#x}/{field:#x}: {} controls, not {n}: not hidden", rd::<u64>(arr - 0x10)));
+        }
+    }
+}
+
+static MASKS: AtomicBool = AtomicBool::new(false);
+/// [`active`] as last seen on an event (gauge init, the Config / camp refresh): what the mask
+/// getters read, so they cost one load inside Re:CoM's per-frame updates.
+static UP: AtomicBool = AtomicBool::new(false);
+
+/// The enemy gauge's mask read: Re:CoM's value, plus its hide bit while the KH1 HUD is up.
+pub unsafe extern "win64" fn enemy_gauge_mask(table: u32, index: u32) -> u32 {
+    func::<GetFn>(VAR_GET)(table, index) | if UP.load(Ordering::Relaxed) { MASK_ENEMY_GAUGE } else { 0 }
+}
+
+/// The minimap's mask reads: likewise with its bit.
+pub unsafe extern "win64" fn minimap_mask(table: u32, index: u32) -> u32 {
+    func::<GetFn>(VAR_GET)(table, index) | if UP.load(Ordering::Relaxed) { MASK_MINIMAP } else { 0 }
+}
+
+/// Retargets the five mask reads to our getters (all or none; the getters pass Re:CoM's value
+/// through unless the KH1 HUD is up).
+unsafe fn install_masks(bs: usize) {
+    let calls = crate::sites::KH1_HUD_MASK_CALLS;
+    let mut code = Vec::with_capacity(28);
+    code.extend_from_slice(&crate::hookplan::abs_jmp(enemy_gauge_mask as *const () as u64));
+    code.extend_from_slice(&crate::hookplan::abs_jmp(minimap_mask as *const () as u64));
+    let Some(block) = super::hook::place_near(bs + calls[0].rva as usize, &code) else {
+        log("kh1 hud: no memory near the exe for the mask stubs; enemy gauges and minimap stay");
+        return;
+    };
+    let mut writes = Vec::new();
+    for (i, c) in calls.iter().enumerate() {
+        let stub = if i == 0 { block } else { block + 14 };
+        match crate::hookplan::call_rel32((bs + c.rva as usize) as u64, stub as u64) {
+            Some(b) => writes.push((c, b)),
+            None => {
+                log(&format!("kh1 hud: {} cannot reach the stub; enemy gauges and minimap stay", c.name));
+                return;
+            }
+        }
+    }
+    let mut done: Vec<(&crate::sites::Site, [u8; 5])> = Vec::new();
+    for &(c, b) in &writes {
+        if !super::hook::patch(bs + c.rva as usize, c.expect, &b, c.name) {
+            for &(d, db) in done.iter().rev() {
+                super::hook::patch(bs + d.rva as usize, &db, d.expect, d.name);
+            }
+            log("kh1 hud: a mask read could not be switched; enemy gauges and minimap stay");
+            return;
+        }
+        done.push((c, b));
+    }
+    MASKS.store(true, Ordering::Relaxed);
+    log(&format!("kh1 hud: enemy-gauge and minimap mask reads (5) through our getters at {block:#x} (their own hide paths while the KH1 HUD is up, H3)"));
 }

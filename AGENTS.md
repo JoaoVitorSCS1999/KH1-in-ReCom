@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 58: KH1 HUD H3, Re:CoM's HUD hidden, version 0.27.0 (2026-10-31)
+
+- At `hud = kh1`: Re:CoM's HP gauge, FRIENDS row and prize gauge (EXP+ / NEXT LV / Moogle
+  points) drawn at alpha 0 (`0x140248590`) so their logic keeps running (the battle end waits on
+  the prize gauge; Re:CoM's low-HP sound plays); enemy gauges and the minimap (room plate assumed
+  with it) hidden through their own hide paths: five mask reads (bits 0x10, 8) via our getter while
+  the KH1 HUD is up. Kept: level-up choice, Guard / Recover / Resist / LEVEL UP! popups, the
+  command menu. Not seen in game.
+
+---
+
 ## Stage 57: KH1 HUD H2, Sora's HP/MP cluster, version 0.26.0 (2026-10-31)
 
 - At `hud = kh1`: Sora's cluster bottom-right at KH1's places and margin (+86): back / front /

@@ -620,6 +620,31 @@ pub const KH1_HUD_HOOKS: &[Site] = &[
     Site { name: "CPlayerGauge max HP (0x14020D8E0)", rva: 0x0020_D8E0, expect: &[0x45, 0x33, 0xC0, 0x0F, 0xB7, 0xC2, 0x85, 0xD2] },
 ];
 
+/// The KH1 HUD (decision 39, H3): Re:CoM's HUD-hide mask reads (`call 0x1401B08C0`, ecx = 1,
+/// edx = 0xE2) of the enemy gauge (`CEnemyGauge` update `0x1402099B0`, bit 0x10) and the minimap
+/// (`CNaviMap` `0x1401E4700` ×3, `0x1401E43E0`, bit 8), retargeted to our getter, which adds the
+/// bit while the KH1 HUD is up so each runs its own hide path. Bytes read from the Steam exe.
+pub const KH1_HUD_MASK_CALLS: &[Site] = &[
+    Site { name: "enemy gauge mask read (0x1402099CE)", rva: 0x0020_99CE, expect: &[0xE8, 0xED, 0x6E, 0xFA, 0xFF] },
+    Site { name: "minimap mask read 1 (0x1401E4767)", rva: 0x001E_4767, expect: &[0xE8, 0x54, 0xC1, 0xFC, 0xFF] },
+    Site { name: "minimap mask read 2 (0x1401E4805)", rva: 0x001E_4805, expect: &[0xE8, 0xB6, 0xC0, 0xFC, 0xFF] },
+    Site { name: "minimap mask read 3 (0x1401E4958)", rva: 0x001E_4958, expect: &[0xE8, 0x63, 0xBF, 0xFC, 0xFF] },
+    Site { name: "minimap mask read 4 (0x1401E440E)", rva: 0x001E_440E, expect: &[0xE8, 0xAD, 0xC4, 0xFC, 0xFF] },
+];
+
+/// Each read's context (mov edx,0xE2; ecx = 1; the call; the test after it), checked only.
+pub const KH1_HUD_MASK_CHECKED: &[Site] = &[
+    // mov edx,0xE2; lea ecx,[rax+1]; call; test al,0x10
+    Site { name: "enemy gauge mask read context (0x1402099C6)", rva: 0x0020_99C6, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0x8D, 0x48, 0x01, 0xE8, 0xED, 0x6E, 0xFA, 0xFF, 0xA8, 0x10] },
+    // mov edx,0xE2; mov ecx,1; call; mov ecx,[rdi+0x110]
+    Site { name: "minimap mask read 1 context (0x1401E475D)", rva: 0x001E_475D, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0x54, 0xC1, 0xFC, 0xFF, 0x8B, 0x8F, 0x10, 0x01, 0x00, 0x00] },
+    Site { name: "minimap mask read 2 context (0x1401E47FB)", rva: 0x001E_47FB, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0xB6, 0xC0, 0xFC, 0xFF, 0x8B, 0x8F, 0x10, 0x01, 0x00, 0x00] },
+    // …; call; test al,8
+    Site { name: "minimap mask read 3 context (0x1401E494E)", rva: 0x001E_494E, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0x63, 0xBF, 0xFC, 0xFF, 0xA8, 0x08] },
+    // mov edx,0xE2; mov ebx,1; mov ecx,ebx; call; test al,8
+    Site { name: "minimap mask read 4 context (0x1401E4402)", rva: 0x001E_4402, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xBB, 0x01, 0x00, 0x00, 0x00, 0x8B, 0xCB, 0xE8, 0xAD, 0xC4, 0xFC, 0xFF, 0xA8, 0x08] },
+];
+
 /// Re:CoM's `D2::C2DSeqCtrl` functions the MP bar calls (the ctor `0x140247260` and `operator
 /// new` are already checked for the Keyblades page).
 pub const MP_BAR_CALLEES: &[Site] = &[
@@ -1016,6 +1041,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(MP_CHECKED)
         .chain(MP_BAR_HOOKS)
         .chain(KH1_HUD_HOOKS)
+        .chain(KH1_HUD_MASK_CALLS)
+        .chain(KH1_HUD_MASK_CHECKED)
         .chain(MP_BAR_CALLEES)
         .chain(MP_BAR_CHECKED)
         .chain(COMMAND_MENU_CALLEES)
@@ -1486,5 +1513,21 @@ mod tests {
         bad[2] ^= 0xFF;
         assert!(matches!(check_site(s, &bad), SiteCheck::Differs(_)));
         assert!(matches!(check_site(s, &s.expect[..3]), SiteCheck::Differs(_)));
+    }
+
+    #[test]
+    fn kh1_hud_mask_sites() {
+        // Each retargeted call sits inside its checked context, as `call rel32` to 0x1401B08C0.
+        for (c, ctx) in KH1_HUD_MASK_CALLS.iter().zip(KH1_HUD_MASK_CHECKED) {
+            let at = (c.rva - ctx.rva) as usize;
+            assert_eq!(&ctx.expect[at..at + 5], c.expect, "{}", c.name);
+            let rel = i32::from_le_bytes(c.expect[1..5].try_into().unwrap());
+            assert_eq!((c.rva as i64 + 5 + rel as i64) as u32, 0x001B_08C0, "{}", c.name);
+            assert_eq!(&ctx.expect[..5], &[0xBA, 0xE2, 0x00, 0x00, 0x00], "{}", ctx.name);
+        }
+        // Not hooked or retargeted by another stage.
+        for c in KH1_HUD_MASK_CALLS {
+            assert!(!M6_COCKPIT_CALLS.iter().chain(M6_CARD_CALLS).chain(M6_ENEMY_UI_CALLS).any(|m| m.rva == c.rva), "{}", c.name);
+        }
     }
 }

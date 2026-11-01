@@ -153,6 +153,54 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 7. Events / cutscenes hide it with Re:CoM's HUD; a battle and back: it is rebuilt.
 8. `hud = recom`: Re:CoM's HUD and the 7.2 MP bar as before.
 
+## H3: Re:CoM's HUD hidden at `hud = kh1` (visual only)
+
+### What owns what (Checked (decomp + exe: RTTI))
+
+| piece | object | how it hides here | its logic |
+|---|---|---|---|
+| HP gauge (ring, bar, drain, low HP) | `CPlayerGauge` `+0x78` (`gauge:01`, `gauge:00`) | colour alpha 0 | runs: HP drain, Re:CoM's low-HP sound 9 (≤ 25 %, `0x14020A0E0` case 4) |
+| FRIENDS row (label, friend cards) | `CFriendGauge` (vtable `0x1405A6788`, `+0x60`): 3 controls `+0x78`, `C2DCard`s `+0x70` parented to them with `+0x138` = 1 | colour alpha 0 on the 3 (the cards take it) | runs |
+| EXP + / NEXT LV / TOTAL MOOGLE P popups and their numbers | `CPrizeGauge` (vtable `0x1405A6718`, `+0x70`, global `[0x14087B690]`): controls `+0x70` ×6, `+0x88` ×6, `+0xA0` ×2, `C2DCard` `+0xA8`; `Cockpit:00` groups 0x51, 0x54, 0x69 | colour alpha 0 | runs (the battle end waits on it) |
+| enemy HP gauges | `CEnemyGauge` (vtable `0x1405A66A8`), update `0x1402099B0` | its own hide path: mask bit 0x10 (toggles its layers) | — |
+| minimap (+ the area layout it plays, the room plate: Assumption) | `CNaviMap` (vtable `0x14059F2A0`), 3D pieces (`+0x58`, lights) | its own hide path: mask bit 8 (`0x1401E4700` ×3, `0x1401E43E0`) | — |
+| kept: "Guard" / "Recover" / "Resist" / "LEVEL UP!" | `CCommonGauge` (vtable `0x1405A66E0`, 7 controls `+0x60`: `Cockpit:00` 0xC, 0xD, 0x8F, 0x3D) | not touched (not on the owner's list) | |
+| kept: the level-up choice, the command menu, the camp | | not touched | |
+
+- **Why not the mask for all:** with the mask set, `CPrizeGauge`'s update (`0x14020A710`) drops
+  its popup state (`+0x5C` = 0) and `CPlayerGauge` goes to state 7, which stops Re:CoM's low-HP
+  sound (`0x1402AB700(…, 9)`). So those three are hidden by colour only. Checked (decomp).
+- **Colour:** `0x140248590(ctrl, rgba)` writes `+0x120`; with `+0x138` = 1 Re:CoM's sprite update
+  multiplies it in, with the parent's (7.3's notes). The gauge classes never write a control's
+  colour (no call of `0x140248590`, no write to `+0x120` in their code); they set `+0x138` = 1
+  themselves on some. Checked (decomp). The arrays' counts are checked against the count word
+  Re:CoM's array new puts before them.
+- **Mask reads** (`sites::KH1_HUD_MASK_CALLS`, contexts `KH1_HUD_MASK_CHECKED`): the five
+  `call 0x1401B08C0` go to two stubs (near the exe) that jump to our getters: Re:CoM's value,
+  plus the bit while the KH1 HUD is up (an atomic set on the gauge's init and the Config / camp
+  refresh). At `hud = recom` the getters return Re:CoM's value unchanged and nothing of Re:CoM's
+  controls is written.
+- **When:** at each player gauge's init (after Re:CoM's) and after the Config / camp refresh.
+
+### Not done / to check
+
+1. The room plate is Assumed to be `CNaviMap`'s area layout (`0x140245940` at its `+0x114`,
+   stopped on bit 8). If it still shows: screenshot, and its owner is searched next.
+2. Re:CoM's lock-on cursor stays until KH1's (H7).
+3. A `CFriendGauge` / `CPrizeGauge` made later by other code (their alternative ctors
+   `0x140206D90` / `0x140206C70` have no caller in the decomp) would show.
+
+### What the first in-game test must check (H3)
+
+1. Log: `kh1 hud: enemy-gauge and minimap mask reads (5) through our getters at …`.
+2. **Screenshot** at `hud = kh1` in the field and in a battle: no Re:CoM HP gauge, FRIENDS row,
+   EXP / Moogle points, minimap, room plate, enemy gauges; the KH1 cluster and the command menu
+   are there; "Guard" / "Recover" popups still show.
+3. Win a battle: it ends as before (EXP and prizes counted: the camp shows the new EXP).
+4. Low HP: Re:CoM's low-HP sound plays with the KH1 ring.
+5. Level up: Re:CoM's level-up choice appears and works.
+6. `hud = recom`: everything of Re:CoM's is back as before.
+
 ## Logs to send (H1)
 
 - `kh1 hud: kh1hud:00 (632 groups, PC copies ["FR", "GR", "IT", "SP", "UK"]) from …`
