@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 85: M7 stage 7.13: the KH1 camp entry with Keyblades and Customize, version 0.43.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "Finish everything up to M9" (M7 7.13: "KH1" camp entry + Customize, plan
+  row 7.13).
+- Built: our camp entry renamed "KH1", opening a submenu made the way Re:CoM's Deck submenu is (its
+  own 7 entry buttons relabelled with the Deck's calls; cursor, glove, fades, breadcrumb, sounds
+  Re:CoM's): Keyblades (unchanged page) and Customize (new): KH1's three shortcut slots, each with a
+  picker of learned spells at their level + None, no duplicate check (KH1 `0x140302950`,
+  `0x140302740`, `0x1402857C0`; Checked (decomp)). Writes our save slots (save+0x2681..0x2683); the L1
+  list reads them at once. Only at Combat = KH1 in Sora's story. No new hook sites.
+- Changed: the camp runs our code on `camp+0xBC` (the confirmed top entry) instead of `+0xB8`; the
+  main panel's layer 2 is hidden only while a page from the submenu is open (Re:CoM's Deck rule).
+- Not KH1's: "Shortcut 1–3" / "None" words are ours (KH1's sysmsg not in the asset step); no glyphs in
+  the rows (the help line names the button). `docs/recom-keyblade-equip.md` § Stage 7.13.
+- Checked: tests (446), Windows build, all site bytes against the Steam exe. Not checked: in game.
+
+---
+
 ## Stage 84: M7 stage 7.12: KH1's shortcut menu on L1, version 0.42.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "Finish everything up to M9"; shortcuts on L1 like KH1 (owner's choice). Owner's

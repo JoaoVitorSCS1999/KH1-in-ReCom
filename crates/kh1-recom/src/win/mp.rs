@@ -133,6 +133,22 @@ pub fn spell_state() -> ([u8; 7], [u8; 3]) {
     (out.map(|l| if l <= 3 { l } else { 0 }), slots)
 }
 
+/// Stage 7.13 (Customize, KH1's `0x1402857C0`): writes Sora's three shortcut slots into the block
+/// (`crate::mp::off::SHORTCUTS`; 0 = none, else spell + 1). The command menu reads them every
+/// frame (`spell_state`), so the L1 list shows the change at once. The block is read first, so a
+/// save never synced gets its one-time sync (and slot set-up) before our write. False when MP isn't
+/// live.
+pub fn set_shortcuts(slots: [u8; 3]) -> bool {
+    if !active() {
+        return false;
+    }
+    let _ = spell_state();
+    let Some(s) = save() else { return false };
+    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST < 0x2818).
+    unsafe { wr(s + BLOCK_FIRST + m::off::SHORTCUTS, slots) };
+    true
+}
+
 /// (MP, max MP, charge), or None when MP isn't live.
 pub fn current() -> Option<(i32, i32, u16)> {
     with_state(|mp| mp.view())

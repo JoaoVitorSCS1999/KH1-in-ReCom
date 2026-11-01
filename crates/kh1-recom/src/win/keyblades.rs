@@ -1,16 +1,22 @@
-//! The camp menu's 8th entry, "Keyblades", and its page (decision 25), run by Re:CoM's own camp
-//! code. Pure rules: `crate::keyblades`. Notes: `docs/recom-keyblade-equip.md`.
+//! The camp menu's 8th entry, "KH1" (M7 stage 7.13; "Keyblades" before it, decision 25), its
+//! submenu (Keyblades, Customize) and their pages, run by Re:CoM's own camp code. Pure rules:
+//! `crate::keyblades`, `crate::customize`. Notes: `docs/recom-keyblade-equip.md` (7.13 section).
 //!
 //! - Entry: a `C2DSeqCtrl` + `C2DFnt` made with the calls Re:CoM's entry build `0x1400E3DE0`
 //!   makes for its own 7, at index 7. Four wrappers make the camp treat index 7 as one more entry:
 //!   the camp update `0x1400D9C80` (states 7 / 0xD / 0xF / 0x11), the entry build (create, delete,
 //!   animations 4 / 5 / 6), the cursor set `0x1400DEA10` (highlight, help line, 8-entry wrap) and
 //!   the teardown `0x1400D7C20` (delete ours).
-//! - Page: run inside Re:CoM's Config states 0x4A..0x4C by the Config input hook
-//!   (`menu::cfg_input` → [`page`]) when the cursor is on our entry. It follows the entry-4 page
-//!   (`0x1400EB7E0` / draw `0x1400E6DF0`) with Re:CoM's classes: two panels, `CButton` rows, a
-//!   `CButtonCursor`, a `CScrollBar`, label / value rows and the help line. Its state is ours
-//!   ([`PAGE`]); it never writes camp fields Re:CoM's pages use.
+//! - Submenu (stage 7.13): run inside Re:CoM's Config states 0x4A..0x4C by the Config input hook
+//!   (`menu::cfg_input` → [`page`]) when our entry was the one confirmed (`camp+0xBC`). Re:CoM's
+//!   own 7 entry buttons, relabelled with our rows as Re:CoM's Deck submenu relabels them (level
+//!   1), with the Deck submenu's input, cursor set, sounds, breadcrumb (header item 1) and fades
+//!   (update states 0x10 / 0x1D / 0x22 / 0x23 / 0x34 / 0x35). Leaving it, Re:CoM's state 0x4C
+//!   relabels its 7 entries itself (level 1 → 0).
+//! - Pages: Keyblades and Customize follow the entry-4 page (`0x1400EB7E0` / draw `0x1400E6DF0`)
+//!   with Re:CoM's classes: two panels, `CButton` rows, a `CButtonCursor`, a `CScrollBar`
+//!   (Keyblades), label / value rows and the help line. Their state is ours ([`SUB`]); they never
+//!   write camp fields Re:CoM's pages use.
 //!
 //! Nothing here runs in field or battle frames: the camp exists only while the pause menu is
 //! open, and without our entry (Re:CoM setting, Riku's story) every wrapper is one load and the
@@ -20,7 +26,9 @@
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log, va};
-use crate::keyblades::{self as kb, list, text, top};
+use crate::command_menu as cm;
+use crate::customize;
+use crate::keyblades::{self as kb, list, sub, text, top};
 use crate::sites::data;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -37,7 +45,8 @@ static SPARE_LOGGED: AtomicBool = AtomicBool::new(false);
 static ENTRY_LOGGED: AtomicBool = AtomicBool::new(false);
 static NO_NUMBERS_LOGGED: AtomicBool = AtomicBool::new(false);
 static ODD_STATE_LOGGED: AtomicBool = AtomicBool::new(false);
-static PAGE: Mutex<Option<Page>> = Mutex::new(None);
+/// The submenu (and the page open in it) of the camp our entry belongs to.
+static SUB: Mutex<Option<Sub>> = Mutex::new(None);
 
 /// `CCamp` fields (Checked, decomp `0x1400D9C80` and the functions named).
 mod camp {
@@ -66,7 +75,7 @@ mod camp {
     /// Entry buttons (`C2DSeqCtrl`, 7) and their labels (`C2DFnt`, 7).
     pub const BUTTONS: usize = 0x1B8;
     pub const LABELS: usize = 0x1F0;
-    /// Header item 0 (`C2DSeqCtrl`) and its title (`C2DFnt`).
+    /// Header items 0 and 1 (`C2DSeqCtrl`, the breadcrumb) and their titles (`C2DFnt`), 8 apart.
     pub const HEADER: usize = 0x228;
     pub const HEADER_TITLE: usize = 0x238;
     pub const HELP: usize = 0x9D0;
@@ -263,11 +272,13 @@ fn entry_of(camp: *mut u8) -> *mut u8 {
     ENTRY_BTN.load(Ordering::Relaxed) as *mut u8
 }
 
-/// True when the Config input hook must run our page: our entry exists for this camp and the
-/// cursor is on it (the camp is in the Config states 0x4A..0x4C only after our confirm).
+/// True when the Config input hook must run our submenu: our entry exists for this camp and it was
+/// the top entry confirmed (`camp+0xBC`, which Re:CoM's state 0xF sets on every confirm and our
+/// confirm sets to 7). The cursor `camp+0xB8` can't tell: inside the submenu it is the submenu's
+/// row, as in Re:CoM's Deck submenu.
 pub fn page_active(camp: *mut u8) -> bool {
     // SAFETY: a live camp (Re:CoM just passed it to its own Config input function).
-    !entry_of(camp).is_null() && unsafe { at::<i32>(camp, camp::CURSOR) } == top::OURS
+    !entry_of(camp).is_null() && unsafe { at::<i32>(camp, camp::SAVED) } == top::OURS
 }
 
 /// Whether the camp should show our entry now: Combat = KH1, Sora's story, the normal top list,
@@ -348,7 +359,7 @@ unsafe fn create_entry(camp: *mut u8) {
     ENTRY_BTN.store(btn as usize, Ordering::Relaxed);
     ENTRY_FNT.store(fnt as usize, Ordering::Relaxed);
     if !ENTRY_LOGGED.swap(true, Ordering::Relaxed) {
-        log(&format!("keyblades: camp entry 8 \"Keyblades\" added (equipped: card {:#x})", super::stats::equipped_card()));
+        log(&format!("kh1 entry: camp entry 8 \"KH1\" added (Keyblades equipped: card {:#x})", super::stats::equipped_card()));
     }
 }
 
@@ -477,39 +488,42 @@ unsafe fn top_pad() -> top::Pad {
     }
 }
 
-/// Header item 0 with our title: `0x1400E4220` mode 1 (header present), with our text where
-/// Re:CoM puts `0x1400D3890`'s (which is "" for index 7).
-unsafe fn header_title(camp: *mut u8) {
+/// Header item `idx` (0 the entry, 1 the submenu row: the breadcrumb) with our title:
+/// `0x1400E4220` mode 1 (header present), with our text where Re:CoM puts `0x1400D3890`'s ("" for
+/// index 7; the Deck's row titles for item 1).
+unsafe fn header_title(camp: *mut u8, idx: usize, title: &[u8]) {
     let set = set_of(camp);
-    let hdr: *mut u8 = at(camp, camp::HEADER);
+    let hdr: *mut u8 = at(camp, camp::HEADER + 8 * idx);
+    let title_at = camp::HEADER_TITLE + 8 * idx;
     if hdr.is_null() {
-        // Re:CoM makes the header at camp open (state 3); not seen missing. Its own call, then our
+        // Re:CoM makes both items at camp open (state 3); not seen missing. Its own call, then our
         // text on the new item. Assumption: the item reads its text pointer when drawn.
-        func::<HeaderFn>(HEADER)(camp, 1, 0);
-        let t: *mut u8 = at(camp, camp::HEADER_TITLE);
+        func::<HeaderFn>(HEADER)(camp, 1, idx as u32);
+        let t: *mut u8 = at(camp, title_at);
         if !t.is_null() {
-            func::<TextFn>(TEXT_SET)(t, text::TITLE.as_ptr());
+            func::<TextFn>(TEXT_SET)(t, title.as_ptr());
         }
-        log("keyblades: header was missing at confirm; made by Re:CoM, title set afterwards");
+        log("kh1 entry: header was missing at confirm; made by Re:CoM, title set afterwards");
         return;
     }
     anim(hdr, set, 7);
-    delete(at(camp, camp::HEADER_TITLE));
-    put::<usize>(camp, camp::HEADER_TITLE, 0);
+    delete(at(camp, title_at));
+    put::<usize>(camp, title_at, 0);
     let mut fnt = func::<NewFn>(NEW)(0xB0);
     if !fnt.is_null() {
         let colour: u32 = at(camp, camp::TEXT_COLOUR);
-        fnt = func::<FntCtorFn>(FNT_CTOR)(fnt, 0, 0, &colour, 0xF, text::TITLE.as_ptr(), 0x40);
+        fnt = func::<FntCtorFn>(FNT_CTOR)(fnt, 0, 0, &colour, 0xF, title.as_ptr(), 0x40);
     }
-    put::<usize>(camp, camp::HEADER_TITLE, fnt as usize);
+    put::<usize>(camp, title_at, fnt as usize);
     vfn::<ReplaceFn>(hdr, 0x68)(hdr, 1, set, fnt);
     func::<SprIntFn>(VISIBLE)(hdr, 1);
-    put::<i32>(camp, camp::HEADER_MODE, 2);
+    put::<i32>(camp, camp::HEADER_MODE + 4 * idx, 2);
 }
 
 /// Re:CoM's confirm sequence for an entry with a page (state 0xF, `0x1400DAB0A..0x1400DACAC`),
-/// for ours. Re:CoM's own update ran this frame and already eased the glove (`0x1400DE100`,
-/// which no step here changes the target of).
+/// for ours, without step 9 (as for its Deck entry, whose submenu keeps the main panel's layer 2).
+/// Re:CoM's own update ran this frame and already eased the glove (`0x1400DE100`, which no step
+/// here changes the target of).
 unsafe fn confirm_ours(camp: *mut u8) {
     let set = set_of(camp);
     func::<GuideFn>(GUIDE)(0, 0);
@@ -521,17 +535,15 @@ unsafe fn confirm_ours(camp: *mut u8) {
         anim(at(camp, camp::BUTTONS + 8 * i as usize), set, 6);
     }
     anim(ENTRY_BTN.load(Ordering::Relaxed) as *mut u8, set, 6);
-    header_title(camp);
+    header_title(camp, 0, text::TITLE);
     let hdr: *mut u8 = at(camp, camp::HEADER);
     if !hdr.is_null() {
         func::<SprIntFn>(VISIBLE)(hdr, 1);
     }
     anim(at(camp, camp::PANEL_140), set, 0xC);
     func::<CampIntFn>(CAMP_PANEL)(camp, 2, 0);
-    let main: *mut u8 = at(camp, camp::MAIN_PANEL);
-    if !main.is_null() {
-        func::<SlotVisFn>(SLOT_VISIBLE)(main, 2, 0);
-    }
+    // Step 9 (the main panel's layer 2 hidden) is Re:CoM's for its page entries; ours opens a
+    // submenu, which (as Re:CoM's Deck entry) keeps it: the page confirm in the submenu hides it.
     put::<i32>(camp, camp::STATE, 0x11);
     put::<i32>(camp, camp::SAVED, top::OURS);
     func::<CampIntFn>(SIDE_PANEL)(camp, 4, 0);
@@ -597,10 +609,10 @@ pub unsafe extern "win64" fn camp_update(camp: *mut u8) {
 pub unsafe extern "win64" fn teardown(camp: *mut u8) {
     let o: VoidFn = orig(&ORIG_TEARDOWN);
     if !camp.is_null() {
-        if let Ok(mut g) = PAGE.lock() {
-            if g.as_ref().is_some_and(|p| p.camp == camp as usize) {
-                if let Some(p) = g.take() {
-                    p.delete_all();
+        if let Ok(mut g) = SUB.lock() {
+            if g.as_ref().is_some_and(|s| s.camp == camp as usize) {
+                if let Some(s) = g.take() {
+                    s.delete_all();
                 }
             }
         }
@@ -612,9 +624,213 @@ pub unsafe extern "win64" fn teardown(camp: *mut u8) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The page
+// The submenu (M7 stage 7.13)
 
-/// Our page's objects and state (never in camp fields).
+/// Where the submenu is (our state; never in camp fields Re:CoM's pages use).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SubState {
+    /// Re:CoM's state 0x1D: the buttons play animation 4 (appear); when button 0's ends, idle
+    /// (entry build mode 1) and the cursor set on the row.
+    Opening,
+    /// Re:CoM's state 0x22.
+    Input,
+    /// After a confirm: the buttons play animation 6 (fade); when button 0's ends, the page opens.
+    ToPage,
+    InPage,
+    /// After a cancel: the buttons fade; when button 0's ends, back to the top list (−1).
+    Closing,
+}
+
+/// The submenu and the page open in it.
+struct Sub {
+    camp: usize,
+    state: SubState,
+    row: i32,
+    page: Option<Page>,
+}
+
+/// Re:CoM's relabel of its entry buttons (`0x1400E3DE0` mode 0 with a new level,
+/// `0x1400E3FF3..0x1400E40C4`), with our texts: old label deleted, a new `C2DFnt` (colour
+/// 0x80404040, font 0xF, 0x40) stored in `camp+0x1F0[i]` and put in the button's slot 1 with its
+/// vtable `+0x68(btn, 1, set, fnt)`. Checked (disasm).
+unsafe fn relabel(camp: *mut u8, labels: &[&'static [u8]]) {
+    let set = set_of(camp);
+    for (i, text) in labels.iter().enumerate().take(sub::MAX_ROWS) {
+        let btn: *mut u8 = at(camp, camp::BUTTONS + 8 * i);
+        if btn.is_null() {
+            continue;
+        }
+        delete(at(camp, camp::LABELS + 8 * i));
+        put::<usize>(camp, camp::LABELS + 8 * i, 0);
+        let mut fnt = func::<NewFn>(NEW)(0xB0);
+        if !fnt.is_null() {
+            let colour = LABEL_NORMAL;
+            fnt = func::<FntCtorFn>(FNT_CTOR)(fnt, 0, 0, &colour, 0xF, text.as_ptr(), 0x40);
+        }
+        put::<usize>(camp, camp::LABELS + 8 * i, fnt as usize);
+        vfn::<ReplaceFn>(btn, 0x68)(btn, 1, set, fnt);
+    }
+}
+
+/// Re:CoM's entry build (the original, past our wrapper): mode 0 at the current level only plays
+/// animation 4 on the `count` buttons; mode 1 / 2 animation 5 / 6.
+unsafe fn build(camp: *mut u8, mode: i32, level: u64) {
+    let o: BuildFn = orig(&ORIG_BUILD);
+    o(camp, mode, level);
+}
+
+/// Re:CoM's cursor set (the original: at level 1 our wrapper passes it through anyway).
+unsafe fn recom_cursor(camp: *mut u8, idx: i32, show: bool) {
+    let o: CursorSetFn = orig(&ORIG_CURSOR);
+    o(camp, idx, show as i32);
+}
+
+unsafe fn button0_ended(camp: *mut u8) -> bool {
+    ended(at(camp, camp::BUTTONS))
+}
+
+/// Main panel layer 2: Re:CoM hides it when a page opens (state 0xF step 9 for entries 2 / 4..6)
+/// and shows it when the page is done (state 0x4C); its Deck submenu keeps it.
+unsafe fn main_layer2(camp: *mut u8, show: bool) {
+    let main: *mut u8 = at(camp, camp::MAIN_PANEL);
+    if !main.is_null() {
+        func::<SlotVisFn>(SLOT_VISIBLE)(main, 2, show as u32);
+    }
+}
+
+impl Sub {
+    fn p(&self) -> *mut u8 {
+        self.camp as *mut u8
+    }
+
+    /// The page's first call (state 0x4A, after Re:CoM's state 0x11 saw the top buttons fade):
+    /// what Re:CoM's state 0x10 does for the Deck at level 1, with our rows.
+    unsafe fn open(camp: *mut u8) -> Sub {
+        let labels: Vec<&'static [u8]> = sub::ROWS.iter().map(|r| r.label()).collect();
+        relabel(camp, &labels);
+        put::<i32>(camp, camp::COUNT, sub::ROWS.len() as i32);
+        // Re:CoM's Deck submenu level; the cursor set and entry build read it (`< 2`: help).
+        put::<i32>(camp, camp::LEVEL, 1);
+        // Our wrapper reads the cursor as the top index; Re:CoM's cursor set unhighlights the
+        // button at `camp+0xB8` first, which must be one of the submenu's.
+        put::<i32>(camp, camp::CURSOR, 0);
+        build(camp, 0, 1);
+        log(&format!("kh1 entry: submenu opened ({} rows: {:?})", sub::ROWS.len(), sub::ROWS));
+        Sub { camp: camp as usize, state: SubState::Opening, row: 0, page: None }
+    }
+
+    unsafe fn help(&self) {
+        if let Some(r) = sub::ROWS.get(self.row as usize) {
+            set_help(self.p(), r.help().as_ptr());
+        }
+    }
+
+    /// One frame (states 0x4A / 0x4B). ≥ 0 running, < 0 back to the top list.
+    unsafe fn step(&mut self) -> i32 {
+        let camp = self.p();
+        match self.state {
+            SubState::Opening => {
+                if button0_ended(camp) {
+                    build(camp, 1, 0);
+                    put::<i32>(camp, camp::CURSOR, self.row);
+                    recom_cursor(camp, self.row, true);
+                    self.help();
+                    self.state = SubState::Input;
+                }
+            }
+            SubState::Input => {
+                match sub::step(self.row, top_pad()) {
+                    sub::Act::Close => {
+                        recom_cursor(camp, self.row, false);
+                        build(camp, 2, 0);
+                        sound(4);
+                        self.state = SubState::Closing;
+                    }
+                    sub::Act::Open(i) => {
+                        // State 0x22's confirm: sound 2, header item 1 (the breadcrumb) with the
+                        // row's title, buttons fade, highlight bar and glove hidden; Re:CoM's page
+                        // entries' confirm also hides the main panel's layer 2.
+                        sound(2);
+                        header_title(camp, 1, sub::ROWS[i].label());
+                        build(camp, 2, 0);
+                        func::<CampIntFn>(HIGHLIGHT_BAR)(camp, -1, 0);
+                        func::<CampIntFn>(GLIDE_TARGET)(camp, -1, 0);
+                        main_layer2(camp, false);
+                        self.state = SubState::ToPage;
+                    }
+                    sub::Act::Move(i) => {
+                        recom_cursor(camp, i, true);
+                        sound(1);
+                        self.row = i;
+                        self.help();
+                    }
+                    sub::Act::None => {}
+                }
+                func::<VoidFn>(GLIDE_STEP)(camp);
+            }
+            SubState::ToPage => {
+                if button0_ended(camp) {
+                    let row = sub::ROWS.get(self.row as usize).copied().unwrap_or(sub::Row::Keyblades);
+                    self.page = Some(Page::open(camp, row));
+                    self.state = SubState::InPage;
+                }
+            }
+            SubState::InPage => {
+                let r = self.page.as_mut().map_or(-1, |p| p.step());
+                if r < 0 {
+                    // Re:CoM's return from a Deck page (states 0x34 / 0x35): header item 1
+                    // closes, the buttons appear again (entry build mode 0 at the same level),
+                    // then idle and the cursor on the row (`Opening`).
+                    self.page = None;
+                    func::<HeaderFn>(HEADER)(camp, 4, 1);
+                    build(camp, 0, 1);
+                    main_layer2(camp, true);
+                    self.state = SubState::Opening;
+                }
+            }
+            SubState::Closing => {
+                if button0_ended(camp) {
+                    // Back to the top list: Re:CoM's state 0x4B closes header item 0, 0x4C
+                    // relabels its 7 entries (level 1 → 0, `0x1400E3DE0`), and 0xD highlights
+                    // the cursor's entry: ours (`cursor_set`).
+                    put::<i32>(camp, camp::CURSOR, top::OURS);
+                    log("kh1 entry: submenu closed");
+                    return -1;
+                }
+            }
+        }
+        0
+    }
+
+    unsafe fn delete_all(&self) {
+        if let Some(p) = &self.page {
+            p.delete_all();
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The pages
+
+/// What a page lists.
+enum Content {
+    Keyblades {
+        cards: Vec<u16>,
+        equipped: u16,
+    },
+    /// KH1's Customize (`crate::customize`): the slot list, or (`picking` = the slot) the picker.
+    Customize {
+        levels: [u8; 7],
+        slots: [u8; 3],
+        picks: Vec<customize::Pick>,
+        picking: Option<usize>,
+    },
+}
+
+/// KH1's one picker cursor for every slot (`0x142E9A040`), kept for the session.
+static LAST_PICK: AtomicUsize = AtomicUsize::new(0);
+
+/// A page's objects and state (never in camp fields).
 struct Page {
     camp: usize,
     sub: u8,
@@ -624,9 +840,13 @@ struct Page {
     bar: usize,
     rows: [usize; 8],
     stat_rows: [usize; 3],
-    cards: Vec<u16>,
     list: list::List,
-    equipped: u16,
+    content: Content,
+}
+
+/// A spell's name at its level: KH1's word as the command menu shows it, else our English name.
+fn spell_word(spell: u8, level: u8) -> Vec<u8> {
+    super::command_menu::word(customize::name_id(spell, level)).unwrap_or_else(|| kb::c_text(crate::unlocks::level_name(spell, level.clamp(1, 3))))
 }
 
 impl Page {
@@ -669,23 +889,24 @@ impl Page {
         c as usize
     }
 
-    unsafe fn open(camp: *mut u8) -> Page {
-        let cards = kb::unlocked(super::stats::keyblade_cards(), |k| ever_obtained(k));
-        let equipped = super::stats::equipped_card();
-        let at_eq = cards.iter().position(|&c| c == equipped).unwrap_or(0) as i32;
-        let mut p = Page {
-            camp: camp as usize,
-            sub: 1,
-            stats_panel: 0,
-            list_panel: 0,
-            cursor: 0,
-            bar: 0,
-            rows: [0; 8],
-            stat_rows: [0; 3],
-            list: list::open_on(cards.len() as i32, at_eq),
-            cards,
-            equipped,
+    /// Draw mode 0 for the submenu's row: the two panels, the cursor, the scroll bar (Keyblades),
+    /// the rows.
+    unsafe fn open(camp: *mut u8, row: sub::Row) -> Page {
+        let (content, list) = match row {
+            sub::Row::Keyblades => {
+                let cards = kb::unlocked(super::stats::keyblade_cards(), |k| ever_obtained(k));
+                let equipped = super::stats::equipped_card();
+                let at_eq = cards.iter().position(|&c| c == equipped).unwrap_or(0) as i32;
+                let list = list::open_on(cards.len() as i32, at_eq);
+                (Content::Keyblades { cards, equipped }, list)
+            }
+            sub::Row::Customize => {
+                let (levels, slots) = super::command_menu::spell_view();
+                let picks = customize::picks(levels);
+                (Content::Customize { levels, slots, picks, picking: None }, list::open_on(customize::SLOTS as i32, 0))
+            }
         };
+        let mut p = Page { camp: camp as usize, sub: 1, stats_panel: 0, list_panel: 0, cursor: 0, bar: 0, rows: [0; 8], stat_rows: [0; 3], list, content };
         let set = set_of(camp);
         p.stats_panel = p.panel(0x10, 3, 0x125);
         p.list_panel = p.panel(0x11, 2, 0x14C);
@@ -693,19 +914,78 @@ impl Page {
         if !c.is_null() {
             p.cursor = func::<CursorCtorFn>(CURSOR_CTOR)(c, 0x12, p.list_panel as *mut u8, 0x12D) as usize;
         }
-        let b = func::<NewFn>(NEW)(0x28);
-        if !b.is_null() {
-            let bar = func::<CtorFn>(BAR_CTOR)(b);
-            let mut pos = Vec4([133.0, -56.0, 0.0, 1.0]);
-            func::<BarSetupFn>(BAR_SETUP)(bar, set, 0x14, va(base(), BAR_SEQ) as *const u16, pos.0.as_mut_ptr(), 157.0, p.list_panel as *mut u8);
-            p.bar = bar as usize;
+        if matches!(p.content, Content::Keyblades { .. }) {
+            let b = func::<NewFn>(NEW)(0x28);
+            if !b.is_null() {
+                let bar = func::<CtorFn>(BAR_CTOR)(b);
+                let mut pos = Vec4([133.0, -56.0, 0.0, 1.0]);
+                func::<BarSetupFn>(BAR_SETUP)(bar, set, 0x14, va(base(), BAR_SEQ) as *const u16, pos.0.as_mut_ptr(), 157.0, p.list_panel as *mut u8);
+                p.bar = bar as usize;
+            }
         }
         p.redraw();
-        log(&format!("keyblades: page opened: {} Keyblades listed {:x?}, equipped {:#x}", p.cards.len(), p.cards, p.equipped));
+        match &p.content {
+            Content::Keyblades { cards, equipped } => log(&format!("keyblades: page opened: {} Keyblades listed {:x?}, equipped {:#x}", cards.len(), cards, equipped)),
+            Content::Customize { levels, slots, .. } => log(&format!("customize: page opened: spell levels {levels:?}, shortcut slots {slots:?} (0 none, else spell + 1)")),
+        }
         p
     }
 
-    /// Draw mode 9 (rows, cursor, scroll bar), plus the status rows for the highlighted Keyblade.
+    /// The text of list row `idx`.
+    fn row_text(&self, idx: usize) -> Vec<u8> {
+        match &self.content {
+            // SAFETY: Re:CoM's card-name call (reads its message tables).
+            Content::Keyblades { cards, .. } => unsafe { card_name(cards[idx]) },
+            Content::Customize { levels, picks, picking: Some(_), .. } => match picks.get(idx).copied().flatten() {
+                Some(s) => spell_word(s, levels[s as usize]),
+                None => customize::text::NONE.to_vec(),
+            },
+            Content::Customize { picking: None, .. } => customize::text::SLOT_LABELS[idx.min(2)].to_vec(),
+        }
+    }
+
+    /// The row with Re:CoM's row mark: the equipped Keyblade, or the picker's row holding the
+    /// slot's spell.
+    fn marked(&self) -> Option<usize> {
+        match &self.content {
+            Content::Keyblades { cards, equipped } => cards.iter().position(|c| c == equipped),
+            Content::Customize { slots, picks, picking: Some(k), .. } => customize::row_of(picks, slots[*k]),
+            Content::Customize { picking: None, .. } => None,
+        }
+    }
+
+    /// The status panel's three rows: labels and values.
+    fn status(&self) -> ([&'static [u8]; 3], [Vec<u8>; 3]) {
+        match &self.content {
+            Content::Keyblades { cards, .. } => {
+                let values = cards
+                    .get(self.list.cursor as usize)
+                    .and_then(|&c| super::stats::keyblade(c))
+                    .map(kb::stat_values)
+                    .unwrap_or_else(|| [String::new(), String::new(), String::new()]);
+                (text::STAT_LABELS, values.map(|v| kb::c_text(&v)))
+            }
+            Content::Customize { levels, slots, .. } => {
+                let v = |k: usize| match cm::shortcut::slot_spell(slots[k]) {
+                    Some(s) => spell_word(s, levels.get(s as usize).copied().unwrap_or(1)),
+                    None => customize::text::NONE.to_vec(),
+                };
+                (customize::text::SLOT_LABELS, [v(0), v(1), v(2)])
+            }
+        }
+    }
+
+    /// The help line for the page's current mode and row.
+    unsafe fn help(&self) {
+        let t: &[u8] = match &self.content {
+            Content::Keyblades { .. } => text::PAGE_HELP,
+            Content::Customize { picking: Some(k), .. } => customize::text::PICK_HELP[(*k).min(2)],
+            Content::Customize { picking: None, .. } => customize::text::slot_help(self.list.cursor.max(0) as usize, super::command_menu::confirm_is_circle()),
+        };
+        set_help(self.p(), t.as_ptr());
+    }
+
+    /// Draw mode 9 (rows, cursor, scroll bar), plus the status rows.
     unsafe fn redraw(&mut self) {
         let camp = self.p();
         let set = set_of(camp);
@@ -724,6 +1004,7 @@ impl Page {
         let blink: u32 = at(camp, camp::BLINK);
         let setup = func::<SetupFn>(CBUTTON_SETUP);
         let seqs = va(base(), LIST_SEQ) as *const u16;
+        let marked = self.marked();
         for i in 0..list::VISIBLE as usize {
             delete(self.rows[i] as *mut u8);
             self.rows[i] = 0;
@@ -731,7 +1012,6 @@ impl Page {
             if idx >= self.list.count {
                 continue;
             }
-            let card = self.cards[idx as usize];
             let pos = self.layout(0x12, 2 + i as u64, 0).unwrap_or_default();
             let btn = func::<NewFn>(NEW)(0x30);
             if btn.is_null() {
@@ -739,10 +1019,10 @@ impl Page {
             }
             func::<CtorFn>(CBUTTON_CTOR)(btn);
             self.rows[i] = btn as usize;
-            let name = card_name(card);
+            let name = self.row_text(idx as usize);
             setup(btn, set, 0x11, seqs, pos.0.as_ptr(), self.list_panel as *mut u8, name.as_ptr(), font, f9, f10, 0x40, &colour, 0);
             let spr: *mut u8 = at(btn, 0x18);
-            if card == self.equipped && !spr.is_null() {
+            if marked == Some(idx as usize) && !spr.is_null() {
                 let m = vfn::<MarkFn>(spr, 0x40)(spr, set, EQUIPPED_MARK, MARK_X, MARK_Y, 0.0, 0);
                 if !m.is_null() {
                     vfn::<ObjIntFn>(m, 0x30)(m, blink);
@@ -780,20 +1060,14 @@ impl Page {
         put::<Vec4>(cur, 0x1A0, src);
     }
 
-    /// The status rows (draw mode 0's label / value rows, layout group 0x11 elements 4.., y + 8)
-    /// for the highlighted Keyblade: Strength, Magic, reach. Rebuilt on each move, as the list
-    /// rows are.
+    /// The status rows (draw mode 0's label / value rows, layout group 0x11 elements 4.., y + 8),
+    /// rebuilt on each change as the list rows are.
     unsafe fn stats(&mut self) {
         let camp = self.p();
         let set = set_of(camp);
         let no_scale = at::<i32>(camp, camp::NO_SCALE) != 0;
         let y = if no_scale { 0.0 } else { 1.0 };
-        let values = self
-            .cards
-            .get(self.list.cursor as usize)
-            .and_then(|&c| super::stats::keyblade(c))
-            .map(kb::stat_values)
-            .unwrap_or_else(|| [String::new(), String::new(), String::new()]);
+        let (labels, values) = self.status();
         let setup = func::<SetupFn>(CBUTTON_SETUP);
         let seqs = va(base(), STATUS_SEQ) as *const u16;
         for (i, value) in values.iter().enumerate() {
@@ -807,12 +1081,12 @@ impl Page {
             }
             func::<CtorFn>(CBUTTON_CTOR)(btn);
             self.stat_rows[i] = btn as usize;
-            setup(btn, set, 0x10, seqs, pos.0.as_ptr(), self.stats_panel as *mut u8, text::STAT_LABELS[i].as_ptr(), 0xE, 0.0, y, 0x40, std::ptr::null(), i as i32);
+            setup(btn, set, 0x10, seqs, pos.0.as_ptr(), self.stats_panel as *mut u8, labels[i].as_ptr(), 0xE, 0.0, y, 0x40, std::ptr::null(), i as i32);
             let mut v = func::<NewFn>(NEW)(0xB0);
             if !v.is_null() {
                 let colour = VALUE_COLOUR;
                 v = func::<FntCtorFn>(FNT_CTOR)(v, 0, 0, &colour, 0xE, std::ptr::null(), 0x41);
-                func::<TextFn>(TEXT_COPY)(v, kb::c_text(value).as_ptr());
+                func::<TextFn>(TEXT_COPY)(v, value.as_ptr());
             }
             let spr: *mut u8 = at(btn, 0x18);
             if !spr.is_null() {
@@ -845,10 +1119,87 @@ impl Page {
                     func::<SprIntFn>(VISIBLE)(child, 1);
                 }
             }
-            set_help(self.p(), text::PAGE_HELP.as_ptr());
+            self.help();
         }
         self.glide();
         done
+    }
+
+    /// Draw mode 4, sound 4, sub-state 3: the page closes.
+    unsafe fn close(&mut self) {
+        let camp = self.p();
+        let set = set_of(camp);
+        anim(self.stats_panel as *mut u8, set, 0x127);
+        anim(self.list_panel as *mut u8, set, 0x14E);
+        if self.cursor != 0 {
+            func::<VoidFn>(CURSOR_HIDE)(self.cursor as *mut u8);
+        }
+        set_help(camp, message(rd::<u32>(va(base(), CLOSE_HELP_ID))));
+        sound(4);
+        self.sub = 3;
+    }
+
+    /// Customize: the list shows the slots (`slot` highlighted) or the picker for a slot.
+    unsafe fn customize_mode(&mut self, picking: Option<usize>, cursor: i32) {
+        let Content::Customize { picking: p, picks, .. } = &mut self.content else { return };
+        *p = picking;
+        let count = if picking.is_some() { picks.len() as i32 } else { customize::SLOTS as i32 };
+        self.list = list::open_on(count, cursor);
+        self.redraw();
+        self.help();
+    }
+
+    /// Confirm on the highlighted row.
+    unsafe fn confirm(&mut self) {
+        let cursor = self.list.cursor;
+        match &self.content {
+            Content::Keyblades { cards, .. } => {
+                let Some(card) = cards.get(cursor as usize).copied() else { return };
+                super::stats::set_equipped(card);
+                let now = super::stats::equipped_card();
+                if let Content::Keyblades { equipped, .. } = &mut self.content {
+                    *equipped = now;
+                }
+                // Its model starts loading now; the weapon is rebuilt when the camp closes.
+                super::models::prefetch();
+                sound(2);
+                self.redraw();
+                log(&format!("keyblades: equipped card {card:#x} (save byte {:#x})", kb::save_byte_for(card)));
+            }
+            Content::Customize { picking: None, picks, .. } => {
+                // KH1's slot list → its picker, on the picker's last row (`0x142E9A040`).
+                let at = customize::picker_cursor(LAST_PICK.load(Ordering::Relaxed) as i32, picks.len() as i32);
+                sound(2);
+                self.customize_mode(Some(cursor as usize), at);
+            }
+            Content::Customize { picking: Some(k), picks, slots, levels } => {
+                let (k, slots, levels) = (*k, *slots, *levels);
+                let pick = picks.get(cursor as usize).copied().flatten();
+                let new = customize::set(slots, k, pick);
+                let name = |p: customize::Pick| p.map_or_else(|| "None".to_string(), |s| crate::unlocks::level_name(s, levels[s as usize].clamp(1, 3)).to_string());
+                if super::mp::set_shortcuts(new) {
+                    if let Content::Customize { slots: s, .. } = &mut self.content {
+                        *s = new;
+                    }
+                    sound(2);
+                    log(&format!("customize: shortcut {} = {} (was {}); slots {new:?}", k + 1, name(pick), name(cm::shortcut::slot_spell(slots[k]))));
+                } else {
+                    sound(5);
+                    log("customize: the save block isn't there (MP not live); shortcut not set");
+                }
+                self.customize_mode(None, k as i32);
+            }
+        }
+    }
+
+    /// Cancel: the picker goes back to the slot list (no write); anything else closes the page.
+    unsafe fn cancel(&mut self) {
+        if let Content::Customize { picking: Some(k), .. } = self.content {
+            sound(4);
+            self.customize_mode(None, k as i32);
+            return;
+        }
+        self.close();
     }
 
     /// Sub-state 2: the list's input, in `0x1400EB7E0`'s order. Returns the page's result.
@@ -856,28 +1207,11 @@ impl Page {
         let camp = self.p();
         self.glide();
         if func::<CampBtnFn>(CAMP_CANCEL)(camp, 0) & 0xFF != 0 {
-            // Draw mode 4, sound 4, sub-state 3.
-            let set = set_of(camp);
-            anim(self.stats_panel as *mut u8, set, 0x127);
-            anim(self.list_panel as *mut u8, set, 0x14E);
-            if self.cursor != 0 {
-                func::<VoidFn>(CURSOR_HIDE)(self.cursor as *mut u8);
-            }
-            set_help(camp, message(rd::<u32>(va(base(), CLOSE_HELP_ID))));
-            sound(4);
-            self.sub = 3;
+            self.cancel();
             return 1;
         }
         if func::<CampBtnFn>(CAMP_DECIDE)(camp, 0) & 0xFF != 0 {
-            if let Some(&card) = self.cards.get(self.list.cursor as usize) {
-                super::stats::set_equipped(card);
-                self.equipped = super::stats::equipped_card();
-                // Its model starts loading now; the weapon is rebuilt when the camp closes.
-                super::models::prefetch();
-                sound(2);
-                self.redraw();
-                log(&format!("keyblades: equipped card {card:#x} (save byte {:#x})", kb::save_byte_for(card)));
-            }
+            self.confirm();
             return 0;
         }
         let dir = func::<CampDirFn>(CAMP_DIR);
@@ -904,8 +1238,41 @@ impl Page {
         if moved {
             sound(1);
             self.redraw();
+            match self.content {
+                Content::Customize { picking: Some(_), .. } => LAST_PICK.store(n.cursor.max(0) as usize, Ordering::Relaxed),
+                Content::Customize { picking: None, .. } => self.help(),
+                Content::Keyblades { .. } => {}
+            }
         }
         0
+    }
+
+    /// One frame: sub-state 1 opening, 2 input, 3 closing (−1 when the status panel's close
+    /// ends, its objects deleted).
+    unsafe fn step(&mut self) -> i32 {
+        match self.sub {
+            1 => {
+                if self.opening() {
+                    self.sub = 2;
+                }
+                0
+            }
+            2 => self.input().min(0),
+            _ => {
+                if ended(self.stats_panel as *mut u8) {
+                    self.delete_all();
+                    self.stats_panel = 0;
+                    self.list_panel = 0;
+                    self.cursor = 0;
+                    self.bar = 0;
+                    self.rows = [0; 8];
+                    self.stat_rows = [0; 3];
+                    -1
+                } else {
+                    0
+                }
+            }
+        }
     }
 }
 
@@ -929,43 +1296,26 @@ pub(super) unsafe fn ever_obtained(id: u16) -> bool {
     coll != 0 && func::<EverFn>(EVER_OBTAINED)(id as u32) & 0xFF != 0
 }
 
-/// Our page, called by the Config input hook in place of `0x1400D3EB0` when [`page_active`]:
-/// the same contract (≥ 0 running, < 0 closed). Re:CoM's states 0x4A..0x4C around it.
+/// Our entry's submenu and pages, called by the Config input hook in place of `0x1400D3EB0` when
+/// [`page_active`]: the same contract (≥ 0 running, < 0 closed). Re:CoM's states 0x4A..0x4C around
+/// it.
 pub unsafe fn page(camp: *mut u8) -> u64 {
-    let Ok(mut g) = PAGE.lock() else { return (-1i32) as u32 as u64 };
-    if g.as_ref().is_some_and(|p| p.camp != camp as usize) {
+    let Ok(mut g) = SUB.lock() else { return (-1i32) as u32 as u64 };
+    if g.as_ref().is_some_and(|s| s.camp != camp as usize) {
         if let Some(stale) = g.take() {
             stale.delete_all();
         }
     }
     let r: i32 = match g.as_mut() {
+        // State 0x4A's call: the submenu's buttons.
         None => {
-            // State 0x4A's call (sub-state 0): build, list, rows.
-            *g = Some(Page::open(camp));
+            *g = Some(Sub::open(camp));
             0
         }
-        Some(p) => match p.sub {
-            1 => {
-                if p.opening() {
-                    p.sub = 2;
-                    1
-                } else {
-                    0
-                }
-            }
-            2 => p.input(),
-            _ => {
-                // Sub-state 3: when the status panel's closing ends, delete everything.
-                if ended(p.stats_panel as *mut u8) {
-                    if let Some(p) = g.take() {
-                        p.delete_all();
-                    }
-                    -1
-                } else {
-                    0
-                }
-            }
-        },
+        Some(s) => s.step(),
     };
+    if r < 0 {
+        *g = None;
+    }
     r as u32 as u64
 }

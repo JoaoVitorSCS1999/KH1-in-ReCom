@@ -361,7 +361,8 @@ fn install_battles(base: usize) {
     }
 }
 
-/// The camp menu's "Keyblades" entry (`keyblades`, decision 25): four camp wrappers, all or
+/// The camp menu's "KH1" entry (`keyblades`, decision 25; stage 7.13: its submenu of Keyblades and
+/// Customize): four camp wrappers, all or
 /// nothing. Needs the Config input hook (the page runs through it), so it is installed only
 /// after that one. Whether the entry shows is decided each time Re:CoM builds the list.
 fn install_keyblades(base: usize) {
@@ -374,9 +375,9 @@ fn install_keyblades(base: usize) {
     ];
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
     if unsafe { hook::install_all(base, &hooks) } {
-        log("keyblades: camp wrappers in; the 8th entry shows at Combat = KH1 in Sora's story");
+        log("keyblades: camp wrappers in; the 8th entry \"KH1\" (Keyblades, Customize) shows at Combat = KH1 in Sora's story");
     } else {
-        log("keyblades: not hooked; no Keyblades entry (the Kingdom Key's numbers stand)");
+        log("keyblades: not hooked; no KH1 entry (the Kingdom Key's numbers stand; shortcuts keep KH1's learn order)");
     }
 }
 

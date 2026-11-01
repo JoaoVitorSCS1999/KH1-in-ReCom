@@ -21,7 +21,7 @@ bits, HUD and camp code run the feature; ours only adds data, wrappers and comma
 | 7.10 | Aero | a new player damage status in the damage check | halves damage for (18 + max MP) s; Aerora/Aeroga wind. |
 | 7.11 | **Spell unlocks and levels** | Re:CoM's card pickup and boss battle ends | base level at the first pickup of that magic card; -ra / -ga at Re:CoM bosses; saved per save. Built: `recom-m7-unlocks.md` (Re:CoM's first-obtained `0x14015C7F0`; a boss win = its enemy card's first pickup; two bosses a spell, +1 each). |
 | 7.12 | **Shortcut menu** | the command menu object | hold L1: Triangle / Square / Cross cast slots 1 / 2 / 3. Built: `recom-m7-command-menu.md` § 7.12 (KH1 panel from `kh1hud`, slots by KH1's learn rule, save / warp point Triangle retargeted). |
-| 7.13 | **"KH1" camp entry + Customize** | our camp entry (renamed) and page, Re:CoM's camp buttons | submenu: Keyblades, Customize (3 shortcut slots from learned spells + None). |
+| 7.13 | **"KH1" camp entry + Customize** | our camp entry (renamed) and page, Re:CoM's camp buttons | submenu: Keyblades, Customize (3 shortcut slots from learned spells + None). Built: `recom-keyblade-equip.md` § Stage 7.13 (Re:CoM's own 7 entry buttons relabelled as its Deck submenu does, run in the Config states; Customize = KH1's slot list + picker on Re:CoM's camp list). |
 
 Out of M7 (later milestones): Items and Summon rows' contents (M8), MP Rage / MP Haste and other
 abilities (M9), KH1's context-row specials in battle (M9), lock-on on R1 (M12).

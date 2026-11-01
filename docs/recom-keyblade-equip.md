@@ -1,5 +1,9 @@
 # Equipping Keyblades: the camp menu's 8th entry (decision 25)
 
+> Since M7 stage 7.13 the entry is **"KH1"** and opens a submenu (Keyblades, Customize): see
+> [Stage 7.13](#stage-713-the-kh1-entry-its-submenu-and-customize) at the end. The Keyblades page
+> below is unchanged; it now opens from the submenu.
+
 At `combat = kh1`, in Sora's story, Re:CoM's camp (pause) menu gets an 8th top-level entry,
 "Keyblades", below Config. Its page lists the Keyblades Sora has earned, marks the equipped one,
 shows the highlighted one's Strength, Magic and reach, and equips on confirm. Re:CoM's own camp
@@ -149,3 +153,132 @@ code runs only while it is open, like Re:CoM's pages.
   from our byte`. The spare range was unused in a real save. Checked (log).
 - The log also shows 17 Keyblades listed (cards 1..0x11, all KH1's, all ever obtained) and
   equips from 0x1 up to 0x11 saved in the byte. Checked (log).
+
+## Stage 7.13: the "KH1" entry, its submenu and Customize
+
+Decision 34: "Customize: one "KH1" camp entry (our entry renamed) with a submenu: Keyblades,
+Customize (later Abilities, Items)". Plan row 7.13 (`recom-m7-plan.md`). Code:
+`crates/kh1-recom/src/keyblades.rs` (`text`, `sub`), `src/customize.rs` (KH1's Customize rules,
+tested), `src/win/keyblades.rs` (`Sub`, `Page`, `Content`), `src/win/mp.rs` (`set_shortcuts`),
+`src/win/command_menu.rs` (`spell_view`, `word`, `confirm_is_circle`).
+
+### The entry
+
+Label "KH1", header title "KH1", help "Keyblades and shortcuts." Same wrappers, gate (Combat = KH1,
+Sora's story, not the direct-map camp, Keyblade numbers loaded) and place as before. One change to
+the confirm sequence: **step 9 (`0x140247E50(camp+0x130, 2, 0)`, the main panel's layer 2
+hidden) is no longer run at the top confirm**: Re:CoM runs it only for its page entries (2, 4, 5,
+6), not for its Deck entry, whose submenu keeps the layer. It now runs when a page opens from our
+submenu, and the layer comes back when the page closes (as Re:CoM's state 0x4C does). Checked
+(decomp `0x1400D9C80` state 0xF and 0x4C).
+
+The Config input hook now runs our code when `camp+0xBC == 7` (the top index Re:CoM's state 0xF
+saves on every confirm; ours sets 7) instead of `camp+0xB8 == 7`: inside the submenu `camp+0xB8`
+is the submenu's row, as in Re:CoM's Deck submenu. Checked (decomp: among the camp's functions
+`+0xBC` is written only by state 0xF's confirm path and read only by state 0x23).
+
+### The submenu: Re:CoM's Deck submenu, our rows
+
+Re:CoM's Deck entry (top index 0) opens a level-1 submenu made of **the same 7 entry buttons**,
+relabelled. Checked (decomp `0x1400D9C80` states 0x10, 0x1D, 0x22, 0x23, 0x34, 0x35; disasm of
+the relabel `0x1400E3FF3..0x1400E40C4`). Ours does the same with Re:CoM's calls, inside the Config
+states 0x4A..0x4C our page already uses (Re:CoM's Deck states are tied to its deck panels):
+
+| step | Re:CoM's Deck | ours |
+|---|---|---|
+| open (top buttons faded) | state 0x10: `0x1400E3DE0(camp, 0, 1)`: count 6, each label deleted, a new `C2DFnt` (0x80404040, font 0xF, 0x40) in `camp+0x1F0[i]`, button vtable `+0x68(btn, 1, set, fnt)`, `camp+0xB4 = 1`, animation 4 | the same relabel with our row labels, count = rows (2), `camp+0xB4 = 1`, `camp+0xB8 = 0`, then Re:CoM's `0x1400E3DE0(camp, 0, 1)` (same level: animation 4 only) |
+| idle | state 0x1D: when button 0's animation ends, mode 1 (animation 5), cursor set `(0, 1)` | the same (cursor set's original: at level 1 our wrapper passes it through), then our help line |
+| input | state 0x22: cancel `0x14029B410`, confirm `0x14029B490`, up / down repeat (0x101000 / 0x204000), held stops at the ends, fresh wraps (cursor set wraps over the count); sound 1; `0x1400DE100` every frame | the same (`keyblades::sub::step`, tested) |
+| confirm a row | sound 2, `0x1400E4220(camp, 1, 1)` + `(7, 1)` (header item 1, the breadcrumb, with the row's title), mode 2 (animation 6), highlight bar / glove hidden (`0x1400E07D0(−1)`, `0x1400E3D30(−1)`) | the same, header item 1 titled with the row's label (as item 0 gets "KH1"), plus step 9 (main panel layer 2 hidden); when button 0's fade ends the page opens |
+| page done | states 0x34 / 0x35: `0x1400E4220(camp, 4, 1)`, `0x1400E3DE0(camp, 0, 1)` (animation 4), then idle with the cursor on **the same row** | the same, plus layer 2 shown |
+| cancel | state 0x22: cursor set `(row, 0)`, mode 2, `0x1400E4220(4)`, sound 4; state 0x23: when button 0's fade ends, back to the top list (`0x1400E3DE0(0, 0)` relabels the 7 entries) | cursor set `(row, 0)`, mode 2, sound 4; when button 0's fade ends `camp+0xB8 = 7` and the page returns −1: Re:CoM's 0x4B closes header item 0 (`0x1400E4220(camp, 4, 0)`, disasm `0x1400DC4B0`), 0x4C relabels its 7 entries (level 1 → 0) and 0xD highlights ours |
+
+Differences from the Deck submenu: header item 0 closes when the submenu's fade ends, not at the
+cancel press (the Config states close it on the page's −1; calling it twice would restart its
+animation); Re:CoM's Deck-only panels (`0x1400E0870`, `0x1400E13C0`) and side elements
+(`0x1400DEC60`) are not used. Rows: `keyblades::sub::ROWS`; a row (M9's Abilities) is one more
+`Row` with a label, help and page (up to Re:CoM's 7 buttons).
+
+No new hook and no new callee: every call above was already a checked site of the Keyblades entry
+(`sites::KEYBLADE_HOOKS` / `KEYBLADE_CALLEES`); the entry build and cursor set are called through
+our wrappers' trampolines (Re:CoM's originals). All 354 site byte lists re-read from the Steam exe
+(pefile): 0 mismatches.
+
+### Customize (KH1's shortcut page)
+
+KH1 (Steam, Checked (decomp + exe)):
+
+| what | where |
+|---|---|
+| slot list: 3 rows, labels sysmsg `0xCE / 0xCF / 0xD0` (table `0x140548060`, read from the exe), each with its slot's spell name or sysmsg `0xD4` ("none") | `0x140302950` |
+| a slot's spell, its name at the spell's current level (command `level + (spell + 2) × 3`) | get `0x140285090` (`save + 0x844 + slot`), name `0x14028F290` |
+| picker: the learned spells in KH1's order, then "none" (the last row), at most 8 | fill `0x1403041A0`, list `0x142E9A018`, count `0x142E9A00C` |
+| the picker opens on its last cursor (one for every slot) | `0x142E9A040` (window cursor `+0xFE` set from it at `0x140302950`) |
+| confirm writes the slot, **no duplicate check**, back to the slot list; cancel back without writing | `0x140302740` → `0x1402857C0(slot, spell or −1)` |
+
+Ours, on Re:CoM's camp list (the Keyblades page's pieces: both panels, `CButton` rows, the
+`CButtonCursor`, the label / value rows, the help line; no scroll bar, at most 8 rows):
+
+- **Slot list**: list rows "Shortcut 1 / 2 / 3"; the status panel shows the three slots (label,
+  spell name or "None"), rebuilt after every write. Help: "Hold L1 and press Triangle / Square /
+  Cross (Circle when Re:CoM's confirm key is Circle) to cast this spell." (7.12's buttons).
+- **Picker** (confirm on a slot, sound 2): list rows = the learned spells at their level, then
+  "None"; Re:CoM's row mark (0x1D, as the equipped Keyblade's) on the row holding the slot's
+  spell; opens on KH1's last picker row (kept for the session). Confirm (sound 2) writes the slot
+  in our save block (`save + 0x2681..0x2683`, 0 = none, else spell + 1) and returns to the slot
+  list on that slot; cancel (sound 4) returns without writing; cancel on the slot list closes the
+  page.
+- Spells and levels: the command menu's (`spell_state`, and `kh1_all_spells` as the menu applies
+  it). Names: KH1's words from `kh1-command-menu.json` in `menu_language` (the command menu's
+  source), else the English names of `crate::unlocks::level_name`.
+- The command menu reads the slots every frame (`spell_state`), so the L1 list shows the change at
+  once. A save never synced gets its one-time sync before our write (`set_shortcuts` reads first).
+- Sounds: Re:CoM's camp sounds (1 move, 2 confirm, 4 back, 5 when the save block isn't there).
+
+1:1 with KH1: the picker's contents and order, "None" last, names at the current level, the write
+without a duplicate check, the return to the slot list, the picker's opening row. Checked
+(decomp). Not KH1's: the screen is Re:CoM's camp (by design); the labels "Shortcut 1..3" and
+"None" are our English words (**Assumption**: KH1's sysmsg 0xCE..0xD0 / 0xD4 texts not read; its
+sysmsg file isn't in the asset step); no button glyphs in the rows (named in the help line
+instead); KH1's per-spell help lines (sysmsg `0xD4 + 3·spell + level`, `0xEA`) are not shown;
+the slot list opens on slot 1 each time (**Assumption**: KH1's slot-list window cursor start not
+traced).
+
+### Per frame
+
+Nothing outside the pause menu. In it, the submenu reads the pad and one sequence state a frame
+(as Re:CoM's state 0x22 does); the pages as before.
+
+### Logs
+
+`kh1 entry: camp entry 8 "KH1" added`, `kh1 entry: submenu opened (2 rows …)`, `kh1 entry: submenu
+closed`, `keyblades: page opened …`, `customize: page opened: spell levels […], shortcut slots […]`,
+`customize: shortcut k = <spell> (was <spell>); slots […]`.
+
+### Assumptions and risks
+
+1. **Relabelling Re:CoM's buttons from the Config states**: Re:CoM does exactly this for the Deck
+   (same calls, same objects); state 0x4C's relabel back runs because `camp+0xB4` is 1 there.
+   Not seen in game.
+2. **Status values' width**: spell names at x 220 of the status panel ("Blizzaga", "Gravité"):
+   to judge in game.
+3. **Header item 1** (the breadcrumb) titled "Keyblades" / "Customize" through the same
+   replace path as item 0's "KH1".
+4. The row mark (0x1D) on the picker's current spell: as on the Keyblades page (seen there).
+
+### What the owner should test in game
+
+1. Camp at Combat = KH1 (Sora's story): the 8th entry reads "KH1", help "Keyblades and shortcuts."
+2. Confirm: the entries fade, header "KH1", two buttons "Keyblades" / "Customize" appear where
+   Re:CoM's entries were (as the Deck submenu), cursor bar and glove on Keyblades, help per row;
+   up / down move and wrap (held stops at the ends); sounds 1 / 2 / 4.
+3. Keyblades: header shows "KH1 > Keyblades"; the page behaves as before (equip, mark, stats,
+   scroll); cancel goes back to the submenu on Keyblades.
+4. Customize: the three slots and their spells (status panel); confirm a slot → the picker (learned
+   spells at their level + None, the mark on the current one); pick one → back to the slot list,
+   the status panel shows it; the same spell in two slots is allowed; cancel in the picker writes
+   nothing.
+5. Close the camp; hold L1: the shortcut list shows the new slots and casts them.
+6. Cancel from the submenu: back to the top list with "KH1" highlighted and Re:CoM's 7 labels
+   right; enter Re:CoM's Deck and Config afterwards: both work as unmodded.
+7. Save, reload: the slots stay (per save). Combat = Re:CoM, Riku's story: no entry.

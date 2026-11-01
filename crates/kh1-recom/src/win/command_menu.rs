@@ -933,6 +933,24 @@ fn spells() -> ([u8; 7], [u8; 3]) {
     ([3; 7], if none { [1, 2, 3] } else { slots })
 }
 
+/// The spells and shortcut slots the menu uses (stage 7.13's Customize page shows and edits the
+/// same ones).
+pub fn spell_view() -> ([u8; 7], [u8; 3]) {
+    spells()
+}
+
+/// A KH1 word of the menu's language (`kh1-command-menu.json`, Re:CoM font bytes, NUL-terminated)
+/// by message id, when the command menu's words are loaded.
+pub fn word(id: u16) -> Option<Vec<u8>> {
+    WORDS.get().and_then(|w| w.get(id)).map(|b| b.to_vec())
+}
+
+/// Re:CoM's confirm button is Circle (its key word `0x14083F3F0`), for the shortcut help lines.
+pub fn confirm_is_circle() -> bool {
+    // SAFETY: a static of the image.
+    cm::shortcut::confirm_is_circle(unsafe { rd::<u16>(base() + CONFIRM_KEY as usize) })
+}
+
 unsafe fn world(pl: usize) -> World {
     let (spells, shortcuts) = spells();
     let mut w = World { mp: mp_view(), spells, shortcuts, ..Default::default() };

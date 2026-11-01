@@ -446,7 +446,8 @@ only while Re:CoM's action is one KH1's frame runs. `recom-m7-magic.md`.
 
 Owner (2026-11-01): "L1 like KH1. Take KH1's behaviour for the rest": Cure / Aero from a shortcut
 cast on Sora at once (as the Magic list); slots filled by KH1's learn rule, older saves once from
-the spells already learned (KH1's spell order, first three); Customize is 7.13; at a save / warp
+the spells already learned (KH1's spell order, first three); Customize is 7.13 (built:
+`recom-keyblade-equip.md` § Stage 7.13; it writes the same three bytes); at a save / warp
 point with L1 held, KH1 casts only (no save menu); the panel is KH1's art in both menu looks
 (`hud_kh1_menu` on or off); keyboard: whatever key Re:CoM maps to its L1 bit.
 

@@ -272,7 +272,7 @@ pub mod off {
     pub const SPELL_COUNT: usize = 7;
     /// Stage 7.12: the 3 shortcut slots (KH1 save `+0x844..0x846`); 0 = none, else spell + 1.
     /// Filled by KH1's learn rule (`crate::unlocks::shortcuts`), once from the spells already
-    /// learned for an older save; Customize (7.13) will set them.
+    /// learned for an older save; Customize (7.13, `win::mp::set_shortcuts`) sets them.
     pub const SHORTCUTS: usize = 0xC;
     pub const SHORTCUT_COUNT: usize = 3;
     /// Stage 7.11: bit 0 = the spell levels were synced from Re:CoM's card collection for this

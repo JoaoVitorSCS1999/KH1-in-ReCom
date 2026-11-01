@@ -1,9 +1,11 @@
 //! Equipping Keyblades at the KH1 setting (decision 25): the testable part.
 //!
-//! Re:CoM's camp (pause) menu gets an 8th top-level entry, "Keyblades", below Config, drawn and
-//! run by Re:CoM's own camp code through four wrappers (`win::keyblades`). Its page lists the
-//! Keyblades Sora has earned, marks the equipped one, shows the highlighted one's numbers, and
-//! equips on confirm. The choice is one byte of Re:CoM's own save block.
+//! Re:CoM's camp (pause) menu gets an 8th top-level entry, "KH1" (M7 stage 7.13; "Keyblades"
+//! before it), below Config, drawn and run by Re:CoM's own camp code through four wrappers
+//! (`win::keyblades`). It opens a submenu of Re:CoM's own entry buttons ([`sub`]): Keyblades and
+//! Customize (`crate::customize`). The Keyblades page lists the Keyblades Sora has earned, marks
+//! the equipped one, shows the highlighted one's numbers, and equips on confirm. The choice is one
+//! byte of Re:CoM's own save block.
 //! See `docs/recom-keyblade-equip.md`.
 //!
 //! Everything here is plain logic: the cursor rules (Re:CoM's, over 8 entries), the page's list
@@ -298,11 +300,95 @@ pub mod list {
 /// Texts: NUL-terminated ASCII handed to Re:CoM's text items (as the Config row's are; seen in
 /// game there). No `%`: the help line's formatter `0x1402402B0` treats it as a code.
 pub mod text {
-    pub const ENTRY_LABEL: &[u8] = b"Keyblades\0";
-    pub const TITLE: &[u8] = b"Keyblades\0";
-    pub const ENTRY_HELP: &[u8] = b"Equip a Keyblade.\0";
+    /// The camp entry (M7 stage 7.13, decision 34: "one "KH1" camp entry (our entry renamed) with a
+    /// submenu"), its header title and help line.
+    pub const ENTRY_LABEL: &[u8] = b"KH1\0";
+    pub const TITLE: &[u8] = b"KH1\0";
+    pub const ENTRY_HELP: &[u8] = b"Keyblades and shortcuts.\0";
+    /// The Keyblades row of the submenu, its page's header title and help.
+    pub const KEYBLADES_LABEL: &[u8] = b"Keyblades\0";
+    pub const KEYBLADES_HELP: &[u8] = b"Equip a Keyblade.\0";
     pub const PAGE_HELP: &[u8] = b"Choose the Keyblade Sora fights with.\0";
     pub const STAT_LABELS: [&[u8]; 3] = [b"Strength\0", b"Magic\0", b"Reach\0"];
+    /// The Customize row (KH1's pause-menu word) and its help.
+    pub const CUSTOMIZE_LABEL: &[u8] = b"Customize\0";
+    pub const CUSTOMIZE_HELP: &[u8] = b"Set the spells of the three shortcuts.\0";
+}
+
+/// The "KH1" entry's submenu (M7 stage 7.13): Re:CoM's own entry buttons relabelled with these
+/// rows, as Re:CoM's Deck submenu relabels them (`0x1400E3DE0` mode 0 at level 1), run with
+/// Re:CoM's Deck-submenu input rule (update state 0x22, `0x1400D9C80`). Checked (decomp).
+///
+/// Adding a row (M9's Abilities) is one more [`Row`] in [`ROWS`] with its label, help and page.
+pub mod sub {
+    use super::text;
+    use super::top::Pad;
+
+    /// A row of the submenu: the page it opens.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Row {
+        Keyblades,
+        Customize,
+    }
+
+    /// The rows, top to bottom.
+    pub const ROWS: &[Row] = &[Row::Keyblades, Row::Customize];
+
+    /// Re:CoM's camp has 7 entry buttons (`camp+0x1B8[7]`); the submenu reuses them. Checked
+    /// (decomp).
+    pub const MAX_ROWS: usize = 7;
+    const _: () = assert!(ROWS.len() <= MAX_ROWS && !ROWS.is_empty());
+
+    impl Row {
+        /// The button's label, also the page's header title (header item 1, the breadcrumb).
+        pub fn label(self) -> &'static [u8] {
+            match self {
+                Row::Keyblades => text::KEYBLADES_LABEL,
+                Row::Customize => text::CUSTOMIZE_LABEL,
+            }
+        }
+
+        /// The help line while the row is highlighted.
+        pub fn help(self) -> &'static [u8] {
+            match self {
+                Row::Keyblades => text::KEYBLADES_HELP,
+                Row::Customize => text::CUSTOMIZE_HELP,
+            }
+        }
+    }
+
+    /// What one frame of input does in the submenu.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Act {
+        None,
+        /// Back to the top list (sound 4).
+        Close,
+        /// Open the row's page (sound 2).
+        Open(usize),
+        /// The cursor to this row (sound 1).
+        Move(i32),
+    }
+
+    /// Re:CoM's Deck submenu (state 0x22, `0x1400DB3F5..`): cancel first (`0x14029B410`; Start
+    /// does nothing there), then confirm (`0x14029B490`), then up / down (repeat masks 0x101000 /
+    /// 0x204000): at the ends a held repeat stops and only a fresh press goes on, and the cursor
+    /// set `0x1400DEA10` wraps over the count (`camp+0x21C4`). Checked (decomp).
+    pub fn step(cursor: i32, p: Pad) -> Act {
+        let n = ROWS.len() as i32;
+        if p.cancel {
+            return Act::Close;
+        }
+        if p.confirm {
+            return if (0..n).contains(&cursor) { Act::Open(cursor as usize) } else { Act::None };
+        }
+        let mv = super::top::recom_move(cursor, n, Pad { start: false, cancel: false, confirm: false, ..p });
+        match mv {
+            Some(i) if i < 0 => Act::Move(n - 1),
+            Some(i) if i >= n => Act::Move(0),
+            Some(i) => Act::Move(i),
+            None => Act::None,
+        }
+    }
 }
 
 /// The blade span a Keyblade's hit spheres cover, in the weapon's bone parameter (KH1 weapon row
@@ -498,12 +584,46 @@ mod tests {
 
     #[test]
     fn texts_are_terminated_ascii_without_codes() {
-        let all = [text::ENTRY_LABEL, text::TITLE, text::ENTRY_HELP, text::PAGE_HELP, text::STAT_LABELS[0], text::STAT_LABELS[1], text::STAT_LABELS[2]];
+        let all = [
+            text::ENTRY_LABEL,
+            text::TITLE,
+            text::ENTRY_HELP,
+            text::KEYBLADES_LABEL,
+            text::KEYBLADES_HELP,
+            text::PAGE_HELP,
+            text::STAT_LABELS[0],
+            text::STAT_LABELS[1],
+            text::STAT_LABELS[2],
+            text::CUSTOMIZE_LABEL,
+            text::CUSTOMIZE_HELP,
+        ];
         for s in all {
             assert_eq!(s.last(), Some(&0));
             assert!(s[..s.len() - 1].iter().all(|&b| (0x20..0x7F).contains(&b) && b != b'%'));
+            assert!(s.len() - 1 <= crate::menu::HELP_MAX);
         }
         assert_eq!(c_text("One-Winged Angel"), b"One-Winged Angel\0".to_vec());
         assert_eq!(c_text("a\u{e9}"), b"a??\0".to_vec());
+    }
+
+    #[test]
+    fn submenu_rows_and_moves_follow_recoms_deck_submenu() {
+        use sub::{Act, Row, ROWS};
+        assert_eq!(ROWS, &[Row::Keyblades, Row::Customize]);
+        assert_eq!((Row::Keyblades.label(), Row::Customize.label()), (&b"Keyblades\0"[..], &b"Customize\0"[..]));
+        // Inside: held or fresh moves.
+        assert_eq!(sub::step(0, DOWN_HELD), Act::Move(1));
+        assert_eq!(sub::step(1, UP_HELD), Act::Move(0));
+        // Ends: held stops, fresh wraps (Re:CoM's cursor set wraps over the count).
+        assert_eq!(sub::step(1, DOWN_HELD), Act::None);
+        assert_eq!(sub::step(1, DOWN_FRESH), Act::Move(0));
+        assert_eq!(sub::step(0, UP_HELD), Act::None);
+        assert_eq!(sub::step(0, UP_FRESH), Act::Move(1));
+        // Cancel first, then confirm; Start is nothing here.
+        assert_eq!(sub::step(1, Pad { confirm: true, ..NONE }), Act::Open(1));
+        assert_eq!(sub::step(1, Pad { confirm: true, cancel: true, ..NONE }), Act::Close);
+        assert_eq!(sub::step(0, Pad { start: true, ..NONE }), Act::None);
+        assert_eq!(sub::step(5, Pad { confirm: true, ..NONE }), Act::None);
+        assert_eq!(sub::step(0, Pad { confirm: true, down: true, ..NONE }), Act::Open(0), "confirm before moves");
     }
 }
