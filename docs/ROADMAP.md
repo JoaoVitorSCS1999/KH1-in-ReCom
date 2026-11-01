@@ -181,3 +181,7 @@ Cloud; enemy cards; sleights with no KH1 equivalent; Riku's story at KH1 setting
   box shows its header only.
 - KH1 HUD (0.33.1): KH1 PC's repacked textures: 40–71 straight-bar rects are drawn from the PS2
   art at 2×; owner to confirm the bar now looks like KH1's.
+- Command menu (0.35.0): row 3 before summons shows KH1's greyed "–" (1:1) — or 0.34.0's greyed
+  "Summon"? Near NPCs KH1 also puts Talk in row 0 (a dimmed Attack that buzzes); kept 7.3's
+  normal Attack with Talk only in the tab. Re:CoM look's tab: teal-green tint or an exact-green
+  plate? Triangle glyph: fixed PlayStation glyph, or follow the pad in use as KH1 PC does?
