@@ -625,3 +625,22 @@ owner's H0 dump, **Assumption**.
 3. Controls made later draw over earlier ones of the same priority (as the MP bar's pieces).
 4. While a submenu is on top the whole plate's RGB is halved (KH1 halves only the bright
    colours; the dark ones differ by 1–5 levels).
+
+## 0.36.0 (owner, 2026-11-01)
+
+- **HP units.** Re:CoM's HP (cap 560, `0x14020D6A0` / `0x14020D8E0` clamp to `0x230`; Checked
+  (decomp)) drawn in KH1's units: × 120 / 560, rounded up (`kh1_hud::hp_units`). Decision 39's
+  raw HP left the gauge full above 120 (Sora had 300–560 HP): "losing health doesnt affect the
+  health bar". The bar still grows with max HP.
+- **Lock-on.** H5 (LOCK ON! + target gauge) and H7 (KH1's cursor) are off (`LOCKON_KH1`):
+  Re:CoM's lock-on cursor and enemy HP gauges show again; no LOCK ON! plate (owner's choice).
+- **Menu.** The cursor row's word at y + 22 (was 25: 3 units low in the plate, against the
+  owner's KH1 screenshot). Battle: the selection's gradient goes black → the panels' red
+  (109, 30, 32) (`0x14027A2B0` with `local_108`; Checked (decomp)); it stayed blue.
+- **Rings.** The PC copies of the baked arcs sample the PC pictures bilinearly (alpha-weighted),
+  as KH1 PC's filtered draw does; point samples of mirrored quarters made the outlines uneven
+  and left dark specks (offline render before / after).
+- **Crash notes.** `win/crash.rs`: a last vectored handler writes a fatal exception's code,
+  place (exe Steam address / DLL offset), registers and return addresses to `kh1-recom.log`,
+  then lets the crash go on as before (the owner's crash after a Curaga left an empty
+  `CrashDump.dmp`).

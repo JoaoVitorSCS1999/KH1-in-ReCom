@@ -4,6 +4,7 @@
 mod attack;
 mod battle;
 mod command_menu;
+mod crash;
 mod d2;
 mod deck;
 mod guard;
@@ -469,6 +470,7 @@ fn run(mod_dir: Option<PathBuf>) {
     }
     let base = base_ptr as usize;
     BASE.store(base, Ordering::Relaxed);
+    crash::install(MODULE.load(Ordering::Relaxed));
 
     // Config menu rows.
     if s.config_menu {

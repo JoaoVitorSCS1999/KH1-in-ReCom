@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 73: HUD fixes: HP in KH1 units, Re:CoM lock-on, menu text / battle colour, smooth rings, crash notes, version 0.36.0 (2026-10-31)
+
+- Asks (owner, 2026-11-01): "the font is oddly positioned when hovering over an option. the health
+  bar and MP bar are REALLY ugly looking", "lets just use Re:CoM's lock on graphics", "lets have
+  Re:CoM's health bar" (+ remove LOCK ON!), "when in battle, the command menu still has a blue
+  tint", "losing health doesnt affect the health bar, and my game just crashed".
+- HP: Re:CoM HP × 120 / 560 (Re:CoM's cap `0x230` = KH1's `0x78`), rounded up. Checked (decomp).
+- Lock-on: H5 / H7 off; Re:CoM's cursor and enemy gauges back (mask bit 0x10 no longer added).
+- Menu: cursor-row word y 22 (owner's KH1 screenshot); battle selection gradient red
+  (`0x14027A2B0`, Checked (decomp)).
+- Rings: PC bake samples bilinearly (offline render). Crash notes: `win/crash.rs` (vectored
+  handler, log only). Crash cause: not known yet (no dump). Not seen in game.
+
+---
+
 ## Stage 72: KH1 FM context tab (green Triangle prompt), version 0.35.0 (2026-10-31)
 
 - Ask (owner, 2026-11-01): "the menu shouldnt have the context option at the bottom, it should behave

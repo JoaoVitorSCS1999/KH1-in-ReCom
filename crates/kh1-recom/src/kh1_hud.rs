@@ -149,7 +149,11 @@ pub mod menu {
     /// A row's word from the list origin + 22 i.
     pub const WORD_AT: (f32, f32) = (16.0, 22.0);
     /// The cursor row's word.
-    pub const SEL_WORD_AT: (f32, f32) = (29.0, 25.0);
+    /// y: 22, not KH1's 25: KH1's words sit at the cell's top and ours 2 units up (the 0.34.0
+    /// font); 25 put "Attack" 3 units low in the cursor plate (owner's screenshot, 2026-11-01:
+    /// "the font is oddly positioned when hovering over an option"). Centred as KH1's: Checked
+    /// (owner's KH1 screenshot).
+    pub const SEL_WORD_AT: (f32, f32) = (29.0, 22.0);
 }
 
 /// H5: the LOCK ON! plate and the target's HP gauge (`kh1_recom_assets::kh1_hud::target`). KH1's
@@ -356,6 +360,19 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
 // H2: Sora's gauge cluster. KH1's rules (Checked (decomp) unless tagged), on Re:CoM's raw HP
 // (decision 39) and KH1's MP (`crate::mp`).
 
+/// Re:CoM's HP in KH1's gauge units: Re:CoM's cap 560 (`0x230`, the HP setters `0x14020D6A0` /
+/// `0x14020D8E0` clamp to it; Checked (decomp)) is KH1's drawn cap 120 (`0x78`), and every HP
+/// scales by the same 120 / 560, rounded up so a living Sora never shows 0. Decision 39's raw HP
+/// left the gauge full above 120 HP (Re:CoM's Sora has hundreds): owner, 2026-11-01, "losing
+/// health doesnt affect the health bar". The bar still grows with max HP as KH1's does.
+pub fn hp_units(recom_hp: i32) -> i32 {
+    let h = recom_hp.clamp(0, RECOM_HP_CAP);
+    (h * kh1::HP_CAP + RECOM_HP_CAP - 1) / RECOM_HP_CAP
+}
+
+/// Re:CoM's HP cap (the gauge's).
+pub const RECOM_HP_CAP: i32 = 560;
+
 /// KH1 numbers (as the asset step's `kh1_hud::kh1`).
 pub mod kh1 {
     /// HP drawn at most (`0x78`), HP filling the ring, HP a straight segment.
@@ -537,6 +554,11 @@ pub fn right_margin(gauge_xoff: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hp_units_scale_recom_cap_to_kh1_cap() {
+        assert_eq!((hp_units(0), hp_units(1), hp_units(560), hp_units(600), hp_units(300), hp_units(280)), (0, 1, 120, 120, 65, 60));
+    }
 
     #[test]
     fn manifest_round_trip_and_refusals() {

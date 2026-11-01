@@ -112,6 +112,10 @@ const HIDDEN_ARRAYS: [(usize, usize, usize); 5] = [(G_FRIEND, 0x78, 3), (G_PRIZE
 /// The mask bits the enemy gauge (`0x1402099B0`) and the minimap (`0x1401E4700`, `0x1401E43E0`)
 /// hide on. Checked (decomp).
 const MASK_ENEMY_GAUGE: u32 = 0x10;
+/// KH1's lock-on visuals (H5 LOCK ON! + target gauge, H7 cursor) instead of Re:CoM's cursor and
+/// enemy HP gauges. Off: the owner's choice, 2026-11-01 ("lets just use Re:CoM's lock on
+/// graphics", "lets have Re:CoM's health bar", and the LOCK ON! plate removed too).
+const LOCKON_KH1: bool = false;
 const MASK_MINIMAP: u32 = 8;
 const C_SIZE: usize = 0x170;
 
@@ -219,7 +223,9 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
         // SAFETY: executable memory of our own near the exe; the call sites' bytes were checked
         // at start and are checked again before the write.
         unsafe { install_masks(b) };
-        if MANIFEST.get().is_some_and(|m| m.cursor.is_some()) {
+        // H7 (KH1's lock-on cursor) is off: the owner chose Re:CoM's lock-on visuals (cursor,
+        // enemy HP gauges, no LOCK ON! plate), 2026-11-01. The wrapper stays in the code.
+        if LOCKON_KH1 && MANIFEST.get().is_some_and(|m| m.cursor.is_some()) {
             let site = crate::sites::KH1_HUD_CURSOR_HOOKS.iter().find(|h| h.name == "CLockonMarker update (0x140209D30)").expect("site");
             let h = [super::hook::Hook { site, ours: marker_update as *const () as usize, original: &ORIG_MARKER }];
             // SAFETY: as above.
@@ -650,7 +656,7 @@ impl Cluster {
 /// [`mp_seen`], which takes the lock).
 unsafe fn view_of(gauge: usize) -> View {
     let mp = super::mp::current();
-    View { hp: rd::<u16>(gauge + G_HP) as i32, max_hp: rd::<u16>(gauge + G_MAX_HP) as i32, mp }
+    View { hp: kh::hp_units(rd::<u16>(gauge + G_HP) as i32), max_hp: kh::hp_units(rd::<u16>(gauge + G_MAX_HP) as i32), mp }
 }
 
 /// Builds the cluster on `gauge` (its init has run, on draw list `list`).
@@ -709,7 +715,7 @@ unsafe fn hp_event(gauge: usize) {
     let mp = super::mp::current();
     let Ok(mut s) = STATE.lock() else { return };
     if let Some(c) = s.clusters.iter_mut().find(|c| c.gauge == gauge) {
-        let v = View { hp: rd::<u16>(gauge + G_HP) as i32, max_hp: rd::<u16>(gauge + G_MAX_HP) as i32, mp };
+        let v = View { hp: kh::hp_units(rd::<u16>(gauge + G_HP) as i32), max_hp: kh::hp_units(rd::<u16>(gauge + G_MAX_HP) as i32), mp };
         if v != c.view {
             c.show(v, false);
         }
@@ -1057,6 +1063,9 @@ unsafe fn target_new(gauge: usize, list: i32, xoff: f32, first: u32, enemy: usiz
 /// KH1's lock-on HUD follows Re:CoM's lock. Reads only, unless the lock, the target's HP or a fade
 /// changes something.
 pub unsafe fn lock_tick(pl: usize) {
+    if !LOCKON_KH1 {
+        return;
+    }
     let Some(first) = manifest().and_then(|m| m.target) else { return };
     let Ok(mut t) = TARGET.lock() else { return };
     let host = if active() { STATE.lock().ok().and_then(|s| s.clusters.iter().find(|c| !c.hidden).map(|c| (c.gauge, c.list, c.xoff))) } else { None };
@@ -1229,7 +1238,7 @@ static UP: AtomicBool = AtomicBool::new(false);
 
 /// The enemy gauge's mask read: Re:CoM's value, plus its hide bit while the KH1 HUD is up.
 pub unsafe extern "win64" fn enemy_gauge_mask(table: u32, index: u32) -> u32 {
-    func::<GetFn>(VAR_GET)(table, index) | if UP.load(Ordering::Relaxed) { MASK_ENEMY_GAUGE } else { 0 }
+    func::<GetFn>(VAR_GET)(table, index) | if LOCKON_KH1 && UP.load(Ordering::Relaxed) { MASK_ENEMY_GAUGE } else { 0 }
 }
 
 /// The minimap's mask reads: likewise with its bit.

@@ -246,6 +246,26 @@ impl Pic {
     fn blank(w: usize, h: usize) -> Pic {
         Pic { w, h, px: vec![[0; 4]; w * h] }
     }
+    /// The bilinear sample at (x, y) texels (texel centres at integers), colour weighted by alpha
+    /// (clear texels add no colour).
+    fn bilinear(&self, x: f64, y: f64) -> [u8; 4] {
+        let (x0, y0) = (x.floor(), y.floor());
+        let (fx, fy) = (x - x0, y - y0);
+        let (x0, y0) = (x0 as i64, y0 as i64);
+        let mut acc = [0f64; 4];
+        for (dx, dy, w) in [(0, 0, (1.0 - fx) * (1.0 - fy)), (1, 0, fx * (1.0 - fy)), (0, 1, (1.0 - fx) * fy), (1, 1, fx * fy)] {
+            let t = self.at(x0 + dx, y0 + dy);
+            let a = t[3] as f64 * w;
+            for c in 0..3 {
+                acc[c] += t[c] as f64 * a;
+            }
+            acc[3] += a;
+        }
+        if acc[3] <= 0.0 {
+            return [0; 4];
+        }
+        [(acc[0] / acc[3]).round() as u8, (acc[1] / acc[3]).round() as u8, (acc[2] / acc[3]).round() as u8, acc[3].round().min(255.0) as u8]
+    }
     fn at(&self, x: i64, y: i64) -> [u8; 4] {
         let x = x.clamp(0, self.w as i64 - 1) as usize;
         let y = y.clamp(0, self.h as i64 - 1) as usize;
@@ -519,9 +539,12 @@ fn render(fan: &[[i32; 4]], wedge: Option<&[[i32; 4]; 3]>, src: &Pic, src_scale:
                     }
                     let u = lc * c[2] as f64 + la * a[2] as f64 + lb * b[2] as f64;
                     let v = lc * c[3] as f64 + la * a[3] as f64 + lb * b[3] as f64;
-                    let tu = (u * src_scale as f64 / 16.0).floor() as i64;
-                    let tv = (v * src_scale as f64 / 16.0).floor() as i64;
-                    let mut t = src.at(tu, tv);
+                    // The PC pictures are sampled bilinearly (alpha-weighted), as KH1 PC's filtered
+                    // draw does: point samples of a mirrored quarter landed a texel either side
+                    // along the outlines and made them uneven (owner, 2026-11-01: "the health bar
+                    // and MP bar are REALLY ugly looking"). The PS2 copy keeps the GS's point
+                    // sample.
+                    let mut t = if s > 1 { src.bilinear(u * src_scale as f64 / 16.0 - 0.5, v * src_scale as f64 / 16.0 - 0.5) } else { src.at((u * src_scale as f64 / 16.0).floor() as i64, (v * src_scale as f64 / 16.0).floor() as i64) };
                     if soft {
                         // Gouraud alpha: 1 at c and a, 0 at b (the GS's vertex alpha × texel alpha / 128).
                         t[3] = ((t[3] as f64) * (1.0 - lb).clamp(0.0, 1.0)).round() as u8;
@@ -2037,7 +2060,17 @@ pub mod menu {
             groups.push(held1(vec![t]));
             groups.push(held1(vec![mpiece(&o[2], p2, 0, 0, ext, over)]));
             groups.push(held1(vec![mpiece(&o[0], p2, 0, 0, ext, over), mpiece(&o[1], p2, 0, 0, 0, over)]));
-            groups.push(held1(vec![mpiece(&o[4], p2, 0, 0, ext, None), mpiece(&o[5], p2, 0, 0, ext, sel_over), mpiece(&o[6], p2, 0, 0, ext, None), mpiece(&o[7], p2, 0, 0, ext, None)]));
+            // The selection's gradient: black on top, the field's blue (the object's own) or, in
+            // battle, the panels' red at the bottom (`0x14027A2B0` with `0x140278B40`'s
+            // `local_108` block: vertices (0, 0, 0), (109, 30, 32), (0, 0, 0), (109, 30, 32);
+            // Checked (decomp)). Owner, 2026-11-01: "in battle, the command menu still has a blue
+            // tint".
+            let mut gra = mpiece(&o[6], p2, 0, 0, ext, None);
+            if let Some([r, g, b]) = over {
+                let a = (o[6].colours[1][3].clamp(0, 255)) as u32;
+                gra.grad = r.clamp(0, 255) as u32 | (g.clamp(0, 255) as u32) << 8 | (b.clamp(0, 255) as u32) << 16 | a << 24;
+            }
+            groups.push(held1(vec![mpiece(&o[4], p2, 0, 0, ext, None), mpiece(&o[5], p2, 0, 0, ext, sel_over), gra, mpiece(&o[7], p2, 0, 0, ext, None)]));
             for k in 9..12 {
                 groups.push(held1(vec![mpiece(&o[k], p1, ext, 0, 0, None)]));
             }
