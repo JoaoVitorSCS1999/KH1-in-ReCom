@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 53: MP bar under the FRIENDS row, version 0.24.2 (2026-10-31)
+
+> Owner's video (2026-10-31): the MP bar sits over Re:CoM's FRIENDS row (label and friend cards
+> under the HP bar), and after Combat Re:CoM → KH1 the rebuilt bar appeared far off.
+
+- The bar (and its fade pieces) now sits 40 units lower, under the friend cards (measured on the
+  video: cards' bottom ≈ 84 units, the bar's top was 50). Assumption until a screenshot.
+- The off-place rebuild is what 0.24.1's rest transform addresses (not yet seen: the game was
+  running 0.24.0 in the video). Not seen in game.
+
+---
+
 ## Stage 52: Command menu installs; MP bar placed at rest, version 0.24.1 (2026-10-31)
 
 > "The command menu isnt there. the MP bar clips through the \"friends\" bar, and also, when switching

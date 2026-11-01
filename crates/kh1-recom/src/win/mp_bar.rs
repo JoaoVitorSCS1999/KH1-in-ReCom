@@ -46,6 +46,11 @@ const CLEAR: u32 = 0x0024_7C90;
 const ALL_VISIBLE: u32 = 0x0024_7EC0;
 const PARENT: u32 = 0x0024_8650;
 const POSITION: u32 = 0x0024_85B0;
+/// The bar's drop below its data position (the Dark gauge's place, under the HP bar), in 2D
+/// units: Re:CoM's "FRIENDS" row (label and friend cards) sits there in Sora's story, so the bar
+/// goes under the cards (owner's video, 2026-10-31: the bar "clips through the friends bar";
+/// cards' bottom ≈ 84 units, the bar's top 50 → +40). Assumption until a screenshot.
+const BAR_DY: f32 = 40.0;
 const SCALE: u32 = 0x0024_86D0;
 // Re:CoM data (RVAs).
 const SEQ_CTRL_VTABLE: u32 = 0x0060_7340;
@@ -202,7 +207,7 @@ unsafe fn new_ctrl(hp: usize) -> Option<usize> {
     // The control's own transform starts at rest: a rebuilt bar (Combat switched back to KH1)
     // otherwise drew wherever the reused memory left it (owner, 2026-10-31: "randomly placed
     // somewhere else each time").
-    func::<VecFn>(POSITION)(c, V4([0.0, 0.0, 0.0, 1.0]).0.as_ptr());
+    func::<VecFn>(POSITION)(c, V4([0.0, BAR_DY, 0.0, 1.0]).0.as_ptr());
     func::<VecFn>(SCALE)(c, V4([1.0, 1.0, 1.0, 1.0]).0.as_ptr());
     Some(c)
 }
@@ -233,7 +238,7 @@ impl Bar {
             Some(c) => c,
             None => new_ctrl(self.hp)?,
         };
-        func::<VecFn>(POSITION)(c, V4([p.x, 0.0, 0.0, 1.0]).0.as_ptr());
+        func::<VecFn>(POSITION)(c, V4([p.x, BAR_DY, 0.0, 1.0]).0.as_ptr());
         let s = V4([p.scale, 1.0, 1.0, 1.0]);
         func::<VecFn>(SCALE)(c, s.0.as_ptr());
         add(c, l, p.group, self.xoff, 0);
