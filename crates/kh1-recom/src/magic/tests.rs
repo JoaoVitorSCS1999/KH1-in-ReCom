@@ -542,6 +542,54 @@ fn stop_strikes_one_every_4_frames_nearest_first() {
     assert!(s.done());
 }
 
+/// M7 f3 (decision 38): the held hits land at KH1's pace (6–11 frames apart) in Re:CoM's stop exe.
+#[test]
+fn stop_held_hits_land_at_kh1s_pace_in_recoms_stop_exe() {
+    // KH1's delay `6 − (int)(r × −6)`: 6 .. 11 frames, a sixth each.
+    assert_eq!([0.0, 0.1666, 0.17, 0.5, 0.8334, 0.999_999].map(stop::held_gap), [6.0, 6.0, 7.0, 9.0, 11.0, 11.0]);
+    let mut seen = [0; 12];
+    let mut rng = Kh1Rand::new(7);
+    for _ in 0..6000 {
+        seen[stop::held_gap(rng.next_f32()) as usize] += 1;
+    }
+    assert!(seen[..6].iter().all(|&n| n == 0) && seen[6..].iter().all(|&n| n > 800 && n < 1200), "{seen:?}");
+    // Re:CoM's order, frame by frame (`0x1401A59A0`): the timer down by dt when above 0; the hit
+    // handler (our wrapper: the frame after a landing, the timer for KH1's gap); the stop exe (phase
+    // 1 lands the held hit and sets its own timer, half the reaction: here 1500; phase 2 waits while
+    // the timer is above 0, then the next index, phase 1).
+    for gaps in [vec![6.0, 6.0, 6.0], vec![11.0, 7.0, 9.0, 6.0, 10.0, 8.0, 11.0]] {
+        let count = gaps.len() + 1;
+        let (mut phase, mut timer, mut index, mut paced) = (1, 0i32, 0usize, None);
+        let mut landed = Vec::new();
+        for frame in 0..200 {
+            if timer > 0 {
+                timer -= 50;
+            }
+            if phase == 2 && paced != Some(index) && index + 1 < count {
+                paced = Some(index);
+                timer = stop::landing_timer(gaps[index], 50);
+            }
+            match phase {
+                1 if index < count => {
+                    landed.push(frame);
+                    timer = 1500;
+                    phase = 2;
+                }
+                1 => phase = 3,
+                2 if timer <= 0 => {
+                    index += 1;
+                    phase = 1;
+                }
+                _ => {}
+            }
+        }
+        let got: Vec<f32> = landed.windows(2).map(|w| (w[1] - w[0]) as f32).collect();
+        assert_eq!(got, gaps, "{landed:?}");
+    }
+    // At 30 fps (100 ticks a game frame) the same time: 8 KH1 frames = 4 game frames = 2 of timer.
+    assert_eq!((stop::landing_timer(6.0, 50), stop::landing_timer(11.0, 50), stop::landing_timer(8.0, 100)), (200, 450, 200));
+}
+
 #[test]
 fn aero_rows_barrier_and_wind_are_kh1s() {
     let t = kh1_magic_table(&recom_rows());

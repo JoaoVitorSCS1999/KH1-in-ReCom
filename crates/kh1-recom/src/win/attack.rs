@@ -574,6 +574,8 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     if !mv::kh1_on() {
         return o(enemy);
     }
+    // M7 f3 (decision 38): KH1's pace for the hits Stop held (one compare unless they are landing).
+    super::magic::held_hit_pace(enemy);
     let Some(part) = take_kh1_hit(enemy) else {
         // M7 stage 7.4: one of our KH1 spell shots hit this enemy.
         if let Some((part, s, lv)) = super::magic::take_hit(enemy) {

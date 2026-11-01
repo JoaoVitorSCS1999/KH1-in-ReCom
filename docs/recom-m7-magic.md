@@ -998,7 +998,58 @@ by one with its reaction); (b) read KH1's post-Stop landing pace (`0x1402B7260` 
 queue handling) and, if it differs, land Re:CoM's held list at KH1's pace by setting the stop
 exe's per-landing timer (`+0x160` in its phase 2) from our hit wrapper; (c) also lift the 8-hit cap
 (needs a larger held list than Re:CoM's 8 × 0x30 slots at `+0x340`: a design change in Re:CoM's
-enemy object, not just data).
+enemy object, not just data). **Answered by decision 38: (b), Re:CoM's 8-hit cap kept.** Built
+below (M7 f3).
+
+### M7 f3: the held hits land at KH1's pace
+
+**KH1 (Checked (decomp)):**
+
+| what | KH1 (Steam) |
+|---|---|
+| A hit on a stopped actor (`+0x88 & 1`) takes the record builder's third branch (`0x1402BF630`, pool `0x142DE6E10`, 128 records for everyone: no per-actor cap); **if the actor's queue (`+0x3EC`) already holds a record**, the new record's `+0xC` bits 12–15 get a delay of **`6 − (int)(r × −6)` frames**, `r` = `0x14031BA30()` = three `rand()` low bytes / 2²⁴ ∈ [0, 1): **6..11 frames, equally likely**. The first record of an empty queue has none. (`+0xC |= 0x800`, and `0x10000` while stopped.) | `0x1402BF630` (`0x1402BF84C..`), `0x14031BA30` |
+| While stopped the actor's update skips the hit pass (only Stop records are handled); when the timer `+0x3E4` runs out the bit clears. | `0x140297FE0` |
+| From the next frame the hit pass `0x1402B8E10` loops `0x1402BF160` (pop): a head with a delay loses one and **ends the pop for this frame**; a head with none is applied (`0x1402B7B90`: the damage, `0x1402BEEE0`) and the next head is looked at in the same frame. | `0x1402B8E10`, `0x1402BF160` |
+
+So the first held hit lands on the first frame after Stop, and **each next one 6–11 frames after
+the one before** (each its own random delay).
+
+**In Re:CoM (Checked (decomp + disasm)):** the stop exe `0x1401843A0` phase 1 lands the held hit
+`+0x33E` (HP, effect, reaction) and sets the per-landing timer `+0x160` to half its reaction motion
+or 750 ticks (`0x140184910`), phase 2 (`0x14018499D`) waits while the timer is above 0, then
+`+0x33E += 1`, phase 1, which lands the next one the frame after. The actor update `0x1401A59A0`
+counts `+0x160` down by the enemy's dt (`+0x14`) **before** its pre-update (`+0x78`: the hit
+handler, our wrapper) and the state machine's exe (`0x1401A5A7F`).
+
+**Built:** in the enemy-hit wrapper (`0x14017F7E0`, no new hook), at Combat = KH1:
+`win::magic::held_hit_pace(enemy)`: when the enemy is in Re:CoM's stop state (`+0x60` = `+0x940`,
+the hit handler's own test) in phase 2 with a held index not yet paced (the frame after a landing)
+and another held hit to come, the timer becomes **`gap × 50 − 2 × dt` ticks** (`magic::stop::
+landing_timer`) with **KH1's gap** (`stop::held_gap` of KH1's own `0x14031BA30` random, kh1-core's
+`Kh1Rand::next_f32`, seeded once per session): Re:CoM then lands the next held hit exactly `gap`
+frames after the last. The last held hit keeps Re:CoM's own wait before its recovery. Re:CoM's
+8-hit cap, its landing, damage, effect and reaction are its own.
+
+- **Per frame:** one compare per enemy update (its state), a small list only while held hits land.
+- **Log / trace:** `magic: stop held hits on 0x…: hit i of n landed; the next in KH1's g frames
+  (Re:CoM's timer t -> t' ticks)` (40 lines); F9 event `held i/n next gf`.
+- **Sites** (`sites::MAGIC_CHECKED`, checked only): `0x140184910` `B8 EE 02 00 00 48 8B CF 89 87 60
+  01 00 00`; `0x14018499D` `83 B9 60 01 00 00 00 0F 8F 2B 02 00 00 66 FF 81 3E 03 00 00 C7 81 70 02
+  00 00 01 00 00 00`; `0x1401A5A7F` (39 bytes: `+0x160 −= +0x14`, `call [rax+0x78]`, `[rdi+0x58]`
+  `+8`). Checked (exe).
+- **1:1:** Checked (decomp + tests: `magic::tests::stop_held_hits_land_at_kh1s_pace_in_recoms_stop_exe`):
+  KH1's 6..11 frames and their even spread; a frame-by-frame replay of Re:CoM's order (timer down,
+  wrapper, exe phases 1 / 2) landing hits exactly at the gaps (6, 6, 6 and 11, 7, 9, 6, 10, 8, 11);
+  the 30 fps ticks. **Assumptions:** (1) the first held hit lands one frame after Stop in both games
+  (Re:CoM: phase 0 → 1, then the landing; KH1: the bit clears, then the hit pass) — not traced;
+  (2) KH1's random draws are shared with everything else KH1 rolls, so the exact sequence isn't
+  reproducible, only its law (6..11, even); (3) a held hit of value < 1 ("no effect") lands at once
+  in Re:CoM (no timer), KH1 waits its delay (not changed).
+- **Not 1:1 (decision 38 keeps it):** Re:CoM holds at most 8 hits; KH1 holds all.
+- **Not checked:** in game. **In-game check:** Stop a Heartless and hit it 5 times: when it thaws
+  the first hit lands at once, then the others one by one about a tenth to a fifth of a second
+  apart (6–11 frames), faster than before (Re:CoM's half-reaction); log `stop held hits … the next
+  in KH1's … frames`.
 
 In-game checklist (7.9):
 

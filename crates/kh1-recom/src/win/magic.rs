@@ -806,6 +806,93 @@ pub unsafe fn stopped(enemy: usize) -> bool {
     rd::<u64>(enemy + enemy_stop::FLAGS) & enemy_stop::STOPPED != 0
 }
 
+/// Re:CoM's stop exe's landing fields (M7 f3; Checked (decomp `0x1401843A0` + disasm `0x140184910`,
+/// `0x14018499D`)): the enemy's current state (`+0x60`, the hit handler's own stop test), the exe's
+/// phase (`+0x270`: 1 lands the held hit `+0x33E`, 2 waits for the timer), the timer (`+0x160`,
+/// counted down by the actor update `0x1401A59A0` by the enemy's dt `+0x14` before its hit handler),
+/// the held count (`+0x33C`, at most 8) and the index (`+0x33E`).
+mod held {
+    pub const CUR_STATE: usize = 0x60;
+    pub const PHASE: usize = 0x270;
+    pub const WAITING: i32 = 2;
+    pub const TIMER: usize = 0x160;
+    pub const COUNT: usize = 0x33C;
+    pub const INDEX: usize = 0x33E;
+    pub const DT: usize = 0x14;
+}
+
+/// The enemies whose held hits are landing: (enemy, the landing already paced), at most 32; and
+/// whether there are any (one load per enemy update otherwise).
+static PACED: Mutex<Vec<(usize, i16)>> = Mutex::new(Vec::new());
+static PACED_ANY: AtomicBool = AtomicBool::new(false);
+/// KH1's `rand()` (`0x14031BA30` draws three of it for each held record's delay), seeded once.
+static PACE_RNG: Mutex<Option<kh1_core::Kh1Rand>> = Mutex::new(None);
+static PACE_LINES: AtomicU32 = AtomicU32::new(40);
+
+/// Decision 38, M7 f3: KH1's pace for the hits held during Stop. From the enemy-hit wrapper (every
+/// enemy update at Combat = KH1, after Re:CoM counted the timer down, before the state exe): in
+/// Re:CoM's stop state (Re:CoM keeps its 8-hit cap), **the frame after each landing** (phase 2 with a
+/// held index not yet paced), the per-landing timer is set so that the next held hit lands **KH1's
+/// 6–11 frames** after this one (`crate::magic::stop::held_gap` with KH1's random, then
+/// `landing_timer`). Everything else is Re:CoM's: the landing, its damage, effect and reaction.
+pub unsafe fn held_hit_pace(enemy: usize) {
+    use enemy_stop::STOP_STATE;
+    let in_stop = rd::<usize>(enemy + held::CUR_STATE) == enemy + STOP_STATE;
+    if !in_stop {
+        if PACED_ANY.load(Ordering::Relaxed) {
+            if let Ok(mut g) = PACED.try_lock() {
+                g.retain(|e| e.0 != enemy);
+                PACED_ANY.store(!g.is_empty(), Ordering::Relaxed);
+            }
+        }
+        return;
+    }
+    if rd::<i32>(enemy + held::PHASE) != held::WAITING {
+        return;
+    }
+    let index: i16 = rd(enemy + held::INDEX);
+    // After the last held hit there is no next one to pace: Re:CoM's own wait before its recovery.
+    if index as i32 + 1 >= rd::<i16>(enemy + held::COUNT) as i32 {
+        return;
+    }
+    let Ok(mut g) = PACED.try_lock() else { return };
+    match g.iter_mut().find(|e| e.0 == enemy) {
+        Some(e) if e.1 == index => return,
+        Some(e) => e.1 = index,
+        None => {
+            if g.len() >= 32 {
+                g.remove(0);
+            }
+            g.push((enemy, index));
+        }
+    }
+    PACED_ANY.store(true, Ordering::Relaxed);
+    drop(g);
+    let r = match PACE_RNG.lock() {
+        Ok(mut rng) => rng
+            .get_or_insert_with(|| {
+                let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.subsec_nanos() ^ d.as_secs() as u32);
+                kh1_core::Kh1Rand::new(seed)
+            })
+            .next_f32(),
+        Err(_) => 0.0,
+    };
+    let gap = mg::stop::held_gap(r);
+    let dt: i32 = rd(enemy + held::DT);
+    let dt = if dt > 0 { dt } else { 50 };
+    let old: i32 = rd(enemy + held::TIMER);
+    let timer = mg::stop::landing_timer(gap, dt);
+    wr(enemy + held::TIMER, timer);
+    let count: i16 = rd(enemy + held::COUNT);
+    if PACE_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!(
+            "magic: stop held hits on {enemy:#x}: hit {} of {count} landed; the next in KH1's {gap:.0} frames (Re:CoM's timer {old} -> {timer} ticks)",
+            index as i32 + 1
+        ));
+    }
+    event(format!("held {}/{count} next {gap:.0}f", index as i32 + 1));
+}
+
 /// Re:CoM's Gravity case's descriptor `+0xB8` (`lea rax,[0x1407C78D0]`). Checked (disasm
 /// `0x140222B09`).
 const GRAVITY_DESC_B8: u64 = 0x1_407C_78D0;

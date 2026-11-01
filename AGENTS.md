@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 61: Stop's held hits at KH1's pace, version 0.27.3 (2026-10-31)
+
+- KH1 (Checked, decomp): each held hit after the first lands 6–11 frames after the previous
+  (`6 − (int)(r·−6)`). In the existing enemy-hit wrapper, Re:CoM's per-landing timer is set to
+  `gap·50 − 2·dt` after each landing; Re:CoM's 8-hit cap kept. Checked sites `0x140184910`,
+  `0x14018499D`, `0x1401A5A7F`. Not seen in game.
+
+---
+
 ## Stage 60: Gravity: KH1's squash under the falling sphere, version 0.27.2 (2026-10-31)
 
 > Decision 38 asked for a slow; KH1 has none: its field `+0x480` only scales the model's height

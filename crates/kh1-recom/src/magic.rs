@@ -778,6 +778,38 @@ pub mod stop {
     pub fn ticks(max_mp: i32, resist9: f32) -> Option<i16> {
         frames(max_mp, resist9).map(|f| (f * 50.0).round().clamp(1.0, i16::MAX as f32) as i16)
     }
+
+    /// KH1's pace for the hits held during Stop (decision 38; M7 f3). Checked (decomp):
+    ///
+    /// - a hit on a stopped actor makes a record from the third pool of the record builder
+    ///   `0x1402BF630` (`+0x88 & 1`); **when the actor's queue already holds a record**, the new one
+    ///   gets a delay in its `+0xC` bits 12–15 of `6 − (int)(r × −6)` frames, `r` = `0x14031BA30()`
+    ///   (24 random bits / 2²⁴), so **6 to 11 frames, each equally likely**; the first record of an
+    ///   empty queue has none;
+    /// - when Stop ends, the hit pass `0x1402B8E10` pops the queue every frame (`0x1402BF160`): a
+    ///   head with a delay loses one and stops the pop for that frame; a head with none is applied
+    ///   (damage and reaction) and the next one is looked at in the same frame.
+    ///
+    /// So the first held hit lands on the first frame after Stop, and each next one **its own 6–11
+    /// frames after the one before**. No cap (the pool has 128 records for everyone). Re:CoM holds at
+    /// most 8 (kept: decision 38) and spaces them by half its reaction motion (or 750 ticks).
+    pub fn held_gap(r: f32) -> f32 {
+        6.0 - (r * -6.0).trunc()
+    }
+
+    /// The frames between two landings that Re:CoM's order adds to the per-landing timer: the actor
+    /// update (`0x1401A59A0`) counts `+0x160` down by its dt **before** the hit handler (our wrapper
+    /// sets the timer there, the frame after a landing) and the state exe; the stop exe's phase 2
+    /// (`0x14018499D`) goes back to phase 1 when the timer is ≤ 0, and phase 1 lands the next hit on
+    /// the frame after. Checked (decomp + disasm).
+    pub const LANDING_OVERHEAD: f32 = 2.0;
+
+    /// The per-landing timer (ticks) our wrapper writes the frame after a landing so that Re:CoM's
+    /// stop exe lands the next held hit `gap` KH1 frames (60 Hz, 50 ticks each) after it, with the
+    /// enemy's dt (ticks a game frame; the overhead is in game frames).
+    pub fn landing_timer(gap: f32, dt: i32) -> i32 {
+        (gap * crate::units::UNITS_PER_FRAME - LANDING_OVERHEAD * dt.max(1) as f32).max(0.0).round() as i32
+    }
 }
 
 /// KH1's Stop attack data (btltbl `0x65B8` / `0x6628` / `0x6698`, Checked (files)): power 2 + max MP
