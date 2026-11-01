@@ -321,6 +321,14 @@ At KH1 setting:
     - **Re:CoM's HUD components are hidden** for now (minimap, room plate, EXP popup, Moogle
       points, FRIENDS row, Re:CoM's HP gauge). **Remind the owner** once the KH1 elements are right
       to place the Re:CoM extras (minimap, room plate, …): they will give exact places.
+    - Details (owner, 2026-10-31): **HP ring: KH1's rule on Re:CoM's raw HP** (5° per HP to
+      270°, then 26-unit segments per 6 HP); **Donald / Goofy gauges hidden until they join**
+      (shown while Re:CoM has them out); **menu words in KH1's font converted into a Re:CoM
+      font**; **command menu colour: KH1's field look in the field, the battle look in battle
+      rooms**; **Re:CoM's enemy gauges hidden and KH1's lock-on cursor used** (Re:CoM's level-up
+      choice kept); **low-HP sound: Re:CoM's**. Research `kh1-hud.md` (kept with the decomp tools);
+      plan H0 (read-only dump of KH1's 24 `exchange/*_uibin_*.bin` layouts and HD textures on the
+      owner's PC) then H1–H8, one element per version.
 
 ## Known open design questions (ask the owner, don't guess)
 
