@@ -51,6 +51,7 @@ pub static ORIG_GOOFY: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_EXIT: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_DTOR: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_MARKER: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_POPUP: AtomicUsize = AtomicUsize::new(0);
 /// H6: the friend objects Re:CoM has out now (Donald, Goofy), 0 when not.
 static FRIEND: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
 static STATE: Mutex<State> = Mutex::new(State { gauges: Vec::new(), clusters: Vec::new() });
@@ -226,6 +227,16 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
                 log("kh1 hud: KH1's lock-on cursor at hud = kh1 (H7): CLockonMarker update 0x140209D30 wrapped");
             } else {
                 log("kh1 hud: lock-on marker not hooked; Re:CoM's cursor stays");
+            }
+        }
+        if MANIFEST.get().is_some_and(|m| m.level_up.is_some()) {
+            let site = &crate::sites::KH1_HUD_POPUP_HOOKS[0];
+            let h = [super::hook::Hook { site, ours: popup as *const () as usize, original: &ORIG_POPUP }];
+            // SAFETY: as above.
+            if unsafe { super::hook::install_all(b, &h) } {
+                log("kh1 hud: KH1's LEVEL UP!! at hud = kh1 (H8): CCommonGauge popup 0x14020C9A0 wrapped");
+            } else {
+                log("kh1 hud: popups not hooked; Re:CoM's LEVEL UP! stays");
             }
         }
         if MANIFEST.get().is_some_and(|m| m.party.is_some()) {
@@ -742,6 +753,51 @@ pub unsafe fn hud(gauge: usize, state: u32) {
 }
 
 // -------------------------------------------------------------------------------------------------
+// H8: KH1's popups where Re:CoM has the event.
+
+/// `CCommonGauge` (`[0x14087B6A8]`, H3's table): its seven popup controls `+0x60` (0x170 each).
+const COMMON_GAUGE: usize = 0x0087_B6A8;
+const CG_CTRLS: usize = 0x60;
+type PopupFn = unsafe extern "win64" fn(i32, i32);
+
+/// The LEVEL UP!! box we show (one at a time) and its list.
+static LEVEL_BOX: Mutex<Option<(usize, i32)>> = Mutex::new(None);
+
+/// `0x14020C9A0(actor, kind)`: Re:CoM's popup; at `hud = kh1` its level up (kind 4) is KH1's
+/// LEVEL UP!! box instead (Re:CoM's control drawn at alpha 0, ours played from its keys' start).
+pub unsafe extern "win64" fn popup(actor: i32, kind: i32) {
+    orig::<PopupFn>(&ORIG_POPUP)(actor, kind);
+    if kind != kh::POPUP_LEVEL_UP || !UP.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(group) = manifest().and_then(|m| m.level_up) else { return };
+    let cg: usize = rd(base() + COMMON_GAUGE);
+    if cg != 0 {
+        let arr: usize = rd(cg + CG_CTRLS);
+        if arr != 0 {
+            tint(arr + kind as usize * C_SIZE, 0.0);
+        }
+    }
+    let host = STATE.lock().ok().and_then(|s| s.clusters.iter().find(|c| !c.hidden).map(|c| (c.list, c.xoff)));
+    let Some((list, xoff)) = host else { return };
+    let Ok(mut lb) = LEVEL_BOX.lock() else { return };
+    let c = match lb.take() {
+        Some((c, l)) => {
+            super::d2::clear(c, l);
+            c
+        }
+        None => match new_ctrl() {
+            Some(c) => c,
+            None => return,
+        },
+    };
+    func::<VecFn>(LAYOUT_POS)(c, V4([kh::LEVEL_UP_AT.0, kh::LEVEL_UP_AT.1, 0.0, 1.0]).0.as_ptr());
+    add(c, list, PRIORITY_FRONT, group, -xoff, 0);
+    *lb = Some((c, list));
+    note(|| "LEVEL UP!!: KH1's box (H8) for Re:CoM's level up".to_string());
+}
+
+// -------------------------------------------------------------------------------------------------
 // H7: KH1's lock-on cursor in place of Re:CoM's.
 
 /// `Gauge::CLockonMarker` (Checked (decomp `0x140208120`, `0x140209D30`)): its cursor control
@@ -1057,6 +1113,11 @@ pub unsafe fn lock_tick(pl: usize) {
 
 /// The gauge's deleting dtor (before Re:CoM's): our controls go.
 pub unsafe fn destroy(gauge: usize) {
+    if let Ok(mut lb) = LEVEL_BOX.lock() {
+        if let Some((c, l)) = lb.take() {
+            super::d2::delete(c, l);
+        }
+    }
     // The lock-on marker is made and deleted with the player's HUD (`0x1401FA6E0` makes both):
     // our cursor goes with any player gauge.
     if let Ok(mut c) = CURSOR.lock() {

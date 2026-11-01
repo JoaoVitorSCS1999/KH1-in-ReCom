@@ -423,6 +423,42 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
    target, the same size near and far; Re:CoM's marker is gone. Switching targets replays it.
 2. `hud = recom`: Re:CoM's marker as before.
 
+## H8: KH1's popups where Re:CoM has the event
+
+### What maps (Checked (decomp) unless tagged)
+
+| KH1 popup (task) | Re:CoM event | built? |
+|---|---|---|
+| LEVEL UP!! box (`lev_s`, `0x140272F10`: Sora's at (left margin + 16, 16), keys, hold 91 frames, fade − 0.125 a frame) | the level up: `0x1401E5730` raises the level, then `0x14020C9A0(Sora, 4)` (CCommonGauge "LEVEL UP!") and sound 0x36 | **yes**: KH1's box replaces Re:CoM's popup at `hud = kh1` (Re:CoM's level-up choice screen stays, decision 39) |
+| EXP popups (`exp`: "EXP" + digits over a defeated enemy, `0x1402719F0`) | Re:CoM counts EXP at the battle end (`CPrizeGauge`'s EXP + popup, hidden by H3) | no: KH1's per-enemy floating EXP needs Re:CoM's per-enemy EXP and a projected popup per kill; owner question |
+| munny counter (`mani`) | Moogle points (`CPrizeGauge` TOTAL MOOGLE P) | no: a different currency; owner question |
+| item / "FULL GET!!" windows (`get*`, `full`) | Re:CoM's card and prize pickups | no: items are M8 |
+| HP-orb pickups | Re:CoM's HP prizes heal with its "Recover" popup (`0x14020C9A0` kind 0/1: Assumption) | none in KH1 (HP balls heal silently): Re:CoM's "Recover" stays (H3 kept it) |
+| Tech!! (`tech`), "!" bubbles (`feel`), Danger! (`danger`) | none | no |
+
+### Native build (LEVEL UP!!)
+
+- **Data:** `lev_s` objects 6..12 (the box's header and "LEVEL UP!!", pictures 3 and 1) baked per
+  frame from their colour and position keys (frame k = key time (k + 1) / 2), held to KH1's frame
+  94, faded over 8 frames, then nothing (one played group). `kh1-hud.json` `"level_up": group`.
+- **DLL:** a wrapper on `0x14020C9A0` (`sites::KH1_HUD_POPUP_HOOKS`, `48 89 5C 24 10 56 48 83 EC
+  20`): after Re:CoM's, kind 4 at `hud = kh1` draws Re:CoM's level-up control at alpha 0 and plays
+  KH1's box on a control of ours at (16, 16) with the left margin. Nothing per frame.
+
+### Not 1:1 / to check (H8)
+
+1. Only the box's header is drawn (KH1 lists the stat gains in rows under it; Re:CoM's choice
+   screen does that here). Which `lev_s` pieces close a box with no rows: not read.
+2. Flipping `hud` back to `recom` mid-room leaves Re:CoM's LEVEL UP! control at alpha 0 until the
+   next room's HUD.
+
+### What the in-game test must check (H8)
+
+1. Level up at a battle's end with `hud = kh1`: KH1's red LEVEL UP!! box drops in top-left, stays
+   ~1.5 s and fades; Re:CoM's "LEVEL UP!" over Sora does not show; Re:CoM's level-up choice
+   follows as before.
+2. Log: `kh1 hud: LEVEL UP!!: KH1's box (H8) for Re:CoM's level up`.
+
 ## H3: Re:CoM's HUD hidden at `hud = kh1` (visual only)
 
 ### What owns what (Checked (decomp + exe: RTTI))

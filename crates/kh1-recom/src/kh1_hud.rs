@@ -199,6 +199,13 @@ pub mod target {
 /// Checked (exe)), added to the objects' places with the right margin.
 pub const PARTY_OFFSET: [(f32, f32); 2] = [(0.0, 0.0), (68.0, 20.0)];
 
+/// H8: Re:CoM's actor popups (`0x14020C9A0(actor, kind)`, `CCommonGauge`): kind 4 is the level
+/// up (its only caller `0x1401E5730` raises Sora's level, then plays sound 0x36; Checked
+/// (decomp)). KH1's LEVEL UP!! box at (left margin + 16, 16) (`0x140272F10`) replaces it.
+pub const POPUP_LEVEL_UP: i32 = 4;
+/// The LEVEL UP!! box's place (Sora's column, `0x140272F10`).
+pub const LEVEL_UP_AT: (f32, f32) = (16.0, 16.0);
+
 /// The menu groups of the manifest.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MenuGroups {
@@ -233,6 +240,8 @@ pub struct Manifest {
     pub party: Option<[u32; 2]>,
     /// KH1's lock-on cursor group (H7), when built.
     pub cursor: Option<u32>,
+    /// KH1's LEVEL UP!! box group (H8), when built.
+    pub level_up: Option<u32>,
 }
 
 /// Reads `kh1-hud.json`; refuses another format or group count than this DLL's.
@@ -323,7 +332,12 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
         Some(Some(c)) if c < groups => Some(c),
         Some(_) => return Err("a bad cursor entry".into()),
     };
-    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party, cursor })
+    let level_up = match v.get("level_up").map(|c| c.as_u32()) {
+        None => None,
+        Some(Some(c)) if c < groups => Some(c),
+        Some(_) => return Err("a bad level_up entry".into()),
+    };
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party, cursor, level_up })
 }
 
 // -------------------------------------------------------------------------------------------------

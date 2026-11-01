@@ -65,6 +65,8 @@ pub const PLATE_CORNER: usize = 96;
 pub const LOCK: &str = "exchange/UK_uibin_lock.bin";
 /// The target's HP gauge (`0x140274E00`).
 pub const G_ENM: &str = "exchange/UK_uibin_g_enm.bin";
+/// KH1's LEVEL UP!! box (`0x1402724D0` loads it; H8).
+pub const LEV_S: &str = "exchange/UK_uibin_lev_s.bin";
 /// The party's gauges (slots 1, 2; loader `0x140268800`).
 pub const G_C: &str = "exchange/UK_uibin_g_c.bin";
 /// KH1 PC's menu font (font 1 of the table `0x1404D9150`, the command words `0x14027A920` →
@@ -855,6 +857,8 @@ pub struct Sources<'a> {
     pub g_enm: Option<&'a [u8]>,
     /// H6: `g_c`.
     pub g_c: Option<&'a [u8]>,
+    /// H8: `lev_s`.
+    pub lev_s: Option<&'a [u8]>,
     /// The three faces (Sora, Donald, Goofy).
     pub faces: [Source; 3],
 }
@@ -901,6 +905,8 @@ pub struct Built {
     pub party: Option<[usize; 2]>,
     /// H7: the lock-on cursor's group.
     pub cursor: Option<usize>,
+    /// H8: the LEVEL UP!! box's group.
+    pub level_up: Option<usize>,
 }
 
 fn colour_of(o: &Obj) -> u32 {
@@ -1252,6 +1258,11 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         Some(gc) => Some(party::build(gc, [it6, bk.src5_item(&mut atlas, &pics[p5], &pic_langs[p5])], [faces[1], faces[2]], [src.faces[1].ps2.h as i32, src.faces[2].ps2.h as i32], &mut groups)?),
         None => None,
     };
+    // H8: KH1's LEVEL UP!! box (`lev_s`, pictures 3 and 1).
+    let level_built = match src.lev_s {
+        Some(l) => Some(popup::level_up(l, [mp[2], mp[0]], &mut groups)?),
+        None => None,
+    };
     let groups_total = groups.len();
     let packed = build_atlas(&atlas, langs.len())?;
     let base = seqd(&groups, &packed, false)?;
@@ -1271,6 +1282,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         target: target_built,
         party: party_built,
         cursor: cursor_built,
+        level_up: level_built,
     })
 }
 
@@ -1972,6 +1984,86 @@ pub mod cursor {
     }
 }
 
+/// H8: KH1's popups where Re:CoM has the event. Built: the LEVEL UP!! box (`0x140272F10`, Checked
+/// (decomp + files)): Sora's box at (left margin + 16, 16); state 1 restarts its objects' keys,
+/// 2 steps, 3 holds 91 frames (`> 0x5A`), 4, then 5 fades alpha − 0.125 a frame, 6 ends. Its header
+/// is `lev_s` objects 6..11 (frame, picture 3) and 12 (`level_up_s`, "LEVEL UP!!", picture 1),
+/// each with colour keys (alpha 0 → 128 → 96 over 10 + 10 frames) and position keys (the drop-in:
+/// y 36 → −12 → 6 → −3 → 0 over 10 + 6 + 2 + 2 frames). Baked per frame (frame k = key time
+/// (k + 1) / 2), held, faded and ended in the data: Re:CoM plays it once.
+pub mod popup {
+    use super::*;
+
+    /// The header's objects.
+    pub const HEADER: [&str; 7] = ["lev_s_fra_top", "lev_s_fra_2_top", "lev_s_fra_3_top", "lev_s_fra_4_top", "lev_s_fra_5_top", "lev_s_fra_6_top", "level_up_s"];
+    /// Frames KH1 holds the box (state 3 counts to 0x5A, then one frame of state 4), after the
+    /// first two states' frames.
+    pub const HOLD: i32 = 2 + 0x5B + 1;
+    /// The fade: − 0.125 a frame.
+    pub const FADE: i32 = 8;
+
+    fn lerp(keys: &[crate::uibin::Key], t: f32) -> Option<Vec<f32>> {
+        let mut at = 0.0;
+        for w in keys.windows(2) {
+            if w[0].dur <= 0 {
+                break;
+            }
+            let d = w[0].dur as f32;
+            if t <= at + d {
+                let f = (t - at) / d;
+                return Some(w[0].vals.iter().zip(&w[1].vals).map(|(a, b)| a + (b - a) * f).collect());
+            }
+            at += d;
+        }
+        keys.last().map(|k| k.vals.clone())
+    }
+
+    /// The LEVEL UP!! box's group (appended); returns it.
+    pub(crate) fn level_up(lev_s: &[u8], [p3, p1]: [usize; 2], groups: &mut Vec<Group>) -> Result<usize> {
+        let u = Uibin::parse(lev_s)?;
+        let mut objs = Vec::new();
+        for (k, n) in HEADER.iter().enumerate() {
+            let o = u.objs.get(6 + k).filter(|o| o.name == *n).ok_or_else(|| crate::Error::Format(format!("{LEV_S}: object {} is not {n}", 6 + k)))?;
+            objs.push(o);
+        }
+        let keys_of = |o: &Obj, a: bool| -> Vec<crate::uibin::Key> {
+            let (f, n) = if a { o.keys_a } else { o.keys_c };
+            let src = if a { &u.keys_a } else { &u.keys_c };
+            src.get(f.max(0) as usize..(f + n).max(0) as usize).map(|k| k.to_vec()).unwrap_or_default()
+        };
+        let len = |k: &[crate::uibin::Key]| k.iter().take_while(|k| k.dur > 0).map(|k| k.dur).sum::<i32>();
+        let keyed = objs.iter().map(|o| 2 * len(&keys_of(o, true)).max(len(&keys_of(o, false)))).max().unwrap_or(0);
+        let col = |v: &[f32], f: f32| v[0].clamp(0.0, 255.0) as u32 | (v[1].clamp(0.0, 255.0) as u32) << 8 | (v[2].clamp(0.0, 255.0) as u32) << 16 | ((v[3] * f).clamp(0.0, 255.0) as u32) << 24;
+        let pieces = |t: f32, fade: f32| -> Vec<Piece> {
+            objs.iter()
+                .enumerate()
+                .map(|(k, o)| {
+                    let (uv, mu, mv) = o.texels();
+                    let r = lerp(&keys_of(o, false), t).map(|v| [v[0] as i32, v[1] as i32, v[2] as i32, v[3] as i32]).unwrap_or(o.rect);
+                    let [x, y, w, h] = r;
+                    let rect = [if mu { x + w } else { x }, if mv { y + h } else { y }, if mu { x } else { x + w }, if mv { y } else { y + h }];
+                    let c = lerp(&keys_of(o, true), t).unwrap_or_else(|| o.colours[0].iter().map(|&v| v as f32).collect());
+                    Piece { item: if k == 6 { p1 } else { p3 }, uv, rect, colour: col(&c, fade), grad: 0 }
+                })
+                .collect()
+        };
+        let one = 0x8080_8080;
+        let mut steps = Vec::new();
+        let hold = HOLD.max(keyed);
+        for k in 0..hold {
+            steps.push(Step { pieces: pieces((k + 1) as f32 / 2.0, 1.0), frames: (k, k), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+        }
+        for j in 0..FADE {
+            let f = 1.0 - 0.125 * (j + 1) as f32;
+            steps.push(Step { pieces: pieces(hold as f32, f), frames: (hold + j, hold + j), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+        }
+        // Over: the group's longest animation (kept drawn after the end) shows nothing.
+        steps.push(Step { pieces: pieces(hold as f32, 0.0), frames: (hold + FADE, LONG), colour: (0x0080_8080, 0x0080_8080), flags: FLAGS_STATIC, tr: [0; 4] });
+        groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
+        Ok(groups.len() - 1)
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Adding the set to Re:CoM's files.
 
@@ -2039,6 +2131,9 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)]) ->
     );
     let _ = writeln!(s, "  \"units\": [{}],", (0..m.first.len()).map(|u| format!("[{}, {}]", m.first[u], m.programs_of(u).len())).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"runs\": [{}],", m.runs.iter().map(|r| format!("[{}, {}, {}, {}]", r.0, r.1, r.2, r.3)).collect::<Vec<_>>().join(", "));
+    if let Some(l) = b.level_up {
+        let _ = writeln!(s, "  \"level_up\": {l},");
+    }
     if let Some(c) = b.cursor {
         let _ = writeln!(s, "  \"cursor\": {c},");
     }
@@ -2221,6 +2316,7 @@ mod tests {
             g_act: &rd("exchange/UK_uibin_g_act.bin"),
             lock: Some(&lock),
             g_c: Some(&rd("exchange/UK_uibin_g_c.bin")),
+            lev_s: Some(&rd("exchange/UK_uibin_lev_s.bin")),
             g_enm: Some(&g_enm),
             menu: Some(MenuSources {
                 com: &com,
@@ -2280,6 +2376,7 @@ mod tests {
         assert!(b.target.is_some());
         assert!(b.party.is_some());
         assert!(b.cursor.is_some());
+        assert!(b.level_up.is_some());
         // KH1's g_act tracks at 2 frames a key unit: vibe_s 5 units, vibe_ss 11, vibe_sss 19,
         // the slides 10.
         assert_eq!(b.motion.programs.iter().map(|p| p.len).collect::<Vec<_>>(), vec![10, 22, 38, 10, 10, 20, 20]);

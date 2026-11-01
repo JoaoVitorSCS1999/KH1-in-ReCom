@@ -640,6 +640,13 @@ pub const KH1_HUD_CURSOR_HOOKS: &[Site] = &[
     Site { name: "CLockonMarker update (0x140209D30)", rva: 0x0020_9D30, expect: &[0x40, 0x57, 0x48, 0x81, 0xEC, 0x80, 0x00, 0x00, 0x00] },
 ];
 
+/// The KH1 HUD (decision 39, H8): Re:CoM's actor popups (`CCommonGauge`, `0x14020C9A0(actor,
+/// kind)`), wrapped for KH1's LEVEL UP!! box. Bytes read from the Steam exe (2026-11-01).
+pub const KH1_HUD_POPUP_HOOKS: &[Site] = &[
+    // mov [rsp+0x10],rbx; push rsi; sub rsp,0x20 (the next instruction is rip-relative)
+    Site { name: "CCommonGauge popup (0x14020C9A0)", rva: 0x0020_C9A0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x56, 0x48, 0x83, 0xEC, 0x20] },
+];
+
 /// The KH1 HUD (decision 39, H3): Re:CoM's HUD-hide mask reads (`call 0x1401B08C0`, ecx = 1,
 /// edx = 0xE2) of the enemy gauge (`CEnemyGauge` update `0x1402099B0`, bit 0x10) and the minimap
 /// (`CNaviMap` `0x1401E4700` ×3, `0x1401E43E0`, bit 8), retargeted to our getter, which adds the
@@ -1118,6 +1125,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(KH1_HUD_HOOKS)
         .chain(KH1_HUD_PARTY_HOOKS)
         .chain(KH1_HUD_CURSOR_HOOKS)
+        .chain(KH1_HUD_POPUP_HOOKS)
         .chain(KH1_HUD_MASK_CALLS)
         .chain(KH1_HUD_MASK_CHECKED)
         .chain(KH1_HUD_CALLEES)
@@ -1226,7 +1234,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(KH1_HUD_CURSOR_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(KH1_HUD_CURSOR_HOOKS).chain(KH1_HUD_POPUP_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
@@ -1658,7 +1666,7 @@ mod tests {
         let m = KH1_HUD_CALLEES.iter().find(|s| s.rva == 0x0024_71D0).unwrap();
         assert_eq!(m.rva as i64 + 17 + i32::from_le_bytes(m.expect[13..17].try_into().unwrap()) as i64, 0x0060_7340);
         // H6 / H7 wrappers move whole instructions only (no rip-relative operand, no call).
-        for h in KH1_HUD_PARTY_HOOKS.iter().chain(KH1_HUD_CURSOR_HOOKS) {
+        for h in KH1_HUD_PARTY_HOOKS.iter().chain(KH1_HUD_CURSOR_HOOKS).chain(KH1_HUD_POPUP_HOOKS) {
             assert!(h.expect.len() >= 5 && !h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
         }
     }
