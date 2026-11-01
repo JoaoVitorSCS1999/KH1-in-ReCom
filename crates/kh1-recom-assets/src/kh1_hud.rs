@@ -63,6 +63,8 @@ pub const PLATE_CORNER: usize = 96;
 pub const LOCK: &str = "exchange/UK_uibin_lock.bin";
 /// The target's HP gauge (`0x140274E00`).
 pub const G_ENM: &str = "exchange/UK_uibin_g_enm.bin";
+/// The party's gauges (slots 1, 2; loader `0x140268800`).
+pub const G_C: &str = "exchange/UK_uibin_g_c.bin";
 /// KH1 PC's menu font (font 1 of the table `0x1404D9150`, the command words `0x14027A920` →
 /// `0x1402D1CD0`): `Image/dt/Theater` `<lang>/font/menufont.tm2` (2048 × 2048 32-bit), `.cod`
 /// (8-byte glyphs: code, x, y, 0, width), `.inf` (count, size, cell). Checked (files).
@@ -781,6 +783,11 @@ struct Baker {
 }
 
 impl Baker {
+    /// Picture 5 itself as an atlas item (the party's full quarter rings are its texels).
+    fn src5_item(&mut self, atlas: &mut Atlas, ps2: &Source, per: &[Pic]) -> usize {
+        atlas.add(ps2.ps2.clone(), vec![per[0].clone()], ps2.scale)
+    }
+
     /// The piece of the fan [a0, a1] of ring `r` (picture 5, or picture 7 per language).
     fn piece(&mut self, atlas: &mut Atlas, r: (i32, i32, i32), p: usize, a0: i32, a1: i32) -> Piece {
         self.piece_soft(atlas, r, p, a0, a1, false)
@@ -844,6 +851,8 @@ pub struct Sources<'a> {
     pub lock: Option<&'a [u8]>,
     /// `g_enm`.
     pub g_enm: Option<&'a [u8]>,
+    /// H6: `g_c`.
+    pub g_c: Option<&'a [u8]>,
     /// The three faces (Sora, Donald, Goofy).
     pub faces: [Source; 3],
 }
@@ -886,6 +895,8 @@ pub struct Built {
     pub menu: Option<menu::Built>,
     /// H5: the target groups' first group.
     pub target: Option<usize>,
+    /// H6: Donald's and Goofy's gauge groups.
+    pub party: Option<[usize; 2]>,
 }
 
 fn colour_of(o: &Obj) -> u32 {
@@ -1216,6 +1227,11 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         (Some(l), Some(e)) => Some(target::build(l, e, [p0, mp[0], it6], &mut groups)?),
         _ => None,
     };
+    // H6: Donald's and Goofy's gauges, full (Re:CoM's friends have no HP or MP).
+    let party_built = match src.g_c {
+        Some(gc) => Some(party::build(gc, [it6, bk.src5_item(&mut atlas, &pics[p5], &pic_langs[p5])], [faces[1], faces[2]], [src.faces[1].ps2.h as i32, src.faces[2].ps2.h as i32], &mut groups)?),
+        None => None,
+    };
     let groups_total = groups.len();
     let packed = build_atlas(&atlas, langs.len())?;
     let base = seqd(&groups, &packed, false)?;
@@ -1233,6 +1249,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         groups: groups_total,
         menu: menu_built,
         target: target_built,
+        party: party_built,
     })
 }
 
@@ -1830,6 +1847,53 @@ pub mod target {
     }
 }
 
+/// H6: Donald's and Goofy's gauges (slots 1 and 2; KH1 Checked (decomp + exe + files) unless
+/// tagged): `g_c` objects at their places, the slot's offset (Donald (0, 0), Goofy (68, 20):
+/// `0x140527330`, `0x140527370`) + the right margin; the face (48 × 48, `xa_ex_0040` / `0050`)
+/// centred on (399, 44) (`0x1405272C0`, `0x14027F470`). Drawn full: the HP ring's three quarters
+/// (`g_c_bar_b/c/d_hp`, picture 5, the texels KH1's fan samples for r26) and the MP ring's
+/// (`_mp`, r32), over their dark backs (`g_c_fra_b/c/d_*`, picture 6), the face frame
+/// (`g_c_fra_a_w`) and disc (`g_c_fra_a_a`). Order as Sora's (`0x14026CF90`): frame, disc, HP
+/// back, MP back, MP, HP, face. Assumption: the party's draw order is Sora's.
+pub mod party {
+    use super::*;
+
+    /// The face's centre (`0x1405272C0`).
+    pub const CENTRE: (i32, i32) = (399, 44);
+
+    /// Builds Donald's and Goofy's groups; returns them.
+    pub(crate) fn build(g_c: &[u8], [p6, p5]: [usize; 2], faces: [usize; 2], face_h: [i32; 2], groups: &mut Vec<Group>) -> Result<[usize; 2]> {
+        let u = Uibin::parse(g_c)?;
+        let names = ["g_c_fra_a_w", "g_c_fra_a_a", "g_c_fra_b_hp", "g_c_fra_b_mp", "g_c_fra_c_hp", "g_c_fra_c_mp", "g_c_fra_d_hp", "g_c_fra_d_mp"];
+        for (k, n) in names.iter().enumerate() {
+            if u.objs.get(k).map(|o| o.name.as_str()) != Some(n) {
+                return bad(format!("{G_C}: object {k} is not {n}"));
+            }
+        }
+        for (k, n) in [(14, "g_c_bar_b_hp"), (15, "g_c_bar_b_mp"), (16, "g_c_bar_c_hp"), (17, "g_c_bar_c_mp"), (18, "g_c_bar_d_hp"), (19, "g_c_bar_d_mp")] {
+            if u.objs.get(k).map(|o| o.name.as_str()) != Some(n) {
+                return bad(format!("{G_C}: object {k} is not {n}"));
+            }
+        }
+        let o = &u.objs;
+        let one = 0x8080_8080;
+        let mut out = [0usize; 2];
+        for m in 0..2 {
+            let mut v = vec![obj_piece(&o[0], p6, 0, 0, 0, None), obj_piece(&o[1], p6, 0, 0, 0, None)];
+            v.extend([2, 4, 6].map(|k| obj_piece(&o[k], p6, 0, 0, 0, None)));
+            v.extend([3, 5, 7].map(|k| obj_piece(&o[k], p6, 0, 0, 0, None)));
+            v.extend([15, 17, 19].map(|k| obj_piece(&o[k], p5, 0, 0, 0, None)));
+            v.extend([14, 16, 18].map(|k| obj_piece(&o[k], p5, 0, 0, 0, None)));
+            let h = face_h[m];
+            let (cx, cy) = CENTRE;
+            v.push(Piece { item: faces[m], uv: [0, 0, h, h], rect: [cx - h / 2, cy - h / 2, cx + h / 2, cy + h / 2], colour: one, grad: 0 });
+            out[m] = groups.len();
+            groups.push(Group { steps: vec![Step { pieces: v, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] }], once: true, word: GROUP_WORD_SCRUB });
+        }
+        Ok(out)
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Adding the set to Re:CoM's files.
 
@@ -1897,6 +1961,9 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)]) ->
     );
     let _ = writeln!(s, "  \"units\": [{}],", (0..m.first.len()).map(|u| format!("[{}, {}]", m.first[u], m.programs_of(u).len())).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"runs\": [{}],", m.runs.iter().map(|r| format!("[{}, {}, {}, {}]", r.0, r.1, r.2, r.3)).collect::<Vec<_>>().join(", "));
+    if let Some([d, g]) = b.party {
+        let _ = writeln!(s, "  \"party\": [{d}, {g}],");
+    }
     if let Some(t) = b.target {
         let _ = writeln!(s, "  \"target\": {{\"first\": {t}}},");
     }
@@ -2072,6 +2139,7 @@ mod tests {
             g_red: &rd("exchange/UK_uibin_g_red.bin"),
             g_act: &rd("exchange/UK_uibin_g_act.bin"),
             lock: Some(&lock),
+            g_c: Some(&rd("exchange/UK_uibin_g_c.bin")),
             g_enm: Some(&g_enm),
             menu: Some(MenuSources {
                 com: &com,
@@ -2129,6 +2197,7 @@ mod tests {
         eprintln!("menu: first group {}, {} glyphs, missing {:?}, words {:?}", mn.first, mn.glyphs, mn.missing, mn.words);
         assert!(mn.missing.is_empty());
         assert!(b.target.is_some());
+        assert!(b.party.is_some());
         // KH1's g_act tracks at 2 frames a key unit: vibe_s 5 units, vibe_ss 11, vibe_sss 19,
         // the slides 10.
         assert_eq!(b.motion.programs.iter().map(|p| p.len).collect::<Vec<_>>(), vec![10, 22, 38, 10, 10, 20, 20]);

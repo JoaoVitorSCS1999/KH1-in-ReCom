@@ -336,6 +336,48 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
 3. Release the lock: both fade out (6 / 5 frames).
 4. Log: `kh1 hud: lock on: target … HP h/m (…)`.
 
+## H6: Donald's and Goofy's gauges (top right)
+
+### KH1 (Checked (decomp + exe + files) unless tagged)
+
+- Slots 1 and 2 draw with Sora's functions; their objects are `g_c` (32) at absolute places
+  around (400, 44), plus the slot offset (Donald `0x140527330` (0, 0), Goofy `0x140527370`
+  (68, 20)) and the right margin; the face 48 × 48 (`xa_ex_0040` / `0050` section 2) centred on
+  `0x1405272C0` (399, 44). Rings: HP r26 (`0x140527400`, picture 5's `g_c_bar_*_hp` quarters),
+  MP r32 (`_mp`), backs `g_c_fra_*` (picture 6); straight parts 17 apart past 54 HP / 9 MP.
+- Re:CoM (Checked (decomp + strings)): `Friend::CFriend` (ctor `0x1401D9000`, base dtor
+  `0x1401D90F0` run by every friend's), `CFriendDonald::beginStateAppear` `0x1401DDC20`,
+  `CFriendGoofy::beginStateAppear` `0x1401DF9C0`, `CFriend::beginStateExit` `0x1401D94D0`.
+  Re:CoM's friends have no HP or MP of their own.
+
+### Native build
+
+- **Data:** two held groups (Donald, Goofy): face frame, disc, HP back, MP back, MP ring, HP ring
+  (the three full quarters each), face. `kh1-hud.json` `"party": [donald, goofy]`.
+- **DLL:** per player gauge two controls at the slot offsets (right margin +86), hidden; four
+  wrappers (`sites::KH1_HUD_PARTY_HOOKS`, first bytes checked): a friend's appear shows its gauge,
+  `CFriend`'s exit or dtor hides it; Re:CoM's HUD hide hides them. Nothing per frame.
+
+### Owner questions (H6)
+
+1. **What the gauges show** (Re:CoM's friends have no HP / MP): built full rings (HP 54 / MP 9:
+   the whole ring, no straight part). (a) keep; (b) KH1's party stats for Sora's level; (c) the
+   friend card's value as HP.
+2. Only while the friend is out (decision 39); with Combat = KH1 there are no friend cards
+   (decision 4), so they show only at Combat = Re:CoM with `hud = kh1`.
+
+### Not done / to check
+
+1. KH1's partial rings and straight parts for the party (not needed while they are full).
+2. Draw order of the party's pieces: Sora's (Assumption).
+3. KH1's `g_help` / `g_lose` circles (a member called / down) are not used.
+
+### What the in-game test must check (H6)
+
+1. `hud = kh1`, Combat = Re:CoM, a battle with a Donald card: his gauge appears top-right at
+   KH1's place when he appears, and goes when he leaves. The same for Goofy (68, 20 further).
+2. Log: `kh1 hud: Donald out: KH1 gauge shown (H6)` / `gone: gauge hidden`.
+
 ## H3: Re:CoM's HUD hidden at `hud = kh1` (visual only)
 
 ### What owns what (Checked (decomp + exe: RTTI))

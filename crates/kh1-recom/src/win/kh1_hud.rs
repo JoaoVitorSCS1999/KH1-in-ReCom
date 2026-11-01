@@ -46,6 +46,12 @@ static HOOKED: AtomicBool = AtomicBool::new(false);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
 pub static ORIG_HP: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_MAX_HP: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_DONALD: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_GOOFY: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_EXIT: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_DTOR: AtomicUsize = AtomicUsize::new(0);
+/// H6: the friend objects Re:CoM has out now (Donald, Goofy), 0 when not.
+static FRIEND: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
 static STATE: Mutex<State> = Mutex::new(State { gauges: Vec::new(), clusters: Vec::new() });
 
 // Re:CoM functions (RVAs; first bytes checked in `sites`).
@@ -146,6 +152,8 @@ struct Cluster {
     /// The held layers' frames as set (FRAME … TICKS, the `kh::frames` order).
     shown: [i32; 7],
     motion: Option<Running>,
+    /// H6: Donald's and Goofy's gauge controls (0 without the data).
+    party: [usize; 2],
 }
 
 struct State {
@@ -209,6 +217,21 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
         // SAFETY: executable memory of our own near the exe; the call sites' bytes were checked
         // at start and are checked again before the write.
         unsafe { install_masks(b) };
+        if MANIFEST.get().is_some_and(|m| m.party.is_some()) {
+            let ps = |n: &str| crate::sites::KH1_HUD_PARTY_HOOKS.iter().find(|h| h.name == n).expect("site");
+            let party = [
+                super::hook::Hook { site: ps("CFriendDonald appear (0x1401DDC20)"), ours: donald_appear as *const () as usize, original: &ORIG_DONALD },
+                super::hook::Hook { site: ps("CFriendGoofy appear (0x1401DF9C0)"), ours: goofy_appear as *const () as usize, original: &ORIG_GOOFY },
+                super::hook::Hook { site: ps("CFriend exit (0x1401D94D0)"), ours: friend_exit as *const () as usize, original: &ORIG_EXIT },
+                super::hook::Hook { site: ps("CFriend dtor (0x1401D90F0)"), ours: friend_dtor as *const () as usize, original: &ORIG_DTOR },
+            ];
+            // SAFETY: as above.
+            if unsafe { super::hook::install_all(b, &party) } {
+                log("kh1 hud: Donald's and Goofy's KH1 gauges while Re:CoM has them out (H6): CFriendDonald / CFriendGoofy appear, CFriend exit and dtor wrapped");
+            } else {
+                log("kh1 hud: friend functions not hooked; no party gauges");
+            }
+        }
     } else {
         log("kh1 hud: HP setters not hooked; no KH1 gauge");
     }
@@ -541,6 +564,29 @@ impl Cluster {
         }
     }
 
+    /// H6: Donald's and Goofy's gauges (hidden until Re:CoM has them out).
+    unsafe fn party_build(&mut self) {
+        let Some(groups) = manifest().and_then(|m| m.party) else { return };
+        for k in 0..2 {
+            let Some(c) = new_ctrl() else { return };
+            let (dx, dy) = kh::PARTY_OFFSET[k];
+            func::<VecFn>(LAYOUT_POS)(c, V4([dx, dy, 0.0, 1.0]).0.as_ptr());
+            add(c, self.list, PRIORITY_BACK, groups[k], self.xoff, 1);
+            self.party[k] = c;
+        }
+        self.party_show();
+    }
+
+    /// Shows a party gauge while its friend is out and the HUD is up.
+    unsafe fn party_show(&self) {
+        for k in 0..2 {
+            if self.party[k] != 0 {
+                let on = !self.hidden && FRIEND[k].load(Ordering::Relaxed) != 0;
+                func::<VisFn>(ALL_VISIBLE)(self.party[k], on as i32);
+            }
+        }
+    }
+
     /// Re:CoM's HUD hides (state 7) or shows (1) the gauge: KH1's 10-frame gauge fade
     /// (`0x140268E30`: alpha ±0.1 a frame) on the units; at once when `now` (the build) or without
     /// motion data.
@@ -561,6 +607,7 @@ impl Cluster {
         if !hidden && self.danger {
             self.red_on();
         }
+        self.party_show();
     }
 
     unsafe fn destroy(&mut self) {
@@ -571,7 +618,7 @@ impl Cluster {
         for p in self.mp.drain(..).chain(self.charge.drain(..)).chain(self.red.drain(..)) {
             super::d2::delete(p.ctrl, self.list);
         }
-        for c in self.pool.drain(..).chain(self.ctrls) {
+        for c in self.pool.drain(..).chain(self.ctrls).chain(self.party.into_iter().filter(|&c| c != 0)) {
             super::d2::delete(c, self.list);
         }
     }
@@ -614,7 +661,8 @@ unsafe fn build(gauge: usize, list: i32) {
     for (g, _) in kh::frames(&v).iter().skip(4) {
         add(ctrls[1], list, PRIORITY_FRONT, *g, xoff, 1);
     }
-    let mut cl = Cluster { gauge, list, xoff, class, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None };
+    let mut cl = Cluster { gauge, list, xoff, class, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2] };
+    cl.party_build();
     cl.show(v, true);
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
     if hidden {
@@ -680,6 +728,57 @@ pub unsafe fn hud(gauge: usize, state: u32) {
             c.hide(hide, false);
         }
     }
+}
+
+// -------------------------------------------------------------------------------------------------
+// H6: Donald's and Goofy's gauges, while Re:CoM has them out as friends.
+
+type FriendFn = unsafe extern "win64" fn(usize);
+type FriendDtorFn = unsafe extern "win64" fn(usize, usize, usize, usize);
+
+fn friend_changed(k: usize, obj: usize, out: bool) {
+    let was = FRIEND[k].swap(if out { obj } else { 0 }, Ordering::Relaxed);
+    if (was != 0) != out {
+        note(|| format!("{} {}", ["Donald", "Goofy"][k], if out { "out: KH1 gauge shown (H6)" } else { "gone: gauge hidden" }));
+        if let Ok(s) = STATE.lock() {
+            for c in &s.clusters {
+                // SAFETY: a live cluster.
+                unsafe { c.party_show() };
+            }
+        }
+    }
+}
+
+/// `CFriendDonald::beginStateAppear` (`0x1401DDC20(friend)`): Re:CoM's, then the gauge shows.
+pub unsafe extern "win64" fn donald_appear(f: usize) {
+    orig::<FriendFn>(&ORIG_DONALD)(f);
+    friend_changed(0, f, true);
+}
+
+/// `CFriendGoofy::beginStateAppear` (`0x1401DF9C0(friend)`).
+pub unsafe extern "win64" fn goofy_appear(f: usize) {
+    orig::<FriendFn>(&ORIG_GOOFY)(f);
+    friend_changed(1, f, true);
+}
+
+/// `CFriend::beginStateExit` (`0x1401D94D0(friend)`): the friend leaves; its gauge hides.
+pub unsafe extern "win64" fn friend_exit(f: usize) {
+    for k in 0..2 {
+        if FRIEND[k].load(Ordering::Relaxed) == f {
+            friend_changed(k, f, false);
+        }
+    }
+    orig::<FriendFn>(&ORIG_EXIT)(f);
+}
+
+/// `CFriend`'s dtor (`0x1401D90F0`, run by every friend's): a friend that goes without its exit.
+pub unsafe extern "win64" fn friend_dtor(f: usize, a: usize, b: usize, c: usize) {
+    for k in 0..2 {
+        if FRIEND[k].load(Ordering::Relaxed) == f {
+            friend_changed(k, f, false);
+        }
+    }
+    orig::<FriendDtorFn>(&ORIG_DTOR)(f, a, b, c);
 }
 
 // -------------------------------------------------------------------------------------------------

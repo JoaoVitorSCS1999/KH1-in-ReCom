@@ -620,6 +620,19 @@ pub const KH1_HUD_HOOKS: &[Site] = &[
     Site { name: "CPlayerGauge max HP (0x14020D8E0)", rva: 0x0020_D8E0, expect: &[0x45, 0x33, 0xC0, 0x0F, 0xB7, 0xC2, 0x85, 0xD2] },
 ];
 
+/// The KH1 HUD (decision 39, H6): Re:CoM's friends (`Friend::CFriend`) as they come and go,
+/// wrapped for Donald's and Goofy's gauges. Bytes read from the Steam exe (2026-11-01).
+pub const KH1_HUD_PARTY_HOOKS: &[Site] = &[
+    // push rbx; sub rsp,0x40; mov rbx,rcx ("CFriendDonald:: beginStateAppear()")
+    Site { name: "CFriendDonald appear (0x1401DDC20)", rva: 0x001D_DC20, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x40, 0x48, 0x8B, 0xD9] },
+    // mov [rsp+8],rbx; push rdi; sub rsp,0x40; mov rbx,rcx ("CFriendGoofy:: beginStateAppear()")
+    Site { name: "CFriendGoofy appear (0x1401DF9C0)", rva: 0x001D_F9C0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x40, 0x48, 0x8B, 0xD9] },
+    // mov [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x40 ("CFriend:: beginStateExit()")
+    Site { name: "CFriend exit (0x1401D94D0)", rva: 0x001D_94D0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x40] },
+    // push rbx; sub rsp,0x30; mov qword [rsp+0x20],-2 (the base dtor every friend's runs, "out")
+    Site { name: "CFriend dtor (0x1401D90F0)", rva: 0x001D_90F0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF] },
+];
+
 /// The KH1 HUD (decision 39, H3): Re:CoM's HUD-hide mask reads (`call 0x1401B08C0`, ecx = 1,
 /// edx = 0xE2) of the enemy gauge (`CEnemyGauge` update `0x1402099B0`, bit 0x10) and the minimap
 /// (`CNaviMap` `0x1401E4700` ×3, `0x1401E43E0`, bit 8), retargeted to our getter, which adds the
@@ -1088,6 +1101,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(MP_CHECKED)
         .chain(MP_BAR_HOOKS)
         .chain(KH1_HUD_HOOKS)
+        .chain(KH1_HUD_PARTY_HOOKS)
         .chain(KH1_HUD_MASK_CALLS)
         .chain(KH1_HUD_MASK_CHECKED)
         .chain(KH1_HUD_CALLEES)
@@ -1196,7 +1210,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);

@@ -484,6 +484,8 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     // H5: the LOCK ON! plate and the target gauge.
     let lock = inst.read(kh::LOCK).ok();
     let g_enm = inst.read(kh::G_ENM).ok();
+    // H6: the party's gauges.
+    let g_c = inst.read(kh::G_C).ok();
     // H4: the command menu's layouts, KH1's menu font (Image/dt/Theater) and the words.
     let menu_files = kh1_menu_files(game, &keys, &inst);
     let mut faces = Vec::new();
@@ -504,7 +506,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
             None
         }
     };
-    let src = kh::Sources { uitex: &uitex, uitex_hd: &uitex_hd, g_s: &g_s, g_red: &g_red, g_act: &g_act, menu, lock: lock.as_deref(), g_enm: g_enm.as_deref(), faces };
+    let src = kh::Sources { uitex: &uitex, uitex_hd: &uitex_hd, g_s: &g_s, g_red: &g_red, g_act: &g_act, menu, lock: lock.as_deref(), g_enm: g_enm.as_deref(), g_c: g_c.as_deref(), faces };
     let b = kh::build(&src, &lrefs).map_err(|e| e.to_string())?;
     bar.spr = kh::add_to_spr(&bar.spr, &mut bar.assets, &b, &langs).map_err(|e| format!("{}: {e}", mb::SPR_PATH))?;
     let e = arc.find(mb::RTM_PATH).ok_or_else(|| format!("{} not in Recom.hed", mb::RTM_PATH))?;

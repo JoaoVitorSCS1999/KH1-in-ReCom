@@ -195,6 +195,10 @@ pub mod target {
     }
 }
 
+/// H6: the party slots' offsets (`0x140527330` Donald (0, 0), `0x140527370` Goofy (68, 20);
+/// Checked (exe)), added to the objects' places with the right margin.
+pub const PARTY_OFFSET: [(f32, f32); 2] = [(0.0, 0.0), (68.0, 20.0)];
+
 /// The menu groups of the manifest.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MenuGroups {
@@ -225,6 +229,8 @@ pub struct Manifest {
     pub menu: Option<MenuGroups>,
     /// The LOCK ON! plate and target gauge's first group (H5), when built.
     pub target: Option<u32>,
+    /// Donald's and Goofy's gauge groups (H6), when built.
+    pub party: Option<[u32; 2]>,
 }
 
 /// Reads `kh1-hud.json`; refuses another format or group count than this DLL's.
@@ -305,7 +311,12 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
             Some(first)
         }
     };
-    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target })
+    let party = match v.get("party").map(|p| nums(p)) {
+        None => None,
+        Some(Some(p)) if p.len() == 2 && p.iter().all(|&g| g < groups) => Some([p[0], p[1]]),
+        Some(_) => return Err("a bad party entry".into()),
+    };
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party })
 }
 
 // -------------------------------------------------------------------------------------------------
