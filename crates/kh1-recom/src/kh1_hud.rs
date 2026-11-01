@@ -4,7 +4,7 @@
 //! group numbering (the same as the asset step's).
 
 /// The manifest's format line (as `kh1_recom_assets::kh1_hud::FORMAT`).
-pub const FORMAT: &str = "kh1-recom-assets kh1-hud 1";
+pub const FORMAT: &str = "kh1-recom-assets kh1-hud 2";
 /// The sprite set's name in Re:CoM's 2D registry, NUL-terminated.
 pub const SET: &[u8] = b"kh1hud:00\0";
 
@@ -42,8 +42,72 @@ pub mod group {
     pub const RED_SEG: u32 = 626;
     /// Danger flash of a partial one (remainder r = 1..5): 627 + r − 1.
     pub const RED_SEG_PART: u32 = 627;
-    /// Groups in all.
+    /// The fixed groups (the motion units' groups follow: [`super::Motion`]).
     pub const COUNT: u32 = 632;
+}
+
+/// H2b: the motion programs of every unit (`kh1_recom_assets::kh1_hud::motion`), in this order.
+pub mod program {
+    /// The hit shakes `vibe_s`, `vibe_ss`, `vibe_sss` (strength 0, 1, 2).
+    pub const VIBE: usize = 0;
+    /// KH1's gauge fade out (10 frames).
+    pub const FADE_OUT: usize = 3;
+    /// KH1's gauge fade in.
+    pub const FADE_IN: usize = 4;
+    /// Programs every unit has.
+    pub const BASE: usize = 5;
+    /// The size-class slides (`slide_s_h` to class 0 / 1, `slide_s_v` to class 2; `0x14026D570`).
+    pub const SLIDE_H: usize = 5;
+    /// To class 2.
+    pub const SLIDE_V: usize = 6;
+    /// Programs in all.
+    pub const COUNT: usize = 7;
+    /// The names the manifest must list, in order.
+    pub const NAMES: [&str; COUNT] = ["vibe_s", "vibe_ss", "vibe_sss", "fade_out", "fade_in", "slide_s_h", "slide_s_v"];
+}
+
+/// The slide KH1 plays for a change to `new_class` (`0x14026D570`: slot `+0x120` below class 2,
+/// `+0x1E0` for class 2).
+pub fn slide_program(new_class: usize) -> usize {
+    if new_class < 2 {
+        program::SLIDE_H
+    } else {
+        program::SLIDE_V
+    }
+}
+
+/// A motion program: the frame it is played from and its length (frames).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Program {
+    /// The group frame to play from.
+    pub start: i32,
+    /// Frames until it is over.
+    pub frames: i32,
+}
+
+/// The motion units: each a played group per program, shown instead of the held layers while a
+/// motion runs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Motion {
+    /// The programs ([`program`] order).
+    pub programs: Vec<Program>,
+    /// Each unit's first group and program count.
+    pub units: Vec<(u32, u32)>,
+    /// (held group, f0, f1, unit): the unit shows while the held group's frame is in [f0, f1].
+    pub runs: Vec<(u32, i32, i32, u32)>,
+}
+
+impl Motion {
+    /// The units held group `held` shows at `frame`, in the held group's order.
+    pub fn units_at(&self, held: u32, frame: i32) -> Vec<usize> {
+        self.runs.iter().filter(|r| r.0 == held && r.1 <= frame && frame <= r.2).map(|r| r.3 as usize).collect()
+    }
+
+    /// Unit `u`'s group for program `p` (None when the unit has no such program: the slides).
+    pub fn group(&self, u: usize, p: usize) -> Option<u32> {
+        let &(first, n) = self.units.get(u)?;
+        ((p as u32) < n).then_some(first + p as u32)
+    }
 }
 
 /// What `kh1-hud.json` says.
@@ -53,6 +117,8 @@ pub struct Manifest {
     pub groups: u32,
     /// The languages the PC copies were built for.
     pub languages: Vec<String>,
+    /// The motion units (H2b).
+    pub motion: Motion,
 }
 
 /// Reads `kh1-hud.json`; refuses another format or group count than this DLL's.
@@ -67,11 +133,40 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
         return Err(format!("set {set:?}, not kh1hud:00"));
     }
     let groups = v.get("groups").and_then(|x| x.as_u32()).ok_or("no groups")?;
-    if groups != group::COUNT {
-        return Err(format!("{groups} groups, this DLL expects {}", group::COUNT));
+    let base = v.get("base_groups").and_then(|x| x.as_u32()).ok_or("no base_groups")?;
+    if base != group::COUNT {
+        return Err(format!("{base} fixed groups, this DLL expects {}", group::COUNT));
     }
     let languages = v.get("languages").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|l| l.as_str().map(str::to_string)).collect()).unwrap_or_default();
-    Ok(Manifest { groups, languages })
+    let mut programs = Vec::new();
+    for (i, p) in v.get("programs").and_then(|x| x.as_array()).ok_or("no programs")?.iter().enumerate() {
+        let name = p.get("name").and_then(|x| x.as_str()).unwrap_or("");
+        if program::NAMES.get(i) != Some(&name) {
+            return Err(format!("program {i} is {name:?}, this DLL expects {:?}", program::NAMES.get(i)));
+        }
+        let start = p.get("start").and_then(|x| x.as_u32()).ok_or("program without start")? as i32;
+        let frames = p.get("frames").and_then(|x| x.as_u32()).ok_or("program without frames")? as i32;
+        programs.push(Program { start, frames });
+    }
+    if programs.len() != program::COUNT {
+        return Err(format!("{} programs, this DLL expects {}", programs.len(), program::COUNT));
+    }
+    let nums = |x: &crate::json::Value| -> Option<Vec<u32>> { x.as_array()?.iter().map(|n| n.as_u32()).collect() };
+    let mut units = Vec::new();
+    for u in v.get("units").and_then(|x| x.as_array()).ok_or("no units")? {
+        match nums(u).as_deref() {
+            Some(&[first, n]) if (n as usize == program::BASE || n as usize == program::COUNT) && first >= group::COUNT && first + n <= groups => units.push((first, n)),
+            _ => return Err("a bad unit".into()),
+        }
+    }
+    let mut runs = Vec::new();
+    for r in v.get("runs").and_then(|x| x.as_array()).ok_or("no runs")? {
+        match nums(r).as_deref() {
+            Some(&[g, f0, f1, u]) if g <= group::FACE && (u as usize) < units.len() => runs.push((g, f0 as i32, f1 as i32, u)),
+            _ => return Err("a bad run".into()),
+        }
+    }
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs } })
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -262,12 +357,20 @@ mod tests {
 
     #[test]
     fn manifest_round_trip_and_refusals() {
-        let ok = r#"{"format": "kh1-recom-assets kh1-hud 1", "set": "kh1hud:00", "groups": 632, "languages": ["FR", "UK"], "atlas": [1024, 512, 2048, 1024], "sources": {}}"#;
+        let ok = r#"{"format": "kh1-recom-assets kh1-hud 2", "set": "kh1hud:00", "groups": 644, "base_groups": 632, "programs": [{"name": "vibe_s", "start": 1, "frames": 10}, {"name": "vibe_ss", "start": 1, "frames": 22}, {"name": "vibe_sss", "start": 1, "frames": 38}, {"name": "fade_out", "start": 0, "frames": 10}, {"name": "fade_in", "start": 0, "frames": 10}, {"name": "slide_s_h", "start": 1, "frames": 20}, {"name": "slide_s_v", "start": 1, "frames": 20}], "units": [[632, 7], [639, 5]], "runs": [[4, 1, 10000000, 0], [4, 2, 2, 1]], "languages": ["FR", "UK"], "atlas": [1024, 512, 2048, 1024], "sources": {}}"#;
         let m = parse_manifest(ok).unwrap();
-        assert_eq!(m.groups, 632);
+        assert_eq!(m.groups, 644);
         assert_eq!(m.languages, vec!["FR", "UK"]);
-        assert!(parse_manifest(&ok.replace("632", "631")).is_err());
-        assert!(parse_manifest(&ok.replace("hud 1", "hud 0")).is_err());
+        assert_eq!(m.motion.programs[2], Program { start: 1, frames: 38 });
+        assert_eq!(m.motion.units_at(group::HP, 2), vec![0, 1]);
+        assert_eq!(m.motion.units_at(group::HP, 3), vec![0]);
+        assert_eq!(m.motion.group(1, program::FADE_IN), Some(643));
+        assert_eq!(m.motion.group(1, program::SLIDE_H), None);
+        assert_eq!(m.motion.group(0, program::SLIDE_V), Some(638));
+        assert!(parse_manifest(&ok.replace("\"base_groups\": 632", "\"base_groups\": 631")).is_err());
+        assert!(parse_manifest(&ok.replace("[639, 5]", "[639, 6]")).is_err());
+        assert!(parse_manifest(&ok.replace("vibe_ss", "vibe_xx")).is_err());
+        assert!(parse_manifest(&ok.replace("hud 2", "hud 1")).is_err());
         assert!(parse_manifest(&ok.replace("kh1hud:00", "Cockpit:00")).is_err());
     }
 

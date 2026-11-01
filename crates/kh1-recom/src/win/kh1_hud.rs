@@ -16,6 +16,12 @@
 //! are time-played groups of the set on small controls of their own, made on those events; Re:CoM
 //! plays them. The 7.2 MP bar is not made at `hud = kh1`.
 //!
+//! Stage H2b: KH1's cluster motions (the hit shake, the size-class slide, the gauge's 10-frame
+//! fade) are played groups of the set, one per *unit* (a piece set of the held groups) and
+//! program; on a hit / class change / HUD hide or show the held controls hide and the units of
+//! what they show play the program from its start (`0x140248550`), rebuilt at the same time
+//! (`0x140248000`) when the view changes meanwhile. `docs/recom-kh1-hud.md` § H2b.
+//!
 //! Stage H3: Re:CoM's HUD pieces are hidden while the KH1 HUD is up, their logic untouched:
 //! - the HP gauge (`+0x78`), the FRIENDS row (`CFriendGauge`: its 3 controls `+0x78`; its cards
 //!   take their parent's colour) and the prize gauge (`CPrizeGauge`: EXP / NEXT LV / Moogle
@@ -29,7 +35,7 @@
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
-use crate::kh1_hud::{self as kh, group, Manifest, View};
+use crate::kh1_hud::{self as kh, group, program, Manifest, View};
 use crate::settings::Mode;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -51,6 +57,13 @@ const LAYOUT_POS: u32 = 0x0024_8660;
 const COLOUR: u32 = 0x0024_8590;
 const VAR_GET: u32 = 0x001B_08C0;
 const SEQ_CTRL_VTABLE: u32 = 0x0060_7340;
+/// H2b (`sites::KH1_HUD_CALLEES`): play a layer from a time (units of 1/50 frame), a layer's time.
+const PLAY_FROM: u32 = 0x0024_8550;
+const LAYER_TIME: u32 = 0x0024_8000;
+/// Re:CoM's 2D time units a frame (`0x140245870`: frame × 50).
+const UNITS: f32 = 50.0;
+/// `C2DSeqCtrl` layer count.
+const C_LAYERS: usize = 0x16D;
 
 /// `CPlayerGauge` fields (Checked (decomp `0x14020D6A0`, `0x14020D8E0`, `0x140208360`)): HP and
 /// max HP (u16, capped at 560 by Re:CoM), the x offset, the display state.
@@ -74,6 +87,8 @@ type VecFn = unsafe extern "win64" fn(usize, *const f32);
 type HpFn = unsafe extern "win64" fn(usize, u32, i32);
 type MaxFn = unsafe extern "win64" fn(usize, u32);
 type GetFn = unsafe extern "win64" fn(u32, u32) -> u32;
+type PlayFn = unsafe extern "win64" fn(usize, u32, f32);
+type TimeFn = unsafe extern "win64" fn(usize, u32) -> u64;
 
 /// `CPlayerGauge` children (Checked (decomp `0x140208360`)): CFriendGauge, CPrizeGauge; the HP
 /// control `+0x78`.
@@ -104,6 +119,17 @@ struct Piece {
     ctrl: usize,
 }
 
+/// A running motion (H2b: KH1's slot `+0x110` motion, or KH1's gauge fade): the held layers are
+/// hidden and the units of what they show play the program's groups instead.
+struct Running {
+    prog: usize,
+    /// The class the units are placed at (a slide moves from the old class).
+    class: usize,
+    /// Controls holding the unit layers (10 a control at most). The face is a unit too for slides
+    /// and fades; a shake moves the hurt face, its own group.
+    ctrls: Vec<usize>,
+}
+
 struct Cluster {
     gauge: usize,
     list: i32,
@@ -117,6 +143,9 @@ struct Cluster {
     charge: Vec<Piece>,
     red: Vec<Piece>,
     pool: Vec<usize>,
+    /// The held layers' frames as set (FRAME … TICKS, the `kh::frames` order).
+    shown: [i32; 7],
+    motion: Option<Running>,
 }
 
 struct State {
@@ -284,7 +313,11 @@ impl Cluster {
         let c = self.ctrls[2];
         super::d2::clear(c, self.list);
         match hurt {
-            Some(s) => add(c, self.list, PRIORITY_FRONT, kh::hurt_group(s, self.danger), self.xoff, 0),
+            Some(s) => {
+                // Played from frame 1: the shake baked in it starts at KH1's key time 0.5.
+                add(c, self.list, PRIORITY_FRONT, kh::hurt_group(s, self.danger), self.xoff, 0);
+                func::<PlayFn>(PLAY_FROM)(c, 0, UNITS);
+            }
             None => {
                 add(c, self.list, PRIORITY_FRONT, group::FACE, self.xoff, 1);
                 func::<FrameFn>(FRAME)(c, 0, kh::face_frame(self.danger));
@@ -297,6 +330,8 @@ impl Cluster {
     unsafe fn show(&mut self, v: View, first: bool) {
         let old = self.view;
         let class = class_of(&v);
+        let old_class = self.class;
+        let class_changed = class != self.class && !first;
         if class != self.class {
             self.class = class;
             for &c in &self.ctrls {
@@ -316,6 +351,7 @@ impl Cluster {
             if first || f != *f0 || (*g == group::CHARGE && oc != nc) {
                 let (ci, layer) = LAYERS[k];
                 func::<FrameFn>(FRAME)(self.ctrls[ci], layer, f);
+                self.shown[k] = f;
             }
         }
         if !first && !self.hidden {
@@ -339,9 +375,10 @@ impl Cluster {
             }
         }
         let d = kh::danger(v.hp, v.max_hp);
-        let hurt = if first { None } else { kh::hurt_strength(old.hp, v.hp) };
+        let hit = if first { None } else { kh::hurt_strength(old.hp, v.hp) };
         let danger_changed = d != self.danger;
         self.danger = d;
+        self.view = v;
         if !self.hidden {
             if d && (danger_changed || old.max_hp != v.max_hp || first) {
                 self.red_on();
@@ -349,31 +386,188 @@ impl Cluster {
                 self.release(2);
             }
         }
+        // KH1's motion pointer (slot `+0x110`, `0x14026D570` / `0x140268D60`): a size-class change
+        // starts its slide (over a running shake); a hit starts its shake, and the hurt face, only
+        // while no motion runs.
+        let mut hurt = None;
+        let mut started = false;
+        if !self.hidden && class_changed {
+            started = self.start(kh::slide_program(class), old_class);
+            if !started {
+                note(|| format!("no slide units for this view (class {old_class} -> {class}): moved at once"));
+            }
+        } else if let Some(s) = hit {
+            if !self.hidden && self.motion_idle() {
+                started = self.start(program::VIBE + s.min(2), class);
+                hurt = Some(s);
+            }
+        }
         if first || hurt.is_some() || danger_changed {
             self.face(if self.hidden { None } else { hurt });
+        }
+        if !started {
+            self.follow();
         }
         if danger_changed && !first {
             note(|| format!("danger {} (HP {}/{})", if d { "on: max-HP flash" } else { "off" }, v.hp, v.max_hp));
         }
-        self.view = v;
     }
 
-    unsafe fn hide(&mut self, hidden: bool) {
-        for &c in &self.ctrls {
-            func::<VisFn>(ALL_VISIBLE)(c, (!hidden) as i32);
+    /// The motion's elapsed frames (its first unit layer's time), None without one.
+    unsafe fn elapsed(&self) -> Option<i32> {
+        let r = self.motion.as_ref()?;
+        let p = manifest()?.motion.programs.get(r.prog)?;
+        let c = *r.ctrls.first()?;
+        let t = func::<TimeFn>(LAYER_TIME)(c, 0) as u32 as i32;
+        Some(t / UNITS as i32 - p.start)
+    }
+
+    /// No motion runs (none, or it is over).
+    unsafe fn motion_idle(&self) -> bool {
+        match (self.motion.as_ref(), self.elapsed()) {
+            (None, _) | (_, None) => true,
+            (Some(r), Some(e)) => manifest().and_then(|m| m.motion.programs.get(r.prog)).is_none_or(|p| e >= p.frames),
         }
+    }
+
+    /// The held controls a program replaces: back and front, and the face for slides and fades.
+    unsafe fn held_visible(&self, on: bool, face: bool) {
+        for &c in &self.ctrls[..if face { 3 } else { 2 }] {
+            func::<VisFn>(ALL_VISIBLE)(c, on as i32);
+        }
+    }
+
+    /// Releases the motion's unit layers (their controls go back to the pool).
+    unsafe fn drop_units(&mut self) -> Option<Running> {
+        let r = self.motion.take()?;
+        for &c in &r.ctrls {
+            super::d2::clear(c, self.list);
+            self.pool.push(c);
+        }
+        Some(r)
+    }
+
+    /// Makes the units of what the held layers show for program `prog` at `class`, played from
+    /// the program's start + `at` frames. False when a unit lacks the program (the slides' bound).
+    unsafe fn units(&mut self, prog: usize, class: usize, at: i32) -> bool {
+        let Some(m) = manifest() else { return false };
+        let Some(p) = m.motion.programs.get(prog).copied() else { return false };
+        let face = prog >= program::FADE_OUT;
+        // Held groups in the held layers' order, with their frames, and their priorities.
+        let mut want: Vec<(u32, u8)> = Vec::new();
+        for (k, (g, _)) in kh::frames(&self.view).iter().enumerate() {
+            let prio = if LAYERS[k].0 == 0 { PRIORITY_BACK } else { PRIORITY_FRONT };
+            for u in m.motion.units_at(*g, self.shown[k]) {
+                match m.motion.group(u, prog) {
+                    Some(gr) => want.push((gr, prio)),
+                    None => return false,
+                }
+            }
+        }
+        if face {
+            for u in m.motion.units_at(group::FACE, kh::face_frame(self.danger)) {
+                match m.motion.group(u, prog) {
+                    Some(gr) => want.push((gr, PRIORITY_FRONT)),
+                    None => return false,
+                }
+            }
+        }
+        let mut r = Running { prog, class, ctrls: Vec::new() };
+        let time = (p.start + at) as f32 * UNITS;
+        for chunk in want.chunks(10) {
+            let c = match self.pool.pop() {
+                Some(c) => c,
+                None => match new_ctrl() {
+                    Some(c) => c,
+                    None => break,
+                },
+            };
+            place(c, class, 0.0);
+            for &(gr, prio) in chunk {
+                add(c, self.list, prio, gr, self.xoff, 0);
+                let n = rd::<u8>(c + C_LAYERS) as u32;
+                if n > 0 {
+                    func::<PlayFn>(PLAY_FROM)(c, n - 1, time);
+                }
+            }
+            r.ctrls.push(c);
+        }
+        self.motion = Some(r);
+        true
+    }
+
+    /// Starts program `prog` with its units at `class`: the held layers hide while it runs.
+    unsafe fn start(&mut self, prog: usize, class: usize) -> bool {
+        self.drop_units();
+        let face = prog >= program::FADE_OUT;
+        if !self.units(prog, class, 0) {
+            self.drop_units();
+            if !self.hidden {
+                self.held_visible(true, true);
+            }
+            return false;
+        }
+        self.held_visible(false, face);
+        if !face {
+            func::<VisFn>(ALL_VISIBLE)(self.ctrls[2], (!self.hidden) as i32);
+        }
+        true
+    }
+
+    /// After a view change: a running motion's units follow the new view at the same time; an
+    /// ended one gives the screen back to the held layers.
+    unsafe fn follow(&mut self) {
+        let Some((prog, class)) = self.motion.as_ref().map(|r| (r.prog, r.class)) else { return };
+        let Some(e) = self.elapsed() else {
+            self.finish();
+            return;
+        };
+        let len = manifest().and_then(|m| m.motion.programs.get(prog)).map_or(0, |p| p.frames);
+        if e >= len {
+            self.finish();
+        } else {
+            self.drop_units();
+            if !self.units(prog, class, e) {
+                self.finish();
+            }
+        }
+    }
+
+    /// The motion is over: the held layers show again (unless the HUD is hidden).
+    unsafe fn finish(&mut self) {
+        self.drop_units();
+        if !self.hidden {
+            self.held_visible(true, true);
+        }
+    }
+
+    /// Re:CoM's HUD hides (state 7) or shows (1) the gauge: KH1's 10-frame gauge fade
+    /// (`0x140268E30`: alpha ±0.1 a frame) on the units; at once when `now` (the build) or without
+    /// motion data.
+    unsafe fn hide(&mut self, hidden: bool, now: bool) {
         if hidden {
             self.release(0);
             self.release(1);
             self.release(2);
         }
         self.hidden = hidden;
+        let faded = !now && self.start(if hidden { program::FADE_OUT } else { program::FADE_IN }, self.class);
+        if !faded {
+            self.drop_units();
+            for &c in &self.ctrls {
+                func::<VisFn>(ALL_VISIBLE)(c, (!hidden) as i32);
+            }
+        }
         if !hidden && self.danger {
             self.red_on();
         }
     }
 
     unsafe fn destroy(&mut self) {
+        let units: Vec<usize> = self.motion.take().map(|r| r.ctrls).unwrap_or_default();
+        for c in units {
+            super::d2::delete(c, self.list);
+        }
         for p in self.mp.drain(..).chain(self.charge.drain(..)).chain(self.red.drain(..)) {
             super::d2::delete(p.ctrl, self.list);
         }
@@ -420,11 +614,11 @@ unsafe fn build(gauge: usize, list: i32) {
     for (g, _) in kh::frames(&v).iter().skip(4) {
         add(ctrls[1], list, PRIORITY_FRONT, *g, xoff, 1);
     }
-    let mut cl = Cluster { gauge, list, xoff, class, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new() };
+    let mut cl = Cluster { gauge, list, xoff, class, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None };
     cl.show(v, true);
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
     if hidden {
-        cl.hide(true);
+        cl.hide(true, true);
     }
     note(|| format!("built on the player gauge {gauge:#x}: HP {}/{}, MP {:?}, class {class}, margin {xoff}{}; Re:CoM's HP gauge, FRIENDS row, prize gauge hidden (colour), enemy gauges and minimap by their mask bits", v.hp, v.max_hp, v.mp, if hidden { " (HUD hidden)" } else { "" }));
     if let Ok(mut s) = STATE.lock() {
@@ -483,7 +677,7 @@ pub unsafe fn hud(gauge: usize, state: u32) {
     if let Some(c) = s.clusters.iter_mut().find(|c| c.gauge == gauge) {
         let hide = state == STATE_HIDDEN;
         if hide != c.hidden {
-            c.hide(hide);
+            c.hide(hide, false);
         }
     }
 }

@@ -8,8 +8,8 @@ Re:CoM's enemy gauges hidden and KH1's lock-on cursor used, Re:CoM's low-HP soun
 extras hidden for now (the owner places them later).
 
 Stages: H0 dump (done, outside the repo) → **H1 the `kh1hud` set** → **H2 Sora's cluster** →
-**H3 hiding Re:CoM's HUD** → H4 command menu look → H5 LOCK ON! + target gauge → H6 party gauges →
-H7 lock-on cursor → H8 popups.
+**H3 hiding Re:CoM's HUD** → **H2b the cluster's motions** → H4 command menu look → H5 LOCK ON! +
+target gauge → H6 party gauges → H7 lock-on cursor → H8 popups.
 
 Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**, **Checked
 (exe)**, **Checked (files)** = the owner's files (the H0 dump of 2026-10-31), **Assumption**.
@@ -119,7 +119,7 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 - **Re:CoM's HP gauge** keeps running (its low-HP sound 9 at ≤ 25 % is the owner's choice); H3
   hides it.
 
-### Not 1:1 yet (to ask / later)
+### Not 1:1 yet (to ask / later; H2b below builds 1, 2 (soft edge), 4 and settles 5)
 
 1. **Hit shake and size-class slide** (`g_act`: `vibe_s/ss/sss`, `slide_s_h/v`, position keys):
    they move every piece at once; Re:CoM's 2D animates per layer, so a native shake needs the shake
@@ -152,6 +152,81 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 6. Swing at enemies: the orange charge line grows along the outer ring, fading in.
 7. Events / cutscenes hide it with Re:CoM's HUD; a battle and back: it is rebuilt.
 8. `hud = recom`: Re:CoM's HUD and the 7.2 MP bar as before.
+
+## H2b: the cluster's motions baked into the data (decision 39, 2026-11-01)
+
+### KH1's rules (Checked (decomp + exe + files))
+
+| what | where |
+|---|---|
+| One motion pointer per slot (`+0x110`): `0x14026D990` adds its keyed offset (player C, x / y) to the centre every piece of the cluster is drawn from | `0x14026D990` |
+| A hit (`0x14029BBD0` → `0x140268D60(slot, strength)`) starts `vibe_s` / `vibe_ss` / `vibe_sss` (slot `+0x2A0` / `+0x360` / `+0x420`, `g_act` objects 0, 1, 2) **and the hurt-face timer, only when no motion runs** (pointer 0) | `0x140268D60` |
+| A size-class change starts `slide_s_h` (new class 0 / 1, slot `+0x120` = `g_act` 3) or `slide_s_v` (class 2, `+0x1E0` = 4), over a running shake; the drawn class stays the old one until the slide ends, then the new one | `0x14026D570`, `0x14026D990` |
+| Keys: `vibe_s` y 0, 3, −3, 2, −2, end 0 (1 unit each); `vibe_ss` 0, ±6, ±4, ±3, ±2, ±1 (11 units); `vibe_sss` 0, ±9 … ±1 (19); `slide_s_h` x 0, −4, 32, −36, −18, end −24 (units 2, 2, 4, 1, 1); `slide_s_v` the same in y. Players step 0.5 a frame, drawn after the step: 2 frames a unit (10, 22, 38, 20 frames) | `exchange/UK_uibin_g_act.bin` (Checked (files)), `0x14027E430` |
+| The gauge fade (`+0xA9C`, `0x140268E30`): ±0.1 a frame, stepped before drawing (0.9 … 0.0 out, 0.1 … 1.0 in), multiplies every vertex alpha | `0x14026D570`, `0x14026B790` |
+| MP and charge fades: every change sets the fade afresh (`0x14027F760`: 128 → 0 for a loss, 0 → 128 for a gain) and draws only the latest change's arc. **H2's gap 5 was wrong**: KH1 does not resume a running fade; H2 already restarts it, as KH1 | `0x14026C6E0`, `0x14026A770`, `0x14027F760` |
+| Soft end (mode 4: the HP arc, the max-HP flash, the charge and its fade arcs): when 1 < end < 270 the fan stops 0.7° short and a last triangle (centre, end − 0.7°, end) fades to alpha 0 at the end vertex | `0x14026B790` (`0x14042F7F4` = 0.7; callers push 4: `0x14026BDF6`, `0x14026BE57`, `0x14026A770`) |
+
+### Re:CoM's side (Checked (decomp + exe))
+
+- A layer whose frame was set never advances (`0x140248BB0`: `+0x38` ≥ 0 holds the time), so a
+  held layer cannot move by itself. A played layer runs to its group's end; after the end only
+  the group's longest animation stays drawn (`0x140248F40` marks it, bit 4 of `+0x144`).
+- `0x140248550(ctrl, layer, time)` plays a layer from a time (f32 in xmm2, units of 1/50 frame:
+  `0x140246710` → the `C2DSeqObj`'s vtable `+0x30` `0x140249360` sets `+0x38` = −1, `+0x30` =
+  time); `0x140248000(ctrl, layer)` returns its time (`0x140246250` → vtable `+0x68`
+  `0x140246D60` → `+0x30`). Re:CoM's own code uses both (16 and 3 callers).
+- Animation flags (`0x14024B4E0` shuffles them; `0x14024A9xx` reads): bit 0 linear (no curve);
+  translation interpolated only when 0x10000 and 0x1000 are clear (else the start offset stays);
+  0x8000 = no extra frame after `f1` (end exclusive). Translation: `+0x10` x0, `+0x14` x1, `+0x18`
+  y0, `+0x1C` y1, ints in 2D units (+0.25). Re:CoM's `Cockpit:00` has both kinds (0x6B73 moving,
+  0x4FB71 exclusive).
+- An animation group's first animation and count are read as unsigned 16-bit (`0x140248F40`), so
+  a SEQD holds up to 65535 animations.
+
+### Native build
+
+- **Data (asset step):** every distinct piece set of the held groups FRAME … FACE (a *unit*: 852
+  on the owner's files) gets one played group per program: `vibe_s`, `vibe_ss`, `vibe_sss` (the
+  KH1 keys as moving animations of 2 frames a key unit, flags 0x6EFF1, then the last offset held to
+  frame 10,000,000), `fade_out` / `fade_in` (alpha 115 → 0 / 13 → 128 over frames 0..9, then
+  held), and for the 423 units a slide can show (HP ≤ 72, charge ≤ 210, the rest: Assumption, a
+  bound) `slide_s_h` / `slide_s_v`. The hurt-face groups carry the shake of their strength. The
+  manifest (format `kh1-hud 2`) lists the programs (start frame, length), each unit's first group
+  and each run (held group, frames, unit). 5738 groups, 43,030 animations, `kh1hud.lad` 6.4 MB (×6
+  copies in `FO0002.SPR`).
+- **Soft ends** are baked into the HP and charge arcs' last pieces, the charge fade pieces below a
+  full cell and the flash pieces below a full quadrant.
+- **DLL (events only):** a hit with no motion running → the held back / front controls hide and
+  the units of what they show play `vibe_<strength>` (from frame 1: KH1 draws key time 0.5 first),
+  with the shaken hurt face; a size-class change → the slide at the old class's place (the held
+  controls already at the new one); Re:CoM's HUD hide / show (state 7 / 1) → `fade_out` /
+  `fade_in` on the units (face included). A view change while a motion runs rebuilds its units at
+  the same time (`0x140248000` on the first unit layer); a view change after it ended gives the
+  screen back to the held layers. Nothing per frame.
+
+### Not done / to check
+
+1. **Back arcs' end strips** (modes 1–3, `0x1402694C0` mode 1, `0x140269F50` computed): black
+   strips built by `0x14026E270` whose float arguments the decomp lost; not baked yet (needs the
+   disassembly of `0x14026B790`'s tail).
+2. While a motion runs, the MP / charge fade pieces and the danger flash stay where they are (KH1
+   moves them too): visible only when MP or the flash changes during the 10–38 frames.
+3. A slide for a change that isn't KH1's (class 0 → 2 or downwards) ends at the slide's last
+   offset and snaps to the new class at the next HP / MP event (KH1 snaps at once).
+4. The fade-in runs on every Re:CoM show (events, menus); KH1 hides at once for its events
+   (world flag 8) and fades for its menus: owner question.
+5. Assumptions: Re:CoM's 2D time step is 50 units a 60 Hz frame (as the MP bar's fades); a played
+   layer added after the held ones at the same priority draws over them (creation order).
+
+### What the in-game test must check (H2b)
+
+1. Take a hit: the whole cluster (rings, segments, labels, face) shakes up and down for 10 / 22 /
+   38 frames (by how much HP the hit took), the face grimaces; a second hit during the shake
+   neither restarts it nor the grimace.
+2. Open the camp / start an event: the cluster fades out over 1/6 s; closing it fades it back in.
+3. Low HP (under 54 HP): the green arc's end is soft over its last 0.7°.
+4. Log: `kh1 hud: … built …` as before; no `no slide units` line in normal play.
 
 ## H3: Re:CoM's HUD hidden at `hud = kh1` (visual only)
 

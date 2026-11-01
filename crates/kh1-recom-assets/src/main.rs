@@ -480,6 +480,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     let (uitex, uitex_hd, _) = inst.read_full(mb::KH1_UITEX).map_err(|e| format!("{}: {e}", mb::KH1_UITEX))?;
     let g_s = inst.read(kh::G_S).map_err(|e| format!("{}: {e}", kh::G_S))?;
     let g_red = inst.read(kh::G_RED).map_err(|e| format!("{}: {e}", kh::G_RED))?;
+    let g_act = inst.read(kh::G_ACT).map_err(|e| format!("{}: {e}", kh::G_ACT))?;
     let mut faces = Vec::new();
     for n in kh::FACES {
         let (m, a, _) = inst.read_full(n).map_err(|e| format!("{n}: {e}"))?;
@@ -491,7 +492,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         return Err("FO0002.SPR has no <LANG>_Cockpit.lad PC layouts (no language to build for)".into());
     }
     let lrefs: Vec<&str> = langs.iter().map(String::as_str).collect();
-    let src = kh::Sources { uitex: &uitex, uitex_hd: &uitex_hd, g_s: &g_s, g_red: &g_red, faces };
+    let src = kh::Sources { uitex: &uitex, uitex_hd: &uitex_hd, g_s: &g_s, g_red: &g_red, g_act: &g_act, faces };
     let b = kh::build(&src, &lrefs).map_err(|e| e.to_string())?;
     bar.spr = kh::add_to_spr(&bar.spr, &mut bar.assets, &b, &langs).map_err(|e| format!("{}: {e}", mb::SPR_PATH))?;
     let e = arc.find(mb::RTM_PATH).ok_or_else(|| format!("{} not in Recom.hed", mb::RTM_PATH))?;
@@ -504,12 +505,14 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         ("uitex.bin sha256", kh1_formats::egs::sha256_hex(&uitex)),
         ("UK_uibin_g_s.bin sha256", kh1_formats::egs::sha256_hex(&g_s)),
         ("UK_uibin_g_red.bin sha256", kh1_formats::egs::sha256_hex(&g_red)),
+        ("UK_uibin_g_act.bin sha256", kh1_formats::egs::sha256_hex(&g_act)),
         ("FO0002.RTM sha256", kh1_formats::egs::sha256_hex(&rtm)),
     ];
     let manifest = kh::manifest_json(&b, &langs, &sources);
     println!(
-        "KH1 HUD: {} groups, {} sprites, {} atlas items; PS2 atlas {}×{}, PC atlas {}×{}; kh1hud.lad + {} language copies into FO0002.SPR, kh1hud.imz + {} into FO0002.RTM ({:?})",
-        kh::group::COUNT,
+        "KH1 HUD: {} groups ({} motion units), {} sprites, {} atlas items; PS2 atlas {}×{}, PC atlas {}×{}; kh1hud.lad + {} language copies into FO0002.SPR, kh1hud.imz + {} into FO0002.RTM ({:?})",
+        b.groups,
+        b.motion.first.len(),
         b.sprites,
         b.pieces,
         b.atlas.0,

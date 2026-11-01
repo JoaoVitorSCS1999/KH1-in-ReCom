@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 64: KH1 HUD H2b, shake, slides, HUD fade, soft arc ends, version 0.28.1 (2026-10-31)
+
+- Every distinct piece set of Sora's cluster (852 units) gets played groups baked at the asset step:
+  KH1's three hit shakes (10/22/38 frames), two size-class slides, the 10-frame fade out / in; the
+  DLL swaps the held layers for these units only while a motion runs (play-from-time `0x140248550`,
+  layer time `0x140248000`, first bytes checked). KH1's 0.7° soft end baked into the HP, charge and
+  danger arcs (Checked, decomp + files). KH1 restarts MP / charge fades from scratch (H2 already).
+  Not built: back-arc end strips. Not seen in game.
+
+---
+
 ## Stage 63: M7 stage 7.11, spell unlocks, version 0.28.0 (2026-10-31)
 
 > Decision 34: base level with the Re:CoM magic card's first pickup; -ra / -ga at Re:CoM bosses

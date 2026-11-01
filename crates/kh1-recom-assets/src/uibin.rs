@@ -32,6 +32,9 @@ pub struct Obj {
     pub flags: u32,
     /// Key player A (colour): first key and count.
     pub keys_a: (i32, i32),
+    /// Key player C (position, `+0x8C`: time, index, count `+0x94`, first key `+0x98`): first key
+    /// and count.
+    pub keys_c: (i32, i32),
     /// The name.
     pub name: String,
 }
@@ -52,6 +55,8 @@ pub struct Uibin {
     pub objs: Vec<Obj>,
     /// Colour keys (A).
     pub keys_a: Vec<Key>,
+    /// Position keys (C: x, y, w, h).
+    pub keys_c: Vec<Key>,
 }
 
 fn i32_at(d: &[u8], at: usize) -> Result<i32> {
@@ -87,6 +92,7 @@ impl Uibin {
                 colours,
                 flags,
                 keys_a: (w(28), w(27)),
+                keys_c: (w(38), w(37)),
                 name: n[..end].iter().map(|&x| if (0x20..0x7F).contains(&x) { x as char } else { '?' }).collect(),
             });
         }
@@ -97,7 +103,23 @@ impl Uibin {
                 Ok(Key { dur: i32_at(d, at)?, vals: (0..4).map(|j| i32_at(d, at + 0x10 + 4 * j).map(|v| f32::from_bits(v as u32))).collect::<Result<_>>()? })
             })
             .collect::<Result<_>>()?;
-        Ok(Uibin { objs, keys_a })
+        let (co, cz) = sec(3)?;
+        let keys_c = (0..cz / 0x20)
+            .map(|i| {
+                let at = co + i * 0x20;
+                Ok(Key { dur: i32_at(d, at)?, vals: (0..4).map(|j| i32_at(d, at + 0x10 + 4 * j).map(|v| f32::from_bits(v as u32))).collect::<Result<_>>()? })
+            })
+            .collect::<Result<_>>()?;
+        Ok(Uibin { objs, keys_a, keys_c })
+    }
+
+    /// The position keys object `o` plays (player C), in order.
+    pub fn c_keys(&self, o: &Obj) -> Option<&[Key]> {
+        let (first, n) = o.keys_c;
+        if first < 0 || n <= 0 {
+            return None;
+        }
+        self.keys_c.get(first as usize..first as usize + n as usize)
     }
 
     /// The object named `name`.

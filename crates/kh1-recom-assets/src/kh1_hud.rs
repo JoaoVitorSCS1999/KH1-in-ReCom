@@ -37,11 +37,14 @@ pub const SET: &str = "kh1hud:00";
 /// The manifest the DLL reads.
 pub const MANIFEST: &str = "kh1-hud.json";
 /// The manifest's format line.
-pub const FORMAT: &str = "kh1-recom-assets kh1-hud 1";
+pub const FORMAT: &str = "kh1-recom-assets kh1-hud 2";
 /// KH1's layout of Sora's gauge (`0x140268800` loads it; `UK` is English, `0x1400D7380`).
 pub const G_S: &str = "exchange/UK_uibin_g_s.bin";
 /// The danger flash object (`g_s_bar_b_hp_red`, slot `+0x4E0`).
 pub const G_RED: &str = "exchange/UK_uibin_g_red.bin";
+/// KH1's gauge motions (`vibe_s/ss/sss` the hit shakes, `slide_s_h/v` the size-class slides; slot
+/// 0 copies objects 0..4 to `+0x2A0`, `+0x360`, `+0x420`, `+0x120`, `+0x1E0`, `0x14026E630` area).
+pub const G_ACT: &str = "exchange/UK_uibin_g_act.bin";
 /// The party's model files whose section 2 is the face strip: Sora (Checked (files)), Donald
 /// and Goofy (Checked (files: their 48 × 48 faces in the owner's dump)).
 pub const FACES: [&str; 3] = ["xa_ex_0010.mdls", "xa_ex_0040.mdls", "xa_ex_0050.mdls"];
@@ -170,7 +173,7 @@ pub mod group {
     pub const RED_SEG: usize = 626;
     /// Partial segment flashes.
     pub const RED_SEG_PART: usize = 627;
-    /// Groups in all.
+    /// The fixed groups (the units' motion groups follow, `motion`).
     pub const COUNT: usize = 632;
 }
 
@@ -330,35 +333,61 @@ pub fn vertex(ring: &Ring, theta: f32) -> [i32; 4] {
 /// The fan `0x14026B790` draws for [a0, a1]: the centre (one unit down; UV the ring's centre), then
 /// the vertex at a0, at every 45° past it up to a1, and at a1.
 pub fn fan(ring: &Ring, a0: f32, a1: f32) -> Vec<[i32; 4]> {
+    fan_to(ring, a0, a1)
+}
+
+fn fan_to(ring: &Ring, a0: f32, f: f32) -> Vec<[i32; 4]> {
     let mut v = vec![[ring.x, ring.y + 0x10, ring.uc, ring.vc], vertex(ring, a0)];
     let mut i = (a0 / 45.0) as i32;
     while {
         i += 1;
-        i <= (a1 / 45.0) as i32
+        i <= (f / 45.0) as i32
     } {
         v.push(vertex(ring, i as f32 * 45.0));
     }
-    v.push(vertex(ring, a1));
+    v.push(vertex(ring, f));
     v
+}
+
+/// KH1's soft end (`0x14026B790` mode 4, the HP, flash and charge arcs; Checked (decomp + exe: the
+/// callers push 4, the constant 0.7 at `0x14042F7F4` is subtracted from the end)): when 1 < a1 <
+/// 270 the fan stops at a1 − 0.7°, and one more triangle (centre, a1 − 0.7°, a1) is drawn with
+/// the a1 vertex's alpha 0 (Gouraud: the edge fades out over the last 0.7°).
+pub const SOFT_DEG: f32 = 0.7;
+
+/// The fan and, with KH1's soft end, its fading wedge (centre, a1 − 0.7°, a1).
+pub fn fan_soft(ring: &Ring, a0: f32, a1: f32, soft: bool) -> (Vec<[i32; 4]>, Option<[[i32; 4]; 3]>) {
+    if soft && a1 < 270.0 && a1 > 1.0 {
+        let f = a1 - SOFT_DEG;
+        let v = fan_to(ring, a0, f);
+        let w = [v[0], vertex(ring, f), vertex(ring, a1)];
+        (v, Some(w))
+    } else {
+        (fan_to(ring, a0, a1), None)
+    }
 }
 
 /// Renders a fan: the texel each sample point inside it shows. Samples at `(x0 + (i + ½) / s − ½,
 /// y0 + (j + ½) / s − ½)` units (s = 1: the unit grid, where the GS samples). A point on the last
 /// radial edge (the centre to the a1 vertex) is outside, so pieces meeting there don't overlap.
-fn render(fan: &[[i32; 4]], src: &Pic, src_scale: usize, s: usize, rect: (i32, i32, i32, i32)) -> Pic {
+fn render(fan: &[[i32; 4]], wedge: Option<&[[i32; 4]; 3]>, src: &Pic, src_scale: usize, s: usize, rect: (i32, i32, i32, i32)) -> Pic {
     let (x0, y0, w, h) = rect;
     let mut p = Pic::blank(w as usize * s, h as usize * s);
     let c = fan[0];
     let n = fan.len();
-    let area = |k: usize| (fan[k][0] - c[0]) as i64 * (fan[k + 1][1] - c[1]) as i64 - (fan[k][1] - c[1]) as i64 * (fan[k + 1][0] - c[0]) as i64;
+    // Triangles (centre, a, b) and whether b's alpha is 0 (the soft wedge's end vertex).
+    let mut tris: Vec<([i32; 4], [i32; 4], [i32; 4], bool)> = (1..n - 1).map(|k| (c, fan[k], fan[k + 1], false)).collect();
+    if let Some(wd) = wedge {
+        tris.push((wd[0], wd[1], wd[2], true));
+    }
+    let area = |t: &([i32; 4], [i32; 4], [i32; 4], bool)| (t.1[0] - t.0[0]) as i64 * (t.2[1] - t.0[1]) as i64 - (t.1[1] - t.0[1]) as i64 * (t.2[0] - t.0[0]) as i64;
     // The last triangle that has an area (KH1 repeats the end vertex when it is a 45° step).
-    let last = (1..n - 1).rev().find(|&k| area(k) != 0).unwrap_or(0);
+    let last = (0..tris.len()).rev().find(|&k| area(&tris[k]) != 0).unwrap_or(0);
     for j in 0..h as usize * s {
         for i in 0..w as usize * s {
             let px = (x0 as f64 + (i as f64 + 0.5) / s as f64 - 0.5) * 16.0;
             let py = (y0 as f64 + (j as f64 + 0.5) / s as f64 - 0.5) * 16.0;
-            for k in 1..n - 1 {
-                let (a, b) = (fan[k], fan[k + 1]);
+            for (k, &(c, a, b, soft)) in tris.iter().enumerate() {
                 // Barycentric weights of a and b over the triangle (c, a, b).
                 let det = ((a[0] - c[0]) as f64) * ((b[1] - c[1]) as f64) - ((a[1] - c[1]) as f64) * ((b[0] - c[0]) as f64);
                 if det == 0.0 {
@@ -379,7 +408,12 @@ fn render(fan: &[[i32; 4]], src: &Pic, src_scale: usize, s: usize, rect: (i32, i
                 let v = lc * c[3] as f64 + la * a[3] as f64 + lb * b[3] as f64;
                 let tu = (u * src_scale as f64 / 16.0).floor() as i64;
                 let tv = (v * src_scale as f64 / 16.0).floor() as i64;
-                p.px[j * w as usize * s + i] = src.at(tu, tv);
+                let mut t = src.at(tu, tv);
+                if soft {
+                    // Gouraud alpha: 1 at c and a, 0 at b (the GS's vertex alpha × texel alpha / 128).
+                    t[3] = ((t[3] as f64) * (1.0 - lb).clamp(0.0, 1.0)).round() as u8;
+                }
+                p.px[j * w as usize * s + i] = t;
                 break;
             }
         }
@@ -401,15 +435,24 @@ pub struct Baked {
 /// Bakes the fan [a0, a1] of `ring` from `src` (per language for the PC pictures), trimmed to
 /// what any of them shows. None when it shows nothing.
 pub fn bake(ring: &Ring, a0: f32, a1: f32, src: &[&Source]) -> Option<Baked> {
-    let f = fan(ring, a0, a1);
-    let minx = f.iter().map(|v| v[0]).min().unwrap().div_euclid(16) - 1;
-    let maxx = f.iter().map(|v| v[0]).max().unwrap().div_euclid(16) + 2;
-    let miny = f.iter().map(|v| v[1]).min().unwrap().div_euclid(16) - 1;
-    let maxy = f.iter().map(|v| v[1]).max().unwrap().div_euclid(16) + 2;
+    bake_soft(ring, a0, a1, false, src)
+}
+
+/// [`bake`] with KH1's soft end when `soft` (mode 4, see [`fan_soft`]).
+pub fn bake_soft(ring: &Ring, a0: f32, a1: f32, soft: bool, src: &[&Source]) -> Option<Baked> {
+    let (f, wedge) = fan_soft(ring, a0, a1, soft);
+    let mut all = f.clone();
+    if let Some(w) = &wedge {
+        all.extend_from_slice(w);
+    }
+    let minx = all.iter().map(|v| v[0]).min().unwrap().div_euclid(16) - 1;
+    let maxx = all.iter().map(|v| v[0]).max().unwrap().div_euclid(16) + 2;
+    let miny = all.iter().map(|v| v[1]).min().unwrap().div_euclid(16) - 1;
+    let maxy = all.iter().map(|v| v[1]).max().unwrap().div_euclid(16) + 2;
     let full = (minx, miny, maxx - minx, maxy - miny);
     let s = src[0].scale;
-    let ps2 = render(&f, &src[0].ps2, 1, 1, full);
-    let hds: Vec<Pic> = src.iter().map(|x| render(&f, &x.hd, x.scale, x.scale, full)).collect();
+    let ps2 = render(&f, wedge.as_ref(), &src[0].ps2, 1, 1, full);
+    let hds: Vec<Pic> = src.iter().map(|x| render(&f, wedge.as_ref(), &x.hd, x.scale, x.scale, full)).collect();
     // Trim to the units any picture shows.
     let (w, h) = (full.2 as usize, full.3 as usize);
     let mut used = vec![false; w * h];
@@ -534,22 +577,25 @@ impl Packed {
 
 /// A piece: what it shows, where (part rect, KH1 units; x1 < x0 / y1 < y0 mirror) and its colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct Piece {
+pub(crate) struct Piece {
     item: usize,
     uv: [i32; 4],
     rect: [i32; 4],
     colour: u32,
 }
 
-/// One animation of a group: its pieces over frames [f0, f1] with a colour start → end.
-struct Step {
+/// One animation of a group: its pieces over frames [f0, f1] with a colour start → end and a
+/// translation (x0, y0) → (x1, y1) (KH1 units).
+#[derive(Clone, Default)]
+pub(crate) struct Step {
     pieces: Vec<Piece>,
     frames: (i32, i32),
     colour: (u32, u32),
     flags: u32,
+    tr: [i32; 4],
 }
 
-struct Group {
+pub(crate) struct Group {
     steps: Vec<Step>,
     once: bool,
     word: i16,
@@ -584,7 +630,7 @@ fn held(frames: &[Vec<Piece>]) -> Group {
     let mut steps = Vec::new();
     for (r, ps) in by_runs {
         for fr in r {
-            steps.push(Step { pieces: ps.clone(), frames: fr, colour: (one, one), flags: FLAGS_STATIC });
+            steps.push(Step { pieces: ps.clone(), frames: fr, colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
         }
     }
     Group { steps, once: true, word: GROUP_WORD_SCRUB }
@@ -618,12 +664,24 @@ fn seqd(groups: &[Group], packed: &Packed, hd: bool) -> Result<Vec<u8>> {
                     s.sgroups.len() - 1
                 }
             };
-            s.anims.push(anim(st.flags, sg, st.frames, 0, (1.0, 1.0), st.colour));
+            let mut a = anim(st.flags, sg, st.frames, 0, (1.0, 1.0), st.colour);
+            // Translation start / end (`+0x10` x0, `+0x14` x1, `+0x18` y0, `+0x1C` y1, ints in 2D
+            // units: `0x14024B4E0` reads them as (x0, y0) → `+0xD0`, (x1, y1) → `+0xD8`; Checked
+            // (decomp)).
+            let [x0, y0, x1, y1] = st.tr;
+            for (at, v) in [(0x10, x0), (0x14, x1), (0x18, y0), (0x1C, y1)] {
+                a[at..at + 4].copy_from_slice(&v.to_le_bytes());
+            }
+            s.anims.push(a);
         }
         s.agroups.push(agroup(a0, g.steps.len(), g.once, g.word));
     }
-    if s.anims.len() > i16::MAX as usize || s.parts.len() > i16::MAX as usize || s.sgroups.len() > i16::MAX as usize {
-        return bad("kh1hud: too many records for 16-bit indices");
+    // Re:CoM reads an animation group's first animation and count, and a sprite group's first
+    // part, as unsigned 16-bit (`0x140248F40`: `*param_4`, `param_4[1]`; `0x140249150`'s part
+    // pointer from `*(ushort *)(sgroup)`); Checked (decomp). Parts stay below 0x8000 (our sprite
+    // group writer stores the first part as i16).
+    if s.anims.len() > u16::MAX as usize || s.parts.len() > i16::MAX as usize || s.sgroups.len() > i16::MAX as usize {
+        return bad(format!("kh1hud: too many records for 16-bit indices ({} animations, {} parts, {} sprite groups)", s.anims.len(), s.parts.len(), s.sgroups.len()));
     }
     Ok(s.write())
 }
@@ -690,16 +748,22 @@ struct Baker {
     p7: usize,
     /// A 1 × 1 transparent item, for a step that shows nothing.
     empty: usize,
-    cache: std::collections::BTreeMap<(i32, i32, i32, i32, i32), Option<(usize, (i32, i32, i32, i32))>>,
+    cache: std::collections::BTreeMap<(i32, i32, i32, i32, i32, bool), Option<(usize, (i32, i32, i32, i32))>>,
 }
 
 impl Baker {
     /// The piece of the fan [a0, a1] of ring `r` (picture 5, or picture 7 per language).
     fn piece(&mut self, atlas: &mut Atlas, r: (i32, i32, i32), p: usize, a0: i32, a1: i32) -> Piece {
+        self.piece_soft(atlas, r, p, a0, a1, false)
+    }
+
+    /// [`Baker::piece`] with KH1's soft end (mode 4) when `soft` and 1 < a1 < 270.
+    fn piece_soft(&mut self, atlas: &mut Atlas, r: (i32, i32, i32), p: usize, a0: i32, a1: i32, soft: bool) -> Piece {
+        let soft = soft && a1 > 1 && a1 < 270;
         let ring = Ring { x: self.centre.0, y: self.centre.1, uc: r.0, vc: r.1, r: r.2 };
-        let got = *self.cache.entry((r.0, r.1, r.2, a0, a1)).or_insert_with(|| {
+        let got = *self.cache.entry((r.0, r.1, r.2, a0, a1, soft)).or_insert_with(|| {
             let s: Vec<&Source> = if p == self.p7 { self.src7.iter().collect() } else { self.src5.iter().take(1).collect() };
-            bake(&ring, a0 as f32, a1 as f32, &s).map(|b| {
+            bake_soft(&ring, a0 as f32, a1 as f32, soft, &s).map(|b| {
                 let hd = if p == self.p7 { b.hd } else { vec![b.hd[0].clone()] };
                 (atlas.add(b.ps2, hd, s[0].scale), b.rect)
             })
@@ -713,11 +777,16 @@ impl Baker {
     /// The arc [0, a] as pieces cut every `step` degrees (KH1 draws one fan; the union of the
     /// cut fans is the same polygon, its boundary points lying on the same square edges).
     fn arc(&mut self, atlas: &mut Atlas, r: (i32, i32, i32), p: usize, a: i32, step: i32) -> Vec<Piece> {
+        self.arc_soft(atlas, r, p, a, step, false)
+    }
+
+    /// [`Baker::arc`] whose last piece has KH1's soft end (mode 4) when `soft`.
+    fn arc_soft(&mut self, atlas: &mut Atlas, r: (i32, i32, i32), p: usize, a: i32, step: i32, soft: bool) -> Vec<Piece> {
         let mut v = Vec::new();
         let mut q0 = 0;
         while q0 < a {
             let q1 = (q0 + step - q0 % step).min(a);
-            let pc = self.piece(atlas, r, p, q0, q1);
+            let pc = self.piece_soft(atlas, r, p, q0, q1, soft && q1 == a);
             if pc.item != self.empty {
                 v.push(pc);
             }
@@ -737,6 +806,8 @@ pub struct Sources<'a> {
     pub g_s: &'a [u8],
     /// `g_red`.
     pub g_red: &'a [u8],
+    /// `g_act` (the gauge motions).
+    pub g_act: &'a [u8],
     /// The three faces (Sora, Donald, Goofy).
     pub faces: [Source; 3],
 }
@@ -757,6 +828,10 @@ pub struct Built {
     pub pieces: usize,
     /// Sprites.
     pub sprites: usize,
+    /// The motion programs and units (H2b), for the manifest.
+    pub motion: motion::Motion,
+    /// Groups in all.
+    pub groups: usize,
 }
 
 fn colour_of(o: &Obj) -> u32 {
@@ -910,7 +985,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     // HP: the arc to min(HP, 54) · 5, then 6 HP a segment (partial last), at most 120.
     let mut f = Vec::new();
     for h in 0..=kh1::HP_CAP {
-        let mut v = if h > 0 { bk.arc(&mut atlas, kh1::RING_HP, p5, (h * kh1::HP_DEG).min(270), 90) } else { Vec::new() };
+        let mut v = if h > 0 { bk.arc_soft(&mut atlas, kh1::RING_HP, p5, (h * kh1::HP_DEG).min(270), 90, true) } else { Vec::new() };
         if h > kh1::HP_RING {
             v.extend(row(objs, it5, obj::SEG_HP, obj::SEG_HP, h - kh1::HP_RING, kh1::HP_PER_SEG).0);
         }
@@ -922,7 +997,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     let seg_w = objs[obj::SEG_CHARGE].rect[2];
     let mut f = Vec::new();
     for c in 0..=kh1::CHARGE_CAP {
-        let mut v = if c > 0 { bk.arc(&mut atlas, kh1::RING_CHARGE, p5, c.min(270), 30) } else { Vec::new() };
+        let mut v = if c > 0 { bk.arc_soft(&mut atlas, kh1::RING_CHARGE, p5, c.min(270), 30, true) } else { Vec::new() };
         if c > kh1::CHARGE_RING {
             let (n, rem) = ((c - kh1::CHARGE_RING) / kh1::CHARGE_PER_SEG, (c - kh1::CHARGE_RING) % kh1::CHARGE_PER_SEG);
             let mut dx = 0;
@@ -956,17 +1031,19 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     let face_piece = |e: i32| Piece { item: faces[0], uv: [fh * e, 0, fh * (e + 1), fh], rect: [cx - fh / 2, cy - fh / 2, cx + fh / 2, cy + fh / 2], colour: 0x8080_8080 };
     groups.push(held(&[vec![face_piece(0)], vec![face_piece(1)], vec![face_piece(2)]]));
     let one = 0x8080_8080u32;
-    // HURT: expression 1 for 40 / 50 / 60 frames, then 0 or 2 (danger).
-    for n in kh1::HURT_FRAMES {
+    // H2b: KH1's gauge motions (`g_act`) and the held groups' units.
+    let g_act = Uibin::parse(src.g_act)?;
+    let tracks = motion::tracks(&g_act)?;
+    // HURT: expression 1 for 40 / 50 / 60 frames, then 0 or 2 (danger), with the hit shake of the
+    // same strength baked in (`0x140268D60` starts both together; played from frame 1).
+    for (si, n) in kh1::HURT_FRAMES.into_iter().enumerate() {
         for after in [0, 2] {
-            groups.push(Group {
-                steps: vec![
-                    Step { pieces: vec![face_piece(1)], frames: (0, n - 1), colour: (one, one), flags: FLAGS_STATIC },
-                    Step { pieces: vec![face_piece(after)], frames: (n, LONG), colour: (one, one), flags: FLAGS_STATIC },
-                ],
-                once: true,
-                word: GROUP_WORD_FADE,
-            });
+            let t = &tracks[si];
+            let mut steps = motion::steps(t, &[face_piece(1)]);
+            steps.pop(); // the hold: expression 1 until the timer ends, then `after`
+            steps.push(Step { pieces: vec![face_piece(1)], frames: (t.len, n), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+            steps.push(Step { pieces: vec![face_piece(after)], frames: (n + 1, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] });
+            groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
         }
     }
     // Fades (KH1: 12.8 a frame for 10 frames, `0x14027F760`; drawn 115.2 … 12.8).
@@ -975,8 +1052,8 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     let grey = |c: u8| 0x8000_0000 | (c as u32) * 0x01_0101;
     let fade = |p: Piece, from: u32, to: u32, then: u32, held: bool| Group {
         steps: vec![
-            Step { pieces: vec![p], frames: (0, last), colour: (from, to), flags: FLAGS_COLOUR },
-            Step { pieces: vec![p], frames: (last + 1, if held { LONG } else { mb::FADE_FRAMES }), colour: (then, then), flags: FLAGS_COLOUR },
+            Step { pieces: vec![p], frames: (0, last), colour: (from, to), flags: FLAGS_COLOUR, tr: [0; 4] },
+            Step { pieces: vec![p], frames: (last + 1, if held { LONG } else { mb::FADE_FRAMES }), colour: (then, then), flags: FLAGS_COLOUR, tr: [0; 4] },
         ],
         once: true,
         word: GROUP_WORD_FADE,
@@ -993,7 +1070,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     let mut charge_pieces = Vec::new();
     for j in 0..9 {
         for t in 1..=30 {
-            charge_pieces.push(bk.piece(&mut atlas, kh1::RING_CHARGE, p5, 30 * j, 30 * j + t));
+            charge_pieces.push(bk.piece_soft(&mut atlas, kh1::RING_CHARGE, p5, 30 * j, 30 * j + t, t < 30));
         }
     }
     for p in &charge_pieces {
@@ -1013,15 +1090,15 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     let step_a = peak / up as u32;
     let flash = |p: Piece| Group {
         steps: vec![
-            Step { pieces: vec![p], frames: (0, up - 1), colour: (rc(step_a), rc(peak)), flags: FLAGS_COLOUR },
-            Step { pieces: vec![p], frames: (up, up + down - 1), colour: (rc(peak - step_a), rc(0)), flags: FLAGS_COLOUR },
+            Step { pieces: vec![p], frames: (0, up - 1), colour: (rc(step_a), rc(peak)), flags: FLAGS_COLOUR, tr: [0; 4] },
+            Step { pieces: vec![p], frames: (up, up + down - 1), colour: (rc(peak - step_a), rc(0)), flags: FLAGS_COLOUR, tr: [0; 4] },
         ],
         once: false,
         word: GROUP_WORD_FADE,
     };
     for q in 0..3 {
         for k in 1..=18 {
-            let p = bk.piece(&mut atlas, kh1::RING_HP, p5, 90 * q, 90 * q + 5 * k);
+            let p = bk.piece_soft(&mut atlas, kh1::RING_HP, p5, 90 * q, 90 * q + 5 * k, k < 18);
             groups.push(flash(p));
         }
     }
@@ -1032,6 +1109,14 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     if groups.len() != group::COUNT {
         return bad(format!("kh1hud: {} groups, expected {}", groups.len(), group::COUNT));
     }
+    // H2b: every unit of the held cluster groups gets its motion programs (played groups).
+    let motion = motion::units(&groups[..=group::FACE], &tracks, group::COUNT);
+    for (u, pieces) in motion.unit_pieces.iter().enumerate() {
+        for p in motion.programs_of(u) {
+            groups.push(motion::program_group(&motion.programs[p], &tracks, pieces));
+        }
+    }
+    let groups_total = groups.len();
     let packed = build_atlas(&atlas, langs.len())?;
     let base = seqd(&groups, &packed, false)?;
     let hd = seqd(&groups, &packed, true)?;
@@ -1044,7 +1129,211 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         atlas: (packed.ps2.w, packed.ps2.h, packed.hd[0].w, packed.hd[0].h),
         pieces: atlas.items.len(),
         sprites,
+        motion,
+        groups: groups_total,
     })
+}
+
+/// Animation flags of a moving piece: Re:CoM's static flags (`FLAGS_STATIC`) with the translation
+/// interpolated (bits 0x10000 and 0x1000 clear: `0x14024B4E0` folds 0x1000 into 0x10000, and
+/// `0x14024A9xx` interpolates `+0xB0` from `+0xD0` to `+0xD8` only when that bit is clear) and an
+/// exclusive end (0x8000: no extra frame after `f1`, so consecutive segments never draw together).
+/// Checked (decomp); Re:CoM's own `Cockpit:00` uses 0x8000 (e.g. 0x4FB71) and moving pieces with
+/// both translation bits clear (e.g. 0x6B73).
+pub(crate) const FLAGS_MOVE: u32 = 0x6EFF1;
+
+/// H2b: KH1's gauge motions baked into played groups (decision 39: "hit shake / size-class slide
+/// baked into every piece's animation data"; Re:CoM plays them, nothing of ours per frame).
+///
+/// KH1 moves the whole cluster: `0x14026D990` adds the running motion's keyed offset (slot `+0x110`:
+/// a hit's shake `0x140268D60`, or a size-class change's slide `0x14026D570`) to the centre every
+/// piece is drawn from. Re:CoM animates per layer, and a scrubbed (held) layer never advances in time
+/// (`0x140248BB0`: a set frame `+0x38` ≥ 0 freezes it). So each distinct piece set of the held
+/// groups (a *unit*) gets one played group per motion program (the motion, then its last offset
+/// held to frame 10,000,000: the group's longest animation, which Re:CoM keeps drawn after the end,
+/// `0x140248F40`'s bit 4), and the DLL swaps the held layers for the units of what they show while
+/// a motion runs.
+pub mod motion {
+    use super::*;
+    use crate::uibin::Key;
+
+    /// `g_act` objects the programs come from (Sora's slot; the party's are `vibe_c…`).
+    pub const OBJECTS: [&str; 5] = ["vibe_s", "vibe_ss", "vibe_sss", "slide_s_h", "slide_s_v"];
+
+    /// A KH1 position track at Re:CoM's frames: segments (frames [f0, f1), offset from → to), its
+    /// length and its last offset. KH1's players step 0.5 key units a 60 Hz frame (`0x14233FBE0`),
+    /// so a key unit is 2 frames; frame f of the group is key time f / 2.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct Track {
+        /// Segments: (f0, f1), (x0, y0), (x1, y1).
+        pub segs: Vec<((i32, i32), (i32, i32), (i32, i32))>,
+        /// Frames.
+        pub len: i32,
+        /// The last key's offset.
+        pub end: (i32, i32),
+    }
+
+    /// A track from KH1's keys (`0x14027E430`: linear between keys; a key with a duration ≤ 0 ends
+    /// the track with its value).
+    pub fn track(keys: &[Key]) -> Result<Track> {
+        let v = |k: &Key| (k.vals[0].round() as i32, k.vals[1].round() as i32);
+        let mut segs = Vec::new();
+        let mut t = 0;
+        for w in keys.windows(2) {
+            if w[0].dur <= 0 {
+                break;
+            }
+            let f1 = t + 2 * w[0].dur;
+            segs.push(((t, f1), v(&w[0]), v(&w[1])));
+            t = f1;
+        }
+        let last = keys.get(segs.len()).ok_or_else(|| crate::Error::Format("g_act: a track without keys".into()))?;
+        if segs.is_empty() || last.dur > 0 {
+            return bad("g_act: a track without an end key");
+        }
+        Ok(Track { segs, len: t, end: v(last) })
+    }
+
+    /// The five tracks of [`OBJECTS`].
+    pub fn tracks(u: &Uibin) -> Result<Vec<Track>> {
+        OBJECTS
+            .iter()
+            .map(|n| {
+                let o = u.find(n).ok_or_else(|| crate::Error::Format(format!("{G_ACT}: no {n}")))?;
+                let k = u.c_keys(o).ok_or_else(|| crate::Error::Format(format!("{G_ACT}: {n} has no position keys")))?;
+                track(k)
+            })
+            .collect()
+    }
+
+    /// What a program does.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Kind {
+        /// A track of [`OBJECTS`].
+        Move(usize),
+        /// KH1's gauge fade (`0x140268E30`: alpha ±0.1 a frame, drawn after the step): out or in.
+        Fade(bool),
+    }
+
+    /// A motion program: its kind, the frame the DLL plays it from (`0x140248550`) and its length.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Program {
+        /// Name for the manifest.
+        pub name: &'static str,
+        /// Kind.
+        pub kind: Kind,
+        /// Frame to play from: 1 for the tracks (KH1 draws key time 0.5 first), 0 for the fades
+        /// (KH1 draws 0.9 / 0.1 first, the group's frame 0).
+        pub start: i32,
+        /// Frames until the motion is over.
+        pub len: i32,
+    }
+
+    /// The units: distinct piece sets of the held groups, their runs and programs.
+    #[derive(Clone, Debug, Default)]
+    pub struct Motion {
+        /// Programs, in the order of a unit's groups (the slides last, only for slide units).
+        pub programs: Vec<Program>,
+        /// Each unit's pieces.
+        pub(crate) unit_pieces: Vec<Vec<Piece>>,
+        /// Whether a unit has the slide programs.
+        pub unit_slides: Vec<bool>,
+        /// Each unit's first group.
+        pub first: Vec<usize>,
+        /// (held group, f0, f1, unit): the unit is shown while the held group's frame is in [f0, f1].
+        pub runs: Vec<(usize, i32, i32, usize)>,
+    }
+
+    /// Programs every unit has.
+    pub const BASE_PROGRAMS: usize = 5;
+
+    impl Motion {
+        /// The programs unit `u` has (indices into [`Motion::programs`]).
+        pub fn programs_of(&self, u: usize) -> std::ops::Range<usize> {
+            0..if self.unit_slides[u] { self.programs.len() } else { BASE_PROGRAMS }
+        }
+    }
+
+    /// The programs: the three hit shakes, the fades out / in, the two slides.
+    pub fn programs(tracks: &[Track]) -> Vec<Program> {
+        let mv = |name, t: usize| Program { name, kind: Kind::Move(t), start: 1, len: tracks[t].len };
+        vec![
+            mv("vibe_s", 0),
+            mv("vibe_ss", 1),
+            mv("vibe_sss", 2),
+            Program { name: "fade_out", kind: Kind::Fade(true), start: 0, len: mb::FADE_FRAMES },
+            Program { name: "fade_in", kind: Kind::Fade(false), start: 0, len: mb::FADE_FRAMES },
+            mv("slide_s_h", 3),
+            mv("slide_s_v", 4),
+        ]
+    }
+
+    /// The highest frame of a held group a slide can show: a slide plays only while the size class
+    /// changes, i.e. while max HP < 37 (class 0 / 1, `0x1402690D0`) on one side of the change, so HP
+    /// stays near the ring (≤ 72: one Re:CoM level-up of +15 past 36 and a margin) and the charge
+    /// near 6 MP (≤ 210); other groups are small. Assumption (a bound, logged by the DLL when a
+    /// slide finds a unit without it: it then moves at once).
+    fn slide_limit(held: usize) -> i32 {
+        match held {
+            group::HP_BACK | group::HP => 72,
+            group::CHARGE => 210,
+            _ => i32::MAX,
+        }
+    }
+
+    /// The units of the held groups `held` (indices = group numbers), numbered from group `base`.
+    pub(crate) fn units(held: &[Group], tracks: &[Track], base: usize) -> Motion {
+        let mut m = Motion { programs: programs(tracks), ..Default::default() };
+        let mut of: std::collections::BTreeMap<Vec<Piece>, usize> = Default::default();
+        for (gi, g) in held.iter().enumerate() {
+            for st in &g.steps {
+                let u = *of.entry(st.pieces.clone()).or_insert_with(|| {
+                    m.unit_pieces.push(st.pieces.clone());
+                    m.unit_slides.push(false);
+                    m.unit_pieces.len() - 1
+                });
+                if st.frames.0 <= slide_limit(gi) {
+                    m.unit_slides[u] = true;
+                }
+                m.runs.push((gi, st.frames.0, st.frames.1, u));
+            }
+        }
+        let mut next = base;
+        for u in 0..m.unit_pieces.len() {
+            m.first.push(next);
+            next += m.programs_of(u).len();
+        }
+        m
+    }
+
+    /// A track's steps on `pieces`: the segments (moving, exclusive ends), then the last offset held.
+    pub(crate) fn steps(t: &Track, pieces: &[Piece]) -> Vec<Step> {
+        let one = 0x8080_8080;
+        let mut v: Vec<Step> = t
+            .segs
+            .iter()
+            .map(|&(fr, a, b)| Step { pieces: pieces.to_vec(), frames: fr, colour: (one, one), flags: FLAGS_MOVE, tr: [a.0, a.1, b.0, b.1] })
+            .collect();
+        v.push(Step { pieces: pieces.to_vec(), frames: (t.len, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [t.end.0, t.end.1, t.end.0, t.end.1] });
+        v
+    }
+
+    /// The played group of program `p` on a unit's pieces.
+    pub(crate) fn program_group(p: &Program, tracks: &[Track], pieces: &[Piece]) -> Group {
+        let a = |x: u32| x << 24 | 0x80_8080;
+        let steps = match p.kind {
+            Kind::Move(t) => steps(&tracks[t], pieces),
+            Kind::Fade(out) => {
+                // 0.9 … 0.0 (out) or 0.1 … 1.0 (in) over frames 0..9, then held.
+                let (from, to) = if out { (115, 0) } else { (13, 128) };
+                vec![
+                    Step { pieces: pieces.to_vec(), frames: (0, p.len - 1), colour: (a(from), a(to)), flags: FLAGS_COLOUR, tr: [0; 4] },
+                    Step { pieces: pieces.to_vec(), frames: (p.len, LONG), colour: (a(to), a(to)), flags: FLAGS_COLOUR, tr: [0; 4] },
+                ]
+            }
+        };
+        Group { steps, once: true, word: GROUP_WORD_FADE }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1104,7 +1393,16 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)]) ->
     let _ = writeln!(s, "{{");
     let _ = writeln!(s, "  \"format\": \"{FORMAT}\",");
     let _ = writeln!(s, "  \"set\": \"{SET}\",");
-    let _ = writeln!(s, "  \"groups\": {},", group::COUNT);
+    let _ = writeln!(s, "  \"groups\": {},", b.groups);
+    let _ = writeln!(s, "  \"base_groups\": {},", group::COUNT);
+    let m = &b.motion;
+    let _ = writeln!(
+        s,
+        "  \"programs\": [{}],",
+        m.programs.iter().map(|p| format!("{{\"name\": \"{}\", \"start\": {}, \"frames\": {}}}", p.name, p.start, p.len)).collect::<Vec<_>>().join(", ")
+    );
+    let _ = writeln!(s, "  \"units\": [{}],", (0..m.first.len()).map(|u| format!("[{}, {}]", m.first[u], m.programs_of(u).len())).collect::<Vec<_>>().join(", "));
+    let _ = writeln!(s, "  \"runs\": [{}],", m.runs.iter().map(|r| format!("[{}, {}, {}, {}]", r.0, r.1, r.2, r.3)).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"languages\": [{}],", langs.iter().map(|l| format!("\"{l}\"")).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"atlas\": [{}, {}, {}, {}],", b.atlas.0, b.atlas.1, b.atlas.2, b.atlas.3);
     let _ = writeln!(s, "  \"sources\": {{");
@@ -1176,6 +1474,41 @@ mod tests {
     }
 
     #[test]
+    fn tracks_follow_kh1_keys() {
+        use crate::uibin::Key;
+        let k = |dur: i32, x: f32, y: f32| Key { dur, vals: vec![x, y, 128.0, 128.0] };
+        // vibe_s: 0, 3, -3, 2, -2, end 0 (1 unit each).
+        let t = motion::track(&[k(1, 0.0, 0.0), k(1, 0.0, 3.0), k(1, 0.0, -3.0), k(1, 0.0, 2.0), k(1, 0.0, -2.0), k(-5, 0.0, 0.0)]).unwrap();
+        assert_eq!(t.len, 10);
+        assert_eq!(t.segs[0], ((0, 2), (0, 0), (0, 3)));
+        assert_eq!(t.segs[4], ((8, 10), (0, -2), (0, 0)));
+        assert_eq!(t.end, (0, 0));
+        // A moving step's frames are exclusive and interpolate (x0, y0) → (x1, y1); the hold keeps
+        // the end to LONG.
+        let p = Piece { item: 0, uv: [0, 0, 1, 1], rect: [0, 0, 1, 1], colour: 0 };
+        let st = motion::steps(&t, &[p]);
+        assert_eq!(st.len(), 6);
+        assert_eq!((st[1].flags, st[1].frames, st[1].tr), (FLAGS_MOVE, (2, 4), [0, 3, 0, -3]));
+        assert_eq!((st[5].flags, st[5].frames), (FLAGS_STATIC, (10, LONG)));
+        assert!(motion::track(&[k(1, 0.0, 0.0)]).is_err());
+    }
+
+    #[test]
+    fn soft_end_fades_the_last_degrees() {
+        let src = Source { ps2: solid(128, 128), hd: solid(256, 256), scale: 2 };
+        let r = ring();
+        let (f, w) = fan_soft(&r, 0.0, 100.0, true);
+        assert_eq!(f.last().copied(), Some(vertex(&r, 100.0 - SOFT_DEG)));
+        assert_eq!(w.unwrap()[2], vertex(&r, 100.0));
+        assert!(fan_soft(&r, 0.0, 270.0, true).1.is_none());
+        let soft = bake_soft(&r, 0.0, 100.0, true, &[&src]).unwrap();
+        let hard = bake(&r, 0.0, 100.0, &[&src]).unwrap();
+        // Same footprint; some texels near the end edge are part-transparent.
+        assert_eq!(soft.rect, hard.rect);
+        assert!(soft.ps2.px.iter().zip(&hard.ps2.px).any(|(a, b)| a[3] < b[3] && a[3] > 0) || soft.hd[0].px.iter().zip(&hard.hd[0].px).any(|(a, b)| a[3] < b[3] && a[3] > 0));
+    }
+
+    #[test]
     fn cut_matches_kh1() {
         assert_eq!(cut(1, 6, 26), 22);
         assert_eq!(cut(5, 6, 26), 4);
@@ -1233,6 +1566,7 @@ mod tests {
             uitex_hd: &uitex_hd,
             g_s: &rd("exchange/UK_uibin_g_s.bin"),
             g_red: &rd("exchange/UK_uibin_g_red.bin"),
+            g_act: &rd("exchange/UK_uibin_g_act.bin"),
             faces: [face("xa_ex_0010.mdls", 0xA2E80), face("xa_ex_0040.mdls", 0x75600), face("xa_ex_0050.mdls", 0x8D400)],
         };
         let langs = ["FR", "GR", "IT", "SP", "UK"];
@@ -1262,7 +1596,25 @@ mod tests {
         assert_eq!(c.entries.last().unwrap().name(), IMZ);
         assert_eq!(c.entries.last().unwrap().name_raw[0x14..], Container::parse(&rtm).unwrap().entries[0].name_raw[0x14..]);
         assert_eq!(rta.len(), 10);
-        eprintln!("atlas {:?}, {} items, {} sprites, lad {} / {} bytes", b.atlas, b.pieces, b.sprites, b.lad.len(), b.lad_hd.len());
+        let sq = Seqd::parse(&Layd::parse(&b.lad).unwrap().seqs[0]).unwrap();
+        eprintln!(
+            "atlas {:?}, {} items, {} sprites, lad {} / {} bytes; {} groups, {} units ({} with slides), {} runs, {} animations, {} parts",
+            b.atlas,
+            b.pieces,
+            b.sprites,
+            b.lad.len(),
+            b.lad_hd.len(),
+            b.groups,
+            b.motion.first.len(),
+            b.motion.unit_slides.iter().filter(|&&x| x).count(),
+            b.motion.runs.len(),
+            sq.anims.len(),
+            sq.parts.len()
+        );
+        assert_eq!(sq.agroups.len(), b.groups);
+        // KH1's g_act tracks at 2 frames a key unit: vibe_s 5 units, vibe_ss 11, vibe_sss 19,
+        // the slides 10.
+        assert_eq!(b.motion.programs.iter().map(|p| p.len).collect::<Vec<_>>(), vec![10, 22, 38, 10, 10, 20, 20]);
         if let Ok(out) = std::env::var("KH1_HUD_OUT") {
             let o = std::path::Path::new(&out);
             std::fs::write(o.join("kh1hud.lad"), &b.lad).unwrap();

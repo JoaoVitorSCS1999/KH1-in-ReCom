@@ -645,6 +645,19 @@ pub const KH1_HUD_MASK_CHECKED: &[Site] = &[
     Site { name: "minimap mask read 4 context (0x1401E4402)", rva: 0x001E_4402, expect: &[0xBA, 0xE2, 0x00, 0x00, 0x00, 0xBB, 0x01, 0x00, 0x00, 0x00, 0x8B, 0xCB, 0xE8, 0xAD, 0xC4, 0xFC, 0xFF, 0xA8, 0x08] },
 ];
 
+/// The KH1 HUD (decision 39) from H2b on: Re:CoM's `D2::C2DSeqCtrl` functions it calls besides the
+/// MP bar's. Bytes read from the Steam exe (2026-11-01).
+pub const KH1_HUD_CALLEES: &[Site] = &[
+    // movzx eax,byte [rcx+0x16D]; cmp edx,eax; jae; mov eax,edx; movaps xmm1,xmm2; mov ecx,
+    // [rcx+rax*4+0x144]; jmp 0x140246710: play layer `edx` from time `xmm2` (f32, units of 1/50
+    // frame; the C2DSeqObj's vtable +0x30 `0x140249360` sets +0x38 = −1 and +0x30 = time).
+    Site { name: "C2DSeqCtrl play from (0x140248550)", rva: 0x0024_8550, expect: &[0x0F, 0xB6, 0x81, 0x6D, 0x01, 0x00, 0x00, 0x3B, 0xD0, 0x73, 0x11, 0x8B, 0xC2, 0x0F, 0x28, 0xCA, 0x8B, 0x8C, 0x81, 0x44, 0x01, 0x00, 0x00, 0xE9, 0xA4, 0xE1, 0xFF, 0xFF, 0xC3] },
+    // movzx eax,byte [rcx+0x16D]; cmp edx,eax; jb; xor eax,eax; ret; mov eax,edx; mov ecx,
+    // [rcx+rax*4+0x144]; jmp 0x140246250: layer `edx`'s play time (the C2DSeqObj's +0x30, through
+    // the set's vtable +0x68 `0x140246D60`).
+    Site { name: "C2DSeqCtrl layer time (0x140248000)", rva: 0x0024_8000, expect: &[0x0F, 0xB6, 0x81, 0x6D, 0x01, 0x00, 0x00, 0x3B, 0xD0, 0x72, 0x03, 0x33, 0xC0, 0xC3, 0x8B, 0xC2, 0x8B, 0x8C, 0x81, 0x44, 0x01, 0x00, 0x00, 0xE9, 0x34, 0xE2, 0xFF, 0xFF] },
+];
+
 /// Re:CoM's `D2::C2DSeqCtrl` functions the MP bar calls (the ctor `0x140247260` and `operator
 /// new` are already checked for the Keyblades page).
 pub const MP_BAR_CALLEES: &[Site] = &[
@@ -1077,6 +1090,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(KH1_HUD_HOOKS)
         .chain(KH1_HUD_MASK_CALLS)
         .chain(KH1_HUD_MASK_CHECKED)
+        .chain(KH1_HUD_CALLEES)
         .chain(MP_BAR_CALLEES)
         .chain(MP_BAR_CHECKED)
         .chain(COMMAND_MENU_CALLEES)
@@ -1600,4 +1614,16 @@ mod tests {
             assert!(!M6_COCKPIT_CALLS.iter().chain(M6_CARD_CALLS).chain(M6_ENEMY_UI_CALLS).any(|m| m.rva == c.rva), "{}", c.name);
         }
     }
+
+    #[test]
+    fn kh1_hud_callees() {
+        // Both end in a jmp rel32 to the 2D manager's handle functions.
+        let jmp = |site: &Site, at: usize| -> u32 { (site.rva as i64 + at as i64 + 5 + i32::from_le_bytes(site.expect[at + 1..at + 5].try_into().unwrap()) as i64) as u32 };
+        let play = KH1_HUD_CALLEES.iter().find(|s| s.rva == 0x0024_8550).unwrap();
+        assert_eq!(jmp(play, 23), 0x0024_6710);
+        let time = KH1_HUD_CALLEES.iter().find(|s| s.rva == 0x0024_8000).unwrap();
+        assert_eq!(jmp(time, 23), 0x0024_6250);
+        assert!(KH1_HUD_CALLEES.iter().all(|s| s.expect.len() >= 5));
+    }
+
 }
