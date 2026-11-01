@@ -825,6 +825,11 @@ pub const MAGIC_CALLEES: &[Site] = &[
     // mov rax,[rcx+0xF0]; add rax,0x30; ret: an actor's position (its mover's +0x30).
     Site { name: "actor position (0x1401A49B0)", rva: 0x001A_49B0, expect: &[0x48, 0x8B, 0x81, 0xF0, 0x00, 0x00, 0x00, 0x48, 0x83, 0xC0, 0x30, 0xC3] },
     Site { name: "player heal (0x1401E59A0)", rva: 0x001E_59A0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x48] },
+    // M7 f2. The whole functions: mov rax,[rcx+0xF0]; add rax,0x70; ret (an actor's scale, its
+    // mover's +0x70) and mov rax,[rcx+0xF0]; movaps xmm0,[rdx]; movdqa [rax+0x70],xmm0; ret (sets
+    // it): what Re:CoM's own Gravity squash writes the height with (0x140183BA0).
+    Site { name: "actor scale (0x1401A4A20)", rva: 0x001A_4A20, expect: &[0x48, 0x8B, 0x81, 0xF0, 0x00, 0x00, 0x00, 0x48, 0x83, 0xC0, 0x70, 0xC3] },
+    Site { name: "actor scale set (0x1401A7050)", rva: 0x001A_7050, expect: &[0x48, 0x8B, 0x81, 0xF0, 0x00, 0x00, 0x00, 0x0F, 0x28, 0x02, 0x66, 0x0F, 0x7F, 0x40, 0x70, 0xC3] },
 ];
 
 /// Exe bytes the cast patches or relies on.
@@ -1498,6 +1503,10 @@ mod tests {
         assert_eq!((u32::from_le_bytes(hv.expect[3..7].try_into().unwrap()), call(hv, 51)), (0x690, 0x0016_FDB0));
         assert_eq!(0x690 + 0x92, 0x722);
         assert_eq!(u32::from_le_bytes(site("damage check: pending hit (0x1401E6FBE)").expect[3..7].try_into().unwrap()), 0x720);
+        // M7 f2: the scale getter and setter both use the mover's +0x70.
+        let sg = site("actor scale (0x1401A4A20)");
+        let ss = site("actor scale set (0x1401A7050)");
+        assert_eq!((sg.expect[3], sg.expect[10], ss.expect[3], ss.expect[14]), (0xF0, 0x70, 0xF0, 0x70));
         // The callees the cast also uses are checked by earlier stages: end attack, ground test,
         // handle → object.
         for rva in [0x001F_6660u32, 0x001F_3C00, 0x002A_D350] {

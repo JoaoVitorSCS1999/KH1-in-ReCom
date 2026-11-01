@@ -791,8 +791,9 @@ Sites (7.8):
   owners the same way); if not, the held bolt carries the strikes and the growth is skipped;
   (5) Re:CoM's `0x41E1` flags don't end the sphere before its life with the attack held (if a wall
   ends it, the strikes still come, from the bolt).
-- **Not built: the slow under the falling sphere** (KH1: `+0x88 |= 4` each frame, the actor's time
-  scale eased to 0.8 with a wobble and back at +0.05 a frame). Re:CoM's enemies have a per-actor
+- **Not built in 7.8: the slow under the falling sphere** (M7 f2 below: it is a squash, not a
+  slow; KH1: `+0x88 |= 4` each frame, the actor's time scale eased to 0.8 with a wobble and back at
+  +0.05 a frame). Re:CoM's enemies have a per-actor
   frame step (`+0x14`, ticks, read by their motion update `0x14024E470` and effects); its writer was
   not found, and no Re:CoM slow status was found (its kind specials have Stop, Freeze, Magnet,
   Synchro, Gravity; no slow). Open question below.
@@ -803,7 +804,71 @@ Open question (7.8): **KH1's slow under the falling Gravity sphere.** (a) leave 
 enemies under the sphere (and ease it back) if Re:CoM's task runner lets a per-actor step through:
 everything of the enemy slows, as KH1's time scale; (c) slow only their motion (Re:CoM's motion
 speed `ctrl+0x4C`, which Re:CoM's own Stop sets to 0): animations and root motion slow, their AI
-timers and shots don't.
+timers and shots don't. **Decision 38 chose (b) "slow everything … research first"; the research
+(M7 f2, below) found that KH1 has no slow there: it squashes.**
+
+### M7 f2: what KH1 does under the falling sphere, and what is built
+
+**Research (Checked (files + decomp))**: the research note's "time scale" was an Assumption, and
+it is wrong:
+
+| what | KH1 (Steam) | tag |
+|---|---|---|
+| The falling thread (`L000ee`), each fall frame: the sphere down 230 / N cm, its scale up, then `L0055c(sphere centre, 170 × scale)`: every enemy (sys 65) whose bodies touch that sphere (sys 90 type 1) gets **`actor+0x88 |= 4`**. Not on the impact run. | `xm_gravity01.mag` `0xEE..0x168`, `0x55C..0x5FA` (`magdis.py`) | Checked (files) |
+| The actor update `0x140297FE0`, normal branch (skipped while `+0x88 & 1`, stopped; and for the flattened requests 0x66..0x68, and when the param block `+0x6C`'s byte 0 bit 0 is set): with bit 4, `+0x480 = (+0x480 − 0.8) × 0.95 + 0.8 − sin(+0x484) × 0.05`, `+0x484 = wrap(+0x484 + π/2)` (`0x1402A8280`, [−π, π]); without it, `+0x480 += 0.05` up to 1.0 and `+0x484 = 0`; then bit 4 is cleared. `+0x480` starts at 1.0 (`0x140292660`). | `0x140297FE0` | Checked (decomp) |
+| **`+0x480`'s only reader**: the actor's world-matrix build `0x1402A0A40`: its scale `+0x40` with **y × `+0x480`**, applied with `0x1402A9090` (flag `+0x374 |= 0x2000`). Bit 4 of `+0x88` has no other reader (the other `|= 4` writers, `0x14027D4B0` / `0x14027E460`, are another struct's). | `0x1402A0A40` | Checked (decomp) |
+| (Related, not asked) KH1's Gravity **hit** flattens the enemy: the hit pass `0x1402B7260` holds `+0x480` at 0.1 in states 0x16 / 0x17 or request 0x66 while its timer `+0x404` is ≤ 60, then eases it back (`(t − 60) / 15 × 0.9 + 0.1`, or `× 0.125`), and request 0x67 pulls it toward 1 by 0.3 a frame. | `0x1402B7260` | Checked (decomp); not built (owner question 2) |
+
+So **KH1's "slow" is a vertical squash of the model** to about 0.8 of its height, wobbling with a
+4-frame period, springing back at 0.05 a frame once out from under the sphere. Nothing of the
+enemy's motion, think, timers or speed changes.
+
+**Built (the most KH1-faithful native option; owner question 1):** KH1's squash on Re:CoM's own
+height scale, the lever Re:CoM's own Gravity squash uses (state `0x140183BA0`, stop exe
+`0x1401843A0` case 5: `y = timer / 250`, then 1.0):
+
+- **Where:** the per-frame spell check that runs Gravity's falls (`win::magic::gravity_frame`, from
+  the request-bits wrapper: one atomic load when no spell thread runs) → `squash_frame`:
+  1. each squashed enemy's KH1 update (`magic::squash::Squash::step`) with the bit the last run
+     left: its height = Re:CoM's height before (read once) × KH1's `+0x480`, written through
+     Re:CoM's `0x1401A7050(enemy, &scale)` (the mover's `+0x70`, read with `0x1401A4A20`); a stopped
+     enemy (Re:CoM's stop state, `+0x260` bit 19) isn't updated, as KH1's; back at 1.0 its height is
+     put back exactly and it leaves the list;
+  2. each falling sphere's test (fall frames only, not the impact run): the sphere's KH1 centre
+     (`squash::centre_at`: straight down 2.3 m over N frames to the impact centre) and radius
+     (`radius_at`: 1.7 m × the scale); every alive enemy of Re:CoM's lock-on list whose live hurt
+     bodies touch it (`magic::body_touches`, KH1's sys 90 type 1, as at the impact) is under it for
+     its next update.
+- **Per frame:** only while a Gravity sphere falls or an enemy springs back (≤ 6 frames after): a
+  lock-on list walk per falling sphere and one scale write per squashed enemy.
+- **Logs / trace:** `magic: gravity1 squash on 0x…: under the falling sphere (centre …, r … m),
+  Re:CoM's height scale 1.000 x KH1's +0x480 from the next update` (20 lines); F9 events `squash
+  n<enemies> u<under now>`.
+- **Sites** (`sites::MAGIC_CALLEES`, called): `0x1401A4A20` `48 8B 81 F0 00 00 00 48 83 C0 70 C3`,
+  `0x1401A7050` `48 8B 81 F0 00 00 00 0F 28 02 66 0F 7F 40 70 C3` (both whole functions). Checked
+  (exe: a script compares every literal site of `sites.rs` with the Steam exe, 321 / 321).
+- **1:1:** Checked (decomp + files; `magic::tests::gravity_squash_is_kh1s_height_ease_and_wobble`):
+  the ease, the wobble's phase and wrap, the spring back, the test sphere's centre and radius per
+  frame. **Assumptions:** (1) KH1's param-block bit (`+0x6C` byte 0 bit 0) that exempts some
+  enemies has no Re:CoM counterpart: every enemy squashes; (2) Re:CoM's mover scale y scales the
+  drawn model's height as KH1's matrix scale does (Re:CoM's own Gravity squash uses it so); whether
+  Re:CoM's hurt bodies follow it is Re:CoM's; (3) an enemy Re:CoM re-scales itself every frame
+  would fight our write (none known); (4) the release run's own test (the first fall frame) is
+  skipped (±1 frame).
+- **Not checked:** in game. **In-game check:** cast Gravity on a group: while the sphere falls,
+  every enemy under it shrinks to about 80 % height with a quick wobble and keeps moving and
+  attacking at its normal speed; after the impact they pop back to full height within about 5
+  frames. Combat = Re:CoM: Re:CoM's own Gravity unchanged.
+
+Owner questions (M7 f2):
+
+1. **Decision 38 asked for a slow; KH1 has none: it squashes.** (a) KH1's squash (built: enemies
+   under the falling sphere shrink to about 80 % height with a small wobble, nothing slows);
+   (b) the slow as decided (not KH1: the enemy's whole step at 0.8 through its per-actor dt
+   `actor+0x14`, which Re:CoM's actor update `0x1401A59A0` counts its timers by; its writer not yet
+   found); (c) neither.
+2. **KH1's Gravity hit flattens the enemy** (height 0.1 for about a second, then it springs back):
+   add it to the impact's hit, on the same height lever? (a) yes; (b) no (built: KH1's damage only).
 
 In-game checklist (7.8):
 

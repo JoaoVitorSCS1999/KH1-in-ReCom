@@ -411,6 +411,48 @@ fn gravity_rows_numbers_and_fall_are_kh1s() {
     assert_eq!(gravity::scale_at(3, 99.0), 1.6);
 }
 
+/// M7 f2 (decision 38): under the falling sphere KH1 squashes the enemy's height (`+0x480`, the y of
+/// its matrix scale) toward 0.8 with a wobble, and springs it back 0.05 a frame after.
+#[test]
+fn gravity_squash_is_kh1s_height_ease_and_wobble() {
+    use squash::Squash;
+    let mut s = Squash::default();
+    assert_eq!((s.y, s.phase), (1.0, 0.0));
+    // First update under the sphere: (1 − 0.8) × 0.95 + 0.8 − sin 0 × 0.05 = 0.99; φ = π/2.
+    assert!((s.step(true) - 0.99).abs() < 1e-6);
+    assert!((s.phase - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+    // Second: (0.99 − 0.8) × 0.95 + 0.8 − 1 × 0.05 = 0.9305; φ = π.
+    assert!((s.step(true) - 0.9305).abs() < 1e-5);
+    // The phase runs π/2 a frame, wrapped into [−π, π] (`0x1402A8280`): π → −π/2 → 0 → π/2.
+    s.step(true);
+    assert!((s.phase + std::f32::consts::FRAC_PI_2).abs() < 1e-5, "{}", s.phase);
+    // Under for a whole fall (60 frames): it hovers around 0.8 within the wobble's reach.
+    for _ in 0..57 {
+        let y = s.step(true);
+        assert!(y > 0.68 && y < 1.0, "{y}");
+    }
+    let low = s.y;
+    assert!((low - 0.8).abs() < 0.12, "{low}");
+    // Out from under: +0.05 a frame to 1, the phase back to 0, then done.
+    let y1 = s.step(false);
+    assert!((y1 - (low + 0.05)).abs() < 1e-6 && s.phase == 0.0);
+    let mut n = 1;
+    while !s.done() {
+        s.step(false);
+        n += 1;
+        assert!(n < 10);
+    }
+    assert_eq!(s.y, 1.0);
+    // The test sphere: 170 cm × the scale, at the falling centre (2.3 m above the impact centre at
+    // the release, at it after N frames).
+    let impact = [1.0, 2.0, 3.0];
+    assert_eq!(squash::centre_at(impact, 1, 0.0), [1.0, 4.3, 3.0]);
+    assert!((squash::centre_at(impact, 2, 35.0)[1] - 3.15).abs() < 1e-5);
+    assert_eq!(squash::centre_at(impact, 3, 60.0), impact);
+    assert!((squash::radius_at(1, 0.0) - 0.017).abs() < 1e-6);
+    assert!((squash::radius_at(3, 60.0) - 2.72).abs() < 1e-5);
+}
+
 #[test]
 fn gravity_damage_is_kh1s_percent_of_current_hp() {
     // Gravity + 5 × max MP 3 = 55 % of the current HP × resist[8].

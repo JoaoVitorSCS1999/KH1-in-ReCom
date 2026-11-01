@@ -984,12 +984,112 @@ unsafe fn shot_object(id: u32) -> Option<usize> {
     (vt == va(b, crate::guard::bullet::HOMING_VTABLE) || vt == va(b, crate::guard::bullet::VTABLE)).then_some(o)
 }
 
+/// An enemy KH1's falling Gravity sphere squashed (M7 f2, decision 38; `crate::magic::squash`):
+/// its handle, Re:CoM's height scale before (the mover's scale y), KH1's `+0x480` / `+0x484`, and
+/// whether the sphere touched it at the last run (KH1's `+0x88 & 4`, read by its next update).
+struct Squashed {
+    h: u32,
+    base: f32,
+    s: mg::squash::Squash,
+    under: bool,
+}
+
+/// The enemies being squashed or springing back (at most 32). Empty: nothing of this runs.
+static SQUASHED: Mutex<Vec<Squashed>> = Mutex::new(Vec::new());
+static SQUASH_LINES: AtomicU32 = AtomicU32::new(20);
+/// `0x1401A4A20(actor)`: its scale vector (the mover's `+0x70`); `0x1401A7050(actor, &scale)`: sets
+/// it (an aligned 16-byte copy). Re:CoM's own Gravity squash (state `0x140183BA0`, stop exe
+/// `0x1401843A0` case 5) writes the height this way. Checked (decomp + exe).
+const SCALE_GET: u32 = 0x001A_4A20;
+const SCALE_SET: u32 = 0x001A_7050;
+
+#[repr(C, align(16))]
+struct Scale([f32; 4]);
+
+/// KH1's squash for this frame (`0x140297FE0` on each actor, then the falling threads' `L0055c`):
+/// first every squashed enemy's update with the bit the last run left (its height = Re:CoM's base ×
+/// KH1's `+0x480`, through Re:CoM's own scale setter; a stopped enemy's update doesn't run, as
+/// KH1's), then each falling sphere's test: every alive enemy whose bodies touch the sphere of 170 cm
+/// × its scale at its centre (KH1's sys 90 type 1) is under it for the next update.
+unsafe fn squash_frame(falling: &[(u8, [f32; 3], f32)]) {
+    type GetFn = unsafe extern "win64" fn(usize) -> *const [f32; 4];
+    type SetFn = unsafe extern "win64" fn(usize, *const Scale);
+    let Ok(mut g) = SQUASHED.lock() else { return };
+    if g.is_empty() && falling.is_empty() {
+        return;
+    }
+    let height = |obj: usize| -> Option<[f32; 4]> {
+        let v = func::<GetFn>(SCALE_GET)(obj);
+        (!v.is_null()).then(|| std::ptr::read_unaligned(v))
+    };
+    let set_height = |obj: usize, y: f32| {
+        if let Some(mut v) = height(obj) {
+            v[1] = y;
+            let s = Scale(v);
+            func::<SetFn>(SCALE_SET)(obj, &s);
+        }
+    };
+    // The actors' updates.
+    g.retain_mut(|e| {
+        let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(e.h);
+        if obj == 0 {
+            return false;
+        }
+        if alive_enemy(e.h).is_some() && stopped(obj) {
+            return true;
+        }
+        let y = e.s.step(e.under);
+        e.under = false;
+        set_height(obj, e.base * y);
+        if e.s.done() {
+            set_height(obj, e.base);
+            return false;
+        }
+        true
+    });
+    // The falling threads' test.
+    for &(level, impact, fallen) in falling {
+        let centre = mg::squash::centre_at(impact, level, fallen);
+        let area = mg::Area::Sphere { radius: mg::squash::radius_at(level, fallen) };
+        for (h, _) in lock_on_list(0, false) {
+            let Some(e) = alive_enemy(h) else { continue };
+            if !bodies(e).iter().any(|(_, b)| mg::body_touches(centre, area, b)) {
+                continue;
+            }
+            if let Some(s) = g.iter_mut().find(|s| s.h == h) {
+                s.under = true;
+            } else if g.len() < 32 {
+                let base = height(e).map_or(1.0, |v| v[1]);
+                let base = if base > 0.01 && base < 100.0 { base } else { 1.0 };
+                g.push(Squashed { h, base, s: mg::squash::Squash::default(), under: true });
+                if SQUASH_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+                    log(&format!(
+                        "magic: gravity{level} squash on {h:#x}: under the falling sphere (centre ({:.2},{:.2},{:.2}), r {:.2} m), Re:CoM's height scale {base:.3} x KH1's +0x480 from the next update",
+                        centre[0], centre[1], centre[2], mg::squash::radius_at(level, fallen)
+                    ));
+                }
+            }
+        }
+    }
+    if !g.is_empty() {
+        let under = g.iter().filter(|s| s.under).count();
+        event(format!("squash n{} u{under}", g.len()));
+    }
+}
+
+/// Enemies being squashed (the per-frame spell check runs while any are).
+fn squashing() -> bool {
+    SQUASHED.lock().map(|g| !g.is_empty()).unwrap_or(false)
+}
+
 /// One run of Gravity's falling threads (Sora's frame start): the sphere's KH1 growth, and at the
 /// impact KH1's strikes (`L0044c`): every alive enemy whose bodies touch the 1.7 × S m sphere at the
 /// centre, struck once with the sphere's attack through Re:CoM's apply. If the sphere is gone
-/// (Re:CoM ended it on a wall), a held bolt like 7.6's carries the strikes.
+/// (Re:CoM ended it on a wall), a held bolt like 7.6's carries the strikes. Each fall frame before
+/// the impact also squashes the enemies under the sphere (`L0055c`, M7 f2: [`squash_frame`]).
 unsafe fn gravity_frame(pl: usize, step: f32) {
     let mut due = Vec::new();
+    let mut falling = Vec::new();
     {
         let Ok(mut g) = FALLS.lock() else { return };
         for run in g.iter_mut() {
@@ -999,10 +1099,13 @@ unsafe fn gravity_frame(pl: usize, step: f32) {
             }
             if impact {
                 due.push((run.shot, run.level, run.centre, run.kind, run.attr, run.ap));
+            } else {
+                falling.push((run.level, run.centre, run.fall.fallen()));
             }
         }
         g.retain(|r| !(r.fall.left <= 0.0 && due.iter().any(|d| d.0 == r.shot)));
     }
+    squash_frame(&falling);
     for (shot, level, centre, kind, attr, ap) in due {
         let area = mg::Area::Sphere { radius: mg::gravity::impact_radius_m(level) };
         let carrier = shot_object(shot).or_else(|| carrier_at(pl, level, centre, kind, attr, ap));
@@ -1470,7 +1573,7 @@ pub unsafe fn strikes_frame(pl: usize) {
     strike_step(pl, step, None);
     gravity_frame(pl, step);
     aero_frame(pl, step);
-    let idle = STRIKES.lock().map(|g| g.is_empty()).unwrap_or(true) && FALLS.lock().map(|g| g.is_empty()).unwrap_or(true) && !barrier_on();
+    let idle = STRIKES.lock().map(|g| g.is_empty()).unwrap_or(true) && FALLS.lock().map(|g| g.is_empty()).unwrap_or(true) && !barrier_on() && !squashing();
     if idle {
         STRIKING.store(false, Ordering::Release);
     }

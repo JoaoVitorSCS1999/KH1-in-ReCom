@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 60: Gravity: KH1's squash under the falling sphere, version 0.27.2 (2026-10-31)
+
+> Decision 38 asked for a slow; KH1 has none: its field `+0x480` only scales the model's height
+> (Checked, KH1 decomp + .mag). Built KH1's squash; owner question.
+
+- Enemies whose bodies touch the falling sphere (170 cm × scale) squash toward 0.8 height with
+  KH1's wobble `(s−0.8)·0.95+0.8−sin φ·0.05` (φ += π/2 a frame) and spring back 0.05 a frame,
+  through Re:CoM's own scale getter / setter (`0x1401A4A20`, `0x1401A7050`). Runs only while a
+  sphere falls or an enemy springs back. Not seen in game.
+
+---
+
 ## Stage 59: Fire's release step as KH1, version 0.27.1 (2026-10-31)
 
 > Decision 38: Fire's release step is KH1's 15 cm curve

@@ -576,6 +576,83 @@ pub mod gravity {
     }
 }
 
+/// What KH1 does to an enemy under the **falling** Gravity sphere (decision 38's "slow"; research
+/// for M7 f2, Checked (files + decomp)):
+///
+/// - the falling thread (`xm_gravity01.mag` `L000ee`, each fall frame after moving the sphere down
+///   and growing it) calls `L0055c`: every enemy (sys 65) whose bodies touch a **sphere of 170 cm ×
+///   the current scale** at the sphere's centre (sys 90 type 1) gets `actor+0x88 |= 4`;
+/// - the actor's update `0x140297FE0` (its normal branch, only while not stopped: `+0x88 & 1`
+///   clear, and not in the flattened motions 0x66..0x68, and its param block's byte 0 bit 0 clear)
+///   then eases **`+0x480`** and clears the bit: with the bit, `s = (s − 0.8) × 0.95 + 0.8 −
+///   sin(φ) × 0.05` and `φ += π/2` (wrapped, `0x1402A8280`); without it, `s += 0.05` up to 1 and
+///   `φ = 0`. It starts at 1 (`0x140292660`: `+0x480 = 1.0`);
+/// - **`+0x480` is no time scale.** Its only reader is the actor's matrix build `0x1402A0A40`:
+///   the actor's scale (`+0x40`) with **y × `+0x480`**, applied to the world matrix
+///   (`0x1402A9090`). The bit 4 has no other reader (`0x140297FE0` only). So KH1's "slow" is a
+///   **vertical squash** of the model to about 0.8 with a 4-frame wobble, springing back at 0.05 a
+///   frame once out from under the sphere. Nothing of the enemy's motion, think or speed changes.
+///   (The research note's "time scale eased to 0.8" was an Assumption; this corrects it.)
+pub mod squash {
+    /// The squashed height, the ease (kept 0.95 a frame), the wobble and its step, the spring back.
+    pub const LOW: f32 = 0.8;
+    pub const KEEP: f32 = 0.95;
+    pub const WOBBLE: f32 = 0.05;
+    pub const PHASE_STEP: f32 = std::f32::consts::FRAC_PI_2;
+    pub const BACK: f32 = 0.05;
+
+    /// One actor's `+0x480` (height scale) and `+0x484` (wobble phase).
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct Squash {
+        pub y: f32,
+        pub phase: f32,
+    }
+
+    impl Default for Squash {
+        fn default() -> Squash {
+            Squash { y: 1.0, phase: 0.0 }
+        }
+    }
+
+    impl Squash {
+        /// One actor update (`0x140297FE0`), with or without the sphere's bit from the last run.
+        /// The height scale now.
+        pub fn step(&mut self, under: bool) -> f32 {
+            if under {
+                self.y = ((self.y - LOW) * KEEP + LOW) - self.phase.sin() * WOBBLE;
+                self.phase = kh1_core::math::wrap_angle(self.phase + PHASE_STEP);
+            } else {
+                if self.y < 1.0 {
+                    self.y += BACK;
+                    if self.y > 1.0 {
+                        self.y = 1.0;
+                    }
+                }
+                self.phase = 0.0;
+            }
+            self.y
+        }
+
+        /// Back at full height (nothing left to do).
+        pub fn done(&self) -> bool {
+            self.y >= 1.0
+        }
+    }
+
+    /// The test sphere's centre `fallen` frames into the fall (Re:CoM metres, y up): KH1's sphere
+    /// falls straight down 230 cm over its N frames to the impact centre.
+    pub fn centre_at(impact: [f32; 3], level: u8, fallen: f32) -> [f32; 3] {
+        let (_, n) = super::gravity::of(level);
+        let left = (1.0 - fallen / n).clamp(0.0, 1.0);
+        [impact[0], impact[1] + super::gravity::FALL / 100.0 * left, impact[2]]
+    }
+
+    /// The test sphere's radius then (170 cm × the scale; Re:CoM metres).
+    pub fn radius_at(level: u8, fallen: f32) -> f32 {
+        super::gravity::RADIUS * super::gravity::scale_at(level, fallen) / 100.0
+    }
+}
+
 /// The falling thread's clock (`xm_gravity01.mag` `0x44..`): the release's run counts the first
 /// frame; each later run counts one more until the N-th; the run after it is the impact.
 #[derive(Clone, Copy, Debug, PartialEq)]
