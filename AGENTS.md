@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 77: KH1 command menu words at KH1's brightness, version 0.38.1 (2026-10-31)
+
+- Ask (owner, 2026-11-01): "for the command menu, lets try to get the resolution of the graphics to be
+  greater than how it is … lets try to get this 1:1" (video of KH1's menu).
+- Side by side at the same size (owner's 2560 × 1440 screenshot vs the KH1 video): the art is the
+  same PC textures at the same density (KH1 PC's menu pictures are 2× too; Checked (files)); the
+  visible difference was the words: ours pure white, KH1's off-white. The baked glyphs are KH1's grey
+  doubled, so the level is bright / 255 (0xE6 → 230), not bright / 128 (clipped to white). Words in
+  rows, the cursor row and the tab. Not seen in game.
+
+---
+
 ## Stage 76: Re:CoM's HP gauge at KH1's place, turned 180°, with KH1's MP ring, version 0.38.0 (2026-10-31)
 
 - Ask (owner, 2026-11-01): "Lets just keep the KH1 command menu and the triangle prompts. For the health

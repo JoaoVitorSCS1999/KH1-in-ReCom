@@ -364,7 +364,7 @@ impl Ui {
         };
         let at = tab_kh1_at(&t, lang);
         let f = if t.dim { 0.5 } else { 1.0 };
-        let b = t.bright as f32 / 128.0;
+        let b = kh1_word_level(t.bright);
         let cols = [[f, f, f, t.alpha], [1.0, 1.0, 1.0, t.alpha], [b, b, b, t.alpha]];
         if let Some(old) = self.tab.as_mut().filter(|o| o.view.name == t.name) {
             if old.view != t {
@@ -491,7 +491,7 @@ impl Ui {
                     func::<VecFn>(COLOUR)(r.ctrl, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
                 }
                 if r.text != 0 && (alpha_changed || r.view.bright != v.bright) {
-                    let b = v.bright as f32 / 128.0;
+                    let b = kh1_word_level(v.bright);
                     func::<VecFn>(COLOUR)(r.text, V4([b, b, b, sc.alpha]).0.as_ptr());
                 }
                 r.view = *v;
@@ -563,7 +563,7 @@ impl Ui {
             if let Some(wg) = (v.name != 0).then(|| g.word(&lang, v.name)).flatten() {
                 let at = kh1_at(v, true);
                 if let Some(t) = self.kh1_ctrl(prio, at.0, at.1, 1.0, &[(wg, None)]) {
-                    let b = v.bright as f32 / 128.0;
+                    let b = kh1_word_level(v.bright);
                     func::<VecFn>(COLOUR)(t, V4([b, b, b, sc.alpha]).0.as_ptr());
                     text = t;
                 }
@@ -643,6 +643,15 @@ impl Ui {
         self.shown = Some(sc.clone());
         self.show_tab_recom(sc.tab, set, first, words);
     }
+}
+
+/// The colour level of a KH1-look word for KH1's brightness `bright` (0x73 grey … 0xE6). The
+/// baked glyphs are KH1's grey texels doubled (0x80 → 0xFF, as KH1's ×2 vertex colour shows
+/// them); KH1 draws texel × bright / 0x80 = bright (0xE6: 230, off-white), so the level is
+/// bright / 255. It was bright / 128, which clipped every bright word to pure white (owner's
+/// side-by-side with KH1, 2026-11-01).
+fn kh1_word_level(bright: u8) -> f32 {
+    bright as f32 / 255.0
 }
 
 /// H4: the KH1 look's groups when the KH1 HUD is up and its menu look was built.
