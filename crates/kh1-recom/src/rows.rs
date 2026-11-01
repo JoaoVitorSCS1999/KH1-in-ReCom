@@ -64,6 +64,9 @@ pub mod row {
     /// `p001_064` and `p001_068` (34 frames at 30 fps = KH1's 68). Checked (exe).
     pub const THUNDER: u32 = 0x39;
     pub const THUNDER_AIR: u32 = 0x3D;
+    /// Re:CoM's item clip (`exeItem` `0x1401ED6E0` plays row 0x2D): `p001_032`, KH1 entry 58's bake
+    /// (request 0x3E, 82 frames). Checked (exe: the action table's name; files: the bake test).
+    pub const ITEM: u32 = 0x2D;
 }
 
 /// KH1 requests for the KH1-only rows, in the order they are appended.
@@ -210,6 +213,9 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         // Aero (M7 stage 7.10): Re:CoM's Aero rows play Thunder's clip (row 0x28's `+0` = 0x39).
         crate::magic::cast_req::AERO => row::THUNDER,
         crate::magic::cast_req::AERO_AIR => row::THUNDER_AIR,
+        // An item on self (M8 stage 8a.1): Re:CoM's own item clip, KH1's entry 58 baked (no root
+        // travel in either).
+        crate::items::USE_SELF => row::ITEM,
         _ => return None,
     };
     Some((r, false))
@@ -318,6 +324,12 @@ mod tests {
         assert_eq!(row_for(0x3C, &s, &none), Some((0x39, false)));
         assert_eq!(row_for(0x89, &s, &none), Some((0x3D, false)));
         assert_eq!(crate::magic::RECOM_AERO_ROWS[0][0] as u32, row::THUNDER);
+    }
+
+    #[test]
+    fn item_use_plays_recoms_item_clip() {
+        let s = Stance::default();
+        assert_eq!(row_for(crate::items::USE_SELF, &s, &Extension::default()), Some((row::ITEM, false)));
     }
 
     #[test]

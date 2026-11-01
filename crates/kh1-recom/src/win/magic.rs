@@ -1281,13 +1281,13 @@ const HEAL: u32 = 0x001E_59A0;
 /// `initMagic`'s charge offset (`0x1407C7E50`: (−0.8, 0, 0, 1)) and the Cure / Stop cases' body
 /// offset (`0x1405A0910`: (0, 0.85, 0, 1)). Checked (exe).
 const CHARGE_OFFSET: [f32; 4] = [-0.8, 0.0, 0.0, 1.0];
-const BODY_OFFSET: [f32; 4] = [0.0, 0.85, 0.0, 1.0];
+pub(super) const BODY_OFFSET: [f32; 4] = [0.0, 0.85, 0.0, 1.0];
 /// The player's weapon (`+0x3D0`, `initMagic`'s charge goes on its bone 2). Checked (disasm).
 const WEAPON: usize = 0x3D0;
 
 /// An effect of the row's set (name at the set's `+0x18 + extra`) on a bone, as Re:CoM's cases
 /// start them. The effect's handle.
-unsafe fn effect_on_bone(pl: usize, bone_of: usize, bone: i32, set_name: usize, id: u32, offset: &[f32; 4], sticky: bool) -> u32 {
+pub(super) unsafe fn effect_on_bone(pl: usize, bone_of: usize, bone: i32, set_name: usize, id: u32, offset: &[f32; 4], sticky: bool) -> u32 {
     type BoneFn = unsafe extern "win64" fn(usize, i32) -> usize;
     type EffFn = unsafe extern "win64" fn(usize, usize, u32, usize, *const [f32; 4], u64, f32) -> u32;
     type ObjFn = unsafe extern "win64" fn(u32) -> usize;

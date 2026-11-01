@@ -174,6 +174,8 @@ pub struct FrameInput {
     pub locked: bool,
     /// A KH1 magic command this frame (the command menu's, M7 stage 7.4; a shortcut's in 7.12).
     pub magic: Option<crate::magic::MagicCommand>,
+    /// A KH1 item command this frame (the command menu's Items list, M8 stage 8a.1).
+    pub item: Option<crate::items::ItemCommand>,
 }
 
 /// A KH1 swing for Re:CoM to start (`crate::attack`): Re:CoM's field-swing init with the KH1 row.
@@ -278,6 +280,17 @@ pub trait Host {
     fn end_cast(&mut self, _airborne: bool) -> bool {
         false
     }
+    /// M8 stage 8a.1: Re:CoM's item action starts for this KH1 item use (`crate::items`): the item
+    /// leaves its slot (`0x1402C2760`), KH1's use task starts, and Sora's fields are `initItem`'s,
+    /// cardless. False when the slot doesn't hold the item (nothing changes).
+    fn start_item(&mut self, _c: &crate::items::ItemCommand) -> bool {
+        false
+    }
+    /// Re:CoM ends its item action (`0x1401F6660`, as `exeItem` does). True as for
+    /// [`Host::end_swing`].
+    fn end_item(&mut self, _airborne: bool) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -339,6 +352,8 @@ pub struct FrameOut {
     pub recom_spring: bool,
     /// What the cast did (M7 stage 7.4).
     pub cast: Vec<crate::magic::CastEvent>,
+    /// What the item command did (M8 stage 8a.1).
+    pub items: Vec<crate::items::ItemEvent>,
     /// Re:CoM's end action entered its win action (`0x1C`) in this frame: the KH1 frame wrote
     /// nothing to Re:CoM after it (no action, no motion), and the next one takes over afresh.
     pub recom_took: bool,
@@ -399,6 +414,10 @@ pub struct Kh1Sora {
     /// The KH1 cast Re:CoM's magic action is playing for us (M7 stage 7.4), if any.
     pub cast: Option<crate::magic::Cast>,
     pub(crate) cast_log: Vec<crate::magic::CastEvent>,
+    /// The KH1 item use whose motion Re:CoM's item action is playing for us (M8 stage 8a.1), if
+    /// any. KH1's use task itself runs on its own (`win::items`), as KH1's does.
+    pub item: Option<crate::items::ItemCommand>,
+    pub(crate) item_log: Vec<crate::items::ItemEvent>,
     /// Re:CoM's end action (from [`Kh1Sora::leave_swing`] / `leave_cast`) entered its own win
     /// action: this frame yields to it.
     pub(crate) recom_took: bool,
@@ -415,6 +434,8 @@ impl Kh1Sora {
         let mut motions = Moveset::kh1_defaults().motions;
         // KH1's cast motions (M7 stage 7.4), from the player's mset.
         crate::magic::add_motions(&mut motions);
+        // KH1's item use motion (M8 stage 8a.1).
+        crate::items::add_motions(&mut motions);
         Kh1Sora {
             params,
             abilities,
@@ -456,6 +477,8 @@ impl Kh1Sora {
             untouchable_reported: false,
             cast: None,
             cast_log: Vec::new(),
+            item: None,
+            item_log: Vec::new(),
             recom_took: false,
         }
     }
@@ -493,8 +516,10 @@ impl Kh1Sora {
         self.last_step = 0.0;
         self.last_start = pos;
         // Whatever Re:CoM ran in between ended any swing of ours, and any cast: a cast cut before
-        // its release casts nothing and pays no MP (KH1's script ends at its release check).
+        // its release casts nothing and pays no MP (KH1's script ends at its release check). An item
+        // use's motion is over too (its use task goes on by itself, as KH1's).
         self.swing = None;
+        self.item = None;
         if let Some(c) = self.cast.take() {
             if !c.released && !c.cancelled {
                 if c.start.spell == crate::magic::spell::AERO {
@@ -532,6 +557,9 @@ impl Kh1Sora {
             return a;
         }
         if let Some(a) = self.cast_action() {
+            return a;
+        }
+        if let Some(a) = self.item_action() {
             return a;
         }
         let a = |id, sub, phase| Action { id, sub, phase };
@@ -652,6 +680,7 @@ impl Kh1Sora {
                 // cast's: Re:CoM ends its magic action.
                 self.leave_swing(h);
                 self.leave_cast(h);
+                self.leave_item(h);
                 if self.recom_took {
                     // Re:CoM's end action entered its win action: its motion, not our idle.
                     return;
@@ -778,6 +807,11 @@ impl Kh1Sora {
         if let Some(m) = input.magic.filter(|_| cast_cmd.is_none()) {
             self.cast_log.push(crate::magic::CastEvent::Refused { spell: m.spell, level: m.level, why: "not now" });
         }
+        // An item command (M8 stage 8a.1): the same accept (`0x140293480`, type 3).
+        let item_cmd = input.item.filter(|_| self.accepts_item());
+        if let Some(i) = input.item.filter(|_| item_cmd.is_none()) {
+            self.item_log.push(crate::items::ItemEvent::Refused { item: i.item, why: "not now" });
+        }
 
         // ---- think: pre-step ----
         self.speed = 0.0;
@@ -812,6 +846,8 @@ impl Kh1Sora {
                 self.command_attack(h, &mut dir, &mut w, input.target, input.locked, pos, ev);
             } else if let Some(m) = cast_cmd {
                 self.command_magic(h, &mut dir, &mut w, input.target, pos, m);
+            } else if let Some(i) = item_cmd {
+                self.command_item(h, &mut dir, &mut w, i);
             }
         } else {
             if attack_cmd {
@@ -892,8 +928,9 @@ impl Kh1Sora {
             // A landing or walk-off replaced the swing's motion.
             self.leave_swing(h);
         }
-        // A landing, walk-off or another command replaced the cast's motion.
+        // A landing, walk-off or another command replaced the cast's motion (or the item's).
         self.leave_cast(h);
+        self.leave_item(h);
         if self.yield_to_recom(&mut out) {
             return out;
         }
@@ -906,6 +943,7 @@ impl Kh1Sora {
             h.set_guard(guard);
         }
         out.cast = self.take_cast_log();
+        out.items = self.take_item_log();
         out
     }
 
@@ -920,9 +958,11 @@ impl Kh1Sora {
         self.recom_took = false;
         self.swing = None;
         self.cast = None;
+        self.item = None;
         self.lock = false;
         self.rec = MotionRec::unknown();
         out.cast = self.take_cast_log();
+        out.items = self.take_item_log();
         out.recom_took = true;
         true
     }

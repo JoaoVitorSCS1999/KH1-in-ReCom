@@ -50,6 +50,13 @@
 //!   held and a slot is set (and Sora has a spell), the shortcut list takes the root's place (any
 //!   submenu closes; released, the root returns on Attack); a fresh Triangle / Square / Cross casts
 //!   slot 1 / 2 / 3 through the same commit path as the menu (see [`shortcut`]).
+//! - **Items** (M8 stage 8a.1, `0x140294220`, `0x140293480`, `0x14027B870` case 2): row 2 Items
+//!   opens KH1's Items list (type 2, `0x140528970`): Sora's filled slots in slot order (command
+//!   `item + 0x1E`), at x + 11, at the Items row's y with fewer than 2 entries, else
+//!   bottom-anchored at 348 − 22 n. No filled slot: row 2 greyed and locked. A state without the
+//!   item flag 0x40 (the air): row 2 greyed but openable, every entry greyed and locked. KH1 greys
+//!   no entry for full HP. Confirm on an entry passes KH1's commit gate (free or a combo window)
+//!   and issues the item on Sora (no party list: as Cure; `crate::items`).
 //!
 //! Re:CoM side: `win/command_menu.rs`; notes `docs/recom-m7-command-menu.md`.
 
@@ -242,6 +249,10 @@ pub struct World {
     /// Stage 7.12: the three shortcut slots as our save block keeps them (KH1 save
     /// `+0x844..0x846`): 0 = none, else spell + 1 ([`shortcut::slot_spell`]).
     pub shortcuts: [u8; 3],
+    /// M8 stage 8a.1: Sora's item slots (KH1 party record `+0x22..`: item ids, 0 = empty) and their
+    /// count (`+0x21`).
+    pub slots: [u8; crate::items::MAX_SLOTS],
+    pub slot_count: u8,
 }
 
 /// The fresh presses of one frame (Re:CoM's pad, mapped to KH1's buttons).
@@ -284,6 +295,8 @@ pub enum Kind {
     /// Stage 7.12: KH1's shortcut list (type 5, `0x140528A18`), in the root's place while L1 is
     /// held.
     Shortcut,
+    /// M8 stage 8a.1: KH1's Items list (type 2, `0x140528970`).
+    Items,
 }
 
 /// One KH1 list.
@@ -370,6 +383,9 @@ pub enum Event {
     ShortcutList(bool),
     /// Stage 7.12: a shortcut button: (slot 0..2, its command, what happened).
     Shortcut(u8, u8, ShortResult),
+    /// M8 stage 8a.1: an Items list entry confirmed: (its command, its slot, what happened:
+    /// issued / greyed (the error sound) / KH1's gate refused it).
+    Item(u8, u8, ShortResult),
 }
 
 /// What a shortcut press did (`0x140293480` on the shortcut list).
@@ -403,6 +419,8 @@ pub struct Outcome {
     pub events: Vec<Event>,
     /// The spell command issued this frame (M7 stage 7.4), for the cast.
     pub cast: Option<u8>,
+    /// The item issued this frame (M8 stage 8a.1): the item and its slot.
+    pub item: Option<crate::items::ItemCommand>,
 }
 
 /// The context tab (`0x140277CF0`): 0 hidden, 1 sliding in, 2 in, 3 fading out.
@@ -436,8 +454,13 @@ pub const TAB_STEP: f32 = 0.5;
 pub struct Menu {
     pub root: List,
     pub magic: List,
-    /// The Magic list is open (the stack is root → Magic).
+    /// A submenu is open (the stack is root → [`Menu::sub`]).
     pub open: bool,
+    /// Which submenu `open` means: the Magic list or (M8 stage 8a.1) the Items list.
+    pub sub: Kind,
+    /// M8 stage 8a.1: the Items list and the slot of each entry (`0x142D53A90`).
+    pub items: List,
+    pub item_slots: Vec<u8>,
     /// The fade (`0x14285280C`) and its speed.
     pub alpha: f32,
     pub alpha_speed: f32,
@@ -469,7 +492,22 @@ impl Menu {
         // The exe's defaults (`0x140528A18`): cursor −1 (no cursor), three entries.
         shortcut.cursor = -1;
         shortcut.cmds = vec![cmd::BLANK; 3];
-        Menu { root, magic: List::new(Kind::Magic), open: false, alpha: 0.0, alpha_speed: 0.0, top: None, tab: Tab::default(), tab_cmd: 0, shortcut, short_on: false, short_ok: false }
+        Menu {
+            root,
+            magic: List::new(Kind::Magic),
+            open: false,
+            sub: Kind::Magic,
+            items: List::new(Kind::Items),
+            item_slots: Vec::new(),
+            alpha: 0.0,
+            alpha_speed: 0.0,
+            top: None,
+            tab: Tab::default(),
+            tab_cmd: 0,
+            shortcut,
+            short_on: false,
+            short_ok: false,
+        }
     }
 
     /// The menu appears (the player's HUD is built): KH1's fade-in (`0x140278AC0(1)`).
@@ -557,10 +595,36 @@ impl Menu {
                 r.grey |= 2;
             }
         }
-        // Items (M8): no item slots yet, greyed and locked.
+        // Items (M8 stage 8a.1, `0x140294220`; KH1's save `+0x874` bits 0x10 / 2, items disabled /
+        // sealed, are never set in Re:CoM): row 2 Items, unlocked; the list holds the filled slots
+        // (command `item + 0x1E`, `0x142D53A90[k]` = the slot), each entry's bit cleared. With
+        // entries: the cursor clamped; without the state's item flag 0x40, row 2 greyed (not
+        // locked) and every entry greyed and locked. Without entries: row 2 greyed and locked.
         r.cmds[2] = cmd::ITEMS;
-        r.grey |= 4;
-        r.lock |= 4;
+        r.grey &= !4;
+        r.lock &= !4;
+        let filled: Vec<(u8, u8)> = (0..(w.slot_count as usize).min(crate::items::MAX_SLOTS)).filter(|&k| w.slots[k] != 0).map(|k| (k as u8, w.slots[k])).collect();
+        let mut igrey = !0u32;
+        for i in 0..filled.len() {
+            igrey &= !(1 << i);
+        }
+        self.items.cmds = filled.iter().map(|&(_, it)| crate::items::command(it)).collect();
+        self.item_slots = filled.iter().map(|&(k, _)| k).collect();
+        let ilen = self.items.cmds.len() as i32;
+        if ilen > 0 {
+            if self.items.cursor >= ilen {
+                self.items.cursor = ilen - 1;
+            }
+            if flags & 0x40 == 0 {
+                r.grey |= 4;
+                igrey = !0;
+            }
+        } else {
+            r.grey |= 4;
+            r.lock |= 4;
+        }
+        self.items.grey = igrey;
+        self.items.lock = igrey;
         // The context command, entry 3 (`0x1402948F0` clears it, `0x140293000` sets it).
         r.cmds[3] = cmd::NONE;
         if w.context != cmd::NONE {
@@ -568,8 +632,25 @@ impl Menu {
             r.grey &= !8;
             r.lock &= !8;
         }
-        for l in [&mut self.root, &mut self.magic] {
+        for l in [&mut self.root, &mut self.magic, &mut self.items] {
             l.bright.resize(l.cmds.len(), BRIGHT_GREY);
+        }
+    }
+
+    /// The open submenu's list.
+    pub fn sub_list(&self) -> &List {
+        if self.sub == Kind::Items {
+            &self.items
+        } else {
+            &self.magic
+        }
+    }
+
+    fn sub_list_mut(&mut self) -> &mut List {
+        if self.sub == Kind::Items {
+            &mut self.items
+        } else {
+            &mut self.magic
         }
     }
 
@@ -585,12 +666,19 @@ impl Menu {
     /// One frame of KH1's menu step for this pad: the build, then the input.
     pub fn step(&mut self, w: &World, pad: Pad) -> Outcome {
         self.build(w);
-        // The stack (`0x1402931B0`'s walk): the Magic list stays open while its row can open it.
-        if self.open && (self.root.locked(1) || self.root.cmds[1] != cmd::MAGIC || self.magic.cmds.is_empty()) {
+        // The stack (`0x1402931B0`'s walk): a submenu stays open while its row can open it.
+        let row_can_open = match self.sub {
+            Kind::Items => !self.root.locked(2) && !self.items.cmds.is_empty(),
+            _ => !self.root.locked(1) && self.root.cmds[1] == cmd::MAGIC && !self.magic.cmds.is_empty(),
+        };
+        if self.open && !row_can_open {
             self.open = false;
         }
-        if self.open && self.magic.cursor >= self.magic.count() {
-            self.magic.cursor = self.magic.count() - 1;
+        if self.open {
+            let l = self.sub_list_mut();
+            if l.cursor >= l.count() {
+                l.cursor = l.count() - 1;
+            }
         }
         // Stage 7.12, the stack's base (`0x1402937F0`, before its input checks): L1 held with the
         // list available swaps the shortcut list in for the root and drops any submenu; L1 released
@@ -663,6 +751,9 @@ impl Menu {
                     self.run_root(row, &mut out);
                 }
             }
+        } else if self.sub == Kind::Items {
+            out.attack = false;
+            self.run_item(w, &mut out);
         } else {
             out.attack = false;
             let row = self.magic.cursor;
@@ -723,42 +814,72 @@ impl Menu {
         out
     }
 
+    /// M8 stage 8a.1, `0x140293480` on an Items entry: locked (greyed) → the error sound; KH1's
+    /// item command opens the party list (record `+8` = 4, or 6 for the Mega items); with no party
+    /// yet it is used on Sora at once (the owner's choice for Cure / Aero, applied to items); KH1's
+    /// commit gate (free or a combo window; no Fire-like exception) may refuse it silently; else it
+    /// is issued (`0x142D539E4` = the entry's slot) and the stack unwinds to Attack.
+    fn run_item(&mut self, w: &World, out: &mut Outcome) {
+        let row = self.items.cursor;
+        let c = self.items.cmds.get(row as usize).copied().unwrap_or(0);
+        let slot = self.item_slots.get(row as usize).copied().unwrap_or(0);
+        let item = crate::items::item_of_command(c);
+        let result = match item {
+            Some(_) if !self.items.locked(row) && !w.gate_any => ShortResult::NotNow,
+            Some(it) if !self.items.locked(row) => {
+                out.item = Some(crate::items::ItemCommand { item: it, slot });
+                self.open = false;
+                self.root.cursor = 0;
+                ShortResult::Cast
+            }
+            _ => {
+                out.sounds.push(Sound::Error);
+                ShortResult::Greyed
+            }
+        };
+        out.events.push(Event::Item(c, slot, result));
+    }
+
     fn run_root(&mut self, row: i32, out: &mut Outcome) {
         let c = self.root.cmds[row as usize];
         if self.root.locked(row) {
             out.sounds.push(Sound::Error);
             out.events.push(Event::Refused(c));
-        } else if cmd::submenu(c) == 1 {
-            self.open_magic(out);
+        } else if cmd::submenu(c) != 0 {
+            self.open_sub(cmd::submenu(c), out);
         } else {
             out.events.push(Event::Refused(c));
         }
     }
 
-    fn open_magic(&mut self, out: &mut Outcome) {
+    /// Opens the Magic list (1) or the Items list (2) (`0x140293480` / `0x1402931B0`: sound 6).
+    fn open_sub(&mut self, which: u8, out: &mut Outcome) {
+        self.sub = if which == 2 { Kind::Items } else { Kind::Magic };
         self.open = true;
         out.sounds.push(Sound::Open);
-        out.events.push(Event::Opened(Kind::Magic));
-        if self.magic.cursor >= self.magic.count() || self.magic.cursor < 0 {
-            self.magic.cursor = 0;
+        out.events.push(Event::Opened(self.sub));
+        let l = self.sub_list_mut();
+        if l.cursor >= l.count() || l.cursor < 0 {
+            l.cursor = 0;
         }
     }
 
     /// `0x1402931B0`: true when the word was the cursor's.
     fn cursor(&mut self, word: u32, out: &mut Outcome) -> bool {
         let open = self.open;
-        let (count, cur) = if open { (self.magic.count(), self.magic.cursor) } else { (4, self.root.cursor) };
+        let (count, cur) = if open { (self.sub_list().count(), self.sub_list().cursor) } else { (4, self.root.cursor) };
         if word == 0x100 {
             if open || cur != 3 {
                 if open {
-                    // Spells open no list (Cure / Aero's party list: 7.4 / 7.7).
-                    if self.magic.locked(cur) {
+                    // Spells and items open no list (KH1's party list: Cure / Aero / items are
+                    // used on Sora; no party yet).
+                    if self.sub_list().locked(cur) {
                         out.sounds.push(Sound::Error);
                     }
                 } else if self.root.locked(cur) {
                     out.sounds.push(Sound::Error);
-                } else if cmd::submenu(self.root.cmds[cur as usize]) == 1 {
-                    self.open_magic(out);
+                } else if cmd::submenu(self.root.cmds[cur as usize]) != 0 {
+                    self.open_sub(cmd::submenu(self.root.cmds[cur as usize]), out);
                 }
                 return true;
             }
@@ -788,7 +909,7 @@ impl Menu {
         };
         let Some(n) = next else { return false };
         if open {
-            self.magic.cursor = n;
+            self.sub_list_mut().cursor = n;
         } else {
             self.root.cursor = n;
         }
@@ -806,7 +927,7 @@ impl Menu {
         let top = if self.short_on {
             Kind::Shortcut
         } else if self.open {
-            Kind::Magic
+            self.sub
         } else {
             Kind::Root
         };
@@ -815,6 +936,7 @@ impl Menu {
             let (t, under) = match top {
                 Kind::Shortcut => (&mut self.shortcut, None),
                 Kind::Magic => (&mut self.magic, Some(&mut self.root)),
+                Kind::Items => (&mut self.items, Some(&mut self.root)),
                 Kind::Root => (&mut self.root, None),
             };
             for (i, b) in t.bright.iter_mut().enumerate() {
@@ -827,6 +949,7 @@ impl Menu {
             let t = match top {
                 Kind::Shortcut => &mut self.shortcut,
                 Kind::Magic => &mut self.magic,
+                Kind::Items => &mut self.items,
                 Kind::Root => &mut self.root,
             };
             for (i, b) in t.bright.iter_mut().enumerate() {
@@ -930,17 +1053,25 @@ impl Menu {
             rows.push(RowView { list: Kind::Root, index: i as u8, x: ROOT_X, y: ROOT_Y + PITCH * i as f32, name, highlight: cursor_here, bright: bright as u8 });
         }
         if self.open {
-            let n = self.magic.cmds.len();
-            let y0 = if n < 3 { ROOT_Y + PITCH } else { BOTTOM - PITCH * n as f32 };
-            for (i, &c) in self.magic.cmds.iter().enumerate() {
+            let l = self.sub_list();
+            let n = l.cmds.len();
+            // `0x14027B870`: the Magic list at its row's y with fewer than 3 entries; the Items list
+            // (case 2) at its row's y (root y + 0x2C) with fewer than 2; else 348 − 22 n.
+            let y0 = match self.sub {
+                Kind::Items if n < 2 => ROOT_Y + 2.0 * PITCH,
+                Kind::Items => BOTTOM - PITCH * n as f32,
+                _ if n < 3 => ROOT_Y + PITCH,
+                _ => BOTTOM - PITCH * n as f32,
+            };
+            for (i, &c) in l.cmds.iter().enumerate() {
                 rows.push(RowView {
-                    list: Kind::Magic,
+                    list: self.sub,
                     index: i as u8,
                     x: ROOT_X + SUB_DX,
                     y: y0 + PITCH * i as f32,
                     name: cmd::name(c),
-                    highlight: self.magic.cursor == i as i32,
-                    bright: self.magic.bright.get(i).copied().unwrap_or(BRIGHT_GREY) as u8,
+                    highlight: l.cursor == i as i32,
+                    bright: l.bright.get(i).copied().unwrap_or(BRIGHT_GREY) as u8,
                 });
             }
         }
@@ -964,10 +1095,12 @@ impl Menu {
             }
             return t;
         }
-        let mut t = if self.open { format!("menu m:{}", self.magic.cursor) } else { format!("menu r:{}", self.root.cursor) };
+        let (tag, gtag) = if self.sub == Kind::Items { ("i", "ig") } else { ("m", "mg") };
+        let mut t = if self.open { format!("menu {tag}:{}", self.sub_list().cursor) } else { format!("menu r:{}", self.root.cursor) };
         t.push_str(&format!(" g{:x}", self.root.grey & 0xF));
         if self.open {
-            t.push_str(&format!(" mg{:x}", self.magic.grey & ((1u32 << self.magic.cmds.len()) - 1)));
+            let l = self.sub_list();
+            t.push_str(&format!(" {gtag}{:x}", l.grey & ((1u64 << l.cmds.len()) - 1) as u32));
         }
         if self.tab.state != 0 {
             t.push_str(&format!(" tab{}:{:#x}", self.tab.state, self.tab_cmd));
@@ -1181,6 +1314,7 @@ pub fn font_bytes(s: &str) -> (Vec<u8>, Vec<char>) {
             'ú' | 'ù' | 'û' | 'ü' => 'u',
             'Ö' => 'O',
             'Ä' => 'A',
+            'É' | 'È' => 'E',
             'Ü' => 'U',
             'ñ' => 'n',
             'ç' => 'c',
@@ -1378,6 +1512,92 @@ mod tests {
         m.root.cursor = 3;
         let o = m.step(&w, press(|p| p.confirm = true));
         assert!(!o.attack && o.sounds == vec![Sound::Error]);
+    }
+
+    fn with_items(slots: &[u8]) -> World {
+        let mut w = world();
+        w.slot_count = 3;
+        for (k, &i) in slots.iter().enumerate() {
+            w.slots[k] = i;
+        }
+        w
+    }
+
+    #[test]
+    fn items_list_holds_kh1s_filled_slots() {
+        use crate::items::id;
+        // Slots Potion, -, Ether: the list is the two filled ones in slot order, row 2 open.
+        let w = with_items(&[id::POTION, 0, id::ETHER]);
+        let mut m = Menu::new();
+        m.build(&w);
+        assert_eq!(m.root.cmds[2], cmd::ITEMS);
+        assert_eq!(m.root.grey & 4, 0);
+        assert_eq!(m.root.lock & 4, 0);
+        assert_eq!(m.items.cmds, vec![0x1F, 0x21]);
+        assert_eq!(m.item_slots, vec![0, 2]);
+        assert_eq!(m.items.grey & 3, 0);
+        // No filled slot: greyed and locked, confirm buzzes.
+        let mut e = Menu::new();
+        e.build(&with_items(&[]));
+        assert_eq!((e.root.grey & 4, e.root.lock & 4), (4, 4));
+        // In the air (state 2, flags 0x3D: no 0x40): row 2 greyed but openable; every entry
+        // greyed and locked.
+        let air = World { state: 2, ..w };
+        m.build(&air);
+        assert_eq!((m.root.grey & 4, m.root.lock & 4), (4, 0));
+        assert_eq!(m.items.grey & 3, 3);
+        assert_eq!(m.items.lock & 3, 3);
+        // KH1 greys no entry for full HP: the menu knows nothing of HP.
+    }
+
+    #[test]
+    fn items_list_opens_and_uses_on_sora() {
+        use crate::items::{id, ItemCommand};
+        let w = with_items(&[id::POTION, 0, id::ETHER]);
+        let mut m = Menu::new();
+        m.root.cursor = 2;
+        // Right (or confirm) opens it with KH1's open sound.
+        let o = m.step(&w, press(|p| p.right = true));
+        assert!(m.open && m.sub == Kind::Items && o.sounds == vec![Sound::Open]);
+        assert_eq!(o.events, vec![Event::Opened(Kind::Items)]);
+        // Down moves to the Ether (slot 2); KH1's gate refuses while Sora is busy: no sound.
+        m.step(&w, press(|p| p.down = true));
+        assert_eq!(m.items.cursor, 1);
+        let busy = World { gate_any: false, gate_fire: true, ..w };
+        let o = m.step(&busy, press(|p| p.confirm = true));
+        assert_eq!(o.events, vec![Event::Item(0x21, 2, ShortResult::NotNow)]);
+        assert!(o.sounds.is_empty() && o.item.is_none() && m.open);
+        // Taken: the Ether in slot 2, no sound, the stack back on Attack.
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert_eq!(o.item, Some(ItemCommand { item: id::ETHER, slot: 2 }));
+        assert_eq!(o.events, vec![Event::Item(0x21, 2, ShortResult::Cast)]);
+        assert!(o.sounds.is_empty() && !o.attack && !o.jump && !m.open && m.root.cursor == 0);
+        // The list's place: one entry at the Items row (y 304), two from 348 − 44.
+        m.root.cursor = 2;
+        m.step(&w, press(|p| p.confirm = true));
+        let sc = m.scene();
+        let ys: Vec<f32> = sc.rows.iter().filter(|r| r.list == Kind::Items).map(|r| r.y).collect();
+        assert_eq!(ys, vec![304.0, 326.0]);
+        assert!(sc.rows.iter().all(|r| r.list != Kind::Items || r.x == ROOT_X + SUB_DX));
+        let one = with_items(&[id::POTION]);
+        let mut m1 = Menu::new();
+        m1.root.cursor = 2;
+        m1.step(&one, press(|p| p.confirm = true));
+        assert_eq!(m1.scene().rows.iter().filter(|r| r.list == Kind::Items).map(|r| r.y).collect::<Vec<_>>(), vec![304.0]);
+        // A greyed entry (in the air): the error sound, nothing issued.
+        let air = World { state: 2, ..w };
+        let o = m.step(&air, press(|p| p.confirm = true));
+        assert_eq!(o.sounds, vec![Sound::Error]);
+        assert!(o.item.is_none());
+        // The last item used: the list closes (its row can no longer open it).
+        let none = with_items(&[]);
+        m.step(&none, Pad::default());
+        assert!(!m.open);
+        // Trace: `menu i:<cursor> ig<grey>` while open.
+        m.root.cursor = 2;
+        m.step(&w, press(|p| p.confirm = true));
+        // (KH1 keeps the list's cursor: still on the second entry.)
+        assert!(m.trace_token(&[]).starts_with("menu i:1 g"), "{}", m.trace_token(&[]));
     }
 
     #[test]

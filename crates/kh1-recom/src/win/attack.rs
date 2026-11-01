@@ -337,6 +337,10 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     super::magic::new_frame();
     // A Thunder's strikes (7.6): its script thread's run (nothing unless one is going).
     super::magic::strikes_frame(pl);
+    // An item command no KH1 frame took last frame is gone; KH1's item use tasks run (M8 stage
+    // 8a.1: one atomic load unless a use is going).
+    super::items::new_frame();
+    super::items::task_frame(pl);
     // Re:CoM's battle end, logged (two loads unless its win is pending; `crate::battle::end`).
     super::battle::end_watch(pl);
     let battle: i32 = rd(pl + p::BATTLE);

@@ -315,13 +315,16 @@ unsafe fn spare_check() {
     let nz = kb::spare_range_nonzero(range);
     if nz.is_empty() {
         log(&format!(
-            "keyblades: save+{:#x}..={:#x} is all zero apart from our bytes (save+{:#x} = {ours:#x}; MP block save+{:#x}..={:#x} v{})",
+            "keyblades: save+{:#x}..={:#x} is all zero apart from our bytes (save+{:#x} = {ours:#x}; MP block save+{:#x}..={:#x} v{}; items save+{:#x}..={:#x} v{})",
             kb::SPARE_FIRST,
             kb::SPARE_LAST,
             kb::EQUIP_OFFSET,
             crate::mp::BLOCK_FIRST,
             crate::mp::BLOCK_LAST,
-            rd::<u8>(save + crate::mp::BLOCK_FIRST)
+            rd::<u8>(save + crate::mp::BLOCK_FIRST),
+            crate::items::EXT_FIRST,
+            crate::items::EXT_LAST,
+            rd::<u8>(save + crate::items::EXT_FIRST)
         ));
     } else {
         let first: Vec<String> = nz.iter().take(16).map(|o| format!("+{o:#x}={:#x}", rd::<u8>(save + o))).collect();

@@ -72,7 +72,7 @@ pub fn kh1_pad(p: &PadView) -> Kh1Pad {
 
 pub fn frame_input(p: &PadView) -> FrameInput {
     let k = kh1_pad(p);
-    FrameInput { move_dir: k.move_dir, tilt: k.tilt, jump: p.jump, square: p.square, lock_target: p.lock, attack: p.confirm, target: p.target, locked: p.lock.is_some(), magic: None }
+    FrameInput { move_dir: k.move_dir, tilt: k.tilt, jump: p.jump, square: p.square, lock_target: p.lock, attack: p.confirm, target: p.target, locked: p.lock.is_some(), magic: None, item: None }
 }
 
 fn replay(b: Button) -> i32 {

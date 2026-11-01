@@ -543,6 +543,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
             words: m.words.clone(),
             icon: m.icon.as_ref().map(|[a, b]| [a.as_slice(), b.as_slice()]),
             cut: m.cut.as_deref(),
+            item: m.item.as_deref(),
         }),
         Err(e) => {
             println!("note: KH1 HUD: no KH1 command menu look: {e}");
@@ -581,6 +582,10 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     if let Some(m) = &b.menu {
         println!("KH1 HUD: command menu look from group {}: {} glyphs of KH1's menu font, words for {:?}{}", m.first, m.glyphs, m.words.iter().map(|w| w.0.as_str()).collect::<Vec<_>>(), if m.missing.is_empty() { String::new() } else { format!("; no glyph for {:?} (drawn as a space)", m.missing) });
         println!("KH1 HUD: FM context tab from uitex.bin picture 2's PC rows; Triangle {}", if m.tab_icon { "from Theater's Icon.tm2 (the PlayStation glyph)" } else { "MISSING (no Icon.tm2 / FontIcon.inf): the tab shows without it" });
+        match m.items_list {
+            Some(g) => println!("KH1 HUD: Items list (M8 stage 8a.1) from group {g}: {}", kh::ITEM),
+            None => println!("note: KH1 HUD: no Items list panels (no {}): the DLL draws the Items list with the Magic list's", kh::ITEM),
+        }
     }
     match &b.shortcut {
         Some(sc) => println!(
@@ -628,6 +633,8 @@ struct MenuFiles {
     icon: Option<[Vec<u8>; 2]>,
     /// `UK_uibin_cut.bin`, the shortcut panel (stage 7.12).
     cut: Option<Vec<u8>>,
+    /// `UK_uibin_item.bin`, the Items list (M8 stage 8a.1).
+    item: Option<Vec<u8>>,
 }
 
 fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_formats::egs::Install) -> Result<MenuFiles, String> {
@@ -665,7 +672,14 @@ fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_for
             None
         }
     };
-    Ok(MenuFiles { com, com_battle, mag, font, words, icon, cut })
+    let item = match rd(kh::ITEM) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            println!("note: KH1 HUD: no KH1 Items list panels (the DLL draws it with the Magic list's): {e}");
+            None
+        }
+    };
+    Ok(MenuFiles { com, com_battle, mag, font, words, icon, cut, item })
 }
 
 /// KH1's command words (`btltbl.bin`'s PC assets `<LANG>_Word.bin`, decoded for the menu's

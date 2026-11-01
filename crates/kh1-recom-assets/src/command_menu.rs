@@ -19,6 +19,11 @@
 //! against the known English names): 0x01 space, 0x21..0x2A '0'..'9', 0x2B..0x44 'A'..'Z',
 //! 0x45..0x5E 'a'..'z', 0x63 '+', 0x66 '/', 0x68 '.', 0x6E '-', 0x71 '\''; the accented letters
 //! the menu's words use: 0xDD 'Ö' (GR "Öffnen"), 0xE4 'á', 0xE9 'é' (FR "Gravité"), 0xED 'í'.
+//! M8 stage 8a.1's item names add 0xCF 'Ä' (GR "Äther"), 0xD2 'É' (SP "Éter"), 0xF2 'ó' (SP
+//! "Poción"); 0xE8 'è' (FR "colère", not a menu word). These four are read from the table's layout
+//! (four forms a vowel: à á â ä 0xE3.., è é ê ë 0xE8.., ì í î ï 0xEC.., ò ó ô ö 0xF1.., ù ú û ü
+//! 0xF5..; capitals the same from 0xCC; it fits all seven known letters, ü 0xF8 included):
+//! Assumption, checked against the words they spell.
 //! 0x6F is the glyph of KH1's blank command (0x42, message 305): read as '-' (GR / SP write that
 //! entry with 0x6E '-'; Assumption: a dash). Japanese uses another encoding: not decoded.
 
@@ -38,8 +43,10 @@ pub const LANGUAGES: &[(&str, &str)] = &[("us", "US_"), ("uk", "UK_"), ("fr", "F
 /// context tab's word for Re:CoM's warp point), 6 Summon (H4), 7..27 the spells
 /// (`level + (spell + 2) × 3`, named by their own id), 28 Lift (command 0x1C), 293 Save (0x36,
 /// the save point's), 294 Open (0x37), 305 the blank command (0x42), 313 Jump On (0x45), 343
-/// Counter (0x63, the Counterattack).
-pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 293, 294, 305, 313, 343];
+/// Counter (0x63, the Counterattack); M8 stage 8a.1: 31..34, 36..38 the battle items' commands
+/// (`item + 0x1E`: Potion, Hi-Potion, Ether, Elixir, Mega-Potion, Mega-Ether, Megalixir; 35 is an
+/// empty row).
+pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 293, 294, 305, 313, 343];
 
 /// Our groups after the MP bar's (`mp_bar::group::COUNT`): the plate, the highlighted plate.
 pub mod group {
@@ -254,10 +261,14 @@ pub fn kh1_char(c: u8) -> Option<char> {
         0x68 => '.',
         0x6E | 0x6F => '-',
         0x71 => '\'',
+        0xCF => 'Ä',
+        0xD2 => 'É',
         0xDD => 'Ö',
         0xE4 => 'á',
+        0xE8 => 'è',
         0xE9 => 'é',
         0xED => 'í',
+        0xF2 => 'ó',
         _ => return None,
     })
 }
@@ -392,7 +403,14 @@ mod tests {
                 assert_eq!([get(1), get(8), get(19)], ["Attaquer", "Brasier +", "Gravité"]);
                 assert_eq!([get(5), get(293)], ["Examiner", "Sauvegarde"]);
             }
+            if *lang == "us" {
+                assert_eq!([get(31), get(32), get(36), get(38)], ["Potion", "Hi-Potion", "Mega-Potion", "Megalixir"]);
+            }
+            if *lang == "sp" {
+                assert_eq!([get(31), get(33), get(37)], ["Poción", "Éter", "Omniéter"]);
+            }
             if *lang == "gr" {
+                assert_eq!(get(33), "Äther");
                 assert_eq!(get(294), "Öffnen");
                 assert_eq!([get(5), get(293)], ["Untersuchen", "Speichern"]);
             }

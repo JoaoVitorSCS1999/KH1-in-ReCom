@@ -577,6 +577,14 @@ impl Host for RecomHost {
     fn end_cast(&mut self, airborne: bool) -> bool {
         unsafe { super::magic::end_cast(self.pl, airborne) }
     }
+
+    fn start_item(&mut self, c: &crate::items::ItemCommand) -> bool {
+        unsafe { super::items::start_item(self.pl, c) }
+    }
+
+    fn end_item(&mut self, airborne: bool) -> bool {
+        unsafe { super::items::end_item(self.pl, airborne) }
+    }
 }
 
 /// One KH1 frame for the player.
@@ -593,6 +601,8 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     if input.magic.is_some() && input.target.is_none() {
         input.target = super::attack::attack_target(pl);
     }
+    // An item from the command menu's Items list this frame (M8 stage 8a.1), on Sora.
+    input.item = super::items::take_command();
     let mut host = RecomHost::new(pl);
     slot.last = slot.sora.frame(&mut host, &input, fresh);
     // Re:CoM's end action entered its win action: it owns Sora; a later KH1 frame takes over.
@@ -602,6 +612,9 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     }
     if !slot.last.cast.is_empty() {
         super::magic::on_events(&slot.last.cast);
+    }
+    if !slot.last.items.is_empty() {
+        super::items::on_events(&slot.last.items);
     }
 }
 

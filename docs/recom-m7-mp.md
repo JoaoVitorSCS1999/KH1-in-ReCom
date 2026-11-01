@@ -81,6 +81,9 @@ Assumption, logged at the first camp open; the owner's level-99 save had the ran
 | `0x2681` | 3 | stage 7.12: shortcut slots 1..3 (KH1 save `+0x844..0x846`); 0 = none, else spell + 1. Filled by KH1's learn rule (the first empty slot), once from the spells already learned for an older save (`recom-m7-command-menu.md` § 7.12). |
 | `0x2684` | 1 | bit 0 (stage 7.11): the spell levels were synced from Re:CoM's card collection for this save (0 in every older save: the first read at the KH1 setting syncs them). Bit 1 (stage 7.12): the shortcut slots were set up (0 in every older save: the next sync fills them once). Other bits zero. |
 
+- **Layout v2 (M8 stage 8a.1):** the items extension follows this block at `save + 0x2685 ..=
+  0x269E` (Sora's item slots and stock, its own version byte; `docs/recom-m8-items.md` § The save).
+  These 16 bytes and their version byte are unchanged.
 - **All-zero compatible:** a save that never used KH1 MP reads as full MP and no charge, and
   reading never writes. The block is written only when MP or charge changes (a hit, a refill, a
   payment).

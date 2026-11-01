@@ -9,6 +9,7 @@ mod d2;
 mod deck;
 mod guard;
 mod hook;
+mod items;
 mod keyblades;
 mod kh1_hud;
 mod magic;
@@ -271,6 +272,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
             kh1_hud::install(base, hud_file);
         }
         install_magic(base);
+        install_items(base, s);
         install_unlocks(base);
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
@@ -302,6 +304,25 @@ fn install_magic(base: usize) {
         log(&magic::start_line());
     } else {
         log("magic: exeMagic not hooked; no KH1 cast (the Field case stays patched but is not reached: Re:CoM never casts in the field)");
+    }
+}
+
+/// M8 stage 8a.1 (`items`): KH1's items on Re:CoM's item action `0xE`: the Field exe's case for
+/// it, then the exeItem hook. Needs the Attack's hooks (the request-bits wrapper carries the command
+/// and the use task) and the command menu (its Items list issues them).
+fn install_items(base: usize, s: &Settings) {
+    // SAFETY: reads of the mapped exe; data patches with checked old values.
+    if !unsafe { items::install(base, s) } {
+        return;
+    }
+    let site = |name: &str| crate::sites::ITEM_HOOKS.iter().find(|h| h.name == name).expect("site");
+    let hooks = [hook::Hook { site: site("exeItem (0x1401ED6E0)"), ours: items::exe_item as *const () as usize, original: &items::ORIG_EXE_ITEM }];
+    // SAFETY: the target's bytes are checked again inside, before anything is written.
+    if unsafe { hook::install_all(base, &hooks) } {
+        items::mark_installed();
+        log(&items::start_line());
+    } else {
+        log("items: exeItem not hooked; no KH1 items (the Field case stays patched but is not reached: Re:CoM never uses items in the field)");
     }
 }
 

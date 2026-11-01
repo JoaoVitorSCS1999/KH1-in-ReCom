@@ -57,6 +57,10 @@ pub const COM: &str = "exchange/UK_uibin_com.bin";
 pub const COM_BATTLE: &str = "exchange/UK_com_battle.bin";
 /// The Magic list.
 pub const MAG: &str = "exchange/UK_uibin_mag.bin";
+/// The Items list (M8 stage 8a.1, `0x14027B870` case 2, layout `0x142859660`): the Magic list's
+/// 17 objects in the same order (`ite_fra_d` … `ite_item`, `ite_sel_ico_d`), green
+/// (58, 86, 66), its strip 78 wide (the Magic list's 50). Checked (files: the owner's dump).
+pub const ITEM: &str = "exchange/UK_uibin_item.bin";
 /// KH1's shortcut panel (M7 stage 7.12): `cut_fra_a` (the frame), `cut_shortcut` (the title),
 /// `cut_ico_a / b / c` (the button glyphs' places). `0x140278180` copies its objects 0..4 to
 /// `0x142853960` (`0x14027E1C0(&0x140527B58)`), `0x14027B870` case 5 draws them. Checked (decomp +
@@ -1202,6 +1206,9 @@ pub struct MenuSources<'a> {
     pub icon: Option<[&'a [u8]; 2]>,
     /// Stage 7.12: `UK_uibin_cut.bin`, the shortcut panel. Without it no panel is built.
     pub cut: Option<&'a [u8]>,
+    /// M8 stage 8a.1: `UK_uibin_item.bin`, the Items list. Without it no Items list is built (the
+    /// DLL then draws it with the Magic list's pieces).
+    pub item: Option<&'a [u8]>,
 }
 
 /// The built files.
@@ -1988,6 +1995,9 @@ pub mod menu {
         pub missing: Vec<char>,
         /// The Triangle's group has the PC's PlayStation glyph.
         pub tab_icon: bool,
+        /// M8 stage 8a.1: the Items list's first group (header, title, row, last row, selection,
+        /// icon: the Magic list's six, [`g::MAGIC`]'s order), after the words.
+        pub items_list: Option<usize>,
     }
 
     /// The menu font: its PC picture and glyphs (character → x, y, advance in PC texels).
@@ -2171,6 +2181,14 @@ pub mod menu {
         need(&com, COM, &["com_fra_d", "com_fra_cd", "com_fra_c", "com_fra_top", "com_sel_sha_d", "com_sel_act_d", "com_sel_gra_d", "com_sel_bla_d", "com_command", "com_sel_ico_a", "com_sel_ico_b", "com_sel_ico_c"])?;
         need(&cb, COM_BATTLE, &["com_command_start", "com_command_end"])?;
         need(&mag, MAG, &["mag_fra_d", "mag_fra_2_d", "mag_fra_cd", "mag_fra_c", "mag_fra_2_c", "mag_fra_top", "mag_fra_2_top", "mag_sel_sha_d", "mag_sel_sha_2_d", "mag_sel_act_d", "mag_sel_act_2_d", "mag_sel_gra_d", "mag_sel_gra_2_d", "mag_sel_bla_d", "mag_sel_bla_2_d", "mag_magic", "mag_sel_ico_d"])?;
+        let item = match ms.item {
+            Some(d) => {
+                let u = Uibin::parse(d)?;
+                need(&u, ITEM, &["ite_fra_d", "ite_fra_2_d", "ite_fra_cd", "ite_fra_c", "ite_fra_2_c", "ite_fra_top", "ite_fra_2_top", "ite_sel_sha_d", "ite_sel_sha_2_d", "ite_sel_act_d", "ite_sel_act_2_d", "ite_sel_gra_d", "ite_sel_gra_2_d", "ite_sel_bla_d", "ite_sel_bla_2_d", "ite_item", "ite_sel_ico_d"])?;
+                Some(u)
+            }
+            None => None,
+        };
         let first = groups.len();
         let o = &com.objs;
         let ext = ROOT_EXT;
@@ -2234,13 +2252,17 @@ pub mod menu {
             groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
         }
         // The Magic list (`0x14027A1C0`: the objects' own colours, no extra width).
-        let m = &mag.objs;
-        groups.push(held1(vec![mpiece(&m[5], p3, 0, 0, 0, None), mpiece(&m[6], p3, 0, 0, 0, None)]));
-        groups.push(held1(vec![mpiece(&m[15], p1, 0, 0, 0, None)]));
-        groups.push(held1(vec![mpiece(&m[3], p3, 0, 0, 0, None), mpiece(&m[4], p3, 0, 0, 0, None)]));
-        groups.push(held1(vec![mpiece(&m[0], p3, 0, 0, 0, None), mpiece(&m[1], p3, 0, 0, 0, None), mpiece(&m[2], p3, 0, 0, 0, None)]));
-        groups.push(held1((7..15).map(|k| mpiece(&m[k], p3, 0, 0, 0, None)).collect()));
-        groups.push(held1(vec![mpiece(&m[16], p1, 0, 0, 0, None)]));
+        // M8 stage 8a.1: the Items list's six groups are made the same way from `item`, after the
+        // words (so every group the DLL already knows keeps its number).
+        let sub_list = |m: &[Obj], groups: &mut Vec<Group>| {
+            groups.push(held1(vec![mpiece(&m[5], p3, 0, 0, 0, None), mpiece(&m[6], p3, 0, 0, 0, None)]));
+            groups.push(held1(vec![mpiece(&m[15], p1, 0, 0, 0, None)]));
+            groups.push(held1(vec![mpiece(&m[3], p3, 0, 0, 0, None), mpiece(&m[4], p3, 0, 0, 0, None)]));
+            groups.push(held1(vec![mpiece(&m[0], p3, 0, 0, 0, None), mpiece(&m[1], p3, 0, 0, 0, None), mpiece(&m[2], p3, 0, 0, 0, None)]));
+            groups.push(held1((7..15).map(|k| mpiece(&m[k], p3, 0, 0, 0, None)).collect()));
+            groups.push(held1(vec![mpiece(&m[16], p1, 0, 0, 0, None)]));
+        };
+        sub_list(&mag.objs, groups);
         // FM's context tab: picture 2's PC-only rows, one atlas item a UV rect.
         debug_assert_eq!(groups.len() - first, g::TAB);
         if s2 != 2 || pic2.h < 175 * s2 || pic2.w < 128 * s2 {
@@ -2320,7 +2342,12 @@ pub mod menu {
             }
             words.push((lang.clone(), list));
         }
-        Ok(Built { first, words, glyphs: glyph_item.len(), missing, tab_icon })
+        let items_list = item.map(|u| {
+            let at = groups.len();
+            sub_list(&u.objs, groups);
+            at
+        });
+        Ok(Built { first, words, glyphs: glyph_item.len(), missing, tab_icon, items_list })
     }
 }
 
@@ -2801,7 +2828,8 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)], re
     }
     if let Some(mn) = &b.menu {
         let words = mn.words.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, g)| format!("[{id}, {g}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
-        let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"tab_icon\": {}, \"words\": {{{words}}}}},", mn.first, mn.tab_icon);
+        let items = mn.items_list.map(|g| format!("\"items_list\": {g}, ")).unwrap_or_default();
+        let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"tab_icon\": {}, {items}\"words\": {{{words}}}}},", mn.first, mn.tab_icon);
     }
     let _ = writeln!(s, "  \"languages\": [{}],", langs.iter().map(|l| format!("\"{l}\"")).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"atlas\": [{}, {}, {}, {}],", b.atlas.0, b.atlas.1, b.atlas.2, b.atlas.3);
@@ -2969,6 +2997,7 @@ mod tests {
         let (com, com_battle, mag) = (rd("exchange/UK_uibin_com.bin"), rd("exchange/UK_com_battle.bin"), rd("exchange/UK_uibin_mag.bin"));
         let (lock, g_enm) = (rd("exchange/UK_uibin_lock.bin"), rd("exchange/UK_uibin_g_enm.bin"));
         let cut = rd(CUT);
+        let item = rd(ITEM);
         let fonts: Vec<Vec<u8>> = vec![rd(&format!("fonts/menu/us/sysfont.bin.hd/{SYSFONT_HD}")), rd("fonts/exchange/US_font_data_tbl.bin")];
         let icon: Vec<Vec<u8>> = ICON_FILES.iter().map(|n| rd(&format!("fonts/{n}"))).collect();
         let src = Sources {
@@ -2986,9 +3015,10 @@ mod tests {
                 com_battle: &com_battle,
                 mag: &mag,
                 font: [&fonts[0], &fonts[1]],
-                words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (4, "Talk".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into()), (8, "Fira".into()), (16, "Cure".into()), (13, "Thunder".into())])],
+                words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (4, "Talk".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into()), (8, "Fira".into()), (16, "Cure".into()), (13, "Thunder".into()), (31, "Potion".into()), (32, "Hi-Potion".into()), (38, "Megalixir".into())])],
                 icon: Some([&icon[0], &icon[1]]),
                 cut: Some(&cut),
+                item: Some(&item),
             }),
             faces: [face("xa_ex_0010.mdls", 0xA2E80), face("xa_ex_0040.mdls", 0x75600), face("xa_ex_0050.mdls", 0x8D400)],
         };
@@ -3048,10 +3078,14 @@ mod tests {
         eprintln!("menu: first group {}, {} glyphs, missing {:?}, words {:?}", mn.first, mn.glyphs, mn.missing, mn.words);
         assert!(mn.missing.is_empty());
         assert!(mn.tab_icon, "the PlayStation triangle from Icon.tm2");
+        // M8 stage 8a.1: the Items list's six groups after the words, before the shortcut panel.
+        let il = mn.items_list.expect("the Items list from UK_uibin_item.bin");
+        assert!(mn.words.iter().all(|(_, w)| w.iter().all(|&(_, g)| g < il)));
         // Stage 7.12: the shortcut panel, its glyphs from Icon.tm2.
         let sc = b.shortcut.unwrap();
         eprintln!("shortcut panel: first group {}", sc.first);
         assert!(sc.icons && sc.first + shortcut::g::COUNT <= b.ring.0);
+        assert_eq!(il + 6, sc.first);
         assert!(b.target.is_some());
         assert!(b.party.is_some());
         assert!(b.cursor.is_some());

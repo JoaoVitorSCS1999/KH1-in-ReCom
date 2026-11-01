@@ -44,6 +44,10 @@
 //!   level with its magic card's first pickup, -ra / -ga with Re:CoM's bosses (their enemy cards'
 //!   first pickup), through a wrapper on Re:CoM's "first obtained" `0x14015C7F0`, kept in our save
 //!   block (`unlocks`; `docs/recom-m7-unlocks.md`);
+//! - at `combat = kh1`, in Sora's story, KH1's items: the command menu's Items list of Sora's
+//!   filled item slots (kept with the stock in our save block), a use plays KH1's motion on
+//!   Re:CoM's own item action `0xE` and clip, and KH1's use task heals through Re:CoM's heal with
+//!   Re:CoM's item effects (`items`; `docs/recom-m8-items.md`);
 //! - F9 records a Re:CoM trace in kh1-trace's CSV schema (`trace`).
 //!
 //! `motions` (with `json`) reads the asset build step's manifest and `PL0001.ANN` header, for the
@@ -58,6 +62,7 @@ pub mod d2;
 pub mod deck;
 pub mod guard;
 pub mod hookplan;
+pub mod items;
 pub mod json;
 pub mod keyblade_models;
 pub mod keyblades;

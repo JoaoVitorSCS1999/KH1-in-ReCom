@@ -11,6 +11,29 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 86: M8 stage 8a.1: KH1 items: Items list, slots, stock, use, version 0.44.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "Finish everything up to M9"; items from the Moogle shop and drops, healing
+  Re:CoM's item-card amounts (owner's choice; see below).
+- KH1 (Checked (decomp + files)): btltbl item rows (0x1A58, 0x14 bytes); use = motion 0x3E (82 f, free from
+  74), hand moment f34, heal f65 (task `0x1402C2880`); slot cleared on use, never refilled from stock;
+  pickup fills an empty slot, else stock (≤ 99); new game 3 empty slots. A hit does not return the item
+  (only death does; the brief's "hit returns it" was wrong).
+- Built: Items list in the command menu (KH1's green panels from `exchange/UK_uibin_item.bin`, item
+  names in KH1's menu font, six languages); a use runs KH1's frame on Re:CoM's item action 0xE
+  (`exeItem` `0x1401ED6E0` hooked, 10 bytes; field exe's action-0xE table entry `0x1401FA628` pointed at
+  a 13-byte stub in padding `0x1401FAEA2`); Re:CoM's own item clip (row 0x2D = KH1's motion baked);
+  Re:CoM's heal `0x1401E59A0` and effect; MP via `win::mp::add_points`. Save layout v2 at
+  save+0x2685..0x269E (slots, stock). Debug `kh1_test_items`. `docs/recom-m8-items.md`.
+- Owner's "Re:CoM's item-card amounts": Re:CoM's item cards heal no HP (they reload cards; Checked
+  (decomp + files)). Provisional: KH1 × 560/120 (Potion 140, Hi-Potion 280, Elixirs full); Ether +3 MP.
+  Owner question.
+- Not KH1's / not yet: Sora only (no party list), no hand effect at f34, always 3 slots.
+- Checked: 462 tests, Windows build, all 375 site byte sets against the exe, HUD dump test. Not
+  checked: in game.
+
+---
+
 ## Stage 85: M7 stage 7.13: the KH1 camp entry with Keyblades and Customize, version 0.43.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "Finish everything up to M9" (M7 7.13: "KH1" camp entry + Customize, plan

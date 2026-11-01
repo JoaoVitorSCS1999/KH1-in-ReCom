@@ -617,8 +617,11 @@ Decision 34: KH1's command menu built from Re:CoM's own pieces, with KH1's own w
   `<LANG>_btltbl_bin_Word.bin` copies, not used). String `k` of a `Word.bin` is KH1 message
   `k + 1` (`0x14028F9D0`, walked as `0x14028F820` walks it; Checked (decomp)). The menu's
   messages are decoded: 1 Attack, 2 Magic, 3 Items, 4 Talk, 5 Examine (the warp point's tab),
-  6 Summon, 7–27 the spells, 28 Lift, 293 Save (the save point's tab), 294 Open, 305 the blank
-  command, 313 Jump On, 343 Counter (the KH1 HUD look gets a word group for each). Re:CoM
+  6 Summon, 7–27 the spells, 28 Lift, 31–34 and 36–38 the battle items (M8 stage 8a.1: Potion,
+  Hi-Potion, Ether, Elixir, Mega-Potion, Mega-Ether, Megalixir), 293 Save (the save point's tab),
+  294 Open, 305 the blank command, 313 Jump On, 343 Counter (the KH1 HUD look gets a word group
+  for each). The KH1 HUD set also gets KH1's Items list panels from `exchange/UK_uibin_item.bin`
+  (`kh1-hud.json` `menu.items_list`; `docs/recom-m8-items.md` § Assets). Re:CoM
   `FORM/0002/FO0002.SPR` (the same entry
   the MP bar patches) for its text plate.
 - **Adds**, in the same patch as the MP bar (`mp_bar::patch_layout`), after the bar's 8 groups:

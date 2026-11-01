@@ -14,8 +14,9 @@ carrying KH1's word, attached as Re:CoM attaches its own labels to these plates.
 the menu: its cursor, its greying, its fades, its context tab. Confirm runs the highlighted row:
 on Attack it is today's Attack (unchanged); Magic opens the Magic list; choosing a spell casts
 it (stage 7.4, `recom-m7-magic.md`: KH1's commit gate, then KH1's command on Re:CoM's magic
-action). Items is greyed (M8). At Combat = Re:CoM, or in Riku's story, nothing is made and nothing
-runs.
+action). Items opens KH1's Items list of Sora's filled item slots (M8 stage 8a.1,
+`docs/recom-m8-items.md`; greyed and locked with no item). At Combat = Re:CoM, or in Riku's story,
+nothing is made and nothing runs.
 
 Code: `crates/kh1-recom/src/command_menu.rs` (KH1's rules, tested), `src/win/command_menu.rs`
 (Re:CoM's objects), `crates/kh1-recom-assets/src/command_menu.rs` (words and plates, tested).

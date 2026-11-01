@@ -904,6 +904,76 @@ pub const HUD_2D_CHECKED: &[Site] = &[
     Site { name: "2D manager ctor: pool of 0x800 (0x140245293)", rva: 0x0024_5293, expect: &[0x41, 0x8D, 0x51, 0x20, 0x41, 0xB8, 0x00, 0x08, 0x00, 0x00, 0x48, 0x8D, 0x4E, 0x08, 0xE8, 0x3A, 0xD3, 0xFF, 0xFF] },
 ];
 
+/// KH1's items (M8 stage 8a.1, `win::items`, `docs/recom-m8-items.md`). Same rule as [`HOOKS`].
+pub const ITEM_HOOKS: &[Site] = &[
+    // mov [rsp+0x10],rbx; push rdi; sub rsp,0x60: exeItem (action 0xE's exe; the Battle exe calls it
+    // directly at 0x1401F9A13, the Field exe through our new case).
+    Site { name: "exeItem (0x1401ED6E0)", rva: 0x001E_D6E0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x60] },
+];
+
+/// Exe bytes the items patch.
+pub const ITEM_DATA: &[Site] = &[
+    // The Field exe's jump table (`0x1401FA5F4`), entry for action 0xE: the default `0x1401FA599`
+    // (an RVA), then 0xF's (the default too, not changed).
+    Site { name: "Field exe jump table, action 0xE", rva: 0x001F_A628, expect: &[0x99, 0xA5, 0x1F, 0x00, 0x99, 0xA5, 0x1F, 0x00] },
+    // int3 padding after a `pop rdi; ret` (`0x1401FAEA0`), before `0x1401FAEB0`: the 13-byte stub.
+    Site { name: "code cave 0x1401FAEA2", rva: 0x001F_AEA2, expect: &[0xCC; 14] },
+];
+
+/// Re:CoM code the items rely on or replicate (not patched).
+pub const ITEM_CHECKED: &[Site] = &[
+    // initItem: its log call, then prev action = action; action (8 bytes) = 0xE. The KH1 use does
+    // these writes cardlessly (initItem reads BattleCardList, below).
+    Site {
+        name: "initItem (0x1401F28F0)",
+        rva: 0x001F_28F0,
+        expect: &[
+            0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0xDA, 0x48, 0x8B, 0xF9, 0x44, 0x8B, 0xC2, 0xB9, 0x03, 0x00, 0x00, 0x00, 0x48, 0x8D, 0x15, 0x45, 0xDF, 0x3A, 0x00, 0xE8, 0xF8, 0xE0, 0x04, 0x00, 0x8B, 0x87,
+            0x0C, 0x04, 0x00, 0x00, 0x33, 0xF6, 0x48, 0x8B, 0xCF, 0x89, 0x87, 0x08, 0x04, 0x00, 0x00, 0x48, 0xC7, 0x87, 0x0C, 0x04, 0x00, 0x00, 0x0E, 0x00, 0x00, 0x00,
+        ],
+    },
+    // initItem's tail: phase 3, sub 1, then +0x65C = 0x1407C7830[BattleCardList[+0x7F4] + 8] (the
+    // card read that keeps it from being called cardlessly).
+    Site {
+        name: "initItem card read (0x1401F29A3)",
+        rva: 0x001F_29A3,
+        expect: &[
+            0xC7, 0x87, 0x04, 0x06, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xC7, 0x87, 0x14, 0x04, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x48, 0x8B, 0x05, 0x4A, 0x7E, 0x68, 0x00, 0x0F, 0xB6, 0x4C, 0xC8, 0x08, 0x48, 0x8D, 0x05, 0x66, 0x4E, 0x5D, 0x00, 0x8B, 0x04,
+            0x88, 0x89, 0x87, 0x5C, 0x06, 0x00, 0x00,
+        ],
+    },
+    // exeItem sub 2: the effects at the clip's frame 56 (cmp edx,0x38; jl), the body offset
+    // (0x1405A0910: (0, 0.85, 0, 1)).
+    Site { name: "exeItem frame 56 (0x1401ED7F8)", rva: 0x001E_D7F8, expect: &[0x83, 0xFA, 0x38, 0x0F, 0x8C, 0x0F, 0x02, 0x00, 0x00, 0x0F, 0x28, 0x05, 0x08, 0x31, 0x3B, 0x00, 0x0F, 0x29, 0x44, 0x24, 0x40] },
+    // exeItem's switch on the card (+0x7F4 − 0x2A, 7 cases: the item cards Potion … Megalixir).
+    Site {
+        name: "exeItem effect switch (0x1401ED82E)",
+        rva: 0x001E_D82E,
+        expect: &[0x8B, 0x83, 0xF4, 0x07, 0x00, 0x00, 0x33, 0xFF, 0x83, 0xC0, 0xD6, 0x83, 0xF8, 0x06, 0x0F, 0x87, 0xD7, 0x00, 0x00, 0x00, 0x48, 0x8D, 0x15, 0xB7, 0x27, 0xE1, 0xFF, 0x8B, 0x8C, 0x82, 0x28, 0xDA, 0x1E, 0x00, 0x48, 0x03, 0xCA, 0xFF, 0xE1],
+    },
+    // exeItem's effect call: 0x1401A2D50(player, name, id, bone 0, &offset, 0, 0.0), then the
+    // effect object's +0x4C |= 4 (kept on the player): what the KH1 use's heal does.
+    Site {
+        name: "exeItem effect call (0x1401ED8F4)",
+        rva: 0x001E_D8F4,
+        expect: &[
+            0x0F, 0x57, 0xC0, 0x4C, 0x8B, 0xC8, 0xF3, 0x0F, 0x11, 0x44, 0x24, 0x30, 0x48, 0x8D, 0x44, 0x24, 0x40, 0x48, 0x89, 0x7C, 0x24, 0x28, 0x48, 0x8B, 0xCB, 0x48, 0x89, 0x44, 0x24, 0x20, 0xE8, 0x39, 0x54, 0xFB, 0xFF, 0x8B, 0xF8, 0x8B, 0xCF, 0xE8,
+            0xD0, 0xA5, 0x06, 0x00, 0x48, 0x85, 0xC0, 0x74, 0x04, 0x83, 0x48, 0x4C, 0x04,
+        ],
+    },
+    // exeItem's card effect: the revolver (+0x3F0) reload 0x14016C910: never reached for a KH1 item.
+    Site {
+        name: "exeItem card reload (0x1401ED929)",
+        rva: 0x001E_D929,
+        expect: &[
+            0x48, 0x8B, 0x8B, 0xF0, 0x03, 0x00, 0x00, 0x48, 0x85, 0xC9, 0x0F, 0x84, 0xD7, 0x00, 0x00, 0x00, 0x44, 0x8B, 0x83, 0x38, 0x08, 0x00, 0x00, 0x33, 0xD2, 0x45, 0x85, 0xC0, 0x7E, 0x0D, 0x41, 0xFF, 0xC8, 0xE8, 0xC1, 0xEF, 0xF7, 0xFF, 0xE9, 0xBC, 0x00,
+            0x00, 0x00, 0x45, 0x33, 0xC0, 0xE8, 0xB4, 0xEF, 0xF7, 0xFF,
+        ],
+    },
+    // The Battle exe's case 0xE: mov rcx,rdi; call exeItem; jmp to its end.
+    Site { name: "Battle exe case 0xE (0x1401F9A10)", rva: 0x001F_9A10, expect: &[0x48, 0x8B, 0xCF, 0xE8, 0xC8, 0x3C, 0xFF, 0xFF, 0xE9, 0xAC, 0x02, 0x00, 0x00] },
+];
+
 /// The vtable slot the menu calls through. Checked (exe; relocated pointer).
 pub const COMMAND_MENU_PTRS: &[PtrSite] = &[PtrSite { name: "C2DSeqCtrl vtable +0x60 (0x1406073A0)", rva: 0x0060_73A0, target: 0x0024_76F0 }];
 
@@ -1256,6 +1326,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(UNLOCK_CHECKED)
         .chain(MENU_SOUND_HOOKS)
         .chain(MENU_SOUND_CALLEES)
+        .chain(ITEM_HOOKS)
+        .chain(ITEM_DATA)
+        .chain(ITEM_CHECKED)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -1631,6 +1704,45 @@ mod tests {
         for rva in [0x0024_7C90u32, 0x0015_D230, 0x0024_7850, 0x0024_76F0] {
             assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
         }
+    }
+
+    #[test]
+    fn item_sites() {
+        // Each item site is no other stage's; the hook is the function the Battle exe's case calls;
+        // the Field case's table entry and stub agree with `crate::items::field_case`.
+        for s in ITEM_HOOKS.iter().chain(ITEM_DATA).chain(ITEM_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        use crate::items::field_case as fc;
+        assert_eq!(ITEM_HOOKS[0].rva, fc::EXE_ITEM_RVA);
+        let call = ITEM_CHECKED.iter().find(|s| s.name.starts_with("Battle exe case 0xE")).unwrap();
+        let rel = i32::from_le_bytes(call.expect[4..8].try_into().unwrap()) as i64;
+        assert_eq!((call.rva as i64 + 3 + 5 + rel) as u32, fc::EXE_ITEM_RVA);
+        assert_eq!(ITEM_DATA[0].rva, fc::TABLE_ENTRY_RVA);
+        assert_eq!(u32::from_le_bytes(ITEM_DATA[0].expect[..4].try_into().unwrap()), fc::DEFAULT_RVA);
+        assert_eq!(ITEM_DATA[1].rva, fc::CAVE_RVA);
+        assert!(fc::STUB_LEN <= ITEM_DATA[1].expect.len());
+        // Clear of the other caves (the Attack's, magic's).
+        for other in [crate::attack::battle_case::CAVE_RVA, crate::magic::field_case::CAVE_RVA] {
+            assert!(fc::CAVE_RVA + fc::STUB_LEN as u32 <= other || other + 15 <= fc::CAVE_RVA);
+        }
+        // The same switch as magic's case: the base is the table's.
+        let sw = MAGIC_CHECKED[0].expect;
+        let base = u32::from_le_bytes(sw[30..34].try_into().unwrap());
+        assert_eq!(base + (crate::items::RECOM_ITEM_ACTION - 1) * 4, fc::TABLE_ENTRY_RVA);
+        // exeItem's effect call goes to the effect-on-bone function the magic cast calls, and the
+        // object getter; the frame check is 56 (0x38).
+        let ec = ITEM_CHECKED.iter().find(|s| s.name.starts_with("exeItem effect call")).unwrap();
+        let rel = i32::from_le_bytes(ec.expect[31..35].try_into().unwrap()) as i64;
+        assert_eq!((ec.rva as i64 + 30 + 5 + rel) as u32, 0x001A_2D50);
+        let rel = i32::from_le_bytes(ec.expect[40..44].try_into().unwrap()) as i64;
+        assert_eq!((ec.rva as i64 + 39 + 5 + rel) as u32, 0x0025_7EF0);
+        let f56 = ITEM_CHECKED.iter().find(|s| s.name.starts_with("exeItem frame 56")).unwrap();
+        assert_eq!(f56.expect[2], 0x38);
+        // The reload calls 0x14016C910 (the card effect a KH1 item never reaches).
+        let rl = ITEM_CHECKED.iter().find(|s| s.name.starts_with("exeItem card reload")).unwrap();
+        let rel = i32::from_le_bytes(rl.expect[34..38].try_into().unwrap()) as i64;
+        assert_eq!((rl.rva as i64 + 33 + 5 + rel) as u32, 0x0016_C910);
     }
 
     #[test]

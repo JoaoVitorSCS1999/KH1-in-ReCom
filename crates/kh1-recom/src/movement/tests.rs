@@ -87,6 +87,11 @@ struct FakeRecom {
     cast_ends: usize,
     /// Re:CoM's battle is won (`player+0x428 & 4`): its end action enters the win action 0x1C.
     win_pending: bool,
+    /// M8 stage 8a.1: the item uses Re:CoM started and its item actions ended; a slot that no
+    /// longer holds the item refuses.
+    items: Vec<crate::items::ItemCommand>,
+    item_ends: usize,
+    item_missing: bool,
 }
 
 impl FakeRecom {
@@ -104,6 +109,7 @@ impl FakeRecom {
             motions: {
                 let mut m = Moveset::kh1_defaults().motions;
                 crate::magic::add_motions(&mut m);
+                crate::items::add_motions(&mut m);
                 m
             },
             no_flinch: false,
@@ -126,6 +132,9 @@ impl FakeRecom {
             releases: Vec::new(),
             cast_ends: 0,
             win_pending: false,
+            items: Vec::new(),
+            item_ends: 0,
+            item_missing: false,
         }
     }
 
@@ -289,6 +298,18 @@ impl Host for FakeRecom {
         self.cast_ends += 1;
         self.end_action()
     }
+    fn start_item(&mut self, c: &crate::items::ItemCommand) -> bool {
+        if self.item_missing {
+            return false;
+        }
+        self.act = Action { id: crate::items::RECOM_ITEM_ACTION, sub: crate::items::ITEM_SUB, phase: crate::items::ITEM_PHASE };
+        self.items.push(*c);
+        true
+    }
+    fn end_item(&mut self, _airborne: bool) -> bool {
+        self.item_ends += 1;
+        self.end_action()
+    }
     fn spring_jump(&mut self) -> bool {
         if !spring::launches(spring::ABILITY, || if self.on_spring { spring::ON_SPRING } else { 0 }) {
             return false;
@@ -371,7 +392,7 @@ impl Pair {
         self.prev = pad;
         let o = self.oracle.step(&Input { move_dir: dir, tilt, jump, square, attack, ..Default::default() }, &[], &mut self.world, step);
         self.o_out = Some(o.clone());
-        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: self.magic.take() }, self.first);
+        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: self.magic.take(), item: None }, self.first);
         self.first = false;
         self.recom.after_exe();
         let airborne = !self.recom.contact;
@@ -806,7 +827,7 @@ fn step_with_target(p: &mut Pair, pad: Pad) -> FrameOut {
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
     let target = kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, 0.0, 150.0), radius: 30.0 };
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: Vec3::ZERO, tilt: 0.0, jump, square, lock_target: None, attack, target: Some(target), locked: false, magic: None }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: Vec3::ZERO, tilt: 0.0, jump, square, lock_target: None, attack, target: Some(target), locked: false, magic: None, item: None }, p.first);
     p.first = false;
     p.recom.after_exe();
     out
@@ -888,7 +909,7 @@ fn step_cast(p: &mut Pair, pad: Pad, magic: Option<crate::magic::MagicCommand>) 
     let square = Button::from_held(p.prev.square, pad.square);
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic, item: None }, p.first);
     p.first = false;
     p.recom.after_exe();
     out
@@ -1464,4 +1485,98 @@ fn aero_casts_at_30_or_at_once_when_its_motion_is_cut() {
     assert!(cast);
     assert_eq!(p.recom.releases.len(), 1);
     assert!(at.is_some_and(|f| f < 30.0), "the landing before 30 casts it then: {at:?}");
+}
+
+// ---- M8 stage 8a.1: items ----
+
+fn step_item(p: &mut Pair, pad: Pad, item: Option<crate::items::ItemCommand>) -> FrameOut {
+    let (dir, tilt) = Input::move_from_stick(pad.stick, 0.0);
+    let jump = Button::from_held(p.prev.jump, pad.jump);
+    let square = Button::from_held(p.prev.square, pad.square);
+    let attack = Button::from_held(p.prev.attack, pad.attack);
+    p.prev = pad;
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: None, item }, p.first);
+    p.first = false;
+    p.recom.after_exe();
+    out
+}
+
+const POTION0: crate::items::ItemCommand = crate::items::ItemCommand { item: 1, slot: 0 };
+
+#[test]
+fn an_item_plays_kh1s_use_motion_on_recoms_item_action() {
+    use crate::items::{ItemEvent, RECOM_ITEM_ACTION, USE_SELF};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_item(&mut p, Pad::default(), None);
+    }
+    // Sora runs; the item stops him and keeps his facing (the target is Sora).
+    for _ in 0..10 {
+        step_item(&mut p, Pad { stick: [0.0, 1.0], ..Default::default() }, None);
+    }
+    let facing = p.ours.facing;
+    let out = step_item(&mut p, Pad { stick: [1.0, 0.0], ..Default::default() }, Some(POTION0));
+    assert_eq!(out.items, vec![ItemEvent::Started { item: 1, slot: 0 }]);
+    assert_eq!(p.recom.items, vec![POTION0]);
+    assert_eq!(p.ours.rec.head(), USE_SELF);
+    assert_eq!(p.recom.act.id, RECOM_ITEM_ACTION);
+    assert!((p.ours.facing - facing).abs() < 1e-4, "no turn toward the stick");
+    // Locked to frame 74 (the motion's free key), the action ended once when it ends at 82.
+    let mut free_at = None;
+    for k in 1..120 {
+        step_item(&mut p, Pad::default(), None);
+        if free_at.is_none() && !p.ours.lock {
+            free_at = Some(k);
+        }
+        if k < 74 {
+            assert_eq!(p.recom.act.id, RECOM_ITEM_ACTION, "frame {k}");
+            assert!(p.recom.vel.flat().length() < 1e-6);
+        }
+    }
+    assert!(matches!(free_at, Some(74) | Some(75)), "{free_at:?}");
+    assert_eq!(p.recom.item_ends, 1);
+    assert!(p.ours.item.is_none());
+}
+
+#[test]
+fn items_are_ground_only_and_wait_for_kh1s_gate() {
+    use crate::items::ItemEvent;
+    // In the air: KH1's command dispatch drops it (state 2).
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_item(&mut p, Pad::default(), None);
+    for _ in 0..8 {
+        step_item(&mut p, Pad { jump: true, ..Default::default() }, None);
+    }
+    let out = step_item(&mut p, Pad { jump: true, ..Default::default() }, Some(POTION0));
+    assert_eq!(out.items, vec![ItemEvent::Refused { item: 1, why: "state" }]);
+    assert!(p.recom.items.is_empty());
+    // During a locked use: refused by the gate ("not now"), the slot untouched.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_item(&mut p, Pad::default(), None);
+    step_item(&mut p, Pad::default(), Some(POTION0));
+    let out = step_item(&mut p, Pad::default(), Some(crate::items::ItemCommand { item: 3, slot: 1 }));
+    assert_eq!(out.items, vec![ItemEvent::Refused { item: 3, why: "not now" }]);
+    assert_eq!(p.recom.items.len(), 1);
+    // A slot that no longer holds it: refused, no motion.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    p.recom.item_missing = true;
+    step_item(&mut p, Pad::default(), None);
+    let out = step_item(&mut p, Pad::default(), Some(POTION0));
+    assert_eq!(out.items, vec![ItemEvent::Refused { item: 1, why: "not in its slot" }]);
+    assert_ne!(p.ours.rec.head(), crate::items::USE_SELF);
+}
+
+#[test]
+fn a_hit_during_the_use_ends_the_motion_only() {
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_item(&mut p, Pad::default(), None);
+    step_item(&mut p, Pad::default(), Some(POTION0));
+    for _ in 0..20 {
+        step_item(&mut p, Pad::default(), None);
+    }
+    // Re:CoM ran its hit reaction: the next KH1 frame takes over afresh; the motion part is gone
+    // (Re:CoM's own action replaced it), the use task is `win::items`'s and goes on.
+    p.ours.frame(&mut p.recom, &FrameInput::default(), true);
+    assert!(p.ours.item.is_none());
+    assert_eq!(p.recom.item_ends, 0, "Re:CoM's hit action ended it, not us");
 }

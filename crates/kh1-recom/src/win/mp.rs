@@ -186,6 +186,25 @@ pub fn gain_charge(units: i32, why: &str) {
     note(|| format!("charge {units:+} ({why}): MP {}/{} c{} -> {}/{} c{}", b.0, b.1, b.2, a.0, a.1, a.2));
 }
 
+/// KH1's item MP (`0x1402CD6B0`, M8 stage 8a.1): below max MP, `0x1402A4A00(actor, n)`: MP + n,
+/// clamped to max; the charge untouched (Elixirs pass 9999). True when MP rose.
+pub fn add_points(n: i32, why: &str) -> bool {
+    let r = with_state(|mp| {
+        let before = mp.view();
+        if mp.mp < mp.max {
+            mp.add_points(n);
+        }
+        (before, mp.view())
+    });
+    let Some((b, a)) = r else { return false };
+    if a == b {
+        return false;
+    }
+    event(format!("+{}mp", a.0 - b.0));
+    note(|| format!("points +{} ({why}): MP {}/{} c{} -> {}/{} c{}", a.0 - b.0, b.0, b.1, b.2, a.0, a.1, a.2));
+    true
+}
+
 /// KH1's full restore (`0x1402A56F0`): for a later stage, once the owner picks Re:CoM's
 /// equivalent (not wired in 7.1).
 #[allow(dead_code)] // Waits for the owner's answer on Re:CoM's refill points.

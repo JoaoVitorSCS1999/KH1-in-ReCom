@@ -30,6 +30,10 @@
 //!   save and warp points read Triangle from the pad themselves (`0x14029B550`): their two calls
 //!   are retargeted to [`point_triangle`], which says "not pressed" while L1 holds the list (KH1:
 //!   Triangle is shortcut 1 there, never the save point's command).
+//! - **Items** (M8 stage 8a.1): the Items row opens KH1's Items list of Sora's filled slots
+//!   (`super::items::slots`); KH1's look draws it with KH1's `item` panels (`kh1-hud.json`'s
+//!   `items_list`; the Magic list's if an older asset step made none), Re:CoM's look with the rows'
+//!   plates; the words are the menu's. A chosen item goes to `super::items::issue`.
 
 use super::movement::{self as mv, body, func, p, rd, rd_vec, wr};
 use super::{base, log};
@@ -297,6 +301,9 @@ pub unsafe fn build(gauge: usize, list: i32) {
     }
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
     let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None, look: None, tab: None, short: None };
+    // M8 stage 8a.1, debug (`kh1_test_items`): a room or battle starts with a test inventory when
+    // Sora's slots are all empty.
+    super::items::hud_built();
     if let Ok(mut s) = STATE.lock() {
         for mut old in s.uis.extract_if(.., |u| u.gauge == gauge) {
             old.clear();
@@ -621,7 +628,7 @@ impl Ui {
             return;
         }
         let lang = super::settings().menu_language.clone();
-        let dim = sc.rows.iter().any(|r| r.list == Kind::Magic);
+        let dim = sc.rows.iter().any(|r| r.list != Kind::Root);
         let same = self.shown.as_ref().is_some_and(|s| s.same_rows(sc)) && self.look.as_ref().is_some_and(|l| l.battle == battle && l.dim == dim);
         if same {
             let old = self.shown.as_ref().expect("same");
@@ -661,9 +668,10 @@ impl Ui {
             func::<VecFn>(COLOUR)(h, V4([d, d, d, sc.alpha]).0.as_ptr());
             headers.push(h);
         }
-        if let Some(m0) = sc.rows.iter().find(|r| r.list == Kind::Magic && r.index == 0) {
+        if let Some(m0) = sc.rows.iter().find(|r| r.list != Kind::Root && r.index == 0) {
             let base_y = m0.y;
-            if let Some(h) = self.kh1_ctrl(PRIORITY_SUB, m0.x, base_y, 1.0, &[(g.first + kh::menu::MAGIC + kh::menu::HEADER, None), (g.first + kh::menu::MAGIC + kh::menu::TITLE, None)]) {
+            let sub = sub_groups(g, m0.list);
+            if let Some(h) = self.kh1_ctrl(PRIORITY_SUB, m0.x, base_y, 1.0, &[(sub + kh::menu::HEADER, None), (sub + kh::menu::TITLE, None)]) {
                 func::<VecFn>(COLOUR)(h, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
                 headers.push(h);
             }
@@ -672,7 +680,7 @@ impl Ui {
         for v in &sc.rows {
             let count = sc.rows.iter().filter(|r| r.list == v.list).count();
             let last = v.index as usize + 1 == count;
-            let (base_g, prio) = if v.list == Kind::Magic { (g.first + kh::menu::MAGIC, PRIORITY_SUB) } else { (look, PRIORITY_ROOT) };
+            let (base_g, prio) = if v.list != Kind::Root { (sub_groups(g, v.list), PRIORITY_SUB) } else { (look, PRIORITY_ROOT) };
             let plate = if v.highlight {
                 kh::menu::SEL
             } else if last {
@@ -685,7 +693,8 @@ impl Ui {
                 // The command's icon (`com_sel_ico_a / b / c`: Keyblade, hat, potion; the Magic
                 // list's hat). Which row takes which: Assumption (by their pictures).
                 let icon = match (v.list, v.name) {
-                    (Kind::Magic, _) => Some(g.first + kh::menu::MAGIC + 5),
+                    // The Magic list's hat; the Items list's potion (`ite_sel_ico_d`).
+                    (Kind::Magic | Kind::Items, _) => Some(base_g + 5),
                     (_, 1) | (_, 343) => Some(look + kh::menu::ICON),
                     (_, 2) => Some(look + kh::menu::ICON + 1),
                     (_, 3) => Some(look + kh::menu::ICON + 2),
@@ -729,7 +738,7 @@ impl Ui {
             return None;
         }
         super::d2::made();
-        wr::<u8>(c + C_PRIORITY, if v.list == Kind::Magic { PRIORITY_SUB } else { PRIORITY_ROOT });
+        wr::<u8>(c + C_PRIORITY, if v.list != Kind::Root { PRIORITY_SUB } else { PRIORITY_ROOT });
         wr::<u8>(c + C_COLOUR_ON, 1);
         place(c, v);
         let g = first + if v.highlight { 1 } else { 0 };
@@ -792,6 +801,22 @@ impl Ui {
 /// side-by-side with KH1, 2026-11-01).
 fn kh1_word_level(bright: u8) -> f32 {
     bright as f32 / 255.0
+}
+
+/// The first of a submenu's six groups in KH1's look: the Magic list's, or (M8 stage 8a.1) the
+/// Items list's (`items_list`); an older asset step built none: the Magic list's, logged once.
+fn sub_groups(g: &kh::MenuGroups, list: Kind) -> u32 {
+    static LOGGED: AtomicBool = AtomicBool::new(false);
+    match (list, g.items_list) {
+        (Kind::Items, Some(first)) => first,
+        (Kind::Items, None) => {
+            if !LOGGED.swap(true, Ordering::Relaxed) {
+                log("command menu: kh1-hud.json has no KH1 Items list (run this version's asset step): drawn with the Magic list's panels");
+            }
+            g.first + kh::menu::MAGIC
+        }
+        _ => g.first + kh::menu::MAGIC,
+    }
 }
 
 /// H4: the KH1 look's groups when the KH1 HUD is up and its menu look was built.
@@ -954,6 +979,10 @@ pub fn confirm_is_circle() -> bool {
 unsafe fn world(pl: usize) -> World {
     let (spells, shortcuts) = spells();
     let mut w = World { mp: mp_view(), spells, shortcuts, ..Default::default() };
+    // M8 stage 8a.1: Sora's item slots (a read of our save block), only with the items in.
+    if super::items::installed() {
+        (w.slots, w.slot_count) = super::items::slots();
+    }
     let mut in_recoil = false;
     if let Ok(g) = mv::SORA.try_lock() {
         if let Some(s) = g.as_ref().filter(|s| s.player == pl) {
@@ -1061,12 +1090,17 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
             Event::NotNow(c) => note(|| format!("{d} [{c:#x}]: KH1's gate refused it this frame (Sora busy)")),
             Event::Cast(c) => note(|| format!("{d} [{c:#x}]: issued")),
             Event::Shortcut(_, c, _) => note(|| format!("{d} [{c:#x}]")),
+            Event::Item(c, _, _) => note(|| format!("{d} [{c:#x}]")),
             _ => note(|| d.clone()),
         }
     }
     // The spell issued (M7 stage 7.4): KH1's magic command for this frame's KH1 frame.
     if let Some((s, lv)) = out.cast.and_then(cm::cmd::spell_of) {
         super::magic::issue(s, lv);
+    }
+    // The item chosen (M8 stage 8a.1): KH1's item command for this frame's KH1 frame.
+    if let Some(c) = out.item {
+        super::items::issue(c.item, c.slot);
     }
     Some(Keep { attack: out.attack, jump: out.jump, triangle: out.triangle, square: out.square })
 }
@@ -1076,6 +1110,7 @@ fn describe(e: &Event, m: &Menu) -> String {
         WORDS.get().and_then(|w| w.get(cm::cmd::name(c))).map(|b| String::from_utf8_lossy(&b[..b.len().saturating_sub(1)]).into_owned()).unwrap_or_else(|| format!("{c:#x}"))
     };
     match *e {
+        Event::Opened(Kind::Items) => format!("open items ({} filled slots {:?}, grey {:#x})", m.items.cmds.len(), m.item_slots, m.items.grey & 0xFF),
         Event::Opened(_) => format!("open magic ({} spells, grey {:#x})", m.magic.cmds.len(), m.magic.grey & 0x7F),
         Event::Closed => "close".into(),
         Event::Spell(c, _) => format!("spell {}", name(c)),
@@ -1084,6 +1119,16 @@ fn describe(e: &Event, m: &Menu) -> String {
         Event::Refused(c) => format!("refused {}", if c == 0 { "-".into() } else { name(c) }),
         Event::Context(c) => format!("context {}", name(c)),
         Event::ShortcutList(on) => (if on { "shortcuts on (L1)" } else { "shortcuts off" }).into(),
+        Event::Item(c, slot, r) => format!(
+            "item {} slot {} {}",
+            name(c),
+            slot + 1,
+            match r {
+                ShortResult::Cast => "used",
+                ShortResult::Greyed => "greyed",
+                ShortResult::NotNow => "not-now",
+            }
+        ),
         Event::Shortcut(k, c, r) => format!(
             "shortcut {} {} {}",
             k + 1,

@@ -132,6 +132,9 @@ pub mod menu {
     pub const TITLE_TO_BATTLE: u32 = 2 * LOOK;
     /// The Magic list's header, title, row, last row, selection, icon.
     pub const MAGIC: u32 = 2 * LOOK + 1;
+    /// A submenu list's groups (header, title, row, last row, selection, icon): the Magic list's
+    /// and (M8 stage 8a.1) the Items list's.
+    pub const LIST_GROUPS: u32 = 6;
     /// FM's context tab: shadow, green plate, band, stripe, at the tab's origin
     /// (`crate::command_menu::tab`).
     pub const TAB: u32 = MAGIC + 6;
@@ -257,6 +260,9 @@ pub struct MenuGroups {
     pub tab_icon: bool,
     /// (language, [(message id, group)]).
     pub words: Vec<(String, Vec<(u16, u32)>)>,
+    /// M8 stage 8a.1: KH1's Items list (`exchange/<L>_uibin_item.bin`), its first group (the
+    /// same six as the Magic list's, [`menu::MAGIC`]'s order), when the asset step built it.
+    pub items_list: Option<u32>,
 }
 
 impl MenuGroups {
@@ -362,7 +368,13 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
                 }
             }
             let tab_icon = matches!(m.get("tab_icon"), Some(crate::json::Value::Bool(true)));
-            Some(MenuGroups { first, tab_icon, words })
+            // M8 stage 8a.1, optional (older manifests have none).
+            let items_list = match m.get("items_list").map(|x| x.as_u32()) {
+                None => None,
+                Some(Some(g)) if g + menu::LIST_GROUPS <= groups => Some(g),
+                Some(_) => return Err("a bad items_list entry".into()),
+            };
+            Some(MenuGroups { first, tab_icon, words, items_list })
         }
     };
     let shortcut = match v.get("shortcut") {
@@ -801,6 +813,10 @@ mod tests {
         let mm = parse_manifest(&with).unwrap().menu.unwrap();
         assert_eq!((mm.word("fr", 1), mm.word("fr", 6), mm.word("gr", 1), mm.word("us", 2)), (Some(641), Some(642), Some(643), None));
         assert!(mm.tab_icon && menu::TAB == 23 && menu::WORDS == 25);
+        assert_eq!(mm.items_list, None, "M8: optional");
+        let it = with.replace("\"tab_icon\": true", "\"tab_icon\": true, \"items_list\": 690");
+        assert_eq!(parse_manifest(&it).unwrap().menu.unwrap().items_list, Some(690));
+        assert!(parse_manifest(&it.replace("690", "695")).is_err(), "six groups past the set");
         assert!(parse_manifest(&ok.replace("kh1hud:00", "Cockpit:00")).is_err());
         // Stage 7.12: the shortcut panel, optional (older manifests have none).
         assert_eq!(m.shortcut, None);
