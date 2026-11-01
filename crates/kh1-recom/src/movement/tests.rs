@@ -1155,3 +1155,34 @@ fn ground_thunder_releases_at_30_and_locks_sora_to_68() {
     assert!(matches!(free_at, Some(68) | Some(69)), "{free_at:?}");
     assert_eq!(p.recom.cast_ends, 1);
 }
+
+// ---- M7 stage 7.4c: the Fire release's root curve ----
+
+#[test]
+fn fire_release_steps_back_15_then_forward_to_10_like_kh1() {
+    use crate::magic::cast_req;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(FIRE1));
+    while p.ours.rec.head() != cast_req::FIRE_RELEASE {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    // Sora faces +z (yaw 0); the release steps him back along −z. Per-frame travel of Re:CoM's
+    // root step (delayed one update, decision 17) while the release motion plays.
+    let mut steps = Vec::new();
+    let mut last = p.recom.pos.z;
+    for _ in 0..62 {
+        step_cast(&mut p, Pad::default(), None);
+        steps.push(p.recom.pos.z - last);
+        last = p.recom.pos.z;
+    }
+    // KH1's entry 57 (`kh1_mset.py`): 1.5 cm back a frame over frames 0–10, then 0.1 cm forward a
+    // frame to −10 cm at 60. The replay hands the travel of frames 1–9 as 9 steps of −1.5, then
+    // 0.1 forward for the rest (the old curve stood still after frame 10).
+    let back = steps.iter().filter(|d| (**d + 1.5).abs() < 1e-3).count();
+    let fwd = steps.iter().filter(|d| (**d - 0.1).abs() < 1e-3).count();
+    assert!(back >= 9, "{steps:?}");
+    assert!(fwd >= 48, "{steps:?}");
+    let total: f32 = steps.iter().sum();
+    assert!(total > -11.0 && total < -8.0, "{total}");
+}

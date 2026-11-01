@@ -680,7 +680,8 @@ pub fn spell_damage(data: &AttackData, max_mp: i32, def: &DefenderStats, rng: &m
 
 /// KH1's cast motions (Sora's mset, read with `kh1-data` from the player's
 /// `xa_ex_0010.mset`; Checked (files)): Fire's wind-up `0x36` (entry 54, 28 frames, no flags),
-/// release `0x3D` (entry 57, 60 frames, free from 46, root −15 cm over frames 0–10), air
+/// release `0x3D` (entry 57, 60 frames, free from 46, root −15 cm over frames 0–10, then 5 cm
+/// forward to −10 cm at frame 60: linear keys, read with `kh1_mset.py`'s root helper), air
 /// wind-up `0x83` (entry 79, 28) and air release `0x8A` (entry 82, 52 frames, free from 46, root
 /// −42.4 cm over 0–10). Re:CoM's clips `p001_062`, `p001_063`, `p001_066`, `p001_067` (rows 0x37,
 /// 0x38, 0x3B, 0x3C) have the same frame counts at 60 Hz (14, 30, 14, 26 at 30 fps; research
@@ -688,9 +689,9 @@ pub fn spell_damage(data: &AttackData, max_mp: i32, def: &DefenderStats, rng: &m
 pub fn add_motions(m: &mut MotionSet) {
     let inf = f32::INFINITY;
     m.add(&[cast_req::FIRE_WINDUP], MotionInfo::new(28.0));
-    m.add(&[cast_req::FIRE_RELEASE], MotionInfo::new(60.0).with_flag(FlagKind::Free, 46.0, inf).with_forward_keys(&[(0.0, 0.0), (10.0, -15.0), (60.0, -15.0)]));
+    m.add(&[cast_req::FIRE_RELEASE], MotionInfo::new(60.0).with_flag(FlagKind::Free, 46.0, inf).with_forward_keys(&[(0.0, 0.0), (10.0, -15.0), (60.0, -10.0)]));
     m.add(&[cast_req::FIRE_AIR_WINDUP], MotionInfo::new(28.0));
-    m.add(&[cast_req::FIRE_AIR_RELEASE], MotionInfo::new(52.0).with_flag(FlagKind::Free, 46.0, inf).with_forward_keys(&[(0.0, 0.0), (10.0, -42.41), (52.0, -42.41)]));
+    m.add(&[cast_req::FIRE_AIR_RELEASE], MotionInfo::new(52.0).with_flag(FlagKind::Free, 46.0, inf).with_forward_keys(&[(0.0, 0.0), (10.0, -42.4096), (52.0, -42.4096)]));
     // Blizzard (7.5): entry 55, 86 frames, free from 68, no root travel; air entry 80, 78 frames,
     // free from 68. Re:CoM's `p001_065` / `p001_069` (rows 0x3A / 0x3E): 43 / 39 frames at 30 fps.
     m.add(&[cast_req::BLIZZARD], MotionInfo::new(86.0).with_flag(FlagKind::Free, 68.0, inf));

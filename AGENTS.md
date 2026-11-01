@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 47: Fire release root curve as KH1, version 0.20.1 (2026-10-31)
+
+- KH1's Fire release motion (Checked, files): back 1.5 cm a frame to −15 cm at frame 10, then
+  0.1 cm a frame forward to −10 cm at 60 (air −42.41 cm at 10, held). The motion record now holds
+  that curve (it held −15 cm). In game Sora's travel still comes from Re:CoM's clip `p001_063`
+  (−40.5 cm at frame 10): owner question. Not seen in game.
+
+---
+
 ## Stage 46: M7 stage 7.6, Thunder, version 0.20.0 (2026-10-31)
 
 - Thunder / Thundara / Thundaga (Checked, decomp + files): release at 30, locked for 68 frames,

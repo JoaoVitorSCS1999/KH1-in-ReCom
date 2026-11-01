@@ -27,7 +27,7 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 | **Fire fast path** `0x1402A7510` type 2: a Fire command while the playing request is `0x3D` / `0x8A`, or swing 1 (200) / the lunge (202) **inside its combo window**: plays the release motion at once (blend 8: `movss xmm2,[0x14042F94C]` = 8.0), queues idle (air: fall), air speed × 0.5 in the air, **no hop, no wind-up, no usable / MP test**. | `0x1402A75B6..0x1402A767A` | Checked (decomp + disasm) |
 | **Normal cast** `0x1402A3600` → `0x1402A3DB0` (ground) / its air branch: the usable test `0x14028EFD0` (MP `0x1402A4C10` for the cost); ground: wind-up `0x36` (action lock), release `0x3D`, idle (release); air: `0x83`, `0x8A`, fall (release, blend 8), then **a new jump arc of 30 cm** (`0x1402AF960(actor, G+0xE8 = 30)`) and the air velocity × G`+0xF0` = 0.5. Other states drop the command. | `0x1402A3600`, `0x1402A3DB0` | Checked (decomp + files) |
 | **Facing** `0x1402A38E0` (command flag 2, every spell): toward the target's part, else the stick (or the facing); speed 0. | `0x1402A38E0` | Checked (decomp) |
-| **Cast motions** (Sora's mset, read from the owner's file): `0x36` entry 54, 28 frames, no flags; `0x3D` entry 57, 60 frames, free from 46, root back 15 cm over frames 0–10; `0x83` entry 79, 28; `0x8A` entry 82, 52 frames, free from 46, root back 42.4 cm over 0–10. | `xa_ex_0010.mset` | Checked (files) |
+| **Cast motions** (Sora's mset, read from the owner's file): `0x36` entry 54, 28 frames, no flags; `0x3D` entry 57, 60 frames, free from 46, root back 15 cm over frames 0–10, then 5 cm forward to −10 cm at frame 60 (7.4c); `0x83` entry 79, 28; `0x8A` entry 82, 52 frames, free from 46, root back 42.4 cm over 0–10. | `xa_ex_0010.mset` | Checked (files) |
 | **The script** (`xm_fire01.mag`, the same at every level): on the wind-up path it yields while the request is `0x36` / `0x83`; on the fast path it waits 8 frames (`L006fa(8.0)`, − frame step per run). Then, if the request is not `0x3D` / `0x8A`, it ends: **no spell, no MP**. Else the ball thread starts (sys 20) and **the MP is paid** (sys 47 → `0x1402A5B60`, the data's `+0x30` = 30 units). | `xm_fire01.mag` 0x520.. | Checked (files: decoded with `magdis.py`; syscalls in the decomp) |
 | **When the script runs**: spell threads are tasks of the list `0x142D22D08`, run by `0x14028F6B0`, registered at priority 137000 (`0x21728`); the actors' update runs earlier in the frame (the command menu at 55000). So a run sees that frame's motion update: the ball leaves **in the frame the wind-up ends (28 after the command)**, or 8 after the command on the fast path. | `0x14028F2D0`, `0x140284670` | Checked (decomp); that the actor list runs before 137000: Assumption (its runner's priority not pinned) |
 | **The ball** (thread at `L0026e`): from the Keyblade's middle (bone 48, × 0.5) along Sora's facing, **40 cm a frame**, **life 30 frames**, turns **≤ 3° a frame** toward its target's part; with no or a dead target it picks the best enemy **within 500 cm of the ball** each frame (sys 78); starts fading 20 frames before its end; radius 50 (attack data `+0x5C`); ends on its first hit. | `xm_fire01.mag` | Checked (files) |
@@ -552,3 +552,39 @@ test), `0x1402AD350`. All 16 new sites compared with the Steam exe's bytes (scri
     bends toward it (≤ 3° a frame) and the log shows `re-target: shot N cast with no target` and
     `rt shot N -> <handle>`; F9 trace: `rt shot …` in the cast column. With a target that dies
     before the ball arrives: the ball flies straight on and never turns to another enemy.
+
+## Stage 7.4c: the Fire release's root curve
+
+Ask (coordinator, M7): "KH1's Fire release motion moves Sora back 15 cm by frame 10 then 5 cm
+forward (to −10 cm at frame 60); 7.4's motion data holds −15 cm. Fix to KH1's curve".
+
+- **KH1** (`xa_ex_0010.mset`, request `0x3D` → entry 57, root helper read with `kh1_mset.py`'s
+  `root_local`): z = −1.5 cm a frame over frames 0–10 (−15.0 at 10), then +0.1 cm a frame to −10.0
+  at frame 60; x, y 0. The air release `0x8A` (entry 82): −4.24096 cm a frame to −42.4096 at 10,
+  then still to 52. Checked (files).
+- **Fixed:** KH1's motion record (`magic::add_motions`) now holds `(0, 0) (10, −15) (60, −10)` for
+  `0x3D` and −42.4096 (was −42.41) for `0x8A`. Tests: `magic::tests::cast_motions_are_kh1s_frame_
+  counts_and_windows` (the curve at 0 / 5 / 10 / 20 / 46 / 60), `movement::tests::fire_release_
+  steps_back_15_then_forward_to_10_like_kh1` (the per-frame travel the fake Re:CoM's root step hands
+  out: −1.5 cm steps, then +0.1 cm steps).
+- **What this changes in game: nothing yet.** The record's root keys drive only the tests' fake
+  Re:CoM; in game Sora's travel is Re:CoM's own clip `p001_063`'s root (the row is played with root
+  motion, `rows::row_for`, decision 17's delay). Re:CoM's clip (bone 0 translation of
+  `PL0001.ANN`, read with `recom_ann.py`): **back 40.5 cm by its frame 5 (KH1 frame 10), then
+  forward to −35.7 cm at its end**, so 25.5 cm deeper than KH1's step for the whole motion. The air
+  clip `p001_067` holds KH1's −42.4 cm exactly. Checked (files). This matches the asset note
+  (`kh1-recom-assets.md`: 57 → `p001_063` is an *edited* bake whose root split differs). Open
+  question (owner) below.
+- **Found while testing (the replay, not KH1):** a release that starts from its queued wind-up end
+  is started on Re:CoM's clock one step on (decision 17's rule for queued motions), so the fake's
+  root step loses the travel of frame 0→1 (1.5 cm) and, at the end, the last update's delayed
+  travel into the idle (0.1 cm): the fake ends at −8.6 cm, not −10. Whether Re:CoM's root step
+  does the same in game (a clip started at t = 1 handing no travel for 0→1): not checked. Assumption.
+
+Open question (7.4c): **Re:CoM's ground release clip steps Sora back 40.5 cm, not KH1's 15 cm.**
+(a) keep Re:CoM's clip travel (as built; KH1's frames and windows, Re:CoM's step depth);
+(b) give the release KH1's travel through the root-step wrapper we already have on `0x14024DCA0`
+(for the cast's release clip only: Re:CoM's travel for the update replaced by KH1's root curve
+delta along the same direction; no new hook, a few float ops per frame of the release);
+(c) re-bake `p001_063`'s root at the asset step from KH1's entry 57 (the clip's other bones stay
+Re:CoM's edit; a new clip slot for the KH1 setting, the Re:CoM setting keeps its own).

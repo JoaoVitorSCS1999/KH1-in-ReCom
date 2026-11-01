@@ -83,7 +83,15 @@ fn cast_motions_are_kh1s_frame_counts_and_windows() {
     assert_eq!((len(0x36), len(0x3D), len(0x83), len(0x8A)), (28.0, 60.0, 28.0, 52.0));
     let free = |r| m.info(r).unwrap().first(FlagKind::Free);
     assert_eq!((free(0x36), free(0x3D), free(0x8A)), (None, Some(46.0), Some(46.0)));
-    assert!((m.info(0x3D).unwrap().root_at(10.0).z + 15.0).abs() < 1e-4);
+    // KH1's root helper (entry 57): back 1.5 cm a frame to −15 cm at frame 10, then 0.1 cm a frame
+    // forward to −10 cm at its end (entry 82: back to −42.41 cm at 10, then still). Checked (files).
+    let z = |r, t| m.info(r).unwrap().root_at(t).z;
+    for (t, want) in [(0.0, 0.0), (5.0, -7.5), (10.0, -15.0), (20.0, -14.0), (46.0, -11.4), (60.0, -10.0)] {
+        assert!((z(0x3D, t) - want).abs() < 1e-4, "0x3D at {t}: {}", z(0x3D, t));
+    }
+    for (t, want) in [(5.0, -21.2048), (10.0, -42.4096), (52.0, -42.4096)] {
+        assert!((z(0x8A, t) - want).abs() < 1e-3, "0x8A at {t}: {}", z(0x8A, t));
+    }
     assert!(is_cast_request(0x36) && is_cast_request(0x8A) && !is_cast_request(0x3E) && !is_cast_request(200));
 }
 
