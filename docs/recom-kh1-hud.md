@@ -511,3 +511,21 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
 
 - `kh1 hud: kh1hud:00 (632 groups, PC copies ["FR", "GR", "IT", "SP", "UK"]) from …`
 - `kh1 hud: Re:CoM registered kh1hud:00 with 632 groups (…); hud = …` on the first room.
+
+## PC textures repacked against the PS2 UVs (0.33.1)
+
+- KH1 PC's `uitex.bin` picture 7 (`UK_uitex_bin10780.dds`, `-10780.dds`) no longer holds the HP
+  back segments at `g_s` objects 16 / 18's UVs (8, 83)–(33, 101) / (8, 104)–(33, 122): there the
+  PC texture has a 1-texel column and a bracket piece. Picture 5's (`-a2c0.dds`) straight HP
+  segment is 24 texels wide at (2, 102) (26 on PS2) and the MP / charge segments are shifted.
+  `g_s` (all languages, 2024 dates) keeps the PS2 UVs. Checked (files). Drawing those UVs on
+  the PC textures made the straight HP bar show dark brackets every 26 units (owner's
+  screenshot, 2026-11-01; reproduced offline from the bake).
+- How KH1 PC draws them correctly is not read: Assumption, a UV remap we have not found.
+- Picture 2 goes the other way: the PC panels fill the `com` rects (to u 126), the PS2 ones stop
+  near u 102. The PC art is kept there.
+- The asset step now checks each texel rect a piece draws from a whole picture: where more than
+  1 in 20 texels the PS2 picture covers are clear on PC, that rect of the PC copy is redrawn from
+  the PS2 texels at 2× (nearest). On the owner's files: 40 rects (picture 5's three straight
+  segments, picture 7's two HP back segments, the HP cap and two MP pieces, 5 languages);
+  faces, rings, labels and the menu pictures keep the PC art. `KH1_HUD_REFIT_LOG=1` lists them.

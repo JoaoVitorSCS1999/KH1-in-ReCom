@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 70: KH1 HUD: straight HP bar drawn without brackets, version 0.33.1 (2026-10-31)
+
+- Ask (owner, 2026-11-01): "for some reason the hp is segmented".
+- Cause: KH1 PC's pictures 5 / 7 are repacked where the straight HP / MP pieces sit; `g_s` keeps
+  the PS2 UVs, so the PC copy showed bracket pieces every 26 units (reproduced offline). Asset
+  step: rects whose PS2 coverage is lost on PC are redrawn from the PS2 texels at 2× (40 rects on
+  the owner's files); everything else keeps the PC art. Checked (files + offline render of the
+  bake). Assumption: KH1 PC remaps those UVs somewhere we have not read. No DLL change.
+
+---
+
 ## Stage 69: KH1 HUD H8, LEVEL UP!! pop-up, version 0.33.0 (2026-10-31)
 
 - Re:CoM's `0x14020C9A0` kind 4 is the level-up (Checked, caller + sound 0x36); hook

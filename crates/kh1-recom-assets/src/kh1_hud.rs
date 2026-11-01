@@ -561,6 +561,74 @@ impl Atlas {
     }
 }
 
+/// KH1's PC textures for `uitex.bin` pictures are repacked in places: some pieces moved or were
+/// cut down (picture 7's HP back segments are a 1-texel column there, picture 5's straight HP
+/// segment is 24 texels, not 26), while `g_s` keeps the PS2 UVs (Checked (files):
+/// `UK_uitex_bin10780.dds`, `-a2c0.dds` against `uitex.bin` pictures 7 and 5). How KH1 PC maps
+/// those UVs onto its repacked textures is not read (Assumption: a remap we have not found). So
+/// for every texel rect a piece draws from a picture taken whole (`raw`; the baked arcs come from
+/// the PC rings, which keep the PS2 layout), the PC texture's coverage is averaged down to one
+/// per PS2 texel; where more than 1 in 20 texels the PS2 picture covers are clear on PC, that
+/// rect of the PC copy is replaced by the PS2 texels at the PC scale (nearest). Only coverage
+/// lost counts: the PC redraws colours and edges (faces, labels) and widens some art inside its
+/// rect (picture 2's panels fill the `com` rects, the PS2 ones stop short). Returns the rects
+/// replaced (`KH1_HUD_REFIT_LOG` set: each one to stderr).
+fn fit_layouts(atlas: &mut Atlas, groups: &[Group], raw: &[usize]) -> usize {
+    use std::collections::BTreeSet;
+    let mut used: BTreeSet<(usize, [i32; 4])> = BTreeSet::new();
+    for g in groups {
+        for st in &g.steps {
+            for p in st.pieces.iter().filter(|p| raw.contains(&p.item)) {
+                used.insert((p.item, p.uv));
+            }
+        }
+    }
+    let log = std::env::var("KH1_HUD_REFIT_LOG").is_ok();
+    let mut fixed = 0;
+    for (item, [u0, v0, u1, v1]) in used {
+        let (ps2, hds, s) = &mut atlas.items[item];
+        let s = *s;
+        let (w, h) = ((u1 - u0).max(0) as usize, (v1 - v0).max(0) as usize);
+        if w == 0 || h == 0 || u0 < 0 || v0 < 0 || u1 as usize > ps2.w || v1 as usize > ps2.h {
+            continue;
+        }
+        let (u0, v0) = (u0 as usize, v0 as usize);
+        for hd in hds.iter_mut() {
+            if hd.w < ps2.w * s || hd.h < ps2.h * s {
+                continue;
+            }
+            let mut lost = 0usize;
+            for j in 0..h {
+                for i in 0..w {
+                    let (x, y) = (u0 + i, v0 + j);
+                    let mut cov = 0u32;
+                    for dy in 0..s {
+                        for dx in 0..s {
+                            cov += hd.px[(y * s + dy) * hd.w + x * s + dx][3] as u32;
+                        }
+                    }
+                    // Alpha 0..128.
+                    if ps2.px[y * ps2.w + x][3] >= 96 && cov / ((s * s) as u32) < 32 {
+                        lost += 1;
+                    }
+                }
+            }
+            if lost * 20 > w * h {
+                for j in 0..h * s {
+                    for i in 0..w * s {
+                        hd.px[(v0 * s + j) * hd.w + u0 * s + i] = ps2.px[(v0 + j / s) * ps2.w + u0 + i / s];
+                    }
+                }
+                fixed += 1;
+                if log {
+                    eprintln!("kh1hud refit: item {item} texels {:?}, {lost} of {} lost on PC", [u0, v0, u0 + w, v0 + h], w * h);
+                }
+            }
+        }
+    }
+    fixed
+}
+
 /// The built atlases: the PS2 one and the PC one per language, and each item's places.
 struct Packed {
     ps2: Pic,
@@ -907,6 +975,8 @@ pub struct Built {
     pub cursor: Option<usize>,
     /// H8: the LEVEL UP!! box's group.
     pub level_up: Option<usize>,
+    /// PC texture rects redrawn from the PS2 pictures (repacked on PC, see [`fit_layouts`]).
+    pub refit: usize,
 }
 
 fn colour_of(o: &Obj) -> u32 {
@@ -1238,6 +1308,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         _ => None,
     };
     // H7: KH1's lock-on cursor (`lock` object 2, `lockon_c`, picture 10).
+    let mut cursor_item = None;
     let cursor_built = match src.lock {
         Some(l) => {
             let (i, off, data) = CURSOR_PICTURE;
@@ -1249,6 +1320,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
             let hd = uitex_asset(src.uitex_hd, data, langs[0])?.ok_or_else(|| crate::Error::Format(format!("uitex.bin: no PC texture for picture {i}")))?;
             let scale = hd_scale(&ps2, &hd)?;
             let item = atlas.add(ps2, vec![hd.crop(0, 0, 128 * scale, 128 * scale)], scale);
+            cursor_item = Some(item);
             Some(cursor::build(l, item, &mut groups)?)
         }
         None => None,
@@ -1264,6 +1336,11 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         None => None,
     };
     let groups_total = groups.len();
+    let mut raw = vec![it5, it6, it7, p0];
+    raw.extend(&faces);
+    raw.extend(&mp);
+    raw.extend(cursor_item);
+    let refit = fit_layouts(&mut atlas, &groups, &raw);
     let packed = build_atlas(&atlas, langs.len())?;
     let base = seqd(&groups, &packed, false)?;
     let hd = seqd(&groups, &packed, true)?;
@@ -1283,6 +1360,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         party: party_built,
         cursor: cursor_built,
         level_up: level_built,
+        refit,
     })
 }
 
@@ -2371,6 +2449,8 @@ mod tests {
         );
         assert_eq!(sq.agroups.len(), b.groups);
         let mn = b.menu.as_ref().unwrap();
+        eprintln!("refit {}", b.refit);
+        assert!(b.refit > 0);
         eprintln!("menu: first group {}, {} glyphs, missing {:?}, words {:?}", mn.first, mn.glyphs, mn.missing, mn.words);
         assert!(mn.missing.is_empty());
         assert!(b.target.is_some());
