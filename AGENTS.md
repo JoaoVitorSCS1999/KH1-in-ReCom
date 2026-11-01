@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 52: Command menu installs; MP bar placed at rest, version 0.24.1 (2026-10-31)
+
+> "The command menu isnt there. the MP bar clips through the \"friends\" bar, and also, when switching
+> from KH1 to Recom, and then back to KH1, the MP bar is randomly placed somewhere else each time"
+
+- Cause 1 (Checked, owner's log): the command menu's install checked `menu_groups()`, which is
+  None until a bar is built on the first player gauge (later), so it logged "no plate groups" and
+  never installed. Now it checks the manifest's `extra_groups` at install; the groups are still
+  resolved when the bar is built.
+- Cause 2 (Assumption, likely): a rebuilt bar's new `C2DSeqCtrl` kept whatever transform the
+  reused memory held. Every control we make now gets position (0, 0, 0, 1) and scale 1 at once.
+- The overlap with Re:CoM's friend gauge is not fixed yet: screenshot requested. Not seen in game.
+
+---
+
 ## Stage 51: M7 stage 7.10, Aero, version 0.24.0 (2026-10-31)
 
 - Aero / Aerora / Aeroga (Checked, KH1 script + decomp): cast at 30 or at once when cut; 2 MP;

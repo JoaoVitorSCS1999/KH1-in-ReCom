@@ -199,6 +199,11 @@ unsafe fn new_ctrl(hp: usize) -> Option<usize> {
     }
     func::<ParentFn>(PARENT)(c, hp);
     wr::<u8>(c + C_INHERIT, 1);
+    // The control's own transform starts at rest: a rebuilt bar (Combat switched back to KH1)
+    // otherwise drew wherever the reused memory left it (owner, 2026-10-31: "randomly placed
+    // somewhere else each time").
+    func::<VecFn>(POSITION)(c, V4([0.0, 0.0, 0.0, 1.0]).0.as_ptr());
+    func::<VecFn>(SCALE)(c, V4([1.0, 1.0, 1.0, 1.0]).0.as_ptr());
     Some(c)
 }
 
@@ -337,6 +342,12 @@ pub unsafe extern "win64" fn gauge_init(gauge: usize) {
     }
     build(gauge);
     super::command_menu::build(gauge);
+}
+
+/// Whether `kh1-mp-bar.json` carries the command menu's plate groups (checked at install; the
+/// group numbers themselves are known only once a bar is built, [`menu_groups`]).
+pub fn has_menu_groups() -> bool {
+    layout().is_some_and(|l| l.0.extra_groups >= 2)
 }
 
 /// The command menu's two plate groups (`kh1-mp-bar.json` `extra_groups`, after the bar's in the

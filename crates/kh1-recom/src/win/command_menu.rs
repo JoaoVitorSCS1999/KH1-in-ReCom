@@ -148,7 +148,10 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>, s: &crate::settings
             }
         }
     }
-    if super::mp_bar::menu_groups().is_none() {
+    // 0.17.x checked `menu_groups()` here, which is None until a bar is built (later, on the
+    // first player gauge): the menu was never installed (owner, 2026-10-31: "The command menu
+    // isnt there").
+    if !super::mp_bar::has_menu_groups() {
         log("command menu: kh1-mp-bar.json has no plate groups (an older asset step): no command menu");
         return false;
     }
