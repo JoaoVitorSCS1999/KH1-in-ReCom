@@ -644,3 +644,19 @@ owner's H0 dump, **Assumption**.
   place (exe Steam address / DLL offset), registers and return addresses to `kh1-recom.log`,
   then lets the crash go on as before (the owner's crash after a Curaga left an empty
   `CrashDump.dmp`).
+
+## 0.37.0 (owner, 2026-11-01)
+
+- **Pick and choose** ("I want to be able to pick and choose which elements i want"): at
+  `hud = kh1`, `kh1-recom.ini` keys `hud_kh1_gauge` (KH1's rings and face; off: Re:CoM's HP
+  gauge and the MP bar), `hud_kh1_menu` (KH1's command menu look; off: 7.3's look),
+  `hud_kh1_party` (Donald's / Goofy's gauges, drawn with the gauge), `hud_hide_recom_hp`,
+  `hud_hide_minimap`, `hud_hide_friends`, `hud_hide_prizes` (Re:CoM's EXP / NEXT LV / Moogle
+  pop-ups). Defaults: the owner's picks (gauge, menu, party on; Re:CoM's HP gauge and FRIENDS row
+  hidden; minimap and pop-ups shown). The Config menu has no free item slots left (7 of 21 used
+  by our 3 rows): owner question.
+- **LEVEL UP**: Re:CoM's popup (H8 off, `LEVEL_UP_KH1`).
+- **Rings**: the PC copies are drawn at 4 × 4 points a texel, each point sampling the PC picture
+  bilinearly; the radial cut edges reach half a texel past the line (no half-covered seams).
+  "grainy" edges and the MP outline's varying thickness came from one sample a texel.
+- **Tab / selection seam**: the band (`com_sel_gra_d`) starts 1 unit higher, under the stripe.

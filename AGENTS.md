@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 75: HUD pieces as settings, Re:CoM's LEVEL UP, smooth rings, tab seam, prize diagnostics, version 0.37.0 (2026-10-31)
+
+- Asks (owner, 2026-11-01): "I want to be able to pick and choose which elements i want", "I want
+  the ReCoM level up message instead of the KH1 level up hud", "the health bar has this grainy harsh
+  looking texture ... for the MP, youll notice that line thickness varies", "the triangle prompt hud
+  has a weird like line through the middle of it", "sora is frozen after battle again".
+- `settings::HudParts` (7 ini keys, defaults = the owner's picks); `kh1_hud::gauge_on` / `menu_on`;
+  Re:CoM's pieces hidden per bit. H8 off. Config rows: no free item slots (owner question).
+- Rings: 4 × 4 bilinear samples a PC texel, cut edges + half a texel (offline render: even
+  outlines). Seam: band 1 unit up under the stripe.
+- Stuck battle end: the manager waits on 5 `CPrize` (log); the battle-end line now gives each
+  prize's kind, words +0x240..+0x260 and position (diagnostics). Not seen in game.
+
+---
+
 ## Stage 74: Context tab at save points and warp points, version 0.36.1 (2026-10-31)
 
 - Ask (owner, 2026-11-01): "standing on a save point and using the purple teleporter thing dont

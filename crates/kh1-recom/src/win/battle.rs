@@ -485,7 +485,18 @@ unsafe fn end_detail(v: &be::View) -> String {
             while node != 0 && guard < 16 {
                 let obj: usize = rd(node + b::NODE_OBJECT);
                 if obj != 0 {
-                    names.push(format!("{} flags {:#x}", class_name(obj), rd::<u16>(obj + task_f::FLAGS)));
+                    let name = class_name(obj);
+                    if name == "CPrize" {
+                        // Diagnostics for the stuck battle end (owner, 2026-11-01: the manager
+                        // waited on 5 CPrize): the prize's kind (+0x244, card kinds 0x31..0x42 per
+                        // `0x140230E40`), +0x248, the words +0x240..+0x260 and +0x30..+0x3C (the
+                        // position: Assumption).
+                        let w: Vec<String> = (0..8).map(|i| format!("{:x}", rd::<u32>(obj + 0x240 + 4 * i))).collect();
+                        let pos = [rd::<f32>(obj + 0x30), rd::<f32>(obj + 0x34), rd::<f32>(obj + 0x38)];
+                        names.push(format!("CPrize flags {:#x} kind {:#x} [{}] at ({:.2},{:.2},{:.2})", rd::<u16>(obj + task_f::FLAGS), rd::<i32>(obj + 0x244), w.join(" "), pos[0], pos[1], pos[2]));
+                    } else {
+                        names.push(format!("{name} flags {:#x}", rd::<u16>(obj + task_f::FLAGS)));
+                    }
                 }
                 node = rd(node + b::NODE_NEXT);
                 guard += 1;

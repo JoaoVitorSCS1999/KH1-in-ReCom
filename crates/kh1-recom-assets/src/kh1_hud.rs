@@ -508,58 +508,124 @@ fn render(fan: &[[i32; 4]], wedge: Option<&[[i32; 4]; 3]>, src: &Pic, src_scale:
     let area = |t: &([i32; 4], [i32; 4], [i32; 4], bool)| (t.1[0] - t.0[0]) as i64 * (t.2[1] - t.0[1]) as i64 - (t.1[1] - t.0[1]) as i64 * (t.2[0] - t.0[0]) as i64;
     // The last triangle that has an area (KH1 repeats the end vertex when it is a 45° step).
     let last = (0..tris.len()).rev().find(|&k| area(&tris[k]) != 0).unwrap_or(0);
-    // The sample points of a texel: its centre (as the GS samples), and for the PC pictures
-    // (s > 1) also its corners: a texel any of them finds inside the fan is drawn. The PC atlas
-    // is filtered and Re:CoM draws the pieces at screen resolution, so a texel cut at a radial
-    // edge must still cover it: neighbouring pieces then overlap by up to a texel (the same art
-    // in both) instead of leaving a clear line (owner: "the bars are all choppy", 2026-11-01).
-    let offs: &[(f64, f64)] = if s > 1 { &[(0.0, 0.0), (-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)] } else { &[(0.0, 0.0)] };
+    if s > 1 {
+        render_pc(&tris, last, src, src_scale, s, rect, &mut p);
+        return p;
+    }
     for j in 0..h as usize * s {
         for i in 0..w as usize * s {
-            'texel: for (n, &(ox, oy)) in offs.iter().enumerate() {
-                let px = (x0 as f64 + (i as f64 + 0.5 + ox) / s as f64 - 0.5) * 16.0;
-                let py = (y0 as f64 + (j as f64 + 0.5 + oy) / s as f64 - 0.5) * 16.0;
-                for (k, &(c, a, b, soft)) in tris.iter().enumerate() {
-                    // Barycentric weights of a and b over the triangle (c, a, b).
-                    let det = ((a[0] - c[0]) as f64) * ((b[1] - c[1]) as f64) - ((a[1] - c[1]) as f64) * ((b[0] - c[0]) as f64);
-                    if det == 0.0 {
-                        continue;
-                    }
-                    let la = ((px - c[0] as f64) * (b[1] - c[1]) as f64 - (py - c[1] as f64) * (b[0] - c[0]) as f64) / det;
-                    let lb = ((a[0] - c[0]) as f64 * (py - c[1] as f64) - (a[1] - c[1]) as f64 * (px - c[0] as f64)) / det;
-                    let lc = 1.0 - la - lb;
-                    const E: f64 = 1e-9;
-                    if la < -E || lb < -E || lc < -E {
-                        continue;
-                    }
-                    // The last radial edge (c → b of the last triangle, where la = 0) is outside
-                    // for the centre (pieces meeting there don't overlap on PS2).
-                    if n == 0 && k == last && la <= E {
-                        continue;
-                    }
-                    let u = lc * c[2] as f64 + la * a[2] as f64 + lb * b[2] as f64;
-                    let v = lc * c[3] as f64 + la * a[3] as f64 + lb * b[3] as f64;
-                    // The PC pictures are sampled bilinearly (alpha-weighted), as KH1 PC's filtered
-                    // draw does: point samples of a mirrored quarter landed a texel either side
-                    // along the outlines and made them uneven (owner, 2026-11-01: "the health bar
-                    // and MP bar are REALLY ugly looking"). The PS2 copy keeps the GS's point
-                    // sample.
-                    let mut t = if s > 1 { src.bilinear(u * src_scale as f64 / 16.0 - 0.5, v * src_scale as f64 / 16.0 - 0.5) } else { src.at((u * src_scale as f64 / 16.0).floor() as i64, (v * src_scale as f64 / 16.0).floor() as i64) };
-                    if soft {
-                        // Gouraud alpha: 1 at c and a, 0 at b (the GS's vertex alpha × texel alpha / 128).
-                        t[3] = ((t[3] as f64) * (1.0 - lb).clamp(0.0, 1.0)).round() as u8;
-                    }
-                    if t[3] == 0 && n + 1 < offs.len() {
-                        // A clear texel from a corner: try the other points.
-                        continue 'texel;
-                    }
-                    p.px[j * w as usize * s + i] = t;
-                    break 'texel;
+            let px = (x0 as f64 + (i as f64 + 0.5) / s as f64 - 0.5) * 16.0;
+            let py = (y0 as f64 + (j as f64 + 0.5) / s as f64 - 0.5) * 16.0;
+            for (k, &(c, a, b, soft)) in tris.iter().enumerate() {
+                // Barycentric weights of a and b over the triangle (c, a, b).
+                let det = ((a[0] - c[0]) as f64) * ((b[1] - c[1]) as f64) - ((a[1] - c[1]) as f64) * ((b[0] - c[0]) as f64);
+                if det == 0.0 {
+                    continue;
                 }
+                let la = ((px - c[0] as f64) * (b[1] - c[1]) as f64 - (py - c[1] as f64) * (b[0] - c[0]) as f64) / det;
+                let lb = ((a[0] - c[0]) as f64 * (py - c[1] as f64) - (a[1] - c[1]) as f64 * (px - c[0] as f64)) / det;
+                let lc = 1.0 - la - lb;
+                const E: f64 = 1e-9;
+                if la < -E || lb < -E || lc < -E {
+                    continue;
+                }
+                // The last radial edge (c → b of the last triangle, where la = 0) is outside, so
+                // pieces meeting there don't overlap on PS2.
+                if k == last && la <= E {
+                    continue;
+                }
+                let u = lc * c[2] as f64 + la * a[2] as f64 + lb * b[2] as f64;
+                let v = lc * c[3] as f64 + la * a[3] as f64 + lb * b[3] as f64;
+                let mut t = src.at((u * src_scale as f64 / 16.0).floor() as i64, (v * src_scale as f64 / 16.0).floor() as i64);
+                if soft {
+                    // Gouraud alpha: 1 at c and a, 0 at b (the GS's vertex alpha × texel alpha / 128).
+                    t[3] = ((t[3] as f64) * (1.0 - lb).clamp(0.0, 1.0)).round() as u8;
+                }
+                p.px[j * w as usize * s + i] = t;
+                break;
             }
         }
     }
     p
+}
+
+/// The PC copy of a fan, drawn as a filtered renderer at the PC scale draws it: each texel is the
+/// average of 4 × 4 points over its area, each point inside the fan sampling the PC picture
+/// bilinearly (alpha-weighted). The fan's two radial cut edges (its start, and its end unless
+/// it is KH1's soft end) reach half a texel past the line, so pieces that meet there overlap a
+/// little instead of leaving a half-covered texel line. Owner, 2026-11-01: the gauge's edges
+/// were "grainy" and the MP outline "line thickness varies" (single samples a texel: the corner
+/// rule of 0.34.0 and point samples before it).
+fn render_pc(tris: &[([i32; 4], [i32; 4], [i32; 4], bool)], last: usize, src: &Pic, src_scale: usize, s: usize, rect: (i32, i32, i32, i32), p: &mut Pic) {
+    let (x0, y0, w, h) = rect;
+    const N: usize = 4;
+    // Half a PC texel, in 1/16 units.
+    let tol = 8.0 / s as f64;
+    let dist = |p: [i32; 4], q0: [i32; 4], q1: [i32; 4]| -> f64 {
+        let (dx, dy) = ((q1[0] - q0[0]) as f64, (q1[1] - q0[1]) as f64);
+        let l = (dx * dx + dy * dy).sqrt();
+        if l == 0.0 {
+            return 0.0;
+        }
+        ((p[0] - q0[0]) as f64 * dy - (p[1] - q0[1]) as f64 * dx).abs() / l
+    };
+    // Barycentric slack across the start edge (c → a of the first triangle: lb ≥ −eb) and the end
+    // edge (c → b of the last: la ≥ −ea).
+    let first = (0..tris.len()).find(|&k| {
+        let t = &tris[k];
+        (t.1[0] - t.0[0]) as i64 * (t.2[1] - t.0[1]) as i64 != (t.1[1] - t.0[1]) as i64 * (t.2[0] - t.0[0]) as i64
+    });
+    let slack: Vec<(f64, f64)> = tris
+        .iter()
+        .enumerate()
+        .map(|(k, &(c, a, b, soft))| {
+            let eb = if Some(k) == first { let d = dist(b, c, a); if d > 0.0 { tol / d } else { 0.0 } } else { 0.0 };
+            let ea = if k == last && !soft { let d = dist(a, c, b); if d > 0.0 { tol / d } else { 0.0 } } else { 0.0 };
+            (ea, eb)
+        })
+        .collect();
+    let ww = w as usize * s;
+    for j in 0..h as usize * s {
+        for i in 0..ww {
+            let mut acc = [0f64; 4];
+            for sj in 0..N {
+                for si in 0..N {
+                    let px = (x0 as f64 + (i as f64 + (si as f64 + 0.5) / N as f64) / s as f64 - 0.5) * 16.0;
+                    let py = (y0 as f64 + (j as f64 + (sj as f64 + 0.5) / N as f64) / s as f64 - 0.5) * 16.0;
+                    for (k, &(c, a, b, soft)) in tris.iter().enumerate() {
+                        let det = ((a[0] - c[0]) as f64) * ((b[1] - c[1]) as f64) - ((a[1] - c[1]) as f64) * ((b[0] - c[0]) as f64);
+                        if det == 0.0 {
+                            continue;
+                        }
+                        let la = ((px - c[0] as f64) * (b[1] - c[1]) as f64 - (py - c[1] as f64) * (b[0] - c[0]) as f64) / det;
+                        let lb = ((a[0] - c[0]) as f64 * (py - c[1] as f64) - (a[1] - c[1]) as f64 * (px - c[0] as f64)) / det;
+                        let lc = 1.0 - la - lb;
+                        let (ea, eb) = slack[k];
+                        const E: f64 = 1e-9;
+                        if la < -E - ea || lb < -E - eb || lc < -E {
+                            continue;
+                        }
+                        let u = lc * c[2] as f64 + la * a[2] as f64 + lb * b[2] as f64;
+                        let v = lc * c[3] as f64 + la * a[3] as f64 + lb * b[3] as f64;
+                        let t = src.bilinear(u * src_scale as f64 / 16.0 - 0.5, v * src_scale as f64 / 16.0 - 0.5);
+                        let mut al = t[3] as f64;
+                        if soft {
+                            al *= (1.0 - lb).clamp(0.0, 1.0);
+                        }
+                        for ch in 0..3 {
+                            acc[ch] += t[ch] as f64 * al;
+                        }
+                        acc[3] += al;
+                        break;
+                    }
+                }
+            }
+            let n = (N * N) as f64;
+            if acc[3] > 0.0 {
+                p.px[j * ww + i] = [(acc[0] / acc[3]).round() as u8, (acc[1] / acc[3]).round() as u8, (acc[2] / acc[3]).round() as u8, (acc[3] / n).round().min(255.0) as u8];
+            }
+        }
+    }
 }
 
 /// A baked arc piece: its screen rect (units) and its PS2 / PC pictures.
@@ -2066,6 +2132,8 @@ pub mod menu {
             // Checked (decomp)). Owner, 2026-11-01: "in battle, the command menu still has a blue
             // tint".
             let mut gra = mpiece(&o[6], p2, 0, 0, ext, None);
+            // 1 unit higher, under the stripe (as the context tab's band).
+            gra.rect[1] -= 1;
             if let Some([r, g, b]) = over {
                 let a = (o[6].colours[1][3].clamp(0, 255)) as u32;
                 gra.grad = r.clamp(0, 255) as u32 | (g.clamp(0, 255) as u32) << 8 | (b.clamp(0, 255) as u32) << 16 | a << 24;
@@ -2126,7 +2194,11 @@ pub mod menu {
                 Some((top, bottom)) => (rgba(top, at), rgba(bottom, ab)),
             };
             let grad = if grad == colour { 0 } else { grad };
-            pieces.push(Piece { item, uv: [0, 0, u1 - u0 + 1, v1 - v0 + 1], rect: [x, y, x + w + dw, y + h + dh], colour, grad });
+            // The band (object 6) starts 1 unit higher, under the stripe (7, drawn after it): the
+            // PC atlas is filtered and the two meeting edge to edge left a light line between
+            // them (owner's screenshot, 2026-11-01: "a weird like line through the middle").
+            let up = if k == 6 { 1 } else { 0 };
+            pieces.push(Piece { item, uv: [0, 0, u1 - u0 + 1, v1 - v0 + 1], rect: [x, y - up, x + w + dw, y + h + dh], colour, grad });
         }
         groups.push(held1(pieces));
         // The Triangle: the PC's PlayStation glyph.

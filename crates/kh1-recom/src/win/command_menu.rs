@@ -647,7 +647,7 @@ impl Ui {
 
 /// H4: the KH1 look's groups when the KH1 HUD is up and its menu look was built.
 fn kh1_look() -> Option<&'static kh::MenuGroups> {
-    if !super::kh1_hud::active() {
+    if !super::kh1_hud::menu_on() {
         return None;
     }
     super::kh1_hud::manifest()?.menu.as_ref()

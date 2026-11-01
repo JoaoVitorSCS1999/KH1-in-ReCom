@@ -116,6 +116,9 @@ const MASK_ENEMY_GAUGE: u32 = 0x10;
 /// enemy HP gauges. Off: the owner's choice, 2026-11-01 ("lets just use Re:CoM's lock on
 /// graphics", "lets have Re:CoM's health bar", and the LOCK ON! plate removed too).
 const LOCKON_KH1: bool = false;
+/// KH1's LEVEL UP!! box (H8) instead of Re:CoM's popup. Off: "I want the ReCoM level up message
+/// instead of the KH1 level up hud" (owner, 2026-11-01).
+const LEVEL_UP_KH1: bool = false;
 const MASK_MINIMAP: u32 = 8;
 const C_SIZE: usize = 0x170;
 
@@ -189,6 +192,34 @@ pub fn active() -> bool {
     wanted() && HOOKED.load(Ordering::Relaxed) && !super::stats::riku_story()
 }
 
+/// The pieces chosen in the settings (`hud_kh1_*`, `hud_hide_*`).
+fn parts() -> crate::settings::HudParts {
+    super::settings().hud_parts
+}
+
+/// KH1's gauge cluster is drawn (`hud_kh1_gauge`): the MP bar and Re:CoM's HP gauge follow it.
+pub fn gauge_on() -> bool {
+    active() && parts().gauge
+}
+
+/// KH1's command menu look is drawn (`hud_kh1_menu`).
+pub fn menu_on() -> bool {
+    active() && parts().menu
+}
+
+/// Re:CoM's pieces hidden now: bit 1 the HP gauge, 2 the FRIENDS row, 4 the EXP / Moogle
+/// pop-ups (the prize gauge), 8 the minimap.
+fn hidden_bits() -> u32 {
+    if !active() {
+        return 0;
+    }
+    let p = parts();
+    (p.hide_hp as u32) | (p.hide_friends as u32) << 1 | (p.hide_prizes as u32) << 2 | (p.hide_minimap as u32) << 3
+}
+
+/// The minimap's hide bit is added (`hud_hide_minimap`), as last seen on an event.
+static MINIMAP_UP: AtomicBool = AtomicBool::new(false);
+
 /// Reads `kh1-hud.json` and hooks Re:CoM's HP setters (needs the MP bar's gauge wrappers,
 /// installed before).
 pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
@@ -235,7 +266,8 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
                 log("kh1 hud: lock-on marker not hooked; Re:CoM's cursor stays");
             }
         }
-        if MANIFEST.get().is_some_and(|m| m.level_up.is_some()) {
+        // H8 (KH1's LEVEL UP!!) is off: the owner chose Re:CoM's level-up message, 2026-11-01.
+        if LEVEL_UP_KH1 && MANIFEST.get().is_some_and(|m| m.level_up.is_some()) {
             let site = &crate::sites::KH1_HUD_POPUP_HOOKS[0];
             let h = [super::hook::Hook { site, ours: popup as *const () as usize, original: &ORIG_POPUP }];
             // SAFETY: as above.
@@ -275,9 +307,10 @@ pub unsafe fn gauge_made(gauge: usize, list: i32) {
         s.gauges.push((gauge, list));
     }
     build(gauge, list);
-    let on = active();
-    UP.store(on, Ordering::Relaxed);
-    recom_hud(gauge, on);
+    UP.store(active(), Ordering::Relaxed);
+    let bits = hidden_bits();
+    MINIMAP_UP.store(bits & 8 != 0, Ordering::Relaxed);
+    recom_hud(gauge, bits);
     if CHECKED.swap(true, Ordering::Relaxed) {
         return;
     }
@@ -594,6 +627,9 @@ impl Cluster {
 
     /// H6: Donald's and Goofy's gauges (hidden until Re:CoM has them out).
     unsafe fn party_build(&mut self) {
+        if !parts().party {
+            return;
+        }
         let Some(groups) = manifest().and_then(|m| m.party) else { return };
         for k in 0..2 {
             let Some(c) = new_ctrl() else { return };
@@ -661,7 +697,7 @@ unsafe fn view_of(gauge: usize) -> View {
 
 /// Builds the cluster on `gauge` (its init has run, on draw list `list`).
 unsafe fn build(gauge: usize, list: i32) {
-    if !active() || !set_ready() {
+    if !gauge_on() || !set_ready() {
         return;
     }
     let v = view_of(gauge);
@@ -1142,7 +1178,7 @@ pub unsafe fn destroy(gauge: usize) {
         }
     }
     if let Ok(mut t) = TINTED.lock() {
-        t.retain(|&g| g != gauge);
+        t.retain(|e| e.0 != gauge);
     }
     let Ok(mut s) = STATE.lock() else { return };
     s.gauges.retain(|g| g.0 != gauge);
@@ -1156,13 +1192,14 @@ pub fn refresh() {
     if manifest().is_none() {
         return;
     }
-    let on = active();
-    UP.store(on, Ordering::Relaxed);
+    UP.store(active(), Ordering::Relaxed);
+    let bits = hidden_bits();
+    MINIMAP_UP.store(bits & 8 != 0, Ordering::Relaxed);
     for (g, _) in STATE.lock().map(|s| s.gauges.clone()).unwrap_or_default() {
         // SAFETY: a live gauge.
-        unsafe { recom_hud(g, on) };
+        unsafe { recom_hud(g, bits) };
     }
-    if active() {
+    if gauge_on() {
         let missing: Vec<(usize, i32)> = STATE.lock().map(|s| s.gauges.iter().copied().filter(|g| !s.clusters.iter().any(|c| c.gauge == g.0)).collect()).unwrap_or_default();
         for (g, list) in missing {
             // SAFETY: a live gauge (its dtor removes it from the list).
@@ -1188,45 +1225,57 @@ unsafe fn tint(c: usize, alpha: f32) {
     func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, alpha]).0.as_ptr());
 }
 
-/// Gauges whose Re:CoM pieces we tinted (only those are ever written back: at `hud = recom`
-/// nothing of Re:CoM's is touched).
-static TINTED: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+/// Gauges whose Re:CoM pieces we tinted, with the bits tinted (only those are ever written
+/// back: at `hud = recom` nothing of Re:CoM's is touched).
+static TINTED: Mutex<Vec<(usize, u32)>> = Mutex::new(Vec::new());
 
-/// Re:CoM's HP gauge, FRIENDS row and prize gauge of `gauge`: colour alpha 0 (`hide`) or 1.
-unsafe fn recom_hud(gauge: usize, hide: bool) {
+/// Re:CoM's HP gauge (bit 1), FRIENDS row (2) and prize gauge (4) of `gauge`: colour alpha 0
+/// for the bits in `hide`, 1 for the ones we hid before and no longer hide.
+unsafe fn recom_hud(gauge: usize, hide: u32) {
     if !HOOKED.load(Ordering::Relaxed) {
         return;
     }
+    let hide = hide & 7;
     let Ok(mut t) = TINTED.lock() else { return };
-    let had = t.contains(&gauge);
+    let had = t.iter().find(|e| e.0 == gauge).map_or(0, |e| e.1);
     if hide == had {
         return;
     }
-    if hide {
-        t.push(gauge);
-    } else {
-        t.retain(|&g| g != gauge);
+    t.retain(|e| e.0 != gauge);
+    if hide != 0 {
+        t.push((gauge, hide));
     }
     drop(t);
-    let a = if hide { 0.0 } else { 1.0 };
-    tint(rd(gauge + G_HP_CTRL), a);
-    for (child, field, n) in HIDDEN_ARRAYS {
-        let o: usize = rd(gauge + child);
-        if o == 0 {
+    for bit in [1u32, 2, 4] {
+        if (hide ^ had) & bit == 0 {
             continue;
         }
-        let arr: usize = rd(o + field);
-        if arr == 0 {
+        let a = if hide & bit != 0 { 0.0 } else { 1.0 };
+        if bit == 1 {
+            tint(rd(gauge + G_HP_CTRL), a);
             continue;
         }
-        if n == 0 {
-            tint(arr, a);
-        } else if rd::<u64>(arr - 0x10) == n as u64 {
-            for k in 0..n {
-                tint(arr + k * C_SIZE, a);
+        for (child, field, n) in HIDDEN_ARRAYS {
+            if (bit == 2) != (child == G_FRIEND) {
+                continue;
             }
-        } else {
-            note(|| format!("{child:#x}/{field:#x}: {} controls, not {n}: not hidden", rd::<u64>(arr - 0x10)));
+            let o: usize = rd(gauge + child);
+            if o == 0 {
+                continue;
+            }
+            let arr: usize = rd(o + field);
+            if arr == 0 {
+                continue;
+            }
+            if n == 0 {
+                tint(arr, a);
+            } else if rd::<u64>(arr - 0x10) == n as u64 {
+                for k in 0..n {
+                    tint(arr + k * C_SIZE, a);
+                }
+            } else {
+                note(|| format!("{child:#x}/{field:#x}: {} controls, not {n}: not hidden", rd::<u64>(arr - 0x10)));
+            }
         }
     }
 }
@@ -1243,7 +1292,7 @@ pub unsafe extern "win64" fn enemy_gauge_mask(table: u32, index: u32) -> u32 {
 
 /// The minimap's mask reads: likewise with its bit.
 pub unsafe extern "win64" fn minimap_mask(table: u32, index: u32) -> u32 {
-    func::<GetFn>(VAR_GET)(table, index) | if UP.load(Ordering::Relaxed) { MASK_MINIMAP } else { 0 }
+    func::<GetFn>(VAR_GET)(table, index) | if MINIMAP_UP.load(Ordering::Relaxed) { MASK_MINIMAP } else { 0 }
 }
 
 /// Retargets the five mask reads to our getters (all or none; the getters pass Re:CoM's value

@@ -308,7 +308,7 @@ unsafe fn build(gauge: usize, list: i32) {
         }
     }
     // The KH1 HUD draws KH1's own MP ring instead (decision 39, H2).
-    if super::kh1_hud::active() {
+    if super::kh1_hud::gauge_on() {
         return;
     }
     let Some(view) = super::mp::current() else { return };
@@ -426,7 +426,7 @@ pub fn refresh() {
         return;
     }
     super::kh1_hud::refresh();
-    if super::kh1_hud::active() {
+    if super::kh1_hud::gauge_on() {
         // The KH1 HUD's MP ring replaces the bar.
         if let Ok(mut s) = STATE.lock() {
             for mut b in s.bars.drain(..) {

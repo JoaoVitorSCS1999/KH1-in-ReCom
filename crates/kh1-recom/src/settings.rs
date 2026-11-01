@@ -70,6 +70,64 @@ pub struct Settings {
     /// The HUD (decision 39): Re:CoM's, or KH1's elements drawn by Re:CoM from the `kh1hud` set
     /// (`kh1-hud.json`). Interim switch until the KH1 camp entry has its row (stage 7.13).
     pub hud: Mode,
+    /// Which KH1 HUD pieces show at `hud = kh1`, and which of Re:CoM's are hidden then (owner,
+    /// 2026-11-01: "I want to be able to pick and choose which elements i want").
+    pub hud_parts: HudParts,
+}
+
+/// The KH1 HUD's pieces (each only at `hud = kh1`). Defaults: the owner's picks, 2026-11-01.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HudParts {
+    /// KH1's gauge cluster (HP / MP rings, face, hurt face, low-HP flash, shake); off: Re:CoM's
+    /// HP gauge and the 7.x MP bar.
+    pub gauge: bool,
+    /// KH1's command menu look (panels, font, icons, the green Triangle tab); off: 7.3's look.
+    pub menu: bool,
+    /// Donald's and Goofy's KH1 gauges (drawn with the gauge cluster).
+    pub party: bool,
+    /// Re:CoM's HP gauge hidden.
+    pub hide_hp: bool,
+    /// Re:CoM's minimap hidden.
+    pub hide_minimap: bool,
+    /// Re:CoM's FRIENDS row hidden.
+    pub hide_friends: bool,
+    /// Re:CoM's EXP / NEXT LV / Moogle point pop-ups hidden.
+    pub hide_prizes: bool,
+}
+
+impl Default for HudParts {
+    fn default() -> Self {
+        HudParts { gauge: true, menu: true, party: true, hide_hp: true, hide_minimap: false, hide_friends: true, hide_prizes: false }
+    }
+}
+
+impl HudParts {
+    /// (ini key, value) for each piece, in the file's order.
+    pub fn keys(self) -> [(&'static str, bool); 7] {
+        [
+            ("hud_kh1_gauge", self.gauge),
+            ("hud_kh1_menu", self.menu),
+            ("hud_kh1_party", self.party),
+            ("hud_hide_recom_hp", self.hide_hp),
+            ("hud_hide_minimap", self.hide_minimap),
+            ("hud_hide_friends", self.hide_friends),
+            ("hud_hide_prizes", self.hide_prizes),
+        ]
+    }
+
+    fn set(&mut self, key: &str, v: bool) -> bool {
+        match key {
+            "hud_kh1_gauge" => self.gauge = v,
+            "hud_kh1_menu" => self.menu = v,
+            "hud_kh1_party" => self.party = v,
+            "hud_hide_recom_hp" => self.hide_hp = v,
+            "hud_hide_minimap" => self.hide_minimap = v,
+            "hud_hide_friends" => self.hide_friends = v,
+            "hud_hide_prizes" => self.hide_prizes = v,
+            _ => return false,
+        }
+        true
+    }
 }
 
 /// The languages the asset step writes KH1's menu words in.
@@ -120,7 +178,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, menu_language: "us".into(), hud: Mode::Recom }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
     }
 }
 
@@ -176,6 +234,20 @@ menu_language = us
 ;   recom: Re:CoM's HUD.
 ;   kh1:   KH1's HUD elements, drawn by Re:CoM (stage by stage; the rest stays Re:CoM's).
 hud = recom
+;
+; At hud = kh1, each piece on or off:
+;   hud_kh1_gauge: KH1's HP / MP rings and face (off: Re:CoM's HP gauge and the MP bar)
+;   hud_kh1_menu:  KH1's command menu look and green Triangle tab (off: the Re:CoM-styled menu)
+;   hud_kh1_party: Donald's and Goofy's KH1 gauges (shown with hud_kh1_gauge)
+;   hud_hide_recom_hp / hud_hide_minimap / hud_hide_friends / hud_hide_prizes: hide Re:CoM's
+;     HP gauge / minimap / FRIENDS row / EXP, NEXT LV and Moogle point pop-ups
+hud_kh1_gauge = on
+hud_kh1_menu = on
+hud_kh1_party = on
+hud_hide_recom_hp = on
+hud_hide_minimap = off
+hud_hide_friends = on
+hud_hide_prizes = off
 ";
 
 /// Parses the file. Unknown keys and bad values are reported and the default kept.
@@ -256,6 +328,11 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(m) => s.hud = m,
                 None => warnings.push(bad("hud must be recom or kh1")),
             },
+            k if k.starts_with("hud_") => match parse_switch(v) {
+                Some(b) if s.hud_parts.set(k, b) => {}
+                Some(_) => warnings.push(bad(&format!("unknown key `{k}`"))),
+                None => warnings.push(bad(&format!("{k} must be on or off"))),
+            },
             "combo_master" => match parse_switch(v) {
                 Some(b) => s.abilities.combo_master = b,
                 None => warnings.push(bad("combo_master must be on or off")),
@@ -320,7 +397,11 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "debug_attack", switch_str(s.debug_attack));
     let t = set_key(&t, "kh1_all_spells", switch_str(s.kh1_all_spells));
     let t = set_key(&t, "menu_language", &s.menu_language);
-    set_key(&t, "hud", s.hud.as_str())
+    let mut t = set_key(&t, "hud", s.hud.as_str());
+    for (k, v) in s.hud_parts.keys() {
+        t = set_key(&t, k, switch_str(v));
+    }
+    t
 }
 
 #[cfg(test)]
@@ -381,7 +462,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, menu_language: "fr".into(), hud: Mode::Kh1 };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -462,6 +543,13 @@ mod combo_tests {
         assert_eq!((c.combo_plus, c.air_combo_plus, c.combo_master), (2, 1, true));
         let back = parse(&store(DEFAULT_FILE, &s)).0;
         assert_eq!(back.abilities, s.abilities);
+    }
+
+    #[test]
+    fn hud_parts_default_and_parse() {
+        assert_eq!(parse(DEFAULT_FILE).0.hud_parts, HudParts::default());
+        let (s, w) = parse("hud_kh1_gauge = off\nhud_hide_minimap = on\nhud_bogus = on\n");
+        assert_eq!((s.hud_parts.gauge, s.hud_parts.hide_minimap, w.len()), (false, true, 1));
     }
 
     #[test]
