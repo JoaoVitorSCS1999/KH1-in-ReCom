@@ -60,6 +60,7 @@ pub mod command_menu;
 pub mod customize;
 pub mod d2;
 pub mod deck;
+pub mod drops;
 pub mod guard;
 pub mod hookplan;
 pub mod items;

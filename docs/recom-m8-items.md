@@ -7,7 +7,7 @@ Re:CoM's item cards heal no HP). This stage: KH1's Items list in the command men
 stock in our save block, and the use, run by Re:CoM's own item action `0xE`. Not in this stage: the
 camp Items page (8a.2, [below](#stage-8a2-kh1s-items-page-in-the-kh1-camp-entry)), the shop (8a.3,
 [below](#stage-8a3-kh1s-items-in-recoms-moogle-shop-not-built-findings-and-options)), the drops
-(8a.4).
+(8a.4, [below](#stage-8a4-kh1s-item-drops-from-enemies)).
 
 At Combat = KH1, in Sora's story, field and battle. At Combat = Re:CoM, or in Riku's story, nothing
 of this runs: Re:CoM's item cards are untouched (our `exeItem` hook passes them through).
@@ -473,3 +473,220 @@ Also to decide with the owner:
    / Camping Set / accessories have no Re:CoM use yet.
 3. **Where it goes**: KH1's buy rule (quantity, then a slot or the stock) or the brief's `pick_up`
    rule (first empty slot, else the stock).
+
+---
+
+## Stage 8a.4: KH1's item drops from enemies
+
+Ask (M8 plan row 8a.4; owner's M7–M9 choice "dropped by enemies (KH1's rates)"): when a Re:CoM
+enemy is defeated at Combat = KH1 in Sora's story, roll its KH1 twin's item drops as KH1 does and
+make each item a prize through Re:CoM's own prize system; its pickup is KH1's rule (`pick_up`).
+Enemies without a twin drop nothing. The Re:CoM setting is untouched.
+
+Code: `crates/kh1-recom/src/drops.rs` (KH1's roll, the new prize kind, the look row, the prize
+descriptor; tested), `src/win/drops.rs` (Re:CoM's side), `src/attack.rs` (`Kh1Stats::drops`, the
+stats file's `drops`), `src/win/stats.rs` (`drops(enemy)`), `src/win/hook.rs` (`place_data_near`).
+Asset step: `kh1-recom-assets` `stats` (`Twin::drops`, `DropTable`, `drop_table`,
+`drop_offset_for`; `kh1-stats.json` format 6).
+
+### KH1 (Steam)
+
+| what | where | tag |
+|---|---|---|
+| **The drop**: an enemy's AI script, on defeat, hands its prize table and its position to syscall **122** (`0x1402BC640`, `param_3` = `0x14298C9A0 ≠ 0`) or **215** (`0x1402BC6B0`, `param_3` = 1); both call `0x1402ABC40(table, position, param_3)` (syscall table `0x140529180` entries 122 / 215, 2 arguments). | `0x1402BC640`, `0x1402BC6B0` | Checked (decomp + exe) |
+| **`0x1402ABC40`**: nothing while `0x142D60FAC` ≠ 0 (set by `0x1402AB8E0`; its meaning not read); seven i32 prize counts at `+0x00..+0x1B` (each × the Jackpot factor `0x142D60FA4`, HP / MP / munny orbs from the prize pool `0x142D60FB0`); then **three (f32 chance, i32 item) pairs** at `+0x1C`, `+0x24`, `+0x2C`, in order: `movss xmm6,[0x142D60FA8]; mulss xmm6,[rbx−4]; call 0x1401E0EB0; comiss xmm6,xmm0; jbe` → the item `0x1402BFF00(item, position, param_3)` when **random < chance × Lucky Strike**. One random draw per pair. | `0x1402ABC40` (`0x1402ABE50..0x1402ABE7C`) | Checked (decomp + exe) |
+| **Random** `0x14031BA30`: three `rand()` bytes → a 24-bit integer × 2^−24 (5.96e−8): [0, 1). | `0x14031BA30` | Checked (decomp) |
+| **Lucky Strike** `0x142D60FA8` = 1 + 0.5 × `0x140284BE0(0x1C, member)` per party member (`0x1402A6380`; the Jackpot factor the same with `0x1B`). The ability names are an Assumption (the brief's). | `0x1402A6380` | Checked (decomp) |
+| **The item** `0x1402BFF00`: at most 8 dropped items (`0x142DE8E20`, 0x50 each; with 8 out, the oldest is removed); the model from the item row's byte 3; a random scatter. They don't time out. | `0x1402BFF00`, `0x1402C0160` | Checked (decomp) |
+| **The pickup** `0x1402C08D0`: `0x140284E60(item, Sora's member)` (8a.1's rule); taken → the "obtained" window `0x140273410` and sound `0x1B`; refused → the "full" notice and a retry every 60 frames (the item stays). | `0x1402C08D0` | Checked (decomp) |
+| **Objects** (barrels, pots) drop through `0x1402AB940` from `map_prize.bin` (13-byte rows: 7 count bytes, 3 × (chance %, item)), not enemies. Not built (no Re:CoM objects). | `0x1402AB940`, `0x1402ABBB0` | Checked (decomp) |
+
+### Where each twin's table is. Checked (files)
+
+The table is script data: the defeat routine pushes its address (`pusha pc:X`, the word `0x00E2`)
+and calls a 2-argument subroutine that runs `sys32` (the actor's position) then `sys122`. Found by
+evaluating each twin's script (the research notes' VM, `/home/claude/re/scratch/estats`, extended
+to stop at syscall 122 / 215; outside the repo) from every routine that reaches a `sys122`, for
+every KH1 world × room 0..63 × variant 0..25 × LV1 / LV2. **The defeat path is the one that also
+runs `sys167` (EXP on defeat).** No table depends on the LV2 bit; only the Shadow's depends on
+the world.
+
+| twin | table | KH1 battle items (rate) | other KH1 items (not made here) |
+|---|---|---|---|
+| Shadow | `0xA44`; Destiny Islands `0xAAC`; Dive to the Heart `0xA78`; End of the World rooms ≥ 37 `0xAE0` | Potion 1 %; Destiny Islands Potion 5 %; Dive none | #233 3 % |
+| Soldier | `0x38C` | Potion 2 % | #17 1 %, #236 6 % |
+| Large Body | `0x3FC` | Hi-Potion 4 % | #18 1 %, #236 10 % |
+| Red Nocturne | `0x2AC` | Ether 1 % | #21 0.5 %, #241 6 % |
+| Blue Rhapsody | `0x23C` | Ether 1 % | #24 0.5 %, #243 12 % |
+| Yellow Opera | `0x2AC` | Ether 1 % | #27 0.5 %, #245 6 % |
+| Green Requiem | `0x15C` | Ether 4 % | #18 0.5 %, #248 10 % |
+| Powerwild | `0x3FC` | Potion 2 % | #18 0.5 %, #238 4 % |
+| Bouncywild | `0x23C` | Hi-Potion 2 % | #18 1 %, #238 8 % |
+| Air Soldier | `0x54C` | Potion 2 %, Hi-Potion 1 % | #237 4 % |
+| Bandit | `0x46C` | Potion 2 % | #18 0.5 %, #242 4 % |
+| Fat Bandit | `0x3FC` | Hi-Potion 4 % | #22 1 %, #242 8 % |
+| Barrel Spider | `0x70C` | – | #142 1 %, #143 0.5 %, #253 1 % |
+| Search Ghost | `0x54C` | Hi-Potion 2 %, Mega-Potion 1 % | #249 4 % |
+| Pirate | `0x54C` | Hi-Potion 2 %, Mega-Potion 1 % | #239 4 % |
+| Air Pirate | `0x1CC` | Hi-Potion 2 %, Mega-Potion 1 % | #239 4 % |
+| Wight Knight | `0x5BC` | Hi-Potion 1 %, Mega-Potion 0.5 % | #234 2 % |
+| Gargoyle | `0x4DC` | Ether 1 %, Mega-Ether 0.5 % | #234 2 % |
+| Darkball | `0x2A8` (End of the World ≥ 37: `0x2DC`) | Hi-Potion 1 % | #235 1 % |
+| Defender | `0x46C` | Elixir 1 % | #131 0.2 %, #250 2 % |
+| Wizard | `0x38C` | Ether 2 % | #115 0.2 %, #247 2 % |
+| Sea Neon | `0x23C` | Ether 0.5 % | #25 0.1 %, #244 2 % |
+| Aquatank | `0x31C` | Ether 4 % | #25 1 %, #244 8 % |
+| Screwdiver | `0x31C` | Mega-Potion 4 % | #28 1 %, #246 8 % |
+| Wyvern | `0x31C` | Hi-Potion 2 %, Elixir 0.5 % | #240 2 % |
+| Black Fungus | `0x1D0` (all zero) | – | – |
+| Creeper Plant | `0x4DC` (End of the World ≥ 37: `0x510`) | Hi-Potion 2 % | #252 4 % |
+| Neoshadow | `0x2E4` | – | #16 35 % |
+| White Mushroom, Spade / Heart Card Soldier | none | – | – |
+
+- Re:CoM worlds KH1 lacks (Twilight Town, Castle Oblivion) take the general table (the tables
+  don't depend on LV2). End of the World and Dive to the Heart are no Re:CoM world, so their
+  tables are never used.
+- **Second tables, not the defeat**: Powerwild `0x430` / Bouncywild `0x270` (20 HP and 5 MP
+  orbs, Ether 20 %, Mega-Ether 4 %) are handed over by a routine with no EXP (what triggers it is
+  not read); White Mushroom's only table `0x254` (#159 100 %) likewise; Black Fungus's `0x204` /
+  `0x238` / `0x26C` go by the finishing move (its spell game). Not built (owner question 2).
+- Item rows (btltbl `0x1A58`): 1..8 battle items (kind 0); 9..16 kind 13; 17..29 kind 1
+  (accessories); 142 / 143 kind 12 (Tents); 233..255 kind 13 (synthesis materials). Checked (files).
+
+### Re:CoM (Steam)
+
+| what | where | tag |
+|---|---|---|
+| **Defeat prizes** (`0x14017BBC0` and the linked-part path `0x140181300`; skipped with `+0x260` bit 22): the EXP orbs `0x1401810A0`, the roulette prizes `0x140186480` (0xD6) / `0x1401867F0` (0xD7), then **the card prize `0x140180D20(enemy, &point)`** last. Its card drops only when `0x1401860A0` allows (the manager's enemy count at 0, or a test on its `+0xF4` object; not read further), but it is called on every defeat; every prize of Re:CoM's needs the enemy's `@ENP` row `+0x310`. | `0x14017BBC0`, `0x140181300`, `0x140180D20` | Checked (decomp) |
+| **Prize descriptor** (the EXP drop's, `0x14018112D..`): `+0x00` the point, `+0x10` angles (pitch = (−70 − r × 10)°, yaw = r × 360°, 0, 1; `0x140293F20` normalises them), `+0x20` kind, `+0x24` argument, `+0x28` speed 0.25, `+0x2C` 1. Random `0x14029CF00` = u32 × 2^−32. Then `0x1401A89C0(0x1401A8A80(), &desc, 0)`. | `0x1401810A0` | Checked (decomp + exe) |
+| **`CPrize`** (factory `0x1401A89C0`: 0x300 bytes, ctor `0x14022E8D0`, init `0x1402315B0`; parent: the battle manager task 0x19 when there is one). Init: `+0x244` kind, `+0x248` argument, `+0x24C` speed; kinds ≥ 0xCB: the look from **`0x1405B3150[kind − 0xCB]`** (16-byte rows: the set name `rec_prise`, effect id, scale; 13 rows) and the state machine **`0x140231010`**. | `0x1402315B0` | Checked (decomp + exe) |
+| **`0x140231010`**: state 0: 30000 ticks (10 s) on the ground, then a 1500-tick fade and gone; collected when Sora comes in range (`0x140230C70`) → state 1: flies to him, the pickup sound `0x140230F00` (0xCB..0xD5 their own, **any other kind 6**), at the end the reward `0x140230F90` → **`0x1401F4AB0(kind, +0x248, 1)`**; then gone. The bounce sound `0x140230E70` only for 0xCB..0xD5. | `0x140231010` | Checked (decomp + exe) |
+| **Prize add `0x1401F4AB0`**: kinds ≤ 0xCA cards; 0xCB..0xD7 a switch (`add r9d,−0xCB; cmp r9d,0xC; ja default`): EXP, HP, Moogle points, the roulette flags; **above 0xD7: the default, nothing**. | `0x1401F4AB0`, `0x1401F503D` | Checked (decomp + exe) |
+| The look rows (kinds 0xCB..0xD7 → `rec_prise` ids 8, 7, 0, 0xA, 9, 1, 2, 0xB, 3, 0xC, 4, 5, 6; scales 0.25..0.425). The 16 bytes after them (`0x1405B3220`) are other data (`0x140220000.c` reads them as floats): the table can't grow in place. Only `0x1402315B0` and `0x1402306D0` (uncalled) index it. | `0x1405B3150` | Checked (exe + decomp) |
+| **No item notice**: Re:CoM shows a card got (`0x14020D940`, cards only) or a heal's "Recover"; it has no notice for anything else a prize gives. | `0x1401F4AB0` | Checked (decomp) |
+
+### What runs (at the KH1 setting)
+
+1. **The look row** (once, at start): Re:CoM's 13 look rows are copied (each checked to name
+   `rec_prise`) with a 14th row after them, kind **0xD8**'s, a copy of **0xD6's** row (`rec_prise`
+   effect 5, scale 0.25); the copy sits within rel32 reach and the two `lea rax,[rip+…]`
+   (`0x140231676` in the prize init, `0x140230700` in its uncalled look set-up) point at it.
+   Re:CoM's kinds read the same rows as before (at either setting).
+2. **The roll** (wrapper on `0x140180D20`, after Re:CoM's own): at Combat = KH1 in Sora's story,
+   for an enemy with an `@ENP` row whose class has a KH1 twin with a table for Re:CoM's current
+   world: KH1's roll (one Re:CoM random float a pair, in order; drops when below chance × Lucky
+   Strike = 1, no ability yet).
+3. **The prize**: each **battle item** that drops (Potion … Megalixir; other KH1 items are logged,
+   not made) is made by Re:CoM's factory at the enemy's prize point, launched as Re:CoM's EXP
+   orbs are, kind 0xD8, argument = KH1's item id. Re:CoM steps, draws, collects, times out and
+   deletes it (`0x140231010`), as a child of the battle manager like its other prizes, so a battle
+   ends as it does with EXP orbs (collected or 10.5 s at most).
+4. **The pickup** (wrapper on `0x1401F4AB0`): kind 0xD8 → `win::items::pick_up(item)` (KH1's
+   `0x140284E60`: the first empty slot, else the stock below 99); every other kind → Re:CoM's.
+   Re:CoM's pickup sound (6, the cards') plays in its own state machine. No notice (Re:CoM has
+   none for this; KH1's "obtained" window is out of scope).
+
+### Sites (`sites::DROP_*`, bytes from the Steam exe)
+
+| address | bytes | use |
+|---|---|---|
+| `0x140180D20` defeat card prize | `40 55 56 57 48 8D 6C 24 B9` | **hooked** (push rbp; push rsi; push rdi; lea rbp,[rsp−0x47]) |
+| `0x1401F4AB0` prize add | `48 89 5C 24 10 57 48 83 EC 30` | **hooked** (mov [rsp+0x10],rbx; push rdi; sub rsp,0x30) |
+| `0x140231676` prize init's look `lea` | `48 8D 05 D3 1A 38 00` | patched: → the table copy |
+| `0x140230700` look set-up's `lea` | `48 8D 05 49 2A 38 00` | patched: → the table copy |
+| `0x1401A89C0` prize factory | `40 57 48 83 EC 30 48 C7 44 24 20 FE FF FF FF` | called |
+| `0x140293F20` angle normalise | `40 53 48 83 EC 20 F3 0F 10 01 48 8B D9` | called |
+| `0x14029CF00` random float | `48 83 EC 28 E8 C7 FE FF FF 0F 57 C0 8B C0 F3 48 0F 2A C0` | called |
+| `0x140231664`, `0x14023167D`, `0x1402316D6`, `0x1402306F9`, `0x140230707` | the look index / row reads | checked only |
+| `0x140230F90` reward (40 bytes), `0x1401F503D` the add's switch (17), `0x140230E70` / `0x140230F00` the sound switches (20 / 22), `0x14018112D` the EXP drop's descriptor (20) | | checked only |
+
+The entity factory getter `0x1401A8A80` was already checked (`MAGIC_CALLEES`). All 393 site byte
+sets compared with `recomsteam.exe` (pefile, `python3 -I`): 0 mismatches. Read at run time: the 13
+look rows (each must name `rec_prise`).
+
+### Per frame
+
+Nothing. The roll runs once per enemy defeat (a class lookup and three random draws), the pickup
+once per collected prize (one compare for every other prize kind).
+
+### Logs
+
+- Start: `drops: KH1's item drops (M8 stage 8a.4) at combat = kh1 in Sora's story: N twin classes
+  with KH1 defeat tables; …; Re:CoM prize kind 0xd8 (look: kind 0xd6's rec_prise row, table at
+  0x…)`, the two `hooked …` lines. Without format 6: `drops:
+  kh1-stats.json has no drop tables (format 6: re-run kh1-recom-build); no KH1 drops`.
+- Up to 120 lines: `drops: CEnemySoldier (world 1; potion 2%, #17 1%, #236 6%): potion dropped
+  at (x, y, z): prize 0x…`, `… KH1 item #236 dropped; not one of the mod's items: no prize`,
+  `… refused …: lost`; and 8a.1's `items: potion picked up (enemy drop): slot 2`.
+- The battle-end log (Stage 75) lists a waiting prize's kind: `kind 0xd8` is ours.
+
+### 1:1 checks
+
+- **Checked (decomp + exe)**: the table layout, the roll (one draw a pair, in order, strictly
+  below chance × Lucky Strike, Lucky Strike 1 without the ability), the pickup rule; replayed by
+  `drops::tests` (the Air Soldier's table, Lucky Strike, the rate over 10 000 uniform draws = the
+  chance).
+- **Checked (files)**: every twin's defeat table, read from the session's KH1 files and validated
+  as the asset step does (the script pushes it, counts 0..255, chances 0..1, items 0..255);
+  `stats::tests` on synthetic scripts.
+- **Not checked**: in game; KH1's random generator is not reproduced (Re:CoM's random float
+  instead; the rates are KH1's, not the sequence).
+
+### Not KH1's (by design or yet)
+
+1. **The look**: Re:CoM's `rec_prise` effect of the rare roulette prize (0xD6), not KH1's item
+   model. Re:CoM has no item prize. **Assumption** that it reads as an item (owner question 1).
+2. **The scatter and the life**: Re:CoM's launch (as its EXP orbs) and Re:CoM's 10 s on the
+   ground, then gone; KH1's items scatter its own way, stay until picked up, at most 8 at once.
+3. **Refused pickup** (stock at 99 and every slot full): the prize is gone (Re:CoM collects a
+   prize once); KH1 leaves it on the ground with a "full" notice.
+4. **No "obtained" notice** (Re:CoM has none for this; KH1's window is out of scope), and the
+   pickup sound is Re:CoM's (6), not KH1's `0x1B`.
+5. **Only battle items** are made: KH1's other drops (synthesis materials, accessories, Tents, the
+   rare #115 / #131, #16) have no place in the mod yet (rolled, logged, not made).
+6. **Boss twins drop nothing** (their KH1 tables, e.g. Trickmaster's and Parasite Cage's
+   `sys122` calls, were not read; owner question 3); proxies (enemies without a twin) drop
+   nothing (the brief).
+7. KH1's prize counts (HP / MP / munny orbs) are not used: Re:CoM's own EXP / HP / Moogle prizes
+   stay Re:CoM's.
+8. A drop happens on every defeat path Re:CoM gives prizes on (`+0x260` bit 22 clear and an
+   `@ENP` row); KH1 skips drops while `0x142D60FAC` is set (meaning not read).
+
+### Assumptions
+
+1. 0xD6's look reads as "an item" (Re:CoM's `rec_prise.dpx` not seen).
+2. Re:CoM never makes a prize of kind 0xD8 itself (its prize add has no case and its look table no
+   row above 0xD7: Checked (exe); the factory's 40 callers' kinds and the event VM's prize ids
+   were not all read).
+3. The ability names Lucky Strike (`0x1C`) / Jackpot (`0x1B`) (the brief's; the factors are
+   Checked).
+4. The tables' meaning "defeat" = the path that also grants EXP (`sys167`).
+
+### Open questions (owner)
+
+1. **The look**: (a) 0xD6's `rec_prise` effect (built); (b) 0xD7's (effect 6); (c) an HP orb's
+   look tinted (needs new effect data); (d) KH1's item models, converted at the asset step (a new
+   effect / model resource for Re:CoM; larger).
+2. **Powerwild / Bouncywild's second tables** (Ether 20 % with HP / MP orbs, not on defeat): (a)
+   leave out (built); (b) research when KH1 hands them over and build it.
+3. **Bosses with a KH1 equivalent**: (a) no drops (built); (b) their KH1 defeat tables (to read).
+4. **Non-battle items** (synthesis materials etc.): (a) not made until the mod has them (built);
+   (b) keep them in the stock bytes for later (the save extension holds ids 1..16 only).
+
+### What the owner should test
+
+Re-run the asset step (`kh1-recom-build`, same command): `kh1-stats.json` must say `stats 6`, and
+the console lists `drops <class> : items …` lines. Combat = KH1, Sora's story.
+
+1. Log: the `drops: KH1's item drops …` start line (with the table's address), `hooked defeat card
+   prize`, `hooked prize add`.
+2. Fight Soldiers / Air Soldiers / Large Bodies until something drops (1–4 % each: about one in
+   30–50 defeats): a `rec_prise` effect pops out where the enemy fell, among the EXP orbs. Log
+   `drops: … potion dropped …`.
+3. Walk into it: Re:CoM's pickup sound, then the Items list (or the camp's Items page) has it
+   (first empty slot, else the stock). Log `items: potion picked up (enemy drop): slot …`.
+4. Leave one on the ground: it fades after about 10 s; the battle ends normally (Sora returns to
+   the field), whether picked up or not. If Sora freezes at the battle end, send the log (the
+   battle-end lines list each waiting `CPrize` with its kind).
+5. Fill all slots and 99 of an item in stock, pick that item up: log `refused … lost`.
+6. Combat = Re:CoM: no item prizes; EXP / HP / Moogle prizes and card drops as before.

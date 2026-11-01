@@ -272,3 +272,26 @@ fn post_hit_hold_leaves_thirty_frames() {
     // Re:CoM's revive timer is never shortened.
     assert_eq!(post_hit_hold(3000, 50), 3000);
 }
+
+#[test]
+fn stats_v6_reads_the_twins_drops() {
+    // The asset step's shape (`kh1-recom-assets` `stats::drops_json`): 13 worlds of three pairs;
+    // Destiny Islands (12) differs, as the Shadow's does.
+    let world = |c: &str| format!("[[{c}, 1], [0, 0], [0.03, 233]]");
+    let drops = (1..=13).map(|w| world(if w == 12 { "0.05" } else { "0.01" })).collect::<Vec<_>>().join(", ");
+    let t = stats_v5().replace("stats 5", "stats 6").replace(r#""recom_id": 1, "#, &format!(r#""recom_id": 1, "drops": [{drops}], "#));
+    let s = parse_stats(&t).unwrap();
+    let tt = s.drops("CEnemyShadow", 1).unwrap();
+    assert_eq!(tt.len(), 3);
+    assert_eq!((tt[0].chance, tt[0].item, tt[2].chance, tt[2].item), (0.01, 1, 0.03, 233));
+    assert_eq!(s.drops("CEnemyShadow", 12).unwrap()[0].chance, 0.05);
+    // No twin, no world, or an older file: no drops.
+    assert!(s.drops("CEnemySoldier", 1).is_none());
+    assert!(s.drops("CEnemyShadow", 0).is_none() && s.drops("CEnemyShadow", 14).is_none());
+    assert!(parse_stats(&stats_v5()).unwrap().drops("CEnemyShadow", 1).is_none());
+    // Refused: 12 worlds, a chance above 1, a fractional item.
+    let short = (1..=12).map(|_| world("0.01")).collect::<Vec<_>>().join(", ");
+    assert!(parse_stats(&stats_v5().replace(r#""recom_id": 1, "#, &format!(r#""recom_id": 1, "drops": [{short}], "#))).unwrap_err().contains("12 worlds"));
+    assert!(parse_stats(&t.replace("[0.05, 1]", "[1.5, 1]")).is_err());
+    assert!(parse_stats(&t.replace("[0.05, 1]", "[0.05, 1.5]")).is_err());
+}

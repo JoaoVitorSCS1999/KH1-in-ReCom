@@ -13,8 +13,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Executable memory within rel32 reach below `near`.
 unsafe fn alloc_near(near: usize) -> Option<usize> {
+    alloc_near_len(near, hookplan::BLOCK)
+}
+
+/// `len` bytes of memory within rel32 reach below `near`.
+unsafe fn alloc_near_len(near: usize, len: usize) -> Option<usize> {
     for at in hookplan::near_candidates(near as u64) {
-        let p = VirtualAlloc(at as *mut c_void, hookplan::BLOCK, MEM_COMMIT_RESERVE, PAGE_EXECUTE_READWRITE);
+        let p = VirtualAlloc(at as *mut c_void, len, MEM_COMMIT_RESERVE, PAGE_EXECUTE_READWRITE);
         if !p.is_null() {
             return Some(p as usize);
         }
@@ -31,6 +36,17 @@ pub unsafe fn place_near(near: usize, code: &[u8]) -> Option<usize> {
     let block = alloc_near(near)?;
     std::ptr::copy_nonoverlapping(code.as_ptr(), block as *mut u8, code.len());
     FlushInstructionCache(GetCurrentProcess(), block as *const c_void, code.len());
+    Some(block)
+}
+
+/// Places `data` (a table Re:CoM's code reads through a rip-relative operand) within rel32 reach
+/// of `near`; its address. Never freed (Re:CoM reads it at any time).
+pub unsafe fn place_data_near(near: usize, data: &[u8]) -> Option<usize> {
+    if data.is_empty() || data.len() > 0x1000 {
+        return None;
+    }
+    let block = alloc_near_len(near, data.len())?;
+    std::ptr::copy_nonoverlapping(data.as_ptr(), block as *mut u8, data.len());
     Some(block)
 }
 

@@ -7,6 +7,7 @@ mod command_menu;
 mod crash;
 mod d2;
 mod deck;
+mod drops;
 mod guard;
 mod hook;
 mod items;
@@ -273,6 +274,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         }
         install_magic(base);
         install_items(base, s);
+        install_drops(base);
         install_unlocks(base);
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
@@ -323,6 +325,37 @@ fn install_items(base: usize, s: &Settings) {
         log(&items::start_line());
     } else {
         log("items: exeItem not hooked; no KH1 items (the Field case stays patched but is not reached: Re:CoM never uses items in the field)");
+    }
+}
+
+/// M8 stage 8a.4 (`drops`): KH1's item drops from enemies as a new Re:CoM prize kind. Needs the
+/// items (the pickup puts the item in Sora's slots / stock) and the stats file's drop tables
+/// (format 6). The look row first (harmless alone: Re:CoM's kinds read the same rows), then the
+/// two wrappers, all or nothing.
+fn install_drops(base: usize) {
+    if !items::installed() {
+        log("drops: KH1 items not installed; no KH1 drops");
+        return;
+    }
+    if stats::drop_classes() == 0 {
+        log("drops: kh1-stats.json has no drop tables (format 6: re-run kh1-recom-build); no KH1 drops");
+        return;
+    }
+    // SAFETY: reads of the mapped exe; data patches with checked old values.
+    if !unsafe { drops::install(base) } {
+        return;
+    }
+    let site = |name: &str| crate::sites::DROP_HOOKS.iter().find(|h| h.name == name).expect("site");
+    let hooks = [
+        hook::Hook { site: site("defeat card prize (0x140180D20)"), ours: drops::defeat_prize as *const () as usize, original: &drops::ORIG_DEFEAT_PRIZE },
+        hook::Hook { site: site("prize add (0x1401F4AB0)"), ours: drops::prize_add as *const () as usize, original: &drops::ORIG_PRIZE_ADD },
+    ];
+    // SAFETY: the targets' bytes are checked again inside, before anything is written.
+    if unsafe { hook::install_all(base, &hooks) } {
+        drops::mark_installed();
+        log(&drops::start_line());
+    } else {
+        log("drops: not hooked; no KH1 drops (the look table copy stays: Re:CoM's kinds read the same rows)");
     }
 }
 

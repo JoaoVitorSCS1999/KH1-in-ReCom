@@ -187,6 +187,22 @@ fn twin(enemy: usize) -> Option<(&'static str, &'static EnemyStats)> {
     Some((class, t))
 }
 
+/// The KH1 twin's defeat drops for this enemy (M8 stage 8a.4): its class's table for Re:CoM's
+/// current world (format 6), with the class for the log. None: Riku's story, no twin, no table.
+pub fn drops(enemy: usize) -> Option<(&'static str, i32, &'static [crate::drops::Drop])> {
+    let class = class_of(enemy)?;
+    if riku_story() {
+        return None;
+    }
+    let w = world();
+    Some((class, w, STATS.get()?.drops(class, w)?))
+}
+
+/// Twin classes with drop tables in the stats file (for the start line).
+pub fn drop_classes() -> usize {
+    STATS.get().map_or(0, |s| s.drops.len())
+}
+
 /// The KH1 twin's lock-point radius (KH1 units) for this enemy, where its twin applies (KH1's
 /// ground picker subtracts it from the distance, `0x1402A7320`). Assumption: the twin's actor
 /// scale (KH1 actor `+0x40`) is 1.0.

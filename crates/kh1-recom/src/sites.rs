@@ -982,6 +982,67 @@ pub const ITEM_PAGE_CALLEES: &[Site] = &[
     Site { name: "player -> save stats (0x1401F0120)", rva: 0x001F_0120, expect: &[0x48, 0x83, 0xEC, 0x28, 0x48, 0x8B, 0x05, 0x65, 0xB2, 0x68, 0x00, 0x48, 0x85, 0xC0, 0x75, 0x05] },
 ];
 
+/// KH1's item drops from enemies (M8 stage 8a.4, `win::drops`, `docs/recom-m8-items.md` § Stage
+/// 8a.4). Same rule as [`HOOKS`].
+pub const DROP_HOOKS: &[Site] = &[
+    // push rbp; push rsi; push rdi; lea rbp,[rsp-0x47]: the card prize at an enemy's defeat
+    // `0x140180D20(enemy, &prize point)`, called last by every defeat path (`0x14017BBC0`,
+    // `0x140181300`, `0x1401832F0`) after the EXP / roulette prizes.
+    Site { name: "defeat card prize (0x140180D20)", rva: 0x0018_0D20, expect: &[0x40, 0x55, 0x56, 0x57, 0x48, 0x8D, 0x6C, 0x24, 0xB9] },
+    // mov [rsp+0x10],rbx; push rdi; sub rsp,0x30: the prize add `0x1401F4AB0(kind, arg, mode)`,
+    // which a collected prize's reward `0x140230F90` tail-calls.
+    Site { name: "prize add (0x1401F4AB0)", rva: 0x001F_4AB0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x30] },
+];
+
+/// The two `lea rax,[rip+…]` that load Re:CoM's prize look table (`0x1405B3150`): retargeted at
+/// the same table with the KH1 item row after Re:CoM's 13 (`crate::drops::look_table`).
+pub const DROP_DATA: &[Site] = &[
+    Site { name: "prize init: look table lea (0x140231676)", rva: 0x0023_1676, expect: &[0x48, 0x8D, 0x05, 0xD3, 0x1A, 0x38, 0x00] },
+    Site { name: "prize look set-up: look table lea (0x140230700)", rva: 0x0023_0700, expect: &[0x48, 0x8D, 0x05, 0x49, 0x2A, 0x38, 0x00] },
+];
+
+/// Re:CoM functions a drop calls (as the EXP drop `0x1401810A0` does). The entity factory getter
+/// `0x1401A8A80` is [`MAGIC_CALLEES`]'.
+pub const DROP_CALLEES: &[Site] = &[
+    // push rdi; sub rsp,0x30; mov qword [rsp+0x20],-2: the prize factory (0x300-byte CPrize,
+    // ctor 0x14022E8D0, init 0x1402315B0; parent: the battle manager task 0x19).
+    Site { name: "prize factory (0x1401A89C0)", rva: 0x001A_89C0, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF] },
+    // push rbx; sub rsp,0x20; movss xmm0,[rcx]; mov rbx,rcx: the angle pair's normaliser.
+    Site { name: "angle normalise (0x140293F20)", rva: 0x0029_3F20, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xF3, 0x0F, 0x10, 0x01, 0x48, 0x8B, 0xD9] },
+    // sub rsp,0x28; call 0x14029CDD0; xorps xmm0,xmm0; mov eax,eax; cvtsi2ss xmm0,rax: Re:CoM's
+    // random float (u32 × 2^-32, [0, 1)).
+    Site { name: "random float (0x14029CF00)", rva: 0x0029_CF00, expect: &[0x48, 0x83, 0xEC, 0x28, 0xE8, 0xC7, 0xFE, 0xFF, 0xFF, 0x0F, 0x57, 0xC0, 0x8B, 0xC0, 0xF3, 0x48, 0x0F, 0x2A, 0xC0] },
+];
+
+/// Re:CoM code the drops rely on (not patched).
+pub const DROP_CHECKED: &[Site] = &[
+    // The prize init's look index: movsxd rbx,[rdi+0x244]; sub rbx,0xCB; shl rbx,4 (then the lea).
+    Site { name: "prize init: look index (0x140231664)", rva: 0x0023_1664, expect: &[0x48, 0x63, 0x9F, 0x44, 0x02, 0x00, 0x00, 0x48, 0x81, 0xEB, 0xCB, 0x00, 0x00, 0x00, 0x48, 0xC1, 0xE3, 0x04] },
+    // ... add rbx,rax; movss xmm1,[rbx+0xC] (the row's scale).
+    Site { name: "prize init: look row scale (0x14023167D)", rva: 0x0023_167D, expect: &[0x48, 0x03, 0xD8, 0xF3, 0x0F, 0x10, 0x4B, 0x0C] },
+    // mov r8d,[rbx+8]; mov rdx,[rbx]: the row's effect id and set name.
+    Site { name: "prize init: look row effect (0x1402316D6)", rva: 0x0023_16D6, expect: &[0x44, 0x8B, 0x43, 0x08, 0x48, 0x8B, 0x13] },
+    // The look set-up's index around its lea: movsxd rbx,[rcx+0x244] / sub rbx,0xCB.
+    Site { name: "prize look set-up: kind (0x1402306F9)", rva: 0x0023_06F9, expect: &[0x48, 0x63, 0x99, 0x44, 0x02, 0x00, 0x00] },
+    Site { name: "prize look set-up: index (0x140230707)", rva: 0x0023_0707, expect: &[0x48, 0x81, 0xEB, 0xCB, 0x00, 0x00, 0x00] },
+    // The reward: +0x260 = 0 → prize add(kind +0x244, arg +0x248, mode 1) as a tail jump.
+    Site {
+        name: "prize reward (0x140230F90)",
+        rva: 0x0023_0F90,
+        expect: &[
+            0x48, 0x83, 0xEC, 0x28, 0x83, 0xB9, 0x60, 0x02, 0x00, 0x00, 0x00, 0x75, 0x1B, 0x8B, 0x91, 0x48, 0x02, 0x00, 0x00, 0x41, 0xB8, 0x01, 0x00, 0x00, 0x00, 0x8B, 0x89, 0x44, 0x02, 0x00, 0x00, 0x48, 0x83, 0xC4, 0x28, 0xE9, 0xF8, 0x3A, 0xFC,
+            0xFF,
+        ],
+    },
+    // The prize add's switch for kinds 0xCB..=0xD7 (above: `ja` to the default, no reward).
+    Site { name: "prize add: special kinds 0xCB..0xD7 (0x1401F503D)", rva: 0x001F_503D, expect: &[0x41, 0x81, 0xC1, 0x35, 0xFF, 0xFF, 0xFF, 0x41, 0x83, 0xF9, 0x0C, 0x0F, 0x87, 0xB8, 0x01, 0x00, 0x00] },
+    // The bounce sound (kinds 0xCB..0xD5, else none) and the pickup sound (else sound 6).
+    Site { name: "prize bounce sound (0x140230E70)", rva: 0x0023_0E70, expect: &[0x48, 0x83, 0xEC, 0x38, 0x8B, 0x81, 0x44, 0x02, 0x00, 0x00, 0x05, 0x35, 0xFF, 0xFF, 0xFF, 0x83, 0xF8, 0x0A, 0x77, 0x41] },
+    Site { name: "prize pickup sound (0x140230F00)", rva: 0x0023_0F00, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x81, 0x44, 0x02, 0x00, 0x00, 0x05, 0x35, 0xFF, 0xFF, 0xFF, 0x83, 0xF8, 0x0A, 0x77, 0x2B] },
+    // The EXP drop's descriptor: speed 0.25 at +0x28, flags 1 at +0x2C, the position at +0x00.
+    Site { name: "EXP drop descriptor (0x14018112D)", rva: 0x0018_112D, expect: &[0xF3, 0x0F, 0x11, 0x4C, 0x24, 0x48, 0xC7, 0x44, 0x24, 0x4C, 0x01, 0x00, 0x00, 0x00, 0x66, 0x0F, 0x7F, 0x44, 0x24, 0x20] },
+];
+
 /// The vtable slot the menu calls through. Checked (exe; relocated pointer).
 pub const COMMAND_MENU_PTRS: &[PtrSite] = &[PtrSite { name: "C2DSeqCtrl vtable +0x60 (0x1406073A0)", rva: 0x0060_73A0, target: 0x0024_76F0 }];
 
@@ -1274,70 +1335,79 @@ pub mod data {
 
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
-    SITES
+    // One flat list (a long `chain` of iterators overflows the type checker).
+    const LISTS: &[&[Site]] = &[
+        SITES,
+        HOOKS,
+        CALLEES,
+        MOVE_HOOKS,
+        TRACE_HOOKS,
+        MOVE_CALLEES,
+        ATTACK_HOOKS,
+        ATTACK_CALLEES,
+        ATTACK_DATA,
+        STATS_HOOKS,
+        STATS_CALLEES,
+        KEYBLADE_HOOKS,
+        KEYBLADE_CALLEES,
+        KEYBLADE_DATA,
+        MODEL_HOOKS,
+        MODEL_CALLEES,
+        M6_HOOKS,
+        M6_CALLEES,
+        M6_CHECKED,
+        M6_DECK_HOOKS,
+        M6_DECK_READERS,
+        M6_DECK_CALLEES,
+        M6_COCKPIT_CALLS,
+        M6_CARD_CALLS,
+        M6_DECK_CHECKED,
+        M6_GETTER_CALLERS,
+        M6_ENEMY_UI_CALLS,
+        M6_ENEMY_UI_CHECKED,
+        M6_BOSS_HOOKS,
+        MP_HOOKS,
+        MP_CHECKED,
+        MP_BAR_HOOKS,
+        KH1_HUD_HOOKS,
+        KH1_HUD_PARTY_HOOKS,
+        KH1_HUD_CURSOR_HOOKS,
+        KH1_HUD_POPUP_HOOKS,
+        KH1_HUD_PLATE_HOOKS,
+        KH1_HUD_MASK_CALLS,
+        KH1_HUD_MASK_CHECKED,
+        KH1_HUD_CALLEES,
+        MP_BAR_CALLEES,
+        MP_BAR_CHECKED,
+        COMMAND_MENU_CALLEES,
+        COMMAND_MENU_CHECKED,
+        COMMAND_MENU_POINT_CALLS,
+        HUD_2D_CALLEES,
+        HUD_2D_CHECKED,
+        MAGIC_HOOKS,
+        MAGIC_CALLEES,
+        MAGIC_DATA,
+        MAGIC_CHECKED,
+        BATTLE_END_CHECKED,
+        UNLOCK_HOOKS,
+        UNLOCK_CHECKED,
+        MENU_SOUND_HOOKS,
+        MENU_SOUND_CALLEES,
+        ITEM_HOOKS,
+        ITEM_DATA,
+        ITEM_CHECKED,
+        ITEM_PAGE_CALLEES,
+        DROP_HOOKS,
+        DROP_DATA,
+        DROP_CALLEES,
+        DROP_CHECKED,
+    ];
+    LISTS
         .iter()
-        .chain(HOOKS)
-        .chain(CALLEES)
-        .chain(MOVE_HOOKS)
-        .chain(TRACE_HOOKS)
-        .chain(MOVE_CALLEES)
-        .chain(ATTACK_HOOKS)
-        .chain(ATTACK_CALLEES)
-        .chain(ATTACK_DATA)
-        .chain(STATS_HOOKS)
-        .chain(STATS_CALLEES)
-        .chain(KEYBLADE_HOOKS)
-        .chain(KEYBLADE_CALLEES)
-        .chain(KEYBLADE_DATA)
-        .chain(MODEL_HOOKS)
-        .chain(MODEL_CALLEES)
-        .chain(M6_HOOKS)
-        .chain(M6_CALLEES)
-        .chain(M6_CHECKED)
+        .flat_map(|l| l.iter())
         .chain(M6_PATCHES.iter().map(|p| &p.site))
-        .chain(M6_DECK_HOOKS)
-        .chain(M6_DECK_READERS)
-        .chain(M6_DECK_CALLEES)
-        .chain(M6_COCKPIT_CALLS)
-        .chain(M6_CARD_CALLS)
-        .chain(M6_DECK_CHECKED)
         .chain(M6_BOSS_PATCHES.iter().map(|p| &p.site))
-        .chain(M6_GETTER_CALLERS)
-        .chain(M6_ENEMY_UI_CALLS)
-        .chain(M6_ENEMY_UI_CHECKED)
-        .chain(M6_BOSS_HOOKS)
-        .chain(MP_HOOKS)
         .chain(std::iter::once(&MP_CHECKPOINT_CALL))
-        .chain(MP_CHECKED)
-        .chain(MP_BAR_HOOKS)
-        .chain(KH1_HUD_HOOKS)
-        .chain(KH1_HUD_PARTY_HOOKS)
-        .chain(KH1_HUD_CURSOR_HOOKS)
-        .chain(KH1_HUD_POPUP_HOOKS)
-        .chain(KH1_HUD_PLATE_HOOKS)
-        .chain(KH1_HUD_MASK_CALLS)
-        .chain(KH1_HUD_MASK_CHECKED)
-        .chain(KH1_HUD_CALLEES)
-        .chain(MP_BAR_CALLEES)
-        .chain(MP_BAR_CHECKED)
-        .chain(COMMAND_MENU_CALLEES)
-        .chain(COMMAND_MENU_CHECKED)
-        .chain(COMMAND_MENU_POINT_CALLS)
-        .chain(HUD_2D_CALLEES)
-        .chain(HUD_2D_CHECKED)
-        .chain(MAGIC_HOOKS)
-        .chain(MAGIC_CALLEES)
-        .chain(MAGIC_DATA)
-        .chain(MAGIC_CHECKED)
-        .chain(BATTLE_END_CHECKED)
-        .chain(UNLOCK_HOOKS)
-        .chain(UNLOCK_CHECKED)
-        .chain(MENU_SOUND_HOOKS)
-        .chain(MENU_SOUND_CALLEES)
-        .chain(ITEM_HOOKS)
-        .chain(ITEM_DATA)
-        .chain(ITEM_CHECKED)
-        .chain(ITEM_PAGE_CALLEES)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -1430,7 +1500,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(KH1_HUD_CURSOR_HOOKS).chain(KH1_HUD_POPUP_HOOKS).chain(KH1_HUD_PLATE_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS).chain(MENU_SOUND_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(KH1_HUD_CURSOR_HOOKS).chain(KH1_HUD_POPUP_HOOKS).chain(KH1_HUD_PLATE_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS).chain(MENU_SOUND_HOOKS).chain(ITEM_HOOKS).chain(DROP_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
