@@ -329,6 +329,9 @@ At KH1 setting:
       choice kept); **low-HP sound: Re:CoM's**. Research `kh1-hud.md` (kept with the decomp tools);
       plan H0 (read-only dump of KH1's 24 `exchange/*_uibin_*.bin` layouts and HD textures on the
       owner's PC) then H1–H8, one element per version.
+    - Hit shake / size-class slide (2026-11-01, owner away: "keep going"): built the native way,
+      **baked into every piece's animation data at the asset step** (Re:CoM plays it; nothing of
+      ours per frame). Owner to confirm when testing.
 
 ## Known open design questions (ask the owner, don't guess)
 
