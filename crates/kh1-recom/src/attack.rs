@@ -526,6 +526,9 @@ pub struct Kh1Stats {
     pub bosses: Vec<BossTwin>,
     /// The proxy tables for enemies without a twin (format 5; None before).
     pub proxies: Option<Proxies>,
+    /// Re:CoM class name → its twin's KH1 defeat drops per Re:CoM world id 1..=13 (format 6,
+    /// M8 stage 8a.4; absent: no drops).
+    pub drops: Vec<(String, Vec<Vec<crate::drops::Drop>>)>,
 }
 
 // ---- KH1 numbers for Re:CoM enemies without a KH1 twin (proxies) ----
@@ -678,6 +681,16 @@ impl Kh1Stats {
     pub fn lock_radius(&self, class: &str) -> Option<f32> {
         self.lock_radius.iter().find(|(c, _)| c == class).map(|(_, r)| *r)
     }
+    /// The twin's KH1 defeat drops for a Re:CoM class in a Re:CoM world (1-based), as [`twin`]
+    /// picks its record. None: no drops (no twin, no table, or a world outside 1..=13).
+    ///
+    /// [`twin`]: Kh1Stats::twin
+    pub fn drops(&self, class: &str, world: i32) -> Option<&[crate::drops::Drop]> {
+        if !(1..=13).contains(&world) {
+            return None;
+        }
+        self.drops.iter().find(|(c, _)| c == class)?.1.get(world as usize - 1).map(|v| v.as_slice())
+    }
 }
 
 /// Reads `kh1-stats.json`.
@@ -727,6 +740,7 @@ pub fn parse_stats(text: &str) -> Result<Kh1Stats, String> {
     let mut enemies = Vec::new();
     let mut lock_radius = Vec::new();
     let mut recom_hp = Vec::new();
+    let mut drops = Vec::new();
     for e in v.get("enemies").and_then(|e| e.as_array()).ok_or("no `enemies` array")? {
         let class = e.get("class").and_then(|c| c.as_str()).ok_or("enemy without `class`")?.to_string();
         let worlds = world_records(e, &class)?;
@@ -735,6 +749,9 @@ pub fn parse_stats(text: &str) -> Result<Kh1Stats, String> {
         }
         if let Some(h) = e.get("recom_hp") {
             recom_hp.push((class.clone(), ints(h, "recom_hp")?));
+        }
+        if let Some(d) = e.get("drops") {
+            drops.push((class.clone(), drop_tables(d, &class)?));
         }
         enemies.push((class, worlds));
     }
@@ -779,7 +796,28 @@ pub fn parse_stats(text: &str) -> Result<Kh1Stats, String> {
             Some(Proxies { ordinary: table("ordinary")?, boss: table("boss")? })
         }
     };
-    Ok(Kh1Stats { sora_strength, base_strength, keyblades, enemies, lock_radius, recom_hp, bosses, proxies })
+    Ok(Kh1Stats { sora_strength, base_strength, keyblades, enemies, lock_radius, recom_hp, bosses, proxies, drops })
+}
+
+/// A twin's `drops` (format 6): 13 worlds, each a list of `[chance, item]` pairs (KH1's three, in
+/// roll order). Chances must be in 0..=1, items 0..=255.
+fn drop_tables(d: &crate::json::Value, class: &str) -> Result<Vec<Vec<crate::drops::Drop>>, String> {
+    let worlds = d.as_array().ok_or_else(|| format!("{class}: `drops` is not an array"))?;
+    if worlds.len() != 13 {
+        return Err(format!("{class}: `drops` has {} worlds, not 13", worlds.len()));
+    }
+    let mut out = Vec::new();
+    for (w, pairs) in worlds.iter().enumerate() {
+        let mut t = Vec::new();
+        for p in pairs.as_array().ok_or_else(|| format!("{class}: drops[{w}] is not an array"))? {
+            let pair = p.as_array().filter(|a| a.len() == 2).ok_or_else(|| format!("{class}: drops[{w}]: not a [chance, item] pair"))?;
+            let chance = pair[0].as_f64().filter(|c| c.is_finite() && (0.0..=1.0).contains(c)).ok_or_else(|| format!("{class}: drops[{w}]: bad chance"))?;
+            let item = pair[1].as_f64().filter(|i| (0.0..=255.0).contains(i) && i.fract() == 0.0).ok_or_else(|| format!("{class}: drops[{w}]: bad item"))?;
+            t.push(crate::drops::Drop { chance: chance as f32, item: item as u8 });
+        }
+        out.push(t);
+    }
+    Ok(out)
 }
 
 /// One KH1 record of `kh1-stats.json` (`hp`, `strength`, `defence`, `floor`, `cap`, `level`,

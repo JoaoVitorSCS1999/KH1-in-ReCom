@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 89: M8 stage 8a.4: KH1 item drops from enemies, version 0.47.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): items dropped by enemies at KH1's rates.
+- KH1 (Checked (decomp + exe + files)): each enemy's defeat routine passes a table of three (chance, item)
+  pairs to syscall 122 (the path that also grants EXP, syscall 167); `0x1402ABC40` rolls one draw per
+  pair, below chance × Lucky Strike. Every KH1 twin's table read from the player's files (asset step,
+  `kh1-stats.json` format 6).
+- Built: wrapper on Re:CoM's defeat card prize `0x140180D20` (9 bytes): after Re:CoM's prizes, the twin's
+  KH1 table rolled; each battle item made by Re:CoM's prize factory `0x1401A89C0` as a new kind 0xD8,
+  launched like EXP orbs, ending like them (collected, or ~10 s then fade). Re:CoM's look table copied
+  with a 14th row (0xD6's effect), its two loads (`0x140231676`, `0x140230700`) pointed at the copy.
+  Wrapper on the prize add `0x1401F4AB0` (10 bytes): kind 0xD8 → KH1's pickup rule, Re:CoM's sound.
+  `docs/recom-m8-items.md` § 8a.4.
+- Not KH1's: Re:CoM's launch and 10 s life (KH1: stays, ≤ 8); refused pickup loses the item; only battle
+  items made; Lucky Strike 1 (no abilities yet); Re:CoM's random float.
+- Checked: tests, Windows build, all site bytes against the exe. Not checked: in game.
+
+---
+
 ## Stage 88: M8 stage 8a.3: KH1 items in the Moogle shop (a fifth Items tab), version 0.46.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): items in the Moogle shop; a fifth "Items" tab, one item per purchase, 1 Moogle

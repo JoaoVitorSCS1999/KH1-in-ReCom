@@ -455,6 +455,11 @@ bones): local rotation (geodesic angle), translation and scale.
   - A missing boss model or `.EPD` is a note, not a stop. Older files (no `proxies`) still
     read: the proxies are then off, and twins work as before.
   - Not run on real files in the session (no `.EPD` here). Tests use synthetic records.
+- Format 6 (M8 stage 8a.4, KH1's item drops; `recom-m8-items.md` § Stage 8a.4): per twin with
+  a KH1 defeat drop table, `drops`: 13 worlds × KH1's three `[chance, item]` pairs (`stats::
+  drop_table` at `Twin::drops`' script offset, which the script must push; `drop_offset_for`).
+  The console prints each distinct table (`drops <class> : items …, prizes …`). A twin without
+  a table has no key; the runtime reads older files with no drops.
 - The local mod's `mod.yml` copies it like the other files.
 - Checked (files): the owner's install gives all 31 twins with valid records; the motion pack
   and manifest it rebuilt are byte-identical to the installed ones.

@@ -65,6 +65,10 @@ pub struct Twin {
     /// Re:CoM's enemy id of the class (the factory `0x140188F40`'s case; its stats are
     /// `ENEMY/<id>/EN<id>.EPD`). Checked (decomp).
     pub recom_id: u16,
+    /// The item drop table its defeat hands to AI syscall 122 (`0x1402BC640` → `0x1402ABC40`),
+    /// by KH1 world (worlds KH1 lacks take the fallback); None: its defeat drops no items (no
+    /// syscall 122 on its defeat path). See [`DropTable`].
+    pub drops: Option<Lv1>,
 }
 
 const SHADOW_WORLDS: &[(&str, u32)] = &[
@@ -84,47 +88,64 @@ const SHADOW_WORLDS: &[(&str, u32)] = &[
     ("lm", 0x740),
 ];
 
-const fn lv(class: &'static str, model: &'static str, assumed: bool, recom_id: u16) -> Twin {
-    Twin { class, model, lv1: Lv1::Fixed(0x14), lv2: 0x80, assumed, recom_id }
+/// The Shadow's defeat drop tables (`ex_2020.bd`'s defeat routine picks by world: Dive to the
+/// Heart, Destiny Islands, else one table; End of the World rooms ≥ 37 have a fourth, no Re:CoM
+/// world maps there). Checked (files: the script evaluated for every world × room × variant).
+const SHADOW_DROPS: &[(&str, u32)] = &[("dh", 0xA78), ("di", 0xAAC)];
+
+const fn lv(class: &'static str, model: &'static str, assumed: bool, recom_id: u16, drops: Option<Lv1>) -> Twin {
+    Twin { class, model, lv1: Lv1::Fixed(0x14), lv2: 0x80, assumed, recom_id, drops }
 }
-const fn one(class: &'static str, model: &'static str, assumed: bool, recom_id: u16) -> Twin {
-    Twin { class, model, lv1: Lv1::Fixed(0x14), lv2: 0x14, assumed, recom_id }
+const fn one(class: &'static str, model: &'static str, assumed: bool, recom_id: u16, drops: Option<Lv1>) -> Twin {
+    Twin { class, model, lv1: Lv1::Fixed(0x14), lv2: 0x14, assumed, recom_id, drops }
+}
+/// One drop table everywhere.
+const fn d(at: u32) -> Option<Lv1> {
+    Some(Lv1::Fixed(at))
 }
 
 /// Re:CoM's KH1-equivalent enemies. Re:CoM-only ones (and KH1 ones not identified: Tornado
 /// Step) keep Re:CoM's numbers.
 pub const TWINS: &[Twin] = &[
-    Twin { class: "CEnemyShadow", model: "xa_ex_2020.mdls", lv1: Lv1::ByWorld(SHADOW_WORLDS, 0x740), lv2: 0x740, assumed: false, recom_id: 1 },
-    lv("CEnemySoldier", "xa_ex_2010.mdls", false, 2),
-    lv("CEnemyLargebody", "xa_ex_2050.mdls", false, 9),
-    lv("CEnemyRednocturne", "xa_ex_2110.mdls", false, 3),
-    lv("CEnemyBluerhapsody", "xa_ex_2120.mdls", false, 4),
-    lv("CEnemyYellowopera", "xa_ex_2130.mdls", false, 5),
-    lv("CEnemyGreenrequiem", "xa_ex_2140.mdls", false, 6),
-    lv("CEnemyPowerwild", "xa_ex_2030.mdls", false, 7),
-    lv("CEnemyBouncywild", "xa_ex_2040.mdls", false, 8),
-    lv("CEnemyAirsoldier", "xa_ex_2160.mdls", false, 15),
-    lv("CEnemyBandit", "xa_ex_2090.mdls", false, 11),
-    lv("CEnemyFatbandit", "xa_ex_2060.mdls", false, 10),
-    lv("CEnemyBarrelspider", "xa_ex_2170.mdls", true, 28),
-    lv("CEnemySearchghost", "xa_ex_2230.mdls", false, 14),
-    lv("CEnemyPirate", "xa_ex_2100.mdls", false, 21),
-    lv("CEnemyAirpirate", "xa_ex_2210.mdls", false, 22),
-    lv("CEnemyWightnight", "xa_ex_2200.mdls", false, 12),
-    lv("CEnemyGargoyle", "xa_ex_2220.mdls", false, 13),
-    lv("CEnemyDarkball", "xa_ex_2280.mdls", false, 23),
-    lv("CEnemyDefender", "xa_ex_2340.mdls", false, 26),
-    lv("CEnemyWizard", "xa_ex_2150.mdls", false, 25),
-    lv("CEnemySeaneon", "xa_ex_2070.mdls", true, 18),
-    lv("CEnemyAquatank", "xa_ex_2080.mdls", true, 20),
-    lv("CEnemyScrewdiver", "xa_ex_2240.mdls", true, 19),
-    lv("CEnemyWyvern", "xa_ex_2320.mdls", true, 24),
-    one("CEnemyWhitemushroom", "xa_ex_2350.mdls", false, 16),
-    one("CEnemyBlackfungus", "xa_ex_2380.mdls", false, 17),
-    one("CEnemyCreapplant", "xa_ex_2290.mdls", true, 31),
-    one("CEnemyNeoshadow", "xa_ex_2420.mdls", true, 27),
-    one("CEnemySpadesoldier", "xa_aw_1030.mdls", false, 103),
-    one("CEnemyHeartsoldier", "xa_aw_1060.mdls", false, 104),
+    Twin { class: "CEnemyShadow", model: "xa_ex_2020.mdls", lv1: Lv1::ByWorld(SHADOW_WORLDS, 0x740), lv2: 0x740, assumed: false, recom_id: 1, drops: Some(Lv1::ByWorld(SHADOW_DROPS, 0xA44)) },
+    lv("CEnemySoldier", "xa_ex_2010.mdls", false, 2, d(0x38C)),
+    lv("CEnemyLargebody", "xa_ex_2050.mdls", false, 9, d(0x3FC)),
+    lv("CEnemyRednocturne", "xa_ex_2110.mdls", false, 3, d(0x2AC)),
+    lv("CEnemyBluerhapsody", "xa_ex_2120.mdls", false, 4, d(0x23C)),
+    lv("CEnemyYellowopera", "xa_ex_2130.mdls", false, 5, d(0x2AC)),
+    lv("CEnemyGreenrequiem", "xa_ex_2140.mdls", false, 6, d(0x15C)),
+    // Powerwild / Bouncywild: a second table (0x430 / 0x270: 20 HP and 5 MP prizes, Ether 20 %)
+    // is dropped by a routine with no EXP (not the defeat; not read).
+    lv("CEnemyPowerwild", "xa_ex_2030.mdls", false, 7, d(0x3FC)),
+    lv("CEnemyBouncywild", "xa_ex_2040.mdls", false, 8, d(0x23C)),
+    lv("CEnemyAirsoldier", "xa_ex_2160.mdls", false, 15, d(0x54C)),
+    lv("CEnemyBandit", "xa_ex_2090.mdls", false, 11, d(0x46C)),
+    lv("CEnemyFatbandit", "xa_ex_2060.mdls", false, 10, d(0x3FC)),
+    lv("CEnemyBarrelspider", "xa_ex_2170.mdls", true, 28, d(0x70C)),
+    lv("CEnemySearchghost", "xa_ex_2230.mdls", false, 14, d(0x54C)),
+    lv("CEnemyPirate", "xa_ex_2100.mdls", false, 21, d(0x54C)),
+    lv("CEnemyAirpirate", "xa_ex_2210.mdls", false, 22, d(0x1CC)),
+    lv("CEnemyWightnight", "xa_ex_2200.mdls", false, 12, d(0x5BC)),
+    lv("CEnemyGargoyle", "xa_ex_2220.mdls", false, 13, d(0x4DC)),
+    // Darkball: End of the World rooms ≥ 37 use 0x2DC (no Re:CoM world maps there).
+    lv("CEnemyDarkball", "xa_ex_2280.mdls", false, 23, d(0x2A8)),
+    lv("CEnemyDefender", "xa_ex_2340.mdls", false, 26, d(0x46C)),
+    lv("CEnemyWizard", "xa_ex_2150.mdls", false, 25, d(0x38C)),
+    lv("CEnemySeaneon", "xa_ex_2070.mdls", true, 18, d(0x23C)),
+    lv("CEnemyAquatank", "xa_ex_2080.mdls", true, 20, d(0x31C)),
+    lv("CEnemyScrewdiver", "xa_ex_2240.mdls", true, 19, d(0x31C)),
+    lv("CEnemyWyvern", "xa_ex_2320.mdls", true, 24, d(0x31C)),
+    // The mushrooms' item drops are their spell game's rewards, not their defeat: White Mushroom's
+    // only table (0x254) is handed over on a path without EXP; Black Fungus's defeat table is
+    // empty (its 0x204 / 0x238 / 0x26C go by the finishing move, not read).
+    one("CEnemyWhitemushroom", "xa_ex_2350.mdls", false, 16, None),
+    one("CEnemyBlackfungus", "xa_ex_2380.mdls", false, 17, d(0x1D0)),
+    // Creeper Plant: End of the World rooms ≥ 37 use 0x510.
+    one("CEnemyCreapplant", "xa_ex_2290.mdls", true, 31, d(0x4DC)),
+    one("CEnemyNeoshadow", "xa_ex_2420.mdls", true, 27, d(0x2E4)),
+    // The Card Soldiers' scripts never call syscall 122 / 215.
+    one("CEnemySpadesoldier", "xa_aw_1030.mdls", false, 103, None),
+    one("CEnemyHeartsoldier", "xa_aw_1060.mdls", false, 104, None),
 ];
 
 /// A Re:CoM boss with a KH1 equivalent (the proxy rule's boss pool). The KH1 record is read from
@@ -478,6 +499,78 @@ pub fn offset_for(t: &Twin, recom_world: usize) -> u32 {
     }
 }
 
+/// A KH1 enemy's prize table (M8 stage 8a.4): what its AI script hands to syscall 122
+/// (`0x1402BC640`) or 215 (`0x1402BC6B0`) on defeat, both `0x1402ABC40(table, position, …)`.
+/// Layout, Checked (decomp + exe: `0x1402ABC40`'s loops, `mulss xmm6,[rbx−4]` / `mov ecx,[rbx]`):
+/// seven i32 prize counts (`+0x00..+0x1B`, HP / MP / munny orbs, × the Jackpot factor
+/// `0x142D60FA4`), then three (f32 chance, i32 item) pairs at `+0x1C`, `+0x24`, `+0x2C`: the item
+/// (`0x1402BFF00`) drops when KH1's random float (`0x14031BA30`, [0, 1)) is below chance × the
+/// Lucky Strike factor `0x142D60FA8` (1 + 0.5 per equipped ability `0x1C`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DropTable {
+    /// The seven prize counts (Re:CoM's own prizes stay Re:CoM's: written for the log only).
+    pub prizes: [i32; 7],
+    /// (chance, KH1 item id), in KH1's roll order.
+    pub items: [(f32, u8); 3],
+}
+
+/// The table's size.
+pub const DROP_TABLE_LEN: usize = 0x34;
+
+/// Whether the script pushes the address `at` (`pusha pc:at`: the word `0x00E2`, then an s16
+/// from the operand: target = instruction + 2 + s16; `0x1402CD310`, research notes
+/// `kh1-enemy-stats.md` §3), the check that `at` is data the script really hands over.
+pub fn pushes_address(script: &[u8], at: u32) -> bool {
+    (0..script.len().saturating_sub(3)).step_by(2).any(|pc| {
+        script[pc] == 0xE2 && script[pc + 1] == 0 && pc as i64 + 2 + i16::from_le_bytes([script[pc + 2], script[pc + 3]]) as i64 == at as i64
+    })
+}
+
+/// Reads a drop table at script offset `at`: the script must push its address, the counts be
+/// 0..=255, the chances finite in 0..=1 and the items 0..=255.
+pub fn drop_table(script: &[u8], at: u32) -> Result<DropTable> {
+    let o = at as usize;
+    let b = script.get(o..o + DROP_TABLE_LEN).ok_or_else(|| Error::Format(format!("no drop table at script offset {at:#x}")))?;
+    if !pushes_address(script, at) {
+        return Err(Error::Format(format!("drop table {at:#x}: the script never pushes its address")));
+    }
+    let i32_at = |k: usize| i32::from_le_bytes(b[k..k + 4].try_into().expect("4 bytes"));
+    let mut prizes = [0; 7];
+    for (k, p) in prizes.iter_mut().enumerate() {
+        *p = i32_at(4 * k);
+        if !(0..=255).contains(p) {
+            return Err(Error::Format(format!("drop table {at:#x}: prize count {} = {p}", k)));
+        }
+    }
+    let mut items = [(0f32, 0u8); 3];
+    for (k, it) in items.iter_mut().enumerate() {
+        let c = f32::from_le_bytes(b[0x1C + 8 * k..0x20 + 8 * k].try_into().expect("4 bytes"));
+        let i = i32_at(0x20 + 8 * k);
+        if !c.is_finite() || !(0.0..=1.0).contains(&c) || !(0..=255).contains(&i) {
+            return Err(Error::Format(format!("drop table {at:#x}: pair {k} = ({c}, {i})")));
+        }
+        *it = (c, i as u8);
+    }
+    Ok(DropTable { prizes, items })
+}
+
+/// The drop table offset for a Re:CoM world (1-based): the world's KH1 table, the fallback where
+/// KH1 has no such world (Twilight Town, Castle Oblivion: the tables don't depend on the LV2 bit,
+/// Checked (files)). None: the twin drops no items.
+pub fn drop_offset_for(t: &Twin, recom_world: usize) -> Option<u32> {
+    let code = RECOM_WORLDS.get(recom_world.wrapping_sub(1)).and_then(|w| w.1);
+    match t.drops? {
+        Lv1::Fixed(o) => Some(o),
+        Lv1::ByWorld(list, fallback) => Some(code.and_then(|c| list.iter().find(|(x, _)| *x == c)).map_or(fallback, |x| x.1)),
+    }
+}
+
+/// The `drops` field of an enemy: 13 worlds × the three (chance, item) pairs.
+fn drops_json(tables: &[DropTable]) -> String {
+    let w: Vec<String> = tables.iter().map(|t| format!("[{}]", t.items.iter().map(|(c, i)| format!("[{c}, {i}]")).collect::<Vec<_>>().join(", "))).collect();
+    format!("[{}]", w.join(", "))
+}
+
 /// Sora's KH1 Strength for levels 1..=100 (index 0 = level 1), keep Rod / give up Shield
 /// (decision 18): template + choice delta + Kingdom Key + 2 per bonus-4 level.
 pub fn sora_strength(btltbl: &[u8], keyblade_strength: i32) -> Result<Vec<i32>> {
@@ -585,12 +678,15 @@ pub fn proxy_tables(twins: &[(&str, Vec<Record>, Vec<i32>)], bosses: &[(BossTwin
 /// § KH1 numbers for enemies without a twin): each twin's `recom_id` / `recom_hp` (its `@ENP`
 /// HP per floor row), `bosses` (Re:CoM's bosses with a KH1 equivalent: their KH1 records and
 /// Re:CoM HP), `final_boss`, and `proxies` (`ordinary` / `boss`: 13 worlds × 13 rows of cells).
+///
+/// Format 6 adds each twin's `drops` (M8 stage 8a.4, [`DropTable`]): per Re:CoM world, the three
+/// (chance, KH1 item) pairs its KH1 defeat rolls; absent for a twin whose defeat drops no item.
 pub fn build_json(read: &mut dyn FnMut(&str) -> Result<Vec<u8>>, recom: &mut dyn FnMut(&str) -> Option<Vec<u8>>, btltbl: &[u8], keyblade_strength: i32, models: &[crate::keyblade::KeybladeModel], kh2: &[Kh2Row]) -> Result<StatsJson> {
     let strength = sora_strength(btltbl, keyblade_strength)?;
     let base = sora_strength(btltbl, 0)?;
     let parsed = kh1_formats::btltbl::Btltbl::parse(btltbl.to_vec()).map_err(|e| Error::Format(format!("btltbl.bin: {e}")))?;
     let mut notes = Vec::new();
-    let mut s = String::from("{\n  \"format\": \"kh1-recom-assets stats 5\",\n");
+    let mut s = String::from("{\n  \"format\": \"kh1-recom-assets stats 6\",\n");
     s.push_str(&format!("  \"sora_strength\": [{}],\n", ints_json(&strength)));
     // Without the Keyblade: the runtime adds the equipped one's Strength (decision 25).
     s.push_str(&format!("  \"sora_base_strength\": [{}],\n", ints_json(&base)));
@@ -613,8 +709,27 @@ pub fn build_json(read: &mut dyn FnMut(&str) -> Result<Vec<u8>>, recom: &mut dyn
         }
         let radii = lock_radii(&mdls).map_err(|e| Error::Format(format!("{}: {e}", t.model)))?;
         let hp = recom_rows(recom, t.recom_id, t.class, &mut notes);
+        // Format 6: the defeat's item drops per world (M8 stage 8a.4).
+        let drops = match t.drops {
+            None => String::new(),
+            Some(_) => {
+                let mut tables = Vec::new();
+                for w in 1..=RECOM_WORLDS.len() {
+                    let at = drop_offset_for(t, w).expect("a twin with drops");
+                    tables.push(drop_table(script, at).map_err(|e| Error::Format(format!("{}: {e}", t.model)))?);
+                }
+                let mut seen: Vec<&DropTable> = Vec::new();
+                for tb in &tables {
+                    if !seen.contains(&tb) {
+                        seen.push(tb);
+                        notes.push(format!("drops {} : items {:?}, prizes {:?}", t.class, tb.items, tb.prizes));
+                    }
+                }
+                format!(", \"drops\": {}", drops_json(&tables))
+            }
+        };
         s.push_str(&format!(
-            "    {{\"class\": \"{}\", \"kh1_model\": \"{}\", \"assumed\": {}, \"lock_radius\": {}, \"lock_radii\": [{}], \"recom_id\": {}, \"recom_hp\": [{}], \"worlds\": [\n{}\n    ]}}{}\n",
+            "    {{\"class\": \"{}\", \"kh1_model\": \"{}\", \"assumed\": {}, \"lock_radius\": {}, \"lock_radii\": [{}], \"recom_id\": {}, \"recom_hp\": [{}]{drops}, \"worlds\": [\n{}\n    ]}}{}\n",
             t.class,
             t.model,
             t.assumed,
@@ -974,4 +1089,57 @@ mod tests {
         assert!(c.starts_with("{\"ratio\": ") && c.contains("\"from\": \"") && c.contains("\"record\": {\"hp\": "));
         assert_eq!(cell_json(&None), "null");
     }
+
+    /// A script holding a drop table at `at` (pushed by a `pusha pc:` at 0x10 when `pushed`).
+    fn drop_script(at: usize, prizes: [i32; 7], items: [(f32, i32); 3], pushed: bool) -> Vec<u8> {
+        let mut s = vec![0u8; 0x200];
+        if pushed {
+            s[0x10..0x12].copy_from_slice(&0x00E2u16.to_le_bytes());
+            s[0x12..0x14].copy_from_slice(&((at as i64 - 0x12) as i16).to_le_bytes());
+        }
+        for (k, p) in prizes.iter().enumerate() {
+            s[at + 4 * k..at + 4 * k + 4].copy_from_slice(&p.to_le_bytes());
+        }
+        for (k, (c, i)) in items.iter().enumerate() {
+            s[at + 0x1C + 8 * k..at + 0x20 + 8 * k].copy_from_slice(&c.to_le_bytes());
+            s[at + 0x20 + 8 * k..at + 0x24 + 8 * k].copy_from_slice(&i.to_le_bytes());
+        }
+        s
+    }
+
+    #[test]
+    fn reads_a_drop_table_the_script_pushes() {
+        // The Shadow's general table (Checked (files): counts 4, 0, 0, 1, …; Potion 1 %, item 233 3 %).
+        let s = drop_script(0x44, [4, 0, 0, 1, 0, 0, 0], [(0.01, 1), (0.0, 0), (0.03, 233)], true);
+        let t = drop_table(&s, 0x44).unwrap();
+        assert_eq!(t.prizes, [4, 0, 0, 1, 0, 0, 0]);
+        assert_eq!(t.items, [(0.01, 1), (0.0, 0), (0.03, 233)]);
+        assert!(pushes_address(&s, 0x44) && !pushes_address(&s, 0x48));
+        // Not pushed by the script, past the end, or not a table.
+        assert!(drop_table(&drop_script(0x44, [4, 0, 0, 1, 0, 0, 0], [(0.01, 1), (0.0, 0), (0.0, 0)], false), 0x44).is_err());
+        assert!(drop_table(&s, 0x1F0).is_err());
+        assert!(drop_table(&drop_script(0x44, [4, 0, 0, 1, 0, 0, 0], [(1.5, 1), (0.0, 0), (0.0, 0)], true), 0x44).is_err(), "a chance above 1");
+        assert!(drop_table(&drop_script(0x44, [4, 0, 0, 1, 0, 0, 0], [(0.1, 300), (0.0, 0), (0.0, 0)], true), 0x44).is_err(), "an item above 255");
+        assert!(drop_table(&drop_script(0x44, [-1, 0, 0, 0, 0, 0, 0], [(0.1, 1), (0.0, 0), (0.0, 0)], true), 0x44).is_err(), "a negative count");
+        assert!(drop_table(&drop_script(0x44, [0; 7], [(f32::NAN, 1), (0.0, 0), (0.0, 0)], true), 0x44).is_err());
+        // The JSON the runtime parses.
+        assert_eq!(drops_json(&[t]), "[[[0.01, 1], [0, 0], [0.03, 233]]]");
+    }
+
+    #[test]
+    fn drop_tables_by_world() {
+        let shadow = &TWINS[0];
+        assert_eq!(drop_offset_for(shadow, 1), Some(0xA44), "Traverse Town");
+        assert_eq!(drop_offset_for(shadow, 12), Some(0xAAC), "Destiny Islands");
+        assert_eq!(drop_offset_for(shadow, 11), Some(0xA44), "Twilight Town: KH1 has no such world");
+        assert_eq!(drop_offset_for(shadow, 13), Some(0xA44), "Castle Oblivion");
+        let soldier = TWINS.iter().find(|t| t.class == "CEnemySoldier").unwrap();
+        assert!((1..=13).all(|w| drop_offset_for(soldier, w) == Some(0x38C)));
+        for c in ["CEnemyWhitemushroom", "CEnemySpadesoldier", "CEnemyHeartsoldier"] {
+            assert_eq!(drop_offset_for(TWINS.iter().find(|t| t.class == c).unwrap(), 1), None, "{c}");
+        }
+        // Every other twin has a defeat table.
+        assert_eq!(TWINS.iter().filter(|t| t.drops.is_some()).count(), TWINS.len() - 3);
+    }
+
 }

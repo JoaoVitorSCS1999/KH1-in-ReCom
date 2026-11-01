@@ -1,0 +1,167 @@
+//! KH1's item drops from enemies inside Re:CoM's prize system (M8 stage 8a.4; `crate::drops`,
+//! `docs/recom-m8-items.md` § Stage 8a.4).
+//!
+//! - **The look:** Re:CoM's prize look table (`0x1405B3150`, 13 rows) gets a 14th row for the new
+//!   prize kind `0xD8` (a KH1 item): the table is copied with the row after Re:CoM's own, and the
+//!   two `lea`s that load it (`0x140231676` in the prize init, `0x140230700` in its uncalled look
+//!   set-up) point at the copy. Re:CoM's kinds read the same rows as before.
+//! - **The drop:** a wrapper on the defeat's card prize `0x140180D20(enemy, &point)` (every defeat
+//!   path calls it last): after Re:CoM's own, at Combat = KH1 in Sora's story, the enemy's KH1
+//!   twin's table is rolled as KH1 does (`crate::drops::roll`) and each battle item that drops is
+//!   made by Re:CoM's prize factory `0x1401A89C0` at the same point, launched as Re:CoM's EXP
+//!   prizes are. Re:CoM then steps, draws, collects and times it out (its prize state machine
+//!   `0x140231010`), as a child of the battle manager like its other prizes.
+//! - **The pickup:** Re:CoM's reward `0x140230F90` tail-calls the prize add `0x1401F4AB0(kind,
+//!   arg, 1)`; our wrapper takes kind `0xD8` (KH1's pickup rule, `items::pick_up`) and passes every
+//!   other kind to Re:CoM. Re:CoM's pickup sound (6) plays in its own state machine.
+
+use super::movement::{func, orig, rd};
+use super::{log, va};
+use crate::drops::{self as dr, site, Dropped, PrizeDesc};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+
+pub static ORIG_DEFEAT_PRIZE: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_PRIZE_ADD: AtomicUsize = AtomicUsize::new(0);
+
+/// The look row is in and the hooks are installed: drops are made.
+static ON: AtomicBool = AtomicBool::new(false);
+/// Where the look table with the KH1 item row lives (for the start line).
+static TABLE: AtomicUsize = AtomicUsize::new(0);
+static LOG_LEFT: AtomicU32 = AtomicU32::new(120);
+
+/// Re:CoM's prize factory, the entity factory getter, the angle normaliser and its random float.
+/// Byte-checked (`sites::DROP_CALLEES`, `MAGIC_CALLEES`).
+const SPAWN: u32 = 0x001A_89C0;
+const FACTORY: u32 = 0x001A_8A80;
+const ANGLES: u32 = 0x0029_3F20;
+const RAND: u32 = 0x0029_CF00;
+/// An enemy's `@ENP` row (`+0x310`): every defeat prize of Re:CoM's needs it (`0x1401810A0`,
+/// `0x140180D20` return at once without it). Checked (decomp).
+const ENP_ROW: usize = 0x310;
+
+type DefeatFn = unsafe extern "win64" fn(usize, usize) -> u64;
+type AddFn = unsafe extern "win64" fn(u32, u32, i32);
+type SpawnFn = unsafe extern "win64" fn(usize, *const PrizeDesc, usize) -> usize;
+type FactoryFn = unsafe extern "win64" fn() -> usize;
+type AnglesFn = unsafe extern "win64" fn(*mut f32);
+type RandFn = unsafe extern "win64" fn() -> f32;
+
+fn note(line: impl FnOnce() -> String) {
+    if LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("drops: {}", line()));
+    }
+}
+
+/// Builds the look table with the KH1 item row and retargets Re:CoM's two `lea`s at it. False
+/// (nothing written) when a byte or a row isn't Re:CoM's.
+pub unsafe fn install(b: usize) -> bool {
+    let sites = crate::sites::DROP_DATA;
+    let at = |s: &crate::sites::Site| b + s.rva as usize;
+    let have = |p: usize, n: usize| std::slice::from_raw_parts(p as *const u8, n).to_vec();
+    if sites.iter().any(|s| have(at(s), s.expect.len()) != s.expect) {
+        log("drops: the prize look table's lea bytes are not Re:CoM's; no KH1 drops");
+        return false;
+    }
+    let live = va(b, site::LOOK_TABLE);
+    let rows: [u8; dr::LOOK_ROWS * dr::LOOK_ROW] = rd(live);
+    // Each row: a pointer to "rec_prise" (relocated), the effect id, the scale.
+    for r in 0..dr::LOOK_ROWS {
+        let name: usize = rd(live + r * dr::LOOK_ROW);
+        if name < b || name >= b + crate::sites::STEAM_SIZE_OF_IMAGE as usize || have(name, 10) != b"rec_prise\0" {
+            log(&format!("drops: prize look row {r} doesn't name rec_prise; no KH1 drops"));
+            return false;
+        }
+    }
+    let table = dr::look_table(&rows);
+    let Some(copy) = super::hook::place_data_near(at(&sites[0]), &table) else {
+        log("drops: no memory near the prize init for the look table; no KH1 drops");
+        return false;
+    };
+    let mut new = Vec::new();
+    for s in sites {
+        match dr::lea_rax(at(s) as u64, copy as u64) {
+            Some(code) => new.push(code),
+            None => {
+                log("drops: the look table copy is out of the lea's reach; no KH1 drops");
+                return false;
+            }
+        }
+    }
+    for (s, code) in sites.iter().zip(&new) {
+        if !super::hook::patch(at(s), s.expect, code, s.name) {
+            return false;
+        }
+    }
+    TABLE.store(copy, Ordering::Release);
+    true
+}
+
+/// The hooks are in: drops are made from now on.
+pub fn mark_installed() {
+    ON.store(true, Ordering::Release);
+}
+
+/// The defeat's card prize (`0x140180D20(enemy, &point)`): Re:CoM's own first, then, at Combat =
+/// KH1 in Sora's story, the twin's KH1 item drops at the same point.
+pub unsafe extern "win64" fn defeat_prize(enemy: usize, point: usize) -> u64 {
+    let r = orig::<DefeatFn>(&ORIG_DEFEAT_PRIZE)(enemy, point);
+    if ON.load(Ordering::Acquire) && enemy != 0 && point != 0 && super::movement::kh1_on() && rd::<usize>(enemy + ENP_ROW) != 0 {
+        drop_items(enemy, point);
+    }
+    r
+}
+
+unsafe fn rand() -> f32 {
+    func::<RandFn>(RAND)()
+}
+
+/// KH1's roll for this enemy's twin, then a prize per battle item that dropped.
+unsafe fn drop_items(enemy: usize, point: usize) {
+    let Some((class, world, table)) = super::stats::drops(enemy) else { return };
+    let out = dr::outcome(table, dr::lucky_factor(dr::LUCKY_STRIKES), || rand());
+    if out.is_empty() {
+        return;
+    }
+    let pos: [f32; 4] = rd(point);
+    for d in out {
+        match d {
+            Dropped::Spawned(item) => {
+                let (r1, r2) = (rand(), rand());
+                let mut desc = dr::item_prize(pos, item, r1, r2);
+                func::<AnglesFn>(ANGLES)(desc.angles.as_mut_ptr());
+                let prize = func::<SpawnFn>(SPAWN)(func::<FactoryFn>(FACTORY)(), &desc, 0);
+                note(|| format!("{class} (world {world}; {}): {} dropped at ({:.2}, {:.2}, {:.2}): prize {prize:#x}", dr::describe(table), crate::items::name(item), pos[0], pos[1], pos[2]));
+            }
+            Dropped::NotAnItemHere(item) => note(|| format!("{class} (world {world}): KH1 item #{item} dropped; not one of the mod's items: no prize")),
+        }
+    }
+}
+
+/// Re:CoM's prize add (`0x1401F4AB0(kind, arg, mode)`): a KH1 item prize is KH1's pickup; every
+/// other kind is Re:CoM's.
+pub unsafe extern "win64" fn prize_add(kind: u32, arg: u32, mode: i32) {
+    if kind != dr::KH1_ITEM_KIND {
+        return orig::<AddFn>(&ORIG_PRIZE_ADD)(kind, arg, mode);
+    }
+    let item = (arg & 0xFFFF) as u16;
+    if item == 0 || item > 0xFF {
+        note(|| format!("a KH1 item prize with item {item}: nothing"));
+        return;
+    }
+    let r = super::items::pick_up(item as u8, "picked up (enemy drop)");
+    if r.is_none() {
+        note(|| format!("{} picked up but refused (stock at 99, or KH1 items not live): lost", crate::items::name(item as u8)));
+    }
+}
+
+/// The start line.
+pub fn start_line() -> String {
+    format!(
+        "drops: KH1's item drops (M8 stage 8a.4) at combat = kh1 in Sora's story: {} twin classes with KH1 defeat tables; rolled after Re:CoM's defeat prizes (0x140180D20), KH1's chances x Lucky Strike {} (no ability yet); battle items only; Re:CoM prize kind {:#x} (look: kind {:#x}'s rec_prise row, table at {:#x}); pickup through the prize add 0x1401F4AB0 by KH1's rule",
+        super::stats::drop_classes(),
+        dr::lucky_factor(dr::LUCKY_STRIKES),
+        dr::KH1_ITEM_KIND,
+        dr::LOOK_FROM_KIND,
+        TABLE.load(Ordering::Acquire)
+    )
+}
