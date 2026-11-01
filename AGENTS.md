@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 54: Battle end: KH1 yields to Re:CoM's win; battle-end log, version 0.24.3 (2026-10-31)
+
+> "after finishing a battle in the field sora is locked in place and doesnt return to the field"
+
+- Re:CoM's battle end (Checked, decomp + disasm; `recom-m6-battles.md` § Battle end): last enemy
+  → `player+0x428 |= 4` (`0x1401F4A60`) → win action 0x1C (`0x1401F1B20`) → manager
+  `0x1401871D0` states 1 (children, enemies) → 2/3 (prize gauge `+0x94`) → 4 (win pose done
+  `0x1401F3C90`) → 5/6 (roulette, task 0x22) → 7 (flag (1, 2), room script returns Sora).
+- Owner's trace 13: win pose finished (0x1C sub 4), no enemies: the manager waits elsewhere; not
+  identified. None of our hooks writes the manager, prize gauge, pause flag, roulette or flag.
+- Fixed a real deviation: a KH1 cast or swing ending after the win overwrote Re:CoM's win action
+  for a frame (0x1401F1B20 ran twice); `Kh1Sora::yield_to_recom` now stops our frame then.
+- New `battle end:` log lines and an `end …` trace token name what Re:CoM waits for (manager
+  state, children by class, prize gauge states and animation ids, pause flag, roulette, flag
+  (1, 2)). 9 checked-only sites. Not seen in game.
+
+---
+
 ## Stage 53: MP bar under the FRIENDS row, version 0.24.2 (2026-10-31)
 
 > Owner's video (2026-10-31): the MP bar sits over Re:CoM's FRIENDS row (label and friend cards

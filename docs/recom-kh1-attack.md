@@ -74,6 +74,11 @@ Assumption. Code: `crates/kh1-recom` (`attack.rs`, `movement.rs`, `win/attack.rs
    (the weapon's volume, effects, fields), and KH1's next motion plays. If Re:CoM ends it first, the
    next KH1 frame takes over from Re:CoM's state. An air swing Re:CoM ends keeps KH1's arc into the
    fall.
+   **A won battle:** with Re:CoM's win pending (`player+0x428 & 4`), `0x1401F6660` enters the win
+   action `0x1C` instead (`0x1401F6794` → `0x1401F1B20`); `leave_swing` sees it and the KH1 frame
+   yields (no idle motion or action after it). When Re:CoM's own exe ends the swing (5b) into the
+   win, the wrapper's re-write (5c) is skipped (the action is no longer `0xA`). Checked (decomp +
+   tests); `recom-m6-battles.md` § Battle end.
 
 ### KH1 rows (`attack::kh1_row_bytes`). Checked (exe + files + tests)
 

@@ -85,6 +85,8 @@ struct FakeRecom {
     casts: Vec<crate::magic::CastStart>,
     releases: Vec<(crate::magic::CastStart, u64)>,
     cast_ends: usize,
+    /// Re:CoM's battle is won (`player+0x428 & 4`): its end action enters the win action 0x1C.
+    win_pending: bool,
 }
 
 impl FakeRecom {
@@ -123,7 +125,20 @@ impl FakeRecom {
             casts: Vec::new(),
             releases: Vec::new(),
             cast_ends: 0,
+            win_pending: false,
         }
+    }
+
+    /// Re:CoM's end action `0x1401F6660`: the win action when the win is pending (`0x1401F6794` →
+    /// `0x1401F1B20`, which also stops the motion), else the idle.
+    fn end_action(&mut self) -> bool {
+        if self.win_pending {
+            self.act = Action { id: crate::battle::end::WIN_ACTION, sub: 2, phase: 3 };
+            self.clip = None;
+            return true;
+        }
+        self.act = Action { id: action::STAND, sub: 0, phase: 0 };
+        false
     }
 
     /// Re:CoM's root step as it is: the motion update makes an absolute position (the model's
@@ -253,9 +268,9 @@ impl Host for FakeRecom {
     fn set_untouchable(&mut self, on: bool) {
         self.untouchable = on;
     }
-    fn end_swing(&mut self, _airborne: bool) {
+    fn end_swing(&mut self, _airborne: bool) -> bool {
         self.swing_ends += 1;
-        self.act = Action { id: action::STAND, sub: 0, phase: 0 };
+        self.end_action()
     }
     fn can_cast(&mut self, _spell: u8, _level: u8) -> bool {
         self.mp_ok
@@ -270,9 +285,9 @@ impl Host for FakeRecom {
         self.releases.push((*c, self.tick));
         Some(100 + self.releases.len() as u32)
     }
-    fn end_cast(&mut self, _airborne: bool) {
+    fn end_cast(&mut self, _airborne: bool) -> bool {
         self.cast_ends += 1;
-        self.act = Action { id: action::STAND, sub: 0, phase: 0 };
+        self.end_action()
     }
     fn spring_jump(&mut self) -> bool {
         if !spring::launches(spring::ABILITY, || if self.on_spring { spring::ON_SPRING } else { 0 }) {
@@ -1154,6 +1169,67 @@ fn ground_thunder_releases_at_30_and_locks_sora_to_68() {
     // No free key: locked to the motion's end (68), then idle; Re:CoM's action ended once.
     assert!(matches!(free_at, Some(68) | Some(69)), "{free_at:?}");
     assert_eq!(p.recom.cast_ends, 1);
+}
+
+/// The owner's log of 2026-10-31 (0.24.2): the last enemies fell to a Thundaga's bolts while
+/// Sora was locked in its 68-frame cast. Re:CoM's end action at the cast's end enters its win
+/// action (`0x1401F6794` → `0x1401F1B20`); the KH1 frame must leave it to Re:CoM (no idle action,
+/// no idle motion over the win pose).
+#[test]
+fn a_cast_that_ends_after_the_win_yields_to_re_coms_win_action() {
+    use crate::battle::end::WIN_ACTION;
+    use crate::magic::MagicCommand;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    step_cast(&mut p, Pad::default(), Some(MagicCommand { spell: 2, level: 3 }));
+    // The last bolt kills the last enemy mid-cast: Re:CoM's win is pending from then on.
+    for _ in 0..40 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    p.recom.win_pending = true;
+    let mut took = None;
+    for k in 0..60 {
+        let plays = p.recom.plays.len();
+        let out = step_cast(&mut p, Pad::default(), None);
+        if out.recom_took {
+            took = Some(k);
+            assert_eq!(p.recom.plays.len(), plays, "no KH1 motion over Re:CoM's win pose");
+            break;
+        }
+    }
+    assert!(took.is_some(), "the cast's end entered Re:CoM's win action");
+    assert_eq!(p.recom.cast_ends, 1);
+    assert_eq!(p.recom.act.id, WIN_ACTION, "the KH1 frame left Re:CoM's win action alone");
+    assert!(p.ours.cast.is_none() && p.ours.swing.is_none());
+    // A swing ended by the win, the same.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..3 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    step_cast(&mut p, Pad { attack: true, ..Default::default() }, None);
+    assert!(p.ours.swing.is_some());
+    p.recom.win_pending = true;
+    let mut took = false;
+    for _ in 0..90 {
+        if step_cast(&mut p, Pad::default(), None).recom_took {
+            took = true;
+            break;
+        }
+    }
+    assert!(took);
+    assert_eq!(p.recom.swing_ends, 1);
+    assert_eq!(p.recom.act.id, WIN_ACTION);
+    // Without a won battle nothing changes: the cast ends into the idle as before.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(MagicCommand { spell: 2, level: 3 }));
+    for _ in 0..100 {
+        assert!(!step_cast(&mut p, Pad::default(), None).recom_took);
+    }
+    assert_eq!(p.recom.cast_ends, 1);
+    assert_ne!(p.recom.act.id, WIN_ACTION);
 }
 
 // ---- M7 stage 7.4c: the Fire release's root curve ----

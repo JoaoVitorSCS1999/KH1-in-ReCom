@@ -1376,6 +1376,10 @@ impl Kh1Sora {
         // A swing playing (the fast path from swing 1 / the lunge, or a cast from a combo
         // window): Re:CoM ends its attack action first, as the new action starts.
         self.leave_swing(h);
+        if self.recom_took {
+            // Re:CoM's win action took over as the swing ended (the frame then yields).
+            return refuse(self, "Re:CoM's win");
+        }
         if !h.start_cast(&start) {
             return refuse(self, "no Re:CoM row");
         }
@@ -1469,8 +1473,8 @@ impl Kh1Sora {
                 self.cast_log.push(CastEvent::Interrupted { spell: c.start.spell, level: c.start.level, frame: c.age, by: self.rec.head() });
             }
         }
-        if self.swing.is_none() {
-            h.end_cast(self.state != state::GROUND);
+        if self.swing.is_none() && h.end_cast(self.state != state::GROUND) {
+            self.recom_took = true;
         }
     }
 

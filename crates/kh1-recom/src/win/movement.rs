@@ -478,7 +478,7 @@ impl Host for RecomHost {
         unsafe { rd::<i32>(self.pl + crate::attack::field::HIT) != 0 }
     }
 
-    fn end_swing(&mut self, airborne: bool) {
+    fn end_swing(&mut self, airborne: bool) -> bool {
         unsafe { super::attack::end_swing(self.pl, airborne) }
     }
 
@@ -544,7 +544,7 @@ impl Host for RecomHost {
         unsafe { super::magic::release(self.pl, c) }
     }
 
-    fn end_cast(&mut self, airborne: bool) {
+    fn end_cast(&mut self, airborne: bool) -> bool {
         unsafe { super::magic::end_cast(self.pl, airborne) }
     }
 }
@@ -565,7 +565,11 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     }
     let mut host = RecomHost::new(pl);
     slot.last = slot.sora.frame(&mut host, &input, fresh);
-    slot.sync = Some(read_sync(pl));
+    // Re:CoM's end action entered its win action: it owns Sora; a later KH1 frame takes over.
+    slot.sync = if slot.last.recom_took { None } else { Some(read_sync(pl)) };
+    if slot.last.recom_took {
+        log_once_win();
+    }
     if !slot.last.cast.is_empty() {
         super::magic::on_events(&slot.last.cast);
     }
@@ -633,6 +637,16 @@ pub unsafe extern "win64" fn move_step(pl: usize) {
         return o(pl);
     }
     run_frame(pl, init_fresh(pl));
+}
+
+/// Re:CoM's win action and Sora's "win pending" bit (`crate::battle::end`).
+pub(super) unsafe fn in_recom_win(pl: usize) -> bool {
+    rd::<u32>(pl + p::ACTION) == crate::battle::end::WIN_ACTION
+}
+
+fn log_once_win() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| log("movement: Re:CoM's end action entered its win action (0x1c) as a KH1 swing or cast ended; the KH1 frame yielded to it"));
 }
 
 fn log_once_spring() {

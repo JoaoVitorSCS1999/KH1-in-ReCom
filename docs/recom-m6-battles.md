@@ -633,3 +633,116 @@ lines (Heartless bosses), and the F9 trace shows `ans=0xb` while Sora swings.
    `P5: Re:CoM's (1 written)` and `Re:CoM's bytes (16 written)`.
 9. Riku's story (Lexaeus, Zexion, Ansem): `Re:CoM (Riku's story)`, P5 Re:CoM's, everything as
    Re:CoM.
+
+## Battle end: Re:CoM's sequence, the KH1 frame's yield, the battle-end log (owner's 0.24.2 soft-lock)
+
+Owner (2026-10-31, 0.24.2): "after finishing a battle in the field sora is locked in place and
+doesnt return to the field". Log `kh1-recom.log` (battle 2: the last four enemies fell to a
+Thundaga's bolts); F9 trace 13 of the stuck moment (155 frames).
+
+### Re:CoM's battle end. Checked (decomp + disasm)
+
+1. **The last enemy.** An enemy with `+0x154 & 0x40000` dies → `0x140187440(manager, id)` → the
+   manager's enemy count `+0x98` − 1; at 0 → `0x1401F4A60`: unless Sora is dead (`+0x7B0`) or in
+   action 0x17, **`player+0x428 |= 4` (win pending)** and `+0x420 |= 0x2000`.
+2. **Sora's win action `0x1C`** (`0x1401F1B20`: prev = action, action = 0x1C, `+0x414` = 2,
+   motion reset `0x1401F6990(8)`, motion stop, CBTL lock `0x140162250`, the revolver freed) is
+   entered from Re:CoM's own code only:
+   - the move exe `0x1401EEDA0` (actions 2–4) in battle, before its commands;
+   - the end action `0x1401F6660`, which every attack / magic exe calls at its end
+     (`0x1401F6794`: `test byte [rbx+0x428],4` → `call 0x1401F1B20`, instead of the idle / fall);
+   - the damage check `0x1401E6DE0` when a hit arrives.
+   Re:CoM's jump exe has no such test: an airborne Sora lands first.
+3. **The pose.** The Battle exe's case 0x1C: `+0x414` 0/1 → 2; at 2, `0x1401F6380(pl, 1)` (on the
+   ground: motion row 0x2A, done) and `+0x420 & 0x2000` → `+0x414` = 4 (3 in scripted battles).
+4. **The manager** (`CBattleEnemyManager`, task 0x19; its step `0x1401871D0`):
+
+   | state `+0x58` | waits for | then |
+   |---|---|---|
+   | 1 | child tasks `+0x50` ≤ 0, enemy count `+0x98` ≤ 0, room (`0x1402339B0`) not in `0x41A..=0x4AE` | 2, timer `+0x5C` = 6000 ticks (2 s; 15000 with `+0x74`); 4 at once with `+0x70` |
+   | 2 | prize display busy (`0x140209830`: `CPrizeGauge` `0x14087B690` `+0x94` ≠ 0) → 3; else the timer runs down by `+0x14` | 4 |
+   | 3 | the prize display closed (`+0x94` = 0) | 4 |
+   | 4 | `0x1401F3C90`: alive, action 0x1C, `+0x414` > 2 | 5 / 6 (`CRoulette`, prizes 0xD6 / 0xD7: `+0x6C` / `+0x70`), else 7 |
+   | 5, 6 | the roulette task 0x22 gone | 6 / 7 |
+   | 7 | — : event flag (1, 2) each step (`0x140182240`); the room script returns Sora to the field | — |
+
+   The prize display (`0x1402094F0`, run by `CPrizeGauge`'s update `0x14020A710`, which returns
+   at once while the gauge pause `0x14087B808` is set): a card picked up in battle shows with
+   `+0x94` = `player+0x390` + 1 (`0x1401F4AB0`); state 2 closes when its sequence ends, or after
+   3000 ticks on a confirm press (`0x14029B490(0)`, a plain pad read); state 1 closes when its
+   sequence ends or the HUD mask (1, 0xE2) is set. Its EXP display (`+0x5C`) steps in the same
+   update, after it.
+
+### What the owner's trace shows. Checked (trace 13)
+
+Every frame: Re:CoM's action 0x1C, `+0x414` = 4, phase 3, row 0x2A, "Re:CoM's own handler", no
+enemy in the manager's list. So **Sora's win pose is done** (`0x1401F3C90` answers 1) and Re:CoM's
+manager is waiting in state 1, 2, 3, 5 or 6 (or the room script after 7). The trace had no field
+for the manager, so which one is **not known**. The owner's earlier screenshot showed the EXP
+display ("EXP + 12") still on screen, which fits the prize gauge not stepping (its update returns
+early while the gauge pause `0x14087B808` is set, or the task isn't run) — **Assumption**.
+
+### Our hooks on the battle-end path. Checked (decomp + exe + code)
+
+None of ours writes the manager, the prize gauge, the gauge pause, the roulette or flag (1, 2):
+
+- **MP refill wrappers (decision 35):** `0x1401AC9D0` is `void(this)` (a state function stored in
+  `+0x68`), wrapped as `fn(usize)`, the original called first with the same argument; the
+  level-up screen `0x14010EF10` is `void(this)` (vtable), the same; the call `0x140237F3A` is
+  `call 0x1402374C0` with `ecx` = 0 (`void(int)`), retargeted through a near `jmp [rip]` to
+  `checkpoint_call(a)`, which calls the original with `a` and returns to `0x140237F3F` (the HP
+  fill), registers per the x64 ABI. Behaviour-identical apart from the MP write.
+- **MP bar / command menu (`CPlayerGauge` init `0x140208360`, second-bar state `0x14020C190`,
+  deleting dtor `0x140207770`):** each calls Re:CoM's first (init, state) or last (dtor) with its
+  arguments; `CPrizeGauge` is made inside the init (`0x140206EE0`) and has its own dtors
+  (`0x1402072E0`, `0x1402078A0`, not hooked). The command menu reads the confirm press with
+  `0x14029B490` (a pure read of the pad's pressed bits) and writes no pad state; it only clears
+  `player+0x424` request bits.
+- **M6 stage 2 / 3 mask reads:** the 16 retargeted (1, 0xE2) reads are in the cockpit
+  (`0x1401689F0`), Sora's cards (`0x140150340`, `0x1401514B0`, `0x1401545A0`), the enemy cue,
+  stock row and stock folder; none is in `0x1402094F0`, `0x14020A710`, `0x14020D940`,
+  `0x14020DEC0`.
+- **Request bits `0x1401F8150`:** keeps Re:CoM's battle-branch early returns while the win is
+  pending (`battle_guards_clear` tests `+0x428 & 4`).
+- **The KH1 frame at the win (the one deviation found):** when the last enemy dies during a KH1
+  cast (or swing), the cast's end calls Re:CoM's end action, which enters the win action; our
+  frame then went on in the same frame and **wrote over it**: the idle motion request over the
+  win pose, then action 2 (`set_action`), so Re:CoM's win action was entered a second time from
+  the move exe the next frame (`0x1401F1B20` twice: CBTL lock and motion stop twice, the
+  recorded previous action 2 instead of 0x13). The trace shows Re:CoM recovered (pose done), so
+  this is **not** what held the battle, but Re:CoM's own path must run as in Re:CoM.
+
+### Changed (this version)
+
+- **The KH1 frame yields to Re:CoM's win action.** `Host::end_swing` / `end_cast` return whether
+  Re:CoM's end action entered action 0x1C (`win::attack::end_swing`, `win::magic::end_cast` read
+  `+0x40C` after `0x1401F6660`); the KH1 frame (`Kh1Sora::yield_to_recom`) then writes nothing
+  more (no motion in the motion update's replay, no action, no queued idle) and drops its cast /
+  swing; `run_frame` clears its sync so a later KH1 frame takes over afresh; `exe_magic`'s
+  take-over path no longer runs a KH1 frame after an end that entered the win. Test:
+  `movement::tests::a_cast_that_ends_after_the_win_yields_to_re_coms_win_action` (a Thundaga
+  ended by the win, a swing ended by the win, and no change without a won battle). Checked
+  (decomp `0x1401F6660`, `0x1401F1B20`; tests).
+- **The battle-end log and trace** (`crate::battle::end`, `win::battle::end_watch`, from the
+  request-bits wrapper; two loads a frame unless the win is pending or Sora is in action 0x1C):
+  `battle end: started: Sora action … sub … phase … dead … win-pending …; manager state s timer t
+  children n count c roulette a/b; prize gauge card p exp e; gauge pause x; roulette task r; flag
+  (1, 2) f; HUD mask m; waiting for <what Re:CoM waits for>; prize gauge 0x…: CPrizeGauge flags …
+  banked … step … parent … flags …; EXP ctrl layers … id … done …; card ctrl …; ours: KH1 cast …,
+  swing …, lock …; spell threads …`, again on every change (not the timer) and every 10 s while
+  nothing changes (60 lines a battle). State 1 with children lists the manager's child tasks by
+  class. F9 trace: `end mgr=s<state> t<timer> c<children> n<count> prize=<card>/<exp> pause=…
+  roul=… over=… hud=…` in the m6 cell. Sites `sites::BATTLE_END_CHECKED` (9, checked only; the
+  getters `0x1401B0870`, `0x1401B08C0`, `0x1402480C0` were already checked).
+
+### Not known yet (needs the new log)
+
+- Which manager state the owner's battle stopped in, and so what Re:CoM waited for. If the log
+  says **state 3 / prize gauge card ≠ 0**: is the gauge paused (`gauge pause 1`), its task not
+  run (`flags` with 0x10 / 0x8000, or its parent's), or its sequence never ending (`card ctrl …
+  done false` with `id 0xffffffff` would mean Re:CoM's 2D instance pool (`0x1402425E0`, 2048
+  entries) ran out). **State 1 with children**: the class names. **State 5 / 6**: the roulette.
+  **State 7 / flag (1, 2) 1**: the room script, not the manager.
+- Why battle 1 of the same log returned and battle 2 didn't. Both ended on a Thundaga (battle 1:
+  2 bolts, the last 30 frames before the cast's end; battle 2: a second wave, 4 bolts, the last
+  14 frames before it). Not explained by anything read so far.

@@ -397,8 +397,8 @@ impl Kh1Sora {
     /// a landing or a walk-off replaced it): Re:CoM ends its attack action (`0x1401F6660`), and
     /// the KH1 motion that follows is played by the caller.
     pub(crate) fn leave_swing(&mut self, h: &mut dyn Host) {
-        if self.swing.take().is_some() {
-            h.end_swing(self.state != state::GROUND);
+        if self.swing.take().is_some() && h.end_swing(self.state != state::GROUND) {
+            self.recom_took = true;
         }
     }
 

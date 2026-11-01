@@ -88,6 +88,11 @@ As a KH1 swing is KH1's frame on Re:CoM's attack action `0xA` (M5):
    action (as `exeMagic` does), unless a swing or another cast already took Re:CoM's action
    over. If Re:CoM ran something else (a hit), the next KH1 frame drops the cast: no ball, no MP
    if it hadn't released.
+   **A won battle:** when Re:CoM's win is pending (`player+0x428 & 4`, the last enemy died during
+   the cast, e.g. to Thunder's bolts), that end action enters Re:CoM's win action `0x1C` instead
+   of the idle (`0x1401F6794` → `0x1401F1B20`); the KH1 frame then yields: no idle motion or
+   action after it (`Kh1Sora::yield_to_recom`). Checked (decomp + tests);
+   `recom-m6-battles.md` § Battle end.
 
 ### The KH1 rows (`magic::fire_row_bytes`)
 

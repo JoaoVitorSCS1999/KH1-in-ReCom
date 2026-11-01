@@ -253,7 +253,12 @@ pub trait Host {
         false
     }
     /// Re:CoM ends its attack action (`0x1401F6660`): the weapon's volume, its effects, its fields.
-    fn end_swing(&mut self, _airborne: bool) {}
+    /// True when Re:CoM's end action entered an action of its own instead of the idle / fall: its
+    /// win action `0x1C` (the battle is won: `player+0x428 & 4`, `0x1401F6794` →
+    /// `0x1401F1B20`). The KH1 frame then yields to it ([`Kh1Sora::frame`]).
+    fn end_swing(&mut self, _airborne: bool) -> bool {
+        false
+    }
     /// KH1's usable test for a spell (`0x14028EFD0`: learned, MP for its cost, `0x1402A4C10`).
     fn can_cast(&mut self, _spell: u8, _level: u8) -> bool {
         false
@@ -268,8 +273,11 @@ pub trait Host {
     fn release_cast(&mut self, _c: &crate::magic::CastStart) -> Option<u32> {
         None
     }
-    /// Re:CoM ends its magic action (`0x1401F6660`, as `exeMagic` does).
-    fn end_cast(&mut self, _airborne: bool) {}
+    /// Re:CoM ends its magic action (`0x1401F6660`, as `exeMagic` does). True as for
+    /// [`Host::end_swing`]: Re:CoM entered its win action, the KH1 frame yields.
+    fn end_cast(&mut self, _airborne: bool) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -331,6 +339,9 @@ pub struct FrameOut {
     pub recom_spring: bool,
     /// What the cast did (M7 stage 7.4).
     pub cast: Vec<crate::magic::CastEvent>,
+    /// Re:CoM's end action entered its win action (`0x1C`) in this frame: the KH1 frame wrote
+    /// nothing to Re:CoM after it (no action, no motion), and the next one takes over afresh.
+    pub recom_took: bool,
 }
 
 /// KH1 Sora's fields Re:CoM has no place for, and the KH1 data the handlers use.
@@ -388,6 +399,9 @@ pub struct Kh1Sora {
     /// The KH1 cast Re:CoM's magic action is playing for us (M7 stage 7.4), if any.
     pub cast: Option<crate::magic::Cast>,
     pub(crate) cast_log: Vec<crate::magic::CastEvent>,
+    /// Re:CoM's end action (from [`Kh1Sora::leave_swing`] / `leave_cast`) entered its own win
+    /// action: this frame yields to it.
+    pub(crate) recom_took: bool,
 }
 
 /// The facing Re:CoM holds may differ from ours by rounding; more than this means Re:CoM turned
@@ -442,6 +456,7 @@ impl Kh1Sora {
             untouchable_reported: false,
             cast: None,
             cast_log: Vec::new(),
+            recom_took: false,
         }
     }
 
@@ -637,6 +652,10 @@ impl Kh1Sora {
                 // cast's: Re:CoM ends its magic action.
                 self.leave_swing(h);
                 self.leave_cast(h);
+                if self.recom_took {
+                    // Re:CoM's end action entered its win action: its motion, not our idle.
+                    return;
+                }
                 // KH1 started it in that update; Re:CoM starts it now, one step on.
                 let (r, b, s) = (self.rec.req, self.rec.blend, self.rec.frame);
                 self.rec.own_clock = !h.play(r, b, s + step);
@@ -738,6 +757,9 @@ impl Kh1Sora {
             // KH1's spell script of the last frame (M7 stage 7.4): its task runs after the actors'
             // update (priority 137000, `0x14028F6B0`), so it sees that frame's motion update.
             self.cast_step(h, dt);
+        }
+        if self.yield_to_recom(&mut out) {
+            return out;
         }
         let ev = &mut out.events;
         // A guarded hit since the last frame (Re:CoM's apply on Sora's body guard).
@@ -872,6 +894,9 @@ impl Kh1Sora {
         }
         // A landing, walk-off or another command replaced the cast's motion.
         self.leave_cast(h);
+        if self.yield_to_recom(&mut out) {
+            return out;
+        }
         h.set_action(self.recom_action());
         self.issue(h);
         // KH1's guard object: live on the Guard motion's hit track (frames 10–36).
@@ -882,6 +907,24 @@ impl Kh1Sora {
         }
         out.cast = self.take_cast_log();
         out
+    }
+
+    /// Re:CoM's end action (a swing's or a cast's) entered Re:CoM's win action (the battle is
+    /// won, `0x1401F6794` → `0x1401F1B20`): this frame writes nothing more to Re:CoM after it (no
+    /// action, no motion), so Re:CoM's battle end runs as it does in Re:CoM; the next KH1 frame, if
+    /// one runs, takes over afresh. Checked (decomp `0x1401F6660`, `0x1401F1B20`).
+    fn yield_to_recom(&mut self, out: &mut FrameOut) -> bool {
+        if !self.recom_took {
+            return false;
+        }
+        self.recom_took = false;
+        self.swing = None;
+        self.cast = None;
+        self.lock = false;
+        self.rec = MotionRec::unknown();
+        out.cast = self.take_cast_log();
+        out.recom_took = true;
+        true
     }
 
     /// KH1's kind-6 guard success (`0x14029D720`): request 0x6E at once (the guard motion and its

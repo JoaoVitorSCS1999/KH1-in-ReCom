@@ -282,8 +282,11 @@ pub(super) unsafe fn start_swing(pl: usize, s: &SwingStart) -> bool {
     take_pending().is_none()
 }
 
-pub(super) unsafe fn end_swing(pl: usize, airborne: bool) {
+/// Re:CoM ends its attack action (`0x1401F6660`). True when it entered its win action instead
+/// (`0x1401F6794`: the battle's win is pending, `player+0x428 & 4`).
+pub(super) unsafe fn end_swing(pl: usize, airborne: bool) -> bool {
     func::<PlIntFn>(END_ATTACK)(pl, airborne as i32);
+    mv::in_recom_win(pl)
 }
 
 /// Re:CoM's row pick for a KH1 row (`0x1401F7520`'s writes, cardless).
@@ -334,6 +337,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     super::magic::new_frame();
     // A Thunder's strikes (7.6): its script thread's run (nothing unless one is going).
     super::magic::strikes_frame(pl);
+    // Re:CoM's battle end, logged (two loads unless its win is pending; `crate::battle::end`).
+    super::battle::end_watch(pl);
     let battle: i32 = rd(pl + p::BATTLE);
     if battle != 0 && battle_guards_clear(pl, rd(pl + p::REQUEST)) {
         // Re:CoM's own field branch: the confirm press is the Attack, no card input.

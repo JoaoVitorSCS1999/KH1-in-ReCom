@@ -1410,6 +1410,11 @@ unsafe fn thunder_effect(pl: usize, r: &[u8; 16], id: u32, at: [f32; 4]) {
     func::<EffectFn>(EFFECT_AT)(pl, name, id, &at, &ang as *const [f32; 4] as u64, 0.0);
 }
 
+/// Spell threads still running (Thunder / Stop strikes, Gravity falls), for the battle-end log.
+pub fn threads_running() -> (usize, usize) {
+    (STRIKES.lock().map(|g| g.len()).unwrap_or(0), FALLS.lock().map(|g| g.len()).unwrap_or(0))
+}
+
 /// Sora's frame start (the request-bits wrapper, every frame at Combat = KH1): one run of a
 /// Thunder strike thread, if one is going (one atomic load otherwise).
 pub unsafe fn strikes_frame(pl: usize) {
@@ -1705,8 +1710,10 @@ pub unsafe extern "win64" fn kh1_ball_exe(bullet: usize) {
 }
 
 /// Re:CoM ends its magic action (`0x1401F6660(player, airborne)`, as `exeMagic` does at its end).
-pub unsafe fn end_cast(pl: usize, airborne: bool) {
+/// True when it entered its win action instead (`0x1401F6794`: the battle's win is pending).
+pub unsafe fn end_cast(pl: usize, airborne: bool) -> bool {
     func::<PlIntFn>(END_ACTION)(pl, airborne as i32);
+    mv::in_recom_win(pl)
 }
 
 /// The frame's cast events (from `win::movement::run_frame`): log and trace.
@@ -1728,7 +1735,10 @@ pub unsafe extern "win64" fn exe_magic(pl: usize) {
     if !mv::continues(pl) {
         // Re:CoM ran something else in between (our cast isn't what it ran): end its action and
         // take over from Re:CoM's state; the cast is dropped (no spell, no MP if not released).
-        end_cast(pl, func::<GroundFn>(GROUND_TEST)(pl) != 0);
+        // Unless that end entered Re:CoM's win action: Re:CoM's battle end owns Sora.
+        if end_cast(pl, func::<GroundFn>(GROUND_TEST)(pl) != 0) {
+            return;
+        }
         return mv::run_frame(pl, true);
     }
     mv::run_frame(pl, false);

@@ -14,11 +14,18 @@
 //!   place by the same switch (ours in a KH1 battle: action 0xA reads as 0xB); boss attacks
 //!   without a card logged per battle; `duel_init` (`0x140220C40`, log only): Sora's card duel.
 //!
-//! Per frame: nothing. The trace (F9 only) reads the enemy list through `trace_token`.
+//! - `end_watch` (Re:CoM's battle end, read only; `crate::battle::end`): from Sora's frame start
+//!   (the request-bits wrapper), only while Re:CoM's win is pending or Sora is in its win action:
+//!   a log line when what Re:CoM waits for changes (and every 10 s while it doesn't), and the F9
+//!   trace's `end …` token.
+//!
+//! Per frame: nothing but `end_watch`'s two loads. The trace (F9 only) reads the enemy list
+//! through `trace_token`.
 
 use super::movement::{self as mv, func, orig, rd, wr};
 use super::{base, log, va};
 use crate::battle::{self as b, cbtl, enemy, Bytes, Gate, Handler, Patch, Path, Play, Why};
+use crate::battle::end as be;
 use crate::boss;
 use crate::sites::{data, M6_BOSS_PATCHES, M6_PATCHES};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
@@ -238,6 +245,7 @@ pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: us
     let battle = BATTLE_NO.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     BOSS_BATTLE_LINES.store(0, Ordering::Relaxed);
     SIDE2_CARDS.store(0, Ordering::Relaxed);
+    END_LINES.store(0, Ordering::Relaxed);
     capped(&BATTLE_LINES, b::BATTLE_LOG_LINES, || {
         format!(
             "battle start (battle {battle}): {}; no-card attacks (P1) {}; think gate (P2) and grant all (P3): {}; crowd pace (P4): {}; Sora attacking for bosses (P5): {}",
@@ -357,7 +365,185 @@ pub unsafe fn trace_token() -> String {
     };
     let (a, ans) = action_and_answer();
     let duel = (c != 0).then(|| rd::<u32>(c + cbtl::DUEL));
-    format!("{m6}; {}", boss::trace_token(p5, a, ans, duel, super::deck::enemy_ui_hidden()))
+    let end_t = end_view_now().map(|v| format!("; {}", be::token(&v))).unwrap_or_default();
+    format!("{m6}; {}{end_t}", boss::trace_token(p5, a, ans, duel, super::deck::enemy_ui_hidden()))
+}
+
+// ---- Re:CoM's battle end, read only (`crate::battle::end`) ----
+
+/// Re:CoM functions and data the watch reads (`sites::BATTLE_END_CHECKED`; the getters are checked by `M6_DECK_CALLEES` and `KEYBLADE_CALLEES`).
+const FLAG_GETTER: u32 = 0x001B_0870;
+const VAR_GETTER: u32 = 0x001B_08C0;
+const LAYER_DONE: u32 = 0x0024_80C0;
+/// `Gauge::CPrizeGauge`'s singleton (`0x140209830`'s load) and the gauge pause (`0x140232050`'s).
+const PRIZE_GAUGE: u64 = 0x1_4087_B690;
+const GAUGE_PAUSE: u64 = 0x1_4087_B808;
+/// `CTask` (ctor `0x1402AB850`, step `0x1402AC3C0`): time banked, the last step it ran with,
+/// flags (u16; 0x10 off, 0x8000 dying: its update and its children's are skipped), the parent.
+mod task_f {
+    pub const BANKED: usize = 0x10;
+    pub const STEP: usize = 0x14;
+    pub const FLAGS: usize = 0x18;
+    pub const PARENT: usize = 0x28;
+}
+/// `CPrizeGauge`'s controls: the EXP display's (`+0x70`, `0x14020A710`) and the get-card
+/// display's (`+0xA0`, `0x1402094F0`). Checked (decomp).
+const PRIZE_EXP_CTRL: usize = 0x70;
+const PRIZE_CARD_CTRL: usize = 0xA0;
+/// The C2DSeqCtrl's layer count and first layer's instance id (`0x1402480C0`).
+const CTRL_LAYERS: usize = 0x16D;
+const CTRL_LAYER0: usize = 0x144;
+
+type FlagFn = unsafe extern "win64" fn(u32, u32) -> u8;
+type VarFn = unsafe extern "win64" fn(u32, u32) -> u64;
+type LayerDoneFn = unsafe extern "win64" fn(usize, u32) -> u64;
+
+static END_LINES: AtomicU32 = AtomicU32::new(0);
+/// The watch's last key and the frames since it last logged; None when no battle end is going.
+static END_STATE: Mutex<Option<(be::Key, u32)>> = Mutex::new(None);
+/// A battle end is being watched (the per-frame test's only state otherwise).
+static END_ON: AtomicBool = AtomicBool::new(false);
+
+fn end_line(line: impl FnOnce() -> String) {
+    if END_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| (n < be::LOG_LINES).then_some(n + 1)).is_ok() {
+        log(&format!("battle end: {}", line()));
+    }
+}
+
+/// Re:CoM's battle end as it is now, if the main player is in it (win pending or win action).
+unsafe fn end_view_now() -> Option<be::View> {
+    let pl = main_player();
+    if pl == 0 {
+        return None;
+    }
+    let pending = rd::<u32>(pl + mv::p::CARD) & be::WIN_PENDING != 0;
+    let action: u32 = rd(pl + mv::p::ACTION);
+    (pending || action == be::WIN_ACTION).then(|| end_view(pl))
+}
+
+unsafe fn end_view(pl: usize) -> be::View {
+    let bs = base();
+    let m = task(b::TASK_ENEMY_MANAGER);
+    let manager = (m != 0).then(|| be::Manager {
+        state: rd(m + be::manager::STATE),
+        timer: rd(m + be::manager::TIMER),
+        children: rd(m + be::manager::CHILDREN),
+        count: rd(m + be::manager::COUNT),
+        roulette: (rd(m + be::manager::ROULETTE_A), rd(m + be::manager::ROULETTE_B)),
+    });
+    let g: usize = rd(va(bs, PRIZE_GAUGE));
+    be::View {
+        action: rd(pl + mv::p::ACTION),
+        sub: rd(pl + mv::p::ACTION_SUB),
+        phase: rd(pl + mv::p::PHASE),
+        dead: rd::<i32>(pl + be::DEAD) != 0,
+        win_pending: rd::<u32>(pl + mv::p::CARD) & be::WIN_PENDING != 0,
+        manager,
+        prize: (g != 0).then(|| (rd(g + be::prize::CARD), rd(g + be::prize::EXP))),
+        gauge_pause: rd(va(bs, GAUGE_PAUSE)),
+        roulette_task: task(be::TASK_ROULETTE) != 0,
+        over: func::<FlagFn>(FLAG_GETTER)(1, 2) != 0,
+        hud_mask: func::<VarFn>(VAR_GETTER)(1, 0xE2) as u32,
+    }
+}
+
+/// A task's step state: (flags, banked, last step), and its parent's flags.
+unsafe fn task_line(t: usize) -> String {
+    if t == 0 {
+        return "none".into();
+    }
+    let parent: usize = rd(t + task_f::PARENT);
+    let pf = if parent != 0 { format!("{:#x}", rd::<u16>(parent + task_f::FLAGS)) } else { "-".into() };
+    format!(
+        "{} flags {:#x} banked {} step {} parent {} flags {pf}",
+        class_name(t),
+        rd::<u16>(t + task_f::FLAGS),
+        rd::<i32>(t + task_f::BANKED),
+        rd::<i32>(t + task_f::STEP),
+        if parent != 0 { class_name(parent) } else { "none".into() }
+    )
+}
+
+/// A C2DSeqCtrl's first layer: (layers, instance id, ended).
+unsafe fn ctrl_line(c: usize) -> String {
+    if c == 0 {
+        return "none".into();
+    }
+    format!("layers {} id {:#x} done {}", rd::<u8>(c + CTRL_LAYERS), rd::<u32>(c + CTRL_LAYER0), func::<LayerDoneFn>(LAYER_DONE)(c, 0) != 0)
+}
+
+/// What the line adds for the state Re:CoM waits in: the manager's children (state 1), the prize
+/// gauge's task and displays (states 2, 3), our KH1 side.
+unsafe fn end_detail(v: &be::View) -> String {
+    let mut d = Vec::new();
+    if let Some(m) = v.manager {
+        if m.state == 1 && m.children > 0 {
+            let t = task(b::TASK_ENEMY_MANAGER);
+            let mut names = Vec::new();
+            let mut node: usize = rd(t + b::MANAGER_LIST);
+            let mut guard = 0;
+            while node != 0 && guard < 16 {
+                let obj: usize = rd(node + b::NODE_OBJECT);
+                if obj != 0 {
+                    names.push(format!("{} flags {:#x}", class_name(obj), rd::<u16>(obj + task_f::FLAGS)));
+                }
+                node = rd(node + b::NODE_NEXT);
+                guard += 1;
+            }
+            d.push(format!("manager children [{}]", names.join(", ")));
+        }
+    }
+    let g: usize = rd(va(base(), PRIZE_GAUGE));
+    if g != 0 {
+        d.push(format!("prize gauge {g:#x}: {}; EXP ctrl {}; card ctrl {}", task_line(g), ctrl_line(rd(g + PRIZE_EXP_CTRL)), ctrl_line(rd(g + PRIZE_CARD_CTRL))));
+    }
+    let (strikes, falls) = super::magic::threads_running();
+    let ours = match mv::SORA.try_lock() {
+        Ok(s) => s.as_ref().map_or("no KH1 frame yet".to_string(), |s| {
+            format!(
+                "KH1 cast {}, swing {}, lock {}",
+                s.sora.cast.as_ref().map_or("none".to_string(), |c| format!("spell {} level {} age {:.0} released {}", c.start.spell, c.start.level, c.age, c.released)),
+                s.sora.swing.map_or("none".to_string(), |w| format!("row {}", w.kh1_row)),
+                s.sora.lock
+            )
+        }),
+        Err(_) => "KH1 frame busy".into(),
+    };
+    d.push(format!("ours: {ours}; spell threads {strikes} strike(s), {falls} fall(s)"));
+    d.join("; ")
+}
+
+/// Sora's frame start (the request-bits wrapper, Combat = KH1): Re:CoM's battle end, logged.
+/// Two loads unless Re:CoM's win is pending or Sora is in its win action.
+pub unsafe fn end_watch(pl: usize) {
+    let pending = rd::<u32>(pl + mv::p::CARD) & be::WIN_PENDING != 0;
+    if !pending && rd::<u32>(pl + mv::p::ACTION) != be::WIN_ACTION {
+        if END_ON.swap(false, Ordering::Relaxed) {
+            if let Ok(mut g) = END_STATE.lock() {
+                *g = None;
+            }
+            end_line(|| "Sora left Re:CoM's win (no longer pending, not in action 0x1c)".into());
+        }
+        return;
+    }
+    END_ON.store(true, Ordering::Relaxed);
+    let v = end_view(pl);
+    let key = be::key(&v);
+    let Ok(mut g) = END_STATE.try_lock() else { return };
+    let (log_now, first) = match g.as_mut() {
+        None => (true, true),
+        Some((k, _)) if *k != key => (true, false),
+        Some((_, n)) => {
+            *n += 1;
+            (*n >= be::REPEAT_FRAMES, false)
+        }
+    };
+    if log_now {
+        *g = Some((key, 0));
+        drop(g);
+        let what = if first { "started" } else { "now" };
+        end_line(|| format!("{what}: {}; {}", be::line(&v), end_detail(&v)));
+    }
 }
 
 /// Installs the three wrappers, all or none (needs the movement handlers: the setting), then
