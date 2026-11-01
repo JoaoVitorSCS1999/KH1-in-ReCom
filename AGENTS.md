@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 46: M7 stage 7.6, Thunder, version 0.20.0 (2026-10-31)
+
+- Thunder / Thundara / Thundaga (Checked, decomp + files): release at 30, locked for 68 frames,
+  1 MP; every enemy (up to 30) nearest first from the target (no target: Sora; only the marker
+  sits 2 m ahead along the camera) whose hurt body overlaps a 6 m radius, ±5 m cylinder; first
+  strike at release, then one per 8 frames, each enemy once.
+- Each bolt: Re:CoM's own Thunder spawn made at that enemy (effects + bolt shot, its collision
+  off), then Re:CoM's own hit function on the enemy's first hurt body (the call its collision pass
+  makes after a contact; vtable slots `0x140523E30` / `0x140523E60` compared per bolt). Damage
+  KH1 power + max MP × 2, thunder resistance. KH1's 50 % world dim not built (owner question).
+  Not seen in game.
+
+---
+
 ## Stage 45: M7 stage 7.5, Blizzard, version 0.19.0 (2026-10-31)
 
 - Blizzard / Blizzara / Blizzaga from the command menu (Checked, decomp + files): release at 28

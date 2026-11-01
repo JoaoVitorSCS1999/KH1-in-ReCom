@@ -299,6 +299,130 @@ In-game checklist (7.5):
 8. F9 trace: `cast blizzard1 f… w…`, `release(blizzard1 f28 shot …)`, `pay30`, the hits column.
 9. Combat = Re:CoM: Re:CoM's Blizzard cards unchanged; Riku's story unchanged.
 
+## Stage 7.6: Thunder / Thundara / Thundaga
+
+At Combat = KH1 in Sora's story: KH1's Thunder cast and strike thread, each bolt Re:CoM's own
+Thunder bolt and hit path.
+
+### KH1 (what runs)
+
+| what | KH1 (Steam) | tag |
+|---|---|---|
+| **Cast**: ground `0x36 + 2` = `0x38`, idle queued (release); air `0x85`, the fall (blend 8), the 30 cm hop, air speed × 0.5. Motions: entry 56, **68 frames, no free key** (locked to the end), no root; air entry 81, 68. | `0x1402A3DB0`, `0x1402A3600` | Checked (decomp + files) |
+| **Command** (`L004b6`): area = cylinder **radius 600, height 1000 (±500)**; centre = the command target's part if alive, **else Sora's position**; distances from the target (alive) else Sora. The area marker effect alone is drawn 2 m ahead along the camera's horizontal forward (sys 1.5 / 1.6, × 200) and on the ground (sys 77). (The research note's "no target: 2 m ahead" is the marker; the area itself is around Sora: Checked (files) — `0x59C` sets the centre to the caster's `+0x10`, `0x24C` adds the offset only to the effect point.) | `xm_thunder01.mag` | Checked (files) |
+| **Tint**: `L00064` (sys 52) dims the screen colour 1 → 0.5 over 20 frames; back over 20 frames 40 frames after the release, or at once on an interrupt. | sys 52 `0x1402BC190` | Checked (files); not built (below) |
+| **Release**: wait **30** (`L00c8e(30)`), the request must be `0x38` / `0x85` (56 / 133), else no spell, no MP; the strike thread starts, then **MP 1 point** (100). | `0xC22..0xC70` | Checked (files) |
+| **Strikes** (thread `0x17E`): the centre moves to the target's part if still alive; every enemy (sys 65; up to 30 slots) with its distance into a list, **sorted nearest first** (selection sort, strict `<`); down the list: an enemy whose hurt bodies overlap the area (sys 90 → `0x1402B6AF0`: alive, each unmasked body's shape vs the cylinder) **is struck directly** (sys 160 → `0x1402BBB70`: the attack applied onto it, no collision; contact = its part), then **8 frames** (`L00c8e(8)`); one outside is passed over at once. Each enemy once; the first strike in the release frame. | `0x17E..0x384` | Checked (files + decomp) |
+| **Damage**: power 16 / 20 / 26 + **max MP × 2** (stat source 3), the curve, floor / cap, × resist[4] (thunder); kind 3. | btltbl `0x61C8` / `0x6238` / `0x62A8` | Checked (files + decomp) |
+
+### In Re:CoM
+
+- **Cast**: as Blizzard, with `release_wait` 30; Re:CoM's clips `0x38` → row `0x39` (`p001_064`),
+  `0x85` → `0x3D` (`p001_068`), 34 frames at 30 fps = 68, no root. KH1 rows from Re:CoM's 0x24 /
+  0x2E / 0x2F (checked at start): Re:CoM's clip, `_thunder_all` sets 12 / 13 / 14 and its bolt's
+  speed / radius / range kept; `+3` 0, `+0xB` 1 (KH1 kind 3; Re:CoM's Thunder kinds 0x1C–0x1E
+  unused), `+0xF` 0x80.
+- **Command** (`win::magic::thunder_command`, from `start_cast`): Re:CoM's target `+0x84C` (KH1's
+  command target, Assumption 5) if it is an alive enemy (type 0x1004, HP > 0) → centre = its aim
+  point (vtable `+0x50`); else Sora's position.
+- **Release** (`release_thunder`): the centre moves to the target's aim point if it is still
+  alive; Re:CoM's lock-on list's enemies (type 0x1004, HP left; without the lock-on flag: the
+  bodies decide, as KH1's sys 90) with their distances from the target / Sora → KH1's order
+  (`magic::thunder_order`); Re:CoM's Thunder hand effect (id 1); the first run of the strike
+  thread; MP 1 point.
+- **Strike thread** (`magic::Strikes`, KH1's script state): one run at the release, then one per
+  frame at Sora's frame start (the request-bits wrapper calls `strikes_frame`: one atomic load when
+  no Thunder is striking). An enemy is in the area when one of its live hurt bodies (Re:CoM's
+  shapes as its primitives `0x1401777E0` / `0x140176FA0` read them: sphere `+0x20`, column `+0x10`
+  → `+0x20`, each y + `+0x74`, radius `+0x70`) comes within its radius of the cylinder
+  (`magic::body_in_area`). Several Thunders' threads run side by side, as KH1's.
+- **A bolt** (`strike`, KH1's sys 160): **Re:CoM's Thunder case for that enemy** (`0x140222170` case
+  `0x24`, Checked (disasm `0x140222748..0x14022293C`)): its bolt effect (id set − 10) at the
+  enemy's aim x / z and 6 m under Sora's height (`+0x504`), its `CBullet` (class 1, flags `0x47`,
+  life 800, pitched down π/2, the row's speed / range / radius × 0.1, the mover set-up 0.1) from
+  Sora's height there, with the cast's kind / attribute (Re:CoM's thunder 4) / AP. Then **Re:CoM's
+  own hit path, directly**: the bolt's `CCollAttack` is switched off (its vtable `+8`, the "off"
+  Re:CoM's init uses for a held collision; also flag `0x200000` with a held count, so Re:CoM's own
+  exe keeps it off) and its **apply** (vtable `+0x38` = `0x14016F1C0`) is called on the enemy's
+  first live hurt body: the call Re:CoM's collision pass `0x14016EAD0` makes once its overlap test
+  passes. Re:CoM records the hit (flag, value, the bolt's id, its ring, its hit effect), and the
+  enemy's own update runs its hit handler (our KH1 damage on it, as for Fire, with KH1's thunder
+  resistance only), its reaction and its hit-once spread.
+- **Why the direct apply, not a bolt that Re:CoM collides:** KH1 strikes each listed enemy
+  directly, once, in order, wherever its bodies are; a Re:CoM bolt (a 1 m sphere falling from
+  Sora's height) would also touch neighbours within 1 m (hit early, or twice with separate
+  serials) and could miss a flying or small enemy. The apply is Re:CoM's own function for "this
+  attack touched this body"; only the overlap test is skipped, as KH1's sys 160 skips collision.
+  No hit test of ours: the area test picks the targets, as KH1's script does.
+- **Order quirk found:** the bullet init tests the held collision (`0x1401583E8`: flag bit 21 and
+  `+0x268` > 0) **before** it copies `desc+0x8C` into `+0x268` (`0x140158544`), so the hold never
+  applies at init; hence our explicit "off" right after the bolt is made. Checked (disasm).
+
+Logs: `magic: release thunder1: area centre (…) r 6 m ±5 m, N enemies listed from (…), first bolt
+…`; up to 60 `magic: bolt on 0x…: shot N, Re:CoM's apply -> Some(1)` lines; `mp: paid 100 (Thunder
+release)`; hit lines `hit thunder1 on 0x…: KH1 …`. F9 trace events: `bolt <n> e<handle> shot <id>`,
+`release(thunder1 f30 …)`, `pay100`; hits column `:thunder1:kh1 …`.
+
+Sites (7.6; `magic_sites` checks the call / RIP targets):
+
+| address | bytes | use |
+|---|---|---|
+| `0x14014DE80` `CCollAttack` off | `C7 41 10 00 00 00 00 C3` | called (slot `0x140523E30` compared) |
+| `0x14016F1C0` `CCollAttack` apply | `40 55 53 57 48 8D 6C 24 B9 48 81 EC D0 00 00 00` | called (slot `0x140523E60` compared, and on each bolt's vtable) |
+| `0x14016EC51` collision pass: apply call | `48 8B 06 48 8B D3 48 8B CE FF 50 38` | checked only |
+| `0x1401583E8` bullet init: held collision | `8B 86 30 02 00 00 48 0F BA E0 15 73 16 83 BE 68 02 00 00 00 7E 0D 48 8B 8E A8 02 00 00 48 8B 01 FF 50 08` | checked only |
+| `0x14022276C` Thunder case: hand effect | 59 bytes ending `E8 79 43 F8 FF` (→ `0x1401A6B20`) | checked only |
+| `0x1402227F3`, `0x140222820` bolt effect drop / id | `F3 0F 58 05 31 6B 2E 00` (→ −6.0 at `0x14050932C`), `44 8D 41 F6 48 8B CF` | checked only |
+| `0x140222867`, `0x140222898`, `0x1402228BC` bolt pitch / flags / life | `F3 0F 10 0D 81 E8 49 00` (→ π/2 at `0x1406C10F0`), `48 C7 45 B0 47 00 00 00`, `C7 45 8C 20 03 00 00` | checked only |
+| `0x1407C6EB0`, `0x1407C6F50` rows 0x24, 0x2E–0x2F | Re:CoM's Thunder rows | the KH1 rows' templates |
+| `0x1401A6B20` effect at a point | (checked by M5) | called |
+
+1:1 checks (7.6):
+
+- **Checked (files + decomp)**, replayed by tests: the release at KH1's frame 30 (handler 31), Sora
+  locked to the motion's end (68) and Re:CoM's action ended once (`movement::tests` "7.6"); the
+  rows, data (16 / 20 / 26 + 2 × max MP, thunder resistance only), cost 1 MP; the strike timing
+  (the release run, then every 8 frames; an enemy outside passed over without a wait; each once),
+  the nearest-first order and the 30 slots, the cylinder test for spheres and columns, its edge,
+  top and rim (`magic::tests`).
+- **Checked (exe)**: the new sites, the rows, the two vtable slots, the constants.
+- **Assumptions:** (1) KH1's sys 90 shape test is a plain overlap of each body with the cylinder
+  (`0x1402B5EF0` not read in full); Re:CoM's bodies are Re:CoM's sizes (as for every hit, M5);
+  (2) KH1's struck part ≈ Re:CoM's first live hurt body; (3) the strike thread's first run is in
+  the release frame (as Fire's ball, ±1 frame); (4) a target alive at the command but dead at
+  the release: KH1 measures from its (dead) actor if it still exists, we from Sora; (5) a Re:CoM
+  body that guards from the bolt's side (`+0x9C & 1` / `+0xAC`) blocks it as Re:CoM's own Thunder
+  would (KH1's direct strike has no guard check); (6) the lock-on list holds every enemy KH1's
+  sys 65 walk would (enemies register in their init `0x1401805A0`); field enemies' type: not
+  checked; (7) the bolt's visual at Sora's height is Re:CoM's rule for its own target.
+- **Not built: the world dim to 50 %.** Re:CoM's spells have no screen tint, and the screen-mode
+  call Lethal Frame uses (`0x140232260`) is an update mask, not a colour; no world-only tint found.
+  Open question (a)/(b)/(c) below.
+- **Not checked:** in game.
+
+In-game checklist (7.6):
+
+1. Log: the start line names Thunder (7.6) and 9 rows.
+2. In battle with several Heartless spread around: Magic → Thunder (target one): Re:CoM's Thunder
+   cast clip, half a second later Re:CoM's Thunder bolt falls on the nearest enemy to the target
+   (the target itself first), then one more bolt every 8 frames (about 7.5 a second) on each next
+   nearest inside 6 m of the target, each enemy once; enemies beyond 6 m (or 5 m above / below)
+   are skipped. MP −1 point.
+3. Without a target: the area is around Sora (6 m).
+4. Sora stays locked for the whole motion (about 1.1 s), the bolts go on after he is free.
+5. A second Thunder while bolts still fall: both strike lists run.
+6. Hit during the wind-up: nothing, no MP. Air Thunder: the hop; landing before 30 cancels it.
+7. Damage: Thunder + 2 × max MP through KH1's numbers; the log's `hit thunder1 … KH1 …`.
+8. F9 trace: `cast thunder1 f… w…`, `release(thunder1 f30 …)`, `bolt 1 e… shot …`, `pay100`.
+9. Combat = Re:CoM: Re:CoM's Thunder cards unchanged; Riku's story unchanged.
+
+Open question (7.6): **KH1's world dim during Thunder** (to 50 % over 20 frames, back 40 frames
+after the release): (a) leave it out (built); (b) research Re:CoM's render / fade code for a
+world-only colour scale (Re:CoM's room fades and its pause dim are candidates, not read) and build
+it there if one exists; (c) a full-screen tint drawn by Re:CoM's HUD layer (a `C2DSeqCtrl` plate
+at 50 % black over the world, under the HUD): native drawing, but it darkens through its own
+plate, not the world's colour.
+
 ## Per frame
 
 Nothing of ours per frame outside a KH1 cast (one atomic load in the request-bits wrapper for the

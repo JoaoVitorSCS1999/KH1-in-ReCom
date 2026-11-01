@@ -47,11 +47,30 @@ static PENDING: Mutex<Option<MagicCommand>> = Mutex::new(None);
 static SHOTS: Mutex<Vec<(u32, u8, u8, u32)>> = Mutex::new(Vec::new());
 /// Our Blizzard shards (7.5): (shot id, its vertical step dy, m per frame), the last 32.
 static SHARDS: Mutex<Vec<(u32, f32)>> = Mutex::new(Vec::new());
+/// Thunder (7.6): what the command saw (the target's handle if it was an alive enemy, and the area
+/// centre then), for the release.
+static THUNDER_CMD: Mutex<Option<(u32, [f32; 3])>> = Mutex::new(None);
+/// Thunder's strike threads while they run (KH1 runs each cast's thread to its end, so a second
+/// Thunder's runs beside the first's; at most 8), and a flag the per-frame check reads.
+static STRIKES: Mutex<Vec<ThunderRun>> = Mutex::new(Vec::new());
+static STRIKING: AtomicBool = AtomicBool::new(false);
+
+/// A Thunder cast's strikes in progress.
+struct ThunderRun {
+    s: mg::Strikes,
+    level: u8,
+    centre: [f32; 3],
+    /// Re:CoM's kind / attribute / AP of the cast (the magic action's, at the release).
+    kind: u32,
+    attr: u32,
+    ap: i32,
+}
 /// KH1's re-target (7.4b) is set up: the homing slot and Re:CoM's lock-on list are as expected.
 static RETARGET: AtomicBool = AtomicBool::new(false);
 /// Our balls cast with no target: (shot id, the last pick's handle, 0 for none), the last 16.
 static SEEKERS: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
 static RETARGET_LINES: AtomicU32 = AtomicU32::new(40);
+static BOLT_LINES: AtomicU32 = AtomicU32::new(60);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
 static HIT_LINES: AtomicU32 = AtomicU32::new(40);
 static EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -87,6 +106,26 @@ const SHOT_SERIAL: u32 = 0x0015_6770;
 /// Re:CoM's Blizzard side-shard effect sets (`0x1405A1790` = the row's set + 1). Checked (decomp
 /// `0x140222170` case `0x23`).
 const EFFECT_SETS_NEXT: u64 = 0x1_405A_1790;
+/// `0x1401A6B20(actor, effect name, id, &position, &angles, 0.0)`: Re:CoM's Thunder case plays its
+/// `_thunder_all` effects with it (`0x1402227A2`, `0x14022282C`). Checked (disasm).
+const EFFECT_AT: u32 = 0x001A_6B20;
+/// Re:CoM's Thunder bolt (`0x140222170` case `0x24`, Checked (disasm `0x140222748..0x14022293C`)):
+/// the bolt effect `set − 10` at the target's x / z and Sora's height (`+0x504`) − 6 m, then a
+/// `CBullet` (flags `0x47`, life 800 ticks) from Sora's height there, pitched straight down
+/// (π/2), its radius `row[4]` × 0.1.
+const THUNDER_DROP: f32 = 6.0;
+const THUNDER_BOLT_FLAGS: u64 = 0x47;
+const THUNDER_BOLT_LIFE: i32 = 800;
+/// Re:CoM's own "collision held off" for a shot (flag `0x200000` with `desc+0x8C` ticks: the init
+/// `0x140157E60` switches its attack off, `0x1401573C0` back on when the count runs out): our bolts
+/// keep it off for good; their one hit is the direct strike. Checked (decomp).
+const COLLISION_HELD: u64 = 0x20_0000;
+const HELD_TICKS: i32 = 1_000_000;
+/// The player's position vector (`+0x500`, its y read by the Thunder case). Checked (disasm).
+const PLAYER_POS: usize = 0x500;
+/// `CCollAttack`'s "off" (vtable +8: `+0x10` = 0) and apply (vtable +0x38). Checked (exe + decomp).
+const COLL_OFF: u32 = 0x0014_DE80;
+const COLL_APPLY: u32 = 0x0016_F1C0;
 /// Re:CoM's `LockOnManager` (`0x14087B1E0`, made on first use by its users; its list `+0x88`:
 /// nodes `{u32 handle, …, +0x10 next}`, the last one a sentinel with no next). Checked (decomp
 /// + disasm `0x1401CDB90`, Re:CoM's own nearest-target pick for homing shots).
@@ -203,7 +242,12 @@ pub unsafe fn install(b: usize) -> bool {
         log("magic: Re:CoM's Blizzard rows 0x23 / 0x2B / 0x2C are not the Steam exe's; no KH1 cast");
         return false;
     }
-    let t: &'static [[u8; 16]] = Box::leak(mg::kh1_magic_table(&live, &bliz).into_boxed_slice());
+    let thun = read([0x24, 0x2E, 0x2F]);
+    if thun != mg::RECOM_THUNDER_ROWS {
+        log("magic: Re:CoM's Thunder rows 0x24 / 0x2E / 0x2F are not the Steam exe's; no KH1 cast");
+        return false;
+    }
+    let t: &'static [[u8; 16]] = Box::leak(mg::kh1_magic_table(&live, &bliz, &thun).into_boxed_slice());
     if TABLE.set(t).is_err() {
         return false;
     }
@@ -316,6 +360,9 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
         func::<PlIntFn>(CURSOR_BUSY)(cursor, 8);
     }
     func::<PlFn>(HOMING_TARGET)(pl);
+    if c.spell == mg::spell::THUNDER {
+        thunder_command(pl);
+    }
     wr(pl + f::RECOVERY, 0u32);
     // `+0x478` picks the air clips (+4) for Re:CoM's own readers; KH1's motion requests choose
     // the clip here.
@@ -344,6 +391,7 @@ pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
     match c.spell {
         mg::spell::FIRE => release_fire(pl, c),
         mg::spell::BLIZZARD => release_blizzard(pl, c),
+        mg::spell::THUNDER => release_thunder(pl, c),
         _ => None,
     }
 }
@@ -502,6 +550,268 @@ unsafe fn release_blizzard(pl: usize, c: &CastStart) -> Option<u32> {
     Some(first)
 }
 
+/// An alive enemy for a handle: Re:CoM's enemy (type 0x1004) with HP left. KH1's sys 120 / its
+/// actor walk count live actors (`+0x374` bit 0 set, bit 1 clear) not flagged defeated.
+unsafe fn alive_enemy(h: u32) -> Option<usize> {
+    type TypeFn = unsafe extern "win64" fn(usize) -> u32;
+    if h == 0 || h as i32 <= 0 {
+        return None;
+    }
+    let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(h);
+    if obj == 0 {
+        return None;
+    }
+    let vt: usize = rd(obj);
+    let ty: TypeFn = std::mem::transmute_copy(&rd::<usize>(vt + crate::battle::enemy::VT_TYPE));
+    (ty(obj) == crate::battle::ENEMY_TYPE && rd::<i32>(obj + crate::battle::enemy::HP) > 0).then_some(obj)
+}
+
+/// An actor's aim point (vtable `+0x50`, what Re:CoM homes and its Thunder strikes at; KH1's target
+/// part, Assumption 5) and its position (mover `+0x30`, KH1's actor `+0x10`).
+unsafe fn aim_point(obj: usize) -> [f32; 3] {
+    type AimFn = unsafe extern "win64" fn(usize, *mut [f32; 4]);
+    let vt: usize = rd(obj);
+    let f: AimFn = std::mem::transmute_copy(&rd::<usize>(vt + 0x50));
+    let mut p = [0f32; 4];
+    f(obj, &mut p);
+    [p[0], p[1], p[2]]
+}
+
+unsafe fn position(obj: usize) -> Option<[f32; 3]> {
+    let mover: usize = rd(obj + rt::MOVER);
+    (mover != 0).then(|| {
+        let p = rd_vec(mover + rt::POSITION);
+        [p.x, p.y, p.z]
+    })
+}
+
+/// Thunder's command (`L004b6`): the target (Re:CoM's `+0x84C`, the command's) if it is an alive
+/// enemy, and the area centre: its aim point, else Sora's position.
+unsafe fn thunder_command(pl: usize) {
+    let h: u32 = rd(pl + f::TARGET);
+    let cmd = match alive_enemy(h) {
+        Some(e) => (h, aim_point(e)),
+        None => {
+            let b: usize = rd(pl + p::BODY);
+            let v = if b != 0 { rd_vec(b + 0x30) } else { kh1_core::Vec3::ZERO };
+            (0, [v.x, v.y, v.z])
+        }
+    };
+    if let Ok(mut g) = THUNDER_CMD.lock() {
+        *g = Some(cmd);
+    }
+}
+
+/// The hurt bodies of an enemy as Re:CoM's primitives read their shapes (the live ones: body
+/// `+0x10` on, shape kind 2 / 4 / 5).
+unsafe fn bodies(enemy: usize) -> Vec<(usize, mg::BodyShape)> {
+    let mut out = Vec::new();
+    let info: usize = rd(enemy + 0xF8);
+    if info == 0 {
+        return out;
+    }
+    let parts: usize = rd(info + 0x40);
+    let n: i32 = rd(info + 0x38);
+    for i in 0..n.clamp(0, 32) as usize {
+        let part = parts + i * 0x120;
+        let shape: usize = rd(part + 0x18);
+        if rd::<i32>(part + 0x10) == 0 || shape == 0 {
+            continue;
+        }
+        let pt = |o: usize| {
+            let v: [f32; 4] = rd(shape + o);
+            [v[0], v[1] + rd::<f32>(shape + 0x74), v[2]]
+        };
+        let r: f32 = rd(shape + 0x70);
+        match rd::<u32>(shape + 0x60) {
+            2 => out.push((part, mg::BodyShape::Sphere { c: pt(0x20), r })),
+            4 | 5 => out.push((part, mg::BodyShape::Column { a: pt(0x10), b: pt(0x20), r })),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// KH1's Thunder release (7.6, `xm_thunder01.mag`): the centre moves to the target if it is still
+/// alive; Re:CoM's lock-on enemies, sorted nearest first from the target / Sora
+/// (`crate::magic::thunder_order`); the first strike now; the MP (one point); the rest every 8
+/// frames from Sora's frame start ([`strikes_frame`]). The first bolt's id, if one struck.
+unsafe fn release_thunder(pl: usize, c: &CastStart) -> Option<u32> {
+    let (h, mut centre) = THUNDER_CMD.lock().ok().and_then(|mut g| g.take()).unwrap_or((0, [0.0; 3]));
+    let target = alive_enemy(h);
+    if let Some(t) = target {
+        centre = aim_point(t);
+    }
+    let from = match target {
+        Some(t) => position(t),
+        None => {
+            let b: usize = rd(pl + p::BODY);
+            (b != 0).then(|| {
+                let v = rd_vec(b + 0x30);
+                [v.x, v.y, v.z]
+            })
+        }
+    }
+    .unwrap_or(centre);
+    let enemies: Vec<(u32, [f32; 3])> = lock_on_list(0, false).into_iter().filter_map(|(h, _)| Some((h, position(alive_enemy(h)?)?))).collect();
+    let order = mg::thunder_order(from, enemies);
+    let n = order.len();
+    // Re:CoM's Thunder case's first effect: id 1 at the hand.
+    if let Some(r) = row(c.spell, c.level) {
+        let mut hand = rd::<[f32; 4]>(pl + PLAYER_POS);
+        func::<PlOutFn>(HAND_POINT)(pl, &mut hand);
+        thunder_effect(pl, r, 1, hand);
+    }
+    let run = ThunderRun { s: mg::Strikes::new(order), level: c.level, centre, kind: rd(pl + f::KIND), attr: rd(pl + f::ATTR), ap: rd(pl + f::AP) };
+    let first = match STRIKES.lock() {
+        Ok(mut g) => {
+            if g.len() >= 8 {
+                g.remove(0);
+            }
+            g.push(run);
+            STRIKING.store(true, Ordering::Release);
+            let i = g.len() - 1;
+            drop(g);
+            strike_step(pl, 0.0, Some(i)).into_iter().next()
+        }
+        Err(_) => None,
+    };
+    // KH1 pays after the strike thread starts (sys 20, then sys 47).
+    super::mp::pay(mg::thunder::COST, "Thunder release");
+    note(|| format!("release thunder{}: area centre ({:.2},{:.2},{:.2}) r {} m ±{} m, {n} enemies listed from ({:.2},{:.2},{:.2}), first bolt {first:?}", c.level, centre[0], centre[1], centre[2], mg::thunder::RADIUS / 100.0, mg::thunder::HALF_HEIGHT / 100.0, from[0], from[1], from[2]));
+    first
+}
+
+/// Re:CoM's effect call as its Thunder case makes it (Sora's angles as the rotation).
+unsafe fn thunder_effect(pl: usize, r: &[u8; 16], id: u32, at: [f32; 4]) {
+    type EffectFn = unsafe extern "win64" fn(usize, usize, u32, *const [f32; 4], u64, f32) -> i32;
+    let name: usize = rd(va(base(), EFFECT_SETS) + r[2] as usize * 0x60 + 0x18);
+    let ang = func::<AnglesFn>(ANGLES)(pl);
+    if name == 0 || ang.is_null() {
+        return;
+    }
+    let ang: [f32; 4] = std::ptr::read_unaligned(ang);
+    func::<EffectFn>(EFFECT_AT)(pl, name, id, &at, &ang as *const [f32; 4] as u64, 0.0);
+}
+
+/// Sora's frame start (the request-bits wrapper, every frame at Combat = KH1): one run of a
+/// Thunder strike thread, if one is going (one atomic load otherwise).
+pub unsafe fn strikes_frame(pl: usize) {
+    if !STRIKING.load(Ordering::Acquire) {
+        return;
+    }
+    let step: f32 = rd(pl + p::STEP);
+    strike_step(pl, step, None);
+}
+
+/// One run of the strike threads (`only`: the release's own run of the new thread, step 0: its
+/// wait then counts that run). The bolts' ids.
+unsafe fn strike_step(pl: usize, step: f32, only: Option<usize>) -> Vec<u32> {
+    let mut due = Vec::new();
+    {
+        let Ok(mut g) = STRIKES.lock() else { return Vec::new() };
+        for (i, run) in g.iter_mut().enumerate() {
+            if only.is_some_and(|o| o != i) {
+                continue;
+            }
+            let centre = run.centre;
+            let hit = run.s.run(if step > 0.0 { step } else { 1.0 }, |h| {
+                let Some(e) = alive_enemy(h) else { return false };
+                bodies(e).iter().any(|(_, b)| mg::body_in_area(centre, b))
+            });
+            if let Some(h) = hit {
+                due.push((h, run.level, run.kind, run.attr, run.ap, run.s.struck));
+            }
+        }
+        g.retain(|r| !r.s.done());
+        if g.is_empty() {
+            STRIKING.store(false, Ordering::Release);
+        }
+    }
+    let mut ids = Vec::new();
+    for (h, level, kind, attr, ap, n) in due {
+        let Some(e) = alive_enemy(h) else { continue };
+        let id = strike(pl, e, h, level, kind, attr, ap);
+        event(format!("bolt {n} e{h:x}{}", id.map_or(" -".into(), |i| format!(" shot {i}"))));
+        ids.extend(id);
+    }
+    ids
+}
+
+/// One bolt (KH1's sys 160): Re:CoM's Thunder case for this enemy (its bolt effect, its `CBullet`
+/// with the cast's kind / attribute / AP, the attack held off), then **Re:CoM's own hit path
+/// directly**: the bolt's attack applied to the enemy's first live hurt body with the attack's
+/// apply (`CCollAttack` vtable `+0x38` = `0x14016F1C0`), the call Re:CoM's collision pass
+/// (`0x14016EAD0`) makes once its overlap test passes. Re:CoM then runs the enemy's hit (its
+/// handler, our KH1 damage on it, the reaction, the hit effect). The bolt's id.
+#[allow(clippy::too_many_arguments)]
+unsafe fn strike(pl: usize, enemy: usize, h: u32, level: u8, kind: u32, attr: u32, ap: i32) -> Option<u32> {
+    type ApplyFn = unsafe extern "win64" fn(usize, usize) -> u32;
+    let r = row(mg::spell::THUNDER, level)?;
+    let aim = aim_point(enemy);
+    let sora: [f32; 4] = rd(pl + PLAYER_POS);
+    let mut at = [aim[0], sora[1] - THUNDER_DROP, aim[2], sora[3]];
+    thunder_effect(pl, r, (r[2] as u32).wrapping_sub(10), at);
+    at[1] += THUNDER_DROP;
+    let ang = func::<AnglesFn>(ANGLES)(pl);
+    let ang: [f32; 4] = if ang.is_null() { [0.0; 4] } else { std::ptr::read_unaligned(ang) };
+    let mut d = Desc([0; 0x100]);
+    let dp = d.0.as_mut_ptr();
+    func::<DescInitFn>(DESC_INIT)(dp, 1, 3);
+    let w = |o: usize| dp.add(o);
+    std::ptr::write_unaligned(w(0x68) as *mut u32, kind);
+    std::ptr::write_unaligned(w(0x6C) as *mut u32, attr);
+    std::ptr::write_unaligned(w(0x70) as *mut i32, ap);
+    std::ptr::write_unaligned(w(0x0C) as *mut u32, 0x8000_0000);
+    std::ptr::write_unaligned(w(0x60) as *mut u64, THUNDER_BOLT_FLAGS | COLLISION_HELD);
+    std::ptr::write_unaligned(w(0x8C) as *mut i32, HELD_TICKS);
+    std::ptr::write_unaligned(w(0x30) as *mut f32, r[9] as f32 * 0.01);
+    std::ptr::write_unaligned(w(0x3C) as *mut i32, THUNDER_BOLT_LIFE);
+    std::ptr::write_unaligned(w(0x34) as *mut f32, r[0xC] as f32);
+    std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [std::f32::consts::FRAC_PI_2, ang[1], ang[2], ang[3]]);
+    std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], at);
+    std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), EFFECT_SETS) + r[2] as usize * 0x60);
+    std::ptr::write_unaligned(w(0x78) as *mut f32, r[4] as f32 * 0.1);
+    let factory = func::<FactoryFn>(FACTORY)();
+    if factory == 0 {
+        return None;
+    }
+    let bullet = func::<ManagerFn>(SHOT_MANAGER)(factory, dp, pl);
+    if bullet == 0 {
+        bolt_line(|| format!("bolt on {h:#x}: Re:CoM made no shot"));
+        return None;
+    }
+    func::<MoverFn>(SHOT_MOVER)(bullet, 0.1, 0.0, 0, -1);
+    let id: u32 = rd(bullet + 0x20);
+    remember_shot(id, mg::spell::THUNDER, level, 0);
+    let coll: usize = rd(bullet + 0x2A8);
+    let body = bodies(enemy).first().map(|b| b.0);
+    let res = match (coll, body) {
+        (0, _) | (_, None) => None,
+        (c, Some(b)) => {
+            // The bolt's own collision stays off (Re:CoM's own "off", the slot its init calls for a
+            // held collision): its one hit is this strike. Only through Re:CoM's own slots.
+            let vt: usize = rd(c);
+            let (off, apply) = (rd::<usize>(vt + 8), rd::<usize>(vt + 0x38));
+            if off != base() + COLL_OFF as usize || apply != base() + COLL_APPLY as usize {
+                bolt_line(|| format!("bolt on {h:#x}: the shot's attack is not a CCollAttack (off {off:#x}, apply {apply:#x}); no strike"));
+                None
+            } else {
+                func::<PlFn>(COLL_OFF)(c);
+                Some(func::<ApplyFn>(COLL_APPLY)(c, b))
+            }
+        }
+    };
+    bolt_line(|| format!("bolt on {h:#x}: shot {id}, Re:CoM's apply -> {res:?} (1 hit, 2 / 3 guarded, 0 already hit)"));
+    Some(id)
+}
+
+fn bolt_line(line: impl FnOnce() -> String) {
+    if BOLT_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("magic: {}", line()));
+    }
+}
+
 /// A shard's flight state's exe becomes [`kh1_shard_exe`] (as [`seek_on`]: only on a plain
 /// `CHomingBullet` whose exe is Re:CoM's thunk).
 unsafe fn shard_on(bullet: usize, id: u32, dy: f32) {
@@ -602,6 +912,12 @@ fn rt_line(line: impl FnOnce() -> String) {
 /// object is not the shot, `+0x154 & 0x10000`), kept to enemies (type 0x1004) with HP left, with
 /// their positions. At most 64.
 unsafe fn lock_on_enemies(skip: usize) -> Vec<(u32, [f32; 3])> {
+    lock_on_list(skip, true)
+}
+
+/// Re:CoM's lock-on list's enemies (type 0x1004, HP left), with or without its lock-on flag
+/// (`+0x154 & 0x10000`: Thunder's area test reads the bodies instead, as KH1's sys 90 does).
+unsafe fn lock_on_list(skip: usize, lockable_only: bool) -> Vec<(u32, [f32; 3])> {
     type TypeFn = unsafe extern "win64" fn(usize) -> u32;
     let mut out = Vec::new();
     let m: usize = rd(va(base(), LOCK_ON_MANAGER));
@@ -617,7 +933,7 @@ unsafe fn lock_on_enemies(skip: usize) -> Vec<(u32, [f32; 3])> {
         }
         let h: u32 = rd(node);
         let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(h);
-        if obj != 0 && obj != skip && rd::<u32>(obj + rt::ACTOR_FLAGS) & rt::LOCKABLE != 0 {
+        if obj != 0 && obj != skip && (!lockable_only || rd::<u32>(obj + rt::ACTOR_FLAGS) & rt::LOCKABLE != 0) {
             let vt: usize = rd(obj);
             let ty: TypeFn = std::mem::transmute_copy(&rd::<usize>(vt + crate::battle::enemy::VT_TYPE));
             let mover: usize = rd(obj + rt::MOVER);
@@ -765,7 +1081,7 @@ pub fn clear_events() {
 /// The start log line.
 pub fn start_line() -> String {
     format!(
-        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.5): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
+        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.6): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Thunder / Thundara / Thundaga (7.6): at 30, every enemy whose bodies touch a {} m, ±{} m cylinder, nearest first, struck through Re:CoM's own hit path one per {} frames, 1 MP; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
         TABLE.get().map_or(0, |t| t.iter().filter(|r| r[0] != 0).count()),
         28,
         mg::fire::FAST_WAIT,
@@ -773,6 +1089,9 @@ pub fn start_line() -> String {
         mg::fire::LIFE,
         mg::fire::TURN_DEG,
         mg::fire::COST,
+        mg::thunder::RADIUS / 100.0,
+        mg::thunder::HALF_HEIGHT / 100.0,
+        mg::thunder::INTERVAL,
         mg::blizzard::LIFE,
         mg::retarget::RANGE_M,
         if RETARGET.load(Ordering::Acquire) { "on" } else { "off" }

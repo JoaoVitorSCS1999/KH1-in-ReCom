@@ -1125,3 +1125,33 @@ fn blizzard_is_never_a_fast_cast_and_a_cut_cast_pays_nothing() {
         assert!(!out.cast.iter().any(|e| matches!(e, CastEvent::Started { .. })));
     }
 }
+
+// ---- M7 stage 7.6: Thunder ----
+
+#[test]
+fn ground_thunder_releases_at_30_and_locks_sora_to_68() {
+    use crate::magic::{cast_req, CastEvent, MagicCommand};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = step_cast(&mut p, Pad::default(), Some(MagicCommand { spell: 2, level: 1 }));
+    assert_eq!(out.cast.first(), Some(&CastEvent::Started { spell: 2, level: 1, fast: false, air: false }));
+    assert_eq!(p.ours.rec.head(), cast_req::THUNDER);
+    let mut rel = None;
+    let mut free_at = None;
+    for k in 1..100 {
+        let out = step_cast(&mut p, Pad::default(), None);
+        if let Some(CastEvent::Released { frame, .. }) = out.cast.iter().find(|e| matches!(e, CastEvent::Released { .. })) {
+            rel = Some((k, *frame));
+        }
+        if free_at.is_none() && !p.ours.lock {
+            free_at = Some(k);
+        }
+    }
+    assert_eq!(rel, Some((31, 30.0)), "`L00c8e(30)`: the release 30 frames after the command");
+    assert_eq!(p.recom.releases.len(), 1);
+    // No free key: locked to the motion's end (68), then idle; Re:CoM's action ended once.
+    assert!(matches!(free_at, Some(68) | Some(69)), "{free_at:?}");
+    assert_eq!(p.recom.cast_ends, 1);
+}

@@ -60,6 +60,10 @@ pub mod row {
     /// the action table's names; the row's `+0`).
     pub const BLIZZARD: u32 = 0x3A;
     pub const BLIZZARD_AIR: u32 = 0x3E;
+    /// Re:CoM's Thunder / Cure / Stop / Aero clip (the attack row 0x24's `+0` = 0x39, air + 4):
+    /// `p001_064` and `p001_068` (34 frames at 30 fps = KH1's 68). Checked (exe).
+    pub const THUNDER: u32 = 0x39;
+    pub const THUNDER_AIR: u32 = 0x3D;
 }
 
 /// KH1 requests for the KH1-only rows, in the order they are appended.
@@ -189,6 +193,9 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         // Blizzard (M7 stage 7.5): KH1's entries 55 / 80 have no root travel.
         crate::magic::cast_req::BLIZZARD => row::BLIZZARD,
         crate::magic::cast_req::BLIZZARD_AIR => row::BLIZZARD_AIR,
+        // Thunder (M7 stage 7.6): KH1's entries 56 / 81 have no root travel.
+        crate::magic::cast_req::THUNDER => row::THUNDER,
+        crate::magic::cast_req::THUNDER_AIR => row::THUNDER_AIR,
         _ => return None,
     };
     Some((r, false))
@@ -276,6 +283,11 @@ mod tests {
         assert_eq!(row_for(0x84, &s, &none), Some((0x3E, false)));
         assert_eq!(crate::magic::RECOM_BLIZZARD_ROWS[0][0] as u32, row::BLIZZARD);
         assert_eq!(row::BLIZZARD_AIR, row::BLIZZARD + 4);
+        // Thunder: Re:CoM's row 0x24's clip, + 4 in the air.
+        assert_eq!(row_for(0x38, &s, &none), Some((0x39, false)));
+        assert_eq!(row_for(0x85, &s, &none), Some((0x3D, false)));
+        assert_eq!(crate::magic::RECOM_THUNDER_ROWS[0][0] as u32, row::THUNDER);
+        assert_eq!(row::THUNDER_AIR, row::THUNDER + 4);
     }
 
     #[test]

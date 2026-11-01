@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn fire_rows_keep_recoms_clip_and_effect_set_and_take_kh1s_ball() {
-    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS);
+    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS, &RECOM_THUNDER_ROWS);
     assert_eq!(t.len(), 21);
     for lv in 1..=3u8 {
         let i = table_index(spell::FIRE, lv).unwrap();
@@ -19,11 +19,11 @@ fn fire_rows_keep_recoms_clip_and_effect_set_and_take_kh1s_ball() {
         assert_eq!(r[0xF] & FLAG_KH1, FLAG_KH1);
         assert_eq!(recom_base_row(spell::FIRE, lv), Some([0x22, 0x29, 0x2A][lv as usize - 1]));
     }
-    // Thunder … Aero come with their stages.
-    assert!(t[6..].iter().all(|r| r[0] == 0));
+    // Cure … Aero come with their stages.
+    assert!(t[9..].iter().all(|r| r[0] == 0));
     assert_eq!(table_index(spell::AERO, 3), Some(20));
     assert_eq!(table_index(spell::FIRE, 0), None);
-    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && !castable(spell::THUNDER));
+    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && castable(spell::THUNDER) && !castable(spell::CURE));
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn fire_retarget_is_kh1s_pick() {
 
 #[test]
 fn blizzard_rows_and_numbers_are_kh1s() {
-    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS);
+    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS, &RECOM_THUNDER_ROWS);
     for lv in 1..=3u8 {
         let r = &t[table_index(spell::BLIZZARD, lv).unwrap()];
         let base = &RECOM_BLIZZARD_ROWS[lv as usize - 1];
@@ -164,7 +164,7 @@ fn blizzard_rows_and_numbers_are_kh1s() {
     assert_eq!(KH1_BLIZZARD_FLAGS & 0x8000_1000, 0, "no homing");
     assert_eq!((cast_req::first(spell::BLIZZARD, false), cast_req::first(spell::BLIZZARD, true)), (0x37, 0x84));
     assert_eq!((cast_req::release(spell::BLIZZARD, false), cast_req::release(spell::FIRE, true)), (0x37, 0x8A));
-    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x38));
+    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x39));
     assert_eq!(spell_attack(spell::BLIZZARD, 2).map(|a| a.power), Some(27));
 }
 
@@ -214,4 +214,81 @@ fn blizzard_glide_is_kh1s() {
     // A sinking shard reaches further (KH1: 50 + its fall this frame), a rising one less.
     assert!((blizzard_ray(-0.15) - 0.65).abs() < 1e-6);
     assert!((blizzard_ray(0.15) - 0.35).abs() < 1e-6);
+}
+
+#[test]
+fn thunder_rows_and_numbers_are_kh1s() {
+    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS, &RECOM_THUNDER_ROWS);
+    for lv in 1..=3u8 {
+        let i = lv as usize - 1;
+        let r = &t[table_index(spell::THUNDER, lv).unwrap()];
+        let base = &RECOM_THUNDER_ROWS[i];
+        // Re:CoM's clip 0x39, sets 12 / 13 / 14, its bolt's speed, radius and range.
+        assert_eq!((&r[..3], r[4], r[9], r[0xC]), (&base[..3], base[4], base[9], base[0xC]));
+        assert_eq!(r[2], 12 + lv - 1);
+        assert_eq!((r[3], r[0xB], r[0xF] & FLAG_KH1), (0, 1, FLAG_KH1));
+        assert_eq!(recom_base_row(spell::THUNDER, lv), Some([0x24, 0x2E, 0x2F][i]));
+        let a = thunder_attack(lv);
+        assert_eq!((a.power, a.stat_source, a.element, a.kind, a.mp_charge), ([16, 20, 26][i], 3, 4, 3, 0));
+    }
+    assert_eq!((cost(spell::THUNDER), release_wait(spell::THUNDER)), (100, 30.0));
+    assert_eq!((cast_req::first(spell::THUNDER, false), cast_req::first(spell::THUNDER, true)), (0x38, 0x85));
+    assert!(is_cast_request(0x38) && is_cast_request(0x85));
+    // Thunder + max MP × 2: 16 + 6 = 22 − Defence 5 = curve[17]; × KH1's thunder resistance.
+    let mut rng = Kh1Rand::new(1);
+    let mut def = DefenderStats { defence: 5, ..Default::default() };
+    let full = spell_damage(&thunder_attack(1), 3, &def, &mut rng);
+    let fire = spell_damage(&fire_attack(1), 3, &def, &mut rng);
+    assert!(full < fire, "Thunder 16 + 2 × 3 = 22 < Fire 20 + 3 = 23");
+    def.resist[4] = 0.5;
+    assert_eq!(spell_damage(&thunder_attack(1), 3, &def, &mut rng), full / 2);
+    def.resist[2] = 0.0;
+    assert_eq!(spell_damage(&thunder_attack(1), 3, &def, &mut rng), full / 2, "fire resistance doesn't touch Thunder");
+}
+
+#[test]
+fn thunder_area_and_order_are_kh1s() {
+    let c = [0.0, 0.0, 0.0];
+    // The cylinder: 6 m around, ±5 m; a body counts when any of it is inside.
+    let s = |x: f32, y: f32, r: f32| BodyShape::Sphere { c: [x, y, 0.0], r };
+    assert!(body_in_area(c, &s(5.9, 0.0, 0.0)));
+    assert!(!body_in_area(c, &s(6.1, 0.0, 0.0)));
+    assert!(body_in_area(c, &s(6.4, 0.0, 0.5)), "its edge inside");
+    assert!(body_in_area(c, &s(0.0, 4.9, 0.0)) && !body_in_area(c, &s(0.0, 5.2, 0.1)) && body_in_area(c, &s(0.0, -5.3, 0.4)));
+    // The rim: 0.3 m out and 0.3 m up from the edge is 0.42 m away.
+    assert!(!body_in_area(c, &s(6.3, 5.3, 0.4)) && body_in_area(c, &s(6.3, 5.3, 0.45)));
+    // A column crossing the area's top from far above: its lowest point counts.
+    let col = BodyShape::Column { a: [3.0, 9.0, 0.0], b: [3.0, 4.5, 0.0], r: 0.1 };
+    assert!(body_in_area(c, &col));
+    let col = BodyShape::Column { a: [7.0, 0.0, -3.0], b: [7.0, 0.0, 3.0], r: 0.95 };
+    assert!(!body_in_area(c, &col));
+    let col = BodyShape::Column { a: [7.0, 0.0, -3.0], b: [7.0, 0.0, 3.0], r: 1.05 };
+    assert!(body_in_area(c, &col));
+    // Nearest first from the target, the first 30 only; ties keep the earlier.
+    let e = |id: u32, x: f32| (id, [x, 0.0, 0.0]);
+    assert_eq!(thunder_order(c, [e(1, 5.0), e(2, -1.0), e(3, 3.0), e(4, 1.0)]), vec![2, 4, 3, 1]);
+    let many: Vec<(u32, [f32; 3])> = (0..40).map(|i| (i, [40.0 - i as f32, 0.0, 0.0])).collect();
+    let o = thunder_order(c, many);
+    assert_eq!(o.len(), 30);
+    assert_eq!((o[0], o[29]), (29, 0));
+}
+
+#[test]
+fn thunder_strikes_one_every_8_frames_nearest_first_once_each() {
+    let mut s = Strikes::new(vec![10, 11, 12, 13]);
+    let outside = 11;
+    let mut at = Vec::new();
+    for frame in 0..60 {
+        if let Some(id) = s.run(1.0, |id| id != outside) {
+            at.push((frame, id));
+        }
+    }
+    // The release's run strikes the nearest; one outside the area is passed over at once.
+    assert_eq!(at, vec![(0, 10), (8, 12), (16, 13)]);
+    assert!(s.done());
+    assert_eq!(s.struck, 3);
+    // Nothing inside: done in the first run, no bolt.
+    let mut s = Strikes::new(vec![1, 2]);
+    assert_eq!(s.run(1.0, |_| false), None);
+    assert!(s.done());
 }

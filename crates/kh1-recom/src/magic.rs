@@ -41,10 +41,10 @@ pub mod spell {
     pub const NAMES: [&str; 7] = ["fire", "blizzard", "thunder", "cure", "gravity", "stop", "aero"];
 }
 
-/// Spells cast so far (Fire 7.4, Blizzard 7.5; Thunder … Aero: 7.6–7.10, each its own rows and
-/// script numbers).
+/// Spells cast so far (Fire 7.4, Blizzard 7.5, Thunder 7.6; Cure … Aero: 7.7–7.10, each its own
+/// rows and script numbers).
 pub fn castable(s: u8) -> bool {
-    matches!(s, spell::FIRE | spell::BLIZZARD)
+    matches!(s, spell::FIRE | spell::BLIZZARD | spell::THUNDER)
 }
 
 /// A spell's MP cost (its data's `+0x30`, the same at every level): charge units below 100,
@@ -65,6 +65,9 @@ pub mod cast_req {
     /// Blizzard's one cast motion, ground and air (`0x36 + 1`, `0x83 + 1`; entries 55 / 80).
     pub const BLIZZARD: u16 = 0x37;
     pub const BLIZZARD_AIR: u16 = 0x84;
+    /// Thunder's one cast motion (`0x36 + 2`, `0x83 + 2`; entries 56 / 81).
+    pub const THUNDER: u16 = 0x38;
+    pub const THUNDER_AIR: u16 = 0x85;
 
     /// The first cast motion a spell's normal cast plays: `0x1402A3DB0` plays `0x36 + spell`
     /// (Fire: `0x36` then `0x3D`), the air branch of `0x1402A3600` `0x83 + spell` (Fire: `0x83`
@@ -112,6 +115,11 @@ pub fn recom_base_row(s: u8, level: u8) -> Option<usize> {
         (spell::BLIZZARD, 1) => Some(0x23),
         (spell::BLIZZARD, 2) => Some(0x2B),
         (spell::BLIZZARD, 3) => Some(0x2C),
+        // Thunder 0x24 (set 12), Thundara 0x2E (13), Thundaga 0x2F (14): `initStockSkill`'s
+        // sleights 0x0F / 0x16. Checked (exe: the sets hold `_thunder_all`).
+        (spell::THUNDER, 1) => Some(0x24),
+        (spell::THUNDER, 2) => Some(0x2E),
+        (spell::THUNDER, 3) => Some(0x2F),
         _ => None,
     }
 }
@@ -306,6 +314,7 @@ pub fn spell_attack(s: u8, level: u8) -> Option<AttackData> {
     match s {
         spell::FIRE => Some(fire_attack(level)),
         spell::BLIZZARD => Some(blizzard_attack(level)),
+        spell::THUNDER => Some(thunder_attack(level)),
         _ => None,
     }
 }
@@ -342,6 +351,190 @@ pub fn blizzard_row_bytes(recom: &[u8; 16], level: u8) -> [u8; 16] {
 /// first hit) and `4` (the life ends it). No homing. Checked (decomp `0x140222170` case `0x23`,
 /// `0x140156E20`, `0x1401569B0`).
 pub const KH1_BLIZZARD_FLAGS: u64 = 0x400_0000 | 0x100 | 4;
+
+/// KH1's Thunder (`xm_thunder01..03.mag`, decoded with `magdis.py`: the same script at every level;
+/// Checked (files), the syscalls in the KH1 decomp).
+///
+/// At the command (`L004b6`): the area's centre is the command target's part if it is alive, else
+/// Sora's position (the area marker effect alone is drawn 2 m ahead along the camera); the
+/// distances are measured from the target (alive), else Sora. Then a screen tint to 50 % over 20
+/// frames (`L00064`, sys 52), **wait 30**, the release check (`0x38` / `0x85`; else the tint goes
+/// back and nothing is cast, no MP), the strike thread, **the MP** (sys 47, 100 = one point),
+/// then 40 frames and the tint back over 20.
+///
+/// The strike thread (`0x17E`): the centre moves to the target's part if it is still alive; every
+/// enemy (sys 65, up to 30 slots) with its distance from the target / Sora goes into a list sorted
+/// nearest first (`L0069c`: selection sort, a later entry replaces the minimum only when nearer);
+/// then down the list: an enemy whose hurt bodies overlap the area (sys 90 → `0x1402B6AF0`: a
+/// vertical cylinder, type 2, radius 600, half-height 500, around the centre) **is struck
+/// directly** (sys 160 → `0x1402BBB70`: the attack applied onto it, no collision) and the thread
+/// waits 8 frames (`L00c8e(8)`); one outside it is passed over at once. Each enemy once.
+pub mod thunder {
+    pub const WAIT: f32 = 30.0;
+    /// The area: a vertical cylinder, cm (`L004b6`: 600, height 1000 → ±500).
+    pub const RADIUS: f32 = 600.0;
+    pub const HALF_HEIGHT: f32 = 500.0;
+    /// The list's slots.
+    pub const MAX: usize = 30;
+    /// The wait after each strike, frames.
+    pub const INTERVAL: f32 = 8.0;
+    /// MP cost (data `+0x30` = 100): one whole point.
+    pub const COST: i32 = crate::mp::cost::THUNDER;
+    /// The screen tint (not built: Re:CoM has no world-only tint we found; open question): to
+    /// this level over `DIM_FRAMES`, held until 40 frames after the release, back over 20.
+    pub const DIM: f32 = 0.5;
+    pub const DIM_FRAMES: f32 = 20.0;
+}
+
+/// KH1's Thunder attack data (btltbl `0x61C8` / `0x6238` / `0x62A8`, Checked (files)): power 16 / 20
+/// / 26 + **max MP × 2** (stat source 3), thunder (element 4), flinch, no radius (struck directly),
+/// no MP charge, no re-hit.
+pub fn thunder_attack(level: u8) -> AttackData {
+    let power = [16, 20, 26][level.clamp(1, 3) as usize - 1];
+    AttackData {
+        stat_source: 3,
+        element: 4,
+        kind_party: 3,
+        kind: 3,
+        bone: -1,
+        power_party: power,
+        mp_charge: 0,
+        clash: 6,
+        priority: 0,
+        recoil_request: 110,
+        power,
+        radius: 0.0,
+        ..Default::default()
+    }
+}
+
+/// Re:CoM's Thunder rows 0x24 / 0x2E / 0x2F as in the Steam exe (clip 0x39, effect sets 12 / 13 / 14
+/// of `_thunder_all`, Re:CoM's bolt: fall speed `+9`, radius `+4` × 0.1 m, range `+0xC`). Checked
+/// (exe).
+pub const RECOM_THUNDER_ROWS: [[u8; 16]; 3] = [
+    [0x39, 0x00, 0x0C, 0x1E, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x1C, 0x08, 0x00, 0x00, 0x00],
+    [0x39, 0x00, 0x0D, 0x1E, 0x14, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x1D, 0x08, 0x00, 0x00, 0x00],
+    [0x39, 0x00, 0x0E, 0x1E, 0x28, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x1E, 0x08, 0x00, 0x00, 0x00],
+];
+
+/// The KH1 Thunder row: Re:CoM's row (clip, blend, effect set, its bolt's speed / radius / range:
+/// decision 34, Re:CoM's visual) with `+3` = 0 (KH1's script decides the release), `+0xB` = 1
+/// (flinch; KH1 kind 3 — Re:CoM's Thunder kinds 0x1C–0x1E are not used) and `+0xF` = 0x80.
+pub fn thunder_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
+    let mut b = *recom;
+    b[3] = 0;
+    b[0xB] = 1;
+    b[0xF] |= FLAG_KH1;
+    b
+}
+
+/// A Re:CoM hurt body's shape as the area test sees it (metres): a sphere (kind 2: centre `+0x20`,
+/// its y + `+0x74`, radius `+0x70`) or a column (kinds 4 / 5: from `+0x10` to `+0x20`, each y +
+/// `+0x74`, radius `+0x70`), as Re:CoM's own primitives `0x1401777E0` / `0x140176FA0` read them.
+/// Checked (decomp).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum BodyShape {
+    Sphere { c: [f32; 3], r: f32 },
+    Column { a: [f32; 3], b: [f32; 3], r: f32 },
+}
+
+/// The distance from a point to KH1's area cylinder (0 inside).
+fn cylinder_distance(p: [f32; 3], centre: [f32; 3], radius: f32, half: f32) -> f32 {
+    let (dx, dz) = (p[0] - centre[0], p[2] - centre[2]);
+    let h = ((dx * dx + dz * dz).sqrt() - radius).max(0.0);
+    let v = ((p[1] - centre[1]).abs() - half).max(0.0);
+    (h * h + v * v).sqrt()
+}
+
+/// Whether a hurt body overlaps KH1's Thunder area (the vertical cylinder, Re:CoM metres): its
+/// shape's nearest point to the cylinder within its radius. The distance from a segment's points
+/// to a convex solid is convex along it, so a ternary search finds the column's nearest point.
+pub fn body_in_area(centre: [f32; 3], body: &BodyShape) -> bool {
+    let (radius, half) = (thunder::RADIUS / 100.0, thunder::HALF_HEIGHT / 100.0);
+    match *body {
+        BodyShape::Sphere { c, r } => cylinder_distance(c, centre, radius, half) <= r,
+        BodyShape::Column { a, b, r } => {
+            let at = |t: f32| cylinder_distance([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t], centre, radius, half);
+            let (mut lo, mut hi) = (0.0f32, 1.0f32);
+            for _ in 0..40 {
+                let (m1, m2) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+                if at(m1) <= at(m2) {
+                    hi = m2;
+                } else {
+                    lo = m1;
+                }
+            }
+            at(0.0).min(at(1.0)).min(at((lo + hi) * 0.5)) <= r
+        }
+    }
+}
+
+/// KH1's strike list (`L0069c`): the first 30 enemies with their distance from `from`, sorted
+/// nearest first by KH1's selection sort (a later entry replaces the minimum only when strictly
+/// nearer, then swaps).
+pub fn thunder_order(from: [f32; 3], enemies: impl IntoIterator<Item = (u32, [f32; 3])>) -> Vec<u32> {
+    let mut l: Vec<(u32, f32)> = enemies
+        .into_iter()
+        .take(thunder::MAX)
+        .map(|(id, p)| {
+            let d = [p[0] - from[0], p[1] - from[1], p[2] - from[2]];
+            (id, (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt())
+        })
+        .collect();
+    for i in 0..l.len() {
+        let mut m = i;
+        for j in i + 1..l.len() {
+            if l[j].1 - l[m].1 < 0.0 {
+                m = j;
+            }
+        }
+        if m != i {
+            l.swap(i, m);
+        }
+    }
+    l.into_iter().map(|e| e.0).collect()
+}
+
+/// The strike thread's state (KH1's script; Re:CoM has no place for it).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Strikes {
+    pub order: Vec<u32>,
+    pub next: usize,
+    /// `L00c8e(8)`'s countdown.
+    pub wait: f32,
+    pub struck: u32,
+}
+
+impl Strikes {
+    pub fn new(order: Vec<u32>) -> Strikes {
+        Strikes { order, next: 0, wait: 0.0, struck: 0 }
+    }
+
+    /// One run of the thread: a run inside the wait counts it down; otherwise the next listed
+    /// enemy `inside` the area is struck (returned) and the wait starts, counting this run (KH1's
+    /// `L00c8e` decrements once before it yields); enemies outside are passed over in the same
+    /// run. So strikes come 8 runs apart.
+    pub fn run(&mut self, step: f32, mut inside: impl FnMut(u32) -> bool) -> Option<u32> {
+        if self.wait > 0.0 {
+            self.wait -= step;
+            return None;
+        }
+        while let Some(&id) = self.order.get(self.next) {
+            self.next += 1;
+            if inside(id) {
+                self.wait = thunder::INTERVAL - step;
+                self.struck += 1;
+                return Some(id);
+            }
+        }
+        None
+    }
+
+    /// The list is done (the thread's last wait over).
+    pub fn done(&self) -> bool {
+        self.next >= self.order.len() && self.wait <= 0.0
+    }
+}
 
 /// KH1's air cast (`0x1402A3600` state 2): a new jump arc of G`+0xE8` = 30 cm and the air
 /// velocity × G`+0xF0` = 0.5 (the fast path only scales). Checked (decomp + files).
@@ -408,15 +601,19 @@ pub fn fire_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
     b
 }
 
-/// The KH1 magic rows, `[spell × 3 + level − 1]` (21; Fire's and Blizzard's three so far), from
-/// Re:CoM's rows (which must be [`RECOM_FIRE_ROWS`] and [`RECOM_BLIZZARD_ROWS`]).
-pub fn kh1_magic_table(recom_fire: &[[u8; 16]; 3], recom_blizzard: &[[u8; 16]; 3]) -> Vec<[u8; 16]> {
+/// The KH1 magic rows, `[spell × 3 + level − 1]` (21; Fire's, Blizzard's and Thunder's three so
+/// far), from Re:CoM's rows (which must be [`RECOM_FIRE_ROWS`], [`RECOM_BLIZZARD_ROWS`] and
+/// [`RECOM_THUNDER_ROWS`]).
+pub fn kh1_magic_table(recom_fire: &[[u8; 16]; 3], recom_blizzard: &[[u8; 16]; 3], recom_thunder: &[[u8; 16]; 3]) -> Vec<[u8; 16]> {
     let mut t = vec![[0u8; 16]; 21];
     for (i, r) in recom_fire.iter().enumerate() {
         t[i] = fire_row_bytes(r);
     }
     for (i, r) in recom_blizzard.iter().enumerate() {
         t[3 + i] = blizzard_row_bytes(r, i as u8 + 1);
+    }
+    for (i, r) in recom_thunder.iter().enumerate() {
+        t[6 + i] = thunder_row_bytes(r);
     }
     t
 }
@@ -498,6 +695,10 @@ pub fn add_motions(m: &mut MotionSet) {
     // free from 68. Re:CoM's `p001_065` / `p001_069` (rows 0x3A / 0x3E): 43 / 39 frames at 30 fps.
     m.add(&[cast_req::BLIZZARD], MotionInfo::new(86.0).with_flag(FlagKind::Free, 68.0, inf));
     m.add(&[cast_req::BLIZZARD_AIR], MotionInfo::new(78.0).with_flag(FlagKind::Free, 68.0, inf));
+    // Thunder (7.6): entry 56, 68 frames, no free key (locked to its end), no root travel; air
+    // entry 81, 68. Re:CoM's `p001_064` / `p001_068` (rows 0x39 / 0x3D): 34 frames at 30 fps.
+    m.add(&[cast_req::THUNDER], MotionInfo::new(68.0));
+    m.add(&[cast_req::THUNDER_AIR], MotionInfo::new(68.0));
 }
 
 /// Whether a KH1 request is one of the cast motions Re:CoM's magic action plays.
@@ -525,6 +726,7 @@ fn is_release_of(s: u8, r: u16) -> bool {
 pub fn release_wait(s: u8) -> f32 {
     match s {
         spell::BLIZZARD => blizzard::WAIT,
+        spell::THUNDER => thunder::WAIT,
         _ => 0.0,
     }
 }

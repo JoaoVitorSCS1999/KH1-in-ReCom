@@ -332,6 +332,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     super::mp::frame();
     // A magic command no KH1 frame took last frame is gone (M7 stage 7.4).
     super::magic::new_frame();
+    // A Thunder's strikes (7.6): its script thread's run (nothing unless one is going).
+    super::magic::strikes_frame(pl);
     let battle: i32 = rd(pl + p::BATTLE);
     if battle != 0 && battle_guards_clear(pl, rd(pl + p::REQUEST)) {
         // Re:CoM's own field branch: the confirm press is the Attack, no card input.
