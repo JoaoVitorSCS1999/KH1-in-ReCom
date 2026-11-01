@@ -6,7 +6,8 @@ Re:CoM's command plate; row spacing KH1's 22 units"; "menu words: KH1's own text
 KH1 message files".
 
 At Combat = KH1, in Sora's story, field and battle: KH1's root list (Attack / Magic / Items / the
-context row) bottom-left at KH1's place, and the Magic list. Re:CoM draws it: each row is a
+4th row: Summon, or KH1's blank dash until summons) bottom-left at KH1's place, the Magic list,
+and KH1 FM's context tab (the green Triangle prompt above the list; 0.35.0, below). Re:CoM draws it: each row is a
 `C2DSeqCtrl` playing one of two groups the asset step added to Re:CoM's `Cockpit:00` (Re:CoM's
 text plate, and the same plate in another colour for the highlighted row) with a `C2DFnt`
 carrying KH1's word, attached as Re:CoM attaches its own labels to these plates. KH1's rules run
@@ -34,15 +35,15 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 | Root build, every frame: row 0 Attack (1); Counterattack (0x63) instead when the ability is on, the guard recoil 0x6E plays and the target is an enemy. Grey = lock = `!(state flags >> 4) \| !1` (Attack needs the movement state's flag 0x10); rows 1..3 the blank command 0x42. | `0x140294220` | Checked (decomp) |
 | Magic: the learned spells in KH1's order, command `level + (spell + 2) × 3`. A spell is usable with the state's flag 0x20, MP for its cost (`0x1402A4C10`), and, for command flag 8 (Thunder, Gravity, Stop), the target within the command's range `+0xE` (1100). Grey = lock = the unusable ones. With spells: row 1 = Magic, not locked, greyed when none is usable. With none: row 1 stays the blank command, greyed and locked. | `0x1402944C0` | Checked (decomp + files) |
 | Items: row 2 = Items, greyed and locked with no item slots. | `0x140294220` | Checked (decomp) |
-| Context: row 3 cleared each frame, set (and ungreyed) by the nearby object's command (`0x140293000`). NPCs (kind 1) put Talk in row 0 instead. | `0x1402948F0` | Checked (decomp) |
+| Context: entry 3 cleared each frame, set (and ungreyed) by the nearby object's command (`0x140293000`). NPCs (kind 1) put Talk in row 0 instead. FM never draws entry 3 as a row: it shows in the context tab (below); the 4th row shows Summon (the Magic list's last entry, appended once summons are learned) or the blank command. | `0x1402948F0`, `0x140278B40` | Checked (decomp) |
 | Movement-state flags: 0 ground 0xFC, 1 take-off 0x34, 2 air 0x3D, 3 0x05, 4/5 0x02, 7 0x01, 8 flight 0x76, 9–11 0x101, 0xD–0xF / 0x11 0x01, 0x15 glide 0x05, 0x1E 0x18. | `0x142DB3840` | Checked (decomp, `kh1-movement-motion.md`) |
-| Cursor, on the fresh-press word compared for equality (two presses in a frame move nothing): Up / Down wrap; Right opens the row's submenu (sound 6), a locked row sounds 4, a row without one does nothing; Left or cancel closes a submenu (sound 3; cancel also puts the root cursor on Attack); Left at the root puts the cursor on Attack (sound 1); Right on the root's row 3 goes to the run (sound 4 unless Summon). No auto-repeat. | `0x1402931B0` | Checked (decomp) |
-| Step order: at the root a fresh jump is the jump and the menu takes no input that frame; Triangle runs the context command when its tab is fully in; Square without Triangle is the roll / guard and no cursor that frame; the cursor; then confirm runs the row (`0x140293410` → `0x140293480`): locked → sound 4; a submenu opens; a command is issued, the stack unwinds and the root cursor returns to Attack. Confirm on the root's row 0 when it holds Talk, or on row 3, is sound 4. | `0x1402937F0` | Checked (decomp) |
+| Cursor, on the fresh-press word compared for equality (two presses in a frame move nothing): Up / Down wrap; Right opens the row's submenu (sound 6), a locked row sounds 4, a row without one does nothing; Left or cancel closes a submenu (sound 3; cancel also puts the root cursor on Attack); Left at the root puts the cursor on Attack (sound 1); Right on the root's row 3 goes to the run (sound 4 unless Summon). No auto-repeat. In the Magic list the Summon entry is skipped (count − 1). | `0x1402931B0` | Checked (decomp) |
+| Step order: at the root a fresh jump is the jump and the menu takes no input that frame; Triangle runs the context command when its tab is fully in; Square without Triangle is the roll / guard and no cursor that frame; the cursor; then confirm runs the row (`0x140293410` → `0x140293480`): locked → sound 4; a submenu opens; a command is issued, the stack unwinds and the root cursor returns to Attack. Confirm on the root's row 0 when it holds Talk is sound 4; on row 3 (or Right there) it opens Summon through the Magic list's last entry when that is Summon, else sound 4. The cursor never runs the context command. | `0x1402937F0` | Checked (decomp) |
 | Buttons (logical, `0x14028B0B0` / `0x140528290`): Up 0x20, Down 0x40, Left 0x80, Right 0x100, Cross 0x210001, Circle 6 (cancel 2 + jump 4), Triangle 0x4080008, Square 0x900010, L1 0x40000. | | Checked (decomp + exe) |
 | Draw: root at (16, 260), rows 22 apart; Magic at x + 11, at the Magic row's y with fewer than 3 rows, else at 348 − 22 n. Text colour (alpha × 128, b, b, b) (`0x14027A920`). | `0x14027B870` | Checked (decomp) |
 | Brightness: the top list's rows ease 32 a frame between 0x73 (grey) and 0xE6; when the top list changes they are set at once and the lists under it go to 0x73. | `0x14027B870` | Checked (decomp) |
 | Fades: in / out 0.1 a frame (10 frames, `0x140278AC0` 1 / 0) when the step starts / stops running; events hide and show at once (2 / 3, `0x140293750`), and the stack goes back to the root on Attack. | | Checked (decomp) |
-| Context tab: 0 hidden, 1 sliding in (X scale + 1/7, x −10 → 0 by 10/7 per step), 2 in, 3 sliding out (scale − 1/7), restarted when its command changes. Its step is half a frame (14 frames). | `0x140277CF0` | Checked (decomp); the half step: as read in the research (`0x14233FBE0`) |
+| Context tab: 0 hidden, 1 sliding in (opacity + 1/7, x −10 → 0 by 10/7 per step), 2 in, 3 fading out (opacity − 1/7), restarted when its command changes. Its step is half a frame (14 frames). 7.3 read the "scale" `0x142866D14` as an X scale: it only multiplies alphas (`0x142866A40` / `A44`), an opacity. Drawn by `0x140278B40` as its own green plate with the Triangle and the word, over the header (`docs/recom-kh1-hud.md` § FM context tab). | `0x140277CF0`, `0x140278B40` | Checked (decomp); the half step: as read in the research (`0x14233FBE0`) |
 | Sounds: 1 move, 3 back, 4 error, 6 open. | `0x14017A040` | Checked (decomp) |
 
 ## KH1's words
@@ -83,8 +84,13 @@ them.
   parent's). Re:CoM's camp uses it. The menu's fade is its alpha; the text's is `C2DFnt +0x34`
   (0xAABBGGRR, 0x80 = ×1), as Re:CoM's camp changes its labels' colour. KH1's brightness bytes
   go there as they are: both games use 0x80 as ×1 (Assumption for the screen result).
-- **Tab:** row 3's control gets the tab's x offset (layout position) and X scale (`0x1402486D0`)
-  each frame while it slides.
+- **Tab (0.35.0):** not a row. KH1's look: three `kh1hud` controls (the tab's pieces, the
+  Triangle, the word) at KH1's places; Re:CoM's look: the highlighted plate tinted green
+  (× (1, 1, 0.39): Re:CoM's blue `0x80FFA200` can't be multiplied to KH1's (110, 210, 100), the red
+  is missing) with the word's `C2DFnt`, its top-left (8, 232) (28 above the first row, as KH1's
+  tab sits over its header), no Triangle (no button glyph identified in Re:CoM's `Cockpit`). Both
+  move (layout position) and fade (control colour, the font's colour) only while the tab
+  slides or fades (14 frames). 7.3 drew it as row 3 with an X scale: a mis-port.
 - **Context:** Re:CoM's field action (`0x1401E80C0`, Triangle `+0x424 & 0x200`, field only) acts
   on the object of handle `player+0x5FC` (when > 0) else `+0x84C`, by its type getter (vtable
   `+0x28`): 0x2000 treasure box (`CGimmickTreasureBox`, `…Pooh`; not when `+0x2C1 & 1`), 0x2002
@@ -93,7 +99,7 @@ them.
   getters `mov eax, imm32; ret`, the door's computed at `0x1401B8A10`). The menu reads the same
   object without calls (`0x1402AD350` for the handle, the getter's bytes) and shows KH1's word:
   chest → Open, door → Open, carry → Lift, NPC → Talk, jump stand → Jump On (the words for Re:CoM's
-  objects: Assumption). Battle: no context row (KH1's battle specials are M9).
+  objects: Assumption). Battle: no context tab (KH1's battle specials are M9).
 - **Inputs:** Re:CoM's pad (pure reads, as the camp's): fresh d-pad Up 0x1000 / Down 0x4000 /
   Left 0x8000 / Right 0x2000, Triangle 0x10, Square 0x80 (`0x14029B2F0`), confirm / cancel
   (`0x14029B490` / `0x14029B410`, Re:CoM's configurable buttons), only while Sora's pad is on
@@ -107,9 +113,9 @@ After Re:CoM's builder (`0x1401F8150`, already wrapped):
 |---|---|---|
 | `+0x424 & 4` Attack | the root list is on top with the cursor on row 0 (Attack, or Counter: the KH1 frame then plays the Counterattack, as before) and the cursor didn't use the press | confirm runs the highlighted row |
 | `& 1` jump | the root list is on top | the jump only from the root; cancel closes a submenu |
-| `& 0x200` Triangle | the root list is on top, and the context row's tab is in when one is shown | Triangle runs the context command once its tab is in |
+| `& 0x200` Triangle | the root list is on top, and the context tab is in when one is shown | Triangle runs the context command once its tab is in |
 
-Square (roll / guard) and lock-on are untouched. With no context row shown, Re:CoM's own
+Square (roll / guard) and lock-on are untouched. With no context tab shown, Re:CoM's own
 Triangle action decides as before (an object the menu doesn't know keeps its Triangle). While
 Re:CoM's HUD is hidden (events) the menu changes nothing.
 
@@ -120,8 +126,8 @@ atomic load in the request-bits wrapper). With the menu: KH1's step (pad reads, 
 values already at hand: the movement state, the MP view the MP code stores on each read / write,
 the spell levels, the context object, the target distance while a range-limited spell is
 learned), then the rows: rebuilt only when what they show changed; colour writes only while the
-fade (10 frames) or a brightness change (4 frames) runs; the tab's place only while it slides
-(14 frames).
+fade (10 frames) or a brightness change (4 frames) runs; the tab's place and colour only while it
+slides or fades (14 frames).
 
 ## Logs and trace
 
@@ -171,13 +177,18 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
 - Checked (exe): every new site's bytes and the vtable slot.
 - Not checked: nothing seen in game; no KH1 recording of the menu (a KH1 video of opening Magic
   and of walking up to a chest would confirm the timing frame by frame).
+- 0.35.0: the tab's draw (`0x140278B40`) Checked (decomp + exe + files), rendered offline from
+  the bake; tests: the 4th row is never the context command, the cursor's confirm / Right there
+  is the error sound, Triangle runs the context from any root row, the per-language Triangle
+  offsets.
 
 ## Not 1:1 by design or yet
 
 - The look is Re:CoM's plates (decision 34), not KH1's panels; the highlighted row is a colour,
   not KH1's cursor.
-- KH1 puts Talk in row 0 (instead of Attack) next to NPCs; here every context command is in row 3
-  (the owner's "context row"): Attack stays Attack. Open question 2.
+- KH1 puts Talk in row 0 (instead of Attack) next to NPCs (FM then draws row 0 as a dimmed
+  "Attack" and the tab shows Talk); here Talk is entry 3's like every context command: it shows
+  in the same tab, and row 0 stays a normal Attack. Open question 2.
 - Confirm on a locked Attack row (a state without flag 0x10, e.g. the glide) gives no error sound
   here (today's Attack path is left as it was).
 - The Magic list's spells cast from 7.4 (Fire first; Blizzard … Aero do nothing until their
@@ -196,8 +207,7 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
 4. Writing `C2DFnt +0x34` and the control colour each frame of a fade is safe (Re:CoM's camp
    writes label colours the same way).
 5. Deleting our rows in the HUD-hide wrapper is safe (they are ours, not the gauge's).
-6. The menu (and a cursor on the empty row 3) is drawn where KH1 would: row 3's plate is drawn
-   empty when the cursor is on it with no context command.
+6. (Gone 0.35.0: the 4th row is always drawn, as FM's.)
 7. A new player gauge (room, battle) resets the stack to the root on Attack and fades in, as
    KH1's step starting again.
 8. The context words for Re:CoM's objects (Open for doors, Jump On for jump stands).
@@ -206,9 +216,9 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
 
 1. **Highlight colour:** (a) the magic plate's blue (built); (b) another of Re:CoM's plate
    colours (red / grey); (c) a value you pick from a screenshot.
-2. **Talk next to NPCs:** (a) in the context row (built; Attack stays Attack); (b) KH1's rule:
-   row 0 becomes Talk near an NPC in the field (confirm then gives the error sound, Triangle
-   talks).
+2. **Talk next to NPCs:** (a) in the context tab (built; Attack stays Attack); (b) KH1's rule:
+   Talk goes in row 0, which FM draws as a dimmed "Attack" whose confirm gives the error sound;
+   the tab shows Talk and Triangle talks.
 3. **Menu language:** (a) the ini's `menu_language` (built, default us); (b) follow Re:CoM's own
    language automatically (needs one log line from each language: the `Re:CoM language index`).
 4. **Accented letters:** (a) base letters (built); (b) find Re:CoM's codes for them (needs Re:CoM's
@@ -219,7 +229,7 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
 1. Log: the start line (words, language index), `mp bar: … groups 151..158` with no "has N
    groups" line, then on entering a room `command menu: built on the player gauge …`.
 2. **Screenshot** in the field: four rows bottom-left (Attack highlighted in blue, a dash row
-   greyed, Items greyed; row 3 only near something), KH1's words, no overlap with the HP / MP
+   greyed, Items greyed; the 4th row a greyed dash), KH1's words, no overlap with the HP / MP
    bars. Another one with `kh1_all_spells = on` and the Magic list open (7 spells, Firaga …
    Aeroga, x + 11, bottom at 348).
 3. Up / Down move the highlight (with Re:CoM's cursor sound), wrap through row 3; two d-pad
@@ -230,9 +240,9 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
    opens the list; Left closes it (cursor stays on Magic); cancel closes it (cursor back to
    Attack, Sora doesn't jump); a spell: cast (7.4; Fire only so far), the menu back on Attack.
    With MP 0 the spells grey (over 4 frames), Fire / Blizzard come back at 30 charge.
-6. In the field next to a chest / NPC / door / box to carry: row 3 slides in (about a quarter
-   second) with Open / Talk / Open / Lift; Triangle works once it is in, not before. In battle:
-   no row 3.
+6. In the field next to a chest / NPC / door / box to carry: the green tab with the Triangle
+   slides in over the header (about a quarter second) with Open / Talk / Open / Lift; Triangle
+   works once it is in, not before; the 4th row stays "–". In battle: no tab.
 7. Cutscenes / events: the menu disappears with the HP gauge and comes back with it, on Attack.
 8. Combat = Re:CoM in the Config: the menu goes when the camp closes; back to KH1: it comes back.
    Riku's story: no menu.

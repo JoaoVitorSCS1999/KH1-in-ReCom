@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 72: KH1 FM context tab (green Triangle prompt), version 0.35.0 (2026-10-31)
+
+- Ask (owner, 2026-11-01): "the menu shouldnt have the context option at the bottom, it should behave
+  like the KH1 final mix version, where the green triangle prompt appears when interacting with
+  something".
+- KH1 FM (`0x140278B40`, `0x140277CF0`, `0x140279FC0`; Checked (decomp + exe + files)): the root
+  list is Attack / Magic / Items / row 3 (Summon once learned, else KH1's greyed dash); the context
+  is never a row: a green tab (`com` objects 4–7 widened, picture 2's PC-only rows, vertex
+  colours) at (list x + 9 + slide, 250) over the COMMAND header, the word at + (18, 7), the
+  Triangle (`0F 46` font escape, `Icon.tm2` 0xE411) at (list x + 6 + slide, list y − 3); slide
+  x −10 → 0 and alpha 0 → 1 over 14 frames (7.3 read the alpha as an X scale). Triangle runs it.
+- Logic: `Scene::tab` replaces the row-3 context; confirm / Right on row 3 is the error sound.
+  KH1 look: plate, Triangle and word controls. Re:CoM look: the highlighted plate tinted green
+  at (8, 232), no Triangle (none found in `Cockpit`). kh1-hud.json format 3 (DLL rejects 2).
+- Checked: tests, Windows build, offline render of the bake. Assumption: the PC's icon remap
+  (40 × 48 cell drawn 16 × 19 units). Not seen in game.
+
+---
+
 ## Stage 71: KH1 HUD polish: KH1's menu font, fourth row, no seams, version 0.34.0 (2026-10-31)
 
 - Ask (owner, 2026-11-01): "the bars are all choppy, the text is wrong, theres no bottom row to the

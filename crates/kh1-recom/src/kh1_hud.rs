@@ -4,7 +4,9 @@
 //! group numbering (the same as the asset step's).
 
 /// The manifest's format line (as `kh1_recom_assets::kh1_hud::FORMAT`).
-pub const FORMAT: &str = "kh1-recom-assets kh1-hud 2";
+/// Format 3 (0.35.0): the menu's FM context tab and Triangle groups (format 2 sets have none:
+/// refused, with the log's "run the asset step of this version").
+pub const FORMAT: &str = "kh1-recom-assets kh1-hud 3";
 /// The sprite set's name in Re:CoM's 2D registry, NUL-terminated.
 pub const SET: &[u8] = b"kh1hud:00\0";
 
@@ -130,6 +132,13 @@ pub mod menu {
     pub const TITLE_TO_BATTLE: u32 = 2 * LOOK;
     /// The Magic list's header, title, row, last row, selection, icon.
     pub const MAGIC: u32 = 2 * LOOK + 1;
+    /// FM's context tab: shadow, green plate, band, stripe, at the tab's origin
+    /// (`crate::command_menu::tab`).
+    pub const TAB: u32 = MAGIC + 6;
+    /// The Triangle (the PC's PlayStation glyph; empty when the asset step had no `Icon.tm2`).
+    pub const TRIANGLE: u32 = TAB + 1;
+    /// The first word group (the words are listed in the manifest).
+    pub const WORDS: u32 = TAB + 2;
     /// KH1's root list origin (`0x14027B870`: (0x10, 0x104)), its header's height and row pitch,
     /// the selection's offset, the words' offsets (`0x140278B40`, `0x14027A920` adds (16, 2)).
     pub const HEADER_H: f32 = 20.0;
@@ -211,6 +220,8 @@ pub const LEVEL_UP_AT: (f32, f32) = (16.0, 16.0);
 pub struct MenuGroups {
     /// First group.
     pub first: u32,
+    /// The Triangle's group holds the glyph.
+    pub tab_icon: bool,
     /// (language, [(message id, group)]).
     pub words: Vec<(String, Vec<(u16, u32)>)>,
 }
@@ -293,7 +304,7 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
         None => None,
         Some(m) => {
             let first = m.get("first").and_then(|x| x.as_u32()).ok_or("menu without first")?;
-            if first + menu::MAGIC + 6 > groups {
+            if first + menu::WORDS > groups {
                 return Err("menu groups past the set".into());
             }
             let mut words = Vec::new();
@@ -309,7 +320,8 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
                     words.push((lang.to_string(), list));
                 }
             }
-            Some(MenuGroups { first, words })
+            let tab_icon = matches!(m.get("tab_icon"), Some(crate::json::Value::Bool(true)));
+            Some(MenuGroups { first, tab_icon, words })
         }
     };
     let target = match v.get("target") {
@@ -528,7 +540,7 @@ mod tests {
 
     #[test]
     fn manifest_round_trip_and_refusals() {
-        let ok = r#"{"format": "kh1-recom-assets kh1-hud 2", "set": "kh1hud:00", "groups": 644, "base_groups": 632, "programs": [{"name": "vibe_s", "start": 1, "frames": 10}, {"name": "vibe_ss", "start": 1, "frames": 22}, {"name": "vibe_sss", "start": 1, "frames": 38}, {"name": "fade_out", "start": 0, "frames": 10}, {"name": "fade_in", "start": 0, "frames": 10}, {"name": "slide_s_h", "start": 1, "frames": 20}, {"name": "slide_s_v", "start": 1, "frames": 20}], "units": [[632, 7], [639, 5]], "runs": [[4, 1, 10000000, 0], [4, 2, 2, 1]], "languages": ["FR", "UK"], "atlas": [1024, 512, 2048, 1024], "sources": {}}"#;
+        let ok = r#"{"format": "kh1-recom-assets kh1-hud 3", "set": "kh1hud:00", "groups": 644, "base_groups": 632, "programs": [{"name": "vibe_s", "start": 1, "frames": 10}, {"name": "vibe_ss", "start": 1, "frames": 22}, {"name": "vibe_sss", "start": 1, "frames": 38}, {"name": "fade_out", "start": 0, "frames": 10}, {"name": "fade_in", "start": 0, "frames": 10}, {"name": "slide_s_h", "start": 1, "frames": 20}, {"name": "slide_s_v", "start": 1, "frames": 20}], "units": [[632, 7], [639, 5]], "runs": [[4, 1, 10000000, 0], [4, 2, 2, 1]], "languages": ["FR", "UK"], "atlas": [1024, 512, 2048, 1024], "sources": {}}"#;
         let m = parse_manifest(ok).unwrap();
         assert_eq!(m.groups, 644);
         assert_eq!(m.languages, vec!["FR", "UK"]);
@@ -541,13 +553,14 @@ mod tests {
         assert!(parse_manifest(&ok.replace("\"base_groups\": 632", "\"base_groups\": 631")).is_err());
         assert!(parse_manifest(&ok.replace("[639, 5]", "[639, 6]")).is_err());
         assert!(parse_manifest(&ok.replace("vibe_ss", "vibe_xx")).is_err());
-        assert!(parse_manifest(&ok.replace("hud 2", "hud 1")).is_err());
+        assert!(parse_manifest(&ok.replace("hud 3", "hud 2")).is_err(), "format 2 has no context tab");
         assert_eq!(m.menu, None);
-        let with = ok.replace("\"languages\"", "\"menu\": {\"first\": 630, \"words\": {\"us\": [[1, 643], [6, 642]], \"fr\": [[1, 641]]}}, \"languages\"");
+        let with = ok.replace("\"languages\"", "\"menu\": {\"first\": 630, \"tab_icon\": true, \"words\": {\"us\": [[1, 643], [6, 642]], \"fr\": [[1, 641]]}}, \"languages\"");
         assert!(parse_manifest(&with).is_err(), "menu groups before the fixed ones would run past");
         let with = with.replace("\"groups\": 644", "\"groups\": 700");
         let mm = parse_manifest(&with).unwrap().menu.unwrap();
         assert_eq!((mm.word("fr", 1), mm.word("fr", 6), mm.word("gr", 1), mm.word("us", 2)), (Some(641), Some(642), Some(643), None));
+        assert!(mm.tab_icon && menu::TAB == 23 && menu::WORDS == 25);
         assert!(parse_manifest(&ok.replace("kh1hud:00", "Cockpit:00")).is_err());
     }
 

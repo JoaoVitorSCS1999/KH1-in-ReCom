@@ -10,6 +10,11 @@
 //!   player gauge's x offset as every HUD layer (`+0xA0`). Re:CoM's 2D manager animates and draws
 //!   them; the fade is Re:CoM's control colour (`0x140248590`, `+0x138` = 1) and the text colour
 //!   (`C2DFnt +0x34`).
+//! - **Context tab** (FM, `0x140278B40`): never a row. KH1's look: three controls of the
+//!   `kh1hud` set (the tab's four pieces, the Triangle, the word) at the tab's origin, moved by
+//!   its slide and faded by its own opacity; Re:CoM's look: the highlighted plate tinted green
+//!   with a `C2DFnt`, above the rows. Made after the rows (later controls draw over earlier ones
+//!   of the same priority: Assumption, as the MP bar's pieces), so a row rebuild remakes it.
 //! - **When:** made with the player gauge (the MP bar's wrapper on `CPlayerGauge` init), hidden
 //!   and shown with Re:CoM's HUD (its second-bar state wrapper), deleted before the gauge's own
 //!   controls (its dtor wrapper). Each frame of Sora's at the KH1 setting the request-bits wrapper
@@ -21,7 +26,7 @@
 
 use super::movement::{self as mv, body, func, p, rd, rd_vec, wr};
 use super::{base, log};
-use crate::command_menu::{self as cm, Event, Kind, Menu, Pad, RowView, Scene, Words, World};
+use crate::command_menu::{self as cm, Event, Kind, Menu, Pad, RowView, Scene, TabView, Words, World};
 use crate::kh1_hud as kh;
 use crate::sites::COMMAND_MENU_PTRS;
 use crate::units::to_kh1;
@@ -102,6 +107,25 @@ struct Row {
     text: usize,
 }
 
+/// The context tab's controls: KH1's look (plate, Triangle, word), or Re:CoM's (one plate with its
+/// `C2DFnt`).
+struct TabCtl {
+    /// KH1's look: plate, Triangle, word (0: not made); Re:CoM's: the plate.
+    ctrls: Vec<usize>,
+    /// Re:CoM's look: the plate's font.
+    fnt: usize,
+    view: TabView,
+}
+
+/// Re:CoM's look's tab: the highlighted plate (Re:CoM's magic-plate blue, `0x80FFA200`) times
+/// this colour reads green (KH1's tab is (110, 210, 100)); a multiply can't add the red. Assumption
+/// (Re:CoM's control colour is a multiply, factors ≤ 1 used: `docs/recom-m7-command-menu.md`).
+const RECOM_TAB_TINT: [f32; 3] = [1.0, 1.0, 0.39];
+/// Re:CoM's look's tab: its plate's top-left, as KH1's green plate sits over its first row
+/// (KH1: 28 units above the first row's top, 8 left of the list; Re:CoM's look has no header,
+/// its first row at the list's y).
+const RECOM_TAB_AT: (f32, f32) = (cm::ROOT_X - 8.0, cm::ROOT_Y - 28.0);
+
 /// H4: KH1's look of the menu (`hud = kh1`): the list headers and which look is shown.
 struct Look {
     battle: bool,
@@ -121,6 +145,7 @@ struct Ui {
     rows: Vec<Row>,
     shown: Option<Scene>,
     look: Option<Look>,
+    tab: Option<TabCtl>,
 }
 
 struct State {
@@ -217,7 +242,7 @@ pub unsafe fn build(gauge: usize, list: i32) {
         let _ = super::mp::current();
     }
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
-    let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None, look: None };
+    let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None, look: None, tab: None };
     if let Ok(mut s) = STATE.lock() {
         for mut old in s.uis.extract_if(.., |u| u.gauge == gauge) {
             old.clear();
@@ -311,7 +336,104 @@ impl Ui {
                 super::d2::delete(h, self.list);
             }
         }
+        self.clear_tab();
         self.shown = None;
+    }
+
+    unsafe fn clear_tab(&mut self) {
+        if let Some(t) = self.tab.take() {
+            for c in t.ctrls.into_iter().filter(|&c| c != 0) {
+                super::d2::delete(c, self.list);
+            }
+        }
+    }
+
+    /// KH1's look's tab (`0x140278B40`): made when it appears or its word changes (and after a
+    /// row rebuild), else moved and coloured while it slides or fades.
+    unsafe fn show_tab_kh1(&mut self, t: Option<TabView>, g: &kh::MenuGroups, lang: &str) {
+        let Some(t) = t else {
+            self.clear_tab();
+            return;
+        };
+        let at = tab_kh1_at(&t, lang);
+        let f = if t.dim { 0.5 } else { 1.0 };
+        let b = t.bright as f32 / 128.0;
+        let cols = [[f, f, f, t.alpha], [1.0, 1.0, 1.0, t.alpha], [b, b, b, t.alpha]];
+        if let Some(old) = self.tab.as_mut().filter(|o| o.view.name == t.name) {
+            if old.view != t {
+                for (k, &c) in old.ctrls.iter().enumerate().filter(|x| *x.1 != 0) {
+                    if old.view.x != t.x {
+                        func::<VecFn>(LAYOUT_POS)(c, V4([at[k].0, at[k].1, 0.0, 1.0]).0.as_ptr());
+                    }
+                    func::<VecFn>(COLOUR)(c, V4(cols[k]).0.as_ptr());
+                }
+                old.view = t;
+            }
+            return;
+        }
+        self.clear_tab();
+        let mut ctrls = Vec::new();
+        let tri = g.tab_icon.then_some(g.first + kh::menu::TRIANGLE);
+        let word = g.word(lang, t.name);
+        for (k, grp) in [Some(g.first + kh::menu::TAB), tri, word].into_iter().enumerate() {
+            let c = grp.and_then(|grp| self.kh1_ctrl(PRIORITY_ROOT, at[k].0, at[k].1, 1.0, &[(grp, None)])).unwrap_or(0);
+            if c != 0 {
+                func::<VecFn>(COLOUR)(c, V4(cols[k]).0.as_ptr());
+            }
+            ctrls.push(c);
+        }
+        self.tab = Some(TabCtl { ctrls, fnt: 0, view: t });
+    }
+
+    /// Re:CoM's look's tab: the highlighted plate tinted green, KH1's word on it as 7.3's rows.
+    unsafe fn show_tab_recom(&mut self, t: Option<TabView>, set: *const u8, first: u32, words: &Words) {
+        let Some(t) = t else {
+            self.clear_tab();
+            return;
+        };
+        let f = if t.dim { 0.5 } else { 1.0 };
+        let [r, g, b] = RECOM_TAB_TINT;
+        let colour = [r * f, g * f, b * f, t.alpha];
+        let at = (RECOM_TAB_AT.0 + cm::PLATE_ANCHOR.0 + t.x, RECOM_TAB_AT.1 + cm::PLATE_ANCHOR.1);
+        if let Some(old) = self.tab.as_mut().filter(|o| o.view.name == t.name) {
+            if old.view != t {
+                let c = old.ctrls[0];
+                if old.view.x != t.x {
+                    func::<VecFn>(LAYOUT_POS)(c, V4([at.0, at.1, 0.0, 1.0]).0.as_ptr());
+                }
+                func::<VecFn>(COLOUR)(c, V4(colour).0.as_ptr());
+                if old.fnt != 0 {
+                    wr::<u32>(old.fnt + F_COLOUR, cm::text_colour(t.bright, t.alpha));
+                }
+                old.view = t;
+            }
+            return;
+        }
+        self.clear_tab();
+        let c = func::<NewFn>(NEW)(0x170);
+        if c == 0 {
+            return;
+        }
+        func::<CtorFn>(SEQ_CTOR)(c);
+        if rd::<usize>(c) != base() + SEQ_CTRL_VTABLE as usize {
+            return;
+        }
+        super::d2::made();
+        wr::<u8>(c + C_PRIORITY, PRIORITY_ROOT);
+        wr::<u8>(c + C_COLOUR_ON, 1);
+        func::<VecFn>(LAYOUT_POS)(c, V4([at.0, at.1, 0.0, 1.0]).0.as_ptr());
+        super::d2::add(c, self.list, set, first + 1, self.xoff, 1);
+        let mut fnt = 0;
+        if let Some(text) = words.get(t.name) {
+            let fp = func::<NewFn>(NEW)(0xB0);
+            if fp != 0 {
+                let tc = cm::text_colour(t.bright, t.alpha);
+                fnt = func::<FntCtorFn>(FNT_CTOR)(fp, 0, 0, &tc, FONT, text.as_ptr(), FONT_FLAGS);
+                super::d2::attach(c, self.list, set, fnt, 0.0, 0.0, TEXT_DX + self.xoff);
+            }
+        }
+        func::<VecFn>(COLOUR)(c, V4(colour).0.as_ptr());
+        self.tab = Some(TabCtl { ctrls: vec![c], fnt, view: t });
     }
 
     /// H4: a control for KH1's look at KH1's (x, y), its layer x offset KH1's left margin.
@@ -351,13 +473,12 @@ impl Ui {
         if self.hidden {
             return;
         }
-        let sc = &with_summon_row(sc);
+        let lang = super::settings().menu_language.clone();
         let dim = sc.rows.iter().any(|r| r.list == Kind::Magic);
         let same = self.shown.as_ref().is_some_and(|s| s.same_rows(sc)) && self.look.as_ref().is_some_and(|l| l.battle == battle && l.dim == dim);
         if same {
             let old = self.shown.as_ref().expect("same");
             let alpha_changed = old.alpha != sc.alpha;
-            let tab_moved = old.tab_x != sc.tab_x || old.tab_scale != sc.tab_scale;
             for (r, v) in self.rows.iter_mut().zip(&sc.rows) {
                 if alpha_changed {
                     func::<VecFn>(COLOUR)(r.ctrl, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
@@ -365,15 +486,6 @@ impl Ui {
                 if r.text != 0 && (alpha_changed || r.view.bright != v.bright) {
                     let b = v.bright as f32 / 128.0;
                     func::<VecFn>(COLOUR)(r.text, V4([b, b, b, sc.alpha]).0.as_ptr());
-                }
-                if v.tab && tab_moved {
-                    for c in [r.ctrl, r.text] {
-                        if c != 0 {
-                            let at = kh1_at(v, c == r.text);
-                            func::<VecFn>(LAYOUT_POS)(c, V4([at.0 + sc.tab_x, at.1, 0.0, 1.0]).0.as_ptr());
-                            func::<VecFn>(SCALE)(c, V4([sc.tab_scale, 1.0, 1.0, 1.0]).0.as_ptr());
-                        }
-                    }
                 }
                 r.view = *v;
             }
@@ -386,11 +498,11 @@ impl Ui {
                 }
             }
             self.shown = Some(sc.clone());
+            self.show_tab_kh1(sc.tab, g, &lang);
             return;
         }
         let was_battle = self.look.as_ref().map(|l| l.battle);
         self.clear();
-        let lang = super::settings().menu_language.clone();
         let look = g.first + if battle { kh::menu::LOOK } else { 0 };
         // Headers: the root's at KH1's root origin; the Magic list's at its origin.
         let mut headers = Vec::new();
@@ -436,17 +548,14 @@ impl Ui {
                     layers.push((i, None));
                 }
             }
-            let (dx, sx) = if v.tab { (sc.tab_x, sc.tab_scale) } else { (0.0, 1.0) };
             let at = kh1_at(v, false);
-            let Some(c) = self.kh1_ctrl(prio, at.0 + dx, at.1, sx, &layers) else { continue };
+            let Some(c) = self.kh1_ctrl(prio, at.0, at.1, 1.0, &layers) else { continue };
             func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
-            // The word; the root's row 3 without a context command reads "Summon", greyed (M8
-            // brings summons).
-            let name = if v.list == Kind::Root && v.index == 3 && (v.name == 0 || v.name == cm::cmd::BLANK_NAME) { cm::SUMMON_NAME } else { v.name };
+            // The word (FM's 4th row: the blank dash until summons, M8; `cm::ROW3_CMD`).
             let mut text = 0;
-            if let Some(wg) = (name != 0).then(|| g.word(&lang, name)).flatten() {
+            if let Some(wg) = (v.name != 0).then(|| g.word(&lang, v.name)).flatten() {
                 let at = kh1_at(v, true);
-                if let Some(t) = self.kh1_ctrl(prio, at.0 + dx, at.1, sx, &[(wg, None)]) {
+                if let Some(t) = self.kh1_ctrl(prio, at.0, at.1, 1.0, &[(wg, None)]) {
                     let b = v.bright as f32 / 128.0;
                     func::<VecFn>(COLOUR)(t, V4([b, b, b, sc.alpha]).0.as_ptr());
                     text = t;
@@ -455,6 +564,8 @@ impl Ui {
             self.rows.push(Row { ctrl: c, fnt: 0, view: *v, text });
         }
         self.shown = Some(sc.clone());
+        // The tab after the rows: drawn over the header (`0x140278B40` draws it after them).
+        self.show_tab_kh1(sc.tab, g, &lang);
         let n = REBUILDS.fetch_add(1, Ordering::Relaxed) + 1;
         if n.is_multiple_of(100) {
             super::d2::census(|| format!("command menu: {n} row rebuilds (KH1 look)"));
@@ -473,7 +584,7 @@ impl Ui {
         super::d2::made();
         wr::<u8>(c + C_PRIORITY, if v.list == Kind::Magic { PRIORITY_SUB } else { PRIORITY_ROOT });
         wr::<u8>(c + C_COLOUR_ON, 1);
-        place(c, v, sc);
+        place(c, v);
         let g = first + if v.highlight { 1 } else { 0 };
         super::d2::add(c, self.list, set, g, self.xoff, 1);
         let mut fnt = 0;
@@ -504,6 +615,7 @@ impl Ui {
                 }
             }
             self.shown = Some(sc.clone());
+            self.show_tab_recom(sc.tab, set, first, words);
             let n = REBUILDS.fetch_add(1, Ordering::Relaxed) + 1;
             if n.is_multiple_of(100) {
                 super::d2::census(|| format!("command menu: {n} row rebuilds"));
@@ -512,7 +624,6 @@ impl Ui {
         }
         let old = self.shown.as_ref().expect("same");
         let alpha_changed = old.alpha != sc.alpha;
-        let tab_moved = old.tab_x != sc.tab_x || old.tab_scale != sc.tab_scale;
         for (r, v) in self.rows.iter_mut().zip(&sc.rows) {
             if alpha_changed {
                 func::<VecFn>(COLOUR)(r.ctrl, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
@@ -520,34 +631,11 @@ impl Ui {
             if r.fnt != 0 && (alpha_changed || r.view.bright != v.bright) {
                 wr::<u32>(r.fnt + F_COLOUR, cm::text_colour(v.bright, sc.alpha));
             }
-            if v.tab && tab_moved {
-                place(r.ctrl, v, sc);
-            }
             r.view = *v;
         }
         self.shown = Some(sc.clone());
+        self.show_tab_recom(sc.tab, set, first, words);
     }
-}
-
-/// KH1's look always shows the root's fourth row: KH1 with summons draws "Summon" there (the
-/// owner's KH1 screenshot, 2026-11-01), and the context command slides in over it. Without a
-/// context command (and the cursor elsewhere) 7.3's scene leaves row 3 out (KH1 without summons,
-/// `0x14027B870`); here it is added as the last row, its word "Summon" greyed until summons come
-/// (M8). Owner ask 2026-11-01: "theres no bottom row to the command menu".
-fn with_summon_row(sc: &Scene) -> Scene {
-    let mut s = sc.clone();
-    let has = |k: u8| s.rows.iter().position(|r| r.list == Kind::Root && r.index == k);
-    if let (Some(i2), None) = (has(2), has(3)) {
-        let mut r = s.rows[i2];
-        r.index = 3;
-        r.y += cm::PITCH;
-        r.name = 0;
-        r.highlight = false;
-        r.bright = cm::BRIGHT_GREY as u8;
-        r.tab = false;
-        s.rows.insert(i2 + 1, r);
-    }
-    s
 }
 
 /// H4: the KH1 look's groups when the KH1 HUD is up and its menu look was built.
@@ -572,12 +660,18 @@ fn kh1_at(v: &RowView, word: bool) -> (f32, f32) {
     (v.x + dx, v.y + dy)
 }
 
-/// Re:CoM's layout position (and X scale for the tab) of a row: KH1's top-left + the plate's
-/// anchor, the tab's x offset and scale.
-unsafe fn place(c: usize, v: &RowView, sc: &Scene) {
-    let (dx, sx) = if v.tab { (sc.tab_x, sc.tab_scale) } else { (0.0, 1.0) };
-    func::<VecFn>(LAYOUT_POS)(c, V4([v.x + cm::PLATE_ANCHOR.0 + dx, v.y + cm::PLATE_ANCHOR.1, 0.0, 1.0]).0.as_ptr());
-    func::<VecFn>(SCALE)(c, V4([sx, 1.0, 1.0, 1.0]).0.as_ptr());
+/// KH1's place of the tab's plate, Triangle and word (`cm::tab`): the root's origin + (9, −10)
+/// + the slide; the Triangle by the menu language, dropped as KH1's button glyphs.
+fn tab_kh1_at(t: &TabView, lang: &str) -> [(f32, f32); 3] {
+    use cm::tab;
+    let o = (cm::ROOT_X + tab::AT.0 + t.x, cm::ROOT_Y + tab::AT.1);
+    [o, (o.0 + tab::triangle_x(lang), o.1 + tab::TRIANGLE_Y + tab::GLYPH_DY), (o.0 + tab::WORD_AT.0, o.1 + tab::WORD_AT.1)]
+}
+
+/// Re:CoM's layout position of a row: KH1's top-left + the plate's anchor.
+unsafe fn place(c: usize, v: &RowView) {
+    func::<VecFn>(LAYOUT_POS)(c, V4([v.x + cm::PLATE_ANCHOR.0, v.y + cm::PLATE_ANCHOR.1, 0.0, 1.0]).0.as_ptr());
+    func::<VecFn>(SCALE)(c, V4([1.0, 1.0, 1.0, 1.0]).0.as_ptr());
 }
 
 /// Re:CoM's pad, this frame's fresh presses (pure reads), when Sora takes input.

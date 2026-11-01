@@ -502,7 +502,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     }
     let lrefs: Vec<&str> = langs.iter().map(String::as_str).collect();
     let menu = match &menu_files {
-        Ok(m) => Some(kh::MenuSources { com: &m.com, com_battle: &m.com_battle, mag: &m.mag, font: [&m.font[0], &m.font[1]], words: m.words.clone() }),
+        Ok(m) => Some(kh::MenuSources { com: &m.com, com_battle: &m.com_battle, mag: &m.mag, font: [&m.font[0], &m.font[1]], words: m.words.clone(), icon: m.icon.as_ref().map(|[a, b]| [a.as_slice(), b.as_slice()]) }),
         Err(e) => {
             println!("note: KH1 HUD: no KH1 command menu look: {e}");
             None
@@ -527,6 +527,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     let manifest = kh::manifest_json(&b, &langs, &sources);
     if let Some(m) = &b.menu {
         println!("KH1 HUD: command menu look from group {}: {} glyphs of KH1's menu font, words for {:?}{}", m.first, m.glyphs, m.words.iter().map(|w| w.0.as_str()).collect::<Vec<_>>(), if m.missing.is_empty() { String::new() } else { format!("; no glyph for {:?} (drawn as a space)", m.missing) });
+        println!("KH1 HUD: FM context tab from uitex.bin picture 2's PC rows; Triangle {}", if m.tab_icon { "from Theater's Icon.tm2 (the PlayStation glyph)" } else { "MISSING (no Icon.tm2 / FontIcon.inf): the tab shows without it" });
     }
     println!(
         "KH1 HUD: {} groups ({} motion units), {} sprites, {} atlas items; PS2 atlas {}×{}, PC atlas {}×{}; kh1hud.lad + {} language copies into FO0002.SPR, kh1hud.imz + {} into FO0002.RTM ({:?}); {} PC texture rects redrawn from the PS2 pictures (repacked on PC)",
@@ -553,6 +554,8 @@ struct MenuFiles {
     mag: Vec<u8>,
     font: [Vec<u8>; 2],
     words: Vec<(String, Vec<(u16, String)>)>,
+    /// `Icon.tm2`, `FontIcon.inf` (`Image/dt/Theater`), for the context tab's Triangle.
+    icon: Option<[Vec<u8>; 2]>,
 }
 
 fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_formats::egs::Install) -> Result<MenuFiles, String> {
@@ -560,7 +563,19 @@ fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_for
     use kh1_recom_assets::kh1_hud as kh;
     let rd = |n: &str| inst.read(n).map_err(|e| format!("{n}: {e}"));
     let (com, com_battle, mag) = (rd(kh::COM)?, rd(kh::COM_BATTLE)?, rd(kh::MAG)?);
-    let _ = (game, keys);
+    // The PC's button icons (the context tab's Triangle): `Image/dt/Theater`.
+    let icon = (|| -> Result<[Vec<u8>; 2], String> {
+        let theater = kh1_formats::egs::Archive::open(game.join("Image").join("dt").join("Theater.hed")).map_err(|e| format!("Image/dt/Theater.hed: {e}"))?;
+        let [a, b] = kh::ICON_FILES.map(|n| theater.read(keys, n).map_err(|e| format!("Theater {n}: {e}")));
+        Ok([a?, b?])
+    })();
+    let icon = match icon {
+        Ok(i) => Some(i),
+        Err(e) => {
+            println!("note: KH1 HUD: no Triangle for the context tab: {e}");
+            None
+        }
+    };
     let (_, sys_assets, _) = inst.read_full(kh::SYSFONT).map_err(|e| format!("{}: {e}", kh::SYSFONT))?;
     let dds = sys_assets.iter().find(|a| a.name.eq_ignore_ascii_case(kh::SYSFONT_HD)).ok_or_else(|| format!("{}: no PC asset {}", kh::SYSFONT, kh::SYSFONT_HD))?.data.clone();
     let font = [dds, rd(kh::FONT_TABLE)?];
@@ -571,7 +586,7 @@ fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_for
             words.push((lang.to_string(), cm::words(&a.data).0));
         }
     }
-    Ok(MenuFiles { com, com_battle, mag, font, words })
+    Ok(MenuFiles { com, com_battle, mag, font, words, icon })
 }
 
 /// KH1's command words (`btltbl.bin`'s PC assets `<LANG>_Word.bin`, decoded for the menu's

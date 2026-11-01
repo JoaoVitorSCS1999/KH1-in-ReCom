@@ -260,7 +260,8 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
   control for the root and one for the Magic list; KH1's left margin −86. The look is the battle
   one while `player + 0x390` (Re:CoM's battle room) is set; switching rebuilds and plays the red
   title from frame 1. Root row 3 with no context command reads "Summon", greyed (locked as 7.3's
-  blank row). Nothing new per frame: the rows rebuild only when 7.3's did, plus a look change.
+  blank row). (Superseded 0.35.0, § FM context tab: row 3 is never the context command; it
+  shows KH1's blank dash until summons.) Nothing new per frame: the rows rebuild only when 7.3's did, plus a look change.
 
 ### Owner questions (H4)
 
@@ -270,7 +271,8 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
 2. **Icons:** a = Keyblade on Attack / Counter, b = hat on Magic, c = potion on Items (by their
    pictures; KH1's choice not read). Summon has none.
 3. Root row 3 shows "Summon" greyed when no context command is in it (the brief's choice); KH1
-   shows it only once a summon is learned.
+   shows it only once a summon is learned. (0.35.0: KH1's rule, the blank dash until summons;
+   § FM context tab.)
 
 ### Not 1:1 / to check
 
@@ -289,7 +291,8 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
    font; Summon greyed.
 2. A battle: the tab and panels red, the title turning red over 1/3 s; back in the field: blue.
 3. Magic open: the purple Magic list at x + 11 with its header, the root's title dimmed.
-4. A chest: row 3 slides in reading Open; Triangle opens it once in (7.3's rules).
+4. A chest: row 3 slides in reading Open; Triangle opens it once in (7.3's rules). (0.35.0: the
+   green Triangle tab over the header instead; § FM context tab.)
 5. `hud = recom`: 7.3's Re:CoM plates as before.
 
 ## H5: LOCK ON! and the target's HP gauge (top left)
@@ -544,7 +547,8 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
   Assumption).
 - **Fourth row.** KH1's look always draws the root's row 3 as the last row (`com_fra_d`): the
   context command when there is one, else "Summon" greyed (M8 brings summons). 7.3's rules are
-  unchanged; only the drawing adds the row.
+  unchanged; only the drawing adds the row. (0.35.0: the context command is never this row, and
+  before summons KH1 shows the blank dash there; § FM context tab.)
 - **Seams.** Three causes, all in how the PC atlas is filtered:
   (1) pieces drawn from inside a whole picture mixed in the clear texels around their rect:
   every such rect now has its own atlas box;
@@ -555,3 +559,69 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
   pieces overlap by up to a texel.
   Checked by an offline bilinear render of the bake (no seam left at the quarters or at the
   bar's join).
+
+## FM context tab (0.35.0, owner 2026-11-01: "the menu shouldnt have the context option at the bottom, it should behave like the KH1 final mix version, where the green triangle prompt appears when interacting with something")
+
+7.3 ported the context command as the root's row 3 sliding in under Items. KH1 FM never draws
+it as a row: it has its own green tab with the Triangle, over the COMMAND header. Tags:
+**Checked (decomp)** = KH1 Steam decomp, **(exe)** = bytes of the Steam exe, **(files)** = the
+owner's H0 dump, **Assumption**.
+
+### KH1's rules
+
+| what | where | tag |
+|---|---|---|
+| The root list's resources: `0x14027AB70(0, &0x142859260, &0x140527B28, uibin_com …)`; the index table at `0x140527B28` is 0..11 (identity), so `[6]` = obj 0 `com_fra_d` (last row), `[7]` = 1 `com_fra_cd`, `[5]` = 2 `com_fra_c` (rows), `[3]` = 3 `com_fra_top`, `[8]` = objects 4..7 (`com_sel_sha_d`, `_act_d`, `_gra_d`, `_bla_d`), `[4]` = 8 `com_command`, `[9]` = 9..11 (the icons); `[0]` = the root's picture (2). | `0x140278180`, `0x14027AB70` | Checked (decomp + exe) |
+| The file at `0x14285AD60` is `exchange/<LANG>_uibin_com.bin` (`0x140277FE0`: `"exchange/%s_%s"` with `uibin_com.bin`, `uibin_item`, `uibin_mag`, `uibin_sum`, `uibin_par`, `uibin_i_par`, `uibin_cut`, `com_battle.bin` into `0x14285AD60`, `C560`, `E160`, `0160`, `1D60`, `3960`, `5560`, `6160`). | `0x140277FE0` | Checked (exe disassembly) |
+| The list draw draws rows `0 .. count − 2` (the root: 0..2), then, for the root only, the tab (`0x140277CF0` steps it), then the last row (index `count − 1` = 3) with `com_fra_d`, then the cursor row's selection. | `0x140278B40` | Checked (decomp) |
+| The tab shows while its "scale" `0x142866D14` > 0. That value is copied to `0x142866A40` / `0x142866A44`, which only multiply the alpha of the tab's vertices and of its word and Triangle: an **opacity**, not an X scale (7.3's reading). It goes 0 → 1 by 1/7 and x `0x140527CA8` −10 → 0 by 10/7 a half-frame step (14 frames), and fades out by 1/7. Not multiplied by the menu's fade (`0x142866A40` is replaced while the tab draws); reset when the fade is 0. | `0x140277CF0`, `0x140278B40`, `0x14027A9F0`, `0x14027A920` | Checked (decomp) |
+| Origin: (list x + 9 + x offset, list y − 10) = (25 + x, 250) before the left margin. | `0x140278B40` | Checked (decomp) |
+| Pieces: the four `[8]` objects copied, flags `& ~0x46` (no keys), x − 17, y + 2, UVs and widths set in code; the root's picture `*puVar23`; vertex order TL, BL, TR, BR (`0x14027EA50`): k 0 `sel_sha_d` w + 47, UV (2, 150)–(126, 174), its own colour (0, 0, 0, 64) (the shadow; `0x14027A9F0`); k 1 `sel_act_d` w + 47, same UV, RGB (110, 210, 100) × f; k 2 `sel_gra_d` w + 44, UV (2, 135)–(117, 148), top (3, 11, 3), bottom (30, 110, 32) × f; k 3 `sel_bla_d` w + 42, h + 2, UV (2, 126)–(114, 133), top (0, 0, 0), bottom (3, 11, 3). Alphas: the objects' (64, 128, 128, 128) × the opacity. f = 0.5 while a submenu is on top (`param_1[4]` = 0), else 1. | `0x140278B40` | Checked (decomp + files) |
+| So the screen rects: shadow (11, 255)–(158, 279), plate (8, 252)–(155, 276), band (14, 261)–(150, 274), stripe (14, 254)–(148, 263) (+ x offset): over the header (260–280), 8 units above it and wider than the menu. | | Checked (decomp + files) |
+| Those UVs lie below picture 2's PS2 128 × 128: the art exists only in the PC texture `-4140.dds` (256 × 384): three white, alpha-shaped shapes (stripe, band, the arrow plate) at PC rows 252..349. The colour is all vertex colour. | | Checked (files) |
+| Word: entry 3's command (`+0x17`) at `com_fra_d`'s place (0, 0) + (2, 5) + `0x14027A920`'s (16, 2) = origin + (18, 7), brightness `+0x27` × f, alpha the opacity. When entry 3 is empty (0, 0x42, 0x7C or greyed) and row 0 holds Talk or a `0x62C0183` command, the tab shows row 0's word (`+0x24`) and row 0 draws "Attack" at half brightness (the cursor's confirm there is the error sound). | `0x140278B40` | Checked (decomp) |
+| Triangle: `0x140279FC0(&0x142853960 + cfg[+0xC] × 0xC0, 0x46, list x + x offset − 0x53 (Spanish − 0x57) + cfg[+0x10], list y − 0x30 + cfg[+0x14])`, cfg = `CLanguageCtrlToUI` (`0x14280CA60`) `+0x20` = `CLanguageControlToUiCommand`: English (`0x14027C8E0`) `+0xC` 2, `+0x10` −2, `+0x14` 22; German (`0x14027C500`) −8; French / Italian (`0x14027C400` / `0x14027C610`) −8; Spanish (`0x14027C7F0`) −13; Japanese (`0x14027C690`) 0. `0x142853960` holds `uibin_cut` objects 0..4 (`0x14027E1C0(&0x140527B58 = {0..4, −1})`); object 2 `cut_ico_a` is at (91, 23). So the Triangle sits at (list x + 6 + x offset, list y − 3) in English (French / German / Italian + 0, Spanish − 9). | `0x14027C1A0`, `0x140278180` | Checked (decomp + exe + files) |
+| `0x140279FC0` draws the 2-byte string `0F 46` through the font (`0x1402D2050`, size 14), RGB fixed ×1 (`0x808080`), alpha the opacity (`0x142866A44`): the Triangle slides and fades with the tab and is not dimmed. Escape `0F`: with a pad, `0x1402D4A50(0x46)` = `0x1403EFF90` row 5 (1, 31, 61 by pad type) + 100 → the record at `0x14053B850 + id × 0x14` (w 320, h 384 sixteenths: 15.5 × 18.625 units at size 14, dropped −37 sixteenths); with keys, `0x1402D4BB0` → action `0xE3D3` → the binding `0x1404D8DAA` (default `0xE3F1`). | `0x1402D2050`, `0x1402D4A50`, `0x1402D4BB0`, `0x140138370` | Checked (decomp + exe) |
+| The PC's button art is `Image/dt/Theater` `<lang>/font/Icon.tm2` (TIM2 1024 × 1024 32-bit, PS2 alpha; the same file in every language) with `FontIcon.inf` (16-byte header `{1024, 1024, 178, 0}`, 16-byte records `{code, x0, y0, x1, y1}`): Xbox B / A / Y / X = `0xE3F3` / `F2` / `F1` / `F0`, PlayStation circle / cross / triangle / square = `0xE413` / `12` / `11` / `10`. The PlayStation Triangle (green) is `0xE411`, box (450, 11)–(502, 63). The exe's PS2-era records (`0x14053B850`) do not line up with this picture (id 101 lands on empty texels): how the PC maps KH1's records onto it is not read. | | Checked (files); the mapping: Assumption |
+| The 4th root row: when row 1 is Magic and the Magic list's last entry is Summon (6, or 0x4F), that word (0x73 / 0xE6 by its grey bit); else the blank command 0x42 (the dash, message 305) at 0x73, 0xE6 under the cursor. Not eased. Summon is appended to the Magic list by `0x1402944C0` once a summon is learned; the Magic list's cursor and draw skip it. Confirm / Right on row 3 opens Summon through it, else the error sound. So before summons KH1 FM shows "–" in the 4th row, not "Summon". | `0x140278B40`, `0x1402944C0`, `0x1402931B0`, `0x1402937F0` | Checked (decomp) |
+
+### Native build
+
+- **Asset step** (`kh1_hud::menu::tab`, format `kh1-recom-assets kh1-hud 3`): after the Magic list's
+  groups, group `first + 23` holds the four pieces (one atlas box per UV rect from picture 2's
+  PC rows, the PS2 copy at half size; the colours as vertical gradients, Re:CoM's sprite TL / TR
+  and BL / BR colours) and `first + 24` the Triangle (a 40 × 48 PC texel cell centred on
+  `Icon.tm2`'s `0xE411` glyph, drawn 16 × 19 units); the words start at `first + 25`.
+  `"menu": {"first", "tab_icon", "words"}`. Without `Icon.tm2` the Triangle group is empty
+  (`tab_icon` false, the build log says so). Format 2 sets are refused by the DLL.
+- **DLL** (`win/command_menu.rs`): the tab is `Scene::tab` (`command_menu::TabView`: word, x offset,
+  opacity, brightness, dim), never a row. KH1's look: three controls (pieces, Triangle, word) at
+  `command_menu::tab`'s places, priority 2, made after the rows (a row rebuild remakes them, so
+  they draw over the header and under the Magic list); while it slides only the layout position
+  and colours are written (14 frames). Re:CoM's look: the highlighted plate × (1, 1, 0.39) with
+  KH1's word in a `C2DFnt`, its top-left (8, 232) (28 above the first row, as KH1's over its
+  header), no Triangle (Re:CoM's `Cockpit` has no button glyph we identified).
+- **Logic** (`command_menu.rs`): the root's 4th entry still holds the context command (KH1's
+  build), the scene's 4th row shows `ROW3_CMD` (the blank command until summons, M8); the cursor
+  wraps over four rows; confirm / Right on row 3 is the error sound; Triangle runs the context
+  command once the tab is in (7.3's gate).
+
+### Checked / not checked
+
+- Checked (decomp + exe + files): every number above.
+- Checked (offline bilinear render of the bake, `UK_` files, gradients): the tab in (green arrow
+  plate, dark band, the PlayStation Triangle, "Open") over the COMMAND header; mid-slide (x −5,
+  opacity 0.5: the title shows through); dimmed under the Magic list.
+- Not checked: in game; a KH1 FM screenshot of the tab (to confirm the place and the Triangle's
+  size); the PC's icon remap (the Triangle's cell and size are Assumptions); the Re:CoM look's
+  tab (not rendered: its plates are in the MP bar's `Cockpit` set).
+
+### Assumptions
+
+1. The Triangle's PC cell is 40 × 48 texels centred on the glyph (twice a PS2 icon cell), drawn
+   16 × 19 units (KH1's quad 15.5 × 18.625).
+2. The PlayStation glyph (the owner's ask: "the green triangle prompt"); KH1 PC picks the glyph
+   by the pad in use (Xbox Y with an Xbox pad).
+3. Controls made later draw over earlier ones of the same priority (as the MP bar's pieces).
+4. While a submenu is on top the whole plate's RGB is halved (KH1 halves only the bright
+   colours; the dark ones differ by 1–5 levels).

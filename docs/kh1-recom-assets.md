@@ -626,8 +626,11 @@ prints and the `command menu:` lines of `kh1-recom.log`.
 `command2/uitex.bin` (+ PC assets), `exchange/UK_uibin_g_s.bin`, `exchange/UK_uibin_g_red.bin`,
 `exchange/UK_uibin_g_act.bin` (the gauge motions, H2b), `UK_uibin_lock.bin`, `UK_uibin_g_enm.bin`, `UK_uibin_g_c.bin` (the party, H6), `UK_uibin_lev_s.bin` (LEVEL UP!!, H8)
 (LOCK ON! and the target gauge, H5), `exchange/UK_uibin_com.bin`,
-`UK_com_battle.bin`, `UK_uibin_mag.bin`, KH1's menu font `uk/font/menufont.tm2 / .cod / .inf` from
-`Image/dt/Theater.hed` and `btltbl.bin`'s `<LANG>_Word.bin` (the command menu's look, H4), and
+`UK_com_battle.bin`, `UK_uibin_mag.bin`, KH1's system font (`menu/us/sysfont.bin`'s
+`US_sysfont_bin0.dds`, `exchange/US_font_data_tbl.bin`; 0.34.0), the PC's button icons
+`uk/font/Icon.tm2` / `FontIcon.inf` from `Image/dt/Theater.hed` (the context tab's Triangle,
+0.35.0; without them the tab has no Triangle and the build says so) and `btltbl.bin`'s
+`<LANG>_Word.bin` (the command menu's look, H4), and
 `xa_ex_0010/0040/0050.mdls`, and writes, next to the other files:
 
 - `raw/FORM/0002/FO0002.SPR` (as before, now also with `kh1hud.lad` and `<LANG>_kh1hud.lad`);

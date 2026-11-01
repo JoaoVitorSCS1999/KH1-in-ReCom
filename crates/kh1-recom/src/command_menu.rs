@@ -4,8 +4,10 @@
 //! decomp tools):
 //! - **Lists** are 0x38-byte records (`0x140528900` + type × 0x38): `+4` grey mask (drawn grey),
 //!   `+8` lock mask (can't run), `+0xC` cursor, `+0x10` count, `+0x14` command ids, `+0x24`
-//!   per-row brightness, `+0x34` the row a submenu was opened from. Root (type 0, 4 rows: Attack /
-//!   Magic / Items / context) and Magic (type 1) are this stage's.
+//!   per-row brightness, `+0x34` the row a submenu was opened from. Root (type 0, 4 entries) and
+//!   Magic (type 1) are this stage's. The root's 4th entry holds the context command, but KH1 FM
+//!   never draws it as a row: the 4th row shows Summon (or the blank dash) and the context
+//!   command shows in its own green tab with the Triangle (`0x140278B40`; see **Draw**).
 //! - **Build, every frame** (`0x140294220`, `0x1402944C0`, `0x1402948F0`): row 0 Attack (1), or
 //!   Counterattack (0x63) while the guard recoil 0x6E plays against a target with the ability;
 //!   grey = lock = `!(state flags >> 4) | !1` (Attack needs the movement state's flag 0x10), rows
@@ -13,26 +15,37 @@
 //!   spell is usable (usable: the state's flag 0x20, MP `0x1402A4C10`, and for the command flag
 //!   8 spells the target within the command's range `+0xE`); the Magic list holds the learned
 //!   spells (`level + (spell + 2) × 3`), grey = lock for the unusable ones. Row 2 Items (3),
-//!   greyed and locked with no item slots. Row 3 the context command (0 = none), ungreyed when
-//!   one is set (`0x140293000`).
+//!   greyed and locked with no item slots. Entry 3 the context command (0 = none), ungreyed when
+//!   one is set (`0x140293000`). Summon is the Magic list's extra last entry (command 6, or 0x4F)
+//!   once summons are learned (`0x1402944C0`); FM's cursor skips it in the Magic list
+//!   (`0x1402931B0`: count − 1) and the draw shows it as the root's 4th row.
 //! - **Cursor** (`0x1402931B0`), on the fresh-press word compared for equality: Up / Down move and
 //!   wrap; Right opens the row's submenu (sound 6), a locked row sounds 4; Left or cancel closes a
 //!   submenu (sound 3; cancel also puts the root cursor on Attack); Left at the root puts the
 //!   cursor on Attack (sound 1). No auto-repeat.
 //! - **Step** (`0x1402937F0`): at the root a fresh jump is the jump (no menu input that frame);
-//!   Triangle runs the context row when its tab is fully in (`0x140277CF0` state 2); Square
+//!   Triangle runs the context command when its tab is fully in (`0x140277CF0` state 2); Square
 //!   (without Triangle) is the roll / guard (no cursor that frame); then the cursor; then confirm
 //!   (and Right on the root's row 3) runs the row (`0x140293410` → `0x140293480`): a locked row
 //!   sounds 4, a row with a submenu opens it, a command is issued and the root cursor returns to
 //!   Attack. A spell passes KH1's commit gate first (free or in a combo window; Fire also from
-//!   frame 14 of its release), else nothing happens and the list stays (M7 stage 7.4). Confirm on the root's row 3 is the error sound (only Summon is opened from there).
+//!   frame 14 of its release), else nothing happens and the list stays (M7 stage 7.4). Confirm
+//!   (or Right) on the root's row 3 opens the Summon list through the Magic list's last entry
+//!   when it is Summon, else it is the error sound (`0x1402937F0`); the cursor never runs the
+//!   context command.
 //! - **Draw** (`0x14027B870`): root rows at (16, 260), 22 apart; the Magic list at x + 11, at the
 //!   Magic row's y when it has fewer than 3 rows, else bottom-anchored at 348 − 22 n. The top
 //!   list's rows ease ±32 brightness a frame between 0x73 (grey) and 0xE6; when the top list
 //!   changes, every row is set at once (the lists under it to 0x73). The menu fades in / out at
-//!   0.1 a frame (`0x140278AC0`) and hides / shows at once for events (`0x140293750`).
-//! - **Context tab** (`0x140277CF0`): row 3 slides in over 14 frames (X scale +1/7 and x −10 → 0
-//!   by 10/7 per half-frame step), out by the scale.
+//!   0.1 a frame (`0x140278AC0`) and hides / shows at once for events (`0x140293750`). FM's list
+//!   draw (`0x140278B40`) draws the root's rows 0..2, then the context tab, then the 4th row
+//!   (the last-row frame) with Summon (the Magic list's last entry, 0x73 / 0xE6 by its grey bit)
+//!   or the blank command 0x42 (0x73, 0xE6 under the cursor); the brightness there is not eased.
+//! - **Context tab** (`0x140277CF0`, drawn by `0x140278B40`): its own green plate above the
+//!   header with the Triangle and the command's word; it slides in over 14 frames (x −10 → 0 by
+//!   10/7 and opacity 0 → 1 by 1/7 per half-frame step) and fades out by the opacity. The
+//!   "scale" `0x142866D14` only multiplies the alpha of the tab's vertices (`0x142866A44`) and
+//!   word (`0x142866A40`): it is an opacity, not an X scale (7.3 read it as one).
 //!
 //! Re:CoM side: `win/command_menu.rs`; notes `docs/recom-m7-command-menu.md`.
 
@@ -43,7 +56,7 @@ pub const FORMAT: &str = "kh1-recom-assets command-menu 1";
 
 /// KH1 command ids (the command table, `btltbl.bin` `+0xA58`; Checked (files)).
 pub mod cmd {
-    /// No command (the empty context row).
+    /// No command (no context command).
     pub const NONE: u8 = 0;
     pub const ATTACK: u8 = 1;
     pub const MAGIC: u8 = 2;
@@ -152,7 +165,7 @@ pub struct World {
     pub mp: Option<(i32, i32, u16)>,
     /// Distance to the target (KH1 cm), when there is one.
     pub target_dist: Option<f32>,
-    /// The context command for row 3 (0: none).
+    /// The context command (entry 3, shown in the tab; 0: none).
     pub context: u8,
     /// KH1's commit gate for a spell (`0x140293480`, M7 stage 7.4): Sora is free or in a combo
     /// window (`0x1402A2EC0`) and not taking off, and Re:CoM's action is one KH1's frame runs.
@@ -271,8 +284,8 @@ pub struct Outcome {
     pub attack: bool,
     /// The jump (`& 1`) may stay: KH1 jumps only from the root list.
     pub jump: bool,
-    /// Re:CoM's Triangle action (`& 0x200`) may stay. KH1 runs the context row with Triangle only
-    /// from the root list and once its tab is in; with no context command shown, Re:CoM's own
+    /// Re:CoM's Triangle action (`& 0x200`) may stay. KH1 runs the context command with Triangle
+    /// only from the root list and once its tab is in; with no context command shown, Re:CoM's own
     /// action is left to decide (an object this menu doesn't recognise keeps its Triangle).
     pub triangle: bool,
     pub sounds: Vec<Sound>,
@@ -281,20 +294,20 @@ pub struct Outcome {
     pub cast: Option<u8>,
 }
 
-/// The context tab (`0x140277CF0`): 0 hidden, 1 sliding in, 2 in, 3 sliding out.
+/// The context tab (`0x140277CF0`): 0 hidden, 1 sliding in, 2 in, 3 fading out.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tab {
     pub state: u8,
-    /// x offset (−10 → 0) and X scale (0 → 1).
+    /// x offset (`0x140527CA8`, −10 → 0) and opacity (`0x142866D14`, 0 → 1).
     pub x: f32,
-    pub scale: f32,
+    pub alpha: f32,
     /// The command it shows (`0x142866D10`).
     pub last: u8,
 }
 
 impl Default for Tab {
     fn default() -> Self {
-        Tab { state: 0, x: -10.0, scale: 0.0, last: 0 }
+        Tab { state: 0, x: -10.0, alpha: 0.0, last: 0 }
     }
 }
 
@@ -393,7 +406,7 @@ impl Menu {
         r.cmds[2] = cmd::ITEMS;
         r.grey |= 4;
         r.lock |= 4;
-        // The context row (`0x1402948F0` clears it, `0x140293000` sets it).
+        // The context command, entry 3 (`0x1402948F0` clears it, `0x140293000` sets it).
         r.cmds[3] = cmd::NONE;
         if w.context != cmd::NONE {
             r.cmds[3] = w.context;
@@ -433,7 +446,7 @@ impl Menu {
         if !was_open && pad.cancel {
             return out;
         }
-        // Triangle: the context row, when its tab is in.
+        // Triangle: the context command, when its tab is in.
         if !was_open && pad.triangle && self.tab.state == 2 && offered {
             let c = if self.row3_valid() { self.root.cmds[3] } else { self.root.cmds[0] };
             out.events.push(Event::Context(c));
@@ -465,8 +478,11 @@ impl Menu {
                     // Attack / Counter: Re:CoM's own Attack request, as before the menu.
                 }
                 3 => {
+                    // FM (`0x1402937F0`): row 3 shows Summon, opened through the Magic list's last
+                    // entry once summons are learned (M8); before that the blank row is the error
+                    // sound. The context command in entry 3 is Triangle's only.
                     out.sounds.push(Sound::Error);
-                    out.events.push(Event::Refused(self.root.cmds[3]));
+                    out.events.push(Event::Refused(ROW3_CMD));
                 }
                 row => {
                     out.attack = false;
@@ -595,7 +611,7 @@ impl Menu {
     }
 
     fn tab_restart(&mut self, c: u8) {
-        self.tab = Tab { state: 1, x: -10.0, scale: 0.0, last: c };
+        self.tab = Tab { state: 1, x: -10.0, alpha: 0.0, last: c };
         self.tab_cmd = c;
     }
 
@@ -623,8 +639,8 @@ impl Menu {
                 if c != self.tab.last && self.tab.last != 0 {
                     self.tab_restart(c);
                 }
-                if self.tab.scale < 1.0 {
-                    self.tab.scale = (self.tab.scale + half * 0.142_857_15).min(1.0);
+                if self.tab.alpha < 1.0 {
+                    self.tab.alpha = (self.tab.alpha + half * 0.142_857_15).min(1.0);
                 }
                 if self.tab.x > 0.0 {
                     return;
@@ -633,7 +649,7 @@ impl Menu {
                 if self.tab.x <= 0.0 {
                     return;
                 }
-                self.tab = Tab { state: 2, x: 0.0, scale: 1.0, last: c };
+                self.tab = Tab { state: 2, x: 0.0, alpha: 1.0, last: c };
                 self.tab_cmd = c;
             }
             2 => {
@@ -646,8 +662,8 @@ impl Menu {
             }
             _ => {
                 if gone {
-                    self.tab.scale -= half * 0.142_857_15;
-                    if self.tab.scale <= 0.0 {
+                    self.tab.alpha -= half * 0.142_857_15;
+                    if self.tab.alpha <= 0.0 {
                         self.tab = Tab::default();
                     }
                 } else {
@@ -663,22 +679,15 @@ impl Menu {
         let mut rows = Vec::new();
         let top_root = !self.open;
         for i in 0..4 {
-            let tab = i == 3;
             let cursor_here = top_root && self.root.cursor == i as i32;
-            if tab && self.tab.state == 0 && !cursor_here {
-                continue;
-            }
-            let c = if tab { if self.tab.state == 0 { cmd::NONE } else { self.tab_cmd } } else { self.root.cmds[i] };
-            rows.push(RowView {
-                list: Kind::Root,
-                index: i as u8,
-                x: ROOT_X,
-                y: ROOT_Y + PITCH * i as f32,
-                name: if c == cmd::NONE { 0 } else { cmd::name(c) },
-                highlight: cursor_here,
-                bright: self.root.bright.get(i).copied().unwrap_or(BRIGHT_GREY) as u8,
-                tab: tab && self.tab.state != 0,
-            });
+            // FM's 4th row (`0x140278B40`): Summon or the blank command, never the context
+            // command (that is the tab's); its brightness is set, not eased.
+            let (name, bright) = if i == 3 {
+                (cmd::name(ROW3_CMD), if cursor_here { BRIGHT_ON } else { BRIGHT_GREY })
+            } else {
+                (cmd::name(self.root.cmds[i]), self.root.bright.get(i).copied().unwrap_or(BRIGHT_GREY))
+            };
+            rows.push(RowView { list: Kind::Root, index: i as u8, x: ROOT_X, y: ROOT_Y + PITCH * i as f32, name, highlight: cursor_here, bright: bright as u8 });
         }
         if self.open {
             let n = self.magic.cmds.len();
@@ -692,11 +701,17 @@ impl Menu {
                     name: cmd::name(c),
                     highlight: self.magic.cursor == i as i32,
                     bright: self.magic.bright.get(i).copied().unwrap_or(BRIGHT_GREY) as u8,
-                    tab: false,
                 });
             }
         }
-        Scene { rows, alpha: self.alpha, tab_x: self.tab.x, tab_scale: self.tab.scale }
+        // The tab: entry 3's word at its eased brightness, all × 0.5 while a submenu is on top
+        // (`0x140278B40`'s `fVar25`); its opacity is the tab's own, not the menu's fade.
+        let tab = (self.tab.state != 0 && self.tab_cmd != cmd::NONE).then(|| {
+            let dim = self.open;
+            let b = self.root.bright.get(3).copied().unwrap_or(BRIGHT_GREY);
+            TabView { name: cmd::name(self.tab_cmd), x: self.tab.x, alpha: self.tab.alpha, bright: (if dim { b * 0.5 } else { b }) as u8, dim }
+        });
+        Scene { rows, alpha: self.alpha, tab }
     }
 
     /// The F9 trace token.
@@ -720,9 +735,12 @@ impl Menu {
     }
 }
 
-/// KH1's "Summon" (message 6, `btltbl.bin`'s Word.bin; Checked (files)): the KH1 look's root row 3
-/// when no context command is in it (H4: greyed until summons come, M8).
+/// KH1's "Summon" (command 6, message 6, `btltbl.bin`'s Word.bin; Checked (files)).
 pub const SUMMON_NAME: u16 = 6;
+/// What FM's 4th root row shows (`0x140278B40`): Summon (6) once summons are learned (the Magic
+/// list's last entry, M8), else KH1's blank command 0x42 (message 305, the dash), greyed. Checked
+/// (decomp). No summons before M8: the blank command.
+pub const ROW3_CMD: u8 = cmd::BLANK;
 /// KH1's layout (`0x14027B870`), in the 512 × 384 2D space. Checked (decomp).
 pub const ROOT_X: f32 = 16.0;
 pub const ROOT_Y: f32 = 260.0;
@@ -745,23 +763,72 @@ pub struct RowView {
     pub name: u16,
     pub highlight: bool,
     pub bright: u8,
-    /// The context tab (its x and X scale follow the tab).
-    pub tab: bool,
 }
 
 impl RowView {
     /// What needs the row rebuilt when it changes (not the brightness).
-    pub fn key(&self) -> (Kind, u8, i32, i32, u16, bool, bool) {
-        (self.list, self.index, self.x as i32, self.y as i32, self.name, self.highlight, self.tab)
+    pub fn key(&self) -> (Kind, u8, i32, i32, u16, bool) {
+        (self.list, self.index, self.x as i32, self.y as i32, self.name, self.highlight)
     }
+}
+
+/// FM's context tab (`0x140278B40`, the block after the root's rows), KH1's 2D units. Checked
+/// (decomp + files) unless tagged:
+/// - its origin is the root list's origin + (9, −10) + (the tab's x offset, 0);
+/// - four pieces from picture 2's PC-only rows (UVs set in the code, the rects from `com`'s
+///   selection objects 4..7 widened): a shadow, the green plate, a band and a stripe
+///   (`kh1_recom_assets::kh1_hud::tab`), drawn over the header;
+/// - the word at the origin + (2, 5) + `0x14027A920`'s (16, 2);
+/// - the Triangle (`0x140279FC0`, glyph 0x46 of the font's button icons) at the root's x + the
+///   tab's x offset − 0x53 (Spanish − 0x57) + the language's offset + `uibin_cut` object 2's x
+///   (91), and y − 0x30 + 22 + 23 (`CLanguageControlToUiCommand`, `0x14027C8E0` & al.).
+pub mod tab {
+    /// The tab's origin from the root list's origin.
+    pub const AT: (f32, f32) = (9.0, -10.0);
+    /// The word from the tab's origin.
+    pub const WORD_AT: (f32, f32) = (18.0, 7.0);
+    /// The Triangle's y from the tab's origin, before the glyph's own drop.
+    pub const TRIANGLE_Y: f32 = 7.0;
+    /// The button glyph's drop (`0x1402D2050`, icons ≥ 100: −48 × 14 / 18 in 1/16 units, −37).
+    pub const GLYPH_DY: f32 = -37.0 / 16.0;
+    /// The glyph's quad (`0x1402D2050`: 320 × 384 sixteenths × 14 / 18): 15.5 × 18.625 units.
+    pub const GLYPH_SIZE: (f32, f32) = (15.5, 18.625);
+
+    /// The Triangle's x from the tab's origin, by the menu language (us, uk, fr, gr, it, sp):
+    /// −0x53 (sp −0x57) + the language's `+0x10` (English −2, French / German / Italian −8,
+    /// Spanish −13: `0x14027C8E0`, `0x14027C400`, `0x14027C500`, `0x14027C610`, `0x14027C7F0`)
+    /// + 91 (`cut_ico_a`) − 9.
+    pub fn triangle_x(lang: &str) -> f32 {
+        let (base, off) = match lang {
+            "fr" | "gr" | "it" => (-0x53, -8),
+            "sp" => (-0x57, -13),
+            _ => (-0x53, -2),
+        };
+        (base + off + 91 - 9) as f32
+    }
+}
+
+/// The context tab to draw.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TabView {
+    /// The KH1 message id of its word.
+    pub name: u16,
+    /// Its x offset (−10 → 0).
+    pub x: f32,
+    /// Its opacity (0 → 1): the plate's, the word's and the Triangle's alpha.
+    pub alpha: f32,
+    /// The word's brightness (× 0.5 while a submenu is on top).
+    pub bright: u8,
+    /// A submenu is on top: the plate's RGB × 0.5 (the Triangle keeps ×1).
+    pub dim: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {
     pub rows: Vec<RowView>,
     pub alpha: f32,
-    pub tab_x: f32,
-    pub tab_scale: f32,
+    /// The context tab, while it shows.
+    pub tab: Option<TabView>,
 }
 
 impl Scene {
@@ -925,7 +992,7 @@ mod tests {
     fn kh1_cursor_rules() {
         let w = World { spells: all_spells(), ..world() };
         let mut m = Menu::new();
-        // Up from Attack wraps to the context row; Down back to Attack.
+        // Up from Attack wraps to row 3 (FM's Summon row); Down back to Attack.
         let o = m.step(&w, press(|p| p.up = true));
         assert_eq!((m.root.cursor, o.sounds.clone()), (3, vec![Sound::Move]));
         assert!(!o.attack);
@@ -1113,7 +1180,7 @@ mod tests {
         }
         // The frame it appears starts the tab, then 14 frames of slide (half-frame steps of 10/7).
         assert_eq!(frames, 15);
-        assert_eq!((m.tab.x, m.tab.scale, m.tab_cmd), (0.0, 1.0, cmd::OPEN));
+        assert_eq!((m.tab.x, m.tab.alpha, m.tab_cmd), (0.0, 1.0, cmd::OPEN));
         let o = m.step(&w, press(|p| p.triangle = true));
         assert!(o.triangle && o.events == vec![Event::Context(cmd::OPEN)]);
         // No context command: Re:CoM's own Triangle action decides (nothing to show).
@@ -1125,7 +1192,7 @@ mod tests {
         m.root.cursor = 1;
         m.step(&ws, press(|p| p.right = true));
         assert!(!m.step(&ws, press(|p| p.triangle = true)).triangle);
-        // The object goes: the tab slides out by its scale (14 frames), keeping its name.
+        // The object goes: the tab fades out by its opacity (14 frames), keeping its name.
         let gone = World { context: 0, ..world() };
         m.step(&gone, Pad::default());
         m.tick(1.0);
@@ -1136,7 +1203,7 @@ mod tests {
             m.tick(1.0);
             n += 1;
         }
-        assert_eq!(n, 15, "the frame it goes, then 14 frames of shrinking");
+        assert_eq!(n, 15, "the frame it goes, then 14 frames of fading");
         // Hidden HUD: reset.
         m.build(&w);
         m.hide();
@@ -1151,17 +1218,28 @@ mod tests {
         m.show();
         m.step(&w, Pad::default());
         m.tick(1.0);
+        m.step(&w, Pad::default());
+        m.tick(1.0);
         let s = m.scene();
-        // Rows 0..2 and the sliding tab.
+        // FM: four rows always (the 4th the blank command until summons, M8); the context
+        // command is not a row.
         assert_eq!(s.rows.iter().map(|r| (r.x, r.y)).collect::<Vec<_>>(), vec![(16.0, 260.0), (16.0, 282.0), (16.0, 304.0), (16.0, 326.0)]);
-        assert!(s.rows[0].highlight && s.rows[3].tab && s.rows[3].name == 4);
-        // Magic with 7 spells: bottom-anchored at 348 − 22 × 7 = 194, x + 11.
+        assert!(s.rows[0].highlight && s.rows[3].name == cmd::BLANK_NAME && !s.rows[3].highlight);
+        assert!(s.rows.iter().all(|r| r.name != cmd::name(cmd::TALK)));
+        // The tab: Talk, sliding in (the frame it starts, then x −10 + 10/7 × ½, opacity 1/14).
+        let t = s.tab.expect("the tab shows");
+        assert_eq!(t.name, cmd::name(cmd::TALK));
+        assert!(t.x < 0.0 && t.x > -10.0 && t.alpha > 0.0 && t.alpha < 0.1 && !t.dim);
+        // Magic with 7 spells: bottom-anchored at 348 − 22 × 7 = 194, x + 11; the tab dims.
         m.root.cursor = 1;
         m.step(&w, press(|p| p.right = true));
+        m.tick(1.0);
         let s = m.scene();
         let mg: Vec<_> = s.rows.iter().filter(|r| r.list == Kind::Magic).collect();
         assert_eq!((mg[0].x, mg[0].y, mg.len()), (27.0, 194.0, 7));
         assert!(mg[0].highlight && !s.rows[1].highlight, "only the top list's cursor row");
+        let t = s.tab.unwrap();
+        assert!(t.dim && t.bright == (BRIGHT_GREY * 0.5) as u8, "the root's rows go grey under the list, the tab × 0.5");
         // Two spells: at the Magic row's y.
         let mut two = [0; 7];
         two[0] = 2;
@@ -1170,14 +1248,42 @@ mod tests {
         let s = m.scene();
         let mg: Vec<_> = s.rows.iter().filter(|r| r.list == Kind::Magic).collect();
         assert_eq!((mg[0].y, mg[1].y, mg[0].name, mg[1].name), (282.0, 304.0, 8, 16));
-        // No context, cursor elsewhere: row 3 isn't drawn; on it: drawn empty.
+        // No context: no tab; the 4th row stays, grey, and bright under the cursor.
         let mut m = Menu::new();
         m.show();
         m.step(&world(), Pad::default());
-        assert_eq!(m.scene().rows.len(), 3);
+        m.tick(1.0);
+        let s = m.scene();
+        assert_eq!((s.rows.len(), s.tab), (4, None));
+        assert_eq!(s.rows[3].bright, BRIGHT_GREY as u8);
         m.root.cursor = 3;
         let s = m.scene();
-        assert_eq!((s.rows.len(), s.rows[3].name, s.rows[3].highlight), (4, 0, true));
+        assert_eq!((s.rows[3].name, s.rows[3].highlight, s.rows[3].bright), (cmd::BLANK_NAME, true, BRIGHT_ON as u8));
+    }
+
+    #[test]
+    fn the_cursor_never_runs_the_context_command() {
+        let w = World { spells: all_spells(), context: cmd::OPEN, ..world() };
+        let mut m = Menu::new();
+        m.show();
+        for _ in 0..16 {
+            m.step(&w, Pad::default());
+            m.tick(1.0);
+        }
+        assert_eq!(m.tab.state, 2);
+        // Up to row 3 (Summon's row) and confirm or Right: the error sound, no context.
+        m.step(&w, press(|p| p.up = true));
+        assert_eq!(m.root.cursor, 3);
+        for pad in [press(|p| p.confirm = true), press(|p| p.right = true)] {
+            let o = m.step(&w, pad);
+            assert_eq!((o.sounds.clone(), o.events.clone()), (vec![Sound::Error], vec![Event::Refused(cmd::BLANK)]));
+            assert!(!o.attack);
+        }
+        // Triangle runs it, from any root row.
+        let o = m.step(&w, press(|p| p.triangle = true));
+        assert_eq!(o.events, vec![Event::Context(cmd::OPEN)]);
+        // KH1's triangle offsets by language (English −3, French / German / Italian −9, Spanish −18).
+        assert_eq!([tab::triangle_x("us"), tab::triangle_x("fr"), tab::triangle_x("sp")], [-3.0, -9.0, -18.0]);
     }
 
     #[test]

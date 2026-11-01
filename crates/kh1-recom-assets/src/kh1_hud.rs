@@ -37,7 +37,9 @@ pub const SET: &str = "kh1hud:00";
 /// The manifest the DLL reads.
 pub const MANIFEST: &str = "kh1-hud.json";
 /// The manifest's format line.
-pub const FORMAT: &str = "kh1-recom-assets kh1-hud 2";
+/// Format 3 (0.35.0): the command menu's FM context tab and Triangle groups follow the Magic
+/// list's (the words move up by two); the DLL refuses format 2.
+pub const FORMAT: &str = "kh1-recom-assets kh1-hud 3";
 /// KH1's layout of Sora's gauge (`0x140268800` loads it; `UK` is English, `0x1400D7380`).
 pub const G_S: &str = "exchange/UK_uibin_g_s.bin";
 /// The danger flash object (`g_s_bar_b_hp_red`, slot `+0x4E0`).
@@ -83,6 +85,17 @@ pub const SYSFONT: &str = "menu/us/sysfont.bin";
 pub const SYSFONT_HD: &str = "US_sysfont_bin0.dds";
 /// The glyph table.
 pub const FONT_TABLE: &str = "exchange/US_font_data_tbl.bin";
+/// The PC's button icons (`Image/dt/Theater`, every language the same file; Checked (files)):
+/// a TIM2 1024 × 1024 32-bit picture with PS2 alpha, and `FontIcon.inf` (a 16-byte header
+/// `{1024, 1024, count, 0}`, then 16-byte records `{code, x0, y0, x1, y1, 0, 0, 0}`: the
+/// PlayStation buttons 0xE410 square, 0xE411 triangle, 0xE412 cross, 0xE413 circle; the Xbox
+/// ones 0xE3F0..0xE3F3). KH1 draws the Triangle prompt as glyph `0F 46` (`0x140279FC0` →
+/// `0x1402D2050` → `0x1402D4A50` / `0x1402D4BB0`); which glyph the PC shows for it depends on
+/// the pad (PlayStation: 0xE411, the green triangle; Assumption: the PC's remap of KH1's PS2 icon
+/// records onto this picture is not read).
+pub const ICON_FILES: [&str; 2] = ["uk/font/Icon.tm2", "uk/font/FontIcon.inf"];
+/// The PlayStation Triangle's record in `FontIcon.inf`.
+pub const ICON_TRIANGLE: u16 = 0xE411;
 /// The party's model files whose section 2 is the face strip: Sora (Checked (files)), Donald
 /// and Goofy (Checked (files: their 48 × 48 faces in the owner's dump)).
 pub const FACES: [&str; 3] = ["xa_ex_0010.mdls", "xa_ex_0040.mdls", "xa_ex_0050.mdls"];
@@ -1063,6 +1076,9 @@ pub struct MenuSources<'a> {
     pub font: [&'a [u8]; 2],
     /// (language, [(message id, word)]) as `command_menu::words` decodes them.
     pub words: Vec<(String, Vec<(u16, String)>)>,
+    /// The PC's button icons (`Icon.tm2`, `FontIcon.inf`), for the context tab's Triangle. Without
+    /// them the Triangle's group is empty.
+    pub icon: Option<[&'a [u8]; 2]>,
 }
 
 /// The built files.
@@ -1384,6 +1400,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     // H4 / H5: pictures 1, 2, 3 (titles, icons, words; the root's panels; the submenus') and
     // picture 0's LOCK ON! plate corner (texels 96..128 square: the plate's art, at the PC's 4×).
     let mut mp = Vec::new();
+    let mut pic2_pc = None;
     for (i, off, data) in MENU_PICTURES {
         let t = tims.get(i).ok_or_else(|| crate::Error::Format(format!("uitex.bin: no picture {i}")))?;
         if t.offset != off || t.width != 128 || t.height != 128 {
@@ -1395,6 +1412,10 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
             per.push(uitex_asset(src.uitex_hd, data, l)?.ok_or_else(|| crate::Error::Format(format!("uitex.bin: no PC texture for picture {i}")))?);
         }
         let scale = hd_scale(&ps2, &per[0])?;
+        // FM's context tab draws from picture 2's PC-only rows (`0x140278B40`): kept whole.
+        if i == 2 {
+            pic2_pc = Some((per[0].clone(), scale));
+        }
         let per: Vec<Pic> = per.into_iter().map(|p| p.crop(0, 0, 128 * scale, 128 * scale)).collect();
         // One shared PC picture when every language has the same one (pictures 2, 3).
         let per = if per.iter().all(|p| *p == per[0]) { vec![per[0].clone()] } else { per };
@@ -1419,7 +1440,10 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     };
     // H4: KH1's command menu pieces and words.
     let menu_built = match &src.menu {
-        Some(ms) => Some(menu::build(ms, &mut atlas, [mp[0], mp[1], mp[2]], &mut groups)?),
+        Some(ms) => {
+            let (p2, s) = pic2_pc.as_ref().expect("picture 2 read");
+            Some(menu::build(ms, &mut atlas, [mp[0], mp[1], mp[2]], (p2, *s), &mut groups)?)
+        }
         None => None,
     };
     // H5: the LOCK ON! plate and the target's HP gauge.
@@ -1735,8 +1759,47 @@ pub mod menu {
         pub const TITLE_TO_BATTLE: usize = 2 * LOOK;
         /// The Magic list: header, title, row, last row, selection, icon.
         pub const MAGIC: usize = 2 * LOOK + 1;
+        /// FM's context tab: its four pieces (shadow, green plate, band, stripe), at the tab's
+        /// origin ([`super::tab`]).
+        pub const TAB: usize = MAGIC + 6;
+        /// The Triangle (the PC's PlayStation glyph; empty without `Icon.tm2`).
+        pub const TRIANGLE: usize = TAB + 1;
         /// The words.
-        pub const WORDS: usize = MAGIC + 6;
+        pub const WORDS: usize = TAB + 2;
+    }
+
+    /// FM's context tab (`0x140278B40`, the block after the root's rows; Checked (decomp) unless
+    /// tagged). Four pieces drawn from the root's picture (2) at the tab's origin (the root's
+    /// origin + (9, −10) + the slide), their rects `com`'s selection objects 4..7 (`sel_sha_d`,
+    /// `sel_act_d`, `sel_gra_d`, `sel_bla_d`) moved by (−17, +2) and widened, their UVs set in the
+    /// code (inclusive PS2 texels of picture 2; those rows exist only in the PC texture
+    /// `-4140.dds`, 256 × 384: Checked (files)), their colours the code's (vertex order TL, BL,
+    /// TR, BR, `0x14027EA50`: top and bottom pairs, a vertical gradient), alphas the objects':
+    /// - 0: `sel_sha_d` (its own colour (0, 0, 0, 64): the shadow), w + 47, UV (2, 150)–(126, 174);
+    /// - 1: `sel_act_d`, w + 47, the same UV, RGB (110, 210, 100): the green plate;
+    /// - 2: `sel_gra_d`, w + 44, UV (2, 135)–(117, 148), top (3, 11, 3), bottom (30, 110, 32);
+    /// - 3: `sel_bla_d`, w + 42, h + 2, UV (2, 126)–(114, 133), top (0, 0, 0), bottom (3, 11, 3).
+    ///
+    /// KH1 multiplies the plate's bright RGB (pieces 1, 2's bottom) by 0.5 while a submenu is on
+    /// top; here the whole group's RGB is (the DLL's control colour): pieces 2, 3's dark (3, 11, 3)
+    /// become (1, 5, 1) then instead of staying. The tab's opacity multiplies every alpha.
+    pub mod tab {
+        /// (object, width added, height added, UV (inclusive PS2 texels of picture 2), top RGB,
+        /// bottom RGB; None: the object's own colour).
+        pub const PIECES: [(usize, i32, i32, [i32; 4], Option<([i32; 3], [i32; 3])>); 4] = [
+            (4, 47, 0, [2, 150, 126, 174], None),
+            (5, 47, 0, [2, 150, 126, 174], Some(([110, 210, 100], [110, 210, 100]))),
+            (6, 44, 0, [2, 135, 117, 148], Some(([3, 11, 3], [30, 110, 32]))),
+            (7, 42, 2, [2, 126, 114, 133], Some(([0, 0, 0], [3, 11, 3]))),
+        ];
+        /// Every piece's move from its object's place.
+        pub const MOVE: (i32, i32) = (-17, 2);
+        /// The Triangle's quad (units; KH1 15.5 × 18.625, `0x1402D2050`) and the PC texels taken
+        /// around the glyph (a PS2 icon cell is 20 × 24 texels: Assumption that the PC's is twice
+        /// that, centred on the glyph).
+        pub const TRIANGLE_RECT: [i32; 4] = [0, 0, 16, 19];
+        /// The PC cell around the glyph.
+        pub const TRIANGLE_CELL: (usize, usize) = (40, 48);
     }
 
     /// The root's extra width (`param_10` = 24 for list type 0, `0x140278B40`).
@@ -1768,6 +1831,8 @@ pub mod menu {
         pub glyphs: usize,
         /// Characters without a glyph.
         pub missing: Vec<char>,
+        /// The Triangle's group has the PC's PlayStation glyph.
+        pub tab_icon: bool,
     }
 
     /// The menu font: its PC picture and glyphs (character → x, y, advance in PC texels).
@@ -1865,7 +1930,73 @@ pub mod menu {
     }
 
     /// Builds the menu groups (appended to `groups`) and the glyphs (into `atlas`).
-    pub(crate) fn build(ms: &MenuSources, atlas: &mut Atlas, [p1, p2, p3]: [usize; 3], groups: &mut Vec<Group>) -> Result<Built> {
+    /// A picture at half size (the PS2 copy of art that exists only on PC; alpha kept PS2).
+    fn half(hd: &Pic) -> Pic {
+        let (hw, hh) = (hd.w / 2, hd.h / 2);
+        let mut p = Pic::blank(hw, hh);
+        for j in 0..hh {
+            for i in 0..hw {
+                let mut a = [0u32; 4];
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    let t = hd.px[(2 * j + dy) * hd.w + 2 * i + dx];
+                    for k in 0..4 {
+                        a[k] += t[k] as u32;
+                    }
+                }
+                p.px[j * hw + i] = a.map(|v| ((v + 2) / 4) as u8);
+            }
+        }
+        p
+    }
+
+    /// The single picture of a TIM2 whose image is 32-bit (`Icon.tm2`).
+    pub fn tim2_rgba(d: &[u8]) -> Result<Pic> {
+        if d.len() < 0x40 || &d[0..4] != b"TIM2" {
+            return bad("Icon.tm2: not a TIM2");
+        }
+        let rd32 = |o: usize| u32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]) as usize;
+        let rd16 = |o: usize| u16::from_le_bytes([d[o], d[o + 1]]) as usize;
+        let (img, hs, kind) = (rd32(0x18), rd16(0x1C), d[0x23]);
+        let (w, h) = (rd16(0x24), rd16(0x26));
+        if kind != 3 || img != w * h * 4 || d.len() < 0x10 + hs + img {
+            return bad(format!("Icon.tm2: image type {kind}, {w}×{h}, {img} bytes (32-bit expected)"));
+        }
+        let px = d[0x10 + hs..0x10 + hs + img].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
+        Ok(Pic { w, h, px })
+    }
+
+    /// `FontIcon.inf`'s box for `code` (x0, y0, x1, y1).
+    pub fn icon_box(inf: &[u8], code: u16) -> Option<[usize; 4]> {
+        let n = u16::from_le_bytes([*inf.get(4)?, *inf.get(5)?]) as usize;
+        (0..n).map(|i| 16 + 16 * i).filter(|&o| o + 10 <= inf.len()).map(|o| (0..5).map(|k| u16::from_le_bytes([inf[o + 2 * k], inf[o + 2 * k + 1]]) as usize).collect::<Vec<_>>()).find(|r| r[0] == code as usize).map(|r| [r[1], r[2], r[3], r[4]])
+    }
+
+    /// The Triangle's PC cell: [`tab::TRIANGLE_CELL`] centred on the glyph's covered texels in
+    /// its `FontIcon.inf` box.
+    pub fn triangle_cell(icon: &Pic, inf: &[u8]) -> Result<Pic> {
+        let Some([x0, y0, x1, y1]) = icon_box(inf, ICON_TRIANGLE) else { return bad(format!("FontIcon.inf: no record {ICON_TRIANGLE:#x}")) };
+        if x1 > icon.w || y1 > icon.h || x0 >= x1 || y0 >= y1 {
+            return bad("FontIcon.inf: the triangle's box is outside Icon.tm2");
+        }
+        let (mut a, mut b) = ((usize::MAX, usize::MAX), (0usize, 0usize));
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if icon.px[y * icon.w + x][3] > 8 {
+                    a = (a.0.min(x), a.1.min(y));
+                    b = (b.0.max(x + 1), b.1.max(y + 1));
+                }
+            }
+        }
+        if a.0 == usize::MAX {
+            return bad("Icon.tm2: the triangle's box is empty");
+        }
+        let (cw, ch) = tab::TRIANGLE_CELL;
+        let cx = ((a.0 + b.0) / 2).saturating_sub(cw / 2).min(icon.w - cw);
+        let cy = ((a.1 + b.1) / 2).saturating_sub(ch / 2).min(icon.h - ch);
+        Ok(icon.crop(cx, cy, cw, ch))
+    }
+
+    pub(crate) fn build(ms: &MenuSources, atlas: &mut Atlas, [p1, p2, p3]: [usize; 3], (pic2, s2): (&Pic, usize), groups: &mut Vec<Group>) -> Result<Built> {
         let com = Uibin::parse(ms.com)?;
         let cb = Uibin::parse(ms.com_battle)?;
         let mag = Uibin::parse(ms.mag)?;
@@ -1938,6 +2069,47 @@ pub mod menu {
         groups.push(held1(vec![mpiece(&m[0], p3, 0, 0, 0, None), mpiece(&m[1], p3, 0, 0, 0, None), mpiece(&m[2], p3, 0, 0, 0, None)]));
         groups.push(held1((7..15).map(|k| mpiece(&m[k], p3, 0, 0, 0, None)).collect()));
         groups.push(held1(vec![mpiece(&m[16], p1, 0, 0, 0, None)]));
+        // FM's context tab: picture 2's PC-only rows, one atlas item a UV rect.
+        debug_assert_eq!(groups.len() - first, g::TAB);
+        if s2 != 2 || pic2.h < 175 * s2 || pic2.w < 128 * s2 {
+            return bad(format!("uitex.bin picture 2's PC texture is {}×{}: not KH1 FM PC's 256 × 384 with the context tab's rows", pic2.w, pic2.h));
+        }
+        let mut tab_items: std::collections::BTreeMap<[i32; 4], usize> = Default::default();
+        let mut pieces = Vec::new();
+        for (k, dw, dh, uv, cols) in tab::PIECES {
+            let [u0, v0, u1, v1] = uv;
+            let item = *tab_items.entry(uv).or_insert_with(|| {
+                let hd = pic2.crop(u0 as usize * s2, v0 as usize * s2, (u1 - u0 + 1) as usize * s2, (v1 - v0 + 1) as usize * s2);
+                atlas.add(half(&hd), vec![hd], s2)
+            });
+            let ob = &o[k];
+            let [x, y, w, h] = ob.rect;
+            let (x, y) = (x + tab::MOVE.0, y + tab::MOVE.1);
+            let rgba = |c: [i32; 3], a: i32| (c[0].clamp(0, 255) | c[1].clamp(0, 255) << 8 | c[2].clamp(0, 255) << 16 | a.clamp(0, 255) << 24) as u32;
+            // Alphas: the object's (top: its first colour; bottom: its second with flag 0x20).
+            let (at, ab) = (ob.colours[0][3], if ob.flags & 0x20 != 0 { ob.colours[1][3] } else { ob.colours[0][3] });
+            let (colour, grad) = match cols {
+                None => (rgba([ob.colours[0][0], ob.colours[0][1], ob.colours[0][2]], at), 0),
+                Some((top, bottom)) => (rgba(top, at), rgba(bottom, ab)),
+            };
+            let grad = if grad == colour { 0 } else { grad };
+            pieces.push(Piece { item, uv: [0, 0, u1 - u0 + 1, v1 - v0 + 1], rect: [x, y, x + w + dw, y + h + dh], colour, grad });
+        }
+        groups.push(held1(pieces));
+        // The Triangle: the PC's PlayStation glyph.
+        let tri = match ms.icon {
+            Some([tm2, inf]) => Some(triangle_cell(&tim2_rgba(tm2)?, inf)?),
+            None => None,
+        };
+        let tab_icon = tri.is_some();
+        match tri {
+            Some(hd) => {
+                let (w, h) = (hd.w / 2, hd.h / 2);
+                let item = atlas.add(half(&hd), vec![hd], 2);
+                groups.push(held1(vec![Piece { item, uv: [0, 0, w as i32, h as i32], rect: tab::TRIANGLE_RECT, colour: 0x8080_8080, grad: 0 }]));
+            }
+            None => groups.push(held(&[vec![]])),
+        }
         debug_assert_eq!(groups.len() - first, g::WORDS);
         // Words: KH1's menu font, a glyph a part, at the font's size.
         let f = font(ms.font[0], ms.font[1])?;
@@ -1972,7 +2144,7 @@ pub mod menu {
             }
             words.push((lang.clone(), list));
         }
-        Ok(Built { first, words, glyphs: glyph_item.len(), missing })
+        Ok(Built { first, words, glyphs: glyph_item.len(), missing, tab_icon })
     }
 }
 
@@ -2359,7 +2531,7 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)]) ->
     }
     if let Some(mn) = &b.menu {
         let words = mn.words.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, g)| format!("[{id}, {g}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
-        let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"words\": {{{words}}}}},", mn.first);
+        let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"tab_icon\": {}, \"words\": {{{words}}}}},", mn.first, mn.tab_icon);
     }
     let _ = writeln!(s, "  \"languages\": [{}],", langs.iter().map(|l| format!("\"{l}\"")).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"atlas\": [{}, {}, {}, {}],", b.atlas.0, b.atlas.1, b.atlas.2, b.atlas.3);
@@ -2522,6 +2694,7 @@ mod tests {
         let (com, com_battle, mag) = (rd("exchange/UK_uibin_com.bin"), rd("exchange/UK_com_battle.bin"), rd("exchange/UK_uibin_mag.bin"));
         let (lock, g_enm) = (rd("exchange/UK_uibin_lock.bin"), rd("exchange/UK_uibin_g_enm.bin"));
         let fonts: Vec<Vec<u8>> = vec![rd(&format!("fonts/menu/us/sysfont.bin.hd/{SYSFONT_HD}")), rd("fonts/exchange/US_font_data_tbl.bin")];
+        let icon: Vec<Vec<u8>> = ICON_FILES.iter().map(|n| rd(&format!("fonts/{n}"))).collect();
         let src = Sources {
             uitex: &rd("command2/uitex.bin"),
             uitex_hd: &uitex_hd,
@@ -2537,7 +2710,8 @@ mod tests {
                 com_battle: &com_battle,
                 mag: &mag,
                 font: [&fonts[0], &fonts[1]],
-                words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into())])],
+                words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (4, "Talk".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into())])],
+                icon: Some([&icon[0], &icon[1]]),
             }),
             faces: [face("xa_ex_0010.mdls", 0xA2E80), face("xa_ex_0040.mdls", 0x75600), face("xa_ex_0050.mdls", 0x8D400)],
         };
@@ -2589,6 +2763,7 @@ mod tests {
         assert!(b.refit > 0);
         eprintln!("menu: first group {}, {} glyphs, missing {:?}, words {:?}", mn.first, mn.glyphs, mn.missing, mn.words);
         assert!(mn.missing.is_empty());
+        assert!(mn.tab_icon, "the PlayStation triangle from Icon.tm2");
         assert!(b.target.is_some());
         assert!(b.party.is_some());
         assert!(b.cursor.is_some());
