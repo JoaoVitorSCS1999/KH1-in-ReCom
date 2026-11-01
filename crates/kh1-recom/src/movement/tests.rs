@@ -1186,3 +1186,65 @@ fn fire_release_steps_back_15_then_forward_to_10_like_kh1() {
     let total: f32 = steps.iter().sum();
     assert!(total > -11.0 && total < -8.0, "{total}");
 }
+
+// ---- M7 stage 7.7: Cure ----
+
+const CURE1: crate::magic::MagicCommand = crate::magic::MagicCommand { spell: 3, level: 1 };
+
+#[test]
+fn ground_cure_releases_at_36_and_locks_sora_to_68() {
+    use crate::magic::{cast_req, CastEvent};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = step_cast(&mut p, Pad::default(), Some(CURE1));
+    assert_eq!(out.cast.first(), Some(&CastEvent::Started { spell: 3, level: 1, fast: false, air: false }));
+    assert_eq!(p.ours.rec.head(), cast_req::CURE);
+    assert_eq!(p.recom.act.id, crate::magic::RECOM_MAGIC_ACTION);
+    let mut rel = None;
+    let mut free_at = None;
+    for k in 1..100 {
+        let out = step_cast(&mut p, Pad::default(), None);
+        if let Some(CastEvent::Released { frame, .. }) = out.cast.iter().find(|e| matches!(e, CastEvent::Released { .. })) {
+            rel = Some((k, *frame));
+        }
+        if free_at.is_none() && !p.ours.lock {
+            free_at = Some(k);
+        }
+    }
+    // `L004e8(36)`: the heal 36 frames after the command (seen one handler on).
+    assert_eq!(rel, Some((37, 36.0)));
+    assert_eq!(p.recom.releases.len(), 1);
+    assert!(matches!(free_at, Some(68) | Some(69)), "{free_at:?}");
+    assert_eq!(p.recom.cast_ends, 1);
+}
+
+#[test]
+fn a_cure_cut_before_36_heals_nothing_and_an_air_cure_hops() {
+    use crate::magic::CastEvent;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(CURE1));
+    for _ in 0..30 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    // A hit at frame 31 (Re:CoM ran its reaction): no heal, no MP.
+    let out = p.ours.frame(&mut p.recom, &FrameInput::default(), true);
+    assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Interrupted { .. })), "{:?}", out.cast);
+    for _ in 0..20 {
+        assert!(!released(&step_cast(&mut p, Pad::default(), None)));
+    }
+    assert!(p.recom.releases.is_empty());
+    // In the air: KH1's 30 cm hop and the air clip (0x86).
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad { jump: true, ..Default::default() }, None);
+    for _ in 0..6 {
+        step_cast(&mut p, Pad { jump: true, ..Default::default() }, None);
+    }
+    let out = step_cast(&mut p, Pad::default(), Some(CURE1));
+    assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Started { air: true, .. })), "{:?}", out.cast);
+    assert_eq!(p.ours.rec.head(), crate::magic::cast_req::CURE_AIR);
+    assert!((p.ours.arc.rise + crate::magic::AIR_HOP).abs() < 1e-3);
+}

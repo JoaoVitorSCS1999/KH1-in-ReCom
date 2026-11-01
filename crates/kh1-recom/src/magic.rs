@@ -41,10 +41,10 @@ pub mod spell {
     pub const NAMES: [&str; 7] = ["fire", "blizzard", "thunder", "cure", "gravity", "stop", "aero"];
 }
 
-/// Spells cast so far (Fire 7.4, Blizzard 7.5, Thunder 7.6; Cure … Aero: 7.7–7.10, each its own
-/// rows and script numbers).
+/// Spells cast so far (Fire 7.4, Blizzard 7.5, Thunder 7.6, Cure 7.7; Gravity … Aero: 7.8–7.10,
+/// each its own rows and script numbers).
 pub fn castable(s: u8) -> bool {
-    matches!(s, spell::FIRE | spell::BLIZZARD | spell::THUNDER)
+    matches!(s, spell::FIRE | spell::BLIZZARD | spell::THUNDER | spell::CURE)
 }
 
 /// A spell's MP cost (its data's `+0x30`, the same at every level): charge units below 100,
@@ -68,6 +68,9 @@ pub mod cast_req {
     /// Thunder's one cast motion (`0x36 + 2`, `0x83 + 2`; entries 56 / 81).
     pub const THUNDER: u16 = 0x38;
     pub const THUNDER_AIR: u16 = 0x85;
+    /// Cure's one cast motion (`0x36 + 3`, `0x83 + 3`; entries 56 / 81, Thunder's). Checked (files).
+    pub const CURE: u16 = 0x39;
+    pub const CURE_AIR: u16 = 0x86;
 
     /// The first cast motion a spell's normal cast plays: `0x1402A3DB0` plays `0x36 + spell`
     /// (Fire: `0x36` then `0x3D`), the air branch of `0x1402A3600` `0x83 + spell` (Fire: `0x83`
@@ -120,6 +123,11 @@ pub fn recom_base_row(s: u8, level: u8) -> Option<usize> {
         (spell::THUNDER, 1) => Some(0x24),
         (spell::THUNDER, 2) => Some(0x2E),
         (spell::THUNDER, 3) => Some(0x2F),
+        // Cure 0x25 (set 15), Cura 0x36 (16), Curaga 0x37 (17): `initStockSkill`'s sleights 0x10 /
+        // 0x17. Checked (exe: the rows' clip 0x39, sets 15–17 of `cure_all`).
+        (spell::CURE, 1) => Some(0x25),
+        (spell::CURE, 2) => Some(0x36),
+        (spell::CURE, 3) => Some(0x37),
         _ => None,
     }
 }
@@ -315,6 +323,7 @@ pub fn spell_attack(s: u8, level: u8) -> Option<AttackData> {
         spell::FIRE => Some(fire_attack(level)),
         spell::BLIZZARD => Some(blizzard_attack(level)),
         spell::THUNDER => Some(thunder_attack(level)),
+        // Cure heals (Re:CoM's amounts, decision 34): no hit, no damage.
         _ => None,
     }
 }
@@ -424,6 +433,58 @@ pub fn thunder_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
     let mut b = *recom;
     b[3] = 0;
     b[0xB] = 1;
+    b[0xF] |= FLAG_KH1;
+    b
+}
+
+/// KH1's Cure (`xm_cure01..03.mag`, decoded with `magdis.py`: the same script at every level;
+/// Checked (files), the syscalls in the KH1 decomp) with **Re:CoM's heal amounts** (decision 34):
+///
+/// - the command: the charge effect on the Keyblade, **wait 36** (`L004e8(36)`), the release check
+///   (the request must still be `0x39` / `0x86`, else it ends: no heal, no MP);
+/// - the heal thread (`L00056`): the target is the command's party member, else the caster
+///   (`sp+0x1c`); it is skipped (no heal, **no MP**) when the target is not alive (sys 120), has
+///   flag `0x200` or lacks `0x8000` (`L00276`; Assumption: defeated / healable); else the data's
+///   attack is struck onto it (sys 23 + sys 60: KH1's HP += 15 / 27 / 36 + max MP), then **the MP**
+///   (sys 47, 100 = one point), then the heal effect follows the target.
+///
+/// At the KH1 setting the heal is Re:CoM's: its Cure case (`0x140222170` case `0x25`) heals
+/// `0x1401E59A0(player, AP, 0, 1)` with AP = `BattleCardList[0x1D]` 500 / 10 = **50**, Cura
+/// (`StockSkillList[0x10]` 1500 / 10) **150**, Curaga (`[0x17]` 3000 / 10) **300** (`SY0002.BIN`,
+/// research `m7-magic.md` § 3.9 / 4.1.4; Checked (files + decomp)). Sora is the only target (no
+/// party members yet).
+pub mod cure {
+    pub const WAIT: f32 = 36.0;
+    /// Re:CoM's heal per level (decision 34).
+    pub const HEAL: [i32; 3] = [50, 150, 300];
+    /// MP cost (data `+0x30` = 100): one whole point.
+    pub const COST: i32 = crate::mp::cost::CURE;
+
+    /// The heal of a level.
+    pub fn heal(level: u8) -> i32 {
+        HEAL[level.clamp(1, 3) as usize - 1]
+    }
+
+    /// The thread's target test (`L00056`): the target alive, not flagged `0x200`, healable
+    /// (`0x8000`). For Sora in Re:CoM: HP left and not in Re:CoM's death path (`+0x7B0`).
+    pub fn target_ok(hp: i32, dead: bool) -> bool {
+        hp > 0 && !dead
+    }
+}
+
+/// Re:CoM's Cure rows 0x25 / 0x36 / 0x37 as in the Steam exe (clip 0x39, effect sets 15 / 16 / 17
+/// of `cure_all`, kind 0x19, release `+3` 30). Checked (exe).
+pub const RECOM_CURE_ROWS: [[u8; 16]; 3] = [
+    [0x39, 0x00, 0x0F, 0x1E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00, 0x00],
+    [0x39, 0x00, 0x10, 0x1E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00, 0x00],
+    [0x39, 0x00, 0x11, 0x1E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00, 0x00],
+];
+
+/// The KH1 Cure row: Re:CoM's row (clip, blend, `cure_all` set: decision 34) with `+3` = 0 (KH1's
+/// script decides the release) and `+0xF` = 0x80. Its kind is not read (no hit).
+pub fn cure_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
+    let mut b = *recom;
+    b[3] = 0;
     b[0xF] |= FLAG_KH1;
     b
 }
@@ -601,19 +662,27 @@ pub fn fire_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
     b
 }
 
-/// The KH1 magic rows, `[spell × 3 + level − 1]` (21; Fire's, Blizzard's and Thunder's three so
-/// far), from Re:CoM's rows (which must be [`RECOM_FIRE_ROWS`], [`RECOM_BLIZZARD_ROWS`] and
-/// [`RECOM_THUNDER_ROWS`]).
-pub fn kh1_magic_table(recom_fire: &[[u8; 16]; 3], recom_blizzard: &[[u8; 16]; 3], recom_thunder: &[[u8; 16]; 3]) -> Vec<[u8; 16]> {
+/// Re:CoM's rows of the spells built so far, by spell (`[spell][level − 1]`), as in the Steam exe:
+/// the templates of the KH1 rows.
+pub fn recom_rows() -> Vec<[[u8; 16]; 3]> {
+    vec![RECOM_FIRE_ROWS, RECOM_BLIZZARD_ROWS, RECOM_THUNDER_ROWS, RECOM_CURE_ROWS]
+}
+
+/// The KH1 magic rows, `[spell × 3 + level − 1]` (21; the spells built so far), from Re:CoM's rows
+/// by spell (which must be [`recom_rows`]).
+pub fn kh1_magic_table(recom: &[[[u8; 16]; 3]]) -> Vec<[u8; 16]> {
     let mut t = vec![[0u8; 16]; 21];
-    for (i, r) in recom_fire.iter().enumerate() {
-        t[i] = fire_row_bytes(r);
-    }
-    for (i, r) in recom_blizzard.iter().enumerate() {
-        t[3 + i] = blizzard_row_bytes(r, i as u8 + 1);
-    }
-    for (i, r) in recom_thunder.iter().enumerate() {
-        t[6 + i] = thunder_row_bytes(r);
+    for (s, rows) in recom.iter().enumerate().take(7) {
+        for (i, r) in rows.iter().enumerate() {
+            let lv = i as u8 + 1;
+            t[s * 3 + i] = match s as u8 {
+                spell::FIRE => fire_row_bytes(r),
+                spell::BLIZZARD => blizzard_row_bytes(r, lv),
+                spell::THUNDER => thunder_row_bytes(r),
+                spell::CURE => cure_row_bytes(r),
+                _ => [0; 16],
+            };
+        }
     }
     t
 }
@@ -700,6 +769,10 @@ pub fn add_motions(m: &mut MotionSet) {
     // entry 81, 68. Re:CoM's `p001_064` / `p001_068` (rows 0x39 / 0x3D): 34 frames at 30 fps.
     m.add(&[cast_req::THUNDER], MotionInfo::new(68.0));
     m.add(&[cast_req::THUNDER_AIR], MotionInfo::new(68.0));
+    // Cure (7.7): Thunder's entries 56 / 81 (68 frames, locked to the end, no root travel). Checked
+    // (files: requests 0x39 / 0x86 map to them).
+    m.add(&[cast_req::CURE], MotionInfo::new(68.0));
+    m.add(&[cast_req::CURE_AIR], MotionInfo::new(68.0));
 }
 
 /// Whether a KH1 request is one of the cast motions Re:CoM's magic action plays.
@@ -728,6 +801,7 @@ pub fn release_wait(s: u8) -> f32 {
     match s {
         spell::BLIZZARD => blizzard::WAIT,
         spell::THUNDER => thunder::WAIT,
+        spell::CURE => cure::WAIT,
         _ => 0.0,
     }
 }

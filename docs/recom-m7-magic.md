@@ -588,3 +588,78 @@ Open question (7.4c): **Re:CoM's ground release clip steps Sora back 40.5 cm, no
 delta along the same direction; no new hook, a few float ops per frame of the release);
 (c) re-bake `p001_063`'s root at the asset step from KH1's entry 57 (the clip's other bones stay
 Re:CoM's edit; a new clip slot for the KH1 setting, the Re:CoM setting keeps its own).
+
+## Stage 7.7: Cure / Cura / Curaga
+
+Owner (decision 34): "Cure heals exactly as Re:CoM's Cure", "Cure 50, Cura 150, Curaga 300 HP
+… with KH1's cast rules". At Combat = KH1 in Sora's story, Cure from the command menu casts as
+KH1 and heals with Re:CoM's own heal.
+
+### KH1 (what runs)
+
+| what | KH1 (Steam) | tag |
+|---|---|---|
+| **Cast**: ground `0x36 + 3` = `0x39`, idle queued (release); air `0x86`, the fall (blend 8), the 30 cm hop, air speed × 0.5. Motions: **entry 56 (Thunder's), 68 frames, no free key** (locked to the end), no root; air entry 81, 68. | `0x1402A3DB0`, `0x1402A3600`; `xa_ex_0010.mset` (requests 0x39 / 0x86 → entries 56 / 81) | Checked (decomp + files) |
+| **Script** `xm_cure01..03.mag` (one script, the level only in the data): charge effect on the Keyblade (`L004a6`), **wait 36** (`L004e8(36)`), release check (request `0x39` / `0x86`, else end: no heal, no MP). | `0x420..0x4A4` | Checked (files: `magdis.py`) |
+| **Heal thread** (`L00056`): the target = the command's member, else the caster; skipped when not alive (sys 120), flagged `0x200`, or lacking `0x8000` (Assumption: defeated / healable); else the data's attack struck onto it (sys 23 / 60: KH1 heals 15 / 27 / 36 + max MP), **then the MP** (sys 47, 100 = one point); then the heal effect follows the target. | `0x56..0x194` | Checked (files) |
+| Data: stat source 1, element 11 (Cure), power 15 / 27 / 36, cost 100. | btltbl `0x6318` / `0x6388` / `0x63F8` | Checked (files) |
+
+### In Re:CoM
+
+- **Cast** as Thunder's (`release_wait` 36); Re:CoM's clips: `0x39` → row `0x39` (`p001_064`, the
+  clip Re:CoM's own Cure plays: row 0x25's `+0` = 0x39), `0x86` → `0x3D`. KH1 rows from Re:CoM's
+  0x25 / 0x36 / 0x37 (checked at start): clip, `cure_all` sets 15 / 16 / 17, `+3` 0, `+0xF` 0x80.
+- **Command** (`start_cast`): `initMagic` case 0x1D's charge: the set's effect id 0 on the weapon's
+  (`+0x3D0`) bone 2 at (−0.8, 0, 0) (`0x1402ABB20`, `0x1401A2D50`; Checked (disasm
+  `0x14022070A..0x140220757`)); the action's AP = **Re:CoM's heal: 50 / 150 / 300** (its card /
+  sleight rule power ÷ 10, `SY0002.BIN`; Checked (files + decomp)).
+- **Release** (`release_cure`): KH1's target test on Sora (the only target: no party members yet):
+  HP (`+0x42C`) > 0 and not in Re:CoM's death path (`+0x7B0`); else nothing and no MP. Then
+  **Re:CoM's Cure case** (`0x140222170` case `0x25`, Checked (disasm `0x140222946..0x1402229CF`)):
+  its effect id set − 14 on Sora's bone 0 at (0, 0.85, 0), kept on him (`+0x4C |= 4`), and its heal
+  **`0x1401E59A0(player, AP, 0, 1, 0)`** (HP += AP, clamped to the max; the HUD; its sound). Then
+  KH1's MP (one point).
+- Re:CoM's own Cure cards are untouched (Combat = Re:CoM, Riku's story).
+
+Logs: `magic: release cure1: Re:CoM's heal 50 -> HP 120 -> 170 (max 300)`, `mp: paid 100 (Cure
+release)`, or `release cure1: Sora can't be healed …: no heal, no MP`. F9 trace: `cast cure1 f…
+w…`, `release(cure1 f36 no-shot)`, `heal 50 hp 170`, `pay100`.
+
+Sites (7.7; `magic_sites` checks the calls and RIP loads):
+
+| address | bytes | use |
+|---|---|---|
+| `0x1401A2D50` effect on bone | `45 8B D0 4C 8B DA 44 8B 81 50 01 00 00 41 8B D2 49 8B CB` | called |
+| `0x140257EF0` effect object | `48 83 EC 28 8B D1 48 8B 0D 13 50 62 00 48 85 C9` | called |
+| `0x1401E59A0` heal | `48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48` | called |
+| `0x140222946` Cure case | 137 bytes ending `E8 D1 2F FC FF` (→ the heal) | checked only |
+| `0x14022070A` initMagic Cure charge | 77 bytes ending `E8 F9 25 F8 FF` (→ `0x1401A2D50`) | checked only |
+| `0x1407C6EC0`, `0x1407C6FD0` rows 0x25, 0x36–0x37 | Re:CoM's Cure rows | the KH1 rows' templates |
+| `0x1407C7E50`, `0x1405A0910` | (−0.8, 0, 0, 1), (0, 0.85, 0, 1) | the offsets |
+| `0x1402ABB20` bone | (checked by M5) | called |
+
+1:1 checks (7.7):
+
+- **Checked (files + decomp)**, replayed by tests: the heal at KH1's frame 36 (handler 37), Sora
+  locked to the motion's end (68), Re:CoM's action ended once; a cast cut before 36 heals nothing
+  and pays nothing; the air cast's hop and clip (`movement::tests` "7.7"); the rows, the heal per
+  level (50 / 150 / 300), the cost (one point), no damage record (`magic::tests`).
+- **Checked (exe)**: the new sites, the rows, the offsets.
+- **Assumptions:** (1) KH1's `0x8000` / `0x200` target flags mean healable / defeated, which for
+  Sora in Re:CoM is "HP left and not dying"; (2) `initMagic`'s charge and the Cure case's effect
+  are Re:CoM's Cure look (decision 34) also when the heal comes at KH1's 36 instead of Re:CoM's 30;
+  (3) a party member as target comes with the party (out of M7).
+- **Not checked:** in game. Re:CoM's heal sound is the heal function's own (`param_4` = 1).
+
+In-game checklist (7.7):
+
+1. Log: the start line names Cure (7.7) and 12 rows.
+2. Hurt Sora, Magic → Cure: Re:CoM's charge on the Keyblade, Re:CoM's cast clip, about 0.6 s later
+   (36 frames) Re:CoM's Cure effect on Sora and +50 HP on the HP bar; MP −1 point. Sora stays
+   locked for the whole motion (about 1.1 s).
+3. Cura / Curaga (debug `kh1_all_spells`): +150 / +300 HP. At full HP: still cast and paid
+   (KH1 heals a full target too).
+4. Get hit before the heal: nothing healed, no MP. In the air: the hop; landing before 36 cancels.
+5. In the field: the same (Re:CoM's heal also works outside battle).
+6. F9 trace: `cast cure1 …`, `release(cure1 f36 no-shot)`, `heal 50 hp …`, `pay100`.
+7. Combat = Re:CoM: Re:CoM's Cure cards unchanged; Riku's story unchanged.

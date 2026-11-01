@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn fire_rows_keep_recoms_clip_and_effect_set_and_take_kh1s_ball() {
-    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS, &RECOM_THUNDER_ROWS);
+    let t = kh1_magic_table(&recom_rows());
     assert_eq!(t.len(), 21);
     for lv in 1..=3u8 {
         let i = table_index(spell::FIRE, lv).unwrap();
@@ -19,11 +19,11 @@ fn fire_rows_keep_recoms_clip_and_effect_set_and_take_kh1s_ball() {
         assert_eq!(r[0xF] & FLAG_KH1, FLAG_KH1);
         assert_eq!(recom_base_row(spell::FIRE, lv), Some([0x22, 0x29, 0x2A][lv as usize - 1]));
     }
-    // Cure … Aero come with their stages.
-    assert!(t[9..].iter().all(|r| r[0] == 0));
+    // Gravity … Aero come with their stages.
+    assert!(t[12..].iter().all(|r| r[0] == 0));
     assert_eq!(table_index(spell::AERO, 3), Some(20));
     assert_eq!(table_index(spell::FIRE, 0), None);
-    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && castable(spell::THUNDER) && !castable(spell::CURE));
+    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && castable(spell::THUNDER) && castable(spell::CURE) && !castable(spell::GRAVITY));
 }
 
 #[test]
@@ -150,7 +150,7 @@ fn fire_retarget_is_kh1s_pick() {
 
 #[test]
 fn blizzard_rows_and_numbers_are_kh1s() {
-    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS, &RECOM_THUNDER_ROWS);
+    let t = kh1_magic_table(&recom_rows());
     for lv in 1..=3u8 {
         let r = &t[table_index(spell::BLIZZARD, lv).unwrap()];
         let base = &RECOM_BLIZZARD_ROWS[lv as usize - 1];
@@ -172,7 +172,7 @@ fn blizzard_rows_and_numbers_are_kh1s() {
     assert_eq!(KH1_BLIZZARD_FLAGS & 0x8000_1000, 0, "no homing");
     assert_eq!((cast_req::first(spell::BLIZZARD, false), cast_req::first(spell::BLIZZARD, true)), (0x37, 0x84));
     assert_eq!((cast_req::release(spell::BLIZZARD, false), cast_req::release(spell::FIRE, true)), (0x37, 0x8A));
-    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x39));
+    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x3A));
     assert_eq!(spell_attack(spell::BLIZZARD, 2).map(|a| a.power), Some(27));
 }
 
@@ -226,7 +226,7 @@ fn blizzard_glide_is_kh1s() {
 
 #[test]
 fn thunder_rows_and_numbers_are_kh1s() {
-    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS, &RECOM_THUNDER_ROWS);
+    let t = kh1_magic_table(&recom_rows());
     for lv in 1..=3u8 {
         let i = lv as usize - 1;
         let r = &t[table_index(spell::THUNDER, lv).unwrap()];
@@ -299,4 +299,36 @@ fn thunder_strikes_one_every_8_frames_nearest_first_once_each() {
     let mut s = Strikes::new(vec![1, 2]);
     assert_eq!(s.run(1.0, |_| false), None);
     assert!(s.done());
+}
+
+#[test]
+fn cure_rows_and_numbers_are_kh1s_cast_with_recoms_heal() {
+    let t = kh1_magic_table(&recom_rows());
+    for lv in 1..=3u8 {
+        let i = lv as usize - 1;
+        let r = &t[table_index(spell::CURE, lv).unwrap()];
+        let base = &RECOM_CURE_ROWS[i];
+        // Re:CoM's clip 0x39 (Thunder's p001_064) and its Cure / Cura / Curaga sets 15 / 16 / 17.
+        assert_eq!(&r[..3], &base[..3]);
+        assert_eq!(r[2], 15 + lv - 1);
+        assert_eq!((r[3], r[0xF] & FLAG_KH1), (0, FLAG_KH1));
+        assert_eq!(recom_base_row(spell::CURE, lv), Some([0x25, 0x36, 0x37][i]));
+        // Re:CoM's heal (decision 34): 500 / 1500 / 3000 ÷ 10.
+        assert_eq!(cure::heal(lv), [50, 150, 300][i]);
+    }
+    // KH1: one point of MP, the release 36 frames after the command, no damage record.
+    assert_eq!((cost(spell::CURE), release_wait(spell::CURE)), (100, 36.0));
+    assert_eq!(spell_attack(spell::CURE, 1), None);
+    assert_eq!((cast_req::first(spell::CURE, false), cast_req::first(spell::CURE, true)), (0x39, 0x86));
+    assert_eq!((cast_req::release(spell::CURE, false), cast_req::release(spell::CURE, true)), (0x39, 0x86));
+    assert!(is_cast_request(0x39) && is_cast_request(0x86));
+    let mut m = MotionSet::default();
+    add_motions(&mut m);
+    // Entries 56 / 81: 68 frames, no free key (locked to the end).
+    for r in [0x39, 0x86] {
+        assert_eq!(m.info(r).unwrap().length, 68.0);
+        assert_eq!(m.info(r).unwrap().first(FlagKind::Free), None);
+    }
+    // The thread heals only a live target (Sora with HP left, not dying).
+    assert!(cure::target_ok(1, false) && !cure::target_ok(0, false) && !cure::target_ok(40, true));
 }

@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 48: M7 stage 7.7, Cure, version 0.21.0 (2026-10-31)
+
+- Cure / Cura / Curaga: heal 36 frames after the command, locked for 68, 1 MP paid at the heal;
+  cut or not healable = no heal, no MP (Checked, KH1 script + motion). Heal = Re:CoM's own Cure
+  case `0x140222946` (effect + heal `0x1401E59A0`) for Re:CoM's 50 / 150 / 300 HP (decision 34);
+  Re:CoM's charge effect from `0x14022070A`. Not seen in game.
+
+---
+
 ## Stage 47: Fire release root curve as KH1, version 0.20.1 (2026-10-31)
 
 - KH1's Fire release motion (Checked, files): back 1.5 cm a frame to −15 cm at frame 10, then

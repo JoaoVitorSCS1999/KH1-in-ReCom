@@ -232,22 +232,19 @@ pub unsafe fn install(b: usize) -> bool {
         }
         live
     };
-    let live = read([0x22, 0x29, 0x2A]);
-    if live != mg::RECOM_FIRE_ROWS {
-        log("magic: Re:CoM's Fire rows 0x22 / 0x29 / 0x2A are not the Steam exe's; no KH1 cast");
-        return false;
+    // Each built spell's Re:CoM rows (its three levels), which must be the Steam exe's.
+    let want = mg::recom_rows();
+    let mut live = Vec::with_capacity(want.len());
+    for (s, rows) in want.iter().enumerate() {
+        let ids = [1u8, 2, 3].map(|lv| mg::recom_base_row(s as u8, lv).unwrap_or(0));
+        let got = read(ids);
+        if got != *rows {
+            log(&format!("magic: Re:CoM's {} rows {:#x} / {:#x} / {:#x} are not the Steam exe's; no KH1 cast", mg::spell::NAMES[s], ids[0], ids[1], ids[2]));
+            return false;
+        }
+        live.push(got);
     }
-    let bliz = read([0x23, 0x2B, 0x2C]);
-    if bliz != mg::RECOM_BLIZZARD_ROWS {
-        log("magic: Re:CoM's Blizzard rows 0x23 / 0x2B / 0x2C are not the Steam exe's; no KH1 cast");
-        return false;
-    }
-    let thun = read([0x24, 0x2E, 0x2F]);
-    if thun != mg::RECOM_THUNDER_ROWS {
-        log("magic: Re:CoM's Thunder rows 0x24 / 0x2E / 0x2F are not the Steam exe's; no KH1 cast");
-        return false;
-    }
-    let t: &'static [[u8; 16]] = Box::leak(mg::kh1_magic_table(&live, &bliz, &thun).into_boxed_slice());
+    let t: &'static [[u8; 16]] = Box::leak(mg::kh1_magic_table(&live).into_boxed_slice());
     if TABLE.set(t).is_err() {
         return false;
     }
@@ -363,6 +360,10 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
     if c.spell == mg::spell::THUNDER {
         thunder_command(pl);
     }
+    if c.spell == mg::spell::CURE {
+        // `initMagic` case 0x1D's charge: the set's effect id 0 on the Keyblade's bone 2.
+        charge_on_weapon(pl, r, 0);
+    }
     wr(pl + f::RECOVERY, 0u32);
     // `+0x478` picks the air clips (+4) for Re:CoM's own readers; KH1's motion requests choose
     // the clip here.
@@ -373,7 +374,12 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
     wr(pl + f::ROW_PTR, r.as_ptr() as usize);
     // Re:CoM's AP for a target without KH1 numbers: the cardless AP (the attack stat), as M5's
     // swings (KH1's damage replaces it on twins and proxies, `take_hit`).
-    wr(pl + f::AP, rd::<i32>(pl + f::ATTACK_STAT));
+    let ap = match c.spell {
+        // Cure: Re:CoM's heal (decision 34), its AP rule for the card / sleight (power / 10).
+        mg::spell::CURE => mg::cure::heal(c.level),
+        _ => rd::<i32>(pl + f::ATTACK_STAT),
+    };
+    wr(pl + f::AP, ap);
     wr(pl + f::KIND, r[0xB] as u32);
     wr(pl + f::ATTR, RECOM_ATTR[c.spell as usize % 7]);
     wr(pl + f::PREV_SITUATION, 0u32);
@@ -392,9 +398,91 @@ pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
         mg::spell::FIRE => release_fire(pl, c),
         mg::spell::BLIZZARD => release_blizzard(pl, c),
         mg::spell::THUNDER => release_thunder(pl, c),
+        mg::spell::CURE => release_cure(pl, c),
         _ => None,
     }
 }
+
+/// `0x1402ABB20(object, bone)`: a bone of an actor (or the weapon) for effects. Checked by M5.
+const BONE: u32 = 0x002A_BB20;
+/// `0x1401A2D50(actor, effect name, id, bone, &offset, 0, 0.0)`: Re:CoM's effect on a bone (a
+/// thunk to `0x1402577D0` with the actor's `+0x150`); `0x140257EF0(handle)` its object (`+0x4C |=
+/// 4` as the Cure / Stop cases do). Checked (disasm `0x140222946..0x1402229B3`).
+const EFFECT_ON_BONE: u32 = 0x001A_2D50;
+const EFFECT_OBJECT: u32 = 0x0025_7EF0;
+/// `0x1401E59A0(player, amount, 0, 1, 0)`: Re:CoM's heal (HP += amount, clamped to the max; the
+/// HUD and the heal voice). Checked (decomp).
+const HEAL: u32 = 0x001E_59A0;
+/// `initMagic`'s charge offset (`0x1407C7E50`: (−0.8, 0, 0, 1)) and the Cure / Stop cases' body
+/// offset (`0x1405A0910`: (0, 0.85, 0, 1)). Checked (exe).
+const CHARGE_OFFSET: [f32; 4] = [-0.8, 0.0, 0.0, 1.0];
+const BODY_OFFSET: [f32; 4] = [0.0, 0.85, 0.0, 1.0];
+/// The player's weapon (`+0x3D0`, `initMagic`'s charge goes on its bone 2). Checked (disasm).
+const WEAPON: usize = 0x3D0;
+
+/// An effect of the row's set (name at the set's `+0x18 + extra`) on a bone, as Re:CoM's cases
+/// start them. The effect's handle.
+unsafe fn effect_on_bone(pl: usize, bone_of: usize, bone: i32, set_name: usize, id: u32, offset: &[f32; 4], sticky: bool) -> u32 {
+    type BoneFn = unsafe extern "win64" fn(usize, i32) -> usize;
+    type EffFn = unsafe extern "win64" fn(usize, usize, u32, usize, *const [f32; 4], u64, f32) -> u32;
+    type ObjFn = unsafe extern "win64" fn(u32) -> usize;
+    if bone_of == 0 || set_name == 0 {
+        return 0;
+    }
+    let b = func::<BoneFn>(BONE)(bone_of, bone);
+    let h = func::<EffFn>(EFFECT_ON_BONE)(pl, set_name, id, b, offset, 0, 0.0);
+    if sticky {
+        let o = func::<ObjFn>(EFFECT_OBJECT)(h);
+        if o != 0 {
+            wr(o + 0x4C, rd::<u32>(o + 0x4C) | 4);
+        }
+    }
+    h
+}
+
+/// The name of an effect set's entry (`0x1405A1730 + set × 0x60 + 0x18 + extra`; Gravity's cases
+/// read `+0x30`).
+unsafe fn set_name(r: &[u8; 16], extra: usize) -> usize {
+    rd(va(base(), EFFECT_SETS) + r[2] as usize * 0x60 + 0x18 + extra)
+}
+
+/// `initMagic`'s charge for Cure / Aero (cases 0x1D / 0x20; Gravity's reads the set's `+0x30`):
+/// effect id 0 of the row's set on the weapon's bone 2, at (−0.8, 0, 0). Checked (disasm
+/// `0x1402206F0..0x140220752`).
+unsafe fn charge_on_weapon(pl: usize, r: &[u8; 16], extra: usize) {
+    let weapon: usize = rd(pl + WEAPON);
+    effect_on_bone(pl, weapon, 2, set_name(r, extra), 0, &CHARGE_OFFSET, false);
+}
+
+/// KH1's Cure release (7.7, `xm_cure01.mag`): the heal thread's target test (Sora: alive, not in
+/// Re:CoM's death path), then **Re:CoM's Cure case** (`0x140222170` case `0x25`, Checked (disasm
+/// `0x140222946..0x1402229CA`)): its `cure_all` effect (id set − 14 on Sora's bone 0 at (0, 0.85,
+/// 0), kept on Sora) and its heal `0x1401E59A0(player, AP, 0, 1, 0)` with AP = 50 / 150 / 300; then
+/// KH1's MP (sys 47 after the strike). An invalid target heals nothing and pays nothing.
+unsafe fn release_cure(pl: usize, c: &CastStart) -> Option<u32> {
+    type HealFn = unsafe extern "win64" fn(usize, i32, i32, i32, i32);
+    let r = row(c.spell, c.level)?;
+    let hp: i32 = rd(pl + HP);
+    let dead = rd::<i32>(pl + DEAD) != 0;
+    if !mg::cure::target_ok(hp, dead) {
+        note(|| format!("release cure{}: Sora can't be healed (HP {hp}, dying {dead}): no heal, no MP", c.level));
+        return None;
+    }
+    effect_on_bone(pl, pl, 0, set_name(r, 0), (r[2] as u32).wrapping_sub(0xE), &BODY_OFFSET, true);
+    let ap: i32 = rd(pl + f::AP);
+    func::<HealFn>(HEAL)(pl, ap, 0, 1, 0);
+    let after: i32 = rd(pl + HP);
+    super::mp::pay(mg::cure::COST, "Cure release");
+    note(|| format!("release cure{}: Re:CoM's heal {ap} -> HP {hp} -> {after} (max {})", c.level, rd::<i32>(pl + HP + 4)));
+    event(format!("heal {ap} hp {after}"));
+    // No shot: the trace's release token shows `no-shot`, a heal is its own event.
+    None
+}
+
+/// Sora's HP (`+0x42C`, max `+0x430`) and Re:CoM's death flag (`+0x7B0`). Checked (decomp
+/// `0x1401E59A0`, `0x1401E6DE0`).
+const HP: usize = 0x42C;
+const DEAD: usize = 0x7B0;
 
 fn remember_shot(id: u32, s: u8, level: u8, serial: u32) {
     if let Ok(mut g) = SHOTS.lock() {
@@ -1081,7 +1169,7 @@ pub fn clear_events() {
 /// The start log line.
 pub fn start_line() -> String {
     format!(
-        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.6): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Thunder / Thundara / Thundaga (7.6): at 30, every enemy whose bodies touch a {} m, ±{} m cylinder, nearest first, struck through Re:CoM's own hit path one per {} frames, 1 MP; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
+        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.7): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Thunder / Thundara / Thundaga (7.6): at 30, every enemy whose bodies touch a {} m, ±{} m cylinder, nearest first, struck through Re:CoM's own hit path one per {} frames, 1 MP; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Cure / Cura / Curaga (7.7): at {}, Re:CoM's heal {:?} HP on Sora, 1 MP; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
         TABLE.get().map_or(0, |t| t.iter().filter(|r| r[0] != 0).count()),
         28,
         mg::fire::FAST_WAIT,
@@ -1093,6 +1181,8 @@ pub fn start_line() -> String {
         mg::thunder::HALF_HEIGHT / 100.0,
         mg::thunder::INTERVAL,
         mg::blizzard::LIFE,
+        mg::cure::WAIT,
+        mg::cure::HEAL,
         mg::retarget::RANGE_M,
         if RETARGET.load(Ordering::Acquire) { "on" } else { "off" }
     )

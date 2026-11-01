@@ -196,6 +196,10 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         // Thunder (M7 stage 7.6): KH1's entries 56 / 81 have no root travel.
         crate::magic::cast_req::THUNDER => row::THUNDER,
         crate::magic::cast_req::THUNDER_AIR => row::THUNDER_AIR,
+        // Cure (M7 stage 7.7): Re:CoM's Cure rows play the same clip as Thunder (row 0x25's `+0` =
+        // 0x39); KH1's entries 56 / 81 have no root travel.
+        crate::magic::cast_req::CURE => row::THUNDER,
+        crate::magic::cast_req::CURE_AIR => row::THUNDER_AIR,
         _ => return None,
     };
     Some((r, false))
@@ -288,6 +292,10 @@ mod tests {
         assert_eq!(row_for(0x85, &s, &none), Some((0x3D, false)));
         assert_eq!(crate::magic::RECOM_THUNDER_ROWS[0][0] as u32, row::THUNDER);
         assert_eq!(row::THUNDER_AIR, row::THUNDER + 4);
+        // Cure: Re:CoM's row 0x25's clip (the same as Thunder's), + 4 in the air.
+        assert_eq!(row_for(0x39, &s, &none), Some((0x39, false)));
+        assert_eq!(row_for(0x86, &s, &none), Some((0x3D, false)));
+        assert_eq!(crate::magic::RECOM_CURE_ROWS[0][0] as u32, row::THUNDER);
     }
 
     #[test]
