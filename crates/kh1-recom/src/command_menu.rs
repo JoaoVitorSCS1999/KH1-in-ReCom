@@ -53,6 +53,8 @@ pub mod cmd {
     pub const OPEN: u8 = 0x37;
     /// The blank command rows 1..3 hold until filled (message 305, a dash).
     pub const BLANK: u8 = 0x42;
+    /// The blank command's message (305).
+    pub const BLANK_NAME: u16 = 305;
     pub const JUMP_ON: u8 = 0x45;
     pub const COUNTER: u8 = 0x63;
     /// Treated as "no context command" by the tab (`0x140277CF0`).
@@ -718,6 +720,9 @@ impl Menu {
     }
 }
 
+/// KH1's "Summon" (message 6, `btltbl.bin`'s Word.bin; Checked (files)): the KH1 look's root row 3
+/// when no context command is in it (H4: greyed until summons come, M8).
+pub const SUMMON_NAME: u16 = 6;
 /// KH1's layout (`0x14027B870`), in the 512 × 384 2D space. Checked (decomp).
 pub const ROOT_X: f32 = 16.0;
 pub const ROOT_Y: f32 = 260.0;

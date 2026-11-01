@@ -20,3 +20,5 @@ path = "src/flip_main.rs"
 kh1-formats = { path = "../kh1-formats" }
 kh1-anim = { path = "../kh1-anim" }
 kh2-formats-lite = { path = "../kh2-formats-lite" }
+# zlib for the PNG HD pictures (KH1's per-language `uitex.bin` picture 1); already in the lockfile.
+miniz_oxide = "0.8"

@@ -624,8 +624,10 @@ prints and the `command menu:` lines of `kh1-recom.log`.
 
 `kh1-recom-build` also builds the `kh1hud` sprite set (`docs/recom-kh1-hud.md`) from KH1's
 `command2/uitex.bin` (+ PC assets), `exchange/UK_uibin_g_s.bin`, `exchange/UK_uibin_g_red.bin`,
-`exchange/UK_uibin_g_act.bin` (the gauge motions, H2b) and `xa_ex_0010/0040/0050.mdls`, and writes,
-next to the other files:
+`exchange/UK_uibin_g_act.bin` (the gauge motions, H2b), `exchange/UK_uibin_com.bin`,
+`UK_com_battle.bin`, `UK_uibin_mag.bin`, KH1's menu font `uk/font/menufont.tm2 / .cod / .inf` from
+`Image/dt/Theater.hed` and `btltbl.bin`'s `<LANG>_Word.bin` (the command menu's look, H4), and
+`xa_ex_0010/0040/0050.mdls`, and writes, next to the other files:
 
 - `raw/FORM/0002/FO0002.SPR` (as before, now also with `kh1hud.lad` and `<LANG>_kh1hud.lad`);
 - `raw/FORM/0002/FO0002.RTM` (new: Re:CoM's own, plus `kh1hud.imz` and `<LANG>_kh1hud.imz`);

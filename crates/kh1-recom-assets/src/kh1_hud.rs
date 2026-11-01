@@ -45,6 +45,20 @@ pub const G_RED: &str = "exchange/UK_uibin_g_red.bin";
 /// KH1's gauge motions (`vibe_s/ss/sss` the hit shakes, `slide_s_h/v` the size-class slides; slot
 /// 0 copies objects 0..4 to `+0x2A0`, `+0x360`, `+0x420`, `+0x120`, `+0x1E0`, `0x14026E630` area).
 pub const G_ACT: &str = "exchange/UK_uibin_g_act.bin";
+/// KH1's command menu layouts (H4): the root list (`com`, 12 objects), its battle title colours
+/// (`com_battle`), the Magic list (`mag`, 18 objects). Loader `0x140277FE0`; Checked (files).
+pub const COM: &str = "exchange/UK_uibin_com.bin";
+/// The root title's field / battle colour keys.
+pub const COM_BATTLE: &str = "exchange/UK_com_battle.bin";
+/// The Magic list.
+pub const MAG: &str = "exchange/UK_uibin_mag.bin";
+/// `uitex.bin` pictures the menu draws from (`0x140278180` passes picture 2 for the root's panels,
+/// 3 for the submenus', 1 for the titles and icons): (index, TIM2 offset, pixel data offset).
+pub const MENU_PICTURES: [(usize, usize, usize); 3] = [(1, 0x2080, 0x20C0), (2, 0x4100, 0x4140), (3, 0x6180, 0x61C0)];
+/// KH1 PC's menu font (font 1 of the table `0x1404D9150`, the command words `0x14027A920` →
+/// `0x1402D1CD0`): `Image/dt/Theater` `<lang>/font/menufont.tm2` (2048 × 2048 32-bit), `.cod`
+/// (8-byte glyphs: code, x, y, 0, width), `.inf` (count, size, cell). Checked (files).
+pub const FONT_FILES: [&str; 3] = ["uk/font/menufont.tm2", "uk/font/menufont.cod", "uk/font/menufont.inf"];
 /// The party's model files whose section 2 is the face strip: Sora (Checked (files)), Donald
 /// and Goofy (Checked (files: their 48 × 48 faces in the owner's dump)).
 pub const FACES: [&str; 3] = ["xa_ex_0010.mdls", "xa_ex_0040.mdls", "xa_ex_0050.mdls"];
@@ -245,10 +259,12 @@ fn hd_scale(ps2: &Pic, hd: &Pic) -> Result<usize> {
 /// Finds a `uitex.bin` PC asset tagged / named for pixel offset `off` (`<LANG>_uitex_bin<hex>` for
 /// the language, else `-<hex>`), decoded.
 fn uitex_asset(assets: &[HdAsset], off: usize, lang: &str) -> Result<Option<Pic>> {
-    let names = [format!("{lang}_uitex_bin{off:x}.dds"), format!("-{off:x}.dds")];
+    // Picture 1's language copies are PNGs (`<LANG>_uitex_bin20c0.png`, Checked (files)).
+    let names = [format!("{lang}_uitex_bin{off:x}.dds"), format!("{lang}_uitex_bin{off:x}.png"), format!("-{off:x}.dds")];
     for n in &names {
         if let Some(a) = assets.iter().find(|a| a.name.eq_ignore_ascii_case(n)) {
-            return Ok(Some(from_pc(&decode_dds(&a.data).map_err(|e| crate::Error::Format(format!("uitex.bin asset {}: {e}", a.name)))?)));
+            let img = if n.ends_with(".png") { crate::texture::decode_png(&a.data) } else { decode_dds(&a.data) };
+            return Ok(Some(from_pc(&img.map_err(|e| crate::Error::Format(format!("uitex.bin asset {}: {e}", a.name)))?)));
         }
     }
     Ok(None)
@@ -520,7 +536,7 @@ struct Sub {
 
 /// The atlas items: each a PS2 picture and its PC pictures (one per language or one shared), at
 /// a PC scale.
-struct Atlas {
+pub(crate) struct Atlas {
     items: Vec<(Pic, Vec<Pic>, usize)>,
 }
 
@@ -582,6 +598,9 @@ pub(crate) struct Piece {
     uv: [i32; 4],
     rect: [i32; 4],
     colour: u32,
+    /// The bottom vertices' colour when not 0 (KH1's 4-vertex-colour objects, flag 0x20, drawn as
+    /// a vertical gradient: their top and bottom pairs are equal in the files used).
+    grad: u32,
 }
 
 /// One animation of a group: its pieces over frames [f0, f1] with a colour start → end and a
@@ -640,7 +659,7 @@ fn held(frames: &[Vec<Piece>]) -> Group {
 fn seqd(groups: &[Group], packed: &Packed, hd: bool) -> Result<Vec<u8>> {
     let mut s = Seqd { version: 0x160, sprites: Vec::new(), parts: Vec::new(), sgroups: Vec::new(), anims: Vec::new(), agroups: Vec::new() };
     use std::collections::HashMap;
-    let mut spr: HashMap<([i32; 4], u32), usize> = HashMap::new();
+    let mut spr: HashMap<([i32; 4], u32, u32), usize> = HashMap::new();
     let mut sg_of: HashMap<Vec<Piece>, usize> = HashMap::new();
     for g in groups {
         let a0 = s.anims.len();
@@ -653,8 +672,10 @@ fn seqd(groups: &[Group], packed: &Packed, hd: bool) -> Result<Vec<u8>> {
                     for p in &st.pieces {
                         let (b, h) = packed.uv(Sub { item: p.item, rect: p.uv });
                         let uv = if hd { h } else { b };
-                        let si = *spr.entry((uv, p.colour)).or_insert_with(|| {
-                            s.sprites.push(sprite(uv, [p.colour; 4]));
+                        let g = if p.grad != 0 { p.grad } else { p.colour };
+                        let si = *spr.entry((uv, p.colour, g)).or_insert_with(|| {
+                            // Re:CoM's sprite colours: TL, TR, BL, BR (`mp_bar` assumption 3).
+                            s.sprites.push(sprite(uv, [p.colour, p.colour, g, g]));
                             s.sprites.len() - 1
                         });
                         s.parts.push(part(p.rect, si));
@@ -769,8 +790,8 @@ impl Baker {
             })
         });
         match got {
-            Some((it, (x, y, w, h))) => Piece { item: it, uv: [0, 0, w, h], rect: [x, y, x + w, y + h], colour: 0x8080_8080 },
-            None => Piece { item: self.empty, uv: [0, 0, 1, 1], rect: [0, 0, 1, 1], colour: 0 },
+            Some((it, (x, y, w, h))) => Piece { item: it, uv: [0, 0, w, h], rect: [x, y, x + w, y + h], colour: 0x8080_8080, grad: 0 },
+            None => Piece { item: self.empty, uv: [0, 0, 1, 1], rect: [0, 0, 1, 1], colour: 0, grad: 0 },
         }
     }
 
@@ -808,8 +829,25 @@ pub struct Sources<'a> {
     pub g_red: &'a [u8],
     /// `g_act` (the gauge motions).
     pub g_act: &'a [u8],
+    /// H4: `com`, `com_battle`, `mag` and the menu font; the command words per language (as the
+    /// command menu decodes them). Without them no menu look is built.
+    pub menu: Option<MenuSources<'a>>,
     /// The three faces (Sora, Donald, Goofy).
     pub faces: [Source; 3],
+}
+
+/// The command menu's inputs (H4).
+pub struct MenuSources<'a> {
+    /// `com`.
+    pub com: &'a [u8],
+    /// `com_battle`.
+    pub com_battle: &'a [u8],
+    /// `mag`.
+    pub mag: &'a [u8],
+    /// The menu font (`menufont.tm2`, `.cod`, `.inf`).
+    pub font: [&'a [u8]; 3],
+    /// (language, [(message id, word)]) as `command_menu::words` decodes them.
+    pub words: Vec<(String, Vec<(u16, String)>)>,
 }
 
 /// The built files.
@@ -832,6 +870,8 @@ pub struct Built {
     pub motion: motion::Motion,
     /// Groups in all.
     pub groups: usize,
+    /// H4: the menu groups (None without menu sources).
+    pub menu: Option<menu::Built>,
 }
 
 fn colour_of(o: &Obj) -> u32 {
@@ -848,7 +888,7 @@ fn obj_piece(o: &Obj, item: usize, dx: i32, dy: i32, cut: i32, x: Option<i32>) -
     let x0 = x.unwrap_or(ox) + cut + dx;
     let (x1, y0, y1) = (x0 + w - cut, oy + dy, oy + dy + h);
     let rect = [if mu { x1 } else { x0 }, if mv { y1 } else { y0 }, if mu { x0 } else { x1 }, if mv { y0 } else { y1 }];
-    Piece { item, uv, rect, colour: colour_of(o) }
+    Piece { item, uv, rect, colour: colour_of(o), grad: 0 }
 }
 
 /// KH1's cut of a partial straight segment: round((1 − rem / per) · width), at least 1, at most
@@ -1028,7 +1068,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     groups.push(held(&f));
     // FACE: Sora's strip, cell = expression, h × h centred on the gauge centre (`0x14027F470`).
     let fh = src.faces[0].ps2.h as i32;
-    let face_piece = |e: i32| Piece { item: faces[0], uv: [fh * e, 0, fh * (e + 1), fh], rect: [cx - fh / 2, cy - fh / 2, cx + fh / 2, cy + fh / 2], colour: 0x8080_8080 };
+    let face_piece = |e: i32| Piece { item: faces[0], uv: [fh * e, 0, fh * (e + 1), fh], rect: [cx - fh / 2, cy - fh / 2, cx + fh / 2, cy + fh / 2], colour: 0x8080_8080, grad: 0 };
     groups.push(held(&[vec![face_piece(0)], vec![face_piece(1)], vec![face_piece(2)]]));
     let one = 0x8080_8080u32;
     // H2b: KH1's gauge motions (`g_act`) and the held groups' units.
@@ -1116,6 +1156,30 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
             groups.push(motion::program_group(&motion.programs[p], &tracks, pieces));
         }
     }
+    // H4: KH1's command menu pieces and words.
+    let menu_built = match &src.menu {
+        Some(ms) => {
+            let mut mp = Vec::new();
+            for (i, off, data) in MENU_PICTURES {
+                let t = tims.get(i).ok_or_else(|| crate::Error::Format(format!("uitex.bin: no picture {i}")))?;
+                if t.offset != off || t.width != 128 || t.height != 128 {
+                    return bad(format!("uitex.bin: picture {i} at {:#x} {}×{}, KH1 draws it from {off:#x} 128×128", t.offset, t.width, t.height));
+                }
+                let ps2 = Pic { w: 128, h: 128, px: t.pixels.clone() };
+                let mut per = Vec::new();
+                for l in langs {
+                    per.push(uitex_asset(src.uitex_hd, data, l)?.ok_or_else(|| crate::Error::Format(format!("uitex.bin: no PC texture for picture {i}")))?);
+                }
+                let scale = hd_scale(&ps2, &per[0])?;
+                let per: Vec<Pic> = per.into_iter().map(|p| p.crop(0, 0, 128 * scale, 128 * scale)).collect();
+                // One shared PC picture when every language has the same one (pictures 2, 3).
+                let per = if per.iter().all(|p| *p == per[0]) { vec![per[0].clone()] } else { per };
+                mp.push(atlas.add(ps2, per, scale));
+            }
+            Some(menu::build(ms, &mut atlas, [mp[0], mp[1], mp[2]], &mut groups)?)
+        }
+        None => None,
+    };
     let groups_total = groups.len();
     let packed = build_atlas(&atlas, langs.len())?;
     let base = seqd(&groups, &packed, false)?;
@@ -1131,6 +1195,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         sprites,
         motion,
         groups: groups_total,
+        menu: menu_built,
     })
 }
 
@@ -1336,6 +1401,280 @@ pub mod motion {
     }
 }
 
+/// H4: KH1's command menu look (decision 39: KH1's panels, cursor and COMMAND title, the field look
+/// in the field and the battle look in battle rooms, the words in KH1's own menu font).
+///
+/// KH1 (Steam; Checked (decomp) unless tagged): `0x14027B870` draws the root list at (16, 260)
+/// (+ the left margin), a submenu at its parent's x + 11; `0x140278B40` draws a list: its header
+/// (`*_fra_top` + the title) at the origin, rows at y + 20 + 22 i (the frame `*_fra_c`, the last
+/// row `*_fra_d` + the connector `*_fra_cd`), the cursor row not as a frame but as the selection
+/// (`*_sel_sha / act / gra / bla` + the command's icon) at (x + 11, y + 18 + 22 c); words at the
+/// row's (x + 16, y + 22 + 22 i), the cursor row's at (x + 29, y + 25 + 22 c) (`0x14027A920` adds
+/// (16, 2)). The root's pieces are 24 units wider (its right vertices and their texels, the
+/// `param_10` of `0x14027A600` / `0x14027A9F0`: the panels' art in picture 2 runs to texel 125,
+/// Checked (files)). In battle (`0x142867364 & 1`, the root record's `+0x1F8` = 0) the root's
+/// panels are drawn with RGB (109, 30, 32) and the selection's plate (216, 109, 100)
+/// (`0x14027A600`; the colours are `0x140278B40`'s locals), and the title is `com_battle`'s
+/// `com_command_start` (blue → white → red over 20 frames, restarted when the mode changes),
+/// `com_command_end` in the field.
+pub mod menu {
+    use super::*;
+
+    /// Groups from the menu's first group: the root's field look, its battle look (each [`LOOK`]
+    /// groups), the battle title's animation, the Magic list, then the words.
+    pub mod g {
+        /// Header frame.
+        pub const HEADER: usize = 0;
+        /// Title ("COMMAND"), static.
+        pub const TITLE: usize = 1;
+        /// A row's frame.
+        pub const ROW: usize = 2;
+        /// The last row's frame and connector.
+        pub const ROW_LAST: usize = 3;
+        /// The selection (cursor row).
+        pub const SEL: usize = 4;
+        /// The icons a / b / c (Attack, Magic, Items).
+        pub const ICON: usize = 5;
+        /// Groups a look.
+        pub const LOOK: usize = 8;
+        /// The battle look's first group.
+        pub const BATTLE: usize = LOOK;
+        /// The title turning red (played from frame 1, 20 frames, then held).
+        pub const TITLE_TO_BATTLE: usize = 2 * LOOK;
+        /// The Magic list: header, title, row, last row, selection, icon.
+        pub const MAGIC: usize = 2 * LOOK + 1;
+        /// The words.
+        pub const WORDS: usize = MAGIC + 6;
+    }
+
+    /// The root's extra width (`param_10` = 24 for list type 0, `0x140278B40`).
+    pub const ROOT_EXT: i32 = 24;
+    /// Battle colours (`0x140278B40`: `local_168`, `local_118`).
+    pub const BATTLE_PANEL: [i32; 3] = [109, 30, 32];
+    /// The battle selection plate's colour.
+    pub const BATTLE_SEL: [i32; 3] = [216, 109, 100];
+    /// The menu font's size over its cell: KH1 draws font 1 at size 14 (`0x14054534C`) in units;
+    /// the PC font's cells are 32 texels: 14 / 32 units a texel. Assumption (strong: "Attack"
+    /// measures 43 units on the owner's KH1 screenshot, 96 texels of advances × 14 / 32 = 42).
+    pub const FONT_UNITS: f32 = 14.0 / 32.0;
+    /// A space's advance (texels): the font has no glyph for it. Assumption.
+    pub const SPACE: i32 = 9;
+
+    /// The built menu: its first group and the words' groups.
+    #[derive(Clone, Debug)]
+    pub struct Built {
+        /// First group.
+        pub first: usize,
+        /// (language, [(message id, group)]).
+        pub words: Vec<(String, Vec<(u16, usize)>)>,
+        /// Glyphs found / characters missing from the font.
+        pub glyphs: usize,
+        /// Characters without a glyph.
+        pub missing: Vec<char>,
+    }
+
+    /// The menu font: its 32-bit picture and glyphs (code → x, y, width).
+    pub struct Font {
+        w: usize,
+        px: Vec<[u8; 4]>,
+        cell: usize,
+        glyphs: std::collections::BTreeMap<u32, (usize, usize, usize)>,
+    }
+
+    /// Reads `menufont.tm2` / `.cod` / `.inf`.
+    pub fn font(tm2: &[u8], cod: &[u8], inf: &[u8]) -> Result<Font> {
+        let u16at = |d: &[u8], at: usize| d.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize);
+        let (w, h) = (u16at(inf, 2).unwrap_or(0), u16at(inf, 4).unwrap_or(0));
+        let cell = *inf.get(6).unwrap_or(&0) as usize;
+        if &tm2.get(..4).unwrap_or(&[]) != b"TIM2" || tm2.len() < 0x40 || cell == 0 {
+            return bad("menufont: not a TIM2 / no cell size");
+        }
+        let hs = u16at(tm2, 0x1C).unwrap_or(0);
+        let (tw, th, kind) = (u16at(tm2, 0x24).unwrap_or(0), u16at(tm2, 0x26).unwrap_or(0), tm2[0x23]);
+        if kind != 3 || tw != w || th != h || 0x10 + hs + w * h * 4 > tm2.len() {
+            return bad(format!("menufont.tm2: {tw}×{th} type {kind}, .inf says {w}×{h} 32-bit"));
+        }
+        let px = tm2[0x10 + hs..0x10 + hs + w * h * 4].chunks(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
+        let mut glyphs = std::collections::BTreeMap::new();
+        for e in cod.chunks_exact(8) {
+            let code = u16::from_le_bytes([e[0], e[1]]) as u32;
+            let (x, y) = (u16::from_le_bytes([e[2], e[3]]) as usize, u16::from_le_bytes([e[4], e[5]]) as usize);
+            if x + cell <= w && y + cell <= h {
+                glyphs.insert(code, (x, y, e[7] as usize));
+            }
+        }
+        Ok(Font { w, px, cell, glyphs })
+    }
+
+    impl Font {
+        /// A glyph's cell: the PS2-size picture (half) and the PC one.
+        fn cell_pics(&self, x: usize, y: usize) -> (Pic, Pic) {
+            let c = self.cell;
+            let mut hd = Pic::blank(c, c);
+            for j in 0..c {
+                for i in 0..c {
+                    hd.px[j * c + i] = self.px[(y + j) * self.w + x + i];
+                }
+            }
+            let h = c / 2;
+            let mut ps2 = Pic::blank(h, h);
+            for j in 0..h {
+                for i in 0..h {
+                    let mut a = [0u32; 4];
+                    for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                        let p = hd.px[(2 * j + dy) * c + 2 * i + dx];
+                        for k in 0..4 {
+                            a[k] += p[k] as u32;
+                        }
+                    }
+                    ps2.px[j * h + i] = a.map(|v| ((v + 2) / 4) as u8);
+                }
+            }
+            // The PC atlas holds full-range RGB (KH1's and Re:CoM's PC pictures); the font's texels
+            // are PS2-range (0x80 = white, Checked (files)): doubled for the PC copy.
+            for p in hd.px.iter_mut() {
+                for k in 0..3 {
+                    p[k] = (p[k] as u32 * 255 / 128).min(255) as u8;
+                }
+            }
+            (ps2, hd)
+        }
+    }
+
+    /// An object's piece: `ext` units (and texels) wider, its RGB replaced by `over`.
+    fn mpiece(o: &Obj, item: usize, dx: i32, dy: i32, ext: i32, over: Option<[i32; 3]>) -> Piece {
+        let (mut uv, ..) = o.texels();
+        uv[2] += ext;
+        let [x, y, w, h] = o.rect;
+        let col = |c: [i32; 4]| {
+            let c = match over {
+                Some(o) => [o[0], o[1], o[2], c[3]],
+                None => c,
+            };
+            let b = |v: i32| v.clamp(0, 255) as u32;
+            b(c[0]) | b(c[1]) << 8 | b(c[2]) << 16 | b(c[3]) << 24
+        };
+        let grad = if o.flags & 0x20 != 0 { col(o.colours[1]) } else { 0 };
+        Piece { item, uv, rect: [x + dx, y + dy, x + dx + w + ext, y + dy + h], colour: col(o.colours[0]), grad }
+    }
+
+    fn held1(pieces: Vec<Piece>) -> Group {
+        let one = 0x8080_8080;
+        Group { steps: vec![Step { pieces, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] }], once: true, word: GROUP_WORD_SCRUB }
+    }
+
+    /// Builds the menu groups (appended to `groups`) and the glyphs (into `atlas`).
+    pub(crate) fn build(ms: &MenuSources, atlas: &mut Atlas, [p1, p2, p3]: [usize; 3], groups: &mut Vec<Group>) -> Result<Built> {
+        let com = Uibin::parse(ms.com)?;
+        let cb = Uibin::parse(ms.com_battle)?;
+        let mag = Uibin::parse(ms.mag)?;
+        let need = |u: &Uibin, n: &str, names: &[&str]| -> Result<()> {
+            for (i, want) in names.iter().enumerate() {
+                if u.objs.get(i).map(|o| o.name.as_str()) != Some(want) {
+                    return bad(format!("{n}: object {i} is not {want} (not KH1 FM Steam's layout)"));
+                }
+            }
+            Ok(())
+        };
+        need(&com, COM, &["com_fra_d", "com_fra_cd", "com_fra_c", "com_fra_top", "com_sel_sha_d", "com_sel_act_d", "com_sel_gra_d", "com_sel_bla_d", "com_command", "com_sel_ico_a", "com_sel_ico_b", "com_sel_ico_c"])?;
+        need(&cb, COM_BATTLE, &["com_command_start", "com_command_end"])?;
+        need(&mag, MAG, &["mag_fra_d", "mag_fra_2_d", "mag_fra_cd", "mag_fra_c", "mag_fra_2_c", "mag_fra_top", "mag_fra_2_top", "mag_sel_sha_d", "mag_sel_sha_2_d", "mag_sel_act_d", "mag_sel_act_2_d", "mag_sel_gra_d", "mag_sel_gra_2_d", "mag_sel_bla_d", "mag_sel_bla_2_d", "mag_magic", "mag_sel_ico_d"])?;
+        let first = groups.len();
+        let o = &com.objs;
+        let ext = ROOT_EXT;
+        // The title's colours: com_command_end's last key (field), com_command_start's (battle).
+        let keys_of = |obj: &Obj| -> Vec<crate::uibin::Key> {
+            let (f, n) = obj.keys_a;
+            if f < 0 || n <= 0 {
+                return Vec::new();
+            }
+            cb.keys_a.get(f as usize..(f + n) as usize).map(|k| k.to_vec()).unwrap_or_default()
+        };
+        let start = keys_of(&cb.objs[0]);
+        let end = keys_of(&cb.objs[1]);
+        if start.len() < 2 || end.len() < 2 {
+            return bad(format!("{COM_BATTLE}: the title keys are not KH1's"));
+        }
+        let rgba = |k: &crate::uibin::Key| -> [i32; 4] { [k.vals[0] as i32, k.vals[1] as i32, k.vals[2] as i32, k.vals[3] as i32] };
+        let title_col = [rgba(end.last().unwrap()), rgba(start.last().unwrap())];
+        for (look, over, sel_over) in [(0, None, None), (1, Some(BATTLE_PANEL), Some(BATTLE_SEL))] {
+            groups.push(held1(vec![mpiece(&o[3], p2, 0, 0, ext, over)]));
+            let mut t = mpiece(&o[8], p1, 0, 0, 0, None);
+            let c = title_col[look];
+            t.colour = (c[0].clamp(0, 255) | c[1].clamp(0, 255) << 8 | c[2].clamp(0, 255) << 16 | c[3].clamp(0, 255) << 24) as u32;
+            groups.push(held1(vec![t]));
+            groups.push(held1(vec![mpiece(&o[2], p2, 0, 0, ext, over)]));
+            groups.push(held1(vec![mpiece(&o[0], p2, 0, 0, ext, over), mpiece(&o[1], p2, 0, 0, 0, over)]));
+            groups.push(held1(vec![mpiece(&o[4], p2, 0, 0, ext, None), mpiece(&o[5], p2, 0, 0, ext, sel_over), mpiece(&o[6], p2, 0, 0, ext, None), mpiece(&o[7], p2, 0, 0, ext, None)]));
+            for k in 9..12 {
+                groups.push(held1(vec![mpiece(&o[k], p1, ext, 0, 0, None)]));
+            }
+        }
+        // The title turning red: com_command_start's colour keys (2 frames a key unit), from frame 1.
+        {
+            let mut t = mpiece(&o[8], p1, 0, 0, 0, None);
+            t.colour = 0x8080_8080;
+            let col = |c: [i32; 4]| (c[0].clamp(0, 255) | c[1].clamp(0, 255) << 8 | c[2].clamp(0, 255) << 16 | c[3].clamp(0, 255) << 24) as u32;
+            let mut steps = Vec::new();
+            let mut f = 0;
+            for w in start.windows(2) {
+                if w[0].dur <= 0 {
+                    break;
+                }
+                let f1 = f + 2 * w[0].dur;
+                steps.push(Step { pieces: vec![t], frames: (f, f1), colour: (col(rgba(&w[0])), col(rgba(&w[1]))), flags: FLAGS_COLOUR | 0x8000, tr: [0; 4] });
+                f = f1;
+            }
+            let last = col(rgba(start.last().unwrap()));
+            steps.push(Step { pieces: vec![t], frames: (f, LONG), colour: (last, last), flags: FLAGS_COLOUR, tr: [0; 4] });
+            groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
+        }
+        // The Magic list (`0x14027A1C0`: the objects' own colours, no extra width).
+        let m = &mag.objs;
+        groups.push(held1(vec![mpiece(&m[5], p3, 0, 0, 0, None), mpiece(&m[6], p3, 0, 0, 0, None)]));
+        groups.push(held1(vec![mpiece(&m[15], p1, 0, 0, 0, None)]));
+        groups.push(held1(vec![mpiece(&m[3], p3, 0, 0, 0, None), mpiece(&m[4], p3, 0, 0, 0, None)]));
+        groups.push(held1(vec![mpiece(&m[0], p3, 0, 0, 0, None), mpiece(&m[1], p3, 0, 0, 0, None), mpiece(&m[2], p3, 0, 0, 0, None)]));
+        groups.push(held1((7..15).map(|k| mpiece(&m[k], p3, 0, 0, 0, None)).collect()));
+        groups.push(held1(vec![mpiece(&m[16], p1, 0, 0, 0, None)]));
+        debug_assert_eq!(groups.len() - first, g::WORDS);
+        // Words: KH1's menu font, a glyph a part, at the font's size.
+        let f = font(ms.font[0], ms.font[1], ms.font[2])?;
+        let mut glyph_item: std::collections::BTreeMap<u32, usize> = Default::default();
+        let mut missing = Vec::new();
+        let mut words = Vec::new();
+        for (lang, ws) in &ms.words {
+            let mut list = Vec::new();
+            for (id, text) in ws {
+                let mut pieces = Vec::new();
+                let mut x = 0.0f32;
+                for ch in text.chars() {
+                    let Some(&(gx, gy, w)) = f.glyphs.get(&(ch as u32)) else {
+                        if ch != ' ' && !missing.contains(&ch) {
+                            missing.push(ch);
+                        }
+                        x += SPACE as f32 * FONT_UNITS;
+                        continue;
+                    };
+                    let item = *glyph_item.entry(ch as u32).or_insert_with(|| {
+                        let (ps2, hd) = f.cell_pics(gx, gy);
+                        atlas.add(ps2, vec![hd], 2)
+                    });
+                    let x0 = x.round() as i32;
+                    let size = (f.cell as f32 * FONT_UNITS).round() as i32;
+                    let half = (f.cell / 2) as i32;
+                    pieces.push(Piece { item, uv: [0, 0, half, half], rect: [x0, 0, x0 + size, size], colour: 0x8080_8080, grad: 0 });
+                    x += w as f32 * FONT_UNITS;
+                }
+                list.push((*id, groups.len()));
+                groups.push(held1(pieces));
+            }
+            words.push((lang.clone(), list));
+        }
+        Ok(Built { first, words, glyphs: glyph_item.len(), missing })
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Adding the set to Re:CoM's files.
 
@@ -1403,6 +1742,10 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)]) ->
     );
     let _ = writeln!(s, "  \"units\": [{}],", (0..m.first.len()).map(|u| format!("[{}, {}]", m.first[u], m.programs_of(u).len())).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"runs\": [{}],", m.runs.iter().map(|r| format!("[{}, {}, {}, {}]", r.0, r.1, r.2, r.3)).collect::<Vec<_>>().join(", "));
+    if let Some(mn) = &b.menu {
+        let words = mn.words.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, g)| format!("[{id}, {g}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
+        let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"words\": {{{words}}}}},", mn.first);
+    }
     let _ = writeln!(s, "  \"languages\": [{}],", langs.iter().map(|l| format!("\"{l}\"")).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"atlas\": [{}, {}, {}, {}],", b.atlas.0, b.atlas.1, b.atlas.2, b.atlas.3);
     let _ = writeln!(s, "  \"sources\": {{");
@@ -1485,7 +1828,7 @@ mod tests {
         assert_eq!(t.end, (0, 0));
         // A moving step's frames are exclusive and interpolate (x0, y0) → (x1, y1); the hold keeps
         // the end to LONG.
-        let p = Piece { item: 0, uv: [0, 0, 1, 1], rect: [0, 0, 1, 1], colour: 0 };
+        let p = Piece { item: 0, uv: [0, 0, 1, 1], rect: [0, 0, 1, 1], colour: 0, grad: 0 };
         let st = motion::steps(&t, &[p]);
         assert_eq!(st.len(), 6);
         assert_eq!((st[1].flags, st[1].frames, st[1].tr), (FLAGS_MOVE, (2, 4), [0, 3, 0, -3]));
@@ -1536,7 +1879,7 @@ mod tests {
 
     #[test]
     fn held_groups_extend_the_last_frame() {
-        let p = |x: i32| Piece { item: 0, uv: [0, 0, 1, 1], rect: [x, 0, x + 1, 1], colour: 0 };
+        let p = |x: i32| Piece { item: 0, uv: [0, 0, 1, 1], rect: [x, 0, x + 1, 1], colour: 0, grad: 0 };
         let g = held(&[vec![], vec![p(0)], vec![p(0), p(1)]]);
         let mut runs: Vec<(Vec<Piece>, (i32, i32))> = g.steps.iter().map(|s| (s.pieces.clone(), s.frames)).collect();
         runs.sort_by_key(|r| r.1);
@@ -1561,12 +1904,21 @@ mod tests {
         };
         let face = |n: &str, at: usize| face_section(&rd(&format!("faces/{n}.sec2.bin")), at, &assets(&format!("faces/{n}.hd"))).unwrap();
         let uitex_hd = assets("command2/uitex.bin.hd");
+        let (com, com_battle, mag) = (rd("exchange/UK_uibin_com.bin"), rd("exchange/UK_com_battle.bin"), rd("exchange/UK_uibin_mag.bin"));
+        let fonts: Vec<Vec<u8>> = FONT_FILES.iter().map(|f| rd(&format!("fonts/{f}"))).collect();
         let src = Sources {
             uitex: &rd("command2/uitex.bin"),
             uitex_hd: &uitex_hd,
             g_s: &rd("exchange/UK_uibin_g_s.bin"),
             g_red: &rd("exchange/UK_uibin_g_red.bin"),
             g_act: &rd("exchange/UK_uibin_g_act.bin"),
+            menu: Some(MenuSources {
+                com: &com,
+                com_battle: &com_battle,
+                mag: &mag,
+                font: [&fonts[0], &fonts[1], &fonts[2]],
+                words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into())])],
+            }),
             faces: [face("xa_ex_0010.mdls", 0xA2E80), face("xa_ex_0040.mdls", 0x75600), face("xa_ex_0050.mdls", 0x8D400)],
         };
         let langs = ["FR", "GR", "IT", "SP", "UK"];
@@ -1612,6 +1964,9 @@ mod tests {
             sq.parts.len()
         );
         assert_eq!(sq.agroups.len(), b.groups);
+        let mn = b.menu.as_ref().unwrap();
+        eprintln!("menu: first group {}, {} glyphs, missing {:?}, words {:?}", mn.first, mn.glyphs, mn.missing, mn.words);
+        assert!(mn.missing.is_empty());
         // KH1's g_act tracks at 2 frames a key unit: vibe_s 5 units, vibe_ss 11, vibe_sss 19,
         // the slides 10.
         assert_eq!(b.motion.programs.iter().map(|p| p.len).collect::<Vec<_>>(), vec![10, 22, 38, 10, 10, 20, 20]);

@@ -228,6 +228,70 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 3. Low HP (under 54 HP): the green arc's end is soft over its last 0.7°.
 4. Log: `kh1 hud: … built …` as before; no `no slide units` line in normal play.
 
+## H4: KH1's command menu look (`hud = kh1`)
+
+7.3's menu (its rules, cursor, fades, tab, request bits) is unchanged; at `hud = kh1` its rows are
+drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3's look.
+
+### KH1's rules (Checked (decomp + exe + files) unless tagged)
+
+| what | where |
+|---|---|
+| Root list at (16, 260) + left margin; a submenu at its parent's x + 11 (7.3) | `0x14027B870` |
+| A list: header (`*_fra_top` and the title) at the origin; rows at y + 20 + 22 i (`*_fra_c`; the last row `*_fra_d` + the connector `*_fra_cd`); the cursor row is not drawn as a frame but as the selection (`*_sel_sha`, `_act`, `_gra`, `_bla` + the command's icon) at (x + 11, y + 18 + 22 c) | `0x140278B40` |
+| Words at the row's (x + 16, y + 22 + 22 i), the cursor row's at (x + 29, y + 25 + 22 c) (`0x14027A920` adds (16, 2)) | `0x140278B40`, `0x14027A920` |
+| The root's pieces 24 units (and texels) wider (`param_10` of `0x14027A600` / `0x14027A9F0` for list type 0; picture 2's panel art runs to texel 125) | `0x140278B40`; Checked (files) |
+| Battle (`0x142867364 & 1` → the root record's `+0x1F8` = 0): the root's panels RGB (109, 30, 32), the selection plate (216, 109, 100) (`0x14027A600` replaces the vertex RGB; `0x140278B40`'s `local_168` / `local_118`); the field look is the objects' own colours | `0x14027A0B0`, `0x14027A600` |
+| Title: `com_battle` `com_command_start` in battle (blue → (128, 128, 255, 255) → red (200, 80, 80), 2 + 18 frames), `com_command_end` in the field (back to (86, 126, 223)), restarted when the mode changes; × 0.5 while a submenu is open | `0x14027B870`, `0x140278180`, `0x140278B40` |
+| Pictures: the root's panels picture 2, the submenus' 3, titles and icons 1 (PC: `-4140.dds` 256 × 384, `-61c0.dds`, per language `<L>_uitex_bin20c0.png`) | `0x140278180`; Checked (files) |
+| Words: font 1 (`menufont` of `<lang>/font/`, Theater: 2048 × 2048 32-bit, 32-texel cells, `.cod` 8-byte glyphs: code, x, y, 0, width) drawn at size 14 (`0x14054534C` over the cell, `0x1402D1DB0`) | Checked (files + decomp); the PC path's scale: Assumption (strong: "Attack" = 42 units here, 43 on the owner's screenshot) |
+
+### Native build
+
+- **Data (asset step):** pictures 1, 2, 3 join the atlas (picture 1 per language from its PNG:
+  a small PNG reader, `miniz_oxide` from the lockfile); after the motion groups: the root's field
+  look and battle look (header, title, row, last row, selection, three icons each), the red
+  title's colour keys (played), the Magic list's six, then one group per word and language: KH1's
+  glyphs (32-texel cells into the atlas, the PS2 copy at half size) as parts at the font's
+  advances × 14 / 32. `kh1-hud.json` `"menu": {"first", "words": {lang: [[id, group]]}}`.
+  Message 6 ("Summon") joins the decoded words.
+- **DLL:** `win/command_menu.rs` `show_kh1`: per row a plate control (the frame / last frame /
+  selection + icon) and a word control (colour = KH1's brightness / 128, alpha the fade), a header
+  control for the root and one for the Magic list; KH1's left margin −86. The look is the battle
+  one while `player + 0x390` (Re:CoM's battle room) is set; switching rebuilds and plays the red
+  title from frame 1. Root row 3 with no context command reads "Summon", greyed (locked as 7.3's
+  blank row). Nothing new per frame: the rows rebuild only when 7.3's did, plus a look change.
+
+### Owner questions (H4)
+
+1. **Font:** KH1's glyphs are Re:CoM sprite parts in the `kh1hud` set (a group per word and
+   language), not a `C2DFnt` font: Re:CoM's font format is not reverse-engineered. (a) keep;
+   (b) research `C2DFnt`'s font files and convert KH1's into one.
+2. **Icons:** a = Keyblade on Attack / Counter, b = hat on Magic, c = potion on Items (by their
+   pictures; KH1's choice not read). Summon has none.
+3. Root row 3 shows "Summon" greyed when no context command is in it (the brief's choice); KH1
+   shows it only once a summon is learned.
+
+### Not 1:1 / to check
+
+1. KH1's slide-in of a list (the objects' C keys −11 → 2 → 0 over 4 frames) is not played
+   (as 7.3).
+2. The 13 KH1 adds with the root's width (`param_9`, to `0x1428669A0` / `B0`) is not applied:
+   its meaning (UV or clip) is not settled. Assumption: the art at +24 texels is what shows.
+3. A space in a word advances 9 texels (no glyph in the font). Assumption.
+4. The PC atlas's glyph texels are doubled (PS2 range in the font). If the words look too bright
+   or dark on screen, that is why.
+
+### What the in-game test must check (H4)
+
+1. `hud = kh1`, field: the KH1 menu bottom-left as the owner's KH1 screenshot (blue in the field):
+   COMMAND tab, Attack highlighted with the Keyblade icon, Magic / Items / Summon below in KH1's
+   font; Summon greyed.
+2. A battle: the tab and panels red, the title turning red over 1/3 s; back in the field: blue.
+3. Magic open: the purple Magic list at x + 11 with its header, the root's title dimmed.
+4. A chest: row 3 slides in reading Open; Triangle opens it once in (7.3's rules).
+5. `hud = recom`: 7.3's Re:CoM plates as before.
+
 ## H3: Re:CoM's HUD hidden at `hud = kh1` (visual only)
 
 ### What owns what (Checked (decomp + exe: RTTI))

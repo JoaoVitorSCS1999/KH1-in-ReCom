@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 65: KH1 HUD H4, KH1's command menu look, version 0.29.0 (2026-10-31)
+
+- At `hud = kh1`: KH1's `com` / `com_battle` / `mag` pieces, field look in the field, battle
+  look in battle rooms (title red over 20 frames), Magic list in KH1's purple, Summon row greyed;
+  7.3's rules unchanged; `hud = recom` keeps 7.3's look. Words: KH1's menu font glyphs (Theater
+  `uk/font/menufont`) baked as sprite parts per word and language (Re:CoM's font format isn't
+  decoded: owner question). Not seen in game.
+
+---
+
 ## Stage 64: KH1 HUD H2b, shake, slides, HUD fade, soft arc ends, version 0.28.1 (2026-10-31)
 
 - Every distinct piece set of Sora's cluster (852 units) gets played groups baked at the asset step:

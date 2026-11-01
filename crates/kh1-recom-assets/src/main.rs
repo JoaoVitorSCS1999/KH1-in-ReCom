@@ -481,6 +481,8 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     let g_s = inst.read(kh::G_S).map_err(|e| format!("{}: {e}", kh::G_S))?;
     let g_red = inst.read(kh::G_RED).map_err(|e| format!("{}: {e}", kh::G_RED))?;
     let g_act = inst.read(kh::G_ACT).map_err(|e| format!("{}: {e}", kh::G_ACT))?;
+    // H4: the command menu's layouts, KH1's menu font (Image/dt/Theater) and the words.
+    let menu_files = kh1_menu_files(game, &keys, &inst);
     let mut faces = Vec::new();
     for n in kh::FACES {
         let (m, a, _) = inst.read_full(n).map_err(|e| format!("{n}: {e}"))?;
@@ -492,7 +494,14 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         return Err("FO0002.SPR has no <LANG>_Cockpit.lad PC layouts (no language to build for)".into());
     }
     let lrefs: Vec<&str> = langs.iter().map(String::as_str).collect();
-    let src = kh::Sources { uitex: &uitex, uitex_hd: &uitex_hd, g_s: &g_s, g_red: &g_red, g_act: &g_act, faces };
+    let menu = match &menu_files {
+        Ok(m) => Some(kh::MenuSources { com: &m.com, com_battle: &m.com_battle, mag: &m.mag, font: [&m.font[0], &m.font[1], &m.font[2]], words: m.words.clone() }),
+        Err(e) => {
+            println!("note: KH1 HUD: no KH1 command menu look: {e}");
+            None
+        }
+    };
+    let src = kh::Sources { uitex: &uitex, uitex_hd: &uitex_hd, g_s: &g_s, g_red: &g_red, g_act: &g_act, menu, faces };
     let b = kh::build(&src, &lrefs).map_err(|e| e.to_string())?;
     bar.spr = kh::add_to_spr(&bar.spr, &mut bar.assets, &b, &langs).map_err(|e| format!("{}: {e}", mb::SPR_PATH))?;
     let e = arc.find(mb::RTM_PATH).ok_or_else(|| format!("{} not in Recom.hed", mb::RTM_PATH))?;
@@ -509,6 +518,9 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         ("FO0002.RTM sha256", kh1_formats::egs::sha256_hex(&rtm)),
     ];
     let manifest = kh::manifest_json(&b, &langs, &sources);
+    if let Some(m) = &b.menu {
+        println!("KH1 HUD: command menu look from group {}: {} glyphs of KH1's menu font, words for {:?}{}", m.first, m.glyphs, m.words.iter().map(|w| w.0.as_str()).collect::<Vec<_>>(), if m.missing.is_empty() { String::new() } else { format!("; no glyph for {:?} (drawn as a space)", m.missing) });
+    }
     println!(
         "KH1 HUD: {} groups ({} motion units), {} sprites, {} atlas items; PS2 atlas {}×{}, PC atlas {}×{}; kh1hud.lad + {} language copies into FO0002.SPR, kh1hud.imz + {} into FO0002.RTM ({:?})",
         b.groups,
@@ -524,6 +536,36 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         langs
     );
     Ok(Hud { rtm_entry, manifest })
+}
+
+/// The command menu look's KH1 inputs (H4).
+struct MenuFiles {
+    com: Vec<u8>,
+    com_battle: Vec<u8>,
+    mag: Vec<u8>,
+    font: [Vec<u8>; 3],
+    words: Vec<(String, Vec<(u16, String)>)>,
+}
+
+fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_formats::egs::Install) -> Result<MenuFiles, String> {
+    use kh1_recom_assets::command_menu as cm;
+    use kh1_recom_assets::kh1_hud as kh;
+    let rd = |n: &str| inst.read(n).map_err(|e| format!("{n}: {e}"));
+    let (com, com_battle, mag) = (rd(kh::COM)?, rd(kh::COM_BATTLE)?, rd(kh::MAG)?);
+    let theater = kh1_formats::egs::Archive::open(game.join("Image").join("dt").join("Theater.hed")).map_err(|e| format!("Image/dt/Theater.hed: {e}"))?;
+    let mut font = Vec::new();
+    for n in kh::FONT_FILES {
+        font.push(theater.read(keys, n).map_err(|e| format!("Theater {n}: {e}"))?);
+    }
+    let font: [Vec<u8>; 3] = font.try_into().map_err(|_| "font")?;
+    let (_, assets, _) = inst.read_full("btltbl.bin").map_err(|e| format!("btltbl.bin: {e}"))?;
+    let mut words = Vec::new();
+    for (lang, prefix) in cm::LANGUAGES {
+        if let Some(a) = assets.iter().find(|a| a.name.eq_ignore_ascii_case(&format!("{prefix}Word.bin"))) {
+            words.push((lang.to_string(), cm::words(&a.data).0));
+        }
+    }
+    Ok(MenuFiles { com, com_battle, mag, font, words })
 }
 
 /// KH1's command words (`btltbl.bin`'s PC assets `<LANG>_Word.bin`, decoded for the menu's

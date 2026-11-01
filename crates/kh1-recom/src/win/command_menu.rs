@@ -22,6 +22,7 @@
 use super::movement::{self as mv, body, func, p, rd, rd_vec, wr};
 use super::{base, log};
 use crate::command_menu::{self as cm, Event, Kind, Menu, Pad, RowView, Scene, Words, World};
+use crate::kh1_hud as kh;
 use crate::sites::COMMAND_MENU_PTRS;
 use crate::units::to_kh1;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -84,6 +85,10 @@ type VecFn = unsafe extern "win64" fn(usize, *const f32);
 type FntCtorFn = unsafe extern "win64" fn(usize, i32, i32, *const u32, i32, *const u8, i32) -> usize;
 type SoundFn = unsafe extern "win64" fn(u32, i32) -> u64;
 type PadFn = unsafe extern "win64" fn(u32, u32) -> u32;
+type PlayFn = unsafe extern "win64" fn(usize, u32, f32);
+/// H4: play a layer from a time (`sites::KH1_HUD_CALLEES`), units of 1/50 frame.
+const PLAY_FROM: u32 = 0x0024_8550;
+const UNITS: f32 = 50.0;
 type PadBtnFn = unsafe extern "win64" fn(u32) -> u32;
 
 #[repr(C, align(16))]
@@ -93,6 +98,17 @@ struct Row {
     ctrl: usize,
     fnt: usize,
     view: RowView,
+    /// H4 (KH1's look): the word's control (KH1's menu font, a group of the `kh1hud` set).
+    text: usize,
+}
+
+/// H4: KH1's look of the menu (`hud = kh1`): the list headers and which look is shown.
+struct Look {
+    battle: bool,
+    /// The root's header control, and the Magic list's when it is open.
+    headers: Vec<usize>,
+    /// The root header dims while a submenu is open (`0x140278B40`: × 0.5).
+    dim: bool,
 }
 
 struct Ui {
@@ -104,6 +120,7 @@ struct Ui {
     hidden: bool,
     rows: Vec<Row>,
     shown: Option<Scene>,
+    look: Option<Look>,
 }
 
 struct State {
@@ -200,7 +217,7 @@ pub unsafe fn build(gauge: usize, list: i32) {
         let _ = super::mp::current();
     }
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
-    let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None };
+    let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None, look: None };
     if let Ok(mut s) = STATE.lock() {
         for mut old in s.uis.extract_if(.., |u| u.gauge == gauge) {
             old.clear();
@@ -285,8 +302,162 @@ impl Ui {
         // (`crate::d2`), as `CStockFolder`'s labels go: the font is not deleted again here.
         for r in self.rows.drain(..) {
             super::d2::delete(r.ctrl, self.list);
+            if r.text != 0 {
+                super::d2::delete(r.text, self.list);
+            }
+        }
+        if let Some(l) = self.look.take() {
+            for h in l.headers {
+                super::d2::delete(h, self.list);
+            }
         }
         self.shown = None;
+    }
+
+    /// H4: a control for KH1's look at KH1's (x, y), its layer x offset KH1's left margin.
+    unsafe fn kh1_ctrl(&self, prio: u8, x: f32, y: f32, sx: f32, groups: &[(u32, Option<f32>)]) -> Option<usize> {
+        let c = func::<NewFn>(NEW)(0x170);
+        if c == 0 {
+            return None;
+        }
+        func::<CtorFn>(SEQ_CTOR)(c);
+        if rd::<usize>(c) != base() + SEQ_CTRL_VTABLE as usize {
+            return None;
+        }
+        super::d2::made();
+        wr::<u8>(c + C_PRIORITY, prio);
+        wr::<u8>(c + C_COLOUR_ON, 1);
+        func::<VecFn>(LAYOUT_POS)(c, V4([x, y, 0.0, 1.0]).0.as_ptr());
+        func::<VecFn>(SCALE)(c, V4([sx, 1.0, 1.0, 1.0]).0.as_ptr());
+        let xoff = -crate::kh1_hud::right_margin(-self.xoff);
+        for &(g, play) in groups {
+            wr::<u8>(c + C_PRIORITY, prio);
+            super::d2::add(c, self.list, crate::kh1_hud::SET.as_ptr(), g, xoff, 1);
+            if let Some(t) = play {
+                let n = rd::<u8>(c + 0x16D) as u32;
+                if n > 0 {
+                    func::<PlayFn>(PLAY_FROM)(c, n - 1, t);
+                }
+            }
+        }
+        Some(c)
+    }
+
+    /// H4: shows `sc` in KH1's look (`docs/recom-kh1-hud.md` § H4): KH1's panels, selection,
+    /// icons and title from the `kh1hud` set, the words in KH1's menu font; the field look, or
+    /// the battle look in Re:CoM's battle rooms (the title turns red as KH1's when the mode
+    /// changes). The menu's rules are 7.3's.
+    unsafe fn show_kh1(&mut self, sc: &Scene, g: &kh::MenuGroups, battle: bool) {
+        if self.hidden {
+            return;
+        }
+        let dim = sc.rows.iter().any(|r| r.list == Kind::Magic);
+        let same = self.shown.as_ref().is_some_and(|s| s.same_rows(sc)) && self.look.as_ref().is_some_and(|l| l.battle == battle && l.dim == dim);
+        if same {
+            let old = self.shown.as_ref().expect("same");
+            let alpha_changed = old.alpha != sc.alpha;
+            let tab_moved = old.tab_x != sc.tab_x || old.tab_scale != sc.tab_scale;
+            for (r, v) in self.rows.iter_mut().zip(&sc.rows) {
+                if alpha_changed {
+                    func::<VecFn>(COLOUR)(r.ctrl, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
+                }
+                if r.text != 0 && (alpha_changed || r.view.bright != v.bright) {
+                    let b = v.bright as f32 / 128.0;
+                    func::<VecFn>(COLOUR)(r.text, V4([b, b, b, sc.alpha]).0.as_ptr());
+                }
+                if v.tab && tab_moved {
+                    for c in [r.ctrl, r.text] {
+                        if c != 0 {
+                            let at = kh1_at(v, c == r.text);
+                            func::<VecFn>(LAYOUT_POS)(c, V4([at.0 + sc.tab_x, at.1, 0.0, 1.0]).0.as_ptr());
+                            func::<VecFn>(SCALE)(c, V4([sc.tab_scale, 1.0, 1.0, 1.0]).0.as_ptr());
+                        }
+                    }
+                }
+                r.view = *v;
+            }
+            if alpha_changed {
+                if let Some(l) = &self.look {
+                    for (i, &h) in l.headers.iter().enumerate() {
+                        let d = if i == 0 && l.dim { 0.5 } else { 1.0 };
+                        func::<VecFn>(COLOUR)(h, V4([d, d, d, sc.alpha]).0.as_ptr());
+                    }
+                }
+            }
+            self.shown = Some(sc.clone());
+            return;
+        }
+        let was_battle = self.look.as_ref().map(|l| l.battle);
+        self.clear();
+        let lang = super::settings().menu_language.clone();
+        let look = g.first + if battle { kh::menu::LOOK } else { 0 };
+        // Headers: the root's at KH1's root origin; the Magic list's at its origin.
+        let mut headers = Vec::new();
+        // KH1 restarts the title's colour keys when the mode changes (`0x14027B870`): into battle
+        // it turns red over 20 frames (played from frame 1).
+        let title = if battle && was_battle == Some(false) { (g.first + kh::menu::TITLE_TO_BATTLE, Some(UNITS)) } else { (look + kh::menu::TITLE, None) };
+        if let Some(h) = self.kh1_ctrl(PRIORITY_ROOT, cm::ROOT_X, cm::ROOT_Y, 1.0, &[(look + kh::menu::HEADER, None), title]) {
+            let d = if dim { 0.5 } else { 1.0 };
+            func::<VecFn>(COLOUR)(h, V4([d, d, d, sc.alpha]).0.as_ptr());
+            headers.push(h);
+        }
+        if let Some(m0) = sc.rows.iter().find(|r| r.list == Kind::Magic && r.index == 0) {
+            let base_y = m0.y;
+            if let Some(h) = self.kh1_ctrl(PRIORITY_SUB, m0.x, base_y, 1.0, &[(g.first + kh::menu::MAGIC + kh::menu::HEADER, None), (g.first + kh::menu::MAGIC + kh::menu::TITLE, None)]) {
+                func::<VecFn>(COLOUR)(h, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
+                headers.push(h);
+            }
+        }
+        self.look = Some(Look { battle, headers, dim });
+        for v in &sc.rows {
+            let count = sc.rows.iter().filter(|r| r.list == v.list).count();
+            let last = v.index as usize + 1 == count;
+            let (base_g, prio) = if v.list == Kind::Magic { (g.first + kh::menu::MAGIC, PRIORITY_SUB) } else { (look, PRIORITY_ROOT) };
+            let plate = if v.highlight {
+                kh::menu::SEL
+            } else if last {
+                kh::menu::ROW_LAST
+            } else {
+                kh::menu::ROW
+            };
+            let mut layers = vec![(base_g + plate, None)];
+            if v.highlight {
+                // The command's icon (`com_sel_ico_a / b / c`: Keyblade, hat, potion; the Magic
+                // list's hat). Which row takes which: Assumption (by their pictures).
+                let icon = match (v.list, v.name) {
+                    (Kind::Magic, _) => Some(g.first + kh::menu::MAGIC + 5),
+                    (_, 1) | (_, 343) => Some(look + kh::menu::ICON),
+                    (_, 2) => Some(look + kh::menu::ICON + 1),
+                    (_, 3) => Some(look + kh::menu::ICON + 2),
+                    _ => None,
+                };
+                if let Some(i) = icon {
+                    layers.push((i, None));
+                }
+            }
+            let (dx, sx) = if v.tab { (sc.tab_x, sc.tab_scale) } else { (0.0, 1.0) };
+            let at = kh1_at(v, false);
+            let Some(c) = self.kh1_ctrl(prio, at.0 + dx, at.1, sx, &layers) else { continue };
+            func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
+            // The word; the root's row 3 without a context command reads "Summon", greyed (M8
+            // brings summons).
+            let name = if v.list == Kind::Root && v.index == 3 && (v.name == 0 || v.name == cm::cmd::BLANK_NAME) { cm::SUMMON_NAME } else { v.name };
+            let mut text = 0;
+            if let Some(wg) = (name != 0).then(|| g.word(&lang, name)).flatten() {
+                let at = kh1_at(v, true);
+                if let Some(t) = self.kh1_ctrl(prio, at.0 + dx, at.1, sx, &[(wg, None)]) {
+                    let b = v.bright as f32 / 128.0;
+                    func::<VecFn>(COLOUR)(t, V4([b, b, b, sc.alpha]).0.as_ptr());
+                    text = t;
+                }
+            }
+            self.rows.push(Row { ctrl: c, fnt: 0, view: *v, text });
+        }
+        self.shown = Some(sc.clone());
+        let n = REBUILDS.fetch_add(1, Ordering::Relaxed) + 1;
+        if n.is_multiple_of(100) {
+            super::d2::census(|| format!("command menu: {n} row rebuilds (KH1 look)"));
+        }
     }
 
     unsafe fn make_row(&self, set: *const u8, first: u32, v: &RowView, sc: &Scene, words: &Words) -> Option<Row> {
@@ -314,7 +485,7 @@ impl Ui {
             }
         }
         func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
-        Some(Row { ctrl: c, fnt, view: *v })
+        Some(Row { ctrl: c, fnt, view: *v, text: 0 })
     }
 
     /// Shows `sc`: rebuilds the rows when what they show changed, else writes colours and the
@@ -355,6 +526,28 @@ impl Ui {
         }
         self.shown = Some(sc.clone());
     }
+}
+
+/// H4: the KH1 look's groups when the KH1 HUD is up and its menu look was built.
+fn kh1_look() -> Option<&'static kh::MenuGroups> {
+    if !super::kh1_hud::active() {
+        return None;
+    }
+    super::kh1_hud::manifest()?.menu.as_ref()
+}
+
+/// KH1's place of a row's plate (or its word): the frame at the list origin + (0, 20 + 22 i), the
+/// selection at + (11, 18 + 22 c); the words at + (16, 22 + 22 i) / + (29, 25 + 22 c)
+/// (`0x140278B40`, `0x14027A920`). `v.y` is the list origin + 22 i.
+fn kh1_at(v: &RowView, word: bool) -> (f32, f32) {
+    use kh::menu as m;
+    let (dx, dy) = match (v.highlight, word) {
+        (false, false) => (0.0, m::HEADER_H),
+        (true, false) => m::SEL_AT,
+        (false, true) => m::WORD_AT,
+        (true, true) => m::SEL_WORD_AT,
+    };
+    (v.x + dx, v.y + dy)
 }
 
 /// Re:CoM's layout position (and X scale for the tab) of a row: KH1's top-left + the plate's
@@ -491,8 +684,18 @@ pub unsafe fn frame(pl: usize) -> Option<Keep> {
         let out = m.step(&w, pad);
         m.tick(step);
         let sc = m.scene();
+        let kh1 = kh1_look();
+        let battle = rd::<i32>(pl + p::BATTLE) != 0;
         for u in uis.iter_mut() {
-            u.show(&sc, set, first, words);
+            match kh1 {
+                Some(g) => u.show_kh1(&sc, g, battle),
+                None => {
+                    if u.look.is_some() {
+                        u.clear();
+                    }
+                    u.show(&sc, set, first, words)
+                }
+            }
         }
         let ev: Vec<String> = out.events.iter().map(|e| describe(e, m)).collect();
         (out, ev)

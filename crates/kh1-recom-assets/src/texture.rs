@@ -54,6 +54,77 @@ fn colour_block(b: &[u8], four: bool) -> ([[u8; 3]; 4], [bool; 4]) {
     }
 }
 
+/// Decodes a PNG of 8-bit RGBA or RGB, not interlaced (KH1 PC's per-language `uitex.bin` picture 1,
+/// `<LANG>_uitex_bin20c0.png`: 256 × 256 RGBA, Checked (files)).
+pub fn decode_png(d: &[u8]) -> Result<Image> {
+    if d.len() < 33 || &d[..8] != b"\x89PNG\r\n\x1a\n" {
+        return bad("png: no PNG signature");
+    }
+    let be = |at: usize| u32::from_be_bytes(d[at..at + 4].try_into().unwrap()) as usize;
+    let (mut w, mut h, mut ch) = (0usize, 0usize, 0usize);
+    let mut z = Vec::new();
+    let mut at = 8;
+    while at + 8 <= d.len() {
+        let n = be(at);
+        let kind = &d[at + 4..at + 8];
+        let body = d.get(at + 8..at + 8 + n).ok_or_else(|| crate::Error::Format("png: short chunk".into()))?;
+        match kind {
+            b"IHDR" => {
+                w = u32::from_be_bytes(body[0..4].try_into().unwrap()) as usize;
+                h = u32::from_be_bytes(body[4..8].try_into().unwrap()) as usize;
+                ch = match (body[8], body[9], body[12]) {
+                    (8, 6, 0) => 4,
+                    (8, 2, 0) => 3,
+                    _ => return bad(format!("png: depth {} colour type {} interlace {} not read", body[8], body[9], body[12])),
+                };
+            }
+            b"IDAT" => z.extend_from_slice(body),
+            b"IEND" => break,
+            _ => {}
+        }
+        at += 12 + n;
+    }
+    if w == 0 || h == 0 || w > 8192 || h > 8192 {
+        return bad("png: no image header");
+    }
+    let raw = miniz_oxide::inflate::decompress_to_vec_zlib(&z).map_err(|e| crate::Error::Format(format!("png: zlib: {e:?}")))?;
+    let stride = w * ch;
+    if raw.len() < h * (stride + 1) {
+        return bad("png: short image data");
+    }
+    let mut out = vec![0u8; h * stride];
+    for y in 0..h {
+        let f = raw[y * (stride + 1)];
+        let src = &raw[y * (stride + 1) + 1..(y + 1) * (stride + 1)];
+        for x in 0..stride {
+            let a = if x >= ch { out[y * stride + x - ch] as i32 } else { 0 };
+            let b = if y > 0 { out[(y - 1) * stride + x] as i32 } else { 0 };
+            let c = if x >= ch && y > 0 { out[(y - 1) * stride + x - ch] as i32 } else { 0 };
+            let pred = match f {
+                0 => 0,
+                1 => a,
+                2 => b,
+                3 => (a + b) / 2,
+                4 => {
+                    let p = a + b - c;
+                    let (pa, pb, pc) = ((p - a).abs(), (p - b).abs(), (p - c).abs());
+                    if pa <= pb && pa <= pc {
+                        a
+                    } else if pb <= pc {
+                        b
+                    } else {
+                        c
+                    }
+                }
+                _ => return bad(format!("png: filter {f}")),
+            };
+            out[y * stride + x] = (src[x] as i32 + pred) as u8;
+        }
+    }
+    let px = out.chunks(ch).map(|p| if ch == 4 { [p[0], p[1], p[2], p[3]] } else { [p[0], p[1], p[2], 255] }).collect();
+    Ok(Image { w, h, px })
+}
+
 /// Decodes a DDS (no DX10 header; the top mip level).
 pub fn decode_dds(d: &[u8]) -> Result<Image> {
     if d.len() < 128 || &d[0..4] != b"DDS " || u32le(d, 4) != 124 {
@@ -257,6 +328,28 @@ pub fn quantise(img: &Image) -> ([[u8; 4]; 256], Vec<u8>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn png_rgba_filters() {
+        // 2 × 2 RGBA, row 0 filter 1 (Sub), row 1 filter 2 (Up).
+        let raw: Vec<u8> = vec![1, 10, 20, 30, 255, 5, 5, 5, 0, 2, 1, 1, 1, 1, 2, 2, 2, 2];
+        let z = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6);
+        let chunk = |kind: &[u8], body: &[u8]| -> Vec<u8> {
+            let mut c = (body.len() as u32).to_be_bytes().to_vec();
+            c.extend_from_slice(kind);
+            c.extend_from_slice(body);
+            c.extend([0, 0, 0, 0]);
+            c
+        };
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend(chunk(b"IHDR", &[0, 0, 0, 2, 0, 0, 0, 2, 8, 6, 0, 0, 0]));
+        png.extend(chunk(b"IDAT", &z));
+        png.extend(chunk(b"IEND", &[]));
+        let img = decode_png(&png).unwrap();
+        assert_eq!((img.w, img.h), (2, 2));
+        assert_eq!(img.px, vec![[10, 20, 30, 255], [15, 25, 35, 255], [11, 21, 31, 0], [17, 27, 37, 1]]);
+        assert!(decode_png(&png[..20]).is_err());
+    }
+
     use super::*;
 
     fn dds_header(w: u32, h: u32, fourcc: Option<&[u8; 4]>) -> Vec<u8> {

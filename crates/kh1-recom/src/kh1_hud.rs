@@ -110,6 +110,56 @@ impl Motion {
     }
 }
 
+/// H4: the command menu look's groups (`kh1_recom_assets::kh1_hud::menu`).
+pub mod menu {
+    /// Header frame, title, row, last row, selection, icons a / b / c: a look's groups.
+    pub const HEADER: u32 = 0;
+    /// Title.
+    pub const TITLE: u32 = 1;
+    /// A row's frame.
+    pub const ROW: u32 = 2;
+    /// The last row.
+    pub const ROW_LAST: u32 = 3;
+    /// The selection.
+    pub const SEL: u32 = 4;
+    /// Icon a (Attack); b, c follow.
+    pub const ICON: u32 = 5;
+    /// Groups a look; the battle look follows the field's.
+    pub const LOOK: u32 = 8;
+    /// The title turning red (played from frame 1).
+    pub const TITLE_TO_BATTLE: u32 = 2 * LOOK;
+    /// The Magic list's header, title, row, last row, selection, icon.
+    pub const MAGIC: u32 = 2 * LOOK + 1;
+    /// KH1's root list origin (`0x14027B870`: (0x10, 0x104)), its header's height and row pitch,
+    /// the selection's offset, the words' offsets (`0x140278B40`, `0x14027A920` adds (16, 2)).
+    pub const HEADER_H: f32 = 20.0;
+    /// Row pitch.
+    pub const PITCH: f32 = 22.0;
+    /// The selection's (x, y) from the list origin + 22 c.
+    pub const SEL_AT: (f32, f32) = (11.0, 18.0);
+    /// A row's word from the list origin + 22 i.
+    pub const WORD_AT: (f32, f32) = (16.0, 22.0);
+    /// The cursor row's word.
+    pub const SEL_WORD_AT: (f32, f32) = (29.0, 25.0);
+}
+
+/// The menu groups of the manifest.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MenuGroups {
+    /// First group.
+    pub first: u32,
+    /// (language, [(message id, group)]).
+    pub words: Vec<(String, Vec<(u16, u32)>)>,
+}
+
+impl MenuGroups {
+    /// The group of word `id` in `lang`, else in "us".
+    pub fn word(&self, lang: &str, id: u16) -> Option<u32> {
+        let find = |l: &str| self.words.iter().find(|w| w.0 == l).and_then(|w| w.1.iter().find(|x| x.0 == id)).map(|x| x.1);
+        find(lang).or_else(|| find("us"))
+    }
+}
+
 /// What `kh1-hud.json` says.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Manifest {
@@ -119,6 +169,8 @@ pub struct Manifest {
     pub languages: Vec<String>,
     /// The motion units (H2b).
     pub motion: Motion,
+    /// The command menu look (H4), when built.
+    pub menu: Option<MenuGroups>,
 }
 
 /// Reads `kh1-hud.json`; refuses another format or group count than this DLL's.
@@ -166,7 +218,30 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
             _ => return Err("a bad run".into()),
         }
     }
-    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs } })
+    let menu = match v.get("menu") {
+        None => None,
+        Some(m) => {
+            let first = m.get("first").and_then(|x| x.as_u32()).ok_or("menu without first")?;
+            if first + menu::MAGIC + 6 > groups {
+                return Err("menu groups past the set".into());
+            }
+            let mut words = Vec::new();
+            for lang in ["us", "uk", "fr", "gr", "it", "sp"] {
+                if let Some(a) = m.get("words").and_then(|w| w.get(lang)).and_then(|x| x.as_array()) {
+                    let mut list = Vec::new();
+                    for e in a {
+                        match nums(e).as_deref() {
+                            Some(&[id, g]) if g < groups && id <= u16::MAX as u32 => list.push((id as u16, g)),
+                            _ => return Err("a bad menu word".into()),
+                        }
+                    }
+                    words.push((lang.to_string(), list));
+                }
+            }
+            Some(MenuGroups { first, words })
+        }
+    };
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu })
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -371,6 +446,12 @@ mod tests {
         assert!(parse_manifest(&ok.replace("[639, 5]", "[639, 6]")).is_err());
         assert!(parse_manifest(&ok.replace("vibe_ss", "vibe_xx")).is_err());
         assert!(parse_manifest(&ok.replace("hud 2", "hud 1")).is_err());
+        assert_eq!(m.menu, None);
+        let with = ok.replace("\"languages\"", "\"menu\": {\"first\": 630, \"words\": {\"us\": [[1, 643], [6, 642]], \"fr\": [[1, 641]]}}, \"languages\"");
+        assert!(parse_manifest(&with).is_err(), "menu groups before the fixed ones would run past");
+        let with = with.replace("\"groups\": 644", "\"groups\": 700");
+        let mm = parse_manifest(&with).unwrap().menu.unwrap();
+        assert_eq!((mm.word("fr", 1), mm.word("fr", 6), mm.word("gr", 1), mm.word("us", 2)), (Some(641), Some(642), Some(643), None));
         assert!(parse_manifest(&ok.replace("kh1hud:00", "Cockpit:00")).is_err());
     }
 

@@ -34,10 +34,10 @@ pub const FORMAT: &str = "kh1-recom-assets command-menu 1";
 pub const LANGUAGES: &[(&str, &str)] = &[("us", "US_"), ("uk", "UK_"), ("fr", "FR_"), ("gr", "GR_"), ("it", "IT_"), ("sp", "SP_")];
 
 /// The KH1 command names the menu shows (message ids, the command records' `+4`). Checked (files:
-/// the owner's `btltbl.bin` command table): 1 Attack, 2 Magic, 3 Items, 4 Talk, 7..27 the spells
+/// the owner's `btltbl.bin` command table): 1 Attack, 2 Magic, 3 Items, 4 Talk, 6 Summon (H4), 7..27 the spells
 /// (`level + (spell + 2) × 3`, named by their own id), 28 Lift (command 0x1C), 294 Open (0x37),
 /// 305 the blank command (0x42), 313 Jump On (0x45), 343 Counter (0x63, the Counterattack).
-pub const NAMES: &[u16] = &[1, 2, 3, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 294, 305, 313, 343];
+pub const NAMES: &[u16] = &[1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 294, 305, 313, 343];
 
 /// Our groups after the MP bar's (`mp_bar::group::COUNT`): the plate, the highlighted plate.
 pub mod group {
