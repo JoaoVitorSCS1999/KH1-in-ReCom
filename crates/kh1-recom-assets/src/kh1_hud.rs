@@ -69,10 +69,20 @@ pub const G_ENM: &str = "exchange/UK_uibin_g_enm.bin";
 pub const LEV_S: &str = "exchange/UK_uibin_lev_s.bin";
 /// The party's gauges (slots 1, 2; loader `0x140268800`).
 pub const G_C: &str = "exchange/UK_uibin_g_c.bin";
-/// KH1 PC's menu font (font 1 of the table `0x1404D9150`, the command words `0x14027A920` →
-/// `0x1402D1CD0`): `Image/dt/Theater` `<lang>/font/menufont.tm2` (2048 × 2048 32-bit), `.cod`
-/// (8-byte glyphs: code, x, y, 0, width), `.inf` (count, size, cell). Checked (files).
-pub const FONT_FILES: [&str; 3] = ["uk/font/menufont.tm2", "uk/font/menufont.cod", "uk/font/menufont.inf"];
+/// KH1's menu words font: the system font `menu/<lang>/sysfont.bin` drawn through its PC texture
+/// `<LANG>_sysfont_bin0.dds` (1024 × 1024; the same file for every Western language, Checked
+/// (files)), glyphs from `exchange/US_font_data_tbl.bin` (`0x1402D1570` loads it for every
+/// language but Japanese / FM; 16-byte entries "3s 2c 3s": `+2` u, `+4` v in 1/16 PS2 texels
+/// (+8), `+6` advance (PS2 texels), `+7` page: low nibble 512 PC texels right, high nibble 512
+/// down; `+8` the character (U+FF01..FF5E = ASCII); Checked (files + decomp `0x1402D2050`)).
+/// Not the PC `menufont` of `Theater` (H4 used it: square "A"; the owner's KH1 screenshot shows
+/// this font, 2026-11-01). Drawn at size 14 over the 18-texel base (`0x14054534C`,
+/// `0x140545344`): "Attack" advances 57 texels = 44.3 units (44.5 on the owner's screenshot).
+pub const SYSFONT: &str = "menu/us/sysfont.bin";
+/// Its PC texture's name.
+pub const SYSFONT_HD: &str = "US_sysfont_bin0.dds";
+/// The glyph table.
+pub const FONT_TABLE: &str = "exchange/US_font_data_tbl.bin";
 /// The party's model files whose section 2 is the face strip: Sora (Checked (files)), Donald
 /// and Goofy (Checked (files: their 48 × 48 faces in the owner's dump)).
 pub const FACES: [&str; 3] = ["xa_ex_0010.mdls", "xa_ex_0040.mdls", "xa_ex_0050.mdls"];
@@ -238,10 +248,62 @@ impl Pic {
         }
         p
     }
-    fn blit(&mut self, src: &Pic, x: usize, y: usize) {
-        for j in 0..src.h {
-            let o = (y + j) * self.w + x;
-            self.px[o..o + src.w].copy_from_slice(&src.px[j * src.w..(j + 1) * src.w]);
+    /// A copy whose clear texels take the colour of the covered texels beside them (`passes`
+    /// texels deep; alpha unchanged). The PC atlas is filtered: a clear texel's colour (black or
+    /// white in the pictures) leaked into the edges of the art as a dark or light fringe, which
+    /// showed as lines where two pieces meet (the rings' quarters). Coverage stays as KH1's.
+    fn bled(&self, passes: usize) -> Pic {
+        let mut p = self.clone();
+        let (w, h) = (p.w, p.h);
+        let mut known: Vec<bool> = p.px.iter().map(|t| t[3] != 0).collect();
+        for _ in 0..passes {
+            let mut next = known.clone();
+            let mut out = p.px.clone();
+            for y in 0..h {
+                for x in 0..w {
+                    if known[y * w + x] {
+                        continue;
+                    }
+                    let mut sum = [0u32; 3];
+                    let mut n = 0u32;
+                    for (dx, dy) in [(-1i64, 0i64), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                        let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                        if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                            continue;
+                        }
+                        let i = ny as usize * w + nx as usize;
+                        if known[i] {
+                            for c in 0..3 {
+                                sum[c] += p.px[i][c] as u32;
+                            }
+                            n += 1;
+                        }
+                    }
+                    if n > 0 {
+                        let o = &mut out[y * w + x];
+                        for c in 0..3 {
+                            o[c] = ((sum[c] + n / 2) / n) as u8;
+                        }
+                        next[y * w + x] = true;
+                    }
+                }
+            }
+            p.px = out;
+            known = next;
+        }
+        p
+    }
+    /// [`Pic::blit`] plus `g` texels of the source's edge copied around it (the caller keeps
+    /// that margin free).
+    fn blit_padded(&mut self, src: &Pic, x: usize, y: usize, g: usize) {
+        for j in 0..src.h + 2 * g {
+            for i in 0..src.w + 2 * g {
+                let (tx, ty) = (x + i, y + j);
+                if tx < g || ty < g || tx - g >= self.w || ty - g >= self.h {
+                    continue;
+                }
+                self.px[(ty - g) * self.w + tx - g] = src.at(i as i64 - g as i64, j as i64 - g as i64);
+            }
         }
     }
 }
@@ -413,38 +475,51 @@ fn render(fan: &[[i32; 4]], wedge: Option<&[[i32; 4]; 3]>, src: &Pic, src_scale:
     let area = |t: &([i32; 4], [i32; 4], [i32; 4], bool)| (t.1[0] - t.0[0]) as i64 * (t.2[1] - t.0[1]) as i64 - (t.1[1] - t.0[1]) as i64 * (t.2[0] - t.0[0]) as i64;
     // The last triangle that has an area (KH1 repeats the end vertex when it is a 45° step).
     let last = (0..tris.len()).rev().find(|&k| area(&tris[k]) != 0).unwrap_or(0);
+    // The sample points of a texel: its centre (as the GS samples), and for the PC pictures
+    // (s > 1) also its corners: a texel any of them finds inside the fan is drawn. The PC atlas
+    // is filtered and Re:CoM draws the pieces at screen resolution, so a texel cut at a radial
+    // edge must still cover it: neighbouring pieces then overlap by up to a texel (the same art
+    // in both) instead of leaving a clear line (owner: "the bars are all choppy", 2026-11-01).
+    let offs: &[(f64, f64)] = if s > 1 { &[(0.0, 0.0), (-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)] } else { &[(0.0, 0.0)] };
     for j in 0..h as usize * s {
         for i in 0..w as usize * s {
-            let px = (x0 as f64 + (i as f64 + 0.5) / s as f64 - 0.5) * 16.0;
-            let py = (y0 as f64 + (j as f64 + 0.5) / s as f64 - 0.5) * 16.0;
-            for (k, &(c, a, b, soft)) in tris.iter().enumerate() {
-                // Barycentric weights of a and b over the triangle (c, a, b).
-                let det = ((a[0] - c[0]) as f64) * ((b[1] - c[1]) as f64) - ((a[1] - c[1]) as f64) * ((b[0] - c[0]) as f64);
-                if det == 0.0 {
-                    continue;
+            'texel: for (n, &(ox, oy)) in offs.iter().enumerate() {
+                let px = (x0 as f64 + (i as f64 + 0.5 + ox) / s as f64 - 0.5) * 16.0;
+                let py = (y0 as f64 + (j as f64 + 0.5 + oy) / s as f64 - 0.5) * 16.0;
+                for (k, &(c, a, b, soft)) in tris.iter().enumerate() {
+                    // Barycentric weights of a and b over the triangle (c, a, b).
+                    let det = ((a[0] - c[0]) as f64) * ((b[1] - c[1]) as f64) - ((a[1] - c[1]) as f64) * ((b[0] - c[0]) as f64);
+                    if det == 0.0 {
+                        continue;
+                    }
+                    let la = ((px - c[0] as f64) * (b[1] - c[1]) as f64 - (py - c[1] as f64) * (b[0] - c[0]) as f64) / det;
+                    let lb = ((a[0] - c[0]) as f64 * (py - c[1] as f64) - (a[1] - c[1]) as f64 * (px - c[0] as f64)) / det;
+                    let lc = 1.0 - la - lb;
+                    const E: f64 = 1e-9;
+                    if la < -E || lb < -E || lc < -E {
+                        continue;
+                    }
+                    // The last radial edge (c → b of the last triangle, where la = 0) is outside
+                    // for the centre (pieces meeting there don't overlap on PS2).
+                    if n == 0 && k == last && la <= E {
+                        continue;
+                    }
+                    let u = lc * c[2] as f64 + la * a[2] as f64 + lb * b[2] as f64;
+                    let v = lc * c[3] as f64 + la * a[3] as f64 + lb * b[3] as f64;
+                    let tu = (u * src_scale as f64 / 16.0).floor() as i64;
+                    let tv = (v * src_scale as f64 / 16.0).floor() as i64;
+                    let mut t = src.at(tu, tv);
+                    if soft {
+                        // Gouraud alpha: 1 at c and a, 0 at b (the GS's vertex alpha × texel alpha / 128).
+                        t[3] = ((t[3] as f64) * (1.0 - lb).clamp(0.0, 1.0)).round() as u8;
+                    }
+                    if t[3] == 0 && n + 1 < offs.len() {
+                        // A clear texel from a corner: try the other points.
+                        continue 'texel;
+                    }
+                    p.px[j * w as usize * s + i] = t;
+                    break 'texel;
                 }
-                let la = ((px - c[0] as f64) * (b[1] - c[1]) as f64 - (py - c[1] as f64) * (b[0] - c[0]) as f64) / det;
-                let lb = ((a[0] - c[0]) as f64 * (py - c[1] as f64) - (a[1] - c[1]) as f64 * (px - c[0] as f64)) / det;
-                let lc = 1.0 - la - lb;
-                const E: f64 = 1e-9;
-                if la < -E || lb < -E || lc < -E {
-                    continue;
-                }
-                // The last radial edge (c → b of the last triangle, where la = 0) is outside.
-                if k == last && la <= E {
-                    continue;
-                }
-                let u = lc * c[2] as f64 + la * a[2] as f64 + lb * b[2] as f64;
-                let v = lc * c[3] as f64 + la * a[3] as f64 + lb * b[3] as f64;
-                let tu = (u * src_scale as f64 / 16.0).floor() as i64;
-                let tv = (v * src_scale as f64 / 16.0).floor() as i64;
-                let mut t = src.at(tu, tv);
-                if soft {
-                    // Gouraud alpha: 1 at c and a, 0 at b (the GS's vertex alpha × texel alpha / 128).
-                    t[3] = ((t[3] as f64) * (1.0 - lb).clamp(0.0, 1.0)).round() as u8;
-                }
-                p.px[j * w as usize * s + i] = t;
-                break;
             }
         }
     }
@@ -629,6 +704,48 @@ fn fit_layouts(atlas: &mut Atlas, groups: &[Group], raw: &[usize]) -> usize {
     fixed
 }
 
+/// Gives every texel rect drawn from a whole picture (`raw`) an atlas box of its own, so the
+/// atlas's edge copies (see [`build_atlas`]) sit around exactly what each piece shows. With the
+/// rect inside a whole picture, the PC atlas's filtering mixed each piece's edge with the
+/// texels beside it there (mostly clear), which showed as thin seams where pieces meet (the
+/// straight bars' segments, the rings' quarters; owner: "the bars are all choppy",
+/// 2026-11-01). Pictures no piece draws from any more become 1 × 1. Returns the boxes made.
+fn split_raw(atlas: &mut Atlas, groups: &mut [Group], raw: &[usize]) -> usize {
+    use std::collections::BTreeMap;
+    let mut made: BTreeMap<(usize, [i32; 4]), usize> = BTreeMap::new();
+    for g in groups.iter_mut() {
+        for st in g.steps.iter_mut() {
+            for p in st.pieces.iter_mut().filter(|p| raw.contains(&p.item)) {
+                let key = (p.item, p.uv);
+                let item = match made.get(&key) {
+                    Some(&i) => i,
+                    None => {
+                        let [u0, v0, u1, v1] = p.uv;
+                        let (w, h) = ((u1 - u0).max(1) as usize, (v1 - v0).max(1) as usize);
+                        let (u0, v0) = (u0.max(0) as usize, v0.max(0) as usize);
+                        let (ps2, hds, s) = &atlas.items[p.item];
+                        let s = *s;
+                        let ps2c = ps2.crop(u0, v0, w, h);
+                        let hdc: Vec<Pic> = hds.iter().map(|hd| hd.crop(u0 * s, v0 * s, w * s, h * s)).collect();
+                        let i = atlas.add(ps2c, hdc, s);
+                        made.insert(key, i);
+                        i
+                    }
+                };
+                p.item = item;
+                let [u0, v0, u1, v1] = p.uv;
+                p.uv = [0, 0, (u1 - u0).max(1), (v1 - v0).max(1)];
+            }
+        }
+    }
+    for &r in raw {
+        let s = atlas.items[r].2;
+        let n = atlas.items[r].1.len();
+        atlas.items[r] = (Pic::blank(1, 1), vec![Pic::blank(s, s); n], s);
+    }
+    made.len()
+}
+
 /// The built atlases: the PS2 one and the PC one per language, and each item's places.
 struct Packed {
     ps2: Pic,
@@ -647,11 +764,14 @@ fn build_atlas(a: &Atlas, langs: usize) -> Result<Packed> {
     let mut ps2 = Pic::blank(pw, ph);
     let mut hd = vec![Pic::blank(hw, hh); langs];
     for (k, (p, h, _)) in a.items.iter().enumerate() {
-        // One texel of gap around each box (the PC atlas is filtered).
-        ps2.blit(p, ps2_slots[k].0 + 1, ps2_slots[k].1 + 1);
+        // One texel of gap around each box (the PC atlas is filtered), holding copies of the
+        // box's edge texels so filtering at a piece's edge never mixes in a neighbour or clear
+        // texels (pieces that meet join without a seam).
+        ps2.blit_padded(&p.bled(2), ps2_slots[k].0 + 1, ps2_slots[k].1 + 1, 1);
+        let hb: Vec<Pic> = h.iter().map(|x| x.bled(4)).collect();
         for (l, atlas) in hd.iter_mut().enumerate() {
-            let pic = if h.len() == 1 { &h[0] } else { &h[l] };
-            atlas.blit(pic, hd_slots[k].0 + 2, hd_slots[k].1 + 2);
+            let pic = if hb.len() == 1 { &hb[0] } else { &hb[l] };
+            atlas.blit_padded(pic, hd_slots[k].0 + 2, hd_slots[k].1 + 2, 2);
         }
     }
     let ps2_slots = ps2_slots.iter().map(|s| (s.0 + 1, s.1 + 1, s.2 - 2, s.3 - 2)).collect();
@@ -939,8 +1059,8 @@ pub struct MenuSources<'a> {
     pub com_battle: &'a [u8],
     /// `mag`.
     pub mag: &'a [u8],
-    /// The menu font (`menufont.tm2`, `.cod`, `.inf`).
-    pub font: [&'a [u8]; 3],
+    /// The system font's PC texture (`US_sysfont_bin0.dds`) and glyph table.
+    pub font: [&'a [u8]; 2],
     /// (language, [(message id, word)]) as `command_menu::words` decodes them.
     pub words: Vec<(String, Vec<(u16, String)>)>,
 }
@@ -1325,9 +1445,14 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         }
         None => None,
     };
+    let mut party5 = None;
     // H6: Donald's and Goofy's gauges, full (Re:CoM's friends have no HP or MP).
     let party_built = match src.g_c {
-        Some(gc) => Some(party::build(gc, [it6, bk.src5_item(&mut atlas, &pics[p5], &pic_langs[p5])], [faces[1], faces[2]], [src.faces[1].ps2.h as i32, src.faces[2].ps2.h as i32], &mut groups)?),
+        Some(gc) => Some(party::build(gc, [it6, {
+            let i = bk.src5_item(&mut atlas, &pics[p5], &pic_langs[p5]);
+            party5 = Some(i);
+            i
+        }], [faces[1], faces[2]], [src.faces[1].ps2.h as i32, src.faces[2].ps2.h as i32], &mut groups)?),
         None => None,
     };
     // H8: KH1's LEVEL UP!! box (`lev_s`, pictures 3 and 1).
@@ -1340,7 +1465,9 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     raw.extend(&faces);
     raw.extend(&mp);
     raw.extend(cursor_item);
+    raw.extend(party5);
     let refit = fit_layouts(&mut atlas, &groups, &raw);
+    split_raw(&mut atlas, &mut groups, &raw);
     let packed = build_atlas(&atlas, langs.len())?;
     let base = seqd(&groups, &packed, false)?;
     let hd = seqd(&groups, &packed, true)?;
@@ -1618,12 +1745,17 @@ pub mod menu {
     pub const BATTLE_PANEL: [i32; 3] = [109, 30, 32];
     /// The battle selection plate's colour.
     pub const BATTLE_SEL: [i32; 3] = [216, 109, 100];
-    /// The menu font's size over its cell: KH1 draws font 1 at size 14 (`0x14054534C`) in units;
-    /// the PC font's cells are 32 texels: 14 / 32 units a texel. Assumption (strong: "Attack"
-    /// measures 43 units on the owner's KH1 screenshot, 96 texels of advances × 14 / 32 = 42).
-    pub const FONT_UNITS: f32 = 14.0 / 32.0;
-    /// A space's advance (texels): the font has no glyph for it. Assumption.
-    pub const SPACE: i32 = 9;
+    /// Units a PC font texel: size 14 over the 18-texel base, PC texels 2 a PS2 texel.
+    pub const FONT_UNITS: f32 = 14.0 / 36.0;
+    /// A space's advance (PC texels): KH1's space is 5 base texels (`0x142E954F0` = 5,
+    /// `0x1402E0000` area; drawn as 5 × size / base, `0x1402D2050` case 1).
+    pub const SPACE: i32 = 10;
+    /// A glyph cell (PC texels): 18 × 24 PS2 texels.
+    pub const CELL: (usize, usize) = (36, 48);
+    /// The cell's top in the word (units): KH1 draws from the cell's top; the 48-texel cell is
+    /// drawn 19 units tall (18.7). The caps' middle at 8 units, where the H4 words had it
+    /// (Assumption: placed by eye against the owner's screenshot).
+    pub const CELL_DY: i32 = -2;
 
     /// The built menu: its first group and the words' groups.
     #[derive(Clone, Debug)]
@@ -1638,69 +1770,73 @@ pub mod menu {
         pub missing: Vec<char>,
     }
 
-    /// The menu font: its 32-bit picture and glyphs (code → x, y, width).
+    /// The menu font: its PC picture and glyphs (character → x, y, advance in PC texels).
     pub struct Font {
-        w: usize,
-        px: Vec<[u8; 4]>,
-        cell: usize,
+        pic: Pic,
         glyphs: std::collections::BTreeMap<u32, (usize, usize, usize)>,
     }
 
-    /// Reads `menufont.tm2` / `.cod` / `.inf`.
-    pub fn font(tm2: &[u8], cod: &[u8], inf: &[u8]) -> Result<Font> {
-        let u16at = |d: &[u8], at: usize| d.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]]) as usize);
-        let (w, h) = (u16at(inf, 2).unwrap_or(0), u16at(inf, 4).unwrap_or(0));
-        let cell = *inf.get(6).unwrap_or(&0) as usize;
-        if &tm2.get(..4).unwrap_or(&[]) != b"TIM2" || tm2.len() < 0x40 || cell == 0 {
-            return bad("menufont: not a TIM2 / no cell size");
+    /// Reads the system font's PC texture (DDS) and `US_font_data_tbl.bin`.
+    pub fn font(dds: &[u8], tbl: &[u8]) -> Result<Font> {
+        let img = decode_dds(dds)?;
+        let pic = Pic { w: img.w, h: img.h, px: img.px.iter().map(|p| [p[0], p[1], p[2], p[3]]).collect() };
+        if pic.w != 1024 || pic.h != 1024 || tbl.len() % 16 != 0 || tbl.is_empty() {
+            return bad(format!("sysfont: PC texture {}×{} (1024 × 1024 expected), table {} bytes", pic.w, pic.h, tbl.len()));
         }
-        let hs = u16at(tm2, 0x1C).unwrap_or(0);
-        let (tw, th, kind) = (u16at(tm2, 0x24).unwrap_or(0), u16at(tm2, 0x26).unwrap_or(0), tm2[0x23]);
-        if kind != 3 || tw != w || th != h || 0x10 + hs + w * h * 4 > tm2.len() {
-            return bad(format!("menufont.tm2: {tw}×{th} type {kind}, .inf says {w}×{h} 32-bit"));
-        }
-        let px = tm2[0x10 + hs..0x10 + hs + w * h * 4].chunks(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
+        let (cw, ch) = CELL;
         let mut glyphs = std::collections::BTreeMap::new();
-        for e in cod.chunks_exact(8) {
-            let code = u16::from_le_bytes([e[0], e[1]]) as u32;
-            let (x, y) = (u16::from_le_bytes([e[2], e[3]]) as usize, u16::from_le_bytes([e[4], e[5]]) as usize);
-            if x + cell <= w && y + cell <= h {
-                glyphs.insert(code, (x, y, e[7] as usize));
+        for e in tbl.chunks_exact(16) {
+            let u = u16::from_le_bytes([e[2], e[3]]) as usize;
+            let v = u16::from_le_bytes([e[4], e[5]]) as usize;
+            let (adv, page) = (e[6] as usize, e[7] as usize);
+            let mut c = u16::from_le_bytes([e[8], e[9]]) as u32;
+            if (0xFF01..=0xFF5E).contains(&c) {
+                c -= 0xFEE0;
+            }
+            if u < 8 || v < 8 || c == 0 {
+                continue;
+            }
+            let x = (u - 8) / 16 * 2 + (page & 15) * 512;
+            let y = (v - 8) / 16 * 2 + (page >> 4) * 512;
+            if x + cw <= pic.w && y + ch <= pic.h {
+                glyphs.entry(c).or_insert((x, y, adv * 2));
             }
         }
-        Ok(Font { w, px, cell, glyphs })
+        if !glyphs.contains_key(&('A' as u32)) {
+            return bad("sysfont: no glyph for A in the table");
+        }
+        Ok(Font { pic, glyphs })
     }
 
     impl Font {
         /// A glyph's cell: the PS2-size picture (half) and the PC one.
         fn cell_pics(&self, x: usize, y: usize) -> (Pic, Pic) {
-            let c = self.cell;
-            let mut hd = Pic::blank(c, c);
-            for j in 0..c {
-                for i in 0..c {
-                    hd.px[j * c + i] = self.px[(y + j) * self.w + x + i];
-                }
-            }
-            let h = c / 2;
-            let mut ps2 = Pic::blank(h, h);
-            for j in 0..h {
-                for i in 0..h {
+            let (cw, ch) = CELL;
+            let mut hd = self.pic.crop(x, y, cw, ch);
+            let (hw, hh) = (cw / 2, ch / 2);
+            let mut ps2 = Pic::blank(hw, hh);
+            for j in 0..hh {
+                for i in 0..hw {
                     let mut a = [0u32; 4];
                     for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-                        let p = hd.px[(2 * j + dy) * c + 2 * i + dx];
+                        let p = hd.px[(2 * j + dy) * cw + 2 * i + dx];
                         for k in 0..4 {
                             a[k] += p[k] as u32;
                         }
                     }
-                    ps2.px[j * h + i] = a.map(|v| ((v + 2) / 4) as u8);
+                    ps2.px[j * hw + i] = a.map(|v| ((v + 2) / 4) as u8);
                 }
             }
-            // The PC atlas holds full-range RGB (KH1's and Re:CoM's PC pictures); the font's texels
-            // are PS2-range (0x80 = white, Checked (files)): doubled for the PC copy.
+            // PS2 alpha (0x80 = opaque) in both; the PC picture's grey glyphs (0x80) are drawn
+            // white by KH1's ×2 vertex colour: doubled for the PC copy (as KH1's PC pictures).
+            for p in ps2.px.iter_mut() {
+                p[3] = ((p[3] as u32 * 128 + 127) / 255) as u8;
+            }
             for p in hd.px.iter_mut() {
                 for k in 0..3 {
-                    p[k] = (p[k] as u32 * 255 / 128).min(255) as u8;
+                    p[k] = (p[k] as u32 * 2).min(255) as u8;
                 }
+                p[3] = ((p[3] as u32 * 128 + 127) / 255) as u8;
             }
             (ps2, hd)
         }
@@ -1804,7 +1940,7 @@ pub mod menu {
         groups.push(held1(vec![mpiece(&m[16], p1, 0, 0, 0, None)]));
         debug_assert_eq!(groups.len() - first, g::WORDS);
         // Words: KH1's menu font, a glyph a part, at the font's size.
-        let f = font(ms.font[0], ms.font[1], ms.font[2])?;
+        let f = font(ms.font[0], ms.font[1])?;
         let mut glyph_item: std::collections::BTreeMap<u32, usize> = Default::default();
         let mut missing = Vec::new();
         let mut words = Vec::new();
@@ -1826,9 +1962,9 @@ pub mod menu {
                         atlas.add(ps2, vec![hd], 2)
                     });
                     let x0 = x.round() as i32;
-                    let size = (f.cell as f32 * FONT_UNITS).round() as i32;
-                    let half = (f.cell / 2) as i32;
-                    pieces.push(Piece { item, uv: [0, 0, half, half], rect: [x0, 0, x0 + size, size], colour: 0x8080_8080, grad: 0 });
+                    let (cw, ch) = CELL;
+                    let (sw, sh) = ((cw as f32 * FONT_UNITS).round() as i32, (ch as f32 * FONT_UNITS).round() as i32);
+                    pieces.push(Piece { item, uv: [0, 0, (cw / 2) as i32, (ch / 2) as i32], rect: [x0, CELL_DY, x0 + sw, CELL_DY + sh], colour: 0x8080_8080, grad: 0 });
                     x += w as f32 * FONT_UNITS;
                 }
                 list.push((*id, groups.len()));
@@ -2385,7 +2521,7 @@ mod tests {
         let uitex_hd = assets("command2/uitex.bin.hd");
         let (com, com_battle, mag) = (rd("exchange/UK_uibin_com.bin"), rd("exchange/UK_com_battle.bin"), rd("exchange/UK_uibin_mag.bin"));
         let (lock, g_enm) = (rd("exchange/UK_uibin_lock.bin"), rd("exchange/UK_uibin_g_enm.bin"));
-        let fonts: Vec<Vec<u8>> = FONT_FILES.iter().map(|f| rd(&format!("fonts/{f}"))).collect();
+        let fonts: Vec<Vec<u8>> = vec![rd(&format!("fonts/menu/us/sysfont.bin.hd/{SYSFONT_HD}")), rd("fonts/exchange/US_font_data_tbl.bin")];
         let src = Sources {
             uitex: &rd("command2/uitex.bin"),
             uitex_hd: &uitex_hd,
@@ -2400,7 +2536,7 @@ mod tests {
                 com: &com,
                 com_battle: &com_battle,
                 mag: &mag,
-                font: [&fonts[0], &fonts[1], &fonts[2]],
+                font: [&fonts[0], &fonts[1]],
                 words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into())])],
             }),
             faces: [face("xa_ex_0010.mdls", 0xA2E80), face("xa_ex_0040.mdls", 0x75600), face("xa_ex_0050.mdls", 0x8D400)],

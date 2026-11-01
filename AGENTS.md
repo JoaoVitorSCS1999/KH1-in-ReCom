@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 71: KH1 HUD polish: KH1's menu font, fourth row, no seams, version 0.34.0 (2026-10-31)
+
+- Ask (owner, 2026-11-01): "the bars are all choppy, the text is wrong, theres no bottom row to the
+  command menu, lets fix this".
+- Words: KH1's system font (`sysfont` PC texture + `exchange/US_font_data_tbl.bin`), not
+  `Theater`'s `menufont`; "Attack" 44.3 units (44.5 on the owner's screenshot). Checked (files +
+  decomp `0x1402D1570`, `0x1402D2050`). Vertical place by eye: Assumption.
+- Fourth row: KH1's look always draws root row 3 (context command, else "Summon" greyed) with
+  the last-row frame (DLL `win/command_menu.rs` `with_summon_row`).
+- Seams: own atlas boxes for every rect drawn from a whole picture, clear texels take their
+  neighbours' colour, the PC ring quarters cover their cut edges. Checked: offline bilinear
+  render of the bake. Not seen in game.
+
+---
+
 ## Stage 70: KH1 HUD: straight HP bar drawn without brackets, version 0.33.1 (2026-10-31)
 
 - Ask (owner, 2026-11-01): "for some reason the hp is segmented".

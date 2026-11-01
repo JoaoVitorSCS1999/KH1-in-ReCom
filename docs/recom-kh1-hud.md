@@ -529,3 +529,29 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
   the PS2 texels at 2× (nearest). On the owner's files: 40 rects (picture 5's three straight
   segments, picture 7's two HP back segments, the HP cap and two MP pieces, 5 languages);
   faces, rings, labels and the menu pictures keep the PC art. `KH1_HUD_REFIT_LOG=1` lists them.
+
+## Polish pass (0.34.0, owner 2026-11-01: "the bars are all choppy, the text is wrong, theres no bottom row to the command menu")
+
+- **Words font.** KH1's command words use the system font: `menu/<lang>/sysfont.bin` through its
+  PC texture `<LANG>_sysfont_bin0.dds` (1024 × 1024, one file for every Western language),
+  glyphs from `exchange/US_font_data_tbl.bin` (`0x1402D1570` loads it unless Japanese / FM).
+  Entries are 16 bytes: `+2` u and `+4` v in 1/16 PS2 texels (+8), `+6` advance, `+7` page (low
+  nibble: 512 PC texels right; high nibble: 512 down), `+8` the character (U+FF01..FF5E =
+  ASCII). Drawn at size 14 over the 18-texel base (`0x14054534C`, `0x140545344`); space 5 base
+  texels (`0x142E954F0`). "Attack" = 57 texels = 44.3 units, 44.5 on the owner's KH1 screenshot.
+  Checked (files + decomp + screenshot). H4's `Theater` `menufont` was the wrong font (square "A").
+  The glyph cell is 36 × 48 PC texels, drawn 14 × 19 units, 2 units up (placed by eye:
+  Assumption).
+- **Fourth row.** KH1's look always draws the root's row 3 as the last row (`com_fra_d`): the
+  context command when there is one, else "Summon" greyed (M8 brings summons). 7.3's rules are
+  unchanged; only the drawing adds the row.
+- **Seams.** Three causes, all in how the PC atlas is filtered:
+  (1) pieces drawn from inside a whole picture mixed in the clear texels around their rect:
+  every such rect now has its own atlas box;
+  (2) clear texels' colour (black / white) leaked into edges: clear texels now take their
+  covered neighbours' colour (alpha unchanged);
+  (3) the baked ring quarters left their cut edge's texels clear (GS centre sampling): the PC
+  copies now take a texel if its centre or any corner is inside the fan, so neighbouring
+  pieces overlap by up to a texel.
+  Checked by an offline bilinear render of the bake (no seam left at the quarters or at the
+  bar's join).

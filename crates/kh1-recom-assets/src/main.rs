@@ -502,7 +502,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     }
     let lrefs: Vec<&str> = langs.iter().map(String::as_str).collect();
     let menu = match &menu_files {
-        Ok(m) => Some(kh::MenuSources { com: &m.com, com_battle: &m.com_battle, mag: &m.mag, font: [&m.font[0], &m.font[1], &m.font[2]], words: m.words.clone() }),
+        Ok(m) => Some(kh::MenuSources { com: &m.com, com_battle: &m.com_battle, mag: &m.mag, font: [&m.font[0], &m.font[1]], words: m.words.clone() }),
         Err(e) => {
             println!("note: KH1 HUD: no KH1 command menu look: {e}");
             None
@@ -551,7 +551,7 @@ struct MenuFiles {
     com: Vec<u8>,
     com_battle: Vec<u8>,
     mag: Vec<u8>,
-    font: [Vec<u8>; 3],
+    font: [Vec<u8>; 2],
     words: Vec<(String, Vec<(u16, String)>)>,
 }
 
@@ -560,12 +560,10 @@ fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_for
     use kh1_recom_assets::kh1_hud as kh;
     let rd = |n: &str| inst.read(n).map_err(|e| format!("{n}: {e}"));
     let (com, com_battle, mag) = (rd(kh::COM)?, rd(kh::COM_BATTLE)?, rd(kh::MAG)?);
-    let theater = kh1_formats::egs::Archive::open(game.join("Image").join("dt").join("Theater.hed")).map_err(|e| format!("Image/dt/Theater.hed: {e}"))?;
-    let mut font = Vec::new();
-    for n in kh::FONT_FILES {
-        font.push(theater.read(keys, n).map_err(|e| format!("Theater {n}: {e}"))?);
-    }
-    let font: [Vec<u8>; 3] = font.try_into().map_err(|_| "font")?;
+    let _ = (game, keys);
+    let (_, sys_assets, _) = inst.read_full(kh::SYSFONT).map_err(|e| format!("{}: {e}", kh::SYSFONT))?;
+    let dds = sys_assets.iter().find(|a| a.name.eq_ignore_ascii_case(kh::SYSFONT_HD)).ok_or_else(|| format!("{}: no PC asset {}", kh::SYSFONT, kh::SYSFONT_HD))?.data.clone();
+    let font = [dds, rd(kh::FONT_TABLE)?];
     let (_, assets, _) = inst.read_full("btltbl.bin").map_err(|e| format!("btltbl.bin: {e}"))?;
     let mut words = Vec::new();
     for (lang, prefix) in cm::LANGUAGES {

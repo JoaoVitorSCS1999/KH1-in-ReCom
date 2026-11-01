@@ -351,6 +351,7 @@ impl Ui {
         if self.hidden {
             return;
         }
+        let sc = &with_summon_row(sc);
         let dim = sc.rows.iter().any(|r| r.list == Kind::Magic);
         let same = self.shown.as_ref().is_some_and(|s| s.same_rows(sc)) && self.look.as_ref().is_some_and(|l| l.battle == battle && l.dim == dim);
         if same {
@@ -526,6 +527,27 @@ impl Ui {
         }
         self.shown = Some(sc.clone());
     }
+}
+
+/// KH1's look always shows the root's fourth row: KH1 with summons draws "Summon" there (the
+/// owner's KH1 screenshot, 2026-11-01), and the context command slides in over it. Without a
+/// context command (and the cursor elsewhere) 7.3's scene leaves row 3 out (KH1 without summons,
+/// `0x14027B870`); here it is added as the last row, its word "Summon" greyed until summons come
+/// (M8). Owner ask 2026-11-01: "theres no bottom row to the command menu".
+fn with_summon_row(sc: &Scene) -> Scene {
+    let mut s = sc.clone();
+    let has = |k: u8| s.rows.iter().position(|r| r.list == Kind::Root && r.index == k);
+    if let (Some(i2), None) = (has(2), has(3)) {
+        let mut r = s.rows[i2];
+        r.index = 3;
+        r.y += cm::PITCH;
+        r.name = 0;
+        r.highlight = false;
+        r.bright = cm::BRIGHT_GREY as u8;
+        r.tab = false;
+        s.rows.insert(i2 + 1, r);
+    }
+    s
 }
 
 /// H4: the KH1 look's groups when the KH1 HUD is up and its menu look was built.
