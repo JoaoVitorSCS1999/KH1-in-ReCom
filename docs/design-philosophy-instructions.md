@@ -302,6 +302,9 @@ At KH1 setting:
     target turns to the best enemy within 5 m: a wrapper on Re:CoM's homing step for our balls);
     **spell hits use KH1's element resistances only** (no Re:CoM % on top).
 
+37. M7 (owner, 2026-10-31): **Fire re-picks exactly as KH1** (only balls cast with no target; a
+    dead target means the ball flies straight); **Thunder's 50 % world dim is left out**.
+
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.
