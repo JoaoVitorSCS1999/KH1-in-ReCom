@@ -366,8 +366,9 @@ pub fn equipped_weapon() -> WeaponData {
 }
 
 /// KH1's damage for a spell (M7 stage 7.4: `crate::magic::spell_damage`, power + max MP) on this
-/// enemy's twin or proxy, or None (Re:CoM's number stands).
-pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32) -> Option<i32> {
+/// enemy's twin or proxy, or None (Re:CoM's number stands). `hp`: the enemy's current HP (KH1's
+/// for twins and proxies, `+0x274`), which Gravity's % reads (7.8; `resist[8]` is its scale).
+pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32, hp: i32) -> Option<i32> {
     let t = match twin(enemy) {
         Some((_, t)) => t.clone(),
         None if !riku_story() => proxied(enemy)?,
@@ -377,7 +378,7 @@ pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32) -> 
     for (r, v) in resist.iter_mut().zip(t.resist.iter()) {
         *r = *v as f32 / 100.0;
     }
-    let def = kh1_core::DefenderStats { hp: t.hp, max_hp: t.hp, defence: t.defence, level: t.level, min_damage: t.min_damage, max_damage: t.max_damage, resist, ..Default::default() };
+    let def = kh1_core::DefenderStats { hp: hp.max(0), max_hp: t.hp, defence: t.defence, level: t.level, min_damage: t.min_damage, max_damage: t.max_damage, resist, hp_percent_scale: resist[8], ..Default::default() };
     let mut g = RNG.lock().ok()?;
     let rng = g.get_or_insert_with(|| kh1_core::Kh1Rand::new(1));
     Some(crate::magic::spell_damage(data, max_mp, &def, rng))

@@ -1248,3 +1248,45 @@ fn a_cure_cut_before_36_heals_nothing_and_an_air_cure_hops() {
     assert_eq!(p.ours.rec.head(), crate::magic::cast_req::CURE_AIR);
     assert!((p.ours.arc.rise + crate::magic::AIR_HOP).abs() < 1e-3);
 }
+
+// ---- M7 stage 7.8: Gravity ----
+
+#[test]
+fn ground_gravity_releases_at_28_and_frees_sora_at_68() {
+    use crate::magic::{cast_req, CastEvent, MagicCommand};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = step_cast(&mut p, Pad::default(), Some(MagicCommand { spell: 4, level: 2 }));
+    assert_eq!(out.cast.first(), Some(&CastEvent::Started { spell: 4, level: 2, fast: false, air: false }));
+    assert_eq!(p.ours.rec.head(), cast_req::GRAVITY);
+    let mut rel = None;
+    let mut free_at = None;
+    for k in 1..100 {
+        let out = step_cast(&mut p, Pad::default(), None);
+        if let Some(CastEvent::Released { frame, .. }) = out.cast.iter().find(|e| matches!(e, CastEvent::Released { .. })) {
+            rel = Some((k, *frame));
+        }
+        if free_at.is_none() && !p.ours.lock {
+            free_at = Some(k);
+        }
+    }
+    // `L009e2(28)`: the sphere 28 frames after the command; Sora free from the motion's key (68).
+    assert_eq!(rel, Some((29, 28.0)));
+    assert_eq!(p.recom.releases.len(), 1);
+    assert!(matches!(free_at, Some(68) | Some(69)), "{free_at:?}");
+    assert_eq!(p.recom.cast_ends, 1);
+    // A Gravity cut before 28 casts nothing (no sphere, no MP).
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(MagicCommand { spell: 4, level: 1 }));
+    for _ in 0..20 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = p.ours.frame(&mut p.recom, &FrameInput::default(), true);
+    assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Interrupted { .. })));
+    for _ in 0..20 {
+        assert!(!released(&step_cast(&mut p, Pad::default(), None)));
+    }
+}

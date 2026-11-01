@@ -631,7 +631,13 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
 /// = 0).
 unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64 {
     let max_mp = super::mp::current().map(|v| v.1);
-    let kh1 = crate::magic::spell_attack(s, lv).and_then(|data| max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m)));
+    let hp_now: i32 = rd(enemy + 0x274);
+    let mut kh1 = crate::magic::spell_attack(s, lv).and_then(|data| max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m, hp_now)));
+    // Gravity on an enemy without KH1 numbers (7.8): KH1's % of its current HP at 100 % (KH1's
+    // ordinary Heartless), at least 1. Re:CoM's own AP is no Gravity number.
+    if kh1.is_none() && s == crate::magic::spell::GRAVITY {
+        kh1 = max_mp.map(|m| crate::magic::gravity_damage(lv, m, hp_now, 1.0, 0));
+    }
     let attr: u32 = rd(part + super::magic::PART_ATTR);
     if let Some(d) = kh1 {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);

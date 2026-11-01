@@ -41,10 +41,10 @@ pub mod spell {
     pub const NAMES: [&str; 7] = ["fire", "blizzard", "thunder", "cure", "gravity", "stop", "aero"];
 }
 
-/// Spells cast so far (Fire 7.4, Blizzard 7.5, Thunder 7.6, Cure 7.7; Gravity … Aero: 7.8–7.10,
+/// Spells cast so far (Fire 7.4, Blizzard 7.5, Thunder 7.6, Cure 7.7, Gravity 7.8; Stop, Aero: 7.9–7.10,
 /// each its own rows and script numbers).
 pub fn castable(s: u8) -> bool {
-    matches!(s, spell::FIRE | spell::BLIZZARD | spell::THUNDER | spell::CURE)
+    matches!(s, spell::FIRE | spell::BLIZZARD | spell::THUNDER | spell::CURE | spell::GRAVITY)
 }
 
 /// A spell's MP cost (its data's `+0x30`, the same at every level): charge units below 100,
@@ -71,6 +71,10 @@ pub mod cast_req {
     /// Cure's one cast motion (`0x36 + 3`, `0x83 + 3`; entries 56 / 81, Thunder's). Checked (files).
     pub const CURE: u16 = 0x39;
     pub const CURE_AIR: u16 = 0x86;
+    /// Gravity's one cast motion (`0x36 + 4`, `0x83 + 4`; entries 55 / 80, Blizzard's). Checked
+    /// (files).
+    pub const GRAVITY: u16 = 0x3A;
+    pub const GRAVITY_AIR: u16 = 0x87;
 
     /// The first cast motion a spell's normal cast plays: `0x1402A3DB0` plays `0x36 + spell`
     /// (Fire: `0x36` then `0x3D`), the air branch of `0x1402A3600` `0x83 + spell` (Fire: `0x83`
@@ -128,6 +132,11 @@ pub fn recom_base_row(s: u8, level: u8) -> Option<usize> {
         (spell::CURE, 1) => Some(0x25),
         (spell::CURE, 2) => Some(0x36),
         (spell::CURE, 3) => Some(0x37),
+        // Gravity 0x26 (set 18), Gravira 0x38 (19), Graviga 0x39 (20): `initStockSkill`'s sleights
+        // 0x11 / 0x18. Checked (exe: clip 0x3A, sets 18–20 of `grav_all`).
+        (spell::GRAVITY, 1) => Some(0x26),
+        (spell::GRAVITY, 2) => Some(0x38),
+        (spell::GRAVITY, 3) => Some(0x39),
         _ => None,
     }
 }
@@ -323,6 +332,7 @@ pub fn spell_attack(s: u8, level: u8) -> Option<AttackData> {
         spell::FIRE => Some(fire_attack(level)),
         spell::BLIZZARD => Some(blizzard_attack(level)),
         spell::THUNDER => Some(thunder_attack(level)),
+        spell::GRAVITY => Some(gravity_attack(level)),
         // Cure heals (Re:CoM's amounts, decision 34): no hit, no damage.
         _ => None,
     }
@@ -489,6 +499,181 @@ pub fn cure_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
     b
 }
 
+/// KH1's Gravity (`xm_gravity01..03.mag`, decoded with `magdis.py`: one script, the level passes
+/// (final scale, fall frames) = (1.0, 60) / (1.5, 70) / (1.6, 60); Checked (files), the syscalls in
+/// the KH1 decomp):
+///
+/// - the command (`L008cc`): the charge effect on the Keyblade; the marker thread (`0x25A`, 28
+///   frames): the point is the target's part if it is alive, else the caster's position + **200 cm
+///   along his facing** (taken at the command); the sphere's start is that point **240 cm up**
+///   (`ind+0x4` = −230, then −10); **wait 28** (`L009e2(ind+0x1c = 28)`); the release check
+///   (`0x3A` / `0x87`, else end: no spell, no MP); the falling thread (`0x21`); **the MP** (sys 47,
+///   100); the hand effect;
+/// - the fall (`0x44..0x16C`): the sphere starts at scale 0.01 and falls **230 cm** over N = 60 /
+///   70 / 60 frames, its scale growing linearly to S = 1.0 / 1.5 / 1.6; each frame the enemies whose
+///   bodies touch a sphere of **170 × the current scale** are slowed (`L0055c`: `actor+0x88 |= 4`);
+/// - the impact (`L0044c`, the run after the N-th): **one direct strike** (sys 23 + 60) on every
+///   enemy whose bodies touch a sphere of **170 × S** cm (170 / 255 / 272) at the sphere's centre
+///   (sys 90 type 1); then the sphere grows × 1.02 a frame while it fades for 20 frames.
+///
+/// Damage (`0x1402BFA80`, element 8): `current HP × (power + 5 × max MP)% × resist[8]`, raised to
+/// the record's floor (at least 1); no Defence, no cap. Power 40 / 55 / 70 (btltbl `0x6468` /
+/// `0x64D8` / `0x6548`, stat source 5). Checked (files + decomp).
+pub mod gravity {
+    pub const WAIT: f32 = 28.0;
+    /// The hit sphere's radius at scale 1, cm.
+    pub const RADIUS: f32 = 170.0;
+    /// The fall, cm, and the start above the marker point (230 + 10).
+    pub const FALL: f32 = 230.0;
+    pub const START_UP: f32 = 240.0;
+    /// With no target: the marker point this far along the caster's facing, cm.
+    pub const AHEAD: f32 = 200.0;
+    /// The start scale and, per level, the final scale and the fall's frames.
+    pub const START_SCALE: f32 = 0.01;
+    pub const SCALE: [f32; 3] = [1.0, 1.5, 1.6];
+    pub const FRAMES: [f32; 3] = [60.0, 70.0, 60.0];
+    /// The fade after the impact: frames, growth a frame.
+    pub const FADE: f32 = 20.0;
+    pub const FADE_GROWTH: f32 = 1.02;
+    /// MP cost (data `+0x30` = 100): one whole point.
+    pub const COST: i32 = crate::mp::cost::GRAVITY;
+
+    /// A level's (final scale, fall frames).
+    pub fn of(level: u8) -> (f32, f32) {
+        let i = level.clamp(1, 3) as usize - 1;
+        (SCALE[i], FRAMES[i])
+    }
+
+    /// The impact's hit radius, Re:CoM metres (170 × S cm).
+    pub fn impact_radius_m(level: u8) -> f32 {
+        RADIUS * of(level).0 / 100.0
+    }
+
+    /// The sphere's scale `t` frames into the fall (linear, `sp+0x24` a frame).
+    pub fn scale_at(level: u8, t: f32) -> f32 {
+        let (s, n) = of(level);
+        START_SCALE + (s - START_SCALE) * (t / n).clamp(0.0, 1.0)
+    }
+}
+
+/// The falling thread's clock (`xm_gravity01.mag` `0x44..`): the release's run counts the first
+/// frame; each later run counts one more until the N-th; the run after it is the impact.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fall {
+    pub left: f32,
+    pub total: f32,
+}
+
+impl Fall {
+    /// The release frame's run (the first of the fall).
+    pub fn new(level: u8) -> Fall {
+        let n = gravity::of(level).1;
+        Fall { left: n - 1.0, total: n }
+    }
+
+    /// One later run: true when it is the impact (the fall's frames are over).
+    pub fn run(&mut self, step: f32) -> bool {
+        if self.left <= 0.0 {
+            return true;
+        }
+        self.left -= step;
+        false
+    }
+
+    /// Frames fallen so far.
+    pub fn fallen(&self) -> f32 {
+        self.total - self.left.max(0.0)
+    }
+}
+
+/// KH1's Gravity attack data (btltbl `0x6468` / `0x64D8` / `0x6548`, Checked (files)): power 40 / 55
+/// / 70 + **max MP × 5** (stat source 5), element 8 (the % of HP path), kind 8, struck directly.
+pub fn gravity_attack(level: u8) -> AttackData {
+    let power = [40, 55, 70][level.clamp(1, 3) as usize - 1];
+    AttackData {
+        stat_source: 5,
+        element: 8,
+        kind_party: 8,
+        kind: 8,
+        bone: -1,
+        power_party: power,
+        mp_charge: 0,
+        clash: 6,
+        priority: 0,
+        recoil_request: 110,
+        power,
+        radius: 0.0,
+        ..Default::default()
+    }
+}
+
+/// Re:CoM's Gravity rows 0x26 / 0x38 / 0x39 as in the Steam exe (clip 0x3A, effect sets 18 / 19 /
+/// 20 of `grav_all`, release `+3` 32, its sphere's radius 1.5 m, speed 0.05, kind 0xD). Checked
+/// (exe).
+pub const RECOM_GRAVITY_ROWS: [[u8; 16]; 3] = [
+    [0x3A, 0x00, 0x12, 0x20, 0x96, 0x04, 0x00, 0x00, 0x00, 0x05, 0x00, 0x0D, 0x08, 0x0A, 0x32, 0x00],
+    [0x3A, 0x00, 0x13, 0x20, 0x96, 0x06, 0x00, 0x00, 0x00, 0x05, 0x00, 0x0D, 0x08, 0x14, 0x32, 0x00],
+    [0x3A, 0x00, 0x14, 0x20, 0x96, 0x08, 0x00, 0x00, 0x00, 0x05, 0x00, 0x0D, 0x08, 0x1E, 0x32, 0x00],
+];
+
+/// The KH1 Gravity row: Re:CoM's row (clip, blend, `grav_all` set, its sphere's `+5` / `+0xD`:
+/// decision 34) with `+3` = 0, **`+0xB` = 1** (Re:CoM's flinch: Re:CoM's kind 0xD is its own %-of-HP
+/// damage with an integer % and a 3-second squash, `0x14017DC50` / state `+0xAC0`; KH1's number
+/// is written as the hit's value instead) and `+0xF` = 0x80.
+pub fn gravity_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
+    let mut b = *recom;
+    b[3] = 0;
+    b[0xB] = 1;
+    b[0xF] |= FLAG_KH1;
+    b
+}
+
+/// KH1's Gravity on an enemy (`0x1402BFA80` element 8): current HP × (power + 5 × max MP)% ×
+/// resist[8], at least the floor (1 when the floor is under 2).
+pub fn gravity_damage(level: u8, max_mp: i32, hp: i32, resist8: f32, floor: u16) -> i32 {
+    let def = DefenderStats { hp, max_hp: hp, min_damage: floor, hp_percent_scale: resist8, ..Default::default() };
+    spell_damage(&gravity_attack(level), max_mp, &def, &mut Kh1Rand::new(1))
+}
+
+/// An area KH1's sys 90 tests a body against (Re:CoM metres): a vertical cylinder (type 2: radius,
+/// half-height) or a sphere (type 1: radius).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Area {
+    Cylinder { radius: f32, half: f32 },
+    Sphere { radius: f32 },
+}
+
+/// The distance from a point to an area around `centre` (0 inside).
+fn area_distance(p: [f32; 3], centre: [f32; 3], a: Area) -> f32 {
+    match a {
+        Area::Cylinder { radius, half } => cylinder_distance(p, centre, radius, half),
+        Area::Sphere { radius } => {
+            let d = [p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]];
+            ((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() - radius).max(0.0)
+        }
+    }
+}
+
+/// Whether a hurt body touches an area (its shape's nearest point within its radius).
+pub fn body_touches(centre: [f32; 3], area: Area, body: &BodyShape) -> bool {
+    match *body {
+        BodyShape::Sphere { c, r } => area_distance(c, centre, area) <= r,
+        BodyShape::Column { a, b, r } => {
+            let at = |t: f32| area_distance([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t], centre, area);
+            let (mut lo, mut hi) = (0.0f32, 1.0f32);
+            for _ in 0..40 {
+                let (m1, m2) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+                if at(m1) <= at(m2) {
+                    hi = m2;
+                } else {
+                    lo = m1;
+                }
+            }
+            at(0.0).min(at(1.0)).min(at((lo + hi) * 0.5)) <= r
+        }
+    }
+}
+
 /// A Re:CoM hurt body's shape as the area test sees it (metres): a sphere (kind 2: centre `+0x20`,
 /// its y + `+0x74`, radius `+0x70`) or a column (kinds 4 / 5: from `+0x10` to `+0x20`, each y +
 /// `+0x74`, radius `+0x70`), as Re:CoM's own primitives `0x1401777E0` / `0x140176FA0` read them.
@@ -511,23 +696,7 @@ fn cylinder_distance(p: [f32; 3], centre: [f32; 3], radius: f32, half: f32) -> f
 /// shape's nearest point to the cylinder within its radius. The distance from a segment's points
 /// to a convex solid is convex along it, so a ternary search finds the column's nearest point.
 pub fn body_in_area(centre: [f32; 3], body: &BodyShape) -> bool {
-    let (radius, half) = (thunder::RADIUS / 100.0, thunder::HALF_HEIGHT / 100.0);
-    match *body {
-        BodyShape::Sphere { c, r } => cylinder_distance(c, centre, radius, half) <= r,
-        BodyShape::Column { a, b, r } => {
-            let at = |t: f32| cylinder_distance([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t], centre, radius, half);
-            let (mut lo, mut hi) = (0.0f32, 1.0f32);
-            for _ in 0..40 {
-                let (m1, m2) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
-                if at(m1) <= at(m2) {
-                    hi = m2;
-                } else {
-                    lo = m1;
-                }
-            }
-            at(0.0).min(at(1.0)).min(at((lo + hi) * 0.5)) <= r
-        }
-    }
+    body_touches(centre, Area::Cylinder { radius: thunder::RADIUS / 100.0, half: thunder::HALF_HEIGHT / 100.0 }, body)
 }
 
 /// KH1's strike list (`L0069c`): the first 30 enemies with their distance from `from`, sorted
@@ -665,7 +834,7 @@ pub fn fire_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
 /// Re:CoM's rows of the spells built so far, by spell (`[spell][level − 1]`), as in the Steam exe:
 /// the templates of the KH1 rows.
 pub fn recom_rows() -> Vec<[[u8; 16]; 3]> {
-    vec![RECOM_FIRE_ROWS, RECOM_BLIZZARD_ROWS, RECOM_THUNDER_ROWS, RECOM_CURE_ROWS]
+    vec![RECOM_FIRE_ROWS, RECOM_BLIZZARD_ROWS, RECOM_THUNDER_ROWS, RECOM_CURE_ROWS, RECOM_GRAVITY_ROWS]
 }
 
 /// The KH1 magic rows, `[spell × 3 + level − 1]` (21; the spells built so far), from Re:CoM's rows
@@ -680,6 +849,7 @@ pub fn kh1_magic_table(recom: &[[[u8; 16]; 3]]) -> Vec<[u8; 16]> {
                 spell::BLIZZARD => blizzard_row_bytes(r, lv),
                 spell::THUNDER => thunder_row_bytes(r),
                 spell::CURE => cure_row_bytes(r),
+                spell::GRAVITY => gravity_row_bytes(r),
                 _ => [0; 16],
             };
         }
@@ -773,6 +943,10 @@ pub fn add_motions(m: &mut MotionSet) {
     // (files: requests 0x39 / 0x86 map to them).
     m.add(&[cast_req::CURE], MotionInfo::new(68.0));
     m.add(&[cast_req::CURE_AIR], MotionInfo::new(68.0));
+    // Gravity (7.8): Blizzard's entries 55 / 80 (86 / 78 frames, free from 68, no root travel).
+    // Checked (files: requests 0x3A / 0x87 map to them).
+    m.add(&[cast_req::GRAVITY], MotionInfo::new(86.0).with_flag(FlagKind::Free, 68.0, inf));
+    m.add(&[cast_req::GRAVITY_AIR], MotionInfo::new(78.0).with_flag(FlagKind::Free, 68.0, inf));
 }
 
 /// Whether a KH1 request is one of the cast motions Re:CoM's magic action plays.
@@ -802,6 +976,7 @@ pub fn release_wait(s: u8) -> f32 {
         spell::BLIZZARD => blizzard::WAIT,
         spell::THUNDER => thunder::WAIT,
         spell::CURE => cure::WAIT,
+        spell::GRAVITY => gravity::WAIT,
         _ => 0.0,
     }
 }

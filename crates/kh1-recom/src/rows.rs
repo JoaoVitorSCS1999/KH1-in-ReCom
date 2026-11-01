@@ -200,6 +200,10 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         // 0x39); KH1's entries 56 / 81 have no root travel.
         crate::magic::cast_req::CURE => row::THUNDER,
         crate::magic::cast_req::CURE_AIR => row::THUNDER_AIR,
+        // Gravity (M7 stage 7.8): Re:CoM's Gravity rows play Blizzard's clip (row 0x26's `+0` =
+        // 0x3A); KH1's entries 55 / 80 have no root travel.
+        crate::magic::cast_req::GRAVITY => row::BLIZZARD,
+        crate::magic::cast_req::GRAVITY_AIR => row::BLIZZARD_AIR,
         _ => return None,
     };
     Some((r, false))
@@ -296,6 +300,10 @@ mod tests {
         assert_eq!(row_for(0x39, &s, &none), Some((0x39, false)));
         assert_eq!(row_for(0x86, &s, &none), Some((0x3D, false)));
         assert_eq!(crate::magic::RECOM_CURE_ROWS[0][0] as u32, row::THUNDER);
+        // Gravity: Re:CoM's row 0x26's clip (Blizzard's), + 4 in the air.
+        assert_eq!(row_for(0x3A, &s, &none), Some((0x3A, false)));
+        assert_eq!(row_for(0x87, &s, &none), Some((0x3E, false)));
+        assert_eq!(crate::magic::RECOM_GRAVITY_ROWS[0][0] as u32, row::BLIZZARD);
     }
 
     #[test]

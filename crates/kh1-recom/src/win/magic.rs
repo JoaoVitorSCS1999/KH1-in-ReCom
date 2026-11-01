@@ -53,7 +53,27 @@ static THUNDER_CMD: Mutex<Option<(u32, [f32; 3])>> = Mutex::new(None);
 /// Thunder's strike threads while they run (KH1 runs each cast's thread to its end, so a second
 /// Thunder's runs beside the first's; at most 8), and a flag the per-frame check reads.
 static STRIKES: Mutex<Vec<ThunderRun>> = Mutex::new(Vec::new());
+/// Any spell thread is running (Thunder's strikes, Gravity's falls): the per-frame check reads it.
 static STRIKING: AtomicBool = AtomicBool::new(false);
+/// Gravity (7.8): what the command saw (the target's handle if it was an alive enemy, and the
+/// offset along Sora's facing used without one), for the release.
+static GRAVITY_CMD: Mutex<Option<(u32, [f32; 3])>> = Mutex::new(None);
+/// Gravity's falling threads while they run (at most 8).
+static FALLS: Mutex<Vec<GravityRun>> = Mutex::new(Vec::new());
+
+/// A Gravity cast's sphere in its fall.
+struct GravityRun {
+    fall: mg::Fall,
+    level: u8,
+    /// Re:CoM's sphere (its handle / shot id), and the impact's centre (the marker point + 0.1 m).
+    shot: u32,
+    centre: [f32; 3],
+    /// The sphere's effect scale at its spawn (Re:CoM's), the base of KH1's growth.
+    base_scale: Option<f32>,
+    kind: u32,
+    attr: u32,
+    ap: i32,
+}
 
 /// A Thunder cast's strikes in progress.
 struct ThunderRun {
@@ -364,6 +384,11 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
         // `initMagic` case 0x1D's charge: the set's effect id 0 on the Keyblade's bone 2.
         charge_on_weapon(pl, r, 0);
     }
+    if c.spell == mg::spell::GRAVITY {
+        // `initMagic` case 0x1E's charge (the set's `+0x30` entry) and KH1's marker point.
+        charge_on_weapon(pl, r, 0x18);
+        gravity_command(pl, r);
+    }
     wr(pl + f::RECOVERY, 0u32);
     // `+0x478` picks the air clips (+4) for Re:CoM's own readers; KH1's motion requests choose
     // the clip here.
@@ -399,8 +424,278 @@ pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
         mg::spell::BLIZZARD => release_blizzard(pl, c),
         mg::spell::THUNDER => release_thunder(pl, c),
         mg::spell::CURE => release_cure(pl, c),
+        mg::spell::GRAVITY => release_gravity(pl, c),
         _ => None,
     }
+}
+
+/// Re:CoM's Gravity case's descriptor `+0xB8` (`lea rax,[0x1407C78D0]`). Checked (disasm
+/// `0x140222B09`).
+const GRAVITY_DESC_B8: u64 = 0x1_407C_78D0;
+/// Re:CoM's Gravity sphere flags (`mov qword [rbp−0x50],0x41E1`). Checked (disasm `0x140222AB7`).
+const GRAVITY_FLAGS: u64 = 0x41E1;
+/// A bullet's effect handle (the bullet init's `0x1401A2D50` result, `+0x244`); the effect
+/// object's scale `+0x10..+0x18` (the init writes `desc+0x90` there). Checked (decomp
+/// `0x140157E60`).
+const BULLET_EFFECT: usize = 0x244;
+const EFFECT_SCALE: usize = 0x10;
+
+/// Sora's position (body `+0x30`) and facing direction (Re:CoM's yaw: (sin, 0, cos)).
+unsafe fn sora_pos_dir(pl: usize) -> ([f32; 3], [f32; 3]) {
+    let b: usize = rd(pl + p::BODY);
+    let v = if b != 0 { rd_vec(b + 0x30) } else { kh1_core::Vec3::ZERO };
+    let ang = func::<AnglesFn>(ANGLES)(pl);
+    let yaw = if ang.is_null() { 0.0 } else { std::ptr::read_unaligned(ang)[1] };
+    ([v.x, v.y, v.z], [yaw.sin(), 0.0, yaw.cos()])
+}
+
+/// Gravity's command (`L0025a`): the target (Re:CoM's `+0x84C`) if it is an alive enemy, else the
+/// offset 2 m along Sora's facing (taken now, KH1's `sp+0x10`); Re:CoM's marker (its `initMagic`
+/// case 0x1E's effect id 2 of the set's `+0x30` entry) at KH1's sphere start.
+unsafe fn gravity_command(pl: usize, r: &[u8; 16]) {
+    let h: u32 = rd(pl + f::TARGET);
+    let (pos, dir) = sora_pos_dir(pl);
+    let ahead = mg::gravity::AHEAD / 100.0;
+    let off = [dir[0] * ahead, 0.0, dir[2] * ahead];
+    let (h, point) = match alive_enemy(h) {
+        Some(e) => (h, aim_point(e)),
+        None => (0, [pos[0] + off[0], pos[1], pos[2] + off[2]]),
+    };
+    if let Ok(mut g) = GRAVITY_CMD.lock() {
+        *g = Some((h, off));
+    }
+    let up = mg::gravity::START_UP / 100.0;
+    effect_at(pl, set_name(r, 0x18), 2, [point[0], point[1] + up, point[2], 1.0]);
+}
+
+/// Re:CoM's `0x1401A6B20(actor, name, id, &position, &angles, 0.0)` with Sora's angles (the
+/// Gravity case's hand effect, `initMagic`'s marker).
+unsafe fn effect_at(pl: usize, name: usize, id: u32, at: [f32; 4]) {
+    type EffectFn = unsafe extern "win64" fn(usize, usize, u32, *const [f32; 4], u64, f32) -> i32;
+    let ang = func::<AnglesFn>(ANGLES)(pl);
+    if name == 0 || ang.is_null() {
+        return;
+    }
+    let ang: [f32; 4] = std::ptr::read_unaligned(ang);
+    func::<EffectFn>(EFFECT_AT)(pl, name, id, &at, &ang as *const [f32; 4] as u64, 0.0);
+}
+
+/// KH1's Gravity release (7.8, `xm_gravity01.mag`): the marker point now (the target's aim point
+/// if it is still alive, else Sora + the command's offset), **Re:CoM's Gravity case**
+/// (`0x140222170` case `0x26`, Checked (disasm `0x1402229E0..0x140222B90`)) with KH1's numbers: its
+/// hand effect (id 1), its sphere (`CHomingBullet`, flags `0x41E1`, `+0xB8` = `0x1407C78D0`, the
+/// row's set / `+5` / `+0xD`) **2.4 m above the point, pitched straight down, falling 2.3 m over
+/// N frames** (speed 2.3 / N m a frame, no target: no homing), its attack held off (as 7.6's
+/// bolts: KH1 strikes at the impact, not on contact), life N + 2 frames; the falling thread
+/// ([`gravity_frame`]); then the MP (one point). The sphere's id.
+unsafe fn release_gravity(pl: usize, c: &CastStart) -> Option<u32> {
+    let r = row(c.spell, c.level)?;
+    let (h, off) = GRAVITY_CMD.lock().ok().and_then(|mut g| g.take()).unwrap_or((0, [0.0; 3]));
+    let point = match alive_enemy(h) {
+        Some(e) => aim_point(e),
+        None => {
+            let (pos, _) = sora_pos_dir(pl);
+            [pos[0] + off[0], pos[1], pos[2] + off[2]]
+        }
+    };
+    let up = mg::gravity::START_UP / 100.0;
+    let fall = mg::gravity::FALL / 100.0;
+    let start = [point[0], point[1] + up, point[2], 1.0];
+    let centre = [point[0], point[1] + up - fall, point[2]];
+    let (_, n) = mg::gravity::of(c.level);
+    // The hand effect (id 1 of the set's `+0x30` entry at the hand point).
+    let body: usize = rd(pl + p::BODY);
+    let mut hand = [0f32; 4];
+    if body != 0 {
+        let b = rd_vec(body + 0x30);
+        hand = [b.x, b.y, b.z, 1.0];
+    }
+    func::<PlOutFn>(HAND_POINT)(pl, &mut hand);
+    effect_at(pl, set_name(r, 0x18), 1, hand);
+    let ang = func::<AnglesFn>(ANGLES)(pl);
+    let ang: [f32; 4] = if ang.is_null() { [0.0; 4] } else { std::ptr::read_unaligned(ang) };
+    let mut d = Desc([0; 0x100]);
+    let dp = d.0.as_mut_ptr();
+    func::<DescInitFn>(DESC_INIT)(dp, 2, 3);
+    let w = |o: usize| dp.add(o);
+    let (kind, attr, ap): (u32, u32, i32) = (rd(pl + f::KIND), rd(pl + f::ATTR), rd(pl + f::AP));
+    std::ptr::write_unaligned(w(0x68) as *mut u32, kind);
+    std::ptr::write_unaligned(w(0x6C) as *mut u32, attr);
+    std::ptr::write_unaligned(w(0x70) as *mut i32, ap);
+    std::ptr::write_unaligned(w(0x0C) as *mut u32, 0x8000_0000);
+    std::ptr::write_unaligned(w(0x60) as *mut u64, GRAVITY_FLAGS | 4 | COLLISION_HELD);
+    std::ptr::write_unaligned(w(0x8C) as *mut i32, HELD_TICKS);
+    std::ptr::write_unaligned(w(0x30) as *mut f32, fall / n);
+    std::ptr::write_unaligned(w(0x34) as *mut f32, r[0xC] as f32);
+    std::ptr::write_unaligned(w(0x3C) as *mut i32, ((n + 2.0) * 50.0) as i32);
+    std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], start);
+    std::ptr::write_unaligned(w(0x1C) as *mut f32, r[5] as f32 * 0.01);
+    std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [std::f32::consts::FRAC_PI_2, ang[1], ang[2], ang[3]]);
+    std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), EFFECT_SETS) + r[2] as usize * 0x60);
+    std::ptr::write_unaligned(w(0xB8) as *mut usize, va(base(), GRAVITY_DESC_B8));
+    std::ptr::write_unaligned(w(0x78) as *mut f32, mg::gravity::impact_radius_m(c.level));
+    let factory = func::<FactoryFn>(FACTORY)();
+    if factory == 0 {
+        return None;
+    }
+    let bullet = func::<ManagerFn>(SHOT_MANAGER)(factory, dp, pl);
+    if bullet == 0 {
+        note(|| format!("release gravity{}: Re:CoM's shot manager made no sphere (no MP paid)", c.level));
+        return None;
+    }
+    func::<MoverFn>(SHOT_MOVER)(bullet, r[0xD] as f32 * 0.01, 0.0, 0, -1);
+    hold_off(bullet);
+    let id: u32 = rd(bullet + 0x20);
+    remember_shot(id, c.spell, c.level, 0);
+    let run = GravityRun { fall: mg::Fall::new(c.level), level: c.level, shot: id, centre, base_scale: None, kind, attr, ap };
+    if let Ok(mut g) = FALLS.lock() {
+        if g.len() >= 8 {
+            g.remove(0);
+        }
+        g.push(run);
+        STRIKING.store(true, Ordering::Release);
+    }
+    // KH1 pays after the falling thread starts (sys 20, then sys 47).
+    super::mp::pay(mg::gravity::COST, "Gravity release");
+    note(|| format!("release gravity{}: sphere {id} from ({:.2},{:.2},{:.2}) falls {fall} m over {n} f to ({:.2},{:.2},{:.2}), impact radius {:.2} m, target {h:#x}", c.level, start[0], start[1], start[2], centre[0], centre[1], centre[2], mg::gravity::impact_radius_m(c.level)));
+    Some(id)
+}
+
+/// A shot's attack switched off for good (Re:CoM's own "off", vtable +8, as 7.6's bolts: the bullet
+/// init tests the held flag before it fills the count).
+unsafe fn hold_off(bullet: usize) {
+    let c: usize = rd(bullet + 0x2A8);
+    if c == 0 {
+        return;
+    }
+    let vt: usize = rd(c);
+    if rd::<usize>(vt + 8) == base() + COLL_OFF as usize {
+        func::<PlFn>(COLL_OFF)(c);
+    }
+}
+
+/// Re:CoM's apply (`CCollAttack` vtable `+0x38`) of a shot's attack on an enemy's first live hurt
+/// body: what Re:CoM's collision pass calls once its overlap test passes (7.6). Only through
+/// Re:CoM's own slots.
+unsafe fn apply_to(bullet: usize, enemy: usize) -> Option<u32> {
+    type ApplyFn = unsafe extern "win64" fn(usize, usize) -> u32;
+    let c: usize = rd(bullet + 0x2A8);
+    let b = bodies(enemy).first().map(|b| b.0)?;
+    if c == 0 {
+        return None;
+    }
+    let vt: usize = rd(c);
+    if rd::<usize>(vt + 8) != base() + COLL_OFF as usize || rd::<usize>(vt + 0x38) != base() + COLL_APPLY as usize {
+        return None;
+    }
+    func::<PlFn>(COLL_OFF)(c);
+    Some(func::<ApplyFn>(COLL_APPLY)(c, b))
+}
+
+/// Our shot by its id (Re:CoM's entity handle, `+0x20`, resolved by `0x1402AD350` as the apply
+/// resolves bodies' owners), if it is still one of Re:CoM's bullets.
+unsafe fn shot_object(id: u32) -> Option<usize> {
+    if id == 0 {
+        return None;
+    }
+    let o = func::<mv::HandleFn>(mv::HANDLE_OBJ)(id);
+    if o == 0 {
+        return None;
+    }
+    let vt: usize = rd(o);
+    let b = base();
+    (vt == va(b, crate::guard::bullet::HOMING_VTABLE) || vt == va(b, crate::guard::bullet::VTABLE)).then_some(o)
+}
+
+/// One run of Gravity's falling threads (Sora's frame start): the sphere's KH1 growth, and at the
+/// impact KH1's strikes (`L0044c`): every alive enemy whose bodies touch the 1.7 × S m sphere at the
+/// centre, struck once with the sphere's attack through Re:CoM's apply. If the sphere is gone
+/// (Re:CoM ended it on a wall), a held bolt like 7.6's carries the strikes.
+unsafe fn gravity_frame(pl: usize, step: f32) {
+    let mut due = Vec::new();
+    {
+        let Ok(mut g) = FALLS.lock() else { return };
+        for run in g.iter_mut() {
+            let impact = run.fall.run(step);
+            if let Some(o) = shot_object(run.shot) {
+                grow(o, run);
+            }
+            if impact {
+                due.push((run.shot, run.level, run.centre, run.kind, run.attr, run.ap));
+            }
+        }
+        g.retain(|r| !(r.fall.left <= 0.0 && due.iter().any(|d| d.0 == r.shot)));
+    }
+    for (shot, level, centre, kind, attr, ap) in due {
+        let area = mg::Area::Sphere { radius: mg::gravity::impact_radius_m(level) };
+        let carrier = shot_object(shot).or_else(|| carrier_at(pl, level, centre, kind, attr, ap));
+        let mut n = 0;
+        for (h, _) in lock_on_list(0, false) {
+            let Some(e) = alive_enemy(h) else { continue };
+            if !bodies(e).iter().any(|(_, b)| mg::body_touches(centre, area, b)) {
+                continue;
+            }
+            let res = carrier.and_then(|c| apply_to(c, e));
+            n += 1;
+            bolt_line(|| format!("gravity{level} impact on {h:#x}: Re:CoM's apply -> {res:?}"));
+        }
+        event(format!("impact gravity{level} shot {shot} n{n}"));
+    }
+}
+
+/// KH1's growth (scale 0.01 → S over the fall) on Re:CoM's sphere effect, from its own spawn scale.
+unsafe fn grow(bullet: usize, run: &mut GravityRun) {
+    type ObjFn = unsafe extern "win64" fn(u32) -> usize;
+    let h: u32 = rd(bullet + BULLET_EFFECT);
+    if h == 0 {
+        return;
+    }
+    let o = func::<ObjFn>(EFFECT_OBJECT)(h);
+    if o == 0 {
+        return;
+    }
+    let base = *run.base_scale.get_or_insert_with(|| {
+        let s: f32 = rd(o + EFFECT_SCALE);
+        if s > 0.0 && s < 100.0 {
+            s
+        } else {
+            1.0
+        }
+    });
+    let s = base * mg::gravity::scale_at(run.level, run.fall.fallen());
+    wr(o + EFFECT_SCALE, [s, s, s]);
+}
+
+/// A held strike carrier at the impact (when Re:CoM already ended the sphere): a `CBullet` of the
+/// row's set like 7.6's bolts, its attack off.
+unsafe fn carrier_at(pl: usize, level: u8, centre: [f32; 3], kind: u32, attr: u32, ap: i32) -> Option<usize> {
+    let r = row(mg::spell::GRAVITY, level)?;
+    let mut d = Desc([0; 0x100]);
+    let dp = d.0.as_mut_ptr();
+    func::<DescInitFn>(DESC_INIT)(dp, 1, 3);
+    let w = |o: usize| dp.add(o);
+    std::ptr::write_unaligned(w(0x68) as *mut u32, kind);
+    std::ptr::write_unaligned(w(0x6C) as *mut u32, attr);
+    std::ptr::write_unaligned(w(0x70) as *mut i32, ap);
+    std::ptr::write_unaligned(w(0x0C) as *mut u32, 0x8000_0000);
+    std::ptr::write_unaligned(w(0x60) as *mut u64, THUNDER_BOLT_FLAGS | COLLISION_HELD);
+    std::ptr::write_unaligned(w(0x8C) as *mut i32, HELD_TICKS);
+    std::ptr::write_unaligned(w(0x3C) as *mut i32, 100);
+    std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], [centre[0], centre[1], centre[2], 1.0]);
+    std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), EFFECT_SETS) + r[2] as usize * 0x60);
+    std::ptr::write_unaligned(w(0x78) as *mut f32, mg::gravity::impact_radius_m(level));
+    let factory = func::<FactoryFn>(FACTORY)();
+    if factory == 0 {
+        return None;
+    }
+    let bullet = func::<ManagerFn>(SHOT_MANAGER)(factory, dp, pl);
+    if bullet == 0 {
+        return None;
+    }
+    func::<MoverFn>(SHOT_MOVER)(bullet, 0.1, 0.0, 0, -1);
+    hold_off(bullet);
+    remember_shot(rd(bullet + 0x20), mg::spell::GRAVITY, level, 0);
+    Some(bullet)
 }
 
 /// `0x1402ABB20(object, bone)`: a bone of an actor (or the weapon) for effects. Checked by M5.
@@ -790,6 +1085,11 @@ pub unsafe fn strikes_frame(pl: usize) {
     }
     let step: f32 = rd(pl + p::STEP);
     strike_step(pl, step, None);
+    gravity_frame(pl, step);
+    let idle = STRIKES.lock().map(|g| g.is_empty()).unwrap_or(true) && FALLS.lock().map(|g| g.is_empty()).unwrap_or(true);
+    if idle {
+        STRIKING.store(false, Ordering::Release);
+    }
 }
 
 /// One run of the strike threads (`only`: the release's own run of the new thread, step 0: its
@@ -812,9 +1112,6 @@ unsafe fn strike_step(pl: usize, step: f32, only: Option<usize>) -> Vec<u32> {
             }
         }
         g.retain(|r| !r.s.done());
-        if g.is_empty() {
-            STRIKING.store(false, Ordering::Release);
-        }
     }
     let mut ids = Vec::new();
     for (h, level, kind, attr, ap, n) in due {
@@ -1169,7 +1466,7 @@ pub fn clear_events() {
 /// The start log line.
 pub fn start_line() -> String {
     format!(
-        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.7): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Thunder / Thundara / Thundaga (7.6): at 30, every enemy whose bodies touch a {} m, ±{} m cylinder, nearest first, struck through Re:CoM's own hit path one per {} frames, 1 MP; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Cure / Cura / Curaga (7.7): at {}, Re:CoM's heal {:?} HP on Sora, 1 MP; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
+        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.8): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Thunder / Thundara / Thundaga (7.6): at 30, every enemy whose bodies touch a {} m, ±{} m cylinder, nearest first, struck through Re:CoM's own hit path one per {} frames, 1 MP; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Cure / Cura / Curaga (7.7): at {}, Re:CoM's heal {:?} HP on Sora, 1 MP; Gravity / Gravira / Graviga (7.8): at {}, Re:CoM's sphere 2.4 m above the target falls 2.3 m over {:?} f growing to {:?}, then strikes every enemy within 170 x scale cm once (current HP x (power + 5 x max MP)% x resist[8]), 1 MP; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
         TABLE.get().map_or(0, |t| t.iter().filter(|r| r[0] != 0).count()),
         28,
         mg::fire::FAST_WAIT,
@@ -1183,6 +1480,9 @@ pub fn start_line() -> String {
         mg::blizzard::LIFE,
         mg::cure::WAIT,
         mg::cure::HEAL,
+        mg::gravity::WAIT,
+        mg::gravity::FRAMES,
+        mg::gravity::SCALE,
         mg::retarget::RANGE_M,
         if RETARGET.load(Ordering::Acquire) { "on" } else { "off" }
     )

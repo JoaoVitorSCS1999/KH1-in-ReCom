@@ -663,3 +663,117 @@ In-game checklist (7.7):
 5. In the field: the same (Re:CoM's heal also works outside battle).
 6. F9 trace: `cast cure1 …`, `release(cure1 f36 no-shot)`, `heal 50 hp …`, `pay100`.
 7. Combat = Re:CoM: Re:CoM's Cure cards unchanged; Riku's story unchanged.
+
+## Stage 7.8: Gravity / Gravira / Graviga
+
+Owner (decision 34): "Stop and Gravity against bosses exactly as in KH1"; Re:CoM-only bosses take
+KH1's final-boss Gravity (2 %, via their proxy records, `recom-kh1-attack.md`). At Combat = KH1 in
+Sora's story, Gravity casts as KH1's: a sphere falls on the target and crushes every enemy under it
+once, for KH1's % of their current HP.
+
+### KH1 (what runs)
+
+| what | KH1 (Steam) | tag |
+|---|---|---|
+| **Cast**: ground `0x36 + 4` = `0x3A` (entry 55, Blizzard's: 86 frames, free from 68), air `0x87` (entry 80, 78, free from 68); the hop as every air cast. | `xa_ex_0010.mset`; `0x1402A3DB0` | Checked (files + decomp) |
+| **Command** (`L008cc`): charge effect on the Keyblade; the marker thread (28 frames): its point is the target's part if alive, else the caster's position + **200 cm along his facing** (the offset taken at the command); the sphere's start is the point **240 cm up**. **Wait 28**, release check (`0x3A` / `0x87`, else nothing, no MP); the falling thread; **MP 100**; the hand effect. | `xm_gravity01.mag` `0x25A`, `0x8CC..0x9E0` | Checked (files) |
+| **Fall** (`0x44..0x16C`): scale 0.01 → S over N frames (S, N = 1.0, 60 / 1.5, 70 / 1.6, 60, the level's arguments), **230 cm down**; each frame enemies touching a sphere of 170 × the current scale get `+0x88 |= 4` (slowed: their time scale eased to 0.8, `0x140297FE0`). | `L0055c` | Checked (files + decomp) |
+| **Impact** (`L0044c`), the run after the N-th (so frame **88 / 98 / 88** after the command): one attack, **struck directly on every enemy whose bodies touch a sphere of 170 × S cm** (170 / 255 / 272; sys 90 type 1) at the sphere's centre (10 cm above the point); then a 20-frame fade growing × 1.02 a frame. | `0x16C..0x258` | Checked (files) |
+| **Damage** `0x1402BFA80` element 8: **current HP × (power + 5 × max MP)% × resist[8]**, raised to the record's floor (1 when the floor is under 2); no Defence, no cap. Power 40 / 55 / 70, stat source 5. Kind 8. | btltbl `0x6468` / `0x64D8` / `0x6548` | Checked (files + decomp) |
+
+### In Re:CoM
+
+- **Cast** as Blizzard's (`release_wait` 28); Re:CoM's clips `0x3A` → row `0x3A` (`p001_065`, the clip
+  Re:CoM's own Gravity plays: row 0x26's `+0` = 0x3A), `0x87` → `0x3E`. KH1 rows from Re:CoM's 0x26 /
+  0x38 / 0x39 (checked at start): clip, `grav_all` sets 18 / 19 / 20, its `+5` / `+0xD`; `+3` 0,
+  `+0xB` 1, `+0xF` 0x80.
+- **Command** (`start_cast` → `gravity_command`): `initMagic` case 0x1E's charge (the set's `+0x30`
+  entry, id 0, on the weapon's bone 2; Checked (disasm `0x1402207A5..0x1402207F4`)); KH1's marker
+  point (Re:CoM's target `+0x84C` if it is an alive enemy, its aim point; else Sora + 2 m along his
+  facing, the offset kept) and Re:CoM's marker effect (id 2 of the `+0x30` entry, as `initMagic`'s)
+  at the sphere's start.
+- **Release** (`release_gravity`): the point again (the target if still alive, else Sora now + the
+  command's offset); **Re:CoM's Gravity case** (`0x140222170` case `0x26`, Checked (disasm
+  `0x1402229E0..0x140222B90`)): its hand effect (id 1) and its sphere (`CHomingBullet`, flags
+  `0x41E1`, `+0xB8` = `0x1407C78D0`, `+0x1C` = row `+5` × 0.01, mover `row[0xD]` × 0.01) with KH1's
+  numbers: **from 2.4 m above the point, pitched straight down, 2.3 m / N a frame, no homing target,
+  life N + 2 frames**, and `| 4` (the life ends it). Its attack is **held off** (flag `0x200000` +
+  Re:CoM's "off", as 7.6's bolts): KH1 strikes at the impact, not on contact. Then KH1's MP.
+- **The fall** (`gravity_frame`, from the per-frame spell check that runs Thunder's strikes: one
+  atomic load when nothing runs): KH1's clock (`magic::Fall`: the release run counts the first frame)
+  and KH1's growth on Re:CoM's sphere effect (the bullet's effect `+0x244` → `0x140257EF0`, scale
+  `+0x10`: Re:CoM's spawn scale × KH1's 0.01 → S). At the impact: every alive enemy of Re:CoM's
+  lock-on list whose live hurt bodies touch the sphere of 1.7 × S m (`magic::body_touches`, Re:CoM's
+  shapes) is struck once with the sphere's attack through **Re:CoM's apply** (7.6's mechanism,
+  `apply_to`). If Re:CoM already ended the sphere (a wall), a held bolt of the same set at the centre
+  carries the strikes (`carrier_at`).
+- **Damage** (`spell_hit`, as every spell): KH1's number from the twin's / proxy's record with the
+  enemy's **current** HP (`+0x274`, KH1's for twins and proxies) and its resist[8], written as the
+  hit's value. An enemy with no KH1 record (none at KH1 in Sora's story except 100 Acre Wood's
+  minigame) takes KH1's % at 100 %. Re:CoM's boss falloff (`+0x290`) still applies (decision 13).
+- **Re:CoM's Gravity gate (enemy param `+0x40`) is not consulted at KH1**: Re:CoM's kind 0xD
+  (`0x14017DC50`) is its own damage (`HP × AP / 100` with an integer %, behind the gate) and its own
+  3-second squash (state `+0xAC0`: `0x14017C350` / `0x140183BA0`, flattened for 9000 ticks). KH1's
+  Gravity is neither: its damage is the % above with KH1's resist[8] (never immune: the floor), so
+  the KH1 rows' kind is Re:CoM's flinch (1) and the KH1 number is the hit's value. The resist[8]
+  decides instead of the gate. Checked (decomp).
+
+Logs: `magic: release gravity1: sphere N from (…) falls 2.3 m over 60 f to (…), impact radius
+1.70 m, target …`, `gravity1 impact on 0x…: Re:CoM's apply -> Some(1)` (bolt-line budget), hit lines
+`hit gravity1 on 0x…: KH1 …`, `mp: paid 100 (Gravity release)`. F9 trace: `cast gravity1 …`,
+`release(gravity1 f28 shot N)`, `impact gravity1 shot N n<enemies>`, hits `:gravity1:kh1 …`.
+
+Sites (7.8):
+
+| address | bytes | use |
+|---|---|---|
+| `0x1402207A5` initMagic Gravity charge | 79 bytes ending `E8 5C 25 F8 FF` (→ `0x1401A2D50`; the set's `+0x30`) | checked only |
+| `0x1402229F8` Gravity case hand effect | 59 bytes ending `E8 ED 40 F8 FF` (→ `0x1401A6B20`) | checked only |
+| `0x140222AB7` Gravity case flags | `48 C7 45 B0 E1 41 00 00` | checked only |
+| `0x140222B09` Gravity case `+0xB8` | `48 8D 05 C0 4D 5A 00` (→ `0x1407C78D0`) | checked only |
+| `0x1407C78D0` | (0, 0, 0, 0, 0, 0, 0, 1.0) | the descriptor's `+0xB8` |
+| `0x1407C6ED0`, `0x1407C6FF0` rows 0x26, 0x38–0x39 | Re:CoM's Gravity rows | the KH1 rows' templates |
+
+1:1 checks (7.8):
+
+- **Checked (files + decomp)**, replayed by tests: the release at 28 (handler 29), Sora free at the
+  key (68), Re:CoM's action ended once, a cut cast casts nothing (`movement::tests` "7.8"); the
+  fall's clock (the impact N frames after the release: 88 / 98 / 88 after the command), the scale's
+  growth, the impact radii 1.7 / 2.55 / 2.72 m, the sphere test (not a column), the damage (55 % at
+  max MP 3, LV2 80 %, Re:CoM-only boss 2 %, the floor, immune records still taking the floor), the
+  rows, cost and data (`magic::tests`).
+- **Checked (exe)**: the new sites.
+- **Assumptions:** (1) KH1's no-target offset `caster+0x30 × 200` is the facing direction;
+  (2) KH1's struck part ≈ Re:CoM's first live hurt body (as 7.6); (3) Re:CoM's sphere effect at
+  scale 1 is the size KH1's sphere has at scale 1 (the visual only: the hits use KH1's radius);
+  (4) a bullet's entity handle (`+0x20`) resolves through `0x1402AD350` (the apply resolves bodies'
+  owners the same way); if not, the held bolt carries the strikes and the growth is skipped;
+  (5) Re:CoM's `0x41E1` flags don't end the sphere before its life with the attack held (if a wall
+  ends it, the strikes still come, from the bolt).
+- **Not built: the slow under the falling sphere** (KH1: `+0x88 |= 4` each frame, the actor's time
+  scale eased to 0.8 with a wobble and back at +0.05 a frame). Re:CoM's enemies have a per-actor
+  frame step (`+0x14`, ticks, read by their motion update `0x14024E470` and effects); its writer was
+  not found, and no Re:CoM slow status was found (its kind specials have Stop, Freeze, Magnet,
+  Synchro, Gravity; no slow). Open question below.
+- **Not checked:** in game.
+
+Open question (7.8): **KH1's slow under the falling Gravity sphere.** (a) leave it out (built);
+(b) research Re:CoM's per-actor frame step (`actor+0x14`) and its writer, and scale it to 0.8 for
+enemies under the sphere (and ease it back) if Re:CoM's task runner lets a per-actor step through:
+everything of the enemy slows, as KH1's time scale; (c) slow only their motion (Re:CoM's motion
+speed `ctrl+0x4C`, which Re:CoM's own Stop sets to 0): animations and root motion slow, their AI
+timers and shots don't.
+
+In-game checklist (7.8):
+
+1. Log: the start line names Gravity (7.8) and 15 rows.
+2. In battle, target a Heartless: Magic → Gravity: Re:CoM's charge and marker above it, Re:CoM's
+   cast clip, about 0.5 s later (28 frames) Re:CoM's Gravity sphere appears 2.4 m above it, grows
+   while it falls for 1 s (60 frames), and at its bottom every enemy within 1.7 m takes one hit:
+   KH1's 55 % of its current HP at max MP 3 (log `hit gravity1 … KH1 …`). MP −1 point.
+3. Gravira / Graviga: bigger spheres (2.55 / 2.72 m), Gravira falls 70 frames.
+4. A boss (Guard Armor): 4 % × 55 % of its HP (floor 2); a Re:CoM-only boss (Larxene): 2 %.
+5. Without a target: the sphere falls 2 m in front of Sora.
+6. Hit before 28: nothing, no MP. Sora is free about 1.1 s after the command (frame 68).
+7. F9 trace: `release(gravity1 f28 shot …)`, `impact gravity1 shot … n…`, `pay100`.
+8. Combat = Re:CoM: Re:CoM's Gravity cards unchanged (kind 0xD and its gate still Re:CoM's).

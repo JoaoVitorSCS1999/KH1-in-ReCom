@@ -19,11 +19,11 @@ fn fire_rows_keep_recoms_clip_and_effect_set_and_take_kh1s_ball() {
         assert_eq!(r[0xF] & FLAG_KH1, FLAG_KH1);
         assert_eq!(recom_base_row(spell::FIRE, lv), Some([0x22, 0x29, 0x2A][lv as usize - 1]));
     }
-    // Gravity … Aero come with their stages.
-    assert!(t[12..].iter().all(|r| r[0] == 0));
+    // Stop and Aero come with their stages.
+    assert!(t[15..].iter().all(|r| r[0] == 0));
     assert_eq!(table_index(spell::AERO, 3), Some(20));
     assert_eq!(table_index(spell::FIRE, 0), None);
-    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && castable(spell::THUNDER) && castable(spell::CURE) && !castable(spell::GRAVITY));
+    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && castable(spell::THUNDER) && castable(spell::CURE) && castable(spell::GRAVITY) && !castable(spell::STOP));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn blizzard_rows_and_numbers_are_kh1s() {
     assert_eq!(KH1_BLIZZARD_FLAGS & 0x8000_1000, 0, "no homing");
     assert_eq!((cast_req::first(spell::BLIZZARD, false), cast_req::first(spell::BLIZZARD, true)), (0x37, 0x84));
     assert_eq!((cast_req::release(spell::BLIZZARD, false), cast_req::release(spell::FIRE, true)), (0x37, 0x8A));
-    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x3A));
+    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x3B));
     assert_eq!(spell_attack(spell::BLIZZARD, 2).map(|a| a.power), Some(27));
 }
 
@@ -331,4 +331,71 @@ fn cure_rows_and_numbers_are_kh1s_cast_with_recoms_heal() {
     }
     // The thread heals only a live target (Sora with HP left, not dying).
     assert!(cure::target_ok(1, false) && !cure::target_ok(0, false) && !cure::target_ok(40, true));
+}
+
+#[test]
+fn gravity_rows_numbers_and_fall_are_kh1s() {
+    let t = kh1_magic_table(&recom_rows());
+    for lv in 1..=3u8 {
+        let i = lv as usize - 1;
+        let r = &t[table_index(spell::GRAVITY, lv).unwrap()];
+        let base = &RECOM_GRAVITY_ROWS[i];
+        // Re:CoM's clip 0x3A (Blizzard's p001_065) and its Gravity sets 18 / 19 / 20.
+        assert_eq!((&r[..3], r[5], r[0xD]), (&base[..3], base[5], base[0xD]));
+        assert_eq!(r[2], 18 + lv - 1);
+        // Re:CoM's flinch, not its kind 0xD.
+        assert_eq!((r[3], r[0xB], r[0xF] & FLAG_KH1), (0, 1, FLAG_KH1));
+        assert_eq!(recom_base_row(spell::GRAVITY, lv), Some([0x26, 0x38, 0x39][i]));
+        let a = gravity_attack(lv);
+        assert_eq!((a.power, a.stat_source, a.element, a.kind), ([40, 55, 70][i], 5, 8, 8));
+    }
+    assert_eq!((cost(spell::GRAVITY), release_wait(spell::GRAVITY)), (100, 28.0));
+    assert_eq!((cast_req::first(spell::GRAVITY, false), cast_req::first(spell::GRAVITY, true)), (0x3A, 0x87));
+    let mut m = MotionSet::default();
+    add_motions(&mut m);
+    assert_eq!((m.info(0x3A).unwrap().length, m.info(0x87).unwrap().length), (86.0, 78.0));
+    assert_eq!((m.info(0x3A).unwrap().first(FlagKind::Free), m.info(0x87).unwrap().first(FlagKind::Free)), (Some(68.0), Some(68.0)));
+    // The impact radius 170 × S cm and the scale's growth.
+    assert_eq!([1u8, 2, 3].map(gravity::impact_radius_m), [1.7, 2.55, 2.72]);
+    assert!((gravity::scale_at(2, 35.0) - (0.01 + 1.49 * 0.5)).abs() < 1e-6);
+    assert_eq!(gravity::scale_at(3, 99.0), 1.6);
+}
+
+#[test]
+fn gravity_damage_is_kh1s_percent_of_current_hp() {
+    // Gravity + 5 × max MP 3 = 55 % of the current HP × resist[8].
+    assert_eq!(gravity_damage(1, 3, 200, 1.0, 0), 110);
+    // An LV2 Heartless (80 %): 44 % → 88.
+    assert_eq!(gravity_damage(1, 3, 200, 0.8, 0), 88);
+    // A Re:CoM-only boss (decision 34, 2 %) at 1000 HP: 1000 × 0.55 × 0.02 = 11.
+    assert_eq!(gravity_damage(1, 3, 1000, 0.02, 2), 11);
+    // Under the floor: the floor (2), or 1 when the floor is under 2.
+    assert_eq!(gravity_damage(1, 3, 50, 0.02, 2), 2);
+    assert_eq!(gravity_damage(1, 3, 50, 0.02, 0), 1);
+    // Graviga (70 + 40 = 110 % at max MP 8) on a twin: never more than ... the current HP × 110 %.
+    assert_eq!(gravity_damage(3, 8, 100, 0.04, 2), 4);
+    // Immune record (Sephiroth 0 %): still the floor.
+    assert_eq!(gravity_damage(2, 3, 900, 0.0, 4), 4);
+}
+
+#[test]
+fn gravity_falls_its_frames_then_strikes_once() {
+    for (lv, n) in [(1u8, 60), (2, 70), (3, 60)] {
+        let mut f = Fall::new(lv);
+        let mut runs = 0;
+        // The release run counted the first frame; the impact is the run N frames after it.
+        while !f.run(1.0) {
+            runs += 1;
+            assert!(runs < 200);
+        }
+        assert_eq!(runs, n - 1, "level {lv}: N − 1 more frames fall, the next run strikes");
+        assert_eq!(f.fallen(), n as f32);
+    }
+    // The impact sphere: a body that touches 1.7 m around the centre counts.
+    let c = [0.0, 1.0, 0.0];
+    let a = Area::Sphere { radius: 1.7 };
+    assert!(body_touches(c, a, &BodyShape::Sphere { c: [2.0, 1.0, 0.0], r: 0.31 }));
+    assert!(!body_touches(c, a, &BodyShape::Sphere { c: [2.0, 1.0, 0.0], r: 0.29 }));
+    assert!(!body_touches(c, a, &BodyShape::Sphere { c: [0.0, 3.0, 0.0], r: 0.2 }), "a sphere, not a column");
+    assert!(body_touches(c, a, &BodyShape::Column { a: [1.0, -5.0, 1.0], b: [1.0, 5.0, 1.0], r: 0.1 }));
 }

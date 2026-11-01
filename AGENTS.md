@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 49: M7 stage 7.8, Gravity, version 0.22.0 (2026-10-31)
+
+- Gravity / Gravira / Graviga (Checked, KH1 script + decomp): sphere 2.4 m above the target (no
+  target: 2 m ahead) falls 2.3 m over 60/70/60 frames growing to 1.0/1.5/1.6; impact at 88/98/88
+  hits every enemy within 1.7 × scale m once: current HP × (power + 5 × max MP)% × KH1 resist[8],
+  at least the floor (Re:CoM-only bosses 2 %); 1 MP.
+- Re:CoM's Gravity shot (collision held) + Re:CoM's hit function at impact, as a flinch carrying
+  KH1's number (Re:CoM's Gravity kind can't carry it and flattens for 3 s); Re:CoM's gate `+0x40`
+  isn't consulted at KH1. The slow under the sphere isn't built (owner question). Not seen in game.
+
+---
+
 ## Stage 48: M7 stage 7.7, Cure, version 0.21.0 (2026-10-31)
 
 - Cure / Cura / Curaga: heal 36 frames after the command, locked for 68, 1 MP paid at the heal;
