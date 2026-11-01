@@ -426,6 +426,9 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
     }
     func::<PlFn>(HOMING_TARGET)(pl);
     if c.spell == mg::spell::THUNDER {
+        // `initMagic` case 0x1C's charge (M7 f4): the set's effect id 0 on the Keyblade's bone 2 at
+        // (−0.8, 0, 0), kept on it (`+0x4C |= 4`). Checked (disasm `0x14022062B..0x140220697`).
+        effect_on_bone(pl, rd(pl + WEAPON), 2, set_name(r, 0), 0, &CHARGE_OFFSET, true);
         thunder_command(pl);
     }
     if c.spell == mg::spell::CURE || c.spell == mg::spell::AERO {

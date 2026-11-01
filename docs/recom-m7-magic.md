@@ -330,6 +330,17 @@ Thunder bolt and hit path.
 - **Command** (`win::magic::thunder_command`, from `start_cast`): Re:CoM's target `+0x84C` (KH1's
   command target, Assumption 5) if it is an alive enemy (type 0x1004, HP > 0) → centre = its aim
   point (vtable `+0x50`); else Sora's position.
+- **Charge (M7 f4):** at the command, `initMagic` case 0x1C's own charge, as Cure / Gravity / Stop /
+  Aero get theirs: the row's set's effect id 0 (the set's `+0x18` name, `_thunder_all`) on the
+  Keyblade's (`+0x3D0`) bone 2 at (−0.8, 0, 0) (`0x1407C7E50`), **kept on the Keyblade** (`+0x4C |=
+  4`, as Re:CoM's Thunder does; Cure's and Aero's charge (`0x14022070A`) isn't kept, Stop's is).
+  Checked (disasm `0x14022062B..0x140220697`, site `initMagic: Thunder charge (0x14022062B)`, 108
+  bytes, checked only; its calls land on `0x1402ABB20`, `0x1401A2D50`, `0x140257EF0`). KH1's script
+  also starts its charge effect at the command (`xm_thunder01.mag`); its look is Re:CoM's (decision
+  34). Not taken from case 0x1C: its `0x1401E5F80(player, AP, row[4] × 0.1, row[0xC])` and
+  `0x1401F7D80(player, 0x1407C5D40)` (Re:CoM's own Thunder targeting and its camera / slowdown:
+  not read; KH1's Thunder picks its own targets) and `+0x504` (the bolt height, set by our release).
+  In game: Re:CoM's Thunder charge on the Keyblade from the command to the end of the cast clip.
 - **Release** (`release_thunder`): the centre moves to the target's aim point if it is still
   alive; Re:CoM's lock-on list's enemies (type 0x1004, HP left; without the lock-on flag: the
   bodies decide, as KH1's sys 90) with their distances from the target / Sora → KH1's order

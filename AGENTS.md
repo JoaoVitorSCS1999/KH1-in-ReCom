@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 62: Thunder's charge effect, version 0.27.4 (2026-10-31)
+
+- Thunder's cast now plays Re:CoM's own Thunder charge (its cast setup at `0x14022062B`, 108
+  bytes checked: on the Keyblade's bone 2, kept on the blade) as Cure / Gravity / Stop / Aero do.
+  Not seen in game.
+
+---
+
 ## Stage 61: Stop's held hits at KH1's pace, version 0.27.3 (2026-10-31)
 
 - KH1 (Checked, decomp): each held hit after the first lands 6–11 frames after the previous
