@@ -72,12 +72,14 @@ pub fn slot_of(id: u32) -> Option<i32> {
     (GROUP_FIRST..GROUP_END).contains(&g).then_some(g as i32)
 }
 
-/// Checks the pack's head: an SCD (`SEDBSSCF`, little-endian, version 1–4) whose own size word is
-/// `size`. Only the first 0x14 bytes are needed.
+/// Checks the pack's head: an SCD (`SEDBSSCF`, little-endian, version 1–4) whose own size word fits
+/// in the pack's `size` bytes (KH1's `se000.win32.scd` holds 1280 bytes past its size word: the
+/// end of its last stream; KH1 loads the asset whole, and so does the DLL). Only the first 0x14
+/// bytes are needed.
 pub fn scd_head_ok(head: &[u8], size: usize) -> bool {
     let Some(h) = head.get(..0x14) else { return false };
     let version = u32::from_le_bytes([h[8], h[9], h[10], h[11]]);
-    h.starts_with(b"SEDBSSCF") && (1..=4).contains(&version) && h[0xC] == 0 && u32::from_le_bytes([h[0x10], h[0x11], h[0x12], h[0x13]]) as usize == size
+    h.starts_with(b"SEDBSSCF") && (1..=4).contains(&version) && h[0xC] == 0 && (0x30..=size).contains(&(u32::from_le_bytes([h[0x10], h[0x11], h[0x12], h[0x13]]) as usize))
 }
 
 /// Reads `kh1-menu-sounds.json`; `pack_size` is the pack file's size, `head` its first bytes.
@@ -173,5 +175,7 @@ mod tests {
         let mut v9 = h.clone();
         v9[8] = 9;
         assert!(!scd_head_ok(&v9, 0x1000));
+        // A pack longer than its size word (KH1's se000) passes; a shorter one does not.
+        assert!(scd_head_ok(&head(0x800), 0x1000) && !scd_head_ok(&head(0x2000), 0x1000));
     }
 }

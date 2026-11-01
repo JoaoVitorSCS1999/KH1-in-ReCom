@@ -11,6 +11,27 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 82: KH1 menu sounds: the SCD's sound table read; asset kept whole, version 0.40.1 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "notice the quality of the menu and the sounds playing … lets try to get
+  this 1:1 in ReCoM". 0.40.0's asset run printed menu sounds 1 (move) and 3 (back) as "stream 1 / 3:
+  empty".
+- Finding (Checked (files): the owner's `se000.win32.scd`): the SCD maps each sound to its streams
+  through a table at `tables + 0x20` (16-byte entry per sound, then (u16 track, u16 stream) pairs).
+  Move 1 → stream 221, back 3 → 220, error 4 → 219, open 6 → 218 (stereo, 0.1–0.25 s audible); streams
+  0–3 and 5 are empty slots. 174 of 193 tracks' waits equal their stream's length exactly. What the game
+  plays never depended on this (both drivers resolve the table; same driver body, SCD unchanged); the
+  step's printout, manifest `stream` and preview WAVs were wrong.
+- Finding: the 1280 bytes past the SCD's size word are the end of stream 222, not padding (0.39.2's
+  Assumption was wrong).
+- Change: asset step reads the sound table (`streams_of`), prints / previews the right stream, writes
+  `streams` per id in the manifest; keeps the asset whole (note when streams pass the size word).
+  DLL: `scd_head_ok` takes a size word up to the pack's size (was: equal). Manifest format unchanged.
+- Checked: files (table, durations), tests. Assumption: Re:CoM's driver reads past the size word as
+  KH1's does (both get the whole asset). Not heard in game.
+
+---
+
 ## Stage 81: MP ring drawn as Re:CoM draws its HP ring; closing outline; follows the gauge; room plate top right, version 0.40.0 (2026-10-31)
 
 - Asks (owner, 2026-11-01): "the MP bar doesnt have the outline at the bottom of the bar", "the health

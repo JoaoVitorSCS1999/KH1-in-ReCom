@@ -517,6 +517,11 @@ the video check and what the DLL does: `docs/recom-m7-command-menu.md` § Sounds
   sounds not taken: … (its PC assets: [...])`.
 - 0.39.0's step looked for one SCD per sound (`se000001.win32.scd` …) and found none on the
   owner's install (only `se000.win32.scd`): fixed.
+- 0.40.1: the step reads the SCD's **sound table** (`tables + 0x20`; layout in
+  `docs/recom-m7-command-menu.md` § Sounds) and prints / previews the stream each menu sound
+  really plays (0.39.x–0.40.0 printed stream `n` for sound `n`, which showed move / back as
+  "empty"). It also keeps the asset **whole**: the 1280 bytes past the SCD's size word are the
+  end of stream 222, not padding (0.39.2 cut them). The pack is the asset byte for byte again.
 
 ### Command for the owner
 

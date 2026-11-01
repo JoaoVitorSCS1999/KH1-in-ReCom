@@ -159,6 +159,49 @@ pub struct ScdInfo {
     pub tracks: u16,
     /// Stream headers (count at `tables + 4`, offsets at `tables + 0x0C`).
     pub streams: Vec<Stream>,
+    /// Per sound, in order, its (track, stream) pairs: the table at `tables + 0x20`. Each entry
+    /// is 16 bytes (byte 0 = its pair count, `+0x0C` = the sound's number) then its pairs as
+    /// (u16 track, u16 stream). Empty when the file has no such table. Checked (files): in the
+    /// owner's `se000.win32.scd` the 184 entries' pairs cover all 193 tracks once, and 174 of the
+    /// 193 tracks' wait (command 3 before the end) equals its stream's length to the
+    /// millisecond (the other 19 are loops or cut plays); KH1's loose `se011xxx` files have
+    /// one entry pairing track 0 with stream 0.
+    pub plays: Vec<Vec<(u16, u16)>>,
+}
+
+impl ScdInfo {
+    /// The streams sound `n` plays: from the sound table, or stream `n` when the file has none
+    /// (Assumption).
+    pub fn streams_of(&self, n: usize) -> Vec<usize> {
+        if self.plays.is_empty() {
+            return if n < self.streams.len() { vec![n] } else { Vec::new() };
+        }
+        self.plays.get(n).map(|p| p.iter().map(|&(_, s)| s as usize).collect()).unwrap_or_default()
+    }
+}
+
+/// The sound table (`tables + 0x20`): `sounds` entries in order; empty when absent or when an
+/// entry would leave the file or name a stream the file lacks.
+fn sound_table(d: &[u8], t: usize, sounds: usize, streams: usize) -> Vec<Vec<(u16, u16)>> {
+    let u16_at = |o: usize| d.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
+    let Some(mut k) = d.get(t + 0x20..t + 0x24).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize) else { return Vec::new() };
+    if k == 0 {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(sounds);
+    for _ in 0..sounds {
+        let Some(&c) = d.get(k) else { return Vec::new() };
+        let mut pairs = Vec::with_capacity(c as usize);
+        for p in 0..c as usize {
+            match (u16_at(k + 16 + 4 * p), u16_at(k + 18 + 4 * p)) {
+                (Some(tr), Some(st)) if (st as usize) < streams => pairs.push((tr, st)),
+                _ => return Vec::new(),
+            }
+        }
+        out.push(pairs);
+        k += 16 + 4 * c as usize;
+    }
+    out
 }
 
 /// Checks an SCD the way both drivers read its header (little-endian `SEDBSSCF`, version 1–4,
@@ -176,8 +219,9 @@ pub fn scd_info(d: &[u8]) -> Result<ScdInfo> {
     if d[0xC] != 0 {
         return Err(Error::Format("big-endian SCD".into()));
     }
-    // The file-size word: the asset may carry padding after it (the owner's `se000.win32.scd`:
-    // 15 277 472 bytes said, 15 278 752 held, 2026-11-01); the step keeps the said size.
+    // The file-size word may be short of the asset: the owner's `se000.win32.scd` says 15 277 472
+    // bytes and holds 15 278 752 (2026-11-01), its last stream (222) ending at 15 278 750. Streams
+    // are checked against the bytes held.
     let size = u32_at(0x10)? as usize;
     if size > d.len() || size < 0x30 {
         return Err(Error::Format(format!("SCD says {size} bytes, has {}", d.len())));
@@ -198,7 +242,8 @@ pub fn scd_info(d: &[u8]) -> Result<ScdInfo> {
         }
         streams.push(st);
     }
-    Ok(ScdInfo { version, sounds, tracks, streams })
+    let plays = sound_table(d, t, sounds as usize, streams.len());
+    Ok(ScdInfo { version, sounds, tracks, streams, plays })
 }
 
 /// KH1's system bank among `se000.dat`'s PC assets: the one KH1 numbers 0 (`se000.win32.scd`).
@@ -231,11 +276,14 @@ pub fn take(assets: &[HdAsset], notes: &mut Vec<String>) -> Result<Taken> {
             notes.push(format!("{}: {} sounds, so no entry {id} ({what}); Re:CoM's sound stays for it", a.name, info.sounds));
         }
     }
+    // Kept whole, as KH1 loads it: what lies past the size word is stream data (0.39.2 cut it as
+    // padding; it is the end of se000's stream 222).
     let size = u32::from_le_bytes([a.data[0x10], a.data[0x11], a.data[0x12], a.data[0x13]]) as usize;
-    if size < a.data.len() {
-        notes.push(format!("{}: {} bytes after the SCD's {size} (padding) left out", a.name, a.data.len() - size));
+    let end = info.streams.iter().filter(|s| s.codec != -1).map(|s| s.at + 0x20 + s.extra + s.data_size as usize).max().unwrap_or(0);
+    if end > size {
+        notes.push(format!("{}: streams run {} bytes past the SCD's size word ({size}); kept whole ({} bytes), as KH1 loads it", a.name, end - size, a.data.len()));
     }
-    Ok(Taken { name: a.name.clone(), data: a.data[..size].to_vec(), info })
+    Ok(Taken { name: a.name.clone(), data: a.data.clone(), info })
 }
 
 /// The menu ids the bank has an entry for.
@@ -243,10 +291,9 @@ pub fn present(t: &Taken) -> Vec<(u32, &'static str)> {
     SOUNDS.iter().copied().filter(|(id, _)| *id < t.info.sounds as u32).collect()
 }
 
-/// Stream `n`, as JSON (the stream with the entry's index: that sound `n` plays stream `n` is an
-/// Assumption the owner's listening checks).
+/// The first stream sound `n` plays, as JSON (from the SCD's sound table).
 fn stream_json(t: &Taken, n: usize) -> String {
-    match t.info.streams.get(n) {
+    match t.info.streams_of(n).first().and_then(|&k| t.info.streams.get(k)) {
         Some(s) => format!(
             "{{\"channels\": {}, \"rate\": {}, \"codec\": {}, \"data_size\": {}, \"samples\": {}, \"loop\": [{}, {}]}}",
             s.channels,
@@ -266,7 +313,7 @@ pub fn build(t: &Taken, sources: &[(&str, String)]) -> (Vec<u8>, String) {
     use std::fmt::Write;
     let rows: Vec<String> = present(t)
         .iter()
-        .map(|(id, what)| format!("    {{\"kh1_id\": {id}, \"use\": {what:?}, \"entry\": {id}, \"recom_id\": {}, \"stream\": {}}}", GROUP * 1000 + id, stream_json(t, *id as usize)))
+        .map(|(id, what)| format!("    {{\"kh1_id\": {id}, \"use\": {what:?}, \"entry\": {id}, \"recom_id\": {}, \"streams\": {:?}, \"stream\": {}}}", GROUP * 1000 + id, t.info.streams_of(*id as usize), stream_json(t, *id as usize)))
         .collect();
     let mut s = String::new();
     let _ = writeln!(s, "{{");
@@ -297,8 +344,9 @@ pub fn lines(t: &Taken) -> Vec<String> {
         t.info.streams.len()
     )];
     for (id, what) in present(t) {
-        let s = match t.info.streams.get(id as usize) {
-            Some(s) => {
+        let ks = t.info.streams_of(id as usize);
+        let s = match ks.first().and_then(|&k| t.info.streams.get(k).map(|s| (k, s))) {
+            Some((k, s)) => {
                 let codec = match s.codec {
                     0xC => "MS ADPCM".to_string(),
                     6 => "Vorbis".to_string(),
@@ -309,9 +357,11 @@ pub fn lines(t: &Taken) -> Vec<String> {
                     Some(n) if s.rate > 0 => format!("{n} samples = {:.3} s", n as f64 / s.rate as f64),
                     _ => format!("{} bytes", s.data_size),
                 };
-                format!("stream {id}: {} ch, {} Hz, {codec}, {len}{}", s.channels, s.rate, if s.loop_end > 0 { ", loops" } else { "" })
+                let more = if ks.len() > 1 { format!(" (+{} more)", ks.len() - 1) } else { String::new() };
+                let how = if t.info.plays.is_empty() { " (no sound table: stream = entry, Assumption)" } else { "" };
+                format!("stream {k}{more}{how}: {} ch, {} Hz, {codec}, {len}{}", s.channels, s.rate, if s.loop_end > 0 { ", loops" } else { "" })
             }
-            None => format!("no stream {id} (the sound table maps it elsewhere)"),
+            None => "no stream".to_string(),
         };
         out.push(format!("KH1 menu sound {id} ({what}): entry {id}, {s} → Re:CoM id {}", GROUP * 1000 + id));
     }
@@ -322,7 +372,7 @@ pub fn lines(t: &Taken) -> Vec<String> {
 pub fn previews(t: &Taken) -> Vec<(String, Vec<u8>)> {
     present(t)
         .iter()
-        .filter_map(|(id, what)| t.info.streams.get(*id as usize).and_then(|s| s.wav(&t.data)).map(|w| (format!("se000_{id}_{what}.wav"), w)))
+        .filter_map(|(id, what)| t.info.streams_of(*id as usize).first().and_then(|&k| t.info.streams.get(k)).and_then(|s| s.wav(&t.data)).map(|w| (format!("se000_{id}_{what}.wav"), w)))
         .collect()
 }
 
@@ -416,7 +466,7 @@ mod tests {
         assert_eq!(present(&t).len(), 4);
         let l = lines(&t);
         assert!(l[0].contains("8 sounds") && l[0].ends_with("Re:CoM bank 9000"), "{}", l[0]);
-        assert!(l[4].starts_with("KH1 menu sound 6 (open): entry 6, stream 6: 1 ch, 48000 Hz, MS ADPCM, 28 samples") && l[4].ends_with("Re:CoM id 9000006"), "{}", l[4]);
+        assert!(l[4].starts_with("KH1 menu sound 6 (open): entry 6, stream 6 (no sound table: stream = entry, Assumption): 1 ch, 48000 Hz, MS ADPCM, 28 samples") && l[4].ends_with("Re:CoM id 9000006"), "{}", l[4]);
         // Fewer entries than the menu ids: a note for each missing one.
         let few = vec![asset("se000.win32.scd", scd(&refs[..5]))];
         let mut notes = Vec::new();
@@ -440,11 +490,53 @@ mod tests {
         assert!(json.contains(&format!("\"pack_size\": {}", d.len())));
         assert!(json.contains("\"group\": 9000,"));
         assert!(json.contains("\"name\": \"se000.win32.scd\""));
-        assert!(json.contains("{\"kh1_id\": 4, \"use\": \"error\", \"entry\": 4, \"recom_id\": 9000004, \"stream\": {\"channels\": 1, \"rate\": 48000, \"codec\": 12, \"data_size\": 8, \"samples\": 8, \"loop\": [0, 0]}}"), "{json}");
+        assert!(json.contains("{\"kh1_id\": 4, \"use\": \"error\", \"entry\": 4, \"recom_id\": 9000004, \"streams\": [4], \"stream\": {\"channels\": 1, \"rate\": 48000, \"codec\": 12, \"data_size\": 8, \"samples\": 8, \"loop\": [0, 0]}}"), "{json}");
         let p = previews(&t);
         assert_eq!(p.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), vec!["se000_1_move.wav", "se000_3_back.wav", "se000_4_error.wav", "se000_6_open.wav"]);
         let w = &p[3].1;
         assert!(w.starts_with(b"RIFF") && &w[8..16] == b"WAVEfmt " && w.ends_with(&[6; 8]));
+    }
+
+    /// `scd` with a sound table (`tables + 0x20`) giving each sound its (track, stream) pairs.
+    fn with_table(mut d: Vec<u8>, plays: &[&[(u16, u16)]]) -> Vec<u8> {
+        let at = d.len() as u32;
+        d[0x50..0x54].copy_from_slice(&at.to_le_bytes());
+        for (n, p) in plays.iter().enumerate() {
+            let mut h = [0u8; 16];
+            h[0] = p.len() as u8;
+            h[0xC..0x10].copy_from_slice(&(n as u32).to_le_bytes());
+            d.extend_from_slice(&h);
+            for &(t, s) in p.iter() {
+                d.extend_from_slice(&t.to_le_bytes());
+                d.extend_from_slice(&s.to_le_bytes());
+            }
+        }
+        let len = d.len() as u32;
+        d[0x10..0x14].copy_from_slice(&len.to_le_bytes());
+        d
+    }
+
+    #[test]
+    fn each_sound_plays_the_streams_its_table_entry_names() {
+        // As the owner's se000: sound 0 plays nothing, 1 → stream 7, 2 → 6 and 5, 3..7 → 3..7
+        // with 6 (open) → stream 1.
+        let payloads: Vec<Vec<u8>> = (0..8u8).map(|k| vec![k; 4 * (k as usize + 1)]).collect();
+        let refs: Vec<&[u8]> = payloads.iter().map(|p| p.as_slice()).collect();
+        let plays: [&[(u16, u16)]; 8] = [&[], &[(0, 7)], &[(1, 6), (2, 5)], &[(3, 3)], &[(4, 4)], &[(5, 5)], &[(6, 1)], &[(7, 7)]];
+        let d = with_table(scd(&refs), &plays);
+        let i = scd_info(&d).unwrap();
+        assert_eq!((i.streams_of(0), i.streams_of(1), i.streams_of(2), i.streams_of(6), i.streams_of(9)), (vec![], vec![7], vec![6, 5], vec![1], vec![]));
+        let t = take(&[asset("se000.win32.scd", d.clone())], &mut Vec::new()).unwrap();
+        let l = lines(&t);
+        assert!(l[1].starts_with("KH1 menu sound 1 (move): entry 1, stream 7: 1 ch, 48000 Hz, MS ADPCM, 32 samples"), "{}", l[1]);
+        assert!(l[4].starts_with("KH1 menu sound 6 (open): entry 6, stream 1: 1 ch, 48000 Hz, MS ADPCM, 8 samples"), "{}", l[4]);
+        let (_, json) = build(&t, &[]);
+        assert!(json.contains("\"recom_id\": 9000001, \"streams\": [7], \"stream\": {\"channels\": 1, \"rate\": 48000, \"codec\": 12, \"data_size\": 32,"), "{json}");
+        let p = previews(&t);
+        assert!(p[0].0 == "se000_1_move.wav" && p[0].1.ends_with(&[7; 32]));
+        // A table naming a stream the file lacks is not trusted.
+        let bad = with_table(scd(&refs), &[&[], &[(0, 9)], &[], &[], &[], &[], &[], &[]]);
+        assert!(scd_info(&bad).unwrap().plays.is_empty());
     }
 
     /// The player's own KH1 files, when given (`KH1_TEST_DATA`): every loose `*.win32.scd` there
@@ -467,8 +559,10 @@ mod tests {
         }
         let Ok(d) = std::fs::read(dir.join("se000.win32.scd")) else { return };
         let mut notes = Vec::new();
+        let len = d.len();
         let t = take(&[asset("se000.win32.scd", d)], &mut notes).unwrap();
-        assert!(notes.is_empty(), "{notes:?}");
-        assert_eq!(present(&t).len(), 4);
+        assert!(notes.iter().all(|n| n.contains("past the SCD's size word")), "{notes:?}");
+        assert_eq!((present(&t).len(), t.data.len()), (4, len), "kept whole");
+        assert_eq!(t.info.plays.len(), t.info.sounds as usize, "se000 has a sound table");
     }
 }

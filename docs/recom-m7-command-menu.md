@@ -91,11 +91,35 @@ writes the menu entries as WAVs (`kh1-menu-sounds-preview/`) for that comparison
   SCD and that ids 1 / 3 / 4 / 6 are entries of it (sound count at `tables + 0`), and writes it
   **whole and unchanged** as `kh1-menu-sounds.bin`, with `kh1-menu-sounds.json` (format
   `kh1-recom-assets menu-sounds 2`: name, size, sha256, group 9000, the SCD's counts, per id
-  its entry, Re:CoM id and the stream with the same index: channels, rate, codec, bytes,
-  samples, loop). It prints the SCD's counts and, per id, the stream's channels / rate / codec /
-  length, and writes MS ADPCM streams 1 / 3 / 4 / 6 as WAVs into `kh1-menu-sounds-preview/`
-  (for listening; not part of the mod). That sound `n` plays stream `n` is an Assumption the
-  printout and the WAVs check (the SCD's sound → stream table is not decoded).
+  its entry, Re:CoM id, the streams its sound plays and the first one's channels, rate, codec,
+  bytes, samples, loop). It prints the SCD's counts and, per id, that stream's channels / rate /
+  codec / length, and writes it as a WAV into `kh1-menu-sounds-preview/` (for listening; not
+  part of the mod).
+- **The sound table** (0.40.1; Checked (files), the owner's `se000.win32.scd` and 21 loose KH1
+  SCDs): the table offsets after the counts are `tables + 0x08` tracks (193 command lists),
+  `+ 0x0C` streams (223 headers), `+ 0x10` the 184 0x80-byte sound headers, `+ 0x18` another
+  table, and `+ 0x20` (= `+ 0x24`) the sound → stream table: one entry per sound, in sound
+  order, 16 bytes (byte 0 = pair count, `+0x0C` = the sound's number) then that many
+  (u16 track, u16 stream) pairs. In se000 the pairs cover all 193 tracks once, and 174 of the
+  193 tracks' wait (command 3, the length the command list waits before it ends: Re:CoM's
+  `0x14008AE50` adds those waits) equals its stream's length to the millisecond; the other 19
+  are loops or cut plays. So the menu ids play:
+
+  | KH1 id | use | track | stream | stream | audible |
+  |---|---|---|---|---|---|
+  | 1 | move | 0 | 221 | stereo 48 kHz MS ADPCM, 1.284 s | ~0.1 s, then a quiet tail |
+  | 3 | back | 2 | 220 | stereo, 1.626 s | ~0.15 s |
+  | 4 | error | 3 | 219 | stereo, 1.843 s | ~0.25 s |
+  | 6 | open | 5 | 218 | stereo, 1.774 s | ~0.1 s |
+
+  Streams 0–3 and 5 are empty slots (codec −1); the PC port put these five sounds at the end
+  (218–222). 0.39.x–0.40.0's printout took stream `n` for sound `n` (so move / back showed
+  "empty", and error / open named the wrong streams); what Re:CoM plays never depended on it,
+  since both drivers resolve the table themselves (same driver body, the SCD unchanged).
+- **Whole asset:** the SCD's size word (15 277 472) is 1280 bytes short of the asset; stream 222
+  (sound 2) ends at 15 278 750. 0.39.2 cut those bytes as padding (Assumption, wrong); 0.40.1
+  keeps the asset whole, as KH1 loads it, and the DLL's head check takes a size word up to the
+  pack's size.
 - Whole file, not a trimmed SCD: no SCD writer to trust (the sound / track tables are not
   decoded), every entry keeps KH1's index, and ~10.9 MB once in Re:CoM's memory is small.
 - The DLL (`menu_sounds`, `win/menu_sounds.rs`), when the command menu is installed and both
@@ -121,8 +145,8 @@ writes the menu entries as WAVs (`kh1-menu-sounds-preview/`) for that comparison
 (KH1 and Re:CoM both play at 1.0: Re:CoM's vol −1 → 127 / 127), as one-shots, at the same
 frames KH1's menu plays them (the menu logic's emit points are KH1's, above). Checked: decomp
 (both), exe bytes (both create calls), KH1 SCD layout on 21 real KH1 SCDs; the video's move /
-open / no-decide pattern. Not checked: `se000.win32.scd`'s entry count and that entry `n` is
-stream `n` (the step prints both; the WAVs are for listening); the sounds against the video;
+open / no-decide pattern; the sound → stream table (0.40.1, files). Not checked: the sounds
+against the video;
 that Re:CoM's SE volume setting and mixer bus treat KH1's SCD as its own (Assumption); that
 Re:CoM's 2D sound position (0, 0, 0) plays them centred like KH1's (Assumption); that Re:CoM's
 driver takes a 10.9 MB bank (Assumption: KH1's own driver takes it). Not seen in game.
