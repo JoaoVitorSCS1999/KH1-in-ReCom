@@ -16,6 +16,8 @@
 //! - Only at Combat = KH1 in Sora's story (`super::mp::active`), and only when the loaded
 //!   `Cockpit:00` has exactly Re:CoM's groups plus ours (checked in Re:CoM's 2D registry at each
 //!   build). Riku's story and the Re:CoM setting: nothing is made; the Dark gauge is Re:CoM's.
+//! - Not made while KH1's MP ring shows (`kh1_hud::ring_on`); mirrored under Re:CoM's HP gauge
+//!   when that gauge is at KH1's place (`kh1_hud::place_on`).
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
@@ -48,6 +50,11 @@ const POSITION: u32 = 0x0024_85B0;
 /// goes under the cards (owner's video, 2026-10-31: the bar "clips through the friends bar";
 /// cards' bottom ≈ 84 units, the bar's top 50 → +40). Assumption until a screenshot.
 const BAR_DY: f32 = 40.0;
+/// With Re:CoM's HP gauge at KH1's place, turned (`hud_recom_hp_kh1_place`, MP ring off): the bar
+/// is mirrored (X scale −1: it runs left from the ring's centre, as KH1's straight segments) and
+/// drops under the turned HP bar (its back reaches 44 units under the ring's centre: the bar's
+/// border (−12 … +4 from here) starts 2 units below it). Assumption until a screenshot.
+const BAR_DY_PLACED: f32 = 58.0;
 const SCALE: u32 = 0x0024_86D0;
 // Re:CoM data (RVAs).
 const SEQ_CTRL_VTABLE: u32 = 0x0060_7340;
@@ -87,6 +94,8 @@ struct V4([f32; 4]);
 
 struct Bar {
     gauge: usize,
+    /// Mirrored under Re:CoM's HP gauge at KH1's place ([`BAR_DY_PLACED`]).
+    mirror: bool,
     /// Re:CoM's draw list the gauge was made on: our layers are added and released on it
     /// (`super::d2`).
     list: i32,
@@ -190,8 +199,17 @@ pub(super) unsafe fn set_groups(name: &[u8]) -> Option<u32> {
     None
 }
 
+/// The bar's X scale sign and drop.
+fn dir(mirror: bool) -> (f32, f32) {
+    if mirror {
+        (-1.0, BAR_DY_PLACED)
+    } else {
+        (1.0, BAR_DY)
+    }
+}
+
 /// A new `C2DSeqCtrl` (Re:CoM's allocator and ctor), parented to `hp`.
-unsafe fn new_ctrl(hp: usize) -> Option<usize> {
+unsafe fn new_ctrl(hp: usize, mirror: bool) -> Option<usize> {
     let c = func::<NewFn>(NEW)(0x170);
     if c == 0 {
         return None;
@@ -206,8 +224,9 @@ unsafe fn new_ctrl(hp: usize) -> Option<usize> {
     // The control's own transform starts at rest: a rebuilt bar (Combat switched back to KH1)
     // otherwise drew wherever the reused memory left it (owner, 2026-10-31: "randomly placed
     // somewhere else each time").
-    func::<VecFn>(POSITION)(c, V4([0.0, BAR_DY, 0.0, 1.0]).0.as_ptr());
-    func::<VecFn>(SCALE)(c, V4([1.0, 1.0, 1.0, 1.0]).0.as_ptr());
+    let (sx, dy) = dir(mirror);
+    func::<VecFn>(POSITION)(c, V4([0.0, dy, 0.0, 1.0]).0.as_ptr());
+    func::<VecFn>(SCALE)(c, V4([sx, 1.0, 1.0, 1.0]).0.as_ptr());
     Some(c)
 }
 
@@ -230,10 +249,11 @@ impl Bar {
     unsafe fn place(&mut self, l: &(Layout, Vec<u8>), p: &Piece) -> Option<usize> {
         let c = match self.pool.pop() {
             Some(c) => c,
-            None => new_ctrl(self.hp)?,
+            None => new_ctrl(self.hp, self.mirror)?,
         };
-        func::<VecFn>(POSITION)(c, V4([p.x, BAR_DY, 0.0, 1.0]).0.as_ptr());
-        let s = V4([p.scale, 1.0, 1.0, 1.0]);
+        let (sx, dy) = dir(self.mirror);
+        func::<VecFn>(POSITION)(c, V4([sx * p.x, dy, 0.0, 1.0]).0.as_ptr());
+        let s = V4([sx * p.scale, 1.0, 1.0, 1.0]);
         func::<VecFn>(SCALE)(c, s.0.as_ptr());
         add(c, self.list, l, p.group, self.xoff, 0);
         Some(c)
@@ -307,23 +327,26 @@ unsafe fn build(gauge: usize, list: i32) {
             return;
         }
     }
-    // The KH1 HUD draws KH1's own MP ring instead (decision 39, H2).
-    if super::kh1_hud::gauge_on() {
+    // The KH1 HUD draws KH1's own MP ring instead (decision 39, H2; or around Re:CoM's HP ring,
+    // `hud_kh1_mp_ring`).
+    if super::kh1_hud::gauge_on() || super::kh1_hud::ring_on() {
         return;
     }
     let Some(view) = super::mp::current() else { return };
-    let Some(ctrl) = new_ctrl(hp) else { return };
+    // Re:CoM's HP gauge moves to KH1's place right after this (`kh1_hud::gauge_made`).
+    let mirror = super::kh1_hud::place_on();
+    let Some(ctrl) = new_ctrl(hp, mirror) else { return };
     let xoff = -rd::<f32>(gauge + G_XOFF);
     for k in [mb::group::TRACK, mb::group::MP, mb::group::CHARGE] {
         add(ctrl, list, l, k, xoff, 1);
     }
-    let mut bar = Bar { gauge, list, hp, ctrl, xoff, shown: None, hidden: false, mp: Vec::new(), charge: Vec::new(), pool: Vec::new() };
+    let mut bar = Bar { gauge, mirror, list, hp, ctrl, xoff, shown: None, hidden: false, mp: Vec::new(), charge: Vec::new(), pool: Vec::new() };
     bar.show(l, view);
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
     if hidden {
         bar.hide();
     }
-    note(|| format!("built on the player gauge {gauge:#x}: MP {}/{} c{}, x offset {xoff}{}", view.0, view.1, view.2, if hidden { " (HUD hidden)" } else { "" }));
+    note(|| format!("built on the player gauge {gauge:#x}: MP {}/{} c{}, x offset {xoff}{}{}", view.0, view.1, view.2, if mirror { ", mirrored under Re:CoM's HP gauge at KH1's place" } else { "" }, if hidden { " (HUD hidden)" } else { "" }));
     if let Ok(mut s) = STATE.lock() {
         for mut old in s.bars.extract_if(.., |b| b.gauge == gauge) {
             old.destroy();
@@ -426,7 +449,7 @@ pub fn refresh() {
         return;
     }
     super::kh1_hud::refresh();
-    if super::kh1_hud::gauge_on() {
+    if super::kh1_hud::gauge_on() || super::kh1_hud::ring_on() {
         // The KH1 HUD's MP ring replaces the bar.
         if let Ok(mut s) = STATE.lock() {
             for mut b in s.bars.drain(..) {

@@ -511,6 +511,18 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     let src = kh::Sources { uitex: &uitex, uitex_hd: &uitex_hd, g_s: &g_s, g_red: &g_red, g_act: &g_act, menu, lock: lock.as_deref(), g_enm: g_enm.as_deref(), g_c: g_c.as_deref(), lev_s: lev_s.as_deref(), faces };
     let b = kh::build(&src, &lrefs).map_err(|e| e.to_string())?;
     bar.spr = kh::add_to_spr(&bar.spr, &mut bar.assets, &b, &langs).map_err(|e| format!("{}: {e}", mb::SPR_PATH))?;
+    // Re:CoM's HP ring and bar turned 180° for KH1's place (`hud_recom_hp_kh1_place`): new groups
+    // in every copy of `gauge:01`. Without them the DLL leaves Re:CoM's gauge where it is.
+    let recom_hp = match kh1_recom_assets::recom_hp::patch_spr(&mut bar.spr, &mut bar.assets) {
+        Ok((first, files)) => {
+            println!("KH1 HUD: Re:CoM's HP ring and bar turned 180° as {} groups {first}..{} in {files:?}", kh1_recom_assets::recom_hp::SET, first + 2);
+            Some(first)
+        }
+        Err(e) => {
+            println!("note: KH1 HUD: Re:CoM's HP gauge not turned ({e}); hud_recom_hp_kh1_place will leave it top-left");
+            None
+        }
+    };
     let e = arc.find(mb::RTM_PATH).ok_or_else(|| format!("{} not in Recom.hed", mb::RTM_PATH))?;
     let raw = arc.read_raw_entry(e).map_err(|e| format!("{}: {e}", mb::RTM_PATH))?;
     let date = i32::from_le_bytes(raw.get(12..16).ok_or("short entry")?.try_into().unwrap());
@@ -524,7 +536,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         ("UK_uibin_g_act.bin sha256", kh1_formats::egs::sha256_hex(&g_act)),
         ("FO0002.RTM sha256", kh1_formats::egs::sha256_hex(&rtm)),
     ];
-    let manifest = kh::manifest_json(&b, &langs, &sources);
+    let manifest = kh::manifest_json(&b, &langs, &sources, recom_hp);
     if let Some(m) = &b.menu {
         println!("KH1 HUD: command menu look from group {}: {} glyphs of KH1's menu font, words for {:?}{}", m.first, m.glyphs, m.words.iter().map(|w| w.0.as_str()).collect::<Vec<_>>(), if m.missing.is_empty() { String::new() } else { format!("; no glyph for {:?} (drawn as a space)", m.missing) });
         println!("KH1 HUD: FM context tab from uitex.bin picture 2's PC rows; Triangle {}", if m.tab_icon { "from Theater's Icon.tm2 (the PlayStation glyph)" } else { "MISSING (no Icon.tm2 / FontIcon.inf): the tab shows without it" });

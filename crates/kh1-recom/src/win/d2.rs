@@ -86,6 +86,19 @@ pub unsafe fn add(c: usize, list: i32, set: *const u8, group: u32, xoff: f32, fl
     LAYERS.fetch_add(layers(c) - n, Ordering::Relaxed);
 }
 
+/// `C2DSeqCtrl` vtable `+0x20` (`0x1402482F0`): replace layer `layer` with group `group` of `set`
+/// (ctrl, layer, set, group, screen x offset, flag): a new instance takes the old one's place in
+/// the draw list and its visibility (`0x140247000` → `0x140249EB0`, the old object's `+0x45`), the
+/// old one's entry goes back to the pool. Checked (decomp). The frame is not carried over.
+type ReplaceFn = unsafe extern "win64" fn(usize, u32, *const u8, u32, f32, u32) -> usize;
+
+/// Replaces layer `layer` of `c` (Re:CoM's control or ours; called through its own vtable, as
+/// Re:CoM's HUD code does). False when Re:CoM made no instance (no such set or group).
+pub unsafe fn replace(c: usize, list: i32, layer: u32, set: *const u8, group: u32, xoff: f32, flag: u32) -> bool {
+    let f: ReplaceFn = std::mem::transmute_copy(&rd::<usize>(rd::<usize>(c) + 0x20));
+    on_list(list, "a layer replace", || f(c, layer, set, group, xoff, flag)) != 0
+}
+
 /// Attaches the text item `fnt` (`C2DSeqCtrl` `+0x60`); the layer then owns the font.
 pub unsafe fn attach(c: usize, list: i32, set: *const u8, fnt: usize, x: f32, y: f32, dx: f32) -> usize {
     let n = layers(c);

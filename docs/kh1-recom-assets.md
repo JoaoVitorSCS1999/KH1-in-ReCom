@@ -650,3 +650,10 @@ add to `mod.yml`:
 
 (`raw/FORM/0002/FO0002.SPR` is already listed.) A run that cannot build the set removes an older
 `kh1-hud.json`, so the DLL keeps Re:CoM's HUD.
+
+Re:CoM's HP gauge at KH1's place (`hud_recom_hp_kh1_place`): the same run adds three groups
+to `gauge:01` in `FO0002.SPR`'s `gauge.lad` and in every `<LANG>_gauge.lad` PC asset (Re:CoM's
+HP ring groups 7, 8, 9 turned 180° in the data, as groups 47, 48, 49; Re:CoM's records kept) and
+writes `"recom_hp": {"set": "gauge:01", "first": 47, "of": [7, 8, 9]}` into `kh1-hud.json`. It
+prints `KH1 HUD: Re:CoM's HP ring and bar turned 180° as gauge:01 groups 47..49 in [...]`. No new
+file: `raw/FORM/0002/FO0002.SPR` carries them (`docs/recom-kh1-hud.md` § Re:CoM's HP gauge at KH1's place).

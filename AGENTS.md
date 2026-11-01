@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 76: Re:CoM's HP gauge at KH1's place, turned 180°, with KH1's MP ring, version 0.38.0 (2026-10-31)
+
+- Ask (owner, 2026-11-01): "Lets just keep the KH1 command menu and the triangle prompts. For the health
+  bar, is it possible to just get the Re:CoM health bar, place it in the same place as the KH1 health
+  bar, and rotate the ReCoM green health so its in the same orientation?" (mockup confirmed; MP
+  "Around the ring").
+- Re:CoM's ring is scissored from parts' corners with no min / max (`0x14024A3F0` → `0x1402643D0`):
+  a turned control would empty the scissor. So the asset step adds `gauge:01` groups 7–9 again,
+  turned 180° (47–49), in gauge.lad and its 5 copies; the DLL swaps layers 1–3 of the HP control
+  for them once at init (`0x1402482F0`, layer replace) and moves the control to KH1's ring centre;
+  face and disc stay upright. Re:CoM runs the gauge itself after that. Checked (decomp + exe +
+  offline render of the owner's UK_gauge.lad).
+- MP: the KH1 cluster's MP back / MP / charge / ticks only, 1:1 outside Re:CoM's ring (42–55 vs
+  29–43). Keys `hud_recom_hp_kh1_place`, `hud_kh1_mp_ring` (default on); `hud_kh1_gauge` default off.
+  Not seen in game; Re:CoM's gauge art not rendered offline (not in session).
+
+---
+
 ## Stage 75: HUD pieces as settings, Re:CoM's LEVEL UP, smooth rings, tab seam, prize diagnostics, version 0.37.0 (2026-10-31)
 
 - Asks (owner, 2026-11-01): "I want to be able to pick and choose which elements i want", "I want

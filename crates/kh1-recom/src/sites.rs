@@ -691,7 +691,16 @@ pub const KH1_HUD_CALLEES: &[Site] = &[
     // H7: movaps xmm0,[rdx]; movdqa [rcx+0xF0],xmm0; mov dword [rcx+0xFC],1.0: the 3D anchor
     // Re:CoM projects the control to (the lock-on marker's own call, `0x140209D30`).
     Site { name: "C2DSeqCtrl 3D anchor (0x140248570)", rva: 0x0024_8570, expect: &[0x0F, 0x28, 0x02, 0x66, 0x0F, 0x7F, 0x81, 0xF0, 0x00, 0x00, 0x00, 0xC7, 0x81, 0xFC, 0x00, 0x00] },
+    // Re:CoM's HP gauge at KH1's place: mov [rsp+8],rbx; mov [rsp+0x10],rbp; mov [rsp+0x18],rsi; mov [rsp+0x20],rdi; push r14;
+    // sub rsp,0x30; movzx eax,byte [rcx+0x16D]: vtable +0x20, replace a layer (ctrl, layer, set,
+    // group, x offset (stack, f32), flag (stack)); Re:CoM's HP setter swaps the gauge's disc and
+    // face with it. Re:CoM's HP gauge at KH1's place puts the turned ring groups on layers 1..3.
+    Site { name: "C2DSeqCtrl replace layer (0x1402482F0)", rva: 0x0024_82F0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x48, 0x89, 0x7C, 0x24, 0x20, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x30, 0x0F, 0xB6, 0x81, 0x6D, 0x01, 0x00, 0x00] },
 ];
+
+/// The vtable slot Re:CoM's HP gauge at KH1's place calls through (`hud_recom_hp_kh1_place`).
+/// Checked (exe; relocated pointer).
+pub const KH1_HUD_PLACE_PTRS: &[PtrSite] = &[PtrSite { name: "C2DSeqCtrl vtable +0x20 (0x140607360)", rva: 0x0060_7360, target: 0x0024_82F0 }];
 
 /// Re:CoM's `D2::C2DSeqCtrl` functions the MP bar calls (the ctor `0x140247260` and `operator
 /// new` are already checked for the Keyblades page).
@@ -1461,6 +1470,16 @@ mod tests {
         assert_eq!(MP_BAR_PTRS[1].rva - MP_BAR_PTRS[0].rva, 8);
         // The bound check sits inside the instantiation, after its checked start.
         assert!(MP_BAR_CHECKED[3].rva + MP_BAR_CHECKED[3].expect.len() as u32 <= MP_BAR_CHECKED[4].rva);
+    }
+
+    #[test]
+    fn kh1_hud_place_sites() {
+        // The replace slot is the C2DSeqCtrl vtable's +0x20 and points at the checked function.
+        for p in KH1_HUD_PLACE_PTRS {
+            assert!(all_sites().any(|s| s.rva == p.target), "{}", p.name);
+            assert!(!all_sites().any(|s| s.rva == p.rva), "{}", p.name);
+            assert_eq!(p.rva - MP_BAR_PTRS[0].rva, 0x20);
+        }
     }
 
     #[test]

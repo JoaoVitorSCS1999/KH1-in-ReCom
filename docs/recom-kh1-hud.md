@@ -660,3 +660,106 @@ owner's H0 dump, **Assumption**.
   bilinearly; the radial cut edges reach half a texel past the line (no half-covered seams).
   "grainy" edges and the MP outline's varying thickness came from one sample a texel.
 - **Tab / selection seam**: the band (`com_sel_gra_d`) starts 1 unit higher, under the stripe.
+
+## Re:CoM's HP gauge at KH1's place, KH1's MP ring around it (owner, 2026-11-01)
+
+- Asks: "okay clearly this isn't working. Lets just keep the KH1 command menu and the triangle
+  prompts. For the health bar, is it possible to just get the Re:CoM health bar, place it in the
+  same place as the KH1 health bar, and rotate the ReCoM green health so its in the same
+  orientation?"; the mockup (ring + bar turned 180° to the bottom right, the bar running left
+  along the bottom, the face upright): "Yes, like the mockup"; MP: "Around the ring".
+- The baked KH1 gauge (H2 / H2b) stays in the code behind `hud_kh1_gauge` (default now off).
+  New keys (default on, only at `hud = kh1` with `hud_kh1_gauge = off`): `hud_recom_hp_kh1_place`,
+  `hud_kh1_mp_ring`. `hud_hide_recom_hp` default now off (on, it would hide the gauge entirely).
+
+### Re:CoM's HP gauge (Checked (decomp + exe + files) unless tagged)
+
+| what | where | tag |
+|---|---|---|
+| `CPlayerGauge` init: control `+0x78` (priority 2), layers 0 `gauge:01` 0xE (the disc behind the face), 1..3 `gauge:01` 7 (max HP), 8 (drain, red), 9 (HP), 4 `gauge:00` 3 (the face; set name from `+0x88`), all flag 1 at x offset −`+0xA0`; frames of 1..3 = trunc(`+0xA8` / 560 × 470); layout position `gauge.lad` element 1 = (60, 60) | `0x140208360` (disassembly: flag 1 in `[rsp+0x20]`, offset in xmm3) | Checked (decomp + exe) |
+| The HP setter replaces layer 0 (0xF, 10 at ≤ 25 %) and layer 4 (`+0x88` group 3, 0, or 2 at 0 HP) through vtable `+0x20`; the update `0x14020A0E0` replaces layer 0 (0x10, 0xE, 0xF, 10) and layer 4 and sets layer 2's frame (the drain); no code of Re:CoM's adds layers 1..3 again or moves `+0x78` after the init (CPlayerGauge's functions searched) | `0x14020D6A0`, `0x14020A0E0` | Checked (decomp) |
+| Re:CoM's 2D space is 512 × 384 like KH1's (`DAT_140821ADC` = 384, read only); a layout position is (x − 256, y − 192) (`0x140248660`) | exe `.data`, `0x140248660` | Checked (exe + decomp) |
+| Groups 7..9: quarter-ring sprites in up to three quadrants with mirrored parts, z rotations (frames 0..270), zero-UV scissor parts, then a 200-unit bar (271..470). The PC copies (`<LANG>_gauge.lad`) differ: 43-unit quarters, the bar a 1-texel column of the ring (0, 0)–(200, −43). The ring starts at 3 o'clock and runs clockwise to 12, the bar along the top to the right (offline render: Re:CoM negates z angles on load, `0x14024B4E0` `^ 0x80000000`) | `gauge.lad`, `UK_gauge.lad` | Checked (files + decomp + offline render) |
+| A control's rotation exists (`0x1402486C0` → `+0x100`, z only used: `0x1402EDB10`) but cannot turn this gauge: a scissor part's GS scissor is built from its transformed top-left and bottom-right corners as they are (`0x14024A3F0` → `0x140265F00` → `0x1402643D0` writes `SCISSOR_1`), so a turned scissor is inverted (empty on the GS). The sprite clip test itself takes min / max (no culling of turned or mirrored quads; Re:CoM's own data mirrors parts) | as listed | Checked (decomp + exe) |
+| Layer replace (vtable `+0x20` `0x1402482F0`): the new instance takes the old one's place in the current draw list (`0x140249EB0`) and its visibility (old `+0x45`, `0x140247000`); the frame is not kept | as listed | Checked (decomp) |
+| Draw order: Re:CoM's 2D sprites go to the foreground display list (`CDispListFG`, 26 buckets): bucket = min(priority, 25), buckets drawn 0 first, FIFO inside a bucket (`0x14024ABB0`, `0x140253F40`, `0x140253AE0`). So a higher priority draws over (the H2 assumption, now checked) | as listed | Checked (decomp) |
+| Translations get + 0.25 on load (`0x1402B4A00` → `0x1402ED290`, an add) | | Checked (exe) |
+| Prize pop-ups (`CPrizeGauge` `0x1402087C0`): absolute `Cockpit.lad` elements 10 / 16 = (0, 130) / (0, 182) + their own offsets, no parent; FRIENDS row (`0x14020CEF0`): element 22 = (0, 0) + offsets, no parent. Neither is a child of `+0x78`: they stay on the left, upright | as listed, `Cockpit.lad` / `UK_Cockpit.lad` | Checked (decomp + files) |
+| The gauge's textures `gauge:00` / `gauge:01` are `gauge.imz` in `FORM/0060..0062` (texture name = set name, `0x140249C90`), not in this session's dump | `forms.txt` | Checked (files listing); the pictures: not seen |
+
+### Native build
+
+- **Data (asset step, `kh1_recom_assets::recom_hp`):** `gauge:01` groups 7, 8, 9 added again as
+  47, 48, 49, turned 180° in the data: image parts' corners negated (each corner keeps its UV),
+  scissor parts negated and reordered (still top-left → bottom-right), translations and pivots
+  negated, angles and scales kept; refused if a group bounces or rotates a scissor (none do). In
+  `gauge.lad` and all five `<LANG>_gauge.lad`; Re:CoM's records byte for byte. Offline render
+  (owner's `UK_gauge.lad`, frames 60..470, flat colours and a UV-gradient texture): the turned
+  groups are pixel for pixel Re:CoM's turned 180° about the origin + 0.25. `kh1-hud.json`
+  `"recom_hp"` (format unchanged, an optional key).
+- **DLL (`win/kh1_hud.rs` `place_recom_hp`, at the player gauge's init, after Re:CoM's):** checks
+  the registry (`gauge:01` = 50 groups) and the vtable slot (`sites::KH1_HUD_PLACE_PTRS`), replaces
+  layers 1..3 with 47..49 through the control's own vtable `+0x20` (Re:CoM's x offset, flag 1),
+  sets their frames back to trunc(max HP / 560 × 470) (what Re:CoM's init just set), and moves the
+  control to KH1's centre: layout (444 + margin + `+0xA0` − 0.25, 317 − 0.25) (margin 86 at 16:9,
+  0 at 4:3). Layer 0 (the disc: four mirrored quadrants, symmetric) and layer 4 (the face) are not
+  touched: the face stays upright. From then on Re:CoM's own code scrubs, swaps, hides and draws
+  the gauge; nothing of ours runs per frame or on HP events for it.
+- **KH1's centre:** a circle fit to the outer edge of our baked MP back ring (owner's files):
+  (443.9, 317.0), R 57.5; KH1's objects meet at (444, 316), its fans start at (443, 317). The ring
+  origin goes to (444, 317) − 0.25 (Re:CoM's translation bias). Checked (offline render).
+- **MP ring (`hud_kh1_mp_ring`, only with Re:CoM's gauge at KH1's place; `Cluster` with
+  `mp_only`):** the cluster's held groups MP back,
+  MP, charge and ticks (KH1's absolute places, size class 2 = KH1's centre), with KH1's MP and
+  charge fades, on KH1's MP reads / writes as before; control 0 (MP back, MP, MP fades) priority 0,
+  control 1 (charge, ticks, charge fades) priority 1, both under Re:CoM's gauge (2), at KH1's
+  right margin. No HP / face / labels / flash / shake; hides and shows at once with Re:CoM's HUD
+  state (7 / 1), as Re:CoM's gauge does. No scaling: KH1's MP band is 42–55 units from the centre
+  (MP back 40–57), Re:CoM's ring 29–43 (parts and scissors; its texture edge not measured):
+  KH1's own HP ring is 29–41 (back 27–43), so the MP ring sits on Re:CoM's ring as on KH1's.
+  Checked (files: picture 5 / 7 radial profiles; Re:CoM part rects).
+- **Past 9 MP:** KH1's straight MP segments (26 apart, 24 × 12 at y + 43..+ 55) run left along the
+  bottom under the turned HP bar (its back reaches + 44), as in KH1 (KH1's HP segments are at
+  + 30..+ 41). Built as KH1's; they may run past Re:CoM's bar (KH1: up to 11 segments = 286 units;
+  Re:CoM's bar is 200 at 560 max HP).
+- **The 7.2 MP bar** is not made while the MP ring is on. With the ring off and Re:CoM's gauge at
+  KH1's place, the bar (a child of `+0x78`) is mirrored (X scale −1, running left from the centre)
+  and dropped to + 58 (under the turned bar). Assumption until a screenshot.
+- Preview: `/tmp/rhp-preview.png` (not in the repo): KH1's real MP ring art, Re:CoM's gauge drawn
+  as flat placeholders (no `gauge.imz` in the session).
+
+### Checked / not checked
+
+- Checked (decomp + exe): every address above; the replace function's first bytes and vtable slot.
+- Checked (files + offline render): the turned groups = Re:CoM's turned 180° (geometry, scissors,
+  UVs) on the owner's `UK_gauge.lad`; the MP ring concentric with the turned ring; nothing off
+  screen at 16:9.
+- Not checked: in game; Re:CoM's gauge textures (the ring's real band, the bar's look turned); the
+  GS emulation's handling of the scissors (unchanged data shape, so as Re:CoM's).
+- Assumptions: (1) Re:CoM's ring visual centre is its origin + 0.25 (from the translation bias);
+  (2) the MP ring's 1–3 units under Re:CoM's ring edge are hidden by it (KH1 draws its MP back over
+  its HP back, then the HP arc over both: only the MP back's inner black edge differs); (3) the
+  prize pop-ups and FRIENDS row staying on the left read well with the gauge bottom right.
+
+### Owner questions
+
+1. **Prize pop-ups (EXP + / NEXT LV / Moogle points):** they are not part of the HP gauge and stay
+   on the left (Re:CoM's (0, 130) / (0, 182)). (a) keep (built); (b) move them next to the gauge
+   bottom right; (c) hide them (`hud_hide_prizes`).
+2. **MP straight segments past 9 MP** run past Re:CoM's HP bar when MP is high and HP low (KH1
+   does the same with its own bar): (a) keep KH1's (built); (b) cap the drawn MP at 9 (ring only).
+
+### What the in-game test must check
+
+1. `hud = kh1`, `hud_kh1_gauge = off` (keys new: default on). Log: `kh1 hud: Re:CoM's HP gauge … at
+   KH1's place, turned 180° (gauge:01 groups 47..49 …)` and `KH1's MP ring around Re:CoM's HP
+   ring …`; no `gauge:01 has 47 groups` line (that means the old `FO0002.SPR` is served).
+2. Screenshot: Re:CoM's ring bottom right where KH1's is, the bar running left along the bottom,
+   Sora's face upright, the blue MP ring outside the green ring.
+3. Take hits: the green ring shrinks from the bar's end toward 9 o'clock; the red drain follows;
+   the face changes as in Re:CoM; low-HP sound and flashing disc as in Re:CoM.
+4. Cast / refill / swing: KH1's MP cells fade, the orange charge line grows on the ring.
+5. Camp / events: the gauge and the ring hide and come back together.
+6. `hud_kh1_mp_ring = off`: the MP bar runs left under the turned HP bar. `hud_recom_hp_kh1_place =
+   off`: Re:CoM's gauge top left as before, the MP bar under it (the ring needs the gauge at KH1's
+   place). `hud = recom`: everything Re:CoM's.

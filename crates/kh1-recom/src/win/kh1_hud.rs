@@ -32,16 +32,27 @@
 //!   (1, 0xE2) go through our getter, which adds their bit (0x10, 8) while the KH1 HUD is up.
 //! Kept: the level-up choice, the "Guard" / "Recover" / "Resist" / "LEVEL UP!" popups
 //! (`CCommonGauge`), the command menu.
+//!
+//! Re:CoM's HP gauge at KH1's place (owner, 2026-11-01, `hud_recom_hp_kh1_place`, with
+//! `hud_kh1_gauge` off): at the gauge's init its control `+0x78` gets the asset step's turned ring
+//! groups on layers 1..3 (Re:CoM's own layer replace) and KH1's centre as its layout position; the
+//! disc and the face stay Re:CoM's, upright. Re:CoM runs it from then on. KH1's MP ring around it
+//! (`hud_kh1_mp_ring`) is the cluster with only its MP parts (`Cluster::mp_only`).
+//! `docs/recom-kh1-hud.md` § Re:CoM's HP gauge at KH1's place.
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
-use crate::kh1_hud::{self as kh, group, program, Manifest, View};
+use crate::kh1_hud::{self as kh, group, mp_ring, program, recom_hp, Manifest, View};
 use crate::settings::Mode;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 static MANIFEST: OnceLock<Manifest> = OnceLock::new();
 static CHECKED: AtomicBool = AtomicBool::new(false);
+/// The C2DSeqCtrl vtable's replace slot is Re:CoM Steam's (`sites::KH1_HUD_PLACE_PTRS`).
+static PLACE_OK: AtomicBool = AtomicBool::new(false);
+/// "gauge:01 is not ours" logged once.
+static PLACE_LOGGED: AtomicBool = AtomicBool::new(false);
 static HOOKED: AtomicBool = AtomicBool::new(false);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
 pub static ORIG_HP: AtomicUsize = AtomicUsize::new(0);
@@ -163,6 +174,9 @@ struct Cluster {
     motion: Option<Running>,
     /// H6: Donald's and Goofy's gauge controls (0 without the data).
     party: [usize; 2],
+    /// Only KH1's MP ring (`hud_kh1_mp_ring`, around Re:CoM's HP ring): controls 0 (MP back, MP)
+    /// and 1 (charge, ticks), no HP, face, flash or motions (`crate::kh1_hud::mp_ring`).
+    mp_only: bool,
 }
 
 struct State {
@@ -200,6 +214,27 @@ fn parts() -> crate::settings::HudParts {
 /// KH1's gauge cluster is drawn (`hud_kh1_gauge`): the MP bar and Re:CoM's HP gauge follow it.
 pub fn gauge_on() -> bool {
     active() && parts().gauge
+}
+
+/// Re:CoM's HP gauge goes to KH1's place, turned (`hud_recom_hp_kh1_place`, with the KH1 gauge
+/// off): the setting, the asset step's groups and the vtable slot. [`place_on`] also checks the
+/// loaded set.
+pub fn place_wanted() -> bool {
+    let p = parts();
+    active() && p.recom_hp_place && !p.gauge && PLACE_OK.load(Ordering::Relaxed) && manifest().is_some_and(|m| m.recom_hp.is_some())
+}
+
+/// [`place_wanted`], and Re:CoM registered `gauge:01` with the turned groups (the served
+/// `FO0002.SPR` is this version's asset step's).
+pub unsafe fn place_on() -> bool {
+    place_wanted() && manifest().and_then(|m| m.recom_hp).is_some_and(|f| super::mp_bar::set_groups(recom_hp::SET) == Some(f + recom_hp::TURNED.len() as u32))
+}
+
+/// KH1's MP ring around Re:CoM's HP ring is drawn (`hud_kh1_mp_ring`, with the KH1 gauge off and
+/// Re:CoM's gauge at KH1's place: a ring around nothing would make no sense): the 7.2 MP bar is not
+/// made then.
+pub fn ring_on() -> bool {
+    parts().mp_ring && place_wanted()
 }
 
 /// KH1's command menu look is drawn (`hud_kh1_menu`).
@@ -254,6 +289,15 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
         // SAFETY: executable memory of our own near the exe; the call sites' bytes were checked
         // at start and are checked again before the write.
         unsafe { install_masks(b) };
+        // Re:CoM's HP gauge at KH1's place calls Re:CoM's layer replace through the vtable.
+        // SAFETY: reads of the mapped image (the build was checked at start).
+        let slots_ok = crate::sites::KH1_HUD_PLACE_PTRS.iter().all(|p| unsafe { rd::<usize>(b + p.rva as usize) } == b + p.target as usize);
+        PLACE_OK.store(slots_ok, Ordering::Relaxed);
+        if !slots_ok {
+            log("kh1 hud: C2DSeqCtrl's replace slot is not Re:CoM Steam's: Re:CoM's HP gauge stays top left");
+        } else if MANIFEST.get().is_some_and(|m| m.recom_hp.is_none()) {
+            log("kh1 hud: kh1-hud.json has no recom_hp (an older asset step): Re:CoM's HP gauge stays top left; run this version's asset step for hud_recom_hp_kh1_place");
+        }
         // H7 (KH1's lock-on cursor) is off: the owner chose Re:CoM's lock-on visuals (cursor,
         // enemy HP gauges, no LOCK ON! plate), 2026-11-01. The wrapper stays in the code.
         if LOCKON_KH1 && MANIFEST.get().is_some_and(|m| m.cursor.is_some()) {
@@ -306,6 +350,7 @@ pub unsafe fn gauge_made(gauge: usize, list: i32) {
         s.gauges.retain(|g| g.0 != gauge);
         s.gauges.push((gauge, list));
     }
+    place_recom_hp(gauge, list);
     build(gauge, list);
     UP.store(active(), Ordering::Relaxed);
     let bits = hidden_bits();
@@ -361,6 +406,33 @@ fn class_of(v: &View) -> usize {
 }
 
 impl Cluster {
+    /// The control and layer of `kh::frames`' entry `k` (None: not drawn by this cluster).
+    fn layer_of(&self, k: usize) -> Option<(usize, u32)> {
+        if self.mp_only {
+            mp_ring::layer_of(k)
+        } else {
+            Some(LAYERS[k])
+        }
+    }
+
+    /// The MP fades' priority (with the MP layer).
+    fn prio_mp(&self) -> u8 {
+        if self.mp_only {
+            mp_ring::PRIORITY_MP
+        } else {
+            PRIORITY_BACK
+        }
+    }
+
+    /// The charge fades' priority (with the charge layer).
+    fn prio_charge(&self) -> u8 {
+        if self.mp_only {
+            mp_ring::PRIORITY_CHARGE
+        } else {
+            PRIORITY_FRONT
+        }
+    }
+
     unsafe fn release(&mut self, which: u8) {
         let v = match which {
             0 => &mut self.mp,
@@ -413,12 +485,12 @@ impl Cluster {
     /// change from what was shown (`first`: no fades).
     unsafe fn show(&mut self, v: View, first: bool) {
         let old = self.view;
-        let class = class_of(&v);
+        let class = if self.mp_only { mp_ring::CLASS } else { class_of(&v) };
         let old_class = self.class;
         let class_changed = class != self.class && !first;
         if class != self.class {
             self.class = class;
-            for &c in &self.ctrls {
+            for &c in self.ctrls.iter().filter(|&&c| c != 0) {
                 place(c, class, 0.0);
             }
             for p in self.mp.iter().chain(&self.charge) {
@@ -433,7 +505,7 @@ impl Cluster {
         for (k, ((g, f), (_, f0))) in fv.iter().zip(fo.iter()).enumerate() {
             let f = if *g == group::CHARGE { charge_main } else { *f };
             if first || f != *f0 || (*g == group::CHARGE && oc != nc) {
-                let (ci, layer) = LAYERS[k];
+                let Some((ci, layer)) = self.layer_of(k) else { continue };
                 func::<FrameFn>(FRAME)(self.ctrls[ci], layer, f);
                 self.shown[k] = f;
             }
@@ -443,7 +515,7 @@ impl Cluster {
                 if a.0 != b.0 {
                     self.release(0);
                     for g in kh::mp_fade(a.0, b.0) {
-                        if let Some(p) = self.piece(g, PRIORITY_BACK, 0.0) {
+                        if let Some(p) = self.piece(g, self.prio_mp(), 0.0) {
                             self.mp.push(p);
                         }
                     }
@@ -452,11 +524,16 @@ impl Cluster {
             if oc != nc {
                 self.release(1);
                 for g in charge_pieces {
-                    if let Some(p) = self.piece(g, PRIORITY_FRONT, 0.0) {
+                    if let Some(p) = self.piece(g, self.prio_charge(), 0.0) {
                         self.charge.push(p);
                     }
                 }
             }
+        }
+        if self.mp_only {
+            // KH1's MP ring only: Re:CoM's own gauge shows HP, the face and low HP.
+            self.view = v;
+            return;
         }
         let d = kh::danger(v.hp, v.max_hp);
         let hit = if first { None } else { kh::hurt_strength(old.hp, v.hp) };
@@ -516,7 +593,7 @@ impl Cluster {
 
     /// The held controls a program replaces: back and front, and the face for slides and fades.
     unsafe fn held_visible(&self, on: bool, face: bool) {
-        for &c in &self.ctrls[..if face { 3 } else { 2 }] {
+        for &c in self.ctrls[..if face { 3 } else { 2 }].iter().filter(|&&c| c != 0) {
             func::<VisFn>(ALL_VISIBLE)(c, on as i32);
         }
     }
@@ -661,10 +738,11 @@ impl Cluster {
             self.release(2);
         }
         self.hidden = hidden;
-        let faded = !now && self.start(if hidden { program::FADE_OUT } else { program::FADE_IN }, self.class);
+        // The MP ring hides and shows at once, with Re:CoM's HP gauge (state 7 / 1).
+        let faded = !now && !self.mp_only && self.start(if hidden { program::FADE_OUT } else { program::FADE_IN }, self.class);
         if !faded {
             self.drop_units();
-            for &c in &self.ctrls {
+            for &c in self.ctrls.iter().filter(|&&c| c != 0) {
                 func::<VisFn>(ALL_VISIBLE)(c, (!hidden) as i32);
             }
         }
@@ -695,9 +773,16 @@ unsafe fn view_of(gauge: usize) -> View {
     View { hp: kh::hp_units(rd::<u16>(gauge + G_HP) as i32), max_hp: kh::hp_units(rd::<u16>(gauge + G_MAX_HP) as i32), mp }
 }
 
-/// Builds the cluster on `gauge` (its init has run, on draw list `list`).
+/// Builds the cluster on `gauge` (its init has run, on draw list `list`): KH1's whole gauge
+/// (`hud_kh1_gauge`), else KH1's MP ring around Re:CoM's HP ring (`hud_kh1_mp_ring`).
 unsafe fn build(gauge: usize, list: i32) {
-    if !gauge_on() || !set_ready() {
+    if !gauge_on() {
+        if ring_on() && set_ready() {
+            build_ring(gauge, list);
+        }
+        return;
+    }
+    if !set_ready() {
         return;
     }
     let v = view_of(gauge);
@@ -725,7 +810,7 @@ unsafe fn build(gauge: usize, list: i32) {
     for (g, _) in kh::frames(&v).iter().skip(4) {
         add(ctrls[1], list, PRIORITY_FRONT, *g, xoff, 1);
     }
-    let mut cl = Cluster { gauge, list, xoff, class, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2] };
+    let mut cl = Cluster { gauge, list, xoff, class, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2], mp_only: false };
     cl.party_build();
     cl.show(v, true);
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
@@ -741,6 +826,97 @@ unsafe fn build(gauge: usize, list: i32) {
     } else {
         cl.destroy();
     }
+}
+
+/// Builds KH1's MP ring on `gauge`: the cluster's MP back, MP, charge and tick groups (KH1's
+/// absolute places, size class 2: centred on [`recom_hp::CENTRE`], where Re:CoM's HP ring goes),
+/// at KH1's right margin, under Re:CoM's HP gauge (priorities 0 / 1 < 2). Frames, fades and the
+/// HUD's hide / show are the cluster's (`Cluster::show`, `hide`), on KH1's MP reads and writes.
+unsafe fn build_ring(gauge: usize, list: i32) {
+    let v = view_of(gauge);
+    let xoff = kh::right_margin(rd::<f32>(gauge + G_XOFF));
+    let mut ctrls = [0usize; 3];
+    for c in ctrls.iter_mut().take(2) {
+        match new_ctrl() {
+            Some(n) => *c = n,
+            None => {
+                for &m in ctrls.iter().filter(|&&m| m != 0) {
+                    super::d2::delete(m, list);
+                }
+                return;
+            }
+        }
+    }
+    for &c in &ctrls[..2] {
+        place(c, mp_ring::CLASS, 0.0);
+    }
+    let frames = kh::frames(&v);
+    for (k, (g, _)) in frames.iter().enumerate() {
+        if let Some((ci, _)) = mp_ring::layer_of(k) {
+            let prio = if ci == 0 { mp_ring::PRIORITY_MP } else { mp_ring::PRIORITY_CHARGE };
+            add(ctrls[ci], list, prio, *g, xoff, 1);
+        }
+    }
+    let mut cl = Cluster { gauge, list, xoff, class: mp_ring::CLASS, ctrls, view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2], mp_only: true };
+    cl.show(v, true);
+    let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
+    if hidden {
+        cl.hide(true, true);
+    }
+    note(|| format!("KH1's MP ring around Re:CoM's HP ring on the player gauge {gauge:#x}: MP {:?}, margin {xoff}{}", v.mp, if hidden { " (HUD hidden)" } else { "" }));
+    if let Ok(mut s) = STATE.lock() {
+        for mut old in s.clusters.extract_if(.., |c| c.gauge == gauge) {
+            old.destroy();
+        }
+        s.clusters.push(cl);
+    } else {
+        cl.destroy();
+    }
+}
+
+/// Re:CoM's HP gauge at KH1's place, turned 180° (`hud_recom_hp_kh1_place`): right after Re:CoM's
+/// init, its control `+0x78`'s layers 1..3 (`gauge:01` 7, 8, 9) are replaced with the asset step's
+/// turned copies through Re:CoM's own replace (the same place in the draw list, the same
+/// visibility; the frames Re:CoM's init gave them set again: trunc(max HP / 560 × 470)), and the
+/// control's layout position (Re:CoM's `(60, 60)`) becomes KH1's centre at KH1's right margin.
+/// Layer 0 (the disc) and 4 (the face) stay Re:CoM's, upright. From then on Re:CoM's own code sets
+/// the frames (HP setters, the drain in its update), swaps the disc and face (hurt, low HP), hides
+/// and shows the layers, and draws them; nothing of ours runs for it.
+unsafe fn place_recom_hp(gauge: usize, list: i32) {
+    if !place_wanted() {
+        return;
+    }
+    let Some(first) = manifest().and_then(|m| m.recom_hp) else { return };
+    let want = first + recom_hp::TURNED.len() as u32;
+    let have = super::mp_bar::set_groups(recom_hp::SET);
+    if have != Some(want) {
+        if !PLACE_LOGGED.swap(true, Ordering::Relaxed) {
+            log(&format!("kh1 hud: gauge:01 has {} groups, not {want} (Panacea serves another FORM/0002/FO0002.SPR: run this version's asset step): Re:CoM's HP gauge stays top left", have.map_or("no".to_string(), |n| n.to_string())));
+        }
+        return;
+    }
+    let hp: usize = rd(gauge + G_HP_CTRL);
+    if hp == 0 || rd::<usize>(hp) != base() + SEQ_CTRL_VTABLE as usize || (rd::<u8>(hp + C_LAYERS) as u32) < recom_hp::FIRST_LAYER + recom_hp::TURNED.len() as u32 {
+        return;
+    }
+    let gx = rd::<f32>(gauge + G_XOFF);
+    let f = recom_hp::frame(rd::<u16>(gauge + G_MAX_HP) as u32);
+    for k in 0..recom_hp::TURNED.len() as u32 {
+        let layer = recom_hp::FIRST_LAYER + k;
+        if !super::d2::replace(hp, list, layer, recom_hp::SET.as_ptr(), first + k, -gx, 1) {
+            // Put back what was turned: Re:CoM's gauge as it was.
+            for j in 0..k {
+                super::d2::replace(hp, list, recom_hp::FIRST_LAYER + j, recom_hp::SET.as_ptr(), recom_hp::TURNED[j as usize], -gx, 1);
+                func::<FrameFn>(FRAME)(hp, recom_hp::FIRST_LAYER + j, f);
+            }
+            note(|| format!("gauge:01 group {} not made: Re:CoM's HP gauge stays top left", first + k));
+            return;
+        }
+        func::<FrameFn>(FRAME)(hp, layer, f);
+    }
+    let (x, y) = recom_hp::origin(gx);
+    func::<VecFn>(LAYOUT_POS)(hp, V4([x, y, 0.0, 1.0]).0.as_ptr());
+    note(|| format!("Re:CoM's HP gauge {gauge:#x} at KH1's place, turned 180° (gauge:01 groups {first}..{} on layers 1..3, frame {f}), origin ({x}, {y}), Re:CoM's x offset {gx}", want - 1));
 }
 
 /// Re:CoM's gauge HP and max HP changed: show them.
@@ -1199,7 +1375,7 @@ pub fn refresh() {
         // SAFETY: a live gauge.
         unsafe { recom_hud(g, bits) };
     }
-    if gauge_on() {
+    if gauge_on() || ring_on() {
         let missing: Vec<(usize, i32)> = STATE.lock().map(|s| s.gauges.iter().copied().filter(|g| !s.clusters.iter().any(|c| c.gauge == g.0)).collect()).unwrap_or_default();
         for (g, list) in missing {
             // SAFETY: a live gauge (its dtor removes it from the list).

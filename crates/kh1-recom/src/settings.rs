@@ -75,12 +75,21 @@ pub struct Settings {
     pub hud_parts: HudParts,
 }
 
-/// The KH1 HUD's pieces (each only at `hud = kh1`). Defaults: the owner's picks, 2026-11-01.
+/// The KH1 HUD's pieces (each only at `hud = kh1`). Defaults: the owner's picks, 2026-11-01 (the
+/// baked KH1 gauge dropped: "Lets just keep the KH1 command menu and the triangle prompts. For the
+/// health bar ... get the Re:CoM health bar, place it in the same place as the KH1 health bar";
+/// MP "Around the ring").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HudParts {
     /// KH1's gauge cluster (HP / MP rings, face, hurt face, low-HP flash, shake); off: Re:CoM's
-    /// HP gauge and the 7.x MP bar.
+    /// HP gauge (placed by [`HudParts::recom_hp_place`]) and the MP ring or the 7.x MP bar.
     pub gauge: bool,
+    /// With the KH1 gauge off: Re:CoM's HP gauge at KH1's place (bottom right), its ring and bar
+    /// turned 180° as KH1's (the face upright); off: Re:CoM's place (top left).
+    pub recom_hp_place: bool,
+    /// With the KH1 gauge off and Re:CoM's gauge at KH1's place: KH1's MP ring (MP, max MP,
+    /// charge, KH1's fades and straight segments) around Re:CoM's HP ring; off: the 7.2 MP bar.
+    pub mp_ring: bool,
     /// KH1's command menu look (panels, font, icons, the green Triangle tab); off: 7.3's look.
     pub menu: bool,
     /// Donald's and Goofy's KH1 gauges (drawn with the gauge cluster).
@@ -97,15 +106,17 @@ pub struct HudParts {
 
 impl Default for HudParts {
     fn default() -> Self {
-        HudParts { gauge: true, menu: true, party: true, hide_hp: true, hide_minimap: false, hide_friends: true, hide_prizes: false }
+        HudParts { gauge: false, recom_hp_place: true, mp_ring: true, menu: true, party: true, hide_hp: false, hide_minimap: false, hide_friends: true, hide_prizes: false }
     }
 }
 
 impl HudParts {
     /// (ini key, value) for each piece, in the file's order.
-    pub fn keys(self) -> [(&'static str, bool); 7] {
+    pub fn keys(self) -> [(&'static str, bool); 9] {
         [
             ("hud_kh1_gauge", self.gauge),
+            ("hud_recom_hp_kh1_place", self.recom_hp_place),
+            ("hud_kh1_mp_ring", self.mp_ring),
             ("hud_kh1_menu", self.menu),
             ("hud_kh1_party", self.party),
             ("hud_hide_recom_hp", self.hide_hp),
@@ -118,6 +129,8 @@ impl HudParts {
     fn set(&mut self, key: &str, v: bool) -> bool {
         match key {
             "hud_kh1_gauge" => self.gauge = v,
+            "hud_recom_hp_kh1_place" => self.recom_hp_place = v,
+            "hud_kh1_mp_ring" => self.mp_ring = v,
             "hud_kh1_menu" => self.menu = v,
             "hud_kh1_party" => self.party = v,
             "hud_hide_recom_hp" => self.hide_hp = v,
@@ -236,15 +249,22 @@ menu_language = us
 hud = recom
 ;
 ; At hud = kh1, each piece on or off:
-;   hud_kh1_gauge: KH1's HP / MP rings and face (off: Re:CoM's HP gauge and the MP bar)
+;   hud_kh1_gauge: KH1's own HP / MP rings and face (off: Re:CoM's HP gauge, see the next two)
+;   hud_recom_hp_kh1_place: with hud_kh1_gauge off, Re:CoM's HP gauge bottom right where KH1's
+;     is, its ring and bar turned 180 degrees as KH1's, Sora's face upright (off: top left)
+;   hud_kh1_mp_ring: with hud_kh1_gauge off, hud_recom_hp_kh1_place on and combat = kh1, KH1's
+;     MP ring around Re:CoM's HP ring (KH1's MP, charge and fades; past 9 MP KH1's straight
+;     segments along the bottom) (off: the Re:CoM-style MP bar under the HP bar)
 ;   hud_kh1_menu:  KH1's command menu look and green Triangle tab (off: the Re:CoM-styled menu)
 ;   hud_kh1_party: Donald's and Goofy's KH1 gauges (shown with hud_kh1_gauge)
 ;   hud_hide_recom_hp / hud_hide_minimap / hud_hide_friends / hud_hide_prizes: hide Re:CoM's
 ;     HP gauge / minimap / FRIENDS row / EXP, NEXT LV and Moogle point pop-ups
-hud_kh1_gauge = on
+hud_kh1_gauge = off
+hud_recom_hp_kh1_place = on
+hud_kh1_mp_ring = on
 hud_kh1_menu = on
 hud_kh1_party = on
-hud_hide_recom_hp = on
+hud_hide_recom_hp = off
 hud_hide_minimap = off
 hud_hide_friends = on
 hud_hide_prizes = off
@@ -462,7 +482,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -548,8 +568,14 @@ mod combo_tests {
     #[test]
     fn hud_parts_default_and_parse() {
         assert_eq!(parse(DEFAULT_FILE).0.hud_parts, HudParts::default());
-        let (s, w) = parse("hud_kh1_gauge = off\nhud_hide_minimap = on\nhud_bogus = on\n");
-        assert_eq!((s.hud_parts.gauge, s.hud_parts.hide_minimap, w.len()), (false, true, 1));
+        let (s, w) = parse("hud_kh1_gauge = on\nhud_hide_minimap = on\nhud_bogus = on\n");
+        assert_eq!((s.hud_parts.gauge, s.hud_parts.hide_minimap, w.len()), (true, true, 1));
+        // The owner's ini (2026-11-01) has neither of the two new keys: both on.
+        let (s, w) = parse("hud = kh1\nhud_kh1_gauge = off\nhud_kh1_menu = on\nhud_kh1_party = off\nhud_hide_recom_hp = off\nhud_hide_friends = on\n");
+        assert!(w.is_empty());
+        assert!(!s.hud_parts.gauge && s.hud_parts.recom_hp_place && s.hud_parts.mp_ring && !s.hud_parts.hide_hp);
+        let (s, _) = parse("hud_recom_hp_kh1_place = off\nhud_kh1_mp_ring = off\n");
+        assert!(!s.hud_parts.recom_hp_place && !s.hud_parts.mp_ring);
     }
 
     #[test]

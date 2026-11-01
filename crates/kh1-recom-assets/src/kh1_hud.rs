@@ -2606,8 +2606,9 @@ pub fn add_to_rtm(rtm: &[u8], assets: &mut Vec<HdAsset>, b: &Built, langs: &[Str
     Ok(c.write())
 }
 
-/// `kh1-hud.json`: the set, the group count, the languages and the inputs' sha256.
-pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)]) -> String {
+/// `kh1-hud.json`: the set, the group count, the languages and the inputs' sha256; `recom_hp`, the
+/// first of Re:CoM's HP ring groups turned 180° in `gauge:01` (`crate::recom_hp`), when added.
+pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)], recom_hp: Option<usize>) -> String {
     let mut s = String::new();
     let _ = writeln!(s, "{{");
     let _ = writeln!(s, "  \"format\": \"{FORMAT}\",");
@@ -2622,6 +2623,10 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)]) ->
     );
     let _ = writeln!(s, "  \"units\": [{}],", (0..m.first.len()).map(|u| format!("[{}, {}]", m.first[u], m.programs_of(u).len())).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"runs\": [{}],", m.runs.iter().map(|r| format!("[{}, {}, {}, {}]", r.0, r.1, r.2, r.3)).collect::<Vec<_>>().join(", "));
+    if let Some(f) = recom_hp {
+        let of = crate::recom_hp::TURNED.map(|g| g.to_string()).join(", ");
+        let _ = writeln!(s, "  \"recom_hp\": {{\"set\": \"{}\", \"first\": {f}, \"of\": [{of}]}},", crate::recom_hp::SET);
+    }
     if let Some(l) = b.level_up {
         let _ = writeln!(s, "  \"level_up\": {l},");
     }

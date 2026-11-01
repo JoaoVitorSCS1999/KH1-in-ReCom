@@ -257,6 +257,9 @@ pub struct Manifest {
     pub cursor: Option<u32>,
     /// KH1's LEVEL UP!! box group (H8), when built.
     pub level_up: Option<u32>,
+    /// The first of Re:CoM's HP ring groups turned 180° in `gauge:01` ([`recom_hp`]), when the
+    /// asset step added them.
+    pub recom_hp: Option<u32>,
 }
 
 /// Reads `kh1-hud.json`; refuses another format or group count than this DLL's.
@@ -353,7 +356,82 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
         Some(Some(c)) if c < groups => Some(c),
         Some(_) => return Err("a bad level_up entry".into()),
     };
-    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party, cursor, level_up })
+    let recom_hp = match v.get("recom_hp") {
+        None => None,
+        Some(r) => {
+            let set = r.get("set").and_then(|x| x.as_str()).unwrap_or("");
+            let of = r.get("of").and_then(nums).unwrap_or_default();
+            let first = r.get("first").and_then(|x| x.as_u32()).ok_or("recom_hp without first")?;
+            if set.as_bytes() != &recom_hp::SET[..recom_hp::SET.len() - 1] || of != recom_hp::TURNED || first != recom_hp::BASE_GROUPS {
+                return Err(format!("recom_hp {set:?} {of:?} from {first}, this DLL expects gauge:01 {:?} from {}", recom_hp::TURNED, recom_hp::BASE_GROUPS));
+            }
+            Some(first)
+        }
+    };
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target, party, cursor, level_up, recom_hp })
+}
+
+/// Re:CoM's HP gauge at KH1's place, its ring and bar turned 180° (owner, 2026-11-01; asset step
+/// `kh1_recom_assets::recom_hp`). Re:CoM's control `+0x78` keeps its five layers; layers 1..3
+/// (`gauge:01` 7 max HP, 8 drain, 9 HP) get the turned copies, layer 0 (the disc behind the face)
+/// and 4 (the face) stay Re:CoM's, drawn upright about the gauge's origin.
+pub mod recom_hp {
+    /// The set, NUL-terminated.
+    pub const SET: &[u8] = b"gauge:01\0";
+    /// Re:CoM Steam's groups in `gauge:01` (the turned ones follow). Checked (files).
+    pub const BASE_GROUPS: u32 = 47;
+    /// The groups turned, in layer order (layers 1, 2, 3; `0x140208360`). Checked (decomp).
+    pub const TURNED: [u32; 3] = [7, 8, 9];
+    /// The first layer they replace.
+    pub const FIRST_LAYER: u32 = 1;
+    /// Where the ring's centre goes in KH1's 512 × 384 space: the centre of KH1's MP ring as our
+    /// bake draws it (a circle fit to the MP back ring's outer edge, offline render of the owner's
+    /// files: (443.9, 317.0), R 57.5). KH1's objects meet at (444, 316); its fans start at
+    /// (443, 317) (`0x14026B790`). Checked (offline render).
+    pub const CENTRE: (f32, f32) = (444.0, 317.0);
+    /// Re:CoM adds 0.25 to every animation translation (`0x14024B4E0` → `0x1402B4A00`, an add;
+    /// Checked (exe)), so its gauge's visual centre is its origin + 0.25; turned in the data, the
+    /// ring turns about that point. The origin goes 0.25 up-left of [`CENTRE`].
+    pub const BIAS: f32 = 0.25;
+    /// Re:CoM's frame for an HP value (`0x140208360`, `0x14020D6A0`, `0x14020D8E0`): trunc(hp /
+    /// 560 × 470), in f32 as Re:CoM computes it. Checked (decomp).
+    pub fn frame(hp: u32) -> i32 {
+        ((hp as f32 / 560.0) * 470.0) as i64 as i32
+    }
+
+    /// The layout position for the HP control (`0x140248660` takes KH1-space x, y): KH1's centre
+    /// at KH1's right margin, minus the bias, plus Re:CoM's own layer offset (its layers are added
+    /// at −`+0xA0`, the left margin), so the ring lands where KH1's right-anchored cluster does.
+    pub fn origin(gauge_xoff: f32) -> (f32, f32) {
+        (CENTRE.0 + super::right_margin(gauge_xoff) + gauge_xoff - BIAS, CENTRE.1 - BIAS)
+    }
+}
+
+/// The KH1 MP ring around Re:CoM's HP ring (`hud_kh1_mp_ring`): which of the cluster's held groups
+/// it shows ([`frames`]' index → (control, layer)), and their priorities. Control 0: MP back and
+/// MP (priority 0), control 1: charge and the max-MP ticks (priority 1); both under Re:CoM's HP
+/// gauge (priority 2): Re:CoM's 2D sprites go to the foreground display list's bucket min(priority,
+/// 25), drawn bucket 0 first, in insertion order within a bucket (`0x14024ABB0`, `0x140253F40`,
+/// `0x140253AE0`; Checked (decomp)). KH1 draws MP back, MP, (the HP arc over them), charge, ticks
+/// (`0x14026CF90`).
+pub mod mp_ring {
+    /// `frames` index → (control, layer); None for the HP / face parts.
+    pub fn layer_of(k: usize) -> Option<(usize, u32)> {
+        match k {
+            2 => Some((0, 0)),
+            3 => Some((0, 1)),
+            5 => Some((1, 0)),
+            6 => Some((1, 1)),
+            _ => None,
+        }
+    }
+    /// The MP back / MP control's priority (and the MP fades').
+    pub const PRIORITY_MP: u8 = 0;
+    /// The charge / ticks control's priority (and the charge fades').
+    pub const PRIORITY_CHARGE: u8 = 1;
+    /// KH1's size class whose centre is [`super::recom_hp::CENTRE`] (offset (0, 0)): the ring
+    /// stays put around Re:CoM's fixed-size ring.
+    pub const CLASS: usize = 2;
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -584,6 +662,23 @@ mod tests {
         assert_eq!((mm.word("fr", 1), mm.word("fr", 6), mm.word("gr", 1), mm.word("us", 2)), (Some(641), Some(642), Some(643), None));
         assert!(mm.tab_icon && menu::TAB == 23 && menu::WORDS == 25);
         assert!(parse_manifest(&ok.replace("kh1hud:00", "Cockpit:00")).is_err());
+        assert_eq!(m.recom_hp, None);
+        let with = ok.replace("\"languages\"", "\"recom_hp\": {\"set\": \"gauge:01\", \"first\": 47, \"of\": [7, 8, 9]}, \"languages\"");
+        assert_eq!(parse_manifest(&with).unwrap().recom_hp, Some(47));
+        assert!(parse_manifest(&with.replace("[7, 8, 9]", "[7, 8]")).is_err());
+        assert!(parse_manifest(&with.replace("\"first\": 47", "\"first\": 48")).is_err());
+    }
+
+    #[test]
+    fn recom_hp_place_and_frames() {
+        // 16:9: Re:CoM's x offset 85, KH1's margin 86: the origin lands KH1's centre + 86 on screen
+        // once Re:CoM's own -85 layer offset is added.
+        let (x, y) = recom_hp::origin(85.0);
+        assert_eq!((x - 85.0 + 0.25, y + 0.25), (444.0 + 86.0, 317.0));
+        assert_eq!(recom_hp::origin(0.0), (443.75, 316.75));
+        assert_eq!((recom_hp::frame(300), recom_hp::frame(560), recom_hp::frame(0)), (251, 470, 0));
+        assert_eq!([2, 3, 5, 6].map(mp_ring::layer_of), [Some((0, 0)), Some((0, 1)), Some((1, 0)), Some((1, 1))]);
+        assert!([0, 1, 4].iter().all(|&k| mp_ring::layer_of(k).is_none()));
     }
 
     #[test]

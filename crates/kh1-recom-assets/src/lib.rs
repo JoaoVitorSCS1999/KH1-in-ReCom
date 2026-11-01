@@ -22,6 +22,7 @@
 //!   `Cockpit:00` (`FORM/0002/FO0002.SPR`) and `kh1-mp-bar.json`;
 //! - [`command_menu`]: KH1's command menu (M7 stage 7.3): its words from the player's KH1
 //!   `Word.bin` (`kh1-command-menu.json`) and Re:CoM's row plates as groups of `Cockpit:00`;
+//! - [`recom_hp`]: Re:CoM's HP ring and bar turned 180° (`gauge:01`) for KH1's place;
 //! - [`flip`]: the "Re:CoM's content in KH1" model-writer test (`kh1-flip-test`).
 //!
 //! No game data is embedded; everything is read from the user's files at run time.
@@ -42,6 +43,7 @@ pub mod math;
 pub mod mdl;
 pub mod kh1_hud;
 pub mod mp_bar;
+pub mod recom_hp;
 pub mod rtm;
 pub mod ses;
 pub mod stats;
