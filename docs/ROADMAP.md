@@ -159,3 +159,14 @@ Cloud; enemy cards; sleights with no KH1 equivalent; Riku's story at KH1 setting
 - Re:CoM's battle rooms are arenas. Check that KH1 jumps, glides and Sonic Blade travel fit
   them (M4/M5).
 - Bosses that read card values (M6): the full list, found by testing.
+
+## Owner questions waiting (owner away since 2026-11-01 01:43: "assume everything is correct until I say otherwise")
+
+- Gravity (0.27.2): KH1 has no slow; built KH1's squash under the falling sphere. Keep the squash,
+  the slow as decided in decision 38 (not KH1), or neither? KH1's Gravity hit also flattens the
+  enemy to 0.1 height: add it?
+- Spell unlocks (0.28.0): review the boss table in `recom-m7-unlocks.md`; "+1 per boss" or each
+  row sets its own level; repeated Organization fights count only the first.
+- KH1 HUD: the hit shake was built as baked animation data (owner to confirm).
+- KH1 HUD: once the KH1 elements look right, the owner gives places for Re:CoM's extras (minimap,
+  room plate, …).
