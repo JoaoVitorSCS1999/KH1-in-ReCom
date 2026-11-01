@@ -497,21 +497,26 @@ bones): local rotation (geodesic angle), translation and scale.
 
 ## KH1's menu sounds (`kh1-menu-sounds.bin` / `.json`, 2026-11-01)
 
-KH1's own SCDs for the command menu's sounds 1 / 3 / 4 / 6 (move, back, error, open), from the PC
-assets of KH1's `amusic/se000.dat`, unchanged. Module `menu_sounds`; design, addresses, the video
-check and what the DLL does: `docs/recom-m7-command-menu.md` § Sounds.
+KH1's system sound bank `se000.win32.scd` (the one PC asset of KH1's `amusic/se000.dat`; KH1's
+bank 2, whose entry `n` is menu sound `n`), unchanged. Module `menu_sounds`; design, addresses,
+the video check and what the DLL does: `docs/recom-m7-command-menu.md` § Sounds.
 
 - **Reads:** `amusic/se000.dat` (`kh1_first`; Checked (hed): 217,088 bytes, 10.9 MB stored) with
-  its PC assets; picks for each id the asset KH1 itself would (`.win32.scd`, `atoi(name + 2) ==
-  id`); checks it is a whole little-endian `SEDBSSCF` (version 1–4, its size word, ≥ 1 sound and
-  stream). Checked (files) on the 21 SCDs of `xa_ex_0010.mdls` (`KH1_TEST_DATA`).
-- **Writes**, under the manifest's root: `kh1-menu-sounds.bin` (the SCDs, 16-byte aligned) and
-  `kh1-menu-sounds.json`. A run that finds none removes older ones (the DLL then keeps Re:CoM's
-  sounds). A missing or bad id is a note; the others are still written.
-- **Prints**, e.g. `KH1 menu sound 6 (open): se000006.win32.scd (… bytes, 1 sound(s), 1 ch, 48000
-  Hz, MS ADPCM) → Re:CoM id 9006000`. Without any: `note: KH1 menu sounds not taken: … (its sound
-  assets: [...])`.
-- Not run on the owner's install yet (`se000.dat` is not in this session).
+  its PC assets; takes the one KH1 numbers 0 (`atoi(name + 2)`: `se000.win32.scd`); checks it is
+  a whole little-endian `SEDBSSCF` (version 1–4, its size word, ≥ 1 sound and stream, every
+  stream inside the file) and that menu ids 1 / 3 / 4 / 6 are below its sound count. Checked
+  (files) on the 21 SCDs of `xa_ex_0010.mdls` (`KH1_TEST_DATA`).
+- **Writes**, under the manifest's root: `kh1-menu-sounds.bin` (the SCD itself),
+  `kh1-menu-sounds.json`, and `kh1-menu-sounds-preview/se000_<id>_<use>.wav` (MS ADPCM streams
+  1 / 3 / 4 / 6 wrapped as WAVs, undecoded; for listening, not for the mod). A run that can't
+  take the bank removes older `.json` / `.bin` (the DLL then keeps Re:CoM's sounds). An id
+  without an entry is a note; the others still play KH1's.
+- **Prints**, e.g. `KH1 menu sounds: se000.win32.scd (… bytes, SCD v3, N sounds, N tracks, N
+  streams) → Re:CoM bank 9000`, then per id `KH1 menu sound 6 (open): entry 6, stream 6: 1 ch,
+  48000 Hz, MS ADPCM, … samples = 0.… s → Re:CoM id 9000006`. Without the bank: `note: KH1 menu
+  sounds not taken: … (its PC assets: [...])`.
+- 0.39.0's step looked for one SCD per sound (`se000001.win32.scd` …) and found none on the
+  owner's install (only `se000.win32.scd`): fixed.
 
 ### Command for the owner
 
@@ -530,7 +535,8 @@ OpenKH mod folder next to the other files, and add to `mod.yml`:
 ```
 
 Build in the Mods Manager and restart the game. Please send the `KH1 menu sound` lines the step
-prints and the `menu sounds:` lines of `kh1-recom.log`.
+prints, the four WAVs in `kh1-playground/build-out/kh1-menu-sounds-preview/` (do they sound like
+KH1's move / back / error / open?), and the `menu sounds:` lines of `kh1-recom.log`.
 
 ## The MP bar (`FORM/0002/FO0002.SPR`, M7 stage 7.2)
 

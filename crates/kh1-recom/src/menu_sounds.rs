@@ -1,20 +1,21 @@
 //! KH1's command menu sounds in Re:CoM's own sound banks (owner, 2026-11-01: "Build a sound bank
 //! from your KH1 files at the asset step and play KH1's exact menu sounds").
 //!
-//! The asset step (`kh1-recom-assets` `menu_sounds`) copies KH1's own SCDs for menu sounds 1 / 3 /
-//! 4 / 6 (move, back, error, open) from the player's `amusic/se000.dat` into
-//! `kh1-menu-sounds.bin`, with `kh1-menu-sounds.json`. The DLL (`win/menu_sounds.rs`):
+//! KH1 plays menu sound `id` as entry `id` of its system bank, the one SCD `se000.win32.scd` of
+//! `amusic/se000.dat` (bank 2: `0x1400DE460` → `CreateSound(handle, id, 0, 1, 0)`; Checked
+//! (decomp + exe)). The asset step (`kh1-recom-assets` `menu_sounds`) copies that SCD unchanged
+//! into `kh1-menu-sounds.bin`, with `kh1-menu-sounds.json`. The DLL (`win/menu_sounds.rs`):
 //!
-//! - gives each SCD to Re:CoM's own bank registration `0x1402F5D70` (what Re:CoM's loader does
-//!   with a sound pack's PC assets) as bank `GROUP_BASE + KH1 id`, the first time it is played;
-//! - extends Re:CoM's id → bank map `0x1402A8560` with that one range: groups 9000..9999 are
-//!   their own bank, as Re:CoM's own 200..599 are. Re:CoM gives groups ≥ 8000 no bank, so no
-//!   Re:CoM id changes; Re:CoM puts its banks at 0–4, 0xC–0xF and 200–599 (a pack's `.seb`,
-//!   `0x1402A8210`) and 0xFFFF (voices, `0x1402F1250`), so none is ever put at 9000..9999 or
-//!   released from there (Checked (decomp));
-//! - plays KH1 sound `n` with Re:CoM's own menu-sound call `0x1402AA360((9000 + n) × 1000, −1)`:
-//!   Re:CoM makes sound 0 of the bank (`0x1402F3080`) and plays it (`0x1402F3B60`), as it plays
-//!   its own.
+//! - gives the SCD to Re:CoM's own bank registration `0x1402F5D70` (what Re:CoM's loader does
+//!   with a sound pack's PC assets) as bank `GROUP` (9000), the first time a menu sound plays;
+//! - extends Re:CoM's id → bank map `0x1402A8560` with groups 9000..9999, each its own bank, as
+//!   Re:CoM's own 200..599 are. Re:CoM gives groups ≥ 8000 no bank, so no Re:CoM id changes;
+//!   Re:CoM puts its banks at 0–4, 0xC–0xF and 200–599 (a pack's `.seb`, `0x1402A8210`) and
+//!   0xFFFF (voices, `0x1402F1250`), so none is ever put at 9000..9999 or released from there
+//!   (Checked (decomp));
+//! - plays KH1 sound `n` with Re:CoM's own menu-sound call `0x1402AA360(9000000 + n, −1)`: Re:CoM
+//!   makes sound `id % 1000 = n` of the bank (`0x1402F3080`, the same `CreateSound(handle, n, 0,
+//!   1, 0)` as KH1's) and plays it (`0x1402F3B60`), as it plays its own.
 //!
 //! Re:CoM's ids stay the fallback (no asset files, the Re:CoM-styled menu, a bank not there).
 //! Notes: `docs/recom-m7-command-menu.md` § Sounds.
@@ -22,30 +23,34 @@
 use crate::json;
 
 /// The manifest's `format` (`kh1-recom-assets` writes it).
-pub const FORMAT: &str = "kh1-recom-assets menu-sounds 1";
+pub const FORMAT: &str = "kh1-recom-assets menu-sounds 2";
 /// The manifest, next to the other asset-step manifests.
 pub const MANIFEST: &str = "kh1-menu-sounds.json";
-/// The SCDs, next to the manifest.
+/// The SCD, next to the manifest.
 pub const PACK: &str = "kh1-menu-sounds.bin";
-/// Re:CoM groups for KH1's sounds: KH1 sound `n` is group `GROUP_BASE + n`, bank the same number.
-pub const GROUP_BASE: u32 = 9000;
+/// Re:CoM's bank for KH1's system bank: KH1 sound `n` is Re:CoM id `GROUP × 1000 + n`.
+pub const GROUP: u32 = 9000;
+/// The group range our map gives its own bank (`GROUP` in it).
+pub const GROUP_FIRST: u32 = 9000;
 /// One past the last group of the range.
 pub const GROUP_END: u32 = 10_000;
-/// The KH1 menu sounds the DLL takes (`0x14017A040` ids: move, back, error, open).
+/// The KH1 menu sounds the DLL plays (`0x14017A040` ids: move, back, error, open).
 pub const KH1_IDS: [u32; 4] = [1, 3, 4, 6];
 /// Longest name Re:CoM's bank entry keeps (`+0x30..+0x50`).
 pub const NAME_MAX: usize = 31;
 
-/// One KH1 sound, ready for Re:CoM's bank registration.
+/// KH1's system bank, ready for Re:CoM's bank registration (the SCD itself stays in the pack
+/// file: the DLL reads it into Re:CoM's own buffer).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Bank {
-    pub kh1_id: u32,
     /// KH1's asset name, NUL-terminated (Re:CoM keeps it as the bank entry's name).
     pub name: Vec<u8>,
     /// The bank number (= its id group).
     pub group: u32,
-    /// The SCD, unchanged.
-    pub data: Vec<u8>,
+    /// The SCD's size (the pack's).
+    pub size: usize,
+    /// The KH1 menu ids it has an entry for.
+    pub ids: Vec<u32>,
 }
 
 impl Bank {
@@ -55,79 +60,87 @@ impl Bank {
     }
 }
 
-/// Re:CoM's sound id for KH1 sound `kh1_id` (sound 0 of its bank).
+/// Re:CoM's sound id for KH1 sound `kh1_id` (entry `kh1_id` of bank `GROUP`).
 pub fn recom_id(kh1_id: u32) -> u32 {
-    (GROUP_BASE + kh1_id) * 1000
+    GROUP * 1000 + kh1_id
 }
 
 /// The bank our map gives an id (`0x1402A8560`'s own `id & 0x0FFFFFFF` / 1000 first), or None
 /// for every id Re:CoM's own map decides.
 pub fn slot_of(id: u32) -> Option<i32> {
     let g = (id & 0x0FFF_FFFF) / 1000;
-    (GROUP_BASE..GROUP_END).contains(&g).then_some(g as i32)
+    (GROUP_FIRST..GROUP_END).contains(&g).then_some(g as i32)
 }
 
-/// Reads `kh1-menu-sounds.json` and its pack.
-pub fn parse(manifest: &str, pack: &[u8]) -> Result<Vec<Bank>, String> {
+/// Checks the pack's head: an SCD (`SEDBSSCF`, little-endian, version 1–4) whose own size word is
+/// `size`. Only the first 0x14 bytes are needed.
+pub fn scd_head_ok(head: &[u8], size: usize) -> bool {
+    let Some(h) = head.get(..0x14) else { return false };
+    let version = u32::from_le_bytes([h[8], h[9], h[10], h[11]]);
+    h.starts_with(b"SEDBSSCF") && (1..=4).contains(&version) && h[0xC] == 0 && u32::from_le_bytes([h[0x10], h[0x11], h[0x12], h[0x13]]) as usize == size
+}
+
+/// Reads `kh1-menu-sounds.json`; `pack_size` is the pack file's size, `head` its first bytes.
+pub fn parse(manifest: &str, pack_size: u64, head: &[u8]) -> Result<Bank, String> {
     let v = json::parse(manifest)?;
     if v.get("format").and_then(|f| f.as_str()) != Some(FORMAT) {
-        return Err(format!("not a \"{FORMAT}\" manifest"));
+        return Err(format!("not a \"{FORMAT}\" manifest (an older asset step? run it again)"));
     }
-    if v.get("group_base").and_then(|x| x.as_u32()) != Some(GROUP_BASE) {
-        return Err("group numbering is not this DLL's".into());
+    if v.get("group").and_then(|x| x.as_u32()) != Some(GROUP) {
+        return Err("bank numbering is not this DLL's".into());
     }
-    if v.get("pack_size").and_then(|x| x.as_u32()) != Some(pack.len() as u32) {
-        return Err(format!("{PACK} is {} bytes, not the manifest's (an older pack?)", pack.len()));
+    let size = v.get("pack_size").and_then(|x| x.as_u32()).ok_or("no \"pack_size\"")? as usize;
+    if size as u64 != pack_size {
+        return Err(format!("{PACK} is {pack_size} bytes, not the manifest's {size} (an older pack?)"));
+    }
+    if !scd_head_ok(head, size) {
+        return Err(format!("{PACK} is not a whole SCD"));
+    }
+    let name = v.get("name").and_then(|x| x.as_str()).ok_or("no \"name\"")?;
+    if name.is_empty() || name.len() > NAME_MAX || name.bytes().any(|c| c == 0 || !c.is_ascii()) {
+        return Err(format!("bad bank name {name:?}"));
     }
     let rows = v.get("sounds").and_then(|s| s.as_array()).ok_or("no \"sounds\"")?;
-    let mut out: Vec<Bank> = Vec::new();
+    let mut ids = Vec::new();
     for r in rows {
         let n = |k: &str| r.get(k).and_then(|x| x.as_u32()).ok_or_else(|| format!("a sound has no \"{k}\""));
-        let (id, group, at, size) = (n("kh1_id")?, n("group")?, n("offset")? as usize, n("size")? as usize);
-        let name = r.get("name").and_then(|x| x.as_str()).ok_or("a sound has no \"name\"")?;
-        if !KH1_IDS.contains(&id) || group != GROUP_BASE + id || out.iter().any(|b| b.kh1_id == id) {
-            return Err(format!("unexpected sound {id} (group {group})"));
+        let (id, entry, rid) = (n("kh1_id")?, n("entry")?, n("recom_id")?);
+        // KH1 plays sound `id` as entry `id` (0x1400DE460).
+        if !KH1_IDS.contains(&id) || entry != id || rid != recom_id(id) || ids.contains(&id) {
+            return Err(format!("unexpected sound {id} (entry {entry}, id {rid})"));
         }
-        if name.is_empty() || name.len() > NAME_MAX || name.bytes().any(|c| c == 0 || !c.is_ascii()) {
-            return Err(format!("sound {id}: bad name {name:?}"));
-        }
-        let data = pack.get(at..at.checked_add(size).ok_or("bad size")?).ok_or_else(|| format!("sound {id}: {size} bytes at {at} run past {PACK}"))?;
-        // An SCD whose own size word is its size (both drivers read it so).
-        let own = data.get(0x10..0x14).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
-        if !data.starts_with(b"SEDBSSCF") || own != Some(size) {
-            return Err(format!("sound {id}: not a whole SCD"));
-        }
-        let mut cname = name.as_bytes().to_vec();
-        cname.push(0);
-        out.push(Bank { kh1_id: id, name: cname, group, data: data.to_vec() });
+        ids.push(id);
     }
-    Ok(out)
+    let mut cname = name.as_bytes().to_vec();
+    cname.push(0);
+    Ok(Bank { name: cname, group: GROUP, size, ids })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn scd(n: usize) -> Vec<u8> {
-        let mut d = vec![0u8; n];
+    fn head(n: usize) -> Vec<u8> {
+        let mut d = vec![0u8; 0x30];
         d[..8].copy_from_slice(b"SEDBSSCF");
+        d[8] = 3;
         d[0x10..0x14].copy_from_slice(&(n as u32).to_le_bytes());
         d
     }
 
-    fn manifest(rows: &[(u32, &str, u32, usize, usize)], pack: usize) -> String {
-        let r: Vec<String> = rows.iter().map(|(id, name, g, at, size)| format!("{{\"kh1_id\": {id}, \"use\": \"x\", \"name\": {name:?}, \"group\": {g}, \"offset\": {at}, \"size\": {size}}}")).collect();
-        format!("{{\"format\": \"{FORMAT}\", \"pack\": \"{PACK}\", \"pack_size\": {pack}, \"group_base\": 9000, \"sounds\": [{}], \"sources\": {{}}}}", r.join(", "))
+    fn manifest(rows: &[(u32, u32, u32)], size: usize, name: &str) -> String {
+        let r: Vec<String> = rows.iter().map(|(id, e, rid)| format!("{{\"kh1_id\": {id}, \"use\": \"x\", \"entry\": {e}, \"recom_id\": {rid}, \"stream\": null}}")).collect();
+        format!("{{\"format\": \"{FORMAT}\", \"pack\": \"{PACK}\", \"pack_size\": {size}, \"group\": 9000, \"name\": {name:?}, \"sounds\": [{}], \"sources\": {{}}}}", r.join(", "))
     }
 
     #[test]
-    fn ids_map_to_their_own_banks_and_nothing_of_recoms_moves() {
-        assert_eq!(recom_id(1), 9_001_000);
-        assert_eq!(recom_id(6), 9_006_000);
-        assert_eq!(slot_of(recom_id(1)), Some(9001));
-        assert_eq!(slot_of(recom_id(6) + 999), Some(9006));
+    fn ids_map_to_entries_of_bank_9000_and_nothing_of_recoms_moves() {
+        assert_eq!(recom_id(1), 9_000_001);
+        assert_eq!(recom_id(6), 9_000_006);
+        assert_eq!(slot_of(recom_id(1)), Some(9000));
+        assert_eq!(recom_id(6) % 1000, 6, "Re:CoM makes sound id % 1000 of the bank");
         // The stream bit is masked first, as Re:CoM's map does.
-        assert_eq!(slot_of(recom_id(3) | 0x1000_0000), Some(9003));
+        assert_eq!(slot_of(recom_id(3) | 0x1000_0000), Some(9000));
         // Every group Re:CoM's map decides (0..7999 and the -1 above) stays Re:CoM's.
         for id in [0u32, 1, 2, 4, 5, 0xE, 110_014, 260_040, 271_043, 601_001, 2_005_000, 7_999_999, 8_000_000, 8_999_999, 10_000_000] {
             assert_eq!(slot_of(id), None, "{id}");
@@ -135,29 +148,30 @@ mod tests {
     }
 
     #[test]
-    fn manifest_and_pack_give_the_banks() {
-        let mut pack = scd(0x40);
-        pack.extend(scd(0x30));
-        let m = manifest(&[(1, "se000001.win32.scd", 9001, 0, 0x40), (6, "se000006.win32.scd", 9006, 0x40, 0x30)], pack.len());
-        let b = parse(&m, &pack).unwrap();
-        assert_eq!(b.len(), 2);
-        assert_eq!((b[1].kh1_id, b[1].group, b[1].name.as_slice(), b[1].data.len()), (6, 9006, b"se000006.win32.scd\0".as_slice(), 0x30));
-        assert_eq!(b[0].name_str(), "se000001.win32.scd");
+    fn manifest_gives_the_bank() {
+        let m = manifest(&[(1, 1, 9_000_001), (3, 3, 9_000_003), (4, 4, 9_000_004), (6, 6, 9_000_006)], 0x1000, "se000.win32.scd");
+        let b = parse(&m, 0x1000, &head(0x1000)).unwrap();
+        assert_eq!((b.name.as_slice(), b.group, b.size, b.ids.clone()), (b"se000.win32.scd\0".as_slice(), 9000, 0x1000, vec![1, 3, 4, 6]));
+        assert_eq!(b.name_str(), "se000.win32.scd");
     }
 
     #[test]
     fn bad_manifests_are_refused() {
-        let pack = scd(0x40);
-        let ok = |rows: &[(u32, &str, u32, usize, usize)], n: usize| parse(&manifest(rows, n), &pack);
-        assert!(ok(&[(1, "se000001.win32.scd", 9001, 0, 0x40)], 0x40).is_ok());
-        // Pack size, range, group, id, duplicate, name, SCD.
-        assert!(ok(&[(1, "se000001.win32.scd", 9001, 0, 0x40)], 0x41).is_err());
-        assert!(ok(&[(1, "se000001.win32.scd", 9001, 8, 0x40)], 0x40).is_err());
-        assert!(ok(&[(1, "se000001.win32.scd", 9002, 0, 0x40)], 0x40).is_err());
-        assert!(ok(&[(2, "se000002.win32.scd", 9002, 0, 0x40)], 0x40).is_err());
-        assert!(ok(&[(1, "a", 9001, 0, 0x40), (1, "b", 9001, 0, 0x40)], 0x40).is_err());
-        assert!(ok(&[(1, "this-name-is-longer-than-31-bytes.win32.scd", 9001, 0, 0x40)], 0x40).is_err());
-        assert!(ok(&[(1, "se000001.win32.scd", 9001, 0, 0x20)], 0x40).is_err(), "the SCD's own size word");
-        assert!(parse(&manifest(&[], 0).replace("menu-sounds 1", "menu-sounds 0"), &[]).is_err());
+        let ok = |rows: &[(u32, u32, u32)], size: usize, file: u64, h: &[u8], name: &str| parse(&manifest(rows, size, name), file, h);
+        let h = head(0x1000);
+        assert!(ok(&[(1, 1, 9_000_001)], 0x1000, 0x1000, &h, "se000.win32.scd").is_ok());
+        // Pack size, SCD head, entry ≠ id, wrong Re:CoM id, unknown id, duplicate, name.
+        assert!(ok(&[(1, 1, 9_000_001)], 0x1000, 0x1001, &h, "se000.win32.scd").is_err());
+        assert!(ok(&[(1, 1, 9_000_001)], 0x1000, 0x1000, &head(0x2000), "se000.win32.scd").is_err());
+        assert!(ok(&[(1, 2, 9_000_001)], 0x1000, 0x1000, &h, "se000.win32.scd").is_err());
+        assert!(ok(&[(1, 1, 9_001_000)], 0x1000, 0x1000, &h, "se000.win32.scd").is_err());
+        assert!(ok(&[(2, 2, 9_000_002)], 0x1000, 0x1000, &h, "se000.win32.scd").is_err());
+        assert!(ok(&[(1, 1, 9_000_001), (1, 1, 9_000_001)], 0x1000, 0x1000, &h, "se000.win32.scd").is_err());
+        assert!(ok(&[(1, 1, 9_000_001)], 0x1000, 0x1000, &h, "this-name-is-longer-than-31-bytes.win32.scd").is_err());
+        // The 0.39.0 format (one SCD per sound) is refused.
+        assert!(parse(&manifest(&[], 0x1000, "x").replace("menu-sounds 2", "menu-sounds 1"), 0x1000, &h).is_err());
+        let mut v9 = h.clone();
+        v9[8] = 9;
+        assert!(!scd_head_ok(&v9, 0x1000));
     }
 }

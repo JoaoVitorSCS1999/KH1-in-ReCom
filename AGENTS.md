@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 79: KH1 menu sounds: entries of se000's one SCD, version 0.39.1 (2026-10-31)
+
+- Owner's asset run of 0.39.0: "amusic/se000.dat has none of KH1's menu sounds (its sound assets:
+  [se000.win32.scd])".
+- KH1 (Checked (decomp + exe)): bank 2 (`0x1404D5EB8`) is `se000.win32.scd` (number atoi(name+2) = 0,
+  registered at start `0x14017A080(2, …)`); `SslSeCreate(2, id)` (`0x1400DE460`) plays entry `id` of it
+  (`CreateSound(h, id, 0, 1, 0)` at `0x1400DE50E`). Re:CoM's create does the same with `id % 1000`
+  (`0x1402F314E`, the same engine function). So the whole SCD is bank 9000 and sound n plays as
+  9000000 + n. Asset step: the SCD unchanged, per-id info + preview WAVs. Not heard in game.
+
+---
+
 ## Stage 78: KH1's own command menu sounds, version 0.39.0 (2026-10-31)
 
 - Asks (owner, 2026-11-01): "going through the command menu plays the wrong sounds" → KH1's own sounds
