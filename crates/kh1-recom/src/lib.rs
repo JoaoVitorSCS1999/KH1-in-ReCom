@@ -62,6 +62,7 @@ pub mod keyblade_models;
 pub mod keyblades;
 pub mod kh1_hud;
 pub mod magic;
+pub mod menu_sounds;
 pub mod menu;
 pub mod motions;
 pub mod movement;

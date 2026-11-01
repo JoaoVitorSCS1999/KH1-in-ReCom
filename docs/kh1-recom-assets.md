@@ -495,6 +495,43 @@ bones): local rotation (geodesic angle), translation and scale.
   pack. It also writes `PL0011.SES` with the same KH1 sound entries as `PL0001.SES`.
 - Test `g_halloween_pack_gets_the_same_slots` (needs `PL0011.ANN` in `KH1_TEST_DATA`).
 
+## KH1's menu sounds (`kh1-menu-sounds.bin` / `.json`, 2026-11-01)
+
+KH1's own SCDs for the command menu's sounds 1 / 3 / 4 / 6 (move, back, error, open), from the PC
+assets of KH1's `amusic/se000.dat`, unchanged. Module `menu_sounds`; design, addresses, the video
+check and what the DLL does: `docs/recom-m7-command-menu.md` § Sounds.
+
+- **Reads:** `amusic/se000.dat` (`kh1_first`; Checked (hed): 217,088 bytes, 10.9 MB stored) with
+  its PC assets; picks for each id the asset KH1 itself would (`.win32.scd`, `atoi(name + 2) ==
+  id`); checks it is a whole little-endian `SEDBSSCF` (version 1–4, its size word, ≥ 1 sound and
+  stream). Checked (files) on the 21 SCDs of `xa_ex_0010.mdls` (`KH1_TEST_DATA`).
+- **Writes**, under the manifest's root: `kh1-menu-sounds.bin` (the SCDs, 16-byte aligned) and
+  `kh1-menu-sounds.json`. A run that finds none removes older ones (the DLL then keeps Re:CoM's
+  sounds). A missing or bad id is a note; the others are still written.
+- **Prints**, e.g. `KH1 menu sound 6 (open): se000006.win32.scd (… bytes, 1 sound(s), 1 ch, 48000
+  Hz, MS ADPCM) → Re:CoM id 9006000`. Without any: `note: KH1 menu sounds not taken: … (its sound
+  assets: [...])`.
+- Not run on the owner's install yet (`se000.dat` is not in this session).
+
+### Command for the owner
+
+The same run as before (no new option):
+
+```
+kh1-recom-build --game . --out kh1-playground/build-out/PL0001.ANN
+```
+
+Copy `kh1-menu-sounds.bin` and `kh1-menu-sounds.json` from `kh1-playground/build-out/` into the
+OpenKH mod folder next to the other files, and add to `mod.yml`:
+
+```yaml
+- {name: kh1-menu-sounds.json, method: copy, source: [{name: kh1-menu-sounds.json}]}
+- {name: kh1-menu-sounds.bin, method: copy, source: [{name: kh1-menu-sounds.bin}]}
+```
+
+Build in the Mods Manager and restart the game. Please send the `KH1 menu sound` lines the step
+prints and the `menu sounds:` lines of `kh1-recom.log`.
+
 ## The MP bar (`FORM/0002/FO0002.SPR`, M7 stage 7.2)
 
 Decision 34: a Re:CoM-style straight MP bar under the HP bar, 26 units per max-MP point, in KH1's

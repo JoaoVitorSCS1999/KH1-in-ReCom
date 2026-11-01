@@ -1094,6 +1094,29 @@ pub const UNLOCK_CHECKED: &[Site] = &[
     Site { name: "card add: discovery, first obtained (0x14015CDFB)", rva: 0x0015_CDFB, expect: &[0x0F, 0xB7, 0xCB, 0xE8, 0xDD, 0xFC, 0xFF, 0xFF, 0x0F, 0xB7, 0xCB, 0xE8, 0xE5, 0xF9, 0xFF, 0xFF] },
 ];
 
+/// KH1's menu sounds (`crate::menu_sounds`, `docs/recom-m7-command-menu.md` § Sounds): Re:CoM's
+/// sound id → bank map, extended with the groups 9000..9999 (each its own bank). Same rule as
+/// [`HOOKS`].
+pub const MENU_SOUND_HOOKS: &[Site] = &[
+    // and ecx,0x0FFFFFFF; mov eax,0x10624DD3 (÷1000); mul ecx (then mov r9d,-1: not moved).
+    Site { name: "sound id to bank (0x1402A8560)", rva: 0x002A_8560, expect: &[0x81, 0xE1, 0xFF, 0xFF, 0xFF, 0x0F, 0xB8, 0xD3, 0x4D, 0x62, 0x10, 0xF7, 0xE1] },
+];
+
+/// Re:CoM's sound-bank registration the menu sounds call (what its loader does with a pack's PC
+/// SCD: `(name, bank, data, tag)` → the driver's handle; the entry frees the data with
+/// `_aligned_free` when released, `0x1402F0610`): through the "sound system up" test
+/// (`cmp qword [0x140C158B0],0`) and the read of the bank list's head (`mov rax,[0x140822370]`),
+/// which the DLL walks.
+pub const MENU_SOUND_CALLEES: &[Site] = &[Site {
+    name: "sound bank register (0x1402F5D70)",
+    rva: 0x002F_5D70,
+    expect: &[
+        0x40, 0x57, 0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x40, 0x48, 0xC7, 0x44, 0x24, 0x30, 0xFE, 0xFF, 0xFF, 0xFF, 0x48, 0x89, 0x5C, 0x24, 0x60, 0x48, 0x89, 0x6C, 0x24, 0x68, 0x48, 0x89, 0x74, 0x24, 0x70, 0x41, 0x8B, 0xE9, 0x4D, 0x8B, 0xF8, 0x44,
+        0x8B, 0xF2, 0x48, 0x8B, 0xF1, 0x48, 0x83, 0x3D, 0x0A, 0xFB, 0x91, 0x00, 0x00, 0x75, 0x07, 0x33, 0xC0, 0xE9, 0x89, 0x01, 0x00, 0x00, 0x33, 0xFF, 0x48, 0x85, 0xF6, 0x0F, 0x84, 0x1B, 0x01, 0x00, 0x00, 0x44, 0x8D, 0x47, 0x08, 0x48, 0x8D, 0x15,
+        0x33, 0x51, 0x34, 0x00, 0xFF, 0x15, 0x6D, 0xED, 0x20, 0x00, 0x85, 0xC0, 0x75, 0x54, 0x48, 0x8B, 0x05, 0x9A, 0xC5, 0x52, 0x00,
+    ],
+}];
+
 /// `CPlayerSora`'s exeMagic slot (vtable `0x1405A9938` + 0x150). Checked (exe; relocated).
 pub const MAGIC_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x150 (0x1405A9A88)", rva: 0x005A_9A88, target: 0x0021_7EE0 }];
 
@@ -1190,6 +1213,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(BATTLE_END_CHECKED)
         .chain(UNLOCK_HOOKS)
         .chain(UNLOCK_CHECKED)
+        .chain(MENU_SOUND_HOOKS)
+        .chain(MENU_SOUND_CALLEES)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -1282,7 +1307,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(KH1_HUD_CURSOR_HOOKS).chain(KH1_HUD_POPUP_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(KH1_HUD_PARTY_HOOKS).chain(KH1_HUD_CURSOR_HOOKS).chain(KH1_HUD_POPUP_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS).chain(MENU_SOUND_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
@@ -1741,6 +1766,21 @@ mod tests {
         for h in KH1_HUD_PARTY_HOOKS.iter().chain(KH1_HUD_CURSOR_HOOKS).chain(KH1_HUD_POPUP_HOOKS) {
             assert!(h.expect.len() >= 5 && !h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
         }
+    }
+
+    #[test]
+    fn menu_sound_sites_name_the_globals_the_dll_reads() {
+        let rip = |s: &Site, off: usize, len: usize, disp_at: usize| {
+            let d = i32::from_le_bytes(s.expect[disp_at..disp_at + 4].try_into().unwrap()) as i64;
+            (0x1_4000_0000i64 + s.rva as i64 + off as i64 + len as i64 + d) as u64
+        };
+        let r = &MENU_SOUND_CALLEES[0];
+        // cmp qword [rip+d],0 at +0x2E (8 bytes); mov rax,[rip+d] at +0x5F (7 bytes).
+        assert_eq!(rip(r, 0x2E, 8, 0x31), 0x1_40C1_58B0);
+        assert_eq!(rip(r, 0x5F, 7, 0x62), 0x1_4082_2370);
+        assert_eq!(r.expect.len(), 0x66);
+        // The map's hook moves its first three whole instructions only.
+        assert_eq!(MENU_SOUND_HOOKS[0].expect.len(), 13);
     }
 
 }

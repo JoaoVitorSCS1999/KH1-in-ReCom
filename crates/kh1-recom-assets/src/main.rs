@@ -11,7 +11,8 @@
 //! `kh1-command-menu.json` holds the menu's words from KH1's own `Word.bin` in every language
 //! (`docs/recom-m7-command-menu.md`). For the KH1 HUD (decision 39, H1) it writes `kh1hud.lad` into
 //! the same `FO0002.SPR`, `raw/FORM/0002/FO0002.RTM` with `kh1hud.imz`, and `kh1-hud.json`
-//! (`docs/recom-kh1-hud.md`).
+//! (`docs/recom-kh1-hud.md`). For the command menu's sounds it writes `kh1-menu-sounds.bin` (KH1's
+//! own SCDs from `amusic/se000.dat`) and `kh1-menu-sounds.json` (`docs/kh1-recom-assets.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -191,6 +192,14 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // KH1's command menu sounds (owner, 2026-11-01): KH1's own SCDs for Re:CoM's sound banks.
+    let menu_sounds = match menu_sounds_build(&game, keys.clone()) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            println!("note: KH1 menu sounds not taken: {e} (the menu keeps Re:CoM's sounds)");
+            None
+        }
+    };
     if dry {
         return Ok(());
     }
@@ -297,6 +306,24 @@ fn run() -> Result<(), String> {
             if menu_manifest.is_file() {
                 std::fs::remove_file(&menu_manifest).map_err(|e| format!("{}: {e}", menu_manifest.display()))?;
                 println!("removed {} (no command menu this run)", menu_manifest.display());
+            }
+        }
+    }
+    // KH1's menu sounds: the pack and its manifest; without them older ones are removed (the DLL
+    // then plays Re:CoM's sounds).
+    let snd_manifest = root.join(kh1_recom_assets::menu_sounds::MANIFEST);
+    let snd_pack = root.join(kh1_recom_assets::menu_sounds::PACK);
+    match &menu_sounds {
+        Some((bin, json)) => {
+            write(&snd_pack, bin)?;
+            write(&snd_manifest, json.as_bytes())?;
+        }
+        None => {
+            for p in [&snd_manifest, &snd_pack] {
+                if p.is_file() {
+                    std::fs::remove_file(p).map_err(|e| format!("{}: {e}", p.display()))?;
+                    println!("removed {} (no KH1 menu sounds this run)", p.display());
+                }
             }
         }
     }
@@ -643,6 +670,28 @@ fn command_menu_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_f
     println!("command menu: plates {} (highlight vertex colour {:#010x}), groups after the MP bar's", if base.found { "from Re:CoM's text plate" } else { "NOT found (empty groups)" }, base.colour);
     let sources = [("btltbl.bin sha256", kh1_formats::egs::sha256_hex(&btl)), ("FO0002.SPR sha256", kh1_formats::egs::sha256_hex(&spr))];
     Ok(cm::manifest_json(&langs, kh1_recom_assets::mp_bar::group::COUNT, base, &sources))
+}
+
+/// KH1's command menu sounds (`menu_sounds`): KH1's own SCDs for sounds 1 / 3 / 4 / 6 from the
+/// PC assets of `amusic/se000.dat`, unchanged, as `kh1-menu-sounds.bin` + `.json`.
+fn menu_sounds_build(game: &Path, keys: kh1_formats::egs::KeyTable) -> Result<(Vec<u8>, String), String> {
+    use kh1_recom_assets::menu_sounds as ms;
+    let inst = install::kh1(game, keys).map_err(|e| format!("KH1 files: {e}"))?;
+    let (data, assets, _) = inst.read_full(ms::KH1_FILE).map_err(|e| format!("{}: {e}", ms::KH1_FILE))?;
+    let mut notes = Vec::new();
+    let taken = ms::take(&assets, &mut notes);
+    for n in &notes {
+        println!("note: {n}");
+    }
+    if taken.is_empty() {
+        let scds: Vec<String> = assets.iter().filter(|a| ms::kh1_number(&a.name).is_some()).map(|a| a.name.clone()).collect();
+        return Err(format!("{} has none of KH1's menu sounds (its sound assets: {scds:?})", ms::KH1_FILE));
+    }
+    for t in &taken {
+        println!("{}", ms::line(t));
+    }
+    let sources = [("se000.dat sha256", kh1_formats::egs::sha256_hex(&data))];
+    Ok(ms::build(&taken, &sources))
 }
 
 fn kh1_stats(game: &std::path::Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive, models: &[KeybladeModel], kh2: &[Kh2Row]) -> Result<kh1_recom_assets::stats::StatsJson, String> {

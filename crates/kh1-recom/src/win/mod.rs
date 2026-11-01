@@ -13,6 +13,7 @@ mod keyblades;
 mod kh1_hud;
 mod magic;
 mod menu;
+mod menu_sounds;
 mod models;
 mod movement;
 mod mp;
@@ -192,7 +193,8 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     let bar_file = recom_bases(dirs).into_iter().map(|b| b.join("kh1-mp-bar.json")).find(|p| p.is_file());
     let menu_file = recom_bases(dirs).into_iter().map(|b| b.join("kh1-command-menu.json")).find(|p| p.is_file());
     let hud_file = recom_bases(dirs).into_iter().map(|b| b.join("kh1-hud.json")).find(|p| p.is_file());
-    install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref(), hud_file.as_deref());
+    let sound_file = recom_bases(dirs).into_iter().map(|b| b.join(crate::menu_sounds::MANIFEST)).find(|p| p.is_file());
+    install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref(), hud_file.as_deref(), sound_file.as_deref());
     install_battles(base);
     let th = &crate::sites::TRACE_HOOKS;
     let hooks = [
@@ -210,7 +212,7 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
 
 /// KH1's Attack (`attack`, `docs/recom-kh1-attack.md`): the KH1 rows, the data patches, then the
 /// hooks, all or nothing. Needs the movement handlers.
-fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file: Option<&Path>, menu_file: Option<&Path>, hud_file: Option<&Path>) {
+fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file: Option<&Path>, menu_file: Option<&Path>, hud_file: Option<&Path>, sound_file: Option<&Path>) {
     if !movement::installed() {
         log("attack: movement not hooked; KH1 Attack not installed");
         return;
@@ -261,7 +263,10 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         // The MP bar (M7 stage 7.2): Re:CoM's player gauge draws it; needs the asset step's file.
         // The command menu (7.3) runs from its wrappers and needs its plate groups.
         if mp_bar::install(base, bar_file) {
-            command_menu::install(base, menu_file, s);
+            // KH1's own menu sounds (the KH1 look's), in Re:CoM's sound banks.
+            if command_menu::install(base, menu_file, s) {
+                menu_sounds::install(base, sound_file);
+            }
             // The KH1 HUD (decision 39) hangs from the same gauge wrappers.
             kh1_hud::install(base, hud_file);
         }

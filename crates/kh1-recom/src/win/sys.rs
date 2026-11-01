@@ -11,6 +11,7 @@ extern "system" {
     pub fn VirtualProtect(addr: *mut c_void, size: usize, prot: u32, old: *mut u32) -> i32;
     pub fn FlushInstructionCache(process: *mut c_void, addr: *const c_void, size: usize) -> i32;
     pub fn GetCurrentProcess() -> *mut c_void;
+    pub fn GetProcAddress(module: *mut c_void, name: *const u8) -> *mut c_void;
 }
 
 pub const MEM_COMMIT_RESERVE: u32 = 0x3000;

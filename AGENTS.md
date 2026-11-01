@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 78: KH1's own command menu sounds, version 0.39.0 (2026-10-31)
+
+- Asks (owner, 2026-11-01): "going through the command menu plays the wrong sounds" → KH1's own sounds
+  (owner's choice); "notice the quality of the menu and the sounds playing … lets try to get this 1:1".
+- KH1 (Checked (decomp + exe)): `0x14017A040(id)` plays bank 2 sound `id` = the PC asset
+  `se<id as 6 digits>.win32.scd` (lookup `0x1400E0A50`, `0x1400DB1F0`); menu ids 1 move, 3 back,
+  4 error, 6 open; no sound on a command / spell issue (the owner's video agrees: 16 moves one
+  sound, Magic's open another, no confirm sound).
+- Asset step: ids 1/3/4/6 from `amusic/se000.dat`'s assets, whole SCDs, into kh1-menu-sounds.bin /
+  .json. DLL: hook on Re:CoM's bank map `0x1402A8560` (13 bytes checked): groups 9000–9999 are
+  ours; on first play the SCD is registered with Re:CoM's `0x1402F5D70` (Re:CoM's bank list owns
+  it) and played by Re:CoM's `0x1402AA360` as 9001000 / 9003000 / 9004000 / 9006000. Re:CoM's ids
+  stay the fallback. Not heard in game; se000.dat holding these ids: Assumption (checked per id
+  by the step).
+
+---
+
 ## Stage 77: KH1 command menu words at KH1's brightness, version 0.38.1 (2026-10-31)
 
 - Ask (owner, 2026-11-01): "for the command menu, lets try to get the resolution of the graphics to be

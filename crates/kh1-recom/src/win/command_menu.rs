@@ -862,8 +862,10 @@ pub unsafe fn frame(pl: usize) -> Option<Keep> {
         let ev: Vec<String> = out.events.iter().map(|e| describe(e, m)).collect();
         (out, ev)
     };
+    // KH1's own sounds with KH1's look (`menu_sounds`), else Re:CoM's.
+    let kh1_sounds = super::kh1_hud::menu_on();
     for snd in &out.sounds {
-        func::<SoundFn>(SOUND)(snd.recom_id(), -1);
+        func::<SoundFn>(SOUND)(super::menu_sounds::id_for(*snd, kh1_sounds), -1);
     }
     for (e, d) in out.events.iter().zip(&token_events) {
         event(d.clone());

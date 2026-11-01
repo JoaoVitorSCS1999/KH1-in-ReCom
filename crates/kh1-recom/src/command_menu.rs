@@ -300,7 +300,9 @@ impl List {
     }
 }
 
-/// KH1's menu sounds (`0x14017A040`): 1 move, 3 back, 4 error, 6 open.
+/// KH1's menu sounds (`0x14017A040`): 1 move, 3 back, 4 error, 6 open. KH1's menu plays no sound
+/// when a command (or a spell) is issued: `0x140293480` returns 1 without one (Checked (decomp);
+/// the owner's KH1 video: no menu sound on the cast, only the spell's own).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Sound {
     Move,
@@ -310,9 +312,21 @@ pub enum Sound {
 }
 
 impl Sound {
+    /// KH1's own id (`0x14017A040`), whose sound the asset step takes from the player's KH1
+    /// files (`menu_sounds`). Checked (decomp).
+    pub fn kh1_id(self) -> u32 {
+        match self {
+            Sound::Move => 1,
+            Sound::Back => 3,
+            Sound::Error => 4,
+            Sound::Open => 6,
+        }
+    }
+
     /// Re:CoM's menu sound for it (`0x1402AA360(id, -1)`): 1 cursor, 4 cancel, 5 refused, 2
     /// decide. Assumption (ids from how Re:CoM's camp uses them: 1 on a move, 2 on a confirm, 4
-    /// on a close, 5 when a confirm is refused).
+    /// on a close, 5 when a confirm is refused). The fallback when KH1's own sounds are not
+    /// there (`menu_sounds`) or the menu has Re:CoM's look.
     pub fn recom_id(self) -> u32 {
         match self {
             Sound::Move => 1,

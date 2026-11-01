@@ -44,7 +44,76 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 | Brightness: the top list's rows ease 32 a frame between 0x73 (grey) and 0xE6; when the top list changes they are set at once and the lists under it go to 0x73. | `0x14027B870` | Checked (decomp) |
 | Fades: in / out 0.1 a frame (10 frames, `0x140278AC0` 1 / 0) when the step starts / stops running; events hide and show at once (2 / 3, `0x140293750`), and the stack goes back to the root on Attack. | | Checked (decomp) |
 | Context tab: 0 hidden, 1 sliding in (opacity + 1/7, x −10 → 0 by 10/7 per step), 2 in, 3 fading out (opacity − 1/7), restarted when its command changes. Its step is half a frame (14 frames). 7.3 read the "scale" `0x142866D14` as an X scale: it only multiplies alphas (`0x142866A40` / `A44`), an opacity. Drawn by `0x140278B40` as its own green plate with the Triangle and the word, over the header (`docs/recom-kh1-hud.md` § FM context tab). | `0x140277CF0`, `0x140278B40` | Checked (decomp); the half step: as read in the research (`0x14233FBE0`) |
-| Sounds: 1 move, 3 back, 4 error, 6 open. | `0x14017A040` | Checked (decomp) |
+| Sounds: 1 move, 3 back, 4 error, 6 open (calls: `0x1402931B0` Up / Down / Left-at-root 1, close 3, locked Right 4; `0x1402948B0` and `0x140293480` open 6; `0x140293480` locked confirm 4 (fresh press only: the held-confirm path clears `0x142D53A40 & 0x2000000`, `0x1402937F0`); `0x1402937F0` row 0 Talk / row 3 without Summon 4). No sound when a command or spell is issued (`0x140293480` returns 1 without one). | `0x14017A040` | Checked (decomp) |
+
+## Sounds (KH1's own, in Re:CoM's sound banks; 2026-11-01)
+
+Owner: "going through the command menu plays the wrong sounds when confirming (opening the magic
+sub menu for example)"; chose "Build a sound bank from your KH1 files at the asset step and play
+KH1's exact menu sounds"; then sent a video of KH1's menu ("lets try to get this 1:1 in ReCoM").
+
+**KH1** (Steam):
+
+| what | where | tag |
+|---|---|---|
+| `0x14017A040(id)` = `SslSeCreate(2, id)` (`0x1400D2FD0` → `0x1400DE460`) then `SslSePlay(2, id, 0, 0x3FFF, 0x3FFF)` (`0x1400D3060` → `0x1400DECF0`). | | Checked (decomp + exe) |
+| The two 0x3FFF words become floats (/ 16383.0 at `0x1403B1D04`) in `xmm3` and the fifth-argument slot, but `SslSePlay` uses only bank / no / id (Ghidra gives it three parameters; its body starts the sound with a zeroed local): each sound plays at its file's own volume. | `0x1400D3060`, `0x1400DECF0` | Checked (decomp + exe disasm of the start); that nothing deeper reads them: Assumption |
+| `SslSeCreate` for a bank other than the map bank takes the first loaded bank entry whose number `+0x14` is `id`, and makes sound 0 of its SCD (`0x14004DBF0(…, handle, 0, …)`). | `0x1400DE460` | Checked (decomp) |
+| Bank entries: every PC asset of a loaded file whose name holds `.win32.scd` and `se` / `music` (`0x1400E0A50` → `0x1400E0F00`); number = `atoi(name + 2)` (`0x1400DB1F0`). So sound `n` = asset `se<n, 6 digits>.win32.scd` (as `xa_ex_0010.mdls`'s `se011001.win32.scd` …). | | Checked (decomp + files) |
+| `amusic/se000.dat` (217,088 bytes of PS2 data, 10.9 MB stored: PC assets) is loaded at start (`0x1401791D0`). That the menu sounds are its assets: Assumption (strong); the asset step checks each id. | `kh1_first.hed` | Checked (decomp + hed) |
+| KH1's per-sound SCDs (`xa_ex_0010.mdls`'s 21): `SEDBSSCF` v3, 1 sound, 1 stream, MS ADPCM mono ~48 kHz. | | Checked (files) |
+
+**The owner's video** (KH1 with a KH2-combat mod; mono 44.1 kHz audio): 16 cursor moves (root
+and Magic list) are one sound (normalised cross-correlation 0.64–0.86 with the first, through the
+music; −37.9 dB RMS, ~−24 dB peak, 95–165 ms above −50 dB); opening Magic (5.93 → 6.00 s) is
+another (0.37 with the move; −36.6 dB RMS, −25.6 dB peak: about as loud); confirming Firaga
+(10.10 → 10.17 s, menu back on Attack) plays no menu sound, only the spell's own sounds from
+10.18 s. No back / error in the video. So: move = id 1, open = id 6, no decide sound: what the
+decomp says. Not compared with KH1's files (`se000.dat` is not in this session).
+
+**Re:CoM** (Steam; the same SQEX "Ssl" sound code):
+
+| what | where | tag |
+|---|---|---|
+| `0x1402AA360(id, vol)` → `0x1402AA0F0(id, (0,0,0,1), vol)`: bank = `0x1402A8560(id)` (group = `(id & 0x0FFFFFFF) / 1000`: 0 → 0, 1 → 1, 2–3 → 3, 100–199 → 2, 200–599 → itself, 600–799 → 0xC–0xF, 800–7999 → 4, else −1 = no sound); `0x1402F3080(bank, id % 1000, …)` makes sound `id % 1000` of the first entry of `0x140822370`'s list with that bank (`SslSeCreate2`); `0x1402AA3B0` → `0x1402A6DD0` → `0x1402F3B60` plays it. vol −1 → 127; `127 / 127.0` = 1.0 is the fifth argument of `0x1402F3080` (`movss [rsp+0x20]` before the call at `0x1402AA319`). | | Checked (decomp + exe disasm) |
+| Banks are made by `0x1402F5D70(name, bank, data, tag)` → `0x1402F0080` (`Axa::BankEntry`, 0x50 bytes: `+8` next, `+0x10` bank, `+0x18` driver handle from `0x14004BD70(data, 0)`, `+0x20` data, `+0x1C` tag, `+0x30` name), pushed on `0x140822370`. Callers: a pack's `.seb` (`0x1402AB290` → `0x1402A79F0` → `0x1402F0780`: bank from the `.seb`'s `+8` through `0x1402A8210`, the PC SCD assets whose names hold the `.seb`'s stem) and `_add_scd_thread` (`0x1402F58C0`). Voices go to bank 0xFFFF (`0x1402F1250`). | | Checked (decomp) |
+| A bank entry's release frees `+0x20` with `_aligned_free` (`0x1402F0610`); `0x1402F5BB0(bank)` releases a bank's entries before a pack loads it again. | | Checked (decomp) |
+| Re:CoM's own KH1-style lookup by `+0x14` (`0x1402F32D0`, `SslSeCreate`) has no callers. | | Checked (decomp) |
+| Same SCD driver: `ScdHeader::GetScdHeaderSize` takes versions 1–4 in both (KH1 `0x1400748F0`, Re:CoM `0x140073130`). | | Checked (decomp) |
+| `_aligned_malloc` import: `0x1405047A0` (`api-ms-win-crt-heap-l1-1-0`). | | Checked (exe) |
+
+**What is built** (asset step + DLL):
+
+- The asset step (`kh1-recom-assets::menu_sounds`) reads KH1's `amusic/se000.dat` with its PC
+  assets, takes the assets KH1 itself would pick for ids 1 / 3 / 4 / 6 (KH1's own rule:
+  `.win32.scd`, `atoi(name + 2) == id`), checks each is a whole SCD, and writes them unchanged
+  into `kh1-menu-sounds.bin` with `kh1-menu-sounds.json` (format `kh1-recom-assets menu-sounds
+  1`: id, use, name, group, offset, size, sha256, channels, rate, codec; `se000.dat`'s sha256).
+- The DLL (`menu_sounds`, `win/menu_sounds.rs`), when the command menu is installed and both
+  files are there:
+  - hooks `0x1402A8560` (13 bytes checked: `and ecx,0x0FFFFFFF; mov eax,0x10624DD3; mul ecx`):
+    groups 9000..9999 are their own bank; every other id goes to Re:CoM's map unchanged. Re:CoM
+    gives those groups no bank today (−1), and never puts a bank there (its banks: 0–4, 0xC–0xF,
+    200–599, 0xFFFF), so no Re:CoM sound changes. Checked (decomp).
+  - With KH1's look (`hud_kh1_menu = on`), a menu sound plays `0x1402AA360((9000 + n) × 1000,
+    −1)` (move 9001000, back 9003000, error 9004000, open 9006000). The first time, if bank
+    9000 + n is not in Re:CoM's list, it copies KH1's SCD into a buffer from Re:CoM's own
+    `_aligned_malloc` (checked equal to ucrtbase's export) and calls `0x1402F5D70(name, 9000 + n,
+    buffer, size)`: Re:CoM's entry owns it from there. It walks the list before each menu sound
+    (not per frame) and registers again if the bank has gone (e.g. a sound-system reset).
+  - Re:CoM's ids (1 / 4 / 5 / 2) stay: with Re:CoM's look, without the asset files, or when
+    Re:CoM refuses a bank (logged once).
+- Logs: `menu sounds: KH1's own [1 se000001.win32.scd → id 9001000, …] as Re:CoM banks …` at
+  start; `menu sounds: KH1 sound 1 (…) registered as Re:CoM bank 9001 (driver handle …)` once each.
+
+**1:1:** the sounds are KH1's own files, played at their own volume (KH1 and Re:CoM both play at
+1.0: Re:CoM's vol −1 → 127 / 127), as one-shots, at the same frames KH1's menu plays them (the
+menu logic's emit points are KH1's, above). Checked: decomp (both), exe bytes, KH1 SCD layout on
+21 real KH1 SCDs; the video's move / open / no-decide pattern. Not checked: that `se000.dat` holds
+ids 1 / 3 / 4 / 6 (the step reports it); the sounds' waveforms against the video (the files are
+not in this session); that Re:CoM's SE volume setting and mixer bus treat KH1's SCDs as its own
+(Assumption); that Re:CoM's 2D sound position (0, 0, 0) plays them centred like KH1's (Assumption).
+Not seen in game.
 
 ## KH1's words
 
@@ -265,7 +334,8 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
    HUD's −85 x offset matches KH1's widescreen margin. To check on a screenshot.
 2. The text sits on the plate where `CStockFolder` puts it ((0, 0), −4); with the icon gone it may
    need a nudge right.
-3. Re:CoM's sound ids: 1 cursor, 2 decide, 4 back, 5 refused (from how the camp uses them).
+3. Re:CoM's sound ids: 1 cursor, 2 decide, 4 back, 5 refused (from how the camp uses them). Now
+   only the fallback: with KH1's look the menu plays KH1's own sounds (§ Sounds).
 4. Writing `C2DFnt +0x34` and the control colour each frame of a fade is safe (Re:CoM's camp
    writes label colours the same way).
 5. Deleting our rows in the HUD-hide wrapper is safe (they are ours, not the gauge's).
