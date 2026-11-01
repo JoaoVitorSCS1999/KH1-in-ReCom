@@ -204,6 +204,9 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         // 0x3A); KH1's entries 55 / 80 have no root travel.
         crate::magic::cast_req::GRAVITY => row::BLIZZARD,
         crate::magic::cast_req::GRAVITY_AIR => row::BLIZZARD_AIR,
+        // Stop (M7 stage 7.9): Re:CoM's Stop rows play Thunder's clip (row 0x27's `+0` = 0x39).
+        crate::magic::cast_req::STOP => row::THUNDER,
+        crate::magic::cast_req::STOP_AIR => row::THUNDER_AIR,
         _ => return None,
     };
     Some((r, false))
@@ -304,6 +307,10 @@ mod tests {
         assert_eq!(row_for(0x3A, &s, &none), Some((0x3A, false)));
         assert_eq!(row_for(0x87, &s, &none), Some((0x3E, false)));
         assert_eq!(crate::magic::RECOM_GRAVITY_ROWS[0][0] as u32, row::BLIZZARD);
+        // Stop: Re:CoM's row 0x27's clip (Thunder's), + 4 in the air.
+        assert_eq!(row_for(0x3B, &s, &none), Some((0x39, false)));
+        assert_eq!(row_for(0x88, &s, &none), Some((0x3D, false)));
+        assert_eq!(crate::magic::RECOM_STOP_ROWS[0][0] as u32, row::THUNDER);
     }
 
     #[test]

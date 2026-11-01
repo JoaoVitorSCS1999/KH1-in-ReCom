@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 50: M7 stage 7.9, Stop, version 0.23.0 (2026-10-31)
+
+- Stop / Stopra / Stopga (Checked, KH1 script + decomp): at 28, every enemy in a 2.5/3.5/5 m,
+  ±3 m cylinder, nearest first, one per 4 frames; (2 + max MP) × 60 × KH1 resist[9] frames, 0 =
+  immune (Re:CoM-only bosses); 2 MP. Re:CoM's own stop state (kind 8, start `0x14017C740`)
+  already holds up to 8 hits and lands them after (Checked, decomp); its gate `+0x2C` is set from
+  KH1's resistance per strike; stopped enemies' attacks off with `0x1401A2D90`. Every boss class
+  has the stop state; non-enemy parts can't be stopped. Not seen in game.
+
+---
+
 ## Stage 49: M7 stage 7.8, Gravity, version 0.22.0 (2026-10-31)
 
 - Gravity / Gravira / Graviga (Checked, KH1 script + decomp): sphere 2.4 m above the target (no

@@ -399,3 +399,13 @@ pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32) -> Option<i32> {
     let d = crate::attack::kh1_damage(super::attack::moveset(), kh1_row, strength, &w, &t, rng)?;
     Some(d.damage)
 }
+
+/// The KH1 record (twin, else proxy / boss twin) of an enemy at the KH1 setting in Sora's story,
+/// for the spells' status gates (7.9: Stop's `resist[9]`).
+pub fn kh1_record(enemy: usize) -> Option<EnemyStats> {
+    match twin(enemy) {
+        Some((_, t)) => Some(t.clone()),
+        None if !riku_story() => proxied(enemy),
+        None => None,
+    }
+}

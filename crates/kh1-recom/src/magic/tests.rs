@@ -19,11 +19,11 @@ fn fire_rows_keep_recoms_clip_and_effect_set_and_take_kh1s_ball() {
         assert_eq!(r[0xF] & FLAG_KH1, FLAG_KH1);
         assert_eq!(recom_base_row(spell::FIRE, lv), Some([0x22, 0x29, 0x2A][lv as usize - 1]));
     }
-    // Stop and Aero come with their stages.
-    assert!(t[15..].iter().all(|r| r[0] == 0));
+    // Aero comes with its stage.
+    assert!(t[18..].iter().all(|r| r[0] == 0));
     assert_eq!(table_index(spell::AERO, 3), Some(20));
     assert_eq!(table_index(spell::FIRE, 0), None);
-    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && castable(spell::THUNDER) && castable(spell::CURE) && castable(spell::GRAVITY) && !castable(spell::STOP));
+    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && castable(spell::THUNDER) && castable(spell::CURE) && castable(spell::GRAVITY) && castable(spell::STOP) && !castable(spell::AERO));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn blizzard_rows_and_numbers_are_kh1s() {
     assert_eq!(KH1_BLIZZARD_FLAGS & 0x8000_1000, 0, "no homing");
     assert_eq!((cast_req::first(spell::BLIZZARD, false), cast_req::first(spell::BLIZZARD, true)), (0x37, 0x84));
     assert_eq!((cast_req::release(spell::BLIZZARD, false), cast_req::release(spell::FIRE, true)), (0x37, 0x8A));
-    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x3B));
+    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x3C));
     assert_eq!(spell_attack(spell::BLIZZARD, 2).map(|a| a.power), Some(27));
 }
 
@@ -398,4 +398,54 @@ fn gravity_falls_its_frames_then_strikes_once() {
     assert!(!body_touches(c, a, &BodyShape::Sphere { c: [2.0, 1.0, 0.0], r: 0.29 }));
     assert!(!body_touches(c, a, &BodyShape::Sphere { c: [0.0, 3.0, 0.0], r: 0.2 }), "a sphere, not a column");
     assert!(body_touches(c, a, &BodyShape::Column { a: [1.0, -5.0, 1.0], b: [1.0, 5.0, 1.0], r: 0.1 }));
+}
+
+#[test]
+fn stop_rows_area_and_duration_are_kh1s() {
+    let t = kh1_magic_table(&recom_rows());
+    for lv in 1..=3u8 {
+        let i = lv as usize - 1;
+        let r = &t[table_index(spell::STOP, lv).unwrap()];
+        let base = &RECOM_STOP_ROWS[i];
+        // Re:CoM's clip 0x39, sets 21 / 22 / 23, and its stop kind 8 (Re:CoM's stop state).
+        assert_eq!((&r[..3], r[4], r[0xC], r[0xE]), (&base[..3], base[4], base[0xC], base[0xE]));
+        assert_eq!((r[2], r[0xB] as u32), (21 + lv - 1, RECOM_STOP_KIND));
+        assert_eq!((r[3], r[0xF] & FLAG_KH1), (0, FLAG_KH1));
+        assert_eq!(recom_base_row(spell::STOP, lv), Some([0x27, 0x3A, 0x3B][i]));
+        assert_eq!(stop::area(lv), Area::Cylinder { radius: [2.5, 3.5, 5.0][i], half: 3.0 });
+    }
+    assert_eq!((cost(spell::STOP), release_wait(spell::STOP)), (200, 28.0));
+    assert_eq!((cast_req::first(spell::STOP, false), cast_req::first(spell::STOP, true)), (0x3B, 0x88));
+    // (2 + max MP) × 60 × resist[9] frames, the same at every level; 0 = immune.
+    assert_eq!(stop::frames(3, 1.0), Some(300.0));
+    assert_eq!(stop::frames(3, 0.3), Some(90.0));
+    assert_eq!(stop::frames(8, 1.0), Some(600.0));
+    assert_eq!(stop::frames(5, 0.0), None);
+    assert_eq!(stop::ticks(3, 1.0), Some(15000));
+    assert_eq!(stop::ticks(8, 1.0), Some(30000), "KH1's longest fits Re:CoM's i16 hit value");
+    assert_eq!(stop::ticks(3, 0.2), Some(3000));
+    // The damage path returns the power for element 9 (the points of the duration).
+    let mut rng = Kh1Rand::new(1);
+    assert_eq!(spell_damage(&stop_attack(2), 3, &DefenderStats::default(), &mut rng), 5);
+}
+
+#[test]
+fn stop_strikes_one_every_4_frames_nearest_first() {
+    let order = thunder_order([0.0; 3], [(1, [3.0, 0.0, 0.0]), (2, [1.0, 0.0, 0.0]), (3, [2.0, 0.0, 0.0]), (4, [9.0, 0.0, 0.0])]);
+    assert_eq!(order, vec![2, 3, 1, 4]);
+    let mut s = Strikes::every(order, stop::INTERVAL);
+    let a = stop::area(1);
+    let inside = |id: u32| {
+        let x = [0.0, 3.0, 1.0, 2.0, 9.0][id as usize];
+        body_touches([0.0; 3], a, &BodyShape::Sphere { c: [x, 0.0, 0.0], r: 0.3 })
+    };
+    let mut at = Vec::new();
+    for frame in 0..30 {
+        if let Some(id) = s.run(1.0, inside) {
+            at.push((frame, id));
+        }
+    }
+    // 2.5 m and a 0.3 m body: 1 and 2 m inside; 3 m (0.2 m short) and 9 m passed over at once.
+    assert_eq!(at, vec![(0, 2), (4, 3)]);
+    assert!(s.done());
 }

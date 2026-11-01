@@ -777,3 +777,135 @@ In-game checklist (7.8):
 6. Hit before 28: nothing, no MP. Sora is free about 1.1 s after the command (frame 68).
 7. F9 trace: `release(gravity1 f28 shot …)`, `impact gravity1 shot … n…`, `pay100`.
 8. Combat = Re:CoM: Re:CoM's Gravity cards unchanged (kind 0xD and its gate still Re:CoM's).
+
+## Stage 7.9: Stop / Stopra / Stopga
+
+Owner (decision 34): "Stop and Gravity against bosses exactly as in KH1"; Re:CoM-only bosses are
+immune (KH1's final boss's Stop 0, through their proxy records). At Combat = KH1 in Sora's story,
+Stop casts as KH1's and stops each enemy in its area, nearest first, in **Re:CoM's own stop state**.
+
+### KH1 (what runs)
+
+| what | KH1 (Steam) | tag |
+|---|---|---|
+| **Cast**: ground `0x36 + 5` = `0x3B`, air `0x88`: Thunder's entries 56 / 81, 68 frames, locked to the end, no root; the hop in the air. | `xa_ex_0010.mset` | Checked (files) |
+| **Command** (`L00890`): **wait 4**, the charge effect, then **each frame for 24 frames** the release check (`0x3B` / `0x88`; a miss fades the effect and ends it: no spell, no MP); the thread at **28**; **MP 200** (two points). | `xm_stop01.mag` `0x87C..0x95E` | Checked (files) |
+| **Thread** (`0x44..0x206`): centre = the target's part if alive, else the caster's position; every enemy (30 slots) nearest first from the centre (`L0040e`, Thunder's selection sort); down the list, an enemy whose bodies touch the cylinder **250 / 350 / 500 cm, ±300 cm** (sys 90 type 2) gets the Stop effect and **one direct strike** (sys 60), then **4 frames**; one outside is passed over at once. | `0x44..0x206`, `L00280` | Checked (files) |
+| **The strike** (`0x1402BEEE0`, element 9): only if `resist[9]` > 0: `actor+0x88 |= 1`, `+0x3E4` = **(2 + max MP) × 60 × resist[9] frames** (power 2 + max MP at every level). | btltbl `0x65B8` / `0x6628` / `0x6698` | Checked (files + decomp) |
+| **While stopped** (`0x140297FE0`): no motion, think or hit pass; queued hit records stay queued and **land when Stop ends**; the actor's own attacks are skipped (`0x1402B47A0`). | | Checked (decomp; research § 2.5) |
+
+### Re:CoM already has a stop state, and it holds hits (Checked, decomp)
+
+- **Entry:** a hit of kind 8 (`0x14017DC50` case 8): if the enemy's param `+0x2C` ≠ 0, `+0x2D8 =` the
+  hit's value and no damage; the reaction picker (`0x14017D260` case 8) sends it to the state at
+  `+0x940` (state 18 of `CBattleEnemy`'s 31; its begin / exe / end are vtable `+0x298` / `+0x2A0` /
+  `+0x2A8` through the state table's thunks `0x14017C840` / `0x140184C70` / `0x14017EDD0`, filled
+  at start-up into `0x14087AA30` / `0x14087AC20` / `0x14087AE10`).
+- **Begin** `0x14017C740` (default; the research note's `0x14017C400` is the Magnet state's begin):
+  the "abnormal" effect 4 (Re:CoM's stop look), **timer `+0x160 = +0x2D8`**, motion speed 0,
+  `+0x260 |= 0x84000` (bit 19 "stopped", bit 14 "no HP loss"), `+0x154 |= 0x8000` (no root motion).
+- **Held hits:** while bit 14 is set, Re:CoM's damage (`0x14017DAB0`) subtracts nothing; the stop
+  exe `0x1401843A0` **records up to 8 hits** of kinds 1–5, 0xD, 0x11, 0x15 (their value × the
+  attribute's resistance, Gravity's % of HP), and when the timer runs out **lands them one by one**
+  (HP, its hit effect, a short reaction between each: half the reaction motion or 750 ticks), then
+  leaves. So KH1's "hits land when Stop ends" is Re:CoM's own behaviour; the differences: Re:CoM
+  keeps at most 8 (KH1's queue: no cap found) and spaces the landings by its reaction (KH1's pace
+  after Stop: not read).
+- **A stopped enemy's attacks:** the begin doesn't switch its attack bodies off (`+0x94`), so an
+  enemy frozen mid-swing could still hit Sora. KH1 skips them: **we switch them off with Re:CoM's
+  own `0x1401A2D90(enemy, −1)`** (what its reaction states' begins call) right after the hit
+  handler sent the enemy to the stop state.
+- **Every Re:CoM boss class has it** (Checked (exe): vtable `+0x298` of every `CEnemy*` / `CBoss*`
+  class): 69 classes use the default `0x14017C740`, among them Guard Armor, Trickmaster, Darkside,
+  Parasite Cage, Oogie (and his dice), Ursula (and her tentacles), Captain Hook, Dragon Maleficent,
+  Jafar (bird, lamp), Hades, Cloud, Larxene, Vexen, Lexaeus, Zexion (and his book), Axel, Riku,
+  Marluxia 1 / 3 (and the Specter), Ansem; **Marluxia 2, his Scythe and Funnel** wrap it
+  (`0x140400230` / `0x140400270` / `0x14040AA40` call `0x14017C740` first). Not stoppable: parts
+  that are not `CBattleEnemy`s (Guard Armor's feet `CGuardarmorFoot`, Marluxia 2's attack objects,
+  Darkside's balls, the dragon's fire): they have no hurt bodies of an enemy, as KH1's parts.
+
+### In Re:CoM
+
+- **Cast** as Thunder's (`release_wait` 28: KH1's 4 + 24; a cut motion before 28 ends the cast,
+  as KH1's per-frame check); Re:CoM's clips `0x3B` → row `0x39`, `0x88` → `0x3D`. KH1 rows from
+  Re:CoM's 0x27 / 0x3A / 0x3B (checked at start): clip, `stop_all` sets 21–23, its shot's numbers,
+  **kind 8 kept** (Re:CoM's stop kind); `+3` 0, `+0xF` 0x80.
+- **Command:** `initMagic` case 0x1F's charge (the set's id 0 on Sora's bone 0 at (0, 0.85, 0), kept
+  on him; Checked (disasm `0x140220926..0x140220988`)); the command's target is kept.
+- **Release** (`release_stop`): the centre (the target's aim point if alive, else Sora), Re:CoM's
+  lock-on enemies nearest first (`thunder_order`), the strike thread (`Strikes::every(…, 4)`, the
+  cylinder `stop::area`), its first run now, then KH1's MP (two points).
+- **A strike** (`stop_strike`): **Re:CoM's Stop case for that enemy** (`0x140222170` case `0x27` with
+  a target, Checked (disasm `0x140222BBA..0x140222CB0`)): its `CBullet` with flags `0x25` at the
+  enemy's aim point (speed 0, the row's range / life / radius × 0.1, `stop_all`), held off, then
+  **Re:CoM's apply** onto the enemy (7.6's mechanism).
+- **The hit** (`win::attack::stop_hit`): the hit's value = **KH1's duration in Re:CoM ticks** ((2 +
+  max MP) × 60 × resist[9] × 50; the longest, 600 frames = 30000, fits the i16); **Re:CoM's gate
+  (param `+0x2C`) is set to KH1's answer for the call** (open when the twin's / proxy's
+  `resist[9]` > 0, shut at 0 = immune) and put back after; Re:CoM's kind 8 then stores the value and
+  its stop state runs it. An enemy with no KH1 record takes 100 %. After the handler: the attack
+  bodies off. A stopped enemy's later spell hits keep the neutral attribute on the part so the held
+  hit lands with KH1's resistance only (decision 36).
+- Re:CoM's own Stop cards (kind 8 with its own gate) are untouched at Combat = Re:CoM.
+
+Logs: `magic: release stop1: centre (…) r 2.5 m ±3 m, N enemies listed, first …`, `stop on 0x…:
+shot N, Re:CoM's apply -> Some(1)`, `hit stop1 on 0x…: KH1 resist[9] 100 % -> 15000 ticks (300
+frames), Re:CoM's stop state, its attacks off` / `… -> immune`, `mp: paid 200 (Stop release)`.
+F9 trace: `cast stop1 …`, `release(stop1 f28 shot …)`, `stop 1 e… shot …`, `pay200`, hits
+`e…:stop1:15000t`.
+
+Sites (7.9):
+
+| address | bytes | use |
+|---|---|---|
+| `0x1401A2D90` attack bodies off | `48 8B 89 F8 00 00 00 48 85 C9 0F 85 80 26 FB FF C3` | called |
+| `0x14017DCB5` kind specials, Stop gate | `48 8B 83 08 03 00 00 83 78 2C 00 0F 84 46 02 00 00 F3 0F 2C C6 89 83 D8 02 00 00` | checked (its param field is written for the call) |
+| `0x14017D28A` reaction picker case 8 | `… 48 8D 83 40 09 00 00 … 48 89 43 68` | checked only |
+| `0x14017F937` hit handler's stop test | `48 8B 56 60 48 8D 8E 40 09 00 00` | checked only |
+| `0x14017C740`, `0x1401843A0`, `0x14017ED30` stop begin / exe / end | `48 89 5C 24 08 57 48 83 EC 30 …`, `4C 8B DC 57 48 81 EC B0 00 00 00 …`, `40 53 48 83 EC 20 …` | checked only |
+| `0x140222BC8` Stop case flags | 44 bytes (`… C7 45 B0 05 …`, `… C7 45 B0 25 …`) | checked only |
+| `0x140220926` initMagic Stop charge | 102 bytes (→ `0x1402ABB20`, `0x1401A2D50`, `0x140257EF0`) | checked only |
+| `0x1407C6EE0`, `0x1407C7010` rows 0x27, 0x3A–0x3B | Re:CoM's Stop rows | the KH1 rows' templates |
+
+1:1 checks (7.9):
+
+- **Checked (files + decomp)**, replayed by tests: the release at 28 (handler 29), Sora locked to the
+  end (68), Re:CoM's action ended once, a cut cast nothing (`movement::tests` "7.9"); the rows, the
+  areas (2.5 / 3.5 / 5 m, ±3 m), the cost, the duration (300 frames at max MP 3, × resist[9], 0 =
+  immune, 600 at max MP 8 fitting Re:CoM's value), the order and one strike every 4 frames with
+  outside enemies passed over (`magic::tests`).
+- **Checked (exe)**: the new sites; every boss class's stop slot (offline script over the RTTI
+  vtables).
+- **Assumptions:** (1) Re:CoM's generic update counts the stop state's `+0x160` down by the frame
+  step (as its other state timers; not traced); (2) a second Stop on a stopped enemy: Re:CoM keeps
+  its first timer (its picker leaves a stopped enemy in place and the begin isn't rerun); KH1's apply
+  rewrites the duration only for actors with a stop handler (`+0x408`): not compared; (3) an immune
+  enemy shows Re:CoM's own "no effect" answer to a gated kind (`0x14020C9A0(…, 6)` and vtable
+  `+0x3F0`); KH1 plays its Stop effect and nothing else; (4) KH1's struck part ≈ the first live
+  body (7.6).
+- **Not 1:1 (Re:CoM's held hits):** at most 8 hits are held (KH1: no cap found) and they land spaced
+  by Re:CoM's short reaction instead of KH1's pace (not read). Open question below.
+- **Not checked:** in game.
+
+Open question (7.9): **the held hits' cap and pace.** (a) keep Re:CoM's (built: 8 hits, landed one
+by one with its reaction); (b) read KH1's post-Stop landing pace (`0x1402B7260` / `0x1402B8E10`'s
+queue handling) and, if it differs, land Re:CoM's held list at KH1's pace by setting the stop
+exe's per-landing timer (`+0x160` in its phase 2) from our hit wrapper; (c) also lift the 8-hit cap
+(needs a larger held list than Re:CoM's 8 × 0x30 slots at `+0x340`: a design change in Re:CoM's
+enemy object, not just data).
+
+In-game checklist (7.9):
+
+1. Log: the start line names Stop (7.9) and 18 rows.
+2. Several Heartless near a target: Magic → Stop: Re:CoM's charge on Sora, the cast clip, about 0.5 s
+   later Re:CoM's Stop shot appears on the nearest enemy, then one more every 4 frames on each next
+   nearest within 2.5 m (Stopra 3.5, Stopga 5) of the target; each freezes in Re:CoM's stop state
+   for 5 s at max MP 3 (300 frames; log `hit stop1 … 15000 ticks`). MP −2 points.
+3. Hit a stopped enemy several times: no damage numbers until it thaws, then the hits land one by
+   one (Re:CoM's held hits); spells keep KH1's numbers.
+4. A stopped enemy frozen mid-attack doesn't hurt Sora.
+5. Bosses: Guard Armor full time (Stop 100 %), Trickmaster 30 % (1.5 s), Larxene / Riku Replica /
+   Marluxia: immune (`… -> immune`).
+6. Without a target: the area is around Sora.
+7. F9 trace: `release(stop1 f28 …)`, `stop 1 e… shot …`, `pay200`.
+8. Combat = Re:CoM: Re:CoM's Stop cards unchanged.

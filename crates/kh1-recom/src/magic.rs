@@ -41,10 +41,10 @@ pub mod spell {
     pub const NAMES: [&str; 7] = ["fire", "blizzard", "thunder", "cure", "gravity", "stop", "aero"];
 }
 
-/// Spells cast so far (Fire 7.4, Blizzard 7.5, Thunder 7.6, Cure 7.7, Gravity 7.8; Stop, Aero: 7.9–7.10,
+/// Spells cast so far (Fire 7.4, Blizzard 7.5, Thunder 7.6, Cure 7.7, Gravity 7.8, Stop 7.9; Aero: 7.10,
 /// each its own rows and script numbers).
 pub fn castable(s: u8) -> bool {
-    matches!(s, spell::FIRE | spell::BLIZZARD | spell::THUNDER | spell::CURE | spell::GRAVITY)
+    matches!(s, spell::FIRE | spell::BLIZZARD | spell::THUNDER | spell::CURE | spell::GRAVITY | spell::STOP)
 }
 
 /// A spell's MP cost (its data's `+0x30`, the same at every level): charge units below 100,
@@ -75,6 +75,9 @@ pub mod cast_req {
     /// (files).
     pub const GRAVITY: u16 = 0x3A;
     pub const GRAVITY_AIR: u16 = 0x87;
+    /// Stop's one cast motion (`0x36 + 5`, `0x83 + 5`; entries 56 / 81, Thunder's). Checked (files).
+    pub const STOP: u16 = 0x3B;
+    pub const STOP_AIR: u16 = 0x88;
 
     /// The first cast motion a spell's normal cast plays: `0x1402A3DB0` plays `0x36 + spell`
     /// (Fire: `0x36` then `0x3D`), the air branch of `0x1402A3600` `0x83 + spell` (Fire: `0x83`
@@ -137,6 +140,11 @@ pub fn recom_base_row(s: u8, level: u8) -> Option<usize> {
         (spell::GRAVITY, 1) => Some(0x26),
         (spell::GRAVITY, 2) => Some(0x38),
         (spell::GRAVITY, 3) => Some(0x39),
+        // Stop 0x27 (set 21), Stopra 0x3A (22), Stopga 0x3B (23): `initStockSkill`'s sleights 0x12 /
+        // 0x19. Checked (exe: clip 0x39, sets 21–23 of `stop_all`, kind 8).
+        (spell::STOP, 1) => Some(0x27),
+        (spell::STOP, 2) => Some(0x3A),
+        (spell::STOP, 3) => Some(0x3B),
         _ => None,
     }
 }
@@ -333,6 +341,7 @@ pub fn spell_attack(s: u8, level: u8) -> Option<AttackData> {
         spell::BLIZZARD => Some(blizzard_attack(level)),
         spell::THUNDER => Some(thunder_attack(level)),
         spell::GRAVITY => Some(gravity_attack(level)),
+        spell::STOP => Some(stop_attack(level)),
         // Cure heals (Re:CoM's amounts, decision 34): no hit, no damage.
         _ => None,
     }
@@ -635,6 +644,95 @@ pub fn gravity_damage(level: u8, max_mp: i32, hp: i32, resist8: f32, floor: u16)
     spell_damage(&gravity_attack(level), max_mp, &def, &mut Kh1Rand::new(1))
 }
 
+/// KH1's Stop (`xm_stop01..03.mag`, decoded with `magdis.py`: one script, the level passes the
+/// radius 250 / 350 / 500; Checked (files), the syscalls in the KH1 decomp):
+///
+/// - the command (`L00890`): **wait 4**, the charge effect, then **each frame for 24 frames** the
+///   release check (`0x3B` / `0x88`; else the effect fades and it ends: no spell, no MP); so the
+///   release is at **28**; the thread; **the MP** (sys 47, 200 = two points);
+/// - the thread (`0x44..0x206`): the centre is the target's part if alive, else the caster's
+///   position; every enemy (up to 30) sorted nearest first from the centre (`L0040e`, the same
+///   selection sort as Thunder's); down the list, an enemy whose bodies touch a vertical cylinder of
+///   **250 / 350 / 500 cm, ±300 cm** (sys 90 type 2) gets the Stop effect and **one direct strike**
+///   (sys 60), then **4 frames** (`L009a2(4)`); one outside is passed over at once.
+///
+/// The strike (`0x1402BEEE0` element 9): if the enemy's `resist[9]` > 0, it is stopped for
+/// **(2 + max MP) × 60 × resist[9] frames** (power 2 + max MP, stat source 1; the same at every
+/// level); `resist[9]` = 0: immune. While stopped KH1 queues the hits it takes and lands them when
+/// Stop ends, and the stopped actor's own attacks are skipped (`0x140297FE0`, `0x1402B47A0`).
+/// Checked (files + decomp).
+pub mod stop {
+    pub const WAIT: f32 = 28.0;
+    /// The area: radius by level, half-height, cm.
+    pub const RADIUS: [f32; 3] = [250.0, 350.0, 500.0];
+    pub const HALF_HEIGHT: f32 = 300.0;
+    /// The wait after each strike, frames.
+    pub const INTERVAL: f32 = 4.0;
+    /// The power (data `+0x48`, all levels) and the frames per point.
+    pub const POWER: i32 = 2;
+    pub const FRAMES_PER_POINT: f32 = 60.0;
+    /// MP cost (data `+0x30` = 200): two whole points.
+    pub const COST: i32 = crate::mp::cost::STOP;
+
+    /// The area of a level (Re:CoM metres).
+    pub fn area(level: u8) -> super::Area {
+        super::Area::Cylinder { radius: RADIUS[level.clamp(1, 3) as usize - 1] / 100.0, half: HALF_HEIGHT / 100.0 }
+    }
+
+    /// KH1's Stop duration in frames for a `resist[9]` (0 = immune: None).
+    pub fn frames(max_mp: i32, resist9: f32) -> Option<f32> {
+        (resist9 > 0.0).then(|| (POWER + max_mp) as f32 * FRAMES_PER_POINT * resist9)
+    }
+
+    /// The duration as Re:CoM's stop timer (`enemy+0x2D8` → the stop state's `+0x160`, ticks: 50
+    /// a frame), carried as the hit's value (an i16: at most 32767; KH1's longest is 600 frames =
+    /// 30000).
+    pub fn ticks(max_mp: i32, resist9: f32) -> Option<i16> {
+        frames(max_mp, resist9).map(|f| (f * 50.0).round().clamp(1.0, i16::MAX as f32) as i16)
+    }
+}
+
+/// KH1's Stop attack data (btltbl `0x65B8` / `0x6628` / `0x6698`, Checked (files)): power 2 + max MP
+/// (stat source 1), element 9 (the damage returns the power: the duration's points), kind 0.
+pub fn stop_attack(_level: u8) -> AttackData {
+    AttackData {
+        stat_source: 1,
+        element: 9,
+        kind_party: 0,
+        kind: 0,
+        bone: -1,
+        power_party: stop::POWER,
+        mp_charge: 0,
+        clash: 6,
+        priority: 0,
+        recoil_request: 110,
+        power: stop::POWER,
+        radius: 0.0,
+        ..Default::default()
+    }
+}
+
+/// Re:CoM's Stop rows 0x27 / 0x3A / 0x3B as in the Steam exe (clip 0x39, effect sets 21 / 22 / 23 of
+/// `stop_all`, kind 8, its shot's radius / range / life). Checked (exe).
+pub const RECOM_STOP_ROWS: [[u8; 16]; 3] = [
+    [0x39, 0x00, 0x15, 0x1E, 0x05, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x08, 0x08, 0x00, 0x08, 0x00],
+    [0x39, 0x00, 0x16, 0x1E, 0x14, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x08, 0x08, 0x00, 0x08, 0x00],
+    [0x39, 0x00, 0x17, 0x1E, 0x28, 0x00, 0x00, 0x00, 0x00, 0x64, 0x00, 0x08, 0x08, 0x00, 0x08, 0x00],
+];
+
+/// The KH1 Stop row: Re:CoM's row (clip, `stop_all` set, its shot: decision 34) with `+3` = 0 and
+/// `+0xF` = 0x80. **`+0xB` stays 8**: Re:CoM's own stop kind, which puts the enemy in Re:CoM's stop
+/// state (`0x14017D260` case 8 → `+0x940`) for the hit's value in ticks (`0x14017DC50` case 8).
+pub fn stop_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
+    let mut b = *recom;
+    b[3] = 0;
+    b[0xF] |= FLAG_KH1;
+    b
+}
+
+/// Re:CoM's stop kind (`0x14017DC50` case 8 / `0x14017D260` case 8). Checked (decomp).
+pub const RECOM_STOP_KIND: u32 = 8;
+
 /// An area KH1's sys 90 tests a body against (Re:CoM metres): a vertical cylinder (type 2: radius,
 /// half-height) or a sphere (type 1: radius).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -699,9 +797,9 @@ pub fn body_in_area(centre: [f32; 3], body: &BodyShape) -> bool {
     body_touches(centre, Area::Cylinder { radius: thunder::RADIUS / 100.0, half: thunder::HALF_HEIGHT / 100.0 }, body)
 }
 
-/// KH1's strike list (`L0069c`): the first 30 enemies with their distance from `from`, sorted
-/// nearest first by KH1's selection sort (a later entry replaces the minimum only when strictly
-/// nearer, then swaps).
+/// KH1's strike list (Thunder's `L0069c`, Stop's `L0040e`): the first 30 enemies with their
+/// distance from `from`, sorted nearest first by KH1's selection sort (a later entry replaces the
+/// minimum only when strictly nearer, then swaps).
 pub fn thunder_order(from: [f32; 3], enemies: impl IntoIterator<Item = (u32, [f32; 3])>) -> Vec<u32> {
     let mut l: Vec<(u32, f32)> = enemies
         .into_iter()
@@ -730,14 +828,21 @@ pub fn thunder_order(from: [f32; 3], enemies: impl IntoIterator<Item = (u32, [f3
 pub struct Strikes {
     pub order: Vec<u32>,
     pub next: usize,
-    /// `L00c8e(8)`'s countdown.
+    /// `L00c8e(8)`'s countdown (Stop: `L009a2(4)`).
     pub wait: f32,
     pub struck: u32,
+    /// The wait after each strike (Thunder 8, Stop 4).
+    pub interval: f32,
 }
 
 impl Strikes {
     pub fn new(order: Vec<u32>) -> Strikes {
-        Strikes { order, next: 0, wait: 0.0, struck: 0 }
+        Strikes::every(order, thunder::INTERVAL)
+    }
+
+    /// A strike list with its own wait after each strike.
+    pub fn every(order: Vec<u32>, interval: f32) -> Strikes {
+        Strikes { order, next: 0, wait: 0.0, struck: 0, interval }
     }
 
     /// One run of the thread: a run inside the wait counts it down; otherwise the next listed
@@ -752,7 +857,7 @@ impl Strikes {
         while let Some(&id) = self.order.get(self.next) {
             self.next += 1;
             if inside(id) {
-                self.wait = thunder::INTERVAL - step;
+                self.wait = self.interval - step;
                 self.struck += 1;
                 return Some(id);
             }
@@ -834,7 +939,7 @@ pub fn fire_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
 /// Re:CoM's rows of the spells built so far, by spell (`[spell][level − 1]`), as in the Steam exe:
 /// the templates of the KH1 rows.
 pub fn recom_rows() -> Vec<[[u8; 16]; 3]> {
-    vec![RECOM_FIRE_ROWS, RECOM_BLIZZARD_ROWS, RECOM_THUNDER_ROWS, RECOM_CURE_ROWS, RECOM_GRAVITY_ROWS]
+    vec![RECOM_FIRE_ROWS, RECOM_BLIZZARD_ROWS, RECOM_THUNDER_ROWS, RECOM_CURE_ROWS, RECOM_GRAVITY_ROWS, RECOM_STOP_ROWS]
 }
 
 /// The KH1 magic rows, `[spell × 3 + level − 1]` (21; the spells built so far), from Re:CoM's rows
@@ -850,6 +955,7 @@ pub fn kh1_magic_table(recom: &[[[u8; 16]; 3]]) -> Vec<[u8; 16]> {
                 spell::THUNDER => thunder_row_bytes(r),
                 spell::CURE => cure_row_bytes(r),
                 spell::GRAVITY => gravity_row_bytes(r),
+                spell::STOP => stop_row_bytes(r),
                 _ => [0; 16],
             };
         }
@@ -947,6 +1053,10 @@ pub fn add_motions(m: &mut MotionSet) {
     // Checked (files: requests 0x3A / 0x87 map to them).
     m.add(&[cast_req::GRAVITY], MotionInfo::new(86.0).with_flag(FlagKind::Free, 68.0, inf));
     m.add(&[cast_req::GRAVITY_AIR], MotionInfo::new(78.0).with_flag(FlagKind::Free, 68.0, inf));
+    // Stop (7.9): Thunder's entries 56 / 81 (68 frames, locked to the end). Checked (files: requests
+    // 0x3B / 0x88 map to them).
+    m.add(&[cast_req::STOP], MotionInfo::new(68.0));
+    m.add(&[cast_req::STOP_AIR], MotionInfo::new(68.0));
 }
 
 /// Whether a KH1 request is one of the cast motions Re:CoM's magic action plays.
@@ -977,6 +1087,9 @@ pub fn release_wait(s: u8) -> f32 {
         spell::THUNDER => thunder::WAIT,
         spell::CURE => cure::WAIT,
         spell::GRAVITY => gravity::WAIT,
+        // Stop: `L009a2(4)`, then the check each frame for 24: the release at 28 (a cut motion
+        // before it ends the cast through `leave_cast` / the resync, as KH1's per-frame check).
+        spell::STOP => stop::WAIT,
         _ => 0.0,
     }
 }

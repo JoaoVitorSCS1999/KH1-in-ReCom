@@ -75,9 +75,12 @@ struct GravityRun {
     ap: i32,
 }
 
-/// A Thunder cast's strikes in progress.
+/// A Thunder (7.6) or Stop (7.9) cast's strikes in progress.
 struct ThunderRun {
     s: mg::Strikes,
+    /// Thunder or Stop, and the area its bodies test (KH1's sys 90).
+    spell: u8,
+    area: mg::Area,
     level: u8,
     centre: [f32; 3],
     /// Re:CoM's kind / attribute / AP of the cast (the magic action's, at the release).
@@ -384,6 +387,14 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
         // `initMagic` case 0x1D's charge: the set's effect id 0 on the Keyblade's bone 2.
         charge_on_weapon(pl, r, 0);
     }
+    if c.spell == mg::spell::STOP {
+        // `initMagic` case 0x1F's charge: the set's effect id 0 on Sora's bone 0 at (0, 0.85, 0),
+        // kept on him; and the command's target for KH1's centre.
+        effect_on_bone(pl, pl, 0, set_name(r, 0), 0, &BODY_OFFSET, true);
+        if let Ok(mut g) = STOP_CMD.lock() {
+            *g = Some(rd(pl + f::TARGET));
+        }
+    }
     if c.spell == mg::spell::GRAVITY {
         // `initMagic` case 0x1E's charge (the set's `+0x30` entry) and KH1's marker point.
         charge_on_weapon(pl, r, 0x18);
@@ -425,8 +436,148 @@ pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
         mg::spell::THUNDER => release_thunder(pl, c),
         mg::spell::CURE => release_cure(pl, c),
         mg::spell::GRAVITY => release_gravity(pl, c),
+        mg::spell::STOP => release_stop(pl, c),
         _ => None,
     }
+}
+
+/// Re:CoM's Stop shot flags with a target (`mov qword [rbp−0x50],0x25`). Checked (disasm
+/// `0x140222BEC`).
+const STOP_FLAGS: u64 = 0x25;
+/// Stop (7.9): the command's target handle, for the release.
+static STOP_CMD: Mutex<Option<u32>> = Mutex::new(None);
+
+/// KH1's Stop release (7.9, `xm_stop01.mag`): the centre (the target's aim point if it is alive,
+/// else Sora's position), Re:CoM's lock-on enemies sorted nearest first from it, the strike thread
+/// (one enemy inside the 2.5 / 3.5 / 5 m, ±3 m cylinder every 4 frames, [`stop_strike`]), the
+/// first run now, then the MP (two points). The first strike's shot id.
+unsafe fn release_stop(pl: usize, c: &CastStart) -> Option<u32> {
+    let h = STOP_CMD.lock().ok().and_then(|mut g| g.take()).unwrap_or(0);
+    let centre = match alive_enemy(h) {
+        Some(e) => aim_point(e),
+        None => sora_pos_dir(pl).0,
+    };
+    let enemies: Vec<(u32, [f32; 3])> = lock_on_list(0, false).into_iter().filter_map(|(h, _)| Some((h, position(alive_enemy(h)?)?))).collect();
+    let order = mg::thunder_order(centre, enemies);
+    let n = order.len();
+    let run = ThunderRun { s: mg::Strikes::every(order, mg::stop::INTERVAL), spell: mg::spell::STOP, area: mg::stop::area(c.level), level: c.level, centre, kind: rd(pl + f::KIND), attr: rd(pl + f::ATTR), ap: rd(pl + f::AP) };
+    let first = match STRIKES.lock() {
+        Ok(mut g) => {
+            if g.len() >= 8 {
+                g.remove(0);
+            }
+            g.push(run);
+            STRIKING.store(true, Ordering::Release);
+            let i = g.len() - 1;
+            drop(g);
+            strike_step(pl, 0.0, Some(i)).into_iter().next()
+        }
+        Err(_) => None,
+    };
+    // KH1 pays after the thread starts (sys 20, then sys 47).
+    super::mp::pay(mg::stop::COST, "Stop release");
+    note(|| format!("release stop{}: centre ({:.2},{:.2},{:.2}) r {} m ±3 m, {n} enemies listed, first {first:?}", c.level, centre[0], centre[1], centre[2], mg::stop::RADIUS[c.level.clamp(1, 3) as usize - 1] / 100.0));
+    first
+}
+
+/// One Stop strike (KH1's sys 60 with the Stop data): **Re:CoM's Stop case for this enemy**
+/// (`0x140222170` case `0x27` with a target, Checked (disasm `0x140222BBA..0x140222CB0`)): its
+/// `CBullet` (flags `0x25`, speed 0, the row's range / life / radius × 0.1, its `stop_all` set) at the
+/// enemy's aim point, its attack held off; then Re:CoM's apply onto the enemy's first live hurt
+/// body (7.6's mechanism). Re:CoM's hit handler then runs its kind 8 (the stop state) with KH1's
+/// duration (`spell_hit`). The shot's id.
+#[allow(clippy::too_many_arguments)]
+unsafe fn stop_strike(pl: usize, enemy: usize, h: u32, level: u8, kind: u32, attr: u32, ap: i32) -> Option<u32> {
+    let r = row(mg::spell::STOP, level)?;
+    let aim = aim_point(enemy);
+    let ang = func::<AnglesFn>(ANGLES)(pl);
+    let ang: [f32; 4] = if ang.is_null() { [0.0; 4] } else { std::ptr::read_unaligned(ang) };
+    let mut d = Desc([0; 0x100]);
+    let dp = d.0.as_mut_ptr();
+    func::<DescInitFn>(DESC_INIT)(dp, 1, 3);
+    let w = |o: usize| dp.add(o);
+    std::ptr::write_unaligned(w(0x68) as *mut u32, kind);
+    std::ptr::write_unaligned(w(0x6C) as *mut u32, attr);
+    std::ptr::write_unaligned(w(0x70) as *mut i32, ap);
+    std::ptr::write_unaligned(w(0x0C) as *mut u32, 0x8000_0000);
+    std::ptr::write_unaligned(w(0x60) as *mut u64, STOP_FLAGS | COLLISION_HELD);
+    std::ptr::write_unaligned(w(0x8C) as *mut i32, HELD_TICKS);
+    std::ptr::write_unaligned(w(0x30) as *mut f32, 0.0);
+    std::ptr::write_unaligned(w(0x34) as *mut f32, r[0xC] as f32);
+    std::ptr::write_unaligned(w(0x3C) as *mut i32, r[0xE] as i32 * 100);
+    std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], [aim[0], aim[1], aim[2], 1.0]);
+    std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], ang);
+    std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), EFFECT_SETS) + r[2] as usize * 0x60);
+    std::ptr::write_unaligned(w(0x78) as *mut f32, r[4] as f32 * 0.1);
+    let factory = func::<FactoryFn>(FACTORY)();
+    if factory == 0 {
+        return None;
+    }
+    let bullet = func::<ManagerFn>(SHOT_MANAGER)(factory, dp, pl);
+    if bullet == 0 {
+        bolt_line(|| format!("stop on {h:#x}: Re:CoM made no shot"));
+        return None;
+    }
+    func::<MoverFn>(SHOT_MOVER)(bullet, 0.1, 0.0, 0, -1);
+    hold_off(bullet);
+    let id: u32 = rd(bullet + 0x20);
+    remember_shot(id, mg::spell::STOP, level, 0);
+    let res = apply_to(bullet, enemy);
+    bolt_line(|| format!("stop on {h:#x}: shot {id}, Re:CoM's apply -> {res:?}"));
+    Some(id)
+}
+
+/// Re:CoM's enemy fields Stop reads or writes (Checked (decomp `0x14017DC50`, `0x14017D260`,
+/// `0x14017C740`, `0x1401843A0`)): the param block (`+0x308`; its `+0x2C` is Re:CoM's Stop gate),
+/// the next state (`+0x68`), the stop state (`+0x940`), the state flags (`+0x260`, bit 19 while
+/// stopped).
+pub mod enemy_stop {
+    pub const PARAM: usize = 0x308;
+    pub const STOP_GATE: usize = 0x2C;
+    pub const NEXT_STATE: usize = 0x68;
+    pub const STOP_STATE: usize = 0x940;
+    pub const FLAGS: usize = 0x260;
+    pub const STOPPED: u64 = 0x8_0000;
+}
+
+/// `0x1401A2D90(enemy, -1)`: every attack body of the enemy off (`+0x94` = 0), as Re:CoM's own
+/// reaction states do (`0x14017C350`). Checked (decomp).
+const ATTACK_BODIES_OFF: u32 = 0x001A_2D90;
+
+/// The stopped enemy's own attack bodies off (KH1 skips the attacks a stopped actor owns,
+/// `0x1402B47A0`): once, when Re:CoM's hit handler has just sent it to its stop state.
+pub unsafe fn stop_attacks_off(enemy: usize) -> bool {
+    use enemy_stop::*;
+    if rd::<usize>(enemy + NEXT_STATE) != enemy + STOP_STATE {
+        return false;
+    }
+    func::<PlIntFn>(ATTACK_BODIES_OFF)(enemy, -1);
+    true
+}
+
+/// Re:CoM's Stop gate (param `+0x2C`) for one hit: KH1's `resist[9]` decides instead (open when it
+/// is above 0). The old value, to put back.
+pub unsafe fn stop_gate(enemy: usize, open: bool) -> Option<(usize, i32)> {
+    use enemy_stop::*;
+    let param: usize = rd(enemy + PARAM);
+    if param == 0 {
+        return None;
+    }
+    let old: i32 = rd(param + STOP_GATE);
+    wr(param + STOP_GATE, open as i32);
+    Some((param, old))
+}
+
+/// Puts Re:CoM's Stop gate back.
+pub unsafe fn stop_gate_back(g: Option<(usize, i32)>) {
+    if let Some((param, old)) = g {
+        wr(param + enemy_stop::STOP_GATE, old);
+    }
+}
+
+/// Whether Re:CoM's stop state holds this enemy (its hits are held, `0x1401843A0`).
+pub unsafe fn stopped(enemy: usize) -> bool {
+    rd::<u64>(enemy + enemy_stop::FLAGS) & enemy_stop::STOPPED != 0
 }
 
 /// Re:CoM's Gravity case's descriptor `+0xB8` (`lea rax,[0x1407C78D0]`). Checked (disasm
@@ -1045,7 +1196,8 @@ unsafe fn release_thunder(pl: usize, c: &CastStart) -> Option<u32> {
         func::<PlOutFn>(HAND_POINT)(pl, &mut hand);
         thunder_effect(pl, r, 1, hand);
     }
-    let run = ThunderRun { s: mg::Strikes::new(order), level: c.level, centre, kind: rd(pl + f::KIND), attr: rd(pl + f::ATTR), ap: rd(pl + f::AP) };
+    let area = mg::Area::Cylinder { radius: mg::thunder::RADIUS / 100.0, half: mg::thunder::HALF_HEIGHT / 100.0 };
+    let run = ThunderRun { s: mg::Strikes::new(order), spell: mg::spell::THUNDER, area, level: c.level, centre, kind: rd(pl + f::KIND), attr: rd(pl + f::ATTR), ap: rd(pl + f::AP) };
     let first = match STRIKES.lock() {
         Ok(mut g) => {
             if g.len() >= 8 {
@@ -1102,22 +1254,22 @@ unsafe fn strike_step(pl: usize, step: f32, only: Option<usize>) -> Vec<u32> {
             if only.is_some_and(|o| o != i) {
                 continue;
             }
-            let centre = run.centre;
+            let (centre, area) = (run.centre, run.area);
             let hit = run.s.run(if step > 0.0 { step } else { 1.0 }, |h| {
                 let Some(e) = alive_enemy(h) else { return false };
-                bodies(e).iter().any(|(_, b)| mg::body_in_area(centre, b))
+                bodies(e).iter().any(|(_, b)| mg::body_touches(centre, area, b))
             });
             if let Some(h) = hit {
-                due.push((h, run.level, run.kind, run.attr, run.ap, run.s.struck));
+                due.push((h, run.spell, run.level, run.kind, run.attr, run.ap, run.s.struck));
             }
         }
         g.retain(|r| !r.s.done());
     }
     let mut ids = Vec::new();
-    for (h, level, kind, attr, ap, n) in due {
+    for (h, sp, level, kind, attr, ap, n) in due {
         let Some(e) = alive_enemy(h) else { continue };
-        let id = strike(pl, e, h, level, kind, attr, ap);
-        event(format!("bolt {n} e{h:x}{}", id.map_or(" -".into(), |i| format!(" shot {i}"))));
+        let (id, what) = if sp == mg::spell::STOP { (stop_strike(pl, e, h, level, kind, attr, ap), "stop") } else { (strike(pl, e, h, level, kind, attr, ap), "bolt") };
+        event(format!("{what} {n} e{h:x}{}", id.map_or(" -".into(), |i| format!(" shot {i}"))));
         ids.extend(id);
     }
     ids
@@ -1466,7 +1618,7 @@ pub fn clear_events() {
 /// The start log line.
 pub fn start_line() -> String {
     format!(
-        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.8): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Thunder / Thundara / Thundaga (7.6): at 30, every enemy whose bodies touch a {} m, ±{} m cylinder, nearest first, struck through Re:CoM's own hit path one per {} frames, 1 MP; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Cure / Cura / Curaga (7.7): at {}, Re:CoM's heal {:?} HP on Sora, 1 MP; Gravity / Gravira / Graviga (7.8): at {}, Re:CoM's sphere 2.4 m above the target falls 2.3 m over {:?} f growing to {:?}, then strikes every enemy within 170 x scale cm once (current HP x (power + 5 x max MP)% x resist[8]), 1 MP; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
+        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.9): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Thunder / Thundara / Thundaga (7.6): at 30, every enemy whose bodies touch a {} m, ±{} m cylinder, nearest first, struck through Re:CoM's own hit path one per {} frames, 1 MP; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Cure / Cura / Curaga (7.7): at {}, Re:CoM's heal {:?} HP on Sora, 1 MP; Gravity / Gravira / Graviga (7.8): at {}, Re:CoM's sphere 2.4 m above the target falls 2.3 m over {:?} f growing to {:?}, then strikes every enemy within 170 x scale cm once (current HP x (power + 5 x max MP)% x resist[8]), 1 MP; Stop / Stopra / Stopga (7.9): at {}, every enemy in a {:?} cm, +-300 cm cylinder, nearest first, one every {} f, into Re:CoM's stop state for (2 + max MP) x 60 x resist[9] f (0: immune), 2 MP; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
         TABLE.get().map_or(0, |t| t.iter().filter(|r| r[0] != 0).count()),
         28,
         mg::fire::FAST_WAIT,
@@ -1483,6 +1635,9 @@ pub fn start_line() -> String {
         mg::gravity::WAIT,
         mg::gravity::FRAMES,
         mg::gravity::SCALE,
+        mg::stop::WAIT,
+        mg::stop::RADIUS,
+        mg::stop::INTERVAL,
         mg::retarget::RANGE_M,
         if RETARGET.load(Ordering::Acquire) { "on" } else { "off" }
     )

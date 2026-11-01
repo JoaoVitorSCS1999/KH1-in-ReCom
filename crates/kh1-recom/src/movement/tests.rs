@@ -1290,3 +1290,44 @@ fn ground_gravity_releases_at_28_and_frees_sora_at_68() {
         assert!(!released(&step_cast(&mut p, Pad::default(), None)));
     }
 }
+
+// ---- M7 stage 7.9: Stop ----
+
+#[test]
+fn ground_stop_releases_at_28_and_locks_sora_to_68() {
+    use crate::magic::{cast_req, CastEvent, MagicCommand};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = step_cast(&mut p, Pad::default(), Some(MagicCommand { spell: 5, level: 3 }));
+    assert_eq!(out.cast.first(), Some(&CastEvent::Started { spell: 5, level: 3, fast: false, air: false }));
+    assert_eq!(p.ours.rec.head(), cast_req::STOP);
+    let mut rel = None;
+    let mut free_at = None;
+    for k in 1..100 {
+        let out = step_cast(&mut p, Pad::default(), None);
+        if let Some(CastEvent::Released { frame, .. }) = out.cast.iter().find(|e| matches!(e, CastEvent::Released { .. })) {
+            rel = Some((k, *frame));
+        }
+        if free_at.is_none() && !p.ours.lock {
+            free_at = Some(k);
+        }
+    }
+    // Wait 4, then the check each frame for 24: the thread at 28.
+    assert_eq!(rel, Some((29, 28.0)));
+    assert!(matches!(free_at, Some(68) | Some(69)), "{free_at:?}");
+    assert_eq!(p.recom.cast_ends, 1);
+    // Cut at frame 10 (inside the 24 checked frames): nothing, no MP.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(MagicCommand { spell: 5, level: 1 }));
+    for _ in 0..10 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = p.ours.frame(&mut p.recom, &FrameInput::default(), true);
+    assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Interrupted { .. })));
+    for _ in 0..30 {
+        assert!(!released(&step_cast(&mut p, Pad::default(), None)));
+    }
+}
