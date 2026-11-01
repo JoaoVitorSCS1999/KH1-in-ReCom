@@ -59,6 +59,13 @@ const END_ACTION: u32 = 0x001F_6660;
 const GROUND_TEST: u32 = 0x001F_3C00;
 /// Re:CoM's base gravity (`initItem` writes it to `+0x5D8`). Checked (disasm `0x1401F2988`).
 const BASE_GRAVITY: u64 = 0x1_4087_B398;
+/// Re:CoM's current player (`[0x14087B390]`, set by the `CPlayer` constructor; the heal
+/// `0x1401E59A0` and the stats sync `0x1401F0120` read it). Checked (decomp + exe: the sync's
+/// `mov rax,[rip+0x68B265]` at `0x1401F0124`).
+const PLAYER: u64 = 0x1_4087_B390;
+/// Re:CoM's player → save stats copy (HP, max HP, AP, EXP, Moogle points), which the camp runs as
+/// it opens (`0x1400D9C80` state 2). Checked (decomp; `sites::ITEM_PAGE_CALLEES`).
+const STATS_SYNC: u32 = 0x001F_0120;
 /// Sora's HP (`+0x42C`, max `+0x430`) and Re:CoM's death flag (`+0x7B0`). Checked (decomp).
 const HP: usize = 0x42C;
 const HP_MAX: usize = 0x430;
@@ -88,6 +95,7 @@ type PlFn = unsafe extern "win64" fn(usize);
 type PlIntFn = unsafe extern "win64" fn(usize, i32);
 type GroundFn = unsafe extern "win64" fn(usize) -> u32;
 type HealFn = unsafe extern "win64" fn(usize, i32, i32, i32, i32);
+type SyncFn = unsafe extern "win64" fn() -> u64;
 
 fn note(line: impl FnOnce() -> String) {
     if LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
@@ -128,6 +136,61 @@ fn with_inventory<R>(f: impl FnOnce(&mut Inventory) -> R) -> Option<R> {
         unsafe { wr(at, block) };
     }
     Some(r)
+}
+
+/// Sora's inventory (a read), when KH1's items are live (M8 stage 8a.2, the camp's Items page).
+pub fn inventory() -> Option<Inventory> {
+    with_inventory(|inv| *inv)
+}
+
+/// Runs `f` on Sora's inventory and writes it back when it changed (the camp's Items page).
+pub fn edit<R>(f: impl FnOnce(&mut Inventory) -> R) -> Option<R> {
+    with_inventory(f)
+}
+
+/// What KH1's pause-menu use rule (`0x1402CD3A0`) reads of Sora: HP below max (Re:CoM's player;
+/// none: false, nothing to heal), MP below max (KH1's MP).
+pub fn menu_ctx() -> crate::items_page::Ctx {
+    // SAFETY: a static pointer of the image; the player's fields while it is set.
+    let pl: usize = unsafe { rd(va(base(), PLAYER)) };
+    let hp_low = pl != 0 && unsafe { rd::<i32>(pl + HP) < rd::<i32>(pl + HP_MAX) };
+    let mp_low = super::mp::current().is_some_and(|(mp, max, _)| mp < max);
+    crate::items_page::Ctx { hp_low, mp_low }
+}
+
+/// KH1's pause-menu use (`0x14030F160` → `0x1402CD590`): the item's effect on Sora at once, no
+/// motion. HP through Re:CoM's heal `0x1401E59A0(player, amount, 0, 0, 0)` (no effect, no popup;
+/// only below max, KH1's `0x1402CD5E0`), then Re:CoM's own player → save stats copy (the camp
+/// copied them as it opened); MP through KH1's MP. The item already left the inventory.
+/// Returns a line for the log.
+pub fn use_in_menu(item: u8) -> String {
+    let Some(e) = it::effect(item) else { return "no effect".into() };
+    let mut what = Vec::new();
+    // SAFETY: a static pointer of the image; Re:CoM's own heal and sync on its current player.
+    unsafe {
+        let pl: usize = rd(va(base(), PLAYER));
+        if let Some(h) = e.hp {
+            if pl == 0 {
+                what.push("no player: HP not healed".to_string());
+            } else {
+                let hp: i32 = rd(pl + HP);
+                let max: i32 = rd(pl + HP_MAX);
+                match it::hp_to_add(h, hp, max) {
+                    Some(a) => {
+                        func::<HealFn>(HEAL)(pl, a, 0, 0, 0);
+                        func::<SyncFn>(STATS_SYNC)();
+                        what.push(format!("HP {hp} -> {} (+{a}, max {max})", rd::<i32>(pl + HP)));
+                    }
+                    None => what.push(format!("HP full ({hp}): no heal")),
+                }
+            }
+        }
+    }
+    if let Some(n) = e.mp {
+        let rose = super::mp::add_points(n, it::name(item));
+        what.push(if rose { "MP up".to_string() } else { "MP full or not live".to_string() });
+    }
+    what.join(", ")
 }
 
 /// Sora's slots and slot count for the command menu (a read; all empty when not live).

@@ -193,6 +193,9 @@ states 0x4A..0x4C our page already uses (Re:CoM's Deck states are tied to its de
 | page done | states 0x34 / 0x35: `0x1400E4220(camp, 4, 1)`, `0x1400E3DE0(camp, 0, 1)` (animation 4), then idle with the cursor on **the same row** | the same, plus layer 2 shown |
 | cancel | state 0x22: cursor set `(row, 0)`, mode 2, `0x1400E4220(4)`, sound 4; state 0x23: when button 0's fade ends, back to the top list (`0x1400E3DE0(0, 0)` relabels the 7 entries) | cursor set `(row, 0)`, mode 2, sound 4; when button 0's fade ends `camp+0xB8 = 7` and the page returns −1: Re:CoM's 0x4B closes header item 0 (`0x1400E4220(camp, 4, 0)`, disasm `0x1400DC4B0`), 0x4C relabels its 7 entries (level 1 → 0) and 0xD highlights ours |
 
+M8 stage 8a.2 added a third row, **Items** (KH1's Items screen, `docs/recom-m8-items.md` § Stage
+8a.2); the entry's help is now "Keyblades, shortcuts and items."
+
 Differences from the Deck submenu: header item 0 closes when the submenu's fade ends, not at the
 cancel press (the Config states close it on the page's −1; calling it twice would restart its
 animation); Re:CoM's Deck-only panels (`0x1400E0870`, `0x1400E13C0`) and side elements

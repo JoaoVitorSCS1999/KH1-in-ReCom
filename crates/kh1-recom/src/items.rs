@@ -66,17 +66,19 @@ pub struct ItemData {
     /// `+8` / `+0xA`: munny (the shop, stage 8a.3).
     pub buy: u16,
     pub sell: u16,
+    /// `+0x10`: the sort key the pause menu's stock lists sort by (`0x14030EEB0`, then the id).
+    pub sort: u16,
 }
 
 /// KH1's battle item rows. Checked (files).
 pub const DATA: [ItemData; 7] = [
-    ItemData { id: id::POTION, name: 0x1F, kind: 0, party: false, amount: 30, buy: 60, sell: 12 },
-    ItemData { id: id::HI_POTION, name: 0x20, kind: 0, party: false, amount: 60, buy: 150, sell: 30 },
-    ItemData { id: id::ETHER, name: 0x21, kind: 0, party: false, amount: 3, buy: 200, sell: 40 },
-    ItemData { id: id::ELIXIR, name: 0x22, kind: 0, party: false, amount: 255, buy: 0, sell: 80 },
-    ItemData { id: id::MEGA_POTION, name: 0x24, kind: 0, party: true, amount: 30, buy: 0, sell: 40 },
-    ItemData { id: id::MEGA_ETHER, name: 0x25, kind: 0, party: true, amount: 3, buy: 0, sell: 60 },
-    ItemData { id: id::MEGALIXIR, name: 0x26, kind: 0, party: true, amount: 255, buy: 0, sell: 100 },
+    ItemData { id: id::POTION, name: 0x1F, kind: 0, party: false, amount: 30, buy: 60, sell: 12, sort: 1 },
+    ItemData { id: id::HI_POTION, name: 0x20, kind: 0, party: false, amount: 60, buy: 150, sell: 30, sort: 2 },
+    ItemData { id: id::ETHER, name: 0x21, kind: 0, party: false, amount: 3, buy: 200, sell: 40, sort: 3 },
+    ItemData { id: id::ELIXIR, name: 0x22, kind: 0, party: false, amount: 255, buy: 0, sell: 80, sort: 4 },
+    ItemData { id: id::MEGA_POTION, name: 0x24, kind: 0, party: true, amount: 30, buy: 0, sell: 40, sort: 6 },
+    ItemData { id: id::MEGA_ETHER, name: 0x25, kind: 0, party: true, amount: 3, buy: 0, sell: 60, sort: 7 },
+    ItemData { id: id::MEGALIXIR, name: 0x26, kind: 0, party: true, amount: 255, buy: 0, sell: 100, sort: 8 },
 ];
 
 pub fn data(item: u8) -> Option<&'static ItemData> {

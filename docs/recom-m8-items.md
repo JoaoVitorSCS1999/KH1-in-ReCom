@@ -5,7 +5,9 @@ Owner (2026-11-01, "Finish everything up to M9"; M7–M9 choices in
 enemies** (8a.3 / 8a.4); **healing amounts: Re:CoM's own item-card amounts** (see open question 1:
 Re:CoM's item cards heal no HP). This stage: KH1's Items list in the command menu, Sora's slots and
 stock in our save block, and the use, run by Re:CoM's own item action `0xE`. Not in this stage: the
-camp Items page (8a.2), the shop (8a.3), the drops (8a.4).
+camp Items page (8a.2, [below](#stage-8a2-kh1s-items-page-in-the-kh1-camp-entry)), the shop (8a.3,
+[below](#stage-8a3-kh1s-items-in-recoms-moogle-shop-not-built-findings-and-options)), the drops
+(8a.4).
 
 At Combat = KH1, in Sora's story, field and battle. At Combat = Re:CoM, or in Riku's story, nothing
 of this runs: Re:CoM's item cards are untouched (our `exeItem` hook passes them through).
@@ -131,6 +133,10 @@ layout v1). **Layout v2 adds the items extension right after it**, `save + 0x268
 `slots()` (the slots and count), `pick_up(item, why)` (KH1's `0x140284E60`: the first empty slot
 for a battle item, else the stock below 99; `None` when refused or not live). Pure:
 `crate::items::{Inventory, read, write, data, effect, command}`.
+
+Since 8a.2: `inventory()` (a read), `edit(f)` (read, change, write back when changed), `menu_ctx()`
+(HP / MP below max for KH1's pause-menu use rule), `use_in_menu(item)` (the effect at once, no
+motion). Pure: `crate::items_page`.
 
 ## Debug: `kh1_test_items`
 
@@ -280,3 +286,190 @@ Set `kh1_test_items = on` in `kh1-recom.ini` (debug), re-run the asset step, Com
 8. Combat = Re:CoM: Re:CoM's item cards reload cards as before (our hook passes them); Riku's
    story: unchanged.
 9. F9 trace: the `item potion f… s… d…` token, `menu i:…`.
+
+---
+
+## Stage 8a.2: KH1's Items page in the "KH1" camp entry
+
+Ask (M8 plan row 8a.2): KH1's pause-menu Items screen, which moves items between the stock and
+Sora's slots, as a third row "Items" of the KH1 camp submenu, on Re:CoM's camp list machinery
+(cursor, sounds, text drawing as Customize) with KH1's item names; KH1's rules where Re:CoM's camp
+list can express them.
+
+Code: `crates/kh1-recom/src/items_page.rs` (KH1's screen as a window stack; tested),
+`src/keyblades.rs` (`sub::Row::Items`), `src/win/keyblades.rs` (`Content::Items`, `item_word`,
+`items_confirm`, `items_read`), `src/win/items.rs` (`inventory`, `edit`, `menu_ctx`,
+`use_in_menu`), `src/items.rs` (the rows' sort key).
+
+### KH1's Items screen (Steam)
+
+The screen's windows share globals: `0x142E9C1F8` the state, `0x142E9C1FC` the source owner (a
+member index, −1 the stock), `0x142E9C208` / `0x142E9C20C` the source slot / item, `0x142E9C210`
+the command, `0x142E9C218` the destination owner. Words are sysmsg ids (KH1's sysmsg file is not in
+the asset step: not read).
+
+| what | where | tag |
+|---|---|---|
+| **State 0, owners**: the party members (names from table `0x1405452B8`), then "Stock" (sysmsg `0x38`), then a row sysmsg `0x39` shown only when `0x142E9C764` ≠ 0 (a count over `0x140225F50` / `0x14020CF40`: not items; not built). A member with 0 slots or the stock with an empty list is greyed and its confirm is error sound 4. | `0x14030D160` | Checked (decomp) |
+| **State 1, a member's slots**: one row per slot (record `+0x25` rows), an empty slot named sysmsg `0x97`; the help window shows the item's description (row `+0xC`). Confirm on any row (an empty one too) → state 2 with the slot and its item (0 for empty). | `0x14030FA10` | Checked (decomp) |
+| **State 1, the stock**: two columns, the count drawn beside the name when above 1. | `0x14030F330` | Checked (decomp) |
+| **Stock lists** (rebuilt after every change): every id 1..255 with a stock byte; the list shown holds kinds 0, 12, 13 (`0x1402E8F80`, table `0x140545320` = 0, 12, 13); the equip list only kind 0 (`0x1402E8F50`); both sorted by row `+0x10` (the sort key) then the id. Battle items' keys are their ids (1, 2, 3, 4, 6, 7, 8). | `0x14030EEB0` | Checked (decomp + exe + files) |
+| **State 2, commands**: Use (sysmsg 0x91), Move (0x94), Remove (0x92, a filled slot) / Equip (0x95, an empty slot), Discard (0x93). Help lines sysmsg 0x81..0x90 (enabled / greyed, member / stock source: table `0x140548C20`). | `0x14030CB50`, `0x14030CA40` | Checked (decomp + exe) |
+| Use: enabled for an item usable now on any member (`0x1402E8B20` → `0x1402CD3A0`: HP items below max HP, Ethers below max MP, Elixirs either); a single-target item opens the target list (state 3), a party item is used at once. The use (`0x14030F160` → `0x1402CD590`): the effect on the party record, the item leaves its slot or the stock; nothing happened → sysmsg 0xA0. | `0x14030CB50`, `0x14030F160`, `0x1402CD3A0` | Checked (decomp) |
+| Move: enabled for a kind-0 item **or an empty slot** (`iVar4 = 1` when the item is 0), needing a slot source or an item. Opens state 3: the members, and **the stock only for a slot's item** (greyed with no kind-0 item in stock). | `0x14030CB50`, `0x14030D7B0` case 3, `0x14030D160` | Checked (decomp) |
+| Remove: the slot's item to the stock (+1), the slot cleared; refused at 99 (sysmsg 0xA1, error sound). Equip (empty slot): the kind-0 stock list (state 4); nothing in it → sysmsg 0xA2. Greyed for a stock source. | `0x14030CB50` | Checked (decomp) |
+| Discard: enabled for a filled row whose kind isn't 13 (`0x1402E8AA0`); a yes / no window (sysmsg 0xA3), its cursor written 0 (`0x1402F10C0`, row 0 = yes: Assumption on which field is the cursor); yes: stock − 1 or the slot cleared. | `0x14030CB50`, `0x14030C8D0` | Checked (decomp) |
+| **State 4, the exchanges** (none checks for duplicates: an item can fill several slots): slot → member slot: the two slots swap. Stock item → member slot: the slot's old item to the stock (refused when that is at 99), the stock item − 1 into the slot. Slot → stock item (Move): the stock item into the slot, the slot's old item (if any) back to the stock (refused at 99). Empty slot → stock item (Equip): the item into the slot, then the slot cursor moves to the member's first empty slot. Stock → stock: nothing. | `0x14030FA10`, `0x14030F330` | Checked (decomp) |
+| **State 5**: lists rebuilt; back to the source's list (state 1), its cursor kept; to the owners (state 0) when the source was the stock and the stock list is now empty. | `0x14030D7B0` case 5 | Checked (decomp) |
+| **Cancel** steps back one window: the destination list → state 3 (Move) or 2 (Equip); state 3 → 2; 2 → 1; 1 → 0; 0 leaves the screen. Sound 3 (back); confirms sound 2; refusals 4. | `0x14030F330`, `0x14030FA10`, `0x14030D160`, `0x14030CB50` | Checked (decomp) |
+
+### Ours, on Re:CoM's camp list
+
+- **The row**: "Items" (help "Equip, use and discard items."), third in the KH1 entry's submenu
+  (`keyblades::sub::ROWS`, Re:CoM's Deck-submenu buttons; Stage 7.13's rule: one more row). The
+  entry's help is now "Keyblades, shortcuts and items." Only at Combat = KH1 in Sora's story (the
+  entry's gate); at the Re:CoM setting nothing of this exists.
+- **The page**: the Keyblades / Customize page type (both panels, `CButton` rows, `CButtonCursor`,
+  help line; no scroll bar: at most 8 rows), one window at a time: the list shows KH1's current
+  window (owners, Sora's slots, the stock, the commands, the destinations, yes / no); confirm opens
+  the next, cancel goes back (KH1's stack, cursors kept per window).
+- **Rows**: item names are KH1's words (`kh1-command-menu.json`, the battle menu's), else English;
+  a stock row adds " xN" when N > 1 (KH1 draws the number beside the name); greyed rows are drawn
+  at half of Re:CoM's text colour (**Assumption**: no greyed camp row of Re:CoM's was read).
+- **Status panel** (3 label / value rows): Owner, Item (the highlighted or chosen one), In stock
+  (its count). KH1 shows the chosen owner / item / command as a header line instead.
+- **Help line**: per window and row (our English for KH1's 0x81..0x90 lines), and KH1's refusal
+  messages 0xA1 / 0xA2 as our English until the next move.
+- **Sounds**: Re:CoM's camp sounds (1 move, 2 confirm / done, 4 back, 5 refused), as Customize.
+- **Use**: on Sora at once (KH1 opens the target list for a single-target item; Sora is the only
+  member, the owner's choice for Cure / Aero and the battle menu). Effect: HP through Re:CoM's heal
+  `0x1401E59A0(player, amount, 0, 0, 0)` (no effect, no popup; the amounts of 8a.1, open question
+  1), then Re:CoM's own player → save stats copy `0x1401F0120` (what the camp runs as it opens, so
+  the save's HP agrees); MP through KH1's MP (`win::mp::add_points`). Sora's player is
+  `[0x14087B390]`; without one (not seen in the field camp) HP items grey out.
+- **Store**: every change reads and writes our save block's items extension (layout v2, 8a.1);
+  the slot count stays 3 (growth deferred, 8a.1 open question 4).
+
+### New site (`sites::ITEM_PAGE_CALLEES`)
+
+| address | bytes | use |
+|---|---|---|
+| `0x1401F0120` player → save stats | `48 83 EC 28 48 8B 05 65 B2 68 00 48 85 C0 75 05` | called after a heal from the page (its `mov rax,[rip+…]` reads `0x14087B390`, the heal's player) |
+
+No new hook. The heal `0x1401E59A0` is already a checked callee (M7). All 376 site byte sets
+compared with `recomsteam.exe` (pefile): 0 mismatches.
+
+### Per frame
+
+Nothing outside the pause menu. In it, the page runs as Customize does; the inventory (26 bytes)
+and Sora's HP / MP are read only when the page opens and after each confirm or cancel.
+
+### Logs
+
+`items page: opened: slots [..] (of 3), stock [(id, n)..], HP below max .., MP below max ..`,
+`items page: Removed { item: 1, slot: 0 }; slots [..], stock [..]`, `items page: Used { .. }: HP
+120 -> 260 (+140, max 300)`, `items page: refused: StockFull`.
+
+### 1:1 checks
+
+- **Checked (decomp + exe + files)**, replayed by `items_page::tests`: the owners' greying; the
+  stock list's kinds and sort; the commands' greying (Use's can-use rule, Move on an empty slot,
+  Equip / Remove only for a slot, Discard needs an item); Remove's 99 refusal; Equip's list and
+  its jump to the first empty slot; Move's swap and both stock exchanges with the 99 refusal; the
+  stock row only for a slot's Move; stock → stock does nothing; Use from a slot and from the stock
+  (back to the owners when the stock empties); the discard question (yes first, no back); every
+  cancel's target.
+- **Not checked**: in game; KH1's own words (sysmsg) and its windows' look.
+
+### Not KH1's (by design or yet)
+
+1. Re:CoM's camp list, one window at a time (KH1 shows its windows side by side and a header
+   line); words ours in English (KH1's sysmsg not in the asset step: **Assumption** that "Use /
+   Move / Remove / Equip / Discard / Stock / Empty" match KH1's 0x91..0x97 in meaning).
+2. No target list for Use (Sora only); party items heal Sora only.
+3. No item descriptions (KH1's row `+0xC` text); the help line describes the command instead.
+4. KH1's refusal messages are a help line + error sound, not a window to dismiss.
+5. KH1's heal sounds (its 0xE / 7) are Re:CoM's confirm sound.
+6. The owners' `0x39` row (not items) is not built.
+7. The stock list only ever holds the battle items (our store has no other KH1 item).
+
+### What the owner should test
+
+With `kh1_test_items = on` (slots Potion / Hi-Potion / Ether, 9 of each in stock), Combat = KH1:
+
+1. Camp → KH1: three rows Keyblades / Customize / Items; Items' help line; up / down wrap.
+2. Items: rows Sora / Stock; the status panel shows Owner, Item, In stock.
+3. Sora → his 3 slots with KH1's names; a slot → Use / Move / Remove / Discard. At full HP, Use is
+   greyed for a Potion (error sound on confirm).
+4. Remove: the slot shows Empty, the stock count rises (In stock). On the empty slot the third
+   command reads Equip; Equip → the stock list → pick Ether: the slot holds it, the cursor goes to
+   the next empty slot.
+5. Move: Sora → another slot: the two swap; Stock → an item: exchanged (the old one back in stock).
+6. Stock → an item → Move → Sora → a slot: exchanged. Discard → Yes: one fewer.
+7. Get hurt, open the camp, Use a Potion from a slot: HP rises (HUD and Re:CoM's Status page),
+   the slot empties. Ether below max MP: the MP bar fills by 3.
+8. Close the camp: the battle menu's Items list shows the new slots. Save, reload: the same.
+9. Combat = Re:CoM or Riku's story: no KH1 entry (unchanged).
+
+---
+
+## Stage 8a.3: KH1's items in Re:CoM's Moogle shop (not built: findings and options)
+
+Ask: KH1's shop items as purchasable rows in Re:CoM's own Moogle shop screen, priced in Moogle
+Points, bought via `pick_up`, native (extend the shop's data / rows), or stop and report options
+if the shop can only list card packs without a large rewrite. **Stopped: it can only list card
+packs.** Nothing of 8a.3 is in the code.
+
+### KH1's item shop (Steam)
+
+| what | where | tag |
+|---|---|---|
+| A shop opens with a list (`0x1403010A0(kind, list, …)`, kind 0 = item shop): count + item ids, 0xD4-byte records at `0x1404FEE00`, the record picked by the event script (`param+0x198[…]`; which record when: script data, not read). | `0x1403010A0`, `0x1401CA610` | Checked (decomp + exe) |
+| Item shop records: 0 = Potion, Hi-Potion, Ether, Tent (142); 1 = + 4 accessories; 2 = + Camping Set (143) and more; 3 = + Orichalcum (255) and more; 7 = Potion, Hi-Potion, Ether, Tent, Camping Set. **Every item-shop record sells Potion, Hi-Potion and Ether**; no record sells Elixirs or the Mega items (row buy price 0). | exe `0x1404FEE00` | Checked (exe + files) |
+| Prices: row `+8` munny: Potion 60, Hi-Potion 150, Ether 200 (Tent 250, Camping Set 500). | `0x1402E88F0` | Checked (files) |
+| Buy (`0x1402FED40` / `0x140301660`): a quantity 1 .. min(munny ÷ price, 99 − stock), then the destination: a member (quantity 1, kind 0 only, into his **first empty slot**, refused when none) or the stock (refused past 99). Not KH1's pickup rule (`0x140284E60`): the player picks where it goes. | `0x1402FED40`, `0x140301660` | Checked (decomp) |
+
+### Re:CoM's Moogle shop (Steam)
+
+| what | where | tag |
+|---|---|---|
+| `CMoogleShopCore` (ctor `0x1403A4220`): 7 modes (init / update / end triples at `+0x98 + 0x40·i`). | `0x1403A4220` | Checked (decomp) |
+| Its top menu (mode 2, `0x1403A8770`): **two fixed entries** (`+0x270` 0..1, wrap at 2, cursor y from `0x14065BA30`; entry 0 the packs, 1 leaves); labels are layout art. | `0x1403A8770` | Checked (decomp + exe) |
+| The pack screen (mode 4, `0x1403A6930`): **4 tabs** (`+0x280`, wrap 0..3) × up to 4 packs in a **2 × 2 grid** (`+0x284`, moves from table `0x14065BA70`); each pack a `CMShopCardPack` (`0x14045A9E0`: art from `m_shop.lad` by position, its price, sold-out flag). Fixed 4 × 4 arrays in the object: pack types `+0x288`, prices `+0x2C8` (from `MogCardPack`), sold-out `+0x308` (a 16-bit field, `0x140114180` / `0x1401141D0`); the per-tab count `+0x348` from `MogFloor` by floor (`0x1403A5B10`). | `0x1403A6930`, `0x1403A5B10`, `0x14045A9E0` | Checked (decomp + exe) |
+| A buy: room for 5 more cards, not sold out, price ≤ Moogle Points (`stats + 0x20`) → **5 random cards from the pack's tables** (`0x1403A66F0` → `0x1403A62B0` / `MogCardKaku`, each through `0x140158FC0`), the pack marked sold out, the "cards got" screen; then Moogle Points − price (`0x14023A1D0`) and the spent total (save var (0, 0xB6), a trophy at 20000). | `0x1403A6930` states 2..4, `0x1403A66F0` | Checked (decomp) |
+
+So every entry the shop lists is a card pack: its picture, its once-per-visit sold-out bit, its
+5-card result and the collection-space check are all pack-specific, the tab and grid sizes are
+fixed (4 × 4 arrays inside the object), and there is no quantity picker. `MogFloor`,
+`MogCardPack` and `MogCardKaku` themselves are not in this session (not read).
+
+### Options (owner question)
+
+- **(a) A fifth tab "Items" in the pack screen** (KH1 setting): hooks on the shop's set-up
+  (`0x1403A5B10`), its update (`0x1403A6930`: tab wrap 0..4, the buy branch for item entries:
+  Moogle Points check, `pick_up` or KH1's buy rule, no sold-out bit, no 5 cards, no
+  collection-space check), the pack object (`0x14045A9E0`) for item pictures; a side table for the
+  fifth tab (the object's 4 × 4 arrays are full); new item pictures in `m_shop.lad` from the
+  player's KH1 files (asset step). One item per confirm (no quantity). Large: about 4 hooks + new
+  art + an asset step change.
+- **(b) A third top-menu entry "Items"** (wrap 2 → 3, a third y, a new label in `m_shop.lad`)
+  opening a list screen inside the shop: Re:CoM's shop has no list screen, so one would be built
+  from Re:CoM's camp list classes (whose sprite set `camp:00` the shop scene may not load:
+  Assumption). Largest and riskiest.
+- **(c) Re:CoM's own item card packs also give KH1 items**: at the KH1 setting in Sora's story,
+  each item card (Potion … Megalixir, kinds 0x2A..0x30) a Moogle pack gives (`0x1403A66F0`'s calls
+  to `0x140158FC0`) also gives the matching KH1 item through `pick_up`. One small hook, no art,
+  Re:CoM's cards untouched; not KH1's shop (random, from packs, priced per pack).
+- **(d) A "Shop" row in the KH1 camp entry** (8a.2's page type) buying KH1's shop items for Moogle
+  Points, KH1's buy rule (quantity, destination), only when the camp is opened in a Moogle room
+  (room test to research). Re:CoM's camp list, not Re:CoM's shop screen.
+
+Also to decide with the owner:
+
+1. **Price**: Moogle Points 1:1 with KH1's munny (Potion 60, Hi-Potion 150, Ether 200) is the
+   **Assumption** on the table; Re:CoM's pack prices (`MogCardPack`) were not read, so no better
+   grounded rate is known.
+2. **Which items**: KH1 sells Potion, Hi-Potion and Ether in every item-shop stage (Checked); Tent
+   / Camping Set / accessories have no Re:CoM use yet.
+3. **Where it goes**: KH1's buy rule (quantity, then a slot or the stock) or the brief's `pick_up`
+   rule (first empty slot, else the stock).

@@ -63,6 +63,7 @@ pub mod deck;
 pub mod guard;
 pub mod hookplan;
 pub mod items;
+pub mod items_page;
 pub mod json;
 pub mod keyblade_models;
 pub mod keyblades;

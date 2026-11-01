@@ -974,6 +974,14 @@ pub const ITEM_CHECKED: &[Site] = &[
     Site { name: "Battle exe case 0xE (0x1401F9A10)", rva: 0x001F_9A10, expect: &[0x48, 0x8B, 0xCF, 0xE8, 0xC8, 0x3C, 0xFF, 0xFF, 0xE9, 0xAC, 0x02, 0x00, 0x00] },
 ];
 
+/// Re:CoM functions the camp's Items page calls (M8 stage 8a.2, `win::items::use_in_menu`,
+/// `docs/recom-m8-items.md` § Stage 8a.2). The heal `0x1401E59A0` is [`MAGIC_CALLEES`]'.
+pub const ITEM_PAGE_CALLEES: &[Site] = &[
+    // sub rsp,0x28; mov rax,[0x14087B390] (the current player); test rax,rax; jne: the player →
+    // save stats copy the camp runs as it opens (`0x1400D9C80` state 2).
+    Site { name: "player -> save stats (0x1401F0120)", rva: 0x001F_0120, expect: &[0x48, 0x83, 0xEC, 0x28, 0x48, 0x8B, 0x05, 0x65, 0xB2, 0x68, 0x00, 0x48, 0x85, 0xC0, 0x75, 0x05] },
+];
+
 /// The vtable slot the menu calls through. Checked (exe; relocated pointer).
 pub const COMMAND_MENU_PTRS: &[PtrSite] = &[PtrSite { name: "C2DSeqCtrl vtable +0x60 (0x1406073A0)", rva: 0x0060_73A0, target: 0x0024_76F0 }];
 
@@ -1329,6 +1337,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(ITEM_HOOKS)
         .chain(ITEM_DATA)
         .chain(ITEM_CHECKED)
+        .chain(ITEM_PAGE_CALLEES)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -1704,6 +1713,19 @@ mod tests {
         for rva in [0x0024_7C90u32, 0x0015_D230, 0x0024_7850, 0x0024_76F0] {
             assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
         }
+    }
+
+    #[test]
+    fn item_page_sites() {
+        // The stats copy is no other stage's site and reads the player pointer the heal uses
+        // (`mov rax,[rip+rel]` at +4, 7 bytes).
+        for s in ITEM_PAGE_CALLEES {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        let sync = &ITEM_PAGE_CALLEES[0];
+        let rel = i32::from_le_bytes(sync.expect[7..11].try_into().unwrap()) as i64;
+        assert_eq!(0x1_4000_0000 + sync.rva as i64 + 4 + 7 + rel, 0x1_4087_B390);
+        assert!(all_sites().any(|s| s.rva == 0x001E_59A0), "the heal is checked");
     }
 
     #[test]

@@ -304,7 +304,7 @@ pub mod text {
     /// submenu"), its header title and help line.
     pub const ENTRY_LABEL: &[u8] = b"KH1\0";
     pub const TITLE: &[u8] = b"KH1\0";
-    pub const ENTRY_HELP: &[u8] = b"Keyblades and shortcuts.\0";
+    pub const ENTRY_HELP: &[u8] = b"Keyblades, shortcuts and items.\0";
     /// The Keyblades row of the submenu, its page's header title and help.
     pub const KEYBLADES_LABEL: &[u8] = b"Keyblades\0";
     pub const KEYBLADES_HELP: &[u8] = b"Equip a Keyblade.\0";
@@ -319,7 +319,8 @@ pub mod text {
 /// rows, as Re:CoM's Deck submenu relabels them (`0x1400E3DE0` mode 0 at level 1), run with
 /// Re:CoM's Deck-submenu input rule (update state 0x22, `0x1400D9C80`). Checked (decomp).
 ///
-/// Adding a row (M9's Abilities) is one more [`Row`] in [`ROWS`] with its label, help and page.
+/// Adding a row (M9's Abilities) is one more [`Row`] in [`ROWS`] with its label, help and page (M8
+/// stage 8a.2 added Items this way).
 pub mod sub {
     use super::text;
     use super::top::Pad;
@@ -329,10 +330,12 @@ pub mod sub {
     pub enum Row {
         Keyblades,
         Customize,
+        /// M8 stage 8a.2: KH1's pause-menu Items screen (`crate::items_page`).
+        Items,
     }
 
     /// The rows, top to bottom.
-    pub const ROWS: &[Row] = &[Row::Keyblades, Row::Customize];
+    pub const ROWS: &[Row] = &[Row::Keyblades, Row::Customize, Row::Items];
 
     /// Re:CoM's camp has 7 entry buttons (`camp+0x1B8[7]`); the submenu reuses them. Checked
     /// (decomp).
@@ -345,6 +348,7 @@ pub mod sub {
             match self {
                 Row::Keyblades => text::KEYBLADES_LABEL,
                 Row::Customize => text::CUSTOMIZE_LABEL,
+                Row::Items => crate::items_page::text::LABEL,
             }
         }
 
@@ -353,6 +357,7 @@ pub mod sub {
             match self {
                 Row::Keyblades => text::KEYBLADES_HELP,
                 Row::Customize => text::CUSTOMIZE_HELP,
+                Row::Items => crate::items_page::text::HELP,
             }
         }
     }
@@ -613,16 +618,17 @@ mod tests {
     #[test]
     fn submenu_rows_and_moves_follow_recoms_deck_submenu() {
         use sub::{Act, Row, ROWS};
-        assert_eq!(ROWS, &[Row::Keyblades, Row::Customize]);
-        assert_eq!((Row::Keyblades.label(), Row::Customize.label()), (&b"Keyblades\0"[..], &b"Customize\0"[..]));
+        assert_eq!(ROWS, &[Row::Keyblades, Row::Customize, Row::Items]);
+        assert_eq!((Row::Keyblades.label(), Row::Customize.label(), Row::Items.label()), (&b"Keyblades\0"[..], &b"Customize\0"[..], &b"Items\0"[..]));
         // Inside: held or fresh moves.
         assert_eq!(sub::step(0, DOWN_HELD), Act::Move(1));
+        assert_eq!(sub::step(1, DOWN_HELD), Act::Move(2));
         assert_eq!(sub::step(1, UP_HELD), Act::Move(0));
         // Ends: held stops, fresh wraps (Re:CoM's cursor set wraps over the count).
-        assert_eq!(sub::step(1, DOWN_HELD), Act::None);
-        assert_eq!(sub::step(1, DOWN_FRESH), Act::Move(0));
+        assert_eq!(sub::step(2, DOWN_HELD), Act::None);
+        assert_eq!(sub::step(2, DOWN_FRESH), Act::Move(0));
         assert_eq!(sub::step(0, UP_HELD), Act::None);
-        assert_eq!(sub::step(0, UP_FRESH), Act::Move(1));
+        assert_eq!(sub::step(0, UP_FRESH), Act::Move(2));
         // Cancel first, then confirm; Start is nothing here.
         assert_eq!(sub::step(1, Pad { confirm: true, ..NONE }), Act::Open(1));
         assert_eq!(sub::step(1, Pad { confirm: true, cancel: true, ..NONE }), Act::Close);

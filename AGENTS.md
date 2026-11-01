@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 87: M8 stage 8a.2: KH1 Items page in the KH1 camp entry, version 0.45.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "Finish everything up to M9" (M8 items).
+- KH1's Items screen (Checked (decomp): `0x14030D160`, `0x14030CB50`, `0x14030F330`, `0x14030FA10`, `0x14030D7B0`,
+  `0x14030EEB0`, `0x14030F160`): owner (Sora / Stock) → item → Use / Move / Remove / Equip / Discard;
+  repeats allowed; 99 cap; cursor to the first empty slot after Equip; stock sorted by the row's key.
+- Built: "Items" row in the KH1 camp submenu on the Customize page type (Re:CoM's camp list, cursor,
+  sounds), KH1's rules; Use heals via Re:CoM's `0x1401E59A0` then Re:CoM's stats copy `0x1401F0120`
+  (callee, 16 bytes checked). `docs/recom-m8-items.md` § 8a.2.
+- 8a.3 (Moogle shop) not built: Re:CoM's shop lists only card packs (2×2 pack grids, per-pack data);
+  KH1 sells Potion 60 / Hi-Potion 150 / Ether 200 munny at every stage, with a quantity and a
+  destination. Owner question (how to sell in the Moogle shop).
+- Not KH1's: menu words ours (English), no target list, refusals on the help line.
+- Checked: 474 tests, Windows build, all 376 site byte sets. Not checked: in game.
+
+---
+
 ## Stage 86: M8 stage 8a.1: KH1 items: Items list, slots, stock, use, version 0.44.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "Finish everything up to M9"; items from the Moogle shop and drops, healing
