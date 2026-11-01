@@ -148,6 +148,18 @@ Already checked by earlier stages and called: `0x1404ACE54`, `0x140247260`, `0x1
 `0x140248660`, `0x1402486D0`, `0x14015D230`, `0x140243F10`, `0x1402AA360`, `0x14029B2F0`,
 `0x14029B410`, `0x14029B490`, `0x1402AD350`. No new hook, no byte patch.
 
+## Rows and Re:CoM's 2D pool
+
+Each shown row is one `C2DSeqCtrl` with two layers (the plate, the text), so two of Re:CoM's 2047
+2D instance entries. A rebuild (a cursor move, a list opened or closed, a word changed) deletes
+the shown rows first (`0x14015D230(ctrl, 1)`: both entries back, and the text layer deletes its
+`C2DFnt`, as Re:CoM's `CStockFolder` labels go; we never delete the font ourselves) and makes the
+new ones; colour-only changes rebuild nothing. Since 0.24.x the rows are made and deleted on the
+player gauge's draw list (`win/d2.rs`, `docs/recom-m7-mp-bar.md` § 2D instances and draw lists):
+a release from another list (the camp's, when Combat is flipped in the Config) left the entries
+taken. The log's `2d: command menu: N row rebuilds: ours L layer(s) …` (every 100 rebuilds)
+should show L and the pool's free count flat during menu use. Checked (decomp); in game: not yet.
+
 ## 1:1 checks
 
 - Checked (decomp): the lists, the build rules, the cursor rules, the step order, the layout

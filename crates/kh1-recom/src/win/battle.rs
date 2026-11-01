@@ -510,6 +510,9 @@ unsafe fn end_detail(v: &be::View) -> String {
         Err(_) => "KH1 frame busy".into(),
     };
     d.push(format!("ours: {ours}; spell threads {strikes} strike(s), {falls} fall(s)"));
+    // A prize display whose layer id is 0xffffffff could not get a pool entry: the pool's free
+    // count says whether it ran out (`crate::d2`).
+    d.push(format!("2D: {}", super::d2::census_text()));
     d.join("; ")
 }
 

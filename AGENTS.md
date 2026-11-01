@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 55: 2D draw lists: no leak from Config flips; pool counter, version 0.24.4 (2026-10-31)
+
+- Re:CoM's 2D pool: 2047 usable entries (`0x140245293`); each C2DSeqCtrl layer (sprite group or
+  attached C2DFnt) takes one, only the ctrl frees it; a release looks only in the current draw list
+  (`0x1402499C0` → `[0x14087CE70]`). Checked (decomp + exe).
+- Leak found: flipping Combat in the camp's Config built / deleted our bar and menu rows on the
+  camp's list 1, so their releases failed (~13 entries per flip). Now each gauge records its list
+  at init and our adds / clears / deletes run on it (Re:CoM's setter `0x140249800`, switched back
+  at once). Normal play already balanced to zero. Log: `2d: …` lines (ours / Re:CoM's free
+  count); the battle-end log ends with the pool state. Not seen in game.
+
+---
+
 ## Stage 54: Battle end: KH1 yields to Re:CoM's win; battle-end log, version 0.24.3 (2026-10-31)
 
 > "after finishing a battle in the field sora is locked in place and doesnt return to the field"

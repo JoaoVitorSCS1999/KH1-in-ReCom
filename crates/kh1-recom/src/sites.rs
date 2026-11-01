@@ -687,6 +687,54 @@ pub const COMMAND_MENU_CHECKED: &[Site] = &[
     Site { name: "door type getter (0x1401B8A10)", rva: 0x001B_8A10, expect: &[0x48, 0x83, 0xEC, 0x28, 0xBA, 0x24, 0x00, 0x00, 0x00, 0x8D, 0x4A, 0xDD] },
 ];
 
+/// Our HUD controls' 2D instances (`win::d2`, `crate::d2`): Re:CoM's draw-list setter, called to
+/// add and release our layers on the list they belong to.
+pub const HUD_2D_CALLEES: &[Site] = &[
+    // cmp ecx,3; jae; mov eax,ecx; lea rdx,[0x14087CE80]; mov [0x140820F94],ecx;
+    // mov rax,[rdx+rax*8]; mov [0x14087CE70],rax; ret: the current list and its index.
+    Site {
+        name: "2D draw list set (0x140249800)",
+        rva: 0x0024_9800,
+        expect: &[
+            0x83, 0xF9, 0x03, 0x73, 0x1A, 0x8B, 0xC1, 0x48, 0x8D, 0x15, 0x72, 0x36, 0x63, 0x00, 0x89, 0x0D, 0x80, 0x77, 0x5D, 0x00, 0x48, 0x8B, 0x04, 0xC2, 0x48, 0x89, 0x05, 0x51, 0x36, 0x63, 0x00, 0xC3,
+        ],
+    },
+];
+
+/// Re:CoM code `win::d2` relies on (not called): where a layer's pool entry is taken and
+/// released (both on the current list), and the pool's fields it reads for the log.
+pub const HUD_2D_CHECKED: &[Site] = &[
+    // An instance's entry: cmp [rcx+0xC],0; …; mov rbx,[0x14087CE70]; mov rcx,[rbx+8];
+    // call [vtable+8] (the pool's allocation) into the current list.
+    Site {
+        name: "2D instance register (0x140249770)",
+        rva: 0x0024_9770,
+        expect: &[
+            0x40, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x83, 0x79, 0x0C, 0x00, 0x48, 0x8B, 0xF9, 0x74, 0x0B, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0xC3, 0x48, 0x89, 0x5C, 0x24, 0x30, 0x48, 0x8B, 0x1D, 0xDA, 0x36, 0x63, 0x00, 0x48, 0x8B,
+            0x4B, 0x08, 0x48, 0x8B, 0x01, 0xFF, 0x50, 0x08,
+        ],
+    },
+    // Its release: mov edx,[rcx+0xC]; …; mov rcx,[0x14087CE70]; call 0x140249E40 (the handle
+    // looked for in the current list only).
+    Site {
+        name: "2D instance release (0x1402499C0)",
+        rva: 0x0024_99C0,
+        expect: &[
+            0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x51, 0x0C, 0x48, 0x8B, 0xD9, 0x85, 0xD2, 0x75, 0x08, 0x33, 0xC0, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3, 0x48, 0x8B, 0x0D, 0x91, 0x34, 0x63, 0x00, 0xE8, 0x5C, 0x04, 0x00, 0x00,
+        ],
+    },
+    // The list walk: mov r9d,edx; xor r8d,r8d; mov rdx,[rcx+0x10] (the list's first node).
+    Site { name: "2D list release walk (0x140249E40)", rva: 0x0024_9E40, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x44, 0x8B, 0xCA, 0x45, 0x33, 0xC0, 0x48, 0x8B, 0x51, 0x10] },
+    // mov rax,[0x14087CE58]; ret: the pool object.
+    Site { name: "2D pool getter (0x140245F70)", rva: 0x0024_5F70, expect: &[0x48, 0x8B, 0x05, 0xE1, 0x6E, 0x63, 0x00, 0xC3] },
+    // Its vtable +8: add rcx,8; jmp 0x140242560 (the pool at +8).
+    Site { name: "2D pool allocate (0x140245B00)", rva: 0x0024_5B00, expect: &[0x48, 0x83, 0xC1, 0x08, 0xE9, 0x57, 0xCA, 0xFF, 0xFF] },
+    // cmp [rcx+0x24],0 (free entries); mov rdx,rcx; jne; xor eax,eax; ret; mov eax,[rdx+0x1C].
+    Site { name: "pool allocate: free count +0x24 (0x140242560)", rva: 0x0024_2560, expect: &[0x83, 0x79, 0x24, 0x00, 0x48, 0x8B, 0xD1, 0x75, 0x03, 0x33, 0xC0, 0xC3, 0x8B, 0x42, 0x1C] },
+    // lea edx,[r9+0x20]; mov r8d,0x800; lea rcx,[rsi+8]; call 0x1402425E0: 2048 entries.
+    Site { name: "2D manager ctor: pool of 0x800 (0x140245293)", rva: 0x0024_5293, expect: &[0x41, 0x8D, 0x51, 0x20, 0x41, 0xB8, 0x00, 0x08, 0x00, 0x00, 0x48, 0x8D, 0x4E, 0x08, 0xE8, 0x3A, 0xD3, 0xFF, 0xFF] },
+];
+
 /// The vtable slot the menu calls through. Checked (exe; relocated pointer).
 pub const COMMAND_MENU_PTRS: &[PtrSite] = &[PtrSite { name: "C2DSeqCtrl vtable +0x60 (0x1406073A0)", rva: 0x0060_73A0, target: 0x0024_76F0 }];
 
@@ -962,6 +1010,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(MP_BAR_CHECKED)
         .chain(COMMAND_MENU_CALLEES)
         .chain(COMMAND_MENU_CHECKED)
+        .chain(HUD_2D_CALLEES)
+        .chain(HUD_2D_CHECKED)
         .chain(MAGIC_HOOKS)
         .chain(MAGIC_CALLEES)
         .chain(MAGIC_DATA)
@@ -1266,6 +1316,45 @@ mod tests {
         // ctor / add layer / layout position / raw position / scale / deleting dtor, the C2DFnt
         // ctor, the menu sound, the pad reads, handle → object.
         for rva in [0x004A_CE54u32, 0x0024_7260, 0x0024_7850, 0x0024_8660, 0x0024_85B0, 0x0024_86D0, 0x0015_D230, 0x0024_3F10, 0x002A_A360, 0x0029_B2F0, 0x0029_B410, 0x0029_B490, 0x002A_D350] {
+            assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
+        }
+    }
+
+    #[test]
+    fn hud_2d_sites() {
+        for c in HUD_2D_CALLEES.iter().chain(HUD_2D_CHECKED) {
+            assert!(c.expect.len() >= 5, "{}", c.name);
+            assert_eq!(all_sites().filter(|s| s.rva == c.rva).count(), 1, "{}", c.name);
+        }
+        // A rip-relative operand's target: the instruction at `at` (bytes `off..off + len` of
+        // the site), its disp32 in its last 4 bytes.
+        let rip = |s: &Site, off: usize, len: usize| {
+            let d = i32::from_le_bytes(s.expect[off + len - 4..off + len].try_into().unwrap()) as i64;
+            (0x1_4000_0000i64 + s.rva as i64 + off as i64 + len as i64 + d) as u64
+        };
+        let find = |n: &str| HUD_2D_CALLEES.iter().chain(HUD_2D_CHECKED).find(|s| s.name.starts_with(n)).unwrap();
+        // The setter writes the index `0x140820F94` and the current list `0x14087CE70` from the
+        // lists `0x14087CE80` (`win::d2` reads the index).
+        let set = find("2D draw list set");
+        assert_eq!(rip(set, 7, 7), 0x1_4087_CE80);
+        assert_eq!(rip(set, 14, 6), 0x1_4082_0F94);
+        assert_eq!(rip(set, 24, 7), 0x1_4087_CE70);
+        // Register and release both use the current list.
+        assert_eq!(rip(find("2D instance register"), 31, 7), 0x1_4087_CE70);
+        let rel = find("2D instance release");
+        assert_eq!(rip(rel, 24, 7), 0x1_4087_CE70);
+        assert_eq!(rip(rel, 31, 5), 0x1_4024_9E40);
+        assert_eq!(find("2D list release walk").rva, 0x0024_9E40);
+        // The pool object `[0x14087CE58]`; its allocation reaches the free count's function.
+        assert_eq!(rip(find("2D pool getter"), 0, 7), 0x1_4087_CE58);
+        assert_eq!(rip(find("2D pool allocate"), 4, 5), 0x1_4024_2560);
+        assert_eq!(find("pool allocate: free count").rva, 0x0024_2560);
+        // 0x800 entries, made by 0x1402425E0.
+        let ctor = find("2D manager ctor");
+        assert_eq!(u32::from_le_bytes(ctor.expect[6..10].try_into().unwrap()), crate::d2::POOL_ENTRIES as u32);
+        assert_eq!(rip(ctor, 14, 5), 0x1_4024_25E0);
+        // The clear, delete and add layer win::d2 also calls are the MP bar's checked ones.
+        for rva in [0x0024_7C90u32, 0x0015_D230, 0x0024_7850, 0x0024_76F0] {
             assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
         }
     }

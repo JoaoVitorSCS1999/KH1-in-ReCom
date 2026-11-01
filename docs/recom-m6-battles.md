@@ -741,7 +741,10 @@ None of ours writes the manager, the prize gauge, the gauge pause, the roulette 
   says **state 3 / prize gauge card ≠ 0**: is the gauge paused (`gauge pause 1`), its task not
   run (`flags` with 0x10 / 0x8000, or its parent's), or its sequence never ending (`card ctrl …
   done false` with `id 0xffffffff` would mean Re:CoM's 2D instance pool (`0x1402425E0`, 2048
-  entries) ran out). **State 1 with children**: the class names. **State 5 / 6**: the roulette.
+  entries) ran out). Since 0.24.x the line ends with `2D: ours … ; Re:CoM's 2D pool F of 2047
+  free` (`docs/recom-m7-mp-bar.md` § 2D instances and draw lists): F = 0 there confirms it. Our
+  HUD's entries balance in normal play (Checked, decomp); the one leak found (layers made or
+  released while the camp's draw list is current) is fixed there. **State 1 with children**: the class names. **State 5 / 6**: the roulette.
   **State 7 / flag (1, 2) 1**: the room script, not the manager.
 - Why battle 1 of the same log returned and battle 2 didn't. Both ended on a Thundaga (battle 1:
   2 bolts, the last 30 frames before the cast's end; battle 2: a second wave, 4 bolts, the last

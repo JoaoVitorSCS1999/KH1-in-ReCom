@@ -39,10 +39,7 @@ static FIRST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0
 // Re:CoM functions (RVAs; first bytes checked in `sites`).
 const NEW: u32 = 0x004A_CE54;
 const SEQ_CTOR: u32 = 0x0024_7260;
-const SEQ_DELETE: u32 = 0x0015_D230;
-const ADD: u32 = 0x0024_7850;
 const FRAME: u32 = 0x0024_7C20;
-const CLEAR: u32 = 0x0024_7C90;
 const ALL_VISIBLE: u32 = 0x0024_7EC0;
 const PARENT: u32 = 0x0024_8650;
 const POSITION: u32 = 0x0024_85B0;
@@ -80,19 +77,19 @@ type StateFn = unsafe extern "win64" fn(usize, u32);
 type DtorFn = unsafe extern "win64" fn(usize, u32) -> usize;
 type NewFn = unsafe extern "win64" fn(usize) -> usize;
 type CtorFn = unsafe extern "win64" fn(usize) -> usize;
-type AddFn = unsafe extern "win64" fn(usize, *const u8, u32, f32, u32) -> usize;
 type FrameFn = unsafe extern "win64" fn(usize, u32, i32);
-type ClearFn = unsafe extern "win64" fn(usize);
 type VisFn = unsafe extern "win64" fn(usize, i32);
 type ParentFn = unsafe extern "win64" fn(usize, usize);
 type VecFn = unsafe extern "win64" fn(usize, *const f32);
-type DeleteFn = unsafe extern "win64" fn(usize, u32) -> usize;
 
 #[repr(C, align(16))]
 struct V4([f32; 4]);
 
 struct Bar {
     gauge: usize,
+    /// Re:CoM's draw list the gauge was made on: our layers are added and released on it
+    /// (`super::d2`).
+    list: i32,
     hp: usize,
     ctrl: usize,
     xoff: f32,
@@ -104,8 +101,9 @@ struct Bar {
 }
 
 struct State {
-    /// Live player gauges (init seen, dtor not yet), for a bar made later (Combat switched on).
-    gauges: Vec<usize>,
+    /// Live player gauges (init seen, dtor not yet) and the draw list each was made on, for a bar
+    /// made later (Combat switched on).
+    gauges: Vec<(usize, i32)>,
     bars: Vec<Bar>,
 }
 
@@ -202,6 +200,7 @@ unsafe fn new_ctrl(hp: usize) -> Option<usize> {
     if rd::<usize>(c) != base() + SEQ_CTRL_VTABLE as usize {
         return None;
     }
+    super::d2::made();
     func::<ParentFn>(PARENT)(c, hp);
     wr::<u8>(c + C_INHERIT, 1);
     // The control's own transform starts at rest: a rebuilt bar (Combat switched back to KH1)
@@ -212,23 +211,18 @@ unsafe fn new_ctrl(hp: usize) -> Option<usize> {
     Some(c)
 }
 
-/// Adds group `first + k` as a layer (flag 1: held at the frame we set; 0: played over time).
-unsafe fn add(c: usize, l: &(Layout, Vec<u8>), k: u32, xoff: f32, flag: u32) {
+/// Adds group `first + k` as a layer (flag 1: held at the frame we set; 0: played over time) on
+/// draw list `list`.
+unsafe fn add(c: usize, list: i32, l: &(Layout, Vec<u8>), k: u32, xoff: f32, flag: u32) {
     wr::<u8>(c + C_PRIORITY, PRIORITY_HUD);
-    func::<AddFn>(ADD)(c, l.1.as_ptr(), FIRST.load(Ordering::Relaxed) + k, xoff, flag);
-}
-
-unsafe fn delete(c: usize) {
-    if c != 0 {
-        func::<DeleteFn>(SEQ_DELETE)(c, 1);
-    }
+    super::d2::add(c, list, l.1.as_ptr(), FIRST.load(Ordering::Relaxed) + k, xoff, flag);
 }
 
 impl Bar {
     unsafe fn release_pieces(&mut self, which: u32) {
         let list = if which == 0 { &mut self.mp } else { &mut self.charge };
         for c in list.drain(..) {
-            func::<ClearFn>(CLEAR)(c);
+            super::d2::clear(c, self.list);
             self.pool.push(c);
         }
     }
@@ -241,7 +235,7 @@ impl Bar {
         func::<VecFn>(POSITION)(c, V4([p.x, BAR_DY, 0.0, 1.0]).0.as_ptr());
         let s = V4([p.scale, 1.0, 1.0, 1.0]);
         func::<VecFn>(SCALE)(c, s.0.as_ptr());
-        add(c, l, p.group, self.xoff, 0);
+        add(c, self.list, l, p.group, self.xoff, 0);
         Some(c)
     }
 
@@ -280,16 +274,16 @@ impl Bar {
 
     unsafe fn destroy(&mut self) {
         for c in self.mp.drain(..).chain(self.charge.drain(..)).chain(self.pool.drain(..)) {
-            delete(c);
+            super::d2::delete(c, self.list);
         }
-        delete(self.ctrl);
+        super::d2::delete(self.ctrl, self.list);
         self.ctrl = 0;
     }
 }
 
-/// Builds the bar on `gauge` (its init has run). The MP view is read first: `mp::current` calls
-/// [`sync`], which takes the lock.
-unsafe fn build(gauge: usize) {
+/// Builds the bar on `gauge` (its init has run, on draw list `list`). The MP view is read first:
+/// `mp::current` calls [`sync`], which takes the lock.
+unsafe fn build(gauge: usize, list: i32) {
     let Some(l) = layout() else { return };
     if !super::mp::active() {
         return;
@@ -317,9 +311,9 @@ unsafe fn build(gauge: usize) {
     let Some(ctrl) = new_ctrl(hp) else { return };
     let xoff = -rd::<f32>(gauge + G_XOFF);
     for k in [mb::group::TRACK, mb::group::MP, mb::group::CHARGE] {
-        add(ctrl, l, k, xoff, 1);
+        add(ctrl, list, l, k, xoff, 1);
     }
-    let mut bar = Bar { gauge, hp, ctrl, xoff, shown: None, hidden: false, mp: Vec::new(), charge: Vec::new(), pool: Vec::new() };
+    let mut bar = Bar { gauge, list, hp, ctrl, xoff, shown: None, hidden: false, mp: Vec::new(), charge: Vec::new(), pool: Vec::new() };
     bar.show(l, view);
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
     if hidden {
@@ -340,13 +334,15 @@ unsafe fn build(gauge: usize) {
 /// stage 7.3, `super::command_menu`), which uses the plate groups after the bar's.
 pub unsafe extern "win64" fn gauge_init(gauge: usize) {
     orig::<GaugeFn>(&ORIG_INIT)(gauge);
+    // The list Re:CoM's init just made the gauge's own controls on.
+    let list = super::d2::current_list();
     if let Ok(mut s) = STATE.lock() {
-        if !s.gauges.contains(&gauge) {
-            s.gauges.push(gauge);
-        }
+        s.gauges.retain(|g| g.0 != gauge);
+        s.gauges.push((gauge, list));
     }
-    build(gauge);
-    super::command_menu::build(gauge);
+    build(gauge, list);
+    super::command_menu::build(gauge, list);
+    super::d2::census(|| format!("player gauge {gauge:#x} made (draw list {list})"));
 }
 
 /// Whether `kh1-mp-bar.json` carries the command menu's plate groups (checked at install; the
@@ -395,12 +391,14 @@ pub unsafe extern "win64" fn gauge_state(gauge: usize, state: u32) {
 pub unsafe extern "win64" fn gauge_dtor(gauge: usize, flags: u32) -> usize {
     super::command_menu::destroy(gauge);
     if let Ok(mut s) = STATE.lock() {
-        s.gauges.retain(|&g| g != gauge);
+        s.gauges.retain(|g| g.0 != gauge);
         for mut b in s.bars.extract_if(.., |b| b.gauge == gauge) {
             b.destroy();
         }
     }
-    orig::<DtorFn>(&ORIG_DTOR)(gauge, flags)
+    let r = orig::<DtorFn>(&ORIG_DTOR)(gauge, flags);
+    super::d2::census(|| format!("player gauge {gauge:#x} deleted"));
+    r
 }
 
 /// KH1's MP as just read or written (`win/mp.rs`): rescrub the bars whose shown value differs.
@@ -421,13 +419,13 @@ pub fn refresh() {
         return;
     }
     if super::mp::active() {
-        let missing: Vec<usize> = STATE.lock().map(|s| s.gauges.iter().copied().filter(|g| !s.bars.iter().any(|b| b.gauge == *g)).collect()).unwrap_or_default();
-        for g in missing {
+        let missing: Vec<(usize, i32)> = STATE.lock().map(|s| s.gauges.iter().copied().filter(|g| !s.bars.iter().any(|b| b.gauge == g.0)).collect()).unwrap_or_default();
+        for (g, list) in missing {
             // SAFETY: a live gauge (its dtor removes it from the list).
-            unsafe { build(g) };
+            unsafe { build(g, list) };
         }
         let _ = super::mp::current(); // calls `sync`
-        let gauges: Vec<usize> = STATE.lock().map(|s| s.gauges.clone()).unwrap_or_default();
+        let gauges: Vec<(usize, i32)> = STATE.lock().map(|s| s.gauges.clone()).unwrap_or_default();
         super::command_menu::refresh(&gauges);
     } else if let Ok(mut s) = STATE.lock() {
         for mut b in s.bars.drain(..) {
@@ -438,4 +436,5 @@ pub fn refresh() {
         drop(s);
         super::command_menu::refresh(&[]);
     }
+    super::d2::census(|| "after the Config or the camp".to_string());
 }

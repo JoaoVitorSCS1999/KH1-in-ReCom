@@ -4,6 +4,7 @@
 mod attack;
 mod battle;
 mod command_menu;
+mod d2;
 mod deck;
 mod guard;
 mod hook;

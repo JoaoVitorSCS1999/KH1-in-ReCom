@@ -254,3 +254,75 @@ prefix) or a whole container, keeps the other assets as they are, and writes:
   atlas's texel at the doubled neutral UV is the same grey (the bar's colours are computed from the
   PS2 texel 128); if the bar looks twice too dark or bright on screen, that is why.
 - Rebuilt on the owner's PC; `kh1-command-menu.json` added to the mod and `mod.yml`.
+
+## 2D instances and draw lists (the MP bar and the command menu; `crate::d2`, `win/d2.rs`)
+
+Asked after the owner's soft-lock at a battle end (`docs/recom-m6-battles.md` § Battle end): can
+our 2D objects use up Re:CoM's 2D instance pool, so that the prize display gets no layer?
+
+Re:CoM's side, Checked (decomp + exe unless noted):
+
+| what | where | tag |
+|---|---|---|
+| One pool of 0x800 entries for all 2D instances (`D2::C2DOSLCManager` at `[0x14087CE58]`, `0x1402425E0(+8, 0x20, 0x800)` in the manager's ctor `0x1402451E0`); entry 0 is taken by the ctor (`vtable +8` called once), so 2047 are handed out. Free count `+8 +0x24`, size `+8 +0x14` (`0x140242560`, `0x1402426B0`). | `0x140245293`, `0x140242560` | Checked (decomp + exe) |
+| Handles carry a generation (a release adds the pool size; a lookup `0x1402425B0` needs an exact match): a stale handle finds nothing, so a second release of a handle is harmless. | `0x1402426B0`, `0x1402425B0` | Checked (decomp) |
+| One entry per `C2DSeqCtrl` layer: a sprite group (`+8` `0x140247850` → `0x140246A40` → `0x140248F40` → `0x140249770`) and a text item (`+0x60` `0x1402476F0` → `+0x28` `0x1402475D0` → `0x140246B60` → `0x140249090` → `0x140249770`). Sprites inside a group take none of their own. At most 10 layers a ctrl (`+0x16D`). | as listed | Checked (decomp) |
+| Entries are given back only through the ctrl: clear `0x140247C90`, layer removals `0x140247C40` / `0x140247CF0` / `0x140247D70`, dtor `0x1402473D0` (deleting dtor `0x14015D230`), each calling `0x140245D90(handle)`: release, then delete the `C2DSeqObj`. A time-played layer that has finished keeps its entry. | as listed | Checked (decomp) |
+| A text item's `C2DFnt` belongs to its layer: `C2DSeqObj` deleting dtor `0x1402489E0` → object list `0x140248940` → `C2DFntObj` `0x140244170` → the font's own deleting dtor `0x140243FB0` (font at `C2DFntObj +0x58`). `CStockFolder`'s dtor `0x140165490` deletes its three ctrls and never its label font. | as listed | Checked (decomp + vtables `0x1406074D0`, `0x1406074C0`, `0x140606D40`, `0x140606C98` in the exe) |
+| Three draw lists (`[0x14087CE80 + 8 i]`); the current one `[0x14087CE70]`, index `[0x140820F94]`, set by `0x140249800` (and `0x140245710`, which also sets the drawn index `[0x14087CE50]`). Only the current list is stepped and drawn (`0x140246500` → `0x140249710`, `0x140245EB0`). | `0x140249800` | Checked (decomp + exe) |
+| A new instance joins the **current** list (`0x140249770`); a release looks for the handle **only in the current list** (`0x1402499C0`: `mov rcx,[0x14087CE70]; call 0x140249E40`). From another list it finds nothing: the entry stays taken, the `C2DSeqObj` is not deleted, and the ctrl forgets the handle anyway. | `0x140249770`, `0x1402499C0` | Checked (exe) |
+| List 1 is the overlay screens': the camp (`0x1400D9C80` state 0 sets 1; its dtors `0x1400D3320` / `0x1400D34A0` set 0), the pause `0x1401145F0`, the roulette `0x14011B100`, the save screen, world select / warp, the Moogle shop. The field's camp close `0x1401A9590(field, 0)` runs only once the camp task is gone (`0x1402AD350` = 0), so list 0 is current again there. | as listed | Checked (decomp) |
+| The player gauge hides and shows (`0x14020A0E0` → `0x14020C190`, states 7 / 1) re-layering its own HP control in the same call, so those calls run on the HUD's list. | `0x14020A0E0` | Checked (decomp) |
+
+Ours (0.24.3, before this fix):
+
+- **Steady play balances**: a menu row is 1 ctrl + 2 entries (plate, text); a rebuild deletes the
+  shown rows (all their entries back) before making the new ones; colour-only changes (the fade,
+  greying, brightness) write colours and rebuild nothing (`RowView::key`). The bar is 1 ctrl + 3
+  entries; each fade piece is 1 entry on a pooled ctrl, cleared before reuse. The text font is
+  freed by the ctrl's delete, as Re:CoM's own labels are; we never delete it ourselves (no double
+  free). Per gauge we hold at most about 3 + a few fade pieces + 2 × the shown rows (the root's
+  5, or the Magic list's up to 7 + the root's under it): well under 50 entries, all given back at
+  the gauge's dtor. So menu use and casting **do not** use up the pool by themselves. Checked
+  (decomp; code read).
+- **The leak that was there**: anything of ours that made or released layers while another
+  list was current. The Config rows run inside the camp (list 1): flipping Combat there built the
+  bar on list 1 (or deleted the bar and the menu rows from list 1, so every release failed: the
+  entries stayed taken and the orphaned `C2DSeqObj`s stayed on list 0 pointing at our freed
+  controls), and the refresh's MP read there rescrubbed the bar on list 1 when its value had
+  changed (each fade piece's clear failed and its new layer went to list 1). No other code of
+  ours makes or releases layers while the camp is up (the camp close's refresh runs after the
+  camp is gone; the Keyblades page and the Config rows call no MP function; Sora's frame, the
+  trace and the gauge's hide / show do not run in the camp: Assumption for Sora's frame).
+  Rate: about 3 + 2 × the shown rows (≈ 13) entries per Combat flip in the camp, plus 1–2 per
+  fade piece. Not enough alone for 2047 in two battles unless Combat was flipped in the camp
+  ~150 times. Checked (decomp); whether the owner's session did this: not known.
+
+The fix (0.24.x, `win/d2.rs`):
+
+- The player gauge's draw list is read at its init (after Re:CoM's, which made its own HUD
+  controls on it). Every layer of ours on that gauge (the bar, its fade pieces, the menu rows and
+  their text) is added, cleared and deleted on that list: when another list is current, Re:CoM's
+  setter `0x140249800` makes ours current for the call and sets the other back right after (one
+  game thread; nothing else runs between). Disposal is otherwise unchanged and is Re:CoM's: the
+  ctrl's deleting dtor (or clear) releases the layers, and the text layer deletes its font.
+- A census in the log: `2d: <why>: ours L layer(s) on C control(s); Re:CoM's 2D pool F of 2047
+  free; current list N` at each player gauge's make and delete, after each Config / camp refresh,
+  every 100 menu row rebuilds, and on the first 8 list switches (`2d: a delete on draw list 0 while
+  list 1 is current (the camp?) …`); the first 40 census calls, then every 10th, 120 lines at most.
+  The battle-end line ends with `2D: …` (the same text). L and C should come back to the same
+  values room after room; F should not fall battle after battle.
+- Sites (`sites::HUD_2D_CALLEES`, `HUD_2D_CHECKED`): `0x140249800` called (`83 F9 03 73 1A 8B C1
+  48 8D 15 72 36 63 00 89 0D 80 77 5D 00 48 8B 04 C2 48 89 05 51 36 63 00 C3`); checked only:
+  `0x140249770` (`40 57 48 83 EC 20 83 79 0C 00 …`), `0x1402499C0` (`40 53 48 83 EC 20 8B 51 0C
+  …`), `0x140249E40` (`40 53 48 83 EC 20 44 8B CA 45 33 C0 48 8B 51 10`), `0x140245F70` (`48 8B
+  05 E1 6E 63 00 C3`), `0x140245B00` (`48 83 C1 08 E9 57 CA FF FF`), `0x140242560` (`83 79 24 00 48
+  8B D1 75 03 33 C0 C3 8B 42 1C`), `0x140245293` (`41 8D 51 20 41 B8 00 08 00 00 48 8D 4E 08 E8 3A
+  D3 FF FF`). The test `sites::tests::hud_2d_sites` decodes their rip operands to the addresses
+  `win/d2.rs` reads.
+
+Not checked: that the gauge's list is 0 in the field and in battle (Assumption: the HUD's; the
+log line `player gauge … made (draw list N)` shows it); whether the owner's stuck battle had a
+full pool (the next battle-end log says: `2D: … pool F of 2047 free`); whether other code of ours
+or Re:CoM itself leaks entries elsewhere (the census only counts ours; a falling F with flat L
+would point there).

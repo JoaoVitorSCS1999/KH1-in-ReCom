@@ -33,6 +33,9 @@ static LIVE: AtomicBool = AtomicBool::new(false);
 static WORDS: OnceLock<Words> = OnceLock::new();
 static ALL_SPELLS: AtomicBool = AtomicBool::new(false);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(60);
+/// Row rebuilds so far (each deletes the shown rows and makes the new ones): the 2D census is
+/// logged every 100th.
+static REBUILDS: AtomicU32 = AtomicU32::new(0);
 /// KH1's MP as last read or written (`super::mp`), packed; bit 63 = known.
 static MP_VIEW: AtomicU64 = AtomicU64::new(0);
 static EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -41,8 +44,6 @@ static STATE: Mutex<State> = Mutex::new(State { menu: None, uis: Vec::new() });
 // Re:CoM functions (RVAs; first bytes checked in `sites`).
 const NEW: u32 = 0x004A_CE54;
 const SEQ_CTOR: u32 = 0x0024_7260;
-const SEQ_DELETE: u32 = 0x0015_D230;
-const ADD: u32 = 0x0024_7850;
 const LAYOUT_POS: u32 = 0x0024_8660;
 const SCALE: u32 = 0x0024_86D0;
 const COLOUR: u32 = 0x0024_8590;
@@ -79,12 +80,8 @@ const BOX_OPENED: usize = 0x2C1;
 
 type NewFn = unsafe extern "win64" fn(usize) -> usize;
 type CtorFn = unsafe extern "win64" fn(usize) -> usize;
-type DeleteFn = unsafe extern "win64" fn(usize, u32) -> usize;
-type AddFn = unsafe extern "win64" fn(usize, *const u8, u32, f32, u32) -> usize;
 type VecFn = unsafe extern "win64" fn(usize, *const f32);
 type FntCtorFn = unsafe extern "win64" fn(usize, i32, i32, *const u32, i32, *const u8, i32) -> usize;
-/// `C2DSeqCtrl` vtable `+0x60` (`0x1402476F0`): (ctrl, set, item, x, y, screen x offset).
-type AttachFn = unsafe extern "win64" fn(usize, *const u8, usize, f32, f32, f32) -> usize;
 type SoundFn = unsafe extern "win64" fn(u32, i32) -> u64;
 type PadFn = unsafe extern "win64" fn(u32, u32) -> u32;
 type PadBtnFn = unsafe extern "win64" fn(u32) -> u32;
@@ -100,6 +97,9 @@ struct Row {
 
 struct Ui {
     gauge: usize,
+    /// Re:CoM's draw list the gauge was made on: the rows' layers are added and released on it
+    /// (`super::d2`).
+    list: i32,
     xoff: f32,
     hidden: bool,
     rows: Vec<Row>,
@@ -190,8 +190,9 @@ fn mp_view() -> Option<(i32, i32, u16)> {
     (v >> 63 != 0).then(|| ((v >> 24) as u8 as i32, (v >> 16) as u8 as i32, v as u16))
 }
 
-/// A new player gauge (its init and the MP bar have run): the menu is made for it, fading in.
-pub unsafe fn build(gauge: usize) {
+/// A new player gauge (its init and the MP bar have run, on draw list `list`): the menu is made
+/// for it, fading in.
+pub unsafe fn build(gauge: usize, list: i32) {
     if !INSTALLED.load(Ordering::Acquire) || !super::mp::active() || super::mp_bar::menu_groups().is_none() {
         return;
     }
@@ -199,7 +200,7 @@ pub unsafe fn build(gauge: usize) {
         let _ = super::mp::current();
     }
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
-    let ui = Ui { gauge, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None };
+    let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None };
     if let Ok(mut s) = STATE.lock() {
         for mut old in s.uis.extract_if(.., |u| u.gauge == gauge) {
             old.clear();
@@ -254,17 +255,18 @@ pub unsafe fn destroy(gauge: usize) {
     }
 }
 
-/// After the Config or the camp: the menu follows the setting; spells may have changed.
-pub fn refresh(gauges: &[usize]) {
+/// After the Config or the camp: the menu follows the setting; spells may have changed. `gauges`:
+/// the live player gauges and their draw lists.
+pub fn refresh(gauges: &[(usize, i32)]) {
     if !INSTALLED.load(Ordering::Acquire) {
         return;
     }
     if super::mp::active() {
-        for &g in gauges {
+        for &(g, list) in gauges {
             let have = STATE.lock().map(|s| s.uis.iter().any(|u| u.gauge == g)).unwrap_or(true);
             if !have {
                 // SAFETY: a live gauge (the MP bar's list; its dtor removes it).
-                unsafe { build(g) };
+                unsafe { build(g, list) };
             }
         }
     } else if let Ok(mut s) = STATE.lock() {
@@ -279,10 +281,10 @@ pub fn refresh(gauges: &[usize]) {
 
 impl Ui {
     unsafe fn clear(&mut self) {
+        // The ctrl's dtor releases both layers; the text layer's object deletes its `C2DFnt`
+        // (`crate::d2`), as `CStockFolder`'s labels go: the font is not deleted again here.
         for r in self.rows.drain(..) {
-            if r.ctrl != 0 {
-                func::<DeleteFn>(SEQ_DELETE)(r.ctrl, 1);
-            }
+            super::d2::delete(r.ctrl, self.list);
         }
         self.shown = None;
     }
@@ -296,19 +298,19 @@ impl Ui {
         if rd::<usize>(c) != base() + SEQ_CTRL_VTABLE as usize {
             return None;
         }
+        super::d2::made();
         wr::<u8>(c + C_PRIORITY, if v.list == Kind::Magic { PRIORITY_SUB } else { PRIORITY_ROOT });
         wr::<u8>(c + C_COLOUR_ON, 1);
         place(c, v, sc);
         let g = first + if v.highlight { 1 } else { 0 };
-        func::<AddFn>(ADD)(c, set, g, self.xoff, 1);
+        super::d2::add(c, self.list, set, g, self.xoff, 1);
         let mut fnt = 0;
         if let Some(text) = (v.name != 0).then(|| words.get(v.name)).flatten() {
             let f = func::<NewFn>(NEW)(0xB0);
             if f != 0 {
                 let colour = cm::text_colour(v.bright, sc.alpha);
                 fnt = func::<FntCtorFn>(FNT_CTOR)(f, 0, 0, &colour, FONT, text.as_ptr(), FONT_FLAGS);
-                let attach: AttachFn = std::mem::transmute_copy(&rd::<usize>(rd::<usize>(c) + 0x60));
-                attach(c, set, fnt, 0.0, 0.0, TEXT_DX + self.xoff);
+                super::d2::attach(c, self.list, set, fnt, 0.0, 0.0, TEXT_DX + self.xoff);
             }
         }
         func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
@@ -330,6 +332,10 @@ impl Ui {
                 }
             }
             self.shown = Some(sc.clone());
+            let n = REBUILDS.fetch_add(1, Ordering::Relaxed) + 1;
+            if n.is_multiple_of(100) {
+                super::d2::census(|| format!("command menu: {n} row rebuilds"));
+            }
             return;
         }
         let old = self.shown.as_ref().expect("same");
