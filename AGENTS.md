@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 91: KH1 camp: one Items menu with Sora's Keyblade slot and item slots, version 0.49.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "I would like one menu inside of the "KH1" menu for "Items" in "items," i want a
+  slot for Keyblade, and all the item slots for items. eventually if we add accessories as well we will have
+  slots for them there but dont worry about that for now".
+- Built: the KH1 submenu is Items, Customize (the Keyblades row goes). Items → Sora: a Keyblade slot first
+  (its name; stats panel Strength / Magic / Reach; confirm opens the owned-Keyblade list on the page, equip
+  as before; cancel back to the slot), then the item slots (8a.2's KH1 rules unchanged); Stock as before.
+  Sora's list is a list of slot kinds (accessories later go between). No new sites.
+- Assumption: the Keyblade list keeps our old picker's behaviour (KH1's weapon screen not read); its scroll
+  bar is made and deleted while the page stays open.
+- Checked: tests, Windows build, all site bytes. Not checked: in game.
+
+---
+
 ## Stage 90: KH1 casts in the field: Keyblade shown, spell effects loaded; Customize rows show their buttons, version 0.48.0 (2026-11-01)
 
 - Asks (owner, 2026-11-01): "when casting spells, soras keyblade isnt visible, and the VFX dont appear";

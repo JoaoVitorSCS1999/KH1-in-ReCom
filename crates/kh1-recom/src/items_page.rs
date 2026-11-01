@@ -1,7 +1,13 @@
 //! M8 stage 8a.2: KH1's pause-menu Items screen, the testable part. The page is Re:CoM's camp list
-//! (`win::keyblades`, the third row of the "KH1" entry's submenu, `crate::keyblades::sub`), the
+//! (`win::keyblades`, the "Items" row of the "KH1" entry's submenu, `crate::keyblades::sub`), the
 //! store is our save block's items extension (`crate::items`, stage 8a.1). Notes:
-//! `docs/recom-m8-items.md` § Stage 8a.2.
+//! `docs/recom-m8-items.md` § Stage 8a.2 and § The Items menu with Sora's equipment.
+//!
+//! Since the owner's ask of 2026-11-01 ("one menu inside of the "KH1" menu for "Items" in "items,"
+//! i want a slot for Keyblade, and all the item slots for items") Sora's list is his equipment
+//! list ([`SORA_KINDS`], [`equipment`]): the Keyblade slot first (confirm: [`Outcome::Keyblade`],
+//! the page's Keyblade list), then his item slots with KH1's Items-screen commands. Accessory slots
+//! (later) are one more [`SlotKind`] between the two.
 //!
 //! KH1 (Steam; Checked (decomp + exe + files) unless tagged), the screen's windows and their
 //! globals (`0x142E9C1F8` the state, `0x142E9C1FC` the source owner, `0x142E9C208` / `0x142E9C20C`
@@ -39,6 +45,48 @@
 //! menu's items), so a single-target Use is used on Sora at once (KH1 shows the target list).
 
 use crate::items::{self as it, Inventory};
+
+/// A kind of slot in Sora's list (the owner's equipment list), in [`SORA_KINDS`]' order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlotKind {
+    /// One row: the equipped Keyblade (`crate::keyblades`, the save byte).
+    Keyblade,
+    /// One row per item slot (`Inventory::slot_count`): KH1's Items screen.
+    Item,
+}
+
+/// Sora's list, top to bottom: the Keyblade, then the item slots. Accessories (not built) go
+/// between them: one more kind here and its rows in [`equipment`].
+pub const SORA_KINDS: &[SlotKind] = &[SlotKind::Keyblade, SlotKind::Item];
+
+/// A row of Sora's list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Slot {
+    Keyblade,
+    /// Item slot `k` (0-based).
+    Item(u8),
+}
+
+/// Sora's item slots shown (KH1's slot count, at most [`it::MAX_SLOTS`]).
+fn item_slots(inv: &Inventory) -> usize {
+    (inv.slot_count as usize).min(it::MAX_SLOTS)
+}
+
+/// Sora's list: every kind of [`SORA_KINDS`] with its rows.
+pub fn equipment(inv: &Inventory) -> Vec<Slot> {
+    SORA_KINDS
+        .iter()
+        .flat_map(|k| match k {
+            SlotKind::Keyblade => vec![Slot::Keyblade],
+            SlotKind::Item => (0..item_slots(inv)).map(|k| Slot::Item(k as u8)).collect(),
+        })
+        .collect()
+}
+
+/// The row of `slot` in Sora's list.
+pub fn row_of(inv: &Inventory, slot: Slot) -> Option<usize> {
+    equipment(inv).iter().position(|&s| s == slot)
+}
 
 /// An owner row: KH1's party members (Sora only for now) and the stock.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,6 +153,8 @@ pub enum Mode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Label {
     Owner(Owner),
+    /// Sora's Keyblade slot (the page writes the equipped Keyblade's name).
+    Keyblade,
     /// A slot's item (0: empty).
     Slot(u8),
     /// A stock item and its count.
@@ -161,6 +211,9 @@ pub enum Outcome {
     Error(Msg),
     /// A window opened (KH1's confirm sound).
     Opened,
+    /// Sora's Keyblade slot confirmed: the page opens its Keyblade list (confirm sound); the
+    /// screen stays on Sora's list, on that row.
+    Keyblade,
     /// Back one window (KH1's back sound).
     Back,
     /// Cancel on the owner list: the page closes.
@@ -246,10 +299,17 @@ impl Screen {
     /// The window's rows.
     pub fn rows(&self, inv: &Inventory, ctx: Ctx) -> Vec<Row> {
         let row = |label, grey| Row { label, grey };
-        let slots = |inv: &Inventory| (0..(inv.slot_count as usize).min(it::MAX_SLOTS)).map(|k| row(Label::Slot(inv.slots[k]), false)).collect::<Vec<_>>();
+        let slots = |inv: &Inventory| (0..item_slots(inv)).map(|k| row(Label::Slot(inv.slots[k]), false)).collect::<Vec<_>>();
         match self.mode() {
-            Mode::Owners => vec![row(Label::Owner(Owner::Sora), inv.slot_count == 0), row(Label::Owner(Owner::Stock), stock_list(inv).is_empty())],
-            Mode::List(Owner::Sora) => slots(inv),
+            // KH1 greys a member with no slots; Sora always has his Keyblade slot.
+            Mode::Owners => vec![row(Label::Owner(Owner::Sora), equipment(inv).is_empty()), row(Label::Owner(Owner::Stock), stock_list(inv).is_empty())],
+            Mode::List(Owner::Sora) => equipment(inv)
+                .into_iter()
+                .map(|s| match s {
+                    Slot::Keyblade => row(Label::Keyblade, false),
+                    Slot::Item(k) => row(Label::Slot(inv.slots[k as usize]), false),
+                })
+                .collect(),
             Mode::List(Owner::Stock) => stock_list(inv).into_iter().map(|i| row(Label::Stocked(i, inv.stock_of(i)), false)).collect(),
             Mode::Commands(src) => {
                 let item = src.item(inv);
@@ -293,7 +353,11 @@ impl Screen {
         self.set_cursor(c);
         match (self.mode(), r.label) {
             (Mode::Owners, Label::Owner(o)) => self.push(Mode::List(o), 0),
-            (Mode::List(Owner::Sora), _) => self.push(Mode::Commands(Source::Slot(c as u8)), 0),
+            (Mode::List(Owner::Sora), _) => match equipment(inv).get(c as usize) {
+                Some(Slot::Keyblade) => Outcome::Keyblade,
+                Some(&Slot::Item(k)) => self.push(Mode::Commands(Source::Slot(k)), 0),
+                None => Outcome::Refused,
+            },
             (Mode::List(Owner::Stock), Label::Stocked(i, _)) => self.push(Mode::Commands(Source::Stock(i)), 0),
             (Mode::Commands(src), Label::Command(cmd, _)) => self.command(inv, src, cmd),
             (Mode::MoveTo(src), Label::Owner(o)) => self.push(Mode::Pick { from: src, to: o, equip: false }, 0),
@@ -380,9 +444,10 @@ impl Screen {
         inv.stock[y as usize - 1] -= 1;
         if equip {
             let r = self.done(inv, Effect::Equipped { item: y, slot: a });
-            // KH1: the slot cursor goes to the member's first empty slot (if any).
-            if let Some(k) = (0..(inv.slot_count as usize).min(it::MAX_SLOTS)).find(|&k| inv.slots[k] == 0) {
-                self.set_cursor(k as i32);
+            // KH1: the slot cursor goes to the member's first empty slot (if any), its row in
+            // Sora's list.
+            if let Some(r) = (0..item_slots(inv)).find(|&k| inv.slots[k] == 0).and_then(|k| row_of(inv, Slot::Item(k as u8))) {
+                self.set_cursor(r as i32);
             }
             return r;
         }
@@ -429,6 +494,14 @@ impl Screen {
 }
 
 impl Screen {
+    /// The highlighted row of Sora's list (None in the other windows).
+    pub fn slot(&self, inv: &Inventory, ctx: Ctx) -> Option<Slot> {
+        match self.mode() {
+            Mode::List(Owner::Sora) => equipment(inv).get(self.cursor(inv, ctx) as usize).copied(),
+            _ => None,
+        }
+    }
+
     /// The status panel's subject: the owner and the item (0: none) the screen is about: on the
     /// owner list the highlighted owner, on a list the highlighted item, later the source.
     pub fn status(&self, inv: &Inventory, ctx: Ctx) -> (Owner, u8) {
@@ -455,7 +528,10 @@ impl Screen {
         }
         match self.mode() {
             Mode::Owners => text::OWNERS_HELP[cursor.clamp(0, 1) as usize],
-            Mode::List(Owner::Sora) => text::SLOT_HELP,
+            Mode::List(Owner::Sora) => match rows.get(cursor.max(0) as usize) {
+                Some(Row { label: Label::Keyblade, .. }) => text::KEYBLADE_SLOT_HELP,
+                _ => text::SLOT_HELP,
+            },
             Mode::List(Owner::Stock) => text::STOCK_HELP,
             Mode::Commands(_) => match rows.get(cursor.max(0) as usize) {
                 Some(&Row { label: Label::Command(c, remove), grey }) => match c {
@@ -497,7 +573,7 @@ pub fn grey_colour(c: u32) -> u32 {
 /// as a code). KH1's own words for these (its sysmsg) are not in the asset step: ours (Assumption).
 pub mod text {
     pub const LABEL: &[u8] = b"Items\0";
-    pub const HELP: &[u8] = b"Equip, use and discard items.\0";
+    pub const HELP: &[u8] = b"Sora's Keyblade and items: equip, use, move and discard.\0";
     pub const SORA: &[u8] = b"Sora\0";
     pub const STOCK: &[u8] = b"Stock\0";
     /// KH1's empty slot (sysmsg 0x97, not read).
@@ -513,7 +589,9 @@ pub mod text {
     pub const STATUS: [&[u8]; 3] = [b"Owner\0", b"Item\0", b"In stock\0"];
     pub const NONE: &[u8] = b"-\0";
 
-    pub const OWNERS_HELP: [&[u8]; 2] = [b"Sora's item slots: what he can use in battle.\0", b"The items you carry beyond Sora's slots.\0"];
+    pub const OWNERS_HELP: [&[u8]; 2] = [b"Sora's Keyblade and item slots.\0", b"The items you carry beyond Sora's slots.\0"];
+    /// Sora's Keyblade slot.
+    pub const KEYBLADE_SLOT_HELP: &[u8] = b"Sora's Keyblade. Confirm to change it.\0";
     pub const SLOT_HELP: &[u8] = b"Choose a slot.\0";
     pub const STOCK_HELP: &[u8] = b"Choose an item.\0";
     /// The commands (KH1: sysmsg 0x81..0x90, an enabled and a greyed line each, not read).
@@ -582,9 +660,49 @@ mod tests {
         assert_eq!(pick(&mut s, &mut v, LOW, 1), Outcome::Refused, "an empty stock: the error sound");
         assert_eq!(pick(&mut s, &mut v, LOW, 0), Outcome::Opened);
         assert_eq!(s.mode(), Mode::List(Owner::Sora));
-        assert_eq!(labels(&s, &v, LOW), vec![(Label::Slot(POTION), false), (Label::Slot(0), false), (Label::Slot(0), false)]);
+        assert_eq!(labels(&s, &v, LOW), vec![(Label::Keyblade, false), (Label::Slot(POTION), false), (Label::Slot(0), false), (Label::Slot(0), false)]);
         assert_eq!(s.cancel(), Outcome::Back);
         assert_eq!(s.cancel(), Outcome::Close);
+    }
+
+    #[test]
+    fn soras_list_is_the_keyblade_then_the_item_slots() {
+        let mut v = inv(&[0, ETHER, 0], &[]);
+        assert_eq!(SORA_KINDS, &[SlotKind::Keyblade, SlotKind::Item]);
+        assert_eq!(equipment(&v), vec![Slot::Keyblade, Slot::Item(0), Slot::Item(1), Slot::Item(2)]);
+        assert_eq!(row_of(&v, Slot::Item(2)), Some(3));
+        assert_eq!(row_of(&v, Slot::Item(3)), None);
+        // KH1 greys a member with no slots: Sora always has his Keyblade slot.
+        let mut none = v;
+        none.slot_count = 0;
+        assert_eq!(equipment(&none), vec![Slot::Keyblade]);
+        assert!(!Screen::new().rows(&none, LOW)[0].grey);
+        // The Keyblade row: the page's Keyblade list, the screen stays on it; cancel steps back.
+        let mut s = Screen::new();
+        pick(&mut s, &mut v, LOW, 0);
+        assert_eq!(s.slot(&v, LOW), Some(Slot::Keyblade));
+        assert_eq!(s.help(&s.rows(&v, LOW), 0, None), text::KEYBLADE_SLOT_HELP);
+        let before = v;
+        assert_eq!(pick(&mut s, &mut v, LOW, 0), Outcome::Keyblade);
+        assert_eq!(v, before);
+        assert_eq!((s.mode(), s.cursor(&v, LOW)), (Mode::List(Owner::Sora), 0));
+        assert_eq!(s.status(&v, LOW), (Owner::Sora, 0));
+        // An item slot: KH1's commands on that slot.
+        assert_eq!(pick(&mut s, &mut v, LOW, 2), Outcome::Opened);
+        assert_eq!(s.mode(), Mode::Commands(Source::Slot(1)));
+        assert_eq!(s.slot(&v, LOW), None);
+        assert_eq!(s.cancel(), Outcome::Back);
+        assert_eq!((s.slot(&v, LOW), s.help(&s.rows(&v, LOW), 2, None)), (Some(Slot::Item(1)), text::SLOT_HELP));
+        // A Move's destination slots are the item slots only.
+        s.set_cursor(2);
+        s.confirm(&mut v, LOW);
+        s.set_cursor(1);
+        s.confirm(&mut v, LOW);
+        assert_eq!(pick(&mut s, &mut v, LOW, 0), Outcome::Opened);
+        assert_eq!(labels(&s, &v, LOW), vec![(Label::Slot(0), false), (Label::Slot(ETHER), false), (Label::Slot(0), false)]);
+        assert_eq!(pick(&mut s, &mut v, LOW, 0), Outcome::Done(Effect::Swapped { a: 1, b: 0 }));
+        assert_eq!(v.slots[..3], [ETHER, 0, 0]);
+        assert_eq!((s.mode(), s.cursor(&v, LOW)), (Mode::List(Owner::Sora), 2), "back on the source's row");
     }
 
     #[test]
@@ -630,13 +748,13 @@ mod tests {
         let mut v = inv(&[POTION, HI_POTION, 0], &[(HI_POTION, 99)]);
         let mut s = Screen::new();
         pick(&mut s, &mut v, LOW, 0);
-        pick(&mut s, &mut v, LOW, 0);
+        pick(&mut s, &mut v, LOW, 1);
         assert_eq!(pick(&mut s, &mut v, LOW, 2), Outcome::Done(Effect::Removed { item: POTION, slot: 0 }));
         assert_eq!((v.slots[0], v.stock_of(POTION)), (0, 1));
         assert_eq!(s.mode(), Mode::List(Owner::Sora), "back to Sora's slots");
-        assert_eq!(s.cursor(&v, LOW), 0, "the cursor kept");
+        assert_eq!(s.cursor(&v, LOW), 1, "the cursor kept (slot 1's row, under the Keyblade)");
         // Hi-Potion: the stock is full.
-        pick(&mut s, &mut v, LOW, 1);
+        pick(&mut s, &mut v, LOW, 2);
         let before = v;
         assert_eq!(pick(&mut s, &mut v, LOW, 2), Outcome::Error(Msg::StockFull));
         assert_eq!(v, before);
@@ -648,24 +766,24 @@ mod tests {
         let mut v = inv(&[0, POTION, 0], &[(ETHER, 2), (HI_POTION, 1)]);
         let mut s = Screen::new();
         pick(&mut s, &mut v, LOW, 0);
-        pick(&mut s, &mut v, LOW, 0);
+        pick(&mut s, &mut v, LOW, 1);
         assert_eq!(pick(&mut s, &mut v, LOW, 2), Outcome::Opened);
         assert_eq!(s.mode(), Mode::Pick { from: Source::Slot(0), to: Owner::Stock, equip: true });
         assert_eq!(labels(&s, &v, LOW), vec![(Label::Stocked(HI_POTION, 1), false), (Label::Stocked(ETHER, 2), false)]);
         assert_eq!(pick(&mut s, &mut v, LOW, 0), Outcome::Done(Effect::Equipped { item: HI_POTION, slot: 0 }));
         assert_eq!((v.slots, v.stock_of(HI_POTION)), ([HI_POTION, POTION, 0, 0, 0, 0, 0, 0], 0));
         assert_eq!(s.mode(), Mode::List(Owner::Sora));
-        assert_eq!(s.cursor(&v, LOW), 2, "the first empty slot");
+        assert_eq!(s.cursor(&v, LOW), 3, "the first empty slot (slot 2's row)");
         // The same item in two slots is KH1's rule (no duplicate check).
-        pick(&mut s, &mut v, LOW, 2);
+        pick(&mut s, &mut v, LOW, 3);
         pick(&mut s, &mut v, LOW, 2);
         pick(&mut s, &mut v, LOW, 0);
         assert_eq!(v.slots[..3], [HI_POTION, POTION, ETHER]);
-        assert_eq!(s.cursor(&v, LOW), 2, "no empty slot: the cursor stays");
+        assert_eq!(s.cursor(&v, LOW), 3, "no empty slot: the cursor stays");
         // Equip with nothing to equip: KH1's message.
         v.slots[2] = 0;
         v.stock = [0; it::STOCK_IDS];
-        pick(&mut s, &mut v, LOW, 2);
+        pick(&mut s, &mut v, LOW, 3);
         assert_eq!(pick(&mut s, &mut v, LOW, 2), Outcome::Error(Msg::NoStock));
         // Cancel from Equip's list goes back to the commands (KH1: state 2).
         v.stock[0] = 1;
@@ -679,7 +797,7 @@ mod tests {
         let mut v = inv(&[POTION, 0, ETHER], &[(HI_POTION, 3), (POTION, 4)]);
         let mut s = Screen::new();
         pick(&mut s, &mut v, LOW, 0);
-        pick(&mut s, &mut v, LOW, 0);
+        pick(&mut s, &mut v, LOW, 1);
         assert_eq!(pick(&mut s, &mut v, LOW, 1), Outcome::Opened);
         assert_eq!(s.mode(), Mode::MoveTo(Source::Slot(0)));
         // Slot 1 → slot 3: swapped.
@@ -688,7 +806,7 @@ mod tests {
         assert_eq!(v.slots[..3], [ETHER, 0, POTION]);
         assert_eq!(s.mode(), Mode::List(Owner::Sora));
         // Slot 1 (Ether) ↔ a Hi-Potion of the stock: the Ether goes to the stock.
-        pick(&mut s, &mut v, LOW, 0);
+        pick(&mut s, &mut v, LOW, 1);
         pick(&mut s, &mut v, LOW, 1);
         pick(&mut s, &mut v, LOW, 1);
         assert_eq!(s.mode(), Mode::Pick { from: Source::Slot(0), to: Owner::Stock, equip: false });
@@ -738,7 +856,7 @@ mod tests {
         let mut v = inv(&[POTION, 0, 0], &[(ETHER, 1)]);
         let mut s = Screen::new();
         pick(&mut s, &mut v, LOW, 0);
-        pick(&mut s, &mut v, LOW, 0);
+        pick(&mut s, &mut v, LOW, 1);
         assert_eq!(pick(&mut s, &mut v, LOW, 0), Outcome::Done(Effect::Used { item: POTION, from: Source::Slot(0) }));
         assert_eq!(v.slots[0], 0);
         // The last Ether of the stock used: the stock list is empty, back to the owners.
@@ -752,7 +870,7 @@ mod tests {
         let mut v = inv(&[HI_POTION, 0, 0], &[]);
         let mut s = Screen::new();
         pick(&mut s, &mut v, LOW, 0);
-        pick(&mut s, &mut v, LOW, 0);
+        pick(&mut s, &mut v, LOW, 1);
         assert_eq!(pick(&mut s, &mut v, LOW, 3), Outcome::Opened);
         assert_eq!(s.cursor(&v, LOW), 0, "opens on yes");
         assert_eq!(pick(&mut s, &mut v, LOW, 1), Outcome::Back);
@@ -761,7 +879,7 @@ mod tests {
         assert_eq!(pick(&mut s, &mut v, LOW, 0), Outcome::Done(Effect::Discarded { item: HI_POTION, from: Source::Slot(0) }));
         assert_eq!(v.slots[0], 0);
         // A greyed command: refused, nothing changes.
-        pick(&mut s, &mut v, LOW, 0);
+        pick(&mut s, &mut v, LOW, 1);
         assert_eq!(pick(&mut s, &mut v, LOW, 3), Outcome::Refused);
         assert_eq!(s.source(), Some(Source::Slot(0)));
     }
@@ -777,8 +895,10 @@ mod tests {
         let mut v2 = v;
         s.set_cursor(0);
         s.confirm(&mut v2, LOW);
-        assert_eq!(s.status(&v, LOW), (Owner::Sora, POTION));
+        assert_eq!(s.status(&v, LOW), (Owner::Sora, 0), "the Keyblade row: the page shows the Keyblade");
         s.set_cursor(1);
+        assert_eq!(s.status(&v, LOW), (Owner::Sora, POTION));
+        s.set_cursor(2);
         assert_eq!(s.status(&v, LOW), (Owner::Sora, 0), "an empty slot");
         s.confirm(&mut v2, LOW);
         let rows = s.rows(&v, LOW);
@@ -819,6 +939,7 @@ mod tests {
             text::YES,
             text::NO,
             text::NONE,
+            text::KEYBLADE_SLOT_HELP,
             text::SLOT_HELP,
             text::STOCK_HELP,
             text::EQUIP_HELP,

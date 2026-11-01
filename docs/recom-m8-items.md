@@ -291,6 +291,11 @@ Set `kh1_test_items = on` in `kh1-recom.ini` (debug), re-run the asset step, Com
 
 ## Stage 8a.2: KH1's Items page in the "KH1" camp entry
 
+> Since the owner's ask of 2026-11-01 the KH1 submenu is **Items / Customize** (no Keyblades row)
+> and Sora's list on the Items page starts with his **Keyblade slot**: see
+> [The Items menu with Sora's equipment](#the-items-menu-with-soras-equipment-owner-2026-11-01).
+> KH1's item rules below are unchanged.
+
 Ask (M8 plan row 8a.2): KH1's pause-menu Items screen, which moves items between the stock and
 Sora's slots, as a third row "Items" of the KH1 camp submenu, on Re:CoM's camp list machinery
 (cursor, sounds, text drawing as Customize) with KH1's item names; KH1's rules where Re:CoM's camp
@@ -410,6 +415,88 @@ With `kh1_test_items = on` (slots Potion / Hi-Potion / Ether, 9 of each in stock
    the slot empties. Ether below max MP: the MP bar fills by 3.
 8. Close the camp: the battle menu's Items list shows the new slots. Save, reload: the same.
 9. Combat = Re:CoM or Riku's story: no KH1 entry (unchanged).
+
+### The Items menu with Sora's equipment (owner, 2026-11-01)
+
+Ask (owner, 2026-11-01, verbatim): "I would like one menu inside of the "KH1" menu for "Items" in
+"items," i want a slot for Keyblade, and all the item slots for items. eventually if we add
+accessories as well we will have slots for them there but dont worry about that for now".
+
+Code: `crates/kh1-recom/src/items_page.rs` (`SlotKind`, `SORA_KINDS`, `Slot`, `equipment`,
+`row_of`, `Label::Keyblade`, `Outcome::Keyblade`, `Screen::slot`; tested),
+`src/keyblades.rs` (`sub::ROWS`, texts), `src/win/keyblades.rs` (`Page::open_keyblades`,
+`back_from_keyblades`, `Page::under`).
+
+- **Submenu**: two rows, **Items** then **Customize** (`keyblades::sub::ROWS`); the Keyblades row
+  is gone. Re:CoM's Deck-submenu buttons, input, fades and breadcrumb as before (Stage 7.13). Help
+  lines: the entry "Sora's Keyblade and items, and the spell shortcuts.", Items "Sora's Keyblade
+  and items: equip, use, move and discard."
+- **Owners** stay KH1's: Sora / Stock (the stock is an owner in KH1's Items screen, so KH1's flow
+  stays whole: owner → row → command; Stock → item → Use / Move / Discard). Sora's owner help: "Sora's
+  Keyblade and item slots."
+- **Sora's list is his equipment list**, built from a list of slot kinds (`SORA_KINDS`): the
+  **Keyblade** (one row), then the **item slots** (one row per slot, KH1's count). Accessories
+  (not built) are one more kind between the two; nothing else changes for them.
+- **The Keyblade row** shows the equipped Keyblade's name (Re:CoM's card name, as the Keyblade
+  list's rows); while it is highlighted the status panel shows its Strength / Magic / Reach and
+  the help line reads "Sora's Keyblade. Confirm to change it." Confirm (sound 2) shows **the
+  Keyblade list on the same page**: everything the Keyblades page did (earned Keyblades, the
+  equipped one marked, the highlighted one's numbers, the scroll bar, confirm equips and stays in
+  the list, help "Choose the Keyblade Sora fights with."). Cancel (sound 4) goes back to Sora's
+  list on the Keyblade row, now naming the new Keyblade. The Keyblade row needs no item store: it
+  opens even when KH1's items aren't live.
+- **The item rows** are KH1's as before (confirm → Use / Move / Remove / Equip / Discard; an empty
+  slot → Equip from the stock). A Move's destination list ("Choose the slot.") lists the item slots
+  only. After an Equip the cursor goes to the first empty slot's row (under the Keyblade row);
+  after any change back on the source slot's row.
+- **Greying**: KH1 greys a member with no slots (`0x14030D160`); Sora always has his Keyblade
+  slot, so his owner row is never greyed now (it was greyed with 0 item slots).
+- **Scroll bar**: the Keyblade list's (`0x140112AB0` / `0x1401130C0`, as the Keyblades page made
+  it) is created when the list is shown and deleted when it goes back; the Items lists have none
+  (Sora's list is 4 rows with KH1's 3 slots).
+
+Not KH1's (by the owner's design): KH1's Items screen has no Keyblade row; KH1 equips weapons on
+its own pause-menu screen, not read for this change (**Assumption**: its look and its return after
+an equip are not matched; the Keyblade list keeps our Keyblades page's rules, decision 25).
+
+Sites: no new hook, callee or data site (every call was a checked site of the Keyblades page).
+All 425 site byte sets and 13 pointers re-read from `recomsteam.exe` (pefile): 0 mismatches.
+Checked (exe).
+
+Per frame: unchanged (nothing outside the pause menu); Sora's list reads the equipped Keyblade
+(one save-byte read) on each redraw.
+
+Logs: `kh1 entry: submenu opened (2 rows: [Items, Customize])`, `keyblades: list opened from the
+Items page: N Keyblades listed [..], equipped 0x..`, `keyblades: equipped card 0x.. (save byte
+0x..)`.
+
+1:1 checks: the item rules are 8a.2's (Checked (decomp), replayed by `items_page::tests`, which
+now run through Sora's list with the Keyblade row first); the new test
+`soras_list_is_the_keyblade_then_the_item_slots` checks the kinds' order, the Keyblade row's
+outcome (no change to the inventory, the screen kept), its help, the item rows' commands, the
+Move destinations (item slots only) and the cursor's return. Not checked: in game.
+
+Assumptions and risks:
+
+1. Creating / deleting the `CScrollBar` while the page is open (Re:CoM makes it when its page
+   opens and deletes it when the page closes): its look when it appears mid-page. Not seen in game.
+2. The Keyblade's name in Sora's list as plain text (no "Keyblade" label or icon): the help line
+   and the status panel say what it is. To judge in game.
+
+What the owner should test (`kh1_test_items = on` for items in stock):
+
+1. Camp → KH1: two buttons, **Items** then **Customize**; help lines; up / down wrap (held stops at
+   the ends); sounds 1 / 2 / 4. Customize works as before.
+2. Items → Sora / Stock (unchanged). Sora → first row the equipped Keyblade's name, then the three
+   item slots. On the Keyblade row the status panel shows Strength / Magic / Reach.
+3. Confirm the Keyblade row: the Keyblade list with its scroll bar, the mark on the equipped one,
+   numbers per row; confirm equips (the mark moves); cancel → Sora's list on the Keyblade row with
+   the new name. Close the camp: Sora holds the new Keyblade; damage follows its Strength.
+4. Item slots: everything of 8a.2's test (Use / Move / Remove / Equip / Discard, the stock) works
+   as before; after Equip the cursor lands on the next empty slot; Move → Sora lists only the item
+   slots.
+5. Close the camp from the Keyblade list with Start, and quit to title with it open: no crash.
+6. Combat = Re:CoM or Riku's story: no KH1 entry (unchanged).
 
 ---
 

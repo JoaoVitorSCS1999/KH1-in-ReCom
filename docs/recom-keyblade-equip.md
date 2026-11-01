@@ -1,8 +1,11 @@
 # Equipping Keyblades: the camp menu's 8th entry (decision 25)
 
-> Since M7 stage 7.13 the entry is **"KH1"** and opens a submenu (Keyblades, Customize): see
-> [Stage 7.13](#stage-713-the-kh1-entry-its-submenu-and-customize) at the end. The Keyblades page
-> below is unchanged; it now opens from the submenu.
+> Since M7 stage 7.13 the entry is **"KH1"** and opens a submenu: see
+> [Stage 7.13](#stage-713-the-kh1-entry-its-submenu-and-customize). Since the owner's ask of
+> 2026-11-01 the submenu is **Items / Customize** and the Keyblade list below opens from the
+> **Keyblade slot** at the top of Sora's list on the Items page: see
+> [The Keyblade slot in the Items menu](#the-keyblade-slot-in-the-items-menu-owner-2026-11-01) at
+> the end. The list itself (rows, mark, stats, scroll bar, equip) is unchanged.
 
 At `combat = kh1`, in Sora's story, Re:CoM's camp (pause) menu gets an 8th top-level entry,
 "Keyblades", below Config. Its page lists the Keyblades Sora has earned, marks the equipped one,
@@ -194,7 +197,9 @@ states 0x4A..0x4C our page already uses (Re:CoM's Deck states are tied to its de
 | cancel | state 0x22: cursor set `(row, 0)`, mode 2, `0x1400E4220(4)`, sound 4; state 0x23: when button 0's fade ends, back to the top list (`0x1400E3DE0(0, 0)` relabels the 7 entries) | cursor set `(row, 0)`, mode 2, sound 4; when button 0's fade ends `camp+0xB8 = 7` and the page returns −1: Re:CoM's 0x4B closes header item 0 (`0x1400E4220(camp, 4, 0)`, disasm `0x1400DC4B0`), 0x4C relabels its 7 entries (level 1 → 0) and 0xD highlights ours |
 
 M8 stage 8a.2 added a third row, **Items** (KH1's Items screen, `docs/recom-m8-items.md` § Stage
-8a.2); the entry's help is now "Keyblades, shortcuts and items."
+8a.2); the entry's help is now "Keyblades, shortcuts and items." Since 2026-11-01 the rows are
+**Items, Customize** (the Keyblades row folded into Items) and the help "Sora's Keyblade and
+items, and the spell shortcuts.": see the last section.
 
 Differences from the Deck submenu: header item 0 closes when the submenu's fade ends, not at the
 cancel press (the Config states close it on the page's −1; calling it twice would restart its
@@ -327,3 +332,27 @@ closed`, `keyblades: page opened …`, `customize: page opened: spell levels [�
 6. Cancel from the submenu: back to the top list with "KH1" highlighted and Re:CoM's 7 labels
    right; enter Re:CoM's Deck and Config afterwards: both work as unmodded.
 7. Save, reload: the slots stay (per save). Combat = Re:CoM, Riku's story: no entry.
+
+## The Keyblade slot in the Items menu (owner, 2026-11-01)
+
+Ask (owner, 2026-11-01, verbatim): "I would like one menu inside of the "KH1" menu for "Items" in
+"items," i want a slot for Keyblade, and all the item slots for items. eventually if we add
+accessories as well we will have slots for them there but dont worry about that for now".
+
+- The submenu's rows are **Items, Customize** (`keyblades::sub::ROWS`); there is no Keyblades row.
+  Re:CoM's Deck-submenu machinery is unchanged (the rows are data; the count is 2).
+- Items → Sora: the first row is the **Keyblade slot** (the equipped Keyblade's card name; status
+  panel Strength / Magic / Reach), then Sora's item slots. Its kinds come from
+  `items_page::SORA_KINDS` (Keyblade, Item); accessory slots will be one more kind between them.
+- Confirm on the Keyblade slot (sound 2) shows **the Keyblade list on the same page**
+  (`win::keyblades::Page::open_keyblades`): the same content, rows, mark, status rows, help and
+  confirm (equip, stay in the list) as the Keyblades page above; its `CScrollBar` is made then, as
+  the page made it at open. Cancel (sound 4, `back_from_keyblades`) deletes the scroll bar and goes
+  back to Sora's list on the Keyblade slot, which now names the new Keyblade. The page's panels,
+  cursor and help line stay up throughout (one page, two lists).
+- No new hook, callee or data site; the save byte, its validation and every reader are unchanged.
+  All 425 site byte sets and 13 pointers re-read from the Steam exe (pefile): 0 mismatches. Checked
+  (exe).
+- **Assumption**: the scroll bar made and deleted while the page stays open looks right (Re:CoM
+  makes it with its page). Not seen in game. Details, tests and the owner's test list:
+  `docs/recom-m8-items.md` § The Items menu with Sora's equipment.
