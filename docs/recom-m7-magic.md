@@ -1174,3 +1174,21 @@ In-game checklist (7.10):
    casts it at the landing.
 5. Re-cast during a barrier: the timer starts again (and Aerora adds a second wind, as KH1).
 6. Combat = Re:CoM: Re:CoM's Aero cards (its damaging wind) unchanged; Riku's story unchanged.
+
+## Spell voices (0.41.0; owner, 2026-11-01: "casting cure makes sora say "thunder!" etc")
+
+- **Cause** (Checked (decomp + files)): Re:CoM's spells share cast clips (`p001_064` / `068`:
+  Thunder, Cure, Stop, Aero; `p001_065` / `069`: Blizzard, Gravity) and `PL0001.SES` holds one
+  voice event per spell on them, picked by the motion request's sixth argument (the SES
+  variant). `initMagic` passes `0x14021FEF0(pl, 4)` (Sora's vtable `+0x110`, on `+0x638`):
+  Fire / Blizzard / Thunder 0, Cure / Gravity 1, Stop 3, Aero 4 (-ra / -ga the same). Our KH1
+  cast passed 0: Thunder's voice (2023) on Cure / Stop / Aero, Blizzard's (2022) on Gravity.
+- **Built:** `win::movement` passes Re:CoM's own variant for KH1 cast motions (vtable slot
+  checked equal to `0x14021FEF0`; else 0, logged). SES voice events: 2021 Fire, 2022 Blizzard,
+  2023 Thunder, 2024 Cure, 2026 Gravity (air: 3026, Re:CoM's own data), 2027 Stop, 2028 Aero.
+- **KH1** (Checked (decomp + files)): the voice is queued by the cast code `0x1402A3600`
+  (`0x1402901F0(Sora, spell + 7, target)`) on the cast's first tick (frame 0), from btltbl voice
+  groups 7..13: 75 / 25 between two takes (Aero 50 / 50); Cure and Aero call an ally's name when
+  aimed at one. Chained Fire has none (and none plays here: `p001_063` has no SES entry).
+- **Not KH1's:** the voice starts at Re:CoM's frame (3 on the ground, 2 in the air), not frame
+  0; Re:CoM's one take per spell, not KH1's two; no ally names (no party yet).

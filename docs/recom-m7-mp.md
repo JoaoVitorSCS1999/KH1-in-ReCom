@@ -32,7 +32,7 @@ KH1 actor stats: `+0x44` MP (whole points), `+0x48` max MP, `+0xBE` charge (u16)
 | Charge from damage taken: HP lost × ((`+0x184` >> 1) & 7), an ability count (ability 0x18, set by `0x1402A6380`). The hit bonus bit 0 is ability 0x17. **Both need abilities: M9.** Names (MP Rage / MP Haste): Assumption. | `0x14029BBD0`, `0x1402A6380` | Checked (decomp) |
 | **Max MP:** stats build = record `+4` + the weapon's `+0x38` + accessories; MP = min(record MP, max); charge = min(record charge, max × 30). KH1 has no Magic stat: weapon `+0x38` is the MP bonus. | `0x1402A5130` | Checked (decomp) |
 | **Level-up:** `0x1402B51B0` applies Sora's table btltbl `0x3AC0` (`0x140528CC0[0]`), byte [L − 2] for reaching L, through `0x1402B5660`; kind 2 = record max MP + 1 and, live, stats max + 1 then add points (+1). Kind 2 only at levels 12, 24, 36, 48, 60. No MP refill at level-up (`0x14029BA50` after it is the revive helper). Start: 3 (new-game record btltbl `0x39D8`; the owner's Dive path keeps it). | | Checked (decomp + files) |
-| **Refills:** full restore (MP < max → max, charge 0; at full nothing changes) `0x1402A56F0`, from event syscall `0x1401B12D0` and the party swap `0x1403A1540`. A save point (object `0x1402ACE20`, handler `0x1402AD0B0`, opens the save menu on Triangle) gives, per tick while standing in it, HP + 2 and, when MP < max, MP + 1 with the charge emptied. `0x1403A0BF0` empties every member's MP and charge (an event). That the `0x1402ACE20` object is the save point: Assumption (its handler opens the save / world-map menu `0x140196CD0`). | | Checked (decomp) |
+| **Refills:** full restore (MP < max → max, charge 0; at full nothing changes) `0x1402A56F0`, from event syscall `0x1401B12D0` and the party swap `0x1403A1540`. A save point (object `0x1402ACE20`, handler `0x1402AD0B0`, opens the save menu on Triangle) gives, while Sora stands in it in a ground state (`+0x70` 0 or 0x18), HP + 2 every frame and, when MP < max, MP + 1 with the charge emptied every third frame (the update steps a counter 0 → 1 → 2 → 0, `0x1402AD081..0x1402AD0A2`; the MP part runs at 0, `0x1402AD208`): 20 MP a second at 60 fps. It loops over the three party slots. Built 0.41.0: the MP part on Re:CoM's save point (`win::mp::save_point`, below). `0x1403A0BF0` empties every member's MP and charge (an event). That the `0x1402ACE20` object is the save point: Assumption (its handler opens the save / world-map menu `0x140196CD0`). | | Checked (decomp) |
 | No KH2-style MP Charge. | | Checked (decomp: no other writer), `m7-menus-mp.md` |
 
 ## In Re:CoM
@@ -182,3 +182,19 @@ Owner: MP refills "where HP refills"; the KH2 Keyblades' max-MP bonus is their K
   each moment is in play (save room, floor change, continue) is not traced.
 - MP is filled after the snapshot, as HP is, so a retry restores the earlier MP with the HP.
 - KH2 Keyblades: `keyblade_bonus` now uses every Keyblade's `magic` (KH2's Magic for the six).
+
+## KH1's save point MP refill (0.41.0; owner, 2026-11-01: "standing on a save point should refill MP")
+
+- **KH1** (Checked (decomp + exe)): above (refills row): 1 MP every third frame and the charge
+  emptied, while MP < max; HP + 2 a frame; all three party members.
+- **Re:CoM** (Checked (decomp)): `CGimmickSavePoint` update `0x1401C5180` (vtable slot
+  `0x140584768`): Sora on it = within 0.8 m and under 0.2 m above it; the frame he steps on it
+  (`+0x2C0` 0 → 1) it heals his HP to full at once (`0x1401E59A0`) and plays `rec_svpt.dpx`;
+  leaving clears `+0x2C0`. No MP.
+- **Built:** a wrapper on `0x1401C5180` (13 bytes checked: `40 57 48 83 EC 40 80 B9 C3 02 00 00
+  01`): Re:CoM's update, then, every third call while `+0x2C0` = 1 and KH1's MP is live,
+  `Mp::save_point_tick` (MP + 1, charge emptied, below max). The HUD hears it as any MP change.
+- **Not KH1's:** Re:CoM's on-it test stands for KH1's ground-state test (Assumption); one counter
+  for the room (KH1's is per save point; a room has one); in Re:CoM's 30 fps rooms the wrapper
+  runs per game frame (Assumption: none has a save point). KH1's HP part and the party refill are
+  not added (Re:CoM heals HP itself; no persistent party yet): owner question.

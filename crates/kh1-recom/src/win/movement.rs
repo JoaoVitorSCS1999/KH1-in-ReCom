@@ -117,6 +117,35 @@ mod ctrl {
 
 pub(super) const MOTION_REQUEST: u32 = 0x001F_7180;
 const GROUND_TEST: u32 = 0x001F_3C00;
+/// Sora's vtable `+0x110` (`0x14021FEF0`, slot `0x1405A9A48`): the `PL0001.SES` variant for the
+/// action in `+0x638` (Re:CoM's spells: Fire / Blizzard / Thunder 0, Cure / Gravity 1, Stop 3,
+/// Aero 4; -ra / -ga the same). `initMagic` passes it, with 4, as the motion request's sixth
+/// argument (`0x140220B15..0x140220B6E`), and the clips Re:CoM's spells share (`p001_064` / `068`
+/// Thunder, Cure, Stop, Aero; `p001_065` / `069` Blizzard, Gravity) carry one voice event per
+/// variant. Checked (decomp + files).
+const VOICE_VARIANT_SLOT: usize = 0x110;
+const VOICE_VARIANT_FN: u32 = 0x0021_FEF0;
+static VOICE_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// The SES variant for a KH1 cast's motion (owner, 2026-11-01: "casting cure makes sora say
+/// "thunder!"; we passed 0, Thunder's / Blizzard's voice on the shared clips): Re:CoM's own
+/// pick, through Sora's vtable as `initMagic` calls it, on the attack id the cast wrote
+/// (`+0x638`). 0 (and logged once) when the slot is not Re:CoM's function.
+unsafe fn cast_voice_variant(pl: usize) -> i32 {
+    type VariantFn = unsafe extern "win64" fn(usize, i32) -> i64;
+    let f: usize = rd(rd::<usize>(pl) + VOICE_VARIANT_SLOT);
+    if f != base() + VOICE_VARIANT_FN as usize {
+        if !VOICE_LOGGED.swap(true, Ordering::Relaxed) {
+            log(&format!("magic: Sora's vtable +0x110 is {f:#x}, not Re:CoM's 0x14021FEF0: cast voices stay variant 0"));
+        }
+        return 0;
+    }
+    let v = std::mem::transmute::<usize, VariantFn>(f)(pl, 4) as i32;
+    if !VOICE_LOGGED.swap(true, Ordering::Relaxed) {
+        log(&format!("magic: cast voice: Re:CoM's SES variant {v} for attack id {:#x} (0x14021FEF0)", rd::<u32>(pl + 0x638)));
+    }
+    v
+}
 pub(super) const COLLIDE: u32 = 0x0017_0330;
 pub(super) const HANDLE_OBJ: u32 = 0x002A_D350;
 const JUMP_HELD: u32 = 0x001F_F4D0;
@@ -447,7 +476,8 @@ impl Host for RecomHost {
             let stance = Stance { battle: rd::<u32>(pl + p::CARD) & 1 != 0, flag_418_2: rd::<u32>(pl + p::FLAGS_418) & 2 != 0, prev_row: rd(pl + p::ROW_PREV), row: rd(pl + p::ROW) };
             let ext = EXT.get().copied().unwrap_or_default();
             let Some((row, root)) = rows::row_for(request, &stance, &ext) else { return false };
-            func::<MotionFn>(MOTION_REQUEST)(pl, row as i32, frames_to_units(blend), root as u64, 0, 0, frames_to_units(start));
+            let voice = if crate::magic::is_cast_request(request) && super::magic::kh1_cast(pl) { cast_voice_variant(pl) } else { 0 };
+            func::<MotionFn>(MOTION_REQUEST)(pl, row as i32, frames_to_units(blend), root as u64, 0, voice, frames_to_units(start));
             true
         }
     }

@@ -60,8 +60,10 @@ pub mod group {
     pub const CHARGE_GAIN: usize = 21;
     /// Charge loss fades.
     pub const CHARGE_LOSS: usize = 291;
+    /// The ticks at 90° / 180° past them in max MP, centred on this ring's seams (0.41.0).
+    pub const TICKS: usize = 561;
     /// Groups in all.
-    pub const COUNT: usize = 561;
+    pub const COUNT: usize = 562;
 }
 
 /// Texels whose PS2 alpha (0..128) is below this are ignored by the cuts (under 6 %).
@@ -107,21 +109,14 @@ impl Quarter {
         Ok(Quarter { item, r, n, alpha, pc })
     }
 
-    /// Quadrant `q`'s picture as KH1's fan draws it (centre-relative; 0 top-left, 1 top-right
-    /// mirrored in u, 2 bottom-right mirrored in u and v; the right and bottom halves one unit
-    /// further, the picture stretched over r + 1 units, `0x14026E450`'s `+ 0x10`).
+    /// Quadrant `q`'s picture, r × r about the centre (centre-relative; 0 top-left, 1 top-right
+    /// mirrored in u, 2 bottom-right mirrored in u and v): a true circle about [`CENTRE`], as
+    /// Re:CoM's HP ring is, so both bands keep one width all round (owner, 2026-11-01: "the MP bar
+    /// should also be the same thickness as the HP bar"). KH1's fan stretches its right and bottom
+    /// halves over r + 1 units about (443, 316) (`0x14026E450`'s `+ 0x10`); about Re:CoM's centre
+    /// (444, 317) that is the same right and bottom edge, and the left and top halves one unit
+    /// further out than KH1's.
     pub fn image(&self, q: usize) -> Piece {
-        let r = self.r;
-        let rect = match q {
-            0 => [-r, -r, 0, 0],
-            1 => [r + 1, -r, 0, 0],
-            _ => [r + 1, r + 1, 0, 0],
-        };
-        Piece { item: self.item, uv: [0, 0, r, r], rect, colour: 0x8080_8080, grad: 0 }
-    }
-
-    /// Quadrant `q`'s picture unstretched (r × r), for turning about its corner.
-    fn image_unstretched(&self, q: usize) -> Piece {
         let r = self.r;
         let rect = match q {
             0 => [-r, -r, 0, 0],
@@ -141,8 +136,8 @@ impl Quarter {
     /// The centre-relative box of PC texel (i, j) in quadrant `q` (x0, x1, y0, y1).
     fn texel_box(&self, q: usize, i: usize, j: usize) -> (f64, f64, f64, f64) {
         let (r, n) = (self.r as f64, self.n as f64);
-        let x = |t: f64| if q == 0 { -r + t * r / n } else { (r + 1.0) * (1.0 - t / n) };
-        let y = |t: f64| if q <= 1 { -r + t * r / n } else { (r + 1.0) * (1.0 - t / n) };
+        let x = |t: f64| if q == 0 { -r + t * r / n } else { r * (1.0 - t / n) };
+        let y = |t: f64| if q <= 1 { -r + t * r / n } else { r * (1.0 - t / n) };
         let (xa, xb) = (x(i as f64), x(i as f64 + 1.0));
         let (ya, yb) = (y(j as f64), y(j as f64 + 1.0));
         (xa.min(xb), xa.max(xb), ya.min(yb), ya.max(yb))
@@ -150,12 +145,10 @@ impl Quarter {
 
     /// The texture angle at a centre-relative point of quadrant `q`.
     fn point_tau(&self, q: usize, x: f64, y: f64) -> f64 {
-        let r = self.r as f64;
-        let k = r / (r + 1.0);
         let (dx, dy) = match q {
             0 => (-x, -y),
-            1 => (x * k, -y),
-            _ => (x * k, y * k),
+            1 => (x, -y),
+            _ => (x, y),
         };
         dy.max(0.0).atan2(dx.max(0.0)).to_degrees()
     }
@@ -199,13 +192,9 @@ fn cells(a: f64, b: f64) -> std::ops::RangeInclusive<i32> {
 /// `gap`: the cuts lie between cells (counted in `stats.gap_*`).
 fn region(qa: &Quarter, q: usize, t0: f64, t1: f64, gap: bool, stats: &mut CutStats) -> Vec<[i32; 4]> {
     const E: f64 = 1e-6;
-    let (r, n) = (qa.r as f64, qa.n);
-    // Bilinear filtering spreads a texel half a texel each way.
-    let (px, py) = match q {
-        0 => (0.25, 0.25),
-        1 => (0.25 * (r + 1.0) / r, 0.25),
-        _ => (0.25 * (r + 1.0) / r, 0.25 * (r + 1.0) / r),
-    };
+    let n = qa.n;
+    // Bilinear filtering spreads a texel half a texel (a quarter unit) each way.
+    let (px, py) = (0.25, 0.25);
     // (need alpha, wrong-side alpha) per cell.
     let mut grid: HashMap<(i32, i32), (u8, u8)> = HashMap::new();
     let (mut xmin, mut xmax, mut ymin, mut ymax) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
@@ -439,8 +428,17 @@ pub(crate) struct Inputs<'a> {
     pub black: usize,
 }
 
-/// The ring's centre (KH1 units): KH1's gauge centre `0x1405272B0` (size class 2: no offset).
-pub const CENTRE: (i32, i32) = kh1::CENTRE;
+/// The ring's centre (KH1 units): Re:CoM's HP ring's centre at KH1's place (the DLL's
+/// `recom_hp::CENTRE`, (444, 317)), so the MP ring is concentric with it and both start on the
+/// same line at 9 o'clock (owner, 2026-11-01: "the bars should start from the same place, (the MP
+/// bar is currently starting a few pixels above where the HP bar starts)"). 0.40.0 used KH1's
+/// gauge centre (443, 316) (`0x1405272B0`), one unit up-left of Re:CoM's ring.
+pub const CENTRE: (i32, i32) = (444, 317);
+
+/// How far the ring moved from KH1's centre in x: the straight segments past 270° (KH1's
+/// absolute objects, joined at 6 o'clock) and the 12 o'clock tick move with it. In y the bottom
+/// half is where KH1 draws it (KH1's stretched lower half ends at 316 + 58 = 317 + 57).
+const SHIFT_X: i32 = CENTRE.0 - kh1::CENTRE.0;
 
 /// The closing outline under the ring's start: from the MP back's outer edge to its inner edge
 /// along its 9 o'clock row, as thick as the back's outer black outline there (Checked (files):
@@ -535,15 +533,14 @@ pub(crate) fn groups(i: &Inputs, stats: &mut CutStats) -> Result<Vec<Group>> {
                 v.push(Op { stage: 0, scissor: [0; 4], piece: i.back.image(q), turn: 0, tr: CENTRE });
             } else if a > q0 {
                 let b = a - q0;
-                let pivot = if q == 2 { (CENTRE.0 + 1, CENTRE.1) } else { CENTRE };
-                v.push(Op { stage: 1, scissor: quadrant_scissor(q, i.back.r), piece: i.back.image_unstretched(q), turn: 90 - b, tr: pivot });
+                v.push(Op { stage: 1, scissor: quadrant_scissor(q, i.back.r), piece: i.back.image(q), turn: 90 - b, tr: CENTRE });
             }
         }
         if m > 0 {
             v.push(cap);
         }
         if m >= kh1::MP_RING {
-            let mut dx = -1;
+            let mut dx = -1 + SHIFT_X;
             for _ in 0..m - kh1::MP_RING {
                 v.push(plain(obj_piece(&objs[obj::BACK_MP], i.it7, dx, 1, 0, None)));
                 dx -= kh1::PITCH;
@@ -557,7 +554,7 @@ pub(crate) fn groups(i: &Inputs, stats: &mut CutStats) -> Result<Vec<Group>> {
     let mut f = Vec::new();
     for m in 0..=kh1::MP_CAP {
         let mut v = arc_ops(&i.mp, (m.min(kh1::MP_RING) * kh1::MP_DEG) as f64, true, stats);
-        let mut dx = -1;
+        let mut dx = -1 + SHIFT_X;
         for _ in kh1::MP_RING..m {
             v.push(plain(obj_piece(&objs[obj::SEG_MP], i.it5, dx, 1, 0, None)));
             dx -= kh1::PITCH;
@@ -573,7 +570,7 @@ pub(crate) fn groups(i: &Inputs, stats: &mut CutStats) -> Result<Vec<Group>> {
         let mut v = arc_ops(&i.charge, a as f64, a % 30 == 0, stats);
         if c > kh1::CHARGE_RING {
             let (n, rem) = ((c - kh1::CHARGE_RING) / kh1::CHARGE_PER_SEG, (c - kh1::CHARGE_RING) % kh1::CHARGE_PER_SEG);
-            let mut dx = 0;
+            let mut dx = SHIFT_X;
             for _ in 0..n {
                 v.push(plain(obj_piece(&objs[obj::SEG_CHARGE], i.it5, dx, 1, 0, None)));
                 dx -= kh1::PITCH;
@@ -613,6 +610,25 @@ pub(crate) fn groups(i: &Inputs, stats: &mut CutStats) -> Result<Vec<Group>> {
     for ops in &charge_cells {
         out.push(fade(ops, alpha(mb::FADE_FIRST), alpha(mb::FADE_LAST), 0x0080_8080, false, CENTRE));
     }
+    // Ticks: KH1's two ticks (picture 7, `g_s` objects 37 / 38) once max MP passes 90° / 180°,
+    // each centred on this ring's seam there (x = CENTRE.0 at 12 o'clock, y = CENTRE.1 at 3
+    // o'clock). Their width and art are KH1's.
+    let mid = |o: &Obj, k: usize| o.rect[k] * 2 + o.rect[k + 2];
+    let t90 = &objs[obj::TICK_90];
+    let t180 = &objs[obj::TICK_180];
+    let (dx90, dy180) = ((2 * CENTRE.0 - mid(t90, 0)) / 2, (2 * CENTRE.1 - mid(t180, 1)) / 2);
+    let mut f = Vec::new();
+    for m in 0..=kh1::MP_CAP {
+        let mut v = Vec::new();
+        if m * kh1::MP_DEG > 90 {
+            v.push(plain(obj_piece(t90, i.it7, dx90, 0, 0, None)));
+        }
+        if m * kh1::MP_DEG > 180 {
+            v.push(plain(obj_piece(t180, i.it7, 0, dy180, 0, None)));
+        }
+        f.push(v);
+    }
+    out.push(held(&f, CENTRE));
     if out.len() != group::COUNT {
         return bad(format!("kh1hud ring: {} groups, expected {}", out.len(), group::COUNT));
     }
@@ -712,7 +728,8 @@ mod tests {
         // The far corner of each quadrant's picture is texel (0, 0).
         assert_eq!(q.texel_box(0, 0, 0), (-55.0, -54.5, -55.0, -54.5));
         let (x0, x1, ..) = q.texel_box(1, 0, 0);
-        assert!((x1 - 56.0).abs() < 1e-9 && (x0 - 56.0 * (1.0 - 1.0 / 110.0)).abs() < 1e-9);
+        // Unstretched: the top-right quadrant mirrors the top-left one about the centre.
+        assert!((x1 - 55.0).abs() < 1e-9 && (x0 - 55.0 * (1.0 - 1.0 / 110.0)).abs() < 1e-9);
         assert!((q.point_tau(0, -10.0, 0.0) - 0.0).abs() < 1e-9 && (q.point_tau(1, 0.0, -10.0) - 90.0).abs() < 1e-9);
     }
 

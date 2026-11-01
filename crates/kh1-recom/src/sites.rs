@@ -537,6 +537,10 @@ pub const MP_HOOKS: &[Site] = &[
     Site { name: "HP refill state step (0x1401AC9D0)", rva: 0x001A_C9D0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9] },
     // mov rax,rsp; push rbp; push r14; push r15; lea rbp,[rax-0x5F]
     Site { name: "level-up screen (0x14010EF10)", rva: 0x0010_EF10, expect: &[0x48, 0x8B, 0xC4, 0x55, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D, 0x68, 0xA1] },
+    // KH1's save point refill (owner, 2026-11-01: "standing on a save point should refill MP"):
+    // `CGimmickSavePoint` update (vtable slot 0x140584768). push rdi; sub rsp,0x40;
+    // cmp byte [rcx+0x2C3],1. Bytes read from the Steam exe.
+    Site { name: "save point update (0x1401C5180)", rva: 0x001C_5180, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x40, 0x80, 0xB9, 0xC3, 0x02, 0x00, 0x00, 0x01] },
 ];
 
 /// The call `0x1402374C0(0)` in `0x140237CE0`'s HP-filling branch (retargeted, decision 35).

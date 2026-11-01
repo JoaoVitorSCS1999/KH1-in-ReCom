@@ -45,7 +45,7 @@
 //! `gauge:01` 7..9) when the manifest has them, and its controls hang from Re:CoM's HP control
 //! `+0x78` (`0x140248650`, as the 7.2 MP bar and Re:CoM's Dark gauge), so whatever moves that
 //! control (the hit shake) moves the MP ring with it. Re:CoM's room plate (`CNaviMap` `+0x128`)
-//! goes under the minimap at `hud_room_plate_top_right`. `docs/recom-kh1-hud.md` § The MP ring
+//! goes to the top left at `hud_room_plate_top_left`. `docs/recom-kh1-hud.md` § The MP ring
 //! built as Re:CoM's HP ring.
 
 use super::movement::{func, orig, rd, wr};
@@ -176,7 +176,7 @@ struct Cluster {
     list: i32,
     xoff: f32,
     class: usize,
-    ctrls: [usize; 3],
+    ctrls: [usize; 4],
     view: View,
     danger: bool,
     hidden: bool,
@@ -331,11 +331,11 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
                 log("kh1 hud: lock-on marker not hooked; Re:CoM's cursor stays");
             }
         }
-        // Re:CoM's room plate under the minimap (`hud_room_plate_top_right`).
+        // Re:CoM's room plate top left (`hud_room_plate_top_left`).
         let h = [super::hook::Hook { site: &crate::sites::KH1_HUD_PLATE_HOOKS[0], ours: room_plate as *const () as usize, original: &ORIG_PLATE }];
         // SAFETY: as above.
         if unsafe { super::hook::install_all(b, &h) } {
-            log("kh1 hud: CNaviMap room plate 0x1401E44A0 wrapped (the plate under the minimap at hud_room_plate_top_right)");
+            log("kh1 hud: CNaviMap room plate 0x1401E44A0 wrapped (the plate top left at hud_room_plate_top_left)");
         } else {
             log("kh1 hud: room plate not hooked; Re:CoM's plate stays bottom right");
         }
@@ -839,8 +839,9 @@ unsafe fn build(gauge: usize, list: i32) {
     let v = view_of(gauge);
     let xoff = kh::right_margin(rd::<f32>(gauge + G_XOFF));
     let class = class_of(&v);
-    let mut ctrls = [0usize; 3];
-    for c in ctrls.iter_mut() {
+    // KH1's whole gauge: back, front, face (the fourth control is the MP ring's).
+    let mut ctrls = [0usize; 4];
+    for c in ctrls.iter_mut().take(3) {
         match new_ctrl() {
             Some(n) => *c = n,
             None => {
@@ -851,7 +852,7 @@ unsafe fn build(gauge: usize, list: i32) {
             }
         }
     }
-    for &c in &ctrls {
+    for &c in &ctrls[..3] {
         place(c, class, 0.0);
     }
     for (g, f) in kh::frames(&v).iter().take(4) {
@@ -900,8 +901,8 @@ unsafe fn build_ring(gauge: usize, list: i32) {
     let hp: usize = rd(gauge + G_HP_CTRL);
     let parent = if hp != 0 && rd::<usize>(hp) == base() + SEQ_CTRL_VTABLE as usize { hp } else { 0 };
     let rel = if parent != 0 { (rd::<f32>(parent + C_POS), rd::<f32>(parent + C_POS + 4)) } else { (0.0, 0.0) };
-    let mut cl = Cluster { gauge, list, xoff, class: mp_ring::CLASS, ctrls: [0; 3], view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2], mp_only: true, ring, parent, rel };
-    for k in 0..2 {
+    let mut cl = Cluster { gauge, list, xoff, class: mp_ring::CLASS, ctrls: [0; 4], view: v, danger: false, hidden: false, mp: Vec::new(), charge: Vec::new(), red: Vec::new(), pool: Vec::new(), shown: [0; 7], motion: None, party: [0; 2], mp_only: true, ring, parent, rel };
+    for k in 0..mp_ring::CONTROLS {
         match new_ctrl() {
             Some(n) => cl.ctrls[k] = n,
             None => {
@@ -912,13 +913,13 @@ unsafe fn build_ring(gauge: usize, list: i32) {
             }
         }
     }
-    for k in 0..2 {
+    for k in 0..mp_ring::CONTROLS {
         cl.put(cl.ctrls[k], mp_ring::CLASS, 0.0);
     }
     let frames = kh::frames(&v);
     for (k, (g, _)) in frames.iter().enumerate() {
         if let Some((ci, _)) = mp_ring::layer_of(k) {
-            let prio = if ci == 0 { mp_ring::PRIORITY_MP } else { mp_ring::PRIORITY_CHARGE };
+            let prio = mp_ring::priority(ci);
             add(cl.ctrls[ci], list, prio, cl.grp(*g), xoff, 1);
         }
     }
@@ -1046,30 +1047,25 @@ pub unsafe fn hud(gauge: usize, state: u32) {
 }
 
 // -------------------------------------------------------------------------------------------------
-// Re:CoM's room plate under the minimap (owner, 2026-11-01).
+// Re:CoM's room plate at the top left (owner, 2026-11-01).
 
 /// `Gauge::CNaviMap`'s room plate controls (`0x1401E44A0`: an array of two `C2DSeqCtrl` made by
 /// the navi map's init `0x1401E39D0`, its count word before it; [0] the plate's art and the room
 /// name, [1] the second layer some rooms add, which an extra object hangs from). Checked (decomp).
 const NAVI_PLATES: usize = 0x128;
-/// How far the plate goes up (KH1 units): Re:CoM's plate (card, name, star) spans y 321..382 on
-/// the owner's 1440p screenshot, the minimap's lowest point (its red ribbons) is at y 114; the
-/// plate's top goes to y 121, under the minimap, its x (Re:CoM's, at the right edge) kept.
-/// Assumption: the plate's place comes from each world's `<world>_navi.lad` (groups 4 / 5), not
-/// in this session; measured on Destiny Islands only.
-const ROOM_PLATE_DY: f32 = -200.0;
 type PlateFn = unsafe extern "win64" fn(usize, usize, i32);
 
-/// The room plate goes under the minimap (`hud_room_plate_top_right`, with Re:CoM's HP gauge at
-/// KH1's place: it would sit on the gauge otherwise).
+/// The room plate goes to the top left (`hud_room_plate_top_left`, with Re:CoM's HP gauge at KH1's
+/// place: it would sit on the gauge otherwise).
 pub fn plate_on() -> bool {
     parts().room_plate_top && place_wanted()
 }
 
 /// `CNaviMap` room plate set-up (`0x1401E44A0(navimap, set, group)`, when a room's plate appears
 /// and settles): Re:CoM's, which puts its two controls at layout (0, 0) (the plate's place is in
-/// its groups), then at `hud_room_plate_top_right` both controls at (0, [`ROOM_PLATE_DY`]).
-/// Re:CoM plays, hides and draws the plate as before; once per plate set-up, nothing per frame.
+/// its groups), then at `hud_room_plate_top_left` both controls at [`kh::room_plate::shift`] for the player
+/// gauge's margin (`+0xA0`, Re:CoM's own left offset for its HUD). Re:CoM plays, hides and draws
+/// the plate as before; once per plate set-up, nothing per frame.
 pub unsafe extern "win64" fn room_plate(navi: usize, set: usize, group: i32) {
     orig::<PlateFn>(&ORIG_PLATE)(navi, set, group);
     if navi == 0 || !plate_on() {
@@ -1079,13 +1075,16 @@ pub unsafe extern "win64" fn room_plate(navi: usize, set: usize, group: i32) {
     if arr == 0 || rd::<u64>(arr - 0x10) != 2 {
         return;
     }
+    let Some(gauge) = STATE.lock().ok().and_then(|s| s.gauges.first().map(|g| g.0)) else { return };
+    let m = rd::<f32>(gauge + G_XOFF);
+    let (dx, dy) = kh::room_plate::shift(m);
     for k in 0..2 {
         let c = arr + k * C_SIZE;
         if rd::<usize>(c) == base() + SEQ_CTRL_VTABLE as usize {
-            func::<VecFn>(LAYOUT_POS)(c, V4([0.0, ROOM_PLATE_DY, 0.0, 1.0]).0.as_ptr());
+            func::<VecFn>(LAYOUT_POS)(c, V4([dx, dy, 0.0, 1.0]).0.as_ptr());
         }
     }
-    note(|| format!("room plate (group {group}) under the minimap: up {}", -ROOM_PLATE_DY));
+    note(|| format!("room plate (group {group}) top left: moved ({dx}, {dy}) at margin {m}"));
 }
 
 // -------------------------------------------------------------------------------------------------

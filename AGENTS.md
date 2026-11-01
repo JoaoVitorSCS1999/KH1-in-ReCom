@@ -11,6 +11,30 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 83: MP ring draws; one centre with the HP ring; ticks; room plate top left; save point MP; spell voices, version 0.41.0 (2026-11-01)
+
+- Asks (owner, 2026-11-01): "the blue of the MP bar doesnt show"; "lets also make sure that all the MP
+  segments are evenly spaced"; "the MP bar should also be the same thickness as the HP bar, and the
+  bars should start from the same place"; "the room indicator should be in the top left of the
+  screen"; "standing on a save point should refill MP"; "casting cure makes sora say \"thunder!\" etc".
+- MP ring (Checked (decomp): `0x140247850` / `0x14024BB10`, a control's later layers are drawn relative
+  to its first layer's first sprite): MP back, MP, charge, ticks now one layer a control (four
+  controls). Ring rebuilt about Re:CoM's HP centre (444, 317), quarters r × r; HP control origin
+  (444, 317) (was 0.25 up-left); new ring group TICKS (KH1's 90° / 180° ticks on the seams); 562
+  groups. `docs/recom-kh1-hud.md` § 0.41.0.
+- Room plate: top left (`hud_room_plate_top_left`, old key read too), moved by the gauge margin
+  `+0xA0`. Assumption: right-anchored plate.
+- Save point: wrapper on `0x1401C5180` (13 bytes checked): KH1's 1 MP every third frame and the charge
+  emptied while Sora is on it (`+0x2C0`). Checked (decomp + exe): KH1 `0x1402ACE20` / `0x1402AD0B0`.
+  `docs/recom-m7-mp.md`.
+- Spell voices: KH1 cast motions pass Re:CoM's own SES variant (`0x14021FEF0(pl, 4)`, vtable `+0x110`
+  checked), as `initMagic` does. Checked (decomp + files). Not KH1's: Re:CoM's voice frame (3 / 2,
+  KH1 0) and one take a spell. `docs/recom-m7-magic.md` § Spell voices.
+- Checked: tests, Windows build, all 349 site byte sets against the Steam exe, offline render of the
+  ring. Not checked: in game.
+
+---
+
 ## Stage 82: KH1 menu sounds: the SCD's sound table read; asset kept whole, version 0.40.1 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "notice the quality of the menu and the sounds playing … lets try to get

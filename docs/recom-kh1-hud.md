@@ -897,3 +897,40 @@ owner's H0 dump, **Assumption**.
    at its end); casts and refills fade as before.
 4. Take a hit: the MP ring moves with the green ring and the face.
 5. `hud_room_plate_top_right = off`: the plate bottom right (next room).
+
+## 0.41.0: the MP ring draws; one centre with the HP ring; ticks; room plate top left (owner, 2026-11-01)
+
+Asks: "the blue of the MP bar doesnt show"; "lets also make sure that all the MP segments are
+evenly spaced"; "the MP bar should also be the same thickness as the HP bar, and the bars should
+start from the same place, (the MP bar is currently starting a few pixels above where the HP bar
+starts)"; "the room indicator should be in the top left of the screen".
+
+- **Why only the MP back drew** (Checked (decomp); in game: Assumption until seen): Re:CoM draws
+  a control's later layers relative to its first layer's first live sprite. `0x140247850` marks
+  a control's first layer (`+0x47` = 0); in `0x14024BB10` that layer's first sprite stores its
+  matrix × the control's at the node `+0x40`, and every sprite of a later layer (`+0x47` = −1)
+  multiplies by node `+0x40` instead of the control's own matrix (when `+0x7C` ≠ 0). The ring's
+  sprites carry the ring centre as their translation (for the turned quarters), so the MP (layer
+  1 of control 0) and the ticks (layer 1 of control 1) were drawn a second (444, 317) away, off
+  screen; the charge (control 1's first layer) only drew when charged. The baked groups of 0.38
+  had zero translations, so the same layout drew. **Fix:** one layer a control: MP back, MP,
+  charge, ticks on four controls (priorities 0, 0, 1, 1; all hung from Re:CoM's HP control).
+- **Evenly spaced segments:** KH1's quarter picture has gaps at 30° and 60° only; KH1 marks 90°
+  and 180° with two tick objects (`g_s` 37 / 38) over the ring (the owner's KH1 video: a divider
+  every 30°). Those are the ticks layer that did not draw. New ring group `TICKS` (562 groups):
+  the two ticks centred on this ring's seams.
+- **One centre:** Re:CoM's HP ring is a circle about (444, 317) (`recom_hp::CENTRE`); KH1's fan
+  draws its top-left quadrant about (443, 316) and stretches the other halves by one unit, so the
+  MP ring sat one unit up-left of the HP ring on its left and top (thicker by one unit there,
+  and its start one unit above the HP ring's). Now the ring's quarters are r × r about (444, 317)
+  (the right and bottom edges are where KH1 draws them), and the HP control's origin is
+  (444, 317) itself (0.38–0.40: 0.25 up-left), so both rings get Re:CoM's +0.25 and share a
+  centre. Thickness: MP back r 43..57 outside the HP ring's r 29..43: both 14 units. The
+  straight segments past 270° move one unit right with the ring's 6 o'clock end.
+- **Room plate top left** (`hud_room_plate_top_left`, default on; 0.40.x's
+  `hud_room_plate_top_right` is the same switch): the plate's round left end 3 units in from the
+  left edge, its top 3 units down: move = (−m + 3 − (305.2 + m), 3 − 321), m = the player gauge's
+  margin (`+0xA0`). Assumption: the plate is right-anchored by m (seen at 16:9 only).
+- Checked: decomp (layers, scissors), tests, offline render of the rebuilt ring (concentric with
+  the HP ring's 29 / 43 circles, dividers every 30°, start on the centre line). Not checked: in
+  game.

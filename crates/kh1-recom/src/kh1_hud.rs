@@ -405,7 +405,10 @@ pub mod recom_hp {
     pub const CENTRE: (f32, f32) = (444.0, 317.0);
     /// Re:CoM adds 0.25 to every animation translation (`0x14024B4E0` → `0x1402B4A00`, an add;
     /// Checked (exe)), so its gauge's visual centre is its origin + 0.25; turned in the data, the
-    /// ring turns about that point. The origin goes 0.25 up-left of [`CENTRE`].
+    /// ring turns about that point. 0.38.0–0.40.x put the origin 0.25 up-left of [`CENTRE`]; from
+    /// 0.41.0 the origin is [`CENTRE`] itself (whole units, as Re:CoM's own layout places it), so
+    /// the HP ring and KH1's MP ring, whose sprites sit at [`CENTRE`] and get the same 0.25, share
+    /// one centre (owner, 2026-11-01: "the bars should start from the same place").
     pub const BIAS: f32 = 0.25;
     /// Re:CoM's frame for an HP value (`0x140208360`, `0x14020D6A0`, `0x14020D8E0`): trunc(hp /
     /// 560 × 470), in f32 as Re:CoM computes it. Checked (decomp).
@@ -417,26 +420,64 @@ pub mod recom_hp {
     /// at KH1's right margin, minus the bias, plus Re:CoM's own layer offset (its layers are added
     /// at −`+0xA0`, the left margin), so the ring lands where KH1's right-anchored cluster does.
     pub fn origin(gauge_xoff: f32) -> (f32, f32) {
-        (CENTRE.0 + super::right_margin(gauge_xoff) + gauge_xoff - BIAS, CENTRE.1 - BIAS)
+        (CENTRE.0 + super::right_margin(gauge_xoff) + gauge_xoff, CENTRE.1)
+    }
+}
+
+/// Re:CoM's room plate at the top left (`hud_room_plate_top_left`; the DLL's `room_plate`).
+pub mod room_plate {
+    /// Where Re:CoM puts the plate (card, name, star) at 16:9, in KH1's 512 × 384 space (x from −85.33
+    /// at the left edge to 597.33 at the right): x 390.5 (its round left end) to 594 at the right edge,
+    /// y 321 to 382, measured on the owner's 1440p and 720p screenshots. Its x follows the right edge
+    /// (Assumption: the navi layout's layers are offset by the right margin, as Re:CoM's gauges are;
+    /// seen at 16:9 only).
+    const PLATE_LEFT_169: f32 = 390.5;
+    const PLATE_TOP: f32 = 321.0;
+    /// The 16:9 margin the measures were taken at (`(682.67 − 512) / 2`).
+    const MARGIN_169: f32 = 85.333;
+    /// The plate's round left end and its top this far in from the screen's top-left corner (KH1
+    /// units), as far as Re:CoM's plate sits from the right edge.
+    const PLATE_PAD: f32 = 3.0;
+    /// The plate's move (dx, dy) for a screen margin `m` (KH1 units each side of 512): its left end
+    /// from `PLATE_LEFT_169 − 85.33 + m` (right-anchored) to `−m + PLATE_PAD`, its top from
+    /// `PLATE_TOP` to `PLATE_PAD`.
+    pub fn shift(m: f32) -> (f32, f32) {
+        (-m + PLATE_PAD - (PLATE_LEFT_169 - MARGIN_169 + m), PLATE_PAD - PLATE_TOP)
     }
 }
 
 /// The KH1 MP ring around Re:CoM's HP ring (`hud_kh1_mp_ring`): which of the cluster's held groups
-/// it shows ([`frames`]' index → (control, layer)), and their priorities. Control 0: MP back and
-/// MP (priority 0), control 1: charge and the max-MP ticks (priority 1); both under Re:CoM's HP
+/// it shows ([`frames`]' index → (control, layer)), and their priorities. Controls 0 / 1: MP back,
+/// MP (priority 0); controls 2 / 3: charge, the max-MP ticks (priority 1); all under Re:CoM's HP
 /// gauge (priority 2): Re:CoM's 2D sprites go to the foreground display list's bucket min(priority,
 /// 25), drawn bucket 0 first, in insertion order within a bucket (`0x14024ABB0`, `0x140253F40`,
 /// `0x140253AE0`; Checked (decomp)). KH1 draws MP back, MP, (the HP arc over them), charge, ticks
 /// (`0x14026CF90`).
 pub mod mp_ring {
-    /// `frames` index → (control, layer); None for the HP / face parts.
+    /// `frames` index → (control, layer); None for the HP / face parts. One layer a control
+    /// (0.41.0): Re:CoM draws a control's later layers relative to its first layer's first live
+    /// sprite (`0x14024BB10`: the first layer, `+0x47` = 0 from `0x140247850`, stores that
+    /// sprite's matrix × the control's at node `+0x40`; later layers, `+0x47` = −1, multiply by
+    /// `+0x40` instead of the control's own). The ring's sprites carry the ring's centre as their
+    /// translation, so on one control the MP and the ticks went off screen by (444, 317) (owner,
+    /// 2026-11-01: "the blue of the MP bar doesnt show"). Checked (decomp); in game: Assumption.
     pub fn layer_of(k: usize) -> Option<(usize, u32)> {
         match k {
             2 => Some((0, 0)),
-            3 => Some((0, 1)),
-            5 => Some((1, 0)),
-            6 => Some((1, 1)),
+            3 => Some((1, 0)),
+            5 => Some((2, 0)),
+            6 => Some((3, 0)),
             _ => None,
+        }
+    }
+    /// Controls the MP ring uses (MP back, MP, charge, ticks).
+    pub const CONTROLS: usize = 4;
+    /// Control `ci`'s priority: MP back and MP under the charge and ticks.
+    pub fn priority(ci: usize) -> u8 {
+        if ci <= 1 {
+            PRIORITY_MP
+        } else {
+            PRIORITY_CHARGE
         }
     }
     /// The MP back / MP control's priority (and the MP fades').
@@ -466,8 +507,10 @@ pub mod mp_ring {
         pub const CHARGE_GAIN: u32 = 21;
         /// Charge loss fades.
         pub const CHARGE_LOSS: u32 = 291;
+        /// The ticks, centred on the ring's seams (0.41.0).
+        pub const TICKS: u32 = 561;
         /// Groups in all.
-        pub const COUNT: u32 = 561;
+        pub const COUNT: u32 = 562;
     }
 
     /// The ring group (from `first`) that shows what the cluster's group `g` shows; the ticks
@@ -478,6 +521,7 @@ pub mod mp_ring {
             c::MP_BACK => group::BACK,
             c::MP => group::MP,
             c::CHARGE => group::CHARGE,
+            c::TICKS => group::TICKS,
             _ if (c::MP_GAIN..c::MP_GAIN + 9).contains(&g) => group::MP_GAIN + (g - c::MP_GAIN),
             _ if (c::MP_LOSS..c::MP_LOSS + 9).contains(&g) => group::MP_LOSS + (g - c::MP_LOSS),
             _ if (c::CHARGE_GAIN..c::CHARGE_GAIN + 270).contains(&g) => group::CHARGE_GAIN + (g - c::CHARGE_GAIN),
@@ -722,10 +766,20 @@ mod tests {
         assert!(parse_manifest(&with.replace("[7, 8, 9]", "[7, 8]")).is_err());
         assert!(parse_manifest(&with.replace("\"first\": 47", "\"first\": 48")).is_err());
         assert_eq!(m.mp_ring, None);
-        let with = ok.replace("\"groups\": 644", "\"groups\": 1205").replace("\"languages\"", "\"mp_ring\": {\"first\": 644, \"count\": 561}, \"languages\"");
+        let with = ok.replace("\"groups\": 644", "\"groups\": 1206").replace("\"languages\"", "\"mp_ring\": {\"first\": 644, \"count\": 562}, \"languages\"");
         assert_eq!(parse_manifest(&with).unwrap().mp_ring, Some(644));
-        assert!(parse_manifest(&with.replace("\"count\": 561", "\"count\": 560")).is_err());
-        assert!(parse_manifest(&with.replace("\"groups\": 1205", "\"groups\": 1204")).is_err(), "past the set");
+        assert!(parse_manifest(&with.replace("\"count\": 562", "\"count\": 561")).is_err());
+        assert!(parse_manifest(&with.replace("\"groups\": 1206", "\"groups\": 1205")).is_err(), "past the set");
+    }
+
+    #[test]
+    fn room_plate_goes_top_left() {
+        // 16:9: the round end 3 units in from the left edge (−85.33), the top 3 units down.
+        let (dx, dy) = room_plate::shift(85.333);
+        assert!((390.5 + dx - (-85.333 + 3.0)).abs() < 1e-3 && dy == -318.0, "{dx} {dy}");
+        // 4:3 (no margin): from 305.17 to x 3.
+        let (dx, _) = room_plate::shift(0.0);
+        assert!((390.5 - 85.333 + dx - 3.0).abs() < 1e-3);
     }
 
     #[test]
@@ -735,7 +789,8 @@ mod tests {
         assert_eq!(ring_group(f, group::MP_BACK), f + r::BACK);
         assert_eq!(ring_group(f, group::MP), f + r::MP);
         assert_eq!(ring_group(f, group::CHARGE), f + r::CHARGE);
-        assert_eq!(ring_group(f, group::TICKS), group::TICKS, "the ticks stay the cluster's");
+        assert_eq!(ring_group(f, group::TICKS), f + r::TICKS);
+        assert_eq!(ring_group(f, group::FACE), group::FACE, "the rest stay the cluster's");
         for j in 0..9 {
             assert_eq!(ring_group(f, group::MP_GAIN + j), f + r::MP_GAIN + j);
             assert_eq!(ring_group(f, group::MP_LOSS + j), f + r::MP_LOSS + j);
@@ -744,11 +799,11 @@ mod tests {
         for (old, new) in [(0, 45), (45, 0), (100, 270), (270, 100), (29, 31)] {
             for g in charge_plan(old, new).1 {
                 let k = ring_group(f, g) - f;
-                assert!((r::CHARGE_GAIN..r::COUNT).contains(&k));
+                assert!((r::CHARGE_GAIN..r::TICKS).contains(&k));
                 assert_eq!(k - if g >= group::CHARGE_LOSS { r::CHARGE_LOSS } else { r::CHARGE_GAIN }, g - if g >= group::CHARGE_LOSS { group::CHARGE_LOSS } else { group::CHARGE_GAIN });
             }
         }
-        assert_eq!(r::CHARGE_LOSS + 270, r::COUNT);
+        assert_eq!((r::CHARGE_LOSS + 270, r::TICKS + 1), (r::TICKS, r::COUNT));
     }
 
     #[test]
@@ -756,10 +811,11 @@ mod tests {
         // 16:9: Re:CoM's x offset 85, KH1's margin 86: the origin lands KH1's centre + 86 on screen
         // once Re:CoM's own -85 layer offset is added.
         let (x, y) = recom_hp::origin(85.0);
-        assert_eq!((x - 85.0 + 0.25, y + 0.25), (444.0 + 86.0, 317.0));
-        assert_eq!(recom_hp::origin(0.0), (443.75, 316.75));
+        assert_eq!((x - 85.0, y), (444.0 + 86.0, 317.0));
+        assert_eq!(recom_hp::origin(0.0), (444.0, 317.0));
         assert_eq!((recom_hp::frame(300), recom_hp::frame(560), recom_hp::frame(0)), (251, 470, 0));
-        assert_eq!([2, 3, 5, 6].map(mp_ring::layer_of), [Some((0, 0)), Some((0, 1)), Some((1, 0)), Some((1, 1))]);
+        assert_eq!([2, 3, 5, 6].map(mp_ring::layer_of), [Some((0, 0)), Some((1, 0)), Some((2, 0)), Some((3, 0))]);
+        assert_eq!((0..mp_ring::CONTROLS).map(mp_ring::priority).collect::<Vec<_>>(), vec![0, 0, 1, 1]);
         assert!([0, 1, 4].iter().all(|&k| mp_ring::layer_of(k).is_none()));
     }
 

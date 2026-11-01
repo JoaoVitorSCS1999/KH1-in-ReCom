@@ -330,13 +330,14 @@ fn install_mp_refills(base: usize) {
     let hooks = [
         hook::Hook { site: site("HP refill state step (0x1401AC9D0)"), ours: mp::heal_state as *const () as usize, original: &mp::ORIG_HEAL_STATE },
         hook::Hook { site: site("level-up screen (0x14010EF10)"), ours: mp::level_up as *const () as usize, original: &mp::ORIG_LEVEL_UP },
+        hook::Hook { site: site("save point update (0x1401C5180)"), ours: mp::save_point as *const () as usize, original: &mp::ORIG_SAVE_POINT },
     ];
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
     let w = unsafe { hook::install_all(base, &hooks) };
     // SAFETY: the call's bytes and context are checked inside `patch`.
     let c = unsafe { mp::install_checkpoint(base) };
     log(&format!(
-        "mp: refill to full where Re:CoM fills HP (decision 35): state step and level-up wrappers {}, checkpoint call 0x140237F3A {}",
+        "mp: refill to full where Re:CoM fills HP (decision 35): state step and level-up wrappers {}, checkpoint call 0x140237F3A {}; KH1's save point refill (1 MP every 3rd frame on a save point) on the save point update 0x1401C5180",
         if w { "in" } else { "NOT in" },
         if c { "retargeted" } else { "NOT retargeted" }
     ));

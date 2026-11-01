@@ -1,6 +1,6 @@
 //! KH1's MP at the KH1 setting (M7 stage 7.1, decision 34; `crate::mp`, `docs/recom-m7-mp.md`).
 //!
-//! No hook of its own and no per-frame work in steady state:
+//! No per-frame work in steady state, and one hook of its own (the save point update, below):
 //!
 //! - **Store:** our block in Re:CoM's own save (`save + 0x2675 ..= 0x2684`, `crate::mp::SavedMp`),
 //!   read and written only when something happens. Re:CoM saves, checksums, loads, snapshots and
@@ -247,6 +247,43 @@ pub fn clear_events() {
 
 pub static ORIG_HEAL_STATE: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_LEVEL_UP: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_SAVE_POINT: AtomicUsize = AtomicUsize::new(0);
+/// `CGimmickSavePoint`: Sora is on it (set by Re:CoM's update the frame he steps on, cleared when
+/// he leaves; `0x1401C5180`). Checked (decomp).
+const SAVE_POINT_ON: usize = 0x2C0;
+/// KH1's save point frame counter (`0x1402ACE20` steps it 0 → 1 → 2 → 0 every frame,
+/// `0x1402AD081..0x1402AD0A2`; the handler adds MP only at 0, `0x1402AD208`). Checked (decomp +
+/// exe). One counter for the room's save points (KH1 keeps one a save point; a room has one).
+static SAVE_POINT_FRAME: AtomicU32 = AtomicU32::new(0);
+static SAVE_POINT_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// `CGimmickSavePoint` update (`0x1401C5180`, each frame in a room with a save point): Re:CoM's
+/// (its HP heal on stepping on, the Save prompt), then KH1's MP part of `0x1402AD0B0` while Sora
+/// is on it (`+0x2C0`): every third frame, below max MP, 1 MP and the charge emptied
+/// (`crate::mp::Mp::save_point_tick`): 20 MP a second at 60 fps. KH1 asks Sora to be in a ground
+/// state (`+0x70` 0 or 0x18); Re:CoM's on-it test (within 0.8 m, under 0.2 m above it) stands for
+/// that (Assumption). KH1's HP part (+2 HP a frame) and the party's refill are not added: Re:CoM
+/// heals HP itself on stepping on, and the party is not KH1's yet.
+pub unsafe extern "win64" fn save_point(this: usize) {
+    let o: ThisFn = mv::orig(&ORIG_SAVE_POINT);
+    o(this);
+    let f = SAVE_POINT_FRAME.fetch_add(1, Ordering::Relaxed) % 3;
+    if f != 0 || rd::<u8>(this + SAVE_POINT_ON) != 1 || !active() {
+        return;
+    }
+    if let Some((b, a)) = with_state(|mp| {
+        let before = mp.view();
+        mp.save_point_tick();
+        (before, mp.view())
+    }) {
+        if a != b {
+            event("save point".into());
+            if !SAVE_POINT_LOGGED.swap(true, Ordering::Relaxed) {
+                log(&format!("mp: save point: KH1's refill, MP {}/{} c{} -> {}/{} c{} (1 a third frame)", b.0, b.1, b.2, a.0, a.1, a.2));
+            }
+        }
+    }
+}
 /// Re:CoM's `0x1402374C0` (the callee of the retargeted call at `0x140237F3A`).
 const CHECKPOINT_CALLEE: u32 = 0x0023_74C0;
 /// The room id (`0x140233700` returns the i16 here).

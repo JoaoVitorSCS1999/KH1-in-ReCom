@@ -103,9 +103,10 @@ pub struct HudParts {
     /// Re:CoM's EXP / NEXT LV / Moogle point pop-ups hidden.
     pub hide_prizes: bool,
     /// With Re:CoM's HP gauge at KH1's place (bottom right): Re:CoM's room plate (the room card
-    /// and its name, bottom right) moved to the top right, under the minimap (owner, 2026-11-01:
-    /// "the bottom right of the screen shows the type of room. can we move this to the top right
-    /// of the screen?"); off: Re:CoM's place.
+    /// and its name, bottom right) moved to the top left (owner, 2026-11-01: "the room indicator
+    /// should be in the top left of the screen"; 0.40.x: top right, under the minimap); off:
+    /// Re:CoM's place. Key `hud_room_plate_top_left`; 0.40.x's `hud_room_plate_top_right` is read
+    /// as the same switch.
     pub room_plate_top: bool,
 }
 
@@ -128,7 +129,7 @@ impl HudParts {
             ("hud_hide_minimap", self.hide_minimap),
             ("hud_hide_friends", self.hide_friends),
             ("hud_hide_prizes", self.hide_prizes),
-            ("hud_room_plate_top_right", self.room_plate_top),
+            ("hud_room_plate_top_left", self.room_plate_top),
         ]
     }
 
@@ -143,7 +144,7 @@ impl HudParts {
             "hud_hide_minimap" => self.hide_minimap = v,
             "hud_hide_friends" => self.hide_friends = v,
             "hud_hide_prizes" => self.hide_prizes = v,
-            "hud_room_plate_top_right" => self.room_plate_top = v,
+            "hud_room_plate_top_left" | "hud_room_plate_top_right" => self.room_plate_top = v,
             _ => return false,
         }
         true
@@ -266,8 +267,8 @@ hud = recom
 ;   hud_kh1_party: Donald's and Goofy's KH1 gauges (shown with hud_kh1_gauge)
 ;   hud_hide_recom_hp / hud_hide_minimap / hud_hide_friends / hud_hide_prizes: hide Re:CoM's
 ;     HP gauge / minimap / FRIENDS row / EXP, NEXT LV and Moogle point pop-ups
-;   hud_room_plate_top_right: with hud_recom_hp_kh1_place on, Re:CoM's room plate (the room card
-;     and its name) top right under the minimap, off the gauge (off: bottom right)
+;   hud_room_plate_top_left: with hud_recom_hp_kh1_place on, Re:CoM's room plate (the room card
+;     and its name) top left, off the gauge (off: bottom right)
 hud_kh1_gauge = off
 hud_recom_hp_kh1_place = on
 hud_kh1_mp_ring = on
@@ -277,7 +278,7 @@ hud_hide_recom_hp = off
 hud_hide_minimap = off
 hud_hide_friends = on
 hud_hide_prizes = off
-hud_room_plate_top_right = on
+hud_room_plate_top_left = on
 ";
 
 /// Parses the file. Unknown keys and bad values are reported and the default kept.
@@ -587,6 +588,9 @@ mod combo_tests {
         let (s, _) = parse("hud_recom_hp_kh1_place = off\nhud_kh1_mp_ring = off\n");
         assert!(!s.hud_parts.recom_hp_place && !s.hud_parts.mp_ring);
         assert!(s.hud_parts.room_plate_top, "on unless the file says off");
+        let (s, w) = parse("hud_room_plate_top_left = off\n");
+        assert!(!s.hud_parts.room_plate_top && w.is_empty());
+        // 0.40.x's key is the same switch.
         let (s, w) = parse("hud_room_plate_top_right = off\n");
         assert!(!s.hud_parts.room_plate_top && w.is_empty());
     }
