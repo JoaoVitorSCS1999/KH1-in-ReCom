@@ -310,6 +310,18 @@ At KH1 setting:
     the falling sphere** (its whole frame step to KH1's factor; research first); **Stop's held hits
     land at KH1's pace** (Re:CoM's 8-hit cap kept).
 
+39. KH1 HUD (owner, 2026-10-31): "Would we be able to instead have an option where the Re:CoM
+    [HUD] is replaced entirely by the KH1 hud? ... use the KH1 decomp to get exact positioning
+    and graphics". Supersedes decision 34's HUD look for that option:
+    - **A switch "HUD: Re:CoM / KH1", in the "KH1" camp entry** (stage 7.13).
+    - At KH1 HUD: **KH1's own elements with KH1's graphics and exact positions** from the KH1
+      decomp: the HP/MP portrait ring (bottom-right), the command menu with its COMMAND header
+      (Attack / Magic / Items / Summon), the lock-on target HP bar, and **Donald's and Goofy's
+      gauges top-right, always shown**.
+    - **Re:CoM's HUD components are hidden** for now (minimap, room plate, EXP popup, Moogle
+      points, FRIENDS row, Re:CoM's HP gauge). **Remind the owner** once the KH1 elements are right
+      to place the Re:CoM extras (minimap, room plate, …): they will give exact places.
+
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.
