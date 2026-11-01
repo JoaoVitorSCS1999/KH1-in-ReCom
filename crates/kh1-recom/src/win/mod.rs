@@ -261,7 +261,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         if mp_bar::install(base, bar_file) {
             command_menu::install(base, menu_file, s);
             // The KH1 HUD (decision 39) hangs from the same gauge wrappers.
-            kh1_hud::install(hud_file);
+            kh1_hud::install(base, hud_file);
         }
         install_magic(base);
     } else {

@@ -82,6 +82,77 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 - Assumption: Re:CoM's IMGD reader takes a 32-bit picture in the PS2 (non-PC) file too (only
   used when no language copy matches).
 
+## H2: Sora's gauge cluster (bottom right)
+
+### KH1's rules (Checked (decomp + exe) unless tagged)
+
+| what | where |
+|---|---|
+| Slot 0's objects: `+0x10` face disc `g_s_fra_a_a..d` + "HP" / "mp" labels (picture 7; "mp" skipped without MP), `+0x50` face frame `g_s_fra_a_wa..wd` (picture 6), `+0x78` / `+0x80` max-MP ticks (objects 37, 38: past 90° / 180°), `+0x90..+0xC8` the straight pieces: colour HP 31, MP 32, charge 33; back HP 16 (first) / 18 (further, x + 26), MP 17; caps 20 (x := 0x19E), 21 (x := 0x1B8) | index lists `0x1405270E0`, `0x140527138`, `0x140527168`, `0x140527180`; `0x14026E630` |
+| Centre (443, 316) + size class offset (24, 24) / (0, 24) / (0, 0): class 0 when max HP < 19 and max MP < 4, 1 when max HP < 37 and max MP < 7 | `0x1405272B0`, `0x140527300`, `0x1402690D0` |
+| Draw order: face frame, disc + labels, HP back arc (to min(max HP, 120)·5°) + back segments + cap, MP back arc (min(max MP, 20)·30°) + segments + cap, MP arc, danger flash, HP arc + segments, charge arc + segments, ticks, face | `0x140269190`, `0x1402698C0`, `0x140269F50`, `0x14026CF90` |
+| Arcs: a triangle fan from (centre x, centre y + 1) over the square of half-size R; vertex at θ: d = trunc(tan t · R) (1/16 units), right / bottom halves one unit out; UVs fixed in the quarter-ring texture; rings (1/16): HP back (744, 1288) r688, MP back (1720, 1512) r912 (picture 7), HP (680, 1592) r656, MP (904, 904) r880, charge (1816, 904) r880 (picture 5) | `0x14026B790`, `0x14026E450`, `0x1405273B0` |
+| Straight segments at (−1 − 26 i, +1) from the object (charge: (−26 i, +1)); a partial one is the object with x + cut, w − cut, UV kept: cut = (int)((1 − rem / per) · w + 0.5), 1..w−1 (HP per 6 HP, w 26; charge per 30, w 24) | `0x1402698C0`, `0x14026BEE0`, `0x14026A970` |
+| MP fade: the changed arc RGB 0 → 128 (gain) / 128 → 0 (loss), 12.8 a frame, 10 frames; charge: alpha the same way; ring part only | `0x14026C6E0`, `0x14026A770` |
+| Danger: HP > 0 and HP / max < 0.2 (max > 44) else HP < 9; flash = `g_red`'s `g_s_bar_b_hp_red` keys: colour (128, 0, 0, a), a 0 → 128 over 8 key units and back over 8 (16 + 16 frames), restarted when done, on the max-HP arc and segments under the HP arc | `0x14026E180`, `0x14026D570`, `0x14026BCF0` |
+| Face: cell = expression of the h × h strip centred on the gauge centre; 1 for 40 / 50 / 60 frames after a hit (new / old HP ≥ 0.8 / ≥ 0.5 / < 0.5), else 2 in danger, else 0 | `0x14027F470`, `0x140268D60`, `0x14029BBD0` |
+
+### Native build
+
+- **Data** (asset step, in the H1 set): the arcs are baked by running KH1's fan in the asset step
+  (the same vertices, triangles, UVs and sampling points as the GS draws, PS2 and PC pictures) into
+  pieces: per quadrant every 5° (HP and HP back, 54 + 54 pieces), every 30° (MP back), per 30° cell
+  (MP), per cell and degree (charge, 270). Held groups take KH1's values as frames (frame →
+  pieces, compiled into Re:CoM animations). Fades, the hurt face and the danger flash are played
+  groups (`crate::kh1_hud::group`).
+- **Controls** (`win/kh1_hud.rs`): at `hud = kh1` in Sora's story, at the player gauge's init:
+  three `C2DSeqCtrl` (Re:CoM's `operator new` `0x1404ACE54` + ctor `0x140247260`), no parent,
+  layout position `0x140248660` = the size-class offset, every layer at KH1's right margin (86 at
+  16:9, 0 at 4:3, from the gauge's `+0xA0`) with flag 1: back (priority 2: frame, HP back, MP back,
+  MP), front (3: HP, charge, ticks), face (3). Pieces (fades, flash) are pooled controls, flag 0
+  (played), priority 2 (MP fades, flash: under the HP ring) or 3 (charge fades).
+- **Events only:** Re:CoM's HP setters `0x14020D6A0` / `0x14020D8E0` (wrapped, `sites::KH1_HUD_HOOKS`:
+  `48 89 5C 24 10 57 48 83 EC 40`, `45 33 C0 0F B7 C2 85 D2`) give HP and max HP (`+0xA4`,
+  `+0xA8`: Re:CoM's raw HP, decision 39); KH1's MP reads / writes (`win/mp.rs`) give MP and charge;
+  the gauge's HUD state (7 / 1) hides and shows ours; the dtor deletes ours. Nothing per frame.
+- **The 7.2 MP bar** is not made at `hud = kh1` (the command menu still finds its groups).
+- **Re:CoM's HP gauge** keeps running (its low-HP sound 9 at ≤ 25 % is the owner's choice); H3
+  hides it.
+
+### Not 1:1 yet (to ask / later)
+
+1. **Hit shake and size-class slide** (`g_act`: `vibe_s/ss/sss`, `slide_s_h/v`, position keys):
+   they move every piece at once; Re:CoM's 2D animates per layer, so a native shake needs the shake
+   keys in every held group or the controls moved over the shake's frames (per frame while it
+   runs). Not built; the class offset changes at once.
+2. **The arcs' end strips** (`0x14026B790` mode 1–3: a piece at the back arcs' end; mode 4: a
+   0.7° soft edge on the HP, charge and flash arcs): their angles are float arguments the decomp
+   lost; not baked.
+3. **Charge fade overlap:** a fading piece starts at its 30° cell's start, so for 10 frames it is
+   drawn over the part of that cell already shown (same texels; only edge texels get a little
+   more opaque). KH1 fades exactly [old, new].
+4. **The gauge's own fade** (`+0xA9C`, ±0.1 a frame, menus / events) is not reproduced: ours shows
+   and hides with Re:CoM's HUD state at once.
+5. KH1 restarts a running MP fade from its last value; ours drops it.
+6. Assumptions: same-priority controls draw in creation order (the MP bar's assumption 4); a
+   played group holds its last frame (5); a group word `+4` of 0 loops (the danger flash);
+   `0x14029BBD0`'s `iVar4` is the HP after the hit (strength rule).
+
+### What the first in-game test must check (H2)
+
+1. `hud = kh1` in `kh1-recom.ini`, Combat = KH1, Sora's story. Log: `kh1 hud: Sora's KH1 gauge at
+   hud = kh1 (H2)…`, then per room `kh1 hud: built on the player gauge …: HP h/m, MP Some((…)),
+   class c, margin 86`.
+2. **Screenshot** in the field at full HP / MP: the cluster bottom right as KH1's (ring sizes,
+   "mpHP" labels, face, segment pitch); Re:CoM's HUD is still there (H3).
+3. Take hits: the green arc shrinks at 5° per HP; Sora's face grimaces for 40–60 frames.
+4. Low HP (< 20 % of max, or < 9 HP when max ≤ 44): the max-HP arc flashes red under the green;
+   the face shows the exhausted look; Re:CoM's low-HP sound plays.
+5. Cast a spell: the MP cell goes black then disappears over 1/6 s; refill: cells rise from black.
+6. Swing at enemies: the orange charge line grows along the outer ring, fading in.
+7. Events / cutscenes hide it with Re:CoM's HUD; a battle and back: it is rebuilt.
+8. `hud = recom`: Re:CoM's HUD and the 7.2 MP bar as before.
+
 ## Logs to send (H1)
 
 - `kh1 hud: kh1hud:00 (632 groups, PC copies ["FR", "GR", "IT", "SP", "UK"]) from …`

@@ -611,6 +611,15 @@ pub const MP_BAR_HOOKS: &[Site] = &[
     Site { name: "CPlayerGauge deleting dtor (0x140207770)", rva: 0x0020_7770, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x30] },
 ];
 
+/// The KH1 HUD (decision 39, H2): Re:CoM's player-gauge HP setters, wrapped for HP events.
+/// Bytes read from the Steam exe (2026-10-31).
+pub const KH1_HUD_HOOKS: &[Site] = &[
+    // mov [rsp+0x10],rbx; push rdi; sub rsp,0x40
+    Site { name: "CPlayerGauge HP (0x14020D6A0)", rva: 0x0020_D6A0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x40] },
+    // xor r8d,r8d; movzx eax,dx; test edx,edx (the cmovs after it reads the flags: a jump keeps them)
+    Site { name: "CPlayerGauge max HP (0x14020D8E0)", rva: 0x0020_D8E0, expect: &[0x45, 0x33, 0xC0, 0x0F, 0xB7, 0xC2, 0x85, 0xD2] },
+];
+
 /// Re:CoM's `D2::C2DSeqCtrl` functions the MP bar calls (the ctor `0x140247260` and `operator
 /// new` are already checked for the Keyblades page).
 pub const MP_BAR_CALLEES: &[Site] = &[
@@ -1006,6 +1015,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(std::iter::once(&MP_CHECKPOINT_CALL))
         .chain(MP_CHECKED)
         .chain(MP_BAR_HOOKS)
+        .chain(KH1_HUD_HOOKS)
         .chain(MP_BAR_CALLEES)
         .chain(MP_BAR_CHECKED)
         .chain(COMMAND_MENU_CALLEES)
@@ -1109,7 +1119,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(MAGIC_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(MAGIC_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);

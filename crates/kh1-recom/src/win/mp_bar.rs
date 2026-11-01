@@ -307,6 +307,10 @@ unsafe fn build(gauge: usize, list: i32) {
             return;
         }
     }
+    // The KH1 HUD draws KH1's own MP ring instead (decision 39, H2).
+    if super::kh1_hud::active() {
+        return;
+    }
     let Some(view) = super::mp::current() else { return };
     let Some(ctrl) = new_ctrl(hp) else { return };
     let xoff = -rd::<f32>(gauge + G_XOFF);
@@ -385,12 +389,14 @@ pub unsafe extern "win64" fn gauge_state(gauge: usize, state: u32) {
         refresh();
     }
     super::command_menu::hud(gauge, state);
+    super::kh1_hud::hud(gauge, state);
 }
 
 /// `CPlayerGauge`'s deleting dtor (`0x140207770`): our controls first (they hang from its HP
 /// control), then Re:CoM's.
 pub unsafe extern "win64" fn gauge_dtor(gauge: usize, flags: u32) -> usize {
     super::command_menu::destroy(gauge);
+    super::kh1_hud::destroy(gauge);
     if let Ok(mut s) = STATE.lock() {
         s.gauges.retain(|g| g.0 != gauge);
         for mut b in s.bars.extract_if(.., |b| b.gauge == gauge) {
@@ -418,6 +424,16 @@ pub fn sync(view: View) {
 pub fn refresh() {
     if layout().is_none() {
         return;
+    }
+    super::kh1_hud::refresh();
+    if super::kh1_hud::active() {
+        // The KH1 HUD's MP ring replaces the bar.
+        if let Ok(mut s) = STATE.lock() {
+            for mut b in s.bars.drain(..) {
+                // SAFETY: as in `sync`.
+                unsafe { b.destroy() };
+            }
+        }
     }
     if super::mp::active() {
         let missing: Vec<(usize, i32)> = STATE.lock().map(|s| s.gauges.iter().copied().filter(|g| !s.bars.iter().any(|b| b.gauge == g.0)).collect()).unwrap_or_default();

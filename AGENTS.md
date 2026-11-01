@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 57: KH1 HUD H2, Sora's HP/MP cluster, version 0.26.0 (2026-10-31)
+
+- At `hud = kh1`: Sora's cluster bottom-right at KH1's places and margin (+86): back / front /
+  face `C2DSeqCtrl`s on `kh1hud:00`; HP on raw Re:CoM HP at 5° per HP to 120 HP then segments,
+  MP, charge; KH1's MP/charge fades, hurt face (40/50/60 frames), red danger flash, size-class
+  offset. Updates on events only: wrappers on Re:CoM's HP setters `0x14020D6A0` / `0x14020D8E0`
+  (first bytes checked) and the MP hooks. The 7.2 bar isn't made at `hud = kh1`.
+- Not built: hit shake / size-class slide, arc end strips and 0.7° soft edge, KH1's 10-frame HUD
+  fade, MP fade resume (owner questions / gaps in `recom-kh1-hud.md`). Not seen in game.
+
+---
+
 ## Stage 56: KH1 HUD H1, the kh1hud sprite set, version 0.25.0 (2026-10-31)
 
 > Decision 39: an option where Re:CoM's HUD is replaced by KH1's, KH1's exact graphics and places

@@ -100,6 +100,8 @@ fn with_state<R>(f: impl FnOnce(&mut Mp) -> R) -> Option<R> {
     REFILL_PENDING.store(l.mp.refill_ready(), Ordering::Relaxed);
     // The MP bar (stage 7.2) shows what was just read or written: only a compare when unchanged.
     super::mp_bar::sync(l.mp.view());
+    // The KH1 HUD's MP ring (decision 39, H2): likewise.
+    super::kh1_hud::mp_seen(l.mp.view());
     // The command menu (stage 7.3) greys spells by it: one atomic store.
     super::command_menu::mp_seen(l.mp.view());
     Some(r)
