@@ -924,7 +924,7 @@ unsafe fn card_name(card: u16) -> Vec<u8> {
 }
 
 /// Re:CoM's "obtained at least once" (`0x14015B3F0`), when the collection is there.
-unsafe fn ever_obtained(id: u16) -> bool {
+pub(super) unsafe fn ever_obtained(id: u16) -> bool {
     let coll: usize = rd(va(base(), COLLECTION));
     coll != 0 && func::<EverFn>(EVER_OBTAINED)(id as u32) & 0xFF != 0
 }

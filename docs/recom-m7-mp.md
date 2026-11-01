@@ -77,9 +77,9 @@ Assumption, logged at the first camp open; the owner's level-99 save had the ran
 | `0x2676` | 1 | MP, whole points (KH1 record `+3`) |
 | `0x2677` | 2 | charge, u16 little-endian (KH1 record `+0x38`) |
 | `0x2679` | 1 | Sora's Re:CoM level when the block was last written |
-| `0x267A` | 7 | stage 7.11: spell levels, Fire, Blizzard, Thunder, Cure, Gravity, Stop, Aero (KH1 save `+0x492 + spell`); 0 = not learned. Zero until then. |
+| `0x267A` | 7 | stage 7.11: spell levels, Fire, Blizzard, Thunder, Cure, Gravity, Stop, Aero (KH1 save `+0x492 + spell`); 0 = not learned. Written by the unlocks (`recom-m7-unlocks.md`), raised only. |
 | `0x2681` | 3 | stage 7.12: shortcut slots 1..3 (KH1 save `+0x844..0x846`); 0 = none, else spell + 1. Zero until then. |
-| `0x2684` | 1 | spare (zero) |
+| `0x2684` | 1 | bit 0 (stage 7.11): the spell levels were synced from Re:CoM's card collection for this save (0 in every older save: the first read at the KH1 setting syncs them). Other bits zero. |
 
 - **All-zero compatible:** a save that never used KH1 MP reads as full MP and no charge, and
   reading never writes. The block is written only when MP or charge changes (a hit, a refill, a

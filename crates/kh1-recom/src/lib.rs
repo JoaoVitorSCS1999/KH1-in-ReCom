@@ -40,6 +40,10 @@
 //!   runs KH1's command on Re:CoM's own magic action `0x13` with KH1 rows in Re:CoM's attack-row
 //!   format, Re:CoM's cast clips and its shot runtime fire the ball at KH1's release frame, KH1's
 //!   MP is paid then, and the ball's hits take KH1's damage (`magic`; `docs/recom-m7-magic.md`);
+//! - in Sora's story, KH1's spells are learned from Re:CoM's own card collection: a spell's base
+//!   level with its magic card's first pickup, -ra / -ga with Re:CoM's bosses (their enemy cards'
+//!   first pickup), through a wrapper on Re:CoM's "first obtained" `0x14015C7F0`, kept in our save
+//!   block (`unlocks`; `docs/recom-m7-unlocks.md`);
 //! - F9 records a Re:CoM trace in kh1-trace's CSV schema (`trace`).
 //!
 //! `motions` (with `json`) reads the asset build step's manifest and `PL0001.ANN` header, for the
@@ -68,6 +72,7 @@ pub mod settings;
 pub mod sites;
 pub mod trace;
 pub mod units;
+pub mod unlocks;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

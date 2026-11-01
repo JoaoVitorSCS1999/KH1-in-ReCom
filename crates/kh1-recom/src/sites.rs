@@ -983,6 +983,21 @@ pub const MAGIC_CHECKED: &[Site] = &[
     Site { name: "nearest pick: list walk (0x1401CDC26)", rva: 0x001C_DC26, expect: &[0x49, 0x8B, 0x9E, 0x88, 0x00, 0x00, 0x00, 0x48, 0x8D, 0x7B, 0x10, 0x48, 0x83, 0x3F, 0x00, 0x74, 0x58, 0x8B, 0x0B, 0xE8, 0x12, 0xF7, 0x0D, 0x00, 0x48, 0x8B, 0xC8, 0x48, 0x85, 0xC0, 0x74, 0x3C, 0x49, 0x3B, 0xC7, 0x74, 0x37, 0xF7, 0x80, 0x54, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00] },
 ];
 
+/// M7 stage 7.11, spell unlocks (`crate::unlocks`, `docs/recom-m7-unlocks.md`): Re:CoM's "first
+/// obtained" of a card id, the one place every collection add turns a card's discovery state from
+/// 1 to 2. Same rule as [`HOOKS`].
+pub const UNLOCK_HOOKS: &[Site] = &[
+    // sub rsp,0x28; mov eax,0xFF (then movzx r9d,cx: the id in cx).
+    Site { name: "card first obtained (0x14015C7F0)", rva: 0x0015_C7F0, expect: &[0x48, 0x83, 0xEC, 0x28, 0xB8, 0xFF, 0x00, 0x00, 0x00] },
+];
+
+/// Re:CoM code the unlocks rely on (not patched).
+pub const UNLOCK_CHECKED: &[Site] = &[
+    // The collection add for types 1-4 and 7 (`0x14015CDB0`, from the add `0x140158FC0`): movzx
+    // ecx,bx; call 0x14015CAE0 (discovery 0 -> 1); movzx ecx,bx; call 0x14015C7F0 (1 -> 2).
+    Site { name: "card add: discovery, first obtained (0x14015CDFB)", rva: 0x0015_CDFB, expect: &[0x0F, 0xB7, 0xCB, 0xE8, 0xDD, 0xFC, 0xFF, 0xFF, 0x0F, 0xB7, 0xCB, 0xE8, 0xE5, 0xF9, 0xFF, 0xFF] },
+];
+
 /// `CPlayerSora`'s exeMagic slot (vtable `0x1405A9938` + 0x150). Checked (exe; relocated).
 pub const MAGIC_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x150 (0x1405A9A88)", rva: 0x005A_9A88, target: 0x0021_7EE0 }];
 
@@ -1073,6 +1088,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .chain(MAGIC_DATA)
         .chain(MAGIC_CHECKED)
         .chain(BATTLE_END_CHECKED)
+        .chain(UNLOCK_HOOKS)
+        .chain(UNLOCK_CHECKED)
 }
 
 /// What the PE headers of a loaded image say about its build.
@@ -1165,7 +1182,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(MAGIC_HOOKS) {
+        for h in HOOKS.iter().chain(MOVE_HOOKS).chain(TRACE_HOOKS).chain(ATTACK_HOOKS).chain(STATS_HOOKS).chain(KEYBLADE_HOOKS).chain(MODEL_HOOKS).chain(M6_HOOKS).chain(M6_DECK_HOOKS).chain(M6_DECK_READERS).chain(M6_BOSS_HOOKS).chain(MP_HOOKS).chain(MP_BAR_HOOKS).chain(KH1_HUD_HOOKS).chain(MAGIC_HOOKS).chain(UNLOCK_HOOKS) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
@@ -1540,6 +1557,21 @@ mod tests {
         // handle → object.
         for rva in [0x001F_6660u32, 0x001F_3C00, 0x002A_D350] {
             assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
+        }
+    }
+
+    #[test]
+    fn unlock_sites() {
+        // The hook is the function the add calls after the discovery step; the reader the unlocks
+        // call (Keyblades' `0x14015B3F0`) reads the collection global `0x14087A7E8`.
+        let site = |n: &str| all_sites().find(|s| s.name == n).unwrap_or_else(|| panic!("{n}"));
+        let add = site("card add: discovery, first obtained (0x14015CDFB)");
+        let call = |s: &Site, at: usize| (s.rva as i64 + at as i64 + 5 + i32::from_le_bytes(s.expect[at + 1..at + 5].try_into().unwrap()) as i64) as u32;
+        assert_eq!((call(add, 3), call(add, 11)), (0x0015_CAE0, UNLOCK_HOOKS[0].rva));
+        let ever = site("card ever obtained (0x14015B3F0)");
+        assert_eq!(0x1_4000_0000 + (ever.rva as i64 + 11 + i32::from_le_bytes(ever.expect[7..11].try_into().unwrap()) as i64) as u64, 0x1_4087_A7E8);
+        for s in UNLOCK_HOOKS.iter().chain(UNLOCK_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
         }
     }
 

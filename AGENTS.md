@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 63: M7 stage 7.11, spell unlocks, version 0.28.0 (2026-10-31)
+
+> Decision 34: base level with the Re:CoM magic card's first pickup; -ra / -ga at Re:CoM bosses
+
+- Hook on Re:CoM's "first obtained" `0x14015C7F0` (`48 83 EC 28 B8 FF 00 00 00`), which every
+  card pickup passes: magic cards (kinds 0x1A–0x20) give level 1; a boss's enemy card's first
+  pickup (= its first defeat) raises its spells one level each (table in
+  `docs/recom-m7-unlocks.md`: two bosses per spell). Levels at `save+0x267A`, raised only; old
+  saves sync once (bit 0 of `save+0x2684`). `kh1_all_spells` still overrides. Owner to review
+  the table. Not seen in game.
+
+---
+
 ## Stage 62: Thunder's charge effect, version 0.27.4 (2026-10-31)
 
 - Thunder's cast now plays Re:CoM's own Thunder charge (its cast setup at `0x14022062B`, 108

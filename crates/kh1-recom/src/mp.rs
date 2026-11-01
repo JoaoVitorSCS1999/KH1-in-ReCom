@@ -267,14 +267,15 @@ pub mod off {
     /// when read).
     pub const LEVEL: usize = 4;
     /// Stage 7.11: 7 spell levels, Fire, Blizzard, Thunder, Cure, Gravity, Stop, Aero (KH1 save
-    /// `+0x492 + spell`); 0 = not learned. Reserved (zero) until then.
+    /// `+0x492 + spell`); 0 = not learned. Written by the unlocks (`crate::unlocks`), raised only.
     pub const SPELLS: usize = 5;
     pub const SPELL_COUNT: usize = 7;
     /// Stage 7.12: the 3 shortcut slots (KH1 save `+0x844..0x846`); 0 = none, else spell + 1.
     /// Reserved (zero) until then.
     pub const SHORTCUTS: usize = 0xC;
     pub const SHORTCUT_COUNT: usize = 3;
-    /// Reserved (zero).
+    /// Stage 7.11: bit 0 = the spell levels were synced from Re:CoM's card collection for this
+    /// save (`crate::unlocks::SYNCED`); the other bits reserved (zero).
     pub const SPARE: usize = 0xF;
 }
 

@@ -19,11 +19,12 @@ bits, HUD and camp code run the feature; ours only adds data, wrappers and comma
 | 7.8 | Gravity | Re:CoM kind `0xD` | KH1 twin's resist[8]; Re:CoM-only bosses: 2 %. |
 | 7.9 | Stop | Re:CoM kind 8 | KH1 twin's resist[9]; Re:CoM-only bosses immune; held hits. |
 | 7.10 | Aero | a new player damage status in the damage check | halves damage for (18 + max MP) s; Aerora/Aeroga wind. |
-| 7.11 | **Spell unlocks and levels** | Re:CoM's card pickup and boss battle ends | base level at the first pickup of that magic card; -ra / -ga at Re:CoM bosses; saved per save. |
+| 7.11 | **Spell unlocks and levels** | Re:CoM's card pickup and boss battle ends | base level at the first pickup of that magic card; -ra / -ga at Re:CoM bosses; saved per save. Built: `recom-m7-unlocks.md` (Re:CoM's first-obtained `0x14015C7F0`; a boss win = its enemy card's first pickup; two bosses a spell, +1 each). |
 | 7.12 | **Shortcut menu** | the command menu object | hold L1: Triangle / Square / Cross cast slots 1 / 2 / 3. |
 | 7.13 | **"KH1" camp entry + Customize** | our camp entry (renamed) and page, Re:CoM's camp buttons | submenu: Keyblades, Customize (3 shortcut slots from learned spells + None). |
 
 Out of M7 (later milestones): Items and Summon rows' contents (M8), MP Rage / MP Haste and other
 abilities (M9), KH1's context-row specials in battle (M9), lock-on on R1 (M12).
 
-Until 7.11, a debug ini switch gives Sora every spell at level 3 so 7.4–7.10 can be tested.
+Until 7.11, a debug ini switch gives Sora every spell at level 3 so 7.4–7.10 can be tested. It stays
+after 7.11 (`kh1_all_spells = on` overrides the learned levels in the menu).

@@ -19,6 +19,7 @@ mod mp_bar;
 mod stats;
 mod sys;
 mod trace;
+mod unlocks;
 
 use crate::settings::{self, Settings};
 use std::ffi::c_void;
@@ -264,6 +265,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
             kh1_hud::install(base, hud_file);
         }
         install_magic(base);
+        install_unlocks(base);
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
     }
@@ -294,6 +296,21 @@ fn install_magic(base: usize) {
         log(&magic::start_line());
     } else {
         log("magic: exeMagic not hooked; no KH1 cast (the Field case stays patched but is not reached: Re:CoM never casts in the field)");
+    }
+}
+
+/// M7 stage 7.11 (`unlocks`, decision 34): KH1's spells learned from Re:CoM's card collection, through
+/// a wrapper on Re:CoM's "first obtained" `0x14015C7F0`. Without it, spells come only from the debug
+/// switch `kh1_all_spells`.
+fn install_unlocks(base: usize) {
+    let site = |name: &str| crate::sites::UNLOCK_HOOKS.iter().find(|h| h.name == name).expect("site");
+    let hooks = [hook::Hook { site: site("card first obtained (0x14015C7F0)"), ours: unlocks::first_obtained as *const () as usize, original: &unlocks::ORIG_FIRST_OBTAINED }];
+    // SAFETY: the target's bytes are checked again inside, before anything is written.
+    if unsafe { hook::install_all(base, &hooks) } {
+        unlocks::mark_installed();
+        log(&unlocks::start_line());
+    } else {
+        log("unlocks: 0x14015C7F0 not hooked; no spell is learned (kh1_all_spells still gives all)");
     }
 }
 

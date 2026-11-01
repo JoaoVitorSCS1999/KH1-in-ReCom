@@ -108,14 +108,20 @@ fn with_state<R>(f: impl FnOnce(&mut Mp) -> R) -> Option<R> {
 }
 
 /// Sora's KH1 spell levels from the block (`crate::mp::off::SPELLS`; stage 7.11 writes them),
-/// Fire … Aero, 0 = not learned. All zero when MP isn't live. A read only.
+/// Fire … Aero, 0 = not learned. All zero when MP isn't live. A read, but for the one-time sync of a
+/// save never synced (`super::unlocks::sync_first`).
 pub fn spell_levels() -> [u8; 7] {
     if !active() {
         return [0; 7];
     }
     let Some(s) = save() else { return [0; 7] };
     // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST < 0x2818).
-    let block: [u8; BLOCK_LEN] = unsafe { rd(s + BLOCK_FIRST) };
+    let mut block: [u8; BLOCK_LEN] = unsafe { rd(s + BLOCK_FIRST) };
+    // Stage 7.11: a save never synced from Re:CoM's card collection gets its levels now, once.
+    if block[m::off::SPARE] & crate::unlocks::SYNCED == 0 && super::unlocks::sync_first() {
+        // SAFETY: as above.
+        block = unsafe { rd(s + BLOCK_FIRST) };
+    }
     let mut out = [0u8; 7];
     out.copy_from_slice(&block[m::off::SPELLS..m::off::SPELLS + m::off::SPELL_COUNT]);
     out.map(|l| if l <= 3 { l } else { 0 })
