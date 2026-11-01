@@ -682,8 +682,194 @@ pub unsafe fn hud(gauge: usize, state: u32) {
     }
 }
 
+// -------------------------------------------------------------------------------------------------
+// H5: the LOCK ON! plate and the target's HP gauge (top left).
+
+/// Re:CoM's enemy max-HP getter (`0x14017F5A0`; KH1's max for a proxied enemy through the stats
+/// hook, `win/stats.rs`). First bytes checked (`sites::STATS` / the hook).
+const ENEMY_MAX_HP: u32 = 0x0017_F5A0;
+type MaxHpFn = unsafe extern "win64" fn(usize) -> i32;
+type TypeFn = unsafe extern "win64" fn(usize) -> u32;
+
+struct Target {
+    gauge: usize,
+    list: i32,
+    plate: usize,
+    /// Head, body, cap, bars (5 layers), marker.
+    ctrls: [usize; 5],
+    enemy: usize,
+    hp: i32,
+    max: i32,
+    /// The gauge's alpha and whether it fades out; the plate's alpha (it fades out by 1/6).
+    alpha: f32,
+    out: bool,
+    plate_alpha: f32,
+}
+
+static TARGET: Mutex<Option<Target>> = Mutex::new(None);
+
+/// Re:CoM's locked enemy: in battle, its lock-on on (`*(player+0x3F8)+0xE0`), the target handle
+/// `player+0x84C` an enemy (type 0x1004) with HP. As the movement code reads the lock
+/// (`win/movement.rs` `lock_target`); Assumption: that pair is Re:CoM's lock-on.
+unsafe fn locked_enemy(pl: usize) -> Option<usize> {
+    use super::movement::p;
+    if pl == 0 || rd::<i32>(pl + p::BATTLE) == 0 {
+        return None;
+    }
+    let cur: usize = rd(pl + p::TARGET_CURSOR);
+    if cur == 0 || rd::<i32>(cur + 0xE0) == 0 {
+        return None;
+    }
+    let h: u32 = rd(pl + p::LOCK_TARGET);
+    if h == 0 {
+        return None;
+    }
+    let obj = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(h);
+    if obj == 0 {
+        return None;
+    }
+    let ty: TypeFn = std::mem::transmute_copy(&rd::<usize>(rd::<usize>(obj) + crate::battle::enemy::VT_TYPE));
+    (ty(obj) == crate::battle::ENEMY_TYPE).then_some(obj)
+}
+
+impl Target {
+    unsafe fn colours(&self) {
+        func::<VecFn>(COLOUR)(self.plate, V4([1.0, 1.0, 1.0, self.plate_alpha]).0.as_ptr());
+        for &c in &self.ctrls {
+            func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, self.alpha]).0.as_ptr());
+        }
+    }
+
+    /// Shows HP / max: the body's length, the cap's place, the bars, the marker.
+    unsafe fn values(&mut self, hp: i32, max: i32) {
+        let (ox, oy) = (kh::target::ORIGIN.0, kh::target::ORIGIN.1 + kh::target::BELOW_PLATE);
+        let l = kh::target::body(max);
+        func::<FrameFn>(FRAME)(self.ctrls[1], 0, l);
+        func::<VecFn>(LAYOUT_POS)(self.ctrls[2], V4([ox + kh::target::BODY_X + l as f32, oy, 0.0, 1.0]).0.as_ptr());
+        let bars = kh::target::bars(hp);
+        for (k, len) in bars.iter().enumerate() {
+            func::<FrameFn>(FRAME)(self.ctrls[3], k as u32, *len);
+        }
+        match kh::target::marker(&bars) {
+            Some(k) => {
+                func::<VecFn>(LAYOUT_POS)(self.ctrls[4], V4([ox + kh::target::BODY_X + bars[k] as f32, oy, 0.0, 1.0]).0.as_ptr());
+                func::<VisFn>(ALL_VISIBLE)(self.ctrls[4], 1);
+            }
+            None => func::<VisFn>(ALL_VISIBLE)(self.ctrls[4], 0),
+        }
+        self.hp = hp;
+        self.max = max;
+    }
+
+    unsafe fn destroy(&mut self) {
+        super::d2::delete(self.plate, self.list);
+        for c in self.ctrls {
+            super::d2::delete(c, self.list);
+        }
+    }
+}
+
+/// Makes the plate and gauge on `cl`'s list for `enemy`.
+unsafe fn target_new(gauge: usize, list: i32, xoff: f32, first: u32, enemy: usize, hp: i32, max: i32) -> Option<Target> {
+    use kh::target as t;
+    let xoff = -xoff;
+    let mk = |x: f32, y: f32| -> Option<usize> {
+        let c = new_ctrl()?;
+        func::<VecFn>(LAYOUT_POS)(c, V4([x, y, 0.0, 1.0]).0.as_ptr());
+        wr::<u8>(c + C_COLOUR_ON, 1);
+        Some(c)
+    };
+    let (ox, oy) = t::ORIGIN;
+    let gy = oy + t::BELOW_PLATE;
+    let plate = mk(ox, oy)?;
+    add(plate, list, PRIORITY_BACK, first + t::PLATE, xoff, 0);
+    // KH1 restarts the plate's colour keys and plays them (drawn after the step: from frame 1).
+    func::<PlayFn>(PLAY_FROM)(plate, 0, UNITS);
+    let head = mk(ox, gy)?;
+    add(head, list, PRIORITY_BACK, first + t::HEAD, xoff, 1);
+    let body = mk(ox + t::BODY_X, gy)?;
+    add(body, list, PRIORITY_BACK, first + t::BODY, xoff, 1);
+    let cap = mk(ox, gy)?;
+    add(cap, list, PRIORITY_BACK, first + t::CAP, xoff, 1);
+    let bars = mk(ox + t::BODY_X, gy)?;
+    for k in 0..5 {
+        add(bars, list, PRIORITY_BACK, first + t::BAR + k, xoff, 1);
+    }
+    let marker = mk(ox, gy)?;
+    add(marker, list, PRIORITY_BACK, first + t::MARKER, xoff, 1);
+    let mut tg = Target { gauge, list, plate, ctrls: [head, body, cap, bars, marker], enemy, hp, max, alpha: 0.0, out: false, plate_alpha: 1.0 };
+    tg.values(hp, max);
+    tg.colours();
+    Some(tg)
+}
+
+/// Each of Sora's frames at the KH1 setting (the request-bits wrapper, after the command menu):
+/// KH1's lock-on HUD follows Re:CoM's lock. Reads only, unless the lock, the target's HP or a fade
+/// changes something.
+pub unsafe fn lock_tick(pl: usize) {
+    let Some(first) = manifest().and_then(|m| m.target) else { return };
+    let Ok(mut t) = TARGET.lock() else { return };
+    let host = if active() { STATE.lock().ok().and_then(|s| s.clusters.iter().find(|c| !c.hidden).map(|c| (c.gauge, c.list, c.xoff))) } else { None };
+    let enemy = if host.is_some() { locked_enemy(pl) } else { None };
+    match (t.as_mut(), enemy) {
+        (None, Some(e)) => {
+            let Some((g, list, xoff)) = host else { return };
+            let (hp, max) = (rd::<i32>(e + crate::battle::enemy::HP), func::<MaxHpFn>(ENEMY_MAX_HP)(e));
+            *t = target_new(g, list, xoff, first, e, hp, max);
+            note(|| format!("lock on: target {e:#x} HP {hp}/{max} (LOCK ON! + KH1's target gauge, H5)"));
+        }
+        (Some(tg), Some(e)) => {
+            if tg.out {
+                // A new lock while fading out: KH1 starts over (plate keys, gauge from 0).
+                tg.out = false;
+                tg.alpha = 0.0;
+                tg.plate_alpha = 1.0;
+                func::<PlayFn>(PLAY_FROM)(tg.plate, 0, UNITS);
+                tg.colours();
+            } else if tg.alpha < 1.0 {
+                tg.alpha = (tg.alpha + kh::target::GAUGE_FADE).min(1.0);
+                tg.colours();
+            }
+            let hp = rd::<i32>(e + crate::battle::enemy::HP);
+            if e != tg.enemy || hp != tg.hp {
+                let max = if e != tg.enemy { func::<MaxHpFn>(ENEMY_MAX_HP)(e) } else { tg.max };
+                tg.enemy = e;
+                tg.values(hp, max);
+            }
+        }
+        (Some(tg), None) => {
+            if host.is_none() {
+                // The HUD is hidden or gone (events, Combat / HUD switched): at once.
+                tg.destroy();
+                *t = None;
+                return;
+            }
+            if !tg.out {
+                tg.out = true;
+                tg.alpha = 1.0;
+            } else {
+                tg.alpha = (tg.alpha - kh::target::GAUGE_FADE).max(0.0);
+            }
+            tg.plate_alpha = (tg.plate_alpha - kh::target::PLATE_FADE).max(0.0);
+            tg.colours();
+            if tg.alpha <= 0.0 && tg.plate_alpha <= 0.0 {
+                tg.destroy();
+                *t = None;
+            }
+        }
+        (None, None) => {}
+    }
+}
+
 /// The gauge's deleting dtor (before Re:CoM's): our controls go.
 pub unsafe fn destroy(gauge: usize) {
+    if let Ok(mut t) = TARGET.lock() {
+        if t.as_ref().is_some_and(|x| x.gauge == gauge) {
+            if let Some(mut x) = t.take() {
+                x.destroy();
+            }
+        }
+    }
     if let Ok(mut t) = TINTED.lock() {
         t.retain(|&g| g != gauge);
     }

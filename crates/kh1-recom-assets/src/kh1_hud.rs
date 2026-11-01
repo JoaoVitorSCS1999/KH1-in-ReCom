@@ -55,6 +55,14 @@ pub const MAG: &str = "exchange/UK_uibin_mag.bin";
 /// `uitex.bin` pictures the menu draws from (`0x140278180` passes picture 2 for the root's panels,
 /// 3 for the submenus', 1 for the titles and icons): (index, TIM2 offset, pixel data offset).
 pub const MENU_PICTURES: [(usize, usize, usize); 3] = [(1, 0x2080, 0x20C0), (2, 0x4100, 0x4140), (3, 0x6180, 0x61C0)];
+/// Picture 0 (the LOCK ON! plate's art at texels 100..125 × 100..123, H5; the PC copy 4×).
+pub const PLATE_PICTURE: (usize, usize, usize) = (0, 0, 0x40);
+/// The corner of picture 0 taken into the atlas (texels 96..128 square).
+pub const PLATE_CORNER: usize = 96;
+/// The LOCK ON! plate (`0x1402740F0` loads it; objects 5..10) and the lock-on cursors (0..4, H7).
+pub const LOCK: &str = "exchange/UK_uibin_lock.bin";
+/// The target's HP gauge (`0x140274E00`).
+pub const G_ENM: &str = "exchange/UK_uibin_g_enm.bin";
 /// KH1 PC's menu font (font 1 of the table `0x1404D9150`, the command words `0x14027A920` →
 /// `0x1402D1CD0`): `Image/dt/Theater` `<lang>/font/menufont.tm2` (2048 × 2048 32-bit), `.cod`
 /// (8-byte glyphs: code, x, y, 0, width), `.inf` (count, size, cell). Checked (files).
@@ -832,6 +840,10 @@ pub struct Sources<'a> {
     /// H4: `com`, `com_battle`, `mag` and the menu font; the command words per language (as the
     /// command menu decodes them). Without them no menu look is built.
     pub menu: Option<MenuSources<'a>>,
+    /// H5: `lock` and `g_enm`.
+    pub lock: Option<&'a [u8]>,
+    /// `g_enm`.
+    pub g_enm: Option<&'a [u8]>,
     /// The three faces (Sora, Donald, Goofy).
     pub faces: [Source; 3],
 }
@@ -872,6 +884,8 @@ pub struct Built {
     pub groups: usize,
     /// H4: the menu groups (None without menu sources).
     pub menu: Option<menu::Built>,
+    /// H5: the target groups' first group.
+    pub target: Option<usize>,
 }
 
 fn colour_of(o: &Obj) -> u32 {
@@ -1156,29 +1170,51 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
             groups.push(motion::program_group(&motion.programs[p], &tracks, pieces));
         }
     }
+    // H4 / H5: pictures 1, 2, 3 (titles, icons, words; the root's panels; the submenus') and
+    // picture 0's LOCK ON! plate corner (texels 96..128 square: the plate's art, at the PC's 4×).
+    let mut mp = Vec::new();
+    for (i, off, data) in MENU_PICTURES {
+        let t = tims.get(i).ok_or_else(|| crate::Error::Format(format!("uitex.bin: no picture {i}")))?;
+        if t.offset != off || t.width != 128 || t.height != 128 {
+            return bad(format!("uitex.bin: picture {i} at {:#x} {}×{}, KH1 draws it from {off:#x} 128×128", t.offset, t.width, t.height));
+        }
+        let ps2 = Pic { w: 128, h: 128, px: t.pixels.clone() };
+        let mut per = Vec::new();
+        for l in langs {
+            per.push(uitex_asset(src.uitex_hd, data, l)?.ok_or_else(|| crate::Error::Format(format!("uitex.bin: no PC texture for picture {i}")))?);
+        }
+        let scale = hd_scale(&ps2, &per[0])?;
+        let per: Vec<Pic> = per.into_iter().map(|p| p.crop(0, 0, 128 * scale, 128 * scale)).collect();
+        // One shared PC picture when every language has the same one (pictures 2, 3).
+        let per = if per.iter().all(|p| *p == per[0]) { vec![per[0].clone()] } else { per };
+        mp.push(atlas.add(ps2, per, scale));
+    }
+    let p0 = {
+        let (i, off, data) = PLATE_PICTURE;
+        let t = tims.get(i).ok_or_else(|| crate::Error::Format(format!("uitex.bin: no picture {i}")))?;
+        if t.offset != off || t.width != 128 || t.height != 128 {
+            return bad(format!("uitex.bin: picture {i} at {:#x} {}×{}", t.offset, t.width, t.height));
+        }
+        let ps2 = Pic { w: 128, h: 128, px: t.pixels.clone() };
+        let mut per = Vec::new();
+        for l in langs {
+            per.push(uitex_asset(src.uitex_hd, data, l)?.ok_or_else(|| crate::Error::Format(format!("uitex.bin: no PC texture for picture {i}")))?);
+        }
+        let scale = hd_scale(&ps2, &per[0])?;
+        let c = PLATE_CORNER;
+        let per: Vec<Pic> = per.into_iter().map(|p| p.crop(c * scale, c * scale, (128 - c) * scale, (128 - c) * scale)).collect();
+        let per = if per.iter().all(|p| *p == per[0]) { vec![per[0].clone()] } else { per };
+        atlas.add(ps2.crop(c, c, 128 - c, 128 - c), per, scale)
+    };
     // H4: KH1's command menu pieces and words.
     let menu_built = match &src.menu {
-        Some(ms) => {
-            let mut mp = Vec::new();
-            for (i, off, data) in MENU_PICTURES {
-                let t = tims.get(i).ok_or_else(|| crate::Error::Format(format!("uitex.bin: no picture {i}")))?;
-                if t.offset != off || t.width != 128 || t.height != 128 {
-                    return bad(format!("uitex.bin: picture {i} at {:#x} {}×{}, KH1 draws it from {off:#x} 128×128", t.offset, t.width, t.height));
-                }
-                let ps2 = Pic { w: 128, h: 128, px: t.pixels.clone() };
-                let mut per = Vec::new();
-                for l in langs {
-                    per.push(uitex_asset(src.uitex_hd, data, l)?.ok_or_else(|| crate::Error::Format(format!("uitex.bin: no PC texture for picture {i}")))?);
-                }
-                let scale = hd_scale(&ps2, &per[0])?;
-                let per: Vec<Pic> = per.into_iter().map(|p| p.crop(0, 0, 128 * scale, 128 * scale)).collect();
-                // One shared PC picture when every language has the same one (pictures 2, 3).
-                let per = if per.iter().all(|p| *p == per[0]) { vec![per[0].clone()] } else { per };
-                mp.push(atlas.add(ps2, per, scale));
-            }
-            Some(menu::build(ms, &mut atlas, [mp[0], mp[1], mp[2]], &mut groups)?)
-        }
+        Some(ms) => Some(menu::build(ms, &mut atlas, [mp[0], mp[1], mp[2]], &mut groups)?),
         None => None,
+    };
+    // H5: the LOCK ON! plate and the target's HP gauge.
+    let target_built = match (src.lock, src.g_enm) {
+        (Some(l), Some(e)) => Some(target::build(l, e, [p0, mp[0], it6], &mut groups)?),
+        _ => None,
     };
     let groups_total = groups.len();
     let packed = build_atlas(&atlas, langs.len())?;
@@ -1196,6 +1232,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         motion,
         groups: groups_total,
         menu: menu_built,
+        target: target_built,
     })
 }
 
@@ -1675,6 +1712,124 @@ pub mod menu {
     }
 }
 
+/// H5: KH1's LOCK ON! plate (`0x1402747F0`) and the target's HP gauge (`0x1402758B0` →
+/// `0x140275000`). KH1 (Checked (decomp) unless tagged):
+/// - the plate: `lock` objects 5..7 (picture 0) and 8..10 (picture 1, "LOCK ON!") at (left margin
+///   + 16, 24); on a lock their colour keys restart (`0x14027E710`) and play (alpha 0 → peak over
+///   2 frames, → rest over 10), then hold; at the lock's end alpha − 1/6 a frame (6 frames);
+/// - the gauge at (left margin + 16, 24 + 28 while the plate shows, `0x1402743E0`): `g_enm` 0
+///   (picture 6) and 1..3 (picture 1, the green "HP") at the origin; 4 (picture 6) and 5 (1)
+///   `L` = min(max HP / 2, 150) wide from x + 28; the cap 12 (6) and 13 (1) at x + 28 + L; five bars
+///   (one per 300 HP, each min(HP − 300 k + 1, 300) / 2 wide, the texture stretched); with more
+///   than one bar a marker (11) at the top bar's end; alpha 0 → 1 by 0.2 a frame and back.
+/// The widths are Re:CoM X scales over frames 0..150 (as the MP bar's partial segment), the
+/// moving pieces controls of their own, placed on events.
+pub mod target {
+    use super::*;
+
+    /// Groups from the first: the plate (played), the gauge's fixed part, its length, its cap,
+    /// the five bars, the marker.
+    pub mod g {
+        /// The plate (played from frame 1: its colour keys, then held).
+        pub const PLATE: usize = 0;
+        /// The gauge's head ("HP").
+        pub const HEAD: usize = 1;
+        /// Its body, X-scaled: frame = L (0..150).
+        pub const BODY: usize = 2;
+        /// Its cap.
+        pub const CAP: usize = 3;
+        /// Bar k (0..4), X-scaled: frame = its length.
+        pub const BAR: usize = 4;
+        /// The top bar's end marker.
+        pub const MARKER: usize = 9;
+        /// Groups.
+        pub const COUNT: usize = 10;
+    }
+
+    /// The bars' colours by stack index: green first, then yellow, orange, magenta, violet
+    /// (`g_enm` objects 10, 9, 8, 7, 6). Assumption (KH1's slot order not read).
+    pub const BAR_OBJECTS: [usize; 5] = [10, 9, 8, 7, 6];
+
+    fn grow(pieces: Vec<Piece>) -> Group {
+        let one = 0x8080_8080;
+        Group {
+            steps: vec![
+                Step { pieces: pieces.clone(), frames: (0, 150), colour: (one, one), flags: crate::mp_bar::FLAGS_GROW_PUB, tr: [0; 4] },
+                Step { pieces, frames: (151, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] },
+            ],
+            once: true,
+            word: GROUP_WORD_SCRUB,
+        }
+    }
+
+    /// A piece at `dx` from its object's place (`x0`: replace the object's x).
+    fn tp(o: &Obj, item: usize, x0: Option<i32>, dx: i32, uv_off: i32) -> Piece {
+        let (mut uv, mu, mv) = o.texels();
+        for k in 0..4 {
+            uv[k] -= uv_off;
+        }
+        let [ox, oy, w, h] = o.rect;
+        let x = x0.unwrap_or(ox) + dx;
+        let rect = [if mu { x + w } else { x }, if mv { oy + h } else { oy }, if mu { x } else { x + w }, if mv { oy } else { oy + h }];
+        let c = |c: [i32; 4]| c[0].clamp(0, 255) as u32 | (c[1].clamp(0, 255) as u32) << 8 | (c[2].clamp(0, 255) as u32) << 16 | (c[3].clamp(0, 255) as u32) << 24;
+        let grad = if o.flags & 0x20 != 0 { c(o.colours[1]) } else { 0 };
+        Piece { item, uv, rect, colour: c(o.colours[0]), grad }
+    }
+
+    /// Builds the groups (appended to `groups`); returns the first.
+    pub(crate) fn build(lock: &[u8], g_enm: &[u8], [p0, p1, p6]: [usize; 3], groups: &mut Vec<Group>) -> Result<usize> {
+        let l = Uibin::parse(lock)?;
+        let e = Uibin::parse(g_enm)?;
+        let ln = ["lockon_plate_a", "lockon_plate_b", "lockon_plate_c", "lockon_text_a", "lockon_text_b", "lockon_text_c"];
+        for (k, n) in ln.iter().enumerate() {
+            if l.objs.get(5 + k).map(|o| o.name.as_str()) != Some(n) {
+                return bad(format!("{LOCK}: object {} is not {n}", 5 + k));
+            }
+        }
+        let en = ["g_enm_out_a", "g_enm_fra_a", "g_enm_fra_hp", "g_enm_fra_aa", "g_enm_out_b", "g_enm_fra_b", "g_enm_bar_v", "g_enm_bar_m", "g_enm_bar_o", "g_enm_bar_y", "g_enm_bar_g", "g_enm_fra_p", "g_enm_out_c", "g_enm_fra_c"];
+        for (k, n) in en.iter().enumerate() {
+            if e.objs.get(k).map(|o| o.name.as_str()) != Some(n) {
+                return bad(format!("{G_ENM}: object {k} is not {n}"));
+            }
+        }
+        let first = groups.len();
+        // The plate: each piece's colour keys (2 frames a key unit), played from frame 1, held.
+        let mut steps = Vec::new();
+        for (k, o) in l.objs[5..11].iter().enumerate() {
+            let piece = if k < 3 { tp(o, p0, None, 0, PLATE_CORNER as i32) } else { tp(o, p1, None, 0, 0) };
+            let (f0, n) = o.keys_a;
+            let keys = l.keys_a.get(f0.max(0) as usize..(f0 + n).max(0) as usize).unwrap_or(&[]);
+            let col = |k: &crate::uibin::Key| k.vals[0].clamp(0.0, 255.0) as u32 | (k.vals[1].clamp(0.0, 255.0) as u32) << 8 | (k.vals[2].clamp(0.0, 255.0) as u32) << 16 | (k.vals[3].clamp(0.0, 255.0) as u32) << 24;
+            let mut f = 0;
+            for w in keys.windows(2) {
+                if w[0].dur <= 0 {
+                    break;
+                }
+                let f1 = f + 2 * w[0].dur;
+                // The piece's own colour is the multiplier's base: draw with colour 0x80 and the keys.
+                steps.push(Step { pieces: vec![Piece { colour: 0x8080_8080, ..piece }], frames: (f, f1), colour: (col(&w[0]), col(&w[1])), flags: FLAGS_COLOUR | 0x8000, tr: [0; 4] });
+                f = f1;
+            }
+            let last = keys.last().map(col).unwrap_or(piece.colour);
+            steps.push(Step { pieces: vec![Piece { colour: 0x8080_8080, ..piece }], frames: (f, LONG), colour: (last, last), flags: FLAGS_COLOUR, tr: [0; 4] });
+        }
+        groups.push(Group { steps, once: true, word: GROUP_WORD_FADE });
+        let one = 0x8080_8080;
+        let held1 = |pieces: Vec<Piece>| Group { steps: vec![Step { pieces, frames: (0, LONG), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4] }], once: true, word: GROUP_WORD_SCRUB };
+        let o = &e.objs;
+        groups.push(held1(vec![tp(&o[0], p6, None, 0, 0), tp(&o[1], p1, None, 0, 0), tp(&o[2], p1, None, 0, 0), tp(&o[3], p1, None, 0, 0)]));
+        // Body and bars from x = 0 (their control at the origin + 28): X scale = width / 150.
+        groups.push(grow(vec![tp(&o[4], p6, Some(0), 0, 0), tp(&o[5], p1, Some(0), 0, 0)]));
+        groups.push(held1(vec![tp(&o[12], p6, Some(0), 0, 0), tp(&o[13], p1, Some(0), 0, 0)]));
+        for k in BAR_OBJECTS {
+            groups.push(grow(vec![tp(&o[k], p1, Some(0), 0, 0)]));
+        }
+        groups.push(held1(vec![tp(&o[11], p1, Some(0), 0, 0)]));
+        debug_assert_eq!(groups.len() - first, g::COUNT);
+        Ok(first)
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Adding the set to Re:CoM's files.
 
@@ -1742,6 +1897,9 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)]) ->
     );
     let _ = writeln!(s, "  \"units\": [{}],", (0..m.first.len()).map(|u| format!("[{}, {}]", m.first[u], m.programs_of(u).len())).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"runs\": [{}],", m.runs.iter().map(|r| format!("[{}, {}, {}, {}]", r.0, r.1, r.2, r.3)).collect::<Vec<_>>().join(", "));
+    if let Some(t) = b.target {
+        let _ = writeln!(s, "  \"target\": {{\"first\": {t}}},");
+    }
     if let Some(mn) = &b.menu {
         let words = mn.words.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, g)| format!("[{id}, {g}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
         let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"words\": {{{words}}}}},", mn.first);
@@ -1905,6 +2063,7 @@ mod tests {
         let face = |n: &str, at: usize| face_section(&rd(&format!("faces/{n}.sec2.bin")), at, &assets(&format!("faces/{n}.hd"))).unwrap();
         let uitex_hd = assets("command2/uitex.bin.hd");
         let (com, com_battle, mag) = (rd("exchange/UK_uibin_com.bin"), rd("exchange/UK_com_battle.bin"), rd("exchange/UK_uibin_mag.bin"));
+        let (lock, g_enm) = (rd("exchange/UK_uibin_lock.bin"), rd("exchange/UK_uibin_g_enm.bin"));
         let fonts: Vec<Vec<u8>> = FONT_FILES.iter().map(|f| rd(&format!("fonts/{f}"))).collect();
         let src = Sources {
             uitex: &rd("command2/uitex.bin"),
@@ -1912,6 +2071,8 @@ mod tests {
             g_s: &rd("exchange/UK_uibin_g_s.bin"),
             g_red: &rd("exchange/UK_uibin_g_red.bin"),
             g_act: &rd("exchange/UK_uibin_g_act.bin"),
+            lock: Some(&lock),
+            g_enm: Some(&g_enm),
             menu: Some(MenuSources {
                 com: &com,
                 com_battle: &com_battle,
@@ -1967,6 +2128,7 @@ mod tests {
         let mn = b.menu.as_ref().unwrap();
         eprintln!("menu: first group {}, {} glyphs, missing {:?}, words {:?}", mn.first, mn.glyphs, mn.missing, mn.words);
         assert!(mn.missing.is_empty());
+        assert!(b.target.is_some());
         // KH1's g_act tracks at 2 frames a key unit: vibe_s 5 units, vibe_ss 11, vibe_sss 19,
         // the slides 10.
         assert_eq!(b.motion.programs.iter().map(|p| p.len).collect::<Vec<_>>(), vec![10, 22, 38, 10, 10, 20, 20]);

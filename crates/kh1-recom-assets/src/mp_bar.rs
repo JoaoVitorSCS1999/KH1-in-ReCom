@@ -106,6 +106,8 @@ pub const FADE_FRAMES: i32 = 10;
 /// bar's straight part), a colour fade (0x77B71, `Cockpit:00`'s tinted boxes). Checked (files).
 pub(crate) const FLAGS_STATIC: u32 = 0x77FF1;
 pub(crate) const FLAGS_GROW: u32 = 0x77DB1;
+/// [`FLAGS_GROW`] for the other HUD modules.
+pub(crate) const FLAGS_GROW_PUB: u32 = FLAGS_GROW;
 pub(crate) const FLAGS_COLOUR: u32 = 0x77B71;
 /// Animation group word +6 (not read by Re:CoM's instance set-up `0x140248F40`; Checked
 /// (decomp)), copied from Re:CoM groups of the same kind: `gauge:01` 0x12 (scrubbed) and

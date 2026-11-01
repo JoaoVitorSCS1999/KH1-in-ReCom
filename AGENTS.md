@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 66: KH1 HUD H5, LOCK ON! and the target gauge, version 0.30.0 (2026-10-31)
+
+- KH1's rules: origin (16, 24), +28 under the plate, body min(max HP / 2, 150), one bar per 300 HP,
+  marker on the top bar, 5-frame gauge / 6-frame plate fades; follows Re:CoM's lock each battle
+  frame from the request-bits wrapper; max HP from `0x14017F5A0`. Not seen in game.
+
+---
+
 ## Stage 65: KH1 HUD H4, KH1's command menu look, version 0.29.0 (2026-10-31)
 
 - At `hud = kh1`: KH1's `com` / `com_battle` / `mag` pieces, field look in the field, battle

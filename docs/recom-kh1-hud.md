@@ -292,6 +292,50 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
 4. A chest: row 3 slides in reading Open; Triangle opens it once in (7.3's rules).
 5. `hud = recom`: 7.3's Re:CoM plates as before.
 
+## H5: LOCK ON! and the target's HP gauge (top left)
+
+### KH1's rules (Checked (decomp + files) unless tagged)
+
+| what | where |
+|---|---|
+| The plate: `lock` objects 5..7 (`lockon_plate_a/b/c`, picture 0) and 8..10 (`lockon_text_a/b/c`, picture 1) at (left margin + 16, 24); on a lock their colour keys restart and play (alpha 0 → 150 / 250 over 2 frames, → 100 / 150 over 10), then hold; when the lock ends alpha − 1/6 a frame | `0x1402747F0`, `0x1402740F0` |
+| The gauge's origin (left margin + 16, 24), + 28 while the plate shows, (65 / 80 in minigames) | `0x140275000`, `0x1402743E0` |
+| `g_enm` 0 (picture 6) + 1, 2, 3 (picture 1: the green "HP") at the origin; 4 (6) + 5 (1) from x + 28, `L` = min(max HP / 2, 150) wide (their texture stretched); the cap 12 (6) + 13 (1) at x + 28 + L | `0x140275000` |
+| Five bars, one per 300 HP: bar k = min(HP − 300 k + 1, 300) / 2 wide while HP ≥ 300 k (texture stretched); with more than one bar, the marker (11) at the top bar's end | `0x140275000` |
+| Fade: state 1 draws alpha 0, then + 0.2 a frame to 1; the lock's end: 1, then − 0.2 a frame | `0x1402758B0` |
+
+### Native build
+
+- **Data:** picture 0's corner (texels 96..128, PC 4×) joins the atlas; groups after the menu's:
+  the plate (each piece's colour keys, played), the head, the body and the five bars as X-scale
+  groups over frames 0..150 (frame = width, as the MP bar's partial segment), the cap, the
+  marker. `kh1-hud.json` `"target": {"first"}`. The bars' colours by stack index (green, yellow,
+  orange, magenta, violet: objects 10, 9, 8, 7, 6): Assumption (KH1's slot order not read; the
+  owner's screenshot shows yellow over green).
+- **DLL** (`win/kh1_hud.rs` `lock_tick`, called each of Sora's frames from the request-bits
+  wrapper before the command menu): reads Re:CoM's lock (in battle, `*(player+0x3F8)+0xE0`, the
+  handle `player+0x84C`, an enemy) and the target's HP (`+0x274`); max HP from Re:CoM's getter
+  `0x14017F5A0` (KH1's for proxied enemies, `win/stats.rs`). A lock makes the plate (played from
+  frame 1) and the gauge controls (KH1's left margin −86); HP / target changes set the frames
+  and the cap / marker places; the fades write the controls' colours for their 5 / 6 frames.
+  Hidden at once with Re:CoM's HUD, deleted with the player gauge. Per frame otherwise: three
+  reads.
+
+### Not 1:1 / to check
+
+1. KH1 shows the gauge while the lock-on cursor reports HP; here while Re:CoM's lock-on is on in
+   battle (Re:CoM has no lock in the field).
+2. The minigame heights (65 / 80) are not used (Re:CoM's minigames are its own).
+3. When the target changes during a lock KH1 keeps the plate; so does ours.
+
+### What the in-game test must check (H5)
+
+1. Lock on in battle: "LOCK ON!" fades in top-left as the owner's KH1 screenshot, the HP gauge
+   under it fades in over 5 frames; its length = the enemy's max HP / 2 (≤ 150).
+2. Hit the enemy: the bar shortens; an enemy over 300 HP shows stacked bars and the marker.
+3. Release the lock: both fade out (6 / 5 frames).
+4. Log: `kh1 hud: lock on: target … HP h/m (…)`.
+
 ## H3: Re:CoM's HUD hidden at `hud = kh1` (visual only)
 
 ### What owns what (Checked (decomp + exe: RTTI))

@@ -351,6 +351,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     // KH1's command menu (M7 stage 7.3): confirm runs the highlighted row (Attack only from the
     // Attack row), the jump only from the root list (cancel closes a submenu), Triangle only
     // when the context row's tab is in.
+    // KH1's LOCK ON! plate and target gauge (decision 39, H5) follow Re:CoM's lock.
+    super::kh1_hud::lock_tick(pl);
     if let Some(k) = super::command_menu::frame(pl) {
         let mut r: u32 = rd(pl + p::REQUEST);
         if !k.attack {

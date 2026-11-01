@@ -143,6 +143,58 @@ pub mod menu {
     pub const SEL_WORD_AT: (f32, f32) = (29.0, 25.0);
 }
 
+/// H5: the LOCK ON! plate and the target's HP gauge (`kh1_recom_assets::kh1_hud::target`). KH1's
+/// rules (`0x1402747F0`, `0x1402758B0`, `0x140275000`; Checked (decomp)).
+pub mod target {
+    /// The plate (played), the gauge's head, body (frame = L), cap, bars 0..4 (frame = length),
+    /// the marker.
+    pub const PLATE: u32 = 0;
+    /// Head.
+    pub const HEAD: u32 = 1;
+    /// Body.
+    pub const BODY: u32 = 2;
+    /// Cap.
+    pub const CAP: u32 = 3;
+    /// Bar 0.
+    pub const BAR: u32 = 4;
+    /// Marker.
+    pub const MARKER: u32 = 9;
+    /// Groups.
+    pub const COUNT: u32 = 10;
+    /// The origin (`0x140275000`: left margin + 16, 24; + 28 while the plate shows).
+    pub const ORIGIN: (f32, f32) = (16.0, 24.0);
+    /// The gauge's drop while the plate shows (`0x1402743E0`).
+    pub const BELOW_PLATE: f32 = 28.0;
+    /// The body / bars start at the origin + 28 (`0x2C` − 16).
+    pub const BODY_X: f32 = 28.0;
+    /// The gauge's fade a frame (`0x1402758B0`: ± 0.2).
+    pub const GAUGE_FADE: f32 = 0.2;
+    /// The plate's fade out a frame (`0x1402747F0` state 4: 1 / 6).
+    pub const PLATE_FADE: f32 = 1.0 / 6.0;
+
+    /// The body's length: min(max HP / 2, 150).
+    pub fn body(max_hp: i32) -> i32 {
+        (max_hp.max(0) / 2).min(150)
+    }
+
+    /// The five bars' lengths: bar k = min(HP − 300 k + 1, 300) / 2 while HP ≥ 300 k, else 0.
+    pub fn bars(hp: i32) -> [i32; 5] {
+        core::array::from_fn(|k| {
+            let rest = hp - 300 * k as i32;
+            if hp < 0 || rest < 0 {
+                0
+            } else {
+                (rest + 1).min(300) / 2
+            }
+        })
+    }
+
+    /// The marker's bar (the top one with a length) when more than one bar shows.
+    pub fn marker(bars: &[i32; 5]) -> Option<usize> {
+        (1..5).rev().find(|&k| bars[k] > 0)
+    }
+}
+
 /// The menu groups of the manifest.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MenuGroups {
@@ -171,6 +223,8 @@ pub struct Manifest {
     pub motion: Motion,
     /// The command menu look (H4), when built.
     pub menu: Option<MenuGroups>,
+    /// The LOCK ON! plate and target gauge's first group (H5), when built.
+    pub target: Option<u32>,
 }
 
 /// Reads `kh1-hud.json`; refuses another format or group count than this DLL's.
@@ -241,7 +295,17 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
             Some(MenuGroups { first, words })
         }
     };
-    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu })
+    let target = match v.get("target") {
+        None => None,
+        Some(t) => {
+            let first = t.get("first").and_then(|x| x.as_u32()).ok_or("target without first")?;
+            if first + target::COUNT > groups {
+                return Err("target groups past the set".into());
+            }
+            Some(first)
+        }
+    };
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, target })
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -453,6 +517,19 @@ mod tests {
         let mm = parse_manifest(&with).unwrap().menu.unwrap();
         assert_eq!((mm.word("fr", 1), mm.word("fr", 6), mm.word("gr", 1), mm.word("us", 2)), (Some(641), Some(642), Some(643), None));
         assert!(parse_manifest(&ok.replace("kh1hud:00", "Cockpit:00")).is_err());
+    }
+
+    #[test]
+    fn target_gauge_rules() {
+        assert_eq!(target::body(120), 60);
+        assert_eq!(target::body(1000), 150);
+        assert_eq!(target::bars(0), [0, 0, 0, 0, 0]);
+        assert_eq!(target::bars(1), [1, 0, 0, 0, 0]);
+        assert_eq!(target::bars(299), [150, 0, 0, 0, 0]);
+        assert_eq!(target::bars(420), [150, 60, 0, 0, 0]);
+        assert_eq!(target::bars(1500), [150, 150, 150, 150, 150]);
+        assert_eq!(target::marker(&target::bars(420)), Some(1));
+        assert_eq!(target::marker(&target::bars(200)), None);
     }
 
     #[test]
