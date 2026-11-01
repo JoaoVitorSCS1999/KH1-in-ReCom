@@ -62,7 +62,15 @@ pub mod cmd {
     pub const MAGIC: u8 = 2;
     pub const ITEMS: u8 = 3;
     pub const TALK: u8 = 4;
+    /// KH1's generic Examine (message 5): our word for Re:CoM's warp point. KH1 has no warp or
+    /// teleport command (Checked (files): no such word in `Word.bin`); the word is an Assumption,
+    /// an owner choice.
+    pub const EXAMINE: u8 = 5;
     pub const LIFT: u8 = 0x1C;
+    /// KH1's save point command (message 293): the save point's handler `0x1402AD0B0` puts it in
+    /// the context entry (`0x140293000(3, 0x36)` at `0x1402AD11F`) and opens the save menu when it
+    /// runs. Checked (decomp + exe + files).
+    pub const SAVE: u8 = 0x36;
     pub const OPEN: u8 = 0x37;
     /// The blank command rows 1..3 hold until filled (message 305, a dash).
     pub const BLANK: u8 = 0x42;
@@ -87,6 +95,7 @@ pub mod cmd {
     pub fn name(c: u8) -> u16 {
         match c {
             LIFT => 28,
+            SAVE => 293,
             OPEN => 294,
             BLANK => 305,
             JUMP_ON => 313,
@@ -108,6 +117,60 @@ pub mod cmd {
     /// The commands KH1 puts in row 0 instead of Attack (`0x62C0183` over 0x46.., and Talk).
     pub fn row0_special(c: u8) -> bool {
         c == TALK || (c.wrapping_sub(0x46) < 0x1B && (0x062C_0183u32 >> (c - 0x46)) & 1 != 0)
+    }
+}
+
+/// Re:CoM's field objects as KH1's context commands (`win::command_menu::context` reads them).
+pub mod recom {
+    use super::cmd;
+
+    /// Kinds (the objects' type getters, vtable `+0x28`). Checked (decomp + exe: RTTI, getters).
+    pub mod kind {
+        /// `CGimmickDoor` (its getter `0x1401B8A10`: 0x1006, or 0x1005).
+        pub const DOOR: u32 = 0x1006;
+        /// `CGimmickTreasureBox`, `…Pooh`.
+        pub const BOX: u32 = 0x2000;
+        /// `CGimmickJumpStand`.
+        pub const JUMP_STAND: u32 = 0x2002;
+        /// `CGimmickCarry`, `…Tu`.
+        pub const CARRY: u32 = 0x2003;
+        /// `CGimmickSavePoint` (vtable `0x1405846C8`, getter `0x1401C50B0`).
+        pub const SAVE_POINT: u32 = 0x2004;
+        /// `CGimmickWarpPoint` (vtable `0x14058F7E0`, getter `0x1401CC1E0`).
+        pub const WARP_POINT: u32 = 0x2005;
+        /// `ATEL::CAvatar` (NPCs, the 100 Acre minigames).
+        pub const NPC: u32 = 0x4000;
+    }
+
+    /// The object Re:CoM's field action (`0x1401E80C0`, on Triangle's request bit) acts on:
+    /// a box not yet opened → Open, a door → Open, a jump stand → Jump On, a carry → Lift, an NPC
+    /// → Talk. The words for Re:CoM's objects: Assumption.
+    pub fn field_action(kind: u32, box_opened: bool) -> u8 {
+        match kind {
+            kind::BOX if !box_opened => cmd::OPEN,
+            kind::DOOR => cmd::OPEN,
+            kind::JUMP_STAND => cmd::JUMP_ON,
+            kind::CARRY => cmd::LIFT,
+            kind::NPC => cmd::TALK,
+            _ => cmd::NONE,
+        }
+    }
+
+    /// The save and warp points read Triangle themselves (`0x14029B550`, the fresh pad bit 0x10)
+    /// in their updates `0x1401C5180` / `0x1401CC280`, on the object of the lock-on handle
+    /// (`player+0x850`, unless 0 or −1, else `+0x84C`), with Re:CoM's action (`player+0x40C`)
+    /// 1..4. The save point also needs Sora within its range (its `+0x2C0`, `in_range`: set at a
+    /// distance < 0.8 and < 0.2 above it, cleared when he leaves); the warp point does nothing
+    /// while `0x14087B84C & 1` (`blocked`, `0x1402345D0`). Checked (decomp + exe).
+    pub fn point(kind: u32, action: u32, in_range: bool, blocked: bool) -> u8 {
+        if action.wrapping_sub(1) > 3 {
+            return cmd::NONE;
+        }
+        match kind {
+            kind::SAVE_POINT if in_range => cmd::SAVE,
+            kind::WARP_POINT if !blocked => cmd::EXAMINE,
+            _ => cmd::NONE,
+        }
     }
 }
 
@@ -1316,5 +1379,57 @@ mod tests {
         );
         assert!(cmd::row0_special(cmd::TALK) && cmd::row0_special(0x58) && !cmd::row0_special(cmd::ATTACK) && !cmd::row0_special(cmd::OPEN));
         assert_eq!(state_flags(0) & 0x70, 0x70);
+    }
+
+    #[test]
+    fn recom_objects_give_kh1s_context_commands() {
+        use recom::{field_action, kind, point};
+        // Re:CoM's field action's objects (7.3).
+        assert_eq!(field_action(kind::BOX, false), cmd::OPEN);
+        assert_eq!(field_action(kind::BOX, true), cmd::NONE);
+        assert_eq!([field_action(kind::DOOR, false), field_action(kind::JUMP_STAND, false), field_action(kind::CARRY, false), field_action(kind::NPC, false)], [cmd::OPEN, cmd::JUMP_ON, cmd::LIFT, cmd::TALK]);
+        // The save / warp points are not the field action's: their own updates take Triangle.
+        assert_eq!(field_action(kind::SAVE_POINT, false), cmd::NONE);
+        assert_eq!(field_action(kind::WARP_POINT, false), cmd::NONE);
+        // Save: Sora within its range, Re:CoM's action 1..4 (stand 2, walk 3, run 4).
+        for a in 1..=4 {
+            assert_eq!(point(kind::SAVE_POINT, a, true, false), cmd::SAVE, "{a}");
+            assert_eq!(point(kind::WARP_POINT, a, false, false), cmd::EXAMINE, "{a}");
+        }
+        assert_eq!(point(kind::SAVE_POINT, 2, false, false), cmd::NONE, "out of its range");
+        for a in [0, 5, 6, 7, 8, 0xA] {
+            assert_eq!(point(kind::SAVE_POINT, a, true, false), cmd::NONE, "{a}: not 1..4");
+            assert_eq!(point(kind::WARP_POINT, a, false, false), cmd::NONE, "{a}: not 1..4");
+        }
+        assert_eq!(point(kind::WARP_POINT, 2, false, true), cmd::NONE, "stopped (0x14087B84C & 1)");
+        assert_eq!(point(kind::BOX, 2, true, false), cmd::NONE);
+        // KH1's words: Save (293), Examine (5); neither a spell, a submenu nor a row-0 special.
+        assert_eq!((cmd::name(cmd::SAVE), cmd::name(cmd::EXAMINE)), (293, 5));
+        for c in [cmd::SAVE, cmd::EXAMINE] {
+            assert!(cmd::spell_of(c).is_none() && cmd::submenu(c) == 0 && !cmd::row0_special(c));
+        }
+    }
+
+    #[test]
+    fn save_point_shows_save_in_the_tab() {
+        let w = World { context: cmd::SAVE, ..world() };
+        let mut m = Menu::new();
+        m.show();
+        m.build(&w);
+        let mut frames = 0;
+        while m.tab.state != 2 {
+            m.step(&w, Pad::default());
+            m.tick(1.0);
+            frames += 1;
+            assert!(frames < 30);
+        }
+        let t = m.scene().tab.expect("the tab");
+        assert_eq!(t.name, 293);
+        // The 4th row stays FM's (not the context command).
+        assert!(m.scene().rows.iter().all(|r| r.name != 293));
+        // Triangle once it is in: logged; Re:CoM's own request bit stays (the save point reads
+        // the pad itself).
+        let o = m.step(&w, press(|p| p.triangle = true));
+        assert!(o.triangle && o.events == vec![Event::Context(cmd::SAVE)]);
     }
 }

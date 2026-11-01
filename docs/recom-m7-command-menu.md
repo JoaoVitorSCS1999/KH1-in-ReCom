@@ -100,6 +100,48 @@ them.
   object without calls (`0x1402AD350` for the handle, the getter's bytes) and shows KH1's word:
   chest → Open, door → Open, carry → Lift, NPC → Talk, jump stand → Jump On (the words for Re:CoM's
   objects: Assumption). Battle: no context tab (KH1's battle specials are M9).
+- **Save and warp points** (owner, 2026-11-01: "standing on a save point and using the purple
+  teleporter thing dont prompt the triangle to interact"): not the field action's. Their own
+  per-frame updates take Triangle straight from the pad and act; the menu reads the same
+  conditions and shows the tab (`cm::recom::point`). Checked (decomp + exe) unless tagged:
+  - `CGimmickSavePoint` (RTTI vtable `0x1405846C8`, type getter `0x1401C50B0` = 0x2004) and
+    `CGimmickWarpPoint` (`0x14058F7E0`, getter `0x1401CC1E0` = 0x2005). `0x1401E80C0` has no
+    case for either.
+  - Save point update `0x1401C5180` (vtable slot `+0xA0`, the exe of the gimmick state at `+0x240`
+    that `0x1401B2BF0` selects; that it runs every frame of the room: Assumption): while the main
+    player (`[0x14087B380]`) is at a distance < 0.8 (`0x1401A32A0`, the float at `0x1405847D8`)
+    and < 0.2 above it (`0x140509234`), the first frame heals him (`0x1401E59A0` with max HP
+    `+0x430`), plays `rec_svpt.dpx` and sets **`+0x2C0` = 1**; leaving clears `+0x2C0`, the
+    targetable bit `+0x154 & 0x10000` and calls `0x1401E6990`. In range, it reads the object of
+    **`player+0x850`** (the lock-on handle, `0x1401E8DA0`) unless 0 or −1, else `+0x84C`; if that
+    object's kind is 0x2004 and **Triangle is fresh** (`0x14029B550(0)` = Re:CoM's fresh pad
+    bit 0x10, the same read as the menu's) and Re:CoM's action `+0x40C` is **1..4** (stand 2,
+    walk 3, run 4), it opens the save menu (`0x1401B1650(1, 5, 1)`, `0x1401AC660`).
+  - Warp point update `0x1401CC280`: makes itself targetable once story flag `0xC2 & 8` is set;
+    unless `0x14087B84C & 1` (`0x1402345D0`), the same handle pick, kind 0x2005, fresh
+    Triangle, action 1..4 → `0x1401B1650(1, 5, 1)` and a `CWorldWarp` (`0x140130ED0`,
+    `wwarp.lad`: Re:CoM's world-warp menu). It has no distance test of its own: it acts whenever
+    it is the lock-on / nearest target (`0x1401CDB90` picks the nearest object with
+    `+0x154 & 0x10000`, no range).
+  - The menu: when the field action's object gives no word, the object of `+0x850` (unless 0 /
+    −1) else `+0x84C` (the same object, read once, on most frames): a save point with `+0x2C0`
+    = 1 and the action 1..4 → **Save**; a warp point with `0x14087B84C & 1` clear and the action
+    1..4 → **Examine**. Pure reads besides the handle lookup. The tab shows exactly when
+    Triangle would save / warp (the "one save point per room" reading: Re:CoM's save point tests
+    its own range and that the target is *a* save point; we read the target's range byte:
+    Assumption).
+  - Triangle: the save / warp point reads the pad, not the request bits, so the request-bits
+    wrapper can't swallow it: saving and warping work exactly as before. The other side of
+    that: they don't wait for the tab to slide in, and they still act with the Magic list open
+    (KH1 runs the context command only from the root once the tab is in). Not 1:1; open
+    question 5.
+  - KH1: the save point's handler `0x1402AD0B0` puts command **0x36 Save** (message 293) in the
+    context entry (`0x140293000(3, 0x36)`, `0x1402AD11F`: `mov edx,0x36; lea ecx,[rdx-0x33]`)
+    and opens the save menu (`0x140196CD0`) when it runs. Checked (decomp + exe + files). KH1
+    has no warp / teleport command: `Word.bin` has no Warp, Enter or Teleport (Checked
+    (files): the 125 command records' names and every `US_Word.bin` string). The warp point's
+    word is **Examine** (command 5, message 5: KH1's generic one; FR Examiner, GR Untersuchen, IT
+    Esamina, SP Observar). Assumption, an owner choice (open question 6).
 - **Inputs:** Re:CoM's pad (pure reads, as the camp's): fresh d-pad Up 0x1000 / Down 0x4000 /
   Left 0x8000 / Right 0x2000, Triangle 0x10, Square 0x80 (`0x14029B2F0`), confirm / cancel
   (`0x14029B490` / `0x14029B410`, Re:CoM's configurable buttons), only while Sora's pad is on
@@ -117,7 +159,8 @@ After Re:CoM's builder (`0x1401F8150`, already wrapped):
 
 Square (roll / guard) and lock-on are untouched. With no context tab shown, Re:CoM's own
 Triangle action decides as before (an object the menu doesn't know keeps its Triangle). While
-Re:CoM's HUD is hidden (events) the menu changes nothing.
+Re:CoM's HUD is hidden (events) the menu changes nothing. The save and warp points don't use
+these bits (they read the pad, `0x14029B550`): nothing here changes them.
 
 ## Per frame
 
@@ -132,11 +175,12 @@ slides or fades (14 frames).
 ## Logs and trace
 
 - Start: `command menu: KH1's command menu at combat = kh1 in Sora's story (M7 stage 7.3): words
-  us (30 entries) from …; Re:CoM language index N; kh1_all_spells = off`.
+  us (33 entries) from …; Re:CoM language index N; kh1_all_spells = off`.
 - Up to 60 lines: `command menu: built on the player gauge 0x…`, `open magic (7 spells, grey
   0x0)`, `close`, `cast Firaga [0x9]: issued` (7.4), `not-now Fire [0x7]: KH1's gate refused it
   this frame (Sora busy)`, `spell Fire [0x7] greyed (Re:CoM's refused sound)`, `refused Items`,
-  `context Open`.
+  `context Open` (`context Save` / `context Examine` at a save / warp point, Triangle once the
+  tab is in).
 - F9 trace, events column: `…; menu r:<cursor> g<root grey> [m:<cursor> mg<spell grey>]
   [tab<state>:<cmd>] [counter] [events]`, or `menu -`.
 
@@ -149,6 +193,14 @@ slides or fades (14 frames).
 | `0x1406073A0` vtable slot | → `0x1402476F0` | compared at install |
 | `0x1401E80E8` field action pick: handles | `8B B1 FC 05 00 00 85 F6 7F 11 8B B1 4C 08 00 00 85 F6 7F 07` | checked only |
 | `0x1401B8A10` door type getter | `48 83 EC 28 BA 24 00 00 00 8D 4A DD` | checked only (its address is compared) |
+| `0x1401C50B0` save point type getter | `B8 04 20 00 00 C3` | checked only |
+| `0x1401CC1E0` warp point type getter | `B8 05 20 00 00 C3` | checked only |
+| `0x1401C52CC` save point update: in range (`+0x2C0` = 1), handle pick (`+0x850` / `+0x84C`), kind 0x2004 | `C6 87 C0 02 00 00 01 48 8B 15 A6 60 6B 00 8B 8A 50 08 00 00 8D 41 01 83 F8 01 77 06 8B 8A 4C 08 00 00 E8 5D 80 0E 00 48 85 C0 0F 84 80 00 00 00 48 8B 10 48 8B C8 FF 52 28 3D 04 20 00 00` | checked only |
+| `0x1401C531E` save point update: action 1..4 | `44 8B 80 0C 04 00 00 41 FF C8 41 83 F8 03 77 4E` | checked only |
+| `0x1401C5356` save point update: out of range (`+0x2C0` = 0) | `80 BF C0 02 00 00 01 75 1D 81 A7 54 01 00 00 FF FF FE FF 48 8B 0D 10 60 6B 00 E8 1B 16 02 00 C6 87 C0 02 00 00 00` | checked only |
+| `0x1401CC2D7` warp point update: stop flag, handle pick, kind 0x2005 | `E8 F4 82 06 00 85 C0 0F 85 9D 00 00 00 48 8B 15 95 F0 6A 00 8B 8A 50 08 00 00 8D 41 01 83 F8 01 77 06 8B 8A 4C 08 00 00 E8 4C 10 0E 00 48 85 C0 74 78 48 8B 10 48 8B C8 FF 52 28 3D 05 20 00 00` | checked only |
+| `0x1401CC32B` warp point update: action 1..4 | `8B 88 0C 04 00 00 FF C9 83 F9 03 77 49` | checked only |
+| `0x1402345D0` warp point stop flag (`0x14087B84C & 1`) | `8B 05 76 72 64 00 83 E0 01 C3` | checked only (the flag is read) |
 
 Already checked by earlier stages and called: `0x1404ACE54`, `0x140247260`, `0x140247850`,
 `0x140248660`, `0x1402486D0`, `0x14015D230`, `0x140243F10`, `0x1402AA360`, `0x14029B2F0`,
@@ -181,6 +233,13 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
   the bake; tests: the 4th row is never the context command, the cursor's confirm / Right there
   is the error sound, Triangle runs the context from any root row, the per-language Triangle
   offsets.
+- Save / warp points: Checked (decomp + exe) Re:CoM's conditions (above) and KH1's Save (the
+  save point handler's `0x140293000(3, 0x36)`); Checked (files) Save (293) and Examine (5) in
+  all six languages (`owner_words` with the owner's `Word.bin`s). Tests: `recom_objects_give_kh1s_context_commands`
+  (range, actions 1..4, the warp's stop flag), `save_point_shows_save_in_the_tab`,
+  `sites::command_menu_sites` (the updates' rip targets: the main player, the handle lookup,
+  `0x14087B84C`). Not checked: in game (the tab at a save point and at a warp point, and that
+  Triangle still saves / warps); a KH1 recording of the save point's tab.
 
 ## Not 1:1 by design or yet
 
@@ -196,6 +255,9 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
 - KH1's slide-in of a newly opened list (`0x14027A0B0`'s "fresh" flag) is not reproduced: lists
   appear at once.
 - Text without accents (Re:CoM's codes for them unknown).
+- Save / warp points take Triangle from the pad themselves: they act while the tab is still
+  sliding in and with the Magic list open (KH1: only from the root, once the tab is in). Open
+  question 5.
 
 ## Assumptions
 
@@ -210,7 +272,12 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
 6. (Gone 0.35.0: the 4th row is always drawn, as FM's.)
 7. A new player gauge (room, battle) resets the stack to the root on Attack and fades in, as
    KH1's step starting again.
-8. The context words for Re:CoM's objects (Open for doors, Jump On for jump stands).
+8. The context words for Re:CoM's objects (Open for doors, Jump On for jump stands, Examine for
+   the warp point).
+9. One save point per room: Re:CoM's save point tests its own range and that the target is a
+   save point; the menu reads the target's range byte `+0x2C0`.
+10. The gimmicks' updates (`0x1401C5180`, `0x1401CC280`) run every frame Sora is in their room
+    (the exe of the state at `+0x240`, through the actor update `0x1401A59A0`'s state machine).
 
 ## Open questions (owner)
 
@@ -223,6 +290,14 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
    language automatically (needs one log line from each language: the `Re:CoM language index`).
 4. **Accented letters:** (a) base letters (built); (b) find Re:CoM's codes for them (needs Re:CoM's
    message files of a European language at the asset step).
+5. **Triangle at save / warp points:** (a) Re:CoM's own, untouched (built): Triangle saves /
+   warps at once, even while the tab slides in or the Magic list is open; (b) KH1's gate: a
+   wrapper on the Triangle read the two updates share (`0x14029B550`, also called by
+   `0x140142A30`) answers "not pressed" until the tab is in and the root list is on top.
+6. **The warp point's word** (KH1 has no warp command): (a) Examine (built; KH1's generic word,
+   message 5); (b) Touch (354; GR "Berühren": its ü, byte 0xF8, is not decoded yet); (c) Get In (362; FR
+   "Monter", IT "Sali", SP "Subir"); (d) Move (348; but FR "Pousser" = push); (e) Save (293),
+   KH1's save point being where KH1 goes to the world map.
 
 ## What the first in-game test must check
 
@@ -242,7 +317,10 @@ should show L and the pool's free count flat during menu use. Checked (decomp); 
    With MP 0 the spells grey (over 4 frames), Fire / Blizzard come back at 30 charge.
 6. In the field next to a chest / NPC / door / box to carry: the green tab with the Triangle
    slides in over the header (about a quarter second) with Open / Talk / Open / Lift; Triangle
-   works once it is in, not before; the 4th row stays "–". In battle: no tab.
+   works once it is in, not before; the 4th row stays "–". In battle: no tab. On a save point:
+   the tab says Save (once standing on it; it goes when stepping off, or while rolling /
+   jumping), Triangle opens Re:CoM's save menu as before. At the warp point: the tab says
+   Examine wherever Triangle would open the warp menu, and Triangle opens it as before.
 7. Cutscenes / events: the menu disappears with the HP gauge and comes back with it, on Attack.
 8. Combat = Re:CoM in the Config: the menu goes when the camp closes; back to KH1: it comes back.
    Riku's story: no menu.

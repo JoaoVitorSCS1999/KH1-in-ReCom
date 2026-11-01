@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 74: Context tab at save points and warp points, version 0.36.1 (2026-10-31)
+
+- Ask (owner, 2026-11-01): "standing on a save point and using the purple teleporter thing dont
+  prompt the triangle to interact".
+- Re:CoM (Checked (decomp + exe)): `CGimmickSavePoint` (kind 0x2004, update `0x1401C5180`, in range
+  `+0x2C0` = 1) and `CGimmickWarpPoint` (0x2005, update `0x1401CC280`) read Triangle from the pad
+  themselves (`0x14029B550`) on the lock / nearest target (`player+0x850`, else `+0x84C`) with
+  Sora's action 1..4; the field action `0x1401E80C0` doesn't handle them.
+- KH1: the save point's context command 0x36 "Save" (message 293, `0x1402AD11F`); no warp word
+  in KH1: "Examine" (5) built (owner choice). Check-only sites; no hook. Triangle still saves /
+  warps as before. Assets: words 5 and 293 added (asset step re-run). Not seen in game.
+
+---
+
 ## Stage 73: HUD fixes: HP in KH1 units, Re:CoM lock-on, menu text / battle colour, smooth rings, crash notes, version 0.36.0 (2026-10-31)
 
 - Asks (owner, 2026-11-01): "the font is oddly positioned when hovering over an option. the health

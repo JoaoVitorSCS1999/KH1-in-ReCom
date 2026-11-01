@@ -568,8 +568,10 @@ Decision 34: KH1's command menu built from Re:CoM's own pieces, with KH1's own w
   SP_Word.bin` (Checked (files): the owner's entry also carries `JP_Word.bin` and
   `<LANG>_btltbl_bin_Word.bin` copies, not used). String `k` of a `Word.bin` is KH1 message
   `k + 1` (`0x14028F9D0`, walked as `0x14028F820` walks it; Checked (decomp)). The menu's
-  messages are decoded: 1 Attack, 2 Magic, 3 Items, 4 Talk, 7–27 the spells, 28 Lift, 294 Open,
-  305 the blank command, 313 Jump On, 343 Counter. Re:CoM `FORM/0002/FO0002.SPR` (the same entry
+  messages are decoded: 1 Attack, 2 Magic, 3 Items, 4 Talk, 5 Examine (the warp point's tab),
+  6 Summon, 7–27 the spells, 28 Lift, 293 Save (the save point's tab), 294 Open, 305 the blank
+  command, 313 Jump On, 343 Counter (the KH1 HUD look gets a word group for each). Re:CoM
+  `FORM/0002/FO0002.SPR` (the same entry
   the MP bar patches) for its text plate.
 - **Adds**, in the same patch as the MP bar (`mp_bar::patch_layout`), after the bar's 8 groups:
   2 groups of `Cockpit:00` (159, 160 in the base file; after the bar's in each language copy):

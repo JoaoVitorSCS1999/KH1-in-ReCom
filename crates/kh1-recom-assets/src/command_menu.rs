@@ -34,10 +34,12 @@ pub const FORMAT: &str = "kh1-recom-assets command-menu 1";
 pub const LANGUAGES: &[(&str, &str)] = &[("us", "US_"), ("uk", "UK_"), ("fr", "FR_"), ("gr", "GR_"), ("it", "IT_"), ("sp", "SP_")];
 
 /// The KH1 command names the menu shows (message ids, the command records' `+4`). Checked (files:
-/// the owner's `btltbl.bin` command table): 1 Attack, 2 Magic, 3 Items, 4 Talk, 6 Summon (H4), 7..27 the spells
-/// (`level + (spell + 2) × 3`, named by their own id), 28 Lift (command 0x1C), 294 Open (0x37),
-/// 305 the blank command (0x42), 313 Jump On (0x45), 343 Counter (0x63, the Counterattack).
-pub const NAMES: &[u16] = &[1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 294, 305, 313, 343];
+/// the owner's `btltbl.bin` command table): 1 Attack, 2 Magic, 3 Items, 4 Talk, 5 Examine (the
+/// context tab's word for Re:CoM's warp point), 6 Summon (H4), 7..27 the spells
+/// (`level + (spell + 2) × 3`, named by their own id), 28 Lift (command 0x1C), 293 Save (0x36,
+/// the save point's), 294 Open (0x37), 305 the blank command (0x42), 313 Jump On (0x45), 343
+/// Counter (0x63, the Counterattack).
+pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 293, 294, 305, 313, 343];
 
 /// Our groups after the MP bar's (`mp_bar::group::COUNT`): the plate, the highlighted plate.
 pub mod group {
@@ -384,12 +386,15 @@ mod tests {
             let get = |id: u16| w.iter().find(|x| x.0 == id).unwrap().1.clone();
             if *lang == "us" || *lang == "uk" {
                 assert_eq!([get(1), get(2), get(3), get(4), get(7), get(9), get(27), get(294), get(343)], ["Attack", "Magic", "Items", "Talk", "Fire", "Firaga", "Aeroga", "Open", "Counter"]);
+                assert_eq!([get(5), get(293)], ["Examine", "Save"]);
             }
             if *lang == "fr" {
                 assert_eq!([get(1), get(8), get(19)], ["Attaquer", "Brasier +", "Gravité"]);
+                assert_eq!([get(5), get(293)], ["Examiner", "Sauvegarde"]);
             }
             if *lang == "gr" {
                 assert_eq!(get(294), "Öffnen");
+                assert_eq!([get(5), get(293)], ["Untersuchen", "Speichern"]);
             }
         }
     }

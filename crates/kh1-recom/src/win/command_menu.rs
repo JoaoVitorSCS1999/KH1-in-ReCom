@@ -83,6 +83,13 @@ const TEXT_DX: f32 = -4.0;
 /// treasure box's opened bit (`0x1401E80C0`: `+0x2C1 & 1`).
 const ACTION_TARGET: usize = 0x5FC;
 const BOX_OPENED: usize = 0x2C1;
+/// The save / warp points' updates (`0x1401C5180`, `0x1401CC280`): the lock-on handle they read
+/// first (`player+0x850`, written by `0x1401E8DA0`), the save point's "Sora in range" byte
+/// (`+0x2C0`), and the flag that stops the warp point (`0x14087B84C & 1`, `0x1402345D0`).
+/// Checked (decomp + exe: `sites::COMMAND_MENU_CHECKED`).
+const LOCK_ON: usize = 0x850;
+const SAVE_IN_RANGE: usize = 0x2C0;
+const WARP_BLOCK: u32 = 0x0087_B84C;
 
 type NewFn = unsafe extern "win64" fn(usize) -> usize;
 type CtorFn = unsafe extern "win64" fn(usize) -> usize;
@@ -695,10 +702,33 @@ unsafe fn read_pad(pl: usize) -> Pad {
     }
 }
 
-/// Re:CoM's field action under Sora (as `0x1401E80C0` finds it), as KH1's context command:
-/// a treasure box not yet opened → Open, a carry gimmick → Lift, an NPC (`ATEL::CAvatar`) → Talk,
-/// a door → Open, a jump stand → Jump On. Pure reads (the type getters are `mov eax, imm32; ret`,
-/// the door's is recognised by its address). The words for Re:CoM's objects: Assumption.
+/// The object of handle `h` and its kind (its type getter, vtable `+0x28`: `mov eax, imm32;
+/// ret`, the door's recognised by its address). Pure reads but Re:CoM's handle lookup.
+unsafe fn object(h: i32) -> Option<(usize, u32)> {
+    let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(h as u32);
+    if obj == 0 {
+        return None;
+    }
+    let getter: usize = rd(rd::<usize>(obj) + 0x28);
+    let kind = if getter == base() + DOOR_TYPE as usize {
+        cm::recom::kind::DOOR
+    } else if rd::<u8>(getter) == 0xB8 && rd::<u8>(getter + 5) == 0xC3 {
+        rd::<u32>(getter + 1)
+    } else {
+        0
+    };
+    Some((obj, kind))
+}
+
+/// KH1's context command for what Re:CoM's Triangle would act on in the field:
+/// - Re:CoM's field action's object (`0x1401E80C0`: handle `+0x5FC` when > 0, else `+0x84C`):
+///   a treasure box not yet opened → Open, a carry gimmick → Lift, an NPC (`ATEL::CAvatar`) →
+///   Talk, a door → Open, a jump stand → Jump On;
+/// - else the save / warp point their own updates would act on (`0x1401C5180` / `0x1401CC280`:
+///   handle `+0x850` unless 0 or −1, else `+0x84C`; Re:CoM's action 1..4): a save point Sora
+///   stands on → Save, a warp point → Examine (`cm::recom::point`).
+///
+/// The words for Re:CoM's objects: Assumption.
 unsafe fn context(pl: usize) -> u8 {
     if rd::<i32>(pl + p::BATTLE) != 0 {
         return cm::cmd::NONE;
@@ -707,27 +737,34 @@ unsafe fn context(pl: usize) -> u8 {
     if h <= 0 {
         h = rd(pl + p::LOCK_TARGET);
     }
-    if h <= 0 {
+    let mut seen = None;
+    if h > 0 {
+        seen = object(h).map(|o| (h, o));
+        if let Some((_, (obj, kind))) = seen {
+            let c = cm::recom::field_action(kind, rd::<u8>(obj + BOX_OPENED) & 1 != 0);
+            if c != cm::cmd::NONE {
+                return c;
+            }
+        }
+    }
+    let mut hp: i32 = rd(pl + LOCK_ON);
+    if (hp as u32).wrapping_add(1) < 2 {
+        hp = rd(pl + p::LOCK_TARGET);
+    }
+    if hp == 0 {
         return cm::cmd::NONE;
     }
-    let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(h as u32);
-    if obj == 0 {
+    // Most frames this is the object just read (no lock-on, no `+0x5FC`).
+    let Some((obj, kind)) = (match seen {
+        Some((sh, o)) if sh == hp => Some(o),
+        _ => object(hp),
+    }) else {
         return cm::cmd::NONE;
-    }
-    let getter: usize = rd(rd::<usize>(obj) + 0x28);
-    let kind = if getter == base() + DOOR_TYPE as usize {
-        0x1006
-    } else if rd::<u8>(getter) == 0xB8 && rd::<u8>(getter + 5) == 0xC3 {
-        rd::<u32>(getter + 1)
-    } else {
-        0
     };
+    let action: u32 = rd(pl + p::ACTION);
     match kind {
-        0x2000 if rd::<u8>(obj + BOX_OPENED) & 1 == 0 => cm::cmd::OPEN,
-        0x1006 => cm::cmd::OPEN,
-        0x2002 => cm::cmd::JUMP_ON,
-        0x2003 => cm::cmd::LIFT,
-        0x4000 => cm::cmd::TALK,
+        cm::recom::kind::SAVE_POINT => cm::recom::point(kind, action, rd::<u8>(obj + SAVE_IN_RANGE) == 1, false),
+        cm::recom::kind::WARP_POINT => cm::recom::point(kind, action, false, rd::<u32>(base() + WARP_BLOCK as usize) & 1 != 0),
         _ => cm::cmd::NONE,
     }
 }
