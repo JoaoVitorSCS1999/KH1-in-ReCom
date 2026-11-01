@@ -170,3 +170,14 @@ Cloud; enemy cards; sleights with no KH1 equivalent; Riku's story at KH1 setting
 - KH1 HUD: the hit shake was built as baked animation data (owner to confirm).
 - KH1 HUD: once the KH1 elements look right, the owner gives places for Re:CoM's extras (minimap,
   room plate, …).
+- KH1 HUD (H2b–H8): Re:CoM's event hides fade the HUD over KH1's 10 frames (not instantly): OK?
+- KH1 HUD (H4): the menu words are KH1's menu-font glyphs baked as sprites (Re:CoM's own font
+  format is not decoded): OK, or decode Re:CoM's font?
+- KH1 HUD (H4): one icon per row (key / hat / bottle), Summon row greyed until summons exist.
+- KH1 HUD (H6): Donald's and Goofy's rings are full (Re:CoM's friends have no HP / MP).
+- KH1 HUD (H7): which lock-on marker states map to KH1's cursor, and whether KH1's orange
+  auto-target ring is wanted.
+- KH1 HUD (H8): EXP / munny pop-ups not mapped (Re:CoM counts EXP at battle end); the level-up
+  box shows its header only.
+- KH1 HUD (0.33.1): KH1 PC's repacked textures: 40–71 straight-bar rects are drawn from the PS2
+  art at 2×; owner to confirm the bar now looks like KH1's.
