@@ -42,8 +42,11 @@ static INSTALLED: AtomicBool = AtomicBool::new(false);
 static TABLE: OnceLock<&'static [[u8; 16]]> = OnceLock::new();
 /// The command issued this frame (the menu's), for the KH1 frame.
 static PENDING: Mutex<Option<MagicCommand>> = Mutex::new(None);
-/// Our balls: (Re:CoM shot id, spell, level), the last 16.
-static SHOTS: Mutex<Vec<(u32, u8, u8)>> = Mutex::new(Vec::new());
+/// Our shots: (Re:CoM shot id, spell, level, the cast's shared hit serial or 0), the last 32 (a
+/// Blizzard makes 7).
+static SHOTS: Mutex<Vec<(u32, u8, u8, u32)>> = Mutex::new(Vec::new());
+/// Our Blizzard shards (7.5): (shot id, its vertical step dy, m per frame), the last 32.
+static SHARDS: Mutex<Vec<(u32, f32)>> = Mutex::new(Vec::new());
 /// KH1's re-target (7.4b) is set up: the homing slot and Re:CoM's lock-on list are as expected.
 static RETARGET: AtomicBool = AtomicBool::new(false);
 /// Our balls cast with no target: (shot id, the last pick's handle, 0 for none), the last 16.
@@ -74,6 +77,16 @@ const ROWS: u64 = crate::attack::RECOM_ATTACK_ROWS;
 /// `0x1401585D5` / `0x140158609`) stores as every bullet's flight-state exe; for a
 /// `CHomingBullet` it reaches the homing step `0x1401575D0`. Checked (disasm).
 const HOMING_THUNK: u32 = 0x0015_60B8;
+/// `0x140156770(bullet)`: its attack's hit serial (`coll+0x70`), which Re:CoM's Blizzard case passes
+/// to its other shards (`desc+0x74`). The apply `0x14016F1C0` skips a body whose ring holds the
+/// serial (`0x14016F960`) and records it on the body it hits (`0x14016FE20`); the enemy's hit
+/// handler (`0x140154EB0`) then records it on all the enemy's bodies and takes one hit body per
+/// run. So with one serial, a cast hits an enemy once, as KH1's shared hit bit. Checked (decomp
+/// + exe).
+const SHOT_SERIAL: u32 = 0x0015_6770;
+/// Re:CoM's Blizzard side-shard effect sets (`0x1405A1790` = the row's set + 1). Checked (decomp
+/// `0x140222170` case `0x23`).
+const EFFECT_SETS_NEXT: u64 = 0x1_405A_1790;
 /// Re:CoM's `LockOnManager` (`0x14087B1E0`, made on first use by its users; its list `+0x88`:
 /// nodes `{u32 handle, …, +0x10 next}`, the last one a sentinel with no next). Checked (decomp
 /// + disasm `0x1401CDB90`, Re:CoM's own nearest-target pick for homing shots).
@@ -98,6 +111,9 @@ mod rt {
     /// Actor position (its mover's `+0x30`).
     pub const MOVER: usize = 0xF0;
     pub const POSITION: usize = 0x30;
+    /// A mover's collision object and its test parameter (`win::movement::body`).
+    pub const MOVER_COLL: usize = 0x158;
+    pub const MOVER_COLL_PARAM: usize = 0x134;
 }
 
 type PlFn = unsafe extern "win64" fn(usize);
@@ -109,6 +125,7 @@ type FactoryFn = unsafe extern "win64" fn() -> usize;
 type ManagerFn = unsafe extern "win64" fn(usize, *const u8, usize) -> usize;
 type MoverFn = unsafe extern "win64" fn(usize, f32, f32, i32, i32);
 type GroundFn = unsafe extern "win64" fn(usize) -> u32;
+type SerialFn = unsafe extern "win64" fn(usize) -> u32;
 
 /// The shot descriptor (`0x140156790` fills 0xE0 bytes; the bullet init reads up to `+0xD8`).
 #[repr(C, align(16))]
@@ -147,9 +164,10 @@ mod f {
     pub const TARGET: usize = 0x84C;
 }
 
-/// Re:CoM's fire attribute (the Fire card's BattleCardList `+0xB` = 2; research `m7-magic.md`
-/// § 3.9, Checked (files)).
-const RECOM_ATTR_FIRE: u32 = 2;
+/// Re:CoM's attributes of the spells (the magic cards' BattleCardList `+0xB`: Fire 2, Blizzard 3,
+/// Thunder 4, Cure 6, Gravity 5, Stop 5, Aero 1; research `m7-magic.md` § 3.9, Checked (files)).
+/// Re:CoM's own resistance reads them for enemies without KH1 numbers.
+const RECOM_ATTR: [u32; 7] = [2, 3, 4, 6, 5, 5, 1];
 
 fn note(line: impl FnOnce() -> String) {
     if LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
@@ -168,15 +186,24 @@ fn event(e: String) {
 /// Builds the KH1 rows from Re:CoM's live Fire rows (which must be the Steam exe's) and patches
 /// the Field exe's case for action `0x13`. The exeMagic hook is installed by the caller after.
 pub unsafe fn install(b: usize) -> bool {
-    let mut live = [[0u8; 16]; 3];
-    for (r, id) in live.iter_mut().zip([0x22usize, 0x29, 0x2A]) {
-        *r = rd(va(b, ROWS) + 16 * id);
-    }
+    let read = |ids: [usize; 3]| {
+        let mut live = [[0u8; 16]; 3];
+        for (r, id) in live.iter_mut().zip(ids) {
+            *r = rd(va(b, ROWS) + 16 * id);
+        }
+        live
+    };
+    let live = read([0x22, 0x29, 0x2A]);
     if live != mg::RECOM_FIRE_ROWS {
         log("magic: Re:CoM's Fire rows 0x22 / 0x29 / 0x2A are not the Steam exe's; no KH1 cast");
         return false;
     }
-    let t: &'static [[u8; 16]] = Box::leak(mg::kh1_magic_table(&live).into_boxed_slice());
+    let bliz = read([0x23, 0x2B, 0x2C]);
+    if bliz != mg::RECOM_BLIZZARD_ROWS {
+        log("magic: Re:CoM's Blizzard rows 0x23 / 0x2B / 0x2C are not the Steam exe's; no KH1 cast");
+        return false;
+    }
+    let t: &'static [[u8; 16]] = Box::leak(mg::kh1_magic_table(&live, &bliz).into_boxed_slice());
     if TABLE.set(t).is_err() {
         return false;
     }
@@ -253,7 +280,7 @@ fn row(s: u8, level: u8) -> Option<&'static [u8; 16]> {
 /// KH1's usable test (`0x14028EFD0`): the spell is learned (the menu offers only learned ones),
 /// and MP pays its cost (`0x1402A4C10`).
 pub fn can_cast(s: u8, level: u8) -> bool {
-    row(s, level).is_some() && s == mg::spell::FIRE && super::mp::can_pay(mg::fire::COST)
+    row(s, level).is_some() && mg::castable(s) && super::mp::can_pay(mg::cost(s))
 }
 
 /// `initMagic`'s writes for a KH1 cast, cardless (Checked (decomp `0x1402203D0`), in its order):
@@ -301,7 +328,7 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
     // swings (KH1's damage replaces it on twins and proxies, `take_hit`).
     wr(pl + f::AP, rd::<i32>(pl + f::ATTACK_STAT));
     wr(pl + f::KIND, r[0xB] as u32);
-    wr(pl + f::ATTR, RECOM_ATTR_FIRE);
+    wr(pl + f::ATTR, RECOM_ATTR[c.spell as usize % 7]);
     wr(pl + f::PREV_SITUATION, 0u32);
     wr(pl + f::SUB, id);
     wr(pl + f::SLEIGHT_670, 0u64);
@@ -314,6 +341,23 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
 /// `0x14022220B..0x14022234D`)) with the KH1 row and KH1's life, then KH1's MP payment. The
 /// shot's id, if Re:CoM made one.
 pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
+    match c.spell {
+        mg::spell::FIRE => release_fire(pl, c),
+        mg::spell::BLIZZARD => release_blizzard(pl, c),
+        _ => None,
+    }
+}
+
+fn remember_shot(id: u32, s: u8, level: u8, serial: u32) {
+    if let Ok(mut g) = SHOTS.lock() {
+        if g.len() >= 32 {
+            g.remove(0);
+        }
+        g.push((id, s, level, serial));
+    }
+}
+
+unsafe fn release_fire(pl: usize, c: &CastStart) -> Option<u32> {
     let r = row(c.spell, c.level)?;
     let n = mg::shot_numbers(r);
     let body: usize = rd(pl + p::BODY);
@@ -364,12 +408,7 @@ pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
     if rd::<i32>(pl + f::TARGET) <= 0 {
         seek_on(bullet, id);
     }
-    if let Ok(mut g) = SHOTS.lock() {
-        if g.len() >= 16 {
-            g.remove(0);
-        }
-        g.push((id, c.spell, c.level));
-    }
+    remember_shot(id, c.spell, c.level, 0);
     // KH1 pays after the launch (`xm_fire01.mag`: sys 20, then sys 47).
     super::mp::pay(mg::fire::COST, "Fire release");
     note(|| {
@@ -388,6 +427,145 @@ pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
         )
     });
     Some(id)
+}
+
+/// KH1's Blizzard release (7.5, `xm_blizzard01.mag` `L006dc` → the spawner thread): seven shards,
+/// each Re:CoM's Blizzard shot (`0x140222170` case `0x23`'s calls: descriptor class 2, the hand
+/// point, Re:CoM's `bliz_all` set for the straight shard and the next set for the cone ones, the
+/// first shard's hit serial passed to the others) with KH1's numbers: the cone and start offsets
+/// (`crate::magic::blizzard_shards`), speed, life, radius, a hit or wall ends it; then each shard
+/// glides as KH1's ([`kh1_shard_exe`]); then the MP (sys 47 after the thread). The first shard's id.
+unsafe fn release_blizzard(pl: usize, c: &CastStart) -> Option<u32> {
+    let r = row(c.spell, c.level)?;
+    let body: usize = rd(pl + p::BODY);
+    let mut hand = [0f32; 4];
+    if body != 0 {
+        let b = rd_vec(body + 0x30);
+        hand = [b.x, b.y, b.z, 1.0];
+    }
+    func::<PlOutFn>(HAND_POINT)(pl, &mut hand);
+    let ang = func::<AnglesFn>(ANGLES)(pl);
+    if ang.is_null() {
+        return None;
+    }
+    let ang: [f32; 4] = std::ptr::read_unaligned(ang);
+    let speed = r[9] as f32 * 0.01;
+    let life = r[0xE] as i32 * 100;
+    let mut serial = 0u32;
+    let mut first = None;
+    let mut made = 0;
+    for (k, (off, dir)) in mg::blizzard_shards(ang[1]).iter().enumerate() {
+        let Some((pitch, yaw)) = crate::guard::aim_angles(*dir) else { continue };
+        let mut d = Desc([0; 0x100]);
+        let dp = d.0.as_mut_ptr();
+        func::<DescInitFn>(DESC_INIT)(dp, 2, 3);
+        let at = |o: usize| dp.add(o);
+        std::ptr::write_unaligned(at(0x68) as *mut u32, rd::<u32>(pl + f::KIND));
+        std::ptr::write_unaligned(at(0x6C) as *mut u32, rd::<u32>(pl + f::ATTR));
+        std::ptr::write_unaligned(at(0x70) as *mut i32, rd::<i32>(pl + f::AP));
+        std::ptr::write_unaligned(at(0x0C) as *mut u32, 0x8000_0000);
+        std::ptr::write_unaligned(at(0x60) as *mut u64, mg::KH1_BLIZZARD_FLAGS);
+        std::ptr::write_unaligned(at(0x30) as *mut f32, speed);
+        std::ptr::write_unaligned(at(0x34) as *mut f32, r[0xC] as f32);
+        std::ptr::write_unaligned(at(0x38) as *mut i32, life);
+        std::ptr::write_unaligned(at(0x3C) as *mut i32, life);
+        std::ptr::write_unaligned(at(0x10) as *mut [f32; 4], [hand[0] + off[0], hand[1] + off[1], hand[2] + off[2], r[5] as f32 * 0.01]);
+        std::ptr::write_unaligned(at(0x20) as *mut [f32; 4], [pitch, yaw, ang[2], ang[3]]);
+        let set = if k < mg::blizzard::CONE_SHARDS { EFFECT_SETS_NEXT } else { EFFECT_SETS };
+        std::ptr::write_unaligned(at(0xA8) as *mut usize, va(base(), set) + r[2] as usize * 0x60);
+        std::ptr::write_unaligned(at(0x78) as *mut f32, r[4] as f32 * 0.01);
+        std::ptr::write_unaligned(at(0x74) as *mut u32, serial);
+        let factory = func::<FactoryFn>(FACTORY)();
+        if factory == 0 {
+            break;
+        }
+        let bullet = func::<ManagerFn>(SHOT_MANAGER)(factory, dp, pl);
+        if bullet == 0 {
+            continue;
+        }
+        // A small mover (Re:CoM's Fire set-up): the shard glides 50 cm above the floor, its attack
+        // keeps KH1's radius.
+        func::<MoverFn>(SHOT_MOVER)(bullet, 0.1, 0.0, 0, -1);
+        if serial == 0 {
+            serial = func::<SerialFn>(SHOT_SERIAL)(bullet);
+        }
+        let id: u32 = rd(bullet + 0x20);
+        first.get_or_insert(id);
+        made += 1;
+        remember_shot(id, c.spell, c.level, serial);
+        shard_on(bullet, id, dir[1] * speed);
+    }
+    let first = first?;
+    // KH1 pays after the spawner thread starts (sys 20, then sys 47).
+    super::mp::pay(mg::blizzard::COST, "Blizzard release");
+    note(|| format!("release {}{}: {made} shards from ({:.2},{:.2},{:.2}) yaw {:.3}, speed {speed:.2} m/f, life {life} ticks, radius {:.2} m, serial {serial}", mg::spell::NAMES[c.spell as usize], c.level, hand[0], hand[1], hand[2], ang[1], r[4] as f32 * 0.01));
+    Some(first)
+}
+
+/// A shard's flight state's exe becomes [`kh1_shard_exe`] (as [`seek_on`]: only on a plain
+/// `CHomingBullet` whose exe is Re:CoM's thunk).
+unsafe fn shard_on(bullet: usize, id: u32, dy: f32) {
+    let b = base();
+    let vt: usize = rd(bullet);
+    let exe: usize = rd(bullet + rt::STATE_EXE);
+    let adj: i32 = rd(bullet + rt::STATE_EXE_ADJUST);
+    if vt != va(b, crate::guard::bullet::HOMING_VTABLE) || exe != b + HOMING_THUNK as usize || adj != 0 {
+        rt_line(|| format!("blizzard: shard {id} is not a plain CHomingBullet in flight: Re:CoM's straight flight"));
+        return;
+    }
+    if let Ok(mut g) = SHARDS.lock() {
+        if g.len() >= 32 {
+            g.remove(0);
+        }
+        g.push((id, dy));
+    }
+    wr(bullet + rt::STATE_EXE, kh1_shard_exe as *const () as usize);
+}
+
+/// The flight-state exe of our Blizzard shards (7.5): KH1's glide for this frame
+/// (`crate::magic::blizzard_glide_y`): Re:CoM's segment test (`0x140170330` on the shard mover's
+/// own collision object, as Re:CoM's movers test their moves) from the shard's height straight down
+/// by `0.5 m − dy`, at where the shard is going this frame; the vertical velocity then lands it 0.5
+/// m above that floor, or on its own slope. Then Re:CoM's own step (the thunk: no target, so the
+/// homing step only runs its checks). Runs only for these shards, once a frame each.
+pub unsafe extern "win64" fn kh1_shard_exe(bullet: usize) {
+    use crate::guard::bullet as gb;
+    let mover: usize = rd(bullet + gb::MOVER);
+    let live = rd::<i32>(bullet + rt::HOLD) == 0 && rd::<i32>(bullet + rt::LIFE) > 0 && mover != 0;
+    let id: u32 = rd(bullet + 0x20);
+    let dy = SHARDS.lock().ok().and_then(|g| g.iter().find(|e| e.0 == id).map(|e| e.1));
+    if let (true, Some(dy)) = (live, dy) {
+        let pos = rd_vec(mover + rt::POSITION);
+        let v: [f32; 4] = rd(mover + gb::VELOCITY);
+        let floor = floor_below(mover, [pos.x + v[0], pos.y, pos.z + v[2]], mg::blizzard_ray(dy));
+        let y = mg::blizzard_glide_y(pos.y, dy, floor);
+        wr(mover + gb::VELOCITY + 4, y - pos.y);
+    }
+    func::<PlFn>(HOMING_THUNK)(bullet)
+}
+
+/// Re:CoM's segment test from `from` straight down by `len` m with this mover's collision object
+/// (`mover+0x158`, its segment `+0x18`: ends `+0x10` / `+0x20`, hit `+0x30`; the parameter
+/// `mover+0x134`), as `win::movement`'s floor probe for Sora. The hit's height, any surface (KH1's
+/// sys 77 takes any).
+unsafe fn floor_below(mover: usize, from: [f32; 3], len: f32) -> Option<f32> {
+    if len <= 0.0 {
+        return None;
+    }
+    let coll: usize = rd(mover + rt::MOVER_COLL);
+    if coll == 0 {
+        return None;
+    }
+    let seg: usize = rd(coll + 0x18);
+    if seg == 0 {
+        return None;
+    }
+    for (o, y) in [(0x10, from[1]), (0x20, from[1] - len)] {
+        wr(seg + o, [from[0], y, from[2], 1.0f32]);
+    }
+    let hit = func::<mv::CollideFn>(mv::COLLIDE)(coll, rd::<i32>(mover + rt::MOVER_COLL_PARAM)) != 0;
+    let seg: usize = rd(coll + 0x18);
+    (hit && seg != 0).then(|| rd::<f32>(seg + 0x34))
 }
 
 /// Our ball cast with no target: its flight state's exe becomes [`kh1_ball_exe`] (only when it is
@@ -541,7 +719,7 @@ pub unsafe fn take_hit(enemy: usize) -> Option<(usize, u8, u8)> {
             continue;
         }
         let by: u32 = rd(part + 0x98);
-        if let Some(&(_, s, l)) = g.iter().find(|&&(id, _, _)| id == by) {
+        if let Some(&(_, s, l, _)) = g.iter().find(|&&(id, _, _, _)| id == by) {
             return Some((part, s, l));
         }
     }
@@ -587,7 +765,7 @@ pub fn clear_events() {
 /// The start log line.
 pub fn start_line() -> String {
     format!(
-        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stage 7.4): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
+        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.5): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
         TABLE.get().map_or(0, |t| t.iter().filter(|r| r[0] != 0).count()),
         28,
         mg::fire::FAST_WAIT,
@@ -595,6 +773,7 @@ pub fn start_line() -> String {
         mg::fire::LIFE,
         mg::fire::TURN_DEG,
         mg::fire::COST,
+        mg::blizzard::LIFE,
         mg::retarget::RANGE_M,
         if RETARGET.load(Ordering::Acquire) { "on" } else { "off" }
     )

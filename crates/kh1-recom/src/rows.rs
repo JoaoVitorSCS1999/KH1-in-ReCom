@@ -55,6 +55,11 @@ pub mod row {
     pub const FIRE_RELEASE: u32 = 0x38;
     pub const FIRE_AIR_WINDUP: u32 = 0x3B;
     pub const FIRE_AIR_RELEASE: u32 = 0x3C;
+    /// Re:CoM's Blizzard / Gravity clip (`initMagic` plays the attack row 0x23's `+0` = 0x3A, air
+    /// + 4): `p001_065` (43 frames at 30 fps = KH1's 86) and `p001_069` (39 = 78). Checked (exe:
+    /// the action table's names; the row's `+0`).
+    pub const BLIZZARD: u32 = 0x3A;
+    pub const BLIZZARD_AIR: u32 = 0x3E;
 }
 
 /// KH1 requests for the KH1-only rows, in the order they are appended.
@@ -181,6 +186,9 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         crate::magic::cast_req::FIRE_RELEASE => return Some((row::FIRE_RELEASE, true)),
         crate::magic::cast_req::FIRE_AIR_WINDUP => row::FIRE_AIR_WINDUP,
         crate::magic::cast_req::FIRE_AIR_RELEASE => return Some((row::FIRE_AIR_RELEASE, true)),
+        // Blizzard (M7 stage 7.5): KH1's entries 55 / 80 have no root travel.
+        crate::magic::cast_req::BLIZZARD => row::BLIZZARD,
+        crate::magic::cast_req::BLIZZARD_AIR => row::BLIZZARD_AIR,
         _ => return None,
     };
     Some((r, false))
@@ -263,6 +271,11 @@ mod tests {
         assert_eq!(row::FIRE_AIR_WINDUP, row::FIRE_WINDUP + 4);
         assert_eq!(row::FIRE_AIR_RELEASE, row::FIRE_AIR_WINDUP + 1);
         assert_eq!(crate::magic::RECOM_FIRE_ROWS[0][0] as u32, row::FIRE_WINDUP);
+        // Blizzard: Re:CoM's row 0x23's clip, + 4 in the air; no root travel.
+        assert_eq!(row_for(0x37, &s, &none), Some((0x3A, false)));
+        assert_eq!(row_for(0x84, &s, &none), Some((0x3E, false)));
+        assert_eq!(crate::magic::RECOM_BLIZZARD_ROWS[0][0] as u32, row::BLIZZARD);
+        assert_eq!(row::BLIZZARD_AIR, row::BLIZZARD + 4);
     }
 
     #[test]

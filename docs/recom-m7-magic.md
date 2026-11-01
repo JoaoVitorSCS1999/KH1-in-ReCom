@@ -196,6 +196,109 @@ exe; `magic_sites` checks the jumps between them):
   Re:CoM enemy keeps resolving until deleted.
 - **Not checked:** in game.
 
+## Stage 7.5: Blizzard / Blizzara / Blizzaga
+
+Owner (2026-10-31): M7 "FULLY implemented"; decision 34 (Re:CoM's visuals and sounds), 36 (KH1's
+resistances only). At Combat = KH1 in Sora's story, Blizzard from the command menu casts as KH1:
+KH1's cast, KH1's seven shards on Re:CoM's own Blizzard shots.
+
+### KH1 (what runs)
+
+| what | KH1 (Steam) | tag |
+|---|---|---|
+| **Cast** `0x1402A3DB0` / `0x1402A3600`: ground `0x36 + 1` = `0x37` (blend 0), queued idle (release); air `0x83 + 1` = `0x84`, queued fall (release, blend 8), the 30 cm hop and air speed × 0.5, as Fire's air cast. No fast path (only Fire has one). | disasm `0x1402A3E92..0x1402A3ED7` | Checked (decomp + disasm) |
+| **Motions**: `0x37` entry 55, 86 frames, free from 68, no root travel; `0x84` entry 80, 78 frames, free from 68. | `xa_ex_0010.mset` | Checked (files, read with `kh1-data`) |
+| **Script** `xm_blizzard01..03.mag` (one script; the level passes the shard speed 20 / 30 / 40): charge effect; **wait 28** (`L0086e(28)`); then the request must still be `0x37` / `0x84` (55 / 132), else it ends: **no spell, no MP**; then the bone point (bone 48, scale 1), the spawner thread, **then the MP** (sys 47, 30 units). | `L006dc` | Checked (files: `magdis.py`) |
+| **Shards** (spawner `0x4A`, shard thread `0x238`): six on a cone, the local vector (0.383, 0, 0.924) (22.5° off the facing) turned 60° about the facing axis each (sys 31), each starting (x, y) × 50 cm off the axis (19.15 cm, sys 93 / 10 / 7); then one straight ahead from the bone point. Each: **speed 20 / 30 / 40 cm a frame, life 26 frames**, its own attack (radius 70 / 90 / 120, data `+0x5C`), **one hit bit shared by all seven**; a shard ends on its attack's first hit. | `xm_blizzard01.mag` | Checked (files) |
+| **Glide** (shard loop `L0029e`): x, z move by direction × speed; a ray (sys 77 → `0x140299530`, any surface) from the shard straight down by 50 + its own vertical step finds a surface → the shard sits 50 cm above it; none → it moves by its own vertical step. | `0x140299530` | Checked (files + decomp) |
+| **One hit per enemy per cast**: the collision pass `0x1402B3BE0` skips an actor whose `+0x3E0` holds the attack's bit; a hit sets it (`0x1402BF5E0`); after each pass every actor keeps only bits some live attack holds (`0x1402B4460`), and a deleted attack frees its bit only when no other attack holds it (`0x1402B3560`). The seven shards share one bit, so an enemy one shard hit is skipped by the others for the whole cast, and a skipped shard flies on through it. Data `+0x50` (re-hit interval) is 0. | `0x1402B3BE0`, `0x1402B3560` | Checked (decomp + files) — the research note's Assumption is confirmed |
+| **Damage** `0x1402BFA80`: power 22 / 27 / 34 + max MP (stat source 1), the curve on − Defence, floor / cap, × resist[3] (ice); kind 3 (flinch). | btltbl `0x6078` / `0x60E8` / `0x6158` | Checked (files + decomp) |
+
+### In Re:CoM
+
+- **Cast:** the same KH1 frame on Re:CoM's magic action as Fire (`Kh1Sora::command_magic`, the cast
+  motions in KH1's record, `release_wait` = 28 for the script's wait); Re:CoM's clips: `0x37` → row
+  `0x3A` (`p001_065`, 43 frames at 30 fps = 86), `0x84` → `0x3E` (`p001_069`, 39 = 78), both
+  without root motion (KH1's have none). Re:CoM's action ends when the motion ends into its idle /
+  fall (86 / 78) or anything replaces it. Checked (exe: the action table's names).
+- **KH1 rows** (`magic::blizzard_row_bytes`): Re:CoM's rows 0x23 / 0x2B / 0x2C (checked against the
+  exe at start) keep clip, blend, `bliz_all` sets 6 / 8 / 10 and `+5`; `+4` radius 70 / 90 / 120,
+  `+9` speed 20 / 30 / 40, `+0xB` kind 1, `+0xC` 255 (no range), `+0xE` 13 (26 frames), `+0xF` 0x80.
+- **Release** (`win::magic::release_blizzard`): Re:CoM's Blizzard case (`0x140222170` case `0x23`,
+  Checked (decomp + disasm `0x1402223F4..0x1402224F3`)) made seven times with KH1's shards: class 2,
+  kind / attribute (Re:CoM's ice 3) / AP from the action, the hand point + KH1's offset, the
+  shard's pitch / yaw (`guard::aim_angles` of `magic::blizzard_shards`, from Sora's yaw), speed,
+  life `+0x3C` and `+0x38` = 1300 ticks, radius, **the straight shard with the row's set, the cone
+  shards with the next set (`0x1405A1790`, Re:CoM's side shards)**, flags `0x4000000` (Re:CoM's)
+  `| 0x100 | 4` (a hit or wall ends it; the life ends it), and **the first shard's hit serial
+  (`0x140156770`, `coll+0x70`) in every later shard's `desc+0x74`, as Re:CoM's own Blizzard does**.
+  Each shard's mover gets Re:CoM's Fire set-up (`0x140157DA0(shot, 0.1, 0, 0, −1)`: a 10 cm mover,
+  so gliding 50 cm up it never touches the floor; the attack keeps KH1's radius). Then MP 30.
+- **Glide** (`kh1_shard_exe`, each shard's own flight-state exe as for 7.4b's re-target): Re:CoM's
+  segment test `0x140170330` on the shard mover's own collision object (`mover+0x158`, parameter
+  `+0x134`, as Re:CoM's movers and our Sora floor probe use it), from the shard's height at this
+  frame's x, z, down by `0.5 − dy` m; the vertical velocity then puts it 0.5 m above the hit, or on
+  its own slope (`magic::blizzard_glide_y`). Then Re:CoM's step (the thunk; no target, so the
+  homing step returns at its first check).
+- **One hit per enemy per cast: Re:CoM's own rule, unchanged.** The apply `0x14016F1C0` skips a
+  body whose hit-once ring holds the attack's serial (`0x14016F960`) and records the serial on the
+  body it hits (`0x14016FE20`); the enemy's hit handler (`0x140154EB0`, from `0x14017F7E0`) takes
+  **one** hit body per run, clears every body's hit flag and **records that serial on all the
+  enemy's bodies**. With the seven shards sharing one serial (as Re:CoM's own Blizzard), an enemy
+  is hit once per cast, and a shard reaching an enemy already hit is not tested against it and
+  flies on: KH1's per-actor shared bit. Checked (decomp). Nothing of ours.
+- **Damage:** as Fire (`spell_hit`): KH1's power + max MP through the twin's / proxy's numbers and
+  KH1's ice resistance only (Re:CoM's ice % not applied: the part's attribute reads 0xFF for the
+  call).
+
+Logs: `magic: release blizzard1: 7 shards from (…) yaw …, speed 0.20 m/f, life 1300 ticks, radius
+0.70 m, serial N`, `release(blizzard1 f28 shot N)`, `mp: paid 30 (Blizzard release)`, hit lines
+`hit blizzard1 on 0x…: KH1 …`; F9 trace: `cast blizzard1 f… w…`, the hits column `:blizzard1:kh1 …`.
+
+Sites (7.5):
+
+| address | bytes | use |
+|---|---|---|
+| `0x140156770` shot hit serial | `48 8B 81 A8 02 00 00 8B 40 70 C3` | called |
+| `0x1402224A7` Blizzard case: serial | `E8 C4 42 F3 FF 89 45 C4` | checked only (its call lands on `0x140156770`) |
+| `0x1402224E9` Blizzard case: side sets | `48 8D 0D A0 F2 37 00` | checked only (= `0x1405A1790`) |
+| `0x1407C6EA0`, `0x1407C6F20` rows 0x23, 0x2B–0x2C | Re:CoM's Blizzard rows | the KH1 rows' templates |
+| `0x140170330` segment test | (checked by M4) | called |
+
+1:1 checks (7.5):
+
+- **Checked (decomp + files)**, replayed by tests: the shards released at KH1's frame 28 (handler
+  29), Sora free at 68 of the 86-frame motion and Re:CoM's action ended once; a cast cut before 28
+  casts nothing and pays nothing; no fast path; a Fire refused during a Blizzard's lock
+  (`movement::tests` "M7 stage 7.5"); the rows, attack data, cost, flags; the cone (six at 22.5°,
+  60° apart about the axis, two level / two up / two down, each starting 19.15 cm off the axis,
+  the straight one from the point); the glide's ray length and heights (`magic::tests`).
+- **Checked (exe)**: the new sites, the rows, the clips' names and frame counts.
+- **Assumptions:** (1) Re:CoM's hand point stands for KH1's bone 48 at scale 1 (Fire's
+  Assumption 4); (2) the segment test's hit height is the surface point under the shard (the
+  mover's 10 cm radius may find it a little earlier than KH1's thin ray); (3) a shard's walls end
+  it as KH1's attack's wall flag ends Fire's ball (Re:CoM `0x100` on a wall contact); (4) Re:CoM's
+  flight-state exe runs before the mover moves the shard (as 7.4b); (5) the enemy's hit handler runs
+  between two shards' contacts with one enemy in different frames (it runs every enemy update;
+  Checked (decomp) that it spreads the serial, not traced in game); (6) Re:CoM's `bliz_all` effects load in the field (as Fire's open
+  question 3).
+- **Not checked:** in game.
+
+In-game checklist (7.5):
+
+1. Log: the `magic:` start line names Blizzard (7.5) and 6 rows.
+2. In battle: Magic → Blizzard: Re:CoM's Blizzard wind-up clip, about half a second later seven
+   ice shards fan out (two level, two up, two down at a narrow angle, one straight), skimming
+   about half a metre above the floor, for about 5 m (26 frames × 20 cm); each stops on the first
+   enemy it hits; an enemy takes **one** shard however many cross it. MP bar −30 units.
+3. Blizzara / Blizzaga: faster shards (30 / 40 cm a frame: 7.8 m / 10.4 m) with bigger hit radii.
+4. On a slope or stairs: the level shards follow the floor; the rising ones keep rising.
+5. Air Blizzard: the hop; landing before frame 28 cancels it (no MP).
+6. Hit during the wind-up: no shards, no MP.
+7. Sora can move again about 1.1 s after the command (frame 68), not at the motion's end.
+8. F9 trace: `cast blizzard1 f… w…`, `release(blizzard1 f28 shot …)`, `pay30`, the hits column.
+9. Combat = Re:CoM: Re:CoM's Blizzard cards unchanged; Riku's story unchanged.
+
 ## Per frame
 
 Nothing of ours per frame outside a KH1 cast (one atomic load in the request-bits wrapper for the

@@ -117,7 +117,7 @@ mod ctrl {
 
 pub(super) const MOTION_REQUEST: u32 = 0x001F_7180;
 const GROUND_TEST: u32 = 0x001F_3C00;
-const COLLIDE: u32 = 0x0017_0330;
+pub(super) const COLLIDE: u32 = 0x0017_0330;
 pub(super) const HANDLE_OBJ: u32 = 0x002A_D350;
 const JUMP_HELD: u32 = 0x001F_F4D0;
 const BUTTONS_HELD: u32 = 0x0029_C1D0;
@@ -139,7 +139,7 @@ type ClassFn = unsafe extern "win64" fn(usize) -> u64;
 pub(super) type InitFn = unsafe extern "win64" fn(usize, i32) -> u64;
 pub(super) type MotionFn = unsafe extern "win64" fn(usize, i32, i32, u64, i32, i32, i32);
 type GroundFn = unsafe extern "win64" fn(usize) -> u32;
-type CollideFn = unsafe extern "win64" fn(usize, i32) -> u64;
+pub(super) type CollideFn = unsafe extern "win64" fn(usize, i32) -> u64;
 pub(super) type HandleFn = unsafe extern "win64" fn(u32) -> usize;
 type PadHeldFn = unsafe extern "win64" fn(usize) -> u32;
 type HeldFn = unsafe extern "win64" fn(u32, u32) -> u8;

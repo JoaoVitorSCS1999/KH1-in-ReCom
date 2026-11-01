@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 45: M7 stage 7.5, Blizzard, version 0.19.0 (2026-10-31)
+
+- Blizzard / Blizzara / Blizzaga from the command menu (Checked, decomp + files): release at 28
+  only while the cast motion plays (else no spell, no MP); motion 86 free at 68 (air 78 / 68);
+  cost 30 units; 7 shards (6 on a 22.5° cone + 1 straight, 19.15 cm off axis), 20/30/40 cm a frame,
+  26 frames, radius 70/90/120, a hit or wall ends a shard; glide 50 cm over Re:CoM's floor test.
+- One hit per enemy per cast: KH1's shared hit bit (Checked, decomp) = Re:CoM's shared hit serial
+  (`0x140156770`), so Re:CoM's own hit handler does it. Built from Re:CoM's Blizzard spawn
+  (`0x1402224A7`, `0x1402224E9`) and rows `0x1407C6EA0` / `0x1407C6F20`, Re:CoM's effects.
+  Damage: KH1 power + max MP, KH1 ice resistance only. Not seen in game.
+
+---
+
 ## Stage 44: Fire re-targets as KH1, version 0.18.1 (2026-10-31)
 
 > Decision 36: Fire re-targets as KH1

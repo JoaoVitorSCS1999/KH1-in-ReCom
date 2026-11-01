@@ -629,8 +629,7 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
 /// = 0).
 unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64 {
     let max_mp = super::mp::current().map(|v| v.1);
-    let data = crate::magic::fire_attack(lv);
-    let kh1 = if s == crate::magic::spell::FIRE { max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m)) } else { None };
+    let kh1 = crate::magic::spell_attack(s, lv).and_then(|data| max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m)));
     let attr: u32 = rd(part + super::magic::PART_ATTR);
     if let Some(d) = kh1 {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);

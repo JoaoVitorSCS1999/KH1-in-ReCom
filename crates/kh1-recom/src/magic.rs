@@ -41,9 +41,17 @@ pub mod spell {
     pub const NAMES: [&str; 7] = ["fire", "blizzard", "thunder", "cure", "gravity", "stop", "aero"];
 }
 
-/// Spells this stage casts (Blizzard … Aero: 7.5–7.10, each its own row and script numbers).
+/// Spells cast so far (Fire 7.4, Blizzard 7.5; Thunder … Aero: 7.6–7.10, each its own rows and
+/// script numbers).
 pub fn castable(s: u8) -> bool {
-    s == spell::FIRE
+    matches!(s, spell::FIRE | spell::BLIZZARD)
+}
+
+/// A spell's MP cost (its data's `+0x30`, the same at every level): charge units below 100,
+/// whole points × 100 from 100 on (`0x1402A4C10` / `0x1402A5B60`). Checked (files).
+pub fn cost(s: u8) -> i32 {
+    use crate::mp::cost::*;
+    [FIRE, BLIZZARD, THUNDER, CURE, GRAVITY, STOP, AERO].get(s as usize).copied().unwrap_or(i32::MAX)
 }
 
 /// KH1's cast motion requests (`0x1402A3DB0` / `0x1402A3600` / the fast path in `0x1402A7510`).
@@ -54,6 +62,30 @@ pub mod cast_req {
     pub const FIRE_RELEASE: u16 = 0x3D;
     pub const FIRE_AIR_WINDUP: u16 = 0x83;
     pub const FIRE_AIR_RELEASE: u16 = 0x8A;
+    /// Blizzard's one cast motion, ground and air (`0x36 + 1`, `0x83 + 1`; entries 55 / 80).
+    pub const BLIZZARD: u16 = 0x37;
+    pub const BLIZZARD_AIR: u16 = 0x84;
+
+    /// The first cast motion a spell's normal cast plays: `0x1402A3DB0` plays `0x36 + spell`
+    /// (Fire: `0x36` then `0x3D`), the air branch of `0x1402A3600` `0x83 + spell` (Fire: `0x83`
+    /// then `0x8A`). Checked (decomp + disasm `0x1402A3E92..0x1402A3ED7`).
+    pub fn first(spell: u8, air: bool) -> u16 {
+        if air {
+            FIRE_AIR_WINDUP + spell as u16
+        } else {
+            FIRE_WINDUP + spell as u16
+        }
+    }
+
+    /// The motion the spell's script requires at its release check (`xm_fire01`: `0x3D` / `0x8A`;
+    /// `xm_blizzard01`: 55 / 132 = `0x37` / `0x84`). Checked (files).
+    pub fn release(spell: u8, air: bool) -> u16 {
+        match (spell, air) {
+            (super::spell::FIRE, false) => FIRE_RELEASE,
+            (super::spell::FIRE, true) => FIRE_AIR_RELEASE,
+            _ => first(spell, air),
+        }
+    }
 }
 
 /// Re:CoM's magic action and its attack ids (`initMagic` `0x1402203D0` sets `+0x638` and
@@ -75,6 +107,11 @@ pub fn recom_base_row(s: u8, level: u8) -> Option<usize> {
         (spell::FIRE, 1) => Some(0x22),
         (spell::FIRE, 2) => Some(0x29),
         (spell::FIRE, 3) => Some(0x2A),
+        // Blizzard 0x23 (set 6), Blizzara 0x2B (set 8), Blizzaga 0x2C (set 10): `initStockSkill`'s
+        // -ra / -ga sleights 0x0E / 0x15. Checked (exe: the sets hold `bliz_all`).
+        (spell::BLIZZARD, 1) => Some(0x23),
+        (spell::BLIZZARD, 2) => Some(0x2B),
+        (spell::BLIZZARD, 3) => Some(0x2C),
         _ => None,
     }
 }
@@ -175,6 +212,137 @@ pub mod retarget {
     }
 }
 
+/// KH1's Blizzard (`xm_blizzard01..03.mag`, decoded with `magdis.py`: one script, the level's shard
+/// speed passed to it; Checked (files), the syscalls in the KH1 decomp).
+pub mod blizzard {
+    /// The script waits this long after the command (`L0086e(28)`), then needs its cast motion
+    /// (`0x37` / `0x84`) still playing, else ends: no spell, no MP.
+    pub const WAIT: f32 = 28.0;
+    /// Shard speed by level, cm per frame (`L006dc(args, 20 / 30 / 40)`).
+    pub const SPEED: [f32; 3] = [20.0, 30.0, 40.0];
+    /// Shard life, frames (`L001dc`: `ind+0x0` = 26).
+    pub const LIFE: f32 = 26.0;
+    /// The height each shard keeps above the floor it finds below it (`ind+0x8` = 50).
+    pub const HEIGHT: f32 = 50.0;
+    /// The first cone direction (local: +z forward, x sideways, y vertical), the script's own
+    /// values (`*(sp+0x30)` = (0.383, 0, 0.924): 22.5° off the axis); each next shard turns it
+    /// 60° about the axis (sys 31). Six cone shards, then one straight ahead (0, 0, 1).
+    pub const CONE: [f32; 3] = [0.383, 0.0, 0.924];
+    pub const RING_DEG: f32 = 60.0;
+    pub const CONE_SHARDS: usize = 6;
+    /// A cone shard starts its direction's sideways part × 50 cm off the axis (sys 93 then sys
+    /// 10 / 7: 0.383 × 50 = 19.15 cm); the straight one at the Keyblade point.
+    pub const OFFSET: f32 = 50.0;
+    /// Attack radius by level (data `+0x5C`: 70 / 90 / 120 cm).
+    pub const RADIUS: [f32; 3] = [70.0, 90.0, 120.0];
+    /// MP cost (data `+0x30`): 30 charge units.
+    pub const COST: i32 = crate::mp::cost::BLIZZARD;
+}
+
+/// The shards of one Blizzard in Re:CoM's frame (metres, y up), for Sora facing `yaw` (Re:CoM's
+/// body yaw: forward = (sin yaw, 0, cos yaw)): `(start offset from the Keyblade point, unit
+/// direction)`, the six cone shards first, then the straight one, as the script makes them.
+///
+/// KH1 rotates its local vectors by the actor's yaw (sys 10) in its own axes (y down); the six
+/// cone shards sit every 60° about the forward axis, a set that is the same under left / right and
+/// up / down mirroring, so it maps onto Re:CoM's axes without regard to which local axis is which.
+pub fn blizzard_shards(yaw: f32) -> [([f32; 3], [f32; 3]); 7] {
+    use blizzard::*;
+    let f = [yaw.sin(), 0.0, yaw.cos()];
+    let r = [yaw.cos(), 0.0, -yaw.sin()];
+    let u = [0.0, 1.0, 0.0];
+    let comb = |a: f32, b: f32, c: f32| [r[0] * a + u[0] * b + f[0] * c, r[1] * a + u[1] * b + f[1] * c, r[2] * a + u[2] * b + f[2] * c];
+    let mut out = [([0.0; 3], f); 7];
+    for (i, o) in out.iter_mut().take(CONE_SHARDS).enumerate() {
+        let phi = (RING_DEG * i as f32).to_radians();
+        // sys 31: the cone vector turned about the forward (local z) axis.
+        let (lx, ly) = (CONE[0] * phi.cos() - CONE[1] * phi.sin(), CONE[0] * phi.sin() + CONE[1] * phi.cos());
+        let off = comb(lx * OFFSET / 100.0, ly * OFFSET / 100.0, 0.0);
+        *o = (off, comb(lx, ly, CONE[2]));
+    }
+    out
+}
+
+/// KH1's shard height step (`xm_blizzard01.mag` `L0029e`, Re:CoM metres, y up): the shard has
+/// moved sideways this frame; a ray from its height straight down by `HEIGHT − dy` (sys 77 →
+/// `0x140299530`, any surface) finds `floor` (the hit's height) → the shard sits `HEIGHT` above it;
+/// no hit → it climbs or sinks by its own `dy` (its direction's vertical part × speed).
+pub fn blizzard_glide_y(y: f32, dy: f32, floor: Option<f32>) -> f32 {
+    match floor {
+        Some(h) => h + blizzard::HEIGHT / 100.0,
+        None => y + dy,
+    }
+}
+
+/// The glide ray's length below the shard, metres: `HEIGHT + dy_down` in KH1's y-down terms.
+pub fn blizzard_ray(dy: f32) -> f32 {
+    blizzard::HEIGHT / 100.0 - dy
+}
+
+/// KH1's Blizzard attack data (btltbl `0x6078` / `0x60E8` / `0x6158`, Checked (files)): power
+/// 22 / 27 / 34 + max MP, ice (element 3), flinch, radius 70 / 90 / 120, no MP charge, no re-hit.
+pub fn blizzard_attack(level: u8) -> AttackData {
+    let i = level.clamp(1, 3) as usize - 1;
+    let power = [22, 27, 34][i];
+    AttackData {
+        stat_source: 1,
+        element: 3,
+        kind_party: 3,
+        kind: 3,
+        bone: -1,
+        power_party: power,
+        mp_charge: 0,
+        clash: 5,
+        priority: 1,
+        recoil_request: 110,
+        power,
+        radius: blizzard::RADIUS[i],
+        ..Default::default()
+    }
+}
+
+/// KH1's attack data for a spell level (the hit's damage).
+pub fn spell_attack(s: u8, level: u8) -> Option<AttackData> {
+    match s {
+        spell::FIRE => Some(fire_attack(level)),
+        spell::BLIZZARD => Some(blizzard_attack(level)),
+        _ => None,
+    }
+}
+
+/// Re:CoM's Blizzard rows 0x23 / 0x2B / 0x2C as in the Steam exe (clip 0x3A, effect sets 6 / 8 /
+/// 10 of `bliz_all`; the KH1 rows' templates). Checked (exe).
+pub const RECOM_BLIZZARD_ROWS: [[u8; 16]; 3] = [
+    [0x3A, 0x01, 0x06, 0x1E, 0x0A, 0x32, 0x00, 0x00, 0x00, 0x14, 0x00, 0x01, 0x0A, 0x00, 0x0A, 0x00],
+    [0x3A, 0x01, 0x08, 0x1E, 0x0F, 0x4B, 0x00, 0x00, 0x00, 0x14, 0x00, 0x02, 0x0A, 0x00, 0x0F, 0x00],
+    [0x3A, 0x01, 0x0A, 0x1E, 0x14, 0x64, 0x00, 0x00, 0x00, 0x14, 0x00, 0x03, 0x0A, 0x00, 0x14, 0x00],
+];
+
+/// The KH1 Blizzard row: Re:CoM's row of that level (clip, blend, effect set: decision 34) with
+/// KH1's shard, in the fields Re:CoM's Blizzard case (`0x140222170` case `0x23`, Checked (decomp))
+/// reads: `+4` radius × 0.01 m (70 / 90 / 120), `+9` speed × 0.01 m a frame (20 / 30 / 40), `+0xB`
+/// kind 1 (flinch; KH1 kind 3), `+0xC` range 255 m (none: the life ends it), `+0xE` life × 100
+/// ticks (13 = 26 frames), `+0xF` = `0x80` (a KH1 row); `+5` (the case's `desc+0x1C`) kept.
+pub fn blizzard_row_bytes(recom: &[u8; 16], level: u8) -> [u8; 16] {
+    let i = level.clamp(1, 3) as usize - 1;
+    let mut b = *recom;
+    b[3] = 0;
+    b[4] = blizzard::RADIUS[i] as u8;
+    b[9] = blizzard::SPEED[i] as u8;
+    b[0xB] = 1;
+    b[0xC] = 255;
+    b[0xD] = 0;
+    b[0xE] = (blizzard::LIFE * 50.0 / 100.0) as u8;
+    b[0xF] |= FLAG_KH1;
+    b
+}
+
+/// The shard's descriptor flags: Re:CoM's Blizzard `0x4000000` (fade, not vanish, when Re:CoM kills
+/// a shot) with KH1's ends: `0x100` (a hit or a wall ends it, as KH1's shard ends on its attack's
+/// first hit) and `4` (the life ends it). No homing. Checked (decomp `0x140222170` case `0x23`,
+/// `0x140156E20`, `0x1401569B0`).
+pub const KH1_BLIZZARD_FLAGS: u64 = 0x400_0000 | 0x100 | 4;
+
 /// KH1's air cast (`0x1402A3600` state 2): a new jump arc of G`+0xE8` = 30 cm and the air
 /// velocity × G`+0xF0` = 0.5 (the fast path only scales). Checked (decomp + files).
 pub const AIR_HOP: f32 = 30.0;
@@ -240,12 +408,15 @@ pub fn fire_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
     b
 }
 
-/// The KH1 magic rows, `[spell × 3 + level − 1]` (21; this stage fills Fire's three), from
-/// Re:CoM's Fire rows (which must be [`RECOM_FIRE_ROWS`]).
-pub fn kh1_magic_table(recom_fire: &[[u8; 16]; 3]) -> Vec<[u8; 16]> {
+/// The KH1 magic rows, `[spell × 3 + level − 1]` (21; Fire's and Blizzard's three so far), from
+/// Re:CoM's rows (which must be [`RECOM_FIRE_ROWS`] and [`RECOM_BLIZZARD_ROWS`]).
+pub fn kh1_magic_table(recom_fire: &[[u8; 16]; 3], recom_blizzard: &[[u8; 16]; 3]) -> Vec<[u8; 16]> {
     let mut t = vec![[0u8; 16]; 21];
     for (i, r) in recom_fire.iter().enumerate() {
         t[i] = fire_row_bytes(r);
+    }
+    for (i, r) in recom_blizzard.iter().enumerate() {
+        t[3 + i] = blizzard_row_bytes(r, i as u8 + 1);
     }
     t
 }
@@ -323,19 +494,39 @@ pub fn add_motions(m: &mut MotionSet) {
     m.add(&[cast_req::FIRE_RELEASE], MotionInfo::new(60.0).with_flag(FlagKind::Free, 46.0, inf).with_forward_keys(&[(0.0, 0.0), (10.0, -15.0), (60.0, -15.0)]));
     m.add(&[cast_req::FIRE_AIR_WINDUP], MotionInfo::new(28.0));
     m.add(&[cast_req::FIRE_AIR_RELEASE], MotionInfo::new(52.0).with_flag(FlagKind::Free, 46.0, inf).with_forward_keys(&[(0.0, 0.0), (10.0, -42.41), (52.0, -42.41)]));
+    // Blizzard (7.5): entry 55, 86 frames, free from 68, no root travel; air entry 80, 78 frames,
+    // free from 68. Re:CoM's `p001_065` / `p001_069` (rows 0x3A / 0x3E): 43 / 39 frames at 30 fps.
+    m.add(&[cast_req::BLIZZARD], MotionInfo::new(86.0).with_flag(FlagKind::Free, 68.0, inf));
+    m.add(&[cast_req::BLIZZARD_AIR], MotionInfo::new(78.0).with_flag(FlagKind::Free, 68.0, inf));
 }
 
 /// Whether a KH1 request is one of the cast motions Re:CoM's magic action plays.
 pub fn is_cast_request(r: u16) -> bool {
-    matches!(r, cast_req::FIRE_WINDUP | cast_req::FIRE_RELEASE | cast_req::FIRE_AIR_WINDUP | cast_req::FIRE_AIR_RELEASE)
+    (0..7u8).filter(|&s| castable(s)).any(|s| [false, true].iter().any(|&a| r == cast_req::first(s, a) || r == cast_req::release(s, a)))
 }
 
+/// Fire's wind-up (its script waits while it plays).
 fn is_windup(r: u16) -> bool {
     r == cast_req::FIRE_WINDUP || r == cast_req::FIRE_AIR_WINDUP
 }
 
+/// Fire's release motion (the Fire re-cast and fast path read it).
 fn is_release(r: u16) -> bool {
     r == cast_req::FIRE_RELEASE || r == cast_req::FIRE_AIR_RELEASE
+}
+
+/// The motion a spell's script requires at its release check, ground or air.
+fn is_release_of(s: u8, r: u16) -> bool {
+    r == cast_req::release(s, false) || r == cast_req::release(s, true)
+}
+
+/// The script's wait from the command to its release check (Fire's wind-up path waits on the
+/// motion instead: 0).
+pub fn release_wait(s: u8) -> f32 {
+    match s {
+        spell::BLIZZARD => blizzard::WAIT,
+        _ => 0.0,
+    }
 }
 
 /// A KH1 magic command (the menu's, or a shortcut's in 7.12): spell 0..6, level 1..3.
@@ -408,6 +599,8 @@ pub fn trace_token(c: Option<&Cast>) -> String {
             let mut t = format!("cast {}{} f{:.0}", spell::NAMES.get(s.spell as usize).copied().unwrap_or("?"), s.level, c.age);
             if s.fast {
                 t.push_str(&format!(" fast w{:.0}", c.wait.max(0.0)));
+            } else if c.wait > 0.0 {
+                t.push_str(&format!(" w{:.0}", c.wait));
             }
             if s.air {
                 t.push_str(" air");
@@ -503,18 +696,25 @@ impl Kh1Sora {
                 self.append(req::RELEASE | request::IDLE as u32, 0.0);
             }
         } else if air {
-            self.play(FIRE_AIR_WINDUP as u32 | req::ACTION, 0.0);
-            self.append(FIRE_AIR_RELEASE as u32, 0.0);
+            // `0x1402A3600` state 2: `0x83 + spell` (Fire: then `0x8A`), the fall (blend 8).
+            self.play(cast_req::first(m.spell, true) as u32 | req::ACTION, 0.0);
+            if m.spell == spell::FIRE {
+                self.append(FIRE_AIR_RELEASE as u32, 0.0);
+            }
             self.append(req::RELEASE | request::FALL as u32, AIR_FALL_BLEND);
             // `0x1402AF960(actor, 30)`, then `+0x3C0` × 0.5.
             self.hop(AIR_HOP, pos.y);
             self.air_vel = self.air_vel * AIR_SPEED_SCALE;
         } else {
-            self.play(FIRE_WINDUP as u32 | req::ACTION, 0.0);
-            self.append(FIRE_RELEASE as u32, 0.0);
+            // `0x1402A3DB0`: `0x36 + spell` (Fire: then `0x3D`), then idle.
+            self.play(cast_req::first(m.spell, false) as u32 | req::ACTION, 0.0);
+            if m.spell == spell::FIRE {
+                self.append(FIRE_RELEASE as u32, 0.0);
+            }
             self.append(req::RELEASE | request::IDLE as u32, 0.0);
         }
-        self.cast = Some(Cast { start, wait: if fast { fire::FAST_WAIT } else { 0.0 }, age: 0.0, released: false, cancelled: false, shot: None, fresh: true });
+        let wait = if fast { fire::FAST_WAIT } else { release_wait(m.spell) };
+        self.cast = Some(Cast { start, wait, age: 0.0, released: false, cancelled: false, shot: None, fresh: true });
         self.cast_log.push(CastEvent::Started { spell: m.spell, level: m.level, fast, air });
     }
 
@@ -534,16 +734,16 @@ impl Kh1Sora {
         if c.released || c.cancelled {
             return;
         }
-        if c.start.fast {
-            if c.wait > 0.0 {
-                c.wait -= step;
-                return;
-            }
-        } else if is_windup(head) {
+        // The fast path's `L006fa(8)`, Blizzard's `L0086e(28)`: count down, a frame at a time.
+        if c.wait > 0.0 {
+            c.wait -= step;
+            return;
+        }
+        if c.start.spell == spell::FIRE && !c.start.fast && is_windup(head) {
             return;
         }
         let s = c.start;
-        if !is_release(head) {
+        if !is_release_of(s.spell, head) {
             c.cancelled = true;
             self.cast_log.push(CastEvent::Interrupted { spell: s.spell, level: s.level, frame: age, by: head });
             return;

@@ -1060,3 +1060,68 @@ fn an_air_cast_hops_30_and_halves_the_air_speed() {
     assert!((p.ours.arc.rise + crate::magic::AIR_HOP).abs() < 1e-3 && (p.ours.arc.y0 - y).abs() < 1e-3, "a 30 cm arc from here: {:?}", p.ours.arc);
     assert_eq!(p.recom.act.id, crate::magic::RECOM_MAGIC_ACTION);
 }
+
+// ---- M7 stage 7.5: Blizzard ----
+
+const BLIZZARD1: crate::magic::MagicCommand = crate::magic::MagicCommand { spell: 1, level: 1 };
+
+#[test]
+fn ground_blizzard_releases_at_28_and_frees_sora_at_68() {
+    use crate::magic::{cast_req, CastEvent, RECOM_MAGIC_ACTION};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = step_cast(&mut p, Pad::default(), Some(BLIZZARD1));
+    assert_eq!(out.cast.first(), Some(&CastEvent::Started { spell: 1, level: 1, fast: false, air: false }));
+    assert_eq!(p.ours.rec.head(), cast_req::BLIZZARD);
+    assert_eq!(p.recom.act.id, RECOM_MAGIC_ACTION);
+    // `L0086e(28)`: the shards leave 28 frames after the command (seen one handler on).
+    let mut rel = None;
+    for k in 1..40 {
+        let out = step_cast(&mut p, Pad::default(), None);
+        if let Some(CastEvent::Released { frame, .. }) = out.cast.iter().find(|e| matches!(e, CastEvent::Released { .. })) {
+            rel = Some((k, *frame));
+            break;
+        }
+    }
+    assert_eq!(rel, Some((29, 28.0)));
+    assert_eq!(p.recom.releases.len(), 1);
+    assert_eq!(p.ours.rec.head(), cast_req::BLIZZARD, "still the cast motion (no second motion)");
+    // Locked until the motion's free key (68), Re:CoM's action ended at its end (86).
+    let mut free_at = None;
+    for k in 30..100 {
+        step_cast(&mut p, Pad::default(), None);
+        if free_at.is_none() && !p.ours.lock {
+            free_at = Some(k);
+        }
+    }
+    assert!(matches!(free_at, Some(68) | Some(69)), "free near frame 68: {free_at:?}");
+    assert_eq!(p.recom.cast_ends, 1);
+    assert!(p.ours.cast.is_none());
+}
+
+#[test]
+fn blizzard_is_never_a_fast_cast_and_a_cut_cast_pays_nothing() {
+    use crate::magic::CastEvent;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(BLIZZARD1));
+    // Re:CoM runs something else at frame 10 (a hit): the next KH1 frame drops the cast.
+    for _ in 0..10 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = p.ours.frame(&mut p.recom, &FrameInput::default(), true);
+    assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Interrupted { .. })), "{:?}", out.cast);
+    for _ in 0..40 {
+        assert!(!released(&step_cast(&mut p, Pad::default(), None)));
+    }
+    assert!(p.recom.releases.is_empty(), "no shards, no MP");
+    // While a Blizzard plays (before its free key) a Fire is refused: only Fire's own release
+    // motion takes a re-cast.
+    step_cast(&mut p, Pad::default(), Some(BLIZZARD1));
+    for _ in 0..40 {
+        let out = step_cast(&mut p, Pad::default(), Some(FIRE1));
+        assert!(!out.cast.iter().any(|e| matches!(e, CastEvent::Started { .. })));
+    }
+}

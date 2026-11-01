@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn fire_rows_keep_recoms_clip_and_effect_set_and_take_kh1s_ball() {
-    let t = kh1_magic_table(&RECOM_FIRE_ROWS);
+    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS);
     assert_eq!(t.len(), 21);
     for lv in 1..=3u8 {
         let i = table_index(spell::FIRE, lv).unwrap();
@@ -19,11 +19,11 @@ fn fire_rows_keep_recoms_clip_and_effect_set_and_take_kh1s_ball() {
         assert_eq!(r[0xF] & FLAG_KH1, FLAG_KH1);
         assert_eq!(recom_base_row(spell::FIRE, lv), Some([0x22, 0x29, 0x2A][lv as usize - 1]));
     }
-    // Blizzard … Aero come with their stages.
-    assert!(t[3..].iter().all(|r| r[0] == 0));
+    // Thunder … Aero come with their stages.
+    assert!(t[6..].iter().all(|r| r[0] == 0));
     assert_eq!(table_index(spell::AERO, 3), Some(20));
     assert_eq!(table_index(spell::FIRE, 0), None);
-    assert!(castable(spell::FIRE) && !castable(spell::BLIZZARD));
+    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && !castable(spell::THUNDER));
 }
 
 #[test]
@@ -138,4 +138,80 @@ fn fire_retarget_is_kh1s_pick() {
     assert_eq!(cos([1.0, 0.0, 0.0], [2.0, 0.0, 0.0]), 1.0);
     let (a, b) = ([1.0, 2.0, 3.0], [-2.0, 0.5, 1.0]);
     assert!((cos(a, b) - cos([a[0], -a[1], -a[2]], [b[0], -b[1], -b[2]])).abs() < 1e-6);
+}
+
+#[test]
+fn blizzard_rows_and_numbers_are_kh1s() {
+    let t = kh1_magic_table(&RECOM_FIRE_ROWS, &RECOM_BLIZZARD_ROWS);
+    for lv in 1..=3u8 {
+        let r = &t[table_index(spell::BLIZZARD, lv).unwrap()];
+        let base = &RECOM_BLIZZARD_ROWS[lv as usize - 1];
+        // Re:CoM's clip 0x3A and its Blizzard / Blizzara / Blizzaga sets 6 / 8 / 10.
+        assert_eq!(&r[..3], &base[..3]);
+        assert_eq!(r[2], [6, 8, 10][lv as usize - 1]);
+        assert_eq!(r[5], base[5]);
+        // KH1: radius 70 / 90 / 120 cm, 20 / 30 / 40 cm a frame, 26 frames (13 × 100 ticks).
+        let i = lv as usize - 1;
+        assert_eq!((r[4], r[9], r[0xB], r[0xC], r[0xD], r[0xE]), ([70, 90, 120][i], [20, 30, 40][i], 1, 255, 0, 13));
+        assert_eq!(r[0xF] & FLAG_KH1, FLAG_KH1);
+        assert_eq!(recom_base_row(spell::BLIZZARD, lv), Some([0x23, 0x2B, 0x2C][i]));
+        let a = blizzard_attack(lv);
+        assert_eq!((a.power, a.stat_source, a.element, a.kind, a.mp_charge, a.radius), ([22, 27, 34][i], 1, 3, 3, 0, [70.0, 90.0, 120.0][i]));
+    }
+    assert_eq!((cost(spell::FIRE), cost(spell::BLIZZARD), cost(spell::THUNDER)), (30, 30, 100));
+    assert_eq!(release_wait(spell::BLIZZARD), 28.0);
+    assert_eq!(KH1_BLIZZARD_FLAGS & 0x104, 0x104, "a hit, a wall or the life ends a shard");
+    assert_eq!(KH1_BLIZZARD_FLAGS & 0x8000_1000, 0, "no homing");
+    assert_eq!((cast_req::first(spell::BLIZZARD, false), cast_req::first(spell::BLIZZARD, true)), (0x37, 0x84));
+    assert_eq!((cast_req::release(spell::BLIZZARD, false), cast_req::release(spell::FIRE, true)), (0x37, 0x8A));
+    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x38));
+    assert_eq!(spell_attack(spell::BLIZZARD, 2).map(|a| a.power), Some(27));
+}
+
+#[test]
+fn blizzard_shards_are_kh1s_cone() {
+    for yaw in [0.0f32, 1.0, -2.5] {
+        let s = blizzard_shards(yaw);
+        let f = [yaw.sin(), 0.0, yaw.cos()];
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        // The straight one last, from the Keyblade point.
+        assert_eq!(s[6].0, [0.0; 3]);
+        assert!((dot(s[6].1, f) - 1.0).abs() < 1e-6);
+        let mut ups = 0;
+        for (off, dir) in &s[..6] {
+            // 22.5° off the facing (the script's 0.924), a unit vector (0.383² + 0.924² ≈ 1).
+            assert!((dot(*dir, f) - 0.924).abs() < 1e-4, "{dir:?}");
+            assert!((dot(*dir, *dir) - 1.0).abs() < 1e-3);
+            // Starting 19.15 cm off the axis, square to it, on the side the shard flies to.
+            assert!(dot(*off, f).abs() < 1e-6);
+            assert!((dot(*off, *off).sqrt() - 0.1915).abs() < 1e-4);
+            assert!(dot(*off, *dir) > 0.0);
+            if dir[1] > 0.01 {
+                ups += 1;
+            }
+        }
+        // Every 60° about the axis: two level, two up, two down.
+        assert_eq!(ups, 2);
+        assert_eq!(s[..6].iter().filter(|x| x.1[1].abs() < 1e-6).count(), 2);
+        for i in 0..6 {
+            let (a, b) = (s[i].1, s[(i + 1) % 6].1);
+            let (ra, rb) = ([a[0] - 0.924 * f[0], a[1], a[2] - 0.924 * f[2]], [b[0] - 0.924 * f[0], b[1], b[2] - 0.924 * f[2]]);
+            assert!((cos_between(ra, rb) - 0.5).abs() < 1e-3, "60° apart");
+        }
+    }
+    fn cos_between(a: [f32; 3], b: [f32; 3]) -> f32 {
+        retarget::cos(a, b)
+    }
+}
+
+#[test]
+fn blizzard_glide_is_kh1s() {
+    // A level shard (dy 0) with the floor within 50 cm below sits 50 cm above it; the ray is 50 cm.
+    assert!((blizzard_ray(0.0) - 0.5).abs() < 1e-6);
+    assert!((blizzard_glide_y(1.0, 0.0, Some(0.62)) - 1.12).abs() < 1e-6);
+    // No floor within reach: it keeps its own slope (a sinking shard 15 cm a frame).
+    assert!((blizzard_glide_y(1.0, -0.15, None) - 0.85).abs() < 1e-6);
+    // A sinking shard reaches further (KH1: 50 + its fall this frame), a rising one less.
+    assert!((blizzard_ray(-0.15) - 0.65).abs() < 1e-6);
+    assert!((blizzard_ray(0.15) - 0.35).abs() < 1e-6);
 }
