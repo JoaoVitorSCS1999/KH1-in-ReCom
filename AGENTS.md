@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 80: KH1 menu sounds: se000's padding left out, version 0.39.2 (2026-10-31)
+
+- Owner's asset run of 0.39.1: "se000.win32.scd: SCD says 15277472 bytes, has 15278752" (refused).
+- The asset holds 1280 bytes after the SCD's own size word; the step now keeps the SCD's said size
+  (the bank Re:CoM registers) and notes the padding. Checked (owner's run); the padding being
+  padding: Assumption (zeros after the last stream).
+
+---
+
 ## Stage 79: KH1 menu sounds: entries of se000's one SCD, version 0.39.1 (2026-10-31)
 
 - Owner's asset run of 0.39.0: "amusic/se000.dat has none of KH1's menu sounds (its sound assets:

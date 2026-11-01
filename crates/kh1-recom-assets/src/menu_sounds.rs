@@ -176,8 +176,10 @@ pub fn scd_info(d: &[u8]) -> Result<ScdInfo> {
     if d[0xC] != 0 {
         return Err(Error::Format("big-endian SCD".into()));
     }
+    // The file-size word: the asset may carry padding after it (the owner's `se000.win32.scd`:
+    // 15 277 472 bytes said, 15 278 752 held, 2026-11-01); the step keeps the said size.
     let size = u32_at(0x10)? as usize;
-    if size != d.len() {
+    if size > d.len() || size < 0x30 {
         return Err(Error::Format(format!("SCD says {size} bytes, has {}", d.len())));
     }
     let t = u16_at(0xE)? as usize;
@@ -229,7 +231,11 @@ pub fn take(assets: &[HdAsset], notes: &mut Vec<String>) -> Result<Taken> {
             notes.push(format!("{}: {} sounds, so no entry {id} ({what}); Re:CoM's sound stays for it", a.name, info.sounds));
         }
     }
-    Ok(Taken { name: a.name.clone(), data: a.data.clone(), info })
+    let size = u32::from_le_bytes([a.data[0x10], a.data[0x11], a.data[0x12], a.data[0x13]]) as usize;
+    if size < a.data.len() {
+        notes.push(format!("{}: {} bytes after the SCD's {size} (padding) left out", a.name, a.data.len() - size));
+    }
+    Ok(Taken { name: a.name.clone(), data: a.data[..size].to_vec(), info })
 }
 
 /// The menu ids the bank has an entry for.
@@ -392,7 +398,10 @@ mod tests {
         assert!(scd_info(&v9).is_err());
         let mut short = d.clone();
         short.pop();
-        assert!(scd_info(&short).is_err(), "the file-size word must match");
+        assert!(scd_info(&short).is_err(), "the file-size word must fit");
+        let mut padded = d.clone();
+        padded.extend([0u8; 0x500]);
+        assert!(scd_info(&padded).is_ok(), "padding after the SCD is allowed");
     }
 
     #[test]
