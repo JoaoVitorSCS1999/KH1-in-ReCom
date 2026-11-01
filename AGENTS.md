@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 59: Fire's release step as KH1, version 0.27.1 (2026-10-31)
+
+> Decision 38: Fire's release step is KH1's 15 cm curve
+
+- In the existing root-step wrapper (`0x14024DCA0`), during a KH1 cast playing row 0x38
+  (`p001_063`), Re:CoM's per-update travel is replaced by KH1's curve (−15 cm at frame 10, −10 cm
+  at 60) along Re:CoM's line. Only Fire's ground release differs (air and other casts match;
+  Checked, both games' motion files). Not seen in game.
+
+---
+
 ## Stage 58: KH1 HUD H3, Re:CoM's HUD hidden, version 0.27.0 (2026-10-31)
 
 - At `hud = kh1`: Re:CoM's HP gauge, FRIENDS row and prize gauge (EXP+ / NEXT LV / Moogle

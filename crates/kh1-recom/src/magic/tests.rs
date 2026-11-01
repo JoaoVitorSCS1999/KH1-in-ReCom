@@ -95,6 +95,56 @@ fn cast_motions_are_kh1s_frame_counts_and_windows() {
     assert!(is_cast_request(0x36) && is_cast_request(0x8A) && !is_cast_request(0x3E) && !is_cast_request(200));
 }
 
+/// Decision 38: the ground release's travel in game is KH1's curve, not Re:CoM's clip's 40.5 cm.
+#[test]
+fn fire_release_root_is_kh1s_curve_on_recoms_line() {
+    use kh1_core::Vec3;
+    use release_root::{kh1_z, travel, Clock};
+    // The record (the tests' fake Re:CoM) and the wrapper share KH1's keys.
+    let mut m = MotionSet::default();
+    add_motions(&mut m);
+    for t in [0.0, 3.0, 10.0, 33.5, 60.0] {
+        assert!((m.info(0x3D).unwrap().root_at(t).z - kh1_z(t)).abs() < 1e-4, "{t}");
+    }
+    assert_eq!((kh1_z(-1.0), kh1_z(10.0), kh1_z(60.0), kh1_z(70.0)), (0.0, -15.0, -10.0, -10.0));
+    // Sora faces +x in Re:CoM (yaw π/2). Re:CoM's clip steps him back 4.047 cm an update over its
+    // first KH1 frames (−x); KH1's step is 1.5 cm, on the same line.
+    let fwd = Vec3::from_yaw(std::f32::consts::FRAC_PI_2);
+    let back = travel(Vec3::new(-0.04047, 0.0, 0.0), fwd, 2.0, 3.0);
+    assert!((back.x + 0.015).abs() < 1e-6 && back.y == 0.0 && back.z.abs() < 1e-6, "{back:?}");
+    // After frame 10 both drift forward 0.1 cm a frame (KH1's travel, Re:CoM's line).
+    let fwd_step = travel(Vec3::new(0.001, 0.0, 0.0), fwd, 20.0, 21.0);
+    assert!((fwd_step.x - 0.001).abs() < 1e-6, "{fwd_step:?}");
+    // Re:CoM's clip holds still from its frame 29 (KH1 58); KH1 still drifts 0.2 cm to 60: along the
+    // facing.
+    let tail = travel(Vec3::ZERO, fwd, 58.0, 60.0);
+    assert!((tail.x - 0.002).abs() < 1e-6 && tail.z.abs() < 1e-6, "{tail:?}");
+    // The update that spans the key at 10: −1.5 back, +0.1 forward.
+    let across = travel(Vec3::new(-0.02, 0.0, 0.0), fwd, 9.0, 11.0);
+    assert!((across.x + 0.014).abs() < 1e-6, "{across:?}");
+    // The whole release is KH1's −10 cm (Re:CoM's clip: −35.7 cm), however the updates fall.
+    let mut c = Clock::new();
+    let mut total = 0.0;
+    let mut t = 0.0;
+    while t < 60.0 {
+        t += 1.0;
+        let (a, b) = c.span(1, t);
+        total += travel(Vec3::new(-0.01, 0.0, 0.0), fwd, a, b).x;
+    }
+    assert!((total + 0.10).abs() < 1e-5, "{total}");
+    // A clip Re:CoM starts one step on still hands out frame 0 → 1; a restarted clip (the Fire
+    // chain) starts again from 0; another controller too; past the end it holds at 60.
+    let mut c = Clock::new();
+    assert_eq!(c.span(1, 1.0), (0.0, 1.0));
+    assert_eq!(c.span(1, 2.0), (1.0, 2.0));
+    assert_eq!(c.span(1, 15.0), (2.0, 15.0));
+    assert_eq!(c.span(1, 0.0), (0.0, 0.0));
+    assert_eq!(c.span(2, 1.0), (0.0, 1.0));
+    assert_eq!(c.span(2, 75.0), (1.0, 60.0));
+    c.reset();
+    assert_eq!(c.span(2, 3.0), (0.0, 3.0));
+}
+
 #[test]
 fn trace_tokens() {
     assert_eq!(trace_token(None), "cast -");

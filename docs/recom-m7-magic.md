@@ -572,7 +572,7 @@ forward (to −10 cm at frame 60); 7.4's motion data holds −15 cm. Fix to KH1'
   counts_and_windows` (the curve at 0 / 5 / 10 / 20 / 46 / 60), `movement::tests::fire_release_
   steps_back_15_then_forward_to_10_like_kh1` (the per-frame travel the fake Re:CoM's root step hands
   out: −1.5 cm steps, then +0.1 cm steps).
-- **What this changes in game: nothing yet.** The record's root keys drive only the tests' fake
+- **What this changed in game (7.4c): nothing.** The record's root keys drive only the tests' fake
   Re:CoM; in game Sora's travel is Re:CoM's own clip `p001_063`'s root (the row is played with root
   motion, `rows::row_for`, decision 17's delay). Re:CoM's clip (bone 0 translation of
   `PL0001.ANN`, read with `recom_ann.py`): **back 40.5 cm by its frame 5 (KH1 frame 10), then
@@ -586,13 +586,49 @@ forward (to −10 cm at frame 60); 7.4's motion data holds −15 cm. Fix to KH1'
   travel into the idle (0.1 cm): the fake ends at −8.6 cm, not −10. Whether Re:CoM's root step
   does the same in game (a clip started at t = 1 handing no travel for 0→1): not checked. Assumption.
 
-Open question (7.4c): **Re:CoM's ground release clip steps Sora back 40.5 cm, not KH1's 15 cm.**
-(a) keep Re:CoM's clip travel (as built; KH1's frames and windows, Re:CoM's step depth);
-(b) give the release KH1's travel through the root-step wrapper we already have on `0x14024DCA0`
-(for the cast's release clip only: Re:CoM's travel for the update replaced by KH1's root curve
-delta along the same direction; no new hook, a few float ops per frame of the release);
-(c) re-bake `p001_063`'s root at the asset step from KH1's entry 57 (the clip's other bones stay
-Re:CoM's edit; a new clip slot for the KH1 setting, the Re:CoM setting keeps its own).
+Open question (7.4c), **answered by decision 38 (option (b))**: "Fire's release step is KH1's 15 cm
+curve (replacing Re:CoM's clip travel in the root-step wrapper)". Built below (M7 f1).
+
+### Built (M7 f1, decision 38): KH1's curve in the root-step wrapper
+
+- **Where (no new hook):** our wrapper on Re:CoM's root step `0x14024DCA0` (decision 17's; bytes
+  `0F 28 81 A0 00 00 00`, `sites::ATTACK_HOOKS`). For the main Sora in **a KH1 cast** (action `0x13`
+  with `+0x3C8` in our table) whose playing row (`player+0x474`, written by `0x1401F7180`) is **0x38**
+  (`p001_063`, the ground release, also the fast path's): Re:CoM's root position for the update
+  (`out` = the anchor `ctrl+0xF0` + its clip's travel) becomes the anchor + **KH1's travel between
+  the clip's time at the last update and its time now** (`ctrl+0x3C`, ticks, 50 a KH1 frame;
+  `crate::magic::release_root`). Then decision 17's one-update delay applies to it as to every KH1
+  root travel. Every other row and action: Re:CoM's own travel stands.
+- **The line:** Re:CoM's clip moves only along the model's z (bone 0's x / y constant 0), so its
+  own travel of the update gives the line (`0x14024C960` turns it by the model's yaw); it is pointed
+  along Sora's facing (body `+0x54`, (sin, 0, cos)), and KH1's z difference (cm × 0.01) is put on it.
+  When Re:CoM's clip holds still (its frame 29 → 30 = KH1 58 → 60) the facing is the line.
+- **The clock** (`release_root::Clock`): the span is (the clip's last time, its time now); a new
+  clip (first seen, another controller, or a time that went back: the Fire chain restarts it)
+  starts from frame 0, so a release Re:CoM starts one step on (a queued motion) still hands out
+  KH1's frame 0 → 1. Reset whenever the wrapper sees Sora in anything but that clip.
+- **Every other spell checked:** the air release `0x8A` and `p001_067` are the same curve (−42.41 cm
+  by frame 10, then still); the wind-ups and the Blizzard / Thunder / Cure / Gravity / Stop / Aero
+  motions (entries 54, 55, 56, 79, 80, 81) have no root travel in KH1, and their clips (`p001_062`,
+  `064`, `065`, `066`, `068`, `069`) none in Re:CoM, played without root motion. Checked (files:
+  `kh1_mset.py` on `xa_ex_0010.mset`, `recom_ann.py` on `PL0001.ANN`). Nothing else to change.
+- **Per frame:** one atomic swap on the wrapper's non-cast path (it already ran there); a few float
+  ops per update of the release clip.
+- **Log:** the first 20 updates: `magic: fire release root: KH1 frames t0 -> t1: Re:CoM's clip
+  (x,y,z) -> KH1's (x,y,z)`.
+- **1:1:** Checked (files + tests: `magic::tests::fire_release_root_is_kh1s_curve_on_recoms_line`):
+  KH1's keys at 0 / 3 / 10 / 33.5 / 60, the back step 1.5 cm an update on Re:CoM's line, the drift
+  0.1 cm, the 0.2 cm tail after Re:CoM's clip stops, the update spanning frame 10, the whole release
+  −10 cm, the clock's restarts. **Assumptions:** (1) the model's +z is Sora's facing (the clip steps
+  him back: Re:CoM's travel and KH1's agree in sign); (2) `ctrl+0x3C` at the wrapper is the clip's
+  time after this update's advance (`0x14024CCC0` advances it before `0x14024C960` computes the
+  travel); (3) the fast path's 8-frame blend: KH1 blends the root position of the old and new
+  motions (`kh1-anim`'s `blend_frame`), ours hands the new clip's KH1 travel from its frame 0 (the
+  chained release is already back 15 cm when the next starts: KH1's blended travel over those 8
+  frames is not modelled). **Not checked:** in game.
+- **In-game check:** ground Fire: Sora steps back about 15 cm (a short hop back, not the old 40 cm)
+  during the first sixth of a second, then creeps forward 5 cm; the log's `fire release root` lines
+  show Re:CoM's ~0.040 m steps turned into KH1's 0.015 m. Air Fire, the other spells: unchanged.
 
 ## Stage 7.7: Cure / Cura / Curaga
 

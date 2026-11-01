@@ -832,13 +832,20 @@ pub unsafe extern "win64" fn root_step(ctrl: usize, out: *mut [f32; 4], yaw: *mu
     let a: u32 = rd(pl + p::ACTION);
     let cast = a == crate::magic::RECOM_MAGIC_ACTION && super::magic::kh1_cast(pl);
     if a != crate::movement::action::AVOID && a != crate::movement::action::ATTACK && !cast {
+        super::magic::release_root_off();
         return;
     }
     // `out` is an absolute position (the model's position `ctrl+0xF0` + this update's travel,
     // `0x14024C960`), not a travel: delay the travel, keep the anchor.
     let v = &mut *out;
-    let root = Vec3::new(v[0], v[1], v[2]);
+    let mut root = Vec3::new(v[0], v[1], v[2]);
     let anchor = rd_vec(ctrl + 0xF0);
+    if cast {
+        // Decision 38: the ground Fire release travels KH1's curve, not Re:CoM's clip's.
+        root = super::magic::release_root(pl, ctrl, anchor, root);
+    } else {
+        super::magic::release_root_off();
+    }
     if let Ok(mut d) = ROOT.lock() {
         let t = d.position(ctrl, TICK.load(Ordering::Relaxed), anchor, root, crate::movement::ROOT_DELAY_MAX_GAP);
         debug(|| format!("root a={a} id={id} anchor=({:.3},{:.3},{:.3}) root=({:.3},{:.3},{:.3}) out=({:.3},{:.3},{:.3})", anchor.x, anchor.y, anchor.z, root.x, root.y, root.z, t.x, t.y, t.z, id = rd::<u32>(pl + field::ATTACK_ID)));

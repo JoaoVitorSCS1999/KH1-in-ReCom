@@ -328,6 +328,51 @@ pub fn take_command() -> Option<MagicCommand> {
     PENDING.try_lock().ok().and_then(|mut g| g.take())
 }
 
+/// The ground Fire release's clock (decision 38, `crate::magic::release_root`), and whether it has
+/// seen the release clip since it was last reset (one atomic load otherwise).
+static RELEASE_CLOCK: Mutex<mg::release_root::Clock> = Mutex::new(mg::release_root::Clock::new());
+static RELEASE_SEEN: AtomicBool = AtomicBool::new(false);
+static RELEASE_LINES: AtomicU32 = AtomicU32::new(20);
+/// The motion controller's time (`ctrl+0x3C`, ticks: 50 a 60 Hz frame; `0x14024CCC0` reads it,
+/// `win::movement`'s motion frame too). Checked (decomp).
+const CTRL_TIME: usize = 0x3C;
+
+/// Decision 38: in the root-step wrapper, for an update of Sora's KH1 cast that plays the ground
+/// release clip (row 0x38, `p001_063`): Re:CoM's root position for the update (the anchor + its
+/// clip's travel) becomes the anchor + **KH1's** travel between the clip's last time and its time
+/// now (`crate::magic::release_root`), on the line of Re:CoM's own travel. Any other row of a cast:
+/// Re:CoM's travel stands (Checked (files): the other cast clips carry KH1's travel or none).
+pub unsafe fn release_root(pl: usize, ctrl: usize, anchor: kh1_core::Vec3, root: kh1_core::Vec3) -> kh1_core::Vec3 {
+    if rd::<u32>(pl + p::ROW) != mg::release_root::RECOM_ROW {
+        release_root_off();
+        return root;
+    }
+    let Ok(mut c) = RELEASE_CLOCK.try_lock() else { return root };
+    RELEASE_SEEN.store(true, Ordering::Relaxed);
+    let (t0, t1) = c.span(ctrl, crate::units::units_to_frames(rd(ctrl + CTRL_TIME)));
+    drop(c);
+    let body: usize = rd(pl + p::BODY);
+    let yaw: f32 = if body != 0 { rd(body + mv::body::YAW) } else { 0.0 };
+    let travel = mg::release_root::travel(root - anchor, kh1_core::Vec3::from_yaw(yaw), t0, t1);
+    if RELEASE_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        let r = root - anchor;
+        log(&format!(
+            "magic: fire release root: KH1 frames {t0:.1} -> {t1:.1}: Re:CoM's clip ({:.4},{:.4},{:.4}) -> KH1's ({:.4},{:.4},{:.4})",
+            r.x, r.y, r.z, travel.x, travel.y, travel.z
+        ));
+    }
+    anchor + travel
+}
+
+/// Not the release clip this update (the root-step wrapper's other paths): its clock starts again.
+pub fn release_root_off() {
+    if RELEASE_SEEN.swap(false, Ordering::Relaxed) {
+        if let Ok(mut c) = RELEASE_CLOCK.try_lock() {
+            c.reset();
+        }
+    }
+}
+
 /// The KH1 row `+0x3C8` points at, if it points into our magic table: a KH1 cast.
 pub unsafe fn kh1_cast(pl: usize) -> bool {
     let Some(t) = TABLE.get() else { return false };

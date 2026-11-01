@@ -1158,7 +1158,7 @@ pub fn spell_damage(data: &AttackData, max_mp: i32, def: &DefenderStats, rng: &m
 pub fn add_motions(m: &mut MotionSet) {
     let inf = f32::INFINITY;
     m.add(&[cast_req::FIRE_WINDUP], MotionInfo::new(28.0));
-    m.add(&[cast_req::FIRE_RELEASE], MotionInfo::new(60.0).with_flag(FlagKind::Free, 46.0, inf).with_forward_keys(&[(0.0, 0.0), (10.0, -15.0), (60.0, -10.0)]));
+    m.add(&[cast_req::FIRE_RELEASE], MotionInfo::new(60.0).with_flag(FlagKind::Free, 46.0, inf).with_forward_keys(&release_root::KH1_KEYS));
     m.add(&[cast_req::FIRE_AIR_WINDUP], MotionInfo::new(28.0));
     m.add(&[cast_req::FIRE_AIR_RELEASE], MotionInfo::new(52.0).with_flag(FlagKind::Free, 46.0, inf).with_forward_keys(&[(0.0, 0.0), (10.0, -42.4096), (52.0, -42.4096)]));
     // Blizzard (7.5): entry 55, 86 frames, free from 68, no root travel; air entry 80, 78 frames,
@@ -1185,6 +1185,103 @@ pub fn add_motions(m: &mut MotionSet) {
     // 0x3C / 0x89 map to them).
     m.add(&[cast_req::AERO], MotionInfo::new(68.0));
     m.add(&[cast_req::AERO_AIR], MotionInfo::new(68.0));
+}
+
+/// The ground Fire release's root travel (decision 38: "Fire's release step is KH1's 15 cm curve",
+/// replacing Re:CoM's clip travel in the root-step wrapper; `docs/recom-m7-magic.md` § 7.4c).
+///
+/// - **KH1** (`xa_ex_0010.mset` request `0x3D` → entry 57, root helper read with `kh1_mset.py`):
+///   linear keys (0, 0) (10, −15) (60, −10) cm along the actor's z (−1.5 cm a frame over frames
+///   0–10, then +0.1 cm a frame to −10 at 60); x and y stay 0. Checked (files).
+/// - **Re:CoM** plays clip `p001_063` (row 0x38) for it: bone 0's z goes 0 → −0.4047 m by its frame
+///   5 (KH1 frame 10), then +0.002 m a clip frame to −0.3567 at 29 (KH1 58), x and y constant 0
+///   (`recom_ann.py`). Its forward drift is KH1's 0.1 cm a frame; only the step back is 2.7 × deeper
+///   (40.5 cm, not 15). Checked (files).
+/// - **Every other cast motion matches already** (`kh1_mset.py` / `recom_ann.py`, Checked (files)):
+///   the air release `0x8A` (entry 82, −42.41 cm by frame 10, then still) and `p001_067` (row 0x3C,
+///   −0.4241 m by its frame 5, then still) are the same curve; the wind-ups (`0x36` / `0x83`,
+///   entries 54 / 79) and Blizzard / Thunder / Cure / Gravity / Stop / Aero's motions (entries 55,
+///   56, 80, 81) have no root travel in KH1, and their clips (`p001_062`, `064`, `065`, `066`, `068`,
+///   `069`) none in Re:CoM (bone 0 constant 0; their rows are played without root motion,
+///   `rows::row_for`).
+///
+/// In game: the root-step wrapper (`0x14024DCA0`, decision 17's) replaces Re:CoM's travel of each
+/// update of row 0x38 in a KH1 cast with KH1's curve between the clip's last time and its time now
+/// (`ctrl+0x3C`, 50 ticks a KH1 frame), along the line Re:CoM's own travel takes (the model's z);
+/// the one-update delay then applies to it as to every KH1 root travel.
+pub mod release_root {
+    use kh1_core::Vec3;
+
+    /// KH1's root keys of the ground release (frame, cm along the actor's z).
+    pub const KH1_KEYS: [(f32, f32); 3] = [(0.0, 0.0), (10.0, -15.0), (60.0, -10.0)];
+    /// Re:CoM's row of the ground release (`p001_063`).
+    pub const RECOM_ROW: u32 = crate::rows::row::FIRE_RELEASE;
+
+    /// KH1's root z (cm) at KH1 frame `t` (linear between the keys, held outside them).
+    pub fn kh1_z(t: f32) -> f32 {
+        let k = &KH1_KEYS;
+        if t <= k[0].0 {
+            return k[0].1;
+        }
+        for w in k.windows(2) {
+            let ((t0, z0), (t1, z1)) = (w[0], w[1]);
+            if t <= t1 {
+                return z0 + (z1 - z0) * (t - t0) / (t1 - t0);
+            }
+        }
+        k[k.len() - 1].1
+    }
+
+    /// The world travel (Re:CoM metres) for an update of the release from KH1 frame `t0` to `t1`:
+    /// KH1's z difference along the model's z axis. The axis is the line of Re:CoM's own travel this
+    /// update (`recom`: its clip moves only along z), pointed along Sora's facing `fwd` (Re:CoM's
+    /// (sin yaw, 0, cos yaw)); with no travel of Re:CoM's (its clip holds still after its frame 29),
+    /// the facing itself. Assumption: the model's +z is Sora's facing (the clip steps him back).
+    pub fn travel(recom: Vec3, fwd: Vec3, t0: f32, t1: f32) -> Vec3 {
+        let dz = (kh1_z(t1) - kh1_z(t0)) * crate::units::METRES_PER_UNIT;
+        let flat = Vec3::new(recom.x, 0.0, recom.z);
+        let axis = if flat.horizontal_length() > 1e-5 {
+            let u = flat.normalized();
+            if u.dot(fwd) < 0.0 {
+                u * -1.0
+            } else {
+                u
+            }
+        } else {
+            fwd.flat().normalized()
+        };
+        axis * dz
+    }
+
+    /// The release clip's time at the last update the wrapper saw, so each update's span is known.
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Clock {
+        ctrl: usize,
+        t: f32,
+        live: bool,
+    }
+
+    impl Clock {
+        pub const fn new() -> Clock {
+            Clock { ctrl: 0, t: 0.0, live: false }
+        }
+
+        /// The span (t0, t1) of this update (KH1 frames; `t1` = the clip's time now, at most 60).
+        /// A new clip (none seen, another controller, or a time that went back: the Fire chain
+        /// restarts the clip) starts from frame 0, so a clip Re:CoM starts one step on (a queued
+        /// motion, decision 17) still hands out KH1's travel of frame 0 → 1.
+        pub fn span(&mut self, ctrl: usize, t1: f32) -> (f32, f32) {
+            let t1 = t1.clamp(0.0, KH1_KEYS[KH1_KEYS.len() - 1].0);
+            let t0 = if self.live && self.ctrl == ctrl && self.t <= t1 { self.t } else { 0.0 };
+            *self = Clock { ctrl, t: t1, live: true };
+            (t0, t1)
+        }
+
+        /// Not the release clip this update: the next one starts from frame 0.
+        pub fn reset(&mut self) {
+            self.live = false;
+        }
+    }
 }
 
 /// Whether a KH1 request is one of the cast motions Re:CoM's magic action plays.
