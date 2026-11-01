@@ -1,5 +1,5 @@
 //! The camp menu's 8th entry, "KH1" (M7 stage 7.13; "Keyblades" before it, decision 25), its
-//! submenu (Keyblades, Customize) and their pages, run by Re:CoM's own camp code. Pure rules:
+//! submenu (Items, Customize) and their pages, run by Re:CoM's own camp code. Pure rules:
 //! `crate::keyblades`, `crate::customize`. Notes: `docs/recom-keyblade-equip.md` (7.13 section).
 //!
 //! - Entry: a `C2DSeqCtrl` + `C2DFnt` made with the calls Re:CoM's entry build `0x1400E3DE0`
@@ -13,9 +13,10 @@
 //!   1), with the Deck submenu's input, cursor set, sounds, breadcrumb (header item 1) and fades
 //!   (update states 0x10 / 0x1D / 0x22 / 0x23 / 0x34 / 0x35). Leaving it, Re:CoM's state 0x4C
 //!   relabels its 7 entries itself (level 1 → 0).
-//! - Pages: Keyblades, Customize and Items (M8 stage 8a.2) follow the entry-4 page (`0x1400EB7E0`
-//!   / draw `0x1400E6DF0`) with Re:CoM's classes: two panels, `CButton` rows, a `CButtonCursor`, a
-//!   `CScrollBar` (Keyblades), label / value rows and the help line. Their state is ours ([`SUB`]); they never
+//! - Pages: Items (M8 stage 8a.2; Sora's list starts with his Keyblade slot, which shows the
+//!   Keyblade list on the same page) and Customize follow the entry-4 page (`0x1400EB7E0` / draw
+//!   `0x1400E6DF0`) with Re:CoM's classes: two panels, `CButton` rows, a `CButtonCursor`, a
+//!   `CScrollBar` (the Keyblade list), label / value rows and the help line. Their state is ours ([`SUB`]); they never
 //!   write camp fields Re:CoM's pages use.
 //!
 //! Nothing here runs in field or battle frames: the camp exists only while the pause menu is
@@ -774,7 +775,7 @@ impl Sub {
             }
             SubState::ToPage => {
                 if button0_ended(camp) {
-                    let row = sub::ROWS.get(self.row as usize).copied().unwrap_or(sub::Row::Keyblades);
+                    let row = sub::ROWS.get(self.row as usize).copied().unwrap_or(sub::Row::Items);
                     self.page = Some(Page::open(camp, row));
                     self.state = SubState::InPage;
                 }
@@ -818,6 +819,8 @@ impl Sub {
 
 /// What a page lists.
 enum Content {
+    /// The Keyblade list, shown from the Items page's Keyblade slot (that page's content waits in
+    /// [`Page::under`]).
     Keyblades {
         cards: Vec<u16>,
         equipped: u16,
@@ -856,6 +859,8 @@ struct Page {
     stat_rows: [usize; 3],
     list: list::List,
     content: Content,
+    /// The Items screen while its Keyblade list is shown; cancel there brings it back.
+    under: Option<Content>,
 }
 
 /// An item's name: KH1's word as the command menu's Items list shows it (`kh1-command-menu.json`),
@@ -871,6 +876,8 @@ fn item_word(item: u8) -> Vec<u8> {
 fn item_label(l: ip::Label) -> Vec<u8> {
     use ip::{Command as C, Label as L, Owner as O};
     let t: &[u8] = match l {
+        // SAFETY: Re:CoM's card-name call (reads its message tables), as the Keyblade list's rows.
+        L::Keyblade => return unsafe { card_name(super::stats::equipped_card()) },
         L::Owner(O::Sora) => ip::text::SORA,
         L::Owner(O::Stock) => ip::text::STOCK,
         L::Slot(i) => return item_word(i),
@@ -931,17 +938,9 @@ impl Page {
         c as usize
     }
 
-    /// Draw mode 0 for the submenu's row: the two panels, the cursor, the scroll bar (Keyblades),
-    /// the rows.
+    /// Draw mode 0 for the submenu's row: the two panels, the cursor, the rows.
     unsafe fn open(camp: *mut u8, row: sub::Row) -> Page {
         let (content, list) = match row {
-            sub::Row::Keyblades => {
-                let cards = kb::unlocked(super::stats::keyblade_cards(), |k| ever_obtained(k));
-                let equipped = super::stats::equipped_card();
-                let at_eq = cards.iter().position(|&c| c == equipped).unwrap_or(0) as i32;
-                let list = list::open_on(cards.len() as i32, at_eq);
-                (Content::Keyblades { cards, equipped }, list)
-            }
             sub::Row::Customize => {
                 let (levels, slots) = super::command_menu::spell_view();
                 let picks = customize::picks(levels);
@@ -952,27 +951,17 @@ impl Page {
                 (content, list::open_on(2, 0))
             }
         };
-        let mut p = Page { camp: camp as usize, sub: 1, stats_panel: 0, list_panel: 0, cursor: 0, bar: 0, rows: [0; 8], stat_rows: [0; 3], list, content };
+        let mut p = Page { camp: camp as usize, sub: 1, stats_panel: 0, list_panel: 0, cursor: 0, bar: 0, rows: [0; 8], stat_rows: [0; 3], list, content, under: None };
         p.items_read();
-        let set = set_of(camp);
         p.stats_panel = p.panel(0x10, 3, 0x125);
         p.list_panel = p.panel(0x11, 2, 0x14C);
         let c = func::<NewFn>(NEW)(0x1C0);
         if !c.is_null() {
             p.cursor = func::<CursorCtorFn>(CURSOR_CTOR)(c, 0x12, p.list_panel as *mut u8, 0x12D) as usize;
         }
-        if matches!(p.content, Content::Keyblades { .. }) {
-            let b = func::<NewFn>(NEW)(0x28);
-            if !b.is_null() {
-                let bar = func::<CtorFn>(BAR_CTOR)(b);
-                let mut pos = Vec4([133.0, -56.0, 0.0, 1.0]);
-                func::<BarSetupFn>(BAR_SETUP)(bar, set, 0x14, va(base(), BAR_SEQ) as *const u16, pos.0.as_mut_ptr(), 157.0, p.list_panel as *mut u8);
-                p.bar = bar as usize;
-            }
-        }
         p.redraw();
         match &p.content {
-            Content::Keyblades { cards, equipped } => log(&format!("keyblades: page opened: {} Keyblades listed {:x?}, equipped {:#x}", cards.len(), cards, equipped)),
+            Content::Keyblades { .. } => {}
             Content::Customize { levels, slots, .. } => log(&format!("customize: page opened: spell levels {levels:?}, shortcut slots {slots:?} (0 none, else spell + 1)")),
             Content::Items { inv, ctx, .. } => log(&format!(
                 "items page: opened: slots {:?} (of {}), stock {:?}, HP below max {}, MP below max {}{}",
@@ -985,6 +974,41 @@ impl Page {
             )),
         }
         p
+    }
+
+    /// The Items page's Keyblade slot confirmed: the list shows the Keyblade list (the Keyblades
+    /// page of before: the earned Keyblades, the equipped one marked, its numbers, the scroll bar),
+    /// on the equipped one; the Items screen waits in `under`.
+    unsafe fn open_keyblades(&mut self) {
+        let cards = kb::unlocked(super::stats::keyblade_cards(), |k| ever_obtained(k));
+        let equipped = super::stats::equipped_card();
+        let at_eq = cards.iter().position(|&c| c == equipped).unwrap_or(0) as i32;
+        self.list = list::open_on(cards.len() as i32, at_eq);
+        log(&format!("keyblades: list opened from the Items page: {} Keyblades listed {:x?}, equipped {:#x}", cards.len(), cards, equipped));
+        self.under = Some(std::mem::replace(&mut self.content, Content::Keyblades { cards, equipped }));
+        // The entry-4 page's scroll bar (`0x140112AB0` / `0x1401130C0`) on the list panel, as the
+        // Keyblades page made it.
+        let b = func::<NewFn>(NEW)(0x28);
+        if !b.is_null() {
+            let bar = func::<CtorFn>(BAR_CTOR)(b);
+            let mut pos = Vec4([133.0, -56.0, 0.0, 1.0]);
+            func::<BarSetupFn>(BAR_SETUP)(bar, set_of(self.p()), 0x14, va(base(), BAR_SEQ) as *const u16, pos.0.as_mut_ptr(), 157.0, self.list_panel as *mut u8);
+            self.bar = bar as usize;
+        }
+        self.redraw();
+        self.help();
+    }
+
+    /// Cancel in the Keyblade list: back to the Items screen (Sora's list, on the Keyblade slot,
+    /// now naming the equipped one); the scroll bar deleted as the page's close deletes it.
+    unsafe fn back_from_keyblades(&mut self) {
+        let Some(under) = self.under.take() else { return };
+        self.content = under;
+        delete(self.bar as *mut u8);
+        self.bar = 0;
+        self.items_read();
+        self.redraw();
+        self.help();
     }
 
     /// The text of list row `idx`.
@@ -1047,6 +1071,11 @@ impl Page {
                     None => customize::text::NONE.to_vec(),
                 };
                 (customize::text::SLOT_LABELS, [v(0), v(1), v(2)])
+            }
+            // Sora's Keyblade slot: the equipped Keyblade's numbers, as the Keyblade list shows them.
+            Content::Items { screen, inv, ctx, .. } if screen.slot(inv, *ctx) == Some(ip::Slot::Keyblade) => {
+                let values = super::stats::keyblade(super::stats::equipped_card()).map(kb::stat_values).unwrap_or_else(|| [String::new(), String::new(), String::new()]);
+                (text::STAT_LABELS, values.map(|v| kb::c_text(&v)))
             }
             Content::Items { screen, inv, ctx, .. } => {
                 let (owner, item) = screen.status(inv, *ctx);
@@ -1281,15 +1310,25 @@ impl Page {
     /// block's inventory), with Re:CoM's camp sounds (2 opened / done, 5 refused).
     unsafe fn items_confirm(&mut self) {
         let cursor = self.list.cursor;
-        let Content::Items { screen, msg, ctx, .. } = &mut self.content else { return };
+        let Content::Items { screen, msg, ctx, inv: shown, .. } = &mut self.content else { return };
         screen.set_cursor(cursor);
         let ctx = *ctx;
-        let Some(out) = super::items::edit(|inv| screen.confirm(inv, ctx)) else {
-            sound(5);
-            log("items page: KH1's items aren't live (no save block, or not Combat = KH1 in Sora's story); nothing changed");
-            return;
+        // The Keyblade slot needs no item store: tried on copies when the items aren't live.
+        let out = match super::items::edit(|inv| screen.confirm(inv, ctx)) {
+            Some(out) => out,
+            None if screen.clone().confirm(&mut shown.clone(), ctx) == ip::Outcome::Keyblade => ip::Outcome::Keyblade,
+            None => {
+                sound(5);
+                log("items page: KH1's items aren't live (no save block, or not Combat = KH1 in Sora's story); nothing changed");
+                return;
+            }
         };
         *msg = None;
+        if out == ip::Outcome::Keyblade {
+            sound(2);
+            self.open_keyblades();
+            return;
+        }
         match out {
             ip::Outcome::Nothing => {}
             ip::Outcome::Refused => sound(5),
@@ -1298,7 +1337,7 @@ impl Page {
                 sound(5);
                 log(&format!("items page: refused: {m:?}"));
             }
-            ip::Outcome::Opened => sound(2),
+            ip::Outcome::Opened | ip::Outcome::Keyblade => sound(2),
             ip::Outcome::Back => sound(4),
             ip::Outcome::Close => {}
             ip::Outcome::Done(e) => {
@@ -1324,8 +1363,14 @@ impl Page {
         self.help();
     }
 
-    /// Cancel: the picker goes back to the slot list (no write); anything else closes the page.
+    /// Cancel: the picker goes back to the slot list (no write), the Keyblade list to the Items
+    /// screen; the Items screen steps back a window; anything else closes the page.
     unsafe fn cancel(&mut self) {
+        if matches!(self.content, Content::Keyblades { .. }) && self.under.is_some() {
+            sound(4);
+            self.back_from_keyblades();
+            return;
+        }
         if let Content::Customize { picking: Some(k), .. } = self.content {
             sound(4);
             self.customize_mode(None, k as i32);
