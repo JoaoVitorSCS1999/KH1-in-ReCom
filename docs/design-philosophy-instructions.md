@@ -305,6 +305,11 @@ At KH1 setting:
 37. M7 (owner, 2026-10-31): **Fire re-picks exactly as KH1** (only balls cast with no target; a
     dead target means the ball flies straight); **Thunder's 50 % world dim is left out**.
 
+38. M7 spell details (owner, 2026-10-31): **Fire's release step is KH1's 15 cm curve** (replacing
+    Re:CoM's clip travel in the root-step wrapper); **Gravity slows everything about an enemy under
+    the falling sphere** (its whole frame step to KH1's factor; research first); **Stop's held hits
+    land at KH1's pace** (Re:CoM's 8-hit cap kept).
+
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.
