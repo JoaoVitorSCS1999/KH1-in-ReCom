@@ -222,9 +222,10 @@ KH1 (Steam, Checked (decomp + exe)):
 Ours, on Re:CoM's camp list (the Keyblades page's pieces: both panels, `CButton` rows, the
 `CButtonCursor`, the label / value rows, the help line; no scroll bar, at most 8 rows):
 
-- **Slot list**: list rows "Shortcut 1 / 2 / 3"; the status panel shows the three slots (label,
-  spell name or "None"), rebuilt after every write. Help: "Hold L1 and press Triangle / Square /
-  Cross (Circle when Re:CoM's confirm key is Circle) to cast this spell." (7.12's buttons).
+- **Slot list**: list rows = the button each slot casts with (Triangle, Square, confirm), as
+  Re:CoM's own button glyphs (below; until the castfix build: "Shortcut 1 / 2 / 3"); the status
+  panel shows the three slots (the same glyph, spell name or "None"), rebuilt after every write.
+  Help: "Hold [L1] and press [button] to cast this spell." (7.12's buttons, glyphs too).
 - **Picker** (confirm on a slot, sound 2): list rows = the learned spells at their level, then
   "None"; Re:CoM's row mark (0x1D, as the equipped Keyblade's) on the row holding the slot's
   spell; opens on KH1's last picker row (kept for the session). Confirm (sound 2) writes the slot
@@ -242,10 +243,48 @@ Ours, on Re:CoM's camp list (the Keyblades page's pieces: both panels, `CButton`
 without a duplicate check, the return to the slot list, the picker's opening row. Checked
 (decomp). Not KH1's: the screen is Re:CoM's camp (by design); the labels "Shortcut 1..3" and
 "None" are our English words (**Assumption**: KH1's sysmsg 0xCE..0xD0 / 0xD4 texts not read; its
-sysmsg file isn't in the asset step); no button glyphs in the rows (named in the help line
-instead); KH1's per-spell help lines (sysmsg `0xD4 + 3·spell + level`, `0xEA`) are not shown;
+sysmsg file isn't in the asset step); the rows show the buttons as Re:CoM's glyphs (below), not
+KH1's words; KH1's per-spell help lines (sysmsg `0xD4 + 3·spell + level`, `0xEA`) are not shown;
 the slot list opens on slot 1 each time (**Assumption**: KH1's slot-list window cursor start not
 traced).
+
+### The slot rows show their buttons (owner, 2026-11-01)
+
+> "for the customize menu, instead of saying 'shortcut 1, shortcut 2 etc' it should be the
+> corresponding button that it would be mapped to."
+
+**Re:CoM's font has button escapes, and they follow the active controller and the keyboard.**
+Checked (decomp + exe):
+
+| what | where |
+|---|---|
+| A `C2DFnt` text is copied for drawing by `0x1403480C0`: a byte ≥ 0x81 starts a two-byte code; `0x140345B40` replaces codes `0xF564..0xF584` with the glyph code in a table at `0x14083F510..` (escapes 0xF574..0xF576 give 2 or 4 glyphs with the keyboard). | `0x1403480C0`, `0x140345B40` (jump table `0x140345F18`) |
+| The table is refilled for the active device: a pad (`0x140349120`: the pad type at the controller config `+0x1C` (1, 2, 3: three icon sets), confirm / cancel swapped by `+0x1E`), or the keyboard (`0x1403488E0`: each entry `0x140348900(bound key)`). | `0x140349120`, `0x1403488E0` |
+| Each entry is an action's button: the key bindings (`0x14034B7D0`, `0x14034BC90`) tie key `0x14083F43C` to the confirm pad bit `[0x14083F3F0]` (default 0x4000, Cross), `0x14083F464` to `[0x14083F408]` = 0x8000 (Square), `0x14083F44C` to `[0x14083F40C]` = 0x1000 (Triangle), `0x14083F46C` to `[0x14083F424]` = 0x400 (L1); the glyph entries `0x14083F510` / `F518` / `F51A` / `F51C` are filled from those same keys. | exe data `0x14083F3F0..0x14083F434` (PS2 pad order) |
+| So: `F5 64` = the confirm button (Cross, or Circle when Re:CoM's confirm is Circle), `F5 66` = Square, `F5 67` = Triangle, `F5 68` = L1, each as the current controller's icon or the bound key. | the cases `0x140345B67`, `0x140345C43`, `0x140345C59`, `0x140345B93` |
+| Glyph codes 0x55C..0x610 are drawn from the font's button sheet only when the font has one (`+0x150`, `0x14025A0B4`); the font set-up gives it to the font named "sysfont" (`0x14025C400`). A `C2DFnt`'s font is its flags `+0x40` bit 12 (`0x14025AACE`: table `0x14087CFC0`, 0x158 a font, `0x14087CFB8` fonts). | `0x14025A0B4`, `0x14025C400`, `0x14025AACE` |
+
+**Built:** the slot rows and the status panel's labels are the escapes (slot 1 `F5 67`, slot 2
+`F5 66`, slot 3 `F5 64`), and the help lines "Hold `F5 68` and press `F5 67` to cast this
+spell." / "Choose the spell for `F5 68` + `F5 67`." Re:CoM draws the icon of the button the slot
+casts with, on the controller in use (or the bound key with the keyboard), and slot 3 follows
+Re:CoM's confirm setting by itself. The rows use font 0 (`CButton` set-up flags 0x40, bit 12
+clear); the help line its own `C2DFnt`'s font. When that font has no button sheet (`+0x150` ≠ 1),
+the page uses the buttons' names instead: "Triangle", "Square", "Cross" / "Circle" (from
+`command_menu::confirm_is_circle`), "Hold L1 and press …". The log says which, once:
+`customize: slot labels as Re:CoM's button glyphs (Re:CoM's font 0 has a button sheet)`.
+
+- Checked (decomp + exe): the escapes, their table, the actions behind them, the font flag; 9 new
+  checked sites (`sites::CUSTOMIZE_GLYPHS_CHECKED`), tests (`customize::tests`,
+  `sites::tests::customize_glyph_sites`).
+- **Assumptions:** (1) font 0 is the "sysfont" (Re:CoM's own help and tutorial texts are drawn in
+  it; the page checks the flag at run time and falls back to words); (2) the pad's confirm swap
+  `+0x1E` and the confirm pad bit `0x14083F3F0` are set together by Re:CoM's options, so `F5 64`
+  shows the button slot 3 casts with (the command menu reads that bit); (3) with the keyboard,
+  Re:CoM's key glyphs (`0x140348900`) are drawn from the same sheet; (4) the glyph's width in a
+  list row: one icon where "Shortcut 1" stood.
+- Not KH1's: KH1's own slot labels (sysmsg 0xCE..0xD0) are not read; whether KH1 shows the L1
+  with the button in those rows: not checked (KH1's sysmsg file isn't in the session).
 
 ### Per frame
 
@@ -277,7 +316,10 @@ closed`, `keyblades: page opened …`, `customize: page opened: spell levels [�
    up / down move and wrap (held stops at the ends); sounds 1 / 2 / 4.
 3. Keyblades: header shows "KH1 > Keyblades"; the page behaves as before (equip, mark, stats,
    scroll); cancel goes back to the submenu on Keyblades.
-4. Customize: the three slots and their spells (status panel); confirm a slot → the picker (learned
+4. Customize: the rows show the Triangle, Square and Cross (or Circle) icons of the controller in
+   use (with the keyboard: the bound keys); the help line shows the L1 icon and the row's button.
+   Switch controller type or Re:CoM's confirm button and reopen the page: the icons follow. The
+   three slots and their spells (status panel); confirm a slot → the picker (learned
    spells at their level + None, the mark on the current one); pick one → back to the slot list,
    the status panel shows it; the same spell in two slots is allowed; cancel in the picker writes
    nothing.

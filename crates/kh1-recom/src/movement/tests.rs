@@ -932,6 +932,7 @@ fn ground_fire_releases_at_28_and_frees_sora_at_46_of_the_release_motion() {
     assert_eq!(out.cast.first(), Some(&CastEvent::Started { spell: 0, level: 1, fast: false, air: false }));
     assert_eq!(p.ours.rec.head(), cast_req::FIRE_WINDUP);
     assert_eq!(p.recom.act.id, RECOM_MAGIC_ACTION, "Re:CoM's magic action runs the cast");
+    assert_eq!(p.recom.draws, 1, "the cast draws the Keyblade through Re:CoM's own function, once, at the command");
     assert_eq!(p.recom.plays.last().map(|x| x.0), Some(cast_req::FIRE_WINDUP));
     // KH1's script: the ball leaves in the frame the wind-up (28 frames) ends; our handler sees
     // that frame's motion update (and the script run after it) at its start, one handler on.

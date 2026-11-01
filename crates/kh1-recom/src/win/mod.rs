@@ -13,6 +13,7 @@ mod items;
 mod keyblades;
 mod kh1_hud;
 mod magic;
+mod magic_fx;
 mod menu;
 mod menu_sounds;
 mod models;
@@ -104,6 +105,8 @@ pub(crate) fn toggle(k: usize) {
     mp_bar::refresh();
     // The weapon's group follows Combat: its files start loading now; the camp close shows it.
     models::prefetch();
+    // KH1 casts' effects: Re:CoM's battle set starts loading now in the field (`magic_fx`).
+    magic_fx::setting_changed();
 }
 
 /// The KH1-only clips the asset step added (Guard): the manifest
@@ -302,6 +305,10 @@ fn install_magic(base: usize) {
     if unsafe { hook::install_all(base, &hooks) } {
         magic::mark_installed();
         log(&magic::start_line());
+        // SAFETY: branch patches with checked old bytes (code of the mapped exe).
+        if unsafe { magic_fx::install(base) } {
+            log("magic fx: Re:CoM's battle set (spell effects) in the field at combat = kh1 in Sora's story: field state 1 0x1401AF933 -> 0x140211AA0 then 0x140211960; camp unloads 0x1401A95BD / 0x1401A99F9 keep it");
+        }
     } else {
         log("magic: exeMagic not hooked; no KH1 cast (the Field case stays patched but is not reached: Re:CoM never casts in the field)");
     }

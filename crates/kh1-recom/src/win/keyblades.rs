@@ -258,6 +258,45 @@ unsafe fn message(id: u32) -> *const u8 {
     func::<MsgFn>(MSG)(tables, id)
 }
 
+/// Re:CoM's fonts (`0x14087CFC0`, 0x158 bytes each, `0x14087CFB8` of them; a `C2DFnt` draws with
+/// font `+0x40` bit 12, `0x14025AACE`) and the flag its set-up gives the "sysfont" (`+0x150` = 1,
+/// `0x14025C400`): only that font has the button sheet the glyph picker draws escapes from
+/// (`0x14025A0B4`: glyphs 0x55C..0x610). Checked (decomp + exe).
+const FONTS: u64 = 0x1_4087_CFC0;
+const FONT_COUNT: u64 = 0x1_4087_CFB8;
+const FONT_SIZE: usize = 0x158;
+const FONT_BUTTONS: usize = 0x150;
+const FNT_FLAGS: usize = 0x40;
+/// The list and status rows' font: `CBUTTON_SETUP`'s flags 0x40 (bit 12 clear).
+const ROW_FONT: u32 = 0;
+
+/// Re:CoM's font `idx` draws button escapes (its button sheet is loaded).
+fn button_glyphs(idx: u32) -> bool {
+    // SAFETY: static data of the image (Re:CoM's font table).
+    let ok = unsafe {
+        let n: u32 = rd(va(base(), FONT_COUNT));
+        idx < n.min(2) && rd::<u32>(va(base(), FONTS) + idx as usize * FONT_SIZE + FONT_BUTTONS) == 1
+    };
+    if !GLYPHS_LOGGED.swap(true, Ordering::Relaxed) {
+        log(&format!(
+            "customize: slot labels {} (Re:CoM's font {idx} {} a button sheet)",
+            if ok { "as Re:CoM's button glyphs" } else { "as button names" },
+            if ok { "has" } else { "has no" }
+        ));
+    }
+    ok
+}
+static GLYPHS_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// The camp's help line draws button escapes (its `C2DFnt`'s font has the button sheet).
+fn help_glyphs(camp: *mut u8) -> bool {
+    // SAFETY: the camp's help item, read as `set_help` writes it.
+    unsafe {
+        let help: *mut u8 = at(camp, camp::HELP);
+        !help.is_null() && button_glyphs((at::<u32>(help, FNT_FLAGS) >> 12) & 1)
+    }
+}
+
 unsafe fn set_help(camp: *mut u8, s: *const u8) {
     let help: *mut u8 = at(camp, camp::HELP);
     if !help.is_null() && !s.is_null() {
@@ -996,7 +1035,7 @@ impl Page {
                 Some(s) => spell_word(s, levels[s as usize]),
                 None => customize::text::NONE.to_vec(),
             },
-            Content::Customize { picking: None, .. } => customize::text::SLOT_LABELS[idx.min(2)].to_vec(),
+            Content::Customize { picking: None, .. } => customize::text::slot_label(idx, button_glyphs(ROW_FONT), super::command_menu::confirm_is_circle()).to_vec(),
             Content::Items { rows, .. } => rows.get(idx).map_or_else(|| ip::text::NONE.to_vec(), |r| item_label(r.label)),
         }
     }
@@ -1046,7 +1085,7 @@ impl Page {
                     Some(s) => spell_word(s, levels.get(s as usize).copied().unwrap_or(1)),
                     None => customize::text::NONE.to_vec(),
                 };
-                (customize::text::SLOT_LABELS, [v(0), v(1), v(2)])
+                (customize::text::slot_labels(button_glyphs(ROW_FONT), super::command_menu::confirm_is_circle()), [v(0), v(1), v(2)])
             }
             Content::Items { screen, inv, ctx, .. } => {
                 let (owner, item) = screen.status(inv, *ctx);
@@ -1061,8 +1100,8 @@ impl Page {
     unsafe fn help(&self) {
         let t: &[u8] = match &self.content {
             Content::Keyblades { .. } => text::PAGE_HELP,
-            Content::Customize { picking: Some(k), .. } => customize::text::PICK_HELP[(*k).min(2)],
-            Content::Customize { picking: None, .. } => customize::text::slot_help(self.list.cursor.max(0) as usize, super::command_menu::confirm_is_circle()),
+            Content::Customize { picking: Some(k), .. } => customize::text::pick_help(*k, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
+            Content::Customize { picking: None, .. } => customize::text::slot_help(self.list.cursor.max(0) as usize, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
             Content::Items { screen, rows, msg, .. } => screen.help(rows, self.list.cursor, *msg),
         };
         set_help(self.p(), t.as_ptr());
