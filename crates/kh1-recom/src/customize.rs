@@ -16,9 +16,11 @@
 //!
 //! Ours: the slot bytes of our save block (`crate::mp::off::SHORTCUTS`, 0 = none, else spell + 1,
 //! stage 7.12), which the command menu reads every frame, so a change shows in the L1 list at once.
-//! KH1's sysmsg file is not in the asset step: the labels and "None" are our English words
-//! (Assumption: KH1's own words for 0xCE..0xD0 / 0xD4 not read); the spell names are KH1's words
-//! from `kh1-command-menu.json`, as the command menu shows them.
+//! The slot rows show the button each slot casts with, as Re:CoM's own button glyph (its font's
+//! escapes, [`text::glyph`]; owner, 2026-11-01), or the button's name when Re:CoM's font has no
+//! button sheet. KH1's sysmsg file is not in the asset step: "None" and the help lines are our
+//! English words (Assumption: KH1's own words for 0xCE..0xD0 / 0xD4 not read); the spell names
+//! are KH1's words from `kh1-command-menu.json`, as the command menu shows them.
 
 use crate::command_menu::{cmd, shortcut as sc};
 
@@ -64,26 +66,82 @@ pub fn name_id(spell: u8, level: u8) -> u16 {
     cmd::name(cmd::spell(spell, level.clamp(1, 3)))
 }
 
-/// Texts: NUL-terminated ASCII for Re:CoM's text items (no `%`: the help line's formatter treats
-/// it as a code).
+/// Texts: NUL-terminated for Re:CoM's text items (`C2DFnt`): ASCII and Re:CoM's two-byte button
+/// escapes ([`text::glyph`]); no `%` (the help line's formatter treats it as a code).
 pub mod text {
-    /// The slot labels (KH1: sysmsg 0xCE..0xD0, not read; our words).
-    pub const SLOT_LABELS: [&[u8]; 3] = [b"Shortcut 1\0", b"Shortcut 2\0", b"Shortcut 3\0"];
+    /// Re:CoM's button escapes (owner, 2026-11-01: "instead of saying 'shortcut 1, shortcut 2 etc'
+    /// it should be the corresponding button that it would be mapped to"). Two bytes `0xF5 n` in a
+    /// `C2DFnt` text: its text copy (`0x1403480C0`) has `0x140345B40` replace them with the glyph of
+    /// the button that Re:CoM action is on now (Checked (decomp + exe: the jump table
+    /// `0x140345F18`)): the pad type's icon (PS / Xbox / the third type, confirm and cancel
+    /// swapped as Re:CoM's setting has them, `0x140349120`) or, with the keyboard, the bound key's
+    /// glyph (`0x1403488E0`). The actions are the shortcut buttons' (Checked (decomp + exe): Re:CoM's
+    /// key bindings `0x14034B7D0` / `0x14034BC90` tie each glyph's key to these pad bits, PS2
+    /// order, defaults at `0x14083F3F0..`).
+    pub mod glyph {
+        /// `0xF564` → `0x14083F510`: the confirm button (the pad bit at `0x14083F3F0`, Cross or
+        /// Circle: what slot 3 casts with).
+        pub const CONFIRM: [u8; 2] = [0xF5, 0x64];
+        /// `0xF566` → `0x14083F518`: the key bound with pad bit `0x8000` (Square).
+        pub const SQUARE: [u8; 2] = [0xF5, 0x66];
+        /// `0xF567` → `0x14083F51A`: pad bit `0x1000` (Triangle).
+        pub const TRIANGLE: [u8; 2] = [0xF5, 0x67];
+        /// `0xF568` → `0x14083F51C`: pad bit `0x400` (L1).
+        pub const L1: [u8; 2] = [0xF5, 0x68];
+    }
+
+    /// The slot labels with Re:CoM's glyphs: the button each slot casts with (L1 held): Triangle,
+    /// Square, confirm (KH1's `0x1402937F0`, stage 7.12).
+    pub const SLOT_GLYPHS: [&[u8]; 3] = [b"\xF5\x67\0", b"\xF5\x66\0", b"\xF5\x64\0"];
+    /// The same as words, when Re:CoM's font has no button sheet (its "sysfont" has one).
+    pub const SLOT_WORDS: [&[u8]; 3] = [b"Triangle\0", b"Square\0", b"Cross\0"];
+    pub const SLOT3_WORD_CIRCLE: &[u8] = b"Circle\0";
     /// KH1's "none" (sysmsg 0xD4, not read; our word).
     pub const NONE: &[u8] = b"None\0";
-    /// The slot list's help: which button casts the slot with L1 held (stage 7.12: Triangle /
-    /// Square / confirm, KH1's `0x1402937F0`).
+    /// The slot list's help: which buttons cast the slot (stage 7.12: L1 + Triangle / Square /
+    /// confirm, KH1's `0x1402937F0`).
+    pub const SLOT_HELP_GLYPHS: [&[u8]; 3] = [
+        b"Hold \xF5\x68 and press \xF5\x67 to cast this spell.\0",
+        b"Hold \xF5\x68 and press \xF5\x66 to cast this spell.\0",
+        b"Hold \xF5\x68 and press \xF5\x64 to cast this spell.\0",
+    ];
     pub const SLOT_HELP: [&[u8]; 3] = [b"Hold L1 and press Triangle to cast this spell.\0", b"Hold L1 and press Square to cast this spell.\0", b"Hold L1 and press Cross to cast this spell.\0"];
     /// Slot 3's help when Re:CoM's confirm button is Circle.
     pub const SLOT3_HELP_CIRCLE: &[u8] = b"Hold L1 and press Circle to cast this spell.\0";
     /// The picker's help.
-    pub const PICK_HELP: [&[u8]; 3] = [b"Choose the spell for Shortcut 1.\0", b"Choose the spell for Shortcut 2.\0", b"Choose the spell for Shortcut 3.\0"];
+    pub const PICK_HELP_GLYPHS: [&[u8]; 3] = [b"Choose the spell for \xF5\x68 + \xF5\x67.\0", b"Choose the spell for \xF5\x68 + \xF5\x66.\0", b"Choose the spell for \xF5\x68 + \xF5\x64.\0"];
+    pub const PICK_HELP: [&[u8]; 3] = [b"Choose the spell for L1 + Triangle.\0", b"Choose the spell for L1 + Square.\0", b"Choose the spell for L1 + Cross.\0"];
+    pub const PICK3_HELP_CIRCLE: &[u8] = b"Choose the spell for L1 + Circle.\0";
+
+    /// Slot `k`'s label (0..2): Re:CoM's glyph, else the button's name.
+    pub fn slot_label(k: usize, glyphs: bool, confirm_is_circle: bool) -> &'static [u8] {
+        match k.min(2) {
+            k if glyphs => SLOT_GLYPHS[k],
+            2 if confirm_is_circle => SLOT3_WORD_CIRCLE,
+            k => SLOT_WORDS[k],
+        }
+    }
+
+    /// The three labels (the status panel's).
+    pub fn slot_labels(glyphs: bool, confirm_is_circle: bool) -> [&'static [u8]; 3] {
+        [0, 1, 2].map(|k| slot_label(k, glyphs, confirm_is_circle))
+    }
 
     /// The slot list's help for slot `k` (0..2).
-    pub fn slot_help(k: usize, confirm_is_circle: bool) -> &'static [u8] {
-        match k {
+    pub fn slot_help(k: usize, glyphs: bool, confirm_is_circle: bool) -> &'static [u8] {
+        match k.min(2) {
+            k if glyphs => SLOT_HELP_GLYPHS[k],
             2 if confirm_is_circle => SLOT3_HELP_CIRCLE,
-            k => SLOT_HELP[k.min(2)],
+            k => SLOT_HELP[k],
+        }
+    }
+
+    /// The picker's help for slot `k` (0..2).
+    pub fn pick_help(k: usize, glyphs: bool, confirm_is_circle: bool) -> &'static [u8] {
+        match k.min(2) {
+            k if glyphs => PICK_HELP_GLYPHS[k],
+            2 if confirm_is_circle => PICK3_HELP_CIRCLE,
+            k => PICK_HELP[k],
         }
     }
 }
@@ -130,19 +188,65 @@ mod tests {
         assert_eq!(name_id(3, 0), 16, "Cure (level 0 reads as 1)");
     }
 
+    /// A text Re:CoM's `C2DFnt` takes: ASCII (no `%`) and button escapes, NUL-terminated; the
+    /// visible length (an escape is one glyph).
+    fn shown_len(s: &[u8]) -> usize {
+        assert_eq!(s.last(), Some(&0));
+        let b = &s[..s.len() - 1];
+        let (mut i, mut n) = (0, 0);
+        while i < b.len() {
+            if b[i] == 0xF5 {
+                assert!((0x64..=0x84).contains(&b[i + 1]), "{s:x?}");
+                i += 2;
+            } else {
+                assert!((0x20..0x7F).contains(&b[i]) && b[i] != b'%', "{s:x?}");
+                i += 1;
+            }
+            n += 1;
+        }
+        n
+    }
+
     #[test]
     fn texts_fit_the_help_box() {
-        let all = [text::SLOT_LABELS[0], text::SLOT_LABELS[1], text::SLOT_LABELS[2], text::NONE, text::SLOT3_HELP_CIRCLE]
+        let all = [text::NONE, text::SLOT3_HELP_CIRCLE, text::SLOT3_WORD_CIRCLE, text::PICK3_HELP_CIRCLE]
             .into_iter()
+            .chain(text::SLOT_GLYPHS)
+            .chain(text::SLOT_WORDS)
             .chain(text::SLOT_HELP)
-            .chain(text::PICK_HELP);
+            .chain(text::SLOT_HELP_GLYPHS)
+            .chain(text::PICK_HELP)
+            .chain(text::PICK_HELP_GLYPHS);
         for s in all {
-            assert_eq!(s.last(), Some(&0));
-            assert!(s[..s.len() - 1].iter().all(|&b| (0x20..0x7F).contains(&b) && b != b'%'));
-            assert!(s.len() - 1 <= crate::menu::HELP_MAX);
+            assert!(shown_len(s) <= crate::menu::HELP_MAX);
         }
-        assert_eq!(text::slot_help(2, true), text::SLOT3_HELP_CIRCLE);
-        assert_eq!(text::slot_help(2, false), text::SLOT_HELP[2]);
-        assert_eq!(text::slot_help(0, true), text::SLOT_HELP[0]);
+        assert_eq!(text::slot_help(2, false, true), text::SLOT3_HELP_CIRCLE);
+        assert_eq!(text::slot_help(2, false, false), text::SLOT_HELP[2]);
+        assert_eq!(text::slot_help(0, false, true), text::SLOT_HELP[0]);
+        assert_eq!(text::pick_help(2, false, true), text::PICK3_HELP_CIRCLE);
+        assert_eq!(text::pick_help(9, false, false), text::PICK_HELP[2]);
+    }
+
+    #[test]
+    fn slot_labels_are_the_buttons_they_cast_with() {
+        use text::glyph::*;
+        // Re:CoM's glyphs: Triangle, Square, then its confirm escape (Cross or Circle as Re:CoM's
+        // setting has it; Re:CoM picks the glyph, so one text serves both).
+        assert_eq!(text::slot_labels(true, false), [&[TRIANGLE[0], TRIANGLE[1], 0][..], &[SQUARE[0], SQUARE[1], 0][..], &[CONFIRM[0], CONFIRM[1], 0][..]]);
+        assert_eq!(text::slot_labels(true, true), text::slot_labels(true, false));
+        assert_eq!(text::slot_labels(false, false), [&b"Triangle\0"[..], b"Square\0", b"Cross\0"]);
+        assert_eq!(text::slot_label(2, false, true), b"Circle\0");
+        // The help names L1 and the slot's button; glyph help and word help say the same.
+        for k in 0..3 {
+            let g = text::slot_help(k, true, false);
+            assert!(g.windows(2).any(|w| w == L1), "{k}");
+            assert!(g.windows(2).any(|w| w == &text::SLOT_GLYPHS[k][..2]), "{k}");
+            assert!(text::pick_help(k, true, false).windows(2).any(|w| w == &text::SLOT_GLYPHS[k][..2]), "{k}");
+        }
+        // Re:CoM's escapes: 0xF564 confirm, 0xF566 Square, 0xF567 Triangle, 0xF568 L1.
+        assert_eq!(u16::from_be_bytes(CONFIRM), 0xF564);
+        assert_eq!(u16::from_be_bytes(SQUARE), 0xF566);
+        assert_eq!(u16::from_be_bytes(TRIANGLE), 0xF567);
+        assert_eq!(u16::from_be_bytes(L1), 0xF568);
     }
 }

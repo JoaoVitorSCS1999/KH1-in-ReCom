@@ -630,3 +630,19 @@ fn aero_rows_barrier_and_wind_are_kh1s() {
     assert_eq!(frames, 1260);
     assert_eq!(hits, 42);
 }
+
+#[test]
+fn field_fx_wants_the_battle_set_only_for_kh1_casts_in_soras_story() {
+    use field_fx::*;
+    assert!(wanted(true, false));
+    assert!(!wanted(false, false), "Combat = Re:CoM: Re:CoM's own field (no set)");
+    assert!(!wanted(true, true), "Riku's story: Re:CoM's own field");
+    assert!(!wanted(false, true));
+    // A branch's target: `jmp 0x140211AA0` at 0x1401AF933 (E9 68 21 06 00), `call 0x140211560` at
+    // 0x1401A95BD (E8 9E 7F 06 00); anything else is no branch.
+    assert_eq!(branch_target(FIELD_JUMP_RVA, &[0xE9, 0x68, 0x21, 0x06, 0x00]), Some(PLAYER_GROUP_RVA));
+    assert_eq!(branch_target(CAMP_CALL_RVAS[0], &[0xE8, 0x9E, 0x7F, 0x06, 0x00]), Some(UNLOAD_RVA));
+    assert_eq!(branch_target(0x100, &[0xE8, 0xF0, 0xFF, 0xFF, 0xFF]), Some(0xF5), "backwards");
+    assert_eq!(branch_target(0x100, &[0x90, 0, 0, 0, 0]), None);
+    assert_eq!(branch_target(0x100, &[0xE8, 0, 0, 0]), None);
+}

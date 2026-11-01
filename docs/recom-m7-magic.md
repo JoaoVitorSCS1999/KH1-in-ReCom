@@ -525,8 +525,8 @@ test), `0x1402AD350`. All 16 new sites compared with the Steam exe's bytes (scri
    case changes nothing at the Re:CoM setting.
 2. The ball's life `+0x160` counts down by dt in Re:CoM's actor update (as the player's
    `+0x160` timer `exeMagic` sets).
-3. `fire_all`'s effects are loaded in the field (Re:CoM never casts there): if not, the ball
-   flies and hits but isn't drawn. Open question 3.
+3. ~~`fire_all`'s effects are loaded in the field~~: they are not (owner's 0.45.0 video; Checked
+   (decomp + exe)); fixed by loading Re:CoM's battle set in the field, § Spell effects in the field.
 4. Re:CoM's clips `p001_062` / `p001_063` / `p001_066` / `p001_067` are KH1's motions baked at
    30 fps (the frame counts match: research § 3.5, Checked (files)); the release clips carry
    KH1's root travel.
@@ -537,9 +537,8 @@ test), `0x1402AD350`. All 16 new sites compared with the Steam exe's bytes (scri
 
 1. Fire's re-acquire: answered (decision 36, built in 7.4b).
 2. Element resistance on spell hits: answered (decision 36: KH1's only).
-3. **Fire in the field**: if Re:CoM's Fire effects aren't loaded outside battle (to see in game),
-   (a) cast without the visual there; (b) load Re:CoM's magic effect group at room load (a new
-   resource request; needs research); (c) Fire only in battle at first.
+3. **Fire in the field**: answered by the owner's report ("the VFX dont appear"): built as (b),
+   Re:CoM's own battle-set load at room load (§ Spell effects in the field).
 
 ## What the first in-game test must check
 
@@ -1192,3 +1191,114 @@ In-game checklist (7.10):
   aimed at one. Chained Fire has none (and none plays here: `p001_063` has no SES entry).
 - **Not KH1's:** the voice starts at Re:CoM's frame (3 on the ground, 2 in the air), not frame
   0; Re:CoM's one take per spell, not KH1's two; no ally names (no party yet).
+
+## The Keyblade and the spell effects in the field (castfix; owner's 0.45.0 video)
+
+> Owner (video, field room "13F Entrance Hall", no enemies, Combat = KH1): "when casting spells,
+> soras keyblade isnt visible, and the VFX dont appear." His log: the casts ran (thunder3 /
+> fire3 released, shot ids made).
+
+### The Keyblade
+
+- **Cause** (Checked (decomp)): Re:CoM hides Sora's Keyblade in the field and draws it for its own
+  attacks: the field swing init `0x1401F0F70` ends with `vtable +0xF8(Sora, 1)` = `0x1401F5D30`
+  (→ `0x140225240(weapon, 1)`: shown, `kb_appear` effect; nothing when already out); Guard does the
+  same (Stage 17). Re:CoM's `initMagic` (`0x1402203D0`) and `exeMagic` (`0x140217EE0`) never draw
+  it: Re:CoM casts only in battle, where the Keyblade is already out. Our cast copies `initMagic`,
+  so in the field the Keyblade stayed away for the whole cast.
+- **Fix:** KH1's command (`Kh1Sora::command_magic`), once Re:CoM's magic action is set
+  (`Host::start_cast`), draws it through `Host::draw_weapon` = `0x1401F5D30(Sora, 1)`, Re:CoM's own
+  call as the swing init and Guard make it. Every spell, ground and air, the Fire fast path too
+  (already out: Re:CoM's function does nothing). Re:CoM's own rules put it away again later, as
+  after a field swing or Guard. No new site (the callee is M5's / Stage 17's).
+- KH1: the owner's report ("KH1 shows the Keyblade while casting"); KH1's Sora always holds it
+  (Stage 17's Assumption). Test: `movement::tests` "ground_fire_releases_at_28…" (one draw at the
+  command).
+
+### Spell effects in the field
+
+- **Cause** (Checked (decomp + exe)):
+  - Re:CoM's spell effects play by name (the effect sets `0x1405A1730`: `fire_all`, `bliz_all`,
+    `_thunder_all`, `cure_all`, `grav_all`, `stop_all`, `airo_all`). Both effect calls
+    (`0x1401A2D50` → `0x1402577D0`, `0x1401A6B20` → `0x1402588B0`) and the bullet init look the
+    name up among the **loaded** resources (`0x1402A4920` → `0x1402A43E0(5, name)`, also with a
+    leading `_`); none loaded: no effect (handle 0), nothing else changes. The effect system itself
+    runs in the field (save points, `kb_appear`).
+  - The packs come with Sora's **battle set**: PLAYER group 1001 (Halloween Town Sora's too; Riku
+    1101, the other Riku 1201), which has no files of its own, only LINK rows to EFFECT groups
+    1100, 1102, 2000, 2003, 2010, 2013, 2017, 2020, 2023, 2030, 2040, 2050, 2060, 2063, 2073, 2078,
+    3090, 3220, 501, 502, 504, 506, 556 (PLAYER table `0x1408055D0`, EFFECT table `0x140810500`).
+    EFFECT 2000..2060 (and 2003 / 2013 / 2023 / 2063, which link them) are linked by **no other
+    row** of any resource table (Checked (exe): all 10 tables' LINK rows); the groups loaded with
+    the player in the field (SYS 1–3, PLAYER 1 / 2 / 11) link EFFECT 1, 100, 102, 500, 505,
+    507..510, 1000 only. Which pack holds which name: not read (no `Recom.pkg` in the session);
+    2000..2060 in steps of 10 = the seven spells is an **Assumption** (strong).
+  - Re:CoM queues the set with `0x140211960(0)` (char from the world → group 1001, `0x1407C7AE4`;
+    `0x14023CCE0` when `0x1402A53E0(1, group)` says it isn't loaded) in **`CGameSubBattle`'s state 1**
+    (`0x1401AEA20`) and, under its system byte (0, 0x60), in `CGameMain`'s load state
+    (`0x1401AD040`). **`CGameSubField`'s state 1** (`0x1401AF920`) queues only the player's group
+    (`0x140211AA0(0)`). The set is unloaded by `0x140211560(0)` when a scene changes
+    (`0x1401AA000`, `0x1401A9D20`) and when the camp opens (`0x1401A9590` open path,
+    `0x1401A9990`), each unless that system byte is set (it keeps the set resident).
+  - So: **in battle rooms the effects appear** (Re:CoM's battle state loads the set before the
+    room starts; Re:CoM's own magic cards use them there); **in the field they were never loaded.**
+- **Fix (Re:CoM's own calls, Re:CoM's own rule under its byte 0x60):** at Combat = KH1 in Sora's
+  story (`magic::field_fx::wanted`),
+  1. **room load:** `CGameSubField` state 1's tail `jmp 0x140211AA0` (`0x1401AF933`, `E9 68 21 06
+     00`) goes through a jump placed near it to `win::magic_fx::field_load`, which makes that call
+     and then `0x140211960(0)`, the call `CGameSubBattle`'s state 1 makes (its bytes are the field
+     state's with this tail: `sites::MAGIC_FX_CHECKED`). The room's next state waits on the loader
+     queue as for the player's group;
+  2. **camp:** the camp openings' `call 0x140211560` (`0x1401A95BD`, `0x1401A99F9`, each `E8 rel32`)
+     go to `camp_unload`, which keeps the set (as Re:CoM does under the byte) and otherwise calls
+     Re:CoM's;
+  3. **Combat switched to KH1 in the camp's Config:** `0x140211960(0)` at once (only with Sora in a
+     room), so the room the camp closes into has the effects (after the loader's few frames).
+  At Combat = Re:CoM or in Riku's story every path is Re:CoM's (the jump target and the calls are
+  Re:CoM's own functions). A set left loaded after a switch to Re:CoM goes at Re:CoM's next unload
+  (room change or camp opening). No effect of ours; nothing per frame.
+- **Not changed:** Re:CoM's unloads on a scene change (`0x1401AA000`, `0x1401A9D20`): each field
+  room load queues the set again (the vanilla battle loads it on every battle entry the same way).
+  **Cost to watch:** a room change in the field now also loads the set's 23 packs (time not
+  measured). Option if it shows: keep the set over room changes too, as Re:CoM's byte 0x60 does
+  (two more call sites; those paths also clear a battle spawn flag `0x14087B6B0`, so they need
+  care).
+
+Sites (castfix; all bytes from the Steam exe, re-read with pefile: 394 site byte lists, 0
+mismatches):
+
+| address | bytes | use |
+|---|---|---|
+| `0x1401AF933` field state 1: player group jump | `E9 68 21 06 00` | patched: → near jump → `field_load` |
+| `0x1401A95BD` camp open: battle set unload | `E8 9E 7F 06 00` | patched: → near jump → `camp_unload` |
+| `0x1401A99F9` camp open (menu button): battle set unload | `E8 62 7B 06 00` | patched: → same |
+| `0x140211960` battle set load | `40 53 48 83 EC 20 48 89 7C 24 30 85 C9 75 2D` | called |
+| `0x140211560` battle set unload | `48 83 EC 28 8B 05 76 65 5B 00 85 C9 0F 45 C1 89` | called (Re:CoM's path) |
+| `0x1401AF920` field state 1 | `48 83 EC 28 E8 17 59 08 00 85 C0 75 0B 33 C9 48 83 C4 28` | checked only (ends at the jump) |
+| `0x1401AEA20` battle state 1 | 24 bytes ending `E9 28 2F 06 00` (→ `0x140211960`) | checked only |
+| `0x1401A95AB`, `0x1401A99E9` the byte-0x60 tests | `BA 60 00 00 00 33 C9 E8 49 72 00 00 84 C0 75 07 33 C9`, `8D 57 60 33 C9 E8 0D 6E 00 00 84 C0 75 07 33 C9` | checked only (end at the calls) |
+| `0x140211AA0` player group load | (models' hook site) | called (through the models' wrapper when it is in) |
+| `0x1401F5D30` draw the Keyblade | (M5) | called |
+
+Logs: `magic fx: Re:CoM's battle set (spell effects) in the field at combat = kh1 in Sora's story:
+…` at start; up to 40 lines `magic fx: field room: Re:CoM's battle set (PLAYER group 1001) loaded or
+queued …`, `magic fx: camp opened: the battle set stays loaded …`, `magic fx: Combat = KH1: …`.
+
+1:1 / checks: Checked (decomp + exe) the cause and every address above; tests
+(`magic::tests::field_fx_wants_the_battle_set_only_for_kh1_casts_in_soras_story`,
+`sites::tests::magic_field_fx_sites`, the movement test's Keyblade draw). **Not checked:** in game;
+which EFFECT pack holds which name; the loader's time for the set at a room change.
+
+What the owner should test:
+
+1. Log: the `magic fx:` start line; entering a field room: `magic fx: field room: … group 1001 …`.
+2. 13F Entrance Hall (no enemies), Combat = KH1: each spell. Sora draws the Keyblade (Re:CoM's
+   `kb_appear` flash) at the command and holds it for the cast; Fire's ball, Blizzard's shards,
+   Thunder's charge on the blade and hand effect, Cure's sparkle, Gravity's sphere, Stop's and
+   Aero's effects all show (and their sounds, if they ride the effects).
+3. Open and close the camp, cast again: effects still there (log `camp opened: the battle set
+   stays loaded`).
+4. Combat = Re:CoM in the camp, close, walk to another room, back to KH1 in the camp, close, cast:
+   effects there (log `Combat = KH1: …`).
+5. Room changes in the field: note whether the load pause got longer than before.
+6. A battle: casts and Re:CoM's own magic cards (Combat = Re:CoM) look as before.

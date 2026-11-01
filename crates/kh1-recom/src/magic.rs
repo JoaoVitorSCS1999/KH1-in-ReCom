@@ -1589,6 +1589,12 @@ impl Kh1Sora {
         if !h.start_cast(&start) {
             return refuse(self, "no Re:CoM row");
         }
+        // KH1's Sora holds the Keyblade for the whole cast; Re:CoM hides it in the field and
+        // draws it for its own attacks (the field swing init `0x1401F0F70` ends with its vtable
+        // `+0xF8`, `0x1401F5D30(Sora, 1)`). Its `initMagic` never draws it (Re:CoM casts only in
+        // battle, where it is already out), so a KH1 cast draws it here as the swing and Guard do.
+        // Already out: Re:CoM's function does nothing (`weapon+0x154 & 1` clear).
+        h.draw_weapon();
         use cast_req::*;
         if fast {
             if air {
@@ -1719,6 +1725,54 @@ pub mod field_case {
     /// The table entry's new value (an RVA, as the table holds).
     pub fn entry() -> [u8; 4] {
         CAVE_RVA.to_le_bytes()
+    }
+}
+
+/// KH1 casts in the field (owner's 0.45.0 video, "13F Entrance Hall": no spell effects in the
+/// field). Re:CoM's spell effects (`fire_all`, `bliz_all`, `_thunder_all`, `cure_all`, …: the
+/// effect sets `0x1405A1730`) are looked up by name among the **loaded** resources (`0x1402A4920`
+/// → `0x1402A43E0(5, name)`; none loaded: no effect, handle 0). Their packs come with Sora's
+/// **battle set**, PLAYER group 1001 (Halloween Town Sora's too; Riku 1101 / 1201), whose LINK rows
+/// load EFFECT groups 1100, 1102, 2000, 2003, 2010, 2013, 2017, 2020, 2023, 2030, 2040, 2050,
+/// 2060, 2063, 2073, 2078, 3090, 3220, 501, 502, 504, 506, 556 (Checked (exe): the PLAYER table).
+/// Re:CoM queues it only in its battle scene (`CGameSubBattle` state 1 `0x1401AEA20` →
+/// `0x140211960(0)`) and, under its system byte (0, 0x60), from `CGameMain`'s load state
+/// (`0x1401AD040`), which also keeps it through the camp. Its field scene (`CGameSubField` state 1
+/// `0x1401AF920`) queues only the player's group (`0x140211AA0(0)`), and the camp's two openings
+/// (`0x1401A9590`, `0x1401A9990`) unload the battle set (`0x140211560(0)`) unless that byte is set.
+/// Checked (decomp + exe).
+///
+/// At Combat = KH1 in Sora's story the field does what Re:CoM does under that byte, with Re:CoM's
+/// own calls: the field state's tail jump to `0x140211AA0` goes to a wrapper that then calls
+/// `0x140211960(0)` (the battle state's call), and the camp openings' unload calls keep the set.
+pub mod field_fx {
+    /// `0x140211960(char)`: Re:CoM's battle-set loader (queues PLAYER group 1001 / 1101 / 1201
+    /// and the char's extra group when not loaded).
+    pub const LOAD_RVA: u32 = 0x0021_1960;
+    /// `0x140211560(char)`: Re:CoM's battle-set unloader.
+    pub const UNLOAD_RVA: u32 = 0x0021_1560;
+    /// `0x140211AA0(char)`: Re:CoM's "queue the player's group" (the field state's tail call).
+    pub const PLAYER_GROUP_RVA: u32 = 0x0021_1AA0;
+    /// `CGameSubField` state 1's tail `jmp 0x140211AA0` (`E9 68 21 06 00`).
+    pub const FIELD_JUMP_RVA: u32 = 0x001A_F933;
+    /// The camp openings' `call 0x140211560` (`0x1401A9590` open path, `0x1401A9990`).
+    pub const CAMP_CALL_RVAS: [u32; 2] = [0x001A_95BD, 0x001A_99F9];
+    /// Sora's battle set (PLAYER group), and the global the loader leaves it in (`0x1407C7AE4`).
+    pub const SORA_SET: u32 = 1001;
+    pub const SET_GLOBAL: u64 = 0x1_407C_7AE4;
+
+    /// The battle set is wanted in the field: KH1 casts (Combat = KH1) in Sora's story.
+    pub fn wanted(kh1: bool, riku_story: bool) -> bool {
+        kh1 && !riku_story
+    }
+
+    /// Where a `jmp rel32` / `call rel32` at `at` goes (RVAs), if `b` is one.
+    pub fn branch_target(at: u32, b: &[u8]) -> Option<u32> {
+        if b.len() != 5 || (b[0] != 0xE8 && b[0] != 0xE9) {
+            return None;
+        }
+        let rel = i32::from_le_bytes([b[1], b[2], b[3], b[4]]) as i64;
+        u32::try_from(at as i64 + 5 + rel).ok()
     }
 }
 

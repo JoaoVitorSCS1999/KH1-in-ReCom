@@ -1421,6 +1421,58 @@ pub const MAGIC_CHECKED: &[Site] = &[
     Site { name: "nearest pick: list walk (0x1401CDC26)", rva: 0x001C_DC26, expect: &[0x49, 0x8B, 0x9E, 0x88, 0x00, 0x00, 0x00, 0x48, 0x8D, 0x7B, 0x10, 0x48, 0x83, 0x3F, 0x00, 0x74, 0x58, 0x8B, 0x0B, 0xE8, 0x12, 0xF7, 0x0D, 0x00, 0x48, 0x8B, 0xC8, 0x48, 0x85, 0xC0, 0x74, 0x3C, 0x49, 0x3B, 0xC7, 0x74, 0x37, 0xF7, 0x80, 0x54, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00] },
 ];
 
+/// KH1 casts in the field (`crate::magic::field_fx`, `docs/recom-m7-magic.md` § Spell effects in the
+/// field): the branches retargeted through a jump placed near them. Each is one whole `jmp` /
+/// `call rel32` (the bytes checked by `patch`).
+pub const MAGIC_FX_BRANCHES: &[Site] = &[
+    // CGameSubField state 1 (0x1401AF920): `jmp 0x140211AA0` (the player's group, tail call).
+    Site { name: "field state 1: player group jump (0x1401AF933)", rva: 0x001A_F933, expect: &[0xE9, 0x68, 0x21, 0x06, 0x00] },
+    // The camp openings: `call 0x140211560` (the battle set's unload).
+    Site { name: "camp open: battle set unload (0x1401A95BD)", rva: 0x001A_95BD, expect: &[0xE8, 0x9E, 0x7F, 0x06, 0x00] },
+    Site { name: "camp open (menu button): battle set unload (0x1401A99F9)", rva: 0x001A_99F9, expect: &[0xE8, 0x62, 0x7B, 0x06, 0x00] },
+];
+
+/// What the field's battle set calls (Re:CoM's battle-set loader and unloader), and the code
+/// around the retargeted branches, checked only.
+pub const MAGIC_FX_CHECKED: &[Site] = &[
+    // push rbx; sub rsp,0x20; mov [rsp+0x30],rdi; test ecx,ecx; jne (char given).
+    Site { name: "battle set load (0x140211960)", rva: 0x0021_1960, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x89, 0x7C, 0x24, 0x30, 0x85, 0xC9, 0x75, 0x2D] },
+    // sub rsp,0x28; mov eax,[0x1407C7AE0]; test ecx,ecx; cmovne eax,ecx.
+    Site { name: "battle set unload (0x140211560)", rva: 0x0021_1560, expect: &[0x48, 0x83, 0xEC, 0x28, 0x8B, 0x05, 0x76, 0x65, 0x5B, 0x00, 0x85, 0xC9, 0x0F, 0x45, 0xC1, 0x89] },
+    // CGameSubField state 1 up to its tail jump: sub rsp,0x28; call 0x140235240 (battle room?);
+    // test eax,eax; jne ret; xor ecx,ecx; add rsp,0x28.
+    Site { name: "field state 1 (0x1401AF920)", rva: 0x001A_F920, expect: &[0x48, 0x83, 0xEC, 0x28, 0xE8, 0x17, 0x59, 0x08, 0x00, 0x85, 0xC0, 0x75, 0x0B, 0x33, 0xC9, 0x48, 0x83, 0xC4, 0x28] },
+    // CGameSubBattle state 1 (Re:CoM's own load of the battle set, the call the field now makes):
+    // sub rsp,0x28; call 0x140235360 (minigame room?); test; jne; xor ecx,ecx; add rsp,0x28;
+    // jmp 0x140211960.
+    Site { name: "battle state 1 (0x1401AEA20)", rva: 0x001A_EA20, expect: &[0x48, 0x83, 0xEC, 0x28, 0xE8, 0x37, 0x69, 0x08, 0x00, 0x85, 0xC0, 0x75, 0x0B, 0x33, 0xC9, 0x48, 0x83, 0xC4, 0x28, 0xE9, 0x28, 0x2F, 0x06, 0x00] },
+    // Before each unload: mov edx,0x60 / lea edx,[rdi+0x60]; xor ecx,ecx; call 0x1401B0800
+    // (system byte (0, 0x60)); test al,al; jne past the unload; xor ecx,ecx.
+    Site { name: "camp open: system byte 0x60 test (0x1401A95AB)", rva: 0x001A_95AB, expect: &[0xBA, 0x60, 0x00, 0x00, 0x00, 0x33, 0xC9, 0xE8, 0x49, 0x72, 0x00, 0x00, 0x84, 0xC0, 0x75, 0x07, 0x33, 0xC9] },
+    Site { name: "camp open (menu button): system byte 0x60 test (0x1401A99E9)", rva: 0x001A_99E9, expect: &[0x8D, 0x57, 0x60, 0x33, 0xC9, 0xE8, 0x0D, 0x6E, 0x00, 0x00, 0x84, 0xC0, 0x75, 0x07, 0x33, 0xC9] },
+];
+
+/// The Customize page's button glyphs (`crate::customize::text::glyph`, `docs/recom-keyblade-equip.md`
+/// § Stage 7.13): Re:CoM's text code that turns the escapes into the mapped button's glyph and
+/// the font flag the page reads. Checked only.
+pub const CUSTOMIZE_GLYPHS_CHECKED: &[Site] = &[
+    // The escape expander: movzx eax,cx; add eax,-0xF564; cmp eax,0x20; ja default.
+    Site { name: "text escape expander (0x140345B40)", rva: 0x0034_5B40, expect: &[0x0F, 0xB7, 0xC1, 0x05, 0x9C, 0x0A, 0xFF, 0xFF, 0x83, 0xF8, 0x20, 0x0F, 0x87, 0xBF, 0x03, 0x00] },
+    // Its jump table, escapes 0xF564..0xF568 (RVAs of the cases).
+    Site { name: "text escape table 0xF564..0xF568 (0x140345F18)", rva: 0x0034_5F18, expect: &[0x67, 0x5B, 0x34, 0x00, 0x7D, 0x5B, 0x34, 0x00, 0x43, 0x5C, 0x34, 0x00, 0x59, 0x5C, 0x34, 0x00, 0x93, 0x5B, 0x34, 0x00] },
+    // The cases the page's escapes reach: movzx eax,word [0x14083F510 / F51C / F518 / F51A].
+    Site { name: "escape 0xF564: confirm glyph (0x140345B67)", rva: 0x0034_5B67, expect: &[0x0F, 0xB7, 0x05, 0xA2, 0x99, 0x4F, 0x00] },
+    Site { name: "escape 0xF568: L1 glyph (0x140345B93)", rva: 0x0034_5B93, expect: &[0x0F, 0xB7, 0x05, 0x82, 0x99, 0x4F, 0x00] },
+    Site { name: "escape 0xF566: Square glyph (0x140345C43)", rva: 0x0034_5C43, expect: &[0x0F, 0xB7, 0x05, 0xCE, 0x98, 0x4F, 0x00] },
+    Site { name: "escape 0xF567: Triangle glyph (0x140345C59)", rva: 0x0034_5C59, expect: &[0x0F, 0xB7, 0x05, 0xBA, 0x98, 0x4F, 0x00] },
+    // The C2DFnt draw's font: cmp edx,[0x14087CFB8] (count); lea rbx,[base+0x87CFC0]; imul 0x158.
+    Site { name: "C2DFnt draw: font table (0x14025AACE)", rva: 0x0025_AACE, expect: &[0x3B, 0x15, 0xE4, 0x24, 0x62, 0x00, 0x0F, 0x83, 0x95, 0x0C, 0x00, 0x00, 0x48, 0x89, 0x9C, 0x24, 0x38, 0x0A, 0x00, 0x00, 0x4C, 0x8D, 0x0D, 0x17, 0x55, 0xDA, 0xFF, 0x8B, 0xC2, 0x49, 0x8D, 0x99, 0xC0, 0xCF, 0x87, 0x00, 0x48, 0x69, 0xC8, 0x58, 0x01, 0x00, 0x00] },
+    // The glyph picker: cmp dword [rcx+0x150],0 (button sheet); ... ; mov ecx,0x55C.
+    Site { name: "glyph picker: button sheet test (0x14025A0B4)", rva: 0x0025_A0B4, expect: &[0x83, 0xB9, 0x50, 0x01, 0x00, 0x00, 0x00, 0x41, 0x8B, 0xF1, 0x41, 0x8B, 0xE8, 0x44, 0x0F, 0xB7, 0xD2, 0x4C, 0x8B, 0xD9, 0x74, 0x6D, 0xB9, 0x5C, 0x05, 0x00, 0x00] },
+    // Font set-up: the "sysfont" gets +0x150 = 1.
+    Site { name: "font set-up: sysfont button flag (0x14025C400)", rva: 0x0025_C400, expect: &[0xC7, 0x84, 0x2F, 0x50, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00] },
+];
+
 /// M7 stage 7.11, spell unlocks (`crate::unlocks`, `docs/recom-m7-unlocks.md`): Re:CoM's "first
 /// obtained" of a card id, the one place every collection add turns a card's discovery state from
 /// 1 to 2. Same rule as [`HOOKS`].
@@ -1568,6 +1620,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SHOP_HOOKS,
         SHOP_CALLEES,
         SHOP_CHECKED,
+        MAGIC_FX_BRANCHES,
+        MAGIC_FX_CHECKED,
+        CUSTOMIZE_GLYPHS_CHECKED,
     ];
     LISTS
         .iter()
@@ -1912,6 +1967,82 @@ mod tests {
         }
         assert!(all_sites().any(|s| s.rva == 0x0029_B550) && all_sites().any(|s| s.rva == 0x0029_C1D0));
         assert_eq!(rip(find("confirm key getter"), 0, 7), 0x1_4083_F3F0);
+    }
+
+    #[test]
+    fn magic_field_fx_sites() {
+        use crate::magic::field_fx as fx;
+        let find = |rva: u32| all_sites().find(|s| s.rva == rva).unwrap_or_else(|| panic!("{rva:#x}"));
+        for s in MAGIC_FX_BRANCHES.iter().chain(MAGIC_FX_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        // The field state's tail jump goes to the player's group load (the models' hooked site,
+        // still called first); the camp openings' calls go to the battle set's unload.
+        let jump = find(fx::FIELD_JUMP_RVA);
+        assert_eq!(jump.expect[0], 0xE9);
+        assert_eq!(fx::branch_target(jump.rva, jump.expect), Some(fx::PLAYER_GROUP_RVA));
+        assert!(MODEL_HOOKS.iter().any(|s| s.rva == fx::PLAYER_GROUP_RVA));
+        for rva in fx::CAMP_CALL_RVAS {
+            let c = find(rva);
+            assert_eq!(c.expect[0], 0xE8, "{}", c.name);
+            assert_eq!(fx::branch_target(c.rva, c.expect), Some(fx::UNLOAD_RVA), "{}", c.name);
+        }
+        // Each checked context ends where its branch starts.
+        let ctx_end = |name: &str| {
+            let s = MAGIC_FX_CHECKED.iter().find(|s| s.name.starts_with(name)).unwrap();
+            s.rva + s.expect.len() as u32
+        };
+        assert_eq!(ctx_end("field state 1"), fx::FIELD_JUMP_RVA);
+        assert_eq!(ctx_end("camp open: system byte"), fx::CAMP_CALL_RVAS[0]);
+        assert_eq!(ctx_end("camp open (menu button): system byte"), fx::CAMP_CALL_RVAS[1]);
+        // Both tests call the system byte getter 0x1401B0800 with (0, 0x60).
+        let t0 = MAGIC_FX_CHECKED.iter().find(|s| s.name.starts_with("camp open: system byte")).unwrap();
+        let t1 = MAGIC_FX_CHECKED.iter().find(|s| s.name.starts_with("camp open (menu button): system byte")).unwrap();
+        assert_eq!(fx::branch_target(t0.rva + 7, &t0.expect[7..12]), Some(0x001B_0800));
+        assert_eq!(fx::branch_target(t1.rva + 5, &t1.expect[5..10]), Some(0x001B_0800));
+        // Re:CoM's battle state 1 is the field's state 1 with the battle set's load as its tail.
+        let battle = MAGIC_FX_CHECKED.iter().find(|s| s.name.starts_with("battle state 1")).unwrap();
+        let field = MAGIC_FX_CHECKED.iter().find(|s| s.name.starts_with("field state 1")).unwrap();
+        assert_eq!(fx::branch_target(battle.rva + 19, &battle.expect[19..24]), Some(fx::LOAD_RVA));
+        assert_eq!(battle.expect[9..19], field.expect[9..19]);
+        // The loader and unloader are checked.
+        find(fx::LOAD_RVA);
+        find(fx::UNLOAD_RVA);
+    }
+
+    #[test]
+    fn customize_glyph_sites() {
+        for s in CUSTOMIZE_GLYPHS_CHECKED {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        let find = |n: &str| CUSTOMIZE_GLYPHS_CHECKED.iter().find(|s| s.name.starts_with(n)).unwrap();
+        // The table's entries are the four cases' RVAs (escapes 0xF564, 0xF565, 0xF566, 0xF567,
+        // 0xF568; 0xF565 is cancel, not used), and each case reads its glyph word.
+        let table = find("text escape table");
+        let entry = |k: usize| u32::from_le_bytes(table.expect[4 * k..4 * k + 4].try_into().unwrap());
+        let rip = |s: &Site| {
+            let d = i32::from_le_bytes(s.expect[3..7].try_into().unwrap()) as i64;
+            (0x1_4000_0000i64 + s.rva as i64 + 7 + d) as u64
+        };
+        for (k, case, word) in [(0, "escape 0xF564", 0x1_4083_F510u64), (2, "escape 0xF566", 0x1_4083_F518), (3, "escape 0xF567", 0x1_4083_F51A), (4, "escape 0xF568", 0x1_4083_F51C)] {
+            let c = find(case);
+            assert_eq!(entry(k), c.rva, "{case}");
+            assert_eq!(rip(c), word, "{case}");
+        }
+        // The page's escapes are those codes.
+        use crate::customize::text::glyph;
+        for (g, k) in [(glyph::CONFIRM, 0), (glyph::SQUARE, 2), (glyph::TRIANGLE, 3), (glyph::L1, 4)] {
+            assert_eq!(u16::from_be_bytes(g), 0xF564 + k);
+        }
+        // The draw's font table: count 0x14087CFB8, base 0x14087CFC0, 0x158 a font.
+        let draw = find("C2DFnt draw");
+        let d = i32::from_le_bytes(draw.expect[2..6].try_into().unwrap()) as i64;
+        assert_eq!((0x1_4000_0000i64 + draw.rva as i64 + 6 + d) as u64, 0x1_4087_CFB8);
+        assert_eq!(u32::from_le_bytes(draw.expect[32..36].try_into().unwrap()), 0x0087_CFC0);
+        assert_eq!(u32::from_le_bytes(draw.expect[39..43].try_into().unwrap()), 0x158);
+        // The button flag is +0x150 in both the set-up and the picker.
+        assert_eq!(u32::from_le_bytes(find("font set-up").expect[3..7].try_into().unwrap()), 0x150);
+        assert_eq!(u32::from_le_bytes(find("glyph picker").expect[2..6].try_into().unwrap()), 0x150);
     }
 
     #[test]

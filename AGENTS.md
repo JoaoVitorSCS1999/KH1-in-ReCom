@@ -11,6 +11,26 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 90: KH1 casts in the field: Keyblade shown, spell effects loaded; Customize rows show their buttons, version 0.48.0 (2026-11-01)
+
+- Asks (owner, 2026-11-01): "when casting spells, soras keyblade isnt visible, and the VFX dont appear";
+  "for the customize menu, instead of saying 'shortcut 1, shortcut 2 etc' it should be the corresponding
+  button".
+- Keyblade (Checked (decomp)): Re:CoM draws it in the field only for its swings / Guard (`0x1401F5D30`);
+  its magic never does (battle only). A KH1 cast now calls Re:CoM's same draw at the command.
+- Effects (Checked (decomp + exe)): spell effects come only with Sora's battle resources (PLAYER group
+  1001, effect groups 2000–2060), loaded by the battle scene (`0x1401AEA20` → `0x140211960(0)`) and dropped
+  on camp open (`0x140211560`) unless Re:CoM's flag (0, 0x60). At Combat = KH1: the field state's player
+  load (`0x1401AF933`, 5 bytes) also runs `0x140211960(0)`; the two camp-open unloads (`0x1401A95BD`,
+  `0x1401A99F9`) keep it; the Config switch to KH1 loads it. Re:CoM's own calls only.
+- Customize: rows and help use Re:CoM's font button escapes (`F5 67` Triangle, `F5 66` Square, `F5 64`
+  confirm, `F5 68` L1; `0x1403480C0` → `0x140345B40`, following the controller / bound key), names if the
+  font lacks them.
+- Not measured: the field room load time with group 1001.
+- Checked: tests, Windows build, all site bytes. Not checked: in game.
+
+---
+
 ## Stage 89: M8 stage 8a.4: KH1 item drops from enemies, version 0.47.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): items dropped by enemies at KH1's rates.
