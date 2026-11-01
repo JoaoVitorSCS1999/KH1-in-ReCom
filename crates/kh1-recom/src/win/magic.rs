@@ -19,6 +19,12 @@
 //!   `0x140157DA0`) with the KH1 row's numbers and KH1's life; then KH1's MP is paid
 //!   (`super::mp::pay`, 30 units). Re:CoM's `CHomingBullet` then steps, homes, draws, collides
 //!   and ends the ball.
+//! - **Re-target** (7.4b, decision 36): a ball cast with no target gets KH1's pick each frame
+//!   ([`seek_on`], [`kh1_ball_exe`]): its own flight state's exe (Re:CoM's `CStateTemplate<CBullet>`
+//!   at `bullet+0x2B0`, exe `+0x2D0` = the vcall thunk `0x1401560B8` → `CHomingBullet`'s homing
+//!   step `0x1401575D0`) points at our wrapper, which writes KH1's pick (`crate::magic::retarget`)
+//!   into Re:CoM's homing target `+0x2F4` and runs Re:CoM's step. Re:CoM's own shots never pass
+//!   through it.
 //! - **Hits:** the enemy-hit wrapper ([`take_hit`]) recognises a hit part whose attacker is one of
 //!   our balls and gives it KH1's spell damage (`super::stats::kh1_spell_hit`).
 //! - **End** ([`end_cast`]): Re:CoM's `0x1401F6660`, as `exeMagic` ends its action.
@@ -38,6 +44,11 @@ static TABLE: OnceLock<&'static [[u8; 16]]> = OnceLock::new();
 static PENDING: Mutex<Option<MagicCommand>> = Mutex::new(None);
 /// Our balls: (Re:CoM shot id, spell, level), the last 16.
 static SHOTS: Mutex<Vec<(u32, u8, u8)>> = Mutex::new(Vec::new());
+/// KH1's re-target (7.4b) is set up: the homing slot and Re:CoM's lock-on list are as expected.
+static RETARGET: AtomicBool = AtomicBool::new(false);
+/// Our balls cast with no target: (shot id, the last pick's handle, 0 for none), the last 16.
+static SEEKERS: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
+static RETARGET_LINES: AtomicU32 = AtomicU32::new(40);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
 static HIT_LINES: AtomicU32 = AtomicU32::new(40);
 static EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -59,6 +70,35 @@ const BASE_GRAVITY: u64 = 0x1_4087_B398;
 const EFFECT_SETS: u64 = 0x1_405A_1730;
 /// Re:CoM's attack rows.
 const ROWS: u64 = crate::attack::RECOM_ATTACK_ROWS;
+/// The vcall thunk `mov rax,[rcx]; jmp [rax+0xA8]` that the bullet init (`0x140157E60`, at
+/// `0x1401585D5` / `0x140158609`) stores as every bullet's flight-state exe; for a
+/// `CHomingBullet` it reaches the homing step `0x1401575D0`. Checked (disasm).
+const HOMING_THUNK: u32 = 0x0015_60B8;
+/// Re:CoM's `LockOnManager` (`0x14087B1E0`, made on first use by its users; its list `+0x88`:
+/// nodes `{u32 handle, …, +0x10 next}`, the last one a sentinel with no next). Checked (decomp
+/// + disasm `0x1401CDB90`, Re:CoM's own nearest-target pick for homing shots).
+const LOCK_ON_MANAGER: u64 = 0x1_4087_B1E0;
+
+/// Bullet and lock-on fields the re-target reads or writes. Checked (decomp `0x140155EB0`,
+/// `0x140157E60`, `0x1401575D0`, `0x140156740`, `0x1401CDB90`).
+mod rt {
+    /// The flight state's exe member-function pointer (`CStateTemplate<CBullet>` at `+0x2B0`,
+    /// its exe `+0x20` / this-adjust `+0x28`, run by `0x140156740` each frame).
+    pub const STATE_EXE: usize = 0x2D0;
+    pub const STATE_EXE_ADJUST: usize = 0x2D8;
+    /// The homing step returns at once while this is set.
+    pub const HOLD: usize = 0x2F0;
+    /// The life (ticks), counted down by Re:CoM.
+    pub const LIFE: usize = 0x160;
+    pub const LIST: usize = 0x88;
+    pub const NODE_NEXT: usize = 0x10;
+    /// The lock-on flag every entry of Re:CoM's own pick must have (`+0x154 & 0x10000`).
+    pub const ACTOR_FLAGS: usize = 0x154;
+    pub const LOCKABLE: u32 = 0x1_0000;
+    /// Actor position (its mover's `+0x30`).
+    pub const MOVER: usize = 0xF0;
+    pub const POSITION: usize = 0x30;
+}
 
 type PlFn = unsafe extern "win64" fn(usize);
 type PlIntFn = unsafe extern "win64" fn(usize, i32);
@@ -154,6 +194,13 @@ pub unsafe fn install(b: usize) -> bool {
     }
     if !super::hook::patch(entry, &old_entry, &fc::entry(), "magic: Field jump table 0x13") {
         return false;
+    }
+    // 7.4b: KH1's re-target needs CHomingBullet's homing slot to be Re:CoM's homing step (the
+    // thunk our wrapper calls goes through it). Without it the balls home as Re:CoM's.
+    let slot_ok = crate::sites::MAGIC_RETARGET_PTRS.iter().all(|p| rd::<usize>(b + p.rva as usize) == b + p.target as usize);
+    RETARGET.store(slot_ok, Ordering::Release);
+    if !slot_ok {
+        log("magic: CHomingBullet's homing slot is not 0x1401575D0; Fire balls cast with no target fly as Re:CoM's (no KH1 re-target)");
     }
     true
 }
@@ -312,6 +359,11 @@ pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
     }
     func::<MoverFn>(SHOT_MOVER)(bullet, 0.1, 0.0, 0, -1);
     let id: u32 = rd(bullet + 0x20);
+    // KH1's ball with no target picks one each frame (7.4b); with a target, Re:CoM's homing is
+    // KH1's (it homes while the target exists, then flies straight, never re-picking).
+    if rd::<i32>(pl + f::TARGET) <= 0 {
+        seek_on(bullet, id);
+    }
     if let Ok(mut g) = SHOTS.lock() {
         if g.len() >= 16 {
             g.remove(0);
@@ -336,6 +388,107 @@ pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
         )
     });
     Some(id)
+}
+
+/// Our ball cast with no target: its flight state's exe becomes [`kh1_ball_exe`] (only when it is
+/// Re:CoM's homing thunk with no this-adjust, on a `CHomingBullet`).
+unsafe fn seek_on(bullet: usize, id: u32) {
+    if !RETARGET.load(Ordering::Acquire) {
+        return;
+    }
+    let b = base();
+    let vt: usize = rd(bullet);
+    let exe: usize = rd(bullet + rt::STATE_EXE);
+    let adj: i32 = rd(bullet + rt::STATE_EXE_ADJUST);
+    if vt != va(b, crate::guard::bullet::HOMING_VTABLE) || exe != b + HOMING_THUNK as usize || adj != 0 {
+        rt_line(|| format!("re-target: shot {id} is not a plain CHomingBullet in flight (vt {vt:#x}, exe {exe:#x}, adjust {adj}): Re:CoM's homing"));
+        return;
+    }
+    if let Ok(mut g) = SEEKERS.lock() {
+        if g.len() >= 16 {
+            g.remove(0);
+        }
+        g.push((id, 0));
+    }
+    wr(bullet + rt::STATE_EXE, kh1_ball_exe as *const () as usize);
+    rt_line(|| format!("re-target: shot {id} cast with no target: KH1's pick each frame (best enemy within {} m of the ball)", mg::retarget::RANGE_M));
+}
+
+fn rt_line(line: impl FnOnce() -> String) {
+    if RETARGET_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("magic: {}", line()));
+    }
+}
+
+/// Re:CoM's enemies in its lock-on list (`0x1401CDB90`'s walk and filter: the handle resolves, the
+/// object is not the shot, `+0x154 & 0x10000`), kept to enemies (type 0x1004) with HP left, with
+/// their positions. At most 64.
+unsafe fn lock_on_enemies(skip: usize) -> Vec<(u32, [f32; 3])> {
+    type TypeFn = unsafe extern "win64" fn(usize) -> u32;
+    let mut out = Vec::new();
+    let m: usize = rd(va(base(), LOCK_ON_MANAGER));
+    if m == 0 {
+        return out;
+    }
+    let mut node: usize = rd(m + rt::LIST);
+    let mut guard = 0;
+    while node != 0 && guard < 256 && out.len() < 64 {
+        let next: usize = rd(node + rt::NODE_NEXT);
+        if next == 0 {
+            break;
+        }
+        let h: u32 = rd(node);
+        let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(h);
+        if obj != 0 && obj != skip && rd::<u32>(obj + rt::ACTOR_FLAGS) & rt::LOCKABLE != 0 {
+            let vt: usize = rd(obj);
+            let ty: TypeFn = std::mem::transmute_copy(&rd::<usize>(vt + crate::battle::enemy::VT_TYPE));
+            let mover: usize = rd(obj + rt::MOVER);
+            if ty(obj) == crate::battle::ENEMY_TYPE && rd::<i32>(obj + crate::battle::enemy::HP) > 0 && mover != 0 {
+                let p = rd_vec(mover + rt::POSITION);
+                out.push((h, [p.x, p.y, p.z]));
+            }
+        }
+        node = next;
+        guard += 1;
+    }
+    out
+}
+
+/// The flight-state exe of our balls cast with no target (7.4b): KH1's pick for this frame
+/// (`crate::magic::retarget::pick` on the ball's position and its direction before this frame's
+/// turn) into Re:CoM's homing target `+0x2F4` (0: none, the ball flies straight this frame), then
+/// Re:CoM's own homing step (the thunk → `0x1401575D0`: the ≤ 3° turn toward the pick's aim
+/// point, the velocity). Runs only for these balls, once a frame each.
+pub unsafe extern "win64" fn kh1_ball_exe(bullet: usize) {
+    use crate::guard::bullet as gb;
+    let mover: usize = rd(bullet + gb::MOVER);
+    let live = rd::<i32>(bullet + rt::HOLD) == 0 && rd::<i32>(bullet + rt::LIFE) > 0 && mover != 0;
+    let pick = if live {
+        let p = rd_vec(mover + rt::POSITION);
+        let dir = crate::guard::forward(rd(mover + gb::PITCH), rd(mover + gb::YAW));
+        mg::retarget::pick([p.x, p.y, p.z], dir, lock_on_enemies(bullet))
+    } else {
+        None
+    };
+    wr(bullet + gb::HOMING_TARGET, pick.map_or(0, |p| p.0 as i32));
+    if live {
+        let id: u32 = rd(bullet + 0x20);
+        let h = pick.map_or(0, |p| p.0);
+        let changed = SEEKERS
+            .lock()
+            .ok()
+            .and_then(|mut g| g.iter_mut().find(|e| e.0 == id).map(|e| std::mem::replace(&mut e.1, h) != h))
+            .unwrap_or(false);
+        if changed {
+            let t = match pick {
+                Some((h, d)) => format!("rt shot {id} -> {h} ({d:.2} m)"),
+                None => format!("rt shot {id} -> none"),
+            };
+            event(t.clone());
+            rt_line(|| format!("re-target: {t}"));
+        }
+    }
+    func::<PlFn>(HOMING_THUNK)(bullet)
 }
 
 /// Re:CoM ends its magic action (`0x1401F6660(player, airborne)`, as `exeMagic` does at its end).
@@ -434,13 +587,15 @@ pub fn clear_events() {
 /// The start log line.
 pub fn start_line() -> String {
     format!(
-        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stage 7.4): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Field exe case 0x13 -> exeMagic",
+        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stage 7.4): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
         TABLE.get().map_or(0, |t| t.iter().filter(|r| r[0] != 0).count()),
         28,
         mg::fire::FAST_WAIT,
         mg::fire::SPEED,
         mg::fire::LIFE,
         mg::fire::TURN_DEG,
-        mg::fire::COST
+        mg::fire::COST,
+        mg::retarget::RANGE_M,
+        if RETARGET.load(Ordering::Acquire) { "on" } else { "off" }
     )
 }

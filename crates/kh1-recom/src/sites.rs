@@ -690,6 +690,9 @@ pub const MAGIC_CALLEES: &[Site] = &[
     Site { name: "homing target (0x1401F68A0)", rva: 0x001F_68A0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0x33, 0xFF, 0x8B, 0x89, 0x4C, 0x08, 0x00, 0x00] },
     // The whole function: the target cursor's "busy" bit (8) and its saved value.
     Site { name: "target cursor busy (0x140209800)", rva: 0x0020_9800, expect: &[0x85, 0xD2, 0x74, 0x14, 0x83, 0x89, 0xF8, 0x00, 0x00, 0x00, 0x08, 0x8B, 0x81, 0xD0, 0x00, 0x00, 0x00, 0x89, 0x81, 0xD8, 0x00, 0x00, 0x00, 0xC3] },
+    // 7.4b: mov rax,[rcx]; jmp [rax+0xA8]: the vcall thunk every bullet's flight state runs as
+    // its exe; our re-target wrapper calls it (→ CHomingBullet's homing step).
+    Site { name: "bullet homing thunk (0x1401560B8)", rva: 0x0015_60B8, expect: &[0x48, 0x8B, 0x01, 0xFF, 0xA0, 0xA8, 0x00, 0x00, 0x00] },
 ];
 
 /// Exe bytes the cast patches or relies on.
@@ -714,10 +717,29 @@ pub const MAGIC_CHECKED: &[Site] = &[
     Site { name: "Field exe after the action (0x1401FA599)", rva: 0x001F_A599, expect: &[0x8B, 0x8B, 0x60, 0x04, 0x00, 0x00, 0x29, 0x8B, 0xBC, 0x07, 0x00, 0x00] },
     // The Battle exe's case 0x13: mov rax,[rdi]; mov rcx,rdi; call [rax+0x150] (exeMagic).
     Site { name: "Battle exe case 0x13 (0x1401F9B4D)", rva: 0x001F_9B4D, expect: &[0x48, 0x8B, 0x07, 0x48, 0x8B, 0xCF, 0xFF, 0x90, 0x50, 0x01, 0x00, 0x00] },
+    // 7.4b. CHomingBullet's homing step (push rbx; sub rsp,0x50; the cookie; cmp dword
+    // [rcx+0x2F0],0): reached through the thunk; turns toward `+0x2F4`'s aim point.
+    Site { name: "CHomingBullet homing step (0x1401575D0)", rva: 0x0015_75D0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x50, 0x48, 0x8B, 0x05, 0xEB, 0xB4, 0x70, 0x00, 0x48, 0x33, 0xC4, 0x48, 0x89, 0x44, 0x24, 0x30, 0x83, 0xB9, 0xF0, 0x02, 0x00, 0x00, 0x00] },
+    // The bullet init's flight state: lea rax,[0x1401560B8] (the exe), and movups [rsi+0x2D0],
+    // xmm1 (the exe member pointer into the state object at +0x2B0).
+    Site { name: "bullet init: exe thunk (0x1401585D5)", rva: 0x0015_85D5, expect: &[0x48, 0x8D, 0x05, 0xDC, 0xDA, 0xFF, 0xFF] },
+    Site { name: "bullet init: exe store +0x2D0 (0x140158609)", rva: 0x0015_8609, expect: &[0x0F, 0x11, 0x8E, 0xD0, 0x02, 0x00, 0x00] },
+    // CStateTemplate<CBullet>'s exe (its vtable 0x140525408 +0x10): rcx = owner + adjust, jmp
+    // [state+0x20]. So the member pointer at +0x2D0 is called with the bullet.
+    Site { name: "CStateTemplate<CBullet> exe (0x140156740)", rva: 0x0015_6740, expect: &[0x48, 0x8B, 0x51, 0x20, 0x48, 0x8B, 0xC1, 0x48, 0x85, 0xD2, 0x74, 0x0B, 0x48, 0x63, 0x49, 0x28, 0x48, 0x03, 0x48, 0x08, 0x48, 0xFF, 0xE2, 0xC3] },
+    // Re:CoM's own nearest pick for homing shots: mov r14,[0x14087B1E0] (the LockOnManager),
+    // then its list walk: rbx = [r14+0x88]; stop at the node with no next; handle → object;
+    // skip null / the shot; test [obj+0x154],0x10000.
+    Site { name: "nearest pick: lock-on manager (0x1401CDBCF)", rva: 0x001C_DBCF, expect: &[0x4C, 0x8B, 0x35, 0x0A, 0xD6, 0x6A, 0x00] },
+    Site { name: "nearest pick: list walk (0x1401CDC26)", rva: 0x001C_DC26, expect: &[0x49, 0x8B, 0x9E, 0x88, 0x00, 0x00, 0x00, 0x48, 0x8D, 0x7B, 0x10, 0x48, 0x83, 0x3F, 0x00, 0x74, 0x58, 0x8B, 0x0B, 0xE8, 0x12, 0xF7, 0x0D, 0x00, 0x48, 0x8B, 0xC8, 0x48, 0x85, 0xC0, 0x74, 0x3C, 0x49, 0x3B, 0xC7, 0x74, 0x37, 0xF7, 0x80, 0x54, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00] },
 ];
 
 /// `CPlayerSora`'s exeMagic slot (vtable `0x1405A9938` + 0x150). Checked (exe; relocated).
 pub const MAGIC_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x150 (0x1405A9A88)", rva: 0x005A_9A88, target: 0x0021_7EE0 }];
+
+/// `CHomingBullet`'s homing slot (vtable `0x140525530` + 0xA8), which the thunk jumps through
+/// (7.4b re-target). Checked (exe; relocated).
+pub const MAGIC_RETARGET_PTRS: &[PtrSite] = &[PtrSite { name: "CHomingBullet vtable +0xA8 (0x1405255D8)", rva: 0x0052_55D8, target: 0x0015_75D0 }];
 
 /// Data this version reads or calls through, with its address (Steam). Checked (exe).
 pub mod data {
@@ -1113,6 +1135,22 @@ mod tests {
         // The stub fits the cave, and both stay clear of the Attack's cave.
         assert!(crate::magic::field_case::STUB_LEN <= MAGIC_DATA[1].expect.len());
         assert_ne!(MAGIC_DATA[1].rva, crate::attack::battle_case::CAVE_RVA);
+        // 7.4b: the thunk jumps through the homing slot; the init stores the thunk; the walk calls
+        // the handle lookup; the manager global is where the pick reads it.
+        let site = |n: &str| all_sites().find(|s| s.name == n).unwrap_or_else(|| panic!("{n}"));
+        let thunk = site("bullet homing thunk (0x1401560B8)");
+        assert_eq!(thunk.expect[5] as u64, 0x1_4000_0000 + MAGIC_RETARGET_PTRS[0].rva as u64 - crate::guard::bullet::HOMING_VTABLE);
+        assert_eq!(MAGIC_RETARGET_PTRS[0].target, site("CHomingBullet homing step (0x1401575D0)").rva);
+        let lea = site("bullet init: exe thunk (0x1401585D5)");
+        assert_eq!((lea.rva as i64 + 7 + i32::from_le_bytes(lea.expect[3..7].try_into().unwrap()) as i64) as u32, thunk.rva);
+        let store = site("bullet init: exe store +0x2D0 (0x140158609)");
+        assert_eq!(u32::from_le_bytes(store.expect[3..7].try_into().unwrap()), 0x2D0);
+        let ld = site("nearest pick: lock-on manager (0x1401CDBCF)");
+        assert_eq!(0x1_4000_0000 + (ld.rva as i64 + 7 + i32::from_le_bytes(ld.expect[3..7].try_into().unwrap()) as i64) as u64, 0x1_4087_B1E0);
+        let walk = site("nearest pick: list walk (0x1401CDC26)");
+        assert_eq!(walk.expect[3], 0x88);
+        assert_eq!((walk.rva as i64 + 24 + i32::from_le_bytes(walk.expect[20..24].try_into().unwrap()) as i64) as u32, 0x002A_D350);
+        assert!(!all_sites().any(|s| s.rva == MAGIC_RETARGET_PTRS[0].rva));
         // The callees the cast also uses are checked by earlier stages: end attack, ground test,
         // handle → object.
         for rva in [0x001F_6660u32, 0x001F_3C00, 0x002A_D350] {

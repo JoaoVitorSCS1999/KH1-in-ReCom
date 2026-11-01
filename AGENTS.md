@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 44: Fire re-targets as KH1, version 0.18.1 (2026-10-31)
+
+> Decision 36: Fire re-targets as KH1
+
+- KH1's Fire script re-picks only for a ball cast with no target (a dead target: the ball flies
+  straight; Checked, decomp + files). The pick `0x1402B0E90`: enemies within 5 m of the ball,
+  score distance × (1 + 2 × (1 − cos angle to the ball's heading)), lowest wins, every frame.
+- Our target-less balls get their own per-frame step: a wrapper writes KH1's pick into Re:CoM's
+  homing target, then runs Re:CoM's homing step (`0x1401575D0`, via the thunk `0x1401560B8`;
+  CHomingBullet vtable +0xA8 `0x1405255D8` compared at install). Candidates: Re:CoM's lock-on list
+  filtered as its nearest pick (`0x1401CDBCF`) does. Re:CoM's shots never run it. Not seen in game.
+
+---
+
 ## Stage 43: M7 stage 7.4, the cardless cast and Fire, version 0.18.0 (2026-10-31)
 
 > Decision 34 (M7 "FULLY implemented"; Re:CoM's spell visuals and sounds)

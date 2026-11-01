@@ -31,6 +31,7 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 | **The script** (`xm_fire01.mag`, the same at every level): on the wind-up path it yields while the request is `0x36` / `0x83`; on the fast path it waits 8 frames (`L006fa(8.0)`, − frame step per run). Then, if the request is not `0x3D` / `0x8A`, it ends: **no spell, no MP**. Else the ball thread starts (sys 20) and **the MP is paid** (sys 47 → `0x1402A5B60`, the data's `+0x30` = 30 units). | `xm_fire01.mag` 0x520.. | Checked (files: decoded with `magdis.py`; syscalls in the decomp) |
 | **When the script runs**: spell threads are tasks of the list `0x142D22D08`, run by `0x14028F6B0`, registered at priority 137000 (`0x21728`); the actors' update runs earlier in the frame (the command menu at 55000). So a run sees that frame's motion update: the ball leaves **in the frame the wind-up ends (28 after the command)**, or 8 after the command on the fast path. | `0x14028F2D0`, `0x140284670` | Checked (decomp); that the actor list runs before 137000: Assumption (its runner's priority not pinned) |
 | **The ball** (thread at `L0026e`): from the Keyblade's middle (bone 48, × 0.5) along Sora's facing, **40 cm a frame**, **life 30 frames**, turns **≤ 3° a frame** toward its target's part; with no or a dead target it picks the best enemy **within 500 cm of the ball** each frame (sys 78); starts fading 20 frames before its end; radius 50 (attack data `+0x5C`); ends on its first hit. | `xm_fire01.mag` | Checked (files) |
+| **Re-target** (`xm_fire01.mag` loop `L000c2`; sys 78 `0x1402BA440` → `0x1402B0E90`, sys 120 `0x1402BAB10` → `0x140291FF0`): each frame the ball reads the cast's target from its thread arguments. **No target** (the command had none): it picks the best actor within 500 cm of the ball and homes on it this frame; the pick isn't kept, so it picks again next frame. **A target no longer alive**: no homing, **no new pick** (straight on). The pick: actors that are live, not flagged `+0 & 0x200`, on a side other than 0 and the caster's (`0x140291AB0`); `d` = 3D distance from the ball to the actor's position `+0x10`, taken when `d < 500`; score `d × (1 + 2 × (1 − cos))`, `cos` = the clamped cosine between the ball's direction and the way to the actor (0 for a zero vector); the first in range is taken, later ones only with a smaller score. | `0x1402B0E90` | Checked (files + decomp) |
 | **Damage** `0x1402BFA80`: power (Fire 20 / Fira 28 / Firaga 36) + max MP (stat source 1), the curve on power − Defence, the target's floor / cap, × resist[2] (fire); no crit. Kind 3 (flinch). MP charge `+0x2C` = 0. | btltbl `0x5F28` / `0x5F98` / `0x6008` | Checked (files + decomp) |
 
 Units: both games step 60 Hz frames (KH1 1.0 per frame; Re:CoM 50 ticks per frame); KH1 cm, Re:CoM
@@ -125,6 +126,76 @@ KH1's**: for that call the part's attribute (`+0x84`) reads `0xFF`, which Re:CoM
 after. Checked (decomp `0x14017F7E0`, `0x14017F440`). Open question 2. The card-interrupt bit
 as for swings (decision 14). Spells charge no MP. The trace's hits column: `…:fire1:kh1 <n>`.
 
+### Re-target (stage 7.4b, decision 36)
+
+Owner (2026-10-31, decision 36): "Fire re-targets as KH1". KH1's rule (above) is built as the
+script has it. Note: the decision's summary said "a ball with no live target"; KH1's script
+re-picks only for a ball **cast with no target**; a ball whose target dies flies straight and
+never picks again (Checked (files): `L000fc` picks only when the thread's target argument is 0;
+`L0013e` clears the target for the frame when sys 120 says it's dead, and `L0015c` then skips
+the homing). Re:CoM's `CHomingBullet` already does the second half the same way (below), so only
+balls cast with no target get the wrapper.
+
+- **Where:** every Re:CoM bullet runs a flight state (`CStateTemplate<CBullet>` at `bullet+0x2B0`,
+  set by the bullet init `0x140157E60`: `0x1401585D5` / `0x140158609`, current via `+0x68`), whose
+  exe member pointer `+0x2D0` (this-adjust `+0x2D8` = 0) is the vcall thunk `0x1401560B8`
+  (`mov rax,[rcx]; jmp [rax+0xA8]`); the state's exe `0x140156740` calls it with the bullet each
+  frame (Re:CoM's FSM `0x140242F50`). For a `CHomingBullet` that is the homing step
+  `0x1401575D0` (vtable `0x140525530` + 0xA8). Checked (decomp + disasm).
+- **The wrapper:** for **our balls cast with no target** only (`+0x84C` ≤ 0 at the release), right
+  after Re:CoM's shot manager made the ball, `win::magic::seek_on` points that ball's own exe
+  member at `kh1_ball_exe` (after checking the ball's vtable is `CHomingBullet`'s, the member is
+  the thunk and the adjust is 0). Each frame `kh1_ball_exe` writes KH1's pick
+  (`magic::retarget::pick`) into Re:CoM's homing target `+0x2F4` (0 when nothing is in range),
+  then calls Re:CoM's thunk: Re:CoM's homing step turns the ball ≤ 3° toward the pick's aim point
+  (vtable `+0x50`) and rebuilds its velocity, as for any homing shot. Re:CoM's own shots never
+  run our code.
+- **KH1's inputs in Re:CoM:** the ball's position (its mover `+0x30`) and its direction before this
+  frame's turn (the mover's aim angles `+0x50` / `+0x54` → `guard::forward`, the inverse of
+  `0x1401A2F10`); the candidates are **Re:CoM's lock-on list** (`LockOnManager` `0x14087B1E0`,
+  list `+0x88`), walked and filtered as Re:CoM's own nearest-target pick for homing shots
+  (`0x1401CDB90`: the handle resolves, not the shot, `+0x154 & 0x10000`), kept to enemies (type
+  `0x1004`) with HP left; the distance is to the enemy's position (mover `+0x30`), as KH1 measures
+  to the actor's `+0x10`. Metres: KH1 cm → Re:CoM is (x, −y, −z) / 100, a rotation and a uniform
+  scale, so 500 cm = 5 m and the cosine is unchanged.
+- **A ball cast with a target** keeps Re:CoM's homing unchanged: it homes while the target's
+  handle resolves (`0x1402AD350`), then clears `+0x2F4` and flies straight for good (Checked
+  (decomp `0x1401575D0`)). That is KH1's dead-target rule, with "dead" = "removed".
+- **Cost:** one lock-on list walk (≤ 64 entries) per frame per ball cast with no target, only while
+  it flies (life `+0x160` > 0); nothing for any other shot.
+- **Logs / trace:** `magic: re-target: shot N cast with no target: …` once per such ball (40
+  lines in all), and each change of its pick: `rt shot N -> <handle> (d m)` / `rt shot N -> none`,
+  also as F9 trace events in the cast column.
+
+Sites (`sites::MAGIC_CALLEES` / `MAGIC_CHECKED` / `MAGIC_RETARGET_PTRS`, bytes from the Steam
+exe; `magic_sites` checks the jumps between them):
+
+| address | bytes | use |
+|---|---|---|
+| `0x1401560B8` homing thunk | `48 8B 01 FF A0 A8 00 00 00` | called (the ball's own exe before the wrapper) |
+| `0x1405255D8` `CHomingBullet` vtable `+0xA8` | → `0x1401575D0` | compared at install (no re-target otherwise) |
+| `0x1401575D0` homing step | `40 53 48 83 EC 50 48 8B 05 EB B4 70 00 48 33 C4 48 89 44 24 30 83 B9 F0 02 00 00 00` | checked only |
+| `0x1401585D5` / `0x140158609` bullet init | `48 8D 05 DC DA FF FF` / `0F 11 8E D0 02 00 00` | checked only (the thunk lands in `+0x2D0`) |
+| `0x140156740` `CStateTemplate<CBullet>` exe | `48 8B 51 20 48 8B C1 48 85 D2 74 0B 48 63 49 28 48 03 48 08 48 FF E2 C3` | checked only (calls the member with the bullet) |
+| `0x1401CDBCF` / `0x1401CDC26` Re:CoM's nearest pick | `4C 8B 35 0A D6 6A 00` / `49 8B 9E 88 00 00 00 … F7 80 54 01 00 00 00 00 01 00` (47 bytes) | checked only (the manager global, the walk and its filter) |
+
+1:1 checks (7.4b):
+
+- **Checked (files + decomp)**, in `magic::tests::fire_retarget_is_kh1s_pick`: the 5 m strict 3D
+  range, the score (ahead × 1, beside × 3, behind × 5), a farther enemy ahead beating a nearer one
+  behind, no pick out of range, ties keeping the first, the pick following the ball's direction,
+  the cosine's clamp and its invariance under the KH1 → Re:CoM axis flip.
+- **Checked (exe)**: the 9 new sites' bytes and the vtable slot (script against the Steam exe).
+- **Assumptions:** (1) Re:CoM's bullet flight-state exe runs before its mover moves it in the
+  frame (KH1: pick, turn, move), as 7.4's homing already assumes; (2) KH1's `+0 & 0x200` excluded
+  actor is a defeated one (set at `0x1402A8567` with the prize record), matched by Re:CoM's
+  lock-on flag and HP > 0; (3) only enemies count (KH1's other-side actors; Re:CoM's lock-on list
+  also holds chests, doors and NPCs in the field, which KH1 has no actors for); (4) KH1's actor
+  array order vs Re:CoM's list order only matters for exact score ties; (5) a dying KH1 enemy
+  stays "alive" for sys 120 until it is removed (`0x140292390` sets `+0x374 & 2`), as a dying
+  Re:CoM enemy keeps resolving until deleted.
+- **Not checked:** in game.
+
 ## Per frame
 
 Nothing of ours per frame outside a KH1 cast (one atomic load in the request-bits wrapper for the
@@ -190,9 +261,7 @@ test), `0x1402AD350`. All 16 new sites compared with the Steam exe's bytes (scri
 
 ## Not 1:1 by design or yet (and why)
 
-1. **Homing re-acquire.** KH1's ball with no (or a dead) target picks the best enemy within 5 m
-   of the ball each frame. Re:CoM's `CHomingBullet` keeps the target it was given (`+0x2F4`);
-   when it dies the ball flies straight. Open question 1.
+1. **Homing re-acquire**: built in 7.4b (above), KH1's rule.
 2. **The homing turn** is Re:CoM's: pitch and yaw each turn ≤ 3° a frame (`0x1401D7F00` →
    `0x1401D4730` per angle); KH1 turns the direction by ≤ 3° in all (sys 24). A target off both
    axes is turned up to √2 × 3° a frame. Assumption (`0x1401D4730` not read in full).
@@ -223,14 +292,8 @@ test), `0x1402AD350`. All 16 new sites compared with the Steam exe's bytes (scri
 
 ## Open questions (owner)
 
-1. **Fire's re-acquire** (KH1: with no or a dead target, the ball turns to the best enemy within
-   5 m of it, each frame): (a) leave Re:CoM's homing (the ball keeps its first target, else flies
-   straight; built); (b) a small wrapper on `CHomingBullet`'s homing step (vtable `0x1405255D8`)
-   for our balls only, giving it KH1's pick within 5 m when its target is gone; (c) Re:CoM's own
-   "pick the nearest at spawn" flag (`0x20000000`: nearest enemy at any distance, once).
-2. **Element resistance on spell hits**: (a) KH1's resistance only (built: Re:CoM's fire % is not
-   applied on top); (b) both, as swings keep Re:CoM's physical % on top; (c) KH1's only, for
-   swings too.
+1. Fire's re-acquire: answered (decision 36, built in 7.4b).
+2. Element resistance on spell hits: answered (decision 36: KH1's only).
 3. **Fire in the field**: if Re:CoM's Fire effects aren't loaded outside battle (to see in game),
    (a) cast without the visual there; (b) load Re:CoM's magic effect group at room load (a new
    resource request; needs research); (c) Fire only in battle at first.
@@ -257,3 +320,8 @@ test), `0x1402AD350`. All 16 new sites compared with the Steam exe's bytes (scri
    (open question 3).
 9. F9 trace: `cast fire1 f…` tokens, the release frame, `pay30`, the hits column `:fire1:kh1 …`.
 10. Combat = Re:CoM: Re:CoM's Fire cards work as before; Riku's story: unchanged.
+11. (7.4b) Re-target: with no target (turn away from the enemies, or in the field next to a
+    field enemy without a target cursor), cast Fire so the ball passes within 5 m of an enemy: it
+    bends toward it (≤ 3° a frame) and the log shows `re-target: shot N cast with no target` and
+    `rt shot N -> <handle>`; F9 trace: `rt shot …` in the cast column. With a target that dies
+    before the ball arrives: the ball flies straight on and never turns to another enemy.

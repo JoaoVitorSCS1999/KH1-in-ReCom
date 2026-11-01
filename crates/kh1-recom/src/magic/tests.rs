@@ -106,3 +106,36 @@ fn field_case_stub_calls_exe_magic_on_rbx_and_goes_on_at_the_default() {
     assert_eq!(field_case::CAVE_RVA as i64 + 13 + jmp, 0x001F_A599);
     assert_eq!(field_case::entry(), [0xE1, 0xB0, 0x1F, 0x00]);
 }
+
+#[test]
+fn fire_retarget_is_kh1s_pick() {
+    use retarget::*;
+    // 500 cm = 5 m; the weight is the script's 2.0.
+    assert_eq!((RANGE_M, WEIGHT), (5.0, 2.0));
+    let ball = [0.0, 1.0, 0.0];
+    let fwd = [0.0, 0.0, 1.0];
+    // Straight ahead: score = distance. Straight behind: × (1 + 2 × 2) = 5. Beside: × 3.
+    assert_eq!(score(ball, fwd, [0.0, 1.0, 2.0]), Some((2.0, 2.0)));
+    assert_eq!(score(ball, fwd, [0.0, 1.0, -2.0]), Some((2.0, 10.0)));
+    assert_eq!(score(ball, fwd, [2.0, 1.0, 0.0]), Some((2.0, 6.0)));
+    // The range is strict and 3D (KH1's `d < 500`, `0x1402A9240`).
+    assert_eq!(score(ball, fwd, [0.0, 1.0, 5.0]), None);
+    assert!(score(ball, fwd, [0.0, 4.0, 4.0]).is_none());
+    assert!(score(ball, fwd, [0.0, 1.0, 4.99]).is_some());
+    // On the ball's own point: distance 0, cosine 0 (`0x1402A8C70`), score 0.
+    assert_eq!(score(ball, fwd, ball), Some((0.0, 0.0)));
+    // A nearer enemy behind loses to a farther one ahead: 1.5 m behind scores 7.5, 4 m ahead 4.
+    let c = [(1, [0.0, 1.0, -1.5]), (2, [0.0, 1.0, 5.0]), (3, [0.0, 1.0, 4.0])];
+    assert_eq!(pick(ball, fwd, c), Some((3, 4.0)));
+    // Nothing in range: no pick (the ball flies straight this frame).
+    assert_eq!(pick(ball, fwd, [(1, [0.0, 1.0, 6.0])]), None);
+    // Ties keep the first (only a smaller score replaces it).
+    assert_eq!(pick(ball, fwd, [(7, [1.0, 1.0, 0.0]), (8, [-1.0, 1.0, 0.0])]), Some((7, 1.0)));
+    // The pick follows the ball's direction (Re:CoM's aim angles, `guard::forward`).
+    let left = crate::guard::forward(0.0, -std::f32::consts::FRAC_PI_2);
+    assert_eq!(pick(ball, left, [(1, [-3.0, 1.0, 0.0]), (2, [0.0, 1.0, 2.0])]).map(|p| p.0), Some(1));
+    // The cosine is clamped and the KH1 → Re:CoM axis flip leaves it unchanged.
+    assert_eq!(cos([1.0, 0.0, 0.0], [2.0, 0.0, 0.0]), 1.0);
+    let (a, b) = ([1.0, 2.0, 3.0], [-2.0, 0.5, 1.0]);
+    assert!((cos(a, b) - cos([a[0], -a[1], -a[2]], [b[0], -b[1], -b[2]])).abs() < 1e-6);
+}

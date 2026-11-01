@@ -98,8 +98,8 @@ pub mod fire {
     pub const TURN_DEG: f32 = 3.0;
     /// It starts fading this many frames before its end (`ind+0x3C`).
     pub const FADE: f32 = 20.0;
-    /// With no live target, it picks the best enemy within this range of the ball each frame
-    /// (`ind+0x40`, sys 78). Not built (open question 1).
+    /// A ball cast with no target picks the best enemy within this range of the ball each frame
+    /// (`ind+0x40`, sys 78; [`super::retarget`]).
     pub const RETARGET: f32 = 500.0;
     /// The fast path's wait: the release 8 frames after the command (`L006fa(8.0)`).
     pub const FAST_WAIT: f32 = 8.0;
@@ -107,6 +107,72 @@ pub mod fire {
     pub const COST: i32 = crate::mp::cost::FIRE;
     /// The release motion takes a new Fire from this frame (`0x140293480`). Checked (decomp).
     pub const RECAST_FROM: f32 = 14.0;
+}
+
+/// KH1's Fire re-target (M7 stage 7.4b, decision 36). The ball thread's loop (`xm_fire01.mag`
+/// `L000c2`, the same at every level; Checked (files: decoded with `magdis.py`)) reads the cast's
+/// target from the thread's arguments every frame:
+///
+/// - **no target** (the command had none): it picks one with sys 78 (`0x1402BA440` →
+///   `0x1402B0E90(caster, ball position, direction with w = 2, 500)`) and homes on it this frame;
+///   the pick is not kept, so the next frame picks again;
+/// - **a target that is no longer alive** (sys 120 `0x1402BAB10` → `0x140291FF0`: the actor's
+///   `+0x374` bit 0 set and bit 1 clear): no homing this frame and **no new pick** (it flies
+///   straight);
+/// - a live target: homes on its part (sys 119).
+///
+/// The pick `0x1402B0E90` (Checked (decomp)): every actor of the actor array (`0x140291AB0`:
+/// live, not flagged `+0 & 0x200`, on a side `+0x374 >> 5 & 3` that is not 0 and not the
+/// caster's), `v` = its position (`+0x10`) − the ball's, `d` = |v| (3D, `0x1402A9240`); taken
+/// only when `d < 500`; score `d × ((1 − cos) × w + 1)` with `cos` = the clamped cosine between
+/// `v` and the ball's direction (`0x1402A8C70`, 0 for a zero vector) and `w` = 2; the first
+/// candidate in range is taken, later ones only with a smaller score. Then (in the same frame) the
+/// ball turns ≤ 3° toward the pick's part and moves.
+pub mod retarget {
+    /// The range, Re:CoM metres (KH1's 500 cm).
+    pub const RANGE_M: f32 = super::fire::RETARGET / 100.0;
+    /// The off-axis weight (the script writes 2.0 into the direction's `w`).
+    pub const WEIGHT: f32 = 2.0;
+
+    fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+        [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+    }
+    fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+        a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    }
+
+    /// `0x1402A8C70`: the cosine between two vectors, clamped to −1..1, 0 when either is zero.
+    pub fn cos(a: [f32; 3], b: [f32; 3]) -> f32 {
+        let (la, lb) = (dot(a, a).abs().sqrt(), dot(b, b).abs().sqrt());
+        if la == 0.0 || lb == 0.0 {
+            return 0.0;
+        }
+        (dot(a, b) / (lb * la)).clamp(-1.0, 1.0)
+    }
+
+    /// One candidate's distance and score, or None when it is out of range. Positions in Re:CoM
+    /// metres: KH1's (x, y, z) cm is Re:CoM's (x, −y, −z) / 100, a rotation and a uniform scale,
+    /// so distances scale by 1/100 and the cosine is the same.
+    pub fn score(ball: [f32; 3], dir: [f32; 3], at: [f32; 3]) -> Option<(f32, f32)> {
+        let v = sub(at, ball);
+        let d = dot(v, v).abs().sqrt();
+        (d < RANGE_M).then(|| (d, d * ((1.0 - cos(v, dir)) * WEIGHT + 1.0)))
+    }
+
+    /// `0x1402B0E90`: the best candidate `(id, position)` for a ball at `ball` flying along `dir`,
+    /// with its distance. The first one in range is taken, later ones with a smaller score
+    /// (KH1's `lVar2 == 0 || score < best`).
+    pub fn pick(ball: [f32; 3], dir: [f32; 3], cands: impl IntoIterator<Item = (u32, [f32; 3])>) -> Option<(u32, f32)> {
+        let mut best: Option<(u32, f32, f32)> = None;
+        for (id, at) in cands {
+            if let Some((d, s)) = score(ball, dir, at) {
+                if best.is_none_or(|b| s < b.2) {
+                    best = Some((id, d, s));
+                }
+            }
+        }
+        best.map(|b| (b.0, b.1))
+    }
 }
 
 /// KH1's air cast (`0x1402A3600` state 2): a new jump arc of G`+0xE8` = 30 cm and the air
