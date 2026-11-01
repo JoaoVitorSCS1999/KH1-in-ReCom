@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 88: M8 stage 8a.3: KH1 items in the Moogle shop (a fifth Items tab), version 0.46.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): items in the Moogle shop; a fifth "Items" tab, one item per purchase, 1 Moogle
+  Point per KH1 munny.
+- KH1 (Checked (files)): every KH1 item shop sells Potion 60, Hi-Potion 150, Ether 200.
+- Built: wrapper on the pack screen update `0x1403A6930` (15 bytes checked): Left from tab 0 / Right from tab
+  3 opens tab "Items": Re:CoM's packs released as its close state does, three made with Re:CoM's pack
+  constructor (never sold out), pictures = Re:CoM's Potion / Hi-Potion / Ether card faces (`C2DCard`);
+  input, sounds, help lines, cursors, payment (tally, trophy, setter, window) Re:CoM's; buy = KH1's pickup
+  rule; refused when no room or too few points. Leaving rebuilds Re:CoM's tab. `docs/recom-m8-items.md`
+  § 8a.3.
+- Not yet: the tab's own art (needs `FORM/0109` dumped); the screen is unreachable when the card
+  collection is full (Re:CoM's rule). Owner questions in the doc.
+- Checked: 483 tests, Windows build, all 408 site byte sets. Not checked: in game.
+
+---
+
 ## Stage 87: M8 stage 8a.2: KH1 Items page in the KH1 camp entry, version 0.45.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "Finish everything up to M9" (M8 items).

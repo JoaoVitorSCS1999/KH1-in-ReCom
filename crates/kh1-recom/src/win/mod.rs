@@ -19,6 +19,7 @@ mod models;
 mod movement;
 mod mp;
 mod mp_bar;
+mod shop;
 mod stats;
 mod sys;
 mod trace;
@@ -321,8 +322,23 @@ fn install_items(base: usize, s: &Settings) {
     if unsafe { hook::install_all(base, &hooks) } {
         items::mark_installed();
         log(&items::start_line());
+        install_shop(base);
     } else {
         log("items: exeItem not hooked; no KH1 items (the Field case stays patched but is not reached: Re:CoM never uses items in the field)");
+    }
+}
+
+/// M8 stage 8a.3 (`shop`): the Items tab in Re:CoM's Moogle shop, a wrapper on its pack screen's
+/// update. Needs KH1's items (their store and pickup rule).
+fn install_shop(base: usize) {
+    let site = |name: &str| crate::sites::SHOP_HOOKS.iter().find(|h| h.name == name).expect("site");
+    let hooks = [hook::Hook { site: site("pack screen update (0x1403A6930)"), ours: shop::pack_screen as *const () as usize, original: &shop::ORIG_PACK_SCREEN }];
+    // SAFETY: the target's bytes are checked again inside, before anything is written.
+    if unsafe { hook::install_all(base, &hooks) } {
+        shop::mark_installed();
+        log(&shop::start_line());
+    } else {
+        log("shop: pack screen not hooked; the Moogle shop is Re:CoM's (no Items tab)");
     }
 }
 

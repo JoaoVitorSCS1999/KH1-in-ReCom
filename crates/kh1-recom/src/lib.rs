@@ -48,6 +48,10 @@
 //!   filled item slots (kept with the stock in our save block), a use plays KH1's motion on
 //!   Re:CoM's own item action `0xE` and clip, and KH1's use task heals through Re:CoM's heal with
 //!   Re:CoM's item effects (`items`; `docs/recom-m8-items.md`);
+//! - at `combat = kh1`, in Sora's story, a fifth "Items" tab in Re:CoM's Moogle shop pack screen
+//!   sells Potion, Hi-Potion and Ether for Moogle Points: Re:CoM's own pack objects, cursors,
+//!   sounds, help lines and payment, Re:CoM's item card pictures, KH1's pickup rule (`shop`;
+//!   `docs/recom-m8-items.md` § Stage 8a.3);
 //! - F9 records a Re:CoM trace in kh1-trace's CSV schema (`trace`).
 //!
 //! `motions` (with `json`) reads the asset build step's manifest and `PL0001.ANN` header, for the
@@ -77,6 +81,7 @@ pub mod mp;
 pub mod mp_bar;
 pub mod rows;
 pub mod settings;
+pub mod shop;
 pub mod sites;
 pub mod trace;
 pub mod units;

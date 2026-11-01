@@ -6,7 +6,7 @@ enemies** (8a.3 / 8a.4); **healing amounts: Re:CoM's own item-card amounts** (se
 Re:CoM's item cards heal no HP). This stage: KH1's Items list in the command menu, Sora's slots and
 stock in our save block, and the use, run by Re:CoM's own item action `0xE`. Not in this stage: the
 camp Items page (8a.2, [below](#stage-8a2-kh1s-items-page-in-the-kh1-camp-entry)), the shop (8a.3,
-[below](#stage-8a3-kh1s-items-in-recoms-moogle-shop-not-built-findings-and-options)), the drops
+[below](#stage-8a3-kh1s-items-in-recoms-moogle-shop-a-fifth-items-tab)), the drops
 (8a.4).
 
 At Combat = KH1, in Sora's story, field and battle. At Combat = Re:CoM, or in Riku's story, nothing
@@ -413,12 +413,16 @@ With `kh1_test_items = on` (slots Potion / Hi-Potion / Ether, 9 of each in stock
 
 ---
 
-## Stage 8a.3: KH1's items in Re:CoM's Moogle shop (not built: findings and options)
+## Stage 8a.3: KH1's items in Re:CoM's Moogle shop: a fifth "Items" tab
 
-Ask: KH1's shop items as purchasable rows in Re:CoM's own Moogle shop screen, priced in Moogle
-Points, bought via `pick_up`, native (extend the shop's data / rows), or stop and report options
-if the shop can only list card packs without a large rewrite. **Stopped: it can only list card
-packs.** Nothing of 8a.3 is in the code.
+Owner (2026-11-01), after the findings below: **a fifth "Items" tab in Re:CoM's pack screen** with
+Potion / Hi-Potion / Ether, **one item per purchase**, priced **1 Moogle Point per KH1 munny**
+(Potion 60, Hi-Potion 150, Ether 200). Only at Combat = KH1 in Sora's story; the Re:CoM setting and
+Riku's story untouched.
+
+Code: `crates/kh1-recom/src/shop.rs` (the rules; tested), `src/win/shop.rs` (Re:CoM's side), sites
+`sites::SHOP_HOOKS`, `SHOP_CALLEES`, `SHOP_CHECKED` (test `sites::tests::shop_sites`). No asset step
+change.
 
 ### KH1's item shop (Steam)
 
@@ -428,48 +432,175 @@ packs.** Nothing of 8a.3 is in the code.
 | Item shop records: 0 = Potion, Hi-Potion, Ether, Tent (142); 1 = + 4 accessories; 2 = + Camping Set (143) and more; 3 = + Orichalcum (255) and more; 7 = Potion, Hi-Potion, Ether, Tent, Camping Set. **Every item-shop record sells Potion, Hi-Potion and Ether**; no record sells Elixirs or the Mega items (row buy price 0). | exe `0x1404FEE00` | Checked (exe + files) |
 | Prices: row `+8` munny: Potion 60, Hi-Potion 150, Ether 200 (Tent 250, Camping Set 500). | `0x1402E88F0` | Checked (files) |
 | Buy (`0x1402FED40` / `0x140301660`): a quantity 1 .. min(munny ÷ price, 99 − stock), then the destination: a member (quantity 1, kind 0 only, into his **first empty slot**, refused when none) or the stock (refused past 99). Not KH1's pickup rule (`0x140284E60`): the player picks where it goes. | `0x1402FED40`, `0x140301660` | Checked (decomp) |
+| KH1's item pictures: none per item. The menus' item layout (`exchange/UK_uibin_item.bin`) has one 16 × 16 icon (`ite_sel_ico_d`) for every item; KH1's shop is a text list. | `UK_uibin_item.bin` | Checked (files: the H0 dump) |
 
 ### Re:CoM's Moogle shop (Steam)
 
+`CMoogleShopCore` (ctor `0x1403A4220`): 7 modes, each a record (init / update / end) at `+0x98 +
+0x40·i`; `+0x258` the mode, `+0x25C` the next mode, `+0x260` the state. Mode 3 (`0x1403A53F0` /
+`0x1403A8EF0`) is the two-choice menu (packs or mode 5); without room for 5 more cards it goes to
+mode 2 (`0x1403A8770`), which offers mode 5 only. Mode 4 is the pack screen. Checked (decomp).
+
 | what | where | tag |
 |---|---|---|
-| `CMoogleShopCore` (ctor `0x1403A4220`): 7 modes (init / update / end triples at `+0x98 + 0x40·i`). | `0x1403A4220` | Checked (decomp) |
-| Its top menu (mode 2, `0x1403A8770`): **two fixed entries** (`+0x270` 0..1, wrap at 2, cursor y from `0x14065BA30`; entry 0 the packs, 1 leaves); labels are layout art. | `0x1403A8770` | Checked (decomp + exe) |
-| The pack screen (mode 4, `0x1403A6930`): **4 tabs** (`+0x280`, wrap 0..3) × up to 4 packs in a **2 × 2 grid** (`+0x284`, moves from table `0x14065BA70`); each pack a `CMShopCardPack` (`0x14045A9E0`: art from `m_shop.lad` by position, its price, sold-out flag). Fixed 4 × 4 arrays in the object: pack types `+0x288`, prices `+0x2C8` (from `MogCardPack`), sold-out `+0x308` (a 16-bit field, `0x140114180` / `0x1401141D0`); the per-tab count `+0x348` from `MogFloor` by floor (`0x1403A5B10`). | `0x1403A6930`, `0x1403A5B10`, `0x14045A9E0` | Checked (decomp + exe) |
-| A buy: room for 5 more cards, not sold out, price ≤ Moogle Points (`stats + 0x20`) → **5 random cards from the pack's tables** (`0x1403A66F0` → `0x1403A62B0` / `MogCardKaku`, each through `0x140158FC0`), the pack marked sold out, the "cards got" screen; then Moogle Points − price (`0x14023A1D0`) and the spent total (save var (0, 0xB6), a trophy at 20000). | `0x1403A6930` states 2..4, `0x1403A66F0` | Checked (decomp) |
+| **The pack screen** (mode 4: init `0x1403A4A90`, update `0x1403A6930`, end a bare `ret`): tab `+0x280` (0..3; init sets it and `+0x27C` to 0), cell `+0x284`, `+0x34C` 0 = tab row / 1 = grid, input lock `+0x274` (no reads while > 0). | `0x1403A4A90`, `0x1403A6930`, `0x1403A59B0` | Checked (decomp + disasm) |
+| **The data**: 4 × 4 arrays `[tab × 4 + cell]` in the object: pack types `+0x288`, prices `+0x2C8`, sold-out `+0x308`; packs per tab `+0x348`, **the same count for every tab** (`MogFloor` by floor: 1, 2..6, 7..10, 11+), set once at load (`0x1403A5B10`). Tab t holds types 4t..4t+3 (a card category per tab: the card draw `0x1403A62B0` falls back to card 1, 0x1D, 0x2A for tabs 0, 1, 2), so all four tabs are used. | `0x1403A5B10`, `0x1403A62B0` | Checked (decomp) |
+| **The packs** `CMShopCardPack` (`0x14045A9E0(mem 0xB8, shop+0x268, cell, price, sold out)`, made in state 0 for cells 0..count−1, `+0x428[cell]`): picture control `+0x78` (layer 0 the frame / its appear and close groups 0x11..0x13, layer 1 the pack art, group `0x140690400[type]` of `m_shop:00`, set by `0x14045D0B0`), sold-out stamp `+0x80`, price plate `+0x90` with its number `+0x98` (`0x14045D120`), `+0x68` close, `+0x6C` release: the pack plays its close and deletes itself (`0x14045C910`). State 0x65 releases them (`+0x6C` = 1, entry cleared). | `0x14045A9E0`, `0x14045C910`, `0x1403A6ABC`, `0x1403A72B8` | Checked (decomp + disasm) |
+| **The tab art** `CMShopCardPackWindow` (`+0x418`): one control playing `m_shop:01` group `0x140690420[tab]` (66, 68, 70, 72: the window with tab t in front) and on close `0x140690428[tab]` (67..73), the tab in `+0x5C` (`0x14045D250` replays only on a change). | `0x14045AD20`, `0x14045CC60`, `0x14045D250` | Checked (decomp + exe) |
+| **Input state** (case 2): the help line (`0x1403A5AA0` → `0x1404573A0`: 4 usual, 5 no room for 5 cards, 6 not enough points); Square (`0x14029B2F0(0x80)`): sound 3, mode 5, state 100. Tab row: cancel → sound 4, mode 3, state 100; Left (0x408000) tab − 1, Right (0x802000) tab + 1 (sound 1), wrap 3 ↔ 0; Down (0x204000) or confirm → the grid at cell 0 (sound 1; no packs: sound 5). Grid: confirm → room for 5 cards, not sold out, price ≤ points → sounds 2 and 0x58, the Moogle's animation, state 3; else sound 5. Then Down / Right / Up / Left (first pressed), cancel winning over them (back to the tab row, sound 1); moves by the table `0x14065BA70` (0x40 = up out of the grid), only to a cell below the count (sound 1). Then the refresh `0x1403A92F0`. | `0x1403A6BC9..0x1403A6F74` | Checked (disasm) |
+| **Refresh** `0x1403A92F0`: the tab's button message at (`0x14065BA40[tab]`, 69), the tab art, the cell's button message at (`0x14065BA50[cell]`, `0x14065BA60[cell]`), each pack's type / price / sold-out from the tab's arrays, the cursors: in the grid the tab mark `+0x3D8` at (tab x − 16, 53) and the finger `+0x3D0` at (cell x − 16, cell y − 32); in the tab row the finger at (tab x − 16, 53), the mark hidden. Tab x 64 / 128 / 192 / 256, cells (74, 167), (224, 167), (74, 252), (224, 252). | `0x1403A92F0`, exe `0x14065BA40..0x14065BA7F`, `0x14065BCE0` | Checked (disasm + exe) |
+| **A buy** (states 3, 4): the pack marked sold out, **5 random cards** (`0x1403A66F0` → `0x1403A62B0` / `MogCardKaku`, each through `0x140158FC0`), the "cards got" screen; then the payment: points − price clamped 0..99999; while the trophy bit `0x140AF7389 & 0x10` is clear, the spent tally (system variable (0, 0xB6), `0x1401B08C0` / `0x1401B16C0`) += price, the trophy (`0x1402BA6F0(*0x140AF7468, 99)`) when it first reaches 20000, and the bit set; Re:CoM's setter `0x14023A1D0` (`stats + 0x20`, clamped; its own `0x1400D3830(0x2B)` on first passing 9999); the Moogle Point window `0x1404598A0(shop+0x3C0, points)`. | `0x1403A6F74..0x1403A7106`, `0x14023A1D0` | Checked (decomp + disasm) |
+| **Re:CoM's card picture** `C2DCard` (`0x1402432A0`, 400 bytes, vtable `0x140606BF8`, deleting dtor `0x1402073D0`): set a card `0x140243560(card, value)` (byte 0 kind, byte 2 negative = no number, byte 3 the class from `0x14068E0B0 + kind × 16`: 0x44 for 0x2A / 0x2B / 0x2D), priority `0x140243380`, attach to a control `0x140243DD0`, show `0x140243A60`. The shop uses it itself (`0x14045BF50`: a number-less card `0x11FF0001` at priority 0x12 on its window; the "cards got" screen `0x1404589B0`). | `0x140243560`, `0x14045BF50`, `0x1404589B0` | Checked (decomp + disasm + exe) |
 
-So every entry the shop lists is a card pack: its picture, its once-per-visit sold-out bit, its
-5-card result and the collection-space check are all pack-specific, the tab and grid sizes are
-fixed (4 × 4 arrays inside the object), and there is no quantity picker. `MogFloor`,
-`MogCardPack` and `MogCardKaku` themselves are not in this session (not read).
+`MogFloor`, `MogCardPack` and `MogCardKaku` (`FORM/0109/FO0109.BIN`) and `m_shop.lad` /
+`m_shop.imz` (`FO0109.SPR` / `.RTM`) are **not in this session** (the H0 dump has `FORM/0109` listed,
+not dumped): pack counts per floor, the pack prices and the art are not read.
 
-### Options (owner question)
+### What runs (at the KH1 setting, in Sora's story)
 
-- **(a) A fifth tab "Items" in the pack screen** (KH1 setting): hooks on the shop's set-up
-  (`0x1403A5B10`), its update (`0x1403A6930`: tab wrap 0..4, the buy branch for item entries:
-  Moogle Points check, `pick_up` or KH1's buy rule, no sold-out bit, no 5 cards, no
-  collection-space check), the pack object (`0x14045A9E0`) for item pictures; a side table for the
-  fifth tab (the object's 4 × 4 arrays are full); new item pictures in `m_shop.lad` from the
-  player's KH1 files (asset step). One item per confirm (no quantity). Large: about 4 hooks + new
-  art + an asset step change.
-- **(b) A third top-menu entry "Items"** (wrap 2 → 3, a third y, a new label in `m_shop.lad`)
-  opening a list screen inside the shop: Re:CoM's shop has no list screen, so one would be built
-  from Re:CoM's camp list classes (whose sprite set `camp:00` the shop scene may not load:
-  Assumption). Largest and riskiest.
-- **(c) Re:CoM's own item card packs also give KH1 items**: at the KH1 setting in Sora's story,
-  each item card (Potion … Megalixir, kinds 0x2A..0x30) a Moogle pack gives (`0x1403A66F0`'s calls
-  to `0x140158FC0`) also gives the matching KH1 item through `pick_up`. One small hook, no art,
-  Re:CoM's cards untouched; not KH1's shop (random, from packs, priced per pack).
-- **(d) A "Shop" row in the KH1 camp entry** (8a.2's page type) buying KH1's shop items for Moogle
-  Points, KH1's buy rule (quantity, destination), only when the camp is opened in a Moogle room
-  (room test to research). Re:CoM's camp list, not Re:CoM's shop screen.
+A wrapper on the pack screen's update `0x1403A6930`. Re:CoM runs the screen; the wrapper acts only
+in the input state (2) at the tab row's edges and while the Items tab is up, and as the screen is
+left with it up.
 
-Also to decide with the owner:
+1. **Into the Items tab**: in the tab row, Left on tab 0 or Right on tab 3 (Re:CoM's earlier reads
+   win: Square, cancel, Left over Right; nothing while `+0x274 > 0`). Sound 1 (Re:CoM's tab sound),
+   the usual help line. Re:CoM's packs are released as state 0x65 releases them (`+0x6C` = 1: each
+   plays its own close and deletes itself); three packs are made with **Re:CoM's own constructor**
+   as state 0 makes them (cells 0..2, the item's price, not sold out); the count `+0x348` becomes 3
+   (the fourth cell stays empty: Re:CoM's move rule never reaches a cell at the count), the tab
+   `+0x280` = 4. Each pack's art layer (picture control layer 1) is hidden and **Re:CoM's own card
+   picture of the item's card** (`C2DCard`: Potion 0x2A, Hi-Potion 0x2B, Ether 0x2D, no number) is
+   attached to its picture control at (0, 0), priority 0x12 (the shop's own card priority).
+2. **On the Items tab** (`crate::shop::items_step`, Re:CoM's case 2 in Re:CoM's order): Square
+   leaves to mode 5, cancel to mode 3 (sounds 3 / 4, state 100); Left → Re:CoM's tab 3, Right → tab
+   0; Down or confirm → the grid at cell 0; in the grid confirm buys, cancel or Up from the top row
+   goes back to the tab row, moves by Re:CoM's table over 3 cells. The help line: 6 (not enough
+   Moogle Points) on an item Sora can't afford, else 4. Each frame Re:CoM's refresh is replayed for
+   the Items tab: button messages, prices (never sold out), cursors at x 320.
+3. **A buy** (confirm on a cell): price ≤ Moogle Points (else sound 5, nothing changes); the item by
+   **KH1's pickup rule** (`Inventory::pick_up`: the first empty slot, else the stock up to 99; else
+   sound 5, nothing paid); then sounds 2 and 0x58 (Re:CoM's buy sounds) and **Re:CoM's payment**
+   (the spent tally and its trophy, `0x14023A1D0`, the Moogle Point window). One item per confirm,
+   never sold out. No room-for-5-cards check, no card draw, no Moogle animation, no "cards got"
+   screen.
+4. **Back to Re:CoM's tab**: the cards are deleted, our packs released, Re:CoM's packs for that tab
+   made again as state 0 makes them (its prices and sold-out marks), the count and tab given back,
+   then **Re:CoM's own refresh** `0x1403A92F0` (pictures, tab art, cursors).
+5. **Leaving the screen from the Items tab** (Square, cancel): the cards are deleted at state 100
+   (before Re:CoM starts closing the packs they hang from); Re:CoM's states 100 / 0x65 close and
+   release our packs as its own; after 0x65 the count is Re:CoM's again. The next visit starts on
+   tab 0 (the mode's init).
 
-1. **Price**: Moogle Points 1:1 with KH1's munny (Potion 60, Hi-Potion 150, Ether 200) is the
-   **Assumption** on the table; Re:CoM's pack prices (`MogCardPack`) were not read, so no better
-   grounded rate is known.
-2. **Which items**: KH1 sells Potion, Hi-Potion and Ether in every item-shop stage (Checked); Tent
-   / Camping Set / accessories have no Re:CoM use yet.
-3. **Where it goes**: KH1's buy rule (quantity, then a slot or the stock) or the brief's `pick_up`
-   rule (first empty slot, else the stock).
+### The tab art (not built)
+
+Re:CoM's tab art is one picture per tab (the window with that tab in front, `m_shop:01` groups
+66..73); a fifth tab needs new art, and `m_shop.lad` / `.imz` are not in this session. Until then
+the **window keeps the art it showed** (the tab the player came from) while the Items tab is up;
+the finger cursor and the tab's button message sit at x 320 (Re:CoM's tab spacing of 64 continued:
+**Assumption**). Next step, to plan with the owner: a read-only dump of `FORM/0109` (the H0 tool's
+FORM dump) to see the tab groups and design the Items tab (owner question 1).
+
+### Pictures: Re:CoM's item cards
+
+KH1 has no per-item picture (one 16 × 16 icon for every item: Checked (files)), so the cells show
+**Re:CoM's own Potion / Hi-Potion / Ether card faces**, drawn by Re:CoM's card picture class with
+its own card art (the shop already draws cards: the "cards got" screen, the stock window). No
+asset step. **Assumption**: the card sets (`card_00..02`) are loaded on the pack screen (the "cards
+got" screen, reached from it, draws them); the card's size and centre against the pack frame are
+not seen (the card is attached at the picture control's origin).
+
+### Sites
+
+| address | bytes | use |
+|---|---|---|
+| `0x1403A6930` pack screen update | `48 8B C4 56 57 41 54 41 56 41 57 48 83 EC 50` (15) | **hooked** (whole instructions, no RIP-relative) |
+| `0x1403A92F0` refresh, `0x14045A9E0` pack ctor, `0x14045D120` price, `0x14045D3F0` sold out, `0x1404573A0` help line, `0x140459AF0` message place, `0x140459A00` cursor place, `0x1404597D0` cursor show, `0x1404598A0` point window, `0x1404598D0` show state (written directly), `0x14023A1D0` points set, `0x1401B16C0` variable set, `0x1402BA6F0` trophy, `0x1402432A0` / `0x140243560` / `0x140243380` / `0x140243DD0` / `0x140243A60` / `0x1402073D0` C2DCard | 8..18 bytes each | called (`SHOP_CALLEES`) |
+| `0x1403A6BC9`, `0x1403A6C1B`, `0x1403A6D74`, `0x1403A6E54`, `0x1403A7041`, `0x1403A6ABC`, `0x1403A72B8` | the input state, the payment, the packs' making and release | checked only (replicated; the test reads their calls, masks, sounds and constants) |
+| `0x14065BA40` (64), `0x14065BCE0` (8), card class rows `0x14068E350` / `E360` / `E380` (8 each) | the places and moves, the cursor and message y, the classes | checked only |
+
+Reused, already checked: `0x1404ACE54` (new), `0x1402AA360` (sound), `0x14029B2E0` / `B2F0` /
+`B410` / `B490` (pad), `0x1401B08C0` (variable get), `0x140247E50` (layer visible), `0x1402485B0`
+(position). Read at run time: the card's vtable after its ctor (`0x140606BF8`) and its slot 0
+(`0x1402073D0`) before the delete. All 408 site byte sets compared with `recomsteam.exe` (pefile):
+0 mismatches.
+
+### Per frame
+
+Nothing outside the shop's pack screen. In it, at Re:CoM's tabs: one mutex read a frame, and in the
+input state the gate (`mp::active`) and, at tab 0 / 3 in the tab row, Re:CoM's pad reads once more.
+On the Items tab: Re:CoM's input state and refresh replayed (a few calls a frame).
+
+### Logs
+
+`shop: KH1's items in the Moogle shop (M8 stage 8a.3): …` and `hooked pack screen update …` at
+start; then (60 lines at most) `shop: Items tab from tab 3: Re:CoM's 2 packs released, …; cards
+[…]; 500 Moogle Points`, `shop: bought potion for 60: 500 -> 440 Moogle Points, Slot(0)`, `shop:
+refused on cell 2 with 100 Moogle Points: Poor { … }` / `NoRoom { … }`, `shop: Items tab -> tab 0:
+Re:CoM's 2 packs made again`, `shop: pack screen left from the Items tab: Re:CoM's count 2 back`.
+
+### 1:1 checks
+
+- **Checked (decomp + disasm + exe)**, replayed by tests (`shop::tests`, `sites::tests::shop_sites`):
+  Re:CoM's input order (Square, cancel, Left, Right, Down / confirm; confirm, then cancel over the
+  directions in the grid), its sounds (1, 2 + 0x58, 3, 4, 5), the move table and the 0x40 exit, the
+  places, the help ids, the payment (clamp, tally, the 20000 trophy once); KH1's prices (60 / 150 /
+  200, Checked (files)), KH1's pickup rule (slots, then stock to 99, refused: nothing paid); the
+  items KH1 sells everywhere.
+- **Not checked**: in game (the cards' look and place on the packs, the window art while the Items
+  tab is up, the packs' close / appear when switching tabs).
+
+### Not KH1's (by the owner's choice or not yet)
+
+1. KH1's buy: a quantity and a destination (a member's slot or the stock). Here one item per
+   confirm, by KH1's pickup rule (owner: one per purchase; the destination window has no Re:CoM
+   counterpart in the pack screen).
+2. Prices in Moogle Points 1:1 with munny (owner).
+3. No Items tab art yet (above); the cards are Re:CoM's item cards.
+4. The buy plays Re:CoM's pack-buy sounds (2, 0x58) without the Moogle's animation.
+5. The spent tally and its trophy count item buys too (Re:CoM's payment path kept whole: owner
+   question 2).
+
+### Assumptions
+
+1. The pack screen is always left through states 100 → 0x65 → 0x66 (every exit in its code does);
+   a shop torn down another way (a reset) while the Items tab is up would leave the cards' parent
+   controls freed under them.
+2. The card sets are loaded on the pack screen; the card sits well at the picture control's origin.
+3. x 320 for the Items tab (no art to place it by).
+4. The pad reads (`0x14029B2E0`, `0x14029B2F0`, `0x14029B410`, `0x14029B490`) are pure: reading them
+   before Re:CoM's update changes nothing (Re:CoM itself reads each several times a frame).
+
+### Open questions (owner)
+
+1. **The Items tab's art**: (a) plan a read-only dump of `FORM/0109` (`m_shop`) and design a fifth
+   tab from Re:CoM's own tab pieces with KH1's word "Items" (asset step); (b) keep the window as it
+   is (the cursor alone marks the fifth tab).
+2. **The spent tally / trophy**: (a) count item buys (built: Re:CoM's payment as it is); (b) packs
+   only.
+3. **No room for 5 cards**: Re:CoM then never offers the pack screen (mode 3 → mode 2), so the Items
+   tab is out of reach too. (a) leave it (built); (b) offer the pack screen anyway at the KH1
+   setting (the packs refuse as Re:CoM does, the Items tab works).
+4. **The refusal when Sora's items are full**: sound 5 only (Re:CoM's message 5 is about cards).
+   (a) keep; (b) a help line of ours.
+
+### What the owner should test
+
+Combat = KH1, Sora's story, a Moogle room with some Moogle Points (`kh1_test_items` off to see the
+slots fill; on to see the stock rise).
+
+1. Log: the `shop:` start line and `hooked pack screen update (0x1403A6930)`.
+2. Moogle → the packs: on the last tab press Right (or Left on the first): a pack-switch sound, the
+   packs close and three open with Potion, Hi-Potion and Ether **card pictures** and prices 60, 150,
+   200; the finger at a fifth place right of the tabs. Log `Items tab from tab …`.
+3. Down → the grid at Potion; moves among the three; the fourth cell can't be reached; Up from the
+   top row and cancel go back to the tabs. With too few points the help line reads Re:CoM's "not
+   enough points" line on that item.
+4. Confirm on Potion: Re:CoM's buy sounds, the Moogle Points drop by 60 at once, log `bought potion
+   …, Slot(0)`. Buy until the slots fill: then `Stock(n)`. With 99 in stock and full slots: the
+   error sound, no points taken. Too few points: the error sound.
+5. Right / Left from the Items tab: back to Re:CoM's tabs with their packs and sold-out marks as
+   before. Square and cancel from the Items tab leave as from any tab; come back: tab 1, Re:CoM's
+   packs.
+6. Close the camp's Items page / battle menu: the bought items are there; save, reload: kept.
+7. Combat = Re:CoM or Riku's story: four tabs, Re:CoM's shop as before.
+8. Report how the cards look on the packs (size, place) and the window art while on the Items tab.
