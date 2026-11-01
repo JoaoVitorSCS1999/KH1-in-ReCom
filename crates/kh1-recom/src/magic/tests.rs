@@ -19,11 +19,11 @@ fn fire_rows_keep_recoms_clip_and_effect_set_and_take_kh1s_ball() {
         assert_eq!(r[0xF] & FLAG_KH1, FLAG_KH1);
         assert_eq!(recom_base_row(spell::FIRE, lv), Some([0x22, 0x29, 0x2A][lv as usize - 1]));
     }
-    // Aero comes with its stage.
-    assert!(t[18..].iter().all(|r| r[0] == 0));
+    // Every spell has its rows (7.10).
+    assert!(t.iter().all(|r| r[0] != 0));
     assert_eq!(table_index(spell::AERO, 3), Some(20));
     assert_eq!(table_index(spell::FIRE, 0), None);
-    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && castable(spell::THUNDER) && castable(spell::CURE) && castable(spell::GRAVITY) && castable(spell::STOP) && !castable(spell::AERO));
+    assert!(castable(spell::FIRE) && castable(spell::BLIZZARD) && castable(spell::THUNDER) && castable(spell::CURE) && castable(spell::GRAVITY) && castable(spell::STOP) && castable(spell::AERO));
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn blizzard_rows_and_numbers_are_kh1s() {
     assert_eq!(KH1_BLIZZARD_FLAGS & 0x8000_1000, 0, "no homing");
     assert_eq!((cast_req::first(spell::BLIZZARD, false), cast_req::first(spell::BLIZZARD, true)), (0x37, 0x84));
     assert_eq!((cast_req::release(spell::BLIZZARD, false), cast_req::release(spell::FIRE, true)), (0x37, 0x8A));
-    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x3C));
+    assert!(is_cast_request(0x37) && is_cast_request(0x84) && !is_cast_request(0x3E));
     assert_eq!(spell_attack(spell::BLIZZARD, 2).map(|a| a.power), Some(27));
 }
 
@@ -448,4 +448,45 @@ fn stop_strikes_one_every_4_frames_nearest_first() {
     // 2.5 m and a 0.3 m body: 1 and 2 m inside; 3 m (0.2 m short) and 9 m passed over at once.
     assert_eq!(at, vec![(0, 2), (4, 3)]);
     assert!(s.done());
+}
+
+#[test]
+fn aero_rows_barrier_and_wind_are_kh1s() {
+    let t = kh1_magic_table(&recom_rows());
+    for lv in 1..=3u8 {
+        let i = lv as usize - 1;
+        let r = &t[table_index(spell::AERO, lv).unwrap()];
+        let base = &RECOM_AERO_ROWS[i];
+        assert_eq!((&r[..3], r[4]), (&base[..3], base[4]));
+        assert_eq!((r[2], r[3], r[0xB], r[0xF] & FLAG_KH1), (24 + lv - 1, 0, 1, FLAG_KH1));
+        assert_eq!(recom_base_row(spell::AERO, lv), Some([0x28, 0x3C, 0x3D][i]));
+    }
+    assert_eq!((cost(spell::AERO), release_wait(spell::AERO)), (200, 30.0));
+    assert_eq!((cast_req::first(spell::AERO, false), cast_req::first(spell::AERO, true)), (0x3C, 0x89));
+    // (18 + max MP) × 60 frames, the same at every level; the wind only from Aerora.
+    assert_eq!((aero::frames(3), aero::frames(8)), (1260.0, 1560.0));
+    assert!(!aero::has_wind(1) && aero::has_wind(2) && aero::has_wind(3));
+    // Halved damage, at least 1 (KH1's order: after the resistance).
+    assert_eq!((aero::halve(30), aero::halve(31), aero::halve(1), aero::halve(0)), (15, 15, 1, 0));
+    // The wind: 8 + 2 × max MP through the curve, element 0.
+    let a = aero_wind_attack(2);
+    assert_eq!((a.power, a.stat_source, a.element, a.kind, a.radius), (8, 3, 0, 3, 80.0));
+    let mut rng = Kh1Rand::new(1);
+    let def = DefenderStats { defence: 5, ..Default::default() };
+    let d = spell_damage(&a, 3, &def, &mut rng);
+    assert_eq!(d, spell_damage(&thunder_attack(1), 0, &DefenderStats { defence: 5 + 2, ..Default::default() }, &mut rng), "8 + 6 − 5 = curve[9] = Thunder 16 + 0 − 7");
+    // The countdown and the 30-frame re-hit.
+    let mut b = aero::Barrier::new(3);
+    let mut hits = 0;
+    let mut frames = 0;
+    loop {
+        let (on, again) = b.step(1.0);
+        frames += 1;
+        hits += again as u32;
+        if !on {
+            break;
+        }
+    }
+    assert_eq!(frames, 1260);
+    assert_eq!(hits, 42);
 }

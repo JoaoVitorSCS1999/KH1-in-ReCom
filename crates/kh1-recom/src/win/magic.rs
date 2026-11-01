@@ -383,8 +383,8 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
     if c.spell == mg::spell::THUNDER {
         thunder_command(pl);
     }
-    if c.spell == mg::spell::CURE {
-        // `initMagic` case 0x1D's charge: the set's effect id 0 on the Keyblade's bone 2.
+    if c.spell == mg::spell::CURE || c.spell == mg::spell::AERO {
+        // `initMagic` case 0x1D / 0x20's charge: the set's effect id 0 on the Keyblade's bone 2.
         charge_on_weapon(pl, r, 0);
     }
     if c.spell == mg::spell::STOP {
@@ -437,7 +437,188 @@ pub unsafe fn release(pl: usize, c: &CastStart) -> Option<u32> {
         mg::spell::CURE => release_cure(pl, c),
         mg::spell::GRAVITY => release_gravity(pl, c),
         mg::spell::STOP => release_stop(pl, c),
+        mg::spell::AERO => release_aero(pl, c),
         _ => None,
+    }
+}
+
+/// Re:CoM's Aero shot flags (`mov qword [rbp−0x50],7`) and its pitch (−π/2 at `0x140520910`).
+/// Checked (disasm `0x140222DFE`, exe).
+const AERO_FLAGS: u64 = 7;
+/// `0x14016F7D0(attack)`: Re:CoM's new hit serial for an attack (its multi-hit attacks call it to
+/// hit again; the apply's hit-once ring `0x14016F960` then lets the attack through once more).
+/// Checked (decomp; 78 call sites).
+const NEW_SERIAL: u32 = 0x0016_F7D0;
+/// `0x1401A49B0(actor)`: its position (the Aero case's point). Checked (decomp).
+const ACTOR_POSITION: u32 = 0x001A_49B0;
+
+/// KH1's barrier on Sora (7.10): its countdown, and Re:CoM's Aero shots that carry its look and the
+/// Aerora / Aeroga wind, following Sora while it lasts.
+struct BarrierState {
+    b: mg::aero::Barrier,
+    /// (shot id, has the wind), at most 4 (one per cast while the barrier lasts, as KH1 starts a
+    /// barrier thread per cast).
+    shots: Vec<(u32, bool)>,
+}
+static BARRIER: Mutex<Option<BarrierState>> = Mutex::new(None);
+/// The barrier is on (the player damage check reads it once per call).
+static BARRIER_ON: AtomicBool = AtomicBool::new(false);
+static BARRIER_LINES: AtomicU32 = AtomicU32::new(40);
+
+fn barrier_line(line: impl FnOnce() -> String) {
+    if BARRIER_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("magic: {}", line()));
+    }
+}
+
+/// Whether KH1's Aero barrier is on Sora (the damage check halves his hits, `win::attack`).
+pub fn barrier_on() -> bool {
+    BARRIER_ON.load(Ordering::Acquire)
+}
+
+/// KH1's Aero release (7.10, `xm_air01.mag`): the target is Sora (no party members yet), cast only if
+/// he is alive; Re:CoM's Aero case's look (`0x140222170` case `0x28`, Checked (disasm
+/// `0x140222CB0..0x140222E7A`): its hand effect id 1, on the ground its effect set − 0x16, and set −
+/// 0x11, at Sora's position); **KH1's barrier** ((18 + max MP) × 60 frames; a re-cast rewrites it),
+/// read by Re:CoM's player damage check through our wrapper; and Re:CoM's Aero shot (`CBullet`, flags
+/// 7, the row's `airo_all` set and radius) **following Sora for the whole barrier**: held off for
+/// Aero (its look only), for Aerora / Aeroga KH1's wind (radius 0.8 m, re-hit every 30 frames
+/// through Re:CoM's own new-serial function, `aero_frame`). Then the MP (two points).
+unsafe fn release_aero(pl: usize, c: &CastStart) -> Option<u32> {
+    let r = row(c.spell, c.level)?;
+    let hp: i32 = rd(pl + HP);
+    if !mg::cure::target_ok(hp, rd::<i32>(pl + DEAD) != 0) {
+        note(|| format!("release aero{}: Sora can't take the barrier (HP {hp}): nothing, no MP", c.level));
+        return None;
+    }
+    let max_mp = super::mp::current().map_or(0, |v| v.1);
+    // Re:CoM's Aero case's effects: id 1 at the hand, the ground wind (set − 0x16) when on the
+    // ground, then set − 0x11, at Sora's position.
+    let body: usize = rd(pl + p::BODY);
+    let mut hand = [0f32; 4];
+    if body != 0 {
+        let b = rd_vec(body + 0x30);
+        hand = [b.x, b.y, b.z, 1.0];
+    }
+    func::<PlOutFn>(HAND_POINT)(pl, &mut hand);
+    let name = set_name(r, 0);
+    effect_at(pl, name, 1, hand);
+    type PosFn = unsafe extern "win64" fn(usize) -> *const [f32; 4];
+    let at = func::<PosFn>(ACTOR_POSITION)(pl);
+    let at: [f32; 4] = if at.is_null() { hand } else { std::ptr::read_unaligned(at) };
+    if func::<GroundFn>(GROUND_TEST)(pl) == 0 {
+        effect_at(pl, name, (r[2] as u32).wrapping_sub(0x16), at);
+    }
+    effect_at(pl, name, (r[2] as u32).wrapping_sub(0x11), at);
+    // The barrier (a re-cast rewrites the timer), and this cast's shot.
+    let wind = mg::aero::has_wind(c.level);
+    let frames = mg::aero::frames(max_mp);
+    let c3 = sora_centre(pl);
+    let shot = aero_shot(pl, r, c.level, wind, frames, [c3[0], c3[1], c3[2], 1.0]);
+    if let Ok(mut g) = BARRIER.lock() {
+        let st = g.get_or_insert_with(|| BarrierState { b: mg::aero::Barrier::new(max_mp), shots: Vec::new() });
+        st.b.left = frames;
+        if let Some(id) = shot {
+            if st.shots.len() >= 4 {
+                st.shots.remove(0);
+            }
+            st.shots.push((id, wind));
+        }
+        BARRIER_ON.store(true, Ordering::Release);
+        STRIKING.store(true, Ordering::Release);
+    }
+    super::mp::pay(mg::aero::COST, "Aero release");
+    note(|| format!("release aero{}: KH1's barrier {frames} f (max MP {max_mp}), damage taken halved; Re:CoM's Aero shot {shot:?} follows Sora{}", c.level, if wind { ", KH1's wind 0.8 m re-hitting every 30 f" } else { " (look only)" }));
+    event(format!("barrier {frames:.0}{}", if wind { " wind" } else { "" }));
+    shot
+}
+
+/// Re:CoM's Aero shot (the case's `CBullet`: flags 7, pitch −π/2, the row's set) at Sora, alive for the
+/// barrier; for Aerora / Aeroga KH1's wind (radius 80 cm × Sora's size, Assumption: 1.0; the KH1
+/// row's kind 1, Re:CoM's aero attribute 1), else its attack held off.
+unsafe fn aero_shot(pl: usize, r: &[u8; 16], level: u8, wind: bool, frames: f32, at: [f32; 4]) -> Option<u32> {
+    let ang = func::<AnglesFn>(ANGLES)(pl);
+    let ang: [f32; 4] = if ang.is_null() { [0.0; 4] } else { std::ptr::read_unaligned(ang) };
+    let mut d = Desc([0; 0x100]);
+    let dp = d.0.as_mut_ptr();
+    func::<DescInitFn>(DESC_INIT)(dp, 1, 3);
+    let w = |o: usize| dp.add(o);
+    std::ptr::write_unaligned(w(0x68) as *mut u32, r[0xB] as u32);
+    std::ptr::write_unaligned(w(0x6C) as *mut u32, RECOM_ATTR[mg::spell::AERO as usize]);
+    std::ptr::write_unaligned(w(0x70) as *mut i32, rd::<i32>(pl + f::ATTACK_STAT));
+    std::ptr::write_unaligned(w(0x0C) as *mut u32, 0x8000_0000);
+    let flags = if wind { AERO_FLAGS | 4 } else { AERO_FLAGS | 4 | COLLISION_HELD };
+    std::ptr::write_unaligned(w(0x60) as *mut u64, flags);
+    if !wind {
+        std::ptr::write_unaligned(w(0x8C) as *mut i32, HELD_TICKS);
+    }
+    std::ptr::write_unaligned(w(0x30) as *mut f32, 0.0);
+    std::ptr::write_unaligned(w(0x34) as *mut f32, 255.0);
+    std::ptr::write_unaligned(w(0x3C) as *mut i32, (frames * 50.0) as i32);
+    std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], [at[0], at[1], at[2], 1.0]);
+    std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [-std::f32::consts::FRAC_PI_2, ang[1], ang[2], ang[3]]);
+    std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), EFFECT_SETS) + r[2] as usize * 0x60);
+    let radius = if wind { mg::aero::WIND_RADIUS / 100.0 } else { r[4] as f32 * 0.1 };
+    std::ptr::write_unaligned(w(0x78) as *mut f32, radius);
+    let factory = func::<FactoryFn>(FACTORY)();
+    if factory == 0 {
+        return None;
+    }
+    let bullet = func::<ManagerFn>(SHOT_MANAGER)(factory, dp, pl);
+    if bullet == 0 {
+        barrier_line(|| "aero: Re:CoM made no shot (the barrier still halves damage)".into());
+        return None;
+    }
+    func::<MoverFn>(SHOT_MOVER)(bullet, 0.1, 0.0, 0, -1);
+    if !wind {
+        hold_off(bullet);
+    }
+    let id: u32 = rd(bullet + 0x20);
+    remember_shot(id, mg::spell::AERO, level, 0);
+    Some(id)
+}
+
+/// Sora's body centre for the barrier's shot: his position (`0x1401A49B0`) + 0.85 m up, the body
+/// offset Re:CoM's Cure and Stop cases put their effects on him with (KH1: bone 32771, the body
+/// centre; Assumption: the same point).
+unsafe fn sora_centre(pl: usize) -> [f32; 3] {
+    type PosFn = unsafe extern "win64" fn(usize) -> *const [f32; 4];
+    let at = func::<PosFn>(ACTOR_POSITION)(pl);
+    let p: [f32; 4] = if at.is_null() { [0.0; 4] } else { std::ptr::read_unaligned(at) };
+    [p[0] + BODY_OFFSET[0], p[1] + BODY_OFFSET[1], p[2] + BODY_OFFSET[2]]
+}
+
+/// One frame of the barrier (Sora's frame start): its countdown; each of its shots at Sora's aim
+/// point (KH1: the body centre) with its life set to what is left; every 30 frames the wind's attack
+/// gets Re:CoM's new hit serial (KH1's re-hit `+0x50`); at the end the shots' lives run out (Re:CoM
+/// ends and fades them) and the halving stops.
+unsafe fn aero_frame(pl: usize, step: f32) {
+    let Ok(mut g) = BARRIER.lock() else { return };
+    let Some(st) = g.as_mut() else { return };
+    let (on, again) = st.b.step(step);
+    let centre = sora_centre(pl);
+    let left_ticks = if on { (st.b.left * 50.0) as i32 } else { 0 };
+    st.shots.retain(|&(id, wind)| {
+        let Some(o) = shot_object(id) else { return false };
+        let mover: usize = rd(o + rt::MOVER);
+        if mover != 0 {
+            let p: [f32; 4] = rd(mover + rt::POSITION);
+            wr(mover + rt::POSITION, [centre[0], centre[1], centre[2], p[3]]);
+        }
+        wr(o + rt::LIFE, left_ticks);
+        if wind && again && on {
+            let c: usize = rd(o + 0x2A8);
+            if c != 0 {
+                func::<PlFn>(NEW_SERIAL)(c);
+            }
+        }
+        on
+    });
+    if !on {
+        *g = None;
+        BARRIER_ON.store(false, Ordering::Release);
+        barrier_line(|| "aero: the barrier is over".into());
+        event("barrier off".into());
     }
 }
 
@@ -1238,7 +1419,8 @@ pub unsafe fn strikes_frame(pl: usize) {
     let step: f32 = rd(pl + p::STEP);
     strike_step(pl, step, None);
     gravity_frame(pl, step);
-    let idle = STRIKES.lock().map(|g| g.is_empty()).unwrap_or(true) && FALLS.lock().map(|g| g.is_empty()).unwrap_or(true);
+    aero_frame(pl, step);
+    let idle = STRIKES.lock().map(|g| g.is_empty()).unwrap_or(true) && FALLS.lock().map(|g| g.is_empty()).unwrap_or(true) && !barrier_on();
     if idle {
         STRIKING.store(false, Ordering::Release);
     }
@@ -1605,6 +1787,11 @@ pub fn trace_token() -> String {
         t.push(' ');
         t.push_str(&e);
     }
+    if let Ok(g) = BARRIER.try_lock() {
+        if let Some(st) = g.as_ref() {
+            t.push_str(&format!(" barrier {:.0}", st.b.left.max(0.0)));
+        }
+    }
     t
 }
 
@@ -1618,7 +1805,7 @@ pub fn clear_events() {
 /// The start log line.
 pub fn start_line() -> String {
     format!(
-        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.9): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Thunder / Thundara / Thundaga (7.6): at 30, every enemy whose bodies touch a {} m, ±{} m cylinder, nearest first, struck through Re:CoM's own hit path one per {} frames, 1 MP; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Cure / Cura / Curaga (7.7): at {}, Re:CoM's heal {:?} HP on Sora, 1 MP; Gravity / Gravira / Graviga (7.8): at {}, Re:CoM's sphere 2.4 m above the target falls 2.3 m over {:?} f growing to {:?}, then strikes every enemy within 170 x scale cm once (current HP x (power + 5 x max MP)% x resist[8]), 1 MP; Stop / Stopra / Stopga (7.9): at {}, every enemy in a {:?} cm, +-300 cm cylinder, nearest first, one every {} f, into Re:CoM's stop state for (2 + max MP) x 60 x resist[9] f (0: immune), 2 MP; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
+        "magic: KH1's cardless cast at combat = kh1 in Sora's story (M7 stages 7.4-7.10): Fire / Fira / Firaga on Re:CoM's magic action 0x13 with KH1 rows ({} rows), KH1's release ({} frames after the wind-up / {} on the fast path), KH1's ball (speed {} cm/f, life {} f, turn {}°/f, radius 50 cm) through Re:CoM's CHomingBullet, MP {} units paid at the release; Thunder / Thundara / Thundaga (7.6): at 30, every enemy whose bodies touch a {} m, ±{} m cylinder, nearest first, struck through Re:CoM's own hit path one per {} frames, 1 MP; Blizzard / Blizzara / Blizzaga (7.5): 7 shards on Re:CoM's Blizzard shots, KH1's cone, speed 20/30/40 cm/f, life {} f, 50 cm glide, one hit per enemy per cast; Cure / Cura / Curaga (7.7): at {}, Re:CoM's heal {:?} HP on Sora, 1 MP; Gravity / Gravira / Graviga (7.8): at {}, Re:CoM's sphere 2.4 m above the target falls 2.3 m over {:?} f growing to {:?}, then strikes every enemy within 170 x scale cm once (current HP x (power + 5 x max MP)% x resist[8]), 1 MP; Stop / Stopra / Stopga (7.9): at {}, every enemy in a {:?} cm, +-300 cm cylinder, nearest first, one every {} f, into Re:CoM's stop state for (2 + max MP) x 60 x resist[9] f (0: immune), 2 MP; Aero / Aerora / Aeroga (7.10): at {} (at once if cut), KH1's barrier (18 + max MP) x 60 f halving Sora's damage, Re:CoM's Aero shot following him, Aerora / Aeroga's wind {} cm re-hitting every {} f, 2 MP; Field exe case 0x13 -> exeMagic; KH1's re-target for balls cast with no target (best enemy within {} m of the ball, each frame): {}",
         TABLE.get().map_or(0, |t| t.iter().filter(|r| r[0] != 0).count()),
         28,
         mg::fire::FAST_WAIT,
@@ -1638,6 +1825,9 @@ pub fn start_line() -> String {
         mg::stop::WAIT,
         mg::stop::RADIUS,
         mg::stop::INTERVAL,
+        mg::aero::WAIT,
+        mg::aero::WIND_RADIUS,
+        mg::aero::REHIT,
         mg::retarget::RANGE_M,
         if RETARGET.load(Ordering::Acquire) { "on" } else { "off" }
     )

@@ -734,6 +734,7 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     let kh1 = mv::kh1_sora(pl);
     if kh1 {
         no_card_duel(pl);
+        aero_halve(pl);
     }
     let r = if NO_FLINCH.load(Ordering::Relaxed) != pl || !kh1 {
         o(pl)
@@ -749,6 +750,26 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     post_hit(pl, kh1);
     r
 }
+
+/// KH1's Aero barrier (M7 stage 7.10): while it is on, the pending hit's value on Sora's body
+/// (`player+0x690`'s `+0x92`, which the check reads through `0x14016FDB0` before its resistance) is
+/// halved (KH1: ÷ 2, at least 1). Re:CoM's check then runs as ever (resistance, reaction, death).
+/// KH1 halves after its resistance: the same number while Sora's Re:CoM resistance is 100 %.
+unsafe fn aero_halve(pl: usize) {
+    if !super::magic::barrier_on() || rd::<i16>(pl + HIT_PENDING) == 0 {
+        return;
+    }
+    let v: i16 = rd(pl + HIT_VALUE);
+    let h = crate::magic::aero::halve(v);
+    if h != v {
+        wr(pl + HIT_VALUE, h);
+        super::magic::hit_line(|| format!("aero: Sora's hit {v} -> {h} (KH1's barrier)"));
+    }
+}
+
+/// Sora's pending hit value (his body `+0x690`, value `+0x92`). Checked (disasm `0x1401E70B0`:
+/// `lea rcx,[rdi+0x690]; … call 0x14016FDB0`).
+const HIT_VALUE: usize = 0x722;
 
 /// Decision 33: at KH1 a hit with Re:CoM's card-duel reaction (`0x21`, Marluxia 3) is a plain
 /// flinch (kind 1), so Sora never enters the duel (action `0x24`), which he can't win without

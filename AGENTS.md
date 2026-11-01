@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 51: M7 stage 7.10, Aero, version 0.24.0 (2026-10-31)
+
+- Aero / Aerora / Aeroga (Checked, KH1 script + decomp): cast at 30 or at once when cut; 2 MP;
+  barrier (18 + max MP) × 60 frames halving Sora's damage (÷ 2, ≥ 1) in the existing damage-check
+  wrapper; re-cast restarts it. Aerora/Aeroga's wind: Re:CoM's Aero shot as a real attack 0.8 m
+  around Sora, collided by Re:CoM, KH1 damage 8 + 2 × max MP, a new hit serial every 30 frames
+  (`0x14016F7D0`). Plain Aero: the shot without collision as the aura. Not seen in game.
+
+---
+
 ## Stage 50: M7 stage 7.9, Stop, version 0.23.0 (2026-10-31)
 
 - Stop / Stopra / Stopga (Checked, KH1 script + decomp): at 28, every enemy in a 2.5/3.5/5 m,

@@ -1331,3 +1331,61 @@ fn ground_stop_releases_at_28_and_locks_sora_to_68() {
         assert!(!released(&step_cast(&mut p, Pad::default(), None)));
     }
 }
+
+// ---- M7 stage 7.10: Aero ----
+
+#[test]
+fn aero_casts_at_30_or_at_once_when_its_motion_is_cut() {
+    use crate::magic::{cast_req, CastEvent, MagicCommand};
+    const AERO2: MagicCommand = MagicCommand { spell: 6, level: 2 };
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    step_cast(&mut p, Pad::default(), Some(AERO2));
+    assert_eq!(p.ours.rec.head(), cast_req::AERO);
+    let mut rel = None;
+    let mut free_at = None;
+    for k in 1..100 {
+        let out = step_cast(&mut p, Pad::default(), None);
+        if let Some(CastEvent::Released { frame, .. }) = out.cast.iter().find(|e| matches!(e, CastEvent::Released { .. })) {
+            rel = Some((k, *frame));
+        }
+        if free_at.is_none() && !p.ours.lock {
+            free_at = Some(k);
+        }
+    }
+    // Up to 30 frames while its motion plays, then the barrier.
+    assert_eq!(rel, Some((31, 30.0)));
+    assert_eq!(p.recom.releases.len(), 1);
+    assert!(matches!(free_at, Some(68) | Some(69)), "{free_at:?}");
+    // Cut at frame 10 (Re:CoM's hit reaction): KH1's Aero still casts, at once.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(AERO2));
+    for _ in 0..10 {
+        step_cast(&mut p, Pad::default(), None);
+    }
+    let out = p.ours.frame(&mut p.recom, &FrameInput::default(), true);
+    assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Released { spell: 6, .. })), "{:?}", out.cast);
+    assert!(!out.cast.iter().any(|e| matches!(e, CastEvent::Interrupted { .. })));
+    assert_eq!(p.recom.releases.len(), 1);
+    // An air Aero that lands at once: the landing replaces its motion, and it casts then.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad { jump: true, ..Default::default() }, None);
+    let mut cast = false;
+    let mut at = None;
+    for _ in 0..80 {
+        let falling = p.ours.state == state::AIR && !p.ours.arc.rising() && p.recom.pos.y > -40.0;
+        let m = (falling && !cast).then_some(AERO2);
+        cast |= m.is_some();
+        let out = step_cast(&mut p, Pad::default(), m);
+        if let Some(CastEvent::Released { frame, .. }) = out.cast.iter().find(|e| matches!(e, CastEvent::Released { .. })) {
+            at = Some(*frame);
+        }
+    }
+    assert!(cast);
+    assert_eq!(p.recom.releases.len(), 1);
+    assert!(at.is_some_and(|f| f < 30.0), "the landing before 30 casts it then: {at:?}");
+}

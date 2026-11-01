@@ -482,7 +482,13 @@ impl Kh1Sora {
         self.swing = None;
         if let Some(c) = self.cast.take() {
             if !c.released && !c.cancelled {
-                self.cast_log.push(crate::magic::CastEvent::Interrupted { spell: c.start.spell, level: c.start.level, frame: c.age, by: 0xFFFF });
+                if c.start.spell == crate::magic::spell::AERO {
+                    // KH1's Aero (M7 stage 7.10) casts at once when its motion is cut.
+                    let shot = h.release_cast(&c.start);
+                    self.cast_log.push(crate::magic::CastEvent::Released { spell: c.start.spell, level: c.start.level, frame: c.age, shot });
+                } else {
+                    self.cast_log.push(crate::magic::CastEvent::Interrupted { spell: c.start.spell, level: c.start.level, frame: c.age, by: 0xFFFF });
+                }
             }
         }
     }

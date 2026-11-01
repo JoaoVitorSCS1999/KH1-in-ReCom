@@ -41,10 +41,10 @@ pub mod spell {
     pub const NAMES: [&str; 7] = ["fire", "blizzard", "thunder", "cure", "gravity", "stop", "aero"];
 }
 
-/// Spells cast so far (Fire 7.4, Blizzard 7.5, Thunder 7.6, Cure 7.7, Gravity 7.8, Stop 7.9; Aero: 7.10,
+/// Spells cast so far (Fire 7.4, Blizzard 7.5, Thunder 7.6, Cure 7.7, Gravity 7.8, Stop 7.9, Aero 7.10;
 /// each its own rows and script numbers).
 pub fn castable(s: u8) -> bool {
-    matches!(s, spell::FIRE | spell::BLIZZARD | spell::THUNDER | spell::CURE | spell::GRAVITY | spell::STOP)
+    matches!(s, spell::FIRE | spell::BLIZZARD | spell::THUNDER | spell::CURE | spell::GRAVITY | spell::STOP | spell::AERO)
 }
 
 /// A spell's MP cost (its data's `+0x30`, the same at every level): charge units below 100,
@@ -78,6 +78,10 @@ pub mod cast_req {
     /// Stop's one cast motion (`0x36 + 5`, `0x83 + 5`; entries 56 / 81, Thunder's). Checked (files).
     pub const STOP: u16 = 0x3B;
     pub const STOP_AIR: u16 = 0x88;
+    /// Aero's one cast motion (`0x36 + 6`, `0x83 + 6`; entries 56 / 81, Thunder's; the script reads
+    /// requests 60 / 137). Checked (files).
+    pub const AERO: u16 = 0x3C;
+    pub const AERO_AIR: u16 = 0x89;
 
     /// The first cast motion a spell's normal cast plays: `0x1402A3DB0` plays `0x36 + spell`
     /// (Fire: `0x36` then `0x3D`), the air branch of `0x1402A3600` `0x83 + spell` (Fire: `0x83`
@@ -145,6 +149,11 @@ pub fn recom_base_row(s: u8, level: u8) -> Option<usize> {
         (spell::STOP, 1) => Some(0x27),
         (spell::STOP, 2) => Some(0x3A),
         (spell::STOP, 3) => Some(0x3B),
+        // Aero 0x28 (set 24), Aerora 0x3C (25), Aeroga 0x3D (26): `initStockSkill`'s sleights 0x13 /
+        // 0x1A. Checked (exe: clip 0x39, sets 24–26 of `airo_all`).
+        (spell::AERO, 1) => Some(0x28),
+        (spell::AERO, 2) => Some(0x3C),
+        (spell::AERO, 3) => Some(0x3D),
         _ => None,
     }
 }
@@ -342,6 +351,8 @@ pub fn spell_attack(s: u8, level: u8) -> Option<AttackData> {
         spell::THUNDER => Some(thunder_attack(level)),
         spell::GRAVITY => Some(gravity_attack(level)),
         spell::STOP => Some(stop_attack(level)),
+        // Aero's hits are its wind's (Aerora / Aeroga); the barrier itself is a status on Sora.
+        spell::AERO => Some(aero_wind_attack(level)),
         // Cure heals (Re:CoM's amounts, decision 34): no hit, no damage.
         _ => None,
     }
@@ -733,6 +744,118 @@ pub fn stop_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
 /// Re:CoM's stop kind (`0x14017DC50` case 8 / `0x14017D260` case 8). Checked (decomp).
 pub const RECOM_STOP_KIND: u32 = 8;
 
+/// KH1's Aero (`xm_air01.mag`, one file for every level; the levels differ in their data: decoded
+/// with `magdis.py`, Checked (files), the syscalls in the KH1 decomp):
+///
+/// - the command (`0x4C4..0x674`): the charge effect; **up to 30 frames while the request is 60 /
+///   137** (`0x3C` / `0x89`): **if the motion changes, it casts at once** (no cancel); the cast aura;
+///   if the target (the command's member, else the caster) and the caster are alive and healable
+///   (`0x8000`): the barrier data struck onto the target (sys 60), the barrier thread, **the MP**
+///   (sys 47, 200), and (if it had no barrier) the lasting barrier effect after 24 frames;
+/// - the strike (`0x1402BEEE0` element 12): `+0x88 |= 8` and the party block's timer = **(18 + max
+///   MP) × 60 frames** (power 18 + max MP, stat source 1, the same at every level), counted down by
+///   the frame step (`0x1402A43A0`); **while it is on, damage taken is halved** (`0x1402BFA80`: the
+///   value after the resistance, ÷ 2, then at least 1);
+/// - the barrier thread (`0x44..0x1DE`): its effect on the target; for **Aerora / Aeroga** (data 2,
+///   btltbl `0x5CF8` / `0x5D68`) an attack owned by the target, **radius 80 × the target's size**,
+///   always active, **re-hit every 30 frames** (`+0x50`), following the body centre (bone 32771)
+///   **while the barrier lasts**; power 8 + max MP × 2 (stat source 3), element 0, kind 3.
+pub mod aero {
+    /// The longest wait before the cast (if the motion keeps playing).
+    pub const WAIT: f32 = 30.0;
+    /// The barrier: power 18 + max MP, × 60 frames.
+    pub const POWER: i32 = 18;
+    pub const FRAMES_PER_POINT: f32 = 60.0;
+    /// The wind (Aerora / Aeroga): radius at size 1, cm; its re-hit interval, frames.
+    pub const WIND_RADIUS: f32 = 80.0;
+    pub const REHIT: f32 = 30.0;
+    /// MP cost (data `+0x30` = 200): two whole points.
+    pub const COST: i32 = crate::mp::cost::AERO;
+
+    /// The barrier's frames.
+    pub fn frames(max_mp: i32) -> f32 {
+        (POWER + max_mp) as f32 * FRAMES_PER_POINT
+    }
+
+    /// Whether a level has the wind (data 2: Aerora and Aeroga).
+    pub fn has_wind(level: u8) -> bool {
+        level >= 2
+    }
+
+    /// KH1's halving under the barrier (`0x1402BFA80`: `v / 2`, then at least 1) on Re:CoM's hit
+    /// value for Sora; 0 stays 0.
+    pub fn halve(v: i16) -> i16 {
+        if v <= 0 {
+            v
+        } else {
+            (v / 2).max(1)
+        }
+    }
+
+    /// The barrier's countdown (`0x1402A43A0`: − the frame step; off at ≤ 0); a re-cast rewrites it.
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Barrier {
+        pub left: f32,
+        /// Frames since the last re-hit of the wind.
+        pub rehit: f32,
+    }
+
+    impl Barrier {
+        pub fn new(max_mp: i32) -> Barrier {
+            Barrier { left: frames(max_mp), rehit: 0.0 }
+        }
+
+        /// One frame: (still on, the wind may hit again now).
+        pub fn step(&mut self, step: f32) -> (bool, bool) {
+            self.left -= step;
+            self.rehit += step;
+            let again = self.rehit >= REHIT;
+            if again {
+                self.rehit -= REHIT;
+            }
+            (self.left > 0.0, again)
+        }
+    }
+}
+
+/// KH1's Aerora / Aeroga wind data (btltbl `0x5CF8` / `0x5D68`, the same numbers; Checked (files)):
+/// power 8 + **max MP × 2** (stat source 3), element 0, kind 3, radius 80, re-hit 30 frames.
+pub fn aero_wind_attack(_level: u8) -> AttackData {
+    AttackData {
+        stat_source: 3,
+        element: 0,
+        kind_party: 3,
+        kind: 3,
+        bone: -1,
+        power_party: 8,
+        mp_charge: 0,
+        clash: 0x1_0005,
+        priority: 99,
+        recoil_request: 110,
+        power: 8,
+        radius: aero::WIND_RADIUS,
+        ..Default::default()
+    }
+}
+
+/// Re:CoM's Aero rows 0x28 / 0x3C / 0x3D as in the Steam exe (clip 0x39, effect sets 24 / 25 / 26 of
+/// `airo_all`, its wind shot: radius `+4` × 0.1, life `+0xE`). Checked (exe).
+pub const RECOM_AERO_ROWS: [[u8; 16]; 3] = [
+    [0x39, 0x00, 0x18, 0x1E, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0x08, 0x00, 0x0A, 0x00],
+    [0x39, 0x00, 0x19, 0x1E, 0x14, 0x00, 0x00, 0x00, 0x00, 0x03, 0x00, 0x02, 0x08, 0x00, 0x0A, 0x00],
+    [0x39, 0x00, 0x1A, 0x1E, 0x1E, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x03, 0x08, 0x00, 0x0A, 0x00],
+];
+
+/// The KH1 Aero row: Re:CoM's row (clip, `airo_all` set: decision 34) with `+3` = 0, `+0xB` = 1 (the
+/// wind's KH1 kind 3, flinch) and `+0xF` = 0x80.
+pub fn aero_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
+    let mut b = *recom;
+    b[3] = 0;
+    b[0xB] = 1;
+    b[0xF] |= FLAG_KH1;
+    b
+}
+
 /// An area KH1's sys 90 tests a body against (Re:CoM metres): a vertical cylinder (type 2: radius,
 /// half-height) or a sphere (type 1: radius).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -939,7 +1062,7 @@ pub fn fire_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
 /// Re:CoM's rows of the spells built so far, by spell (`[spell][level − 1]`), as in the Steam exe:
 /// the templates of the KH1 rows.
 pub fn recom_rows() -> Vec<[[u8; 16]; 3]> {
-    vec![RECOM_FIRE_ROWS, RECOM_BLIZZARD_ROWS, RECOM_THUNDER_ROWS, RECOM_CURE_ROWS, RECOM_GRAVITY_ROWS, RECOM_STOP_ROWS]
+    vec![RECOM_FIRE_ROWS, RECOM_BLIZZARD_ROWS, RECOM_THUNDER_ROWS, RECOM_CURE_ROWS, RECOM_GRAVITY_ROWS, RECOM_STOP_ROWS, RECOM_AERO_ROWS]
 }
 
 /// The KH1 magic rows, `[spell × 3 + level − 1]` (21; the spells built so far), from Re:CoM's rows
@@ -956,6 +1079,7 @@ pub fn kh1_magic_table(recom: &[[[u8; 16]; 3]]) -> Vec<[u8; 16]> {
                 spell::CURE => cure_row_bytes(r),
                 spell::GRAVITY => gravity_row_bytes(r),
                 spell::STOP => stop_row_bytes(r),
+                spell::AERO => aero_row_bytes(r),
                 _ => [0; 16],
             };
         }
@@ -1057,6 +1181,10 @@ pub fn add_motions(m: &mut MotionSet) {
     // 0x3B / 0x88 map to them).
     m.add(&[cast_req::STOP], MotionInfo::new(68.0));
     m.add(&[cast_req::STOP_AIR], MotionInfo::new(68.0));
+    // Aero (7.10): Thunder's entries 56 / 81 (68 frames, locked to the end). Checked (files: requests
+    // 0x3C / 0x89 map to them).
+    m.add(&[cast_req::AERO], MotionInfo::new(68.0));
+    m.add(&[cast_req::AERO_AIR], MotionInfo::new(68.0));
 }
 
 /// Whether a KH1 request is one of the cast motions Re:CoM's magic action plays.
@@ -1090,6 +1218,7 @@ pub fn release_wait(s: u8) -> f32 {
         // Stop: `L009a2(4)`, then the check each frame for 24: the release at 28 (a cut motion
         // before it ends the cast through `leave_cast` / the resync, as KH1's per-frame check).
         spell::STOP => stop::WAIT,
+        spell::AERO => aero::WAIT,
         _ => 0.0,
     }
 }
@@ -1308,7 +1437,8 @@ impl Kh1Sora {
             return;
         }
         let s = c.start;
-        if !is_release_of(s.spell, head) {
+        // Aero (`0x50E..0x56C`): the motion leaving its request ends the wait, and it casts anyway.
+        if !is_release_of(s.spell, head) && s.spell != spell::AERO {
             c.cancelled = true;
             self.cast_log.push(CastEvent::Interrupted { spell: s.spell, level: s.level, frame: age, by: head });
             return;
@@ -1331,7 +1461,13 @@ impl Kh1Sora {
         }
         self.cast = None;
         if !c.released && !c.cancelled {
-            self.cast_log.push(CastEvent::Interrupted { spell: c.start.spell, level: c.start.level, frame: c.age, by: self.rec.head() });
+            if c.start.spell == spell::AERO {
+                // KH1's Aero isn't cut: a motion change ends its wait and it casts now.
+                let shot = h.release_cast(&c.start);
+                self.cast_log.push(CastEvent::Released { spell: c.start.spell, level: c.start.level, frame: c.age, shot });
+            } else {
+                self.cast_log.push(CastEvent::Interrupted { spell: c.start.spell, level: c.start.level, frame: c.age, by: self.rec.head() });
+            }
         }
         if self.swing.is_none() {
             h.end_cast(self.state != state::GROUND);

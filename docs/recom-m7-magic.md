@@ -909,3 +909,100 @@ In-game checklist (7.9):
 6. Without a target: the area is around Sora.
 7. F9 trace: `release(stop1 f28 …)`, `stop 1 e… shot …`, `pay200`.
 8. Combat = Re:CoM: Re:CoM's Stop cards unchanged.
+
+## Stage 7.10: Aero / Aerora / Aeroga
+
+Owner (decision 34): "Aero works as KH1's". At Combat = KH1 in Sora's story, Aero puts KH1's barrier
+on Sora: his damage taken is halved for (18 + max MP) seconds, and Aerora / Aeroga add KH1's wind
+around him that hits enemies again every half second.
+
+### KH1 (what runs)
+
+| what | KH1 (Steam) | tag |
+|---|---|---|
+| **Cast**: ground `0x36 + 6` = `0x3C`, air `0x89`: Thunder's entries 56 / 81, 68 frames, locked to the end; the hop in the air. | `xa_ex_0010.mset` | Checked (files) |
+| **Command** (`0x4C4..0x674`): charge; **up to 30 frames while the request is 60 / 137**; when the motion changes **it casts at once** (no cancel); the cast aura; if the target (the member, else the caster) and the caster are alive and healable: the barrier strike, the barrier thread, **MP 200**, and after 24 frames the lasting barrier effect (if it had none). | `xm_air01.mag` | Checked (files) |
+| **Barrier** (`0x1402BEEE0` element 12): `+0x88 |= 8`, timer **(18 + max MP) × 60 frames** (power 18 + max MP, every level), counted down by the frame step; a re-cast rewrites it. While on: **damage taken ÷ 2** after the resistance, then at least 1 (`0x1402BFA80`). | btltbl `0x6708` / `0x6778` / `0x67E8` | Checked (files + decomp) |
+| **Wind** (Aerora / Aeroga, data 2 `0x5CF8` / `0x5D68`): an attack owned by the target, **radius 80 × its size**, always on, **re-hit every 30 frames** (`+0x50`), at its body centre (bone 32771) **while the barrier lasts**; power 8 + **max MP × 2**, element 0, kind 3. Each cast starts its own thread (a re-cast adds a wind). | `0x44..0x1DE` | Checked (files) |
+
+### In Re:CoM
+
+- **Cast** as Thunder's (`release_wait` 30); Re:CoM's clips `0x3C` → row `0x39`, `0x89` → `0x3D`.
+  KH1 rows from Re:CoM's 0x28 / 0x3C / 0x3D (checked at start): clip, `airo_all` sets 24–26, `+3` 0,
+  `+0xB` 1 (the wind's flinch), `+0xF` 0x80. `initMagic` case 0x20's charge (Cure's: the weapon's
+  bone 2).
+- **KH1's early cast**: a cut Aero (a landing, a walk-off, Re:CoM's hit reaction) is released in
+  that frame instead of dropped (`Kh1Sora::leave_cast`, `resync`, `cast_step`); KH1's MP rule
+  (paid only when the target is valid) stays.
+- **Release** (`release_aero`): Sora must be alive (the only target; no party yet). **Re:CoM's Aero
+  case's look** (`0x140222170` case `0x28`, Checked (disasm `0x140222CB0..0x140222E7A`)): its hand
+  effect id 1, the ground wind set − 0x16 when on the ground, set − 0x11, at Sora's position.
+  **KH1's barrier**: a new player status of ours (the countdown, `magic::aero::Barrier`), re-written
+  by a re-cast. Then Re:CoM's **Aero shot** (its `CBullet`: flags 7, pitch −π/2, the row's set) at
+  Sora's body centre with life = the barrier: **held off for Aero** (the lasting aura only: Re:CoM's
+  `airo_all` look on its shot), **KH1's wind for Aerora / Aeroga** (radius 0.8 m, kind 1, Re:CoM's
+  aero attribute 1, collided by Re:CoM). Then KH1's MP (two points).
+- **The damage halving** (`win::attack::aero_halve`, in our wrapper on Re:CoM's player damage check
+  `0x1401E6DE0`): while the barrier is on and a hit is pending (`+0x720`), the hit's value on Sora's
+  body (`+0x690`'s `+0x92` = `+0x722`, read by the check through `0x14016FDB0` before its
+  resistance) becomes `max(v / 2, 1)`. Re:CoM's check then runs as ever. Checked (disasm
+  `0x1401E6FBE`, `0x1401E70B0`).
+- **The wind's native mechanism:** the wind is Re:CoM's own attack object (the Aero shot's
+  `CCollAttack`), so **Re:CoM's collision pass collides it with enemies' hurt bodies, Re:CoM's apply
+  records the hit, the enemy's handler takes it** (with KH1's wind damage on twins / proxies,
+  `spell_hit`: 8 + 2 × max MP through the curve, element 0). KH1's re-hit every 30 frames is
+  **Re:CoM's own "new serial" `0x14016F7D0(attack)`** (what its multi-hit attacks call): with a new
+  serial, the apply's hit-once ring (`0x14016F960`) lets the attack through each enemy once more.
+  Ours per frame, only while a barrier is on (`aero_frame`, from the per-frame spell check): the
+  countdown, the shot moved to Sora's body centre (KH1's bone 32771 ≈ Re:CoM's position + 0.85 m,
+  the offset Re:CoM's Cure / Stop cases use on him), its life set to what is left, and every 30
+  frames the new serial. At the barrier's end the shots' lives reach 0 and Re:CoM ends and fades them.
+
+Logs: `magic: release aero2: KH1's barrier 1260 f (max MP 3), damage taken halved; Re:CoM's Aero shot
+Some(N) follows Sora, KH1's wind 0.8 m re-hitting every 30 f`, `magic: aero: Sora's hit 30 -> 15
+(KH1's barrier)` (hit-line budget), `aero: the barrier is over`, hit lines `hit aero2 on 0x…: KH1 …`,
+`mp: paid 200 (Aero release)`. F9 trace: `cast aero2 …`, `release(aero2 f30 shot …)`, `barrier 1260
+wind`, then `barrier <frames left>` on every frame, `barrier off`.
+
+Sites (7.10):
+
+| address | bytes | use |
+|---|---|---|
+| `0x14016F7D0` attack new serial | `8B 05 7A 31 65 00 BA 01 00 00 00 83 C0 01 0F 44 C2 89 05 69 31 65 00 89 41 70 C3` | called |
+| `0x1401A49B0` actor position | `48 8B 81 F0 00 00 00 48 83 C0 30 C3` | called |
+| `0x140222D2F` Aero case effects | 138 bytes (→ `0x1401A49B0`, `0x1401F3C00`, `0x1401A6B20` × 2; ids set − 0x16, − 0x11) | checked only |
+| `0x140222DFE` Aero case flags | `C7 44 24 5C 00 00 00 80 48 C7 45 B0 07 00 00 00` | checked only |
+| `0x140520910` | −π/2 | the shot's pitch |
+| `0x1401E6FBE`, `0x1401E70B0` damage check | the pending count `+0x720`; `lea rcx,[rdi+0x690]` … `call 0x14016FDB0` | checked only (the value `+0x722` is halved before the check) |
+| `0x1407C6EF0`, `0x1407C7030` rows 0x28, 0x3C–0x3D | Re:CoM's Aero rows | the KH1 rows' templates |
+
+1:1 checks (7.10):
+
+- **Checked (files + decomp)**, replayed by tests: the cast at 30 while its motion plays (handler
+  31), at once when Re:CoM cuts it (its hit reaction) or a landing replaces it (never dropped), Sora
+  locked to 68 (`movement::tests` "7.10"); the barrier's 1260 / 1560 frames at max MP 3 / 8, the
+  wind from Aerora on, 42 re-hits over a max-MP-3 barrier, the halving (÷ 2, at least 1, 0 stays 0),
+  the wind's damage (8 + 2 × max MP through the curve), the rows and cost (`magic::tests`).
+- **Checked (exe)**: the new sites.
+- **Assumptions:** (1) Sora's size for the wind is 1.0 (KH1's sys 189; Re:CoM's Sora isn't scaled);
+  (2) KH1's halving comes after its resistance; ours before Re:CoM's: the same while Sora's Re:CoM
+  resistance is 100 % (no cards at KH1); (3) a bullet's handle resolves through `0x1402AD350` (7.8's
+  Assumption 4): if not, the shot stays where it was made and lives the barrier's first length;
+  (4) Re:CoM's Aero shot's `airo_all` look stands for KH1's lasting barrier effect (Re:CoM has no
+  barrier); (5) the barrier lasts across Re:CoM's field / battle switch (KH1's lasts until its timer;
+  ours counts in Sora's frames); (6) the 24-frame delay of KH1's lasting effect is not built (the
+  shot's look starts at the cast).
+- **Not checked:** in game.
+
+In-game checklist (7.10):
+
+1. Log: the start line names Aero (7.10) and 21 rows.
+2. Magic → Aero: Re:CoM's charge, cast clip and Aero wind effects, Re:CoM's Aero look staying on
+   Sora; MP −2 points; for 21 s at max MP 3 (1260 frames) every hit on Sora does half (log `aero:
+   Sora's hit 30 -> 15`). F9: `barrier …` counting down, `barrier off`.
+3. Aerora / Aeroga: enemies touching Sora (0.8 m around his body) take the wind's hit, again every
+   half second while they stay; the wind follows Sora as he moves.
+4. Get hit during the cast: the barrier still comes (at once), MP paid. Air Aero: landing early
+   casts it at the landing.
+5. Re-cast during a barrier: the timer starts again (and Aerora adds a second wind, as KH1).
+6. Combat = Re:CoM: Re:CoM's Aero cards (its damaging wind) unchanged; Riku's story unchanged.

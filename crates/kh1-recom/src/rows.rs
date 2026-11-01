@@ -207,6 +207,9 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         // Stop (M7 stage 7.9): Re:CoM's Stop rows play Thunder's clip (row 0x27's `+0` = 0x39).
         crate::magic::cast_req::STOP => row::THUNDER,
         crate::magic::cast_req::STOP_AIR => row::THUNDER_AIR,
+        // Aero (M7 stage 7.10): Re:CoM's Aero rows play Thunder's clip (row 0x28's `+0` = 0x39).
+        crate::magic::cast_req::AERO => row::THUNDER,
+        crate::magic::cast_req::AERO_AIR => row::THUNDER_AIR,
         _ => return None,
     };
     Some((r, false))
@@ -311,6 +314,10 @@ mod tests {
         assert_eq!(row_for(0x3B, &s, &none), Some((0x39, false)));
         assert_eq!(row_for(0x88, &s, &none), Some((0x3D, false)));
         assert_eq!(crate::magic::RECOM_STOP_ROWS[0][0] as u32, row::THUNDER);
+        // Aero: Re:CoM's row 0x28's clip (Thunder's), + 4 in the air.
+        assert_eq!(row_for(0x3C, &s, &none), Some((0x39, false)));
+        assert_eq!(row_for(0x89, &s, &none), Some((0x3D, false)));
+        assert_eq!(crate::magic::RECOM_AERO_ROWS[0][0] as u32, row::THUNDER);
     }
 
     #[test]
