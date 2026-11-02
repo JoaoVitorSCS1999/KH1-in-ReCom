@@ -272,7 +272,35 @@ pub fn hurt_parts(mdls: &[u8], conv: &Converter) -> Result<Vec<(usize, usize)>> 
     Ok(out)
 }
 
-/// The HIT track's window of hit slot `sub` (key ≠ 0 on, then 0 off; `kh1-data`'s rule).
+/// Every window a HIT track is on (KH1's attack objects hit while the slot's bit is set,
+/// `0x1402B47A0`): one Re:CoM record each, as Re:CoM's own models have one record per window (its
+/// Powerwild's `e007_050`: two records, Checked (files)). The Powerwild's flurry turns its right
+/// hand's slot on three times (M11).
+pub fn hit_windows(m: &kh1_formats::mset::Motion, sub: u16) -> Result<Vec<(f32, f32)>> {
+    let t = m.tracks.iter().find(|t| t.kind == kh1_formats::mset::track::HIT && t.sub == sub).ok_or_else(|| crate::Error::Format(format!("attack motion without a HIT track {sub}")))?;
+    let mut out = Vec::new();
+    let mut on: Option<f32> = None;
+    for k in &t.keys {
+        match (on, k.value() != 0) {
+            (None, true) => on = Some(k.time),
+            (Some(a), false) if k.time > a => {
+                out.push((a, k.time));
+                on = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(a) = on {
+        out.push((a, m.frames as f32));
+    }
+    if out.is_empty() {
+        return bad("HIT track never on");
+    }
+    Ok(out)
+}
+
+/// The HIT track's first window of hit slot `sub` (key ≠ 0 on, then 0 off; `kh1-data`'s rule): the
+/// sound events' anchor.
 pub fn hit_window(m: &kh1_formats::mset::Motion, sub: u16) -> Result<(f32, f32)> {
     let t = m.tracks.iter().find(|t| t.kind == kh1_formats::mset::track::HIT && t.sub == sub).ok_or_else(|| crate::Error::Format(format!("attack motion without a HIT track {sub}")))?;
     let on = t.keys.iter().find(|k| k.value() != 0).map(|k| k.time).ok_or_else(|| crate::Error::Format("HIT track never on".into()))?;
@@ -395,7 +423,7 @@ pub fn extend_asd(asd: &[u8], want: (usize, usize, usize), conv: &Converter, ms:
         let row = nr.row;
         let c = clips.iter().find(|c| c.request == nr.request).ok_or_else(|| crate::Error::Format(format!("request {} has no clip", nr.request)))?;
         let m = &ms.motions[c.entry];
-        let (on, off_) = hit_window(m, nr.sub)?;
+        for (on, off_) in hit_windows(m, nr.sub)? {
         let mut rig = conv.rig();
         let parent = rig.parent(row.bone).ok_or_else(|| crate::Error::Format(format!("KH1 bone {} has no parent", row.bone)))?;
         let hand = conv.map().iter().position(|k| *k == Some(parent)).ok_or_else(|| crate::Error::Format(format!("KH1 bone {parent} has no Re:CoM bone")))?;
@@ -447,6 +475,7 @@ pub fn extend_asd(asd: &[u8], want: (usize, usize, usize), conv: &Converter, ms:
             nr.recom_id
         ));
         out_recs.push(r);
+        }
     }
     let mut d = asd[..tail].to_vec();
     for r in &out_recs {
