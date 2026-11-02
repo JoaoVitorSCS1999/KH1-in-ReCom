@@ -1,0 +1,332 @@
+//! M11, KH1's enemies on Re:CoM's own enemy states (`docs/recom-m11-enemies.md`): the testable
+//! part of the shared framework the Shadow (M10, `crate::shadow`) and the Soldier run on. The
+//! runtime is `win/kh1_enemy.rs`; each enemy's behaviour is its `kh1_core` module, driven through
+//! `kh1_core::enemy::Behaviour`.
+//!
+//! One table ([`CLASSES`]) says, per Re:CoM class: its vtable and allocation size (our 0x20-byte
+//! tail after the body), its ctor and factory-size sites (`crate::sites`), the Re:CoM attack state
+//! each KH1 attack runs in, how its battle appearance runs, and its manifest. At Combat = KH1 in
+//! Sora's story with `enemy_ai = kh1`, each battle enemy of a listed class gets a copy of its own
+//! vtable whose state slots run its KH1 behaviour (decision M10 (a): native states):
+//!
+//! - state 0 (appearance): Re:CoM's own begin and its battle-start rules; KH1's appearance;
+//! - state 1: KH1's AI and body each frame (the behaviour polled once per frame, paused while an
+//!   action motion plays, as KH1's script is);
+//! - the class's attack states: Re:CoM attack states (entered as P1 enters one), KH1's motions with
+//!   the new attack records of its `.ASD` on them;
+//! - states 11 / 12: KH1's reactions for every hit Re:CoM's hit handler sends there, and KH1's
+//!   clash recoil for a Guard;
+//! - state 30: Re:CoM's defeat (prizes, EXP, removal) with the killing hit's KH1 reaction motion;
+//! - the think slot `+0x3D0`: nothing.
+//!
+//! Status states (Stop, freeze, Gravity's flatten, first-strike stun) stay Re:CoM's.
+
+use crate::json;
+use crate::sites::{PtrSite, Site};
+use kh1_core::enemy::{self as ke, Cmd, Table};
+
+/// The Re:CoM enemy states every class's copy runs (`enemy + 0x4C0 + k × 0x40`; begin / step /
+/// end at vtable `+0xE8 + 0x18 k` / `+8` / `+0x10`). Checked (decomp: `0x14017AF00`).
+pub mod state {
+    pub const APPEAR: i32 = 0;
+    pub const THINK: i32 = 1;
+    pub const FLINCH: i32 = 11;
+    pub const BLOW: i32 = 12;
+    pub const DEFEAT: i32 = 30;
+}
+
+pub use crate::shadow::{begin_slot, end_slot, step_slot, THINK_SLOT};
+
+/// How a class's battle appearance runs in state 0.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Appear {
+    /// `CEnemyShadow`'s own state 0 (`0x140192850` / `0x140192B00`): its begin's writes without
+    /// its motion, both body sets off, KH1's rise, then its battle-start handshake (M10).
+    Shadow,
+    /// `CBattleEnemy`'s state 0 (`0x14017B590` / `0x1401829E0`, a class that keeps it): Re:CoM's
+    /// begin as it is (its writes, the battle message `0x96`), then KH1's appearance in place of
+    /// its motion, then Re:CoM's default state (`0x14017D6F0`), as its step does when its motion ends.
+    Base,
+}
+
+/// The 0x20-byte tail after a converted enemy's body (the factory's `mov ecx, size` raised, as the
+/// revenge bosses' sizes): magic, battle number, the runtime's index.
+pub mod tail {
+    pub const SIZE: u32 = 0x20;
+    pub const OFF_MAGIC: usize = 0;
+    pub const OFF_BATTLE: usize = 4;
+    pub const OFF_INDEX: usize = 8;
+}
+
+/// One Re:CoM class with a KH1 behaviour.
+pub struct Class {
+    /// For the log and the trace (`shadow`, `soldier`): the log lines' prefix.
+    pub name: &'static str,
+    /// For messages (`Shadow`, `Soldier`).
+    pub title: &'static str,
+    /// Re:CoM's RTTI name of the class.
+    pub rtti: &'static str,
+    /// Re:CoM's enemy id (the factory `0x140188F40`'s case).
+    pub recom_id: u16,
+    /// The class's vtable and its slot count (Checked (exe): RTTI COL at `vt − 8`, the next
+    /// class's COL after the slots).
+    pub vtable: u32,
+    pub slots: usize,
+    /// Re:CoM's allocation size (our tail sits there).
+    pub alloc: u32,
+    pub magic: u32,
+    /// The ctor hook, the factory's size, the vtable slots checked before the copy.
+    pub ctor: &'static Site,
+    pub alloc_site: &'static Site,
+    pub ptrs: &'static [PtrSite],
+    /// The Re:CoM attack state each KH1 attack (by index) runs in.
+    pub attack_states: &'static [i32],
+    pub attack_names: &'static [&'static str],
+    pub appear: Appear,
+    /// Its script reads its HP (the Soldier's counter `0x1DBC`): the runtime passes Re:CoM's HP
+    /// ratio at each hit.
+    pub reads_hp: bool,
+    /// The manifest the asset step writes (recom root) and its format.
+    pub manifest: &'static str,
+    pub format: &'static str,
+}
+
+/// Every class with a KH1 behaviour. Index = the runtime's class number.
+pub static CLASSES: [Class; 1] = [
+    Class {
+        name: "shadow",
+        title: "Shadow",
+        rtti: ".?AVCEnemyShadow@@",
+        recom_id: 1,
+        vtable: crate::shadow::VTABLE,
+        slots: crate::shadow::VTABLE_SLOTS,
+        alloc: crate::shadow::ALLOC,
+        magic: crate::shadow::tail::MAGIC,
+        ctor: &crate::sites::SHADOW_HOOKS[0],
+        alloc_site: &crate::sites::SHADOW_ALLOC[0],
+        ptrs: crate::sites::SHADOW_PTRS,
+        // Claw 2, swipe 4, leap claw 3 (`crate::shadow::attack_state`).
+        attack_states: &[2, 4, 3],
+        attack_names: &["claw", "swipe", "leap claw"],
+        appear: Appear::Shadow,
+        reads_hp: false,
+        manifest: crate::shadow::MANIFEST,
+        format: crate::shadow::FORMAT,
+    },
+];
+
+/// The generic manifest's format (the Shadow keeps `kh1-shadow 1`).
+pub const FORMAT: &str = "kh1-enemy 1";
+
+/// The states a class's copy replaces (begin and step): appearance, think, its attack states, the
+/// two reaction states, the defeat.
+pub fn replaced_states(c: &Class) -> Vec<i32> {
+    let mut v = vec![state::APPEAR, state::THINK];
+    for &k in c.attack_states {
+        if !v.contains(&k) {
+            v.push(k);
+        }
+    }
+    v.extend([state::FLINCH, state::BLOW, state::DEFEAT]);
+    v
+}
+
+pub fn alloc_bytes(size: u32) -> [u8; 5] {
+    crate::shadow::alloc_bytes(size)
+}
+
+/// One request's clip in the class's `.ANN`.
+pub use crate::shadow::Clip;
+
+/// A class's manifest, in the form the runtime uses.
+#[derive(Clone, Debug)]
+pub struct Manifest {
+    pub consts: Table,
+    pub clips: Vec<Clip>,
+    /// The clash recoil request of each attack (by index).
+    pub recoil: Vec<u16>,
+    /// Re:CoM's bones of KH1's hurt parts (part 0 first).
+    pub parts: Vec<i32>,
+}
+
+impl Manifest {
+    pub fn clip(&self, r: u16) -> Option<&Clip> {
+        self.clips.iter().find(|c| c.request == r)
+    }
+
+    /// `sys 43`'s motion lengths for the behaviour.
+    pub fn frames(&self) -> Vec<(u16, f32)> {
+        self.clips.iter().map(|c| (c.request, c.frames as f32)).collect()
+    }
+
+    /// The clash recoil of an attack; None when the model has no motion for it (KH1's request then
+    /// names no entry: `0x1402A01E0` flags it 0x200000).
+    pub fn recoil_of(&self, attack: u8) -> Option<u16> {
+        self.recoil.get(attack as usize).copied().filter(|&r| self.clip(r).is_some())
+    }
+}
+
+impl ke::Motions for Manifest {
+    fn has(&self, request: u16) -> bool {
+        self.clip(request).is_some()
+    }
+}
+
+/// The Shadow's `kh1-shadow 1` manifest as the framework's.
+pub fn from_shadow(text: &str) -> Result<Manifest, String> {
+    let m = crate::shadow::parse(text)?;
+    let v = json::parse(text)?;
+    let parts = parse_parts(&v, 2)?;
+    let consts = Table::new(m.consts.pairs().to_vec(), kh1_core::shadow::NAMES)?;
+    Ok(Manifest { consts, clips: m.clips, recoil: vec![m.recoil[0], m.recoil[1], m.recoil[2]], parts })
+}
+
+fn parse_parts(v: &json::Value, min: usize) -> Result<Vec<i32>, String> {
+    let a = v.get("parts").and_then(|a| a.as_array()).ok_or("no \"parts\"")?;
+    if a.len() < min {
+        return Err(format!("\"parts\" needs at least {min} bones"));
+    }
+    a.iter().map(|b| b.as_u32().filter(|&b| b < 256).ok_or_else(|| "bad part bone".to_string()).map(|b| b as i32)).collect()
+}
+
+/// A `kh1-enemy 1` manifest (the asset step's `kh1_recom_assets::enemy`): `enemy` (the class's
+/// name), `consts`, `attacks` (per attack: its request and clash recoil), `parts`, `requests`.
+/// `names`: the behaviour's constants; `needed`: the requests it plays.
+pub fn parse(text: &str, enemy: &str, names: &[&str], needed: &[u16]) -> Result<Manifest, String> {
+    let v = json::parse(text)?;
+    if v.get("format").and_then(|f| f.as_str()) != Some(FORMAT) {
+        return Err(format!("not a \"{FORMAT}\" manifest (an older asset step? run it again)"));
+    }
+    if v.get("enemy").and_then(|f| f.as_str()) != Some(enemy) {
+        return Err(format!("not the {enemy}'s manifest"));
+    }
+    let json::Value::Obj(c) = v.get("consts").ok_or("no \"consts\"")? else { return Err("\"consts\" is not an object".into()) };
+    let mut pairs = Vec::new();
+    for (k, x) in c {
+        let f = x.as_f64().ok_or_else(|| format!("const {k} is not a number"))? as f32;
+        if !f.is_finite() {
+            return Err(format!("const {k} = {f}"));
+        }
+        pairs.push((k.clone(), f));
+    }
+    let consts = Table::new(pairs, names)?;
+    let list = v.get("requests").and_then(|a| a.as_array()).ok_or("no \"requests\"")?;
+    let mut clips = Vec::with_capacity(list.len());
+    for r in list {
+        let n = |k: &str| r.get(k).and_then(|x| x.as_u32()).ok_or_else(|| format!("request entry without \"{k}\""));
+        let b = |k: &str| match r.get(k) {
+            Some(json::Value::Bool(b)) => Ok(*b),
+            _ => Err(format!("request entry without \"{k}\"")),
+        };
+        let request = n("request")?;
+        let slot = n("slot")?;
+        if request > 0xFFFF || slot >= 1000 {
+            return Err(format!("request {request} slot {slot}"));
+        }
+        clips.push(Clip { request: request as u16, slot, frames: n("frames")?, root: b("root")?, looped: b("loop")? });
+    }
+    let atk = v.get("attacks").and_then(|a| a.as_array()).ok_or("no \"attacks\"")?;
+    let mut recoil = Vec::new();
+    for a in atk {
+        let r = a.get("recoil").and_then(|x| x.as_u32()).filter(|&r| r <= 0xFFFF).ok_or("attack without \"recoil\"")?;
+        let q = a.get("request").and_then(|x| x.as_u32()).filter(|&r| r <= 0xFFFF).ok_or("attack without \"request\"")?;
+        if !clips.iter().any(|c| c.request as u32 == q) {
+            return Err(format!("no clip for the attack request {q}"));
+        }
+        recoil.push(r as u16);
+    }
+    let parts = parse_parts(&v, 1)?;
+    let m = Manifest { consts, clips, recoil, parts };
+    for &r in needed {
+        if m.clip(r).is_none() {
+            return Err(format!("no clip for KH1 request {r}"));
+        }
+    }
+    Ok(m)
+}
+
+/// A behaviour command as a log token (attack names from the class).
+pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'static str) -> String {
+    match c {
+        Cmd::Motion { request, blend } => format!("motion {request} b{blend}"),
+        Cmd::Queue { request, blend } => format!("queue {request} b{blend}"),
+        Cmd::Action { request, attack, then, .. } => format!("action {request}{} then {then}", attack.map_or(String::new(), |a| format!(" ({})", names.get(a as usize).copied().unwrap_or("?")))),
+        Cmd::Yaw(y) => format!("yaw {:.2}", y),
+        Cmd::Jump { height, velocity } => format!("jump h{height} v({:.1},{:.1})", velocity.x, velocity.z),
+        Cmd::Underground(u) => format!("underground {u}"),
+        Cmd::Hittable(h) => format!("hittable {h}"),
+        Cmd::Height(h) => format!("height {h:.2}"),
+        Cmd::FadeIn(f) => format!("fade in {f}"),
+        Cmd::Target(t) => format!("target {t}"),
+        Cmd::State(s) => format!("state {}", state_name(*s)),
+        Cmd::Held => "held (root motion carries it)".into(),
+    }
+}
+
+/// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
+/// per-frame walk / yaw / height).
+pub fn logged(c: &Cmd<u8>) -> bool {
+    matches!(c, Cmd::Action { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+}
+
+/// A new behaviour for a class (`seed`: its random stream; `yaw`: its facing, KH1's).
+pub fn make(class: usize, m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
+    match class {
+        _ => {
+            let c = kh1_core::shadow::Consts::new(m.consts.pairs().to_vec()).expect("checked at parse");
+            let _ = class;
+            Box::new(kh1_core::shadow::Ai::new(c, m.frames(), seed, yaw, false))
+        }
+    }
+}
+
+/// Parses a class's manifest.
+pub fn parse_for(class: usize, text: &str) -> Result<Manifest, String> {
+    let _ = class;
+    from_shadow(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_manifest_parses_and_checks() {
+        let consts: Vec<String> = ke::ENGINE_NAMES.iter().map(|n| format!("\"{n}\": 1.0")).collect();
+        let r: Vec<String> = [0u16, 200, 218].iter().map(|q| format!("{{\"request\": {q}, \"entry\": 0, \"slot\": {}, \"name\": \"e009_100\", \"frames\": 30, \"root\": false, \"loop\": false, \"source\": \"kh1\"}}", 100 + q % 50)).collect();
+        let t = format!("{{\"format\": \"kh1-enemy 1\", \"enemy\": \"x\", \"consts\": {{{}}}, \"attacks\": [{{\"name\": \"a\", \"request\": 200, \"recoil\": 218}}, {{\"name\": \"b\", \"request\": 200, \"recoil\": 110}}], \"parts\": [5, 3], \"requests\": [{}]}}", consts.join(", "), r.join(", "));
+        let m = parse(&t, "x", &[], &[0, 200]).unwrap();
+        assert_eq!((m.recoil_of(0), m.recoil_of(1)), (Some(218), None));
+        assert!(parse(&t, "y", &[], &[]).is_err());
+        assert!(parse(&t, "x", &["close_range"], &[]).is_err());
+        assert!(parse(&t, "x", &[], &[7]).is_err());
+    }
+
+    #[test]
+    fn classes_table() {
+        for (i, c) in CLASSES.iter().enumerate() {
+            assert_eq!(c.attack_states.len(), c.attack_names.len(), "{}", c.name);
+            assert!(c.attack_states.iter().all(|k| (2..=10).contains(k)), "{}", c.name);
+            assert_eq!(c.alloc_site.expect, &alloc_bytes(c.alloc), "{}", c.name);
+            assert!(CLASSES.iter().enumerate().all(|(j, d)| j == i || (d.magic != c.magic && d.vtable != c.vtable)));
+        }
+        assert_eq!(replaced_states(&CLASSES[0]), vec![0, 1, 2, 4, 3, 11, 12, 30]);
+    }
+
+    #[test]
+    fn shadow_manifest_is_the_frameworks_too() {
+        let Some(p) = std::env::var_os("KH1_SHADOW_JSON") else { return };
+        let m = parse_for(0, &std::fs::read_to_string(p).unwrap()).unwrap();
+        assert_eq!(m.recoil, vec![207, 207, 208]);
+        assert_eq!(m.parts.len(), 2);
+        let _ = make(0, &m, 1, 0.0);
+    }
+
+    #[test]
+    fn tokens() {
+        let n = |s: u8| ["idle", "engaged", "hit"][s as usize];
+        assert_eq!(cmd_token(&Cmd::Action { request: 200, attack: Some(0), then: 203, blend: 8.0 }, CLASSES[0].attack_names, &n), "action 200 (claw) then 203");
+        assert_eq!(cmd_token(&Cmd::State(1), CLASSES[0].attack_names, &n), "state engaged");
+        assert!(logged(&Cmd::Held) && !logged(&Cmd::Yaw(0.0)));
+    }
+}

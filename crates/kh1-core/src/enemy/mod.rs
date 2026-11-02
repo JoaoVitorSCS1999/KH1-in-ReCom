@@ -1,0 +1,211 @@
+//! The shared KH1 enemy framework (M11, `docs/recom-m11-enemies.md`): what KH1's engine does the
+//! same way for every ordinary Heartless, taken out of the Shadow's port (M10) so each enemy's own
+//! module holds only its own AI script.
+//!
+//! - [`body`]: the actor's movement physics (turning, the walk the script set, the air arc and its
+//!   horizontal velocity, the push slide), from the enemy update `0x1402B7260`.
+//! - [`react`]: KH1's hit reactions (`0x1402B8E10` and its cases: flinch, knock-back, launch, air
+//!   reactions, landing, lying down, get-up, the clash recoil), one rule set for every enemy;
+//!   what differs per enemy is only which motions its model has ([`react::Motions`]).
+//! - [`script`]: the AI VM's shape (one behaviour thread polled once a frame, paused while an
+//!   action motion plays: `0x1402CC620`, `0x1402BCEC0`, `0x140297870`) as Rust `async` code, the
+//!   commands it gives the host ([`script::Cmd`]) and the helper routines KH1's enemy scripts
+//!   share byte for byte (move toward, walk to, approach, random ranges and offsets, the frame
+//!   waits, facing); each cites the script offsets it was read from in the Shadow's `ex_2020.bd`
+//!   and the Soldier's `ex_2010.bd` (Checked (files): the 26 byte-identical routines of the two
+//!   scripts, `docs/recom-m11-enemies.md` § Shared script routines).
+//! - [`Behaviour`]: the one interface the host (`kh1-recom`'s `win::kh1_enemy`) drives every KH1
+//!   enemy through.
+//!
+//! Every number is data ([`Numbers`]): the asset step reads it from the player's files; KH1's exe
+//! values it can't read from a file are listed with their addresses (Checked (decomp + exe)).
+
+pub mod body;
+pub mod react;
+pub mod script;
+
+pub use body::Body;
+pub use react::{get_up, landing, react, Hit, Motions, Phase, ReactionStart};
+pub use script::{Cmd, Draw, World};
+
+use crate::math::Vec3;
+use crate::rng::Kh1Rand;
+
+/// Named numbers (KH1 units, 60 Hz frames): a behaviour's constants by name.
+pub trait Numbers {
+    /// The number called `name` (NaN when missing; [`Table::new`] checks the names).
+    fn num(&self, name: &str) -> f32;
+}
+
+/// The numbers the shared engine code reads, by name (the same names in every enemy's
+/// manifest). Implemented for every [`Numbers`].
+pub trait Engine: Numbers {
+    /// The stats block's walk / run speeds (`+4` / `+8`, set by each script's init).
+    fn walk_speed(&self) -> f32 {
+        self.num("walk_speed")
+    }
+    fn run_speed(&self) -> f32 {
+        self.num("run_speed")
+    }
+    /// KH1's stats-block defaults (`0x1402A5D70`: `+0x14` air acceleration, `+0x18` air drag,
+    /// `+0xD0` turn rate).
+    fn air_accel(&self) -> f32 {
+        self.num("air_accel")
+    }
+    fn air_drag(&self) -> f32 {
+        self.num("air_drag")
+    }
+    fn turn_rate(&self) -> f32 {
+        self.num("turn_rate")
+    }
+    /// btltbl's globals the reactions read (G+0x14 / +0x16 / +0x18, G+0x2C, G+0x38, G+0x3C) and
+    /// the reaction code's own numbers (`0x1402B8530`'s down time, the 20 hop).
+    fn launch_min(&self) -> f32 {
+        self.num("launch_min")
+    }
+    fn launch_max(&self) -> f32 {
+        self.num("launch_max")
+    }
+    fn launch_hop(&self) -> f32 {
+        self.num("launch_hop")
+    }
+    fn flinch_push(&self) -> f32 {
+        self.num("flinch_push")
+    }
+    fn air_flinch_speed(&self) -> f32 {
+        self.num("air_flinch_speed")
+    }
+    fn air_knock_speed(&self) -> f32 {
+        self.num("air_knock_speed")
+    }
+    fn down_time(&self) -> f32 {
+        self.num("down_time")
+    }
+    fn air_knock_hop(&self) -> f32 {
+        self.num("air_knock_hop")
+    }
+    /// The enemy's stat record `+0x18`: the knock-back factor (decision M10: KH1's).
+    fn weight(&self) -> f32 {
+        self.num("weight")
+    }
+    /// KH1's gravity (`0x1403EAB54`) and fall cap (`0x1402AF6A0`).
+    fn gravity(&self) -> f32 {
+        self.num("gravity")
+    }
+    fn fall_cap(&self) -> f32 {
+        self.num("fall_cap")
+    }
+    /// The blend the host gives the motion a reaction queues (the scripts' 8).
+    fn attack_blend(&self) -> f32 {
+        self.num("attack_blend")
+    }
+}
+
+impl<T: Numbers + ?Sized> Engine for T {}
+
+/// The names every enemy's manifest holds for the shared code ([`Engine`]).
+pub const ENGINE_NAMES: &[&str] = &[
+    "walk_speed",
+    "run_speed",
+    "air_accel",
+    "air_drag",
+    "turn_rate",
+    "launch_min",
+    "launch_max",
+    "launch_hop",
+    "flinch_push",
+    "air_flinch_speed",
+    "air_knock_speed",
+    "down_time",
+    "air_knock_hop",
+    "weight",
+    "gravity",
+    "fall_cap",
+    "attack_blend",
+];
+
+/// KH1's exe numbers the shared code reads that no file holds (Checked (decomp + exe), the same
+/// values `kh1-core` uses for Sora): the stats-block defaults (`0x1402A5D70`: air acceleration 0.1,
+/// air drag 0.95, turn rate π/16), gravity (`0x1403EAB54`), the fall cap 20 (`0x1402AF6A0`), the
+/// launch's down time 30 (`0x1402B8530`), the 20 hop of the air reactions and clash
+/// (`0x1402B8B90`, `0x1402B77D0`, `0x1402B9140`).
+pub const EXE_NUMBERS: &[(&str, f32)] = &[
+    ("air_accel", 0.1),
+    ("air_drag", 0.95),
+    ("turn_rate", std::f32::consts::PI / 16.0),
+    ("gravity", crate::params::GRAVITY),
+    ("fall_cap", 20.0),
+    ("down_time", 30.0),
+    ("air_knock_hop", 20.0),
+];
+
+/// KH1's walk / run motion blend in the move-toward routine (`0x140299D60` plays request 1 / 2
+/// with `0x41000000` = 8.0). Checked (decomp).
+pub const MOVE_BLEND: f32 = 8.0;
+
+/// A table of named numbers (a manifest's `consts`), checked against an enemy's name list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Table {
+    values: Vec<(String, f32)>,
+}
+
+impl Table {
+    /// From name / value pairs; every name of `names` (and of [`ENGINE_NAMES`]) must be there.
+    pub fn new(values: Vec<(String, f32)>, names: &[&str]) -> Result<Table, String> {
+        for n in names.iter().chain(ENGINE_NAMES) {
+            if !values.iter().any(|(k, _)| k == n) {
+                return Err(format!("constant {n} missing"));
+            }
+        }
+        Ok(Table { values })
+    }
+
+    pub fn get(&self, n: &str) -> f32 {
+        self.values.iter().find(|(k, _)| k == n).map(|v| v.1).unwrap_or(f32::NAN)
+    }
+
+    pub fn pairs(&self) -> &[(String, f32)] {
+        &self.values
+    }
+}
+
+impl Numbers for Table {
+    fn num(&self, name: &str) -> f32 {
+        self.get(name)
+    }
+}
+
+/// What the host tells a behaviour about a hit its hit handler took (KH1's script hit handler
+/// receives the hit record; Re:CoM's handler has already applied Re:CoM's damage).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HitNews {
+    /// A damaging hit from an attacker that didn't defeat it.
+    Damage,
+    /// Sora's Guard blocked its attack (KH1's reaction kinds 6 / 7: the clash).
+    Clash,
+}
+
+/// One KH1 enemy's behaviour as the host drives it: the AI frame (only while no action runs, as
+/// KH1's script pauses), its body, its random stream, the hit news. Commands name attacks by
+/// their index in the enemy's attack list ([`script::Cmd`]`<u8>`).
+pub trait Behaviour {
+    /// One AI frame: the commands.
+    fn frame(&mut self, w: World) -> Vec<Cmd<u8>>;
+    /// The body physics (the host steps it every frame).
+    fn body(&self) -> std::cell::RefMut<'_, Body>;
+    /// The air steering the script set this frame (cleared each frame).
+    fn take_steer(&self) -> Option<Vec3>;
+    /// The random draws since the last call (the log).
+    fn take_draws(&self) -> Vec<Draw>;
+    /// The behaviour's random stream (KH1's one `rand`; reactions draw from it too).
+    fn rng(&self) -> Kh1Rand;
+    fn set_rng(&self, r: Kh1Rand);
+    /// The script's hit handler.
+    fn on_hit(&self, news: HitNews);
+    /// Whether the battle appearance is done.
+    fn risen(&self) -> bool;
+    /// The appearance was Re:CoM's own: no KH1 appearance.
+    fn skip_rise(&self);
+    /// The state names for the log (`Cmd::State`).
+    fn state_name(&self, s: u8) -> &'static str;
+}

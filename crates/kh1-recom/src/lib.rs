@@ -95,6 +95,7 @@ pub mod mp_bar;
 pub mod revenge;
 pub mod rows;
 pub mod settings;
+pub mod kh1_enemy;
 pub mod shadow;
 pub mod shop;
 pub mod specials;

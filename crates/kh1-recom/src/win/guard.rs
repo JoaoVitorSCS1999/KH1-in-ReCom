@@ -344,9 +344,9 @@ pub(super) unsafe fn after_enemy_hit(e: usize, r: u64, hp: i32) {
         block_log(|| format!("{name} id={id}: flags {flags:#x} (bit 13: Re:CoM's hit handler gives no reaction); none"));
         return;
     }
-    // M10: a KH1 Shadow plays KH1's clash recoil (decision M10, instead of Re:CoM's flinch).
-    if super::shadow::guard_block(e) {
-        block_log(|| format!("{name} id={id}: KH1 Shadow: KH1's clash recoil"));
+    // M10 / M11: a KH1 enemy plays KH1's clash recoil (decision M10, instead of Re:CoM's flinch).
+    if let Some(t) = super::kh1_enemy::guard_block(e) {
+        block_log(|| format!("{name} id={id}: KH1 {t}: KH1's clash recoil"));
         return;
     }
     let state = g::state_index(e, rd(e + enemy::STATE));

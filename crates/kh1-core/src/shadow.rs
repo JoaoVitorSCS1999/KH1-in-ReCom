@@ -21,14 +21,10 @@
 //! port keeps that shape with Rust `async` code polled once per frame ([`Ai::frame`]); the host
 //! doesn't poll while its action (attack state, reaction) runs, which is KH1's pause.
 
-use crate::arc::Arc;
-use crate::math::{turn_toward, wrap_angle, Vec3};
+use crate::math::Vec3;
 use crate::rng::Kh1Rand;
-use std::cell::RefCell;
-use std::future::Future;
-use std::pin::Pin;
 use std::rc::Rc;
-use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use std::cell::RefCell;
 
 /// KH1's motion requests the Shadow uses (its `.mset` request map; Checked (files)).
 pub mod req {
@@ -162,224 +158,11 @@ impl Consts {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Body physics.
+// Body physics and reactions: the shared engine code (M11, `crate::enemy`), unchanged.
 // ---------------------------------------------------------------------------------------------
 
-/// The engine side of the Shadow's movement (what KH1's actor task does every frame, whatever
-/// the script does): turning toward the target yaw, the ground walk the script set this frame,
-/// the air arc with its horizontal velocity, and the push slide of a flinch.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Body {
-    /// Facing (`+0x3C`) and the yaw the engine turns to (`+0x150`) at the turn rate.
-    pub yaw: f32,
-    pub yaw_target: f32,
-    /// This frame's walk velocity (`+0x20` × `+0x2C`): set by [`Ai`]'s moves, zeroed each frame
-    /// (KH1's actor task zeroes `+0x2C`, `0x140295E50` in the Epic notes; Assumption for Steam).
-    pub walk: Vec3,
-    /// Movement state 2 (in the air): the arc and the air velocity `+0x3C0`.
-    pub arc: Option<Arc>,
-    pub air_vel: Vec3,
-    /// The push slide (`+0x3F0` direction, `+0x3FC` speed; `0x1402C7300` / `0x1402C7070`).
-    pub push: Option<(Vec3, f32)>,
-}
-
-impl Body {
-    /// `0x1402AF960(h)` + the horizontal: a jump of `h` with air velocity `v`.
-    pub fn jump(&mut self, h: f32, v: Vec3, y: f32, c: &Consts) {
-        self.arc = Some(Arc::hop(h, y, c.gravity()));
-        self.air_vel = v;
-    }
-
-    /// `0x1402C7300(dir, p)`: a push slide totalling `p` (speed `p × −ln 0.8`, ×0.8 a frame).
-    pub fn push(&mut self, dir: Vec3, p: f32) {
-        self.air_vel = Vec3::ZERO;
-        self.push = Some((dir.flat(), p * 0.223_143_55));
-    }
-
-    pub fn airborne(&self) -> bool {
-        self.arc.is_some()
-    }
-
-    /// One frame: the displacement (KH1 units) for the host to move and collide. `steer`: the
-    /// script's air velocity this frame (`+0x20` with speed `+0x2C`, the leap's steering), or
-    /// none. `floor_below`: the host's floor test (only read while falling).
-    pub fn step(&mut self, step: f32, y: f32, steer: Option<Vec3>, c: &Consts) -> Vec3 {
-        // The engine's turn (end of `0x1402B7260`): at most turn_rate × step toward +0x150.
-        self.yaw = turn_toward(self.yaw, self.yaw_target, c.turn_rate(), step);
-        let mut d = self.walk * step;
-        self.walk = Vec3::ZERO;
-        if let Some(arc) = &mut self.arc {
-            // `0x1402AF6A0`: the horizontal velocity, then the arc's height.
-            match steer {
-                Some(s) if s.horizontal_length() > 0.0 => {
-                    let cur = self.air_vel.horizontal_length();
-                    let (dir, speed) = (s.flat().normalized(), s.horizontal_length());
-                    let mut v = (dir * (c.air_accel() * speed) + self.air_vel).flat();
-                    let (u, len) = v.normalize_len();
-                    let cap = if cur <= c.run_speed() { c.run_speed() } else { cur };
-                    v = u * len.min(cap);
-                    self.air_vel = v;
-                }
-                _ => {
-                    let k = if step < 2.0 { c.air_drag().sqrt() } else { c.air_drag() };
-                    self.air_vel = self.air_vel * k;
-                }
-            }
-            d += self.air_vel * step;
-            d.y = arc.advance(y, step, c.gravity(), c.fall_cap());
-        }
-        if let Some((dir, v)) = &mut self.push {
-            // `0x1402C7070`: dir × step × v, then v ×= 0.8^step; ends below 1.
-            d += *dir * (step * *v);
-            *v *= 0.8f32.powf(step);
-            if *v < 1.0 {
-                self.push = None;
-            }
-        }
-        d
-    }
-
-    /// The host found the floor while falling: the arc ends.
-    pub fn land(&mut self) {
-        self.arc = None;
-        self.air_vel = Vec3::ZERO;
-    }
-
-    pub fn falling(&self) -> bool {
-        self.arc.is_some_and(|a| !a.rising())
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Reactions (`0x1402B8E10` and its cases).
-// ---------------------------------------------------------------------------------------------
-
-/// A hit as the reaction code sees it: KH1's reaction kind against enemies (attack data `+0xC`),
-/// the push direction (target − attacker, flat, unit; record `+0x10`), the hurt part (record
-/// `+0x20`: 0 = the head ellipsoid, 1 = the hips).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Hit {
-    pub kind: u8,
-    pub dir: Vec3,
-    pub part: u8,
-}
-
-/// What a reaction asks of the host.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ReactionStart {
-    /// The motion request (an action: the AI waits) and the one queued after it.
-    pub request: u16,
-    pub then: u16,
-    /// The facing it sets (radians), if any.
-    pub yaw: Option<f32>,
-    /// Launches: the base request (`+0x3EA`) the landing / lying / get-up follow from.
-    pub base: Option<u16>,
-    /// Lying-down time once landed (frames).
-    pub down: f32,
-}
-
-/// The phase of a running reaction.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Phase {
-    /// Until the motion ends (flinch, knock-back, clash recoil, get-up, landing).
-    Motion,
-    /// In the air (launch, air flinch); `base`: the launch's base request (land = base + 2 / + 7).
-    Air { base: Option<u16>, behind: bool },
-    /// Lying (`(motion − base) % 5 == 3`), counting the down time.
-    Down { base: u16, behind: bool, left: f32 },
-}
-
-/// Whether the model has a request (the `.mset` map names an entry): `0x14029F010`.
-pub trait Motions {
-    fn has(&self, request: u16) -> bool;
-}
-
-/// KH1's choice for a hit (Checked (decomp + disasm): `0x1402B8E10`, `0x1402B9230`,
-/// `0x1402B8B90`, `0x1402B77D0`, `0x1402B8CC0`, `0x1402B8530`, `0x1402B7E60`).
-///
-/// - kind 3 on the ground: 0x48 + part (front) / 0x4A + part (behind); the same request as the
-///   one playing alternates (`(r − 0x48) ^ 1`); push slide `flinch_push × weight`;
-/// - kind 3 in the air: 0x4E / 0x4F, a 20 hop, air velocity dir × `air_flinch_speed × weight`;
-/// - kind 4 on the ground: 0x4C / 0x4D facing along / against the push (root motion), else
-///   launch, else flinch; in the air 0x50 / 0x51 (hop 20, dir × `air_knock_speed`), else the air
-///   launch, else the air flinch;
-/// - kind 5: launch: speed `min + (max − min) × weight`, hop speed × `launch_hop`, base 0x52 / 0x5C
-///   (+5 from behind), facing against / along the push, down time rand × `down_time`;
-/// - lying down: only the push slide.
-///
-/// `facing`: the actor's facing vector `+0x30`; "behind" is `facing · dir ≥ 0`.
-#[allow(clippy::too_many_arguments)]
-pub fn react(hit: Hit, yaw: f32, current: Option<u16>, airborne: bool, lying: bool, m: &dyn Motions, c: &Consts, rng: &mut Kh1Rand, body: &mut Body, y: f32) -> Option<ReactionStart> {
-    let behind = Vec3::from_yaw(yaw).dot(hit.dir) >= 0.0;
-    let along = hit.dir.x.atan2(hit.dir.z);
-    let against = (-hit.dir.x).atan2(-hit.dir.z);
-    let flinch_push = |body: &mut Body| body.push(hit.dir, c.flinch_push() * c.weight());
-    if lying {
-        flinch_push(body);
-        return None;
-    }
-    let launch = |body: &mut Body, rng: &mut Kh1Rand, airborne: bool| -> Option<ReactionStart> {
-        let s = (c.launch_max() - c.launch_min()) * c.weight() + c.launch_min();
-        let roll = rng.next_f32();
-        let base = if airborne { req::AIR_LAUNCH } else { req::LAUNCH };
-        if !m.has(base) {
-            return None;
-        }
-        let (r, then, yw) = if behind { (base + 5, base + 6, along) } else { (base, base + 1, against) };
-        body.yaw = wrap_angle(yw);
-        body.yaw_target = body.yaw;
-        body.push = None;
-        body.jump(s * c.launch_hop(), hit.dir.flat().normalized() * s, y, c);
-        Some(ReactionStart { request: r, then, yaw: Some(body.yaw), base: Some(base), down: roll * c.down_time() })
-    };
-    let air_flinch = |body: &mut Body| -> ReactionStart {
-        let r = if behind { req::AIR_FLINCH + 1 } else { req::AIR_FLINCH };
-        body.jump(c.air_knock_hop(), hit.dir.flat().normalized() * (c.air_flinch_speed() * c.weight()), y, c);
-        ReactionStart { request: r, then: req::AFTER_LEAP, yaw: None, base: None, down: 0.0 }
-    };
-    let ground_flinch = |body: &mut Body| -> Option<ReactionStart> {
-        let mut r = if behind { req::FLINCH + 2 } else { req::FLINCH };
-        if hit.part != 0 {
-            r += 1;
-        }
-        if current == Some(r) {
-            r = ((r - req::FLINCH) ^ 1) + req::FLINCH;
-        }
-        flinch_push(body);
-        m.has(req::FLINCH).then_some(ReactionStart { request: r, then: req::IDLE, yaw: None, base: None, down: 0.0 })
-    };
-    match hit.kind {
-        3 if airborne => Some(air_flinch(body)),
-        3 => ground_flinch(body),
-        4 if airborne => {
-            if m.has(req::AIR_KNOCK) {
-                let (r, yw) = if behind { (req::AIR_KNOCK + 1, along) } else { (req::AIR_KNOCK, against) };
-                body.yaw = wrap_angle(yw);
-                body.yaw_target = body.yaw;
-                body.jump(c.air_knock_hop(), hit.dir.flat().normalized() * c.air_knock_speed(), y, c);
-                Some(ReactionStart { request: r, then: req::AFTER_LEAP, yaw: Some(body.yaw), base: None, down: 0.0 })
-            } else if m.has(req::AIR_LAUNCH) {
-                launch(body, rng, true)
-            } else {
-                Some(air_flinch(body))
-            }
-        }
-        4 => {
-            if m.has(req::KNOCK) {
-                let (r, yw) = if behind { (req::KNOCK + 1, along) } else { (req::KNOCK, against) };
-                body.yaw = wrap_angle(yw);
-                body.yaw_target = body.yaw;
-                Some(ReactionStart { request: r, then: req::IDLE, yaw: Some(body.yaw), base: None, down: 0.0 })
-            } else if m.has(req::LAUNCH) {
-                launch(body, rng, false)
-            } else {
-                ground_flinch(body)
-            }
-        }
-        5 => launch(body, rng, airborne).or_else(|| if airborne { Some(air_flinch(body)) } else { ground_flinch(body) }),
-        _ => None,
-    }
-}
+pub use crate::enemy::body::Body;
+pub use crate::enemy::react::{get_up, landing, react, Hit, Motions, Phase, ReactionStart};
 
 /// The clash recoil a blocked attack plays (attack row `+0x40`; `0x1402B8E10` case 6 / 7):
 /// on the ground the request with bit 24 and the idle queued; in the air the request with a
@@ -387,328 +170,36 @@ pub fn react(hit: Hit, yaw: f32, current: Option<u16>, airborne: bool, lying: bo
 /// built (Assumption: a block's record carries no negative damage).
 pub fn clash(attack: Attack, airborne: bool, body: &mut Body, y: f32, c: &Consts, recoil: [u16; 3]) -> ReactionStart {
     let r = recoil[Attack::ALL.iter().position(|&a| a == attack).unwrap_or(0)];
-    if airborne {
-        body.jump(c.air_knock_hop(), Vec3::ZERO, y, c);
-        ReactionStart { request: r, then: req::AFTER_LEAP, yaw: None, base: None, down: 0.0 }
-    } else {
-        ReactionStart { request: r, then: req::IDLE, yaw: None, base: None, down: 0.0 }
-    }
-}
-
-/// After a landing (`0x1402B7260`, top): the motion that follows a reaction in the air.
-/// Launch base / base+1 → base+2 then base+3 (lying); behind +5 / +6 → +7 then +8; anything
-/// else → request 7, then the idle.
-pub fn landing(base: Option<u16>, behind: bool) -> (u16, u16, bool) {
-    match base {
-        Some(b) if behind => (b + 7, b + 8, true),
-        Some(b) => (b + 2, b + 3, true),
-        None => (req::LAND, req::IDLE, false),
-    }
-}
-
-/// The get-up after lying (`(motion − base) % 5 == 3` → motion + 1, the idle queued).
-pub fn get_up(base: u16, behind: bool) -> u16 {
-    if behind {
-        base + 9
-    } else {
-        base + 4
-    }
+    crate::enemy::react::clash(r, airborne, body, y, c)
 }
 
 // ---------------------------------------------------------------------------------------------
 // The AI.
 // ---------------------------------------------------------------------------------------------
 
-/// What the AI asks of the host this frame.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Cmd {
-    /// A plain motion request (KH1's `0x14029F7C0` / `0x14029F980` without bit 24): played now
-    /// unless it is the one playing.
-    Motion { request: u16, blend: f32 },
-    /// The motion queued after the current one (`0x14029FA30`).
-    Queue { request: u16, blend: f32 },
-    /// An action (bit 24): the AI is not polled again until the host says it ended. `attack`:
-    /// the attack objects made with it. `then`: the queued request.
-    Action { request: u16, attack: Option<Attack>, then: u16, blend: f32 },
-    /// The facing, now (`sys 11`).
-    Yaw(f32),
-    /// A jump (`sys 50` → `0x1402B7F20`): hop height and air velocity.
-    Jump { height: f32, velocity: Vec3 },
-    /// Underground on / off (the script's `wp+0x3C` and the `+0x3AC` masks of its kind-2 points
-    /// 2 / 3; not its lock points 0 / 1): for the log. What can hit it is [`Cmd::Hittable`].
-    Underground(bool),
-    /// KH1's actor flag `0x40` cleared (true) or set (false): with it set, KH1's attack-vs-hurt
-    /// test (`0x1402B6AF0`, gated by `0x140291920`: `flags & 0x8048 == 0x8000`) and the automatic
-    /// target search (`0x1402B0A00`, gated by `0x140292070`, same test) skip the actor. The script
-    /// sets it at the sink's first frame (`0x1378`, with request 70), at the init of a Shadow that
-    /// spawns from the floor (`0x28D2`), and clears it at the end of the rise's ramp (`0x130A`:
-    /// rise frame len(69) − 30 = 50). Checked (decomp + files).
-    Hittable(bool),
-    /// The model's height scale the script ramps while sinking (1 → 0) and rising (0 → 1): actor
-    /// `+0x44`, the y of the scale `+0x40..` (the lock radius reads `+0x40`, `0x1402B04C0`;
-    /// that `+0x44` is the y scale: Assumption, from the layout).
-    Height(f32),
-    /// The first rise's fade-in (`0x2570`: alpha `+0x60` = 0, `+0x64` = 1 / frames).
-    FadeIn(f32),
-    /// Target set (`sys 49` with the target) or cleared.
-    Target(bool),
-    /// The state object changed (0 idle, 1 engaged, 2 hit): for the log.
-    State(u8),
-}
+/// What the AI asks of the host this frame (the shared commands, `crate::enemy::Cmd`, with the
+/// Shadow's attacks).
+pub type Cmd = crate::enemy::Cmd<Attack>;
+pub use crate::enemy::{Draw, World};
 
-/// What the host tells the AI each frame (KH1 units, y down, 60 Hz frames).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct World {
-    pub step: f32,
-    pub pos: Vec3,
-    /// Sora's position (the script's target `actor+0x74` is always Sora here), or none.
-    pub target: Option<Vec3>,
-    /// Movement state 0 (on the ground, not in an arc).
-    pub grounded: bool,
-    /// Movement state 2 (in an arc).
-    pub airborne: bool,
-    /// Last frame's displacement length (`+0x10 − +0x490`, the stuck test `0x160C`).
-    pub moved: f32,
-    /// The KH1 request playing (the taunt's wait stops when it is 6, `0x1D28`).
-    pub motion: Option<u16>,
-}
-
-/// One frame's random draw, for the log (`sys 25` = `0x14031BA30`).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Draw {
-    pub value: f32,
-    pub what: &'static str,
-}
-
-struct Io {
-    c: Consts,
-    frames: Vec<(u16, f32)>,
-    w: World,
-    body: Body,
-    rng: Kh1Rand,
-    draws: Vec<Draw>,
-    out: Vec<Cmd>,
-    /// The script's work area: home (`wp+0x10`), weave phase (`wp+0x38`), underground
-    /// (`wp+0x3C`), first rise done (`wp+0x40`), has target (`actor+0x74 != 0`), the state object
-    /// (`wp+0x20`: value, changed), the air steering this frame (`+0x20` × `+0x2C`).
-    home: Vec3,
+/// The Shadow's own work area: weave phase (`wp+0x38`), underground (`wp+0x3C`), first rise
+/// done (`wp+0x40`).
+#[derive(Clone, Copy, Debug, Default)]
+struct Wp {
     phase: f32,
     underground: bool,
     risen: bool,
-    has_target: bool,
-    state: (u8, bool),
-    steer: Option<Vec3>,
-    /// The last walk / run request (the host plays it while moving).
-    moving: Option<u16>,
 }
 
-type Cx = Rc<RefCell<Io>>;
-type Task = Pin<Box<dyn Future<Output = ()>>>;
+type Cx = crate::enemy::script::Cx<Consts, Attack, Wp>;
+type Task = crate::enemy::script::Task;
 
-struct Yield(bool);
+use crate::enemy::script::{approach, dist_to_target, face_target, frame, motion_frames, move_toward, poll, pos, push, rand, rand_range, random_offset, set_state, set_target, target, wait_frames, wait_grounded, walk_to};
 
-impl Future for Yield {
-    type Output = ();
-    fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
-        if self.0 {
-            Poll::Ready(())
-        } else {
-            self.0 = true;
-            Poll::Pending
-        }
+impl crate::enemy::Numbers for Consts {
+    fn num(&self, name: &str) -> f32 {
+        self.get(name)
     }
-}
-
-/// `misc0`: the rest of the frame.
-fn frame() -> Yield {
-    Yield(false)
-}
-
-fn waker() -> Waker {
-    fn clone(_: *const ()) -> RawWaker {
-        RawWaker::new(std::ptr::null(), &VT)
-    }
-    fn noop(_: *const ()) {}
-    static VT: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
-    // SAFETY: the vtable's functions ignore the data pointer.
-    unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VT)) }
-}
-
-fn poll(t: &mut Option<Task>) {
-    if let Some(f) = t.as_mut() {
-        let w = waker();
-        let mut cx = Context::from_waker(&w);
-        if f.as_mut().poll(&mut cx).is_ready() {
-            *t = None;
-        }
-    }
-}
-
-fn rand(cx: &Cx, what: &'static str) -> f32 {
-    let mut io = cx.borrow_mut();
-    let v = io.rng.next_f32();
-    io.draws.push(Draw { value: v, what });
-    v
-}
-
-/// `0x1FB6(a, b)`: rand × (b − a) + a.
-fn rand_range(cx: &Cx, a: f32, b: f32, what: &'static str) -> f32 {
-    rand(cx, what) * (b - a) + a
-}
-
-/// `0x1F70`: a random offset of length [a, b) in a random direction (`sys 10` rotates (len, 0,
-/// 0) by rand × 360°; the rotation's sign is an Assumption that changes nothing: the angle is
-/// uniform).
-fn random_offset(cx: &Cx, a: f32, b: f32) -> Vec3 {
-    let len = rand_range(cx, a, b, "offset length");
-    let deg = rand(cx, "offset angle") * 360.0;
-    let r = deg.to_radians();
-    Vec3::new(len * r.cos(), 0.0, -len * r.sin())
-}
-
-fn push(cx: &Cx, c: Cmd) {
-    cx.borrow_mut().out.push(c);
-}
-
-fn pos(cx: &Cx) -> Vec3 {
-    cx.borrow().w.pos
-}
-
-fn target(cx: &Cx) -> Option<Vec3> {
-    let io = cx.borrow();
-    io.w.target.filter(|_| io.has_target)
-}
-
-/// `0x2102` / `0x1D5A`: the distance to the target (3D, `sys 6`; Assumption: 3D length), or a
-/// large value with none.
-fn dist_to_target(cx: &Cx) -> f32 {
-    target(cx).map_or(1.0e8, |t| (t - pos(cx)).length())
-}
-
-fn set_target(cx: &Cx, on: bool) {
-    let changed = {
-        let mut io = cx.borrow_mut();
-        let ch = io.has_target != on;
-        io.has_target = on;
-        ch
-    };
-    if changed {
-        push(cx, Cmd::Target(on));
-    }
-}
-
-/// `0x2302`: the target yaw toward the target (`sys 36`: +0x150 only, the engine turns).
-fn face_target(cx: &Cx) {
-    if let Some(t) = target(cx) {
-        let d = t - pos(cx);
-        cx.borrow_mut().body.yaw_target = d.x.atan2(d.z);
-    }
-}
-
-fn set_state(cx: &Cx, s: u8) {
-    cx.borrow_mut().state = (s, true);
-}
-
-fn motion_frames(cx: &Cx, r: u16) -> f32 {
-    cx.borrow().frames.iter().find(|x| x.0 == r).map_or(0.0, |x| x.1)
-}
-
-async fn wait_frames(cx: &Cx, n: f32) {
-    let mut t = n;
-    while t > 0.0 {
-        let s = cx.borrow().w.step;
-        t -= s;
-        frame().await;
-    }
-}
-
-/// `0x1D74`: wait until on the ground (movement state 0).
-async fn wait_grounded(cx: &Cx) {
-    while !cx.borrow().w.grounded {
-        frame().await;
-    }
-}
-
-/// `sys 40` → `0x140299D60(actor, goal, mode)`: walk (mode 0, `+4`), run (1, `+8`) or glide (2,
-/// `+0xC`, no motion) toward `goal`: the facing turns by the angle to the goal, divided by
-/// `dist / speed × 0.3` when that is above 1; the velocity this frame is the facing × min(speed,
-/// dist); returns 0 once within one frame's travel, else the distance. The walk / run request
-/// (1 / 2, blend 8) plays while moving. Not ported: the floor probe ahead (`0x140193650`; a drop
-/// makes it hop with `+0x10` and fall): Re:CoM's arenas are flat (Assumption).
-fn move_toward(cx: &Cx, goal: Vec3, mode: u8, speed2: f32) -> f32 {
-    let mut io = cx.borrow_mut();
-    let c = io.c.clone();
-    let speed = match mode {
-        0 => c.walk_speed(),
-        1 => c.run_speed(),
-        _ => speed2,
-    };
-    let to = (goal - io.w.pos).flat();
-    let (dir, dist) = to.normalize_len();
-    let cur = io.body.yaw;
-    let mut turn = wrap_angle(dir.x.atan2(dir.z) - cur);
-    let k = dist / speed * 0.3;
-    if k > 1.0 {
-        turn /= k;
-    }
-    let y = wrap_angle(cur + turn);
-    io.body.yaw = y;
-    io.body.yaw_target = y;
-    let v = Vec3::from_yaw(y) * dist.min(speed);
-    io.out.push(Cmd::Yaw(y));
-    let step = io.w.step;
-    if dist < step * speed {
-        return 0.0;
-    }
-    io.body.walk = v;
-    if mode <= 1 {
-        let r = if mode == 0 { req::WALK } else { req::RUN };
-        io.moving = Some(r);
-        io.out.push(Cmd::Motion { request: r, blend: c.attack_blend() });
-    }
-    dist
-}
-
-/// `0x2440(actor, goal, mode, timeout)`: move each frame until arrived on the ground or the time
-/// is out.
-async fn walk_to(cx: &Cx, goal: Vec3, mode: u8, timeout: f32) -> f32 {
-    let mut t = timeout;
-    let mut r = 0.0;
-    while t > 0.0 {
-        r = move_toward(cx, goal, mode, 0.0);
-        frame().await;
-        if r <= 0.0 && cx.borrow().w.grounded {
-            break;
-        }
-        t -= cx.borrow().w.step;
-    }
-    r
-}
-
-/// `0x2374(actor, mode, timeout, retarget, dist)`: chase the target (its position re-read every
-/// `retarget` frames) until within `dist` or the time is out.
-async fn approach(cx: &Cx, mode: u8, timeout: f32, retarget: f32, dist: f32) -> f32 {
-    let mut t = timeout;
-    let mut rt = 0.0;
-    let mut goal = pos(cx);
-    let mut r = 0.0;
-    while t > 0.0 {
-        if rt <= 0.0 {
-            if let Some(tg) = target(cx) {
-                goal = tg;
-            }
-            rt = retarget;
-        }
-        r = move_toward(cx, goal, mode, 0.0);
-        if r - dist < 0.0 {
-            break;
-        }
-        let s = cx.borrow().w.step;
-        t -= s;
-        rt -= s;
-        frame().await;
-    }
-    r
 }
 
 /// `0x10C6(goal)`: one underground step: the goal offset weaves by sin(phase) × 60°, the phase
@@ -719,13 +210,13 @@ fn under_step(cx: &Cx, goal: Vec3) -> f32 {
         (io.c.weave_amplitude(), io.c.weave_rand(), io.c.weave_base(), io.c.under_speed())
     };
     let p = pos(cx);
-    let phase = cx.borrow().phase;
+    let phase = cx.borrow().x.phase;
     let ang = (phase.to_radians().sin() * amp).to_radians();
     let off = goal - p;
     let (s, co) = ang.sin_cos();
     let w = Vec3::new(off.x * co + off.z * s, off.y, -off.x * s + off.z * co) + p;
     let add = rand(cx, "weave") * wr + wb;
-    cx.borrow_mut().phase += add;
+    cx.borrow_mut().x.phase += add;
     move_toward(cx, w, 2, sp)
 }
 
@@ -757,7 +248,7 @@ async fn travel(cx: &Cx, goal: Vec3, near: f32) {
 async fn sink(cx: &Cx) {
     wait_grounded(cx).await;
     let c = cx.borrow().c.clone();
-    cx.borrow_mut().underground = true;
+    cx.borrow_mut().x.underground = true;
     push(cx, Cmd::Motion { request: req::SINK, blend: c.attack_blend() });
     push(cx, Cmd::Queue { request: req::UNDERGROUND, blend: 0.0 });
     // `0x1366..0x138C`: flags |= 0x20, 0x40, 0x10 on the sink's first frame.
@@ -784,7 +275,7 @@ async fn rise(cx: &Cx) {
     wait_grounded(cx).await;
     let c = cx.borrow().c.clone();
     push(cx, Cmd::Underground(false));
-    let first = !cx.borrow().risen;
+    let first = !cx.borrow().x.risen;
     if first {
         let to = {
             let io = cx.borrow();
@@ -819,8 +310,8 @@ async fn rise(cx: &Cx) {
     }
     {
         let mut io = cx.borrow_mut();
-        io.risen = true;
-        io.underground = false;
+        io.x.risen = true;
+        io.x.underground = false;
     }
     push(cx, Cmd::Height(1.0));
     // `0x12D8..0x1314`: flags &= ~0x10, ~0x20, ~0x40 (the last unless `wp+0x44`, a scripted-room
@@ -1018,34 +509,19 @@ impl Ai {
     /// seeds, Assumption). `frames`: KH1 motion lengths by request (`sys 43`, Assumption: the
     /// motion's frame count). `risen`: the battle appearance already played its rise.
     pub fn new(c: Consts, frames: Vec<(u16, f32)>, seed: u32, yaw: f32, risen: bool) -> Ai {
-        let io = Io {
-            c,
-            frames,
-            w: World::default(),
-            body: Body { yaw, yaw_target: yaw, ..Default::default() },
-            rng: Kh1Rand::new(seed),
-            draws: Vec::new(),
-            out: Vec::new(),
-            home: Vec3::ZERO,
-            phase: 0.0,
-            underground: false,
-            risen,
-            has_target: false,
-            state: (0, false),
-            steer: None,
-            moving: None,
-        };
+        let blend = c.attack_blend();
+        let io = crate::enemy::script::Core::new(c, frames, seed, yaw, blend, Wp { phase: 0.0, underground: false, risen });
         Ai { io: Rc::new(RefCell::new(io)), main: None, behaviour: None, started: false }
     }
 
     /// The appearance was not KH1's rise (Re:CoM's own appearance ran): no first rise.
     pub fn skip_rise(&self) {
-        self.io.borrow_mut().risen = true;
+        self.io.borrow_mut().x.risen = true;
     }
 
     /// Whether the battle appearance (the first rise) is done.
     pub fn risen(&self) -> bool {
-        self.io.borrow().risen
+        self.io.borrow().x.risen
     }
 
     /// The body physics (the host steps it every frame, the AI's frames or not).
@@ -1058,7 +534,7 @@ impl Ai {
     }
 
     pub fn underground(&self) -> bool {
-        self.io.borrow().underground
+        self.io.borrow().x.underground
     }
 
     /// The air steering the script set this frame (cleared each frame).
@@ -1094,10 +570,10 @@ impl Ai {
                 io.home = w.pos;
                 let v = io.rng.next_f32();
                 io.draws.push(Draw { value: v, what: "weave phase" });
-                io.phase = v * 360.0;
+                io.x.phase = v * 360.0;
                 io.state = (0, false);
                 // `0x28B0..0x28E0`: spawned from the floor: flags |= 0x100, 0x20, 0x40.
-                if !io.risen {
+                if !io.x.risen {
                     io.out.push(Cmd::Hittable(false));
                 }
             }
@@ -1122,18 +598,55 @@ impl Ai {
     }
 }
 
+/// The framework's interface (M11, `crate::enemy::Behaviour`): the same calls the M10 host made.
+impl crate::enemy::Behaviour for Ai {
+    fn frame(&mut self, w: World) -> Vec<crate::enemy::Cmd<u8>> {
+        Ai::frame(self, w).iter().map(|c| c.map(|a| Attack::ALL.iter().position(|&x| x == a).unwrap_or(0) as u8)).collect()
+    }
+    fn body(&self) -> std::cell::RefMut<'_, Body> {
+        Ai::body(self)
+    }
+    fn take_steer(&self) -> Option<Vec3> {
+        Ai::take_steer(self)
+    }
+    fn take_draws(&self) -> Vec<Draw> {
+        Ai::take_draws(self)
+    }
+    fn rng(&self) -> Kh1Rand {
+        self.with_rng(|r| r.clone())
+    }
+    fn set_rng(&self, r: Kh1Rand) {
+        self.with_rng(|x| *x = r);
+    }
+    /// The hit handler (`0x2988`): a damaging hit sets state 2; a clash is no hit (M10).
+    fn on_hit(&self, news: crate::enemy::HitNews) {
+        if news == crate::enemy::HitNews::Damage {
+            Ai::on_hit(self);
+        }
+    }
+    fn risen(&self) -> bool {
+        Ai::risen(self)
+    }
+    fn skip_rise(&self) {
+        Ai::skip_rise(self)
+    }
+    fn state_name(&self, s: u8) -> &'static str {
+        ["idle", "engaged", "hit"].get(s as usize).copied().unwrap_or("?")
+    }
+}
+
 /// The supervisor (`0x26B2`): after the init frame, the first rise when spawned from the floor
 /// (`mdl_5a`; every Re:CoM battle appearance), the idle behaviour, then each frame: nothing while
 /// underground; idle with Sora within `idle_search` → engaged; a state change restarts the
 /// behaviour thread.
 async fn supervisor(cx: Cx) {
     frame().await;
-    if !cx.borrow().risen {
+    if !cx.borrow().x.risen {
         rise(&cx).await;
     }
     push(&cx, Cmd::State(0));
     loop {
-        if cx.borrow().underground {
+        if cx.borrow().x.underground {
             frame().await;
             continue;
         }

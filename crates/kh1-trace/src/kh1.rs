@@ -23,8 +23,9 @@ pub const SORA_PTR: usize = 0x02D3_7280;
 /// consecutive pointers).
 pub const PARTY_SLOTS: usize = 3;
 
-/// The enemy rows' CSV header (M10: the Shadow; `docs/kh1-trace.md` § Enemy rows).
-pub const ENEMY_HEADER: &str = "frame,actor,flags,state,prev_state,request,entry,motion_frame,pos_x,pos_y,pos_z,facing,target_yaw,move_x,move_z,speed,air_t,rise_t,air_vx,air_vy,air_vz,height,push_x,push_z,push_v,scale_x,scale_y,alpha,alpha_rate,down_time,react_base,pause";
+/// The enemy rows' CSV header (M10: the Shadow; M11: every KH1 enemy, `kind` / `spawn` tell them
+/// apart; `docs/kh1-trace.md` § Enemy rows).
+pub const ENEMY_HEADER: &str = "frame,actor,flags,state,prev_state,request,entry,motion_frame,pos_x,pos_y,pos_z,facing,target_yaw,move_x,move_z,speed,air_t,rise_t,air_vx,air_vy,air_vz,height,push_x,push_z,push_v,scale_x,scale_y,alpha,alpha_rate,down_time,react_base,pause,kind,spawn";
 /// The frame step (float), set each frame by `0x14018D1F0`.
 pub const FRAME_STEP: usize = 0x0233_FBDC;
 /// The logical pad block (`0x14028B0B0` copies pad 0 into it): +4 held, +8 pressed, +0x4C tilt,
@@ -97,6 +98,13 @@ pub mod actor {
     pub const PUSH_SPEED: usize = 0x3FC;
     pub const DOWN_TIME: usize = 0x3E4;
     pub const REACT_BASE: usize = 0x3EA;
+    /// M11: the actor's object handle (`+0x130`, a [`super::HANDLE_TABLE`] handle); the object's
+    /// `+0x4C` (u16, AI syscall 114 `0x1402BA950`: a per-kind number the scripts compare, e.g. the
+    /// Soldier's 301 check; its meaning: Assumption) and `+0x5A` (u8, syscall 132 `0x1402BAC40`: how
+    /// the room spawned it, 0 = placed). Checked (decomp).
+    pub const OBJECT: usize = 0x130;
+    pub const OBJ_KIND: usize = 0x4C;
+    pub const OBJ_SPAWN: usize = 0x5A;
     /// Stats block: ground / air combo length.
     pub const ST_COMBO_MAX: usize = 0xD4;
     pub const ST_AIR_COMBO_MAX: usize = 0xD5;
@@ -146,6 +154,13 @@ pub fn stick(unit_x: f32, unit_y: f32, tilt: f32) -> [f32; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enemy_rows_name_the_kind() {
+        let h: Vec<&str> = ENEMY_HEADER.split(',').collect();
+        assert_eq!(h.len(), 34);
+        assert_eq!(&h[32..], &["kind", "spawn"]);
+    }
 
     /// The Steam exe's headers and the hook's first bytes, when the exe is at hand
     /// (`KH1_STEAM_EXE`; skipped otherwise).

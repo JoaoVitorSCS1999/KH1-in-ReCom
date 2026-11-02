@@ -22,10 +22,10 @@
 
 use kh1_formats::mset::MotionSet;
 
-use crate::ann::{name16, Ann, Slot};
-use crate::build::{cycle_error, LOOP_TOLERANCE_M};
-use crate::convert::{ClipSpec, Converter};
-use crate::matching::{decode_pack, match_all, MatchKind, Query};
+use crate::ann::name16;
+#[cfg(test)]
+use crate::ann::Ann;
+use crate::convert::Converter;
 use crate::mdl::RecomSkeleton;
 use crate::{bad, Result};
 
@@ -309,27 +309,15 @@ pub struct Built {
     pub records: Vec<String>,
 }
 
+/// An attack record's size (the tests read the records).
+#[cfg(test)]
 const REC: usize = 0xA0;
-
-fn put_name(r: &mut [u8], at: usize, s: &str) {
-    r[at..at + 16].copy_from_slice(&name16(s));
-}
-fn put_u32(r: &mut [u8], at: usize, v: u32) {
-    r[at..at + 4].copy_from_slice(&v.to_le_bytes());
-}
-fn put_f32(r: &mut [u8], at: usize, v: f32) {
-    r[at..at + 4].copy_from_slice(&v.to_le_bytes());
-}
 
 /// Builds everything.
 pub fn build(inp: &Inputs) -> Result<Built> {
     let ms = MotionSet::parse(&inp.mset)?;
     let skel = RecomSkeleton::parse(&inp.mdl)?;
-    let mut ann = Ann::parse(&inp.ann)?;
-    if ann.slots.len() != RECOM_SLOTS {
-        return bad(format!("EN0001.ANN has {} slots, Re:CoM Steam's has {RECOM_SLOTS} (already extended?)", ann.slots.len()));
-    }
-    let conv = Converter::new(&inp.mdls, skel.clone())?;
+    let conv = Converter::new(&inp.mdls, skel)?;
     let script = crate::stats::mdls_part(&inp.mdls, 5).ok_or_else(|| crate::Error::Format("xa_ex_2020.mdls: no AI script (part 5)".into()))?;
     // The constants.
     let mut consts = script_consts(script)?;
@@ -345,69 +333,17 @@ pub fn build(inp: &Inputs) -> Result<Built> {
     consts.push(("air_knock_speed".into(), g.air_knockback[1]));
     consts.push(("weight".into(), weight(script)?));
 
-    // Requests → entries (filler requests excluded), root flags.
-    let mut by_entry: Vec<(usize, Vec<u16>, bool)> = Vec::new();
-    for (rid, w) in ms.requests.iter().enumerate().take(LAST_REQUEST + 1) {
-        for e in w.variants() {
-            let e = e as usize;
-            if e >= ms.motions.len() {
-                return bad(format!("xa_ex_2020.mset: request {rid:#x} names entry {e}, past the {} motions", ms.motions.len()));
-            }
-            match by_entry.iter_mut().find(|x| x.0 == e) {
-                Some(x) => {
-                    if x.2 != w.root_motion() {
-                        return bad(format!("xa_ex_2020.mset: entry {e} played with and without root motion (request {rid:#x})"));
-                    }
-                    x.1.push(rid as u16);
-                }
-                None => by_entry.push((e, vec![rid as u16], w.root_motion())),
-            }
-        }
-    }
-    by_entry.sort();
-    if let Some(e) = by_entry.iter().find(|x| SLOT_BASE + x.0 > 999) {
-        return bad(format!("entry {} past slot 999", e.0));
-    }
-    // Bakes Re:CoM already has.
-    let decoded = decode_pack(&ann);
-    let qs: Vec<Query> = by_entry.iter().map(|(e, _, root)| Query { entry: *e, motion: &ms.motions[*e], root_motion: *root }).collect();
-    let found = match_all(&conv, &qs, &decoded);
-    let mut clips = Vec::new();
-    for ((e, reqs, root), fm) in by_entry.iter().zip(found) {
-        let m = &ms.motions[*e];
-        let (slot, name, looped, source) = match fm.found.as_ref() {
-            Some((sc, MatchKind::Bake)) => {
-                let s = &ann.slots[sc.slot];
-                let looped = s.clip.as_ref().is_some_and(|c| c.looped());
-                (sc.slot, s.name_str(), looped, "recom")
-            }
-            _ => {
-                let slot = SLOT_BASE + e;
-                let name = format!("e001_{slot:03}");
-                let looped = cycle_error(&conv, m) <= LOOP_TOLERANCE_M;
-                let clip = conv.convert(m, &ClipSpec { name: name.clone(), looped, root_motion: *root, blend: 8 })?;
-                while ann.slots.len() < slot {
-                    ann.slots.push(Slot { name: [0; 16], clip: None });
-                }
-                if ann.slots.len() > slot {
-                    return bad(format!("slot {slot} taken"));
-                }
-                ann.slots.push(Slot { name: name16(&name), clip: Some(clip) });
-                (slot, name, looped, "kh1")
-            }
-        };
-        for &r in reqs {
-            clips.push(RequestClip { request: r, entry: *e, slot, name: name.clone(), frames: m.frames, root: *root, looped, source });
-        }
-    }
-    clips.sort_by_key(|c| c.request);
-    ann.pad_tail_like_recom();
-    let ann_bytes = ann.to_bytes();
+    // Requests → entries (filler requests excluded), root flags; the clips (M11: the shared
+    // builder, the same rules).
+    let (ann_bytes, clips, _pairs) = crate::enemy::extend_ann(&inp.ann, &ms, &conv, "e001_", RECOM_SLOTS).map_err(|e| crate::Error::Format(format!("EN0001.ANN: {e}")))?;
 
     // The attack rows → ASD records.
     let codes = bone_codes(&inp.mdls)?;
     let rows: Vec<AttackRow> = ATTACK_ROWS.iter().map(|&a| attack_row(script, a, &codes)).collect::<Result<_>>()?;
-    let (asd, records) = extend_asd(&inp.asd, &conv, &ms, &rows, &clips)?;
+    // M11: the shared record writer: the claw and the swipe on Re:CoM's claw record (attack id 0),
+    // the leap claw's two rows on its leap record (id 1), every row on hit slot 0 (their `+0x34`).
+    let new: Vec<crate::enemy::NewRecord> = (0..ATTACK_ROWS.len()).map(|i| crate::enemy::NewRecord { request: ATTACK_REQUESTS[i], row: &rows[i], sub: 0, recom_id: ATTACK_IDS[i] }).collect();
+    let (asd, records) = crate::enemy::extend_asd(&inp.asd, (3, 0x6C, 0x24C), &conv, &ms, &new, &clips).map_err(|e| crate::Error::Format(format!("EN0001.ASD: {e}")))?;
     // Sounds.
     let ses = extend_ses(&inp.ses, &ms, &clips)?;
 
@@ -435,98 +371,6 @@ fn hit_window(m: &kh1_formats::mset::Motion) -> Result<(f32, f32)> {
     let on = t.keys.iter().find(|k| k.value() != 0).map(|k| k.time).ok_or_else(|| crate::Error::Format("HIT track never on".into()))?;
     let off = t.keys.iter().find(|k| k.value() == 0 && k.time > on).map(|k| k.time).unwrap_or(m.frames as f32);
     Ok((on, off))
-}
-
-/// The ASD with KH1's attack records added after Re:CoM's.
-fn extend_asd(asd: &[u8], conv: &Converter, ms: &MotionSet, rows: &[AttackRow], clips: &[RequestClip]) -> Result<(Vec<u8>, Vec<String>)> {
-    let u = |o: usize| -> Result<u32> { asd.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).ok_or_else(|| crate::Error::Format("EN0001.ASD: short".into())) };
-    if asd.get(0..4) != Some(b"@COP".as_slice()) || u(4)? != 3 {
-        return bad("EN0001.ASD: not @COP version 3");
-    }
-    let (n, off, tail) = (u(0x10)? as usize, u(0x14)? as usize, u(0x18)? as usize);
-    if n != 3 || off + REC * n != tail || tail > asd.len() {
-        return bad(format!("EN0001.ASD: {n} attack records at {off:#x}, tail {tail:#x}; Re:CoM Steam's has 3 at 0x6C, tail 0x24C"));
-    }
-    let rec = |i: usize| -> [u8; REC] { asd[off + REC * i..off + REC * (i + 1)].try_into().unwrap() };
-    let name_at = |r: &[u8; REC], o: usize| -> String { let e = r[o..o + 16].iter().position(|&c| c == 0).unwrap_or(16); String::from_utf8_lossy(&r[o..o + e]).into_owned() };
-    // Templates: Re:CoM's claw record (e001_050) and leap claw record (e001_052).
-    let claw_t = (0..n).map(rec).find(|r| name_at(r, 0x40) == "e001_050").ok_or_else(|| crate::Error::Format("EN0001.ASD: no e001_050 record".into()))?;
-    let leap_t = (0..n).map(rec).find(|r| name_at(r, 0x40) == "e001_052").ok_or_else(|| crate::Error::Format("EN0001.ASD: no e001_052 record".into()))?;
-    let skel = conv.skeleton();
-    let mut out_recs = Vec::new();
-    let mut notes = Vec::new();
-    // (rows, template): claw, swipe, leap claw (both hands, one record each).
-    let groups: [(&[usize], &[u8; REC]); 3] = [(&[0], &claw_t), (&[1], &claw_t), (&[2, 3], &leap_t)];
-    for (idx, tmpl) in groups {
-        for &i in idx {
-            let row = &rows[i];
-            let req = ATTACK_REQUESTS[i];
-            let c = clips.iter().find(|c| c.request == req).ok_or_else(|| crate::Error::Format(format!("request {req} has no clip")))?;
-            let m = &ms.motions[c.entry];
-            let (on, off_) = hit_window(m)?;
-            // The KH1 bone's parent is the hand; the Re:CoM bone it maps to.
-            let mut rig = conv.rig();
-            let parent = rig.parent(row.bone).ok_or_else(|| crate::Error::Format(format!("KH1 bone {} has no parent", row.bone)))?;
-            let hand = conv.map().iter().position(|k| *k == Some(parent)).ok_or_else(|| crate::Error::Format(format!("KH1 bone {parent} has no Re:CoM bone")))?;
-            rig.start_motion(m);
-            let p0 = conv.kh1_point_in(&mut rig, m, on, hand, row.bone, row.t[0] as f64);
-            let p1 = conv.kh1_point_in(&mut rig, m, on, hand, row.bone, row.t[1] as f64);
-            let mut r = *tmpl;
-            let hname = skel.bones[hand].name.clone();
-            put_name(&mut r, 0x00, &hname);
-            put_u32(&mut r, 0x10, hand as u32);
-            for (k, v) in p0.iter().enumerate() {
-                put_f32(&mut r, 0x14 + 4 * k, *v as f32);
-            }
-            let line = (row.t[0] - row.t[1]).abs() > 1e-6;
-            if line {
-                // A line between the two points: Re:CoM's shape index 2 (type 7, `0x1407C1C98`)
-                // from bone 1's and bone 2's points.
-                put_name(&mut r, 0x20, &hname);
-                put_u32(&mut r, 0x30, hand as u32);
-                for (k, v) in p1.iter().enumerate() {
-                    put_f32(&mut r, 0x34 + 4 * k, *v as f32);
-                }
-                put_u32(&mut r, 0x54, 2);
-            } else {
-                put_name(&mut r, 0x20, "Root");
-                put_u32(&mut r, 0x30, 0);
-                for k in 0..3 {
-                    put_f32(&mut r, 0x34 + 4 * k, 0.0);
-                }
-                put_u32(&mut r, 0x54, 1);
-            }
-            put_name(&mut r, 0x40, &c.name);
-            put_u32(&mut r, 0x50, u32::MAX);
-            // KH1 radius (cm) → metres (× actor scale 1.0: Assumption).
-            put_f32(&mut r, 0x58, row.radius * 0.01);
-            put_u32(&mut r, 0x5C, (on * 50.0).round() as u32);
-            put_u32(&mut r, 0x60, (off_ * 50.0).round() as u32);
-            put_u32(&mut r, 0x64, ATTACK_IDS[i]);
-            put_u32(&mut r, 0x68, 0);
-            r[0x98..REC].fill(0);
-            notes.push(format!(
-                "{} on {hname} at ({:.4}, {:.4}, {:.4}){} r {:.2} m, frames {on}..{off_}, attack id {}",
-                c.name,
-                p0[0],
-                p0[1],
-                p0[2],
-                if line { format!(" → ({:.4}, {:.4}, {:.4})", p1[0], p1[1], p1[2]) } else { String::new() },
-                row.radius * 0.01,
-                ATTACK_IDS[i]
-            ));
-            out_recs.push(r);
-        }
-    }
-    let mut d = asd[..tail].to_vec();
-    for r in &out_recs {
-        d.extend_from_slice(r);
-    }
-    let new_tail = d.len();
-    d.extend_from_slice(&asd[tail..]);
-    d[0x10..0x14].copy_from_slice(&((n + out_recs.len()) as u32).to_le_bytes());
-    d[0x18..0x1C].copy_from_slice(&(new_tail as u32).to_le_bytes());
-    Ok((d, notes))
 }
 
 /// Re:CoM's `EN0001.SES` with Re:CoM's Shadow attack sounds on the new attack clips: the claw's

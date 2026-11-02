@@ -1,0 +1,435 @@
+//! The AI script runtime and the helper routines KH1's enemy scripts share (M11).
+//!
+//! KH1 runs an enemy's script once per frame from the enemy update `0x1402B7260`, only while no
+//! "action" motion plays (actor flag 4, set by a request with bit 24): an attack or a reaction
+//! pauses the script, which then carries on after the instruction that yielded (VM `0x1402CC620`:
+//! `misc0` yields, `misc8` ends a thread, `misc3` returns; threads `0x1402BCEC0` / `0x1402BD640`,
+//! gate `0x140297870`). Checked (decomp). The port keeps that shape with Rust `async` code polled
+//! once per frame; the host doesn't poll while its action runs, which is KH1's pause.
+//!
+//! The helpers are the routines the scripts share. Each names its offset in the Shadow's
+//! `ex_2020.bd` and the Soldier's `ex_2010.bd`; "same bytes" means the two copies are byte for
+//! byte identical (their branches and calls are relative), Checked (files).
+
+use super::body::Body;
+use super::{Engine, Numbers};
+use crate::math::{wrap_angle, Vec3};
+use crate::rng::Kh1Rand;
+use std::cell::RefCell;
+use std::future::Future;
+use std::pin::Pin;
+use std::rc::Rc;
+use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+/// What the AI asks of the host this frame. `A` names an attack (the enemy's own enum; the host
+/// sees its index).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Cmd<A> {
+    /// A plain motion request (KH1's `0x14029F7C0` / `0x14029F980` without bit 24): played now
+    /// unless it is the one playing.
+    Motion { request: u16, blend: f32 },
+    /// The motion queued after the current one (`0x14029FA30`).
+    Queue { request: u16, blend: f32 },
+    /// An action (bit 24): the AI is not polled again until the host says it ended. `attack`:
+    /// the attack objects made with it. `then`: the queued request.
+    Action { request: u16, attack: Option<A>, then: u16, blend: f32 },
+    /// The facing, now (`sys 11`).
+    Yaw(f32),
+    /// A jump (`sys 50` → `0x1402B7F20`): hop height and air velocity.
+    Jump { height: f32, velocity: Vec3 },
+    /// Underground on / off (the Shadow: the script's `wp+0x3C` and its kind-2 point masks): for
+    /// the log. What can hit it is [`Cmd::Hittable`].
+    Underground(bool),
+    /// KH1's actor flag `0x40` cleared (true) or set (false): with it set, KH1's attack-vs-hurt
+    /// test (`0x1402B6AF0`, gated by `0x140291920`: `flags & 0x8048 == 0x8000`) and the automatic
+    /// target search (`0x1402B0A00`, gated by `0x140292070`, same test) skip the actor.
+    Hittable(bool),
+    /// The model's height scale a script ramps (the Shadow's sink 1 → 0, rise 0 → 1): actor
+    /// `+0x44` (Assumption: the y of the scale `+0x40..`, from the layout).
+    Height(f32),
+    /// A fade-in over n frames (`0x2570` / `0x2010`: alpha `+0x60` = 0, `+0x64` = 1 / n).
+    FadeIn(f32),
+    /// Target set (`sys 49` with the target) or cleared.
+    Target(bool),
+    /// The state object changed (the enemy's own state numbers): for the log.
+    State(u8),
+    /// The action just requested carries KH1's request bit 23 (actor flag `0x1000`,
+    /// [`Body::held`]): its root motion moves the body, KH1's air step does nothing until it ends.
+    /// Not used by the Shadow.
+    Held,
+}
+
+impl<A: Copy> Cmd<A> {
+    /// The same command with the attack mapped (the host's index).
+    pub fn map<B>(&self, f: impl Fn(A) -> B) -> Cmd<B> {
+        match *self {
+            Cmd::Motion { request, blend } => Cmd::Motion { request, blend },
+            Cmd::Queue { request, blend } => Cmd::Queue { request, blend },
+            Cmd::Action { request, attack, then, blend } => Cmd::Action { request, attack: attack.map(f), then, blend },
+            Cmd::Yaw(y) => Cmd::Yaw(y),
+            Cmd::Jump { height, velocity } => Cmd::Jump { height, velocity },
+            Cmd::Underground(u) => Cmd::Underground(u),
+            Cmd::Hittable(h) => Cmd::Hittable(h),
+            Cmd::Height(h) => Cmd::Height(h),
+            Cmd::FadeIn(n) => Cmd::FadeIn(n),
+            Cmd::Target(t) => Cmd::Target(t),
+            Cmd::State(s) => Cmd::State(s),
+            Cmd::Held => Cmd::Held,
+        }
+    }
+}
+
+/// What the host tells the AI each frame (KH1 units, y down, 60 Hz frames).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct World {
+    pub step: f32,
+    pub pos: Vec3,
+    /// Sora's position (the scripts' target `actor+0x74` is always Sora here: Re:CoM has no party
+    /// in battle yet), or none.
+    pub target: Option<Vec3>,
+    /// Movement state 0 (on the ground, not in an arc).
+    pub grounded: bool,
+    /// Movement state 2 (in an arc).
+    pub airborne: bool,
+    /// Last frame's displacement length (`+0x10 − +0x490`, the stuck test).
+    pub moved: f32,
+    /// The KH1 request playing.
+    pub motion: Option<u16>,
+}
+
+/// One frame's random draw, for the log (`sys 25` = `0x14031BA30`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Draw {
+    pub value: f32,
+    pub what: &'static str,
+}
+
+/// The script's world: the constants, the motion lengths, this frame's world, the body, the
+/// random stream and the work area every script has (home `wp+0x10`, target `actor+0x74`, the
+/// state object `wp+0x20`); `X` holds the enemy's own work area.
+pub struct Core<C, A, X> {
+    pub c: C,
+    pub frames: Vec<(u16, f32)>,
+    pub w: World,
+    pub body: Body,
+    pub rng: Kh1Rand,
+    pub draws: Vec<Draw>,
+    pub out: Vec<Cmd<A>>,
+    pub home: Vec3,
+    pub has_target: bool,
+    /// The state object (`wp+0x20`): value, changed.
+    pub state: (u8, bool),
+    /// The air steering this frame (`+0x20` × `+0x2C`).
+    pub steer: Option<Vec3>,
+    /// The last walk / run request (the host plays it while moving).
+    pub moving: Option<u16>,
+    /// The walk / run motion blend ([`super::MOVE_BLEND`]; the Shadow's port passes its script's
+    /// 8, the same number).
+    pub move_blend: f32,
+    pub x: X,
+}
+
+pub type Cx<C, A, X> = Rc<RefCell<Core<C, A, X>>>;
+pub type Task = Pin<Box<dyn Future<Output = ()>>>;
+
+impl<C, A, X> Core<C, A, X> {
+    pub fn new(c: C, frames: Vec<(u16, f32)>, seed: u32, yaw: f32, move_blend: f32, x: X) -> Core<C, A, X> {
+        Core {
+            c,
+            frames,
+            w: World::default(),
+            body: Body { yaw, yaw_target: yaw, ..Default::default() },
+            rng: Kh1Rand::new(seed),
+            draws: Vec::new(),
+            out: Vec::new(),
+            home: Vec3::ZERO,
+            has_target: false,
+            state: (0, false),
+            steer: None,
+            moving: None,
+            move_blend,
+            x,
+        }
+    }
+}
+
+pub struct Yield(bool);
+
+impl Future for Yield {
+    type Output = ();
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+        if self.0 {
+            Poll::Ready(())
+        } else {
+            self.0 = true;
+            Poll::Pending
+        }
+    }
+}
+
+/// `misc0`: the rest of the frame.
+pub fn frame() -> Yield {
+    Yield(false)
+}
+
+fn waker() -> Waker {
+    fn clone(_: *const ()) -> RawWaker {
+        RawWaker::new(std::ptr::null(), &VT)
+    }
+    fn noop(_: *const ()) {}
+    static VT: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+    // SAFETY: the vtable's functions ignore the data pointer.
+    unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VT)) }
+}
+
+/// Polls a thread once; a finished thread is dropped (`misc8`).
+pub fn poll(t: &mut Option<Task>) {
+    if let Some(f) = t.as_mut() {
+        let w = waker();
+        let mut cx = Context::from_waker(&w);
+        if f.as_mut().poll(&mut cx).is_ready() {
+            *t = None;
+        }
+    }
+}
+
+/// `sys 25`: KH1's random float (logged).
+pub fn rand<C, A, X>(cx: &Cx<C, A, X>, what: &'static str) -> f32 {
+    let mut io = cx.borrow_mut();
+    let v = io.rng.next_f32();
+    io.draws.push(Draw { value: v, what });
+    v
+}
+
+/// Shadow `0x1FB6`, Soldier `0x1A70` (same bytes): rand × (b − a) + a.
+pub fn rand_range<C, A, X>(cx: &Cx<C, A, X>, a: f32, b: f32, what: &'static str) -> f32 {
+    rand(cx, what) * (b - a) + a
+}
+
+/// Shadow `0x1F70`, Soldier `0x1A2A` (same bytes): a random offset of length [a, b) in a random
+/// direction (`sys 10` rotates (len, 0, 0) by rand × 360°; the rotation's sign is an Assumption
+/// that changes nothing: the angle is uniform).
+pub fn random_offset<C, A, X>(cx: &Cx<C, A, X>, a: f32, b: f32) -> Vec3 {
+    let len = rand_range(cx, a, b, "offset length");
+    let deg = rand(cx, "offset angle") * 360.0;
+    let r = deg.to_radians();
+    Vec3::new(len * r.cos(), 0.0, -len * r.sin())
+}
+
+pub fn push<C, A, X>(cx: &Cx<C, A, X>, c: Cmd<A>) {
+    cx.borrow_mut().out.push(c);
+}
+
+pub fn pos<C, A, X>(cx: &Cx<C, A, X>) -> Vec3 {
+    cx.borrow().w.pos
+}
+
+pub fn target<C, A, X>(cx: &Cx<C, A, X>) -> Option<Vec3> {
+    let io = cx.borrow();
+    io.w.target.filter(|_| io.has_target)
+}
+
+/// Shadow `0x2102` / `0x1D5A`, Soldier `0x1BBC` / `0x17D2`: the distance to the target (`sys 6`,
+/// 3D), or a large value with none.
+pub fn dist_to_target<C, A, X>(cx: &Cx<C, A, X>) -> f32 {
+    target(cx).map_or(1.0e8, |t| (t - pos(cx)).length())
+}
+
+/// `sys 49`: the target set or cleared (Soldier `0x1D7C` / `0x1D6A`).
+pub fn set_target<C, A, X>(cx: &Cx<C, A, X>, on: bool) {
+    let changed = {
+        let mut io = cx.borrow_mut();
+        let ch = io.has_target != on;
+        io.has_target = on;
+        ch
+    };
+    if changed {
+        push(cx, Cmd::Target(on));
+    }
+}
+
+/// Shadow `0x2302`, Soldier `0x1DD8`: the target yaw toward the target (`sys 36`: +0x150 only,
+/// the engine turns).
+pub fn face_target<C, A, X>(cx: &Cx<C, A, X>) {
+    if let Some(t) = target(cx) {
+        let d = t - pos(cx);
+        cx.borrow_mut().body.yaw_target = d.x.atan2(d.z);
+    }
+}
+
+/// Soldier `0x1E02`: face the target now (`sys 11`: +0x150 and the facing, `0x140297E10`).
+pub fn face_target_now<C, A, X>(cx: &Cx<C, A, X>) {
+    if let Some(t) = target(cx) {
+        let d = t - pos(cx);
+        let y = d.x.atan2(d.z);
+        let mut io = cx.borrow_mut();
+        io.body.yaw = y;
+        io.body.yaw_target = y;
+        io.out.push(Cmd::Yaw(y));
+    }
+}
+
+/// The state object changes (Soldier `0x19EA`; the Shadow's `wp+0x20`): the supervisor restarts
+/// the behaviour thread.
+pub fn set_state<C, A, X>(cx: &Cx<C, A, X>, s: u8) {
+    cx.borrow_mut().state = (s, true);
+}
+
+/// `sys 43`: a motion's length (Assumption: its frame count).
+pub fn motion_frames<C, A, X>(cx: &Cx<C, A, X>, r: u16) -> f32 {
+    cx.borrow().frames.iter().find(|x| x.0 == r).map_or(0.0, |x| x.1)
+}
+
+/// Shadow `0x2D42`, Soldier `0x23EA`: wait `n` frames (counted down by the step `sys 5`).
+pub async fn wait_frames<C, A, X>(cx: &Cx<C, A, X>, n: f32) {
+    let mut t = n;
+    while t > 0.0 {
+        let s = cx.borrow().w.step;
+        t -= s;
+        frame().await;
+    }
+}
+
+/// Shadow `0x1D74`, Soldier `0x182E` (same bytes): wait until on the ground (movement state 0).
+pub async fn wait_grounded<C, A, X>(cx: &Cx<C, A, X>) {
+    while !cx.borrow().w.grounded {
+        frame().await;
+    }
+}
+
+/// Soldier `0x998` / `0xA82` / `0xB6A` / `0x174E`: wait while in the air (movement state 2).
+pub async fn wait_airborne<C, A, X>(cx: &Cx<C, A, X>) {
+    while cx.borrow().w.airborne {
+        frame().await;
+    }
+}
+
+/// `sys 40` → `0x140299D60(actor, goal, mode)`: walk (mode 0, `+4`), run (1, `+8`) or glide (2,
+/// `+0xC`, no motion) toward `goal`: the facing turns by the angle to the goal, divided by
+/// `dist / speed × 0.3` when that is above 1; the velocity this frame is the facing × min(speed,
+/// dist); returns 0 once within one frame's travel, else the distance. The walk / run request
+/// (1 / 2, blend 8) plays while moving. Not ported: the floor probe ahead (`0x140193650`; a drop
+/// makes it hop with `+0x10` and fall): Re:CoM's arenas are flat (Assumption).
+pub fn move_toward<C: Numbers + Clone, A, X>(cx: &Cx<C, A, X>, goal: Vec3, mode: u8, speed2: f32) -> f32 {
+    let mut io = cx.borrow_mut();
+    let speed = match mode {
+        0 => io.c.walk_speed(),
+        1 => io.c.run_speed(),
+        _ => speed2,
+    };
+    let to = (goal - io.w.pos).flat();
+    let (dir, dist) = to.normalize_len();
+    let cur = io.body.yaw;
+    let mut turn = wrap_angle(dir.x.atan2(dir.z) - cur);
+    let k = dist / speed * 0.3;
+    if k > 1.0 {
+        turn /= k;
+    }
+    let y = wrap_angle(cur + turn);
+    io.body.yaw = y;
+    io.body.yaw_target = y;
+    let v = Vec3::from_yaw(y) * dist.min(speed);
+    io.out.push(Cmd::Yaw(y));
+    let step = io.w.step;
+    if dist < step * speed {
+        return 0.0;
+    }
+    io.body.walk = v;
+    if mode <= 1 {
+        let r = if mode == 0 { super::react::req::WALK } else { super::react::req::RUN };
+        io.moving = Some(r);
+        let blend = io.move_blend;
+        io.out.push(Cmd::Motion { request: r, blend });
+    }
+    dist
+}
+
+/// Shadow `0x2440`, Soldier `0x1F16` (same bytes): move each frame until arrived on the ground or
+/// the time is out.
+pub async fn walk_to<C: Numbers + Clone, A, X>(cx: &Cx<C, A, X>, goal: Vec3, mode: u8, timeout: f32) -> f32 {
+    let mut t = timeout;
+    let mut r = 0.0;
+    while t > 0.0 {
+        r = move_toward(cx, goal, mode, 0.0);
+        frame().await;
+        if r <= 0.0 && cx.borrow().w.grounded {
+            break;
+        }
+        t -= cx.borrow().w.step;
+    }
+    r
+}
+
+/// Shadow `0x2374`, Soldier `0x1E4A` (the same routine; the Soldier's copy also calls `sys 1`,
+/// a debug print): chase the target (its position re-read every `retarget` frames) until within
+/// `dist` or the time is out.
+pub async fn approach<C: Numbers + Clone, A, X>(cx: &Cx<C, A, X>, mode: u8, timeout: f32, retarget: f32, dist: f32) -> f32 {
+    let mut t = timeout;
+    let mut rt = 0.0;
+    let mut goal = pos(cx);
+    let mut r = 0.0;
+    while t > 0.0 {
+        if rt <= 0.0 {
+            if let Some(tg) = target(cx) {
+                goal = tg;
+            }
+            rt = retarget;
+        }
+        r = move_toward(cx, goal, mode, 0.0);
+        if r - dist < 0.0 {
+            break;
+        }
+        let s = cx.borrow().w.step;
+        t -= s;
+        rt -= s;
+        frame().await;
+    }
+    r
+}
+
+/// Soldier `0x15BA`, Shadow `0x1BC4` (the same routine): wander. Two random points around the
+/// actor's **current** position (`sys 7` adds `actor+0x10`; lengths [inner − band, inner) and
+/// [outer − band, outer), band 100), walk to each (timeout), sometimes stand (the idle motion,
+/// wait [idle_min, idle_max)), and walk home when farther than `home_max`.
+#[allow(clippy::too_many_arguments)]
+pub async fn wander<C: Numbers + Clone, A, X>(cx: &Cx<C, A, X>, inner: f32, outer: f32, band: f32, timeout: f32, idle_chance: f32, idle_min: f32, idle_max: f32, home_max: f32, idle_blend: f32) {
+    let home = cx.borrow().home;
+    let p = pos(cx);
+    let a = p + random_offset(cx, inner - band, inner);
+    let b = p + random_offset(cx, outer - band, outer);
+    walk_to(cx, a, 0, timeout).await;
+    walk_to(cx, b, 0, timeout).await;
+    if rand(cx, "wander idle") - idle_chance < 0.0 {
+        push(cx, Cmd::Motion { request: super::react::req::IDLE, blend: idle_blend });
+        let n = rand_range(cx, idle_min, idle_max, "wander idle time");
+        wait_frames(cx, n).await;
+    }
+    if (pos(cx) - home).length() - home_max > 0.0 {
+        walk_to(cx, home, 0, timeout).await;
+        frame().await;
+    }
+}
+
+/// Soldier `0x1BFC`, Shadow `0x2142`: the jump start (request 3 as an action, 4 queued with
+/// `0x40010004`), a yield (the action plays), then the jump (`sys 50`: hop `height`, air velocity
+/// `v`).
+pub async fn jump_at<C: Numbers + Clone, A, X>(cx: &Cx<C, A, X>, height: f32, v: Vec3) {
+    push(cx, Cmd::Action { request: super::react::req::JUMP, attack: None, then: super::react::req::FALL, blend: 0.0 });
+    frame().await;
+    let y = pos(cx).y;
+    {
+        let mut io = cx.borrow_mut();
+        let c = io.c.clone();
+        io.body.jump(height, Vec3::new(v.x, 0.0, v.z), y, &c);
+    }
+    push(cx, Cmd::Jump { height, velocity: v });
+}
+
+/// The supervisor's state-machine helpers (Soldier `0x1996` restart, `0x19B4` take the request,
+/// `0x19EA` request, `0x1A06` clear): the request taken this frame, if any.
+pub fn take_state<C, A, X>(cx: &Cx<C, A, X>) -> Option<u8> {
+    let mut io = cx.borrow_mut();
+    let ch = io.state.1;
+    io.state.1 = false;
+    ch.then_some(io.state.0)
+}

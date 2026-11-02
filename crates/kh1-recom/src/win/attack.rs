@@ -712,9 +712,9 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
             super::damage::note(|| format!("swing row {}: Re:CoM's boss falloff skipped (its multiplier was {:.2})", row.unwrap_or(0), f.mult()));
         }
     }
-    // M10: a KH1 Shadow reacts with the swing's KH1 reaction kind.
+    // M10 / M11: a KH1 enemy reacts with the swing's KH1 reaction kind.
     if let Some(k) = row.and_then(|r| moveset().row(r)).and_then(|x| moveset().attack(x.attack)).map(|a| a.kind) {
-        super::shadow::note_swing(enemy, k);
+        super::kh1_enemy::note_swing(enemy, k);
     }
     super::guard::after_enemy_hit(enemy, r, hp);
     // Gimmick cards, option (c): a KH1 finisher that interrupted a card-break boss's attack.
