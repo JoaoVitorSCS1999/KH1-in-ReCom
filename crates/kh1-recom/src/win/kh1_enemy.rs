@@ -322,11 +322,12 @@ pub fn start_line(k: usize) -> String {
 
 /// Class `K`'s ctor: Re:CoM's, then (KH1 battle, `enemy_ai = kh1`) our vtable and tail.
 pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usize, c: usize) -> usize {
-    let r = orig::<CtorFn>(&ORIG_CTOR[K])(this, a, b, c);
+    // `ctor_ptr` names a wrapper for 40 indices; only installed classes' are ever called.
+    let (Some(o), Some(cl)) = (ORIG_CTOR.get(K), CLASSES.get(K)) else { return 0 };
+    let r = orig::<CtorFn>(o)(this, a, b, c);
     if this == 0 || !live_battle(K) {
         return r;
     }
-    let cl = &CLASSES[K];
     let copy = COPY[K].load(Ordering::Acquire);
     let Some(m) = MANIFEST[K].get() else { return r };
     if copy == 0 || rd::<usize>(this) != base() + cl.vtable as usize {
@@ -378,6 +379,55 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
     let name = cl.title;
     line(K, || format!("battle {battle}: {name} {this:#x} gets KH1's AI (seed {seed:#x})"));
     r
+}
+
+/// Class `k`'s ctor wrapper (`ctor::<K>` for every class index; room for 40 classes so a new class
+/// needs no line here).
+pub fn ctor_ptr(k: usize) -> usize {
+    const _: () = assert!(N <= 40);
+    match k {
+        0 => ctor::<0> as *const () as usize,
+        1 => ctor::<1> as *const () as usize,
+        2 => ctor::<2> as *const () as usize,
+        3 => ctor::<3> as *const () as usize,
+        4 => ctor::<4> as *const () as usize,
+        5 => ctor::<5> as *const () as usize,
+        6 => ctor::<6> as *const () as usize,
+        7 => ctor::<7> as *const () as usize,
+        8 => ctor::<8> as *const () as usize,
+        9 => ctor::<9> as *const () as usize,
+        10 => ctor::<10> as *const () as usize,
+        11 => ctor::<11> as *const () as usize,
+        12 => ctor::<12> as *const () as usize,
+        13 => ctor::<13> as *const () as usize,
+        14 => ctor::<14> as *const () as usize,
+        15 => ctor::<15> as *const () as usize,
+        16 => ctor::<16> as *const () as usize,
+        17 => ctor::<17> as *const () as usize,
+        18 => ctor::<18> as *const () as usize,
+        19 => ctor::<19> as *const () as usize,
+        20 => ctor::<20> as *const () as usize,
+        21 => ctor::<21> as *const () as usize,
+        22 => ctor::<22> as *const () as usize,
+        23 => ctor::<23> as *const () as usize,
+        24 => ctor::<24> as *const () as usize,
+        25 => ctor::<25> as *const () as usize,
+        26 => ctor::<26> as *const () as usize,
+        27 => ctor::<27> as *const () as usize,
+        28 => ctor::<28> as *const () as usize,
+        29 => ctor::<29> as *const () as usize,
+        30 => ctor::<30> as *const () as usize,
+        31 => ctor::<31> as *const () as usize,
+        32 => ctor::<32> as *const () as usize,
+        33 => ctor::<33> as *const () as usize,
+        34 => ctor::<34> as *const () as usize,
+        35 => ctor::<35> as *const () as usize,
+        36 => ctor::<36> as *const () as usize,
+        37 => ctor::<37> as *const () as usize,
+        38 => ctor::<38> as *const () as usize,
+        39 => ctor::<39> as *const () as usize,
+        _ => 0,
+    }
 }
 
 /// The class of an enemy that is one of ours (our vtable and tail).
