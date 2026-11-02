@@ -1516,6 +1516,34 @@ moving lunge, nearest Re:CoM's charge; all its rows' `+0x3C` are 30, the slash's
   our step then only marks Re:CoM's homing target as the Bandit (`+0x2F4`) and Re:CoM's homing takes it. The Bandit
   takes its damage as Stage 27's turned-back shots do (Assumption: not tested on a KH1 enemy yet). KH1's own repel
   slide after a Guard is not used.
+- **Sora's swing knocks it away** (owner 2026-11-02, on 0.75.2: "Sora's swings can knock the thrown scimitar away").
+  - KH1 (Checked (decomp + files)). Two attacks of types that meet (`0x140528CB8`; 0 meets 0) are resolved
+    both ways (`0x1402B4A20` → `0x1402B4BC0`). Neither row is a guard type, so there is no front cone
+    (`0x1402B4640` tests it only for types 1..4).
+  - The blade's row `0x1CC` is type 0, priority 0. Sora's side gets nothing: no record, since the other side's
+    priority is 0. The blade's side gets clash bit 0x10 (0x20 at 40+ under), and its owner becomes the swinger
+    (a projectile, `+0x30 & 0x400`).
+  - Its child script hears `+4 & 0x30` (`ex_2090_00.bd` `0x1A0`). It then:
+    - turns back with the random tilt (`0x1B8..0x222`);
+    - fades over 60 frames (`sys 26`) and gives its model a random spin;
+    - slides with its speed × 0.9 a frame for 60 frames, without moving its attack again (`0x282..0x2CC`);
+    - ends (`sys 97`).
+  - Here (no new hook, no per-frame code of its own):
+    - In the swing's pair test (`win::attack::pair_dispatch`, while Sora's KH1 swing is live), the same
+      spheres meet each flying blade's own Re:CoM collision shape through Re:CoM's overlap tests
+      (`0x1401777E0` / `0x140176FA0`).
+    - A blade they meet gets `Thrown::repel` (KH1's three draws from a stream of our own: Assumption), its
+      Re:CoM attack off (`0x14014DE80`, `coll+0x10 = 0`) and its life raised to outlast the slide.
+    - Re:CoM's guard spark and clink play at the blade (`"always"` 0xB, actor 0, as `0x140182260`).
+    - Our flight step slides it, and Re:CoM's life ends it after 60 frames.
+    - One flag test per live swing frame while no blade flies.
+  - Not KH1's:
+    - Re:CoM's spark for KH1's clash effect (`0x1402AE650` 10 / 11);
+    - Re:CoM's end fade (1000 ticks) after the slide, for KH1's 60-frame fade during it;
+    - no model spin (the look is a Re:CoM effect);
+    - Sora's swing keeps hitting after the clash. KH1 marks it clashed (`+4 |= 0x10`); that a clashed
+      swing meets no body afterwards is an Assumption, not built.
+  - A blade Sora's Guard turned back is left to Re:CoM (decision 28).
 - Per frame: one KH1 flight step per flying blade (at most 8); nothing otherwise.
 
 #### What the asset step writes
@@ -1560,8 +1588,7 @@ KH1's AI` in a Bandit battle, and per Bandit `bandit: eNNN: KH1 world Some(8) (R
   (Agrabah rooms 2 / 3–6 / 9–11 / 17, the sitting Bandits, the rooftop heights), the head look, the effects, the
   blade's part mask (`sys 98` / `99`: the Bandit's held blade stays drawn while the thrown one flies), the fade-in
   (no Re:CoM alpha), flag 0x80 at the appearance.
-- **Not built (guard / blade):** Sora's swing knocking the flying blade away (KH1 turns a 0x400 projectile on a swing
-  clash; Re:CoM has no attack-vs-attack test for bullets); KH1's repel slide after a Guard (decision 28's turn-back
+- **Not built (guard / blade):** KH1's repel slide after a Guard (decision 28's turn-back
   instead); walls end the blade (Re:CoM's flag `0x100`; KH1's blade ignores walls); turned guard cones (none here).
 
 #### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; an Agrabah Bandit battle)
@@ -1579,7 +1606,8 @@ KH1's AI` in a Bandit battle, and per Bandit `bandit: eNNN: KH1 world Some(8) (R
 6. Swing into its spin from the front: Sora's strong recoil (0x6F, about a metre back; in the air 0x70, a small hop);
    the Bandit plays 213. Re:CoM's "Guard" popup shows over it (not KH1: owner question).
 7. Guard its slash or leap: KH1's recoil 205; its spin: 213. Guard the thrown blade: it flies back and hits the
-   Bandit. Let the blade hit you: Re:CoM's damage for the Bandit's whirl.
+   Bandit. Swing at a flying blade: it bounces back off the Keyblade with a spark and slides away, harmless, for
+   about 1 s. Over a Bandit that blocks, no Re:CoM "Guard" popup shows. Let the blade hit you: Re:CoM's damage for the Bandit's whirl.
 8. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
 9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Bandits (no guard, no blade).
 
@@ -1596,7 +1624,9 @@ past you and come back; Guard a thrown blade; swing at a flying blade.
 #### Bandit owner questions
 
 Answered 2026-11-02: 1 (a) the bullet with a Re:CoM effect; 2 (b) the shared enemy-guard step first (both built).
-New (the guard and the blade, not answered yet):
+Answered 2026-11-02 (on 0.75.2): 5 (b) hide the popup (built); 6 (a) keep Re:CoM's body guard; 7 (b) swings knock the
+blade away (built); 8 (a) keep the whirl's power.
+The questions as asked (0.75.2):
 
 5. **Re:CoM's "Guard" popup over a blocking enemy**: Re:CoM's hit handler shows it for every guarded hit (its spark
    and popup kind 3); KH1 shows only the clash. (a) Keep it, (b) hide it for KH1 enemies (skip the popup in the

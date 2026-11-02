@@ -1069,7 +1069,7 @@ unsafe fn release_gravity(pl: usize, c: &CastStart) -> Option<u32> {
 
 /// A shot's attack switched off for good (Re:CoM's own "off", vtable +8, as 7.6's bolts: the bullet
 /// init tests the held flag before it fills the count).
-unsafe fn hold_off(bullet: usize) {
+pub(super) unsafe fn hold_off(bullet: usize) {
     let c: usize = rd(bullet + 0x2A8);
     if c == 0 {
         return;

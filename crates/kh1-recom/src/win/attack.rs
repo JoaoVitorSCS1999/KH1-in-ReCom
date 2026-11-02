@@ -565,24 +565,7 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
             let bshape: usize = rd(node + 0x18);
             let flags = if bshape == 0 { 0xFFu8 } else { rd::<u32>(bshape + 100) as u8 };
             if flags & 0xE != 6 && bshape != 0 {
-                let kind: u32 = rd(bshape + 0x60);
-                let mut hit = false;
-                for &(c, r) in &spheres {
-                    for o4 in [0x10, 0x20] {
-                        wr(fp + o4, [c.x, c.y, c.z, 1.0f32]);
-                    }
-                    wr(fp + 0x70, r);
-                    wr(fp + 0x74, 0f32);
-                    hit = match kind {
-                        2 => func::<PrimFn>(SPHERE_SPHERE)(ctx, bshape, fp, 0) != 0,
-                        4 | 5 => func::<PrimFn>(SPHERE_COLUMN)(ctx, bshape, fp, 0) != 0,
-                        _ => false,
-                    };
-                    if hit {
-                        break;
-                    }
-                }
-                if hit {
+                if spheres_meet(ctx, fp, bshape, &spheres) {
                     // The contact the apply reads from the attack's shape (`+0x30..+0x60`).
                     std::ptr::copy_nonoverlapping((fp + 0x30) as *const u8, (shape + 0x30) as *mut u8, 0x30);
                     // M11, the shared enemy-guard step: a body under a KH1 enemy's guard row guards
@@ -612,7 +595,42 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
         }
         node = next;
     }
+    // M11: the swing against the KH1 enemies' flying thrown objects (KH1's attack-vs-attack test,
+    // `0x1402B4A20`), with the same spheres and Re:CoM's primitives (`super::kh1_thrown`).
+    super::kh1_thrown::swing_at_blades(|bshape| spheres_meet(ctx, fp, bshape, &spheres));
     result
+}
+
+/// Whether one of the swing's spheres meets Re:CoM shape `bshape` (a sphere: kind 2; a column: 4 /
+/// 5), through Re:CoM's own overlap tests on the fake sphere `fp` (its contact left in `fp + 0x30`).
+unsafe fn spheres_meet(ctx: usize, fp: usize, bshape: usize, spheres: &[(Vec3, f32)]) -> bool {
+    let kind: u32 = rd(bshape + 0x60);
+    for &(c, r) in spheres {
+        for o4 in [0x10, 0x20] {
+            wr(fp + o4, [c.x, c.y, c.z, 1.0f32]);
+        }
+        wr(fp + 0x70, r);
+        wr(fp + 0x74, 0f32);
+        let hit = match kind {
+            2 => func::<PrimFn>(SPHERE_SPHERE)(ctx, bshape, fp, 0) != 0,
+            4 | 5 => func::<PrimFn>(SPHERE_COLUMN)(ctx, bshape, fp, 0) != 0,
+            _ => false,
+        };
+        if hit {
+            return true;
+        }
+    }
+    false
+}
+
+/// Re:CoM's guard spark and clink at `point` with no actor (as `0x140182260` plays it for an
+/// enemy's guard: actor 0); nothing when the `"always"` name isn't where it was.
+pub(super) unsafe fn spark_at(point: [f32; 4]) {
+    let name: usize = rd(base() + EFFECT_ALWAYS as usize);
+    if name == 0 || std::slice::from_raw_parts(name as *const u8, 7) != b"always\0" {
+        return;
+    }
+    func::<EffectFn>(EFFECT_AT)(0, name, GUARD_SPARK, &point, 0, 0.0);
 }
 
 /// M11, the shared enemy-guard step: Sora's swing met a KH1 enemy's guard row (the player, and
