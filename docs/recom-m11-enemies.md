@@ -440,6 +440,28 @@ bodies covers their bodies; each is a new script (1170–1710 listing lines) to 
 | Darkball | `ex_2280.bd` (`0x338`) | `CEnemyDarkball` `0x14018D5D0` / `0x140189349` 0xCD0 / `0x14053B7A8` | 2 (`ex_2280_sk`, a whole-clip window and a 1.3 m one) | `sys 86`, `sys 74`, `sys1.0` / `sys1.3` |
 | Wyvern | `ex_2320.bd` (`0x378`) | `CEnemyWyvern` `0x140195ED0` / `0x140189373` **0xCF0** / `0x140555DC8` | 3 (header to `0x10C`) | turn rate changed 19 times (`Body::turn` covers it), `sys 42`, an idle requested from frame 16 (`enemy::STARTS` covers it) |
 
+**Found in the second pass (2026-11-02).** Checked (exe + decomp + files) unless marked:
+
+- **Syscall table 1** (the scripts' `sys1.N`): the VM (`0x1402CC620`, op 11) takes `param[4] + mode × 8`; the
+  script context's array at `0x140529FA0` holds table 0 `0x140529180` and table 1 `0x1405752D0`.
+  `sys1.0(n)` = `0x140394D80`, a bare `ret` (a debug print of the state number: nothing to port);
+  `sys1.3(h)` = `0x140394DE0`: marks the child object of handle `h` for removal (`*(obj+0x10) = 1`) and
+  returns 0. `tools/kh1-ai-script.py` now reads both tables (argument counts were wrong for `sys1.*` before).
+- **Child objects** (`sys 94` → `0x1402BC030` → `0x14028F0A0(actor, idx, target, a, b)`): entry `idx` of the
+  model's sub-object table (`actor+0x13C`), the `.mdls` part 3 (absent in the Air Soldier's), which holds its
+  own script:
+  - **Search Ghost** `ex_2230_00.bd` (0x400 bytes, entry `0x202`): **not a projectile.** While the parent
+    plays its idle (0) or its search motion (202), it makes an effect on the parent (`sys 109(parent, 7, 45)`,
+    removed by `sys 97`) and each frame looks along bone code 4141 (`sys 19`, `sys 115(…, 45, …)`): a party
+    member within 300 inside a cone (`sys 100` against `sys 3(35)`, 35°) becomes the parent's target (`sys 49`).
+    So it ports as part of the Search Ghost's behaviour (a cone test against Sora) plus, for the look, a Re:CoM
+    effect on the body (which effect: open). No bullet needed.
+  - **Gargoyle** `ex_2220_00.bd` (0xC00 bytes, entry `0xB22`, made with the parent's rows `0x3FC` / `0x46C` and
+    request 219 at `0x1B24`): a separate object that moves on its own (`sys 15` / `16` / `18` / `24` / `26` /
+    `39` / `119` / `120`, not read yet) and makes attack rows on the parent (`0x234`, `0x868`): a moving hit,
+    so it needs Re:CoM's own bullets (`docs/recom-m7-magic.md`'s shots) or the parent's own attack records,
+    after its movement syscalls are read. Not decided: options in the report / owner question 8.
+
 Every ctor starts `40 53 48 83 EC 20 45 33` (Checked (exe)). The Air Soldier's shared routines (`0x2F48`, `0x2FBE`,
 `0x2FA0`, `0x2FF4`, `0x307A`, `0x30B6`, `0x34C2`, `0x35E6`, …) recur byte for byte in all five (`.bd` scan).
 
@@ -579,3 +601,7 @@ The questions as asked (0.68.0):
 7. **The Air Soldier's chest rows**: each KH1 attack also makes a 50-unit row on its chest with reaction kind 0
    (no reaction on Sora; it looks like a body block). Not made. (a) Keep it out, (b) make it a Re:CoM record
    (it would hit with Re:CoM's reaction), (c) research its KH1 effect first.
+8. **The Gargoyle's child object** (`ex_2220_00.bd`, a moving hit made with its attack 219): (a) a Re:CoM bullet
+   (`CBullet` / `CHomingBullet`, as KH1 magic's shots) moved by KH1's child script's numbers, (b) the hit
+   kept on the Gargoyle's own body as an attack record (only if the child turns out to stay on the parent),
+   (c) leave the Gargoyle on Re:CoM's behaviour for now. To be chosen once its movement syscalls are read.
