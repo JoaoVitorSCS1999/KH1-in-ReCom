@@ -184,6 +184,30 @@ struct Runtime {
     /// clear: no action of ours waiting and no reaction). The behaviour hears it as the record's
     /// `+0x24` (`Behaviour::set_hit_count`; M11, the Bandit).
     hits: u16,
+    /// The shared enemy-guard step: the guard row the behaviour made last (`Cmd::Guard`), and
+    /// whether its bodies carry Re:CoM's guard flag now ([`guard_bodies`]).
+    guard: Option<GuardOn>,
+    guarded: bool,
+    /// Re:CoM's body guard fields before ours (per hurt part: `+0x9C & 1`, `+0x8C`, `+0xB0`).
+    guard_saved: Vec<(u32, u32, f32)>,
+    /// The enemy's side of the last clash on its guard row (KH1's kind 6 / 7 from the swing's
+    /// priority, `pair_dispatch`), until its guard event plays it.
+    guard_kind: Option<u8>,
+    /// A guard row's clash: its recoil and KH1's kind, played by the next state 11 begin.
+    clash_recoil: Option<(u16, u8)>,
+}
+
+/// A guard row made with a request (`kh1_core::enemy::Cmd::Guard`): KH1's row lives while that
+/// request plays (it takes the owner's request at its first tick and ends when it changes,
+/// `0x1402B47A0`) and is on while its HIT slot is.
+#[derive(Clone, Copy, Debug)]
+struct GuardOn {
+    row: u8,
+    request: u16,
+    /// The request has played since the row was made.
+    seen: bool,
+    /// KH1 frames since it was made (a request that never plays drops it: `ce::watchdog::START_LIMIT`).
+    age: f32,
 }
 
 // SAFETY: a runtime (its behaviour holds `Rc`s that never leave it) is only touched under `RT`'s
@@ -278,6 +302,9 @@ pub unsafe fn prepare(bs: usize, k: usize, manifest: Option<&std::path::Path>) -
     set(ce::begin_slot(state::DEFEAT), defeat_begin as *const () as usize);
     set(ce::step_slot(state::DEFEAT), defeat_step as *const () as usize);
     set(ce::THINK_SLOT, think_none as *const () as usize);
+    // The shared enemy-guard step: Re:CoM's hit handler calls `+0x3D8` when a hit met a guarded body
+    // (`0x14017F7E0`: the guard spark, popup 3, then this; `CBattleEnemy`'s is a no-op `0x140181600`).
+    set(GUARD_EVENT_SLOT, guard_event as *const () as usize);
     let leaked: &'static mut [usize] = Box::leak(copy.into_boxed_slice());
     let at = leaked.as_ptr() as usize + 8;
     // The allocation size (all-or-nothing with the rest: a failed write leaves everything off).
@@ -388,6 +415,11 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             floor: None,
             base_scale: None,
             hits: 0,
+            guard: None,
+            guarded: false,
+            guard_saved: Vec::new(),
+            guard_kind: None,
+            clash_recoil: None,
         });
         Some(v.len() - 1)
     })();
@@ -699,6 +731,18 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
                 play_at(en, rt, request, blend, start);
             }
         }
+        Cmd::Guard(Some((row, request))) => {
+            let m = manifest(rt.class);
+            match m.guards.get(row as usize) {
+                Some(g) if g.half_angle().is_some() => rt.guard = Some(GuardOn { row, request, seen: false, age: 0.0 }),
+                Some(g) => line(rt.class, || format!("{}: guard row {} has a turned cone ({} rad): Re:CoM's body guard can't hold it; not built", rd::<u32>(en + e::ID), g.name, g.turn)),
+                None => line(rt.class, || format!("{}: no guard row {row} in the manifest", rd::<u32>(en + e::ID))),
+            }
+        }
+        Cmd::Guard(None) => {
+            rt.guard = None;
+            guard_bodies(en, rt, None);
+        }
         Cmd::Yaw(_) | Cmd::Jump { .. } | Cmd::Target(_) | Cmd::State(_) => {}
     }
     if ce::logged(c) {
@@ -833,6 +877,7 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         }
     }
     body_step(en, rt, step, pos);
+    guard_step(en, rt, step);
     // KH1's hit counter goes back to 0 at the end of an update with no action playing (actor flag
     // 4: an action of ours the AI waits on, or a reaction).
     if rt.reaction.is_none() && rt.action.is_none_or(|a| a.steered) {
@@ -1081,6 +1126,9 @@ unsafe fn take_over(en: usize, rt: &mut Runtime) {
     rt.queued = None;
     rt.recom_flinch = false;
     rt.current = None;
+    rt.guard = None;
+    rt.clash_recoil = None;
+    guard_bodies(en, rt, None);
 }
 
 /// State 1 step: KH1's frame with the behaviour.
@@ -1265,6 +1313,18 @@ unsafe fn start_reaction(en: usize, rt: &mut Runtime, hit: Option<Hit>) -> bool 
     let y = crate::units::to_kh1(rd_vec(mover(en) + mv::POS)).y;
     let airborne = rt.ai.body().airborne();
     end_action(rt);
+    if let Some((recoil, kind)) = rt.clash_recoil.take() {
+        // The shared enemy-guard step: its guard row met Sora's swing (`0x1402B4BC0`): KH1's clash
+        // (`0x1402B8E10` cases 6 / 7 → `0x1402B9140`: the row's `+0x40`).
+        rt.clash = None;
+        let s = ke::react::clash(recoil, airborne, &mut rt.ai.body(), y, c);
+        rt.queued = None;
+        play(en, rt, s.request, 0.0);
+        rt.queued = Some((s.then, c.get("attack_blend")));
+        rt.reaction = Some(if airborne { Phase::Air { base: None, behind: false } } else { Phase::Motion });
+        line(rt.class, || format!("e{}: its guard row clashed (kind {kind}): recoil {}", rd::<u32>(en + e::ID), s.request));
+        return true;
+    }
     if let Some(a) = rt.clash.take() {
         let names = CLASSES[rt.class].attack_names;
         let aname = names.get(a as usize).copied().unwrap_or("?");
@@ -1376,13 +1436,16 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         if let Some(h) = hit {
             rt.ai.set_hit_kind(h.kind);
         }
+        if let Some((_, k)) = rt.clash_recoil {
+            rt.ai.set_hit_kind(k);
+        }
         rt.hits = rt.hits.saturating_add(1);
         rt.ai.set_hit_count(rt.hits);
-        let clash = rt.clash.is_some();
+        let clash = rt.clash.is_some() || rt.clash_recoil.is_some();
         rt.ai.on_hit(if clash { HitNews::Clash } else { HitNews::Damage });
         // The handler ran before the reaction and may have rewritten the record's kind.
         let hit = if clash { hit } else { hit.map(|h| Hit { kind: rt.ai.reaction_kind(h.kind), ..h }) };
-        if rt.clash.is_none() && !rt.ai.keeps_reaction() {
+        if !clash && !rt.ai.keeps_reaction() {
             // KH1's hit handler zeroed the reaction kind (M11, the Darkball's armour): no reaction.
             // A reaction already running carries on in this state; otherwise back to state 1 (Re:CoM's
             // handler has already cut the attack it hit: the AI goes on).
@@ -1483,6 +1546,9 @@ pub unsafe extern "win64" fn defeat_begin(en: usize) {
         // KH1's hit handler rewrites the killing hit's kind too (it runs before the reaction).
         let hit = hit.map(|h| Hit { kind: rt.ai.reaction_kind(h.kind), ..h });
         rt.dead = true;
+        rt.guard = None;
+        rt.clash_recoil = None;
+        guard_bodies(en, rt, None);
         rt.recom_flinch = false;
         rt.recom_state = false;
         if !start_reaction(en, rt, hit) {
@@ -1501,6 +1567,222 @@ pub unsafe extern "win64" fn defeat_step(en: usize) {
         tick(en, rt, false)
     });
     call_original(en, ce::step_slot(state::DEFEAT));
+}
+
+// ---------------------------------------------------------------------------------------------
+// The shared enemy-guard step (M11; `docs/recom-m11-enemies.md` § Enemy guard).
+// ---------------------------------------------------------------------------------------------
+
+/// Re:CoM's enemy vtable slot the hit handler calls for a hit that met a guarded body
+/// (`0x14017F7E0`, the `+8 & 0x18` branch: after the guard spark `0x140182260` and popup 3,
+/// `call [rax+0x3D8]`; its other callers: none found). Checked (decomp).
+const GUARD_EVENT_SLOT: usize = 0x3D8;
+/// Re:CoM's body (`CCollBody`, a hurt part: `enemy+0xF8` → `+0x40`, 0x120 each, count `+0x38`) guard
+/// fields its hit apply `0x14016F1C0` reads: `+0x9C` bit 0 the guard, `+0x8C` the elements it guards
+/// (`1 << attack +0x50`), `+0xB0` its half angle about the owner's facing (to the attack's `+0x60`); the
+/// body ctor's defaults all elements and π (`0x14016F820`). A guarded hit: result 2, no damage, the
+/// body's `+0x9C |= 0x20` (the hit handler's guard branch). Checked (decomp).
+mod body {
+    pub const FLAGS: usize = 0x9C;
+    pub const GUARD: u32 = 1;
+    pub const ELEMENTS: usize = 0x8C;
+    pub const HALF_ANGLE: usize = 0xB0;
+    pub const OWNER: usize = 0x20;
+    pub const STRIDE: usize = 0x120;
+}
+/// The elements a KH1 enemy's guard row keeps out of Re:CoM's attacks: the physical (0). KH1's type
+/// rule decides for Sora's KH1 swings (`guard_for_swing`); every other attack reaching the apply is
+/// Re:CoM's (our spells carry Re:CoM's spell attributes 1..6, `win::magic::RECOM_ATTR`, KH1 types 5 / 6:
+/// a type-2 row meets neither). Assumption: Re:CoM's other physical attacks (a turned-back shot, a
+/// summon) count as KH1's type 0.
+const GUARD_ELEMENTS: u32 = 1;
+
+/// How many KH1 enemies carry the guard flag now (the per-swing and per-frame checks return at once
+/// while it is 0).
+static GUARDED: AtomicUsize = AtomicUsize::new(0);
+
+/// The enemy's hurt parts.
+unsafe fn parts(en: usize) -> Vec<usize> {
+    let info: usize = rd(en + e::HIT_INFO);
+    if info == 0 {
+        return Vec::new();
+    }
+    let arr: usize = rd(info + hi::PARTS);
+    let n: i32 = rd(info + hi::COUNT);
+    if arr == 0 {
+        return Vec::new();
+    }
+    (0..n.clamp(0, 32) as usize).map(|i| arr + i * body::STRIDE).collect()
+}
+
+/// Re:CoM's own body guard on every hurt part (`half`: the row's half angle), or back to what the
+/// parts held before.
+unsafe fn guard_bodies(en: usize, rt: &mut Runtime, half: Option<f32>) {
+    match half {
+        Some(h) if !rt.guarded => {
+            rt.guard_saved = parts(en).iter().map(|&p| (rd::<u32>(p + body::FLAGS) & body::GUARD, rd::<u32>(p + body::ELEMENTS), rd::<f32>(p + body::HALF_ANGLE))).collect();
+            for p in parts(en) {
+                wr(p + body::FLAGS, rd::<u32>(p + body::FLAGS) | body::GUARD);
+                wr(p + body::ELEMENTS, GUARD_ELEMENTS);
+                wr(p + body::HALF_ANGLE, h);
+            }
+            rt.guarded = true;
+            GUARDED.fetch_add(1, Ordering::Relaxed);
+        }
+        None if rt.guarded => {
+            for (p, &(g, el, a)) in parts(en).into_iter().zip(&rt.guard_saved) {
+                wr(p + body::FLAGS, rd::<u32>(p + body::FLAGS) & !body::GUARD | g);
+                wr(p + body::ELEMENTS, el);
+                wr(p + body::HALF_ANGLE, a);
+            }
+            rt.guard_saved.clear();
+            rt.guarded = false;
+            let _ = GUARDED.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
+        }
+        _ => {}
+    }
+}
+
+/// One KH1 frame of the guard row: it lives while its request plays (ends once another plays, or
+/// when its request never plays), and is on while its HIT slot is (KH1 frames of Re:CoM's motion clock).
+unsafe fn guard_step(en: usize, rt: &mut Runtime, step: f32) {
+    let Some(mut g) = rt.guard else {
+        guard_bodies(en, rt, None);
+        return;
+    };
+    let playing = rt.current == Some(g.request);
+    if playing {
+        g.seen = true;
+    } else if g.seen || g.age >= ce::watchdog::START_LIMIT {
+        rt.guard = None;
+        guard_bodies(en, rt, None);
+        return;
+    }
+    g.age += step;
+    rt.guard = Some(g);
+    let m = manifest(rt.class);
+    let Some(row) = m.guards.get(g.row as usize) else { return };
+    let on = playing && row.live(g.request, crate::units::units_to_frames(clock(en)));
+    guard_bodies(en, rt, if on { row.half_angle() } else { None });
+}
+
+/// `win::attack`'s enemy-hit wrapper, each frame for each enemy before Re:CoM's hit handler: a KH1
+/// enemy whose guard is on while a state Re:CoM owns runs (Stop, a stun, freeze: our states' steps
+/// don't run, so its row's request can't be watched) drops its guard: KH1's statuses end the action
+/// and its rows with it.
+pub(super) unsafe fn guard_watch(en: usize) {
+    if GUARDED.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    let Some(k) = ours(en) else { return };
+    let st = crate::guard::state_index(en, rd(en + e::STATE)).map(|s| s as i32);
+    if st.is_some_and(|s| ce::replaced_states(CLASSES[k]).contains(&s)) {
+        return;
+    }
+    with_rt(en, |rt| {
+        if rt.guarded {
+            rt.guard = None;
+            guard_bodies(en, rt, None);
+            line(rt.class, || format!("e{}: Re:CoM state {st:?} runs: its guard row ends", rd::<u32>(en + e::ID)));
+        }
+    });
+}
+
+/// What `pair_dispatch` needs of a guarded body a KH1 swing touched.
+pub(super) struct SwingGuard {
+    /// The guarding enemy.
+    enemy: usize,
+    /// The row's clash type and priority.
+    clash_type: u32,
+    priority: i32,
+    /// KH1's types meet (`0x140528CB8`): Re:CoM's apply then guards it whatever its element.
+    pub meets: bool,
+    /// The body's fields to put back after the apply.
+    saved: (u32, u32),
+    body: usize,
+    /// Sora's side of the clash, filled by [`guard_after_swing`].
+    pub sora: Option<(u8, i32)>,
+}
+
+/// Before Re:CoM's apply of a KH1 swing (type `kind`) on body `node`: when it is a hurt part of a KH1
+/// enemy whose guard row is on, the apply guards it only if KH1's types meet (else the guard bit is
+/// off for the call), and then for the swing's element (`coll+0x50`, whatever the Damage setting
+/// gave it). None (nothing changed) otherwise.
+pub(super) unsafe fn guard_for_swing(node: usize, coll: usize, kind: u32) -> Option<SwingGuard> {
+    if GUARDED.load(Ordering::Relaxed) == 0 {
+        return None;
+    }
+    let owner: u32 = rd(node + body::OWNER);
+    let en = func::<HandleFn>(f::HANDLE_OBJ)(owner);
+    if en == 0 {
+        return None;
+    }
+    ours(en)?;
+    let (clash_type, priority) = with_rt(en, |rt| {
+        let g = rt.guard.filter(|_| rt.guarded)?;
+        let row = manifest(rt.class).guards.get(g.row as usize)?;
+        Some((row.clash_type, row.priority))
+    })??;
+    let meets = ke::guard::meets(kind, clash_type);
+    let saved = (rd::<u32>(node + body::FLAGS), rd::<u32>(node + body::ELEMENTS));
+    if meets {
+        let el: u32 = rd(coll + crate::guard::coll::ELEMENT);
+        wr(node + body::ELEMENTS, saved.1 | 1u32.checked_shl(el).unwrap_or(0));
+    } else {
+        wr(node + body::FLAGS, saved.0 & !body::GUARD);
+    }
+    Some(SwingGuard { enemy: en, clash_type, priority, meets, saved, body: node, sora: None })
+}
+
+/// After the apply (`r`): the body's fields back; when it guarded (2), KH1's clash for both sides
+/// (`0x1402B4BC0` both orders): Sora's kind and difference into `g.sora`, the enemy's kind kept for
+/// its guard event.
+pub(super) unsafe fn guard_after_swing(g: &mut SwingGuard, r: i32, kind: u32, priority: i32) {
+    wr(g.body + body::FLAGS, (rd::<u32>(g.body + body::FLAGS) & !body::GUARD) | (g.saved.0 & body::GUARD));
+    wr(g.body + body::ELEMENTS, g.saved.1);
+    if r != 2 || !g.meets {
+        return;
+    }
+    let sora = ke::guard::resolve(kind, priority, g.priority);
+    let enemy = ke::guard::resolve(g.clash_type, g.priority, priority);
+    if let ke::guard::Side::Clash { kind, diff } = sora {
+        g.sora = Some((kind, diff));
+    }
+    let en = g.enemy;
+    with_rt(en, |rt| {
+        rt.guard_kind = match enemy {
+            ke::guard::Side::Clash { kind, .. } => Some(kind),
+            _ => None,
+        };
+        let k = rt.class;
+        line(k, || format!("e{}: its guard row stopped Sora's swing (priority {priority} vs {}): Sora {sora:?}, it {enemy:?}", rd::<u32>(en + e::ID), g.priority));
+    });
+}
+
+/// The guard event (vtable `+0x3D8`, Re:CoM's hit handler on a guarded hit): a KH1 enemy whose guard
+/// row is on plays KH1's clash (its row's recoil through our state 11; its script hears the clash);
+/// its row ends (KH1: a clashed row meets nothing more, `+4 & 0x30`). Anything else: Re:CoM's slot.
+pub unsafe extern "win64" fn guard_event(en: usize) {
+    let r = with_rt(en, |rt| {
+        let g = rt.guard.filter(|_| rt.guarded)?;
+        let row = manifest(rt.class).guards.get(g.row as usize)?;
+        // KH1's kind for the enemy (`pair_dispatch`'s), 6 for any other attacker (a Re:CoM attack has
+        // no KH1 priority).
+        let kind = rt.guard_kind.take().unwrap_or(6);
+        rt.clash_recoil = Some((row.recoil, kind));
+        rt.guard = None;
+        guard_bodies(en, rt, None);
+        let in_attack = rt.action.is_some_and(|a| a.attack.is_some() && rt.action_playing);
+        let (k, name) = (rt.class, row.name.clone());
+        line(k, || format!("e{}: guard event on its {name} row: KH1's clash (kind {kind}), recoil {}", rd::<u32>(en + e::ID), row.recoil));
+        Some(in_attack)
+    });
+    match r.flatten() {
+        // Re:CoM's attack end with state 11 next (bit 0 off), as a Guard block of its attack.
+        Some(true) => func::<EndFn>(f::ATTACK_END)(en, crate::battle::state_address(en, state::FLINCH), 0),
+        Some(false) => wr(en + e::NEXT, crate::battle::state_address(en, state::FLINCH)),
+        None => call_original(en, GUARD_EVENT_SLOT),
+    }
 }
 
 /// `super::guard`: Sora's Guard blocked this enemy's attack. A KH1 enemy plays KH1's clash recoil

@@ -209,6 +209,78 @@ Re:CoM's state code, `0x14017EB80`, `0x14017EED0`, `0x140198600`); their clips h
 actor (Air Soldier: `ex_2160_sk` at y 0.614 in `e015_001` and in KH1's idle, Checked (files)), so Re:CoM's
 fliers float low; at Combat = KH1 they fly at KH1's heights (the script's own targets).
 
+### Enemy guard (the shared enemy-guard step; owner 2026-11-02: Bandit question 2, option (b))
+
+KH1 enemies that block (the Bandit's stance and spin now; the Large Body's front and the Defender's shield next) do
+it with **guard-type attack rows**, not with a flag on their bodies. This step gives Re:CoM's engine KH1's rule
+through Re:CoM's own body guard, the one Sora's Guard already uses.
+
+**KH1's rule. Checked (decomp + exe), Steam addresses:**
+
+- An attack row's clash type is its object bits 17..19 (row `+0x38` low bits). Types 1..4 are guard types: 1, 2
+  and 4 never meet a hurt body; type 3 still does (`0x1402B3BE0`). Two attacks are tested against each other only
+  when the type table `0x140528CB8` = `1F 09 09 3F 29 18 00 00` has `table[b] & (1 << a)` (symmetric). A type-2 row
+  meets only types 0 and 3: Sora's swings (type 0) and nothing of magic (Fire / Blizzard / Thunder rows are types
+  5 / 6).
+- Front only: KH1 tests the cos of the angle between the enemy's facing (turned by row `+0x60`) and the attacker
+  against row `+0x64` (`0x1402B4640`). Both of the Bandit's rows have turn 0, cos 0: the front half (±90°).
+- A mode-2 row lives while its request plays and that motion's HIT slot is on (`0x1402B47A0`).
+- When two attacks meet, `0x1402B4BC0` runs both ways (`0x1402B4A20`). Nothing when the other side's priority is 0
+  or both are 98 or more; a side at 100 is never moved. Otherwise the lower side gets a clash record: kind 6, or
+  kind 7 when it is 40 or more under (`diff < −0x28`), with `diff` = its priority − the other's. A type 1 / 3 / 4 side
+  with the higher priority **repels** instead (`0x1402BF630`, flag 0x20): the Large Body and the Defender (not built:
+  see below). A type-2 side never repels. A projectile side (`+0x30 & 0x400`) is turned to the other side instead
+  of getting a record (not built: see below).
+- Sora (`0x14029BBD0`): on the ground kind 6 plays the recoil 0x6E (`0x14029D720`; pushed back by −diff × 2.5,
+  btltbl G+0x1C, when diff < 0), kind 7 the strong recoil 0x6F (`0x14029D5F0`, 64 frames, 118 cm root travel back);
+  in the air either plays 0x70 (`0x14029D510`: hop 20, back velocity diff / 100 × 40, at most 8, G+0x30 / G+0x34).
+  The swing ends, the combo counter `CB+0x41` drops by one, flag 0x80 for 8 frames. The Counterattack is offered
+  from frame 12 of 0x6E (`0x140294220`), as after a Guard.
+- The enemy: its script's hit handler hears the clash (kinds 6 / 7) and its row's recoil (`+0x40`) plays; a
+  clashed row meets nothing more (`+4 & 0x30`).
+
+**Re:CoM's side. Checked (decomp + exe):**
+
+- Re:CoM's hit apply `0x14016F1C0` guards a body (result 2) when the body's `CCollBody +0x9C` has bit value 1, the
+  attack's element is in `+0x8C`, and the attacker is within `+0xB0` (half angle) of the body's facing. It then
+  sets `+0x9C |= 0x20`, and the enemy hit handler plays Re:CoM's guard spark, the "Guard" popup (kind 3) and calls
+  vtable `+0x3D8` (`CBattleEnemy`'s is `ret 0`, `0x140181600`). Result 1 / 2 also mark `procAttackCollision +0x644`.
+  The flip bit (value 2, result 3) is not used: it makes Re:CoM run its own Sora flip action 0xD instead of KH1's
+  recoil.
+
+**The step (built):**
+
+| Part | Where | What |
+|---|---|---|
+| KH1's rule | `kh1-core` `enemy/guard.rs` | `MEETS` / `meets`, `resolve` (both sides' `Side`), `GuardRow` (the asset step's row: type, priority, recoil, turn / cos, windows per request), `live`, `half_angle`, `clash` |
+| Command | `kh1-core` `enemy/script.rs` | `Cmd::Guard(Some((row, request)))` turns a guard row on with its request, `Cmd::Guard(None)` off |
+| Asset step | `kh1-recom-assets` `enemy.rs` | `GUARDS` (per enemy: name, row offset, requests); `guard_rows` reads each row's type, priority, recoil and front cone from the player's script and its windows from the motions; the manifest's `"guards"` |
+| Manifest | `kh1-recom` `kh1_enemy.rs` | `Manifest::guards` (`parse_guards`: optional; types, priorities, recoil, windows checked) |
+| Runtime | `kh1-recom` `win/kh1_enemy.rs` | per enemy `GuardOn` (row, request, clock); each tick `guard_step` turns Re:CoM's guard on every hurt part (`+0x9C` bit 1, `+0x8C` physical, `+0xB0` = the row's half angle, Re:CoM's own values saved and put back) while the row's window is on, ends it when its request changes; `guard_watch` drops it when a Re:CoM state runs (Stop, stun); our vtable copy's `+0x3D8` = `guard_event` |
+| Sora's swings | `kh1-recom` `win/attack.rs` | in the pair-dispatch wrapper, around each KH1 swing's apply: `guard_for_swing` clears the guard bit when KH1's types don't meet, else adds the swing's element; `guard_after_swing` puts the fields back and, on result 2, resolves both sides (`resolve`) |
+| Sora's clash | `kh1-recom` `movement.rs` | `Host::take_swing_clash` → `Kh1Sora::swing_clash`: KH1's recoils above on Re:CoM's action rows (0x6E Re:CoM's `p001_081`; 0x6F / 0x70 appended rows, `rows::KH1_ONLY`), KH1's push, hop, flag 0x80, combo counter, `Event::SwingClashed` |
+| Enemy's clash | `win/kh1_enemy.rs` `guard_event` | the row's recoil and kind kept as `clash_recoil`; the row ends; the attack ends into our state 11 (or state 11 is next), which plays KH1's clash reaction (`react::clash`) and tells the script (its hit handler) |
+
+Per frame: nothing while no KH1 enemy is guarding (`GUARDED` = 0); one window test per guarding enemy; the swing
+wrapper's check only when a KH1 swing meets a body.
+
+**Differences from KH1 (known, kept):**
+
+- Shape: KH1 tests the guard row's own sphere (the Bandit's blade, 40); Re:CoM tests the enemy's hurt bodies. A
+  swing that reaches the body's front while the row is on is blocked even when it would have missed the blade
+  (the owner chose Re:CoM's body flag). Owner question below.
+- Angle: equal for cones without a turn (`turn` = 0; KH1's cos ≥ `c` = Re:CoM's ±acos(`c`)). A turned cone has no
+  Re:CoM field: refused with a log line (`guard row … not built`). None of the Bandit's.
+- Re:CoM's "Guard" popup shows over the enemy (its art: Assumption); KH1 shows none.
+- Elements: the guard keeps out the physical element only; KH1's type rule decides for Sora's swings. Our spells
+  carry Re:CoM's spell attributes (KH1's types 5 / 6 meet no type-2 row, so they land as in KH1). Assumption:
+  Re:CoM's other physical attacks (a turned-back shot, a summon) count as KH1's type 0.
+
+**For the Large Body and the Defender (not built):** their rows are types 1 / 4 with priorities above Sora's: KH1
+repels (`Side::Repels`: Sora gets the clash, the enemy goes on, no recoil on its side). `guard_event` then has to
+skip the enemy's recoil when its side is `Repels`; `resolve` already returns it. A turned cone (a shield held to one
+side) needs Re:CoM's `+0xB0` plus a facing offset Re:CoM does not have: research before porting.
+
 ## The Soldier
 
 ### KH1's side. Checked (files: `ex_2010.bd` disassembled; decomp: the VM `0x1402CC620` and syscalls)
@@ -1065,9 +1137,9 @@ counts are tested).
 
 ### The Bandit (built)
 
-Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Bandit yet. Three parts of
-KH1's Bandit are **not built** and wait for the owner (§ Bandit owner questions): the thrown blade, its block
-stance's block, the spin's repel.
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Bandit yet. The block
+stance's block and the spin's repel run on the shared enemy-guard step (§ Enemy guard), the thrown blade on a
+Re:CoM homing bullet (§ The Bandit's thrown scimitar) (owner 2026-11-02: questions 1 (a), 2 (b)).
 
 #### KH1's side. Checked (files: `ex_2090.bd` disassembled; decomp: the syscalls and engine functions named)
 
@@ -1097,8 +1169,8 @@ changes, `0x1402B2DC0` sets flags `1001b` = mode 2, `0x1402B47A0`):
 | slash | 200 (60 f, root) | `0x23C` (48 → 120 blade, 2.5 → 0, 40; 1) | [26, 38) | 205 | 0 |
 | spin | 210 (46 f) wind-up, 211 (40 f loop) ×4, 212 (94 f) | `0x2AC` on 211 (blade; 0), `0x31C` on 212 (blade; 0) | 211 [0, 16); 212 [0, 12), [34, 50) | 213 | 1 |
 | leap | 216 (60 f) crouch, 217 (20 f loop) flight, 218 (40 f, bit 16) | `0x3FC` (blade, 2.5 → 0, 40; 0), `0x38C` (blade, 0.3, 80; 1) on 217 | [0, 20) each | 205 | 1 |
-| throw | 201 (438 f, root): the blade leaves at 90, back at 380 | the child's row `0x1CC` (no bone, 70) | — | — | **not built** |
-| block stance | 230 (12 f), 231 (60 f loop) [60, 90) frames, 233 (16 f) | none: its blade row `0x15C` is guard-type | — | (232) | **not built** |
+| throw | 201 (438 f, root): the blade leaves at 90, back at 380 | the child's row `0x1CC` (no bone, 70) | the blade's flight | — | 1 (the blade, Assumption) |
+| block stance | 230 (12 f), 231 (60 f loop) [60, 90) frames, 233 (16 f) | none: its blade row `0x15C` is guard-type | guard: 230–233's HIT slot 0 | (232) | — (guard) |
 
 - **The spin** glides at the target (`sys 40` mode 2 at the stats block's `+0xC` = 4) through four rounds of 12 + 26
   frames (len − 2 − 12), each part ended off the ground; a round's landed hit ends the rounds (`wp+0x80`, the row's
@@ -1162,12 +1234,32 @@ moving lunge, nearest Re:CoM's charge; all its rows' `+0x3C` are 30, the slash's
   and that reaction's random draw; the host still chooses KH1's reaction first and replaces it, so the Powerwild draws
   one extra random number after its own launch (its later choices shift by one draw).
 
+#### The block stance and the spin's repel (the shared enemy-guard step)
+
+- Rows (Checked (files), the asset step reads them from the player's script and motions): the spin's body row
+  `0xEC` (type 2, priority 90, recoil 213, HIT slot 1: on in 210 frames 10–46, 211 0–40, 212 0–50) and the stance's
+  blade row `0x15C` (type 2, priority 30, recoil 232, HIT slot 0: on in 230 0–12, 231 0–60, 233 0–10); both turn 0,
+  cos 0 (the front half).
+- The behaviour sends `Cmd::Guard` with the row and its request after each of those plays (`bandit::Guard`); the
+  host ends the row when its request changes.
+- Against Sora's KH1 swing (type 0; priority = the row's + the Keyblade's, clamped 1..99, the Kingdom Key's 30):
+  - the stance (30): with the Kingdom Key both sides get kind 6, difference 0: Sora plays the recoil 0x6E (no push)
+    with the Counterattack offered, the Bandit plays 232; its hit handler then runs its counter: the back hop and
+    the throw (Checked (files): `0x367A` → `0x4FA`, the stance's flag);
+  - the spin (90): Sora gets kind 7 (60 under): the strong recoil 0x6F (in the air 0x70); the Bandit kind 6: 213
+    and its counter round.
+  - A Keyblade with a higher priority changes the kinds by KH1's rule (`enemy::guard::resolve`).
+- Magic is never blocked (KH1: types 5 / 6 meet no type-2 row). Hits from behind land (the front half only).
+
 #### What the asset step writes
 
 `ENEMY/0011/EN0011.ANN` (Re:CoM's 74 slots byte-identical, KH1's clips at 100 + entry), `EN0011.ASD` (Re:CoM's 2
 records kept, 6 added: slash 1, spin 1, spin end 2, leap 2), `EN0011.SES` (Re:CoM's 2 entries kept; the attack clips
-take their template's sounds at the hit window: Assumption), `kh1-bandit.json` (`kh1-enemy 1`, 117 numbers). Test
-`bandit::tests::builds_from_the_players_files`. In `mod.yml`:
+take their template's sounds at the hit window: Assumption), `kh1-bandit.json` (`kh1-enemy 1`, 117 numbers, the
+blade's 12 and the two guard rows). Test `bandit::tests::builds_from_the_players_files`. **Re-run the asset step for
+the guard and the blade:** only `kh1-bandit.json` changes (`EN0011.ANN` / `.ASD` / `.SES` are byte-identical); with an
+older `kh1-bandit.json` the DLL logs `… (an older asset step? run it again); Re:CoM's behaviour kept` and the
+Bandits play Re:CoM's AI. In `mod.yml`:
 
 ```yaml
 - {name: ENEMY/0011/EN0011.ANN, method: copy, source: [{name: ENEMY/0011/EN0011.ANN}]}
@@ -1188,25 +1280,41 @@ KH1's AI` in a Bandit battle, and per Bandit `bandit: eNNN: KH1 world Some(8) (R
   object's script (below).
 - **Checked (exe):** the class, its slots, the ctor, the factory size and call, KH1's world codes; every site (609
   byte sites, 176 pointer sites) against the Steam exe.
-- **Assumptions:** the leap's power (id 1); Re:CoM's battle floors are flat (`sys 89` from where it last stood); the
+- **Checked (exe), the guard and the blade:** Re:CoM's body guard in `0x14016F1C0` (`+0x9C` bit 1, `+0x8C`, `+0xB0`,
+  result 2, `+0x9C |= 0x20`), the hit handler's `+0x3D8` call, the bullet set-up as the Aquatank's, the Aero set's
+  name, the type table `0x140528CB8`, KH1's recoil numbers (btltbl G+0x1C / +0x30 / +0x34; motions 0x6F / 0x70 from
+  `xa_ex_0010.mset`); every site (782, pefile, 2026-11-02).
+- **Assumptions:** the leap's power (id 1); the blade's power (id 1), its look, its bone (`l_hand`), the sign of
+  its turn (Rodrigues about `dir × to_target`), Re:CoM's aim point for KH1's lock point 0, the Aero set loaded in
+  every battle; Re:CoM's other physical attacks as KH1's type 0 for the guard; Re:CoM's battle floors are flat (`sys 89` from where it last stood); the
   apex motion one frame late (as the Powerwild); seeds per enemy; record types 9 / 11 not told apart; Agrabah's
   rules in Re:CoM's Agrabah (decision 21's pairing; owner question 4); Re:CoM's sounds on the new clips.
 - **Not ported:** the leash and the fall-out death (KH1 removes it), the group leader's messages, KH1's room rules
   (Agrabah rooms 2 / 3–6 / 9–11 / 17, the sitting Bandits, the rooftop heights), the head look, the effects, the
-  blade's part mask, the fade-in (no Re:CoM alpha), flag 0x80 at the appearance.
+  blade's part mask (`sys 98` / `99`: the Bandit's held blade stays drawn while the thrown one flies), the fade-in
+  (no Re:CoM alpha), flag 0x80 at the appearance.
+- **Not built (guard / blade):** Sora's swing knocking the flying blade away (KH1 turns a 0x400 projectile on a swing
+  clash; Re:CoM has no attack-vs-attack test for bullets); KH1's repel slide after a Guard (decision 28's turn-back
+  instead); walls end the blade (Re:CoM's flag `0x100`; KH1's blade ignores walls); turned guard cones (none here).
 
 #### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; an Agrabah Bandit battle)
 
 1. Each Bandit plays KH1's appearance (69 twice, about 0.8 s), then wanders about where it stands.
 2. Within 15 m (or when Sora targets it, between its walks) it engages: close (< 2 m) back hops and spins or strafes
    and slashes; at 2–4 m it strafes, pauses, then runs in and slashes or leaps; far it runs in, sometimes leaps, and
-   sometimes plays the throw motion (no blade flies yet).
+   sometimes throws its blade: a small Aero-like whirl leaves its hand at about 1.5 s, flies at Sora, slows past 2 s,
+   comes back after him, and is gone at 5 s or when it hits.
 3. The leap: a crouch, then a dash through the air at Sora about head height that carries on past him, then a drop.
 4. Hit it: KH1's flinch / launch (a knock-back hit launches it); its counter: after the first hits of a combo the
-   block stance (it raises its blade; nothing is blocked yet), a slash or a back hop and the leap.
-5. Guard its slash or leap: KH1's recoil 205; its spin: 213.
-6. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
-7. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Bandits.
+   block stance (it raises its blade), a slash or a back hop and the leap.
+5. Swing at its block stance from the front (Kingdom Key): Sora bounces off (recoil 0x6E, Counterattack offered),
+   the Bandit plays 232, then back hops and throws. From behind the swing lands. A spell lands.
+6. Swing into its spin from the front: Sora's strong recoil (0x6F, about a metre back; in the air 0x70, a small hop);
+   the Bandit plays 213. Re:CoM's "Guard" popup shows over it (not KH1: owner question).
+7. Guard its slash or leap: KH1's recoil 205; its spin: 213. Guard the thrown blade: it flies back and hits the
+   Bandit. Let the blade hit you: Re:CoM's damage for the Bandit's whirl.
+8. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Bandits (no guard, no blade).
 
 Please send `kh1-recom.log` (`bandit:` lines) and an F9 trace.
 
@@ -1214,9 +1322,30 @@ Please send `kh1-recom.log` (`bandit:` lines) and an F9 trace.
 
 An Agrabah room with Bandits (the Main Street's): stand far 10 s; stand at 3 m 10 s; stand at 1.5 m 10 s; one swing;
 a full combo; a finisher (its launch); Guard a slash; Guard a spin; let it leap at you and hold still; kill one; and
-one fight in Olympus' cups (outside Agrabah: its follow-up rounds).
+one fight in Olympus' cups (outside Agrabah: its follow-up rounds). For the guard and the blade: swing at its block
+stance and its spin from the front and from behind (once on the ground, once in the air); let a thrown blade fly
+past you and come back; Guard a thrown blade; swing at a flying blade.
 
 #### Bandit owner questions
+
+Answered 2026-11-02: 1 (a) the bullet with a Re:CoM effect; 2 (b) the shared enemy-guard step first (both built).
+New (the guard and the blade, not answered yet):
+
+5. **Re:CoM's "Guard" popup over a blocking enemy**: Re:CoM's hit handler shows it for every guarded hit (its spark
+   and popup kind 3); KH1 shows only the clash. (a) Keep it, (b) hide it for KH1 enemies (skip the popup in the
+   guarded path; Re:CoM's own guarding enemies keep theirs).
+6. **The block's shape**: Re:CoM guards the hurt bodies' front half; KH1 blocks only swings that touch the guard
+   row's blade sphere (40). So a swing at the Bandit's legs or side-front bounces off here but lands in KH1.
+   (a) Keep Re:CoM's body guard (as chosen), (b) also test KH1's row sphere against the swing before the guard bit
+   is left on (one more test per swing on a guarding enemy, Re:CoM's own sphere test).
+7. **Swinging at the flying blade**: in KH1 a swing that meets it knocks it away (a projectile on a swing clash).
+   Re:CoM has no attack-vs-bullet test. (a) Leave it out (the blade flies through swings), (b) test Sora's KH1
+   blade against the bullet's sphere each frame it flies and turn it back as a Guard does (a per-frame test while
+   a blade flies).
+8. **The blade's power**: Re:CoM's Bandit has a slash (id 0) and a whirl (id 1). Chosen: the whirl's. (a) Keep, (b)
+   the slash's.
+
+The questions as asked (0.72.0):
 
 1. **The thrown blade** (`sys 94` → `ex_2090_00.bd`, row `0x1CC`). Checked (files + decomp): a separate object (`sys 15`;
    that it is the blade's model: Assumption) made at the Bandit's bone code 28, flying along the Bandit's facing at

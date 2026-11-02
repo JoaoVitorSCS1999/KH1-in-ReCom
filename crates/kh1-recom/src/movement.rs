@@ -252,6 +252,12 @@ pub trait Host {
     fn guard_blocked(&mut self) -> bool {
         false
     }
+    /// M11, the shared enemy-guard step: Sora's KH1 swing met a KH1 enemy's guard row since the last
+    /// frame (Re:CoM's apply guarded it on the enemy's body): KH1's clash kind for Sora (6 / 7) and
+    /// his swing's priority − the row's.
+    fn take_swing_clash(&mut self) -> Option<(u8, i32)> {
+        None
+    }
     /// No damage and no reaction (KH1's flag 0x80 after a guard success; Re:CoM `+0x418 & 1`).
     fn set_untouchable(&mut self, _on: bool) {}
     /// Re:CoM's guard spark and its clink at the guarded point (once per guard success).
@@ -472,10 +478,20 @@ pub struct Kh1Sora {
     /// `dodge_roll = recom` (the default; the host sets it): KH1's rule asks for the roll, Re:CoM's
     /// own roll runs ([`roll`]). False: KH1's roll on Re:CoM's action 6 (`dodge_roll = kh1`).
     pub recom_roll: bool,
+    /// KH1's push slide (`0x1402C7300` → `0x1402C7070`: direction, speed; × 0.8 a frame, ends under
+    /// 1): a ground kind-6 clash's push back (M11, the shared enemy-guard step).
+    pub push: Option<(Vec3, f32)>,
     /// KH1's rule asked for the roll this frame; Re:CoM's starts after the frame's commands, if
     /// none replaced it (as a command replaces KH1's roll).
     recom_roll_wanted: bool,
 }
+
+/// btltbl's globals the player's clash reactions read (Checked (files): `G+0x1C` 2.5, `G+0x30` 40,
+/// `G+0x34` 8; `0x14029D720`, `0x14029D510`) and the air recoil's hop (`0x1402AF960(actor, 20)`).
+pub const CLASH_PUSH: f32 = 2.5;
+pub const CLASH_AIR_BACK: f32 = 40.0;
+pub const CLASH_AIR_BACK_MAX: f32 = 8.0;
+pub const CLASH_AIR_HOP: f32 = 20.0;
 
 /// The facing Re:CoM holds may differ from ours by rounding; more than this means Re:CoM turned
 /// Sora (an event, a Re:CoM action) and its value wins.
@@ -540,6 +556,7 @@ impl Kh1Sora {
             recom_took: false,
             recom_roll: false,
             recom_roll_wanted: false,
+            push: None,
         }
     }
 
@@ -550,6 +567,7 @@ impl Kh1Sora {
     /// Takes over from whatever Re:CoM did last (first frame, or after a Re:CoM action such as a
     /// card, a hit or an event): KH1's state from Re:CoM's.
     pub fn resync(&mut self, h: &mut dyn Host, airborne: bool) {
+        self.push = None;
         let f = h.facing();
         self.facing = f;
         self.target_yaw = f;
@@ -638,7 +656,7 @@ impl Kh1Sora {
             state::GLIDE => a(GLIDE, 0, phase::GLIDE),
             _ if self.lock => match self.rec.head() {
                 request::DODGE_ROLL => a(AVOID, SUB_ROLL, phase::FALL),
-                crate::rows::GUARD | crate::rows::RECOIL => a(AVOID, SUB_GUARD, phase::NONE),
+                crate::rows::GUARD | crate::rows::RECOIL | crate::rows::STRONG_RECOIL => a(AVOID, SUB_GUARD, phase::NONE),
                 _ => a(JUMP, 0, phase::LAND),
             },
             _ => {
@@ -812,6 +830,17 @@ impl Kh1Sora {
         self.params.reach(&self.abilities)
     }
 
+    /// This frame's push slide (`0x1402C7070`: `dir × step × v`, then `v ×= 0.8^step`, ended under 1).
+    fn push_step(&mut self, step: f32) -> Vec3 {
+        let Some((dir, v)) = self.push.as_mut() else { return Vec3::ZERO };
+        let d = *dir * (step * *v);
+        *v *= 0.8f32.powf(step);
+        if *v < 1.0 {
+            self.push = None;
+        }
+        d
+    }
+
     pub(crate) fn hop(&mut self, h: f32, y: f32) {
         self.arc = Arc::hop(h, y, self.params.gravity);
         self.set_state(state::AIR);
@@ -873,6 +902,15 @@ impl Kh1Sora {
         if self.guard_on && h.guard_blocked() {
             self.guard_success(h, ev);
         }
+        // M11, the shared enemy-guard step: the swing met a KH1 enemy's guard row last frame (Re:CoM's
+        // apply guarded it on the enemy's body): KH1's clash on Sora (`0x1402B4BC0` → his kind 6 / 7).
+        if let Some((kind, diff)) = h.take_swing_clash() {
+            self.swing_clash(h, kind, diff, ev);
+            if self.yield_to_recom(&mut out) {
+                return out;
+            }
+        }
+        let ev = &mut out.events;
         // Re:CoM's battle is won (`player+0x428 & 4`): Re:CoM starts no card play from then on (its
         // card-use test `0x1401E9180` answers no), so no KH1 command starts either; what is
         // running ends as it does and Re:CoM's end action enters the win ([`Host::battle_won`]).
@@ -1009,7 +1047,7 @@ impl Kh1Sora {
         let disp = match self.state {
             state::AIR => self.air_move(step, pos),
             state::GLIDE => self.glide_move(h, step, &mut out.height),
-            _ => self.move_dir.flat().normalized() * (step * self.speed),
+            _ => self.move_dir.flat().normalized() * (step * self.speed) + self.push_step(step),
         };
         h.set_facing(self.facing);
         h.set_velocity(disp * (1.0 / step));
@@ -1128,6 +1166,55 @@ impl Kh1Sora {
         }
         h.guard_clink();
         ev.push(Event::GuardSucceeded);
+    }
+
+    /// KH1's clash on Sora's own attack (M11, the shared enemy-guard step): his swing met an enemy's
+    /// guard row and the row stopped it (`0x1402B4BC0`: a type-0 swing never wins against a guard row,
+    /// it gets a clash record, kind 7 when 40 or more under the row's priority, else 6; `diff` = his
+    /// swing's priority − the row's). The swing ends (Re:CoM's end action), then, by his state when the
+    /// record is read (`0x14029BBD0`):
+    /// - on the ground, kind 6 (`0x14029D720`): request 0x6E, the idle queued, flag 0x80 for 8 frames,
+    ///   CB+0x41 − 1, a push back of `−diff × G+0x1C × stats+0xC4` when `diff` < 0 (G+0x1C = 2.5,
+    ///   Sora's `+0xC4` = 1.0: `0x1402A5130`);
+    /// - on the ground, kind 7 (`0x14029D5F0`): request 0x6F (root travel back), the idle queued, flag
+    ///   0x80 for 8 frames, CB+0x41 − 1;
+    /// - in the air, either kind (`0x14029D510`): request 0x70, the fall queued, flag 0x80 for 8
+    ///   frames, a hop of 20 (`0x1402AF960`), the air velocity backward `max(diff / 100 × G+0x30,
+    ///   −G+0x34)` (40, 8) when `diff` < 0, else none.
+    ///
+    /// CB+0x50 gets the clash bit (0x10, 0x20 for kind 7) from the record (`0x1402B4BC0`), which offers
+    /// the Counterattack during a kind-6 recoil (`0x140294220` reads request 0x6E). Checked (decomp +
+    /// files: btltbl's globals).
+    pub(crate) fn swing_clash(&mut self, h: &mut dyn Host, kind: u8, diff: i32, ev: &mut Vec<Event>) {
+        self.leave_swing(h);
+        if self.recom_took {
+            return;
+        }
+        self.speed = 0.0;
+        self.clashed = true;
+        self.untouchable = true;
+        self.untouchable_counting = false;
+        self.untouchable_left = 8.0;
+        if self.state == state::AIR {
+            self.play(crate::rows::AIR_RECOIL as u32 | req::ACTION, 0.0);
+            self.append(req::RELEASE | request::FALL as u32, 0.0);
+            let y = h.pos().y;
+            self.hop(CLASH_AIR_HOP, y);
+            let back = if diff < 0 { (diff as f32 / 100.0 * CLASH_AIR_BACK).max(-CLASH_AIR_BACK_MAX) } else { 0.0 };
+            self.air_vel = Vec3::from_yaw(self.facing) * back;
+        } else {
+            let r = if kind == 7 { crate::rows::STRONG_RECOIL } else { crate::rows::RECOIL };
+            self.play(r as u32 | req::ACTION, 0.0);
+            self.append(req::RELEASE | request::IDLE as u32, 0.0);
+            self.combo_counter = self.combo_counter.saturating_sub(1);
+            if kind != 7 && diff < 0 {
+                // `0x1402C7300(actor, dir, p)`: a slide totalling p, speed p × −ln 0.8.
+                let p = -diff as f32 * CLASH_PUSH;
+                self.push = Some((-Vec3::from_yaw(self.facing), p * 0.223_143_55));
+            }
+        }
+        self.lock = true;
+        ev.push(Event::SwingClashed { kind });
     }
 
     /// `0x140294220`: the Counterattack is offered while the recoil 0x6E plays after a clash, with

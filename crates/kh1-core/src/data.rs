@@ -316,6 +316,14 @@ impl Moveset {
         // Entry 72, request 0x6E: the guard-success / repel recoil (60 frames, no travel). Checked
         // (files: free 28–60, combo window 28–60, trail 0–6).
         put(72, &[0x6E], MotionInfo::new(60.0).with_flag(Free, 28.0, inf).with_flag(ComboWindow, 28.0, 60.0).with_flag(Trail, 0.0, 6.0));
+        // Entry 73, request 0x6F: the strong recoil (kind 7, `0x14029D5F0`): 64 frames, free from 40,
+        // root travel 118 cm back. Entry 74, request 0x70: the air recoil (kinds 6 / 7 in the air,
+        // `0x14029D510`): 40 frames, free from 26, no travel. Checked (files: `xa_ex_0010.mset`; entry
+        // 73's free flag is two rows in the file, 40–50 and 50–end, kept as they are).
+        let mut strong = MotionInfo::new(64.0).with_flag(Free, 40.0, 50.0).with_flag(Free, 50.0, inf).with_flag(Trail, 0.0, 6.0).with_forward_keys(&[(0.0, 0.0), (6.0, -18.98), (12.0, -76.82), (28.0, -102.34), (40.0, -107.61), (64.0, -118.15)]);
+        strong.root_motion = true;
+        put(73, &[0x6F], strong);
+        put(74, &[0x70], MotionInfo::new(40.0).with_flag(Free, 26.0, inf).with_flag(Trail, 0.0, 6.0));
         put(111, &[213], MotionInfo::new(86.0).with_flag(Hit(0), 8.0, 24.0).with_flag(ComboWindow, 18.0, 56.0).with_flag(Trail, 4.0, 24.0).with_forward_keys(&[(0.0, 0.0), (4.0, 12.86), (6.0, 44.08), (14.0, 163.77), (24.0, 237.5), (36.0, 267.05), (86.0, 267.05)]));
         put(117, &[0xDC], MotionInfo::new(38.0).with_flag(Free, 30.0, inf).with_forward_keys(&[(0.0, 0.0), (12.0, 213.82), (24.0, 350.0), (38.0, 350.0)]));
         // The combo modifiers (M9 stage 9a). Checked (files: `xa_ex_0010.mset` flag tracks and

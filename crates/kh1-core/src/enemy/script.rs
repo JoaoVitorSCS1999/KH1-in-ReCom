@@ -76,6 +76,11 @@ pub enum Cmd<A> {
     /// `0x14029FC40`; Checked (decomp)): played from `start` KH1 frames, unless it is the one playing
     /// ([`Cmd::Motion`]'s rule). M11 (the Wyvern's idle from frame 16, `0x2FD4` / `0x3022`).
     MotionAt { request: u16, blend: f32, start: f32 },
+    /// A guard-type row (`crate::enemy::guard`, the shared enemy-guard step, M11) made with the
+    /// request just asked for: `Some((row, request))` (the row's index in the enemy's guard list; it
+    /// lives while that request plays and its HIT slot is on, `0x1402B47A0`), or `None`: the
+    /// enemy's guard rows end now.
+    Guard(Option<(u8, u16)>),
 }
 
 impl<A: Copy> Cmd<A> {
@@ -98,6 +103,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::Scale(k) => Cmd::Scale(k),
             Cmd::Visible(v) => Cmd::Visible(v),
             Cmd::MotionAt { request, blend, start } => Cmd::MotionAt { request, blend, start },
+            Cmd::Guard(g) => Cmd::Guard(g),
         }
     }
 }

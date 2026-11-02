@@ -21,6 +21,7 @@
 //! values it can't read from a file are listed with their addresses (Checked (decomp + exe)).
 
 pub mod body;
+pub mod guard;
 pub mod react;
 pub mod script;
 

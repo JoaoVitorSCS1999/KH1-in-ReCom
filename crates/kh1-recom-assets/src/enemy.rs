@@ -599,6 +599,8 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     let (mut ann, mut clips) = (ann, clips);
     apply_starts(spec.name, &ms, &conv, &mut ann, &mut clips, &mut asd, spec.asd.0, &mut ses)?;
     let parts = hurt_parts(&inp.mdls, &conv)?;
+    // M11, the shared enemy-guard step: the enemy's guard-type rows and their HIT windows.
+    let guards = guard_rows(spec.name, script, &ms, &clips)?;
     // The attacks and their clash recoils (row `+0x40`, request in the low 16 bits; the first row's,
     // as KH1's clash reads the record that met the Guard: Assumption that an attack's rows agree,
     // checked below).
@@ -613,11 +615,11 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
         }
         attacks.push((a.name, a.request, rs[0], a.rows.iter().map(|r| r.at).collect::<Vec<_>>()));
     }
-    let manifest = manifest_json(spec, &consts, &clips, &attacks, &parts);
+    let manifest = manifest_json(spec, &consts, &clips, &attacks, &parts, &guards);
     Ok(Built { ann, asd, ses, manifest, clips, consts, records, parts })
 }
 
-fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], attacks: &[(&str, u16, u32, Vec<usize>)], parts: &[(usize, usize)]) -> String {
+fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], attacks: &[(&str, u16, u32, Vec<usize>)], parts: &[(usize, usize)], guards: &[Guard]) -> String {
     let mut s = String::new();
     s.push_str("{\n");
     s.push_str(&format!("  \"format\": \"{FORMAT}\",\n  \"enemy\": \"{}\",\n  \"recom_id\": {},\n  \"kh1\": \"{}\",\n", spec.name, spec.recom_id, spec.kh1));
@@ -628,6 +630,29 @@ fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], a
     let a: Vec<String> = attacks.iter().map(|(n, r, rc, rows)| format!("    {{\"name\": \"{n}\", \"request\": {r}, \"recoil\": {rc}, \"rows\": [{}]}}", rows.iter().map(|x| format!("\"{x:#x}\"")).collect::<Vec<_>>().join(", "))).collect();
     s.push_str(&a.join(",\n"));
     s.push_str("\n  ],\n");
+    if !guards.is_empty() {
+        s.push_str("  \"guards\": [\n");
+        let g: Vec<String> = guards
+            .iter()
+            .map(|g| {
+                let w: Vec<String> = g.windows.iter().map(|(r, on)| format!("{{\"request\": {r}, \"on\": [{}]}}", on.iter().map(|(a, b)| format!("[{}, {}]", fmt_f(*a), fmt_f(*b))).collect::<Vec<_>>().join(", "))).collect();
+                format!(
+                    "    {{\"name\": \"{}\", \"row\": \"{:#x}\", \"type\": {}, \"priority\": {}, \"recoil\": {}, \"slot\": {}, \"turn\": {}, \"cos\": {}, \"windows\": [{}]}}",
+                    g.name,
+                    g.row,
+                    g.clash_type,
+                    g.priority,
+                    g.recoil,
+                    g.slot,
+                    fmt_f(g.turn),
+                    fmt_f(g.cos),
+                    w.join(", ")
+                )
+            })
+            .collect();
+        s.push_str(&g.join(",\n"));
+        s.push_str("\n  ],\n");
+    }
     s.push_str(&format!("  \"parts\": [{}],\n", parts.iter().map(|p| p.1.to_string()).collect::<Vec<_>>().join(", ")));
     s.push_str(&format!("  \"parts_kh1\": [{}],\n", parts.iter().map(|p| p.0.to_string()).collect::<Vec<_>>().join(", ")));
     s.push_str("  \"requests\": [\n");
@@ -638,6 +663,86 @@ fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], a
     s.push_str(&r.join(",\n"));
     s.push_str("\n  ]\n}\n");
     s
+}
+
+/// One guard-type row of an enemy (M11, the shared enemy-guard step; `kh1_core::enemy::guard`): its
+/// name (the behaviour's), script offset and the requests the script makes it with.
+pub struct GuardSpec {
+    /// The enemy (the spec's `name`).
+    pub enemy: &'static str,
+    /// The row's name (the behaviour's `Guard::name`).
+    pub name: &'static str,
+    /// The row's script offset.
+    pub row: usize,
+    /// The requests it is made with.
+    pub requests: &'static [u16],
+}
+
+/// Every built enemy's guard rows, in its behaviour's order (`kh1_core::bandit::Guard::ALL`).
+/// Checked (files): the Bandit's `ex_2090.bd` makes `0xEC` at `0x1ED6` / `0x1F6E` / `0x2188` (with
+/// 210, 211, 212) and `0x15C` at `0x408E` / `0x40CC` / `0x4186` (230, 231, 233).
+pub const GUARDS: &[GuardSpec] = &[
+    GuardSpec { enemy: "bandit", name: "spin", row: 0xEC, requests: &[210, 211, 212] },
+    GuardSpec { enemy: "bandit", name: "stance", row: 0x15C, requests: &[230, 231, 233] },
+];
+
+/// A guard row as read (the manifest's `guards` entry).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Guard {
+    /// Its name and script offset.
+    pub name: &'static str,
+    /// Its script offset.
+    pub row: usize,
+    /// `+0x38 & 7`.
+    pub clash_type: u32,
+    /// `+0x3C`.
+    pub priority: i32,
+    /// `+0x40 & 0xFFFF`.
+    pub recoil: u32,
+    /// `+0x34 & 3`.
+    pub slot: u32,
+    /// `+0x60` (radians).
+    pub turn: f32,
+    /// `+0x64`.
+    pub cos: f32,
+    /// Per request, the HIT slot's windows (KH1 frames).
+    pub windows: Vec<(u16, Vec<(f32, f32)>)>,
+}
+
+/// Reads [`GUARDS`]' rows of an enemy: `+0x34` the HIT slot, `+0x38 & 7` the clash type (a guard
+/// type, 1..4), `+0x3C` the priority, `+0x40 & 0xFFFF` the recoil (a request the model has), `+0x60`
+/// the cone's turn, `+0x64` its cosine; per request, the slot's windows in its motion (KH1's rows
+/// live while their HIT slot is on, `0x1402B47A0`). Checked (decomp: `0x1402B2DC0`, `0x1402B4640`,
+/// `0x1402B4BC0`).
+pub fn guard_rows(enemy: &str, script: &[u8], ms: &MotionSet, clips: &[RequestClip]) -> Result<Vec<Guard>> {
+    let mut out = Vec::new();
+    for g in GUARDS.iter().filter(|g| g.enemy == enemy) {
+        let r = script.get(g.row..g.row + 0x70).ok_or_else(|| crate::Error::Format(format!("{enemy}: no guard row at {:#x}", g.row)))?;
+        if !crate::stats::pushes_address(script, g.row as u32) {
+            return bad(format!("{enemy}: the script never pushes the guard row {:#x}", g.row));
+        }
+        let u = |o: usize| u32::from_le_bytes(r[o..o + 4].try_into().unwrap());
+        let f = |o: usize| f32::from_le_bytes(r[o..o + 4].try_into().unwrap());
+        let (slot, clash_type, priority, recoil) = (u(0x34) & 3, u(0x38) & 7, u(0x3C) as i32, u(0x40) & 0xFFFF);
+        if !(1..=4).contains(&clash_type) || !(0..=100).contains(&priority) {
+            return bad(format!("{enemy}: row {:#x} is not a guard row (type {clash_type}, priority {priority})", g.row));
+        }
+        if !clips.iter().any(|c| c.request as u32 == recoil) {
+            return bad(format!("{enemy}: guard row {:#x}'s recoil {recoil} has no motion", g.row));
+        }
+        let (turn, cos) = (f(0x60), f(0x64));
+        if !(turn.is_finite() && cos.is_finite() && (-1.0..=1.0).contains(&cos)) {
+            return bad(format!("{enemy}: guard row {:#x}: cone {turn} / {cos}", g.row));
+        }
+        let mut windows = Vec::new();
+        for &req in g.requests {
+            let e = ms.requests.get(req as usize).and_then(|w| w.entry()).ok_or_else(|| crate::Error::Format(format!("{enemy}: request {req} has no motion")))? as usize;
+            let m = ms.motions.get(e).ok_or_else(|| crate::Error::Format(format!("{enemy}: request {req}: entry {e}")))?;
+            windows.push((req, hit_windows(m, slot as u16)?));
+        }
+        out.push(Guard { name: g.name, row: g.row, clash_type, priority, recoil, slot, turn, cos, windows });
+    }
+    Ok(out)
 }
 
 /// Requests a script only ever plays from a later frame (KH1's request word `+4`: the start time of
