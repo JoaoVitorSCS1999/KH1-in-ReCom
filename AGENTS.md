@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 102: Sonic Blade: Re:CoM's voices and effects per dash; battle only, version 0.57.0 (2026-11-01)
+
+- Asks (owner, 2026-11-01, on 0.56.1's questions): voices "however it works in base ReCoM"; per-dash effects
+  "however it works in base ReCoM"; field use "Only in battle".
+- Re:CoM's Sonic Blade (Checked (decomp + exe), `exeStockSkill` `0x140218950` SONICRAVE): start 0x8C, six dashes
+  0x8D–0x92, finisher 0x93, 1:1 with KH1's wind-up, rows 0x1B–0x20, 0x21. Each part plays a motion of the
+  sleight's pack 11009 (start 0, dashes 1, finisher 2); its voices / sounds / effects are that motion's events
+  (the sub-pack play `0x1401A3580` points Sora's sleight event players `+0x110` / `+0x120` at it).
+- Built: when a KH1 Sonic Blade motion starts, `win::specials::motion_events` makes the same event calls on
+  the matching Re:CoM motion (`0x140179A30` / `0x14017A240` effects, `0x140238710` / `0x140239260` sounds);
+  KH1's motion, timing, damage, travel unchanged. The asset step no longer writes our SES entries for them.
+- Battle only: offer and start need Re:CoM's battle flag (`player+0x390`); the Field exe entry `0x1401FA648`
+  and cave `0x1401FB7B2` are no longer patched (Re:CoM's bytes).
+- Assumptions: Re:CoM's sleight motions as long as KH1's (events at Re:CoM's frames on KH1's clip); the
+  sleight's resources loaded by the first press (logged if not); `+0x390` set exactly in the Battle exe.
+- Checked: tests, Windows build, 476 sites (pefile). Not checked: in game; the sleight's event files.
+
+---
+
 ## Stage 101: Stock items on the green item row, version 0.56.2 (2026-11-01)
 
 - Ask (owner, 2026-11-01, screenshot of KH1 > Items > Stock, its rows red with the Keyblade symbol): "have all
