@@ -14,6 +14,9 @@
 //! | 7 jump (`0x1401EDA60`) | 1 crouch, 2 rise, 3 fall, 6 land | 1, 2, 2, 0 locked by the land |
 //! | 8 glide (`CPlayerSora` exe `0x140217B50`) | 4 | 0x15 |
 //!
+//! At `dodge_roll = recom` (the default) KH1's rule only asks for the roll: Re:CoM's own roll then
+//! runs action 6 sub 0 whole, from its avoid init to its exe's end ([`roll`]).
+//!
 //! [`Kh1Sora::frame`] is kh1-core's `Controller::step` (the oracle) for these states, with KH1's
 //! numbers. Its control step also runs KH1's Attack command (M5, `crate::attack`): Re:CoM's attack
 //! action `0xA` plays the swing. What it reads and writes goes through [`Host`]: Re:CoM's body
@@ -149,6 +152,8 @@ pub mod spring {
     }
 }
 
+pub mod roll;
+
 /// The Re:CoM action that stands for a KH1 state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Action {
@@ -232,6 +237,10 @@ pub trait Host {
     fn spring_jump(&mut self) -> bool {
         false
     }
+    /// Re:CoM's own Dodge Roll ([`roll`], `dodge_roll = recom`): its avoid init `0x1401F10C0`
+    /// through the trampoline. Re:CoM then owns Sora (its action 6 and exe) until its action
+    /// changes; the next KH1 frame takes over afresh.
+    fn start_recom_roll(&mut self) {}
     /// Re:CoM starts the swing: its field-swing init `0x1401F0F70`, whose row pick (Sora's vtable
     /// `+0x128`) takes this KH1 row. True when Re:CoM plays its clip.
     fn start_swing(&mut self, _s: &SwingStart) -> bool {
@@ -382,6 +391,17 @@ pub struct FrameOut {
     /// Re:CoM's end action entered its win action (`0x1C`) in this frame: the KH1 frame wrote
     /// nothing to Re:CoM after it (no action, no motion), and the next one takes over afresh.
     pub recom_took: bool,
+    /// KH1's rule asked for the Dodge Roll and Re:CoM's own roll started ([`roll`]): Re:CoM owns
+    /// Sora from its avoid init on, and the next KH1 frame takes over afresh.
+    pub recom_roll: bool,
+}
+
+impl FrameOut {
+    /// Re:CoM took Sora in this frame (its win action or its roll): the next KH1 frame starts from
+    /// Re:CoM's state, not from ours.
+    pub fn handed_to_recom(&self) -> bool {
+        self.recom_took || self.recom_roll
+    }
 }
 
 /// KH1 Sora's fields Re:CoM has no place for, and the KH1 data the handlers use.
@@ -449,6 +469,12 @@ pub struct Kh1Sora {
     /// Re:CoM's end action (from [`Kh1Sora::leave_swing`] / `leave_cast`) entered its own win
     /// action: this frame yields to it.
     pub(crate) recom_took: bool,
+    /// `dodge_roll = recom` (the default; the host sets it): KH1's rule asks for the roll, Re:CoM's
+    /// own roll runs ([`roll`]). False: KH1's roll on Re:CoM's action 6 (`dodge_roll = kh1`).
+    pub recom_roll: bool,
+    /// KH1's rule asked for the roll this frame; Re:CoM's starts after the frame's commands, if
+    /// none replaced it (as a command replaces KH1's roll).
+    recom_roll_wanted: bool,
 }
 
 /// The facing Re:CoM holds may differ from ours by rounding; more than this means Re:CoM turned
@@ -512,6 +538,8 @@ impl Kh1Sora {
             special: None,
             special_log: Vec::new(),
             recom_took: false,
+            recom_roll: false,
+            recom_roll_wanted: false,
         }
     }
 
@@ -537,6 +565,7 @@ impl Kh1Sora {
         self.jump_offset = 0;
         self.arc = Arc::timed(0.0, pos.y, self.params.gravity);
         self.air_vel = Vec3::ZERO;
+        self.recom_roll_wanted = false;
         self.no_flinch_on = false;
         self.no_flinch_counting = false;
         if self.no_flinch_reported {
@@ -933,6 +962,11 @@ impl Kh1Sora {
             self.rec = MotionRec::unknown();
             return out;
         }
+        if std::mem::take(&mut self.recom_roll_wanted) && self.rec.head() == request::DODGE_ROLL {
+            // No command of this frame replaced the roll: Re:CoM's own roll from here.
+            self.hand_roll_to_recom(h, &mut out);
+            return out;
+        }
 
         // ---- state input on the flattened move vector ----
         let flat = Vec3::new(dir.x, 0.0, dir.z).normalized();
@@ -1032,6 +1066,47 @@ impl Kh1Sora {
         out.specials = self.take_special_log();
         out.recom_took = true;
         true
+    }
+
+    /// `dodge_roll = recom`: KH1's rule asked for the roll and no command replaced it. What it
+    /// replaced ends as before KH1's roll (a swing's, cast's or item's Re:CoM end action, which may
+    /// enter Re:CoM's win instead: then no roll), our own pieces of Sora are put down without
+    /// writing Re:CoM's untouchable bit (Re:CoM's roll sets and clears it itself), and Re:CoM's
+    /// avoid init starts its roll. This frame writes nothing else; the next KH1 frame takes over
+    /// afresh once Re:CoM's action changes ([`FrameOut::handed_to_recom`]).
+    fn hand_roll_to_recom(&mut self, h: &mut dyn Host, out: &mut FrameOut) {
+        if self.swing.is_some_and(|s| self.rec.head() != s.request) {
+            self.leave_swing(h);
+        }
+        self.leave_cast(h);
+        self.leave_item(h);
+        if self.yield_to_recom(out) {
+            return;
+        }
+        if self.guard_on {
+            self.guard_on = false;
+            h.set_guard(false);
+        }
+        // KH1's roll protection is not used (decision 17's no-flinch frames are KH1's roll's).
+        self.no_flinch_on = false;
+        self.no_flinch_counting = false;
+        if self.no_flinch_reported {
+            self.no_flinch_reported = false;
+            h.set_no_flinch(false);
+        }
+        // KH1's flag 0x80 after a guard success (≤ 8 frames, Re:CoM's `+0x418 & 1`): Re:CoM's
+        // init sets the same bit and its exe clears it after 600 units, so the rest of KH1's
+        // window lies inside Re:CoM's; nothing of ours writes the bit from here.
+        self.untouchable = false;
+        self.untouchable_counting = false;
+        self.untouchable_reported = false;
+        self.lock = false;
+        self.rec = MotionRec::unknown();
+        h.start_recom_roll();
+        out.recom_roll = true;
+        out.cast = self.take_cast_log();
+        out.items = self.take_item_log();
+        out.specials = self.take_special_log();
     }
 
     /// KH1's kind-6 guard success (`0x14029D720`): request 0x6E at once (the guard motion and its
@@ -1225,6 +1300,16 @@ impl Kh1Sora {
                 let y = dir.yaw();
                 self.target_yaw = y;
                 self.facing = y;
+                if self.recom_roll {
+                    // `dodge_roll = recom` (owner, 2026-11-02): KH1's rule asked for the roll;
+                    // Re:CoM's own roll runs, with its own untouchable frames (no KH1 no-flinch).
+                    // The request stands in the queue as KH1's does, so a command later in this
+                    // frame still replaces it; [`Kh1Sora::frame`] then hands Sora to Re:CoM.
+                    self.recom_roll_wanted = true;
+                    self.play(req::ACTION | req::HOLD | request::DODGE_ROLL as u32, 0.0);
+                    ev.push(Event::Rolled);
+                    return;
+                }
                 // `0x1402C9E60`
                 self.no_flinch = self.params.roll_no_flinch;
                 self.no_flinch_on = true;

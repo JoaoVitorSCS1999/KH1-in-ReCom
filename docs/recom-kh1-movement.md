@@ -203,6 +203,7 @@ Every hook passes through to Re:CoM unless `combat = kh1` and the player is the 
 
 `kh1-recom.ini` keys `high_jump`, `glide`, `superglide`, `dodge_roll`, `guard` (on / off;
 defaults off, off, off, on, on) until abilities are in Re:CoM's progression (M9).
+Since 2026-11-02 `dodge_roll` is `recom | kh1 | off` (default `recom`; see § Re:CoM's roll).
 
 ### Trace
 
@@ -269,6 +270,138 @@ hook. No other launch writes the spring speed: the player's `+0x600` is written 
 (through the main-player pointer), called only by the spring gimmick (`0x1401BC460`, `0x1401BC780`,
 `0x1401BC990`). The one other `+0x600` store in the decomp (`0x14011CB20`) is on a camp-menu object.
 
+## Re:CoM's roll at Combat = KH1 (`dodge_roll = recom`, 2026-11-02)
+
+> Owner: "make dodge roll work how it does in ReCoM, not KH1"; asked to choose: "The whole roll"
+> (Re:CoM's motion, speed, distance, timing and invincibility). Design doc: the "Dodge roll"
+> bullet (supersedes decision 17's KH1 roll frames; an ini key keeps KH1's roll).
+
+### Re:CoM's roll. Checked (decomp + exe) unless marked
+
+- **Action:** 6 (avoid), sub 0 (`player+0x40C` / `+0x414`). The Field and Battle exes both run it
+  (case 6 → `CPlayerSora` vtable `+0x1C8` = `0x140217310`).
+- **Input:** the request bit `+0x424 & 2`, built by `0x1401F8150` in **both** the field and the
+  battle branch (the field branch jumps to the same tail `LAB_1401f861e`): a Square press
+  (`0x1401FF700`) with the ability bit `+0x41C & 8` (and, with a deck, `0x140161610(1) == 0` or
+  `+0x428 & 0x10200000 == 0`). So **Re:CoM's field has the roll too**. Assumption: `+0x41C & 8` is
+  on in the field in vanilla play (the KH1 roll, which uses the same bit, works in the field).
+- **Who starts it:** the move exe `0x1401EEDA0` (stand / walk / run) on any Square press, standing
+  included (no stick test there); the command helper `0x1401E93A0(pl, 1)` with the stick at 0.3 or
+  more (only from `0x1401EBD80`, actions 0xC / 0xD, the hit reactions' recovery); the footing
+  action 0x23 (`0x1401EC600`). Re:CoM's own field swing exe `0x1401EAEB0` has no roll cancel.
+- **Init `0x1401F10C0`:** footing case (`+0x420 & 0x10400000 == 0x10000000`) → `0x1401F2310(pl, 2)`
+  instead. Else `+0x428 &= ~8`; **`+0x418 |= 1`**; sub 0; previous action kept; action 6 with
+  time 0; body velocity zeroed (`0x1401A38D0`); if the stick magnitude `+0x384` ≥ 0.3 the facing
+  turns at once to the stick's world yaw `+0x38C` (`0x1401A6E00`); model matrix rebuilt
+  (`0x1401A7EC0`); **row 0x16 (`p001_070`), blend −1 (the clip's own), root motion on**; vertical
+  speed 0, phase 3, gravity `+0x5D8` = `0x14087B398`.
+- **Exe `0x140217310`:** `+0x428 &= ~8`; keeps the body's horizontal velocity (zero), adds
+  gravity to the vertical speed in the air (clamps it at 0 on the ground). Then:
+  - clears `+0x418` bit 0 once the motion clock (`ctrl+0x3C`, `0x1401A47C0`) is ≥ `params+0x28`;
+  - **moving cancel:** on the ground, clock ≥ `params+0x2C` and stick ≥ 0.3 → stand / walk / run
+    by the stick (`0x1401E9630`, `0x1401F8D70`, row pick `0x1401F9380`, `0x1401F5460`,
+    `0x1401F8AC0`), bit 0 cleared;
+  - else at the clip's end (`ctrl+0x50 & 3`) `0x1401F2890(pl, −1, 1)`: on the ground the stand
+    init `0x1401F3180(pl, 1)` (stand / walk / run by the stick, half speed), in the air the fall
+    `0x1401F1F20` (= jump init(pl, 1)).
+  - Nothing else cancels it from the pad (the exe reads no button). A hit after the untouchable
+    frames does (the damage check runs before the action switch), and events do.
+  - The stand init keeps bit 0 (its mask `0xFDB3DFFF`): only the avoid exe clears it.
+- **Numbers:** `params` = `player+0x3C0` = `0x1407C5B60`, whose first 0x30 bytes the
+  `CPlayerSora` constructor `0x140216CE0` copies from `0x1407C7CB0`: **`+0x28` = 600 units (12
+  frames), `+0x2C` = 1400 units (28 frames)**. Checked (exe + decomp). Riku's (`0x1407C7BF0`):
+  2200 / 2200.
+- **Motion and travel:** `p001_070` (Re:CoM's `PL0001.ANN` slot 70): 30 fps, 19 frames, plays
+  once, default blend 0. Root travel 3.5 m straight ahead: 0.3564 m a clip frame for clip
+  frames 0–6, 0.2270 m for 6–12, none after. That is 2.138 m in the first 12 game frames (≈ 10.7
+  m/s), 1.362 m in the next 12 (≈ 6.8 m/s), then still. KH1's roll (motion 0xDC, 38 frames, free
+  from 30) travels 213.82 + 136.18 cm in the same frames (`kh1-sora-data.md`). So **Re:CoM's clip
+  is a bake of KH1's roll: same distance and speed curve**. Checked (files: Re:CoM's own
+  `PL0001.ANN` in the session, 1,740,528 bytes, SHA-256 `6b1d3a90…8795`, read with
+  `kh1-recom-assets::ann`).
+- **Timing at step 1** (the press frame is 0). Derived from the above and from Re:CoM's motion
+  clock not advancing on a requested clip's first update (§ Motions). The log reports it in game:
+  - frame k's exe reads 50 × (k − 1) units;
+  - **untouchable on frames 1–13**: the init's bit protects from the next frame's damage check,
+    and frame 13's exe clears it after that frame's check;
+  - moving cancel possible from frame 29;
+  - the clip (1800 units: 19 × 100, one 30 fps frame less as it plays once) ends, so Re:CoM's
+    stand init runs in frame 37.
+  - KH1's roll for comparison: lock free from frame 30, 12 no-flinch frames with damage taken,
+    root travel one frame later (decision 17).
+- **Where the two rolls differ** (all Re:CoM's now at `recom`): the end (Re:CoM: its moving
+  cancel from 28 motion frames, else the clip's end at 36; KH1: free from 30 into the idle at an
+  8-frame blend); the protection (Re:CoM: untouchable, no damage; KH1: damage, no flinch); the
+  root travel's frame (Re:CoM: the same update; KH1's: one update later); the facing (Re:CoM:
+  the stick's world yaw from 0.3, else keeps facing; KH1: the move direction); off a ledge
+  (Re:CoM: the roll goes on under gravity until the clip ends, then its fall; KH1: `0x1402C9EB0`).
+
+### What we do
+
+- **KH1's input rule is kept** (as asked): Square on the ground, with Guard (Sora's kit) only at
+  the run tilt, otherwise Guard; nothing while KH1's lock holds (a swing until its free frames,
+  Guard, the recoil, a land); commands of the same frame run after the pad handler and replace the
+  roll, as they replace KH1's. Re:CoM's own rule is not needed for its action to start: its init
+  has no condition but the footing case, which stays Re:CoM's. Assumption: none of Re:CoM's
+  callers' conditions (stick ≥ 0.3 in `0x1401E93A0`) is needed by the init itself (read: it isn't).
+- **Hand-over** (`Kh1Sora::hand_roll_to_recom`, `crates/kh1-recom/src/movement.rs`): after the
+  frame's commands, if the roll is still KH1's head request: what it replaced ends through
+  Re:CoM's end action as before KH1's roll (`0x1401F6660` for a swing, cast or item; if that
+  enters Re:CoM's win, no roll); Guard's body guard off; KH1's no-flinch not used; KH1's flag
+  0x80 (a guard success's ≤ 8 frames) dropped **without writing** `+0x418` (Re:CoM's init sets the
+  same bit and its exe clears it after 12 frames, so KH1's rest lies inside it); then **Re:CoM's
+  own avoid init through its trampoline** (`RecomHost::start_recom_roll`). That frame writes
+  nothing else (no action, motion, velocity or facing).
+- **Re:CoM runs the roll:** our avoid exe hook `0x140217310` calls Re:CoM's exe whole while Re:CoM
+  owns the roll (`movement::roll::recom_owns`: the handed-over player, action 6 sub 0), only
+  reading around it for the log. The root-step wrapper `0x14024DCA0` leaves Re:CoM's same-update
+  travel alone for it; a KH1 swing's last travel still pending (KH1 applies it in the next frame)
+  is added once on the roll's first update. Assumption: Re:CoM calls the root step on a clip's
+  first update (the existing delay assumes the same).
+- **Taking Sora back:** the hand-over frame leaves no sync (`FrameOut::handed_to_recom`), so the
+  next KH1 frame (Re:CoM's stand / walk / run through the move exe, or its fall through
+  `jump init(pl, 1)` → `enter_fall`) starts from Re:CoM's state, as after Re:CoM's other actions.
+  Checked (tests on the fake Re:CoM).
+- **Invulnerability:** Re:CoM's own bit, set by its init, cleared by its exe; no write of ours.
+  The summon shield (Stage 111) only sets the bit during action 0x16 and clears it after only if
+  it was clear before; Sonic Blade's runs from the KH1 frame, which doesn't run during Re:CoM's
+  roll. Neither can clear Re:CoM's bit, and Re:CoM's exe only clears it in action 6. Checked
+  (code + decomp).
+- **No new hook, site or callee.** The avoid init and exe were hooked since M4; the trampoline
+  is the existing hook's.
+- **ini:** `dodge_roll = recom | kh1 | off` (default `recom`; `on` → recom, `off` → off).
+  `kh1` is the KH1 roll as before. `off` now takes the kit's roll away at Combat = KH1 too (Square
+  always guards). Before, `off` only applied while no save was loaded. Ini only: Re:CoM's 21
+  Config item slots are full.
+- **Abilities page:** Dodge Roll is Sora's kit (Stage 96), not on the page; unchanged.
+- **Log:** one line per roll start (`roll: Re:CoM's roll started … from action …, facing, stick,
+  untouchable bit set`) and end (`roll: Re:CoM's roll ended (why): N frames after the press frame
+  (exe calls, last motion clock), untouchable on K frames (cleared at motion clock U); Re:CoM's
+  action now …`), the first 1000 lines. A roll Re:CoM ends without its exe (a hit after the
+  untouchable frames, an event) is logged when our code next runs Sora.
+
+### Owner test list (`dodge_roll = recom`, the default)
+
+1. Run (full tilt) in a battle and press Square: Sora plays Re:CoM's roll. The log has a `roll:
+   Re:CoM's roll started` line and, after it, an `ended` line with about 37 frames and
+   `untouchable on 13 frames` at 60 fps.
+2. The same in a field room (Re:CoM's field roll).
+3. Roll into an enemy's attack right after the press: no damage and no flinch for the first
+   ~13 frames; later in the roll a hit lands with Re:CoM's reaction.
+4. Hold the stick after rolling: Sora runs out of the roll from about frame 29 (Re:CoM's moving
+   cancel); let go: he stops at the roll's end (frame ~37).
+5. Walk slowly or stand and press Square: Guard, not a roll (KH1's rule).
+6. Attack, then press Square while running in the combo's free frames: the swing ends and
+   Re:CoM's roll starts. Attack and Square on the same frame: the Attack wins.
+7. Guard a hit, then roll out of the recoil: Re:CoM's roll, no extra protection after it.
+8. Roll off a ledge: Sora keeps rolling while falling and then falls with KH1's fall.
+9. Summon (any), and use Sonic Blade, then roll right after each: invincibility as before.
+10. `dodge_roll = kh1`: KH1's roll exactly as 0.65.0 (damage taken, no flinch for 12 frames);
+    `dodge_roll = off`: Square always guards.
+
+Not checked: in game; the frame counts above at Re:CoM's 30 fps rooms (step 2: the log gives
+14 untouchable frames' worth at two frames a call).
+
 ## Where Re:CoM can't match KH1 yet
 
 1. **Root motion** (fixed in 0.6.0, decision 17, option (c)). KH1 applies a motion's root travel
@@ -286,7 +419,8 @@ hook. No other launch writes the spring speed: the player's `+0x600` is written 
 3. **Re:CoM's clock runs through blends** (KH1 holds the new motion at frame 0). Only the look
    and `motion_frame` of blended motions (idle, walk, run, fall, glide) differ; none of them has a
    window.
-4. **Roll protection** (fixed in 0.6.0). KH1's roll has 12 no-flinch frames and **no**
+4. **Roll protection** (fixed in 0.6.0; since 2026-11-02 only at `dodge_roll = kh1`: the default
+   `recom` is Re:CoM's own roll and its own untouchable frames, § Re:CoM's roll). KH1's roll has 12 no-flinch frames and **no**
    untouchable frames: the ops `0x2B` / `0x2A` come only from event scripts. Checked (decomp +
    files). At KH1, Sora now takes damage during the roll, with no reaction for those 12 frames.
    This uses Re:CoM's own no-reaction exit in its damage check, and no longer Re:CoM's untouchable

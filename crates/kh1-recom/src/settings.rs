@@ -27,6 +27,44 @@ impl Mode {
     }
 }
 
+/// Sora's Dodge Roll at `combat = kh1` (`dodge_roll` in the ini; owner, 2026-11-02: "make dodge
+/// roll work how it does in ReCoM, not KH1", "The whole roll"). KH1's input rule decides when the
+/// roll is asked for in every case (`crate::movement`); what runs then:
+/// - `Recom` (the default): Re:CoM's own roll, its action 6 from its avoid init `0x1401F10C0` to
+///   its exe's end: motion, travel, timing, cancel and invulnerability all Re:CoM's;
+/// - `Kh1`: KH1's roll as before (KH1's frames on Re:CoM's action 6, KH1's 12 no-flinch frames);
+/// - `Off`: no Dodge Roll (Square always guards, KH1's rule without the ability).
+///
+/// The old values still read: `on` is `Recom`, `off` is `Off`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RollMode {
+    Recom,
+    Kh1,
+    Off,
+}
+
+impl RollMode {
+    pub fn parse(v: &str) -> Option<RollMode> {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "recom" | "on" | "1" | "true" | "yes" => Some(RollMode::Recom),
+            "kh1" => Some(RollMode::Kh1),
+            "off" | "0" | "false" | "no" => Some(RollMode::Off),
+            _ => None,
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RollMode::Recom => "recom",
+            RollMode::Kh1 => "kh1",
+            RollMode::Off => "off",
+        }
+    }
+    /// Sora has a Dodge Roll at all.
+    pub fn on(self) -> bool {
+        self != RollMode::Off
+    }
+}
+
 fn parse_switch(v: &str) -> Option<bool> {
     match v.trim().to_ascii_lowercase().as_str() {
         "on" | "1" | "true" | "yes" => Some(true),
@@ -70,6 +108,9 @@ pub struct Settings {
     /// keeps equipped at its migration to the ability state (Guard, Counterattack, Combo Plus, Air
     /// Combo Plus), and all of them while there is no save block.
     pub abilities: Kh1Abilities,
+    /// Which Dodge Roll Sora has at `combat = kh1` ([`RollMode`]); `abilities.dodge_roll` follows
+    /// it (on unless `Off`). No Config row (Re:CoM's 21 item slots are full).
+    pub dodge_roll: RollMode,
     /// One-line logs of the Attack's decisions in `kh1-recom.log` (first 200 lines).
     pub debug_attack: bool,
     /// Debug (M7, until stage 7.11 earns spells): Sora has all 7 spells at level 3.
@@ -216,7 +257,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, damage: Mode::Recom, boss_revenge: true, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, damage: Mode::Recom, boss_revenge: true, config_menu: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
     }
 }
 
@@ -264,14 +305,21 @@ config_menu = on
 ; Dodge Roll (equipped) from the start; High Jump, Glide and Superglide when Re:CoM gives Sora
 ; its own; Combo Master at level 50; Counterattack 57, Air Combo Plus 24 and 45, Combo Plus 87,
 ; 93, 99 (KH1's levels).
-; - high_jump, glide, superglide, dodge_roll, combo_master: no longer unlock anything; only
+; - high_jump, glide, superglide, combo_master: no longer unlock anything; only
 ;   used while no save is loaded. kh1_all_abilities (below) is the testing switch.
 ; - guard, counterattack, combo_plus, air_combo_plus: only read once per save, when a save from
 ;   before 9b first meets the ability page: what they had on stays equipped if learned.
 high_jump = off
 glide = off
 superglide = off
-dodge_roll = on
+;
+; dodge_roll = recom | kh1 | off (only at combat = kh1; read at start)
+;   Square while running rolls (KH1's rule: slower, or standing, guards).
+;   recom: Re:CoM's own roll (its motion, speed, distance, timing and invulnerable frames).
+;   kh1:   KH1's roll (KH1's frames; damage still taken, no flinch for 12 frames).
+;   off:   no Dodge Roll (Square always guards).
+;   (on, from older files, reads as recom.)
+dodge_roll = recom
 guard = on
 counterattack = on
 ; combo_plus / air_combo_plus: how many were equipped (0-9); combo_master = on | off
@@ -371,14 +419,20 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(b) => s.config_menu = b,
                 None => warnings.push(bad("config_menu must be on or off")),
             },
-            k @ ("high_jump" | "glide" | "superglide" | "dodge_roll" | "guard" | "counterattack") => match parse_switch(v) {
+            "dodge_roll" => match RollMode::parse(v) {
+                Some(m) => {
+                    s.dodge_roll = m;
+                    s.abilities.dodge_roll = m.on();
+                }
+                None => warnings.push(bad("dodge_roll must be recom, kh1 or off (on = recom)")),
+            },
+            k @ ("high_jump" | "glide" | "superglide" | "guard" | "counterattack") => match parse_switch(v) {
                 Some(b) => {
                     let a = &mut s.abilities;
                     *match k {
                         "high_jump" => &mut a.high_jump,
                         "glide" => &mut a.glide,
                         "superglide" => &mut a.superglide,
-                        "dodge_roll" => &mut a.dodge_roll,
                         "counterattack" => &mut a.counterattack,
                         _ => &mut a.guard,
                     } = b;
@@ -485,9 +539,10 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "boss_revenge", switch_str(s.boss_revenge));
     let mut t = set_key(&t, "config_menu", switch_str(s.config_menu));
     let a = s.abilities;
-    for (k, v) in [("high_jump", a.high_jump), ("glide", a.glide), ("superglide", a.superglide), ("dodge_roll", a.dodge_roll), ("guard", a.guard), ("counterattack", a.counterattack)] {
+    for (k, v) in [("high_jump", a.high_jump), ("glide", a.glide), ("superglide", a.superglide), ("guard", a.guard), ("counterattack", a.counterattack)] {
         t = set_key(&t, k, switch_str(v));
     }
+    let t = set_key(&t, "dodge_roll", s.dodge_roll.as_str());
     let t = set_key(&t, "combo_plus", &a.combo_plus.to_string());
     let t = set_key(&t, "air_combo_plus", &a.air_combo_plus.to_string());
     let t = set_key(&t, "combo_master", switch_str(a.combo_master));
@@ -549,6 +604,30 @@ mod tests {
         assert!(c.high_jump && c.glide && c.superglide && !c.dodge_roll && !c.guard);
     }
 
+    /// Owner (2026-11-02): Re:CoM's whole roll by default; `kh1` keeps KH1's; the old on / off read
+    /// as recom / off.
+    #[test]
+    fn dodge_roll_reads_recom_kh1_off_and_the_old_switch() {
+        assert_eq!(Settings::default().dodge_roll, RollMode::Recom);
+        assert!(Settings::default().abilities.dodge_roll);
+        for (v, m) in [("recom", RollMode::Recom), ("ReCoM", RollMode::Recom), ("kh1", RollMode::Kh1), ("off", RollMode::Off), ("on", RollMode::Recom), ("yes", RollMode::Recom), ("no", RollMode::Off)] {
+            let (s, w) = parse(&format!("dodge_roll = {v}\n"));
+            assert!(w.is_empty(), "{v}: {w:?}");
+            assert_eq!(s.dodge_roll, m, "{v}");
+            assert_eq!(s.abilities.dodge_roll, m != RollMode::Off, "{v}");
+        }
+        let (s, w) = parse("dodge_roll = sideways\n");
+        assert_eq!((s.dodge_roll, w.len()), (RollMode::Recom, 1));
+        // Written back as the mode, and read back the same.
+        for m in [RollMode::Recom, RollMode::Kh1, RollMode::Off] {
+            let t = store("dodge_roll = on\n", &Settings { dodge_roll: m, abilities: Kh1Abilities { dodge_roll: m.on(), ..Default::default() }, ..Default::default() });
+            assert!(t.contains(&format!("dodge_roll = {}", m.as_str())), "{t}");
+            assert_eq!(parse(&t).0.dodge_roll, m);
+        }
+        // The default file names the new values.
+        assert!(DEFAULT_FILE.contains("\ndodge_roll = recom\n"));
+    }
+
     #[test]
     fn set_key_keeps_the_rest() {
         let t = set_key("; head\ncombat = kh1 ; why\nother = 1\n", "combat", "recom");
@@ -561,7 +640,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, damage: Mode::Kh1, boss_revenge: false, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, damage: Mode::Kh1, boss_revenge: false, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
