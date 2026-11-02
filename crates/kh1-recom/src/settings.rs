@@ -59,6 +59,9 @@ pub struct Settings {
     /// for the equipped Keyblade's card / the spell's card or sleight / Sonic Blade's sleight.
     /// `Kh1`: KH1's formula on the KH1 twins' / proxies' records and HP (decisions 12, 21).
     pub damage: Mode,
+    /// Boss revenge at `combat = kh1` (owner, 2026-11-01; `crate::revenge`): KH2's revenge value on
+    /// Re:CoM's humanoid bosses. No Config row (Re:CoM's 21 item slots are full).
+    pub boss_revenge: bool,
     /// Our rows in Re:CoM's Config menu. `off` leaves the menu untouched (a safety switch while
     /// the rows are untested in game; the settings then come from this file only).
     pub config_menu: bool,
@@ -213,7 +216,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, damage: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, damage: Mode::Recom, boss_revenge: true, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
     }
 }
 
@@ -245,6 +248,12 @@ enemy_pace = recom
 ;          Fire / Blizzard / Thunder their Re:CoM card's or sleight's, Sonic Blade Re:CoM's.
 ;   kh1:   KH1's damage formula and KH1's HP for the enemies (each Re:CoM enemy's KH1 twin).
 damage = recom
+;
+; boss_revenge = on | off (only at combat = kh1, in Sora's story; read at start)
+;   on:  humanoid bosses count Sora's hits as KH2's revenge value (Axel 92, Vexen 150, Hades 80
+;        then 50, the rest 100) and, past it, break out of their flinch with an attack of their own.
+;   off: bosses keep Re:CoM's rules.
+boss_revenge = on
 ;
 ; config_menu = on | off
 ;   off: don't add our rows to Re:CoM's Config menu (use this file instead).
@@ -353,6 +362,10 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
             "damage" => match Mode::parse(v) {
                 Some(m) => s.damage = m,
                 None => warnings.push(bad("damage must be recom or kh1")),
+            },
+            "boss_revenge" => match parse_switch(v) {
+                Some(b) => s.boss_revenge = b,
+                None => warnings.push(bad("boss_revenge must be on or off")),
             },
             "config_menu" => match parse_switch(v) {
                 Some(b) => s.config_menu = b,
@@ -469,6 +482,7 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "guard_reactions", switch_str(s.guard_reactions));
     let t = set_key(&t, "enemy_pace", s.enemy_pace.as_str());
     let t = set_key(&t, "damage", s.damage.as_str());
+    let t = set_key(&t, "boss_revenge", switch_str(s.boss_revenge));
     let mut t = set_key(&t, "config_menu", switch_str(s.config_menu));
     let a = s.abilities;
     for (k, v) in [("high_jump", a.high_jump), ("glide", a.glide), ("superglide", a.superglide), ("dodge_roll", a.dodge_roll), ("guard", a.guard), ("counterattack", a.counterattack)] {
@@ -547,7 +561,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, damage: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, damage: Mode::Kh1, boss_revenge: false, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);

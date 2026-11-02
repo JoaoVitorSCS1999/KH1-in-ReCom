@@ -358,6 +358,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     // KH1's MP refill runs in the actor pre-step, at the start of the frame (`0x1402A43A0` →
     // `0x1402A4CB0`): one point per frame while one is waiting (M7 stage 7.1).
     super::mp::frame();
+    // Boss revenge: the game clock its decay reads (one add).
+    super::revenge::frame(pl);
     // A magic command no KH1 frame took last frame is gone (M7 stage 7.4).
     super::magic::new_frame();
     // A Thunder's strikes (7.6): its script thread's run (nothing unless one is going).
@@ -656,6 +658,7 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     // own path then applies its weak part, resistance % and boss falloff (decision 13).
     let pl: usize = rd(va(base(), data::MAIN_PLAYER));
     let row = if pl != 0 { kh1_row_of(pl) } else { None };
+    super::revenge::note_swing(row);
     let hp: i32 = rd(enemy + 0x274);
     // Damage = Re:CoM (owner, 2026-11-01): the part carries Re:CoM's card / sleight AP from the
     // swing's start (`super::damage`); Re:CoM's path applies it as is.
@@ -710,6 +713,7 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
 /// call. The card-interrupt bit as for a swing (decision 14). Spells charge no MP (KH1 `+0x2C`
 /// = 0).
 unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64 {
+    super::revenge::note_spell(s);
     if s == crate::magic::spell::STOP {
         return stop_hit(enemy, part, lv, o);
     }
