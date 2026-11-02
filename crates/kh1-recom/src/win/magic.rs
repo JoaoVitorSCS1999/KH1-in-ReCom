@@ -712,8 +712,8 @@ unsafe fn release_stop(pl: usize, c: &CastStart) -> Option<u32> {
 /// One Stop strike (KH1's sys 60 with the Stop data): **Re:CoM's Stop case for this enemy**
 /// (`0x140222170` case `0x27` with a target, Checked (disasm `0x140222BBA..0x140222CB0`)): its
 /// `CBullet` (flags `0x25`, speed 0, the row's range / life / radius × 0.1, its `stop_all` set) at the
-/// enemy's aim point, its attack held off; then Re:CoM's apply onto the enemy's first live hurt
-/// body (7.6's mechanism). Re:CoM's hit handler then runs its kind 8 (the stop state) with KH1's
+/// enemy's aim point, its attack held off; then Re:CoM's contact and apply onto the enemy's first
+/// live hurt body (7.6's mechanism, [`strike_body`]). Re:CoM's hit handler then runs its kind 8 (the stop state) with KH1's
 /// duration (`spell_hit`). The shot's id.
 #[allow(clippy::too_many_arguments)]
 unsafe fn stop_strike(pl: usize, enemy: usize, h: u32, level: u8, kind: u32, attr: u32, ap: i32) -> Option<u32> {
@@ -752,7 +752,7 @@ unsafe fn stop_strike(pl: usize, enemy: usize, h: u32, level: u8, kind: u32, att
     let id: u32 = rd(bullet + 0x20);
     remember_shot(id, mg::spell::STOP, level, 0);
     let res = apply_to(bullet, enemy);
-    bolt_line(|| format!("stop on {h:#x}: shot {id}, Re:CoM's apply -> {res:?}"));
+    bolt_line(|| format!("stop on {h:#x}: shot {id}, Re:CoM's contact and apply -> {res:?}"));
     Some(id)
 }
 
@@ -1041,22 +1041,109 @@ unsafe fn hold_off(bullet: usize) {
     }
 }
 
-/// Re:CoM's apply (`CCollAttack` vtable `+0x38`) of a shot's attack on an enemy's first live hurt
-/// body: what Re:CoM's collision pass calls once its overlap test passes (7.6). Only through
-/// Re:CoM's own slots.
-unsafe fn apply_to(bullet: usize, enemy: usize) -> Option<u32> {
+/// A shot's attack struck on an enemy (7.8's impact, 7.9's Stop): [`strike_body`] on the shot's
+/// `CCollAttack` (`bullet+0x2A8`).
+unsafe fn apply_to(bullet: usize, enemy: usize) -> Result<u32, &'static str> {
+    strike_body(rd(bullet + 0x2A8), enemy)
+}
+
+/// Re:CoM's collision context: its pass gives it to every overlap test (`mov rcx,[0x14087A870]`
+/// before each test call, `0x14016EBB3` / `0x14016EBEC`; `sites::MAGIC_CHECKED`).
+const COLL_CONTEXT: u64 = 0x1_4087_A870;
+/// Re:CoM's overlap tests its pass runs for a sphere attack (`crate::magic::strike_contact`):
+/// sphere body `0x1401777E0(ctx, body shape, attack shape)`, capsule body `0x140176FA0(ctx, body
+/// shape, attack shape, 0)`; the KH1 blade test calls the same two (`win::attack`). Byte-checked
+/// (`sites::ATTACK_CALLEES`).
+const TEST_SPHERE: u32 = 0x0017_77E0;
+const TEST_CAPSULE: u32 = 0x0017_6FA0;
+
+/// Collision shape fields (`0x1401720E0`, the tests above). Checked (decomp).
+mod shape {
+    /// The sweep: from (`+0x10`) to (`+0x20`); the contact the tests write (`+0x50`).
+    pub const FROM: usize = 0x10;
+    pub const TO: usize = 0x20;
+    pub const CONTACT: usize = 0x50;
+    pub const KIND: usize = 0x60;
+    pub const FLAGS: usize = 0x64;
+    pub const RADIUS: usize = 0x70;
+    pub const Y_OFFSET: usize = 0x74;
+}
+
+/// A hurt body's shape as the tests read it (each y + the shape's `+0x74`); kinds 2, 4, 5.
+unsafe fn body_shape(s: usize) -> Option<mg::BodyShape> {
+    let pt = |o: usize| {
+        let v: [f32; 4] = rd(s + o);
+        [v[0], v[1] + rd::<f32>(s + shape::Y_OFFSET), v[2]]
+    };
+    let r: f32 = rd(s + shape::RADIUS);
+    match rd::<u32>(s + shape::KIND) {
+        2 => Some(mg::BodyShape::Sphere { c: pt(shape::TO), r }),
+        4 | 5 => Some(mg::BodyShape::Column { a: pt(shape::FROM), b: pt(shape::TO), r }),
+        _ => None,
+    }
+}
+
+/// One strike of ours on an enemy, as Re:CoM's collision pass (`0x14016EAD0`) strikes a body:
+/// the enemy's first live hurt body the pass would test against this attack, **Re:CoM's own
+/// overlap test** for the pair (the attack's sweep set straight down onto the body,
+/// `crate::magic::strike_contact::sweep`), then, on its contact, the attack's apply (`CCollAttack`
+/// vtable `+0x38` = `0x14016F1C0`). The test is what gives the body's shape its contact point
+/// (`+0x50`), the point Re:CoM's defeat (`0x14017BBC0`) makes the death effect and the enemy's
+/// prizes at: without it a strike that killed left the prizes at whatever the shape held (never
+/// written: allocation garbage), which can be non-finite (the battle-end soft-lock,
+/// `docs/recom-m7-magic.md` § Strikes and Re:CoM's contact). The attack stays off for Re:CoM's
+/// own pass (Re:CoM's "off", vtable `+8`). Only through Re:CoM's own slots and functions.
+unsafe fn strike_body(coll: usize, enemy: usize) -> Result<u32, &'static str> {
     type ApplyFn = unsafe extern "win64" fn(usize, usize) -> u32;
-    let c: usize = rd(bullet + 0x2A8);
-    let b = bodies(enemy).first().map(|b| b.0)?;
-    if c == 0 {
-        return None;
+    type TestFn = unsafe extern "win64" fn(usize, usize, usize, i32) -> u8;
+    use mg::strike_contact as sc;
+    if coll == 0 {
+        return Err("no attack");
     }
-    let vt: usize = rd(c);
+    let vt: usize = rd(coll);
     if rd::<usize>(vt + 8) != base() + COLL_OFF as usize || rd::<usize>(vt + 0x38) != base() + COLL_APPLY as usize {
-        return None;
+        return Err("the shot's attack is not a CCollAttack");
     }
-    func::<PlFn>(COLL_OFF)(c);
-    Some(func::<ApplyFn>(COLL_APPLY)(c, b))
+    let attack: usize = rd(coll + 0x18);
+    let ctx: usize = rd(va(base(), COLL_CONTEXT));
+    if attack == 0 || ctx == 0 {
+        return Err("no attack shape or collision context");
+    }
+    let kind: u32 = rd(attack + shape::KIND);
+    let info: usize = rd(enemy + 0xF8);
+    if info == 0 {
+        return Err("no hurt bodies");
+    }
+    let parts: usize = rd(info + 0x40);
+    let n: i32 = rd(info + 0x38);
+    let found = (0..n.clamp(0, 32) as usize).find_map(|i| {
+        let part = parts + i * 0x120;
+        let s: usize = rd(part + 0x18);
+        if rd::<i32>(part + 0x10) == 0 || s == 0 {
+            return None;
+        }
+        let test = sc::test_for(rd(s + shape::KIND), kind, rd(s + shape::FLAGS))?;
+        Some((part, s, test, body_shape(s)?))
+    });
+    let Some((part, s, test, body)) = found else {
+        return Err("no hurt body Re:CoM's pass hits with this attack");
+    };
+    let (from, to) = sc::sweep(test, &body, rd(attack + shape::RADIUS), rd(attack + shape::Y_OFFSET));
+    wr(attack + shape::FROM, from);
+    wr(attack + shape::TO, to);
+    let contact = match test {
+        sc::Test::Sphere => func::<TestFn>(TEST_SPHERE)(ctx, s, attack, 0),
+        sc::Test::Capsule => func::<TestFn>(TEST_CAPSULE)(ctx, s, attack, 0),
+    };
+    func::<PlFn>(COLL_OFF)(coll);
+    if contact == 0 {
+        return Err("Re:CoM's overlap test found no contact (no hit, as in its pass)");
+    }
+    let p: [f32; 3] = rd(s + shape::CONTACT);
+    if !sc::finite(p) {
+        return Err("Re:CoM's overlap test left a non-finite contact; no hit");
+    }
+    Ok(func::<ApplyFn>(COLL_APPLY)(coll, part))
 }
 
 /// Our shot by its id (Re:CoM's entity handle, `+0x20`, resolved by `0x1402AD350` as the apply
@@ -1174,8 +1261,9 @@ fn squashing() -> bool {
 
 /// One run of Gravity's falling threads (Sora's frame start): the sphere's KH1 growth, and at the
 /// impact KH1's strikes (`L0044c`): every alive enemy whose bodies touch the 1.7 × S m sphere at the
-/// centre, struck once with the sphere's attack through Re:CoM's apply. If the sphere is gone
-/// (Re:CoM ended it on a wall), a held bolt like 7.6's carries the strikes. Each fall frame before
+/// centre, struck once with the sphere's attack through Re:CoM's contact and apply
+/// ([`strike_body`]). If the sphere is gone (Re:CoM ended it on a wall), a held bolt like 7.6's
+/// carries the strikes. Each fall frame before
 /// the impact also squashes the enemies under the sphere (`L0055c`, M7 f2: [`squash_frame`]).
 unsafe fn gravity_frame(pl: usize, step: f32) {
     let mut due = Vec::new();
@@ -1205,9 +1293,9 @@ unsafe fn gravity_frame(pl: usize, step: f32) {
             if !bodies(e).iter().any(|(_, b)| mg::body_touches(centre, area, b)) {
                 continue;
             }
-            let res = carrier.and_then(|c| apply_to(c, e));
+            let res = carrier.ok_or("no carrier").and_then(|c| apply_to(c, e));
             n += 1;
-            bolt_line(|| format!("gravity{level} impact on {h:#x}: Re:CoM's apply -> {res:?}"));
+            bolt_line(|| format!("gravity{level} impact on {h:#x}: Re:CoM's contact and apply -> {res:?}"));
         }
         event(format!("impact gravity{level} shot {shot} n{n}"));
     }
@@ -1567,19 +1655,12 @@ unsafe fn bodies(enemy: usize) -> Vec<(usize, mg::BodyShape)> {
     let n: i32 = rd(info + 0x38);
     for i in 0..n.clamp(0, 32) as usize {
         let part = parts + i * 0x120;
-        let shape: usize = rd(part + 0x18);
-        if rd::<i32>(part + 0x10) == 0 || shape == 0 {
+        let s: usize = rd(part + 0x18);
+        if rd::<i32>(part + 0x10) == 0 || s == 0 {
             continue;
         }
-        let pt = |o: usize| {
-            let v: [f32; 4] = rd(shape + o);
-            [v[0], v[1] + rd::<f32>(shape + 0x74), v[2]]
-        };
-        let r: f32 = rd(shape + 0x70);
-        match rd::<u32>(shape + 0x60) {
-            2 => out.push((part, mg::BodyShape::Sphere { c: pt(0x20), r })),
-            4 | 5 => out.push((part, mg::BodyShape::Column { a: pt(0x10), b: pt(0x20), r })),
-            _ => {}
+        if let Some(b) = body_shape(s) {
+            out.push((part, b));
         }
     }
     out
@@ -1702,13 +1783,13 @@ unsafe fn strike_step(pl: usize, step: f32, only: Option<usize>) -> Vec<u32> {
 
 /// One bolt (KH1's sys 160): Re:CoM's Thunder case for this enemy (its bolt effect, its `CBullet`
 /// with the cast's kind / attribute / AP, the attack held off), then **Re:CoM's own hit path
-/// directly**: the bolt's attack applied to the enemy's first live hurt body with the attack's
-/// apply (`CCollAttack` vtable `+0x38` = `0x14016F1C0`), the call Re:CoM's collision pass
-/// (`0x14016EAD0`) makes once its overlap test passes. Re:CoM then runs the enemy's hit (its
-/// handler, our KH1 damage on it, the reaction, the hit effect). The bolt's id.
+/// directly**: as Re:CoM's collision pass (`0x14016EAD0`) strikes a body, Re:CoM's own overlap
+/// test for the bolt and the enemy's first live hurt body (the bolt falling onto it), then the
+/// attack's apply (`CCollAttack` vtable `+0x38` = `0x14016F1C0`) ([`strike_body`]). Re:CoM then
+/// runs the enemy's hit (its handler, our KH1 damage on it, the reaction, the hit effect) and, if
+/// it dies, its death effect and prizes at the test's contact. The bolt's id.
 #[allow(clippy::too_many_arguments)]
 unsafe fn strike(pl: usize, enemy: usize, h: u32, level: u8, kind: u32, attr: u32, ap: i32) -> Option<u32> {
-    type ApplyFn = unsafe extern "win64" fn(usize, usize) -> u32;
     let r = row(mg::spell::THUNDER, level)?;
     let aim = aim_point(enemy);
     let sora: [f32; 4] = rd(pl + PLAYER_POS);
@@ -1746,25 +1827,10 @@ unsafe fn strike(pl: usize, enemy: usize, h: u32, level: u8, kind: u32, attr: u3
     func::<MoverFn>(SHOT_MOVER)(bullet, 0.1, 0.0, 0, -1);
     let id: u32 = rd(bullet + 0x20);
     remember_shot(id, mg::spell::THUNDER, level, 0);
-    let coll: usize = rd(bullet + 0x2A8);
-    let body = bodies(enemy).first().map(|b| b.0);
-    let res = match (coll, body) {
-        (0, _) | (_, None) => None,
-        (c, Some(b)) => {
-            // The bolt's own collision stays off (Re:CoM's own "off", the slot its init calls for a
-            // held collision): its one hit is this strike. Only through Re:CoM's own slots.
-            let vt: usize = rd(c);
-            let (off, apply) = (rd::<usize>(vt + 8), rd::<usize>(vt + 0x38));
-            if off != base() + COLL_OFF as usize || apply != base() + COLL_APPLY as usize {
-                bolt_line(|| format!("bolt on {h:#x}: the shot's attack is not a CCollAttack (off {off:#x}, apply {apply:#x}); no strike"));
-                None
-            } else {
-                func::<PlFn>(COLL_OFF)(c);
-                Some(func::<ApplyFn>(COLL_APPLY)(c, b))
-            }
-        }
-    };
-    bolt_line(|| format!("bolt on {h:#x}: shot {id}, Re:CoM's apply -> {res:?} (1 hit, 2 / 3 guarded, 0 already hit)"));
+    // The bolt's own collision stays off (Re:CoM's own "off", the slot its init calls for a held
+    // collision): its one hit is this strike, with Re:CoM's own contact ([`strike_body`]).
+    let res = strike_body(rd(bullet + 0x2A8), enemy);
+    bolt_line(|| format!("bolt on {h:#x}: shot {id}, Re:CoM's contact and apply -> {res:?} (1 hit, 2 / 3 guarded, 0 already hit)"));
     Some(id)
 }
 

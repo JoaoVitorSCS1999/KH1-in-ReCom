@@ -28,6 +28,7 @@ static ON: AtomicBool = AtomicBool::new(false);
 /// Where the look table with the KH1 item row lives (for the start line).
 static TABLE: AtomicUsize = AtomicUsize::new(0);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(120);
+static BAD_POINT_LINES: AtomicU32 = AtomicU32::new(20);
 
 /// Re:CoM's prize factory, the entity factory getter, the angle normaliser and its random float.
 /// Byte-checked (`sites::DROP_CALLEES`, `MAGIC_CALLEES`).
@@ -104,6 +105,15 @@ pub fn mark_installed() {
 /// The defeat's card prize (`0x140180D20(enemy, &point)`): Re:CoM's own first, then, at Combat =
 /// KH1 in Sora's story, the twin's KH1 item drops at the same point.
 pub unsafe extern "win64" fn defeat_prize(enemy: usize, point: usize) -> u64 {
+    // Battle-end diagnostics: the defeat's point (`0x14017BBC0`: the killing hit's body shape
+    // `+0x50`, Re:CoM's contact) is where all the enemy's prizes were just made. A non-finite one
+    // makes prizes that can never be picked up (the battle-end soft-lock).
+    if point != 0 {
+        let p: [f32; 3] = rd(point);
+        if !crate::magic::strike_contact::finite(p) && BAD_POINT_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+            log(&format!("battle end: enemy {enemy:#x} defeated at a non-finite point ({}, {}, {}): its prizes can't be picked up", p[0], p[1], p[2]));
+        }
+    }
     let r = orig::<DefeatFn>(&ORIG_DEFEAT_PRIZE)(enemy, point);
     if ON.load(Ordering::Acquire) && enemy != 0 && point != 0 && super::movement::kh1_on() && rd::<usize>(enemy + ENP_ROW) != 0 {
         drop_items(enemy, point);

@@ -11,6 +11,26 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 92: Battle-end softlock: KH1 strikes take Re:CoM's contact point; no new KH1 command after the win, version 0.50.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "ending a battle with magic still softlocks the game" (log: the battle manager
+  waits on 5 EXP prizes that never arrive).
+- Cause (Checked (decomp + disasm); the prizes' non-finite positions: Assumption, the old log read the
+  wrong field): the manager `0x1401871D0` waits for its children; an EXP prize (update `0x140231010`) is
+  collected only within 2 m of Sora's `+0x4B0` (`0x140231318`), no timeout. Re:CoM's defeat `0x14017BBC0`
+  puts an enemy's prizes at the killing hit's body contact `+0x50`, written only by Re:CoM's overlap tests
+  (`0x1401777E0` / `0x140176FA0`, run by its collision pass `0x14016EAD0`). Our Thunder / Gravity / Stop
+  strikes called the hit apply directly: a kill by them dropped prizes at a stale or garbage point (NaN →
+  never arrives → softlock).
+- Fix: `win::magic::strike_body` runs Re:CoM's own overlap test (its pair rule) before the apply, as the
+  collision pass does. After Re:CoM's win (`player+0x428 & 4`, as `0x1401E9180` refuses card plays) no new
+  KH1 Attack / Counter / spell / item starts. Battle-end log shows each prize's real position, flags,
+  Sora's prize target; a non-finite defeat point is logged.
+- Checked: tests, Windows build, site bytes (two new check-only sites in the collision pass). Not checked: in
+  game.
+
+---
+
 ## Stage 91: KH1 camp: one Items menu with Sora's Keyblade slot and item slots, version 0.49.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "I would like one menu inside of the "KH1" menu for "Items" in "items," i want a

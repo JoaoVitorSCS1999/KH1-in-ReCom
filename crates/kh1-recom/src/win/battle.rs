@@ -472,6 +472,49 @@ unsafe fn ctrl_line(c: usize) -> String {
     format!("layers {} id {:#x} done {}", rd::<u8>(c + CTRL_LAYERS), rd::<u32>(c + CTRL_LAYER0), func::<LayerDoneFn>(LAYER_DONE)(c, 0) != 0)
 }
 
+/// The player prizes home to (`0x140231010`, `0x140230C70`: `DAT_14087B380`). Checked (decomp).
+const PRIZE_PLAYER: u64 = 0x1_4087_B380;
+
+/// A point, "NON-FINITE" when it is one (`crate::magic::strike_contact::finite`).
+fn v3(p: [f32; 3]) -> String {
+    let s = format!("({:.2},{:.2},{:.2})", p[0], p[1], p[2]);
+    if crate::magic::strike_contact::finite(p) {
+        s
+    } else {
+        format!("{s} NON-FINITE")
+    }
+}
+
+/// One `CPrize` (kinds ≥ 0xCB step in `0x140231010`; Checked (decomp)): its state `+0x240`, kind
+/// `+0x244`, amount `+0x248`, launch speed `+0x24C`, effect `+0x250`, `+0x254`, "may be pulled"
+/// `+0x258`, "arrived" `+0x25C` (set once within 2 m of the prize target: the pickup's start),
+/// reward mode `+0x260`; its timer `+0x160`, step `+0x14`; its mover (`+0xF0`): position `+0x30`,
+/// velocity `+0x80`, flags `+0x118` (1: no map collision, 4: gravity, 8: frozen) and contact
+/// `+0x120`.
+unsafe fn prize_line(obj: usize) -> String {
+    let w: Vec<String> = (0..9).map(|i| format!("{:x}", rd::<u32>(obj + 0x240 + 4 * i))).collect();
+    let m: usize = rd(obj + 0xF0);
+    let mover = if m != 0 {
+        format!(
+            "at {} v {} mover {:#x}/{:#x}",
+            v3(rd(m + 0x30)),
+            v3(rd(m + 0x80)),
+            rd::<u32>(m + 0x118),
+            rd::<u32>(m + 0x120)
+        )
+    } else {
+        "no mover".into()
+    };
+    format!(
+        "CPrize flags {:#x} kind {:#x} [{}] timer {} step {} {mover}",
+        rd::<u16>(obj + task_f::FLAGS),
+        rd::<i32>(obj + 0x244),
+        w.join(" "),
+        rd::<i32>(obj + 0x160),
+        rd::<i32>(obj + task_f::STEP)
+    )
+}
+
 /// What the line adds for the state Re:CoM waits in: the manager's children (state 1), the prize
 /// gauge's task and displays (states 2, 3), our KH1 side.
 unsafe fn end_detail(v: &be::View) -> String {
@@ -487,13 +530,7 @@ unsafe fn end_detail(v: &be::View) -> String {
                 if obj != 0 {
                     let name = class_name(obj);
                     if name == "CPrize" {
-                        // Diagnostics for the stuck battle end (owner, 2026-11-01: the manager
-                        // waited on 5 CPrize): the prize's kind (+0x244, card kinds 0x31..0x42 per
-                        // `0x140230E40`), +0x248, the words +0x240..+0x260 and +0x30..+0x3C (the
-                        // position: Assumption).
-                        let w: Vec<String> = (0..8).map(|i| format!("{:x}", rd::<u32>(obj + 0x240 + 4 * i))).collect();
-                        let pos = [rd::<f32>(obj + 0x30), rd::<f32>(obj + 0x34), rd::<f32>(obj + 0x38)];
-                        names.push(format!("CPrize flags {:#x} kind {:#x} [{}] at ({:.2},{:.2},{:.2})", rd::<u16>(obj + task_f::FLAGS), rd::<i32>(obj + 0x244), w.join(" "), pos[0], pos[1], pos[2]));
+                        names.push(prize_line(obj));
                     } else {
                         names.push(format!("{name} flags {:#x}", rd::<u16>(obj + task_f::FLAGS)));
                     }
@@ -507,6 +544,15 @@ unsafe fn end_detail(v: &be::View) -> String {
     let g: usize = rd(va(base(), PRIZE_GAUGE));
     if g != 0 {
         d.push(format!("prize gauge {g:#x}: {}; EXP ctrl {}; card ctrl {}", task_line(g), ctrl_line(rd(g + PRIZE_EXP_CTRL)), ctrl_line(rd(g + PRIZE_CARD_CTRL))));
+    }
+    // What the prizes home to and measure their arrival against (`0x140231010` state 1: the
+    // prize player's vtable +0x50 = `+0x4B0`; the attraction radius `+0x550`, 50 m in the win).
+    let pp: usize = rd(va(base(), PRIZE_PLAYER));
+    if pp != 0 {
+        let t: [f32; 3] = rd(pp + 0x4B0);
+        let body: usize = rd(pp + 0xF0);
+        let b: [f32; 3] = if body != 0 { rd(body + 0x30) } else { [0.0; 3] };
+        d.push(format!("prize target {} body {} radius {:.1}", v3(t), v3(b), rd::<f32>(pp + 0x550)));
     }
     let (strikes, falls) = super::magic::threads_running();
     let ours = match mv::SORA.try_lock() {

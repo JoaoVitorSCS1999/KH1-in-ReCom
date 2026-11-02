@@ -585,6 +585,10 @@ impl Host for RecomHost {
     fn end_item(&mut self, airborne: bool) -> bool {
         unsafe { super::items::end_item(self.pl, airborne) }
     }
+
+    fn battle_won(&mut self) -> bool {
+        unsafe { rd::<u32>(self.pl + p::CARD) & crate::battle::end::WIN_PENDING != 0 }
+    }
 }
 
 /// One KH1 frame for the player.

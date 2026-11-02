@@ -310,6 +310,9 @@ impl Host for FakeRecom {
         self.item_ends += 1;
         self.end_action()
     }
+    fn battle_won(&mut self) -> bool {
+        self.win_pending
+    }
     fn spring_jump(&mut self) -> bool {
         if !spring::launches(spring::ABILITY, || if self.on_spring { spring::ON_SPRING } else { 0 }) {
             return false;
@@ -1252,6 +1255,57 @@ fn a_cast_that_ends_after_the_win_yields_to_re_coms_win_action() {
     }
     assert_eq!(p.recom.cast_ends, 1);
     assert_ne!(p.recom.act.id, WIN_ACTION);
+}
+
+/// The owner's 0.47.0 log: the last enemy fell to a fast Firaga and another Firaga was cast after
+/// "battle end: started" (shot 670). Re:CoM starts no card once its battle is won (its card-use
+/// test `0x1401E9180` answers no while `player+0x428 & 4`); the KH1 frame takes no new command
+/// then: the Fire re-cast, Attack and items are refused, the running cast ends as it does and
+/// Re:CoM's end action enters the win.
+#[test]
+fn no_new_kh1_command_once_re_coms_battle_is_won() {
+    use crate::battle::end::WIN_ACTION;
+    use crate::magic::CastEvent;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    step_cast(&mut p, Pad::default(), Some(FIRE1));
+    while !released(&step_cast(&mut p, Pad::default(), None)) {}
+    // The ball kills the last enemy: Re:CoM's win is pending from here on.
+    p.recom.win_pending = true;
+    let mut took = false;
+    for k in 0..160 {
+        // A fresh Attack press and a Fire command every other frame.
+        let press = k % 2 == 0;
+        let out = step_cast(&mut p, Pad { attack: press, ..Default::default() }, press.then_some(FIRE1));
+        assert!(!out.cast.iter().any(|e| matches!(e, CastEvent::Started { .. })), "{:?}", out.cast);
+        if out.recom_took {
+            took = true;
+            break;
+        }
+        if press {
+            assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Refused { why: "battle won", .. })), "{:?}", out.cast);
+        }
+        assert!(p.ours.swing.is_none(), "no swing after the win");
+    }
+    assert!(took, "the running cast ended into Re:CoM's win");
+    assert_eq!(p.recom.casts.len(), 1, "no re-cast after the win");
+    assert_eq!(p.recom.releases.len(), 1);
+    assert_eq!(p.recom.cast_ends, 1);
+    assert_eq!(p.recom.act.id, WIN_ACTION);
+    // An item command once the battle is won: refused, no item action.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..5 {
+        step_item(&mut p, Pad::default(), None);
+    }
+    p.recom.win_pending = true;
+    let out = step_item(&mut p, Pad::default(), Some(POTION0));
+    assert!(out.items.iter().any(|e| matches!(e, crate::items::ItemEvent::Refused { why: "battle won", .. })), "{:?}", out.items);
+    assert!(p.recom.items.is_empty());
+    // Before the win the same commands are taken as before.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_cast(&mut p, Pad::default(), None);
+    let out = step_cast(&mut p, Pad::default(), Some(FIRE1));
+    assert!(out.cast.iter().any(|e| matches!(e, CastEvent::Started { .. })));
 }
 
 // ---- M7 stage 7.4c: the Fire release's root curve ----

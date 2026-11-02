@@ -646,3 +646,48 @@ fn field_fx_wants_the_battle_set_only_for_kh1_casts_in_soras_story() {
     assert_eq!(branch_target(0x100, &[0x90, 0, 0, 0, 0]), None);
     assert_eq!(branch_target(0x100, &[0xE8, 0, 0, 0]), None);
 }
+
+#[test]
+fn strike_contact_takes_recoms_test_for_the_pair() {
+    use strike_contact::{test_for, Test, ATTACK_SPHERE};
+    // Re:CoM's key body | attack << 4 (`0x14016EAD0`): 0x22 sphere, 0x24 / 0x25 capsule.
+    assert_eq!(test_for(2, ATTACK_SPHERE, 0), Some(Test::Sphere));
+    assert_eq!(test_for(4, ATTACK_SPHERE, 0), Some(Test::Capsule));
+    assert_eq!(test_for(5, ATTACK_SPHERE, 0x10), Some(Test::Capsule));
+    // Other kinds: Re:CoM's pass never hits them (no test, no apply).
+    assert_eq!(test_for(1, ATTACK_SPHERE, 0), None);
+    assert_eq!(test_for(3, ATTACK_SPHERE, 0), None);
+    assert_eq!(test_for(2, 1, 0), None);
+    // Shape flags & 0xE == 6: the pass skips the body.
+    assert_eq!(test_for(2, ATTACK_SPHERE, 6), None);
+    assert_eq!(test_for(4, ATTACK_SPHERE, 0x17), None);
+    assert_eq!(test_for(4, ATTACK_SPHERE, 0x4), Some(Test::Capsule));
+}
+
+#[test]
+fn strike_sweep_falls_from_above_the_body_into_its_centre() {
+    use strike_contact::{sweep, Test, MARGIN_M};
+    // A sphere body: straight down from above its top (beyond both radii) to its centre; the
+    // sphere test reads the attack's points as they are.
+    let s = BodyShape::Sphere { c: [1.0, 2.8, -3.0], r: 0.6 };
+    let (a, b) = sweep(Test::Sphere, &s, 0.5, 0.5);
+    assert_eq!(b, [1.0, 2.8, -3.0]);
+    assert_eq!((a[0], a[2]), (1.0, -3.0));
+    assert!((a[1] - (2.8 + 0.6 + 0.5 + MARGIN_M)).abs() < 1e-6);
+    // The start is outside the summed radius, the end inside: Re:CoM's sweep test must contact.
+    assert!(a[1] - 2.8 > 0.6 + 0.5);
+    // A column body: from above its top end to its middle; the capsule test adds the attack's
+    // y offset to each point, so the raw points are lowered by it.
+    let c = BodyShape::Column { a: [0.0, 0.2, 0.0], b: [0.0, 1.4, 0.0], r: 0.4 };
+    let (a, b) = sweep(Test::Capsule, &c, 0.3, 0.5);
+    assert!((b[1] + 0.5 - 0.8).abs() < 1e-6);
+    assert!((a[1] + 0.5 - (1.4 + 0.4 + 0.3 + MARGIN_M)).abs() < 1e-6);
+    assert_eq!((a[0], a[2], b[0], b[2]), (0.0, 0.0, 0.0, 0.0));
+}
+
+#[test]
+fn strike_contact_finite_points() {
+    assert!(strike_contact::finite([0.0, -1.0, 2.0]));
+    assert!(!strike_contact::finite([f32::NAN, 0.0, 0.0]));
+    assert!(!strike_contact::finite([0.0, f32::NEG_INFINITY, 0.0]));
+}
