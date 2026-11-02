@@ -723,6 +723,35 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     r
 }
 
+/// Revenge moves untouchable (owner, 2026-11-02): a hit on a boss in the attack its revenge started
+/// (`super::revenge::untouchable`). Re:CoM's handler decides it with its own rule for an attacking
+/// enemy: no card-interrupt bit (decision 14's `0x2000000` not set for any source: swing, spell,
+/// Stop, turned-back shot), so it drops the hit while `+0x260 & 1` (`0x14017F8CB`): no damage, no
+/// reaction, the attack goes on. The KH1 swing's / spell's hit record is taken so it can't land on
+/// a later call; no MP charge (no hit landed). The Guard rule still sees the call (it skips a boss in
+/// its revenge attack). Returns Re:CoM's result and what the hit was.
+pub(super) unsafe fn untouchable_hit(enemy: usize) -> (u64, crate::revenge::IgnoredKind) {
+    use crate::revenge::IgnoredKind;
+    let o: PlRetFn = orig(&ORIG_ENEMY_HIT);
+    let kind = if take_kh1_hit(enemy).is_some() {
+        IgnoredKind::Swing
+    } else if super::magic::take_hit(enemy).is_some() {
+        IgnoredKind::Spell
+    } else {
+        IgnoredKind::Other
+    };
+    let hp: i32 = rd(enemy + 0x274);
+    let r = o(enemy);
+    super::guard::after_enemy_hit(enemy, r, hp);
+    let after: i32 = rd(enemy + 0x274);
+    if let Ok(mut g) = HIT_LOG.lock() {
+        if g.len() < 16 {
+            g.push(format!("e{:x}:untouchable:{kind:?}:dmg {}:hp {after}", enemy & 0x00FF_FFFF, hp - after));
+        }
+    }
+    (r, kind)
+}
+
 /// A KH1 spell shot's hit (M7 stage 7.4): KH1's spell damage (power + max MP through KH1's curve,
 /// the twin's or proxy's Defence, floor, cap and the element's resistance) as the hit part's
 /// value, as for a swing; Re:CoM's own path then applies its weak part and boss falloff
@@ -918,8 +947,11 @@ unsafe fn recom_stop_hit(enemy: usize, part: usize, lv: u8, o: PlRetFn) -> u64 {
 /// attack (the Shadow's script never masks its hurt parts, `actor+0x3A8`). Owner (2026-10-31,
 /// decision 26): at the KH1 setting, in Sora's story, enemies stay hittable while attacking, for
 /// every attacker, bosses included. Runs once per enemy attack start.
+///
+/// Except the attack a boss's revenge started (owner, 2026-11-02, "can't be damaged or interrupted
+/// during their retaliation move"): Re:CoM's own call runs for it (`super::revenge::begin_untouchable`).
 pub unsafe extern "win64" fn hurt_off(enemy: usize) {
-    if mv::kh1_on() && !super::stats::riku_story() {
+    if mv::kh1_on() && !super::stats::riku_story() && !super::revenge::begin_untouchable(enemy) {
         return;
     }
     orig::<PlFn>(&ORIG_HURT_OFF)(enemy)

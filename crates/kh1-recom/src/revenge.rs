@@ -11,16 +11,22 @@
 //! - the limit is set by the boss's AI (`trap_enemy_set_karma_limit`, table 2 #76,
 //!   `0x140431E30`); 100 when the AI sets none.
 //!
-//! Here (Re:CoM's own systems do the work): the counter lives in a 0x20-byte tail added to each
+//! Here (Re:CoM's own systems do the work): the counter lives in a 0x30-byte tail added to each
 //! boss body's allocation (Re:CoM's enemy factory `0x140188F40` allocates it: our patch raises the
 //! size immediate); the add is in the enemy-hit wrapper; the decay is worked out lazily at each
 //! hit and check from a game clock, minus the frames the boss spent in its flinch / blow-away
 //! states (counted in their step hooks); the check runs in the step of Re:CoM's flinch (state 11,
 //! `0x140184100`) and blow-away (state 12, `0x140182E50`); revenge starts the boss's own Re:CoM
 //! attack state with the transition Re:CoM's message 2 makes (as the cardless card play P1 does).
+//!
+//! Revenge moves untouchable (owner, 2026-11-02): while the boss plays the attack state its revenge
+//! started, Re:CoM's own rule for an attacking enemy holds: its hurt bodies go off at the state's
+//! begin (`0x14017DA80`, decision 26's skip not taken for this attack) and its hit handler drops
+//! every hit (`+0x260 & 1` without the card-interrupt bit: decision 14's bit not set for it). The
+//! window ends with the state (Re:CoM's `0x14017DA90`: bits 0 / 2 cleared, bodies back on).
 
 /// The tail's size (added to each boss body's allocation) and its fields.
-pub const TAIL: u32 = 0x20;
+pub const TAIL: u32 = 0x30;
 pub mod tail {
     /// `RVG1`, written when the tail is set up for this battle.
     pub const MAGIC: usize = 0;
@@ -36,6 +42,13 @@ pub mod tail {
     pub const FLAGS: usize = 0x18;
     /// The battle number the tail belongs to (u32).
     pub const BATTLE: usize = 0x1C;
+    /// The attack state the last revenge started (i32).
+    pub const STATE: usize = 0x20;
+    /// What the untouchable window ignored: [KH1 swings, KH1 spells, other hits, Guard reactions]
+    /// (u8 each, saturating; [`Ignored`]).
+    pub const IGNORED: usize = 0x24;
+    /// The game clock (60 Hz frames, f32) when the window began.
+    pub const START: usize = 0x28;
 }
 pub const MAGIC: u32 = u32::from_le_bytes(*b"RVG1");
 pub mod flag {
@@ -43,6 +56,66 @@ pub mod flag {
     pub const CHECKED: u32 = 1;
     /// Hades' limit dropped to 50 (KH2 never raises it again).
     pub const HADES_LOW: u32 = 2;
+    /// Revenge wrote its attack state as the next state; Re:CoM hasn't begun it yet.
+    pub const PENDING: u32 = 4;
+    /// The boss is in the attack state its revenge started (the untouchable window).
+    pub const UNTOUCHABLE: u32 = 8;
+}
+
+/// The enemy's "in an attack" bit (`+0x260 & 1`; Re:CoM's hit handler drops hits while it is set
+/// without the card-interrupt bit `0x2000000`, `0x14017F7E0` at `0x14017F8CB`). Checked (decomp).
+pub const ATTACKING: u64 = 1;
+
+/// Whether Re:CoM's own rule makes the boss untouchable now: the window is open (or its start is
+/// pending), Re:CoM still has the attack running (bit 0; its attack end `0x14017E540` and state end
+/// `0x14017DA90` clear it) and the boss lives.
+pub fn holds(tail_flags: u32, enemy_flags: u64, hp: i32) -> bool {
+    tail_flags & (flag::PENDING | flag::UNTOUCHABLE) != 0 && enemy_flags & ATTACKING != 0 && hp > 0
+}
+
+/// Whether the attack state Re:CoM is beginning (its current state object, `+0x60`, already the new
+/// one when the begin runs: `0x140242F50`) is the one revenge started.
+pub fn begins_revenge(tail_flags: u32, current: usize, revenge_state: usize) -> bool {
+    tail_flags & flag::PENDING != 0 && current == revenge_state
+}
+
+/// What one untouchable window ignored (the tail's four counters).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Ignored {
+    pub swings: u8,
+    pub spells: u8,
+    pub other: u8,
+    pub guards: u8,
+}
+
+/// What an ignored hit was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IgnoredKind {
+    Swing,
+    Spell,
+    Other,
+    Guard,
+}
+
+impl Ignored {
+    pub fn from_bytes(b: [u8; 4]) -> Ignored {
+        Ignored { swings: b[0], spells: b[1], other: b[2], guards: b[3] }
+    }
+    pub fn to_bytes(self) -> [u8; 4] {
+        [self.swings, self.spells, self.other, self.guards]
+    }
+    pub fn add(&mut self, k: IgnoredKind) {
+        let c = match k {
+            IgnoredKind::Swing => &mut self.swings,
+            IgnoredKind::Spell => &mut self.spells,
+            IgnoredKind::Other => &mut self.other,
+            IgnoredKind::Guard => &mut self.guards,
+        };
+        *c = c.saturating_add(1);
+    }
+    pub fn hits(&self) -> u32 {
+        self.swings as u32 + self.spells as u32 + self.other as u32
+    }
 }
 
 /// KH2's check frame in a damage motion (trigger 28 at frame 20; Hades' flinches at 30).
@@ -376,6 +449,38 @@ mod tests {
             }
         }
         assert_eq!(fired, Some(2), "{c:?}");
+    }
+
+    #[test]
+    fn untouchable_window_follows_recoms_attack_bit() {
+        // Pending (start written, not begun) and open windows hold while bit 0 is set and HP > 0.
+        assert!(holds(flag::PENDING, 1 | 4, 100));
+        assert!(holds(flag::UNTOUCHABLE | flag::CHECKED, 1, 1));
+        // Re:CoM's attack end cleared bit 0: hits land again.
+        assert!(!holds(flag::UNTOUCHABLE, 4, 100));
+        // Dead, or no window.
+        assert!(!holds(flag::UNTOUCHABLE, 1, 0));
+        assert!(!holds(flag::CHECKED | flag::HADES_LOW, 1, 100));
+        // Begins only for the state revenge started.
+        assert!(begins_revenge(flag::PENDING, 0x1000, 0x1000));
+        assert!(!begins_revenge(flag::PENDING, 0x1040, 0x1000));
+        assert!(!begins_revenge(flag::UNTOUCHABLE, 0x1000, 0x1000));
+    }
+
+    #[test]
+    fn ignored_counts_saturate() {
+        let mut i = Ignored::default();
+        i.add(IgnoredKind::Swing);
+        i.add(IgnoredKind::Spell);
+        i.add(IgnoredKind::Guard);
+        assert_eq!(i.hits(), 2);
+        assert_eq!(Ignored::from_bytes(i.to_bytes()), i);
+        for _ in 0..300 {
+            i.add(IgnoredKind::Other);
+        }
+        assert_eq!(i.other, 255);
+        // The tail's fields fit in it.
+        assert!(tail::START + 4 <= TAIL as usize && tail::IGNORED + 4 <= tail::START);
     }
 
     #[test]

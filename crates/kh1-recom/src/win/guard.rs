@@ -325,6 +325,13 @@ pub(super) unsafe fn after_enemy_hit(e: usize, r: u64, hp: i32) {
         block_log(|| format!("{name} id={id}: HP {now_hp}; no reaction"));
         return;
     }
+    // Revenge moves untouchable (owner, 2026-11-02): a block doesn't interrupt the attack a boss's
+    // revenge started.
+    if super::revenge::untouchable(e) {
+        super::revenge::guard_skipped(e);
+        block_log(|| format!("{name} id={id}: in the attack its revenge started (untouchable); no reaction"));
+        return;
+    }
     if flags & enemy::NO_REACTION != 0 {
         block_log(|| format!("{name} id={id}: flags {flags:#x} (bit 13: Re:CoM's hit handler gives no reaction); none"));
         return;

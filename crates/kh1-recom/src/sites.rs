@@ -593,10 +593,32 @@ pub const REVENGE_HOOKS: &[Site] = &[
     Site { name: "enemy flinch step (0x140184100)", rva: 0x0018_4100, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x40] },
     // rex push rbx; sub rsp,0x40
     Site { name: "enemy blow-away step (0x140182E50)", rva: 0x0018_2E50, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x40] },
+    // and qword [rcx+0x260],-6 (then `mov edx,-1; jmp 0x1401A2DB0`, checked in
+    // [`REVENGE_CHECKED`]): Re:CoM's attack-state end (vtable +0x440 default; clears bits 0 / 2,
+    // hurt bodies back on). Revenge moves untouchable (2026-11-02): closes the window. Only these 8
+    // bytes move; the function is a 0x12-byte leaf with no branch into it but its entry (Checked
+    // (exe): rel32 scan).
+    Site { name: "enemy attack-state end (0x14017DA90)", rva: 0x0017_DA90, expect: &[0x48, 0x83, 0xA1, 0x60, 0x02, 0x00, 0x00, 0xFA] },
+];
+
+/// Revenge moves untouchable: bytes the window relies on, checked at install (not patched).
+pub const REVENGE_CHECKED: &[Site] = &[
+    // The rest of `0x14017DA90` after the 8 bytes our hook moves: mov edx,-1; jmp 0x1401A2DB0
+    // (every hurt body back on), reached through the trampoline.
+    Site { name: "enemy attack-state end, its tail (0x14017DA98)", rva: 0x0017_DA98, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0xE9, 0x0E, 0x53, 0x02, 0x00] },
+    // Vexen's +0x438: push rbx; sub rsp,0x20; mov rbx,rcx; call 0x14017DA80 (the hurt-off hook,
+    // enemy still in rcx), then his own extras.
+    Site { name: "CBossVexen hurt off calls 0x14017DA80 (0x1403B3260)", rva: 0x003B_3260, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0xE8, 0x12, 0xA8, 0xDC, 0xFF] },
+    // Marluxia 2's +0x438: mov [rsp+8],rbx; push rdi; sub rsp,0x20; mov rbx,rcx; call 0x14017DA80,
+    // then its two parts' bodies off.
+    Site { name: "CBossMarluxia2 hurt off calls 0x14017DA80 (0x140400410)", rva: 0x0040_0410, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0xE8, 0x5E, 0xD6, 0xD7, 0xFF] },
+    // Marluxia 2's +0x440: mov [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x20;
+    // mov rsi,rcx; call 0x14017DA90, then its parts.
+    Site { name: "CBossMarluxia2 attack end calls 0x14017DA90 (0x140400460)", rva: 0x0040_0460, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xF1, 0xE8, 0x19, 0xD6, 0xD7, 0xFF] },
 ];
 
 /// Boss revenge: the enemy factory `0x140188F40`'s `mov ecx, size` for each revenge boss body
-/// (`crate::revenge::BOSSES`), raised by the counter's 0x20-byte tail at install. Checked (exe:
+/// (`crate::revenge::BOSSES`), raised by the counter's 0x30-byte tail at install. Checked (exe:
 /// each is the size passed to the allocator `0x1404ACE54` right before the class's ctor).
 pub const REVENGE_ALLOC: &[Site] = &[
     Site { name: "alloc CTutorialHood (0x140189517)", rva: 0x0018_9517, expect: &[0xB9, 0xE0, 0x0C, 0x00, 0x00] },
@@ -615,6 +637,9 @@ pub const REVENGE_ALLOC: &[Site] = &[
 
 /// Boss revenge: each revenge boss class's state 11 step (vtable `+0x1F8`) and state 12 step
 /// (`+0x210`) are the two hooked functions, so the check sees every boss flinch. Checked (exe).
+/// Revenge moves untouchable (2026-11-02): each class's attack-state begin extra `+0x438` reaches the
+/// hurt-off hook `0x14017DA80` (directly, or through Vexen's / Marluxia 2's own, which call it:
+/// [`REVENGE_CHECKED`]) and its end `+0x440` the attack-state end hook `0x14017DA90`. Checked (exe).
 pub const REVENGE_PTRS: &[PtrSite] = &[
     PtrSite { name: "CTutorialHood +0x1F8", rva: 0x0065_CD00, target: 0x0018_4100 },
     PtrSite { name: "CTutorialLeon +0x1F8", rva: 0x0065_DFE0, target: 0x0018_4100 },
@@ -640,6 +665,30 @@ pub const REVENGE_PTRS: &[PtrSite] = &[
     PtrSite { name: "CBossMarluxia +0x210", rva: 0x0067_ED70, target: 0x0018_2E50 },
     PtrSite { name: "CBossMarluxia2 +0x210", rva: 0x0067_B1A0, target: 0x0018_2E50 },
     PtrSite { name: "CBossMarluxia3 +0x210", rva: 0x0067_87C8, target: 0x0018_2E50 },
+    PtrSite { name: "CTutorialHood +0x438", rva: 0x0065_CF40, target: 0x0017_DA80 },
+    PtrSite { name: "CTutorialLeon +0x438", rva: 0x0065_E220, target: 0x0017_DA80 },
+    PtrSite { name: "CBossCloud +0x438", rva: 0x0066_0FE0, target: 0x0017_DA80 },
+    PtrSite { name: "CBossHades +0x438", rva: 0x0066_2470, target: 0x0017_DA80 },
+    PtrSite { name: "CBossHook +0x438", rva: 0x0066_B250, target: 0x0017_DA80 },
+    PtrSite { name: "CBossVexen +0x438", rva: 0x0066_3AE8, target: 0x003B_3260 },
+    PtrSite { name: "CBossRiku +0x438", rva: 0x0066_5088, target: 0x0017_DA80 },
+    PtrSite { name: "CBossLarxene +0x438", rva: 0x0066_69D0, target: 0x0017_DA80 },
+    PtrSite { name: "CBossAxel +0x438", rva: 0x0066_8110, target: 0x0017_DA80 },
+    PtrSite { name: "CBossMarluxia +0x438", rva: 0x0067_EF98, target: 0x0017_DA80 },
+    PtrSite { name: "CBossMarluxia2 +0x438", rva: 0x0067_B3C8, target: 0x0040_0410 },
+    PtrSite { name: "CBossMarluxia3 +0x438", rva: 0x0067_89F0, target: 0x0017_DA80 },
+    PtrSite { name: "CTutorialHood +0x440", rva: 0x0065_CF48, target: 0x0017_DA90 },
+    PtrSite { name: "CTutorialLeon +0x440", rva: 0x0065_E228, target: 0x0017_DA90 },
+    PtrSite { name: "CBossCloud +0x440", rva: 0x0066_0FE8, target: 0x0017_DA90 },
+    PtrSite { name: "CBossHades +0x440", rva: 0x0066_2478, target: 0x0017_DA90 },
+    PtrSite { name: "CBossHook +0x440", rva: 0x0066_B258, target: 0x0017_DA90 },
+    PtrSite { name: "CBossVexen +0x440", rva: 0x0066_3AF0, target: 0x0017_DA90 },
+    PtrSite { name: "CBossRiku +0x440", rva: 0x0066_5090, target: 0x0017_DA90 },
+    PtrSite { name: "CBossLarxene +0x440", rva: 0x0066_69D8, target: 0x0017_DA90 },
+    PtrSite { name: "CBossAxel +0x440", rva: 0x0066_8118, target: 0x0017_DA90 },
+    PtrSite { name: "CBossMarluxia +0x440", rva: 0x0067_EFA0, target: 0x0017_DA90 },
+    PtrSite { name: "CBossMarluxia2 +0x440", rva: 0x0067_B3D0, target: 0x0040_0460 },
+    PtrSite { name: "CBossMarluxia3 +0x440", rva: 0x0067_89F8, target: 0x0017_DA90 },
 ];
 
 /// Decision 35 (MP to full where Re:CoM fills HP). Moved bytes are whole, position-independent
@@ -1998,6 +2047,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         M6_BOSS_HOOKS,
         REVENGE_HOOKS,
         REVENGE_ALLOC,
+        REVENGE_CHECKED,
         MP_HOOKS,
         MP_CHECKED,
         MP_BAR_HOOKS,
