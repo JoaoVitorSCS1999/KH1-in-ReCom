@@ -612,6 +612,47 @@ Without `--out`, `kh1-recom-build --game .` writes both straight into
 `<mod_path>/recom/` (from `panacea_settings.txt`). Please send the step's printed `MP bar:` line
 and the `mp bar:` lines of `kh1-recom.log`.
 
+## The camp's item row (`FORM/0100/FO0100.SPR`, owner 2026-11-01)
+
+Owner: "for the item slots … lets use the green item symbol"; the plan "Yes, add it". Module
+`camp_rows`; design, addresses and checks: `docs/recom-m8-items.md` § Row looks.
+
+- **Reads:** Re:CoM `FORM/0100/FO0100.SPR`: the whole PKG entry with its PC assets.
+- **Adds:** to `camp:00` (SEQD 0 of `camp.lad`), after Re:CoM's 353 groups: one group (0x161),
+  a copy of Re:CoM's green row 0x131 with its icon's sprite group 85 (sprite 278, the Mickey
+  symbol) swapped for 83 (sprite 166, the item symbol of Re:CoM's Deck tabs). In the file itself
+  and in every PC asset that is a `camp.lad` (any language prefix) or a whole container with one;
+  any other asset is kept as it is. A set that is not Re:CoM Steam's stops it (a note; the item
+  rows keep 0x131).
+- **Writes**, under the manifest's root: `raw/FORM/0100/FO0100.SPR` (plain PKG entry, same asset
+  names, tags, date) and `kh1-camp-rows.json` (format `kh1-recom-assets camp-rows 1`). When it
+  can't be built, an older `kh1-camp-rows.json` there is removed.
+- **Prints** `camp item row: camp:00 group 0x161 = group 0x131 with sprite group 83 (item symbol)
+  for 85 added to [...] (PC assets of the entry: [...])`.
+- Checked (files): the session's base `FO0100.SPR` (no PC assets) reads back byte for byte and
+  patches as expected (`camp_rows::tests::owner_camp_file`, `KH1_FO0100_SPR` = its path). The PC
+  assets are not in the session.
+
+### Command for the owner
+
+The same run as before:
+
+```
+kh1-recom-build --game . --out kh1-playground/build-out/PL0001.ANN
+```
+
+Copy `kh1-playground/build-out/raw/FORM/0100/FO0100.SPR` and
+`kh1-playground/build-out/kh1-camp-rows.json` into the OpenKH mod folder under the same relative
+paths and add to its `mod.yml`:
+
+```yaml
+- {name: raw/FORM/0100/FO0100.SPR, method: copy, source: [{name: raw/FORM/0100/FO0100.SPR}]}
+- {name: kh1-camp-rows.json, method: copy, source: [{name: kh1-camp-rows.json}]}
+```
+
+Build in the Mods Manager and restart the game. Please send the step's `camp item row:` line and
+the `camp rows:` lines of `kh1-recom.log`.
+
 ## The command menu (`kh1-command-menu.json` and `FO0002.SPR`'s plates, M7 stage 7.3)
 
 Decision 34: KH1's command menu built from Re:CoM's own pieces, with KH1's own words. Module

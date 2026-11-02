@@ -24,6 +24,8 @@
 //!   `Word.bin` (`kh1-command-menu.json`) and Re:CoM's row plates as groups of `Cockpit:00`;
 //! - [`menu_sounds`]: KH1's command menu sounds (its own SCDs) for Re:CoM's sound banks;
 //! - [`recom_hp`]: Re:CoM's HP ring and bar turned 180° (`gauge:01`) for KH1's place;
+//! - [`camp_rows`]: the camp list's green row with Re:CoM's item symbol (`camp:00` in
+//!   `FORM/0100/FO0100.SPR`) and `kh1-camp-rows.json`;
 //! - [`flip`]: the "Re:CoM's content in KH1" model-writer test (`kh1-flip-test`).
 //!
 //! No game data is embedded; everything is read from the user's files at run time.
@@ -33,6 +35,7 @@
 
 pub mod ann;
 pub mod build;
+pub mod camp_rows;
 pub mod command_menu;
 pub mod convert;
 pub mod flip;

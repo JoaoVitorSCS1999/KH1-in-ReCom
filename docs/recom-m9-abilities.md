@@ -585,8 +585,8 @@ the blue magic row 0x133 (still the Customize page's, `recom-keyblade-equip.md`)
   symbol (the earlier Assumption in `recom-m8-items.md` § Row looks was wrong).
 - Checked (test): `abilities::tests::rows_are_recoms_green_mickey_row` (reads 0x131 from the
   checked table's bytes). No new site. Not seen in game yet.
-- Re:CoM's item symbol (for the Items page) is a separate question: `recom-m8-items.md` § Row looks
-  / The item symbol.
+- The Items page's rows take the asset step's green row with Re:CoM's item symbol instead
+  (`recom-m8-items.md` § Row looks / Built); the Abilities rows keep 0x131 (Mickey symbol).
 
 ### Logs
 

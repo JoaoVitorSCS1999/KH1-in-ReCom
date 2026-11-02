@@ -316,9 +316,12 @@ pub mod row_look {
     /// Sequence 0x131: green plate (0x80143200), icon sprite 278 tinted green (0x801EDC1E): the
     /// green **Mickey** symbol (owner, in game, 2026-11-01), not the item symbol. Re:CoM's item
     /// symbol is sprite 166 (sprite group 83; the Deck page's item-card tab, Checked (decomp +
-    /// files)), and no sequence of the camp list draws it on a row: `docs/recom-m8-items.md`
-    /// § Row looks.
+    /// files)); Re:CoM has no row with it, the asset step adds one ([`ITEM`]):
+    /// `docs/recom-m8-items.md` § Row looks.
     pub const GREEN: i32 = 2;
+    /// The asset step's group (`crate::camp_rows`): Re:CoM's green row 0x131 with the item symbol
+    /// (sprite 166). Only in the DLL's own 8-entry copy of the list table, never in Re:CoM's.
+    pub const ITEM: i32 = crate::camp_rows::ITEM_VARIANT;
 }
 
 /// Texts: NUL-terminated ASCII handed to Re:CoM's text items (as the Config row's are; seen in

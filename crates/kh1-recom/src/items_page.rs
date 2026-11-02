@@ -565,13 +565,14 @@ pub fn stocked_text(word: &[u8], count: u8) -> Vec<u8> {
 
 /// The row's look on Re:CoM's camp list (`crate::keyblades::row_look`; owner, 2026-11-01: "lets
 /// make "stock" have the item symbol, and make the box green", and every item slot of Sora's
-/// list likewise): the Stock row and Sora's item slots (filled or empty) take Re:CoM's green row.
-/// Its icon is the green Mickey symbol, not the item symbol (owner, in game, 2026-11-01): Re:CoM
-/// has no camp row with the item symbol (`docs/recom-m8-items.md` § Row looks); open. The
-/// Keyblade slot, the Sora row and the other windows keep the red row.
-pub fn row_look(l: Label) -> i32 {
-    use crate::keyblades::row_look::{GREEN, RED};
+/// list likewise; then "lets use the green item symbol"): the Stock row and Sora's item slots
+/// (filled or empty) take the asset step's green row with Re:CoM's item symbol when it is loaded
+/// (`item_row`, `crate::camp_rows`), else Re:CoM's green row 0x131 (its icon the green Mickey
+/// symbol). The Keyblade slot, the Sora row and the other windows keep the red row.
+pub fn row_look(l: Label, item_row: bool) -> i32 {
+    use crate::keyblades::row_look::{GREEN, ITEM, RED};
     match l {
+        Label::Owner(Owner::Stock) | Label::Slot(_) if item_row => ITEM,
         Label::Owner(Owner::Stock) | Label::Slot(_) => GREEN,
         _ => RED,
     }
@@ -645,14 +646,17 @@ mod tests {
 
     #[test]
     fn stock_and_item_slots_take_the_green_row() {
-        use crate::keyblades::row_look::{GREEN, RED};
-        assert_eq!(row_look(Label::Owner(Owner::Stock)), GREEN);
-        assert_eq!(row_look(Label::Slot(0)), GREEN, "an empty slot too");
-        assert_eq!(row_look(Label::Slot(crate::items::id::POTION)), GREEN);
-        assert_eq!(row_look(Label::Owner(Owner::Sora)), RED);
-        assert_eq!(row_look(Label::Keyblade), RED);
-        assert_eq!(row_look(Label::Stocked(crate::items::id::POTION, 3)), RED);
-        assert_eq!(row_look(Label::Yes), RED);
+        use crate::keyblades::row_look::{GREEN, ITEM, RED};
+        for item_row in [false, true] {
+            let green = if item_row { ITEM } else { GREEN };
+            assert_eq!(row_look(Label::Owner(Owner::Stock), item_row), green);
+            assert_eq!(row_look(Label::Slot(0), item_row), green, "an empty slot too");
+            assert_eq!(row_look(Label::Slot(crate::items::id::POTION), item_row), green);
+            assert_eq!(row_look(Label::Owner(Owner::Sora), item_row), RED);
+            assert_eq!(row_look(Label::Keyblade, item_row), RED);
+            assert_eq!(row_look(Label::Stocked(crate::items::id::POTION, 3), item_row), RED);
+            assert_eq!(row_look(Label::Yes, item_row), RED);
+        }
     }
     use crate::items::id::*;
 

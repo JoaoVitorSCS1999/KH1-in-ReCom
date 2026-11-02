@@ -934,7 +934,8 @@ and every item slot row of Sora's list likewise. The Keyblade slot and the "Sora
 - ~~Assumption: icon sprite 278 is the item symbol~~ **Wrong** (owner, in game, 2026-11-01): "for
   the item slots, the color is correct, but they have the green mickey symbol, but lets use the
   green item symbol". Sprite 278 is the green **Mickey** symbol. Below.
-- `items_page::tests::stock_and_item_slots_take_the_green_row` (renamed).
+- `items_page::tests::stock_and_item_slots_take_the_green_row` (renamed). Since then the item rows
+  take the asset step's group with the item symbol when it is loaded (below, § Built).
 - The Abilities page's rows now take 0x131 too (owner, same day: "have the abilities be green with
   the green mickey symbol"; `docs/recom-m9-abilities.md` § Rows).
 
@@ -975,7 +976,52 @@ and every item slot row of Sora's list likewise. The Keyblade slot and the "Sora
   Sleights page) too.
 - **So the item symbol on a green row needs one new sequence in `camp.lad`**: a copy of 0x131
   (green plate) whose icon animation draws sprite group 83 (sprite 166, as the Deck tabs draw it)
-  instead of 85, added by the asset step to the player's `FO0100.SPR` (as it already adds groups to
-  `FO0002.SPR`'s `Cockpit` and `gauge` sequences), with the item rows' set-up given a table holding
-  its id. Re:CoM would draw it like its own rows. This is a new asset file for the asset step, so
-  it waits for the owner (plan first). Until then the item rows keep 0x131 (green, Mickey symbol).
+  instead of 85. Owner: "Yes, add it" (2026-11-01). Built below.
+
+### Built: the asset step's item row (owner, 2026-11-01: "Yes, add it")
+
+- **Asset step** (`kh1-recom-assets` `camp_rows`, run by `kh1-recom-build`): reads Re:CoM's
+  `FORM/0100/FO0100.SPR` PKG entry with its PC assets, and appends **one animation group** to
+  `camp:00` (SEQD 0 of `camp.lad`) in the base file and in every PC asset that is a `camp.lad`
+  (any language prefix, e.g. `UK_camp.lad`) or a whole container holding one: 0x131's four
+  animations copied (empty piece, green plate sprite group 270 tinted 0x80143200, glow, icon), the
+  icon's sprite group **85 → 83**; frames, place (13, 10), tint 0x801EDC1E, flags and the group
+  record's own words as 0x131's. Re:CoM's 353 groups and every other record stay byte for byte.
+  The new group is **0x161** (353). It refuses a set that is not Re:CoM Steam's (another group
+  count, already patched, 0x131 without exactly one icon on sprite group 85, sprite groups 83 / 85
+  not one part each, the Deck's item tab 0xED not drawing 83), and every copy must give the same
+  group number. Writes `raw/FORM/0100/FO0100.SPR` (a plain PKG entry, same asset names, tags and
+  date, as `FO0002.SPR`) and `kh1-camp-rows.json` (format `kh1-recom-assets camp-rows 1`: set,
+  `base_groups` 353, `item_row` 353, `copy_of` 305, `icon_sprite_group` {from 85, to 83}, the files
+  patched, the base file's sha256). Without the entry (or on a refusal) it prints a note and removes
+  an older `kh1-camp-rows.json`.
+- **How a row gets it** (Checked (decomp)): `0x140112F10` keeps the table pointer it is given
+  (`CButton+0x10`) and plays `table[variant]` (`*(u16*)(table − 2 + 2 × (variant + 1))`); the
+  state change `0x140112E00` reads the kept table again for a new variant. Re:CoM's camp table
+  `0x1407C11F0` has 7 entries and a 0, so the new group needs its own entry: the DLL keeps an
+  8-entry table in its own memory (`win::keyblades::ITEM_TABLE`: Re:CoM's 7 entries read from the
+  image, then 0x161) for the life of the DLL and gives it to the set-up for every list row of our
+  pages while the item row is in use; variants 0..6 still mean Re:CoM's sequences, variant 7
+  (`keyblades::row_look::ITEM`) is ours. The Stock row and Sora's item slots take variant 7
+  (`items_page::row_look(label, item_row)`). No new hook or call site (`0x140112F10` and the table
+  site were already checked).
+- **Fallbacks**: no `kh1-camp-rows.json`, a manifest this DLL does not expect (`camp_rows::parse`),
+  or a loaded `camp:00` without exactly 354 groups (read from Re:CoM's 2D registry, as the MP bar
+  checks `Cockpit:00`; Panacea serving Re:CoM's own file, or an unpatched language copy) → Re:CoM's
+  own table and the green row 0x131 (Mickey symbol), as before. Logs: `camp rows: … item row =
+  camp:00 group 0x161 …` at start; `camp rows: camp:00 has N groups, not 354 …` once when the
+  loaded set lacks it.
+- Checked (files): `camp.lad` and `camp:00` of the session's `FO0100.SPR` (the base file, no PC
+  assets) read back byte for byte with the step's readers; patched, the new group 0x161 draws
+  sprite groups [46, 270, 46, 83] where 0x131 draws [46, 270, 46, 85]
+  (`camp_rows::tests::owner_camp_file` with `KH1_FO0100_SPR` = that file). Synthetic tests:
+  `camp_rows::tests` (asset crate: the copy, refusals, container + language copies, manifest) and
+  `camp_rows::tests` (DLL: manifest, our table = the checked bytes of `0x1407C11F0` + 0x161, the
+  loaded-set check), `items_page::tests::stock_and_item_slots_take_the_green_row`.
+- **Not checked**: the PC assets of the `FO0100.SPR` entry (which language copies exist, whether
+  they have Re:CoM's 353 groups): not in the session; the step prints them (`PC assets of the
+  entry: […]`) and which it patched. Assumption: Re:CoM draws `camp:00` from one of those copies
+  per language, as `Cockpit:00` (so all are patched). Not seen in game. Assumption: sprite 166
+  tinted 0x801EDC1E reads as the green item symbol (the atlas is not in the session; the Deck
+  tabs draw it untinted). If it looks wrong, the copy can keep 0x131's tint off for the icon
+  (Re:CoM's untinted draw) instead.
