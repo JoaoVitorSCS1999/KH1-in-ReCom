@@ -324,10 +324,14 @@ unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     wr(pl + field::ROW_PTR, row.as_ptr() as usize);
     func::<mv::MotionFn>(mv::MOTION_REQUEST)(pl, row[0] as i32, 0, s.root as u64, 0, 0, 0);
     wr(pl + field::CARD_7B4, 0i32);
-    // Re:CoM's cardless AP (the attack stat) until the KH1 twins' stats exist (fallback, logged).
+    // Re:CoM's cardless AP (the attack stat): at Damage = KH1 the KH1 numbers replace it per hit
+    // (`enemy_hit`); in the field it is Re:CoM's own field-swing AP.
     wr(pl + field::AP, rd::<i32>(pl + field::ATTACK_STAT));
     wr(pl + field::KIND, row[0xB] as u32);
     wr(pl + field::ATTR, 0u32);
+    // Damage = Re:CoM (owner, 2026-11-01), in battle: the row pick's card AP for the equipped
+    // Keyblade's card at this row's column, its attribute, Re:CoM's enemy-card rewrite.
+    super::damage::swing(pl, s.kh1_row);
     wr(pl + field::CHAINABLE, 0u32);
     wr(pl + field::PREV_SITUATION, s.recom_id);
     wr(pl + field::COUNTER, s.counter as i32);
@@ -653,10 +657,14 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     let pl: usize = rd(va(base(), data::MAIN_PLAYER));
     let row = if pl != 0 { kh1_row_of(pl) } else { None };
     let hp: i32 = rd(enemy + 0x274);
+    // Damage = Re:CoM (owner, 2026-11-01): the part carries Re:CoM's card / sleight AP from the
+    // swing's start (`super::damage`); Re:CoM's path applies it as is.
+    let recom = !super::damage::kh1();
+    let carried: i16 = rd(part + 0x92);
     // M9 9a: the % of HP rows (Gravity Break, Zantetsuken) read the current HP; Ripple Drive Sora's
     // max MP (KH1's default 2 when the MP block isn't live).
     let max_mp = super::mp::current().map_or(kh1_core::AttackerStats::default().max_mp, |v| v.1);
-    let kh1 = row.and_then(|r| super::stats::kh1_hit(enemy, r, super::stats::sora_level(), hp, max_mp));
+    let kh1 = if recom { None } else { row.and_then(|r| super::stats::kh1_hit(enemy, r, super::stats::sora_level(), hp, max_mp)) };
     if let Some(d) = kh1 {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
     }
@@ -676,7 +684,11 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     let after: i32 = rd(enemy + 0x274);
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {
-            g.push(format!("e{:x}:dmg {}:hp {}{}{}", enemy & 0x00FF_FFFF, hp - after, after, if force { ":card" } else { "" }, kh1.map_or(String::new(), |d| format!(":kh1 {d}"))));
+            let tag = match (recom, row) {
+                (true, Some(r)) => super::damage::swing_tag(r, carried as i32),
+                _ => kh1.map_or(String::new(), |d| format!(":kh1 {d}")),
+            };
+            g.push(format!("e{:x}:dmg {}:hp {}{}{}", enemy & 0x00FF_FFFF, hp - after, after, if force { ":card" } else { "" }, tag));
         }
     }
     r
@@ -695,7 +707,12 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
     }
     let max_mp = super::mp::current().map(|v| v.1);
     let hp_now: i32 = rd(enemy + 0x274);
-    let mut kh1 = crate::magic::spell_attack(s, lv).and_then(|data| max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m, hp_now)));
+    // Damage = Re:CoM (owner, 2026-11-01): Fire / Blizzard / Thunder carry their Re:CoM card's /
+    // sleight's AP and attribute from the cast (`super::damage::spell`); Re:CoM's path applies them
+    // (its resistance included). Gravity, Stop and Aero keep KH1's rules (owner questions).
+    let recom = super::damage::recom_spell_hits(s);
+    let carried: i16 = rd(part + 0x92);
+    let mut kh1 = if recom { None } else { crate::magic::spell_attack(s, lv).and_then(|data| max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m, hp_now))) };
     // Gravity on an enemy without KH1 numbers (7.8): KH1's % of its current HP at 100 % (KH1's
     // ordinary Heartless), at least 1. Re:CoM's own AP is no Gravity number.
     if kh1.is_none() && s == crate::magic::spell::GRAVITY {
@@ -726,10 +743,14 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
     super::guard::after_enemy_hit(enemy, r, hp);
     let after: i32 = rd(enemy + 0x274);
     let name = crate::magic::spell::NAMES.get(s as usize).copied().unwrap_or("?");
-    super::magic::hit_line(|| format!("hit {name}{lv} on {:#x}: KH1 {} (max MP {}), Re:CoM took {} -> HP {after}{}", enemy & 0x00FF_FFFF, kh1.map_or("- (no KH1 numbers: Re:CoM's)".to_string(), |d| d.to_string()), max_mp.unwrap_or(0), hp - after, if force { " (card broken)" } else { "" }));
+    super::magic::hit_line(|| {
+        let what = if recom { format!("Re:CoM AP {carried} ({})", super::damage::spell_tag(s, lv, carried as i32).trim_start_matches(':')) } else { format!("KH1 {}", kh1.map_or("- (no KH1 numbers: Re:CoM's)".to_string(), |d| d.to_string())) };
+        format!("hit {name}{lv} on {:#x}: {what} (max MP {}), Re:CoM took {} -> HP {after}{}", enemy & 0x00FF_FFFF, max_mp.unwrap_or(0), hp - after, if force { " (card broken)" } else { "" })
+    });
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {
-            g.push(format!("e{:x}:dmg {}:hp {after}{}:{name}{lv}{}", enemy & 0x00FF_FFFF, hp - after, if force { ":card" } else { "" }, kh1.map_or(String::new(), |d| format!(":kh1 {d}"))));
+            let tag = if recom { super::damage::spell_tag(s, lv, carried as i32) } else { kh1.map_or(String::new(), |d| format!(":kh1 {d}")) };
+            g.push(format!("e{:x}:dmg {}:hp {after}{}:{name}{lv}{}", enemy & 0x00FF_FFFF, hp - after, if force { ":card" } else { "" }, tag));
         }
     }
     r

@@ -289,6 +289,140 @@ Steam bytes) that plays the same KH1 motion, with:
     - The trace's `hits` column is cleared when F9 starts, so the first row no longer carries
       hits from before the recording.
 
+## Re:CoM damage setting (owner, 2026-11-01)
+
+> "Can we change it to where depending on which keyblade sora has equipped, it does recom's damage
+> for the corresponding keyblade? lets also have Recom's enemy HP"
+
+Owner's choices: every KH1 Keyblade swing uses Re:CoM's card formula for the equipped Keyblade;
+KH1's normal swings take Re:CoM's normal column (0), KH1's combo finisher (KH1 kind 5) the
+finisher column (2); Re:CoM's enemy HP; spells and specials do Re:CoM's card / sleight damage; a
+setting `damage = recom | kh1`, **Re:CoM by default**. At Damage = KH1 everything below is off and
+decisions 12 / 21 stand. At Combat = Re:CoM and in Riku's story nothing changes (every wrapper
+passes through there). Code: `crate::damage` (testable), `win::damage`.
+
+### Re:CoM's formula, as read. Checked (decomp + disasm + exe)
+
+- **Row pick `0x1401F7520`, card branch** (`0x1401F7ACC..0x1401F7C24`): with a card (`+0x7F4` ≠ 0),
+  `power = BattleCardList[card][row+0xA]` (u16) `+ player+0x664`; if `player+0x420 & 0x4000000`
+  then `power += power / 2`; **`AP = attack stat +0x43C × power / 100`** (32-bit `imul`, C's
+  truncating division by the `0x51EB851F` multiply); `+0x660` = AP, `+0x668` = row `+0xB` (kind),
+  `+0x66C` = card `+0xB` (attribute); status bits = `1 << (n − 1)` for each non-zero nibble of card
+  `+9`; then, when `player+0x3E8` ≠ 0, Re:CoM's enemy-card rewrite (`0x14015D5F0` on a 0x20-byte
+  hit record), which only changes AP / kind while an **enemy card of Sora's side** is active
+  (`*0x14087A818 + 0x1E8` ≥ 0x44). Without a card: AP = the attack stat, attribute 0.
+- **The bonus `+0x664`: it applies, and is 0 at Combat = KH1.** `initAttack` `0x1401F0D90` sets it
+  before the row pick: `+0x420 & 0x40000000` ? `+0x664 + 20` : 0 (`0x1401F0EEA`). Only enemy card
+  0x79's effect sets that bit (`0x140163C00` case 0x79), and Sora plays no card at Combat = KH1
+  (Stage 29). We repeat `initAttack`'s rule at each KH1 swing start (it was not run at KH1: our
+  `initAttack` hook starts the field swing), so the value is Re:CoM's own.
+- **`+0x420 & 0x4000000`** (the ×1.5): set by Re:CoM's card play `0x1401F5580` from `+0x829`
+  (with the Dark gauge `+0x44C`; Riku's Dark Mode: Assumption). Repeated as read; never set for KH1
+  Sora (no card play).
+- **`BattleCardList`** is `*0x14087A808`, set (with `StockSkillList` `*0x14087A810`) by the
+  `CCardBattle` ctor `0x1401607A0` from the resident resource "BattleCardList" (other readers cache
+  the same resource forever, e.g. `0x14015A260`). Its rows (Checked (files): `SY0002.BIN`'s
+  directory entry 1, **offset 0x270**, size 0x7F0 = 127 rows; entry 2, offset 0xA60, is
+  `StockSkillList`, 0x960 = 150 rows; each directory entry is u32 offset, 24-byte name, u32 size |
+  0x80000000, so the offset word *before* a name is its own): u16 power for columns 0..3, `+8`
+  recovery index, `+9` status nibbles, `+0xA` CP, `+0xB` attribute. This is the layout
+  `recom-m8-items.md` describes (item cards: power 0, `+8` 3, `+0xA` CP, `+0xB` 5); the brief's
+  "offset 0xA60" was `StockSkillList`'s.
+- **Re:CoM's swing rows' columns** (`0x1407C6C80`, `+0xA`, read with pefile): row 1 → 0, row 2 → 0,
+  row 3 → 1, row 4 → 2, row 5 → 1, row 6 → 0, row 7 → 2 (the owner's reading of 1–4 confirmed).
+  Re:CoM's own ground chain alternates 1 → 3 → 1 … → 4 (`0x1401F7520`'s situation logic), the air
+  chain 6 → 5 → 6 … → 7, so column 1 is Re:CoM's "second swing" column.
+
+### What runs at Damage = Re:CoM (Combat = KH1, Sora's story)
+
+- **Enemy HP**: the stats-init wrapper writes no KH1 HP (twins, proxies and boss twins), so
+  `+0x274` keeps Re:CoM's row HP × difficulty and the max-HP getter `0x14017F5A0` answers Re:CoM's
+  (no override). The KH1 records stay for what is not damage or HP: the KH1 level (MP charge,
+  `0x1402BF330`), Stop's `resist[9]` and duration, Gravity's `resist[8]`, drops, lock radius.
+- **Swings** (`win::attack::apply_row` → `win::damage::swing`, once per swing start, in battle
+  only): after the row's kind is written, `+0x664` = `initAttack`'s bonus, then the card branch
+  above with the **equipped Keyblade's card** (`save + 0x2674`, `win::stats::equipped_card`; 0 =
+  Kingdom Key = card 1) at the row's column, then Re:CoM's own rewrite **`0x1401E66A0(player,
+  &+0x660, &+0x668, attribute, status)`** (the function `initMagic` / `initStockSkill` /
+  `exeStockSkill` call; the row pick inlines the same code). `onAttack` copies `+0x660 / +0x66C`
+  into the weapon's attack; the enemy-hit wrapper **no longer replaces** the part's value. Re:CoM's
+  path applies weak parts, the back bonus, its resistance for the card's attribute, boss falloff,
+  the veto and `0x14017DAB0` unchanged.
+- **In the field** (`player+0x390` = 0): Re:CoM's own field swing is cardless (`0x1401F0F70` writes
+  card 0 → AP = attack stat), so KH1's field swings keep that.
+- **Columns** (`damage::swing_column`; test `column_mapping`):
+
+  | KH1 row | what | column | why |
+  |---|---|---|---|
+  | 13, 11, 14 | ground swing 1, swing 2, close swing 2 ("lunge") | 0 | owner: normal swings |
+  | 8, 16 | ground / air finisher (kind 5) | 2 | owner: finishers |
+  | 6, 7, 15 | Blitz, Ripple Drive, Hurricane Blast (kind 5) | 2 | owner: finishers |
+  | 18, 17 | air swing 1, air swing 2 | 0, 1 | Re:CoM rows 6 / 5 they are built on |
+  | 1, 2 | jump-up, hop | 1, 0 | Re:CoM rows 5 / 6 |
+  | 0 | Aerial Sweep | 1 | Re:CoM row 5 |
+  | 3, 4, 5 | Stun Impact, Gravity Break, Zantetsuken | 2 | Re:CoM row 4 (finisher slot) |
+  | 9, 10 | Sliding Dash, Vortex | 0 | Re:CoM rows 1 / 2 |
+  | 0x3E | Counterattack | 0 | built on Re:CoM row 1 |
+  | 0x1B..0x21 | Sonic Blade | sleight | `recom-m9-abilities.md` § 9c.1 |
+  | — | turned-back shots | the shot's own AP | unchanged: already Re:CoM's (decision 27) |
+
+- **Spells / specials**: `recom-m7-magic.md` § Spell damage at Damage = Re:CoM;
+  `recom-m9-abilities.md` § 9c.1 Sonic Blade at Damage = Re:CoM.
+- **Per frame**: nothing new (one compare in the enemy-hit wrapper per hit).
+
+### Sites (`sites::DAMAGE_CHECKED`, bytes re-read with pefile; checked at start)
+
+| address | what | use |
+|---|---|---|
+| `0x1401E66A0` | enemy-card AP rewrite (16 bytes) | called |
+| `0x1401F7ACC` | row pick card power (38 bytes, through the `0x4000000` test) | checked: the arithmetic repeated |
+| `0x1401F0EEA` | `initAttack`'s bonus (20 bytes) | checked |
+| `0x140160849` / `0x140160879` | `CCardBattle` stores of `0x14087A808` / `0x14087A810` | checked: the pointers read |
+| `0x140219B27` | `exeStockSkill`'s Sonic Blade dash AP (38 bytes) | checked |
+
+### Logs and trace
+
+- Start: `damage: damage = recom: …` (or `damage = kh1`); a mismatch of a site logs it and leaves
+  the cardless AP.
+- First 48 computations: `damage: swing row 13: Re:CoM card 0x1 column 0: power 100 x attack 10 /
+  100 = AP 10 (attribute 0, status 0x4)` (`-> n (Re:CoM's enemy-card rewrite)` if it changed it).
+- The trace's hits column: `e…:dmg <hp lost>:hp <left>:recom <ap> col <n> card <kind>` (spells:
+  `… sleight 0xd`; Sonic Blade: `… col 0 sleight 0x9`). At Damage = KH1 it keeps `:kh1 <damage>`.
+- Proxy lines end `[damage = recom: Re:CoM's HP stands; level and resistances used]`.
+
+### Checked / not checked
+
+- Checked (decomp + disasm + exe): the formula, the columns, the bonus, the tables' layout; tests
+  for the columns, the AP arithmetic (truncation, bonus, ×1.5, status bits) and the setting's parse
+  and default; the Windows build; all sites with pefile.
+- Not checked: in game; that `0x1401E66A0` leaves the AP alone at Combat = KH1 (it should: no
+  enemy card of Sora's side; the log prints any change).
+- Assumption: `player+0x390` ≠ 0 exactly in Re:CoM's battle room (the swing's card AP is used only
+  then).
+
+### Not available yet: a Config row
+
+Re:CoM's Config screen has 21 item slots and all are used (Combat 3, Guard reactions 2, Enemy
+pace 2; `recom-config-menu.md` § Room for more rows), so "Damage" is an ini key for now
+(`damage = recom | kh1`, read at start). Owner question (options in the report).
+
+### What the owner should test
+
+1. No ini line (or `damage = recom`): the log says `damage = recom`. In a battle, swing at a
+   Shadow with the Kingdom Key: the F9 trace's hits show `:recom <ap> col 0 card 0x1` for swings
+   1 / 2 and `col 2` for the finisher; the HP left matches Re:CoM's (a Shadow takes as many hits as
+   with Re:CoM's Kingdom Key cards).
+2. Equip another Keyblade (KH1 > Items > Keyblade): the `card` in the trace follows it, and the
+   AP follows that card's Re:CoM power (the `damage: swing row …` log lines print power and AP);
+   it should hit like that Keyblade's attack card at Combat = Re:CoM.
+3. Enemy HP: the HP bar / lock-on gauge show Re:CoM's HP (no `KH1 HP` in the log; proxy lines end
+   with `[damage = recom …]`).
+4. Bosses: every scripted HP threshold (e.g. Guard Armor's parts, Marluxia) behaves as at Combat =
+   Re:CoM.
+5. `damage = kh1`: everything as before this version (`:kh1 <damage>` in the trace).
+6. Air combo, Counterattack, Sliding Dash / Blitz / Ripple Drive etc.: their `col` in the trace as
+   in the table above.
+
 ## Sora's KH1 Strength (decision 18: keep the Rod, give up the Shield)
 
 All Checked (decomp + files) unless tagged.
