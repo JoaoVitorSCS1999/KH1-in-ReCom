@@ -2503,6 +2503,47 @@ pub const WYVERN_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemyWyvern +0x440 attack end", rva: 0x0055_6208, target: 0x0017_DA90 },
 ];
 
+/// M11 fliers: the Search Ghost's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp):
+/// its only caller is the enemy factory `0x140188F40` (case 14, the call at `0x1401891E8`); no branch lands inside
+/// the moved bytes and no pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, rip-relative
+/// operands, 8-byte pointers).
+pub const SEARCHGHOST_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemySearchghost ctor (0x1401923F0)", rva: 0x0019_23F0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 fliers: the factory's `mov ecx, 0xCE0` before `CEnemySearchghost`'s ctor (its fields go up to `+0xCD0`,
+/// the drain effect's handle its ctor zeroes and its dtor releases), raised by the framework's 0x20-byte tail.
+/// Checked (exe + decomp).
+pub const SEARCHGHOST_ALLOC: &[Site] = &[Site { name: "alloc CEnemySearchghost (0x1401891CF)", rva: 0x0018_91CF, expect: &[0xB9, 0xE0, 0x0C, 0x00, 0x00] }];
+
+/// M11 fliers: `CEnemySearchghost`'s vtable slots the copy keeps or replaces, checked against Re:CoM's functions
+/// before the copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12 / 30 are
+/// `CBattleEnemy`'s, 1..3 the Search Ghost's own: 1 the flying walk `0x1401925B0` → `0x1401979F0` with
+/// `e014_001` / `0x140192760`, 2 `e014_050` `0x140192510` / `0x1401925F0`, 3 its drain `e014_051`
+/// `0x140192560` / `0x140192630` (a landed drain heals it 1/8 of its max HP, `0x140181CE0`); the think
+/// `CHeartless`'s `0x140196EC0`).
+pub const SEARCHGHOST_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemySearchghost +0x70 motion play", rva: 0x0054_C478, target: 0x0017_D750 },
+    PtrSite { name: "CEnemySearchghost +0x80 update", rva: 0x0054_C488, target: 0x0018_5320 },
+    PtrSite { name: "CEnemySearchghost +0xE8 state 0 begin", rva: 0x0054_C4F0, target: 0x0017_B590 },
+    PtrSite { name: "CEnemySearchghost +0xF0 state 0 step", rva: 0x0054_C4F8, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemySearchghost +0xF8 state 0 end", rva: 0x0054_C500, target: 0x0017_E630 },
+    PtrSite { name: "CEnemySearchghost +0x100 state 1 begin", rva: 0x0054_C508, target: 0x0019_25B0 },
+    PtrSite { name: "CEnemySearchghost +0x108 state 1 step", rva: 0x0054_C510, target: 0x0019_2760 },
+    PtrSite { name: "CEnemySearchghost +0x118 state 2 begin", rva: 0x0054_C520, target: 0x0019_2510 },
+    PtrSite { name: "CEnemySearchghost +0x120 state 2 step", rva: 0x0054_C528, target: 0x0019_25F0 },
+    PtrSite { name: "CEnemySearchghost +0x130 state 3 begin", rva: 0x0054_C538, target: 0x0019_2560 },
+    PtrSite { name: "CEnemySearchghost +0x138 state 3 step", rva: 0x0054_C540, target: 0x0019_2630 },
+    PtrSite { name: "CEnemySearchghost +0x1F0 state 11 begin", rva: 0x0054_C5F8, target: 0x0017_C530 },
+    PtrSite { name: "CEnemySearchghost +0x208 state 12 begin", rva: 0x0054_C610, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemySearchghost +0x3B8 state 30 begin", rva: 0x0054_C7C0, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemySearchghost +0x3C0 state 30 step", rva: 0x0054_C7C8, target: 0x0018_3260 },
+    PtrSite { name: "CEnemySearchghost +0x3D0 think", rva: 0x0054_C7D8, target: 0x0019_6EC0 },
+    PtrSite { name: "CEnemySearchghost +0x438 attack hurt off", rva: 0x0054_C840, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemySearchghost +0x440 attack end", rva: 0x0054_C848, target: 0x0017_DA90 },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -2615,6 +2656,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         AIRPIRATE_ALLOC,
         WYVERN_HOOKS,
         WYVERN_ALLOC,
+        SEARCHGHOST_HOOKS,
+        SEARCHGHOST_ALLOC,
     ];
     LISTS
         .iter()
@@ -2714,7 +2757,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

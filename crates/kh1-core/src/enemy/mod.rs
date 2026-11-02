@@ -185,6 +185,25 @@ impl Numbers for Table {
     }
 }
 
+/// What the host tells a behaviour that looks from one of its bones each frame (M11, the Search Ghost's
+/// child object `ex_2230_00.bd`, the cone that finds its target): KH1 units, y down.
+///
+/// - `eye`: `sys 19(actor, code, 0)`, the code's bone's parent's world position (`0x14029EB20` →
+///   `0x1401D6320` with t = 0: the lerp `0x1400E64D0` gives the parent; Checked (decomp));
+/// - `axis`: `sys 115(actor, (1, 0, 0, 0), code, out)`, that same parent's world matrix row 0
+///   (`0x14029EA00` takes the code's parent, `0x1401D62B0`; the vector times the matrix
+///   `0x1400E5AD0`; Checked (decomp)): any length;
+/// - `target`: the target's KH1 lock point 0 (`sys 32` → `0x1402B04C0(actor, 0)`), or none.
+///
+/// The host reads them from Re:CoM's own animated bones (the asset step's `sight_bone`; Sora's
+/// `chest1`, KH1's lock point 0).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Sight {
+    pub eye: Vec3,
+    pub axis: Vec3,
+    pub target: Option<Vec3>,
+}
+
 /// What the host tells a behaviour about a hit its hit handler took (KH1's script hit handler
 /// receives the hit record; Re:CoM's handler has already applied Re:CoM's damage).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,5 +288,15 @@ pub trait Behaviour {
     /// (decomp). M11: the Bandit's kind 4 → 5. The default keeps it.
     fn reaction_kind(&self, kind: u8) -> u8 {
         kind
+    }
+    /// The bone sight (M11, the Search Ghost's cone), each frame before [`Behaviour::frame`] /
+    /// [`Behaviour::side_frame`], for a class whose manifest names a `sight_bone`.
+    fn set_sight(&self, _s: Sight) {}
+    /// A frame in which the host doesn't poll [`Behaviour::frame`] (an action or a reaction plays:
+    /// KH1's script pauses): KH1's child objects (`sys 94` → `0x14028F0A0`, the model's sub-object
+    /// table `+0x13C`) run their own scripts every frame all the same (M11, the Search Ghost's cone).
+    /// The default: no children.
+    fn side_frame(&mut self, _w: World) -> Vec<Cmd<u8>> {
+        Vec::new()
     }
 }

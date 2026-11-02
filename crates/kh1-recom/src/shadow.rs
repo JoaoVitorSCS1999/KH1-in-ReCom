@@ -250,6 +250,7 @@ pub fn cmd_token(c: &Cmd) -> String {
         Cmd::MotionAt { request, blend, start } => format!("motion {request} b{blend} from {start}"),
         Cmd::Guard(g) => format!("guard {g:?}"),
         Cmd::Throw(n) => format!("throw {n}"),
+        Cmd::Note(n) => format!("note: {n}"),
     }
 }
 

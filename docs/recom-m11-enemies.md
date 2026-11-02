@@ -146,7 +146,9 @@ could leave that wait open forever; both are fixed, and a safety net now ends an
   - an attack still "playing" when the AI is polled in state 0 / 1 is released;
   - a reaction that takes 600 frames is released (`REACTION_LIMIT`);
   - an AI polled in state 1 that issues nothing for 600 frames, with no action or reaction pending, restarts
-    from its engaged state (`QUIET_LIMIT`, `Behaviour::reset`). KH1's longest silent wait is 180 frames.
+    from its engaged state (`QUIET_LIMIT`, `Behaviour::reset`). KH1's longest silent wait was 180 frames until the
+    Search Ghost: its idle search (`ex_2230.bd` `0x1044`) is silent for up to 600 frames, so the limit is 900 since
+    its port (test `the_idle_search_is_the_longest_silence`: worst 450–600 frames).
 
 ### Steered attacks released on their first step (owner 2026-11-02, 0.73.0: "bandits dont spin when they do the move where they're supposed to spin towards you")
 
@@ -972,17 +974,210 @@ kill one. The trace's enemy rows give the heights, the chase and charge speeds a
    (the claw, the rush); KH1's dive (202, its landing 203) has none. Chosen: the rush's (id 1), the same body-ram row as
    the charge. (a) Keep, (b) the claw's, (c) another rule.
 
+## The Search Ghost (M11 fliers)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Search Ghost yet. Two parts of
+KH1's Search Ghost wait for the owner (§ Search Ghost owner questions): what its drain does to its HP and Sora's
+rewards, and its burst's repel layer.
+
+### KH1's side. Checked (files: `ex_2230.bd` and `ex_2230_00.bd` disassembled, folded and raw; decomp: the syscalls named)
+
+The script (0x3580 bytes; code from `0x5DC`, entry `0x253A`) has the Air Soldier's newer shape (the actor at `wp+0`, the
+state object at `wp+0x20`, the search table at `wp+0x30`), on the flight of § Flying bodies, with its own routines (only
+the random draws and the waits are the shared ones). The child object (`.mdls` part 3, its one sub-object
+`ex_2230_00.bd`, 0x400 bytes, entry `0x202`) is the cone.
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x253A` | init `0x26BC` (records LV1 `0x14` / LV2 `0x80`; stats `+0x10` = 800, the hop, unused; KH1's world: `wp+0x78` = world 11, `wp+0x74` = world 9 room 15, never read; home; the state object; the search table; handlers hit `0x285A`, `0x2836` (answers 0), `0x284E` (ends)), `sys 135` with (0, 0, 0, 1), a yield, the start `0x10E6`. Each frame: nothing while it warps (`wp+0x54`); a state request restarts the behaviour: 1 idle `0xCDE` (the target cleared), 2 engaged `0x786` (the target or Sora), 3 hit `0x628` (the hitter or Sora); while engaged, a drain that reached it (`wp+0x68`) is held (`wp+0x6C`) for 568 frames |
+| start | `0x10E6` | placed (`sys 132` = 0) outside world 11: idle, draining always (`wp+0x7C` = 2); spawn type 6: face Sora, the appearance, idle, draining always; other spawns: Sora found (5000) or Sora, face him, the appearance (outside world 11), engaged, draining only below half its HP (`wp+0x7C` = 1) |
+| appearance | `0x2130` | 69 (blend 0), a 30-frame fade-in, flag 0x80 for 30 frames, effect 2, 30 frames, then flag 4 with the idle queued (bit 30): the whole script waits for 69's end |
+| idle | `0xCDE` | not noticed; turn rate 6; **the child** (`sys 94` at `0xD12`); forever: Sora beyond 10 m: a point 2–5 m from him, else 2–10 m from itself; the flight to it `0xDCE`; the search `0x1044` for [60, 600) frames |
+| idle flight | `0xDCE(p, 3, 10)` | the idle (0) at 3 a frame, 500 frames at most; a target set → engaged; within 10 flat and a frame's travel vertically: done; rising (−0.2) under 50 over the floor, more than 2 m under home or 2 m under Sora; sinking (0.2) more than 1.5 m above him; stuck after 30 frames (under a quarter of the speed): a new point 2–5 m off |
+| search | `0x1044(t)` | 202 (blend 20) for `t` frames, nothing else (KH1's longest silence, § Re:CoM's own states hand back); a target set → engaged |
+| **the cone** | child `0x202` | effect 7 on bone 45 (`sys 109`); while the parent plays 0 or 202, each frame: the eye `sys 19(parent, 4141, 0)` (bone 45 \| 0x1000 at t 0: **its parent 44's position**, `0x1401D6320`'s lerp), the axis `sys 115(parent, (1, 0, 0, 0), 45)` (**44's** world row 0: `0x14029EA00` takes the parent, `0x1401D62B0`); for party members 0..2 (alive, flag 0x8000): the member's lock point 0 (`sys 32`) within 300 of the eye and the cosine to the axis over cos 35° (`sys 100`, `sys 3`) → the parent's target (`sys 49`), the effect removed, the child ends. Any other motion: the child ends |
+| engaged | `0x786` | the notice once (`0x1210`: 206 as an action, the idle queued, effect 8); forever: below half its HP (`func_2212`, current / max) or draining always: the drain's approach `0xA34`, the hover with the hold `0xA0E`, the roam `0x7EC` (it ends in the idle); else the attack round `0xB62` |
+| attack round | `0xB62` | the approach `0x30C4(target, 8, 450, idle)`; facing him, the burst; a flight `0x335A` to a point 5–8 m away at his height (8, within 1 m, 300 frames); easing 0.6, turn rate 6, 120 frames facing him, warping away 5–6 m once he is within 2 m; turn rate 11.25, easing 0.2 |
+| burst | `0x128E` | effect 6 after 8 frames (`sys 107`); two hit bits, rows `0x1CC` / `0x23C` / `0x38C` / `0x3FC` and `0x2AC` / `0x31C` / `0x46C` / `0x4DC`; facing him, 204 for its length (facing him until 85 frames are left); the idle (blend 6) |
+| drain's approach | `0xA34` | the target checked (alive, `sys 120`, flag 0x8000; else a new search); the approach `0x30C4(target, 20, 250, 200)`; facing him, the drain `0x13BE`; until a drain lands (`wp+0x58`), 200 again |
+| drain | `0x13BE` | effect 5 after 8 frames; rows `0xEC` / `0x15C` with the callback `0x1794`; facing him, 203 for its length: with 60 or more frames left facing him; with more than 96 left: within 30 of him backing off (−3 × the facing at 4: 12 a frame), else creeping at him at 2. The callback (once, a target not reacting, without flag 0x80, `sys 170` = 1): `wp+0x58` = 1 and an orb effect (`sys 15`, effect 12) 80 above him; in the last 60 frames the orb flies to 30 above the Ghost (`p ← (p − me) × k + me − 30`, `k` 0.95 down 0.02 a frame); within 3.2 m of it: **drained** (`wp+0x68`, effect 11); within 1 m or with 20 frames left: the orb removed (`sys1.3`), the drain ends early. **An orb that starts within 1 m never drains** (the Ghost usually coasts in close: the hold is rare; tests `a_drain_from_close_heals_at_once` / `the_drain_holds_then_would_heal`). The rest of 203, the idle |
+| hover | `0x2A50(target, speed, dist, time, mode)` | turn rate 2; away 20 m behind it (±180°), after [100, 180) frames off to a side (±60..120°), and on that leg within `dist` of him and level (± 1.5 m) a burst (turn rate 6) and away again, 3 bursts at most; rising under 50 over the floor; stuck after 60 frames: away at once. **Mode 1** (`0xA0E`: 8, 4 m, 800 frames, after the drain): once the hold is off (568 frames unhit, or no drain reached it) **HP = max HP** (`0x2ADE`: stats `+0x3C` = `+0x40`), 30 frames facing him, done |
+| roam | `0x7EC` | warp to a point 7–10 m away; Sora within 10 m: within 5 m the burst, else 202 for [400, 600) frames facing him, bursting once within 3.5 m; not found: 202 for [200, 300) frames facing Sora, bursting within 5.25 m; after 3 rounds the idle [30, 60) frames and the idle state |
+| hit | `0x628` | noticed. Below half its HP (or draining always): 50 % the vanish (blend 0), invisibly at him at 24 to 0.8 m playing 200, face him, reappear; then engaged. Else 50 % a warp to a point 5–6 m away, otherwise the burst and the hover `(6, 4 m, 300, mode 0)`; then engaged |
+| warp | `0x2EBA` | the vanish `0x2FF2` (warping, 201, the idle queued, flags 0x20 / 0x40 / 0x10: unhittable, its lock point masked (`sys 116`), effect 9, a 100-frame fade-out, 100 frames, hidden: flags 0x10 / 0x2 / 0x1 cleared); the flight to the point (24, within 10, 240 frames); the reappearance `0x2EEC` (stopped, the idle 80 frames, facing him, 201 and its queue **cancelled in the same frame** by `sys 12(0)` (`0x14029F7C0` zeroes the pending count `+0x178` first), shown, effect 10, a 100-frame fade-in, 80 frames, hittable, unmasked, not warping) |
+| approach | `0x30C4(target, speed, dist, motion)` | at 50 above him playing `motion`, facing him, until within `dist` of him (or of that point); stuck after 30 frames: done within 1.5 × `dist`, else a detour flight to a point 4–6 m from him (200 frames) |
+| flight to a point | `0x335A(p, speed, arrive, time)` | the idle; until within `arrive` flat and a frame's travel vertically; stuck (30 frames on): face ahead, stop, a new point 6–8 m from the target |
+| hit handler | `0x285A` | easing 0.2; attribute 9: damage only; **while holding**: the hold ends, `sys 194(level / 10 + 1)` (an EXP bonus for the party, with its number shown, `0x140270990` / `0x140284990`) and the drop table `0x580` (3 prizes of kind 4); death: Re:CoM's defeat here; attribute 11: nothing more; the orb dropped (`wp+0x58` = 0); attribute 8 (Gravity): the same reward; every hit, clashes too: the hit state |
+| leash | `0x34EE` → `0x18F0` | **not ported**: spawned and 15 m (12 m out of sight) from Sora it is removed; in a Re:CoM battle room it would never be defeated |
+
+Attacks (rows `0x70` bytes, `sys 23`, mode 2: each lives while its request plays; Checked (files)):
+
+| Attack | Request | Damaging rows (bone → its parent, t, radius) | Hit | Recoil `+0x40` | Re:CoM id | Re:CoM state |
+|---|---|---|---|---|---|---|
+| burst | 204 (164 f; the AI faces him) | `0x1CC` / `0x23C` (r. / l. hand, 1.5 → 1, 60) hit bit A; `0x2AC` / `0x31C` (the same) hit bit B | [36, 48) and [108, 118) | 205 (in the model) | 0 | 2 |
+| drain | 203 (120 f; steered) | `0xEC` / `0x15C` (r. / l. hand, 1.5 → 1, 50), slots 0 / 1 | [34, 54) | 205 (in the model) | 1 | 3 |
+
+The burst's other four rows (`0x38C` / `0x3FC` / `0x46C` / `0x4DC`, 90 at the hands at both strikes, no power words) are
+**attack type 1**: KH1's attack-vs-hurt test skips types 1 / 2 / 4 (`0x1402B3BE0`), and type 1 meets only attack types 0 /
+3 (the table `0x140528CB8`, byte 1 = 0x09): a repel layer for Sora's swings (§ Enemy guard: a type-1 side with the
+higher priority repels). Not made (owner question 2).
+
+Reactions: the flying forms (F `0x48..0x4B`, K `0x4C` / `0x4D`, a `0x4E` / `0x4F`, A `0x50` / `0x51`; no launches: kind 5
+→ kind 4); weight 1.0 in both records; hurt parts: 5 (collision block group 2 → Re:CoM bones 19, 2, 17, 51, 35). Checked
+(files).
+
+Motions (`xa_ex_2230.mset`, 17 entries): KH1's matcher finds Re:CoM bakes for the idle (0, 1, 2 → `e014_001`) and 70
+(`e014_074`); edits (≤ 20 bones differ): entry 1 (7, 72, 73, 78, 103 → `e014_020`), 2 (74, 75, 79 → `e014_021`), 66 →
+`e014_070`, 67 / 102 / 104 → `e014_071`, 68 → `e014_072`, **the drain 203 → `e014_051`**. Every other request is a new
+clip at 100 + entry (69 → 108, 200..206 → 110..116); the edits get their Re:CoM clip's sounds.
+
+### The cone, ported natively (owner 2026-11-02: "its gameplay (targeting) is ported")
+
+- In the behaviour: KH1's child is a second script the behaviour runs itself (`kh1_core::searchghost`'s `cone`, polled
+  after the parent's script each frame: Assumption ±1 frame, KH1's object order not read), made where the idle makes it
+  (`0xD12`) and ending as KH1's does.
+- Its inputs come from **Re:CoM's own animated bones** (framework: `enemy::Sight`, `Behaviour::set_sight`):
+  - the eye and its axis: Re:CoM's `l_eye` (bone 32, the asset step's `sight_bone`: KH1 bone 45's parent 44). The
+    converter poses each Re:CoM bone at its KH1 twin's world (`convert.rs` `targets`), so the node's position `+0xD0` and
+    scaled row 0 `+0xA0` (`0x14023EB00`) are KH1's 44 world position and row 0 in Re:CoM's axes. Checked (decomp + files:
+    both motions the cone runs in pose 44 and skip 45);
+  - Sora's lock point 0: KH1's last collision group, code 8 at t 0 → bone 78's parent 77, which is Re:CoM's `chest1`
+    (Re:CoM bone 37). Re:CoM keeps its index at `player+0x3A8` (`0x1401A4450(player, "chest1")`, so Halloween Town's
+    skeleton works too). Checked (files + decomp).
+- It runs even while the parent's script waits (`Behaviour::side_frame`): a reaction ends it as in KH1.
+- Its look (effect 7, the searchlight) waits for the effects milestone (M13).
+
+### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemySearchghost` (vtable `0x14054C408`, 139 slots, RTTI at −8), ctor `0x1401923F0` (`40 53 48 83 EC 20`: `CHeartless`'s
+base ctor, then `+0x154 |= 0x80`, `+0xCD0` = 0, its drain effect's handle, `+0x260 |= 0x100`: gravity off; its only
+caller the factory `0x140188F40` case 14 at `0x1401891E8`; no branch into the moved bytes, no pointer to them, no
+rip-relative operand: exe scan), allocation `0x1401891CF` `mov ecx, 0xCE0` → 0xD00. It overrides states 1 (the flying walk
+`0x1401925B0` → `0x1401979F0` with `e014_001`, step `0x140192760`), 2 (`e014_050`, `0x140192510` / `0x1401925F0`), 3 (its
+drain `e014_051`, `0x140192560` / `0x140192630`: when it lands, `+0x260 & 0x40`, **it heals 1/8 of its max HP**,
+`0x140181CE0(enemy, max / 8, 0, 0xB)`, with the effect `ex_2230` 0xB on bone 1, `0x1401A2D50`); its think is
+`CHeartless`'s `0x140196EC0`. Our copy: states 0, 1, 2, 3, 11, 12, 30, the think; KH1's burst in state 2, its drain in
+state 3 (Re:CoM's heal doesn't run: owner question 1). `EN0014.ASD`: 2 records at `0x6C`, tail `0x1AC` (id 0 `e014_050`
+on `l_fing3b`, 0.5 m, [108, 118); id 1 `e014_051` on `l_fing3b`, 0.5 m, [30, 60)). `EN0014.SES`: Re:CoM's entries.
+
+Power mapping (decision M10, "the Re:CoM attack of the same kind"): the drain on id 1 (Re:CoM's drain `e014_051` is an
+edit of KH1's 203); the burst on id 0 (Re:CoM's other attack; `e014_050` is not within the matcher's edit rule of KH1's
+204, but its window is exactly 204's second strike, [108, 118): Checked (files)).
+
+### Framework additions (M11, the Search Ghost)
+
+- `enemy::Sight` and `Behaviour::set_sight`: the host gives a behaviour whose manifest names a `sight_bone` that bone's
+  position and row 0 and Sora's lock point each frame (read from Re:CoM's nodes; the bone is resolved once at the ctor, no
+  per-frame read for other classes).
+- `Behaviour::side_frame`: KH1's child objects run every frame, also while the parent's script waits for an action or a
+  reaction; the host calls it on the frames it doesn't poll `frame` (not after the defeat). Default: nothing.
+- `Cmd::Note`: a log line for something KH1 does that isn't built (`note: …`).
+- Asset step: `enemy::child_script` (part 3's sub-objects), `enemy::CHILD_CONSTS` (numbers and request checks from a
+  child script) and `enemy::SIGHTS` (a bone code → `sight_bone`, KH1's parent rule).
+- `kh1_enemy::watchdog::QUIET_LIMIT` 600 → 900 (the idle search's silence, above). Every other enemy's outputs are
+  unchanged (their asset tests pass; the new tables are keyed by enemy).
+
+### What the asset step writes
+
+`ENEMY/0014/EN0014.ANN` (Re:CoM's 75 slots byte-identical; KH1's clips at 100 + entry: 101..108, 110..116), `.ASD` (Re:CoM's
+2 records kept + 6: the burst's two hands at each strike on `e014_114`, the drain's two hands on `e014_113`), `.SES`
+(Re:CoM's entries kept; the edits get their Re:CoM clip's sounds: the drain `e014_051`'s; the burst its template's at its
+window: Assumption), `kh1-searchghost.json` (`kh1-enemy 1`: 121 script constants read at checked offsets (and the stats
+block's two defaults), 2 from the child, `sight_bone`, 25 request words checked + 5 in the child, 2 attacks, 5 parts). Test:
+`searchghost::tests::builds_from_the_players_files`.
+
+### Owner install steps
+
+1. Run the step (`kh1-recom-build`): it prints a `searchghost (M11): …` line.
+2. Copy into the OpenKH mod folder and add to `mod.yml`:
+
+```yaml
+- {name: ENEMY/0014/EN0014.ANN, method: copy, source: [{name: ENEMY/0014/EN0014.ANN}]}
+- {name: ENEMY/0014/EN0014.ASD, method: copy, source: [{name: ENEMY/0014/EN0014.ASD}]}
+- {name: ENEMY/0014/EN0014.SES, method: copy, source: [{name: ENEMY/0014/EN0014.SES}]}
+- {name: kh1-searchghost.json, method: copy, source: [{name: kh1-searchghost.json}]}
+```
+
+3. The log shows `searchghost: KH1's searchghost (M11) …` at start and `battle N: Search Ghost … gets KH1's AI` in a Search
+   Ghost battle.
+
+### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; any Search Ghost battle)
+
+1. Each Search Ghost faces Sora and plays KH1's appearance (69, 2 s), then notices him (206, ~1.8 s).
+2. Above half its HP: it flies in to about 4.5 m, bursts (204: two swipes, ~0.6 s and ~1.8 s in), flies off 5–8 m, watches
+   him for 2 s and vanishes when he comes within 2 m.
+3. The vanish: it plays 201 and fades (it can't be hit from the start), disappears after ~1.7 s, glides invisibly, shows
+   again ~1.3 s after it stops, and can be hit ~1.3 s after that.
+4. Hit it (above half): it warps away 5–6 m, or bursts and hovers off (away, then off to a side, bursting when level with
+   Sora within 4 m).
+5. Below half its HP: it lunges in (200) and drains (203): a hit with both hands about 0.6–0.9 s in; it then hovers off
+   and, after a while, warps around searching (202) and bursts when Sora is close; after three warps it idles.
+6. The idle: it glides slowly and searches (202, up to 10 s); it engages only when Sora is in front of its eye within 3 m
+   (35° either side), or when hit.
+7. Guard the burst or the drain: KH1's clash recoil (205).
+8. Kill one: Re:CoM's prizes and EXP.
+9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Search Ghosts (its drain heals it 1/8 of its HP).
+
+Please send `kh1-recom.log` (`searchghost:` lines: `state …`, `attack 204 (burst), steered`, `attack 203 (drain), steered`,
+`its drain hit Sora`, `visible false` / `visible true`, `hittable …`, `target true`, `note: …`, the `rand` lines) and an F9
+trace.
+
+### KH1 trace (what to record in KH1)
+
+A KH1 room with Search Ghosts (Monstro or Neverland): stand far 10 s; stand at 4 m 10 s; stand
+behind an idle one, then in front of it at 2 m; one swing / a full combo / a finisher; bring one below half its HP and let it
+drain you, then (a) hit it within 9 s, (b) leave it alone for 10 s; Guard a burst and a drain; kill one. The trace's enemy
+rows give the warp timings, the cone's reach and the drain's hold to compare.
+
+### Not built / open (the Search Ghost)
+
+- The leash, the party retargeting, `sys 139`'s out-of-sight test (taken as in sight), the placed start and spawn type 6
+  (Re:CoM's battles spawn every Ghost: Assumption, as the Darkball's).
+- KH1's world 11: its searches reach 100 m there (ported); **its appearance is skipped there in KH1, kept here** (owner
+  2026-11-02, "battle spawns play KH1's appearance").
+- KH1's hit attribute (`hp[0xC] >> 6 & 15`) isn't carried: attribute 9 (damage only), 11 (no hit state) and 8 (Gravity's
+  reward) never come.
+- The effects (`sys 75` 2 / 8 / 9 / 10 / 11, `sys 107` 5 / 6, the cone's `sys 109` 7, the drain's orb `sys 15` / `sys 16`:
+  its flight is counted, not drawn), the alpha fades (no Re:CoM model alpha), flag 0x80 at the appearance, the lock point
+  mask while it warps (Re:CoM's lockable flag stays, the Darkball's rule): the effects milestone (M13).
+- The drain's callback refuses a target that is reacting, has KH1's flag 0x80 or isn't `sys 170`'s 1 (**Assumption**: a
+  hit Re:CoM applied to Sora passes).
+- The cone's other party members and their flag 0x8000 (**Assumption**: Sora passes); the cone runs after the parent's
+  script in a frame (**Assumption** ±1 frame); Re:CoM's nodes are last frame's pose (**Assumption** ±1 frame).
+- Each hit bit's rows are Re:CoM records with their own hit serials (`0x14014E830` → `0x14016F7D0` at each record's window
+  start): the two hands of a strike could both hit (**Assumption**: Sora's post-hit invulnerability, decision 31, keeps it
+  to one, as the Wyvern's charge).
+- `sys 10`'s turning sign (the hover's sides): the Air Soldier's convention (**Assumption**).
+- The floor for `sys 89` is Sora's height when he last stood (**Assumption**: flat battle floors).
+
+### Search Ghost owner questions
+
+1. **The drain and its HP.** KH1: a landed drain whose orb reaches the Ghost (from 1–3.2 m) is *held* for 568 frames
+   (9.5 s); a hit in that time ends it and gives the party an EXP bonus (its level / 10 + 1) and 3 prizes; if nobody hits it,
+   or when the orb starts within 1 m (the usual case: it coasts in close), **its HP goes back to full** (`0x2ADE`). Re:CoM:
+   its drain heals it 1/8 of its max HP when it lands. Built: neither (the log says `note: …` where KH1 would heal or
+   reward); the timing (the hold, the hover that waits for it) is KH1's. (a) KH1's full heal on Re:CoM's HP and its reward as
+   Re:CoM prizes / EXP, (b) Re:CoM's 1/8 heal when the drain lands (Re:CoM's own `0x140181CE0` and effect), (c) keep neither.
+2. **The burst's repel layer** (its four type-1 rows `0x38C` / `0x3FC` / `0x46C` / `0x4DC`: priority 40, row `+0x60`
+   turn 0, `+0x64` 1.0, on the two strikes' windows): in KH1 a type-1 row meets only Sora's swings, and with the higher
+   priority it **repels** them (`0x1402BF630`), else it gets the clash (§ Enemy guard: KH1's rule). The shared
+   enemy-guard step is built (Stage 135, the Bandit's type-2 rows); its repel is the part still to build, for the Large
+   Body and the Defender. (a) Add the Search Ghost's rows to that step when the repel is built, (b) leave them out.
+3. **The burst's power**: Re:CoM's Search Ghost has `e014_050` (id 0) and its drain (id 1). Chosen: the burst on id 0 (its
+   window is the burst's second strike), the drain on id 1. (a) Keep, (b) another rule.
+
 ## The other fliers: not ported yet (survey for the next pass)
 
 Search Ghost, Air Pirate, Gargoyle, Darkball and Wyvern were surveyed, not ported (time); the Darkball, the
-Air Pirate and the Wyvern are built since (§ The Darkball, § The Air Pirate, § The Wyvern). All five enter flight
+Air Pirate, the Wyvern and the Search Ghost are built since (§ The Darkball, § The Air Pirate, § The Wyvern, § The
+Search Ghost). All five enter flight
 once with `sys 135` and steer through `+0x20` / `+0x2C` like the Air Soldier (6–14 steering writes each), so § Flying
 bodies covers their bodies; each is a new script (1170–1710 listing lines) to port routine by routine. Checked
 (files: the scripts listed; exe: ctors, allocation sites, vtables) unless marked:
 
 | Enemy | Script (code from) | Re:CoM class (ctor / alloc / vtable) | Re:CoM `.ASD` | Open before porting |
 |---|---|---|---|---|
-| Search Ghost | `ex_2230.bd` (`0x5DC`) | `CEnemySearchghost` `0x1401923F0` / `0x1401891CF` **0xCE0** / `0x14054C408` | 2 (`l_fing3b`, ids 0 / 1) | a child object (`sys 94` at `0xD12`, its drain: on Re:CoM's own bullets, checklist step 9); `sys 116 / 117` (part masks); table-1 syscalls `sys1.0` / `sys1.3` (the lister reads only table 0) |
+| Search Ghost (**built**) | `ex_2230.bd` (`0x5DC`) | `CEnemySearchghost` `0x1401923F0` / `0x1401891CF` **0xCE0** / `0x14054C408` | 2 (`l_fing3b`, ids 0 / 1) | its child is the cone (no bullet), the drain's orb is an effect, `sys1.3` removes it: § The Search Ghost |
 | Air Pirate (**built**) | `ex_2210.bd` (`0x228`) | `CEnemyAirpirate` `0x14018A0B0` / `0x14018931F` 0xCD0 / `0x1405309E8` | 2 (`r_hand`, ids 0 / 1) | `sys 118` (the stuck tests: `+0x10 − +0x490`), `sys1.0` (a no-op): § The Air Pirate |
 | Gargoyle | `ex_2220.bd` (`0x538`) | `CEnemyGargoyle` `0x14018E150` / `0x1401891A5` 0xCD0 / `0x14053F198` | 2 (both wings, id 0 only) | a child object (`sys 94` at `0x1B24` with rows `0x3FC` / `0x46C`, request 219): on Re:CoM's bullets; one Re:CoM power for all its attacks |
 | Darkball (**built**) | `ex_2280.bd` (`0x338`) | `CEnemyDarkball` `0x14018D5D0` / `0x140189349` 0xCD0 / `0x14053B7A8` | 2 (`ex_2280_sk`, a whole-clip window and a 1.3 m one) | `sys 86` (the warp), `sys 74` (effects), `sys1.0` / `sys1.3`: § The Darkball |

@@ -448,6 +448,12 @@ At KH1 setting:
       Defender; powers kept (leap on the whirl, swoop on Re:CoM's second sword attack); the Air Pirate's
       world-height checks read as heights above the battle floor; the Bandit's Agrabah rules only in
       Re:CoM's Agrabah.
+      Guard / blade follow-ups (2026-11-02, on 0.75.2's questions): **hide Re:CoM's "Guard" popup over
+      KH1 enemies**; the block keeps Re:CoM's whole-front body guard; **Sora's swings can knock the thrown
+      scimitar away** (KH1); powers kept (the blade on the whirl, the Wyvern's dive on its rush).
+      Search Ghost (2026-11-02, on 0.76.0's questions): **KH1's drain rule on Re:CoM's HP, EXP and prizes**
+      (a landed drain restores it to full after its hold; a hit during the hold gives KH1's EXP bonus and 3
+      prizes instead); **its burst repels Sora's swings** through the shared enemy guard.
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
