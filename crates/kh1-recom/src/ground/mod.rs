@@ -2,3 +2,4 @@
 //! row for `crate::kh1_enemy::CLASSES` in its own module (KH1's AI on the shared framework).
 
 pub mod powerwild;
+pub mod bandit;

@@ -620,6 +620,183 @@ counts are tested).
      it off (224).
   3. The hops land with no landing pose and travel about 3 m.
 
+### The Bandit (built)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Bandit yet. Three parts of
+KH1's Bandit are **not built** and wait for the owner (§ Bandit owner questions): the thrown blade, its block
+stance's block, the spin's repel.
+
+#### KH1's side. Checked (files: `ex_2090.bd` disassembled; decomp: the syscalls and engine functions named)
+
+The script (0x4700 bytes, code from `0x4A0`) has the Air Soldier's newer shape (the actor at `wp+0`, the state
+object at `wp+0x30`). Its child object `ex_2090_00.bd` sits in the `.mdls` part 3.
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x317C` | init `0x34B0` (records LV1 `0x14` / LV2 `0x80`, walk 2, run 8, hop 400, handlers hit `0x367A`); party / group handles; KH1's world `wp+0x48` and room `wp+0x4C` (`wp+0x64` = 0 only in Agrabah rooms 2 / 17); the appearance `0x174A`; each frame a state request restarts the behaviour (1 idle `0x1190`, 2 engaged `0xB38`, 3 lost `0x8D0`, 4 hit `0x4FA`); while idle the search: a spawned Bandit engages within 1500 |
+| appearance | `0x174A` → `0x2C8A` | home = here; Sora faced now; 69 (plain, blend 0), the 30-frame fade-in, 30 frames, the idle queued (`sys 14`) with the action flag set: KH1 loops 69 and plays the idle at its next cycle end, frame 48 |
+| idle | `0x1190` / `0x1346` | Sora's target is it → engaged; else the wander: points [200, 400) and [400, 500) about where it stands, walked to (300 each); 70 %: 40 % of all an idle wait [238, 308) (Sora targeting it → engaged), then again; else (Agrabah) farther than 500 from home: home (600) and an idle wait |
+| engaged | `0xB38` | < 200 close `0x107A`, < 400 mid `0xFA8`, else far `0xD8E`; then engaged again |
+| close | `0x107A` | 40 %: back hop, spin, strafe; else strafe, pause, slash, back hop, strafe; the closing pause [60, 75) + 8 |
+| mid | `0xFA8` | strafe (turn 3), pause [60, 90) + 8; 70 %: run in (90 + 8 frames, to 200), slash, strafe; else the leap; the closing pause |
+| far | `0xD8E` | Agrabah: 30 % throw then run in to 600, 50 % leap, 20 % run in to 600; the closing pause. Elsewhere: past 2000 from Sora the leash `0x3B12` (not ported: nothing that round), else run in to 400 and a pause [30, 60) + 8 |
+| hit | `0x4FA` | out of an arc; a swing blocked during the stance → back hop and throw; past 400: 50 % throw, else leap; after a 1st / 2nd hit seen (`wp+0x54`): 50 % the block stance, 20 % slash, 30 % back hop + leap; else 50 % leap, else spin. Outside Agrabah one more round by distance: two slashes (< 200), the leap (< 400), the spin. Then engaged |
+| lost | `0x8D0` | Sora's target is it → the throw; Sora alive → engaged (reachable only after a clash with no attacker) |
+| hit handler | `0x367A` | hits of attack type 9 / 11 (record `+0xC` bits 6..9): damage only (not told apart here); a clash (kinds 6 / 7): the hit state, the stance's flag kept; a damaging hit: the stance's flag cleared, `wp+0x54` = 1 when record `+0x24` is 1 or 2, **kind 4 → 5** (its launch), the hit state |
+| strafe | `0x4334` | 60 % to −90° of the facing, else +90° (turn negated); run (request 2) at 8 for time + 10 frames, turning by turn × 0.5° a frame; stops off the ground or within 200; time from `0x4606`: 50 % [30, 45), 30 % [60, 90), 20 % [120, 150) |
+| pause / approach | `0x44AE` / `0x42DC` | the idle for n + 8 frames until within 400 / run at the target (t + 8 frames, re-read every 20) to d |
+
+Attacks (each a plain request with attack rows: the script keeps running; KH1's bone rows end when the request
+changes, `0x1402B2DC0` sets flags `1001b` = mode 2, `0x1402B47A0`):
+
+| Attack | Requests | Damaging rows (bone code → bone, t, radius; hit slot) | Hit windows | Recoil | Re:CoM id |
+|---|---|---|---|---|---|
+| slash | 200 (60 f, root) | `0x23C` (48 → 120 blade, 2.5 → 0, 40; 1) | [26, 38) | 205 | 0 |
+| spin | 210 (46 f) wind-up, 211 (40 f loop) ×4, 212 (94 f) | `0x2AC` on 211 (blade; 0), `0x31C` on 212 (blade; 0) | 211 [0, 16); 212 [0, 12), [34, 50) | 213 | 1 |
+| leap | 216 (60 f) crouch, 217 (20 f loop) flight, 218 (40 f, bit 16) | `0x3FC` (blade, 2.5 → 0, 40; 0), `0x38C` (blade, 0.3, 80; 1) on 217 | [0, 20) each | 205 | 1 |
+| throw | 201 (438 f, root): the blade leaves at 90, back at 380 | the child's row `0x1CC` (no bone, 70) | — | — | **not built** |
+| block stance | 230 (12 f), 231 (60 f loop) [60, 90) frames, 233 (16 f) | none: its blade row `0x15C` is guard-type | — | (232) | **not built** |
+
+- **The spin** glides at the target (`sys 40` mode 2 at the stats block's `+0xC` = 4) through four rounds of 12 + 26
+  frames (len − 2 − 12), each part ended off the ground; a round's landed hit ends the rounds (`wp+0x80`, the row's
+  callback `0x228A` = Re:CoM's `CCollAttack` apply answering 1: `Behaviour::on_landed`).
+- **The leap** is movement state 7 (`sys 169` → `0x1402BB030`, the flight step `0x1402CC000` with flags 1):
+  `0x1D42(217, Sora + 50 up, 70, 100, 500)` steers at 70 each frame (easing 0.1), the goal below and the body more
+  than 20 above the floor → straight down; it stops steering at the first frame within 100 of the point, so the
+  flight velocity then eases off at 0.9 a frame and carries it on past Sora through 218 (KH1's physics: its stuck
+  test `0x24FE(70 × 0.1)` is that ramp's first frame); then `sys 88(0)` and, above the floor, a drop.
+- **The back hop** `0x41B8` → `0x41DC(221, 25, 60, 30, 180)`: movement state 3, 30 a frame backward, 60 high, 25
+  frames, drag 0.9 (≈ 4.3 m), the trio 222 / 223 / 224 (`sys 83`).
+- **Motions loop** unless their request has bit 16 (`0x14029FC40` copies it to `+0x160` bit 3; `0x14029F0A0` loops
+  back to `+0x288`, 0 for enemies, or holds): `sys 172` is the end of each cycle (the port's `done_now`).
+- **Rows that never hurt Sora** (attack type 2: `+0x38` low bits → object bits 17..19; type 2 meets no hurt body and
+  only types 0 / 3 attacks, `0x140528CB8`): the spin's body row `0xEC` (code 8, 60, priority 90, recoil 213) and the
+  stance's blade row `0x15C` (code 48, 40, priority 30, recoil 232). In KH1's attack-vs-attack resolution
+  `0x1402B4BC0` the lower-priority side gets a clash record (kind 6, kind 7 when 40 or more under) and a type-2 object
+  never repels: Sora's swing that meets them is deflected, the Bandit plays the row's recoil and counters (after the
+  stance: the back hop and the throw).
+- Reactions: the shared engine with the Bandit's motions (flinch 0x48..0x4B, air flinch 0x4E / 0x4F, air knock-back
+  0x50 / 0x51, launch 0x52.., air launch 0x5C..; no ground knock-back: kind 4 launches, and the handler makes every
+  damaging kind 4 a kind 5). Weight 1.0 in both records. Hurt parts: 6 (collision block group 2 → Re:CoM bones 16, 2,
+  26, 11, 7, 42). Checked (files).
+- Motions (`xa_ex_2090.mset`, 48 entries): KH1's matcher finds Re:CoM bakes for the idle 0 (`e011_001`), walk 1
+  (`e011_002`) and the landing / appearance entry 7 (`e011_073`, requests 7 and 69); every other request is a new clip
+  at 100 + entry. The pose rule marks 201, 211, 217, 231 looping (the loops the script relies on).
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyBandit` (vtable `0x140534368`, 139 slots, RTTI COL at −8), ctor `0x14018AEB0` (`40 53 48 83 EC 20`, its only
+reference the factory's call at `0x14018916A`; no branch into the moved bytes, no pointer to it: exe scan),
+allocation `0x140189151` `mov ecx, 0xCD0` → 0xCF0. Its own states 1 (`0x14018AFF0` / `0x14018B3A0`), 2 (slash
+`e011_050`, `0x14018AF70` / `0x14018B120`), 3 (its whirl `e011_051` → `052` → `053`, `0x14018AFA0` / `0x14018B160`);
+0 / 11 / 12 / 30 `CBattleEnemy`'s; think `0x140196EC0`. Our copy: states 0, 1, 2 (the slash), 3 (spin, spin end,
+leap), 11, 12, 30, the think. `EN0011.ASD`: 2 records at `0x6C`, tail `0x1AC` (id 0 `e011_050` on `wep0` 28–40, id 1
+`e011_052` a 0.5 m `wep0` sphere through its loop). `EN0011.SES`: `e011_050`, `e011_052`. Re:CoM's Bandit has no
+throw and no projectile (Checked (decomp): its state code).
+
+**Power mapping** (decision M10): slash 200 → id 0 (Re:CoM's slash: the same swing, its window two frames later;
+Checked (files)); spin 211 / 212 → id 1 (Re:CoM's whirl, the same kind of attack); leap 217 → id 1 (Assumption: a
+moving lunge, nearest Re:CoM's charge; all its rows' `+0x3C` are 30, the slash's too).
+
+#### Framework additions (commit `625e428`)
+
+- `Body::air_flight` / `air_fly` / `ground`: movement state 7 (flight physics, airborne for reactions; a reaction's
+  hop, a timed jump, flight or `sys 88` ends it).
+- `Behaviour::set_world` (KH1's world id: `kh1_enemy::kh1_world` maps Re:CoM's world as decision 21 maps the twins'
+  records; Checked (exe): KH1's code table `0x1404DCCA0`, 8 = `al`); `set_hit_count` (record `+0x24` = the actor's
+  counter `+0x3E8`, one more per record clashes included, `0x1402BFE60`, zeroed when no action plays, `0x1402B7260`;
+  the host keeps it per enemy); `reaction_kind` (KH1 runs the script's handler before the reaction, `0x1402B7B90` →
+  `0x1402BCD60`, then `0x1402B8E10`'s switch; the host applies it to damaging hits and the killing hit).
+- **Asset step fix** (`Converter::kh1_point_in`): KH1 takes a row's point from the parent's world matrix times the
+  bone's local translation (`0x1401D6320`, then the lerp `0x1400E64D0`). For a chain-end bone the motion doesn't pose
+  (flags 0x6000000) the old code read its never-built world matrix (the origin): the Bandit's blade record came out
+  3.3 m long; now 1.30 m along `wep0` (Re:CoM's own slash record is 1.16 m out on the same bone). **The Air Soldier's
+  spin row `0x4DC`** (left toes' end bone, 1 → −1, 70) had the same fault (a 1.7 m line through the origin); it is now
+  ±7 cm about `l_toes`, so its `EN0015.ASD` changes: re-run the asset step. Soldier and Powerwild outputs are
+  byte-identical (hashed before / after); the Shadow's `.mset` isn't in this session (its rows' bones are posed:
+  unchanged by construction).
+- Found, not changed: the scripted launch (`sys 38`, `0x1402B79F0`) sets `*hit |= 2`, so KH1 skips its own reaction
+  and that reaction's random draw; the host still chooses KH1's reaction first and replaces it, so the Powerwild draws
+  one extra random number after its own launch (its later choices shift by one draw).
+
+#### What the asset step writes
+
+`ENEMY/0011/EN0011.ANN` (Re:CoM's 74 slots byte-identical, KH1's clips at 100 + entry), `EN0011.ASD` (Re:CoM's 2
+records kept, 6 added: slash 1, spin 1, spin end 2, leap 2), `EN0011.SES` (Re:CoM's 2 entries kept; the attack clips
+take their template's sounds at the hit window: Assumption), `kh1-bandit.json` (`kh1-enemy 1`, 117 numbers). Test
+`bandit::tests::builds_from_the_players_files`. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0011/EN0011.ANN, method: copy, source: [{name: ENEMY/0011/EN0011.ANN}]}
+- {name: ENEMY/0011/EN0011.ASD, method: copy, source: [{name: ENEMY/0011/EN0011.ASD}]}
+- {name: ENEMY/0011/EN0011.SES, method: copy, source: [{name: ENEMY/0011/EN0011.SES}]}
+- {name: kh1-bandit.json, method: copy, source: [{name: kh1-bandit.json}]}
+```
+
+The step prints `bandit (M11): …`; the log shows `bandit: KH1's bandit (M11) …` at start, `battle N: Bandit … gets
+KH1's AI` in a Bandit battle, and per Bandit `bandit: eNNN: KH1 world Some(8) (Re:CoM world 2)` at its appearance.
+
+#### Checked / Assumption
+
+- **Checked (files):** every number at its offset (117, the test reads them from the player's script), the request
+  words, the rows and their recoils (205 / 213, in the model), the hit windows, the hurt parts, the blade's length.
+- **Checked (decomp):** the hit handler's order and kind rewrite, the hit counter, movement state 7, the motion loop /
+  hold rule, `sys 100` (the cosine), `sys 172`, the attack types and the clash resolution, the bone point, the child
+  object's script (below).
+- **Checked (exe):** the class, its slots, the ctor, the factory size and call, KH1's world codes; every site (609
+  byte sites, 176 pointer sites) against the Steam exe.
+- **Assumptions:** the leap's power (id 1); Re:CoM's battle floors are flat (`sys 89` from where it last stood); the
+  apex motion one frame late (as the Powerwild); seeds per enemy; record types 9 / 11 not told apart; Agrabah's
+  rules in Re:CoM's Agrabah (decision 21's pairing; owner question 4); Re:CoM's sounds on the new clips.
+- **Not ported:** the leash and the fall-out death (KH1 removes it), the group leader's messages, KH1's room rules
+  (Agrabah rooms 2 / 3–6 / 9–11 / 17, the sitting Bandits, the rooftop heights), the head look, the effects, the
+  blade's part mask, the fade-in (no Re:CoM alpha), flag 0x80 at the appearance.
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; an Agrabah Bandit battle)
+
+1. Each Bandit plays KH1's appearance (69 twice, about 0.8 s), then wanders about where it stands.
+2. Within 15 m (or when Sora targets it, between its walks) it engages: close (< 2 m) back hops and spins or strafes
+   and slashes; at 2–4 m it strafes, pauses, then runs in and slashes or leaps; far it runs in, sometimes leaps, and
+   sometimes plays the throw motion (no blade flies yet).
+3. The leap: a crouch, then a dash through the air at Sora about head height that carries on past him, then a drop.
+4. Hit it: KH1's flinch / launch (a knock-back hit launches it); its counter: after the first hits of a combo the
+   block stance (it raises its blade; nothing is blocked yet), a slash or a back hop and the leap.
+5. Guard its slash or leap: KH1's recoil 205; its spin: 213.
+6. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+7. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Bandits.
+
+Please send `kh1-recom.log` (`bandit:` lines) and an F9 trace.
+
+#### KH1 trace (what to record in KH1)
+
+An Agrabah room with Bandits (the Main Street's): stand far 10 s; stand at 3 m 10 s; stand at 1.5 m 10 s; one swing;
+a full combo; a finisher (its launch); Guard a slash; Guard a spin; let it leap at you and hold still; kill one; and
+one fight in Olympus' cups (outside Agrabah: its follow-up rounds).
+
+#### Bandit owner questions
+
+1. **The thrown blade** (`sys 94` → `ex_2090_00.bd`, row `0x1CC`). Checked (files + decomp): a separate object (`sys 15`;
+   that it is the blade's model: Assumption) made at the Bandit's bone code 28, flying along the Bandit's facing at
+   10 a frame, turned toward its target's point each frame by `sys 24(…, 3)` (a 3° step: Assumption), from frame 120
+   slowing by 0.5 a frame (so it comes back), 300 frames at most; it ends on a hit (its object flags `& 0x45`), and
+   when repelled (`& 0x102` / `& 0x30`) it turns, drops and stops after 60 frames. The Bandit waits 290 frames for it. Native options: (a) one of Re:CoM's own bullets
+   (`CHomingBullet`), moved and timed by those numbers each frame, with a Re:CoM effect as its look (the Gargoyle
+   rule); (b) the same bullet with KH1's scimitar model converted at the asset step as its look; (c) leave it out for
+   now (today: the throw motion plays, nothing flies).
+2. **The block** (the stance's row `0x15C`) and **the spin's repel** (row `0xEC`): in KH1 Sora's swing that meets them
+   is deflected (Sora's clash recoil), the Bandit plays 232 / 213 and counters (after a block: back hop and throw).
+   Native route found: Re:CoM's `CCollBody` guard flag (`+0x9C` bit 1, which Re:CoM's own hit apply honours; Sora's
+   Guard uses it) on its hurt bodies while those rows live, then KH1's clash on both sides. This changes how fights
+   play (Sora's swings bounce off) and the same mechanic serves the Large Body and the Defender. (a) Build it for the
+   Bandit now, (b) build it as a shared enemy-guard step first, (c) leave it out (today: hits land during the stance
+   and the spin).
+3. **The leap's power**: Re:CoM's Bandit has a slash (id 0) and a whirl (id 1). Chosen: the leap takes the whirl's.
+   (a) Keep, (b) the slash's.
+4. **Agrabah's rules**: KH1's Bandit plays differently by world (Agrabah: far rounds throw or leap, no follow-up after
+   its counter; elsewhere far rounds only close in and every counter gets a follow-up). Built: Re:CoM's world mapped
+   as decision 21 maps the records (Re:CoM's Agrabah = KH1's Agrabah). (a) Keep, (b) Agrabah's rules everywhere,
+   (c) the other rules everywhere.
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -639,7 +816,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Powerwild | `xa_ex_2030` (ex_2030.bd) | `CEnemyPowerwild` 7 | `0x140547798` | `0x140191380` / `0x1401890a9` 0xcd0 | 1,2,3 | 212,214,222 | FaLl | — |
 | Bouncywild | `xa_ex_2040` (ex_2040.bd) | `CEnemyBouncywild` 8 | `0x140538fb8` | `0x14018c4d0` / `0x1401890d3` 0xcd0 | 1,2,3 | — | FaLl | — |
 | Air Soldier (built) | `xa_ex_2160` (ex_2160.bd) | `CEnemyAirsoldier` 15 | `0x140531cc8` | `0x14018a4e0` / `0x1401891f9` 0xcd0 | 1,2,3, think `0x14018a5c0` | 200,201,202,203,210,211,212 | FKaA | — |
-| Bandit | `xa_ex_2090` (ex_2090.bd) | `CEnemyBandit` 11 | `0x140534368` | `0x14018aeb0` / `0x140189151` 0xcd0 | 1,2,3 | 200,202,210,211,212,216,217,218,230..233 | FaALl | — |
+| Bandit (built) | `xa_ex_2090` (ex_2090.bd) | `CEnemyBandit` 11 | `0x140534368` | `0x14018aeb0` / `0x140189151` 0xcd0 | 1,2,3 | 200,202,210,211,212,216,217,218,230..233 | FaALl | — |
 | Fat Bandit | `xa_ex_2060` (ex_2060.bd) | `CEnemyFatbandit` 10 | `0x14053ddf8` | `0x14018dd70` / `0x140189127` 0xcd0 | 1,2,3 | 200,205,206,207 | FKaALl | — |
 | Barrel Spider | `xa_ex_2170` (ex_2170.bd) | `CEnemyBarrelspider` 28 | `0x140535688` | `0x14018b3b0` / `0x14018941b` 0xce0 | 1,2,3,19 | 205,207,211,213,214 | FKaA | — |
 | Search Ghost | `xa_ex_2230` (ex_2230.bd) | `CEnemySearchghost` 14 | `0x14054c408` | `0x1401923f0` / `0x1401891cf` 0xce0 | 1,2,3 | 203,204 | FKaA | — |

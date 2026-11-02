@@ -99,7 +99,7 @@ const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin 
 
 /// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
 /// row in their own module (`crate::m11`); one line here per enemy.
-pub static CLASSES: [&Class; 4] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS];
+pub static CLASSES: [&Class; 5] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::ground::bandit::CLASS];
 
 /// M10's Shadow (class 0).
 pub static SHADOW: Class = Class {
