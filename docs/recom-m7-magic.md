@@ -1503,16 +1503,31 @@ default). At Damage = KH1 this section is off (KH1's spell damage as above).
   `*(+0xF8)+0x34` as a float, the attribute's resistance % and the attack's kind `+0x80`;
   Checked (decomp + disasm)):
   - **0xD (Gravity)**: refused (returns 0) when the param block's gate `+0x308 → +0x40` is 0;
-    else `value = (float)current HP +0x274 × AP / 100.0`, then, when `+0x2B0` ≠ 0, the boss rule
-    `0x14015D940` on the int; then `0x14017DAB0`: `(int)(value × resistance % × +0x290 / 100)`
+    else `value = (float)current HP +0x274 × AP / 100.0`, then, when `+0x2B0` ≠ 0, the frozen
+    bonus `0x14015D940` on the int (see below); then `0x14017DAB0`: `(int)(value × resistance % ×
+    +0x290 / 100)`
     (doubles), HP −= it (the veto `0x140180920`), at least 1. The hit handler skips its own boss
     rule for kinds 8 / 0xD / 0x10 / 0x14 / 0x17 (mask `0x912100`). The reaction picker's case
     0xD (`0x14017D626`) sends the enemy to its **flatten state `+0xAC0`** (exe `0x140183BA0`:
     height = timer ÷ 250 down to 0.1, then **held 9000 ticks = 3 s** (`0x140183CFB`), then 1.0).
     An immune enemy: the handler's "no damage" branch (HUD popup 6, vtable `+0x3F0`).
   - **8 (Stop)**: refused when the gate `+0x308 → +0x2C` is 0; else `+0x2D8 = (int)value` (no
-    resistance, no boss rule); the picker's case 8 → stop state `+0x940`, whose begin copies
+    resistance, no frozen bonus); the picker's case 8 → stop state `+0x940`, whose begin copies
     `+0x2D8` into its timer (`0x14017C7F4`). So the AP **is** the duration in ticks.
+- **The frozen bonus `0x14015D940`** (Checked (decomp + exe + files); it is **not** a boss rule,
+  which 0.59.0's notes called it): `value += StockSkillList[0x23] column 1 × 10 / 100` (1000 in
+  the session's `SY0002.BIN` → **+100**). Its test `+0x2B0` is the handle of the **"ice"** effect
+  (`0x1407C2C10` → "ice") that the Freeze state's begin `0x14017C190` starts (id 3; timer `24000 ÷
+  Freeze`) and its exe `0x140183AD0` / the cleanup `0x14017EAA0` clear: **a frozen enemy takes
+  100 more**. The hit handler adds it to the hit value before `0x14017DC50` (not for kinds 8 /
+  0xD / 0x10 / 0x14 / 0x17, mask `0x912100`, and not at resistance 0); kind 0xD adds it to its %
+  result instead.
+- **Re:CoM's boss reduction is the falloff** (Checked (decomp)): for ids 100..199 (bosses) each
+  hit the handler takes (`0x14017FBF4..`) counts `+0x288`; from the 6th, `+0x290` −= 0.25 (down to
+  0.05); `+0x28C` = 1500 ticks; the enemy update `0x140185320` counts it down by the enemy's dt and zeroes `+0x288`, puts
+  `+0x290` back to 1.0 when 1500 ticks (30 frames) pass without a hit. `0x14017DAB0`
+  multiplies every damage by `+0x290`. Stage 106 restores these three fields after each hit on a
+  boss whose revenge acts (falloff off for them).
 
 ### KH1 level → Re:CoM card / sleight (`damage::spell_source`)
 
@@ -1552,17 +1567,27 @@ read from the exe (0x26 / 0x38 / 0x39: 0xD; 0x27 / 0x3A / 0x3B: 8; 0x28 / 0x3C /
   re-hit, the MP.
 - **Hits** (enemy-hit wrapper, `win::damage::recom_spell_hits`): no KH1 number is written and the
   attribute is not neutralised: Re:CoM's path applies the AP with **Re:CoM's own resistance**,
-  weak parts, boss rules:
+  weak parts, its frozen bonus and its boss falloff:
   - **Gravity**: Re:CoM's kind 0xD with its gate `+0x40` (immune: no damage), % of the current
-    HP, boss rule, resistance, and its **3-second flatten**. KH1's squash leaves an enemy in the
+    HP, frozen bonus, resistance, falloff, and its **3-second flatten**. KH1's squash leaves an enemy in the
     flatten state (`win::magic::flattening`: no spring-back write, not squashed again under
     another sphere), as KH1's squash skips flattened actors. No KH1 `resist[8]`, no floor.
   - **Stop** (`win::attack::recom_stop_hit`): Re:CoM's kind 8 with its gate `+0x2C`; the
     duration is the AP. No KH1 `resist[9]`, duration or whole-duration write. Kept from KH1's
     Stop: the stopped enemy's attack bodies off, the held hits' 6–11-frame pace (M7 f3).
-  - **Aero's wind** (Aerora / Aeroga): each re-hit carries Re:CoM's AP and attribute 1; the hit
-    keeps KH1's reaction (the KH1 row's kind 1), as Fire / Blizzard / Thunder. Aero (level 1) has
-    no wind in KH1 (`aero::has_wind`): its Re:CoM card AP is computed and carried by no hit.
+  - **Aero's wind**: each re-hit carries Re:CoM's AP and attribute 1; the hit keeps KH1's
+    reaction (the KH1 row's kind 1), as Fire / Blizzard / Thunder.
+  - **Aero (level 1) gets a wind** (owner, 2026-11-01, follow-ups 2, "1 (b)"; not KH1: KH1's
+    level 1 has no wind record, `aero::has_wind`) when the cast took the Aero card's AP
+    (`damage::aero_wind`, `win::damage::recom_cast`): card 0x20, **300 × attack ÷ 100**, attribute
+    1. Its shape and pace are **Aerora's KH1 wind** (btltbl `0x5CF8`, the nearest KH1 data, the
+    same numbers as Aeroga's `0x5D68`): a sphere of **80 cm** × Sora's size (size 1.0:
+    Assumption, as for Aerora) at his body centre, **re-hit every 30 frames** (Re:CoM's new hit
+    serial `0x14016F7D0`), **alive for the whole barrier** ((18 + max MP) × 60 frames, KH1's
+    level 1's own barrier), KH1's flinch (the KH1 row's kind 1). Its look is Re:CoM's Aero card's
+    (row 0x28's effect set 24). All of these are Aerora's or the barrier's numbers used for level 1:
+    **Assumption** (no KH1 level-1 wind to read). At Damage = KH1, and in the field (no card AP),
+    level 1 stays KH1's: the barrier only.
   - **Card interrupt** (decision 14): an attacking enemy's card is broken for the hit, **unless
     Re:CoM's gate for the kind refuses it** (`damage::interrupts`): an immune enemy's attack goes
     on, as KH1's Stop on a `resist[9]` 0 enemy.
@@ -1598,6 +1623,16 @@ the setting's other sites; kind 8's `0x14017DCB5` was already checked (7.9). No 
 2. Stop: (b) Re:CoM's durations with Re:CoM's gate (built above).
 3. Aero: the wind's hits take Re:CoM's Aero by level (card, Aerora, Aeroga; built above).
 
+Follow-ups 2 (owner, 2026-11-01, on 0.59.0's questions):
+
+1. **(b)** Aero level 1 gets a wind with the Aero card's value at Damage = Re:CoM (built above).
+2. **(a)** Stopped enemies keep KH1's held-hit pace and attacks-off (no change).
+3. **(b)** "Gravity Break and Zantetsuken skip Re:CoM's boss rule": `recom-kh1-attack.md`
+   § Gravity Break and Zantetsuken. **Not built**: the function named (`0x14015D940`) is the
+   frozen bonus, not a boss rule (above); owner question there.
+4. **(a)** Aero's wind in the field keeps Re:CoM's no-card AP (the attack stat), as Fire (no
+   change). Aero (level 1) in the field: no card AP, so no wind (KH1's barrier only).
+
 ### What the owner should test
 
 1. In battle, cast Fire, Fira (needs the -ra level), Firaga: the log's `damage: fire…` lines show
@@ -1607,7 +1642,7 @@ the setting's other sites; kind 8's `0x14017DCB5` was already checked (7.9). No 
 2. Blizzard (each shard that hits) and Thunder (each strike): the same.
 3. Cure: unchanged (50 / 150 / 300).
 4. **Gravity / Gravira / Graviga**: KH1's cast and falling sphere; at the impact each enemy under
-   it loses 20 / 40 / 70 % of the HP it has left (Re:CoM's resistance and boss rule on top) and is
+   it loses 20 / 40 / 70 % of the HP it has left (Re:CoM's resistance and boss falloff on top) and is
    **flattened for 3 seconds** as by Re:CoM's Gravity card; an enemy Re:CoM's Gravity can't touch
    takes nothing (log `gate shut: immune`) and its attack goes on. No pop back to full height
    during the flatten.
@@ -1616,6 +1651,11 @@ the setting's other sites; kind 8's `0x14017DCB5` was already checked (7.9). No 
    Stop can't stop aren't stopped (log `gate shut: immune`). Held hits land after it, 6–11 frames
    apart.
 6. **Aerora / Aeroga**: the wind's hits (every 30 frames while the barrier lasts) do Re:CoM's
-   Aerora / Aeroga AP (600 / 900 × attack ÷ 100); trace `:aero2:recom …`. Aero (level 1): barrier
-   only, no wind hits (KH1). The barrier still halves Sora's damage (KH1's).
-7. In the field: Gravity and Stop as before (KH1's); `damage = kh1`: everything as before.
+   Aerora / Aeroga AP (600 / 900 × attack ÷ 100); trace `:aero2:recom …`. The barrier still halves
+   Sora's damage (KH1's).
+7. **Aero (level 1), in battle**: the log's `release aero1: … Aerora's KH1 wind 0.8 m re-hitting
+   every 30 f with the Aero card's AP (Damage = Re:CoM)`; enemies within about 0.8 m of Sora take
+   a hit every half second while the barrier lasts, each the Aero card's 300 × attack ÷ 100
+   (attack 13: 39); trace `:aero1:recom 39 col 0 card 0x20`. In the field: barrier only.
+   `damage = kh1`: barrier only (KH1).
+8. In the field: Gravity and Stop as before (KH1's); `damage = kh1`: everything as before.

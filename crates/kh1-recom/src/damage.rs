@@ -244,6 +244,23 @@ pub fn needs_recom_kind(spell: u8) -> bool {
     matches!(spell, s::GRAVITY | s::STOP)
 }
 
+/// Whether a spell's cast records "took Re:CoM's card / sleight numbers" for its hits or its
+/// shape: Gravity and Stop (their hits are Re:CoM's kinds only then), Aero (level 1's wind, below).
+pub fn tracks_recom_cast(spell: u8) -> bool {
+    needs_recom_kind(spell) || spell == crate::magic::spell::AERO
+}
+
+/// Whether an Aero cast has the wind (owner, 2026-11-01, follow-ups 2, "1 (b)"): KH1's Aerora and
+/// Aeroga always (`magic::aero::has_wind`); **Aero (level 1) too at Damage = Re:CoM when the cast
+/// took Re:CoM's Aero card's AP** (`recom_card`: a battle room with the live table), carrying that
+/// value. KH1's level 1 has no wind (no wind record; not KH1, the owner's choice): its wind is
+/// Aerora's (`magic::aero_wind_attack`: radius 80 cm × the size, re-hit every 30 frames, following
+/// Sora for the whole barrier, KH1's flinch). At Damage = KH1, or with no card AP (the field), level
+/// 1 stays KH1's: barrier only.
+pub fn aero_wind(level: u8, recom_card: bool) -> bool {
+    crate::magic::aero::has_wind(level) || (level.clamp(1, 3) == 1 && recom_card)
+}
+
 /// The hit kind Re:CoM's own card / sleight of this level gives its attack (`initMagic` /
 /// `initStockSkill`: `+0x668` = the row's `+0xB`), for the spells whose Re:CoM effect is the kind:
 /// Gravity / Gravira / Graviga **0xD** (rows 0x26 / 0x38 / 0x39: current HP × AP ÷ 100 behind the
@@ -283,7 +300,8 @@ pub fn interrupts(flags: u64, gate: Option<bool>) -> bool {
 }
 
 /// What Re:CoM's kind 0xD takes from an enemy (`0x14017DC50` → `0x14017DAB0`), for tests and the
-/// log: `(float)HP × AP / 100` (the boss rule `0x14015D940` when `+0x2B0` is set: not modelled),
+/// log: `(float)HP × AP / 100` (+ the frozen bonus `0x14015D940` when the enemy is frozen, `+0x2B0`
+/// its "ice" effect: not modelled),
 /// then `(int)(value × resistance % × +0x290 / 100)` in doubles, at least 1. Immune (gate 0): 0.
 pub fn recom_gravity_damage(hp: i32, ap: i32, gate_open: bool, resist_pct: f32, scale_290: f32) -> i32 {
     if !gate_open {
@@ -494,6 +512,27 @@ mod tests {
         assert_eq!(recom_kind(s::FIRE, 1), None);
         assert!(!needs_recom_kind(s::AERO) && !needs_recom_kind(s::FIRE));
         assert_eq!(recom_gate_offset(s::AERO), None);
+    }
+
+    #[test]
+    fn aero_level_1_wind_only_with_recoms_card() {
+        // KH1: Aerora / Aeroga have the wind, Aero doesn't.
+        assert_eq!((1..=3).map(|lv| aero_wind(lv, false)).collect::<Vec<_>>(), vec![false, true, true]);
+        // Damage = Re:CoM with the Aero card's AP: level 1 gets the wind too (owner, "1 (b)").
+        assert_eq!((1..=3).map(|lv| aero_wind(lv, true)).collect::<Vec<_>>(), vec![true, true, true]);
+        // Its value: the Aero card 0x20, 300 × attack ÷ 100 (attack 13: 39), attribute 1.
+        let src = spell_source(s::AERO, 1).unwrap();
+        assert_eq!((src.table, src.id, src.recom_row, src.rule), (Table::Card, 0x20, 0x28, Rule::Stat));
+        let a = row_ap(src.table, &card(300, 0x03, 1), src.col, 13, src.rule);
+        assert_eq!((a.ap, a.attr), (39, 1));
+        // Aero's casts record whether they took the card's numbers; Fire's don't need to.
+        assert!(tracks_recom_cast(s::AERO) && tracks_recom_cast(s::GRAVITY) && tracks_recom_cast(s::STOP));
+        assert!(!tracks_recom_cast(s::FIRE) && !tracks_recom_cast(s::CURE));
+        // Level 1's wind is Aerora's KH1 data (radius 80, re-hit 30): the only KH1 wind record.
+        let w1 = crate::magic::aero_wind_attack(1);
+        let w2 = crate::magic::aero_wind_attack(2);
+        assert_eq!((w1.radius, w1.kind), (w2.radius, w2.kind));
+        assert_eq!((crate::magic::aero::WIND_RADIUS, crate::magic::aero::REHIT), (80.0, 30.0));
     }
 
     #[test]

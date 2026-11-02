@@ -721,7 +721,7 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
     let hp_now: i32 = rd(enemy + 0x274);
     // Damage = Re:CoM (owner, 2026-11-01): Fire / Blizzard / Thunder / Gravity / Aero's wind carry
     // their Re:CoM card's / sleight's AP and attribute from the cast (`super::damage::spell`),
-    // Gravity also Re:CoM's kind 0xD (its % of the current HP, its gate `+0x40`, its boss rule and
+    // Gravity also Re:CoM's kind 0xD (its % of the current HP, its gate `+0x40`, its frozen bonus and
     // its 3-second flatten); Re:CoM's path applies them (its resistance included).
     let recom = super::damage::recom_spell_hits(s);
     let carried: i16 = rd(part + 0x92);

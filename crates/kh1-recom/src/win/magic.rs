@@ -563,7 +563,9 @@ unsafe fn release_aero(pl: usize, c: &CastStart) -> Option<u32> {
     }
     effect_at(pl, name, (r[2] as u32).wrapping_sub(0x11), at);
     // The barrier (a re-cast rewrites the timer), and this cast's shot.
-    let wind = mg::aero::has_wind(c.level);
+    // Aerora / Aeroga: KH1's wind; Aero (level 1): Aerora's wind with the Aero card's value at
+    // Damage = Re:CoM when the cast took it (owner, "1 (b)"; `crate::damage::aero_wind`).
+    let wind = crate::damage::aero_wind(c.level, super::damage::recom_cast(mg::spell::AERO));
     let frames = mg::aero::frames(max_mp);
     let c3 = sora_centre(pl);
     let shot = aero_shot(pl, r, c.level, wind, frames, [c3[0], c3[1], c3[2], 1.0]);
@@ -580,7 +582,7 @@ unsafe fn release_aero(pl: usize, c: &CastStart) -> Option<u32> {
         STRIKING.store(true, Ordering::Release);
     }
     super::mp::pay(mg::aero::COST, "Aero release");
-    note(|| format!("release aero{}: KH1's barrier {frames} f (max MP {max_mp}), damage taken halved; Re:CoM's Aero shot {shot:?} follows Sora{}", c.level, if wind { ", KH1's wind 0.8 m re-hitting every 30 f" } else { " (look only)" }));
+    note(|| format!("release aero{}: KH1's barrier {frames} f (max MP {max_mp}), damage taken halved; Re:CoM's Aero shot {shot:?} follows Sora{}", c.level, if !wind { " (look only)" } else if c.level == 1 { ", Aerora's KH1 wind 0.8 m re-hitting every 30 f with the Aero card's AP (Damage = Re:CoM)" } else { ", KH1's wind 0.8 m re-hitting every 30 f" }));
     event(format!("barrier {frames:.0}{}", if wind { " wind" } else { "" }));
     shot
 }
