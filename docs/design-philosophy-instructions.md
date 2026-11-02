@@ -379,6 +379,15 @@ At KH1 setting:
       flatten; Stop 9000 / 15000 / 21000 ticks); **Aero's wind uses Re:CoM's Aero by level** (card,
       then Aerora / Aeroga sleights, as Fire / Blizzard / Thunder); **Gravity Break and Zantetsuken
       take KH1's percentage of Re:CoM's HP**.
+    - **Boss revenge value (owner, 2026-11-01):** "lets also have humanoid bosses have a revenge value
+      system, similar to how they work in their fights in KH2 … borrow their revenge value". Chosen:
+      KH2's **story / Absent Silhouette limits** (Axel 92, Larxene 100, Vexen 150, Marluxia 100 for all
+      three forms, Hades 80 then 50 below 30 % HP, Cloud 100); **all humanoid bosses** (also Hook,
+      Riku, Riku Replica, the hooded figure: KH2's default 100); on revenge the boss plays **its own
+      Re:CoM attack nearest its KH2 revenge move** (Larxene: her leap, as KH2's decoy teleport); **Re:CoM's
+      boss damage falloff is off for bosses that have revenge**. KH1 hits add KH2 Sora's ATKP revenge
+      values (swing 8, finisher 24, air swing 12, air finisher 28, Fire 8, Blizzard 16, Thunder 32).
+      Notes: `docs/recom-boss-revenge.md`.
 
 ## Known open design questions (ask the owner, don't guess)
 
