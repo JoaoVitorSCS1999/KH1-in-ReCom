@@ -275,6 +275,15 @@ pub fn recom_kind(spell: u8, level: u8) -> Option<u32> {
     recom_rows(spell)?.get(level.clamp(1, 3) as usize - 1).map(|r| r[0xB] as u32)
 }
 
+/// Owner (2026-11-01, follow-ups 2): at Damage = Re:CoM, Gravity Break and Zantetsuken hits skip
+/// Re:CoM's boss falloff (`+0x288` / `+0x28C` / `+0x290`: from a boss's 6th hit within 1500 ticks,
+/// −0.25 a hit to 0.05, `0x14017F7E0` / `0x140185320`, applied by `0x14017DAB0`), so KH1's
+/// `resist[8]` and floor alone reduce bosses. Its frozen bonus (`0x14015D940`), resistance and weak
+/// parts stay. Checked (decomp).
+pub fn skips_falloff(damage_kh1: bool, kh1_row: usize, m: &Moveset) -> bool {
+    !damage_kh1 && percent_of_hp_row(kh1_row, m)
+}
+
 /// Re:CoM's Gravity kind (`0x14017DC50` case 0xD) and Stop kind (case 8). Checked (decomp).
 pub const RECOM_GRAVITY_KIND: u32 = 0xD;
 pub const RECOM_STOP_KIND: u32 = crate::magic::RECOM_STOP_KIND;
@@ -551,5 +560,15 @@ mod tests {
         let m = Moveset::kh1_defaults();
         let pct: Vec<usize> = (0..0x40).filter(|&r| percent_of_hp_row(r, &m)).collect();
         assert_eq!(pct, vec![row::GRAVITY_BREAK, row::ZANTETSUKEN]);
+    }
+
+    #[test]
+    fn only_percent_rows_skip_the_falloff_at_recom() {
+        let m = Moveset::kh1_defaults();
+        // Damage = Re:CoM: Gravity Break and Zantetsuken only (owner, follow-ups 2).
+        let skip: Vec<usize> = (0..0x40).filter(|&r| skips_falloff(false, r, &m)).collect();
+        assert_eq!(skip, vec![row::GRAVITY_BREAK, row::ZANTETSUKEN]);
+        // Damage = KH1: nothing changes.
+        assert!((0..0x40).all(|r| !skips_falloff(true, r, &m)));
     }
 }

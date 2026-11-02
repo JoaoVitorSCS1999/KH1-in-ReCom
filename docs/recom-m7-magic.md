@@ -1527,7 +1527,8 @@ default). At Damage = KH1 this section is off (KH1's spell damage as above).
   0.05); `+0x28C` = 1500 ticks; the enemy update `0x140185320` counts it down by the enemy's dt and zeroes `+0x288`, puts
   `+0x290` back to 1.0 when 1500 ticks (30 frames) pass without a hit. `0x14017DAB0`
   multiplies every damage by `+0x290`. Stage 106 restores these three fields after each hit on a
-  boss whose revenge acts (falloff off for them).
+  boss whose revenge acts (falloff off for them); Damage = Re:CoM does the same for Gravity
+  Break / Zantetsuken hits (owner, follow-ups 2; `win::revenge::Falloff`).
 
 ### KH1 level → Re:CoM card / sleight (`damage::spell_source`)
 
@@ -1627,9 +1628,9 @@ Follow-ups 2 (owner, 2026-11-01, on 0.59.0's questions):
 
 1. **(b)** Aero level 1 gets a wind with the Aero card's value at Damage = Re:CoM (built above).
 2. **(a)** Stopped enemies keep KH1's held-hit pace and attacks-off (no change).
-3. **(b)** "Gravity Break and Zantetsuken skip Re:CoM's boss rule": `recom-kh1-attack.md`
-   § Gravity Break and Zantetsuken. **Not built**: the function named (`0x14015D940`) is the
-   frozen bonus, not a boss rule (above); owner question there.
+3. **(b)** "Gravity Break and Zantetsuken skip Re:CoM's boss reduction": the **falloff** `+0x290`
+   (the question's "boss rule" `0x14015D940` is the frozen bonus, above, and stays). Built:
+   `recom-kh1-attack.md` § Gravity Break and Zantetsuken.
 4. **(a)** Aero's wind in the field keeps Re:CoM's no-card AP (the attack stat), as Fire (no
    change). Aero (level 1) in the field: no card AP, so no wind (KH1's barrier only).
 

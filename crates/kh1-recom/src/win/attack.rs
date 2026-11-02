@@ -678,6 +678,13 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
         super::damage::note(|| format!("swing row {}: KH1's % of Re:CoM's HP {hp} = {d} (was the card's AP {carried})", row.unwrap_or(0)));
     }
+    // Damage = Re:CoM (owner, 2026-11-01, follow-ups 2): Gravity Break and Zantetsuken skip
+    // Re:CoM's boss falloff: its multiplier at 1.0 for the handler, its three fields put back after
+    // (as for revenge bosses). Its frozen bonus, resistance and weak parts stay.
+    let falloff = row.filter(|&r| crate::damage::skips_falloff(super::damage::kh1(), r, super::attack::moveset()) && pct.is_some()).map(|_| super::revenge::Falloff::save(enemy));
+    if falloff.is_some() {
+        super::revenge::Falloff::neutral(enemy);
+    }
     let flags: u64 = rd(enemy + 0x260);
     let force = flags & 1 != 0 && flags & 0x200_0000 == 0;
     if force {
@@ -687,6 +694,12 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     if force {
         let now: u64 = rd(enemy + 0x260);
         wr(enemy + 0x260, now & !0x200_0000);
+    }
+    if let Some(f) = falloff {
+        f.restore(enemy);
+        if f.mult() < 1.0 {
+            super::damage::note(|| format!("swing row {}: Re:CoM's boss falloff skipped (its multiplier was {:.2})", row.unwrap_or(0), f.mult()));
+        }
     }
     super::guard::after_enemy_hit(enemy, r, hp);
     // KH1's MP charge for this hit (`0x1402BF330`: one per KH1 damage record; M7 stage 7.1).
