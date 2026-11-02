@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 112: Gimmick cards: Guard blocks break the five card-break bosses; cards at 75 / 50 / 25 % HP, version 0.64.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "interrupting an attack with a finisher is very rare"; chose (a) Guard + (d) HP thresholds,
+  for Guard Armor, Trickmaster, Jafar, Parasite Cage, Dragon Maleficent at Combat = KH1, Sora's story.
+- (a) Our Guard's block (`win::guard::on_result`, in the pair-dispatch wrapper `0x14016EAD0`) of the boss's own
+  attack or a Re:CoM shot it fired (`CBullet` / `CHomingBullet`, shooter `+0x238`) posts the card-break message 3
+  (as Stage 110); once per blocked attack (collision + serial `+0x70`); not in / entering state 13, dead or pending.
+  Block detection no longer needs the guard-reactions toggle (it gates only the reactions).
+- (d) After each hit (KH1 enemy-hit wrapper on `0x14017F7E0`; `+0x274` and the max-HP getter `0x14017F5A0`): crossing
+  75 / 50 / 25 % drops the boss's card without a stagger, one card per hit, once per threshold per fight, not on the
+  killing hit, no chance roll; a boss's own condition (Trickmaster's table, Jafar not in state 15, Parasite Cage's card
+  unused, Dragon's footing not out) makes it wait. Spawned as each boss's own drop call: `0x140163740` then the prize
+  factory `0x1401A89C0(0x1401A8A80(), &desc, 0)` with that boss's descriptor. Checked (decomp + disasm + exe).
+- Finisher-interrupt break kept. Assumptions: the bosses' own projectile classes aren't linked for (a); HP lost only
+  through the hit handler.
+- Checked: tests, Windows build, 600 sites. Not checked: in game.
+
+---
+
 ## Stage 111: Summons: usable whenever Sora has the MP; Sora invincible through them; Cloud first, version 0.63.0 (2026-11-01)
 
 - Asks (owner, 2026-11-02): "summons should be able to be used as long as you have MP, also, sora should have iframes
