@@ -3,3 +3,4 @@
 
 pub mod airsoldier;
 pub mod darkball;
+pub mod airpirate;

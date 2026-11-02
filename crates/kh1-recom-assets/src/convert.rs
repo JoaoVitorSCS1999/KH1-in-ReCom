@@ -180,9 +180,10 @@ impl Converter {
         let kskel = Skeleton::parse(mdls)?;
         let rig = Rig::from_mdls(mdls)?;
         // Bone 1 is the model's own `ex_NNNN_sk` (Sora's `ex_0010_sk`, the Shadow's
-        // `ex_2020_sk`; Checked (files)).
+        // `ex_2020_sk`; Checked (files)); Re:CoM's Air Pirate names it `m_ex210_sk` (Checked (files):
+        // `EN0022.MDL`, M11).
         let sk = &skel.bones.get(1).map(|b| b.name.clone()).unwrap_or_default();
-        if skel.bones.len() < 2 || skel.bones[0].name != "Root" || !(sk.starts_with("ex_") && sk.ends_with("_sk")) {
+        if skel.bones.len() < 2 || skel.bones[0].name != "Root" || !((sk.starts_with("ex_") || sk.starts_with("m_ex")) && sk.ends_with("_sk")) {
             return bad("Re:CoM skeleton: bone 0/1 are not Root/ex_NNNN_sk");
         }
         let map = bone_map(&kskel, &skel);

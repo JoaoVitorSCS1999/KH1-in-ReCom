@@ -62,6 +62,7 @@ pub mod airsoldier;
 pub mod powerwild;
 pub mod darkball;
 pub mod bandit;
+pub mod airpirate;
 pub mod stats;
 pub mod texture;
 pub mod uibin;
