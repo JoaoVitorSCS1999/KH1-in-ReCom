@@ -160,8 +160,8 @@ The revenge start (message 2's writes, `crate::battle::cardless_flags`) sets bit
 | Part | How | Tag |
 |---|---|---|
 | Pending | the revenge start marks the tail (`flag::PENDING`, the state at `+0x20`) | Checked (decomp) |
-| Window opens | our hurt-off wrapper (`0x14017DA80`, decision 26) runs Re:CoM's own call when the state beginning (`+0x60`) is the boss's revenge state with the mark (`win::revenge::begin_untouchable`): bodies off. Any other attack keeps decision 26 | Checked (decomp) |
-| Hits | in the enemy-hit hook, a hit on a boss in its window (or pending; bit 0 set, HP > 0) goes to Re:CoM's handler without the card-interrupt bit for every source (KH1 swing, spell, Stop, turned-back shot, Re:CoM's own), so it drops it (`win::attack::untouchable_hit`); the KH1 swing / spell record is taken (it can't land later); no MP charge | Checked (decomp) |
+| Window opens | our hurt-off wrapper (`0x14017DA80`, decision 26) runs Re:CoM's own call when the state beginning (`+0x60`) is the boss's revenge-move state (`win::revenge::begin_untouchable`, `crate::revenge::window_opens`): bodies off. **Whoever started it** (owner, 2026-11-02, "untouchable whenever played"): the revenge start's mark, or the boss's own choice (its think, a card play: tail flag `OWN`; the tail is set up there if no hit did yet this battle). Any other attack keeps decision 26 | Checked (decomp) |
+| Hits | in the enemy-hit hook, a hit on a boss in its window (or pending; bit 0 set, HP > 0) goes to Re:CoM's handler without the card-interrupt bit for every source (KH1 swing, spell, Stop, turned-back shot, Re:CoM's own), so it drops it (`win::attack::untouchable_hit`); Captain Hook's permanent `0x2000000` is held off for the call (2026-11-02); the KH1 swing / spell record is taken (it can't land later); no MP charge. Only calls with a hit waiting on a body (`+0x90` ≠ 0 or `+0x9C & 0x28`, what `0x140154EB0` reads) are counted and traced: the handler runs every frame | Checked (decomp) |
 | Guard | decision 27's flinch for a blocked melee attacker is skipped for a boss in its window (`win::guard::after_enemy_hit`) | — |
 | Window closes | new hook on Re:CoM's state end `0x14017DA90` (8 bytes `48 83 A1 60 02 00 00 FA` moved; tail `BA FF FF FF FF E9 0E 53 02 00` checked; no branch into `0x14017DA91..97`, Checked (exe rel32 / pointer scan)): the mark cleared, the end line logged; Re:CoM turns the bodies on. A boss that dies mid-move ends here too (its death state replaces the attack) | Checked (decomp + exe) |
 | Off | `boss_revenge = off`, Combat = Re:CoM, Riku's story: nothing marked, all as before | — |
@@ -172,6 +172,23 @@ are all past the untouchable branch; the hurt-off wrapper is the only skip of `0
 "attacks off" (`0x1401A2D90`) only runs after a landed Stop; gimmick-card break (message 3) and
 message 6 go to Heartless bosses only (none in `BOSSES`); summons and specials use Re:CoM's
 collision (bodies off) and set no interrupt bit. Checked (code).
+
+### Holes found (2026-11-02, owner: "you can still hit bosses during their revenge move (or if they use their revenge move naturally …)")
+
+Every hit path re-checked against the window. Checked (decomp + exe + code) unless tagged.
+
+| # | Hole | Fix |
+|---|---|---|
+| 1 | **The boss's own use of its revenge move was never untouchable**: the window opened only for a state a revenge start marked. A boss that picks the same attack itself (its think, P1's cardless play, Re:CoM's card play) played it under decisions 14 / 26: bodies on, every KH1 hit with the interrupt bit. The likeliest source of the report | the window opens at every begin of the revenge-move state (`window_opens`), logged `revenge: <boss> untouchable (own choice, state n: …)`; same rules and end |
+| 2 | **Captain Hook is always interruptible**: his ctor `0x1403C6340` sets `+0x260 \|= 0x2000000` for good, so Re:CoM's handler takes the `0x2000001` path (ends the attack, `0x14017E1D0`, clears bit 0, applies the hit) for any hit that reaches it in his window | the bit is held off for the window's handler call and put back after |
+| 3 | The window's handler call runs **every frame** (its only caller `0x140185630`, the enemies' per-frame slot `+0x78`), so the end line counted every frame as an ignored "other" hit and the trace's `hits` column filled with `untouchable` entries. Not a damage hole | counted / traced only when a hit is waiting on a body |
+
+Checked and not holes:
+- Every attack state 2..10 begins through Re:CoM's wrappers (`0x14017B720` …, `+0x118 + (k − 2) × 0x18`, then `+0x438`), copied into every `CEnemy` by its ctor `0x14017AF00` from the table at `0x14087A910`; the humanoid bosses' base ctor `0x1401989A0` and their own ctors don't replace them; all 12 classes' `+0x438` reach `0x14017DA80` (Vexen and Marluxia 2 through their own, which call it). So a window always turns the bodies off.
+- Bodies off is `+0x10 = 0` on each body (`0x14014DE80`); our KH1 blade sweep in the pair dispatch `0x14016EAD0` and `win::magic::strike_body` (Thunder, Gravity, Stop strikes) both skip bodies with `+0x10 = 0`; Re:CoM's own collision (Fire / Blizzard shots, Aero's wind, turned-back shots, summons, Sonic Blade's `procAttackCollision`) skips them too.
+- Every hit's damage is applied in the handler `0x14017F7E0` (hooked), whose only caller is `0x140185630`; the untouchable branch is the hook's first test, before any wrapper sets `0x2000000`. The only other HP subtraction on these classes, vtable `+0xD8` (`0x1401814C0` and Marluxia's own), is called on enemies only by CBTL's 1 HP a second room-card tick (`0x14015E450`, `0x1401617F0`; the third caller, `0x140361530`, walks another class's list), not by Sora's hits.
+- The revenge start always marks the tail when it starts the attack (`decide`); the gimmick posts (messages 3 / 6) go to Heartless bosses only.
+- Marluxia 2 / 3's parts keep their own HP rules (default `+0x430`); that a part's damage never reaches the body's HP: Assumption.
 
 ### The meter (choice)
 
@@ -274,6 +291,9 @@ Vexen's window is 5 s.
 
 ### Logs and trace (untouchable)
 
+- `revenge: Axel untouchable (own choice, state 4: …) 0x…: its revenge move, played by itself …`
+  when the boss picks the move itself; its end line says `untouchable ends (own choice, state 4) …`.
+
 - `revenge: Axel untouchable (state 4: warp, then a flame burst around him) 0x…: Re:CoM's rule …`
   when Re:CoM begins the state.
 - `revenge: Axel untouchable ends (state 4) 0x… after 93 frames: ignored 5 hits (3 KH1 swings, 2 KH1
@@ -320,3 +340,9 @@ Vexen's window is 5 s.
     a quarter in). Before this change every line said frame 0 or 1.
 18. Cloud's charge: Guard blocks a dash and the next dash still comes; stepping sideways once he
     starts moving avoids it; all dashes in one untouchable window (one start and one end line).
+19. Every revenge move the boss plays **on its own** (no revenge line before it) is untouchable too:
+    `revenge: <boss> untouchable (own choice, state n …)` then `… untouchable ends (own choice …)`;
+    no damage, no flinch, no Guard flinch; its other attacks stay hittable (decision 26).
+20. Captain Hook's sword slash (state 3), revenge or not: hits do nothing until his end line.
+21. The end line's ignored-hit counts match the hits Sora actually swung or cast during the move
+    (before, it counted every frame as `other`).

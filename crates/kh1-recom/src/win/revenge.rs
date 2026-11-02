@@ -269,10 +269,12 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
             return super::attack::enemy_hit(enemy);
         }
         let (r, kind) = super::attack::untouchable_hit(enemy);
-        let t = enemy + b.size as usize;
-        let mut ig = Ignored::from_bytes(rd(t + tail::IGNORED));
-        ig.add(kind);
-        wr(t + tail::IGNORED, ig.to_bytes());
+        if let Some(kind) = kind {
+            let t = enemy + b.size as usize;
+            let mut ig = Ignored::from_bytes(rd(t + tail::IGNORED));
+            ig.add(kind);
+            wr(t + tail::IGNORED, ig.to_bytes());
+        }
         if r != 0 {
             line(|| format!("revenge: {} {enemy:#x} took a hit in its untouchable move: Re:CoM's handler applied it (flags {:#x})", b.name, rd::<u64>(enemy + EN_FLAGS)));
         }
@@ -320,7 +322,7 @@ unsafe fn decide(e: usize, b: &Boss, c: &mut Counter, at_end: bool) {
             wr(e + EN_CHOSEN, state);
             wr(e + EN_NEXT, crate::battle::state_address(e, state));
             // The untouchable window opens when Re:CoM begins this state.
-            c.flags = (c.flags | flag::PENDING) & !flag::UNTOUCHABLE;
+            c.flags = (c.flags | flag::PENDING) & !(flag::UNTOUCHABLE | flag::OWN);
             wr(e + b.size as usize + tail::STATE, state);
             line(|| format!("revenge: {} {e:#x} counter {value:.1} >= {l} at frame {at:.0} of its {} -> state {state} ({what})", b.name, if at_end { "reaction's end" } else { "reaction" }));
         }
@@ -402,34 +404,44 @@ pub(super) unsafe fn guard_skipped(e: usize) {
 }
 
 /// Re:CoM's "hurt bodies off" at an attack state's begin (`super::attack::hurt_off`, at the KH1
-/// setting, which otherwise skips it: decision 26): true when the state beginning is the one this
-/// boss's revenge started, so Re:CoM's own call runs and the window opens. A pending start that
-/// another attack state replaced is dropped.
+/// setting, which otherwise skips it: decision 26): true when the state beginning is the boss's
+/// revenge move, so Re:CoM's own call runs and the window opens: the state a revenge start marked,
+/// or (owner, 2026-11-02: "untouchable whenever played") the same state chosen by the boss itself.
+/// A pending start that another attack state replaced is dropped.
 pub(super) unsafe fn begin_untouchable(e: usize) -> bool {
     if !live() {
         return false;
     }
     let Some(b) = boss_of(e) else { return false };
+    let Some((move_state, what)) = b.attack else { return false };
+    let current: usize = rd(e + EN_STATE);
+    let is_move = current == crate::battle::state_address(e, move_state);
     if !tail_ok(e, b) {
-        return false;
+        if !is_move {
+            return false;
+        }
+        // The boss's first use, before any hit set its tail up for this battle.
+        setup(e, b);
     }
     let t = e + b.size as usize;
     let flags: u32 = rd(t + tail::FLAGS);
-    if flags & flag::PENDING == 0 {
+    let Some(origin) = rv::window_opens(flags, current, crate::battle::state_address(e, move_state)) else {
+        if flags & flag::PENDING != 0 {
+            wr(t + tail::FLAGS, flags & !flag::PENDING);
+            let state: i32 = rd(t + tail::STATE);
+            line(|| format!("revenge: {} {e:#x}: another attack state began (+{:#x}) before its revenge state {state}: not untouchable", b.name, current.wrapping_sub(e)));
+        }
         return false;
-    }
-    let state: i32 = rd(t + tail::STATE);
-    let current: usize = rd(e + EN_STATE);
-    if !rv::begins_revenge(flags, current, crate::battle::state_address(e, state)) {
-        wr(t + tail::FLAGS, flags & !flag::PENDING);
-        line(|| format!("revenge: {} {e:#x}: another attack state began (+{:#x}) before its revenge state {state}: not untouchable", b.name, current.wrapping_sub(e)));
-        return false;
-    }
-    wr(t + tail::FLAGS, (flags & !flag::PENDING) | flag::UNTOUCHABLE);
+    };
+    let own = if origin == rv::Origin::Own { flag::OWN } else { 0 };
+    wr(t + tail::FLAGS, (flags & !(flag::PENDING | flag::OWN)) | flag::UNTOUCHABLE | own);
+    wr(t + tail::STATE, move_state);
     wr(t + tail::IGNORED, [0u8; 4]);
     wr(t + tail::START, now() as f32);
-    let what = b.attack.map_or("", |a| a.1);
-    line(|| format!("revenge: {} untouchable (state {state}: {what}) {e:#x}: Re:CoM's rule for an attacking enemy (hurt bodies off, its hit handler drops hits while +0x260 bit 0 is set)", b.name));
+    match origin {
+        rv::Origin::Revenge => line(|| format!("revenge: {} untouchable (state {move_state}: {what}) {e:#x}: Re:CoM's rule for an attacking enemy (hurt bodies off, its hit handler drops hits while +0x260 bit 0 is set)", b.name)),
+        rv::Origin::Own => line(|| format!("revenge: {} untouchable (own choice, state {move_state}: {what}) {e:#x}: its revenge move, played by itself; Re:CoM's rule for an attacking enemy", b.name)),
+    }
     true
 }
 
@@ -451,8 +463,8 @@ unsafe fn close_window(e: usize, b: &Boss, why: &str) -> bool {
     }
     let t = e + b.size as usize;
     let flags: u32 = rd(t + tail::FLAGS);
-    if flags & (flag::UNTOUCHABLE | flag::PENDING) != 0 {
-        wr(t + tail::FLAGS, flags & !(flag::UNTOUCHABLE | flag::PENDING));
+    if flags & (flag::UNTOUCHABLE | flag::PENDING | flag::OWN) != 0 {
+        wr(t + tail::FLAGS, flags & !(flag::UNTOUCHABLE | flag::PENDING | flag::OWN));
     }
     if flags & flag::UNTOUCHABLE == 0 {
         return false;
@@ -461,9 +473,10 @@ unsafe fn close_window(e: usize, b: &Boss, why: &str) -> bool {
     let ig = Ignored::from_bytes(rd(t + tail::IGNORED));
     let frames = now() as f32 - rd::<f32>(t + tail::START);
     let hp: i32 = rd(e + EN_HP);
+    let own = if flags & flag::OWN != 0 { "own choice, " } else { "" };
     line(|| {
         format!(
-            "revenge: {} untouchable ends (state {state}{why}) {e:#x} after {frames:.0} frames: ignored {} hits ({} KH1 swings, {} KH1 spells, {} other), {} Guard reactions skipped; HP {hp}{}",
+            "revenge: {} untouchable ends ({own}state {state}{why}) {e:#x} after {frames:.0} frames: ignored {} hits ({} KH1 swings, {} KH1 spells, {} other), {} Guard reactions skipped; HP {hp}{}",
             b.name,
             ig.hits(),
             ig.swings,
