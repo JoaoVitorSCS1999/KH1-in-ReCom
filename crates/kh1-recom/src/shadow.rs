@@ -248,6 +248,7 @@ pub fn cmd_token(c: &Cmd) -> String {
         Cmd::Scale(k) => format!("scale {k:.2}"),
         Cmd::Visible(v) => format!("visible {v}"),
         Cmd::Guard(g) => format!("guard {g:?}"),
+        Cmd::Throw(n) => format!("throw {n}"),
     }
 }
 

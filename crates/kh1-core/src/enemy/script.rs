@@ -76,6 +76,9 @@ pub enum Cmd<A> {
     /// lives while that request plays and its HIT slot is on, `0x1402B47A0`), or `None`: the
     /// enemy's guard rows end now.
     Guard(Option<(u8, u16)>),
+    /// `sys 94`: the enemy throws its thrown object `n` (its child script,
+    /// `crate::enemy::thrown`; the Bandit's scimitar, M11).
+    Throw(u8),
 }
 
 impl<A: Copy> Cmd<A> {
@@ -98,6 +101,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::Scale(k) => Cmd::Scale(k),
             Cmd::Visible(v) => Cmd::Visible(v),
             Cmd::Guard(g) => Cmd::Guard(g),
+            Cmd::Throw(n) => Cmd::Throw(n),
         }
     }
 }

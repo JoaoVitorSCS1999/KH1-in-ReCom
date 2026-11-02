@@ -1088,6 +1088,37 @@ moving lunge, nearest Re:CoM's charge; all its rows' `+0x3C` are 30, the slash's
   - A Keyblade with a higher priority changes the kinds by KH1's rule (`enemy::guard::resolve`).
 - Magic is never blocked (KH1: types 5 / 6 meet no type-2 row). Hits from behind land (the front half only).
 
+#### The Bandit's thrown scimitar (a Re:CoM homing bullet moved by KH1's numbers)
+
+- KH1 (Checked (files: `ex_2090_00.bd` from the `.mdls` part 3, disassembled; decomp: its syscalls)): the child
+  starts at the Bandit's bone code 28 along its facing at 10 a frame; past 120 frames its speed changes by −0.5 a
+  frame (it stops at 140 and comes back); each frame it turns toward its target's lock point 0 by at most 3°
+  (`sys 24` → `0x1402A85C0`); 300 frames at most; a hit ends it; a repel turns it back with a random tilt, fades
+  it and slides it on (× 0.9 a frame) for 60 frames. Its attack row `0x1CC`: radius 70, no bone. The Bandit lets
+  it go at frame 90 of 201 (8 + 82) and waits 290 frames.
+- Numbers read by the asset step from the player's files into `kh1-bandit.json` (`blade_*`): life 300, turn-back
+  120, speed 10, change −0.5, turn 3°, slide 60, drag 0.9, radius 70; the bone (KH1's code 28 → Re:CoM bone 32,
+  `l_hand`: Assumption on the code's bone); Re:CoM's attack id 1.
+- Re:CoM (Checked (decomp + disasm + exe)), made as Re:CoM's own enemies make theirs (the Aquatank's
+  `0x14018AC50`): descriptor `0x140156790(desc, 2 = CHomingBullet, 3)` (side word `+0xC` left at `0x80000002`: it
+  tests the player's side), the factory, the shot manager `0x140158DD0` with the Bandit as its shooter, the mover
+  set-up `0x140157DA0`. Its flight state's exe (`STATE_EXE`, the vcall thunk `0x1401560B8`) is ours: KH1's step
+  ([`kh1_core::enemy::thrown`]) writes the velocity toward Sora's aim point, then Re:CoM's own step runs. Re:CoM
+  draws, moves, collides it, hits Sora with it and ends it (flags `0x100` a hit, 4 the life).
+- **Look:** Re:CoM's Aero level-1 shot effect set `0x1405A2030` (entry 24 of `0x1405A1730`; slot 1 `airo_all` id 5,
+  name pointer checked at `0x1405A2048` → `0x1405A3150`). Chosen as the nearest Re:CoM look to a spinning blade
+  (a small whirl); that the set is loaded in every battle (Sora's spell resources): Assumption, the log says when
+  the bullet cannot be made.
+- **Power:** Re:CoM's power for the Bandit's attack id 1 (its whirl), through Re:CoM's own enemy-attack getters
+  (`0x14017F0E0` AP: `@ENP +4` × difficulty × the record's `+0x10`, `0x14017F050` attribute, `0x140179410` the
+  record's kind from ASD record `+0x68`). Mapping: the throw is a spinning blade, nearest the whirl (Assumption;
+  owner question).
+- **Sora's Guard:** decision 28's turn-back of Re:CoM bullets: the shot moves to the enemies' side and flies back;
+  our step then only marks Re:CoM's homing target as the Bandit (`+0x2F4`) and Re:CoM's homing takes it. The Bandit
+  takes its damage as Stage 27's turned-back shots do (Assumption: not tested on a KH1 enemy yet). KH1's own repel
+  slide after a Guard is not used.
+- Per frame: one KH1 flight step per flying blade (at most 8); nothing otherwise.
+
 #### What the asset step writes
 
 `ENEMY/0011/EN0011.ANN` (Re:CoM's 74 slots byte-identical, KH1's clips at 100 + entry), `EN0011.ASD` (Re:CoM's 2

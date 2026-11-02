@@ -46,7 +46,11 @@ pub static CLASS: Class = Class {
 
 fn parse_manifest(text: &str) -> Result<Manifest, String> {
     let m = parse(text, "bandit", kh1_core::bandit::NAMES, REQUESTS)?;
-    // Both guard rows (the asset step of 0.74 on: an older manifest has none).
+    // The thrown scimitar's numbers and both guard rows (the asset step of 0.74 on: an older
+    // manifest has neither).
+    if let Some(n) = kh1_core::bandit::BLADE_NAMES.iter().find(|n| !m.consts.get(n).is_finite()) {
+        return Err(format!("constant {n} missing (an older asset step? run it again)"));
+    }
     let names: Vec<&str> = m.guards.iter().map(|g| g.name.as_str()).collect();
     let want: Vec<&str> = kh1_core::bandit::Guard::ALL.iter().map(|g| g.name()).collect();
     if names != want {
@@ -85,6 +89,10 @@ mod tests {
         assert_eq!((g[0].half_angle(), g[1].half_angle()), (Some(std::f32::consts::FRAC_PI_2), Some(std::f32::consts::FRAC_PI_2)));
         assert!(g[0].live(210, 10.0) && !g[0].live(210, 9.0) && g[0].live(212, 49.0) && !g[0].live(212, 50.0));
         assert!(g[1].live(231, 59.0) && g[1].live(233, 9.0) && !g[1].live(233, 10.0));
+        // The thrown scimitar (`ex_2090_00.bd`).
+        let c = |n: &str| m.consts.get(n);
+        assert_eq!((c("blade_life"), c("blade_turn_back"), c("blade_speed"), c("blade_accel"), c("blade_turn"), c("blade_slide"), c("blade_slide_drag"), c("blade_radius")), (300.0, 120.0, 10.0, -0.5, 3.0, 60.0, 0.9, 70.0));
+        assert_eq!(c("blade_recom_id"), 1.0);
         let _ = (CLASS.make)(&m, 1, 0.0);
     }
 

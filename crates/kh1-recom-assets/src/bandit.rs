@@ -190,7 +190,8 @@ const LEAP_BODY: RowSpec = RowSpec { at: 0x38C, recom_id: 1 };
 /// `kh1_core::bandit::Attack::ALL`'s order. Not `.ASD` records (they never hurt Sora: reaction kind
 /// 0, attack type 2, which meets only other attacks, `0x1402B3BE0` / `0x140528CB8`): the spin's body
 /// row `0xEC` and the block stance's blade row `0x15C` are guard rows (`crate::enemy::GUARDS`); the
-/// thrown blade's row `0x1CC` (its child object, owner question).
+/// thrown blade's row `0x1CC` is its child object's (`crate::enemy::THROWN`: one of Re:CoM's own
+/// bullets, its power Re:CoM's id 1).
 pub const ATTACKS: &[AttackSpec] = &[
     AttackSpec { name: "slash", request: 200, rows: &[SLASH] },
     AttackSpec { name: "spin", request: 211, rows: &[SPIN] },
@@ -287,6 +288,11 @@ mod tests {
         assert_eq!(g[0].windows, vec![(210, vec![(10.0, 46.0)]), (211, vec![(0.0, 40.0)]), (212, vec![(0.0, 50.0)])]);
         assert_eq!(g[1].windows, vec![(230, vec![(0.0, 12.0)]), (231, vec![(0.0, 60.0)]), (233, vec![(0.0, 10.0)])]);
         assert!(b.manifest.contains("\"guards\": ["));
+        // The thrown scimitar (`ex_2090_00.bd` and row `0x1CC`; Re:CoM's whirl id 1, its record's kind
+        // index 0 = Re:CoM kind 1).
+        assert_eq!((get("blade_life"), get("blade_turn_back"), get("blade_speed"), get("blade_accel"), get("blade_turn"), get("blade_slide"), get("blade_slide_drag")), (300.0, 120.0, 10.0, -0.5, 3.0, 60.0, 0.9));
+        assert_eq!((get("blade_radius"), get("blade_recom_id"), get("blade_kind_index"), get("blade_flag2")), (70.0, 1.0, 0.0, 0.0));
+        println!("blade bone (Re:CoM) {}", get("blade_bone"));
         std::fs::write(std::env::temp_dir().join("kh1-bandit-test.json"), &b.manifest).unwrap();
         println!("{}", b.records.join("\n"));
         println!("parts {:?}", b.parts);

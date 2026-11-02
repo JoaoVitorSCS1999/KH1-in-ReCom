@@ -384,6 +384,10 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
     let ai = ce::make(K, m, seed, yaw);
     let idx = (|| {
         let Ok(mut v) = RT.lock() else { return None };
+        if v.iter().any(|x| x.battle != battle) {
+            // A new battle: the last one's thrown blades are gone.
+            super::kh1_thrown::forget();
+        }
         v.retain(|x| x.battle == battle && x.enemy != this);
         v.push(Runtime {
             class: K,
@@ -727,6 +731,10 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         Cmd::Guard(None) => {
             rt.guard = None;
             guard_bodies(en, rt, None);
+        }
+        Cmd::Throw(n) => {
+            let yaw = rt.ai.body().yaw;
+            let _ = super::kh1_thrown::throw(en, CLASSES[rt.class].name, manifest(rt.class), n, yaw);
         }
         Cmd::Yaw(_) | Cmd::Jump { .. } | Cmd::Target(_) | Cmd::State(_) => {}
     }
@@ -1861,6 +1869,10 @@ pub unsafe fn trace_token() -> String {
         if !t.is_empty() {
             out.push(format!("{} {}", c.name, t.join(" ")));
         }
+    }
+    let blades = super::kh1_thrown::trace_token();
+    if !blades.is_empty() {
+        out.push(blades);
     }
     out.join("; ")
 }
