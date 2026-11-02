@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 125: Fix: KH1 Soldiers and Shadows freezing; a watchdog for every KH1 enemy, version 0.68.1 (2026-11-01)
+
+- Owner (2026-11-02, video): "this soldier just decides to not attack and stay in one position"; "it seems the shadows
+  are doing the same thing".
+- Cause 1 (Soldier; Checked (files + log + trace)): the asset step marks a clip looping when its last pose matches its
+  first; kick 200 and air kick 204 were, so Re:CoM looped them and the motion clock (`0x1401A47C0`) wrapped before KH1's
+  length: the action never ended. `ClipWatch`: the clock going back after half the motion counts as its end.
+- Cause 2 (Shadow; Checked (log + code)): when the rise ends and the first attack is requested on the same frame, state
+  0's step called Re:CoM's default state (`0x14017D6F0`), overwriting the attack state, which never began. State 0 no
+  longer does while an attack is pending; a pending attack state is requested again if something replaced it.
+- Watchdog (all classes): an attack state not begun 10 frames after the request, or an action playing 30 frames past
+  its motion's length, is released as if its motion ended, with a log line past the cap. Tests: a 20000-frame fight
+  per enemy (12 seeds) acts at least every 600 frames.
+- Not a refactor regression (M10's paths compared). The Shadow popping up while sunk: cause not found; new logging
+  (motions and Re:CoM state changes while unhittable).
+- Checked: tests, Windows build, 717 sites. Not checked: in game.
+
+---
+
 ## Stage 124: M11 step 1b: the KH1 Soldier on Re:CoM's enemy states, version 0.68.0 (2026-11-01)
 
 - KH1 (Checked (decomp + files)): `xa_ex_2010` script: appearance, wander, engage within 1000; close (< 350) kick or
