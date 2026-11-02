@@ -365,6 +365,14 @@ At KH1 setting:
     - **Sonic Blade (owner, 2026-11-01, on 0.56.1's questions):** the dashes' voices "however it works
       in base ReCoM"; the per-dash effects "however it works in base ReCoM"; usable **only in battle**
       (not in the field rooms). Whether the other specials follow the same rule: ask at 9c.2.
+    - **Damage and enemy HP (owner, 2026-11-01):** "depending on which keyblade sora has equipped, it
+      does recom's damage for the corresponding keyblade … lets also have Recom's enemy HP". Re:CoM's
+      formula (attack stat × the equipped Keyblade card's power ÷ 100) for every KH1 swing: **KH1's
+      normal swings take Re:CoM's normal column (0), KH1's combo finisher Re:CoM's finisher column
+      (2)**; Re:CoM's enemy HP; **spells and specials do Re:CoM's card / sleight damage** (each spell its
+      Re:CoM magic card's, Sonic Blade Re:CoM's Sonic Blade sleight's). A Config setting (Damage: Re:CoM
+      / KH1), Re:CoM by default; KH1 keeps decisions 12 / 21. Supersedes decision 12 at the default.
+      Sonic Blade also gets **Re:CoM's start tint** (as base Re:CoM's).
 
 ## Known open design questions (ask the owner, don't guess)
 
