@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 141: Sora's swings knock the Bandit's thrown scimitar away, version 0.76.3 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Yes" (swing at the blade, KH1).
+- KH1 (Checked (decomp + child script)): two meeting attacks resolve both ways (`0x1402B4A20` → `0x1402B4BC0`, no front
+  cone for these types); the blade's row `0x1CC` priority 0: Sora gets nothing, the blade the clash bit; on it
+  `ex_2090_00.bd` turns back with a random tilt, fades, slides ×0.9/f for 60 frames without attacking, ends.
+- Built (no new hook): in the existing swing pair test, the swing spheres against each flying blade's Re:CoM shape
+  (Re:CoM's overlap tests); on contact KH1's repel (`Thrown::repel`), the bullet's attack off (`0x14014DE80`), its life
+  raised past the slide, Re:CoM's guard spark at the blade. One flag test per live swing frame while no blade flies.
+- Assumptions: own random stream; Re:CoM's spark for KH1's clash effect; the fade after the slide; the swing keeps
+  hitting bodies after the blade (KH1 marks it clashed; not built).
+- Checked: tests, Windows build, 623 + 250 sites. Not checked: in game.
+
+---
+
 ## Stage 140: Re:CoM's "Guard" popup hidden over KH1 enemies that block, version 0.76.2 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Hide it".
