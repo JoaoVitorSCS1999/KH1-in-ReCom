@@ -14,6 +14,9 @@
 //!   stock row (sleight name and stocked value) and Marluxia 3's stock folder are hidden through
 //!   Re:CoM's own event-hide mask (system variable (1, 0xE2)) at the reads that draw them, as
 //!   stage 2 hides Sora's deck HUD.
+//! - **Enemy card sounds** (owner, 2026-11-02): in the same battles, the eight `call 0x1402AA360`
+//!   that play a revolver's or stock folder's stock, reload and deal sounds skip the play for a
+//!   side-2 object (`sound`, `SOUND_SITES`). Sora's own sounds go through unchanged.
 //!
 //! Every offset is Steam, read in the Re:CoM decomp and checked in the exe where noted.
 
@@ -130,6 +133,85 @@ impl UiPart {
         }
     }
 }
+
+/// Enemy card sounds (owner, 2026-11-02: "you cant hear enemies stocking cards or refilling their
+/// deck"). Re:CoM's 2D sound ids (bank 0, played by `0x1402AA360(id, -1)`), as the revolver code
+/// passes them. Checked (decomp + exe: `sites::M6_ENEMY_SOUND_CHECKED`).
+pub mod sound {
+    /// Stock: a card goes to the revolver's stock row (`0x14016DB60`) or Marluxia 3's stock
+    /// folder (`0x14016DD20`).
+    pub const STOCK: u32 = 0x0F;
+    /// The Reload card charging, a loop whose handle the revolver keeps at `+0x200` (stopped by
+    /// its update `0x14016B9A0` when the charge ends).
+    pub const RELOAD_CHARGE: u32 = 0x13;
+    /// One of the Reload card's gauge steps filled (`+0x82` down by one).
+    pub const RELOAD_STEP: u32 = 0x14;
+    /// The reload done (also the "at once" reload, revolver `+0x98 & 0x80`).
+    pub const RELOAD_DONE: u32 = 0x15;
+    /// The deal: the revolver's `+0x204`, 0x1B for side 2 (`0x140164DD6`), handle at `+0x1FC`.
+    pub const DEAL_ENEMY: u32 = 0x1B;
+    /// Sora's deal (side 1, `0x140164DF5`): never silenced.
+    pub const DEAL_PLAYER: u32 = 0x12;
+}
+
+/// Which register holds the revolver / stock folder at a sound call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ObjReg {
+    Rbx,
+    Rdi,
+}
+
+/// One retargeted sound call (`sites::M6_ENEMY_SOUND_CALLS`, same order).
+pub struct SoundSite {
+    /// The `call 0x1402AA360` (RVA).
+    pub call: u32,
+    /// Its function (RVA) and size.
+    pub function: u32,
+    pub size: u32,
+    /// The id it passes (`None`: the revolver's deal sound `+0x204`).
+    pub id: Option<u32>,
+    pub reg: ObjReg,
+    pub what: &'static str,
+}
+
+pub const SOUND_SITES: [SoundSite; 8] = [
+    SoundSite { call: 0x0016_7B01, function: 0x0016_7AA0, size: 0x246, id: Some(sound::RELOAD_DONE), reg: ObjReg::Rbx, what: "reload done at once" },
+    SoundSite { call: 0x0016_7BDA, function: 0x0016_7AA0, size: 0x246, id: Some(sound::RELOAD_STEP), reg: ObjReg::Rbx, what: "reload gauge step" },
+    SoundSite { call: 0x0016_7C01, function: 0x0016_7AA0, size: 0x246, id: Some(sound::RELOAD_CHARGE), reg: ObjReg::Rbx, what: "reload charge loop" },
+    SoundSite { call: 0x0016_7C93, function: 0x0016_7AA0, size: 0x246, id: Some(sound::RELOAD_DONE), reg: ObjReg::Rbx, what: "reload done" },
+    SoundSite { call: 0x0016_B3E7, function: 0x0016_B2B0, size: 0x171, id: None, reg: ObjReg::Rbx, what: "deal after a reload" },
+    SoundSite { call: 0x0016_A091, function: 0x0016_9F40, size: 0x206, id: None, reg: ObjReg::Rbx, what: "first deal" },
+    SoundSite { call: 0x0016_DCA4, function: 0x0016_DB60, size: 0x180, id: Some(sound::STOCK), reg: ObjReg::Rbx, what: "stock" },
+    SoundSite { call: 0x0016_DE3F, function: 0x0016_DD20, size: 0x14B, id: Some(sound::STOCK), reg: ObjReg::Rdi, what: "stock folder add" },
+];
+
+/// Whether a retargeted sound call skips Re:CoM's play: the object (a revolver's or stock
+/// folder's side, `+0x5C`) isn't Sora's, in a battle that hides the enemy card UI. Skipped, the
+/// call gives what Re:CoM's play gives when it plays nothing (0, no handle).
+pub fn enemy_sound_silenced(side: i32, hide: bool) -> bool {
+    hide && side != i32::from(SIDE_PLAYER)
+}
+
+/// A sound id's name, for the log.
+pub fn sound_name(id: u32) -> &'static str {
+    match id {
+        sound::STOCK => "stock",
+        sound::RELOAD_CHARGE => "Reload card charging (loop)",
+        sound::RELOAD_STEP => "Reload gauge step",
+        sound::RELOAD_DONE => "reload done",
+        sound::DEAL_ENEMY => "enemy deck deal",
+        sound::DEAL_PLAYER => "Sora's deck deal",
+        _ => "other",
+    }
+}
+
+/// The log line for a silenced sound (once per sound per battle).
+pub fn sound_line(battle: u32, id: u32, side: i32, obj: usize) -> String {
+    format!("enemy card sound {id:#x} ({}) silent at KH1 (battle {battle}, side-{side} object {obj:#x}): Re:CoM's play skipped, the call returns 0 (no sound, no handle)", sound_name(id))
+}
+
+/// Log cap for the silenced-sound lines (once per sound id per battle).
+pub const SOUND_LOG_LINES: u32 = 200;
 
 /// The P5 part of the battle-start line.
 pub fn p5_part(kh1: bool, switched: Option<usize>) -> String {
@@ -282,6 +364,31 @@ mod tests {
         // The enemy bits never reach a side-1 test (0x20 cards, 2 cockpit / Sora's stock row).
         assert_eq!(mask::ENEMY_CARDS & (0x20 | 2), 0);
         assert_eq!(mask::ENEMY_REVOLVER & (0x20 | 2), 0);
+    }
+
+    #[test]
+    fn enemy_sounds() {
+        // Only a non-player object, only while the battle hides the enemy card UI.
+        assert!(enemy_sound_silenced(2, true));
+        assert!(!enemy_sound_silenced(2, false));
+        assert!(!enemy_sound_silenced(i32::from(SIDE_PLAYER), true));
+        assert!(!enemy_sound_silenced(i32::from(SIDE_PLAYER), false));
+        // Sora's deal id differs from the enemy's (the side decides anyway).
+        assert_ne!(sound::DEAL_ENEMY, sound::DEAL_PLAYER);
+        // Every site names a known sound; the deal sites read the revolver's.
+        for s in SOUND_SITES {
+            match s.id {
+                Some(id) => assert_ne!(sound_name(id), "other", "{}", s.what),
+                None => assert!(s.what.contains("deal"), "{}", s.what),
+            }
+        }
+        // Reload: done (twice), step, charge; deal: two; stock: two (revolver, folder).
+        let n = |id: u32| SOUND_SITES.iter().filter(|s| s.id == Some(id)).count();
+        assert_eq!((n(sound::RELOAD_DONE), n(sound::RELOAD_STEP), n(sound::RELOAD_CHARGE), n(sound::STOCK)), (2, 1, 1, 2));
+        assert_eq!(SOUND_SITES.iter().filter(|s| s.id.is_none()).count(), 2);
+        assert_eq!(SOUND_SITES.iter().filter(|s| s.reg == ObjReg::Rdi).count(), 1);
+        let l = sound_line(3, 0x13, 2, 0x1234);
+        assert_eq!(l, "enemy card sound 0x13 (Reload card charging (loop)) silent at KH1 (battle 3, side-2 object 0x1234): Re:CoM's play skipped, the call returns 0 (no sound, no handle)");
     }
 
     #[test]

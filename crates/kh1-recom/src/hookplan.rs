@@ -49,6 +49,14 @@ pub fn rbx_arg_stub(to: u64) -> [u8; 17] {
     b
 }
 
+/// The same stub for a caller whose object is in `rdi`: `mov r8,rdi; jmp [rip+0]; dq to` (17
+/// bytes).
+pub fn rdi_arg_stub(to: u64) -> [u8; 17] {
+    let mut b = rbx_arg_stub(to);
+    b[2] = 0xF8;
+    b
+}
+
 /// What goes over the first `len` bytes of the target: the jump to the stub, then `nop`s.
 pub fn entry_patch(target: u64, len: usize, stub: u64) -> Option<Vec<u8>> {
     if len < 5 {
@@ -109,6 +117,10 @@ mod tests {
         assert_eq!(&s[3..9], &[0xFF, 0x25, 0, 0, 0, 0]);
         assert_eq!(u64::from_le_bytes(s[9..].try_into().unwrap()), 0x1122_3344_5566_7788);
         assert!(2 * s.len() <= BLOCK);
+        // mov r8,rdi (ModRM 11 111 000); the jump unchanged.
+        let d = rdi_arg_stub(0x1122_3344_5566_7788);
+        assert_eq!(&d[..3], &[0x49, 0x89, 0xF8]);
+        assert_eq!(&d[3..], &s[3..]);
     }
 
     #[test]

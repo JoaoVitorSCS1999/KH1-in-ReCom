@@ -16,17 +16,23 @@
 //!   stage 2's seven, all or none.
 //! - Three log-only readers (`0x1401EA1A0`, `0x1401EA1E0`, `0x140167CF0`): once per battle, who
 //!   read the empty revolver.
+//! - Enemy card sounds (owner, 2026-11-02; `crate::boss::sound`): eight `call 0x1402AA360` in
+//!   the revolver / stock folder code (stock, reload, deal) call `enemy_card_sound` (through a
+//!   stub that passes rbx, or rdi at the folder), switched with the mask reads. It skips Re:CoM's
+//!   play for a side-2 object and returns 0, what the play returns when it plays nothing.
 //!
 //! Per frame: the mask reads Re:CoM already makes (one OR, two loads), and the tutorial's
-//! hand-empty check while its watcher exists (one compare).
+//! hand-empty check while its watcher exists (one compare). The sound calls run only when Re:CoM
+//! plays one of those sounds; while an enemy's Reload card charges, Re:CoM asks for the charge
+//! loop each frame its handle is 0 (as with its sound off), so that one runs per frame then.
 
 use super::movement::{self as mv, func, orig, rd, wr};
 use super::{base, hook, log, va};
 use crate::battle::{self as b, Bytes};
 use crate::deck::{self as d, Build, Reader};
 use crate::hookplan;
-use crate::sites::{data, M6_CARD_CALLS, M6_COCKPIT_CALLS, M6_ENEMY_UI_CALLS};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use crate::sites::{data, M6_CARD_CALLS, M6_COCKPIT_CALLS, M6_ENEMY_SOUND_CALLS, M6_ENEMY_UI_CALLS};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 pub static ORIG_BUILD: AtomicUsize = AtomicUsize::new(0);
@@ -46,6 +52,11 @@ static DROP_LINES: AtomicU32 = AtomicU32::new(0);
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 /// The retargets are ours right now.
 static HUD_OURS: AtomicBool = AtomicBool::new(false);
+/// Silenced-sound log: the battle the bits below belong to, one bit per sound id (< 64) logged
+/// in it, and the lines so far.
+static SOUND_BATTLE: AtomicU32 = AtomicU32::new(0);
+static SOUND_SEEN: AtomicU64 = AtomicU64::new(0);
+static SOUND_LINES: AtomicU32 = AtomicU32::new(0);
 
 /// One retargeted mask read: Re:CoM's `call 0x1401B08C0` and ours (to the stub).
 struct Retarget {
@@ -63,6 +74,8 @@ const NEW: u32 = 0x004A_CE54;
 const FLAG_GET: u32 = 0x001B_0870;
 const VAR_GET: u32 = 0x001B_08C0;
 const MINIGAME: u32 = 0x0023_5360;
+/// Re:CoM's 2D sound play `0x1402AA360(id, volume)` (`sites::CALLEES`).
+const SOUND_PLAY: u32 = 0x002A_A360;
 
 type PlFn = unsafe extern "win64" fn(usize);
 type NewFn = unsafe extern "win64" fn(usize) -> usize;
@@ -73,6 +86,7 @@ type DropFn = unsafe extern "win64" fn(usize, i32);
 type PlRetFn = unsafe extern "win64" fn(usize) -> u64;
 type ScrollFn = unsafe extern "win64" fn(usize, u32) -> u64;
 type SearchFn = unsafe extern "win64" fn(usize, i32, i32, i32) -> u64;
+type SoundFn = unsafe extern "win64" fn(u32, i32) -> u32;
 
 fn capped(counter: &AtomicU32, cap: u32, line: impl FnOnce() -> String) {
     if counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| (n < cap).then_some(n + 1)).is_ok() {
@@ -173,7 +187,8 @@ unsafe fn build_empty(pl: usize) -> usize {
     rev
 }
 
-/// Makes the seven mask-read retargets ours (or Re:CoM's), all or none. The number written.
+/// Makes the mask-read retargets (stages 2 / 3) and the enemy card sound calls ours (or Re:CoM's),
+/// all or none. The number written.
 unsafe fn switch_hud(ours: bool) -> Option<usize> {
     let rt = RETARGETS.get()?;
     let bs = base();
@@ -226,6 +241,33 @@ pub unsafe extern "win64" fn card_mask(table: u32, index: u32, card: usize) -> u
 /// (the caller's rbx) is not used: at `0x14016E2B1` it is the tested bit, not an object.
 pub unsafe extern "win64" fn enemy_ui_mask(table: u32, index: u32, _rbx: usize) -> u32 {
     func::<GetFn>(VAR_GET)(table, index) | crate::boss::enemy_ui_bits(EMPTY.load(Ordering::Relaxed) != 0)
+}
+
+/// A revolver's or stock folder's sound (`sites::M6_ENEMY_SOUND_CALLS`: stock, reload, deal;
+/// `obj` = the caller's rbx, or rdi at the folder). Re:CoM's play, unless the object is the
+/// enemy side's in a battle that hides the enemy card UI: then nothing plays and the call gives
+/// 0, as Re:CoM's play does when it plays nothing (callers keep 0 as "no handle").
+pub unsafe extern "win64" fn enemy_card_sound(id: u32, volume: i32, obj: usize) -> u32 {
+    if obj != 0 && enemy_ui_hidden() {
+        let side: i32 = rd(obj + d::revolver::SIDE);
+        if crate::boss::enemy_sound_silenced(side, true) {
+            log_silenced(id, side, obj);
+            return 0;
+        }
+    }
+    func::<SoundFn>(SOUND_PLAY)(id, volume)
+}
+
+/// Once per sound id per battle (the charge loop asks every frame while its handle is 0).
+fn log_silenced(id: u32, side: i32, obj: usize) {
+    let battle = BATTLE.load(Ordering::Relaxed);
+    if SOUND_BATTLE.swap(battle, Ordering::Relaxed) != battle {
+        SOUND_SEEN.store(0, Ordering::Relaxed);
+    }
+    let bit = 1u64 << (id & 63);
+    if SOUND_SEEN.fetch_or(bit, Ordering::Relaxed) & bit == 0 {
+        capped(&SOUND_LINES, crate::boss::SOUND_LOG_LINES, || crate::boss::sound_line(battle, id, side, obj));
+    }
 }
 
 /// Whether this battle hides the enemy card UI (the reads are ours and the battle has no deck).
@@ -285,6 +327,34 @@ pub unsafe fn trace_token() -> String {
     d::trace_token(main_player_revolver(), EMPTY.load(Ordering::Relaxed), &tutorial_flags())
 }
 
+/// The sound calls' retargets: their own stub block (rbx, then rdi), near the first call. `None`
+/// (logged) if it can't be placed or reached.
+unsafe fn sound_retargets(bs: usize) -> Option<Vec<Retarget>> {
+    use crate::boss::{ObjReg, SOUND_SITES};
+    let to = enemy_card_sound as *const () as u64;
+    let mut code = Vec::with_capacity(34);
+    code.extend_from_slice(&hookplan::rbx_arg_stub(to));
+    code.extend_from_slice(&hookplan::rdi_arg_stub(to));
+    let Some(block) = hook::place_near(bs + M6_ENEMY_SOUND_CALLS[0].rva as usize, &code) else {
+        log("m6: no memory near the exe for the enemy card sound stubs; enemy stock / reload / deal sounds stay Re:CoM's");
+        return None;
+    };
+    let mut v = Vec::with_capacity(M6_ENEMY_SOUND_CALLS.len());
+    for (s, site) in M6_ENEMY_SOUND_CALLS.iter().zip(SOUND_SITES.iter()) {
+        let stub = match site.reg {
+            ObjReg::Rbx => block,
+            ObjReg::Rdi => block + 17,
+        };
+        let Some(ours) = hookplan::call_rel32((bs + s.rva as usize) as u64, stub as u64) else {
+            log(&format!("m6: {} cannot reach the sound stub {stub:#x}; enemy card sounds stay Re:CoM's", s.name));
+            return None;
+        };
+        v.push(Retarget { name: s.name, rva: s.rva, recom: s.expect, ours });
+    }
+    log(&format!("m6: enemy card sound stubs at {block:#x} (rbx) and {:#x} (rdi)", block + 17));
+    Some(v)
+}
+
 /// The stub block and the retargets, then the two wrappers (all or none), then the readers (log
 /// only, apart). Needs the movement handlers (the setting).
 pub fn install(bs: usize) -> bool {
@@ -312,6 +382,11 @@ pub fn install(bs: usize) -> bool {
                 v.push(Retarget { name: s.name, rva: s.rva, recom: s.expect, ours });
             }
         }
+        // The enemy card sounds: switched with the reads (all or none). Without their block the
+        // deck work stands and the sounds stay Re:CoM's.
+        let sounds = sound_retargets(bs);
+        let n_sounds = sounds.as_ref().map_or(0, Vec::len);
+        v.extend(sounds.into_iter().flatten());
         if RETARGETS.set(v).is_err() {
             return false;
         }
@@ -321,6 +396,9 @@ pub fn install(bs: usize) -> bool {
             block + 34,
             M6_COCKPIT_CALLS.len() + M6_CARD_CALLS.len() + M6_ENEMY_UI_CALLS.len()
         ));
+        if n_sounds > 0 {
+            log(&format!("m6: enemy card sounds (stock, reload, deal): {n_sounds} sound calls switched with them; silent for the enemy side at KH1"));
+        }
         let site = |name: &str| crate::sites::M6_DECK_HOOKS.iter().find(|h| h.name == name).expect("site");
         let hooks = [
             hook::Hook { site: site("battle revolver build (0x1401F43D0)"), ours: build_revolver as *const () as usize, original: &ORIG_BUILD },
