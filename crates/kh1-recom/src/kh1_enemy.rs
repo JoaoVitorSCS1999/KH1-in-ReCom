@@ -349,6 +349,13 @@ pub mod watchdog {
     pub const START_LIMIT: f32 = 10.0;
     /// An action that plays this many KH1 frames past its motion's length is released.
     pub const END_MARGIN: f32 = 30.0;
+    /// A reaction (states 11 / 12) that takes this many KH1 frames is released (KH1's longest,
+    /// a launch's air time, lying (at most `down_time`, 30) and the get-up, is well under).
+    pub const REACTION_LIMIT: f32 = 600.0;
+    /// An AI polled in state 1 that issues nothing for this many KH1 frames is restarted (its
+    /// longest silent wait is the wander's idle, at most 180 frames; the long-fight tests stay
+    /// under 600 with any command counted).
+    pub const QUIET_LIMIT: f32 = 600.0;
 
     /// Why an action was released.
     #[derive(Clone, Copy, Debug, PartialEq)]

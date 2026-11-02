@@ -680,6 +680,9 @@ impl Behaviour for Ai {
     fn state_name(&self, s: u8) -> &'static str {
         ["none", "idle", "engaged", "hit"].get(s as usize).copied().unwrap_or("?")
     }
+    fn reset(&self) {
+        set_state(&self.io, st::ENGAGED);
+    }
 }
 
 #[cfg(test)]
@@ -867,6 +870,14 @@ mod tests {
         b.held = false;
         assert!(b.falling(), "falls once the motion ends");
         assert!(b.step(1.0, -50.0, None, &c).y > 0.0);
+    }
+
+    #[test]
+    fn the_host_reset_restarts_the_engaged_behaviour() {
+        let mut s = ready(4);
+        Behaviour::reset(&s.ai);
+        s.run(Vec3::new(0.0, 0.0, 5000.0), 2);
+        assert!(s.log.contains(&ECmd::State(st::ENGAGED)), "{:?}", s.log);
     }
 
     #[test]

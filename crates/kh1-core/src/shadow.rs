@@ -621,6 +621,9 @@ impl crate::enemy::Behaviour for Ai {
     fn state_name(&self, s: u8) -> &'static str {
         ["idle", "engaged", "hit"].get(s as usize).copied().unwrap_or("?")
     }
+    fn reset(&self) {
+        set_state(&self.io, 1);
+    }
 }
 
 /// The supervisor (`0x26B2`): after the init frame, the first rise when spawned from the floor

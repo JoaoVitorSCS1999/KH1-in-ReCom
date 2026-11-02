@@ -163,6 +163,14 @@ struct Runtime {
     recom_flinch: bool,
     /// Re:CoM's own flinch runs (state 11's Re:CoM begin / step); ends at the next state 1.
     recom_state: bool,
+    /// We asked for the next state 1 (an attack's end, a reaction's end, the appearance's end):
+    /// any other state 1 begin follows a state Re:CoM owns (stun, Stop, freeze, a Re:CoM flinch,
+    /// the first-strike stun) and the KH1 frame is resumed cleanly (`take_over`).
+    handing_back: bool,
+    /// KH1 frames in state 1 with the AI polled and issuing nothing (`ce::watchdog::QUIET_LIMIT`).
+    quiet: f32,
+    /// KH1 frames the running reaction has taken (`ce::watchdog::REACTION_LIMIT`).
+    reaction_age: f32,
 }
 
 // SAFETY: a runtime (its behaviour holds `Rc`s that never leave it) is only touched under `RT`'s
@@ -360,6 +368,9 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             last_state: None,
             recom_flinch: false,
             recom_state: false,
+            handing_back: false,
+            quiet: 0.0,
+            reaction_age: 0.0,
         });
         Some(v.len() - 1)
     })();
@@ -619,6 +630,15 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
             enter_state(en, want);
         }
     }
+    if poll && rt.action.is_some_and(|a| a.attack.is_some()) && rt.action_playing {
+        // An attack plays only in its Re:CoM attack state: here (state 0 / 1) its state was left
+        // without its end (a Re:CoM state took over and handed back): released.
+        let detail = format!("its Re:CoM attack state was left without its end; now Re:CoM state {:?}", st);
+        release_line(en, rt, ce::watchdog::Stuck::NeverEnded, &detail);
+        end_action(rt);
+        rt.queued = None;
+        play(en, rt, ke::react::req::IDLE, manifest(rt.class).consts.get("attack_blend"));
+    }
     if rt.action.is_some() {
         rt.action_age += step;
         // The safety net (an attack that plays is `attack_step`'s: it leaves the attack state).
@@ -656,6 +676,18 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         let cmds = rt.ai.frame(w);
         for c in &cmds {
             apply(en, rt, c);
+        }
+        // The safety net for a silent AI (no command at all for `QUIET_LIMIT` frames, no action and
+        // no reaction pending): logged past the cap, the behaviour restarts from its engaged state.
+        if !cmds.is_empty() || rt.reaction.is_some() || st != Some(state::THINK as usize) {
+            rt.quiet = 0.0;
+        } else {
+            rt.quiet += step;
+            if rt.quiet >= ce::watchdog::QUIET_LIMIT {
+                rt.quiet = 0.0;
+                log(&format!("{}: e{}: the AI issued nothing for {:.0} frames in Re:CoM state {st:?} (playing {:?}), restarted", CLASSES[rt.class].name, rd::<u32>(en + e::ID), ce::watchdog::QUIET_LIMIT, rt.current));
+                rt.ai.reset();
+            }
         }
         let draws = rt.ai.take_draws();
         if !draws.is_empty() {
@@ -779,7 +811,7 @@ pub unsafe extern "win64" fn appear_step(en: usize) {
             0 => {
                 tick(en, rt, true);
                 if !rt.ai.risen() {
-                    return Some(());
+                    return Some(false);
                 }
                 // An attack the behaviour asked for in this same frame (its first after the rise)
                 // already set Re:CoM's next state: the default state would overwrite it and the
@@ -790,26 +822,35 @@ pub unsafe extern "win64" fn appear_step(en: usize) {
                     func::<IntFn>(f::INTRO_COUNT)();
                     rt.appear_sub = 1;
                 } else if !pending {
-                    func::<StateFn>(f::DEFAULT_STATE)(en);
+                    rt.handing_back = true;
+                    return Some(true);
                 }
             }
             _ => {
                 if func::<IntFn>(f::INTRO_FLAG)() == 0 {
-                    func::<StateFn>(f::DEFAULT_STATE)(en);
+                    rt.handing_back = true;
+                    return Some(true);
                 }
             }
         }
-        Some(())
+        Some(false)
     });
-    if r.flatten().is_none() {
-        call_original(en, ce::step_slot(state::APPEAR));
+    match r.flatten() {
+        // Re:CoM's default state outside our lock (its state 1 begin is ours: `think_begin`).
+        Some(true) => func::<StateFn>(f::DEFAULT_STATE)(en),
+        Some(false) => {}
+        None => call_original(en, ce::step_slot(state::APPEAR)),
     }
 }
 
 /// State 1 begin: no Re:CoM idle / walk pick; KH1's motion carries on.
 pub unsafe extern "win64" fn think_begin(en: usize) {
     if with_rt(en, |rt| {
+        if !std::mem::take(&mut rt.handing_back) {
+            take_over(en, rt);
+        }
         rt.recom_state = false;
+        rt.quiet = 0.0;
         if rt.current.is_none() {
             play(en, rt, ke::react::req::IDLE, 8.0);
         }
@@ -818,6 +859,34 @@ pub unsafe extern "win64" fn think_begin(en: usize) {
     {
         call_original(en, ce::begin_slot(state::THINK));
     }
+}
+
+/// A state Re:CoM owns ran (stun, Stop, freeze, Gravity's flatten, a Re:CoM flinch, the
+/// first-strike stun) and handed back to state 1 (owner 2026-11-02, 0.68.2: "once they got out of
+/// the stun they are doing the same issue of just standing still": the kick the stun cut was still
+/// the running action, so the AI was never polled again). As in KH1, where a status ends the
+/// current action: the action, the reaction, the queued motion and the clash are dropped, the
+/// motion Re:CoM played is forgotten (the idle plays), and the AI goes on from its wait.
+unsafe fn take_over(en: usize, rt: &mut Runtime) {
+    let had = (rt.action.map(|a| a.request), rt.reaction.is_some(), rt.queued.map(|q| q.0));
+    if had != (None, false, None) {
+        let st = crate::guard::state_index(en, rd(en + e::STATE));
+        log(&format!(
+            "{}: e{}: back in state 1 after a Re:CoM state ({st:?}): action {:?}, reaction {}, queued {:?} dropped; the AI goes on",
+            CLASSES[rt.class].name,
+            rd::<u32>(en + e::ID),
+            had.0,
+            had.1,
+            had.2
+        ));
+    }
+    end_action(rt);
+    rt.reaction = None;
+    rt.lie = None;
+    rt.clash = None;
+    rt.queued = None;
+    rt.recom_flinch = false;
+    rt.current = None;
 }
 
 /// State 1 step: KH1's frame with the behaviour.
@@ -871,6 +940,7 @@ pub unsafe extern "win64" fn attack_step(en: usize) {
         }
         if end {
             end_action(rt);
+            rt.handing_back = true;
         }
         tick(en, rt, false);
         end
@@ -1050,7 +1120,12 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
             rt.ai.set_hp_ratio(hp_ratio(en));
         }
         rt.ai.on_hit(if rt.clash.is_none() { HitNews::Damage } else { HitNews::Clash });
-        start_reaction(en, rt, hit)
+        rt.reaction_age = 0.0;
+        let started = start_reaction(en, rt, hit);
+        if !started {
+            rt.handing_back = true;
+        }
+        started
     });
     match done {
         Some(true) => {}
@@ -1071,6 +1146,18 @@ pub unsafe extern "win64" fn react_step(en: usize) {
         let dt: i32 = rd(en + e::DT);
         let step = crate::units::step_from_dt(dt.clamp(0, 1000));
         let mut done = false;
+        rt.reaction_age += step;
+        if rt.reaction_age >= ce::watchdog::REACTION_LIMIT {
+            // The safety net: a reaction that never ends (a launch that never lands, a motion that
+            // never ends) is released as if it had ended.
+            log(&format!("{}: e{}: reaction {:?} never ended ({:.0} frames, playing {:?}), released", CLASSES[rt.class].name, rd::<u32>(en + e::ID), rt.reaction, rt.reaction_age, rt.current));
+            rt.reaction = None;
+            rt.lie = None;
+            rt.queued = None;
+            play(en, rt, ke::react::req::IDLE, manifest(rt.class).consts.get("attack_blend"));
+            rt.handing_back = true;
+            return true;
+        }
         let motion_ended = matches!(rt.reaction, Some(Phase::Motion)) && ended(en, rt);
         match rt.reaction {
             // The reaction's motion ended (this frame: `tick` plays the queued one): done.
@@ -1098,6 +1185,7 @@ pub unsafe extern "win64" fn react_step(en: usize) {
         tick(en, rt, false);
         if done {
             rt.reaction = None;
+            rt.handing_back = true;
         }
         done
     });
