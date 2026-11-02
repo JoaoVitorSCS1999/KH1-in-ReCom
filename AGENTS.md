@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 121: Shadow: unhittable from the sink's first frame to rise frame 50, as KH1, version 0.67.2 (2026-11-01)
+
+- Owner (2026-11-02): "i can attack the shadow when its flat on the ground". Trace 18: three hits during sinks.
+- KH1 (Checked (decomp + script)): actor flag 0x40 skips the hit test `0x1402B6AF0` (gate `0x140291920`) and the auto
+  target `0x1402B0A00`; `ex_2020.bd` sets it on the sink's first frame (request 70, `0x1366..0x138C`), clears it at
+  rise frame len(69) − 30 = 50 (`0x12D8..0x1314`), and sets it at init for a floor-spawned Shadow.
+- Fix: `kh1_core::shadow` emits `Hittable` at those three points; the DLL uses Re:CoM's own hurt-body switch
+  (`0x1401A2D70` off, `0x1401A2DB0` on). 0.67.1 switched them at sink frame 105 and rise frame 0. Lock-on unchanged
+  (KH1's lock button can lock a sunk Shadow; Re:CoM's lockable flag stays).
+- Trace: defeated Shadows drop out 31 frames after defeat; `h0` / `h1` token. Log cap 4000 → 20000 lines.
+- The traces otherwise match KH1's script (sink / rise, leap, claw / swipe, flinches, launch, clash).
+- Checked: tests, Windows build, 697 sites, the trace. Not checked: in game.
+
+---
+
 ## Stage 120: Fix: crash at the start of every battle with a Shadow, version 0.67.1 (2026-11-01)
 
 - Owner (2026-11-02): "the game crashes when getting into a battle with a shadow". Log: access violation at
