@@ -56,7 +56,10 @@
 //!   Zantetsuken, Vortex, Aerial Sweep, Hurricane Blast, Ripple Drive, Gravity Break): unlocked by
 //!   Re:CoM's own learned sleights or KH1's learn levels on Re:CoM's level, kept in our save block,
 //!   passed to KH1's pickers, played as KH1 rows on Re:CoM's attack action (`abilities`;
-//!   `docs/recom-m9-abilities.md`);
+//!   `docs/recom-m9-abilities.md`); and (stage 9b) KH1's ability screen with AP in the KH1 camp
+//!   entry (Abilities): the modifiers and the movement abilities (Guard, Counterattack, Dodge Roll,
+//!   High Jump, Glide, Superglide, Combo Plus, Air Combo Plus, Combo Master), equipped with KH1's
+//!   costs within KH1's max AP on Re:CoM's level;
 //! - F9 records a Re:CoM trace in kh1-trace's CSV schema (`trace`).
 //!
 //! `motions` (with `json`) reads the asset build step's manifest and `PL0001.ANN` header, for the

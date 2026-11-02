@@ -218,6 +218,7 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     if unsafe { hook::install_all(base, &hooks) } {
         movement::mark_installed();
         movement::set_abilities(s.abilities);
+        abilities::set_ini(&s.abilities);
         movement::set_mode(s.combat == settings::Mode::Kh1);
         log(&format!(
             "movement: KH1 handlers in Re:CoM's actions 2/3/4, 6, 7, 8 ({}); abilities {:?}",

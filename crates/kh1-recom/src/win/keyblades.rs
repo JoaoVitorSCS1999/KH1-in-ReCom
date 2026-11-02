@@ -30,6 +30,7 @@ use super::{base, log, va};
 use crate::command_menu as cm;
 use crate::customize;
 use crate::items_page as ip;
+use crate::abilities::page as ap;
 use crate::keyblades::{self as kb, list, sub, text, top};
 use crate::sites::data;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -881,6 +882,18 @@ enum Content {
         ctx: ip::Ctx,
         rows: Vec<ip::Row>,
     },
+    /// M9 stage 9b: KH1's ability screen (`crate::abilities::page`) on the ability state in our
+    /// save block (`win::abilities`). `state`, `level` and `rows` are read again after every change.
+    Abilities {
+        screen: ap::Screen,
+        state: crate::abilities::State,
+        level: u32,
+        rows: Vec<ap::Row>,
+        /// KH1's message after a refusal (not enough AP), on the help line until the next move.
+        msg: Option<&'static [u8]>,
+        /// The ability state is live (the KH1 setting, Sora's story, a save).
+        live: bool,
+    },
 }
 
 /// KH1's one picker cursor for every slot (`0x142E9A040`), kept for the session.
@@ -989,9 +1002,14 @@ impl Page {
                 let content = Content::Items { screen: ip::Screen::new(), msg: None, inv: Default::default(), ctx: Default::default(), rows: Vec::new() };
                 (content, list::open_on(2, 0))
             }
+            sub::Row::Abilities => {
+                let content = Content::Abilities { screen: ap::Screen::default(), state: Default::default(), level: 1, rows: Vec::new(), msg: None, live: false };
+                (content, list::open_on(2, 0))
+            }
         };
         let mut p = Page { camp: camp as usize, sub: 1, stats_panel: 0, list_panel: 0, cursor: 0, bar: 0, rows: [0; 8], stat_rows: [0; 3], list, content, under: None };
         p.items_read();
+        p.abilities_read();
         p.stats_panel = p.panel(0x10, 3, 0x125);
         p.list_panel = p.panel(0x11, 2, 0x14C);
         let c = func::<NewFn>(NEW)(0x1C0);
@@ -1010,6 +1028,14 @@ impl Page {
                 ctx.hp_low,
                 ctx.mp_low,
                 if super::items::inventory().is_none() { " (KH1's items not live: nothing can change)" } else { "" }
+            )),
+            Content::Abilities { state, level, live, .. } => log(&format!(
+                "abilities page: opened at Re:CoM level {level}: AP {}/{} left; unlocked {:?}; equipped {:?}{}",
+                crate::abilities::ap_left(state.equipped, *level),
+                crate::abilities::max_ap(*level),
+                crate::abilities::names(state.unlocked),
+                crate::abilities::names(state.equipped),
+                if *live { "" } else { " (the ability state isn't live: nothing can change)" }
             )),
         }
         p
@@ -1061,12 +1087,49 @@ impl Page {
             },
             Content::Customize { picking: None, .. } => customize::text::slot_label(idx, button_glyphs(ROW_FONT), super::command_menu::confirm_is_circle()).to_vec(),
             Content::Items { rows, .. } => rows.get(idx).map_or_else(|| ip::text::NONE.to_vec(), |r| item_label(r.label)),
+            Content::Abilities { rows, .. } => match rows.get(idx).map(|r| r.label) {
+                Some(ap::Label::Owner(ap::Owner::Sora)) => ap::text::SORA.to_vec(),
+                Some(ap::Label::Owner(ap::Owner::Shared)) => ap::text::SHARED.to_vec(),
+                Some(ap::Label::Ability(i)) => kb::c_text(crate::abilities::ALL[i].name),
+                None => ip::text::NONE.to_vec(),
+            },
         }
     }
 
-    /// A greyed row (Items: KH1's greyed rows).
+    /// A greyed row (Items, Abilities: KH1's greyed rows).
     fn row_grey(&self, idx: usize) -> bool {
-        matches!(&self.content, Content::Items { rows, .. } if rows.get(idx).is_some_and(|r| r.grey))
+        match &self.content {
+            Content::Items { rows, .. } => rows.get(idx).is_some_and(|r| r.grey),
+            Content::Abilities { rows, .. } => rows.get(idx).is_some_and(|r| r.grey),
+            _ => false,
+        }
+    }
+
+    /// The row's look on Re:CoM's list (`CBUTTON_SETUP`'s variant, `crate::keyblades::row_look`):
+    /// the Items page's Stock row and item slots are Re:CoM's green item row (owner,
+    /// 2026-11-01); everything else keeps the red row.
+    fn row_look(&self, idx: usize) -> i32 {
+        match &self.content {
+            Content::Items { rows, .. } => rows.get(idx).map_or(kb::row_look::RED, |r| ip::row_look(r.label)),
+            _ => kb::row_look::RED,
+        }
+    }
+
+    /// Abilities: reads the ability state again (a sync: new unlocks, the ini's story keys), the
+    /// window's rows, and the list from the screen's cursor. Nothing for the other pages.
+    fn abilities_read(&mut self) {
+        let Content::Abilities { screen, state, level, rows, live, .. } = &mut self.content else { return };
+        match super::abilities::page_state() {
+            Some((s, l)) => {
+                (*state, *level, *live) = (s, l, true);
+            }
+            None => *live = false,
+        }
+        *rows = screen.rows(state, *level);
+        let n = rows.len() as i32;
+        let c = screen.cursor().clamp(0, (n - 1).max(0));
+        screen.set_cursor(c);
+        self.list = list::open_on(n, c);
     }
 
     /// Items: reads the inventory and Sora's state again, the window's rows, and the list from the
@@ -1082,14 +1145,15 @@ impl Page {
         self.list = list::open_on(n, c);
     }
 
-    /// The row with Re:CoM's row mark: the equipped Keyblade, or the picker's row holding the
-    /// slot's spell.
-    fn marked(&self) -> Option<usize> {
+    /// Whether row `idx` has Re:CoM's row mark: the equipped Keyblade, the picker's row holding the
+    /// slot's spell, or an equipped ability.
+    fn marked(&self, idx: usize) -> bool {
         match &self.content {
-            Content::Keyblades { cards, equipped } => cards.iter().position(|c| c == equipped),
-            Content::Customize { slots, picks, picking: Some(k), .. } => customize::row_of(picks, slots[*k]),
-            Content::Customize { picking: None, .. } => None,
-            Content::Items { .. } => None,
+            Content::Keyblades { cards, equipped } => cards.iter().position(|c| c == equipped) == Some(idx),
+            Content::Customize { slots, picks, picking: Some(k), .. } => customize::row_of(picks, slots[*k]) == Some(idx),
+            Content::Customize { picking: None, .. } => false,
+            Content::Items { .. } => false,
+            Content::Abilities { rows, .. } => rows.get(idx).is_some_and(|r| r.marked),
         }
     }
 
@@ -1122,6 +1186,7 @@ impl Page {
                 let (name, count) = if item == 0 { (ip::text::NONE.to_vec(), ip::text::NONE.to_vec()) } else { (item_word(item), kb::c_text(&inv.stock_of(item).to_string())) };
                 (ip::text::STATUS, [o, name, count])
             }
+            Content::Abilities { screen, state, level, .. } => (ap::text::STATUS, screen.status(state, *level).map(|v| kb::c_text(&v))),
         }
     }
 
@@ -1132,6 +1197,13 @@ impl Page {
             Content::Customize { picking: Some(k), .. } => customize::text::pick_help(*k, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
             Content::Customize { picking: None, .. } => customize::text::slot_help(self.list.cursor.max(0) as usize, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
             Content::Items { screen, rows, msg, .. } => screen.help(rows, self.list.cursor, *msg),
+            Content::Abilities { msg: Some(m), .. } => m,
+            Content::Abilities { rows, .. } => match rows.get(self.list.cursor.max(0) as usize) {
+                Some(ap::Row { label: ap::Label::Owner(_), grey: true, .. }) | None => ap::text::EMPTY_HELP,
+                Some(ap::Row { label: ap::Label::Owner(ap::Owner::Sora), .. }) => ap::text::OWNER_HELP[0],
+                Some(ap::Row { label: ap::Label::Owner(ap::Owner::Shared), .. }) => ap::text::OWNER_HELP[1],
+                Some(ap::Row { label: ap::Label::Ability(i), .. }) => ap::text::help(*i),
+            },
         };
         set_help(self.p(), t.as_ptr());
     }
@@ -1155,7 +1227,6 @@ impl Page {
         let blink: u32 = at(camp, camp::BLINK);
         let setup = func::<SetupFn>(CBUTTON_SETUP);
         let seqs = va(base(), LIST_SEQ) as *const u16;
-        let marked = self.marked();
         for i in 0..list::VISIBLE as usize {
             delete(self.rows[i] as *mut u8);
             self.rows[i] = 0;
@@ -1172,9 +1243,9 @@ impl Page {
             self.rows[i] = btn as usize;
             let name = self.row_text(idx as usize);
             let c = if self.row_grey(idx as usize) { ip::grey_colour(colour) } else { colour };
-            setup(btn, set, 0x11, seqs, pos.0.as_ptr(), self.list_panel as *mut u8, name.as_ptr(), font, f9, f10, 0x40, &c, 0);
+            setup(btn, set, 0x11, seqs, pos.0.as_ptr(), self.list_panel as *mut u8, name.as_ptr(), font, f9, f10, 0x40, &c, self.row_look(idx as usize));
             let spr: *mut u8 = at(btn, 0x18);
-            if marked == Some(idx as usize) && !spr.is_null() {
+            if self.marked(idx as usize) && !spr.is_null() {
                 let m = vfn::<MarkFn>(spr, 0x40)(spr, set, EQUIPPED_MARK, MARK_X, MARK_Y, 0.0, 0);
                 if !m.is_null() {
                     vfn::<ObjIntFn>(m, 0x30)(m, blink);
@@ -1342,7 +1413,54 @@ impl Page {
                 self.customize_mode(None, k as i32);
             }
             Content::Items { .. } => self.items_confirm(),
+            Content::Abilities { .. } => self.abilities_confirm(),
         }
+    }
+
+    /// Abilities: confirm on the highlighted row (`crate::abilities::page::Screen::confirm`, KH1's
+    /// rule), written to our save block, with Re:CoM's camp sounds (2 opened / equipped / removed,
+    /// 5 refused or nothing to open).
+    unsafe fn abilities_confirm(&mut self) {
+        let cursor = self.list.cursor;
+        let Content::Abilities { screen, state, level, msg, live, .. } = &mut self.content else { return };
+        screen.set_cursor(cursor);
+        *msg = None;
+        let mut s = *state;
+        let out = screen.confirm(&mut s, *level);
+        match out {
+            ap::Outcome::Opened => sound(2),
+            ap::Outcome::Equipped(i) | ap::Outcome::Removed(i) => {
+                if !*live || !super::abilities::set_equipped(s.equipped) {
+                    sound(5);
+                    log("abilities page: the ability state isn't live (no save block, or not Combat = KH1 in Sora's story); nothing changed");
+                } else {
+                    sound(2);
+                    let lv = *level;
+                    log(&format!(
+                        "abilities page: {} {} ({} AP); AP {}/{} left; equipped {:?}",
+                        if matches!(out, ap::Outcome::Equipped(_)) { "equipped" } else { "removed" },
+                        crate::abilities::ALL[i].name,
+                        crate::abilities::ALL[i].ap,
+                        crate::abilities::ap_left(s.equipped, lv),
+                        crate::abilities::max_ap(lv),
+                        crate::abilities::names(s.equipped)
+                    ));
+                }
+            }
+            ap::Outcome::Refused(i) => {
+                *msg = Some(ap::text::NO_AP);
+                sound(5);
+                log(&format!("abilities page: refused {} ({} AP): AP {} left (KH1's rule)", crate::abilities::ALL[i].name, crate::abilities::ALL[i].ap, crate::abilities::ap_left(s.equipped, *level)));
+            }
+            ap::Outcome::Empty => {
+                *msg = Some(ap::text::EMPTY_HELP);
+                sound(5);
+            }
+            ap::Outcome::Nothing | ap::Outcome::Back | ap::Outcome::Close => {}
+        }
+        self.abilities_read();
+        self.redraw();
+        self.help();
     }
 
     /// Items: confirm on the highlighted row (`crate::items_page::Screen::confirm` on our save
@@ -1415,6 +1533,16 @@ impl Page {
             self.customize_mode(None, k as i32);
             return;
         }
+        if let Content::Abilities { screen, msg, .. } = &mut self.content {
+            *msg = None;
+            if screen.cancel() == ap::Outcome::Back {
+                sound(4);
+                self.abilities_read();
+                self.redraw();
+                self.help();
+                return;
+            }
+        }
         if let Content::Items { screen, msg, .. } = &mut self.content {
             *msg = None;
             if screen.cancel() == ip::Outcome::Back {
@@ -1467,12 +1595,18 @@ impl Page {
                 *msg = None;
             }
         }
+        if let Content::Abilities { screen, msg, .. } = &mut self.content {
+            screen.set_cursor(n.cursor);
+            if moved {
+                *msg = None;
+            }
+        }
         if moved {
             sound(1);
             self.redraw();
             match self.content {
                 Content::Customize { picking: Some(_), .. } => LAST_PICK.store(n.cursor.max(0) as usize, Ordering::Relaxed),
-                Content::Customize { picking: None, .. } | Content::Items { .. } => self.help(),
+                Content::Customize { picking: None, .. } | Content::Items { .. } | Content::Abilities { .. } => self.help(),
                 Content::Keyblades { .. } => {}
             }
         }

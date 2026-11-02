@@ -563,6 +563,18 @@ pub fn stocked_text(word: &[u8], count: u8) -> Vec<u8> {
     v
 }
 
+/// The row's look on Re:CoM's camp list (`crate::keyblades::row_look`; owner, 2026-11-01: "lets
+/// make "stock" have the item symbol, and make the box green", and every item slot of Sora's
+/// list likewise): the Stock row and Sora's item slots (filled or empty) take Re:CoM's green row
+/// with its icon; the Keyblade slot, the Sora row and the other windows keep the red row.
+pub fn row_look(l: Label) -> i32 {
+    use crate::keyblades::row_look::{GREEN, RED};
+    match l {
+        Label::Owner(Owner::Stock) | Label::Slot(_) => GREEN,
+        _ => RED,
+    }
+}
+
 /// A greyed row's text colour: Re:CoM's colour at half brightness, its alpha kept. Assumption (no
 /// greyed camp row of Re:CoM's was read).
 pub fn grey_colour(c: u32) -> u32 {
@@ -628,6 +640,18 @@ pub mod text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stock_and_item_slots_take_the_green_item_row() {
+        use crate::keyblades::row_look::{GREEN, RED};
+        assert_eq!(row_look(Label::Owner(Owner::Stock)), GREEN);
+        assert_eq!(row_look(Label::Slot(0)), GREEN, "an empty slot too");
+        assert_eq!(row_look(Label::Slot(crate::items::id::POTION)), GREEN);
+        assert_eq!(row_look(Label::Owner(Owner::Sora)), RED);
+        assert_eq!(row_look(Label::Keyblade), RED);
+        assert_eq!(row_look(Label::Stocked(crate::items::id::POTION, 3)), RED);
+        assert_eq!(row_look(Label::Yes), RED);
+    }
     use crate::items::id::*;
 
     fn inv(slots: &[u8], stock: &[(u8, u8)]) -> Inventory {

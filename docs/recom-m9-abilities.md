@@ -1,4 +1,8 @@
-# M9 stage 9a: KH1's combo-modifier abilities and the ability state
+# M9: KH1's abilities (9a: the combo modifiers and the ability state; 9b: the equip screen with AP)
+
+> Stage 9b (below, [Stage 9b](#stage-9b-kh1s-ability-screen-with-ap)) replaces three 9a rules:
+> new unlocks arrive **unequipped** (KH1), the block is **layout v2**, and Gravity Break unlocks at
+> **Re:CoM level 30** (owner). The movement abilities moved from the ini into the ability state.
 
 Steam addresses (KH1 and Re:CoM images at `0x140000000`). Tags: Checked (decomp / exe / files /
 tests) or Assumption. Code: `crates/kh1-recom/src/abilities.rs` (pure), `win/abilities.rs`,
@@ -20,9 +24,9 @@ At Combat = KH1, in Sora's story:
 1. **The ability state** in our block of Re:CoM's save (below): unlocked and equipped bits, AP
    reserved for 9b.
 2. **Unlocks**: Re:CoM's own learned-sleight state for the eight it has; KH1's learn level on
-   Re:CoM's level for Vortex, Aerial Sweep, Hurricane Blast, Ripple Drive. **Gravity Break has no
-   source yet** (owner question).
-3. **Equipped = unlocked** until 9b's equip screen: a new unlock is equipped at once.
+   Re:CoM's level for Vortex, Aerial Sweep, Hurricane Blast, Ripple Drive. (9b: Gravity Break at
+   Re:CoM level 30, owner.)
+3. (9a only) **Equipped = unlocked**: a new unlock was equipped at once. 9b: KH1's rule.
 4. The equipped modifiers become KH1's ability bits in the `kh1_core::Abilities` the KH1 frame
    passes to **KH1's own pickers** (`0x1402A6EE0` ground, `0x1402A6C70` air), which choose KH1's rows.
 5. **The rows** (KH1 rows 0, 3–7, 9, 10, 15) in Re:CoM's attack-row layout through `kh1_row_bytes`,
@@ -118,10 +122,10 @@ Right after the items extension, inside Re:CoM's spare tail `save + 0x246B ..= 0
 
 | save + | size | field |
 |---|---|---|
-| `0x269F` | 1 | version: **0 = never written** (older save, new game) → nothing unlocked; 1 = written |
-| `0x26A0` | 4 | unlocked, bit = `abilities::ix` (0 Sliding Dash, 1 Blitz, 2 Stun Impact, 3 Zantetsuken, 4 Vortex, 5 Aerial Sweep, 6 Hurricane Blast, 7 Ripple Drive, 8 Gravity Break, 9 Strike Raid, 10 Sonic Blade, 11 Ars Arcanum, 12 Ragnarok) |
+| `0x269F` | 1 | version: **0 = never written** (older save, new game) → nothing unlocked; 1 = written by 9a; **2 = 9b** (bits 13–24 below, KH1's equip rules) |
+| `0x26A0` | 4 | unlocked, bit = `abilities::ix` (0 Sliding Dash, 1 Blitz, 2 Stun Impact, 3 Zantetsuken, 4 Vortex, 5 Aerial Sweep, 6 Hurricane Blast, 7 Ripple Drive, 8 Gravity Break, 9 Strike Raid, 10 Sonic Blade, 11 Ars Arcanum, 12 Ragnarok; 9b: 13 Guard, 14 Counterattack, 15 Dodge Roll, 16 High Jump, 17 Glide, 18 Superglide, 19 Combo Master, 20–22 Combo Plus ×3, 23–24 Air Combo Plus ×2) |
 | `0x26A4` | 4 | equipped (a subset of unlocked) |
-| `0x26A8` | 6 | zero, kept for 9b (KH1's AP) |
+| `0x26A8` | 6 | zero (9b derives the max AP from the level; kept for AP Up items, should they come) |
 
 Fields never move. Re:CoM saves, checksums, loads, snapshots and zeroes it with its save block.
 An older save unlocks what it has at its first Attack press.
@@ -267,7 +271,7 @@ pointer sites re-read from the Steam exe with pefile: 0 mismatches.
 - The id − 1 indexing of the AP table (9b).
 - `0x1401AAB00` ≠ 0 means Sora's story (its ids 4..0x56 are Sora's sleights).
 
-## Owner questions
+## Owner questions (9a; all answered 2026-11-01, built in 9b)
 
 1. **Gravity Break's unlock**: KH1 learns it from no level list (Sword, Shield and Rod all lack
    it). (a) at a Re:CoM level you name, (b) with a Re:CoM boss's first defeat (as -ra / -ga spells),
@@ -301,3 +305,183 @@ pointer sites re-read from the Steam exe with pefile: 0 mismatches.
   abilities moved from the ini into it, KH1's "learned unequipped" rule (question 3).
 - **9c**: the specials (Sonic Blade, Strike Raid, Ars Arcanum, Ragnarok; their KH1 ids, rows and
   commands), whose unlock state is already kept.
+
+## Stage 9b: KH1's ability screen with AP
+
+Owner (M7–M9 choices, M9 follow-ups, 2026-11-01): "an equip screen with KH1's AP (KH1's costs, AP +2
+at KH1's levels, on Re:CoM's level)"; Gravity Break unlocks at **Re:CoM level 30**; the learn list is
+**KH1's Rod list**; a newly unlocked ability arrives **unequipped**, as in KH1. Answers 9a's owner
+questions 1–3. Code: `crates/kh1-recom/src/abilities.rs` (rules, AP, the screen; tested),
+`src/win/abilities.rs` (the block, sync, migration, the live read), `src/win/keyblades.rs`
+(`Content::Abilities`), `src/win/movement.rs` (`abilities()`), `src/keyblades.rs` (`sub::Row::Abilities`).
+
+### KH1 (Steam). Checked (decomp + files) unless tagged
+
+| what | where |
+|---|---|
+| **AP is the character record's `+9`**: the new game fills it from the template btltbl `0x39D8` byte 2 = **3** (`0x1402852C0`); the Dive adds the choice's fourth byte (`0x140284B70`; keep Rod / give up Shield, choice 5: **+0**); level-up bonus kind 3 adds **2**, capped at 100 (`0x1402B5660`); the AP Up item 0x9A adds its amount, capped at 100 (`0x1402CD780`); the battle stats copy it to `+0xE4` (`0x1402A5130`). | as listed |
+| Sora's bonus list btltbl `0x3AC0` (`0x140528CC0[0]`, the same for every Dive choice; byte `[L − 2]` for reaching L): kind 3 at **11, 17, 20, 23, 29, 32, 35, 41, 44, 47, 53, 56, 59, 65, 68, 71, 77, 80, 83, 86, 89, 92, 95, 98** (24 levels). So max AP = 3 + 2 × those reached: 3 at level 1, 13 at 30, **51** at 99. | files |
+| AP cost: `0x1402E8120(id)` = byte +0 of `0x14028F8F0(id)` = `*0x142D36D48 + (id − 1) × 12`, and `0x142D36D48 = 0x142D26118` = btltbl base `0x142D22D40` + **`0x33D8`**. 9a's "row id − 1" Assumption is now Checked. | decomp `0x140280000` |
+| AP left: `0x1402E8660(char)` = the menu's max AP (`0x142E942C4 + char × 0x100`) − the costs of the character's **equipped** abilities (list `+0x44`, bit 7 clear), never below 0. The shared list is not counted. That the menu's max AP is record `+9`: Assumption (the cache's writer not read; KH1 has no AP accessory). | `0x1402E8660`, `0x1402E8560` |
+| Learning adds an ability **unequipped** (`0x140284E10` writes `id | 0x80`); character lists `+0x44` (48 bytes), the shared list `+0x599` (list index ≥ 10). | `0x140284E10` |
+| **The screen**: owner list (`0x140310B60`: each party member, then "Shared Abilities", message 0xC0); a character's list (`0x140311C20`: rows in **list order**, each icon, name, cost; a row is **greyed when unequipped and its cost is over the AP left**); the shared list (`0x1403120F0`, no cost column); the panel (`0x1403108E0`): the character's name, "AP", **AP left / max AP**. | as listed |
+| **Confirm on an ability** opens a command window (`0x140310650`): **Equip / Remove** (message 0xBA / 0xB9 by bit 7), **Move** (0xBB: pick another row, the two swap, sound 0x4A), **Sort** (0xBC: three orders, `0x140310400` → quicksort `0x1403119F0` with keys `0x140310260` (sort key, then equipped), `0x140310290` (cost, sort key, equipped), `0x1403102E0` (equipped first, then sort key); the sort key is the record's u16 `+2`, `0x1402E81B0`). Equip with too little AP: **error sound 4** and message window 0xCA; else bit 7 cleared, sound 5. Remove: bit 7 set, sound 0x4B. A **shared** ability toggles (`^ 0x80`) with **no AP test**. | `0x140310650`, `0x140310400`, `0x140310EF0` |
+| Ability ids (Checked: `0x1402A6380` / `0x1402A5130` / `0x1402A7510`): High Jump **1**, Glide **3**, Superglide **4** (all three counted in the **shared** list: `0x1402A6734`.. pass list 0xB), Combo Plus **6**, Air Combo Plus **7**, Counterattack **19**, Guard **21**, Dodge Roll **22**, Combo Master **0x41**. Costs / sort keys (btltbl `0x33D8`): Guard 2 / 101, Counterattack 2 / 102, Dodge Roll 1 / 100, Combo Plus 1 / 201, Air Combo Plus 1 / 202, High Jump / Glide / Superglide 0. **Combo Master has no row** (row 65 is zero: cost 0, no name record; Checked (files)). | decomp + files |
+| **KH1 FM's Superglide is an ability** (id 4, shared, bit 0x100). | decomp |
+| The Rod list (`0x3BF8`) gives: Guard **33**, Counterattack **57**, Air Combo Plus **24, 45**, Combo Plus **87, 93, 99** (and the 9a levels). **High Jump, Glide, Superglide, Dodge Roll, Combo Master are in none of the three lists** (story / other rewards in KH1: which event not traced). | files |
+
+### What 9b builds (Combat = KH1, Sora's story)
+
+**Which abilities, and from where** (`abilities::ALL`):
+
+| ability | KH1 id | AP | unlocks |
+|---|---|---|---|
+| the nine modifiers | 9a's | 9a's | 9a's (Re:CoM's sleights; Rod levels); **Gravity Break: Re:CoM level 30** (owner) |
+| Guard | 21 | 2 | Rod list: level **33** |
+| Counterattack | 19 | 2 | Rod list: level **57** |
+| Combo Plus ×3 | 6 | 1 each | Rod list: **87, 93, 99** |
+| Air Combo Plus ×2 | 7 | 1 each | Rod list: **24, 45** |
+| Dodge Roll | 22 | 1 | **story in KH1**: while `dodge_roll = on` in the ini (owner question) |
+| High Jump, Glide, Superglide (shared) | 1, 3, 4 | 0 | **story in KH1**: while their ini key is on (owner question) |
+| Combo Master | 0x41 | 0 (no row in KH1's table) | **story / other in KH1**: while `combo_master = on` (owner question) |
+
+The specials (Strike Raid, Sonic Blade, Ars Arcanum, Ragnarok; KH1 ids 13 / 11 / 12 / 14, costs
+3 / 3 / 4 / 4) keep their unlock state but are **not on the screen** until 9c gives them a use.
+
+**AP** (`abilities::max_ap`): 3 + 2 at each of KH1's 24 kind-3 levels reached, on Re:CoM's level
+(`*0x14087CBF8 + 0x1C`). Used = the costs of Sora's equipped abilities; left = max − used, never below 0.
+
+**Equipping** (`abilities::page::Screen::confirm`): equipped → removed; unequipped → equipped when
+its cost ≤ AP left (shared: always), else **refused**: Re:CoM's error sound (camp sound 5) and the
+help line "Not enough AP to equip this ability." (KH1's message 0xCA, our words).
+
+**Unlocks** (`abilities::sync`): from Re:CoM's sleights and levels, **unequipped** (KH1); never
+taken back. The story abilities follow their ini keys both ways, and one switched on arrives
+**equipped** (as the ini has them today) when the AP allows.
+
+**The ini keys** (chosen: initial state + stand-in, not debug overrides):
+- `high_jump`, `glide`, `superglide`, `dodge_roll`, `combo_master`: the story abilities' unlock
+  (stand-in until the owner picks their Re:CoM source).
+- `guard`, `counterattack`, `combo_plus`, `air_combo_plus`: read **once per save**, at its
+  migration (below): what they had on stays equipped where it is learned by then.
+- With no save block (title screen) or at Re:CoM's setting, the ini stands as before (the KH1 frame's
+  fallback).
+- `kh1_all_abilities = on` stays the debug override: everything on the screen equipped (3 Combo
+  Plus, 2 Air Combo Plus), AP ignored, nothing written.
+
+**Migration** (`abilities::migrate`, a block of version 0 or 1, at its first sync): the sync's
+unlocks; then everything that was equipped stays equipped where still unlocked: 9a's equipped set
+(v1: 9a equipped every unlock) and the ini's `guard` / `counterattack` / first `combo_plus` /
+`air_combo_plus` copies; then, over KH1's max AP, **unequipped from the most expensive down** (ties:
+the later in `ALL`). Written as v2; logged (`abilities: block v1 -> v2 at Re:CoM level N (max AP
+M): equipped […]; over KH1's AP, unequipped […]`). A new game (v0) gets only the ini's story
+abilities.
+
+**Use** (`win::abilities::equipped_live`, `win::movement::abilities`): every KH1 frame reads the
+block's equipped word (one 15-byte read; a block older than v2 is migrated once) and passes
+`abilities::to_core(equipped)` to KH1's handlers and pickers: movement (High Jump, Glide, Superglide,
+Dodge Roll, Guard, Counterattack), the Combo Plus / Air Combo Plus counts, Combo Master and the
+modifiers (those with rows). So a change in the camp applies as soon as the camp closes, and a
+loaded save is followed with nothing of ours at load time. The F9 trace's ability bits follow it.
+
+### The screen: the KH1 camp entry's third row, "Abilities"
+
+The submenu is **Items, Customize, Abilities** (`keyblades::sub::ROWS`), on the same page type as the
+others (Re:CoM's camp list: both panels, `CButton` rows, `CButtonCursor`, label / value rows, help
+line, camp sounds 1 move / 2 confirm / 4 back / 5 refused). No new hook, callee or data site.
+
+- **Owner list** (KH1's `0x140310B60`): "Sora", "Shared" (KH1 has the party members too; Sora only
+  here, as the Items page). An owner with nothing learned is greyed; confirming it plays sound 5 and
+  "No abilities learned yet."
+- **Sora's list / the shared list**: the unlocked abilities, each row its English name; equipped
+  rows carry Re:CoM's row mark (0x1D, as the equipped Keyblade); **greyed when unequipped and the
+  cost is over the AP left** (KH1's rule; the Items page's grey colour). Confirm toggles (above);
+  cancel goes back to the owner list on the same owner; cancel there closes the page.
+- **Status panel**: "AP" = **AP left / max AP** (KH1's panel), "Cost" = the highlighted ability's
+  cost ("-" on the owner list), "AP used" = used / max AP.
+- **Help line**: each ability's one-line description (ours), the owner rows' help, or the refusal.
+- **Order**: by KH1's sort key (the record's `+2`: Combo Master 0, Dodge Roll 100, Guard 101,
+  Counterattack 102, Combo Plus 201, Air Combo Plus 202, Sliding Dash 205, Vortex 206, Aerial Sweep
+  207, Blitz 208, Hurricane Blast 209, Ripple Drive 210, Stun Impact 211, Gravity Break 212,
+  Zantetsuken 213; shared: High Jump, Glide, Superglide) = KH1's Sort option 0 without its equipped
+  tie-break.
+- Rows keep Re:CoM's red row look (`keyblades::row_look::RED`); see the owner question on the blue
+  one.
+
+**Not KH1's (by design or yet):**
+- KH1's list order is the **learning order** (the list grows at the end), changed by **Move** and
+  **Sort** from the command window; ours is fixed in KH1's sort-key order, and confirm toggles at
+  once (no Equip / Move / Sort window). Owner question 2.
+- Costs are in the status panel, not a column on each row (one text item a row: Re:CoM's
+  `CButton`). Names are English (KH1's ability names and descriptions are its sysmsg, not in the
+  asset step; Assumption, as the other pages). No ability icons.
+- Sounds: Re:CoM's camp sounds (KH1: 5 equip, 0x4B remove, 4 error).
+- Only Sora's and the shared lists (no party yet).
+
+### Logs
+
+- `abilities: block vN -> v2 at Re:CoM level L (max AP M): equipped […] (U AP)[; over KH1's AP, unequipped […]]`
+- `abilities: learned at Re:CoM level L (unequipped, KH1's rule): […]`
+- `abilities: from the ini: on […], off […]`
+- `abilities: level L, AP left/max left; unlocked […]; equipped […]; modifiers the pickers get […]` (once)
+- `abilities page: opened at Re:CoM level L: AP …; unlocked […]; equipped […]`
+- `abilities page: equipped|removed <name> (c AP); AP left/max left; equipped […]`,
+  `abilities page: refused <name> (c AP): AP n left (KH1's rule)`
+
+### Per frame
+
+KH1 frames: one atomic load, one pointer read and a 15-byte read of the block (9a: two atomic
+loads); the KH1 frame already rebuilt its abilities each frame. Attack presses and the page's
+opening: one sync (Re:CoM's sleight test only for abilities not yet unlocked). Nothing at the Re:CoM
+setting.
+
+### 1:1 checks (9b)
+
+- Checked (decomp + files + tests, `KH1_TEST_DATA`'s `btltbl.bin`): the start AP 3, the Dive's +0,
+  the 24 AP levels, every cost and sort key, the Rod levels of every level-sourced ability, Combo
+  Master's empty row (`abilities::tests::ap_tables_match_btltbl`).
+- Checked (decomp + tests): the refusal rule, the grey rule, shared abilities free, AP left clamped
+  at 0, new unlocks unequipped (`the_screen_follows_kh1s_rules`, `new_unlocks_arrive_unequipped`).
+- Not checked: anything in game; that KH1's menu max AP equals record `+9` (Assumption, no AP
+  accessory in KH1).
+
+### Found on the way (not built; for the owner)
+
+- **The Rod list also gives stats**: its non-ability entries go through the same bonus function
+  `0x1402B5660`: **max MP + 1 at levels 30 and 66** (entry 2) and entry 7 (record `+0x1C` + 1) at
+  54. M7's max MP (`crate::mp::MAX_MP_UP_LEVELS` = 12, 24, 36, 48, 60, the bonus list only) misses the
+  Rod's two. Checked (decomp + files). Not changed (outside 9b).
+- KH1's Rod list also teaches abilities the mod has no use for yet (Checked (files): ids and
+  levels; the names: Assumption, the Archipelago list): id 5 (Treasure Magnet; 9, 72), 10 (Scan;
+  15), 23 (21), 24 (42, 75), 25 (90), 26 (60), 27 (63), 28 (48), 53 (69), 60 (27, 81), 62 (39), and
+  8 (Critical Plus; 96, 100), which `kh1_core` reads (crit factor) but the screen doesn't list.
+  Owner: add any of them (each needs its effect built)?
+
+### Owner questions (9b)
+
+1. **Story abilities' Re:CoM source**: High Jump, Glide, Superglide, Dodge Roll and Combo Master
+   are in no KH1 level list (KH1 gives them by story). Until you pick, their ini keys unlock them
+   (and they arrive equipped). (a) keep the ini, (b) a Re:CoM event or boss each (name them), (c)
+   a Re:CoM level each.
+2. **KH1's Equip / Move / Sort window**: ours toggles at confirm in a fixed order. (a) keep it, (b)
+   add KH1's command window (Equip / Remove, Move, Sort with KH1's three orders) and keep the order in
+   the save.
+3. **Guard at level 33**: following the Rod list, a new game has no Guard until Re:CoM level 33,
+   and Counterattack at 57. Saves past 33 keep Guard equipped (migration). Confirm.
+4. **Ability rows' look**: they keep the red row; Re:CoM's camp list also has a blue row with the
+   magic icon (`row_look::BLUE`, sequence 0x133). Change? (not changed without asking)
+5. **The Rod's MP +1 at 30 and 66** (above): add to M7's max MP?
+
+### What the owner should test
+
+1. Camp → KH1: three rows (Items, Customize, Abilities); help "Equip Sora's abilities with AP."
+2. Abilities → "Sora" / "Shared"; the status panel's AP (left / max, e.g. 13/13 at level 30 with
+   nothing equipped beyond the story ones).
+3. Sora's list: learned abilities in the order above, the mark on equipped rows, greyed rows when the
+   AP is short; confirm equips / removes (sound 2), a greyed one is refused (error sound, the help
+   line says so); "Cost" and "AP used" follow.
+4. Close the camp: the changes apply at once (e.g. remove Guard: Square rolls; equip Combo Plus: one
+   more swing; remove a modifier: its finisher stops).
+5. Shared: High Jump / Glide / Superglide toggle freely (with their ini keys on).
+6. An older save (9a): the log's `block v1 -> v2` line; what was equipped stays, within the AP.
+7. Save and reload: the equipped set stays. Combat = Re:CoM, Riku's story: no entry, nothing changes.

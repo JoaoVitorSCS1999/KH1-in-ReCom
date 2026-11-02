@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 94: M9 stage 9b: KH1's ability equip screen with AP; green item rows, version 0.52.0 (2026-11-01)
+
+- Asks (owner, 2026-11-01): equip screen with KH1's AP; new unlocks unequipped; Gravity Break at Re:CoM level
+  30; Rod list. "lets make "stock" have the item symbol, and make the box green" / "the same for all the item
+  slots". Owner's spell-effects decisions recorded (own toggle, Re:CoM's sounds, after the specials).
+- KH1 (Checked (decomp + btltbl)): AP = record +9: 3 at start, +2 at 24 levels (`0x1402852C0`, `0x1402B5660`);
+  costs btltbl 0x33D8 (row id − 1); equip refused over max AP, greyed rows (`0x140310650`, `0x140311C20`);
+  shared abilities (High Jump, Glide, Superglide) free.
+- Built: "Abilities" row in the KH1 camp submenu (Sora / Shared → learned abilities, equipped marked, greyed
+  when unaffordable, confirm toggles, AP left / max + cost + used / max). Unlocks: Gravity Break at 30; Rod
+  list: Guard 33, Counterattack 57, Air Combo Plus 24 / 45, Combo Plus 87 / 93 / 99; High Jump, Glide,
+  Superglide, Dodge Roll, Combo Master by their ini keys (owner question). New unlocks unequipped; 9a saves
+  migrated within AP. Each KH1 frame reads the equipped set. Items page: Stock and item slots use Re:CoM's
+  list entry 0x131 (green box, icon sprite 278) through its own row setup `0x140112F10`.
+- Assumption: English names; sprite 278 = the item icon. No new sites.
+- Checked: 528 tests, Windows build, all site bytes. Not checked: in game.
+
+---
+
 ## Stage 93: M9 stage 9a: KH1's combo-modifier abilities and the ability state, version 0.51.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "Finish everything up to M9"; abilities unlock with Re:CoM (its level-up

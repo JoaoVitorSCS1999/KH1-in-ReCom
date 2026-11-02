@@ -41,7 +41,8 @@ pub static ORIG_GLIDE_EXE: AtomicUsize = AtomicUsize::new(0);
 /// `combat = kh1`, and the hooks are in.
 static KH1: AtomicBool = AtomicBool::new(false);
 static INSTALLED: AtomicBool = AtomicBool::new(false);
-/// The abilities (`Kh1Abilities::bits`), set from the ini, and all of them.
+/// The ini's abilities (`Kh1Abilities::bits`, and all of them): the fallback while the ability
+/// state isn't live (M9 9b).
 static ABILITY_BITS: AtomicU32 = AtomicU32::new(0x30);
 static ABILITIES: Mutex<Option<Kh1Abilities>> = Mutex::new(None);
 /// The appended action-table rows (KH1-only clips).
@@ -210,18 +211,23 @@ pub fn set_abilities(a: Kh1Abilities) {
     }
 }
 
-/// KH1's ability bits (`0x142D5EC10` layout) for the trace: the ini's movement abilities and the
-/// equipped combo modifiers (M9 9a).
+/// KH1's ability bits (`0x142D5EC10` layout) for the trace: the equipped abilities of the ability
+/// state (M9 9b), or the ini's movement abilities while the state isn't live.
 pub fn ability_bits() -> u32 {
-    ABILITY_BITS.load(Ordering::Relaxed) | crate::abilities::kh1_bits(super::abilities::equipped())
+    match super::abilities::equipped_live() {
+        Some(e) => crate::abilities::kh1_bits(e),
+        None => ABILITY_BITS.load(Ordering::Relaxed),
+    }
 }
 
-/// The abilities the KH1 frame passes on: the ini's movement abilities, and the equipped combo
-/// modifiers from the ability state (M9 9a, `super::abilities`).
+/// The abilities the KH1 frame passes on: the equipped abilities of the ability state (M9 9b,
+/// `super::abilities`: movement, Combo Plus copies, the combo modifiers), or the ini's while the
+/// state isn't live (no save block yet).
 pub(crate) fn abilities() -> kh1_core::Abilities {
-    let mut a = ABILITIES.lock().ok().and_then(|g| *g).unwrap_or_default().to_core();
-    crate::abilities::apply(super::abilities::equipped(), &mut a);
-    a
+    match super::abilities::equipped_live() {
+        Some(e) => crate::abilities::to_core(e),
+        None => ABILITIES.lock().ok().and_then(|g| *g).unwrap_or_default().to_core(),
+    }
 }
 
 pub(super) fn kh1_on() -> bool {

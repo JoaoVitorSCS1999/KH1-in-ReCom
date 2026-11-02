@@ -300,6 +300,26 @@ pub mod list {
     }
 }
 
+/// The look of a camp list row: the variant Re:CoM's `CButton` set-up `0x140112F10` takes (its
+/// last argument) to pick the row's sequence from the list's table `0x1407C11F0`
+/// (`seqs[variant]`, Checked (decomp)). Re:CoM's Sleights page passes each row's category
+/// (`0x1400E6DF0` mode 9 reads it from the list entry's second byte, filled in mode 10 from the
+/// sleight's kind: Sora's 0..3, Riku's 4..7; Checked (decomp)). What each sequence draws, from
+/// `camp.lad` in `FO0100.SPR` (Checked (files)): a plate (sprites 70 / 71) tinted by its
+/// animation's colour, and an icon sprite.
+pub mod row_look {
+    /// Sequence 0x12E: red plate (colour 0x8000003C), icon sprite 167 untinted (Re:CoM's
+    /// physical sleights; the rows we drew before took this one).
+    pub const RED: i32 = 0;
+    /// Sequence 0x133: blue plate (0x803C1E00), icon sprite 168 (Re:CoM's magic sleights).
+    pub const BLUE: i32 = 1;
+    /// Sequence 0x131: green plate (0x80143200), icon sprite 278 tinted green (0x801EDC1E). The
+    /// owner's "item symbol and green box". Assumption: sprite 278 is Re:CoM's item icon (the
+    /// atlas `FO0100.RTM` is not in the session; Re:CoM's by-kind sleight rows `0x1407C1150` draw
+    /// the same sprite green for kinds 6 / 7 and pink for the summons).
+    pub const GREEN: i32 = 2;
+}
+
 /// Texts: NUL-terminated ASCII handed to Re:CoM's text items (as the Config row's are; seen in
 /// game there). No `%`: the help line's formatter `0x1402402B0` treats it as a code.
 pub mod text {
@@ -307,7 +327,7 @@ pub mod text {
     /// submenu"), its header title and help line.
     pub const ENTRY_LABEL: &[u8] = b"KH1\0";
     pub const TITLE: &[u8] = b"KH1\0";
-    pub const ENTRY_HELP: &[u8] = b"Sora's Keyblade and items, and the spell shortcuts.\0";
+    pub const ENTRY_HELP: &[u8] = b"Sora's Keyblade and items, spell shortcuts and abilities.\0";
     /// The Keyblade list's help (opened from the Items page's Keyblade slot).
     pub const PAGE_HELP: &[u8] = b"Choose the Keyblade Sora fights with.\0";
     pub const STAT_LABELS: [&[u8]; 3] = [b"Strength\0", b"Magic\0", b"Reach\0"];
@@ -320,8 +340,8 @@ pub mod text {
 /// rows, as Re:CoM's Deck submenu relabels them (`0x1400E3DE0` mode 0 at level 1), run with
 /// Re:CoM's Deck-submenu input rule (update state 0x22, `0x1400D9C80`). Checked (decomp).
 ///
-/// Adding a row (M9's Abilities) is one more [`Row`] in [`ROWS`] with its label, help and page (M8
-/// stage 8a.2 added Items this way). Since the owner's ask of 2026-11-01 the Keyblades row is gone:
+/// Adding a row is one more [`Row`] in [`ROWS`] with its label, help and page (M8 stage 8a.2 added
+/// Items this way, M9 stage 9b Abilities). Since the owner's ask of 2026-11-01 the Keyblades row is gone:
 /// the Keyblade is the first slot of the Items page's Sora list (`crate::items_page::SORA_KINDS`).
 pub mod sub {
     use super::text;
@@ -334,10 +354,12 @@ pub mod sub {
         /// his Keyblade slot, then his item slots.
         Items,
         Customize,
+        /// M9 stage 9b: KH1's ability screen with AP (`crate::abilities::page`).
+        Abilities,
     }
 
     /// The rows, top to bottom.
-    pub const ROWS: &[Row] = &[Row::Items, Row::Customize];
+    pub const ROWS: &[Row] = &[Row::Items, Row::Customize, Row::Abilities];
 
     /// Re:CoM's camp has 7 entry buttons (`camp+0x1B8[7]`); the submenu reuses them. Checked
     /// (decomp).
@@ -350,6 +372,7 @@ pub mod sub {
             match self {
                 Row::Items => crate::items_page::text::LABEL,
                 Row::Customize => text::CUSTOMIZE_LABEL,
+                Row::Abilities => crate::abilities::page::text::LABEL,
             }
         }
 
@@ -358,6 +381,7 @@ pub mod sub {
             match self {
                 Row::Items => crate::items_page::text::HELP,
                 Row::Customize => text::CUSTOMIZE_HELP,
+                Row::Abilities => crate::abilities::page::text::HELP,
             }
         }
     }
@@ -619,17 +643,19 @@ mod tests {
     #[test]
     fn submenu_rows_and_moves_follow_recoms_deck_submenu() {
         use sub::{Act, Row, ROWS};
-        // The owner's ask (2026-11-01): Items (the Keyblade slot and the item slots), Customize.
-        assert_eq!(ROWS, &[Row::Items, Row::Customize]);
-        assert_eq!((Row::Items.label(), Row::Customize.label()), (&b"Items\0"[..], &b"Customize\0"[..]));
+        // The owner's ask (2026-11-01): Items (the Keyblade slot and the item slots), Customize;
+        // M9 9b: Abilities.
+        assert_eq!(ROWS, &[Row::Items, Row::Customize, Row::Abilities]);
+        assert_eq!((Row::Items.label(), Row::Customize.label(), Row::Abilities.label()), (&b"Items\0"[..], &b"Customize\0"[..], &b"Abilities\0"[..]));
         // Inside: held or fresh moves.
         assert_eq!(sub::step(0, DOWN_HELD), Act::Move(1));
+        assert_eq!(sub::step(1, DOWN_HELD), Act::Move(2));
         assert_eq!(sub::step(1, UP_HELD), Act::Move(0));
         // Ends: held stops, fresh wraps (Re:CoM's cursor set wraps over the count).
-        assert_eq!(sub::step(1, DOWN_HELD), Act::None);
-        assert_eq!(sub::step(1, DOWN_FRESH), Act::Move(0));
+        assert_eq!(sub::step(2, DOWN_HELD), Act::None);
+        assert_eq!(sub::step(2, DOWN_FRESH), Act::Move(0));
         assert_eq!(sub::step(0, UP_HELD), Act::None);
-        assert_eq!(sub::step(0, UP_FRESH), Act::Move(1));
+        assert_eq!(sub::step(0, UP_FRESH), Act::Move(2));
         // Cancel first, then confirm; Start is nothing here.
         assert_eq!(sub::step(1, Pad { confirm: true, ..NONE }), Act::Open(1));
         assert_eq!(sub::step(1, Pad { confirm: true, cancel: true, ..NONE }), Act::Close);

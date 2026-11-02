@@ -356,3 +356,21 @@ accessories as well we will have slots for them there but dont worry about that 
 - **Assumption**: the scroll bar made and deleted while the page stays open looks right (Re:CoM
   makes it with its page). Not seen in game. Details, tests and the owner's test list:
   `docs/recom-m8-items.md` § The Items menu with Sora's equipment.
+
+## The Abilities row (M9 stage 9b) and the rows' look
+
+- The submenu's rows are **Items, Customize, Abilities** (`keyblades::sub::ROWS`); the entry's help
+  "Sora's Keyblade and items, spell shortcuts and abilities." The Abilities page runs on the same
+  page type (`win::keyblades::Content::Abilities`): KH1's ability screen with AP, rules in
+  `crate::abilities::page`, notes in `docs/recom-m9-abilities.md` § Stage 9b. Re:CoM's row mark
+  (0x1D) now marks **every** equipped row there (`Page::marked(idx)`), as one row before.
+- **A row's look is Re:CoM's**: the last argument of its `CButton` set-up `0x140112F10` is the row's
+  variant, which picks the sequence `seqs[variant]` from the list's table `0x1407C11F0` (Checked
+  (decomp)): Re:CoM's Sleights page passes each sleight's category there (`0x1400E6DF0` mode 9,
+  from the list entry's second byte, filled in mode 10). The pages used variant 0 everywhere; they
+  now pass `keyblades::row_look` per row (`Page::row_look`): the Items page's Stock row and item
+  slots green (owner, 2026-11-01; `docs/recom-m8-items.md` § Row looks), everything else red as
+  before. No new site (the set-up was already a checked callee).
+- `camp.lad` (`FO0100.SPR`, Checked (files)): sequence 0x12E red plate (vertex colour 0x8000003C)
+  + icon sprite 167; 0x133 blue plate (0x803C1E00) + icon 168; **0x131 green plate (0x80143200) +
+  icon 278 tinted green (0x801EDC1E)**; 0x132 grey + icon 279; 0x12F / 0x160 / 0x130 Riku's.

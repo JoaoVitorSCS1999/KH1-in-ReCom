@@ -57,15 +57,17 @@ pub struct Settings {
     /// Our rows in Re:CoM's Config menu. `off` leaves the menu untouched (a safety switch while
     /// the rows are untested in game; the settings then come from this file only).
     pub config_menu: bool,
-    /// KH1 abilities Sora has at `combat = kh1`, until abilities are built into Re:CoM's
-    /// progression (roadmap M9).
+    /// KH1 abilities from the ini (M9 stage 9b, `crate::abilities`): the story abilities' unlock
+    /// (High Jump, Glide, Superglide, Dodge Roll, Combo Master), the movement abilities a save
+    /// keeps equipped at its migration to the ability state (Guard, Counterattack, Combo Plus, Air
+    /// Combo Plus), and all of them while there is no save block.
     pub abilities: Kh1Abilities,
     /// One-line logs of the Attack's decisions in `kh1-recom.log` (first 200 lines).
     pub debug_attack: bool,
     /// Debug (M7, until stage 7.11 earns spells): Sora has all 7 spells at level 3.
     pub kh1_all_spells: bool,
-    /// Debug (M9 stage 9a, until every ability has an unlock): every combo modifier is unlocked and
-    /// equipped (not written to the save).
+    /// Debug (M9): every ability of the equip screen is equipped, AP ignored (not written to the
+    /// save).
     pub kh1_all_abilities: bool,
     /// Debug (M8 stage 8a.1, until the shop and drops give items): a test inventory: whenever
     /// Sora's slots are all empty as a room or battle starts, they get Potion, Hi-Potion, Ether,
@@ -236,14 +238,21 @@ enemy_pace = recom
 ;   off: don't add our rows to Re:CoM's Config menu (use this file instead).
 config_menu = on
 ;
-; KH1 abilities at combat = kh1 (on | off), until abilities are built into the game:
+; KH1 abilities at combat = kh1 (on | off). Since M9 9b they live in the save and are equipped
+; in the camp's KH1 > Abilities page with KH1's AP:
+; - high_jump, glide, superglide, dodge_roll, combo_master: KH1 gives these by story; Sora has
+;   them while the key is on (until they get a Re:CoM unlock), and they arrive equipped.
+; - guard, counterattack, combo_plus, air_combo_plus: Sora learns them at KH1's levels (Guard
+;   33, Counterattack 57, Air Combo Plus 24 and 45, Combo Plus 87, 93, 99); these keys are only
+;   read once per save, when it first meets 9b: what they had on stays equipped if learned.
+; Without a save (the title screen) the keys stand as they are.
 high_jump = off
 glide = off
 superglide = off
 dodge_roll = on
 guard = on
 counterattack = on
-; Combo Plus / Air Combo Plus: how many are equipped (0-9); combo_master = on | off
+; combo_plus / air_combo_plus: how many were equipped (0-9); combo_master = on | off
 combo_plus = 0
 air_combo_plus = 0
 combo_master = off
@@ -255,9 +264,9 @@ debug_attack = off
 ;   spells at level 3 in the command menu's Magic list.
 kh1_all_spells = off
 ;
-; kh1_all_abilities = on | off (debug, until every ability unlocks in the game): Sora has every
-;   KH1 combo modifier (Sliding Dash, Blitz, Stun Impact, Zantetsuken, Vortex, Aerial Sweep,
-;   Hurricane Blast, Ripple Drive, Gravity Break) equipped. Not written to the save.
+; kh1_all_abilities = on | off (debug): Sora has every KH1 ability of the Abilities page
+;   equipped (the combo modifiers, Guard, Counterattack, Dodge Roll, High Jump, Glide,
+;   Superglide, Combo Master, 3 Combo Plus, 2 Air Combo Plus), AP ignored. Not written to the save.
 kh1_all_abilities = off
 ;
 ; kh1_test_items = on | off (debug, until items come from the shop and drops): whenever Sora's

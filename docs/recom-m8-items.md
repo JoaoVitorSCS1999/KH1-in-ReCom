@@ -907,3 +907,33 @@ the console lists `drops <class> : items …` lines. Combat = KH1, Sora's story.
    battle-end lines list each waiting `CPrize` with its kind).
 5. Fill all slots and 99 of an item in stock, pick that item up: log `refused … lost`.
 6. Combat = Re:CoM: no item prizes; EXP / HP / Moogle prizes and card drops as before.
+
+## Row looks: the item symbol and the green box (owner, 2026-11-01)
+
+Ask (owner, 2026-11-01, verbatim): "lets make "stock" have the item symbol, and make the box green";
+and every item slot row of Sora's list likewise. The Keyblade slot and the "Sora" row stay.
+
+- **How Re:CoM picks a camp row's box and icon** (Checked (decomp)): the list rows are `CButton`s
+  set up by `0x140112F10`; its last argument (a short) is the row's **variant**, and the row plays
+  sequence `seqs[variant]` of the table it is given (`*(u16*)(seqs + 2 × variant)`, the
+  `+8` call of its `C2DSeqCtrl`). The camp list's table is `0x1407C11F0` = 0x12E, 0x133, 0x131,
+  0x132, 0x12F, 0x160, 0x130 (Checked (exe)). Re:CoM's Sleights page sets each row's variant from its
+  category (`0x1400E6DF0` mode 9 reads the list entry's second byte; mode 10 fills it from the
+  sleight's kind: Sora 0..3, Riku 4..7). Our pages passed 0 for every row: the red box.
+- **What the sequences draw** (`camp.lad` in `FO0100.SPR`, Checked (files)): each is the same
+  plate (sprites 70 / 71) tinted by its animation's colour, plus an icon sprite:
+  0x12E red (0x8000003C) + icon 167; 0x133 blue (0x803C1E00) + icon 168; **0x131 green
+  (0x80143200) + icon 278, tinted green (0x801EDC1E)**; 0x132 grey + icon 279; 0x12F / 0x160 / 0x130
+  Riku's (red + 287, grey + 278, purple + 279).
+- **Built** (`items_page::row_look`, `keyblades::row_look`, `win::keyblades::Page::row_look`): the
+  Stock owner row and Sora's item slots (filled or empty) set up with **variant 2 (sequence
+  0x131)**; the Keyblade slot, the Sora row, the stock list, the command and Yes / No windows keep
+  variant 0 (0x12E). Re:CoM draws the box and the icon itself; nothing of ours is drawn. No new
+  site (`0x140112F10` was already a checked callee). Tests:
+  `items_page::tests::stock_and_item_slots_take_the_green_item_row`.
+- **Assumption**: icon sprite 278 is the item symbol the owner means. The atlas (`FO0100.RTM`) is
+  not in the session; Re:CoM's by-kind sleight rows (`0x1407C1150`) draw the same sprite green for
+  sleight kinds 6 / 7 and pink for the summons, and the green box 0x131 is the only green one in the
+  camp list's table. To confirm on screen.
+- Not changed: the Abilities page's rows (red); Re:CoM's blue magic row (variant 1) is there if
+  wanted (owner question in `docs/recom-m9-abilities.md`).

@@ -347,6 +347,13 @@ At KH1 setting:
       Re:CoM source (Vortex, Aerial Sweep, Hurricane Blast, Ripple Drive, Gravity Break) at
       **KH1's learn levels** on Re:CoM's level; an **equip screen with KH1's AP** (KH1's costs,
       AP +2 at KH1's levels, on Re:CoM's level).
+    - **M9 follow-ups (owner, 2026-11-01):** Gravity Break (no KH1 learn level) unlocks at **Re:CoM
+      level 30**; the learn list is **KH1's Rod list**; with the equip screen, a newly unlocked ability
+      arrives **unequipped**, as in KH1.
+    - **Spell effects (owner, 2026-11-01):** "lets look at how KH1 handles these FX and bring them in
+      here 1:1": KH1's own spell effects (same effect engine as Re:CoM's) are ported natively, behind
+      **their own toggle** (KH1 or Re:CoM spell effects); **Re:CoM's spell sounds are kept**; built
+      **after the M9 specials**, Fire first as the pilot.
 
 ## Known open design questions (ask the owner, don't guess)
 
