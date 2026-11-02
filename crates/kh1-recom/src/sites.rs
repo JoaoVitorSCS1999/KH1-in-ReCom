@@ -1606,6 +1606,30 @@ pub mod data {
     pub const VT_INIT_MAGIC: usize = 0x148;
 }
 
+/// Story skips at Combat = KH1 (`win::story_skip`, `crate::story_skip`,
+/// `docs/recom-story-skips.md`). Same rule as [`HOOKS`]. Checked (exe): no branch lands inside the
+/// moved bytes; the only other reference to the function is its `.pdata` entry.
+pub const STORY_SKIP_HOOKS: &[Site] = &[
+    // mov [rsp+8],rbx; push rdi; sub rsp,0x20 (10 bytes; the next instruction, `movzx edi,cx`,
+    // stays). Re:CoM's battle-entry request: script syscall 0xEE (`0x1401490D6`) passes a battle
+    // room; case 10 (`0x1401460D6`), the gimmicks and `0x140237020` pass 0, `0x1401CA9D4` 1030.
+    Site { name: "battle entry request (0x140236690)", rva: 0x0023_6690, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// Re:CoM functions the story skip calls (with the system variable getter / setter of earlier
+/// stages).
+pub const STORY_SKIP_CALLEES: &[Site] = &[
+    // push rsi; push rdi; push r12; push r13; push r14; sub rsp,0x30: the room change
+    // (kind, door, room) script syscall 0xF7 calls.
+    Site { name: "room change (0x1402360F0)", rva: 0x0023_60F0, expect: &[0x40, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x30] },
+    // mov rax,[rip+…] (the save block); movzx ecx,byte [rax+2]; movzx eax,cl; cmp cl,4: the
+    // saved door (syscall 0xF7's door −1).
+    Site { name: "saved door (0x140233AE0)", rva: 0x0023_3AE0, expect: &[0x48, 0x8B, 0x05, 0x29, 0x76, 0x64, 0x00, 0x0F, 0xB6, 0x48, 0x02, 0x0F, 0xB6, 0xC1, 0x80, 0xF9, 0x04] },
+    // mov r11d,r8d; mov r9d,edx; cmp ecx,2; jae: a system flag set (table, index, value), as
+    // script op 0x6E calls it.
+    Site { name: "system flag set (0x1401B1650)", rva: 0x001B_1650, expect: &[0x45, 0x8B, 0xD8, 0x44, 0x8B, 0xCA, 0x83, 0xF9, 0x02, 0x73, 0x57] },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -1684,6 +1708,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SPECIAL_HOOKS,
         SPECIAL_DATA,
         SPECIAL_CHECKED,
+        STORY_SKIP_HOOKS,
+        STORY_SKIP_CALLEES,
     ];
     LISTS
         .iter()
@@ -1783,7 +1809,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
@@ -2428,6 +2454,23 @@ mod tests {
         assert_eq!(r.expect.len(), 0x66);
         // The map's hook moves its first three whole instructions only.
         assert_eq!(MENU_SOUND_HOOKS[0].expect.len(), 13);
+    }
+
+    #[test]
+    fn story_skip_sites() {
+        for s in STORY_SKIP_HOOKS.iter().chain(STORY_SKIP_CALLEES) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        // Reused: the system variable get / set, Riku's story.
+        for rva in [0x001B_08C0u32, 0x001B_16C0, 0x001A_AAE0] {
+            assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
+        }
+        // The hook moves exactly mov [rsp+8],rbx; push rdi; sub rsp,0x20.
+        assert_eq!(STORY_SKIP_HOOKS[0].expect, [0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20]);
+        // The saved door reads the save block pointer 0x14087B110 (rip-relative at +0, 7 bytes).
+        let d = STORY_SKIP_CALLEES.iter().find(|s| s.rva == 0x0023_3AE0).unwrap();
+        let disp = i32::from_le_bytes(d.expect[3..7].try_into().unwrap()) as i64;
+        assert_eq!(0x1_4000_0000i64 + d.rva as i64 + 7 + disp, crate::keyblades::SAVE_PTR as i64);
     }
 
     #[test]

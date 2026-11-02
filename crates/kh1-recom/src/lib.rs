@@ -95,6 +95,7 @@ pub mod settings;
 pub mod shop;
 pub mod specials;
 pub mod sites;
+pub mod story_skip;
 pub mod trace;
 pub mod units;
 pub mod unlocks;
