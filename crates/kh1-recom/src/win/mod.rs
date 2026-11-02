@@ -23,6 +23,7 @@ mod models;
 mod movement;
 mod mp;
 mod mp_bar;
+mod revenge;
 mod shop;
 mod specials;
 mod stats;
@@ -249,6 +250,7 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     let sound_file = recom_bases(dirs).into_iter().map(|b| b.join(crate::menu_sounds::MANIFEST)).find(|p| p.is_file());
     install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref(), hud_file.as_deref(), sound_file.as_deref());
     install_battles(base);
+    install_revenge(base, s);
     install_story_skip(base);
     let th = &crate::sites::TRACE_HOOKS;
     let hooks = [
@@ -297,7 +299,8 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         hook::Hook { site: site("field swing init (0x1401F0F70)"), ours: attack::field_init as *const () as usize, original: &attack::ORIG_FIELD_INIT },
         hook::Hook { site: site("field swing exe (0x1401EAEB0)"), ours: attack::swing_exe as *const () as usize, original: &attack::ORIG_SWING_EXE },
         hook::Hook { site: site("attack pair dispatch (0x14016EAD0)"), ours: attack::pair_dispatch as *const () as usize, original: &attack::ORIG_PAIR },
-        hook::Hook { site: site("enemy hit handler (0x14017F7E0)"), ours: attack::enemy_hit as *const () as usize, original: &attack::ORIG_ENEMY_HIT },
+        // Boss revenge wraps the KH1 enemy-hit wrapper (`revenge::enemy_hit` calls `attack::enemy_hit`).
+        hook::Hook { site: site("enemy hit handler (0x14017F7E0)"), ours: revenge::enemy_hit as *const () as usize, original: &attack::ORIG_ENEMY_HIT },
         hook::Hook { site: site("player damage check (0x1401E6DE0)"), ours: attack::damage_check as *const () as usize, original: &attack::ORIG_DAMAGE_CHECK },
         hook::Hook { site: site("root motion step (0x14024DCA0)"), ours: attack::root_step as *const () as usize, original: &attack::ORIG_ROOT_STEP },
         hook::Hook { site: site("enemy attack hurt off (0x14017DA80)"), ours: attack::hurt_off as *const () as usize, original: &attack::ORIG_HURT_OFF },
@@ -526,6 +529,27 @@ fn install_battles(base: usize) {
         log("m6: no-deck wrappers in (revolver build 0x1401F43D0, hit drop 0x14017E190); the 16 deck and enemy-card HUD mask reads are switched at each battle start by the setting");
     } else {
         log("m6: no-deck not hooked; Sora keeps Re:CoM's deck in battle");
+    }
+}
+
+/// Boss revenge at Combat = KH1 (`revenge`, owner 2026-11-01): KH2's revenge value on Re:CoM's
+/// humanoid bosses. Two state-step hooks and the bosses' allocation sizes, all or nothing; the add
+/// is in the enemy-hit wrapper. `boss_revenge = off` leaves it all passing through.
+fn install_revenge(base: usize, s: &Settings) {
+    if !movement::installed() {
+        log("revenge: movement not hooked; bosses keep Re:CoM's rules");
+        return;
+    }
+    revenge::set_enabled(s.boss_revenge);
+    // SAFETY: reads of the mapped exe; the hook targets' and patch sites' bytes are checked inside.
+    if unsafe { revenge::install(base) } {
+        log(&format!(
+            "revenge: KH2's revenge value on {} humanoid bosses (boss_revenge = {}): counter in a 0x20-byte tail of each boss body (factory sizes raised), add in the enemy-hit wrapper, check in the flinch / blow-away steps 0x140184100 / 0x140182E50 at KH2's frame 20 (Hades 30) or the state's end",
+            crate::revenge::BOSSES.len(),
+            settings::switch_str(s.boss_revenge)
+        ));
+    } else {
+        log("revenge: not installed; bosses keep Re:CoM's rules (no revenge, Re:CoM's falloff)");
     }
 }
 

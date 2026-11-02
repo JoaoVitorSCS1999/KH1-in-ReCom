@@ -102,6 +102,26 @@ unsafe fn task(id: u32) -> usize {
     func::<TaskFn>(TASK_BY_ID)(id)
 }
 
+/// Boss revenge (`super::revenge`): whether this battle is a KH1 battle (Combat = KH1, Sora's
+/// story), and its number.
+pub(super) fn kh1_battle() -> bool {
+    KH1_BATTLE.load(Ordering::Acquire)
+}
+pub(super) fn battle_number() -> u32 {
+    BATTLE_NO.load(Ordering::Relaxed)
+}
+
+/// Boss revenge: whether an enemy may start an attack as P1 lets a card play start one (alive,
+/// CBTL there and not locked: `0x1401634B0`'s test). The transition itself is P1's
+/// (`b::cardless_flags`, `b::state_address`).
+pub(super) unsafe fn may_start_attack(e: usize) -> bool {
+    let c = task(b::TASK_CBTL);
+    if c == 0 || rd::<i32>(e + enemy::HP) <= 0 {
+        return false;
+    }
+    !Gate { lock: rd(c + cbtl::LOCK), gimmick: rd(c + cbtl::GIMMICK), duel: rd(c + cbtl::DUEL) }.locked()
+}
+
 unsafe fn class_name(obj: usize) -> String {
     if obj == 0 {
         return "none".into();

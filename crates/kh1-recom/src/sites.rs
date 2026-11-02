@@ -565,6 +565,65 @@ pub const M6_BOSS_HOOKS: &[Site] = &[
     Site { name: "Sora card duel init (0x140220C40)", rva: 0x0022_0C40, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x40] },
 ];
 
+/// Boss revenge (`crate::revenge`, `docs/recom-boss-revenge.md`): the steps of Re:CoM's flinch
+/// (state 11, vtable `+0x1F8` of every boss class) and blow-away (state 12, `+0x210`). Same rule
+/// as [`HOOKS`]. Checked (exe): the only direct reference to each start is a call / jmp to the
+/// start itself (`0x140428A64` jmp, the vtables, `.pdata`); no branch lands inside the moved
+/// bytes.
+pub const REVENGE_HOOKS: &[Site] = &[
+    // rex push rdi; sub rsp,0x40
+    Site { name: "enemy flinch step (0x140184100)", rva: 0x0018_4100, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x40] },
+    // rex push rbx; sub rsp,0x40
+    Site { name: "enemy blow-away step (0x140182E50)", rva: 0x0018_2E50, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x40] },
+];
+
+/// Boss revenge: the enemy factory `0x140188F40`'s `mov ecx, size` for each revenge boss body
+/// (`crate::revenge::BOSSES`), raised by the counter's 0x20-byte tail at install. Checked (exe:
+/// each is the size passed to the allocator `0x1404ACE54` right before the class's ctor).
+pub const REVENGE_ALLOC: &[Site] = &[
+    Site { name: "alloc CTutorialHood (0x140189517)", rva: 0x0018_9517, expect: &[0xB9, 0xE0, 0x0C, 0x00, 0x00] },
+    Site { name: "alloc CTutorialLeon (0x140189541)", rva: 0x0018_9541, expect: &[0xB9, 0x10, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossCloud (0x140189595)", rva: 0x0018_9595, expect: &[0xB9, 0x30, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossHades (0x1401895BF)", rva: 0x0018_95BF, expect: &[0xB9, 0x80, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossHook (0x140189613)", rva: 0x0018_9613, expect: &[0xB9, 0x90, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossVexen (0x14018963D)", rva: 0x0018_963D, expect: &[0xB9, 0x70, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossRiku (0x140189667)", rva: 0x0018_9667, expect: &[0xB9, 0x70, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossLarxene (0x140189691)", rva: 0x0018_9691, expect: &[0xB9, 0xA0, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossAxel (0x1401896BB)", rva: 0x0018_96BB, expect: &[0xB9, 0x70, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossMarluxia (0x140189A2D)", rva: 0x0018_9A2D, expect: &[0xB9, 0x50, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossMarluxia2 (0x14018995B)", rva: 0x0018_995B, expect: &[0xB9, 0xF0, 0x0D, 0x00, 0x00] },
+    Site { name: "alloc CBossMarluxia3 (0x1401899D9)", rva: 0x0018_99D9, expect: &[0xB9, 0x50, 0x0F, 0x00, 0x00] },
+];
+
+/// Boss revenge: each revenge boss class's state 11 step (vtable `+0x1F8`) and state 12 step
+/// (`+0x210`) are the two hooked functions, so the check sees every boss flinch. Checked (exe).
+pub const REVENGE_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CTutorialHood +0x1F8", rva: 0x0065_CD00, target: 0x0018_4100 },
+    PtrSite { name: "CTutorialLeon +0x1F8", rva: 0x0065_DFE0, target: 0x0018_4100 },
+    PtrSite { name: "CBossCloud +0x1F8", rva: 0x0066_0DA0, target: 0x0018_4100 },
+    PtrSite { name: "CBossHades +0x1F8", rva: 0x0066_2230, target: 0x0018_4100 },
+    PtrSite { name: "CBossHook +0x1F8", rva: 0x0066_B010, target: 0x0018_4100 },
+    PtrSite { name: "CBossVexen +0x1F8", rva: 0x0066_38A8, target: 0x0018_4100 },
+    PtrSite { name: "CBossRiku +0x1F8", rva: 0x0066_4E48, target: 0x0018_4100 },
+    PtrSite { name: "CBossLarxene +0x1F8", rva: 0x0066_6790, target: 0x0018_4100 },
+    PtrSite { name: "CBossAxel +0x1F8", rva: 0x0066_7ED0, target: 0x0018_4100 },
+    PtrSite { name: "CBossMarluxia +0x1F8", rva: 0x0067_ED58, target: 0x0018_4100 },
+    PtrSite { name: "CBossMarluxia2 +0x1F8", rva: 0x0067_B188, target: 0x0018_4100 },
+    PtrSite { name: "CBossMarluxia3 +0x1F8", rva: 0x0067_87B0, target: 0x0018_4100 },
+    PtrSite { name: "CTutorialHood +0x210", rva: 0x0065_CD18, target: 0x0018_2E50 },
+    PtrSite { name: "CTutorialLeon +0x210", rva: 0x0065_DFF8, target: 0x0018_2E50 },
+    PtrSite { name: "CBossCloud +0x210", rva: 0x0066_0DB8, target: 0x0018_2E50 },
+    PtrSite { name: "CBossHades +0x210", rva: 0x0066_2248, target: 0x0018_2E50 },
+    PtrSite { name: "CBossHook +0x210", rva: 0x0066_B028, target: 0x0018_2E50 },
+    PtrSite { name: "CBossVexen +0x210", rva: 0x0066_38C0, target: 0x0018_2E50 },
+    PtrSite { name: "CBossRiku +0x210", rva: 0x0066_4E60, target: 0x0018_2E50 },
+    PtrSite { name: "CBossLarxene +0x210", rva: 0x0066_67A8, target: 0x0018_2E50 },
+    PtrSite { name: "CBossAxel +0x210", rva: 0x0066_7EE8, target: 0x0018_2E50 },
+    PtrSite { name: "CBossMarluxia +0x210", rva: 0x0067_ED70, target: 0x0018_2E50 },
+    PtrSite { name: "CBossMarluxia2 +0x210", rva: 0x0067_B1A0, target: 0x0018_2E50 },
+    PtrSite { name: "CBossMarluxia3 +0x210", rva: 0x0067_87C8, target: 0x0018_2E50 },
+];
+
 /// Decision 35 (MP to full where Re:CoM fills HP). Moved bytes are whole, position-independent
 /// instructions.
 pub const MP_HOOKS: &[Site] = &[
@@ -1735,6 +1794,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         M6_ENEMY_UI_CALLS,
         M6_ENEMY_UI_CHECKED,
         M6_BOSS_HOOKS,
+        REVENGE_HOOKS,
+        REVENGE_ALLOC,
         MP_HOOKS,
         MP_CHECKED,
         MP_BAR_HOOKS,

@@ -226,6 +226,8 @@ pub fn twin_level(enemy: usize) -> Option<i32> {
 pub unsafe extern "win64" fn stat_init(enemy: usize, kind: i32, variant: i32, x: i32) -> u64 {
     let o: StatInitFn = orig(&ORIG_STAT_INIT);
     let r = o(enemy, kind, variant, x);
+    // Boss revenge: a boss body's counter tail is set up with its stats.
+    super::revenge::on_init(enemy);
     let mut g = match KH1_HP.lock() {
         Ok(g) => g,
         Err(_) => return r,
