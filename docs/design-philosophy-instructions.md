@@ -401,6 +401,11 @@ At KH1 setting:
       Then (2026-11-02, on 0.65.0's questions): **Hades untouchable only during his wind-up** (his spin
       can be hit; his fire-up still doesn't flinch); the revenge check at **KH2's frame 20 of the flinch**
       (Hades 30), or at the flinch's end if shorter (0.65.0 checked on its first frame: a bug).
+      **Cloud's revenge move: his homing charge** (state 4, `e106_053`, 2 charges above half HP, 4 below;
+      nearest KH2's Sonic Rave), instead of Omnislash.
+    - **Dodge roll (owner, 2026-11-02):** "make dodge roll work how it does in ReCoM, not KH1" — **the
+      whole roll** (Re:CoM's motion, speed, distance, timing and invincibility) at Combat = KH1. Supersedes
+      decision 17's KH1 roll frames; an ini key keeps KH1's roll selectable.
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
