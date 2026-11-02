@@ -927,4 +927,63 @@ mod tests {
         // KH1 moves by the speed, then decays it: 80 × 0.2231 / (1 − 0.8), less the tail.
         assert!((80.0..89.3).contains(&x), "{x}");
     }
+
+    /// A long fight (owner 2026-11-02: enemies froze until hit): Sora circling 2–7 m away, a hit
+    /// every 150–400 frames, each action and reaction holding the AI for its motion's length.
+    /// The AI must keep acting (an action, a motion of its own or a state change) at least every
+    /// 600 frames: a frozen AI emits nothing.
+    #[test]
+    fn a_long_fight_never_stalls() {
+        for seed in 0..12u32 {
+            let mut ai = Ai::new(consts(), frames(), seed, 0.0, true);
+            let mut rng = crate::rng::Kh1Rand::new(seed ^ 0x5EED);
+            let (mut pos, mut busy, mut last_action, mut next_hit) = (Vec3::ZERO, 0.0f32, 0usize, 200usize);
+            let mut worst = 0usize;
+            for f in 0..20_000usize {
+                let a = f as f32 / 600.0;
+                let r = 200.0 + 250.0 * (1.0 + (f as f32 / 1700.0).sin());
+                let sora = Vec3::new(a.sin() * r, 0.0, a.cos() * r);
+                let airborne = ai.body().airborne();
+                let w = World { step: 1.0, pos, target: Some(sora), grounded: !airborne, airborne, moved: 5.0, motion: None };
+                if f == next_hit {
+                    crate::enemy::Behaviour::on_hit(&ai, crate::enemy::HitNews::Damage);
+                    busy = 34.0;
+                    ai.body().held = false;
+                    next_hit = f + 150 + (rng.next_f32() * 250.0) as usize;
+                }
+                if busy > 0.0 {
+                    busy -= 1.0;
+                    if busy <= 0.0 {
+                        ai.body().held = false;
+                    }
+                } else {
+                    for c in ai.frame(w) {
+                        // Acting: an action, a motion of its own (a taunt, a sink, a rise), a state
+                        // change; not the per-frame facing, walk or height.
+                        if !matches!(c, Cmd::Yaw(_) | Cmd::Height(_) | Cmd::Motion { request: 1 | 2, .. }) {
+                            worst = worst.max(f - last_action);
+                            last_action = f;
+                        }
+                        match c {
+                            Cmd::Action { request, .. } => {
+                                busy = frames().iter().find(|x| x.0 == request).map_or(40.0, |x| x.1);
+                            }
+                            
+                            _ => {}
+                        }
+                    }
+                }
+                let c = ai.consts();
+                let steer = ai.take_steer();
+                let d = ai.body().step(1.0, pos.y, steer, &c);
+                pos += d;
+                if pos.y >= 0.0 && ai.body().falling() {
+                    pos.y = 0.0;
+                    ai.body().land();
+                }
+            }
+            worst = worst.max(20_000 - last_action);
+            assert!(worst < 600, "seed {seed}: {worst} frames without acting");
+        }
+    }
 }

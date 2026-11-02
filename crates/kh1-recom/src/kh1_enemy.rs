@@ -301,6 +301,84 @@ pub fn logged(c: &Cmd<u8>) -> bool {
     matches!(c, Cmd::Action { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
+/// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
+///
+/// A clip the asset step marks as looping (KH1's last pose equals its first: the Soldier's kick
+/// 200, its air kick 204) loops in Re:CoM too: its clock wraps back to 0 at the clip's end and
+/// never reaches KH1's length (owner 2026-11-02, "this soldier just decides to not attack": every
+/// kick 200 in the 0.68.0 log waited forever). A wrap is the end of the motion's first cycle, so
+/// it ends there as the KH1 length does. Assumption: KH1 ends an action at its motion's length
+/// whether or not the motion loops (KH1's Soldier kicks once and goes on).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ClipWatch {
+    /// The clock at the last read.
+    pub last: i32,
+    /// KH1 frames since the motion was played.
+    pub age: f32,
+    /// The clock wrapped since it was played.
+    pub wrapped: bool,
+}
+
+impl ClipWatch {
+    /// A motion was just played.
+    pub fn restart(&mut self) {
+        *self = ClipWatch::default();
+    }
+
+    /// One KH1 frame passed.
+    pub fn tick(&mut self, step: f32) {
+        self.age += step;
+    }
+
+    /// Whether the motion (KH1 length `frames`) has ended at clock `now`. A clock that went back
+    /// counts as a wrap only once half the motion has played (the first reads after a play may
+    /// still show the previous motion's clock: Assumption, the play's reset timing is not read).
+    pub fn ended(&mut self, now: i32, frames: f32) -> bool {
+        if now < self.last && self.age >= frames * 0.5 {
+            self.wrapped = true;
+        }
+        self.last = now;
+        self.wrapped || now >= crate::units::frames_to_units(frames)
+    }
+}
+
+/// The safety net for an action the behaviour waits on (KH1's script pauses while an action
+/// motion plays): no KH1 enemy may wait forever.
+pub mod watchdog {
+    /// An attack's Re:CoM attack state must begin within this many KH1 frames of the request.
+    pub const START_LIMIT: f32 = 10.0;
+    /// An action that plays this many KH1 frames past its motion's length is released.
+    pub const END_MARGIN: f32 = 30.0;
+
+    /// Why an action was released.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum Stuck {
+        /// Its motion never started (an attack: Re:CoM's attack state never began).
+        NeverStarted,
+        /// Its motion never reached its end.
+        NeverEnded,
+    }
+
+    /// `age`: KH1 frames since the request (`playing` false) or since its motion started
+    /// (`playing` true); `frames`: its motion's KH1 length.
+    pub fn check(playing: bool, age: f32, frames: f32) -> Option<Stuck> {
+        if !playing {
+            (age >= START_LIMIT).then_some(Stuck::NeverStarted)
+        } else {
+            (age >= frames + END_MARGIN).then_some(Stuck::NeverEnded)
+        }
+    }
+
+    /// The loud log line (`<class>: eNNN: action NNN never started/ended (…), released`).
+    pub fn line(class: &str, id: u32, request: u16, why: Stuck, detail: &str) -> String {
+        let w = match why {
+            Stuck::NeverStarted => "never started",
+            Stuck::NeverEnded => "never ended",
+        };
+        format!("{class}: e{id}: action {request} {w} ({detail}), released")
+    }
+}
+
 /// A new behaviour for a class (`seed`: its random stream; `yaw`: its facing, KH1's).
 pub fn make(class: usize, m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
     match class {
@@ -394,5 +472,39 @@ mod tests {
         assert_eq!(cmd_token(&Cmd::Action { request: 200, attack: Some(0), then: 203, blend: 8.0 }, CLASSES[0].attack_names, &n), "action 200 (claw) then 203");
         assert_eq!(cmd_token(&Cmd::State(1), CLASSES[0].attack_names, &n), "state engaged");
         assert!(logged(&Cmd::Held) && !logged(&Cmd::Yaw(0.0)));
+    }
+
+    #[test]
+    fn a_looping_clip_ends_at_its_wrap() {
+        // The Soldier's kick 200: 110 KH1 frames (5500 units), looped in Re:CoM.
+        let mut w = ClipWatch::default();
+        w.restart();
+        // The first read after the play still shows the last motion's clock: no wrap yet.
+        assert!(!w.ended(4000, 110.0));
+        w.tick(1.0);
+        assert!(!w.ended(50, 110.0), "a clock going back early is the play's reset");
+        let mut t = 50;
+        for _ in 0..107 {
+            w.tick(1.0);
+            t += 50;
+            assert!(!w.ended(t, 110.0));
+        }
+        // 5450 → the clip's end wraps to 0 before KH1's 5500.
+        w.tick(1.0);
+        assert!(w.ended(0, 110.0), "the wrap is the end");
+        assert!(w.ended(50, 110.0), "and stays ended");
+        // A clip that does not loop ends at KH1's length.
+        let mut w = ClipWatch::default();
+        assert!(!w.ended(5450, 110.0) && w.ended(5500, 110.0));
+    }
+
+    #[test]
+    fn the_watchdog_releases_stuck_actions() {
+        use watchdog::*;
+        assert_eq!(check(false, 9.0, 110.0), None);
+        assert_eq!(check(false, 10.0, 110.0), Some(Stuck::NeverStarted));
+        assert_eq!(check(true, 139.0, 110.0), None);
+        assert_eq!(check(true, 140.0, 110.0), Some(Stuck::NeverEnded));
+        assert_eq!(line("soldier", 336, 200, Stuck::NeverEnded, "clock 50 of 5500"), "soldier: e336: action 200 never ended (clock 50 of 5500), released");
     }
 }

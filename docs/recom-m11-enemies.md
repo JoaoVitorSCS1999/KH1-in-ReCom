@@ -82,6 +82,41 @@ New for M11:
 - Hurt parts from the manifest (any count): the contact point's nearest part bone (`react::nearest_part`;
   for two parts it is M10's rule).
 
+### Actions that never end (owner 2026-11-02, 0.68.0: "this soldier just decides to not attack")
+
+The AI is not polled while an action plays (KH1's script pauses while an action motion plays). Two host paths
+could leave that wait open forever; both are fixed, and a safety net now ends any wait the same way:
+
+- **A clip Re:CoM loops.** The asset step marks a clip as looping when KH1's last pose equals its first
+  (M10's rule). The Soldier's kick 200 (entry 37, 110 frames) and air kick 204 (entry 41) are marked
+  that way (Checked (files): the player's manifest). Re:CoM loops them, so the motion clock (`0x1401A47C0`)
+  wraps to 0 at the clip's end and never reaches KH1's 5500 units. Every kick 200 in the 0.68.0 log
+  waited forever (e336 at line 3966 until it was hit at 4727; e335 and e483 the same). The trace shows
+  e336 in Re:CoM state 2 with request 200 for 700 frames. Fix: `ClipWatch` treats a clock that goes back,
+  once half the motion has played, as the end of the motion. Assumption: KH1 ends an action at its
+  motion's length. The kick is a one-shot motion in KH1; our loop rule marked it, not KH1. The Shadow has
+  no looping action clip (its loops, 202 underground and 203 taunt, are plain motions).
+- **An attack state request overwritten in the appearance's last frame.** The behaviour runs in state 0's
+  step. When the rise ends and the first attack is asked for in the same frame (enter state 2: Re:CoM's next
+  state), state 0's step then called the default state `0x14017D6F0`. That overwrote the next state, so the
+  attack state never began. This is Shadow e213 in the second log: rise, `state engaged`, claw, then
+  nothing for 1400 lines until a hit. The same code existed in M10 (`win::shadow::appear_step`, Checked
+  (diff)): this one is not a refactor regression, just a rarer path. Fix: state 0 does not call the default
+  state while an attack is pending, and `tick` asks for a pending attack state again while Re:CoM's next
+  state is another.
+- **Safety net** (`kh1_enemy::watchdog`, every class): an attack whose state has not begun 10 KH1 frames
+  after the request, or an action still playing 30 frames past its motion's length, is released as if its
+  motion had finished. Its queued motion plays and the AI goes on. An attack state with no KH1 action
+  leaves through Re:CoM's attack end. Each release is logged past the line cap:
+  `<class>: eNNN: action NNN never started/ended (Re:CoM state, motion, clock …), released`.
+- Tests: `a_looping_clip_ends_at_its_wrap`, `the_watchdog_releases_stuck_actions`, and per enemy
+  `a_long_fight_never_stalls` (20 000 frames, 12 seeds, Sora circling 2–7 m away, a hit every 150–400
+  frames: the AI acts at least every 600 frames).
+- Diagnostic for the sunk Shadow that sometimes shows standing mid-travel (owner 2026-11-02). While unhittable,
+  every motion change (`plays N (slot S) after M while unhittable`) and every Re:CoM state change
+  (`Re:CoM state A -> B while unhittable`) is logged. The 0.68.0 log has no command of ours between
+  `underground true` and `underground false`, so the cause is not found yet; an F9 trace of it is needed.
+
 ## The Soldier
 
 ### KH1's side. Checked (files: `ex_2010.bd` disassembled; decomp: the VM `0x1402CC620` and syscalls)
