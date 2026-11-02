@@ -439,6 +439,9 @@ At KH1 setting:
       left out (would make a battle unwinnable).
       Gargoyle (2026-11-02): its launched object (attack 219) is **one of Re:CoM's own bullets, moved and
       timed by KH1's numbers**.
+      Darkball (2026-11-02, on 0.71.0's questions): the drop on Re:CoM's bite power; warp smoke / trail
+      **later with the effects milestone (M13)**; stays lockable while invisible; KH1's element-based
+      reactions (Gravity stagger) **left out** for now.
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
