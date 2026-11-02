@@ -1878,6 +1878,51 @@ pub(super) unsafe fn guard_after_swing(g: &mut SwingGuard, r: i32, kind: u32, pr
     });
 }
 
+/// Re:CoM's actor popup (`CCommonGauge`, `0x14020C9A0(handle, kind)`) and its kind 3, "Guard" (the
+/// hit handler's guarded branch; Checked (decomp)).
+const POPUP: u32 = 0x0020_C9A0;
+const POPUP_GUARD: i32 = 3;
+type PopupFn = unsafe extern "win64" fn(i32, i32);
+
+/// The enemy hit handler's guard popup (`sites::M11_GUARD_POPUP_CALLS`, retargeted at install):
+/// over one of our KH1 enemies Re:CoM's "Guard" popup is skipped (owner 2026-11-02: "hide Re:CoM's
+/// "Guard" popup over KH1 enemies"); the spark, the clink and the guard event still run. Any other
+/// actor or kind: Re:CoM's popup, as its call was.
+pub unsafe extern "win64" fn guard_popup(handle: i32, kind: i32) {
+    if kind == POPUP_GUARD && handle > 0 {
+        let en = func::<HandleFn>(f::HANDLE_OBJ)(handle as u32);
+        if let Some(k) = (en != 0).then(|| ours(en)).flatten() {
+            line(k, || format!("e{}: Re:CoM's Guard popup skipped", rd::<u32>(en + e::ID)));
+            return;
+        }
+    }
+    func::<PopupFn>(POPUP)(handle, kind)
+}
+
+/// Retargets the hit handler's guard popup call to [`guard_popup`] (once, after the classes are in;
+/// its context checked first). Without it Re:CoM's popup shows over KH1 enemies too (logged).
+pub unsafe fn install_guard_popup(bs: usize) {
+    if !any_installed() {
+        return;
+    }
+    for c in crate::sites::M11_GUARD_POPUP_CHECKED {
+        if std::slice::from_raw_parts((bs + c.rva as usize) as *const u8, c.expect.len()) != c.expect {
+            log(&format!("kh1 enemies: {} is not as expected: Re:CoM's Guard popup stays over KH1 enemies", c.name));
+            return;
+        }
+    }
+    let s = &crate::sites::M11_GUARD_POPUP_CALLS[0];
+    let at = bs + s.rva as usize;
+    let call = super::hook::place_near(at, &crate::hookplan::abs_jmp(guard_popup as *const () as u64)).and_then(|stub| crate::hookplan::call_rel32(at as u64, stub as u64).map(|c| (stub, c)));
+    let Some((stub, call)) = call else {
+        log("kh1 enemies: no stub within reach of the guard popup call: Re:CoM's Guard popup stays over KH1 enemies");
+        return;
+    };
+    if super::hook::patch(at, s.expect, &call, s.name) {
+        log(&format!("kh1 enemies: {} retargeted through {stub:#x}: no Re:CoM Guard popup over KH1 enemies", s.name));
+    }
+}
+
 /// The guard event (vtable `+0x3D8`, Re:CoM's hit handler on a guarded hit): a KH1 enemy whose guard
 /// row is on plays KH1's clash (its row's recoil through our state 11; its script hears the clash);
 /// its row ends (KH1: a clashed row meets nothing more, `+4 & 0x30`). Anything else: Re:CoM's slot.

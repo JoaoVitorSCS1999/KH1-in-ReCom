@@ -2382,6 +2382,21 @@ pub const BANDIT_HOOKS: &[Site] = &[
 /// framework's 0x20-byte tail. Checked (exe).
 pub const BANDIT_ALLOC: &[Site] = &[Site { name: "alloc CEnemyBandit (0x140189151)", rva: 0x0018_9151, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
 
+/// M11, the shared enemy guard (owner 2026-11-02: "hide Re:CoM's "Guard" popup over KH1 enemies"):
+/// the enemy hit handler's (`0x14017F7E0`) guarded branch (`+0xF8 → +8 & 0x18`) calls the guard spark
+/// `0x140182260`, then `mov ecx,[rsi+0x20]; lea edx,[rbp+3]; call 0x14020C9A0` (`CCommonGauge`'s popup
+/// 3, "Guard", over the enemy's handle), then `call [rax+0x3D8]` (the guard event). The call is
+/// retargeted once at install, through a stub near it, to `win::kh1_enemy::guard_popup`, which skips
+/// it for our KH1 enemies. Bytes read from the Steam exe; no branch lands inside the call (exe scan).
+pub const M11_GUARD_POPUP_CALLS: &[Site] = &[Site { name: "enemy hit guard popup 3 (0x14017FCE7)", rva: 0x0017_FCE7, expect: &[0xE8, 0xB4, 0xCC, 0x08, 0x00] }];
+
+/// The call's context: the spark call and the popup's handle / kind loads before it, the guard
+/// event's call after it.
+pub const M11_GUARD_POPUP_CHECKED: &[Site] = &[
+    Site { name: "guard spark call, popup handle / kind (0x14017FCDC)", rva: 0x0017_FCDC, expect: &[0xE8, 0x7F, 0x25, 0x00, 0x00, 0x8B, 0x4E, 0x20, 0x8D, 0x55, 0x03] },
+    Site { name: "guard event call after the popup (0x14017FCEC)", rva: 0x0017_FCEC, expect: &[0x48, 0x8B, 0x06, 0x48, 0x8B, 0xCE, 0xFF, 0x90, 0xD8, 0x03, 0x00, 0x00] },
+];
+
 /// M11 ground melee: `CEnemyBandit`'s vtable slots the copy keeps or replaces, checked against
 /// Re:CoM's functions before the copy is made (Checked (exe), relocated pointers: states 0 / 11 /
 /// 12 / 30 are `CBattleEnemy`'s, 1..3 the Bandit's own).
@@ -2651,6 +2666,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         DARKBALL_ALLOC,
         BANDIT_HOOKS,
         BANDIT_ALLOC,
+        M11_GUARD_POPUP_CALLS,
+        M11_GUARD_POPUP_CHECKED,
         THROWN_CALLEES,
         AIRPIRATE_HOOKS,
         AIRPIRATE_ALLOC,
@@ -3709,5 +3726,16 @@ mod tests {
             let row = SHOP_CHECKED.iter().find(|s| s.rva == 0x0068_E0B0 + kind as u32 * 16).unwrap();
             assert_eq!(row.expect[0], 0x44, "{}", row.name);
         }
+    }
+
+    /// The guard popup call targets Re:CoM's popup `0x14020C9A0` and sits between its context.
+    #[test]
+    fn m11_guard_popup_call() {
+        let c = &M11_GUARD_POPUP_CALLS[0];
+        assert_eq!(crate::hookplan::call_target(0x1_4000_0000 + c.rva as u64, c.expect), Some(0x1_4020_C9A0));
+        let (a, b) = (&M11_GUARD_POPUP_CHECKED[0], &M11_GUARD_POPUP_CHECKED[1]);
+        assert_eq!(a.rva + a.expect.len() as u32, c.rva);
+        assert_eq!(c.rva + 5, b.rva);
+        assert_eq!(&a.expect[5..], &[0x8B, 0x4E, 0x20, 0x8D, 0x55, 0x03], "ecx = [rsi+0x20] (the handle), edx = 3");
     }
 }
