@@ -206,6 +206,8 @@ pub trait Behaviour {
     fn risen(&self) -> bool;
     /// The appearance was Re:CoM's own: no KH1 appearance.
     fn skip_rise(&self);
+    /// The enemy's HP / max HP after a hit (Re:CoM's HP, decision M10), for scripts that read it.
+    fn set_hp_ratio(&self, _r: f32) {}
     /// The state names for the log (`Cmd::State`).
     fn state_name(&self, s: u8) -> &'static str;
 }
