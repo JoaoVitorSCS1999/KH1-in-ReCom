@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 126: KH1 enemies: Re:CoM's flinch for a guarded attack with no KH1 recoil; KH1's wander centre, version 0.68.2 (2026-11-01)
+
+- Asks (owner, 2026-11-02, on 0.68.0's questions): guarded attacks whose KH1 recoil the model lacks play "Re:CoM's
+  flinch"; the Shadow's wander "Fix it to KH1".
+- Every KH1 enemy class: a Guard block of an attack with no recoil motion makes the next state 11 Re:CoM's own flinch
+  (its begin / step) until the next state 1. KH1's wander picks its points around the enemy's current place
+  (was its home for the Shadow).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 125: Fix: KH1 Soldiers and Shadows freezing; a watchdog for every KH1 enemy, version 0.68.1 (2026-11-01)
 
 - Owner (2026-11-02, video): "this soldier just decides to not attack and stay in one position"; "it seems the shadows
