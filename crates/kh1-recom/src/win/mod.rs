@@ -615,6 +615,9 @@ fn install_enemies(base: usize, bases: &[PathBuf]) {
             log(&format!("{}: ctor not hooked; Re:CoM's behaviour kept", c.name));
         }
     }
+    // The shared enemy guard: no Re:CoM "Guard" popup over KH1 enemies (owner 2026-11-02).
+    // SAFETY: the call's context and bytes are checked inside, before anything is written.
+    unsafe { kh1_enemy::install_guard_popup(base) };
 }
 
 /// Boss revenge at Combat = KH1 (`revenge`, owner 2026-11-01): KH2's revenge value on Re:CoM's

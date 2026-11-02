@@ -278,7 +278,8 @@ through Re:CoM's own body guard, the one Sora's Guard already uses.
 
 - Re:CoM's hit apply `0x14016F1C0` guards a body (result 2) when the body's `CCollBody +0x9C` has bit value 1, the
   attack's element is in `+0x8C`, and the attacker is within `+0xB0` (half angle) of the body's facing. It then
-  sets `+0x9C |= 0x20`, and the enemy hit handler plays Re:CoM's guard spark, the "Guard" popup (kind 3) and calls
+  sets `+0x9C |= 0x20`, and the enemy hit handler plays Re:CoM's guard spark, the "Guard" popup (kind 3; skipped for
+  ours, below) and calls
   vtable `+0x3D8` (`CBattleEnemy`'s is `ret 0`, `0x140181600`). Result 1 / 2 also mark `procAttackCollision +0x644`.
   The flip bit (value 2, result 3) is not used: it makes Re:CoM run its own Sora flip action 0xD instead of KH1's
   recoil.
@@ -306,7 +307,14 @@ wrapper's check only when a KH1 swing meets a body.
   (the owner chose Re:CoM's body flag). Owner question below.
 - Angle: equal for cones without a turn (`turn` = 0; KH1's cos ≥ `c` = Re:CoM's ±acos(`c`)). A turned cone has no
   Re:CoM field: refused with a log line (`guard row … not built`). None of the Bandit's.
-- Re:CoM's "Guard" popup shows over the enemy (its art: Assumption); KH1 shows none.
+- Re:CoM's "Guard" popup: hidden over KH1 enemies (owner 2026-11-02, on 0.75.2: "hide Re:CoM's "Guard" popup over
+  KH1 enemies"). The hit handler's guarded branch calls `0x14020C9A0(handle, 3)` at `0x14017FCE7` (`mov ecx,
+  [rsi+0x20]; lea edx,[rbp+3]; call`), between the guard spark and the `+0x3D8` guard event. Checked (decomp + exe).
+  That call is retargeted once at install, through a 14-byte stub near it, to `guard_popup`, which skips kind 3
+  when the handle's object is one of ours. Everything else calls Re:CoM's popup as before (Re:CoM's enemies,
+  Sora's popups, the other kinds). The spark, the clink and the guard event are unchanged. Sites
+  `M11_GUARD_POPUP_CALLS` / `_CHECKED`; no branch lands inside the call (exe scan). Nothing runs per frame.
+  Logged as `<class>: eNNN: Re:CoM's Guard popup skipped`.
 - Elements: the guard keeps out the physical element only; KH1's type rule decides for Sora's swings. Our spells
   carry Re:CoM's spell attributes (KH1's types 5 / 6 meet no type-2 row, so they land as in KH1). Assumption:
   Re:CoM's other physical attacks (a turned-back shot, a summon) count as KH1's type 0.
