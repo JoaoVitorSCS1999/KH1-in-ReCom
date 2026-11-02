@@ -11,6 +11,28 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 119: M10: the KH1 Shadow (AI, attacks, reactions, motions) on Re:CoM's own enemy states, Re:CoM's stats, version 0.67.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "lets move on to doing phase 4, except, i only want the AI, attacks, reactions and motions
+  from KH1 equivalent enemies, everything else (emphasis on stats) stay the same as they are in RECoM"; M10 choices in
+  `design-philosophy-instructions.md` (native states, `enemy_ai` default kh1, battle only).
+- KH1 (Checked (files + decomp)): the Shadow's AI script `ex_2020.bd` (`xa_ex_2020.mdls` part 5, VM `0x1402CC620`,
+  pauses while an action motion plays `0x140297870`); attack rows in the script (claw / swipe / leap claw, 35 cm);
+  reactions `0x1402B9230` / `0x1402B8B90` / `0x1402B77D0` / `0x1402B8530` / clash `0x1402B9140`.
+- Built:
+  - `kh1-core` `shadow.rs`: the Shadow's behaviour and reactions (numbers as data); the Dummy's kind-3 flinch fixed.
+  - Asset step: `ENEMY/0001/EN0001.ANN` (KH1 clips at slot 100 + entry; Re:CoM's 76 kept), `.ASD` (4 new attack
+    records with KH1's hit windows), `.SES` (Re:CoM's Shadow sounds on the new clips), `kh1-shadow.json` (the
+    constants read from the player's `ex_2020.bd` / `btltbl.bin`).
+  - DLL: ctor hook `0x140192770` and factory size `0x140188FAD` 0xCE0 → 0xD00; battle Shadows get a vtable copy whose
+    states 0, 1, 2–4, 11, 12, 30 run the KH1 Shadow, think `+0x3D0` a no-op; Re:CoM's motion play, attack records,
+    damage, defeat, prizes, EXP, stats; KH1's clash recoil on a Guard block. ini `enemy_ai = kh1 | recom` (kh1).
+  - `kh1-trace`: an enemies CSV per recording (for the owner's KH1 Shadow trace).
+- Not built: the first rise's alpha fade (no Re:CoM model alpha field found).
+- Assumptions in `docs/recom-m10-shadow.md`. Checked: tests, Windows build, 693 sites. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 118: Silent human-boss item-card page switch at Combat = KH1, version 0.66.1 (2026-11-01)
 
 - Ask (owner, 2026-11-02, on 0.65.2's questions): "1 keep it silent" (first deal), "2 silence it" (page switch).
