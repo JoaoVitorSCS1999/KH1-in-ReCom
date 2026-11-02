@@ -166,6 +166,17 @@ mod tests {
         assert_eq!(s.clash(5, 30), None);
     }
 
+    /// The Bandit's thrown blade (its row `0x1CC`: type 0, priority 0) met by Sora's swing (type 0,
+    /// the Kingdom Key's 30): Sora's side gets nothing (`b`'s priority 0), the blade's side the clash
+    /// (bit 0x10; a projectile turns instead of taking a record), which its child script hears as a
+    /// repel (`ex_2090_00.bd` `0x1A0`: `+4 & 0x30`).
+    #[test]
+    fn a_swing_knocks_the_thrown_blade_away() {
+        assert!(meets(0, 0));
+        assert_eq!(resolve(0, 30, 0), Side::None);
+        assert_eq!(resolve(0, 0, 30), Side::Clash { kind: 6, diff: -30 });
+    }
+
     #[test]
     fn windows_and_cone() {
         let s = stance();

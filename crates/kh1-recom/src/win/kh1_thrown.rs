@@ -21,6 +21,17 @@
 //!   the enemies' side, its velocity reverses); from then on Re:CoM's own homing takes it back at the
 //!   thrower (its homing target `+0x2F4`, 3° a frame) and our exe only passes on.
 //!
+//! - **Swung at** (owner 2026-11-02, on 0.75.2: "Sora's swings can knock the thrown scimitar away"):
+//!   [`swing_at_blades`], from the swing's pair test (`win::attack::pair_dispatch`, while Sora's
+//!   KH1 swing is live): its spheres against each flying blade's own collision shape through Re:CoM's
+//!   overlap tests. KH1 (`0x1402B4A20` → `0x1402B4BC0`, Checked (decomp)): the blade's row `0x1CC`
+//!   has priority 0, so Sora's side gets nothing (no record: `b`'s priority 0) and the blade's gets
+//!   clash bit 0x10 (owner turned to the swinger); its child script (`ex_2090_00.bd` `0x1A0..0x2D0`,
+//!   Checked (files)) then turns back with a random tilt, fades over 60 frames and slides on (× 0.9 a
+//!   frame) for 60 frames without moving its attack again, and ends. Here: [`Thrown::repel`], the
+//!   bullet's attack off (Re:CoM's own off), Re:CoM's guard spark at the contact, the slide on our
+//!   flight step, then Re:CoM's end.
+//!
 //! Runs once a frame per flying blade (at most [`MAX`]); nothing otherwise.
 
 use super::magic::{rt, Desc, DescInitFn, FactoryFn, ManagerFn, MoverFn, PlFn, DESC_INIT, FACTORY, HOMING_THUNK, SHOT_MANAGER, SHOT_MOVER};
@@ -28,9 +39,10 @@ use super::movement::{func, rd, rd_vec, wr};
 use super::{base, log, va};
 use crate::guard::bullet as gb;
 use crate::kh1_enemy::Manifest;
-use kh1_core::enemy::thrown::{Numbers, Thrown};
+use kh1_core::enemy::thrown::{Numbers, Phase, Thrown};
+use kh1_core::rng::Kh1Rand;
 use kh1_core::Vec3;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 
 /// Re:CoM's functions (bytes checked: `sites::THROWN_CALLEES`, `sites::MAGIC_CALLEES`).
@@ -76,6 +88,11 @@ struct Blade {
 }
 
 static BLADES: Mutex<Vec<Blade>> = Mutex::new(Vec::new());
+/// A blade may be flying (set at a throw, cleared when none is left): the swing test's only cost
+/// otherwise.
+static FLYING: AtomicBool = AtomicBool::new(false);
+/// The repel's random draws (KH1's `sys 25`; Assumption: a stream of our own, seeded once).
+static RNG: Mutex<Option<Kh1Rand>> = Mutex::new(None);
 static LINES: AtomicU32 = AtomicU32::new(60);
 
 fn line(s: impl FnOnce() -> String) {
@@ -177,6 +194,7 @@ pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32
             g.remove(0);
         }
         g.push(Blade { id: bid, shooter, flight, turned: false });
+        FLYING.store(true, Ordering::Relaxed);
     }
     wr(bullet + rt::STATE_EXE, blade_exe as *const () as usize);
     line(|| format!("{class} e{shooter}: throws its blade: shot {bid} at ({:.2},{:.2},{:.2}) yaw {yaw:.2}, AP {ap} kind {kind_out} attribute {attr} (Re:CoM attack id {id}), radius {:.2} m, life {} frames", at.x, at.y, at.z, c("blade_radius") * 0.01, flight.n.life));
@@ -224,6 +242,9 @@ pub unsafe extern "win64" fn blade_exe(bullet: usize) {
             }
             if end {
                 g.retain(|b| b.id != id);
+                if g.is_empty() {
+                    FLYING.store(false, Ordering::Relaxed);
+                }
             }
         }
         if end {
@@ -241,6 +262,54 @@ pub unsafe extern "win64" fn blade_exe(bullet: usize) {
 pub(super) fn forget() {
     if let Ok(mut g) = BLADES.lock() {
         g.clear();
+    }
+    FLYING.store(false, Ordering::Relaxed);
+}
+
+/// Sora's live KH1 swing against the flying blades (`meets(shape)`: the swing's spheres against a
+/// Re:CoM collision shape, `win::attack::pair_dispatch`). A blade it meets is knocked away as KH1's
+/// child script does on its clash bit (module doc): turned back with KH1's random tilt, its attack
+/// off, sliding 60 frames at × 0.9, then ended. Blades Sora's Guard turned back are left to Re:CoM.
+pub(super) unsafe fn swing_at_blades(meets: impl Fn(usize) -> bool) {
+    if !FLYING.load(Ordering::Relaxed) {
+        return;
+    }
+    let Ok(mut g) = BLADES.try_lock() else { return };
+    let b0 = base();
+    for b in g.iter_mut().filter(|b| !b.turned && b.flight.phase == Phase::Flying) {
+        let bullet = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(b.id);
+        // Still our blade in flight (the handle may have been reused after Re:CoM ended it).
+        if bullet == 0 || rd::<usize>(bullet) != va(b0, gb::HOMING_VTABLE) || rd::<usize>(bullet + rt::STATE_EXE) != blade_exe as *const () as usize || rd::<i32>(bullet + rt::LIFE) <= 0 {
+            continue;
+        }
+        let coll: usize = rd(bullet + gb::COLL);
+        let shape: usize = if coll != 0 { rd(coll + crate::guard::coll::SHAPE) } else { 0 };
+        if shape == 0 || !meets(shape) {
+            continue;
+        }
+        let r = {
+            let mut rng = RNG.lock().ok();
+            let r = rng.as_mut().map(|o| o.get_or_insert_with(|| Kh1Rand::new(0x2090_0001)));
+            match r {
+                Some(r) => [r.next_f32(), r.next_f32(), r.next_f32()],
+                None => [0.0, 0.5, 0.5],
+            }
+        };
+        b.flight.repel(r);
+        super::magic::hold_off(bullet);
+        // KH1's slide restarts its clock (`hp[0x50] = 0`): Re:CoM's life must outlast it (our step
+        // ends it after the slide).
+        let slide = crate::units::frames_to_units(b.flight.n.slide + 2.0);
+        if rd::<i32>(bullet + rt::LIFE) < slide {
+            wr(bullet + rt::LIFE, slide);
+        }
+        let mover: usize = rd(bullet + gb::MOVER);
+        if mover != 0 {
+            let p = rd_vec(mover + rt::POSITION);
+            super::attack::spark_at([p.x, p.y, p.z, 1.0]);
+        }
+        let (id, d) = (b.id, b.flight.dir);
+        line(|| format!("blade {id}: Sora's swing knocked it away: back along ({:.2},{:.2},{:.2}), its attack off, a 60-frame slide (KH1's clash)", d.x, d.y, d.z));
     }
 }
 
