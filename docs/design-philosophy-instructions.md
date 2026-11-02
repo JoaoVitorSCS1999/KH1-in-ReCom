@@ -408,6 +408,8 @@ At KH1 setting:
       decision 17's KH1 roll frames; an ini key keeps KH1's roll selectable.
     - **Enemy card sounds (owner, 2026-11-02):** "you cant hear enemies stocking cards or refilling their
       deck": at Combat = KH1, the sounds of enemies stocking cards and reloading their deck are silent.
+      Then (on 0.65.2's questions): the enemies' first deal at battle start **stays silent**; a human
+      boss's item-card page switch (sound 3) is **silenced too**.
     - **Phase 4, KH1 enemies (owner, 2026-11-02):** "lets move on to doing phase 4, except, i only want
       the AI, attacks, reactions and motions from KH1 equivalent enemies, everything else (emphasis on
       stats) stay the same as they are in RECoM". KH1-equivalent enemies take **KH1's AI, attacks
