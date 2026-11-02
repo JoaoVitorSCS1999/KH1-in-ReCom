@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 104: Sonic Blade: Re:CoM's start tint, version 0.58.1 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "Add Re:CoM's tint" (as base Re:CoM's Sonic Blade).
+- At our Sonic Blade's start, before the `limit1` effect: `0x1401F7D80(player, 0x1407C5D50, 20.0, 0)`, as Re:CoM's
+  SONICRAVE start (`0x140218E05`; Checked (decomp + disasm)). It sets a flag Re:CoM's end action `0x1401F6660`
+  (already our special's end) reads to fade back over 20.0.
+- Checked: tests, Windows build, sites. Not checked: in game.
+
+---
+
 ## Stage 103: Damage setting: Re:CoM damage per equipped Keyblade and Re:CoM enemy HP (default), version 0.58.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "depending on which keyblade sora has equipped, it does recom's damage for the
