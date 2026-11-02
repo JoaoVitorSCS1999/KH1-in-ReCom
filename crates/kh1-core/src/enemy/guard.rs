@@ -85,6 +85,10 @@ pub struct GuardRow {
     pub turn: f32,
     pub cos: f32,
     pub windows: Vec<(u16, Vec<(f32, f32)>)>,
+    /// How many KH1 rows it stands for (1; the Search Ghost's burst: 4, its hands at both strikes, made
+    /// with the same request and the same clash numbers: the asset step's merged rows). KH1 marks a row
+    /// that met an attack as done (`+4 |= 0x10`); the others go on.
+    pub rows: u8,
 }
 
 impl GuardRow {
@@ -131,7 +135,7 @@ mod tests {
     fn stance() -> GuardRow {
         // The Bandit's block stance row `0x15C` (the player's `ex_2090.bd`): type 2, priority 30,
         // recoil 232, cone 0 / 0 (the front half), slot 0 on 230 [0, 12), 231 [0, 60), 233 [0, 10).
-        GuardRow { name: "stance".into(), clash_type: 2, priority: 30, recoil: 232, turn: 0.0, cos: 0.0, windows: vec![(230, vec![(0.0, 12.0)]), (231, vec![(0.0, 60.0)]), (233, vec![(0.0, 10.0)])] }
+        GuardRow { name: "stance".into(), clash_type: 2, priority: 30, recoil: 232, turn: 0.0, cos: 0.0, windows: vec![(230, vec![(0.0, 12.0)]), (231, vec![(0.0, 60.0)]), (233, vec![(0.0, 10.0)])], rows: 1 }
     }
 
     #[test]
@@ -175,6 +179,21 @@ mod tests {
         assert!(meets(0, 0));
         assert_eq!(resolve(0, 30, 0), Side::None);
         assert_eq!(resolve(0, 0, 30), Side::Clash { kind: 6, diff: -30 });
+    }
+
+    /// The Search Ghost's burst rows (the player's `ex_2230.bd`: type 1, priority 40, cone 0 / 1.0): above the
+    /// Kingdom Key's 30 they repel (Sora kind 6, 10 under); their cos 1.0 passes only an attacker exactly along
+    /// the facing at the same height: never for a Ghost above or beside Sora.
+    #[test]
+    fn the_search_ghost_burst_rows() {
+        let b = GuardRow { name: "burst".into(), clash_type: 1, priority: 40, recoil: 205, turn: 0.0, cos: 1.0, windows: vec![(204, vec![(36.0, 48.0), (108.0, 118.0)])], rows: 4 };
+        assert_eq!(b.clash(0, 30), Some((Side::Clash { kind: 6, diff: -10 }, Side::Repels)));
+        assert_eq!(b.clash(0, 40), Some((Side::Clash { kind: 6, diff: 0 }, Side::Clash { kind: 6, diff: 0 })));
+        assert_eq!(b.clash(0, 60).map(|c| c.1), Some(Side::Clash { kind: 6, diff: -20 }));
+        assert!(!b.front(0.0, Vec3::new(1.0, 0.0, 100.0)) && !b.front(0.0, Vec3::new(0.0, -50.0, 400.0)) && !b.front(0.0, Vec3::new(0.0, 0.0, -100.0)));
+        assert!(b.front(0.0, Vec3::new(0.0, 0.0, 100.0)), "exactly ahead, level");
+        assert!(b.live(204, 36.0) && !b.live(204, 48.0) && b.live(204, 117.0) && !b.live(204, 60.0));
+        assert_eq!(b.half_angle(), Some(0.0));
     }
 
     #[test]

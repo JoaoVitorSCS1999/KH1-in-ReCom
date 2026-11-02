@@ -573,6 +573,7 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     consts.extend(bone_points(spec.name, &inp.mdls, &ms, &conv, &clips)?);
     consts.extend(child_consts(spec.name, &inp.mdls)?);
     consts.extend(sight_bones(spec.name, &inp.mdls, &conv)?);
+    consts.extend(reward_consts(spec.name, script)?);
     // The attack rows → ASD records.
     let codes = bone_codes(&inp.mdls)?;
     let mut rows: Vec<(usize, AttackRow, u16)> = Vec::new();
@@ -642,8 +643,14 @@ fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], a
             .iter()
             .map(|g| {
                 let w: Vec<String> = g.windows.iter().map(|(r, on)| format!("{{\"request\": {r}, \"on\": [{}]}}", on.iter().map(|(a, b)| format!("[{}, {}]", fmt_f(*a), fmt_f(*b))).collect::<Vec<_>>().join(", "))).collect();
+                // Rows acting with it (the Search Ghost's burst): listed with their slots; none for the Bandit's.
+                let also = if g.also.is_empty() {
+                    String::new()
+                } else {
+                    format!("\"also\": [{}], \"slots\": [{}], ", g.also.iter().map(|a| format!("\"{a:#x}\"")).collect::<Vec<_>>().join(", "), g.slots.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", "))
+                };
                 format!(
-                    "    {{\"name\": \"{}\", \"row\": \"{:#x}\", \"type\": {}, \"priority\": {}, \"recoil\": {}, \"slot\": {}, \"turn\": {}, \"cos\": {}, \"windows\": [{}]}}",
+                    "    {{\"name\": \"{}\", \"row\": \"{:#x}\", {also}\"type\": {}, \"priority\": {}, \"recoil\": {}, \"slot\": {}, \"turn\": {}, \"cos\": {}, \"windows\": [{}]}}",
                     g.name,
                     g.row,
                     g.clash_type,
@@ -680,6 +687,10 @@ pub struct GuardSpec {
     pub name: &'static str,
     /// The row's script offset.
     pub row: usize,
+    /// Rows made with it that differ only in their sphere (bone, radius) and HIT slot (the Search Ghost's
+    /// burst: both hands at both strikes). Re:CoM's body guard is the whole body, so they act as one row,
+    /// on while any of their slots is on: their clash numbers must equal `row`'s.
+    pub also: &'static [usize],
     /// The requests it is made with.
     pub requests: &'static [u16],
 }
@@ -687,9 +698,13 @@ pub struct GuardSpec {
 /// Every built enemy's guard rows, in its behaviour's order (`kh1_core::bandit::Guard::ALL`).
 /// Checked (files): the Bandit's `ex_2090.bd` makes `0xEC` at `0x1ED6` / `0x1F6E` / `0x2188` (with
 /// 210, 211, 212) and `0x15C` at `0x408E` / `0x40CC` / `0x4186` (230, 231, 233).
+///
+/// The Search Ghost's burst (`ex_2230.bd` `0x128E`): `0x38C` / `0x3FC` with hit bit A (`0x12D4` / `0x12E4`)
+/// and `0x46C` / `0x4DC` with hit bit B (`0x131A` / `0x132A`), all made with 204. Checked (files).
 pub const GUARDS: &[GuardSpec] = &[
-    GuardSpec { enemy: "bandit", name: "spin", row: 0xEC, requests: &[210, 211, 212] },
-    GuardSpec { enemy: "bandit", name: "stance", row: 0x15C, requests: &[230, 231, 233] },
+    GuardSpec { enemy: "bandit", name: "spin", row: 0xEC, also: &[], requests: &[210, 211, 212] },
+    GuardSpec { enemy: "bandit", name: "stance", row: 0x15C, also: &[], requests: &[230, 231, 233] },
+    GuardSpec { enemy: "searchghost", name: "burst", row: 0x38C, also: &[0x3FC, 0x46C, 0x4DC], requests: &[204] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).
@@ -699,14 +714,18 @@ pub struct Guard {
     pub name: &'static str,
     /// Its script offset.
     pub row: usize,
+    /// The rows that act with it ([`GuardSpec::also`]).
+    pub also: &'static [usize],
     /// `+0x38 & 7`.
     pub clash_type: u32,
     /// `+0x3C`.
     pub priority: i32,
     /// `+0x40 & 0xFFFF`.
     pub recoil: u32,
-    /// `+0x34 & 3`.
+    /// `+0x34 & 3` (`row`'s).
     pub slot: u32,
+    /// Every HIT slot of `row` and `also` (their windows are joined).
+    pub slots: Vec<u32>,
     /// `+0x60` (radians).
     pub turn: f32,
     /// `+0x64`.
@@ -723,32 +742,62 @@ pub struct Guard {
 pub fn guard_rows(enemy: &str, script: &[u8], ms: &MotionSet, clips: &[RequestClip]) -> Result<Vec<Guard>> {
     let mut out = Vec::new();
     for g in GUARDS.iter().filter(|g| g.enemy == enemy) {
-        let r = script.get(g.row..g.row + 0x70).ok_or_else(|| crate::Error::Format(format!("{enemy}: no guard row at {:#x}", g.row)))?;
-        if !crate::stats::pushes_address(script, g.row as u32) {
-            return bad(format!("{enemy}: the script never pushes the guard row {:#x}", g.row));
-        }
-        let u = |o: usize| u32::from_le_bytes(r[o..o + 4].try_into().unwrap());
-        let f = |o: usize| f32::from_le_bytes(r[o..o + 4].try_into().unwrap());
-        let (slot, clash_type, priority, recoil) = (u(0x34) & 3, u(0x38) & 7, u(0x3C) as i32, u(0x40) & 0xFFFF);
+        // Each row: (slot, type, priority, recoil, turn, cos).
+        let read = |at: usize| -> Result<(u32, u32, i32, u32, f32, f32)> {
+            let r = script.get(at..at + 0x70).ok_or_else(|| crate::Error::Format(format!("{enemy}: no guard row at {at:#x}")))?;
+            if !crate::stats::pushes_address(script, at as u32) {
+                return bad(format!("{enemy}: the script never pushes the guard row {at:#x}"));
+            }
+            let u = |o: usize| u32::from_le_bytes(r[o..o + 4].try_into().unwrap());
+            let f = |o: usize| f32::from_le_bytes(r[o..o + 4].try_into().unwrap());
+            Ok((u(0x34) & 3, u(0x38) & 7, u(0x3C) as i32, u(0x40) & 0xFFFF, f(0x60), f(0x64)))
+        };
+        let (slot, clash_type, priority, recoil, turn, cos) = read(g.row)?;
         if !(1..=4).contains(&clash_type) || !(0..=100).contains(&priority) {
             return bad(format!("{enemy}: row {:#x} is not a guard row (type {clash_type}, priority {priority})", g.row));
         }
         if !clips.iter().any(|c| c.request as u32 == recoil) {
             return bad(format!("{enemy}: guard row {:#x}'s recoil {recoil} has no motion", g.row));
         }
-        let (turn, cos) = (f(0x60), f(0x64));
         if !(turn.is_finite() && cos.is_finite() && (-1.0..=1.0).contains(&cos)) {
             return bad(format!("{enemy}: guard row {:#x}: cone {turn} / {cos}", g.row));
+        }
+        let mut slots = vec![slot];
+        for &at in g.also {
+            let (s2, t2, p2, r2, turn2, cos2) = read(at)?;
+            if (t2, p2, r2) != (clash_type, priority, recoil) || turn2.to_bits() != turn.to_bits() || cos2.to_bits() != cos.to_bits() {
+                return bad(format!("{enemy}: guard row {at:#x} (type {t2}, priority {p2}, recoil {r2}, cone {turn2} / {cos2}) differs from {:#x}'s", g.row));
+            }
+            if !slots.contains(&s2) {
+                slots.push(s2);
+            }
         }
         let mut windows = Vec::new();
         for &req in g.requests {
             let e = ms.requests.get(req as usize).and_then(|w| w.entry()).ok_or_else(|| crate::Error::Format(format!("{enemy}: request {req} has no motion")))? as usize;
             let m = ms.motions.get(e).ok_or_else(|| crate::Error::Format(format!("{enemy}: request {req}: entry {e}")))?;
-            windows.push((req, hit_windows(m, slot as u16)?));
+            let mut on = Vec::new();
+            for &sl in &slots {
+                on.extend(hit_windows(m, sl as u16)?);
+            }
+            windows.push((req, merge_windows(on)));
         }
-        out.push(Guard { name: g.name, row: g.row, clash_type, priority, recoil, slot, turn, cos, windows });
+        out.push(Guard { name: g.name, row: g.row, also: g.also, clash_type, priority, recoil, slot, slots, turn, cos, windows });
     }
     Ok(out)
+}
+
+/// Windows sorted and joined where they touch or overlap.
+fn merge_windows(mut on: Vec<(f32, f32)>) -> Vec<(f32, f32)> {
+    on.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out: Vec<(f32, f32)> = Vec::new();
+    for w in on {
+        match out.last_mut() {
+            Some(l) if w.0 <= l.1 => l.1 = l.1.max(w.1),
+            _ => out.push(w),
+        }
+    }
+    out
 }
 
 /// An enemy's thrown object (M11, `kh1_core::enemy::thrown`): its child script (entry 0 of the
@@ -987,6 +1036,25 @@ fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
 /// Search Ghost's cone: `ex_2230_00.bd` `0x28C` (`sys 19(parent, 4141, 0)`) and `0x27A` (`sys 115(…, 45)`):
 /// bone 45, an end bone the motions don't pose, whose parent 44 is Re:CoM's `l_eye`.
 pub const SIGHTS: &[(&str, u32)] = &[("searchghost", 0x102D)];
+
+/// Prize tables a script's handler hands to `sys 122` as a reward (M11, `kh1_core::enemy::Reward`): (enemy,
+/// the constants' prefix, the table's script offset). The Search Ghost's hold reward: `0x28EE` / `0x29C4`
+/// push `0x580` for `func_1F64` (`sys 32` → `sys 122`). Checked (files).
+pub const REWARDS: &[(&str, &str, u32)] = &[("searchghost", "reward_prize", 0x580)];
+
+/// [`REWARDS`]' tables as `<prefix>_0..6` (the seven prize counts, `0x1402ABC40`'s, by KH1 prize kind). A
+/// table that also rolls items is refused (a reward carries no items).
+fn reward_consts(name: &str, script: &[u8]) -> Result<Vec<(String, f32)>> {
+    let mut out = Vec::new();
+    for &(_, prefix, at) in REWARDS.iter().filter(|r| r.0 == name) {
+        let t = crate::stats::drop_table(script, at)?;
+        if t.items.iter().any(|i| i.0 > 0.0) {
+            return bad(format!("{name}: the reward table {at:#x} also rolls items ({:?}); not built", t.items));
+        }
+        out.extend(t.prizes.iter().enumerate().map(|(k, &n)| (format!("{prefix}_{k}"), n as f32)));
+    }
+    Ok(out)
+}
 
 fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String, f32)>> {
     let mut out = Vec::new();

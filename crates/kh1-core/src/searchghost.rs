@@ -27,9 +27,17 @@
 //!   (`sys 49`), and the child ends. The idle routines engage once a target is set. Its effect (`sys 109` 7
 //!   on bone 45): the effects milestone (M13).
 //! - the hit handler `0x285A`: the flight easing back to 0.2; attribute 9: damage only (not carried); a hit
-//!   while it holds a drain: the hold ends and KH1 gives an EXP bonus and 3 prizes (`sys 194`, the drop table
-//!   `0x580`: not built, Re:CoM's EXP and drops stay; owner question); the drain's orb is dropped; attribute 8:
-//!   the same reward (not carried); every hit, clashes too, asks for the hit state 3.
+//!   while it holds a drain (the killing hit too, [`Behaviour::on_defeat`]): the hold ends and KH1 gives an EXP
+//!   bonus and 3 prizes (`sys 194(EXP / 10 + 1)`, the drop table `0x580`: [`ECmd::Reward`], owner 2026-11-02:
+//!   on Re:CoM's EXP and prizes); the drain's orb is dropped; attribute 8: the same reward on every Gravity
+//!   hit (not carried); every hit, clashes and repelled hits too, asks for the hit state 3.
+//! - the hover after a drain (`0x2A50` mode 1): once the hold is off unhit (568 frames, or at once when the
+//!   orb never counted: it started within 1 m) its HP goes back to full (`0x2ADE`: [`ECmd::HealFull`], on
+//!   Re:CoM's HP).
+//! - the burst's four type-1 rows (`0x38C` / `0x3FC` / `0x46C` / `0x4DC`): one [`Guard`] for the shared
+//!   enemy-guard step. Their front cone is cos 1.0 (row `+0x64`): KH1's test (`0x1402B4640`, the 3D cosine
+//!   ≥ 1.0) passes only for an attacker exactly along its facing, so in KH1 they practically never meet a
+//!   swing; the port keeps that number.
 //!
 //! The work area: `wp+0x54` warping, `+0x58` drain landed (0, 1, 2, 3), `+0x5C` noticed, `+0x60` roam rounds,
 //! `+0x64` the notice's effect live, `+0x68` drained, `+0x6C` holding it, `+0x70` noticed (the leash),
@@ -41,8 +49,7 @@
 //! / `sys 109`, the drain's orb `sys 15` / `sys 16`: its flight is counted, not drawn), the alpha fades
 //! (`0x23B8` / `0x23E4`: [`ECmd::FadeIn`] for the log only), flag 0x80 at the appearance, the lock point mask
 //! while it warps (`sys 116` / `117`: Re:CoM's lockable flag stays, the Darkball's rule), the death routine
-//! (`0x2A14`: Re:CoM's defeat), the HP heal and the drain's reward ([`ECmd::Note`]: owner question), `sys1.0`
-//! (a debug print).
+//! (`0x2A14`: Re:CoM's defeat), `sys1.0` (a debug print).
 
 use crate::enemy::script::{fly, frame, height, motion_frames, poll, pos, push, rand, rand_range, random_offset, set_air_accel, set_state, set_target, set_turn_rate, steer, take_state, target, tick_clock};
 use crate::enemy::{Behaviour, Body, Cmd as ECmd, Draw, HitNews, Numbers, Sight, Table, World};
@@ -83,6 +90,37 @@ pub enum Attack {
     Burst,
     /// `0x13BE`: the drain, 203 with rows `0xEC` / `0x15C`, steered (it creeps in, or backs off when on him).
     Drain,
+}
+
+/// The Search Ghost's guard rows (the shared enemy-guard step, `crate::enemy::guard`; the manifest's
+/// `guards`, in this order). The burst makes four attack-type-1 rows with its damaging ones (`0x128E`):
+/// `0x38C` / `0x3FC` (right / left hand, HIT slot 0, hit bit A) and `0x46C` / `0x4DC` (slot 1, hit bit B),
+/// all priority 40, recoil 205, front cone turn 0 / cos 1.0 (Checked (files)). Re:CoM's body guard is the
+/// whole body, so the four act as one row on while either slot is (the asset step merges their windows).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Guard {
+    Burst,
+}
+
+impl Guard {
+    pub const ALL: [Guard; 1] = [Guard::Burst];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Guard::Burst => "burst",
+        }
+    }
+
+    /// Its first row's script offset (the asset step reads the others with it).
+    pub fn row(self) -> usize {
+        match self {
+            Guard::Burst => 0x38C,
+        }
+    }
+
+    pub fn index(self) -> u8 {
+        Guard::ALL.iter().position(|&g| g == self).unwrap_or(0) as u8
+    }
 }
 
 impl Attack {
@@ -246,6 +284,17 @@ pub const NAMES: &[&str] = &[
     "cone_range",
     "cone_angle",
     "sight_bone",
+    // The hit handler's reward while it holds a drain (`0x28A6`): `sys 194(EXP / 10 + 1)` and the drop
+    // table `0x580`'s seven prize counts (the asset step's).
+    "reward_exp_div",
+    "reward_exp_add",
+    "reward_prize_0",
+    "reward_prize_1",
+    "reward_prize_2",
+    "reward_prize_3",
+    "reward_prize_4",
+    "reward_prize_5",
+    "reward_prize_6",
 ];
 
 /// The Search Ghost's numbers.
@@ -293,6 +342,8 @@ struct Wp {
     /// The idle made its child (`sys 94`, `0xD12`): [`Ai::frame`] starts it.
     child_new: bool,
     sight: Option<Sight>,
+    /// The hit handler gave its reward (`0x28A6`): [`Behaviour::take_now`] hands it to the host.
+    reward: bool,
 }
 
 type Cx = crate::enemy::script::Cx<Consts, Attack, Wp>;
@@ -577,6 +628,9 @@ async fn warp_to(cx: &Cx, p: Vec3, speed: f32) {
 async fn burst(cx: &Cx) {
     yaw_to(cx, tgt(cx));
     attack(cx, Attack::Burst, k(cx, "motion_blend"));
+    // Its four type-1 rows (`0x38C` / `0x3FC` / `0x46C` / `0x4DC`), made with the damaging ones: they live
+    // while 204 plays, on in their HIT slots' windows (the shared enemy-guard step).
+    push(cx, ECmd::Guard(Some((Guard::Burst.index(), req::BURST))));
     let mut t = motion_frames(cx, req::BURST);
     while t - k(cx, "burst_turn_until") > 0.0 {
         yaw_to(cx, tgt(cx));
@@ -680,7 +734,8 @@ async fn hover(cx: &Cx, speed: f32, dist: f32, time: f32, heal: bool) {
     set_turn_rate(cx, k(cx, "hover_turn_rate"));
     while t > 0.0 {
         if heal && !cx.borrow().x.holding {
-            push(cx, ECmd::Note("KH1 restores its HP to full here (its drain's hold ran out unhit): not built, Re:CoM's HP stays (owner question)"));
+            // `0x2ADE`: stats `+0x3C` = `+0x40` (owner 2026-11-02: on Re:CoM's HP).
+            push(cx, ECmd::HealFull);
             let mut n = k(cx, "hover_rest");
             while n > 0.0 {
                 yaw_to(cx, tgt(cx));
@@ -1111,6 +1166,17 @@ pub struct Ai {
 }
 
 impl Ai {
+    /// `0x28A6`: while it holds a drain (`wp+0x6C` = 1), the hold ends (`wp+0x68` = `wp+0x6C` = 0) and the
+    /// reward is given.
+    fn hold_reward(&self) {
+        let mut io = self.io.borrow_mut();
+        if io.x.holding {
+            io.x.holding = false;
+            io.x.drained = false;
+            io.x.reward = true;
+        }
+    }
+
     /// A new AI. `seed`: its random stream (Assumption, as the Shadow's: per-enemy seeds). `frames`: KH1 motion
     /// lengths by request. `spawned`: a room spawn (every Re:CoM battle appearance, owner 2026-11-02; false: a
     /// placed Ghost, which drains always).
@@ -1205,28 +1271,40 @@ impl Behaviour for Ai {
         self.io.borrow_mut().rng = r;
     }
     /// The hit handler (`0x285A`): the flight easing back to `ease_default` (`0x286E`); a hit while it holds a
-    /// drain ends the hold (`0x28A6`; KH1's EXP bonus `sys 194` and drop table `0x580`: not built, owner
-    /// question); the drain's orb dropped (`0x298E`); the hit state 3, clashes too (`0x2A0C`). KH1's attribute
-    /// exceptions (9: damage only; 11: no state; 8: the reward): not carried.
+    /// drain ends the hold and gives KH1's reward (`0x28A6`: `sys 194(EXP / 10 + 1)` and the drop table
+    /// `0x580`, [`Behaviour::take_now`]; owner 2026-11-02: on Re:CoM's EXP and prizes); the drain's orb dropped
+    /// (`0x298E`); the hit state 3, clashes and repelled hits too (`0x2A0C`). KH1's attribute exceptions (9:
+    /// damage only; 11: no state; 8: the reward on every Gravity hit, `0x29BC`): not carried.
     fn on_hit(&self, _news: HitNews) {
         let ease = self.io.borrow().c.num("ease_default");
         set_air_accel(&self.io, ease);
-        let held = {
+        self.hold_reward();
+        {
             let mut io = self.io.borrow_mut();
-            let h = io.x.holding;
-            if h {
-                io.x.holding = false;
-                io.x.drained = false;
-            }
             if io.x.drain > 0 {
                 io.x.drain = 0;
             }
-            h
-        };
-        if held {
-            push(&self.io, ECmd::Note("KH1 gives an EXP bonus and 3 prizes here (hit while it holds its drain): not built, Re:CoM's EXP and drops stay (owner question)"));
         }
         set_state(&self.io, st::HIT);
+    }
+    /// The killing hit: KH1's handler gives the hold's reward before it applies the damage (`0x28A6`
+    /// before `sys 44` and the death `0x2A14`).
+    fn on_defeat(&self) {
+        self.hold_reward();
+    }
+    /// The reward its hit handler gave (`0x28A6`): KH1's `sys 194` and drop table `0x580` as one
+    /// [`ECmd::Reward`].
+    fn take_now(&self) -> Vec<ECmd<u8>> {
+        let mut io = self.io.borrow_mut();
+        if !std::mem::take(&mut io.x.reward) {
+            return Vec::new();
+        }
+        let n = |s: &str| io.c.num(s);
+        let mut prizes = [0u8; 7];
+        for (i, p) in prizes.iter_mut().enumerate() {
+            *p = n(&format!("reward_prize_{i}")).clamp(0.0, 255.0) as u8;
+        }
+        vec![ECmd::Reward(crate::enemy::Reward { exp_div: n("reward_exp_div") as i32, exp_add: n("reward_exp_add") as i32, prizes })]
     }
     /// The drain's rows' callback (`0x1794`): once per drain, the drained target and its orb (`wp+0x58` = 1).
     /// KH1 refuses a target that is reacting (`sys 71`), has flag 0x80 or isn't `sys 170`'s 1: taken as
@@ -1319,6 +1397,8 @@ mod tests {
             ("vanish_fade", 100.0), ("reappear_wait", 80.0), ("reappear_fade", 100.0), ("approach_above", 50.0), ("approach_check", 30.0), ("approach_retry", 1.5),
             ("approach_detour_lo", 400.0), ("approach_detour_hi", 600.0), ("approach_detour_time", 200.0), ("fly_check", 30.0), ("fly_detour_lo", 600.0), ("fly_detour_hi", 800.0),
             ("cone_range", 300.0), ("cone_angle", 35.0), ("sight_bone", 32.0), ("attack_blend", 8.0),
+            ("reward_exp_div", 10.0), ("reward_exp_add", 1.0), ("reward_prize_0", 0.0), ("reward_prize_1", 0.0), ("reward_prize_2", 0.0), ("reward_prize_3", 0.0),
+            ("reward_prize_4", 3.0), ("reward_prize_5", 0.0), ("reward_prize_6", 0.0),
             ("walk_speed", 2.0), ("run_speed", 8.0), ("air_accel", 0.1), ("air_drag", 0.95), ("turn_rate", std::f32::consts::PI / 16.0), ("launch_min", 20.0),
             ("launch_max", 35.0), ("launch_hop", 1.35), ("flinch_push", 80.0), ("air_flinch_speed", 4.0), ("air_knock_speed", 16.0), ("down_time", 30.0),
             ("air_knock_hop", 20.0), ("weight", 1.0), ("gravity", crate::params::GRAVITY), ("fall_cap", 20.0),
@@ -1547,9 +1627,14 @@ mod tests {
         s
     }
 
+    /// The frame of its first full heal (`0x2ADE`).
+    fn healed_at(s: &Sim) -> Option<usize> {
+        s.log.iter().find(|(_, c)| *c == ECmd::HealFull).map(|x| x.0)
+    }
+
     /// Its HP under half: the drain's approach (200), the drain (203). When it lands with the Ghost right on
-    /// Sora, its orb is home at once (within `orb_done`): no hold, and the hover after it at once has KH1
-    /// restore its HP (not built: a note).
+    /// Sora, its orb is home at once (within `orb_done`): no hold, and the hover after it at once restores its
+    /// HP to full (`0x2ADE`).
     #[test]
     fn a_drain_from_close_heals_at_once() {
         let sora = |_| Vec3::new(0.0, 0.0, 900.0);
@@ -1559,40 +1644,88 @@ mod tests {
         assert_eq!(s.attacks().first().map(|a| a.1), Some(Attack::Drain), "{:?}", s.attacks());
         assert!(!s.ai.io.borrow().x.drained && !s.ai.io.borrow().x.holding);
         let end = s.attacks()[0].0 + 120;
-        let note = s.log.iter().find(|(_, c)| matches!(c, ECmd::Note(n) if n.contains("full"))).map(|x| x.0).expect("the heal note");
-        assert!(note >= end && note - end < 10, "{note} after {end}");
+        let heal = healed_at(&s).expect("the heal");
+        assert!(heal >= end && heal - end < 10, "{heal} after {end}");
+        assert_eq!(s.log.iter().filter(|(_, c)| *c == ECmd::HealFull).count(), 1, "once");
+        assert!(s.notes().is_empty() && s.ai.take_now().is_empty(), "no reward");
     }
 
-    /// The orb starting 1–3.2 m away: drained, the hold runs while it hovers off; 568 frames unhit and KH1 would
-    /// restore its HP (a note); then the roam (warps).
+    /// The orb starting 1–3.2 m away: drained, the hold runs while it hovers off; 568 frames unhit and its HP
+    /// goes back to full; then the roam (warps).
     #[test]
-    fn the_drain_holds_then_would_heal() {
+    fn the_drain_holds_then_heals() {
         let mut s = draining(9, back_off);
         s.run(back_off, 400);
         assert_eq!(s.attacks().first().map(|a| a.1), Some(Attack::Drain), "{:?}", s.attacks());
         assert!(s.ai.io.borrow().x.holding, "the orb reached it: holding");
-        assert!(s.notes().is_empty());
+        assert!(healed_at(&s).is_none() && s.notes().is_empty());
         let start = s.attacks()[0].0;
         s.run(back_off, 700);
         assert!(!s.ai.io.borrow().x.holding);
-        let note = s.log.iter().find(|(_, c)| matches!(c, ECmd::Note(n) if n.contains("full"))).map(|x| x.0).expect("the heal note");
-        assert!(note - start > 568 && note - start < 568 + 130, "{note} after {start}");
+        let heal = healed_at(&s).expect("the heal");
+        assert!(heal - start > 568 && heal - start < 568 + 130, "{heal} after {start}");
+        assert!(s.ai.take_now().is_empty(), "unhit: no reward");
         s.run(back_off, 800);
         let hid = s.log.iter().position(|(_, c)| *c == ECmd::Visible(false)).expect("a warp");
         assert!(s.log[hid..].iter().any(|(_, c)| *c == ECmd::Hittable(true)));
     }
 
-    /// A hit while it holds the drain: the hold ends (KH1's reward: a note), the hit state.
+    /// The reward the player's script gives (`0x28A6`: `sys 194(EXP / 10 + 1)`, the drop table `0x580`: 3
+    /// prizes of KH1 kind 4).
+    fn the_reward() -> ECmd<u8> {
+        ECmd::Reward(crate::enemy::Reward { exp_div: 10, exp_add: 1, prizes: [0, 0, 0, 0, 3, 0, 0] })
+    }
+
+    /// A hit while it holds the drain: the hold ends, KH1's reward comes in the handler itself (`take_now`,
+    /// once), the hit state; the hover then never heals it.
     #[test]
-    fn a_hit_during_the_hold_ends_it() {
+    fn a_hit_during_the_hold_ends_it_with_the_reward() {
         let mut s = draining(9, back_off);
         s.run(back_off, 400);
         assert!(s.ai.io.borrow().x.holding);
+        let hit = s.frame;
         s.ai.on_hit(HitNews::Damage);
+        assert_eq!(s.ai.take_now(), vec![the_reward()]);
+        assert!(s.ai.take_now().is_empty(), "once");
         s.run(back_off, 3);
         assert!(!s.ai.io.borrow().x.holding);
-        assert!(s.notes().iter().any(|n| n.contains("EXP")), "{:?}", s.notes());
         assert!(s.states().contains(&st::HIT));
+        // The hover is cut by the hit: no heal until its next drain (which heals by the rule again).
+        s.run(back_off, 900);
+        let next = s.attacks().iter().find(|a| a.0 > hit && a.1 == Attack::Drain).map_or(usize::MAX, |a| a.0);
+        assert!(healed_at(&s).is_none_or(|h| h > next), "{:?} {next}", healed_at(&s));
+        // A second hit: no hold, no reward.
+        s.ai.on_hit(HitNews::Damage);
+        assert!(s.ai.take_now().is_empty());
+        // KH1's numbers: the LV1 record's EXP 10 → 2, LV2's 120 → 13.
+        let r = crate::enemy::Reward { exp_div: 10, exp_add: 1, prizes: [0; 7] };
+        assert_eq!((r.exp_bonus(10), r.exp_bonus(120), r.exp_bonus(9), r.exp_bonus(0)), (2, 13, 1, 1));
+    }
+
+    /// The killing hit while it holds: the reward (before Re:CoM's defeat prizes); not holding: nothing.
+    #[test]
+    fn a_killing_hit_during_the_hold_rewards_too() {
+        let mut s = draining(9, back_off);
+        s.run(back_off, 400);
+        assert!(s.ai.io.borrow().x.holding);
+        s.ai.on_defeat();
+        assert_eq!(s.ai.take_now(), vec![the_reward()]);
+        let s = Sim::new(9, true, Vec3::ZERO);
+        s.ai.on_defeat();
+        assert!(s.ai.take_now().is_empty());
+    }
+
+    /// Each burst makes its type-1 guard row with 204 (the shared enemy-guard step).
+    #[test]
+    fn the_burst_makes_its_guard_row() {
+        let mut s = Sim::new(3, true, Vec3::new(0.0, -150.0, 0.0));
+        let sora = |_| Vec3::new(0.0, 0.0, 1200.0);
+        s.run(sora, 2);
+        s.start(st::ENGAGED, |cx| Box::pin(async move { attack_round(&cx).await }));
+        s.run(sora, 900);
+        let f = s.attacks().iter().find(|a| a.1 == Attack::Burst).expect("a burst").0;
+        assert!(s.log.iter().any(|(g, c)| *g == f && *c == ECmd::Guard(Some((Guard::Burst.index(), req::BURST)))), "{:?}", s.log);
+        assert_eq!((Guard::Burst.row(), Guard::Burst.name(), Guard::ALL.len()), (0x38C, "burst", 1));
     }
 
     /// The warp: unhittable at once, hidden after the 100-frame fade, shown 80 frames after it arrives, hittable

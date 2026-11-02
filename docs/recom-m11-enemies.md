@@ -263,9 +263,12 @@ through Re:CoM's own body guard, the one Sora's Guard already uses.
 - When two attacks meet, `0x1402B4BC0` runs both ways (`0x1402B4A20`). Nothing when the other side's priority is 0
   or both are 98 or more; a side at 100 is never moved. Otherwise the lower side gets a clash record: kind 6, or
   kind 7 when it is 40 or more under (`diff < −0x28`), with `diff` = its priority − the other's. A type 1 / 3 / 4 side
-  with the higher priority **repels** instead (`0x1402BF630`, flag 0x20): the Large Body and the Defender (not built:
-  see below). A type-2 side never repels. A projectile side (`+0x30 & 0x400`) is turned to the other side instead
-  of getting a record (not built: see below).
+  with the higher priority **repels** instead (`0x1402BF630(other attack, 0, its owner)`): its own owner gets **the
+  other attack's hit record, flagged 0x20**, and its row is marked met (`+4 |= 0x10`); the other side still runs its
+  own resolve and gets its kind 6 / 7. A 0x20 record does no damage (`0x1402BEEE0` returns at once) and plays no
+  reaction (`0x1402B8E10` skips `& 0x22`), but the owner's script hit handler hears it (`0x1402B7B90` →
+  `0x1402BCD60`) and KH1's hit counter counts it (`0x1402BFE60`). Checked (decomp). A type-2 side never repels. A
+  projectile side (`+0x30 & 0x400`) is turned to the other side instead of getting a record (not built: see below).
 - Sora (`0x14029BBD0`): on the ground kind 6 plays the recoil 0x6E (`0x14029D720`; pushed back by −diff × 2.5,
   btltbl G+0x1C, when diff < 0), kind 7 the strong recoil 0x6F (`0x14029D5F0`, 64 frames, 118 cm root travel back);
   in the air either plays 0x70 (`0x14029D510`: hop 20, back velocity diff / 100 × 40, at most 8, G+0x30 / G+0x34).
@@ -295,7 +298,9 @@ through Re:CoM's own body guard, the one Sora's Guard already uses.
 | Runtime | `kh1-recom` `win/kh1_enemy.rs` | per enemy `GuardOn` (row, request, clock); each tick `guard_step` turns Re:CoM's guard on every hurt part (`+0x9C` bit 1, `+0x8C` physical, `+0xB0` = the row's half angle, Re:CoM's own values saved and put back) while the row's window is on, ends it when its request changes; `guard_watch` drops it when a Re:CoM state runs (Stop, stun); our vtable copy's `+0x3D8` = `guard_event` |
 | Sora's swings | `kh1-recom` `win/attack.rs` | in the pair-dispatch wrapper, around each KH1 swing's apply: `guard_for_swing` clears the guard bit when KH1's types don't meet, else adds the swing's element; `guard_after_swing` puts the fields back and, on result 2, resolves both sides (`resolve`) |
 | Sora's clash | `kh1-recom` `movement.rs` | `Host::take_swing_clash` → `Kh1Sora::swing_clash`: KH1's recoils above on Re:CoM's action rows (0x6E Re:CoM's `p001_081`; 0x6F / 0x70 appended rows, `rows::KH1_ONLY`), KH1's push, hop, flag 0x80, combo counter, `Event::SwingClashed` |
-| Enemy's clash | `win/kh1_enemy.rs` `guard_event` | the row's recoil and kind kept as `clash_recoil`; the row ends; the attack ends into our state 11 (or state 11 is next), which plays KH1's clash reaction (`react::clash`) and tells the script (its hit handler) |
+| Enemy's clash | `win/kh1_enemy.rs` `guard_event` | by the enemy's side (`guard_after_swing` keeps it): **a clash**: the row's recoil and kind kept as `clash_recoil`; the row ends; the attack ends into our state 11 (or state 11 is next), which plays KH1's clash reaction (`react::clash`) and tells the script (its hit handler); **a repel** (built 2026-11-02): no recoil, no reaction, its attack goes on, the hit counter + 1, the script hears `HitNews::Repelled` (and what its handler does in the handler runs now, `Behaviour::take_now`); the row that met is done (KH1's `+4 |= 0x10`): a plain row ends, a merged one stays on (Assumption below); **neither** (a side at 100, both 98+): nothing |
+| KH1's front cone | `win/kh1_enemy.rs` `kh1_front` | KH1's 3D test (`0x1402B4640`: the enemy's facing turned by `+0x60`, the vector to Sora, cos ≥ `+0x64`) before each KH1 swing's apply: outside it the swing is a plain hit (as when the types don't meet). Re:CoM's `+0xB0` half angle stays for Re:CoM's own attacks. For a cos-0 cone (the Bandit's) the two tests agree (the facing has no height); for the Search Ghost's cos 1.0 only KH1's 3D test is right |
+| Merged rows | `kh1-recom-assets` `enemy.rs` `GuardSpec::also` | rows made with the same request that differ only in their sphere and HIT slot (the Search Ghost's four) are one guard row: their clash numbers must match; their slots' windows are joined. The manifest lists them (`"also"`, `"slots"`); the Bandit's manifest is unchanged |
 
 Per frame: nothing while no KH1 enemy is guarding (`GUARDED` = 0); one window test per guarding enemy; the swing
 wrapper's check only when a KH1 swing meets a body.
@@ -319,10 +324,17 @@ wrapper's check only when a KH1 swing meets a body.
   carry Re:CoM's spell attributes (KH1's types 5 / 6 meet no type-2 row, so they land as in KH1). Assumption:
   Re:CoM's other physical attacks (a turned-back shot, a summon) count as KH1's type 0.
 
-**For the Large Body and the Defender (not built):** their rows are types 1 / 4 with priorities above Sora's: KH1
-repels (`Side::Repels`: Sora gets the clash, the enemy goes on, no recoil on its side). `guard_event` then has to
-skip the enemy's recoil when its side is `Repels`; `resolve` already returns it. A turned cone (a shield held to one
-side) needs Re:CoM's `+0xB0` plus a facing offset Re:CoM does not have: research before porting.
+**For the Large Body and the Defender:** their rows are types 1 / 4 with priorities above Sora's: KH1 repels. The repel
+is built (2026-11-02, first used by the Search Ghost's burst rows): Sora gets his kind 6 / 7 from his own side, the enemy
+the 0x20 record (`HitNews::Repelled`: its script's hit handler decides; no damage, no reaction, its attack goes on).
+Their ports add their rows to `GUARDS` and send `Cmd::Guard`; their scripts' hit handlers must treat `Repelled` as KH1's
+0x20 record (a hit record whose kind is the attacker's, which does no damage). Still to research: a **turned cone** (a
+shield held to one side, row `+0x60` ≠ 0): `kh1_front` already tests it the KH1 way, but Re:CoM's body guard flag has
+no facing offset (`+0xB0` is a half angle about the facing), so the host refuses such a row today (`guard row … has a
+turned cone`); building it means setting Re:CoM's half angle to π (all round) and letting `kh1_front` decide for Sora's
+swings, then deciding what Re:CoM's own attacks see. Assumption (merged rows and the repel): after a repel a merged row
+stays on, since KH1's other row instances (the other hand, the other strike) could still meet a later swing, which
+Re:CoM's whole-body guard can't tell apart.
 
 ## The Soldier
 
@@ -984,9 +996,9 @@ kill one. The trace's enemy rows give the heights, the chase and charge speeds a
 
 ## The Search Ghost (M11 fliers)
 
-Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Search Ghost yet. Two parts of
-KH1's Search Ghost wait for the owner (§ Search Ghost owner questions): what its drain does to its HP and Sora's
-rewards, and its burst's repel layer.
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Search Ghost yet. The owner's
+choices of 2026-11-02 (§ Search Ghost owner questions) are built: KH1's drain rule on Re:CoM's HP, EXP and prizes
+(§ The drain's heal and reward), and the burst's type-1 rows through the shared enemy guard (§ The burst's repel rows).
 
 ### KH1's side. Checked (files: `ex_2230.bd` and `ex_2230_00.bd` disassembled, folded and raw; decomp: the syscalls named)
 
@@ -1009,13 +1021,13 @@ the random draws and the waits are the shared ones). The child object (`.mdls` p
 | burst | `0x128E` | effect 6 after 8 frames (`sys 107`); two hit bits, rows `0x1CC` / `0x23C` / `0x38C` / `0x3FC` and `0x2AC` / `0x31C` / `0x46C` / `0x4DC`; facing him, 204 for its length (facing him until 85 frames are left); the idle (blend 6) |
 | drain's approach | `0xA34` | the target checked (alive, `sys 120`, flag 0x8000; else a new search); the approach `0x30C4(target, 20, 250, 200)`; facing him, the drain `0x13BE`; until a drain lands (`wp+0x58`), 200 again |
 | drain | `0x13BE` | effect 5 after 8 frames; rows `0xEC` / `0x15C` with the callback `0x1794`; facing him, 203 for its length: with 60 or more frames left facing him; with more than 96 left: within 30 of him backing off (−3 × the facing at 4: 12 a frame), else creeping at him at 2. The callback (once, a target not reacting, without flag 0x80, `sys 170` = 1): `wp+0x58` = 1 and an orb effect (`sys 15`, effect 12) 80 above him; in the last 60 frames the orb flies to 30 above the Ghost (`p ← (p − me) × k + me − 30`, `k` 0.95 down 0.02 a frame); within 3.2 m of it: **drained** (`wp+0x68`, effect 11); within 1 m or with 20 frames left: the orb removed (`sys1.3`), the drain ends early. **An orb that starts within 1 m never drains** (the Ghost usually coasts in close: the hold is rare; tests `a_drain_from_close_heals_at_once` / `the_drain_holds_then_would_heal`). The rest of 203, the idle |
-| hover | `0x2A50(target, speed, dist, time, mode)` | turn rate 2; away 20 m behind it (±180°), after [100, 180) frames off to a side (±60..120°), and on that leg within `dist` of him and level (± 1.5 m) a burst (turn rate 6) and away again, 3 bursts at most; rising under 50 over the floor; stuck after 60 frames: away at once. **Mode 1** (`0xA0E`: 8, 4 m, 800 frames, after the drain): once the hold is off (568 frames unhit, or no drain reached it) **HP = max HP** (`0x2ADE`: stats `+0x3C` = `+0x40`), 30 frames facing him, done |
+| hover | `0x2A50(target, speed, dist, time, mode)` | turn rate 2; away 20 m behind it (±180°), after [100, 180) frames off to a side (±60..120°), and on that leg within `dist` of him and level (± 1.5 m) a burst (turn rate 6) and away again, 3 bursts at most; rising under 50 over the floor; stuck after 60 frames: away at once. **Mode 1** (`0xA0E`: 8, 4 m, 800 frames, after the drain): once the hold is off (568 frames unhit, or no drain reached it) **HP = max HP** (`0x2ADE`: stats `+0x3C` = `+0x40`, then a debug print `sys1.0`; no effect), 30 frames facing him, done |
 | roam | `0x7EC` | warp to a point 7–10 m away; Sora within 10 m: within 5 m the burst, else 202 for [400, 600) frames facing him, bursting once within 3.5 m; not found: 202 for [200, 300) frames facing Sora, bursting within 5.25 m; after 3 rounds the idle [30, 60) frames and the idle state |
 | hit | `0x628` | noticed. Below half its HP (or draining always): 50 % the vanish (blend 0), invisibly at him at 24 to 0.8 m playing 200, face him, reappear; then engaged. Else 50 % a warp to a point 5–6 m away, otherwise the burst and the hover `(6, 4 m, 300, mode 0)`; then engaged |
 | warp | `0x2EBA` | the vanish `0x2FF2` (warping, 201, the idle queued, flags 0x20 / 0x40 / 0x10: unhittable, its lock point masked (`sys 116`), effect 9, a 100-frame fade-out, 100 frames, hidden: flags 0x10 / 0x2 / 0x1 cleared); the flight to the point (24, within 10, 240 frames); the reappearance `0x2EEC` (stopped, the idle 80 frames, facing him, 201 and its queue **cancelled in the same frame** by `sys 12(0)` (`0x14029F7C0` zeroes the pending count `+0x178` first), shown, effect 10, a 100-frame fade-in, 80 frames, hittable, unmasked, not warping) |
 | approach | `0x30C4(target, speed, dist, motion)` | at 50 above him playing `motion`, facing him, until within `dist` of him (or of that point); stuck after 30 frames: done within 1.5 × `dist`, else a detour flight to a point 4–6 m from him (200 frames) |
 | flight to a point | `0x335A(p, speed, arrive, time)` | the idle; until within `arrive` flat and a frame's travel vertically; stuck (30 frames on): face ahead, stop, a new point 6–8 m from the target |
-| hit handler | `0x285A` | easing 0.2; attribute 9: damage only; **while holding**: the hold ends, `sys 194(level / 10 + 1)` (an EXP bonus for the party, with its number shown, `0x140270990` / `0x140284990`) and the drop table `0x580` (3 prizes of kind 4); death: Re:CoM's defeat here; attribute 11: nothing more; the orb dropped (`wp+0x58` = 0); attribute 8 (Gravity): the same reward; every hit, clashes too: the hit state |
+| hit handler | `0x285A` | easing 0.2; attribute 9: damage only; **while holding** (`0x28A6`, before the damage): the hold ends, `sys 194(EXP / 10 + 1)` (`0x28D8` / `0x28E0`; the stats block's `+0x68` is the record's EXP word r7, `0x1402A58E0`: an EXP bonus for the party, with its number shown, `0x140270990` / `0x140284990`) and the drop table `0x580` (`func_1F64`: at its lock point, `sys 32` → `sys 122`; 3 prizes of KH1 kind 4); then `sys 44` (the damage); death `0x2A14` (Re:CoM's defeat here); attribute 11: nothing more; the orb dropped (`wp+0x58` = 0); attribute 8 (Gravity, `0x29BC`): the same reward **on every Gravity hit** (`0x29DC` / `0x29E4`); every hit, clashes and repelled hits too: the hit state |
 | leash | `0x34EE` → `0x18F0` | **not ported**: spawned and 15 m (12 m out of sight) from Sora it is removed; in a Re:CoM battle room it would never be defeated |
 
 Attacks (rows `0x70` bytes, `sys 23`, mode 2: each lives while its request plays; Checked (files)):
@@ -1028,7 +1040,7 @@ Attacks (rows `0x70` bytes, `sys 23`, mode 2: each lives while its request plays
 The burst's other four rows (`0x38C` / `0x3FC` / `0x46C` / `0x4DC`, 90 at the hands at both strikes, no power words) are
 **attack type 1**: KH1's attack-vs-hurt test skips types 1 / 2 / 4 (`0x1402B3BE0`), and type 1 meets only attack types 0 /
 3 (the table `0x140528CB8`, byte 1 = 0x09): a repel layer for Sora's swings (§ Enemy guard: a type-1 side with the
-higher priority repels). Not made (owner question 2).
+higher priority repels). Built as the guard row `burst` (§ The burst's repel rows).
 
 Reactions: the flying forms (F `0x48..0x4B`, K `0x4C` / `0x4D`, a `0x4E` / `0x4F`, A `0x50` / `0x51`; no launches: kind 5
 → kind 4); weight 1.0 in both records; hurt parts: 5 (collision block group 2 → Re:CoM bones 19, 2, 17, 51, 35). Checked
@@ -1055,6 +1067,65 @@ clip at 100 + entry (69 → 108, 200..206 → 110..116); the edits get their Re:
 - It runs even while the parent's script waits (`Behaviour::side_frame`): a reaction ends it as in KH1.
 - Its look (effect 7, the searchlight) waits for the effects milestone (M13).
 
+### The drain's heal and reward (owner 2026-11-02: "KH1's drain rule on Re:CoM's HP, EXP and prizes")
+
+**KH1's rule** (Checked (files: `ex_2230.bd` disassembled, raw and folded) + decomp, Steam addresses):
+
+- The orb counts only when it reaches the Ghost from 1–3.2 m (`orb_done` 100 ≤ distance < `orb_near` 320 at the drain's
+  end, `wp+0x68`); an orb that starts within 1 m is removed at once and never counts.
+- A counted orb is **held** (`wp+0x6C`) for `hold_time` 568 frames by the supervisor while it is engaged (`0x2678`).
+- The hover after the drain (mode 1) heals as soon as the hold is off: **HP = max HP** (`0x2ADE`). An orb that never
+  counted: at the hover's first frame (right after the drain); a counted one: 568 frames after it reached the Ghost.
+- A hit while it holds (`0x28A6`, the hit handler, before `sys 44` applies the damage, so **the killing hit too**): the
+  hold ends, **`sys 194(EXP / 10 + 1)`** (`0x1402BC9A0`: unless ability `0x40`'s slot says otherwise, `0x140270990`
+  shows the number at its point `0x8004` and `0x140284990` adds it to each party member's EXP, **not** scaled by the
+  defeat's EXP rate `0x142D5CB00` that `sys 167` applies, `0x1402A4F40`), and **the drop table `0x580`**: 3 prizes of
+  KH1 kind 4 at its lock point (`0x1402ABC40`: counts × the Jackpot factor `0x142D60FA4`; kind 4 is an HP ball of +5,
+  `0x1402AC080` → `0x1402A4920(…, 5)`; the kinds: 0..2 munny 1 / 5 / 20, 3 / 4 HP 1 / 5, 5 / 6 MP 2 / 15). The hit
+  restarts its behaviour into the hit state: the hover (and its heal) is gone.
+- With KH1's records: EXP 10 (LV1 `0x14`) → bonus 2; EXP 120 (LV2 `0x80`) → 13.
+
+**On Re:CoM's state (built):**
+
+| KH1 | Re:CoM | Where |
+|---|---|---|
+| HP = max HP (`0x2ADE`) | Re:CoM's own enemy heal `0x140181CE0(enemy, max − HP, no effect, 0xB, &point, 0)`, the call its own Ghost's drain makes for its 1/8 (`0x140192630`); max from `0x14017F5A0`. HP `+0x274`, the clamp and the HP gauge (`+0x430` → `0x14020B2D0`, `0x14020C9A0`) are Re:CoM's. Checked (decomp + exe) | `Cmd::HealFull`, `win::kh1_enemy::heal_full` |
+| `sys 194(EXP / 10 + 1)` | **KH1's formula on Re:CoM's EXP for that Ghost** (`+0x2E4`, its `@ENP` row's `+8`, `0x14017FF50`: 12 on the first row up to 106 on the last, so bonuses 2..11 against KH1's 2 / 13), made as **Re:CoM's EXP prizes by its own defeat EXP drop `0x1401810A0(enemy, &point)`** (the bonus sits in `+0x2E4` for that call, Re:CoM's EXP put back after). Decision M10 keeps Re:CoM's EXP; Re:CoM gives EXP only through its EXP prizes, so the bonus is that many EXP prizes' worth. KH1's popup number: none (Re:CoM's EXP prizes show theirs on pickup). Checked (decomp + exe); the mapping is the port's choice (owner: "sensibly") | `Cmd::Reward`, `win::kh1_enemy::reward` |
+| 3 × KH1 kind 4 (HP + 5) | 3 × **Re:CoM's HP prize 0xD3** (`0x1401F4AB0`: 5 % of Sora's max HP, Re:CoM's own heal and its "Recover"), made by Re:CoM's prize factory `0x1401A89C0` with the defeat EXP drop's launch (pitch (−70 − r × 10)°, yaw r × 360°, speed 0.25; Re:CoM's random float and angle normaliser). Re:CoM never drops 0xD3 from a defeat (only Pluto's friend card makes them, `0x1401E2E60`). Jackpot: 1 (no such ability yet). Checked (decomp) | `crate::drops::reward_prize_kind`, `win::drops::spawn_reward_prize` |
+| at its lock point (`sys 32`) | at Re:CoM's prize point (vtable `+0x50`, `0x1401A4700`: where its defeat makes its prizes) | `win::kh1_enemy::prize_point` |
+| the killing hit while holding | the reward first, then Re:CoM's defeat (its EXP prizes, roulette prizes, card) | `defeat_begin` → `Behaviour::on_defeat` |
+| no `@ENP` row | nothing (Re:CoM makes no prize without one) | |
+
+Framework (shared): `Cmd::HealFull`, `Cmd::Reward(Reward)` (the numbers from the player's script: `reward_exp_div` /
+`reward_exp_add` at `0x28D8` / `0x28E0`, also pushed at `0x29DC` / `0x29E4`; `reward_prize_0..6` from the table `0x580`,
+`crate::enemy::REWARDS`; a table with item chances is refused), `Behaviour::take_now` (what a handler does in the
+handler: the host applies it right after `on_hit`, not after the reaction), `Behaviour::on_defeat` (the killing hit's
+handler, before Re:CoM's defeat prizes).
+
+Not built: KH1's EXP number popup; the Gravity reward on every Gravity hit (`0x29BC`, needs KH1's hit attribute, not
+carried); ability `0x40`'s gate on `sys 194` (its name not read; Re:CoM has no such ability); the Jackpot factor.
+
+Assumptions: Re:CoM's HP prize is the right twin of KH1's HP ball (Re:CoM's heal amount, decision M10); the descriptor's
+`+0x2C` = 1 (the defeat EXP drop's; Pluto's 0xD3 use 0: only `+0x2E` bit 0 is read by the prize init `0x1402315B0`).
+
+### The burst's repel rows (owner 2026-11-02: "its burst repels Sora's swings" through the shared enemy guard)
+
+- Rows (Checked (files)): `0x38C` / `0x3FC` (right / left hand, HIT slot 0, hit bit A) and `0x46C` / `0x4DC` (slot 1, hit
+  bit B), all type 1, priority 40, recoil 205, 0.9 m, front cone turn 0 / **cos 1.0**, made with 204 at `0x12D4..0x132A`.
+  The asset step merges them into one guard row `burst` (`GuardSpec::also`: same clash numbers checked; windows of slots
+  0 and 1 joined: 204 [36, 48) and [108, 118)); the behaviour sends `Cmd::Guard` with 204 at each burst.
+- KH1's rule (§ Enemy guard), with Sora's Kingdom Key swing at priority 30: the row is 10 above, type 1 → it **repels**:
+  Sora gets kind 6 (diff −10: recoil 0x6E, pushed back 25), the Ghost the swing's record flagged 0x20 (no damage, no
+  reaction; its hit handler hears it: during a hold that is the reward, then the hit state). A Keyblade at 40: both kind
+  6 (the Ghost plays 205); above 40: the Ghost kind 6 (or 7 at 40+ under), Sora kind 6 with no push.
+- **KH1's front cone makes them inert in practice.** `0x1402B4640` tests a guard-type row only when the 3D cosine between
+  the owner's facing (`actor+0x30` = (sin yaw, 0, cos yaw), `0x140297E10`) and the vector to the attacker is at least
+  row `+0x64`; these rows hold **1.0** (the damaging rows' default), so the test passes only for an attacker exactly
+  along its facing, at exactly its height (a hovering Ghost never is). Sora's swings (`0x1402B2DC0` via `0x1402B3150`)
+  carry no flag 0x40 that would skip the test. Checked (decomp + exe + files). The port keeps the number (the
+  manifest's `cos` 1.0) and KH1's 3D test (`win::kh1_enemy::kh1_front`, before Re:CoM's apply): **in game, Sora's
+  swings should land on a bursting Ghost as before**. Owner question below.
+
 ### Re:CoM's side. Checked (exe + decomp)
 
 `CEnemySearchghost` (vtable `0x14054C408`, 139 slots, RTTI at −8), ctor `0x1401923F0` (`40 53 48 83 EC 20`: `CHeartless`'s
@@ -1065,7 +1136,7 @@ rip-relative operand: exe scan), allocation `0x1401891CF` `mov ecx, 0xCE0` → 0
 drain `e014_051`, `0x140192560` / `0x140192630`: when it lands, `+0x260 & 0x40`, **it heals 1/8 of its max HP**,
 `0x140181CE0(enemy, max / 8, 0, 0xB)`, with the effect `ex_2230` 0xB on bone 1, `0x1401A2D50`); its think is
 `CHeartless`'s `0x140196EC0`. Our copy: states 0, 1, 2, 3, 11, 12, 30, the think; KH1's burst in state 2, its drain in
-state 3 (Re:CoM's heal doesn't run: owner question 1). `EN0014.ASD`: 2 records at `0x6C`, tail `0x1AC` (id 0 `e014_050`
+state 3 (Re:CoM's 1/8 heal doesn't run; KH1's rule does, § The drain's heal and reward). `EN0014.ASD`: 2 records at `0x6C`, tail `0x1AC` (id 0 `e014_050`
 on `l_fing3b`, 0.5 m, [108, 118); id 1 `e014_051` on `l_fing3b`, 0.5 m, [30, 60)). `EN0014.SES`: Re:CoM's entries.
 
 Power mapping (decision M10, "the Re:CoM attack of the same kind"): the drain on id 1 (Re:CoM's drain `e014_051` is an
@@ -1084,6 +1155,11 @@ edit of KH1's 203); the burst on id 0 (Re:CoM's other attack; `e014_050` is not 
   child script) and `enemy::SIGHTS` (a bone code → `sight_bone`, KH1's parent rule).
 - `kh1_enemy::watchdog::QUIET_LIMIT` 600 → 900 (the idle search's silence, above). Every other enemy's outputs are
   unchanged (their asset tests pass; the new tables are keyed by enemy).
+- The drain rule (owner 2026-11-02): `Cmd::HealFull`, `Cmd::Reward` / `enemy::Reward`, `Behaviour::take_now`,
+  `Behaviour::on_defeat`; asset step `enemy::REWARDS`; sites `KH1_ENEMY_REWARD_CALLEES` (Re:CoM's enemy heal
+  `0x140181CE0`, its defeat EXP drop `0x1401810A0`) and the Ghost's vtable `+0x50` (prize point) / `+0x3D8` (guard event).
+- The repel (owner 2026-11-02): `HitNews::Repelled`, the guard event's repel and "neither" outcomes, KH1's 3D front cone
+  before Re:CoM's apply, merged guard rows (`GuardSpec::also`) (§ Enemy guard).
 
 ### What the asset step writes
 
@@ -1091,8 +1167,11 @@ edit of KH1's 203); the burst on id 0 (Re:CoM's other attack; `e014_050` is not 
 2 records kept + 6: the burst's two hands at each strike on `e014_114`, the drain's two hands on `e014_113`), `.SES`
 (Re:CoM's entries kept; the edits get their Re:CoM clip's sounds: the drain `e014_051`'s; the burst its template's at its
 window: Assumption), `kh1-searchghost.json` (`kh1-enemy 1`: 121 script constants read at checked offsets (and the stats
-block's two defaults), 2 from the child, `sight_bone`, 25 request words checked + 5 in the child, 2 attacks, 5 parts). Test:
-`searchghost::tests::builds_from_the_players_files`.
+block's two defaults), 2 from the child, `sight_bone`, 25 request words checked + 5 in the child, 2 attacks, 5 parts; since the
+drain rule also `reward_exp_div` / `reward_exp_add` (4 pushes checked) and `reward_prize_0..6` (the table `0x580`), and
+`guards`: the row `burst`). Test: `searchghost::tests::builds_from_the_players_files`. **Re-run the step** for these
+(`EN0014.ANN` / `.ASD` / `.SES` are byte-identical to the 0.76.0 step's; only `kh1-searchghost.json` changes; a 0.76.0
+manifest fails to load: no `reward_*`).
 
 ### Owner install steps
 
@@ -1125,10 +1204,20 @@ block's two defaults), 2 from the child, `sight_bone`, 25 request words checked 
 7. Guard the burst or the drain: KH1's clash recoil (205).
 8. Kill one: Re:CoM's prizes and EXP.
 9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Search Ghosts (its drain heals it 1/8 of its HP).
+10. The drain from close (the usual case: it drains while touching Sora): as its drain ends and it hovers off, its HP bar
+    goes back to full (the log: `heals to full HP`, `KH1's full heal … HP a -> max`).
+11. The drain from 1–3 m (step back as it drains): it hovers off with its HP unchanged; ~9.5 s later its HP bar goes back
+    to full.
+12. Hit it in those ~9.5 s: its HP stays down; EXP prizes and 3 HP prizes (Re:CoM's HP orbs) burst out of it; collecting
+    an HP prize heals Sora (Re:CoM's "Recover"). The log: `reward: EXP bonus EXP / 10 + 1 …`, `KH1's reward at … EXP bonus
+    n (Re:CoM's EXP e / 10 + 1)`, the prizes made. Hit it again: no second reward.
+13. Kill it with the hit that ends the hold: the reward's prizes, then Re:CoM's defeat prizes.
+14. The burst: Sora's swings land on a bursting Ghost (its repel rows never meet him, as in KH1: § The burst's repel rows).
+    The log: `guard row 0 with 204` at each burst, and no `guard event` line.
 
 Please send `kh1-recom.log` (`searchghost:` lines: `state …`, `attack 204 (burst), steered`, `attack 203 (drain), steered`,
-`its drain hit Sora`, `visible false` / `visible true`, `hittable …`, `target true`, `note: …`, the `rand` lines) and an F9
-trace.
+`its drain hit Sora`, `visible false` / `visible true`, `hittable …`, `target true`, `heals to full HP`, `KH1's full heal`,
+`reward`, `KH1's reward`, `guard row`, `guard event`, `note: …`, the `rand` lines) and an F9 trace.
 
 ### KH1 trace (what to record in KH1)
 
@@ -1144,7 +1233,8 @@ rows give the warp timings, the cone's reach and the drain's hold to compare.
 - KH1's world 11: its searches reach 100 m there (ported); **its appearance is skipped there in KH1, kept here** (owner
   2026-11-02, "battle spawns play KH1's appearance").
 - KH1's hit attribute (`hp[0xC] >> 6 & 15`) isn't carried: attribute 9 (damage only), 11 (no hit state) and 8 (Gravity's
-  reward) never come.
+  reward on every Gravity hit, `0x29BC`) never come.
+- The drain's reward: KH1's EXP popup number, ability `0x40`'s gate, the Jackpot factor (§ The drain's heal and reward).
 - The effects (`sys 75` 2 / 8 / 9 / 10 / 11, `sys 107` 5 / 6, the cone's `sys 109` 7, the drain's orb `sys 15` / `sys 16`:
   its flight is counted, not drawn), the alpha fades (no Re:CoM model alpha), flag 0x80 at the appearance, the lock point
   mask while it warps (Re:CoM's lockable flag stays, the Darkball's rule): the effects milestone (M13).
@@ -1159,6 +1249,16 @@ rows give the warp timings, the cone's reach and the drain's hold to compare.
 - The floor for `sys 89` is Sora's height when he last stood (**Assumption**: flat battle floors).
 
 ### Search Ghost owner questions
+
+Answered 2026-11-02: 1 (a) (built, § The drain's heal and reward), 2 (a) (built, § The burst's repel rows), 3 kept.
+
+4. **The burst's cone (new, 2026-11-02).** KH1's four type-1 rows have the front cone cos 1.0, so KH1's own test lets them
+   meet only a swing from exactly along its facing at exactly its height: in KH1 the burst practically never repels Sora
+   (Checked (decomp + exe + files); a KH1 trace swinging into a burst would confirm). Built: KH1's number (inert).
+   (a) Keep KH1's (1:1: the swings land); (b) give the rows a cone of their own as a deliberate change (for example the
+   front half, as the Bandit's block), behind an ini key, so the burst repels Sora's swings from in front (not 1:1).
+
+Earlier questions (kept for the record):
 
 1. **The drain and its HP.** KH1: a landed drain whose orb reaches the Ghost (from 1–3.2 m) is *held* for 568 frames
    (9.5 s); a hit in that time ends it and gives the party an EXP bonus (its level / 10 + 1) and 3 prizes; if nobody hits it,

@@ -152,6 +152,17 @@ unsafe fn drop_items(enemy: usize, point: usize) {
     }
 }
 
+/// A prize of Re:CoM's `kind` at `pos`, made as the defeat's EXP drop makes its prizes (Re:CoM's random
+/// float for the launch, its angle normaliser, its prize factory `0x1401A89C0(0x1401A8A80(), &desc, 0)`):
+/// M11, a KH1 script's reward (`win::kh1_enemy`). Re:CoM steps, draws, collects and times it out. The
+/// prize's address (0: none made).
+pub unsafe fn spawn_reward_prize(pos: [f32; 4], kind: u32) -> usize {
+    let (r1, r2) = (rand(), rand());
+    let mut desc = dr::reward_prize(pos, kind, r1, r2);
+    func::<AnglesFn>(ANGLES)(desc.angles.as_mut_ptr());
+    func::<SpawnFn>(SPAWN)(func::<FactoryFn>(FACTORY)(), &desc, 0)
+}
+
 /// Re:CoM's prize add (`0x1401F4AB0(kind, arg, mode)`): a gimmick card at Combat = KH1 is held
 /// (`super::gimmick`); a KH1 item prize is KH1's pickup; every other kind is Re:CoM's. Installed
 /// by the drops, or by the gimmick cards alone.

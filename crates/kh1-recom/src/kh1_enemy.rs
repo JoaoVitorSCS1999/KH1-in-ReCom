@@ -326,7 +326,10 @@ fn parse_guards(v: &json::Value, clips: &[Clip]) -> Result<Vec<ke::guard::GuardR
         if !(-1.0..=1.0).contains(&cos) {
             return Err(format!("guard {name}: cos {cos}"));
         }
-        out.push(ke::guard::GuardRow { name, clash_type, priority: priority as i32, recoil: recoil as u16, turn, cos, windows });
+        // Rows acting with it (the asset step's merged rows, `"also"`): KH1 row instances it stands for.
+        let also = g.get("also").and_then(|x| x.as_array()).map_or(0, |a| a.len());
+        let rows = u8::try_from(1 + also).map_err(|_| format!("guard {name}: {also} rows with it"))?;
+        out.push(ke::guard::GuardRow { name, clash_type, priority: priority as i32, recoil: recoil as u16, turn, cos, windows, rows });
     }
     Ok(out)
 }
@@ -360,13 +363,15 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Guard(None) => "guard rows end".into(),
         Cmd::Throw(n) => format!("throws its object {n}"),
         Cmd::Note(n) => format!("note: {n}"),
+        Cmd::HealFull => "heals to full HP (KH1's HP = max HP)".into(),
+        Cmd::Reward(r) => format!("reward: EXP bonus EXP / {} + {}, KH1 prizes {:?}", r.exp_div, r.exp_add, r.prizes),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Throw(_) | Cmd::Note(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Throw(_) | Cmd::Note(_) | Cmd::HealFull | Cmd::Reward(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -602,6 +607,8 @@ mod tests {
         // M11 (the Search Ghost): what KH1 does that isn't built is logged.
         assert_eq!(cmd_token(&Cmd::Note("x"), CLASSES[0].attack_names, &n), "note: x");
         assert!(logged(&Cmd::Note("x")));
+        assert!(logged(&Cmd::HealFull) && logged(&Cmd::Reward(ke::Reward { exp_div: 10, exp_add: 1, prizes: [0, 0, 0, 0, 3, 0, 0] })));
+        assert_eq!(cmd_token(&Cmd::Reward(ke::Reward { exp_div: 10, exp_add: 1, prizes: [0, 0, 0, 0, 3, 0, 0] }), CLASSES[0].attack_names, &n), "reward: EXP bonus EXP / 10 + 1, KH1 prizes [0, 0, 0, 0, 3, 0, 0]");
     }
 
     /// Re:CoM's worlds → KH1's world ids (decision 21's pairing): Traverse Town 3, Agrabah 8,

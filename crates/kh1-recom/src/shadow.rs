@@ -251,6 +251,8 @@ pub fn cmd_token(c: &Cmd) -> String {
         Cmd::Guard(g) => format!("guard {g:?}"),
         Cmd::Throw(n) => format!("throw {n}"),
         Cmd::Note(n) => format!("note: {n}"),
+        Cmd::HealFull => "heal full".into(),
+        Cmd::Reward(r) => format!("reward {r:?}"),
     }
 }
 

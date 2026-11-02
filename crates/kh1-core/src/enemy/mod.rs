@@ -31,7 +31,7 @@ pub mod thrown;
 
 pub use body::Body;
 pub use react::{get_up, landing, react, react_flying, Hit, Motions, Phase, ReactionStart};
-pub use script::{Cmd, Draw, World};
+pub use script::{Cmd, Draw, Reward, World};
 
 /// Whether a behaviour's body is in KH1's flight (movement state 4, [`Body::flying`]).
 pub fn flying(b: &dyn Behaviour) -> bool {
@@ -212,6 +212,12 @@ pub enum HitNews {
     Damage,
     /// Sora's Guard blocked its attack (KH1's reaction kinds 6 / 7: the clash).
     Clash,
+    /// One of its guard rows repelled an attack (`0x1402B4BC0`: a type 1 / 3 / 4 row with the higher
+    /// priority): KH1 gives it the attacker's hit record flagged 0x20 (`0x1402BF630`), which its
+    /// script's hit handler hears like any record, but which does no damage (`0x1402BEEE0` returns at
+    /// once) and plays no reaction (`0x1402B8E10` skips records with `& 0x22`). Checked (decomp).
+    /// M11 (the shared enemy-guard step's repel).
+    Repelled,
 }
 
 /// One KH1 enemy's behaviour as the host drives it: the AI frame (only while no action runs, as
@@ -297,6 +303,16 @@ pub trait Behaviour {
     /// table `+0x13C`) run their own scripts every frame all the same (M11, the Search Ghost's cone).
     /// The default: no children.
     fn side_frame(&mut self, _w: World) -> Vec<Cmd<u8>> {
+        Vec::new()
+    }
+    /// The killing hit (Re:CoM's defeat, state 30), before Re:CoM's defeat prizes: KH1's script hit
+    /// handler runs for it too, and some act before they apply its damage (the Search Ghost's reward
+    /// at `0x28A6` comes before `sys 44` and its death `0x2A14`). The default: nothing.
+    fn on_defeat(&self) {}
+    /// What a handler ([`Behaviour::on_hit`], [`Behaviour::on_defeat`]) did that KH1 does inside the
+    /// handler itself (M11, the Search Ghost's reward): the host applies these right after the call,
+    /// not at the next AI frame (the AI is paused while the reaction plays).
+    fn take_now(&self) -> Vec<Cmd<u8>> {
         Vec::new()
     }
 }

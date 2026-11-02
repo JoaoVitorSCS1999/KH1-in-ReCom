@@ -147,6 +147,10 @@ pub const CONSTS: &[(&str, &[usize])] = &[
     ("fly_check", &[0x336E, 0x34D4]),
     ("fly_detour_lo", &[0x34B0]),
     ("fly_detour_hi", &[0x34B6]),
+    // The hit handler's reward `sys 194(EXP / 10 + 1)`: while it holds a drain (`0x28D8` / `0x28E0`) and on a
+    // Gravity hit (`0x29DC` / `0x29E4`, not carried). Its prizes: `crate::enemy::REWARDS` (the table `0x580`).
+    ("reward_exp_div", &[0x28D8, 0x29DC]),
+    ("reward_exp_add", &[0x28E0, 0x29E4]),
 ];
 
 /// The request words `ex_2230.bd` pushes (bit 24: an action; bit 30: a request that clears the action flag when
@@ -200,8 +204,8 @@ pub const CHILD_REQUESTS: &[(u32, usize)] = &[(0, 0x248), (202, 0x260), (45, 0x2
 /// The burst's four 0.9 m rows (`0x38C` / `0x3FC` / `0x46C` / `0x4DC`, the hands at both strikes) are attack
 /// type 1 (row `+0x38` low bits), which never meets a hurt body (`0x1402B3BE0`: types 1 / 2 / 4 skip hurt bodies)
 /// and only Sora's attacks (the table `0x140528CB8`): a repel layer for his swings, not damage (Checked
-/// (decomp + exe)). They are not made as Re:CoM records; they wait for the shared enemy-guard step (owner
-/// 2026-11-02, the Bandit's spin repel).
+/// (decomp + exe)). They are not Re:CoM attack records: they are the shared enemy-guard step's row "burst"
+/// (`crate::enemy::GUARDS`, owner 2026-11-02).
 const DRAIN_R: RowSpec = RowSpec { at: 0xEC, recom_id: 1 };
 const DRAIN_L: RowSpec = RowSpec { at: 0x15C, recom_id: 1 };
 const BURST_R1: RowSpec = RowSpec { at: 0x1CC, recom_id: 0 };
@@ -265,6 +269,13 @@ mod tests {
         assert_eq!((get("orb_near"), get("orb_done"), get("orb_keep"), get("orb_up")), (320.0, 100.0, 0.95, 80.0));
         assert_eq!((get("drain_speed"), get("drain_near"), get("approach_near"), get("watch_near")), (20.0, 250.0, 450.0, 200.0));
         assert_eq!((get("search_lo"), get("search_hi"), get("roam_rounds"), get("hover_bursts")), (60.0, 600.0, 3.0, 3.0));
+        // The hold's reward: `sys 194(EXP / 10 + 1)` and the table `0x580`: 3 prizes of KH1 kind 4 (HP +5).
+        assert_eq!((get("reward_exp_div"), get("reward_exp_add")), (10.0, 1.0));
+        assert_eq!((0..7).map(|k| get(&format!("reward_prize_{k}"))).collect::<Vec<_>>(), vec![0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0]);
+        // The burst's guard row: the four type-1 rows as one, priority 40, recoil 205, cone cos 1.0, on in 204's
+        // two strikes.
+        assert!(b.manifest.contains("\"name\": \"burst\", \"row\": \"0x38c\", \"also\": [\"0x3fc\", \"0x46c\", \"0x4dc\"], \"slots\": [0, 1], \"type\": 1, \"priority\": 40, \"recoil\": 205"), "{}", b.manifest);
+        assert!(b.manifest.contains("\"cos\": 1.0, \"windows\": [{\"request\": 204, \"on\": [[36.0, 48.0], [108.0, 118.0]]}]"), "{}", b.manifest);
         assert_eq!((get("hover_side_lo"), get("hover_back_neg"), get("drain_back_dir"), get("rise_y")), (-120.0, -180.0, -3.0, -0.2));
         assert_eq!((get("weight"), get("walk_speed"), get("motion_blend"), get("air_accel")), (1.0, 2.0, 8.0, 0.1));
         let c = |r: u16| b.clips.iter().find(|c| c.request == r).unwrap().clone();
@@ -297,8 +308,9 @@ mod tests {
         assert_eq!((clip(4), win(4), id(4), bone(4)), ("e014_113".into(), (34, 54), 1, "r_hand1".into()), "the drain");
         assert_eq!((clip(5), win(5), id(5), bone(5)), ("e014_113".into(), (34, 54), 1, "l_hand1".into()));
         assert!((0..4).all(|i| (r(i) - 0.6).abs() < 1e-6) && (4..6).all(|i| (r(i) - 0.5).abs() < 1e-6));
-        // The clash recoil 205 is in the model: KH1's recoil when Sora guards either attack.
-        assert_eq!(b.manifest.matches("\"recoil\": 205").count(), 2);
+        // The clash recoil 205 is in the model: KH1's recoil when Sora guards either attack (and the burst's guard
+        // row's).
+        assert_eq!(b.manifest.matches("\"recoil\": 205").count(), 3);
         // SES: Re:CoM's entries kept; the drain's clip gets `e014_051`'s sounds (its edit).
         let s0 = crate::ses::parse(&inp.ses).unwrap();
         let s1 = crate::ses::parse(&b.ses).unwrap();
