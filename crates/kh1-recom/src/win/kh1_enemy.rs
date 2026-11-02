@@ -591,6 +591,7 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         if let Some(f) = rt.floor {
             rt.ai.set_floor(f);
         }
+        rt.ai.set_targeted(sora_targets(en));
         let w = World { step, pos, target: sora_pos(), grounded, airborne, moved, motion: rt.current };
         let cmds = rt.ai.frame(w);
         for c in &cmds {
@@ -633,6 +634,17 @@ unsafe fn body_step(en: usize, rt: &mut Runtime, step: f32, pos: Vec3) {
         vel[1] = v.y * k;
     }
     wr(mvr + mv::VEL, vel);
+}
+
+/// Whether Sora's target (Re:CoM's attack target `player+0x84C`, a handle; KH1's party 0 `+0x74`)
+/// is this enemy.
+unsafe fn sora_targets(en: usize) -> bool {
+    let pl: usize = rd(super::va(base(), data::MAIN_PLAYER));
+    if pl == 0 {
+        return false;
+    }
+    let h: i32 = rd(pl + 0x84C);
+    h > 0 && func::<HandleFn>(f::HANDLE_OBJ)(h as u32) == en
 }
 
 /// The battle floor for a flying body (`sys 89`): Sora's height while he stands on the floor
@@ -1023,6 +1035,9 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         // KH1's hit handler: a damaging hit or a clash (the Shadow ignores a clash).
         if CLASSES[rt.class].reads_hp {
             rt.ai.set_hp_ratio(hp_ratio(en));
+        }
+        if let Some(h) = hit {
+            rt.ai.set_hit_kind(h.kind);
         }
         rt.ai.on_hit(if rt.clash.is_none() { HitNews::Damage } else { HitNews::Clash });
         start_reaction(en, rt, hit)

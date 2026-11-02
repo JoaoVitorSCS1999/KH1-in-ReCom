@@ -221,4 +221,10 @@ pub trait Behaviour {
     /// One of its attacks met Sora (Re:CoM's `CCollAttack` apply answered 1, `0x14016F1C0`): KH1's
     /// attack object's hit callback (`+0x38`, M11 fliers), by the attack's index.
     fn on_landed(&self, _attack: u8) {}
+    /// The KH1 reaction kind of the hit the next [`Behaviour::on_hit`] reports (the hit record's
+    /// `+0xC & 0x1F`, which KH1's script hit handlers read: `hp[0xC] & 31`; M11 fliers).
+    fn set_hit_kind(&self, _kind: u8) {}
+    /// Whether Sora's target is this enemy (KH1's `*(party 0 + 0x74)`; Re:CoM's attack target
+    /// `player+0x84C`), each frame before [`Behaviour::frame`] (M11 fliers).
+    fn set_targeted(&self, _by_sora: bool) {}
 }
