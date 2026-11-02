@@ -587,7 +587,7 @@ unsafe fn release_aero(pl: usize, c: &CastStart) -> Option<u32> {
 
 /// Re:CoM's Aero shot (the case's `CBullet`: flags 7, pitch −π/2, the row's set) at Sora, alive for the
 /// barrier; for Aerora / Aeroga KH1's wind (radius 80 cm × Sora's size, Assumption: 1.0; the KH1
-/// row's kind 1, Re:CoM's aero attribute 1), else its attack held off.
+/// row's kind 1 and the cast's AP / attribute), else its attack held off.
 unsafe fn aero_shot(pl: usize, r: &[u8; 16], level: u8, wind: bool, frames: f32, at: [f32; 4]) -> Option<u32> {
     let ang = func::<AnglesFn>(ANGLES)(pl);
     let ang: [f32; 4] = if ang.is_null() { [0.0; 4] } else { std::ptr::read_unaligned(ang) };
@@ -595,9 +595,13 @@ unsafe fn aero_shot(pl: usize, r: &[u8; 16], level: u8, wind: bool, frames: f32,
     let dp = d.0.as_mut_ptr();
     func::<DescInitFn>(DESC_INIT)(dp, 1, 3);
     let w = |o: usize| dp.add(o);
-    std::ptr::write_unaligned(w(0x68) as *mut u32, r[0xB] as u32);
-    std::ptr::write_unaligned(w(0x6C) as *mut u32, RECOM_ATTR[mg::spell::AERO as usize]);
-    std::ptr::write_unaligned(w(0x70) as *mut i32, rd::<i32>(pl + f::ATTACK_STAT));
+    // The cast's attack fields (`start_cast`): the KH1 row's kind, and the AP / attribute it wrote
+    // (the cardless AP and Re:CoM's aero attribute 1; at Damage = Re:CoM in battle, Re:CoM's Aero
+    // card's / Aerora's / Aeroga's AP and attribute, `super::damage::spell`), carried by every
+    // re-hit of the wind.
+    std::ptr::write_unaligned(w(0x68) as *mut u32, rd::<u32>(pl + f::KIND));
+    std::ptr::write_unaligned(w(0x6C) as *mut u32, rd::<u32>(pl + f::ATTR));
+    std::ptr::write_unaligned(w(0x70) as *mut i32, rd::<i32>(pl + f::AP));
     std::ptr::write_unaligned(w(0x0C) as *mut u32, 0x8000_0000);
     let flags = if wind { AERO_FLAGS | 4 } else { AERO_FLAGS | 4 | COLLISION_HELD };
     std::ptr::write_unaligned(w(0x60) as *mut u64, flags);
@@ -774,6 +778,20 @@ pub mod enemy_stop {
     /// The duration kind 8 stores (`mov [rbx+0x2D8],eax`, `0x14017DCCA`), copied into the stop
     /// state's timer `+0x160` by its begin (`0x14017C7F4`); both i32. Checked (disasm).
     pub const DURATION: usize = 0x2D8;
+}
+
+/// Re:CoM's Gravity flatten state (`enemy+0xAC0`, entered by the reaction picker's case 0xD,
+/// `0x14017D626`; its exe `0x140183BA0` squashes the height to the timer ÷ 250 (≥ 0.1), holds it
+/// 9000 ticks, then sets it back to 1.0). Checked (decomp + disasm).
+const FLATTEN_STATE: usize = 0xAC0;
+
+/// Whether the enemy is in (or entering) Re:CoM's Gravity flatten: its height is Re:CoM's then
+/// (KH1's squash under a falling sphere leaves it, as KH1's own squash skips its flattened
+/// actors, requests 0x66..0x68 in `0x140297FE0`).
+pub unsafe fn flattening(enemy: usize) -> bool {
+    use enemy_stop::NEXT_STATE;
+    let st = enemy + FLATTEN_STATE;
+    rd::<usize>(enemy + held::CUR_STATE) == st || rd::<usize>(enemy + NEXT_STATE) == st
 }
 
 /// Whether Re:CoM's hit handler has just sent the enemy to its stop state (`+0x68` = `+0x940`,
@@ -1234,6 +1252,10 @@ unsafe fn squash_frame(falling: &[(u8, [f32; 3], f32)]) {
         if alive_enemy(e.h).is_some() && stopped(obj) {
             return true;
         }
+        // Re:CoM's Gravity flatten (Damage = Re:CoM: the impact's kind 0xD) owns the height now.
+        if flattening(obj) {
+            return false;
+        }
         let y = e.s.step(e.under);
         e.under = false;
         set_height(obj, e.base * y);
@@ -1249,7 +1271,7 @@ unsafe fn squash_frame(falling: &[(u8, [f32; 3], f32)]) {
         let area = mg::Area::Sphere { radius: mg::squash::radius_at(level, fallen) };
         for (h, _) in lock_on_list(0, false) {
             let Some(e) = alive_enemy(h) else { continue };
-            if !bodies(e).iter().any(|(_, b)| mg::body_touches(centre, area, b)) {
+            if flattening(e) || !bodies(e).iter().any(|(_, b)| mg::body_touches(centre, area, b)) {
                 continue;
             }
             if let Some(s) = g.iter_mut().find(|s| s.h == h) {

@@ -668,6 +668,13 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     if let Some(d) = kh1 {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
     }
+    // Damage = Re:CoM (owner, 2026-11-01, follow-ups): Gravity Break and Zantetsuken take KH1's
+    // percentage of the enemy's Re:CoM current HP instead of the card's column 2.
+    let pct = if recom { row.and_then(|r| super::stats::recom_percent_hit(enemy, r, super::stats::sora_level(), hp, max_mp)) } else { None };
+    if let Some(d) = pct {
+        wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
+        super::damage::note(|| format!("swing row {}: KH1's % of Re:CoM's HP {hp} = {d} (was the card's AP {carried})", row.unwrap_or(0)));
+    }
     let flags: u64 = rd(enemy + 0x260);
     let force = flags & 1 != 0 && flags & 0x200_0000 == 0;
     if force {
@@ -685,6 +692,7 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {
             let tag = match (recom, row) {
+                (true, Some(_)) if pct.is_some() => format!(":kh1pct {}", pct.unwrap_or(0)),
                 (true, Some(r)) => super::damage::swing_tag(r, carried as i32),
                 _ => kh1.map_or(String::new(), |d| format!(":kh1 {d}")),
             };
@@ -707,15 +715,16 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
     }
     let max_mp = super::mp::current().map(|v| v.1);
     let hp_now: i32 = rd(enemy + 0x274);
-    // Damage = Re:CoM (owner, 2026-11-01): Fire / Blizzard / Thunder carry their Re:CoM card's /
-    // sleight's AP and attribute from the cast (`super::damage::spell`); Re:CoM's path applies them
-    // (its resistance included). Gravity, Stop and Aero keep KH1's rules (owner questions).
+    // Damage = Re:CoM (owner, 2026-11-01): Fire / Blizzard / Thunder / Gravity / Aero's wind carry
+    // their Re:CoM card's / sleight's AP and attribute from the cast (`super::damage::spell`),
+    // Gravity also Re:CoM's kind 0xD (its % of the current HP, its gate `+0x40`, its boss rule and
+    // its 3-second flatten); Re:CoM's path applies them (its resistance included).
     let recom = super::damage::recom_spell_hits(s);
     let carried: i16 = rd(part + 0x92);
     let mut kh1 = if recom { None } else { crate::magic::spell_attack(s, lv).and_then(|data| max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m, hp_now))) };
     // Gravity on an enemy without KH1 numbers (7.8): KH1's % of its current HP at 100 % (KH1's
-    // ordinary Heartless), at least 1. Re:CoM's own AP is no Gravity number.
-    if kh1.is_none() && s == crate::magic::spell::GRAVITY {
+    // ordinary Heartless), at least 1. Re:CoM's own AP is no Gravity number at KH1's rules.
+    if !recom && kh1.is_none() && s == crate::magic::spell::GRAVITY {
         kh1 = max_mp.map(|m| crate::magic::gravity_damage(lv, m, hp_now, 1.0, 0));
     }
     let attr: u32 = rd(part + super::magic::PART_ATTR);
@@ -723,8 +732,11 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
         wr(part + super::magic::PART_ATTR, super::magic::NEUTRAL_ATTR);
     }
+    // Re:CoM's own gate for its kind (Gravity `+0x40`) at Damage = Re:CoM: an immune enemy's attack
+    // goes on (no card interrupt for a hit Re:CoM refuses), as Stop's.
+    let gate = if recom { super::damage::recom_gate_open(enemy, s) } else { None };
     let flags: u64 = rd(enemy + 0x260);
-    let force = flags & 1 != 0 && flags & 0x200_0000 == 0;
+    let force = crate::damage::interrupts(flags, gate);
     if force {
         wr(enemy + 0x260, flags | 0x200_0000);
     }
@@ -743,9 +755,15 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
     super::guard::after_enemy_hit(enemy, r, hp);
     let after: i32 = rd(enemy + 0x274);
     let name = crate::magic::spell::NAMES.get(s as usize).copied().unwrap_or("?");
+    let flat = recom && s == crate::magic::spell::GRAVITY && super::magic::flattening(enemy);
     super::magic::hit_line(|| {
         let what = if recom { format!("Re:CoM AP {carried} ({})", super::damage::spell_tag(s, lv, carried as i32).trim_start_matches(':')) } else { format!("KH1 {}", kh1.map_or("- (no KH1 numbers: Re:CoM's)".to_string(), |d| d.to_string())) };
-        format!("hit {name}{lv} on {:#x}: {what} (max MP {}), Re:CoM took {} -> HP {after}{}", enemy & 0x00FF_FFFF, max_mp.unwrap_or(0), hp - after, if force { " (card broken)" } else { "" })
+        let g = match gate {
+            Some(true) => ", Re:CoM's gate open",
+            Some(false) => ", Re:CoM's gate shut: immune",
+            None => "",
+        };
+        format!("hit {name}{lv} on {:#x}: {what} (max MP {}){g}, Re:CoM took {} -> HP {after}{}{}", enemy & 0x00FF_FFFF, max_mp.unwrap_or(0), hp - after, if force { " (card broken)" } else { "" }, if flat { ", Re:CoM's flatten state" } else { "" })
     });
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {
@@ -771,6 +789,9 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
 /// after the handler (`stop::timer_after_entry`), before the stop state's begin copies it.
 unsafe fn stop_hit(enemy: usize, part: usize, lv: u8, o: PlRetFn) -> u64 {
     use crate::magic::stop;
+    if super::damage::recom_spell_hits(crate::magic::spell::STOP) {
+        return recom_stop_hit(enemy, part, lv, o);
+    }
     let max_mp = super::mp::current().map_or(0, |v| v.1);
     let rec = super::stats::kh1_record(enemy);
     let r9 = rec.as_ref().map_or(1.0, |t| t.resist.get(9).copied().unwrap_or(100) as f32 / 100.0);
@@ -817,6 +838,52 @@ unsafe fn stop_hit(enemy: usize, part: usize, lv: u8, o: PlRetFn) -> u64 {
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {
             g.push(format!("e{:x}:stop{lv}:{}", enemy & 0x00FF_FFFF, ticks.map_or("immune".to_string(), |t| format!("{t}t"))));
+        }
+    }
+    r
+}
+
+/// Damage = Re:CoM (owner, 2026-11-01, follow-ups), in a battle room: **Re:CoM's own Stop**. The
+/// strike carries Re:CoM's Stop card's / Stopra's / Stopga's AP (9000 / 15000 / 21000 ticks in the
+/// session's `SY0002.BIN`) and kind 8 from the cast (`super::damage::spell`); Re:CoM's handler
+/// applies its own gate (param `+0x2C`: 0 = immune) and puts the AP in `+0x2D8`, and its stop
+/// state's begin in its timer (`0x14017DC50` case 8, `0x14017C740`). Nothing of KH1's duration or
+/// `resist[9]`. Kept from KH1 (its cast, not its numbers): the card interrupt on an attacking,
+/// non-immune enemy (decision 14), its attack bodies off once stopped, the held hits' pace.
+unsafe fn recom_stop_hit(enemy: usize, part: usize, lv: u8, o: PlRetFn) -> u64 {
+    let carried: i16 = rd(part + 0x92);
+    let gate = super::damage::recom_gate_open(enemy, crate::magic::spell::STOP);
+    let flags: u64 = rd(enemy + 0x260);
+    let force = crate::damage::interrupts(flags, gate);
+    if force {
+        wr(enemy + 0x260, flags | 0x200_0000);
+    }
+    let r = o(enemy);
+    if force {
+        let now: u64 = rd(enemy + 0x260);
+        wr(enemy + 0x260, now & !0x200_0000);
+    }
+    let entered = super::magic::stop_entering(enemy);
+    let off = entered && super::magic::stop_attacks_off(enemy);
+    let duration: i32 = rd(enemy + super::magic::enemy_stop::DURATION);
+    super::magic::hit_line(|| {
+        format!(
+            "hit stop{lv} on {:#x}: Re:CoM AP {carried} ({}){}{}{}",
+            enemy & 0x00FF_FFFF,
+            super::damage::spell_tag(crate::magic::spell::STOP, lv, carried as i32).trim_start_matches(':'),
+            match gate {
+                Some(true) => ", Re:CoM's gate open",
+                Some(false) => ", Re:CoM's gate shut: immune",
+                None => ", no param block",
+            },
+            if force { " (its attack broken)" } else { "" },
+            if off { format!(", Re:CoM's stop state for {duration} ticks ({:.0} frames), its attacks off", duration as f32 / 50.0) } else { format!(", not stopped: Re:CoM's handler -> {r}") }
+        )
+    });
+    if let Ok(mut g) = HIT_LOG.lock() {
+        if g.len() < 16 {
+            let what = if gate == Some(false) { "immune".to_string() } else { format!("{carried}t") };
+            g.push(format!("e{:x}:stop{lv}:{what}{}", enemy & 0x00FF_FFFF, super::damage::spell_tag(crate::magic::spell::STOP, lv, carried as i32)));
         }
     }
     r

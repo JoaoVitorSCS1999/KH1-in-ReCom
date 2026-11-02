@@ -1,5 +1,6 @@
 //! The "Damage" setting at runtime (`crate::damage`; `docs/recom-kh1-attack.md` § Re:CoM damage
-//! setting). Read once at start from `kh1-recom.ini` (`damage = recom | kh1`).
+//! setting). Read once at start from `kh1-recom.ini` (`damage = recom | kh1`); ini only, no Config
+//! row (owner, 2026-11-01).
 //!
 //! At Damage = Re:CoM (the default), in battle, the AP of a KH1 attack is what Re:CoM's own code
 //! writes for the card / sleight it stands for, in the same player fields (`+0x660` AP, `+0x66C`
@@ -16,7 +17,7 @@
 use super::movement::{func, p, rd, wr};
 use super::{base, log, va};
 use crate::damage::{self as dm, RecomAp, Rule, Table};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 
 /// Damage = KH1 (decisions 12 / 21); false = Re:CoM (the default).
 static KH1: AtomicBool = AtomicBool::new(false);
@@ -42,7 +43,7 @@ mod f {
 const CARD_ROWS: u16 = 0x7F;
 const SLEIGHT_ROWS: u16 = 0x96;
 
-fn note(line: impl FnOnce() -> String) {
+pub(super) fn note(line: impl FnOnce() -> String) {
     if LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
         log(&format!("damage: {}", line()));
     }
@@ -160,9 +161,28 @@ pub unsafe fn special(pl: usize, recom_id: u32) -> bool {
 }
 
 /// A KH1 cast's AP (`win::magic::start_cast`, after its kind is written): Fire / Blizzard /
-/// Thunder take their Re:CoM magic card's (level 1) or sleight's (2, 3) AP, as `initMagic` /
-/// `initStockSkill` compute it.
+/// Thunder / Gravity / Stop / Aero take their Re:CoM magic card's (level 1) or sleight's (2, 3) AP
+/// and attribute, as `initMagic` / `initStockSkill` compute them; Gravity and Stop also Re:CoM's
+/// kind of that card / sleight (0xD, 8: `dm::recom_kind`), which `initMagic` writes from the row's
+/// `+0xB` before its rewrite. Each release reads the player's fields into its shots.
 pub unsafe fn spell(pl: usize, s: u8, level: u8) -> bool {
+    let done = spell_ap(pl, s, level);
+    // Gravity / Stop: whether this cast's hits are Re:CoM's (its AP and kind were written).
+    if dm::needs_recom_kind(s) {
+        let bit = 1u8 << (s & 7);
+        if done {
+            RECOM_CAST.fetch_or(bit, Ordering::AcqRel);
+        } else {
+            RECOM_CAST.fetch_and(!bit, Ordering::AcqRel);
+        }
+    }
+    done
+}
+
+/// The spells (bit = spell id) whose last cast took Re:CoM's AP and kind (Gravity, Stop).
+static RECOM_CAST: AtomicU8 = AtomicU8::new(0);
+
+unsafe fn spell_ap(pl: usize, s: u8, level: u8) -> bool {
     if !recom_ready() || !dm::recom_spell(s) || !in_battle(pl) {
         return false;
     }
@@ -171,12 +191,21 @@ pub unsafe fn spell(pl: usize, s: u8, level: u8) -> bool {
         note(|| format!("spell {s} level {level}: Re:CoM's table isn't loaded: cardless AP"));
         return false;
     };
+    let kind = dm::recom_kind(s, level);
+    if let Some(k) = kind {
+        wr(pl + f::KIND, k);
+    }
     let stat: i32 = rd(pl + f::ATTACK_STAT);
     let a = dm::row_ap(src.table, &r, src.col, stat, src.rule);
     let after = apply(pl, &a);
+    let rule = match src.rule {
+        Rule::Stat => format!("x attack {stat} / 100"),
+        Rule::Tenth => "x 10 / 100".into(),
+        Rule::Raw => "as is".into(),
+    };
     note(|| {
         format!(
-            "{}{level}: Re:CoM {} {:#x} (row {:#x}) column {}: power {} x attack {stat} / 100 = AP {}{} (attribute {})",
+            "{}{level}: Re:CoM {} {:#x} (row {:#x}) column {}: power {} {rule} = AP {}{} (attribute {}{})",
             crate::magic::spell::NAMES.get(s as usize).copied().unwrap_or("?"),
             src.table.name(),
             src.id,
@@ -185,15 +214,36 @@ pub unsafe fn spell(pl: usize, s: u8, level: u8) -> bool {
             a.power,
             a.ap,
             if after != a.ap { format!(" -> {after} (rewrite)") } else { String::new() },
-            a.attr
+            a.attr,
+            kind.map_or(String::new(), |k| format!(", Re:CoM's kind {k:#x}"))
         )
     });
     true
 }
 
-/// A KH1 spell's hits take Re:CoM's damage (no KH1 override in the enemy-hit wrapper).
+/// A KH1 spell's hits take Re:CoM's damage (no KH1 override in the enemy-hit wrapper). Gravity and
+/// Stop only when their cast took Re:CoM's card AP and kind (a battle room with the live tables);
+/// otherwise (the field) they keep KH1's rules, as they had no Re:CoM number to carry.
 pub fn recom_spell_hits(s: u8) -> bool {
-    !kh1() && dm::recom_spell(s)
+    if kh1() || !dm::recom_spell(s) {
+        return false;
+    }
+    if dm::needs_recom_kind(s) {
+        return RECOM_CAST.load(Ordering::Acquire) & (1u8 << (s & 7)) != 0;
+    }
+    true
+}
+
+/// Re:CoM's own gate for a spell's kind on this enemy (`dm::recom_gate_offset`: Stop `+0x2C`,
+/// Gravity `+0x40` of the param block `+0x308`): Some(open), None for other spells or no param
+/// block (Re:CoM's kind would then read null; it never meets one in a battle room).
+pub unsafe fn recom_gate_open(enemy: usize, s: u8) -> Option<bool> {
+    let off = dm::recom_gate_offset(s)?;
+    let param: usize = rd(enemy + 0x308);
+    if param == 0 {
+        return None;
+    }
+    Some(rd::<i32>(param + off) != 0)
 }
 
 /// The hits trace's tag for a KH1 swing or special hit carrying `value` at Damage = Re:CoM.

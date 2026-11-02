@@ -360,7 +360,8 @@ passes through there). Code: `crate::damage` (testable), `win::damage`.
   | 18, 17 | air swing 1, air swing 2 | 0, 1 | Re:CoM rows 6 / 5 they are built on |
   | 1, 2 | jump-up, hop | 1, 0 | Re:CoM rows 5 / 6 |
   | 0 | Aerial Sweep | 1 | Re:CoM row 5 |
-  | 3, 4, 5 | Stun Impact, Gravity Break, Zantetsuken | 2 | Re:CoM row 4 (finisher slot) |
+  | 3 | Stun Impact | 2 | Re:CoM row 4 (finisher slot) |
+| 4, 5 | Gravity Break, Zantetsuken | 2 at the swing's start; **at the hit KH1's % of Re:CoM's HP** | owner (follow-ups): below |
   | 9, 10 | Sliding Dash, Vortex | 0 | Re:CoM rows 1 / 2 |
   | 0x3E | Counterattack | 0 | built on Re:CoM row 1 |
   | 0x1B..0x21 | Sonic Blade | sleight | `recom-m9-abilities.md` § 9c.1 |
@@ -369,6 +370,34 @@ passes through there). Code: `crate::damage` (testable), `win::damage`.
 - **Spells / specials**: `recom-m7-magic.md` § Spell damage at Damage = Re:CoM;
   `recom-m9-abilities.md` § 9c.1 Sonic Blade at Damage = Re:CoM.
 - **Per frame**: nothing new (one compare in the enemy-hit wrapper per hit).
+
+### Gravity Break and Zantetsuken: KH1's % of Re:CoM's HP (owner, 2026-11-01, follow-ups)
+
+> "Gravity Break and Zantetsuken take KH1's percentage of Re:CoM's HP" (instead of the Keyblade
+> card's column 2)
+
+- **KH1's rule** (`0x1402BFA80`, the % of HP element 8, `(+0x30 & 0x3C0) == 0x200`; Checked (KH1
+  decomp)): power = the record's power `+0x14` + the stat term `+0x2C` (+ the attack's crit bonus,
+  attack `+0x98`, on a crit); damage = `(int)((float)HP × ((float)power / 100) × resist8)` with **HP = the
+  defender's current HP** (stats `+0x3C`; `+0x40` is the max, `recom-m8-items.md`), `resist8` =
+  stats `+0x98`; **at least the record's floor** (`+0xC0`, 1 when it is under 2); **no Defence, no
+  curve, no cap**, no Aero halving. Truncated toward zero.
+- **The two records** (btltbl, Checked (files), `kh1_core::data`): Gravity Break `0x4F68` power
+  **40 + Strength** (stat source 0), crit 200 with bonus 0 (a crit changes nothing); Zantetsuken
+  `0x4FD8` power **250**, stat source 2 (no stat term), crit 200 bonus 0.
+- **Bosses** (KH1's rule): the record's `resist[8]` scales it and the floor holds it up; no other
+  boss rule in `0x1402BFA80`.
+- **At Damage = Re:CoM** (`damage::percent_of_hp_row`, `attack::kh1_percent_of_hp`,
+  `win::stats::recom_percent_hit`, in the enemy-hit wrapper): the swing starts as every swing
+  (the card's column 2 AP and attribute, Re:CoM's rewrite); at the hit, the part's value
+  becomes KH1's number with **HP = the enemy's Re:CoM current HP** `+0x274`, Sora's KH1 Strength
+  (level + Keyblade, as at Damage = KH1) and the enemy's KH1 record (twin / proxy / boss twin)
+  for `resist[8]` and the floor; no record: 100 %, floor 1. Re:CoM's path then applies its extras
+  (weak part, back bonus, its resistance for the card's attribute, `+0x290`, the boss rule
+  `0x14015D940`) as for every KH1 hit (decision 13). The part's `+0x92` is an i16: values over
+  32767 are cut (Zantetsuken on more than 13106 HP left).
+- Trace hits: `…:kh1pct <value>`; log `damage: swing row 4: KH1's % of Re:CoM's HP <hp> = <v>`.
+- Tests: `attack::tests::percent_rows_on_recoms_hp`, `damage::tests::percent_rows_are_gravity_break_and_zantetsuken`.
 
 ### Sites (`sites::DAMAGE_CHECKED`, bytes re-read with pefile; checked at start)
 
@@ -379,6 +408,10 @@ passes through there). Code: `crate::damage` (testable), `win::damage`.
 | `0x1401F0EEA` | `initAttack`'s bonus (20 bytes) | checked |
 | `0x140160849` / `0x140160879` | `CCardBattle` stores of `0x14087A808` / `0x14087A810` | checked: the pointers read |
 | `0x140219B27` | `exeStockSkill`'s Sonic Blade dash AP (38 bytes) | checked |
+| `0x14017DD4C` | kind 0xD: the gate `param+0x40`, then current HP × AP (39 bytes) | checked: Re:CoM's Gravity relied on |
+| `0x14017D626` | the reaction picker's case 0xD → flatten state `+0xAC0` (22 bytes) | checked: `win::magic::flattening` |
+| `0x140183CFB` | the flatten exe's hold `+0x160 = 9000` (10 bytes) | checked |
+| `0x14017DCB5` | kind 8: the gate `param+0x2C`, AP → `+0x2D8` | already `MAGIC_CHECKED` (7.9) |
 
 ### Logs and trace
 
@@ -395,16 +428,17 @@ passes through there). Code: `crate::damage` (testable), `win::damage`.
 - Checked (decomp + disasm + exe): the formula, the columns, the bonus, the tables' layout; tests
   for the columns, the AP arithmetic (truncation, bonus, ×1.5, status bits) and the setting's parse
   and default; the Windows build; all sites with pefile.
+- Checked (KH1 decomp + files; tests): Gravity Break's and Zantetsuken's % rule and records.
 - Not checked: in game; that `0x1401E66A0` leaves the AP alone at Combat = KH1 (it should: no
   enemy card of Sora's side; the log prints any change).
 - Assumption: `player+0x390` ≠ 0 exactly in Re:CoM's battle room (the swing's card AP is used only
   then).
 
-### Not available yet: a Config row
+### The setting stays ini-only (owner, 2026-11-01)
 
 Re:CoM's Config screen has 21 item slots and all are used (Combat 3, Guard reactions 2, Enemy
-pace 2; `recom-config-menu.md` § Room for more rows), so "Damage" is an ini key for now
-(`damage = recom | kh1`, read at start). Owner question (options in the report).
+pace 2; `recom-config-menu.md` § Room for more rows). Owner's choice: "Damage" stays an **ini key
+only**, `damage = recom | kh1` in `kh1-recom.ini`, read at start (default `recom`); no Config row.
 
 ### What the owner should test
 
@@ -422,6 +456,11 @@ pace 2; `recom-config-menu.md` § Room for more rows), so "Damage" is an ini key
 5. `damage = kh1`: everything as before this version (`:kh1 <damage>` in the trace).
 6. Air combo, Counterattack, Sliding Dash / Blitz / Ripple Drive etc.: their `col` in the trace as
    in the table above.
+7. Gravity Break (Re:CoM level 30, equipped) and Zantetsuken: the trace's hits show `:kh1pct <v>`
+   and the log `damage: swing row 4: KH1's % of Re:CoM's HP <hp> = <v>`: Gravity Break takes
+   (40 + KH1 Strength) % of the HP the enemy has left (e.g. Strength 51: 91 %), Zantetsuken 250 %
+   (an ordinary Heartless dies); a boss takes its KH1 `resist[8]` share (e.g. 2 %), at least its
+   floor. With `damage = kh1`: as before.
 
 ## Sora's KH1 Strength (decision 18: keep the Rod, give up the Shield)
 

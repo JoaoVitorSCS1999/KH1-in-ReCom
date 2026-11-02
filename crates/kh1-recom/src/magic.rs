@@ -716,7 +716,9 @@ pub const RECOM_GRAVITY_ROWS: [[u8; 16]; 3] = [
 /// The KH1 Gravity row: Re:CoM's row (clip, blend, `grav_all` set, its sphere's `+5` / `+0xD`:
 /// decision 34) with `+3` = 0, **`+0xB` = 1** (Re:CoM's flinch: Re:CoM's kind 0xD is its own %-of-HP
 /// damage with an integer % and a 3-second squash, `0x14017DC50` / state `+0xAC0`; KH1's number
-/// is written as the hit's value instead) and `+0xF` = 0x80.
+/// is written as the hit's value instead) and `+0xF` = 0x80. At Damage = Re:CoM in a battle room
+/// the cast writes Re:CoM's kind 0xD into `+0x668` instead (`crate::damage::recom_kind`), so the
+/// sphere's hit is Re:CoM's own Gravity.
 pub fn gravity_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
     let mut b = *recom;
     b[3] = 0;

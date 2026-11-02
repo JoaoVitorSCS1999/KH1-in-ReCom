@@ -618,6 +618,19 @@ pub fn kh1_damage_at(m: &Moveset, kh1_row: usize, sora: Sora, weapon: &WeaponDat
     Some(kh1_core::damage::compute_damage(&live, &kh1_core::DamageCurve::kh1_defaults(), &stats, rng))
 }
 
+/// Damage = Re:CoM (owner, 2026-11-01): Gravity Break and Zantetsuken take **KH1's percentage of
+/// Re:CoM's HP** (`crate::damage::percent_of_hp_row`): [`kh1_damage_at`] with `hp_now` = the
+/// enemy's Re:CoM current HP, the KH1 record's `resist[8]` and floor (its twin / proxy / boss twin:
+/// KH1's boss rule), or, with no record, 100 % and no floor (1), as the Gravity spell's fallback.
+/// None for any other row.
+pub fn kh1_percent_of_hp(m: &Moveset, kh1_row: usize, sora: Sora, weapon: &WeaponData, record: Option<&EnemyStats>, hp_now: i32, rng: &mut kh1_core::Kh1Rand) -> Option<i32> {
+    if !crate::damage::percent_of_hp_row(kh1_row, m) {
+        return None;
+    }
+    let plain = EnemyStats { hp: hp_now, strength: 0, defence: 0, min_damage: 0, max_damage: 0, level: 1, exp: 0, resist: [100; 16] };
+    kh1_damage_at(m, kh1_row, sora, weapon, record.unwrap_or(&plain), hp_now, rng).map(|d| d.damage)
+}
+
 /// One Keyblade Sora can equip at the KH1 setting (decision 25), keyed by Re:CoM's Keyblade card
 /// kind (1 Kingdom Key … 0x18 Bond of Flame; table `0x1405256D0`).
 #[derive(Clone, Debug, PartialEq)]
