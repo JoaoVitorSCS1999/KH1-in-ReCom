@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 114: Revenge moves can't be damaged or interrupted, version 0.65.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "the humanoid bosses that have revenge value can't be damaged or interrupted during their
+  retaliation move".
+- Re:CoM's own rule: its hit handler `0x14017F7E0` drops hits while `+0x260` bit 0 is set without `0x2000000`, and
+  `0x14017DA80` turns the attacker's hurt bodies off (Checked (decomp)). For the attack a revenge started only, our
+  hurt-off wrapper lets Re:CoM's body-off run and every hit source (swings, spells, Stop, turned-back shots, Re:CoM's
+  own) reaches the handler without the interrupt bit; the swing / spell record is used up; Guard's flinch on the boss
+  skipped. Window ends at Re:CoM's attack-state end `0x14017DA90` (new hook, 8 bytes moved; no branch into them).
+- Meter: nothing adds during the window (bodies off: hits never meet the boss, as KH2's add needs contact); keeps
+  draining. Revenge tail 0x20 → 0x30 bytes.
+- Windows: Vexen 5 s of needles; Hades' state 5 = wind-up + 4 / 8 / 12 s spinning (owner question); Cloud's chase has
+  no time limit. Found, not changed: the revenge check fires on the flinch's first frame (`+0x68` zeroed after each
+  change by `0x140242F50`), not frame 20 (owner question).
+- Checked: tests, Windows build, sites. Not checked: in game; enemy motion lengths.
+
+---
+
 ## Stage 113: Gimmick cards: the HP drop at 50 % only, version 0.64.1 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "only drop one at 50% and occasionally when guarding".
