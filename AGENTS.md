@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 97: Stop works on attacking enemies; its full duration, version 0.54.1 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "stop doesnt seem to work". Log `kh1-recom-stop-0530.log`: eight Stopga strikes
+  reached Re:CoM's handler, none entered its stop state.
+- Cause (Checked (decomp + disasm)): Re:CoM's enemy hit handler `0x14017F7E0` drops any hit on an enemy in an
+  attack (`+0x260 & 1`, `0x14017F8CB`) unless the card-interrupt bit `0x2000000` is set; every other KH1 hit
+  sets it (decision 14), Stop's never did (since 0.23.0). Not a regression from 0.50.0. That each of the
+  eight strikes met an attacking enemy: Assumption (the old log didn't print it; the new one does).
+- Also: KH1's duration was clipped to the i16 carrier (32767 ticks); Re:CoM's `+0x2D8` is i32
+  (`0x14017DCC6`, begin copies it at `0x14017C7F4`). Checked (disasm).
+- Fix (native, no new hook): Stop sets the interrupt bit for the handler call on attacking, non-immune
+  enemies; when the handler entered the stop and the duration is longer than the carrier, the whole
+  duration goes into `+0x2D8`. KH1's numbers unchanged. `docs/recom-m7-magic.md` § Stop on attacking enemies.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 96: M9 stage 9c.1: KH1's Sonic Blade; Guard and Dodge Roll in Sora's kit, version 0.54.0 (2026-11-01)
 
 - Asks (owner, 2026-11-01): "just have guard and dodge roll be a part of sora's movement kit from the start,
