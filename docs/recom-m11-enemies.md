@@ -52,9 +52,9 @@ Ported once in `kh1_core::enemy::script`:
 | state requests | (`wp+0x20`) | `0x1996` / `0x19B4` / `0x19EA` / `0x1A06` | the supervisor's state object |
 | move toward | `sys 40` | `sys 40` | `0x140299D60` (walk / run / glide; blend 8 Checked (decomp)) |
 
-**Finding (Shadow, not changed):** KH1's wander (`0x1BC4` / `0x15BA`) adds both points to the actor's
-**current** position (`sys 7` with `actor+0x10`), not to home; M10's Shadow port adds them to home. The shared
-`wander` is KH1's; the Shadow keeps its own (its runtime must stay identical). Owner question below.
+**Shadow's wander (fixed 2026-11-02):** KH1's wander (`0x1BC4` / `0x15BA`) adds both points to the actor's
+**current** position (`sys 7` with `actor+0x10`), not to home; M10's port added them to home. Owner: "fix it to
+KH1's rule": the Shadow now calls the shared `wander` (same draws, same order; only the centre moved).
 
 ### What the runtime does per class (unchanged from M10 for the Shadow)
 
@@ -76,7 +76,10 @@ New for M11:
   moves nothing and keeps the arc at the body's height): `Body::held`; the root motion moves the body; cleared
   when the action ends (Assumption: KH1 clears it with the next motion request without bit 23).
 - The clash recoil per attack from its rows' `+0x40`; when the model has no motion for it (KH1's request names
-  no entry: `0x1402A01E0` flags 0x200000), the attack is cut and the idle plays (Assumption; logged).
+  no entry: `0x1402A01E0` flags 0x200000), **Re:CoM's own flinch** (owner 2026-11-02, every enemy): `guard_block`
+  hands the block back to `win::guard`'s pre-M10 path (Re:CoM's picker `0x14017D260(enemy, 1)`, its card end
+  `0x14017E1D0`), and our state 11 runs Re:CoM's own begin / step (`0x14017C530` / `0x140184100`) until the next
+  state 1; the behaviour still hears the clash (the Soldier's counter). Decision 27's toggle still gates it.
 - `reads_hp`: the runtime passes Re:CoM's HP / max HP (`+0x274`, `0x14017F5A0`) at each hit (the Soldier's
   counter reads its HP ratio; Re:CoM's HP, decision M10).
 - Hurt parts from the manifest (any count): the contact point's nearest part bone (`react::nearest_part`;
@@ -175,7 +178,7 @@ session's files: every constant read and checked, 10 records, 4 hurt parts (test
 4. Far: it runs in, sometimes pauses.
 5. Jump above it: it jumps at Sora and kicks in the air.
 6. Hit it: KH1's flinch / launch; then its counter (a kick or the spin kick; far: the crouch and the rush).
-7. Guard a kick: KH1's clash recoil (218). Guard the jumping / spin / air kick: the attack stops and it idles.
+7. Guard a kick: KH1's clash recoil (218). Guard the jumping / spin / air kick: Re:CoM's flinch, then its counter.
 8. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
 9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Soldiers.
 
@@ -312,7 +315,15 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
    (rooted, Re:CoM state 19 too), White Mushroom (no attacks; its spell game; Re:CoM overrides states 11 / 12
    / 30: its reactions are its game, keep Re:CoM's for those?), Black Fungus (petrify / its guard; no `.SES`).
 
-## Owner questions
+## Owner answers (2026-11-02, `docs/design-philosophy-instructions.md` § Soldier choices)
+
+1. Shadow's wander: fixed to KH1's rule (above).
+2. Soldier's power mapping: kept.
+3. Guarded attacks without a KH1 recoil motion: Re:CoM's flinch, for every enemy (above).
+4. Battle spawns: KH1's appearance kept.
+5. The leash: stays out.
+
+The questions as asked (0.68.0):
 
 1. **The Shadow's wander** (finding above): KH1 picks its two wander points about where the Shadow stands
    now; M10's port picks them about its home. (a) Fix the Shadow to KH1's rule (a version on its own), (b)
