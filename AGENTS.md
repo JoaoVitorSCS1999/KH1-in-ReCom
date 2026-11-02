@@ -11,6 +11,26 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 142: Search Ghost: KH1's drain rule on Re:CoM's HP / EXP / prizes; its burst's repel rows (the guard step's repel), version 0.77.0 (2026-11-01)
+
+- Asks (owner, 2026-11-02): "KH1's rule on Re:CoM HP"; burst repel "Yes".
+- KH1 (Checked (files + decomp)): the orb counts only if it ends 1–3.2 m from the Ghost; then a 568-frame hold
+  (`0x2678`); the hover sets HP to max (`0x2ADE`) when the hold is off (at once if the orb started within 1 m); a hit
+  during the hold (`0x28A6`, before the damage) ends it and gives `sys 194(EXP / 10 + 1)` (`0x1402BC9A0`) and 3 HP-ball
+  prizes (`0x580`).
+- Re:CoM: the heal through Re:CoM's enemy heal `0x140181CE0` (max `0x14017F5A0` − current); the EXP bonus KH1's formula on
+  Re:CoM's EXP (`+0x2E4`, set for one call of Re:CoM's defeat EXP drop `0x1401810A0`, then put back); 3 of Re:CoM's HP
+  prize (kind 0xD3) by the prize factory `0x1401A89C0` at its prize point.
+- Burst: four type-1 rows (priority 40, recoil 205, cone cos 1.0) as one guard row on in 204's [36, 48) and [108, 118);
+  KH1's priority rule: a Kingdom Key swing (30) is repelled (Sora kind 6; the Ghost hears a no-damage record). The
+  guard step's "repel" outcome built for the Large Body / Defender. Finding (Checked (decomp + exe + files)): KH1's cone
+  `0x1402B4640` with cos 1.0 passes only an attacker exactly ahead at the same height: in KH1 the burst effectively never
+  repels; kept 1:1 with KH1's 3D test before each swing.
+- Asset step re-run: `kh1-searchghost.json` (EN0014 files unchanged).
+- Checked: tests (764), Windows build, 866 sites. Not checked: in game.
+
+---
+
 ## Stage 141: Sora's swings knock the Bandit's thrown scimitar away, version 0.76.3 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Yes" (swing at the blade, KH1).
