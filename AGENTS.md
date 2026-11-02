@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 110: Gimmick cards: a finisher that interrupts a card-break boss gives Re:CoM's card break, version 0.62.1 (2026-11-01)
+
+- Ask (owner, 2026-11-02, option c): when a KH1 combo finisher interrupts the attack of Guard Armor, Trickmaster,
+  Jafar, Parasite Cage or Dragon Maleficent, the boss gets Re:CoM's own card-break stagger, which rolls its drop.
+- Built (no new hook): after Re:CoM's hit handler, for those five classes (vtables RTTI-checked), a kind-5 hit that
+  ended the attack on a surviving boss posts Re:CoM's card-break message as its resolver `0x14015EAC0` does:
+  `0x1401D2770(CBTL+0x58, 0, CBTL+0x20, boss+0x20, 3, none)`; the base handler `0x140181620` case 3 (`0x140181739`)
+  ends the attack and sets state 13; each boss's own state-13 begin plays the stagger and rolls the drop (Guard
+  Armor 30 %, Parasite Cage 30 % once, the others their .EPD chance: Assumption). Checked (decomp + disasm + exe).
+- Assumptions: Re:CoM's message manager runs in KH1 battles (as Stage 108's message 6); how often vs Re:CoM.
+- Checked: tests, Windows build, 567 sites. Not checked: in game.
+
+---
+
 ## Stage 109: Summons: KH1's Summon list issuing Re:CoM's LV3 summon sleights (Cloud: Omnislash), version 0.62.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "Lets get summons working. I want the summon section on the command menu to work like KH1,
