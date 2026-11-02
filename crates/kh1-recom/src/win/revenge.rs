@@ -59,6 +59,38 @@ const FALLOFF_COUNT: usize = 0x288;
 const FALLOFF_TIMER: usize = 0x28C;
 const FALLOFF_MULT: usize = 0x290;
 
+/// Re:CoM's boss falloff fields of one enemy (`+0x288` hit count, `+0x28C` reset timer, `+0x290`
+/// multiplier), saved before a hit and put back after it: the hit neither takes the falloff
+/// (with [`Falloff::neutral`]) nor feeds it. Revenge bosses (owner: falloff off) and, at Damage =
+/// Re:CoM, Gravity Break / Zantetsuken hits (`super::attack`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Falloff {
+    count: i32,
+    timer: i32,
+    mult: f32,
+}
+
+impl Falloff {
+    pub(super) unsafe fn save(enemy: usize) -> Falloff {
+        Falloff { count: rd(enemy + FALLOFF_COUNT), timer: rd(enemy + FALLOFF_TIMER), mult: rd(enemy + FALLOFF_MULT) }
+    }
+
+    /// The multiplier at 1.0 for the coming call (`0x14017DAB0` multiplies the damage by it).
+    pub(super) unsafe fn neutral(enemy: usize) {
+        wr(enemy + FALLOFF_MULT, 1.0f32);
+    }
+
+    pub(super) unsafe fn restore(self, enemy: usize) {
+        wr(enemy + FALLOFF_COUNT, self.count);
+        wr(enemy + FALLOFF_TIMER, self.timer);
+        wr(enemy + FALLOFF_MULT, self.mult);
+    }
+
+    pub(super) fn mult(&self) -> f32 {
+        self.mult
+    }
+}
+
 pub fn set_enabled(on: bool) {
     ENABLED.store(on, Ordering::Relaxed);
 }
@@ -207,14 +239,12 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
         }
         None => return super::attack::enemy_hit(enemy),
     };
-    let falloff = b.falloff_off().then(|| (rd::<i32>(enemy + FALLOFF_COUNT), rd::<i32>(enemy + FALLOFF_TIMER), rd::<f32>(enemy + FALLOFF_MULT)));
+    let falloff = b.falloff_off().then(|| Falloff::save(enemy));
     NOTE.store(0, Ordering::Relaxed);
     let r = super::attack::enemy_hit(enemy);
     let src = take_note();
-    if let Some((n, t, m)) = falloff {
-        wr(enemy + FALLOFF_COUNT, n);
-        wr(enemy + FALLOFF_TIMER, t);
-        wr(enemy + FALLOFF_MULT, m);
+    if let Some(f) = falloff {
+        f.restore(enemy);
     }
     // A landed hit (Re:CoM applied it). Held hits of a stopped enemy count when they land.
     if r != 0 && !super::magic::stopped(enemy) {

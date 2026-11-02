@@ -167,8 +167,9 @@ pub unsafe fn special(pl: usize, recom_id: u32) -> bool {
 /// `+0xB` before its rewrite. Each release reads the player's fields into its shots.
 pub unsafe fn spell(pl: usize, s: u8, level: u8) -> bool {
     let done = spell_ap(pl, s, level);
-    // Gravity / Stop: whether this cast's hits are Re:CoM's (its AP and kind were written).
-    if dm::needs_recom_kind(s) {
+    // Gravity / Stop: whether this cast's hits are Re:CoM's (its AP and kind were written); Aero:
+    // whether level 1 gets the wind (`dm::aero_wind`).
+    if dm::tracks_recom_cast(s) {
         let bit = 1u8 << (s & 7);
         if done {
             RECOM_CAST.fetch_or(bit, Ordering::AcqRel);
@@ -179,7 +180,7 @@ pub unsafe fn spell(pl: usize, s: u8, level: u8) -> bool {
     done
 }
 
-/// The spells (bit = spell id) whose last cast took Re:CoM's AP and kind (Gravity, Stop).
+/// The spells (bit = spell id) whose last cast took Re:CoM's AP (and kind: Gravity, Stop; Aero).
 static RECOM_CAST: AtomicU8 = AtomicU8::new(0);
 
 unsafe fn spell_ap(pl: usize, s: u8, level: u8) -> bool {
@@ -232,6 +233,11 @@ pub fn recom_spell_hits(s: u8) -> bool {
         return RECOM_CAST.load(Ordering::Acquire) & (1u8 << (s & 7)) != 0;
     }
     true
+}
+
+/// Whether the spell's last cast took Re:CoM's card / sleight AP (`spell`; Gravity, Stop, Aero).
+pub fn recom_cast(s: u8) -> bool {
+    dm::tracks_recom_cast(s) && !kh1() && RECOM_CAST.load(Ordering::Acquire) & (1u8 << (s & 7)) != 0
 }
 
 /// Re:CoM's own gate for a spell's kind on this enemy (`dm::recom_gate_offset`: Stop `+0x2C`,

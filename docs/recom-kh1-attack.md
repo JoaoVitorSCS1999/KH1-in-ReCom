@@ -393,11 +393,40 @@ passes through there). Code: `crate::damage` (testable), `win::damage`.
   becomes KH1's number with **HP = the enemy's Re:CoM current HP** `+0x274`, Sora's KH1 Strength
   (level + Keyblade, as at Damage = KH1) and the enemy's KH1 record (twin / proxy / boss twin)
   for `resist[8]` and the floor; no record: 100 %, floor 1. Re:CoM's path then applies its extras
-  (weak part, back bonus, its resistance for the card's attribute, `+0x290`, the boss rule
-  `0x14015D940`) as for every KH1 hit (decision 13). The part's `+0x92` is an i16: values over
+  (weak part, back bonus, its resistance for the card's attribute, the frozen bonus
+  `0x14015D940`) as for every KH1 hit (decision 13), **except the boss falloff `+0x290`** (owner,
+  follow-ups 2: below). The part's `+0x92` is an i16: values over
   32767 are cut (Zantetsuken on more than 13106 HP left).
 - Trace hits: `…:kh1pct <value>`; log `damage: swing row 4: KH1's % of Re:CoM's HP <hp> = <v>`.
 - Tests: `attack::tests::percent_rows_on_recoms_hp`, `damage::tests::percent_rows_are_gravity_break_and_zantetsuken`.
+
+#### Follow-ups 2 (owner, 2026-11-01): "skip Re:CoM's boss reduction for these two": the falloff (built)
+
+0.59.0's notes called `0x14015D940` "the boss rule". **That label was wrong** (Checked (decomp +
+exe + files), `recom-m7-magic.md` § Spell damage at Damage = Re:CoM):
+
+- `0x14015D940` is the **frozen bonus**: `value += StockSkillList[0x23] column 1 × 10 / 100`
+  (+100 with the session's `SY0002.BIN`), applied by the hit handler `0x14017F7E0` when
+  `enemy+0x2B0` ≠ 0, which is the handle of the "ice" effect the **Freeze state** (`0x14017C190`)
+  starts and its end clears. Any frozen enemy, boss or not.
+- Re:CoM's **boss** reduction is the **falloff**: for ids 100..199 each hit the handler takes
+  counts `+0x288`; from the 6th within 1500 ticks of the last, `+0x290` −= 0.25 (to 0.05), reset to
+  1.0 by the enemy update `0x140185320`; `0x14017DAB0` multiplies every damage by `+0x290`.
+  Bosses whose revenge acts (Stage 106) already have it off (their three fields are put back
+  after each hit).
+
+Owner's choice, as clarified (2026-11-01): "skip Re:CoM's boss reduction for these two" = the
+**falloff** (option (a) of the question). Built (`damage::skips_falloff`, the enemy-hit wrapper,
+`win::revenge::Falloff`, shared with Stage 106):
+
+- at Damage = Re:CoM, a Gravity Break / Zantetsuken hit (with its KH1 % written) saves `+0x288` /
+  `+0x28C` / `+0x290`, sets `+0x290` = 1.0 for Re:CoM's handler call, and puts the three back
+  after: the hit neither takes nor feeds the falloff. Bosses are reduced by KH1's `resist[8]` and
+  floor alone, plus Re:CoM's resistance for the card's attribute and its weak parts (kept);
+- the frozen bonus (`0x14015D940`) stays;
+- every other hit, and Damage = KH1: unchanged (the falloff as before; off on revenge bosses);
+- log: `damage: swing row 4: Re:CoM's boss falloff skipped (its multiplier was 0.75)` when it
+  would have reduced the hit. Test `damage::tests::only_percent_rows_skip_the_falloff_at_recom`.
 
 ### Sites (`sites::DAMAGE_CHECKED`, bytes re-read with pefile; checked at start)
 
@@ -460,7 +489,9 @@ only**, `damage = recom | kh1` in `kh1-recom.ini`, read at start (default `recom
    and the log `damage: swing row 4: KH1's % of Re:CoM's HP <hp> = <v>`: Gravity Break takes
    (40 + KH1 Strength) % of the HP the enemy has left (e.g. Strength 51: 91 %), Zantetsuken 250 %
    (an ordinary Heartless dies); a boss takes its KH1 `resist[8]` share (e.g. 2 %), at least its
-   floor. With `damage = kh1`: as before.
+   floor, and **no** Re:CoM falloff: on a boss, hit it 6+ times quickly with swings (the log's
+   `falloff skipped (its multiplier was …)`), then Gravity Break / Zantetsuken: full KH1 %.
+   With `damage = kh1`: as before.
 
 ## Sora's KH1 Strength (decision 18: keep the Rod, give up the Shield)
 
