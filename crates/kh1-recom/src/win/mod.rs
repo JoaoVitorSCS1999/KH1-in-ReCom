@@ -522,7 +522,7 @@ fn install_battles(base: usize) {
 /// Customize): four camp wrappers, all or
 /// nothing. Needs the Config input hook (the page runs through it), so it is installed only
 /// after that one. Whether the entry shows is decided each time Re:CoM builds the list.
-fn install_keyblades(base: usize) {
+fn install_keyblades(base: usize, bases: &[PathBuf]) {
     let site = |name: &str| crate::sites::KEYBLADE_HOOKS.iter().find(|h| h.name == name).expect("site");
     let hooks = [
         hook::Hook { site: site("camp update (0x1400D9C80)"), ours: keyblades::camp_update as *const () as usize, original: &keyblades::ORIG_UPDATE },
@@ -533,6 +533,7 @@ fn install_keyblades(base: usize) {
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
     if unsafe { hook::install_all(base, &hooks) } {
         log("keyblades: camp wrappers in; the 8th entry \"KH1\" (Keyblades, Customize) shows at Combat = KH1 in Sora's story");
+        keyblades::load_item_row(bases.iter().map(|b| b.join(crate::camp_rows::MANIFEST)).find(|p| p.is_file()).as_deref());
     } else {
         log("keyblades: not hooked; no KH1 entry (the Kingdom Key's numbers stand; shortcuts keep KH1's learn order)");
     }
@@ -645,7 +646,7 @@ fn run(mod_dir: Option<PathBuf>) {
         // SAFETY: the targets' bytes are checked again inside, before anything is written.
         if unsafe { hook::install_all(base, &hooks) } {
             log("config menu: rows added (camp menu > Config, below Re:CoM's rows: Combat, Guard reactions)");
-            install_keyblades(base);
+            install_keyblades(base, &recom_bases(&manifest_dirs(&mod_dir, &dll, &game_dir)));
         } else {
             log("config menu: not hooked; use kh1-recom.ini");
         }
@@ -653,9 +654,15 @@ fn run(mod_dir: Option<PathBuf>) {
         log("config menu: off in the ini; Re:CoM's menu untouched (no Keyblades entry either)");
     }
 
-    let dll_dir = dll.parent().map(Path::to_path_buf).unwrap_or_default();
-    let dirs = [mod_dir.clone(), dll_dir.parent().map(Path::to_path_buf).unwrap_or_default(), dll_dir, game_dir.clone()];
+    let dirs = manifest_dirs(&mod_dir, &dll, &game_dir);
     install_movement(base, &s, &dirs, &game_dir);
+}
+
+/// Where the asset step's files are looked for: the mod folder, the DLL's folder and its parent,
+/// the game folder (each also with its `recom` subfolder, `recom_bases`).
+fn manifest_dirs(mod_dir: &Path, dll: &Path, game_dir: &Path) -> [PathBuf; 4] {
+    let dll_dir = dll.parent().map(Path::to_path_buf).unwrap_or_default();
+    [mod_dir.to_path_buf(), dll_dir.parent().map(Path::to_path_buf).unwrap_or_default(), dll_dir, game_dir.to_path_buf()]
 }
 
 fn start(mod_dir: Option<PathBuf>) {

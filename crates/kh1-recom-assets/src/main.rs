@@ -14,7 +14,9 @@
 //! (`docs/recom-kh1-hud.md`). For the command menu's sounds it writes `kh1-menu-sounds.bin` (KH1's
 //! system sound bank `se000.win32.scd` from `amusic/se000.dat`, unchanged) and
 //! `kh1-menu-sounds.json`, plus the menu entries as WAVs in `kh1-menu-sounds-preview/` for
-//! listening (`docs/kh1-recom-assets.md`).
+//! listening (`docs/kh1-recom-assets.md`). For the camp's item rows it writes
+//! `raw/FORM/0100/FO0100.SPR` (Re:CoM's camp sprite file with its green row carrying the item
+//! symbol as a new group of `camp:00`) and `kh1-camp-rows.json` (`docs/recom-m8-items.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -227,6 +229,14 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // The camp list's green row with the item symbol (owner, 2026-11-01): a group of camp:00.
+    let camp_rows = match camp_rows_build(keys.clone(), &arc) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            println!("note: camp item row not built: {e} (the item rows keep Re:CoM's green row with the Mickey symbol)");
+            None
+        }
+    };
     if dry {
         return Ok(());
     }
@@ -335,6 +345,22 @@ fn run() -> Result<(), String> {
             if bar_manifest.is_file() {
                 std::fs::remove_file(&bar_manifest).map_err(|e| format!("{}: {e}", bar_manifest.display()))?;
                 println!("removed {} (no MP bar this run)", bar_manifest.display());
+            }
+        }
+    }
+    // The camp's item row: Re:CoM's FO0100.SPR with the new group (a raw PKG entry, every
+    // language's copy inside) and its manifest; without them an older manifest is removed (the DLL
+    // then keeps Re:CoM's green row 0x131).
+    let camp_manifest = root.join(kh1_recom_assets::camp_rows::MANIFEST);
+    match &camp_rows {
+        Some(c) => {
+            write(&root.join("raw").join(kh1_recom_assets::camp_rows::SPR_PATH.replace('/', std::path::MAIN_SEPARATOR_STR)), &c.entry)?;
+            write(&camp_manifest, c.manifest.as_bytes())?;
+        }
+        None => {
+            if camp_manifest.is_file() {
+                std::fs::remove_file(&camp_manifest).map_err(|e| format!("{}: {e}", camp_manifest.display()))?;
+                println!("removed {} (no camp item row this run)", camp_manifest.display());
             }
         }
     }
@@ -547,6 +573,37 @@ fn mp_bar_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats
         if kept.is_empty() { String::new() } else { format!("; kept as they are: {kept:?}") }
     );
     Ok(MpBar { spr: base, assets: out_assets, date, manifest })
+}
+
+/// The camp item row's files: the raw `FO0100.SPR` entry and `kh1-camp-rows.json`.
+struct CampRows {
+    entry: Vec<u8>,
+    manifest: String,
+}
+
+/// Adds the green row with Re:CoM's item symbol to `camp:00` in Re:CoM's `FO0100.SPR` and in each
+/// of its PC assets that is a `camp.lad` (any language prefix) or a whole container with one, as a
+/// plain PKG entry with the same asset names, tags and date (`kh1_recom_assets::camp_rows`).
+fn camp_rows_build(keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive) -> Result<CampRows, String> {
+    use kh1_recom_assets::camp_rows as cr;
+    let e = arc.find(cr::SPR_PATH).ok_or_else(|| format!("{} not in Recom.hed", cr::SPR_PATH))?;
+    let raw = arc.read_raw_entry(e).map_err(|e| format!("{}: {e}", cr::SPR_PATH))?;
+    let date = i32::from_le_bytes(raw.get(12..16).ok_or("short entry")?.try_into().unwrap());
+    let (spr, mut assets) = kh1_formats::egs::decode_entry_full(&keys, &raw).map_err(|e| format!("{}: {e}", cr::SPR_PATH))?;
+    let sha = kh1_formats::egs::sha256_hex(&spr);
+    let mut out = spr;
+    let (group, files) = cr::patch_spr(&mut out, &mut assets).map_err(|e| e.to_string())?;
+    let all: Vec<&str> = assets.iter().map(|a| a.name.as_str()).collect();
+    println!(
+        "camp item row: {} group {group:#x} = group {:#x} with sprite group {} (item symbol) for {} added to {files:?} (PC assets of the entry: {all:?})",
+        cr::SET,
+        cr::GREEN_ROW,
+        cr::ITEM_SG,
+        cr::MICKEY_SG
+    );
+    let entry = kh1_formats::egs::build_plain_entry(&out, &assets, date).map_err(|e| e.to_string())?;
+    let manifest = cr::manifest_json(group, &files, &[("FO0100.SPR sha256", sha)]);
+    Ok(CampRows { entry, manifest })
 }
 
 /// The KH1 HUD's files (stage H1): the raw `FO0002.RTM` entry and `kh1-hud.json`.

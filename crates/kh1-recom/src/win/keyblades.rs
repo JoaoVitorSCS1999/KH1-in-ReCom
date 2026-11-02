@@ -34,7 +34,7 @@ use crate::abilities::page as ap;
 use crate::keyblades::{self as kb, list, sub, text, top};
 use crate::sites::data;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 pub static ORIG_UPDATE: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_BUILD: AtomicUsize = AtomicUsize::new(0);
@@ -43,6 +43,11 @@ pub static ORIG_TEARDOWN: AtomicUsize = AtomicUsize::new(0);
 
 /// The camp our entry belongs to, and our entry's `C2DSeqCtrl`.
 static ENTRY_CAMP: AtomicUsize = AtomicUsize::new(0);
+/// The asset step's item row (`crate::camp_rows`): our list table, Re:CoM's 7 entries of
+/// `0x1407C11F0` (read from the image) and the new group. Set once at install from
+/// `kh1-camp-rows.json`; Re:CoM's row set-up keeps the pointer, so it lives as long as the DLL.
+static ITEM_TABLE: OnceLock<[u16; crate::camp_rows::RECOM_ENTRIES + 1]> = OnceLock::new();
+static ITEM_SET_LOGGED: AtomicBool = AtomicBool::new(false);
 static ENTRY_BTN: AtomicUsize = AtomicUsize::new(0);
 static SPARE_LOGGED: AtomicBool = AtomicBool::new(false);
 static ENTRY_LOGGED: AtomicBool = AtomicBool::new(false);
@@ -232,6 +237,57 @@ unsafe fn vfn<T: Copy>(obj: *mut u8, slot: usize) -> T {
 
 unsafe fn set_of(camp: *mut u8) -> *const u8 {
     at(camp, camp::SET)
+}
+
+/// Reads `kh1-camp-rows.json` (the asset step's item row, `crate::camp_rows`) and builds our list
+/// table. Without it the item rows keep Re:CoM's green row 0x131.
+pub fn load_item_row(file: Option<&std::path::Path>) {
+    let Some(path) = file else {
+        log("camp rows: no kh1-camp-rows.json: item rows keep Re:CoM's green row 0x131 (Mickey symbol)");
+        return;
+    };
+    let row = match std::fs::read_to_string(path).map_err(|e| e.to_string()).and_then(|t| crate::camp_rows::parse(&t)) {
+        Ok(r) => r,
+        Err(e) => {
+            log(&format!("camp rows: {}: {e}: item rows keep Re:CoM's green row 0x131", path.display()));
+            return;
+        }
+    };
+    // SAFETY: Re:CoM's camp list table in the image (its bytes checked at start-up, `sites`).
+    let recom: [u16; crate::camp_rows::RECOM_ENTRIES] = std::array::from_fn(|i| unsafe { rd::<u16>(va(base(), LIST_SEQ) + 2 * i) });
+    let t = crate::camp_rows::list_table(recom, row);
+    let _ = ITEM_TABLE.set(t);
+    log(&format!("camp rows: {} item row = camp:00 group {row:#x} (variant {}, our table {t:x?}); used when the loaded camp:00 has it", path.display(), kb::row_look::ITEM));
+}
+
+/// Whether the loaded camp set (`set`, Re:CoM's NUL-terminated name) has the item row `row`:
+/// exactly Re:CoM's groups + 1, read from Re:CoM's 2D registry. Logged once when not.
+unsafe fn item_row_loaded(set: *const u8, row: u16) -> bool {
+    if set.is_null() {
+        return false;
+    }
+    let mut name = Vec::with_capacity(16);
+    for k in 0..32 {
+        let c = *set.add(k);
+        name.push(c);
+        if c == 0 {
+            break;
+        }
+    }
+    if name.last() != Some(&0) {
+        return false;
+    }
+    let n = super::mp_bar::set_groups(&name);
+    let ok = crate::camp_rows::loaded_has_it(n, row);
+    if !ok && !ITEM_SET_LOGGED.swap(true, Ordering::Relaxed) {
+        log(&format!(
+            "camp rows: {} has {} groups, not {} (Panacea serves Re:CoM's own FORM/0100/FO0100.SPR, or this language's copy was not patched): item rows keep Re:CoM's green row 0x131",
+            String::from_utf8_lossy(&name[..name.len() - 1]),
+            n.map_or("no".to_string(), |n| n.to_string()),
+            row as u32 + 1
+        ));
+    }
+    ok
 }
 
 /// `vt+0x20(obj, 0, set, sequence, 0.0, 0)`, as Re:CoM gives its menu sprites a sequence.
@@ -1106,12 +1162,12 @@ impl Page {
     }
 
     /// The row's look on Re:CoM's list (`CBUTTON_SETUP`'s variant, `crate::keyblades::row_look`):
-    /// the Items page's Stock row and item slots are Re:CoM's green item row; the Abilities page's
-    /// rows and the Customize page's shortcut slots and spells are Re:CoM's blue magic row (owner,
-    /// 2026-11-01); everything else keeps the red row.
-    fn row_look(&self, idx: usize) -> i32 {
+    /// the Items page's Stock row and item slots and the Abilities page's rows are Re:CoM's green
+    /// row (green Mickey symbol); the Customize page's shortcut slots and spells are Re:CoM's blue
+    /// magic row (owner, 2026-11-01); everything else keeps the red row.
+    fn row_look(&self, idx: usize, item_row: bool) -> i32 {
         match &self.content {
-            Content::Items { rows, .. } => rows.get(idx).map_or(kb::row_look::RED, |r| ip::row_look(r.label)),
+            Content::Items { rows, .. } => rows.get(idx).map_or(kb::row_look::RED, |r| ip::row_look(r.label, item_row)),
             Content::Abilities { .. } => ap::ROW_LOOK,
             Content::Customize { picks, picking, .. } => customize::row_look(picking.is_some(), picks.get(idx).copied().flatten()),
             Content::Keyblades { .. } => kb::row_look::RED,
@@ -1229,7 +1285,10 @@ impl Page {
         let colour: u32 = at(camp, camp::TEXT_COLOUR);
         let blink: u32 = at(camp, camp::BLINK);
         let setup = func::<SetupFn>(CBUTTON_SETUP);
-        let seqs = va(base(), LIST_SEQ) as *const u16;
+        // The item row needs our table (Re:CoM's + the new group) and a loaded set that has it.
+        let item_table = ITEM_TABLE.get().filter(|t| item_row_loaded(set, t[crate::camp_rows::RECOM_ENTRIES]));
+        let seqs = item_table.map_or(va(base(), LIST_SEQ) as *const u16, |t| t.as_ptr());
+        let item_row = item_table.is_some();
         for i in 0..list::VISIBLE as usize {
             delete(self.rows[i] as *mut u8);
             self.rows[i] = 0;
@@ -1246,7 +1305,7 @@ impl Page {
             self.rows[i] = btn as usize;
             let name = self.row_text(idx as usize);
             let c = if self.row_grey(idx as usize) { ip::grey_colour(colour) } else { colour };
-            setup(btn, set, 0x11, seqs, pos.0.as_ptr(), self.list_panel as *mut u8, name.as_ptr(), font, f9, f10, 0x40, &c, self.row_look(idx as usize));
+            setup(btn, set, 0x11, seqs, pos.0.as_ptr(), self.list_panel as *mut u8, name.as_ptr(), font, f9, f10, 0x40, &c, self.row_look(idx as usize, item_row));
             let spr: *mut u8 = at(btn, 0x18);
             if self.marked(idx as usize) && !spr.is_null() {
                 let m = vfn::<MarkFn>(spr, 0x40)(spr, set, EQUIPPED_MARK, MARK_X, MARK_Y, 0.0, 0);

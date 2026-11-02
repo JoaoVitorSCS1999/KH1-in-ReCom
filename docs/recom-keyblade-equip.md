@@ -373,7 +373,7 @@ accessories as well we will have slots for them there but dont worry about that 
   before. No new site (the set-up was already a checked callee).
 - `camp.lad` (`FO0100.SPR`, Checked (files)): sequence 0x12E red plate (vertex colour 0x8000003C)
   + icon sprite 167; 0x133 blue plate (0x803C1E00) + icon 168; **0x131 green plate (0x80143200) +
-  icon 278 tinted green (0x801EDC1E)**; 0x132 grey + icon 279; 0x12F / 0x160 / 0x130 Riku's.
+  icon 278 tinted green (0x801EDC1E)** (the green Mickey symbol, owner in game 2026-11-01); 0x132 grey + icon 279; 0x12F / 0x160 / 0x130 Riku's.
 
 ## Blue magic rows: Customize and Abilities (owner, 2026-11-01)
 
@@ -389,9 +389,9 @@ accessories as well we will have slots for them there but dont worry about that 
     (spells are magic). The picker's last row, "None", is no spell and keeps the red row
     (`customize::row_look`).
   - **Abilities**: every row (the owner rows "Sora" / "Shared" and every ability;
-    `abilities::page::ROW_LOOK`).
+    `abilities::page::ROW_LOOK`). **Since changed** (owner, 2026-11-01: "have the abilities be
+    green with the green mickey symbol"): the green row 0x131, `recom-m9-abilities.md` § Rows.
   - Items (green), the Keyblade list and the Keyblade slot (red) unchanged.
-- Checked (tests): `customize::tests::slots_and_spells_are_recoms_blue_magic_row`,
-  `abilities::tests::rows_are_recoms_blue_magic_row` (both read 0x133 from the checked table's
-  bytes). No new site. Assumption: sprite 168 is Re:CoM's magic icon (`FO0100.RTM` not in the
+- Checked (tests): `customize::tests::slots_and_spells_are_recoms_blue_magic_row` (reads 0x133
+  from the checked table's bytes; the Abilities test now reads 0x131). No new site. Assumption: sprite 168 is Re:CoM's magic icon (`FO0100.RTM` not in the
   session; it is what Re:CoM's magic sleight rows draw). Not seen in game.
