@@ -103,7 +103,9 @@ pub(super) unsafe fn on_result(c: usize, list: usize, r: i32) -> i32 {
     if TURNED_N.load(Ordering::Relaxed) != 0 {
         turned_hit(c, r);
     }
-    if r != 2 || !active() {
+    // The block itself is detected without the Guard reactions toggle: Re:CoM's gimmick cards
+    // (trigger (a)) break the five card-break bosses on a block whatever the toggle says.
+    if r != 2 || !READY.load(Ordering::Acquire) || !mv::kh1_on() {
         return r;
     }
     let b = base();
@@ -119,6 +121,12 @@ pub(super) unsafe fn on_result(c: usize, list: usize, r: i32) -> i32 {
         return r;
     }
     let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(owner);
+    // A block (Sora's KH1 Guard, this attack's owner on his guarded body): Re:CoM's gimmick cards'
+    // guard break (one of the five card-break bosses, its melee or its shot).
+    super::gimmick::on_guard_block(obj, c);
+    if !ON.load(Ordering::Relaxed) {
+        return r;
+    }
     if obj == 0 {
         other(0, c, "owner not found");
         return r;

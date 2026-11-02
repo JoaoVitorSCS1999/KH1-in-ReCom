@@ -193,6 +193,76 @@ the attack** of Guard Armor, Trickmaster, Jafar, Parasite Cage or Dragon Malefic
   Stage 108's message 6 relies on it too); that bosses stagger "about as often" as in Re:CoM
   (not measured).
 
+### More triggers for the five (owner, 2026-11-01: "interrupting an attack with a finisher is very rare")
+
+Same five bosses, Combat = KH1, Sora's story; the finisher interrupt above stays as it is.
+
+**(a) Guard.** When Sora's KH1 Guard blocks an attack of one of the five, the boss gets the same
+card break (CBTL's message 3 posted on CBTL's queue, its own state 13 staggers it and rolls the
+card).
+
+- **Where**: the block is decided in `win::guard::on_result` (the pair-dispatch wrapper
+  `0x14016EAD0`): Re:CoM's dispatch returned 2 on the player side's list (`*0x14087A838`), Sora's
+  KH1 Guard is live, his body (`player+0x690`) has the guarded bit `+0x9C & 0x20` and `+0x98` = the
+  attack's owner (decision 20; Checked (decomp) in `recom-kh1-attack.md`). That detection no longer
+  needs the **Guard reactions** toggle: the toggle now only gates the reactions (flinch, turned-back
+  shots). Right after it, `win::gimmick::on_guard_block(owner, collision)`.
+- **What counts as "an attack of the boss"**: the blocked collision's owner is the boss itself
+  (its melee `CAttackMotion` entries and any other collision of its own), **or** a Re:CoM shot
+  (`CBullet` `0x140525430` / `CHomingBullet` `0x140525530`) whose shooter (`+0x238`) is the boss.
+  So **blocked projectiles count**, as our Guard code blocks them. Not counted: shots of the bosses'
+  own projectile classes (e.g. `CBossMDragonFiraBall`, Dragon's fire): their owner is that class,
+  not a `CBullet`, and our Guard code doesn't trace them back (Assumption that the five use them
+  for some attacks: not listed). A turned-back shot hitting the boss later is a hit, not a block:
+  it doesn't break.
+- **Once per blocked attack**: the collision and its hit serial (`+0x70`) of the last break are
+  kept; the same pair again does nothing. Never a boss whose current (`+0x60`) or next (`+0x68`)
+  state is state 13, a dead one (HP ≤ 0), or one whose posted break is still on its way.
+- **No new per-frame code**: it runs only on a block.
+
+**(d) HP thresholds.** Each of the five drops its card **without a stagger** when its HP falls to
+75 %, 50 % or 25 % of its max HP.
+
+- **Where**: the KH1 enemy-hit wrapper (`0x14017F7E0`), after every hit at Combat = KH1 (swings,
+  spells, turned-back shots: every path through Re:CoM's hit handler, which applies the damage;
+  Assumption that no other path lowers these bosses' HP): `win::gimmick::after_hp(enemy, hp before)`.
+  HP is `+0x274`, the max Re:CoM's getter `0x14017F5A0` (Re:CoM's at Damage = Re:CoM, KH1's at
+  Damage = KH1: our stats hook answers it).
+- **Once per threshold per fight**, per boss handle (a new fight is a new handle). The first hit
+  seen in a fight marks the thresholds it already was below as done (no card for HP lost before).
+- **One card per hit**: a hit that crosses several thresholds drops one card and uses all of them
+  (several cards at once could not be held: Re:CoM's one-at-a-time rule loses the second).
+- **Not on the killing hit** (HP ≤ 0 after it).
+- **Already held or on the floor: it still drops**, as the bosses' own drop code does (it never
+  looks); Re:CoM's one-at-a-time rule then loses the second on pick-up.
+- **The boss's own conditions** (its drop code's tests other than the chance) are kept; a threshold
+  they refuse **waits** and drops on a later hit when they allow it:
+  - Guard Armor (`0x1403AB290`): none.
+  - Trickmaster (`0x1403CB1F4`): its table object (`+0xCE8`) has `+0x2C8 & 1`.
+  - Jafar (`0x1403CFE29`): not in its state 15 (`+0xE5C` ≠ 0xF).
+  - Parasite Cage (`0x1403C2BDB`): its card not used yet (`+0xCD4 & 2` clear): once the card has
+    been used, it never drops again.
+  - Dragon Maleficent (`0x1403E16BD`): no footing of its own out (`+0xD18` a live handle).
+- **The spawn is the boss's own** (Checked (decomp + disasm + exe constants)): the receiver
+  `0x140163740(boss handle)`, then Re:CoM's prize factory `0x1401A89C0(0x1401A8A80(), &desc, 0)` with
+  the descriptor its drop code builds:
+
+| Boss | Position | Angles (pitch, yaw, 0, 1) | Normalised (`0x140293F20`) | Speed | Flags `+0x2C` |
+|---|---|---|---|---|---|
+| Guard Armor | boss (`0x1401A49B0`) + y 5.0 | −70°, random × 360° | yes | 0.2 | 1 |
+| Parasite Cage | boss + y 5.0 | −70°, random × 360° | yes | 0.2 | 1 |
+| Trickmaster | boss + y 4.5 | −70°, random × 360° | yes | 0.2 | 0x10001 |
+| Jafar | (0, 20, 0, 1) | (0, 0, 0, 1) | no | 0.2 | 0x10001 |
+| Dragon Maleficent | boss + y 5.0 | −70°, atan2(Sora's point `0x1401F0AB0` − boss) + random in ±45° | yes | 0.2 | 0x10001 |
+
+  (Random: Re:CoM's random float `0x14029CF00`; Dragon's spread is `0x1401A6530`'s formula
+  r × |hi − lo| + lo on it. The chance itself is not rolled: a threshold always drops.)
+- **Logs**: `gimmick: guard break:` (the boss, melee or shot, collision and serial, HP, handle, or
+  why not), then the same `break:` watch lines; `gimmick: hp drop 75/50/25:` (crossed at HP / max,
+  waits and why, made at where, prize).
+- Assumption: Re:CoM's `atan2f` (`0x1404E5898`) and Rust's agree; the random draws match the boss's
+  in kind, not in sequence (ours draw from the same generator at another time).
+
 ## 5. Sites (`sites::GIMMICK_*`, bytes from the Steam exe, pefile-checked)
 
 - Hook: prize factory `0x1401A89C0` (moved here from `DROP_CALLEES`).
@@ -208,6 +278,10 @@ the attack** of Guard Armor, Trickmaster, Jafar, Parasite Cage or Dragon Malefic
   `0x14016CF25`, the prize add's type 5 / 6 branch `0x1401F4BDA`, the eight card-info rows
   (`0x140528C30 + kind × 16`).
 
+- Triggers (a), (d): called `0x140163740`, `0x1401F0AB0` (`GIMMICK_HP_CALLEES`); checked the five
+  drops' code (receiver, position, y offsets, speed, yaw, pitch, kinds, conditions, Jafar's
+  descriptor, Dragon's spread) and their constants (`GIMMICK_HP_CHECKED`).
+
 ## 6. Checked / Assumption
 
 - Checked (decomp + disasm + exe): every address and field above, the drop sites and handlers, the
@@ -222,6 +296,10 @@ the attack** of Guard Armor, Trickmaster, Jafar, Parasite Cage or Dragon Malefic
   enemy handler's case 3 → state 13, the five classes' handler and state-13 slots, kind-5 rows
   (rows 8, 16 finishers; 11, 13 not), no revenge overlap. Assumption: the message manager runs in
   KH1 battles; the stagger's visible feel.
+- Triggers (a), (d): Checked (decomp + disasm + exe + tests): the block detection's place, the
+  bullet shooter field, the five drop calls' arguments and conditions, the threshold rules.
+  Assumption: the bosses' own projectile classes aren't counted as theirs; no HP path outside the
+  hit handler; atan2 agreement.
 - Not checked: in game.
 
 ## 7. The five card-break drops (answered: (c), built in § 4)
@@ -270,3 +348,16 @@ Combat = KH1, Sora's story, `kh1-recom.log` open:
     platform of its own out).
 12. A finisher that kills one of them: no break. Other bosses and Heartless: never a break line.
 13. Stagger with a card from a break: the boss's own reaction (§ 2) as with the other cards.
+14. **Guard break (a)**: Guard Armor: block its attack with Guard: it staggers at once (`gimmick:
+    guard break: Guard blocked CBossGuardarmor (its attack …)`, then `entered its state 13` and the
+    roll). Block again while it is staggered: no second break (`already in its card-break
+    stagger`). With Config "Guard reactions" Off: still breaks.
+15. A blocked shot of one of the five (a Re:CoM bullet): `guard break: … (its shot …)`.
+16. **HP drops (d)**: Guard Armor: bring it under 75 %: a card drops without a stagger (`gimmick:
+    hp drop 75: CBossGuardarmor at … HP`, then `made at …`); the same at 50 % and 25 %, once each.
+    A big hit across two thresholds: one card (`hp drop 50/25`).
+17. Parasite Cage after its card was used: thresholds log `waits: its card was used already`, no
+    card. Trickmaster: a threshold may wait for its table (`waits: its table's +0x2C8 & 1 is
+    clear`) and drop on a later hit.
+18. Jafar's HP card appears at the arena's (0, 20, 0) and falls; Dragon's flies toward Sora.
+19. Damage = KH1 (ini): the thresholds follow KH1's max HP.

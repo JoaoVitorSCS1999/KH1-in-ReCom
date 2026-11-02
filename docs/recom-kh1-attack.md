@@ -731,6 +731,10 @@ Research notes `guard-counter-sounds.md` (kept with the decomp tools).
 
 ## Enemy reactions to Guard (decision 27)
 
+> Gimmick cards (owner, 2026-11-01, trigger (a)): the block detection in `win::guard::on_result`
+> no longer needs the Guard reactions toggle; the toggle gates only the reactions. A block also
+> calls `win::gimmick::on_guard_block` (`recom-gimmick-cards.md` § 4).
+
 Owner (2026-10-31; completes decision 20): a new Config row "Guard reactions" (Off / On, **on by
 default**, ini `guard_reactions`), with an effect only at Combat = KH1. When Sora's KH1 Guard
 blocks an enemy attack, a **melee** attacker plays Re:CoM's own flinch (its card ends first) and a
