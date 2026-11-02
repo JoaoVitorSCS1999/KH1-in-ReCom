@@ -14,7 +14,8 @@
 //!   existing request-bits wrapper), minus the frames the boss spent in its flinch / blow-away.
 //! - **Check:** hooks on Re:CoM's flinch step `0x140184100` (state 11) and blow-away step
 //!   `0x140182E50` (state 12), shared by every enemy: they return at once for other enemies.
-//!   At KH2's frame 20 (Hades 30) of the state, or at its end when Re:CoM's state is shorter,
+//!   At KH2's frame 20 (Hades 30) of the state, or at its end when sooner (the bosses' state-change
+//!   callback `0x1401A3B80`, written in their state machines' tables: [`state_change`]),
 //!   limit ≤ counter starts the boss's own attack state with the transition Re:CoM's message 2
 //!   makes (the cardless card play P1's: `crate::battle::cardless_flags`, `state_address`).
 //!
@@ -31,7 +32,7 @@
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
 use crate::revenge::{self as rv, flag, tail, Boss, Counter, Ignored, IgnoredKind, Source};
-use crate::sites::{REVENGE_CHECKED, REVENGE_HOOKS, REVENGE_PTRS};
+use crate::sites::{PtrSite, REVENGE_CHECKED, REVENGE_FSM_SLOTS, REVENGE_HOOKS, REVENGE_PTRS, REVENGE_WINDUP_SLOTS};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 pub static ORIG_FLINCH: AtomicUsize = AtomicUsize::new(0);
@@ -62,6 +63,12 @@ const EN_NEXT: usize = 0x68;
 const EN_FLAGS: usize = 0x260;
 const EN_HP: usize = 0x274;
 const EN_CHOSEN: usize = 0x278;
+/// Re:CoM's flinch and blow-away states (`+0x4C0 + k × 0x40`). Checked (decomp).
+const FLINCH_STATE: i32 = 11;
+const BLOW_STATE: i32 = 12;
+/// Re:CoM's "every hurt body on" (`0x1401A2DB0(enemy, -1)`, the call its attack-state end makes).
+const BODIES_ON: u32 = 0x001A_2DB0;
+type BodiesFn = unsafe extern "win64" fn(usize, i32);
 /// Re:CoM's boss damage falloff (`0x14017F7E0` for ids 100..199: hit count, reset timer,
 /// multiplier). Checked (decomp).
 const FALLOFF_COUNT: usize = 0x288;
@@ -296,6 +303,34 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     r
 }
 
+/// The revenge decision for this reaction (once: `Counter::decide` marks it): limit ≤ counter starts
+/// the boss's own attack state with message 2's transition. `at_end`: the reaction is ending (Re:CoM's
+/// state machine is between its end and the next begin, and re-reads `+0x68` after: `0x140242F75`).
+unsafe fn decide(e: usize, b: &Boss, c: &mut Counter, at_end: bool) {
+    let l = limit_now(e, b, c);
+    let at = c.flinch_elapsed;
+    if !c.decide(now(), l) {
+        return;
+    }
+    let value = c.value;
+    match b.attack {
+        Some((state, what)) if super::battle::may_start_attack(e) => {
+            let flags: u64 = rd(e + EN_FLAGS);
+            wr(e + EN_FLAGS, crate::battle::cardless_flags(flags));
+            wr(e + EN_CHOSEN, state);
+            wr(e + EN_NEXT, crate::battle::state_address(e, state));
+            // The untouchable window opens when Re:CoM begins this state.
+            c.flags = (c.flags | flag::PENDING) & !flag::UNTOUCHABLE;
+            wr(e + b.size as usize + tail::STATE, state);
+            line(|| format!("revenge: {} {e:#x} counter {value:.1} >= {l} at frame {at:.0} of its {} -> state {state} ({what})", b.name, if at_end { "reaction's end" } else { "reaction" }));
+        }
+        Some((state, _)) => line(|| format!("revenge: {} {e:#x} counter {value:.1} >= {l}, but it may not attack now (dead or CBTL locked): state {state} not started", b.name)),
+        None => line(|| format!("revenge: {} {e:#x} counter {value:.1} >= {l}: no attack state of its own, nothing starts", b.name)),
+    }
+}
+
+/// A frame of Re:CoM's flinch / blow-away: counts it; at KH2's frame (20, Hades 30) decides. An
+/// earlier end is decided in [`state_change`].
 unsafe fn step(e: usize, o: StepFn) {
     if !live() {
         return o(e);
@@ -305,27 +340,33 @@ unsafe fn step(e: usize, o: StepFn) {
     o(e);
     let mut c = counter(e, b);
     c.flinch_frame(dt);
-    let ending = rd::<usize>(e + EN_NEXT) != rd::<usize>(e + EN_STATE);
-    if c.due(b.check_frame(), ending) {
-        let l = limit_now(e, b, &mut c);
-        let at = c.flinch_elapsed;
-        if c.decide(now(), l) {
-            let value = c.value;
-            match b.attack {
-                Some((state, what)) if super::battle::may_start_attack(e) => {
-                    let flags: u64 = rd(e + EN_FLAGS);
-                    wr(e + EN_FLAGS, crate::battle::cardless_flags(flags));
-                    wr(e + EN_CHOSEN, state);
-                    wr(e + EN_NEXT, crate::battle::state_address(e, state));
-                    // The untouchable window opens when Re:CoM begins this state.
-                    c.flags = (c.flags | flag::PENDING) & !flag::UNTOUCHABLE;
-                    wr(e + b.size as usize + tail::STATE, state);
-                    line(|| format!("revenge: {} {e:#x} counter {value:.1} >= {l} at frame {at:.0} of its {} -> state {state} ({what})", b.name, if ending { "reaction's end" } else { "reaction" }));
-                }
-                Some((state, _)) => line(|| format!("revenge: {} {e:#x} counter {value:.1} >= {l}, but it may not attack now (dead or CBTL locked): state {state} not started", b.name)),
-                None => line(|| format!("revenge: {} {e:#x} counter {value:.1} >= {l}: no attack state of its own, nothing starts", b.name)),
-            }
-        }
+    if c.due(b.check_frame(), false) {
+        decide(e, b, &mut c, false);
+    }
+    store(e, b, &c);
+}
+
+/// Re:CoM's state-change callback, as written in each revenge boss class's state-machine vtable
+/// (`sites::REVENGE_FSM_SLOTS`; `fsm` = the boss + 0x58). Re:CoM's own `0x1401A3B80` runs first.
+/// When a flinch / blow-away that hasn't decided yet is left for anything but a new reaction (its
+/// own end, the boss's think a quarter in, a stop…), the revenge check runs here, at its end (owner,
+/// 2026-11-02: KH2's frame 20, or the end if sooner). Runs on the bosses' state changes only.
+pub unsafe extern "win64" fn state_change(fsm: usize) {
+    func::<StepFn>(rv::FSM_CHANGE)(fsm);
+    if !live() {
+        return;
+    }
+    let e = fsm - rv::FSM_AT;
+    let Some(b) = boss_of(e) else { return };
+    let old: usize = rd(e + EN_STATE);
+    let next: usize = rd(e + EN_NEXT);
+    let reaction = |s: usize| s == crate::battle::state_address(e, FLINCH_STATE) || s == crate::battle::state_address(e, BLOW_STATE);
+    if !rv::reaction_left(reaction(old), reaction(next)) || rd::<i32>(e + EN_HP) <= 0 {
+        return;
+    }
+    let mut c = counter(e, b);
+    if c.due(b.check_frame(), true) {
+        decide(e, b, &mut c, true);
     }
     store(e, b, &c);
 }
@@ -397,34 +438,63 @@ pub(super) unsafe fn begin_untouchable(e: usize) -> bool {
 pub unsafe extern "win64" fn attack_end(e: usize) {
     if INSTALLED.load(Ordering::Relaxed) {
         if let Some(b) = boss_of(e) {
-            if tail_ok(e, b) {
-                let t = e + b.size as usize;
-                let flags: u32 = rd(t + tail::FLAGS);
-                if flags & (flag::UNTOUCHABLE | flag::PENDING) != 0 {
-                    wr(t + tail::FLAGS, flags & !(flag::UNTOUCHABLE | flag::PENDING));
-                }
-                if flags & flag::UNTOUCHABLE != 0 {
-                    let state: i32 = rd(t + tail::STATE);
-                    let ig = Ignored::from_bytes(rd(t + tail::IGNORED));
-                    let frames = now() as f32 - rd::<f32>(t + tail::START);
-                    let hp: i32 = rd(e + EN_HP);
-                    line(|| {
-                        format!(
-                            "revenge: {} untouchable ends (state {state}) {e:#x} after {frames:.0} frames: ignored {} hits ({} KH1 swings, {} KH1 spells, {} other), {} Guard reactions skipped; HP {hp}{}",
-                            b.name,
-                            ig.hits(),
-                            ig.swings,
-                            ig.spells,
-                            ig.other,
-                            ig.guards,
-                            if hp <= 0 { " (dead)" } else { "" }
-                        )
-                    });
-                }
-            }
+            close_window(e, b, "");
         }
     }
     orig::<StepFn>(&ORIG_ATTACK_END)(e)
+}
+
+/// Closes the window (if open) and logs it; true when it was open.
+unsafe fn close_window(e: usize, b: &Boss, why: &str) -> bool {
+    if !tail_ok(e, b) {
+        return false;
+    }
+    let t = e + b.size as usize;
+    let flags: u32 = rd(t + tail::FLAGS);
+    if flags & (flag::UNTOUCHABLE | flag::PENDING) != 0 {
+        wr(t + tail::FLAGS, flags & !(flag::UNTOUCHABLE | flag::PENDING));
+    }
+    if flags & flag::UNTOUCHABLE == 0 {
+        return false;
+    }
+    let state: i32 = rd(t + tail::STATE);
+    let ig = Ignored::from_bytes(rd(t + tail::IGNORED));
+    let frames = now() as f32 - rd::<f32>(t + tail::START);
+    let hp: i32 = rd(e + EN_HP);
+    line(|| {
+        format!(
+            "revenge: {} untouchable ends (state {state}{why}) {e:#x} after {frames:.0} frames: ignored {} hits ({} KH1 swings, {} KH1 spells, {} other), {} Guard reactions skipped; HP {hp}{}",
+            b.name,
+            ig.hits(),
+            ig.swings,
+            ig.spells,
+            ig.other,
+            ig.guards,
+            if hp <= 0 { " (dead)" } else { "" }
+        )
+    });
+    true
+}
+
+/// A wind-up-only revenge state's exe (Hades' state 5, `crate::revenge::HADES_WINDUP`), as written in
+/// the class's vtable (`sites::REVENGE_WINDUP_SLOTS`). Re:CoM's exe runs first; when it has moved its
+/// sub-step off 0 (the wind-up motion ended, the spin and its timer started) the window closes and
+/// Re:CoM's own "bodies on" runs, so the rest of the state is an ordinary attack at the KH1 setting
+/// (decisions 14 / 26; his fire-up keeps Re:CoM's no-flinch bit 19). Runs only while the class is
+/// in that state.
+pub unsafe extern "win64" fn windup_exe(e: usize) {
+    // Only Hades' table holds this slot; Re:CoM's exe always runs.
+    let b = boss_of(e).filter(|b| b.windup.is_some());
+    let w = b.and_then(|b| b.windup).unwrap_or(rv::HADES_WINDUP);
+    func::<StepFn>(w.exe)(e);
+    let Some(b) = b else { return };
+    if !INSTALLED.load(Ordering::Relaxed) || !rv::windup_over(rd(e + w.step)) {
+        return;
+    }
+    let open = tail_ok(e, b) && rd::<u32>(e + b.size as usize + tail::FLAGS) & flag::UNTOUCHABLE != 0;
+    if open && close_window(e, b, &format!(", {}", w.what)) {
+        func::<BodiesFn>(BODIES_ON)(e, -1);
+    }
 }
 
 /// Checks the classes and their state steps, hooks the two steps and raises the bosses'
@@ -476,6 +546,25 @@ pub unsafe fn install(bs: usize) -> bool {
             log("revenge: an allocation size held other bytes; sizes left as Re:CoM's, revenge off (the step hooks pass through)");
             return false;
         }
+    }
+    // The state-change callback of each class's state machine and Hades' state-5 exe: pointer
+    // writes in those classes' own tables (Re:CoM's function checked as the old value).
+    let ours: Vec<(&PtrSite, usize)> = REVENGE_FSM_SLOTS.iter().map(|p| (p, state_change as *const () as usize)).chain(REVENGE_WINDUP_SLOTS.iter().map(|p| (p, windup_exe as *const () as usize))).collect();
+    let mut written: Vec<(&PtrSite, usize)> = Vec::new();
+    for &(p, f) in &ours {
+        let old = ((bs + p.target as usize) as u64).to_le_bytes();
+        if super::hook::patch(bs + p.rva as usize, &old, &(f as u64).to_le_bytes(), p.name) {
+            written.push((p, f));
+            continue;
+        }
+        for (q, g) in written.iter().rev() {
+            super::hook::patch(bs + q.rva as usize, &(*g as u64).to_le_bytes(), &((bs + q.target as usize) as u64).to_le_bytes(), q.name);
+        }
+        for b in rv::BOSSES {
+            super::hook::patch(bs + b.alloc as usize, &rv::alloc_bytes_ours(b.size), &rv::alloc_bytes(b.size), b.rtti);
+        }
+        log(&format!("revenge: {} held another pointer; revenge off (the step hooks pass through)", p.name));
+        return false;
     }
     INSTALLED.store(true, Ordering::Release);
     true

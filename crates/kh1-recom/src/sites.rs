@@ -614,6 +614,9 @@ pub const REVENGE_CHECKED: &[Site] = &[
     Site { name: "CBossMarluxia2 hurt off calls 0x14017DA80 (0x140400410)", rva: 0x0040_0410, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0xE8, 0x5E, 0xD6, 0xD7, 0xFF] },
     // Marluxia 2's +0x440: mov [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x20;
     // mov rsi,rcx; call 0x14017DA90, then its parts.
+    // mov rcx,[rcx+0xF8]; test rcx,rcx; jnz 0x140155490: every hurt body back on (the call
+    // `0x14017DA90` ends with). Called when Hades' wind-up ends.
+    Site { name: "hurt bodies on (0x1401A2DB0)", rva: 0x001A_2DB0, expect: &[0x48, 0x8B, 0x89, 0xF8, 0x00, 0x00, 0x00, 0x48, 0x85, 0xC9, 0x0F, 0x85, 0xE0, 0x26, 0xFB, 0xFF] },
     Site { name: "CBossMarluxia2 attack end calls 0x14017DA90 (0x140400460)", rva: 0x0040_0460, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xF1, 0xE8, 0x19, 0xD6, 0xD7, 0xFF] },
 ];
 
@@ -689,6 +692,33 @@ pub const REVENGE_PTRS: &[PtrSite] = &[
     PtrSite { name: "CBossMarluxia +0x440", rva: 0x0067_EFA0, target: 0x0017_DA90 },
     PtrSite { name: "CBossMarluxia2 +0x440", rva: 0x0067_B3D0, target: 0x0040_0460 },
     PtrSite { name: "CBossMarluxia3 +0x440", rva: 0x0067_89F8, target: 0x0017_DA90 },
+];
+
+/// Revenge check timing (owner, 2026-11-02: KH2's frame 20, or the reaction's end if sooner): each
+/// revenge boss class's state-machine vtable (the `CFSM` base at `+0x58`, RTTI COL offset 0x58)
+/// slot `+0x28`, the state-change callback `0x1401A3B80` that `0x140242F50` calls between the old
+/// state's end and the new state's begin. Ours (`win::revenge::state_change`) is written in the
+/// slot; it calls Re:CoM's. Only these 12 classes' tables change. Checked (exe + disasm).
+pub const REVENGE_FSM_SLOTS: &[PtrSite] = &[
+    PtrSite { name: "CTutorialHood FSM +0x28", rva: 0x0065_CF90, target: 0x001A_3B80 },
+    PtrSite { name: "CTutorialLeon FSM +0x28", rva: 0x0065_E2D0, target: 0x001A_3B80 },
+    PtrSite { name: "CBossCloud FSM +0x28", rva: 0x0066_1090, target: 0x001A_3B80 },
+    PtrSite { name: "CBossHades FSM +0x28", rva: 0x0066_2520, target: 0x001A_3B80 },
+    PtrSite { name: "CBossHook FSM +0x28", rva: 0x0066_B300, target: 0x001A_3B80 },
+    PtrSite { name: "CBossVexen FSM +0x28", rva: 0x0066_3B98, target: 0x001A_3B80 },
+    PtrSite { name: "CBossRiku FSM +0x28", rva: 0x0066_5138, target: 0x001A_3B80 },
+    PtrSite { name: "CBossLarxene FSM +0x28", rva: 0x0066_6A80, target: 0x001A_3B80 },
+    PtrSite { name: "CBossAxel FSM +0x28", rva: 0x0066_81C0, target: 0x001A_3B80 },
+    PtrSite { name: "CBossMarluxia FSM +0x28", rva: 0x0067_F048, target: 0x001A_3B80 },
+    PtrSite { name: "CBossMarluxia2 FSM +0x28", rva: 0x0067_B418, target: 0x001A_3B80 },
+    PtrSite { name: "CBossMarluxia3 FSM +0x28", rva: 0x0067_8A40, target: 0x001A_3B80 },
+];
+
+/// Hades untouchable only in his wind-up (owner, 2026-11-02): CBossHades' vtable slot of state 5's
+/// exe (`+0x168`, reached by the state handler `0x140182BC0`: `jmp [rax+0x168]`), written with ours
+/// (`win::revenge::windup_exe`), which calls his. Checked (exe + disasm).
+pub const REVENGE_WINDUP_SLOTS: &[PtrSite] = &[
+    PtrSite { name: "CBossHades +0x168 (state 5 exe)", rva: 0x0066_21A0, target: 0x003B_1DB0 },
 ];
 
 /// Decision 35 (MP to full where Re:CoM fills HP). Moved bytes are whole, position-independent

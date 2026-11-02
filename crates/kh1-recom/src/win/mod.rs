@@ -591,7 +591,7 @@ fn install_revenge(base: usize, s: &Settings) {
     // SAFETY: reads of the mapped exe; the hook targets' and patch sites' bytes are checked inside.
     if unsafe { revenge::install(base) } {
         log(&format!(
-            "revenge: KH2's revenge value on {} humanoid bosses (boss_revenge = {}): counter in a 0x30-byte tail of each boss body (factory sizes raised), add in the enemy-hit wrapper, check in the flinch / blow-away steps 0x140184100 / 0x140182E50 at KH2's frame 20 (Hades 30) or the state's end; the revenge attack untouchable by Re:CoM's own rule (hurt bodies off 0x14017DA80, its handler's bit-0 drop) until its state end 0x14017DA90",
+            "revenge: KH2's revenge value on {} humanoid bosses (boss_revenge = {}): counter in a 0x30-byte tail of each boss body (factory sizes raised), add in the enemy-hit wrapper, check in the flinch / blow-away steps 0x140184100 / 0x140182E50 at KH2's frame 20 (Hades 30), or at the reaction's end if sooner (state-change callback 0x1401A3B80 in the 12 classes' tables); the revenge attack untouchable by Re:CoM's own rule (hurt bodies off 0x14017DA80, its handler's bit-0 drop) until its state end 0x14017DA90 (Hades: until his wind-up ends, his state-5 exe +0x168)",
             crate::revenge::BOSSES.len(),
             settings::switch_str(s.boss_revenge)
         ));

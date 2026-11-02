@@ -70,7 +70,7 @@ damaged or interrupted during their retaliation move?" → § 4.
 | Add | in the enemy-hit hook: `win::revenge::enemy_hit` runs the KH1 wrapper, then adds the hit's value when Re:CoM applied it (return 1; held hits of a stopped enemy when they land). Marluxia 2 / 3's parts (`CBossMarluxia2Funnel`, `CBossMarluxia2Scythe`, `CBossMarluxia3Specter`) add to the body | Checked (decomp) |
 | Falloff off | for bosses whose revenge acts, `+0x288` / `+0x28C` / `+0x290` put back after Re:CoM's handler (Hood and Leon keep it: no attack state of their own) | Checked (decomp) |
 | Decay | lazy, at each hit and check: 1 per 60 Hz frame of the game clock (Sora's dt `player+0x460` summed in the request-bits wrapper), minus the frames spent in the flinch / blow-away states (counted in their step hooks) | Checked (decomp); matches KH2's pause in damage motions |
-| Check | hooks on Re:CoM's flinch step `0x140184100` (state 11, vtable `+0x1F8` of all 12 classes) and blow-away step `0x140182E50` (state 12, `+0x210`): at frame 20 (Hades 30) of the state, or at its end if Re:CoM's state is shorter (its exe then requests another state, `+0x68` ≠ `+0x60`); once per reaction; a new hit starts a new reaction | Checked (exe: `sites::REVENGE_PTRS`); the end rule is ours (Re:CoM's flinches can be shorter than KH2's damage motions) |
+| Check | hooks on Re:CoM's flinch step `0x140184100` (state 11, vtable `+0x1F8` of all 12 classes) and blow-away step `0x140182E50` (state 12, `+0x210`) count the frames and decide at frame 20 (Hades 30). **An earlier end** (2026-11-02, owner: "fix it to KH2's") is decided at Re:CoM's state change: each class's state-machine table (`CFSM` at `+0x58`) slot `+0x28` (`0x1401A3B80`, called by `0x140242F50` between the old state's end and the new state's begin; `+0x68` is re-read after it, `0x140242F75`) now holds ours (`win::revenge::state_change`, `sites::REVENGE_FSM_SLOTS`), which calls Re:CoM's and, when a flinch / blow-away not yet decided is left for anything but a new flinch / blow-away (its own end, the boss's think a quarter in, a stop…), decides then. Once per reaction; a new hit starts a new reaction (its own frame 20). Runs on these 12 classes' state changes only | Checked (decomp + disasm + exe: the 12 tables' COL offset 0x58, slot `+0x28` = `0x1401A3B80`); "a new reaction has its own check": KH2's motion restart, Assumption |
 | Start | the transition Re:CoM's message 2 makes, as the cardless card play P1 does: `+0x260` = `cardless_flags`, `+0x278` = the state, `+0x68` = the state's object; only when the boss is alive and CBTL isn't locked (`0x1401634B0`'s test). Re:CoM's own state code then runs the attack and ends it | Checked (decomp) |
 
 The human bosses don't start attacks through the attack request: their `+0x98` (`0x1401829D0`)
@@ -96,7 +96,7 @@ swing counts as a ground swing, a shot Guard turned back): 10, KH2's most common
 | Marluxia 2 (120), parts 135–138 count on the body | 100 | 2: the death scythe (`CBossMarluxia2AtkDScythe`) | 20 |
 | Marluxia 3 (132) | 100 | 2: scythe strike through its specter object | 20 |
 | Hades (107) | 80, 50 below 30 % HP | 5: fire-up (`e107_054..056`, no flinch for 3000 ticks, flames) — nearest the Firaga wall | 30 |
-| Cloud (106) | 100 | 6: Omnislash ("bushin" dashes, `e106_057..062`) — nearest Sonic Rave | 20 |
+| Cloud (106) | 100 | **4: charge** (`e106_053`: aims, then a straight dash; 2 times, 4 below half HP) — nearest Sonic Rave (owner, 2026-11-02; was 6, Omnislash) | 20 |
 | Captain Hook (112) | 100 | 3: sword slash (`e112_050`) | 20 |
 | Riku / Riku Replica (116) | 100 | 4: slash (`p003_039`) | 20 |
 | Hooded figure (100) | 100 | none: no attack state of its own (counter only) | 20 |
@@ -116,7 +116,7 @@ KH2), Riku's story (Re:CoM's numbers).
 
 ## 3. Assumptions and not checked
 
-- **Finding (2026-11-02), not changed:** the check's "the state ends before frame 20" test
+- **Finding (2026-11-02), fixed in the next change (§ 2 Check row):** the check's "the state ends before frame 20" test
   (`+0x68 != +0x60` after Re:CoM's flinch step) is true on every frame without a queued change:
   Re:CoM's state machine `0x140242F50` (the enemy's at `+0x58`: `+0x60` current, `+0x68` next, run
   by the actor update `0x1401A59A0`) zeroes `+0x68` after each change. So the decision is made on
@@ -124,10 +124,12 @@ KH2), Riku's story (Re:CoM's numbers).
   (decomp). A plain fix (`+0x68 != 0`) would miss flinches the boss leaves through its own think:
   Re:CoM's flinch step `0x140184100` frees the boss (`+0x260 |= 0x1010`, bit 0 cleared) a quarter
   into the motion, and the think (`+0x3D0` from `0x140185320`) can queue its next state before the
-  step runs. Owner question (how the check should time).
+  step runs. Owner: KH2's frame 20, or the end if sooner, detected properly (now Re:CoM's
+  state-change callback).
 - Nothing seen in game.
 - The attack states chosen (above); the human bosses' attacks starting without a card read no card
-  record (checked: none of the ten chosen states reads `+0x318..+0x338`); Marluxia 2's death
+  record (checked: none of the ten chosen states reads `+0x318..+0x338`; Cloud's state 4 neither,
+  2026-11-02); Marluxia 2's death
   scythe uses the last think's variant fields (`+0xD30`, `+0xDD0`).
 - Re:CoM's flinch / blow-away lengths against KH2's frame 20 (the state's end decides when shorter).
 - The game clock follows Sora's dt (`player+0x460`, Re:CoM units); pauses stop both.
@@ -197,21 +199,80 @@ actor update `0x1401A59A0` (Checked (decomp)).
 | Marluxia | 2 | `e119_050`; one motion |
 | Marluxia 2 | 2 | **58 frames** (2900 ticks), then the death scythe until it is gone (`0x1403FBA20`); variant 0 ends at once |
 | Marluxia 3 | 2 | one motion |
-| Hades | 5 | `e107_054`, then `e107_055` spinning for **240, 480 or 720 frames** (4 / 8 / 12 s, random: (rand % 3 + 1) × 12000 ticks), then the attack ends |
-| Cloud | 6 | `e106_057`, then five rounds of chase (`e106_058`, no time limit until within 4 m of Sora) and dash (`e106_059` / `060` / `061` / `061` / `060`), then `e106_062` |
+| Hades | 5 | **the wind-up `e107_054` only** (owner, 2026-11-02). Then `e107_055` spins for 240, 480 or 720 frames (4 / 8 / 12 s, random: (rand % 3 + 1) × 12000 ticks), hittable |
+| Cloud | 4 | every repeat of `e106_053` (2 at ≥ 50 % HP, 4 below: `+0xD28`, set by the begin `0x1403AE680`), to Re:CoM's attack end `0x14017E540(boss, 0, 6000)` in the exe `0x1403AF190`; the repeats stay in state 4 (the exe replays the motion), so the window needs nothing more |
+| (Cloud, Omnislash, no longer used) | 6 | `e106_057`, then five rounds of chase (`e106_058`, no time limit until within 4 m of Sora) and dash (`e106_059` / `060` / `061` / `061` / `060`), then `e106_062` |
 | Captain Hook | 3 | `e112_003` / `e112_011` / `e112_050` (and `e112_004`); ends with the last motion |
 | Riku / Riku Replica | 4 | `p003_039`; one motion |
 | Hooded figure, Leon | — | no revenge attack: no window |
 
-**Hades:** 4–12 s untouchable plus the wind-up, the longest by far (KH2's warp / Firaga wall is a
-short move). The state also starts his fire-up mode (`+0x260 |= 0x80000`, reaction picker: voice
-only) for his next three attacks (`0x1403B0470`); those are not untouchable (hits land, he doesn't
-flinch, so no revenge check either). It is Re:CoM's own length for that attack, but at Re:CoM Sora
-can break it with a card. Owner question: keep the whole state, or untouchable only through the
-wind-up `e107_054`. Cloud's chase has no time limit (window as long as Sora keeps away); Vexen's is
-5 s.
+**Hades (owner, 2026-11-02: untouchable only during the wind-up).** The boundary used is his
+state-5 sub-step `+0xC80` (Checked (decomp + exe)): the begin `0x1403B0750` plays `e107_054` and sets
+`+0xC80 = 0`; the exe `0x1403B1DB0` (CBossHades vtable `+0x168`, reached by the state handler
+`0x140182BC0`: `jmp [rax+0x168]`), once `e107_054` ends (`0x1401A57D0`), plays the spin `e107_055`,
+sets the timer `+0x160` and `+0xC80 = 1` in the same call. Ours (`win::revenge::windup_exe`,
+written in that slot, `sites::REVENGE_WINDUP_SLOTS`) runs his exe, and when `+0xC80` has left 0
+closes the window and calls Re:CoM's "every hurt body on" `0x1401A2DB0(boss, -1)` (the call his state
+end `0x14017DA90` makes). The spin is then an ordinary attack at the KH1 setting (decisions 14 / 26:
+hittable, the hit ends its bit 0 but not the spin); his fire-up keeps Re:CoM's no-flinch (`+0x260 |=
+0x80000`, set by the begin when he isn't already fired up; the reaction picker plays a voice only).
+Hits in the spin add to the meter as any landed hit; with no flinch there is no check. The fire-up
+mode lasts his next three attacks (`0x1403B0470`). Runs per frame only while Hades is in state 5.
+Vexen's window is 5 s.
 
-### Logs and trace
+### Cloud: the owner's questions ("does this make omnislash a guaranteed hit on sora?")
+
+**Charge, state 4 (the revenge move now).** Begin `0x1403AE680`, exe `0x1403AF190`, end
+`0x1403AE9A0` (CBossCloud vtable `+0x148` / `+0x150` / `+0x158`).
+
+- **Homing:** no homing during the dash itself. For the first 1249 ticks of each `e106_053` (motion
+  time `0x1401A47C0` ≤ `0x4E1`, about 25 frames) he only turns toward Sora: `0x1401D6E90(mover,
+  Sora, 0.2)` turns his yaw 0.2 of the remaining angle a 60 Hz frame (`0x1401D4670`), no movement.
+  Past that, `0x1401D5630(mover, 0.1)` sets one velocity along his facing and the sub-step goes to 1:
+  no more turning; the velocity holds until the motion ends (`0x1401A38D0` zeroes it). Each repeat
+  re-aims. Checked (decomp). (The coordinator's "speed 0.2, then 0.1": 0.2 is the turn, 0.1 the
+  dash speed.) Whether `e106_053`'s root motion adds travel: Assumption (motion not in session).
+- **Speed / outrun:** 0.1 × the mover's scale `+0x13C` (1.0; 1.7 while CBTL `+0x1EC` = 0x70,
+  `0x14017EF90`) m per 60 Hz frame: the mover integrates `+0x80` × dt × 0.02 (`0x1401D4E00`) = 6 m/s.
+  Sora's KH1 run is 8 cm a frame = 4.8 m/s (kh1-core's KH1 params; not re-read). So he can't
+  outrun a dash in a straight line, but the line is fixed ~25 frames in: moving sideways after he
+  commits leaves it. Checked (decomp) for Cloud; Sora's speed from our KH1 params.
+- **Guard:** each dash is blockable if it meets Sora's body while KH1's Guard is live (frames
+  10–36), from within 100° of his facing: Re:CoM's apply `0x14016F1C0` returns 2 when `body+0x9C &
+  1`, the hit's element bit is in `body+0x8C` (all) and the angle ≤ `body+0xB0`. Checked (decomp).
+  That the charge's hit is an ordinary attack collision (no unblockable kind): Assumption.
+- **A block doesn't end it:** the exe reads only the motion time, the motion end and `+0xD28`, and
+  in the untouchable window decision 27's Guard flinch is skipped; the dash keeps its velocity and
+  the next repeat re-aims. Checked (decomp + code). Sora's own side after a block is KH1's: the
+  recoil 0x6E and flag 0x80 (no damage) until 8 frames after his next action.
+- **Damage per dash:** Re:CoM's enemy formula, AP = round(Cloud's `@ENP` attack (`+0x310` row
+  `+4`) × the game mode's factor (`0x14052B4D8`) × the attack row's multiplier (`+0x10`)), then
+  CBTL's AP rewrite `0x14015D5F0` (no card at KH1), then Sora's damage check. The formula is
+  `0x14017F0E0`'s (Checked (decomp)); that the dash's hit goes through it and the numbers: Assumption
+  (Cloud's `EN0106.EPD` and his motion events aren't in this session). One hit per dash: Assumption.
+- **Dodge roll:** today (KH1's roll, decision 17): 12 no-flinch frames, damage taken, so the roll
+  only helps by leaving the dash's line (it doesn't re-aim). With **Re:CoM's whole roll** (owner's
+  choice, another agent): Re:CoM's avoid sets `player+0x418` bit 0 (the damage check's early exit:
+  no damage, no reaction) from the roll's start until motion time ≥ `[player+0x3C0] + 0x28` (600
+  ticks, 12 frames per `recom-kh1-movement.md`; Sora's avoid exe `0x140217310` clears it), so a dash
+  meeting Sora in those frames does nothing; Checked (decomp `0x140217310`). Whether the same dash
+  can still hit him after the 12 frames if they still overlap: Assumption (hit-once rules not read).
+- **Guaranteed?** No: each dash commits ~25 frames in and goes straight, so moving sideways,
+  Guard or (with Re:CoM's roll) a timed roll avoids it; Sora can't stop it (untouchable).
+
+**Omnislash, state 6 (no longer the revenge move; kept for reference).** Begin `0x1403AE770`, exe
+`0x1403AF550`, end `0x1403AE9E0`. Checked (decomp) unless tagged.
+- Homing: each round he chases (`0x1401D6D40`: turn by `BusinRate` and move at `BusinSpeed` × the
+  mover's scale) with no time limit until within 4 m, then a dash motion; in the dash's first
+  quarter (`+0x160` = motion length / 4) he turns 0.5 of the angle a frame toward Sora when within
+  4 m (else keeps chasing); after it he turns by `BusinRate` and his own x / z velocity is zeroed
+  (travel from the motion: Assumption). So the dashes track Sora, at a rate set by `BusinRate`.
+- Outrun: `BusinSpeed` / `BusinRate` are named values of Cloud's `.EPD` (`0x14017F4E0`), not in this
+  session: not checked against Sora's 4.8 m/s.
+- Guard / block, damage, roll: as for the charge (same rules; a block doesn't end a round: the exe
+  reads only motion ends, the timer and the distance).
+
+### Logs and trace (untouchable)
 
 - `revenge: Axel untouchable (state 4: warp, then a flame burst around him) 0x…: Re:CoM's rule …`
   when Re:CoM begins the state.
@@ -238,7 +299,8 @@ wind-up `e107_054`. Cloud's chase has no time limit (window as long as Sora keep
 4. Larxene: past 100 she hops back and casts lightning.
 5. Hades: 80 at first; below 30 % HP his revenge (fire-up) comes sooner (50).
 6. Marluxia 2: hitting the funnels / scythes counts toward the body's revenge.
-7. Cloud, Hook, Riku / Riku Replica, Marluxia 1 and 3: each breaks out with the listed attack.
+7. Cloud (his charge, 2 dashes, 4 below half HP), Hook, Riku / Riku Replica, Marluxia 1 and 3: each
+   breaks out with the listed attack.
 8. Damage on these bosses no longer drops after 5 hits (falloff off); Guard Armor and other
    Heartless bosses keep Re:CoM's falloff.
 9. `boss_revenge = off`: no `revenge:` lines, Re:CoM's falloff back.
@@ -248,7 +310,13 @@ wind-up `e107_054`. Cloud's chase has no time limit (window as long as Sora keep
     `… untouchable ends (state 4) after N frames: ignored M hits …`.
 12. Right after the end line, hits land (damage and flinches) as before.
 13. Guard during a revenge move: Sora blocks, the boss doesn't flinch (`… Guard reactions skipped`).
-14. Vexen's needles (~5 s) and Hades' fire-up spin (4–12 s) stay untouchable the whole time: say if
-    Hades' is too long.
+14. Vexen's needles (~5 s) stay untouchable the whole time. Hades: untouchable only while he winds
+    up; the log's end line says `wind-up e107_054 over …`; his spin then takes damage but he doesn't
+    flinch.
 15. A normal (non-revenge) attack of the same boss is still hittable mid-attack (decision 26).
 16. `boss_revenge = off`: bosses hittable in every attack, as before.
+17. Revenge timing: the decision line says `at frame 20 of its reaction` (Hades 30), or `at frame N
+    of its reaction's end` with N < 20 when the boss got out of the flinch sooner (often its think
+    a quarter in). Before this change every line said frame 0 or 1.
+18. Cloud's charge: Guard blocks a dash and the next dash still comes; stepping sideways once he
+    starts moving avoids it; all dashes in one untouchable window (one start and one end line).

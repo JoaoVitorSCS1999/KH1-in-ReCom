@@ -151,7 +151,49 @@ pub struct Boss {
     pub attack: Option<(i32, &'static str)>,
     /// The KH2 counterpart the numbers come from.
     pub kh2: &'static str,
+    /// The untouchable window ends before the state does (owner, 2026-11-02: Hades only in his
+    /// wind-up); `None`: the whole state.
+    pub windup: Option<WindUp>,
 }
+
+/// A revenge state whose untouchable window is only its wind-up: it ends when the state's own exe
+/// moves its sub-step field off 0 (the same call that starts the next motion and its timer).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WindUp {
+    /// The class's vtable slot for the state's exe (RVA) and the exe it holds (RVA).
+    pub exe_slot: u32,
+    pub exe: u32,
+    /// The sub-step field (i32) the exe keeps.
+    pub step: usize,
+    pub what: &'static str,
+}
+
+/// Hades' state 5 (fire-up): begin `0x1403B0750` plays `e107_054` and sets `+0xC80 = 0`; the exe
+/// `0x1403B1DB0` (vtable `+0x168`), once that motion ends (`0x1401A57D0`), plays the spin `e107_055`,
+/// sets the timer `+0x160` = (rand % 3 + 1) × 12000 and `+0xC80 = 1`. Checked (decomp + exe).
+pub const HADES_WINDUP: WindUp = WindUp { exe_slot: 0x0066_21A0, exe: 0x003B_1DB0, step: 0xC80, what: "wind-up e107_054 over: sub-step +0xC80 left 0, spin e107_055 started" };
+
+/// Whether the wind-up is over (the sub-step field left 0).
+pub fn windup_over(step: i32) -> bool {
+    step != 0
+}
+
+/// Re:CoM's enemy state machine (`CFSM` at `+0x58`: `+0x60` current, `+0x68` next). Its update
+/// `0x140242F50` runs the old state's end, then its vtable `+0x28` (`0x1401A3B80` for every revenge
+/// boss), then sets current = next, zeroes next, and begins it; next is re-read after `+0x28`
+/// (`0x140242F75`). Checked (decomp + disasm + exe: each boss class's FSM vtable at COL offset 0x58).
+pub const FSM_AT: usize = 0x58;
+
+/// At a state change (the `+0x28` callback): whether a flinch / blow-away that hasn't decided yet is
+/// being left for something that isn't a new reaction (a hit's new flinch has its own check). This is
+/// "the reaction ended before KH2's frame": its own end, the boss's think, a stop, anything.
+pub fn reaction_left(old_is_reaction: bool, next_is_reaction: bool) -> bool {
+    old_is_reaction && !next_is_reaction
+}
+
+/// Re:CoM's state-change callback every revenge boss class's FSM vtable holds at `+0x28` (RVA):
+/// it zeroes the mover's velocity. Ours calls it, then decides.
+pub const FSM_CHANGE: u32 = 0x001A_3B80;
 
 impl Boss {
     pub fn check_frame(&self) -> f32 {
@@ -171,18 +213,18 @@ impl Boss {
 /// (disasm of `0x140188F40`); attack states: each class's own vtable states (Checked (exe)), which
 /// state is "nearest" KH2's revenge move is an Assumption from the state's motions and code.
 pub const BOSSES: &[Boss] = &[
-    Boss { name: "hooded figure", id: 100, vtable: 0x0065_CB08, rtti: "CTutorialHood", alloc: 0x0018_9517, size: 0xCE0, limit: Limit::Fixed(100.0), attack: None, kh2: "none (KH2's default 100)" },
-    Boss { name: "Leon", id: 101, vtable: 0x0065_DDE8, rtti: "CTutorialLeon", alloc: 0x0018_9541, size: 0xD10, limit: Limit::Fixed(100.0), attack: None, kh2: "N_HB530_BTL2 (owner: 100)" },
-    Boss { name: "Cloud", id: 106, vtable: 0x0066_0BA8, rtti: "CBossCloud", alloc: 0x0018_9595, size: 0xD30, limit: Limit::Fixed(100.0), attack: Some((6, "Omnislash (bushin dashes)")), kh2: "N_HB550_BTL2 (100)" },
-    Boss { name: "Hades", id: 107, vtable: 0x0066_2038, rtti: "CBossHades", alloc: 0x0018_95BF, size: 0xD80, limit: Limit::Hades, attack: Some((5, "fire-up (unflinching, flames)")), kh2: "B_HE030 (80, 50 below 30 % HP)" },
-    Boss { name: "Captain Hook", id: 112, vtable: 0x0066_AE18, rtti: "CBossHook", alloc: 0x0018_9613, size: 0xD90, limit: Limit::Fixed(100.0), attack: Some((3, "sword slash")), kh2: "Barbossa B_CA010 (default 100)" },
-    Boss { name: "Vexen", id: 114, vtable: 0x0066_36B0, rtti: "CBossVexen", alloc: 0x0018_963D, size: 0xD70, limit: Limit::Fixed(150.0), attack: Some((6, "ice needles")), kh2: "N_CM040_BTL (AS 150)" },
-    Boss { name: "Riku", id: 116, vtable: 0x0066_4C50, rtti: "CBossRiku", alloc: 0x0018_9667, size: 0xD70, limit: Limit::Fixed(100.0), attack: Some((4, "slash (p003_039)")), kh2: "none (KH2's default 100)" },
-    Boss { name: "Larxene", id: 117, vtable: 0x0066_6598, rtti: "CBossLarxene", alloc: 0x0018_9691, size: 0xDA0, limit: Limit::Fixed(100.0), attack: Some((4, "hop back, then lightning from range")), kh2: "B_EX400 (AS 100)" },
-    Boss { name: "Axel", id: 118, vtable: 0x0066_7CD8, rtti: "CBossAxel", alloc: 0x0018_96BB, size: 0xD70, limit: Limit::Fixed(92.0), attack: Some((4, "warp, then a flame burst around him")), kh2: "B_EX110 (unit arg 1 = 0: 92)" },
-    Boss { name: "Marluxia", id: 119, vtable: 0x0067_EB60, rtti: "CBossMarluxia", alloc: 0x0018_9A2D, size: 0xD50, limit: Limit::Fixed(100.0), attack: Some((2, "scythe cut")), kh2: "N_CM000_BTL (AS 100)" },
-    Boss { name: "Marluxia 2", id: 120, vtable: 0x0067_AF90, rtti: "CBossMarluxia2", alloc: 0x0018_995B, size: 0xDF0, limit: Limit::Fixed(100.0), attack: Some((2, "death scythe")), kh2: "N_CM000_BTL (AS 100)" },
-    Boss { name: "Marluxia 3", id: 132, vtable: 0x0067_85B8, rtti: "CBossMarluxia3", alloc: 0x0018_99D9, size: 0xF50, limit: Limit::Fixed(100.0), attack: Some((2, "scythe strike")), kh2: "N_CM000_BTL (AS 100)" },
+    Boss { name: "hooded figure", id: 100, vtable: 0x0065_CB08, rtti: "CTutorialHood", alloc: 0x0018_9517, size: 0xCE0, limit: Limit::Fixed(100.0), attack: None, kh2: "none (KH2's default 100)", windup: None },
+    Boss { name: "Leon", id: 101, vtable: 0x0065_DDE8, rtti: "CTutorialLeon", alloc: 0x0018_9541, size: 0xD10, limit: Limit::Fixed(100.0), attack: None, kh2: "N_HB530_BTL2 (owner: 100)", windup: None },
+    Boss { name: "Cloud", id: 106, vtable: 0x0066_0BA8, rtti: "CBossCloud", alloc: 0x0018_9595, size: 0xD30, limit: Limit::Fixed(100.0), attack: Some((4, "charge (e106_053: aims, then a straight dash; 2 times, 4 below half HP)")), kh2: "N_HB550_BTL2 (100)", windup: None },
+    Boss { name: "Hades", id: 107, vtable: 0x0066_2038, rtti: "CBossHades", alloc: 0x0018_95BF, size: 0xD80, limit: Limit::Hades, attack: Some((5, "fire-up (unflinching, flames)")), kh2: "B_HE030 (80, 50 below 30 % HP)", windup: Some(HADES_WINDUP) },
+    Boss { name: "Captain Hook", id: 112, vtable: 0x0066_AE18, rtti: "CBossHook", alloc: 0x0018_9613, size: 0xD90, limit: Limit::Fixed(100.0), attack: Some((3, "sword slash")), kh2: "Barbossa B_CA010 (default 100)", windup: None },
+    Boss { name: "Vexen", id: 114, vtable: 0x0066_36B0, rtti: "CBossVexen", alloc: 0x0018_963D, size: 0xD70, limit: Limit::Fixed(150.0), attack: Some((6, "ice needles")), kh2: "N_CM040_BTL (AS 150)", windup: None },
+    Boss { name: "Riku", id: 116, vtable: 0x0066_4C50, rtti: "CBossRiku", alloc: 0x0018_9667, size: 0xD70, limit: Limit::Fixed(100.0), attack: Some((4, "slash (p003_039)")), kh2: "none (KH2's default 100)", windup: None },
+    Boss { name: "Larxene", id: 117, vtable: 0x0066_6598, rtti: "CBossLarxene", alloc: 0x0018_9691, size: 0xDA0, limit: Limit::Fixed(100.0), attack: Some((4, "hop back, then lightning from range")), kh2: "B_EX400 (AS 100)", windup: None },
+    Boss { name: "Axel", id: 118, vtable: 0x0066_7CD8, rtti: "CBossAxel", alloc: 0x0018_96BB, size: 0xD70, limit: Limit::Fixed(92.0), attack: Some((4, "warp, then a flame burst around him")), kh2: "B_EX110 (unit arg 1 = 0: 92)", windup: None },
+    Boss { name: "Marluxia", id: 119, vtable: 0x0067_EB60, rtti: "CBossMarluxia", alloc: 0x0018_9A2D, size: 0xD50, limit: Limit::Fixed(100.0), attack: Some((2, "scythe cut")), kh2: "N_CM000_BTL (AS 100)", windup: None },
+    Boss { name: "Marluxia 2", id: 120, vtable: 0x0067_AF90, rtti: "CBossMarluxia2", alloc: 0x0018_995B, size: 0xDF0, limit: Limit::Fixed(100.0), attack: Some((2, "death scythe")), kh2: "N_CM000_BTL (AS 100)", windup: None },
+    Boss { name: "Marluxia 3", id: 132, vtable: 0x0067_85B8, rtti: "CBossMarluxia3", alloc: 0x0018_99D9, size: 0xF50, limit: Limit::Fixed(100.0), attack: Some((2, "scythe strike")), kh2: "N_CM000_BTL (AS 100)", windup: None },
 ];
 
 /// Parts of a boss whose hits count on the body (owner: Marluxia's parts). Vtables Checked (exe
@@ -465,6 +507,50 @@ mod tests {
         assert!(begins_revenge(flag::PENDING, 0x1000, 0x1000));
         assert!(!begins_revenge(flag::PENDING, 0x1040, 0x1000));
         assert!(!begins_revenge(flag::UNTOUCHABLE, 0x1000, 0x1000));
+    }
+
+    #[test]
+    fn clouds_revenge_is_his_charge() {
+        // Owner (2026-11-02): state 4 (begin 0x1403AE680, exe 0x1403AF190), not Omnislash (6).
+        let c = BOSSES.iter().find(|b| b.id == 106).unwrap();
+        assert_eq!(c.attack.unwrap().0, 4);
+        assert!(c.windup.is_none(), "the window covers every repeat, to Re:CoM's attack end");
+    }
+
+    #[test]
+    fn hades_window_is_his_wind_up_only() {
+        let h = BOSSES.iter().find(|b| b.id == 107).unwrap();
+        let w = h.windup.expect("Hades");
+        // His state-5 exe in his vtable's state-5 exe slot (+0x118 + 3 × 0x18 + 8).
+        assert_eq!(w.exe_slot, h.vtable + 0x118 + 3 * 0x18 + 8);
+        assert_eq!(h.attack.unwrap().0, 5);
+        assert!(!windup_over(0));
+        assert!(windup_over(1));
+        // Everyone else: the whole state.
+        assert!(BOSSES.iter().filter(|b| b.id != 107).all(|b| b.windup.is_none()));
+        // Its slot is listed and checked.
+        assert!(crate::sites::REVENGE_WINDUP_SLOTS.iter().any(|p| p.rva == w.exe_slot && p.target == w.exe));
+    }
+
+    #[test]
+    fn reaction_end_decides_unless_a_new_reaction_follows() {
+        assert!(reaction_left(true, false));
+        assert!(!reaction_left(true, true), "a hit's new flinch has its own check");
+        assert!(!reaction_left(false, false));
+        // At the end, once per reaction: decided unless the frame-20 check already did.
+        let mut c = Counter::new(0.0);
+        c.hit(0.0, 10.0);
+        c.flinch_frame(8.0);
+        assert!(!c.due(20.0, false), "frame 8: not yet");
+        assert!(c.due(20.0, true), "the think cut it short at frame 8: decide now");
+        c.decide(8.0, 100.0);
+        assert!(!c.due(20.0, true));
+        // The FSM slots: one per boss class.
+        for b in BOSSES {
+            assert_eq!(crate::sites::REVENGE_FSM_SLOTS.iter().filter(|p| p.name.starts_with(b.rtti) && p.name[b.rtti.len()..].starts_with(' ')).count(), 1, "{}", b.name);
+        }
+        assert_eq!(crate::sites::REVENGE_FSM_SLOTS.len(), BOSSES.len());
+        assert!(crate::sites::REVENGE_FSM_SLOTS.iter().all(|p| p.target == FSM_CHANGE));
     }
 
     #[test]
