@@ -772,11 +772,34 @@ pub mod stop {
         (resist9 > 0.0).then(|| (POWER + max_mp) as f32 * FRAMES_PER_POINT * resist9)
     }
 
-    /// The duration as Re:CoM's stop timer (`enemy+0x2D8` → the stop state's `+0x160`, ticks: 50
-    /// a frame), carried as the hit's value (an i16: at most 32767; KH1's longest is 600 frames =
-    /// 30000).
-    pub fn ticks(max_mp: i32, resist9: f32) -> Option<i16> {
-        frames(max_mp, resist9).map(|f| (f * 50.0).round().clamp(1.0, i16::MAX as f32) as i16)
+    /// The duration as Re:CoM's stop timer (`enemy+0x2D8` → the stop state's `+0x160`, both i32
+    /// ticks: 50 a frame; Checked (disasm `0x14017DCC6`, `0x14017C7F4`)).
+    pub fn ticks(max_mp: i32, resist9: f32) -> Option<i32> {
+        frames(max_mp, resist9).map(|f| (f * crate::units::UNITS_PER_FRAME).round().max(1.0) as i32)
+    }
+
+    /// The hit's value that carries the duration through Re:CoM's hit (the part's `+0x92` is an
+    /// i16, read by `0x14016FDB0`): at most 32767 ticks (655 frames). Longer durations (max MP 10
+    /// and up: (2 + 10) × 60 = 720 frames) are written whole into `+0x2D8` once Re:CoM's handler
+    /// has sent the enemy to its stop state ([`timer_after_entry`]).
+    pub fn carrier(ticks: i32) -> i16 {
+        ticks.clamp(1, i16::MAX as i32) as i16
+    }
+
+    /// What our hit writes into Re:CoM's `+0x2D8` after its handler: KH1's whole duration, only
+    /// when the handler sent the enemy to its stop state (`+0x68` = `+0x940`) and the carrier
+    /// could not hold it. None: Re:CoM's own write stands.
+    pub fn timer_after_entry(entered: bool, ticks: i32) -> Option<i32> {
+        (entered && ticks > i16::MAX as i32).then_some(ticks)
+    }
+
+    /// Decision 14 for Stop: KH1's Stop lands on an attacking actor (`0x1402BEEE0` element 9 sets
+    /// `+0x88 |= 1` whatever the actor does), so the strike carries Re:CoM's card-interrupt bit
+    /// (`+0x260 |= 0x2000000`) when the enemy is in an attack (`+0x260 & 1`) and the stop isn't
+    /// refused (an immune enemy's attack goes on, as KH1's). Re:CoM's hit handler `0x14017F7E0`
+    /// otherwise returns at once for an enemy with bit 0 (`0x14017F8CB`), before its kind 8.
+    pub fn interrupts(flags: u64, ticks: Option<i32>) -> bool {
+        ticks.is_some() && flags & 1 != 0 && flags & 0x200_0000 == 0
     }
 
     /// KH1's pace for the hits held during Stop (decision 38; M7 f3). Checked (decomp):

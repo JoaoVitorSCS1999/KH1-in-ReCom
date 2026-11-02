@@ -742,20 +742,57 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
 /// (`0x14017C740`) in its timer. Re:CoM then holds the hits the enemy takes and lands them when the
 /// stop ends (its stop exe `0x1401843A0`). Once stopped, the enemy's own attack bodies go off (KH1
 /// skips a stopped actor's attacks). An enemy with no KH1 record takes 100 %.
+///
+/// An enemy in an attack (`+0x260 & 1`) gets the card-interrupt bit for the call, as every other
+/// KH1 hit (decision 14; `crate::magic::stop::interrupts`): Re:CoM's handler drops any hit on an
+/// attacking enemy without it (`0x14017F8CB`), before its kind 8 (owner's 0.53.0 log: no strike
+/// entered the stop state). A duration longer than the i16 carrier goes whole into `+0x2D8`
+/// after the handler (`stop::timer_after_entry`), before the stop state's begin copies it.
 unsafe fn stop_hit(enemy: usize, part: usize, lv: u8, o: PlRetFn) -> u64 {
+    use crate::magic::stop;
     let max_mp = super::mp::current().map_or(0, |v| v.1);
     let rec = super::stats::kh1_record(enemy);
     let r9 = rec.as_ref().map_or(1.0, |t| t.resist.get(9).copied().unwrap_or(100) as f32 / 100.0);
-    let ticks = crate::magic::stop::ticks(max_mp, r9);
+    let ticks = stop::ticks(max_mp, r9);
     let attr: u32 = rd(part + super::magic::PART_ATTR);
-    wr(part + 0x92, ticks.unwrap_or(0));
+    wr(part + 0x92, ticks.map_or(0, stop::carrier));
     wr(part + super::magic::PART_ATTR, super::magic::NEUTRAL_ATTR);
     let gate = super::magic::stop_gate(enemy, ticks.is_some());
+    let flags: u64 = rd(enemy + 0x260);
+    let force = stop::interrupts(flags, ticks);
+    if force {
+        wr(enemy + 0x260, flags | 0x200_0000);
+    }
     let r = o(enemy);
+    if force {
+        let now: u64 = rd(enemy + 0x260);
+        wr(enemy + 0x260, now & !0x200_0000);
+    }
     super::magic::stop_gate_back(gate);
     wr(part + super::magic::PART_ATTR, attr);
-    let off = super::magic::stop_attacks_off(enemy);
-    super::magic::hit_line(|| format!("hit stop{lv} on {:#x}: KH1 resist[9] {:.0} % -> {}{}", enemy & 0x00FF_FFFF, r9 * 100.0, ticks.map_or("immune".to_string(), |t| format!("{t} ticks ({:.0} frames)", t as f32 / 50.0)), if off { ", Re:CoM's stop state, its attacks off" } else { "" }));
+    let entered = super::magic::stop_entering(enemy);
+    let whole = ticks.and_then(|t| stop::timer_after_entry(entered, t));
+    if let Some(t) = whole {
+        super::magic::stop_timer(enemy, t);
+    }
+    let off = entered && super::magic::stop_attacks_off(enemy);
+    let state: usize = rd(enemy + super::magic::enemy_stop::NEXT_STATE);
+    super::magic::hit_line(|| {
+        format!(
+            "hit stop{lv} on {:#x}: KH1 resist[9] {:.0} % -> {}{}{}",
+            enemy & 0x00FF_FFFF,
+            r9 * 100.0,
+            ticks.map_or("immune".to_string(), |t| format!("{t} ticks ({:.0} frames)", t as f32 / 50.0)),
+            if force { " (its attack broken)" } else { "" },
+            if off {
+                format!(", Re:CoM's stop state, its attacks off{}", if whole.is_some() { ", Re:CoM's timer given the whole duration" } else { "" })
+            } else if ticks.is_some() {
+                format!(", NOT stopped: Re:CoM's handler -> {r}, flags {flags:#x}, next state +{:#x}", state.wrapping_sub(enemy))
+            } else {
+                String::new()
+            }
+        )
+    });
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {
             g.push(format!("e{:x}:stop{lv}:{}", enemy & 0x00FF_FFFF, ticks.map_or("immune".to_string(), |t| format!("{t}t"))));
