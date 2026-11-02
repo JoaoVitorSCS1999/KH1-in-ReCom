@@ -674,7 +674,7 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
 /// bake carries Re:CoM's own attack records (`.ASD`, bound by the clip's name), which would hit with
 /// KH1's rows. The Darkball's dash 202 (`e023_051`, Re:CoM's record id 0) and bite 204 (`e023_053`,
 /// id 1). Checked (files): Re:CoM's `EN0023.ASD`.
-pub const OWN_CLIPS: &[(&str, u16)] = &[];
+pub const OWN_CLIPS: &[(&str, u16)] = &[("darkball", 202), ("darkball", 204)];
 
 /// Bone points a behaviour reads (M11): (enemy, name, KH1 bone code, request, KH1 frame): the code's
 /// bone's place in that request's motion at that frame, in the actor's frame (KH1 units, y down,
@@ -682,7 +682,7 @@ pub const OWN_CLIPS: &[(&str, u16)] = &[];
 /// actor to bone code 0's place (`0x2A78`: `sys 19(actor, 0, 0)` → `0x14029EB20`: the code's bone's
 /// position, `0x14029FAB0` / `0x1401D62E0`, Checked (decomp)) while its idle plays (blended in over 20
 /// frames: frame 20, Assumption ±10 units).
-pub const BONE_POINTS: &[(&str, &str, u32, u16, f32)] = &[];
+pub const BONE_POINTS: &[(&str, &str, u32, u16, f32)] = &[("darkball", "core", 0, 0, 20.0)];
 
 fn bone_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[RequestClip]) -> Result<Vec<(String, f32)>> {
     let mut out = Vec::new();
@@ -707,4 +707,4 @@ fn bone_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips:
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::darkball::SPEC];

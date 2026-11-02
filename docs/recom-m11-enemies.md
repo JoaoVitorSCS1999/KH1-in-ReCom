@@ -190,6 +190,19 @@ Built (`kh1-core` `enemy`, `kh1-recom` `win::kh1_enemy`):
 | `Behaviour::set_floor` / `on_landed` (defaults: nothing) | the floor height each frame; Re:CoM's `CCollAttack` apply `0x14016F1C0` answered 1 (a hit) on the player side (from the pair-dispatch wrapper, `win::guard::on_result`) → KH1's attack hit callback (`+0x38`) |
 | host | a flying body's vertical velocity is written every frame (× the mover's speed scale, Re:CoM's acceleration cancelled), it is never `grounded`; the floor is Sora's height the last time he stood on the floor (**Assumption**: Re:CoM's battle floors are flat; Re:CoM's fliers keep no floor height: their gravity is off, `+0x260 & 0x100`, `0x1401D67B0(mover, 0)`) |
 
+New for the Darkball (Checked (decomp) unless marked):
+
+| Part | What |
+|---|---|
+| `Cmd::Scale(k)` | KH1's actor scale `+0x40..+0x48` (the Darkball's appearance and warps ramp it 0 → 1, 0.2 → 2 → 1): a factor on Re:CoM's own model scale (read before the first write), through Re:CoM's scale getter / setter `0x1401A4A20` / `0x1401A7050` (the Shadow's `Height` uses them for y); written as at least 0.001 (**Assumption**: a zero scale would leave the model matrix singular) |
+| `Cmd::Visible(b)` | KH1's actor flag `0x1` (the model drawn) as Re:CoM's own hide bit `enemy+0x154` bit 0: the actor draw `0x1401A39B0` (every actor class's slot) draws nothing while it is set; the player's hide state sets it (`0x1401E5E80`), `CEnemyShadow`'s state 0 clears it (`0x140192850`), `CEnemyNeoshadow`'s ctor sets it (`0x140190150`), Re:CoM's defeat sets it once its death effect is half done (`0x1401832F0`). **Assumption**: the bit doesn't stop the motion clock (`0x1401A47C0`) |
+| `Body::accel` | a script's write of the stats block's `+0x14` (the flight's easing `a` of `0x1402CC000`; the Darkball writes 0.05 / 0.1 / 0.2 / 1), else the manifest's `air_accel` |
+| `script::warp`, `Body::warp` | `sys 86` (`0x1402BA560` → `0x140292BC0`): the actor moved to a point with a facing (the vector's fourth word, wrapped by `0x1402A8280`), its flight velocity `+0x3C0..+0x3D0` and speed `+0x2C` zeroed; the host moves the body there in one frame through Re:CoM's mover (its velocity) |
+| `Behaviour::keeps_reaction` | KH1's script hit handler may zero the hit's reaction kind (`hp[0xC] &= ~0x1F`): no reaction; a reaction already running carries on in Re:CoM's state 11 / 12, otherwise back to state 1 (Re:CoM's handler has already cut the attack it hit: **Assumption**, the action ends where KH1's would go on) |
+| quiet watchdog | a flier's AI that steers its body this frame (`+0x20` × `+0x2C`) counts as acting (the Darkball's invisible glide issues no command for its whole length) |
+| asset step `enemy::OWN_CLIPS` | requests that get their own new clip although Re:CoM has their motion as an exact bake, because the bake carries Re:CoM's own attack records (bound by the clip's name, `0x14014DBE0`): they would hit with KH1's rows. The new clip gets the bake's SES entry (same frames) |
+| asset step `enemy::BONE_POINTS` | a bone code's place in a motion's frame (KH1's pose through `kh1-anim`, actor frame, root motion off) as `<name>_x / _y / _z` constants |
+
 Re:CoM's fliers (Checked (decomp)): every flier ctor sets `+0x154 |= 0x80` and `+0x260 |= 0x100` (gravity off in
 Re:CoM's state code, `0x14017EB80`, `0x14017EED0`, `0x140198600`); their clips hold the body 0.61 m above the
 actor (Air Soldier: `ex_2160_sk` at y 0.614 in `e015_001` and in KH1's idle, Checked (files)), so Re:CoM's
@@ -425,9 +438,150 @@ and the flight speeds to compare.
 - `sys 172` from the behaviour's own clock (**Assumption**: ±1 frame against KH1's motion time).
 - The chest rows (above).
 
+## The Darkball (M11 fliers)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Darkball yet.
+
+### KH1's side. Checked (files: `ex_2280.bd` disassembled; decomp: the syscalls named)
+
+The script (0x3600 bytes; code from `0x338`, entry `0x1A28`) has the Air Soldier's newer shape (the actor at
+`wp+0`, the state object at `wp+0x20`), on the flight of § Flying bodies, with its own routines (no shared
+helper besides the random draws).
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x1A28` | init `0x1BD0` (records LV1 `0x14`, LV2 `0x80` / `0xEC` (world 16 from room 37); stats `+0x10` = 800 (the hop, unused); `sys 208`; handlers hit `0x1E20`); `sys 135` (flight, no velocity); a yield; turn rate 5° (`sys 125`); placed (`sys 132` = 0): a target within 1000 → engaged, else lost; spawned: the appearance `0x96E` → `0x97E`. Each frame: nothing while warping (`wp+0x4C`); a state request restarts the behaviour (1 idle `0x8C2` → `0x8DA`, 2 engaged `0x65E` → `0x682`, 3 lost `0x520` → `0x538`, 4 hit `0x338` → `0x35C`); while idle, a target within 1000 → engaged |
+| appearance | `0x9A0` | flags 0x20 / 0x40 / 0x10 (unhittable), request 69, the idle queued; 80 up (`sys 86`); 0 → 1 scale over len(69) − 50 = 122 frames facing Sora, sinking 0.3 a frame from frame 30; flags cleared; 50 frames; then idle |
+| idle | `0x8DA` | not noticed; forever: a point 5–10 m away (raised 0.5–1 m when under 0.7 m), turn to it (`0x34A0`: until the facing's cosine to it is 0.9, 200 frames at most), fly to it (`0x331C`: at 3, until within 10, 500 frames; rising when under 70, sinking when 1.5 m up and above Sora; stuck: a new point and the end), 30 frames |
+| engaged | `0x682` | the notice once (`0xBCE`: request 205, 170 frames facing Sora); rounds: after 2 counted rounds lost; > 6 m: 50 % the warp (one round), else the side approach and dashes (one round); ≤ 6 m: the bite, the warp, the side approach and dashes (two rounds) |
+| side approach | `0x3060` | to within 4.5 m (engaged) / 3 m (lost) for 300 frames: along the facing turned ±80° (chosen once) at 4 within 10 m, straight at 8 beyond; bobbing 0.5–1.5 m above the target (a new bob every 20–40 frames); stuck: turn, 20 frames, end |
+| dash | `0xCC4` | turn to the target; 201 (8 + 68 frames facing it); 202 with row `0x158` (`sys 213`: mode 2, it lives while 202 plays) along the facing at 24 for 60 frames (sinking 0.1 when over 70 above the target, rising 0.4 when low); 203, the idle queued |
+| bite | `0xC64` | turn to the target; the action 204 (`0x10000CC`) with row `0x238`, effect 10; the idle queued (bit 30) |
+| warp | `0x2304` | the vanish `0x2C7A` (warping; 200; unhittable; 1 → 0 scale over 70 frames; back where it started (`sys 86` with the position's fourth word 1.0 as the facing); model hidden: flags 0x1 / 0x10 cleared; effect 8 attached); 30 frames; glides (`0x25C0`, at 24, easing 0.1, 600 frames at most) alternating a point 5–6 m from itself (a target farther than 10 m: one near it) and one 0.1–0.5 m from the target 0.7 m above it, a 60-frame pause between, until within 3 m of the target (the drop `0x27F8`) or 4 tries (the plain reappearance `0x2A78`); the easing 0.2 from then on |
+| glide | `0x25C0` | within 3 m of the target after 60 frames, or within 3 m of the point: only vertical, done once level (easing 0.05 / 0.1); stuck after 30 frames: done |
+| drop | `0x27F8` | the idle 10 frames; request 200 (row `0x1C8` made 8 frames later); shown; 0.2 → 2 scale over 10 frames, held 10, 2 → 1 over 64; hittable; not warping |
+| plain reappearance | `0x2A78` | the idle 20 frames; turn to the target; 200; shown; to bone code 0's place (`sys 19(actor, 0, 0)` → bone 3, the core, about 96 above the actor, `sys 86`); 0 → 1 scale over 70 frames, sinking 0.5 from frame 10; hittable; not warping |
+| hit | `0x35C` | the bite mark (100): the bite, engaged; the stagger mark (200, a Gravity hit): 205 for 170 frames; under 5 counted hits: the bite (< 3.5 m) or a dash (< 10 m), engaged; else the warp, lost |
+| hit handler | `0x1E20` | noticed; kinds 4 / 5: a hit counted, the light run reset; kinds 6 / 7 (clash): nothing counted; others: both counted, the 5th light hit in a row marks the bite, the 6th and later: no reaction (the hit's reaction kind zeroed) and no state change; else state 4 |
+| lost | `0x538` | the side approach to Sora (3 m, 300 frames); within 3 m: 8 m back along the line from him (0–1 m higher) at 6; Sora within 10 m → engaged |
+| leash | `0x2112` | **not ported**: beyond 15 m (10.5 m out of sight, spawned) it sinks away (request 70) and is removed; in a Re:CoM battle room it would never be defeated |
+
+Attacks (rows `0x70` bytes, `sys 23`; Checked (files)):
+
+| Attack | Request | Row (bone code → bone, t, radius, KH1 power) | Hit | Recoil `+0x40` | Re:CoM id | Re:CoM state |
+|---|---|---|---|---|---|---|
+| bite | 204 (152 f, root, an action) | `0x238` (8 → 6, 0, 160, 100 %) | [22, 74) | 110 (no motion) | 1 | 3 |
+| dash | 202 (60 f, looped; steered) | `0x158` (8 → 6, 0 → −1, 100, 40 %) | [0, 60) | 206 | 0 | 2 |
+| drop | 200 (100 f; steered) | `0x1C8` (0 → 3, 0, 230, 100 %) | [12, 28) | 110 (no motion) | 1 | 3 |
+
+KH1's attack objects default to mode 2 (`0x1402B2DC0`: `| 9`, bits 2..3 = 2; `sys 213` only sets it again):
+they live while the request they first saw plays and hit while its HIT slot is on; the radius takes the actor's
+scale only with flag `0x2000` (`0x1402B2DC0`), which the Darkball never sets. So the drop's row, made 8 frames
+after its request, is the same as one made with it (its window starts at 12): the port makes it with the
+request (`Cmd::Attack`).
+
+Reactions: the flying forms (F `0x48..0x4B`, K `0x4C` / `0x4D`, a `0x4E` / `0x4F`, A `0x50` / `0x51`; no
+launches: kind 5 → kind 4); weight 1.0 in all three records; hurt parts: 4 (collision block group 2 → Re:CoM
+bones 2, 14, 10, 5). Checked (files).
+
+Motions (`xa_ex_2280.mset`, 17 entries): KH1's matcher finds Re:CoM's `EN0023.ANN` (86 slots) bakes for the idle
+(`e023_001`), a flinch (`e023_021`), 66 (`e023_070`), 70 (`e023_074`), the dash's wind-up and end (201 →
+`e023_050`, 203 → `e023_052`), the dash 202 (`e023_051`) and the bite 204 (`e023_053`); edits (≤ 20 bones differ) for entry 1
+(7, 72, 73, 78, 103 → `e023_020`), entries 3 / 4 (76, 77, 80, 81 → `e023_072`), 6 (67, 102, 104 → `e023_071`), 7
+(68 → `e023_072`), 8 (the appearance 69 → `e023_073`), 15 (205 → `e023_075`); no Re:CoM match: 200, 206. The
+dash and the bite get their own clips (112, 114: `enemy::OWN_CLIPS`), the rest of the bakes play Re:CoM's clips;
+the edits are new clips with their Re:CoM clip's sounds (decision M10).
+
+### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyDarkball` (vtable `0x14053B7A8`, 139 slots, RTTI at −8), ctor `0x14018D5D0` (`40 53 48 83 EC 20`; its only
+caller the factory `0x140188F40` case 23 at `0x140189362`; no branch into the moved bytes: exe scan), allocation
+`0x140189349` `mov ecx, 0xCD0` → 0xCF0. It overrides states 1 (`0x14018D720` / `0x14018D8D0` → the flying walk
+`0x140197450`), 2 (its dash: `e023_050`, `e023_051` at `BiteSpeed` for 12000 units or until it hit, `e023_052`;
+`0x14018D6A0` / `0x14018D780`), 3 (its bite `e023_053`, `0x14018D6F0` / `0x14018D8A0`); its think is
+`CHeartless`'s `0x140196EC0`. Our copy: states 0, 1, 2, 3, 11, 12, 30, the think; KH1's dash in state 2, the bite and
+the drop in state 3. `EN0023.ASD`: 2 records (id 0 `e023_051` on `ex_2280_sk`, 0.6 m, the whole clip; id 1
+`e023_053`, 1.3 m, [22, 110)). `EN0023.SES`: `e023_051`, `e023_053`.
+
+Power mapping (decision M10): the dash on id 0 and the bite on id 1 (the same motions: Re:CoM's clips are
+bakes of KH1's); the drop on id 1 (**Assumption**: nearest, Re:CoM's whole-body record; KH1 gives the drop and
+the bite the same 100 %; owner question 1).
+
+### What the asset step writes
+
+`ENEMY/0023/EN0023.ANN` (Re:CoM's 86 slots byte-identical; KH1's clips at 100 + entry: 101, 103, 104, 106,
+107, 108 (69), 110 (200), 112 (202), 114 (204), 115 (205), 116), `.ASD` (Re:CoM's 2 records kept + 3: the bite on
+`e023_114`, the dash on `e023_112`, the drop on `e023_110`), `.SES` (Re:CoM's entries kept; 112 / 114 get
+`e023_051` / `e023_053`'s events; the edits their Re:CoM clip's; the drop its template's sounds at its hit:
+Assumption), `kh1-darkball.json` (`kh1-enemy 1`: 151 constants, 29 requests, 3 attacks, 4 parts). Test:
+`darkball::tests::builds_from_the_players_files`.
+
+### Owner install steps
+
+1. Run the step (`kh1-recom-build`): it prints a `darkball (M11): …` line.
+2. Copy into the OpenKH mod folder and add to `mod.yml`:
+
+```yaml
+- {name: ENEMY/0023/EN0023.ANN, method: copy, source: [{name: ENEMY/0023/EN0023.ANN}]}
+- {name: ENEMY/0023/EN0023.ASD, method: copy, source: [{name: ENEMY/0023/EN0023.ASD}]}
+- {name: ENEMY/0023/EN0023.SES, method: copy, source: [{name: ENEMY/0023/EN0023.SES}]}
+- {name: kh1-darkball.json, method: copy, source: [{name: kh1-darkball.json}]}
+```
+
+3. The log shows `darkball: KH1's darkball (M11) …` at start and `battle N: Darkball … gets KH1's AI`.
+
+### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`)
+
+1. A Darkball battle: each grows out of nothing about 0.8 m up (69, ~2 s), sinking a little; it can't be hit
+   until it has grown.
+2. Within 10 m it notices Sora (205, ~3 s), then:
+3. Close (≤ 6 m): a bite (204), then it shrinks away and vanishes; it reappears above Sora growing big (twice its
+   size) and shrinking back (the drop, 200), or (when its glides miss him) reappears plainly further off; then it
+   circles toward Sora at his side and dashes three times (201 → 202 → 203).
+4. Far (> 6 m): the vanish / reappearance, or the side approach and the three dashes.
+5. Hit it: KH1's flinch / knock-back in the air; it counters (a bite when close, a dash further off); after five
+   hits it warps away instead; five quick light hits in a row: the sixth and later don't flinch it and it bites.
+6. While it is shrinking, invisible or growing back it can't be hit.
+7. Guard the dash: KH1's clash recoil (206). Guard the bite or the drop: Re:CoM's flinch.
+8. Kill one: Re:CoM's prizes and EXP.
+9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Darkballs.
+
+Please send `kh1-recom.log` (`darkball:` lines: `visible false` / `visible true` at each warp, the attacks, `hit
+without a reaction`) and an F9 trace.
+
+### KH1 trace (what to record in KH1)
+
+A room with Darkballs: stand far 10 s; stand at 4 m 10 s; stand at 2 m 10 s; one swing / a full combo / a
+finisher; six quick light hits; Guard a dash, a bite, a drop; kill one. The trace's enemy rows give the heights,
+the glides' ends against Sora and the warps' timing to compare.
+
+### Not built / open (the Darkball)
+
+- The leash, the retargeting to another party member, the world rules (KH1 world 11 / 15 / 16 flags: the leash
+  off, a hit rule for Sora's kinds 1 / 10, the LV2 record).
+- KH1's hit attribute (`hp[0xC] >> 6 & 15`) isn't carried by the host: every hit is attribute 0, so the Gravity
+  stagger (attribute 8 → 205) never plays, attributes 9 / 11 change state as any other hit (owner question 4).
+  The armour's status exception (`actor+0x88 & 0x102`) is taken as never set (**Assumption**).
+- The effects (`sys 74` 2 / 7 / 9 at the appearance and the warps, `sys 75` 10 at the bite, `sys 21` 8 attached
+  while invisible: KH1's dark smoke and its trail) and the alpha fades: the warps show as shrinking / growing
+  only (owner question 2).
+- KH1's flags 0x10 / 0x20 (set with 0x40 during the appearance and the warps; 0x10 is Sora's body push, M10's
+  note): not mapped; Re:CoM's body push stays on (KH1's is off only while it shrinks and grows).
+- Re:CoM's lock-on flag stays while it is hidden and unhittable (M10's rule; KH1's automatic target skips it):
+  owner question 3.
+- A Re:CoM battle spawn is a room spawn of a type other than 1 (**Assumption**: `0x1132`'s type-1 rule, which
+  engages Sora at any distance, not taken).
+- `sys 48`'s search is "Sora within the range" (**Assumption**, as the Soldier's).
+- The plain reappearance's warp to bone code 0 uses the idle's pose at frame 20 (**Assumption** ±10 units: KH1
+  reads the live pose).
+- The vanish's warp sets the facing to 1.0 rad (the position's fourth word): ported as read (Checked (decomp));
+  it is invisible then and turns to its glide.
+- A sixth light hit that lands while it attacks: Re:CoM's handler has already cut the attack (KH1's would go on).
+
 ## The other fliers: not ported yet (survey for the next pass)
 
-Search Ghost, Air Pirate, Gargoyle, Darkball and Wyvern were surveyed, not ported (time). All five enter flight
+Search Ghost, Air Pirate, Gargoyle, Darkball and Wyvern were surveyed, not ported (time); the Darkball is
+built since (§ The Darkball). All five enter flight
 once with `sys 135` and steer through `+0x20` / `+0x2C` like the Air Soldier (6–14 steering writes each), so § Flying
 bodies covers their bodies; each is a new script (1170–1710 listing lines) to port routine by routine. Checked
 (files: the scripts listed; exe: ctors, allocation sites, vtables) unless marked:
@@ -437,7 +591,7 @@ bodies covers their bodies; each is a new script (1170–1710 listing lines) to 
 | Search Ghost | `ex_2230.bd` (`0x5DC`) | `CEnemySearchghost` `0x1401923F0` / `0x1401891CF` **0xCE0** / `0x14054C408` | 2 (`l_fing3b`, ids 0 / 1) | a child object (`sys 94` at `0xD12`, its drain: on Re:CoM's own bullets, checklist step 9); `sys 116 / 117` (part masks); table-1 syscalls `sys1.0` / `sys1.3` (the lister reads only table 0) |
 | Air Pirate | `ex_2210.bd` (`0x228`) | `CEnemyAirpirate` `0x14018A0B0` / `0x14018931F` 0xCD0 / `0x1405309E8` | 2 (`r_hand`, ids 0 / 1) | `sys 118` (×7), `sys1.0` (×7) |
 | Gargoyle | `ex_2220.bd` (`0x538`) | `CEnemyGargoyle` `0x14018E150` / `0x1401891A5` 0xCD0 / `0x14053F198` | 2 (both wings, id 0 only) | a child object (`sys 94` at `0x1B24` with rows `0x3FC` / `0x46C`, request 219): on Re:CoM's bullets; one Re:CoM power for all its attacks |
-| Darkball | `ex_2280.bd` (`0x338`) | `CEnemyDarkball` `0x14018D5D0` / `0x140189349` 0xCD0 / `0x14053B7A8` | 2 (`ex_2280_sk`, a whole-clip window and a 1.3 m one) | `sys 86`, `sys 74`, `sys1.0` / `sys1.3` |
+| Darkball (**built**) | `ex_2280.bd` (`0x338`) | `CEnemyDarkball` `0x14018D5D0` / `0x140189349` 0xCD0 / `0x14053B7A8` | 2 (`ex_2280_sk`, a whole-clip window and a 1.3 m one) | `sys 86` (the warp), `sys 74` (effects), `sys1.0` / `sys1.3`: § The Darkball |
 | Wyvern | `ex_2320.bd` (`0x378`) | `CEnemyWyvern` `0x140195ED0` / `0x140189373` **0xCF0** / `0x140555DC8` | 3 (header to `0x10C`) | turn rate changed 19 times (`Body::turn` covers it), `sys 42`, an idle requested from frame 16 (`enemy::STARTS` covers it) |
 
 **Found in the second pass (2026-11-02).** Checked (exe + decomp + files) unless marked:
@@ -526,7 +680,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Air Pirate | `xa_ex_2210` (ex_2210.bd) | `CEnemyAirpirate` 22 | `0x1405309e8` | `0x14018a0b0` / `0x14018931f` 0xcd0 | 1,2,3, think `0x14018a190` | 200,212 | FKaA | — |
 | Wight Knight | `xa_ex_2200` (ex_2200.bd) | `CEnemyWightnight` 12 | `0x140553748` | `0x140194ed0` / `0x14018917b` 0xcd0 | 1,2,3 | 200,201,202,211,216 | FaALl | — |
 | Gargoyle | `xa_ex_2220` (ex_2220.bd) | `CEnemyGargoyle` 13 | `0x14053f198` | `0x14018e150` / `0x1401891a5` 0xcd0 | 1,2,3 | 203,212,218 | FKA | — |
-| Darkball | `xa_ex_2280` (ex_2280.bd) | `CEnemyDarkball` 23 | `0x14053b7a8` | `0x14018d5d0` / `0x140189349` 0xcd0 | 1,2,3 | 200,202,204 | FKaA | — |
+| Darkball (built) | `xa_ex_2280` (ex_2280.bd) | `CEnemyDarkball` 23 | `0x14053b7a8` | `0x14018d5d0` / `0x140189349` 0xcd0 | 1,2,3 | 200,202,204 | FKaA | — |
 | Defender | `xa_ex_2340` (ex_2340.bd) | `CEnemyDefender` 26 | `0x14053ca98` | `0x14018d8e0` / `0x1401893c7` 0xcd0 | 1,2,3 | 207,208,209 | FKa | — |
 | Wizard | `xa_ex_2150` (ex_2150.bd) | `CEnemyWizard` 25 | `0x140554a58` | `0x140195420` / `0x14018939d` 0xcd0 | 1,2,3,4 | — | FKaA | SES |
 | Sea Neon | `xa_ex_2070` (ex_2070.bd) | `CEnemySeaneon` 18 | `0x14054b0e8` | `0x1401920c0` / `0x140189277` 0xce0 | 1,2,3 | 201,204 | FKaA | — |
@@ -605,3 +759,19 @@ The questions as asked (0.68.0):
    (`CBullet` / `CHomingBullet`, as KH1 magic's shots) moved by KH1's child script's numbers, (b) the hit
    kept on the Gargoyle's own body as an attack record (only if the child turns out to stay on the parent),
    (c) leave the Gargoyle on Re:CoM's behaviour for now. To be chosen once its movement syscalls are read.
+
+The Darkball's questions (M11, not answered yet):
+
+1. **The Darkball's attack power**: Re:CoM's Darkball has its dash (id 0) and its bite (id 1), whose clips are
+   bakes of KH1's dash 202 and bite 204: those take them. KH1's drop (the reappearance's 2.3 m slam, 100 % like the
+   bite) has no Re:CoM twin. Chosen: the bite's (id 1). (a) Keep, (b) the dash's, (c) another rule.
+2. **The warp's effects**: KH1 shows dark smoke as it vanishes and reappears and a trail while it is invisible
+   (`sys 74` / `sys 21`); the port shows the shrink and the growth only (no effects are ported for any enemy
+   yet). (a) Leave it for the effects milestone, (b) use one of Re:CoM's own effects (which: to research), (c)
+   research KH1's effect ids first.
+3. **Lock-on while it is invisible**: Re:CoM's lock-on can stay on (or pick) a Darkball that has vanished; KH1's
+   automatic target skips it (flag 0x40), its lock button may not (M10's Shadow kept Re:CoM's lockable flag). (a)
+   Keep (as the Shadow), (b) clear Re:CoM's lockable flag (`+0x154` bit 0x10000) while it is hidden.
+4. **Gravity on a Darkball**: KH1's Darkball answers a Gravity hit with a 3-second stagger (205); the host doesn't
+   carry KH1's hit attribute, so it never plays. (a) Leave it, (b) pass our spells' KH1 attribute to the enemies'
+   behaviours (a framework change; Re:CoM's own Gravity at Damage = Re:CoM stays Re:CoM's flatten).
