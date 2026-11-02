@@ -230,9 +230,12 @@ through Re:CoM's own body guard, the one Sora's Guard already uses.
 - When two attacks meet, `0x1402B4BC0` runs both ways (`0x1402B4A20`). Nothing when the other side's priority is 0
   or both are 98 or more; a side at 100 is never moved. Otherwise the lower side gets a clash record: kind 6, or
   kind 7 when it is 40 or more under (`diff < −0x28`), with `diff` = its priority − the other's. A type 1 / 3 / 4 side
-  with the higher priority **repels** instead (`0x1402BF630`, flag 0x20): the Large Body and the Defender (not built:
-  see below). A type-2 side never repels. A projectile side (`+0x30 & 0x400`) is turned to the other side instead
-  of getting a record (not built: see below).
+  with the higher priority **repels** instead (`0x1402BF630(other attack, 0, its owner)`): its own owner gets **the
+  other attack's hit record, flagged 0x20**, and its row is marked met (`+4 |= 0x10`); the other side still runs its
+  own resolve and gets its kind 6 / 7. A 0x20 record does no damage (`0x1402BEEE0` returns at once) and plays no
+  reaction (`0x1402B8E10` skips `& 0x22`), but the owner's script hit handler hears it (`0x1402B7B90` →
+  `0x1402BCD60`) and KH1's hit counter counts it (`0x1402BFE60`). Checked (decomp). A type-2 side never repels. A
+  projectile side (`+0x30 & 0x400`) is turned to the other side instead of getting a record (not built: see below).
 - Sora (`0x14029BBD0`): on the ground kind 6 plays the recoil 0x6E (`0x14029D720`; pushed back by −diff × 2.5,
   btltbl G+0x1C, when diff < 0), kind 7 the strong recoil 0x6F (`0x14029D5F0`, 64 frames, 118 cm root travel back);
   in the air either plays 0x70 (`0x14029D510`: hop 20, back velocity diff / 100 × 40, at most 8, G+0x30 / G+0x34).
@@ -261,7 +264,9 @@ through Re:CoM's own body guard, the one Sora's Guard already uses.
 | Runtime | `kh1-recom` `win/kh1_enemy.rs` | per enemy `GuardOn` (row, request, clock); each tick `guard_step` turns Re:CoM's guard on every hurt part (`+0x9C` bit 1, `+0x8C` physical, `+0xB0` = the row's half angle, Re:CoM's own values saved and put back) while the row's window is on, ends it when its request changes; `guard_watch` drops it when a Re:CoM state runs (Stop, stun); our vtable copy's `+0x3D8` = `guard_event` |
 | Sora's swings | `kh1-recom` `win/attack.rs` | in the pair-dispatch wrapper, around each KH1 swing's apply: `guard_for_swing` clears the guard bit when KH1's types don't meet, else adds the swing's element; `guard_after_swing` puts the fields back and, on result 2, resolves both sides (`resolve`) |
 | Sora's clash | `kh1-recom` `movement.rs` | `Host::take_swing_clash` → `Kh1Sora::swing_clash`: KH1's recoils above on Re:CoM's action rows (0x6E Re:CoM's `p001_081`; 0x6F / 0x70 appended rows, `rows::KH1_ONLY`), KH1's push, hop, flag 0x80, combo counter, `Event::SwingClashed` |
-| Enemy's clash | `win/kh1_enemy.rs` `guard_event` | the row's recoil and kind kept as `clash_recoil`; the row ends; the attack ends into our state 11 (or state 11 is next), which plays KH1's clash reaction (`react::clash`) and tells the script (its hit handler) |
+| Enemy's clash | `win/kh1_enemy.rs` `guard_event` | by the enemy's side (`guard_after_swing` keeps it): **a clash**: the row's recoil and kind kept as `clash_recoil`; the row ends; the attack ends into our state 11 (or state 11 is next), which plays KH1's clash reaction (`react::clash`) and tells the script (its hit handler); **a repel** (built 2026-11-02): no recoil, no reaction, its attack goes on, the hit counter + 1, the script hears `HitNews::Repelled` (and what its handler does in the handler runs now, `Behaviour::take_now`); the row that met is done (KH1's `+4 |= 0x10`): a plain row ends, a merged one stays on (Assumption below); **neither** (a side at 100, both 98+): nothing |
+| KH1's front cone | `win/kh1_enemy.rs` `kh1_front` | KH1's 3D test (`0x1402B4640`: the enemy's facing turned by `+0x60`, the vector to Sora, cos ≥ `+0x64`) before each KH1 swing's apply: outside it the swing is a plain hit (as when the types don't meet). Re:CoM's `+0xB0` half angle stays for Re:CoM's own attacks. For a cos-0 cone (the Bandit's) the two tests agree (the facing has no height); for the Search Ghost's cos 1.0 only KH1's 3D test is right |
+| Merged rows | `kh1-recom-assets` `enemy.rs` `GuardSpec::also` | rows made with the same request that differ only in their sphere and HIT slot (the Search Ghost's four) are one guard row: their clash numbers must match; their slots' windows are joined. The manifest lists them (`"also"`, `"slots"`); the Bandit's manifest is unchanged |
 
 Per frame: nothing while no KH1 enemy is guarding (`GUARDED` = 0); one window test per guarding enemy; the swing
 wrapper's check only when a KH1 swing meets a body.
@@ -278,10 +283,17 @@ wrapper's check only when a KH1 swing meets a body.
   carry Re:CoM's spell attributes (KH1's types 5 / 6 meet no type-2 row, so they land as in KH1). Assumption:
   Re:CoM's other physical attacks (a turned-back shot, a summon) count as KH1's type 0.
 
-**For the Large Body and the Defender (not built):** their rows are types 1 / 4 with priorities above Sora's: KH1
-repels (`Side::Repels`: Sora gets the clash, the enemy goes on, no recoil on its side). `guard_event` then has to
-skip the enemy's recoil when its side is `Repels`; `resolve` already returns it. A turned cone (a shield held to one
-side) needs Re:CoM's `+0xB0` plus a facing offset Re:CoM does not have: research before porting.
+**For the Large Body and the Defender:** their rows are types 1 / 4 with priorities above Sora's: KH1 repels. The repel
+is built (2026-11-02, first used by the Search Ghost's burst rows): Sora gets his kind 6 / 7 from his own side, the enemy
+the 0x20 record (`HitNews::Repelled`: its script's hit handler decides; no damage, no reaction, its attack goes on).
+Their ports add their rows to `GUARDS` and send `Cmd::Guard`; their scripts' hit handlers must treat `Repelled` as KH1's
+0x20 record (a hit record whose kind is the attacker's, which does no damage). Still to research: a **turned cone** (a
+shield held to one side, row `+0x60` ≠ 0): `kh1_front` already tests it the KH1 way, but Re:CoM's body guard flag has
+no facing offset (`+0xB0` is a half angle about the facing), so the host refuses such a row today (`guard row … has a
+turned cone`); building it means setting Re:CoM's half angle to π (all round) and letting `kh1_front` decide for Sora's
+swings, then deciding what Re:CoM's own attacks see. Assumption (merged rows and the repel): after a repel a merged row
+stays on, since KH1's other row instances (the other hand, the other strike) could still meet a later swing, which
+Re:CoM's whole-body guard can't tell apart.
 
 ## The Soldier
 

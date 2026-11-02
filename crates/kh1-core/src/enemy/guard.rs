@@ -85,6 +85,10 @@ pub struct GuardRow {
     pub turn: f32,
     pub cos: f32,
     pub windows: Vec<(u16, Vec<(f32, f32)>)>,
+    /// How many KH1 rows it stands for (1; the Search Ghost's burst: 4, its hands at both strikes, made
+    /// with the same request and the same clash numbers: the asset step's merged rows). KH1 marks a row
+    /// that met an attack as done (`+4 |= 0x10`); the others go on.
+    pub rows: u8,
 }
 
 impl GuardRow {
@@ -131,7 +135,7 @@ mod tests {
     fn stance() -> GuardRow {
         // The Bandit's block stance row `0x15C` (the player's `ex_2090.bd`): type 2, priority 30,
         // recoil 232, cone 0 / 0 (the front half), slot 0 on 230 [0, 12), 231 [0, 60), 233 [0, 10).
-        GuardRow { name: "stance".into(), clash_type: 2, priority: 30, recoil: 232, turn: 0.0, cos: 0.0, windows: vec![(230, vec![(0.0, 12.0)]), (231, vec![(0.0, 60.0)]), (233, vec![(0.0, 10.0)])] }
+        GuardRow { name: "stance".into(), clash_type: 2, priority: 30, recoil: 232, turn: 0.0, cos: 0.0, windows: vec![(230, vec![(0.0, 12.0)]), (231, vec![(0.0, 60.0)]), (233, vec![(0.0, 10.0)])], rows: 1 }
     }
 
     #[test]

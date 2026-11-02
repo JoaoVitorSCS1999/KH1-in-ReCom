@@ -97,6 +97,26 @@ pub fn launch_angles(r1: f32, r2: f32) -> [f32; 4] {
     [(-70.0 - r2 * 10.0) * DEG, r1 * 360.0 * DEG, 0.0, 1.0]
 }
 
+/// Re:CoM's HP prize (`0x1401F4AB0` case 0xD3: `0x1401E59A0(player, 5 % of max HP (10 with
+/// `player+0x390`), 9000, 0, 0)`; Re:CoM makes it itself only for Pluto's friend card, `0x1401E2E60`,
+/// 3 / 7 / 10 of them). Checked (decomp).
+pub const HP_PRIZE_KIND: u32 = 0xD3;
+
+/// The Re:CoM prize a KH1 prize kind of a script's reward becomes (M11, `kh1_core::enemy::Reward`;
+/// KH1's kinds are `0x1402AC080`'s switch: 0..2 munny 1 / 5 / 20, 3 / 4 HP 1 / 5 (`0x1402A4920`), 5 / 6
+/// MP 2 / 15 (`0x1402A4AE0`); Checked (decomp)). KH1's HP balls are Re:CoM's HP prize (Re:CoM's heal,
+/// decision M10's Re:CoM stats; the HUD keeps its "Recover", `docs/recom-kh1-hud.md`). The others have no
+/// mapping yet (no reward that gives them is built): None.
+pub fn reward_prize_kind(kh1_kind: usize) -> Option<u32> {
+    matches!(kh1_kind, 3 | 4).then_some(HP_PRIZE_KIND)
+}
+
+/// A reward prize's descriptor at `pos`: launched as Re:CoM's defeat EXP drop launches its prizes
+/// (`0x1401810A0`: speed 0.25, `+0x2C` 1).
+pub fn reward_prize(pos: [f32; 4], kind: u32, r1: f32, r2: f32) -> PrizeDesc {
+    PrizeDesc { pos, angles: launch_angles(r1, r2), kind, arg: 0, speed: 0.25, flags: 1 }
+}
+
 /// A KH1 item prize descriptor at `pos`.
 pub fn item_prize(pos: [f32; 4], item: u8, r1: f32, r2: f32) -> PrizeDesc {
     PrizeDesc { pos, angles: launch_angles(r1, r2), kind: KH1_ITEM_KIND, arg: item as u32, speed: 0.25, flags: 1 }
@@ -250,6 +270,13 @@ mod tests {
         assert_eq!(&d.kind as *const u32 as usize - base, 0x20);
         assert_eq!(&d.speed as *const f32 as usize - base, 0x28);
         assert_eq!(&d.flags as *const u32 as usize - base, 0x2C);
+    }
+
+    #[test]
+    fn reward_prizes_are_re_coms_hp_prize() {
+        assert_eq!((0..7).map(reward_prize_kind).collect::<Vec<_>>(), vec![None, None, None, Some(0xD3), Some(0xD3), None, None]);
+        let d = reward_prize([1.0, 2.0, 3.0, 1.0], HP_PRIZE_KIND, 0.5, 1.0);
+        assert_eq!((d.kind, d.arg, d.speed, d.flags, d.angles), (0xD3, 0, 0.25, 1, launch_angles(0.5, 1.0)));
     }
 
     #[test]

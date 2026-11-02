@@ -1150,6 +1150,8 @@ impl Behaviour for Ai {
             let mut io = self.io.borrow_mut();
             match news {
                 HitNews::Clash => io.body.fly(Vec3::ZERO),
+                // It has no guard rows: never sent (the shared enemy-guard step's repel).
+                HitNews::Repelled => {}
                 HitNews::Damage => {
                     let add = match io.x.kind {
                         5 => io.c.num("anger_launch"),

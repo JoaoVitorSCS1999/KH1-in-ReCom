@@ -70,6 +70,9 @@ mod f {
     pub const SCALE_SET: u32 = 0x001A_7050;
     /// Re:CoM's max-HP getter (`0x14017F5A0`, checked in the stats lists).
     pub const MAX_HP: u32 = 0x0017_F5A0;
+    /// Re:CoM's enemy heal and its defeat EXP drop (`sites::KH1_ENEMY_REWARD_CALLEES`).
+    pub const HEAL: u32 = 0x0018_1CE0;
+    pub const EXP_DROP: u32 = 0x0018_10A0;
 }
 /// Enemy fields (Checked (decomp): `0x14017F7E0`, `0x14017C530`, `0x140185320`).
 mod e {
@@ -82,6 +85,11 @@ mod e {
     pub const FLAGS: usize = 0x260;
     pub const HP: usize = 0x274;
     pub const CHOSEN: usize = 0x278;
+    /// Re:CoM's EXP for the enemy, which its defeat EXP drop splits into prizes (`0x1401810A0`). Checked
+    /// (decomp).
+    pub const EXP: usize = 0x2E4;
+    /// The `@ENP` row: Re:CoM makes no prize of an enemy without it (`0x1401810A0`). Checked (decomp).
+    pub const ENP_ROW: usize = 0x310;
     /// Re:CoM's state 0 alternate path (`0x140192850` / `0x14017B590`: `+0x260 & 0x20000000008`).
     pub const APPEAR_ALT: u64 = 0x200_0000_0008;
 }
@@ -116,6 +124,9 @@ type ScaleFn = unsafe extern "win64" fn(usize) -> usize;
 type ScaleSetFn = unsafe extern "win64" fn(usize, *const [f32; 4]);
 type PlayFn = unsafe extern "win64" fn(usize, u32, u64, u64, i32, u32, u32);
 type MaxHpFn = unsafe extern "win64" fn(usize) -> i32;
+type HealFn = unsafe extern "win64" fn(usize, i32, usize, u32, *const [f32; 4], usize) -> u32;
+type ExpDropFn = unsafe extern "win64" fn(usize, *const [f32; 4]) -> u64;
+type PointFn = unsafe extern "win64" fn(usize, *mut [f32; 4]);
 
 /// A running action (an attack, or a jump start, an appearance): the AI waits for it, unless it
 /// is `steered` (KH1's plain request made with attack rows, `kh1_core::enemy::Cmd::Attack`: the AI
@@ -190,9 +201,9 @@ struct Runtime {
     guarded: bool,
     /// Re:CoM's body guard fields before ours (per hurt part: `+0x9C & 1`, `+0x8C`, `+0xB0`).
     guard_saved: Vec<(u32, u32, f32)>,
-    /// The enemy's side of the last clash on its guard row (KH1's kind 6 / 7 from the swing's
-    /// priority, `pair_dispatch`), until its guard event plays it.
-    guard_kind: Option<u8>,
+    /// The enemy's side of the last clash on its guard row (KH1's `0x1402B4BC0` from the swing's
+    /// priority, `pair_dispatch`: kind 6 / 7, or a repel), until its guard event plays it.
+    guard_side: Option<ke::guard::Side>,
     /// A guard row's clash: its recoil and KH1's kind, played by the next state 11 begin.
     clash_recoil: Option<(u16, u8)>,
     /// The Re:CoM bone a behaviour looks from (the manifest's `sight_bone`, M11: the Search Ghost's
@@ -431,7 +442,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             guard: None,
             guarded: false,
             guard_saved: Vec::new(),
-            guard_kind: None,
+            guard_side: None,
             clash_recoil: None,
             sight_bone: sight_bone(m),
         };
@@ -803,6 +814,8 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         }
         // Log only (KH1 does something here the port doesn't build: the line below says what).
         Cmd::Note(_) => {}
+        Cmd::HealFull => heal_full(en, rt),
+        Cmd::Reward(r) => reward(en, rt, r),
         Cmd::Yaw(_) | Cmd::Jump { .. } | Cmd::Target(_) | Cmd::State(_) => {}
     }
     if ce::logged(c) {
@@ -1530,6 +1543,7 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         rt.hits = rt.hits.saturating_add(1);
         rt.ai.set_hit_count(rt.hits);
         rt.ai.on_hit(HitNews::Clash);
+        run_now(en, rt);
         let k = rt.class;
         line(k, || format!("e{}: clash without a KH1 recoil motion: Re:CoM's flinch", rd::<u32>(en + e::ID)));
         true
@@ -1553,6 +1567,8 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         rt.ai.set_hit_count(rt.hits);
         let clash = rt.clash.is_some() || rt.clash_recoil.is_some();
         rt.ai.on_hit(if clash { HitNews::Clash } else { HitNews::Damage });
+        // What KH1's handler does in itself (the Search Ghost's reward): now, not after the reaction.
+        run_now(en, rt);
         // The handler ran before the reaction and may have rewritten the record's kind.
         let hit = if clash { hit } else { hit.map(|h| Hit { kind: rt.ai.reaction_kind(h.kind), ..h }) };
         if !clash && !rt.ai.keeps_reaction() {
@@ -1651,6 +1667,14 @@ pub unsafe extern "win64" fn react_step(en: usize) {
 /// reaction motion.
 pub unsafe extern "win64" fn defeat_begin(en: usize) {
     let hit = ours(en).and_then(|k| hit_of(en, k));
+    // KH1's hit handler runs for the killing hit too, before its damage and death (the Search Ghost's
+    // reward, `0x28A6`): before Re:CoM's defeat prizes.
+    with_rt(en, |rt| {
+        if !rt.dead {
+            rt.ai.on_defeat();
+            run_now(en, rt);
+        }
+    });
     call_original(en, ce::begin_slot(state::DEFEAT));
     with_rt(en, |rt| {
         // KH1's hit handler rewrites the killing hit's kind too (it runs before the reaction).
@@ -1677,6 +1701,92 @@ pub unsafe extern "win64" fn defeat_step(en: usize) {
         tick(en, rt, false)
     });
     call_original(en, ce::step_slot(state::DEFEAT));
+}
+
+// ---------------------------------------------------------------------------------------------
+// A script's heal and reward on Re:CoM's own HP, EXP and prizes (M11, the Search Ghost's drain;
+// `docs/recom-m11-enemies.md` § The Search Ghost).
+// ---------------------------------------------------------------------------------------------
+
+/// Re:CoM's enemy vtable slot for its prize point (`0x1401A4700` for the Search Ghost, `sites::SEARCHGHOST_PTRS`).
+const PRIZE_POINT_SLOT: usize = 0x50;
+
+/// Re:CoM's prize point of the enemy (its vtable `+0x50`, as Re:CoM's defeat `0x14017BBC0` and its Search
+/// Ghost's drain heal `0x140192630` read it); None when not finite.
+unsafe fn prize_point(en: usize, rt: &Runtime) -> Option<[f32; 4]> {
+    let f = original(rt.class, PRIZE_POINT_SLOT);
+    if f == 0 {
+        return None;
+    }
+    let g: PointFn = std::mem::transmute_copy(&f);
+    let mut p = [0.0f32, 0.0, 0.0, 1.0];
+    g(en, &mut p);
+    p[..3].iter().all(|x| x.is_finite()).then_some(p)
+}
+
+/// `Cmd::HealFull` (KH1's HP = max HP): Re:CoM's own enemy heal `0x140181CE0(enemy, max − HP, no effect,
+/// 0xB, &point, 0)`, the call its Search Ghost's drain makes for its 1/8 (`0x140192630`), by what is
+/// missing to Re:CoM's max HP (`0x14017F5A0`): HP, its clamp and the HP gauge (`+0x430`) are Re:CoM's.
+unsafe fn heal_full(en: usize, rt: &mut Runtime) {
+    let hp: i32 = rd(en + e::HP);
+    let max = func::<MaxHpFn>(f::MAX_HP)(en);
+    let id: u32 = rd(en + e::ID);
+    if hp <= 0 || hp >= max {
+        line(rt.class, || format!("e{id}: KH1's full heal: HP {hp} / {max}, nothing to heal"));
+        return;
+    }
+    let p = prize_point(en, rt).unwrap_or([0.0, 0.0, 0.0, 1.0]);
+    func::<HealFn>(f::HEAL)(en, max - hp, 0, 0xB, &p, 0);
+    let after: i32 = rd(en + e::HP);
+    line(rt.class, || format!("e{id}: KH1's full heal (Re:CoM's enemy heal 0x140181CE0, +{}): HP {hp} -> {after} / {max}", max - hp));
+}
+
+/// `Cmd::Reward` (KH1's `sys 194` and `sys 122` from a handler): KH1's EXP bonus on Re:CoM's EXP for the
+/// enemy (`+0x2E4`, decision M10's Re:CoM stats), split into EXP prizes by Re:CoM's own defeat EXP drop
+/// `0x1401810A0` (its EXP field holds the bonus for the call), and each KH1 prize as Re:CoM's prize of the
+/// same use (`crate::drops::reward_prize_kind`: KH1's HP balls → Re:CoM's HP prize), launched as the defeat's
+/// prizes, all at Re:CoM's prize point. Nothing without the enemy's `@ENP` row (Re:CoM's rule for its prizes).
+unsafe fn reward(en: usize, rt: &mut Runtime, r: ke::Reward) {
+    let id: u32 = rd(en + e::ID);
+    let k = rt.class;
+    if rd::<usize>(en + e::ENP_ROW) == 0 {
+        line(k, || format!("e{id}: KH1's reward: no @ENP row (Re:CoM makes no prize without one)"));
+        return;
+    }
+    let Some(p) = prize_point(en, rt) else {
+        line(k, || format!("e{id}: KH1's reward: no finite prize point"));
+        return;
+    };
+    let exp: i32 = rd(en + e::EXP);
+    let bonus = r.exp_bonus(exp.max(0)).max(0);
+    if bonus > 0 {
+        wr(en + e::EXP, bonus);
+        func::<ExpDropFn>(f::EXP_DROP)(en, &p);
+        wr(en + e::EXP, exp);
+    }
+    let mut made = Vec::new();
+    for (kind, &n) in r.prizes.iter().enumerate() {
+        if n == 0 {
+            continue;
+        }
+        // KH1's counts × the Jackpot factor (`0x142D60FA4`): 1, no such ability yet (M9).
+        match crate::drops::reward_prize_kind(kind) {
+            Some(recom) => {
+                for _ in 0..n {
+                    made.push((recom, super::drops::spawn_reward_prize(p, recom)));
+                }
+            }
+            None => line(k, || format!("e{id}: KH1's reward: {n} prizes of KH1 kind {kind}: no Re:CoM prize for it yet")),
+        }
+    }
+    line(k, || format!("e{id}: KH1's reward at ({:.2}, {:.2}, {:.2}): EXP bonus {bonus} (Re:CoM's EXP {exp} / {} + {}) as EXP prizes (0x1401810A0); prizes {made:x?}", p[0], p[1], p[2], r.exp_div, r.exp_add));
+}
+
+/// What the behaviour's handler did that KH1 does inside the handler (`Behaviour::take_now`): now.
+unsafe fn run_now(en: usize, rt: &mut Runtime) {
+    for c in rt.ai.take_now() {
+        apply(en, rt, &c);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1828,12 +1938,14 @@ pub(super) unsafe fn guard_for_swing(node: usize, coll: usize, kind: u32) -> Opt
         return None;
     }
     ours(en)?;
-    let (clash_type, priority) = with_rt(en, |rt| {
+    let (clash_type, priority, front) = with_rt(en, |rt| {
         let g = rt.guard.filter(|_| rt.guarded)?;
         let row = manifest(rt.class).guards.get(g.row as usize)?;
-        Some((row.clash_type, row.priority))
+        Some((row.clash_type, row.priority, kh1_front(en, row)))
     })??;
-    let meets = ke::guard::meets(kind, clash_type);
+    // KH1 tests the pair only when the types meet (`0x1402B3BE0`) and the swing comes from inside the row's
+    // front cone (`0x1402B4640`); otherwise the apply is a plain hit.
+    let meets = ke::guard::meets(kind, clash_type) && front;
     let saved = (rd::<u32>(node + body::FLAGS), rd::<u32>(node + body::ELEMENTS));
     if meets {
         let el: u32 = rd(coll + crate::guard::coll::ELEMENT);
@@ -1842,6 +1954,23 @@ pub(super) unsafe fn guard_for_swing(node: usize, coll: usize, kind: u32) -> Opt
         wr(node + body::FLAGS, saved.0 & !body::GUARD);
     }
     Some(SwingGuard { enemy: en, clash_type, priority, meets, saved, body: node, sora: None })
+}
+
+/// KH1's front cone of a guard row (`0x1402B4640`: the 3D cosine between the enemy's facing (`actor+0x30`,
+/// `(sin yaw, 0, cos yaw)`, `0x140297E10`) turned by row `+0x60`, and the vector from it to the attacker's
+/// owner, at least row `+0x64`; 0 when either is zero). Here: Re:CoM's mover positions of the enemy and Sora
+/// and its facing (Assumption: KH1's `+0x50` points are the actors' positions). Re:CoM's own half angle
+/// (`+0xB0`) is a yaw-only test; KH1's is 3D, which matters for a cone like the Search Ghost's burst rows
+/// (cos 1.0: never, as in KH1, where Re:CoM's `|Δyaw| ≤ 0` would pass a Sora exactly ahead at any height).
+unsafe fn kh1_front(en: usize, row: &ke::guard::GuardRow) -> bool {
+    let m = mover(en);
+    let Some(sora) = sora_pos() else { return false };
+    if m == 0 {
+        return false;
+    }
+    let me = crate::units::to_kh1(rd_vec(m + mv::POS));
+    let yaw = crate::units::yaw_to_kh1(rd(m + mv::YAW));
+    row.front(yaw, sora - me)
 }
 
 /// After the apply (`r`): the body's fields back; when it guarded (2), KH1's clash for both sides
@@ -1860,37 +1989,74 @@ pub(super) unsafe fn guard_after_swing(g: &mut SwingGuard, r: i32, kind: u32, pr
     }
     let en = g.enemy;
     with_rt(en, |rt| {
-        rt.guard_kind = match enemy {
-            ke::guard::Side::Clash { kind, .. } => Some(kind),
-            _ => None,
-        };
+        rt.guard_side = Some(enemy);
         let k = rt.class;
         line(k, || format!("e{}: its guard row stopped Sora's swing (priority {priority} vs {}): Sora {sora:?}, it {enemy:?}", rd::<u32>(en + e::ID), g.priority));
     });
 }
 
 /// The guard event (vtable `+0x3D8`, Re:CoM's hit handler on a guarded hit): a KH1 enemy whose guard
-/// row is on plays KH1's clash (its row's recoil through our state 11; its script hears the clash);
-/// its row ends (KH1: a clashed row meets nothing more, `+4 & 0x30`). Anything else: Re:CoM's slot.
+/// row is on gets its side of KH1's `0x1402B4BC0`:
+/// - a clash (kind 6 / 7; 6 for an attacker with no KH1 priority, a Re:CoM attack): its row's recoil
+///   through our state 11, its script hears the clash; its row ends (KH1: a clashed row meets nothing more,
+///   `+4 & 0x30`);
+/// - a repel (its type 1 / 3 / 4 row has the higher priority): KH1 gives it the attacker's hit record
+///   flagged 0x20 (`0x1402BF630`): no damage (Re:CoM's guard already kept it out), no reaction, its attack
+///   goes on; its script's hit handler hears it ([`HitNews::Repelled`]). The row that met is done (`+4 |=
+///   0x10`): a plain row ends; a merged one (`GuardRow::rows` > 1) stays on (Assumption: its other KH1 rows,
+///   the other hand or the other strike, can still meet a later swing; Re:CoM's body guard can't tell them
+///   apart);
+/// - nothing (KH1: a side at 100, or both 98 or more): no reaction; its row stays on.
+///
+/// Anything else: Re:CoM's slot.
 pub unsafe extern "win64" fn guard_event(en: usize) {
+    enum Then {
+        Clash(bool),
+        Done,
+    }
     let r = with_rt(en, |rt| {
         let g = rt.guard.filter(|_| rt.guarded)?;
         let row = manifest(rt.class).guards.get(g.row as usize)?;
-        // KH1's kind for the enemy (`pair_dispatch`'s), 6 for any other attacker (a Re:CoM attack has
-        // no KH1 priority).
-        let kind = rt.guard_kind.take().unwrap_or(6);
-        rt.clash_recoil = Some((row.recoil, kind));
-        rt.guard = None;
-        guard_bodies(en, rt, None);
-        let in_attack = rt.action.is_some_and(|a| a.attack.is_some() && rt.action_playing);
-        let (k, name) = (rt.class, row.name.clone());
-        line(k, || format!("e{}: guard event on its {name} row: KH1's clash (kind {kind}), recoil {}", rd::<u32>(en + e::ID), row.recoil));
-        Some(in_attack)
+        // KH1's side for the enemy (`pair_dispatch`'s), a kind-6 clash for any other attacker (a Re:CoM
+        // attack has no KH1 priority).
+        let side = rt.guard_side.take().unwrap_or(ke::guard::Side::Clash { kind: 6, diff: 0 });
+        let (k, name, id) = (rt.class, row.name.clone(), rd::<u32>(en + e::ID));
+        match side {
+            ke::guard::Side::Clash { kind, .. } => {
+                rt.clash_recoil = Some((row.recoil, kind));
+                rt.guard = None;
+                guard_bodies(en, rt, None);
+                let in_attack = rt.action.is_some_and(|a| a.attack.is_some() && rt.action_playing);
+                line(k, || format!("e{id}: guard event on its {name} row: KH1's clash (kind {kind}), recoil {}", row.recoil));
+                Some(Then::Clash(in_attack))
+            }
+            ke::guard::Side::Repels => {
+                // KH1's hit counter counts the record (`0x1402BF630` → `0x1402BFE60`).
+                rt.hits = rt.hits.saturating_add(1);
+                rt.ai.set_hit_count(rt.hits);
+                if CLASSES[rt.class].reads_hp {
+                    rt.ai.set_hp_ratio(hp_ratio(en));
+                }
+                if row.rows <= 1 {
+                    rt.guard = None;
+                    guard_bodies(en, rt, None);
+                }
+                rt.ai.on_hit(HitNews::Repelled);
+                run_now(en, rt);
+                line(k, || format!("e{id}: guard event on its {name} row: KH1's repel (no damage, no reaction; its hit handler hears it)"));
+                Some(Then::Done)
+            }
+            ke::guard::Side::None => {
+                line(k, || format!("e{id}: guard event on its {name} row: KH1 moves neither side"));
+                Some(Then::Done)
+            }
+        }
     });
     match r.flatten() {
         // Re:CoM's attack end with state 11 next (bit 0 off), as a Guard block of its attack.
-        Some(true) => func::<EndFn>(f::ATTACK_END)(en, crate::battle::state_address(en, state::FLINCH), 0),
-        Some(false) => wr(en + e::NEXT, crate::battle::state_address(en, state::FLINCH)),
+        Some(Then::Clash(true)) => func::<EndFn>(f::ATTACK_END)(en, crate::battle::state_address(en, state::FLINCH), 0),
+        Some(Then::Clash(false)) => wr(en + e::NEXT, crate::battle::state_address(en, state::FLINCH)),
+        Some(Then::Done) => {}
         None => call_original(en, GUARD_EVENT_SLOT),
     }
 }

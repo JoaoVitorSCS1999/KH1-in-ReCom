@@ -2544,6 +2544,19 @@ pub const SEARCHGHOST_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemySearchghost +0x440 attack end", rva: 0x0054_C848, target: 0x0017_DA90 },
 ];
 
+/// M11, a KH1 script's heal and reward on Re:CoM's own HP, EXP and prizes (`win::kh1_enemy`'s
+/// `Cmd::HealFull` / `Cmd::Reward`; `docs/recom-m11-enemies.md` § The Search Ghost). Called only. Bytes read
+/// from the Steam exe (2026-11-02).
+pub const KH1_ENEMY_REWARD_CALLEES: &[Site] = &[
+    // push rbx; push rbp; push rsi; push rdi; push r12; push r14; push r15; sub rsp,0xA0: Re:CoM's enemy heal
+    // (HP + n clamped to `0x14017F5A0`, the HP gauge through `+0x430`, `0x14020C9A0`), the one its Search Ghost's
+    // drain calls (`0x140192630`).
+    Site { name: "enemy heal (0x140181CE0)", rva: 0x0018_1CE0, expect: &[0x40, 0x53, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x56, 0x41, 0x57, 0x48, 0x81, 0xEC, 0xA0, 0x00, 0x00, 0x00] },
+    // mov r11,rsp; sub rsp,0xB8: Re:CoM's defeat EXP drop (`+0x2E4` split into EXP prizes by the table
+    // `0x1407C2C78`, each by the prize factory), the first of its defeat prizes (`0x14017BBC0`).
+    Site { name: "defeat EXP drop (0x1401810A0)", rva: 0x0018_10A0, expect: &[0x4C, 0x8B, 0xDC, 0x48, 0x81, 0xEC, 0xB8, 0x00, 0x00, 0x00] },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -2658,6 +2671,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         WYVERN_ALLOC,
         SEARCHGHOST_HOOKS,
         SEARCHGHOST_ALLOC,
+        KH1_ENEMY_REWARD_CALLEES,
     ];
     LISTS
         .iter()

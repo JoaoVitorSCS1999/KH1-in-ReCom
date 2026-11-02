@@ -85,8 +85,37 @@ pub enum Cmd<A> {
     /// `crate::enemy::thrown`; the Bandit's scimitar, M11).
     Throw(u8),
     /// Something KH1's script does here that the port doesn't build (an owner question or a later
-    /// milestone): for the log only. M11 (the Search Ghost's drain heal and reward).
+    /// milestone): for the log only.
     Note(&'static str),
+    /// KH1's stats-block write `+0x3C = +0x40` (HP = max HP; the Search Ghost's `0x2ADE`, M11): the
+    /// host restores the enemy's own HP to its max (Re:CoM's HP, decision M10).
+    HealFull,
+    /// KH1's `sys 194` (`0x1402BC9A0`: an EXP bonus for the party) and `sys 122` with a prize table
+    /// (`0x1402ABC40`) from a script handler (M11, the Search Ghost's hit during its drain's hold).
+    /// The host carries it out on the enemy's own EXP and prizes ([`Reward`]).
+    Reward(Reward),
+}
+
+/// A script's reward (M11, the Search Ghost's `0x28A6`): KH1's EXP bonus `EXP / exp_div + exp_add`
+/// on the enemy's EXP (KH1's stats `+0x68`, the record's EXP word r7, `0x1402A58E0`; integer
+/// division, VM op 1 sub 0 imm 3), and the prize counts of a KH1 drop table by KH1 prize kind
+/// (`0x1402ABC40`'s seven counts; the kinds are `0x1402AC080`'s switch: 0..2 munny 1 / 5 / 20,
+/// 3 / 4 HP 1 / 5, 5 / 6 MP 2 / 15). Checked (decomp). Every number comes from the player's script.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Reward {
+    pub exp_div: i32,
+    pub exp_add: i32,
+    pub prizes: [u8; 7],
+}
+
+impl Reward {
+    /// KH1's bonus on an enemy EXP `exp` (`sys 194`'s argument). A zero divisor gives the addend.
+    pub fn exp_bonus(&self, exp: i32) -> i32 {
+        if self.exp_div == 0 {
+            return self.exp_add;
+        }
+        exp / self.exp_div + self.exp_add
+    }
 }
 
 impl<A: Copy> Cmd<A> {
@@ -112,6 +141,8 @@ impl<A: Copy> Cmd<A> {
             Cmd::Guard(g) => Cmd::Guard(g),
             Cmd::Throw(n) => Cmd::Throw(n),
             Cmd::Note(n) => Cmd::Note(n),
+            Cmd::HealFull => Cmd::HealFull,
+            Cmd::Reward(r) => Cmd::Reward(r),
         }
     }
 }
