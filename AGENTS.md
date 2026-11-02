@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 118: Silent human-boss item-card page switch at Combat = KH1, version 0.66.1 (2026-11-01)
+
+- Ask (owner, 2026-11-02, on 0.65.2's questions): "1 keep it silent" (first deal), "2 silence it" (page switch).
+- The page switch's `call 0x1402AA360` (id 3) at `0x140167A35` in the revolver's page switch `0x140167910` (plays only
+  when its third argument is 0) joins the side-checking stub (ninth call): enemy decks silent, Sora's own switch
+  (`0x1401F8303`, side 1) passes. Its sound-playing callers: the human boss's `+0x468` `0x140199130` and Hades'
+  `0x1403B10C0` (side 2). Menus play sound 3 from their own calls (untouched). Checked (decomp + disasm + exe).
+- Checked: tests (434), Windows build, 670 sites. Not checked: in game.
+
+---
+
 ## Stage 117: Re:CoM's whole dodge roll at Combat = KH1, version 0.66.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "make dodge roll work how it does in ReCoM, not KH1"; chose "The whole roll".
