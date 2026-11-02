@@ -14,6 +14,8 @@
 //!   waits, facing); each cites the script offsets it was read from in the Shadow's `ex_2020.bd`
 //!   and the Soldier's `ex_2010.bd` (Checked (files): the 26 byte-identical routines of the two
 //!   scripts, `docs/recom-m11-enemies.md` § Shared script routines).
+//! - [`host`]: the host's rules for a running action (the DLL's states call them; the behaviours'
+//!   tests drive a behaviour through them).
 //! - [`Behaviour`]: the one interface the host (`kh1-recom`'s `win::kh1_enemy`) drives every KH1
 //!   enemy through.
 //!
@@ -22,6 +24,7 @@
 
 pub mod body;
 pub mod guard;
+pub mod host;
 pub mod react;
 pub mod script;
 pub mod thrown;

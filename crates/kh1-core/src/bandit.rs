@@ -335,9 +335,18 @@ fn attack_now(cx: &Cx, a: Attack, blend: f32) {
 }
 
 /// `sys 12` of an attack's request: nothing when it already plays (`0x14029F7C0` returns for the
-/// entry playing), so a looped request carries on.
+/// entry playing), so a looped request carries on. The entry playing is the last one this frame
+/// asked for, else the host's (KH1 sets the entry at once: the leap's `sys 12` before its loop and
+/// the loop's first in the same frame start 217 once; 0.73.0 asked twice).
 fn attack_keep(cx: &Cx, a: Attack, blend: f32) {
-    if cx.borrow().w.motion != Some(a.request()) {
+    let playing = {
+        let io = cx.borrow();
+        io.out.iter().rev().find_map(|c| match c {
+            ECmd::Motion { request, .. } | ECmd::MotionAt { request, .. } | ECmd::Attack { request, .. } | ECmd::Action { request, .. } => Some(*request),
+            _ => None,
+        }).or(io.w.motion)
+    };
+    if playing != Some(a.request()) {
         attack_now(cx, a, blend);
     }
 }
@@ -1157,6 +1166,7 @@ impl Behaviour for Ai {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enemy::host::model::Model;
 
     fn consts() -> Consts {
         // The player's `ex_2090.bd` / `btltbl.bin` / KH1 exe numbers as the asset step reads them
@@ -1489,6 +1499,107 @@ mod tests {
                 }
             }
             assert!(worst < 600, "seed {seed}: {worst} frames without acting");
+        }
+    }
+
+    /// The Bandit through the host's rules (`crate::enemy::host::model`, what `kh1-recom`'s
+    /// `win::kh1_enemy` decides): its class map (`ground::bandit::CLASS.attack_states`: the slash
+    /// in state 2, the spin, its end and the leap in state 3) and the asset step's looping clips
+    /// (211, 217, 231). 0.73.0 (owner 2026-11-02, "bandits dont spin when they do the move where
+    /// they're supposed to spin towards you"): the host released every steered attack on its first
+    /// step in its own state, so 217 restarted every other frame.
+    fn hosted(s: Sim) -> Model<Consts> {
+        let Sim { ai, pos, .. } = s;
+        let mut m = Model::new(Box::new(ai), consts(), frames(), vec![req::SPIN, req::LEAP, req::STANCE_HOLD], vec![2, 3, 3, 3]);
+        m.pos = pos;
+        m
+    }
+
+    /// A Bandit past its appearance running `f` alone (Sora targeted, its hit state's thread).
+    fn hosted_with<F: std::future::Future<Output = ()> + 'static>(seed: u32, f: impl FnOnce(Cx) -> F) -> Model<Consts> {
+        let mut s = ready(seed, Some(AGRABAH));
+        s.ai.io.borrow_mut().x.targeted = true;
+        s.ai.io.borrow_mut().has_target = true;
+        s.ai.io.borrow_mut().state = (st::HIT, false);
+        let fut = f(s.ai.io.clone());
+        s.ai.behaviour = Some(Box::pin(async move {
+            fut.await;
+            halt().await;
+        }));
+        hosted(s)
+    }
+
+    /// The leap in the host: 217 asked for once, played from its start once in state 3 through
+    /// the whole flight (looping past its 20 frames), never released; it reaches Sora and lands.
+    #[test]
+    fn hosted_the_leap_plays_217_through_its_flight() {
+        let mut m = hosted_with(5, |cx| async move { leap(&cx).await });
+        let sora = Vec3::new(0.0, 0.0, 1500.0);
+        let mut nearest = f32::INFINITY;
+        for _ in 0..300 {
+            m.run(sora, 1);
+            nearest = nearest.min((m.pos - sora).flat().length());
+        }
+        assert_eq!(m.released, 0, "no steered attack released in its own state");
+        assert_eq!(m.attacks_of(req::LEAP).len(), 1, "one start of 217: {:?}", m.attacks_of(req::LEAP));
+        let flight = m.longest_run(req::LEAP);
+        let frames217 = m.trace.iter().filter(|t| t.1 == Some(req::LEAP)).count();
+        assert_eq!(flight, frames217, "217 plays without a break");
+        assert!(flight > 20, "past one cycle of 217: {flight}");
+        assert!(m.trace.iter().all(|t| t.1 != Some(req::LEAP) || t.0 == 3), "217 plays in state 3");
+        assert!(m.longest_run(req::LEAP_SLASH) >= 24, "then 218");
+        assert!(nearest < 100.0, "it reaches Sora: {nearest}");
+        assert_eq!((m.pos.y, m.state), (0.0, 1), "back on the floor, in state 1");
+    }
+
+    /// The spin in the host: 211 asked for once and played in state 3 for its four rounds of 38
+    /// frames, gliding at Sora at 4 a frame, then 212 in state 3, never released.
+    #[test]
+    fn hosted_the_spin_glides_four_rounds_of_211() {
+        let mut m = hosted_with(6, |cx| async move { spin(&cx).await });
+        let sora = Vec3::new(0.0, 0.0, 2000.0);
+        let mut f = 0;
+        let mut glide = (0.0f32, 0.0f32);
+        while m.longest_run(req::SPIN_END) < 90 && f < 1000 {
+            let z = m.pos.z;
+            m.run(sora, 1);
+            if m.current == Some(req::SPIN) {
+                glide.0 += m.pos.z - z;
+                glide.1 += 1.0;
+            }
+            f += 1;
+        }
+        assert_eq!(m.released, 0);
+        assert_eq!((m.attacks_of(req::SPIN).len(), m.attacks_of(req::SPIN_END).len()), (1, 1));
+        let rounds = m.longest_run(req::SPIN);
+        assert!(rounds >= 4 * 38, "four rounds of 211: {rounds}");
+        assert!(m.trace.iter().all(|t| !matches!(t.1, Some(req::SPIN | req::SPIN_END)) || t.0 == 3), "in state 3");
+        assert!(glide.0 > 3.5 * glide.1, "glides at 4 a frame: {} in {} frames", glide.0, glide.1);
+    }
+
+    /// A long fight in the host (12 seeds, 20 000 frames, Sora circling 2–7 m away, in and out of
+    /// Agrabah): no attack is released, none is asked for again within two frames (0.73.0's
+    /// release / re-issue loop), and the looping spin and leap play in their state.
+    #[test]
+    fn hosted_a_long_fight_never_loops_an_attack() {
+        for seed in 0..12u32 {
+            let world = if seed % 2 == 0 { Some(AGRABAH) } else { None };
+            let mut m = hosted(ready(seed, world));
+            for f in 0..20_000usize {
+                let a = f as f32 / 600.0;
+                let rad = 200.0 + 250.0 * (1.0 + (f as f32 / 1700.0).sin());
+                m.run(Vec3::new(a.sin() * rad, 0.0, a.cos() * rad), 1);
+            }
+            assert_eq!(m.released, 0, "seed {seed}");
+            let issued: Vec<(usize, u16)> = m.log.iter().filter_map(|(f, c)| if let ECmd::Attack { request, .. } = c { Some((*f, *request)) } else { None }).collect();
+            assert!(issued.len() > 10, "seed {seed}: it attacks ({})", issued.len());
+            for w in issued.windows(2) {
+                assert!(w[1].1 != w[0].1 || w[1].0 > w[0].0 + 2, "seed {seed}: {} asked again at {} after {}", w[0].1, w[1].0, w[0].0);
+            }
+            // The looping ones play only in state 3 (a one-shot's last frame may show in state 1).
+            for r in [req::SPIN, req::LEAP] {
+                assert!(m.trace.iter().all(|t| t.1 != Some(r) || t.0 == 3), "seed {seed}: {r} outside state 3");
+            }
         }
     }
 

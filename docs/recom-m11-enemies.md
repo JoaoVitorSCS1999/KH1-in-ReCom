@@ -147,6 +147,39 @@ could leave that wait open forever; both are fixed, and a safety net now ends an
   - a reaction that takes 600 frames is released (`REACTION_LIMIT`);
   - an AI polled in state 1 that issues nothing for 600 frames, with no action or reaction pending, restarts
     from its engaged state (`QUIET_LIMIT`, `Behaviour::reset`). KH1's longest silent wait is 180 frames.
+
+### Steered attacks released on their first step (owner 2026-11-02, 0.73.0: "bandits dont spin when they do the move where they're supposed to spin towards you")
+
+- **What happened** (Checked (log + code)). The owner's 0.73.0 log has 157 lines `bandit: eNNN: action 217 never
+  ended (its Re:CoM attack state was left without its end; now Re:CoM state Some(3)), released`, one every
+  other frame, each followed by `attack 217 (leap), steered`; the slash 200 shows the same in state 2. No spin
+  (210 / 211) was played in that log, so the move the owner means is the leap (216 crouch, 217 flight at Sora).
+  Assumption: the owner means the leap; the spin had the same fault.
+- **Cause.** The safety net above ("an attack still playing when the AI is polled in state 0 / 1") was
+  written before steered attacks (Stage 128). It tested only "polled and playing", but a steered attack is
+  polled from its own attack state's step. So every steered attack of every class (Air Soldier, Darkball, Air
+  Pirate, Wyvern, Bandit) was released on its first step since 0.69.0. The idle played, the AI asked for the
+  attack again, Re:CoM's state machine (`0x140242F50`: the old state's end, the new one's begin, then its step,
+  in the next update; Checked (decomp)) began it again, and the next step released it. The leap's 217
+  restarted from frame 0 every other frame: no spin on screen.
+- **Fix.** The host's rules are now pure functions in `kh1_core::enemy::host`, called by `win::kh1_enemy`:
+  - `attack_state_left`: the net fires only when Re:CoM's state is not the attack's own state;
+  - `after_poll`: what a steered attack's state does after the AI ran in it (unchanged rules).
+- **Also: one start per `sys 12`.** The Bandit's leap asks for 217 before its flight loop and again in the
+  loop's first frame. Both saw the host's 216, so 0.73.0 asked twice in one frame. `attack_keep` now takes the
+  entry this frame already asked for first, as KH1 sets the entry at once (`0x14029F7C0`). Checked (decomp).
+- **Tests** (`kh1_core::enemy::host::model::Model`: Re:CoM's state 1 and attack states as `win::kh1_enemy`
+  runs them, through the same rules):
+  - the Bandit's leap plays 217 once, unbroken through its flight (past one 20-frame cycle), in state 3;
+  - the spin plays 211 once for its four 38-frame rounds, gliding at 4 a frame, then 212;
+  - a 20 000-frame fight, 12 seeds: nothing released, no attack asked for again within two frames.
+  - `kh1-recom`: every class through the model with its own attack-state map and the asset step's manifest
+    (`KH1_<NAME>_JSON`): nothing released, no re-ask within two frames. Run on the session's files for all
+    seven manifests.
+
+  The old rule fails the first three (checked by reverting it), and the old `attack_keep` fails two.
+- **Asset step:** no change.
+
 ### Flying bodies (M11 fliers). Checked (decomp + disasm) unless marked
 
 KH1's fliers (Air Soldier, Search Ghost, Air Pirate, Gargoyle, Darkball, Wyvern) all enter **movement state 4**
