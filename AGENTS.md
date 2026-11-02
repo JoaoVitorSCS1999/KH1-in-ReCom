@@ -11,6 +11,22 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 115: Revenge: KH2's frame-20 check, Hades untouchable only in his wind-up, Cloud's revenge = his charge, version 0.65.1 (2026-11-01)
+
+- Asks (owner, 2026-11-02, on 0.65.0's questions): Hades "Only the wind-up"; check frame "KH2's frame 20"; Cloud's
+  revenge "Homing charge".
+- Check timing (bug fix; Checked (disasm)): `+0x68` is zeroed after each change by `0x140242F50`, so 0.65.0 decided on
+  frame 1. Now: at frame 20 (Hades 30) in the flinch / blow-away step hooks; an earlier end decided in Re:CoM's
+  state-change callback `0x1401A3B80` (the 12 boss classes' state-machine table slot `+0x28` → our wrapper, Re:CoM's
+  callback first); once per reaction.
+- Hades: his state-5 exe (vtable `+0x168`) wrapped; when `+0xC80` leaves 0 (wind-up `e107_054` → spin `e107_055`) the
+  window closes and Re:CoM's `0x1401A2DB0(boss, -1)` turns his hurt bodies back on; the spin takes hits (no flinch).
+- Cloud: revenge state 4 (begin `0x1403AE680`, exe `0x1403AF190`): 2 dashes ≥ 50 % HP, 4 below; each turns toward
+  Sora ~25 frames then dashes straight at 0.1 m/f (6 m/s): sidestep, Guard (frames 10–36) or Re:CoM's roll avoid it.
+- Checked: tests (422), Windows build, sites. Not checked: in game; Cloud's .EPD numbers.
+
+---
+
 ## Stage 114: Revenge moves can't be damaged or interrupted, version 0.65.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "the humanoid bosses that have revenge value can't be damaged or interrupted during their
