@@ -403,6 +403,9 @@ At KH1 setting:
       (Hades 30), or at the flinch's end if shorter (0.65.0 checked on its first frame: a bug).
       **Cloud's revenge move: his homing charge** (state 4, `e106_053`, 2 charges above half HP, 4 below;
       nearest KH2's Sonic Rave), instead of Omnislash.
+      Then (2026-11-02): "you can still hit bosses during their revenge move (or if they use their revenge
+      move naturally instead of it being triggered by revenge value)": a bug to fix, and **the boss's
+      revenge-move attack is untouchable whenever it plays it**, by revenge or by its own choice.
     - **Dodge roll (owner, 2026-11-02):** "make dodge roll work how it does in ReCoM, not KH1" — **the
       whole roll** (Re:CoM's motion, speed, distance, timing and invincibility) at Combat = KH1. Supersedes
       decision 17's KH1 roll frames; an ini key keeps KH1's roll selectable.
