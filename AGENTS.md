@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 130: M11: the KH1 Powerwild; KH1's timed jump and scripted launch in the framework, version 0.70.0 (2026-11-01)
+
+- M11 (owner, 2026-11-02): the ground family's first.
+- Framework (Checked (KH1 decomp)): movement state 3, the timed jump (`sys 82` → `0x1402AF150`, step `0x1402AFAE0`; apex
+  motion 6 frames before the top `0x1402AF630`, no landing motion); scripted launch (`sys 38` → `0x1402B79F0`): a hit
+  handler can replace KH1's reaction (its random draw kept). Asset step: one `.ASD` record per hit window (a slot can
+  open several times; Shadow / Soldier / Air Soldier outputs unchanged).
+- Powerwild (`xa_ex_2030` ↔ `CEnemyPowerwild` id 7): first look; close: back hop / side hop + swipe; mid: sideways
+  walk, pause / roar, shuffle into hop + swipe or swipe, maybe the pounce; far: run in; counters: flurry + back hop or
+  side hop + pounce; above 40 % HP a launching / knock-back hit plays its own launch (base 270 / 280 in the air, hop
+  80, speed 25) then the shake-off (224). All numbers from the player's `ex_2030.bd`. Vtable `0x140547798`, ctor
+  `0x140191380`, alloc `0x1401890A9` (0xCD0). Power: swipe 212 → Re:CoM id 0, flurry 214 → id 1, pounce 222 → id 1
+  (Assumption: nearest).
+- Asset step: `ENEMY/0007/EN0007.ANN`, `.ASD` (Re:CoM's 3 + 9), `.SES`, `kh1-powerwild.json`.
+- Checked: tests, Windows build, 757 sites. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 129: Air Soldier: the quiet watchdog can restart it (Behaviour::reset), version 0.69.1 (2026-11-01)
 
 - The Air Soldier's `Behaviour::reset` (Stage 127's quiet watchdog): back to engaged, still flying, no velocity, its
