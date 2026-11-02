@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 127: Fix: KH1 enemies freezing after a Re:CoM state (Stun Impact's stun, Stop, freeze…), version 0.68.3 (2026-11-01)
+
+- Owner (2026-11-02): "i used stun impact on 2 soliders (check trace) and once they got out of the stun they are doing
+  the same issue of just standing still".
+- Cause (Checked (log + trace 20)): Re:CoM's stun cut the kick / spin kick; Re:CoM went back to state 1 with our runtime
+  still holding the attack as playing; the AI isn't polled during an action and an attack only ends in its attack
+  state: never. The watchdog left playing attacks to that state.
+- Fix (all classes): our own returns to state 1 are marked; any other entry means a Re:CoM state ran (stun, Stop,
+  freeze, Gravity's flatten, Re:CoM flinch, first-strike stun): the pending action / reaction / queue / clash are
+  dropped, idle plays, the AI goes on (KH1: a status ends the current action; that the AI carries on: Assumption).
+  The appearance's end calls Re:CoM's default state outside our lock. New nets (logged past the cap): an attack
+  still playing after its state was left; a reaction over 600 frames; an AI silent 600 frames in state 1 restarts
+  from engaged (`Behaviour::reset`; KH1's longest silent wait 180).
+- Checked: tests, Windows build, 717 sites. Not checked: in game.
+
+---
+
 ## Stage 126: KH1 enemies: Re:CoM's flinch for a guarded attack with no KH1 recoil; KH1's wander centre, version 0.68.2 (2026-11-01)
 
 - Asks (owner, 2026-11-02, on 0.68.0's questions): guarded attacks whose KH1 recoil the model lacks play "Re:CoM's
