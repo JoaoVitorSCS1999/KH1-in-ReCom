@@ -5,10 +5,15 @@ work like KH1, but each summon should do their lv 3 recom summon equivalent, clo
 Choices (owner, 2026-11-01; `design-philosophy-instructions.md`, "Summons now"): **MP from Re:CoM's
 CP** (2 MP for the 20-CP cards, 3 for the 25-CP ones), paid at once on the command with KH1's
 "whole MP ≥ cost" rule; **KH1's party rule skipped until the party exists**; **Re:CoM's summon
-damage at both Damage settings**; **KH1's once-per-battle rule kept**, the Summon row greyed and
-locked while one is out (no Dismiss); Cloud with Omnislash; battle rooms only; each summon unlocks
+damage at both Damage settings**; the Summon row greyed and locked while one is out (no Dismiss);
+Cloud with Omnislash; battle rooms only; each summon unlocks
 with its first Re:CoM summon card; learn order (older saves: KH1's index order, Cloud last); the
 start through Re:CoM's own sleight start `0x1402247A0` (its use counter counts it).
+
+Follow-ups (owner, 2026-11-02, verbatim): "summons should be able to be used as long as you have
+MP" → **KH1's once-per-battle rule dropped**; "also, sora should have iframes through all summon
+animations" → **Sora invincible from the start to Re:CoM's end action**; "cloud should also be at
+the top of the summons list" → **Cloud first, then the others in learn order** (§ Follow-ups).
 
 Code: `crates/kh1-recom/src/summons.rs` (table, KH1's usable rule, learn order, save block; tested),
 `src/command_menu.rs` (the Summon entry and list; tested), `src/win/summons.rs` (Re:CoM's side),
@@ -99,13 +104,15 @@ falling off, a room change. Checked (decomp + exe) for the calls; what each call
   else KH1's blank dash, as before. The context command keeps entry 3 (the tab's); row 3 is not it.
 - **Greyed** when no summon is usable; **greyed and locked** while one is out (owner: no Dismiss).
 - **Confirm or Right on row 3**: locked → KH1's error sound; else the Summon list (KH1's open sound).
-- **The list**: the learned summons in learn order, each greyed and locked when KH1's rule says no:
-  battle (Re:CoM's battle room), KH1 state 0, whole MP ≥ the owner's cost, not used this battle, none
-  out; the party counts as present (`summons::party_ready`, the hook for the party milestone). Up /
+- **The list**: Cloud first when learned (owner), then the learned summons in learn order, each
+  greyed and locked when KH1's rule (without its once-per-battle test, owner) says no: battle
+  (Re:CoM's battle room), KH1 state 0, whole MP ≥ the owner's cost, none out (a second sleight can't
+  start mid-sleight: Re:CoM's action 0x16 is busy until its end action); the party counts as present (`summons::party_ready`, the hook for the party milestone). Up /
   Down wrap; Left / cancel close it (cancel: the root back on Attack); its cursor stays as KH1's lists'.
 - **Confirm on an entry**: greyed → error sound; KH1's commit gate (free or a combo window) may refuse
   it silently; else the summon is issued (no menu sound), the stack back to Attack.
-- **Place**: x 27; one entry at 326 (beside row 3), more bottom-anchored at 348 − 22 n. The Magic list
+- **Place**: x 27; one entry at 326 (beside row 3; Cloud alone too), more bottom-anchored at
+  348 − 22 n (Cloud on the top row). The Magic list
   with two spells and Summon sits at 304 (KH1's count includes Summon).
 - **Words**: KH1's own 286..291 from the player's Word.bin (asset step); Cloud: "Cloud" (KH1 has no
   word; Re:CoM's card-name text is not in our word system) under our id `0x8029`. A manifest from an
@@ -120,7 +127,7 @@ falling off, a room change. Checked (decomp + exe) for the calls; what each call
   `0x140289210` that frame): battle only; a live swing's weapon volume ends (`0x140224FB0`, the
   specials' rule); `player+0x82C` = the LV3 sleight; **Sora's vtable `+0x130` is called** (checked to
   be `0x1402247A0`). When Re:CoM's action is then 0x16: KH1's MP paid (whole points), the summon
-  marked used for this battle and out.
+  out.
 - **Re:CoM runs the rest**: its tint, motion 0x2E and "summon" effect, its resource wait, the
   `CSummon*` actor, the hits and damage (Re:CoM's at both Damage settings), its end action. Our
   `exeStockSkill` wrapper (with the specials in) passes it through untouched.
@@ -128,13 +135,44 @@ falling off, a room change. Checked (decomp + exe) for the calls; what each call
   (action, previous action and time against our last KH1 frame, `movement::sync_ok`) fails, so the
   KH1 frame takes Sora back fresh, as after Re:CoM's hit reactions and its win action. Checked
   (code); in game: to test.
-- **Out**: while Sora's action is 0x16 after our start (row 3 greyed and locked); cleared at the first
-  menu build after it.
-- **Once per battle**: the used summons clear when the menu sees Sora's player in the field
-  (`player+0x390` = 0) or a new battle's player.
+- **Out** (`win::summons::out`): from our start while Sora's action is 0x16 in the battle room
+  (`player+0x390` ≠ 0); the first check that sees otherwise ends it (Re:CoM's end action, its win
+  action, the room's end, another player). Row 3 greyed and locked meanwhile.
+- **Invincible** (follow-up, below) for exactly that span.
 - **Preload** (optional, built): the Summon list's cursor landing on a summon, in battle, calls
   Re:CoM's `0x140211790(player+0x3B8, sleight, 0)` once, as Re:CoM preloads a sleight its stock
   forms. Re:CoM's cache decides what stays.
+
+### Follow-ups (owner, 2026-11-02)
+
+1. **No once-per-battle rule.** `summons::usable` = battle, KH1 state 0 (flag 0x80), whole MP ≥ cost,
+   none out (and the party hook). The used-this-battle bits and their reset are removed (KH1's
+   `0x14298C7AC` is not modelled). The row stays locked while one is out: a second LV3 can't start
+   while Re:CoM's sleight action runs.
+2. **Sora invincible through the whole summon.** Re:CoM's player damage check `0x1401E6DE0` (already
+   wrapped: `attack::damage_check`) has a protection exit: with a hit arrived (`+0x41C & 0x200`) and
+   `+0x418 & 1` set (or the hit-immunity timer `+0x7BC`, or `+0x7B4`), it zeroes the hit's value
+   (`+0x722`) and returns: no damage, no reaction. That bit is Re:CoM's roll protection and our Sonic
+   Blade's invincibility (`docs/recom-m9-abilities.md` § 9c.1). Checked (decomp). While the summon is
+   out, the wrapper sets the bit for each check and restores it after (left set when it already was:
+   Re:CoM's attached summons set `+0x418 |= 0x1001` themselves and clear it at their end,
+   `exeStockSkill` sub-states 0x50A.. / 0x5C0; the standing ones, Bambi / Tinker Bell / Mushu, don't).
+   - **Coverage**: the Battle exe (`0x1401F9840`) runs the request bits (our start) and then the damage
+     check every frame unless the action is 0x17, 0x1C, 0x1D (or 0x20 without a flag): action 0x16 is
+     checked every frame, from the start frame on, whether Sora is attached (Simba, Genie, Dumbo,
+     Cloud) or standing (Bambi, Tinker Bell, Mushu). Checked (decomp).
+   - **The end**: "out" is read in the check itself (two loads): it ends the frame Sora's action is no
+     longer 0x16 (Re:CoM's end action `0x1401F6660`; its win action at a battle's end, 0x1C, where the
+     check doesn't run anyway), or the battle room ends, or the player changes (a room change). The
+     bit is ours only inside the check, so nothing is left set.
+   - Not covered: a card break of Sora's sleight (`+0x428 & 0x20`, the check's first block, which ends
+     actions 0x16 / 0x1B): not a hit; at KH1 enemies play no cards (decision 29; human bosses keep
+     hidden decks: whether their cards can break Sora's cardless sleight: Assumption, untested).
+   - Log: `summons: a hit on Sora during the summon (value n): skipped …` (first 8), and the hits
+     skipped in the end line.
+3. **Cloud first** (`summons::list_order`, applied in the menu's build): Cloud, then the others in
+   learn order; the save's learn order is unchanged. KH1's placement holds (tests: one entry, Cloud
+   alone included, at 326; three bottom-anchored at 282, Cloud on top).
 
 ### Learning (`summons::sync`, `win::summons::sync`)
 
@@ -181,7 +219,8 @@ No hook and no patch: calls only, all checked at start (a mismatch: no summons, 
 
 The menu's build (already per frame): a 9-byte read of our save block and two loads (the battle
 flag, the action while one is out). The preload: one compare unless the cursor moved onto a summon.
-Nothing during the sleight but Re:CoM's own code.
+The damage-check wrapper (already per frame): one load, and while a summon is out three more and the
+bit's set / restore.
 
 ## Logs and trace
 
@@ -189,9 +228,9 @@ Nothing during the sleight but Re:CoM's own code.
 - learning: `summons: learned Simba (Proud Roar LV3, card 0x23): Simba card 0x23 obtained for the first
   time` (older saves: `…, an older save: KH1's index order, Cloud last`).
 - each summon: `summons: Simba -> Re:CoM's Proud Roar LV3 (sleight 0x35, attack 0x82, CSummonSinba
-  from PLAYER/0301), 2 MP, from action 0x…`; refusals (`not in battle`, `MP short`, `Re:CoM's sleight
-  start refused …`); the end (`Re:CoM's summon sleight ended (action 0x…); the KH1 frame takes Sora
-  back`); `battle over: every summon usable again`.
+  from PLAYER/0301), 2 MP, from action 0x…; Sora invincible until it ends`; refusals (`not in battle`,
+  `MP short`, `Re:CoM's sleight start refused …`); hits skipped; the end (`Simba: Re:CoM's Proud Roar
+  LV3 ended (action 0x…); invincibility off (n hits skipped); the KH1 frame takes Sora back`).
 - the menu's events (log and F9 trace): `open summon (3 learned, grey 0x4)`, `summon Simba issued /
   greyed / not-now`, `refused Summon`; the menu token gains `sum`, `sum:grey` or `sum:lock`, and
   `menu s:<cursor> … sg<grey>` while the list is open.
@@ -200,11 +239,12 @@ Nothing during the sleight but Re:CoM's own code.
 
 - Checked (decomp + exe + files; tests `summons::tests`, `command_menu::tests::summon_*`): the entry's
   condition (a spell, a summon), row 3's word and brightness, the open / error sounds, the list's
-  order, greying (MP whole points, battle, state flag 0x80, once per battle), the commit gate, the
-  list's place (326 / 348 − 22 n) and the Magic list's with Summon (304 for two spells), the
+  order (Cloud first), greying (MP whole points, battle, state flag 0x80, one out), the commit gate,
+  the list's place (326 / 348 − 22 n) and the Magic list's with Summon (304 for two spells), the
   learn-order rule, KH1's words 286..291 in all six languages (`owner_words` with the session's
   Word.bin files).
-- Checked (decomp): Re:CoM's LV3 recognition, ids, start path, resource loading, end.
+- Checked (decomp): Re:CoM's LV3 recognition, ids, start path, resource loading, end; the damage
+  check's protection exit and that the Battle exe runs it every frame of action 0x16.
 - Not checked: in game; KH1's `uibin_sum.bin` objects (the asset step prints what it found); the
   durations and hit counts of Re:CoM's LV3 sleights (Re:CoM's own, not changed).
 
@@ -213,6 +253,9 @@ Nothing during the sleight but Re:CoM's own code.
 - **The summon itself is Re:CoM's LV3 sleight** (owner): no KH1 entrance, no summon partner staying
   with a gauge, no summon commands, no Dismiss; Sora is Re:CoM's (not controllable) until it ends.
 - **MP** from Re:CoM's CP (owner), not KH1's costs above.
+- **No once-per-battle rule** (owner): KH1's `0x14298C7AC` test is dropped.
+- **Cloud first** in the list (owner); KH1 lists in learn order only.
+- **Sora invincible** through the summon (owner); KH1's Sora stays hittable beside his summon.
 - **The party rule** is skipped (owner) until the party exists (`summons::party_ready`).
 - **The menu stays up** during the sleight (row 3 greyed and locked; owner); KH1 hides it during its
   summon's entrance (`0x142867364` bits 20 / 14).
@@ -225,8 +268,8 @@ Nothing during the sleight but Re:CoM's own code.
   equivalent to Re:CoM's own call inside `0x1401F8150`; no card record (`+0x808..`) is needed by the
   summon sleights (they read `+0x82C`, the row, the target and the resources).
 - `player+0x390` ≠ 0 exactly in Re:CoM's battle rooms (as the specials use it).
-- Re:CoM's battle-room player object differs between battles, or the field is seen in between (the
-  once-per-battle reset).
+- Every hit on Sora goes through the damage check `0x1401E6DE0` (decision 31's reading); a hit kept
+  pending by the protection exit is dropped by Re:CoM as after a roll (Re:CoM's own rule).
 - Bambi / Tinker Bell "stand and turn" (from `0x1401EF120`'s code).
 - "Cloud" is Cloud's name in every language.
 
@@ -244,11 +287,17 @@ Nothing during the sleight but Re:CoM's own code.
    with the same LV3 sleight from cards at Combat = Re:CoM.
 5. While it runs: row 3 greyed and locked (error sound). After it: Sora walks, attacks and casts at once
    (the KH1 frame took him back).
-6. The same summon again in the same battle: greyed. Another one: usable. After the battle (back in
-   the field) and in the next battle: usable again.
-7. Not enough MP (e.g. 2 MP and Cloud): greyed; in the air: all greyed.
-8. Mid-combo (in a combo window): a summon is taken; mid-swing outside the window: nothing (no sound).
-9. Damage: Re:CoM's summon damage at both `damage = recom` and `damage = kh1`.
-10. Cloud: Omnislash. The list's word "Cloud".
-11. Send `kh1-recom.log` (the `summons:` lines) and, for one summon, an F9 trace from the command to
+6. Invincible: let enemies hit Sora during each summon (attached: Simba, Genie, Dumbo, Cloud; standing:
+   Bambi, Tinker Bell, Mushu): no HP lost, no flinch; the log's `a hit on Sora during the summon …`
+   lines. Right after it ends he can be hit again (no lingering invincibility).
+7. The same summon again in the same battle: usable as long as the MP pays (no once-per-battle).
+8. Cloud is the top entry of the list whenever learned; the others follow in learn order. One entry
+   sits beside row 3; more end at the bottom row.
+9. Not enough MP (e.g. 2 MP and Cloud): greyed; in the air: all greyed.
+10. Mid-combo (in a combo window): a summon is taken; mid-swing outside the window: nothing (no sound).
+11. Damage: Re:CoM's summon damage at both `damage = recom` and `damage = kh1`.
+12. Cloud: Omnislash. The list's word "Cloud".
+13. Ending a battle with a summon (its attack kills the last enemy): no stuck invincibility in the next
+    battle.
+14. Send `kh1-recom.log` (the `summons:` lines) and, for one summon, an F9 trace from the command to
     a few frames after it ends.

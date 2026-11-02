@@ -11,13 +11,20 @@
 //!   actor (`CSummon*`), its hits and damage, and its end (`0x1401F6660`). KH1's MP (the owner's
 //!   CP-based cost) is paid once Re:CoM's action is `0x16`.
 //! - **While it runs**: our `exeStockSkill` wrapper (when the specials are in) passes Re:CoM's
-//!   sleights through; Re:CoM's Battle exe steps it. The summon counts as out (the menu's row 3
-//!   greyed and locked) while Sora's action is `0x16`.
+//!   sleights through; Re:CoM's Battle exe steps it. The summon counts as out ([`out`]: from our
+//!   start while Sora's action is `0x16` in the battle room): the menu's row 3 greyed and locked (a
+//!   second sleight can't start mid-sleight), and **Sora is invincible** (owner, 2026-11-02): the
+//!   damage-check wrapper (`attack::damage_check`, on Re:CoM's `0x1401E6DE0`) holds Re:CoM's own
+//!   protection bit `player+0x418 & 1` for each check (its exit: the hit's value zeroed, no damage,
+//!   no reaction; the roll's and Sonic Blade's path). The Battle exe runs the check every frame of
+//!   action `0x16` (`0x1401F9840`, after the request bits), so it covers the start frame, the
+//!   attached summons (Simba, Genie, Dumbo, Cloud) and the standing ones (Bambi, Tinker Bell,
+//!   Mushu), and ends with the action: Re:CoM's end action `0x1401F6660`, its win action at a
+//!   battle's end, or the room's end (the field: `player+0x390` = 0).
 //! - **After it**: Re:CoM's end action leaves Sora in its own move action; our move-exe wrapper sees
 //!   that its last KH1 frame no longer matches and takes Sora back fresh (`movement::continues`),
 //!   as after Re:CoM's hit reactions and its win action.
-//! - **Once per battle**: the summons used are kept until Re:CoM's battle room ends (Sora in the
-//!   field, or another battle's player).
+//! - **No once-per-battle rule** (owner, 2026-11-02): usable again whenever the MP pays.
 //! - **The learn order**: our save block (`crate::summons::BLOCK_FIRST`), synced from Re:CoM's
 //!   discovery state by the unlocks wrapper on `0x14015C7F0` and at the first read of a save.
 //! - **Preload**: when the Summon list's cursor lands on a summon in battle, Re:CoM's sleight
@@ -32,13 +39,12 @@ use crate::summons::{self as sm, BLOCK_FIRST, BLOCK_LEN};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering};
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
-/// The player of the current battle (a new one starts a new battle's list of used summons).
-static BATTLE_PLAYER: AtomicUsize = AtomicUsize::new(0);
-/// The summons used in this battle (bit per summon; KH1's `0x14298C7AC`).
-static USED: AtomicU8 = AtomicU8::new(0);
-/// The player whose Re:CoM summon sleight is out (KH1's in-progress flag).
+/// The player whose Re:CoM summon sleight is out (KH1's in-progress flag), and which summon.
 static OUT: AtomicUsize = AtomicUsize::new(0);
-/// The last summon preloaded (+ 1; 0 none), for the player in `BATTLE_PLAYER`.
+static OUT_SUMMON: AtomicU8 = AtomicU8::new(0);
+/// The hits skipped during the summon out (for the end's log line).
+static SKIPPED: AtomicU32 = AtomicU32::new(0);
+/// The last summon preloaded (+ 1; 0 none).
 static PRELOADED: AtomicU8 = AtomicU8::new(0);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
 
@@ -165,28 +171,45 @@ pub unsafe fn learned() -> ([u8; sm::COUNT], u8) {
 
 // ---- the battle ----
 
-/// KH1's usable test's inputs from Re:CoM's side, every menu build: (battle mode, the summons used
-/// in this battle, a summon out). Re:CoM's battle room ending (Sora's player in the field, or a new
-/// battle's player) clears the used ones, as KH1's battle mode ending (`0x140298940`).
-pub unsafe fn gate_state(pl: usize) -> (bool, u8, bool) {
+/// KH1's usable test's inputs from Re:CoM's side, every menu build: (battle mode, a summon out).
+pub unsafe fn gate_state(pl: usize) -> (bool, bool) {
     let battle = rd::<i32>(pl + p::BATTLE) != 0;
-    if !battle || BATTLE_PLAYER.load(Ordering::Relaxed) != pl {
-        if USED.swap(0, Ordering::Relaxed) != 0 {
-            note(|| "battle over: every summon usable again".into());
-        }
+    if !battle {
         PRELOADED.store(0, Ordering::Relaxed);
-        BATTLE_PLAYER.store(if battle { pl } else { 0 }, Ordering::Relaxed);
     }
-    let mut out = false;
-    if OUT.load(Ordering::Relaxed) == pl && pl != 0 {
-        if rd::<u32>(pl + p::ACTION) == STOCK_ACTION {
-            out = true;
+    (battle, out(pl))
+}
+
+/// `pl`'s Re:CoM summon sleight (ours) is out: from [`start`] while Sora's action is `0x16` in the
+/// battle room. The first call that sees otherwise (Re:CoM's end action `0x1401F6660`, its win
+/// action, the room's end, another player) ends it. Two loads unless one is out.
+pub unsafe fn out(pl: usize) -> bool {
+    let o = OUT.load(Ordering::Relaxed);
+    if o == 0 || pl == 0 {
+        return false;
+    }
+    if o == pl && rd::<u32>(pl + p::ACTION) == STOCK_ACTION && rd::<i32>(pl + p::BATTLE) != 0 {
+        return true;
+    }
+    if OUT.compare_exchange(o, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+        let s = &sm::ALL[OUT_SUMMON.load(Ordering::Relaxed) as usize % sm::COUNT];
+        let skipped = SKIPPED.swap(0, Ordering::Relaxed);
+        if o == pl {
+            note(|| format!("{}: Re:CoM's {} ended (action {:#x}{}); invincibility off ({skipped} hits skipped); the KH1 frame takes Sora back", s.name, s.sleight_name, rd::<u32>(pl + p::ACTION), if rd::<i32>(pl + p::BATTLE) == 0 { ", out of the battle room" } else { "" }));
         } else {
-            OUT.store(0, Ordering::Relaxed);
-            note(|| format!("Re:CoM's summon sleight ended (action {:#x}); the KH1 frame takes Sora back", rd::<u32>(pl + p::ACTION)));
+            note(|| format!("{}: its player is gone (another player {pl:#x}); invincibility off ({skipped} hits skipped)", s.name));
         }
     }
-    (battle, USED.load(Ordering::Relaxed), out)
+    false
+}
+
+/// The damage check met a hit (`+0x41C & 0x200`) on Sora while his summon is out (the check's
+/// protection exit skips it): counted and logged.
+pub fn hit_skipped(value: i16) {
+    let n = SKIPPED.fetch_add(1, Ordering::Relaxed) + 1;
+    if n <= 8 {
+        note(|| format!("a hit on Sora during the summon (value {value}): skipped (Re:CoM's +0x418 bit 0: no damage, no reaction)"));
+    }
 }
 
 /// Summon `i` (the menu's command, KH1's usable test passed): Re:CoM's LV3 sleight through Sora's
@@ -228,10 +251,10 @@ pub unsafe fn start(pl: usize, i: usize) -> bool {
     }
     // KH1 pays at once, in whole points (`0x140289210` → `0x1402A4A00(actor, −cost)`).
     super::mp::pay(cost * 100, s.name);
-    USED.fetch_or(1 << i, Ordering::Relaxed);
+    OUT_SUMMON.store(i as u8, Ordering::Relaxed);
+    SKIPPED.store(0, Ordering::Relaxed);
     OUT.store(pl, Ordering::Relaxed);
-    BATTLE_PLAYER.store(pl, Ordering::Relaxed);
-    note(|| format!("{} -> Re:CoM's {} (sleight {:#x}, attack {:#x}, {} from PLAYER/{:04}), {cost} MP, from action {before:#x}", s.name, s.sleight_name, s.sleight, s.attack_id, s.class, s.pack));
+    note(|| format!("{} -> Re:CoM's {} (sleight {:#x}, attack {:#x}, {} from PLAYER/{:04}), {cost} MP, from action {before:#x}; Sora invincible until it ends", s.name, s.sleight_name, s.sleight, s.attack_id, s.class, s.pack));
     true
 }
 

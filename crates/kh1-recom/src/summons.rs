@@ -8,9 +8,12 @@
 //!   `0x2F + summon` for each summon of the save's list `+0x7D0` (7 bytes, learn order: event
 //!   syscall 568 `0x1401B1250` → `0x1402850B0` appends to the first empty slot).
 //! - **Usable** (`0x140288F30`; grey = lock): battle mode (`0x142867364 & 1`), the movement state's
-//!   flag 0x80 (state 0 only), Sora's whole MP ≥ the cost, the summon not used in this battle
-//!   (`0x14298C7AC`, cleared when battle mode ends, `0x140298940`), and both party slots filled and
-//!   alive (**skipped until the party exists**, owner: [`party_ready`]).
+//!   flag 0x80 (state 0 only), Sora's whole MP ≥ the cost, and both party slots filled and alive
+//!   (**skipped until the party exists**, owner: [`party_ready`]). KH1's once-per-battle rule
+//!   (`0x14298C7AC`) is **not used** (owner, 2026-11-02: "summons should be able to be used as long
+//!   as you have MP"); one summon at a time (a second sleight can't start mid-sleight).
+//! - **The list** (owner, 2026-11-02: "cloud should also be at the top of the summons list"): Cloud
+//!   first when learned, then the others in learn order ([`list_order`]).
 //! - **Each summon runs Re:CoM's LV3 sleight** of its card (the same card ×3, Re:CoM's
 //!   recognition `0x1401669F0`), started without a card through Sora's vtable `+0x130`
 //!   (`0x1402247A0`, Re:CoM's own sleight start from its request bits `0x1401F8150`): Re:CoM
@@ -113,15 +116,25 @@ pub struct Gate {
     pub ground: bool,
     /// Sora's whole MP (KH1's `+0x44`; the charge doesn't count).
     pub mp: i32,
-    /// The summons used in this battle (bit `i`).
-    pub used: u8,
-    /// A summon is out (KH1's in-progress flag `0x142867364 & 0x2000`).
+    /// A summon is out (Re:CoM's sleight running; KH1's in-progress flag `0x142867364 & 0x2000`):
+    /// none can start until it ends.
     pub out: bool,
 }
 
-/// `0x140288F30` for summon `i`.
+/// `0x140288F30` for summon `i`, without KH1's once-per-battle test (owner).
 pub fn usable(g: &Gate, i: usize) -> bool {
-    i < COUNT && g.battle && g.ground && !g.out && g.mp >= mp_cost(i) && g.used >> i & 1 == 0 && party_ready()
+    i < COUNT && g.battle && g.ground && !g.out && g.mp >= mp_cost(i) && party_ready()
+}
+
+/// Our index of Cloud.
+pub const CLOUD: usize = 6;
+
+/// The Summon list's order (owner, 2026-11-02): Cloud first when learned, then the others in learn
+/// order.
+pub fn list_order(learned: &[usize]) -> Vec<usize> {
+    let mut v: Vec<usize> = learned.iter().copied().filter(|&i| i == CLOUD).take(1).collect();
+    v.extend(learned.iter().copied().filter(|&i| i != CLOUD));
+    v
 }
 
 // ---- the learn order and its save block ----
@@ -239,13 +252,11 @@ mod tests {
 
     #[test]
     fn kh1_usable_rule() {
-        let g = Gate { battle: true, ground: true, mp: 2, used: 0, out: false };
+        let g = Gate { battle: true, ground: true, mp: 2, out: false };
         assert!(usable(&g, 5), "Simba with 2 MP");
         assert!(!usable(&g, 4), "Mushu needs 3");
         assert!(!usable(&Gate { battle: false, ..g }, 5), "battle mode only");
         assert!(!usable(&Gate { ground: false, ..g }, 5), "state 0 only");
-        assert!(!usable(&Gate { used: 1 << 5, ..g }, 5), "once per battle");
-        assert!(usable(&Gate { used: 1 << 5, ..g }, 0), "the others stay");
         assert!(!usable(&Gate { out: true, ..g }, 5), "one out at a time");
         assert!(!usable(&g, 7));
         assert!(party_ready());
@@ -271,6 +282,15 @@ mod tests {
         assert!(added.is_empty());
         assert_eq!(b3, b2);
         assert_eq!(b3[field::RESERVED], 0);
+    }
+
+    #[test]
+    fn cloud_heads_the_list() {
+        assert_eq!(list_order(&[5, 0, 6, 1]), vec![6, 5, 0, 1]);
+        assert_eq!(list_order(&[6]), vec![6]);
+        assert_eq!(list_order(&[5, 0]), vec![5, 0]);
+        assert_eq!(list_order(&[]), Vec::<usize>::new());
+        assert_eq!(ALL[CLOUD].name, "Cloud");
     }
 
     #[test]
