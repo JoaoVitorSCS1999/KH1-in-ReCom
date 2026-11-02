@@ -432,6 +432,11 @@ At KH1 setting:
       heartless": the 30 other ordinary Heartless with a KH1 twin, under M10's rules (KH1 AI / attacks /
       reactions / motions, Re:CoM stats, battle only). Step 1: a shared framework from the Shadow's
       code, proven on the Soldier; then the families.
+      Soldier choices (2026-11-02, on 0.68.0's questions): power mapping kept (kicks / double kick / rush /
+      air kick on Re:CoM's kick, jumping kick / rush leap / spin kick on its spin kick); **a guarded attack
+      whose KH1 recoil motion the model lacks plays Re:CoM's flinch**; battle spawns keep KH1's appearance;
+      KH1's wander picks points **around where the enemy stands** (fix the Shadow to it); KH1's leash
+      left out (would make a battle unwinnable).
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
