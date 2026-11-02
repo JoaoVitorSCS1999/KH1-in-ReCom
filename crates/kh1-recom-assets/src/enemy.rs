@@ -690,6 +690,9 @@ pub struct GuardSpec {
 pub const GUARDS: &[GuardSpec] = &[
     GuardSpec { enemy: "bandit", name: "spin", row: 0xEC, requests: &[210, 211, 212] },
     GuardSpec { enemy: "bandit", name: "stance", row: 0x15C, requests: &[230, 231, 233] },
+    // The Pirate's `ex_2100.bd` makes `0x1CC` at `0x1156` (then 217) and `0x46C` at `0xAB4` (after 208).
+    GuardSpec { enemy: "pirate", name: "spin", row: 0x1CC, requests: &[217] },
+    GuardSpec { enemy: "pirate", name: "stance", row: 0x46C, requests: &[208] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).
@@ -859,7 +862,9 @@ fn thrown_consts(enemy: &str, mdls: &[u8], script: &[u8], asd: &[u8], asd_shape:
 /// (decomp); M11): (enemy, request, KH1 frame). Their clip is the motion from that frame
 /// ([`Converter::convert_from`]), their attack records' windows and their sounds move by it, their
 /// manifest length is the rest. The Air Soldier's slash: `0x22F2` `sys 13(wp, 201, 8, 20)`.
-pub const STARTS: &[(&str, u16, u32)] = &[("airsoldier", 201, 20)];
+/// The Pirate's jump slash (`0xDEA` `sys 13(wp, 0x10000D2, 8, 8)`, an action: `Cmd::MotionAt` can't
+/// carry it) and its spin's wind-up (`0xEEC` `sys 13(wp, 222, 8, 8)`), each played only there.
+pub const STARTS: &[(&str, u16, u32)] = &[("airsoldier", 201, 20), ("pirate", 210, 8), ("pirate", 222, 8)];
 
 /// [`STARTS`]' requests of an enemy.
 pub fn starts_of(name: &str) -> Vec<(u16, u32)> {
@@ -920,7 +925,8 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
 /// `+0x288`, 0 for enemies, or holds with it; Checked (decomp), § The Bandit), so a script that plays one past
 /// its length sees it start again; Re:CoM holds a clip not marked looping. Only the requests a script plays
 /// past their length: the Wyvern's wind-up 204 (108 frames) in its engaged charge `0xF52` (16 + 106 frames).
-pub const LOOPS: &[(&str, u16)] = &[("wyvern", 204)];
+/// The Pirate's spin 217 (48 frames) in its spin `0xED0` (up to 180 frames).
+pub const LOOPS: &[(&str, u16)] = &[("wyvern", 204), ("pirate", 217)];
 
 /// Requests that get their own clip although Re:CoM has their motion as an exact bake (M11): the
 /// bake carries Re:CoM's own attack records (`.ASD`, bound by the clip's name), which would hit with
@@ -1005,4 +1011,4 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC];
