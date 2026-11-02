@@ -634,7 +634,7 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     }
     let hp: i32 = rd(enemy + 0x274);
     let r = kh1_enemy_hit(enemy);
-    // Gimmick cards, trigger (d): a card-break boss crossing 75 / 50 / 25 % of its max HP.
+    // Gimmick cards, trigger (d): a card-break boss crossing 50 % of its max HP.
     super::gimmick::after_hp(enemy, hp);
     r
 }

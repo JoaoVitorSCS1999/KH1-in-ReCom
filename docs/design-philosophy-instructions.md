@@ -416,7 +416,8 @@ At KH1 setting:
       chose **(a) + (d)**: (a) when Sora's KH1 Guard blocks an attack of one of the five card-break bosses
       (Guard Armor, Trickmaster, Jafar, Parasite Cage, Dragon Maleficent), the boss gets Re:CoM's card-break
       stagger and its own drop roll; (d) each of those bosses also drops its gimmick card, without a
-      stagger, at **75 %, 50 % and 25 % of its HP**.
+      stagger, at **75 %, 50 % and 25 % of its HP**. Then (2026-11-02): "only drop one at 50% and
+      occasionally when guarding": the HP drop at **50 % only**.
 
 ## Known open design questions (ask the owner, don't guess)
 

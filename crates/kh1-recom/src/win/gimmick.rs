@@ -153,7 +153,7 @@ pub fn mark_installed() {
 
 pub fn start_line() -> String {
     let brk = if BREAK_OK.load(Ordering::Acquire) {
-        "; Guard Armor, Trickmaster, Jafar, Parasite Cage and Dragon Maleficent: a KH1 combo finisher that interrupts their attack, or Sora's Guard blocking their attack or shot, posts CBTL's card-break message 3 (0x1401D2770), so their own state 13 staggers them and rolls the card; at 75 / 50 / 25 % of their max HP they drop it without a stagger (their own drop code's descriptor and conditions, Re:CoM's prize factory)"
+        "; Guard Armor, Trickmaster, Jafar, Parasite Cage and Dragon Maleficent: a KH1 combo finisher that interrupts their attack, or Sora's Guard blocking their attack or shot, posts CBTL's card-break message 3 (0x1401D2770), so their own state 13 staggers them and rolls the card; at 50 % of their max HP they drop it without a stagger (their own drop code's descriptor and conditions, Re:CoM's prize factory)"
     } else {
         "; no card breaks or HP drops (sites not as read): those five bosses' cards don't drop"
     };
@@ -564,7 +564,7 @@ unsafe fn own_condition(kind: u8, e: usize) -> Option<&'static str> {
 }
 
 /// Trigger (d), from the KH1 enemy-hit wrapper after every hit (`hp` before it): one of the five
-/// crossing 75 / 50 / 25 % of its max HP drops its card without a stagger, made as its own drop
+/// crossing 50 % of its max HP drops its card without a stagger, made as its own drop
 /// code makes it (the receiver, the descriptor, Re:CoM's prize factory). Once per threshold per
 /// fight; one card per hit even across several thresholds; a threshold its own condition refuses
 /// waits for a later hit. Not on the killing hit.

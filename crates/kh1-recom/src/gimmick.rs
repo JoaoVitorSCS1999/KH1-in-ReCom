@@ -205,8 +205,9 @@ pub fn roll_step(frames: u32, entered: Option<u32>, present: bool, in_state: boo
 }
 
 /// Trigger (d) (owner, 2026-11-01): each card-break boss also drops its card, without a stagger,
-/// at 75 %, 50 % and 25 % of its max HP, once per threshold per fight.
-pub const HP_THRESHOLDS: [u32; 3] = [75, 50, 25];
+/// at a share of its max HP, once per fight. First 75 / 50 / 25 %; then (owner, 2026-11-02: "only
+/// drop one at 50% and occasionally when guarding") **50 % only**.
+pub const HP_THRESHOLDS: [u32; 1] = [50];
 
 /// The thresholds (bit i = [`HP_THRESHOLDS`]`[i]`) `hp` is at or below.
 pub fn hp_reached(hp: i32, max: i32) -> u8 {
@@ -562,26 +563,23 @@ mod tests {
     }
 
     #[test]
-    fn hp_thresholds_once_each() {
+    fn hp_threshold_once_at_half() {
         assert_eq!(hp_reached(1000, 1000), 0);
-        assert_eq!(hp_reached(750, 1000), 1);
-        assert_eq!(hp_reached(500, 1000), 3);
-        assert_eq!(hp_reached(249, 1000), 7);
-        // First hit 1000 → 700: 75 crossed.
+        assert_eq!(hp_reached(501, 1000), 0);
+        assert_eq!(hp_reached(500, 1000), 1);
+        assert_eq!(hp_reached(10, 1000), 1);
+        // 1000 → 700: nothing; 700 → 450: 50 crossed (one card).
         let (m, n) = hp_step(None, 5, 1000, 700, 1000);
+        assert_eq!((n, m.done, m.owed), (0, 0, 0));
+        let (m, n) = hp_step(Some(m), 5, 700, 450, 1000);
         assert_eq!((n, m.done, m.owed), (1, 1, 1));
-        // Paid; then one hit across 50 and 25: both crossed by one hit (one card, § choices).
-        let m = HpMarks { owed: 0, ..m };
-        let (m, n) = hp_step(Some(m), 5, 700, 200, 1000);
-        assert_eq!((n, m.done, m.owed), (6, 7, 6));
-        assert_eq!(hp_names(n), "50/25");
+        assert_eq!(hp_names(n), "50");
         // Never again in this fight.
-        let (_, n) = hp_step(Some(m), 5, 200, 10, 1000);
-        assert_eq!(n, 0);
-        // A boss first seen below 50 % (another handle: a new fight): only 25 still to come.
+        let m = HpMarks { owed: 0, ..m };
+        assert_eq!(hp_step(Some(m), 5, 450, 10, 1000).1, 0);
+        // A boss first seen below 50 % (another handle: a new fight): no card for HP lost before.
         let (m, n) = hp_step(Some(m), 9, 400, 390, 1000);
-        assert_eq!((n, m.done), (0, 3));
-        assert_eq!(hp_step(Some(m), 9, 390, 250, 1000).1, 4);
+        assert_eq!((n, m.done), (0, 1));
         assert_eq!(hp_reached(0, 0), 0);
     }
 

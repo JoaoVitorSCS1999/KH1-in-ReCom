@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 113: Gimmick cards: the HP drop at 50 % only, version 0.64.1 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "only drop one at 50% and occasionally when guarding".
+- `gimmick::HP_THRESHOLDS` = [50]: the five card-break bosses drop their card once per fight at 50 % of max HP,
+  without a stagger (same conditions and spawn as Stage 112). The Guard trigger is unchanged: each block posts
+  Re:CoM's card break and the boss's own drop roll decides (Guard Armor 30 %, others their .EPD chance: Assumption).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 112: Gimmick cards: Guard blocks break the five card-break bosses; cards at 75 / 50 / 25 % HP, version 0.64.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "interrupting an attack with a finisher is very rare"; chose (a) Guard + (d) HP thresholds,

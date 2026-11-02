@@ -361,3 +361,12 @@ Combat = KH1, Sora's story, `kh1-recom.log` open:
     clear`) and drop on a later hit.
 18. Jafar's HP card appears at the arena's (0, 20, 0) and falls; Dragon's flies toward Sora.
 19. Damage = KH1 (ini): the thresholds follow KH1's max HP.
+
+## 9. HP drop at 50 % only (0.64.1)
+
+Owner (2026-11-02): "only drop one at 50% and occasionally when guarding". Trigger (d) now has one
+threshold, **50 %** of the boss's max HP (`gimmick::HP_THRESHOLDS = [50]`): one card, once per fight,
+without a stagger, with the same waiting conditions and spawn as before. The Guard trigger (a) is
+unchanged: each block posts the card-break and the boss's own drop roll decides (Guard Armor 30 %,
+Parasite Cage 30 % until its card is used, the others their `.EPD` chance: Assumption). Test: bring a
+boss from full to below half: one `gimmick: hp drop 50:` line and one card; none at 75 % or 25 %.
