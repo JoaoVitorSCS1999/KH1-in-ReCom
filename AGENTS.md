@@ -11,6 +11,30 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 103: Damage setting: Re:CoM damage per equipped Keyblade and Re:CoM enemy HP (default), version 0.58.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "depending on which keyblade sora has equipped, it does recom's damage for the
+  corresponding keyblade? lets also have Recom's enemy HP"; chose: KH1's normal swings Re:CoM's normal column,
+  KH1's finisher Re:CoM's finisher column; spells and specials Re:CoM's card / sleight damage.
+- Re:CoM's formula (Checked (decomp + disasm), row pick `0x1401F7520`, card branch `0x1401F7ACC`): power = card
+  `BattleCardList` (`0x14087A808`) power at the row's column + `+0x664` (0 at KH1: no enemy card 0x79), + half
+  when `+0x420 & 0x4000000`; AP = attack stat `+0x43C` × power / 100; attribute card `+0xB`; then Re:CoM's
+  enemy-card rewrite `0x1401E66A0`. Re:CoM's rows 1–7 columns 0, 0, 1, 2, 1, 0, 2 (Checked (exe)).
+- New ini setting `damage = recom | kh1` (default recom; KH1 = decisions 12 / 21 as before). At recom:
+  - swings: the equipped Keyblade card (`save+0x2674`) at column 0 for normal swings, 2 for KH1 kind-5 finishers
+    (Blitz, Ripple Drive, Hurricane Blast too); other KH1 moves the column of the Re:CoM row they are built on
+    (table in `docs/recom-kh1-attack.md` § Re:CoM damage setting); field swings keep Re:CoM's no-card AP.
+  - enemy HP: Re:CoM's own (no KH1 HP write or max-HP override); KH1 records kept for level, Stop / Gravity
+    resist, drops, lock radius.
+  - Fire / Blizzard / Thunder: card 0x1A / 0x1B / 0x1C, then the -ra / -ga sleights 0xD..0xF / 0x14..0x16;
+    Sonic Blade sleight 9: dashes row 0xF (col 0), finisher row 0x10 (col 2). Cure, Gravity, Stop, Aero unchanged
+    (owner questions).
+- No Config row yet (Re:CoM's Config slots are full): owner question.
+- Checked: tests, Windows build, 488 sites. Assumptions: `player+0x390` exactly in battle rooms; the rewrite
+  changes nothing at KH1 (logged). Not checked: in game.
+
+---
+
 ## Stage 102: Sonic Blade: Re:CoM's voices and effects per dash; battle only, version 0.57.0 (2026-11-01)
 
 - Asks (owner, 2026-11-01, on 0.56.1's questions): voices "however it works in base ReCoM"; per-dash effects
