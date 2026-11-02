@@ -36,7 +36,17 @@ pub const START_MAX_MP: i32 = 3;
 /// The levels whose level-up bonus is kind 2 (max MP +1) in Sora's table btltbl `0x3AC0`
 /// (`0x140528CC0[0]`; byte `[L − 2]` for reaching level L): 12, 24, 36, 48, 60, no other in its
 /// 99 entries. Checked (files + decomp `0x1402B51B0`, `0x1402B5660`).
-pub const MAX_MP_UP_LEVELS: [u32; 5] = [12, 24, 36, 48, 60];
+pub const BONUS_MAX_MP_LEVELS: [u32; 5] = [12, 24, 36, 48, 60];
+/// The levels whose entry is kind 2 in Sora's Dive list for the **Rod** (btltbl `0x3BF8`,
+/// `*(0x140528D10 + 4 × save[0x48C])`; entry i = level i + 2): 30 and 66. The same level-up
+/// `0x1402B51B0` passes each non-ability entry (1..7) of that list to the same bonus function
+/// `0x1402B5660`, so kind 2 is max MP + 1 there too. Checked (files + decomp). The Rod: the mod's
+/// Dive path keeps it (decision 18; `save[0x48C]` = 2 is the Rod: Assumption, as the ability list).
+/// Owner, 2026-11-01: add them.
+pub const ROD_MAX_MP_LEVELS: [u32; 2] = [30, 66];
+/// Every max-MP level of Sora's KH1 growth on the owner's path, in order: the bonus list's and the
+/// Rod list's ([`BONUS_MAX_MP_LEVELS`], [`ROD_MAX_MP_LEVELS`]; none shared).
+pub const MAX_MP_UP_LEVELS: [u32; 7] = [12, 24, 30, 36, 48, 60, 66];
 
 /// KH1's spell costs (spell data `+0x30` per level, btltbl via the level table `0x140528620`;
 /// the same at all three levels). ≥ 100 = whole points (cost / 100), < 100 = charge units.
@@ -52,7 +62,7 @@ pub mod cost {
 }
 
 /// Sora's KH1 base max MP at a level (no Keyblade bonus): 3, +1 at each of
-/// [`MAX_MP_UP_LEVELS`] reached. Re:CoM's level is used by number (decision 34: "Max MP grows on
+/// [`MAX_MP_UP_LEVELS`] reached (10 at level 66 and above). Re:CoM's level is used by number (decision 34: "Max MP grows on
 /// level up"; as Sora's KH1 Strength, decision 18).
 pub fn base_max_mp(level: u32) -> i32 {
     START_MAX_MP + MAX_MP_UP_LEVELS.iter().filter(|&&l| l <= level).count() as i32
@@ -402,15 +412,21 @@ mod tests {
         assert_eq!(base_max_mp(12), 4);
         assert_eq!(base_max_mp(23), 4);
         assert_eq!(base_max_mp(24), 5);
-        assert_eq!(base_max_mp(36), 6);
-        assert_eq!(base_max_mp(48), 7);
-        assert_eq!(base_max_mp(59), 7);
-        assert_eq!(base_max_mp(60), 8);
-        assert_eq!(base_max_mp(99), 8);
+        // The Rod list's +1 at 30 (owner, 2026-11-01).
+        assert_eq!(base_max_mp(29), 5);
+        assert_eq!(base_max_mp(30), 6);
+        assert_eq!(base_max_mp(36), 7);
+        assert_eq!(base_max_mp(48), 8);
+        assert_eq!(base_max_mp(59), 8);
+        assert_eq!(base_max_mp(60), 9);
+        // And at 66.
+        assert_eq!(base_max_mp(65), 9);
+        assert_eq!(base_max_mp(66), 10);
+        assert_eq!(base_max_mp(99), 10);
         // Keyblade bonuses (KH1 weapon +0x38): Diamond Dust +3, One-Winged Angel −2.
         assert_eq!(max_mp(1, 3), 6);
         assert_eq!(max_mp(1, -2), 1);
-        assert_eq!(max_mp(60, -2), 6);
+        assert_eq!(max_mp(60, -2), 7);
         assert_eq!(max_mp(1, -5), 0);
     }
 
@@ -641,7 +657,7 @@ mod tests {
         assert!(l.fresh);
         assert_eq!(l.mp.view(), (3, 3, 0));
         let l = live(&z, 30, 2);
-        assert_eq!(l.mp.view(), (7, 7, 0));
+        assert_eq!(l.mp.view(), (8, 8, 0), "12, 24 and the Rod's 30, + 2");
         // Reading writes nothing.
         assert_eq!(stored(&z, &l), None);
     }
@@ -666,16 +682,16 @@ mod tests {
         // KH1's record keeps an MP above max while a lower-max Keyblade is on, until MP changes.
         let saved = SavedMp { version: 1, mp: 5, charge: 10, level: 30 };
         let mut l = live(&saved, 30, -2);
-        assert_eq!(l.mp.view(), (3, 3, 10));
+        assert_eq!(l.mp.view(), (4, 4, 10));
         l.mp.gain(3);
         let s = stored(&saved, &l).unwrap();
         assert_eq!(s.mp, 5, "a charge write leaves the record's MP");
         assert_eq!(s.charge, 13);
-        assert_eq!(live(&s, 30, 0).mp.view(), (5, 5, 13), "back to the Kingdom Key: 5 again");
+        assert_eq!(live(&s, 30, 0).mp.view(), (5, 6, 13), "back to the Kingdom Key: 5 again");
         // An MP write stores the clamped MP.
         let mut l = live(&saved, 30, -2);
         l.mp.pay(cost::THUNDER);
-        assert_eq!(stored(&saved, &l).unwrap().mp, 2);
+        assert_eq!(stored(&saved, &l).unwrap().mp, 3);
     }
 
     #[test]
@@ -697,6 +713,26 @@ mod tests {
         // A full bar stays full through a level-up.
         let l = live(&SavedMp { version: 1, mp: 3, charge: 0, level: 1 }, 12, 0);
         assert_eq!(l.mp.view(), (4, 4, 0));
+        // The Rod list's 30 and 66 are level-ups too (owner, 2026-11-01).
+        let l = live(&SavedMp { version: 1, mp: 2, charge: 0, level: 29 }, 31, 0);
+        assert_eq!((l.level_ups, l.mp.view()), (1, (3, 6, 0)));
+        let l = live(&SavedMp { version: 1, mp: 9, charge: 0, level: 60 }, 99, 0);
+        assert_eq!((l.level_ups, l.mp.view()), (1, (10, 10, 0)));
+    }
+
+    #[test]
+    fn max_mp_levels_are_the_bonus_and_rod_lists() {
+        let mut v: Vec<u32> = BONUS_MAX_MP_LEVELS.iter().chain(ROD_MAX_MP_LEVELS.iter()).copied().collect();
+        v.sort();
+        assert_eq!(v, MAX_MP_UP_LEVELS);
+        assert!(MAX_MP_UP_LEVELS.windows(2).all(|w| w[0] < w[1]), "none shared");
+        // From the player's btltbl when the test data is there: kind 2 in the bonus list 0x3AC0
+        // and in the Rod list 0x3BF8 (entry i = level i + 2).
+        let Ok(dir) = std::env::var("KH1_TEST_DATA") else { return };
+        let Ok(b) = std::fs::read(std::path::Path::new(&dir).join("btltbl.bin")) else { return };
+        let kind2 = |list: usize| -> Vec<u32> { (0..99).filter(|&i| b[list + i] == 2).map(|i| i as u32 + 2).collect() };
+        assert_eq!(kind2(0x3AC0), BONUS_MAX_MP_LEVELS);
+        assert_eq!(kind2(0x3BF8), ROD_MAX_MP_LEVELS);
     }
 
     #[test]
@@ -707,7 +743,7 @@ mod tests {
         assert_eq!(l.level, 10);
         // A level byte of 0 in a written block: taken as the current level.
         let l = live(&SavedMp { version: 1, mp: 2, charge: 0, level: 0 }, 40, 0);
-        assert_eq!((l.level_ups, l.mp.view()), (0, (2, 6, 0)));
+        assert_eq!((l.level_ups, l.mp.view()), (0, (2, 7, 0)));
     }
 
     #[test]

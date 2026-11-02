@@ -239,13 +239,14 @@ enemy_pace = recom
 config_menu = on
 ;
 ; KH1 abilities at combat = kh1 (on | off). Since M9 9b they live in the save and are equipped
-; in the camp's KH1 > Abilities page with KH1's AP:
-; - high_jump, glide, superglide, dodge_roll, combo_master: KH1 gives these by story; Sora has
-;   them while the key is on (until they get a Re:CoM unlock), and they arrive equipped.
-; - guard, counterattack, combo_plus, air_combo_plus: Sora learns them at KH1's levels (Guard
-;   33, Counterattack 57, Air Combo Plus 24 and 45, Combo Plus 87, 93, 99); these keys are only
-;   read once per save, when it first meets 9b: what they had on stays equipped if learned.
-; Without a save (the title screen) the keys stand as they are.
+; in the camp's KH1 > Abilities page with KH1's AP. Sora learns them in the game: Guard and
+; Dodge Roll (equipped) from the start; High Jump, Glide and Superglide when Re:CoM gives Sora
+; its own; Combo Master at level 50; Counterattack 57, Air Combo Plus 24 and 45, Combo Plus 87,
+; 93, 99 (KH1's levels).
+; - high_jump, glide, superglide, dodge_roll, combo_master: no longer unlock anything; only
+;   used while no save is loaded. kh1_all_abilities (below) is the testing switch.
+; - guard, counterattack, combo_plus, air_combo_plus: only read once per save, when a save from
+;   before 9b first meets the ability page: what they had on stays equipped if learned.
 high_jump = off
 glide = off
 superglide = off

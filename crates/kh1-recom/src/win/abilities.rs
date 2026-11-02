@@ -5,9 +5,10 @@
 //!   loads, snapshots and zeroes it with its save block.
 //! - **Sync** ([`sync`]): at each Attack press Re:CoM's dispatch hands to KH1's frame, and when the
 //!   camp's Abilities page opens, never per frame: the abilities not yet unlocked are checked
-//!   against Re:CoM's own learned-sleight test (`0x14023AB00`) and Re:CoM's level (new ones arrive
-//!   unequipped, KH1's rule), the story abilities against the ini; a block older than layout v2 is
-//!   migrated once (`crate::abilities::migrate`); written back, logged.
+//!   against Re:CoM's own learned-sleight test (`0x14023AB00`), Re:CoM's level and Re:CoM's
+//!   ability variable (0, 0x24) read with its getter `0x1401B08C0` (new ones arrive unequipped,
+//!   KH1's rule; Dodge Roll equipped, owner); a block older than layout v3 is migrated once
+//!   (`crate::abilities::migrate`); written back, logged.
 //! - **Use:** [`equipped_live`] reads the equipped word from the block (a 15-byte read) for the
 //!   abilities the KH1 frame passes on (`win::movement::abilities`), so what the camp's page
 //!   changes applies at once, and a loaded save is followed with no event of ours.
@@ -18,21 +19,24 @@ use super::movement::{func, rd, wr};
 use super::{base, log, va};
 use crate::abilities::{self as ab, State};
 use crate::settings::Kh1Abilities;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 /// The modifiers whose rows the attack table holds (`crate::attack::modifier_rows_ready`).
 static READY: AtomicU32 = AtomicU32::new(0);
 /// `kh1_all_abilities = on` (debug): every ability equipped, nothing written.
 static ALL: AtomicBool = AtomicBool::new(false);
-/// The ini's story abilities (`crate::abilities::story_mask`) and its movement abilities for the
-/// migration (`crate::abilities::ini_equipped`).
-static STORY: AtomicU8 = AtomicU8::new(0);
+/// The ini's movement abilities for the migration of a v0 / v1 block
+/// (`crate::abilities::ini_equipped`).
 static INI_EQUIPPED: AtomicU32 = AtomicU32::new(0);
 static LOGGED_FIRST: AtomicBool = AtomicBool::new(false);
 
 /// Re:CoM's "sleight learned" (`0x14023AB00(u16 id)`, `sites::ABILITY_CALLEES`).
 const SLEIGHT_LEARNED: u32 = 0x0023_AB00;
 type LearnedFn = unsafe extern "win64" fn(u16) -> u64;
+/// Re:CoM's int variable getter (`0x1401B08C0(set, id)`, `sites::M6_DECK_CALLEES`, bytes checked at
+/// start), for its ability variable (`crate::abilities::recom::VAR`).
+const VAR_GET: u32 = 0x001B_08C0;
+type VarGetFn = unsafe extern "win64" fn(u32, u32) -> u64;
 
 pub fn set_rows_ready(bits: u32) {
     READY.store(bits, Ordering::Relaxed);
@@ -45,9 +49,10 @@ pub fn set_all(on: bool) {
     }
 }
 
-/// The ini's abilities: the story ones' unlock, and the movement ones for the migration.
+/// The ini's movement abilities, read once per save at its migration from v0 / v1. (The ini's
+/// `high_jump`, `glide`, `superglide`, `dodge_roll`, `combo_master` no longer unlock anything:
+/// only the KH1 frame's fallback with no save block reads them, `win::movement::abilities`.)
 pub fn set_ini(a: &Kh1Abilities) {
-    STORY.store(ab::story_mask(a), Ordering::Relaxed);
     INI_EQUIPPED.store(ab::ini_equipped(a), Ordering::Relaxed);
 }
 
@@ -62,8 +67,8 @@ fn usable(e: u32) -> u32 {
     e & (READY.load(Ordering::Relaxed) | !ab::MODIFIER_BITS)
 }
 
-/// Brings the state up to Re:CoM's (sleights learned, level) and the ini's story keys, migrating
-/// an older block once; writes it back when it changed. None unless KH1's MP is live (the KH1
+/// Brings the state up to Re:CoM's (sleights learned, level, its ability variable), migrating an
+/// older block once; writes it back when it changed. None unless KH1's MP is live (the KH1
 /// setting, Sora's story, a save).
 pub fn sync() -> Option<State> {
     if !super::mp::active() {
@@ -77,13 +82,14 @@ pub fn sync() -> Option<State> {
     let before = ab::read(&block);
     let mut s: State = before;
     let level = super::stats::sora_level();
-    let story = STORY.load(Ordering::Relaxed);
+    // SAFETY: Re:CoM's own getter (bytes checked at start), a pure read of its save variables.
+    let recom_var = unsafe { func::<VarGetFn>(VAR_GET)(ab::recom::VAR.0, ab::recom::VAR.1) } as u32;
     // SAFETY: Re:CoM's own test (`sites::ABILITY_CALLEES`, bytes checked at start), a pure read of
     // its save.
     let learned = unsafe { func::<LearnedFn>(SLEIGHT_LEARNED) };
     let mut ask = |id: u16| unsafe { learned(id) } & 0xFF != 0;
-    let migrating = version < ab::BLOCK_V2;
-    let r = if migrating { ab::migrate(&mut s, level, story, INI_EQUIPPED.load(Ordering::Relaxed), &mut ask) } else { ab::sync(&mut s, level, story, &mut ask) };
+    let migrating = version < ab::BLOCK_NOW;
+    let r = if migrating { ab::migrate(&mut s, version, level, recom_var, INI_EQUIPPED.load(Ordering::Relaxed), &mut ask) } else { ab::sync(&mut s, level, recom_var, &mut ask) };
     if s != before || migrating {
         ab::write(&s, &mut block);
         // SAFETY: as above.
@@ -91,22 +97,24 @@ pub fn sync() -> Option<State> {
     }
     if migrating {
         log(&format!(
-            "abilities: block v{version} -> v2 at Re:CoM level {level} (max AP {}): equipped {:?} ({} AP){}",
+            "abilities: block v{version} -> v{} at Re:CoM level {level} (max AP {}, Re:CoM's ability variable {recom_var:#x}): equipped {:?} ({} AP){}{}",
+            ab::BLOCK_NOW,
             ab::max_ap(level),
             ab::names(s.equipped),
             ab::used_ap(s.equipped),
+            if r.taken != 0 { format!("; the ini's, not yet from their source, taken back {:?}", ab::names(r.taken)) } else { String::new() },
             if r.fitted != 0 { format!("; over KH1's AP, unequipped {:?}", ab::names(r.fitted)) } else { String::new() }
         ));
     }
     if r.new != 0 {
-        log(&format!("abilities: learned at Re:CoM level {level} (unequipped, KH1's rule): {:?}", ab::names(r.new)));
+        log(&format!("abilities: learned at Re:CoM level {level} (unequipped, KH1's rule; Re:CoM's ability variable {recom_var:#x}): {:?}", ab::names(r.new)));
     }
-    if r.story_on | r.story_off != 0 {
-        log(&format!("abilities: from the ini: on {:?}, off {:?}", ab::names(r.story_on), ab::names(r.story_off)));
+    if r.new_equipped != 0 {
+        log(&format!("abilities: learned at Re:CoM level {level} and equipped (owner: from the start): {:?}", ab::names(r.new_equipped)));
     }
     if !LOGGED_FIRST.swap(true, Ordering::Relaxed) {
         log(&format!(
-            "abilities: level {level}, AP {}/{} left; unlocked {:?}; equipped {:?}; modifiers the pickers get {:?}",
+            "abilities: level {level}, Re:CoM's ability variable {recom_var:#x}, AP {}/{} left; unlocked {:?}; equipped {:?}; modifiers the pickers get {:?}",
             ab::ap_left(s.equipped, level),
             ab::max_ap(level),
             ab::names(s.unlocked),
@@ -119,7 +127,7 @@ pub fn sync() -> Option<State> {
 
 /// The equipped abilities the KH1 frame passes on (`ab::ix` bits, the modifiers only with rows),
 /// or None at the Re:CoM setting or with no save block (the ini then stands, as before stage 9b).
-/// Each KH1 frame: one 15-byte read of the block; a block older than v2 is migrated by [`sync`]
+/// Each KH1 frame: one 15-byte read of the block; a block older than v3 is migrated by [`sync`]
 /// once.
 pub fn equipped_live() -> Option<u32> {
     if ALL.load(Ordering::Relaxed) {
@@ -133,7 +141,7 @@ pub fn equipped_live() -> Option<u32> {
     let save = save()?;
     // SAFETY: inside the 0x2AD4-byte save block.
     let block: [u8; ab::BLOCK_LEN] = unsafe { rd(save + ab::BLOCK_FIRST) };
-    let e = if ab::version(&block) < ab::BLOCK_V2 { sync()?.equipped } else { ab::read(&block).equipped };
+    let e = if ab::version(&block) < ab::BLOCK_NOW { sync()?.equipped } else { ab::read(&block).equipped };
     Some(usable(e))
 }
 

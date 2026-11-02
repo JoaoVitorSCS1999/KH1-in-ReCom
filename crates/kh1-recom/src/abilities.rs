@@ -6,17 +6,17 @@
 //!   Roll, Guard, Counterattack, Combo Plus / Air Combo Plus (copies), Combo Master, and the nine
 //!   combo modifiers (`0x1402A6EE0` / `0x1402A6C70` swap a modifier's row in when its bit in
 //!   `0x142D5EC10` is set; Re:CoM's attack action then plays, collides and ends the row).
-//! - **Unlocks (owner, M7–M9 choices and follow-ups):** with Re:CoM's level-up sleights (Re:CoM's
-//!   own learned state, `0x14023AB00(sleight)`), or at KH1's learn level on Re:CoM's level (KH1's
-//!   **Rod** list, btltbl `0x3BF8`: the mod's Dive path keeps the Rod, decision 18); Gravity Break
-//!   at Re:CoM level 30 (owner). Abilities KH1 gives by story (High Jump, Glide, Superglide, Dodge
-//!   Roll, Combo Master) are unlocked while their `kh1-recom.ini` key is on, until the owner picks
-//!   their Re:CoM source ([`Source::Story`]). Unlocks from Re:CoM and levels are never taken back.
+//! - **Unlocks (owner, M7–M9 choices and the 9b follow-ups):** with Re:CoM's level-up sleights
+//!   (Re:CoM's own learned state, `0x14023AB00(sleight)`), or at KH1's learn level on Re:CoM's level
+//!   (KH1's **Rod** list, btltbl `0x3BF8`: the mod's Dive path keeps the Rod, decision 18); Gravity
+//!   Break at Re:CoM level 30, Combo Master at 50 (owner); Guard and Dodge Roll from the start
+//!   (owner); High Jump, Glide and Superglide when Re:CoM gives Sora its own (Re:CoM's ability
+//!   variable, [`recom`]). Unlocks are never taken back.
 //! - **Equipping (stage 9b):** KH1's rule: a learned ability arrives **unequipped**
-//!   (`0x140284E10` writes `id | 0x80`); equipping one costs its AP (btltbl `0x33D8`), refused when
-//!   the AP left is short (`0x140310650`); shared abilities (High Jump, Glide, Superglide: KH1's
-//!   shared list `+0x599`) cost nothing and toggle freely. The ini's story abilities arrive
-//!   equipped, as the ini has them today.
+//!   (`0x140284E10` writes `id | 0x80`, story grants too: event syscall `0x1401B1110` calls it);
+//!   equipping one costs its AP (btltbl `0x33D8`), refused when the AP left is short
+//!   (`0x140310650`); shared abilities (High Jump, Glide, Superglide: KH1's shared list `+0x599`)
+//!   cost nothing and toggle freely. Dodge Roll alone arrives equipped (owner).
 //! - **AP:** Sora's max AP is KH1's record `+9` on Re:CoM's level ([`max_ap`]): 3 at a new game,
 //!   +2 at each level whose level-up bonus is kind 3.
 //! - **The state** is a block of Re:CoM's own save (Re:CoM saves, loads and zeroes it), after the
@@ -29,9 +29,37 @@ pub enum Source {
     Sleight(u16),
     /// Re:CoM's level reaches this level (KH1's Rod list btltbl `0x3BF8`, or the owner's level).
     Level(u32),
-    /// KH1 gives it by story (no level list holds it): unlocked while its ini key is on (bit `n` of
-    /// the story mask, [`story_mask`]), until the owner picks a Re:CoM source.
-    Story(u8),
+    /// From the start (owner): unlocked on a new or loaded save; `equip`: and equipped then.
+    Start { equip: bool },
+    /// Re:CoM gives Sora its own: any of these bits of Re:CoM's ability variable ([`recom`]).
+    Recom(u32),
+}
+
+/// Re:CoM's own movement abilities: the bits of its save int variable (set 0, id 0x24), read with
+/// Re:CoM's getter `0x1401B08C0(0, 0x24)`. Re:CoM's player setup `0x1401F0C50` copies them into the
+/// player's ability word `+0x41C`, which its movement code reads. Checked (decomp + exe):
+/// - bit 1 → `+0x41C & 0x200000`: its higher jump (jump init `0x1401F29F0`: row 0x14 and Sora's
+///   jump speed 32.5 instead of 28.0, `0x1407C5B60 + 0x20` / `+0x1C`): **High Jump**;
+/// - bit 2 → `0x400000` (Sora's story only): its glide (jump exe `0x1401EDA60` starts the glide
+///   `CPlayerSora::initGlide` `0x1402202C0` on a jump press after 900 units in the air when
+///   `+0x41C & 0xC00000`): **Glide**;
+/// - bit 4 → `0x800000` (Sora's story only): the faster glide (glide exe `0x140217B50`: speed 8.0
+///   instead of 5.0, `0x1407C5B48` / `0x1407C5B44`; row 0x1C instead of 0x1B), which also allows
+///   the glide on its own: **Superglide** (and Glide).
+///
+/// Where Re:CoM sets them: bit 4 by its reward pick `0x1401BD9D0` in world 13 (Castle Oblivion), the
+/// first time, unless byte variable (0, 0x61) is 3 (Checked (decomp)); every bit by the event
+/// script machine `0x140145C50`: command 0x2C ORs bits into an int variable of set 0, command
+/// 0x41 sets 0x24 to all bits (Checked (decomp)); the exe's only other writers are unreferenced
+/// debug functions (`0x1400D1A00`, `0x1400D1FC0`, `0x1400D20B0`). Which events: Assumption (KH
+/// wiki: High Jump after Monstro's Room of Beginnings, Glide on entering Neverland, Super Glide
+/// in Castle Oblivion's Room of Rewards; Re:CoM's scripts are not in the session).
+pub mod recom {
+    /// Re:CoM's ability variable: int variable set 0, id 0x24.
+    pub const VAR: (u32, u32) = (0, 0x24);
+    pub const HIGH_JUMP: u32 = 1;
+    pub const GLIDE: u32 = 2;
+    pub const SUPERGLIDE: u32 = 4;
 }
 
 /// One ability of the state.
@@ -94,21 +122,12 @@ pub mod sleight {
     pub const RAGNAROK: u16 = 11;
 }
 
-/// The story abilities' bits in the story mask ([`Source::Story`], [`story_mask`]).
-pub mod story {
-    pub const HIGH_JUMP: u8 = 0;
-    pub const GLIDE: u8 = 1;
-    pub const SUPERGLIDE: u8 = 2;
-    pub const DODGE_ROLL: u8 = 3;
-    pub const COMBO_MASTER: u8 = 4;
-}
-
 const fn a(name: &'static str, id: u8, kh1_bit: u32, ap: u8, key: u16, source: Source) -> Ability {
     Ability { name, kh1_id: Some(id), kh1_bit, ap, key, shared: false, source }
 }
 
-const fn shared(name: &'static str, id: u8, kh1_bit: u32, key: u16, s: u8) -> Ability {
-    Ability { name, kh1_id: Some(id), kh1_bit, ap: 0, key, shared: true, source: Source::Story(s) }
+const fn shared(name: &'static str, id: u8, kh1_bit: u32, key: u16, bits: u32) -> Ability {
+    Ability { name, kh1_id: Some(id), kh1_bit, ap: 0, key, shared: true, source: Source::Recom(bits) }
 }
 
 const fn special(name: &'static str, s: u16) -> Ability {
@@ -139,15 +158,18 @@ pub const ALL: [Ability; 25] = [
     special("Sonic Blade", sleight::SONIC_BLADE),
     special("Ars Arcanum", sleight::ARS_ARCANUM),
     special("Ragnarok", sleight::RAGNAROK),
-    // Stage 9b: the Rod list's Guard (33) and Counterattack (57).
-    a("Guard", 21, 0x10, 2, 101, Source::Level(33)),
+    // Guard from the start (owner, 2026-11-01; KH1's Rod list has it at 33); Counterattack at the
+    // Rod list's 57.
+    a("Guard", 21, 0x10, 2, 101, Source::Start { equip: false }),
     a("Counterattack", 19, 0x4, 2, 102, Source::Level(57)),
-    // KH1 gives these by story (no level list holds them): the ini's keys stand in.
-    a("Dodge Roll", 22, 0x20, 1, 100, Source::Story(story::DODGE_ROLL)),
-    shared("High Jump", 1, 0x200, 1, story::HIGH_JUMP),
-    shared("Glide", 3, 0x80, 3, story::GLIDE),
-    shared("Superglide", 4, 0x100, 4, story::SUPERGLIDE),
-    a("Combo Master", 0x41, 0, 0, 0, Source::Story(story::COMBO_MASTER)),
+    // KH1 gives these by story (no level list holds them). Dodge Roll: equipped from the start
+    // (owner); High Jump, Glide, Superglide: where Re:CoM gives Sora its own (owner); Combo
+    // Master: Re:CoM level 50 (owner).
+    a("Dodge Roll", 22, 0x20, 1, 100, Source::Start { equip: true }),
+    shared("High Jump", 1, 0x200, 1, recom::HIGH_JUMP),
+    shared("Glide", 3, 0x80, 3, recom::GLIDE | recom::SUPERGLIDE),
+    shared("Superglide", 4, 0x100, 4, recom::SUPERGLIDE),
+    a("Combo Master", 0x41, 0, 0, 0, Source::Level(50)),
     // The Rod list's Combo Plus (87, 93, 99) and Air Combo Plus (24, 45).
     a("Combo Plus", 6, 0, 1, 201, Source::Level(87)),
     a("Combo Plus", 6, 0, 1, 201, Source::Level(93)),
@@ -228,7 +250,8 @@ pub const BLOCK_LAST: usize = BLOCK_FIRST + BLOCK_LEN - 1;
 /// Offsets inside the block. Fields never move.
 pub mod field {
     /// 0 = never written (an older save, or a new game); 1 = stage 9a (unlocked = equipped);
-    /// 2 = stage 9b (KH1's equip rules).
+    /// 2 = stage 9b (KH1's equip rules; the story abilities from the ini); 3 = the 9b follow-ups
+    /// (their sources from Re:CoM, the start and levels). Same fields in all.
     pub const VERSION: usize = 0;
     /// u32 LE: unlocked abilities, bit [`super::ix`].
     pub const UNLOCKED: usize = 1;
@@ -241,6 +264,9 @@ pub mod field {
 
 pub const BLOCK_V1: u8 = 1;
 pub const BLOCK_V2: u8 = 2;
+pub const BLOCK_V3: u8 = 3;
+/// The layout this build writes.
+pub const BLOCK_NOW: u8 = BLOCK_V3;
 
 const _: () = assert!(BLOCK_LAST <= crate::keyblades::SPARE_LAST && field::RESERVED + 6 == BLOCK_LEN);
 
@@ -269,81 +295,75 @@ pub fn version(block: &[u8; BLOCK_LEN]) -> u8 {
     block[field::VERSION]
 }
 
-/// Writes the state as layout v2; the reserved bytes are kept.
+/// Writes the state as layout [`BLOCK_NOW`]; the reserved bytes are kept.
 pub fn write(s: &State, block: &mut [u8; BLOCK_LEN]) {
-    block[field::VERSION] = block[field::VERSION].max(BLOCK_V2);
+    block[field::VERSION] = block[field::VERSION].max(BLOCK_NOW);
     block[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&s.unlocked.to_le_bytes());
     block[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&s.equipped.to_le_bytes());
 }
 
 // ---- unlocks ----
 
-/// The ini's story abilities (`settings::Kh1Abilities`) as the story mask: bit [`story`].
-pub fn story_mask(a: &crate::settings::Kh1Abilities) -> u8 {
-    (a.high_jump as u8) << story::HIGH_JUMP | (a.glide as u8) << story::GLIDE | (a.superglide as u8) << story::SUPERGLIDE | (a.dodge_roll as u8) << story::DODGE_ROLL | (a.combo_master as u8) << story::COMBO_MASTER
-}
-
 /// Whether an ability's source is met: Re:CoM's sleight learned (`learned`, Re:CoM's own
-/// `0x14023AB00`), Re:CoM's level, or the ini's story key.
-pub fn source_met(a: &Ability, level: u32, story_on: u8, learned: &mut dyn FnMut(u16) -> bool) -> bool {
+/// `0x14023AB00`), Re:CoM's level, the start, or Re:CoM's ability variable (`recom_var`, [`recom`]).
+pub fn source_met(a: &Ability, level: u32, recom_var: u32, learned: &mut dyn FnMut(u16) -> bool) -> bool {
     match a.source {
         Source::Sleight(id) => learned(id),
         Source::Level(l) => l <= level,
-        Source::Story(b) => story_on & (1 << b) != 0,
+        Source::Start { .. } => true,
+        Source::Recom(bits) => recom_var & bits != 0,
     }
 }
 
-/// The story abilities' bits.
-pub fn story_bits() -> u32 {
-    ALL.iter().enumerate().filter(|(_, a)| matches!(a.source, Source::Story(_))).fold(0, |b, (i, _)| b | 1 << i)
+/// The abilities that arrive equipped (Dodge Roll, owner: "equipped from the start").
+pub fn start_equipped_bits() -> u32 {
+    ALL.iter().enumerate().filter(|(_, a)| a.source == Source::Start { equip: true }).fold(0, |b, (i, _)| b | 1 << i)
 }
+
+/// The abilities a layout-v2 block had from the ini's story keys (High Jump, Glide, Superglide,
+/// Combo Master; Dodge Roll's unlock stays): v2 → v3 takes them back and asks their new source.
+pub const V2_STORY_BITS: u32 = 1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE | 1 << ix::COMBO_MASTER;
 
 /// What a sync changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Synced {
-    /// Newly unlocked (from Re:CoM's sleights and level: unequipped, KH1's rule).
+    /// Newly unlocked and left unequipped (KH1's rule).
     pub new: u32,
-    /// Story abilities the ini switched on (arrive equipped, as the ini has them) or off.
-    pub story_on: u32,
-    pub story_off: u32,
+    /// Newly unlocked and equipped (Dodge Roll, owner).
+    pub new_equipped: u32,
+    /// Taken back (only at the v2 → v3 migration: the ini's story abilities whose new source isn't
+    /// met yet).
+    pub taken: u32,
     /// Taken off to fit the AP (only at a migration).
     pub fitted: u32,
 }
 
-/// Brings the state up to Re:CoM's sleights, its level and the ini's story keys:
-/// - abilities from Re:CoM's sleights and levels unlock **unequipped** (KH1's `0x140284E10`) and
-///   are never taken back (only those not yet unlocked are asked about);
-/// - story abilities follow the ini both ways; one switched on arrives equipped (today's ini
-///   behaviour) when the AP allows.
-pub fn sync(s: &mut State, level: u32, story_on: u8, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
+/// Brings the state up to Re:CoM's sleights, its level and its ability variable: every ability
+/// not yet unlocked whose source is met is unlocked **unequipped** (KH1's `0x140284E10`), but
+/// Dodge Roll arrives equipped when the AP allows (owner). Never taken back; only abilities not
+/// yet unlocked are asked about.
+pub fn sync(s: &mut State, level: u32, recom_var: u32, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
     let mut out = Synced::default();
-    let sb = story_bits();
+    let eq = start_equipped_bits();
     for (i, a) in ALL.iter().enumerate() {
         let bit = 1 << i;
-        if sb & bit != 0 {
-            let on = source_met(a, level, story_on, learned);
-            if on && s.unlocked & bit == 0 {
-                s.unlocked |= bit;
-                out.story_on |= bit;
-                if can_equip(s.equipped, i, level) {
-                    s.equipped |= bit;
-                }
-            } else if !on && s.unlocked & bit != 0 {
-                s.unlocked &= !bit;
-                s.equipped &= !bit;
-                out.story_off |= bit;
-            }
-        } else if s.unlocked & bit == 0 && source_met(a, level, story_on, learned) {
-            s.unlocked |= bit;
+        if s.unlocked & bit != 0 || !source_met(a, level, recom_var, learned) {
+            continue;
+        }
+        s.unlocked |= bit;
+        if eq & bit != 0 && can_equip(s.equipped, i, level) {
+            s.equipped |= bit;
+            out.new_equipped |= bit;
+        } else {
             out.new |= bit;
         }
     }
     out
 }
 
-/// The ini's movement abilities at the migration (stage 9a's block or none → 9b): which of the
-/// abilities that now come from KH1's levels the ini had equipped (Guard, Counterattack, the first
-/// `combo_plus` / `air_combo_plus` copies).
+/// The ini's movement abilities at the migration (stage 9a's block or none → now): which of the
+/// abilities that now come from the start or KH1's levels the ini had equipped (Guard,
+/// Counterattack, the first `combo_plus` / `air_combo_plus` copies).
 pub fn ini_equipped(a: &crate::settings::Kh1Abilities) -> u32 {
     let mut b = 0;
     if a.guard {
@@ -365,16 +385,33 @@ pub fn ini_equipped(a: &crate::settings::Kh1Abilities) -> u32 {
     b
 }
 
-/// The migration of a block older than v2 (`version` 0 or 1) at its first sync: the sync's
-/// unlocks, then everything that was equipped before stays equipped where it is still unlocked:
-/// stage 9a's equipped set (v1; 9a equipped every unlock) and the ini's movement abilities
-/// ([`ini_equipped`]); then KH1's AP rule: over the max AP, unequipped from the most expensive
-/// down ([`fit_ap`]).
-pub fn migrate(s: &mut State, level: u32, story_on: u8, ini: u32, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
+/// The migration of a block older than [`BLOCK_NOW`] (`from` = its version 0, 1 or 2) at its first
+/// sync:
+/// - v2 (9b): the ini's story abilities ([`V2_STORY_BITS`]) are taken back, to be asked again from
+///   their new source; Dodge Roll keeps its state;
+/// - the sync's unlocks (a newly unlocked Dodge Roll wanted equipped);
+/// - everything equipped before stays equipped where it is still unlocked: the block's own set
+///   (v1: 9a equipped every unlock) and, from v0 / v1, the ini's movement abilities
+///   ([`ini_equipped`]; the ini is read once per save);
+/// - then KH1's AP rule: over the max AP, unequipped from the most expensive down ([`fit_ap`]).
+pub fn migrate(s: &mut State, from: u8, level: u32, recom_var: u32, ini: u32, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
     let before = s.equipped;
-    let mut out = sync(s, level, story_on, learned);
-    s.equipped |= (before | ini) & s.unlocked;
+    let mut taken = 0;
+    if from == BLOCK_V2 {
+        taken = s.unlocked & V2_STORY_BITS;
+        s.unlocked &= !V2_STORY_BITS;
+        s.equipped &= s.unlocked;
+    }
+    let mut out = sync(s, level, recom_var, learned);
+    out.taken = taken & !s.unlocked;
+    let ini = if from < BLOCK_V2 { ini } else { 0 };
+    let wanted = (out.new | out.new_equipped) & start_equipped_bits();
+    s.equipped |= (before | ini | wanted) & s.unlocked;
     out.fitted = fit_ap(&mut s.equipped, level);
+    // Report what really arrived equipped after the fit.
+    let fresh = out.new | out.new_equipped;
+    out.new_equipped = fresh & wanted & s.equipped;
+    out.new = fresh & !out.new_equipped;
     out
 }
 
@@ -447,6 +484,11 @@ pub mod page {
     }
 
     pub const OWNERS: [Owner; 2] = [Owner::Sora, Owner::Shared];
+
+    /// Every row of the page (owners and abilities) is Re:CoM's blue magic row: list entry 0x133
+    /// through its row set-up `0x140112F10` (owner, 2026-11-01: "the Abilities page rows use
+    /// Re:CoM's blue box"), as the Items page's item rows take 0x131.
+    pub const ROW_LOOK: i32 = crate::keyblades::row_look::BLUE;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Label {
@@ -628,7 +670,7 @@ mod tests {
         assert_eq!(read(&b), State::default(), "a block never written: nothing unlocked");
         let s = State { unlocked: 0b1_0101, equipped: 0b101 };
         write(&s, &mut b);
-        assert_eq!(b[field::VERSION], BLOCK_V2);
+        assert_eq!(b[field::VERSION], BLOCK_V3);
         assert_eq!(read(&b), s);
         // Equipped is only ever a subset of unlocked; unknown bits are dropped.
         b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&u32::MAX.to_le_bytes());
@@ -680,16 +722,18 @@ mod tests {
         }
         // Combo Master (0x41) has no row.
         assert!(b[0x33D8 + 12 * 64..0x33D8 + 12 * 65].iter().all(|&x| x == 0));
-        // The Rod list's levels for every Level source but Gravity Break (the owner's 30).
+        // The Rod list's levels for every Level source but the owner's (Gravity Break 30, Combo
+        // Master 50).
         let rod = |id: u8| -> Vec<u32> { (0..99).filter(|&i| b[0x3BF8 + i] == 0x80 | id).map(|i| i as u32 + 2).collect() };
         for (i, a) in ALL.iter().enumerate() {
             if let (Source::Level(l), Some(id)) = (a.source, a.kh1_id) {
-                if i != ix::GRAVITY_BREAK {
+                if i != ix::GRAVITY_BREAK && i != ix::COMBO_MASTER {
                     assert!(rod(id).contains(&l), "{} at {l}: {:?}", a.name, rod(id));
                 }
             }
         }
         assert_eq!(rod(6), vec![87, 93, 99]);
+        assert_eq!(rod(21), vec![33], "KH1's Guard level (the owner moved it to the start)");
         assert_eq!(rod(7), vec![24, 45]);
         for id in [1, 3, 4, 22, 58, 59] {
             assert!(rod(id).is_empty(), "id {id}");
@@ -717,63 +761,85 @@ mod tests {
     }
 
     #[test]
-    fn learn_levels_are_kh1s_rod_list_and_gravity_break_at_30() {
+    fn learn_levels_are_kh1s_rod_list_and_the_owners() {
         let lv = |i: usize| match ALL[i].source {
             Source::Level(l) => l,
             _ => 0,
         };
         assert_eq!([lv(ix::RIPPLE_DRIVE), lv(ix::HURRICANE_BLAST), lv(ix::AERIAL_SWEEP), lv(ix::VORTEX)], [12, 18, 36, 84]);
         assert_eq!(lv(ix::GRAVITY_BREAK), 30, "owner, 2026-11-01");
-        assert_eq!([lv(ix::GUARD), lv(ix::COUNTERATTACK)], [33, 57]);
+        assert_eq!(lv(ix::COMBO_MASTER), 50, "owner, 2026-11-01");
+        assert_eq!(lv(ix::COUNTERATTACK), 57, "KH1's Rod list");
+        assert_eq!(ALL[ix::GUARD].source, Source::Start { equip: false }, "owner: Guard from the start");
+        assert_eq!(ALL[ix::DODGE_ROLL].source, Source::Start { equip: true }, "owner: Dodge Roll equipped from the start");
+        assert_eq!(start_equipped_bits(), 1 << ix::DODGE_ROLL);
         assert_eq!(ix::COMBO_PLUS.map(lv), [87, 93, 99]);
         assert_eq!(ix::AIR_COMBO_PLUS.map(lv), [24, 45]);
+        // Re:CoM's own movement abilities (its variable (0, 0x24)).
+        assert_eq!(ALL[ix::HIGH_JUMP].source, Source::Recom(1));
+        assert_eq!(ALL[ix::GLIDE].source, Source::Recom(2 | 4), "Re:CoM glides with either bit");
+        assert_eq!(ALL[ix::SUPERGLIDE].source, Source::Recom(4));
     }
 
-    const NO_STORY: u8 = 0;
+    const NO_RECOM: u32 = 0;
+    const START: u32 = 1 << ix::GUARD | 1 << ix::DODGE_ROLL;
 
     #[test]
     fn new_unlocks_arrive_unequipped() {
         let mut s = State::default();
-        assert_eq!(sync(&mut s, 1, NO_STORY, &mut |_| false), Synced::default());
+        // A new game: Guard (unequipped) and Dodge Roll (equipped) from the start.
+        let r = sync(&mut s, 1, NO_RECOM, &mut |_| false);
+        assert_eq!((names(r.new), names(r.new_equipped)), (vec!["Guard"], vec!["Dodge Roll"]));
+        assert_eq!(s, State { unlocked: START, equipped: 1 << ix::DODGE_ROLL });
+        assert_eq!(sync(&mut s, 1, NO_RECOM, &mut |_| false), Synced::default());
         // Re:CoM's Lv2 sleight and level 12: Sliding Dash, Ripple Drive, unequipped (KH1).
-        let r = sync(&mut s, 12, NO_STORY, &mut |id| id == sleight::SLIDING_DASH);
+        let r = sync(&mut s, 12, NO_RECOM, &mut |id| id == sleight::SLIDING_DASH);
         assert_eq!(names(r.new), vec!["Sliding Dash", "Ripple Drive"]);
-        assert_eq!(s.equipped, 0);
+        assert_eq!(s.equipped, 1 << ix::DODGE_ROLL);
         // Only abilities not yet unlocked are asked about; never taken back.
         let mut asked = Vec::new();
-        sync(&mut s, 12, NO_STORY, &mut |id| {
+        sync(&mut s, 12, NO_RECOM, &mut |id| {
             asked.push(id);
             false
         });
         assert!(!asked.contains(&sleight::SLIDING_DASH));
-        sync(&mut s, 1, NO_STORY, &mut |_| false);
-        assert_eq!(names(s.unlocked), vec!["Sliding Dash", "Ripple Drive"]);
+        sync(&mut s, 1, NO_RECOM, &mut |_| false);
+        assert_eq!(names(s.unlocked & !START), vec!["Sliding Dash", "Ripple Drive"]);
         // Level 30: Gravity Break (owner), Hurricane Blast 18, Air Combo Plus 24.
-        let r = sync(&mut s, 30, NO_STORY, &mut |_| false);
+        let r = sync(&mut s, 30, NO_RECOM, &mut |_| false);
         assert_eq!(names(r.new), vec!["Hurricane Blast", "Gravity Break", "Air Combo Plus"]);
-        // Level 99: everything but the story ones (and the specials' sleights).
-        sync(&mut s, 99, NO_STORY, &mut |_| true);
-        assert_eq!(s.unlocked, ALL_BITS & !story_bits());
-        assert_eq!(s.equipped, 0);
+        // Level 50: Combo Master (owner), unequipped.
+        let r = sync(&mut s, 50, NO_RECOM, &mut |_| false);
+        assert_eq!(names(r.new), vec!["Aerial Sweep", "Combo Master", "Air Combo Plus"]);
+        // Level 99 and every sleight: everything but Re:CoM's movement abilities.
+        sync(&mut s, 99, NO_RECOM, &mut |_| true);
+        assert_eq!(s.unlocked, ALL_BITS & !(1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE));
+        assert_eq!(s.equipped, 1 << ix::DODGE_ROLL);
     }
 
     #[test]
-    fn story_abilities_follow_the_ini() {
-        let ini = crate::settings::Kh1Abilities::default(); // Dodge Roll on (and Guard, Counterattack: Rod levels now)
-        let on = story_mask(&ini);
+    fn movement_abilities_follow_recoms_variable() {
         let mut s = State::default();
-        let r = sync(&mut s, 1, on, &mut |_| false);
-        assert_eq!(names(r.story_on), vec!["Dodge Roll"]);
-        assert_eq!(names(s.equipped), vec!["Dodge Roll"], "as the ini has it today");
-        // Switched off in the ini: gone.
-        let r = sync(&mut s, 1, 0, &mut |_| false);
-        assert_eq!(names(r.story_off), vec!["Dodge Roll"]);
-        assert_eq!(s, State::default());
-        // All on: shared ones cost nothing.
-        let all = crate::settings::Kh1Abilities { high_jump: true, glide: true, superglide: true, dodge_roll: true, guard: true, counterattack: true, combo_plus: 9, air_combo_plus: 9, combo_master: true };
-        sync(&mut s, 1, story_mask(&all), &mut |_| false);
-        assert_eq!(names(s.equipped), vec!["Dodge Roll", "High Jump", "Glide", "Superglide", "Combo Master"]);
-        assert_eq!(used_ap(s.equipped), 1);
+        sync(&mut s, 1, NO_RECOM, &mut |_| false);
+        // Re:CoM's High Jump (bit 1): unlocked, unequipped (KH1's rule; shared: free to equip).
+        let r = sync(&mut s, 1, recom::HIGH_JUMP, &mut |_| false);
+        assert_eq!(names(r.new), vec!["High Jump"]);
+        assert_eq!(s.equipped & 1 << ix::HIGH_JUMP, 0);
+        // Its Glide (bit 2), then the faster glide (bit 4): Superglide.
+        let r = sync(&mut s, 1, recom::HIGH_JUMP | recom::GLIDE, &mut |_| false);
+        assert_eq!(names(r.new), vec!["Glide"]);
+        let r = sync(&mut s, 1, 7, &mut |_| false);
+        assert_eq!(names(r.new), vec!["Superglide"]);
+        // Bit 4 alone gives Re:CoM's glide too: Glide and Superglide.
+        let mut t = State::default();
+        let r = sync(&mut t, 1, recom::SUPERGLIDE, &mut |_| false);
+        assert_eq!(names(r.new), vec!["Guard", "Glide", "Superglide"]);
+        // Never taken back, whatever the variable says later; other bits mean nothing.
+        sync(&mut s, 1, 0xFFFF_FFF8, &mut |_| false);
+        assert_eq!(s.unlocked & (1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE), 1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE);
+        let mut u = State::default();
+        sync(&mut u, 1, 0xFFFF_FFF8, &mut |_| false);
+        assert_eq!(u.unlocked, START);
     }
 
     #[test]
@@ -784,26 +850,57 @@ mod tests {
         let nine_a = [ix::SLIDING_DASH, ix::BLITZ, ix::STUN_IMPACT, ix::ZANTETSUKEN, ix::HURRICANE_BLAST, ix::RIPPLE_DRIVE, ix::AERIAL_SWEEP].iter().fold(0, |b, &i| b | 1 << i);
         s.unlocked = nine_a;
         s.equipped = nine_a;
-        let ini = crate::settings::Kh1Abilities::default(); // dodge roll, guard, counterattack on
-        let r = migrate(&mut s, 34, story_mask(&ini), ini_equipped(&ini), &mut |id| id <= sleight::ZANTETSUKEN);
+        let ini = crate::settings::Kh1Abilities::default(); // guard, counterattack on
+        let r = migrate(&mut s, BLOCK_V1, 34, NO_RECOM, ini_equipped(&ini), &mut |id| id <= sleight::ZANTETSUKEN);
         // Level 34: 15 AP. Wanted: 14 (9a) + Guard 2 + Dodge Roll 1 = 17: the most expensive go
         // first: Ripple Drive (3).
         assert_eq!(max_ap(34), 15);
         assert_eq!(names(r.fitted), vec!["Ripple Drive"]);
         assert!(used_ap(s.equipped) <= 15);
-        assert!(s.equipped & 1 << ix::GUARD != 0, "the ini's Guard stays (Rod 33 reached)");
+        assert!(s.equipped & 1 << ix::GUARD != 0, "the ini's Guard stays (from the start now)");
+        assert!(s.equipped & 1 << ix::DODGE_ROLL != 0, "Dodge Roll arrives equipped");
+        assert_eq!(names(r.new_equipped), vec!["Dodge Roll"]);
         assert!(s.equipped & 1 << ix::COUNTERATTACK == 0, "Counterattack not unlocked before 57");
         assert!(s.equipped & 1 << ix::GRAVITY_BREAK == 0, "a new unlock: unequipped");
-        // A new game (block never written): only the ini's story abilities.
+        // A new game (block never written) with the default ini: Dodge Roll and the ini's Guard,
+        // 3 AP of 3.
         let mut n = State::default();
-        migrate(&mut n, 1, story_mask(&ini), ini_equipped(&ini), &mut |_| false);
-        assert_eq!(names(n.equipped), vec!["Dodge Roll"]);
+        migrate(&mut n, 0, 1, NO_RECOM, ini_equipped(&ini), &mut |_| false);
+        assert_eq!((names(n.equipped), used_ap(n.equipped)), (vec!["Guard", "Dodge Roll"], 3));
+        // With the ini's guard off: Guard unlocked, unequipped (KH1's rule).
+        let off = crate::settings::Kh1Abilities { guard: false, ..ini };
+        let mut o = State::default();
+        migrate(&mut o, 0, 1, NO_RECOM, ini_equipped(&off), &mut |_| false);
+        assert_eq!((o.unlocked, names(o.equipped)), (START, vec!["Dodge Roll"]));
         // The ini's combo_plus copies at a level that has them.
         let cp = crate::settings::Kh1Abilities { combo_plus: 2, air_combo_plus: 1, ..ini };
         let mut m = State::default();
-        migrate(&mut m, 99, story_mask(&cp), ini_equipped(&cp), &mut |_| false);
+        migrate(&mut m, 0, 99, NO_RECOM, ini_equipped(&cp), &mut |_| false);
         let c = to_core(m.equipped);
         assert_eq!((c.combo_plus, c.air_combo_plus, c.guard, c.counterattack, c.dodge_roll), (2, 1, true, true, true));
+    }
+
+    #[test]
+    fn v2_story_abilities_move_to_their_new_sources() {
+        // A 9b save at level 40 whose ini had High Jump, Glide, Superglide, Combo Master on (all
+        // equipped) and Dodge Roll removed in the camp; Re:CoM has given only its High Jump.
+        let had = 1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE | 1 << ix::COMBO_MASTER | 1 << ix::GUARD;
+        let mut s = State { unlocked: had | 1 << ix::DODGE_ROLL, equipped: had };
+        let r = migrate(&mut s, BLOCK_V2, 40, recom::HIGH_JUMP, u32::MAX, &mut |_| false);
+        assert_eq!(names(r.taken), vec!["Glide", "Superglide", "Combo Master"]);
+        assert!(s.equipped & 1 << ix::HIGH_JUMP != 0, "Re:CoM has it: stays equipped");
+        assert_eq!(s.unlocked & V2_STORY_BITS, 1 << ix::HIGH_JUMP);
+        assert_eq!(s.equipped & 1 << ix::DODGE_ROLL, 0, "the player's removal stands");
+        assert_eq!(s.equipped & 1 << ix::COUNTERATTACK, 0, "the ini is read only from v0 / v1");
+        // Level 50 and Re:CoM's Glide later: back, unequipped (a later sync, not a migration).
+        let r = sync(&mut s, 50, recom::HIGH_JUMP | recom::GLIDE, &mut |_| false);
+        assert!(r.new & (1 << ix::GLIDE | 1 << ix::COMBO_MASTER) == 1 << ix::GLIDE | 1 << ix::COMBO_MASTER);
+        // At the migration itself, a source already met keeps the old equipped state.
+        let mut t = State { unlocked: had, equipped: had };
+        let r = migrate(&mut t, BLOCK_V2, 50, 7, 0, &mut |_| false);
+        assert_eq!(r.taken, 0);
+        assert_eq!(t.equipped & V2_STORY_BITS, V2_STORY_BITS);
+        assert_eq!(names(r.new_equipped), vec!["Dodge Roll"], "never unlocked before: equipped now");
     }
 
     #[test]
@@ -865,6 +962,15 @@ mod tests {
         let mut sc = Screen::default();
         assert_eq!(sc.confirm(&mut e, 1), Outcome::Empty);
         assert!(sc.rows(&e, 1)[0].grey);
+    }
+
+    /// The page's rows take Re:CoM's list entry 0x133 (the blue magic row): `seqs[ROW_LOOK]` of
+    /// the checked sequence table `0x1407C11F0`.
+    #[test]
+    fn rows_are_recoms_blue_magic_row() {
+        let seqs = crate::sites::KEYBLADE_DATA.iter().find(|s| s.rva == 0x007C_11F0).unwrap().expect;
+        let at = 2 * page::ROW_LOOK as usize;
+        assert_eq!(u16::from_le_bytes([seqs[at], seqs[at + 1]]), 0x133);
     }
 
     #[test]

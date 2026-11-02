@@ -350,6 +350,10 @@ At KH1 setting:
     - **M9 follow-ups (owner, 2026-11-01):** Gravity Break (no KH1 learn level) unlocks at **Re:CoM
       level 30**; the learn list is **KH1's Rod list**; with the equip screen, a newly unlocked ability
       arrives **unequipped**, as in KH1.
+    - **9b follow-ups (owner, 2026-11-01):** **Guard from the start** (still costing AP); High Jump,
+      Glide and Superglide unlock **where Re:CoM unlocks them**; **Dodge Roll equipped from the start**;
+      **Combo Master at Re:CoM level 50**; KH1's Rod-path **max MP +1 at levels 30 and 66** added; the
+      Abilities page rows use Re:CoM's **blue** box.
     - **Spell effects (owner, 2026-11-01):** "lets look at how KH1 handles these FX and bring them in
       here 1:1": KH1's own spell effects (same effect engine as Re:CoM's) are ported natively, behind
       **their own toggle** (KH1 or Re:CoM spell effects); **Re:CoM's spell sounds are kept**; built

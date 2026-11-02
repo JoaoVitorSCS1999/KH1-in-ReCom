@@ -374,3 +374,24 @@ accessories as well we will have slots for them there but dont worry about that 
 - `camp.lad` (`FO0100.SPR`, Checked (files)): sequence 0x12E red plate (vertex colour 0x8000003C)
   + icon sprite 167; 0x133 blue plate (0x803C1E00) + icon 168; **0x131 green plate (0x80143200) +
   icon 278 tinted green (0x801EDC1E)**; 0x132 grey + icon 279; 0x12F / 0x160 / 0x130 Riku's.
+
+## Blue magic rows: Customize and Abilities (owner, 2026-11-01)
+
+> "in the customize menu, make these slots be blue with the magic symbol"; "the Abilities page
+> rows use Re:CoM's blue box" (9b follow-ups).
+
+- **Built** (`Page::row_look`, same mechanism as the green item rows above): variant 1 of the
+  list's checked sequence table `0x1407C11F0` = **sequence 0x133**, the blue plate (0x803C1E00) +
+  icon sprite 168 (the look of Re:CoM's magic sleight rows), through Re:CoM's own `CButton` set-up
+  `0x140112F10`:
+  - **Customize**: the three shortcut slot rows (Triangle / Square / Cross-or-Circle; the button
+    glyphs stay the row text) and, in the spell picker (the same list), every **spell** row
+    (spells are magic). The picker's last row, "None", is no spell and keeps the red row
+    (`customize::row_look`).
+  - **Abilities**: every row (the owner rows "Sora" / "Shared" and every ability;
+    `abilities::page::ROW_LOOK`).
+  - Items (green), the Keyblade list and the Keyblade slot (red) unchanged.
+- Checked (tests): `customize::tests::slots_and_spells_are_recoms_blue_magic_row`,
+  `abilities::tests::rows_are_recoms_blue_magic_row` (both read 0x133 from the checked table's
+  bytes). No new site. Assumption: sprite 168 is Re:CoM's magic icon (`FO0100.RTM` not in the
+  session; it is what Re:CoM's magic sleight rows draw). Not seen in game.

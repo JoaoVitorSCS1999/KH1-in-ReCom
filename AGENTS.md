@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 95: M9 9b follow-ups: Guard and Dodge Roll from the start, Re:CoM's High Jump / Glide / Superglide, Combo Master 50, Rod max MP, blue rows, version 0.53.0 (2026-11-01)
+
+- Asks (owner, 2026-11-01): Guard from the start; High Jump, Glide, Superglide where Re:CoM unlocks them;
+  Dodge Roll equipped from the start; Combo Master at level 50; Rod max MP +1 at 30 / 66; Abilities rows
+  blue; "in the customize menu, make these slots be blue with the magic symbol".
+- Re:CoM (Checked (decomp + exe)): int variable (0, 0x24) bits 1 / 2 / 4 = High Jump / Glide / Superglide
+  (copied by `0x1401F0C50` into `player+0x41C`; set by the event script `0x140145C50` cmds 0x2C / 0x41 and
+  bit 4 by the reward pick `0x1401BD9D0` in Castle Oblivion). Which events: Assumption (KH wiki: Monstro,
+  Neverland, Room of Rewards).
+- Built: unlocks as asked (read at Attack presses and the Abilities page, not per frame); save layout v3
+  (ini-given High Jump / Glide / Superglide / Combo Master return when their source is met); the five ini
+  keys are now only a no-save fallback. Max MP +1 at Re:CoM levels 30 and 66 (Checked: btltbl Rod list,
+  bonus kind 2). Abilities rows, Customize slot rows and picker spell rows: Re:CoM list entry 0x133 (blue,
+  magic icon) via `0x140112F10`.
+- Checked: 532 tests, Windows build, all site bytes. Not checked: in game.
+
+---
+
 ## Stage 94: M9 stage 9b: KH1's ability equip screen with AP; green item rows, version 0.52.0 (2026-11-01)
 
 - Asks (owner, 2026-11-01): equip screen with KH1's AP; new unlocks unequipped; Gravity Break at Re:CoM level

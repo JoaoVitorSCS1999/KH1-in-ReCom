@@ -31,7 +31,7 @@ KH1 actor stats: `+0x44` MP (whole points), `+0x48` max MP, `+0xBE` charge (u16)
 | `+0x2C` per row: swings 3 (`0x4B78`, `0x4BE8`, `0x4CC8`, `0x50B8`, `0x5128`), finishers 6 (`0x4C58`, `0x4D38`, `0x5048`), Counterattack 24 (`0x4E18`), Guard 0 (`0x4DA8`). kh1-core's `Moveset::kh1_defaults` has the same numbers. | btltbl | Checked (files) |
 | Charge from damage taken: HP lost × ((`+0x184` >> 1) & 7), an ability count (ability 0x18, set by `0x1402A6380`). The hit bonus bit 0 is ability 0x17. **Both need abilities: M9.** Names (MP Rage / MP Haste): Assumption. | `0x14029BBD0`, `0x1402A6380` | Checked (decomp) |
 | **Max MP:** stats build = record `+4` + the weapon's `+0x38` + accessories; MP = min(record MP, max); charge = min(record charge, max × 30). KH1 has no Magic stat: weapon `+0x38` is the MP bonus. | `0x1402A5130` | Checked (decomp) |
-| **Level-up:** `0x1402B51B0` applies Sora's table btltbl `0x3AC0` (`0x140528CC0[0]`), byte [L − 2] for reaching L, through `0x1402B5660`; kind 2 = record max MP + 1 and, live, stats max + 1 then add points (+1). Kind 2 only at levels 12, 24, 36, 48, 60. No MP refill at level-up (`0x14029BA50` after it is the revive helper). Start: 3 (new-game record btltbl `0x39D8`; the owner's Dive path keeps it). | | Checked (decomp + files) |
+| **Level-up:** `0x1402B51B0` applies Sora's table btltbl `0x3AC0` (`0x140528CC0[0]`), byte [L − 2] for reaching L, through `0x1402B5660`; kind 2 = record max MP + 1 and, live, stats max + 1 then add points (+1). Kind 2 only at levels 12, 24, 36, 48, 60 in that list. The same level-up also reads the Dive's ability list (`*(0x140528D10 + 4 × save[0x48C])`) and passes its non-ability entries to the same `0x1402B5660`: the **Rod** list (btltbl `0x3BF8`) has kind 2 at **30 and 66** (Sword `0x3B28`: 30; Shield `0x3B90`: 66). No MP refill at level-up (`0x14029BA50` after it is the revive helper). Start: 3 (new-game record btltbl `0x39D8`; the owner's Dive path keeps it). | | Checked (decomp + files) |
 | **Refills:** full restore (MP < max → max, charge 0; at full nothing changes) `0x1402A56F0`, from event syscall `0x1401B12D0` and the party swap `0x1403A1540`. A save point (object `0x1402ACE20`, handler `0x1402AD0B0`, opens the save menu on Triangle) gives, while Sora stands in it in a ground state (`+0x70` 0 or 0x18), HP + 2 every frame and, when MP < max, MP + 1 with the charge emptied every third frame (the update steps a counter 0 → 1 → 2 → 0, `0x1402AD081..0x1402AD0A2`; the MP part runs at 0, `0x1402AD208`): 20 MP a second at 60 fps. It loops over the three party slots. Built 0.41.0: the MP part on Re:CoM's save point (`win::mp::save_point`, below). `0x1403A0BF0` empties every member's MP and charge (an event). That the `0x1402ACE20` object is the save point: Assumption (its handler opens the save / world-map menu `0x140196CD0`). | | Checked (decomp) |
 | No KH2-style MP Charge. | | Checked (decomp: no other writer), `m7-menus-mp.md` |
 
@@ -39,7 +39,7 @@ KH1 actor stats: `+0x44` MP (whole points), `+0x48` max MP, `+0xBE` charge (u16)
 
 - **Store:** a block of Re:CoM's own save (below). Re:CoM saves, checksums, loads, snapshots and
   zeroes it at new game with the rest of its 0x2AD4-byte save block (`recom-keyblade-equip.md`).
-- **Max MP** = 3 + one per level 12 / 24 / 36 / 48 / 60 reached by **Sora's Re:CoM level** (the
+- **Max MP** = 3 + one per level 12 / 24 / **30** / 36 / 48 / 60 / **66** reached by **Sora's Re:CoM level** (the
   menu's, `*0x14087CBF8 + 0x1C`, as his KH1 Strength, decision 18) + the equipped Keyblade's KH1
   `+0x38` (the stats file's `magic` for the 16 KH1 Keyblades: Crabclaw, Fairy Harp, Lionheart,
   Oathkeeper +1; Spellbinder, Lady Luck, Ultima Weapon +2; Diamond Dust +3; Metal Chocobo,
@@ -49,8 +49,8 @@ KH1 actor stats: `+0x44` MP (whole points), `+0x48` max MP, `+0xBE` charge (u16)
   a time (`DAT_14087CBF8[7]`); in battle the player's own copy `player+0x444` rises first
   (`0x1401E5730`) and the save's follows at the screen. Checked (decomp). The block stores the
   level it was written at; when read at a higher level, KH1's kind-2 bonus (max + 1, MP + 1) is
-  applied for each 12 / 24 / 36 / 48 / 60 passed (no hook; the level-up is seen at the next MP
-  read, and stored at the next MP write).
+  applied for each 12 / 24 / 30 / 36 / 48 / 60 / 66 passed (no hook; the level-up is seen at the
+  next MP read, and stored at the next MP write).
 - **Charge from hits:** in the existing enemy-hit wrapper (`0x14017F7E0`), for each KH1 hit an
   enemy takes (`take_kh1_hit`: one per enemy part per swing, as KH1's one damage record per
   target per attack): Sora's current KH1 row's attack data `+0x2C`, the enemy's **KH1 twin's
@@ -201,3 +201,23 @@ Owner: MP refills "where HP refills"; the KH2 Keyblades' max-MP bonus is their K
   for the room (KH1's is per save point; a room has one); in Re:CoM's 30 fps rooms the wrapper
   runs per game frame (Assumption: none has a save point). KH1's HP part and the party refill are
   not added (Re:CoM heals HP itself; no persistent party yet): owner question.
+
+## The Rod list's max MP (9b follow-ups; owner, 2026-11-01: "KH1's Rod-path max MP +1 at levels 30 and 66")
+
+- KH1 (Checked (decomp + files, `KH1_TEST_DATA`'s `btltbl.bin`)): each level-up `0x1402B51B0`
+  applies two lists through the bonus function `0x1402B5660`: Sora's bonus list btltbl `0x3AC0`
+  (kind 2 = max MP + 1 at 12, 24, 36, 48, 60) and the Dive's ability list (entry i = level i + 2;
+  entries 1..7 are bonuses, the rest abilities). The Rod list `0x3BF8`'s bonus entries: kind 2 at
+  **30 and 66**, kind 7 at 54. The mod follows the Rod (decision 18; that `save[0x48C]` = 2 is
+  the Rod: Assumption, as in `recom-m9-abilities.md`).
+- Built (`crate::mp`): `BONUS_MAX_MP_LEVELS` (12, 24, 36, 48, 60) and `ROD_MAX_MP_LEVELS` (30,
+  66) merged into `MAX_MP_UP_LEVELS` (12, 24, 30, 36, 48, 60, 66). Base max MP: 3 → 6 at 30 (was
+  5), 10 at 66 and above (was 8). On Re:CoM's level, as the rest.
+- A save whose MP block was written below 30 (or 66) and is read above it gets KH1's level-up
+  bonus for it (max + 1, MP + 1), as for the other levels. A save written at or above 30 already:
+  its max rises by one at the next read, its MP stays (KH1's stats build clamps it; no MP + 1, as
+  no level-up is seen). Not refilled until the next refill (save point, `HP = max` moments).
+- Tests: `mp::tests::max_mp_by_level`, `max_mp_levels_are_the_bonus_and_rod_lists` (also
+  against the player's btltbl when `KH1_TEST_DATA` is set), `level_ups_since_the_last_write`.
+- Not changed: the Rod list's kind 7 at 54 (record `+0x1C` + 1; not read: what `+0x1C` is). Not
+  checked in game.

@@ -3,6 +3,11 @@
 > Stage 9b (below, [Stage 9b](#stage-9b-kh1s-ability-screen-with-ap)) replaces three 9a rules:
 > new unlocks arrive **unequipped** (KH1), the block is **layout v2**, and Gravity Break unlocks at
 > **Re:CoM level 30** (owner). The movement abilities moved from the ini into the ability state.
+>
+> The [9b follow-ups](#9b-follow-ups-owner-2026-11-01) (at the end) replace 9b's sources: Guard and
+> Dodge Roll (equipped) from the start, High Jump / Glide / Superglide from **Re:CoM's own ability
+> variable**, Combo Master at level 50; the ini's story keys no longer unlock; **layout v3**; the
+> Abilities rows are Re:CoM's blue row.
 
 Steam addresses (KH1 and Re:CoM images at `0x140000000`). Tags: Checked (decomp / exe / files /
 tests) or Assumption. Code: `crates/kh1-recom/src/abilities.rs` (pure), `win/abilities.rs`,
@@ -122,7 +127,7 @@ Right after the items extension, inside Re:CoM's spare tail `save + 0x246B ..= 0
 
 | save + | size | field |
 |---|---|---|
-| `0x269F` | 1 | version: **0 = never written** (older save, new game) → nothing unlocked; 1 = written by 9a; **2 = 9b** (bits 13–24 below, KH1's equip rules) |
+| `0x269F` | 1 | version: **0 = never written** (older save, new game) → nothing unlocked; 1 = written by 9a; **2 = 9b** (bits 13–24 below, KH1's equip rules); **3 = the 9b follow-ups** (same fields; the sources below) |
 | `0x26A0` | 4 | unlocked, bit = `abilities::ix` (0 Sliding Dash, 1 Blitz, 2 Stun Impact, 3 Zantetsuken, 4 Vortex, 5 Aerial Sweep, 6 Hurricane Blast, 7 Ripple Drive, 8 Gravity Break, 9 Strike Raid, 10 Sonic Blade, 11 Ars Arcanum, 12 Ragnarok; 9b: 13 Guard, 14 Counterattack, 15 Dodge Roll, 16 High Jump, 17 Glide, 18 Superglide, 19 Combo Master, 20–22 Combo Plus ×3, 23–24 Air Combo Plus ×2) |
 | `0x26A4` | 4 | equipped (a subset of unlocked) |
 | `0x26A8` | 6 | zero (9b derives the max AP from the level; kept for AP Up items, should they come) |
@@ -337,13 +342,13 @@ questions 1–3. Code: `crates/kh1-recom/src/abilities.rs` (rules, AP, the scree
 | ability | KH1 id | AP | unlocks |
 |---|---|---|---|
 | the nine modifiers | 9a's | 9a's | 9a's (Re:CoM's sleights; Rod levels); **Gravity Break: Re:CoM level 30** (owner) |
-| Guard | 21 | 2 | Rod list: level **33** |
+| Guard | 21 | 2 | Rod list: level **33** (follow-ups: **from the start**) |
 | Counterattack | 19 | 2 | Rod list: level **57** |
 | Combo Plus ×3 | 6 | 1 each | Rod list: **87, 93, 99** |
 | Air Combo Plus ×2 | 7 | 1 each | Rod list: **24, 45** |
-| Dodge Roll | 22 | 1 | **story in KH1**: while `dodge_roll = on` in the ini (owner question) |
-| High Jump, Glide, Superglide (shared) | 1, 3, 4 | 0 | **story in KH1**: while their ini key is on (owner question) |
-| Combo Master | 0x41 | 0 (no row in KH1's table) | **story / other in KH1**: while `combo_master = on` (owner question) |
+| Dodge Roll | 22 | 1 | **story in KH1**: while `dodge_roll = on` in the ini (follow-ups: **from the start, equipped**) |
+| High Jump, Glide, Superglide (shared) | 1, 3, 4 | 0 | **story in KH1**: while their ini key is on (follow-ups: **Re:CoM's own ability variable**) |
+| Combo Master | 0x41 | 0 (no row in KH1's table) | **story / other in KH1**: while `combo_master = on` (follow-ups: **Re:CoM level 50**) |
 
 The specials (Strike Raid, Sonic Blade, Ars Arcanum, Ragnarok; KH1 ids 13 / 11 / 12 / 14, costs
 3 / 3 / 4 / 4) keep their unlock state but are **not on the screen** until 9c gives them a use.
@@ -406,7 +411,7 @@ line, camp sounds 1 move / 2 confirm / 4 back / 5 refused). No new hook, callee 
   Zantetsuken 213; shared: High Jump, Glide, Superglide) = KH1's Sort option 0 without its equipped
   tie-break.
 - Rows keep Re:CoM's red row look (`keyblades::row_look::RED`); see the owner question on the blue
-  one.
+  one. (Follow-ups: blue.)
 
 **Not KH1's (by design or yet):**
 - KH1's list order is the **learning order** (the list grows at the end), changed by **Move** and
@@ -457,7 +462,7 @@ setting.
   8 (Critical Plus; 96, 100), which `kh1_core` reads (crit factor) but the screen doesn't list.
   Owner: add any of them (each needs its effect built)?
 
-### Owner questions (9b)
+### Owner questions (9b; 1, 3, 4, 5 answered 2026-11-01, built in the follow-ups below)
 
 1. **Story abilities' Re:CoM source**: High Jump, Glide, Superglide, Dodge Roll and Combo Master
    are in no KH1 level list (KH1 gives them by story). Until you pick, their ini keys unlock them
@@ -485,3 +490,135 @@ setting.
 5. Shared: High Jump / Glide / Superglide toggle freely (with their ini keys on).
 6. An older save (9a): the log's `block v1 -> v2` line; what was equipped stays, within the AP.
 7. Save and reload: the equipped set stays. Combat = Re:CoM, Riku's story: no entry, nothing changes.
+
+## 9b follow-ups (owner, 2026-11-01)
+
+Owner: "**Guard from the start** (still costing AP); High Jump, Glide and Superglide unlock **where
+Re:CoM unlocks them**; **Dodge Roll equipped from the start**; **Combo Master at Re:CoM level 50**;
+KH1's Rod-path **max MP +1 at levels 30 and 66** added; the Abilities page rows use Re:CoM's
+**blue** box." Answers 9b's owner questions 1, 3, 4, 5 (question 2, KH1's Equip / Move / Sort
+window, stays open). The max MP: `recom-m7-mp.md` § The Rod list's max MP.
+
+### Where Re:CoM gives Sora High Jump, Glide and Superglide
+
+Re:CoM keeps Sora's three movement abilities as bits of a save **int variable, set 0, id 0x24**
+(read by `0x1401B08C0(0, 0x24)`; save variables: `notes/recom-level-world.md` § 0). Its player
+setup `0x1401F0C50` (called at each player build) copies them into the player's ability word
+`+0x41C`, which its movement code reads. Checked (decomp + exe):
+
+| variable bit | `+0x41C` | what Re:CoM does with it | ours |
+|---|---|---|---|
+| 1 | `0x200000` | its higher jump: the jump init `0x1401F29F0` plays row 0x14 and takes Sora's jump speed 32.5 instead of 28.0 (`0x1407C5B60 + 0x20` / `+0x1C`) | **High Jump** |
+| 2 | `0x400000` (Sora's story only) | its glide: the jump exe `0x1401EDA60` calls `CPlayerSora::initGlide` (`0x1402202C0`, vtable `+0x1A8`) on a jump press after 900 units (18 frames) in the air when `+0x41C & 0xC00000` | **Glide** |
+| 4 | `0x800000` (Sora's story only) | the faster glide: the glide exe `0x140217B50` flies at 8.0 instead of 5.0 (`0x1407C5B48` / `0x1407C5B44`) on row 0x1C instead of 0x1B; it also allows the glide by itself (the `0xC00000` test) | **Superglide** (and Glide) |
+
+Where the bits are set (Checked (decomp)):
+- **Bit 4**: Re:CoM's reward pick `0x1401BD9D0` (called by `0x1401BF420`), world 13 (Castle
+  Oblivion), the first time (the world's byte `save + 0x18A0 + world` = 0) unless byte variable
+  (0, 0x61) is 3: bit 4 set and reward 0x5C.
+- **Any bit**: the event script machine `0x140145C50`: command **0x2C** ORs a value into an int
+  variable of set 0; command **0x41** sets 0x24 (with 0x21, 0x2D) to all bits.
+- No other code writes it: the only other writers (`0x1400D1A00`, `0x1400D1FC0`, `0x1400D20B0`)
+  have no callers and no pointers to them in the exe (debug leftovers).
+- **Which events**: Assumption (Re:CoM's scripts are not in the session; the KH wiki,
+  "Abilities (KHCOM)": High Jump on clearing Monstro's Room of Beginnings, Glide on entering
+  Neverland, Super Glide in Castle Oblivion's Room of Rewards). Bit 4 in Castle Oblivion agrees
+  with the decomp.
+
+KH1's Superglide (id 4) and Re:CoM's faster glide are not the same move (KH1's is its own
+ability, run by KH1's handler at KH1's numbers); the owner's rule makes Re:CoM's Super Glide the
+moment ours unlocks. Glide unlocks with either bit, as Re:CoM's glide test does.
+
+### The sources now (`abilities::ALL`, `abilities::Source`)
+
+| ability | source | arrives |
+|---|---|---|
+| Guard | `Start { equip: false }`: from the start | unequipped (KH1's rule), unless the ini's `guard` was on when a save from before 9b first met the page (so a new game with the default ini has Guard + Dodge Roll = 3 AP of 3) |
+| Dodge Roll | `Start { equip: true }` | **equipped** when the AP allows (removable on the page; never equipped again by us) |
+| High Jump | `Recom(1)` | unequipped (KH1: story grants arrive unequipped too, event syscall `0x1401B1110` → `0x140284E10`, `id | 0x80`; Checked (decomp)); free to equip (shared) |
+| Glide | `Recom(2 | 4)` | unequipped, free |
+| Superglide | `Recom(4)` | unequipped, free |
+| Combo Master | `Level(50)` (owner) | unequipped, 0 AP |
+| Counterattack | `Level(57)` (Rod list; unchanged) | unequipped |
+| the rest | as 9b | as 9b |
+
+Never taken back, as every unlock (whether a script ever clears a bit of 0x24 is not read).
+
+### The read
+
+`win::abilities::sync` (Attack presses, the page's opening; never per frame) reads the variable
+once through Re:CoM's getter `0x1401B08C0` (a callee already checked by `sites::M6_DECK_CALLEES`:
+`83 F9 02 73 1D 8B C1 48 8D 0C 40`); no new hook, callee or data site. All 446 byte sets and 13
+pointer sites re-read from the Steam exe with pefile: 0 mismatches.
+
+### The block: layout v3 (`abilities::BLOCK_V3`, `abilities::migrate`)
+
+Same fields. A block below v3 is migrated once (first sync, as 9b's):
+- **v2 → v3**: High Jump, Glide, Superglide, Combo Master (9b's ini-given story abilities,
+  `V2_STORY_BITS`) are taken back and asked their new source at once; those whose source is met
+  keep their equipped state, the others come back later, unequipped. Dodge Roll keeps its state
+  (a player who removed it keeps it removed); not yet unlocked → unlocked and equipped.
+- **v0 / v1 → v3**: as 9b's migration (the ini's `guard` / `counterattack` / `combo_plus` /
+  `air_combo_plus` read once), with the new sources; Dodge Roll is wanted equipped.
+- Then KH1's AP rule (over the max AP: unequipped from the most expensive down, Dodge Roll 1 AP
+  near the last).
+
+### The ini
+
+`high_jump`, `glide`, `superglide`, `dodge_roll`, `combo_master` **no longer unlock anything**.
+They stay readable (old ini files parse; the Config menu writes them back unchanged) and are only
+the KH1 frame's fallback while no save block exists (`win::movement::abilities`; not reached in
+play). Testing switch: `kh1_all_abilities = on` (unchanged). `guard`, `counterattack`,
+`combo_plus`, `air_combo_plus`: unchanged (read once for a v0 / v1 save).
+
+### Rows: Re:CoM's blue (magic) row
+
+Every row of the Abilities page (the owner rows "Sora" / "Shared" and every ability) takes Re:CoM's
+list entry **0x133** through its row set-up `0x140112F10` (variant 1 of the list's checked
+sequence table `0x1407C11F0`: blue plate, icon sprite 168), as the Items page's item rows take 0x131
+(`abilities::page::ROW_LOOK`). Same for the Customize page (`recom-keyblade-equip.md`).
+
+### Logs
+
+- `abilities: block vN -> v3 at Re:CoM level L (max AP M, Re:CoM's ability variable 0x…): equipped
+  […] (U AP)[; the ini's, not yet from their source, taken back […]][; over KH1's AP, unequipped […]]`
+- `abilities: learned at Re:CoM level L (unequipped, KH1's rule; Re:CoM's ability variable 0x…): […]`
+- `abilities: learned at Re:CoM level L and equipped (owner: from the start): ["Dodge Roll"]`
+- the first-sync line now names Re:CoM's ability variable.
+
+### 1:1 checks
+
+- Checked (decomp + exe): the variable, its three bits and what Re:CoM's movement does with them;
+  the Castle Oblivion writer; the script commands 0x2C / 0x41; KH1's story grants arrive
+  unequipped.
+- Checked (tests): `learn_levels_are_kh1s_rod_list_and_the_owners`, `new_unlocks_arrive_unequipped`,
+  `movement_abilities_follow_recoms_variable`, `migration_keeps_the_old_set_within_kh1s_ap`,
+  `v2_story_abilities_move_to_their_new_sources`, `rows_are_recoms_blue_magic_row`; the btltbl
+  test (Guard's Rod level 33 still read) with the player's file.
+- Not checked: in game; which script events set bits 1 and 2 (Assumption above); that sprite 168
+  is the magic icon (`FO0100.RTM` not in the session; Re:CoM's own magic sleight rows use it).
+
+### Owner questions (follow-ups)
+
+1. **Guard at the start: equipped or not?** Built as unlocked and **unequipped** (KH1's rule for a
+   new ability; only Dodge Roll was asked equipped). Exception: a save from before 9b (or a new
+   game) with the ini's `guard = on` (the default) gets it equipped once, so a new game starts with
+   Dodge Roll + Guard = 3 of 3 AP. (a) keep, (b) always equipped at the start when the AP allows,
+   (c) never from the ini (new games: Dodge Roll only).
+2. **High Jump / Glide / Superglide arrive unequipped** (KH1's rule; they're free, one confirm on
+   the Shared list). In Re:CoM they work at once. (a) keep KH1's rule, (b) equip them when Re:CoM
+   gives them (still removable).
+
+### What the owner should test
+
+1. A **new game** (Sora, Combat = KH1): KH1 > Abilities > Sora lists Dodge Roll (marked) and Guard
+   (marked with the default ini); AP 0/3. Square rolls; Guard works.
+2. **Monstro's Room of Beginnings cleared** (or the save past it): the Shared list has High Jump;
+   equip it; the jump is KH1's High Jump. **Neverland**: Glide. **Castle Oblivion's Room of
+   Rewards**: Superglide. The log's `Re:CoM's ability variable 0x…` shows Re:CoM's bits (1, 2, 4).
+3. Level 50: Combo Master on Sora's list (0 AP). Level 30: max MP one higher than before (6 at 30
+   with the Kingdom Key), level 66: 10.
+4. A 9b save with `high_jump = on` in the ini but before Monstro: the log's `block v2 -> v3` line
+   takes High Jump back; after Monstro it returns.
+5. The Abilities page's rows and the Customize page's slot and spell rows: blue plate, magic icon.
+6. Combat = Re:CoM: nothing changes (Re:CoM's own High Jump / glide unchanged).

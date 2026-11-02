@@ -60,6 +60,19 @@ pub fn row_of(picks: &[Pick], slot_byte: u8) -> Option<usize> {
     picks.iter().position(|&p| p == want)
 }
 
+/// A row's look on Re:CoM's camp list (`crate::keyblades::row_look`; owner, 2026-11-01: "in the
+/// customize menu, make these slots be blue with the magic symbol"): the three shortcut slots
+/// (`picking` false) and the picker's spells are Re:CoM's blue magic row (list entry 0x133 through
+/// its row set-up `0x140112F10`); the picker's "None" row is no spell and keeps the red row.
+pub fn row_look(picking: bool, pick: Pick) -> i32 {
+    use crate::keyblades::row_look::{BLUE, RED};
+    if !picking || pick.is_some() {
+        BLUE
+    } else {
+        RED
+    }
+}
+
 /// The message id of a spell's name at its level (KH1's `0x14028F290`: the command
 /// `level + (spell + 2) × 3`, named by its own id). A level outside 1..=3 reads as level 1.
 pub fn name_id(spell: u8, level: u8) -> u16 {
@@ -178,6 +191,19 @@ mod tests {
         assert_eq!(row_of(&p, 0), Some(2), "empty: the None row");
         assert_eq!(row_of(&p, 2), None, "Blizzard not learned");
         assert_eq!(row_of(&p, 9), Some(2), "a bad byte reads as none");
+    }
+
+    #[test]
+    fn slots_and_spells_are_recoms_blue_magic_row() {
+        use crate::keyblades::row_look::{BLUE, RED};
+        assert_eq!(row_look(false, None), BLUE, "every shortcut slot, empty or not");
+        assert_eq!(row_look(false, Some(2)), BLUE);
+        assert_eq!(row_look(true, Some(0)), BLUE, "Fire");
+        assert_eq!(row_look(true, Some(6)), BLUE, "Aero");
+        assert_eq!(row_look(true, None), RED, "the picker's None row is no spell");
+        // BLUE is the list's entry 0x133 (the checked sequence table 0x1407C11F0).
+        let seqs = crate::sites::KEYBLADE_DATA.iter().find(|s| s.rva == 0x007C_11F0).unwrap().expect;
+        assert_eq!(u16::from_le_bytes([seqs[2 * BLUE as usize], seqs[2 * BLUE as usize + 1]]), 0x133);
     }
 
     #[test]
