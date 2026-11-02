@@ -59,6 +59,32 @@ pub fn after_poll(before: Option<u16>, now: Option<Running>, current: Option<u16
     }
 }
 
+/// Re:CoM's own super armour, `enemy+0x260` bits 20 and 21 (M11, the Pirate's `sys 42`,
+/// [`crate::enemy::Behaviour::armoured`]). Re:CoM's hit handler `0x14017F7E0` applies the damage, then
+/// its reaction picker `0x14017D260`: with bit 20 the blow-away and knock kinds (2..6, 0x12, 0x1D,
+/// 0x1E) take the flinch's path `0x14017D800` as kind 1 does, and with bit 21 that path only plays the
+/// damage voice (`0x140181B50` / `0x140181A50`) and asks for no state (`+0x68` untouched). The status
+/// kinds keep their states (Stop 8 / 0x17, stun 7 with its gauge, Gravity's flatten 0xD, freeze 0x11,
+/// 0xB / 0xC / 0xE..0x10 / 0x14 / 0x16 / 0x1F), as decision M10 keeps them; a killing hit still goes
+/// to the defeat (`0x140180A80`). Checked (decomp).
+pub const RECOM_ARMOUR: u64 = 0x30_0000;
+
+/// The flags for the hit handler's call with the armour on.
+pub fn armour_flags(flags: u64) -> u64 {
+    flags | RECOM_ARMOUR
+}
+
+/// The flags after the call: the two bits as they were before (Re:CoM's own, if it set them).
+pub fn restore_armour(now: u64, before: u64) -> u64 {
+    (now & !RECOM_ARMOUR) | (before & RECOM_ARMOUR)
+}
+
+/// Whether the armoured call took a damaging hit without a reaction: the handler answered 1 (a hit
+/// applied), the enemy lives, and no state was asked for (`+0x68` the same as before the call).
+pub fn armour_took(result: u64, hp: i32, next_before: usize, next_after: usize) -> bool {
+    result == 1 && hp > 0 && next_before == next_after
+}
+
 /// A model of the host for tests (the behaviours', and `kh1-recom`'s with each class's map and
 /// manifest; the DLL never runs it): Re:CoM's state 1 and attack states as
 /// `win::kh1_enemy` runs them (`think_step`, `attack_begin`, `attack_step`, `tick`), on a flat
@@ -296,5 +322,19 @@ mod tests {
         assert_eq!(after_poll(Some(211), Some(Running { request: 212, playing: false, ..a }), Some(211)), AfterPoll::NewAttack);
         assert_eq!(after_poll(Some(217), Some(Running { attack: false, steered: false, ..a }), Some(5)), AfterPoll::Plain);
         assert_eq!(after_poll(Some(217), None, Some(0)), AfterPoll::Gone);
+    }
+
+    /// Re:CoM's super armour for one hit handler call: bits 20 / 21 on, then put back as they were;
+    /// the hit counts as armoured only when it was applied to a living enemy and no state was asked.
+    #[test]
+    fn the_armour_rules() {
+        assert_eq!(armour_flags(0x1), 0x30_0001);
+        assert_eq!(restore_armour(0x30_0001, 0x1), 0x1);
+        assert_eq!(restore_armour(0x30_0000, 0x20_0000), 0x20_0000, "Re:CoM's own bit 21 stays");
+        assert_eq!(restore_armour(0x30_0000 | 0x2_0000_0000, 0), 0x2_0000_0000, "other bits the handler wrote stay");
+        assert!(armour_took(1, 10, 0x780, 0x780));
+        assert!(!armour_took(0, 10, 0x780, 0x780), "no hit (dropped, guarded)");
+        assert!(!armour_took(1, 0, 0x780, 0x780), "the killing hit");
+        assert!(!armour_took(1, 10, 0, 0x940), "a Re:CoM state (Stop) was asked for");
     }
 }

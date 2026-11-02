@@ -324,6 +324,48 @@ repels (`Side::Repels`: Sora gets the clash, the enemy goes on, no recoil on its
 skip the enemy's recoil when its side is `Repels`; `resolve` already returns it. A turned cone (a shield held to one
 side) needs Re:CoM's `+0xB0` plus a facing offset Re:CoM does not have: research before porting.
 
+### Hits that take no reaction (KH1's `sys 42` on Re:CoM's own super armour; M11, the Pirate)
+
+KH1's Pirate keeps attacking when it is hit during its attacks: its hit handler (`ex_2100.bd` `0x2A3C`) calls
+`sys 42` instead of asking for its hit state while one of its attack motions plays (`0x267E`) or while it lies
+after a launch (`sys 70`).
+
+**KH1. Checked (decomp + exe):**
+
+- `sys 42` = `0x1402BBD80`: an effect on a hurt part when the record's `+0xC & 0x800` (`0x1402B8790`, a look: M13),
+  then `0x1402B7E60`: the push slide `0x1402C7300` along the record's push direction `+0x10` at `G+0x2C` × the
+  stats block's `+0xC4` (the flinch's push, `react`'s `flinch_push × weight`), and `*hit |= 2`: KH1's reaction
+  (`0x1402B8E10`) then plays nothing, as after a scripted launch.
+- `sys 70` = `0x1402BBF00` → `0x1402B7EE0`: `u = +0x164 − +0x3EA` (the request playing minus the last launch's base,
+  a u16 written only by the launches `0x1402B79F0` / `0x1402B8530`); true when `u < 10` and `u % 5 == 3` (the lie
+  requests base + 3 / + 8). Before any launch `+0x3EA` is 0 (Assumption: the actor's memory starts zeroed), so the
+  test also holds for requests 3 and 8.
+
+**Re:CoM. Checked (decomp):** its hit handler `0x14017F7E0` applies the damage, calls vtable `+0x3E0` and then its
+reaction picker `0x14017D260`. With `+0x260` bit 20 the blow-away and knock kinds (2..6, 0x12, 0x1D, 0x1E) take the
+flinch's path `0x14017D800`, as kind 1 does; with bit 21 that path plays only the damage voice (`0x140181B50` /
+`0x140181A50`) and asks for no state (`+0x68` untouched). The status kinds keep their states (Stop 8 / 0x17, stun 7,
+Gravity's flatten 0xD, freeze 0x11, 0xB / 0xC / 0xE..0x10 / 0x14 / 0x16 / 0x1F: decision M10's rule), and a killing
+hit still goes to the defeat (`0x140180A80`). A KH1 hit on an attacking enemy carries the card-interrupt bit, so the
+handler's `0x2000001` path ends the "card" first (`0x14017E1D0`, `+0x260 &= ~1`; nothing for our cardless attacks);
+the attack state itself goes on.
+
+**Built (no new hook, no new site; nothing per frame):**
+
+| Part | Where | What |
+|---|---|---|
+| Behaviour | `kh1-core` `enemy/mod.rs` | `Behaviour::armoured(playing, launch_base)` (KH1's `+0x164`, `+0x3EA`; default false), `on_armoured_hit(dir)` (the `sys 42` path), `set_hit_dir(dir)` (the record's `+0x10`, for handlers that read it) |
+| Rules | `kh1-core` `enemy/host.rs` | `RECOM_ARMOUR` (bits 20 / 21), `armour_flags`, `restore_armour` (the two bits back as they were), `armour_took` (the handler answered 1, the enemy lives, `+0x68` unchanged) |
+| Host | `kh1-recom` `win/kh1_enemy.rs` | `armour_on` / `armour_off` around the existing enemy-hit wrapper's call (`win::attack::enemy_hit`, which every call of `0x14017F7E0` goes through): the bits on for the call when the behaviour says so, put back after; a hit the armour kept goes to `on_armoured_hit` with KH1's hit counter and a log line; the runtime keeps `launch_base` (each launch's base, `start_reaction`) |
+
+Per hit: one atomic load while no KH1 class is installed, else one tail check and the behaviour's answer. The
+other classes' behaviours answer false: nothing changes for them.
+
+Found, not changed (owner question in § The Pirate): the Wyvern's attribute 2 / 3 / 4 hits call the same `sys 42`
+(§ The Wyvern: "the engine's element reaction", left out); that is this no-reaction path, so KH1's Wyvern takes no
+reaction from those hits. The Darkball's, the Air Pirate's and the Wyvern's "doesn't flinch" cases zero the reaction
+kind (`keeps_reaction`) after Re:CoM's handler has already cut the attack; this armour would keep their attacks going.
+
 ## The Soldier
 
 ### KH1's side. Checked (files: `ex_2010.bd` disassembled; decomp: the VM `0x1402CC620` and syscalls)

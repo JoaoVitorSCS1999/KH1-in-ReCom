@@ -677,7 +677,11 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
         return orig::<PlRetFn>(&ORIG_ENEMY_HIT)(enemy);
     }
     let hp: i32 = rd(enemy + 0x274);
+    // M11 (the Pirate): Re:CoM's super armour for the call while a KH1 enemy's script takes no reaction
+    // (KH1's `sys 42`), then the hit to its script.
+    let armour = super::kh1_enemy::armour_on(enemy);
     let r = kh1_enemy_hit(enemy);
+    super::kh1_enemy::armour_off(armour, r);
     // Gimmick cards, trigger (d): a card-break boss crossing 50 % of its max HP.
     super::gimmick::after_hp(enemy, hp);
     r
