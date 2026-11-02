@@ -425,6 +425,9 @@ At KH1 setting:
       flinch part from the hit's height, Re:CoM's hurt shapes); KH1's recoil when Sora guards; Re:CoM's
       attack power per attack; Re:CoM's Stop / freeze / Gravity states; **battle enemies only** (field
       Shadows keep Re:CoM's roaming, owner).
+      Then (2026-11-02, on 0.67.2's questions): a sunk Shadow **stays lockable** (Re:CoM's one lockable
+      flag; KH1's lock button can lock it, its auto-target can't) and **keeps pushing Sora** while it sinks
+      and rises (KH1 lets him walk through): both left as they are.
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
