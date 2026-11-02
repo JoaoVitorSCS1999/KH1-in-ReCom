@@ -1081,6 +1081,27 @@ pub const SPECIAL_CHECKED: &[Site] = &[
     },
 ];
 
+/// Re:CoM's Sonic Blade start tint (owner, 2026-11-01: "Add Re:CoM's tint"; `win::specials`,
+/// `docs/recom-m9-abilities.md` § 9c.1): what `exeStockSkill` calls at its SONICRAVE start, and how
+/// Re:CoM's end action ends it. Checked at start; a mismatch only leaves the tint out.
+pub const SPECIAL_TINT_CHECKED: &[Site] = &[
+    // mov [rsp+8],rbx; push rdi; sub rsp,0x30; movss xmm0,[rdx+4]: the screen tint (player, colour,
+    // time, flags): blend 0x1808 (flags & 1: 0x187C), `+0x418` bit 31 set unless r + g + b = 3.
+    Site { name: "screen tint (0x1401F7D80)", rva: 0x001F_7D80, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x30, 0xF3, 0x0F, 0x10, 0x42, 0x04, 0x41] },
+    // exeStockSkill's start switch, attack id 0xE (× 10 = 0x8C): lea rdx,[0x1407C5D50].
+    Site { name: "SONICRAVE start tint colour (0x140218E05)", rva: 0x0021_8E05, expect: &[0x48, 0x8D, 0x15, 0x44, 0xCF, 0x5A, 0x00] },
+    // The call it jumps to: xor r9d,r9d (flags 0); movaps xmm2,xmm6 (the time); mov rcx,r14; call
+    // 0x1401F7D80.
+    Site { name: "sleight start tint call (0x140218D0E)", rva: 0x0021_8D0E, expect: &[0x45, 0x33, 0xC9, 0x0F, 0x28, 0xD6, 0x49, 0x8B, 0xCE, 0xE8, 0x64, 0xF0, 0xFD, 0xFF] },
+    // xmm6 = [0x1406C1208] (`0x140218CA9`) = 20.0 (and the next constant, 30.0).
+    Site { name: "sleight tint time 20.0 (0x1406C1208)", rva: 0x006C_1208, expect: &[0x00, 0x00, 0xA0, 0x41, 0x00, 0x00, 0xF0, 0x41] },
+    // The colour (0.5, 0.5, 0.75, 1.0).
+    Site { name: "Sonic Blade tint colour (0x1407C5D50)", rva: 0x007C_5D50, expect: &[0x00, 0x00, 0x00, 0x3F, 0x00, 0x00, 0x00, 0x3F, 0x00, 0x00, 0x40, 0x3F, 0x00, 0x00, 0x80, 0x3F] },
+    // The end action `0x1401F6660`: mov eax,[rbx+0x418]; xor r14d,r14d; test eax,eax; jns: with bit
+    // 31 set, the tint back to (1, 1, 1, 1) over 20.0 (blend 0x1808) and the bit cleared.
+    Site { name: "end action tint reset (0x1401F66D4)", rva: 0x001F_66D4, expect: &[0x8B, 0x83, 0x18, 0x04, 0x00, 0x00, 0x45, 0x33, 0xF6, 0x85, 0xC0, 0x79, 0x35] },
+];
+
 /// CPlayerSora's exeStockSkill slot (vtable `+0x140`), which the Battle exe calls through.
 pub const SPECIAL_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x140 (0x1405A9A78)", rva: 0x005A_9A78, target: 0x0021_8950 }];
 
@@ -1758,6 +1779,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         ABILITY_CALLEES,
         SPECIAL_HOOKS,
         SPECIAL_CHECKED,
+        SPECIAL_TINT_CHECKED,
         STORY_SKIP_HOOKS,
         STORY_SKIP_CALLEES,
     ];

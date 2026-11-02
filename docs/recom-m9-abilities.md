@@ -745,7 +745,7 @@ xl clips are converted at 60 fps. Checked (decomp, earlier stages).
   sub-pack flag was set).
 - Re:CoM waits for the sleight's resources before its start (`0x1402106E0(+0x3B8, 9)` ≠ 1: motion
   0x2E, sub-state 4); it also tints the screen at the start (`0x1401F7D80(player, 0x1407C5D50)`,
-  row 0xE flag 0x20) — not per dash, not built (below).
+  row 0xE flag 0x20) — not per dash; built since the owner's answer (§ Re:CoM's start tint).
 
 ### What runs (Combat = KH1, Sora's story)
 
@@ -876,8 +876,7 @@ four Re:CoM calls at each of its eight motion starts.
 
 - **Voices, sounds and effects are base Re:CoM's** (owner): KH1's own (its row voices, its bank's
   4003 / 4004, its step and whoosh) are not played.
-- KH1's scene tint: skipped (owner). Re:CoM's own start tint (`0x1401F7D80`, colour
-  `0x1407C5D50`): not built (found reading the sleight; owner question 1).
+- KH1's scene tint: skipped (owner). Re:CoM's own start tint: built (owner's answer, below).
 - Re:CoM's resource wait before the start (motion 0x2E): not copied (KH1's timing).
 
 ### Owner answers (9c.1, 2026-11-01) and what was built
@@ -893,10 +892,8 @@ four Re:CoM calls at each of its eight motion starts.
 
 ### Owner questions (9c.1, new)
 
-1. **Re:CoM's start tint.** Re:CoM darkens / tints the screen when its Sonic Blade starts
-   (`0x1401F7D80` with colour `0x1407C5D50`, the same call its other sleights make). KH1's tint was
-   skipped on your word. (a) leave it out, (b) play Re:CoM's at the start of ours (and its reset at
-   the end).
+1. **Re:CoM's start tint.** Answered (owner, 2026-11-01): "Add Re:CoM's tint" → built (§ Re:CoM's
+   start tint).
 
 ### What the owner should test (re-run the asset step first)
 
@@ -943,3 +940,30 @@ four Re:CoM calls at each of its eight motion starts.
 - **Test:** in battle, Sonic Blade on a Shadow: each dash's hit in the trace carries
   `:recom <2 × attack> col 0 sleight 0x9`, the finisher `<4 × attack> col 2`; compare with Re:CoM's
   Sonic Blade sleight at Combat = Re:CoM on the same enemy.
+
+### Re:CoM's start tint (owner, 2026-11-01: "Add Re:CoM's tint")
+
+- **Re:CoM** (Checked (decomp + disasm + exe)): `exeStockSkill` `0x140218950` sub-state 1 (the
+  sleight's first update): with the row's flag 0x20 (row 0xE: `+0xF` = 0x60) it picks a colour by
+  attack id × 10; id 0xE (0x8C) → `lea rdx,[0x1407C5D50]` (`0x140218E05`) → `0x140218D0E`: `xor r9d,
+  r9d; movaps xmm2,xmm6; call 0x1401F7D80` with `xmm6 = [0x1406C1208]` = 20.0 (`0x140218CA9`). So
+  **`0x1401F7D80(player, (0.5, 0.5, 0.75, 1), 20.0, 0)`**, before the resource wait and the `limit1`
+  effect. `0x1401F7D80`: blend 0x1808 (flags & 1: 0x187C), `+0x418` bit 31 set unless r + g + b =
+  3, `0x140232170(blend, time, colour, 0, 0)` (a fade toward the colour at 1 / time per step).
+- **The end**: Re:CoM's end action `0x1401F6660` (`0x1401F66D4..0x1401F6711`): with `+0x418` bit
+  31 set it fades to (1, 1, 1, 1) over 20.0 (blend 0x1808) and clears the bit. The only other
+  Re:CoM function that clears it, `0x1401E7C20` (not read further), runs as it does for Re:CoM's
+  sleights.
+- **Ours** (`win::specials::start_special`): the same call with Re:CoM's colour and time, at KH1's
+  start, right before the `limit1` effect, as Re:CoM's order; the end is `end_special` →
+  `0x1401F6660` (already Re:CoM's end of a sleight), so the fade back is Re:CoM's. Nothing per frame.
+  The trace's special events show `tint`.
+- Sites (`sites::SPECIAL_TINT_CHECKED`, bytes re-read with pefile; a mismatch leaves only the tint
+  out, logged): `0x1401F7D80` (16 bytes, called), `0x140218E05` (the colour's `lea`), `0x140218D0E`
+  (the call: flags 0, the time in xmm6), `0x1406C1208` (20.0, 30.0), `0x1407C5D50` (the colour),
+  `0x1401F66D4` (the end's reset).
+- Not checked: in game; the fade's unit (20.0 "steps" of `0x140232170`'s consumer, not read: it is
+  Re:CoM's own value either way).
+- **Test:** start Sonic Blade in battle: the screen takes Re:CoM's blue-grey tint as its Sonic
+  Blade card does at Combat = Re:CoM, and fades back when the special ends (the finisher's end, or
+  stopping after a dash). Compare side by side with Re:CoM's own Sonic Blade sleight.

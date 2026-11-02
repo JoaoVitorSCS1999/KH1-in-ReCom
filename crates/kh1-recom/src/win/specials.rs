@@ -41,6 +41,8 @@ static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static PENDING: Mutex<Option<u8>> = Mutex::new(None);
 /// Re:CoM's `limit1` effect name is where `exeStockSkill` reads it.
 static EFFECT_OK: AtomicBool = AtomicBool::new(false);
+/// Re:CoM's start tint and its end are as read (`sites::SPECIAL_TINT_CHECKED`).
+static TINT_OK: AtomicBool = AtomicBool::new(false);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
 static EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -64,6 +66,15 @@ const RECOM_ROWS: u64 = crate::attack::RECOM_ATTACK_ROWS;
 /// `"limit1"`'s pointer, as `exeStockSkill` passes it (`0x140218EEC`: `mov rdx,[0x1407C7E10]`).
 /// Checked (exe: the string at `0x1405A30D8`).
 const LIMIT1_PTR: u64 = 0x1_407C_7E10;
+
+/// Re:CoM's screen tint `0x1401F7D80(player, colour, time, flags)` and what its Sonic Blade start
+/// passes (`exeStockSkill` `0x140218E05` → `0x140218D0E`): the colour `0x1407C5D50` (0.5, 0.5, 0.75,
+/// 1), the time `[0x1406C1208]` = 20.0 (`xmm6`, `0x140218CA9`), flags 0. Its end action
+/// `0x1401F6660` (`end_special`) fades back (`0x1401F66D4`). Checked (decomp + disasm + exe).
+const TINT: u32 = 0x001F_7D80;
+const TINT_COLOUR: u64 = 0x1_407C_5D50;
+const TINT_TIME: u64 = 0x1_406C_1208;
+type TintFn = unsafe extern "win64" fn(usize, usize, f32, u32);
 
 /// Sora's event players and the functions `0x1401A3580` starts a sleight motion's events with
 /// (`crate::specials::recom_events`; `sites::SPECIAL_CHECKED`). Checked (decomp + exe disasm of
@@ -159,6 +170,12 @@ pub unsafe fn install(b: usize) -> bool {
             log(&format!("specials: {} is not as expected; no KH1 specials", c.name));
             return false;
         }
+    }
+    // Re:CoM's start tint (owner, 2026-11-01): only the tint is left out if it isn't as read.
+    let tint = crate::sites::SPECIAL_TINT_CHECKED.iter().all(|c| have(b + c.rva as usize, c.expect.len()) == c.expect);
+    TINT_OK.store(tint, Ordering::Release);
+    if !tint {
+        log("specials: Re:CoM's Sonic Blade tint code is not as read: Sonic Blade without Re:CoM's start tint");
     }
     let name: usize = rd(va(b, LIMIT1_PTR));
     let ok = name != 0 && have(name, 7) == b"limit1\0";
@@ -273,6 +290,15 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
     wr(pl + f::SUB, sp::RECOM_SUB);
     wr(pl + f::F670, 0u64);
     ACTIVE.store(pl, Ordering::Release);
+    // Re:CoM's start tint (owner, 2026-11-01: "Add Re:CoM's tint"), as its SONICRAVE start makes it
+    // on the press, before its `limit1` effect: `0x1401F7D80(player, 0x1407C5D50, 20.0, 0)`. It sets
+    // `+0x418` bit 31; Re:CoM's end action (`end_special` → `0x1401F6660`), and every other Re:CoM
+    // path that tests the bit, fade it back.
+    if TINT_OK.load(Ordering::Acquire) {
+        let time: f32 = rd(va(base(), TINT_TIME));
+        func::<TintFn>(TINT)(pl, va(base(), TINT_COLOUR), time, 0);
+        event("tint".into());
+    }
     // Re:CoM's own Sonic Blade start effect (`exeStockSkill` sub-state 0x8C: `0x1401F7F90(player,
     // "limit1", 0, bone +0x3A4)`, kept on Sora), at KH1's start (owner: Re:CoM's sleight effects).
     if EFFECT_OK.load(Ordering::Acquire) {
