@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 111: Summons: usable whenever Sora has the MP; Sora invincible through them; Cloud first, version 0.63.0 (2026-11-01)
+
+- Asks (owner, 2026-11-02): "summons should be able to be used as long as you have MP, also, sora should have iframes
+  through all summon animations"; "cloud should also be at the top of the summons list".
+- KH1's once-per-battle rule dropped: usable in a battle room, on the ground, with whole MP ≥ cost, no summon out (the
+  row stays locked while one is out: a second sleight can't start during action 0x16).
+- Invincible: the existing damage-check wrapper (`0x1401E6DE0`) sets Re:CoM's protection bit `player+0x418 & 1`
+  for the call while a summon is out (action 0x16 from our summon, battle room, same player), so Re:CoM's own early
+  exit drops the hit (no damage, no reaction), as Sonic Blade and the roll; checked every frame by the Battle exe
+  (`0x1401F9840`); ends with Re:CoM's end action `0x1401F6660`, the battle or a room change. Checked (decomp).
+- Cloud first in the list (`summons::list_order`), the others in learn order; KH1's placement kept.
+- No new hook, call or site. Assumptions: every hit on Sora goes through `0x1401E6DE0`; a card break of the sleight
+  (not a hit) can still end it.
+- Checked: tests, Windows build, 577 sites. Not checked: in game.
+
+---
+
 ## Stage 110: Gimmick cards: a finisher that interrupts a card-break boss gives Re:CoM's card break, version 0.62.1 (2026-11-01)
 
 - Ask (owner, 2026-11-02, option c): when a KH1 combo finisher interrupts the attack of Guard Armor, Trickmaster,
