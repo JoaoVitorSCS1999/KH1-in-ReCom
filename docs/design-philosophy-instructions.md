@@ -406,6 +406,8 @@ At KH1 setting:
     - **Dodge roll (owner, 2026-11-02):** "make dodge roll work how it does in ReCoM, not KH1" — **the
       whole roll** (Re:CoM's motion, speed, distance, timing and invincibility) at Combat = KH1. Supersedes
       decision 17's KH1 roll frames; an ini key keeps KH1's roll selectable.
+    - **Enemy card sounds (owner, 2026-11-02):** "you cant hear enemies stocking cards or refilling their
+      deck": at Combat = KH1, the sounds of enemies stocking cards and reloading their deck are silent.
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
