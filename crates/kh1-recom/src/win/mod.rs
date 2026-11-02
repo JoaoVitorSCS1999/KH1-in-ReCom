@@ -7,6 +7,7 @@ mod battle;
 mod command_menu;
 mod crash;
 mod d2;
+mod damage;
 mod deck;
 mod drops;
 mod guard;
@@ -272,6 +273,14 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
     }
     attack::set_debug(s.debug_attack);
     attack::set_guard_reactions(s.guard_reactions);
+    // The Damage setting (owner, 2026-11-01), read once at start.
+    damage::set_mode(s.damage == settings::Mode::Kh1);
+    // SAFETY: reads of the mapped exe.
+    if s.damage == settings::Mode::Kh1 {
+        log("damage: damage = kh1: KH1's formula and the KH1 twins' / proxies' HP (decisions 12, 21)");
+    } else if unsafe { damage::install(base) } {
+        log("damage: damage = recom: Re:CoM's enemy HP; in battle KH1 swings carry the equipped Keyblade card's AP (normal swings column 0, finishers column 2), Fire / Blizzard / Thunder their Re:CoM card's / sleight's, Sonic Blade its sleight's; Re:CoM's damage path as is");
+    }
     abilities::set_all(s.kh1_all_abilities);
     if s.debug_attack {
         log("attack: debug_attack = on (first 200 lines)");
@@ -569,7 +578,11 @@ fn install_stats(base: usize, stats_file: Option<&Path>) {
     ];
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
     if unsafe { hook::install_all(base, &hooks) } {
-        log("attack: damage: KH1's (Sora's KH1 Strength, the twin's Defence, floor, cap and resistance; Re:CoM's weak part and falloff on top); KH1 HP on twins");
+        if settings().damage == settings::Mode::Recom {
+            log("attack: damage = recom: Re:CoM's HP and AP; the KH1 records give levels, Stop / Gravity resistances, drops and lock radii");
+        } else {
+            log("attack: damage: KH1's (Sora's KH1 Strength, the twin's Defence, floor, cap and resistance; Re:CoM's weak part and falloff on top); KH1 HP on twins");
+        }
     } else {
         log("attack: damage: Re:CoM's own numbers: the stats hooks are not in");
     }

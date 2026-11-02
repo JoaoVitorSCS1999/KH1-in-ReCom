@@ -1471,3 +1471,98 @@ body Re:CoM's pass would hit (`strike_contact::test_for`); bodies flagged `& 0xE
 3. Hit a stopped enemy: no damage until it thaws, then the held hits land (M7 f3).
 4. Any `NOT stopped` line: send the log (it names Re:CoM's answer and the enemy's flags).
 5. Thunder / Gravity still hit attacking enemies (`(card broken)` on their hit lines).
+
+## Spell damage at Damage = Re:CoM (owner, 2026-11-01)
+
+> "spells and specials do Re:CoM's card / sleight damage" (each KH1 spell its Re:CoM magic card's)
+
+Setting `damage = recom | kh1` (`recom-kh1-attack.md` § Re:CoM damage setting; Re:CoM by
+default). At Damage = KH1 this section is off (KH1's spell damage as above).
+
+### How Re:CoM computes a magic card's and a magic sleight's AP. Checked (decomp + exe)
+
+- **Cards** (`initMagic` `0x1402203D0`, card `+0x7F4` = 0x1A..0x20): `+0x638` = row 0x22..0x28,
+  `+0x3C8` = that row; AP from `BattleCardList[card][row+0xA]`: Fire / Blizzard / Thunder / Aero
+  **power × attack stat `+0x43C` ÷ 100**; Cure power × 10 ÷ 100 (= power ÷ 10, the heal); Gravity
+  and Stop **the power as is**. Then `+0x668` = row `+0xB`, `+0x66C` = card `+0xB`, status = card
+  `+9`, and `0x1401E66A0` (the enemy-card rewrite).
+- **Sleights** (`initStockSkill` `0x140220DF0`, sleight `+0x82C`): Fira 0xD → row 0x29, Blizzara 0xE
+  → 0x2B, Thundara 0xF → 0x2E, Cura 0x10 → 0x36, Gravira 0x11 → 0x38, Stopra 0x12 → 0x3A, Aerora
+  0x13 → 0x3C; Firaga 0x14 → 0x2A, Blizzaga 0x15 → 0x2C, Thundaga 0x16 → 0x2F, Curaga 0x17 → 0x37,
+  Graviga 0x18 → 0x39, Stopga 0x19 → 0x3B, Aeroga 0x1A → 0x3D. AP from
+  `StockSkillList[sleight][row+0xA]` by the case's mode: 1 = power × attack stat ÷ 100 (Fira,
+  Blizzara, Thundara, Aerora and their -ga), 2 = power ÷ 10 (Cura, Curaga), 3 = power as is
+  (Gravira / Graviga, Stopra / Stopga). Attribute `StockSkillList +0xA`, status `+0xB`, then the same
+  rewrite.
+- Every one of these rows has column 0 (exe; `magic::RECOM_*_ROWS`).
+- Powers in the session's `SY0002.BIN` (Checked (files)): Fire 500 / Fira 1000 / Firaga 1500;
+  Blizzard 400 / 700 / 1100; Thunder 350 / 600 / 900; Cure 500 / 1500 / 3000 (→ 50 / 150 / 300);
+  Gravity 20 / 40 / 70; Stop 9000 / 15000 / 21000; Aero 300 / 600 / 900. The DLL reads the live
+  tables, not these numbers.
+- Re:CoM's **Gravity** damage is kind 0xD (`0x14017DC50`): **current HP × AP ÷ 100** (20 / 40 /
+  70 %), refused when the enemy's `@ENP +0x40` is 0, and adjusted by `0x14015D940` when the enemy's
+  `+0x2B0` is set (not read).
+
+### KH1 level → Re:CoM card / sleight (`damage::spell_source`)
+
+| KH1 | level 1 | level 2 (-ra) | level 3 (-ga) | at Damage = Re:CoM |
+|---|---|---|---|---|
+| Fire | card 0x1A, row 0x22 | sleight 0xD (Fira), row 0x29 | 0x14 (Firaga), 0x2A | **Re:CoM's AP** (power × stat ÷ 100), attribute 2 |
+| Blizzard | card 0x1B, 0x23 | 0xE, 0x2B | 0x15, 0x2C | **Re:CoM's AP**, attribute 3 |
+| Thunder | card 0x1C, 0x24 | 0xF, 0x2E | 0x16, 0x2F | **Re:CoM's AP** for each strike, attribute 4 |
+| Cure | card 0x1D, 0x25 | 0x10, 0x36 | 0x17, 0x37 | Re:CoM's heal 50 / 150 / 300 (already, decision 34) |
+| Gravity | card 0x1E, 0x26 | 0x11, 0x38 | 0x18, 0x39 | KH1's % (owner: "it stays percent of Re:CoM's HP"); question 1 |
+| Stop | card 0x1F, 0x27 | 0x12, 0x3A | 0x19, 0x3B | KH1's duration and `resist[9]` (no damage); question 2 |
+| Aero | card 0x20, 0x28 | 0x13, 0x3C | 0x1A, 0x3D | KH1's barrier and wind (stopped); question 3 |
+
+### What runs (Combat = KH1, Sora's story, Damage = Re:CoM)
+
+- **Cast** (`win::magic::start_cast` → `win::damage::spell`, once per cast, in battle): after the
+  cast's kind and attribute are written, Fire / Blizzard / Thunder write **the Re:CoM AP and
+  attribute of their card / sleight** into `+0x660 / +0x66C` and run Re:CoM's rewrite
+  `0x1401E66A0`, as `initMagic` / `initStockSkill` do. Re:CoM's shots (Fire's homing ball,
+  Blizzard's shards) and our Thunder strikes already take `+0x660 / +0x66C` from the player
+  (descriptor `+0x70 / +0x6C`; `ThunderRun`).
+- **Hits** (enemy-hit wrapper): for these three, KH1's damage is **not** written into the part and
+  the attribute is **not** neutralised: Re:CoM's path applies the shot's AP with **Re:CoM's own
+  resistance** for the attribute, weak parts, boss falloff (decision 36's "KH1's resistances only"
+  is a KH1-setting rule).
+- **In the field**: Re:CoM has no magic there; the cast keeps the cardless AP (the attack stat), as
+  the swings.
+- Gravity (KH1's (power + 5 × max MP) % × `resist[8]` of the enemy's current HP, now Re:CoM's HP),
+  Stop and Aero: unchanged.
+
+### Logs and trace
+
+- `damage: fire2: Re:CoM sleight 0xd (row 0x29) column 0: power 1000 x attack 10 / 100 = AP 100
+  (attribute 2)` (first 48 computations).
+- `magic: hit fire2 on …: Re:CoM AP 100 (recom 100 col 0 sleight 0xd) …`; trace hits
+  `…:fire2:recom 100 col 0 sleight 0xd`.
+
+### Owner questions (Damage = Re:CoM)
+
+1. **Gravity.** (a) KH1's % of Re:CoM's HP ((power + 5 × max MP) %, KH1's `resist[8]`, at least the
+   record's floor; built: your line "it stays percent of Re:CoM's HP"); (b) Re:CoM's own Gravity
+   card / Gravira / Graviga: 20 / 40 / 70 % of current HP by Re:CoM's kind 0xD with Re:CoM's
+   immunity flag (`@ENP +0x40`) and its boss rule (and its 3-second flatten, which 7.8 avoided by
+   carrying the number as a flinch).
+2. **Stop.** No damage in either game; kept KH1's duration and resistance (your line). Re:CoM's
+   own Stop card holds 9000 / 15000 / 21000 (Re:CoM ticks: 180 / 300 / 420 frames). (a) keep KH1's
+   duration (built); (b) Re:CoM's durations with Re:CoM's gate.
+3. **Aero.** KH1's Aero is a barrier (half damage to Sora) and Aerora / Aeroga add a wind around
+   Sora that hits; Re:CoM's Aero card / sleights are shots. Not changed: the wind still does KH1's
+   number (8 + 2 × max MP through KH1's curve against the twin's Defence) on Re:CoM's HP, which is
+   small next to Re:CoM's HP. (a) the wind's hits take Re:CoM's Aerora / Aeroga sleight AP (600 /
+   900 × attack ÷ 100) per hit; (b) Re:CoM's Aero card AP (300 × attack ÷ 100) for every level;
+   (c) keep KH1's number.
+
+### What the owner should test
+
+1. In battle, cast Fire, Fira (needs the -ra level), Firaga: the log's `damage: fire…` lines show
+   cards / sleights 0x1A / 0xD / 0x14 and the AP; the trace's hits `:recom <ap> col 0 card 0x1a`
+   (etc.); damage as Re:CoM's Fire card / Fira / Firaga sleights at Combat = Re:CoM against the
+   same enemy (resistances included: a fire-weak enemy takes more).
+2. Blizzard (each shard that hits) and Thunder (each strike): the same.
+3. Cure: unchanged (50 / 150 / 300).
+4. Gravity, Stop, Aero: unchanged from 0.57.0 except that the enemy's HP is Re:CoM's.
+5. `damage = kh1`: everything as before.

@@ -201,3 +201,11 @@ owner decision, 2026-10-30; see `recom-motion-switch.md`):
 - Assumption: the panel, now 3 rows taller, still ends above the camp's bottom bars (from the
   owner's screenshot at 1275 × 716 there are about 60 px left below Guard reactions; one row is
   about 49 px). Not seen in game.
+
+## "Damage" (owner, 2026-11-01): no slot left
+
+- The owner asked for a setting "Damage: Re:CoM / KH1" (`recom-kh1-attack.md` § Re:CoM damage
+  setting). All 21 item slots are in use (above), so it is an ini key for now: `damage = recom |
+  kh1` (default `recom`), parsed, defaulted and stored like the others (`settings::Settings::damage`;
+  `store` writes it), read once at start (no Config row, no runtime flip). Owner question: where
+  the row should go (options in the version's report).

@@ -11,6 +11,8 @@
 //!   through `0x14016FDB0`) becomes KH1's damage for Sora's swing row, his KH1 Strength and the
 //!   twin's Defence / floor / cap / resistance. Re:CoM's own path then applies its extras (weak
 //!   part, resistance %, boss falloff; decision 13).
+//! - Damage = Re:CoM (owner, 2026-11-01; `super::damage`): no KH1 HP is written and no KH1 damage
+//!   replaces Re:CoM's; the twins' / proxies' records still give the non-damage numbers.
 //! - Proxies (`docs/recom-kh1-attack.md` § KH1 numbers for enemies without a twin): an enemy
 //!   without an ordinary twin (Re:CoM-only enemies and every boss) takes, in the same wrapper,
 //!   its own Re:CoM row HP × the world's ratio (from the twins, or the world's boss twin) and the
@@ -241,7 +243,10 @@ pub unsafe extern "win64" fn stat_init(enemy: usize, kind: i32, variant: i32, x:
             None if kind == ENEMY_KIND => proxy(enemy, variant),
             None => None,
         };
-        if let Some(hp) = hp {
+        // Damage = Re:CoM (owner, 2026-11-01): Re:CoM's own HP stands; the twin's / proxy's record
+        // still gives the non-damage numbers (KH1 level for the MP charge, Stop's and Gravity's
+        // resistances, drops, lock radius).
+        if let Some(hp) = hp.filter(|_| super::damage::kh1()) {
             wr(enemy + 0x274, hp);
             g.push((enemy, hp));
             if g.len() > 256 {
@@ -303,8 +308,17 @@ unsafe fn proxy(enemy: usize, id: i32) -> Option<i32> {
         let t = &p.stats;
         let what = if p.own { "boss twin" } else if p.boss { "proxy boss" } else { "proxy" };
         log(&format!(
-            "stats: {what} {class} (id {id}) world {w} floor {floor}: Re:CoM HP {recom_hp} -> KH1 HP {}, Defence {}, floor {} cap {}, level {}, gravity {} stop {}, ratio {:.3} (from {})",
-            t.hp, t.defence, t.min_damage, t.max_damage, t.level, t.resist[8], t.resist[9], p.ratio, p.from
+            "stats: {what} {class} (id {id}) world {w} floor {floor}: Re:CoM HP {recom_hp} -> KH1 HP {}, Defence {}, floor {} cap {}, level {}, gravity {} stop {}, ratio {:.3} (from {}){}",
+            t.hp,
+            t.defence,
+            t.min_damage,
+            t.max_damage,
+            t.level,
+            t.resist[8],
+            t.resist[9],
+            p.ratio,
+            p.from,
+            if super::damage::kh1() { "" } else { " [damage = recom: Re:CoM's HP stands; level and resistances used]" }
         ));
     }
     let hp = p.stats.hp;
@@ -404,6 +418,10 @@ pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32, hp:
 /// `hp_now`: the enemy's current HP (KH1's for twins and proxies, `+0x274`), which the % of HP
 /// rows read (Gravity Break, Zantetsuken); `max_mp`: Sora's KH1 max MP (Ripple Drive's Magic × 3).
 pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32) -> Option<i32> {
+    // Damage = Re:CoM: Re:CoM's AP stands (`super::damage`).
+    if !super::damage::kh1() {
+        return None;
+    }
     // A twin, else a proxy / boss twin set up at its stats init (Sora's story only).
     let t = match twin(enemy) {
         Some((_, t)) => t.clone(),

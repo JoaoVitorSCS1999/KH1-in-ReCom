@@ -466,6 +466,10 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
     wr(pl + f::AP, ap);
     wr(pl + f::KIND, r[0xB] as u32);
     wr(pl + f::ATTR, RECOM_ATTR[c.spell as usize % 7]);
+    // Damage = Re:CoM (owner, 2026-11-01), in battle: Fire / Blizzard / Thunder take their Re:CoM
+    // magic card's (level 1) or sleight's (2, 3) AP and attribute, as `initMagic` /
+    // `initStockSkill` compute them, and Re:CoM's enemy-card rewrite. The shots carry them.
+    super::damage::spell(pl, c.spell, c.level);
     wr(pl + f::PREV_SITUATION, 0u32);
     wr(pl + f::SUB, id);
     wr(pl + f::SLEIGHT_670, 0u64);

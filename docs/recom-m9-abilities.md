@@ -918,3 +918,28 @@ four Re:CoM calls at each of its eight motion starts.
    sleight resources weren't there.
 7. F9 trace of one full Sonic Blade (seven rows): attach it; the `sp` column gives the frames for
    the 1:1 check against KH1.
+
+### Damage at Damage = Re:CoM (owner, 2026-11-01)
+
+> "Sonic Blade does Re:CoM's Sonic Blade sleight damage per dash and finisher"
+
+- **Re:CoM** (Checked (decomp + disasm `0x140219AEE..0x140219BB8`, exe rows)): `exeStockSkill`'s
+  SONICRAVE writes, at 0x8C → 0x8D and at each chain, `+0x638` = 0xF (dash) or 0x10 (finisher,
+  sub-state 0x93), **AP = `StockSkillList[+0x82C][row+0xA]` × attack stat `+0x43C` ÷ 100**
+  (`imul edx,[r14+0x43C]`, signed ÷ 100), `+0x668` = row `+0xB`, `+0x66C` = `StockSkillList +0xA`,
+  status `+0xB`, then `0x1401E66A0`. Sonic Blade is sleight 9 (`initStockSkill` case 9); row 0xF has
+  column 0, row 0x10 column 2 (`0x1407C6D50`, `sites::SPECIAL_CHECKED`); `initStockSkill` gives the
+  start (row 0xE, column 0, no hit window) the same rule. In the session's `SY0002.BIN` sleight 9
+  holds 200 / 0 / 400 / 0 (dash 2 × attack, finisher 4 × attack) and attribute 1 (Checked (files);
+  the DLL reads the live table).
+- **Ours** (`win::specials::start_special` / `special_row` → `win::damage::special`, once per row):
+  KH1's six dashes take Re:CoM's dash AP (row 0xF, column 0), the finisher Re:CoM's finisher AP
+  (row 0x10, column 2), with the sleight's attribute and Re:CoM's rewrite; the enemy-hit wrapper
+  leaves them as is. KH1's power 6 / 10, crit and the stun element are not used for the number;
+  the reaction (KH1's stun → Re:CoM kind 7) is unchanged.
+- Trace: `:recom <ap> col 0 sleight 0x9` (dashes), `col 2` (finisher). Log: `damage: Sonic Blade
+  row 0xf: Re:CoM sleight 0x9 column 0: …`.
+- At Damage = KH1: KH1's damage as before.
+- **Test:** in battle, Sonic Blade on a Shadow: each dash's hit in the trace carries
+  `:recom <2 × attack> col 0 sleight 0x9`, the finisher `<4 × attack> col 2`; compare with Re:CoM's
+  Sonic Blade sleight at Combat = Re:CoM on the same enemy.

@@ -262,10 +262,12 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
         }
     }
     wr(pl + f::ROW_PTR, va(base(), RECOM_ROWS) + sp::recom::ID_START as usize * 16);
-    // Re:CoM's cardless AP (the attack stat), as KH1 swings: KH1's damage replaces it per hit.
+    // Re:CoM's cardless AP (the attack stat), as KH1 swings: at Damage = KH1 KH1's damage replaces
+    // it per hit; at Damage = Re:CoM `initStockSkill`'s own AP for the start row (no hit window).
     wr(pl + f::AP, rd::<i32>(pl + f::ATTACK_STAT));
     wr(pl + f::KIND, 0u32);
     wr(pl + f::ATTR, 0u32);
+    super::damage::special(pl, sp::recom::ID_START);
     wr(pl + f::REQUEST, rd::<u32>(pl + f::REQUEST) & 0xFFFB_FFFF);
     wr(pl + f::PREV_SITUATION, 8u32);
     wr(pl + f::SUB, sp::RECOM_SUB);
@@ -297,6 +299,10 @@ pub unsafe fn special_row(pl: usize, r: &RowStart) {
     wr(pl + f::AP, rd::<i32>(pl + f::ATTACK_STAT));
     wr(pl + f::KIND, rd::<u8>(row + 0xB) as u32);
     wr(pl + f::ATTR, 0u32);
+    // Damage = Re:CoM (owner, 2026-11-01): Re:CoM's Sonic Blade sleight AP for this part
+    // (`exeStockSkill`: dash row 0xF column 0, finisher row 0x10 column 2), its attribute, the
+    // enemy-card rewrite.
+    super::damage::special(pl, r.recom_id);
     wr(pl + f::HIT, 0u64);
     wr(pl + f::CHAIN, 0u64);
     super::attack::new_attack();

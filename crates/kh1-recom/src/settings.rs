@@ -54,6 +54,11 @@ pub struct Settings {
     /// crowd sharing stays (each enemy's think rate is multiplied by the number of enemies,
     /// `0x14017F380`); `Kh1`: each enemy attacks as if alone (decision 30, patch P4).
     pub enemy_pace: Mode,
+    /// Damage and enemy HP at `combat = kh1` (owner, 2026-11-01; `crate::damage`). `Recom` (the
+    /// default): Re:CoM's enemy HP, and Sora's KH1 swings, spells and specials carry Re:CoM's AP
+    /// for the equipped Keyblade's card / the spell's card or sleight / Sonic Blade's sleight.
+    /// `Kh1`: KH1's formula on the KH1 twins' / proxies' records and HP (decisions 12, 21).
+    pub damage: Mode,
     /// Our rows in Re:CoM's Config menu. `off` leaves the menu untouched (a safety switch while
     /// the rows are untested in game; the settings then come from this file only).
     pub config_menu: bool,
@@ -208,7 +213,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, damage: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
     }
 }
 
@@ -233,6 +238,13 @@ guard_reactions = on
 ;          about four times less often than one alone).
 ;   kh1:   each enemy attacks as often as when it is alone.
 enemy_pace = recom
+;
+; damage = recom | kh1 (only at combat = kh1; read at start)
+;   recom: Re:CoM's enemy HP and Re:CoM's damage: each KH1 swing does what Re:CoM's card of the
+;          equipped Keyblade does (normal swings its normal power, finishers its finisher power),
+;          Fire / Blizzard / Thunder their Re:CoM card's or sleight's, Sonic Blade Re:CoM's.
+;   kh1:   KH1's damage formula and KH1's HP for the enemies (each Re:CoM enemy's KH1 twin).
+damage = recom
 ;
 ; config_menu = on | off
 ;   off: don't add our rows to Re:CoM's Config menu (use this file instead).
@@ -337,6 +349,10 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
             "enemy_pace" => match Mode::parse(v) {
                 Some(m) => s.enemy_pace = m,
                 None => warnings.push(bad("enemy_pace must be kh1 or recom")),
+            },
+            "damage" => match Mode::parse(v) {
+                Some(m) => s.damage = m,
+                None => warnings.push(bad("damage must be recom or kh1")),
             },
             "config_menu" => match parse_switch(v) {
                 Some(b) => s.config_menu = b,
@@ -452,6 +468,7 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(text, "combat", s.combat.as_str());
     let t = set_key(&t, "guard_reactions", switch_str(s.guard_reactions));
     let t = set_key(&t, "enemy_pace", s.enemy_pace.as_str());
+    let t = set_key(&t, "damage", s.damage.as_str());
     let mut t = set_key(&t, "config_menu", switch_str(s.config_menu));
     let a = s.abilities;
     for (k, v) in [("high_jump", a.high_jump), ("glide", a.glide), ("superglide", a.superglide), ("dodge_roll", a.dodge_roll), ("guard", a.guard), ("counterattack", a.counterattack)] {
@@ -530,7 +547,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, damage: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -558,6 +575,28 @@ mod guard_reaction_tests {
         let t = store(DEFAULT_FILE, &Settings { enemy_pace: Mode::Kh1, ..Default::default() });
         assert_eq!(t.lines().filter(|l| l.starts_with("enemy_pace")).count(), 1);
         assert_eq!(parse(&t).0.enemy_pace, Mode::Kh1);
+    }
+
+    #[test]
+    fn damage_default_recom_and_round_trip() {
+        // Owner (2026-11-01): Re:CoM is the default.
+        assert_eq!(Settings::default().damage, Mode::Recom);
+        assert!(DEFAULT_FILE.contains("\ndamage = recom\n"));
+        assert_eq!(parse(DEFAULT_FILE).0.damage, Mode::Recom);
+        // An older file without the key keeps the default, without a warning.
+        let (s, w) = parse("combat = kh1\n");
+        assert_eq!(s.damage, Mode::Recom);
+        assert!(w.is_empty());
+        let (s, w) = parse("damage = KH1\ndamage = both\n");
+        assert_eq!(s.damage, Mode::Kh1);
+        assert_eq!(w.len(), 1);
+        let t = store(DEFAULT_FILE, &Settings { damage: Mode::Kh1, ..Default::default() });
+        assert_eq!(t.lines().filter(|l| l.starts_with("damage")).count(), 1);
+        assert_eq!(parse(&t).0.damage, Mode::Kh1);
+        // An old file gains the key when stored.
+        let t = store("combat = kh1\n", &Settings::default());
+        assert_eq!(parse(&t).0.damage, Mode::Recom);
+        assert!(t.contains("damage = recom"));
     }
 
     #[test]

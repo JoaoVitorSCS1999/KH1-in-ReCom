@@ -73,6 +73,7 @@ pub mod camp_rows;
 pub mod command_menu;
 pub mod customize;
 pub mod d2;
+pub mod damage;
 pub mod deck;
 pub mod drops;
 pub mod guard;
@@ -168,6 +169,7 @@ pub fn startup_report(
             );
             let _ = writeln!(r, "settings: guard_reactions = {} (only at combat = kh1)", settings::switch_str(s.guard_reactions));
             let _ = writeln!(r, "settings: enemy_pace = {} (only at combat = kh1)", s.enemy_pace.as_str());
+            let _ = writeln!(r, "settings: damage = {} (only at combat = kh1; recom: Re:CoM's enemy HP and card / sleight damage)", s.damage.as_str());
             let a = s.abilities;
             let _ = writeln!(
                 r,
