@@ -767,6 +767,22 @@ pub mod enemy_stop {
     pub const STOP_STATE: usize = 0x940;
     pub const FLAGS: usize = 0x260;
     pub const STOPPED: u64 = 0x8_0000;
+    /// The duration kind 8 stores (`mov [rbx+0x2D8],eax`, `0x14017DCCA`), copied into the stop
+    /// state's timer `+0x160` by its begin (`0x14017C7F4`); both i32. Checked (disasm).
+    pub const DURATION: usize = 0x2D8;
+}
+
+/// Whether Re:CoM's hit handler has just sent the enemy to its stop state (`+0x68` = `+0x940`,
+/// the reaction picker's case 8, `0x14017D28A`); its begin runs at the next state switch.
+pub unsafe fn stop_entering(enemy: usize) -> bool {
+    use enemy_stop::*;
+    rd::<usize>(enemy + NEXT_STATE) == enemy + STOP_STATE
+}
+
+/// KH1's whole Stop duration (ticks) into Re:CoM's `+0x2D8`, the field its kind 8 just wrote,
+/// before the stop state's begin copies it into its timer. Only after [`stop_entering`].
+pub unsafe fn stop_timer(enemy: usize, ticks: i32) {
+    wr(enemy + enemy_stop::DURATION, ticks);
 }
 
 /// `0x1401A2D90(enemy, -1)`: every attack body of the enemy off (`+0x94` = 0), as Re:CoM's own
@@ -776,8 +792,7 @@ const ATTACK_BODIES_OFF: u32 = 0x001A_2D90;
 /// The stopped enemy's own attack bodies off (KH1 skips the attacks a stopped actor owns,
 /// `0x1402B47A0`): once, when Re:CoM's hit handler has just sent it to its stop state.
 pub unsafe fn stop_attacks_off(enemy: usize) -> bool {
-    use enemy_stop::*;
-    if rd::<usize>(enemy + NEXT_STATE) != enemy + STOP_STATE {
+    if !stop_entering(enemy) {
         return false;
     }
     func::<PlIntFn>(ATTACK_BODIES_OFF)(enemy, -1);
@@ -1760,10 +1775,17 @@ unsafe fn strike_step(pl: usize, step: f32, only: Option<usize>) -> Vec<u32> {
             if only.is_some_and(|o| o != i) {
                 continue;
             }
-            let (centre, area) = (run.centre, run.area);
+            let (centre, area, spell, level) = (run.centre, run.area, run.spell, run.level);
             let hit = run.s.run(if step > 0.0 { step } else { 1.0 }, |h| {
-                let Some(e) = alive_enemy(h) else { return false };
-                bodies(e).iter().any(|(_, b)| mg::body_touches(centre, area, b))
+                let Some(e) = alive_enemy(h) else {
+                    bolt_line(|| format!("{}{level}: {h:#x} passed over (not alive)", mg::spell::NAMES.get(spell as usize).copied().unwrap_or("?")));
+                    return false;
+                };
+                let inside = bodies(e).iter().any(|(_, b)| mg::body_touches(centre, area, b));
+                if !inside {
+                    bolt_line(|| format!("{}{level}: {h:#x} passed over (no hurt body in the area, as KH1)", mg::spell::NAMES.get(spell as usize).copied().unwrap_or("?")));
+                }
+                inside
             });
             if let Some(h) = hit {
                 due.push((h, run.spell, run.level, run.kind, run.attr, run.ap, run.s.struck));

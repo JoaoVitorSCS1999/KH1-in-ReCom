@@ -514,8 +514,24 @@ fn stop_rows_area_and_duration_are_kh1s() {
     assert_eq!(stop::frames(8, 1.0), Some(600.0));
     assert_eq!(stop::frames(5, 0.0), None);
     assert_eq!(stop::ticks(3, 1.0), Some(15000));
-    assert_eq!(stop::ticks(8, 1.0), Some(30000), "KH1's longest fits Re:CoM's i16 hit value");
+    assert_eq!(stop::ticks(8, 1.0), Some(30000));
     assert_eq!(stop::ticks(3, 0.2), Some(3000));
+    // The owner's 0.53.0 log: max MP 12 (840 frames) was clipped to the i16 carrier (655 frames);
+    // the whole duration now goes into Re:CoM's i32 timer once its handler has entered the stop.
+    assert_eq!(stop::ticks(12, 1.0), Some(42000));
+    assert_eq!(stop::ticks(12, 0.6), Some(25200));
+    assert_eq!(stop::carrier(42000), i16::MAX);
+    assert_eq!(stop::carrier(25200), 25200);
+    assert_eq!(stop::timer_after_entry(true, 42000), Some(42000));
+    assert_eq!(stop::timer_after_entry(true, 25200), None, "Re:CoM's own write already holds it");
+    assert_eq!(stop::timer_after_entry(false, 42000), None, "not stopped: nothing written");
+    // Decision 14: the strike breaks into an enemy's attack (bit 0), as every KH1 hit; Re:CoM's
+    // handler drops a hit on an attacking enemy otherwise (`0x14017F8CB`). Not for an immune enemy.
+    assert!(stop::interrupts(0x8200108005, Some(25200)), "the owner's Creapplant mid-attack");
+    assert!(stop::interrupts(0x80000005, Some(32767)), "the owner's Tornadostep mid-attack");
+    assert!(!stop::interrupts(0x8200108810, Some(25200)), "not attacking: Re:CoM's path as it is");
+    assert!(!stop::interrupts(0x8200108005, None), "immune: its attack goes on");
+    assert!(!stop::interrupts(0x200_0001, Some(15000)), "already set");
     // The damage path returns the power for element 9 (the points of the duration).
     let mut rng = Kh1Rand::new(1);
     assert_eq!(spell_damage(&stop_attack(2), 3, &DefenderStats::default(), &mut rng), 5);

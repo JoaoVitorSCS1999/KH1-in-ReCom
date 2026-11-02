@@ -956,7 +956,8 @@ Stop casts as KH1's and stops each enemy in its area, nearest first, in **Re:CoM
   enemy's aim point (speed 0, the row's range / life / radius × 0.1, `stop_all`), held off, then
   **Re:CoM's apply** onto the enemy (7.6's mechanism).
 - **The hit** (`win::attack::stop_hit`): the hit's value = **KH1's duration in Re:CoM ticks** ((2 +
-  max MP) × 60 × resist[9] × 50; the longest, 600 frames = 30000, fits the i16); **Re:CoM's gate
+  max MP) × 60 × resist[9] × 50; carried in the part's i16 value, the whole duration written into
+  `+0x2D8` when longer: see § Stop on attacking enemies below); **Re:CoM's gate
   (param `+0x2C`) is set to KH1's answer for the call** (open when the twin's / proxy's
   `resist[9]` > 0, shut at 0 = immune) and put back after; Re:CoM's kind 8 then stores the value and
   its stop state runs it. An enemy with no KH1 record takes 100 %. After the handler: the attack
@@ -1395,3 +1396,78 @@ battle 1 of that log, also ended by bolts, returned.
   use Re:CoM's tests; Aero's wind is collided by Re:CoM's pass. None has this failure mode. Item
   use after the win is refused as above.
 - Not checked in game.
+
+## Stop on attacking enemies (owner, 0.53.0: "stop doesnt seem to work")
+
+Owner's log `kh1-recom-stop-0530.log`: eight Stopga strikes (Creapplant 333 four times, Tornadostep
+906 / 907 twice each), every one `Re:CoM's contact and apply -> Ok(1)` and `hit stop3 on …: KH1
+resist[9] … ticks`, and **none** with the suffix `, Re:CoM's stop state, its attacks off`, which
+`stop_attacks_off` prints when Re:CoM's handler has set the enemy's next state to its stop state
+(`+0x68` = `+0x940`). So the strike reached Re:CoM's handler and the handler never chose the stop.
+
+### Cause. Checked (decomp + disasm; the per-strike reading: Assumption, see below)
+
+- Re:CoM's enemy hit handler `0x14017F7E0` returns at once, before its kind specials
+  (`0x14017DC50`, kind 8 = stop) and its reaction picker (`0x14017D260`, case 8 → `+0x940`), for an
+  enemy whose `+0x260` bit 0 (in a card attack) is set (`0x14017F8CB`: `test cl,1; jne` → return 0),
+  unless bit `0x2000000` (card interrupt) is set too, in which case it ends the card
+  (`0x14017E1D0`) and clears bit 0 first (`0x14017F8A4..0x14017F8C4`).
+- M6's cardless attacks (Stage 28) set bit 0 for every attack (the log's `flags …810 -> …005`), and
+  at `enemy_pace = kh1` enemies attack almost all the time (the log: `attacking_now` 1–3 of 2–3
+  enemies; 4 of the 5 Firaga hits on Creapplant 333 broke an attack).
+- Every other KH1 hit sets `0x2000000` for the call (decision 14: swings since Stage 9, spells in
+  `spell_hit` since 7.4). **`stop_hit` never did** (since 7.9, 0.23.0): a Stop on an attacking
+  enemy was dropped by Re:CoM's handler without a trace.
+- **Not a regression from 0.50.0.** 0.50.0 added Re:CoM's overlap test before the same apply
+  (`strike_body`); the apply answered 1 and our hit wrapper ran for every strike. The overlap test
+  doesn't touch the enemy's flags, the part's kind (`+0x80`, the attack's `+0x44`, written by the
+  apply `0x14016F1C0`) or value. Stop was never seen working in game before 0.53.0 (no tester
+  thread mentions it).
+- That each of the eight strikes met an attacking enemy is an **Assumption** (the old log line
+  didn't print the handler's answer or the flags); the new line does.
+
+### Also: the duration was clipped
+
+The log's max MP 12 gives (2 + 12) × 60 = 840 frames = 42000 ticks; the hit's value (the part's
+`+0x92`, i16, read by `0x14016FDB0` into the info's `+0x34`) held 32767 (655 frames). Re:CoM's own
+fields are i32: kind 8 stores `+0x2D8` (`0x14017DCC6`: `cvttss2si eax,xmm6; mov [rbx+0x2D8],eax`)
+and the stop state's begin copies it into its timer (`0x14017C7F4`: `mov eax,[rbx+0x2D8]; mov
+[rbx+0x160],eax`). Checked (disasm). (7.9's "the longest, 600 frames at max MP 8" no longer holds:
+the Rod list and the KH2 Keyblades raise max MP past 8.)
+
+### Fixed (native; no new hook or site)
+
+- `stop_hit`: an enemy in an attack (`+0x260 & 1`) gets Re:CoM's card-interrupt bit `0x2000000` for
+  the handler call, exactly as `spell_hit` does (`magic::stop::interrupts`). Re:CoM then ends the
+  attack and runs its own kind 8 and stop state. Not for an immune enemy (`resist[9]` 0: KH1 doesn't
+  interrupt it; Re:CoM keeps its own answer).
+- When the handler has entered the stop (`+0x68` = `+0x940`) and KH1's duration is longer than the
+  i16 carrier, the whole duration goes into Re:CoM's `+0x2D8` before its begin copies it
+  (`magic::stop::timer_after_entry`, `win::magic::stop_timer`).
+- KH1's numbers unchanged ((2 + max MP) × 60 × resist[9] frames, area, order, every 4 frames). The
+  0.50.0 contact (Re:CoM's overlap test before the apply) is kept.
+- Logs: `hit stop3 on …: … (its attack broken), Re:CoM's stop state, its attacks off[, Re:CoM's
+  timer given the whole duration]`, or `…, NOT stopped: Re:CoM's handler -> r, flags 0x…, next
+  state +0x…`; a listed enemy outside the area: `stop3: 0x… passed over (no hurt body in the area,
+  as KH1)` (the log's "2 enemies listed" with one strike: the other was outside, Assumption until
+  this line shows it).
+- Tests: `magic::tests` (Stop's ticks at max MP 12, the carrier, the timer write, the interrupt on
+  the log's flags).
+
+### Thunder and Gravity
+
+Both strike through `spell_hit`, which already sets the interrupt bit, and their kinds (flinch /
+knock-away) go through Re:CoM's normal damage path: not affected. 0.50.0's `strike_body` hits only a
+body Re:CoM's pass would hit (`strike_contact::test_for`); bodies flagged `& 0xE == 6` are skipped
+(as Re:CoM's pass). Checked (code); the log has no Thunder or Gravity casts to confirm in game.
+
+### In-game check
+
+1. Several Heartless that attack a lot (Creapplants, Tornadosteps): Stopga. Each in the area
+   freezes in Re:CoM's stop look, also mid-attack; log `hit stop3 … (its attack broken), Re:CoM's
+   stop state, its attacks off`.
+2. With max MP 12: about 14 s (840 frames) at 100 %, 8.4 s at 60 %; log `…, Re:CoM's timer given the
+   whole duration`.
+3. Hit a stopped enemy: no damage until it thaws, then the held hits land (M7 f3).
+4. Any `NOT stopped` line: send the log (it names Re:CoM's answer and the enemy's flags).
+5. Thunder / Gravity still hit attacking enemies (`(card broken)` on their hit lines).
