@@ -394,6 +394,15 @@ At KH1 setting:
       boss damage falloff is off for bosses that have revenge**. KH1 hits add KH2 Sora's ATKP revenge
       values (swing 8, finisher 24, air swing 12, air finisher 28, Fire 8, Blizzard 16, Thunder 32).
       Notes: `docs/recom-boss-revenge.md`.
+    - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
+      command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
+      included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
+      order, KH1's greying) issues **Re:CoM's LV3 sleight** of each summon (same card ×3: Proud Roar /
+      Showtime / Paradise / Splash / Twinkle / Flare Breath LV3; **Cloud: Omnislash**), started natively
+      without a card. Chosen: **MP cost from Re:CoM's CP** (2 MP for the 20-CP cards Simba..Tinker Bell, 3
+      for the 25-CP Mushu and Cloud); **KH1's party rule skipped until the party exists**; **Re:CoM's
+      summon damage at both Damage settings**; **KH1's once-per-battle rule kept** (row locked while one
+      is out, no Dismiss); battle rooms only; each unlocks with its first Re:CoM summon card.
 
 ## Known open design questions (ask the owner, don't guess)
 
