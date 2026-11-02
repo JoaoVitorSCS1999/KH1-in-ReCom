@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 124: M11 step 1b: the KH1 Soldier on Re:CoM's enemy states, version 0.68.0 (2026-11-01)
+
+- KH1 (Checked (decomp + files)): `xa_ex_2010` script: appearance, wander, engage within 1000; close (< 350) kick or
+  double kick (> 280), sometimes back off + spin kick; mid (350–450) jumping kick / spin kick / run-in kick; far run in;
+  arc strafe after each round; jump-kick at Sora above; counters when hit. 64 constants + 14 request words read
+  from the player's script.
+- Re:CoM: `CEnemySoldier` vtable `0x14054EA68`, ctor `0x140193510` hooked (6 bytes), alloc `0x140188FD7` 0xCD0 →
+  0xCF0; copy runs states 0, 1, 2 (ground kicks), 3 (airborne attacks), 11, 12, 30 and the think. Re:CoM's HP,
+  damage, drops, EXP.
+- Asset step: `ENEMY/0002/EN0002.ANN` (Re:CoM's 75 slots kept, KH1 clips from 100), `.ASD` (10 records), `.SES`,
+  `kh1-soldier.json`.
+- Not ported: KH1's leash (would make a Re:CoM battle unwinnable); scripted-room rules.
+- Assumptions (`docs/recom-m11-enemies.md`): power mapping (kick / spin kick); missing recoils stop the attack.
+- Checked: tests, Windows build, 717 sites. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 123: M11 step 1a: a shared KH1-enemy framework from the Shadow's code (Shadow unchanged), version 0.67.4 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
