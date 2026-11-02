@@ -10,7 +10,8 @@ Tags: Checked (exe / decomp / files / trace) or Assumption. Every address is Ste
 `0x140000000`. Script offsets are offsets in the player's `ex_2020.bd` (part 5 of
 `xa_ex_2020.mdls`, 11648 bytes).
 
-Status: built, not seen in game, no KH1 trace of the Shadow yet.
+Status: in game since 0.67.0 (owner: "Everything seems to work well"); the unhittable-while-sunk fix
+below is not seen in game yet; no KH1 trace of the Shadow yet.
 
 ## What was built
 
@@ -160,8 +161,10 @@ stay Re:CoM's.
   does (`0x1401D6C30`); the facing goes to `+0x54`. The arc lands on Re:CoM's floor contact
   (`+0x120 & 5`). Root-motion requests play with the root flag (Re:CoM moves them).
 - **Sink / rise:** the height ramp is Re:CoM's model scale y (`0x1401A4A20` / `0x1401A7050`, the
-  field Re:CoM's own dig squashes); underground switches the two body sets Re:CoM's dig switches
-  (`0x1401A2D70` + `0x1401A2D90` off, `0x1401A2DB0` + `0x1401A2DD0` on).
+  field Re:CoM's own dig squashes). What can hit it follows KH1's flag 0x40 (§ Unhittable while
+  sunk): Re:CoM's hurt bodies off (`0x1401A2D70`) from the sink's first frame to rise frame 50, on
+  (`0x1401A2DB0`) after. The battle appearance turns both body sets off as Re:CoM's state-0 begin
+  does; Re:CoM's state-0 end turns them on.
 - **Reactions:** Re:CoM's hit handler `0x14017F7E0` applies Re:CoM's damage and picks state 11 / 12
   / 30 as always. Our begin reads the hit (the hit info `+0xF8`: the attack `+0x50`, its Re:CoM
   kind `+0x80` and attacker handle `+0x98`; the body part's contact point `+0x50`): KH1's kind from
@@ -302,3 +305,82 @@ after the ctor call). `+0xa4e44` is in `win::shadow::ctor`: it read the facing f
 registers: rax 0)). The ctor now takes facing 0 when there is no mover; state 0's begin (`appear_begin`)
 already takes the spawn's facing from the mover, and now skips that too if the mover is missing; the hit
 reader returns "no hit" without a mover. Checked: tests, Windows build. Not checked: in game.
+
+## Fix: unhittable while sunk (owner 2026-11-02, on 0.67.1)
+
+Owner: "Everything seems to work well, except i can attack the shadow when its flat on the ground".
+
+### KH1's rule. Checked (decomp + files)
+
+- KH1's attack-vs-hurt-part test `0x1402B6AF0` runs only for actors that pass `0x140291920`:
+  `flags & 0x8048 == 0x8000` (actor `+0`), and the hurt parts not masked in `+0x3A8`. The automatic
+  target search `0x1402B0A00` (the lock-on task `0x1402B11B0`'s pick when nothing is locked) needs
+  `0x140292070`, the same flag test. So **actor flag 0x40 set = can't be hit, not auto-targeted**.
+- The Shadow's script sets and clears it through its flag helpers `0x24DA` (`|=`) / `0x24BE` (`&= ~`)
+  on actor `+0`:
+  - sink `0x1328`: on its first frame, with request 70 and 202 queued, flags `|= 0x20, 0x40, 0x10`
+    (`0x1366..0x138C`); its ramp ends (frame len(70) + 45 = 105) with flags `&= ~0x10`, `|= 2, 0x100`,
+    `&= ~1`, the `+0x3AC` mask (clr 8, set 4), and `wp+0x3C` stays 1;
+  - rise `0x114A`: at its start masks back (`+0x3AC` clr 4, set 8), flags `|= 1, 0x10`, `&= ~2, 0x100`,
+    request 69; at its ramp's end (frame len(69) − 30 = 50) flags `&= ~0x10, ~0x20, ~0x40`
+    (`0x12D8..0x1314`; 0x40 kept only when `wp+0x44` = 1, a scripted-room flag `0x2C04` sets in one
+    Traverse Town room), then `wp+0x3C` = 0;
+  - init `0x27F8`, a Shadow spawned from the floor (`mdl_5a` ∉ {0, 16}): flags `|= 0x100, 0x20, 0x40`
+    (`0x28B0..0x28E0`), so it can't be hit until its first rise's frame 50.
+- So: **unhittable from the sink's request-70 frame until rise frame 50**, the whole time
+  underground in between. Flag 0x10 (`0x140292010`: `flags & 0x8010 == 0x8000`, read by the physics
+  steps `0x14029A3C0` / `0x1402998A0`) is the body push against Sora: off during the sink and the
+  rise.
+- Lock-on: the lock button's pick `0x1402B1540` (from `0x1402B0610`) and a held lock's check
+  `0x1402B0030` / `0x1402B13F0` don't read flag 0x40; they read `+0x374` bits 1 / 2 / 0x8000,
+  flags 0x200, the distance, and the `+0x3AC` mask of the lock (kind-0) points. The Shadow's
+  kind-0 points are its collision block's points 0 and 1 (init masks point 1); the sink / rise
+  masks bits 4 / 8 are its kind-2 points 2 and 3 (Checked (files): `xa_ex_2020.mdls` part 4,
+  group 3: kinds 0, 0, 2, 2). So in KH1 the lock button **can** lock a sunk Shadow and a held lock
+  stays; only the automatic target skips it.
+
+### What changed
+
+- `kh1_core::shadow`: a new command `Hittable(bool)` at exactly those three points (sink frame 0
+  off, rise frame 50 on, a floor spawn off at init); `Underground` is log only now (it was the hurt
+  switch, at the sink's frame 105 and the rise's frame 0: the owner's bug). Test
+  `unhittable_from_the_sink_to_the_rise_ramps_end` checks the frames.
+- `win::shadow`: `Hittable` switches only Re:CoM's hurt bodies (`0x1401A2D70` off / `0x1401A2DB0` on,
+  every body, as its dig). The lock-on flag (`+0x154` bit 0x10000, the only filter of Re:CoM's lock
+  pick `0x1401CDB90`) stays on: Sora can lock a sunk Shadow, as with KH1's lock button.
+- No interaction with boss revenge (Stages 106 / 114): its hurt-off and attack-end hooks act only on
+  the 12 boss vtables (`revenge::boss_by_vtable`), and our calls go to `0x1401A2D70` / `0x1401A2DB0`
+  directly, not through the attack-state `+0x438` / `+0x440` they wrap. The Shadow's tail is its own
+  allocation site (`0x140188FAD`), not a revenge tail.
+
+### The owner's log and traces (0.67.1). Checked (trace + log)
+
+- Trace 18: three hits landed during a sink: on a Shadow 26 frames into request 202 (frame 87 of
+  the 105-frame sink), on one 28 frames into request 70, on one 4 frames into 202 (frame 65). With
+  0.67.1 the hurt bodies went off only at the sink's frame 105 and back on at the rise's frame 0.
+  The log also shows a flinch during a rise (`e162`, right after `motion 69`). KH1 can't be hit at
+  any of these frames. After such a hit the Shadow flinched, then stood in its idle for the rest of
+  the sink loop (45 frames in trace 18) before rising: also gone with the fix.
+- Everything else matches KH1's script: the sink 70 runs its 60 frames then 202; the rise 69 hands
+  over at frame 51 (ramp 50 + the ground wait); the jump start 3 runs 31 frames, the fall 4 16
+  frames, then the leap claw 201 (`leap_attack_after` 16) for its 70 frames, request 6 after; the
+  leap speed is always 8 (the cap: every leap was from 300–450 away); the claw 200 runs 93 frames
+  (92 + the attack-state frame), the swipe 204 87; flinches 0x48 / 0x49 run 43 frames and alternate
+  when hit again in the flinch; a finisher launched (0x52, then 0x53, down time logged); a Guard on
+  a leap claw played clash recoil 208 in the air, then the landing 7 (15 frames), then the idle.
+  Re:CoM's damage (10 per swing, 15 for the finisher) on Re:CoM's HP 33.
+- Not a game bug: the trace's `shadow` token kept listing defeated Shadows (`73` / `84` held to the
+  end of the file) because the runtime outlives the Re:CoM object. It now stops listing one 31
+  frames after its defeat (Re:CoM's 1500-unit removal timer) and shows `h0` / `h1` (hittable).
+- The log cap (4000 `shadow:` lines) filled with the underground weave's draw (one a frame): raised
+  to 20000.
+
+### Not built / open (this fix)
+
+- KH1's automatic target (soft target with nothing locked) skips a sunk Shadow; Re:CoM's lock pick
+  doesn't distinguish (one flag). Re:CoM's soft target is Re:CoM's (Stage 73). Assumption: minor.
+- KH1's flag 0x10 (Sora's body pushes through the Shadow during the sink and the rise): Re:CoM's
+  body push isn't mapped to it. Assumption: not noticeable.
+
+Checked: tests (kh1-core 45, DLL 441), Windows build (no warnings), pefile (697 sites, 0 mismatches).
+Not checked: in game.

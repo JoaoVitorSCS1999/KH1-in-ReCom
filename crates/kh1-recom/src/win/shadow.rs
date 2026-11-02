@@ -38,7 +38,7 @@ static ORIGINAL: OnceLock<Vec<usize>> = OnceLock::new();
 /// Re:CoM's hurt-part bones (head, hips) in `EN0001.MDL` for KH1's parts 0 / 1.
 static PART_BONES: OnceLock<[i32; 2]> = OnceLock::new();
 static LINES: AtomicU32 = AtomicU32::new(0);
-const LINE_CAP: u32 = 4000;
+const LINE_CAP: u32 = 20_000;
 static SEED: AtomicU32 = AtomicU32::new(0x1234_5678);
 
 /// Re:CoM functions (bytes checked: `sites::SHADOW_CALLEES` and the lists named there).
@@ -131,6 +131,10 @@ struct Runtime {
     recom_appear: bool,
     appear_sub: u8,
     dead: bool,
+    /// Frames since the defeat (the trace stops listing it once Re:CoM removed it).
+    dead_frames: u32,
+    /// KH1's flag 0x40 clear (Re:CoM's hurt bodies on).
+    hittable: bool,
     /// The last launch's down time (frames).
     down: f32,
 }
@@ -303,6 +307,8 @@ pub unsafe extern "win64" fn ctor(this: usize, a: usize, b: usize, c: usize) -> 
             recom_appear: false,
             appear_sub: 0,
             dead: false,
+            dead_frames: 0,
+            hittable: true,
             down: 0.0,
         });
         Some(v.len() - 1)
@@ -394,6 +400,15 @@ unsafe fn ended(en: usize, rt: &Runtime) -> bool {
     }
 }
 
+/// KH1's hittable flag (actor flag `0x40`, `kh1_core::shadow::Cmd::Hittable`) as Re:CoM's own
+/// hurt-body switch: every hurt body off (`0x1401A2D70(enemy, −1)`) or on (`0x1401A2DB0`), what
+/// Re:CoM's dig does (`0x140192E60` case 0 / 5). Re:CoM's hit handler, the KH1 swings' pair tests
+/// and the spells' overlap tests only meet bodies that are on. The lock-on flag (`+0x154` bit
+/// 0x10000, `0x1401CDB90`) stays: KH1's lock button (`0x1402B1540`) can lock a sunk Shadow too.
+unsafe fn hurt(en: usize, on: bool) {
+    func::<BodiesFn>(if on { f::HURT_ON } else { f::HURT_OFF })(en, -1);
+}
+
 unsafe fn bodies(en: usize, on: bool) {
     if on {
         func::<BodiesFn>(f::HURT_ON)(en, -1);
@@ -446,7 +461,12 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd) {
                 }
             }
         }
-        Cmd::Underground(u) => bodies(en, !u),
+        // Log only: what can hit it is KH1's flag 0x40 (`Hittable`), not the underground state.
+        Cmd::Underground(_) => {}
+        Cmd::Hittable(h) => {
+            hurt(en, h);
+            rt.hittable = h;
+        }
         Cmd::Height(h) => set_height(en, h),
         Cmd::FadeIn(n) => {
             // KH1's 30-frame alpha fade-in of the first rise (`0x2570`): no Re:CoM model alpha found
@@ -884,7 +904,10 @@ pub unsafe extern "win64" fn defeat_begin(en: usize) {
 
 /// State 30 step: KH1's body (the launch arc of the last hit), then Re:CoM's step (removal).
 pub unsafe extern "win64" fn defeat_step(en: usize) {
-    with_rt(en, |rt| tick(en, rt, false));
+    with_rt(en, |rt| {
+        rt.dead_frames = rt.dead_frames.saturating_add(1);
+        tick(en, rt, false)
+    });
     call_original(en, sh::step_slot(state::DEFEAT));
 }
 
@@ -915,13 +938,23 @@ pub unsafe fn trace_token() -> String {
     {
         let Ok(v) = RT.try_lock() else { return String::new() };
         v.iter()
-            .filter(|r| r.battle == super::battle::battle_number())
+            // Re:CoM removes a defeated enemy after its 1500-unit (30-frame) timer: not listed after.
+            .filter(|r| r.battle == super::battle::battle_number() && !(r.dead && r.dead_frames > 31))
             .take(8)
-            .map(|r| format!("{:x}:r{:?}:{:?}:{}", r.enemy & 0xFFFFFF, r.current, r.reaction.map(|p| match p {
-                Phase::Motion => 'm',
-                Phase::Air { .. } => 'a',
-                Phase::Down { .. } => 'd',
-            }), r.action.map_or(0, |a| a.request)))
+            .map(|r| {
+                format!(
+                    "{:x}:r{:?}:{:?}:{}:h{}",
+                    r.enemy & 0xFFFFFF,
+                    r.current,
+                    r.reaction.map(|p| match p {
+                        Phase::Motion => 'm',
+                        Phase::Air { .. } => 'a',
+                        Phase::Down { .. } => 'd',
+                    }),
+                    r.action.map_or(0, |a| a.request),
+                    r.hittable as u8
+                )
+            })
             .collect::<Vec<_>>()
             .join(" ")
     }

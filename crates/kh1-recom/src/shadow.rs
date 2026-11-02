@@ -237,6 +237,7 @@ pub fn cmd_token(c: &Cmd) -> String {
         Cmd::Yaw(y) => format!("yaw {:.2}", y),
         Cmd::Jump { height, velocity } => format!("jump h{height} v({:.1},{:.1})", velocity.x, velocity.z),
         Cmd::Underground(u) => format!("underground {u}"),
+        Cmd::Hittable(h) => format!("hittable {h}"),
         Cmd::Height(h) => format!("height {h:.2}"),
         Cmd::FadeIn(f) => format!("fade in {f}"),
         Cmd::Target(t) => format!("target {t}"),
@@ -247,7 +248,7 @@ pub fn cmd_token(c: &Cmd) -> String {
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ks::req::WALK && *request != ks::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ks::req::WALK && *request != ks::req::RUN)
 }
 
 #[cfg(test)]

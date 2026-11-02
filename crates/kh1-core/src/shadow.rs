@@ -434,9 +434,16 @@ pub enum Cmd {
     Yaw(f32),
     /// A jump (`sys 50` → `0x1402B7F20`): hop height and air velocity.
     Jump { height: f32, velocity: Vec3 },
-    /// Underground on / off: hurt bodies, lock points and the attack-able flags (KH1 flags
-    /// `| 0x70` / masks `+0x3AC`; Re:CoM's dig: bodies off, `0x1401A2D70` / `0x1401A2D90`).
+    /// Underground on / off (the script's `wp+0x3C` and the `+0x3AC` masks of its kind-2 points
+    /// 2 / 3; not its lock points 0 / 1): for the log. What can hit it is [`Cmd::Hittable`].
     Underground(bool),
+    /// KH1's actor flag `0x40` cleared (true) or set (false): with it set, KH1's attack-vs-hurt
+    /// test (`0x1402B6AF0`, gated by `0x140291920`: `flags & 0x8048 == 0x8000`) and the automatic
+    /// target search (`0x1402B0A00`, gated by `0x140292070`, same test) skip the actor. The script
+    /// sets it at the sink's first frame (`0x1378`, with request 70), at the init of a Shadow that
+    /// spawns from the floor (`0x28D2`), and clears it at the end of the rise's ramp (`0x130A`:
+    /// rise frame len(69) − 30 = 50). Checked (decomp + files).
+    Hittable(bool),
     /// The model's height scale the script ramps while sinking (1 → 0) and rising (0 → 1): actor
     /// `+0x44`, the y of the scale `+0x40..` (the lock radius reads `+0x40`, `0x1402B04C0`;
     /// that `+0x44` is the y scale: Assumption, from the layout).
@@ -753,6 +760,8 @@ async fn sink(cx: &Cx) {
     cx.borrow_mut().underground = true;
     push(cx, Cmd::Motion { request: req::SINK, blend: c.attack_blend() });
     push(cx, Cmd::Queue { request: req::UNDERGROUND, blend: 0.0 });
+    // `0x1366..0x138C`: flags |= 0x20, 0x40, 0x10 on the sink's first frame.
+    push(cx, Cmd::Hittable(false));
     let len = motion_frames(cx, req::SINK) + c.sink_extra();
     let mut t = 0.0;
     while t < len {
@@ -814,6 +823,9 @@ async fn rise(cx: &Cx) {
         io.underground = false;
     }
     push(cx, Cmd::Height(1.0));
+    // `0x12D8..0x1314`: flags &= ~0x10, ~0x20, ~0x40 (the last unless `wp+0x44`, a scripted-room
+    // flag `0x2C04` sets only in one Traverse Town room; Assumption: no Re:CoM battle needs it).
+    push(cx, Cmd::Hittable(true));
     wait_grounded(cx).await;
 }
 
@@ -1084,6 +1096,10 @@ impl Ai {
                 io.draws.push(Draw { value: v, what: "weave phase" });
                 io.phase = v * 360.0;
                 io.state = (0, false);
+                // `0x28B0..0x28E0`: spawned from the floor: flags |= 0x100, 0x20, 0x40.
+                if !io.risen {
+                    io.out.push(Cmd::Hittable(false));
+                }
             }
             self.main = Some(Box::pin(supervisor(cx)));
         }
@@ -1264,6 +1280,29 @@ mod tests {
     }
 
     #[test]
+    fn unhittable_from_the_sink_to_the_rise_ramps_end() {
+        // KH1's flag 0x40: set with request 70, cleared rise frame len(69) − 30 = 50 later.
+        let mut s = sim(2);
+        let sora = Vec3::new(0.0, 0.0, 1000.0);
+        let mut at = |s: &mut Sim, n: usize| -> Vec<(usize, Cmd)> {
+            let mut out = Vec::new();
+            for f in 0..n {
+                let k = s.log.len();
+                s.run(sora, 1);
+                out.extend(s.log[k..].iter().cloned().map(|c| (f, c)));
+            }
+            out
+        };
+        let log = at(&mut s, 600);
+        let f = |want: &Cmd| log.iter().find(|(_, c)| c == want).map(|x| x.0);
+        let sink = log.iter().find(|(_, c)| matches!(c, Cmd::Motion { request: req::SINK, .. })).unwrap().0;
+        assert_eq!(f(&Cmd::Hittable(false)), Some(sink), "same frame as request 70");
+        let rise = log.iter().find(|(_, c)| matches!(c, Cmd::Motion { request: req::RISE, .. })).unwrap().0;
+        assert_eq!(f(&Cmd::Hittable(true)), Some(rise + 50), "rise frame 50");
+        assert!(!log.iter().any(|(t, c)| *c == Cmd::Hittable(true) && *t < rise));
+    }
+
+    #[test]
     fn idle_without_target_wanders() {
         let mut s = sim(3);
         s.run(Vec3::new(0.0, 0.0, 5000.0), 30);
@@ -1307,10 +1346,14 @@ mod tests {
         assert!(s.log.contains(&Cmd::Motion { request: req::RISE, blend: 0.0 }));
         assert!(s.log.contains(&Cmd::FadeIn(30.0)));
         assert!(!s.log.iter().any(|c| matches!(c, Cmd::State(_))));
+        assert!(s.log.contains(&Cmd::Hittable(false)), "spawned unhittable");
+        assert!(!s.log.contains(&Cmd::Hittable(true)), "until the rise's ramp ends");
         s.run(Vec3::new(0.0, 0.0, 100.0), 52);
         let heights = s.log.iter().filter(|c| matches!(c, Cmd::Height(_))).count();
         assert_eq!(heights, 51, "50 ramp frames + the final 1.0");
         let i0 = s.log.iter().position(|c| *c == Cmd::State(0)).expect("idle after the rise");
+        let ih = s.log.iter().position(|c| *c == Cmd::Hittable(true)).expect("hittable at the ramp's end");
+        assert!(ih < i0);
         assert_eq!(s.log[i0 + 1..].iter().find(|c| matches!(c, Cmd::State(_))), Some(&Cmd::State(1)));
         assert!(s.ai.risen());
     }
