@@ -574,6 +574,56 @@ pub const M6_ENEMY_UI_CHECKED: &[Site] = &[
     Site { name: "stock folder start (0x140169070)", rva: 0x0016_9070, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x55, 0x48, 0x83, 0xEC, 0x30] },
 ];
 
+/// Enemy card sounds at KH1 (owner, 2026-11-02, `crate::boss::sound`): Re:CoM's `call
+/// 0x1402AA360` (its 2D sound play: ecx = id, edx = -1) at the eight places a revolver or stock
+/// folder plays its reload, deal or stock sound, retargeted per battle with the mask reads
+/// (`win::deck`) to a stub that hands our function the object (rbx, or rdi at the folder), which
+/// skips the play for a side-2 object. `expect` is Re:CoM's call. Checked (exe): no branch or
+/// pointer lands inside any of them; the object register is not written between the function's
+/// `mov <reg>,rcx` and the call (disasm). Order: `crate::boss::SOUND_SITES`.
+pub const M6_ENEMY_SOUND_CALLS: &[Site] = &[
+    Site { name: "reload done at once, 0x15 (0x140167B01)", rva: 0x0016_7B01, expect: &[0xE8, 0x5A, 0x28, 0x14, 0x00] },
+    Site { name: "reload gauge step, 0x14 (0x140167BDA)", rva: 0x0016_7BDA, expect: &[0xE8, 0x81, 0x27, 0x14, 0x00] },
+    Site { name: "reload charge loop, 0x13 (0x140167C01)", rva: 0x0016_7C01, expect: &[0xE8, 0x5A, 0x27, 0x14, 0x00] },
+    Site { name: "reload done, 0x15 (0x140167C93)", rva: 0x0016_7C93, expect: &[0xE8, 0xC8, 0x26, 0x14, 0x00] },
+    Site { name: "deal after a reload, +0x204 (0x14016B3E7)", rva: 0x0016_B3E7, expect: &[0xE8, 0x74, 0xEF, 0x13, 0x00] },
+    Site { name: "first deal, +0x204 (0x14016A091)", rva: 0x0016_A091, expect: &[0xE8, 0xCA, 0x02, 0x14, 0x00] },
+    Site { name: "stock, 0xF (0x14016DCA4)", rva: 0x0016_DCA4, expect: &[0xE8, 0xB7, 0xC6, 0x13, 0x00] },
+    Site { name: "stock folder add, 0xF (0x14016DE3F)", rva: 0x0016_DE3F, expect: &[0xE8, 0x1C, 0xC5, 0x13, 0x00] },
+];
+
+/// Each call's context (the id and volume loads, the call, and what uses its result) and the
+/// start of its function up to `mov rbx,rcx` / `mov rdi,rcx`. Checked so a build where they
+/// differ is never touched.
+pub const M6_ENEMY_SOUND_CHECKED: &[Site] = &[
+    // test edi,edi; jne +0xB; lea edx,[rdi-1]; lea ecx,[rdi+0x15]: id 0x15 with edi = 0.
+    Site { name: "reload done at once context (0x140167AF7)", rva: 0x0016_7AF7, expect: &[0x85, 0xFF, 0x75, 0x0B, 0x8D, 0x57, 0xFF, 0x8D, 0x4F, 0x15, 0xE8, 0x5A, 0x28, 0x14, 0x00] },
+    // mov edx,-1; imul edi,ecx,0x64; lea ecx,[rdx+0x15] (0x14); mov [rbx+0x84],eax; the call.
+    Site { name: "reload gauge step context (0x140167BC9)", rva: 0x0016_7BC9, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x6B, 0xF9, 0x64, 0x8D, 0x4A, 0x15, 0x89, 0x83, 0x84, 0x00, 0x00, 0x00, 0xE8, 0x81, 0x27, 0x14, 0x00] },
+    // mov edx,-1; lea ecx,[rdx+0x14] (0x13); the call; mov [rbx+0x200],eax (the loop's handle).
+    Site { name: "reload charge loop context (0x140167BF9)", rva: 0x0016_7BF9, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x8D, 0x4A, 0x14, 0xE8, 0x5A, 0x27, 0x14, 0x00, 0x89, 0x83, 0x00, 0x02, 0x00, 0x00] },
+    // mov edx,-1; lea ecx,[rdx+0x16] (0x15); the call.
+    Site { name: "reload done context (0x140167C8B)", rva: 0x0016_7C8B, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x8D, 0x4A, 0x16, 0xE8, 0xC8, 0x26, 0x14, 0x00] },
+    // mov ecx,[rbx+0x204] (the revolver's deal sound); mov edx,-1; the call.
+    Site { name: "deal after a reload context (0x14016B3DC)", rva: 0x0016_B3DC, expect: &[0x8B, 0x8B, 0x04, 0x02, 0x00, 0x00, 0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0xE8, 0x74, 0xEF, 0x13, 0x00] },
+    Site { name: "first deal context (0x14016A086)", rva: 0x0016_A086, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x8B, 0x8B, 0x04, 0x02, 0x00, 0x00, 0xE8, 0xCA, 0x02, 0x14, 0x00] },
+    // mov edx,-1; lea ecx,[rdx+0x10] (0xF); the call.
+    Site { name: "stock context (0x14016DC9C)", rva: 0x0016_DC9C, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x8D, 0x4A, 0x10, 0xE8, 0xB7, 0xC6, 0x13, 0x00] },
+    Site { name: "stock folder add context (0x14016DE37)", rva: 0x0016_DE37, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x8D, 0x4A, 0x10, 0xE8, 0x1C, 0xC5, 0x13, 0x00] },
+    // The functions, each up to its `mov rbx,rcx` (rdi at the folder): the reload step
+    // 0x140167AA0 (size 0x246), the deal 0x14016B2B0 (0x171), the first deal 0x140169F40 (0x206),
+    // the stock 0x14016DB60 (0x180), the folder add 0x14016DD20 (0x14B).
+    Site { name: "reload step start (0x140167AA0)", rva: 0x0016_7AA0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x20, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0xFA, 0x48, 0x8B, 0xD9] },
+    Site { name: "revolver deal start (0x14016B2B0)", rva: 0x0016_B2B0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0x89, 0x74, 0x24, 0x48, 0x48, 0x8B, 0xD9] },
+    Site { name: "revolver first deal start (0x140169F40)", rva: 0x0016_9F40, expect: &[0x48, 0x89, 0x5C, 0x24, 0x20, 0x56, 0x57, 0x41, 0x54, 0x48, 0x83, 0xEC, 0x20, 0x83, 0x79, 0x5C, 0x01, 0x41, 0xBC, 0x02, 0x00, 0x00, 0x00, 0x4C, 0x89, 0x7C, 0x24, 0x50, 0x48, 0x8B, 0xD9] },
+    Site { name: "revolver stock start (0x14016DB60)", rva: 0x0016_DB60, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xBA, 0x0A, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9] },
+    Site { name: "stock folder add start (0x14016DD20)", rva: 0x0016_DD20, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x50, 0x48, 0xC7, 0x44, 0x24, 0x40, 0xFE, 0xFF, 0xFF, 0xFF, 0x48, 0x89, 0x5C, 0x24, 0x60, 0x48, 0x89, 0x74, 0x24, 0x68, 0x41, 0x8B, 0xD8, 0x8B, 0xF2, 0x48, 0x8B, 0xF9] },
+    // The revolver ctor 0x140164D40 sets the deal sound: mov dword [rdi+0x204],0x1B (side 2) /
+    // 0x12 (side 1).
+    Site { name: "revolver ctor: enemy deal sound 0x1B (0x140164DD6)", rva: 0x0016_4DD6, expect: &[0xC7, 0x87, 0x04, 0x02, 0x00, 0x00, 0x1B, 0x00, 0x00, 0x00] },
+    Site { name: "revolver ctor: Sora's deal sound 0x12 (0x140164DF5)", rva: 0x0016_4DF5, expect: &[0xC7, 0x87, 0x04, 0x02, 0x00, 0x00, 0x12, 0x00, 0x00, 0x00] },
+];
+
 /// M6 stage 3, log only: Sora's card-duel init (`CPlayerSora` vtable `+0x1E0`, action 0x24, from
 /// hit reaction 0x21 in `0x1401E6DE0`; Marluxia 3's countdown). A pass-through, installed apart.
 /// Same rule as [`HOOKS`]; Checked (exe): referenced only by the vtable and `.pdata`, no branch
@@ -2141,6 +2191,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         M6_GETTER_CALLERS,
         M6_ENEMY_UI_CALLS,
         M6_ENEMY_UI_CHECKED,
+        M6_ENEMY_SOUND_CALLS,
+        M6_ENEMY_SOUND_CHECKED,
         M6_BOSS_HOOKS,
         REVENGE_HOOKS,
         REVENGE_ALLOC,
@@ -2577,6 +2629,55 @@ mod tests {
             assert!((start..start + size).contains(&c.rva), "{}", c.name);
             assert!(M6_ENEMY_UI_CHECKED.iter().any(|s| s.rva == start), "{}", c.name);
         }
+    }
+
+    #[test]
+    fn m6_enemy_sound_sites() {
+        // Every retargeted call is Re:CoM's `call 0x1402AA360` (the checked sound play), sits in
+        // its checked context, and is no other stage's retarget.
+        let play = CALLEES.iter().find(|s| s.rva == 0x002A_A360).unwrap();
+        let overlaps = |a: &Site, b: &Site| a.rva < b.rva + b.expect.len() as u32 && b.rva < a.rva + a.expect.len() as u32;
+        assert_eq!(M6_ENEMY_SOUND_CALLS.len(), crate::boss::SOUND_SITES.len());
+        for (c, s) in M6_ENEMY_SOUND_CALLS.iter().zip(crate::boss::SOUND_SITES) {
+            assert_eq!(c.rva, s.call, "{}", c.name);
+            assert_eq!(c.expect.len(), 5, "{}", c.name);
+            assert_eq!(crate::hookplan::call_target(0x1_4000_0000 + c.rva as u64, c.expect), Some(0x1_4000_0000 + play.rva as u64), "{}", c.name);
+            assert!(!M6_COCKPIT_CALLS.iter().chain(M6_CARD_CALLS).chain(M6_ENEMY_UI_CALLS).chain(KH1_HUD_MASK_CALLS).any(|m| overlaps(m, c)), "{}", c.name);
+            let ctx = M6_ENEMY_SOUND_CHECKED.iter().find(|x| x.rva < c.rva && c.rva + 5 <= x.rva + x.expect.len() as u32).unwrap_or_else(|| panic!("{}", c.name));
+            let off = (c.rva - ctx.rva) as usize;
+            assert_eq!(&ctx.expect[off..off + 5], c.expect, "{}", c.name);
+            let before = &ctx.expect[..off];
+            // The id the checked bytes load, as `crate::boss::SOUND_SITES` names it.
+            match s.id {
+                // lea ecx,[rdx+k] after mov edx,-1: k - 1.
+                Some(id) if before.starts_with(&[0xBA, 0xFF, 0xFF, 0xFF, 0xFF]) => {
+                    let lea = before.windows(3).rposition(|w| w[0] == 0x8D && w[1] == 0x4A).unwrap_or_else(|| panic!("{}", c.name));
+                    assert_eq!(before[lea + 2] as u32 - 1, id, "{}", c.name);
+                }
+                // jne skips it unless edi = 0; lea ecx,[rdi+0x15].
+                Some(id) => {
+                    assert!(before.starts_with(&[0x85, 0xFF, 0x75]), "{}", c.name);
+                    assert!(before.ends_with(&[0x8D, 0x4F, id as u8]), "{}", c.name);
+                }
+                // mov ecx,[rbx+0x204]: the revolver's deal sound.
+                None => assert!(before.windows(6).any(|w| w == [0x8B, 0x8B, 0x04, 0x02, 0x00, 0x00]), "{}", c.name),
+            }
+            assert!(before.windows(5).any(|w| w == [0xBA, 0xFF, 0xFF, 0xFF, 0xFF]) || before.windows(3).any(|w| w == [0x8D, 0x57, 0xFF]), "{} volume -1", c.name);
+        }
+        // Each call is inside its function, whose checked start ends with `mov <reg>,rcx`.
+        for s in crate::boss::SOUND_SITES {
+            let f = M6_ENEMY_SOUND_CHECKED.iter().find(|x| x.rva == s.function).unwrap_or_else(|| panic!("{}", s.what));
+            assert!((s.function..s.function + s.size).contains(&s.call), "{}", s.what);
+            let mov: &[u8] = match s.reg {
+                crate::boss::ObjReg::Rbx => &[0x48, 0x8B, 0xD9],
+                crate::boss::ObjReg::Rdi => &[0x48, 0x8B, 0xF9],
+            };
+            assert!(f.expect.ends_with(mov), "{}", s.what);
+        }
+        // The ctor's two deal ids are the ones `crate::boss::sound` names.
+        let ctor = |rva: u32| M6_ENEMY_SOUND_CHECKED.iter().find(|x| x.rva == rva).unwrap().expect[6] as u32;
+        assert_eq!(ctor(0x0016_4DD6), crate::boss::sound::DEAL_ENEMY);
+        assert_eq!(ctor(0x0016_4DF5), crate::boss::sound::DEAL_PLAYER);
     }
 
     #[test]
