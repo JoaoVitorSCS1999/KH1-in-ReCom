@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 123: M11 step 1a: a shared KH1-enemy framework from the Shadow's code (Shadow unchanged), version 0.67.4 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
+- Framework: `kh1-core` `enemy/` (KH1's enemy body physics, the shared reaction engine, the script runtime, the
+  helper routines KH1's enemy scripts share byte for byte, request bit 23); `kh1-recom` `kh1_enemy` (one class table:
+  vtable, alloc / tail, ctor and size sites, attack-state map, appearance, manifest; one ctor wrapper per class;
+  the Shadow is class 0); `kh1-recom-assets` `enemy` (one Spec per enemy writes .ANN / .ASD / .SES / manifest);
+  `kh1-trace` enemy rows gain `kind` / `spawn`; `tools/kh1-ai-script.py` (lists a KH1 AI script from the player's files).
+- Shadow unchanged: its tests pass, its four asset outputs hash the same, same manifest, logs and trace token.
+- Checked: tests, Windows build, sites. Not checked: in game.
+
+---
+
 ## Stage 122: Revenge moves untouchable whenever a boss plays them; Hook's hole closed, version 0.67.3 (2026-11-01)
 
 - Owner (2026-11-02): "you can still hit bosses during their revenge move (or if they use their revenge move naturally
