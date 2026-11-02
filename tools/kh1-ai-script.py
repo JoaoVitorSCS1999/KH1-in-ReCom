@@ -6,7 +6,8 @@ usage: python3 -I tools/kh1-ai-script.py <xa_xx_NNNN.mdls | script.bd> <KH1 Stea
 
 Reads only the player's own files: the script from the model, the syscall table (argument counts, which
 return a value) from the KH1 Steam exe at 0x140529180 (16-byte entries: function, descriptor; low byte =
-argument count, bit 30 = returns a value). Nothing of the game is in this file.
+argument count, bit 30 = returns a value), and table 1 (mode 1, 0x1405752D0) from the pointer array at
+0x140529FA0. Nothing of the game is in this file.
 
 The VM (`0x1402CC620`, Checked (decomp)): 16-bit words, low nibble = op, bits 4..5 = sub, 6..7 = mode
 (0 sp frame, 1 wp work area, 2 hp = *sp[0] + off, 3 pc-relative), high byte = imm.
@@ -45,7 +46,10 @@ def sys_table(exe):
     import pefile  # the player's exe only
     pe = pefile.PE(exe, fast_load=True)
     out = []
-    for mode_at in (0x529180,):
+    # The VM's table pointers (`0x1402CC620` op 11: `param[4] + mode * 8`): the script context's
+    # array at 0x140529FA0 holds table 0 (0x140529180) and table 1 (0x1405752D0). Checked (exe).
+    tables = [struct.unpack('<Q', pe.get_data(0x529FA0 + 8 * m, 8))[0] - 0x140000000 for m in range(2)]
+    for mode_at in tables:
         tab = []
         for k in range(256):
             desc = struct.unpack('<I', pe.get_data(mode_at + 16 * k + 8, 4))[0]
