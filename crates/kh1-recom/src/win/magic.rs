@@ -99,12 +99,12 @@ static HIT_LINES: AtomicU32 = AtomicU32::new(40);
 static EVENTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 // Re:CoM functions and data (RVAs; first bytes checked in `sites::MAGIC_*`).
-const DESC_INIT: u32 = 0x0015_6790;
+pub(super) const DESC_INIT: u32 = 0x0015_6790;
 const HAND_POINT: u32 = 0x001F_0B30;
 const ANGLES: u32 = 0x001A_4A00;
-const FACTORY: u32 = 0x001A_8A80;
-const SHOT_MANAGER: u32 = 0x0015_8DD0;
-const SHOT_MOVER: u32 = 0x0015_7DA0;
+pub(super) const FACTORY: u32 = 0x001A_8A80;
+pub(super) const SHOT_MANAGER: u32 = 0x0015_8DD0;
+pub(super) const SHOT_MOVER: u32 = 0x0015_7DA0;
 const HOMING_TARGET: u32 = 0x001F_68A0;
 const CURSOR_BUSY: u32 = 0x0020_9800;
 const END_ACTION: u32 = 0x001F_6660;
@@ -112,13 +112,13 @@ const GROUND_TEST: u32 = 0x001F_3C00;
 /// Re:CoM's base gravity (`initMagic` writes it to `+0x5D8`). Checked (decomp).
 const BASE_GRAVITY: u64 = 0x1_4087_B398;
 /// The effect sets (`0x1405A1730`, 0x60 bytes each; Fire 3, Fira 4, Firaga 5 hold `fire_all`).
-const EFFECT_SETS: u64 = 0x1_405A_1730;
+pub(super) const EFFECT_SETS: u64 = 0x1_405A_1730;
 /// Re:CoM's attack rows.
 const ROWS: u64 = crate::attack::RECOM_ATTACK_ROWS;
 /// The vcall thunk `mov rax,[rcx]; jmp [rax+0xA8]` that the bullet init (`0x140157E60`, at
 /// `0x1401585D5` / `0x140158609`) stores as every bullet's flight-state exe; for a
 /// `CHomingBullet` it reaches the homing step `0x1401575D0`. Checked (disasm).
-const HOMING_THUNK: u32 = 0x0015_60B8;
+pub(super) const HOMING_THUNK: u32 = 0x0015_60B8;
 /// `0x140156770(bullet)`: its attack's hit serial (`coll+0x70`), which Re:CoM's Blizzard case passes
 /// to its other shards (`desc+0x74`). The apply `0x14016F1C0` skips a body whose ring holds the
 /// serial (`0x14016F960`) and records it on the body it hits (`0x14016FE20`); the enemy's hit
@@ -156,7 +156,7 @@ const LOCK_ON_MANAGER: u64 = 0x1_4087_B1E0;
 
 /// Bullet and lock-on fields the re-target reads or writes. Checked (decomp `0x140155EB0`,
 /// `0x140157E60`, `0x1401575D0`, `0x140156740`, `0x1401CDB90`).
-mod rt {
+pub(super) mod rt {
     /// The flight state's exe member-function pointer (`CStateTemplate<CBullet>` at `+0x2B0`,
     /// its exe `+0x20` / this-adjust `+0x28`, run by `0x140156740` each frame).
     pub const STATE_EXE: usize = 0x2D0;
@@ -178,20 +178,20 @@ mod rt {
     pub const MOVER_COLL_PARAM: usize = 0x134;
 }
 
-type PlFn = unsafe extern "win64" fn(usize);
+pub(super) type PlFn = unsafe extern "win64" fn(usize);
 type PlIntFn = unsafe extern "win64" fn(usize, i32);
 type PlOutFn = unsafe extern "win64" fn(usize, *mut [f32; 4]);
 type AnglesFn = unsafe extern "win64" fn(usize) -> *const [f32; 4];
-type DescInitFn = unsafe extern "win64" fn(*mut u8, i32, i32);
-type FactoryFn = unsafe extern "win64" fn() -> usize;
-type ManagerFn = unsafe extern "win64" fn(usize, *const u8, usize) -> usize;
-type MoverFn = unsafe extern "win64" fn(usize, f32, f32, i32, i32);
+pub(super) type DescInitFn = unsafe extern "win64" fn(*mut u8, i32, i32);
+pub(super) type FactoryFn = unsafe extern "win64" fn() -> usize;
+pub(super) type ManagerFn = unsafe extern "win64" fn(usize, *const u8, usize) -> usize;
+pub(super) type MoverFn = unsafe extern "win64" fn(usize, f32, f32, i32, i32);
 type GroundFn = unsafe extern "win64" fn(usize) -> u32;
 type SerialFn = unsafe extern "win64" fn(usize) -> u32;
 
 /// The shot descriptor (`0x140156790` fills 0xE0 bytes; the bullet init reads up to `+0xD8`).
 #[repr(C, align(16))]
-struct Desc([u8; 0x100]);
+pub(super) struct Desc(pub(super) [u8; 0x100]);
 
 /// `CPlayer` fields the cast writes (`initMagic` `0x1402203D0`; `docs/recom-player.md`).
 /// Checked (decomp).
@@ -1657,7 +1657,7 @@ unsafe fn alive_enemy(h: u32) -> Option<usize> {
 
 /// An actor's aim point (vtable `+0x50`, what Re:CoM homes and its Thunder strikes at; KH1's target
 /// part, Assumption 5) and its position (mover `+0x30`, KH1's actor `+0x10`).
-unsafe fn aim_point(obj: usize) -> [f32; 3] {
+pub(super) unsafe fn aim_point(obj: usize) -> [f32; 3] {
     type AimFn = unsafe extern "win64" fn(usize, *mut [f32; 4]);
     let vt: usize = rd(obj);
     let f: AimFn = std::mem::transmute_copy(&rd::<usize>(vt + 0x50));

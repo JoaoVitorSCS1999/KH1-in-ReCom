@@ -2408,6 +2408,24 @@ pub const BANDIT_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemyBandit +0x440 attack end", rva: 0x0053_47A8, target: 0x0017_DA90 },
 ];
 
+/// M11, the shared enemy-guard step and the thrown objects (`win::kh1_enemy`, `win::kh1_thrown`;
+/// `docs/recom-m11-enemies.md` § Enemy guard, § The Bandit's thrown scimitar): Re:CoM's functions
+/// a KH1 enemy's thrown object takes its power with, as Re:CoM's attack records do (`0x14014E320`).
+/// Called only. Bytes read from the Steam exe (2026-11-02).
+pub const THROWN_CALLEES: &[Site] = &[
+    // push rbx; push rbp; push rsi; push rdi; push r12; push r13; push r15; sub rsp,0x70: an enemy
+    // attack's AP (`@ENP +4` × difficulty × the record's `+0x10`, Re:CoM's enemy-card rewrite).
+    Site { name: "enemy attack AP (0x14017F0E0)", rva: 0x0017_F0E0, expect: &[0x40, 0x53, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x70] },
+    // mov [rsp+8],rbx; mov [rsp+0x10],rbp; mov [rsp+0x18],rsi; push rdi: an enemy attack's attribute.
+    Site { name: "enemy attack attribute (0x14017F050)", rva: 0x0017_F050, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57] },
+    // The whole function: movsxd rax,[rcx+0x68]; lea rcx,[0x14052A220]; mov eax,[rcx+rax*4]; ret.
+    Site { name: "attack record kind (0x140179410)", rva: 0x0017_9410, expect: &[0x48, 0x63, 0x41, 0x68, 0x48, 0x8D, 0x0D, 0x05, 0x0E, 0x3B, 0x00, 0x8B, 0x04, 0x81, 0xC3] },
+];
+
+/// The thrown blade's look: Re:CoM's Aero level-1 shot effect set (`0x1405A2030`, entry 24 of
+/// `0x1405A1730`): its slot 1's name pointer (relocated) is `"airo_all"`. Checked (exe).
+pub const THROWN_PTRS: &[PtrSite] = &[PtrSite { name: "Aero level 1 shot set slot 1 name (0x1405A2048)", rva: 0x005A_2048, target: 0x005A_3150 }];
+
 /// M11 fliers: the Air Pirate's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe +
 /// decomp): its only caller is the enemy factory `0x140188F40` (case 22, the call at `0x140189338`);
 /// no branch lands inside the moved bytes (exe scan: rel32 calls / jumps, jcc, rel8 jumps).
@@ -2592,6 +2610,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         DARKBALL_ALLOC,
         BANDIT_HOOKS,
         BANDIT_ALLOC,
+        THROWN_CALLEES,
         AIRPIRATE_HOOKS,
         AIRPIRATE_ALLOC,
         WYVERN_HOOKS,

@@ -28,9 +28,10 @@
 //!   `0xEC` (made with 210, 211, 212) and the block stance's blade row `0x15C` (230, 231, 233), each
 //!   a [`Guard`] the host turns on while its request plays and its HIT slot is on
 //!   (`crate::enemy::Cmd::Guard`); Sora's swing that meets one is stopped, both sides clash.
+//! - the throw: `sys 94`'s child object `ex_2090_00.bd` (row `0x1CC`), KH1's flight
+//!   (`crate::enemy::thrown`) on one of Re:CoM's own bullets (`crate::enemy::Cmd::Throw`).
 //!
 //! Not ported (Re:CoM's battles only, decision M10; `docs/recom-m11-enemies.md` § The Bandit): the
-//! thrown blade (`sys 94`'s child object `ex_2090_00.bd`, row `0x1CC`: owner question), the
 //! leash `0x3B12` and the fall-out death `0x2C30` (KH1 removes it), the group leader's messages
 //! (`sys 81`, `wp+0x18`), KH1's room rules (Agrabah rooms 2 / 3–6 / 9–11 / 17, the sitting Bandits
 //! `wp+0x68`, the rooftop heights), the head look (`sys 121`), the effects (`sys 75`), the blade's
@@ -157,6 +158,15 @@ impl Guard {
         Guard::ALL.iter().position(|&g| g == self).unwrap_or(0) as u8
     }
 }
+
+/// The thrown scimitar's numbers in the manifest (the child `ex_2090_00.bd`'s init `0x348` and
+/// slide `0x2A2`; the row `0x1CC`'s radius; the thrower's bone code 28 as Re:CoM's bone; the Re:CoM
+/// attack id whose power it takes and that record's kind index and `+0x9C & 2`): read by the host
+/// (`crate::enemy::thrown`), not by the AI.
+pub const BLADE_NAMES: &[&str] = &["blade_life", "blade_turn_back", "blade_speed", "blade_accel", "blade_turn", "blade_slide", "blade_slide_drag", "blade_radius", "blade_bone", "blade_recom_id", "blade_kind_index", "blade_flag2"];
+
+/// The thrown object (`crate::enemy::Cmd::Throw`'s index): the scimitar.
+pub const BLADE: u8 = 0;
 
 /// The names of the Bandit's numbers (besides `crate::enemy::ENGINE_NAMES`).
 pub const NAMES: &[&str] = &[
@@ -534,13 +544,16 @@ async fn slash(cx: &Cx) {
 
 /// `0x22DA`: the throw. On the ground; 201 at blend 8; 8 frames; 82 frames turning to the target;
 /// KH1 hides the blade (`sys 98`) and throws it (`sys 94`: the child object `ex_2090_00.bd` with
-/// row `0x1CC`, **not built**: owner question); 290 frames turning to the target; the blade back
-/// (`sys 99`); to the motion's end; the idle at blend 8.
+/// row `0x1CC`: [`ECmd::Throw`]); 290 frames turning to the target; the blade back (`sys 99`); to the
+/// motion's end; the idle at blend 8.
 async fn throw(cx: &Cx) {
     wait_grounded(cx).await;
     play(cx, req::THROW, k(cx, "throw_blend"));
     wait_frames(cx, k(cx, "throw_wait")).await;
     wait_facing(cx, k(cx, "throw_release")).await;
+    // `0x2360`: `sys 94(actor, 0, target, &0x1CC, 0)`, the child object (KH1's blade part mask
+    // `sys 98` / `99` around it is not ported).
+    push(cx, ECmd::Throw(BLADE));
     wait_facing(cx, k(cx, "throw_hold")).await;
     wait_done(cx).await;
     play(cx, req::IDLE, k(cx, "idle_blend"));
@@ -1508,6 +1521,34 @@ mod tests {
         assert_eq!(guards(&s), vec![(sp, 210), (sp, 211), (sp, 212)]);
         assert_eq!(Guard::ALL.map(|g| g.row()), [0xEC, 0x15C]);
         assert!(Guard::ALL.iter().all(|g| g.requests().len() == 3));
+    }
+
+    /// The throw: 201, then the child object 8 + 82 frames in (`0x2360`).
+    #[test]
+    fn the_throw_releases_the_blade_at_frame_90() {
+        let mut s = ready(7, Some(AGRABAH));
+        s.ai.io.borrow_mut().has_target = true;
+        s.ai.io.borrow_mut().state = (st::HIT, false);
+        let cx = s.ai.io.clone();
+        s.ai.behaviour = Some(Box::pin(async move {
+            throw(&cx).await;
+            halt().await;
+        }));
+        let mut at = None;
+        let mut start = None;
+        for f in 0..200 {
+            let n = s.log.len();
+            s.run(Vec3::new(0.0, 0.0, 1500.0), 1);
+            if start.is_none() && s.log[n..].contains(&ECmd::Motion { request: req::THROW, blend: 8.0 }) {
+                start = Some(f);
+            }
+            if at.is_none() && s.log[n..].contains(&ECmd::Throw(BLADE)) {
+                at = Some(f);
+            }
+        }
+        let (start, at) = (start.expect("201"), at.expect("the blade"));
+        assert_eq!(at - start, 90, "{start} {at}");
+        assert_eq!(s.log.iter().filter(|c| **c == ECmd::Throw(BLADE)).count(), 1);
     }
 
     #[test]

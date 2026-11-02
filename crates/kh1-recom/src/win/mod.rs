@@ -26,6 +26,7 @@ mod mp;
 mod mp_bar;
 mod revenge;
 mod kh1_enemy;
+mod kh1_thrown;
 mod shop;
 mod specials;
 mod stats;

@@ -249,6 +249,7 @@ pub fn cmd_token(c: &Cmd) -> String {
         Cmd::Visible(v) => format!("visible {v}"),
         Cmd::MotionAt { request, blend, start } => format!("motion {request} b{blend} from {start}"),
         Cmd::Guard(g) => format!("guard {g:?}"),
+        Cmd::Throw(n) => format!("throw {n}"),
     }
 }
 

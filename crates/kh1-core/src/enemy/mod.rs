@@ -24,6 +24,7 @@ pub mod body;
 pub mod guard;
 pub mod react;
 pub mod script;
+pub mod thrown;
 
 pub use body::Body;
 pub use react::{get_up, landing, react, react_flying, Hit, Motions, Phase, ReactionStart};

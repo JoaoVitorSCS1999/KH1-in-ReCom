@@ -358,13 +358,14 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::MotionAt { request, blend, start } => format!("motion {request} b{blend} from {start}"),
         Cmd::Guard(Some((g, r))) => format!("guard row {g} with {r}"),
         Cmd::Guard(None) => "guard rows end".into(),
+        Cmd::Throw(n) => format!("throws its object {n}"),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. }) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Throw(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).

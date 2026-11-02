@@ -179,7 +179,9 @@ pub fn script_consts(script: &[u8], name: &[u8], table: &[(&str, &[usize])]) -> 
         let mut v: Option<f32> = None;
         for &o in offs.iter() {
             let w = script.get(o..o + 6).ok_or_else(|| crate::Error::Format(format!("{sname}: short at {o:#x}")))?;
-            let x = match w[0] & 0xBF {
+            // A push's mode bits (6..7) don't change its immediate (`0x1402CC620` op 2 sub 0 / 1):
+            // the child scripts push with mode 2 (`0x92`, M11 the Bandit's blade).
+            let x = match w[0] & 0x3F {
                 0x12 => f32::from_le_bytes(w[2..6].try_into().unwrap()),
                 0x02 => i32::from_le_bytes(w[2..6].try_into().unwrap()) as f32,
                 _ => return bad(format!("{sname} {o:#x} ({n}): not a push (opcode {:02x}{:02x}); not the script this step knows", w[0], w[1])),
@@ -601,6 +603,8 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     let parts = hurt_parts(&inp.mdls, &conv)?;
     // M11, the shared enemy-guard step: the enemy's guard-type rows and their HIT windows.
     let guards = guard_rows(spec.name, script, &ms, &clips)?;
+    // M11: its thrown object's numbers (the child script, part 3), when it has one.
+    consts.extend(thrown_consts(spec.name, &inp.mdls, script, &inp.asd, spec.asd, &conv)?);
     // The attacks and their clash recoils (row `+0x40`, request in the low 16 bits; the first row's,
     // as KH1's clash reads the record that met the Guard: Assumption that an attack's rows agree,
     // checked below).
@@ -741,6 +745,109 @@ pub fn guard_rows(enemy: &str, script: &[u8], ms: &MotionSet, clips: &[RequestCl
             windows.push((req, hit_windows(m, slot as u16)?));
         }
         out.push(Guard { name: g.name, row: g.row, clash_type, priority, recoil, slot, turn, cos, windows });
+    }
+    Ok(out)
+}
+
+/// An enemy's thrown object (M11, `kh1_core::enemy::thrown`): its child script (entry 0 of the
+/// `.mdls` part 3, by name), the constants pushed there, the bone code push (`sys 19`'s second
+/// argument), the parent's attack row the throw passes (`sys 94`), and the Re:CoM attack id whose
+/// power it takes (decision M10).
+pub struct ThrownSpec {
+    /// The enemy (the spec's `name`).
+    pub enemy: &'static str,
+    /// The constants' prefix (`blade` → `blade_life`).
+    pub prefix: &'static str,
+    /// The child script's name in its header.
+    pub child: &'static [u8],
+    /// Its constants' pushes.
+    pub consts: &'static [(&'static str, &'static [usize])],
+    /// The bone code's push (`sys 19`).
+    pub bone_code_at: usize,
+    /// The parent's attack row the throw passes.
+    pub row: usize,
+    /// The Re:CoM attack id whose power it takes.
+    pub recom_id: u32,
+}
+
+/// The Bandit's scimitar (`ex_2090_00.bd`; Checked (files): the child disassembled): its init
+/// `0x348` stores life 300 (push `0x3CE`), slide 60 (`0x3D8`), turn-back 120 (`0x3E2`), speed 10
+/// (`0x3EC`), change −0.5 (`0x3F6`), turn 3° (`0x400`); the repelled slide's × 0.9 (`0x29A`); the
+/// entry `0x5EC`'s `sys 19(parent, 28, 1, …)` (`0x5F6`); the throw `0x2360` passes row `0x1CC`. Its
+/// power: Re:CoM's whirl (id 1; Assumption: the nearest by KH1's power, the row's `+0x14` 4 as the
+/// spin's end and the leap, which take id 1; the slash's is 2).
+pub const THROWN: &[ThrownSpec] = &[ThrownSpec {
+    enemy: "bandit",
+    prefix: "blade",
+    child: b"ex_2090_00.bd",
+    consts: &[("life", &[0x3CE]), ("slide", &[0x3D8]), ("turn_back", &[0x3E2]), ("speed", &[0x3EC]), ("accel", &[0x3F6]), ("turn", &[0x400]), ("slide_drag", &[0x29A])],
+    bone_code_at: 0x5F6,
+    row: 0x1CC,
+    recom_id: 1,
+}];
+
+/// Entry `k` of a `.mdls` part holding a file list (u32 count, then the entries' `[start, end)`
+/// offsets; part 3, the child scripts: `1, 0x80, 0x700, 0` for the Bandit's). Checked (files).
+fn part_entry(part: &[u8], k: usize) -> Option<&[u8]> {
+    let u = |o: usize| part.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize);
+    let n = u(0)?;
+    if k >= n || n > 64 {
+        return None;
+    }
+    let (a, b) = (u(4 + 4 * k)?, u(8 + 4 * k)?);
+    part.get(a..b.min(part.len()))
+}
+
+/// The Re:CoM bone a KH1 bone code stands for: its bone, or its nearest mapped ancestor.
+fn recom_bone_of_code(mdls: &[u8], conv: &Converter, code: usize) -> Result<usize> {
+    let codes = bone_codes(mdls)?;
+    let mut k = *codes.get(code).filter(|b| **b >= 0).ok_or_else(|| crate::Error::Format(format!("bone code {code} names no bone")))? as usize;
+    let rig = conv.rig();
+    loop {
+        if let Some(r) = conv.map().iter().position(|m| *m == Some(k)) {
+            return Ok(r);
+        }
+        k = rig.parent(k).ok_or_else(|| crate::Error::Format(format!("bone code {code}: no mapped ancestor")))?;
+    }
+}
+
+/// [`THROWN`]'s numbers of an enemy as `<prefix>_<name>` constants: the child's pushes, the row's
+/// radius (`+0x5C`, a free-standing row: bone `−1`, `0x1402B2DC0` takes the radius as it is), the bone
+/// (Re:CoM's index for the code), the Re:CoM attack id and its `.ASD` record's kind index (`+0x68`,
+/// Re:CoM's kind table `0x14052A220`, `0x140179410`) and `+0x9C & 2` (`0x14014E320` passes it to the
+/// power getter `0x14017F0E0`). Checked (decomp + files).
+fn thrown_consts(enemy: &str, mdls: &[u8], script: &[u8], asd: &[u8], asd_shape: (usize, usize, usize), conv: &Converter) -> Result<Vec<(String, f32)>> {
+    let mut out = Vec::new();
+    for t in THROWN.iter().filter(|t| t.enemy == enemy) {
+        let part = crate::stats::mdls_part(mdls, 3).ok_or_else(|| crate::Error::Format(format!("{enemy}: no child scripts (part 3)")))?;
+        let child = part_entry(part, 0).ok_or_else(|| crate::Error::Format(format!("{enemy}: part 3 holds no child script")))?;
+        for (n, v) in script_consts(child, t.child, t.consts)? {
+            out.push((format!("{}_{n}", t.prefix), v));
+        }
+        let w = child.get(t.bone_code_at..t.bone_code_at + 6).ok_or_else(|| crate::Error::Format(format!("{enemy}: child short at {:#x}", t.bone_code_at)))?;
+        if w[0] & 0x3F != 0x02 {
+            return bad(format!("{enemy}: child {:#x} is not the bone code's push", t.bone_code_at));
+        }
+        let code = i32::from_le_bytes(w[2..6].try_into().unwrap());
+        let bone = recom_bone_of_code(mdls, conv, usize::try_from(code).map_err(|_| crate::Error::Format(format!("bone code {code}")))?)?;
+        let row = script.get(t.row..t.row + 0x70).ok_or_else(|| crate::Error::Format(format!("{enemy}: no row {:#x}", t.row)))?;
+        if !crate::stats::pushes_address(script, t.row as u32) || i32::from_le_bytes(row[0x10..0x14].try_into().unwrap()) != -1 {
+            return bad(format!("{enemy}: row {:#x} is not the thrown object's (pushed, bone −1)", t.row));
+        }
+        let radius = f32::from_le_bytes(row[0x5C..0x60].try_into().unwrap());
+        if !(radius > 0.0 && radius < 1000.0) {
+            return bad(format!("{enemy}: thrown row radius {radius}"));
+        }
+        let (n, first) = (asd_shape.0, asd_shape.1);
+        let rec = (0..n).map(|i| &asd[first + i * REC..first + (i + 1) * REC]).find(|r| u32::from_le_bytes(r[0x64..0x68].try_into().unwrap()) == t.recom_id).ok_or_else(|| crate::Error::Format(format!("{enemy}: no Re:CoM record with attack id {}", t.recom_id)))?;
+        let kind = u32::from_le_bytes(rec[0x68..0x6C].try_into().unwrap());
+        let flag2 = u32::from_le_bytes(rec[0x9C..0xA0].try_into().unwrap()) & 2 != 0;
+        if kind >= 8 {
+            return bad(format!("{enemy}: record {} kind index {kind}", t.recom_id));
+        }
+        for (n, v) in [("radius", radius), ("bone", bone as f32), ("recom_id", t.recom_id as f32), ("kind_index", kind as f32), ("flag2", flag2 as u8 as f32)] {
+            out.push((format!("{}_{n}", t.prefix), v));
+        }
     }
     Ok(out)
 }
