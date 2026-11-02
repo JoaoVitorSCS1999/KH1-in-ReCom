@@ -25,6 +25,7 @@ mod movement;
 mod mp;
 mod mp_bar;
 mod revenge;
+mod shadow;
 mod shop;
 mod specials;
 mod stats;
@@ -252,6 +253,7 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     let sound_file = recom_bases(dirs).into_iter().map(|b| b.join(crate::menu_sounds::MANIFEST)).find(|p| p.is_file());
     install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref(), hud_file.as_deref(), sound_file.as_deref());
     install_battles(base);
+    install_shadow(base, recom_bases(dirs).into_iter().map(|b| b.join(crate::shadow::MANIFEST)).find(|p| p.is_file()).as_deref());
     install_revenge(base, s);
     install_story_skip(base);
     let th = &crate::sites::TRACE_HOOKS;
@@ -576,6 +578,30 @@ fn install_battles(base: usize) {
         log("m6: no-deck wrappers in (revolver build 0x1401F43D0, hit drop 0x14017E190); the 16 deck and enemy-card HUD mask reads are switched at each battle start by the setting");
     } else {
         log("m6: no-deck not hooked; Sora keeps Re:CoM's deck in battle");
+    }
+}
+
+/// M10 (`shadow`, decision M10 (a)): KH1's Shadow on Re:CoM's own states. Needs the battle wrappers
+/// (the battle's setting), the asset step's `kh1-shadow.json` and its `ENEMY/0001` files. The
+/// manifest, the vtable checks and the factory size first, then the ctor hook; all or nothing.
+fn install_shadow(base: usize, manifest: Option<&Path>) {
+    if !movement::installed() {
+        log("shadow: movement not hooked; Shadows keep Re:CoM's behaviour");
+        return;
+    }
+    // SAFETY: reads of the mapped exe; the size patch's bytes are checked inside.
+    if !unsafe { shadow::prepare(base, manifest) } {
+        return;
+    }
+    let hooks = [hook::Hook { site: &crate::sites::SHADOW_HOOKS[0], ours: shadow::ctor as *const () as usize, original: &shadow::ORIG_CTOR }];
+    // SAFETY: the target's bytes are checked again inside, before anything is written.
+    if unsafe { hook::install_all(base, &hooks) } {
+        shadow::mark_installed();
+        log(&shadow::start_line());
+    } else {
+        // SAFETY: puts back the bytes `prepare` wrote (checked).
+        unsafe { shadow::unprepare(base) };
+        log("shadow: ctor not hooked; Shadows keep Re:CoM's behaviour");
     }
 }
 

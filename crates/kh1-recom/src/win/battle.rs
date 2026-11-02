@@ -386,7 +386,10 @@ pub unsafe fn trace_token() -> String {
     let (a, ans) = action_and_answer();
     let duel = (c != 0).then(|| rd::<u32>(c + cbtl::DUEL));
     let end_t = end_view_now().map(|v| format!("; {}", be::token(&v))).unwrap_or_default();
-    format!("{m6}; {}{end_t}", boss::trace_token(p5, a, ans, duel, super::deck::enemy_ui_hidden()))
+    // M10: the KH1 Shadows' requests, reactions and actions.
+    let shadows = super::shadow::trace_token();
+    let shadows = if shadows.is_empty() { String::new() } else { format!("; shadow {shadows}") };
+    format!("{m6}; {}{end_t}{shadows}", boss::trace_token(p5, a, ans, duel, super::deck::enemy_ui_hidden()))
 }
 
 // ---- Re:CoM's battle end, read only (`crate::battle::end`) ----

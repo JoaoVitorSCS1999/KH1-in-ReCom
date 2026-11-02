@@ -54,6 +54,11 @@ pub struct Settings {
     /// crowd sharing stays (each enemy's think rate is multiplied by the number of enemies,
     /// `0x14017F380`); `Kh1`: each enemy attacks as if alone (decision 30, patch P4).
     pub enemy_pace: Mode,
+    /// The AI of Re:CoM's enemies that have a KH1 twin built natively (M10: the Shadow) at
+    /// `combat = kh1` (owner, 2026-11-02): `Kh1` (the default): KH1's AI, attacks, reactions and
+    /// motions (stats stay Re:CoM's); `Recom`: Re:CoM's own. Decided at each battle start, like
+    /// `enemy_pace` (which doesn't apply to KH1-AI enemies). ini only.
+    pub enemy_ai: Mode,
     /// Damage and enemy HP at `combat = kh1` (owner, 2026-11-01; `crate::damage`). `Recom` (the
     /// default): Re:CoM's enemy HP, and Sora's KH1 swings, spells and specials carry Re:CoM's AP
     /// for the equipped Keyblade's card / the spell's card or sleight / Sonic Blade's sleight.
@@ -216,7 +221,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, damage: Mode::Recom, boss_revenge: true, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
     }
 }
 
@@ -241,6 +246,12 @@ guard_reactions = on
 ;          about four times less often than one alone).
 ;   kh1:   each enemy attacks as often as when it is alone.
 enemy_pace = recom
+;
+; enemy_ai = kh1 | recom (only at combat = kh1, in Sora's story; read at each battle start)
+;   kh1:   enemies with a KH1 version built so far (the Shadow) think, attack, react and move as
+;          in KH1; their HP, attack, defence, drops and EXP stay Re:CoM's.
+;   recom: Re:CoM's enemy behaviour.
+enemy_ai = kh1
 ;
 ; damage = recom | kh1 (only at combat = kh1; read at start)
 ;   recom: Re:CoM's enemy HP and Re:CoM's damage: each KH1 swing does what Re:CoM's card of the
@@ -363,6 +374,10 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(m) => s.damage = m,
                 None => warnings.push(bad("damage must be recom or kh1")),
             },
+            "enemy_ai" => match Mode::parse(v) {
+                Some(m) => s.enemy_ai = m,
+                None => warnings.push(bad("enemy_ai must be kh1 or recom")),
+            },
             "boss_revenge" => match parse_switch(v) {
                 Some(b) => s.boss_revenge = b,
                 None => warnings.push(bad("boss_revenge must be on or off")),
@@ -481,6 +496,7 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(text, "combat", s.combat.as_str());
     let t = set_key(&t, "guard_reactions", switch_str(s.guard_reactions));
     let t = set_key(&t, "enemy_pace", s.enemy_pace.as_str());
+    let t = set_key(&t, "enemy_ai", s.enemy_ai.as_str());
     let t = set_key(&t, "damage", s.damage.as_str());
     let t = set_key(&t, "boss_revenge", switch_str(s.boss_revenge));
     let mut t = set_key(&t, "config_menu", switch_str(s.config_menu));
@@ -561,7 +577,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, damage: Mode::Kh1, boss_revenge: false, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -575,6 +591,19 @@ mod tests {
 #[cfg(test)]
 mod guard_reaction_tests {
     use super::*;
+
+    #[test]
+    fn enemy_ai_default_kh1_and_round_trip() {
+        assert_eq!(Settings::default().enemy_ai, Mode::Kh1);
+        assert!(DEFAULT_FILE.contains("\nenemy_ai = kh1\n"));
+        assert_eq!(parse(DEFAULT_FILE).0.enemy_ai, Mode::Kh1);
+        let (s, w) = parse("enemy_ai = recom\nenemy_ai = maybe\n");
+        assert_eq!(s.enemy_ai, Mode::Recom);
+        assert_eq!(w.len(), 1);
+        let t = store(DEFAULT_FILE, &Settings { enemy_ai: Mode::Recom, ..Default::default() });
+        assert_eq!(t.lines().filter(|l| l.starts_with("enemy_ai")).count(), 1);
+        assert_eq!(parse(&t).0.enemy_ai, Mode::Recom);
+    }
 
     #[test]
     fn enemy_pace_default_recom_and_round_trip() {

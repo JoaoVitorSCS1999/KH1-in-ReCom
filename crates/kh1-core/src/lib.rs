@@ -26,6 +26,7 @@ pub mod motion;
 pub mod params;
 pub mod reaction;
 pub mod rng;
+pub mod shadow;
 pub mod shape;
 
 pub use arc::Arc;

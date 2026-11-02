@@ -19,6 +19,12 @@ pub const HOOK_PROLOGUE: [u8; 8] = [0x48, 0x8B, 0xC4, 0x57, 0x48, 0x83, 0xEC, 0x
 
 /// Party actor pointers; slot 0 is Sora (`0x140290D60` fills it by party member index).
 pub const SORA_PTR: usize = 0x02D3_7280;
+/// Party slots read to keep Donald and Goofy out of the enemy rows (Assumption: three
+/// consecutive pointers).
+pub const PARTY_SLOTS: usize = 3;
+
+/// The enemy rows' CSV header (M10: the Shadow; `docs/kh1-trace.md` § Enemy rows).
+pub const ENEMY_HEADER: &str = "frame,actor,flags,state,prev_state,request,entry,motion_frame,pos_x,pos_y,pos_z,facing,target_yaw,move_x,move_z,speed,air_t,rise_t,air_vx,air_vy,air_vz,height,push_x,push_z,push_v,scale_x,scale_y,alpha,alpha_rate,down_time,react_base,pause";
 /// The frame step (float), set each frame by `0x14018D1F0`.
 pub const FRAME_STEP: usize = 0x0233_FBDC;
 /// The logical pad block (`0x14028B0B0` copies pad 0 into it): +4 held, +8 pressed, +0x4C tilt,
@@ -79,6 +85,18 @@ pub mod actor {
     pub const CB_COUNTER: usize = 0x41;
     pub const CB_FLAGS: usize = 0x42;
     pub const CB_HITS: usize = 0x50;
+    /// Enemy fields the enemy rows add (M10, the Shadow; Checked (decomp): the scale `+0x40..` (the
+    /// lock radius reads `+0x40`, `0x1402B04C0`; the script's sink / rise ramp `+0x44`), the alpha
+    /// `+0x60` and its rate `+0x64` (`0x2570` / `0x251C` in `ex_2020.bd`), the push slide `+0x3F0`
+    /// direction / `+0x3FC` speed (`0x1402C7300`), the lying countdown `+0x3E4` and the launch base
+    /// request `+0x3EA` (`0x1402B8530`, `0x1402B7260`)).
+    pub const SCALE: usize = 0x40;
+    pub const ALPHA: usize = 0x60;
+    pub const ALPHA_RATE: usize = 0x64;
+    pub const PUSH_DIR: usize = 0x3F0;
+    pub const PUSH_SPEED: usize = 0x3FC;
+    pub const DOWN_TIME: usize = 0x3E4;
+    pub const REACT_BASE: usize = 0x3EA;
     /// Stats block: ground / air combo length.
     pub const ST_COMBO_MAX: usize = 0xD4;
     pub const ST_AIR_COMBO_MAX: usize = 0xD5;

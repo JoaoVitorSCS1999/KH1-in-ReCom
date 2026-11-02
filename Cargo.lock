@@ -2392,6 +2392,7 @@ name = "kh1-recom-assets"
 version = "0.1.0"
 dependencies = [
  "kh1-anim",
+ "kh1-core",
  "kh1-formats",
  "kh2-formats-lite",
  "miniz_oxide 0.8.9",

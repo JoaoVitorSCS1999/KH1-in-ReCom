@@ -112,6 +112,8 @@ unsafe fn handle(base: usize, h: u32) -> usize {
 
 struct Recorder {
     out: BufWriter<File>,
+    /// M10: every other actor's row each frame (`kh1-trace-<n>-enemies.csv`).
+    enemies: Option<BufWriter<File>>,
     path: PathBuf,
     rows: u64,
     /// Frame n's inputs, waiting for its end state.
@@ -147,6 +149,53 @@ impl Recorder {
             r.in_move_w = rd(v + 12);
         }
     }
+}
+
+/// M10: one enemy actor's state after its task (the Shadow: its AI, reactions, motions).
+unsafe fn enemy_row(out: &mut BufWriter<File>, frame: u64, e: usize) {
+    if !readable(e, 0x400) {
+        return;
+    }
+    let f = |o: usize| -> f32 { rd(e + o) };
+    let line = format!(
+        "{frame},{e:#x},{:#x},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:#x}",
+        rd::<u32>(e + a::FLAGS),
+        rd::<i32>(e + a::STATE),
+        rd::<i32>(e + a::PREV_STATE),
+        rd::<i32>(e + a::REQUEST),
+        rd::<i32>(e + a::ENTRY),
+        f(a::MOTION_FRAME),
+        f(a::POS),
+        f(a::POS + 4),
+        f(a::POS + 8),
+        f(a::FACING),
+        f(a::TARGET_YAW),
+        f(a::MOVE_DIR),
+        f(a::MOVE_DIR + 8),
+        f(a::SPEED),
+        f(a::AIR_T),
+        f(a::RISE_T),
+        f(a::AIR_VEL),
+        f(a::AIR_VEL + 4),
+        f(a::AIR_VEL + 8),
+        f(a::HEIGHT),
+        f(a::PUSH_DIR),
+        f(a::PUSH_DIR + 8),
+        f(a::PUSH_SPEED),
+        f(a::SCALE),
+        f(a::SCALE + 4),
+        f(a::ALPHA),
+        f(a::ALPHA_RATE),
+        f(a::DOWN_TIME),
+        rd::<u16>(e + a::REACT_BASE),
+        rd::<u32>(e + a::PAUSE),
+    );
+    let _ = writeln!(out, "{line}");
+}
+
+/// Whether an actor is one of the party's (not an enemy row).
+unsafe fn party(base: usize, actor: usize) -> bool {
+    (0..kh1::PARTY_SLOTS).any(|i| rd::<usize>(base + kh1::SORA_PTR + 8 * i) == actor)
 }
 
 /// Frame inputs, read before Sora's think.
@@ -255,7 +304,20 @@ unsafe extern "system" fn actor_task(task: usize) -> u64 {
     let base = BASE.load(Ordering::Relaxed);
     let actor: usize = rd(task + 0x18);
     let sora: usize = rd(base + kh1::SORA_PTR);
-    if actor == 0 || actor != sora {
+    if actor != 0 && actor != sora && !party(base, actor) {
+        // M10: an enemy (the Shadow): its state after its own task.
+        let ret = original(task);
+        if let Ok(mut g) = REC.try_lock() {
+            if let Some(r) = g.as_mut() {
+                let frame = r.rows;
+                if let Some(out) = r.enemies.as_mut() {
+                    enemy_row(out, frame, actor);
+                }
+            }
+        }
+        return ret;
+    }
+    if actor == 0 {
         return original(task);
     }
     if let Ok(mut g) = REC.try_lock() {
@@ -401,6 +463,9 @@ fn toggle() {
         Some(mut r) => {
             RECORDING.store(false, Ordering::Relaxed);
             let _ = r.out.flush();
+            if let Some(e) = r.enemies.as_mut() {
+                let _ = e.flush();
+            }
             log(&format!("stopped: {} frames in {}", r.rows, r.path.display()));
         }
         None => {
@@ -410,7 +475,14 @@ fn toggle() {
                     let mut out = BufWriter::with_capacity(1 << 16, f);
                     if schema::write_header(&mut out).is_ok() {
                         log(&format!("recording to {}", path.display()));
-                        *g = Some(Recorder { out, path, rows: 0, pending: None, actor: 0 });
+                        // M10: the enemies' rows next to it.
+                        let ep = path.with_file_name(format!("{}-enemies.csv", path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()));
+                        let enemies = File::create(&ep).ok().map(|f| {
+                            let mut w = BufWriter::with_capacity(1 << 16, f);
+                            let _ = writeln!(w, "{}", kh1::ENEMY_HEADER);
+                            w
+                        });
+                        *g = Some(Recorder { out, enemies, path, rows: 0, pending: None, actor: 0 });
                         RECORDING.store(true, Ordering::Relaxed);
                     }
                 }
@@ -446,6 +518,9 @@ pub unsafe extern "system" fn DllMain(_module: *mut c_void, reason: u32, _reserv
             if let Ok(mut g) = REC.try_lock() {
                 if let Some(r) = g.as_mut() {
                     let _ = r.out.flush();
+                    if let Some(e) = r.enemies.as_mut() {
+                        let _ = e.flush();
+                    }
                 }
             }
         }

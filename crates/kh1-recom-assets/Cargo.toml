@@ -22,3 +22,7 @@ kh1-anim = { path = "../kh1-anim" }
 kh2-formats-lite = { path = "../kh2-formats-lite" }
 # zlib for the PNG HD pictures (KH1's per-language `uitex.bin` picture 1); already in the lockfile.
 miniz_oxide = "0.8"
+
+[dev-dependencies]
+# M10's test checks the manifest's constants against the behaviour's list.
+kh1-core = { path = "../kh1-core" }

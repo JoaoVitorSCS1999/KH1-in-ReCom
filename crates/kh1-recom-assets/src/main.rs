@@ -17,6 +17,9 @@
 //! listening (`docs/kh1-recom-assets.md`). For the camp's item rows it writes
 //! `raw/FORM/0100/FO0100.SPR` (Re:CoM's camp sprite file with its green row carrying the item
 //! symbol as a new group of `camp:00`) and `kh1-camp-rows.json` (`docs/recom-m8-items.md`).
+//! For KH1's Shadow (M10) it writes `ENEMY/0001/EN0001.ANN`, `.ASD` and `.SES` (Re:CoM's Shadow
+//! files with KH1's Shadow motions, attack records and their sounds added) and `kh1-shadow.json`
+//! (`docs/recom-m10-shadow.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -233,6 +236,29 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // KH1's Shadow (M10): its motions, attacks and the behaviour's numbers in Re:CoM's Shadow.
+    let shadow = match shadow_build(&game, keys.clone(), &arc) {
+        Ok(b) => {
+            println!(
+                "Shadow (M10): {} requests on {} clips ({} Re:CoM bakes), {} attack records: {}",
+                b.clips.len(),
+                {
+                    let mut s: Vec<usize> = b.clips.iter().map(|c| c.slot).collect();
+                    s.sort_unstable();
+                    s.dedup();
+                    s.len()
+                },
+                b.clips.iter().filter(|c| c.source == "recom").count(),
+                b.records.len(),
+                b.records.join("; ")
+            );
+            Some(b)
+        }
+        Err(e) => {
+            println!("note: KH1's Shadow not built: {e} (Shadows keep Re:CoM's behaviour)");
+            None
+        }
+    };
     if dry {
         return Ok(());
     }
@@ -402,6 +428,33 @@ fn run() -> Result<(), String> {
             }
         }
     }
+    // KH1's Shadow (M10): Re:CoM's ENEMY/0001 files extended and the manifest; without them the
+    // older files are removed (the DLL then keeps Re:CoM's Shadow).
+    {
+        use kh1_recom_assets::shadow as sh;
+        let man = root.join(sh::MANIFEST);
+        let files = [(sh::ANN_PATH, 0), (sh::ASD_PATH, 1), (sh::SES_PATH, 2)];
+        let at = |p: &str| p.split('/').fold(root.clone(), |acc, s| acc.join(s));
+        match &shadow {
+            Some(b) => {
+                for (p, i) in files {
+                    write(&at(p), [&b.ann, &b.asd, &b.ses][i])?;
+                }
+                write(&man, b.manifest.as_bytes())?;
+            }
+            None => {
+                // Only when an earlier run of this step wrote them (its manifest is there).
+                if man.is_file() {
+                    for p in [man.clone(), at(sh::ANN_PATH), at(sh::ASD_PATH), at(sh::SES_PATH)] {
+                        if p.is_file() {
+                            std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+                            println!("removed {} (no KH1 Shadow this run)", p.display());
+                        }
+                    }
+                }
+            }
+        }
+    }
     // KH1 stats (decisions 12, 18, 21, 25): the enemy twins' records, Sora's Strength, the
     // Keyblades (with their model groups).
     let models: Vec<KeybladeModel> = keyblades.iter().map(|k| k.0.clone()).collect();
@@ -413,6 +466,17 @@ fn run() -> Result<(), String> {
     std::fs::write(&sp, &stats.json).map_err(|e| format!("{}: {e}", sp.display()))?;
     println!("wrote {} ({} KH1 enemy twins, {} boss twins, {} bytes)", sp.display(), stats.twins, stats.bosses, stats.json.len());
     Ok(())
+}
+
+/// KH1's Shadow (M10, `kh1_recom_assets::shadow`): KH1's `xa_ex_2020.mset` / `.mdls` and
+/// `btltbl.bin`, Re:CoM's `ENEMY/0001/EN0001.{ANN,MDL,ASD,SES}`.
+fn shadow_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive) -> Result<kh1_recom_assets::shadow::Built, String> {
+    use kh1_recom_assets::shadow as sh;
+    let inst = install::kh1(game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
+    let k = |n: &str| inst.read(n).map_err(|e| format!("{n}: {e}"));
+    let r = |n: &str| install::read_recom(arc, &keys, n).map_err(|e| format!("{n}: {e}"));
+    let inp = sh::Inputs { mset: k(sh::KH1_MSET)?, mdls: k(sh::KH1_MDLS)?, ann: r(sh::ANN_PATH)?, mdl: r(sh::MDL_PATH)?, asd: r(sh::ASD_PATH)?, ses: r(sh::SES_PATH)?, btltbl: k("btltbl.bin")? };
+    sh::build(&inp).map_err(|e| e.to_string())
 }
 
 /// Converts the 17 KH1 Keyblades (`KH1_KEYBLADES`): their model names from KH1's weapon table,
