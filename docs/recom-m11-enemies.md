@@ -187,6 +187,7 @@ Built (`kh1-core` `enemy`, `kh1-recom` `win::kh1_enemy`):
 | `react::react_flying` | the ground forms, kind 5 as kind 4 (the host picks it while the body flies) |
 | `script::{steer, fly, height, set_turn_rate, motion_done, tick_clock}` | the scripts' writes / reads; `Core::floor`, `Core::clock` |
 | `Cmd::Attack` | a plain request made with attack rows: Re:CoM's attack state, the AI keeps running; it ends when another motion replaces it, an action starts or a one-shot clip has played (not at a looping clip's wrap: the script decides; the watchdog's end margin doesn't apply, the AI isn't waiting); a new attack begins its state again (`tick` asks for it) |
+| `Behaviour::set_target_grounded` (default: nothing; M11, the Air Pirate) | Sora's KH1 movement state `*(target + 0x70)` (Checked (decomp): `0x1402B1960` keeps it there; 0 ground, 2 air) as his Re:CoM mover's floor contact `+0x120 & 5`, each frame before the AI frame (**Assumption**: his glide counts as the air) |
 | `Behaviour::set_floor` / `on_landed` (defaults: nothing) | the floor height each frame; Re:CoM's `CCollAttack` apply `0x14016F1C0` answered 1 (a hit) on the player side (from the pair-dispatch wrapper, `win::guard::on_result`) → KH1's attack hit callback (`+0x38`) |
 | host | a flying body's vertical velocity is written every frame (× the mover's speed scale, Re:CoM's acceleration cancelled), it is never `grounded`; the floor is Sora's height the last time he stood on the floor (**Assumption**: Re:CoM's battle floors are flat; Re:CoM's fliers keep no floor height: their gravity is off, `+0x260 & 0x100`, `0x1401D67B0(mover, 0)`) |
 
@@ -578,10 +579,135 @@ the glides' ends against Sora and the warps' timing to compare.
   it is invisible then and turns to its glide.
 - A sixth light hit that lands while it attacks: Re:CoM's handler has already cut the attack (KH1's would go on).
 
+## The Air Pirate (M11 fliers)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Air Pirate yet.
+
+### KH1's side. Checked (files: `ex_2210.bd` disassembled, folded and raw; decomp: the syscalls named)
+
+The script (0x3880 bytes; code from `0x228`, entry `0x1CF6`) has the Air Soldier's newer shape (the actor at `wp+0`,
+the state object at `wp+4`), on the flight of § Flying bodies, with its own routines (only the random draws and the
+waits are the shared ones). It never sets a turn rate (`sys 125`) or a flight easing (stats `+0x14`): the stats
+block's defaults (π/16 a frame, 0.1).
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x1CF6` | init `0x1E04` (records LV1 `0x14` / LV2 `0x80`; stats `+0x10` = 800, the hop, unused; work area; home; the search table `0x200`; handlers hit `0x1F0C`), `sys 135` with (0, 0, 0, 1) (flight, no velocity), a yield; outside KH1's world 11 (Olympus, `sys 105`) the appearance thread `0xA6E`; then each frame a state request restarts the behaviour: 1 engaged `0x4A2` (the target set), 2 idle `0x8D2` (the target cleared), 3 hit `0x274` (the hitter or Sora) |
+| appearance | `0xA6E` → `0x195A` | face Sora (`sys 36`); spawn type 5: a rise from below (not ported, Assumption: Re:CoM's battle spawns are not type 5); else 69 (blend 0) with a 30-frame fade-in and flag 0x80, effect 2, 30 frames, then paused (flag 4, the idle queued with bit 30) until 69 ends; idle |
+| idle | `0x8D2` | hits forgotten; Sora found (`sys 48`, 5000): the target, a yield, a rise of 170 when under 170 above him (`0x3706`), the circle, engaged. Not found: the circle, the idle 90–120 frames facing Sora, again |
+| circle | `0x358A(time, turn)` | time [250, 500), turn [3, 5) (drawn in that order) × 0.5 degrees a frame; the facing turned −90° (208) or +90° (209, the turn negated) at random; the take-off 201 to its end (`sys 172`); `time` frames flying along the turning direction at 16 facing it; the halt 203 as an action, the idle queued |
+| engaged | `0x4A2` | beyond 500 (or beyond 200 and more than 300 above the target): far rounds `0x5A4`; 200..500: mid `0x5DA`; within 200: close `0x69C`; a yield; Sora re-picked |
+| far round | `0x5A4` → `0x2100` | until done (`wp+0x48`). Target below: nearly straight below (cos ≥ 0.9) 205 then the dive `0x27CA`; fairly level (cos ≥ 0.8) the wind-up 210 (beyond 1000, or under 170 above it; skipped when near `wp+0x44`) and the take-off 201, then charges at a point 30 under it until done; else the take-off and a charge at its x / z at its own height (16). Target above or level: nearly straight above (cos ≥ 0.76) the climb `0x2642`; fairly level (cos ≥ 0.86) the wind-up / take-off and charges at it; else the climb |
+| charge | `0x2A22(target, p, speed, arrive, 60)` | near; flying 202 at `p` (its x / z the target's while he stands), banking 208 / 209 (blend 15) while he is off to a side (cos ≤ 0.98), back to 202 after 30 frames; within 200 of him: the swoop (more than 50 above him) or the slash, a round, done; within `arrive` (200) of `p`: done; stuck from frame 10 (moved < speed / 4 a frame): a rise of 300, done |
+| dive | `0x27CA` | to 320 above where he was, diving 206 at 16 (stuck or within 100 of the floor: stop, near); from there 207 for its length sinking at 8 (only `+0x24` written: the direction's x / z stay); within 150 of him: the nudge `0x32B4`, the swoop, a round; near, done |
+| climb | `0x2642` | within 150: the slash, a round; at or over 100 under him: the idle, near; else rising 204 at 16; stuck: near |
+| mid | `0x5DA` | the idle, the approach `0x2E7E(10, 180)` (to 100 above him, or him while he is in the air over 100 up), the swoop, a round, the back-off |
+| close | `0x69C` | 50 %: the back-off, then a rise of 200 when under 170 above the floor or under 100 above him; else the swoop (blend 0), a round, a flight to a point 5–7 m away (`0x30B6`, at 6) and the back-off; from 10 rounds the idle state |
+| back-off | `0x3368(speed, far, motion)` | the flat line from him turned 180° (or −180°, at random), 10 frames, the take-off and flying (18) along it until `far` flat from him (the distance + 600 under 600, else + 300), the halt 203; stuck from frame 10: a rise of 300 |
+| swoop | `0xC4E` / `0xEBC` | face him; low (under 50 above him): stop, two yields; high (over 80 above him) over a standing target: sink at 4 to 80; 200 with row `0xEC`, steering at him flat at 8 beyond 200 until 80 frames are left, those still; the idle |
+| slash | `0xBC6` | 212 with row `0x15C`, facing him until 60 frames are left, those; the idle |
+| hit | `0x274` | hit in the dive: 211 (blend 0) for its length; launched: 8 frames; within 150: 1–4 hits the swoop (over 50 above the floor) or the slash, 5–9 the back-off (600), else idle; within 500: 5–9 the back-off, 10+ idle; then engaged (rounds cleared) |
+| hit handler | `0x1F0C` | attributes 9 / 11: nothing more (not carried); while 206 plays: a hit that is not a clash takes no reaction (`hp[0xC] &= ~0x1F`) and asks for 211, every hit counts; else a launch (kind 5) counts and asks for the pause, other hits but clashes count; the hit state 3 |
+
+Attacks (rows `0x70` bytes, `sys 23`, mode 2: each lives while its request plays; Checked (files)):
+
+| Attack | Request | Row (bone code → bone, t, radius, KH1 power) | Hit | Recoil `+0x40` | Re:CoM id | Re:CoM state |
+|---|---|---|---|---|---|---|
+| swoop | 200 (122 f, root; steered) | `0xEC` (29 → the sword hand `r_hand`, 0.1 → 1, 60, 50 %) | [41, 48) | 213 (in the model) | 1 | 3 |
+| slash | 212 (100 f, root) | `0x15C` (29 → `r_hand`, −0.5 → 1, 60, 100 %) | [39.3, 51) | 110 (no motion) | 0 | 2 |
+
+Reactions: the flying forms (F `0x48..0x4B`, K `0x4C` / `0x4D`, a `0x4E` / `0x4F`, A `0x50` / `0x51`; no launches: kind
+5 → kind 4); weight 1.0 in both records; hurt parts: 7 (collision block group 2 → Re:CoM bones 47, 6, 8, 14, 20, 9, 15).
+Checked (files).
+
+Motions (`xa_ex_2210.mset`, 25 entries): KH1's matcher finds no exact Re:CoM bake on `EN0022.ANN` (74 slots); edits
+(≤ 20 bones differ): the idle → `e022_001`, flinches 73 / 75 → `e022_022` / `e022_023`, 66 / 67 → `e022_070` / `e022_071`,
+the slash 212 → `e022_050`. Every request is a new clip at 100 + entry; the edits get their Re:CoM clip's sounds.
+
+### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyAirpirate` (vtable `0x1405309E8`, 139 slots, RTTI at −8), ctor `0x14018A0B0` (`40 53 48 83 EC 20`: `CHeartless`'s
+base ctor, then `+0x154 |= 0x80`, `+0x260 |= 0x100` (gravity off), `+0xCC0 |= 1`; its only caller the factory
+`0x140188F40` case 22 at `0x140189338`; no branch into the moved bytes: exe scan), allocation `0x14018931F` `mov ecx,
+0xCD0` → 0xCF0. It overrides states 1 (the flying walk `0x14018A310` → `0x1401979F0` with `e022_001` / `e022_002`, step
+`0x14018A4D0` → `0x140197450`, end `0x14018A350`), 2 (`e022_050`, `0x14018A270` / `0x14018A370`), 3 (`e022_051`,
+`0x14018A2C0` / `0x14018A420`) and the think (`0x14018A190`, its own). Our copy: states 0, 1, 2, 3, 11, 12, 30, the think;
+KH1's slash in state 2, its swoop in state 3. `EN0022.ASD`: 2 records at `0x6C`, tail `0x1AC` (id 0 `e022_050` on `r_hand`,
+0.5 m, [38, 60); id 1 `e022_051`, 0.5 m, [37, 52)). `EN0022.SES`: `e022_050`. `EN0022.EPD` `@ENP` attack entries: id 0 and
+id 1. Re:CoM's skeleton names bone 1 `m_ex210_sk` (the asset step's converter now takes `m_ex…_sk` too; Checked (files)).
+
+Power mapping (decision M10, "the Re:CoM attack of the same kind"): the slash on id 0 (Re:CoM's `e022_050` is an edit of
+KH1's 212); the swoop on id 1 (**Assumption**: Re:CoM's other sword attack; its clip `e022_051` matches no KH1 motion
+within the matcher's edit rule; owner question 1).
+
+### What the asset step writes
+
+`ENEMY/0022/EN0022.ANN` (Re:CoM's 74 slots byte-identical; KH1's clips at 100 + entry: 100..124), `.ASD` (Re:CoM's 2
+records kept + 2: the swoop on `e022_116`, the slash on `e022_123`), `.SES` (Re:CoM's one entry kept; the slash's clip gets
+`e022_050`'s sounds, its edit's; the swoop's template `e022_051` has none: no sounds), `kh1-airpirate.json` (`kh1-enemy 1`: 126 script constants read at checked offsets, 49 request
+words checked, 2 attacks, 7 parts). Test: `airpirate::tests::builds_from_the_players_files`.
+
+### Owner install steps
+
+1. Run the step (`kh1-recom-build`): it prints an `airpirate (M11): …` line.
+2. Copy into the OpenKH mod folder and add to `mod.yml`:
+
+```yaml
+- {name: ENEMY/0022/EN0022.ANN, method: copy, source: [{name: ENEMY/0022/EN0022.ANN}]}
+- {name: ENEMY/0022/EN0022.ASD, method: copy, source: [{name: ENEMY/0022/EN0022.ASD}]}
+- {name: ENEMY/0022/EN0022.SES, method: copy, source: [{name: ENEMY/0022/EN0022.SES}]}
+- {name: kh1-airpirate.json, method: copy, source: [{name: kh1-airpirate.json}]}
+```
+
+3. The log shows `airpirate: KH1's airpirate (M11) …` at start and `battle N: … gets KH1's AI` in an Air Pirate battle.
+
+### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; an Air Pirate battle in Neverland)
+
+1. Each Air Pirate plays KH1's appearance (69, ~1.3 s), rises to about 1.7 m above Sora and circles (201, then a long
+   banked curve, 208 / 209, 4–8 s), stops (203) and engages.
+2. Far (> 5 m): a wind-up (210, ~2 s) when very far or low, a take-off (201), then it flies at Sora (202, banking as he
+   moves) and swoops (200, more than 0.5 m above him) or slashes (212).
+3. Sora straight below it: 205, a vertical dive (206), a slower last stretch (207), a swoop.
+4. Sora on a ledge above it: it climbs (204) and slashes.
+5. 2–5 m: it flies to 1 m above Sora, swoops, then flies away (201 → 202 → 203).
+6. Within 2 m: it backs off (and climbs) or swoops, flies off to a point 5–7 m away and backs off; after 10 rounds it
+   circles again.
+7. Hit it in the dive (206): no flinch; it plays 211, then counters. Other hits: KH1's flinch / knock-back in the air;
+   1–4 hits close: a swoop or a slash; 5–9: it backs off; 10+: it circles again.
+8. Guard the swoop: KH1's clash recoil (213). Guard the slash: Re:CoM's flinch.
+9. Kill one: Re:CoM's prizes and EXP.
+10. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Air Pirates.
+
+Please send `kh1-recom.log` (`airpirate:` lines: `state …`, `attack 200 (swoop), steered`, `attack 212 (slash), steered`,
+`action 203 then 0`, `hit without a reaction` in the dive, the `rand` lines) and an F9 trace.
+
+### KH1 trace (what to record in KH1)
+
+Neverland (the ship's deck or the hold): stand far 10 s; stand at 4 m 10 s; stand at 1.5 m 10 s; stand under one (let it
+dive); jump onto something high; one swing / a full combo / a finisher; hit it while it dives; Guard a swoop and a slash;
+kill one. The trace's enemy rows give the heights, the circle's radius and the charge's speed to compare.
+
+### Not built / open (the Air Pirate)
+
+- KH1's world-11 rules (Olympus cups: the search at 10000, no appearance), the spawn type 5 rise from below, the
+  retargeting to another party member (`0x1364`), `sys 139`'s out-of-sight test (taken as in sight).
+- KH1's hit attribute (`hp[0xC] >> 6 & 15`) is not carried by the host: attributes 9 / 11 (which end KH1's handler at
+  once) and 8 / 9 (which keep the dive's reaction) never come.
+- The effects (`sys 75` 2 at the appearance, 7 at each swoop; `sys 74`), the fade-in and flag 0x80 at the appearance.
+- The script's two world-height tests (the close round's rise below y −170, the approach's target over y −100) are read
+  as heights above the battle floor (**Assumption**: KH1's Air Pirate rooms have their floor at y = 0; Re:CoM's battle
+  floors sit at any height; owner question 2). The floor is Sora's height the last time he stood (§ Flying bodies).
+- The nudge `0x32B4` moves along world (0, 0.2, −1) while Sora is within 1 m flat (as the script writes it; Checked
+  (files)): a KH1 quirk kept.
+- The charge's bank clock (`sp+0x70`) is read before the script writes it: taken as 0 (**Assumption**).
+- `sys 10`'s turning sign (the circle's and the banks' sides): the Air Soldier's convention (**Assumption**).
+- Sora's KH1 movement state (`*(target + 0x70)`): 0 when his Re:CoM mover touches the floor, else 2 (**Assumption**: his
+  glide counts as the air).
+
 ## The other fliers: not ported yet (survey for the next pass)
 
-Search Ghost, Air Pirate, Gargoyle, Darkball and Wyvern were surveyed, not ported (time); the Darkball is
-built since (§ The Darkball). All five enter flight
+Search Ghost, Air Pirate, Gargoyle, Darkball and Wyvern were surveyed, not ported (time); the Darkball and the
+Air Pirate are built since (§ The Darkball, § The Air Pirate). All five enter flight
 once with `sys 135` and steer through `+0x20` / `+0x2C` like the Air Soldier (6–14 steering writes each), so § Flying
 bodies covers their bodies; each is a new script (1170–1710 listing lines) to port routine by routine. Checked
 (files: the scripts listed; exe: ctors, allocation sites, vtables) unless marked:
@@ -589,7 +715,7 @@ bodies covers their bodies; each is a new script (1170–1710 listing lines) to 
 | Enemy | Script (code from) | Re:CoM class (ctor / alloc / vtable) | Re:CoM `.ASD` | Open before porting |
 |---|---|---|---|---|
 | Search Ghost | `ex_2230.bd` (`0x5DC`) | `CEnemySearchghost` `0x1401923F0` / `0x1401891CF` **0xCE0** / `0x14054C408` | 2 (`l_fing3b`, ids 0 / 1) | a child object (`sys 94` at `0xD12`, its drain: on Re:CoM's own bullets, checklist step 9); `sys 116 / 117` (part masks); table-1 syscalls `sys1.0` / `sys1.3` (the lister reads only table 0) |
-| Air Pirate | `ex_2210.bd` (`0x228`) | `CEnemyAirpirate` `0x14018A0B0` / `0x14018931F` 0xCD0 / `0x1405309E8` | 2 (`r_hand`, ids 0 / 1) | `sys 118` (×7), `sys1.0` (×7) |
+| Air Pirate (**built**) | `ex_2210.bd` (`0x228`) | `CEnemyAirpirate` `0x14018A0B0` / `0x14018931F` 0xCD0 / `0x1405309E8` | 2 (`r_hand`, ids 0 / 1) | `sys 118` (the stuck tests: `+0x10 − +0x490`), `sys1.0` (a no-op): § The Air Pirate |
 | Gargoyle | `ex_2220.bd` (`0x538`) | `CEnemyGargoyle` `0x14018E150` / `0x1401891A5` 0xCD0 / `0x14053F198` | 2 (both wings, id 0 only) | a child object (`sys 94` at `0x1B24` with rows `0x3FC` / `0x46C`, request 219): on Re:CoM's bullets; one Re:CoM power for all its attacks |
 | Darkball (**built**) | `ex_2280.bd` (`0x338`) | `CEnemyDarkball` `0x14018D5D0` / `0x140189349` 0xCD0 / `0x14053B7A8` | 2 (`ex_2280_sk`, a whole-clip window and a 1.3 m one) | `sys 86` (the warp), `sys 74` (effects), `sys1.0` / `sys1.3`: § The Darkball |
 | Wyvern | `ex_2320.bd` (`0x378`) | `CEnemyWyvern` `0x140195ED0` / `0x140189373` **0xCF0** / `0x140555DC8` | 3 (header to `0x10C`) | turn rate changed 19 times (`Body::turn` covers it), `sys 42`, an idle requested from frame 16 (`enemy::STARTS` covers it) |
@@ -798,7 +924,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Barrel Spider | `xa_ex_2170` (ex_2170.bd) | `CEnemyBarrelspider` 28 | `0x140535688` | `0x14018b3b0` / `0x14018941b` 0xce0 | 1,2,3,19 | 205,207,211,213,214 | FKaA | — |
 | Search Ghost | `xa_ex_2230` (ex_2230.bd) | `CEnemySearchghost` 14 | `0x14054c408` | `0x1401923f0` / `0x1401891cf` 0xce0 | 1,2,3 | 203,204 | FKaA | — |
 | Pirate | `xa_ex_2100` (ex_2100.bd) | `CEnemyPirate` 21 | `0x140546458` | `0x140190f30` / `0x1401892f5` 0xcd0 | 1,2,3 | 208,210,214,216,217,218,235,236 | FaLl | — |
-| Air Pirate | `xa_ex_2210` (ex_2210.bd) | `CEnemyAirpirate` 22 | `0x1405309e8` | `0x14018a0b0` / `0x14018931f` 0xcd0 | 1,2,3, think `0x14018a190` | 200,212 | FKaA | — |
+| Air Pirate (built) | `xa_ex_2210` (ex_2210.bd) | `CEnemyAirpirate` 22 | `0x1405309e8` | `0x14018a0b0` / `0x14018931f` 0xcd0 | 1,2,3, think `0x14018a190` | 200,212 | FKaA | — |
 | Wight Knight | `xa_ex_2200` (ex_2200.bd) | `CEnemyWightnight` 12 | `0x140553748` | `0x140194ed0` / `0x14018917b` 0xcd0 | 1,2,3 | 200,201,202,211,216 | FaALl | — |
 | Gargoyle | `xa_ex_2220` (ex_2220.bd) | `CEnemyGargoyle` 13 | `0x14053f198` | `0x14018e150` / `0x1401891a5` 0xcd0 | 1,2,3 | 203,212,218 | FKA | — |
 | Darkball (built) | `xa_ex_2280` (ex_2280.bd) | `CEnemyDarkball` 23 | `0x14053b7a8` | `0x14018d5d0` / `0x140189349` 0xcd0 | 1,2,3 | 200,202,204 | FKaA | — |
@@ -896,3 +1022,13 @@ The Darkball's questions (M11, not answered yet):
 4. **Gravity on a Darkball**: KH1's Darkball answers a Gravity hit with a 3-second stagger (205); the host doesn't
    carry KH1's hit attribute, so it never plays. (a) Leave it, (b) pass our spells' KH1 attribute to the enemies'
    behaviours (a framework change; Re:CoM's own Gravity at Damage = Re:CoM stays Re:CoM's flatten).
+
+The Air Pirate's questions (M11, not answered yet):
+
+1. **The Air Pirate's attack power**: Re:CoM's Air Pirate has two sword attacks, id 0 on `e022_050` (an edit of KH1's
+   slash 212) and id 1 on `e022_051` (no KH1 twin). Chosen: the slash on id 0, the swoop 200 on id 1. (a) Keep, (b) both
+   on id 0, (c) another rule.
+2. **Two world-height tests**: KH1's script compares two world heights (the close round climbs when it is below
+   y −170; the approach aims at Sora himself when he is in the air above y −100), written for KH1 rooms whose floor is
+   at y = 0. Built: heights above the battle floor (Sora's last standing height). (a) Keep, (b) world heights as KH1's
+   script has them (Re:CoM's battle floors are not at 0, so the tests would always or never pass).

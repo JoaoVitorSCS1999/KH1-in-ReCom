@@ -736,4 +736,4 @@ fn bone_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips:
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::airpirate::SPEC];
