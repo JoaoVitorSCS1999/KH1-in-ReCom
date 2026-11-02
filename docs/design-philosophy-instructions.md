@@ -408,6 +408,11 @@ At KH1 setting:
       **dropped** (usable whenever Sora has the MP); **Sora is invincible through every summon's whole
       animation** (start to Re:CoM's end action); "cloud should also be at the top of the summons list"
       (**Cloud first**, then the others in learn order).
+    - **Gimmick card triggers (owner, 2026-11-02):** "interrupting an attack with a finisher is very rare";
+      chose **(a) + (d)**: (a) when Sora's KH1 Guard blocks an attack of one of the five card-break bosses
+      (Guard Armor, Trickmaster, Jafar, Parasite Cage, Dragon Maleficent), the boss gets Re:CoM's card-break
+      stagger and its own drop roll; (d) each of those bosses also drops its gimmick card, without a
+      stagger, at **75 %, 50 % and 25 % of its HP**.
 
 ## Known open design questions (ask the owner, don't guess)
 
