@@ -11,6 +11,27 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 132: M11: the KH1 Bandit; movement state 7, KH1's hit counter, world-aware scripts; an attack-point fix, version 0.72.0 (2026-11-01)
+
+- M11 (owner, 2026-11-02): a ground enemy.
+- Framework (Checked (decomp)): movement state 7 (`sys 169` → `0x1402BB030`, the leap's flight: the flight step,
+  airborne for reactions); KH1's per-enemy hit counter (record `+0x24` from `actor+0x3E8`, zeroed when no action
+  plays, `0x1402BFE60` / `0x1402B7260`); a script's hit handler may rewrite the reaction kind (KH1 runs it before the
+  reaction); KH1's world passed to scripts (decision 21's mapping). Asset step: attack points on bones the motion
+  never poses now follow KH1's rule (the Bandit's blade 3.3 m → 1.30 m; the Air Soldier's spin row now ±7 cm around
+  the toes: `EN0015.ASD` changes; Soldier / Powerwild byte-identical).
+- Bandit (`xa_ex_2090` ↔ `CEnemyBandit` id 11; `ex_2090.bd`, 117 constants): appearance (69 ×2); wanders, engages
+  within 15 m or when targeted; < 2 m back hop + spin or strafe + slash; 2–4 m strafe, pause, run-in slash or leap;
+  far: run in, leap or throw; the leap dashes at 70 to 50 cm above Sora and carries on past; spin up to 4 rounds;
+  counters after the 1st / 2nd hit (block stance 50 %, slash 20 %, back hop + leap 30 %); knock-backs become launches;
+  Agrabah's rules in Re:CoM's Agrabah. Vtable `0x140534368`, ctor `0x14018AEB0`, alloc `0x140189151` 0xCD0 → 0xCF0.
+  Power: slash → id 0, spin → id 1, leap → id 1 (Assumption).
+- Not built yet (owner questions): the thrown blade (the throw motion plays, nothing flies); the block stance / spin
+  repel. Asset step: `ENEMY/0011/EN0011.ANN`, `.ASD` (2 + 6), `.SES`, `kh1-bandit.json`.
+- Checked: tests, Windows build, 609 + 176 sites. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 131: M11: the KH1 Darkball (warp, model scale and hide through Re:CoM's own calls), version 0.71.0 (2026-11-01)
 
 - M11 (owner, 2026-11-02): a flier.
