@@ -11,6 +11,30 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 106: Boss revenge value (KH2's) for humanoid bosses at Combat = KH1, version 0.60.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "lets also have humanoid bosses have a revenge value system, similar to how they work
+  in their fights in KH2 … borrow their revenge value"; chose story / AS limits, all humanoids, the boss's own Re:CoM
+  attack nearest its KH2 revenge move, Re:CoM's boss falloff off for them.
+- KH2 (Checked (decomp + exe + files), `docs/recom-boss-revenge.md`): hit adds ATKP `+0x2A` to enemy `+0xD48`;
+  limit `+0xD4C` (default 100) set by AI syscall table 2 #76 `0x140431E30`; decays 1 per 60 Hz frame, paused in
+  damage motions; checked by motion trigger 28 at frame 20 of the flinches (Hades 30); no reset.
+- Limits: Axel 92, Larxene 100, Vexen 150, Marluxia (all forms; parts count on the body) 100, Hades 80 → 50 below
+  30 % HP, Cloud 100, Hook / Riku / Riku Replica / hooded figure / Leon 100 (KH2's default).
+- Re:CoM side: the 12 boss bodies' factory sizes (`mov ecx, imm32`) raised by 0x20 for the counter (all-or-nothing);
+  hooks on the flinch step `0x140184100` and blow-away step `0x140182E50` (6 bytes each), returning at once for
+  other enemies; lazy decay at each hit / check minus flinch frames; the check at KH2's frame (or at the flinch's
+  end if shorter: Assumption that Re:CoM's flinches can be shorter). Revenge starts the boss's own attack state
+  (Axel 4, Larxene 4, Vexen 6, Marluxia 2, Hades 5, Cloud 6 Omnislash, Hook 3, Riku 4) with P1's message-2 writes;
+  hooded figure and Leon have no attack state (counter only, falloff kept). Falloff fields put back for the rest.
+- Hit values: KH2 Sora's rows (swing 8, finisher 24, air 12 / 28, Fire 8, Blizzard 16, Thunder 32); 10 for hits
+  without a KH2 twin (Assumption).
+- ini `boss_revenge = on | off` (default on); Combat = KH1, Sora's story only.
+- Assumptions: each 'nearest' attack state (chosen from its motions and code); Sora's dt as the clock.
+- Checked: tests, Windows build, 526 sites. Not checked: in game.
+
+---
+
 ## Stage 105: Damage = Re:CoM: Re:CoM's Gravity / Stop / Aero; KH1's % for Gravity Break and Zantetsuken, version 0.59.0 (2026-11-01)
 
 - Asks (owner, 2026-11-01, on 0.58.1's questions): Damage ini only; Gravity and Stop "Re:CoM's numbers"; Aero
