@@ -99,7 +99,7 @@ const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin 
 
 /// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
 /// row in their own module (`crate::m11`); one line here per enemy.
-pub static CLASSES: [&Class; 2] = [&SHADOW, &SOLDIER];
+pub static CLASSES: [&Class; 3] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS];
 
 /// M10's Shadow (class 0).
 pub static SHADOW: Class = Class {
@@ -303,13 +303,14 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Target(t) => format!("target {t}"),
         Cmd::State(s) => format!("state {}", state_name(*s)),
         Cmd::Held => "held (root motion carries it)".into(),
+        Cmd::Attack { request, attack, .. } => format!("attack {request} ({}), steered", names.get(*attack as usize).copied().unwrap_or("?")),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -360,6 +361,13 @@ pub mod watchdog {
     pub const START_LIMIT: f32 = 10.0;
     /// An action that plays this many KH1 frames past its motion's length is released.
     pub const END_MARGIN: f32 = 30.0;
+    /// A reaction (states 11 / 12) that takes this many KH1 frames is released (KH1's longest,
+    /// a launch's air time, lying (at most `down_time`, 30) and the get-up, is well under).
+    pub const REACTION_LIMIT: f32 = 600.0;
+    /// An AI polled in state 1 that issues nothing for this many KH1 frames is restarted (its
+    /// longest silent wait is the wander's idle, at most 180 frames; the long-fight tests stay
+    /// under 600 with any command counted).
+    pub const QUIET_LIMIT: f32 = 600.0;
 
     /// Why an action was released.
     #[derive(Clone, Copy, Debug, PartialEq)]

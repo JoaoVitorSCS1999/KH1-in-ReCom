@@ -57,6 +57,14 @@ pub enum Cmd<A> {
     /// [`Body::held`]): its root motion moves the body, KH1's air step does nothing until it ends.
     /// Not used by the Shadow.
     Held,
+    /// A plain motion request (no bit 24) made with attack rows (M11 fliers): KH1's `sys 23`
+    /// objects of mode 2 live while the request they first saw plays (`0x1402B47A0`: `+0x58` takes
+    /// the owner's request `+0x164` at the first tick, a change ends them; they hit while its HIT
+    /// track's slot is on, `+0x1CC & 0x10000 << sub`; Checked (decomp)), and the script is not
+    /// paused (no action flag 4): it keeps steering the body while the attack plays. The host runs
+    /// it in the class's Re:CoM attack state; it ends when another motion replaces it or its motion
+    /// has played.
+    Attack { request: u16, attack: A, blend: f32 },
 }
 
 impl<A: Copy> Cmd<A> {
@@ -75,6 +83,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::Target(t) => Cmd::Target(t),
             Cmd::State(s) => Cmd::State(s),
             Cmd::Held => Cmd::Held,
+            Cmd::Attack { request, attack, blend } => Cmd::Attack { request, attack: f(attack), blend },
         }
     }
 }
@@ -126,6 +135,11 @@ pub struct Core<C, A, X> {
     /// The walk / run motion blend ([`super::MOVE_BLEND`]; the Shadow's port passes its script's
     /// 8, the same number).
     pub move_blend: f32,
+    /// The floor's height (KH1 y, down) under the body, from the host (`sys 89`'s `+0x3D4` =
+    /// floor − y, `0x1402999A0`; M11 fliers), or none.
+    pub floor: Option<f32>,
+    /// The request playing and the frames it has played ([`tick_clock`], [`motion_done`]).
+    pub clock: (Option<u16>, f32),
     pub x: X,
 }
 
@@ -148,6 +162,8 @@ impl<C, A, X> Core<C, A, X> {
             steer: None,
             moving: None,
             move_blend,
+            floor: None,
+            clock: (None, 0.0),
             x,
         }
     }
@@ -432,4 +448,56 @@ pub fn take_state<C, A, X>(cx: &Cx<C, A, X>) -> Option<u8> {
     let ch = io.state.1;
     io.state.1 = false;
     ch.then_some(io.state.0)
+}
+
+/// The flying enemies' steering (M11 fliers): the script writes the actor's `+0x20` (a unit
+/// direction, `y` included) and `+0x2C` (a speed) for this frame; movement state 4 follows it
+/// ([`Body::flying`]).
+pub fn steer<C, A, X>(cx: &Cx<C, A, X>, dir: Vec3, speed: f32) {
+    cx.borrow_mut().body.walk = dir * speed;
+}
+
+/// `sys 135`: movement state 4 (flight) with the flight velocity `v` ([`Body::fly`]).
+pub fn fly<C, A, X>(cx: &Cx<C, A, X>, v: Vec3) {
+    cx.borrow_mut().body.fly(v);
+}
+
+/// `sys 89` (`0x1402BA5D0`): the height above the floor, `+0x3D4` = floor y − y (KH1 y down;
+/// `0x1402999A0`, Checked (decomp)); 0 without a floor (as KH1's when no floor was found).
+pub fn height<C, A, X>(cx: &Cx<C, A, X>) -> f32 {
+    let io = cx.borrow();
+    io.floor.map_or(0.0, |f| f - io.w.pos.y)
+}
+
+/// `sys 125` (`0x1402BABA0`): the turn rate, in degrees a frame.
+pub fn set_turn_rate<C, A, X>(cx: &Cx<C, A, X>, deg: f32) {
+    cx.borrow_mut().body.turn = Some(deg / 180.0 * std::f32::consts::PI);
+}
+
+/// `sys 51`: the KH1 request playing.
+pub fn current_motion<C, A, X>(cx: &Cx<C, A, X>) -> Option<u16> {
+    cx.borrow().w.motion
+}
+
+/// `sys 172` (`0x14029EFC0`): the motion has played to its end (`+0x280 ≤ step × +0x284 +
+/// +0x16C`: its length against its time plus this frame's step) with no blend running and nothing
+/// queued. The time is [`Core::clock`] (the frames the request playing has played, counted by the
+/// behaviour from the host's world each frame: [`tick_clock`]); the blend and the queue are not
+/// read (Assumption: the scripts that wait on it queue nothing then).
+pub fn motion_done<C, A, X>(cx: &Cx<C, A, X>) -> bool {
+    let io = cx.borrow();
+    let Some(r) = io.clock.0 else { return true };
+    let len = io.frames.iter().find(|x| x.0 == r).map_or(0.0, |x| x.1);
+    len <= io.w.step + io.clock.1
+}
+
+/// Counts the frames the host's current request has played ([`Core::clock`]), once a frame
+/// before the script runs. A request seen for the first time has played one step (KH1 advances it
+/// in the motion update of the frame that requested it, after the script; Assumption ±1 frame).
+pub fn tick_clock<C, A, X>(io: &mut Core<C, A, X>) {
+    if io.clock.0 == io.w.motion && io.clock.0.is_some() {
+        io.clock.1 += io.w.step;
+    } else {
+        io.clock = (io.w.motion, io.w.step);
+    }
 }

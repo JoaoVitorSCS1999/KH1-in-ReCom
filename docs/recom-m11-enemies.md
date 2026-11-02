@@ -120,6 +120,81 @@ could leave that wait open forever; both are fixed, and a safety net now ends an
   (`Re:CoM state A -> B while unhittable`) is logged. The 0.68.0 log has no command of ours between
   `underground true` and `underground false`, so the cause is not found yet; an F9 trace of it is needed.
 
+### Re:CoM's own states hand back (owner 2026-11-02, 0.68.2: "once they got out of the stun … just standing still")
+
+- **What happened.** Stun Impact put two Soldiers into Re:CoM's stun state. Under the M10 choices, Stop,
+  freeze, Gravity and the stun keep Re:CoM's own states, outside our copies. They were stunned mid-kick (e321)
+  and mid-spin-kick. On leaving the stun Re:CoM entered state 1, but our runtime still held the attack
+  as the running action. Trace 20 shows both in state 1 with their action pending (200, 203) and the idle
+  playing. Checked (log, trace).
+  - The AI is not polled while an action runs.
+  - An attack ends only in its attack state's step, so it never ended.
+  - The watchdog didn't fire because a playing attack was left to `attack_step`.
+- **Fix: hand-back.** Every state 1 we ask for (an attack's end, a reaction's end, the appearance's end) is
+  marked. Any other state 1 begin follows a state Re:CoM owns: stun, Stop, freeze, Gravity's flatten, a
+  Re:CoM flinch, the first-strike stun. At that begin (`take_over`):
+  - the action, reaction, queued motion and clash are dropped;
+  - the motion Re:CoM played is forgotten, so the idle plays;
+  - the AI goes on from its wait, logged as `<class>: eNNN: back in state 1 after a Re:CoM state (…): action …
+    dropped; the AI goes on`.
+
+  This is KH1's rule: a status ends the current action. Assumption: the KH1 AI's next step after a status
+  is the rest of its routine. Its hit handler isn't told, since Re:CoM's stun hit didn't run our state 11.
+- **Fix: the appearance's default state.** It is now called outside our lock. It used to run inside, so
+  `try_lock` failed and Re:CoM's own state 1 begin ran at every appearance end.
+- **Safety nets added** (all logged past the cap):
+  - an attack still "playing" when the AI is polled in state 0 / 1 is released;
+  - a reaction that takes 600 frames is released (`REACTION_LIMIT`);
+  - an AI polled in state 1 that issues nothing for 600 frames, with no action or reaction pending, restarts
+    from its engaged state (`QUIET_LIMIT`, `Behaviour::reset`). KH1's longest silent wait is 180 frames.
+### Flying bodies (M11 fliers). Checked (decomp + disasm) unless marked
+
+KH1's fliers (Air Soldier, Search Ghost, Air Pirate, Gargoyle, Darkball, Wyvern) all enter **movement state 4**
+once (`sys 135` → `0x1402BACB0`: `0x1402B1960(actor, 4)`, flight velocity `+0x3C0` = the script's vector ×
+its fourth word) and then steer by writing the actor's `+0x20` (a unit direction, its `y` included) and
+`+0x2C` (a speed) every frame. State 4 is registered by `0x1402CBF80` (`0x1402B1B80(4, flags 2, …,
+0x1402CC000, keep-state 0x1402B1840)`); its step `0x1402CC000`:
+
+- `want = +0x20 × +0x2C`; `+0x3C0 = 0x1400E7CB0(want, +0x3C0, stats+0x14)` = `v·(1 − a) + want·a` (the
+  wrapper `0x140386B70` passes `(out, want, v, a)` in rcx / rdx / r8 / xmm3: Checked (disasm)), `a` = the
+  stats block's `+0x14` (0.1, `0x1402A5D70`; no flier script writes it: Checked (files));
+- `+0x3C4 = want.y` (vertical at once), displacement `+0x3C0 × step`; no gravity, no ground walk, no floor
+  probe (the move-toward routine's probe `0x140193650` runs only outside states 2 / with flag 0x100);
+- the actor task zeroes `+0x2C` each frame before the script (`0x140297FE0`, `puVar1[0xb] = 0`), so a frame
+  the script doesn't steer eases the flight off;
+- a push slide (`0x1402C7300`) zeroes `+0x3C0`; a hop (`0x1402AF960`) sets state 2 (flight ends);
+- the reactions: state 4's flags `& 3 == 2`, so `0x1402B1AE0` is true and `0x1402B1B10` false:
+  `0x1402B8E10` takes the ground forms (kind 3 the ground flinch with its push, kind 5 skips the launch and
+  is kind 4: the knock-back 0x4C / 0x4D through `0x1402B77D0` → `0x1402B8CC0`, the clash the ground recoil).
+
+Other per-script engine values the fliers use: `sys 125` (`0x1402BABA0`) sets the turn rate (stats `+0xD0`,
+degrees × π / 180), `sys 89` (`0x1402BA5D0`) reads `+0x3D4` = floor y − y (the height above the floor,
+written by the move `0x1402999A0`), `sys 172` (`0x14029EFC0`) is "the motion has played to its end, no blend,
+nothing queued", `sys 77` (`0x140299530`) a stepped line test (0 = nothing between), `sys 121` the look-at
+target (`+0x470`, KH1's head turn, `0x1402A28C0`: not ported, the look is the model's).
+
+KH1's attack objects of mode 2 (`0x1402B47A0`) take the owner's request (`+0x164`) at their first tick
+and end when it changes; they hit while that motion's HIT slot is on (`+0x1CC & 0x10000 << sub`). The fliers
+make them and then play a plain request (no action bit), so the script keeps steering while the attack
+plays.
+
+Built (`kh1-core` `enemy`, `kh1-recom` `win::kh1_enemy`):
+
+| Part | What |
+|---|---|
+| `Body::flying`, `Body::fly(v)` | state 4; `Body::step` eases / follows as above (`Body::walk` is `+0x20 × +0x2C`) |
+| `Body::turn` | `sys 125`'s rate, else the manifest's |
+| `react::react_flying` | the ground forms, kind 5 as kind 4 (the host picks it while the body flies) |
+| `script::{steer, fly, height, set_turn_rate, motion_done, tick_clock}` | the scripts' writes / reads; `Core::floor`, `Core::clock` |
+| `Cmd::Attack` | a plain request made with attack rows: Re:CoM's attack state, the AI keeps running; it ends when another motion replaces it, an action starts or a one-shot clip has played (not at a looping clip's wrap: the script decides; the watchdog's end margin doesn't apply, the AI isn't waiting); a new attack begins its state again (`tick` asks for it) |
+| `Behaviour::set_floor` / `on_landed` (defaults: nothing) | the floor height each frame; Re:CoM's `CCollAttack` apply `0x14016F1C0` answered 1 (a hit) on the player side (from the pair-dispatch wrapper, `win::guard::on_result`) → KH1's attack hit callback (`+0x38`) |
+| host | a flying body's vertical velocity is written every frame (× the mover's speed scale, Re:CoM's acceleration cancelled), it is never `grounded`; the floor is Sora's height the last time he stood on the floor (**Assumption**: Re:CoM's battle floors are flat; Re:CoM's fliers keep no floor height: their gravity is off, `+0x260 & 0x100`, `0x1401D67B0(mover, 0)`) |
+
+Re:CoM's fliers (Checked (decomp)): every flier ctor sets `+0x154 |= 0x80` and `+0x260 |= 0x100` (gravity off in
+Re:CoM's state code, `0x14017EB80`, `0x14017EED0`, `0x140198600`); their clips hold the body 0.61 m above the
+actor (Air Soldier: `ex_2160_sk` at y 0.614 in `e015_001` and in KH1's idle, Checked (files)), so Re:CoM's
+fliers float low; at Combat = KH1 they fly at KH1's heights (the script's own targets).
+
 ## The Soldier
 
 ### KH1's side. Checked (files: `ex_2010.bd` disassembled; decomp: the VM `0x1402CC620` and syscalls)
@@ -244,6 +319,129 @@ jumping kick; kill one.
   queue blends per call (0 / 8) are not all carried.
 - Hits that don't count in KH1 (attacker-less, kinds 8 / 9 / 10 / 11) count here (no Re:CoM equivalent read;
   Assumption).
+
+## The Air Soldier (M11 fliers)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Air Soldier yet.
+
+### KH1's side. Checked (files: `ex_2160.bd` disassembled; decomp: the syscalls named)
+
+The script (0x5100 bytes; code from `0x5C0`) is a newer shape than the Soldier's (the actor at `wp+0`, the
+state object at `wp+0x30`, party / group handles), on the flight of § Flying bodies.
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x3670` | init `0x38C0` (records LV1 `0x14` / LV2 `0x80`, turn rate 7.5°, walk 8, head-look limits, handlers `0x3A90` / `0x3A28` / `0x3A64`), `sys 135` (flight, no velocity), the appearance thread; each frame: a state request restarts the behaviour (1 idle `0x1442`, 2 engaged `0x1022`, 3 lost `0xD84`, 4 hit `0x5F2`); while idle the search (spawned: 1500) → engaged |
+| appearance | `0x1966` → `0x3282` | home = here; a room spawn: request 69 with the 30-frame fade-in and flag 0x80 30 frames, 30 frames, then paused (flag 4, the idle queued with bit 30) until 69 ends; face Sora now; idle |
+| idle | `0x1442` | Sora's target is it → engaged; else the wander `0x15FA(200, 800)`: a point [200, 800) from home, its height the floor's under it ± 200 (or the current height ± 150 when the floor is below and it is under 1200 high), flown to (request 1) at 8 for [120, 180) + 8 frames (arrived within 10: vertical only; low under 100: up; a point below: level), then the idle [55, 110) + 8 |
+| engaged | `0x1022` | the target 7 m above / below: the climb `0x4CF2` / dive `0x4960`; flat distance < 300 close `0x1364`, < 600 mid `0x1264`, else far `0x123A`; the leash `0x3E52(0)` / `0x2A7C`; engaged again |
+| close | `0x1364` | strafe [60, 120); 70 %: hover [90, 150), approach `0x4664(1, 8, 300, 500)`, slash; else spin, hover |
+| mid | `0x1264` | 40 %: swoop kick, back off `0x41F8(780, 1200)`, hover; 30 %: hover, swoop, hover; else strafe [90, 150), swoop, hover [60, 120) |
+| far | `0x123A` | hover [90, 150) (ends within 480), charge |
+| hit | `0x5F2` | flight stopped; close: level (±100) spin, a little above (< 217.5) and over 100 high swoop, then back off (600, 900); far with the anger meter ≥ 100: 50 % (or HP < ¼) the power-up 225 → approach 226 `(12, 750, 600)` → within 900: 227, near (< 300) and level the slash, the meter emptied; strafe [18, 54); engaged |
+| hit handler | `0x3A90` | the clash (kinds 6 / 7) or flag 32: `sys 135` with no velocity, state 4; damage: kind 5 +25 (and taken as kind 4), kind 4 +10, kind 3 +5 to `wp+0x54`, state 4; other kinds nothing |
+| leash, group | `0x3E52`, `0x2A7C`, `0x4184`, `sys 81` | **not ported** (KH1 removes it far from / out of sight of Sora; messages to a group leader `party(0xB0000 | 160)`: none in Re:CoM) |
+
+Attacks (each a plain request with rows, steered: `Cmd::Attack`). Rows (`sys 23`; `+0x40` the clash recoil;
+the limb is the row's bone code's bone):
+
+| Attack | Request | Row (limb, t, radius) | Hit | Recoil | Re:CoM id | Steering while it plays |
+|---|---|---|---|---|---|---|
+| swoop kick | 200 (64 f, root) | `0x2AC` (l. hand, 4 → 0, 50) | [28, 50) | 206 | 1 | at Sora 40 above at 20, until within 100 |
+| slash | 201 **from frame 20** (58 f, root) | `0x38C` (r. hand, 15 → 0, 40) | [22, 52) → [2, 32) | 205 | 1 | vertical only (20 above, at 5), stops within 50 or once it hit |
+| swoop | 202 (88 f) | `0x3FC` (r. toes, 50) | [32, 42) | 206 | 0 | rise to 120 above (60 f at 12), coast 32 f, down at 4 to 20 above |
+| spin | 203 (80 f) | `0x4DC` (l. toes, 1 → −1, 70) | [24, 32) | 206 | 0 | the tuck 235 to a point 4–5 m off, then 150 f at Sora 100 above at 60 / at him at 30, until within 100; the meter emptied |
+| charge | 211 loop (20 f) | `0x46C` (l. collar, 90) | all along | 205 | 1 | after 210's 90 f: at Sora's first position at 50 for [120, 180) f, until within 100 or it hit; then 212 (hit) / 213 (miss: misses + 2) |
+
+Each attack also makes a chest row (`0xEC`, `0x15C`, `0x1CC`, `0x23C`: radius 50, reaction kind 0, mode bits 2):
+**not made** (Assumption: KH1's body block during the attack, no reaction on Sora; owner question 2).
+
+Reactions: the flying forms (F `0x48..0x4B`, K `0x4C` / `0x4D`; kind 5 → kind 4). Weight from the records;
+hurt parts: 5 (collision block group 2 → Re:CoM bones 15, 14, 2, 3, 8). Checked (files).
+
+Motions (`xa_ex_2160.mset`, 35 entries): KH1's matcher finds no Re:CoM bake or edit on `EN0015.ANN` (75
+slots): every request is a new clip at 100 + entry. Re:CoM's clips hold the body 0.61 m above the actor as
+KH1's do.
+
+### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyAirsoldier` (vtable `0x140531CC8`, 139 slots, RTTI at −8), ctor `0x14018A4E0` (`40 53 48 83 EC 20`, its
+only caller the factory `0x140188F40` at `0x140189212`; no branch into the moved bytes: exe scan), allocation
+`0x1401891F9` `mov ecx, 0xCD0` → 0xCF0. It overrides states 1 (`0x14018A740` / `0x14018A950`, the flying walk),
+2 (kick `e015_050`), 3 (dash punch `e015_051`) and the think `0x14018A5C0`. Our copy: states 0, 1, 2, 3, 11, 12,
+30, the think; the foot attacks (swoop, spin) in state 2, the hand attacks and the charge in state 3.
+`EN0015.ASD`: 2 records (`r_toes` id 0, `r_hand` id 1).
+
+### What the asset step writes
+
+`ENEMY/0015/EN0015.ANN` (Re:CoM's 75 slots byte-identical; KH1's clips at 100 + entry; the slash's clip is
+KH1's 201 from frame 20, `enemy::STARTS`), `.ASD` (5 records), `.SES` (Re:CoM's entries kept; the attack clips
+get their template's sounds at the hit window: Assumption), `kh1-airsoldier.json` (`kh1-enemy 1`; `run_speed`
+the stats block's default 8). Test: `airsoldier::tests::builds_from_the_players_files`.
+
+### Owner install steps
+
+1. Run the step (`kh1-recom-build`): it prints an `airsoldier (M11): …` line.
+2. Copy into the OpenKH mod folder and add to `mod.yml`:
+
+```yaml
+- {name: ENEMY/0015/EN0015.ANN, method: copy, source: [{name: ENEMY/0015/EN0015.ANN}]}
+- {name: ENEMY/0015/EN0015.ASD, method: copy, source: [{name: ENEMY/0015/EN0015.ASD}]}
+- {name: ENEMY/0015/EN0015.SES, method: copy, source: [{name: ENEMY/0015/EN0015.SES}]}
+- {name: kh1-airsoldier.json, method: copy, source: [{name: kh1-airsoldier.json}]}
+```
+
+3. The log shows `airsoldier: KH1's airsoldier (M11) …` at start and `battle N: Air Soldier … gets KH1's AI`.
+
+### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`)
+
+1. An Air Soldier battle: each plays KH1's appearance (69), then flies at KH1's heights (about Sora's head).
+2. Idle: it wanders in the air about where it appeared; within 15 m (or when Sora targets it) it engages.
+3. Far (≥ 6 m): it hovers, then winds up (210, ~1.5 s) and charges in a loop (211); a hit ends in 212, a miss in 213.
+4. 3–6 m: the swoop kick then a back-off, or a rise and the swoop, or a sideways strafe and the swoop.
+5. Close (< 3 m): a strafe, then the approach and the slash, or the tuck and the spinning dash.
+6. Hit it: KH1's flinch / knock-back while it stays in the air (finishers knock it back, never launch it); after
+   enough hits (the anger meter) a far one powers up (225 / 226 / 227) and slashes.
+7. Guard each attack: KH1's clash recoil (205 / 206).
+8. Kill one: Re:CoM's prizes and EXP.
+9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Air Soldiers.
+
+Please send `kh1-recom.log` (`airsoldier:` lines) and an F9 trace.
+
+### KH1 trace (what to record in KH1)
+
+A room with Air Soldiers (Traverse Town 2nd / 3rd District): stand far 10 s; stand at 4 m 10 s; stand at 2 m
+10 s; one swing / a full combo / a finisher; Guard each attack; kill one. The trace's enemy rows give the heights
+and the flight speeds to compare.
+
+### Not built / open (the Air Soldier)
+
+- The leash, the group leader's messages, the world-8 room rule, the spawn type 23 entry (not Re:CoM battles).
+- KH1's line test (`sys 77`) has no Re:CoM counterpart read: it finds nothing (**Assumption**: Re:CoM's battle
+  rooms have no walls between Sora and an enemy), so the branches that need a wall between (the charge after
+  two misses, the climb to the target's height) never run.
+- The floor for `sys 89` is Sora's height when he last stood (**Assumption**: flat battle floors).
+- The head look (`sys 121`), the fade-in, flag 0x80 at the appearance, the effects (`sys 75`).
+- `sys 172` from the behaviour's own clock (**Assumption**: ±1 frame against KH1's motion time).
+- The chest rows (above).
+
+## The other fliers: not ported yet (survey for the next pass)
+
+Search Ghost, Air Pirate, Gargoyle, Darkball and Wyvern were surveyed, not ported (time). All five enter flight
+once with `sys 135` and steer through `+0x20` / `+0x2C` like the Air Soldier (6–14 steering writes each), so § Flying
+bodies covers their bodies; each is a new script (1170–1710 listing lines) to port routine by routine. Checked
+(files: the scripts listed; exe: ctors, allocation sites, vtables) unless marked:
+
+| Enemy | Script (code from) | Re:CoM class (ctor / alloc / vtable) | Re:CoM `.ASD` | Open before porting |
+|---|---|---|---|---|
+| Search Ghost | `ex_2230.bd` (`0x5DC`) | `CEnemySearchghost` `0x1401923F0` / `0x1401891CF` **0xCE0** / `0x14054C408` | 2 (`l_fing3b`, ids 0 / 1) | a child object (`sys 94` at `0xD12`, its drain: on Re:CoM's own bullets, checklist step 9); `sys 116 / 117` (part masks); table-1 syscalls `sys1.0` / `sys1.3` (the lister reads only table 0) |
+| Air Pirate | `ex_2210.bd` (`0x228`) | `CEnemyAirpirate` `0x14018A0B0` / `0x14018931F` 0xCD0 / `0x1405309E8` | 2 (`r_hand`, ids 0 / 1) | `sys 118` (×7), `sys1.0` (×7) |
+| Gargoyle | `ex_2220.bd` (`0x538`) | `CEnemyGargoyle` `0x14018E150` / `0x1401891A5` 0xCD0 / `0x14053F198` | 2 (both wings, id 0 only) | a child object (`sys 94` at `0x1B24` with rows `0x3FC` / `0x46C`, request 219): on Re:CoM's bullets; one Re:CoM power for all its attacks |
+| Darkball | `ex_2280.bd` (`0x338`) | `CEnemyDarkball` `0x14018D5D0` / `0x140189349` 0xCD0 / `0x14053B7A8` | 2 (`ex_2280_sk`, a whole-clip window and a 1.3 m one) | `sys 86`, `sys 74`, `sys1.0` / `sys1.3` |
+| Wyvern | `ex_2320.bd` (`0x378`) | `CEnemyWyvern` `0x140195ED0` / `0x140189373` **0xCF0** / `0x140555DC8` | 3 (header to `0x10C`) | turn rate changed 19 times (`Body::turn` covers it), `sys 42`, an idle requested from frame 16 (`enemy::STARTS` covers it) |
+
+Every ctor starts `40 53 48 83 EC 20 45 33` (Checked (exe)). The Air Soldier's shared routines (`0x2F48`, `0x2FBE`,
+`0x2FA0`, `0x2FF4`, `0x307A`, `0x30B6`, `0x34C2`, `0x35E6`, …) recur byte for byte in all five (`.bd` scan).
 
 ## Per-enemy porting checklist
 
@@ -377,7 +575,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Green Requiem | `xa_ex_2140` (ex_2140.bd) | `CEnemyGreenrequiem` 6 | `0x1405404c8` | `0x14018e570` / `0x14018907f` 0xce0 | 1,2 | — | FKaA | SES |
 | Powerwild | `xa_ex_2030` (ex_2030.bd) | `CEnemyPowerwild` 7 | `0x140547798` | `0x140191380` / `0x1401890a9` 0xcd0 | 1,2,3 | 212,214,222 | FaLl | — |
 | Bouncywild | `xa_ex_2040` (ex_2040.bd) | `CEnemyBouncywild` 8 | `0x140538fb8` | `0x14018c4d0` / `0x1401890d3` 0xcd0 | 1,2,3 | — | FaLl | — |
-| Air Soldier | `xa_ex_2160` (ex_2160.bd) | `CEnemyAirsoldier` 15 | `0x140531cc8` | `0x14018a4e0` / `0x1401891f9` 0xcd0 | 1,2,3, think `0x14018a5c0` | 200,201,202,203,210,211,212 | FKaA | — |
+| Air Soldier (built) | `xa_ex_2160` (ex_2160.bd) | `CEnemyAirsoldier` 15 | `0x140531cc8` | `0x14018a4e0` / `0x1401891f9` 0xcd0 | 1,2,3, think `0x14018a5c0` | 200,201,202,203,210,211,212 | FKaA | — |
 | Bandit | `xa_ex_2090` (ex_2090.bd) | `CEnemyBandit` 11 | `0x140534368` | `0x14018aeb0` / `0x140189151` 0xcd0 | 1,2,3 | 200,202,210,211,212,216,217,218,230..233 | FaALl | — |
 | Fat Bandit | `xa_ex_2060` (ex_2060.bd) | `CEnemyFatbandit` 10 | `0x14053ddf8` | `0x14018dd70` / `0x140189127` 0xcd0 | 1,2,3 | 200,205,206,207 | FKaALl | — |
 | Barrel Spider | `xa_ex_2170` (ex_2170.bd) | `CEnemyBarrelspider` 28 | `0x140535688` | `0x14018b3b0` / `0x14018941b` 0xce0 | 1,2,3,19 | 205,207,211,213,214 | FKaA | — |
@@ -455,3 +653,9 @@ The questions as asked (0.68.0):
    appearance (request 69), so it never plays the first look (208). (a) Keep, (b) treat Re:CoM's battle spawns
    as KH1's placed enemies (no appearance, the look on first engaging).
 5. **The leash**: KH1 removes a Soldier that is far from Sora; not ported (battles could not end). Confirm.
+6. **The Air Soldier's attack power** (fliers): Re:CoM's Air Soldier has a kick (id 0, `r_toes`) and a dash punch
+   (id 1, `r_hand`). Chosen by the limb of KH1's row: the swoop kick and the slash (hands) and the charge (a body
+   dash) the punch's power, the swoop and the spin (feet) the kick's. (a) Keep, (b) all on one, (c) another rule.
+7. **The Air Soldier's chest rows**: each KH1 attack also makes a 50-unit row on its chest with reaction kind 0
+   (no reaction on Sora; it looks like a body block). Not made. (a) Keep it out, (b) make it a Re:CoM record
+   (it would hit with Re:CoM's reaction), (c) research its KH1 effect first.

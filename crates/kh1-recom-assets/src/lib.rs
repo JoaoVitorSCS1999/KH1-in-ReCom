@@ -58,6 +58,7 @@ pub mod menu_sounds;
 pub mod ses;
 pub mod shadow;
 pub mod soldier;
+pub mod airsoldier;
 pub mod stats;
 pub mod texture;
 pub mod uibin;

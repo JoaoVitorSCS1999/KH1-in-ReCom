@@ -25,8 +25,13 @@ pub mod react;
 pub mod script;
 
 pub use body::Body;
-pub use react::{get_up, landing, react, Hit, Motions, Phase, ReactionStart};
+pub use react::{get_up, landing, react, react_flying, Hit, Motions, Phase, ReactionStart};
 pub use script::{Cmd, Draw, World};
+
+/// Whether a behaviour's body is in KH1's flight (movement state 4, [`Body::flying`]).
+pub fn flying(b: &dyn Behaviour) -> bool {
+    b.body().flying
+}
 
 use crate::math::Vec3;
 use crate::rng::Kh1Rand;
@@ -210,4 +215,19 @@ pub trait Behaviour {
     fn set_hp_ratio(&self, _r: f32) {}
     /// The state names for the log (`Cmd::State`).
     fn state_name(&self, s: u8) -> &'static str;
+    /// The host's safety net (the AI issued nothing for a long time in Re:CoM's state 1): the
+    /// behaviour starts again from its engaged state, as its supervisor does on a state request.
+    fn reset(&self) {}
+    /// The floor's height (KH1 y) under the body, from the host each frame before
+    /// [`Behaviour::frame`] (`sys 89`, M11 fliers).
+    fn set_floor(&self, _y: f32) {}
+    /// One of its attacks met Sora (Re:CoM's `CCollAttack` apply answered 1, `0x14016F1C0`): KH1's
+    /// attack object's hit callback (`+0x38`, M11 fliers), by the attack's index.
+    fn on_landed(&self, _attack: u8) {}
+    /// The KH1 reaction kind of the hit the next [`Behaviour::on_hit`] reports (the hit record's
+    /// `+0xC & 0x1F`, which KH1's script hit handlers read: `hp[0xC] & 31`; M11 fliers).
+    fn set_hit_kind(&self, _kind: u8) {}
+    /// Whether Sora's target is this enemy (KH1's `*(party 0 + 0x74)`; Re:CoM's attack target
+    /// `player+0x84C`), each frame before [`Behaviour::frame`] (M11 fliers).
+    fn set_targeted(&self, _by_sora: bool) {}
 }
