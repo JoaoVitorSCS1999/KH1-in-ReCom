@@ -141,6 +141,106 @@ pub fn add_kh1(entries: &mut Vec<Entry>, guard: Option<&str>, counter: Option<&s
     Ok(added)
 }
 
+// ---- M9 stage 9a: the KH1-only combo modifier clips ----
+
+/// The combo modifiers' KH1 mset entries, and whether their row is a finisher (row voice group 5 /
+/// 6) or a swing (4) (btltbl rows 0..15, Checked (files)): Sliding Dash 106, Hurricane Blast 107,
+/// Blitz 108, Vortex 109, Aerial Sweep 112, Ripple Drive 113, Stun Impact 114, Gravity Break 115,
+/// Zantetsuken 116. Re:CoM already has 106 / 114 / 116 (its own clips keep its own sounds); the
+/// rest are KH1-only clips and get entries here.
+pub const MODIFIER_ENTRIES: [(usize, bool); 9] = [(106, false), (107, true), (108, true), (109, false), (112, false), (113, true), (114, true), (115, true), (116, true)];
+
+/// One sound cue of a KH1 motion: its sound track (type 6, sub 0) keys, `0x140295420`'s ops.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cue {
+    /// Op 0x19: the weapon's swing sound, the argument within the weapon's set.
+    Whoosh(u16),
+    /// Ops 0..=7: a footstep.
+    Step,
+}
+
+/// The cues of a KH1 motion, frame (rounded down, 60 Hz as SES frames) and kind. Voice ops
+/// (0x1A..0x1D) are left to the row's voice (below).
+pub fn kh1_cues(m: &kh1_formats::mset::Motion) -> Vec<(i32, Cue)> {
+    let mut out = Vec::new();
+    let Some(t) = m.tracks.iter().find(|t| t.kind == kh1_formats::mset::track::SOUND && t.sub == 0) else { return out };
+    for k in &t.keys {
+        let op = u16::from_le_bytes([k.payload[0], k.payload[1]]);
+        let arg = u16::from_le_bytes([k.payload[2], k.payload[3]]);
+        match op {
+            0x19 => out.push((k.time as i32, Cue::Whoosh(arg))),
+            0..=7 => out.push((k.time as i32, Cue::Step)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Re:CoM's whoosh (sound group 1, index) for KH1's swing sound `arg`: the pairs Re:CoM's own swing
+/// clips give (KH1 entries 98–104 → `p001_055`–`p001_061`: args 7, 8, 9, 10, 11, 12, 17 → 232,
+/// 233, 234, 235, 237, 236, 238; Checked (files)). Re:CoM has no whoosh for KH1's other args
+/// (Assumption: none of its swing clips plays one): a finisher row takes the ground finisher's
+/// (235), a swing row swing 1's (232).
+pub fn whoosh_index(arg: u16, finisher: bool) -> u32 {
+    match arg {
+        7 => 232,
+        8 => 233,
+        9 => 234,
+        10 => 235,
+        11 => 237,
+        12 => 236,
+        17 => 238,
+        _ if finisher => 235,
+        _ => 232,
+    }
+}
+
+/// One KH1-only clip to give sounds: its name in the extended pack, its KH1 cues, and whether its
+/// row is a finisher.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClipSounds {
+    /// The clip's name in the extended pack (`p001_NNN`).
+    pub name: String,
+    /// KH1's cues ([`kh1_cues`]).
+    pub cues: Vec<(i32, Cue)>,
+    /// The row is a finisher (voice group 5 / 6).
+    pub finisher: bool,
+}
+
+/// Adds entries for the KH1-only modifier clips (owner, 2026-10-30: Re:CoM's sounds for now): each
+/// KH1 swing sound as Re:CoM's whoosh ([`whoosh_index`]) at KH1's frame, each KH1 footstep as
+/// Re:CoM's step 1 at its frame (Assumption: KH1's step codes aren't mapped), and the row's voice at
+/// 0 (KH1 starts the row's voice group with the row, `0x1402901F0`): the finisher grunts of
+/// `p001_058` for finishers, the swing grunts of `p001_055` for swings. Re:CoM's own entries stay
+/// byte-identical; an entry of the same name is replaced.
+pub fn add_clips(entries: &mut Vec<Entry>, clips: &[ClipSounds]) -> Result<usize> {
+    if clips.is_empty() {
+        return Ok(0);
+    }
+    let whoosh = event_of(entries, "p001_060", |e| group(e) == 1)?;
+    let swing_voice = event_of(entries, "p001_055", |e| group(e) == 2 && flags(e) & 4 != 0)?;
+    let finisher_voice = event_of(entries, "p001_058", |e| group(e) == 2 && flags(e) & 4 != 0)?;
+    let step1 = event_of(entries, "p001_055", |e| flags(e) & 1 != 0 && u32::from_le_bytes(e[4..8].try_into().unwrap()) == 1)?;
+    let head = entries.iter().find(|e| e.name() == "p001_055").map(|e| e.head).ok_or_else(|| Error::Format("SES: no p001_055".into()))?;
+    for c in clips {
+        let mut events = Vec::new();
+        for &(frame, cue) in &c.cues {
+            events.push(match cue {
+                Cue::Whoosh(arg) => with(whoosh, Some(whoosh_index(arg, c.finisher)), frame),
+                Cue::Step => with(step1, None, frame),
+            });
+        }
+        events.push(with(if c.finisher { finisher_voice } else { swing_voice }, None, 0));
+        entries.retain(|e| e.name() != c.name);
+        let mut h = head;
+        h[..16].fill(0);
+        let n = c.name.len().min(15);
+        h[..n].copy_from_slice(&c.name.as_bytes()[..n]);
+        entries.push(Entry { head: h, events });
+    }
+    Ok(clips.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +269,62 @@ mod tests {
             entry("p001_060", vec![ev(1, 237, 2, 0), ev(2, 0, 0, 4)]),
             entry("p001_081", vec![ev(601, 1, 8, 1)]),
         ]
+    }
+
+    #[test]
+    fn modifier_clips_take_recoms_whooshes_at_kh1s_frames() {
+        let mut e = recom();
+        let clips = vec![
+            // Blitz (entry 108): KH1 swing sound 26 at 0, footsteps at 12 and 34; a finisher row.
+            ClipSounds { name: "p001_223".into(), cues: vec![(0, Cue::Whoosh(26)), (12, Cue::Step), (34, Cue::Step)], finisher: true },
+            // Vortex (entry 109): swing sounds 13 at 6 and 10 at 12; a swing row.
+            ClipSounds { name: "p001_224".into(), cues: vec![(6, Cue::Whoosh(13)), (12, Cue::Whoosh(10))], finisher: false },
+        ];
+        assert_eq!(add_clips(&mut e, &clips).unwrap(), 2);
+        let back = parse(&write(&e)).unwrap();
+        let ev = |n: &str| -> Vec<(u32, u32, i32)> {
+            back.iter().find(|x| x.name() == n).unwrap().events.iter().map(|x| (group(x), u32::from_le_bytes(x[4..8].try_into().unwrap()), i32::from_le_bytes(x[0x18..0x1C].try_into().unwrap()))).collect()
+        };
+        assert_eq!(ev("p001_223"), vec![(1, 235, 0), (601, 1, 12), (601, 1, 34), (2, 0, 0)]);
+        assert_eq!(ev("p001_224"), vec![(1, 232, 6), (1, 235, 12), (2, 0, 0)]);
+        // Re:CoM's entries untouched; a second run replaces.
+        for (a, b) in back[..4].iter().zip(recom().iter()) {
+            assert_eq!((a.name(), &a.events), (b.name(), &b.events));
+        }
+        add_clips(&mut e, &clips).unwrap();
+        assert_eq!(e.len(), 6);
+        assert_eq!(add_clips(&mut e, &[]).unwrap(), 0);
+    }
+
+    /// The player's own files, when given (`KH1_TEST_DATA` holding Re:CoM's `PL0011.SES` and KH1's
+    /// `xa_ex_0010.mset`): the modifier clips' entries are added to Re:CoM's real file, which
+    /// round-trips with Re:CoM's entries unchanged.
+    #[test]
+    fn modifier_entries_on_the_players_files() {
+        let Ok(dir) = std::env::var("KH1_TEST_DATA") else { return };
+        let dir = std::path::PathBuf::from(dir);
+        let (Ok(ses), Ok(mset)) = (std::fs::read(dir.join("PL0011.SES")), std::fs::read(dir.join("xa_ex_0010.mset"))) else { return };
+        let set = kh1_formats::mset::MotionSet::parse(&mset).unwrap();
+        let mut e = parse(&ses).unwrap();
+        let n0 = e.len();
+        let clips: Vec<ClipSounds> = MODIFIER_ENTRIES.iter().map(|&(entry, finisher)| ClipSounds { name: format!("p001_{}", 115 + entry), cues: kh1_cues(&set.motions[entry]), finisher }).collect();
+        // Blitz (108): KH1's swing sound 26 at 0, steps at 12 and 34 (Checked (files)).
+        assert_eq!(clips[2].cues, vec![(0, Cue::Whoosh(26)), (12, Cue::Step), (34, Cue::Step)]);
+        // Ripple Drive (113): a step at 19, its swing sound 8 at 20 (→ Re:CoM 233).
+        assert_eq!(clips[5].cues[..2], [(19, Cue::Step), (20, Cue::Whoosh(8))]);
+        assert_eq!(add_clips(&mut e, &clips).unwrap(), 9);
+        let back = parse(&write(&e)).unwrap();
+        assert_eq!(back.len(), n0 + 9);
+        let orig = parse(&ses).unwrap();
+        for (a, b) in back[..n0].iter().zip(orig.iter()) {
+            assert_eq!((a.name(), &a.events), (b.name(), &b.events));
+        }
+    }
+
+    #[test]
+    fn whooshes_follow_recoms_own_swing_clips() {
+        assert_eq!([7, 8, 9, 10, 11, 12, 17].map(|a| whoosh_index(a, false)), [232, 233, 234, 235, 237, 236, 238]);
+        assert_eq!((whoosh_index(33, true), whoosh_index(28, false)), (235, 232));
     }
 
     #[test]

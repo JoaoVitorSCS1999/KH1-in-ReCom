@@ -1,6 +1,7 @@
 //! Windows side: start-up (from Panacea's `OnInit`, or a fallback thread), hooks, and the glue
 //! between our Config row and `kh1-recom.ini`.
 
+mod abilities;
 mod attack;
 mod battle;
 mod command_menu;
@@ -159,10 +160,41 @@ fn kh1_clips(dirs: &[PathBuf]) -> (crate::rows::Extension, Vec<(u32, String)>) {
         log("movement: no extended PL0001.ANN found next to the manifest: KH1-only clips not used");
         return (rows::Extension::default(), Vec::new());
     };
-    let ext = rows::Extension::plan(|e| motions::clip_for_entry(&m, &ann, e).is_ok());
+    // Entries Re:CoM already has (M9 9a: the modifiers it baked) play its own action row of the
+    // clip; the row's name is read from Sora's action table in the running exe.
+    let table = recom_row_names();
+    let ext = rows::Extension::plan(|e| motions::clip_for_entry(&m, &ann, e).is_ok()).with_recom(|e| motions::recom_clip_for_entry(&m, e).and_then(|c| motions::row_of_clip(&table, &c.name)));
     let names = rows::appended_rows(&ext, |e| motions::clip_for_entry(&m, &ann, e).ok().map(|c| c.name.clone()));
-    log(&format!("movement: manifest {}; KH1-only clips {:?}", manifest.display(), names));
+    let recom: Vec<(u16, u32)> = rows::KH1_ONLY.iter().zip(ext.recom.iter()).filter_map(|(&(req, _), r)| Some((req, (*r)?))).collect();
+    log(&format!("movement: manifest {}; KH1-only clips {:?}; Re:CoM's rows for KH1 requests {:x?}", manifest.display(), names, recom));
     (ext, names)
+}
+
+/// The clip names of Re:CoM's own rows of Sora's action table (`0x1407C5E80`: 16-byte rows
+/// `{const char* name; int index; int pad}`, 0x47 rows), read from the running exe.
+fn recom_row_names() -> Vec<Option<String>> {
+    let b = base();
+    let table = va(b, crate::sites::data::SORA_TABLE);
+    (0..crate::rows::RECOM_ROWS as usize)
+        .map(|i| {
+            // SAFETY: rows of the image's own table; each name a NUL-terminated string in the image,
+            // read a byte at a time up to its NUL (at most 16: Re:CoM's clip names are shorter).
+            unsafe {
+                let p: usize = std::ptr::read_unaligned((table + i * 16) as *const usize);
+                if p == 0 {
+                    return None;
+                }
+                let mut name = Vec::new();
+                for k in 0..16 {
+                    match *((p + k) as *const u8) {
+                        0 => return String::from_utf8(name).ok(),
+                        c => name.push(c),
+                    }
+                }
+                None
+            }
+        })
+        .collect()
 }
 
 /// The KH1 movement handlers (`movement`) and the trace's sampling points (`trace`).
@@ -225,6 +257,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
     }
     attack::set_debug(s.debug_attack);
     attack::set_guard_reactions(s.guard_reactions);
+    abilities::set_all(s.kh1_all_abilities);
     if s.debug_attack {
         log("attack: debug_attack = on (first 200 lines)");
     }

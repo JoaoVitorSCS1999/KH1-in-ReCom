@@ -982,6 +982,16 @@ pub const ITEM_PAGE_CALLEES: &[Site] = &[
     Site { name: "player -> save stats (0x1401F0120)", rva: 0x001F_0120, expect: &[0x48, 0x83, 0xEC, 0x28, 0x48, 0x8B, 0x05, 0x65, 0xB2, 0x68, 0x00, 0x48, 0x85, 0xC0, 0x75, 0x05] },
 ];
 
+/// M9 stage 9a (`win::abilities`, `docs/recom-m9-abilities.md`): Re:CoM's "this sleight is
+/// learned" test, called for the abilities that unlock with Re:CoM's sleights. Only called, never
+/// hooked.
+pub const ABILITY_CALLEES: &[Site] = &[
+    // push rbx; sub rsp,0x20; movzx ebx,cx; call 0x1401AAB00 (Re:CoM's story test); test eax,eax:
+    // the 2-bit state of sleight `cx` at `*0x14087CC08` (= save + 0x2840) is not 0, for the ids
+    // the story allows (Sora: 4..0x56, 0x5A..0x5C).
+    Site { name: "sleight learned (0x14023AB00)", rva: 0x0023_AB00, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x0F, 0xB7, 0xD9, 0xE8, 0xF2, 0xFF, 0xF6, 0xFF, 0x85, 0xC0] },
+];
+
 /// M8 stage 8a.3 (`win::shop`, `docs/recom-m8-items.md` § Stage 8a.3): the Moogle shop's pack screen
 /// update (`CMoogleShopCore` mode 4), wrapped for the Items tab. Same rule as [`HOOKS`].
 pub const SHOP_HOOKS: &[Site] = &[
@@ -1628,6 +1638,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         MAGIC_FX_BRANCHES,
         MAGIC_FX_CHECKED,
         CUSTOMIZE_GLYPHS_CHECKED,
+        ABILITY_CALLEES,
     ];
     LISTS
         .iter()
@@ -2087,6 +2098,17 @@ mod tests {
         for rva in [0x0024_7C90u32, 0x0015_D230, 0x0024_7850, 0x0024_76F0] {
             assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
         }
+    }
+
+    #[test]
+    fn ability_sites() {
+        for s in ABILITY_CALLEES {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        // Its call at +9 goes to Re:CoM's story test 0x1401AAB00.
+        let f = &ABILITY_CALLEES[0];
+        let rel = i32::from_le_bytes(f.expect[10..14].try_into().unwrap()) as i64;
+        assert_eq!(0x1_4000_0000 + f.rva as i64 + 9 + 5 + rel, 0x1_401A_AB00);
     }
 
     #[test]

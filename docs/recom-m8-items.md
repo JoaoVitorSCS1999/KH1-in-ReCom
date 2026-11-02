@@ -125,6 +125,7 @@ layout v1). **Layout v2 adds the items extension right after it**, `save + 0x268
   KH1's new game; it is written on the first change (a use, a pickup, the debug inventory). The MP
   block's own version byte keeps its meaning (0 = full MP never written) and isn't raised.
 - Fields never move; a later version only adds and raises the version byte.
+- M9's ability block follows at `save + 0x269F ..= 0x26AD` (`recom-m9-abilities.md`).
 - Re:CoM saves, checksums, loads, snapshots and zeroes it with its 0x2AD4-byte save block (as the
   MP block): a Continue after a game over gives the items back as they were at the checkpoint.
 

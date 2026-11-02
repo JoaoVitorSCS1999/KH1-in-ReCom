@@ -82,8 +82,27 @@ pub const ATTACK_PHASE: u32 = 3;
 /// row 2 plays 204 (→ 6).
 pub const ROW_MAP: [(usize, u32); 9] = [(13, 1), (11, 2), (14, 3), (8, 4), (17, 5), (18, 6), (16, 7), (1, 5), (2, 6)];
 
+/// The combo modifiers' rows (M9 stage 9a, `docs/recom-m9-abilities.md`): KH1 row → the Re:CoM
+/// row (1–7) whose layout the KH1 row copies and whose id `+0x638` / `+0x630` take, by the move's
+/// kind: the jump-up Aerial Sweep as the jump-up row 1 (5), the ground finishers as the finisher
+/// (4), Sliding Dash as swing 1 (1), Vortex as the side swing (2), Hurricane Blast as the air
+/// finisher (7). The clip (`+0`) is the modifier's own (`kh1_table`'s `clip_row`). Re:CoM's sleight
+/// ids are not used: Re:CoM reads `+0x638` in many places and some test sleight ids (Strike Raid's
+/// 0xD among them), so the ids stay Re:CoM's plain swings'. Checked (decomp: the readers).
+pub const MODIFIER_ROWS: [(usize, u32); 9] = [
+    (row::AERIAL_SWEEP, 5),
+    (row::STUN_IMPACT, 4),
+    (row::GRAVITY_BREAK, 4),
+    (row::ZANTETSUKEN, 4),
+    (row::BLITZ, 4),
+    (row::RIPPLE_DRIVE, 4),
+    (row::SLIDING_DASH, 1),
+    (row::VORTEX, 2),
+    (row::HURRICANE_BLAST, 7),
+];
+
 pub fn recom_id(kh1_row: usize) -> Option<u32> {
-    ROW_MAP.iter().find(|&&(r, _)| r == kh1_row).map(|&(_, id)| id)
+    ROW_MAP.iter().chain(MODIFIER_ROWS.iter()).find(|&&(r, _)| r == kh1_row).map(|&(_, id)| id)
 }
 
 /// Re:CoM tests a row's hit window in its exe against the clock of the **last** motion update
@@ -93,11 +112,30 @@ pub fn recom_id(kh1_row: usize) -> Option<u32> {
 /// Sora's motion update in the frame (checked by the trace's `hit_active` frames in game).
 pub const HIT_LEAD: u8 = 1;
 
-/// KH1 kind → Re:CoM kind (`docs/recom-attack-design.md` §5): flinch 3 → 1, launch 5 → 2.
+/// KH1 kind → Re:CoM kind (`docs/recom-attack-design.md` §5): flinch 3 → 1, launch 5 → 2. Gravity
+/// Break's reaction 8 is a flinch carrying KH1's % damage, as the Gravity spell's hit (M7 7.8:
+/// Re:CoM's Gravity kind 0xD computes its own % and flattens for 3 s).
 pub fn recom_kind(kh1_kind: u8) -> u8 {
     match kh1_kind {
         5 => 2,
         _ => 1,
+    }
+}
+
+/// KH1's stun element (10, `0x1402BEEE0` → `0x1402B8730`).
+pub const KH1_STUN_ELEMENT: u8 = 10;
+/// Re:CoM's stun kind: its reaction picker `0x14017D260` sends kind 7 to the enemy's stun state
+/// (`+0x900`) when the enemy's param `+0x28` allows it, else to the flinch; its damage
+/// `0x14017DC50` takes kind 7 as a plain hit; Re:CoM's own Stun Impact row (attack row 0xB) carries
+/// kind 7. Checked (decomp + exe).
+pub const RECOM_STUN_KIND: u8 = 7;
+
+/// The Re:CoM kind for a KH1 record: the stun element → Re:CoM's stun; else by KH1's reaction.
+pub fn recom_kind_of(data: &AttackData) -> u8 {
+    if data.element == KH1_STUN_ELEMENT {
+        RECOM_STUN_KIND
+    } else {
+        recom_kind(data.kind)
     }
 }
 
@@ -128,7 +166,7 @@ pub fn kh1_row_bytes(recom: &[u8; 16], kh1_row: usize, m: &Moveset) -> Option<[u
     b[8] = 0;
     b[9] = 0;
     b[0xA] = 0;
-    b[0xB] = recom_kind(data.kind);
+    b[0xB] = recom_kind_of(data);
     b[0xC] = 0;
     b[0xD] = 0;
     // Not chainable by Re:CoM's own gate, no early cancel, no push: KH1's window decides.
@@ -139,23 +177,49 @@ pub fn kh1_row_bytes(recom: &[u8; 16], kh1_row: usize, m: &Moveset) -> Option<[u
 /// KH1's Counterattack row (motion 213, record `0x4E18`).
 pub const COUNTERATTACK_ROW: usize = 0x3E;
 
-/// The KH1 rows by KH1 row id (0..=0x3E; unused rows are zero), from Re:CoM's rows 1–7. The
-/// Counterattack (row 0x3E) plays the appended action row `counter_clip` (its KH1-only clip),
-/// in the layout of Re:CoM's row 1; without that row it stays empty (not offered).
-pub fn kh1_table(recom_rows_1_7: &[[u8; 16]; 7], m: &Moveset, counter_clip: Option<u32>) -> Vec<[u8; 16]> {
+/// The KH1 rows by KH1 row id (0..=0x3E; unused rows are zero), from Re:CoM's rows 1–7. Rows that
+/// play a clip of their own (the Counterattack, row 0x3E, and the combo modifiers,
+/// [`MODIFIER_ROWS`]) take its action row from `clip_row(KH1 request)`: an appended row for a
+/// KH1-only clip, or Re:CoM's own row of its bake (`rows::Extension::get`); without one the row
+/// stays empty (not offered).
+pub fn kh1_table(recom_rows_1_7: &[[u8; 16]; 7], m: &Moveset, clip_row: &dyn Fn(u16) -> Option<u32>) -> Vec<[u8; 16]> {
     let mut t = vec![[0u8; 16]; COUNTERATTACK_ROW + 1];
     for &(r, id) in ROW_MAP.iter() {
         if let Some(b) = kh1_row_bytes(&recom_rows_1_7[id as usize - 1], r, m) {
             t[r] = b;
         }
     }
-    if let Some(clip) = counter_clip.filter(|c| *c <= 0xFF) {
-        if let Some(mut b) = kh1_row_bytes(&recom_rows_1_7[0], COUNTERATTACK_ROW, m) {
-            b[0] = clip as u8;
-            t[COUNTERATTACK_ROW] = b;
+    let own = MODIFIER_ROWS.iter().copied().chain(std::iter::once((COUNTERATTACK_ROW, 1)));
+    for (r, id) in own {
+        let Ok(req) = u16::try_from(m.row_request(r)) else { continue };
+        if let Some(clip) = clip_row(req).filter(|c| *c <= 0xFF) {
+            if let Some(mut b) = kh1_row_bytes(&recom_rows_1_7[id as usize - 1], r, m) {
+                b[0] = clip as u8;
+                t[r] = b;
+            }
         }
     }
     t
+}
+
+/// The modifiers whose rows the table holds, as `abilities::ix` bits (the pickers only get those).
+pub fn modifier_rows_ready(t: &[[u8; 16]]) -> u32 {
+    use crate::abilities::ix;
+    let ready = |r: usize| t.get(r).is_some_and(|b| b[0] != 0);
+    [
+        (ix::SLIDING_DASH, row::SLIDING_DASH),
+        (ix::BLITZ, row::BLITZ),
+        (ix::STUN_IMPACT, row::STUN_IMPACT),
+        (ix::ZANTETSUKEN, row::ZANTETSUKEN),
+        (ix::VORTEX, row::VORTEX),
+        (ix::AERIAL_SWEEP, row::AERIAL_SWEEP),
+        (ix::HURRICANE_BLAST, row::HURRICANE_BLAST),
+        (ix::RIPPLE_DRIVE, row::RIPPLE_DRIVE),
+        (ix::GRAVITY_BREAK, row::GRAVITY_BREAK),
+    ]
+    .iter()
+    .filter(|&&(_, r)| ready(r))
+    .fold(0, |b, &(i, _)| b | 1 << i)
 }
 
 /// A row's KH1 combo window (`+1` / `+3` with flag `0x80`), in frames.
@@ -165,7 +229,7 @@ pub fn row_window(b: &[u8; 16]) -> Option<(f32, f32)> {
 
 /// Whether a KH1 request is one of the swings the rows play (Re:CoM owns its motion).
 pub fn is_swing_request(r: u16) -> bool {
-    (200..=206).contains(&r)
+    (200..=211).contains(&r) || (214..=218).contains(&r)
 }
 
 /// Whether the swing's clip moves Sora by root motion (KH1's request map bit; the air swings have
@@ -191,6 +255,22 @@ pub fn live_attack(m: &Moveset, kh1_row: usize, weapon: &WeaponData) -> Option<L
 pub fn blade_points(w2: Vec3, w3: Vec3, live: &LiveAttack, weapon: &WeaponData) -> (Vec3, Vec3) {
     let (ta, tb) = live.blade_t(weapon);
     (w2.lerp(w3, ta), w2.lerp(w3, tb))
+}
+
+/// KH1's weapon bone id in attack records (`0x30`): the blade line ([`blade_points`]).
+pub const KH1_WEAPON_BONE: i32 = 0x30;
+
+/// The Re:CoM Sora bone (`PL0001.MDL` / `PL0011.MDL` index) standing for a KH1 Sora bone a
+/// non-blade record is centred on (`0x1402B2DC0` reads the record's bone): Stun Impact's bone 8 →
+/// Re:CoM's `belt1` (4), the bone at the same rest place and orientation (Checked (files:
+/// `skel_map.py`, KH1 bones 7 and 8 coincide at rest)). That the posed bone 8 stays on Re:CoM's
+/// `belt1` in the clip is an Assumption (KH1's bone 8 is a flags-1 bone with no offset from 7; a
+/// 2.5 m sphere hides any difference). Other bones: none known (the swing keeps Re:CoM's test).
+pub fn recom_body_bone(kh1_bone: i32) -> Option<i32> {
+    match kh1_bone {
+        8 => Some(4),
+        _ => None,
+    }
 }
 
 /// This frame's spheres (centre, radius), in the units of the points given: the chain from A to
@@ -470,17 +550,43 @@ pub struct EnemyStats {
 }
 
 /// The KH1 swing damage against a KH1 twin's stats (`0x1402BFA80` through kh1-core), before
-/// Re:CoM's extras (back bonus, weak part, boss falloff) which its own damage path applies.
+/// Re:CoM's extras (back bonus, weak part, boss falloff) which its own damage path applies. The
+/// twin at full HP, Sora at KH1's default max MP (records of swings read neither).
 pub fn kh1_damage(m: &Moveset, kh1_row: usize, strength: i32, weapon: &WeaponData, twin: &EnemyStats, rng: &mut kh1_core::Kh1Rand) -> Option<kh1_core::DamageResult> {
+    kh1_damage_at(m, kh1_row, Sora { strength, max_mp: AttackerStats::default().max_mp }, weapon, twin, twin.hp, rng)
+}
+
+/// Sora's numbers a KH1 record can read: Strength (stat source 0) and max MP (sources 1, 3, 4, 5:
+/// Ripple Drive's Magic × 3 is source 4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Sora {
+    pub strength: i32,
+    pub max_mp: i32,
+}
+
+/// [`kh1_damage`] with Sora's max MP and the enemy's current HP (`hp_now`), which the % of HP
+/// element (8: Gravity Break, Zantetsuken) reads with the record's `resist[8]` as its scale
+/// (stats `+0x98`, as the Gravity spell, `win::stats::kh1_spell_hit`).
+pub fn kh1_damage_at(m: &Moveset, kh1_row: usize, sora: Sora, weapon: &WeaponData, twin: &EnemyStats, hp_now: i32, rng: &mut kh1_core::Kh1Rand) -> Option<kh1_core::DamageResult> {
     let rw = m.row(kh1_row)?;
     let data = m.attack(rw.attack)?;
-    let attacker = AttackerStats { strength, ..Default::default() };
+    let attacker = AttackerStats { strength: sora.strength, max_mp: sora.max_mp, ..Default::default() };
     let live = LiveAttack::new(data, weapon, &attacker, 1.0);
     let mut resist = [1.0f32; 16];
     for (r, v) in resist.iter_mut().zip(twin.resist.iter()) {
         *r = *v as f32 / 100.0;
     }
-    let stats = kh1_core::DefenderStats { hp: twin.hp, max_hp: twin.hp, defence: twin.defence, level: twin.level, min_damage: twin.min_damage, max_damage: twin.max_damage, resist, ..Default::default() };
+    let stats = kh1_core::DefenderStats {
+        hp: hp_now.max(0),
+        max_hp: twin.hp,
+        defence: twin.defence,
+        level: twin.level,
+        min_damage: twin.min_damage,
+        max_damage: twin.max_damage,
+        resist,
+        hp_percent_scale: resist[8],
+        ..Default::default()
+    };
     Some(kh1_core::damage::compute_damage(&live, &kh1_core::DamageCurve::kh1_defaults(), &stats, rng))
 }
 

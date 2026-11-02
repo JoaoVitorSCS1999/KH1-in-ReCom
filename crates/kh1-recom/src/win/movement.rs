@@ -210,12 +210,18 @@ pub fn set_abilities(a: Kh1Abilities) {
     }
 }
 
+/// KH1's ability bits (`0x142D5EC10` layout) for the trace: the ini's movement abilities and the
+/// equipped combo modifiers (M9 9a).
 pub fn ability_bits() -> u32 {
-    ABILITY_BITS.load(Ordering::Relaxed)
+    ABILITY_BITS.load(Ordering::Relaxed) | crate::abilities::kh1_bits(super::abilities::equipped())
 }
 
+/// The abilities the KH1 frame passes on: the ini's movement abilities, and the equipped combo
+/// modifiers from the ability state (M9 9a, `super::abilities`).
 pub(crate) fn abilities() -> kh1_core::Abilities {
-    ABILITIES.lock().ok().and_then(|g| *g).unwrap_or_default().to_core()
+    let mut a = ABILITIES.lock().ok().and_then(|g| *g).unwrap_or_default().to_core();
+    crate::abilities::apply(super::abilities::equipped(), &mut a);
+    a
 }
 
 pub(super) fn kh1_on() -> bool {

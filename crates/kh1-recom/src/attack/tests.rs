@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn kh1_rows_keep_recoms_clip_and_take_kh1s_windows() {
     let m = Moveset::kh1_defaults();
-    let t = kh1_table(&RECOM_ROWS_1_7, &m, Some(0x48));
+    let t = kh1_table(&RECOM_ROWS_1_7, &m, &|r| (r == 213).then_some(0x48));
     // Row 13 (motion 200): Re:CoM row 1's action 0x30 and effect 1; KH1 hit 14–24 held one frame
     // earlier for Re:CoM's exe-time test; combo window 22–40; kind 1 (flinch); only flag 0x80.
     let r = t[13];
@@ -29,7 +29,7 @@ fn kh1_rows_keep_recoms_clip_and_take_kh1s_windows() {
     // window 18–56, flinch; none without the clip.
     let c = t[COUNTERATTACK_ROW];
     assert_eq!((c[0], c[4], c[5], c[1], c[3], c[0xB]), (0x48, 7, 23, 18, 56, 1));
-    assert_eq!(kh1_table(&RECOM_ROWS_1_7, &m, None)[COUNTERATTACK_ROW], [0u8; 16]);
+    assert_eq!(kh1_table(&RECOM_ROWS_1_7, &m, &|_| None)[COUNTERATTACK_ROW], [0u8; 16]);
     // Re:CoM's own rows never carry flag 0x80 (the gate's KH1 test leaves them alone).
     assert!(RECOM_ROWS_1_7.iter().all(|r| r[0xF] & FLAG_KH1 == 0 && row_window(r).is_none()));
 }
@@ -46,10 +46,12 @@ fn row_map_follows_the_motions() {
         assert_eq!(req, expect, "row {r}");
     }
     assert_eq!(recom_id(13), Some(1));
-    assert_eq!(recom_id(3), None);
+    assert_eq!(recom_id(3), Some(4), "Stun Impact takes the finisher's id (M9 9a)");
+    assert_eq!(recom_id(12), None, "row 12 is never picked");
     assert!(swing_root(&m, 200) && swing_root(&m, 203));
     assert!(!swing_root(&m, 204) && !swing_root(&m, 206));
-    assert!(is_swing_request(206) && !is_swing_request(212));
+    assert!(is_swing_request(206) && !is_swing_request(212) && !is_swing_request(213));
+    assert!(is_swing_request(208) && is_swing_request(218) && is_swing_request(214));
     assert_eq!((recom_kind(3), recom_kind(5)), (1, 2));
 }
 
@@ -294,4 +296,101 @@ fn stats_v6_reads_the_twins_drops() {
     assert!(parse_stats(&stats_v5().replace(r#""recom_id": 1, "#, &format!(r#""recom_id": 1, "drops": [{short}], "#))).unwrap_err().contains("12 worlds"));
     assert!(parse_stats(&t.replace("[0.05, 1]", "[1.5, 1]")).is_err());
     assert!(parse_stats(&t.replace("[0.05, 1]", "[0.05, 1.5]")).is_err());
+}
+
+/// M9 9a: the combo modifiers' rows: each its own clip (Re:CoM's bake or an appended row), KH1's
+/// hit window one frame earlier, KH1's combo window, the Re:CoM kind of its record.
+#[test]
+fn modifier_rows_take_their_clips_and_kh1s_windows() {
+    let m = Moveset::kh1_defaults();
+    // The owner's manifest: Sliding Dash / Stun Impact / Zantetsuken on Re:CoM's rows 0x45 / 0x44
+    // / 0x46, the rest appended after Guard and Counterattack.
+    let clip = |r: u16| match r {
+        208 => Some(0x45),
+        216 => Some(0x44),
+        218 => Some(0x46),
+        209 => Some(0x49),
+        210 => Some(0x4A),
+        211 => Some(0x4B),
+        214 => Some(0x4C),
+        215 => Some(0x4D),
+        217 => Some(0x4E),
+        213 => Some(0x48),
+        _ => None,
+    };
+    let t = kh1_table(&RECOM_ROWS_1_7, &m, &clip);
+    // (row, clip, hit +4/+5, window +1/+3, Re:CoM kind)
+    type Want = (usize, u8, (u8, u8), (u8, u8), u8);
+    let want: [Want; 9] = [
+        (0, 0x4C, (5, 27), (20, 44), 1),
+        (3, 0x44, (33, 49), (0, 0), RECOM_STUN_KIND),
+        (4, 0x4E, (31, 37), (0, 0), 1),
+        (5, 0x46, (35, 49), (0, 0), 1),
+        (6, 0x4A, (29, 37), (0, 0), 2),
+        (7, 0x4D, (33, 45), (0, 0), 2),
+        (9, 0x45, (25, 57), (28, 86), 1),
+        (10, 0x4B, (17, 41), (38, 66), 1),
+        (15, 0x49, (3, 53), (0, 0), 2),
+    ];
+    for (r, c, hit, win, kind) in want {
+        let b = t[r];
+        assert_eq!((b[0], (b[4], b[5]), (b[1], b[3]), b[0xB], b[0xF]), (c, hit, win, kind, FLAG_KH1), "row {r}");
+        assert_eq!(&b[6..0xB], &[0; 5], "row {r}: no homing, no card column");
+    }
+    // Layouts: the finishers copy Re:CoM's finisher row (its `+2` = 3), the swings swing 1's.
+    assert_eq!((t[3][2], t[9][2], t[15][2]), (RECOM_ROWS_1_7[3][2], RECOM_ROWS_1_7[0][2], RECOM_ROWS_1_7[6][2]));
+    assert_eq!(modifier_rows_ready(&t), crate::abilities::MODIFIER_BITS);
+    // Without a clip the row stays empty and the pickers don't get that modifier.
+    let none = kh1_table(&RECOM_ROWS_1_7, &m, &|r| (r != 217).then(|| clip(r)).flatten());
+    assert_eq!(none[4], [0u8; 16]);
+    assert_eq!(modifier_rows_ready(&none), crate::abilities::MODIFIER_BITS & !(1 << crate::abilities::ix::GRAVITY_BREAK));
+    // Root motion: KH1's request map has it for all but Hurricane Blast (an air row).
+    for r in [208u16, 210, 211, 214, 215, 216, 217, 218] {
+        assert!(swing_root(&m, r), "{r}");
+    }
+    assert!(!swing_root(&m, 209));
+}
+
+/// M9 9a: the modifiers' damage through KH1's formula: Gravity Break and Zantetsuken are % of the
+/// current HP (× resist[8]), Ripple Drive reads Magic × 3, Stun Impact flinches (stun) for power 4.
+#[test]
+fn modifier_damage() {
+    let m = Moveset::kh1_defaults();
+    let w = WeaponData::kingdom_key();
+    let mut rng = kh1_core::Kh1Rand::new(1);
+    let t = twin(8);
+    let sora = Sora { strength: 10, max_mp: 5 };
+    // Gravity Break: (40 + Strength) % of the current HP (its stat source is Strength; crit chance
+    // 200 × 0.05 × the Kingdom Key's 20 × 0.05 = 10: always a crit, bonus 0): 50 % of 50.
+    let gb = kh1_damage_at(&m, 4, sora, &w, &t, 50, &mut rng).unwrap();
+    assert_eq!((gb.damage, gb.critical), (25, true));
+    // Zantetsuken: 250 % of the current HP: the rest of it.
+    let zan = kh1_damage_at(&m, 5, sora, &w, &t, 37, &mut rng).unwrap();
+    assert_eq!(zan.damage, 92);
+    // A % hit is at least the floor (twin's floor < 2: 1).
+    assert_eq!(kh1_damage_at(&m, 4, sora, &w, &t, 1, &mut rng).unwrap().damage, 1);
+    // resist[8] scales it (a boss at 2 %: 50 % × 2 % of 1000 = 10).
+    let mut boss = twin(8);
+    boss.resist[8] = 2;
+    assert_eq!(kh1_damage_at(&m, 4, sora, &w, &boss, 1000, &mut rng).unwrap().damage, 10);
+    // Ripple Drive: power 10 + max MP × 3 (not Strength): curve[10 + 15 − 8].
+    let rd1 = kh1_damage_at(&m, 7, sora, &w, &t, t.hp, &mut rng).unwrap().damage;
+    let rd2 = kh1_damage_at(&m, 7, Sora { strength: 90, max_mp: 5 }, &w, &t, t.hp, &mut rng).unwrap().damage;
+    assert_eq!(rd1, rd2, "Strength doesn't count");
+    assert_eq!(rd1, kh1_core::DamageCurve::kh1_defaults().0[17] as i32);
+    // Stun Impact: Strength + 4.
+    assert_eq!(kh1_damage_at(&m, 3, sora, &w, &t, t.hp, &mut rng).unwrap().damage, kh1_core::DamageCurve::kh1_defaults().0[6] as i32);
+}
+
+/// M9 9a: Stun Impact's record sits on Sora's bone 8 (Re:CoM's `belt1`), not the blade.
+#[test]
+fn stun_impact_is_a_body_sphere() {
+    let m = Moveset::kh1_defaults();
+    let live = live_attack(&m, 3, &WeaponData::kingdom_key()).unwrap();
+    assert_eq!((live.data.bone, live.radius), (8, 250.0), "no Keyblade radius on a body bone");
+    assert_eq!(recom_body_bone(live.data.bone), Some(4));
+    assert_eq!(recom_body_bone(KH1_WEAPON_BONE), None);
+    // Ripple Drive: the blade's t = 0 (the hand), 200 + the Keyblade's 40.
+    let rip = live_attack(&m, 7, &WeaponData::kingdom_key()).unwrap();
+    assert_eq!((rip.data.bone, rip.radius, rip.blade_t(&WeaponData::kingdom_key())), (KH1_WEAPON_BONE, 240.0, (0.0, 0.0)));
 }

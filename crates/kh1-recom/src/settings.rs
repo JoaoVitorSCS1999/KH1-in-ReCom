@@ -64,6 +64,9 @@ pub struct Settings {
     pub debug_attack: bool,
     /// Debug (M7, until stage 7.11 earns spells): Sora has all 7 spells at level 3.
     pub kh1_all_spells: bool,
+    /// Debug (M9 stage 9a, until every ability has an unlock): every combo modifier is unlocked and
+    /// equipped (not written to the save).
+    pub kh1_all_abilities: bool,
     /// Debug (M8 stage 8a.1, until the shop and drops give items): a test inventory: whenever
     /// Sora's slots are all empty as a room or battle starts, they get Potion, Hi-Potion, Ether,
     /// and the stock at least 9 of each battle item (written to the save).
@@ -203,7 +206,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, config_menu: true, abilities: Kh1Abilities::default(), debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
     }
 }
 
@@ -251,6 +254,11 @@ debug_attack = off
 ; kh1_all_spells = on | off (debug, until spells are earned in the game): Sora has all 7 KH1
 ;   spells at level 3 in the command menu's Magic list.
 kh1_all_spells = off
+;
+; kh1_all_abilities = on | off (debug, until every ability unlocks in the game): Sora has every
+;   KH1 combo modifier (Sliding Dash, Blitz, Stun Impact, Zantetsuken, Vortex, Aerial Sweep,
+;   Hurricane Blast, Ripple Drive, Gravity Break) equipped. Not written to the save.
+kh1_all_abilities = off
 ;
 ; kh1_test_items = on | off (debug, until items come from the shop and drops): whenever Sora's
 ;   item slots are all empty as a room or battle starts, they are filled with Potion, Hi-Potion
@@ -356,6 +364,10 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(b) => s.kh1_all_spells = b,
                 None => warnings.push(bad("kh1_all_spells must be on or off")),
             },
+            "kh1_all_abilities" => match parse_switch(v) {
+                Some(b) => s.kh1_all_abilities = b,
+                None => warnings.push(bad("kh1_all_abilities must be on or off")),
+            },
             "kh1_test_items" => match parse_switch(v) {
                 Some(b) => s.kh1_test_items = b,
                 None => warnings.push(bad("kh1_test_items must be on or off")),
@@ -440,6 +452,7 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "combo_master", switch_str(a.combo_master));
     let t = set_key(&t, "debug_attack", switch_str(s.debug_attack));
     let t = set_key(&t, "kh1_all_spells", switch_str(s.kh1_all_spells));
+    let t = set_key(&t, "kh1_all_abilities", switch_str(s.kh1_all_abilities));
     let t = set_key(&t, "kh1_test_items", switch_str(s.kh1_test_items));
     let t = set_key(&t, "menu_language", &s.menu_language);
     let mut t = set_key(&t, "hud", s.hud.as_str());
@@ -507,7 +520,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -570,6 +583,9 @@ mod menu_tests {
         assert!(s.kh1_all_spells && s.menu_language == "gr");
         let (s, w2) = parse("kh1_test_items = on\n");
         assert!(s.kh1_test_items && w2.is_empty());
+        assert!(!d.kh1_all_abilities);
+        let (s, w3) = parse("kh1_all_abilities = on\n");
+        assert!(s.kh1_all_abilities && w3.is_empty());
         assert_eq!(w.len(), 1, "{w:?}");
         // An older file without the keys keeps the defaults without a warning.
         let (s, w) = parse("combat = kh1\n");

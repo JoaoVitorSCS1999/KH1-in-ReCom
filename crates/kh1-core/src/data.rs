@@ -228,10 +228,23 @@ impl Moveset {
         guard.root_motion = true; // flag set, no travel
         put(110, &[212], guard);
         // Entry 72, request 0x6E: the guard-success / repel recoil (60 frames, no travel). Checked
-        // (files: free 28–60, combo window 28–60).
-        put(72, &[0x6E], MotionInfo::new(60.0).with_flag(Free, 28.0, inf).with_flag(ComboWindow, 28.0, 60.0));
+        // (files: free 28–60, combo window 28–60, trail 0–6).
+        put(72, &[0x6E], MotionInfo::new(60.0).with_flag(Free, 28.0, inf).with_flag(ComboWindow, 28.0, 60.0).with_flag(Trail, 0.0, 6.0));
         put(111, &[213], MotionInfo::new(86.0).with_flag(Hit(0), 8.0, 24.0).with_flag(ComboWindow, 18.0, 56.0).with_flag(Trail, 4.0, 24.0).with_forward_keys(&[(0.0, 0.0), (4.0, 12.86), (6.0, 44.08), (14.0, 163.77), (24.0, 237.5), (36.0, 267.05), (86.0, 267.05)]));
         put(117, &[0xDC], MotionInfo::new(38.0).with_flag(Free, 30.0, inf).with_forward_keys(&[(0.0, 0.0), (12.0, 213.82), (24.0, 350.0), (38.0, 350.0)]));
+        // The combo modifiers (M9 stage 9a). Checked (files: `xa_ex_0010.mset` flag tracks and
+        // root curves, relative to frame 0; `docs/recom-m9-abilities.md`).
+        put(106, &[208], MotionInfo::new(94.0).with_flag(Hit(0), 26.0, 58.0).with_flag(ComboWindow, 28.0, 86.0).with_forward_keys(&[(0.0, 0.0), (16.0, 0.0), (22.0, 35.27), (54.0, 590.48), (70.0, 627.04), (94.0, 654.24)]));
+        put(107, &[209], MotionInfo::new(76.0).with_flag(Hit(0), 4.0, 54.0).with_flag(Trail, 2.0, 54.0));
+        put(108, &[210], MotionInfo::new(80.0).with_flag(Hit(0), 30.0, 38.0).with_flag(Trail, 22.0, 38.0).with_forward_keys(&[(0.0, 0.0), (10.0, 0.0), (26.0, 66.33), (28.0, 88.02), (30.0, 125.73), (32.0, 165.0), (54.0, 165.0), (70.0, 200.0), (80.0, 200.0)]));
+        put(109, &[211], MotionInfo::new(76.0).with_flag(Hit(0), 18.0, 42.0).with_flag(ComboWindow, 38.0, 66.0).with_flag(Trail, 14.0, 42.0).with_forward_keys(&[(0.0, 0.0), (6.0, 40.0), (16.0, 68.31), (26.0, 160.48), (32.0, 212.5), (38.0, 225.66), (74.0, 226.61), (76.0, 226.61)]));
+        let mut sweep = MotionInfo::new(56.0).with_flag(Hit(0), 6.0, 28.0).with_flag(ComboWindow, 20.0, 44.0).with_flag(Trail, 2.0, 28.0);
+        sweep.root_motion = true; // flag set, no travel
+        put(112, &[214], sweep);
+        put(113, &[215], MotionInfo::new(100.0).with_flag(Hit(0), 34.0, 46.0).with_flag(Trail, 26.0, 36.0).with_forward_keys(&[(0.0, 0.0), (30.0, 0.0), (42.0, 52.44), (50.0, 81.99), (60.0, 107.81), (72.0, 107.81), (80.0, 76.96), (100.0, 76.96)]));
+        put(114, &[216], MotionInfo::new(94.0).with_flag(Hit(0), 34.0, 50.0).with_forward_keys(&[(0.0, 0.0), (34.0, 0.0), (42.0, 44.0), (94.0, 44.0)]));
+        put(115, &[217], MotionInfo::new(66.0).with_flag(Hit(0), 32.0, 38.0).with_flag(Trail, 28.0, 38.0).with_forward_keys(&[(0.0, 0.0), (24.0, 0.0), (36.0, 75.0), (58.0, 150.0), (66.0, 150.0)]));
+        put(116, &[218], MotionInfo::new(100.0).with_flag(Hit(0), 36.0, 50.0).with_flag(Trail, 30.0, 50.0).with_forward_keys(&[(0.0, 0.0), (32.0, 0.0), (34.0, 23.37), (38.0, 146.32), (42.0, 243.99), (46.0, 288.74), (52.0, 337.58), (74.0, 350.0), (100.0, 350.0)]));
 
         let mut rows = vec![ActionRow::none(); 0x42];
         rows[0] = ActionRow::new(214, 0x4CC8, 0.0, [3, 5, 6], 4);
@@ -288,6 +301,13 @@ impl Moveset {
         attacks.insert(0x5128, rec(3, 0, 4, 4, 3, 0, 0.0, 10.0));
         attacks.insert(0x4DA8, rec(0, 0, 0, 0, 0, 0x10002, 0.0, 0.0));
         attacks.insert(0x4E18, rec(3, 0, 200, 4, 24, 0, 0.0, 10.0));
+        // The modifiers' own records (M9 stage 9a; Checked (files)): Ripple Drive (Magic × 3, a
+        // 200 sphere at the hand), Stun Impact (stun element 10, a 250 sphere on bone 8), Gravity
+        // Break (% of HP element 8, reaction 8), Zantetsuken (% of HP, no stat term).
+        attacks.insert(0x4E88, AttackData { stat_source: 4, frac_a: 0.0, ..rec(5, 10, 0, 0, 6, 0x10006, 0.0, 200.0) });
+        attacks.insert(0x4EF8, AttackData { element: 10, bone: 8, ..rec(3, 4, 0, 0, 3, 0x10006, 1.0, 250.0) });
+        attacks.insert(0x4F68, AttackData { element: 8, ..rec(8, 40, 200, 0, 6, 0, 0.0, 20.0) });
+        attacks.insert(0x4FD8, AttackData { stat_source: 2, element: 8, ..rec(3, 250, 200, 0, 6, 0, -0.2, 10.0) });
         Moveset { motions: m, rows, attacks }
     }
 }

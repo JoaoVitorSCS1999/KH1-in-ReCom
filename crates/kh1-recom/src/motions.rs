@@ -108,6 +108,17 @@ pub fn clip_for_entry<'a>(manifest: &'a [Clip], ann: &[(u32, String)], entry: u3
     }
 }
 
+/// The manifest clip of KH1 mset `entry` when it is one of Re:CoM's own (slot below 161: Re:CoM
+/// already has the motion, decision 11), for finding the Re:CoM action row that plays it.
+pub fn recom_clip_for_entry(manifest: &[Clip], entry: u32) -> Option<&Clip> {
+    manifest.iter().find(|c| c.entry == Some(entry)).filter(|c| c.slot < RECOM_SLOTS)
+}
+
+/// The row of Sora's action table (`names[i]` = row i's clip name) that plays `clip`.
+pub fn row_of_clip(names: &[Option<String>], clip: &str) -> Option<u32> {
+    names.iter().position(|n| n.as_deref() == Some(clip)).map(|i| i as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +174,16 @@ mod tests {
         assert_eq!(h, vec![(10, "p001_000".into()), (0, String::new()), (5, "p001_161_long16c".into())]);
         assert_eq!(ann_header_len(3), b.len());
         assert!(ann_header(&b[..30]).is_err());
+    }
+
+    #[test]
+    fn recoms_own_clips_and_their_rows() {
+        let m = parse_manifest(r#"{"slots": [{"slot": 103, "name": "p001_103", "kh1_entry": 106}, {"slot": 222, "kh1_entry": 107}]}"#).unwrap();
+        assert_eq!(recom_clip_for_entry(&m, 106).unwrap().name, "p001_103");
+        assert!(recom_clip_for_entry(&m, 107).is_none(), "a KH1-only clip is not Re:CoM's");
+        let names = vec![None, Some("p001_001".to_string()), Some("p001_103".to_string())];
+        assert_eq!(row_of_clip(&names, "p001_103"), Some(2));
+        assert_eq!(row_of_clip(&names, "p001_104"), None);
     }
 
     #[test]

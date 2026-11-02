@@ -116,6 +116,8 @@ fn run() -> Result<(), String> {
         sources.push(("PL0002.MDL sha256", kh1_formats::egs::sha256_hex(m)));
     }
     let t1 = Instant::now();
+    // M9 9a: the KH1 sound cues of the combo modifiers' motions (their SES entries, below).
+    let kh1_set = kh1_formats::mset::MotionSet::parse(&mset).map_err(|e| format!("xa_ex_0010.mset: {e}"))?;
     let built = build(&Inputs { mset, mdls, ann, mdl, weapon }, &opt).map_err(|e| e.to_string())?;
     let t_conv = t1.elapsed();
     let n_recom = built.recom_entries();
@@ -250,13 +252,24 @@ fn run() -> Result<(), String> {
     let (guard, counter) = (clip(110), clip(111));
     let mut sound = kh1_recom_assets::ses::parse(&ses).map_err(|e| format!("{}: {e}", install::SORA_SES))?;
     let n = kh1_recom_assets::ses::add_kh1(&mut sound, guard.as_deref(), counter.as_deref()).map_err(|e| e.to_string())?;
+    // M9 9a: the KH1-only combo modifier clips, with Re:CoM's whooshes at KH1's frames.
+    let modifier_clips: Vec<kh1_recom_assets::ses::ClipSounds> = kh1_recom_assets::ses::MODIFIER_ENTRIES
+        .iter()
+        .filter_map(|&(entry, finisher)| {
+            let name = clip(entry)?;
+            let m = kh1_set.motions.get(entry)?;
+            Some(kh1_recom_assets::ses::ClipSounds { name, cues: kh1_recom_assets::ses::kh1_cues(m), finisher })
+        })
+        .collect();
+    let nm = kh1_recom_assets::ses::add_clips(&mut sound, &modifier_clips).map_err(|e| e.to_string())?;
     let ses_path = ann_path.with_file_name("PL0001.SES");
     write(&ses_path, &kh1_recom_assets::ses::write(&sound))?;
-    println!("wrote {} ({} KH1 clip entries: guard {:?}, counterattack {:?})", ses_path.display(), n, guard, counter);
+    println!("wrote {} ({} KH1 clip entries: guard {:?}, counterattack {:?}; {} combo modifier clips: {:?})", ses_path.display(), n, guard, counter, nm, modifier_clips.iter().map(|c| c.name.as_str()).collect::<Vec<_>>());
     // Halloween Town's sound events: Re:CoM's `PL0011.SES` with the same KH1 entries.
     if let Some(hs) = &halloween_ses {
         let mut hsound = kh1_recom_assets::ses::parse(hs).map_err(|e| format!("{}: {e}", install::HALLOWEEN_SES))?;
         kh1_recom_assets::ses::add_kh1(&mut hsound, guard.as_deref(), counter.as_deref()).map_err(|e| e.to_string())?;
+        kh1_recom_assets::ses::add_clips(&mut hsound, &modifier_clips).map_err(|e| e.to_string())?;
         write(&hw_dir.with_file_name("PL0011.SES"), &kh1_recom_assets::ses::write(&hsound))?;
     }
     // The Keyblade models, under the same root as the manifest (`<mod>/recom` or --out's folder).

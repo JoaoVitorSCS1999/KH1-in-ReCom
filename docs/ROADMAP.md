@@ -115,6 +115,9 @@ wherever Re:CoM has the motion; only the KH1 motions it lacks are converted; no 
   - Sliding Dash and Vortex;
   - Glide, High Jump, Dodge Roll and Guard, Combo Plus / Air Combo Plus, Combo Master.
 - How the player equips them: an open design question for the owner.
+- Stages (owner's M7–M9 choices): **9a** the ability state and the combo modifiers (built,
+  `recom-m9-abilities.md`), **9b** the equip screen with KH1's AP, **9c** the specials (Sonic
+  Blade, Strike Raid, Ars Arcanum, Ragnarok).
 
 ## Phase 4: KH1 enemies
 

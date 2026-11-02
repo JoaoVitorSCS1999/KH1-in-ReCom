@@ -106,6 +106,9 @@ Steam bytes) that plays the same KH1 motion, with:
 | 1 jump-up | 205 | 5 | 10–20 | 9–19 | 18–32 | 1 |
 | 2 hop | 204 | 6 | 6–20 | 5–19 | 18–34 | 1 |
 
+- **M9 stage 9a** adds the combo modifiers' rows (0, 3–7, 9, 10, 15), each on its own clip
+  (Re:CoM's bake or an appended action row), Stun Impact's body sphere and the % of HP / Magic
+  damage: `recom-m9-abilities.md`.
 - **The hit window one frame earlier.** Re:CoM tests a row's window in its exe against the clock
   of the last motion update. The weapon's collision runs later in the frame on the new pose
   (`0x140225840` calls the test itself). KH1 tests its flags after this frame's update. So KH1's

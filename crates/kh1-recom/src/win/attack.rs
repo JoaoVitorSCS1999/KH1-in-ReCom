@@ -378,6 +378,10 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     let r: u32 = rd(pl + p::REQUEST);
     if r & 1 != 0 && r & 4 != 0 {
         wr(pl + p::REQUEST, r & !4);
+    } else if r & 4 != 0 {
+        // M9 9a: an Attack press: the ability state follows Re:CoM's sleights and level before KH1's
+        // pickers run (only on presses, not per frame).
+        super::abilities::sync();
     }
 }
 
@@ -489,12 +493,25 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     let kh1_weapon = super::stats::equipped_weapon();
     let Some(live) = atk::live_attack(moveset(), kh1_row, &kh1_weapon) else { return recom_pair(coll, list) };
     let bone = func::<BoneFn>(ACTOR_BONE);
-    let (b2, b3) = (bone(weapon, 2), bone(weapon, 3));
-    if b2 == 0 || b3 == 0 {
-        return recom_pair(coll, list);
-    }
-    let (w2, w3) = (rd_vec(b2 + 0xD0), rd_vec(b3 + 0xD0));
-    let (a, bp) = atk::blade_points(w2, w3, &live, &kh1_weapon);
+    let (a, bp) = if live.data.bone == atk::KH1_WEAPON_BONE {
+        let (b2, b3) = (bone(weapon, 2), bone(weapon, 3));
+        if b2 == 0 || b3 == 0 {
+            return recom_pair(coll, list);
+        }
+        let (w2, w3) = (rd_vec(b2 + 0xD0), rd_vec(b3 + 0xD0));
+        atk::blade_points(w2, w3, &live, &kh1_weapon)
+    } else {
+        // M9 9a: a record on one of Sora's own bones (Stun Impact: bone 8, a 2.5 m sphere), tested
+        // while Re:CoM's weapon volume is live (the row's hit window), at Re:CoM's bone of Sora that
+        // stands for it, with the same primitives.
+        let Some(rb) = atk::recom_body_bone(live.data.bone) else { return recom_pair(coll, list) };
+        let at = bone(pl, rb);
+        if at == 0 {
+            return recom_pair(coll, list);
+        }
+        let c = rd_vec(at + 0xD0);
+        (c, c)
+    };
     let serial: i32 = rd(coll + 0x70);
     let prev = BLADE.lock().map(|mut t| t.frame(serial, a)).unwrap_or(None);
     // Assumption: Sora's centre for the first frame's sweep is `player+0x4B0` (the attack origin
@@ -612,7 +629,11 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     // own path then applies its weak part, resistance % and boss falloff (decision 13).
     let pl: usize = rd(va(base(), data::MAIN_PLAYER));
     let row = if pl != 0 { kh1_row_of(pl) } else { None };
-    let kh1 = row.and_then(|r| super::stats::kh1_hit(enemy, r, super::stats::sora_level()));
+    let hp: i32 = rd(enemy + 0x274);
+    // M9 9a: the % of HP rows (Gravity Break, Zantetsuken) read the current HP; Ripple Drive Sora's
+    // max MP (KH1's default 2 when the MP block isn't live).
+    let max_mp = super::mp::current().map_or(kh1_core::AttackerStats::default().max_mp, |v| v.1);
+    let kh1 = row.and_then(|r| super::stats::kh1_hit(enemy, r, super::stats::sora_level(), hp, max_mp));
     if let Some(d) = kh1 {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
     }
@@ -621,7 +642,6 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     if force {
         wr(enemy + 0x260, flags | 0x200_0000);
     }
-    let hp: i32 = rd(enemy + 0x274);
     let r = o(enemy);
     if force {
         let now: u64 = rd(enemy + 0x260);
@@ -880,7 +900,16 @@ pub unsafe fn build_table(b: usize) -> bool {
         log("attack: Re:CoM's attack rows 1-7 are not the Steam exe's; KH1 Attack not installed");
         return false;
     }
-    let t: &'static [[u8; 16]] = Box::leak(atk::kh1_table(&live, moveset(), mv::EXT.get().and_then(|e| e.get(crate::rows::COUNTERATTACK))).into_boxed_slice());
+    let ext = mv::EXT.get().copied().unwrap_or_default();
+    let t: &'static [[u8; 16]] = Box::leak(atk::kh1_table(&live, moveset(), &|req| ext.get(req)).into_boxed_slice());
+    // M9 9a: the pickers only get the modifiers whose rows Re:CoM can play.
+    let ready = atk::modifier_rows_ready(t);
+    super::abilities::set_rows_ready(ready);
+    log(&format!(
+        "attack: modifier rows ready: {:?}; missing (no clip in the motion pack): {:?}",
+        crate::abilities::names(ready),
+        crate::abilities::names(crate::abilities::MODIFIER_BITS & !ready)
+    ));
     TABLE.set(t).is_ok()
 }
 

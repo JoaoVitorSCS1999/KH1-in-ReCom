@@ -52,11 +52,17 @@
 //!   sells Potion, Hi-Potion and Ether for Moogle Points: Re:CoM's own pack objects, cursors,
 //!   sounds, help lines and payment, Re:CoM's item card pictures, KH1's pickup rule (`shop`;
 //!   `docs/recom-m8-items.md` § Stage 8a.3);
+//! - at `combat = kh1`, in Sora's story, KH1's combo modifiers (Sliding Dash, Blitz, Stun Impact,
+//!   Zantetsuken, Vortex, Aerial Sweep, Hurricane Blast, Ripple Drive, Gravity Break): unlocked by
+//!   Re:CoM's own learned sleights or KH1's learn levels on Re:CoM's level, kept in our save block,
+//!   passed to KH1's pickers, played as KH1 rows on Re:CoM's attack action (`abilities`;
+//!   `docs/recom-m9-abilities.md`);
 //! - F9 records a Re:CoM trace in kh1-trace's CSV schema (`trace`).
 //!
 //! `motions` (with `json`) reads the asset build step's manifest and `PL0001.ANN` header, for the
 //! KH1-only clips the movement plays (High Jump, Guard).
 
+pub mod abilities;
 pub mod attack;
 pub mod battle;
 pub mod boss;

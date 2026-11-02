@@ -258,6 +258,107 @@ mod tests {
         assert_eq!(g.hop, 140.0);
     }
 
+    /// The finisher modifiers (`0x1402A6EE0`): Stun Impact, Gravity Break and Zantetsuken share one
+    /// draw in 0.3 slices, each slice going to the next equipped one; Ripple Drive and Blitz flag
+    /// their rows next to the finisher's, and the lowest flagged row wins.
+    #[test]
+    fn finisher_modifiers() {
+        let p = Params::kh1_defaults();
+        let m = Moveset::kh1_defaults();
+        let fin = |a: &Abilities, r: f32, parts: &[TargetPart]| {
+            let mut draw = || r;
+            pick_ground(&ctx(&p, a, &m, 3, 201, None, parts), &mut draw, &mut |_| false).row
+        };
+        let stun = Abilities { stun_impact: true, ..Default::default() };
+        let all3 = Abilities { stun_impact: true, gravity_break: true, zantetsuken: true, ..Default::default() };
+        assert_eq!(fin(&stun, 0.29, &[]), row::STUN_IMPACT);
+        assert_eq!(fin(&stun, 0.31, &[]), row::GROUND_FINISHER, "Stun Impact only takes its 30 %");
+        assert_eq!(fin(&all3, 0.0, &[]), row::STUN_IMPACT);
+        assert_eq!(fin(&all3, 0.45, &[]), row::GRAVITY_BREAK);
+        assert_eq!(fin(&all3, 0.75, &[]), row::ZANTETSUKEN);
+        assert_eq!(fin(&all3, 0.95, &[]), row::GROUND_FINISHER);
+        // Unequipped ones give their slice to the next equipped one.
+        let zan = Abilities { zantetsuken: true, ..Default::default() };
+        assert_eq!(fin(&zan, 0.1, &[]), row::ZANTETSUKEN);
+        assert_eq!(fin(&zan, 0.3, &[]), row::GROUND_FINISHER);
+        let gb = Abilities { gravity_break: true, ..Default::default() };
+        assert_eq!(fin(&gb, 0.2, &[]), row::GRAVITY_BREAK);
+        // Ripple Drive flags row 7 beside the finisher: 7 < 8 wins; a Stun Impact draw (3) beats it.
+        let ripple = Abilities { ripple_drive: true, ..Default::default() };
+        assert_eq!(fin(&ripple, 0.5, &[]), row::RIPPLE_DRIVE);
+        let ripple_stun = Abilities { ripple_drive: true, stun_impact: true, ..Default::default() };
+        assert_eq!(fin(&ripple_stun, 0.1, &[]), row::STUN_IMPACT);
+        assert_eq!(fin(&ripple_stun, 0.5, &[]), row::RIPPLE_DRIVE);
+        // Blitz: only with the plain finisher flagged and no side enemy (f[11] = 0); 6 < 7 < 8.
+        let blitz = Abilities { blitz: true, ..Default::default() };
+        assert_eq!(fin(&blitz, 0.5, &[]), row::BLITZ);
+        let side = TargetPart { owner: 2, centre: Vec3::new(100.0 * 60f32.to_radians().sin(), -50.0, 100.0 * 60f32.to_radians().cos()), radius: 0.0 };
+        assert_eq!(fin(&blitz, 0.5, &[side]), row::GROUND_FINISHER, "a side enemy stops Blitz");
+        let blitz_ripple = Abilities { blitz: true, ripple_drive: true, ..Default::default() };
+        assert_eq!(fin(&blitz_ripple, 0.5, &[]), row::BLITZ);
+        let blitz_stun = Abilities { blitz: true, stun_impact: true, ..Default::default() };
+        assert_eq!(fin(&blitz_stun, 0.1, &[]), row::STUN_IMPACT, "the plain finisher isn't flagged, so no Blitz");
+        // Not a finisher press: no modifier.
+        let mut draw = || 0.0;
+        assert_eq!(pick_ground(&ctx(&p, &all3, &m, 1, 0, None, &[]), &mut draw, &mut |_| false).row, row::SWING_1);
+    }
+
+    /// Sliding Dash (target beyond the lunge range, under 160 above), Vortex (the lunge, or the
+    /// side swing in the scan) and Aerial Sweep (the jump-up attack).
+    #[test]
+    fn approach_modifiers() {
+        let p = Params::kh1_defaults();
+        let m = Moveset::kh1_defaults();
+        let g = |a: &Abilities, t: TargetPart| pick_ground(&ctx(&p, a, &m, 1, 0, Some(t), &[t]), &mut || 0.0, &mut |_| false);
+        let dash = Abilities { sliding_dash: true, ..Default::default() };
+        // Gap 470 (500 − 30) ≥ 300, 50 above: Sliding Dash, the speed word keeps the gap.
+        let far = part(500.0, -50.0);
+        let s = g(&dash, far);
+        assert_eq!(s.row, row::SLIDING_DASH);
+        assert_eq!(s.speed, 470.0);
+        assert_ne!(g(&Abilities::default(), far).row, row::SLIDING_DASH);
+        // Exactly the lunge range: dashes (`gap < lunge` refuses only below).
+        assert_eq!(g(&dash, part(330.0, -50.0)).row, row::SLIDING_DASH);
+        // 160 or more above: no dash.
+        assert_ne!(g(&dash, part(500.0, -160.0)).row, row::SLIDING_DASH);
+        // In lunge range the lunge stays (Sliding Dash is only beyond it).
+        assert_eq!(g(&dash, part(280.0, -50.0)).row, row::LUNGE);
+        // Vortex: the lunge becomes Vortex (10 < 14).
+        let vortex = Abilities { vortex: true, ..Default::default() };
+        assert_eq!(g(&vortex, part(280.0, -50.0)).row, row::VORTEX);
+        // … and a side enemy in the scan flags Vortex with the side swing (10 < 11).
+        let side = TargetPart { owner: 2, centre: Vec3::new(100.0 * 60f32.to_radians().sin(), -50.0, 100.0 * 60f32.to_radians().cos()), radius: 0.0 };
+        assert_eq!(pick_ground(&ctx(&p, &vortex, &m, 1, 0, None, &[side]), &mut || 0.0, &mut |_| false).row, row::VORTEX);
+        assert_eq!(pick_ground(&ctx(&p, &Abilities::default(), &m, 1, 0, None, &[side]), &mut || 0.0, &mut |_| false).row, row::SWING_2);
+        // Aerial Sweep replaces the jump-up attack at an airborne target.
+        let sweep = Abilities { aerial_sweep: true, ..Default::default() };
+        let high = part(130.0, -250.0);
+        assert_eq!(g(&Abilities::default(), high).row, row::JUMP_UP);
+        let a = g(&sweep, high);
+        assert_eq!(a.row, row::AERIAL_SWEEP);
+        assert_eq!(a.hop, 190.0, "the same hop as the jump-up attack");
+    }
+
+    /// Hurricane Blast: the air finisher at a target not more than 100 below, in state 2.
+    #[test]
+    fn hurricane_blast() {
+        let p = Params::kh1_defaults();
+        let m = Moveset::kh1_defaults();
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let hb = Abilities { hurricane_blast: true, ..Default::default() };
+        let air = |a: &Abilities, counter: u8, cur: i32, target: Option<TargetPart>, s2: bool| {
+            pick_air(&AirCtx { params: &p, abilities: a, moveset: &m, counter, length: 3, current_request: cur, in_state_2: s2, pos: Vec3::ZERO, aim: z, target }).0
+        };
+        let level = TargetPart { owner: 1, centre: Vec3::new(0.0, 0.0, 80.0), radius: 0.0 };
+        assert_eq!(air(&hb, 3, 205, Some(level), true), row::HURRICANE_BLAST);
+        assert_eq!(air(&Abilities::default(), 3, 205, Some(level), true), row::AIR_FINISHER);
+        assert_eq!(air(&hb, 3, 205, None, true), row::AIR_FINISHER, "no target: no Hurricane Blast");
+        assert_eq!(air(&hb, 3, 205, Some(level), false), row::AIR_FINISHER, "only in state 2");
+        let high = TargetPart { owner: 1, centre: Vec3::new(0.0, -150.0, 50.0), radius: 0.0 };
+        assert_eq!(air(&hb, 3, 205, Some(high), true), row::AIR_FINISHER, "more than 100 above Sora: the finisher");
+        assert_eq!(air(&hb, 1, 0, Some(level), true), row::AIR_SWING_1, "not the finisher press");
+    }
+
     #[test]
     fn air_rows() {
         let p = Params::kh1_defaults();

@@ -69,8 +69,14 @@ pub mod row {
     pub const ITEM: u32 = 0x2D;
 }
 
-/// KH1 requests for the KH1-only rows, in the order they are appended.
-pub const KH1_ONLY: [(u16, u32); 2] = [(212, 110), (213, 111)];
+/// KH1 requests (and mset entries) that play a clip of their own, in the order their rows are
+/// appended: Guard, Counterattack, then the combo modifiers (M9 stage 9a): Sliding Dash 208,
+/// Hurricane Blast 209, Blitz 210, Vortex 211, Aerial Sweep 214, Ripple Drive 215, Stun Impact 216,
+/// Gravity Break 217, Zantetsuken 218. An entry whose clip the asset step added (a KH1-only clip,
+/// slot ≥ 161) gets an appended row; an entry Re:CoM already has (its bake: Sliding Dash
+/// `p001_103`, Stun Impact `p001_101`, Zantetsuken `p001_104`, by the manifest) plays Re:CoM's own
+/// action row of that clip ([`Extension::with_recom`]).
+pub const KH1_ONLY: [(u16, u32); 11] = [(212, 110), (213, 111), (208, 106), (209, 107), (210, 108), (211, 109), (214, 112), (215, 113), (216, 114), (217, 115), (218, 116)];
 
 /// KH1 Guard's request.
 pub const GUARD: u16 = 212;
@@ -79,10 +85,13 @@ pub const COUNTERATTACK: u16 = 213;
 /// KH1's guard-success recoil (kind 6, `0x14029D720`).
 pub const RECOIL: u16 = 0x6E;
 
-/// The appended rows: `ext[i]` is the row id of `KH1_ONLY[i]`, when its clip exists.
+/// The appended rows: `rows[i]` is the row id of `KH1_ONLY[i]`, when its KH1-only clip exists;
+/// `recom[i]` Re:CoM's own action row playing that entry's clip, when the manifest maps the entry
+/// to one of Re:CoM's clips.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Extension {
-    pub rows: [Option<u32>; 2],
+    pub rows: [Option<u32>; KH1_ONLY.len()],
+    pub recom: [Option<u32>; KH1_ONLY.len()],
 }
 
 impl Extension {
@@ -99,17 +108,30 @@ impl Extension {
         e
     }
 
+    /// Entries without a KH1-only clip that Re:CoM's own action table plays: `recom_row(entry)` is
+    /// Re:CoM's row whose clip the manifest names for the entry.
+    pub fn with_recom(mut self, recom_row: impl Fn(u32) -> Option<u32>) -> Extension {
+        for (i, &(_, entry)) in KH1_ONLY.iter().enumerate() {
+            if self.rows[i].is_none() {
+                self.recom[i] = recom_row(entry).filter(|&r| r < RECOM_ROWS);
+            }
+        }
+        self
+    }
+
+    /// The action row playing a KH1 request's own clip: ours appended, or Re:CoM's.
     pub fn get(&self, req: u16) -> Option<u32> {
-        KH1_ONLY.iter().position(|&(r, _)| r == req).and_then(|i| self.rows[i])
+        KH1_ONLY.iter().position(|&(r, _)| r == req).and_then(|i| self.rows[i].or(self.recom[i]))
     }
 
     pub fn count(&self) -> usize {
         self.rows.iter().flatten().count()
     }
 
-    /// Whether `row` is one of our appended KH1-only rows (Guard, Counterattack).
+    /// Whether `row` plays one of the KH1 requests above (our appended rows, or Re:CoM's rows of
+    /// the modifiers' bakes): they end in the battle stance like Re:CoM's swing rows.
     pub fn has_row(&self, row: i32) -> bool {
-        self.rows.iter().flatten().any(|&r| r as i32 == row)
+        self.rows.iter().chain(self.recom.iter()).flatten().any(|&r| r as i32 == row)
     }
 }
 
@@ -332,10 +354,35 @@ mod tests {
         assert_eq!(row_for(crate::items::USE_SELF, &s, &Extension::default()), Some((row::ITEM, false)));
     }
 
+    /// M9 9a: the modifiers Re:CoM has baked (the manifest maps them to Re:CoM's clips) play
+    /// Re:CoM's own rows; the KH1-only ones get appended rows after Guard and Counterattack.
+    #[test]
+    fn modifier_clips_take_recoms_rows_or_appended_ones() {
+        // The owner's manifest: entries 106 / 114 / 116 are Re:CoM's p001_103 / 101 / 104 (rows
+        // 0x45 / 0x44 / 0x46 of Re:CoM's table, Checked (exe)); the rest are KH1-only.
+        let recom = |e: u32| match e {
+            106 => Some(0x45),
+            114 => Some(0x44),
+            116 => Some(0x46),
+            _ => None,
+        };
+        let e = Extension::plan(|e| recom(e).is_none()).with_recom(recom);
+        assert_eq!((e.get(GUARD), e.get(COUNTERATTACK)), (Some(0x47), Some(0x48)));
+        assert_eq!((e.get(208), e.get(216), e.get(218)), (Some(0x45), Some(0x44), Some(0x46)));
+        assert_eq!([e.get(209), e.get(210), e.get(211), e.get(214), e.get(215), e.get(217)], [Some(0x49), Some(0x4A), Some(0x4B), Some(0x4C), Some(0x4D), Some(0x4E)]);
+        assert_eq!(e.count(), 8);
+        assert!(e.has_row(0x44) && e.has_row(0x4E) && !e.has_row(0x30));
+        // A row id past Re:CoM's table is never taken as Re:CoM's.
+        assert_eq!(Extension::plan(|_| false).with_recom(|_| Some(0x47)).get(208), None);
+        // Swings never go through `row_for` (Re:CoM's attack action plays their rows).
+        assert_eq!(row_for(216, &Stance::default(), &e), None);
+    }
+
     #[test]
     fn extension_rows_are_appended_in_order() {
         let all = Extension::plan(|_| true);
-        assert_eq!(all.rows, [Some(0x47), Some(0x48)]);
+        assert_eq!(all.rows[..2], [Some(0x47), Some(0x48)]);
+        assert_eq!(all.get(218), Some(0x47 + 10));
         let s = Stance::default();
         // The converted High Jump clips are no longer used, even when the pack has them.
         assert_eq!(row_for(9, &s, &all), Some((row::HIGH_JUMP, false)));
@@ -343,9 +390,10 @@ mod tests {
         assert_eq!(row_for(COUNTERATTACK, &s, &all), Some((0x48, true)));
         assert_eq!(row_for(RECOIL, &s, &all), Some((row::RECOIL, false)));
         let no_guard = Extension::plan(|e| e != 110);
-        assert_eq!(no_guard.rows, [None, Some(0x47)], "the counterattack moves up when the guard clip is missing");
+        assert_eq!(no_guard.rows[..2], [None, Some(0x47)], "the counterattack moves up when the guard clip is missing");
         let rows = appended_rows(&all, |e| Some(format!("p001_{}", 150 + e)));
-        assert_eq!(rows, vec![(0x47, "p001_260".to_string()), (0x48, "p001_261".to_string())]);
+        assert_eq!(rows[..2], [(0x47, "p001_260".to_string()), (0x48, "p001_261".to_string())]);
+        assert_eq!(rows.len(), KH1_ONLY.len());
         assert!(appended_rows(&all, |_| None).is_empty());
     }
 }

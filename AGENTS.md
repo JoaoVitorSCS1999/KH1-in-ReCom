@@ -11,6 +11,28 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 93: M9 stage 9a: KH1's combo-modifier abilities and the ability state, version 0.51.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "Finish everything up to M9"; abilities unlock with Re:CoM (its level-up
+  sleights) and, without a Re:CoM source, at KH1's learn levels; equip screen with KH1's AP next.
+- KH1 (Checked (decomp + files)): picker `0x1402A6EE0` / `0x1402A6C70` conditions for Stun Impact, Gravity
+  Break, Zantetsuken, Blitz, Ripple Drive, Sliding Dash, Vortex, Aerial Sweep, Hurricane Blast; their
+  motions, windows, travel and attack records; AP costs (btltbl 0x33D8); learn tables.
+- Built: ability block at save+0x269F..0x26AD (unlocked, equipped; AP reserved); Re:CoM-sourced unlocks
+  via Re:CoM's own sleight-learned `0x14023AB00` (called, 16 bytes checked; storage save+0x2840); others at
+  KH1's Rod-list levels on Re:CoM's level (Ripple Drive 12, Hurricane Blast 18, Aerial Sweep 36, Vortex 84);
+  unlocked = equipped until 9b. Equipped modifiers passed to KH1's pickers (only rows that exist). Six
+  KH1-only clips on extra action rows; Sliding Dash / Stun Impact / Zantetsuken play Re:CoM's own copies
+  (rows 0x45 / 0x44 / 0x46). Rows 0, 3–7, 9, 10, 15 via `kh1_row_bytes`. Stun Impact a 2.5 m sphere at
+  `belt1` (Re:CoM's collision); Gravity Break / Zantetsuken damage on current HP; Ripple Drive max MP × 3;
+  stun → Re:CoM's kind 7. SES entries for the six clips. Debug `kh1_all_abilities`.
+  `docs/recom-m9-abilities.md`.
+- Not 1:1 yet: stun length / immunity Re:CoM's; no KH1 effects (M13); Re:CoM's blow-away; side scans see
+  only Re:CoM's target (M12). Gravity Break has no KH1 learn level: never unlocks yet (owner question).
+- Checked: tests, Windows build, 446 site byte sets. Not checked: in game.
+
+---
+
 ## Stage 92: Battle-end softlock: KH1 strikes take Re:CoM's contact point; no new KH1 command after the win, version 0.50.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "ending a battle with magic still softlocks the game" (log: the battle manager

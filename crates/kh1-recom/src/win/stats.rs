@@ -401,7 +401,9 @@ pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32, hp:
 }
 
 /// KH1's damage for Sora's swing row on this enemy's twin, or None (Re:CoM's number stands).
-pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32) -> Option<i32> {
+/// `hp_now`: the enemy's current HP (KH1's for twins and proxies, `+0x274`), which the % of HP
+/// rows read (Gravity Break, Zantetsuken); `max_mp`: Sora's KH1 max MP (Ripple Drive's Magic × 3).
+pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32) -> Option<i32> {
     // A twin, else a proxy / boss twin set up at its stats init (Sora's story only).
     let t = match twin(enemy) {
         Some((_, t)) => t.clone(),
@@ -412,7 +414,7 @@ pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32) -> Option<i32> {
     let strength = STATS.get()?.strength_with(sora_level, &w)?;
     let mut g = RNG.lock().ok()?;
     let rng = g.get_or_insert_with(|| kh1_core::Kh1Rand::new(1));
-    let d = crate::attack::kh1_damage(super::attack::moveset(), kh1_row, strength, &w, &t, rng)?;
+    let d = crate::attack::kh1_damage_at(super::attack::moveset(), kh1_row, crate::attack::Sora { strength, max_mp }, &w, &t, hp_now, rng)?;
     Some(d.damage)
 }
 
