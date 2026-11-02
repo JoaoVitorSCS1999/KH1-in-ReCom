@@ -283,6 +283,9 @@ Steam bytes) that plays the same KH1 motion, with:
       boss risk stays with M6.
   - **Not checked:** whether in KH1 the blade meeting the claw's own attack object stops the hit,
     and whether a hit interrupts the claw in KH1. Not seen in game.
+  - **Exception (2026-11-02, owner):** the attack a humanoid boss's revenge started keeps Re:CoM's
+    rule (bodies off, no card-interrupt bit, no Guard flinch) until its state end `0x14017DA90`:
+    `docs/recom-boss-revenge.md` § 4.
   - Also fixed:
     - A KH1 hit is now kept through the next swing's start: a chain could start before the
       enemy's update consumed the hit, and the hit then took Re:CoM's damage and rule.

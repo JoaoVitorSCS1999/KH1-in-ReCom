@@ -580,8 +580,8 @@ fn install_battles(base: usize) {
 }
 
 /// Boss revenge at Combat = KH1 (`revenge`, owner 2026-11-01): KH2's revenge value on Re:CoM's
-/// humanoid bosses. Two state-step hooks and the bosses' allocation sizes, all or nothing; the add
-/// is in the enemy-hit wrapper. `boss_revenge = off` leaves it all passing through.
+/// humanoid bosses. Two state-step hooks, the attack-state end hook and the bosses' allocation sizes,
+/// all or nothing; the add is in the enemy-hit wrapper. `boss_revenge = off` leaves it all passing through.
 fn install_revenge(base: usize, s: &Settings) {
     if !movement::installed() {
         log("revenge: movement not hooked; bosses keep Re:CoM's rules");
@@ -591,7 +591,7 @@ fn install_revenge(base: usize, s: &Settings) {
     // SAFETY: reads of the mapped exe; the hook targets' and patch sites' bytes are checked inside.
     if unsafe { revenge::install(base) } {
         log(&format!(
-            "revenge: KH2's revenge value on {} humanoid bosses (boss_revenge = {}): counter in a 0x20-byte tail of each boss body (factory sizes raised), add in the enemy-hit wrapper, check in the flinch / blow-away steps 0x140184100 / 0x140182E50 at KH2's frame 20 (Hades 30) or the state's end",
+            "revenge: KH2's revenge value on {} humanoid bosses (boss_revenge = {}): counter in a 0x30-byte tail of each boss body (factory sizes raised), add in the enemy-hit wrapper, check in the flinch / blow-away steps 0x140184100 / 0x140182E50 at KH2's frame 20 (Hades 30) or the state's end; the revenge attack untouchable by Re:CoM's own rule (hurt bodies off 0x14017DA80, its handler's bit-0 drop) until its state end 0x14017DA90",
             crate::revenge::BOSSES.len(),
             settings::switch_str(s.boss_revenge)
         ));

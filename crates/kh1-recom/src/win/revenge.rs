@@ -1,6 +1,6 @@
 //! Boss revenge at Combat = KH1 (`crate::revenge`, `docs/recom-boss-revenge.md`).
 //!
-//! - **Counter:** a 0x20-byte tail after each revenge boss body (`crate::revenge::tail`), made by
+//! - **Counter:** a 0x30-byte tail after each revenge boss body (`crate::revenge::tail`), made by
 //!   raising the size Re:CoM's enemy factory `0x140188F40` allocates for the class (one 5-byte
 //!   `mov ecx, size` each, written once at install) and set up when Re:CoM's stats init
 //!   `0x14017FF50` runs for the boss (our existing wrapper). A tail from another battle or class is
@@ -18,16 +18,25 @@
 //!   limit ≤ counter starts the boss's own attack state with the transition Re:CoM's message 2
 //!   makes (the cardless card play P1's: `crate::battle::cardless_flags`, `state_address`).
 //!
+//! - **Untouchable revenge move** (owner, 2026-11-02): the start marks the tail pending; when
+//!   Re:CoM begins that attack state its "hurt bodies off" (`0x14017DA80`, `super::attack::hurt_off`)
+//!   runs for this attack ([`begin_untouchable`]), and hits on the boss go to Re:CoM's handler
+//!   without the card-interrupt bit (`super::attack::untouchable_hit`), so Re:CoM's own rule drops
+//!   them (`+0x260 & 1`). No Guard reaction either (`super::guard`). The window closes in Re:CoM's
+//!   attack-state end `0x14017DA90` (hooked: [`attack_end`]), which turns the bodies back on.
+//!   Nothing adds to the counter during it; the counter keeps draining.
+//!
 //! Only in a KH1 battle (Combat = KH1, Sora's story) with `boss_revenge = on`.
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
-use crate::revenge::{self as rv, flag, tail, Boss, Counter, Source};
-use crate::sites::{REVENGE_HOOKS, REVENGE_PTRS};
+use crate::revenge::{self as rv, flag, tail, Boss, Counter, Ignored, IgnoredKind, Source};
+use crate::sites::{REVENGE_CHECKED, REVENGE_HOOKS, REVENGE_PTRS};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 pub static ORIG_FLINCH: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_BLOW: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_ATTACK_END: AtomicUsize = AtomicUsize::new(0);
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static ENABLED: AtomicBool = AtomicBool::new(true);
 /// The game clock: Re:CoM time units (50 a 60 Hz frame), Sora's dt summed each frame.
@@ -142,11 +151,16 @@ unsafe fn boss_of(e: usize) -> Option<&'static Boss> {
     rv::boss_by_vtable(vt_rva(e))
 }
 
+/// Whether the tail was set up in this battle.
+unsafe fn tail_ok(e: usize, b: &Boss) -> bool {
+    let t = e + b.size as usize;
+    rd::<u32>(t + tail::MAGIC) == rv::MAGIC && rd::<u32>(t + tail::BATTLE) == super::battle::battle_number()
+}
+
 /// The tail's counter (set up again when it is another battle's or never was).
 unsafe fn counter(e: usize, b: &Boss) -> Counter {
     let t = e + b.size as usize;
-    let battle = super::battle::battle_number();
-    if rd::<u32>(t + tail::MAGIC) != rv::MAGIC || rd::<u32>(t + tail::BATTLE) != battle {
+    if !tail_ok(e, b) {
         setup(e, b);
     }
     Counter {
@@ -239,6 +253,24 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
         }
         None => return super::attack::enemy_hit(enemy),
     };
+    // Revenge moves untouchable (owner, 2026-11-02): while the body plays the attack its revenge
+    // started, Re:CoM's own rule decides a hit on it, and nothing adds to the counter (its hurt
+    // bodies are off, so Sora's attacks don't meet it: KH2 adds only on a hit that meets the enemy,
+    // `0x1403DB730` through its on-hit slot `+0xC0`). A part's own hits keep their Re:CoM rules.
+    if untouchable(body) {
+        if body != enemy {
+            return super::attack::enemy_hit(enemy);
+        }
+        let (r, kind) = super::attack::untouchable_hit(enemy);
+        let t = enemy + b.size as usize;
+        let mut ig = Ignored::from_bytes(rd(t + tail::IGNORED));
+        ig.add(kind);
+        wr(t + tail::IGNORED, ig.to_bytes());
+        if r != 0 {
+            line(|| format!("revenge: {} {enemy:#x} took a hit in its untouchable move: Re:CoM's handler applied it (flags {:#x})", b.name, rd::<u64>(enemy + EN_FLAGS)));
+        }
+        return r;
+    }
     let falloff = b.falloff_off().then(|| Falloff::save(enemy));
     NOTE.store(0, Ordering::Relaxed);
     let r = super::attack::enemy_hit(enemy);
@@ -285,6 +317,9 @@ unsafe fn step(e: usize, o: StepFn) {
                     wr(e + EN_FLAGS, crate::battle::cardless_flags(flags));
                     wr(e + EN_CHOSEN, state);
                     wr(e + EN_NEXT, crate::battle::state_address(e, state));
+                    // The untouchable window opens when Re:CoM begins this state.
+                    c.flags = (c.flags | flag::PENDING) & !flag::UNTOUCHABLE;
+                    wr(e + b.size as usize + tail::STATE, state);
                     line(|| format!("revenge: {} {e:#x} counter {value:.1} >= {l} at frame {at:.0} of its {} -> state {state} ({what})", b.name, if ending { "reaction's end" } else { "reaction" }));
                 }
                 Some((state, _)) => line(|| format!("revenge: {} {e:#x} counter {value:.1} >= {l}, but it may not attack now (dead or CBTL locked): state {state} not started", b.name)),
@@ -303,6 +338,93 @@ pub unsafe extern "win64" fn flinch_step(e: usize) {
 /// Re:CoM's blow-away step (state 12, `0x140182E50`).
 pub unsafe extern "win64" fn blow_step(e: usize) {
     step(e, orig(&ORIG_BLOW))
+}
+
+/// Whether `e` is a revenge boss body in (or about to begin) the attack its revenge started: Re:CoM's
+/// own rule for an attacking enemy then decides hits on it (`crate::revenge::holds`).
+pub(super) unsafe fn untouchable(e: usize) -> bool {
+    if !live() {
+        return false;
+    }
+    let Some(b) = boss_of(e) else { return false };
+    tail_ok(e, b) && rv::holds(rd(e + b.size as usize + tail::FLAGS), rd(e + EN_FLAGS), rd(e + EN_HP))
+}
+
+/// A Guard reaction (decision 27) the window skipped (`super::guard`).
+pub(super) unsafe fn guard_skipped(e: usize) {
+    if let Some(b) = boss_of(e) {
+        let t = e + b.size as usize;
+        let mut ig = Ignored::from_bytes(rd(t + tail::IGNORED));
+        ig.add(IgnoredKind::Guard);
+        wr(t + tail::IGNORED, ig.to_bytes());
+    }
+}
+
+/// Re:CoM's "hurt bodies off" at an attack state's begin (`super::attack::hurt_off`, at the KH1
+/// setting, which otherwise skips it: decision 26): true when the state beginning is the one this
+/// boss's revenge started, so Re:CoM's own call runs and the window opens. A pending start that
+/// another attack state replaced is dropped.
+pub(super) unsafe fn begin_untouchable(e: usize) -> bool {
+    if !live() {
+        return false;
+    }
+    let Some(b) = boss_of(e) else { return false };
+    if !tail_ok(e, b) {
+        return false;
+    }
+    let t = e + b.size as usize;
+    let flags: u32 = rd(t + tail::FLAGS);
+    if flags & flag::PENDING == 0 {
+        return false;
+    }
+    let state: i32 = rd(t + tail::STATE);
+    let current: usize = rd(e + EN_STATE);
+    if !rv::begins_revenge(flags, current, crate::battle::state_address(e, state)) {
+        wr(t + tail::FLAGS, flags & !flag::PENDING);
+        line(|| format!("revenge: {} {e:#x}: another attack state began (+{:#x}) before its revenge state {state}: not untouchable", b.name, current.wrapping_sub(e)));
+        return false;
+    }
+    wr(t + tail::FLAGS, (flags & !flag::PENDING) | flag::UNTOUCHABLE);
+    wr(t + tail::IGNORED, [0u8; 4]);
+    wr(t + tail::START, now() as f32);
+    let what = b.attack.map_or("", |a| a.1);
+    line(|| format!("revenge: {} untouchable (state {state}: {what}) {e:#x}: Re:CoM's rule for an attacking enemy (hurt bodies off, its hit handler drops hits while +0x260 bit 0 is set)", b.name));
+    true
+}
+
+/// Re:CoM's attack-state end (`0x14017DA90`, vtable `+0x440` of every enemy; Marluxia 2's own
+/// `0x140400460` calls it): clears bits 0 / 2 and turns the hurt bodies back on. Closes the window.
+pub unsafe extern "win64" fn attack_end(e: usize) {
+    if INSTALLED.load(Ordering::Relaxed) {
+        if let Some(b) = boss_of(e) {
+            if tail_ok(e, b) {
+                let t = e + b.size as usize;
+                let flags: u32 = rd(t + tail::FLAGS);
+                if flags & (flag::UNTOUCHABLE | flag::PENDING) != 0 {
+                    wr(t + tail::FLAGS, flags & !(flag::UNTOUCHABLE | flag::PENDING));
+                }
+                if flags & flag::UNTOUCHABLE != 0 {
+                    let state: i32 = rd(t + tail::STATE);
+                    let ig = Ignored::from_bytes(rd(t + tail::IGNORED));
+                    let frames = now() as f32 - rd::<f32>(t + tail::START);
+                    let hp: i32 = rd(e + EN_HP);
+                    line(|| {
+                        format!(
+                            "revenge: {} untouchable ends (state {state}) {e:#x} after {frames:.0} frames: ignored {} hits ({} KH1 swings, {} KH1 spells, {} other), {} Guard reactions skipped; HP {hp}{}",
+                            b.name,
+                            ig.hits(),
+                            ig.swings,
+                            ig.spells,
+                            ig.other,
+                            ig.guards,
+                            if hp <= 0 { " (dead)" } else { "" }
+                        )
+                    });
+                }
+            }
+        }
+    }
+    orig::<StepFn>(&ORIG_ATTACK_END)(e)
 }
 
 /// Checks the classes and their state steps, hooks the two steps and raises the bosses'
@@ -326,13 +448,19 @@ pub unsafe fn install(bs: usize) -> bool {
         }
     }
     if let Some(p) = REVENGE_PTRS.iter().find(|p| rd::<usize>(bs + p.rva as usize) != bs + p.target as usize) {
-        log(&format!("revenge: {} is not the state step we hook: not installed", p.name));
+        log(&format!("revenge: {} is not the function we hook or expect: not installed", p.name));
+        return false;
+    }
+    // The attack-state end's bytes after the 8 our hook moves (`mov edx,-1; jmp 0x1401A2DB0`).
+    if let Some(s) = REVENGE_CHECKED.iter().find(|s| std::slice::from_raw_parts((bs + s.rva as usize) as *const u8, s.expect.len()) != s.expect) {
+        log(&format!("revenge: {} holds other bytes: not installed", s.name));
         return false;
     }
     let site = |name: &str| REVENGE_HOOKS.iter().find(|h| h.name == name).expect("site");
     let hooks = [
         super::hook::Hook { site: site("enemy flinch step (0x140184100)"), ours: flinch_step as *const () as usize, original: &ORIG_FLINCH },
         super::hook::Hook { site: site("enemy blow-away step (0x140182E50)"), ours: blow_step as *const () as usize, original: &ORIG_BLOW },
+        super::hook::Hook { site: site("enemy attack-state end (0x14017DA90)"), ours: attack_end as *const () as usize, original: &ORIG_ATTACK_END },
     ];
     if !super::hook::install_all(bs, &hooks) {
         return false;
