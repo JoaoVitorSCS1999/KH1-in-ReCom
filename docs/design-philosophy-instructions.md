@@ -408,6 +408,12 @@ At KH1 setting:
       decision 17's KH1 roll frames; an ini key keeps KH1's roll selectable.
     - **Enemy card sounds (owner, 2026-11-02):** "you cant hear enemies stocking cards or refilling their
       deck": at Combat = KH1, the sounds of enemies stocking cards and reloading their deck are silent.
+    - **Phase 4, KH1 enemies (owner, 2026-11-02):** "lets move on to doing phase 4, except, i only want
+      the AI, attacks, reactions and motions from KH1 equivalent enemies, everything else (emphasis on
+      stats) stay the same as they are in RECoM". KH1-equivalent enemies take **KH1's AI, attacks
+      (timing, hit shapes, behaviour), reactions and motions**; **stats (HP, damage, defence, drops,
+      EXP…) and everything else stay Re:CoM's** (the Damage setting still decides Sora's damage to
+      them). M10 Shadow pilot first, then M11.
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
