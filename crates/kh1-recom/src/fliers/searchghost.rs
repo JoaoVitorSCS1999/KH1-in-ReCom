@@ -68,6 +68,8 @@ mod tests {
         // Both rows name the recoil 205, which the model has: KH1's clash recoil when Sora guards.
         assert_eq!((m.recoil_of(0), m.recoil_of(1)), (Some(205), Some(205)));
         assert_eq!(m.parts.len(), 5);
+        // The drain's reward numbers.
+        assert_eq!((m.consts.get("reward_exp_div"), m.consts.get("reward_exp_add"), m.consts.get("reward_prize_4")), (10.0, 1.0, 3.0));
         let _ = (CLASS.make)(&m, 1, 0.0);
     }
 

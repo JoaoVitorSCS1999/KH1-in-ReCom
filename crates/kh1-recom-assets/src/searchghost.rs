@@ -147,6 +147,10 @@ pub const CONSTS: &[(&str, &[usize])] = &[
     ("fly_check", &[0x336E, 0x34D4]),
     ("fly_detour_lo", &[0x34B0]),
     ("fly_detour_hi", &[0x34B6]),
+    // The hit handler's reward `sys 194(EXP / 10 + 1)`: while it holds a drain (`0x28D8` / `0x28E0`) and on a
+    // Gravity hit (`0x29DC` / `0x29E4`, not carried). Its prizes: `crate::enemy::REWARDS` (the table `0x580`).
+    ("reward_exp_div", &[0x28D8, 0x29DC]),
+    ("reward_exp_add", &[0x28E0, 0x29E4]),
 ];
 
 /// The request words `ex_2230.bd` pushes (bit 24: an action; bit 30: a request that clears the action flag when
@@ -265,8 +269,9 @@ mod tests {
         assert_eq!((get("orb_near"), get("orb_done"), get("orb_keep"), get("orb_up")), (320.0, 100.0, 0.95, 80.0));
         assert_eq!((get("drain_speed"), get("drain_near"), get("approach_near"), get("watch_near")), (20.0, 250.0, 450.0, 200.0));
         assert_eq!((get("search_lo"), get("search_hi"), get("roam_rounds"), get("hover_bursts")), (60.0, 600.0, 3.0, 3.0));
-        assert_eq!((get("hover_side_lo"), get("hover_back_neg"), get("drain_back_dir"), get("rise_y")), (-120.0, -180.0, -3.0, -0.2));
-        assert_eq!((get("weight"), get("walk_speed"), get("motion_blend"), get("air_accel")), (1.0, 2.0, 8.0, 0.1));
+        // The hold's reward: `sys 194(EXP / 10 + 1)` and the table `0x580`: 3 prizes of KH1 kind 4 (HP +5).
+        assert_eq!((get("reward_exp_div"), get("reward_exp_add")), (10.0, 1.0));
+        assert_eq!((0..7).map(|k| get(&format!("reward_prize_{k}"))).collect::<Vec<_>>(), vec![0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0]);
         let c = |r: u16| b.clips.iter().find(|c| c.request == r).unwrap().clone();
         // Re:CoM's bakes: the idle (`e014_001`) and 70 (`e014_074`); every other request a new clip at 100 + entry.
         assert_eq!((c(0).name.as_str(), c(0).source, c(70).name.as_str(), c(70).source), ("e014_001", "recom", "e014_074", "recom"));

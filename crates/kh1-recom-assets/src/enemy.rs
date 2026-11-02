@@ -1034,8 +1034,9 @@ fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
 pub const SIGHTS: &[(&str, u32)] = &[("searchghost", 0x102D)];
 
 /// Prize tables a script's handler hands to `sys 122` as a reward (M11, `kh1_core::enemy::Reward`): (enemy,
-/// the constants' prefix, the table's script offset).
-pub const REWARDS: &[(&str, &str, u32)] = &[];
+/// the constants' prefix, the table's script offset). The Search Ghost's hold reward: `0x28EE` / `0x29C4`
+/// push `0x580` for `func_1F64` (`sys 32` → `sys 122`). Checked (files).
+pub const REWARDS: &[(&str, &str, u32)] = &[("searchghost", "reward_prize", 0x580)];
 
 /// [`REWARDS`]' tables as `<prefix>_0..6` (the seven prize counts, `0x1402ABC40`'s, by KH1 prize kind). A
 /// table that also rolls items is refused (a reward carries no items).
