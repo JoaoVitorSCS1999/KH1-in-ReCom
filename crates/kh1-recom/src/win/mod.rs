@@ -28,6 +28,7 @@ mod shop;
 mod specials;
 mod stats;
 mod story_skip;
+mod summons;
 mod sys;
 mod trace;
 mod unlocks;
@@ -341,6 +342,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         install_specials(base);
         install_drops(base);
         install_unlocks(base);
+        install_summons(base);
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
     }
@@ -488,6 +490,23 @@ fn install_unlocks(base: usize) {
         log(&unlocks::start_line());
     } else {
         log("unlocks: 0x14015C7F0 not hooked; no spell is learned (kh1_all_spells still gives all)");
+    }
+}
+
+/// M8b (`summons`): KH1's Summon list, each summon Re:CoM's LV3 sleight through Sora's own sleight
+/// start (no hook, no patch). Needs the command menu (its Summon list issues them); the learn order
+/// follows Re:CoM's card collection through the unlocks wrapper (and the first read of a save).
+fn install_summons(base: usize) {
+    if !command_menu::installed() {
+        log("summons: no KH1 command menu; no KH1 summons");
+        return;
+    }
+    // SAFETY: reads of the mapped exe.
+    if unsafe { summons::install(base) } {
+        log(&summons::start_line());
+        if !unlocks::installed() {
+            log("summons: the unlocks wrapper is not in: summons learned only at a save's first read");
+        }
     }
 }
 

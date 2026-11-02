@@ -644,6 +644,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
             icon: m.icon.as_ref().map(|[a, b]| [a.as_slice(), b.as_slice()]),
             cut: m.cut.as_deref(),
             item: m.item.as_deref(),
+            sum: m.sum.as_deref(),
         }),
         Err(e) => {
             println!("note: KH1 HUD: no KH1 command menu look: {e}");
@@ -685,6 +686,11 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         match m.items_list {
             Some(g) => println!("KH1 HUD: Items list (M8 stage 8a.1) from group {g}: {}", kh::ITEM),
             None => println!("note: KH1 HUD: no Items list panels (no {}): the DLL draws the Items list with the Magic list's", kh::ITEM),
+        }
+        match (m.summon_list, &m.summon_note) {
+            (Some(g), _) => println!("KH1 HUD: Summon list (M8b) from group {g}: {}", kh::SUM),
+            (None, Some(n)) => println!("note: KH1 HUD: no Summon list panels ({n}): the DLL draws the Summon list with the Magic list's"),
+            (None, None) => println!("note: KH1 HUD: no Summon list panels (no {}): the DLL draws the Summon list with the Magic list's", kh::SUM),
         }
     }
     match &b.shortcut {
@@ -735,6 +741,8 @@ struct MenuFiles {
     cut: Option<Vec<u8>>,
     /// `UK_uibin_item.bin`, the Items list (M8 stage 8a.1).
     item: Option<Vec<u8>>,
+    /// `UK_uibin_sum.bin`, the Summon list (M8b).
+    sum: Option<Vec<u8>>,
 }
 
 fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_formats::egs::Install) -> Result<MenuFiles, String> {
@@ -779,7 +787,14 @@ fn kh1_menu_files(game: &Path, keys: &kh1_formats::egs::KeyTable, inst: &kh1_for
             None
         }
     };
-    Ok(MenuFiles { com, com_battle, mag, font, words, icon, cut, item })
+    let sum = match rd(kh::SUM) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            println!("note: KH1 HUD: no KH1 Summon list panels (the DLL draws it with the Magic list's): {e}");
+            None
+        }
+    };
+    Ok(MenuFiles { com, com_battle, mag, font, words, icon, cut, item, sum })
 }
 
 /// KH1's command words (`btltbl.bin`'s PC assets `<LANG>_Word.bin`, decoded for the menu's

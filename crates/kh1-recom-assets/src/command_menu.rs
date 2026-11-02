@@ -45,8 +45,16 @@ pub const LANGUAGES: &[(&str, &str)] = &[("us", "US_"), ("uk", "UK_"), ("fr", "F
 /// the save point's), 294 Open (0x37), 305 the blank command (0x42), 313 Jump On (0x45), 343
 /// Counter (0x63, the Counterattack); M8 stage 8a.1: 31..34, 36..38 the battle items' commands
 /// (`item + 0x1E`: Potion, Hi-Potion, Ether, Elixir, Mega-Potion, Mega-Ether, Megalixir; 35 is an
-/// empty row); M9 stage 9c.1: 319 Sonic Blade (0x4B), 321 Rave (0x4D), 322 Blast (0x4E).
-pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 293, 294, 305, 313, 319, 321, 322, 343];
+/// empty row); M9 stage 9c.1: 319 Sonic Blade (0x4B), 321 Rave (0x4D), 322 Blast (0x4E); M8b:
+/// 286..291 the summons (commands 0x2F..0x34: Dumbo, Bambi, Genie, Tinker Bell, Mushu, Simba).
+pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 286, 287, 288, 289, 290, 291, 293, 294, 305, 313, 319, 321, 322, 343];
+
+/// M8b: Cloud's word (the DLL's `crate::summons::CLOUD_NAME`, the same value). KH1's `Word.bin` has
+/// no "Cloud" (Checked (files)) and Re:CoM's card-name text is not in our word system: "Cloud" in
+/// every language (a name; that Re:CoM's languages all write it so: Assumption).
+pub const CLOUD_NAME: u16 = 0x8029;
+/// Cloud's text.
+pub const CLOUD_TEXT: &str = "Cloud";
 
 /// Our groups after the MP bar's (`mp_bar::group::COUNT`): the plate, the highlighted plate.
 pub mod group {
@@ -292,6 +300,7 @@ pub fn words(word_bin: &[u8]) -> (Vec<(u16, String)>, Vec<u16>) {
             None => missing.push(id),
         }
     }
+    ok.push((CLOUD_NAME, CLOUD_TEXT.to_string()));
     (ok, missing)
 }
 
@@ -380,7 +389,8 @@ mod tests {
         }
         let (ok, missing) = words(&d);
         assert!(missing.is_empty(), "{missing:?}");
-        assert_eq!(ok.len(), NAMES.len());
+        assert_eq!(ok.len(), NAMES.len() + 1, "and Cloud");
+        assert!(ok.contains(&(CLOUD_NAME, "Cloud".into())));
         assert!(ok.contains(&(7, "Fire".into())));
         assert!(ok.contains(&(343, "W343".into())));
         // A short file misses the late ids.
@@ -402,6 +412,8 @@ mod tests {
                 assert_eq!([get(1), get(2), get(3), get(4), get(7), get(9), get(27), get(294), get(343)], ["Attack", "Magic", "Items", "Talk", "Fire", "Firaga", "Aeroga", "Open", "Counter"]);
                 assert_eq!([get(5), get(293)], ["Examine", "Save"]);
                 assert_eq!([get(319), get(321), get(322)], ["Sonic", "Rave", "Blast"]);
+                assert_eq!([get(286), get(287), get(288), get(289), get(290), get(291)], ["Dumbo", "Bambi", "Genie", "Tinker Bell", "Mushu", "Simba"]);
+                assert_eq!(get(CLOUD_NAME), "Cloud");
             }
             if *lang == "fr" {
                 assert_eq!([get(1), get(8), get(19)], ["Attaquer", "Brasier +", "Gravité"]);

@@ -42,6 +42,10 @@ pub fn mark_installed() {
     INSTALLED.store(true, Ordering::Release);
 }
 
+pub fn installed() -> bool {
+    INSTALLED.load(Ordering::Acquire)
+}
+
 pub fn start_line() -> String {
     format!(
         "unlocks: KH1 spell unlocks in Sora's story (M7 stage 7.11): a spell's base level with its Re:CoM magic card's first pickup, -ra / -ga with {} Re:CoM bosses (their enemy cards' first pickup, two per spell), wrapper on Re:CoM's first-obtained 0x14015C7F0; levels at save+{:#x} (7 bytes), sync flag save+{:#x} bit 0; stage 7.12: a learned spell fills the first empty shortcut slot (save+{:#x}, 3 bytes; set up once from the spells already learned, flag bit 1)",
@@ -60,6 +64,12 @@ pub unsafe extern "win64" fn first_obtained(id: u64) {
     let id = (id & 0xFFFF) as u16;
     if u::tracked(id) {
         sync(&format!("card {id:#x} ({}) obtained for the first time", card_name(id)));
+    }
+    // M8b: a summon card's first pickup learns its summon (KH1's list, learn order).
+    if let Some(i) = crate::summons::of_card(id) {
+        if !super::stats::riku_story() {
+            super::summons::sync(&format!("{} card {id:#x} obtained for the first time", crate::summons::ALL[i].name));
+        }
     }
 }
 
