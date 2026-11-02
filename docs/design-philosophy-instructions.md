@@ -403,6 +403,10 @@ At KH1 setting:
       for the 25-CP Mushu and Cloud); **KH1's party rule skipped until the party exists**; **Re:CoM's
       summon damage at both Damage settings**; **KH1's once-per-battle rule kept** (row locked while one
       is out, no Dismiss); battle rooms only; each unlocks with its first Re:CoM summon card.
+    - **Summons follow-up (owner, 2026-11-02):** "summons should be able to be used as long as you have
+      MP, also, sora should have iframes through all summon animations". KH1's once-per-battle rule is
+      **dropped** (usable whenever Sora has the MP); **Sora is invincible through every summon's whole
+      animation** (start to Re:CoM's end action).
 
 ## Known open design questions (ask the owner, don't guess)
 
