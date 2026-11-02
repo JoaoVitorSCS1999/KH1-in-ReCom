@@ -606,7 +606,7 @@ fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], a
 /// (decomp); M11): (enemy, request, KH1 frame). Their clip is the motion from that frame
 /// ([`Converter::convert_from`]), their attack records' windows and their sounds move by it, their
 /// manifest length is the rest. The Air Soldier's slash: `0x22F2` `sys 13(wp, 201, 8, 20)`.
-pub const STARTS: &[(&str, u16, u32)] = &[];
+pub const STARTS: &[(&str, u16, u32)] = &[("airsoldier", 201, 20)];
 
 /// [`STARTS`]' requests of an enemy.
 pub fn starts_of(name: &str) -> Vec<(u16, u32)> {
@@ -663,4 +663,4 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC];

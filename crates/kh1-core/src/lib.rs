@@ -30,6 +30,7 @@ pub mod enemy;
 pub mod shadow;
 pub mod shape;
 pub mod soldier;
+pub mod airsoldier;
 
 pub use arc::Arc;
 pub use combat::{blade_params, resolve_hits, Blade, CombatParams, HitReport};
