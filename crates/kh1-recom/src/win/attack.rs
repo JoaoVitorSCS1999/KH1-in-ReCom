@@ -943,6 +943,18 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
         no_card_duel(pl);
         aero_halve(pl);
     }
+    // M8b (owner, 2026-11-02: "sora should have iframes through all summon animations"): while his
+    // Re:CoM summon sleight is out, Re:CoM's own protection bit `+0x418 & 1` for this check (its
+    // exit zeroes the hit's value: no damage, no reaction; the roll's and Sonic Blade's path).
+    // Restored after unless it was already set (Re:CoM's attached summons set it themselves).
+    let shield = kh1 && super::summons::out(pl);
+    let f418: u32 = if shield { rd(pl + p::FLAGS_418) } else { 0 };
+    if shield {
+        if rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0 && rd::<i16>(pl + HIT_VALUE) != 0 {
+            super::summons::hit_skipped(rd(pl + HIT_VALUE));
+        }
+        wr(pl + p::FLAGS_418, f418 | 1);
+    }
     let r = if NO_FLINCH.load(Ordering::Relaxed) != pl || !kh1 {
         o(pl)
     } else {
@@ -954,6 +966,9 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
         }
         r
     };
+    if shield && f418 & 1 == 0 {
+        wr(pl + p::FLAGS_418, rd::<u32>(pl + p::FLAGS_418) & !1);
+    }
     post_hit(pl, kh1);
     r
 }
@@ -977,6 +992,10 @@ unsafe fn aero_halve(pl: usize) {
 /// Sora's pending hit value (his body `+0x690`, value `+0x92`). Checked (disasm `0x1401E70B0`:
 /// `lea rcx,[rdi+0x690]; … call 0x14016FDB0`).
 const HIT_VALUE: usize = 0x722;
+/// A hit arrived (`+0x41C & 0x200`): the damage check goes past its early return only with it.
+/// Checked (decomp `0x1401E6DE0`).
+const HIT_FLAGS: usize = 0x41C;
+const HIT_ARRIVED: u32 = 0x200;
 
 /// Decision 33: at KH1 a hit with Re:CoM's card-duel reaction (`0x21`, Marluxia 3) is a plain
 /// flinch (kind 1), so Sora never enters the duel (action `0x24`), which he can't win without

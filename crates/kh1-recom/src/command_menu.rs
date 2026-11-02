@@ -53,8 +53,8 @@
 //! - **Summons** (M8b, `crate::summons`, `docs/recom-summons.md`): with a spell learned and a summon
 //!   learned, Summon (command 6) is the Magic list's extra last entry (`0x1402944C0`), shown as the
 //!   root's 4th row (FM). Confirm or Right on row 3 opens KH1's Summon list (type 3, `0x1405289A8`):
-//!   the learned summons in learn order (`0x2F + summon`), grey = lock = not usable
-//!   (`0x140288F30`). Row 3 is greyed when none is usable, greyed and locked while one is out
+//!   Cloud first (owner), then the learned summons in learn order (`0x2F + summon`), grey = lock
+//!   = not usable (`0x140288F30`, without its once-per-battle test: owner). Row 3 is greyed when none is usable, greyed and locked while one is out
 //!   (KH1's in-progress flag; owner: no Dismiss). The list at x + 11, beside row 3 with one entry,
 //!   else bottom-anchored at 348 − 22 n (`0x14027B870` case 3, after the root set its row 3); with
 //!   the Summon entry the Magic list counts it for its "fewer than 3" test (case 1). Confirm on an
@@ -288,14 +288,13 @@ pub struct World {
     /// Blast (0: none) and whether it is greyed.
     pub follow: u8,
     pub follow_grey: bool,
-    /// M8b: the learned summons in learn order (`crate::summons` indexes; KH1's save `+0x7D0`) and
+    /// M8b: the learned summons in learn order (`crate::summons` indexes; KH1's save `+0x7D0`; the
+    /// list puts Cloud first, `crate::summons::list_order`) and
     /// their count.
     pub summons: [u8; crate::summons::COUNT],
     pub summon_count: u8,
-    /// M8b: KH1's battle mode (Re:CoM's battle room), the summons used this battle (bit per
-    /// summon) and a summon out (Re:CoM's sleight running).
+    /// M8b: KH1's battle mode (Re:CoM's battle room) and a summon out (Re:CoM's sleight running).
     pub battle: bool,
-    pub summon_used: u8,
     pub summon_out: bool,
 }
 
@@ -679,8 +678,10 @@ impl Menu {
         // shown as the root's 4th row: greyed when none is usable, greyed and locked while one is
         // out (KH1's in-progress flag `0x142867364 & 0x2000`; owner: no Dismiss).
         let n = (w.summon_count as usize).min(crate::summons::COUNT);
-        let list: Vec<usize> = w.summons[..n].iter().map(|&i| i as usize).filter(|&i| i < crate::summons::COUNT).collect();
-        let gate = crate::summons::Gate { battle: w.battle, ground: flags & 0x80 != 0, mp: w.mp.map_or(0, |m| m.0), used: w.summon_used, out: w.summon_out };
+        // Owner (2026-11-02): Cloud first, then the others in learn order.
+        let learned_summons: Vec<usize> = w.summons[..n].iter().map(|&i| i as usize).filter(|&i| i < crate::summons::COUNT).collect();
+        let list = crate::summons::list_order(&learned_summons);
+        let gate = crate::summons::Gate { battle: w.battle, ground: flags & 0x80 != 0, mp: w.mp.map_or(0, |m| m.0), out: w.summon_out };
         let mut sgrey = !0u32;
         for (k, &i) in list.iter().enumerate() {
             if crate::summons::usable(&gate, i) {
@@ -2169,7 +2170,8 @@ mod tests {
         let w = summon_world();
         m.build(&w);
         assert!(m.summon_on && !m.summon_grey && !m.summon_lock);
-        assert_eq!(m.summon.cmds, vec![0x34, 0x2F, 0x35]);
+        // Cloud first (owner), then Simba, Dumbo in learn order.
+        assert_eq!(m.summon.cmds, vec![0x35, 0x34, 0x2F]);
         assert_eq!(m.summon.grey & 7, 0);
         // The context command keeps entry 3 (the tab's); row 3's word is Summon.
         assert_eq!(m.root.cmds[3], cmd::NONE);
@@ -2190,10 +2192,12 @@ mod tests {
     #[test]
     fn summon_greying_is_kh1s() {
         let mut m = Menu::new();
-        // 2 MP: Simba (2) and Dumbo (2) usable, Cloud (3) not.
+        // 2 MP: Cloud (3, first) not usable, Simba (2) and Dumbo (2) usable.
         m.build(&World { mp: Some((2, 3, 0)), ..summon_world() });
-        assert_eq!(m.summon.grey & 7, 0b100);
-        assert_eq!(m.summon.lock & 7, 0b100);
+        assert_eq!(m.summon.grey & 7, 0b001);
+        assert_eq!(m.summon.lock & 7, 0b001);
+        // No once-per-battle rule (owner): with the MP, a summon stays usable after it was used;
+        // only one out at a time (below).
         // Not in battle (the field): all greyed; row 3 greyed but openable.
         m.build(&World { battle: false, ..summon_world() });
         assert_eq!(m.summon.grey & 7, 0b111);
@@ -2201,9 +2205,6 @@ mod tests {
         // In the air (KH1 state 2: no flag 0x80): all greyed.
         m.build(&World { state: 2, ..summon_world() });
         assert_eq!(m.summon.grey & 7, 0b111);
-        // Simba used this battle: greyed until battle mode ends.
-        m.build(&World { summon_used: 1 << 5, ..summon_world() });
-        assert_eq!(m.summon.grey & 7, 0b001);
         // One out: row 3 greyed and locked (owner: no Dismiss); confirm is the error sound.
         let w = World { summon_out: true, ..summon_world() };
         let mut m = Menu::new();
@@ -2222,26 +2223,25 @@ mod tests {
         let mut m = Menu::new();
         m.step(&w, press(|p| p.up = true));
         m.step(&w, press(|p| p.confirm = true));
-        // Down to Dumbo; the cursor wraps over the three.
+        // Down to Simba (Cloud is first); the cursor wraps over the three.
         m.step(&w, press(|p| p.down = true));
         assert_eq!(m.summon.cursor, 1);
         // KH1's commit gate refuses (Sora busy): no sound, the list stays.
         let o = m.step(&World { gate_any: false, ..w }, press(|p| p.confirm = true));
         assert!(m.open && o.sounds.is_empty() && o.summon.is_none());
-        assert_eq!(o.events, vec![Event::Summon(0x2F, ShortResult::NotNow)]);
+        assert_eq!(o.events, vec![Event::Summon(0x34, ShortResult::NotNow)]);
         // Issued: no menu sound, the stack back to Attack.
         let o = m.step(&w, press(|p| p.confirm = true));
-        assert_eq!(o.summon, Some(0));
+        assert_eq!(o.summon, Some(5));
         assert!(!m.open && m.root.cursor == 0 && o.sounds.is_empty() && !o.attack);
         // A greyed entry (Cloud with 2 MP): the error sound.
         let w2 = World { mp: Some((2, 3, 0)), ..w };
         m.step(&w2, press(|p| p.up = true));
         m.step(&w2, press(|p| p.confirm = true));
-        // The list keeps its cursor (Dumbo, 1), as KH1's records do: Up twice wraps to Cloud.
+        // The list keeps its cursor (Simba, 1), as KH1's records do: Up to Cloud, Up again wraps.
         assert_eq!(m.summon.cursor, 1);
         m.step(&w2, press(|p| p.up = true));
-        m.step(&w2, press(|p| p.up = true));
-        assert_eq!(m.summon.cursor, 2, "wrapped to Cloud");
+        assert_eq!(m.summon.cursor, 0, "Cloud");
         let o = m.step(&w2, press(|p| p.confirm = true));
         assert_eq!((o.sounds, o.summon), (vec![Sound::Error], None));
         // Cancel closes it (sound 3), the root back on Attack.
@@ -2269,7 +2269,17 @@ mod tests {
         m.step(&w, press(|p| p.confirm = true));
         let sc = m.scene();
         let ys: Vec<(f32, u16)> = sc.rows.iter().filter(|r| r.list == Kind::Summon).map(|r| (r.y, r.name)).collect();
-        assert_eq!(ys, vec![(282.0, 291), (304.0, 286), (326.0, crate::summons::CLOUD_NAME)]);
+        assert_eq!(ys, vec![(282.0, crate::summons::CLOUD_NAME), (304.0, 291), (326.0, 286)]);
+        // Cloud alone (learned third, shown first): beside row 3.
+        let mut cloud = summon_world();
+        cloud.summons[0] = 6;
+        cloud.summon_count = 1;
+        let mut m = Menu::new();
+        m.show();
+        m.step(&cloud, press(|p| p.up = true));
+        m.step(&cloud, press(|p| p.confirm = true));
+        let ys: Vec<(f32, u16)> = m.scene().rows.iter().filter(|r| r.list == Kind::Summon).map(|r| (r.y, r.name)).collect();
+        assert_eq!(ys, vec![(326.0, crate::summons::CLOUD_NAME)]);
         // The Magic list with two spells and Summon: KH1's list holds 3 entries, so it is
         // bottom-anchored (348 − 44 = 304), not at the Magic row (282).
         let mut two = [0; 7];

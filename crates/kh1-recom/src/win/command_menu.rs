@@ -1037,10 +1037,10 @@ unsafe fn world(pl: usize) -> World {
     if w.context == 0 {
         w.gimmick = super::gimmick::offer(pl);
     }
-    // M8b: the learned summons and KH1's usable inputs (battle mode, used this battle, one out).
+    // M8b: the learned summons and KH1's usable inputs (battle mode, one out).
     if super::summons::installed() {
         (w.summons, w.summon_count) = super::summons::learned();
-        (w.battle, w.summon_used, w.summon_out) = super::summons::gate_state(pl);
+        (w.battle, w.summon_out) = super::summons::gate_state(pl);
     }
     // M9 stage 9c.1: KH1's special offer (`0x14028D0F0`) when nothing took the context entry.
     // Battle only (owner, 2026-11-01: "Only in battle"): Re:CoM's battle room (`player+0x390`).
