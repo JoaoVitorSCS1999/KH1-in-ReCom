@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 140: Re:CoM's "Guard" popup hidden over KH1 enemies that block, version 0.76.2 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Hide it".
+- Re:CoM's enemy hit handler's guarded branch calls the popup `0x14020C9A0` with kind 3 at `0x14017FCE7` (between the
+  guard spark and the `+0x3D8` guard event; Checked (decomp + exe)). That call is retargeted at install through a stub
+  to `guard_popup`: kind 3 skipped for our KH1 enemies, else Re:CoM's popup. Surrounding bytes checked, no branch
+  inside (exe scan). Nothing per frame.
+- Checked: tests, Windows build, sites. Not checked: in game.
+
+---
+
 ## Stage 139: Fix: steered KH1 attacks (Bandit leap / spin, fliers' attacks) restarting every other frame, version 0.76.1 (2026-11-01)
 
 - Owner (2026-11-02, 0.73.0): "bandits dont spin when they do the move where they're supposed to spin towards you"; the log:
