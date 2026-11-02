@@ -99,7 +99,7 @@ const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin 
 
 /// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
 /// row in their own module (`crate::m11`); one line here per enemy.
-pub static CLASSES: [&Class; 8] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS];
+pub static CLASSES: [&Class; 9] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS];
 
 /// M10's Shadow (class 0).
 pub static SHADOW: Class = Class {
@@ -359,13 +359,14 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Guard(Some((g, r))) => format!("guard row {g} with {r}"),
         Cmd::Guard(None) => "guard rows end".into(),
         Cmd::Throw(n) => format!("throws its object {n}"),
+        Cmd::Note(n) => format!("note: {n}"),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Throw(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Throw(_) | Cmd::Note(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -419,10 +420,12 @@ pub mod watchdog {
     /// A reaction (states 11 / 12) that takes this many KH1 frames is released (KH1's longest,
     /// a launch's air time, lying (at most `down_time`, 30) and the get-up, is well under).
     pub const REACTION_LIMIT: f32 = 600.0;
-    /// An AI polled in state 1 that issues nothing for this many KH1 frames is restarted (its
-    /// longest silent wait is the wander's idle, at most 180 frames; the long-fight tests stay
-    /// under 600 with any command counted).
-    pub const QUIET_LIMIT: f32 = 600.0;
+    /// An AI polled in state 1 that issues nothing for this many KH1 frames is restarted. KH1's
+    /// longest silent wait is the Search Ghost's search (`ex_2230.bd` `0x1044`: request 202, then
+    /// [60, 600) frames with no request, steering or turn, then a frame more; M11); every ported
+    /// script's before it is under 180 (the wander's idle). The long-fight tests stay under it with
+    /// any command counted.
+    pub const QUIET_LIMIT: f32 = 900.0;
 
     /// Why an action was released.
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -566,6 +569,9 @@ mod tests {
         assert!(logged(&Cmd::Visible(true)) && !logged(&Cmd::Scale(1.0)));
         assert_eq!(cmd_token(&Cmd::MotionAt { request: 0, blend: 24.0, start: 16.0 }, CLASSES[0].attack_names, &n), "motion 0 b24 from 16");
         assert!(logged(&Cmd::MotionAt { request: 0, blend: 24.0, start: 16.0 }));
+        // M11 (the Search Ghost): what KH1 does that isn't built is logged.
+        assert_eq!(cmd_token(&Cmd::Note("x"), CLASSES[0].attack_names, &n), "note: x");
+        assert!(logged(&Cmd::Note("x")));
     }
 
     /// Re:CoM's worlds → KH1's world ids (decision 21's pairing): Traverse Town 3, Agrabah 8,

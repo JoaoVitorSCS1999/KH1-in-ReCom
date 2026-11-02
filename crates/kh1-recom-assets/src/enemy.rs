@@ -571,6 +571,8 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     let loops: Vec<u16> = LOOPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
     let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own, &loops)?;
     consts.extend(bone_points(spec.name, &inp.mdls, &ms, &conv, &clips)?);
+    consts.extend(child_consts(spec.name, &inp.mdls)?);
+    consts.extend(sight_bones(spec.name, &inp.mdls, &conv)?);
     // The attack rows → ASD records.
     let codes = bone_codes(&inp.mdls)?;
     let mut rows: Vec<(usize, AttackRow, u16)> = Vec::new();
@@ -956,5 +958,51 @@ fn bone_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips:
     Ok(out)
 }
 
+/// A model's child script (`.mdls` part 3, its file list, [`part_entry`]: the table KH1's `sys 94` reads,
+/// `actor+0x13C`, `0x1402BC030` → `0x14028F0A0`; Checked (decomp + files): the Search Ghost's one child
+/// `ex_2230_00.bd` at 0x80..0x480, M11).
+pub fn child_script(mdls: &[u8], idx: usize) -> Result<&[u8]> {
+    let p = crate::stats::mdls_part(mdls, 3).ok_or_else(|| crate::Error::Format("no sub-object table (part 3)".into()))?;
+    part_entry(p, idx).filter(|s| s.len() > 0x30).ok_or_else(|| crate::Error::Format(format!("part 3 holds no child script {idx}")))
+}
+
+/// Numbers a behaviour reads from one of its model's child scripts (M11): (enemy, sub-object, script name,
+/// constants as [`Spec::consts`]). The Search Ghost's cone `ex_2230_00.bd` (`crate::searchghost`).
+pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usize)])] = &[("searchghost", 0, b"ex_2230_00.bd", crate::searchghost::CHILD_CONSTS, crate::searchghost::CHILD_REQUESTS)];
+
+fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
+    let mut out = Vec::new();
+    for &(_, idx, script, table, requests) in CHILD_CONSTS.iter().filter(|c| c.0 == name) {
+        let s = child_script(mdls, idx)?;
+        out.extend(script_consts(s, script, table)?);
+        check_requests(s, script, requests)?;
+    }
+    Ok(out)
+}
+
+/// Bones a behaviour looks from (M11, `kh1_core::enemy::Sight`): (enemy, KH1 bone code). KH1's `sys 19` (t
+/// 0) and `sys 115` take the code's bone's **parent** (`0x1401D6320`'s lerp at t = 0, `0x14029EA00` →
+/// `0x1401D62B0`); a code with bit 12 names a bone directly (`0x14029FAB0`: `code & 0xFFF`). Checked (decomp).
+/// The constant `sight_bone` is the Re:CoM bone posed at that parent's KH1 world (the converter's map). The
+/// Search Ghost's cone: `ex_2230_00.bd` `0x28C` (`sys 19(parent, 4141, 0)`) and `0x27A` (`sys 115(…, 45)`):
+/// bone 45, an end bone the motions don't pose, whose parent 44 is Re:CoM's `l_eye`.
+pub const SIGHTS: &[(&str, u32)] = &[("searchghost", 0x102D)];
+
+fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String, f32)>> {
+    let mut out = Vec::new();
+    for &(_, code) in SIGHTS.iter().filter(|s| s.0 == name) {
+        let bone = if code & 0x1000 != 0 {
+            (code & 0xFFF) as usize
+        } else {
+            let codes = bone_codes(mdls)?;
+            *codes.get(code as usize).filter(|b| **b >= 0).ok_or_else(|| crate::Error::Format(format!("{name}: bone code {code} names no bone")))? as usize
+        };
+        let parent = conv.rig().parent(bone).ok_or_else(|| crate::Error::Format(format!("{name}: KH1 bone {bone} has no parent")))?;
+        let recom = conv.map().iter().position(|m| *m == Some(parent)).ok_or_else(|| crate::Error::Format(format!("{name}: KH1 bone {parent} has no Re:CoM bone")))?;
+        out.push(("sight_bone".to_string(), recom as f32));
+    }
+    Ok(out)
+}
+
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC];
