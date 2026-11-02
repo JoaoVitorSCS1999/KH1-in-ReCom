@@ -575,8 +575,8 @@ pub const M6_ENEMY_UI_CHECKED: &[Site] = &[
 ];
 
 /// Enemy card sounds at KH1 (owner, 2026-11-02, `crate::boss::sound`): Re:CoM's `call
-/// 0x1402AA360` (its 2D sound play: ecx = id, edx = -1) at the eight places a revolver or stock
-/// folder plays its reload, deal or stock sound, retargeted per battle with the mask reads
+/// 0x1402AA360` (its 2D sound play: ecx = id, edx = -1) at the nine places a revolver or stock
+/// folder plays its reload, deal, stock or page-switch sound, retargeted per battle with the mask reads
 /// (`win::deck`) to a stub that hands our function the object (rbx, or rdi at the folder), which
 /// skips the play for a side-2 object. `expect` is Re:CoM's call. Checked (exe): no branch or
 /// pointer lands inside any of them; the object register is not written between the function's
@@ -590,6 +590,8 @@ pub const M6_ENEMY_SOUND_CALLS: &[Site] = &[
     Site { name: "first deal, +0x204 (0x14016A091)", rva: 0x0016_A091, expect: &[0xE8, 0xCA, 0x02, 0x14, 0x00] },
     Site { name: "stock, 0xF (0x14016DCA4)", rva: 0x0016_DCA4, expect: &[0xE8, 0xB7, 0xC6, 0x13, 0x00] },
     Site { name: "stock folder add, 0xF (0x14016DE3F)", rva: 0x0016_DE3F, expect: &[0xE8, 0x1C, 0xC5, 0x13, 0x00] },
+    // Sound 3 is a generic id; only this call (in the revolver's page switch) is retargeted.
+    Site { name: "revolver page switch, 3 (0x140167A35)", rva: 0x0016_7A35, expect: &[0xE8, 0x26, 0x29, 0x14, 0x00] },
 ];
 
 /// Each call's context (the id and volume loads, the call, and what uses its result) and the
@@ -610,6 +612,11 @@ pub const M6_ENEMY_SOUND_CHECKED: &[Site] = &[
     // mov edx,-1; lea ecx,[rdx+0x10] (0xF); the call.
     Site { name: "stock context (0x14016DC9C)", rva: 0x0016_DC9C, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x8D, 0x4A, 0x10, 0xE8, 0xB7, 0xC6, 0x13, 0x00] },
     Site { name: "stock folder add context (0x14016DE37)", rva: 0x0016_DE37, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x8D, 0x4A, 0x10, 0xE8, 0x1C, 0xC5, 0x13, 0x00] },
+    // cmp [rsp+0x60],r13d (r13d = 0; the third argument, spilled at entry); jne past the call:
+    // the page switch plays its sound only when called with 0.
+    Site { name: "page switch sound guard (0x140167A26)", rva: 0x0016_7A26, expect: &[0x44, 0x39, 0x6C, 0x24, 0x60, 0x75, 0x0D] },
+    // mov edx,-1; lea ecx,[rdx+4] (3); the call.
+    Site { name: "page switch context (0x140167A2D)", rva: 0x0016_7A2D, expect: &[0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x8D, 0x4A, 0x04, 0xE8, 0x26, 0x29, 0x14, 0x00] },
     // The functions, each up to its `mov rbx,rcx` (rdi at the folder): the reload step
     // 0x140167AA0 (size 0x246), the deal 0x14016B2B0 (0x171), the first deal 0x140169F40 (0x206),
     // the stock 0x14016DB60 (0x180), the folder add 0x14016DD20 (0x14B).
@@ -617,6 +624,9 @@ pub const M6_ENEMY_SOUND_CHECKED: &[Site] = &[
     Site { name: "revolver deal start (0x14016B2B0)", rva: 0x0016_B2B0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0x89, 0x74, 0x24, 0x48, 0x48, 0x8B, 0xD9] },
     Site { name: "revolver first deal start (0x140169F40)", rva: 0x0016_9F40, expect: &[0x48, 0x89, 0x5C, 0x24, 0x20, 0x56, 0x57, 0x41, 0x54, 0x48, 0x83, 0xEC, 0x20, 0x83, 0x79, 0x5C, 0x01, 0x41, 0xBC, 0x02, 0x00, 0x00, 0x00, 0x4C, 0x89, 0x7C, 0x24, 0x50, 0x48, 0x8B, 0xD9] },
     Site { name: "revolver stock start (0x14016DB60)", rva: 0x0016_DB60, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xBA, 0x0A, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9] },
+    // mov [rsp+0x18],r8d; push rbx; push r12; sub rsp,0x38; cmp [rcx+0x60],1; mov eax,r8d;
+    // mov r12d,edx; mov rbx,rcx: the page switch 0x140167910 (size 0x184).
+    Site { name: "revolver page switch start (0x140167910)", rva: 0x0016_7910, expect: &[0x44, 0x89, 0x44, 0x24, 0x18, 0x53, 0x41, 0x54, 0x48, 0x83, 0xEC, 0x38, 0x83, 0x79, 0x60, 0x01, 0x41, 0x8B, 0xC0, 0x44, 0x8B, 0xE2, 0x48, 0x8B, 0xD9] },
     Site { name: "stock folder add start (0x14016DD20)", rva: 0x0016_DD20, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x50, 0x48, 0xC7, 0x44, 0x24, 0x40, 0xFE, 0xFF, 0xFF, 0xFF, 0x48, 0x89, 0x5C, 0x24, 0x60, 0x48, 0x89, 0x74, 0x24, 0x68, 0x41, 0x8B, 0xD8, 0x8B, 0xF2, 0x48, 0x8B, 0xF9] },
     // The revolver ctor 0x140164D40 sets the deal sound: mov dword [rdi+0x204],0x1B (side 2) /
     // 0x12 (side 1).
@@ -2674,6 +2684,13 @@ mod tests {
             };
             assert!(f.expect.ends_with(mov), "{}", s.what);
         }
+        // The page switch: its guard (`jne +0xD`) ends where the play's context starts and skips
+        // exactly it (mov edx,-1; lea ecx,[rdx+4]; call = 13 bytes).
+        let guard = M6_ENEMY_SOUND_CHECKED.iter().find(|x| x.rva == 0x0016_7A26).unwrap();
+        let page = M6_ENEMY_SOUND_CHECKED.iter().find(|x| x.rva == 0x0016_7A2D).unwrap();
+        assert_eq!(guard.rva + guard.expect.len() as u32, page.rva);
+        assert_eq!(&guard.expect[5..], &[0x75, page.expect.len() as u8]);
+        assert_eq!(crate::boss::SOUND_SITES.iter().filter(|s| s.id == Some(crate::boss::sound::PAGE_SWITCH)).count(), 1);
         // The ctor's two deal ids are the ones `crate::boss::sound` names.
         let ctor = |rva: u32| M6_ENEMY_SOUND_CHECKED.iter().find(|x| x.rva == rva).unwrap().expect[6] as u32;
         assert_eq!(ctor(0x0016_4DD6), crate::boss::sound::DEAL_ENEMY);

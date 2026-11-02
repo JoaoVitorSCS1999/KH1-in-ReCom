@@ -14,9 +14,9 @@
 //!   stock row (sleight name and stocked value) and Marluxia 3's stock folder are hidden through
 //!   Re:CoM's own event-hide mask (system variable (1, 0xE2)) at the reads that draw them, as
 //!   stage 2 hides Sora's deck HUD.
-//! - **Enemy card sounds** (owner, 2026-11-02): in the same battles, the eight `call 0x1402AA360`
-//!   that play a revolver's or stock folder's stock, reload and deal sounds skip the play for a
-//!   side-2 object (`sound`, `SOUND_SITES`). Sora's own sounds go through unchanged.
+//! - **Enemy card sounds** (owner, 2026-11-02): in the same battles, the nine `call 0x1402AA360`
+//!   that play a revolver's or stock folder's stock, reload, deal and page-switch sounds skip the
+//!   play for a side-2 object (`sound`, `SOUND_SITES`). Sora's own sounds go through unchanged.
 //!
 //! Every offset is Steam, read in the Re:CoM decomp and checked in the exe where noted.
 
@@ -135,7 +135,7 @@ impl UiPart {
 }
 
 /// Enemy card sounds (owner, 2026-11-02: "you cant hear enemies stocking cards or refilling their
-/// deck"). Re:CoM's 2D sound ids (bank 0, played by `0x1402AA360(id, -1)`), as the revolver code
+/// deck"; then: the first deal stays silent, and the item-card page switch goes silent too). Re:CoM's 2D sound ids (bank 0, played by `0x1402AA360(id, -1)`), as the revolver code
 /// passes them. Checked (decomp + exe: `sites::M6_ENEMY_SOUND_CHECKED`).
 pub mod sound {
     /// Stock: a card goes to the revolver's stock row (`0x14016DB60`) or Marluxia 3's stock
@@ -152,6 +152,10 @@ pub mod sound {
     pub const DEAL_ENEMY: u32 = 0x1B;
     /// Sora's deal (side 1, `0x140164DF5`): never silenced.
     pub const DEAL_PLAYER: u32 = 0x12;
+    /// A revolver's page switch (`0x140167910` with its third argument 0): for an enemy, a human
+    /// boss turning to or from its item-card page (`0x140199130`, Hades' `0x1403B10C0`). A generic
+    /// id (Re:CoM's menus play 3 too): only the call in `0x140167910` is retargeted.
+    pub const PAGE_SWITCH: u32 = 0x03;
 }
 
 /// Which register holds the revolver / stock folder at a sound call.
@@ -174,7 +178,7 @@ pub struct SoundSite {
     pub what: &'static str,
 }
 
-pub const SOUND_SITES: [SoundSite; 8] = [
+pub const SOUND_SITES: [SoundSite; 9] = [
     SoundSite { call: 0x0016_7B01, function: 0x0016_7AA0, size: 0x246, id: Some(sound::RELOAD_DONE), reg: ObjReg::Rbx, what: "reload done at once" },
     SoundSite { call: 0x0016_7BDA, function: 0x0016_7AA0, size: 0x246, id: Some(sound::RELOAD_STEP), reg: ObjReg::Rbx, what: "reload gauge step" },
     SoundSite { call: 0x0016_7C01, function: 0x0016_7AA0, size: 0x246, id: Some(sound::RELOAD_CHARGE), reg: ObjReg::Rbx, what: "reload charge loop" },
@@ -183,6 +187,7 @@ pub const SOUND_SITES: [SoundSite; 8] = [
     SoundSite { call: 0x0016_A091, function: 0x0016_9F40, size: 0x206, id: None, reg: ObjReg::Rbx, what: "first deal" },
     SoundSite { call: 0x0016_DCA4, function: 0x0016_DB60, size: 0x180, id: Some(sound::STOCK), reg: ObjReg::Rbx, what: "stock" },
     SoundSite { call: 0x0016_DE3F, function: 0x0016_DD20, size: 0x14B, id: Some(sound::STOCK), reg: ObjReg::Rdi, what: "stock folder add" },
+    SoundSite { call: 0x0016_7A35, function: 0x0016_7910, size: 0x184, id: Some(sound::PAGE_SWITCH), reg: ObjReg::Rbx, what: "page switch (item cards)" },
 ];
 
 /// Whether a retargeted sound call skips Re:CoM's play: the object (a revolver's or stock
@@ -201,6 +206,7 @@ pub fn sound_name(id: u32) -> &'static str {
         sound::RELOAD_DONE => "reload done",
         sound::DEAL_ENEMY => "enemy deck deal",
         sound::DEAL_PLAYER => "Sora's deck deal",
+        sound::PAGE_SWITCH => "item-card page switch",
         _ => "other",
     }
 }
@@ -382,9 +388,11 @@ mod tests {
                 None => assert!(s.what.contains("deal"), "{}", s.what),
             }
         }
-        // Reload: done (twice), step, charge; deal: two; stock: two (revolver, folder).
+        // Reload: done (twice), step, charge; deal: two; stock: two (revolver, folder); page
+        // switch: one.
         let n = |id: u32| SOUND_SITES.iter().filter(|s| s.id == Some(id)).count();
-        assert_eq!((n(sound::RELOAD_DONE), n(sound::RELOAD_STEP), n(sound::RELOAD_CHARGE), n(sound::STOCK)), (2, 1, 1, 2));
+        assert_eq!((n(sound::RELOAD_DONE), n(sound::RELOAD_STEP), n(sound::RELOAD_CHARGE), n(sound::STOCK), n(sound::PAGE_SWITCH)), (2, 1, 1, 2, 1));
+        assert_eq!(sound_name(sound::PAGE_SWITCH), "item-card page switch");
         assert_eq!(SOUND_SITES.iter().filter(|s| s.id.is_none()).count(), 2);
         assert_eq!(SOUND_SITES.iter().filter(|s| s.reg == ObjReg::Rdi).count(), 1);
         let l = sound_line(3, 0x13, 2, 0x1234);
