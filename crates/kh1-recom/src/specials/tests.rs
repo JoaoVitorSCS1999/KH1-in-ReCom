@@ -53,18 +53,13 @@ fn follow_ups_and_numbers() {
     assert_eq!(row_request(&m, 13), None);
 }
 
-/// The Field exe's stub: `mov rcx,rbx; call 0x140218950; jmp 0x1401FA599` at the cave.
+/// Base Re:CoM's events: the start, the dashes and the finisher are motions 0, 1, 2 of the pack
+/// 11009 (sleight 9's group 0x3F1 + 10000).
 #[test]
-fn field_case_stub() {
-    let s = field_case::stub();
-    assert_eq!(&s[..4], &[0x48, 0x8B, 0xCB, 0xE8]);
-    let call = i32::from_le_bytes(s[4..8].try_into().unwrap()) as i64 + field_case::CAVE_RVA as i64 + 8;
-    assert_eq!(call as u32, field_case::EXE_STOCK_RVA);
-    assert_eq!(s[8], 0xE9);
-    let jmp = i32::from_le_bytes(s[9..13].try_into().unwrap()) as i64 + field_case::CAVE_RVA as i64 + 13;
-    assert_eq!(jmp as u32, field_case::DEFAULT_RVA);
-    // The jump table's entry for action 0x16 (index action − 1 from 0x1401FA5F4).
-    assert_eq!(field_case::TABLE_ENTRY_RVA, 0x001F_A5F4 + 4 * (RECOM_ACTION - 1));
+fn recom_events_follow_the_sleight() {
+    assert_eq!(recom_events::PACK, 11_009);
+    assert_eq!([xl::WINDUP, xl::DASH, xl::FINISHER].map(recom_events::motion_of), [Some(0), Some(1), Some(2)]);
+    assert_eq!(recom_events::motion_of(3), None);
 }
 
 /// Sonic Blade's rows in Re:CoM's layout: the xl motions' windows one frame earlier, Re:CoM's

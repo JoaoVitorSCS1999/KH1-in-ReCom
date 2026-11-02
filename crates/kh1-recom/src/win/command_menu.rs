@@ -1018,7 +1018,8 @@ unsafe fn world(pl: usize) -> World {
     }
     w.context = context(pl);
     // M9 stage 9c.1: KH1's special offer (`0x14028D0F0`) when no object took the context entry.
-    if w.context == 0 && special_free && super::specials::installed() {
+    // Battle only (owner, 2026-11-01: "Only in battle"): Re:CoM's battle room (`player+0x390`).
+    if w.context == 0 && special_free && super::specials::installed() && rd::<i32>(pl + p::BATTLE) != 0 {
         (w.special, w.special_grey) = special_offer(pl).unwrap_or((0, false));
     }
     w

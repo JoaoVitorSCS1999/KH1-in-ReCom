@@ -996,17 +996,9 @@ pub const ABILITY_CALLEES: &[Site] = &[
 /// Re:CoM's sleight action `0x16`. Same rule as [`HOOKS`].
 pub const SPECIAL_HOOKS: &[Site] = &[
     // mov rax,rsp; mov [rax+0x10],rbx; mov [rax+0x18],rsi: CPlayerSora's exeStockSkill (Sora's
-    // vtable +0x140; the Battle exe calls it at 0x1401F9B64, the Field exe through our new case).
+    // vtable +0x140; the Battle exe calls it at 0x1401F9B64; battle only: the Field exe has no
+    // case for action 0x16 and is not patched).
     Site { name: "exeStockSkill (0x140218950)", rva: 0x0021_8950, expect: &[0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48, 0x89, 0x70, 0x18] },
-];
-
-/// Exe bytes the specials patch.
-pub const SPECIAL_DATA: &[Site] = &[
-    // The Field exe's jump table (`0x1401FA5F4`, index action − 1), entry for action 0x16: the
-    // default `0x1401FA599` (an RVA), then 0x17's (the default too, not changed).
-    Site { name: "Field exe jump table, action 0x16", rva: 0x001F_A648, expect: &[0x99, 0xA5, 0x1F, 0x00, 0x99, 0xA5, 0x1F, 0x00] },
-    // int3 padding after a `ret` (`0x1401FB7B1`), before `0x1401FB7C0`: the 13-byte stub.
-    Site { name: "code cave 0x1401FB7B2", rva: 0x001F_B7B2, expect: &[0xCC; 14] },
 ];
 
 /// Re:CoM functions the specials call, and code they replicate (not patched).
@@ -1029,6 +1021,29 @@ pub const SPECIAL_CHECKED: &[Site] = &[
     // The sleight resource load (`initStockSkill` calls it with (player+0x3B8, 9, 0) for Sonic
     // Blade: group 0x3F1 through `0x14020F720` / `0x14020FB10`).
     Site { name: "sleight resources (0x140211790)", rva: 0x0021_1790, expect: &[0x40, 0x53, 0x41, 0x54, 0x48, 0x83, 0xEC, 0x38, 0x48, 0x8B, 0xD9, 0xE8, 0x80, 0xDF, 0xFF, 0xFF] },
+    // Base Re:CoM's Sonic Blade events (owner: its voices and effects; `crate::specials::recom_events`).
+    // 0x1401A3580 (the sub-pack motion play exeStockSkill's 0x1401F73A0 calls): Sora's own players
+    // stopped unless ctrl+0x52 & 0x200, then the sleight's set to the pack and started.
+    Site { name: "sub-pack motion play (0x1401A3580)", rva: 0x001A_3580, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x30] },
+    // The effect events' pack (player +0x110, edx = pack) and start (edx = motion, r8d = variant,
+    // r9d = 1: stop first).
+    Site { name: "effect events pack (0x140179A30)", rva: 0x0017_9A30, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x56, 0x48, 0x83, 0xEC, 0x20, 0x45, 0x33, 0xC0, 0x48, 0x8B, 0xF1, 0x8B, 0xDA] },
+    Site { name: "effect events start (0x14017A240)", rva: 0x0017_A240, expect: &[0x89, 0x54, 0x24, 0x10, 0x57, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x38, 0x48, 0x8B, 0x41, 0x18, 0x45, 0x8B, 0xF8] },
+    // The sound events' pack (player +0x120) and start (`CSEMotion`).
+    Site { name: "sound events pack (0x140238710)", rva: 0x0023_8710, expect: &[0x41, 0x56, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48, 0x89, 0x5C, 0x24, 0x40] },
+    Site { name: "sound events start (0x140239260)", rva: 0x0023_9260, expect: &[0x44, 0x89, 0x44, 0x24, 0x18, 0x89, 0x54, 0x24, 0x10, 0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x68, 0x48, 0x83, 0x79] },
+    // A sleight's resources loaded (rcx = player+0x3B8, edx = sleight id; 1 = in).
+    Site { name: "sleight resources ready (0x1402106E0)", rva: 0x0021_06E0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0xE8, 0x32, 0xF0, 0xFF, 0xFF, 0x85, 0xC0] },
+    // Re:CoM's attack rows 0xE..=0x10 (Sonic Blade's start, dash, finisher): byte 0 = the motion
+    // in the sleight pack (0, 1, 2), byte 1 = the start's EET variant (0), byte 0xF flags (0x40: a
+    // sleight-pack motion).
+    Site {
+        name: "Re:CoM rows 0xE..=0x10 (0x1407C6D50)",
+        rva: 0x007C_6D50,
+        expect: &[
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x60, 0x01, 0x00, 0x01, 0x00, 0x03, 0x22, 0x03, 0x14, 0x0F, 0x14, 0x00, 0x03, 0x00, 0x00, 0x00, 0x64, 0x02, 0x00, 0x04, 0x00, 0x0F, 0x3C, 0x0F, 0x20, 0x0F, 0x14, 0x02, 0x03, 0x00, 0x00, 0x00, 0x64,
+        ],
+    },
 ];
 
 /// CPlayerSora's exeStockSkill slot (vtable `+0x140`), which the Battle exe calls through.
@@ -1706,7 +1721,6 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         CUSTOMIZE_GLYPHS_CHECKED,
         ABILITY_CALLEES,
         SPECIAL_HOOKS,
-        SPECIAL_DATA,
         SPECIAL_CHECKED,
         STORY_SKIP_HOOKS,
         STORY_SKIP_CALLEES,
@@ -2195,19 +2209,24 @@ mod tests {
         assert!(all_sites().any(|s| s.rva == 0x001E_59A0), "the heal is checked");
     }
 
-    /// M9 stage 9c.1: the specials' sites agree with `crate::specials::field_case` and each other.
+    /// M9 stage 9c.1: the specials' sites agree with `crate::specials` and each other; battle only:
+    /// nothing of the Field exe's (its action-0x16 entry `0x1401FA648` and the cave `0x1401FB7B2`
+    /// stay Re:CoM's).
     #[test]
     fn special_sites() {
-        use crate::specials::field_case as fc;
-        assert_eq!(SPECIAL_HOOKS[0].rva, fc::EXE_STOCK_RVA);
+        assert_eq!(SPECIAL_HOOKS[0].rva, 0x0021_8950);
         assert_eq!(SPECIAL_PTRS[0].target, SPECIAL_HOOKS[0].rva);
         assert_eq!(0x1_4000_0000u64 + SPECIAL_PTRS[0].rva as u64, data::SORA_VTABLE + 0x140);
-        assert_eq!(SPECIAL_DATA[0].rva, fc::TABLE_ENTRY_RVA);
-        assert_eq!(u32::from_le_bytes(SPECIAL_DATA[0].expect[..4].try_into().unwrap()), fc::DEFAULT_RVA);
-        assert_eq!(SPECIAL_DATA[1].rva, fc::CAVE_RVA);
-        assert!(fc::STUB_LEN <= SPECIAL_DATA[1].expect.len());
-        // Not the caves the other cases use.
-        assert!([crate::items::field_case::CAVE_RVA, crate::magic::field_case::CAVE_RVA, crate::attack::battle_case::CAVE_RVA].iter().all(|&c| c.abs_diff(fc::CAVE_RVA) >= 16));
+        assert!(all_sites().all(|s| !(0x001F_A648..0x001F_A64C).contains(&s.rva) && !(0x001F_B7B2..0x001F_B7C0).contains(&s.rva)), "the Field exe is Re:CoM's");
+        // Re:CoM's rows 0xE..=0x10: their sleight motions are `recom_events::MOTION`, the start's
+        // EET variant 0, all three sleight-pack motions (flag 0x40).
+        let rows = SPECIAL_CHECKED.iter().find(|s| s.name.starts_with("Re:CoM rows 0xE")).unwrap();
+        assert_eq!(0x1_4000_0000u64 + rows.rva as u64, crate::attack::RECOM_ATTACK_ROWS + 0xE * 16);
+        for (i, r) in rows.expect.chunks(16).enumerate() {
+            assert_eq!(r[0] as u32, crate::specials::recom_events::MOTION[i]);
+            assert!(r[15] & 0x40 != 0);
+        }
+        assert_eq!(rows.expect[1] as u32, crate::specials::recom_events::EET_VARIANT);
         // initStockSkill sets action 0x16; the Battle case calls vtable +0x140.
         let init = SPECIAL_CHECKED.iter().find(|s| s.name.starts_with("initStockSkill")).unwrap();
         assert_eq!(&init.expect[init.expect.len() - 3..], &[0xBA, crate::specials::RECOM_ACTION as u8, 0x00]);

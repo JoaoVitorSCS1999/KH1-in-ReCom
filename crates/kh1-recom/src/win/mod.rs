@@ -386,8 +386,8 @@ fn install_items(base: usize, s: &Settings) {
     }
 }
 
-/// M9 stage 9c.1 (`specials`): KH1's Sonic Blade on Re:CoM's sleight action `0x16`: the Field
-/// exe's case for it, then the exeStockSkill hook. Needs the Attack's hooks (the request-bits
+/// M9 stage 9c.1 (`specials`): KH1's Sonic Blade on Re:CoM's sleight action `0x16`, in battle
+/// (the Battle exe's own case): the exeStockSkill hook. Needs the Attack's hooks (the request-bits
 /// wrapper, the pair dispatch and the enemy-hit wrapper carry its command, spheres and damage),
 /// the command menu (its context tab offers it) and the asset step's xl_limit clips.
 fn install_specials(base: usize) {
@@ -404,7 +404,7 @@ fn install_specials(base: usize) {
         log("specials: CPlayerSora's exeStockSkill slot is not 0x140218950; no KH1 specials");
         return;
     }
-    // SAFETY: reads of the mapped exe; data patches with checked old values.
+    // SAFETY: reads of the mapped exe.
     if !unsafe { specials::install(base) } {
         return;
     }
@@ -415,7 +415,7 @@ fn install_specials(base: usize) {
         specials::mark_installed();
         log(&specials::start_line());
     } else {
-        log("specials: exeStockSkill not hooked; no KH1 specials (the Field case stays patched but is not reached: Re:CoM never plays a sleight in the field, and the menu offers no special)");
+        log("specials: exeStockSkill not hooked; no KH1 specials");
     }
 }
 

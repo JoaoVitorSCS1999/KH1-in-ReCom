@@ -412,35 +412,41 @@ impl Kh1Sora {
     }
 }
 
-/// The Field exe (`0x1401FA0F0`) has no case for action `0x16` (its jump table `0x1401FA5F4`,
-/// index action − 1, sends it to the default `0x1401FA599`: Re:CoM plays sleights only in battle).
-/// KH1's specials run in the field, so the entry is pointed at a stub in an int3 cave that runs
-/// `exeStockSkill` on the player (`rbx` in the switch) and goes on at the default, as magic's and
-/// the items' cases do. The Battle exe calls it through Sora's vtable `+0x140`
-/// (`0x1401F9B5E`). Checked (exe: the entry, the cave's 14 int3 bytes after `0x1401FB7B1`'s
-/// `ret`, nothing branching into them; disasm of both switches).
-pub mod field_case {
-    pub const TABLE_ENTRY_RVA: u32 = 0x001F_A648;
-    pub const CAVE_RVA: u32 = 0x001F_B7B2;
-    pub const EXE_STOCK_RVA: u32 = 0x0021_8950;
-    pub const DEFAULT_RVA: u32 = 0x001F_A599;
-    pub const STUB_LEN: usize = 13;
+/// Base Re:CoM's Sonic Blade voices, sounds and effects (owner, 2026-11-01: "however it works in
+/// base ReCoM"): Re:CoM's sleight plays them from its own sleight motions' sound and effect events,
+/// not from code. Checked (decomp + exe):
+/// - `exeStockSkill` (`0x140218950`) plays each part of "SONICRAVE" with `0x1401F73A0(player,
+///   row[0], 0, 1)` (stack: EET variant, SES variant): the start (sub-state 0x8C, row 0xE: motion
+///   0, variants row[1] = 0 and Sora's vtable `+0x110(player, 3)` = 0 for id 0xE), each of the six
+///   dashes (0x8D..0x92, row 0xF: motion 1, variants 0, 0) and the finisher (0x93, row 0x10:
+///   motion 2, variants 0, 0). Its per-state code has no effect or sound call of its own (only the
+///   `limit1` effect at the start, and the weapon's sound for id 0xF, `0x140224610`).
+/// - `0x1401F73A0` → `0x1401A3580(player, pack, motion, …)`, pack = `0x14020FE60(+0x3B8, sleight
+///   9)` + 10000 = 0x3F1 + 10000 (`0x14020F720`: 9 → 2; `0x14020FB10`: 2 → 0x3F1). Besides playing
+///   the sub-pack motion, `0x1401A3580` stops Sora's own event players (`+0x108` effects, `+0x118`
+///   sounds: vtable `+0x10`) and starts the sleight's: `0x140179A30(+0x110, pack)` +
+///   `0x14017A240(+0x110, motion, EET variant, 1)` unless `+0x154 & 0x400`, `0x140238710(+0x120,
+///   pack)` + `0x140239260(+0x120, motion, SES variant, 1)` unless `+0x154 & 0x4000`. The
+///   players step on the motion controller's clock every update (`0x1401A82E0`, vtable `+0x18`);
+///   the next own motion stops them (`0x1401A3470`, when the sub-pack flag `ctrl+0x52 & 0x200` is
+///   set).
+///
+/// Re:CoM's structure is KH1's (a start, six dashes, a finisher), so each KH1 motion of the special
+/// starts the events of the Re:CoM motion it stands for (`win::specials::motion_events`), on KH1's
+/// clip and clock: Re:CoM's events at Re:CoM's frames. Assumption: Re:CoM's sleight motions are
+/// as long as KH1's (its pack is not in the session).
+pub mod recom_events {
+    /// Re:CoM's sleight motion pack id for Sonic Blade (0x3F1 + 10000).
+    pub const PACK: u32 = 10_000 + 0x3F1;
+    /// Re:CoM's motion for each xl entry (wind-up, dash, finisher): rows 0xE / 0xF / 0x10 byte 0.
+    pub const MOTION: [u32; 3] = [0, 1, 2];
+    /// The variants `exeStockSkill` passes (EET, SES): 0 for all three.
+    pub const EET_VARIANT: u32 = 0;
+    pub const SES_VARIANT: u32 = 0;
 
-    /// `mov rcx,rbx; call exeStockSkill; jmp default`.
-    pub fn stub() -> [u8; STUB_LEN] {
-        let mut b = [0u8; STUB_LEN];
-        b[..3].copy_from_slice(&[0x48, 0x8B, 0xCB]);
-        b[3] = 0xE8;
-        let call = EXE_STOCK_RVA as i64 - (CAVE_RVA as i64 + 8);
-        b[4..8].copy_from_slice(&(call as i32).to_le_bytes());
-        b[8] = 0xE9;
-        let jmp = DEFAULT_RVA as i64 - (CAVE_RVA as i64 + 13);
-        b[9..13].copy_from_slice(&(jmp as i32).to_le_bytes());
-        b
-    }
-
-    pub fn entry() -> [u8; 4] {
-        CAVE_RVA.to_le_bytes()
+    /// Re:CoM's sleight motion for a KH1 xl entry.
+    pub fn motion_of(xl_entry: usize) -> Option<u32> {
+        MOTION.get(xl_entry).copied()
     }
 }
 

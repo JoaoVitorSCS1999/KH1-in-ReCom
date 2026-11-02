@@ -12,8 +12,13 @@
 //! - **Each row** ([`special_row`]): the last row's weapon volume ends, `+0x3C8` = our KH1 row,
 //!   `+0x638` = Re:CoM's Sonic Blade id of it (0xF dash, 0x10 finisher: its own hit whoosh and
 //!   effects), the AP / kind fields, the hit fields cleared.
-//! - **Each frame**: Re:CoM's Battle exe calls `exeStockSkill` through Sora's vtable, the Field exe
-//!   through our new case (`crate::specials::field_case`); our wrapper runs KH1's frame for a KH1
+//! - **Each KH1 motion** ([`motion_events`]): base Re:CoM's voices, sounds and effects: the
+//!   events of Re:CoM's own sleight motion for it (start, dash, finisher), started on Sora's sleight
+//!   event players as `exeStockSkill`'s `0x1401F73A0` → `0x1401A3580` starts them
+//!   (`crate::specials::recom_events`); stopped at the end.
+//! - **Battle only** (owner, 2026-11-01): Re:CoM's Battle exe calls `exeStockSkill` through Sora's
+//!   vtable (the Field exe has no case for it and is not patched; the menu offers no special
+//!   outside battle, [`start_special`] refuses one); our wrapper runs KH1's frame for a KH1
 //!   special and then Re:CoM's own `procAttackCollision` (`0x1401F5DC0`) on the row with the
 //!   motion's frame, as `exeStockSkill` and the swing exe do (its window, the weapon's attack, our
 //!   KH1 spheres in the pair dispatch, KH1's damage in the enemy-hit wrapper); Re:CoM's
@@ -60,6 +65,29 @@ const RECOM_ROWS: u64 = crate::attack::RECOM_ATTACK_ROWS;
 /// Checked (exe: the string at `0x1405A30D8`).
 const LIMIT1_PTR: u64 = 0x1_407C_7E10;
 
+/// Sora's event players and the functions `0x1401A3580` starts a sleight motion's events with
+/// (`crate::specials::recom_events`; `sites::SPECIAL_CHECKED`). Checked (decomp + exe disasm of
+/// `0x1401A3580`).
+const EET_SET: u32 = 0x0017_9A30;
+const EET_START: u32 = 0x0017_A240;
+const SES_SET: u32 = 0x0023_8710;
+const SES_START: u32 = 0x0023_9260;
+/// Whether a sleight's resources are loaded (`0x1402106E0(+0x3B8, sleight)` = 1), as
+/// `exeStockSkill` tests before its start (logged only: KH1's timing can't wait).
+const RES_READY: u32 = 0x0021_06E0;
+mod ev {
+    pub const OWN_EET: usize = 0x108;
+    pub const SLEIGHT_EET: usize = 0x110;
+    pub const OWN_SES: usize = 0x118;
+    pub const SLEIGHT_SES: usize = 0x120;
+    pub const MUTE: usize = 0x154;
+    pub const NO_EET: u32 = 0x400;
+    pub const NO_SES: u32 = 0x4000;
+    /// The motion controller's flags: `0x200` = a sub-pack motion plays (`0x14024C760`).
+    pub const CTRL_FLAGS: usize = 0x52;
+    pub const SUB_PACK: u16 = 0x200;
+}
+
 /// `CPlayer` fields `initStockSkill` writes (Checked (decomp `0x140220DF0`)).
 mod f {
     pub const PREV_ACTION: usize = 0x408;
@@ -98,6 +126,9 @@ type PlFn = unsafe extern "win64" fn(usize);
 type PlIntFn = unsafe extern "win64" fn(usize, i32) -> u64;
 type GroundFn = unsafe extern "win64" fn(usize) -> u32;
 type LoadFn = unsafe extern "win64" fn(usize, u32, u32);
+type SetPackFn = unsafe extern "win64" fn(usize, u32) -> u64;
+type EvStartFn = unsafe extern "win64" fn(usize, u32, u32, u32) -> u8;
+type ReadyFn = unsafe extern "win64" fn(usize, u32) -> i32;
 
 fn note(line: impl FnOnce() -> String) {
     if LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
@@ -113,27 +144,21 @@ fn event(e: String) {
     }
 }
 
-/// Patches the Field exe's case for action `0x16` and checks Re:CoM's effect name. The
-/// exeStockSkill hook is installed by the caller after.
+/// Checks the rows and Re:CoM's effect name (no exe patch: battle only, through the Battle exe's
+/// own case). The exeStockSkill hook is installed by the caller after.
 pub unsafe fn install(b: usize) -> bool {
-    use crate::specials::field_case as fc;
     if !super::attack::special_rows_ready() {
         log("specials: Sonic Blade's rows are not in the attack table (no xl_limit clips: re-run kh1-recom-build); no KH1 specials");
         return false;
     }
-    let cave = b + fc::CAVE_RVA as usize;
-    let entry = b + fc::TABLE_ENTRY_RVA as usize;
-    let old_entry = fc::DEFAULT_RVA.to_le_bytes();
     let have = |at: usize, n: usize| std::slice::from_raw_parts(at as *const u8, n).to_vec();
-    if have(cave, fc::STUB_LEN) != [0xCC; fc::STUB_LEN] || have(entry, 4) != old_entry {
-        log("specials: the Field exe's case 0x16 or its cave is not as expected; no KH1 specials");
-        return false;
-    }
-    if !super::hook::patch(cave, &[0xCC; fc::STUB_LEN], &fc::stub(), "specials: Field case stub") {
-        return false;
-    }
-    if !super::hook::patch(entry, &old_entry, &fc::entry(), "specials: Field jump table 0x16") {
-        return false;
+    // The Re:CoM code the specials call or copy (and its Sonic Blade rows), as read from the Steam
+    // exe.
+    for c in crate::sites::SPECIAL_CHECKED {
+        if have(b + c.rva as usize, c.expect.len()) != c.expect {
+            log(&format!("specials: {} is not as expected; no KH1 specials", c.name));
+            return false;
+        }
     }
     let name: usize = rd(va(b, LIMIT1_PTR));
     let ok = name != 0 && have(name, 7) == b"limit1\0";
@@ -189,6 +214,11 @@ pub unsafe fn kh1_special(pl: usize) -> bool {
 /// Sonic Blade, cardless, in its order (Checked (decomp `0x140220DF0`)). False (nothing changed)
 /// when KH1's MP can't pay.
 pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
+    // Battle only (owner): the Field exe never runs action 0x16.
+    if rd::<i32>(pl + p::BATTLE) == 0 {
+        note(|| format!("special {}: not in battle", s.index));
+        return false;
+    }
     if !super::mp::can_pay(s.cost) || !super::mp::pay(s.cost, "Sonic Blade") {
         note(|| format!("special {}: MP short ({})", s.index, s.cost));
         return false;
@@ -224,6 +254,12 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
     let sleights: usize = rd(pl + f::SLEIGHTS);
     if sleights != 0 {
         func::<LoadFn>(SLEIGHT_LOAD)(sleights, sp::recom::SLEIGHT as u32, 0);
+        // Re:CoM waits for them (`exeStockSkill` sub-state 4, motion 0x2E); KH1 starts at once:
+        // until they are in, Re:CoM's sleight events find nothing (logged).
+        let ready = func::<ReadyFn>(RES_READY)(sleights, sp::recom::SLEIGHT as u32);
+        if ready != 1 {
+            note(|| format!("start: Re:CoM's Sonic Blade resources not loaded yet ({ready}): its sleight events may be missing at first"));
+        }
     }
     wr(pl + f::ROW_PTR, va(base(), RECOM_ROWS) + sp::recom::ID_START as usize * 16);
     // Re:CoM's cardless AP (the attack stat), as KH1 swings: KH1's damage replaces it per hit.
@@ -267,10 +303,71 @@ pub unsafe fn special_row(pl: usize, r: &RowStart) {
     event(format!("row {:#x} n{}", r.kh1_row, r.counter));
 }
 
+/// A KH1 motion of the special started (`RecomHost::play`, right after Re:CoM's motion request):
+/// the events of Re:CoM's sleight motion it stands for, as `0x1401A3580` starts them after a
+/// sleight motion: Sora's own event players stopped (the clip just played is one of his own:
+/// `ctrl+0x52 & 0x200` clear), the sleight's players set to the Sonic Blade pack and started on
+/// the motion with the variants `exeStockSkill` passes. Base Re:CoM's voices, sounds and effects
+/// (owner), on KH1's clip and clock.
+pub unsafe fn motion_events(pl: usize, xl_entry: usize) {
+    use sp::recom_events as re;
+    if ACTIVE.load(Ordering::Acquire) != pl {
+        return;
+    }
+    let Some(motion) = re::motion_of(xl_entry) else { return };
+    let c: usize = rd(pl + p::CTRL);
+    if c == 0 {
+        return;
+    }
+    if rd::<u16>(c + ev::CTRL_FLAGS) & ev::SUB_PACK == 0 {
+        for at in [ev::OWN_EET, ev::OWN_SES] {
+            stop_player(rd(pl + at));
+        }
+    }
+    let mute: u32 = rd(pl + ev::MUTE);
+    let (mut eet, mut ses) = (false, false);
+    let e: usize = rd(pl + ev::SLEIGHT_EET);
+    if e != 0 {
+        func::<SetPackFn>(EET_SET)(e, re::PACK);
+        let e: usize = rd(pl + ev::SLEIGHT_EET);
+        if e != 0 && mute & ev::NO_EET == 0 {
+            eet = func::<EvStartFn>(EET_START)(e, motion, re::EET_VARIANT, 1) & 1 != 0;
+        }
+    }
+    let s: usize = rd(pl + ev::SLEIGHT_SES);
+    if s != 0 {
+        func::<SetPackFn>(SES_SET)(s, re::PACK);
+        let s: usize = rd(pl + ev::SLEIGHT_SES);
+        if s != 0 && mute & ev::NO_SES == 0 {
+            ses = func::<EvStartFn>(SES_START)(s, motion, re::SES_VARIANT, 1) & 1 != 0;
+        }
+    }
+    event(format!("ev m{motion}{}{}", if eet { " eet" } else { "" }, if ses { " ses" } else { "" }));
+    note(|| format!("Re:CoM's Sonic Blade events: pack {} motion {motion} (xl entry {xl_entry}): effects {}, sounds {}", re::PACK, if eet { "started" } else { "none" }, if ses { "started" } else { "none" }));
+}
+
+/// A player's stop (its vtable `+0x10`, as `0x1401A3470` / `0x1401A3580` call it).
+unsafe fn stop_player(obj: usize) {
+    type StopFn = unsafe extern "win64" fn(usize);
+    if obj != 0 {
+        let f: StopFn = std::mem::transmute_copy(&rd::<usize>(rd::<usize>(obj) + 0x10));
+        f(obj);
+    }
+}
+
+/// The special's end: the sleight's event players stop, as Re:CoM's next own motion stops them
+/// after a sleight (`0x1401A3470` with the sub-pack flag set; ours never sets it).
+unsafe fn stop_events(pl: usize) {
+    for at in [ev::SLEIGHT_EET, ev::SLEIGHT_SES] {
+        stop_player(rd(pl + at));
+    }
+}
+
 /// Re:CoM ends its sleight action (`0x1401F6660(player, airborne)`). True when it entered its win
 /// action instead.
 pub unsafe fn end_special(pl: usize, airborne: bool) -> bool {
     ACTIVE.store(0, Ordering::Release);
+    stop_events(pl);
     let w: usize = rd(pl + f::WEAPON);
     if w != 0 && rd::<i32>(w + 0x23C) != 0 {
         func::<PlFn>(WEAPON_END)(w);
@@ -349,7 +446,7 @@ pub fn clear_events() {
 /// The start log line.
 pub fn start_line() -> String {
     format!(
-        "specials: KH1's Sonic Blade at combat = kh1 in Sora's story (M9 stage 9c.1): offered in the context tab (KH1's 0x14028D0F0: equipped, target gap < 600, not 160 above, 2 MP), Triangle starts it on Re:CoM's sleight action 0x16 (initStockSkill's writes, cardless; MP on the press), KH1's wind-up / 6 dashes / finisher (rows 0x1B..=0x21) on the xl_limit clips, Rave / Blast in the Attack row; Re:CoM's Sonic Blade ids 0xE / 0xF / 0x10 (its hit sounds and effects), its limit1 start effect{}; Field exe case 0x16 -> exeStockSkill",
+        "specials: KH1's Sonic Blade at combat = kh1 in Sora's story, in battle (M9 stage 9c.1): offered in the context tab (KH1's 0x14028D0F0: equipped, target gap < 600, not 160 above, 2 MP), Triangle starts it on Re:CoM's sleight action 0x16 (initStockSkill's writes, cardless; MP on the press), KH1's wind-up / 6 dashes / finisher (rows 0x1B..=0x21) on the xl_limit clips, Rave / Blast in the Attack row; Re:CoM's Sonic Blade ids 0xE / 0xF / 0x10 (its hit sounds and effects), its limit1 start effect{}, its sleight motions' sound and effect events (pack 11009 motions 0 / 1 / 2) on KH1's motions; the Battle exe's own case 0x16 -> exeStockSkill",
         if EFFECT_OK.load(Ordering::Acquire) { "" } else { " (OFF: name not found)" }
     )
 }
