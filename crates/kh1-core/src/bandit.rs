@@ -24,9 +24,13 @@
 //!   script keeps running while they play): the slash 200, the spin 210 → 211 (looped) → 212,
 //!   the leap 216 → 217 (movement state 7, `crate::enemy::Body::air_flight`) → 218.
 //!
-//! Not ported (Re:CoM's battles only, decision M10; `docs/recom-m11-enemies.md` § The Bandit):
-//! the thrown blade (`sys 94`'s child object `ex_2090_00.bd`, row `0x1CC`: owner question), the
-//! guard-type rows (the block stance's blade `0x15C`, the spin's body `0xEC`: owner question), the
+//! - its guard-type rows (the shared enemy-guard step, `crate::enemy::guard`): the spin's body row
+//!   `0xEC` (made with 210, 211, 212) and the block stance's blade row `0x15C` (230, 231, 233), each
+//!   a [`Guard`] the host turns on while its request plays and its HIT slot is on
+//!   (`crate::enemy::Cmd::Guard`); Sora's swing that meets one is stopped, both sides clash.
+//!
+//! Not ported (Re:CoM's battles only, decision M10; `docs/recom-m11-enemies.md` § The Bandit): the
+//! thrown blade (`sys 94`'s child object `ex_2090_00.bd`, row `0x1CC`: owner question), the
 //! leash `0x3B12` and the fall-out death `0x2C30` (KH1 removes it), the group leader's messages
 //! (`sys 81`, `wp+0x18`), KH1's room rules (Agrabah rooms 2 / 3–6 / 9–11 / 17, the sitting Bandits
 //! `wp+0x68`, the rooftop heights), the head look (`sys 121`), the effects (`sys 75`), the blade's
@@ -97,7 +101,7 @@ impl Attack {
     }
 
     /// The damaging attack rows (script offsets, 0x70 bytes, `sys 23`) made with it. The
-    /// guard-type rows (`0xEC` with the spin, `0x15C` with the block stance) are not made.
+    /// guard-type rows (`0xEC` with the spin, `0x15C` with the block stance) are [`Guard`]s.
     pub fn rows(self) -> &'static [usize] {
         match self {
             Attack::Slash => &[0x23C],
@@ -109,6 +113,48 @@ impl Attack {
 
     pub fn index(self) -> u8 {
         Attack::ALL.iter().position(|&a| a == self).unwrap_or(0) as u8
+    }
+}
+
+/// The Bandit's guard-type rows (attack type 2: they meet only swings and type-3 attacks, never a
+/// hurt body; `crate::enemy::guard`), in the order of the manifest's `guards`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Guard {
+    /// The spin's body row `0xEC` (bone code 8, 60, priority 90, recoil 213; HIT slot 1).
+    Spin,
+    /// The block stance's blade row `0x15C` (bone code 48, 40, priority 30, recoil 232; HIT slot 0).
+    Stance,
+}
+
+impl Guard {
+    pub const ALL: [Guard; 2] = [Guard::Spin, Guard::Stance];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Guard::Spin => "spin",
+            Guard::Stance => "stance",
+        }
+    }
+
+    /// The row's script offset.
+    pub fn row(self) -> usize {
+        match self {
+            Guard::Spin => 0xEC,
+            Guard::Stance => 0x15C,
+        }
+    }
+
+    /// The requests the script makes it with (`0x1ED6` / `0x1F6E` / `0x2188`; `0x408E` / `0x40CC` /
+    /// `0x4186`).
+    pub fn requests(self) -> &'static [u16] {
+        match self {
+            Guard::Spin => &[req::SPIN_UP, req::SPIN, req::SPIN_END],
+            Guard::Stance => &[req::STANCE, req::STANCE_HOLD, req::STANCE_END],
+        }
+    }
+
+    pub fn index(self) -> u8 {
+        Guard::ALL.iter().position(|&g| g == self).unwrap_or(0) as u8
     }
 }
 
@@ -500,7 +546,8 @@ async fn throw(cx: &Cx) {
     play(cx, req::IDLE, k(cx, "idle_blend"));
 }
 
-/// `0x1EC6`: the spin. On the ground; 210 at blend 4 (its guard-type body row `0xEC`: not made);
+/// `0x1EC6`: the spin. On the ground; 210 at blend 4 (with its guard-type body row `0xEC`, made again
+/// for 211 and 212: [`Guard::Spin`]);
 /// 34 frames turning to the target, then to its end; up to 4 rounds of 211 (its row `0x2AC`):
 /// 12 frames then len − 2 − 12 more gliding at the target (`sys 40` mode 2 at the stats block's
 /// `+0xC` = 4), each part ended off the ground, the rounds ended once the spin landed (`wp+0x80`);
@@ -509,9 +556,12 @@ async fn throw(cx: &Cx) {
 async fn spin(cx: &Cx) {
     wait_grounded(cx).await;
     play(cx, req::SPIN_UP, k(cx, "spin_blend"));
+    guard(cx, Guard::Spin, req::SPIN_UP);
     wait_facing(cx, k(cx, "spin_windup")).await;
     wait_done_or_air(cx).await;
     cx.borrow_mut().x.landed = false;
+    // `0x1F6E`: the body row again, for the loop 211 (its first tick sees 211).
+    guard(cx, Guard::Spin, req::SPIN);
     let speed = k(cx, "spin_speed");
     let first = k(cx, "spin_step");
     let rest = motion_frames(cx, req::SPIN) - k(cx, "spin_trim") - first;
@@ -538,6 +588,7 @@ async fn spin(cx: &Cx) {
     }
     wait_done(cx).await;
     attack_now(cx, Attack::SpinEnd, k(cx, "spin_loop_blend"));
+    guard(cx, Guard::Spin, req::SPIN_END);
     wait_frames(cx, k(cx, "spin_end_wait_a")).await;
     wait_frames(cx, k(cx, "spin_end_wait_b")).await;
     wait_frames(cx, k(cx, "spin_end_wait_c")).await;
@@ -650,16 +701,19 @@ async fn hop(cx: &Cx) {
 
 /// `0x400A`: the block stance. Out of an arc; 230 at blend 4, to its end; turned to the target; 231
 /// at blend 0 (`wp+0x84` set) for [60, 90) frames turning to the target, ended once the target is
-/// more than 120° off its facing (`sys 100` < `sys 3(120)`); 233 at blend 0, to its end. KH1's
-/// blade row `0x15C` (attack type 2, priority 30: it blocks Sora's swings, `0x1402B4BC0`) is
-/// **not made** (owner question): nothing blocks here.
+/// more than 120° off its facing (`sys 100` < `sys 3(120)`); 233 at blend 0, to its end. Each part
+/// makes KH1's blade row `0x15C` ([`Guard::Stance`]: attack type 2, priority 30): Sora's swing from
+/// in front is stopped and both clash (`0x1402B4BC0`); the clash's hit state then hops back and
+/// throws (`wp+0x84`).
 async fn stance(cx: &Cx) {
     wait_arc(cx).await;
     play(cx, req::STANCE, k(cx, "stance_blend"));
+    guard(cx, Guard::Stance, req::STANCE);
     wait_done(cx).await;
     face_target(cx);
     let hold = k(cx, "stance_hold_blend");
     play(cx, req::STANCE_HOLD, hold);
+    guard(cx, Guard::Stance, req::STANCE_HOLD);
     cx.borrow_mut().x.blocking = true;
     let mut n = rand_range(cx, k(cx, "stance_min"), k(cx, "stance_max"), "stance time");
     let limit = k(cx, "stance_angle").to_radians().cos();
@@ -675,8 +729,14 @@ async fn stance(cx: &Cx) {
         frame().await;
     }
     play(cx, req::STANCE_END, hold);
+    guard(cx, Guard::Stance, req::STANCE_END);
     wait_done(cx).await;
     cx.borrow_mut().x.blocking = false;
+}
+
+/// `sys 23` of a guard-type row (`0xEC` / `0x15C`) with the request it lives on.
+fn guard(cx: &Cx, g: Guard, request: u16) {
+    push(cx, ECmd::Guard(Some((g.index(), request))));
 }
 
 fn agrabah(cx: &Cx) -> bool {
@@ -1417,6 +1477,37 @@ mod tests {
             }
             assert!(worst < 600, "seed {seed}: {worst} frames without acting");
         }
+    }
+
+    /// The guard rows go with their requests (the shared enemy-guard step): the stance's blade row with
+    /// 230, 231, 233; the spin's body row with 210, 211, 212.
+    #[test]
+    fn guard_rows_go_with_their_requests() {
+        let guards = |s: &Sim| -> Vec<(u8, u16)> { s.log.iter().filter_map(|c| if let ECmd::Guard(Some(g)) = c { Some(*g) } else { None }).collect() };
+        let mut s = ready(4, Some(AGRABAH));
+        s.ai.io.borrow_mut().has_target = true;
+        s.ai.io.borrow_mut().state = (st::HIT, false);
+        let cx = s.ai.io.clone();
+        s.ai.behaviour = Some(Box::pin(async move {
+            stance(&cx).await;
+            halt().await;
+        }));
+        s.run(Vec3::new(0.0, 0.0, 300.0), 200);
+        let st = Guard::Stance.index();
+        assert_eq!(guards(&s), vec![(st, 230), (st, 231), (st, 233)]);
+        let mut s = ready(6, Some(AGRABAH));
+        s.ai.io.borrow_mut().has_target = true;
+        s.ai.io.borrow_mut().state = (st::HIT, false);
+        let cx = s.ai.io.clone();
+        s.ai.behaviour = Some(Box::pin(async move {
+            spin(&cx).await;
+            halt().await;
+        }));
+        s.run(Vec3::new(0.0, 0.0, 2000.0), 400);
+        let sp = Guard::Spin.index();
+        assert_eq!(guards(&s), vec![(sp, 210), (sp, 211), (sp, 212)]);
+        assert_eq!(Guard::ALL.map(|g| g.row()), [0xEC, 0x15C]);
+        assert!(Guard::ALL.iter().all(|g| g.requests().len() == 3));
     }
 
     #[test]

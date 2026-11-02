@@ -187,10 +187,10 @@ const SPIN_END: RowSpec = RowSpec { at: 0x31C, recom_id: 1 };
 const LEAP_BLADE: RowSpec = RowSpec { at: 0x3FC, recom_id: 1 };
 const LEAP_BODY: RowSpec = RowSpec { at: 0x38C, recom_id: 1 };
 
-/// `kh1_core::bandit::Attack::ALL`'s order. Not made (they never hurt Sora: reaction kind 0,
-/// attack type 2, which meets only other attacks, `0x1402B3BE0` / `0x140528CB8`): the spin's body
-/// row `0xEC` and the block stance's blade row `0x15C` (owner question); the thrown blade's row
-/// `0x1CC` (its child object, owner question).
+/// `kh1_core::bandit::Attack::ALL`'s order. Not `.ASD` records (they never hurt Sora: reaction kind
+/// 0, attack type 2, which meets only other attacks, `0x1402B3BE0` / `0x140528CB8`): the spin's body
+/// row `0xEC` and the block stance's blade row `0x15C` are guard rows (`crate::enemy::GUARDS`); the
+/// thrown blade's row `0x1CC` (its child object, owner question).
 pub const ATTACKS: &[AttackSpec] = &[
     AttackSpec { name: "slash", request: 200, rows: &[SLASH] },
     AttackSpec { name: "spin", request: 211, rows: &[SPIN] },
@@ -281,6 +281,12 @@ mod tests {
         assert_eq!((u32::from_le_bytes(r0[0x5C..0x60].try_into().unwrap()), u32::from_le_bytes(r0[0x60..0x64].try_into().unwrap()), u32::from_le_bytes(r0[0x64..0x68].try_into().unwrap())), (26 * 50, 38 * 50, 0));
         assert_eq!(b.parts.len(), 6);
         assert!(b.manifest.contains("\"format\": \"kh1-enemy 1\"") && b.manifest.contains("\"enemy\": \"bandit\""));
+        // The guard rows (M11, the shared enemy-guard step): the spin's body row and the stance's blade.
+        let g = crate::enemy::guard_rows("bandit", crate::stats::mdls_part(&inp.mdls, 5).unwrap(), &kh1_formats::mset::MotionSet::parse(&inp.mset).unwrap(), &b.clips).unwrap();
+        assert_eq!(g.iter().map(|g| (g.name, g.clash_type, g.priority, g.recoil, g.slot, g.turn, g.cos)).collect::<Vec<_>>(), vec![("spin", 2, 90, 213, 1, 0.0, 0.0), ("stance", 2, 30, 232, 0, 0.0, 0.0)]);
+        assert_eq!(g[0].windows, vec![(210, vec![(10.0, 46.0)]), (211, vec![(0.0, 40.0)]), (212, vec![(0.0, 50.0)])]);
+        assert_eq!(g[1].windows, vec![(230, vec![(0.0, 12.0)]), (231, vec![(0.0, 60.0)]), (233, vec![(0.0, 10.0)])]);
+        assert!(b.manifest.contains("\"guards\": ["));
         std::fs::write(std::env::temp_dir().join("kh1-bandit-test.json"), &b.manifest).unwrap();
         println!("{}", b.records.join("\n"));
         println!("parts {:?}", b.parts);

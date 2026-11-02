@@ -101,6 +101,8 @@ struct FakeRecom {
     recom_rolls: usize,
     order: Vec<&'static str>,
     untouchable_writes: u32,
+    /// M11, the shared enemy-guard step: a clash to report (KH1's kind, the priority difference).
+    swing_clash: Option<(u8, i32)>,
 }
 
 impl FakeRecom {
@@ -151,6 +153,7 @@ impl FakeRecom {
             recom_rolls: 0,
             order: Vec::new(),
             untouchable_writes: 0,
+            swing_clash: None,
         }
     }
 
@@ -286,6 +289,9 @@ impl Host for FakeRecom {
     }
     fn guard_clink(&mut self) {
         self.clinks += 1;
+    }
+    fn take_swing_clash(&mut self) -> Option<(u8, i32)> {
+        self.swing_clash.take()
     }
     fn draw_weapon(&mut self) {
         self.draws += 1;
@@ -931,6 +937,58 @@ fn guard_success_recoils_and_offers_the_counterattack_from_frame_12() {
     step_with_target(&mut p, Pad::default());
     step_with_target(&mut p, Pad::default());
     assert!(!p.recom.untouchable);
+}
+
+/// M11, the shared enemy-guard step: a swing that met an enemy's guard row ends and plays KH1's
+/// clash (`0x1402B4BC0` → `0x14029BBD0`): kind 6 on the ground the recoil 0x6E (the Counterattack
+/// offered from its frame 12), kind 7 the strong recoil 0x6F; flag 0x80 for 8 frames; CB+0x41 − 1.
+#[test]
+fn a_swing_on_a_guard_row_clashes() {
+    for (kind, recoil) in [(6u8, crate::rows::RECOIL), (7, crate::rows::STRONG_RECOIL)] {
+        let mut p = Pair::new(Abilities { counterattack: true, ..all() }, Floor::flat());
+        for k in 0..4 {
+            step_with_target(&mut p, Pad { attack: k == 2, ..Default::default() });
+        }
+        assert!(p.ours.swing.is_some(), "a swing plays");
+        let counter = p.ours.combo_counter;
+        p.recom.swing_clash = Some((kind, 0));
+        let ends = p.recom.swing_ends;
+        let out = step_with_target(&mut p, Pad::default());
+        assert!(out.events.contains(&Event::SwingClashed { kind }), "{:?}", out.events);
+        assert_eq!(p.recom.swing_ends, ends + 1, "Re:CoM's attack action ended");
+        assert!(p.ours.swing.is_none() && p.ours.lock && p.ours.clashed);
+        assert_eq!(p.ours.rec.head(), recoil);
+        assert_eq!(p.ours.combo_counter, counter.saturating_sub(1));
+        assert!(p.recom.untouchable, "KH1's flag 0x80");
+        assert!(p.ours.push.is_none(), "no push at a difference of 0");
+        // The Counterattack only during the kind-6 recoil 0x6E (`0x140294220`).
+        let mut started = false;
+        for k in 0..30 {
+            let out = step_with_target(&mut p, Pad { attack: k % 2 == 0, ..Default::default() });
+            started |= out.events.iter().any(|e| matches!(e, Event::AttackStarted { row, .. } if *row == crate::attack::COUNTERATTACK_ROW));
+        }
+        assert_eq!(started, kind == 6, "kind {kind}");
+    }
+}
+
+/// A kind-6 clash under the row's priority pushes Sora back by −diff × 2.5 (`0x14029D720`).
+#[test]
+fn a_clash_under_the_rows_priority_pushes_back() {
+    let mut p = Pair::new(all(), Floor::flat());
+    for k in 0..4 {
+        step_with_target(&mut p, Pad { attack: k == 2, ..Default::default() });
+    }
+    let from = p.recom.pos;
+    p.recom.swing_clash = Some((6, -29));
+    step_with_target(&mut p, Pad::default());
+    assert!(p.ours.push.is_some());
+    for _ in 0..40 {
+        step_with_target(&mut p, Pad::default());
+    }
+    assert!(p.ours.push.is_none(), "the slide ends");
+    // 72.5 in all along −facing (the swing's own root travel aside: a sum of 0.8^k).
+    let back = (from - p.recom.pos).z;
+    assert!(back > 40.0, "pushed back: {back}");
 }
 
 #[test]

@@ -2402,6 +2402,8 @@ pub const BANDIT_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemyBandit +0x3B8 state 30 begin", rva: 0x0053_4720, target: 0x0017_BBC0 },
     PtrSite { name: "CEnemyBandit +0x3C0 state 30 step", rva: 0x0053_4728, target: 0x0018_3260 },
     PtrSite { name: "CEnemyBandit +0x3D0 think", rva: 0x0053_4738, target: 0x0019_6EC0 },
+    // The shared enemy-guard step: the hit handler's guard event (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemyBandit +0x3D8 guard event", rva: 0x0053_4740, target: 0x0018_1600 },
     PtrSite { name: "CEnemyBandit +0x438 attack hurt off", rva: 0x0053_47A0, target: 0x0017_DA80 },
     PtrSite { name: "CEnemyBandit +0x440 attack end", rva: 0x0053_47A8, target: 0x0017_DA90 },
 ];

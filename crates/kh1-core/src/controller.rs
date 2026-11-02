@@ -141,6 +141,9 @@ pub enum Event {
     Guarded,
     /// The guard stopped an attack: KH1's kind-6 recoil (`0x14029D720`).
     GuardSucceeded,
+    /// A swing met an enemy's guard row and clashed (KH1's kind 6 / 7, `0x1402B4BC0`; M11's shared
+    /// enemy-guard step): the recoil 0x6E / 0x6F, or 0x70 in the air.
+    SwingClashed { kind: u8 },
     AttackStarted { row: usize, request: i16, counter: u8, finisher: bool },
     AttackRefused(Refused),
     MotionStarted(u16),

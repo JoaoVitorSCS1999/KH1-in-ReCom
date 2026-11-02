@@ -247,6 +247,7 @@ pub fn cmd_token(c: &Cmd) -> String {
         Cmd::Attack { request, attack, .. } => format!("attack {request} ({})", attack.name()),
         Cmd::Scale(k) => format!("scale {k:.2}"),
         Cmd::Visible(v) => format!("visible {v}"),
+        Cmd::Guard(g) => format!("guard {g:?}"),
     }
 }
 

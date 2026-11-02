@@ -658,6 +658,10 @@ impl Host for RecomHost {
         unsafe { super::attack::take_guard_hit(self.pl) }
     }
 
+    fn take_swing_clash(&mut self) -> Option<(u8, i32)> {
+        super::attack::take_swing_clash(self.pl)
+    }
+
     fn set_untouchable(&mut self, on: bool) {
         // KH1's flag 0x80 after a guard success: Re:CoM's `+0x418 & 1`, which makes the damage
         // check `0x1401E6DE0` skip hits (Checked (decomp)).

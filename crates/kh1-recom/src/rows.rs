@@ -76,7 +76,11 @@ pub mod row {
 /// slot ≥ 161) gets an appended row; an entry Re:CoM already has (its bake: Sliding Dash
 /// `p001_103`, Stun Impact `p001_101`, Zantetsuken `p001_104`, by the manifest) plays Re:CoM's own
 /// action row of that clip ([`Extension::with_recom`]).
-pub const KH1_ONLY: [(u16, u32); 11] = [(212, 110), (213, 111), (208, 106), (209, 107), (210, 108), (211, 109), (214, 112), (215, 113), (216, 114), (217, 115), (218, 116)];
+///
+/// M11 (the shared enemy-guard step): KH1's strong recoil 0x6F (entry 73, a KH1-only clip,
+/// `p001_209` with the owner's files) and air recoil 0x70 (entry 74, Re:CoM's bake `p001_045`, its row
+/// 0x26), for a swing that clashes on an enemy's guard row.
+pub const KH1_ONLY: [(u16, u32); 13] = [(212, 110), (213, 111), (208, 106), (209, 107), (210, 108), (211, 109), (214, 112), (215, 113), (216, 114), (217, 115), (218, 116), (STRONG_RECOIL, 73), (AIR_RECOIL, 74)];
 
 /// KH1 Guard's request.
 pub const GUARD: u16 = 212;
@@ -84,6 +88,10 @@ pub const GUARD: u16 = 212;
 pub const COUNTERATTACK: u16 = 213;
 /// KH1's guard-success recoil (kind 6, `0x14029D720`).
 pub const RECOIL: u16 = 0x6E;
+/// KH1's strong recoil (kind 7 on the ground, `0x14029D5F0`; 64 frames, 118 cm root travel back).
+pub const STRONG_RECOIL: u16 = 0x6F;
+/// KH1's air recoil (kinds 6 / 7 in the air, `0x14029D510`; 40 frames, the fall queued).
+pub const AIR_RECOIL: u16 = 0x70;
 
 /// The appended rows: `rows[i]` is the row id of `KH1_ONLY[i]`, when its KH1-only clip exists;
 /// `recom[i]` Re:CoM's own action row playing that entry's clip, when the manifest maps the entry
@@ -232,6 +240,9 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         GUARD => return ext.get(req).map(|r| (r, true)),
         // KH1's recoil has no travel; Re:CoM's bake of it is row 0x24.
         RECOIL => row::RECOIL,
+        // M11: the strong recoil travels back (request 0x6F's root bit); the air recoil has none.
+        STRONG_RECOIL => return ext.get(req).map(|r| (r, true)),
+        AIR_RECOIL => return ext.get(req).map(|r| (r, false)),
         COUNTERATTACK => return ext.get(req).map(|r| (r, true)),
         // KH1's Fire cast (M7 stage 7.4): Re:CoM's own cast clips (decision 10: the same moves,
         // KH1's frame counts). The release motions have the root bit (KH1: back 15 / 42.4 cm),
@@ -404,7 +415,11 @@ mod tests {
         assert_eq!((e.get(GUARD), e.get(COUNTERATTACK)), (Some(0x47), Some(0x48)));
         assert_eq!((e.get(208), e.get(216), e.get(218)), (Some(0x45), Some(0x44), Some(0x46)));
         assert_eq!([e.get(209), e.get(210), e.get(211), e.get(214), e.get(215), e.get(217)], [Some(0x49), Some(0x4A), Some(0x4B), Some(0x4C), Some(0x4D), Some(0x4E)]);
-        assert_eq!(e.count(), 8);
+        // M11 (the shared enemy-guard step): the strong and air recoils after them. In the
+        // owner's pack entry 74 is Re:CoM's own bake (slot 45, Checked (files): the BAKES table of
+        // `validate.rs`), so it takes Re:CoM's row; this fake manifest has neither as Re:CoM's.
+        assert_eq!((e.get(STRONG_RECOIL), e.get(AIR_RECOIL)), (Some(0x4F), Some(0x50)));
+        assert_eq!(e.count(), 10);
         assert!(e.has_row(0x44) && e.has_row(0x4E) && !e.has_row(0x30));
         // A row id past Re:CoM's table is never taken as Re:CoM's.
         assert_eq!(Extension::plan(|_| false).with_recom(|_| Some(0x47)).get(208), None);

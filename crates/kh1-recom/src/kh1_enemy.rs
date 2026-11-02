@@ -184,6 +184,9 @@ pub struct Manifest {
     pub recoil: Vec<u16>,
     /// Re:CoM's bones of KH1's hurt parts (part 0 first).
     pub parts: Vec<i32>,
+    /// The enemy's guard-type rows (the shared enemy-guard step, `kh1_core::enemy::guard`; its
+    /// manifest's `guards`, in the behaviour's order), none for an enemy without any.
+    pub guards: Vec<ke::guard::GuardRow>,
 }
 
 impl Manifest {
@@ -215,7 +218,7 @@ pub fn from_shadow(text: &str) -> Result<Manifest, String> {
     let v = json::parse(text)?;
     let parts = parse_parts(&v, 2)?;
     let consts = Table::new(m.consts.pairs().to_vec(), kh1_core::shadow::NAMES)?;
-    Ok(Manifest { consts, clips: m.clips, recoil: vec![m.recoil[0], m.recoil[1], m.recoil[2]], parts })
+    Ok(Manifest { consts, clips: m.clips, recoil: vec![m.recoil[0], m.recoil[1], m.recoil[2]], parts, guards: Vec::new() })
 }
 
 fn parse_parts(v: &json::Value, min: usize) -> Result<Vec<i32>, String> {
@@ -273,13 +276,59 @@ pub fn parse(text: &str, enemy: &str, names: &[&str], needed: &[u16]) -> Result<
         recoil.push(r as u16);
     }
     let parts = parse_parts(&v, 1)?;
-    let m = Manifest { consts, clips, recoil, parts };
+    let guards = parse_guards(&v, &clips)?;
+    let m = Manifest { consts, clips, recoil, parts, guards };
     for &r in needed {
         if m.clip(r).is_none() {
             return Err(format!("no clip for KH1 request {r}"));
         }
     }
     Ok(m)
+}
+
+/// The manifest's `guards` (absent: none): per guard-type row its `type` (clash type 1..4),
+/// `priority`, `recoil` (a request with a clip, or one the model lacks: then Re:CoM's flinch, as for
+/// a guarded attack), the front cone `turn` / `cos`, and its `windows` (per request that makes it,
+/// the frames `on` its HIT slot is on). Checked here: the type is a guard type, each window lies in
+/// its request's clip.
+fn parse_guards(v: &json::Value, clips: &[Clip]) -> Result<Vec<ke::guard::GuardRow>, String> {
+    let Some(list) = v.get("guards") else { return Ok(Vec::new()) };
+    let list = list.as_array().ok_or("\"guards\" is not a list")?;
+    let mut out = Vec::new();
+    for g in list {
+        let name = g.get("name").and_then(|x| x.as_str()).ok_or("guard without \"name\"")?.to_string();
+        let n = |k: &str| g.get(k).and_then(|x| x.as_f64()).filter(|x| x.is_finite()).ok_or_else(|| format!("guard {name} without \"{k}\""));
+        let clash_type = n("type")? as u32;
+        if !ke::guard::is_guard_type(clash_type) {
+            return Err(format!("guard {name}: type {clash_type} is not a guard type"));
+        }
+        let priority = n("priority")?;
+        let recoil = n("recoil")?;
+        if !(0.0..=100.0).contains(&priority) || !(0.0..=65535.0).contains(&recoil) {
+            return Err(format!("guard {name}: priority {priority} recoil {recoil}"));
+        }
+        let mut windows = Vec::new();
+        for w in g.get("windows").and_then(|x| x.as_array()).ok_or_else(|| format!("guard {name} without \"windows\""))? {
+            let r = w.get("request").and_then(|x| x.as_u32()).filter(|&r| r <= 0xFFFF).ok_or_else(|| format!("guard {name}: window without \"request\""))? as u16;
+            let clip = clips.iter().find(|c| c.request == r).ok_or_else(|| format!("guard {name}: no clip for its request {r}"))?;
+            let mut on = Vec::new();
+            for p in w.get("on").and_then(|x| x.as_array()).ok_or_else(|| format!("guard {name}: request {r} without \"on\""))? {
+                let a = p.as_array().filter(|a| a.len() == 2).ok_or_else(|| format!("guard {name}: request {r}: a window is not [on, off]"))?;
+                let (x, y) = (a[0].as_f64().unwrap_or(f64::NAN) as f32, a[1].as_f64().unwrap_or(f64::NAN) as f32);
+                if !(0.0 <= x && x < y && y <= clip.frames as f32) {
+                    return Err(format!("guard {name}: request {r}: window [{x}, {y}) outside its {} frames", clip.frames));
+                }
+                on.push((x, y));
+            }
+            windows.push((r, on));
+        }
+        let (turn, cos) = (n("turn")? as f32, n("cos")? as f32);
+        if !(-1.0..=1.0).contains(&cos) {
+            return Err(format!("guard {name}: cos {cos}"));
+        }
+        out.push(ke::guard::GuardRow { name, clash_type, priority: priority as i32, recoil: recoil as u16, turn, cos, windows });
+    }
+    Ok(out)
 }
 
 /// The requests the Soldier's behaviour plays (its manifest must map them).
@@ -306,13 +355,15 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Attack { request, attack, .. } => format!("attack {request} ({}), steered", names.get(*attack as usize).copied().unwrap_or("?")),
         Cmd::Scale(k) => format!("scale {k:.2}"),
         Cmd::Visible(v) => format!("visible {v}"),
+        Cmd::Guard(Some((g, r))) => format!("guard row {g} with {r}"),
+        Cmd::Guard(None) => "guard rows end".into(),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).

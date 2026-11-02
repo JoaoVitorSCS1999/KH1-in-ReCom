@@ -585,7 +585,18 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
                 if hit {
                     // The contact the apply reads from the attack's shape (`+0x30..+0x60`).
                     std::ptr::copy_nonoverlapping((fp + 0x30) as *const u8, (shape + 0x30) as *mut u8, 0x30);
+                    // M11, the shared enemy-guard step: a body under a KH1 enemy's guard row guards
+                    // this swing in Re:CoM's apply only when KH1's types meet (`0x140528CB8`), for
+                    // its element whatever it is (`super::kh1_enemy::guard_for_swing`).
+                    let mut guard = super::kh1_enemy::guard_for_swing(node, coll, live.data.clash_type());
                     let r = apply(coll, node);
+                    if let Some(g) = guard.as_mut() {
+                        super::kh1_enemy::guard_after_swing(g, r, live.data.clash_type(), live.priority);
+                        if let Some((kind, diff)) = g.sora {
+                            SWING_CLASH_KIND.store((kind as u32) << 16 | (diff as i16 as u16 as u32), Ordering::Relaxed);
+                            SWING_CLASH.store(pl, Ordering::Relaxed);
+                        }
+                    }
                     if r != 0 {
                         if let Ok(mut g) = KH1_HITS.lock() {
                             if g.len() < 64 {
@@ -602,6 +613,21 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
         node = next;
     }
     result
+}
+
+/// M11, the shared enemy-guard step: Sora's swing met a KH1 enemy's guard row (the player, and
+/// KH1's clash kind << 16 | the priority difference as an i16).
+static SWING_CLASH: AtomicUsize = AtomicUsize::new(0);
+static SWING_CLASH_KIND: AtomicU32 = AtomicU32::new(0);
+
+/// The clash Sora's KH1 frame plays (`Kh1Sora::swing_clash`), once.
+pub(super) fn take_swing_clash(pl: usize) -> Option<(u8, i32)> {
+    if pl == 0 || SWING_CLASH.load(Ordering::Relaxed) != pl {
+        return None;
+    }
+    SWING_CLASH.store(0, Ordering::Relaxed);
+    let k = SWING_CLASH_KIND.load(Ordering::Relaxed);
+    Some(((k >> 16) as u8, k as u16 as i16 as i32))
 }
 
 /// Whether one of the enemy's body parts took a KH1 swing's hit (consumed).
@@ -641,6 +667,9 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
 
 unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
     let o: PlRetFn = orig(&ORIG_ENEMY_HIT);
+    // M11, the shared enemy-guard step: a guard row left on while a Re:CoM state runs ends (one
+    // atomic load while no KH1 enemy guards).
+    super::kh1_enemy::guard_watch(enemy);
     // M7 f3 (decision 38): KH1's pace for the hits Stop held (one compare unless they are landing).
     super::magic::held_hit_pace(enemy);
     let Some(part) = take_kh1_hit(enemy) else {

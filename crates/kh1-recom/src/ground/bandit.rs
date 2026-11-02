@@ -45,7 +45,19 @@ pub static CLASS: Class = Class {
 };
 
 fn parse_manifest(text: &str) -> Result<Manifest, String> {
-    parse(text, "bandit", kh1_core::bandit::NAMES, REQUESTS)
+    let m = parse(text, "bandit", kh1_core::bandit::NAMES, REQUESTS)?;
+    // Both guard rows (the asset step of 0.74 on: an older manifest has none).
+    let names: Vec<&str> = m.guards.iter().map(|g| g.name.as_str()).collect();
+    let want: Vec<&str> = kh1_core::bandit::Guard::ALL.iter().map(|g| g.name()).collect();
+    if names != want {
+        return Err(format!("guards {names:?}, the behaviour's are {want:?} (an older asset step? run it again)"));
+    }
+    for (g, row) in kh1_core::bandit::Guard::ALL.iter().zip(&m.guards) {
+        if let Some(r) = g.requests().iter().find(|&&r| !row.made_with(r)) {
+            return Err(format!("guard {}: no window for its request {r}", row.name));
+        }
+    }
+    Ok(m)
 }
 
 fn make(m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
@@ -66,6 +78,13 @@ mod tests {
         // The clash recoils its rows name: 205 (slash, leap), 213 (the spin's); all in the model.
         assert_eq!((m.recoil_of(0), m.recoil_of(1), m.recoil_of(2), m.recoil_of(3)), (Some(205), Some(213), Some(213), Some(205)));
         assert_eq!(m.parts.len(), 6);
+        // The guard rows (the player's script): the spin's body 90 / 213, the stance's blade 30 / 232,
+        // both type 2, the front half; their HIT slots' windows.
+        let g = &m.guards;
+        assert_eq!((g[0].priority, g[0].recoil, g[0].clash_type, g[1].priority, g[1].recoil, g[1].clash_type), (90, 213, 2, 30, 232, 2));
+        assert_eq!((g[0].half_angle(), g[1].half_angle()), (Some(std::f32::consts::FRAC_PI_2), Some(std::f32::consts::FRAC_PI_2)));
+        assert!(g[0].live(210, 10.0) && !g[0].live(210, 9.0) && g[0].live(212, 49.0) && !g[0].live(212, 50.0));
+        assert!(g[1].live(231, 59.0) && g[1].live(233, 9.0) && !g[1].live(233, 10.0));
         let _ = (CLASS.make)(&m, 1, 0.0);
     }
 

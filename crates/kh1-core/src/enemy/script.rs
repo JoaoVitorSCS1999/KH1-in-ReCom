@@ -71,6 +71,11 @@ pub enum Cmd<A> {
     /// KH1's actor flag `0x1` (the model drawn: `0x14029F421`, Checked (decomp, Epic notes
     /// re-read on Steam: the draw skips an actor without it)): shown (true) or hidden (false).
     Visible(bool),
+    /// A guard-type row (`crate::enemy::guard`, the shared enemy-guard step, M11) made with the
+    /// request just asked for: `Some((row, request))` (the row's index in the enemy's guard list; it
+    /// lives while that request plays and its HIT slot is on, `0x1402B47A0`), or `None`: the
+    /// enemy's guard rows end now.
+    Guard(Option<(u8, u16)>),
 }
 
 impl<A: Copy> Cmd<A> {
@@ -92,6 +97,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::Attack { request, attack, blend } => Cmd::Attack { request, attack: f(attack), blend },
             Cmd::Scale(k) => Cmd::Scale(k),
             Cmd::Visible(v) => Cmd::Visible(v),
+            Cmd::Guard(g) => Cmd::Guard(g),
         }
     }
 }
