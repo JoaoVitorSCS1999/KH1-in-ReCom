@@ -2370,6 +2370,42 @@ pub const DARKBALL_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemyDarkball +0x440 attack end", rva: 0x0053_BBE8, target: 0x0017_DA90 },
 ];
 
+/// M11 ground melee: the Bandit's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked
+/// (exe): its only caller is the enemy factory `0x140188F40` (id 11, the call at `0x14018916A`); no
+/// branch lands inside the moved bytes and no pointer names it (exe scan).
+pub const BANDIT_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d)
+    Site { name: "CEnemyBandit ctor (0x14018AEB0)", rva: 0x0018_AEB0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 ground melee: the factory's `mov ecx, 0xCD0` before `CEnemyBandit`'s ctor, raised by the
+/// framework's 0x20-byte tail. Checked (exe).
+pub const BANDIT_ALLOC: &[Site] = &[Site { name: "alloc CEnemyBandit (0x140189151)", rva: 0x0018_9151, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11 ground melee: `CEnemyBandit`'s vtable slots the copy keeps or replaces, checked against
+/// Re:CoM's functions before the copy is made (Checked (exe), relocated pointers: states 0 / 11 /
+/// 12 / 30 are `CBattleEnemy`'s, 1..3 the Bandit's own).
+pub const BANDIT_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyBandit +0x70 motion play", rva: 0x0053_43D8, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyBandit +0x80 update", rva: 0x0053_43E8, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyBandit +0xE8 state 0 begin", rva: 0x0053_4450, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyBandit +0xF0 state 0 step", rva: 0x0053_4458, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyBandit +0xF8 state 0 end", rva: 0x0053_4460, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyBandit +0x100 state 1 begin", rva: 0x0053_4468, target: 0x0018_AFF0 },
+    PtrSite { name: "CEnemyBandit +0x108 state 1 step", rva: 0x0053_4470, target: 0x0018_B3A0 },
+    PtrSite { name: "CEnemyBandit +0x118 state 2 begin", rva: 0x0053_4480, target: 0x0018_AF70 },
+    PtrSite { name: "CEnemyBandit +0x120 state 2 step", rva: 0x0053_4488, target: 0x0018_B120 },
+    PtrSite { name: "CEnemyBandit +0x130 state 3 begin", rva: 0x0053_4498, target: 0x0018_AFA0 },
+    PtrSite { name: "CEnemyBandit +0x138 state 3 step", rva: 0x0053_44A0, target: 0x0018_B160 },
+    PtrSite { name: "CEnemyBandit +0x1F0 state 11 begin", rva: 0x0053_4558, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyBandit +0x208 state 12 begin", rva: 0x0053_4570, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyBandit +0x3B8 state 30 begin", rva: 0x0053_4720, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyBandit +0x3C0 state 30 step", rva: 0x0053_4728, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyBandit +0x3D0 think", rva: 0x0053_4738, target: 0x0019_6EC0 },
+    PtrSite { name: "CEnemyBandit +0x438 attack hurt off", rva: 0x0053_47A0, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyBandit +0x440 attack end", rva: 0x0053_47A8, target: 0x0017_DA90 },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -2475,6 +2511,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         POWERWILD_ALLOC,
         DARKBALL_HOOKS,
         DARKBALL_ALLOC,
+        BANDIT_HOOKS,
+        BANDIT_ALLOC,
     ];
     LISTS
         .iter()
@@ -2574,7 +2612,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

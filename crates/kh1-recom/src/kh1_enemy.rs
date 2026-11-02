@@ -99,7 +99,7 @@ const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin 
 
 /// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
 /// row in their own module (`crate::m11`); one line here per enemy.
-pub static CLASSES: [&Class; 5] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS];
+pub static CLASSES: [&Class; 6] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS];
 
 /// M10's Shadow (class 0).
 pub static SHADOW: Class = Class {
@@ -413,6 +413,16 @@ fn make_soldier(m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
     Box::new(kh1_core::soldier::Ai::new(m.consts.clone(), m.frames(), seed, yaw, true))
 }
 
+/// KH1's world id (`sys 105`'s `+0`, the index of KH1's world code table `0x1404DCCA0`: 1 `di`,
+/// 3 `tw`, 4 `aw`, 6 `po`, 8 `al`, 9 `lm`, 10 `nm`, 11 `he`, 12 `pi`, 13 `pp`, 15 `pc`; Checked
+/// (exe)) for Re:CoM's world (`0x1402339C0(0)`: 1..13 in the order of its world table
+/// `0x140506AA0`), as the asset step maps the twins' records (`kh1_recom_assets::stats::RECOM_WORLDS`,
+/// decision 21). None: Twilight Town, Castle Oblivion (and its halls, 0), which KH1 doesn't have.
+pub fn kh1_world(recom_world: i32) -> Option<u8> {
+    const MAP: [Option<u8>; 13] = [Some(3), Some(8), Some(11), Some(4), Some(12), Some(10), Some(9), Some(13), Some(15), Some(6), None, Some(1), None];
+    usize::try_from(recom_world).ok().and_then(|w| w.checked_sub(1)).and_then(|i| MAP.get(i).copied().flatten())
+}
+
 /// A new behaviour for a class (`seed`: its random stream; `yaw`: its facing, KH1's).
 pub fn make(class: usize, m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
     (CLASSES[class].make)(m, seed, yaw)
@@ -501,6 +511,15 @@ mod tests {
         assert_eq!(cmd_token(&Cmd::Visible(false), CLASSES[0].attack_names, &n), "visible false");
         assert_eq!(cmd_token(&Cmd::Scale(0.5), CLASSES[0].attack_names, &n), "scale 0.50");
         assert!(logged(&Cmd::Visible(true)) && !logged(&Cmd::Scale(1.0)));
+    }
+
+    /// Re:CoM's worlds → KH1's world ids (decision 21's pairing): Traverse Town 3, Agrabah 8,
+    /// Olympus 11, …; Twilight Town and Castle Oblivion none.
+    #[test]
+    fn recom_worlds_map_to_kh1_worlds() {
+        assert_eq!((kh1_world(1), kh1_world(2), kh1_world(3)), (Some(3), Some(8), Some(11)));
+        assert_eq!((kh1_world(10), kh1_world(11), kh1_world(12), kh1_world(13)), (Some(6), None, Some(1), None));
+        assert_eq!((kh1_world(0), kh1_world(14), kh1_world(-1)), (None, None, None));
     }
 
     #[test]

@@ -49,6 +49,13 @@ pub struct Body {
     /// A warp (`sys 86`, [`super::script::warp`]): this frame's displacement to the new place; the
     /// flight velocity and the walk are zeroed with it (`0x140292BC0`). M11.
     pub warp: Option<Vec3>,
+    /// KH1's movement state 7 (`sys 169` → `0x1402BB030`: `0x1402B1960(actor, 7)`, the velocity
+    /// `+0x3C0` = the script's vector × its fourth word; registered by `0x1402B1B80(7, flags 1, …,
+    /// 0x1402CC000, …)`, Checked (decomp)): [`Body::flying`]'s step (the flight velocity follows
+    /// the script's `+0x20` × `+0x2C`) with the air state's flags (`& 3 == 1`): airborne for the
+    /// reactions (`0x1402B1B10`), never grounded. The Bandit's leap (M11). An arc, a timed jump,
+    /// flight or `sys 88` ([`Body::ground`]) ends it.
+    pub air_flight: bool,
 }
 
 /// Movement state 3's numbers (`actor+0x3B0` time, `+0x3B4` gravity, `+0x3B8` half the time,
@@ -66,8 +73,9 @@ impl Body {
     pub fn jump<C: Engine + ?Sized>(&mut self, h: f32, v: Vec3, y: f32, c: &C) {
         self.arc = Some(Arc::hop(h, y, c.gravity()));
         self.air_vel = v;
-        // `0x1402AF960` → movement state 2: flight (state 4) and state 3 end.
+        // `0x1402AF960` → movement state 2: flight (states 4 / 7) and state 3 end.
         self.flying = false;
+        self.air_flight = false;
         self.timed = None;
     }
 
@@ -88,6 +96,7 @@ impl Body {
         self.timed = Some(Timed { t: 0.0, g, half, drag });
         self.arc = None;
         self.flying = false;
+        self.air_flight = false;
     }
 
     /// `0x1402AF630`: six frames before the top of a [`Timed`] jump (`+0x3B0 + 6 ≥ +0x3B8`), KH1
@@ -101,6 +110,7 @@ impl Body {
     /// flight velocity `+0x3C0` = `v` (the script's vector × its fourth word, `0x140386D00`).
     pub fn fly(&mut self, v: Vec3) {
         self.flying = true;
+        self.air_flight = false;
         self.arc = None;
         self.timed = None;
         self.held = false;
@@ -116,6 +126,24 @@ impl Body {
         self.yaw_target = yaw;
     }
 
+    /// `sys 169` (`0x1402BB030`): movement state 7 ([`Body::air_flight`]) with the flight velocity
+    /// `v` (the script's vector × its fourth word, `0x140386D00`).
+    pub fn air_fly(&mut self, v: Vec3) {
+        self.air_flight = true;
+        self.flying = false;
+        self.arc = None;
+        self.timed = None;
+        self.held = false;
+        self.air_vel = v;
+    }
+
+    /// `sys 88(actor, 0)` (`0x1402BA5B0` → `0x1402B1960(actor, 0)`): movement state 0; flight
+    /// (states 4 / 7) ends. Checked (decomp).
+    pub fn ground(&mut self) {
+        self.flying = false;
+        self.air_flight = false;
+    }
+
     /// `0x1402C7300(dir, p)`: a push slide totalling `p` (speed `p × −ln 0.8`, ×0.8 a frame).
     pub fn push(&mut self, dir: Vec3, p: f32) {
         self.air_vel = Vec3::ZERO;
@@ -125,7 +153,7 @@ impl Body {
     /// In the air: movement state 2 (an arc) or 3 (a [`Timed`] jump; `0x1402B1B10`: the state
     /// table's flags `& 3 == 1`, state 3's are 5).
     pub fn airborne(&self) -> bool {
-        self.arc.is_some() || self.timed.is_some()
+        self.arc.is_some() || self.timed.is_some() || self.air_flight
     }
 
     /// One frame: the displacement (KH1 units) for the host to move and collide. `steer`: the
@@ -142,7 +170,7 @@ impl Body {
         let want = self.walk;
         let mut d = want * step;
         self.walk = Vec3::ZERO;
-        if self.flying && self.arc.is_none() {
+        if (self.flying || self.air_flight) && self.arc.is_none() {
             // `0x1402CC000`: the flight velocity follows the script's (`+0x20` × `+0x2C`, which the
             // actor task zeroes each frame, `0x140297FE0`, before the script sets it again).
             let a = self.accel.unwrap_or_else(|| c.air_accel());
@@ -203,6 +231,7 @@ impl Body {
     /// The host found the floor while falling: the arc ends.
     pub fn land(&mut self) {
         self.landed_timed = self.timed.is_some();
+        self.air_flight = false;
         self.arc = None;
         self.timed = None;
         self.air_vel = Vec3::ZERO;
@@ -311,6 +340,26 @@ mod tests {
         assert_eq!(d, Vec3::new(0.0, -80.0, 0.0));
         assert_eq!((b.air_vel, b.yaw), (Vec3::ZERO, 1.0));
         assert_eq!(b.step(1.0, 0.0, None, &c), Vec3::ZERO);
+    }
+
+    /// Movement state 7 (`sys 169`, the Bandit's leap): the flight step, airborne for the
+    /// reactions, never falling; a jump (a reaction's hop) or `sys 88` ends it.
+    #[test]
+    fn air_flight_steps_as_flight_and_is_airborne() {
+        let c = consts();
+        let mut b = Body::default();
+        b.air_fly(Vec3::ZERO);
+        assert!(b.air_flight && b.airborne() && !b.falling() && !b.flying);
+        b.walk = Vec3::new(0.0, -7.0, 70.0);
+        let d = b.step(1.0, 0.0, None, &c);
+        assert!((d.z - 7.0).abs() < 1e-4 && (d.y + 7.0).abs() < 1e-5, "{d:?}");
+        let d = b.step(1.0, 0.0, None, &c);
+        assert!((d.z - 6.3).abs() < 1e-4 && d.y == 0.0, "eases off, no gravity: {d:?}");
+        b.ground();
+        assert!(!b.airborne());
+        b.air_fly(Vec3::ZERO);
+        b.jump(20.0, Vec3::ZERO, 0.0, &c);
+        assert!(!b.air_flight && b.airborne() && b.arc.is_some());
     }
 
     /// `sys 125`'s turn rate replaces the manifest's.

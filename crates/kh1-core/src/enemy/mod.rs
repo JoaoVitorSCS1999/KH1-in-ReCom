@@ -241,4 +241,22 @@ pub trait Behaviour {
     fn keeps_reaction(&self) -> bool {
         true
     }
+
+    /// The KH1 world the battle stands for (`sys 105`'s world id: Re:CoM's world mapped as
+    /// decision 21 maps its records, `kh1-recom`'s `kh1_enemy::kh1_world`; None for a Re:CoM world
+    /// KH1 doesn't have), once before the first frame. Scripts with world rules read it (M11: the
+    /// Bandit's Agrabah rules, world 8).
+    fn set_world(&self, _kh1_world: Option<u8>) {}
+    /// The hit's place in the enemy's run of hits, before [`Behaviour::on_hit`]: KH1's hit record
+    /// `+0x24`, which `0x1402BFE60` sets from the actor's counter `+0x3E8` (one more per record,
+    /// clashes included) and which the enemy update zeroes whenever no action plays (`0x1402B7260`:
+    /// actor flag 4 clear). Checked (decomp). M11: the Bandit's counter reads it.
+    fn set_hit_count(&self, _n: u16) {}
+    /// The reaction kind of a damaging hit once the script's hit handler has run: KH1 runs the
+    /// handler before the reaction (`0x1402B7B90` → `0x1402BCD60`, then `0x1402B8E10`'s switch
+    /// reads the record's kind), and a handler may rewrite it (`hp[0xC] & ~0x1F | k`). Checked
+    /// (decomp). M11: the Bandit's kind 4 → 5. The default keeps it.
+    fn reaction_kind(&self, kind: u8) -> u8 {
+        kind
+    }
 }

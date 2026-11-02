@@ -179,6 +179,11 @@ struct Runtime {
     floor: Option<f32>,
     /// Re:CoM's own model scale, read before our first `Cmd::Scale` (KH1's scale is a factor on it).
     base_scale: Option<[f32; 4]>,
+    /// KH1's hit counter (`actor+0x3E8`): one more per hit record (clashes too, `0x1402BFE60`),
+    /// zeroed at the end of a KH1 frame with no action playing (`0x1402B7260`: actor flag 4
+    /// clear: no action of ours waiting and no reaction). The behaviour hears it as the record's
+    /// `+0x24` (`Behaviour::set_hit_count`; M11, the Bandit).
+    hits: u16,
 }
 
 // SAFETY: a runtime (its behaviour holds `Rc`s that never leave it) is only touched under `RT`'s
@@ -382,6 +387,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             reaction_age: 0.0,
             floor: None,
             base_scale: None,
+            hits: 0,
         });
         Some(v.len() - 1)
     })();
@@ -811,6 +817,11 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         }
     }
     body_step(en, rt, step, pos);
+    // KH1's hit counter goes back to 0 at the end of an update with no action playing (actor flag
+    // 4: an action of ours the AI waits on, or a reaction).
+    if rt.reaction.is_none() && rt.action.is_none_or(|a| a.steered) {
+        rt.hits = 0;
+    }
 }
 
 /// KH1's body physics for the frame, written into Re:CoM's mover: the facing, and the velocity
@@ -911,9 +922,15 @@ unsafe fn landed(en: usize, rt: &mut Runtime) {
 /// Re:CoM begin as it is, then KH1's appearance.
 pub unsafe extern "win64" fn appear_begin(en: usize) {
     let alt = rd::<u64>(en + e::FLAGS) & e::APPEAR_ALT != 0;
+    let world = super::stats::recom_world();
     let done = with_rt(en, |rt| {
         rt.recom_appear = alt;
         rt.appear_sub = 0;
+        // The KH1 world its script's world rules read (decision 21's mapping).
+        let w = crate::kh1_enemy::kh1_world(world);
+        rt.ai.set_world(w);
+        let k = rt.class;
+        line(k, || format!("e{}: KH1 world {w:?} (Re:CoM world {world})", rd::<u32>(en + e::ID)));
         let m = mover(en);
         if m != 0 {
             rt.last_pos = crate::units::to_kh1(rd_vec(m + mv::POS));
@@ -1255,9 +1272,11 @@ unsafe fn start_reaction(en: usize, rt: &mut Runtime, hit: Option<Hit>) -> bool 
             ke::react(hit, yaw, current, airborne, lying, m, c, &mut rng, &mut body, y)
         }
     };
-    // The script's hit handler runs after KH1's reaction (`sys 38`, the Powerwild): its launch
-    // replaces the one KH1 chose (Assumption: the engine's hit processing precedes the handler, as
-    // the Soldier's counter reads the HP after the damage).
+    // A launch the script's hit handler asked for (`sys 38`, the Powerwild) replaces the reaction.
+    // KH1 runs the handler first (`0x1402B7B90` → `0x1402BCD60`, then `0x1402B8E10`'s switch) and
+    // `0x1402B79F0` marks the record (`*hit |= 2`) so KH1's own reaction is skipped, its random
+    // draw too (Checked (decomp), M11 Bandit pass); here KH1's reaction is chosen first and
+    // replaced, so its draw stays drawn (a known difference, `docs/recom-m11-enemies.md`).
     if let Some(l) = rt.ai.scripted_launch() {
         let mut body = rt.ai.body();
         if let Some(s) = ke::react::scripted_launch(hit, l, airborne, yaw, m, c, &mut body, y) {
@@ -1311,6 +1330,8 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         rt.current = None;
         rt.reaction = None;
         rt.recom_state = true;
+        rt.hits = rt.hits.saturating_add(1);
+        rt.ai.set_hit_count(rt.hits);
         rt.ai.on_hit(HitNews::Clash);
         let k = rt.class;
         line(k, || format!("e{}: clash without a KH1 recoil motion: Re:CoM's flinch", rd::<u32>(en + e::ID)));
@@ -1328,7 +1349,12 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         if let Some(h) = hit {
             rt.ai.set_hit_kind(h.kind);
         }
-        rt.ai.on_hit(if rt.clash.is_none() { HitNews::Damage } else { HitNews::Clash });
+        rt.hits = rt.hits.saturating_add(1);
+        rt.ai.set_hit_count(rt.hits);
+        let clash = rt.clash.is_some();
+        rt.ai.on_hit(if clash { HitNews::Clash } else { HitNews::Damage });
+        // The handler ran before the reaction and may have rewritten the record's kind.
+        let hit = if clash { hit } else { hit.map(|h| Hit { kind: rt.ai.reaction_kind(h.kind), ..h }) };
         if rt.clash.is_none() && !rt.ai.keeps_reaction() {
             // KH1's hit handler zeroed the reaction kind (M11, the Darkball's armour): no reaction.
             // A reaction already running carries on in this state; otherwise back to state 1 (Re:CoM's
@@ -1427,6 +1453,8 @@ pub unsafe extern "win64" fn defeat_begin(en: usize) {
     let hit = ours(en).and_then(|k| hit_of(en, k));
     call_original(en, ce::begin_slot(state::DEFEAT));
     with_rt(en, |rt| {
+        // KH1's hit handler rewrites the killing hit's kind too (it runs before the reaction).
+        let hit = hit.map(|h| Hit { kind: rt.ai.reaction_kind(h.kind), ..h });
         rt.dead = true;
         rt.recom_flinch = false;
         rt.recom_state = false;
