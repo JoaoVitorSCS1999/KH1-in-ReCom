@@ -13,8 +13,9 @@ Tags: Checked (exe / decomp / files / trace) or Assumption. Every address is Ste
 M11 (2026-11-02): the Shadow now runs on the shared KH1 enemy framework (`docs/recom-m11-enemies.md`):
 `kh1_core::enemy` (body, reactions, script routines), `kh1_recom::kh1_enemy` + `win::kh1_enemy` (one table of
 classes; this note's `win::shadow` is its class 0), `kh1_recom_assets::enemy`. Its behaviour, asset outputs
-(byte-identical), manifest, log lines and trace token are unchanged. Finding: KH1's wander (`0x1BC4`) picks its
-points about the current position, this port about home (owner question in the M11 note).
+(byte-identical), manifest, log lines and trace token are unchanged. KH1's wander (`0x1BC4`) picks its points
+about the current position; M10's port took them about home: fixed to KH1's rule (owner 2026-11-02, M11's
+shared `wander`).
 
 Status: in game since 0.67.0 (owner: "Everything seems to work well"); the unhittable-while-sunk fix
 below is not seen in game yet; no KH1 trace of the Shadow yet.
@@ -63,7 +64,7 @@ only ever played by our states (Re:CoM's own states play Re:CoM's clip names), s
 | main | `0x26B2` | init `0x27F8`, yield; spawned from the floor → rise; idle; each frame: wait while underground; idle with Sora within 1500 → engaged; a state change restarts the behaviour thread |
 | init | `0x27F8` | stats record (per world), walk 2.0 (stats `+4`), run 5.0 (`+8`), hop 150 (`+0x10`), home = position, weave phase = rand × 360, handlers |
 | idle | `0xD38` → `0xD50` | clear the target; forever: wander (`0x1BC4`), dig and come up elsewhere (`0xD5E`) |
-| wander | `0x1BC4` | two points around home at [200, 300) and [300, 400); walk to each (timeout 300); 40 %: idle motion and wait rand [90, 180); back home when > 700 away |
+| wander | `0x1BC4` | two points around the current position (`sys 7` adds `actor+0x10`; M10 took home, fixed 2026-11-02) at [200, 300) and [300, 400); walk to each (timeout 300); 40 %: idle motion and wait rand [90, 180); back home when > 700 away |
 | idle dig | `0xD5E` | sink; underground to a point [300, 500) away, then [700, 1000); rise |
 | engaged | `0xB72` → `0xB96` | by distance: < 450 close, < 800 mid, else far; then keep the target (search 3000) and loop |
 | close | `0xC6A` | < 150 swipe; < 300: 90 % claw else leap; else 30 % taunt else leap; then 80 % taunt; then 70 % dig near |
