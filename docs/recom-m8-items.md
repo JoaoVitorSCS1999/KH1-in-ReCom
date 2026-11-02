@@ -1044,3 +1044,11 @@ and every item slot row of Sora's list likewise. The Keyblade slot and the "Sora
 - Assumption: a language's 14 extra groups come after Re:CoM's 353 and 0x131 is the same green row
   in every copy (Re:CoM's table `0x1407C11F0` names 0x131 for every language, and the step's checks on
   0x131's icon pass or it refuses). Checked: tests. Not checked: the owner's PC assets (next run's log).
+
+### Stock items green too (0.56.2)
+
+Owner (2026-11-01, screenshot of the Stock list, its rows red with the Keyblade symbol): "have all
+the items also be green and have the items symbol". Every stock item row (`items_page::Label::Stocked`,
+in the Stock list and in the pick from it) now takes the same look as Sora's item slots: the asset
+step's green row with the item symbol (variant 7), else Re:CoM's green row 0x131. The Keyblade slot,
+the Sora row, the commands and Yes / No stay red. No new address. Checked: tests. Not checked: in game.

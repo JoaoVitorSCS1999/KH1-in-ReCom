@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 101: Stock items on the green item row, version 0.56.2 (2026-11-01)
+
+- Ask (owner, 2026-11-01, screenshot of KH1 > Items > Stock, its rows red with the Keyblade symbol): "have all
+  the items also be green and have the items symbol".
+- Change: `items_page::row_look` gives every stock item row (`Label::Stocked`: the Stock list and the pick
+  from it) the item slots' look: the asset step's green row with the item symbol (variant 7, group 0x161 or
+  the language copy's), else Re:CoM's green row 0x131. Keyblade slot, Sora row, commands, Yes / No stay red.
+- No new address or hook. `docs/recom-m8-items.md` § Stock items green too.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 100: Item-row symbol in every language's camp menu, version 0.56.1 (2026-11-01)
 
 - Found on the owner's PC (asset step run, 0.56.0): `note: camp item row not built: FORM/0100/FO0100.SPR asset

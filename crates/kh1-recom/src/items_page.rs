@@ -568,12 +568,14 @@ pub fn stocked_text(word: &[u8], count: u8) -> Vec<u8> {
 /// list likewise; then "lets use the green item symbol"): the Stock row and Sora's item slots
 /// (filled or empty) take the asset step's green row with Re:CoM's item symbol when it is loaded
 /// (`item_row`, `crate::camp_rows`), else Re:CoM's green row 0x131 (its icon the green Mickey
-/// symbol). The Keyblade slot, the Sora row and the other windows keep the red row.
+/// symbol). Then (owner, 2026-11-01, on the Stock list: "have all the items also be green and have
+/// the items symbol") every stock item row too, in the Stock list and in the pick from it. The
+/// Keyblade slot, the Sora row, the commands and the yes / no rows keep the red row.
 pub fn row_look(l: Label, item_row: bool) -> i32 {
     use crate::keyblades::row_look::{GREEN, ITEM, RED};
     match l {
-        Label::Owner(Owner::Stock) | Label::Slot(_) if item_row => ITEM,
-        Label::Owner(Owner::Stock) | Label::Slot(_) => GREEN,
+        Label::Owner(Owner::Stock) | Label::Slot(_) | Label::Stocked(..) if item_row => ITEM,
+        Label::Owner(Owner::Stock) | Label::Slot(_) | Label::Stocked(..) => GREEN,
         _ => RED,
     }
 }
@@ -654,7 +656,7 @@ mod tests {
             assert_eq!(row_look(Label::Slot(crate::items::id::POTION), item_row), green);
             assert_eq!(row_look(Label::Owner(Owner::Sora), item_row), RED);
             assert_eq!(row_look(Label::Keyblade, item_row), RED);
-            assert_eq!(row_look(Label::Stocked(crate::items::id::POTION, 3), item_row), RED);
+            assert_eq!(row_look(Label::Stocked(crate::items::id::POTION, 3), item_row), green, "a stock item");
             assert_eq!(row_look(Label::Yes, item_row), RED);
         }
     }
