@@ -1192,6 +1192,16 @@ impl Behaviour for Ai {
     fn set_targeted(&self, by_sora: bool) {
         self.io.borrow_mut().x.targeted = by_sora;
     }
+    /// The host's quiet watchdog: engaged again (as the supervisor's state request does), flying
+    /// with no velocity (the flight state is the script's from its init, `0x36A8`).
+    fn reset(&self) {
+        {
+            let mut io = self.io.borrow_mut();
+            io.x.appeared = true;
+            io.body.fly(Vec3::ZERO);
+        }
+        set_state(&self.io, st::ENGAGED);
+    }
 }
 
 #[cfg(test)]
@@ -1351,6 +1361,10 @@ mod tests {
         s.ai.body().air_vel = Vec3::new(5.0, 0.0, 0.0);
         s.ai.on_hit(HitNews::Clash);
         assert_eq!(s.ai.body().air_vel, Vec3::ZERO);
+        // The quiet watchdog's reset: engaged again, still flying.
+        s.ai.reset();
+        s.run(|_| Vec3::new(0.0, 0.0, 500.0), 2);
+        assert!(s.log.iter().rev().take(20).any(|(_, c)| matches!(c, ECmd::State(st::ENGAGED))) && s.ai.body().flying);
     }
 
     /// No stall: Sora circling 2–9 m away for 20 000 frames, it keeps attacking (some attack at
