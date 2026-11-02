@@ -24,6 +24,7 @@ mod mp;
 mod mp_bar;
 mod shop;
 mod stats;
+mod story_skip;
 mod sys;
 mod trace;
 mod unlocks;
@@ -235,6 +236,7 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     let sound_file = recom_bases(dirs).into_iter().map(|b| b.join(crate::menu_sounds::MANIFEST)).find(|p| p.is_file());
     install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref(), hud_file.as_deref(), sound_file.as_deref());
     install_battles(base);
+    install_story_skip(base);
     let th = &crate::sites::TRACE_HOOKS;
     let hooks = [
         hook::Hook { site: &th[0], ours: trace::field_exe as *const () as usize, original: &trace::ORIG_FIELD },
@@ -469,6 +471,19 @@ fn install_battles(base: usize) {
         log("m6: no-deck wrappers in (revolver build 0x1401F43D0, hit drop 0x14017E190); the 16 deck and enemy-card HUD mask reads are switched at each battle start by the setting");
     } else {
         log("m6: no-deck not hooked; Sora keeps Re:CoM's deck in battle");
+    }
+}
+
+/// Story skips at Combat = KH1 (`story_skip`, owner 2026-11-01, option (a)): the intro tutorial and
+/// Leon's training battle skipped through their own exit. One wrapper; the setting comes from the
+/// movement handlers, so without them it always passes through.
+fn install_story_skip(base: usize) {
+    let hooks = [hook::Hook { site: &crate::sites::STORY_SKIP_HOOKS[0], ours: story_skip::battle_entry as *const () as usize, original: &story_skip::ORIG_BATTLE_ENTRY }];
+    // SAFETY: the target's bytes are checked again inside, before anything is written.
+    if unsafe { hook::install_all(base, &hooks) } {
+        log(&story_skip::start_line());
+    } else {
+        log("story skip: 0x140236690 not hooked; the tutorial battles play as in Re:CoM");
     }
 }
 

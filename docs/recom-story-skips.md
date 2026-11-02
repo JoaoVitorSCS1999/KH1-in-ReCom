@@ -3,9 +3,10 @@
 Ask (owner, 2026-11-01): "If a player has KH1 Combat enabled, have the player skip the leon training
 battle. Also the intro tutorial."
 
-Status: **research done, no code.** Both tutorials are battles that event scripts start by
-battle-room number, and neither script has an "already done" branch. So the skip needs a fallback
-design. The options are in § 4, waiting for a choice.
+Status: **built (option (a), owner 2026-11-01), not seen in game.** Both tutorials are battles that
+event scripts start by battle-room number, and neither script has an "already done" branch (§ 2).
+The owner chose option (a) of § 4: skip the battle room and run its own exit. See § 6 for what was
+built.
 
 Tags: Checked (exe / decomp / files) or Assumption. Steam addresses. "Files" means the owner's
 `WORLD00` / `WORLD01` `.ABC` / `.CTD` / `.ESD` files, read in the session only. Nothing from them is in
@@ -94,7 +95,7 @@ Sora's opening in Traverse Town (world 1) is a chain of event rooms (2000+) and 
   save after playing the tutorials. Switching Combat back to Re:CoM later is safe: the floor's cards
   come from event 2003, which still plays.
 
-## 4. Fallback options (owner question)
+## 4. Fallback options (owner chose (a), 2026-11-01)
 
 Each acts only at Combat = KH1, in Sora's story, in world 1, for battle rooms 1100 and 1101.
 Re:CoM's setting and Riku's story are unchanged.
@@ -124,12 +125,74 @@ Re:CoM's setting and Riku's story are unchanged.
 Recommendation: (a). It is cleanest for the player and native (Re:CoM's own room change, with the
 battle script's own arguments). Fall back to (b) if the in-game test shows a problem.
 
-## 5. To test once built
+## 5. In-game checks
 
 A new game at Combat = KH1:
 1. After the opening scene, the hooded-figure battle does not start, and the next scene plays.
 2. After the Leon scene, his battle does not start, and the next scene plays and gives the cards.
 3. Donald and Goofy are back afterwards: their Friend cards drop again at Combat = Re:CoM.
 4. Save, then load at Combat = Re:CoM: the game plays on.
+5. Skipping either scene with Re:CoM's own scene skip gives the same result (the skip path asks for
+   the same battle room).
+6. The log has the start line, then one `story skip: … skipped at Combat = KH1 … -> 1` line for each
+   tutorial.
 
-Also check at Combat = Re:CoM that both tutorials play as before.
+Also check at Combat = Re:CoM that both tutorials play as before, and that the log says
+`… Re:CoM's battle (Combat = Re:CoM, Sora's story)`. If a scene freezes instead of moving on, send
+the log: it names the room change's answer.
+
+## 6. Built (option (a))
+
+Code: `crates/kh1-recom/src/story_skip.rs` (pure: which rooms, which writes, which room change;
+unit tests) and `crates/kh1-recom/src/win/story_skip.rs` (the wrapper). Sites:
+`sites::STORY_SKIP_HOOKS`, `sites::STORY_SKIP_CALLEES`.
+
+- **Hook:** Re:CoM's battle-entry request `0x140236690`. The wrapper moves its first 10 bytes
+  `48 89 5C 24 08 57 48 83 EC 20` (`mov [rsp+8],rbx; push rdi; sub rsp,0x20`). The next instruction,
+  `movzx edi,cx`, stays. Checked (exe): no branch lands inside the moved bytes; the only other
+  reference is the `.pdata` entry. Callers (Checked (exe)): script syscall 0xEE at `0x1401490D6`
+  (the room), case 10 `0x1401460D6`, the gimmicks `0x1401B75C8` / `0x1401B763F` / `0x1401B7787` /
+  `0x1401B7B02` / `0x1401B7BD7` and the tail jump at `0x140237020` (0), and `0x1401CA9D4` (1030).
+- **When it acts** (`story_skip::plan`): Combat = KH1 (the movement handlers' setting), Sora's story
+  (`0x1401AAAE0`), map world code `save + 0x1878` = 1 (Traverse Town), and the pair (asking room
+  `save + 0x187A`, battle room) is (2000, 1100) or (2002, 1101). Anything else goes to Re:CoM's own
+  function unchanged; for any other room the wrapper only compares one number.
+- **What it does** (the battle script's lesson exit, in its order; § 2):
+  - Intro (1100): session bits (1, 0x0), (1, 3..6), (1, 8..0xC), (1, 0x23), (1, 0x2C) cleared and
+    the HUD mask (1, 0xE2) = 0, through `0x1401B1650` / `0x1401B16C0`. The friends-met bits are set:
+    `(0, 0x22) |= 1`, then `|= 2`, through `0x1401B08C0` / `0x1401B16C0`. Then
+    `0x1402360F0(0, 0, 2001)`.
+  - Leon (1101): (1, 0x2C), (1, 0xA), (1, 0x2F), (1, 0x30) cleared, (1, 0x32) = 1 (music), (1, 0x0)
+    and (1, 3..6) cleared, the HUD mask (1, 0xE2) = 0. Then `0x1402360F0(1, 0x140233AE0(), 2003)`.
+    The script's door −1 becomes `0x140233AE0()`, as syscall 0xF7 does.
+  - Returns 1, as the request does when it is accepted. The script that asked has already ended
+    its thread after the syscall (`end`), as it does after a real battle request. Checked (files).
+- **Fallbacks:** if the floor slot `0x14087CBE2[kind]` the room change reads is negative (a null
+  floor in `0x140237850`), or the room change returns 0, Re:CoM's battle entry runs as asked and the
+  tutorial plays. Writes done by then are the exit's own values (cleared session bits, friend bits
+  that event 2000 had already set). Checked (decomp).
+- **Not copied from the script:**
+  - script op 0x6E also calls `0x1402E75D0(v == 0, 0)` (a device field) when it writes bit 4. The
+    skip writes the bit only. The last call before it, event 2000's own (1, 4) = 0, already passed
+    the same argument. Checked (files + decomp).
+  - 0xAD sub 0xC has no case in the Steam build (does nothing). Checked (decomp).
+- **Per frame:** nothing. Once per battle request.
+- **Log:** at start, `story skip: wrapper on Re:CoM's battle-entry request 0x140236690; …`. Each
+  skip: `story skip: <name> skipped at Combat = KH1: battle room <n> (asked from room <r>) not
+  entered; its lesson exit's <k> writes done (friends-met (0, 0x22) = 0x…), Re:CoM's room change
+  0x1402360F0(kind, door, room) -> 1`. At Combat = Re:CoM or in Riku's story: one line saying
+  Re:CoM's battle runs. A refused room change or bad floor slot is logged too.
+- **Saves:** the skip writes only what the lesson exit writes. Its one saved value, (0, 0x22),
+  ends as after a played tutorial. A save made after the skip is valid at Combat = Re:CoM. Checked
+  (files + decomp); not seen in game.
+- **Checked:** unit tests (rooms, arguments, the writes against the scripts, the floor guard, site
+  bytes), `cargo test --workspace`, the Windows build (no warnings), all literal site byte lists and
+  pointer sites against the Steam exe with pefile (450 + 13, 0 mismatches).
+- **Assumptions:**
+  - an event-room-to-event-room move through `0x1402360F0` works as the battle-room-to-event-room
+    move does. Its entry test allows it (Checked (decomp)), but vanilla never does it;
+  - the floor state is the same in event 2000 / 2002 as in battle 1100 / 1101 (the battle entry
+    doesn't change it);
+  - the lesson exit is the one a normal play takes;
+  - Tutorial Leon gives no EXP.
+- **Not seen in game.**
