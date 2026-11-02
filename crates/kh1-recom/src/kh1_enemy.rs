@@ -535,6 +535,36 @@ mod tests {
         assert!(parse(&t, "x", &[], &[7]).is_err());
     }
 
+    /// Every class through the host's rules (`kh1_core::enemy::host::model`, what
+    /// `win::kh1_enemy` decides) with its own attack-state map and the asset step's manifest
+    /// (`KH1_<NAME>_JSON`, e.g. `KH1_BANDIT_JSON`; skipped when unset): in a long fight no attack
+    /// is released and no steered attack is asked for again within two frames (0.73.0: every
+    /// steered attack was released on its first step in its own state and asked for again, the
+    /// Bandit's leap restarting every other frame).
+    #[test]
+    fn every_class_in_the_host_model() {
+        use kh1_core::Vec3;
+        for (i, c) in CLASSES.iter().enumerate() {
+            let Some(p) = std::env::var_os(format!("KH1_{}_JSON", c.name.to_uppercase())) else { continue };
+            let m = parse_for(i, &std::fs::read_to_string(p).unwrap()).unwrap();
+            let loops: Vec<u16> = m.clips.iter().filter(|x| x.looped).map(|x| x.request).collect();
+            for seed in 1..5u32 {
+                let mut h = ke::host::model::Model::new(make(i, &m, seed, 0.0), m.consts.clone(), m.frames(), loops.clone(), c.attack_states.to_vec());
+                for f in 0..20_000usize {
+                    let a = f as f32 / 600.0;
+                    let rad = 200.0 + 250.0 * (1.0 + (f as f32 / 1700.0).sin());
+                    h.run(Vec3::new(a.sin() * rad, 0.0, a.cos() * rad), 1);
+                }
+                assert_eq!(h.released, 0, "{} seed {seed}", c.name);
+                let issued: Vec<(usize, u16)> = h.log.iter().filter_map(|(f, c)| if let Cmd::Attack { request, .. } = c { Some((*f, *request)) } else { None }).collect();
+                for w in issued.windows(2) {
+                    assert!(w[1].1 != w[0].1 || w[1].0 > w[0].0 + 2, "{} seed {seed}: {} asked again at {} after {}", c.name, w[0].1, w[1].0, w[0].0);
+                }
+                eprintln!("{} seed {seed}: {} steered attacks, {} commands", c.name, issued.len(), h.log.len());
+            }
+        }
+    }
+
     #[test]
     fn classes_table() {
         for (i, c) in CLASSES.iter().enumerate() {

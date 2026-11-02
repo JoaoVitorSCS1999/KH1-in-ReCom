@@ -813,6 +813,16 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
     }
 }
 
+/// The host rules' view of an action (`kh1_core::enemy::host`).
+fn running(a: Act, playing: bool) -> ke::host::Running {
+    ke::host::Running { request: a.request, attack: a.attack.is_some(), steered: a.steered, playing }
+}
+
+/// The Re:CoM attack state an action's attack plays in (the class's map; 2 for none).
+fn attack_state(class: usize, a: Act) -> i32 {
+    a.attack.and_then(|i| CLASSES[class].attack_states.get(i as usize).copied()).unwrap_or(2)
+}
+
 /// The action that played ended: the AI goes on; KH1's flag 0x1000 goes with its motion
 /// (Assumption: cleared when the next motion, requested without bit 23, starts).
 fn end_action(rt: &mut Runtime) {
@@ -860,9 +870,10 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
             enter_state(en, want);
         }
     }
-    if poll && rt.action.is_some_and(|a| a.attack.is_some()) && rt.action_playing {
-        // An attack plays only in its Re:CoM attack state: here (state 0 / 1) its state was left
-        // without its end (a Re:CoM state took over and handed back): released.
+    if poll && rt.action.is_some_and(|a| ke::host::attack_state_left(running(a, rt.action_playing), st, attack_state(rt.class, a))) {
+        // A playing attack in a polled frame outside its Re:CoM attack state (state 0 / 1): its
+        // state was left without its end (a Re:CoM state took over and handed back): released. A
+        // steered attack polled in its own attack state (`attack_step`) is kept.
         let detail = format!("its Re:CoM attack state was left without its end; now Re:CoM state {:?}", st);
         release_line(en, rt, ce::watchdog::Stuck::NeverEnded, &detail);
         end_action(rt);
@@ -1312,18 +1323,16 @@ pub unsafe extern "win64" fn attack_step(en: usize) {
         let req = rt.action.map(|a| a.request);
         tick(en, rt, poll);
         if poll {
-            match rt.action {
-                // A new attack the behaviour started: `tick` asks for its state again.
-                Some(a) if a.attack.is_some() && !rt.action_playing => end = true,
-                Some(a) if a.steered && Some(a.request) == req && rt.current == req => {}
-                // A plain action (a jump start…): it carries on in state 1.
-                Some(a) if a.attack.is_none() => end = true,
+            match ke::host::after_poll(req, rt.action.map(|a| running(a, rt.action_playing)), rt.current) {
+                ke::host::AfterPoll::Keep => {}
                 // Another motion replaced it.
-                Some(_) => {
+                ke::host::AfterPoll::Replaced => {
                     end_action(rt);
                     end = true;
                 }
-                None => end = true,
+                // A new attack the behaviour started (`tick` asks for its state again), a plain
+                // action (a jump start…: it carries on in state 1), or none left.
+                ke::host::AfterPoll::NewAttack | ke::host::AfterPoll::Plain | ke::host::AfterPoll::Gone => end = true,
             }
             // Our own leave to state 1 (merge of Stage 127's hand-back with the fliers' steered
             // attacks): not a Re:CoM takeover, so the pending action / queue are kept.
