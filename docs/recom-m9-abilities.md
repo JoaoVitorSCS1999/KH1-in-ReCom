@@ -411,7 +411,7 @@ line, camp sounds 1 move / 2 confirm / 4 back / 5 refused). No new hook, callee 
   Zantetsuken 213; shared: High Jump, Glide, Superglide) = KH1's Sort option 0 without its equipped
   tie-break.
 - Rows keep Re:CoM's red row look (`keyblades::row_look::RED`); see the owner question on the blue
-  one. (Follow-ups: blue.)
+  one. (Follow-ups: blue; then, 2026-11-01, green with the green Mickey symbol, § Rows below.)
 
 **Not KH1's (by design or yet):**
 - KH1's list order is the **learning order** (the list grows at the end), changed by **Move** and
@@ -571,12 +571,22 @@ the KH1 frame's fallback while no save block exists (`win::movement::abilities`;
 play). Testing switch: `kh1_all_abilities = on` (unchanged). `guard`, `counterattack`,
 `combo_plus`, `air_combo_plus`: unchanged (read once for a v0 / v1 save).
 
-### Rows: Re:CoM's blue (magic) row
+### Rows: Re:CoM's green row with the green Mickey symbol (owner, 2026-11-01)
+
+> "have the abilities be green with the green mickey symbol" (in game, 2026-11-01).
 
 Every row of the Abilities page (the owner rows "Sora" / "Shared" and every ability) takes Re:CoM's
-list entry **0x133** through its row set-up `0x140112F10` (variant 1 of the list's checked
-sequence table `0x1407C11F0`: blue plate, icon sprite 168), as the Items page's item rows take 0x131
-(`abilities::page::ROW_LOOK`). Same for the Customize page (`recom-keyblade-equip.md`).
+list entry **0x131** through its row set-up `0x140112F10` (variant 2 of the list's checked
+sequence table `0x1407C11F0`: green plate 0x80143200, icon sprite 278 tinted 0x801EDC1E), the look
+the Items page's item rows had (`abilities::page::ROW_LOOK = keyblades::row_look::GREEN`). Before:
+the blue magic row 0x133 (still the Customize page's, `recom-keyblade-equip.md`).
+
+- Checked (in game, owner): sprite 278 in 0x131 is the **green Mickey symbol**, not the item
+  symbol (the earlier Assumption in `recom-m8-items.md` § Row looks was wrong).
+- Checked (test): `abilities::tests::rows_are_recoms_green_mickey_row` (reads 0x131 from the
+  checked table's bytes). No new site. Not seen in game yet.
+- Re:CoM's item symbol (for the Items page) is a separate question: `recom-m8-items.md` § Row looks
+  / The item symbol.
 
 ### Logs
 
@@ -593,10 +603,10 @@ sequence table `0x1407C11F0`: blue plate, icon sprite 168), as the Items page's 
   unequipped.
 - Checked (tests): `learn_levels_are_kh1s_rod_list_and_the_owners`, `new_unlocks_arrive_unequipped`,
   `movement_abilities_follow_recoms_variable`, `migration_keeps_the_old_set_within_kh1s_ap`,
-  `v2_story_abilities_move_to_their_new_sources`, `rows_are_recoms_blue_magic_row`; the btltbl
+  `v2_story_abilities_move_to_their_new_sources`, `rows_are_recoms_green_mickey_row`; the btltbl
   test (Guard's Rod level 33 still read) with the player's file.
-- Not checked: in game; which script events set bits 1 and 2 (Assumption above); that sprite 168
-  is the magic icon (`FO0100.RTM` not in the session; Re:CoM's own magic sleight rows use it).
+- Not checked: in game; which script events set bits 1 and 2 (Assumption above). The rows' icon
+  (sprite 278) is the green Mickey symbol (owner, in game).
 
 ### Owner questions (follow-ups)
 

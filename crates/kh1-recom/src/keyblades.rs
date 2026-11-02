@@ -313,10 +313,11 @@ pub mod row_look {
     pub const RED: i32 = 0;
     /// Sequence 0x133: blue plate (0x803C1E00), icon sprite 168 (Re:CoM's magic sleights).
     pub const BLUE: i32 = 1;
-    /// Sequence 0x131: green plate (0x80143200), icon sprite 278 tinted green (0x801EDC1E). The
-    /// owner's "item symbol and green box". Assumption: sprite 278 is Re:CoM's item icon (the
-    /// atlas `FO0100.RTM` is not in the session; Re:CoM's by-kind sleight rows `0x1407C1150` draw
-    /// the same sprite green for kinds 6 / 7 and pink for the summons).
+    /// Sequence 0x131: green plate (0x80143200), icon sprite 278 tinted green (0x801EDC1E): the
+    /// green **Mickey** symbol (owner, in game, 2026-11-01), not the item symbol. Re:CoM's item
+    /// symbol is sprite 166 (sprite group 83; the Deck page's item-card tab, Checked (decomp +
+    /// files)), and no sequence of the camp list draws it on a row: `docs/recom-m8-items.md`
+    /// § Row looks.
     pub const GREEN: i32 = 2;
 }
 

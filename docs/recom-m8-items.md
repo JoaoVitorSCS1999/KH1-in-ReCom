@@ -930,10 +930,52 @@ and every item slot row of Sora's list likewise. The Keyblade slot and the "Sora
   0x131)**; the Keyblade slot, the Sora row, the stock list, the command and Yes / No windows keep
   variant 0 (0x12E). Re:CoM draws the box and the icon itself; nothing of ours is drawn. No new
   site (`0x140112F10` was already a checked callee). Tests:
-  `items_page::tests::stock_and_item_slots_take_the_green_item_row`.
-- **Assumption**: icon sprite 278 is the item symbol the owner means. The atlas (`FO0100.RTM`) is
-  not in the session; Re:CoM's by-kind sleight rows (`0x1407C1150`) draw the same sprite green for
-  sleight kinds 6 / 7 and pink for the summons, and the green box 0x131 is the only green one in the
-  camp list's table. To confirm on screen.
-- Not changed: the Abilities page's rows (red); Re:CoM's blue magic row (variant 1) is there if
-  wanted (owner question in `docs/recom-m9-abilities.md`).
+  `items_page::tests::stock_and_item_slots_take_the_green_row`.
+- ~~Assumption: icon sprite 278 is the item symbol~~ **Wrong** (owner, in game, 2026-11-01): "for
+  the item slots, the color is correct, but they have the green mickey symbol, but lets use the
+  green item symbol". Sprite 278 is the green **Mickey** symbol. Below.
+- `items_page::tests::stock_and_item_slots_take_the_green_row` (renamed).
+- The Abilities page's rows now take 0x131 too (owner, same day: "have the abilities be green with
+  the green mickey symbol"; `docs/recom-m9-abilities.md` § Rows).
+
+### The item symbol (owner, 2026-11-01): where it is, and why no camp row has it
+
+- **Re:CoM's item symbol is sprite 166** of `camp.lad` (sprite group 83; atlas rect (175, 50) –
+  (187, 65), 12 × 15). Checked (decomp + files), from the Deck page's card-type tabs:
+  - The Deck page's card list filter `0x1400D88A0(camp, char, tab, …)` puts a card in tab 1 for
+    cards 0x01..0x18 / 0x101..0x118 (attack), tab 2 for 0x1A..0x29 / 0x11A..0x129 (magic),
+    **tab 3 for 0x2A..0x30 (the item cards)**, tab 4 for 0x44..0x7E (enemy); tab 0 all (Checked
+    (decomp)).
+  - The tab strip plays `seqs[tab × 2 + lit]` of `0x1407C10D0` = 0xE7 0xE8 / 0xE9 0xEA / 0xEF 0xF0 /
+    0xED 0xEE / 0xEB 0xEC (`0x1400E0870` cases 0xB / 0xC / 0x14; Checked (decomp + exe)). In
+    `camp.lad` each of those sequences lights one tab (sprite groups 146 / 149 / 158 / 155 / 152 at
+    x −82..−25 / −27..−1 / −3..23 / 21..47 / 45..71) and draws the four type icons over the tabs at
+    x −14 / 11 / 35 / 57: sprite 167 (attack), 168 (magic), **166**, 169. Tab 3 (items, 0xED) lights
+    sprite group 155 (x 21..47), under sprite 166; tab 4 (enemy, 0xEB) lights 152, under 169
+    (Checked (files)). The Deck summary 0xD0 / 0xD1 draws the same four icons in the same order
+    beside four counters.
+  - Re:CoM draws sprite 166 untinted (colour 0x80808080) everywhere, as it does 167 / 168; 278 is
+    always tinted (green 0x801EDC1E in 0x131, white, purple, pink elsewhere). Assumption: 166 is
+    already green in the texture (the atlas `FO0100.RTM` is not in the session).
+- **No camp row draws it** (Checked (files)): sprite 166 is used only by 0xD0, 0xD1 and 0xE7..0xF0
+  (whole tab panels), in no other sequence of `camp.lad`, and in no other `.lad` of the session
+  (`worldmap.lad`, `card.lad`, `gauge.lad`, `Cockpit.lad`, `layout_card.lad`, `pause.lad`). Every
+  row sequence of Re:CoM's lists has a plate and one icon: the camp list's `0x1407C11F0` (0x12E red
+  + 167, 0x133 blue + 168, 0x131 green + 278, 0x132 grey + 279, Riku's 0x12F / 0x160 / 0x130), the
+  by-kind sleight rows `0x1407C1150` (0xD9..0xE6: 167, 168, 278, 287, 279) and the sleight tabs
+  0x14F..0x157 (167, 168, 278, 279, 287). None has the item symbol: Re:CoM never shows an item card
+  as a camp row.
+- **Setting the icon after set-up** (Checked (decomp)): the row's `C2DSeqCtrl` holds up to 10
+  layers (`+0x16D` count, `+0x144` handles); vtable `+8` (`0x140247850`) adds a layer playing a
+  sequence by lad name and id (`0x140245A20` looks the lad up by name in Re:CoM's loaded list),
+  `+0x20` (`0x1402482F0`) replaces layer *i*'s sequence. There is no call that swaps one sprite or
+  sprite group inside a playing sequence. So a second layer could draw an item icon over the row,
+  but only from a sequence that draws just that icon, and Re:CoM has none (above). Changing
+  0x131's icon in the loaded data would change Re:CoM's own green sleight rows (variant 2 of the
+  Sleights page) too.
+- **So the item symbol on a green row needs one new sequence in `camp.lad`**: a copy of 0x131
+  (green plate) whose icon animation draws sprite group 83 (sprite 166, as the Deck tabs draw it)
+  instead of 85, added by the asset step to the player's `FO0100.SPR` (as it already adds groups to
+  `FO0002.SPR`'s `Cockpit` and `gauge` sequences), with the item rows' set-up given a table holding
+  its id. Re:CoM would draw it like its own rows. This is a new asset file for the asset step, so
+  it waits for the owner (plan first). Until then the item rows keep 0x131 (green, Mickey symbol).

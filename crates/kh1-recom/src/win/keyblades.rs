@@ -1106,9 +1106,9 @@ impl Page {
     }
 
     /// The row's look on Re:CoM's list (`CBUTTON_SETUP`'s variant, `crate::keyblades::row_look`):
-    /// the Items page's Stock row and item slots are Re:CoM's green item row; the Abilities page's
-    /// rows and the Customize page's shortcut slots and spells are Re:CoM's blue magic row (owner,
-    /// 2026-11-01); everything else keeps the red row.
+    /// the Items page's Stock row and item slots and the Abilities page's rows are Re:CoM's green
+    /// row (green Mickey symbol); the Customize page's shortcut slots and spells are Re:CoM's blue
+    /// magic row (owner, 2026-11-01); everything else keeps the red row.
     fn row_look(&self, idx: usize) -> i32 {
         match &self.content {
             Content::Items { rows, .. } => rows.get(idx).map_or(kb::row_look::RED, |r| ip::row_look(r.label)),

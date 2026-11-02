@@ -485,10 +485,10 @@ pub mod page {
 
     pub const OWNERS: [Owner; 2] = [Owner::Sora, Owner::Shared];
 
-    /// Every row of the page (owners and abilities) is Re:CoM's blue magic row: list entry 0x133
-    /// through its row set-up `0x140112F10` (owner, 2026-11-01: "the Abilities page rows use
-    /// Re:CoM's blue box"), as the Items page's item rows take 0x131.
-    pub const ROW_LOOK: i32 = crate::keyblades::row_look::BLUE;
+    /// Every row of the page (owners and abilities) is Re:CoM's green row with the green Mickey
+    /// symbol: list entry 0x131 through its row set-up `0x140112F10` (owner, 2026-11-01: "have the
+    /// abilities be green with the green mickey symbol"; before, the blue magic row 0x133).
+    pub const ROW_LOOK: i32 = crate::keyblades::row_look::GREEN;
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Label {
@@ -964,13 +964,13 @@ mod tests {
         assert!(sc.rows(&e, 1)[0].grey);
     }
 
-    /// The page's rows take Re:CoM's list entry 0x133 (the blue magic row): `seqs[ROW_LOOK]` of
-    /// the checked sequence table `0x1407C11F0`.
+    /// The page's rows take Re:CoM's list entry 0x131 (the green row with the green Mickey
+    /// symbol): `seqs[ROW_LOOK]` of the checked sequence table `0x1407C11F0`.
     #[test]
-    fn rows_are_recoms_blue_magic_row() {
+    fn rows_are_recoms_green_mickey_row() {
         let seqs = crate::sites::KEYBLADE_DATA.iter().find(|s| s.rva == 0x007C_11F0).unwrap().expect;
         let at = 2 * page::ROW_LOOK as usize;
-        assert_eq!(u16::from_le_bytes([seqs[at], seqs[at + 1]]), 0x133);
+        assert_eq!(u16::from_le_bytes([seqs[at], seqs[at + 1]]), 0x131);
     }
 
     #[test]

@@ -565,8 +565,10 @@ pub fn stocked_text(word: &[u8], count: u8) -> Vec<u8> {
 
 /// The row's look on Re:CoM's camp list (`crate::keyblades::row_look`; owner, 2026-11-01: "lets
 /// make "stock" have the item symbol, and make the box green", and every item slot of Sora's
-/// list likewise): the Stock row and Sora's item slots (filled or empty) take Re:CoM's green row
-/// with its icon; the Keyblade slot, the Sora row and the other windows keep the red row.
+/// list likewise): the Stock row and Sora's item slots (filled or empty) take Re:CoM's green row.
+/// Its icon is the green Mickey symbol, not the item symbol (owner, in game, 2026-11-01): Re:CoM
+/// has no camp row with the item symbol (`docs/recom-m8-items.md` § Row looks); open. The
+/// Keyblade slot, the Sora row and the other windows keep the red row.
 pub fn row_look(l: Label) -> i32 {
     use crate::keyblades::row_look::{GREEN, RED};
     match l {
@@ -642,7 +644,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stock_and_item_slots_take_the_green_item_row() {
+    fn stock_and_item_slots_take_the_green_row() {
         use crate::keyblades::row_look::{GREEN, RED};
         assert_eq!(row_look(Label::Owner(Owner::Stock)), GREEN);
         assert_eq!(row_look(Label::Slot(0)), GREEN, "an empty slot too");
