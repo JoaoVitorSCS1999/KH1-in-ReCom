@@ -1182,6 +1182,38 @@ pub const SPECIAL_TINT_CHECKED: &[Site] = &[
 /// CPlayerSora's exeStockSkill slot (vtable `+0x140`), which the Battle exe calls through.
 pub const SPECIAL_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x140 (0x1405A9A78)", rva: 0x005A_9A78, target: 0x0021_8950 }];
 
+/// M8b (`win::summons`, `docs/recom-summons.md`): Re:CoM code the summons call (no hook, no patch):
+/// each KH1 summon starts Re:CoM's LV3 sleight through Sora's own sleight start. Checked at start;
+/// a mismatch: no summons. They also call `initStockSkill` (through the start), the sleight
+/// resource load (the preload) and the weapon's attack end, checked from their own lists
+/// ([`SUMMON_ALSO`]).
+pub const SUMMON_CHECKED: &[Site] = &[
+    // push rbx; sub rsp,0x20; mov rbx,rcx; mov ecx,[rcx+0x82C]; lea eax,[rcx-4]; cmp eax,0x55; ja:
+    // CPlayerSora's sleight start (vtable +0x130): `0x14020E590` (the use counter, LV3 counted as
+    // its LV2), then initStockSkill (vtable +0x138), `+0x838` = 10; 1 = started. Re:CoM calls it
+    // from its request bits `0x1401F8150` for a played sleight.
+    Site { name: "sleight start (0x1402247A0)", rva: 0x0022_47A0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0x8B, 0x89, 0x2C, 0x08, 0x00, 0x00, 0x8D, 0x41, 0xFC, 0x83, 0xF8, 0x55, 0x77, 0x4B] },
+    // xor r8d,r8d; add edx,-0x34; cmp edx,0xF; ja: the sleight → summon actor class (0x34..0x43 →
+    // 1 Simba, 2 Genie, 3 Bambi, 4 Dumbo, 5 Tinker Bell, 6 Mushu, 7 Cloud).
+    Site { name: "summon class of a sleight (0x14020FF40)", rva: 0x0020_FF40, expect: &[0x45, 0x33, 0xC0, 0x83, 0xC2, 0xCC, 0x83, 0xFA, 0x0F, 0x77, 0x57] },
+    // The card-info rows of the summon cards 0x23..0x29 (type 0x33 = summon; icon page / cell;
+    // byte 3 = premium + Sora's story), first 8 bytes (no pointer).
+    Site { name: "card info 0x23 Simba (0x140525900)", rva: 0x0052_5900, expect: &[0x33, 0x05, 0x07, 0x03, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x24 Genie (0x140525910)", rva: 0x0052_5910, expect: &[0x33, 0x06, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x25 Bambi (0x140525920)", rva: 0x0052_5920, expect: &[0x33, 0x06, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x26 Dumbo (0x140525930)", rva: 0x0052_5930, expect: &[0x33, 0x06, 0x02, 0x03, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x27 Tinker Bell (0x140525940)", rva: 0x0052_5940, expect: &[0x33, 0x06, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x28 Mushu (0x140525950)", rva: 0x0052_5950, expect: &[0x33, 0x06, 0x04, 0x03, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x29 Cloud (0x140525960)", rva: 0x0052_5960, expect: &[0x33, 0x06, 0x05, 0x03, 0x00, 0x00, 0x00, 0x00] },
+];
+
+/// The RVAs of the other lists' sites the summons call or rely on (`initStockSkill`, the sleight
+/// resource load, the weapon's attack end).
+pub const SUMMON_ALSO: [u32; 3] = [0x0022_0DF0, 0x0021_1790, 0x0022_4FB0];
+
+/// CPlayerSora's sleight start slot (vtable `+0x130`), which the summons call through.
+pub const SUMMON_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x130 (0x1405A9A68)", rva: 0x005A_9A68, target: 0x0022_47A0 }];
+
 /// M8 stage 8a.3 (`win::shop`, `docs/recom-m8-items.md` § Stage 8a.3): the Moogle shop's pack screen
 /// update (`CMoogleShopCore` mode 4), wrapped for the Items tab. Same rule as [`HOOKS`].
 pub const SHOP_HOOKS: &[Site] = &[
@@ -1971,6 +2003,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SPECIAL_HOOKS,
         SPECIAL_CHECKED,
         SPECIAL_TINT_CHECKED,
+        SUMMON_CHECKED,
         STORY_SKIP_HOOKS,
         STORY_SKIP_CALLEES,
     ];
@@ -2527,6 +2560,18 @@ mod tests {
     fn special_sites() {
         assert_eq!(SPECIAL_HOOKS[0].rva, 0x0021_8950);
         assert_eq!(SPECIAL_PTRS[0].target, SPECIAL_HOOKS[0].rva);
+        // M8b: the sleight start slot sits 0x10 before exeStockSkill's (+0x130 / +0x140), and the
+        // card-info rows are the summon cards' (0x1405256D0 + kind × 16).
+        assert_eq!(SUMMON_PTRS[0].rva + 0x10, SPECIAL_PTRS[0].rva);
+        assert_eq!(0x1_4000_0000u64 + SUMMON_PTRS[0].rva as u64, data::SORA_VTABLE + 0x130);
+        assert_eq!(SUMMON_PTRS[0].target, SUMMON_CHECKED[0].rva);
+        for rva in SUMMON_ALSO {
+            assert!(all_sites().any(|c| c.rva == rva), "{rva:#x}");
+        }
+        for s in crate::summons::ALL {
+            let rva = 0x0052_56D0 + s.card as u32 * 16;
+            assert!(SUMMON_CHECKED.iter().any(|c| c.rva == rva && c.expect[0] == 0x33), "{}", s.name);
+        }
         assert_eq!(0x1_4000_0000u64 + SPECIAL_PTRS[0].rva as u64, data::SORA_VTABLE + 0x140);
         assert!(all_sites().all(|s| !(0x001F_A648..0x001F_A64C).contains(&s.rva) && !(0x001F_B7B2..0x001F_B7C0).contains(&s.rva)), "the Field exe is Re:CoM's");
         // Re:CoM's rows 0xE..=0x10: their sleight motions are `recom_events::MOTION`, the start's

@@ -50,6 +50,16 @@
 //!   held and a slot is set (and Sora has a spell), the shortcut list takes the root's place (any
 //!   submenu closes; released, the root returns on Attack); a fresh Triangle / Square / Cross casts
 //!   slot 1 / 2 / 3 through the same commit path as the menu (see [`shortcut`]).
+//! - **Summons** (M8b, `crate::summons`, `docs/recom-summons.md`): with a spell learned and a summon
+//!   learned, Summon (command 6) is the Magic list's extra last entry (`0x1402944C0`), shown as the
+//!   root's 4th row (FM). Confirm or Right on row 3 opens KH1's Summon list (type 3, `0x1405289A8`):
+//!   the learned summons in learn order (`0x2F + summon`), grey = lock = not usable
+//!   (`0x140288F30`). Row 3 is greyed when none is usable, greyed and locked while one is out
+//!   (KH1's in-progress flag; owner: no Dismiss). The list at x + 11, beside row 3 with one entry,
+//!   else bottom-anchored at 348 − 22 n (`0x14027B870` case 3, after the root set its row 3); with
+//!   the Summon entry the Magic list counts it for its "fewer than 3" test (case 1). Confirm on an
+//!   entry passes KH1's commit gate (free or a combo window, `0x140293480`) and issues it (no menu
+//!   sound); the stack unwinds to Attack.
 //! - **Items** (M8 stage 8a.1, `0x140294220`, `0x140293480`, `0x14027B870` case 2): row 2 Items
 //!   opens KH1's Items list (type 2, `0x140528970`): Sora's filled slots in slot order (command
 //!   `item + 0x1E`), at x + 11, at the Items row's y with fewer than 2 entries, else
@@ -72,6 +82,8 @@ pub mod cmd {
     pub const ATTACK: u8 = 1;
     pub const MAGIC: u8 = 2;
     pub const ITEMS: u8 = 3;
+    /// Summon (message 6): the Magic list's last entry once summons are learned (M8b).
+    pub const SUMMON: u8 = 6;
     pub const TALK: u8 = 4;
     /// KH1's generic Examine (message 5): our word for Re:CoM's warp point. KH1 has no warp or
     /// teleport command (Checked (files): no such word in `Word.bin`); the word is an Assumption,
@@ -113,19 +125,27 @@ pub mod cmd {
             COUNTER => 343,
             // A held gimmick card's command (ours; `crate::gimmick`).
             crate::gimmick::STAGGER => crate::gimmick::STAGGER_WORD,
+            // M8b: the summons (`0x2F + summon`: KH1's words 286..291, Cloud ours).
+            c if crate::summons::of_command(c).is_some() => crate::summons::ALL[crate::summons::of_command(c).unwrap_or(0)].word,
             // M9 stage 9c.1: the specials and Sonic Blade's follow-ups (`crate::specials::cmd`).
             c => crate::specials::cmd::name(c).unwrap_or(c as u16),
         }
     }
 
-    /// The list a command opens (record `+8`): Magic 1, Items 2 (Cure / Aero open the party list
-    /// 4: with the casts, stage 7.4 / 7.7).
+    /// The list a command opens (record `+8`): Magic 1, Items 2, Summon 3 (Cure / Aero open the
+    /// party list 4: with the casts, stage 7.4 / 7.7).
     pub fn submenu(c: u8) -> u8 {
         match c {
             MAGIC => 1,
             ITEMS => 2,
+            SUMMON => 3,
             _ => 0,
         }
+    }
+
+    /// M8b: the summon of a Summon list command.
+    pub fn summon(c: u8) -> Option<usize> {
+        crate::summons::of_command(c)
     }
 
     /// The commands KH1 puts in row 0 instead of Attack (`0x62C0183` over 0x46.., and Talk).
@@ -268,6 +288,15 @@ pub struct World {
     /// Blast (0: none) and whether it is greyed.
     pub follow: u8,
     pub follow_grey: bool,
+    /// M8b: the learned summons in learn order (`crate::summons` indexes; KH1's save `+0x7D0`) and
+    /// their count.
+    pub summons: [u8; crate::summons::COUNT],
+    pub summon_count: u8,
+    /// M8b: KH1's battle mode (Re:CoM's battle room), the summons used this battle (bit per
+    /// summon) and a summon out (Re:CoM's sleight running).
+    pub battle: bool,
+    pub summon_used: u8,
+    pub summon_out: bool,
 }
 
 /// The fresh presses of one frame (Re:CoM's pad, mapped to KH1's buttons).
@@ -312,6 +341,8 @@ pub enum Kind {
     Shortcut,
     /// M8 stage 8a.1: KH1's Items list (type 2, `0x140528970`).
     Items,
+    /// M8b: KH1's Summon list (type 3, `0x1405289A8`).
+    Summon,
 }
 
 /// One KH1 list.
@@ -401,6 +432,8 @@ pub enum Event {
     /// M8 stage 8a.1: an Items list entry confirmed: (its command, its slot, what happened:
     /// issued / greyed (the error sound) / KH1's gate refused it).
     Item(u8, u8, ShortResult),
+    /// M8b: a Summon list entry confirmed: (its command, what happened).
+    Summon(u8, ShortResult),
 }
 
 /// What a shortcut press did (`0x140293480` on the shortcut list).
@@ -436,6 +469,8 @@ pub struct Outcome {
     pub cast: Option<u8>,
     /// The item issued this frame (M8 stage 8a.1): the item and its slot.
     pub item: Option<crate::items::ItemCommand>,
+    /// M8b: the summon issued this frame (`crate::summons` index).
+    pub summon: Option<usize>,
     /// M9 stage 9c.1: a special command run by Triangle this frame (Sonic Blade, Rave, Blast):
     /// ours to run, not Re:CoM's Triangle action.
     pub special: Option<u8>,
@@ -485,6 +520,11 @@ pub struct Menu {
     /// M8 stage 8a.1: the Items list and the slot of each entry (`0x142D53A90`).
     pub items: List,
     pub item_slots: Vec<u8>,
+    /// M8b: the Summon list, and the Summon entry (root row 3): shown, greyed, locked.
+    pub summon: List,
+    pub summon_on: bool,
+    pub summon_grey: bool,
+    pub summon_lock: bool,
     /// The fade (`0x14285280C`) and its speed.
     pub alpha: f32,
     pub alpha_speed: f32,
@@ -523,6 +563,10 @@ impl Menu {
             sub: Kind::Magic,
             items: List::new(Kind::Items),
             item_slots: Vec::new(),
+            summon: List::new(Kind::Summon),
+            summon_on: false,
+            summon_grey: true,
+            summon_lock: true,
             alpha: 0.0,
             alpha_speed: 0.0,
             top: None,
@@ -630,6 +674,29 @@ impl Menu {
                 r.grey |= 2;
             }
         }
+        // M8b, `0x1402944C0`: with a spell learned, the summons learned make the Summon list (each
+        // greyed and locked when `0x140288F30` says no) and the Magic list's last entry, Summon,
+        // shown as the root's 4th row: greyed when none is usable, greyed and locked while one is
+        // out (KH1's in-progress flag `0x142867364 & 0x2000`; owner: no Dismiss).
+        let n = (w.summon_count as usize).min(crate::summons::COUNT);
+        let list: Vec<usize> = w.summons[..n].iter().map(|&i| i as usize).filter(|&i| i < crate::summons::COUNT).collect();
+        let gate = crate::summons::Gate { battle: w.battle, ground: flags & 0x80 != 0, mp: w.mp.map_or(0, |m| m.0), used: w.summon_used, out: w.summon_out };
+        let mut sgrey = !0u32;
+        for (k, &i) in list.iter().enumerate() {
+            if crate::summons::usable(&gate, i) {
+                sgrey &= !(1 << k);
+            }
+        }
+        self.summon.cmds = list.iter().map(|&i| crate::summons::command(i)).collect();
+        self.summon.grey = sgrey;
+        self.summon.lock = sgrey;
+        let slen = self.summon.cmds.len() as i32;
+        if self.summon.cursor >= slen {
+            self.summon.cursor = (slen - 1).max(0);
+        }
+        self.summon_on = !learned.is_empty() && !list.is_empty();
+        self.summon_lock = !self.summon_on || w.summon_out;
+        self.summon_grey = self.summon_lock || sgrey == !0;
         // Items (M8 stage 8a.1, `0x140294220`; KH1's save `+0x874` bits 0x10 / 2, items disabled /
         // sealed, are never set in Re:CoM): row 2 Items, unlocked; the list holds the filled slots
         // (command `item + 0x1E`, `0x142D53A90[k]` = the slot), each entry's bit cleared. With
@@ -676,25 +743,25 @@ impl Menu {
                 r.lock &= !8;
             }
         }
-        for l in [&mut self.root, &mut self.magic, &mut self.items] {
+        for l in [&mut self.root, &mut self.magic, &mut self.items, &mut self.summon] {
             l.bright.resize(l.cmds.len(), BRIGHT_GREY);
         }
     }
 
     /// The open submenu's list.
     pub fn sub_list(&self) -> &List {
-        if self.sub == Kind::Items {
-            &self.items
-        } else {
-            &self.magic
+        match self.sub {
+            Kind::Items => &self.items,
+            Kind::Summon => &self.summon,
+            _ => &self.magic,
         }
     }
 
     fn sub_list_mut(&mut self) -> &mut List {
-        if self.sub == Kind::Items {
-            &mut self.items
-        } else {
-            &mut self.magic
+        match self.sub {
+            Kind::Items => &mut self.items,
+            Kind::Summon => &mut self.summon,
+            _ => &mut self.magic,
         }
     }
 
@@ -713,6 +780,7 @@ impl Menu {
         // The stack (`0x1402931B0`'s walk): a submenu stays open while its row can open it.
         let row_can_open = match self.sub {
             Kind::Items => !self.root.locked(2) && !self.items.cmds.is_empty(),
+            Kind::Summon => self.summon_on && !self.summon_lock && !self.summon.cmds.is_empty(),
             _ => !self.root.locked(1) && self.root.cmds[1] == cmd::MAGIC && !self.magic.cmds.is_empty(),
         };
         if self.open && !row_can_open {
@@ -796,10 +864,11 @@ impl Menu {
                 }
                 3 => {
                     // FM (`0x1402937F0`): row 3 shows Summon, opened through the Magic list's last
-                    // entry once summons are learned (M8); before that the blank row is the error
+                    // entry once summons are learned (M8b: `0x140293480` on it: locked → sound 4,
+                    // else the Summon list opens, sound 6); without it the blank row is the error
                     // sound. The context command in entry 3 is Triangle's only.
-                    out.sounds.push(Sound::Error);
-                    out.events.push(Event::Refused(ROW3_CMD));
+                    out.attack = false;
+                    self.run_row3(&mut out);
                 }
                 row => {
                     out.attack = false;
@@ -809,6 +878,9 @@ impl Menu {
         } else if self.sub == Kind::Items {
             out.attack = false;
             self.run_item(w, &mut out);
+        } else if self.sub == Kind::Summon {
+            out.attack = false;
+            self.run_summon(w, &mut out);
         } else {
             out.attack = false;
             let row = self.magic.cursor;
@@ -901,6 +973,49 @@ impl Menu {
         out.events.push(Event::Item(c, slot, result));
     }
 
+    /// M8b: confirm (or Right) on the root's row 3 (`0x1402937F0` → `0x140293480` on the Magic
+    /// list's last entry).
+    fn run_row3(&mut self, out: &mut Outcome) {
+        if !self.summon_on {
+            out.sounds.push(Sound::Error);
+            out.events.push(Event::Refused(ROW3_CMD));
+            return;
+        }
+        out.confirm_refused = true;
+        if self.summon_lock {
+            out.sounds.push(Sound::Error);
+            out.events.push(Event::Refused(cmd::SUMMON));
+        } else {
+            self.open_sub(3, out);
+        }
+    }
+
+    /// M8b, `0x140293480` on a Summon list entry: locked (greyed) → the error sound; KH1's commit
+    /// gate (free or a combo window; no Fire-like exception) may refuse it silently; else it is
+    /// issued (no menu sound) and the stack unwinds to Attack.
+    fn run_summon(&mut self, w: &World, out: &mut Outcome) {
+        let row = self.summon.cursor;
+        let c = self.summon.cmds.get(row as usize).copied().unwrap_or(0);
+        let result = match crate::summons::of_command(c) {
+            Some(_) if !self.summon.locked(row) && !w.gate_any => {
+                out.confirm_refused = true;
+                ShortResult::NotNow
+            }
+            Some(i) if !self.summon.locked(row) => {
+                out.summon = Some(i);
+                self.open = false;
+                self.root.cursor = 0;
+                ShortResult::Cast
+            }
+            _ => {
+                out.sounds.push(Sound::Error);
+                out.confirm_refused = true;
+                ShortResult::Greyed
+            }
+        };
+        out.events.push(Event::Summon(c, result));
+    }
+
     fn run_root(&mut self, row: i32, out: &mut Outcome) {
         let c = self.root.cmds[row as usize];
         // `0x140293480` returns 0 for each of these (a locked row, a submenu opened, a command it
@@ -916,9 +1031,14 @@ impl Menu {
         }
     }
 
-    /// Opens the Magic list (1) or the Items list (2) (`0x140293480` / `0x1402931B0`: sound 6).
+    /// Opens the Magic list (1), the Items list (2) or the Summon list (3) (`0x140293480` /
+    /// `0x1402931B0`: sound 6).
     fn open_sub(&mut self, which: u8, out: &mut Outcome) {
-        self.sub = if which == 2 { Kind::Items } else { Kind::Magic };
+        self.sub = match which {
+            2 => Kind::Items,
+            3 => Kind::Summon,
+            _ => Kind::Magic,
+        };
         self.open = true;
         out.sounds.push(Sound::Open);
         out.events.push(Event::Opened(self.sub));
@@ -1001,6 +1121,7 @@ impl Menu {
                 Kind::Shortcut => (&mut self.shortcut, None),
                 Kind::Magic => (&mut self.magic, Some(&mut self.root)),
                 Kind::Items => (&mut self.items, Some(&mut self.root)),
+                Kind::Summon => (&mut self.summon, Some(&mut self.root)),
                 Kind::Root => (&mut self.root, None),
             };
             for (i, b) in t.bright.iter_mut().enumerate() {
@@ -1014,6 +1135,7 @@ impl Menu {
                 Kind::Shortcut => &mut self.shortcut,
                 Kind::Magic => &mut self.magic,
                 Kind::Items => &mut self.items,
+                Kind::Summon => &mut self.summon,
                 Kind::Root => &mut self.root,
             };
             for (i, b) in t.bright.iter_mut().enumerate() {
@@ -1107,9 +1229,12 @@ impl Menu {
         let top_root = !self.open;
         for i in 0..4 {
             let cursor_here = top_root && self.root.cursor == i as i32;
-            // FM's 4th row (`0x140278B40`): Summon or the blank command, never the context
-            // command (that is the tab's); its brightness is set, not eased.
-            let (name, bright) = if i == 3 {
+            // FM's 4th row (`0x140278B40`): Summon (0x73 / 0xE6 by its grey bit) or the blank
+            // command (0xE6 under the cursor), never the context command (that is the tab's); its
+            // brightness is set, not eased.
+            let (name, bright) = if i == 3 && self.summon_on {
+                (SUMMON_NAME, if self.summon_grey { BRIGHT_GREY } else { BRIGHT_ON })
+            } else if i == 3 {
                 (cmd::name(ROW3_CMD), if cursor_here { BRIGHT_ON } else { BRIGHT_GREY })
             } else {
                 (cmd::name(self.root.cmds[i]), self.root.bright.get(i).copied().unwrap_or(BRIGHT_GREY))
@@ -1119,12 +1244,16 @@ impl Menu {
         if self.open {
             let l = self.sub_list();
             let n = l.cmds.len();
-            // `0x14027B870`: the Magic list at its row's y with fewer than 3 entries; the Items list
-            // (case 2) at its row's y (root y + 0x2C) with fewer than 2; else 348 − 22 n.
+            // `0x14027B870`: the Magic list at its row's y with fewer than 3 entries (the Summon
+            // entry counted: KH1's list holds it; its rows end at 348 either way); the Items list
+            // (case 2) at its row's y (root y + 0x2C) with fewer than 2; the Summon list (case 3)
+            // beside row 3 when y + 20 + (3 + n) × 22 < 369 (one entry), else 348 − 22 n.
             let y0 = match self.sub {
                 Kind::Items if n < 2 => ROOT_Y + 2.0 * PITCH,
                 Kind::Items => BOTTOM - PITCH * n as f32,
-                _ if n < 3 => ROOT_Y + PITCH,
+                Kind::Summon if ROOT_Y + 20.0 + (3.0 + n as f32) * PITCH < 369.0 => ROOT_Y + 3.0 * PITCH,
+                Kind::Summon => BOTTOM - PITCH * n as f32,
+                _ if n + (self.summon_on as usize) < 3 => ROOT_Y + PITCH,
                 _ => BOTTOM - PITCH * n as f32,
             };
             for (i, &c) in l.cmds.iter().enumerate() {
@@ -1159,7 +1288,11 @@ impl Menu {
             }
             return t;
         }
-        let (tag, gtag) = if self.sub == Kind::Items { ("i", "ig") } else { ("m", "mg") };
+        let (tag, gtag) = match self.sub {
+            Kind::Items => ("i", "ig"),
+            Kind::Summon => ("s", "sg"),
+            _ => ("m", "mg"),
+        };
         let mut t = if self.open { format!("menu {tag}:{}", self.sub_list().cursor) } else { format!("menu r:{}", self.root.cursor) };
         t.push_str(&format!(" g{:x}", self.root.grey & 0xF));
         if self.open {
@@ -1172,6 +1305,9 @@ impl Menu {
         if self.root.cmds[0] == cmd::COUNTER {
             t.push_str(" counter");
         }
+        if self.summon_on {
+            t.push_str(if self.summon_lock { " sum:lock" } else if self.summon_grey { " sum:grey" } else { " sum" });
+        }
         for e in events {
             t.push(' ');
             t.push_str(e);
@@ -1182,9 +1318,9 @@ impl Menu {
 
 /// KH1's "Summon" (command 6, message 6, `btltbl.bin`'s Word.bin; Checked (files)).
 pub const SUMMON_NAME: u16 = 6;
-/// What FM's 4th root row shows (`0x140278B40`): Summon (6) once summons are learned (the Magic
-/// list's last entry, M8), else KH1's blank command 0x42 (message 305, the dash), greyed. Checked
-/// (decomp). No summons before M8: the blank command.
+/// What FM's 4th root row shows without summons (`0x140278B40`): KH1's blank command 0x42
+/// (message 305, the dash), greyed; with summons learned (and a spell), Summon ([`SUMMON_NAME`],
+/// M8b). Checked (decomp).
 pub const ROW3_CMD: u8 = cmd::BLANK;
 /// KH1's layout (`0x14027B870`), in the 512 × 384 2D space. Checked (decomp).
 pub const ROOT_X: f32 = 16.0;
@@ -1419,6 +1555,13 @@ pub fn parse_words(text: &str, lang: &str) -> Result<Words, String> {
         let (b, f) = font_bytes(t);
         out.folded.extend(f);
         out.by_id.push((id, b));
+    }
+    // M8b: the summons' names from a manifest written before them (re-run the asset step for
+    // KH1's own words): English, Re:CoM's font bytes. Cloud is English in every language anyway.
+    for s in crate::summons::ALL.iter() {
+        if out.get(s.word).is_none() {
+            out.by_id.push((s.word, font_bytes(s.name).0));
+        }
     }
     if [1u16, 2, 3].iter().any(|id| out.get(*id).is_none()) {
         return Err("Attack / Magic / Items missing".into());
@@ -2007,6 +2150,138 @@ mod tests {
         assert_eq!(o.events, vec![Event::Context(cmd::OPEN)]);
         // KH1's triangle offsets by language (English −3, French / German / Italian −9, Spanish −18).
         assert_eq!([tab::triangle_x("us"), tab::triangle_x("fr"), tab::triangle_x("sp")], [-3.0, -9.0, -18.0]);
+    }
+
+    /// M8b: Simba (5), Dumbo (0), Cloud (6) learned in that order, in battle, 3 MP.
+    fn summon_world() -> World {
+        let mut summons = [0u8; crate::summons::COUNT];
+        summons[..3].copy_from_slice(&[5, 0, 6]);
+        World { spells: all_spells(), summons, summon_count: 3, battle: true, ..world() }
+    }
+
+    #[test]
+    fn summon_is_the_magic_lists_last_entry_on_row_3() {
+        // No spell: no Summon (KH1 appends it to the Magic list only), the blank row.
+        let mut m = Menu::new();
+        m.build(&World { spells: [0; 7], ..summon_world() });
+        assert!(!m.summon_on);
+        // With spells: row 3 is Summon, not greyed (one usable), the list in learn order.
+        let w = summon_world();
+        m.build(&w);
+        assert!(m.summon_on && !m.summon_grey && !m.summon_lock);
+        assert_eq!(m.summon.cmds, vec![0x34, 0x2F, 0x35]);
+        assert_eq!(m.summon.grey & 7, 0);
+        // The context command keeps entry 3 (the tab's); row 3's word is Summon.
+        assert_eq!(m.root.cmds[3], cmd::NONE);
+        m.show();
+        let sc = m.scene();
+        assert_eq!((sc.rows[3].name, sc.rows[3].bright), (SUMMON_NAME, BRIGHT_ON as u8));
+        // Up to row 3, confirm: the Summon list opens (sound 6); Right does the same.
+        for pad in [press(|p| p.confirm = true), press(|p| p.right = true)] {
+            let mut m = Menu::new();
+            m.step(&w, press(|p| p.up = true));
+            let o = m.step(&w, pad);
+            assert!(m.open && m.sub == Kind::Summon, "{pad:?}");
+            assert_eq!((o.sounds, o.events), (vec![Sound::Open], vec![Event::Opened(Kind::Summon)]));
+            assert!(!o.attack);
+        }
+    }
+
+    #[test]
+    fn summon_greying_is_kh1s() {
+        let mut m = Menu::new();
+        // 2 MP: Simba (2) and Dumbo (2) usable, Cloud (3) not.
+        m.build(&World { mp: Some((2, 3, 0)), ..summon_world() });
+        assert_eq!(m.summon.grey & 7, 0b100);
+        assert_eq!(m.summon.lock & 7, 0b100);
+        // Not in battle (the field): all greyed; row 3 greyed but openable.
+        m.build(&World { battle: false, ..summon_world() });
+        assert_eq!(m.summon.grey & 7, 0b111);
+        assert!(m.summon_grey && !m.summon_lock);
+        // In the air (KH1 state 2: no flag 0x80): all greyed.
+        m.build(&World { state: 2, ..summon_world() });
+        assert_eq!(m.summon.grey & 7, 0b111);
+        // Simba used this battle: greyed until battle mode ends.
+        m.build(&World { summon_used: 1 << 5, ..summon_world() });
+        assert_eq!(m.summon.grey & 7, 0b001);
+        // One out: row 3 greyed and locked (owner: no Dismiss); confirm is the error sound.
+        let w = World { summon_out: true, ..summon_world() };
+        let mut m = Menu::new();
+        m.step(&w, press(|p| p.up = true));
+        assert!(m.summon_grey && m.summon_lock);
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert!(!m.open);
+        assert_eq!((o.sounds, o.events), (vec![Sound::Error], vec![Event::Refused(cmd::SUMMON)]));
+        m.show();
+        assert_eq!(m.scene().rows[3].bright, BRIGHT_GREY as u8);
+    }
+
+    #[test]
+    fn summon_list_issues_through_kh1s_gate() {
+        let w = summon_world();
+        let mut m = Menu::new();
+        m.step(&w, press(|p| p.up = true));
+        m.step(&w, press(|p| p.confirm = true));
+        // Down to Dumbo; the cursor wraps over the three.
+        m.step(&w, press(|p| p.down = true));
+        assert_eq!(m.summon.cursor, 1);
+        // KH1's commit gate refuses (Sora busy): no sound, the list stays.
+        let o = m.step(&World { gate_any: false, ..w }, press(|p| p.confirm = true));
+        assert!(m.open && o.sounds.is_empty() && o.summon.is_none());
+        assert_eq!(o.events, vec![Event::Summon(0x2F, ShortResult::NotNow)]);
+        // Issued: no menu sound, the stack back to Attack.
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert_eq!(o.summon, Some(0));
+        assert!(!m.open && m.root.cursor == 0 && o.sounds.is_empty() && !o.attack);
+        // A greyed entry (Cloud with 2 MP): the error sound.
+        let w2 = World { mp: Some((2, 3, 0)), ..w };
+        m.step(&w2, press(|p| p.up = true));
+        m.step(&w2, press(|p| p.confirm = true));
+        // The list keeps its cursor (Dumbo, 1), as KH1's records do: Up twice wraps to Cloud.
+        assert_eq!(m.summon.cursor, 1);
+        m.step(&w2, press(|p| p.up = true));
+        m.step(&w2, press(|p| p.up = true));
+        assert_eq!(m.summon.cursor, 2, "wrapped to Cloud");
+        let o = m.step(&w2, press(|p| p.confirm = true));
+        assert_eq!((o.sounds, o.summon), (vec![Sound::Error], None));
+        // Cancel closes it (sound 3), the root back on Attack.
+        let o = m.step(&w2, press(|p| p.cancel = true));
+        assert!(!m.open && m.root.cursor == 0 && o.sounds == vec![Sound::Back]);
+    }
+
+    #[test]
+    fn summon_list_place_is_kh1s() {
+        // One summon: beside row 3 (260 + 3 × 22 = 326), x + 11.
+        let mut one = summon_world();
+        one.summon_count = 1;
+        let mut m = Menu::new();
+        m.show();
+        m.step(&one, press(|p| p.up = true));
+        m.step(&one, press(|p| p.confirm = true));
+        let sc = m.scene();
+        let sl: Vec<_> = sc.rows.iter().filter(|r| r.list == Kind::Summon).collect();
+        assert_eq!((sl[0].x, sl[0].y, sl.len(), sl[0].name), (27.0, 326.0, 1, 291));
+        // Three: bottom-anchored, 348 − 66 = 282; Cloud's word is ours.
+        let mut m = Menu::new();
+        m.show();
+        let w = summon_world();
+        m.step(&w, press(|p| p.up = true));
+        m.step(&w, press(|p| p.confirm = true));
+        let sc = m.scene();
+        let ys: Vec<(f32, u16)> = sc.rows.iter().filter(|r| r.list == Kind::Summon).map(|r| (r.y, r.name)).collect();
+        assert_eq!(ys, vec![(282.0, 291), (304.0, 286), (326.0, crate::summons::CLOUD_NAME)]);
+        // The Magic list with two spells and Summon: KH1's list holds 3 entries, so it is
+        // bottom-anchored (348 − 44 = 304), not at the Magic row (282).
+        let mut two = [0; 7];
+        two[0] = 2;
+        two[3] = 1;
+        let w = World { spells: two, ..summon_world() };
+        let mut m = Menu::new();
+        m.show();
+        m.step(&w, press(|p| p.down = true));
+        m.step(&w, press(|p| p.confirm = true));
+        let ys: Vec<f32> = m.scene().rows.iter().filter(|r| r.list == Kind::Magic).map(|r| r.y).collect();
+        assert_eq!(ys, vec![304.0, 326.0]);
     }
 
     #[test]

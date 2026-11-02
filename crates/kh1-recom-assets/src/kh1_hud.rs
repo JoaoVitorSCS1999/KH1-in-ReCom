@@ -61,6 +61,12 @@ pub const MAG: &str = "exchange/UK_uibin_mag.bin";
 /// 17 objects in the same order (`ite_fra_d` … `ite_item`, `ite_sel_ico_d`), green
 /// (58, 86, 66), its strip 78 wide (the Magic list's 50). Checked (files: the owner's dump).
 pub const ITEM: &str = "exchange/UK_uibin_item.bin";
+/// M8b: KH1's Summon list (`0x14027B870` case 3, layout `0x142859860`, built from `uibin_sum.bin`
+/// by `0x14027AB70(3, …)`; the name: the exe's string `0x1403EE5F8`). Checked (decomp + exe). Its
+/// objects are not in this session: used only when they are the Magic list's 17 in the same order
+/// (`sum_` for `mag_`; the title, object 15, any name), else the DLL draws the Summon list with the
+/// Magic list's panels. Assumption until the owner's step prints it.
+pub const SUM: &str = "exchange/UK_uibin_sum.bin";
 /// KH1's shortcut panel (M7 stage 7.12): `cut_fra_a` (the frame), `cut_shortcut` (the title),
 /// `cut_ico_a / b / c` (the button glyphs' places). `0x140278180` copies its objects 0..4 to
 /// `0x142853960` (`0x14027E1C0(&0x140527B58)`), `0x14027B870` case 5 draws them. Checked (decomp +
@@ -1209,6 +1215,8 @@ pub struct MenuSources<'a> {
     /// M8 stage 8a.1: `UK_uibin_item.bin`, the Items list. Without it no Items list is built (the
     /// DLL then draws it with the Magic list's pieces).
     pub item: Option<&'a [u8]>,
+    /// M8b: `UK_uibin_sum.bin`, the Summon list ([`SUM`]); same rule.
+    pub sum: Option<&'a [u8]>,
 }
 
 /// The built files.
@@ -1998,6 +2006,11 @@ pub mod menu {
         /// M8 stage 8a.1: the Items list's first group (header, title, row, last row, selection,
         /// icon: the Magic list's six, [`g::MAGIC`]'s order), after the words.
         pub items_list: Option<usize>,
+        /// M8b: the Summon list's first group (the same six), after the Items list's; None without
+        /// `uibin_sum.bin` or when it is not laid out as the Magic list ([`SUM`]).
+        pub summon_list: Option<usize>,
+        /// M8b: why `uibin_sum.bin` was not used (for the step's note).
+        pub summon_note: Option<String>,
     }
 
     /// The menu font: its PC picture and glyphs (character → x, y, advance in PC texels).
@@ -2189,6 +2202,27 @@ pub mod menu {
             }
             None => None,
         };
+        // M8b: the Summon list, when its objects are the Magic list's (`sum_` for `mag_`; the
+        // title any name). Not an error otherwise: the DLL uses the Magic list's panels.
+        let (sum, summon_note) = match ms.sum {
+            Some(d) => match Uibin::parse(d) {
+                Ok(u) => {
+                    let bad_at = (0..17).find(|&i| {
+                        let want = mag.objs[i].name.replacen("mag_", "sum_", 1);
+                        i != 15 && u.objs.get(i).map(|o| o.name.as_str()) != Some(want.as_str())
+                    });
+                    match bad_at {
+                        None => (Some(u), None),
+                        Some(i) => {
+                            let names: Vec<&str> = u.objs.iter().map(|o| o.name.as_str()).collect();
+                            (None, Some(format!("{SUM}: object {i} is not the Magic list's (objects {names:?})")))
+                        }
+                    }
+                }
+                Err(e) => (None, Some(format!("{SUM}: {e}"))),
+            },
+            None => (None, None),
+        };
         let first = groups.len();
         let o = &com.objs;
         let ext = ROOT_EXT;
@@ -2347,7 +2381,14 @@ pub mod menu {
             sub_list(&u.objs, groups);
             at
         });
-        Ok(Built { first, words, glyphs: glyph_item.len(), missing, tab_icon, items_list })
+        // M8b: the Summon list's six after the Items list's (every group the DLL knows keeps its
+        // number).
+        let summon_list = sum.map(|u| {
+            let at = groups.len();
+            sub_list(&u.objs, groups);
+            at
+        });
+        Ok(Built { first, words, glyphs: glyph_item.len(), missing, tab_icon, items_list, summon_list, summon_note })
     }
 }
 
@@ -2829,7 +2870,8 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)], re
     if let Some(mn) = &b.menu {
         let words = mn.words.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, g)| format!("[{id}, {g}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
         let items = mn.items_list.map(|g| format!("\"items_list\": {g}, ")).unwrap_or_default();
-        let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"tab_icon\": {}, {items}\"words\": {{{words}}}}},", mn.first, mn.tab_icon);
+        let summons = mn.summon_list.map(|g| format!("\"summon_list\": {g}, ")).unwrap_or_default();
+        let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"tab_icon\": {}, {items}{summons}\"words\": {{{words}}}}},", mn.first, mn.tab_icon);
     }
     let _ = writeln!(s, "  \"languages\": [{}],", langs.iter().map(|l| format!("\"{l}\"")).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"atlas\": [{}, {}, {}, {}],", b.atlas.0, b.atlas.1, b.atlas.2, b.atlas.3);
@@ -2998,6 +3040,8 @@ mod tests {
         let (lock, g_enm) = (rd("exchange/UK_uibin_lock.bin"), rd("exchange/UK_uibin_g_enm.bin"));
         let cut = rd(CUT);
         let item = rd(ITEM);
+        // M8b: optional in the dump.
+        let sum = std::fs::read(d.join(SUM)).ok();
         let fonts: Vec<Vec<u8>> = vec![rd(&format!("fonts/menu/us/sysfont.bin.hd/{SYSFONT_HD}")), rd("fonts/exchange/US_font_data_tbl.bin")];
         let icon: Vec<Vec<u8>> = ICON_FILES.iter().map(|n| rd(&format!("fonts/{n}"))).collect();
         let src = Sources {
@@ -3019,6 +3063,7 @@ mod tests {
                 icon: Some([&icon[0], &icon[1]]),
                 cut: Some(&cut),
                 item: Some(&item),
+                sum: sum.as_deref(),
             }),
             faces: [face("xa_ex_0010.mdls", 0xA2E80), face("xa_ex_0040.mdls", 0x75600), face("xa_ex_0050.mdls", 0x8D400)],
         };
@@ -3085,7 +3130,13 @@ mod tests {
         let sc = b.shortcut.unwrap();
         eprintln!("shortcut panel: first group {}", sc.first);
         assert!(sc.icons && sc.first + shortcut::g::COUNT <= b.ring.0);
-        assert_eq!(il + 6, sc.first);
+        // M8b: the Summon list's six after the Items list's, when the owner's dump has it.
+        eprintln!("summon list: {:?} {:?}", mn.summon_list, mn.summon_note);
+        let after = mn.summon_list.map_or(il + 6, |sl| {
+            assert_eq!(sl, il + 6);
+            sl + 6
+        });
+        assert_eq!(after, sc.first);
         assert!(b.target.is_some());
         assert!(b.party.is_some());
         assert!(b.cursor.is_some());

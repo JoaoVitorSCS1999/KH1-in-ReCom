@@ -676,7 +676,10 @@ impl Ui {
         if let Some(m0) = sc.rows.iter().find(|r| r.list != Kind::Root && r.index == 0) {
             let base_y = m0.y;
             let sub = sub_groups(g, m0.list);
-            if let Some(h) = self.kh1_ctrl(PRIORITY_SUB, m0.x, base_y, 1.0, &[(sub + kh::menu::HEADER, None), (sub + kh::menu::TITLE, None)]) {
+            // M8b: the Magic list's panels stand in for a missing Summon list: no "MAGIC" title.
+            let stand_in = m0.list == Kind::Summon && g.summon_list.is_none();
+            let layers: &[(u32, Option<f32>)] = if stand_in { &[(sub + kh::menu::HEADER, None)] } else { &[(sub + kh::menu::HEADER, None), (sub + kh::menu::TITLE, None)] };
+            if let Some(h) = self.kh1_ctrl(PRIORITY_SUB, m0.x, base_y, 1.0, layers) {
                 func::<VecFn>(COLOUR)(h, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
                 headers.push(h);
             }
@@ -699,7 +702,7 @@ impl Ui {
                 // list's hat). Which row takes which: Assumption (by their pictures).
                 let icon = match (v.list, v.name) {
                     // The Magic list's hat; the Items list's potion (`ite_sel_ico_d`).
-                    (Kind::Magic | Kind::Items, _) => Some(base_g + 5),
+                    (Kind::Magic | Kind::Items | Kind::Summon, _) => Some(base_g + 5),
                     (_, 1) | (_, 343) => Some(look + kh::menu::ICON),
                     (_, 2) => Some(look + kh::menu::ICON + 1),
                     (_, 3) => Some(look + kh::menu::ICON + 2),
@@ -812,6 +815,18 @@ fn kh1_word_level(bright: u8) -> f32 {
 /// Items list's (`items_list`); an older asset step built none: the Magic list's, logged once.
 fn sub_groups(g: &kh::MenuGroups, list: Kind) -> u32 {
     static LOGGED: AtomicBool = AtomicBool::new(false);
+    static LOGGED_SUMMON: AtomicBool = AtomicBool::new(false);
+    if list == Kind::Summon {
+        return match g.summon_list {
+            Some(first) => first,
+            None => {
+                if !LOGGED_SUMMON.swap(true, Ordering::Relaxed) {
+                    log("command menu: kh1-hud.json has no KH1 Summon list (run this version's asset step): drawn with the Magic list's panels, without its title");
+                }
+                g.first + kh::menu::MAGIC
+            }
+        };
+    }
     match (list, g.items_list) {
         (Kind::Items, Some(first)) => first,
         (Kind::Items, None) => {
@@ -1022,6 +1037,11 @@ unsafe fn world(pl: usize) -> World {
     if w.context == 0 {
         w.gimmick = super::gimmick::offer(pl);
     }
+    // M8b: the learned summons and KH1's usable inputs (battle mode, used this battle, one out).
+    if super::summons::installed() {
+        (w.summons, w.summon_count) = super::summons::learned();
+        (w.battle, w.summon_used, w.summon_out) = super::summons::gate_state(pl);
+    }
     // M9 stage 9c.1: KH1's special offer (`0x14028D0F0`) when nothing took the context entry.
     // Battle only (owner, 2026-11-01: "Only in battle"): Re:CoM's battle room (`player+0x390`).
     if w.context == 0 && w.gimmick == 0 && special_free && super::specials::installed() && rd::<i32>(pl + p::BATTLE) != 0 {
@@ -1080,7 +1100,7 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
     let pad = read_pad(pl);
     let w = world(pl);
     let step = (rd::<i32>(pl + p::DT).max(0) as f32) / 50.0;
-    let (out, token_events) = {
+    let (out, token_events, summon_at) = {
         let mut s = STATE.lock().ok()?;
         let State { menu, uis } = &mut *s;
         let m = menu.as_mut()?;
@@ -1116,7 +1136,9 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
             }
         }
         let ev: Vec<String> = out.events.iter().map(|e| describe(e, m)).collect();
-        (out, ev)
+        // M8b: the summon under the Summon list's cursor (the preload).
+        let at = (m.open && m.sub == Kind::Summon).then(|| m.summon.cmds.get(m.summon.cursor.max(0) as usize).copied().and_then(cm::cmd::summon)).flatten();
+        (out, ev, at)
     };
     // KH1's own sounds with KH1's look (`menu_sounds`), else Re:CoM's.
     let kh1_sounds = super::kh1_hud::menu_on();
@@ -1131,6 +1153,7 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
             Event::Cast(c) => note(|| format!("{d} [{c:#x}]: issued")),
             Event::Shortcut(_, c, _) => note(|| format!("{d} [{c:#x}]")),
             Event::Item(c, _, _) => note(|| format!("{d} [{c:#x}]")),
+            Event::Summon(c, _) => note(|| format!("{d} [{c:#x}]")),
             _ => note(|| d.clone()),
         }
     }
@@ -1141,6 +1164,14 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
     // The item chosen (M8 stage 8a.1): KH1's item command for this frame's KH1 frame.
     if let Some(c) = out.item {
         super::items::issue(c.item, c.slot);
+    }
+    // M8b: a summon (KH1's command step runs it the frame it is issued: Re:CoM's sleight start from
+    // its request bits, where we are).
+    if let Some(i) = out.summon {
+        super::summons::start(pl, i);
+    }
+    if super::summons::installed() {
+        super::summons::preload(pl, summon_at);
     }
     // M9 stage 9c.1: a special (the context tab's Triangle, or Rave / Blast in the Attack row).
     if let Some(c) = out.special {
@@ -1162,6 +1193,7 @@ fn describe(e: &Event, m: &Menu) -> String {
     };
     match *e {
         Event::Opened(Kind::Items) => format!("open items ({} filled slots {:?}, grey {:#x})", m.items.cmds.len(), m.item_slots, m.items.grey & 0xFF),
+        Event::Opened(Kind::Summon) => format!("open summon ({} learned, grey {:#x})", m.summon.cmds.len(), m.summon.grey & 0x7F),
         Event::Opened(_) => format!("open magic ({} spells, grey {:#x})", m.magic.cmds.len(), m.magic.grey & 0x7F),
         Event::Closed => "close".into(),
         Event::Spell(c, _) => format!("spell {}", name(c)),
@@ -1176,6 +1208,15 @@ fn describe(e: &Event, m: &Menu) -> String {
             slot + 1,
             match r {
                 ShortResult::Cast => "used",
+                ShortResult::Greyed => "greyed",
+                ShortResult::NotNow => "not-now",
+            }
+        ),
+        Event::Summon(c, r) => format!(
+            "summon {} {}",
+            name(c),
+            match r {
+                ShortResult::Cast => "issued",
                 ShortResult::Greyed => "greyed",
                 ShortResult::NotNow => "not-now",
             }

@@ -263,6 +263,9 @@ pub struct MenuGroups {
     /// M8 stage 8a.1: KH1's Items list (`exchange/<L>_uibin_item.bin`), its first group (the
     /// same six as the Magic list's, [`menu::MAGIC`]'s order), when the asset step built it.
     pub items_list: Option<u32>,
+    /// M8b: KH1's Summon list (`exchange/<L>_uibin_sum.bin`), its first group (the same six), when
+    /// the asset step built it.
+    pub summon_list: Option<u32>,
 }
 
 impl MenuGroups {
@@ -374,7 +377,13 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
                 Some(Some(g)) if g + menu::LIST_GROUPS <= groups => Some(g),
                 Some(_) => return Err("a bad items_list entry".into()),
             };
-            Some(MenuGroups { first, tab_icon, words, items_list })
+            // M8b, optional (older manifests, or a `uibin_sum.bin` not laid out as the Magic list's).
+            let summon_list = match m.get("summon_list").map(|x| x.as_u32()) {
+                None => None,
+                Some(Some(g)) if g + menu::LIST_GROUPS <= groups => Some(g),
+                Some(_) => return Err("a bad summon_list entry".into()),
+            };
+            Some(MenuGroups { first, tab_icon, words, items_list, summon_list })
         }
     };
     let shortcut = match v.get("shortcut") {
@@ -816,6 +825,9 @@ mod tests {
         assert_eq!(mm.items_list, None, "M8: optional");
         let it = with.replace("\"tab_icon\": true", "\"tab_icon\": true, \"items_list\": 690");
         assert_eq!(parse_manifest(&it).unwrap().menu.unwrap().items_list, Some(690));
+        assert_eq!(mm.summon_list, None, "M8b: optional");
+        let su = with.replace("\"tab_icon\": true", "\"tab_icon\": true, \"summon_list\": 694");
+        assert_eq!(parse_manifest(&su).unwrap().menu.unwrap().summon_list, Some(694));
         assert!(parse_manifest(&it.replace("690", "695")).is_err(), "six groups past the set");
         assert!(parse_manifest(&ok.replace("kh1hud:00", "Cockpit:00")).is_err());
         // Stage 7.12: the shortcut panel, optional (older manifests have none).

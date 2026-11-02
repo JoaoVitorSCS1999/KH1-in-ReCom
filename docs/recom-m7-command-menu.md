@@ -18,6 +18,8 @@ action). Items opens KH1's Items list of Sora's filled item slots (M8 stage 8a.1
 `docs/recom-m8-items.md`; greyed and locked with no item). At Combat = Re:CoM, or in Riku's story,
 nothing is made and nothing runs.
 
+M8b (2026-11-02): the Summon entry (row 3) and KH1's Summon list are built: `docs/recom-summons.md`.
+
 Code: `crates/kh1-recom/src/command_menu.rs` (KH1's rules, tested), `src/win/command_menu.rs`
 (Re:CoM's objects), `crates/kh1-recom-assets/src/command_menu.rs` (words and plates, tested).
 No hook of its own: it runs from the MP bar's three `CPlayerGauge` wrappers and the request-bits

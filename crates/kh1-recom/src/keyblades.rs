@@ -60,10 +60,12 @@ pub fn save_byte_for(card: u16) -> u8 {
 /// The offsets (from the save block) in the spare range that are not zero, our bytes excepted
 /// (the Keyblade byte, M7's MP block `crate::mp::BLOCK_FIRST ..= BLOCK_LAST`, and M8's items
 /// extension `crate::items::EXT_FIRST ..= EXT_LAST`, M9's ability block
-/// `crate::abilities::BLOCK_FIRST ..= BLOCK_LAST`). `range` is `save[SPARE_FIRST..=SPARE_LAST]`.
+/// `crate::abilities::BLOCK_FIRST ..= BLOCK_LAST`, M8b's summon block
+/// `crate::summons::BLOCK_FIRST ..= BLOCK_LAST`). `range` is `save[SPARE_FIRST..=SPARE_LAST]`.
 pub fn spare_range_nonzero(range: &[u8]) -> Vec<usize> {
     let ours = |o: usize| o == EQUIP_OFFSET || (crate::mp::BLOCK_FIRST..=crate::mp::BLOCK_LAST).contains(&o) || (crate::items::EXT_FIRST..=crate::items::EXT_LAST).contains(&o)
-        || (crate::abilities::BLOCK_FIRST..=crate::abilities::BLOCK_LAST).contains(&o);
+        || (crate::abilities::BLOCK_FIRST..=crate::abilities::BLOCK_LAST).contains(&o)
+        || (crate::summons::BLOCK_FIRST..=crate::summons::BLOCK_LAST).contains(&o);
     range
         .iter()
         .enumerate()
@@ -487,9 +489,13 @@ mod tests {
         r[crate::abilities::BLOCK_FIRST - SPARE_FIRST] = 1;
         r[crate::abilities::BLOCK_LAST - SPARE_FIRST] = 4;
         assert!(spare_range_nonzero(&r).is_empty());
-        r[crate::abilities::BLOCK_LAST + 1 - SPARE_FIRST] = 3;
-        assert_eq!(spare_range_nonzero(&r), vec![crate::abilities::BLOCK_LAST + 1]);
-        r[crate::abilities::BLOCK_LAST + 1 - SPARE_FIRST] = 0;
+        // M8b's summon block after the ability block is ours; the byte after it is not.
+        r[crate::summons::BLOCK_FIRST - SPARE_FIRST] = 1;
+        r[crate::summons::BLOCK_LAST - SPARE_FIRST] = 7;
+        assert!(spare_range_nonzero(&r).is_empty());
+        r[crate::summons::BLOCK_LAST + 1 - SPARE_FIRST] = 3;
+        assert_eq!(spare_range_nonzero(&r), vec![crate::summons::BLOCK_LAST + 1]);
+        r[crate::summons::BLOCK_LAST + 1 - SPARE_FIRST] = 0;
         r[0] = 1;
         r[SPARE_LAST - SPARE_FIRST] = 2;
         assert_eq!(spare_range_nonzero(&r), vec![SPARE_FIRST, SPARE_LAST]);
