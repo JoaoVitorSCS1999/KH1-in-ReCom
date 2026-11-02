@@ -11,6 +11,22 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 98: Green item symbol on the camp's item rows, version 0.55.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "for the item slots, the color is correct, but they have the green mickey symbol, but
+  lets use the green item symbol"; the plan "Yes, add it".
+- Found (Checked (decomp + files)): Re:CoM's item symbol is `camp.lad` sprite 166 (sprite group 83), drawn only by
+  the Deck page's type tabs; no camp row draws it, and no call swaps one sprite inside a playing sequence.
+- Built: the asset step (`camp_rows`) appends group 0x161 to `camp:00` in Re:CoM's `FORM/0100/FO0100.SPR` (and
+  its PC `camp.lad` assets): a copy of green row 0x131 with its icon's sprite group 85 → 83; writes
+  `raw/FORM/0100/FO0100.SPR` + `kh1-camp-rows.json`. The DLL gives our pages' rows an 8-entry copy of Re:CoM's
+  table `0x1407C11F0` (+0x161) while the item row is loaded; the Stock row and item slots take it. No new hook.
+- Fallback: without the manifest (or a `camp:00` without 354 groups) the item rows keep 0x131.
+- Assumption: sprite 166 is green in the texture (`FO0100.RTM` not in the session).
+- Checked: tests, Windows build, the session's base `FO0100.SPR` patch. Not checked: the PC assets, in game.
+
+---
+
 ## Stage 97: Stop works on attacking enemies; its full duration, version 0.54.1 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "stop doesnt seem to work". Log `kh1-recom-stop-0530.log`: eight Stopga strikes
