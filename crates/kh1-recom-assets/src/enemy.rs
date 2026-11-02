@@ -156,8 +156,14 @@ pub fn exe_consts() -> Vec<(&'static str, f32)> {
     crate::shadow::exe_consts()
 }
 
+/// KH1's stats-block defaults (`0x1402A5D70`: `+4` walk 2, `+8` run 8, `+0x10` hop 190; Checked
+/// (decomp)): a constant listed with no offsets takes its value here (a script that never writes
+/// it keeps the default; M11 fliers).
+pub const STATS_DEFAULTS: &[(&str, f32)] = &[("walk_speed", 2.0), ("run_speed", 8.0), ("hop_height", 190.0)];
+
 /// Reads the constants at `table` (`push`: an opcode word whose low byte is 0x12 / 0x52 (a float)
-/// or 0x02 / 0x42 (an integer, as a number), then the value).
+/// or 0x02 / 0x42 (an integer, as a number), then the value). A name with no offsets is one of
+/// [`STATS_DEFAULTS`].
 pub fn script_consts(script: &[u8], name: &[u8], table: &[(&str, &[usize])]) -> Result<Vec<(String, f32)>> {
     let sname = String::from_utf8_lossy(name);
     if script.get(4..4 + name.len()) != Some(name) {
@@ -165,6 +171,11 @@ pub fn script_consts(script: &[u8], name: &[u8], table: &[(&str, &[usize])]) -> 
     }
     let mut out = Vec::new();
     for (n, offs) in table {
+        if offs.is_empty() {
+            let d = STATS_DEFAULTS.iter().find(|d| d.0 == *n).ok_or_else(|| crate::Error::Format(format!("{sname}: {n} has no offset and no stats-block default")))?;
+            out.push((n.to_string(), d.1));
+            continue;
+        }
         let mut v: Option<f32> = None;
         for &o in offs.iter() {
             let w = script.get(o..o + 6).ok_or_else(|| crate::Error::Format(format!("{sname}: short at {o:#x}")))?;

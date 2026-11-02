@@ -178,7 +178,9 @@ pub fn attack_row(script: &[u8], at: usize, codes: &[i32]) -> Result<AttackRow> 
         return bad(format!("attack row {at:#x}: bone code {code} names no bone"));
     }
     let (t, radius) = ([f(0x54), f(0x58)], f(0x5C));
-    if !(t.iter().all(|x| x.is_finite() && (0.0..=100.0).contains(x)) && radius > 0.0 && radius < 1000.0) {
+    // `t` may be negative (a point past the parent, away from the bone: the Air Soldier's spin row
+    // `0x4DC` runs from 1 to −1; M11 fliers).
+    if !(t.iter().all(|x| x.is_finite() && (-100.0..=100.0).contains(x)) && radius > 0.0 && radius < 1000.0) {
         return bad(format!("attack row {at:#x}: t {t:?} radius {radius}"));
     }
     Ok(AttackRow { code, bone: bone as usize, t, radius, recoil: u(0x40) })
