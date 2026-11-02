@@ -284,6 +284,12 @@ pub fn hit_window(m: &kh1_formats::mset::Motion, sub: u16) -> Result<(f32, f32)>
 /// slot [`SLOT_BASE`] + entry unless Re:CoM has it as an exact bake. Returns the ANN, every
 /// request's clip and, per new clip, the Re:CoM clip the matcher pairs it with (bake or edit).
 pub fn extend_ann(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
+    extend_ann_own(ann_in, ms, conv, prefix, recom_slots, &[])
+}
+
+/// [`extend_ann`], with `own`: requests whose entry gets its own new clip even when Re:CoM has it as
+/// an exact bake ([`OWN_CLIPS`]); the new clip is paired with the bake (its sounds, `extend_ses`).
+pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize, own: &[u16]) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
     let mut ann = Ann::parse(ann_in)?;
     if ann.slots.len() != recom_slots {
         return bad(format!("{} slots, Re:CoM Steam's has {recom_slots} (already extended?)", ann.slots.len()));
@@ -318,7 +324,7 @@ pub fn extend_ann(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str,
     for ((e, reqs, root), fm) in by_entry.iter().zip(found) {
         let m = &ms.motions[*e];
         let (slot, name, looped, source) = match fm.found.as_ref() {
-            Some((sc, MatchKind::Bake)) => {
+            Some((sc, MatchKind::Bake)) if !reqs.iter().any(|r| own.contains(r)) => {
                 let s = &ann.slots[sc.slot];
                 let looped = s.clip.as_ref().is_some_and(|c| c.looped());
                 (sc.slot, s.name_str(), looped, "recom")
@@ -529,7 +535,9 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     }
     consts.extend(btltbl_consts(&inp.btltbl)?);
     consts.push(("weight".into(), weight(script, spec.records)?));
-    let (ann, clips, pairs) = extend_ann(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots)?;
+    let own: Vec<u16> = OWN_CLIPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
+    let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own)?;
+    consts.extend(bone_points(spec.name, &inp.mdls, &ms, &conv, &clips)?);
     // The attack rows → ASD records.
     let codes = bone_codes(&inp.mdls)?;
     let mut rows: Vec<(usize, AttackRow, u16)> = Vec::new();
@@ -660,6 +668,42 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
     *ann = a.to_bytes();
     *ses = crate::ses::write(&sounds);
     Ok(())
+}
+
+/// Requests that get their own clip although Re:CoM has their motion as an exact bake (M11): the
+/// bake carries Re:CoM's own attack records (`.ASD`, bound by the clip's name), which would hit with
+/// KH1's rows. The Darkball's dash 202 (`e023_051`, Re:CoM's record id 0) and bite 204 (`e023_053`,
+/// id 1). Checked (files): Re:CoM's `EN0023.ASD`.
+pub const OWN_CLIPS: &[(&str, u16)] = &[];
+
+/// Bone points a behaviour reads (M11): (enemy, name, KH1 bone code, request, KH1 frame): the code's
+/// bone's place in that request's motion at that frame, in the actor's frame (KH1 units, y down,
+/// root motion off), as the constants `<name>_x`, `_y`, `_z`. The Darkball's reappearance moves the
+/// actor to bone code 0's place (`0x2A78`: `sys 19(actor, 0, 0)` → `0x14029EB20`: the code's bone's
+/// position, `0x14029FAB0` / `0x1401D62E0`, Checked (decomp)) while its idle plays (blended in over 20
+/// frames: frame 20, Assumption ±10 units).
+pub const BONE_POINTS: &[(&str, &str, u32, u16, f32)] = &[];
+
+fn bone_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[RequestClip]) -> Result<Vec<(String, f32)>> {
+    let mut out = Vec::new();
+    for &(_, point, code, request, frame) in BONE_POINTS.iter().filter(|b| b.0 == name) {
+        let codes = bone_codes(mdls)?;
+        let bone = *codes.get(code as usize).filter(|b| **b >= 0).ok_or_else(|| crate::Error::Format(format!("{name}: bone code {code} names no bone")))? as usize;
+        let c = clips.iter().find(|c| c.request == request).ok_or_else(|| crate::Error::Format(format!("{name}: request {request} has no clip")))?;
+        let m = &ms.motions[c.entry];
+        let mut rig = conv.rig();
+        rig.start_motion(m);
+        let _ = conv.targets(&mut rig, m, frame, false);
+        let t = rig.current().world[bone].t;
+        for (axis, v) in ["x", "y", "z"].iter().zip([t[0], t[1], t[2]]) {
+            let v = v as f32;
+            if !v.is_finite() {
+                return bad(format!("{name}: {point}_{axis} = {v}"));
+            }
+            out.push((format!("{point}_{axis}"), v));
+        }
+    }
+    Ok(out)
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.

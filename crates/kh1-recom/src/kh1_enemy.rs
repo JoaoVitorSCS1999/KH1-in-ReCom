@@ -304,13 +304,15 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::State(s) => format!("state {}", state_name(*s)),
         Cmd::Held => "held (root motion carries it)".into(),
         Cmd::Attack { request, attack, .. } => format!("attack {request} ({}), steered", names.get(*attack as usize).copied().unwrap_or("?")),
+        Cmd::Scale(k) => format!("scale {k:.2}"),
+        Cmd::Visible(v) => format!("visible {v}"),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -495,6 +497,10 @@ mod tests {
         assert_eq!(cmd_token(&Cmd::Action { request: 200, attack: Some(0), then: 203, blend: 8.0 }, CLASSES[0].attack_names, &n), "action 200 (claw) then 203");
         assert_eq!(cmd_token(&Cmd::State(1), CLASSES[0].attack_names, &n), "state engaged");
         assert!(logged(&Cmd::Held) && !logged(&Cmd::Yaw(0.0)));
+        // M11 (the Darkball): its warps' model switch is logged, its per-frame scale isn't.
+        assert_eq!(cmd_token(&Cmd::Visible(false), CLASSES[0].attack_names, &n), "visible false");
+        assert_eq!(cmd_token(&Cmd::Scale(0.5), CLASSES[0].attack_names, &n), "scale 0.50");
+        assert!(logged(&Cmd::Visible(true)) && !logged(&Cmd::Scale(1.0)));
     }
 
     #[test]
