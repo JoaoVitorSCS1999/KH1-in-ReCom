@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 134: M11: the KH1 Wyvern; motions from a start frame, KH1's loop rule, version 0.74.0 (2026-11-01)
+
+- M11 (owner, 2026-11-02): a flier.
+- Framework: `Cmd::MotionAt` (KH1's `sys 13` start frame through Re:CoM's motion play's start time, its third argument;
+  Checked (decomp + disasm)); asset step `enemy::LOOPS` (clips KH1 loops though their last pose differs). Other
+  enemies' outputs unchanged.
+- Wyvern (`xa_ex_2320` ↔ `CEnemyWyvern` id 24; `ex_2320.bd`, 123 constants, 49 request words): appearance, notice
+  (215) within 15 m; far: 70 % chase (207 / 208, banks 209 / 210), bite (200), fly past and up, come down (212, idle
+  from frame 16), then charge or dive; 30 % charge (204, 40-frame rush 205 at 40/f, 206); close: roar (213) then dive
+  (chase to 4 m above, 201, drop 202, land 203), every third close round the far attack; after 3 rounds rises and
+  circles; a hit in the dive doesn't flinch (214); 5 counted hits within 3 m roar + dive, 3–10 m roar + charge + circle;
+  Olympus rule (100 m search) in Re:CoM's Olympus. All guards: Re:CoM's flinch (recoil 110 missing). Vtable
+  `0x140555DC8`, ctor `0x140195ED0`, alloc `0x140189373` 0xCF0 → 0xD10. Power: bite → id 0, charge → id 1 (Checked:
+  Re:CoM's clips edit KH1's), dive → id 1 (Assumption).
+- Asset step: `ENEMY/0024/EN0024.ANN` (77 kept, KH1 clips 100–127), `.ASD` (3 + 6), `.SES`, `kh1-wyvern.json`.
+- Checked: tests, Windows build, 607 + 230 sites. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 133: M11: the KH1 Air Pirate, version 0.73.0 (2026-11-01)
 
 - M11 (owner, 2026-11-02): a flier.
