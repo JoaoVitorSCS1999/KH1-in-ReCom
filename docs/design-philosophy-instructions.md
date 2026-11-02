@@ -406,7 +406,8 @@ At KH1 setting:
     - **Summons follow-up (owner, 2026-11-02):** "summons should be able to be used as long as you have
       MP, also, sora should have iframes through all summon animations". KH1's once-per-battle rule is
       **dropped** (usable whenever Sora has the MP); **Sora is invincible through every summon's whole
-      animation** (start to Re:CoM's end action).
+      animation** (start to Re:CoM's end action); "cloud should also be at the top of the summons list"
+      (**Cloud first**, then the others in learn order).
 
 ## Known open design questions (ask the owner, don't guess)
 
