@@ -499,6 +499,127 @@ For enemy X (Re:CoM id N, KH1 model `xa_..._MMMM`), one agent per enemy:
     pefile over every site, the asset outputs against Re:CoM's files (Re:CoM's bytes kept), a doc section
     with Checked / Assumption tags, the owner's install lines, the test list, the KH1 trace scenarios.
 
+## Ground-melee family, part 1
+
+Offsets below are in the player's `ex_2030.bd` (`xa_ex_2030.mdls` part 5). These are notes, not code.
+
+### Re:CoM side (all four)
+
+Checked (exe):
+- Each ctor starts `40 53 48 83 EC 20 45 33 C9 45 33 C0`. Its only caller is the factory `0x140188F40`.
+  No branch lands in its first 6 bytes.
+- Each vtable has 139 slots. States 0 / 11 / 12 / 30 are `CBattleEnemy`'s (as the Soldier's), so the
+  appearance is `Appear::Base`.
+- The factory sizes are `B9 <size>`:
+
+| Class (id) | vtable | ctor | factory size site | size | caller |
+|---|---|---|---|---|---|
+| Powerwild (7) | `0x140547798` | `0x140191380` | `0x1401890A9` | `0xCD0` | `0x1401890C2` |
+| Bandit (11) | `0x140534368` | `0x14018AEB0` | `0x140189151` | `0xCD0` | `0x14018916A` |
+| Pirate (21) | `0x140546458` | `0x140190F30` | `0x1401892F5` | `0xCD0` | `0x14018930E` |
+| Large Body (9) | `0x140542AD0` | `0x14018F090` | `0x1401890FD` | `0xCE0` | `0x140189116` |
+
+Attack states and clips (state begin → the clip name it plays; Checked (exe)):
+- Powerwild: 2 → `e007_051` (`.ASD` attack id 0, one hit), 3 → `e007_050` (id 1, two hits).
+- Bandit: 2 → `e011_050` or `e011_051`, 3 → `e011_051`.
+- Pirate: 2 → `e021_050`, 3 → `e021_051`.
+- Large Body: 2 → `e009_050`, 3 → `e009_053`.
+
+### Powerwild's script
+
+- **Init `0x2346`.** Walk 3, run 7, hop 500. Stat records `0x14` / `0x80`. Handlers: hit `0x2436`, event
+  `0x23D6` (event 1001: `wp+0x38` = 3 → motion 260; scripted, Assumption: no Re:CoM battle sends it).
+- **Supervisor `0x2262`.** While idle, it engages Sora within 1500. Its states are 1 idle `0x78C`, 2 engaged
+  `0x5A2`, 3 hit `0x4B0`.
+- **Appearance `0x7BC`** (spawn type ≠ 0 / 16). It faces Sora at once and fades in over 30 frames, then
+  yields. Then action 69 (`0x1000045`, blend 8), idle queued (blend 12).
+- **Idle loop.** The shared wander (350 / 450, band 100, timeout 300, idle 40 % for 90–180 frames, home
+  700), then action 223 (blend 8) and a wait for the ground.
+- **Engaged.**
+  - First, the notice: motion 227, wait until it ends or request 6 plays, then the idle.
+  - Close (< 300) alternates: the first time a backward hop (215); the next time a side hop (207 or 202,
+    50 / 50), then attack 212.
+  - Mid (< 700): a strafe (`0x13AA`: walk motion at speed 7, 60–120 frames, turning 1° a frame, stopping
+    within 300). Then 60 % a pause (`0x9E6`) or else roar 228 (`0x8D8`). Then 70 % a hop-strafe (`0xA8E`)
+    followed by the pounce (`0xD34`), or else attack 212.
+  - Far: approach (run, timeout 150, retarget 20, stop at 560). Then 30 % an idle of 60–120 frames. Then
+    60 % attack 212, 20 % roar 228, 20 % the pause.
+- **Hit behaviour `0x4B0`.**
+  - `wp+0x38` = 4 → motion 224, then idle.
+  - Otherwise, within 700: 50 % flurry 214 then the backward hop; else a side hop then the pounce.
+- **Hit handler `0x2436`.**
+  - Damage of kind 4 / 5 above 40 % HP: its own launch (`sys 38` → `0x1402B79F0`), base 270 on the
+    ground or 280 in the air, hop 80, speed 25, no down time; then `wp+0x38` = 4.
+  - Otherwise `wp+0x38` = 2.
+  - A clash, or kinds 8 / 10: `wp+0x38` = 2. Every case asks for state 3.
+- **Hops `0xBEC` → `0x1152`.**
+  - Plain motion r (215 / 207 / 202), for its length.
+  - Then (r + 1) | `0x10000`, and `sys 82` → `0x1402AF150`: movement state 3. Its step is `0x1402AFAE0`.
+    The velocity is the facing turned 180 / −70 / 70° × 20, height 50, 30 frames. g = 2h / (T/2)²,
+    vy₀ = −g·T/2. Horizontal drag 0.9 (√0.9 at step < 2); vy capped at 20.
+  - `sys 83` → `actor+0x3D0` = r − 3, so the apex motion (`0x1402AF630`: 6 frames before the top) is
+    r + 2, with r + 3 queued.
+  - Landing goes straight to movement state 0, with no landing motion (`0x1402AFAD0`). State 3 counts as
+    airborne for reactions (`0x1402B1B10`: the state table's flag & 3 == 1).
+- **Pounce `0xD34`.**
+  - Jump start, hop 200, speed min((d − 200) / 30, 10).
+  - In the air it steers at 7. From frame 19 it is action 222 (`0x10000DE` is bit 24) with rows `0x2AC` /
+    `0x31C`.
+- **Rows** (`+0x3C` / clash recoil):
+  - 212: `0x23C` (50 / 226);
+  - 214: `0xEC`, `0x15C`, `0x1CC` (10 / 225);
+  - 222: `0x2AC`, `0x31C` (10 / 229).
+- **Power mapping** (decision M10 pattern).
+  - Checked (files): Re:CoM's `e007_051` is KH1's 212 (62 frames, one hit), and its `e007_050` is KH1's
+    214 (98 frames).
+  - So 212 → id 0 / state 2, and 214 → id 1 / state 3.
+  - 222 → id 1 / state 3 (`+0x3C` 10, as 214's). Assumption: the nearest Re:CoM attack.
+
+**Framework additions** (built): `Body::timed_jump` / `timed_apex` (movement state 3, the step above;
+airborne for reactions; it lands with no landing motion: the host skips request 7), `react::scripted_launch`
+(`0x1402B79F0`) with `Behaviour::scripted_launch` (read after `on_hit`; it replaces the reaction KH1 chose
+first, whose random draw stays drawn). Assumption: the engine's hit processing runs before the script's hit
+handler. The asset step now makes one `.ASD` record per HIT window (`hit_windows`), as Re:CoM's own models do.
+The Soldier's and the Air Soldier's tracks have one window each, so their outputs are unchanged (their record
+counts are tested).
+
+### The Powerwild (built)
+
+- `kh1_core::powerwild` (the AI above, every number a manifest constant), `ground::powerwild` (class row:
+  attack states swipe 2, flurry 3, pounce 3; `reads_hp`), sites `POWERWILD_HOOKS` / `_ALLOC` / `_PTRS`,
+  `kh1_recom_assets::powerwild` (constant offsets, request checks, rows, power mapping).
+- **Asset outputs** (`kh1-recom-build`, from the player's `xa_ex_2030.mset` / `.mdls`, `btltbl.bin` and Re:CoM's
+  `ENEMY/0007`): `ENEMY/0007/EN0007.ANN` (Re:CoM's 75 slots kept, KH1's clips after), `EN0007.ASD` (Re:CoM's 3
+  records kept, 9 added: swipe 1, flurry 3 + 2 + 1, pounce 2), `EN0007.SES`, `kh1-powerwild.json`. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0007/EN0007.ANN, method: copy, source: [{name: ENEMY/0007/EN0007.ANN}]}
+- {name: ENEMY/0007/EN0007.ASD, method: copy, source: [{name: ENEMY/0007/EN0007.ASD}]}
+- {name: ENEMY/0007/EN0007.SES, method: copy, source: [{name: ENEMY/0007/EN0007.SES}]}
+- {name: kh1-powerwild.json, method: copy, source: [{name: kh1-powerwild.json}]}
+```
+
+- **Checked (files):** the script's numbers at their offsets (the asset test reads them from the player's
+  file), the request words, the rows and their recoils (226 / 225 / 229, all in the model), the hit windows
+  (`e007_144`: right hand 20–26, 36–40, 48–54; left hand 28–36, 64–70; body 22–56).
+- **Checked (exe / decomp):** movement state 3 and the scripted launch (above), the sites.
+- **Assumptions:**
+  - The apex motion plays one frame later than KH1's (the script runs before the step).
+  - Request bit 16 (`0x10000`) is a plain request.
+  - Event 1001, the leash and the death routine are not built.
+  - The pounce takes the flurry's power.
+  - Seeds per enemy.
+- **Not checked yet:** a tester's trace against KH1 frame for frame.
+- **Owner test list** (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Powerwild battle in Deep Jungle):
+  1. The first look (227), then by distance:
+     - close: a back hop, next time a side hop and a swipe;
+     - mid: a walk sideways, a pause or a roar, then a sideways shuffle into a side hop and swipe, then the
+       pounce;
+     - far: it runs in.
+  2. Hit it with a launching finisher while above 40 % HP: it flips back with its own launch (270), then shakes
+     it off (224).
+  3. The hops land with no landing pose and travel about 3 m.
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
