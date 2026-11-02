@@ -204,6 +204,108 @@ pub fn roll_step(frames: u32, entered: Option<u32>, present: bool, in_state: boo
     }
 }
 
+/// Trigger (d) (owner, 2026-11-01): each card-break boss also drops its card, without a stagger,
+/// at 75 %, 50 % and 25 % of its max HP, once per threshold per fight.
+pub const HP_THRESHOLDS: [u32; 3] = [75, 50, 25];
+
+/// The thresholds (bit i = [`HP_THRESHOLDS`]`[i]`) `hp` is at or below.
+pub fn hp_reached(hp: i32, max: i32) -> u8 {
+    if max <= 0 {
+        return 0;
+    }
+    let mut m = 0;
+    for (i, t) in HP_THRESHOLDS.iter().enumerate() {
+        if (hp as i64) * 100 <= (max as i64) * (*t as i64) {
+            m |= 1 << i;
+        }
+    }
+    m
+}
+
+/// One boss's thresholds in this fight: those reached, and those reached but not yet dropped
+/// (waiting for the boss's own drop condition).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HpMarks {
+    pub handle: u32,
+    pub done: u8,
+    pub owed: u8,
+}
+
+/// A hit took the boss from `before` to `after` HP (of `max`). The first hit seen in a fight marks
+/// the thresholds it already was below as done (no card for HP lost before). Returns the marks and
+/// the thresholds this hit crossed.
+pub fn hp_step(prev: Option<HpMarks>, handle: u32, before: i32, after: i32, max: i32) -> (HpMarks, u8) {
+    let mut m = match prev {
+        Some(m) if m.handle == handle => m,
+        _ => HpMarks { handle, done: hp_reached(before, max), owed: 0 },
+    };
+    let new = hp_reached(after, max) & !m.done;
+    m.done |= new;
+    m.owed |= new;
+    (m, new)
+}
+
+/// The thresholds' names for a mask ("75/50").
+pub fn hp_names(mask: u8) -> String {
+    HP_THRESHOLDS.iter().enumerate().filter(|(i, _)| mask & 1 << i != 0).map(|(_, t)| t.to_string()).collect::<Vec<_>>().join("/")
+}
+
+/// How a boss's own drop code fills Re:CoM's prize descriptor for its card (Checked (decomp +
+/// disasm + exe constants)): `0x1403AB290` Guard Armor, `0x1403CB1C0` Trickmaster, `0x1403CFE10`
+/// Jafar, `0x1403C2B70` Parasite Cage, `0x1403E1690` Dragon Maleficent.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DropAim {
+    /// At the boss's position (`0x1401A49B0`) raised by `up` (5.0 `0x1406C11D8`, Trickmaster 4.5
+    /// `0x1405455BC`); pitch −70° (`0x14052BA48`), yaw = random × 360° (`0x14029CF00`).
+    Above { up: f32 },
+    /// Jafar: the fixed point (0, 20, 0, 1) (`0x14066F780`), angles (0, 0, 0, 1) (`0x1406C1430`),
+    /// not normalised.
+    Fixed,
+    /// Dragon Maleficent: above the boss (5.0), pitch −70°, yaw = atan2 of (Sora's point
+    /// `0x1401F0AB0(…, 0)` − the boss) + a random in ±45° (`0x1401A6530(−π/4, π/4)`).
+    TowardSora,
+}
+
+/// A card's drop: its aim and the descriptor's `+0x2C` flags (1, or 0x10001).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DropShape {
+    pub aim: DropAim,
+    pub flags: u32,
+}
+
+pub fn drop_shape(kind: u8) -> Option<DropShape> {
+    Some(match kind {
+        0x3A | 0x3E => DropShape { aim: DropAim::Above { up: 5.0 }, flags: 1 },
+        0x3B => DropShape { aim: DropAim::Above { up: 4.5 }, flags: 0x1_0001 },
+        0x3C => DropShape { aim: DropAim::Fixed, flags: 0x1_0001 },
+        0x40 => DropShape { aim: DropAim::TowardSora, flags: 0x1_0001 },
+        _ => return None,
+    })
+}
+
+/// The drop's speed (`+0x28`, 0.2 `0x140509234`) and pitch (−70°, `0x14052BA48`).
+pub const DROP_SPEED: f32 = 0.2;
+pub const DROP_PITCH: f32 = -1.221_730_5;
+const DEG: f32 = 0.017_453_292;
+
+/// The descriptor the boss's own code builds (before Re:CoM's angle normaliser `0x140293F20`,
+/// which every aim but [`DropAim::Fixed`] passes through). `r` is Re:CoM's random float.
+pub fn drop_desc(kind: u8, boss: [f32; 4], sora: [f32; 4], r: f32) -> Option<(crate::drops::PrizeDesc, bool)> {
+    let sh = drop_shape(kind)?;
+    let up = |dy: f32| [boss[0], boss[1] + dy, boss[2], boss[3]];
+    let (pos, angles, normalise) = match sh.aim {
+        DropAim::Above { up: dy } => (up(dy), [DROP_PITCH, r * 360.0 * DEG, 0.0, 1.0], true),
+        DropAim::Fixed => ([0.0, 20.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0], false),
+        DropAim::TowardSora => {
+            let quarter = std::f32::consts::FRAC_PI_4;
+            let spread = r * (quarter - -quarter).abs() + -quarter;
+            let yaw = spread + (sora[0] - boss[0]).atan2(sora[2] - boss[2]);
+            (up(5.0), [DROP_PITCH, yaw, 0.0, 1.0], true)
+        }
+    };
+    Some((crate::drops::PrizeDesc { pos, angles, kind: kind as u32, arg: 0, speed: DROP_SPEED, flags: sh.flags }, normalise))
+}
+
 /// The boss a gimmick card belongs to.
 pub fn boss(kind: u32) -> Option<&'static str> {
     BOSSES.iter().find(|b| b.0 as u32 == kind).map(|b| b.1)
@@ -457,6 +559,52 @@ mod tests {
         assert_eq!(roll_step(3, Some(3), true, true, false), Roll::Wait);
         assert_eq!(roll_step(5, Some(3), true, true, false), Roll::NoDrop);
         assert_eq!(roll_step(ROLL_GIVE_UP + 1, None, true, false, false), Roll::NoStagger);
+    }
+
+    #[test]
+    fn hp_thresholds_once_each() {
+        assert_eq!(hp_reached(1000, 1000), 0);
+        assert_eq!(hp_reached(750, 1000), 1);
+        assert_eq!(hp_reached(500, 1000), 3);
+        assert_eq!(hp_reached(249, 1000), 7);
+        // First hit 1000 → 700: 75 crossed.
+        let (m, n) = hp_step(None, 5, 1000, 700, 1000);
+        assert_eq!((n, m.done, m.owed), (1, 1, 1));
+        // Paid; then one hit across 50 and 25: both crossed by one hit (one card, § choices).
+        let m = HpMarks { owed: 0, ..m };
+        let (m, n) = hp_step(Some(m), 5, 700, 200, 1000);
+        assert_eq!((n, m.done, m.owed), (6, 7, 6));
+        assert_eq!(hp_names(n), "50/25");
+        // Never again in this fight.
+        let (_, n) = hp_step(Some(m), 5, 200, 10, 1000);
+        assert_eq!(n, 0);
+        // A boss first seen below 50 % (another handle: a new fight): only 25 still to come.
+        let (m, n) = hp_step(Some(m), 9, 400, 390, 1000);
+        assert_eq!((n, m.done), (0, 3));
+        assert_eq!(hp_step(Some(m), 9, 390, 250, 1000).1, 4);
+        assert_eq!(hp_reached(0, 0), 0);
+    }
+
+    #[test]
+    fn drops_as_each_boss_builds_them() {
+        let boss = [10.0, 1.0, -4.0, 1.0];
+        let sora = [10.0, 0.0, 6.0, 1.0];
+        let (d, n) = drop_desc(0x3A, boss, sora, 0.5).unwrap();
+        assert!(n && d.pos == [10.0, 6.0, -4.0, 1.0] && d.kind == 0x3A && d.flags == 1 && d.speed == 0.2);
+        assert!((d.angles[1] - std::f32::consts::PI).abs() < 1e-5 && d.angles[0] == DROP_PITCH);
+        let (d, _) = drop_desc(0x3B, boss, sora, 0.0).unwrap();
+        assert!(d.pos[1] == 5.5 && d.flags == 0x1_0001);
+        let (d, n) = drop_desc(0x3C, boss, sora, 0.9).unwrap();
+        assert!(!n && d.pos == [0.0, 20.0, 0.0, 1.0] && d.angles == [0.0, 0.0, 0.0, 1.0]);
+        // Dragon: toward Sora (straight +z: yaw 0) ± 45°; r = 0.5 → 0.
+        let (d, _) = drop_desc(0x40, boss, sora, 0.5).unwrap();
+        assert!(d.angles[1].abs() < 1e-6 && d.pos[1] == 6.0 && d.flags == 0x1_0001);
+        let (d, _) = drop_desc(0x40, boss, sora, 0.0).unwrap();
+        assert!((d.angles[1] + std::f32::consts::FRAC_PI_4).abs() < 1e-6);
+        assert_eq!(drop_desc(0x3D, boss, sora, 0.0), None);
+        for b in BREAK_BOSSES {
+            assert!(drop_shape(b.kind).is_some(), "{}", b.rtti);
+        }
     }
 
     #[test]

@@ -629,10 +629,18 @@ unsafe fn take_kh1_hit(enemy: usize) -> Option<usize> {
 /// play. Re:CoM's own path for an interruptible card (`+0x260 & 0x2000001`: end the card, then
 /// take the hit) runs for a KH1 hit.
 pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
-    let o: PlRetFn = orig(&ORIG_ENEMY_HIT);
     if !mv::kh1_on() {
-        return o(enemy);
+        return orig::<PlRetFn>(&ORIG_ENEMY_HIT)(enemy);
     }
+    let hp: i32 = rd(enemy + 0x274);
+    let r = kh1_enemy_hit(enemy);
+    // Gimmick cards, trigger (d): a card-break boss crossing 75 / 50 / 25 % of its max HP.
+    super::gimmick::after_hp(enemy, hp);
+    r
+}
+
+unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
+    let o: PlRetFn = orig(&ORIG_ENEMY_HIT);
     // M7 f3 (decision 38): KH1's pace for the hits Stop held (one compare unless they are landing).
     super::magic::held_hit_pace(enemy);
     let Some(part) = take_kh1_hit(enemy) else {

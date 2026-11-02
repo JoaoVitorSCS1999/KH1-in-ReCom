@@ -59,6 +59,7 @@ const HANDLE: usize = 0x20;
 /// (`+0x60`), HP (`+0x274`).
 const EN_FLAGS: usize = 0x260;
 const EN_STATE: usize = 0x60;
+const EN_NEXT: usize = 0x68;
 const EN_HP: usize = 0x274;
 
 /// CBTL (`CCardBattle`, task 0x16). Checked (decomp + exe: every getter reads it).
@@ -130,6 +131,12 @@ unsafe fn install_break(b: usize) {
             return;
         }
     }
+    for c in crate::sites::GIMMICK_HP_CALLEES.iter().chain(crate::sites::GIMMICK_HP_CHECKED) {
+        if have(b + c.rva as usize, c.expect.len()) != c.expect {
+            log(&format!("gimmick: {} is not as expected; no card breaks or HP drops for the five bosses", c.name));
+            return;
+        }
+    }
     for k in gm::BREAK_BOSSES {
         let want = format!(".?AV{}@@", k.rtti);
         if super::stats::rtti_name(b, b + k.vtable as usize).as_deref() != Some(want.as_str()) {
@@ -146,9 +153,9 @@ pub fn mark_installed() {
 
 pub fn start_line() -> String {
     let brk = if BREAK_OK.load(Ordering::Acquire) {
-        "; a KH1 combo finisher that interrupts Guard Armor's, Trickmaster's, Jafar's, Parasite Cage's or Dragon Maleficent's attack posts CBTL's card-break message 3 (0x1401D2770), so its own state 13 staggers it and rolls its card"
+        "; Guard Armor, Trickmaster, Jafar, Parasite Cage and Dragon Maleficent: a KH1 combo finisher that interrupts their attack, or Sora's Guard blocking their attack or shot, posts CBTL's card-break message 3 (0x1401D2770), so their own state 13 staggers them and rolls the card; at 75 / 50 / 25 % of their max HP they drop it without a stagger (their own drop code's descriptor and conditions, Re:CoM's prize factory)"
     } else {
-        "; no card break (sites not as read): those five bosses' cards don't drop"
+        "; no card breaks or HP drops (sites not as read): those five bosses' cards don't drop"
     };
     format!("{}{brk}", start_base())
 }
@@ -406,32 +413,218 @@ pub unsafe fn after_kh1_hit(enemy: usize, row: Option<usize>, interrupted: bool)
         }
         return;
     }
+    if let Some(to) = post_break(enemy, boss, "break") {
+        note(|| {
+            format!(
+                "break: KH1 finisher row {} interrupted {}'s attack (HP {}): CBTL message 3 posted to handle {to:#x}; its state 13 ({:#x}) staggers it and rolls the {}",
+                row.unwrap_or(0),
+                boss.rtti,
+                rd::<i32>(enemy + EN_HP),
+                0x1_4000_0000u64 + boss.stagger as u64,
+                gm::describe(boss.kind as u32)
+            )
+        });
+    }
+}
+
+/// Re:CoM's card break for one of the five: CBTL's message 3 posted on CBTL's queue as the
+/// resolver `0x14015EAC0` posts it (delay 0, from CBTL's handle, no record), then watched for the
+/// log. The boss's handle, when posted.
+unsafe fn post_break(enemy: usize, boss: &gm::BreakBoss, tag: &str) -> Option<u32> {
     let c = cbtl_now();
     if c == 0 {
-        note(|| format!("break: {}: no CBTL, no card break", boss.rtti));
-        return;
+        note(|| format!("{tag}: {}: no CBTL, no card break", boss.rtti));
+        return None;
     }
     let to: u32 = rd(enemy + HANDLE);
     let ok = func::<PostFn>(POST)(rd(c + CBTL_QUEUE), 0, rd(c + HANDLE), to, gm::MESSAGE_BROKEN, 0);
     if ok == 0 {
-        note(|| format!("break: {}: CBTL's message queue is full; no card break", boss.rtti));
-        return;
+        note(|| format!("{tag}: {}: CBTL's message queue is full; no card break", boss.rtti));
+        return None;
     }
     BREAK_KIND.store(boss.kind as u32, Ordering::Release);
     BREAK_FRAMES.store(0, Ordering::Release);
     BREAK_ENTERED.store(0, Ordering::Release);
     DROP_SEEN.store(0, Ordering::Release);
     BREAK_HANDLE.store(to, Ordering::Release);
-    note(|| {
-        format!(
-            "break: KH1 finisher row {} interrupted {}'s attack (HP {}): CBTL message 3 posted to handle {to:#x}; its state 13 ({:#x}) staggers it and rolls the {}",
-            row.unwrap_or(0),
-            boss.rtti,
-            rd::<i32>(enemy + EN_HP),
-            0x1_4000_0000u64 + boss.stagger as u64,
-            gm::describe(boss.kind as u32)
-        )
-    });
+    Some(to)
+}
+
+/// The last blocked attack that broke a boss: (its collision, the collision's hit serial).
+static GUARD_LAST: std::sync::Mutex<(usize, i32)> = std::sync::Mutex::new((0, 0));
+/// A bullet's shooter handle (`CBullet +0x238`, `crate::guard::bullet::SHOOTER`).
+const BULLET_SHOOTER: usize = crate::guard::bullet::SHOOTER;
+/// A collision's hit serial (`crate::guard::coll::SERIAL`): one per attack instance.
+const COLL_SERIAL: usize = crate::guard::coll::SERIAL;
+
+/// Trigger (a) (owner, 2026-11-01), from the Guard block detection (`win::guard::on_result`, the
+/// pair-dispatch wrapper, independent of the Guard reactions toggle): Sora's KH1 Guard blocked an
+/// attack whose owner is one of the five card-break bosses (its own collision: melee and body
+/// attacks), or a Re:CoM shot (`CBullet` / `CHomingBullet`) one of them fired (`+0x238`): the boss
+/// gets Re:CoM's card break ([`post_break`]). Once per blocked attack (its collision and hit
+/// serial); never a boss in state 13 (or with it next), a dead one, or one whose break is pending.
+pub unsafe fn on_guard_block(owner: usize, c: usize) {
+    if owner == 0 || !BREAK_OK.load(Ordering::Acquire) || !ON.load(Ordering::Acquire) {
+        return;
+    }
+    let b = base();
+    let vt: usize = rd(owner);
+    let (enemy, via) = if vt == va(b, crate::guard::bullet::VTABLE) || vt == va(b, crate::guard::bullet::HOMING_VTABLE) {
+        (func::<mv::HandleFn>(mv::HANDLE_OBJ)(rd::<u32>(owner + BULLET_SHOOTER)), "its shot")
+    } else {
+        (owner, "its attack")
+    };
+    if enemy == 0 {
+        return;
+    }
+    let Some(boss) = gm::break_boss((rd::<usize>(enemy).wrapping_sub(b)) as u32) else {
+        return;
+    };
+    if !mv::kh1_sora(rd(va(b, data::MAIN_PLAYER))) {
+        return;
+    }
+    let serial: i32 = rd(c + COLL_SERIAL);
+    if let Ok(mut g) = GUARD_LAST.lock() {
+        if *g == (c, serial) {
+            return;
+        }
+        *g = (c, serial);
+    }
+    let s13 = enemy + gm::state_at(gm::STATE_BROKEN);
+    let why = if rd::<i32>(enemy + EN_HP) <= 0 {
+        Some("dead")
+    } else if rd::<usize>(enemy + EN_STATE) == s13 || rd::<usize>(enemy + EN_NEXT) == s13 {
+        Some("already in its card-break stagger")
+    } else if BREAK_HANDLE.load(Ordering::Acquire) == rd::<u32>(enemy + HANDLE) {
+        Some("a break is already on its way")
+    } else {
+        None
+    };
+    if let Some(w) = why {
+        note(|| format!("guard break: Guard blocked {}'s {via}: no break ({w})", boss.rtti));
+        return;
+    }
+    if let Some(to) = post_break(enemy, boss, "guard break") {
+        note(|| {
+            format!(
+                "guard break: Guard blocked {} ({via}, coll {c:#x} serial {serial}; HP {}): CBTL message 3 posted to handle {to:#x}; its state 13 ({:#x}) staggers it and rolls the {}",
+                boss.rtti,
+                rd::<i32>(enemy + EN_HP),
+                0x1_4000_0000u64 + boss.stagger as u64,
+                gm::describe(boss.kind as u32)
+            )
+        });
+    }
+}
+
+/// Trigger (d)'s marks for the boss being fought (a handle per boss; a new handle is a new fight).
+static HP_MARKS: std::sync::Mutex<Vec<gm::HpMarks>> = std::sync::Mutex::new(Vec::new());
+/// Re:CoM's enemy max-HP getter (hooked by the stats: the KH1 max at Damage = KH1), the receiver
+/// set, Sora's point, the angle normaliser, the random float, the entity-factory getter, the prize
+/// factory (through our drop-log wrapper).
+const MAX_HP: u32 = 0x0017_F5A0;
+const RECEIVER_SET: u32 = 0x0016_3740;
+const SORA_POINT: u32 = 0x001F_0AB0;
+const ANGLES: u32 = 0x0029_3F20;
+const RAND: u32 = 0x0029_CF00;
+const FACTORY: u32 = 0x001A_8A80;
+const SPAWN: u32 = 0x001A_89C0;
+type MaxHpFn = unsafe extern "win64" fn(usize) -> i32;
+type ReceiverFn = unsafe extern "win64" fn(u32);
+type PointFn = unsafe extern "win64" fn(*mut [f32; 4], i32) -> *const [f32; 4];
+type AnglesFn = unsafe extern "win64" fn(*mut f32);
+type RandFn = unsafe extern "win64" fn() -> f32;
+type FactoryFn = unsafe extern "win64" fn() -> usize;
+/// The boss fields its own drop code tests (Checked (decomp + disasm)).
+const PC_FLAGS: usize = 0xCD4;
+const TM_TABLE: usize = 0xCE8;
+const TM_TABLE_FLAGS: usize = 0x2C8;
+const JAFAR_STATE: usize = 0xE5C;
+const DRAGON_FOOTING: usize = 0xD18;
+
+/// The boss's own drop condition (its drop code's tests other than the chance), None = allowed.
+unsafe fn own_condition(kind: u8, e: usize) -> Option<&'static str> {
+    match kind {
+        // Parasite Cage (`0x1403C2BDB`): none once its card was used (`+0xCD4 & 2`).
+        0x3E if rd::<u8>(e + PC_FLAGS) & 2 != 0 => Some("its card was used already (+0xCD4 & 2)"),
+        // Trickmaster (`0x1403CB1F4`): its table object's `+0x2C8 & 1`.
+        0x3B => {
+            let t: usize = rd(e + TM_TABLE);
+            (t == 0 || rd::<u32>(t + TM_TABLE_FLAGS) & 1 == 0).then_some("its table's +0x2C8 & 1 is clear")
+        }
+        // Jafar (`0x1403CFE29`): not in its state 15 (`+0xE5C`).
+        0x3C if rd::<i32>(e + JAFAR_STATE) == 0xF => Some("it is in its state 15 (+0xE5C)"),
+        // Dragon Maleficent (`0x1403E16BD`): no footing of its own out (`+0xD18`, a live handle).
+        0x40 => {
+            let h: u32 = rd(e + DRAGON_FOOTING);
+            (h != 0 && func::<mv::HandleFn>(mv::HANDLE_OBJ)(h) != 0).then_some("its footing is out (+0xD18)")
+        }
+        _ => None,
+    }
+}
+
+/// Trigger (d), from the KH1 enemy-hit wrapper after every hit (`hp` before it): one of the five
+/// crossing 75 / 50 / 25 % of its max HP drops its card without a stagger, made as its own drop
+/// code makes it (the receiver, the descriptor, Re:CoM's prize factory). Once per threshold per
+/// fight; one card per hit even across several thresholds; a threshold its own condition refuses
+/// waits for a later hit. Not on the killing hit.
+pub unsafe fn after_hp(enemy: usize, before: i32) {
+    if !BREAK_OK.load(Ordering::Acquire) || !ON.load(Ordering::Acquire) {
+        return;
+    }
+    let b = base();
+    let Some(boss) = gm::break_boss((rd::<usize>(enemy).wrapping_sub(b)) as u32) else {
+        return;
+    };
+    let after: i32 = rd(enemy + EN_HP);
+    if after <= 0 || !mv::kh1_sora(rd(va(b, data::MAIN_PLAYER))) {
+        return;
+    }
+    let handle: u32 = rd(enemy + HANDLE);
+    let Ok(mut marks) = HP_MARKS.lock() else { return };
+    let prev = marks.iter().copied().find(|m| m.handle == handle);
+    if prev.is_some_and(|m| m.done == 7 && m.owed == 0) || (prev.is_none() && after >= before) {
+        return;
+    }
+    let max = func::<MaxHpFn>(MAX_HP)(enemy);
+    let (mut m, new) = gm::hp_step(prev, handle, before, after, max);
+    if new != 0 {
+        note(|| format!("hp drop {}: {} at {after} / {max} HP (from {before})", gm::hp_names(new), boss.rtti));
+    }
+    if m.owed != 0 {
+        match own_condition(boss.kind, enemy) {
+            Some(w) => note(|| format!("hp drop {}: {} waits: {w}", gm::hp_names(m.owed), boss.rtti)),
+            None => {
+                let owed = m.owed;
+                m.owed = 0;
+                spawn_card(enemy, boss, owed);
+            }
+        }
+    }
+    marks.retain(|x| x.handle != handle);
+    if marks.len() >= 8 {
+        marks.remove(0);
+    }
+    marks.push(m);
+}
+
+/// The boss's card as its own drop code makes it: the receiver (`0x140163740`, the boss's handle),
+/// the descriptor ([`gm::drop_desc`]; Re:CoM's random float, angle normaliser), Re:CoM's prize
+/// factory `0x1401A89C0(0x1401A8A80(), &desc, 0)`.
+unsafe fn spawn_card(enemy: usize, boss: &gm::BreakBoss, owed: u8) {
+    func::<ReceiverFn>(RECEIVER_SET)(rd(enemy + HANDLE));
+    let pos: [f32; 4] = rd(rd::<usize>(enemy + 0xF0) + 0x30);
+    let mut sora = [0f32; 4];
+    if boss.kind == 0x40 {
+        func::<PointFn>(SORA_POINT)(&mut sora, 0);
+    }
+    let r = if boss.kind == 0x3C { 0.0 } else { func::<RandFn>(RAND)() };
+    let Some((mut desc, normalise)) = gm::drop_desc(boss.kind, pos, sora, r) else { return };
+    if normalise {
+        func::<AnglesFn>(ANGLES)(desc.angles.as_mut_ptr());
+    }
+    let prize = func::<SpawnFn>(SPAWN)(func::<FactoryFn>(FACTORY)(), &desc, 0);
+    note(|| format!("hp drop {}: {} made at ({:.2}, {:.2}, {:.2}), prize {prize:#x} (no stagger)", gm::hp_names(owed), gm::describe(boss.kind as u32), desc.pos[0], desc.pos[1], desc.pos[2]));
 }
 
 /// Each frame while a break is pending (from [`request`]): the boss's state 13 and its card's
