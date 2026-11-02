@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 133: M11: the KH1 Air Pirate, version 0.73.0 (2026-11-01)
+
+- M11 (owner, 2026-11-02): a flier.
+- Framework: `Behaviour::set_target_grounded` (KH1's target state `+0x70`; fed from Sora's mover floor contact);
+  the asset converter accepts a bone 1 named `m_ex…_sk` (Re:CoM's Air Pirate skeleton).
+- Air Pirate (`xa_ex_2210` ↔ `CEnemyAirpirate` id 22; 126 constants, 49 request words; Checked (files + decomp)):
+  appearance, rises to 170 above Sora and circles 4–8 s, stops (203), engages; far: Sora below → dive (205–207) then
+  swoop; level → wind-up / take-off, banking flight, swoop or slash; above → climb and slash; 2–5 m: to 1 m above,
+  swoop, back off; < 2 m: back off and climb, or swoop and fly off 5–7 m; after 10 rounds circles again; a hit in the
+  dive doesn't flinch (211); 1–4 hits counter, 5–9 back off, 10+ circle. Swoop 200 (steered, frames 41–48), slash 212
+  (frames 39.3–51); guarding the swoop: KH1's recoil 213, the slash: Re:CoM's flinch (no 110). Vtable `0x1405309E8`,
+  ctor `0x14018A0B0`, alloc `0x14018931F` 0xCD0 → 0xCF0. Power: slash → id 0 (`e022_050` edits KH1's 212), swoop →
+  id 1 (Assumption).
+- Asset step: `ENEMY/0022/EN0022.ANN` (74 kept, KH1 clips 100–124), `.ASD` (2 + 2), `.SES`, `kh1-airpirate.json`.
+- Assumptions: the two world-height tests as heights above the battle floor (owner question); others in the doc.
+- Checked: tests, Windows build, 603 + 194 sites. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 132: M11: the KH1 Bandit; movement state 7, KH1's hit counter, world-aware scripts; an attack-point fix, version 0.72.0 (2026-11-01)
 
 - M11 (owner, 2026-11-02): a ground enemy.
