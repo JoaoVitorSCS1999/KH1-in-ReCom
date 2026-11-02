@@ -281,8 +281,14 @@ pub fn decode(s: &[u8]) -> Option<String> {
     s.iter().map(|&c| kh1_char(c)).collect()
 }
 
-/// The menu's words of one language: (message id, text) for each of [`NAMES`] found, and the ids
-/// that could not be decoded.
+/// Our own menu words, not KH1's (message ids above `Word.bin`'s 510–523 strings), the same text
+/// in every language: 901 "Stagger", the context tab's command for a held Re:CoM gimmick card
+/// (owner's word, 2026-11-01; KH1 has no such word, Checked (files: the six `Word.bin`); English
+/// everywhere: no translation was asked for). The DLL's `command_menu::OUR_WORDS` holds the same.
+pub const OUR_WORDS: &[(u16, &str)] = &[(901, "Stagger")];
+
+/// The menu's words of one language: (message id, text) for each of [`NAMES`] found, then
+/// [`OUR_WORDS`], and the ids that could not be decoded.
 pub fn words(word_bin: &[u8]) -> (Vec<(u16, String)>, Vec<u16>) {
     let strings = word_strings(word_bin);
     let (mut ok, mut missing) = (Vec::new(), Vec::new());
@@ -291,6 +297,9 @@ pub fn words(word_bin: &[u8]) -> (Vec<(u16, String)>, Vec<u16>) {
             Some(t) => ok.push((id, t)),
             None => missing.push(id),
         }
+    }
+    for &(id, t) in OUR_WORDS {
+        ok.push((id, t.to_string()));
     }
     (ok, missing)
 }
@@ -380,8 +389,11 @@ mod tests {
         }
         let (ok, missing) = words(&d);
         assert!(missing.is_empty(), "{missing:?}");
-        assert_eq!(ok.len(), NAMES.len());
+        assert_eq!(ok.len(), NAMES.len() + OUR_WORDS.len());
         assert!(ok.contains(&(7, "Fire".into())));
+        // Ours, after KH1's, above every KH1 message id.
+        assert_eq!(ok.last(), Some(&(901, "Stagger".into())));
+        assert!(OUR_WORDS.iter().all(|(id, _)| !NAMES.contains(id) && *id > 600));
         assert!(ok.contains(&(343, "W343".into())));
         // A short file misses the late ids.
         let (_, missing) = words(&d[..200]);

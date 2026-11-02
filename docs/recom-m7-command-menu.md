@@ -560,3 +560,10 @@ Not 1:1 / Assumptions:
 - At a save / warp point: Triangle there still acts without waiting for the tab (7.3's known gap);
   with L1 held it is shortcut 1 only.
 - An empty slot is drawn with the blank command's dash, greyed (KH1's 0x42).
+
+## Gimmick cards: "Stagger" in the context tab
+
+A held Re:CoM gimmick card (`recom-gimmick-cards.md`) puts our command `0xF0` ("Stagger", word id
+901, ours) in the context entry. Order: an object's command → Stagger → KH1's special offer (Sonic
+Blade), `crate::gimmick::context_entry`. Triangle on it is ours (`Outcome::gimmick`), not Re:CoM's
+Triangle action; confirm on row 3 never runs it (as every context command).

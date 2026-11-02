@@ -111,6 +111,8 @@ pub mod cmd {
             BLANK => 305,
             JUMP_ON => 313,
             COUNTER => 343,
+            // A held gimmick card's command (ours; `crate::gimmick`).
+            crate::gimmick::STAGGER => crate::gimmick::STAGGER_WORD,
             // M9 stage 9c.1: the specials and Sonic Blade's follow-ups (`crate::specials::cmd`).
             c => crate::specials::cmd::name(c).unwrap_or(c as u16),
         }
@@ -258,6 +260,10 @@ pub struct World {
     /// entry when no object took it: its command (0: none) and whether it is greyed (MP short).
     pub special: u8,
     pub special_grey: bool,
+    /// A held Re:CoM gimmick card (`crate::gimmick`): [`crate::gimmick::STAGGER`] when Re:CoM's
+    /// own play would take it now, else 0. Takes the context entry after an object's command and
+    /// before the special offer (`crate::gimmick::context_entry`).
+    pub gimmick: u8,
     /// M9 stage 9c.1: a running special's follow-up in the Attack row (`0x14039ED70`): Rave /
     /// Blast (0: none) and whether it is greyed.
     pub follow: u8,
@@ -436,6 +442,9 @@ pub struct Outcome {
     /// M9 stage 9c.1: a confirm KH1's commit refused, or a submenu it opened (`0x140293410`
     /// returns 0 for both): a running special's attacking bit goes.
     pub confirm_refused: bool,
+    /// Triangle on "Stagger" this frame: the held gimmick card is played (`win::gimmick`), not
+    /// Re:CoM's Triangle action.
+    pub gimmick: bool,
 }
 
 /// The context tab (`0x140277CF0`): 0 hidden, 1 sliding in, 2 in, 3 fading out.
@@ -653,15 +662,13 @@ impl Menu {
         self.items.lock = igrey;
         // The context command, entry 3 (`0x1402948F0` clears it, `0x140293000` sets it).
         r.cmds[3] = cmd::NONE;
-        if w.context != cmd::NONE {
-            r.cmds[3] = w.context;
-            r.grey &= !8;
-            r.lock &= !8;
-        } else if w.special != cmd::NONE {
-            // M9 stage 9c.1: the special offer comes last (`0x14028D0F0`) and only takes an entry
-            // no object took; greyed when it scored 1 (MP short).
-            r.cmds[3] = w.special;
-            if w.special_grey {
+        // An object's command, then a held gimmick card's "Stagger", then (M9 stage 9c.1) the
+        // special offer, which KH1 runs last (`0x14028D0F0`) and only into an entry nothing took;
+        // greyed when it scored 1 (MP short).
+        let (c, special) = crate::gimmick::context_entry(w.context, w.gimmick, w.special);
+        if c != cmd::NONE {
+            r.cmds[3] = c;
+            if special && w.special_grey {
                 r.grey |= 8;
                 r.lock |= 8;
             } else {
@@ -754,6 +761,11 @@ impl Menu {
             // Triangle action.
             if crate::specials::cmd::is_ours(c) {
                 out.special = Some(c);
+                out.triangle = false;
+            }
+            // A held gimmick card: ours to play, not Re:CoM's Triangle action.
+            if c == crate::gimmick::STAGGER {
+                out.gimmick = true;
                 out.triangle = false;
             }
         }
@@ -1330,6 +1342,10 @@ pub fn text_colour(bright: u8, alpha: f32) -> u32 {
     a << 24 | b << 16 | b << 8 | b
 }
 
+/// Our own menu words (message ids above KH1's `Word.bin`), English in every language: the
+/// asset step's `command_menu::OUR_WORDS` holds the same.
+pub const OUR_WORDS: &[(u16, &str)] = &[(crate::gimmick::STAGGER_WORD, crate::gimmick::STAGGER_TEXT)];
+
 /// The words (`kh1-command-menu.json`) of one language, as Re:CoM's font bytes (NUL-terminated),
 /// by message id.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1406,6 +1422,13 @@ pub fn parse_words(text: &str, lang: &str) -> Result<Words, String> {
     }
     if [1u16, 2, 3].iter().any(|id| out.get(*id).is_none()) {
         return Err("Attack / Magic / Items missing".into());
+    }
+    // Our own words (not KH1's): the asset step writes them; a manifest from before them gets the
+    // built-in text (the Re:CoM look draws it; the KH1 look needs the asset step's glyphs).
+    for (id, text) in OUR_WORDS {
+        if out.get(*id).is_none() {
+            out.by_id.push((*id, font_bytes(text).0));
+        }
     }
     Ok(out)
 }
@@ -1824,6 +1847,57 @@ mod tests {
         let mut o2 = Menu::new();
         o2.build(&World { context: cmd::OPEN, ..w });
         assert_eq!(o2.root.cmds[3], cmd::OPEN);
+    }
+
+    /// A held gimmick card: "Stagger" in the context tab (before the special offer, after an
+    /// object's command), gated by the tab as every context command; Triangle plays it as ours
+    /// (not Re:CoM's Triangle action); used, the tab fades.
+    #[test]
+    fn a_held_gimmick_card_offers_stagger() {
+        use crate::gimmick::{STAGGER, STAGGER_WORD};
+        use crate::specials::cmd as sp;
+        let w = World { gimmick: STAGGER, special: sp::SONIC_BLADE, ..world() };
+        let mut m = Menu::new();
+        m.show();
+        let mut frames = 0;
+        while m.tab.state != 2 {
+            let o = m.step(&w, press(|p| p.triangle = true));
+            assert!(!o.gimmick && o.special.is_none());
+            m.tick(1.0);
+            frames += 1;
+            assert!(frames < 30);
+        }
+        assert_eq!((frames, m.tab_cmd, cmd::name(m.tab_cmd)), (15, STAGGER, STAGGER_WORD));
+        assert!(m.root.grey & 8 == 0);
+        let o = m.step(&w, press(|p| p.triangle = true));
+        assert!(o.gimmick && !o.triangle && o.special.is_none());
+        assert_eq!(o.events, vec![Event::Context(STAGGER)]);
+        // Confirm on row 3 never plays it (the cursor never runs the context command).
+        m.root.cursor = 3;
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert!(!o.gimmick && o.sounds == vec![Sound::Error]);
+        // Played (no card held any more): the tab fades out.
+        let gone = World { gimmick: 0, ..world() };
+        m.step(&gone, Pad::default());
+        m.tick(1.0);
+        assert_eq!(m.tab.state, 3);
+        // An object's command takes the entry first; a greyed special doesn't grey Stagger.
+        let mut o2 = Menu::new();
+        o2.build(&World { context: cmd::OPEN, ..w });
+        assert_eq!(o2.root.cmds[3], cmd::OPEN);
+        let mut o3 = Menu::new();
+        o3.build(&World { special_grey: true, ..w });
+        assert!(o3.root.cmds[3] == STAGGER && o3.root.grey & 8 == 0);
+    }
+
+    #[test]
+    fn our_words_come_without_the_asset_step() {
+        let old = r#"{"format": "kh1-recom-assets command-menu 1", "words": {"us": {"1": "Attack", "2": "Magic", "3": "Items"}}}"#;
+        let w = parse_words(old, "fr").unwrap();
+        assert_eq!(w.get(crate::gimmick::STAGGER_WORD), Some(&b"Stagger\0"[..]));
+        let new = r#"{"format": "kh1-recom-assets command-menu 1", "words": {"us": {"1": "Attack", "2": "Magic", "3": "Items", "901": "Stagger"}}}"#;
+        let w = parse_words(new, "us").unwrap();
+        assert_eq!(w.by_id.iter().filter(|x| x.0 == crate::gimmick::STAGGER_WORD).count(), 1);
     }
 
     /// M9 stage 9c.1: Rave / Blast in the Attack row during the special (`0x14039ED70`): shown in

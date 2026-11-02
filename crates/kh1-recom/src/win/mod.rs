@@ -10,6 +10,7 @@ mod d2;
 mod damage;
 mod deck;
 mod drops;
+mod gimmick;
 mod guard;
 mod hook;
 mod items;
@@ -340,6 +341,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         install_items(base, s);
         install_specials(base);
         install_drops(base);
+        install_gimmick(base);
         install_unlocks(base);
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
@@ -473,6 +475,32 @@ fn install_drops(base: usize) {
         log(&drops::start_line());
     } else {
         log("drops: not hooked; no KH1 drops (the look table copy stays: Re:CoM's kinds read the same rows)");
+    }
+}
+
+/// Re:CoM's gimmick cards at Combat = KH1 (`gimmick`, `docs/recom-gimmick-cards.md`): the drop log on
+/// Re:CoM's prize factory, the pickup in the prize add wrapper (`drops::prize_add`: installed here
+/// when the KH1 item drops didn't install it), "Stagger" in the command menu's context tab.
+fn install_gimmick(base: usize) {
+    if !command_menu::installed() {
+        log("gimmick: no KH1 command menu; gimmick cards stay Re:CoM's at combat = kh1 (held in the hidden revolver, no Stagger)");
+        return;
+    }
+    // SAFETY: reads of the mapped exe.
+    if !unsafe { gimmick::install(base) } {
+        return;
+    }
+    let mut hooks = vec![hook::Hook { site: &crate::sites::GIMMICK_HOOKS[0], ours: gimmick::prize_spawn as *const () as usize, original: &gimmick::ORIG_PRIZE_SPAWN }];
+    if !drops::installed() {
+        let site = crate::sites::DROP_HOOKS.iter().find(|h| h.name == "prize add (0x1401F4AB0)").expect("site");
+        hooks.push(hook::Hook { site, ours: drops::prize_add as *const () as usize, original: &drops::ORIG_PRIZE_ADD });
+    }
+    // SAFETY: the targets' bytes are checked again inside, before anything is written.
+    if unsafe { hook::install_all(base, &hooks) } {
+        gimmick::mark_installed();
+        log(&gimmick::start_line());
+    } else {
+        log("gimmick: not hooked; gimmick cards stay Re:CoM's at combat = kh1 (held in the hidden revolver, no Stagger)");
     }
 }
 
