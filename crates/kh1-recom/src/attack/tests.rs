@@ -394,3 +394,35 @@ fn stun_impact_is_a_body_sphere() {
     let rip = live_attack(&m, 7, &WeaponData::kingdom_key()).unwrap();
     assert_eq!((rip.data.bone, rip.radius, rip.blade_t(&WeaponData::kingdom_key())), (KH1_WEAPON_BONE, 240.0, (0.0, 0.0)));
 }
+
+/// Damage = Re:CoM (owner, 2026-11-01, follow-ups): Gravity Break and Zantetsuken take KH1's
+/// percentage of the enemy's Re:CoM current HP (KH1 `0x1402BFA80` element 8: truncated, × the
+/// record's resist[8], at least its floor); every other row: None (the card's column stands).
+#[test]
+fn percent_rows_on_recoms_hp() {
+    let m = Moveset::kh1_defaults();
+    let w = WeaponData::kingdom_key();
+    let mut rng = kh1_core::Kh1Rand::new(1);
+    let t = twin(8);
+    let sora = Sora { strength: 10, max_mp: 5 };
+    // Gravity Break: (40 + 10) % of a Re:CoM HP of 1203 = 601 (601.5 truncated).
+    assert_eq!(kh1_percent_of_hp(&m, 4, sora, &w, Some(&t), 1203, &mut rng), Some(601));
+    // Strength 51 (max level): 91 %.
+    assert_eq!(kh1_percent_of_hp(&m, 4, Sora { strength: 51, max_mp: 5 }, &w, Some(&t), 1000, &mut rng), Some(910));
+    // Zantetsuken: 250 % of it (no stat term): more than the HP left.
+    assert_eq!(kh1_percent_of_hp(&m, 5, sora, &w, Some(&t), 1203, &mut rng), Some(3007));
+    // A boss record's resist[8] (2 %) and floor (KH1's boss rule): 250 % × 2 % of 4000 = 200;
+    // 50 % × 2 % of 50 = 0 → the floor 2.
+    let mut boss = twin(8);
+    boss.resist[8] = 2;
+    boss.min_damage = 2;
+    assert_eq!(kh1_percent_of_hp(&m, 5, sora, &w, Some(&boss), 4000, &mut rng), Some(200));
+    assert_eq!(kh1_percent_of_hp(&m, 4, sora, &w, Some(&boss), 50, &mut rng), Some(2));
+    // No KH1 record: 100 %, floor 1.
+    assert_eq!(kh1_percent_of_hp(&m, 4, sora, &w, None, 1000, &mut rng), Some(500));
+    assert_eq!(kh1_percent_of_hp(&m, 4, sora, &w, None, 1, &mut rng), Some(1));
+    // Not a % row.
+    for r in [13, 11, 8, 3, 7, 0x3E] {
+        assert_eq!(kh1_percent_of_hp(&m, r, sora, &w, Some(&t), 1000, &mut rng), None);
+    }
+}

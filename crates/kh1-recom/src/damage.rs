@@ -6,9 +6,13 @@
 //!   Keyblade's card (`save + 0x2674`, `crate::keyblades`) at a power column of Re:CoM's
 //!   `BattleCardList` ([`swing_column`]), plus Re:CoM's bonus `+0x664`, × Sora's attack stat
 //!   `+0x43C` ÷ 100 ([`card_ap`]); the attribute and status bits are the card's, and Re:CoM's own
-//!   enemy-card rewrite `0x1401E66A0` runs on them. Fire / Blizzard / Thunder carry their Re:CoM
-//!   magic card's (level 1) or sleight's (levels 2, 3) AP ([`spell_source`]), Sonic Blade its
-//!   sleight's ([`sonic_blade`]). Re:CoM's damage path then applies unchanged.
+//!   enemy-card rewrite `0x1401E66A0` runs on them. Fire / Blizzard / Thunder / Gravity / Stop and
+//!   Aero's wind carry their Re:CoM magic card's (level 1) or sleight's (levels 2, 3) AP
+//!   ([`spell_source`]), Gravity and Stop with Re:CoM's kinds 0xD / 8 ([`recom_kind`]); Sonic Blade
+//!   its sleight's ([`sonic_blade`]); Gravity Break and Zantetsuken KH1's % of Re:CoM's HP
+//!   ([`percent_of_hp_row`]). Re:CoM's damage path then applies unchanged.
+//!
+//! The setting is ini-only (`kh1-recom.ini`, read at start): Re:CoM's Config has no free item slot.
 //! - **KH1**: decisions 12 / 21 (KH1's formula on the twins' / proxies' KH1 records and HP).
 //!
 //! Everything here is Re:CoM's own arithmetic, Checked (decomp + disasm `0x1401F7520`,
@@ -223,13 +227,81 @@ fn recom_rows(spell: u8) -> Option<&'static [[u8; 16]; 3]> {
     })
 }
 
-/// The spells whose hits carry Re:CoM's card / sleight AP at Damage = Re:CoM. Cure already heals
-/// Re:CoM's amounts at both settings (decision 34). Gravity keeps KH1's % (now of Re:CoM's HP),
-/// Stop KH1's duration and resistance, Aero KH1's barrier and wind: owner questions
-/// (`docs/recom-m7-magic.md` § Spell damage at Damage = Re:CoM).
+/// The spells whose hits carry Re:CoM's card / sleight AP at Damage = Re:CoM (owner, 2026-11-01:
+/// Fire / Blizzard / Thunder; then Gravity, Stop and Aero's wind "use Re:CoM's own numbers"). Cure
+/// already heals Re:CoM's amounts at both settings (decision 34). Aero's barrier stays KH1's (it is
+/// no hit). `docs/recom-m7-magic.md` § Spell damage at Damage = Re:CoM.
 pub fn recom_spell(spell: u8) -> bool {
     use crate::magic::spell as s;
-    matches!(spell, s::FIRE | s::BLIZZARD | s::THUNDER)
+    matches!(spell, s::FIRE | s::BLIZZARD | s::THUNDER | s::GRAVITY | s::STOP | s::AERO)
+}
+
+/// The spells whose Re:CoM numbers only exist with Re:CoM's kind (Gravity's % of HP 0xD, Stop's
+/// ticks 8): outside a card battle (no `BattleCardList` AP) their hits keep KH1's rules, where the
+/// others take Re:CoM's cardless AP (the attack stat), as Re:CoM's field swing.
+pub fn needs_recom_kind(spell: u8) -> bool {
+    use crate::magic::spell as s;
+    matches!(spell, s::GRAVITY | s::STOP)
+}
+
+/// The hit kind Re:CoM's own card / sleight of this level gives its attack (`initMagic` /
+/// `initStockSkill`: `+0x668` = the row's `+0xB`), for the spells whose Re:CoM effect is the kind:
+/// Gravity / Gravira / Graviga **0xD** (rows 0x26 / 0x38 / 0x39: current HP × AP ÷ 100 behind the
+/// param gate `+0x40`, then the flatten state `+0xAC0`), Stop / Stopra / Stopga **8** (rows 0x27 /
+/// 0x3A / 0x3B: AP ticks into `+0x2D8` behind the gate `+0x2C`, then the stop state `+0x940`).
+/// Checked (exe rows, decomp `0x14017DC50`, `0x14017D260`). None: the KH1 row's kind stands (Fire,
+/// Blizzard, Thunder and Aero keep KH1's reactions, as the swings do).
+pub fn recom_kind(spell: u8, level: u8) -> Option<u32> {
+    if !needs_recom_kind(spell) {
+        return None;
+    }
+    recom_rows(spell)?.get(level.clamp(1, 3) as usize - 1).map(|r| r[0xB] as u32)
+}
+
+/// Re:CoM's Gravity kind (`0x14017DC50` case 0xD) and Stop kind (case 8). Checked (decomp).
+pub const RECOM_GRAVITY_KIND: u32 = 0xD;
+pub const RECOM_STOP_KIND: u32 = crate::magic::RECOM_STOP_KIND;
+
+/// Re:CoM's enemy param block (`enemy+0x308`) gates its kinds read (`0x14017DC50`; 0 = immune):
+/// Stop `+0x2C`, Gravity `+0x40`. Checked (disasm `0x14017DCB5`, `0x14017DD4C`).
+pub fn recom_gate_offset(spell: u8) -> Option<usize> {
+    use crate::magic::spell as s;
+    match spell {
+        s::STOP => Some(0x2C),
+        s::GRAVITY => Some(0x40),
+        _ => None,
+    }
+}
+
+/// Decision 14 for a spell hit (KH1's hits land on attacking actors): the card-interrupt bit
+/// `0x2000000` for an enemy in an attack (`+0x260 & 1`) that hasn't got it, **unless Re:CoM's own
+/// gate for the hit's kind is shut** (`gate` Some(false): Re:CoM refuses the hit; an immune enemy's
+/// attack goes on, as KH1's Stop on a `resist[9]` 0 enemy). `gate` None: no gate (KH1's rules, or
+/// a kind without one).
+pub fn interrupts(flags: u64, gate: Option<bool>) -> bool {
+    flags & 1 != 0 && flags & 0x200_0000 == 0 && gate != Some(false)
+}
+
+/// What Re:CoM's kind 0xD takes from an enemy (`0x14017DC50` → `0x14017DAB0`), for tests and the
+/// log: `(float)HP × AP / 100` (the boss rule `0x14015D940` when `+0x2B0` is set: not modelled),
+/// then `(int)(value × resistance % × +0x290 / 100)` in doubles, at least 1. Immune (gate 0): 0.
+pub fn recom_gravity_damage(hp: i32, ap: i32, gate_open: bool, resist_pct: f32, scale_290: f32) -> i32 {
+    if !gate_open {
+        return 0;
+    }
+    let v = (hp as f32 * ap as f32) / 100.0;
+    let d = ((v as f64) * (resist_pct as f64) * (scale_290 as f64) / 100.0) as i32;
+    d.max(1)
+}
+
+/// The KH1 swing rows whose record is the **% of HP** element (8): Gravity Break (`0x4F68`, 40 +
+/// Strength) and Zantetsuken (`0x4FD8`, 250, no stat term). At Damage = Re:CoM (owner, 2026-11-01)
+/// these take **KH1's percentage of Re:CoM's HP** instead of the Keyblade card's column 2:
+/// KH1's `0x1402BFA80` element 8 (`(int)(current HP × (power + stat [+ crit bonus]) / 100 ×
+/// resist[8])`, at least the record's floor, 1 when it is under 2; no Defence, no cap) on the
+/// enemy's Re:CoM current HP `+0x274`. Checked (KH1 decomp `0x1402BFA80`; btltbl records).
+pub fn percent_of_hp_row(kh1_row: usize, m: &Moveset) -> bool {
+    m.row(kh1_row).and_then(|rw| m.attack(rw.attack)).is_some_and(|a| a.element & 0xF == 8)
 }
 
 /// Re:CoM's Sonic Blade: sleight 9 (`initStockSkill` case 9), its dash row 0xF (column 0) and
@@ -354,7 +426,91 @@ mod tests {
             }
         }
         assert!(recom_spell(s::FIRE) && recom_spell(s::BLIZZARD) && recom_spell(s::THUNDER));
-        assert!(!recom_spell(s::CURE) && !recom_spell(s::GRAVITY) && !recom_spell(s::STOP) && !recom_spell(s::AERO));
+        // Owner (2026-11-01, follow-ups): Gravity, Stop and Aero's wind too; Cure is a heal.
+        assert!(recom_spell(s::GRAVITY) && recom_spell(s::STOP) && recom_spell(s::AERO));
+        assert!(!recom_spell(s::CURE));
         assert_eq!(trace_tag(15, 2, Table::Card, 1), ":recom 15 col 2 card 0x1");
+    }
+
+    /// The session's `SY0002.BIN` rows (Checked (files): `BattleCardList` at 0x270, `StockSkillList`
+    /// at 0xA60): Gravity card 0x1E power 20, status 0x93, attribute 5; Gravira 0x11 40, Graviga
+    /// 0x18 70 (attribute `+0xA` 5, status `+0xB` 0x93); Stop card 0x1F 9000, Stopra 0x12 15000,
+    /// Stopga 0x19 21000; Aero card 0x20 300 (attribute 1), Aerora 0x13 600, Aeroga 0x1A 900.
+    fn card(power: u16, status: u8, attr: u8) -> [u8; 16] {
+        let p = power.to_le_bytes();
+        [p[0], p[1], 0, 0, 0, 0, 0, 0, 0, status, 0, attr, 0, 0, 0, 0]
+    }
+    fn sleight(power: u16, attr: u8, status: u8) -> [u8; 16] {
+        let p = power.to_le_bytes();
+        [p[0], p[1], 0, 0, 0, 0, 0, 0, 0, 2, attr, status, 0, 0, 0, 0]
+    }
+
+    #[test]
+    fn gravity_maps_to_recoms_card_and_sleights() {
+        // KH1 level → Re:CoM's Gravity card, Gravira, Graviga; the power as is (initMagic 0x1E,
+        // initStockSkill mode 3).
+        let src: Vec<_> = (1..=3).map(|lv| spell_source(s::GRAVITY, lv).unwrap()).collect();
+        assert_eq!(src.iter().map(|x| (x.table, x.id, x.recom_row, x.rule)).collect::<Vec<_>>(), vec![(Table::Card, 0x1E, 0x26, Rule::Raw), (Table::Sleight, 0x11, 0x38, Rule::Raw), (Table::Sleight, 0x18, 0x39, Rule::Raw)]);
+        let rows = [card(20, 0x93, 5), sleight(40, 5, 0x93), sleight(70, 5, 0x93)];
+        let aps: Vec<i32> = src.iter().zip(rows.iter()).map(|(x, r)| row_ap(x.table, r, x.col, 37, x.rule).ap).collect();
+        assert_eq!(aps, vec![20, 40, 70], "20 / 40 / 70 % whatever the attack stat");
+        let a = row_ap(Table::Card, &rows[0], 0, 37, Rule::Raw);
+        assert_eq!((a.attr, a.status), (5, (1 << 2) | (1 << 8)));
+        // Re:CoM's kind 0xD for every level (rows 0x26 / 0x38 / 0x39 +0xB).
+        assert_eq!((1..=3).map(|lv| recom_kind(s::GRAVITY, lv)).collect::<Vec<_>>(), vec![Some(RECOM_GRAVITY_KIND); 3]);
+        assert_eq!(recom_gate_offset(s::GRAVITY), Some(0x40));
+        // Kind 0xD: HP × AP / 100, × resistance % × +0x290 / 100, at least 1; immune: nothing.
+        assert_eq!(recom_gravity_damage(1000, 20, true, 100.0, 1.0), 200);
+        assert_eq!(recom_gravity_damage(1000, 70, true, 50.0, 1.0), 350);
+        assert_eq!(recom_gravity_damage(333, 40, true, 100.0, 1.0), 133, "133.2 truncated");
+        assert_eq!(recom_gravity_damage(2, 20, true, 100.0, 1.0), 1, "at least 1");
+        assert_eq!(recom_gravity_damage(1000, 70, false, 100.0, 1.0), 0, "gate +0x40 = 0: immune");
+    }
+
+    #[test]
+    fn stop_maps_to_recoms_card_and_sleights() {
+        let src: Vec<_> = (1..=3).map(|lv| spell_source(s::STOP, lv).unwrap()).collect();
+        assert_eq!(src.iter().map(|x| (x.table, x.id, x.recom_row, x.rule)).collect::<Vec<_>>(), vec![(Table::Card, 0x1F, 0x27, Rule::Raw), (Table::Sleight, 0x12, 0x3A, Rule::Raw), (Table::Sleight, 0x19, 0x3B, Rule::Raw)]);
+        let rows = [card(9000, 0x03, 5), sleight(15000, 5, 0x03), sleight(21000, 5, 0x03)];
+        let ticks: Vec<i32> = src.iter().zip(rows.iter()).map(|(x, r)| row_ap(x.table, r, x.col, 37, x.rule).ap).collect();
+        assert_eq!(ticks, vec![9000, 15000, 21000], "Re:CoM ticks (50 a frame): 3 / 5 / 7 s");
+        // Every one fits the i16 the hit part carries (`+0x92`).
+        assert!(ticks.iter().all(|&t| t <= i16::MAX as i32));
+        assert_eq!((1..=3).map(|lv| recom_kind(s::STOP, lv)).collect::<Vec<_>>(), vec![Some(RECOM_STOP_KIND); 3]);
+        assert_eq!(recom_gate_offset(s::STOP), Some(0x2C));
+        assert!(needs_recom_kind(s::STOP) && needs_recom_kind(s::GRAVITY));
+    }
+
+    #[test]
+    fn aero_wind_maps_to_recoms_card_and_sleights() {
+        let src: Vec<_> = (1..=3).map(|lv| spell_source(s::AERO, lv).unwrap()).collect();
+        assert_eq!(src.iter().map(|x| (x.table, x.id, x.recom_row, x.rule)).collect::<Vec<_>>(), vec![(Table::Card, 0x20, 0x28, Rule::Stat), (Table::Sleight, 0x13, 0x3C, Rule::Stat), (Table::Sleight, 0x1A, 0x3D, Rule::Stat)]);
+        let rows = [card(300, 0x03, 1), sleight(600, 1, 0x03), sleight(900, 1, 0x03)];
+        // Power × attack stat ÷ 100 (initMagic 0x20, initStockSkill mode 1), attack stat 13.
+        let aps: Vec<(i32, u32)> = src.iter().zip(rows.iter()).map(|(x, r)| row_ap(x.table, r, x.col, 13, x.rule)).map(|a| (a.ap, a.attr)).collect();
+        assert_eq!(aps, vec![(39, 1), (78, 1), (117, 1)]);
+        // The wind keeps KH1's reaction (no Re:CoM kind), as Fire / Blizzard / Thunder.
+        assert_eq!(recom_kind(s::AERO, 2), None);
+        assert_eq!(recom_kind(s::FIRE, 1), None);
+        assert!(!needs_recom_kind(s::AERO) && !needs_recom_kind(s::FIRE));
+        assert_eq!(recom_gate_offset(s::AERO), None);
+    }
+
+    #[test]
+    fn spell_interrupts_follow_recoms_gate() {
+        // An attacking enemy: interrupted unless Re:CoM's gate refuses the hit.
+        assert!(interrupts(1, None));
+        assert!(interrupts(1, Some(true)));
+        assert!(!interrupts(1, Some(false)));
+        // Not attacking, or already interruptible: nothing to do.
+        assert!(!interrupts(0, Some(true)));
+        assert!(!interrupts(1 | 0x200_0000, Some(true)));
+    }
+
+    #[test]
+    fn percent_rows_are_gravity_break_and_zantetsuken() {
+        let m = Moveset::kh1_defaults();
+        let pct: Vec<usize> = (0..0x40).filter(|&r| percent_of_hp_row(r, &m)).collect();
+        assert_eq!(pct, vec![row::GRAVITY_BREAK, row::ZANTETSUKEN]);
     }
 }

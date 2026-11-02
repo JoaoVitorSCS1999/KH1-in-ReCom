@@ -209,6 +209,9 @@ frame earlier (`HIT_LEAD`, as every KH1 row), KH1's combo window, no homing / pu
   - Stun Impact: Strength + 4 through the curve, × `resist[10]` (KH1's own: an enemy with stun
     resistance 0 takes 1).
 - Re:CoM's extras (back bonus, weak part, boss falloff) on top, as every KH1 hit (decision 13).
+- At Damage = Re:CoM (owner, 2026-11-01): Gravity Break and Zantetsuken keep KH1's % (same rule,
+  record, Strength, `resist[8]` and floor) on the enemy's **Re:CoM** current HP instead of the
+  Keyblade card's column 2: `recom-kh1-attack.md` § Gravity Break and Zantetsuken.
 - MP charge: the records' 3 / 6 through the existing KH1 rule.
 
 ### Sounds (asset step, `ses::add_clips`)

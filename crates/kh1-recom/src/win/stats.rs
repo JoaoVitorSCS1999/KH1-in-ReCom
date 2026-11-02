@@ -436,6 +436,26 @@ pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_m
     Some(d.damage)
 }
 
+/// Damage = Re:CoM (owner, 2026-11-01): Gravity Break's and Zantetsuken's KH1 percentage of the
+/// enemy's Re:CoM current HP `hp_now` (`crate::attack::kh1_percent_of_hp`: the twin's / proxy's
+/// `resist[8]` and floor, else 100 %), with Sora's KH1 Strength (Gravity Break's stat term). None for
+/// other rows, at Damage = KH1 (`kh1_hit` does it there), and in Riku's story.
+pub fn recom_percent_hit(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32) -> Option<i32> {
+    if super::damage::kh1() || riku_story() {
+        return None;
+    }
+    let m = super::attack::moveset();
+    if !crate::damage::percent_of_hp_row(kh1_row, m) {
+        return None;
+    }
+    let record = kh1_record(enemy);
+    let w = equipped_weapon();
+    let strength = STATS.get()?.strength_with(sora_level, &w)?;
+    let mut g = RNG.lock().ok()?;
+    let rng = g.get_or_insert_with(|| kh1_core::Kh1Rand::new(1));
+    crate::attack::kh1_percent_of_hp(m, kh1_row, crate::attack::Sora { strength, max_mp }, &w, record.as_ref(), hp_now, rng)
+}
+
 /// The KH1 record (twin, else proxy / boss twin) of an enemy at the KH1 setting in Sora's story,
 /// for the spells' status gates (7.9: Stop's `resist[9]`).
 pub fn kh1_record(enemy: usize) -> Option<EnemyStats> {
