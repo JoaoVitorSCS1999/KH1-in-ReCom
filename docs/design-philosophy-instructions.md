@@ -442,6 +442,12 @@ At KH1 setting:
       Darkball (2026-11-02, on 0.71.0's questions): the drop on Re:CoM's bite power; warp smoke / trail
       **later with the effects milestone (M13)**; stays lockable while invisible; KH1's element-based
       reactions (Gravity stagger) **left out** for now.
+      Bandit / Air Pirate (2026-11-02, on 0.73.0's questions): the Bandit's thrown scimitar is **a Re:CoM
+      homing bullet moved by KH1's numbers, drawn with a Re:CoM effect**; **a shared enemy-guard step**
+      (Re:CoM's own body-guard flag) for the Bandit's block stance and spin repel, then the Large Body and
+      Defender; powers kept (leap on the whirl, swoop on Re:CoM's second sword attack); the Air Pirate's
+      world-height checks read as heights above the battle floor; the Bandit's Agrabah rules only in
+      Re:CoM's Agrabah.
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
