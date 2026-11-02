@@ -354,6 +354,8 @@ pub(super) unsafe fn after_enemy_hit(e: usize, r: u64, hp: i32) {
     func::<PickerFn>(g::func::PICKER)(e, g::PICKER_KIND);
     let next1: usize = rd(e + enemy::NEXT_STATE);
     let flinch = g::picker_flinches(flags) && next1 == e + g::state_offset(enemy::FLINCH_STATE);
+    // M11: a KH1 enemy's block without a KH1 recoil motion takes this Re:CoM flinch (owner 2026-11-02).
+    super::kh1_enemy::recom_flinch_settled(e, flinch);
     let mut card = "none";
     if flags & enemy::CARD_PLAYING != 0 {
         if flinch {

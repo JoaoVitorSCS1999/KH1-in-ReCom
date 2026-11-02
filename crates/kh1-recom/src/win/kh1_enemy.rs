@@ -158,6 +158,11 @@ struct Runtime {
     action_age: f32,
     /// Re:CoM's state at the last KH1 frame (the log of a state change while unhittable).
     last_state: Option<usize>,
+    /// A Guard blocked an attack whose recoil the model lacks: the next state 11 is Re:CoM's own
+    /// flinch (owner 2026-11-02, "Soldier choices"), not KH1's reaction.
+    recom_flinch: bool,
+    /// Re:CoM's own flinch runs (state 11's Re:CoM begin / step); ends at the next state 1.
+    recom_state: bool,
 }
 
 // SAFETY: a runtime (its behaviour holds `Rc`s that never leave it) is only touched under `RT`'s
@@ -353,6 +358,8 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             watch: ce::ClipWatch::default(),
             action_age: 0.0,
             last_state: None,
+            recom_flinch: false,
+            recom_state: false,
         });
         Some(v.len() - 1)
     })();
@@ -802,6 +809,7 @@ pub unsafe extern "win64" fn appear_step(en: usize) {
 /// State 1 begin: no Re:CoM idle / walk pick; KH1's motion carries on.
 pub unsafe extern "win64" fn think_begin(en: usize) {
     if with_rt(en, |rt| {
+        rt.recom_state = false;
         if rt.current.is_none() {
             play(en, rt, ke::react::req::IDLE, 8.0);
         }
@@ -955,8 +963,7 @@ unsafe fn start_reaction(en: usize, rt: &mut Runtime, hit: Option<Hit>) -> bool 
         let names = CLASSES[rt.class].attack_names;
         let aname = names.get(a as usize).copied().unwrap_or("?");
         let Some(recoil) = m.recoil_of(a) else {
-            // The model has no motion for the row's recoil (KH1's request names no entry,
-            // `0x1402A01E0`): Assumption: the attack is cut and the idle plays.
+            // Not expected (`guard_block` hands such a block to Re:CoM's flinch): the idle.
             rt.queued = None;
             play(en, rt, ke::react::req::IDLE, c.get("attack_blend"));
             rt.reaction = Some(Phase::Motion);
@@ -1014,6 +1021,28 @@ unsafe fn hp_ratio(en: usize) -> f32 {
 
 /// States 11 / 12 begin: KH1's reaction.
 pub unsafe extern "win64" fn react_begin(en: usize) {
+    // Re:CoM's own flinch for a blocked attack without a KH1 recoil motion (owner 2026-11-02): as
+    // before M10, Re:CoM's state 11 begin and step (`0x14017C530` / `0x140184100`); the KH1 frame
+    // waits (no velocity of ours, no KH1 motion) until the next state 1.
+    let recom = with_rt(en, |rt| {
+        rt.recom_state = false;
+        if !std::mem::take(&mut rt.recom_flinch) {
+            return false;
+        }
+        end_action(rt);
+        rt.clash = None;
+        rt.queued = None;
+        rt.current = None;
+        rt.reaction = None;
+        rt.recom_state = true;
+        rt.ai.on_hit(HitNews::Clash);
+        let k = rt.class;
+        line(k, || format!("e{}: clash without a KH1 recoil motion: Re:CoM's flinch", rd::<u32>(en + e::ID)));
+        true
+    });
+    if recom == Some(true) {
+        return call_original(en, ce::begin_slot(state::FLINCH));
+    }
     let hit = ours(en).and_then(|k| hit_of(en, k));
     let done = with_rt(en, |rt| {
         // KH1's hit handler: a damaging hit or a clash (the Shadow ignores a clash).
@@ -1035,6 +1064,9 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
 
 /// States 11 / 12 step: KH1's frame without the behaviour; the reaction's phases.
 pub unsafe extern "win64" fn react_step(en: usize) {
+    if with_rt(en, |rt| rt.recom_state) == Some(true) {
+        return call_original(en, ce::step_slot(state::FLINCH));
+    }
     let r = with_rt(en, |rt| {
         let dt: i32 = rd(en + e::DT);
         let step = crate::units::step_from_dt(dt.clamp(0, 1000));
@@ -1086,6 +1118,8 @@ pub unsafe extern "win64" fn defeat_begin(en: usize) {
     call_original(en, ce::begin_slot(state::DEFEAT));
     with_rt(en, |rt| {
         rt.dead = true;
+        rt.recom_flinch = false;
+        rt.recom_state = false;
         if !start_reaction(en, rt, hit) {
             play(en, rt, ke::react::req::FLINCH, 0.0);
             rt.reaction = Some(Phase::Motion);
@@ -1118,11 +1152,30 @@ pub(super) unsafe fn guard_block(en: usize) -> Option<&'static str> {
     })
     .flatten();
     let a = attack?;
+    // Owner 2026-11-02: a blocked attack whose recoil the model lacks gets Re:CoM's flinch, as
+    // before M10 (`super::guard`'s picker path); our state 11 then runs Re:CoM's.
+    if manifest(k).recoil_of(a).is_none() {
+        with_rt(en, |rt| {
+            rt.clash = None;
+            rt.recom_flinch = true;
+        });
+        let name = CLASSES[k].attack_names.get(a as usize).copied().unwrap_or("?");
+        line(k, || format!("e{}: Guard blocked its {name} (no KH1 recoil motion): Re:CoM's flinch", rd::<u32>(en + e::ID)));
+        return None;
+    }
     // Re:CoM's attack end with state 11 next (bit 0 off, its card end).
     func::<EndFn>(f::ATTACK_END)(en, crate::battle::state_address(en, state::FLINCH), 0);
     let name = CLASSES[k].attack_names.get(a as usize).copied().unwrap_or("?");
     line(k, || format!("e{}: Guard blocked its {name}", rd::<u32>(en + e::ID)));
     Some(CLASSES[k].title)
+}
+
+/// `super::guard`: Re:CoM's picker ran for a block `guard_block` handed back; without its flinch the
+/// mark is dropped (a later hit is KH1's reaction again).
+pub(super) unsafe fn recom_flinch_settled(en: usize, flinched: bool) {
+    if !flinched && any_installed() {
+        with_rt(en, |rt| rt.recom_flinch = false);
+    }
 }
 
 /// The trace's tokens (F9 recording): per class (`shadow …`, `soldier …`), every KH1 enemy's

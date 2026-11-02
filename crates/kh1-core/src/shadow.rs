@@ -194,7 +194,7 @@ struct Wp {
 type Cx = crate::enemy::script::Cx<Consts, Attack, Wp>;
 type Task = crate::enemy::script::Task;
 
-use crate::enemy::script::{approach, dist_to_target, face_target, frame, motion_frames, move_toward, poll, pos, push, rand, rand_range, random_offset, set_state, set_target, target, wait_frames, wait_grounded, walk_to};
+use crate::enemy::script::{approach, dist_to_target, face_target, frame, motion_frames, move_toward, poll, pos, push, rand, rand_range, random_offset, set_state, set_target, target, wait_grounded};
 
 impl crate::enemy::Numbers for Consts {
     fn num(&self, name: &str) -> f32 {
@@ -391,25 +391,13 @@ async fn leap(cx: &Cx) {
     }
 }
 
-/// `0x1BC4(home, outer, inner)`: two random points around home (lengths [inner − band, inner)
-/// and [outer − band, outer)), walk to each, sometimes stand (idle) a while, and walk home when
-/// too far.
+/// `0x1BC4(home, outer, inner)`: KH1's wander, the shared routine (`crate::enemy::script::wander`,
+/// the Soldier's `0x15BA`): two random points about the Shadow's **current** position (`sys 7` adds
+/// `actor+0x10`), walk to each, sometimes stand, home when too far. (M10's port took the points about
+/// home; owner 2026-11-02: KH1's rule.)
 async fn wander(cx: &Cx) {
     let c = cx.borrow().c.clone();
-    let home = cx.borrow().home;
-    let a = home + random_offset(cx, c.wander_inner() - c.wander_band(), c.wander_inner());
-    let b = home + random_offset(cx, c.wander_outer() - c.wander_band(), c.wander_outer());
-    walk_to(cx, a, 0, c.wander_timeout()).await;
-    walk_to(cx, b, 0, c.wander_timeout()).await;
-    if rand(cx, "wander idle") - c.wander_idle_chance() < 0.0 {
-        push(cx, Cmd::Motion { request: req::IDLE, blend: c.attack_blend() });
-        let n = rand_range(cx, c.wander_idle_min(), c.wander_idle_max(), "wander idle time");
-        wait_frames(cx, n).await;
-    }
-    if (pos(cx) - home).length() - c.wander_home_max() > 0.0 {
-        walk_to(cx, home, 0, c.wander_timeout()).await;
-        frame().await;
-    }
+    crate::enemy::script::wander(cx, c.wander_inner(), c.wander_outer(), c.wander_band(), c.wander_timeout(), c.wander_idle_chance(), c.wander_idle_min(), c.wander_idle_max(), c.wander_home_max(), c.attack_blend()).await;
 }
 
 /// The idle behaviour (`0xD38` → `0xD50`): forever wander, then dig and come up elsewhere
