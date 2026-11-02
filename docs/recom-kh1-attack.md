@@ -950,6 +950,8 @@ numbers of decisions 12 / 21 apply only to KH1 swings).
   - Checked (decomp + files). This corrects KH2-Combat-in-KH1's `kh1-intangible.md`, which calls
     them "motion events".
   - So at KH1, Sora takes damage during the roll, with no hit reaction for 12 frames.
+  - Since 2026-11-02 this is only `dodge_roll = kh1`. The default `recom` runs Re:CoM's own roll
+    and its own untouchable bit (`recom-kh1-movement.md` § Re:CoM's roll).
   - Re:CoM's untouchable bit `+0x418 & 1` is no longer set. Our wrapper on the damage check
     `0x1401E6DE0` sets `+0x420 & 2` for that call only. The check reads `+0x420` once at its start,
     and after applying the damage takes its own no-reaction exit (`(+0x420 & 0x8010002) ≠ 0` →

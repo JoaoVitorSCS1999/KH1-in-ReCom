@@ -14,6 +14,9 @@
 //! - jump exe `0x1401EDA60` (action 7), `CPlayerSora` avoid exe `0x140217310` (6) and glide exe
 //!   `0x140217B50` (8): KH1's frame. The jump exe keeps Re:CoM's air commands (attack card or field
 //!   swing, magic card) until M5 replaces them.
+//! - `dodge_roll = recom` (the default): when KH1's rule asks for the roll, the KH1 frame calls
+//!   Re:CoM's own avoid init (trampoline) and the avoid exe hook runs Re:CoM's exe whole while
+//!   Re:CoM owns that roll (`crate::movement::roll`); the next KH1 frame takes Sora back afresh.
 //!
 //! Re:CoM then plays the requested rows, advances and ends the motions, applies the roll's root
 //! motion and moves / collides the body with the velocity we leave in `body+0x80`.
@@ -26,7 +29,8 @@ use crate::sites::data;
 use crate::trace::{self, PadView};
 use crate::units::{frames_to_units, to_kh1, to_recom, units_to_frames, yaw_to_kh1, yaw_to_recom};
 use kh1_core::{Button, Params, Vec3};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use crate::settings::RollMode;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 pub static ORIG_MOVE_EXE: AtomicUsize = AtomicUsize::new(0);
@@ -45,6 +49,12 @@ static INSTALLED: AtomicBool = AtomicBool::new(false);
 /// state isn't live (M9 9b).
 static ABILITY_BITS: AtomicU32 = AtomicU32::new(0x30);
 static ABILITIES: Mutex<Option<Kh1Abilities>> = Mutex::new(None);
+/// `dodge_roll` from the ini (read at start): 0 Re:CoM's own roll, 1 KH1's, 2 none.
+static ROLL_MODE: AtomicU8 = AtomicU8::new(0);
+/// The player whose roll Re:CoM runs ([`crate::movement::roll`]), 0 when none was handed over.
+static RECOM_ROLL: AtomicUsize = AtomicUsize::new(0);
+static ROLL_WATCH: Mutex<crate::movement::roll::Watch> = Mutex::new(crate::movement::roll::Watch { from: 0, frames: 0.0, calls: 0, untouchable: None, untouchable_at: None, clock: 0 });
+static ROLL_LINES: AtomicU32 = AtomicU32::new(0);
 /// The appended action-table rows (KH1-only clips).
 pub static EXT: OnceLock<Extension> = OnceLock::new();
 /// The player whose move exe is running (its leaves run our frame), and whether it takes over.
@@ -211,22 +221,86 @@ pub fn set_abilities(a: Kh1Abilities) {
     }
 }
 
+/// `dodge_roll` (owner, 2026-11-02; read at start): Re:CoM's own roll, KH1's, or none.
+pub fn set_roll_mode(m: RollMode) {
+    ROLL_MODE.store(
+        match m {
+            RollMode::Recom => 0,
+            RollMode::Kh1 => 1,
+            RollMode::Off => 2,
+        },
+        Ordering::Relaxed,
+    );
+}
+
+pub fn roll_mode() -> RollMode {
+    match ROLL_MODE.load(Ordering::Relaxed) {
+        0 => RollMode::Recom,
+        1 => RollMode::Kh1,
+        _ => RollMode::Off,
+    }
+}
+
 /// KH1's ability bits (`0x142D5EC10` layout) for the trace: the equipped abilities of the ability
 /// state (M9 9b), or the ini's movement abilities while the state isn't live.
 pub fn ability_bits() -> u32 {
-    match super::abilities::equipped_live() {
+    let b = match super::abilities::equipped_live() {
         Some(e) => crate::abilities::kh1_bits(e),
         None => ABILITY_BITS.load(Ordering::Relaxed),
+    };
+    // `dodge_roll = off` takes the kit's roll away (KH1's Dodge Roll bit 0x20).
+    if roll_mode().on() {
+        b
+    } else {
+        b & !0x20
     }
 }
 
 /// The abilities the KH1 frame passes on: the equipped abilities of the ability state (M9 9b,
 /// `super::abilities`: movement, Combo Plus copies, the combo modifiers), or the ini's while the
-/// state isn't live (no save block yet).
+/// state isn't live (no save block yet). `dodge_roll = off` takes the kit's Dodge Roll away.
 pub(crate) fn abilities() -> kh1_core::Abilities {
-    match super::abilities::equipped_live() {
+    let mut a = match super::abilities::equipped_live() {
         Some(e) => crate::abilities::to_core(e),
         None => ABILITIES.lock().ok().and_then(|g| *g).unwrap_or_default().to_core(),
+    };
+    a.dodge_roll &= roll_mode().on();
+    a
+}
+
+/// Re:CoM runs this player's roll now ([`crate::movement::roll::recom_owns`]).
+pub(super) unsafe fn recom_roll_owns(pl: usize) -> bool {
+    crate::movement::roll::recom_owns(RECOM_ROLL.load(Ordering::Relaxed), pl, rd(pl + p::ACTION), rd(pl + p::ACTION_SUB))
+}
+
+fn roll_log(line: impl FnOnce() -> String) {
+    let n = ROLL_LINES.fetch_add(1, Ordering::Relaxed);
+    if n < crate::movement::roll::LOG_LINES {
+        log(&line());
+    } else if n == crate::movement::roll::LOG_LINES {
+        log("roll: further roll lines not logged");
+    }
+}
+
+/// Re:CoM's roll of this player is over (its action changed, or something of ours runs Sora
+/// again): its end line, once.
+unsafe fn close_recom_roll(pl: usize, why: &str) {
+    if RECOM_ROLL.load(Ordering::Relaxed) != pl || pl == 0 {
+        return;
+    }
+    RECOM_ROLL.store(0, Ordering::Relaxed);
+    let w = ROLL_WATCH.lock().map(|g| *g).unwrap_or_default();
+    let now: u32 = rd(pl + p::ACTION);
+    roll_log(|| w.end_line(now, why));
+}
+
+/// Our handler's view of the motion clock Re:CoM's exe reads (`0x1401A47C0`: `ctrl+0x3C`).
+unsafe fn motion_clock(pl: usize) -> i32 {
+    let c: usize = rd(pl + p::CTRL);
+    if c == 0 {
+        0
+    } else {
+        rd(c + ctrl::TIME)
     }
 }
 
@@ -543,6 +617,33 @@ impl Host for RecomHost {
         }
     }
 
+    fn start_recom_roll(&mut self) {
+        unsafe {
+            let pl = self.pl;
+            let from: u32 = rd(pl + p::ACTION);
+            // Re:CoM's own avoid init (the trampoline: no hook runs), as its move exe calls it.
+            let o: PlayerFn = orig(&ORIG_AVOID_INIT);
+            o(pl);
+            let a: u32 = rd(pl + p::ACTION);
+            let sub: u32 = rd(pl + p::ACTION_SUB);
+            if a != crate::movement::roll::ACTION || sub != crate::movement::roll::SUB {
+                // Its footing branch (`0x1401F2310(pl, 2)`) ran instead: Re:CoM's too.
+                roll_log(|| format!("roll: Re:CoM's avoid init from action {from:#x} started action {a:#x} sub {sub} (its footing branch), not its roll"));
+                return;
+            }
+            RECOM_ROLL.store(pl, Ordering::Relaxed);
+            let w = crate::movement::roll::Watch::start(from);
+            if let Ok(mut g) = ROLL_WATCH.lock() {
+                *g = w;
+            }
+            let b = self.body();
+            let facing: f32 = rd(b + body::YAW);
+            let stick: f32 = rd(pl + 0x384);
+            let bit = rd::<u32>(pl + p::FLAGS_418) & crate::movement::roll::UNTOUCHABLE != 0;
+            roll_log(|| w.start_line(facing, stick, bit));
+        }
+    }
+
     fn set_no_flinch(&mut self, on: bool) {
         // KH1's no-flinch (damage, no reaction) for the damage-check wrapper; not Re:CoM's
         // untouchable roll bit `+0x418 & 1` (KH1's roll has no untouchable frames).
@@ -621,12 +722,15 @@ impl Host for RecomHost {
 
 /// One KH1 frame for the player.
 pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
+    // A Re:CoM roll handed over earlier is over (our frame runs Sora again).
+    close_recom_roll(pl, "a KH1 frame runs Sora again");
     let Ok(mut g) = SORA.try_lock() else { return };
     if g.as_ref().is_none_or(|s| s.player != pl) {
         *g = Some(Slot { player: pl, sora: Kh1Sora::new(Params::kh1_defaults(), abilities()), sync: None, last: FrameOut::default() });
     }
     let Some(slot) = g.as_mut() else { return };
     slot.sora.abilities = abilities();
+    slot.sora.recom_roll = roll_mode() == RollMode::Recom;
     let mut input = trace::frame_input(&read_pad(pl));
     // A magic command from the command menu this frame (M7 stage 7.4), aimed at Re:CoM's target.
     input.magic = super::magic::take_command();
@@ -642,8 +746,9 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     }
     let mut host = RecomHost::new(pl);
     slot.last = slot.sora.frame(&mut host, &input, fresh);
-    // Re:CoM's end action entered its win action: it owns Sora; a later KH1 frame takes over.
-    slot.sync = if slot.last.recom_took { None } else { Some(read_sync(pl)) };
+    // Re:CoM's end action entered its win action, or Re:CoM's own roll started: it owns Sora; a
+    // later KH1 frame takes over afresh.
+    slot.sync = if slot.last.handed_to_recom() { None } else { Some(read_sync(pl)) };
     if slot.last.recom_took {
         log_once_win();
     }
@@ -852,6 +957,30 @@ pub unsafe extern "win64" fn avoid_exe(pl: usize) {
     if !kh1_sora(pl) {
         return o(pl);
     }
+    if recom_roll_owns(pl) {
+        // `dodge_roll = recom`: Re:CoM's own roll, its exe whole (owner, 2026-11-02, "The whole
+        // roll"). Only read around it, for the start / end log lines.
+        let bit = |pl: usize| rd::<u32>(pl + p::FLAGS_418) & crate::movement::roll::UNTOUCHABLE != 0;
+        let (before, clock, step) = (bit(pl), motion_clock(pl), rd::<f32>(pl + p::STEP));
+        o(pl);
+        let after = bit(pl);
+        if let Ok(mut g) = ROLL_WATCH.lock() {
+            g.exe(step, before, after, clock);
+        }
+        if !recom_roll_owns(pl) {
+            let a: u32 = rd(pl + p::ACTION);
+            let why = match a {
+                crate::movement::action::STAND | crate::movement::action::WALK | crate::movement::action::RUN => "Re:CoM's exe: clip end or its moving cancel, into stand / walk / run",
+                crate::movement::action::JUMP => "Re:CoM's exe: clip end in the air, into its fall",
+                _ => "Re:CoM's exe started another action",
+            };
+            close_recom_roll(pl, why);
+        }
+        return;
+    }
+    // A roll handed over earlier that Re:CoM ended without its exe (a hit after its untouchable
+    // frames, an event): logged now.
+    close_recom_roll(pl, "Re:CoM ran another action");
     // As Re:CoM's avoid and glide exes do first.
     wr(pl + p::CARD, rd::<u32>(pl + p::CARD) & !8);
     run_frame(pl, !continues(pl));

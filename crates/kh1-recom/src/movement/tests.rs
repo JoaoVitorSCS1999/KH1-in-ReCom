@@ -96,6 +96,11 @@ struct FakeRecom {
     specials: Vec<crate::specials::SpecialStart>,
     special_rows: Vec<crate::specials::RowStart>,
     special_ends: usize,
+    /// `dodge_roll = recom`: Re:CoM's own avoid init runs (its roll), the order of Re:CoM's calls
+    /// around it, and how often our frame wrote Re:CoM's untouchable bit.
+    recom_rolls: usize,
+    order: Vec<&'static str>,
+    untouchable_writes: u32,
 }
 
 impl FakeRecom {
@@ -143,6 +148,9 @@ impl FakeRecom {
             specials: Vec::new(),
             special_rows: Vec::new(),
             special_ends: 0,
+            recom_rolls: 0,
+            order: Vec::new(),
+            untouchable_writes: 0,
         }
     }
 
@@ -284,10 +292,22 @@ impl Host for FakeRecom {
     }
     fn set_untouchable(&mut self, on: bool) {
         self.untouchable = on;
+        self.untouchable_writes += 1;
     }
     fn end_swing(&mut self, _airborne: bool) -> bool {
         self.swing_ends += 1;
+        self.order.push("end swing");
         self.end_action()
+    }
+    fn start_recom_roll(&mut self) {
+        // Re:CoM's avoid init `0x1401F10C0`: its untouchable bit, action 6 sub 0, the body's
+        // velocity zeroed, row 0x16 with root motion (Re:CoM's own; not modelled here).
+        self.recom_rolls += 1;
+        self.order.push("Re:CoM's roll");
+        self.untouchable = true;
+        self.act = Action { id: action::AVOID, sub: action::SUB_ROLL, phase: phase::FALL };
+        self.vel = Vec3::ZERO;
+        self.clip = None;
     }
     fn can_cast(&mut self, _spell: u8, _level: u8) -> bool {
         self.mp_ok
@@ -1795,4 +1815,190 @@ fn sonic_blade_refusals() {
     }
     let out = step_special(&mut p, Some(cmd::SONIC_BLADE));
     assert!(matches!(out.specials[..], [SpecialEvent::Refused { .. }]), "in the air");
+}
+
+// ---- `dodge_roll = recom`: Re:CoM's own roll (owner, 2026-11-02, "The whole roll") ----
+
+/// One handler frame with the stick (no oracle: the roll after the hand-over is Re:CoM's), an
+/// enemy ahead when `target`. As the win layer does, a frame that handed Sora to Re:CoM leaves no
+/// sync, so the next one takes over afresh.
+fn step_free(p: &mut Pair, pad: Pad, target: bool) -> FrameOut {
+    let (dir, tilt) = Input::move_from_stick(pad.stick, 0.0);
+    let jump = Button::from_held(p.prev.jump, pad.jump);
+    let square = Button::from_held(p.prev.square, pad.square);
+    let attack = Button::from_held(p.prev.attack, pad.attack);
+    p.prev = pad;
+    let target = target.then(|| kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, 0.0, 150.0), radius: 30.0 });
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target, locked: false, magic: None, item: None, special: None }, p.first);
+    p.first = out.handed_to_recom();
+    p.recom.after_exe();
+    out
+}
+
+fn recom_roll_pair(ab: Abilities) -> Pair {
+    let mut p = Pair::new(ab, Floor::flat());
+    p.ours.recom_roll = true;
+    p
+}
+
+fn run_square() -> Pad {
+    Pad { square: true, stick: [0.0, 1.0], ..Default::default() }
+}
+
+#[test]
+fn square_while_running_starts_recoms_own_roll_and_takes_sora_back_after() {
+    let mut p = recom_roll_pair(all());
+    for _ in 0..10 {
+        step_free(&mut p, stick(0.0, 1.0), false);
+    }
+    assert_eq!(p.recom.act.id, action::RUN);
+    let plays = p.recom.plays.len();
+    let out = step_free(&mut p, run_square(), false);
+    assert!(out.recom_roll && out.handed_to_recom());
+    assert!(out.events.contains(&Event::Rolled));
+    assert_eq!(p.recom.recom_rolls, 1, "Re:CoM's avoid init, once");
+    assert_eq!(p.recom.act, Action { id: action::AVOID, sub: action::SUB_ROLL, phase: phase::FALL }, "Re:CoM's action as its init left it");
+    assert_eq!(p.recom.plays.len(), plays, "no KH1 motion: Re:CoM's init plays its own row");
+    assert!(!p.recom.no_flinch, "no KH1 no-flinch frames (they are KH1's roll's)");
+    assert_eq!(p.recom.vel, Vec3::ZERO, "no KH1 velocity over Re:CoM's root motion");
+    assert!(!p.ours.lock && p.ours.rec.req == 0xFFFF);
+    // Re:CoM's exe ends the roll (its moving cancel into its run) and clears its own bit.
+    p.recom.untouchable = false;
+    p.recom.act = Action { id: action::RUN, sub: 0, phase: 0 };
+    let writes = p.recom.untouchable_writes;
+    let out = step_free(&mut p, stick(0.0, 1.0), false);
+    assert!(!out.handed_to_recom());
+    assert_eq!((p.ours.state, p.recom.act.id), (state::GROUND, action::RUN), "KH1's run again, from Re:CoM's state");
+    for _ in 0..30 {
+        step_free(&mut p, stick(0.0, 1.0), false);
+    }
+    assert_eq!(p.recom.untouchable_writes, writes, "nothing of ours writes Re:CoM's untouchable bit");
+    // The next roll is Re:CoM's again.
+    step_free(&mut p, run_square(), false);
+    assert_eq!(p.recom.recom_rolls, 2);
+    // Re:CoM's exe ended it in the air: its fall (jump init(pl, 1)) hands back through enter_fall.
+    p.recom.act = Action { id: action::JUMP, sub: 0, phase: phase::FALL };
+    p.recom.contact = false;
+    p.ours.enter_fall(&mut p.recom);
+    assert_eq!((p.ours.state, p.recom.act.phase), (state::AIR, phase::FALL));
+}
+
+#[test]
+fn recoms_roll_keeps_kh1s_square_rule() {
+    // Guard equipped: below the run tilt Square guards (KH1's `0x1402A7B30`), as before.
+    let mut p = recom_roll_pair(all());
+    for _ in 0..5 {
+        step_free(&mut p, stick(0.0, 0.5), false);
+    }
+    let out = step_free(&mut p, Pad { square: true, stick: [0.0, 0.5], ..Default::default() }, false);
+    assert!(out.events.contains(&Event::Guarded) && !out.recom_roll);
+    assert_eq!(p.recom.recom_rolls, 0);
+    // Standing still, the same.
+    let mut p = recom_roll_pair(all());
+    step_free(&mut p, Pad::default(), false);
+    let out = step_free(&mut p, Pad { square: true, ..Default::default() }, false);
+    assert!(out.events.contains(&Event::Guarded) && p.recom.recom_rolls == 0);
+    // Without the roll (`dodge_roll = off`), running Square guards.
+    let mut p = recom_roll_pair(Abilities { dodge_roll: false, ..all() });
+    for _ in 0..10 {
+        step_free(&mut p, stick(0.0, 1.0), false);
+    }
+    let out = step_free(&mut p, run_square(), false);
+    assert!(out.events.contains(&Event::Guarded) && p.recom.recom_rolls == 0);
+    // In the air Square is no roll (Superglide's, or nothing).
+    let mut p = recom_roll_pair(Abilities { superglide: false, ..all() });
+    step_free(&mut p, Pad { jump: true, ..Default::default() }, false);
+    for _ in 0..10 {
+        step_free(&mut p, Pad { jump: true, stick: [0.0, 1.0], ..Default::default() }, false);
+    }
+    step_free(&mut p, Pad { jump: true, square: true, stick: [0.0, 1.0], ..Default::default() }, false);
+    assert_eq!(p.recom.recom_rolls, 0);
+}
+
+#[test]
+fn an_attack_on_the_same_frame_replaces_the_roll_as_it_replaces_kh1s() {
+    for recom in [true, false] {
+        let mut p = Pair::new(all(), Floor::flat());
+        p.ours.recom_roll = recom;
+        for _ in 0..10 {
+            step_free(&mut p, stick(0.0, 1.0), true);
+        }
+        let out = step_free(&mut p, Pad { attack: true, ..run_square() }, true);
+        assert!(!out.recom_roll, "recom {recom}");
+        assert_eq!(p.recom.recom_rolls, 0, "recom {recom}");
+        assert_eq!(p.recom.swings.len(), 1, "recom {recom}: the Attack");
+    }
+}
+
+/// Steps without input until KH1's lock is off for the next frame (a swing's free frames, the
+/// recoil's), with an enemy ahead.
+fn until_free(p: &mut Pair) {
+    for _ in 0..120 {
+        step_free(p, Pad::default(), true);
+        if !p.ours.after_frame(&mut p.recom, false).1 {
+            return;
+        }
+    }
+    panic!("never free");
+}
+
+#[test]
+fn rolling_out_of_a_swing_ends_it_through_recoms_end_action_first() {
+    let mut p = recom_roll_pair(all());
+    step_free(&mut p, Pad::default(), true);
+    step_free(&mut p, Pad { attack: true, ..Default::default() }, true);
+    assert!(p.ours.swing.is_some());
+    until_free(&mut p);
+    assert!(p.ours.swing.is_some(), "still the swing's motion in its free frames");
+    let out = step_free(&mut p, run_square(), true);
+    assert!(out.recom_roll);
+    assert_eq!(p.recom.order, vec!["end swing", "Re:CoM's roll"]);
+    assert!(p.ours.swing.is_none());
+    // With Re:CoM's battle won, the swing's end enters Re:CoM's win instead: no roll.
+    let mut p = recom_roll_pair(all());
+    step_free(&mut p, Pad::default(), true);
+    step_free(&mut p, Pad { attack: true, ..Default::default() }, true);
+    until_free(&mut p);
+    p.recom.win_pending = true;
+    let out = step_free(&mut p, run_square(), true);
+    assert!(out.recom_took && !out.recom_roll);
+    assert_eq!(p.recom.recom_rolls, 0);
+    assert_eq!(p.recom.act.id, crate::battle::end::WIN_ACTION);
+}
+
+#[test]
+fn a_roll_out_of_guards_recoil_leaves_the_untouchable_bit_to_recom() {
+    let mut p = recom_roll_pair(Abilities { counterattack: true, ..all() });
+    for k in 0..20 {
+        step_free(&mut p, Pad { square: k == 4, ..Default::default() }, true);
+    }
+    p.recom.block_next = true;
+    let out = step_free(&mut p, Pad::default(), true);
+    assert!(out.events.contains(&Event::GuardSucceeded));
+    assert!(p.recom.untouchable, "KH1's flag 0x80 on Re:CoM's bit");
+    until_free(&mut p);
+    let writes = p.recom.untouchable_writes;
+    let out = step_free(&mut p, run_square(), true);
+    assert!(out.recom_roll);
+    assert!(p.recom.untouchable && p.recom.untouchable_writes == writes, "Re:CoM's init owns the bit now");
+    // Re:CoM's exe clears it; after the roll nothing of ours writes it (KH1's 8 frames were inside).
+    p.recom.untouchable = false;
+    p.recom.act = Action { id: action::STAND, sub: 0, phase: 0 };
+    for _ in 0..20 {
+        step_free(&mut p, Pad::default(), true);
+    }
+    assert!(!p.recom.untouchable && p.recom.untouchable_writes == writes);
+    assert!(!p.recom.guard, "the guard object is off");
+}
+
+#[test]
+fn a_kh1_swings_pending_travel_lands_once_on_recoms_roll() {
+    // The root-step wrapper hands Re:CoM's roll its own travel, plus once the swing's last
+    // update's travel KH1 would have applied in the next frame.
+    let mut d = RootDelay::default();
+    let a = Vec3::new(1.0, 0.0, 2.0);
+    let v = Vec3::new(0.0, 0.0, 0.05);
+    assert_eq!(d.position(5, 10, a, a + v, 1.0), a);
+    assert!((d.swap(5, 11, Vec3::ZERO) - v).length() < 1e-6, "the roll's first update");
+    assert_eq!(d.swap(5, 12, Vec3::ZERO), Vec3::ZERO, "then nothing of ours");
 }

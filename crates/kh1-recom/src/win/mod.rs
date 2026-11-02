@@ -234,13 +234,20 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
     if unsafe { hook::install_all(base, &hooks) } {
         movement::mark_installed();
+        movement::set_roll_mode(s.dodge_roll);
         movement::set_abilities(s.abilities);
         abilities::set_ini(&s.abilities);
         movement::set_mode(s.combat == settings::Mode::Kh1);
         log(&format!(
-            "movement: KH1 handlers in Re:CoM's actions 2/3/4, 6, 7, 8 ({}); abilities {:?}",
+            "movement: KH1 handlers in Re:CoM's actions 2/3/4, 6, 7, 8 ({}); abilities {:?}; dodge_roll = {} ({})",
             if s.combat == settings::Mode::Kh1 { "on: combat = kh1" } else { "pass-through: combat = recom" },
-            s.abilities
+            s.abilities,
+            s.dodge_roll.as_str(),
+            match s.dodge_roll {
+                settings::RollMode::Recom => "KH1's Square rule starts Re:CoM's own roll: its avoid init 0x1401F10C0 and exe 0x140217310 whole",
+                settings::RollMode::Kh1 => "KH1's roll on Re:CoM's action 6, KH1's 12 no-flinch frames",
+                settings::RollMode::Off => "no Dodge Roll: Square guards",
+            }
         ));
     } else {
         log("movement: not hooked; Sora moves as in Re:CoM");

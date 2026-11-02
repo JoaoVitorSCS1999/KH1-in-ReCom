@@ -1091,6 +1091,23 @@ pub unsafe extern "win64" fn root_step(ctrl: usize, out: *mut [f32; 4], yaw: *mu
         return;
     }
     let a: u32 = rd(pl + p::ACTION);
+    if mv::recom_roll_owns(pl) {
+        // `dodge_roll = recom`: Re:CoM's own roll travels in its own update (no delay). A KH1
+        // swing's last travel still pending (KH1 applies it in the next frame's physics) goes on
+        // top once, on the roll's first update; then nothing of ours.
+        super::magic::release_root_off();
+        if let Ok(mut d) = ROOT.lock() {
+            let late = d.swap(ctrl, TICK.load(Ordering::Relaxed), Vec3::ZERO);
+            let late_m = late.length();
+            if late_m > 0.0 && late_m <= crate::movement::ROOT_DELAY_MAX_GAP {
+                let v = &mut *out;
+                v[0] += late.x;
+                v[1] += late.y;
+                v[2] += late.z;
+            }
+        }
+        return;
+    }
     let cast = a == crate::magic::RECOM_MAGIC_ACTION && super::magic::kh1_cast(pl);
     // M9 stage 9c.1: a KH1 special's rows travel by their root motion, one update late as the
     // swings (KH1 applies it in the next frame's physics).

@@ -176,11 +176,11 @@ pub fn startup_report(
             let a = s.abilities;
             let _ = writeln!(
                 r,
-                "settings: KH1 abilities: high_jump = {}, glide = {}, superglide = {}, dodge_roll = {}, guard = {}",
+                "settings: KH1 abilities: high_jump = {}, glide = {}, superglide = {}, dodge_roll = {} (recom: Re:CoM's own roll; kh1: KH1's; off: none), guard = {}",
                 settings::switch_str(a.high_jump),
                 settings::switch_str(a.glide),
                 settings::switch_str(a.superglide),
-                settings::switch_str(a.dodge_roll),
+                s.dodge_roll.as_str(),
                 settings::switch_str(a.guard)
             );
             let _ = writeln!(r, "settings: KH1 combo: combo_plus = {}, air_combo_plus = {}, combo_master = {}", a.combo_plus, a.air_combo_plus, settings::switch_str(a.combo_master));
