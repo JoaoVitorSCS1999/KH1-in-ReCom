@@ -428,6 +428,10 @@ At KH1 setting:
       Then (2026-11-02, on 0.67.2's questions): a sunk Shadow **stays lockable** (Re:CoM's one lockable
       flag; KH1's lock button can lock it, its auto-target can't) and **keeps pushing Sora** while it sinks
       and rises (KH1 lets him walk through): both left as they are.
+    - **M11 (owner, 2026-11-02):** "it works perfect. Now let's bring in the remaining KH1 adjacent
+      heartless": the 30 other ordinary Heartless with a KH1 twin, under M10's rules (KH1 AI / attacks /
+      reactions / motions, Re:CoM stats, battle only). Step 1: a shared framework from the Shadow's
+      code, proven on the Soldier; then the families.
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
