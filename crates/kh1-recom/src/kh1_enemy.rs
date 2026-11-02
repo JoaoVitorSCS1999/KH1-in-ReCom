@@ -292,13 +292,14 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Target(t) => format!("target {t}"),
         Cmd::State(s) => format!("state {}", state_name(*s)),
         Cmd::Held => "held (root motion carries it)".into(),
+        Cmd::Attack { request, attack, .. } => format!("attack {request} ({}), steered", names.get(*attack as usize).copied().unwrap_or("?")),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// A new behaviour for a class (`seed`: its random stream; `yaw`: its facing, KH1's).

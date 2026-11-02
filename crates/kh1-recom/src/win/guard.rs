@@ -103,6 +103,11 @@ pub(super) unsafe fn on_result(c: usize, list: usize, r: i32) -> i32 {
     if TURNED_N.load(Ordering::Relaxed) != 0 {
         turned_hit(c, r);
     }
+    // A hit (`CCollAttack` apply `0x14016F1C0` answered 1) on the player side: a KH1 enemy's attack
+    // hit callback (M11 fliers; `super::kh1_enemy::attack_landed` returns at once for others).
+    if r == 1 && list != 0 && list == rd::<usize>(va(base(), g::PLAYER_LIST)) {
+        super::kh1_enemy::attack_landed(rd(c + coll::OWNER));
+    }
     // The block itself is detected without the Guard reactions toggle: Re:CoM's gimmick cards
     // (trigger (a)) break the five card-break bosses on a block whatever the toggle says.
     if r != 2 || !READY.load(Ordering::Acquire) || !mv::kh1_on() {

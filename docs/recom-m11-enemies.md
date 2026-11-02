@@ -85,6 +85,54 @@ New for M11:
 - Hurt parts from the manifest (any count): the contact point's nearest part bone (`react::nearest_part`;
   for two parts it is M10's rule).
 
+### Flying bodies (M11 fliers). Checked (decomp + disasm) unless marked
+
+KH1's fliers (Air Soldier, Search Ghost, Air Pirate, Gargoyle, Darkball, Wyvern) all enter **movement state 4**
+once (`sys 135` → `0x1402BACB0`: `0x1402B1960(actor, 4)`, flight velocity `+0x3C0` = the script's vector ×
+its fourth word) and then steer by writing the actor's `+0x20` (a unit direction, its `y` included) and
+`+0x2C` (a speed) every frame. State 4 is registered by `0x1402CBF80` (`0x1402B1B80(4, flags 2, …,
+0x1402CC000, keep-state 0x1402B1840)`); its step `0x1402CC000`:
+
+- `want = +0x20 × +0x2C`; `+0x3C0 = 0x1400E7CB0(want, +0x3C0, stats+0x14)` = `v·(1 − a) + want·a` (the
+  wrapper `0x140386B70` passes `(out, want, v, a)` in rcx / rdx / r8 / xmm3: Checked (disasm)), `a` = the
+  stats block's `+0x14` (0.1, `0x1402A5D70`; no flier script writes it: Checked (files));
+- `+0x3C4 = want.y` (vertical at once), displacement `+0x3C0 × step`; no gravity, no ground walk, no floor
+  probe (the move-toward routine's probe `0x140193650` runs only outside states 2 / with flag 0x100);
+- the actor task zeroes `+0x2C` each frame before the script (`0x140297FE0`, `puVar1[0xb] = 0`), so a frame
+  the script doesn't steer eases the flight off;
+- a push slide (`0x1402C7300`) zeroes `+0x3C0`; a hop (`0x1402AF960`) sets state 2 (flight ends);
+- the reactions: state 4's flags `& 3 == 2`, so `0x1402B1AE0` is true and `0x1402B1B10` false:
+  `0x1402B8E10` takes the ground forms (kind 3 the ground flinch with its push, kind 5 skips the launch and
+  is kind 4: the knock-back 0x4C / 0x4D through `0x1402B77D0` → `0x1402B8CC0`, the clash the ground recoil).
+
+Other per-script engine values the fliers use: `sys 125` (`0x1402BABA0`) sets the turn rate (stats `+0xD0`,
+degrees × π / 180), `sys 89` (`0x1402BA5D0`) reads `+0x3D4` = floor y − y (the height above the floor,
+written by the move `0x1402999A0`), `sys 172` (`0x14029EFC0`) is "the motion has played to its end, no blend,
+nothing queued", `sys 77` (`0x140299530`) a stepped line test (0 = nothing between), `sys 121` the look-at
+target (`+0x470`, KH1's head turn, `0x1402A28C0`: not ported, the look is the model's).
+
+KH1's attack objects of mode 2 (`0x1402B47A0`) take the owner's request (`+0x164`) at their first tick
+and end when it changes; they hit while that motion's HIT slot is on (`+0x1CC & 0x10000 << sub`). The fliers
+make them and then play a plain request (no action bit), so the script keeps steering while the attack
+plays.
+
+Built (`kh1-core` `enemy`, `kh1-recom` `win::kh1_enemy`):
+
+| Part | What |
+|---|---|
+| `Body::flying`, `Body::fly(v)` | state 4; `Body::step` eases / follows as above (`Body::walk` is `+0x20 × +0x2C`) |
+| `Body::turn` | `sys 125`'s rate, else the manifest's |
+| `react::react_flying` | the ground forms, kind 5 as kind 4 (the host picks it while the body flies) |
+| `script::{steer, fly, height, set_turn_rate, motion_done, tick_clock}` | the scripts' writes / reads; `Core::floor`, `Core::clock` |
+| `Cmd::Attack` | a plain request made with attack rows: Re:CoM's attack state, the AI keeps running; it ends when another motion replaces it, an action starts or its motion has played; a new attack begins its state again |
+| `Behaviour::set_floor` / `on_landed` (defaults: nothing) | the floor height each frame; Re:CoM's `CCollAttack` apply `0x14016F1C0` answered 1 (a hit) on the player side (from the pair-dispatch wrapper, `win::guard::on_result`) → KH1's attack hit callback (`+0x38`) |
+| host | a flying body's vertical velocity is written every frame (× the mover's speed scale, Re:CoM's acceleration cancelled), it is never `grounded`; the floor is Sora's height the last time he stood on the floor (**Assumption**: Re:CoM's battle floors are flat; Re:CoM's fliers keep no floor height: their gravity is off, `+0x260 & 0x100`, `0x1401D67B0(mover, 0)`) |
+
+Re:CoM's fliers (Checked (decomp)): every flier ctor sets `+0x154 |= 0x80` and `+0x260 |= 0x100` (gravity off in
+Re:CoM's state code, `0x14017EB80`, `0x14017EED0`, `0x140198600`); their clips hold the body 0.61 m above the
+actor (Air Soldier: `ex_2160_sk` at y 0.614 in `e015_001` and in KH1's idle, Checked (files)), so Re:CoM's
+fliers float low; at Combat = KH1 they fly at KH1's heights (the script's own targets).
+
 ## The Soldier
 
 ### KH1's side. Checked (files: `ex_2010.bd` disassembled; decomp: the VM `0x1402CC620` and syscalls)
