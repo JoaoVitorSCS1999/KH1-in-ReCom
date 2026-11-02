@@ -1014,6 +1014,73 @@ pub enum BodyShape {
     Column { a: [f32; 3], b: [f32; 3], r: f32 },
 }
 
+/// The contact of a strike that Re:CoM's collision doesn't find itself (7.6's bolts, 7.8's impact,
+/// 7.9's Stop: their attack is applied to one body directly), found by **Re:CoM's own overlap
+/// test** as its collision pass `0x14016EAD0` finds it before every apply (battle-end soft-lock,
+/// `docs/recom-m7-magic.md` § Strikes and Re:CoM's contact).
+///
+/// Re:CoM's pass picks the test by `body kind | attack kind << 4` (Checked (decomp + disasm
+/// `0x14016EB9D..0x14016EC17`)); our strikes' attacks are spheres (kind 2, the shot descriptor's
+/// `+0x80`, `0x140156790`), so 0x22 is the sphere test `0x1401777E0` and 0x24 / 0x25 the capsule
+/// test `0x140176FA0(…, 0)`; other body kinds are never hit by Re:CoM's pass. A body whose shape
+/// flags (`+0x64`) & 0xE are 6 is skipped by the pass. The test sweeps the attack sphere from its
+/// `+0x10` to its `+0x20` and, on contact, writes the contact point to **both** shapes' `+0x50`
+/// and the normal to `+0x40`. Re:CoM's defeat `0x14017BBC0` makes the death effect and every prize
+/// of the enemy at the hit body's shape `+0x50`, which a shape is not given at its creation
+/// (`0x1401720E0` fills `+0x10..+0x3C` only). Checked (decomp).
+pub mod strike_contact {
+    use super::BodyShape;
+
+    /// The attack shape kind of our strikes' shots (a sphere).
+    pub const ATTACK_SPHERE: u32 = 2;
+    /// How far above the body's top the sweep starts (beyond both radii), metres.
+    pub const MARGIN_M: f32 = 0.5;
+
+    /// Re:CoM's overlap test for a body kind against a sphere attack.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Test {
+        /// Key 0x22: `0x1401777E0` (the attack's points as they are).
+        Sphere,
+        /// Keys 0x24 / 0x25: `0x140176FA0` with 0 (each attack point's y + the attack's `+0x74`).
+        Capsule,
+    }
+
+    /// The test Re:CoM's pass runs for this pair, or None (Re:CoM's pass doesn't hit this body).
+    pub fn test_for(body_kind: u32, attack_kind: u32, body_flags: u32) -> Option<Test> {
+        if body_flags & 0xE == 6 {
+            return None;
+        }
+        match body_kind | attack_kind << 4 {
+            0x22 => Some(Test::Sphere),
+            0x24 | 0x25 => Some(Test::Capsule),
+            _ => None,
+        }
+    }
+
+    /// The attack's sweep for the strike, as the raw `+0x10` / `+0x20` to write: straight down from
+    /// above the body's top (beyond both radii) to the body's centre, as a bolt falling onto it. The
+    /// end lies inside the body, so Re:CoM's test always finds the contact (where the sweep enters
+    /// the body). `body`: the shape as [`BodyShape`] (each y already + the body's `+0x74`).
+    pub fn sweep(test: Test, body: &BodyShape, attack_radius: f32, attack_y_offset: f32) -> ([f32; 3], [f32; 3]) {
+        let (centre, top) = match *body {
+            BodyShape::Sphere { c, r } => (c, c[1] + r),
+            BodyShape::Column { a, b, r } => ([(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5], a[1].max(b[1]) + r),
+        };
+        let start = [centre[0], top + attack_radius.max(0.0) + MARGIN_M, centre[2]];
+        let dy = match test {
+            Test::Sphere => 0.0,
+            Test::Capsule => attack_y_offset,
+        };
+        ([start[0], start[1] - dy, start[2]], [centre[0], centre[1] - dy, centre[2]])
+    }
+
+    /// Whether a point is a usable position (a non-finite one is what a never-written shape `+0x50`
+    /// can hold).
+    pub fn finite(p: [f32; 3]) -> bool {
+        p.iter().all(|v| v.is_finite())
+    }
+}
+
 /// The distance from a point to KH1's area cylinder (0 inside).
 fn cylinder_distance(p: [f32; 3], centre: [f32; 3], radius: f32, half: f32) -> f32 {
     let (dx, dz) = (p[0] - centre[0], p[2] - centre[2]);

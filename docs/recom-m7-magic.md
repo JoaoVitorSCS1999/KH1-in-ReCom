@@ -1192,3 +1192,96 @@ In-game checklist (7.10):
   aimed at one. Chained Fire has none (and none plays here: `p001_063` has no SES entry).
 - **Not KH1's:** the voice starts at Re:CoM's frame (3 on the ground, 2 in the air), not frame
   0; Re:CoM's one take per spell, not KH1's two; no ally names (no party yet).
+
+## Strikes and Re:CoM's contact (the battle-end soft-lock; owner, 0.47.0: "ending a battle with magic still softlocks the game")
+
+Owner's log `kh1-recom-softlock-0470.log`, battle 2: the manager stayed in state 1 ("children 5,
+enemy count 0") with Sora's win pose done; the five children were EXP prizes (kinds 0xD0, 0xD0,
+0xCC, 0xCC, 0xCB) whose words `+0x240..+0x25C` read `[1 … 0x3E99999A … 1 0]`. They were already in
+that state on the first battle-end line (the frame of the last kill), i.e. for the whole rest of
+the battle (two Blizzagas and a dozen Firagas), while the prizes of the other kills sat in state 0
+and were picked up normally after the win. The same battle had two Thundaga bolt kills; the
+0.24.2 soft-lock (`recom-m6-battles.md` § Battle end) also ended on Thundaga bolt kills, while
+battle 1 of that log, also ended by bolts, returned.
+
+### Re:CoM's EXP prize (kinds ≥ 0xCB). Checked (decomp + disasm)
+
+- **Made** by the factory `0x1401A89C0` → init `0x1402315B0` (state machine at `+0x278`: enter
+  `0x14022EDE0`, update `0x140231010`); the enter sets the timer `+0x160` = 4500 ticks, the launch
+  `0x1401D5610(mover, +0x24C)` and state 0 (3 while flag (1, 0x21), the battle-entry flag, is set).
+- **Words:** `+0x240` state; `+0x244` kind; `+0x248` amount; `+0x24C` launch speed (0.25, then 0.3
+  once pulled); `+0x250` its effect; `+0x254` not written by it; `+0x258` "may be pulled" (set
+  when the first timer runs out, at once for a new prize); `+0x25C` **"arrived"**; `+0x260` the
+  reward mode (`0x140230F90`).
+- **State 0** (lying): timer out with `+0x258` → state 2 (fade 1500 ticks, then gone): an EXP
+  prize nobody pulls ends by itself. Else bounce (sound `0x140230E70`), then `0x140230C70`: flag
+  (1, 0x21) clear and (its y < −75, or `+0x258` and its distance² to the prize player
+  `[0x14087B380]`'s mover ≤ (player `+0x550`)²) → state 1 (gravity off, map collision off:
+  mover `+0x118 |= 1`). The player's `+0x550` is 5 m in battle (`CBTL::resetNowEnchant`
+  `0x140161E10`) and 50 m once Sora's win pose is up (the win exe `0x1401EC500`, sub 2 → 4).
+- **State 1** (pulled): toward the player's vtable `+0x50` point (`0x1401F0A10`: `+0x4B0`) at 0.3 m
+  a frame, turning 25 % of the angle a frame (`0x1401D6B40` → `0x1401D6A10`, `0x1401D4670`), no
+  map collision; **only** when `comiss 4.0, dist²` passes (`0x140231318`: `jb` out on "4 <
+  dist²" **and on an unordered compare**) is `+0x25C` set, the pickup sound played and the
+  3000-tick shrink started, after which the reward `0x140230F90` and the delete run. State 1 has
+  **no timeout**. A finite prize arrives (worked out from those numbers: a circle around a still
+  point needs a turn of 0.3 / r a frame, which 25 % of at most π reaches only below r ≈ 0.4–0.8 m,
+  inside the 2 m arrival; Checked (decomp) for the numbers, the bound is arithmetic). A prize whose
+  position is non-finite never does, and `0x140230C70` sends it to state 1 at its first update
+  (both of its compares are unordered → "pull"). So a non-finite prize holds the battle manager in
+  state 1 for ever.
+
+### Where the prize's position comes from. Checked (decomp + disasm)
+
+- Re:CoM's defeat `0x14017BBC0` takes **the killing hit's body** (`enemy+0xF8` → `+0x50`) and
+  makes the death effect (`0x1401A68B0`) and **all** the enemy's prizes (`0x140181300` →
+  `0x1401810A0` EXP, `0x140186480`, `0x1401867F0`, `0x140180D20` cards) at that body's shape
+  `+0x50` (`0x14017BC97..0x14017BCBD`); only a death without a hit body uses the enemy's position.
+- A shape's `+0x50` is **the contact point**, written (with the normal `+0x40`) on both shapes
+  only by Re:CoM's overlap tests when they find a contact (`0x1401777E0`, `0x140176FA0`, …), which
+  its collision pass `0x14016EAD0` runs before every apply. A new shape (`0x1401720E0`) gets
+  `+0x10..+0x3C` and `+0x60..` only: **`+0x40..+0x5C` hold whatever the allocation held** until a
+  first contact.
+- 7.6's bolts (and 7.8's impact, 7.9's Stop) applied the attack (`0x14016F1C0`) **directly**,
+  without the test: so a bolt kill made the death effect and the prizes at the body's last
+  contact from Re:CoM's own pass (a stale point), or, on a body never touched by it, at garbage.
+  Garbage that is non-finite gives the soft-lock above; finite garbage gives prizes somewhere odd
+  (which time out). This is why it is intermittent and why it follows Thunder kills. KH1 swings
+  run Re:CoM's tests (`win::attack`, Stage 9) and are not affected; Fire and Blizzard are collided
+  by Re:CoM's own pass.
+- **Not proven from this log:** the five prizes' positions (the 0.37.0 diagnostics read `+0x30` of
+  the prize, not its mover's: every prize printed (−0, 0, −0)). That they came from the Thundaga
+  bolt kill of Tornadostep 577 is an **Assumption** (their creation order and their EXP split,
+  which differs from the other Tornadostep's set). The mechanism above is Checked (decomp); that
+  their positions were non-finite is the only reading of Re:CoM's code that keeps a prize in state
+  1 for a minute, and the new log lines say it directly.
+
+### Fixed (native): Re:CoM's contact for every strike of ours
+
+- `win::magic::strike_body` strikes as Re:CoM's pass strikes one body: the enemy's first live hurt
+  body the pass would test against the shot's attack (its key `body kind | attack kind << 4`,
+  0x22 → `0x1401777E0`, 0x24 / 0x25 → `0x140176FA0(…, 0)`; flags `& 0xE == 6` skipped:
+  `crate::magic::strike_contact`), **Re:CoM's own overlap test** with the shot's sweep set
+  straight down from above the body onto its centre (the bolt falling onto it; the end inside the
+  body, so the test always contacts), then the apply. Re:CoM's test writes the contact; Re:CoM's
+  defeat makes the death effect and the prizes there; the hit effect's angles come from a real
+  sweep (straight down) instead of a zero-length one. Used by Thunder's bolts, Gravity's impact
+  and Stop's strikes. No new hook; the two tests are the KH1 blade's (`sites::ATTACK_CALLEES`), the
+  context `[0x14087A870]` and the call shapes checked at the pass's call sites
+  (`sites::MAGIC_CHECKED`: `0x14016EBAF`, `0x14016EBE5`).
+- KH1 numbers unchanged (KH1's strike order, area, timing, damage); Re:CoM's contact only decides
+  where its own hit effect, death effect and prizes are.
+- **The win:** Re:CoM starts no card once its battle is won (`0x1401E9180` answers no while
+  `player+0x428 & 4`); the KH1 frame now takes no new command then either (`Host::battle_won`):
+  the log's Firaga after "battle end: started" (shot 670) is refused, the running cast ends and
+  Re:CoM's end action enters the win, as with a card. Not the soft-lock's cause (its prizes were
+  stuck before the win), a deviation from Re:CoM's rule.
+- **Diagnostics:** the battle-end line's prizes now give the mover's position, velocity and flags
+  (NON-FINITE marked), the timer, the step and `+0x260`, and the prize target (`+0x4B0`), body and
+  radius; the defeat-prize wrapper logs a non-finite defeat point ("battle end: enemy … defeated
+  at a non-finite point").
+- Tests: `magic::tests::strike_contact_*`, `movement::tests::no_new_kh1_command_once_re_coms_battle_is_won`.
+- **Items (8a.1) and other KH1 actions:** an item use hits nothing (no prize path); the KH1 swings
+  use Re:CoM's tests; Aero's wind is collided by Re:CoM's pass. None has this failure mode. Item
+  use after the win is refused as above.
+- Not checked in game.

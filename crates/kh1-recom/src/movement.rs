@@ -291,6 +291,12 @@ pub trait Host {
     fn end_item(&mut self, _airborne: bool) -> bool {
         false
     }
+    /// Re:CoM's battle is won: the last enemy is gone and its win waits for Sora's action to end
+    /// (`player+0x428 & 4`, set by `0x1401F4A60`). Re:CoM's card-use test `0x1401E9180` refuses
+    /// every card from then on; the KH1 frame takes no new command either. Checked (decomp).
+    fn battle_won(&mut self) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -795,22 +801,27 @@ impl Kh1Sora {
         if self.guard_on && h.guard_blocked() {
             self.guard_success(h, ev);
         }
+        // Re:CoM's battle is won (`player+0x428 & 4`): Re:CoM starts no card play from then on (its
+        // card-use test `0x1401E9180` answers no), so no KH1 command starts either; what is
+        // running ends as it does and Re:CoM's end action enters the win ([`Host::battle_won`]).
+        let won = h.battle_won();
         // Command accept (KH1's menu task, before Sora's think). The Counterattack replaces the
         // Attack command while it is offered (`0x140294220`).
-        let counter_cmd = input.attack.pressed && self.counter_offered(input.target.is_some()) && h.row_available(crate::attack::COUNTERATTACK_ROW);
-        let attack_cmd = input.attack.pressed && !counter_cmd && self.accepts_attack();
+        let counter_cmd = !won && input.attack.pressed && self.counter_offered(input.target.is_some()) && h.row_available(crate::attack::COUNTERATTACK_ROW);
+        let attack_cmd = !won && input.attack.pressed && !counter_cmd && self.accepts_attack();
         if input.attack.pressed && !attack_cmd && !counter_cmd {
             ev.push(Event::AttackRefused(kh1_core::Refused::NotAccepted));
         }
+        let why = if won { "battle won" } else { "not now" };
         // A magic command (M7 stage 7.4): the same accept (`0x140293480`), with the Fire re-cast.
-        let cast_cmd = input.magic.filter(|m| self.accepts_spell(m.spell));
+        let cast_cmd = input.magic.filter(|m| !won && self.accepts_spell(m.spell));
         if let Some(m) = input.magic.filter(|_| cast_cmd.is_none()) {
-            self.cast_log.push(crate::magic::CastEvent::Refused { spell: m.spell, level: m.level, why: "not now" });
+            self.cast_log.push(crate::magic::CastEvent::Refused { spell: m.spell, level: m.level, why });
         }
         // An item command (M8 stage 8a.1): the same accept (`0x140293480`, type 3).
-        let item_cmd = input.item.filter(|_| self.accepts_item());
+        let item_cmd = input.item.filter(|_| !won && self.accepts_item());
         if let Some(i) = input.item.filter(|_| item_cmd.is_none()) {
-            self.item_log.push(crate::items::ItemEvent::Refused { item: i.item, why: "not now" });
+            self.item_log.push(crate::items::ItemEvent::Refused { item: i.item, why });
         }
 
         // ---- think: pre-step ----

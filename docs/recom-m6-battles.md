@@ -749,3 +749,14 @@ None of ours writes the manager, the prize gauge, the gauge pause, the roulette 
 - Why battle 1 of the same log returned and battle 2 didn't. Both ended on a Thundaga (battle 1:
   2 bolts, the last 30 frames before the cast's end; battle 2: a second wave, 4 bolts, the last
   14 frames before it). Not explained by anything read so far.
+
+### The prizes that never end (owner's 0.47.0 log)
+
+The 0.37.0 diagnostics answered the question above: **state 1 with children**, the children being
+`CPrize`s that Re:CoM's own prize code can never end. Cause (Checked (decomp)): our direct strikes
+(Thunder's bolts, Gravity's impact, Stop) applied their attack without Re:CoM's overlap test, so a
+kill left the death point, where Re:CoM's defeat makes all the enemy's prizes, at the struck
+body's uninitialised (or stale) contact point; a non-finite one makes prizes that are pulled at
+once and never arrive (no timeout in that state). Battle 1 vs battle 2 of the 0.24.2 log: whatever
+the bodies' memory held. Details and the native fix: `recom-m7-magic.md` § Strikes and Re:CoM's
+contact.
