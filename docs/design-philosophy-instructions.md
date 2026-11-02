@@ -379,6 +379,10 @@ At KH1 setting:
       flatten; Stop 9000 / 15000 / 21000 ticks); **Aero's wind uses Re:CoM's Aero by level** (card,
       then Aerora / Aeroga sleights, as Fire / Blizzard / Thunder); **Gravity Break and Zantetsuken
       take KH1's percentage of Re:CoM's HP**.
+    - **Damage follow-ups 2 (owner, 2026-11-01, on 0.59.0's questions):** at Damage = Re:CoM, **Aero
+      level 1 gets a wind carrying the Aero card's value** (not KH1, owner's choice); stopped enemies keep
+      KH1's held-hit pace and attacks-off; **Gravity Break and Zantetsuken skip Re:CoM's boss rule**
+      (KH1's `resist[8]` alone reduces bosses); Aero's wind in the field keeps Re:CoM's no-card AP.
     - **Boss revenge value (owner, 2026-11-01):** "lets also have humanoid bosses have a revenge value
       system, similar to how they work in their fights in KH2 … borrow their revenge value". Chosen:
       KH2's **story / Absent Silhouette limits** (Axel 92, Larxene 100, Vexen 150, Marluxia 100 for all
