@@ -19,7 +19,8 @@
 //! symbol as a new group of `camp:00`) and `kh1-camp-rows.json` (`docs/recom-m8-items.md`).
 //! For KH1's Shadow (M10) it writes `ENEMY/0001/EN0001.ANN`, `.ASD` and `.SES` (Re:CoM's Shadow
 //! files with KH1's Shadow motions, attack records and their sounds added) and `kh1-shadow.json`
-//! (`docs/recom-m10-shadow.md`).
+//! (`docs/recom-m10-shadow.md`). For each M11 enemy (`kh1_recom_assets::enemy::SPECS`) it writes `ENEMY/NNNN/ENNNNN.ANN`, `.ASD`, `.SES` and `kh1-<enemy>.json`
+//! (`docs/recom-m11-enemies.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -259,6 +260,26 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // KH1's other enemies (M11): each spec's files and manifest.
+    let enemies: Vec<(&kh1_recom_assets::enemy::Spec, Option<kh1_recom_assets::enemy::Built>)> = kh1_recom_assets::enemy::SPECS
+        .iter()
+        .map(|spec| match enemy_build(spec, keys.clone(), &game, &arc) {
+            Ok(b) => {
+                let slots = {
+                    let mut s: Vec<usize> = b.clips.iter().map(|c| c.slot).collect();
+                    s.sort_unstable();
+                    s.dedup();
+                    s.len()
+                };
+                println!("{} (M11): {} requests on {} clips ({} Re:CoM bakes), {} attack records, hurt parts {:?}: {}", spec.name, b.clips.len(), slots, b.clips.iter().filter(|c| c.source == "recom").count(), b.records.len(), b.parts, b.records.join("; "));
+                (*spec, Some(b))
+            }
+            Err(e) => {
+                println!("note: KH1's {} not built: {e} (it keeps Re:CoM's behaviour)", spec.name);
+                (*spec, None)
+            }
+        })
+        .collect();
     if dry {
         return Ok(());
     }
@@ -455,6 +476,30 @@ fn run() -> Result<(), String> {
             }
         }
     }
+    // KH1's other enemies (M11): the same, per spec.
+    for (spec, b) in &enemies {
+        let man = root.join(spec.manifest);
+        let files = [(spec.path("ANN"), 0), (spec.path("ASD"), 1), (spec.path("SES"), 2)];
+        let at = |p: &str| p.split('/').fold(root.clone(), |acc, s| acc.join(s));
+        match b {
+            Some(b) => {
+                for (p, i) in &files {
+                    write(&at(p), [&b.ann, &b.asd, &b.ses][*i])?;
+                }
+                write(&man, b.manifest.as_bytes())?;
+            }
+            None => {
+                if man.is_file() {
+                    for p in [man.clone(), at(&files[0].0), at(&files[1].0), at(&files[2].0)] {
+                        if p.is_file() {
+                            std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+                            println!("removed {} (no KH1 {} this run)", p.display(), spec.name);
+                        }
+                    }
+                }
+            }
+        }
+    }
     // KH1 stats (decisions 12, 18, 21, 25): the enemy twins' records, Sora's Strength, the
     // Keyblades (with their model groups).
     let models: Vec<KeybladeModel> = keyblades.iter().map(|k| k.0.clone()).collect();
@@ -477,6 +522,24 @@ fn shadow_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats
     let r = |n: &str| install::read_recom(arc, &keys, n).map_err(|e| format!("{n}: {e}"));
     let inp = sh::Inputs { mset: k(sh::KH1_MSET)?, mdls: k(sh::KH1_MDLS)?, ann: r(sh::ANN_PATH)?, mdl: r(sh::MDL_PATH)?, asd: r(sh::ASD_PATH)?, ses: r(sh::SES_PATH)?, btltbl: k("btltbl.bin")? };
     sh::build(&inp).map_err(|e| e.to_string())
+}
+
+/// An M11 enemy (`kh1_recom_assets::enemy`): KH1's `.mset` / `.mdls` and `btltbl.bin`, Re:CoM's
+/// `ENEMY/NNNN/ENNNNN.{ANN,MDL,ASD,SES}`.
+fn enemy_build(spec: &kh1_recom_assets::enemy::Spec, keys: kh1_formats::egs::KeyTable, game: &Path, arc: &kh1_formats::egs::Archive) -> Result<kh1_recom_assets::enemy::Built, String> {
+    let inst = install::kh1(game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
+    let k = |n: &str| inst.read(n).map_err(|e| format!("{n}: {e}"));
+    let r = |n: &str| install::read_recom(arc, &keys, n).map_err(|e| format!("{n}: {e}"));
+    let inp = kh1_recom_assets::enemy::Inputs {
+        mset: k(&format!("{}.mset", spec.kh1))?,
+        mdls: k(&format!("{}.mdls", spec.kh1))?,
+        ann: r(&spec.path("ANN"))?,
+        mdl: r(&spec.path("MDL"))?,
+        asd: r(&spec.path("ASD"))?,
+        ses: r(&spec.path("SES"))?,
+        btltbl: k("btltbl.bin")?,
+    };
+    kh1_recom_assets::enemy::build(spec, &inp).map_err(|e| e.to_string())
 }
 
 /// Converts the 17 KH1 Keyblades (`KH1_KEYBLADES`): their model names from KH1's weapon table,

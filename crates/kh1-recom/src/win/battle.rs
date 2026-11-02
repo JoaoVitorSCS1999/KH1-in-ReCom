@@ -386,9 +386,9 @@ pub unsafe fn trace_token() -> String {
     let (a, ans) = action_and_answer();
     let duel = (c != 0).then(|| rd::<u32>(c + cbtl::DUEL));
     let end_t = end_view_now().map(|v| format!("; {}", be::token(&v))).unwrap_or_default();
-    // M10: the KH1 Shadows' requests, reactions and actions.
-    let shadows = super::shadow::trace_token();
-    let shadows = if shadows.is_empty() { String::new() } else { format!("; shadow {shadows}") };
+    // M10 / M11: the KH1 enemies' requests, reactions and actions (`shadow …; soldier …`).
+    let shadows = super::kh1_enemy::trace_token();
+    let shadows = if shadows.is_empty() { String::new() } else { format!("; {shadows}") };
     format!("{m6}; {}{end_t}{shadows}", boss::trace_token(p5, a, ans, duel, super::deck::enemy_ui_hidden()))
 }
 

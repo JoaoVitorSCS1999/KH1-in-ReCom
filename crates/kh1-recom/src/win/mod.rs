@@ -25,7 +25,7 @@ mod movement;
 mod mp;
 mod mp_bar;
 mod revenge;
-mod shadow;
+mod kh1_enemy;
 mod shop;
 mod specials;
 mod stats;
@@ -260,7 +260,7 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     let sound_file = recom_bases(dirs).into_iter().map(|b| b.join(crate::menu_sounds::MANIFEST)).find(|p| p.is_file());
     install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref(), hud_file.as_deref(), sound_file.as_deref());
     install_battles(base);
-    install_shadow(base, recom_bases(dirs).into_iter().map(|b| b.join(crate::shadow::MANIFEST)).find(|p| p.is_file()).as_deref());
+    install_enemies(base, &recom_bases(dirs));
     install_revenge(base, s);
     install_story_skip(base);
     let th = &crate::sites::TRACE_HOOKS;
@@ -588,27 +588,32 @@ fn install_battles(base: usize) {
     }
 }
 
-/// M10 (`shadow`, decision M10 (a)): KH1's Shadow on Re:CoM's own states. Needs the battle wrappers
-/// (the battle's setting), the asset step's `kh1-shadow.json` and its `ENEMY/0001` files. The
-/// manifest, the vtable checks and the factory size first, then the ctor hook; all or nothing.
-fn install_shadow(base: usize, manifest: Option<&Path>) {
-    if !movement::installed() {
-        log("shadow: movement not hooked; Shadows keep Re:CoM's behaviour");
-        return;
-    }
-    // SAFETY: reads of the mapped exe; the size patch's bytes are checked inside.
-    if !unsafe { shadow::prepare(base, manifest) } {
-        return;
-    }
-    let hooks = [hook::Hook { site: &crate::sites::SHADOW_HOOKS[0], ours: shadow::ctor as *const () as usize, original: &shadow::ORIG_CTOR }];
-    // SAFETY: the target's bytes are checked again inside, before anything is written.
-    if unsafe { hook::install_all(base, &hooks) } {
-        shadow::mark_installed();
-        log(&shadow::start_line());
-    } else {
-        // SAFETY: puts back the bytes `prepare` wrote (checked).
-        unsafe { shadow::unprepare(base) };
-        log("shadow: ctor not hooked; Shadows keep Re:CoM's behaviour");
+/// M10 / M11 (`kh1_enemy`, decision M10 (a)): KH1's enemies on Re:CoM's own states, one class at
+/// a time from `crate::kh1_enemy::CLASSES`. Needs the battle wrappers (the battle's setting), the
+/// asset step's manifest and the class's `ENEMY/<id>` files. Per class: the manifest, the vtable
+/// checks and the factory size first, then the ctor hook; all or nothing for that class.
+fn install_enemies(base: usize, bases: &[PathBuf]) {
+    let ctors: [usize; crate::kh1_enemy::CLASSES.len()] = [kh1_enemy::ctor::<0> as *const () as usize];
+    for (k, c) in crate::kh1_enemy::CLASSES.iter().enumerate() {
+        if !movement::installed() {
+            log(&format!("{}: movement not hooked; Re:CoM's behaviour kept", c.name));
+            continue;
+        }
+        let manifest = bases.iter().map(|b| b.join(c.manifest)).find(|p| p.is_file());
+        // SAFETY: reads of the mapped exe; the size patch's bytes are checked inside.
+        if !unsafe { kh1_enemy::prepare(base, k, manifest.as_deref()) } {
+            continue;
+        }
+        let hooks = [hook::Hook { site: c.ctor, ours: ctors[k], original: &kh1_enemy::ORIG_CTOR[k] }];
+        // SAFETY: the target's bytes are checked again inside, before anything is written.
+        if unsafe { hook::install_all(base, &hooks) } {
+            kh1_enemy::mark_installed(k);
+            log(&kh1_enemy::start_line(k));
+        } else {
+            // SAFETY: puts back the bytes `prepare` wrote (checked).
+            unsafe { kh1_enemy::unprepare(base, k) };
+            log(&format!("{}: ctor not hooked; Re:CoM's behaviour kept", c.name));
+        }
     }
 }
 

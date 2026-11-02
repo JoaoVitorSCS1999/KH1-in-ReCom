@@ -242,6 +242,8 @@ pub fn cmd_token(c: &Cmd) -> String {
         Cmd::FadeIn(f) => format!("fade in {f}"),
         Cmd::Target(t) => format!("target {t}"),
         Cmd::State(s) => format!("state {}", ["idle", "engaged", "hit"].get(*s as usize).unwrap_or(&"?")),
+        // M11's shared command; the Shadow never gives it.
+        Cmd::Held => "held".into(),
     }
 }
 

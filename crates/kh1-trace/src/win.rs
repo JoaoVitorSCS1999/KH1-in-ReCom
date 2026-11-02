@@ -157,8 +157,18 @@ unsafe fn enemy_row(out: &mut BufWriter<File>, frame: u64, e: usize) {
         return;
     }
     let f = |o: usize| -> f32 { rd(e + o) };
+    // M11: which kind of enemy (its object's per-kind number and spawn type, read as syscalls 114 /
+    // 132 do, through KH1's handle table; −1 when the object isn't readable).
+    let (kind, spawn) = {
+        let o = handle(BASE.load(Ordering::Relaxed), rd::<u32>(e + a::OBJECT));
+        if o != 0 && readable(o, 0x60) {
+            (rd::<u16>(o + a::OBJ_KIND) as i32, rd::<u8>(o + a::OBJ_SPAWN) as i32)
+        } else {
+            (-1, -1)
+        }
+    };
     let line = format!(
-        "{frame},{e:#x},{:#x},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:#x}",
+        "{frame},{e:#x},{:#x},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:#x},{kind},{spawn}",
         rd::<u32>(e + a::FLAGS),
         rd::<i32>(e + a::STATE),
         rd::<i32>(e + a::PREV_STATE),

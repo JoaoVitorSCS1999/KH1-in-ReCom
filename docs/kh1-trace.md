@@ -149,7 +149,7 @@ file). `kh1-tracediff` checks the formula against KH1's own move vector on every
 Sora could act, and prints how many agree. Camera modes 2 and 0xB take other paths in
 `0x14028C7E0`; the replay does not model them.
 
-## Enemy rows (M10, the Shadow)
+## Enemy rows (M10, the Shadow; M11, every KH1 enemy)
 
 Each recording also writes `kh1-trace-<n>-enemies.csv`: after every non-party actor's own task
 (the hook already sees every actor), one row with `frame` (Sora's row number), `actor` (address),
@@ -157,7 +157,11 @@ flags `+0`, state `+0x70` / `+0x378`, request `+0x164`, entry `+0x168`, motion f
 position `+0x10`, facing `+0x3C`, target yaw `+0x150`, walk direction `+0x20` / `+0x28` and speed
 `+0x2C`, arc `+0x3B0` / `+0x3B8`, air velocity `+0x3C0`, height `+0x3D4`, push slide direction
 `+0x3F0` / `+0x3F8` and speed `+0x3FC`, scale x / y `+0x40` / `+0x44`, alpha `+0x60` and its rate
-`+0x64`, down time `+0x3E4`, reaction base `+0x3EA`, pause `+0x88`. Checked (decomp:
+`+0x64`, down time `+0x3E4`, reaction base `+0x3EA`, pause `+0x88`, and (M11) `kind` / `spawn`: the
+actor's object (`+0x130`, through KH1's handle table `0x14038AF40`) `+0x4C` (u16, AI syscall 114
+`0x1402BA950`: a per-kind number the scripts compare, e.g. the Soldier's `== 301`; its meaning: Assumption)
+and `+0x5A` (u8, syscall 132 `0x1402BAC40`: how the room spawned it, 0 = placed); −1 when the object isn't
+readable. Checked (decomp). Checked (decomp:
 `0x1402B7260`, `0x1402B8530`, `0x1402C7300`, the Shadow's script). Party slots 0..2 are skipped
 (Assumption: three consecutive pointers at `0x142D37280`). Every other actor is written, so record
 where the Shadows are the only enemies. Not recorded: the script's pc and KH1's random draws (the

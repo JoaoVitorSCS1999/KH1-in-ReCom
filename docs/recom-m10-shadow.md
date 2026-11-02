@@ -10,6 +10,12 @@ Tags: Checked (exe / decomp / files / trace) or Assumption. Every address is Ste
 `0x140000000`. Script offsets are offsets in the player's `ex_2020.bd` (part 5 of
 `xa_ex_2020.mdls`, 11648 bytes).
 
+M11 (2026-11-02): the Shadow now runs on the shared KH1 enemy framework (`docs/recom-m11-enemies.md`):
+`kh1_core::enemy` (body, reactions, script routines), `kh1_recom::kh1_enemy` + `win::kh1_enemy` (one table of
+classes; this note's `win::shadow` is its class 0), `kh1_recom_assets::enemy`. Its behaviour, asset outputs
+(byte-identical), manifest, log lines and trace token are unchanged. Finding: KH1's wander (`0x1BC4`) picks its
+points about the current position, this port about home (owner question in the M11 note).
+
 Status: in game since 0.67.0 (owner: "Everything seems to work well"); the unhittable-while-sunk fix
 below is not seen in game yet; no KH1 trace of the Shadow yet.
 
@@ -24,7 +30,7 @@ own enemy states (decision M10 (a), native states):
 | Behaviour | `crates/kh1-core/src/shadow.rs` | KH1's AI (`ex_2020.bd`), body physics, reactions, engine-agnostic |
 | Oracle fix | `crates/kh1-core/src/reaction.rs` | KH1's kind-3 flinch for the training dummy (§ Oracle fix) |
 | Asset step | `crates/kh1-recom-assets/src/shadow.rs` | `EN0001.ANN` / `.ASD` / `.SES` + `kh1-shadow.json` |
-| Runtime | `crates/kh1-recom/src/shadow.rs`, `win/shadow.rs` | class swap, the state slots, reactions, clash |
+| Runtime | `crates/kh1-recom/src/shadow.rs`, `win/kh1_enemy.rs` (M11: was `win/shadow.rs`) | class swap, the state slots, reactions, clash |
 | KH1 trace | `crates/kh1-trace` | enemy rows next to Sora's (`docs/kh1-trace.md` § Enemy rows) |
 
 Re:CoM stays whole: Re:CoM battles, Riku's story, `enemy_ai = recom`, field Shadows

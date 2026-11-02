@@ -1,43 +1,52 @@
-//! M10: KH1's Shadow in Re:CoM's battles (`crate::shadow`, `docs/recom-m10-shadow.md`).
+//! M10 / M11: KH1's enemies on Re:CoM's own enemy states (`crate::kh1_enemy`,
+//! `docs/recom-m10-shadow.md`, `docs/recom-m11-enemies.md`). The shared runtime, generalized from
+//! M10's Shadow runtime; one table (`crate::kh1_enemy::CLASSES`) drives it.
 //!
-//! - **Class swap.** A wrapper on `CEnemyShadow`'s ctor `0x140192770` (its only caller is the
-//!   enemy factory `0x140188F40`, id 1): in a KH1 battle (Combat = KH1, Sora's story, decided by
-//!   the battle enemy manager's ctor) with `enemy_ai = kh1`, the new Shadow's vtable becomes our
-//!   copy of Re:CoM's (139 slots, the RTTI locator kept at `−8`), whose state slots run KH1's
-//!   Shadow. A 0x20-byte tail after the body (the factory's size raised at `0x140188FAD`) marks it
-//!   (magic, battle, our index). Field Shadows (`CMapEnemyShadow`) and Re:CoM battles are never
-//!   touched.
-//! - **States** (`crate::shadow::state`): Re:CoM's state machine calls them; each runs KH1's
-//!   frame for this enemy: the behaviour (`kh1_core::shadow::Ai`) once a frame when no action
-//!   plays, KH1's body physics (turn, walk, arc, air steering, push slide) written into Re:CoM's
-//!   mover (`+0xF0`: yaw `+0x54`, velocity `+0x80`), KH1's motions played through Re:CoM's own
-//!   motion play (vtable `+0x70` `0x14017D750`: the clip, its sounds `EN0001.SES` and its attack
-//!   records `EN0001.ASD`, AP from Re:CoM's `@ENP`).
+//! - **Class swap.** A wrapper on each class's ctor (its only caller is the enemy factory
+//!   `0x140188F40`): in a KH1 battle (Combat = KH1, Sora's story, decided by the battle enemy
+//!   manager's ctor) with `enemy_ai = kh1`, the new enemy's vtable becomes our copy of Re:CoM's (the
+//!   RTTI locator kept at `−8`), whose state slots run its KH1 behaviour. A 0x20-byte tail after the
+//!   body (the factory's size raised) marks it (magic, battle, our index). Field enemies and Re:CoM
+//!   battles are never touched.
+//! - **States** (`crate::kh1_enemy::state`, each class's attack states): Re:CoM's state machine
+//!   calls them; each runs KH1's frame for this enemy: the behaviour (`kh1_core::enemy::Behaviour`)
+//!   once a frame when no action plays, KH1's body physics (turn, walk, arc, air steering, push
+//!   slide) written into Re:CoM's mover (`+0xF0`: yaw `+0x54`, velocity `+0x80`), KH1's motions
+//!   played through Re:CoM's own motion play (vtable `+0x70` `0x14017D750`: the clip, its sounds
+//!   (`.SES`) and its attack records (`.ASD`), AP from Re:CoM's `@ENP`).
 //! - **Reactions.** Re:CoM's hit handler `0x14017F7E0` takes the hit, applies Re:CoM's damage and
 //!   picks state 11 / 12 / 30 as always; our state 11 / 12 begin turns the hit into KH1's reaction
-//!   (`kh1_core::shadow::react`), state 30 runs Re:CoM's defeat with the KH1 motion.
-//! - **Guard.** `super::guard` hands a blocked Shadow to [`guard_block`]: KH1's clash recoil.
+//!   (`kh1_core::enemy::react`), state 30 runs Re:CoM's defeat with the KH1 motion.
+//! - **Guard.** `super::guard` hands a blocked enemy to [`guard_block`]: KH1's clash recoil.
 //!
-//! Per frame: one tail check per Shadow state call, the behaviour's frame, a few reads and writes.
+//! Per frame: one tail check per converted enemy's state call, the behaviour's frame, a few reads
+//! and writes. The Shadow's runtime is M10's, unchanged (its log lines and trace token too).
 
 use super::movement::{func, orig, rd, rd_vec, wr};
 use super::{base, log};
-use crate::shadow::{self as sh, state, tail, Manifest};
-use crate::sites::{data, SHADOW_ALLOC, SHADOW_PTRS};
-use kh1_core::shadow::{self as ks, Ai, Attack, Cmd, Hit, Phase, World};
+use crate::kh1_enemy::{self as ce, state, tail, Appear, Manifest, CLASSES};
+use crate::sites::data;
+use kh1_core::enemy::{self as ke, Behaviour, Cmd, Hit, HitNews, Phase, World};
 use kh1_core::Vec3;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-pub static ORIG_CTOR: AtomicUsize = AtomicUsize::new(0);
-static INSTALLED: AtomicBool = AtomicBool::new(false);
-static MANIFEST: OnceLock<Manifest> = OnceLock::new();
-/// Our vtable copy (its slot 0's address) and Re:CoM's slots.
-static COPY: AtomicUsize = AtomicUsize::new(0);
-static ORIGINAL: OnceLock<Vec<usize>> = OnceLock::new();
-/// Re:CoM's hurt-part bones (head, hips) in `EN0001.MDL` for KH1's parts 0 / 1.
-static PART_BONES: OnceLock<[i32; 2]> = OnceLock::new();
-static LINES: AtomicU32 = AtomicU32::new(0);
+const N: usize = CLASSES.len();
+
+#[allow(clippy::declare_interior_mutable_const)]
+const ZERO: AtomicUsize = AtomicUsize::new(0);
+#[allow(clippy::declare_interior_mutable_const)]
+const OFF: AtomicBool = AtomicBool::new(false);
+#[allow(clippy::declare_interior_mutable_const)]
+const NOLINE: AtomicU32 = AtomicU32::new(0);
+
+pub static ORIG_CTOR: [AtomicUsize; N] = [ZERO; N];
+static INSTALLED: [AtomicBool; N] = [OFF; N];
+static MANIFEST: [OnceLock<Manifest>; N] = [const { OnceLock::new() }; N];
+/// Our vtable copies (slot 0's address) and Re:CoM's slots.
+static COPY: [AtomicUsize; N] = [ZERO; N];
+static ORIGINAL: [OnceLock<Vec<usize>>; N] = [const { OnceLock::new() }; N];
+static LINES: [AtomicU32; N] = [NOLINE; N];
 const LINE_CAP: u32 = 20_000;
 static SEED: AtomicU32 = AtomicU32::new(0x1234_5678);
 
@@ -59,6 +68,8 @@ mod f {
     pub const HANDLE_OBJ: u32 = 0x002A_D350;
     pub const SCALE: u32 = 0x001A_4A20;
     pub const SCALE_SET: u32 = 0x001A_7050;
+    /// Re:CoM's max-HP getter (`0x14017F5A0`, checked in the stats lists).
+    pub const MAX_HP: u32 = 0x0017_F5A0;
 }
 /// Enemy fields (Checked (decomp): `0x14017F7E0`, `0x14017C530`, `0x140185320`).
 mod e {
@@ -69,8 +80,9 @@ mod e {
     pub const MOVER: usize = 0xF0;
     pub const HIT_INFO: usize = 0xF8;
     pub const FLAGS: usize = 0x260;
+    pub const HP: usize = 0x274;
     pub const CHOSEN: usize = 0x278;
-    /// Re:CoM's state 0 alternate path (`0x140192850`: `+0x260 & 0x20000000008`).
+    /// Re:CoM's state 0 alternate path (`0x140192850` / `0x14017B590`: `+0x260 & 0x20000000008`).
     pub const APPEAR_ALT: u64 = 0x200_0000_0008;
 }
 mod mv {
@@ -103,20 +115,22 @@ type HandleFn = unsafe extern "win64" fn(u32) -> usize;
 type ScaleFn = unsafe extern "win64" fn(usize) -> usize;
 type ScaleSetFn = unsafe extern "win64" fn(usize, *const [f32; 4]);
 type PlayFn = unsafe extern "win64" fn(usize, u32, u64, u64, i32, u32, u32);
+type MaxHpFn = unsafe extern "win64" fn(usize) -> i32;
 
-/// A running action (an attack, or the leap's jump start): the AI waits for it.
+/// A running action (an attack, or a jump start, an appearance): the AI waits for it.
 #[derive(Clone, Copy, Debug)]
 struct Act {
     request: u16,
     then: u16,
-    attack: Option<Attack>,
+    attack: Option<u8>,
     blend: f32,
 }
 
 struct Runtime {
+    class: usize,
     enemy: usize,
     battle: u32,
-    ai: Ai,
+    ai: Box<dyn Behaviour>,
     current: Option<u16>,
     queued: Option<(u16, f32)>,
     action: Option<Act>,
@@ -125,7 +139,7 @@ struct Runtime {
     reaction: Option<Phase>,
     /// A launch's lie request (`base + 3` / `+ 8`) while lying.
     lie: Option<u16>,
-    clash: Option<Attack>,
+    clash: Option<u8>,
     last_pos: Vec3,
     /// Re:CoM's own state 0 (its alternate appearance) runs.
     recom_appear: bool,
@@ -143,156 +157,175 @@ struct Runtime {
 // lock; the ctor may run on a loading thread and the states on the game thread.
 unsafe impl Send for Runtime {}
 
-/// Every KH1 Shadow's runtime (this battle's; older ones are dropped at the next ctor).
+/// Every KH1 enemy's runtime (this battle's; older ones are dropped at the next ctor).
 static RT: Mutex<Vec<Runtime>> = Mutex::new(Vec::new());
 
-fn line(s: impl FnOnce() -> String) {
-    if LINES.fetch_add(1, Ordering::Relaxed) < LINE_CAP {
-        log(&format!("shadow: {}", s()));
+fn line(k: usize, s: impl FnOnce() -> String) {
+    if LINES[k].fetch_add(1, Ordering::Relaxed) < LINE_CAP {
+        log(&format!("{}: {}", CLASSES[k].name, s()));
     }
 }
 
-pub fn installed() -> bool {
-    INSTALLED.load(Ordering::Relaxed)
+pub fn installed(k: usize) -> bool {
+    INSTALLED[k].load(Ordering::Relaxed)
 }
 
-fn live_battle() -> bool {
-    installed() && super::battle::kh1_battle() && super::settings().enemy_ai == crate::settings::Mode::Kh1
+fn any_installed() -> bool {
+    (0..N).any(installed)
 }
 
-/// `super::stats`: our vtable copy stands for `CEnemyShadow`'s.
+fn live_battle(k: usize) -> bool {
+    installed(k) && super::battle::kh1_battle() && super::settings().enemy_ai == crate::settings::Mode::Kh1
+}
+
+/// `super::stats`: our vtable copies stand for their classes' vtables.
 pub(super) fn canonical_vtable(vt: usize) -> usize {
-    let c = COPY.load(Ordering::Relaxed);
-    if c != 0 && vt == c {
-        base() + sh::VTABLE as usize
-    } else {
-        vt
+    for (k, c) in CLASSES.iter().enumerate() {
+        let copy = COPY[k].load(Ordering::Relaxed);
+        if copy != 0 && vt == copy {
+            return base() + c.vtable as usize;
+        }
     }
+    vt
 }
 
-/// Loads the manifest, checks the vtable and the factory size, builds the vtable copy, patches the
-/// size. The ctor hook is installed by the caller after this.
-pub unsafe fn prepare(bs: usize, manifest: Option<&std::path::Path>) -> bool {
+/// Loads the class's manifest, checks its vtable and factory size, builds the vtable copy, patches
+/// the size. The ctor hook is installed by the caller after this.
+pub unsafe fn prepare(bs: usize, k: usize, manifest: Option<&std::path::Path>) -> bool {
+    let c = &CLASSES[k];
     let Some(p) = manifest else {
-        log("shadow: no kh1-shadow.json (run kh1-recom-build): Shadows keep Re:CoM's behaviour");
+        if k == 0 {
+            log("shadow: no kh1-shadow.json (run kh1-recom-build): Shadows keep Re:CoM's behaviour");
+        } else {
+            log(&format!("{}: no {} (run kh1-recom-build): Re:CoM's behaviour kept", c.name, c.manifest));
+        }
         return false;
     };
     let text = match std::fs::read_to_string(p) {
         Ok(t) => t,
         Err(e) => {
-            log(&format!("shadow: {}: {e}; Shadows keep Re:CoM's behaviour", p.display()));
+            log(&format!("{}: {}: {e}; Re:CoM's behaviour kept", c.name, p.display()));
             return false;
         }
     };
-    let (m, parts) = match sh::parse(&text).and_then(|m| parse_parts(&text).map(|p| (m, p))) {
-        Ok(x) => x,
+    let m = match ce::parse_for(k, &text) {
+        Ok(m) => m,
         Err(e) => {
-            log(&format!("shadow: {}: {e}; Shadows keep Re:CoM's behaviour", p.display()));
+            log(&format!("{}: {}: {e}; Re:CoM's behaviour kept", c.name, p.display()));
             return false;
         }
     };
-    let vt = bs + sh::VTABLE as usize;
-    if super::stats::rtti_name(bs, vt).as_deref() != Some(".?AVCEnemyShadow@@") {
-        log("shadow: CEnemyShadow's vtable is not at 0x14054D728: not installed");
+    let vt = bs + c.vtable as usize;
+    if super::stats::rtti_name(bs, vt).as_deref() != Some(c.rtti) {
+        log(&format!("{}: {}'s vtable is not at {:#x}: not installed", c.name, c.rtti, 0x1_4000_0000u64 + c.vtable as u64));
         return false;
     }
-    if let Some(p) = SHADOW_PTRS.iter().find(|p| rd::<usize>(bs + p.rva as usize) != bs + p.target as usize) {
-        log(&format!("shadow: {} is not the function expected: not installed", p.name));
+    if let Some(p) = c.ptrs.iter().find(|p| rd::<usize>(bs + p.rva as usize) != bs + p.target as usize) {
+        log(&format!("{}: {} is not the function expected: not installed", c.name, p.name));
         return false;
     }
-    // The copy: Re:CoM's locator, then its 139 slots with ours in the state slots.
-    let original: Vec<usize> = (0..sh::VTABLE_SLOTS).map(|i| rd::<usize>(vt + 8 * i)).collect();
-    let mut copy: Vec<usize> = Vec::with_capacity(sh::VTABLE_SLOTS + 1);
+    // The copy: Re:CoM's locator, then its slots with ours in the state slots.
+    let original: Vec<usize> = (0..c.slots).map(|i| rd::<usize>(vt + 8 * i)).collect();
+    let mut copy: Vec<usize> = Vec::with_capacity(c.slots + 1);
     copy.push(rd::<usize>(vt - 8));
     copy.extend_from_slice(&original);
     let mut set = |off: usize, f: usize| copy[1 + off / 8] = f;
-    set(sh::begin_slot(state::APPEAR), appear_begin as *const () as usize);
-    set(sh::step_slot(state::APPEAR), appear_step as *const () as usize);
-    set(sh::begin_slot(state::THINK), think_begin as *const () as usize);
-    set(sh::step_slot(state::THINK), think_step as *const () as usize);
-    for k in [state::CLAW, state::LEAP, state::SWIPE] {
-        set(sh::begin_slot(k), attack_begin as *const () as usize);
-        set(sh::step_slot(k), attack_step as *const () as usize);
+    set(ce::begin_slot(state::APPEAR), appear_begin as *const () as usize);
+    set(ce::step_slot(state::APPEAR), appear_step as *const () as usize);
+    set(ce::begin_slot(state::THINK), think_begin as *const () as usize);
+    set(ce::step_slot(state::THINK), think_step as *const () as usize);
+    for &s in c.attack_states {
+        set(ce::begin_slot(s), attack_begin as *const () as usize);
+        set(ce::step_slot(s), attack_step as *const () as usize);
     }
-    for k in [state::FLINCH, state::BLOW] {
-        set(sh::begin_slot(k), react_begin as *const () as usize);
-        set(sh::step_slot(k), react_step as *const () as usize);
+    for s in [state::FLINCH, state::BLOW] {
+        set(ce::begin_slot(s), react_begin as *const () as usize);
+        set(ce::step_slot(s), react_step as *const () as usize);
     }
-    set(sh::begin_slot(state::DEFEAT), defeat_begin as *const () as usize);
-    set(sh::step_slot(state::DEFEAT), defeat_step as *const () as usize);
-    set(sh::THINK_SLOT, think_none as *const () as usize);
+    set(ce::begin_slot(state::DEFEAT), defeat_begin as *const () as usize);
+    set(ce::step_slot(state::DEFEAT), defeat_step as *const () as usize);
+    set(ce::THINK_SLOT, think_none as *const () as usize);
     let leaked: &'static mut [usize] = Box::leak(copy.into_boxed_slice());
     let at = leaked.as_ptr() as usize + 8;
     // The allocation size (all-or-nothing with the rest: a failed write leaves everything off).
-    let a = &SHADOW_ALLOC[0];
-    if !super::hook::patch(bs + a.rva as usize, &sh::alloc_bytes(sh::ALLOC), &sh::alloc_bytes(sh::ALLOC + tail::SIZE), a.name) {
-        log("shadow: the factory's size held other bytes: not installed");
+    let a = c.alloc_site;
+    if !super::hook::patch(bs + a.rva as usize, &ce::alloc_bytes(c.alloc), &ce::alloc_bytes(c.alloc + tail::SIZE), a.name) {
+        log(&format!("{}: the factory's size held other bytes: not installed", c.name));
         return false;
     }
-    let _ = ORIGINAL.set(original);
-    let _ = PART_BONES.set(parts);
-    let _ = MANIFEST.set(m);
-    COPY.store(at, Ordering::Release);
+    let _ = ORIGINAL[k].set(original);
+    let _ = MANIFEST[k].set(m);
+    COPY[k].store(at, Ordering::Release);
     true
 }
 
 /// Puts the size back (the ctor hook failed).
-pub unsafe fn unprepare(bs: usize) {
-    let a = &SHADOW_ALLOC[0];
-    super::hook::patch(bs + a.rva as usize, &sh::alloc_bytes(sh::ALLOC + tail::SIZE), &sh::alloc_bytes(sh::ALLOC), a.name);
-    COPY.store(0, Ordering::Release);
+pub unsafe fn unprepare(bs: usize, k: usize) {
+    let c = &CLASSES[k];
+    let a = c.alloc_site;
+    super::hook::patch(bs + a.rva as usize, &ce::alloc_bytes(c.alloc + tail::SIZE), &ce::alloc_bytes(c.alloc), a.name);
+    COPY[k].store(0, Ordering::Release);
 }
 
-pub fn mark_installed() {
-    INSTALLED.store(true, Ordering::Release);
+pub fn mark_installed(k: usize) {
+    INSTALLED[k].store(true, Ordering::Release);
 }
 
-pub fn start_line() -> String {
-    let m = MANIFEST.get();
+pub fn start_line(k: usize) -> String {
+    let m = MANIFEST[k].get();
+    let c = &CLASSES[k];
+    if k == 0 {
+        return format!(
+            "shadow: KH1's Shadow (M10) at combat = kh1 in Sora's story with enemy_ai = kh1 (read at each battle start): ctor 0x140192770 wrapped, vtable copy at {:#x} (states 0, 1, 2, 3, 4, 11, 12, 30, think 0x3D0), size 0xCE0 -> 0xD00 at 0x140188FAD; {} clips, recoil {:?}",
+            COPY[k].load(Ordering::Relaxed),
+            m.map_or(0, |m| m.clips.len()),
+            m.map(|m| [m.recoil[0], m.recoil[1], m.recoil[2], m.recoil[2]])
+        );
+    }
+    let states: Vec<String> = ce::replaced_states(c).iter().map(|s| s.to_string()).collect();
     format!(
-        "shadow: KH1's Shadow (M10) at combat = kh1 in Sora's story with enemy_ai = kh1 (read at each battle start): ctor 0x140192770 wrapped, vtable copy at {:#x} (states 0, 1, 2, 3, 4, 11, 12, 30, think 0x3D0), size 0xCE0 -> 0xD00 at 0x140188FAD; {} clips, recoil {:?}",
-        COPY.load(Ordering::Relaxed),
+        "{}: KH1's {} (M11) at combat = kh1 in Sora's story with enemy_ai = kh1 (read at each battle start): ctor {:#x} wrapped, vtable copy at {:#x} (states {}, think 0x3D0), size {:#X} -> {:#X} at {:#x}; {} clips, recoil {:?}",
+        c.name,
+        c.name,
+        0x1_4000_0000u64 + c.ctor.rva as u64,
+        COPY[k].load(Ordering::Relaxed),
+        states.join(", "),
+        c.alloc,
+        c.alloc + tail::SIZE,
+        0x1_4000_0000u64 + c.alloc_site.rva as u64,
         m.map_or(0, |m| m.clips.len()),
-        m.map(|m| m.recoil)
+        m.map(|m| m.recoil.clone())
     )
 }
 
-fn parse_parts(text: &str) -> Result<[i32; 2], String> {
-    let v = crate::json::parse(text)?;
-    let a = v.get("parts").and_then(|a| a.as_array()).ok_or("no \"parts\"")?;
-    if a.len() != 2 {
-        return Err("\"parts\" needs 2 bones".into());
-    }
-    let n = |i: usize| a[i].as_u32().filter(|&b| b < 256).ok_or("bad part bone").map(|b| b as i32);
-    Ok([n(0)?, n(1)?])
-}
-
 // ---------------------------------------------------------------------------------------------
-// The ctor and the runtime lookup.
+// The ctors and the runtime lookup.
 // ---------------------------------------------------------------------------------------------
 
-/// `CEnemyShadow`'s ctor: Re:CoM's, then (KH1 battle, `enemy_ai = kh1`) our vtable and tail.
-pub unsafe extern "win64" fn ctor(this: usize, a: usize, b: usize, c: usize) -> usize {
-    let r = orig::<CtorFn>(&ORIG_CTOR)(this, a, b, c);
-    if this == 0 || !live_battle() {
+/// Class `K`'s ctor: Re:CoM's, then (KH1 battle, `enemy_ai = kh1`) our vtable and tail.
+pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usize, c: usize) -> usize {
+    let r = orig::<CtorFn>(&ORIG_CTOR[K])(this, a, b, c);
+    if this == 0 || !live_battle(K) {
         return r;
     }
-    let copy = COPY.load(Ordering::Acquire);
-    let Some(m) = MANIFEST.get() else { return r };
-    if copy == 0 || rd::<usize>(this) != base() + sh::VTABLE as usize {
+    let cl = &CLASSES[K];
+    let copy = COPY[K].load(Ordering::Acquire);
+    let Some(m) = MANIFEST[K].get() else { return r };
+    if copy == 0 || rd::<usize>(this) != base() + cl.vtable as usize {
         return r;
     }
     let battle = super::battle::battle_number();
     let seed = SEED.fetch_add(0x9E37_79B9, Ordering::Relaxed) ^ (this as u32);
     // Re:CoM's ctor doesn't make the mover (`+0xF0` is still 0 here: 0.67.0's crash at every battle
-    // with a Shadow, owner 2026-11-02); the facing is taken again at state 0's begin (`appear_begin`).
+    // with a Shadow, owner 2026-11-02); the facing is taken again at state 0's begin.
     let m0: usize = rd(this + e::MOVER);
     let yaw = if m0 != 0 { crate::units::yaw_to_kh1(rd::<f32>(m0 + mv::YAW)) } else { 0.0 };
-    let ai = Ai::new(m.consts.clone(), m.frames(), seed, yaw, false);
+    let ai = ce::make(K, m, seed, yaw);
     let idx = (|| {
         let Ok(mut v) = RT.lock() else { return None };
         v.retain(|x| x.battle == battle && x.enemy != this);
         v.push(Runtime {
+            class: K,
             enemy: this,
             battle,
             ai,
@@ -315,38 +348,43 @@ pub unsafe extern "win64" fn ctor(this: usize, a: usize, b: usize, c: usize) -> 
     })();
     let Some(idx) = idx else { return r };
     wr(this, copy);
-    wr(this + tail::AT + tail::OFF_MAGIC, tail::MAGIC);
-    wr(this + tail::AT + tail::OFF_BATTLE, battle);
-    wr(this + tail::AT + tail::OFF_INDEX, idx as u32);
-    line(|| format!("battle {battle}: Shadow {this:#x} gets KH1's AI (seed {seed:#x})"));
+    wr(this + cl.alloc as usize + tail::OFF_MAGIC, cl.magic);
+    wr(this + cl.alloc as usize + tail::OFF_BATTLE, battle);
+    wr(this + cl.alloc as usize + tail::OFF_INDEX, idx as u32);
+    let name = cl.title;
+    line(K, || format!("battle {battle}: {name} {this:#x} gets KH1's AI (seed {seed:#x})"));
     r
 }
 
-/// Whether an enemy is one of ours (our vtable and tail, this battle).
-pub(super) unsafe fn ours(en: usize) -> bool {
-    let c = COPY.load(Ordering::Relaxed);
-    c != 0 && rd::<usize>(en) == c && rd::<u32>(en + tail::AT + tail::OFF_MAGIC) == tail::MAGIC
+/// The class of an enemy that is one of ours (our vtable and tail).
+pub(super) unsafe fn ours(en: usize) -> Option<usize> {
+    let vt: usize = rd(en);
+    (0..N).find(|&k| {
+        let c = COPY[k].load(Ordering::Relaxed);
+        c != 0 && vt == c && rd::<u32>(en + CLASSES[k].alloc as usize + tail::OFF_MAGIC) == CLASSES[k].magic
+    })
 }
 
 /// Runs `f` on the enemy's runtime; None when it has none (then the caller runs Re:CoM's slot).
 unsafe fn with_rt<T>(en: usize, f: impl FnOnce(&mut Runtime) -> T) -> Option<T> {
-    if !ours(en) {
-        return None;
-    }
-    let battle: u32 = rd(en + tail::AT + tail::OFF_BATTLE);
-    let idx: u32 = rd(en + tail::AT + tail::OFF_INDEX);
+    let k = ours(en)?;
+    let at = CLASSES[k].alloc as usize;
+    let battle: u32 = rd(en + at + tail::OFF_BATTLE);
+    let idx: u32 = rd(en + at + tail::OFF_INDEX);
     // `try_lock`: a state call re-entered from inside another (never expected) runs Re:CoM's slot.
     let mut v = RT.try_lock().ok()?;
     let r = v.get_mut(idx as usize).filter(|r| r.enemy == en && r.battle == battle)?;
     Some(f(r))
 }
 
-unsafe fn original(off: usize) -> usize {
-    ORIGINAL.get().map_or(0, |o| o[off / 8])
+unsafe fn original(k: usize, off: usize) -> usize {
+    ORIGINAL[k].get().map_or(0, |o| o[off / 8])
 }
 
+/// Calls Re:CoM's own slot of the enemy's class (`k`: its class; the Shadow's when unknown).
 unsafe fn call_original(en: usize, off: usize) {
-    let f = original(off);
+    let k = ours(en).unwrap_or(0);
+    let f = original(k, off);
     if f != 0 {
         let g: StateFn = std::mem::transmute_copy(&f);
         g(en);
@@ -357,8 +395,8 @@ unsafe fn call_original(en: usize, off: usize) {
 // The KH1 frame.
 // ---------------------------------------------------------------------------------------------
 
-fn manifest() -> &'static Manifest {
-    MANIFEST.get().expect("installed")
+fn manifest(k: usize) -> &'static Manifest {
+    MANIFEST[k].get().expect("installed")
 }
 
 unsafe fn mover(en: usize) -> usize {
@@ -382,29 +420,29 @@ unsafe fn clock(en: usize) -> i32 {
 /// blend in Re:CoM's clock units (KH1 frames × 50; Assumption: the play's blend argument counts
 /// the same units as the clock).
 unsafe fn play(en: usize, rt: &mut Runtime, request: u16, blend: f32) {
-    let Some(c) = manifest().clip(request) else {
-        line(|| format!("{en:#x}: no clip for KH1 request {request}"));
+    let Some(c) = manifest(rt.class).clip(request) else {
+        line(rt.class, || format!("{en:#x}: no clip for KH1 request {request}"));
         return;
     };
     let vt: usize = rd(en);
     let p: PlayFn = std::mem::transmute_copy(&rd::<usize>(vt + 0x70));
-    p(en, c.slot, 0, c.root as u64, sh::blend_units(blend), 0, 0);
+    p(en, c.slot, 0, c.root as u64, crate::shadow::blend_units(blend), 0, 0);
     rt.current = Some(request);
 }
 
 /// The current request's clip has played to KH1's length.
 unsafe fn ended(en: usize, rt: &Runtime) -> bool {
-    match rt.current.and_then(|r| manifest().clip(r)) {
+    match rt.current.and_then(|r| manifest(rt.class).clip(r)) {
         Some(c) => clock(en) >= crate::units::frames_to_units(c.frames as f32),
         None => true,
     }
 }
 
-/// KH1's hittable flag (actor flag `0x40`, `kh1_core::shadow::Cmd::Hittable`) as Re:CoM's own
+/// KH1's hittable flag (actor flag `0x40`, `kh1_core::enemy::Cmd::Hittable`) as Re:CoM's own
 /// hurt-body switch: every hurt body off (`0x1401A2D70(enemy, −1)`) or on (`0x1401A2DB0`), what
 /// Re:CoM's dig does (`0x140192E60` case 0 / 5). Re:CoM's hit handler, the KH1 swings' pair tests
 /// and the spells' overlap tests only meet bodies that are on. The lock-on flag (`+0x154` bit
-/// 0x10000, `0x1401CDB90`) stays: KH1's lock button (`0x1402B1540`) can lock a sunk Shadow too.
+/// 0x10000, `0x1401CDB90`) stays: KH1's lock button (`0x1402B1540`) can lock it too.
 unsafe fn hurt(en: usize, on: bool) {
     func::<BodiesFn>(if on { f::HURT_ON } else { f::HURT_OFF })(en, -1);
 }
@@ -439,7 +477,7 @@ unsafe fn enter_state(en: usize, k: i32) {
     wr(en + e::NEXT, crate::battle::state_address(en, k));
 }
 
-unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd) {
+unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
     match *c {
         Cmd::Motion { request, blend } => {
             if rt.current != Some(request) {
@@ -453,7 +491,7 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd) {
             rt.action_playing = false;
             match attack {
                 // An attack: Re:CoM's attack state; its begin plays the motion.
-                Some(a) => enter_state(en, sh::attack_state(a)),
+                Some(a) => enter_state(en, CLASSES[rt.class].attack_states.get(a as usize).copied().unwrap_or(2)),
                 None => {
                     play(en, rt, request, blend);
                     rt.queued = Some((then, 0.0));
@@ -469,19 +507,31 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd) {
         }
         Cmd::Height(h) => set_height(en, h),
         Cmd::FadeIn(n) => {
-            // KH1's 30-frame alpha fade-in of the first rise (`0x2570`): no Re:CoM model alpha found
-            // to write yet (`docs/recom-m10-shadow.md` § Not built); the height ramp shows the rise.
+            // KH1's alpha fade-in (`0x2570` / `0x2010`): no Re:CoM model alpha found to write yet
+            // (`docs/recom-m10-shadow.md` § Not built).
             let _ = n;
         }
+        // KH1's flag 0x1000: the action's root motion carries the body (`kh1_core::enemy::Body::held`).
+        Cmd::Held => rt.ai.body().held = true,
         Cmd::Yaw(_) | Cmd::Jump { .. } | Cmd::Target(_) | Cmd::State(_) => {}
     }
-    if sh::logged(c) {
+    if ce::logged(c) {
         let id: u32 = rd(en + e::ID);
-        line(|| format!("e{id}: {}", sh::cmd_token(c)));
+        let k = rt.class;
+        let tok = ce::cmd_token(c, CLASSES[k].attack_names, &|s| rt.ai.state_name(s));
+        line(k, || format!("e{id}: {tok}"));
     }
 }
 
-/// One KH1 frame of this Shadow: landing, the motion queue, the action's end, the behaviour (when
+/// The action that played ended: the AI goes on; KH1's flag 0x1000 goes with its motion
+/// (Assumption: cleared when the next motion, requested without bit 23, starts).
+fn end_action(rt: &mut Runtime) {
+    rt.action = None;
+    rt.action_playing = false;
+    rt.ai.body().held = false;
+}
+
+/// One KH1 frame of this enemy: landing, the motion queue, the action's end, the behaviour (when
 /// `poll`), the body physics into Re:CoM's mover.
 unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
     let mvr = mover(en);
@@ -502,8 +552,7 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
     if ended(en, rt) {
         if let Some(a) = rt.action.filter(|_| rt.action_playing) {
             if rt.current == Some(a.request) && a.attack.is_none() {
-                rt.action = None;
-                rt.action_playing = false;
+                end_action(rt);
             }
         }
         if let Some((q, b)) = rt.queued.take() {
@@ -520,7 +569,7 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         let draws = rt.ai.take_draws();
         if !draws.is_empty() {
             let id: u32 = rd(en + e::ID);
-            line(|| format!("e{id}: rand {}", draws.iter().map(|d| format!("{}={:.4}", d.what, d.value)).collect::<Vec<_>>().join(", ")));
+            line(rt.class, || format!("e{id}: rand {}", draws.iter().map(|d| format!("{}={:.4}", d.what, d.value)).collect::<Vec<_>>().join(", ")));
         }
     }
     body_step(en, rt, step, pos);
@@ -528,18 +577,19 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
 
 /// KH1's body physics for the frame, written into Re:CoM's mover: the facing, and the velocity
 /// that moves it by KH1's displacement (horizontal always; vertical while in a KH1 arc, with
-/// Re:CoM's acceleration cancelled).
+/// Re:CoM's acceleration cancelled). While KH1's flag 0x1000 holds the body, Re:CoM's root motion
+/// moves it (the clip's root flag) and our velocity is only what cancels the mover's acceleration.
 unsafe fn body_step(en: usize, rt: &mut Runtime, step: f32, pos: Vec3) {
     let mvr = mover(en);
-    let c = manifest().consts.clone();
+    let c = &manifest(rt.class).consts;
     let steer = rt.ai.take_steer();
     let airborne = rt.ai.body().airborne();
-    let d = rt.ai.body().step(step, pos.y, steer, &c);
+    let d = rt.ai.body().step(step, pos.y, steer, c);
     let yaw = rt.ai.body().yaw;
     wr(mvr + mv::YAW, crate::units::yaw_to_recom(yaw));
     let dr = crate::units::to_recom(d);
     let accel = rd_vec(mvr + mv::ACCEL);
-    let v = sh::velocity(dr, accel, step);
+    let v = crate::shadow::velocity(dr, accel, step);
     let scale: f32 = rd(mvr + mv::SPEED_SCALE);
     let k = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
     let mut vel: [f32; 4] = rd(mvr + mv::VEL);
@@ -555,7 +605,7 @@ unsafe fn body_step(en: usize, rt: &mut Runtime, step: f32, pos: Vec3) {
 unsafe fn landed(en: usize, rt: &mut Runtime) {
     match rt.reaction {
         Some(Phase::Air { base, behind }) => {
-            let (r, then, lying) = ks::landing(base, behind);
+            let (r, then, lying) = ke::landing(base, behind);
             rt.queued = None;
             play(en, rt, r, 0.0);
             rt.queued = Some((then, 0.0));
@@ -568,11 +618,12 @@ unsafe fn landed(en: usize, rt: &mut Runtime) {
             });
         }
         _ => {
-            // A plain landing (the leap): KH1's request 7 then the queue (`0x1402B7260`).
+            // A plain landing (a leap, a held attack's end): KH1's request 7 then the queue
+            // (`0x1402B7260`).
             if rt.action.is_none() && rt.reaction.is_none() {
                 let q = rt.queued.take();
-                play(en, rt, ks::req::LAND, 0.0);
-                rt.queued = q.or(Some((ks::req::IDLE, 0.0)));
+                play(en, rt, ke::react::req::LAND, 0.0);
+                rt.queued = q.or(Some((ke::react::req::IDLE, 0.0)));
             }
         }
     }
@@ -582,8 +633,9 @@ unsafe fn landed(en: usize, rt: &mut Runtime) {
 // The states.
 // ---------------------------------------------------------------------------------------------
 
-/// State 0 begin: Re:CoM's alternate appearance runs as Re:CoM's; else Re:CoM's begin without its
-/// motion (bodies off until the rise), and KH1's rise starts with the behaviour.
+/// State 0 begin: Re:CoM's alternate appearance runs as Re:CoM's; else the class's appearance:
+/// the Shadow's begin without its motion (bodies off until the rise) and KH1's rise; a base class's
+/// Re:CoM begin as it is, then KH1's appearance.
 pub unsafe extern "win64" fn appear_begin(en: usize) {
     let alt = rd::<u64>(en + e::FLAGS) & e::APPEAR_ALT != 0;
     let done = with_rt(en, |rt| {
@@ -602,30 +654,43 @@ pub unsafe extern "win64" fn appear_begin(en: usize) {
         if alt {
             rt.ai.skip_rise();
         }
+        CLASSES[rt.class].appear
     });
-    if done.is_none() || alt {
-        return call_original(en, sh::begin_slot(state::APPEAR));
+    match done {
+        None => return call_original(en, ce::begin_slot(state::APPEAR)),
+        Some(_) if alt => return call_original(en, ce::begin_slot(state::APPEAR)),
+        Some(Appear::Base) => {
+            // `0x14017B590` as it is (its writes, the battle message 0x96, its appear motion if the
+            // class has one); KH1's appearance replaces the motion from the next frame.
+            call_original(en, ce::begin_slot(state::APPEAR));
+            let k = ours(en).unwrap_or(1);
+            line(k, || format!("e{}: appears (KH1's appearance)", rd::<u32>(en + e::ID)));
+        }
+        Some(Appear::Shadow) => {
+            // `0x140192850`'s writes but its motion: `+0x154 &= ~1`, both body sets off.
+            let f154: u32 = rd(en + 0x154);
+            wr(en + 0x154, f154 & !1);
+            bodies(en, false);
+            line(0, || format!("e{}: appears (KH1's rise)", rd::<u32>(en + e::ID)));
+        }
     }
-    // `0x140192850`'s writes but its motion: `+0x154 &= ~1`, both body sets off.
-    let f154: u32 = rd(en + 0x154);
-    wr(en + 0x154, f154 & !1);
-    bodies(en, false);
-    line(|| format!("e{}: appears (KH1's rise)", rd::<u32>(en + e::ID)));
 }
 
-/// State 0 step: KH1's rise; when it is done, Re:CoM's battle-start handshake (`0x140192B00`).
+/// State 0 step: KH1's appearance; when it is done, the Shadow's battle-start handshake
+/// (`0x140192B00`) or, for a base class, Re:CoM's default state.
 pub unsafe extern "win64" fn appear_step(en: usize) {
     let r = with_rt(en, |rt| {
         if rt.recom_appear {
             return None;
         }
+        let kind = CLASSES[rt.class].appear;
         match rt.appear_sub {
             0 => {
                 tick(en, rt, true);
                 if !rt.ai.risen() {
                     return Some(());
                 }
-                if func::<IntFn>(f::INTRO_ROOM)() != 0 && func::<IntFn>(f::INTRO_FLAG)() != 0 {
+                if kind == Appear::Shadow && func::<IntFn>(f::INTRO_ROOM)() != 0 && func::<IntFn>(f::INTRO_FLAG)() != 0 {
                     func::<IntFn>(f::INTRO_COUNT)();
                     rt.appear_sub = 1;
                 } else {
@@ -641,7 +706,7 @@ pub unsafe extern "win64" fn appear_step(en: usize) {
         Some(())
     });
     if r.flatten().is_none() {
-        call_original(en, sh::step_slot(state::APPEAR));
+        call_original(en, ce::step_slot(state::APPEAR));
     }
 }
 
@@ -649,26 +714,26 @@ pub unsafe extern "win64" fn appear_step(en: usize) {
 pub unsafe extern "win64" fn think_begin(en: usize) {
     if with_rt(en, |rt| {
         if rt.current.is_none() {
-            play(en, rt, ks::req::IDLE, 8.0);
+            play(en, rt, ke::react::req::IDLE, 8.0);
         }
     })
     .is_none()
     {
-        call_original(en, sh::begin_slot(state::THINK));
+        call_original(en, ce::begin_slot(state::THINK));
     }
 }
 
 /// State 1 step: KH1's frame with the behaviour.
 pub unsafe extern "win64" fn think_step(en: usize) {
     if with_rt(en, |rt| tick(en, rt, true)).is_none() {
-        call_original(en, sh::step_slot(state::THINK));
+        call_original(en, ce::step_slot(state::THINK));
     }
 }
 
 /// The think (`+0x3D0`): nothing; KH1's behaviour picks the attacks.
 pub unsafe extern "win64" fn think_none(_en: usize) {}
 
-/// States 2 / 3 / 4 begin: the attack's KH1 motion (its records attack through `EN0001.ASD`).
+/// An attack state's begin: the attack's KH1 motion (its records attack through the `.ASD`).
 pub unsafe extern "win64" fn attack_begin(en: usize) {
     let k = crate::guard::state_index(en, rd(en + e::NEXT)).or_else(|| crate::guard::state_index(en, rd(en + e::STATE)));
     let done = with_rt(en, |rt| {
@@ -680,19 +745,18 @@ pub unsafe extern "win64" fn attack_begin(en: usize) {
     });
     if done != Some(true) {
         // Not started by our behaviour (never expected): Re:CoM's begin.
-        let s = k.map_or(state::CLAW, |k| k as i32);
-        call_original(en, sh::begin_slot(s));
+        let s = k.map_or(2, |k| k as i32);
+        call_original(en, ce::begin_slot(s));
     }
 }
 
-/// States 2 / 3 / 4 step: KH1's frame without the behaviour; at the motion's end, Re:CoM's attack
+/// An attack state's step: KH1's frame without the behaviour; at the motion's end, Re:CoM's attack
 /// end (`0x14017E540`: bit 0 off, the default state).
 pub unsafe extern "win64" fn attack_step(en: usize) {
     let r = with_rt(en, |rt| {
         let end = rt.action.is_some() && ended(en, rt);
         if end {
-            rt.action = None;
-            rt.action_playing = false;
+            end_action(rt);
         }
         tick(en, rt, false);
         end
@@ -701,15 +765,15 @@ pub unsafe extern "win64" fn attack_step(en: usize) {
         Some(true) => func::<EndFn>(f::ATTACK_END)(en, 0, 0),
         Some(false) => {}
         None => {
-            let s = crate::guard::state_index(en, rd(en + e::STATE)).map_or(state::CLAW, |k| k as i32);
-            call_original(en, sh::step_slot(s));
+            let s = crate::guard::state_index(en, rd(en + e::STATE)).map_or(2, |k| k as i32);
+            call_original(en, ce::step_slot(s));
         }
     }
 }
 
 /// The hit Re:CoM's handler took (its hit info): KH1's kind (a KH1 swing's from its row, else from
 /// Re:CoM's kind), the push direction, the hurt part.
-unsafe fn hit_of(en: usize) -> Option<Hit> {
+unsafe fn hit_of(en: usize, k: usize) -> Option<Hit> {
     let info: usize = rd(en + e::HIT_INFO);
     if info == 0 {
         return None;
@@ -720,7 +784,7 @@ unsafe fn hit_of(en: usize) -> Option<Hit> {
     }
     let me = crate::units::to_kh1(rd_vec(mover(en) + mv::POS));
     let swing = take_swing(en);
-    let kind = swing.or_else(|| (atk != 0).then(|| sh::kh1_kind_of_recom(rd(atk + hi::KIND))))?;
+    let kind = swing.or_else(|| (atk != 0).then(|| crate::shadow::kh1_kind_of_recom(rd(atk + hi::KIND))))?;
     // The attacker: its handle's actor (`0x14017C530`'s rule), else Sora.
     let owner = if atk != 0 { func::<HandleFn>(f::HANDLE_OBJ)(rd(atk + hi::OWNER)) } else { 0 };
     let pl: usize = rd(super::va(base(), data::MAIN_PLAYER));
@@ -728,7 +792,7 @@ unsafe fn hit_of(en: usize) -> Option<Hit> {
         let pm: usize = rd(pl + e::MOVER);
         let sp = crate::units::to_kh1(rd_vec(pm + mv::POS));
         let sy = crate::units::yaw_to_kh1(rd(pm + mv::YAW));
-        sh::swing_dir(sp, sy, me, std::f32::consts::FRAC_PI_4)
+        crate::shadow::swing_dir(sp, sy, me, std::f32::consts::FRAC_PI_4)
     } else {
         let from = if owner != 0 { crate::units::to_kh1(rd_vec(func::<BoneFn>(f::BONE)(owner, 0) + 0xD0)) } else { sora_pos().unwrap_or(me) };
         let d = (me - from).flat();
@@ -738,16 +802,16 @@ unsafe fn hit_of(en: usize) -> Option<Hit> {
             Vec3::from_yaw(with_rt(en, |rt| rt.ai.body().yaw).unwrap_or(0.0) + std::f32::consts::PI)
         }
     };
-    // The part: the contact point against the head and hip bones.
+    // The part: the contact point against the hurt parts' bones.
     let n: i32 = rd(info + hi::COUNT);
     let parts: usize = rd(info + hi::PARTS);
-    let part = match (PART_BONES.get(), n > 0 && parts != 0) {
-        (Some(b), true) => {
-            let contact = rd_vec(parts + hi::CONTACT);
-            let bone = |i: i32| rd_vec(func::<BoneFn>(f::BONE)(en, i) + 0xD0);
-            sh::part_of(contact, bone(b[0]), bone(b[1]))
-        }
-        _ => 0,
+    let bones = &manifest(k).parts;
+    let part = if n > 0 && parts != 0 && !bones.is_empty() {
+        let contact = rd_vec(parts + hi::CONTACT);
+        let at: Vec<Vec3> = bones.iter().map(|&b| rd_vec(func::<BoneFn>(f::BONE)(en, b) + 0xD0)).collect();
+        ke::react::nearest_part(contact, &at)
+    } else {
+        0
     };
     Some(Hit { kind, dir, part })
 }
@@ -757,7 +821,7 @@ static SWING: std::sync::Mutex<Vec<(usize, u8)>> = std::sync::Mutex::new(Vec::ne
 
 /// `super::attack`: a KH1 swing hit this enemy with KH1's reaction kind `kind`.
 pub(super) unsafe fn note_swing(en: usize, kind: u8) {
-    if !installed() || !ours(en) {
+    if !any_installed() || ours(en).is_none() {
         return;
     }
     if let Ok(mut g) = SWING.lock() {
@@ -774,61 +838,83 @@ fn take_swing(en: usize) -> Option<u8> {
     Some(g.swap_remove(i).1)
 }
 
-/// Starts KH1's reaction for the hit (or the clash) on this Shadow; false: nothing to play.
+/// Starts KH1's reaction for the hit (or the clash) on this enemy; false: nothing to play.
 unsafe fn start_reaction(en: usize, rt: &mut Runtime, hit: Option<Hit>) -> bool {
-    let m = manifest();
-    let c = m.consts.clone();
+    let m = manifest(rt.class);
+    let c = &m.consts;
     let y = crate::units::to_kh1(rd_vec(mover(en) + mv::POS)).y;
     let airborne = rt.ai.body().airborne();
-    rt.action = None;
-    rt.action_playing = false;
+    end_action(rt);
     if let Some(a) = rt.clash.take() {
-        let s = ks::clash(a, airborne, &mut rt.ai.body(), y, &c, [m.recoil_of(Attack::Claw), m.recoil_of(Attack::Swipe), m.recoil_of(Attack::LeapClaw)]);
+        let names = CLASSES[rt.class].attack_names;
+        let aname = names.get(a as usize).copied().unwrap_or("?");
+        let Some(recoil) = m.recoil_of(a) else {
+            // The model has no motion for the row's recoil (KH1's request names no entry,
+            // `0x1402A01E0`): Assumption: the attack is cut and the idle plays.
+            rt.queued = None;
+            play(en, rt, ke::react::req::IDLE, c.get("attack_blend"));
+            rt.reaction = Some(Phase::Motion);
+            line(rt.class, || format!("e{}: clash on its {aname}: no recoil motion ({:?}); idle", rd::<u32>(en + e::ID), m.recoil.get(a as usize)));
+            return true;
+        };
+        let s = ke::react::clash(recoil, airborne, &mut rt.ai.body(), y, c);
         rt.queued = None;
         play(en, rt, s.request, 0.0);
-        rt.queued = Some((s.then, c.attack_blend()));
+        rt.queued = Some((s.then, c.get("attack_blend")));
         rt.reaction = Some(if airborne { Phase::Air { base: None, behind: false } } else { Phase::Motion });
-        line(|| format!("e{}: clash recoil {} ({})", rd::<u32>(en + e::ID), s.request, a.name()));
+        line(rt.class, || format!("e{}: clash recoil {} ({aname})", rd::<u32>(en + e::ID), s.request));
         return true;
     }
     let Some(hit) = hit else { return false };
     let lying = matches!(rt.reaction, Some(Phase::Down { .. })) && rt.current == rt.lie;
     let current = rt.current;
     // The behaviour's random stream (KH1's one `rand`; the launch's down time draws from it).
-    let mut rng = rt.ai.with_rng(|r| r.clone());
+    let mut rng = rt.ai.rng();
     let yaw = rt.ai.body().yaw;
     let start = {
         let mut body = rt.ai.body();
-        ks::react(hit, yaw, current, airborne, lying, m, &c, &mut rng, &mut body, y)
+        ke::react(hit, yaw, current, airborne, lying, m, c, &mut rng, &mut body, y)
     };
-    rt.ai.with_rng(|r| *r = rng);
+    rt.ai.set_rng(rng);
     let id: u32 = rd(en + e::ID);
     match start {
         None => {
-            line(|| format!("e{id}: hit kind {} part {} while lying: push only", hit.kind, hit.part));
+            line(rt.class, || format!("e{id}: hit kind {} part {} while lying: push only", hit.kind, hit.part));
             true
         }
         Some(s) => {
             rt.down = s.down;
             rt.queued = None;
             play(en, rt, s.request, 0.0);
-            rt.queued = Some((s.then, c.attack_blend()));
+            rt.queued = Some((s.then, c.get("attack_blend")));
             let behind = s.base.is_some_and(|b| s.request >= b + 5);
             rt.reaction = Some(if rt.ai.body().airborne() { Phase::Air { base: s.base, behind } } else { Phase::Motion });
-            line(|| format!("e{id}: reaction kind {} part {} dir ({:.2},{:.2}) -> {} then {}{}", hit.kind, hit.part, hit.dir.x, hit.dir.z, s.request, s.then, if s.base.is_some() { format!(" down {:.1}", s.down) } else { String::new() }));
+            line(rt.class, || format!("e{id}: reaction kind {} part {} dir ({:.2},{:.2}) -> {} then {}{}", hit.kind, hit.part, hit.dir.x, hit.dir.z, s.request, s.then, if s.base.is_some() { format!(" down {:.1}", s.down) } else { String::new() }));
             true
         }
     }
 }
 
+/// Re:CoM's HP / max HP (`+0x274`, `0x14017F5A0`), for scripts that read their HP.
+unsafe fn hp_ratio(en: usize) -> f32 {
+    let hp: i32 = rd(en + e::HP);
+    let max = func::<MaxHpFn>(f::MAX_HP)(en);
+    if max > 0 {
+        hp as f32 / max as f32
+    } else {
+        1.0
+    }
+}
+
 /// States 11 / 12 begin: KH1's reaction.
 pub unsafe extern "win64" fn react_begin(en: usize) {
-    let hit = if ours(en) { hit_of(en) } else { None };
+    let hit = ours(en).and_then(|k| hit_of(en, k));
     let done = with_rt(en, |rt| {
-        // KH1's hit handler (`0x2988`): a damaging hit sets the "hit" state; a clash is no hit.
-        if rt.clash.is_none() {
-            rt.ai.on_hit();
+        // KH1's hit handler: a damaging hit or a clash (the Shadow ignores a clash).
+        if CLASSES[rt.class].reads_hp {
+            let _ = hp_ratio(en);
         }
+        rt.ai.on_hit(if rt.clash.is_none() { HitNews::Damage } else { HitNews::Clash });
         start_reaction(en, rt, hit)
     });
     match done {
@@ -836,7 +922,7 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         Some(false) => func::<StateFn>(f::DEFAULT_STATE)(en),
         None => {
             let s = crate::guard::state_index(en, rd(en + e::NEXT)).map_or(state::FLINCH, |k| k as i32);
-            call_original(en, sh::begin_slot(s));
+            call_original(en, ce::begin_slot(s));
         }
     }
 }
@@ -860,8 +946,8 @@ pub unsafe extern "win64" fn react_step(en: usize) {
                     let l = left - step;
                     if l <= 0.0 {
                         rt.queued = None;
-                        play(en, rt, ks::get_up(base, behind), 0.0);
-                        rt.queued = Some((ks::req::IDLE, manifest().consts.attack_blend()));
+                        play(en, rt, ke::get_up(base, behind), 0.0);
+                        rt.queued = Some((ke::react::req::IDLE, manifest(rt.class).consts.get("attack_blend")));
                         rt.reaction = Some(Phase::Motion);
                         rt.lie = None;
                     } else {
@@ -882,7 +968,7 @@ pub unsafe extern "win64" fn react_step(en: usize) {
         Some(false) => {}
         None => {
             let s = crate::guard::state_index(en, rd(en + e::STATE)).map_or(state::FLINCH, |k| k as i32);
-            call_original(en, sh::step_slot(s));
+            call_original(en, ce::step_slot(s));
         }
     }
 }
@@ -890,15 +976,16 @@ pub unsafe extern "win64" fn react_step(en: usize) {
 /// State 30 begin: Re:CoM's defeat (prizes, EXP, its removal timer), then the killing hit's KH1
 /// reaction motion.
 pub unsafe extern "win64" fn defeat_begin(en: usize) {
-    let hit = if ours(en) { hit_of(en) } else { None };
-    call_original(en, sh::begin_slot(state::DEFEAT));
+    let hit = ours(en).and_then(|k| hit_of(en, k));
+    call_original(en, ce::begin_slot(state::DEFEAT));
     with_rt(en, |rt| {
         rt.dead = true;
         if !start_reaction(en, rt, hit) {
-            play(en, rt, ks::req::FLINCH, 0.0);
+            play(en, rt, ke::react::req::FLINCH, 0.0);
             rt.reaction = Some(Phase::Motion);
         }
-        line(|| format!("e{}: defeated (Re:CoM's defeat, KH1's motion {:?})", rd::<u32>(en + e::ID), rt.current));
+        let cur = rt.current;
+        line(rt.class, || format!("e{}: defeated (Re:CoM's defeat, KH1's motion {:?})", rd::<u32>(en + e::ID), cur));
     });
 }
 
@@ -908,38 +995,43 @@ pub unsafe extern "win64" fn defeat_step(en: usize) {
         rt.dead_frames = rt.dead_frames.saturating_add(1);
         tick(en, rt, false)
     });
-    call_original(en, sh::step_slot(state::DEFEAT));
+    call_original(en, ce::step_slot(state::DEFEAT));
 }
 
-/// `super::guard`: Sora's Guard blocked this enemy's attack. A KH1 Shadow plays KH1's clash recoil
-/// (`0x1402B8E10` cases 6 / 7 → `0x1402B9140`) through state 11; true when handled.
-pub(super) unsafe fn guard_block(en: usize) -> bool {
-    if !installed() || !ours(en) {
-        return false;
+/// `super::guard`: Sora's Guard blocked this enemy's attack. A KH1 enemy plays KH1's clash recoil
+/// (`0x1402B8E10` cases 6 / 7 → `0x1402B9140`) through state 11; its class's title when handled.
+pub(super) unsafe fn guard_block(en: usize) -> Option<&'static str> {
+    if !any_installed() {
+        return None;
     }
+    let k = ours(en)?;
     let attack = with_rt(en, |rt| {
         let a = rt.action.and_then(|a| a.attack);
         rt.clash = a;
         a
     })
     .flatten();
-    let Some(a) = attack else { return false };
+    let a = attack?;
     // Re:CoM's attack end with state 11 next (bit 0 off, its card end).
     func::<EndFn>(f::ATTACK_END)(en, crate::battle::state_address(en, state::FLINCH), 0);
-    line(|| format!("e{}: Guard blocked its {}", rd::<u32>(en + e::ID), a.name()));
-    true
+    let name = CLASSES[k].attack_names.get(a as usize).copied().unwrap_or("?");
+    line(k, || format!("e{}: Guard blocked its {name}", rd::<u32>(en + e::ID)));
+    Some(CLASSES[k].title)
 }
 
-/// The trace's token (F9 recording): every KH1 Shadow's request, reaction, action.
+/// The trace's tokens (F9 recording): per class (`shadow …`, `soldier …`), every KH1 enemy's
+/// request, reaction, action and hittable flag.
 pub unsafe fn trace_token() -> String {
-    if !installed() {
+    if !any_installed() {
         return String::new();
     }
-    {
-        let Ok(v) = RT.try_lock() else { return String::new() };
-        v.iter()
+    let Ok(v) = RT.try_lock() else { return String::new() };
+    let mut out = Vec::new();
+    for (k, c) in CLASSES.iter().enumerate() {
+        let t: Vec<String> = v
+            .iter()
             // Re:CoM removes a defeated enemy after its 1500-unit (30-frame) timer: not listed after.
-            .filter(|r| r.battle == super::battle::battle_number() && !(r.dead && r.dead_frames > 31))
+            .filter(|r| r.class == k && r.battle == super::battle::battle_number() && !(r.dead && r.dead_frames > 31))
             .take(8)
             .map(|r| {
                 format!(
@@ -955,7 +1047,10 @@ pub unsafe fn trace_token() -> String {
                     r.hittable as u8
                 )
             })
-            .collect::<Vec<_>>()
-            .join(" ")
+            .collect();
+        if !t.is_empty() {
+            out.push(format!("{} {}", c.name, t.join(" ")));
+        }
     }
+    out.join("; ")
 }

@@ -29,6 +29,7 @@
 //! - [`flip`]: the "Re:CoM's content in KH1" model-writer test (`kh1-flip-test`);
 //! - [`shadow`]: M10, KH1's Shadow: its motions, attack records and sounds in Re:CoM's
 //!   `ENEMY/0001` files and the behaviour's numbers (`kh1-shadow.json`).
+//! - [`enemy`]: M11, the same step for any KH1 enemy twin ([`enemy::Spec`]).
 //!
 //! No game data is embedded; everything is read from the user's files at run time.
 
@@ -40,6 +41,7 @@ pub mod build;
 pub mod camp_rows;
 pub mod command_menu;
 pub mod convert;
+pub mod enemy;
 pub mod flip;
 pub mod install;
 pub mod keyblade;
