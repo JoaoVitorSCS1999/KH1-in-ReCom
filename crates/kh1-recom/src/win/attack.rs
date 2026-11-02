@@ -705,6 +705,8 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
         }
     }
     super::guard::after_enemy_hit(enemy, r, hp);
+    // Gimmick cards, option (c): a KH1 finisher that interrupted a card-break boss's attack.
+    super::gimmick::after_kh1_hit(enemy, row, force);
     // KH1's MP charge for this hit (`0x1402BF330`: one per KH1 damage record; M7 stage 7.1).
     super::mp::on_kh1_hit(enemy, row);
     let after: i32 = rd(enemy + 0x274);

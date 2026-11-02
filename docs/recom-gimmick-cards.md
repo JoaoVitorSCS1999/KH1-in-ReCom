@@ -101,7 +101,7 @@ kill count).
 
 ## 3. At Combat = KH1 before this change (Checked (decomp) + the mod's code)
 
-- **Card-break drops never happen.** Guard Armor, Trickmaster, Jafar (its card-break drop),
+- (Before option (c).) **Card-break drops never happen.** Guard Armor, Trickmaster, Jafar (its card-break drop),
   Parasite Cage and Dragon Maleficent drop only from **state 13**, which only CBTL's **message 3**
   (a broken card) enters (the writers of `enemy+0x68` = `enemy+0x800`: only that case; text search
   of the decomp). At KH1 the Heartless bosses attack without cards (Stage 28's P1) and Sora has none
@@ -151,9 +151,55 @@ kill count).
   `prompt:` (shown / gone), `use:` (played, the handler's refusal, action 0x19 started, the boss took
   it, the action ended).
 
+### The five card-break bosses (Stage after 108; owner, 2026-11-01: option (c))
+
+At Combat = KH1, in Sora's story: when a **KH1 combo finisher** (a KH1 row whose attack record has
+kind 5: the ground finisher, the air finisher, Blitz, Ripple Drive, Hurricane Blast) **interrupts
+the attack** of Guard Armor, Trickmaster, Jafar, Parasite Cage or Dragon Maleficent, the boss gets
+**Re:CoM's own card break**, exactly as the card-battle resolver gives it:
+
+- **Where**: the KH1 enemy-hit wrapper (`win::attack::enemy_hit`), after Re:CoM's hit handler
+  `0x14017F7E0`, calls `win::gimmick::after_kh1_hit`. "Interrupts": the boss was in an attack
+  (`+0x260 & 1`, without the interrupt bit) so the wrapper set the interrupt bit `0x2000000` for
+  the handler (decision 14), and after the handler its attack is over (`+0x260 & 1` cleared by
+  `0x14017E1D0`). Not for a hit that kills it (Re:CoM's message handler ignores a dead enemy), not
+  for spells, not for any other enemy. Only the five classes, by vtable, RTTI-checked at start:
+  `CBossGuardarmor` `0x14065F4B8`, `CBossTrickMaster` `0x14066C5F8`, `CBossJafar` `0x14066E220`,
+  `CBossParasiteCage` `0x140669220`, `CBossMDragon` `0x140674570`.
+- **What**: Re:CoM's message post `0x1401D2770(CBTL +0x58 (its CMessageManager), delay 0, CBTL's
+  handle +0x20, the boss's handle +0x20, message 3, no record)`: the same call the resolver
+  `0x14015EAC0` makes for a broken card (its posts at `0x14015ED6D..`, delay 0, from CBTL's handle).
+  The record is left out: nothing in the five bosses' state 13 (begin `+0x220`, exe `+0x228`, end
+  `+0x230`) or `+0x418` reads the copy at `+0x318` (Checked (decomp)), and at KH1 CBTL's side-2
+  record holds no card of theirs. Re:CoM's message manager then delivers it to the boss's handler
+  `0x140181620` (all five use the base handler: Checked (exe)), whose **case 3** (`0x140181739`):
+  unless `+0x260 & 4`, vtable `+0x418`; clears `+0x260` bits 0x201 and 0x10; ends its attack
+  collision (`0x140179D90(+0x108, 10.0)`); next state = **state 13** (`enemy+0x800`). The boss's
+  **state-13 begin** is the stagger with the drop roll (§ 1 table: Guard Armor `0x1403AB290`,
+  Trickmaster `0x1403CB1C0`, Jafar `0x1403D0D80`, Parasite Cage `0x1403C2B70`, Dragon `0x1403E1690`):
+  the chance, its conditions, the receiver and the prize are all its own.
+- **Not done**: the resolver's other card-break work (the enemy card's UI, CBTL's slot, the clash
+  effects) has no card at KH1 to act on; only the boss's message is sent.
+- **Revenge (Stage 106)**: none of the five is a revenge boss (the revenge list holds the humanoid
+  bosses only; Checked (test `the_five_card_break_bosses`)). Re:CoM's boss falloff and every other
+  hit rule are unchanged.
+- **Per frame**: nothing, except a few loads while a posted break is watched for its log line
+  (≤ 120 frames).
+- **Logs**: `break:` lines: the post (finisher row, boss, HP, handle), "entered its state 13", then
+  the roll: "the card dropped" / "no card (its chance missed, or its own condition refused)" / "no
+  state 13 within 120 frames" / "the boss is gone"; a finisher on an attacking boss that didn't
+  break says why.
+- Assumption: Re:CoM's message manager is stepped in KH1 battles as in card battles (CBTL's task;
+  Stage 108's message 6 relies on it too); that bosses stagger "about as often" as in Re:CoM
+  (not measured).
+
 ## 5. Sites (`sites::GIMMICK_*`, bytes from the Steam exe, pefile-checked)
 
 - Hook: prize factory `0x1401A89C0` (moved here from `DROP_CALLEES`).
+- Card break: called `0x1401D2770` (`GIMMICK_BREAK_CALLEES`); checked the enemy handler's case 3
+  `0x140181739`, its table entry `0x1401819B0`, the next-state store `0x140181994`
+  (`GIMMICK_BREAK_CHECKED`); the five classes' `+0x48` (= `0x140181620`) and `+0x220` (their drop
+  begins) as relocated pointers (`GIMMICK_BREAK_PTRS`).
 - Called: `0x140161D60`, `0x140161D30`, `0x14015D5B0`, `0x1401F5580` (+ `CPlayerSora` vtable
   `+0x48` = it, `0x1405A9980`); reused: `0x1401B0870`, `0x1401B08C0`.
 - Checked: `0x140160760`, `0x1401616C0`, the handler's type 6 case `0x1401F58E8` and table
@@ -172,9 +218,13 @@ kill count).
   `.EPD` parameters (files not in session); worlds by name; `0xFF0` is the card-raise motion; no
   Re:CoM code relies on the gimmick card sitting in the revolver at KH1 (the revolver add is the
   only step skipped); KH1 Blizzard keeps attribute 3 on Jafar's guarding body.
+- Option (c): Checked (decomp + disasm + exe + tests): the resolver's post and its arguments, the
+  enemy handler's case 3 → state 13, the five classes' handler and state-13 slots, kind-5 rows
+  (rows 8, 16 finishers; 11, 13 not), no revenge overlap. Assumption: the message manager runs in
+  KH1 battles; the stagger's visible feel.
 - Not checked: in game.
 
-## 7. Owner question: the five card-break drops
+## 7. The five card-break drops (answered: (c), built in § 4)
 
 Guard Armor, Trickmaster, Jafar, Parasite Cage and Dragon Maleficent drop their card only when Sora
 **breaks the boss's card** (state 13). At Combat = KH1 there are no card breaks, so these five never
@@ -210,4 +260,13 @@ Combat = KH1, Sora's story, `kh1-recom.log` open:
    returns.
 9. Combat = Re:CoM: the card goes into the deck as before (log: `drop: … Re:CoM's`), no Stagger.
    Riku's story: unchanged.
-10. Guard Armor / Trickmaster / Parasite Cage / Dragon Maleficent: no drop yet (§ 7).
+10. **Card break, option (c)**: Guard Armor (Traverse Town): hit it with a combo finisher while it
+    attacks. It staggers (Re:CoM's card-break stagger) and the log shows `break: KH1 finisher row …
+    interrupted CBossGuardarmor's attack`, `entered its state 13`, then the roll (30 %: a card
+    drops about one break in three). Swings 1 / 2 during its attack, or a finisher while it isn't
+    attacking: no stagger, no break line (or "no break" with the reason).
+11. The same with Trickmaster, Jafar, Parasite Cage and Dragon Maleficent (their chances are their
+    parameter files'; Parasite Cage stops dropping once its card was used; Dragon only with no
+    platform of its own out).
+12. A finisher that kills one of them: no break. Other bosses and Heartless: never a break line.
+13. Stagger with a card from a break: the boss's own reaction (§ 2) as with the other cards.
