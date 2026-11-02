@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 116: Silent enemy card stock / reload / refill sounds at Combat = KH1, version 0.65.2 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "make it so that you cant hear enemies stocking cards or refilling their deck".
+- Every one goes through Re:CoM's sound play `0x1402AA360(id, -1)` from deck code shared with Sora; the deck / stock
+  folder's side is `+0x5C` (1 Sora, 2 enemy). Eight exact calls retargeted to a stub that skips enemy decks (returns
+  0, as a play that plays nothing): reload charge 0x13 (`0x140167C01`), gauge step 0x14 (`0x140167BDA`), reload done
+  0x15 (`0x140167C93`, `0x140167B01`), deck refill / first deal 0x1B (`0x14016B3E7`, `0x14016A091`), boss stock 0xF
+  (`0x14016DCA4`), Marluxia 3's folder 0xF (`0x14016DE3F`). Switched at battle start with stage 2/3's switches;
+  Combat = Re:CoM, Riku's story and minigames keep Re:CoM's bytes. Checked (decomp + disasm + exe).
+- Not silenced (outside the ask): a human boss's item-card page switch (sound 3). Assumption: no reload voice.
+- Checked: tests, Windows build, 652 sites. Not checked: in game.
+
+---
+
 ## Stage 115: Revenge: KH2's frame-20 check, Hades untouchable only in his wind-up, Cloud's revenge = his charge, version 0.65.1 (2026-11-01)
 
 - Asks (owner, 2026-11-02, on 0.65.0's questions): Hades "Only the wind-up"; check frame "KH2's frame 20"; Cloud's
