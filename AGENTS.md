@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 136: M11: the Bandit's thrown scimitar as a Re:CoM homing bullet, version 0.75.1 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Re:CoM bullet + Re:CoM effect".
+- KH1 (Checked (files + decomp)): it leaves at frame 90 of the throw, flies at 10/f, slows 0.5/f after frame 120 and
+  comes back, turns up to 3°/f toward Sora, lives at most 300 frames.
+- Built (Checked (exe)): a Re:CoM homing bullet made the way Re:CoM's Aquatank makes its shots; KH1's flight steps
+  it each frame, then Re:CoM's own step (collides, hits Sora, ends it); look: Re:CoM's Aero level-1 shot set
+  `0x1405A2030` (`airo_all` 5); damage: Re:CoM's power for the Bandit's attack id 1 (whirl; Assumption); Sora's
+  Guard turns it back (decision 28). No new hooks.
+- Not built: swinging at the blade, KH1's slide after a repel, walls (end it here), hiding the held blade.
+- Asset step re-run: `kh1-bandit.json` gains the `blade_*` numbers.
+- Checked: tests, Windows build, 782 sites. Not checked: in game.
+
+---
+
 ## Stage 135: M11: a shared enemy guard (KH1's rule on Re:CoM's body guard); the Bandit's block stance and spin repel, version 0.75.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Shared enemy guard first" for the Bandit's block stance and spin repel (then Large Body,
