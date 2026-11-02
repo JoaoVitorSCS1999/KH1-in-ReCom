@@ -116,9 +116,12 @@ pub struct Globals {
     pub launch_speed_max: u16,
     /// +0x18: launch height = speed x this (1.35).
     pub launch_height_factor: f32,
-    /// +0x1C..+0x34: Sora-side hit-reaction pushes (2.5, 750, 150, 4, 80, 40, 8; not decoded).
+    /// +0x1C..+0x34: hit-reaction pushes (2.5, 750, 150, 4, 80, 40, 8); +0x2C (80) is the enemy
+    /// ground flinch's push slide (`0x1402B9230` → `0x1402B7E60`; Checked (decomp)), the rest not
+    /// decoded.
     pub reaction_pushes: [f32; 7],
-    /// +0x38 / +0x3C: enemy air knock-back speeds (4, 16; meaning Assumption (notes)).
+    /// +0x38 / +0x3C: enemy air flinch speed (`0x1402B8B90`, × weight) and air knock-back speed
+    /// (`0x1402B77D0`) (4, 16; Checked (decomp)).
     pub air_knockback: [f32; 2],
     /// +0x54 + c*4: per character (u16 jump height, u16 with High Jump). Sora is c = 0
     /// (190 / 290); the order of the others is an Assumption.

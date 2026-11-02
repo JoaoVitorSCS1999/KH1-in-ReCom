@@ -9,3 +9,6 @@ assets:
   method: copy
   source:
   - name: kh1-recom.dll
+# Files the asset step (kh1-recom-build) writes straight into Panacea's mod folder from the
+# player's own game files (never shipped here). M10, KH1's Shadow: recom/ENEMY/0001/EN0001.ANN,
+# EN0001.ASD, EN0001.SES and recom/kh1-shadow.json (docs/recom-m10-shadow.md).

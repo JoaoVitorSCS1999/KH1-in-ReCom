@@ -416,6 +416,13 @@ bones): local rotation (geodesic angle), translation and scale.
 - Version / `AGENTS.md` stage entry for this crate: left to the lead (this task was limited to
   the crate and this note).
 
+## KH1's Shadow (`ENEMY/0001/EN0001.*`, `kh1-shadow.json`, M10)
+
+The step also builds KH1's Shadow into Re:CoM's Shadow files: its motions, attack records and
+their sounds, and the behaviour's numbers from the player's `ex_2020.bd`. Details, outputs and the
+owner's install steps: `docs/recom-m10-shadow.md` § The asset step. Without KH1's or Re:CoM's
+Shadow files it prints a note and builds nothing (an earlier run's files are removed).
+
 ## KH1 stats (`kh1-stats.json`, 0.7.0)
 
 - `kh1-recom-build` also writes `kh1-stats.json` next to `kh1-motions.json`: Sora's KH1

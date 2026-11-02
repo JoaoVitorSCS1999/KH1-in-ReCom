@@ -329,7 +329,7 @@ fn keyblade_hits_once_per_swing_and_finisher_launches() {
     assert_eq!(rows, vec![13, 14, 8], "a close foe in front flags rows 13 and 14: the 2nd swing is the lunge");
     assert_eq!(hits.len(), 3, "one hit per swing");
     assert_eq!(hits[0].damage, 6, "curve[8 − 2]");
-    assert!(matches!(hits[0].reaction, Reaction::Flinch { request: 0x4C }));
+    assert!(matches!(hits[0].reaction, Reaction::Flinch { request: 0x48 }));
     assert_eq!(hits[0].mp_units, 3, "equal levels: the record charge, 3 units");
     assert!(matches!(hits[2].reaction, Reaction::Launch { .. }));
     assert!(hits[2].damage == 12 || hits[2].damage == 24);

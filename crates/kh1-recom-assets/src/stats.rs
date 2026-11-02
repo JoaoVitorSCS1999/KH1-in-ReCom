@@ -88,6 +88,14 @@ const SHADOW_WORLDS: &[(&str, u32)] = &[
     ("lm", 0x740),
 ];
 
+/// The script offsets of the Shadow's per-world stat records (M10 reads their knock-back weight).
+pub fn shadow_record_offsets() -> Vec<u32> {
+    let mut v: Vec<u32> = SHADOW_WORLDS.iter().map(|w| w.1).collect();
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
 /// The Shadow's defeat drop tables (`ex_2020.bd`'s defeat routine picks by world: Dive to the
 /// Heart, Destiny Islands, else one table; End of the World rooms ≥ 37 have a fourth, no Re:CoM
 /// world maps there). Checked (files: the script evaluated for every world × room × variant).

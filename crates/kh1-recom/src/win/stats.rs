@@ -146,7 +146,8 @@ pub fn load(path: Option<&std::path::Path>) -> bool {
 
 fn class_of(enemy: usize) -> Option<&'static str> {
     // SAFETY: an enemy object's first field is its vtable.
-    let vt: usize = unsafe { rd(enemy) };
+    // M10: a KH1 Shadow's vtable copy is `CEnemyShadow`'s.
+    let vt: usize = super::shadow::canonical_vtable(unsafe { rd(enemy) });
     CLASSES.get()?.iter().find(|(v, _)| *v == vt).map(|(_, c)| *c)
 }
 

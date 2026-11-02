@@ -26,7 +26,9 @@
 //! - [`recom_hp`]: Re:CoM's HP ring and bar turned 180° (`gauge:01`) for KH1's place;
 //! - [`camp_rows`]: the camp list's green row with Re:CoM's item symbol (`camp:00` in
 //!   `FORM/0100/FO0100.SPR`) and `kh1-camp-rows.json`;
-//! - [`flip`]: the "Re:CoM's content in KH1" model-writer test (`kh1-flip-test`).
+//! - [`flip`]: the "Re:CoM's content in KH1" model-writer test (`kh1-flip-test`);
+//! - [`shadow`]: M10, KH1's Shadow: its motions, attack records and sounds in Re:CoM's
+//!   `ENEMY/0001` files and the behaviour's numbers (`kh1-shadow.json`).
 //!
 //! No game data is embedded; everything is read from the user's files at run time.
 
@@ -51,6 +53,7 @@ pub mod recom_hp;
 pub mod rtm;
 pub mod menu_sounds;
 pub mod ses;
+pub mod shadow;
 pub mod stats;
 pub mod texture;
 pub mod uibin;

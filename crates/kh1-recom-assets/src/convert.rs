@@ -175,12 +175,15 @@ const CONST_EPS: [f64; 3] = [1e-7, 1e-5, 1e-6];
 
 impl Converter {
     /// From KH1's `.mdls` and Re:CoM's skeleton. Checks the map covers every Re:CoM bone but
-    /// `Root`, that bones 0/1 are `Root`/`ex_0010_sk`, and that every parent is mapped.
+    /// `Root`, that bones 0/1 are `Root`/`ex_NNNN_sk`, and that every parent is mapped.
     pub fn new(mdls: &[u8], skel: RecomSkeleton) -> Result<Converter> {
         let kskel = Skeleton::parse(mdls)?;
         let rig = Rig::from_mdls(mdls)?;
-        if skel.bones.len() < 2 || skel.bones[0].name != "Root" || skel.bones[1].name != "ex_0010_sk" {
-            return bad("Re:CoM skeleton: bone 0/1 are not Root/ex_0010_sk");
+        // Bone 1 is the model's own `ex_NNNN_sk` (Sora's `ex_0010_sk`, the Shadow's
+        // `ex_2020_sk`; Checked (files)).
+        let sk = &skel.bones.get(1).map(|b| b.name.clone()).unwrap_or_default();
+        if skel.bones.len() < 2 || skel.bones[0].name != "Root" || !(sk.starts_with("ex_") && sk.ends_with("_sk")) {
+            return bad("Re:CoM skeleton: bone 0/1 are not Root/ex_NNNN_sk");
         }
         let map = bone_map(&kskel, &skel);
         let missing: Vec<&str> = (1..skel.bones.len()).filter(|&i| map[i].is_none()).map(|i| skel.bones[i].name.as_str()).collect();
@@ -237,6 +240,21 @@ impl Converter {
     /// continuous.
     pub fn locals(&self, tg: &[Target], prev: Option<&[[f64; 9]]>) -> Vec<[f64; 9]> {
         locals_for(&self.skel, tg, None, prev)
+    }
+
+    /// Where a point on KH1 bone `k` lies in Re:CoM bone `b`'s frame (metres) at KH1's pose of
+    /// `m` at frame `t`: the point is `k`'s parent + `along` × (`k` − parent), as KH1's attack
+    /// objects take their points (`t` along the bone; M10). Re:CoM places an offset on a bone as
+    /// `offset · W + P` with the bone's scaled world (its composition, above).
+    pub fn kh1_point_in(&self, rig: &mut Rig, m: &Motion, t: f32, b: usize, k: usize, along: f64) -> [f64; 3] {
+        let tg = self.targets(rig, m, t, false);
+        let world = &rig.current().world;
+        let pk = Aff::kh1_to_recom(&world[k]).t;
+        let pp = rig.parent(k).map_or(pk, |p| Aff::kh1_to_recom(&world[p]).t);
+        let point = [pp[0] + along * (pk[0] - pp[0]), pp[1] + along * (pk[1] - pp[1]), pp[2] + along * (pk[2] - pp[2])];
+        let d = [point[0] - tg[b].p[0], point[1] - tg[b].p[1], point[2] - tg[b].p[2]];
+        let l = vm(d, &tr(&tg[b].u));
+        [l[0] / tg[b].s[0], l[1] / tg[b].s[1], l[2] / tg[b].s[2]]
     }
 
     /// Converts one KH1 motion.

@@ -1,6 +1,14 @@
-//! A training dummy and KH1's enemy hit reactions: flinch (`0x1402B8CC0`, ground) and launch
-//! (`0x1402B8530`). Checked (decomp) for the numbers; the dummy's own body (its motions, how long
-//! it stays down) is host data.
+//! A training dummy and KH1's enemy hit reactions (`0x1402B8E10`): kind 3 flinch (ground
+//! `0x1402B9230`, air `0x1402B8B90`), kind 4 knock-back (`0x1402B77D0`, ground `0x1402B8CC0`) and
+//! kind 5 launch (`0x1402B8530`). Checked (decomp) for the numbers; the dummy's own body (its
+//! motions, how long it stays down) is host data.
+//!
+//! Fixed in M10 (`docs/recom-m10-shadow.md` § Oracle fix): kind 3 on the ground was the kind-4
+//! knock-back (0x4C / 0x4D facing the attacker) and kind 3 in the air the kind-4 air knock-back
+//! (0x50 / 0x51, speed 16). KH1's kind 3 is `0x1402B9230`: 0x48 + part from the front, 0x4A + part
+//! from behind, the facing kept, a push slide of G+0x2C × weight; in the air `0x1402B8B90`: 0x4E /
+//! 0x4F, hop 20, speed G+0x38 × weight. Checked (decomp + disasm). The Shadow's port
+//! (`crate::shadow::react`) is the full rule set; the dummy keeps its one part (part 0).
 
 use crate::arc::Arc;
 use crate::damage::DefenderStats;
@@ -18,12 +26,20 @@ pub struct ReactionParams {
     pub launch_height: f32,
     /// Down time = rand × this (30, `0x1402B8530`).
     pub down_time_max: f32,
-    /// Air flinch (`0x1402B77D0`): hop 20, speed G+0x3C (16).
+    /// Air flinch (`0x1402B8B90`): hop 20, speed G+0x38 (4) × weight. Air knock-back
+    /// (`0x1402B77D0`): hop 20, speed G+0x3C (16).
     pub air_flinch_hop: f32,
     pub air_flinch_speed: f32,
-    /// Motion requests: flinch 0x4C (front) / 0x4D (behind); launch 0x52 on the ground, 0x5C in
-    /// the air, +5 when hit from behind.
+    pub air_knock_speed: f32,
+    /// Ground flinch push slide: G+0x2C (80) × weight (`0x1402B7E60`, `0x1402C7300`).
+    pub flinch_push: f32,
+    /// Motion requests: flinch 0x48 (front) / 0x4A (behind) (+1 for part ≠ 0); knock-back 0x4C /
+    /// 0x4D; air flinch 0x4E / 0x4F; air knock-back 0x50 / 0x51; launch 0x52 on the ground, 0x5C
+    /// in the air, +5 when hit from behind.
     pub flinch_request: u16,
+    pub knock_request: u16,
+    pub air_flinch_request: u16,
+    pub air_knock_request: u16,
     pub launch_request: u16,
     pub air_launch_request: u16,
     /// Assumption: the dummy's flinch motion length (an enemy's own motion data).
@@ -43,8 +59,13 @@ impl Default for ReactionParams {
             launch_height: 1.35,
             down_time_max: 30.0,
             air_flinch_hop: 20.0,
-            air_flinch_speed: 16.0,
-            flinch_request: 0x4C,
+            air_flinch_speed: 4.0,
+            air_knock_speed: 16.0,
+            flinch_push: 80.0,
+            flinch_request: 0x48,
+            knock_request: 0x4C,
+            air_flinch_request: 0x4E,
+            air_knock_request: 0x50,
             launch_request: 0x52,
             air_launch_request: 0x5C,
             flinch_frames: 30.0,
@@ -59,9 +80,10 @@ impl Default for ReactionParams {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Reaction {
     None,
-    /// Kind 3 on the ground: flinch request (front / behind), facing the attacker.
+    /// Kind 3 on the ground: flinch request (front / behind), the facing kept, a push slide.
+    /// Kind 4 on the ground: the knock-back request, facing along / against the push.
     Flinch { request: u16 },
-    /// Kind 3 in the air: hop and drift away.
+    /// Kind 3 / 4 in the air: hop and drift away.
     AirFlinch { request: u16, speed: f32 },
     /// Kind 5: launched with `speed`, a hop of `hop`, then down for `down_time` frames.
     Launch { request: u16, speed: f32, hop: f32, down_time: f32 },
@@ -101,6 +123,8 @@ pub struct Dummy {
     pub down_time: f32,
     /// Untouchable (flags & 0x8048 must be 0x8000 to be hit): the host sets it.
     pub untouchable: bool,
+    /// The push slide (`+0x3F0` direction, `+0x3FC` speed).
+    pub push: Option<(Vec3, f32)>,
 }
 
 impl Dummy {
@@ -117,6 +141,7 @@ impl Dummy {
             air_vel: Vec3::ZERO,
             down_time: 0.0,
             untouchable: false,
+            push: None,
         }
     }
 
@@ -134,27 +159,45 @@ impl Dummy {
     }
 
     /// The reaction for an enemy-side reaction kind (+0x0C) along `dir` (the hit's push
-    /// direction, horizontal unit). Kinds other than 3 and 5 give none here (Assumption: kind 4
-    /// knock-back is not traced for this demo).
+    /// direction, horizontal unit). The dummy has every request and one part (part 0).
     pub fn react(&mut self, kind: u8, dir: Vec3, p: &ReactionParams, rng: &mut Kh1Rand) -> Reaction {
         let behind = Vec3::from_yaw(self.facing).dot(dir) >= 0.0;
         let face = |d: Vec3| if behind { d.x.atan2(d.z) } else { (-d.x).atan2(-d.z) };
+        let w = self.stats.launch_weight;
         match kind {
             3 if !self.airborne() => {
-                let r = p.flinch_request + behind as u16;
+                // `0x1402B9230`: 0x48 / 0x4A (part 0), the one playing alternates; facing kept;
+                // then the push slide `0x1402B7E60`.
+                let mut r = if behind { p.flinch_request + 2 } else { p.flinch_request };
+                if self.request == Some(r) {
+                    r = ((r - p.flinch_request) ^ 1) + p.flinch_request;
+                }
+                self.request = Some(r);
+                self.state = DummyState::Flinch { left: p.flinch_frames };
+                self.push = Some((dir.flat().normalized(), p.flinch_push * w * 0.223_143_55));
+                Reaction::Flinch { request: r }
+            }
+            4 if !self.airborne() => {
+                // `0x1402B8CC0`: 0x4C / 0x4D facing against / along the push (root motion).
+                let r = p.knock_request + behind as u16;
                 self.facing = face(dir);
                 self.request = Some(r);
                 self.state = DummyState::Flinch { left: p.flinch_frames };
                 Reaction::Flinch { request: r }
             }
-            3 => {
-                // `0x1402B77D0`: 0x50 / 0x51, hop 20, velocity dir × 16.
-                let r = if behind { 0x51 } else { 0x50 };
-                self.facing = face(dir);
+            3 | 4 => {
+                // `0x1402B8B90` (kind 3): 0x4E / 0x4F, hop 20, dir × 4 × weight.
+                // `0x1402B77D0` (kind 4): 0x50 / 0x51, hop 20, dir × 16, facing set.
+                let (r, speed) = if kind == 3 {
+                    (p.air_flinch_request + behind as u16, p.air_flinch_speed * w)
+                } else {
+                    self.facing = face(dir);
+                    (p.air_knock_request + behind as u16, p.air_knock_speed)
+                };
                 self.request = Some(r);
                 self.state = DummyState::Air { arc: Arc::hop(p.air_flinch_hop, self.pos.y, p.gravity), keep: false };
-                self.air_vel = dir.normalized() * p.air_flinch_speed;
-                Reaction::AirFlinch { request: r, speed: p.air_flinch_speed }
+                self.air_vel = dir.normalized() * speed;
+                Reaction::AirFlinch { request: r, speed }
             }
             5 => {
                 let speed = (p.launch_speed_max - p.launch_speed_min) * self.stats.launch_weight + p.launch_speed_min;
@@ -176,6 +219,14 @@ impl Dummy {
 
     /// One frame of the dummy's own movement, on a floor at `floor_y`.
     pub fn step(&mut self, p: &ReactionParams, floor_y: f32, step: f32) {
+        if let Some((dir, v)) = &mut self.push {
+            // `0x1402C7070`: dir × step × v, v ×= 0.8^step, ends below 1.
+            self.pos += *dir * (step * *v);
+            *v *= 0.8f32.powf(step);
+            if *v < 1.0 {
+                self.push = None;
+            }
+        }
         match &mut self.state {
             DummyState::Idle => {}
             DummyState::Flinch { left } => {
@@ -253,7 +304,15 @@ mod tests {
         let p = ReactionParams::default();
         let mut d = Dummy::standing(1, Vec3::ZERO, DefenderStats::default());
         let mut r = Kh1Rand::new(1);
-        assert_eq!(d.react(3, Vec3::new(0.0, 0.0, -1.0), &p, &mut r), Reaction::Flinch { request: 0x4C });
-        assert!(d.facing.abs() < 1e-6, "faces +z, toward the attacker");
+        assert_eq!(d.react(3, Vec3::new(0.0, 0.0, -1.0), &p, &mut r), Reaction::Flinch { request: 0x48 });
+        assert!(d.facing.abs() < 1e-6, "facing kept");
+        assert!(d.push.is_some(), "pushed back 80 × weight");
+        // The same flinch again alternates; from behind 0x4A.
+        assert_eq!(d.react(3, Vec3::new(0.0, 0.0, -1.0), &p, &mut r), Reaction::Flinch { request: 0x49 });
+        assert_eq!(d.react(3, Vec3::new(0.0, 0.0, 1.0), &p, &mut r), Reaction::Flinch { request: 0x4A });
+        // Kind 4: the knock-back, facing the attacker.
+        d.facing = 1.0;
+        assert_eq!(d.react(4, Vec3::new(0.0, 0.0, -1.0), &p, &mut r), Reaction::Flinch { request: 0x4C });
+        assert!(d.facing.abs() < 1e-6);
     }
 }

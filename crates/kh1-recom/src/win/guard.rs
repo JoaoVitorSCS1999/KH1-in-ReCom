@@ -344,6 +344,11 @@ pub(super) unsafe fn after_enemy_hit(e: usize, r: u64, hp: i32) {
         block_log(|| format!("{name} id={id}: flags {flags:#x} (bit 13: Re:CoM's hit handler gives no reaction); none"));
         return;
     }
+    // M10: a KH1 Shadow plays KH1's clash recoil (decision M10, instead of Re:CoM's flinch).
+    if super::shadow::guard_block(e) {
+        block_log(|| format!("{name} id={id}: KH1 Shadow: KH1's clash recoil"));
+        return;
+    }
     let state = g::state_index(e, rd(e + enemy::STATE));
     let next0 = g::state_index(e, rd(e + enemy::NEXT_STATE));
     func::<PickerFn>(g::func::PICKER)(e, g::PICKER_KIND);

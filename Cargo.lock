@@ -2382,7 +2382,7 @@ dependencies = [
 
 [[package]]
 name = "kh1-recom"
-version = "0.66.0"
+version = "0.66.1"
 dependencies = [
  "kh1-core",
 ]
@@ -2392,6 +2392,7 @@ name = "kh1-recom-assets"
 version = "0.1.0"
 dependencies = [
  "kh1-anim",
+ "kh1-core",
  "kh1-formats",
  "kh2-formats-lite",
  "miniz_oxide 0.8.9",

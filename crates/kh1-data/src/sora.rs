@@ -79,8 +79,11 @@ impl SoraKit {
         combat.reaction.launch_speed_min = globals.launch_speed_min as f32;
         combat.reaction.launch_speed_max = globals.launch_speed_max as f32;
         combat.reaction.launch_height = globals.launch_height_factor;
-        // G+0x3C: the air flinch's push speed (`0x1402B77D0`).
-        combat.reaction.air_flinch_speed = globals.air_knockback[1];
+        // G+0x38: the air flinch's speed (`0x1402B8B90`); G+0x3C: the air knock-back's
+        // (`0x1402B77D0`); G+0x2C: the ground flinch's push (`0x1402B7E60`).
+        combat.reaction.air_flinch_speed = globals.air_knockback[0];
+        combat.reaction.air_knock_speed = globals.air_knockback[1];
+        combat.reaction.flinch_push = globals.reaction_pushes[4];
 
         let w = table.weapon_for_item(btltbl::KINGDOM_KEY)?;
         let weapon = WeaponData {
