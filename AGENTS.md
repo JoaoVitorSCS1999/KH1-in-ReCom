@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 129: Air Soldier: the quiet watchdog can restart it (Behaviour::reset), version 0.69.1 (2026-11-01)
+
+- The Air Soldier's `Behaviour::reset` (Stage 127's quiet watchdog): back to engaged, still flying, no velocity, its
+  appearance counted done. Test added.
+- Research (no DLL change): KH1's second AI syscall table `0x1405752D0` (`sys1.0` `0x140394D80` a no-op, `sys1.3`
+  `0x140394DE0` removes a child); `tools/kh1-ai-script.py` reads both tables. Child objects (`sys 94`, part 3 of the
+  `.mdls`): Search Ghost's is a 35° / 3 m target cone with an effect (no projectile); Gargoyle's moves on its own and
+  makes attack rows (owner question). Checked (exe + decomp + files).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 128: M11: the KH1 Air Soldier, with KH1's flight in the shared enemy framework, version 0.69.0 (2026-11-01)
 
 - M11 (owner, 2026-11-02, "bring in the remaining KH1 adjacent heartless"): the flying family's first.
