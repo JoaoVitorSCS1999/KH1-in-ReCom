@@ -11,6 +11,26 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 108: Gimmick cards: Re:CoM's drops, a Triangle "Stagger" prompt that plays the card, version 0.61.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "certain bosses drop "gimmick cards" in their battles. I want these to drop, and when sora
+  picks them up, i want there to be a triangle prompt that says "Stagger," and pressing triangle will activate the card".
+- Re:CoM (Checked (decomp + exe)): kinds 0x3A–0x41 (type 6), one held at a time, never stocked; played as action 0x19,
+  the boss gets message 6 at frame 50 and runs its own reaction. Drops: Oogie (dice), Ursula (tentacle), Darkside
+  (summoned Heartless gone), Jafar (Blizzard on its guard; Assumption) drop at KH1; Guard Armor, Trickmaster, Jafar,
+  Parasite Cage, Dragon Maleficent drop on a card break (none at KH1: owner question).
+- Built at Combat = KH1, Sora's story: Re:CoM's drops (log-only pass-through on the prize factory `0x1401A89C0`);
+  pick-up keeps Re:CoM's one-at-a-time count (CBTL `+0x1D0`) with the deck add skipped for the call; the context tab
+  offers "Stagger" (command 0xF0, word 901, English everywhere) when Re:CoM's card play would accept it, priority
+  object command > Stagger > Sonic Blade; Triangle makes Re:CoM's play writes (`0x140161D60`, `0x14015D5B0(-1)`,
+  `0x1401F5580` message 1, `+0x428` bit 9 → `+0x424 |= 0x40`), Re:CoM's action does the rest; forgotten at
+  battle end. `docs/recom-gimmick-cards.md`.
+- Assumptions: the .EPD drop chances; each reaction's look; nothing needs the card in the deck at KH1.
+- Asset step re-run: the word in KH1's font.
+- Checked: tests, Windows build, 553 sites. Not checked: in game.
+
+---
+
 ## Stage 107: Damage = Re:CoM: Aero level 1 wind; Gravity Break and Zantetsuken skip Re:CoM's boss falloff, version 0.60.1 (2026-11-01)
 
 - Asks (owner, 2026-11-01, on 0.59.0's questions): 1 (b) Aero level 1 gets a wind with the card's value; 3 (b) "skip
