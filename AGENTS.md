@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 135: M11: a shared enemy guard (KH1's rule on Re:CoM's body guard); the Bandit's block stance and spin repel, version 0.75.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Shared enemy guard first" for the Bandit's block stance and spin repel (then Large Body,
+  Defender).
+- KH1 (Checked (decomp + exe)): a guard row (type 2, table `0x140528CB8`) never hits a body and only meets Sora's
+  swings (magic never blocked); front half only (`0x1402B4640`), while its request plays with its hit window on; two
+  meeting attacks give the lower-priority side kind 6, or 7 when 40+ under (`0x1402B4BC0`); Sora: kind 6 recoil 0x6E
+  + push, Counterattack from frame 12; kind 7 0x6F; in the air 0x70; the enemy plays its row's recoil and its script
+  hears the clash.
+- Re:CoM (Checked (decomp + exe)): its hit apply `0x14016F1C0` blocks a body with its guard bit (`+0x9C` bit 1, mask
+  `+0x8C`, half angle `+0xB0`): set on the enemy's hurt bodies while the row is live (Re:CoM's values put back), KH1's
+  type rule around each swing, the enemy's side from our vtable slot `+0x3D8`. Bandit: block stance → both kind 6
+  (Sora recoils, the Bandit 232, back hop + throw); spin → Sora's strong recoil, the Bandit 213.
+- No new hooks. Large Body / Defender shields (a turned cone) need more research.
+- Asset step re-run: `kh1-bandit.json` gains `guards` (EN0011 files byte-identical).
+- Checked: tests, Windows build, sites. Not checked: in game.
+
+---
+
 ## Stage 134: M11: the KH1 Wyvern; motions from a start frame, KH1's loop rule, version 0.74.0 (2026-11-01)
 
 - M11 (owner, 2026-11-02): a flier.
