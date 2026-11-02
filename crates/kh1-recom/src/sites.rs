@@ -1368,15 +1368,124 @@ pub const DROP_DATA: &[Site] = &[
 /// Re:CoM functions a drop calls (as the EXP drop `0x1401810A0` does). The entity factory getter
 /// `0x1401A8A80` is [`MAGIC_CALLEES`]'.
 pub const DROP_CALLEES: &[Site] = &[
-    // push rdi; sub rsp,0x30; mov qword [rsp+0x20],-2: the prize factory (0x300-byte CPrize,
-    // ctor 0x14022E8D0, init 0x1402315B0; parent: the battle manager task 0x19).
-    Site { name: "prize factory (0x1401A89C0)", rva: 0x001A_89C0, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF] },
+    // (The prize factory `0x1401A89C0` is [`GIMMICK_HOOKS`]': a drop calls it through the hook.)
     // push rbx; sub rsp,0x20; movss xmm0,[rcx]; mov rbx,rcx: the angle pair's normaliser.
     Site { name: "angle normalise (0x140293F20)", rva: 0x0029_3F20, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xF3, 0x0F, 0x10, 0x01, 0x48, 0x8B, 0xD9] },
     // sub rsp,0x28; call 0x14029CDD0; xorps xmm0,xmm0; mov eax,eax; cvtsi2ss xmm0,rax: Re:CoM's
     // random float (u32 × 2^-32, [0, 1)).
     Site { name: "random float (0x14029CF00)", rva: 0x0029_CF00, expect: &[0x48, 0x83, 0xEC, 0x28, 0xE8, 0xC7, 0xFE, 0xFF, 0xFF, 0x0F, 0x57, 0xC0, 0x8B, 0xC0, 0xF3, 0x48, 0x0F, 0x2A, 0xC0] },
 ];
+
+/// Re:CoM's gimmick cards at Combat = KH1 (`win::gimmick`, `docs/recom-gimmick-cards.md`). Same
+/// rule as [`HOOKS`].
+pub const GIMMICK_HOOKS: &[Site] = &[
+    // push rdi; sub rsp,0x30; mov qword [rsp+0x20],-2: the prize factory
+    // `0x1401A89C0(factory, &descriptor, parent)` (0x300-byte CPrize, ctor 0x14022E8D0, init
+    // 0x1402315B0; parent: the battle manager task 0x19). Wrapped for the drop log only (the
+    // descriptor's `+0x20` kind); KH1's item drops (`win::drops`) call it too.
+    Site { name: "prize factory (0x1401A89C0)", rva: 0x001A_89C0, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF] },
+];
+
+/// Re:CoM functions a gimmick card's play calls (`win::gimmick::use_card`, the pickup).
+pub const GIMMICK_CALLEES: &[Site] = &[
+    // sub rsp,0x68; (cookie); mov r8,[CBTL]; test; je; test rcx,rcx; je; mov eax,[rcx];
+    // mov [r8+0x1E4],eax; mov r8,[CBTL]; or dword [r8+0x208],0x8000; test edx,edx; jne (no post):
+    // the gimmick card now playing (the revolver play's type-6 step passes (&card, 1)).
+    Site {
+        name: "CBTL gimmick now (0x140161D60)",
+        rva: 0x0016_1D60,
+        expect: &[
+            0x48, 0x83, 0xEC, 0x68, 0x48, 0x8B, 0x05, 0x5D, 0x0D, 0x70, 0x00, 0x48, 0x33, 0xC4, 0x48, 0x89, 0x44, 0x24, 0x58, 0x4C, 0x8B, 0x05, 0x9E, 0x8A, 0x71, 0x00, 0x4D, 0x85, 0xC0, 0x74, 0x74, 0x48, 0x85, 0xC9, 0x74, 0x10, 0x8B, 0x01, 0x41, 0x89, 0x80, 0xE4, 0x01, 0x00, 0x00, 0x4C,
+            0x8B, 0x05, 0x84, 0x8A, 0x71, 0x00, 0x41, 0x81, 0x88, 0x08, 0x02, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x85, 0xD2, 0x75, 0x50,
+        ],
+    },
+    // mov rax,[CBTL]; test; je; xor ecx,ecx; mov [rax+0x1E4],ecx; mov rax,[CBTL];
+    // and dword [rax+0x208],0xFFFF7FFF; ret: no gimmick card playing (the undo of a refused play).
+    Site {
+        name: "CBTL gimmick clear (0x140161D30)",
+        rva: 0x0016_1D30,
+        expect: &[0x48, 0x8B, 0x05, 0xE1, 0x8A, 0x71, 0x00, 0x48, 0x85, 0xC0, 0x74, 0x19, 0x33, 0xC9, 0x89, 0x88, 0xE4, 0x01, 0x00, 0x00, 0x48, 0x8B, 0x05, 0xCD, 0x8A, 0x71, 0x00, 0x81, 0xA0, 0x08, 0x02, 0x00, 0x00, 0xFF, 0x7F, 0xFF, 0xFF, 0xC3],
+    },
+    // mov rax,[CBTL]; test; je; add [rax+0x1D0],ecx; ret: Sora's gimmick card count (the revolver
+    // add's +1, the used card's −1 `0x1401501B0`).
+    Site { name: "CBTL gimmick count add (0x14015D5B0)", rva: 0x0015_D5B0, expect: &[0x48, 0x8B, 0x05, 0x61, 0xD2, 0x71, 0x00, 0x48, 0x85, 0xC0, 0x74, 0x06, 0x01, 0x88, 0xD0, 0x01, 0x00, 0x00, 0xC3] },
+    // push rbx; sub rsp,0x20; mov [rcx+0x7FC],edx; mov rbx,rcx; test edx,edx; je; test r8,r8; je;
+    // mov r9d,[rcx+0x428]; mov [rsp+0x38],rdi; test r9b,4: Sora's card message handler (vtable
+    // +0x48, CBTL's message delivery calls it).
+    Site {
+        name: "player card message handler (0x1401F5580)",
+        rva: 0x001F_5580,
+        expect: &[
+            0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x89, 0x91, 0xFC, 0x07, 0x00, 0x00, 0x48, 0x8B, 0xD9, 0x85, 0xD2, 0x0F, 0x84, 0xDB, 0x00, 0x00, 0x00, 0x4D, 0x85, 0xC0, 0x0F, 0x84, 0xD2, 0x00, 0x00, 0x00, 0x44, 0x8B, 0x89, 0x28, 0x04, 0x00, 0x00, 0x48, 0x89, 0x7C, 0x24, 0x38, 0x41, 0xF6,
+            0xC1, 0x04,
+        ],
+    },
+];
+
+/// Re:CoM code the gimmick cards rely on (not patched, not called).
+pub const GIMMICK_CHECKED: &[Site] = &[
+    // The count getter (−1 without CBTL, else +0x1D0) and the "now playing" getter (byte +0x1E4):
+    // the fields the DLL reads.
+    Site { name: "CBTL gimmick count (0x140160760)", rva: 0x0016_0760, expect: &[0x48, 0x8B, 0x05, 0xB1, 0xA0, 0x71, 0x00, 0x48, 0x85, 0xC0, 0x75, 0x06, 0xB8, 0xFF, 0xFF, 0xFF, 0xFF, 0xC3, 0x8B, 0x80, 0xD0, 0x01, 0x00, 0x00, 0xC3] },
+    Site { name: "CBTL gimmick playing (0x1401616C0)", rva: 0x0016_16C0, expect: &[0x48, 0x8B, 0x05, 0x51, 0x91, 0x71, 0x00, 0x48, 0x85, 0xC0, 0x75, 0x01, 0xC3, 0x0F, 0xB6, 0x80, 0xE4, 0x01, 0x00, 0x00, 0xC3] },
+    // The revolver play's event gates: mov edx,8; lea ecx,[rdx-7]; call 0x1401B0870 (flag (1, 8)),
+    // then the mask (1, 0xE2) read: Sora's side tests bit 2.
+    Site { name: "revolver play: event gates (0x14016CF25)", rva: 0x0016_CF25, expect: &[0xBA, 0x08, 0x00, 0x00, 0x00, 0x8D, 0x4A, 0xF9, 0xE8, 0x3E, 0x39, 0x04, 0x00] },
+    // The handler's type 6 case (jump-table entry 6 → 0x1401F58E8): bts r9d,9; mov [rbx+0x428],r9d.
+    Site { name: "card handler: type 6 (0x1401F58E8)", rva: 0x001F_58E8, expect: &[0x48, 0x8B, 0x74, 0x24, 0x30, 0x41, 0x0F, 0xBA, 0xE9, 0x09, 0x48, 0x8B, 0x7C, 0x24, 0x38, 0x44, 0x89, 0x8B, 0x28, 0x04, 0x00, 0x00] },
+    // Its jump table's entries for types 6 and 7 (RVAs 0x1F58E8, 0x1F5904).
+    Site { name: "card handler: type table 6..7 (0x1401F5CEC)", rva: 0x001F_5CEC, expect: &[0xE8, 0x58, 0x1F, 0x00, 0x04, 0x59, 0x1F, 0x00] },
+    // The request builder's battle branch: bt eax,9; jae; or dword [rbx+0x424],0x40 (`+0x428`
+    // bit 9 → the gimmick request), which the field branch the KH1 Attack takes skips.
+    Site { name: "request builder: gimmick (0x1401F85F1)", rva: 0x001F_85F1, expect: &[0x0F, 0xBA, 0xE0, 0x09, 0x73, 0x07, 0x83, 0x8B, 0x24, 0x04, 0x00, 0x00, 0x40] },
+    // The move exe's battle branch: test al,0x40; je; xor edx,edx; mov rcx,rbx; add rsp,0x50;
+    // pop rbx; jmp 0x1401F25D0 (the gimmick init).
+    Site { name: "move exe: gimmick request (0x1401EEE39)", rva: 0x001E_EE39, expect: &[0xA8, 0x40, 0x74, 0x0F, 0x33, 0xD2, 0x48, 0x8B, 0xCB, 0x48, 0x83, 0xC4, 0x50, 0x5B, 0xE9, 0x84, 0x37, 0x00, 0x00] },
+    // The gimmick init: action 0x19 (mov qword [rcx+0x40C],0x19).
+    Site {
+        name: "gimmick init (0x1401F25D0)",
+        rva: 0x001F_25D0,
+        expect: &[
+            0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x81, 0x0C, 0x04, 0x00, 0x00, 0x8B, 0xFA, 0x89, 0x81, 0x08, 0x04, 0x00, 0x00, 0x48, 0x8B, 0xD9, 0x48, 0xC7, 0x81, 0x0C, 0x04, 0x00, 0x00, 0x19, 0x00, 0x00, 0x00,
+        ],
+    },
+    // The gimmick exe (the Battle exe's case 0x19 calls it).
+    Site { name: "gimmick exe (0x1401ECA70)", rva: 0x001E_CA70, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x50, 0x48, 0x8B, 0xD9, 0xE8, 0x3E, 0x7D] },
+    // The revolver play's type-6 step: the card dword (word = kind, byte 3 = 0x140528C30[kind]
+    // byte 0), then 0x140161D60(&card, 1).
+    Site {
+        name: "revolver play: gimmick step (0x14016D008)",
+        rva: 0x0016_D008,
+        expect: &[
+            0x0F, 0xB6, 0x83, 0x60, 0x02, 0x00, 0x00, 0x48, 0x8D, 0x8C, 0x24, 0x88, 0x00, 0x00, 0x00, 0x89, 0xB4, 0x24, 0x88, 0x00, 0x00, 0x00, 0x66, 0x89, 0x84, 0x24, 0x88, 0x00, 0x00, 0x00, 0x48, 0x03, 0xC0, 0x0F, 0xB6, 0x84, 0xC2, 0x30, 0x8C, 0x52, 0x00, 0xBA, 0x01, 0x00, 0x00, 0x00, 0x88,
+            0x84, 0x24, 0x8B, 0x00, 0x00, 0x00, 0xE8, 0x1E, 0x4D, 0xFF, 0xFF,
+        ],
+    },
+    // The prize add's type 5 / 6 branch: the main player [0x14087B390]; its revolver +0x3F0, when
+    // set, takes the card (0x140166300); then 0x14010A0C0(4, kind) either way.
+    Site {
+        name: "prize add: type 5 / 6 (0x1401F4BDA)",
+        rva: 0x001F_4BDA,
+        expect: &[
+            0x48, 0x8B, 0x0D, 0xAF, 0x67, 0x68, 0x00, 0x48, 0x85, 0xC9, 0x74, 0x37, 0x48, 0x8B, 0x89, 0xF0, 0x03, 0x00, 0x00, 0x48, 0x85, 0xC9, 0x74, 0x1A, 0x48, 0x8D, 0x54, 0x24, 0x40, 0x83, 0xFB, 0x03, 0x75, 0x0B, 0x44, 0x8D, 0x43, 0xFE, 0xE8, 0xFB, 0x16, 0xF7, 0xFF, 0xEB,
+            0x16, 0xE8, 0xF4, 0x16, 0xF7, 0xFF, 0x0F, 0xB6, 0x54, 0x24, 0x40, 0x45, 0x33, 0xC0, 0x41, 0x8D, 0x48, 0x04, 0xE8, 0xA3, 0x54, 0xF1, 0xFF,
+        ],
+    },
+    // The card-info rows of the eight gimmick cards (`0x140528C30 + kind × 16`, the copy the
+    // revolver play reads): type byte 0x66, icon 8 / 6, Sora's and Riku's story (6).
+    Site { name: "card info 0x3A Guard Armor (0x140528FD0)", rva: 0x0052_8FD0, expect: &[0x66, 0x08, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x3B Trickmaster (0x140528FE0)", rva: 0x0052_8FE0, expect: &[0x66, 0x08, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x3C Jafar (0x140528FF0)", rva: 0x0052_8FF0, expect: &[0x66, 0x08, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x3D Oogie Boogie (0x140529000)", rva: 0x0052_9000, expect: &[0x66, 0x08, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x3E Parasite Cage (0x140529010)", rva: 0x0052_9010, expect: &[0x66, 0x08, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x3F Ursula (0x140529020)", rva: 0x0052_9020, expect: &[0x66, 0x08, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x40 Dragon Maleficent (0x140529030)", rva: 0x0052_9030, expect: &[0x66, 0x08, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00] },
+    Site { name: "card info 0x41 Darkside (0x140529040)", rva: 0x0052_9040, expect: &[0x66, 0x08, 0x06, 0x06, 0x00, 0x00, 0x00, 0x00] },
+];
+
+/// Sora's card message handler slot (CBTL's message delivery calls `vtable +0x48`). Checked (exe;
+/// relocated pointer).
+pub const GIMMICK_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x48 (0x1405A9980)", rva: 0x005A_9980, target: 0x001F_5580 }];
 
 /// Re:CoM code the drops rely on (not patched).
 pub const DROP_CHECKED: &[Site] = &[
@@ -1849,6 +1958,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         DROP_DATA,
         DROP_CALLEES,
         DROP_CHECKED,
+        GIMMICK_HOOKS,
+        GIMMICK_CALLEES,
+        GIMMICK_CHECKED,
         SHOP_HOOKS,
         SHOP_CALLEES,
         SHOP_CHECKED,
@@ -1960,12 +2072,74 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
             assert!(!h.expect.contains(&0xE8) && !h.expect.contains(&0xE9), "{}", h.name);
         }
+    }
+
+    #[test]
+    fn gimmick_sites() {
+        for s in GIMMICK_HOOKS.iter().chain(GIMMICK_CALLEES).chain(GIMMICK_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        let find = |n: &str| GIMMICK_HOOKS.iter().chain(GIMMICK_CALLEES).chain(GIMMICK_CHECKED).find(|s| s.name.starts_with(n)).unwrap();
+        // A rip-relative target: the 4-byte displacement at `off + disp` of an instruction `len` long.
+        let target = |s: &Site, off: usize, len: usize, disp: usize| {
+            let d = i32::from_le_bytes(s.expect[off + disp..off + disp + 4].try_into().unwrap()) as i64;
+            (0x1_4000_0000i64 + s.rva as i64 + off as i64 + len as i64 + d) as u64
+        };
+        const CBTL: u64 = 0x1_4087_A818;
+        assert_eq!(target(find("CBTL gimmick now"), 0x13, 7, 3), CBTL);
+        assert_eq!(target(find("CBTL gimmick now"), 0x2D, 7, 3), CBTL);
+        assert_eq!(target(find("CBTL gimmick clear"), 0, 7, 3), CBTL);
+        assert_eq!(target(find("CBTL gimmick count add"), 0, 7, 3), CBTL);
+        assert_eq!(target(find("CBTL gimmick count ("), 0, 7, 3), CBTL);
+        assert_eq!(target(find("CBTL gimmick playing"), 0, 7, 3), CBTL);
+        // The fields the DLL reads and the setters write.
+        let u32_at = |s: &Site, at: usize| u32::from_le_bytes(s.expect[at..at + 4].try_into().unwrap()) as usize;
+        use crate::gimmick::{cbtl, player};
+        assert_eq!(u32_at(find("CBTL gimmick now"), 0x29), cbtl::NOW);
+        assert_eq!(u32_at(find("CBTL gimmick now"), 0x37), cbtl::FLAGS);
+        assert_eq!(u32_at(find("CBTL gimmick count add"), 0x0E), cbtl::COUNT);
+        assert_eq!(u32_at(find("CBTL gimmick count ("), 0x14), cbtl::COUNT);
+        assert_eq!(u32_at(find("CBTL gimmick playing"), 0x10), cbtl::NOW);
+        assert_eq!(u32_at(find("player card message handler"), 0x23), player::CARD);
+        assert_eq!(find("player card message handler").expect[0x2F], player::CARD_WON as u8);
+        assert_eq!(u32_at(find("card handler: type 6"), 0x12), player::CARD);
+        assert_eq!(find("card handler: type 6").expect[9], 9);
+        // The revolver play's flag gate: system flag (1, 8) through 0x1401B0870.
+        let e = find("revolver play: event gates");
+        // mov edx,8; lea ecx,[rdx−7]: (1, 8).
+        assert_eq!(((e.expect[1] as i32 + e.expect[7] as i8 as i32) as u32, e.expect[1] as u32), crate::gimmick::EVENT_FLAG);
+        assert_eq!(target(e, 8, 5, 1), 0x1_401B_0870);
+        // The type table: entry 6 is the type 6 case.
+        assert_eq!(u32_at(find("card handler: type table"), 0), 0x001F_58E8);
+        // The builder's bit 9 → 0x40, the move exe's 0x40 → the gimmick init (jmp rel32).
+        let b = find("request builder: gimmick");
+        assert_eq!((b.expect[3], u32_at(b, 8), b.expect[12] as u32), (9, player::REQUEST, player::REQUEST_GIMMICK));
+        let m = find("move exe: gimmick request");
+        assert_eq!(m.expect[1] as u32, player::REQUEST_GIMMICK);
+        assert_eq!(target(m, 0x0E, 5, 1), 0x1_401F_25D0);
+        assert_eq!(find("gimmick init").expect[39] as u32, player::GIMMICK_ACTION);
+        // The revolver step reads the card-info copy at 0x140528C30 and calls 0x140161D60(&card, 1).
+        let r = find("revolver play: gimmick step");
+        assert_eq!(u32_at(r, 0x25), 0x0052_8C30);
+        assert_eq!(target(r, 0x35, 5, 1), 0x1_4016_1D60);
+        // The prize add's branch: the main player, its revolver +0x3F0, the add, then the notice.
+        let a = find("prize add: type 5 / 6");
+        assert_eq!(target(a, 0, 7, 3), 0x1_4087_B390);
+        assert_eq!(u32_at(a, 0x0F), player::REVOLVER);
+        assert_eq!(target(a, 0x2D, 5, 1), 0x1_4016_6300);
+        assert_eq!(target(a, 0x3E, 5, 1), 0x1_4010_A0C0);
+        // The eight cards' rows.
+        for (k, name) in crate::gimmick::BOSSES {
+            let s = GIMMICK_CHECKED.iter().find(|s| s.rva == 0x0052_8C30 + k as u32 * 16).unwrap();
+            assert!(s.name.contains(name) && s.expect[0] & 0xF == crate::gimmick::TYPE, "{}", s.name);
+        }
+        assert_eq!(GIMMICK_PTRS[0].target, find("player card message handler").rva);
     }
 
     #[test]

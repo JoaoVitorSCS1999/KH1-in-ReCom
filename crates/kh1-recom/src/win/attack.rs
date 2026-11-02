@@ -373,7 +373,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     // Re:CoM's battle end, logged (two loads unless its win is pending; `crate::battle::end`).
     super::battle::end_watch(pl);
     let battle: i32 = rd(pl + p::BATTLE);
-    if battle != 0 && battle_guards_clear(pl, rd(pl + p::REQUEST)) {
+    let forced = battle != 0 && battle_guards_clear(pl, rd(pl + p::REQUEST));
+    if forced {
         // Re:CoM's own field branch: the confirm press is the Attack, no card input.
         wr(pl + p::BATTLE, 0i32);
         o(pl);
@@ -403,6 +404,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
         }
         wr(pl + p::REQUEST, r);
     }
+    // A played gimmick card's request (Re:CoM's battle-branch conversion the field branch skips).
+    super::gimmick::request(pl, forced);
     // KH1: a jump on the same frame wins over the Attack (`0x1402A6220`).
     let r: u32 = rd(pl + p::REQUEST);
     if r & 1 != 0 && r & 4 != 0 {

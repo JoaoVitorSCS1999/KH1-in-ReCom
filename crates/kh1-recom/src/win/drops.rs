@@ -98,6 +98,11 @@ pub unsafe fn install(b: usize) -> bool {
 }
 
 /// The hooks are in: drops are made from now on.
+/// The KH1 item drops' hooks are in (the prize add wrapper among them).
+pub fn installed() -> bool {
+    ON.load(Ordering::Acquire)
+}
+
 pub fn mark_installed() {
     ON.store(true, Ordering::Release);
 }
@@ -147,10 +152,15 @@ unsafe fn drop_items(enemy: usize, point: usize) {
     }
 }
 
-/// Re:CoM's prize add (`0x1401F4AB0(kind, arg, mode)`): a KH1 item prize is KH1's pickup; every
-/// other kind is Re:CoM's.
+/// Re:CoM's prize add (`0x1401F4AB0(kind, arg, mode)`): a gimmick card at Combat = KH1 is held
+/// (`super::gimmick`); a KH1 item prize is KH1's pickup; every other kind is Re:CoM's. Installed
+/// by the drops, or by the gimmick cards alone.
 pub unsafe extern "win64" fn prize_add(kind: u32, arg: u32, mode: i32) {
-    if kind != dr::KH1_ITEM_KIND {
+    // Re:CoM's gimmick cards at Combat = KH1 (`super::gimmick`).
+    if super::gimmick::prize_add(kind, arg, mode) {
+        return;
+    }
+    if kind != dr::KH1_ITEM_KIND || !ON.load(Ordering::Acquire) {
         return orig::<AddFn>(&ORIG_PRIZE_ADD)(kind, arg, mode);
     }
     let item = (arg & 0xFFFF) as u16;
