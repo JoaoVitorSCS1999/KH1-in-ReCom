@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 139: Fix: steered KH1 attacks (Bandit leap / spin, fliers' attacks) restarting every other frame, version 0.76.1 (2026-11-01)
+
+- Owner (2026-11-02, 0.73.0): "bandits dont spin when they do the move where they're supposed to spin towards you"; the log:
+  leap 217 `never ended … released` again and again.
+- Cause (Checked (log + code + Re:CoM decomp)): Stage 127's net released any playing attack whenever the AI was polled;
+  steered attacks are polled from their own attack state's step, so each was released on its first step, the idle
+  played, the AI asked again, Re:CoM re-entered state 3 (`0x140242F50`): the attack restarted every other frame. Every
+  class with steered attacks since 0.69.0 (Air Soldier, Darkball, Air Pirate, Wyvern, Bandit). Also the Bandit's leap
+  asked for 217 twice in a frame (both saw the host's 216).
+- Fix: the host's rules as pure functions (`kh1_core::enemy::host`): the net fires only when Re:CoM's state isn't the
+  attack's own; the Bandit's `attack_keep` counts this frame's requests (KH1 sets the motion at once, `0x14029F7C0`).
+  Tests: a host model of Re:CoM's states; Bandit leap / spin unbroken; a 12-seed fight never releases; every class
+  through the model with its real manifest.
+- Checked: tests, Windows build, sites. Not checked: in game.
+
+---
+
 ## Stage 138: M11: the KH1 Search Ghost (its sight cone on Re:CoM's own bones), version 0.76.0 (2026-11-01)
 
 - M11 (owner, 2026-11-02): a flier.
