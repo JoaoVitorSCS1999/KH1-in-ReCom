@@ -477,7 +477,7 @@ For enemy X (Re:CoM id N, KH1 model `xa_..._MMMM`), one agent per enemy:
     pefile over every site, the asset outputs against Re:CoM's files (Re:CoM's bytes kept), a doc section
     with Checked / Assumption tags, the owner's install lines, the test list, the KH1 trace scenarios.
 
-## Ground-melee family, part 1: research notes (port not built yet)
+## Ground-melee family, part 1
 
 Offsets below are in the player's `ex_2030.bd` (`xa_ex_2030.mdls` part 5). These are notes, not code.
 
@@ -553,9 +553,50 @@ Attack states and clips (state begin → the clip name it plays; Checked (exe)):
   - So 212 → id 0 / state 2, and 214 → id 1 / state 3.
   - 222 → id 1 / state 3 (`+0x3C` 10, as 214's). Assumption: the nearest Re:CoM attack.
 
-**Framework additions needed** (native, own commit): movement state 3 in `Body` (`timed`: the step above,
-airborne, no landing motion), `react::scripted_launch` (`0x1402B79F0`), and a hook for the hit's kind and an
-override launch in `Behaviour`.
+**Framework additions** (built): `Body::timed_jump` / `timed_apex` (movement state 3, the step above;
+airborne for reactions; it lands with no landing motion: the host skips request 7), `react::scripted_launch`
+(`0x1402B79F0`) with `Behaviour::scripted_launch` (read after `on_hit`; it replaces the reaction KH1 chose
+first, whose random draw stays drawn). Assumption: the engine's hit processing runs before the script's hit
+handler. The asset step now makes one `.ASD` record per HIT window (`hit_windows`), as Re:CoM's own models do.
+The Soldier's and the Air Soldier's tracks have one window each, so their outputs are unchanged (their record
+counts are tested).
+
+### The Powerwild (built)
+
+- `kh1_core::powerwild` (the AI above, every number a manifest constant), `ground::powerwild` (class row:
+  attack states swipe 2, flurry 3, pounce 3; `reads_hp`), sites `POWERWILD_HOOKS` / `_ALLOC` / `_PTRS`,
+  `kh1_recom_assets::powerwild` (constant offsets, request checks, rows, power mapping).
+- **Asset outputs** (`kh1-recom-build`, from the player's `xa_ex_2030.mset` / `.mdls`, `btltbl.bin` and Re:CoM's
+  `ENEMY/0007`): `ENEMY/0007/EN0007.ANN` (Re:CoM's 75 slots kept, KH1's clips after), `EN0007.ASD` (Re:CoM's 3
+  records kept, 9 added: swipe 1, flurry 3 + 2 + 1, pounce 2), `EN0007.SES`, `kh1-powerwild.json`. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0007/EN0007.ANN, method: copy, source: [{name: ENEMY/0007/EN0007.ANN}]}
+- {name: ENEMY/0007/EN0007.ASD, method: copy, source: [{name: ENEMY/0007/EN0007.ASD}]}
+- {name: ENEMY/0007/EN0007.SES, method: copy, source: [{name: ENEMY/0007/EN0007.SES}]}
+- {name: kh1-powerwild.json, method: copy, source: [{name: kh1-powerwild.json}]}
+```
+
+- **Checked (files):** the script's numbers at their offsets (the asset test reads them from the player's
+  file), the request words, the rows and their recoils (226 / 225 / 229, all in the model), the hit windows
+  (`e007_144`: right hand 20–26, 36–40, 48–54; left hand 28–36, 64–70; body 22–56).
+- **Checked (exe / decomp):** movement state 3 and the scripted launch (above), the sites.
+- **Assumptions:**
+  - The apex motion plays one frame later than KH1's (the script runs before the step).
+  - Request bit 16 (`0x10000`) is a plain request.
+  - Event 1001, the leash and the death routine are not built.
+  - The pounce takes the flurry's power.
+  - Seeds per enemy.
+- **Not checked yet:** a tester's trace against KH1 frame for frame.
+- **Owner test list** (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Powerwild battle in Deep Jungle):
+  1. The first look (227), then by distance:
+     - close: a back hop, next time a side hop and a swipe;
+     - mid: a walk sideways, a pause or a roar, then a sideways shuffle into a side hop and swipe, then the
+       pounce;
+     - far: it runs in.
+  2. Hit it with a launching finisher while above 40 % HP: it flips back with its own launch (270), then shakes
+     it off (224).
+  3. The hops land with no landing pose and travel about 3 m.
 
 ## The other 29, by family
 
