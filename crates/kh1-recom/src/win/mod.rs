@@ -593,7 +593,7 @@ fn install_battles(base: usize) {
 /// asset step's manifest and the class's `ENEMY/<id>` files. Per class: the manifest, the vtable
 /// checks and the factory size first, then the ctor hook; all or nothing for that class.
 fn install_enemies(base: usize, bases: &[PathBuf]) {
-    let ctors: [usize; crate::kh1_enemy::CLASSES.len()] = [kh1_enemy::ctor::<0> as *const () as usize];
+    let ctors: [usize; crate::kh1_enemy::CLASSES.len()] = [kh1_enemy::ctor::<0> as *const () as usize, kh1_enemy::ctor::<1> as *const () as usize];
     for (k, c) in crate::kh1_enemy::CLASSES.iter().enumerate() {
         if !movement::installed() {
             log(&format!("{}: movement not hooked; Re:CoM's behaviour kept", c.name));

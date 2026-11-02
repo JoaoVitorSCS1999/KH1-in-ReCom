@@ -2224,6 +2224,42 @@ pub const SHADOW_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemyShadow +0x440 attack end", rva: 0x0054_DB68, target: 0x0017_DA90 },
 ];
 
+/// M11, the KH1 enemy framework (`crate::kh1_enemy`, `win::kh1_enemy`): the Soldier's ctor (same
+/// shape as the Shadow's). Same rule as [`HOOKS`]. Checked (exe + decomp): its only caller is the
+/// enemy factory `0x140188F40` (id 2); no branch lands inside the moved bytes (exe scan).
+pub const SOLDIER_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemySoldier ctor (0x140193510)", rva: 0x0019_3510, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11: the factory's `mov ecx, 0xCD0` before `CEnemySoldier`'s ctor (the allocator `0x1404ACE54`
+/// call follows), raised by the framework's 0x20-byte tail. Checked (exe).
+pub const SOLDIER_ALLOC: &[Site] = &[Site { name: "alloc CEnemySoldier (0x140188FD7)", rva: 0x0018_8FD7, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11: `CEnemySoldier`'s vtable slots the copy keeps or replaces, checked against Re:CoM's
+/// functions before the copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12
+/// / 30 are `CBattleEnemy`'s, 1..3 the Soldier's own).
+pub const SOLDIER_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemySoldier +0x70 motion play", rva: 0x0054_EAD8, target: 0x0017_D750 },
+    PtrSite { name: "CEnemySoldier +0x80 update", rva: 0x0054_EAE8, target: 0x0018_5320 },
+    PtrSite { name: "CEnemySoldier +0xE8 state 0 begin", rva: 0x0054_EB50, target: 0x0017_B590 },
+    PtrSite { name: "CEnemySoldier +0xF0 state 0 step", rva: 0x0054_EB58, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemySoldier +0xF8 state 0 end", rva: 0x0054_EB60, target: 0x0017_E630 },
+    PtrSite { name: "CEnemySoldier +0x100 state 1 begin", rva: 0x0054_EB68, target: 0x0019_3680 },
+    PtrSite { name: "CEnemySoldier +0x108 state 1 step", rva: 0x0054_EB70, target: 0x0019_3A10 },
+    PtrSite { name: "CEnemySoldier +0x118 state 2 begin", rva: 0x0054_EB80, target: 0x0019_35E0 },
+    PtrSite { name: "CEnemySoldier +0x120 state 2 step", rva: 0x0054_EB88, target: 0x0019_36B0 },
+    PtrSite { name: "CEnemySoldier +0x130 state 3 begin", rva: 0x0054_EB98, target: 0x0019_3630 },
+    PtrSite { name: "CEnemySoldier +0x138 state 3 step", rva: 0x0054_EBA0, target: 0x0019_3940 },
+    PtrSite { name: "CEnemySoldier +0x1F0 state 11 begin", rva: 0x0054_EC58, target: 0x0017_C530 },
+    PtrSite { name: "CEnemySoldier +0x208 state 12 begin", rva: 0x0054_EC70, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemySoldier +0x3B8 state 30 begin", rva: 0x0054_EE20, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemySoldier +0x3C0 state 30 step", rva: 0x0054_EE28, target: 0x0018_3260 },
+    PtrSite { name: "CEnemySoldier +0x3D0 think", rva: 0x0054_EE38, target: 0x0019_6EC0 },
+    PtrSite { name: "CEnemySoldier +0x438 attack hurt off", rva: 0x0054_EEA0, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemySoldier +0x440 attack end", rva: 0x0054_EEA8, target: 0x0017_DA90 },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -2321,6 +2357,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SHADOW_HOOKS,
         SHADOW_ALLOC,
         SHADOW_CALLEES,
+        SOLDIER_HOOKS,
+        SOLDIER_ALLOC,
     ];
     LISTS
         .iter()
@@ -2420,7 +2458,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

@@ -589,4 +589,4 @@ fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], a
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC];

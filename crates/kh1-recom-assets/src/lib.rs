@@ -29,7 +29,8 @@
 //! - [`flip`]: the "Re:CoM's content in KH1" model-writer test (`kh1-flip-test`);
 //! - [`shadow`]: M10, KH1's Shadow: its motions, attack records and sounds in Re:CoM's
 //!   `ENEMY/0001` files and the behaviour's numbers (`kh1-shadow.json`).
-//! - [`enemy`]: M11, the same step for any KH1 enemy twin ([`enemy::Spec`]).
+//! - [`enemy`]: M11, the same step for any KH1 enemy twin ([`enemy::Spec`]); [`soldier`] is the
+//!   Soldier's spec (`ENEMY/0002`, `kh1-soldier.json`).
 //!
 //! No game data is embedded; everything is read from the user's files at run time.
 
@@ -56,6 +57,7 @@ pub mod rtm;
 pub mod menu_sounds;
 pub mod ses;
 pub mod shadow;
+pub mod soldier;
 pub mod stats;
 pub mod texture;
 pub mod uibin;

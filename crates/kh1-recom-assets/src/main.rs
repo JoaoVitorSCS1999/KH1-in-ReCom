@@ -19,7 +19,8 @@
 //! symbol as a new group of `camp:00`) and `kh1-camp-rows.json` (`docs/recom-m8-items.md`).
 //! For KH1's Shadow (M10) it writes `ENEMY/0001/EN0001.ANN`, `.ASD` and `.SES` (Re:CoM's Shadow
 //! files with KH1's Shadow motions, attack records and their sounds added) and `kh1-shadow.json`
-//! (`docs/recom-m10-shadow.md`). For each M11 enemy (`kh1_recom_assets::enemy::SPECS`) it writes `ENEMY/NNNN/ENNNNN.ANN`, `.ASD`, `.SES` and `kh1-<enemy>.json`
+//! (`docs/recom-m10-shadow.md`). For each M11 enemy (`kh1_recom_assets::enemy::SPECS`, the Soldier
+//! first) it writes `ENEMY/NNNN/ENNNNN.ANN`, `.ASD`, `.SES` and `kh1-<enemy>.json`
 //! (`docs/recom-m11-enemies.md`).
 
 use std::path::{Path, PathBuf};

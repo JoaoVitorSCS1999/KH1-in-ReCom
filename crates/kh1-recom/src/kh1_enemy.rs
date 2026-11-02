@@ -91,8 +91,11 @@ pub struct Class {
     pub format: &'static str,
 }
 
+/// The Soldier's attack names (`kh1_core::soldier::Attack::ALL`'s order).
+const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin kick", "air kick", "rush", "rush leap"];
+
 /// Every class with a KH1 behaviour. Index = the runtime's class number.
-pub static CLASSES: [Class; 1] = [
+pub static CLASSES: [Class; 2] = [
     Class {
         name: "shadow",
         title: "Shadow",
@@ -113,10 +116,33 @@ pub static CLASSES: [Class; 1] = [
         manifest: crate::shadow::MANIFEST,
         format: crate::shadow::FORMAT,
     },
+    Class {
+        name: "soldier",
+        title: "Soldier",
+        rtti: ".?AVCEnemySoldier@@",
+        recom_id: 2,
+        vtable: 0x0054_EA68,
+        slots: 139,
+        alloc: 0xCD0,
+        magic: 0x4F53_314B, // "K1SO"
+        ctor: &crate::sites::SOLDIER_HOOKS[0],
+        alloc_site: &crate::sites::SOLDIER_ALLOC[0],
+        ptrs: crate::sites::SOLDIER_PTRS,
+        // Re:CoM's Soldier has two attack states (Checked (exe): `CEnemySoldier` overrides states
+        // 2 (its kick `e002_050`) and 3 (its spin kick `e002_051`)): the kicks on the ground in
+        // state 2, the attacks that leave the ground in state 3.
+        attack_states: &[2, 2, 3, 2, 3, 2, 3],
+        attack_names: SOLDIER_ATTACKS,
+        appear: Appear::Base,
+        reads_hp: true,
+        manifest: SOLDIER_MANIFEST,
+        format: FORMAT,
+    },
 ];
 
 /// The generic manifest's format (the Shadow keeps `kh1-shadow 1`).
 pub const FORMAT: &str = "kh1-enemy 1";
+pub const SOLDIER_MANIFEST: &str = "kh1-soldier.json";
 
 /// The states a class's copy replaces (begin and step): appearance, think, its attack states, the
 /// two reaction states, the defeat.
@@ -245,6 +271,12 @@ pub fn parse(text: &str, enemy: &str, names: &[&str], needed: &[u16]) -> Result<
     Ok(m)
 }
 
+/// The requests the Soldier's behaviour plays (its manifest must map them).
+pub const SOLDIER_REQUESTS: &[u16] = {
+    use kh1_core::soldier::req::*;
+    &[IDLE, WALK, RUN, JUMP, FALL, AIR, LAND, FLINCH, APPEAR, NOTICE, KICK, DOUBLE_KICK, JUMP_KICK, SPIN_KICK, AIR_KICK, RUSH, RUSH_LEAP, CROUCH]
+};
+
 /// A behaviour command as a log token (attack names from the class).
 pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'static str) -> String {
     match c {
@@ -272,23 +304,55 @@ pub fn logged(c: &Cmd<u8>) -> bool {
 /// A new behaviour for a class (`seed`: its random stream; `yaw`: its facing, KH1's).
 pub fn make(class: usize, m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
     match class {
-        _ => {
+        0 => {
             let c = kh1_core::shadow::Consts::new(m.consts.pairs().to_vec()).expect("checked at parse");
-            let _ = class;
             Box::new(kh1_core::shadow::Ai::new(c, m.frames(), seed, yaw, false))
         }
+        _ => Box::new(kh1_core::soldier::Ai::new(m.consts.clone(), m.frames(), seed, yaw, true)),
     }
 }
 
 /// Parses a class's manifest.
 pub fn parse_for(class: usize, text: &str) -> Result<Manifest, String> {
-    let _ = class;
-    from_shadow(text)
+    match class {
+        0 => from_shadow(text),
+        _ => parse(text, CLASSES[class].name, kh1_core::soldier::NAMES, SOLDIER_REQUESTS),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn soldier_text() -> String {
+        let consts: Vec<String> = kh1_core::soldier::NAMES.iter().chain(ke::ENGINE_NAMES).map(|n| format!("\"{n}\": 1.0")).collect();
+        let reqs: Vec<u16> = SOLDIER_REQUESTS.iter().copied().chain([0x49, 0x4A, 0x4B, 218]).collect();
+        let r: Vec<String> = reqs.iter().map(|q| format!("{{\"request\": {q}, \"entry\": 0, \"slot\": {}, \"name\": \"e002_100\", \"frames\": 30, \"root\": false, \"loop\": false, \"source\": \"kh1\"}}", 100 + q % 50)).collect();
+        let a: Vec<String> = kh1_core::soldier::Attack::ALL.iter().map(|x| format!("{{\"name\": \"{}\", \"request\": {}, \"recoil\": {}}}", x.name(), x.request(), if x.rows()[0] == 0xEC { 218 } else { 110 })).collect();
+        format!("{{\"format\": \"kh1-enemy 1\", \"enemy\": \"soldier\", \"consts\": {{{}}}, \"attacks\": [{}], \"parts\": [5, 3, 40, 41], \"requests\": [{}]}}", consts.join(", "), a.join(", "), r.join(", "))
+    }
+
+    #[test]
+    fn soldier_manifest_parses_and_checks() {
+        let m = parse_for(1, &soldier_text()).unwrap();
+        assert_eq!(m.recoil.len(), 7);
+        assert_eq!(m.recoil_of(0), Some(218));
+        assert_eq!(m.recoil_of(2), None, "110 has no motion in the Soldier's model");
+        assert_eq!(m.parts, vec![5, 3, 40, 41]);
+        assert!(parse_for(1, &soldier_text().replace("\"soldier\"", "\"shadow\"")).is_err());
+        assert!(parse_for(1, &soldier_text().replace("\"close_range\": 1.0, ", "")).is_err());
+        assert!(parse_for(1, &soldier_text().replace("{\"request\": 208,", "{\"request\": 1208,")).is_err());
+    }
+
+    /// The asset step's real manifest (`KH1_SOLDIER_JSON`) parses here.
+    #[test]
+    fn asset_step_soldier_manifest_parses() {
+        let Some(p) = std::env::var_os("KH1_SOLDIER_JSON") else { return };
+        let m = parse_for(1, &std::fs::read_to_string(p).unwrap()).unwrap();
+        assert_eq!(m.consts.get("close_range"), 350.0);
+        assert_eq!(m.recoil_of(0), Some(218));
+        let _ = make(1, &m, 1, 0.0);
+    }
 
     #[test]
     fn generic_manifest_parses_and_checks() {
@@ -311,6 +375,8 @@ mod tests {
             assert!(CLASSES.iter().enumerate().all(|(j, d)| j == i || (d.magic != c.magic && d.vtable != c.vtable)));
         }
         assert_eq!(replaced_states(&CLASSES[0]), vec![0, 1, 2, 4, 3, 11, 12, 30]);
+        assert_eq!(replaced_states(&CLASSES[1]), vec![0, 1, 2, 3, 11, 12, 30]);
+        assert_eq!(CLASSES[1].attack_names, kh1_core::soldier::Attack::ALL.map(|a| a.name()));
     }
 
     #[test]

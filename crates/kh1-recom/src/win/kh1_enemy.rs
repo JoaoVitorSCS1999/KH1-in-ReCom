@@ -912,7 +912,7 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
     let done = with_rt(en, |rt| {
         // KH1's hit handler: a damaging hit or a clash (the Shadow ignores a clash).
         if CLASSES[rt.class].reads_hp {
-            let _ = hp_ratio(en);
+            rt.ai.set_hp_ratio(hp_ratio(en));
         }
         rt.ai.on_hit(if rt.clash.is_none() { HitNews::Damage } else { HitNews::Clash });
         start_reaction(en, rt, hit)
