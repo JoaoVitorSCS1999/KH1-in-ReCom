@@ -21,7 +21,8 @@ supersedes `recom-cardless-battle-design.md` §8 ("CBTL is the only gate").
   Marluxia 3's card duel (Sora can't win it without cards), the enemy enchant gauge. § Stage 3
   below.
 - **Enemy card sounds silent (2026-11-02, not versioned yet, not heard in game):** in the same
-  battles, the enemy side's stock, Reload and deal sounds don't play. § Enemy card sounds below.
+  battles, the enemy side's stock, Reload, deal and item-card page-switch sounds don't play.
+  § Enemy card sounds below.
 
 ## Stage 1: what changes
 
@@ -766,9 +767,11 @@ contact.
 ## Enemy card sounds (owner, 2026-11-02)
 
 Owner: "Lets also make it so that you cant hear enemies stocking cards or refilling their deck".
+Owner's answers (2026-11-02) to the two questions below: (1) the enemies' first deal at battle
+start stays silent, no change; (2) silence the human boss's item-card page switch (sound 3) too.
 At Combat = KH1, in Sora's story (the battles stage 2 / 3 already switch: no deck for Sora, not a
-minigame room), the sounds a side-2 revolver or stock folder plays when it stocks, reloads or
-deals are skipped. Everything else plays: the enemy's motions and voices, Sora's sounds, every
+minigame room), the sounds a side-2 revolver or stock folder plays when it stocks, reloads, deals
+or turns to / from its item-card page are skipped. Everything else plays: the enemy's motions and voices, Sora's sounds, every
 other sound; Combat = Re:CoM and Riku's story keep Re:CoM's bytes.
 
 ### Where Re:CoM plays them (Checked (decomp + disasm + exe))
@@ -789,6 +792,7 @@ call is told apart by its object's side.
 | same | the first deal at battle start (state 0, `0x140169F40`, once the event-hide mask allows: bit 4 for side 2) | `0x14016A091` (`0x140169F40`) | rbx |
 | 0xF | stock: a card to the revolver's stock row | `0x14016DCA4` (`0x14016DB60`) | rbx |
 | 0xF | stock: a card into Marluxia 3's stock folder (CBTL `+0x190 + 2 × 8`, `0x1401609C0(2)`; caller `0x1403EEBB0` from `0x1403F7110`) | `0x14016DE3F` (`0x14016DD20`) | rdi |
+| 3 | page switch, only when its third argument is 0 (`cmp [rsp+0x60],r13d; jne`, `0x140167A26`); for an enemy: a human boss turning to or from its item-card page (below) | `0x140167A35` (`0x140167910`) | rbx |
 
 Who reaches them at KH1: human bosses' think `0x140198B90` → vtable `+0x460` (`0x140199E10`)
 reloads with `0x140167AA0(revolver, 0)` and stocks through
@@ -796,6 +800,22 @@ reloads with `0x140167AA0(revolver, 0)` and stocks through
 vtable `0x1406785B8` slot `+0x108`, Checked (exe RTTI)) fills its folder.
 Heartless don't play cards at KH1 (P1), so their revolvers never empty: only their first deal at
 battle start plays (0x1B).
+
+**The page switch (sound 3), added on the owner's answer (2).** Sound 3 is a generic id (Re:CoM's
+menus play it from their own calls), so only the one call inside the revolver's page switch
+`0x140167910` is retargeted; no other `call 0x1402AA360` changes. That function is only ever
+given a revolver (`rbx = rcx` at `0x140167926`, kept to the call), and of its 19 callers only six
+pass a third argument of 0, the only case that plays the sound (Checked (exe: every `call
+0x140167910` and its `r8d`)):
+
+| Caller | Whose revolver | What |
+|---|---|---|
+| `0x1401991E9`, `0x1401992A1` (`0x140199130`, `CHumanBoss` vtable `+0x468`) | the boss's (`+0xC88`), side 2 | page 1 (its type-7 item cards, `UseItemCard`) on a 1-in-50 roll; back to page 0 when page 1 is empty |
+| `0x1403B112B`, `0x1403B1164`, `0x1403B122A` (`0x1403B10C0`, `CBossHades` vtable `0x140662038` `+0x468`, Checked (exe RTTI)) | Hades' (`+0xC88`), side 2 | his own version of the same |
+| `0x1401F8303` (Sora's request bits `0x1401F8150`) | Sora's (`player+0x3F0`), side 1 | Sora's own page switch: the side test passes it to Re:CoM's play, unchanged |
+
+The other 13 callers pass 1 (no sound). An enemy's page switch is therefore only a human boss's
+item-card page; Sora's goes through, and the UI never reaches this call.
 
 Not found: a reload voice. The reload path (`0x140199E10`, `0x140167AA0`, `0x14016B2B0`) starts no
 motion and plays no voice; it sets `+0x260` bit 7, which bosses' movement code reads to keep away
@@ -808,10 +828,6 @@ Not part of this (found, unchanged):
 
 - Scroll 0xE (`0x14016C651` in `0x14016C580`, `0x14016C8E5` in `0x14016C860`): side 1 only (its own
   test), Sora's.
-- Page switch 3 (`0x140167A35` in `0x140167910`): a human boss switching to its item-card page
-  (page 1 holds its type-7 cards, `UseItemCard`; `0x140199130` switches on a 1-in-50 roll or back
-  when the page is empty). An item card that refills the deck then deals through `0x14016B2B0`,
-  whose sound is silenced above; the page-switch sound itself still plays. Owner question.
 - Card-effect 0x20 (`0x1401631F0`, an enemy card's effect taking hold), card-break / clash sounds
   0x16 / 0x17 / 0x18 / 0x14D (resolver `0x14015EAC0`), duel 0x14B–0x14F: not stocking or refilling.
 
@@ -819,7 +835,7 @@ Not part of this (found, unchanged):
 
 | Part | How | Tag |
 |---|---|---|
-| Retargets | the eight `call 0x1402AA360` above (`sites::M6_ENEMY_SOUND_CALLS`) point at our stub, switched per battle with stage 2 / 3's mask reads (`win::deck::switch_hud`, all or none): ours in a battle without a deck, Re:CoM's bytes otherwise | Checked (exe: the calls and their contexts `M6_ENEMY_SOUND_CHECKED`; no branch or pointer lands inside them) |
+| Retargets | the nine `call 0x1402AA360` above (`sites::M6_ENEMY_SOUND_CALLS`) point at our stub, switched per battle with stage 2 / 3's mask reads (`win::deck::switch_hud`, all or none): ours in a battle without a deck, Re:CoM's bytes otherwise | Checked (exe: the calls and their contexts `M6_ENEMY_SOUND_CHECKED`; no branch or pointer lands inside them) |
 | Stubs | their own 34-byte block near `0x140167B01`: `mov r8,rbx` (or `mov r8,rdi` for the folder) then a jump to `win::deck::enemy_card_sound(id, volume, object)`; no stack touched | Checked (disasm: the register holds the object from the function's `mov <reg>,rcx` to the call) |
 | Decision | a side-2 object (`+0x5C` ≠ 1) while the battle hides the enemy card UI: nothing plays, the call returns 0. Otherwise Re:CoM's play with the same arguments | Checked (decomp) |
 | Handles | 0 is what Re:CoM's play returns when it plays nothing (`0x1402AA0F0` with the sound off): the loop's `+0x200` and the deal's `+0x1FC` stay 0, so Re:CoM's stops (handle > 0) are skipped | Checked (decomp) |
@@ -832,8 +848,9 @@ loop each frame its handle is 0 (as it does with its own sound off), so our func
 ### Logs
 
 - At start: `m6: enemy card sound stubs at 0x… (rbx) and 0x… (rdi)` and `m6: enemy card sounds
-  (stock, reload, deal): 8 sound calls switched with them …`; or why they stay Re:CoM's.
-- Each battle's start line counts them with the mask reads written (up to 24 at KH1: 16 reads + 8
+  (stock, reload, deal, item-card page switch): 9 sound calls switched with them …`; or why they
+  stay Re:CoM's.
+- Each battle's start line counts them with the mask reads written (up to 25 at KH1: 16 reads + 9
   calls).
 - Once per sound per battle (200 lines in all): `m6: enemy card sound 0x13 (Reload card charging
   (loop)) silent at KH1 (battle 4, side-2 object 0x…): Re:CoM's play skipped, the call returns 0
@@ -843,13 +860,13 @@ loop each frame its handle is 0 (as it does with its own sound off), so our func
 
 - Sora's revolver is built (the switch) before an enemy revolver's first deal; otherwise the
   first KH1 battle after a Re:CoM one could play one enemy deal.
-- The enemy's first deal at battle start counts as "refilling their deck" (same sound, 0x1B, as the
-  refill after a reload): silenced with it. Owner question.
+- Answered (owner, 2026-11-02): the enemy's first deal at battle start (same sound, 0x1B, as the
+  refill after a reload) stays silent.
 - No reload voice in the bosses' keep-away motions (above).
 
 ### Owner test list
 
-1. Log at start: `m6: enemy card sound stubs at …` and `… 8 sound calls switched …`.
+1. Log at start: `m6: enemy card sound stubs at …` and `… 9 sound calls switched …`.
 2. Combat = KH1, a Heartless battle: no card-deal sound from the enemies when the battle starts;
    your own sounds and the enemies' hits and voices as before. Log: `enemy card sound 0x1b (enemy
    deck deal) silent …`.
@@ -859,5 +876,8 @@ loop each frame its handle is 0 (as it does with its own sound off), so our func
 4. A boss using a sleight (it stocks cards first): no stock sound; log `0xf (stock)`.
 5. Marluxia 3: no stock sound when its folder fills.
 6. Still heard: the boss's voices and attack sounds, Sora's own sounds, menu sounds.
-7. Still heard (owner question): a human boss's item-card page switch (sound 3).
-8. Combat = Re:CoM: every enemy card sound back, no `enemy card sound` lines.
+7. A human boss (or Hades) turning to its item cards, then using one: no page-switch sound; log
+   `enemy card sound 0x3 (item-card page switch) silent …`. A 1-in-50 roll when it wants an
+   item, so it may take a while; the log line is the proof.
+8. Still heard: the same menu sound (3) in the camp and other menus, and Sora's own sounds.
+9. Combat = Re:CoM: every enemy card sound back, no `enemy card sound` lines.

@@ -16,10 +16,11 @@
 //!   stage 2's seven, all or none.
 //! - Three log-only readers (`0x1401EA1A0`, `0x1401EA1E0`, `0x140167CF0`): once per battle, who
 //!   read the empty revolver.
-//! - Enemy card sounds (owner, 2026-11-02; `crate::boss::sound`): eight `call 0x1402AA360` in
-//!   the revolver / stock folder code (stock, reload, deal) call `enemy_card_sound` (through a
-//!   stub that passes rbx, or rdi at the folder), switched with the mask reads. It skips Re:CoM's
-//!   play for a side-2 object and returns 0, what the play returns when it plays nothing.
+//! - Enemy card sounds (owner, 2026-11-02; `crate::boss::sound`): nine `call 0x1402AA360` in
+//!   the revolver / stock folder code (stock, reload, deal, item-card page switch) call
+//!   `enemy_card_sound` (through a stub that passes rbx, or rdi at the folder), switched with the
+//!   mask reads. It skips Re:CoM's play for a side-2 object and returns 0, what the play returns
+//!   when it plays nothing.
 //!
 //! Per frame: the mask reads Re:CoM already makes (one OR, two loads), and the tutorial's
 //! hand-empty check while its watcher exists (one compare). The sound calls run only when Re:CoM
@@ -243,8 +244,8 @@ pub unsafe extern "win64" fn enemy_ui_mask(table: u32, index: u32, _rbx: usize) 
     func::<GetFn>(VAR_GET)(table, index) | crate::boss::enemy_ui_bits(EMPTY.load(Ordering::Relaxed) != 0)
 }
 
-/// A revolver's or stock folder's sound (`sites::M6_ENEMY_SOUND_CALLS`: stock, reload, deal;
-/// `obj` = the caller's rbx, or rdi at the folder). Re:CoM's play, unless the object is the
+/// A revolver's or stock folder's sound (`sites::M6_ENEMY_SOUND_CALLS`: stock, reload, deal, page
+/// switch; `obj` = the caller's rbx, or rdi at the folder). Re:CoM's play, unless the object is the
 /// enemy side's in a battle that hides the enemy card UI: then nothing plays and the call gives
 /// 0, as Re:CoM's play does when it plays nothing (callers keep 0 as "no handle").
 pub unsafe extern "win64" fn enemy_card_sound(id: u32, volume: i32, obj: usize) -> u32 {
@@ -336,7 +337,7 @@ unsafe fn sound_retargets(bs: usize) -> Option<Vec<Retarget>> {
     code.extend_from_slice(&hookplan::rbx_arg_stub(to));
     code.extend_from_slice(&hookplan::rdi_arg_stub(to));
     let Some(block) = hook::place_near(bs + M6_ENEMY_SOUND_CALLS[0].rva as usize, &code) else {
-        log("m6: no memory near the exe for the enemy card sound stubs; enemy stock / reload / deal sounds stay Re:CoM's");
+        log("m6: no memory near the exe for the enemy card sound stubs; enemy stock / reload / deal / page-switch sounds stay Re:CoM's");
         return None;
     };
     let mut v = Vec::with_capacity(M6_ENEMY_SOUND_CALLS.len());
@@ -397,7 +398,7 @@ pub fn install(bs: usize) -> bool {
             M6_COCKPIT_CALLS.len() + M6_CARD_CALLS.len() + M6_ENEMY_UI_CALLS.len()
         ));
         if n_sounds > 0 {
-            log(&format!("m6: enemy card sounds (stock, reload, deal): {n_sounds} sound calls switched with them; silent for the enemy side at KH1"));
+            log(&format!("m6: enemy card sounds (stock, reload, deal, item-card page switch): {n_sounds} sound calls switched with them; silent for the enemy side at KH1"));
         }
         let site = |name: &str| crate::sites::M6_DECK_HOOKS.iter().find(|h| h.name == name).expect("site");
         let hooks = [
