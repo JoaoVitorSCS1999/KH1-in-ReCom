@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 99: Skip the intro tutorial and the Leon battle at Combat = KH1, version 0.56.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "If a player has KH1 Combat enabled, have the player skip the leon training battle.
+  Also the intro tutorial."; method (a) "Skip the battle room".
+- Hook: Re:CoM's battle-entry request `0x140236690` (10 bytes `48 89 5C 24 08 57 48 83 EC 20`, no branch into
+  them; Checked (exe)). Acts only at Combat = KH1, Sora's story, Traverse Town (`save+0x1878` = 1), for event
+  room 2000 → battle 1100 (intro) or 2002 → 1101 (Leon). Everything else goes to Re:CoM unchanged.
+- It does what each battle script's own exit does, in its order (Checked (files): the ABC scripts):
+  - intro: clears its 13 session flags, HUD-hide 0, friends-met (0, 0x22) |= 1 then |= 2, room change
+    `0x1402360F0(0, 0, 2001)`;
+  - Leon: clears its 10 session flags, keep-music (1, 0x32) = 1, HUD-hide 0, `0x1402360F0(1, 0x140233AE0(), 2003)`.
+  - Fallback: no floor for the room (`0x14087CBE2[kind]` < 0) or a refusal → Re:CoM's battle runs.
+- Runs once per battle request, never per frame. Saves: only the friends-met bits, as after a played tutorial.
+- Assumptions: a scene room may change straight to the next scene room (vanilla only does it from a battle
+  room); tutorial Leon gives no EXP. `docs/recom-story-skips.md` § Built.
+- Checked: tests, Windows build, site bytes (pefile). Not checked: in game.
+
+---
+
 ## Stage 98: Green item symbol on the camp's item rows, version 0.55.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "for the item slots, the color is correct, but they have the green mickey symbol, but
