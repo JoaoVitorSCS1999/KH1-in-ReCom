@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 117: Re:CoM's whole dodge roll at Combat = KH1, version 0.66.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "make dodge roll work how it does in ReCoM, not KH1"; chose "The whole roll".
+- Re:CoM's roll (Checked (decomp + exe + files)): action 6, start `0x1401F10C0` (untouchable bit `+0x418` 1, turn to the
+  stick ≥ 0.3, row 0x16 `p001_070` with root motion), exe `0x140217310` (bit cleared at 600 units = 12 frames,
+  moving cancel from 1400 = 28 frames, then stand / walk / run or fall); 3.5 m travel (Re:CoM's clip bakes KH1's).
+- At `dodge_roll = recom` (new default): KH1's input rule decides when (Square on the ground; with Guard at run tilt;
+  KH1's locks; a command replaces it), then Re:CoM's start runs through the existing hook's original and its exe
+  runs untouched; the next KH1 frame takes Sora back fresh. Invincibility Re:CoM's own (decision 17's no-flinch frames
+  unused). `kh1` keeps the KH1 roll; `on` = recom; `off` removes the roll (now also with a save loaded).
+- No new site. Assumption: Re:CoM calls the root step on a clip's first update.
+- Checked: tests (429), Windows build, 629 sites. Not checked: in game.
+
+---
+
 ## Stage 116: Silent enemy card stock / reload / refill sounds at Combat = KH1, version 0.65.2 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "make it so that you cant hear enemies stocking cards or refilling their deck".
