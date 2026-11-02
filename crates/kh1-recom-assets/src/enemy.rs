@@ -967,8 +967,8 @@ pub fn child_script(mdls: &[u8], idx: usize) -> Result<&[u8]> {
 }
 
 /// Numbers a behaviour reads from one of its model's child scripts (M11): (enemy, sub-object, script name,
-/// constants as [`Spec::consts`], request words as [`Spec::requests`]).
-pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usize)])] = &[];
+/// constants as [`Spec::consts`]). The Search Ghost's cone `ex_2230_00.bd` (`crate::searchghost`).
+pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usize)])] = &[("searchghost", 0, b"ex_2230_00.bd", crate::searchghost::CHILD_CONSTS, crate::searchghost::CHILD_REQUESTS)];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
     let mut out = Vec::new();
@@ -983,8 +983,10 @@ fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
 /// Bones a behaviour looks from (M11, `kh1_core::enemy::Sight`): (enemy, KH1 bone code). KH1's `sys 19` (t
 /// 0) and `sys 115` take the code's bone's **parent** (`0x1401D6320`'s lerp at t = 0, `0x14029EA00` →
 /// `0x1401D62B0`); a code with bit 12 names a bone directly (`0x14029FAB0`: `code & 0xFFF`). Checked (decomp).
-/// The constant `sight_bone` is the Re:CoM bone posed at that parent's KH1 world (the converter's map).
-pub const SIGHTS: &[(&str, u32)] = &[];
+/// The constant `sight_bone` is the Re:CoM bone posed at that parent's KH1 world (the converter's map). The
+/// Search Ghost's cone: `ex_2230_00.bd` `0x28C` (`sys 19(parent, 4141, 0)`) and `0x27A` (`sys 115(…, 45)`):
+/// bone 45, an end bone the motions don't pose, whose parent 44 is Re:CoM's `l_eye`.
+pub const SIGHTS: &[(&str, u32)] = &[("searchghost", 0x102D)];
 
 fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String, f32)>> {
     let mut out = Vec::new();
@@ -1003,4 +1005,4 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC];
