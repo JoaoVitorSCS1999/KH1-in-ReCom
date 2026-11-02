@@ -235,6 +235,12 @@ pub trait Behaviour {
     /// Whether Sora's target is this enemy (KH1's `*(party 0 + 0x74)`; Re:CoM's attack target
     /// `player+0x84C`), each frame before [`Behaviour::frame`] (M11 fliers).
     fn set_targeted(&self, _by_sora: bool) {}
+    /// Whether Sora stands on the floor, each frame before [`Behaviour::frame`]: the scripts read
+    /// their target's movement state `*(target + 0x70)` (Checked (decomp): `0x1402B1960` keeps the
+    /// state there; 0 on the ground, 2 in the air) and Re:CoM's is his mover's floor contact
+    /// (`+0x120 & 5`; Assumption: KH1's other player states (glide, swim) count as not on the ground).
+    /// M11 (the Air Pirate).
+    fn set_target_grounded(&self, _on_ground: bool) {}
     /// Whether the hit the last [`Behaviour::on_hit`] reported keeps its reaction: KH1's script hit
     /// handler may zero the hit record's reaction kind (`hp[0xC] &= ~0x1F`, then no reaction and the
     /// action goes on; the Darkball's `0x1E20` after its sixth light hit in a row, M11).

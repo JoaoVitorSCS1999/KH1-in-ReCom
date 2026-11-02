@@ -784,6 +784,7 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
             rt.ai.set_floor(f);
         }
         rt.ai.set_targeted(sora_targets(en));
+        rt.ai.set_target_grounded(sora_grounded());
         let w = World { step, pos, target: sora_pos(), grounded, airborne, moved, motion: rt.current };
         let cmds = rt.ai.frame(w);
         for c in &cmds {
@@ -852,6 +853,17 @@ unsafe fn sora_targets(en: usize) -> bool {
     }
     let h: i32 = rd(pl + 0x84C);
     h > 0 && func::<HandleFn>(f::HANDLE_OBJ)(h as u32) == en
+}
+
+/// Whether Sora stands on the floor (his mover's contact `+0x120 & 5`, as [`floor_note`] reads it):
+/// KH1's target movement state `*(target + 0x70)` = 0 (M11, the Air Pirate). No Sora: on the floor.
+unsafe fn sora_grounded() -> bool {
+    let pl: usize = rd(super::va(base(), data::MAIN_PLAYER));
+    if pl == 0 {
+        return true;
+    }
+    let m: usize = rd(pl + e::MOVER);
+    m == 0 || rd::<u32>(m + mv::CONTACT) & 5 != 0
 }
 
 /// The battle floor for a flying body (`sys 89`): Sora's height while he stands on the floor
