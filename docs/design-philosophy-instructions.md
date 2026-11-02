@@ -373,6 +373,12 @@ At KH1 setting:
       Re:CoM magic card's, Sonic Blade Re:CoM's Sonic Blade sleight's). A Config setting (Damage: Re:CoM
       / KH1), Re:CoM by default; KH1 keeps decisions 12 / 21. Supersedes decision 12 at the default.
       Sonic Blade also gets **Re:CoM's start tint** (as base Re:CoM's).
+    - **Damage follow-ups (owner, 2026-11-01, on 0.58.1's questions):** the Damage setting stays
+      **ini only** (`damage = recom | kh1`); at Damage = Re:CoM, **Gravity and Stop use Re:CoM's own
+      numbers** (Gravity / Gravira / Graviga 20 / 40 / 70 % of current HP with Re:CoM's immunities and
+      flatten; Stop 9000 / 15000 / 21000 ticks); **Aero's wind uses Re:CoM's Aero by level** (card,
+      then Aerora / Aeroga sleights, as Fire / Blizzard / Thunder); **Gravity Break and Zantetsuken
+      take KH1's percentage of Re:CoM's HP**.
 
 ## Known open design questions (ask the owner, don't guess)
 
