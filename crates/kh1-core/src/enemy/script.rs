@@ -71,6 +71,11 @@ pub enum Cmd<A> {
     /// KH1's actor flag `0x1` (the model drawn: `0x14029F421`, Checked (decomp, Epic notes
     /// re-read on Steam: the draw skips an actor without it)): shown (true) or hidden (false).
     Visible(bool),
+    /// A plain motion request from a later frame (`sys 13`'s fourth word, `0x1402B9F80`: the start
+    /// time `+4` of the request entry `0x14029F980` writes, added when the motion switches,
+    /// `0x14029FC40`; Checked (decomp)): played from `start` KH1 frames, unless it is the one playing
+    /// ([`Cmd::Motion`]'s rule). M11 (the Wyvern's idle from frame 16, `0x2FD4` / `0x3022`).
+    MotionAt { request: u16, blend: f32, start: f32 },
 }
 
 impl<A: Copy> Cmd<A> {
@@ -92,6 +97,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::Attack { request, attack, blend } => Cmd::Attack { request, attack: f(attack), blend },
             Cmd::Scale(k) => Cmd::Scale(k),
             Cmd::Visible(v) => Cmd::Visible(v),
+            Cmd::MotionAt { request, blend, start } => Cmd::MotionAt { request, blend, start },
         }
     }
 }

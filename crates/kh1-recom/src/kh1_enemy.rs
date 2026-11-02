@@ -306,13 +306,14 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Attack { request, attack, .. } => format!("attack {request} ({}), steered", names.get(*attack as usize).copied().unwrap_or("?")),
         Cmd::Scale(k) => format!("scale {k:.2}"),
         Cmd::Visible(v) => format!("visible {v}"),
+        Cmd::MotionAt { request, blend, start } => format!("motion {request} b{blend} from {start}"),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::MotionAt { .. }) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -511,6 +512,8 @@ mod tests {
         assert_eq!(cmd_token(&Cmd::Visible(false), CLASSES[0].attack_names, &n), "visible false");
         assert_eq!(cmd_token(&Cmd::Scale(0.5), CLASSES[0].attack_names, &n), "scale 0.50");
         assert!(logged(&Cmd::Visible(true)) && !logged(&Cmd::Scale(1.0)));
+        assert_eq!(cmd_token(&Cmd::MotionAt { request: 0, blend: 24.0, start: 16.0 }, CLASSES[0].attack_names, &n), "motion 0 b24 from 16");
+        assert!(logged(&Cmd::MotionAt { request: 0, blend: 24.0, start: 16.0 }));
     }
 
     /// Re:CoM's worlds → KH1's world ids (decision 21's pairing): Traverse Town 3, Agrabah 8,
