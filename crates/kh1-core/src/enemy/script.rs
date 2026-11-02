@@ -65,6 +65,12 @@ pub enum Cmd<A> {
     /// it in the class's Re:CoM attack state; it ends when another motion replaces it or its motion
     /// has played.
     Attack { request: u16, attack: A, blend: f32 },
+    /// The model's scale (actor `+0x40..+0x48`, all three axes; the Darkball's appearance and
+    /// warps ramp it, M11): a factor on the model's own scale.
+    Scale(f32),
+    /// KH1's actor flag `0x1` (the model drawn: `0x14029F421`, Checked (decomp, Epic notes
+    /// re-read on Steam: the draw skips an actor without it)): shown (true) or hidden (false).
+    Visible(bool),
 }
 
 impl<A: Copy> Cmd<A> {
@@ -84,6 +90,8 @@ impl<A: Copy> Cmd<A> {
             Cmd::State(s) => Cmd::State(s),
             Cmd::Held => Cmd::Held,
             Cmd::Attack { request, attack, blend } => Cmd::Attack { request, attack: f(attack), blend },
+            Cmd::Scale(k) => Cmd::Scale(k),
+            Cmd::Visible(v) => Cmd::Visible(v),
         }
     }
 }
@@ -467,6 +475,24 @@ pub fn fly<C, A, X>(cx: &Cx<C, A, X>, v: Vec3) {
 pub fn height<C, A, X>(cx: &Cx<C, A, X>) -> f32 {
     let io = cx.borrow();
     io.floor.map_or(0.0, |f| f - io.w.pos.y)
+}
+
+/// A script's write of the stats block's `+0x14` (the flight's easing, `0x1402CC000`'s `a`; the
+/// Darkball's script sets it, M11): [`Body::accel`].
+pub fn set_air_accel<C, A, X>(cx: &Cx<C, A, X>, a: f32) {
+    cx.borrow_mut().body.accel = Some(a);
+}
+
+/// `sys 86` (`0x1402BA560` → `0x140292BC0`): the actor moved to `to` (KH1 units) with the facing
+/// `yaw` (the vector's fourth word, wrapped by `0x1402A8280`), its flight velocity `+0x3C0..+0x3D0`
+/// and speed `+0x2C` zeroed (Checked (decomp)). The host moves the body there this frame
+/// ([`Body::warp`]).
+pub fn warp<C, A, X>(cx: &Cx<C, A, X>, to: Vec3, yaw: f32) {
+    let mut io = cx.borrow_mut();
+    let d = to - io.w.pos;
+    io.body.warp(d, crate::math::wrap_angle(yaw));
+    let y = io.body.yaw;
+    io.out.push(Cmd::Yaw(y));
 }
 
 /// `sys 125` (`0x1402BABA0`): the turn rate, in degrees a frame.

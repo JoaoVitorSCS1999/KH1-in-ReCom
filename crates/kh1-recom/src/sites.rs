@@ -2332,6 +2332,44 @@ pub const POWERWILD_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemyPowerwild +0x440 attack end", rva: 0x0054_7BD8, target: 0x0017_DA90 },
 ];
 
+/// M11 fliers: the Darkball's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe +
+/// decomp): its only caller is the enemy factory `0x140188F40` (case 23, the call at `0x140189362`);
+/// no branch lands inside the moved bytes (exe scan: rel32 calls / jumps, jcc, rel8 jumps).
+pub const DARKBALL_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemyDarkball ctor (0x14018D5D0)", rva: 0x0018_D5D0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 fliers: the factory's `mov ecx, 0xCD0` before `CEnemyDarkball`'s ctor (its states use fields up
+/// to `+0xCB0`), raised by the framework's 0x20-byte tail. Checked (exe).
+pub const DARKBALL_ALLOC: &[Site] = &[Site { name: "alloc CEnemyDarkball (0x140189349)", rva: 0x0018_9349, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11 fliers: `CEnemyDarkball`'s vtable slots the copy keeps or replaces, checked against Re:CoM's
+/// functions before the copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12 /
+/// 30 and the think are `CBattleEnemy`'s / `CHeartless`'s, 1..3 the Darkball's own: 1 the flying walk
+/// `0x14018D720` / `0x14018D8D0` → `0x140197450`, 2 its dash `e023_050..052` `0x14018D6A0` /
+/// `0x14018D780`, 3 its bite `e023_053` `0x14018D6F0` / `0x14018D8A0`).
+pub const DARKBALL_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyDarkball +0x70 motion play", rva: 0x0053_B818, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyDarkball +0x80 update", rva: 0x0053_B828, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyDarkball +0xE8 state 0 begin", rva: 0x0053_B890, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyDarkball +0xF0 state 0 step", rva: 0x0053_B898, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyDarkball +0xF8 state 0 end", rva: 0x0053_B8A0, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyDarkball +0x100 state 1 begin", rva: 0x0053_B8A8, target: 0x0018_D720 },
+    PtrSite { name: "CEnemyDarkball +0x108 state 1 step", rva: 0x0053_B8B0, target: 0x0018_D8D0 },
+    PtrSite { name: "CEnemyDarkball +0x118 state 2 begin", rva: 0x0053_B8C0, target: 0x0018_D6A0 },
+    PtrSite { name: "CEnemyDarkball +0x120 state 2 step", rva: 0x0053_B8C8, target: 0x0018_D780 },
+    PtrSite { name: "CEnemyDarkball +0x130 state 3 begin", rva: 0x0053_B8D8, target: 0x0018_D6F0 },
+    PtrSite { name: "CEnemyDarkball +0x138 state 3 step", rva: 0x0053_B8E0, target: 0x0018_D8A0 },
+    PtrSite { name: "CEnemyDarkball +0x1F0 state 11 begin", rva: 0x0053_B998, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyDarkball +0x208 state 12 begin", rva: 0x0053_B9B0, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyDarkball +0x3B8 state 30 begin", rva: 0x0053_BB60, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyDarkball +0x3C0 state 30 step", rva: 0x0053_BB68, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyDarkball +0x3D0 think", rva: 0x0053_BB78, target: 0x0019_6EC0 },
+    PtrSite { name: "CEnemyDarkball +0x438 attack hurt off", rva: 0x0053_BBE0, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyDarkball +0x440 attack end", rva: 0x0053_BBE8, target: 0x0017_DA90 },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -2435,6 +2473,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         AIRSOLDIER_ALLOC,
         POWERWILD_HOOKS,
         POWERWILD_ALLOC,
+        DARKBALL_HOOKS,
+        DARKBALL_ALLOC,
     ];
     LISTS
         .iter()
@@ -2534,7 +2574,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

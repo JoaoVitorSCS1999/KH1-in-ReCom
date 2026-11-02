@@ -43,6 +43,12 @@ pub struct Body {
     /// The last landing ended a [`Timed`] jump: KH1's state 3 lands straight to state 0
     /// (`0x1402AFAD0`), with no landing motion.
     pub landed_timed: bool,
+    /// The flight's easing a script set (the stats block's `+0x14`, `0x1402CC000`'s `a`), else the
+    /// manifest's (`Engine::air_accel`). M11 (the Darkball writes it: 0.05 / 0.1 / 0.2 / 1).
+    pub accel: Option<f32>,
+    /// A warp (`sys 86`, [`super::script::warp`]): this frame's displacement to the new place; the
+    /// flight velocity and the walk are zeroed with it (`0x140292BC0`). M11.
+    pub warp: Option<Vec3>,
 }
 
 /// Movement state 3's numbers (`actor+0x3B0` time, `+0x3B4` gravity, `+0x3B8` half the time,
@@ -101,6 +107,15 @@ impl Body {
         self.air_vel = v;
     }
 
+    /// `sys 86`: moved by `d` this frame, facing `yaw`, no velocity.
+    pub fn warp(&mut self, d: Vec3, yaw: f32) {
+        self.warp = Some(self.warp.unwrap_or(Vec3::ZERO) + d);
+        self.air_vel = Vec3::ZERO;
+        self.walk = Vec3::ZERO;
+        self.yaw = yaw;
+        self.yaw_target = yaw;
+    }
+
     /// `0x1402C7300(dir, p)`: a push slide totalling `p` (speed `p × −ln 0.8`, ×0.8 a frame).
     pub fn push(&mut self, dir: Vec3, p: f32) {
         self.air_vel = Vec3::ZERO;
@@ -118,13 +133,19 @@ impl Body {
     pub fn step<C: Engine + ?Sized>(&mut self, step: f32, y: f32, steer: Option<Vec3>, c: &C) -> Vec3 {
         // The engine's turn (end of `0x1402B7260`): at most turn_rate × step toward +0x150.
         self.yaw = turn_toward(self.yaw, self.yaw_target, self.turn.unwrap_or_else(|| c.turn_rate()), step);
+        if let Some(w) = self.warp.take() {
+            // `sys 86` zeroed the velocity and the speed: only the warp moves it this frame.
+            self.walk = Vec3::ZERO;
+            self.air_vel = Vec3::ZERO;
+            return w;
+        }
         let want = self.walk;
         let mut d = want * step;
         self.walk = Vec3::ZERO;
         if self.flying && self.arc.is_none() {
             // `0x1402CC000`: the flight velocity follows the script's (`+0x20` × `+0x2C`, which the
             // actor task zeroes each frame, `0x140297FE0`, before the script sets it again).
-            let a = c.air_accel();
+            let a = self.accel.unwrap_or_else(|| c.air_accel());
             let mut v = want * a + self.air_vel * (1.0 - a);
             v.y = want.y;
             self.air_vel = v;
@@ -273,6 +294,23 @@ mod tests {
         b.jump(20.0, Vec3::ZERO, 0.0, &c);
         assert!(!b.flying && b.airborne());
         assert_eq!(c.num("air_accel"), 0.1);
+    }
+
+    /// A script's easing (the stats block's `+0x14`) replaces the manifest's; a warp moves the body
+    /// by its displacement alone and stops the flight.
+    #[test]
+    fn script_easing_and_warp() {
+        let c = consts();
+        let mut b = Body { accel: Some(0.2), ..Default::default() };
+        b.fly(Vec3::ZERO);
+        b.walk = Vec3::new(0.0, 0.0, 10.0);
+        assert!((b.step(1.0, 0.0, None, &c).z - 2.0).abs() < 1e-5);
+        b.walk = Vec3::new(0.0, 0.0, 10.0);
+        b.warp(Vec3::new(0.0, -80.0, 0.0), 1.0);
+        let d = b.step(1.0, 0.0, None, &c);
+        assert_eq!(d, Vec3::new(0.0, -80.0, 0.0));
+        assert_eq!((b.air_vel, b.yaw), (Vec3::ZERO, 1.0));
+        assert_eq!(b.step(1.0, 0.0, None, &c), Vec3::ZERO);
     }
 
     /// `sys 125`'s turn rate replaces the manifest's.

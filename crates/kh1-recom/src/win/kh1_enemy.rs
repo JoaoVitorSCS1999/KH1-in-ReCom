@@ -177,6 +177,8 @@ struct Runtime {
     /// The battle floor's height (KH1 y) for a flying body's `sys 89` (M11 fliers): Sora's height
     /// the last time he stood on the floor (Assumption: Re:CoM's battle floors are flat).
     floor: Option<f32>,
+    /// Re:CoM's own model scale, read before our first `Cmd::Scale` (KH1's scale is a factor on it).
+    base_scale: Option<[f32; 4]>,
 }
 
 // SAFETY: a runtime (its behaviour holds `Rc`s that never leave it) is only touched under `RT`'s
@@ -379,6 +381,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             quiet: 0.0,
             reaction_age: 0.0,
             floor: None,
+            base_scale: None,
         });
         Some(v.len() - 1)
     })();
@@ -593,6 +596,33 @@ unsafe fn set_height(en: usize, h: f32) {
     func::<ScaleSetFn>(f::SCALE_SET)(en, &s);
 }
 
+/// KH1's scale (`+0x40..+0x48`, `kh1_core::enemy::Cmd::Scale`) as a factor on Re:CoM's own model
+/// scale (read before the first write), through Re:CoM's scale getter / setter (`0x1401A4A20` /
+/// `0x1401A7050`, as [`set_height`]). A factor under 0.001 is written as 0.001 (Assumption: a zero
+/// scale would leave Re:CoM's model matrix singular; the model is as invisible at 0.001).
+unsafe fn set_scale(en: usize, rt: &mut Runtime, k: f32) {
+    let p = func::<ScaleFn>(f::SCALE)(en);
+    if p == 0 {
+        return;
+    }
+    let base = *rt.base_scale.get_or_insert_with(|| rd(p));
+    let k = if k.is_finite() { k.max(0.001) } else { 1.0 };
+    let s = [base[0] * k, base[1] * k, base[2] * k, base[3]];
+    func::<ScaleSetFn>(f::SCALE_SET)(en, &s);
+}
+
+/// KH1's actor flag `0x1` (the model drawn, `kh1_core::enemy::Cmd::Visible`) as Re:CoM's own hide
+/// bit `enemy+0x154` bit 0: the actor draw `0x1401A39B0` (every actor class's slot) draws nothing
+/// while it is set, as the player's hide state sets it (`0x1401E5E80`) and `CEnemyShadow`'s state 0
+/// clears it (`0x140192850`). Checked (decomp).
+unsafe fn set_visible(en: usize, on: bool) {
+    let f: u32 = rd(en + HIDE);
+    wr(en + HIDE, if on { f & !1 } else { f | 1 });
+}
+
+/// Re:CoM's actor flags holding the hide bit (bit 0).
+const HIDE: usize = 0x154;
+
 /// Enters a Re:CoM attack state as P1's cardless play does (`crate::battle::cardless_flags`).
 unsafe fn enter_state(en: usize, k: i32) {
     let flags: u64 = rd(en + e::FLAGS);
@@ -646,6 +676,8 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
             rt.action_age = 0.0;
             enter_state(en, CLASSES[rt.class].attack_states.get(attack as usize).copied().unwrap_or(2));
         }
+        Cmd::Scale(k) => set_scale(en, rt, k),
+        Cmd::Visible(v) => set_visible(en, v),
         Cmd::Yaw(_) | Cmd::Jump { .. } | Cmd::Target(_) | Cmd::State(_) => {}
     }
     if ce::logged(c) {
@@ -757,9 +789,12 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         for c in &cmds {
             apply(en, rt, c);
         }
+        // A flier's script that steers its body this frame (`+0x20` × `+0x2C`) is acting too (the
+        // Darkball's invisible glide issues no command for its whole length; M11).
+        let steering = rt.ai.body().walk != Vec3::ZERO;
         // The safety net for a silent AI (no command at all for `QUIET_LIMIT` frames, no action and
         // no reaction pending): logged past the cap, the behaviour restarts from its engaged state.
-        if !cmds.is_empty() || rt.reaction.is_some() || st != Some(state::THINK as usize) {
+        if !cmds.is_empty() || steering || rt.reaction.is_some() || st != Some(state::THINK as usize) {
             rt.quiet = 0.0;
         } else {
             rt.quiet += step;
@@ -1294,6 +1329,19 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
             rt.ai.set_hit_kind(h.kind);
         }
         rt.ai.on_hit(if rt.clash.is_none() { HitNews::Damage } else { HitNews::Clash });
+        if rt.clash.is_none() && !rt.ai.keeps_reaction() {
+            // KH1's hit handler zeroed the reaction kind (M11, the Darkball's armour): no reaction.
+            // A reaction already running carries on in this state; otherwise back to state 1 (Re:CoM's
+            // handler has already cut the attack it hit: the AI goes on).
+            let id: u32 = rd(en + e::ID);
+            let k = rt.class;
+            let running = rt.reaction.is_some();
+            line(k, || format!("e{id}: hit without a reaction (KH1's hit handler){}", if running { ": the reaction carries on" } else { "" }));
+            if !running {
+                rt.handing_back = true;
+            }
+            return running;
+        }
         rt.reaction_age = 0.0;
         let started = start_reaction(en, rt, hit);
         if !started {

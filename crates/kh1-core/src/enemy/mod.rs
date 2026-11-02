@@ -235,4 +235,10 @@ pub trait Behaviour {
     /// Whether Sora's target is this enemy (KH1's `*(party 0 + 0x74)`; Re:CoM's attack target
     /// `player+0x84C`), each frame before [`Behaviour::frame`] (M11 fliers).
     fn set_targeted(&self, _by_sora: bool) {}
+    /// Whether the hit the last [`Behaviour::on_hit`] reported keeps its reaction: KH1's script hit
+    /// handler may zero the hit record's reaction kind (`hp[0xC] &= ~0x1F`, then no reaction and the
+    /// action goes on; the Darkball's `0x1E20` after its sixth light hit in a row, M11).
+    fn keeps_reaction(&self) -> bool {
+        true
+    }
 }

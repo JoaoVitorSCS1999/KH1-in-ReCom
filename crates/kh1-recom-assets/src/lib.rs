@@ -60,6 +60,7 @@ pub mod shadow;
 pub mod soldier;
 pub mod airsoldier;
 pub mod powerwild;
+pub mod darkball;
 pub mod stats;
 pub mod texture;
 pub mod uibin;

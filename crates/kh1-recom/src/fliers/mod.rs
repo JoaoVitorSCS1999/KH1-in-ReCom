@@ -2,3 +2,4 @@
 //! `crate::kh1_enemy::CLASSES` in its own module (KH1's AI on the shared framework, flying).
 
 pub mod airsoldier;
+pub mod darkball;
