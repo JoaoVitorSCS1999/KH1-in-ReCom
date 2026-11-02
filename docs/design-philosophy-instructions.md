@@ -398,6 +398,9 @@ At KH1 setting:
       can't be damaged or interrupted during their retaliation move": while a boss plays the attack its
       revenge started, Sora's hits do no damage and don't interrupt it (Re:CoM's own rule for an attacking
       enemy, without decisions 14 / 26's bypass for that attack).
+      Then (2026-11-02, on 0.65.0's questions): **Hades untouchable only during his wind-up** (his spin
+      can be hit; his fire-up still doesn't flinch); the revenge check at **KH2's frame 20 of the flinch**
+      (Hades 30), or at the flinch's end if shorter (0.65.0 checked on its first frame: a bug).
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
