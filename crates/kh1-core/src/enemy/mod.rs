@@ -227,6 +227,11 @@ pub trait Behaviour {
     /// The KH1 reaction kind of the hit the next [`Behaviour::on_hit`] reports (the hit record's
     /// `+0xC & 0x1F`, which KH1's script hit handlers read: `hp[0xC] & 31`; M11 fliers).
     fn set_hit_kind(&self, _kind: u8) {}
+    /// A launch its hit handler asks for in place of KH1's reaction (`sys 38`; the Powerwild),
+    /// read after [`Behaviour::on_hit`]; the host plays it over the reaction KH1 chose first.
+    fn scripted_launch(&self) -> Option<react::ScriptedLaunch> {
+        None
+    }
     /// Whether Sora's target is this enemy (KH1's `*(party 0 + 0x74)`; Re:CoM's attack target
     /// `player+0x84C`), each frame before [`Behaviour::frame`] (M11 fliers).
     fn set_targeted(&self, _by_sora: bool) {}

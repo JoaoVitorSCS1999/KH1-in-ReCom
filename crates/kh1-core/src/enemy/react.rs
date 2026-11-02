@@ -171,6 +171,38 @@ pub fn react_flying<C: Engine + ?Sized>(hit: Hit, yaw: f32, current: Option<u16>
     react(Hit { kind, ..hit }, yaw, current, false, false, m, c, rng, body, y)
 }
 
+/// A launch a script's hit handler asks for in place of KH1's own reaction (`sys 38` →
+/// `0x1402BBC80` → `0x1402B79F0(actor, hit, base, hop, speed, down)`; the Powerwild, M11): the base
+/// request on the ground and in the air (the script picks by its movement state), the hop, the
+/// speed and the lying time.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScriptedLaunch {
+    pub ground: u16,
+    pub air: u16,
+    pub hop: f32,
+    pub speed: f32,
+    pub down: f32,
+}
+
+/// `0x1402B79F0`: the scripted launch. The model must have the base (`0x14029F010`), else KH1
+/// plays its `0x1402B77D0` instead (Assumption: the reaction KH1 already chose stands; none is
+/// None here). From behind (`facing · dir ≥ 0`) base + 5 with base + 6 queued, facing along the
+/// push; else base with base + 1 queued, facing against it. The hop `0x1402AF960(hop)`, the air
+/// velocity the push direction (flat, unit) × speed; the lying time is `down`. Checked (decomp).
+#[allow(clippy::too_many_arguments)]
+pub fn scripted_launch<C: Engine + ?Sized>(hit: Hit, l: ScriptedLaunch, airborne: bool, yaw: f32, m: &dyn Motions, c: &C, body: &mut Body, y: f32) -> Option<ReactionStart> {
+    let base = if airborne { l.air } else { l.ground };
+    if !m.has(base) {
+        return None;
+    }
+    let behind = Vec3::from_yaw(yaw).dot(hit.dir) >= 0.0;
+    let (r, then, yw) = if behind { (base + 5, base + 6, hit.dir.x.atan2(hit.dir.z)) } else { (base, base + 1, (-hit.dir.x).atan2(-hit.dir.z)) };
+    body.yaw = wrap_angle(yw);
+    body.yaw_target = body.yaw;
+    body.jump(l.hop, hit.dir.flat().normalized() * l.speed, y, c);
+    Some(ReactionStart { request: r, then, yaw: Some(body.yaw), base: Some(base), down: l.down })
+}
+
 /// The clash recoil a blocked attack plays: the attack row's `+0x40` request (`0x1402B8E10` case
 /// 6 / 7 → `0x1402B9140`): on the ground the request as an action with the idle queued; in the air
 /// with a 20 hop and request 6 queued (`0x40000006`). The push of a negative-damage record is not
@@ -260,5 +292,26 @@ mod tests {
         b.jump(20.0, Vec3::ZERO, 0.0, &c);
         let s = react(Hit { kind: 5, dir: front, part: 0 }, 0.0, None, true, false, &m, &c, &mut rng, &mut b, 0.0).unwrap();
         assert_eq!(s.request, 0x4E);
+    }
+
+    /// The Powerwild's `sys 38(hit, 270 / 280, 80, 25, 0)`: from the front base 270 with 271 queued,
+    /// facing against the push; from behind 275 with 276 queued; hop 80, speed 25, no lying time; in
+    /// the air base 280. A model without the base keeps KH1's own reaction.
+    #[test]
+    fn a_scripted_launch_replaces_the_reaction() {
+        let c = consts();
+        let l = ScriptedLaunch { ground: 270, air: 280, hop: 80.0, speed: 25.0, down: 0.0 };
+        let m = Has(&[270, 280]);
+        // Facing +z, pushed toward −z: from the front.
+        let mut b = Body::default();
+        let s = scripted_launch(Hit { kind: 5, dir: Vec3::new(0.0, 0.0, -1.0), part: 0 }, l, false, 0.0, &m, &c, &mut b, 0.0).unwrap();
+        assert_eq!((s.request, s.then, s.base, s.down), (270, 271, Some(270), 0.0));
+        assert!((b.yaw - 0.0).abs() < 1e-6 && b.airborne());
+        assert!((b.air_vel.z + 25.0).abs() < 1e-4, "{:?}", b.air_vel);
+        // Pushed along its facing: from behind.
+        let mut b = Body::default();
+        let s = scripted_launch(Hit { kind: 4, dir: Vec3::new(0.0, 0.0, 1.0), part: 0 }, l, true, 0.0, &m, &c, &mut b, 0.0).unwrap();
+        assert_eq!((s.request, s.then), (285, 286));
+        assert!(scripted_launch(Hit { kind: 4, dir: Vec3::new(0.0, 0.0, 1.0), part: 0 }, l, false, 0.0, &Has(&[]), &c, &mut Body::default(), 0.0).is_none());
     }
 }

@@ -852,6 +852,9 @@ unsafe fn landed(en: usize, rt: &mut Runtime) {
                 _ => Phase::Motion,
             });
         }
+        // Movement state 3 (a timed jump, the Powerwild's hops) lands straight to state 0
+        // (`0x1402AFAD0`): no landing motion; the queue the jump set plays on.
+        _ if rt.ai.body().landed_timed => {}
         _ => {
             // A plain landing (a leap, a held attack's end): KH1's request 7 then the queue
             // (`0x1402B7260`).
@@ -1208,7 +1211,7 @@ unsafe fn start_reaction(en: usize, rt: &mut Runtime, hit: Option<Hit>) -> bool 
     // The behaviour's random stream (KH1's one `rand`; the launch's down time draws from it).
     let mut rng = rt.ai.rng();
     let yaw = rt.ai.body().yaw;
-    let start = {
+    let mut start = {
         let mut body = rt.ai.body();
         if body.flying {
             // Movement state 4 (M11 fliers): KH1's ground forms, kind 5 as kind 4.
@@ -1217,6 +1220,15 @@ unsafe fn start_reaction(en: usize, rt: &mut Runtime, hit: Option<Hit>) -> bool 
             ke::react(hit, yaw, current, airborne, lying, m, c, &mut rng, &mut body, y)
         }
     };
+    // The script's hit handler runs after KH1's reaction (`sys 38`, the Powerwild): its launch
+    // replaces the one KH1 chose (Assumption: the engine's hit processing precedes the handler, as
+    // the Soldier's counter reads the HP after the damage).
+    if let Some(l) = rt.ai.scripted_launch() {
+        let mut body = rt.ai.body();
+        if let Some(s) = ke::react::scripted_launch(hit, l, airborne, yaw, m, c, &mut body, y) {
+            start = Some(s);
+        }
+    }
     rt.ai.set_rng(rng);
     let id: u32 = rd(en + e::ID);
     match start {

@@ -37,6 +37,22 @@ pub struct Body {
     /// The turn rate a script set (`sys 125` → `0x1402BABA0`: the stats block's `+0xD0` = degrees
     /// × π / 180), else the manifest's (`Engine::turn_rate`). M11 fliers.
     pub turn: Option<f32>,
+    /// KH1's movement state 3, a jump of fixed time (`sys 82` → `0x1402AF150`, step `0x1402AFAE0`;
+    /// the Powerwild's hops, M11). Its velocity is [`Body::air_vel`], `y` included.
+    pub timed: Option<Timed>,
+    /// The last landing ended a [`Timed`] jump: KH1's state 3 lands straight to state 0
+    /// (`0x1402AFAD0`), with no landing motion.
+    pub landed_timed: bool,
+}
+
+/// Movement state 3's numbers (`actor+0x3B0` time, `+0x3B4` gravity, `+0x3B8` half the time,
+/// `+0x3CC` the horizontal drag).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Timed {
+    pub t: f32,
+    pub g: f32,
+    pub half: f32,
+    pub drag: f32,
 }
 
 impl Body {
@@ -44,8 +60,35 @@ impl Body {
     pub fn jump<C: Engine + ?Sized>(&mut self, h: f32, v: Vec3, y: f32, c: &C) {
         self.arc = Some(Arc::hop(h, y, c.gravity()));
         self.air_vel = v;
-        // `0x1402AF960` → movement state 2: flight (state 4) ends.
+        // `0x1402AF960` → movement state 2: flight (state 4) and state 3 end.
         self.flying = false;
+        self.timed = None;
+    }
+
+    /// `sys 82` → `0x1402AF150(actor, v, drag, time)`: movement state 3. `v`: the horizontal
+    /// velocity in `x` / `z` and the height in `y`. Half the time is the rise; gravity
+    /// `2h / half²`, the first vertical speed `−g × half` (up, KH1 y down). All zero: time 30, drag
+    /// 0.9, height 500 (the function's own default). Checked (decomp).
+    pub fn timed_jump(&mut self, v: Vec3, drag: f32, time: f32) {
+        let (mut v, mut drag, mut time) = (v, drag, time);
+        if v == Vec3::ZERO && drag == 0.0 && time == 0.0 {
+            time = 30.0;
+            drag = 0.9;
+            v.y = 500.0;
+        }
+        let half = time * 0.5;
+        let g = (v.y + v.y) / (half * half);
+        self.air_vel = Vec3::new(v.x, -(g * half), v.z);
+        self.timed = Some(Timed { t: 0.0, g, half, drag });
+        self.arc = None;
+        self.flying = false;
+    }
+
+    /// `0x1402AF630`: six frames before the top of a [`Timed`] jump (`+0x3B0 + 6 ≥ +0x3B8`), KH1
+    /// plays the request base + 5 and queues base + 6 when base + 4 is playing (the base is
+    /// `actor+0x3D0`, `sys 83`'s request − 3).
+    pub fn timed_apex(&self) -> bool {
+        self.timed.is_some_and(|j| j.half <= j.t + 6.0)
     }
 
     /// `sys 135` (`0x1402BACB0`): movement state 4 (flight, `0x1402B1960(actor, 4)`) with the
@@ -53,6 +96,7 @@ impl Body {
     pub fn fly(&mut self, v: Vec3) {
         self.flying = true;
         self.arc = None;
+        self.timed = None;
         self.held = false;
         self.air_vel = v;
     }
@@ -63,8 +107,10 @@ impl Body {
         self.push = Some((dir.flat(), p * 0.223_143_55));
     }
 
+    /// In the air: movement state 2 (an arc) or 3 (a [`Timed`] jump; `0x1402B1B10`: the state
+    /// table's flags `& 3 == 1`, state 3's are 5).
     pub fn airborne(&self) -> bool {
-        self.arc.is_some()
+        self.arc.is_some() || self.timed.is_some()
     }
 
     /// One frame: the displacement (KH1 units) for the host to move and collide. `steer`: the
@@ -83,6 +129,16 @@ impl Body {
             v.y = want.y;
             self.air_vel = v;
             d = v * step;
+        } else if let Some(j) = &mut self.timed {
+            // `0x1402AFAE0`: the displacement is the velocity × step (the ground walk is not added:
+            // state 3's move function only takes the facing); then x / z × drag (√drag below step 2),
+            // the vertical speed + step × g (at most 20), the time + step.
+            d = self.air_vel * step;
+            let k = if step < 2.0 { j.drag.abs().sqrt() } else { j.drag };
+            self.air_vel.x *= k;
+            self.air_vel.z *= k;
+            self.air_vel.y = (self.air_vel.y + step * j.g).min(20.0);
+            j.t += step;
         } else if self.held {
             // `0x1402AF6A0` with flag 0x1000: t (`+0x3B0`) and the rise time (`+0x3B8`) back to 0,
             // the base (`+0x3B4`) at the body's height (the root motion's height is already in
@@ -125,12 +181,14 @@ impl Body {
 
     /// The host found the floor while falling: the arc ends.
     pub fn land(&mut self) {
+        self.landed_timed = self.timed.is_some();
         self.arc = None;
+        self.timed = None;
         self.air_vel = Vec3::ZERO;
     }
 
     pub fn falling(&self) -> bool {
-        !self.held && self.arc.is_some_and(|a| !a.rising())
+        !self.held && (self.arc.is_some_and(|a| !a.rising()) || (self.timed.is_some() && self.air_vel.y > 0.0))
     }
 }
 
@@ -145,6 +203,45 @@ mod tests {
             v.push((k.to_string(), x));
         }
         Table::new(v, &[]).unwrap()
+    }
+
+    /// Movement state 3 (`0x1402AF150` / `0x1402AFAE0`), the Powerwild's back hop: 20 a frame
+    /// backward, height 50, 30 frames. It rises for 15 frames to about 50 (y down), the horizontal speed
+    /// falls by √0.9 a frame over its 31 frames of travel, the apex motion comes 6 frames before the top, and it lands as state
+    /// 3 (no landing motion).
+    #[test]
+    fn a_timed_jump_rises_for_half_its_time() {
+        let c = consts();
+        let mut b = Body::default();
+        b.timed_jump(Vec3::new(0.0, 50.0, -20.0), 0.9, 30.0);
+        assert!(b.airborne() && !b.falling());
+        let (mut y, mut z, mut top, mut apex) = (0.0f32, 0.0f32, 0.0f32, None);
+        for f in 1..=40 {
+            let d = b.step(1.0, y, None, &c);
+            y += d.y;
+            z += d.z;
+            top = top.min(y);
+            if apex.is_none() && b.timed_apex() {
+                apex = Some(f);
+            }
+            if y >= 0.0 && b.falling() {
+                b.land();
+                assert!(b.landed_timed && !b.airborne());
+                // Displacement before the speed update (KH1's order): n·vy₀ + g·n(n−1)/2 = 0 at n = 31.
+                assert_eq!(f, 31, "lands on frame 31");
+                break;
+            }
+        }
+        assert!((top + 50.0).abs() < 4.0, "top {top}");
+        assert_eq!(apex, Some(9), "6 frames before the 15-frame rise");
+        let k = 0.9f32.sqrt();
+        let want = -20.0 * (1.0 - k.powi(31)) / (1.0 - k);
+        assert!((z - want).abs() < 1e-2, "{z} vs {want}");
+        // An arc or flight ends it.
+        b.timed_jump(Vec3::ZERO, 0.0, 0.0);
+        assert_eq!(b.timed.map(|j| (j.half, j.drag)), Some((15.0, 0.9)));
+        b.jump(20.0, Vec3::ZERO, 0.0, &c);
+        assert!(b.timed.is_none());
     }
 
     /// KH1's flight (`0x1402CC000`): the horizontal velocity eases toward the script's at the stats
