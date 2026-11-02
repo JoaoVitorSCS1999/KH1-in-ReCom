@@ -490,6 +490,10 @@ impl Host for RecomHost {
             let Some((row, root)) = rows::row_for(request, &stance, &ext) else { return false };
             let voice = if crate::magic::is_cast_request(request) && super::magic::kh1_cast(pl) { cast_voice_variant(pl) } else { 0 };
             func::<MotionFn>(MOTION_REQUEST)(pl, row as i32, frames_to_units(blend), root as u64, 0, voice, frames_to_units(start));
+            // M9 9c.1: a KH1 special's motion starts base Re:CoM's sleight events for it.
+            if let Some(e) = kh1_core::data::xl::entry_of(request) {
+                super::specials::motion_events(pl, e);
+            }
             true
         }
     }
