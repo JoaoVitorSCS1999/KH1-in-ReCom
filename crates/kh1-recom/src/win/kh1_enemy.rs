@@ -195,6 +195,9 @@ struct Runtime {
     guard_kind: Option<u8>,
     /// A guard row's clash: its recoil and KH1's kind, played by the next state 11 begin.
     clash_recoil: Option<(u16, u8)>,
+    /// The Re:CoM bone a behaviour looks from (the manifest's `sight_bone`, M11: the Search Ghost's
+    /// cone), read once at the ctor; None for the other classes (no per-frame read).
+    sight_bone: Option<i32>,
 }
 
 /// A guard row made with a request (`kh1_core::enemy::Cmd::Guard`): KH1's row lives while that
@@ -430,6 +433,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             guard_saved: Vec::new(),
             guard_kind: None,
             clash_recoil: None,
+            sight_bone: sight_bone(m),
         };
         Some(match slot {
             Some(i) => {
@@ -797,6 +801,8 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
             let yaw = rt.ai.body().yaw;
             let _ = super::kh1_thrown::throw(en, CLASSES[rt.class].name, manifest(rt.class), n, yaw);
         }
+        // Log only (KH1 does something here the port doesn't build: the line below says what).
+        Cmd::Note(_) => {}
         Cmd::Yaw(_) | Cmd::Jump { .. } | Cmd::Target(_) | Cmd::State(_) => {}
     }
     if ce::logged(c) {
@@ -896,6 +902,18 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         }
     }
     let airborne = rt.ai.body().airborne();
+    // A behaviour that looks from one of its bones (M11, the Search Ghost's cone): the bone's place
+    // and axis and Sora's lock point, from Re:CoM's own animated bones.
+    if let Some(s) = sight(en, rt.sight_bone) {
+        rt.ai.set_sight(s);
+    }
+    if !(poll && rt.action.is_none_or(|a| a.steered)) && !rt.dead {
+        // KH1's child objects run every frame, also while the parent's script waits (M11).
+        let w = World { step, pos, target: sora_pos(), grounded: contact && !airborne && !flying, airborne, moved, motion: rt.current };
+        for c in &rt.ai.side_frame(w) {
+            apply(en, rt, c);
+        }
+    }
     if poll && rt.action.is_none_or(|a| a.steered) {
         // KH1's movement state 4 (flight) is neither state 0 nor state 2.
         let grounded = contact && !airborne && !flying;
@@ -968,6 +986,41 @@ unsafe fn body_step(en: usize, rt: &mut Runtime, step: f32, pos: Vec3) {
     }
     wr(mvr + mv::VEL, vel);
 }
+
+/// The bone sight of a class whose manifest names a `sight_bone` (M11, the Search Ghost's cone,
+/// `kh1_core::enemy::Sight`), in KH1's axes: the bone's world position (Re:CoM's bone node `+0xD0`)
+/// and its world row 0 (`+0xA0`: the node's scaled world rows `+0xA0..+0xC0`, `0x14023EB00`; Checked
+/// (decomp)); the converter poses each Re:CoM bone at its KH1 twin's world (`kh1_recom_assets::convert`),
+/// so these are KH1's own. Sora's KH1 lock point 0 is his bone 77, Re:CoM's `chest1` (Checked (files):
+/// `xa_ex_0010.mdls` part 4's last group, code 8 at t 0 → bone 78's parent 77 ↔ `PL0001.MDL` bone 37),
+/// whose index Re:CoM keeps at `player+0x3A8` (`0x1401A4450(player, "chest1")`, Checked (decomp)).
+unsafe fn sight(en: usize, bone: Option<i32>) -> Option<ke::Sight> {
+    let node = func::<BoneFn>(f::BONE)(en, bone?);
+    if node == 0 {
+        return None;
+    }
+    let eye = crate::units::to_kh1(rd_vec(node + 0xD0));
+    let r0 = rd_vec(node + 0xA0);
+    let axis = Vec3::new(r0.x, -r0.y, -r0.z);
+    let pl: usize = rd(super::va(base(), data::MAIN_PLAYER));
+    let target = if pl != 0 {
+        let i: i32 = rd(pl + SORA_CHEST);
+        let n = if (0..512).contains(&i) { func::<BoneFn>(f::BONE)(pl, i) } else { 0 };
+        (n != 0).then(|| crate::units::to_kh1(rd_vec(n + 0xD0)))
+    } else {
+        None
+    };
+    (eye.length().is_finite() && axis.length().is_finite()).then_some(ke::Sight { eye, axis, target: target.filter(|t| t.length().is_finite()) })
+}
+
+/// The manifest's `sight_bone` (a Re:CoM bone index), if it names one.
+fn sight_bone(m: &Manifest) -> Option<i32> {
+    let b = m.consts.get("sight_bone");
+    (b.is_finite() && (0.0..256.0).contains(&b) && b.fract() == 0.0).then_some(b as i32)
+}
+
+/// `player+0x3A8`: Re:CoM's index of Sora's `chest1` bone (see [`sight`]).
+const SORA_CHEST: usize = 0x3A8;
 
 /// Whether Sora's target (Re:CoM's attack target `player+0x84C`, a handle; KH1's party 0 `+0x74`)
 /// is this enemy.

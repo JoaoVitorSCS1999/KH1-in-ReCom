@@ -84,6 +84,9 @@ pub enum Cmd<A> {
     /// `sys 94`: the enemy throws its thrown object `n` (its child script,
     /// `crate::enemy::thrown`; the Bandit's scimitar, M11).
     Throw(u8),
+    /// Something KH1's script does here that the port doesn't build (an owner question or a later
+    /// milestone): for the log only. M11 (the Search Ghost's drain heal and reward).
+    Note(&'static str),
 }
 
 impl<A: Copy> Cmd<A> {
@@ -108,6 +111,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::MotionAt { request, blend, start } => Cmd::MotionAt { request, blend, start },
             Cmd::Guard(g) => Cmd::Guard(g),
             Cmd::Throw(n) => Cmd::Throw(n),
+            Cmd::Note(n) => Cmd::Note(n),
         }
     }
 }
