@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 107: Damage = Re:CoM: Aero level 1 wind; Gravity Break and Zantetsuken skip Re:CoM's boss falloff, version 0.60.1 (2026-11-01)
+
+- Asks (owner, 2026-11-01, on 0.59.0's questions): 1 (b) Aero level 1 gets a wind with the card's value; 3 (b) "skip
+  Re:CoM's reduction for these two"; 2 (a), 4 (a) unchanged.
+- Aero level 1 (Damage = Re:CoM, battle rooms): card 0x20 (300 × attack / 100, attribute 1), a wind shaped as KH1's
+  Aerora wind (btltbl `0x5CF8`: 80 cm × Sora's size, a hit every 30 frames through `0x14016F7D0`, KH1's flinch;
+  using level 2's shape for level 1: Assumption), for the barrier's (18 + max MP) × 60 frames; Re:CoM's Aero card
+  effect. Field and Damage = KH1: barrier only, as KH1.
+- Correction: `0x14015D940` (named "boss rule" in 0.59.0's question) is Re:CoM's bonus against frozen enemies
+  (`enemy+0x2B0`; Checked (decomp + exe + files)); Re:CoM's boss reduction is the falloff (`+0x288` / `+0x28C` /
+  `+0x290`). Gravity Break and Zantetsuken now skip the falloff (`+0x290` = 1.0 for the handler call, the three
+  fields put back; shared helper `win::revenge::Falloff`); frozen bonus, resistance, weak parts kept.
+- No new sites or hooks.
+- Checked: tests, Windows build, 529 sites. Not checked: in game.
+
+---
+
 ## Stage 106: Boss revenge value (KH2's) for humanoid bosses at Combat = KH1, version 0.60.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "lets also have humanoid bosses have a revenge value system, similar to how they work
