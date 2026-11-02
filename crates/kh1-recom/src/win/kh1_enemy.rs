@@ -151,6 +151,13 @@ struct Runtime {
     hittable: bool,
     /// The last launch's down time (frames).
     down: f32,
+    /// The motion playing: its clock's wrap (a clip Re:CoM loops), its age.
+    watch: ce::ClipWatch,
+    /// KH1 frames since the action was requested (until its motion starts), then since its motion
+    /// started: the safety net (`ce::watchdog`).
+    action_age: f32,
+    /// Re:CoM's state at the last KH1 frame (the log of a state change while unhittable).
+    last_state: Option<usize>,
 }
 
 // SAFETY: a runtime (its behaviour holds `Rc`s that never leave it) is only touched under `RT`'s
@@ -343,6 +350,9 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             dead_frames: 0,
             hittable: true,
             down: 0.0,
+            watch: ce::ClipWatch::default(),
+            action_age: 0.0,
+            last_state: None,
         });
         Some(v.len() - 1)
     })();
@@ -427,15 +437,50 @@ unsafe fn play(en: usize, rt: &mut Runtime, request: u16, blend: f32) {
     let vt: usize = rd(en);
     let p: PlayFn = std::mem::transmute_copy(&rd::<usize>(vt + 0x70));
     p(en, c.slot, 0, c.root as u64, crate::shadow::blend_units(blend), 0, 0);
+    if !rt.hittable && rt.current != Some(request) {
+        // Diagnostic (the sunk Shadow that shows standing): every motion change while unhittable.
+        let from = rt.current;
+        line(rt.class, || format!("e{}: plays {request} (slot {}) after {from:?} while unhittable", rd::<u32>(en + e::ID), c.slot));
+    }
     rt.current = Some(request);
+    rt.watch.restart();
 }
 
-/// The current request's clip has played to KH1's length.
-unsafe fn ended(en: usize, rt: &Runtime) -> bool {
+/// The current request's clip has played to KH1's length, or (a clip Re:CoM loops) its clock
+/// wrapped (`ce::ClipWatch`).
+unsafe fn ended(en: usize, rt: &mut Runtime) -> bool {
     match rt.current.and_then(|r| manifest(rt.class).clip(r)) {
-        Some(c) => clock(en) >= crate::units::frames_to_units(c.frames as f32),
+        Some(c) => rt.watch.ended(clock(en), c.frames as f32),
         None => true,
     }
+}
+
+/// The safety net: the running action is stuck (`ce::watchdog`), with the loud log line's detail.
+unsafe fn stuck(en: usize, rt: &Runtime) -> Option<(ce::watchdog::Stuck, String)> {
+    let a = rt.action?;
+    let frames = manifest(rt.class).clip(a.request).map_or(0.0, |c| c.frames as f32);
+    let why = ce::watchdog::check(rt.action_playing, rt.action_age, frames)?;
+    let st = crate::guard::state_index(en, rd(en + e::STATE)).map_or("?".to_string(), |s| s.to_string());
+    let detail = match why {
+        ce::watchdog::Stuck::NeverStarted => match a.attack {
+            Some(i) => format!("Re:CoM state {st}, its attack state {} never began, {:.0} frames", CLASSES[rt.class].attack_states.get(i as usize).copied().unwrap_or(2), rt.action_age),
+            None => format!("Re:CoM state {st}, {:.0} frames", rt.action_age),
+        },
+        ce::watchdog::Stuck::NeverEnded => format!(
+            "Re:CoM state {st}, playing {:?}, clock {} of {} units, {:.0} of {frames:.0} frames",
+            rt.current,
+            clock(en),
+            crate::units::frames_to_units(frames),
+            rt.action_age
+        ),
+    };
+    Some((why, detail))
+}
+
+/// Logs a released action (always, past the class's line cap).
+unsafe fn release_line(en: usize, rt: &Runtime, why: ce::watchdog::Stuck, detail: &str) {
+    let req = rt.action.map_or(0, |a| a.request);
+    log(&ce::watchdog::line(CLASSES[rt.class].name, rd(en + e::ID), req, why, detail));
 }
 
 /// KH1's hittable flag (actor flag `0x40`, `kh1_core::enemy::Cmd::Hittable`) as Re:CoM's own
@@ -489,6 +534,7 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         Cmd::Action { request, attack, then, blend } => {
             rt.action = Some(Act { request, then, attack, blend });
             rt.action_playing = false;
+            rt.action_age = 0.0;
             match attack {
                 // An attack: Re:CoM's attack state; its begin plays the motion.
                 Some(a) => enter_state(en, CLASSES[rt.class].attack_states.get(a as usize).copied().unwrap_or(2)),
@@ -544,6 +590,44 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
     let moved = (pos - rt.last_pos).length();
     rt.last_pos = pos;
     let contact = rd::<u32>(mvr + mv::CONTACT) & 5 != 0;
+    rt.watch.tick(step);
+    // Diagnostic (owner 2026-11-02: a sunk Shadow sometimes shows standing mid-travel): a Re:CoM
+    // state change while it cannot be hit (sinking, underground, rising) is logged with the KH1
+    // motion playing.
+    let st = crate::guard::state_index(en, rd(en + e::STATE));
+    if st != rt.last_state {
+        if !rt.hittable && rt.last_state.is_some() {
+            let (from, cur) = (rt.last_state, rt.current);
+            line(rt.class, || format!("e{}: Re:CoM state {from:?} -> {st:?} while unhittable (KH1 motion {cur:?})", rd::<u32>(en + e::ID)));
+        }
+        rt.last_state = st;
+    }
+    if let Some(a) = rt.action.filter(|a| a.attack.is_some() && !rt.action_playing) {
+        // An attack whose Re:CoM attack state has not begun: asked again each frame while Re:CoM's
+        // next state is another (something overwrote it, e.g. a default state in the same frame).
+        let want = CLASSES[rt.class].attack_states.get(a.attack.unwrap_or(0) as usize).copied().unwrap_or(2);
+        let is = |v: usize| crate::guard::state_index(en, v).map(|k| k as i32);
+        if is(rd(en + e::NEXT)) != Some(want) && is(rd(en + e::STATE)) != Some(want) && rt.action_age > 0.0 {
+            line(rt.class, || format!("e{}: attack state {want} asked again (Re:CoM's next state was {:?})", rd::<u32>(en + e::ID), is(rd(en + e::NEXT))));
+            enter_state(en, want);
+        }
+    }
+    if rt.action.is_some() {
+        rt.action_age += step;
+        // The safety net (an attack that plays is `attack_step`'s: it leaves the attack state).
+        if let Some((why, detail)) = stuck(en, rt) {
+            if why == ce::watchdog::Stuck::NeverStarted || rt.action.is_some_and(|a| a.attack.is_none()) {
+                release_line(en, rt, why, &detail);
+                // As if its motion had finished: the queued motion plays, the AI goes on.
+                let then = rt.action.map(|a| (a.then, a.blend));
+                end_action(rt);
+                if let Some((q, b)) = then {
+                    rt.queued = None;
+                    play(en, rt, q, b);
+                }
+            }
+        }
+    }
     if contact && rt.ai.body().falling() {
         rt.ai.body().land();
         landed(en, rt);
@@ -690,10 +774,15 @@ pub unsafe extern "win64" fn appear_step(en: usize) {
                 if !rt.ai.risen() {
                     return Some(());
                 }
+                // An attack the behaviour asked for in this same frame (its first after the rise)
+                // already set Re:CoM's next state: the default state would overwrite it and the
+                // attack state would never begin (owner 2026-11-02: a Shadow froze after its first
+                // claw, log `e213`). It leaves state 0 for the attack state instead.
+                let pending = rt.action.is_some_and(|a| a.attack.is_some()) && !rt.action_playing;
                 if kind == Appear::Shadow && func::<IntFn>(f::INTRO_ROOM)() != 0 && func::<IntFn>(f::INTRO_FLAG)() != 0 {
                     func::<IntFn>(f::INTRO_COUNT)();
                     rt.appear_sub = 1;
-                } else {
+                } else if !pending {
                     func::<StateFn>(f::DEFAULT_STATE)(en);
                 }
             }
@@ -741,6 +830,7 @@ pub unsafe extern "win64" fn attack_begin(en: usize) {
         play(en, rt, a.request, a.blend);
         rt.queued = Some((a.then, a.blend));
         rt.action_playing = true;
+        rt.action_age = 0.0;
         true
     });
     if done != Some(true) {
@@ -754,7 +844,23 @@ pub unsafe extern "win64" fn attack_begin(en: usize) {
 /// end (`0x14017E540`: bit 0 off, the default state).
 pub unsafe extern "win64" fn attack_step(en: usize) {
     let r = with_rt(en, |rt| {
-        let end = rt.action.is_some() && ended(en, rt);
+        let mut end = rt.action.is_some() && ended(en, rt);
+        if !end {
+            // The safety net: an attack that never ends, or none at all in an attack state (its
+            // begin was Re:CoM's): leave the attack state as at the motion's end.
+            match stuck(en, rt) {
+                Some((why, detail)) => {
+                    release_line(en, rt, why, &detail);
+                    end = true;
+                }
+                None if rt.action.is_none() => {
+                    let st = crate::guard::state_index(en, rd(en + e::STATE)).map_or("?".to_string(), |s| s.to_string());
+                    log(&ce::watchdog::line(CLASSES[rt.class].name, rd(en + e::ID), 0, ce::watchdog::Stuck::NeverStarted, &format!("Re:CoM attack state {st} without a KH1 action")));
+                    end = true;
+                }
+                None => {}
+            }
+        }
         if end {
             end_action(rt);
         }
@@ -933,11 +1039,11 @@ pub unsafe extern "win64" fn react_step(en: usize) {
         let dt: i32 = rd(en + e::DT);
         let step = crate::units::step_from_dt(dt.clamp(0, 1000));
         let mut done = false;
+        let motion_ended = matches!(rt.reaction, Some(Phase::Motion)) && ended(en, rt);
         match rt.reaction {
-            Some(Phase::Motion) if ended(en, rt) && rt.queued.is_none() => done = true,
+            // The reaction's motion ended (this frame: `tick` plays the queued one): done.
             Some(Phase::Motion) => {
-                // The reaction's motion ended this frame: `tick` plays the queued one; then done.
-                if ended(en, rt) {
+                if motion_ended {
                     done = true;
                 }
             }
