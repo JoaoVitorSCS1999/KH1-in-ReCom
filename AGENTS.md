@@ -11,6 +11,26 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 105: Damage = Re:CoM: Re:CoM's Gravity / Stop / Aero; KH1's % for Gravity Break and Zantetsuken, version 0.59.0 (2026-11-01)
+
+- Asks (owner, 2026-11-01, on 0.58.1's questions): Damage ini only; Gravity and Stop "Re:CoM's numbers"; Aero
+  "Re:CoM's Aero by level"; Gravity Break / Zantetsuken "KH1's % of Re:CoM HP".
+- At Damage = Re:CoM (Checked (decomp + disasm + exe + files)):
+  - Gravity: card 0x1E / Gravira 0x11 / Graviga 0x18, 20 / 40 / 70 % of current HP through Re:CoM's kind 0xD
+    (`0x14017DC50`, gate `param+0x40`, `0x14017DD4C`), then its flatten state `+0xAC0` (`0x14017D626`, 9000-tick hold
+    `0x140183CFB`); KH1's squash leaves a flattened enemy alone.
+  - Stop: card 0x1F / Stopra 0x12 / Stopga 0x19, 9000 / 15000 / 21000 ticks through kind 8 (gate `param+0x2C`).
+  - Aero's wind: card 0x20 / Aerora 0x13 / Aeroga 0x1A, 300 / 600 / 900 × attack / 100 per wind hit.
+  - Gravity Break / Zantetsuken: KH1's rule (`0x1402BFA80`): int(current HP × power / 100 × resist[8]), at least the
+    record's floor; power 40 + KH1 Strength / 250; on Re:CoM's current HP.
+  - KH1's cast, area and order kept; the card interrupt not set when Re:CoM's gate refuses.
+- Field: Gravity / Stop keep KH1's rules (no card table); Aero's wind takes Re:CoM's no-card AP as Fire.
+- No new hooks; three check-only sites. Damage = KH1 unchanged.
+- Assumption: the live tables match the session's SY0002.BIN (the DLL reads the live ones).
+- Checked: tests, Windows build, 491 sites. Not checked: in game.
+
+---
+
 ## Stage 104: Sonic Blade: Re:CoM's start tint, version 0.58.1 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "Add Re:CoM's tint" (as base Re:CoM's Sonic Blade).
