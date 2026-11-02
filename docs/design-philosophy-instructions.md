@@ -437,6 +437,8 @@ At KH1 setting:
       whose KH1 recoil motion the model lacks plays Re:CoM's flinch**; battle spawns keep KH1's appearance;
       KH1's wander picks points **around where the enemy stands** (fix the Shadow to it); KH1's leash
       left out (would make a battle unwinnable).
+      Gargoyle (2026-11-02): its launched object (attack 219) is **one of Re:CoM's own bullets, moved and
+      timed by KH1's numbers**.
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
