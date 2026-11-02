@@ -111,7 +111,8 @@ pub mod cmd {
             BLANK => 305,
             JUMP_ON => 313,
             COUNTER => 343,
-            c => c as u16,
+            // M9 stage 9c.1: the specials and Sonic Blade's follow-ups (`crate::specials::cmd`).
+            c => crate::specials::cmd::name(c).unwrap_or(c as u16),
         }
     }
 
@@ -253,6 +254,14 @@ pub struct World {
     /// count (`+0x21`).
     pub slots: [u8; crate::items::MAX_SLOTS],
     pub slot_count: u8,
+    /// M9 stage 9c.1: KH1's special offer (`0x14028D0F0`, `crate::specials::offer`) for the context
+    /// entry when no object took it: its command (0: none) and whether it is greyed (MP short).
+    pub special: u8,
+    pub special_grey: bool,
+    /// M9 stage 9c.1: a running special's follow-up in the Attack row (`0x14039ED70`): Rave /
+    /// Blast (0: none) and whether it is greyed.
+    pub follow: u8,
+    pub follow_grey: bool,
 }
 
 /// The fresh presses of one frame (Re:CoM's pad, mapped to KH1's buttons).
@@ -421,6 +430,12 @@ pub struct Outcome {
     pub cast: Option<u8>,
     /// The item issued this frame (M8 stage 8a.1): the item and its slot.
     pub item: Option<crate::items::ItemCommand>,
+    /// M9 stage 9c.1: a special command run by Triangle this frame (Sonic Blade, Rave, Blast):
+    /// ours to run, not Re:CoM's Triangle action.
+    pub special: Option<u8>,
+    /// M9 stage 9c.1: a confirm KH1's commit refused, or a submenu it opened (`0x140293410`
+    /// returns 0 for both): a running special's attacking bit goes.
+    pub confirm_refused: bool,
 }
 
 /// The context tab (`0x140277CF0`): 0 hidden, 1 sliding in, 2 in, 3 fading out.
@@ -541,6 +556,17 @@ impl Menu {
         r.cmds = vec![if w.counter { cmd::COUNTER } else { cmd::ATTACK }, cmd::BLANK, cmd::BLANK, cmd::BLANK];
         r.grey = !(flags >> 4) | 0xFFFF_FFFE;
         r.lock = r.grey;
+        // M9 stage 9c.1: a running special's follow-up takes row 0 (`0x14039ED70`, the menu callback
+        // `0x1402948F0` runs first: `0x140293000(0, cmd)` ungreys it, `0x140292FB0(0)` greys it).
+        if w.follow != cmd::NONE {
+            r.cmds[0] = w.follow;
+            if w.follow_grey {
+                r.grey |= 1;
+            } else {
+                r.grey &= !1;
+            }
+            r.lock = r.grey;
+        }
         // Magic (`0x1402944C0`).
         let learned: Vec<(u8, u8)> = (0..spell::COUNT as u8).filter_map(|s| Some((s, w.spells[s as usize])).filter(|x| (1..=3).contains(&x.1))).collect();
         let mut usable = !0u32;
@@ -631,6 +657,17 @@ impl Menu {
             r.cmds[3] = w.context;
             r.grey &= !8;
             r.lock &= !8;
+        } else if w.special != cmd::NONE {
+            // M9 stage 9c.1: the special offer comes last (`0x14028D0F0`) and only takes an entry
+            // no object took; greyed when it scored 1 (MP short).
+            r.cmds[3] = w.special;
+            if w.special_grey {
+                r.grey |= 8;
+                r.lock |= 8;
+            } else {
+                r.grey &= !8;
+                r.lock &= !8;
+            }
         }
         for l in [&mut self.root, &mut self.magic, &mut self.items] {
             l.bright.resize(l.cmds.len(), BRIGHT_GREY);
@@ -713,6 +750,12 @@ impl Menu {
             let c = if self.row3_valid() { self.root.cmds[3] } else { self.root.cmds[0] };
             out.events.push(Event::Context(c));
             self.root.cursor = 0;
+            // M9 stage 9c.1: a special (its start or a follow-up) is ours to run, not Re:CoM's
+            // Triangle action.
+            if crate::specials::cmd::is_ours(c) {
+                out.special = Some(c);
+                out.triangle = false;
+            }
         }
         // Square without Triangle: the roll / guard, no cursor this frame.
         if word & 0x400_0010 == 0x10 {
@@ -765,8 +808,10 @@ impl Menu {
             if locked || c == 0 {
                 out.sounds.push(Sound::Error);
                 out.events.push(Event::Spell(c, true));
+                out.confirm_refused = true;
             } else if !(w.gate_any || (fire && w.gate_fire)) {
                 out.events.push(Event::NotNow(c));
+                out.confirm_refused = true;
             } else {
                 out.cast = Some(c);
                 out.events.push(Event::Cast(c));
@@ -825,7 +870,10 @@ impl Menu {
         let slot = self.item_slots.get(row as usize).copied().unwrap_or(0);
         let item = crate::items::item_of_command(c);
         let result = match item {
-            Some(_) if !self.items.locked(row) && !w.gate_any => ShortResult::NotNow,
+            Some(_) if !self.items.locked(row) && !w.gate_any => {
+                out.confirm_refused = true;
+                ShortResult::NotNow
+            }
             Some(it) if !self.items.locked(row) => {
                 out.item = Some(crate::items::ItemCommand { item: it, slot });
                 self.open = false;
@@ -834,6 +882,7 @@ impl Menu {
             }
             _ => {
                 out.sounds.push(Sound::Error);
+                out.confirm_refused = true;
                 ShortResult::Greyed
             }
         };
@@ -842,6 +891,9 @@ impl Menu {
 
     fn run_root(&mut self, row: i32, out: &mut Outcome) {
         let c = self.root.cmds[row as usize];
+        // `0x140293480` returns 0 for each of these (a locked row, a submenu opened, a command it
+        // doesn't run here): `0x140293410` clears the attacking bit (M9 stage 9c.1).
+        out.confirm_refused = true;
         if self.root.locked(row) {
             out.sounds.push(Sound::Error);
             out.events.push(Event::Refused(c));
@@ -1306,6 +1358,12 @@ pub fn font_bytes(s: &str) -> (Vec<u8>, Vec<char>) {
             b.push(c as u8);
             continue;
         }
+        // German ß as "ss" (M9 stage 9c.1: "Sonicstoß", "Todesstoß").
+        if c == 'ß' {
+            folded.push(c);
+            b.extend_from_slice(b"ss");
+            continue;
+        }
         let base = match c {
             'á' | 'à' | 'â' | 'ä' => 'a',
             'é' | 'è' | 'ê' | 'ë' => 'e',
@@ -1731,6 +1789,77 @@ mod tests {
         assert_eq!(m.tab, Tab::default());
     }
 
+    /// M9 stage 9c.1: Sonic Blade in the context entry (KH1's offer, after any object), its tab
+    /// gating Triangle as every context command; Triangle runs it as ours, not Re:CoM's action; a
+    /// greyed offer shows no tab (FM); an object takes the entry first.
+    #[test]
+    fn the_special_offer_takes_the_context_tab() {
+        use crate::specials::cmd as sp;
+        let w = World { special: sp::SONIC_BLADE, ..world() };
+        let mut m = Menu::new();
+        m.show();
+        let mut frames = 0;
+        while m.tab.state != 2 {
+            let o = m.step(&w, press(|p| p.triangle = true));
+            assert!(o.special.is_none());
+            m.tick(1.0);
+            frames += 1;
+            assert!(frames < 30);
+        }
+        assert_eq!((frames, m.tab_cmd, cmd::name(m.tab_cmd)), (15, sp::SONIC_BLADE, 319));
+        let o = m.step(&w, press(|p| p.triangle = true));
+        assert_eq!((o.special, o.triangle), (Some(sp::SONIC_BLADE), false));
+        // MP short: greyed, no tab, Triangle runs nothing.
+        let grey = World { special_grey: true, ..w };
+        let mut g = Menu::new();
+        g.show();
+        for _ in 0..20 {
+            let o = g.step(&grey, press(|p| p.triangle = true));
+            assert!(o.special.is_none());
+            g.tick(1.0);
+        }
+        assert_eq!(g.tab.state, 0);
+        assert!(g.root.grey & 8 != 0 && g.root.cmds[3] == sp::SONIC_BLADE);
+        // An object's command wins the entry.
+        let mut o2 = Menu::new();
+        o2.build(&World { context: cmd::OPEN, ..w });
+        assert_eq!(o2.root.cmds[3], cmd::OPEN);
+    }
+
+    /// M9 stage 9c.1: Rave / Blast in the Attack row during the special (`0x14039ED70`): shown in
+    /// the tab when ungreyed, run by Triangle; confirm on it is the error sound (no Attack); a
+    /// refused confirm (a submenu opened) is reported for the attacking bit.
+    #[test]
+    fn sonic_blade_follow_ups_take_row_0() {
+        use crate::specials::cmd as sp;
+        let w = World { state: 0x20, follow: sp::RAVE, spells: all_spells(), ..world() };
+        let mut m = Menu::new();
+        m.show();
+        for _ in 0..16 {
+            m.step(&w, Pad::default());
+            m.tick(1.0);
+        }
+        assert_eq!((m.root.cmds[0], m.root.grey & 1), (sp::RAVE, 0));
+        assert_eq!(m.tab.state, 2);
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert!(!o.attack && o.sounds == vec![Sound::Error] && !o.confirm_refused, "X on Rave: the error sound only");
+        let o = m.step(&w, press(|p| p.triangle = true));
+        assert_eq!(o.special, Some(sp::RAVE));
+        // Greyed (outside the dash's window): no tab, no run.
+        let gw = World { follow_grey: true, ..w };
+        for _ in 0..16 {
+            m.step(&gw, Pad::default());
+            m.tick(1.0);
+        }
+        assert!(m.root.grey & 1 != 0 && m.tab.state == 0);
+        assert!(m.step(&gw, press(|p| p.triangle = true)).special.is_none());
+        // Confirm on Magic opens the list: KH1's commit returned 0 (the bit goes).
+        m.root.cursor = 1;
+        let o = m.step(&gw, press(|p| p.confirm = true));
+        assert!(m.open && o.confirm_refused);
+        assert_eq!(cmd::name(sp::BLAST), 322);
+    }
+
     #[test]
     fn scene_positions_are_kh1s() {
         let w = World { spells: all_spells(), context: cmd::TALK, ..world() };
@@ -1814,6 +1943,7 @@ mod tests {
         assert_eq!(fr.get(2), Some(&b"Magic\0"[..]), "missing ids come from us");
         assert_eq!(fr.get(19), Some(&b"Gravite\0"[..]));
         assert_eq!(fr.folded, vec!['é']);
+        assert_eq!(font_bytes("Todesstoß"), (b"Todesstoss\0".to_vec(), vec!['ß']));
         let xx = parse_words(j, "xx").unwrap();
         assert_eq!((xx.lang.as_str(), xx.get(19)), ("us", Some(&b"Gravity\0"[..])));
         assert!(parse_words(&j.replace("menu 1", "menu 9"), "us").is_err());

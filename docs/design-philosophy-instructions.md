@@ -354,6 +354,10 @@ At KH1 setting:
       Glide and Superglide unlock **where Re:CoM unlocks them**; **Dodge Roll equipped from the start**;
       **Combo Master at Re:CoM level 50**; KH1's Rod-path **max MP +1 at levels 30 and 66** added; the
       Abilities page rows use Re:CoM's **blue** box.
+    - **Later the same day:** **Guard and Dodge Roll are part of Sora's base movement kit from the
+      start, not abilities** (no AP, not on the Abilities page); High Jump / Glide / Superglide are
+      **equipped automatically when Re:CoM gives them** (still removable). Specials (9c): **Re:CoM's
+      sleight effects** until the KH1-effects work; KH1's blue scene tint **skipped for now**.
     - **Spell effects (owner, 2026-11-01):** "lets look at how KH1 handles these FX and bring them in
       here 1:1": KH1's own spell effects (same effect engine as Re:CoM's) are ported natively, behind
       **their own toggle** (KH1 or Re:CoM spell effects); **Re:CoM's spell sounds are kept**; built

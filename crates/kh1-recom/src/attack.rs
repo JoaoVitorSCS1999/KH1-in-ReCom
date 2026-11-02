@@ -143,7 +143,11 @@ pub fn recom_kind_of(data: &AttackData) -> u8 {
 pub fn kh1_row_bytes(recom: &[u8; 16], kh1_row: usize, m: &Moveset) -> Option<[u8; 16]> {
     let rw = m.row(kh1_row)?;
     let info = m.motions.info(rw.request as u16)?;
-    let data = m.attack(rw.attack)?;
+    row_bytes_from(recom, info, m.attack(rw.attack)?)
+}
+
+/// [`kh1_row_bytes`] for a motion and a record given.
+pub fn row_bytes_from(recom: &[u8; 16], info: &kh1_core::MotionInfo, data: &AttackData) -> Option<[u8; 16]> {
     let slot = data.hit_slot & 3;
     let hit = info.flags.iter().find(|w| w.kind == FlagKind::Hit(slot))?;
     let mut b = *recom;
@@ -200,6 +204,30 @@ pub fn kh1_table(recom_rows_1_7: &[[u8; 16]; 7], m: &Moveset, clip_row: &dyn Fn(
         }
     }
     t
+}
+
+/// M9 stage 9c.1: Sonic Blade's rows (`0x1B..=0x21`) into the table: their motions are the xl
+/// set's (`kh1_core::data::xl`, not Sora's own requests 0xC9 / 0xCA), their clip rows `xl_row(xl
+/// entry)` (the asset step's converted clips); the layout a copy of Re:CoM's swing 1 (dashes) or
+/// finisher (row 4) as the modifiers'. Re:CoM's attack id is written by the special's row start
+/// (`specials::recom`), not taken from the row. Without the clip the rows stay empty.
+pub fn add_special_rows(t: &mut [[u8; 16]], recom_rows_1_7: &[[u8; 16]; 7], m: &Moveset, xl_row: &dyn Fn(usize) -> Option<u32>) {
+    let infos = kh1_core::data::xl::motions();
+    for r in row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER {
+        let Some(rw) = m.row(r).filter(|_| r < t.len()) else { continue };
+        let Some(e) = kh1_core::data::xl::entry_of_kh1_request(rw.request) else { continue };
+        let Some(clip) = xl_row(e).filter(|c| *c <= 0xFF) else { continue };
+        let template = &recom_rows_1_7[if r == row::SONIC_BLADE_FINISHER { 3 } else { 0 }];
+        if let Some(mut b) = m.attack(rw.attack).and_then(|d| row_bytes_from(template, &infos[e], d)) {
+            b[0] = clip as u8;
+            t[r] = b;
+        }
+    }
+}
+
+/// Whether the table holds every Sonic Blade row (stage 9c.1).
+pub fn special_rows_ready(t: &[[u8; 16]]) -> bool {
+    (row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER).all(|r| t.get(r).is_some_and(|b| b[0] != 0))
 }
 
 /// The modifiers whose rows the table holds, as `abilities::ix` bits (the pickers only get those).

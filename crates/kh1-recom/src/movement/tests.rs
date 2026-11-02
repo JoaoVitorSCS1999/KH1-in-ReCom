@@ -92,6 +92,10 @@ struct FakeRecom {
     items: Vec<crate::items::ItemCommand>,
     item_ends: usize,
     item_missing: bool,
+    /// M9 stage 9c.1: the specials Re:CoM started, their rows and its sleight actions ended.
+    specials: Vec<crate::specials::SpecialStart>,
+    special_rows: Vec<crate::specials::RowStart>,
+    special_ends: usize,
 }
 
 impl FakeRecom {
@@ -105,11 +109,12 @@ impl FakeRecom {
             step: 1.0,
             act: Action { id: action::STAND, sub: 0, phase: 0 },
             clip: None,
-            ext: Extension::plan(|_| true),
+            ext: Extension::plan(|_| true).with_xl(|_| true),
             motions: {
                 let mut m = Moveset::kh1_defaults().motions;
                 crate::magic::add_motions(&mut m);
                 crate::items::add_motions(&mut m);
+                crate::specials::add_motions(&mut m);
                 m
             },
             no_flinch: false,
@@ -135,6 +140,9 @@ impl FakeRecom {
             items: Vec::new(),
             item_ends: 0,
             item_missing: false,
+            specials: Vec::new(),
+            special_rows: Vec::new(),
+            special_ends: 0,
         }
     }
 
@@ -156,7 +164,7 @@ impl FakeRecom {
     fn root_step(&mut self, local: Vec3) {
         let anchor = self.pos + self.model_offset;
         let root = anchor + local.rotate_yaw(self.facing);
-        let out = self.root_delay.position(1, self.tick, anchor, root, 50.0);
+        let out = self.root_delay.position(1, self.tick, anchor, root, ROOT_DELAY_MAX_GAP / crate::units::METRES_PER_UNIT);
         self.pos += out - (self.pos + self.model_offset);
     }
 
@@ -313,6 +321,21 @@ impl Host for FakeRecom {
     fn battle_won(&mut self) -> bool {
         self.win_pending
     }
+    fn start_special(&mut self, s: &crate::specials::SpecialStart) -> bool {
+        if !self.mp_ok {
+            return false;
+        }
+        self.act = Action { id: crate::specials::RECOM_ACTION, sub: crate::specials::RECOM_SUB, phase: crate::specials::RECOM_PHASE };
+        self.specials.push(*s);
+        true
+    }
+    fn special_row(&mut self, r: &crate::specials::RowStart) {
+        self.special_rows.push(*r);
+    }
+    fn end_special(&mut self, _airborne: bool) -> bool {
+        self.special_ends += 1;
+        self.end_action()
+    }
     fn spring_jump(&mut self) -> bool {
         if !spring::launches(spring::ABILITY, || if self.on_spring { spring::ON_SPRING } else { 0 }) {
             return false;
@@ -343,6 +366,8 @@ struct Pair {
     o_out: Option<kh1_core::Output>,
     /// A magic command for the next frame (M7 stage 7.4; the oracle has none).
     magic: Option<crate::magic::MagicCommand>,
+    /// A special command for the next frame (M9 stage 9c.1; the oracle has none).
+    special: Option<u8>,
 }
 
 #[derive(Debug)]
@@ -378,6 +403,7 @@ impl Pair {
             first: true,
             o_out: None,
             magic: None,
+            special: None,
         }
     }
 
@@ -395,7 +421,7 @@ impl Pair {
         self.prev = pad;
         let o = self.oracle.step(&Input { move_dir: dir, tilt, jump, square, attack, ..Default::default() }, &[], &mut self.world, step);
         self.o_out = Some(o.clone());
-        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: self.magic.take(), item: None }, self.first);
+        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: self.magic.take(), item: None, special: self.special.take() }, self.first);
         self.first = false;
         self.recom.after_exe();
         let airborne = !self.recom.contact;
@@ -830,7 +856,7 @@ fn step_with_target(p: &mut Pair, pad: Pad) -> FrameOut {
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
     let target = kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, 0.0, 150.0), radius: 30.0 };
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: Vec3::ZERO, tilt: 0.0, jump, square, lock_target: None, attack, target: Some(target), locked: false, magic: None, item: None }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: Vec3::ZERO, tilt: 0.0, jump, square, lock_target: None, attack, target: Some(target), locked: false, magic: None, item: None, special: None }, p.first);
     p.first = false;
     p.recom.after_exe();
     out
@@ -912,7 +938,7 @@ fn step_cast(p: &mut Pair, pad: Pad, magic: Option<crate::magic::MagicCommand>) 
     let square = Button::from_held(p.prev.square, pad.square);
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic, item: None }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic, item: None, special: None }, p.first);
     p.first = false;
     p.recom.after_exe();
     out
@@ -1550,7 +1576,7 @@ fn step_item(p: &mut Pair, pad: Pad, item: Option<crate::items::ItemCommand>) ->
     let square = Button::from_held(p.prev.square, pad.square);
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: None, item }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: None, item, special: None }, p.first);
     p.first = false;
     p.recom.after_exe();
     out
@@ -1634,4 +1660,139 @@ fn a_hit_during_the_use_ends_the_motion_only() {
     p.ours.frame(&mut p.recom, &FrameInput::default(), true);
     assert!(p.ours.item.is_none());
     assert_eq!(p.recom.item_ends, 0, "Re:CoM's hit action ended it, not us");
+}
+
+// ---- M9 stage 9c.1: Sonic Blade on Re:CoM's sleight action ----
+
+fn step_special(p: &mut Pair, c: Option<u8>) -> FrameOut {
+    p.special = c;
+    p.step(Pad::default()).out
+}
+
+/// KH1's flow (`0x14039EAD0`, `0x14039ECA0`, `0x14039ED70`): the press starts the wind-up on
+/// Re:CoM's sleight action, invincible; 30 frames later dash 1 (row 0x1B) without a blend; Rave
+/// (offered from the dash's frame 10, the combo window) chains dashes 2..6 with blend 8, Blast the
+/// finisher (row 0x21); its end returns Sora to state 0 and Re:CoM's action to the idle.
+#[test]
+fn sonic_blade_runs_kh1s_rows_on_recoms_sleight_action() {
+    use crate::specials::{cmd, SpecialEvent, RECOM_ACTION, STATE};
+    use kh1_core::data::xl;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..3 {
+        step_special(&mut p, None);
+    }
+    let out = step_special(&mut p, Some(cmd::SONIC_BLADE));
+    assert_eq!(out.specials, vec![SpecialEvent::Started { index: 0 }]);
+    assert_eq!(p.recom.specials.len(), 1);
+    assert_eq!((p.recom.act.id, p.ours.state), (RECOM_ACTION, STATE));
+    assert_eq!(p.ours.rec.head(), xl::request(xl::WINDUP));
+    assert!(p.recom.untouchable, "no damage, no reaction for the whole special");
+    assert_eq!(p.ours.follow_up(), Some((cmd::RAVE, true)), "Rave in the Attack row, greyed in the wind-up");
+    // The wind-up's 30 frames, then dash 1 (row 0x1B, counter 1) with blend 0.
+    let mut k = 0;
+    while p.recom.special_rows.is_empty() {
+        step_special(&mut p, None);
+        k += 1;
+        assert!(k < 40);
+    }
+    // The wind-up's 30 frames end in the update of the press + 30 (its clock does not move on its
+    // first update); KH1's end callback starts dash 1's row then and its motion on the next update.
+    assert_eq!(k, 31, "dash 1 starts as the wind-up ends");
+    assert_eq!((p.recom.special_rows[0].kh1_row, p.recom.special_rows[0].counter, p.recom.special_rows[0].recom_id), (0x1B, 1, crate::specials::recom::ID_DASH));
+    let pos0 = p.recom.pos;
+    // A Rave before the window (dash frame 10) is refused; the window opens at 10.
+    let out = step_special(&mut p, Some(cmd::RAVE));
+    assert!(matches!(out.specials[..], [SpecialEvent::Refused { command: cmd::RAVE, .. }]), "{:?}", out.specials);
+    let mut opened = None;
+    for f in 0..40 {
+        step_special(&mut p, None);
+        if p.ours.follow_up() == Some((cmd::RAVE, false)) {
+            opened = Some(f);
+            break;
+        }
+    }
+    assert!(matches!(opened, Some(7..=10)), "{opened:?}");
+    // Rave: dash 2 (row 0x1C) at once, blend 8; up to dash 6, then Blast: the finisher.
+    for n in 2..=7u8 {
+        while p.ours.follow_up().is_none_or(|f| f.1) {
+            step_special(&mut p, None);
+        }
+        let c = if n == 7 { cmd::BLAST } else { cmd::RAVE };
+        assert_eq!(p.ours.follow_up(), Some((c, false)), "dash {n}");
+        let out = step_special(&mut p, Some(c));
+        assert!(matches!(out.specials[..], [SpecialEvent::Row { counter, .. }] if counter == n), "{:?}", out.specials);
+        assert_eq!(p.recom.special_rows.last().map(|r| r.kh1_row), Some(0x1A + n as usize));
+    }
+    assert_eq!(p.recom.special_rows.last().map(|r| r.recom_id), Some(crate::specials::recom::ID_FINISHER));
+    assert!((p.recom.pos - pos0).flat().length() > 500.0, "root travel moves Sora");
+    // The finisher (82 frames) ends the special: state 0, Re:CoM's action ended once, no flags.
+    let mut k = 0;
+    while p.ours.special.is_some() {
+        step_special(&mut p, None);
+        k += 1;
+        assert!(k < 100);
+    }
+    assert_eq!((p.recom.special_ends, p.ours.state), (1, state::GROUND));
+    assert_ne!(p.recom.act.id, RECOM_ACTION);
+    step_special(&mut p, None);
+    assert!(!p.recom.untouchable);
+}
+
+/// Without a Rave dash 1 ends the special after its 54 frames, its root travel KH1's 562.05; in the
+/// air (a walk-off) Sora falls out (`0x14039EBA0`).
+#[test]
+fn sonic_blade_ends_after_one_dash_or_in_the_air() {
+    use crate::specials::cmd;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_special(&mut p, None);
+    step_special(&mut p, Some(cmd::SONIC_BLADE));
+    let start = p.recom.pos;
+    let mut k = 0;
+    while p.ours.special.is_some() {
+        step_special(&mut p, None);
+        k += 1;
+        assert!(k < 120);
+    }
+    // Wind-up 30 + dash 54 (± the update the end is seen in).
+    assert!((83..=86).contains(&k), "{k}");
+    assert_eq!(p.recom.special_rows.len(), 1);
+    for _ in 0..3 {
+        step_special(&mut p, None);
+    }
+    let travel = (p.recom.pos - start).flat().length();
+    assert!((travel - 562.05).abs() < 0.5, "{travel}");
+    // Off a ledge mid-dash: the special ends, KH1's fall.
+    let mut p = Pair::new(Abilities::default(), Floor { edge_z: 150.0, low: 400.0 });
+    step_special(&mut p, None);
+    step_special(&mut p, Some(cmd::SONIC_BLADE));
+    for _ in 0..60 {
+        step_special(&mut p, None);
+    }
+    assert!(p.ours.special.is_none());
+    assert_eq!(p.ours.state, state::AIR);
+}
+
+/// Refusals: in the air (state 2), with no MP (Re:CoM's start refuses), and a second press.
+#[test]
+fn sonic_blade_refusals() {
+    use crate::specials::{cmd, SpecialEvent};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_special(&mut p, None);
+    p.recom.mp_ok = false;
+    let out = step_special(&mut p, Some(cmd::SONIC_BLADE));
+    assert!(matches!(out.specials[..], [SpecialEvent::Refused { .. }]));
+    assert!(p.ours.special.is_none());
+    p.recom.mp_ok = true;
+    step_special(&mut p, Some(cmd::SONIC_BLADE));
+    let out = step_special(&mut p, Some(cmd::SONIC_BLADE));
+    assert!(matches!(out.specials[..], [SpecialEvent::Refused { .. }]), "a press in the wind-up: refused");
+    assert_eq!(p.recom.specials.len(), 1);
+    // Magic and items during the special: KH1's dispatch drops them (state 0x20).
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_special(&mut p, None);
+    for _ in 0..8 {
+        p.step(Pad { jump: true, ..Default::default() });
+    }
+    let out = step_special(&mut p, Some(cmd::SONIC_BLADE));
+    assert!(matches!(out.specials[..], [SpecialEvent::Refused { .. }]), "in the air");
 }

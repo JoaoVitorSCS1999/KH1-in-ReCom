@@ -59,7 +59,8 @@ impl Recorder {
         // the deck tutorial flags (`deck`), recording only.
         // M7: KH1's MP (MP / max / charge and this frame's gains, payments and points), and the
         // command menu (list, cursor, greys, the context tab, this frame's choices).
-        let m6 = format!("{}; {}; {}; {}; {}; {}", super::battle::trace_token(), super::deck::trace_token(), super::mp::trace_token(), super::command_menu::trace_token(), super::magic::trace_token(), super::items::trace_token());
+        // M9 9c.1: the running special (`sp <index> <phase> n<dashes> f<age> [bit]`) and its events.
+        let m6 = format!("{}; {}; {}; {}; {}; {}; {}", super::battle::trace_token(), super::deck::trace_token(), super::mp::trace_token(), super::command_menu::trace_token(), super::magic::trace_token(), super::items::trace_token(), super::specials::trace_token(g.as_ref().and_then(|g| g.as_ref()).filter(|s| s.player == pl).and_then(|s| s.sora.special.as_ref())));
         row.events = if row.events.is_empty() { m6 } else { format!("{}; {m6}", row.events) };
         row.frame = self.rows;
         if row.write_csv(&mut self.out).is_ok() {
@@ -146,6 +147,7 @@ fn toggle() {
                         super::command_menu::clear_events();
                         super::magic::clear_events();
                         super::items::clear_events();
+                        super::specials::clear_events();
                         *g = Some(Recorder { out, path, rows: 0, pending: None, player: 0 });
                         RECORDING.store(true, Ordering::Relaxed);
                     }

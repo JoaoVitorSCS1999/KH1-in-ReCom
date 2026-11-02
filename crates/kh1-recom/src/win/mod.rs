@@ -23,6 +23,7 @@ mod movement;
 mod mp;
 mod mp_bar;
 mod shop;
+mod specials;
 mod stats;
 mod sys;
 mod trace;
@@ -137,11 +138,20 @@ fn kh1_clips(dirs: &[PathBuf]) -> (crate::rows::Extension, Vec<(u32, String)>) {
         log("movement: no kh1-motions.json found (asset step not run?): Guard has no clip");
         return (rows::Extension::default(), Vec::new());
     };
-    let m = match std::fs::read_to_string(&manifest).map_err(|e| e.to_string()).and_then(|t| motions::parse_manifest(&t)) {
+    let text = std::fs::read_to_string(&manifest).map_err(|e| e.to_string());
+    let m = match text.clone().and_then(|t| motions::parse_manifest(&t)) {
         Ok(m) => m,
         Err(e) => {
             log(&format!("movement: {}: {e}", manifest.display()));
             return (rows::Extension::default(), Vec::new());
+        }
+    };
+    // Stage 9c.1: KH1's specials' motions (`xl_limit.dat`), keyed by xl entry.
+    let xl = match text.and_then(|t| motions::parse_xl(&t)) {
+        Ok(x) => x,
+        Err(e) => {
+            log(&format!("specials: {}: {e}; no special clips", manifest.display()));
+            Vec::new()
         }
     };
     let ann = bases.iter().map(|b| b.join("PLAYER").join("0001").join("PL0001.ANN")).find(|p| p.is_file()).and_then(|p| {
@@ -163,10 +173,12 @@ fn kh1_clips(dirs: &[PathBuf]) -> (crate::rows::Extension, Vec<(u32, String)>) {
     // Entries Re:CoM already has (M9 9a: the modifiers it baked) play its own action row of the
     // clip; the row's name is read from Sora's action table in the running exe.
     let table = recom_row_names();
-    let ext = rows::Extension::plan(|e| motions::clip_for_entry(&m, &ann, e).is_ok()).with_recom(|e| motions::recom_clip_for_entry(&m, e).and_then(|c| motions::row_of_clip(&table, &c.name)));
-    let names = rows::appended_rows(&ext, |e| motions::clip_for_entry(&m, &ann, e).ok().map(|c| c.name.clone()));
+    let ext = rows::Extension::plan(|e| motions::clip_for_entry(&m, &ann, e).is_ok())
+        .with_recom(|e| motions::recom_clip_for_entry(&m, e).and_then(|c| motions::row_of_clip(&table, &c.name)))
+        .with_xl(|e| motions::clip_for_entry(&xl, &ann, e as u32).is_ok());
+    let names = rows::appended_rows(&ext, |e| motions::clip_for_entry(&m, &ann, e).ok().map(|c| c.name.clone()), |e| motions::clip_for_entry(&xl, &ann, e as u32).ok().map(|c| c.name.clone()));
     let recom: Vec<(u16, u32)> = rows::KH1_ONLY.iter().zip(ext.recom.iter()).filter_map(|(&(req, _), r)| Some((req, (*r)?))).collect();
-    log(&format!("movement: manifest {}; KH1-only clips {:?}; Re:CoM's rows for KH1 requests {:x?}", manifest.display(), names, recom));
+    log(&format!("movement: manifest {}; KH1-only clips {:?}; Re:CoM's rows for KH1 requests {:x?}; xl_limit clips (specials) {:?}", manifest.display(), names, recom, ext.xl));
     (ext, names)
 }
 
@@ -312,6 +324,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         }
         install_magic(base);
         install_items(base, s);
+        install_specials(base);
         install_drops(base);
         install_unlocks(base);
     } else {
@@ -368,6 +381,39 @@ fn install_items(base: usize, s: &Settings) {
         install_shop(base);
     } else {
         log("items: exeItem not hooked; no KH1 items (the Field case stays patched but is not reached: Re:CoM never uses items in the field)");
+    }
+}
+
+/// M9 stage 9c.1 (`specials`): KH1's Sonic Blade on Re:CoM's sleight action `0x16`: the Field
+/// exe's case for it, then the exeStockSkill hook. Needs the Attack's hooks (the request-bits
+/// wrapper, the pair dispatch and the enemy-hit wrapper carry its command, spheres and damage),
+/// the command menu (its context tab offers it) and the asset step's xl_limit clips.
+fn install_specials(base: usize) {
+    if !command_menu::installed() {
+        log("specials: no KH1 command menu; no KH1 specials");
+        return;
+    }
+    // SAFETY: the vtable slot is a read of the mapped image.
+    let slot_ok = unsafe {
+        let p = &crate::sites::SPECIAL_PTRS[0];
+        movement::rd::<usize>(base + p.rva as usize) == base + p.target as usize
+    };
+    if !slot_ok {
+        log("specials: CPlayerSora's exeStockSkill slot is not 0x140218950; no KH1 specials");
+        return;
+    }
+    // SAFETY: reads of the mapped exe; data patches with checked old values.
+    if !unsafe { specials::install(base) } {
+        return;
+    }
+    let site = |name: &str| crate::sites::SPECIAL_HOOKS.iter().find(|h| h.name == name).expect("site");
+    let hooks = [hook::Hook { site: site("exeStockSkill (0x140218950)"), ours: specials::exe_stock as *const () as usize, original: &specials::ORIG_EXE_STOCK }];
+    // SAFETY: the target's bytes are checked again inside, before anything is written.
+    if unsafe { hook::install_all(base, &hooks) } {
+        specials::mark_installed();
+        log(&specials::start_line());
+    } else {
+        log("specials: exeStockSkill not hooked; no KH1 specials (the Field case stays patched but is not reached: Re:CoM never plays a sleight in the field, and the menu offers no special)");
     }
 }
 

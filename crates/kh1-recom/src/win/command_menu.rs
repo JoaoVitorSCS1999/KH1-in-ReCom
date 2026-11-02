@@ -279,6 +279,11 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>, s: &crate::settings
     true
 }
 
+/// The menu is in (KH1's specials are offered only in it).
+pub fn installed() -> bool {
+    INSTALLED.load(Ordering::Acquire)
+}
+
 /// KH1's MP as just read or written (`super::mp`): kept for the menu's greying, no lock.
 pub fn mp_seen(view: (i32, i32, u16)) {
     let packed = 1u64 << 63 | (view.0 as u8 as u64) << 24 | (view.1 as u8 as u64) << 16 | view.2 as u64;
@@ -984,9 +989,15 @@ unsafe fn world(pl: usize) -> World {
         (w.slots, w.slot_count) = super::items::slots();
     }
     let mut in_recoil = false;
+    let mut special_free = false;
     if let Ok(g) = mv::SORA.try_lock() {
         if let Some(s) = g.as_ref().filter(|s| s.player == pl) {
             w.state = s.sora.state;
+            // M9 stage 9c.1: a running special's follow-up in the Attack row (`0x14039ED70`).
+            if let Some((c, grey)) = s.sora.follow_up() {
+                (w.follow, w.follow_grey) = (c, grey);
+            }
+            special_free = s.sora.special.is_none();
             in_recoil = s.sora.abilities.counterattack && s.sora.clashed && s.sora.rec.head() == crate::rows::RECOIL;
             // KH1's commit gate for spells (`0x140293480`), on the KH1 frame as last left, and
             // only while Re:CoM's action is one KH1's frame runs (M7 stage 7.4). One update
@@ -1006,7 +1017,30 @@ unsafe fn world(pl: usize) -> World {
         }
     }
     w.context = context(pl);
+    // M9 stage 9c.1: KH1's special offer (`0x14028D0F0`) when no object took the context entry.
+    if w.context == 0 && special_free && super::specials::installed() {
+        (w.special, w.special_grey) = special_offer(pl).unwrap_or((0, false));
+    }
     w
+}
+
+/// `0x14028D0F0` on Sora's equipped specials and Re:CoM's attack target, when it is a live enemy
+/// (KH1 picks its target among enemies; Assumption: Re:CoM's lock target stands for KH1's).
+unsafe fn special_offer(pl: usize) -> Option<(u8, bool)> {
+    use crate::abilities::ix;
+    let e = super::abilities::equipped_live()?;
+    let mut equipped = [false; 5];
+    equipped[crate::specials::SONIC_BLADE] = e & 1 << ix::SONIC_BLADE != 0;
+    if !equipped.iter().any(|&b| b) {
+        return None;
+    }
+    let t = super::attack::attack_target(pl).filter(|t| super::magic::is_alive_enemy(t.owner))?;
+    let b: usize = rd(pl + p::BODY);
+    if b == 0 {
+        return None;
+    }
+    let sora = to_kh1(rd_vec(b + body::POS));
+    crate::specials::offer(&equipped, Some(crate::specials::OfferTarget::new(sora, &t)), &mut |c| super::mp::can_pay(c))
 }
 
 /// Re:CoM's request bits the menu lets through this frame: (Attack, jump, Triangle, Square).
@@ -1101,6 +1135,13 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
     // The item chosen (M8 stage 8a.1): KH1's item command for this frame's KH1 frame.
     if let Some(c) = out.item {
         super::items::issue(c.item, c.slot);
+    }
+    // M9 stage 9c.1: a special (the context tab's Triangle, or Rave / Blast in the Attack row).
+    if let Some(c) = out.special {
+        super::specials::issue(c);
+    }
+    if out.confirm_refused {
+        super::specials::confirm_refused(pl);
     }
     Some(Keep { attack: out.attack, jump: out.jump, triangle: out.triangle, square: out.square })
 }

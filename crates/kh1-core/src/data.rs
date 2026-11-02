@@ -158,8 +158,94 @@ pub mod row {
     pub const AIR_SWING_1: usize = 18;
     pub const GUARD: usize = 0x3D;
     pub const COUNTERATTACK: usize = 0x3E;
+    /// Sonic Blade (the special `0x14039EAD0`): its six dashes `0x1B + n` (n = 0..5, played by
+    /// `0x14039ECA0` with KH1's dash counter) and its finisher. The picker never names them.
+    pub const SONIC_BLADE_DASH: usize = 0x1B;
+    pub const SONIC_BLADE_FINISHER: usize = 0x21;
     /// Rows the ground picker walks (0..=0x41).
     pub const GROUND_COUNT: usize = 0x42;
+}
+
+/// KH1's specials' motion set (`xl_limit.dat`, loaded by `0x14028D620` from the KH1 archives:
+/// u32 count 7, then offsets: `+4` a motion set in Sora's format (36 motions on Sora's 293-bone
+/// skeleton, 60 fps; `0x14029E850` swaps it in for the special, `0x14029F780` back), `+8..+0x18`
+/// the five specials' effect packages, `+0x1C` their sound bank). Its requests 0xC8.. overlap
+/// Sora's own (0xC8 is swing 1 in Sora's set), so the mod keys these motions by xl entry:
+/// [`request`] gives each a request id of its own in kh1-core's motion set. Checked (files: the
+/// owner's `xl_limit.dat`, request map 0xC8 → 0, 0xC9 → 1 (root), 0xCA → 2 (root); decomp).
+pub mod xl {
+    use crate::motion::{FlagKind, MotionInfo};
+
+    /// Sonic Blade's wind-up (request 0xC8), dash (0xC9, rows 0x1B..=0x20) and finisher (0xCA,
+    /// row 0x21).
+    pub const WINDUP: usize = 0;
+    pub const DASH: usize = 1;
+    pub const FINISHER: usize = 2;
+    /// The entries built so far.
+    pub const ENTRIES: [usize; 3] = [WINDUP, DASH, FINISHER];
+    /// KH1's own requests of the entries in the xl set (`0xC8 + entry`).
+    pub const KH1_REQUEST_BASE: u16 = 0xC8;
+    /// Our request ids for them in kh1-core's motion set (none of Sora's own reach 0x300).
+    pub const REQUEST_BASE: u16 = 0x300;
+
+    pub const fn request(entry: usize) -> u16 {
+        REQUEST_BASE + entry as u16
+    }
+
+    /// The xl entry of one of our requests.
+    pub fn entry_of(request: u16) -> Option<usize> {
+        let e = request.checked_sub(REQUEST_BASE)? as usize;
+        ENTRIES.contains(&e).then_some(e)
+    }
+
+    /// The xl entry a special row's KH1 request plays (the xl set's map: 0xC8 → 0, 0xC9 → 1,
+    /// 0xCA → 2).
+    pub fn entry_of_kh1_request(r: i16) -> Option<usize> {
+        let e = usize::try_from(r).ok()?.checked_sub(KH1_REQUEST_BASE as usize)?;
+        ENTRIES.contains(&e).then_some(e)
+    }
+
+    /// The three motions: lengths, flag tracks (hit slot 0, combo window: KH1's follow-up window,
+    /// `0x14039ED70` reads `+0x1CC & 0x400000`), root travel (forward, KH1 units). Checked (files:
+    /// `kh1-data`'s `xl_motions_match_the_players_file`, every integer frame).
+    pub fn motions() -> [MotionInfo; 3] {
+        let windup = MotionInfo::new(30.0);
+        let dash = MotionInfo::new(54.0).with_flag(FlagKind::Hit(0), 4.0, 22.0).with_flag(FlagKind::ComboWindow, 10.0, 40.0).with_forward_keys(&[
+            (0.0, 0.0),
+            (2.0, 0.0),
+            (4.0, 122.07),
+            (6.0, 214.66),
+            (10.0, 356.97),
+            (14.0, 467.44),
+            (18.0, 556.62),
+            (22.0, 584.74),
+            (30.0, 598.40),
+            (38.0, 588.27),
+            (44.0, 562.05),
+            (54.0, 562.05),
+        ]);
+        let finisher = MotionInfo::new(82.0).with_flag(FlagKind::Hit(0), 16.0, 34.0).with_forward_keys(&[
+            (0.0, 0.0),
+            (14.0, 0.0),
+            (16.0, 122.07),
+            (18.0, 214.66),
+            (22.0, 375.07),
+            (24.0, 469.54),
+            (26.0, 555.38),
+            (28.0, 615.61),
+            (30.0, 672.39),
+            (32.0, 702.45),
+            (34.0, 725.60),
+            (38.0, 746.91),
+            (44.0, 756.73),
+            (54.0, 761.56),
+            (62.0, 760.56),
+            (72.0, 757.15),
+            (78.0, 734.41),
+            (82.0, 734.41),
+        ]);
+        [windup, dash, finisher]
+    }
 }
 
 /// Everything the controller needs about Sora's moves.
@@ -271,6 +357,13 @@ impl Moveset {
         rows[21] = ActionRow::new(204, 0x4B78, 8.0, [0, 5, 6], 4);
         rows[0x3D] = ActionRow::new(212, 0x4DA8, 0.0, [0, 5, 6], 19);
         rows[0x3E] = ActionRow::new(213, 0x4E18, 0.0, [3, 5, 6], 5);
+        // Sonic Blade (stage 9c.1): six dashes on the xl set's request 0xC9 (the first without a
+        // voice), the finisher on 0xCA; no trail, no weapon effect. Checked (files).
+        let special = |request: i16, attack: u32, sounds: [u8; 3], voice: i8| ActionRow { request, trail: -1, weapon_effect: -1, attack, hop: 0.0, sounds, voice };
+        for (n, r) in (row::SONIC_BLADE_DASH..row::SONIC_BLADE_FINISHER).enumerate() {
+            rows[r] = special(0xC9, 0x5C18, [2, 5, 6], if n == 0 { -1 } else { 4 });
+        }
+        rows[row::SONIC_BLADE_FINISHER] = special(0xCA, 0x5C88, [18, 5, 18], 6);
 
         let rec = |kind: u8, power: i32, crit: i32, crit_bonus: i32, mp: i32, clash: u32, frac_b: f32, radius: f32| AttackData {
             stat_source: 0,
@@ -308,6 +401,13 @@ impl Moveset {
         attacks.insert(0x4EF8, AttackData { element: 10, bone: 8, ..rec(3, 4, 0, 0, 3, 0x10006, 1.0, 250.0) });
         attacks.insert(0x4F68, AttackData { element: 8, ..rec(8, 40, 200, 0, 6, 0, 0.0, 20.0) });
         attacks.insert(0x4FD8, AttackData { stat_source: 2, element: 8, ..rec(3, 250, 200, 0, 6, 0, -0.2, 10.0) });
+        // Sonic Blade's records (stage 9c.1; Checked (files)): the stun element 10 (Stun Impact's,
+        // the enemy's resistance 10), flinch, crit 200, no MP charge, a 60 sphere (+ the weapon's)
+        // at blade fraction −0.2, swept (clash type 6): power 6 a dash, 10 the finisher.
+        // (The file holds A as −0.19999999 and B as −0.2.)
+        let sonic = |power: i32| AttackData { element: 10, power_party: power, power, crit: 200, mp_charge: 0, clash: 0x10006, frac_a: -0.199_999_99, frac_b: -0.2, radius: 60.0, ..rec(3, 0, 0, 0, 0, 0, 0.0, 0.0) };
+        attacks.insert(0x5C18, sonic(6));
+        attacks.insert(0x5C88, sonic(10));
         Moveset { motions: m, rows, attacks }
     }
 }

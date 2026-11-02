@@ -45,8 +45,8 @@ pub const LANGUAGES: &[(&str, &str)] = &[("us", "US_"), ("uk", "UK_"), ("fr", "F
 /// the save point's), 294 Open (0x37), 305 the blank command (0x42), 313 Jump On (0x45), 343
 /// Counter (0x63, the Counterattack); M8 stage 8a.1: 31..34, 36..38 the battle items' commands
 /// (`item + 0x1E`: Potion, Hi-Potion, Ether, Elixir, Mega-Potion, Mega-Ether, Megalixir; 35 is an
-/// empty row).
-pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 293, 294, 305, 313, 343];
+/// empty row); M9 stage 9c.1: 319 Sonic Blade (0x4B), 321 Rave (0x4D), 322 Blast (0x4E).
+pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 293, 294, 305, 313, 319, 321, 322, 343];
 
 /// Our groups after the MP bar's (`mp_bar::group::COUNT`): the plate, the highlighted plate.
 pub mod group {
@@ -264,6 +264,9 @@ pub fn kh1_char(c: u8) -> Option<char> {
         0xCF => 'Ä',
         0xD2 => 'É',
         0xDD => 'Ö',
+        // M9 stage 9c.1: German "Sonicsto?" / "Todessto?" (Sonic Blade 319, Blast 322). Checked
+        // (files: the owner's GR_Word.bin; the only reading of both words).
+        0xE2 => 'ß',
         0xE4 => 'á',
         0xE8 => 'è',
         0xE9 => 'é',
@@ -398,10 +401,12 @@ mod tests {
             if *lang == "us" || *lang == "uk" {
                 assert_eq!([get(1), get(2), get(3), get(4), get(7), get(9), get(27), get(294), get(343)], ["Attack", "Magic", "Items", "Talk", "Fire", "Firaga", "Aeroga", "Open", "Counter"]);
                 assert_eq!([get(5), get(293)], ["Examine", "Save"]);
+                assert_eq!([get(319), get(321), get(322)], ["Sonic", "Rave", "Blast"]);
             }
             if *lang == "fr" {
                 assert_eq!([get(1), get(8), get(19)], ["Attaquer", "Brasier +", "Gravité"]);
                 assert_eq!([get(5), get(293)], ["Examiner", "Sauvegarde"]);
+                assert_eq!([get(319), get(321), get(322)], ["Aquilon", "Combo", "Bourrasque"]);
             }
             if *lang == "us" {
                 assert_eq!([get(31), get(32), get(36), get(38)], ["Potion", "Hi-Potion", "Mega-Potion", "Megalixir"]);

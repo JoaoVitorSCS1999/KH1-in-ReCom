@@ -210,6 +210,30 @@ pub(super) unsafe fn guard_clink(pl: usize) {
     func::<EffectFn>(EFFECT_AT)(pl, name, GUARD_SPARK, &point, 0, 0.0);
 }
 
+/// M9 stage 9c.1: our attack table's row `r` (a special's), for `player+0x3C8`.
+pub(super) fn row_ptr(r: usize) -> Option<usize> {
+    TABLE.get().and_then(|t| t.get(r)).filter(|b| b[0] != 0).map(|b| b.as_ptr() as usize)
+}
+
+/// M9 stage 9c.1: every Sonic Blade row is in the table (their clips were converted).
+pub(super) fn special_rows_ready() -> bool {
+    TABLE.get().is_some_and(|t| atk::special_rows_ready(t))
+}
+
+/// M9 stage 9c.1: `player+0x3C8` points at one of our special rows.
+pub(super) unsafe fn special_row_live(pl: usize) -> bool {
+    kh1_row_of(pl).is_some_and(|r| (kh1_core::data::row::SONIC_BLADE_DASH..=kh1_core::data::row::SONIC_BLADE_FINISHER).contains(&r))
+}
+
+/// A new KH1 attack starts (a swing's row, M9 9c.1 a special's): the KH1 hits of attacks two
+/// starts back are forgotten (as `apply_row`).
+pub(super) fn new_attack() {
+    let gen = SWING_GEN.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+    if let Ok(mut g) = KH1_HITS.lock() {
+        g.retain(|&(_, at)| gen.wrapping_sub(at) <= 1);
+    }
+}
+
 /// Whether our attack table holds this KH1 row.
 pub(super) fn row_ready(r: usize) -> bool {
     TABLE.get().is_some_and(|t| t.get(r).is_some_and(|b| b[0] != 0))
@@ -311,10 +335,7 @@ unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     // KH1 has no post-swing lockout, and a swing starts from standing (root travel only).
     wr(pl + field::LOCKOUT, 0i32);
     wr(pl + field::SPEED_4E0, 0f32);
-    let gen = SWING_GEN.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
-    if let Ok(mut g) = KH1_HITS.lock() {
-        g.retain(|&(_, at)| gen.wrapping_sub(at) <= 1);
-    }
+    new_attack();
     true
 }
 
@@ -341,6 +362,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     // 8a.1: one atomic load unless a use is going).
     super::items::new_frame();
     super::items::task_frame(pl);
+    // A special command no KH1 frame took last frame is gone (M9 stage 9c.1).
+    super::specials::new_frame();
     // Re:CoM's battle end, logged (two loads unless its win is pending; `crate::battle::end`).
     super::battle::end_watch(pl);
     let battle: i32 = rd(pl + p::BATTLE);
@@ -863,7 +886,10 @@ pub unsafe extern "win64" fn root_step(ctrl: usize, out: *mut [f32; 4], yaw: *mu
     }
     let a: u32 = rd(pl + p::ACTION);
     let cast = a == crate::magic::RECOM_MAGIC_ACTION && super::magic::kh1_cast(pl);
-    if a != crate::movement::action::AVOID && a != crate::movement::action::ATTACK && !cast {
+    // M9 stage 9c.1: a KH1 special's rows travel by their root motion, one update late as the
+    // swings (KH1 applies it in the next frame's physics).
+    let special = a == crate::specials::RECOM_ACTION && super::specials::kh1_special(pl);
+    if a != crate::movement::action::AVOID && a != crate::movement::action::ATTACK && !cast && !special {
         super::magic::release_root_off();
         return;
     }
@@ -901,7 +927,11 @@ pub unsafe fn build_table(b: usize) -> bool {
         return false;
     }
     let ext = mv::EXT.get().copied().unwrap_or_default();
-    let t: &'static [[u8; 16]] = Box::leak(atk::kh1_table(&live, moveset(), &|req| ext.get(req)).into_boxed_slice());
+    let mut rows = atk::kh1_table(&live, moveset(), &|req| ext.get(req));
+    // M9 stage 9c.1: Sonic Blade's rows on the xl clips' action rows.
+    atk::add_special_rows(&mut rows, &live, moveset(), &|e| ext.xl_row(e));
+    log(&format!("attack: Sonic Blade rows 0x1B..=0x21 {}", if atk::special_rows_ready(&rows) { "ready" } else { "missing (no xl_limit clips in the motion pack: re-run kh1-recom-build)" }));
+    let t: &'static [[u8; 16]] = Box::leak(rows.into_boxed_slice());
     // M9 9a: the pickers only get the modifiers whose rows Re:CoM can play.
     let ready = atk::modifier_rows_ready(t);
     super::abilities::set_rows_ready(ready);

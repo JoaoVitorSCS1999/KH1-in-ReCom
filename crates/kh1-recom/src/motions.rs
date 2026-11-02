@@ -60,6 +60,27 @@ pub fn parse_manifest(text: &str) -> Result<Vec<Clip>, String> {
     Ok(out)
 }
 
+/// Stage 9c.1: the manifest's `xl_limit` section (KH1's specials' motions of `xl_limit.dat`, keyed
+/// by xl entry): each `{"xl_entry", "slot", "name"}` as a [`Clip`] whose `entry` is the xl entry.
+/// An older manifest (none): empty.
+pub fn parse_xl(text: &str) -> Result<Vec<Clip>, String> {
+    let v = json::parse(text)?;
+    let Some(Value::Arr(arr)) = v.get("xl_limit") else { return Ok(Vec::new()) };
+    let mut out = Vec::new();
+    for (i, c) in arr.iter().enumerate() {
+        let name = c.get("name").and_then(Value::as_str).map(str::to_string);
+        let (Some(slot), Some(entry)) = (c.get("slot").and_then(Value::as_u32), c.get("xl_entry").and_then(Value::as_u32)) else {
+            return Err(format!("xl clip {i}: no slot or xl_entry"));
+        };
+        let name = name.unwrap_or_else(|| format!("p001_{slot:03}"));
+        if name.is_empty() || name.len() > 15 || !name.is_ascii() {
+            return Err(format!("xl clip {i}: name `{name}` must be 1-15 ASCII characters"));
+        }
+        out.push(Clip { slot, name, entry: Some(entry), request: c.get("kh1_request").and_then(Value::as_u32) });
+    }
+    Ok(out)
+}
+
 /// `p001_161` → 161 (the three trailing digits, as Re:CoM's `0x1401A47E0` reads them).
 pub fn slot_of_name(name: &str) -> Option<u32> {
     let d = name.get(name.len().checked_sub(3)?..)?;
@@ -184,6 +205,17 @@ mod tests {
         let names = vec![None, Some("p001_001".to_string()), Some("p001_103".to_string())];
         assert_eq!(row_of_clip(&names, "p001_103"), Some(2));
         assert_eq!(row_of_clip(&names, "p001_104"), None);
+    }
+
+    #[test]
+    fn xl_section() {
+        let t = r#"{"slots": [{"slot": 161, "kh1_entry": 0}], "xl_limit": [{"xl_entry": 0, "kh1_request": 200, "slot": 230, "name": "p001_230"}, {"xl_entry": 1, "slot": 231}]}"#;
+        let x = parse_xl(t).unwrap();
+        assert_eq!(x[0], Clip { slot: 230, name: "p001_230".into(), entry: Some(0), request: Some(200) });
+        assert_eq!(x[1].name, "p001_231");
+        assert_eq!(clip_for_entry(&x, &ann(232), 1).unwrap().slot, 231);
+        assert!(parse_xl(MANIFEST).unwrap().is_empty(), "an older manifest has none");
+        assert!(parse_xl(r#"{"xl_limit": [{"slot": 1}]}"#).is_err());
     }
 
     #[test]

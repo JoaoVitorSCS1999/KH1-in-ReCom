@@ -433,6 +433,41 @@ mod tests {
         assert_eq!(k.rig.attach_bone(kh1_anim::WEAPON_ATTACH), Some(283));
     }
 
+    /// Stage 9c.1: kh1-core's Sonic Blade motions (`xl::motions`) against the player's
+    /// `xl_limit.dat` (the motion set at its `+4` offset): lengths, flag windows, the root travel at
+    /// every integer frame, the request map and its root bits; and Sonic Blade's rows' records.
+    #[test]
+    fn xl_motions_match_the_players_file() {
+        let Some(d) = testdata::read("xl_limit.dat") else { return };
+        let at = u32::from_le_bytes(d[4..8].try_into().unwrap()) as usize;
+        assert_eq!((u32::from_le_bytes(d[0..4].try_into().unwrap()), at), (7, 0x80));
+        let ms = kh1_formats::mset::MotionSet::parse(&d[at..]).unwrap();
+        assert_eq!(ms.motions.len(), 36);
+        let want = kh1_core::data::xl::motions();
+        for (e, w) in kh1_core::data::xl::ENTRIES.iter().zip(want.iter()) {
+            let m = &ms.motions[*e];
+            assert_eq!(m.frames as f32, w.length, "xl entry {e}");
+            let mut got = MotionInfo::new(m.frames as f32);
+            got.flags = flag_windows(m);
+            assert_eq!(norm(&got), norm(w), "xl entry {e}");
+            let rc = root_curve(m);
+            for (f, p) in rc.iter().enumerate() {
+                let z = w.root_at(f as f32).z;
+                assert!((p.z - z).abs() < 0.02 && p.x.abs() < 0.01 && p.y.abs() < 0.01, "xl entry {e} frame {f}: {p:?} vs {z}");
+            }
+            let word = ms.requests[(kh1_core::data::xl::KH1_REQUEST_BASE as usize) + e];
+            assert_eq!(word.entry(), Some(*e as u16));
+            assert_eq!(word.root_motion(), !w.root.is_empty(), "xl entry {e}");
+        }
+        // Sonic Blade's rows play the xl requests 0xC9 / 0xCA (Sora's own set has other motions
+        // there: the rows are read with the xl set).
+        let Some(k) = kit() else { return };
+        for r in kh1_core::data::row::SONIC_BLADE_DASH..=kh1_core::data::row::SONIC_BLADE_FINISHER {
+            let row = k.moveset.row(r).unwrap();
+            assert_eq!(kh1_core::data::xl::entry_of_kh1_request(row.request), Some(if r == 0x21 { 2 } else { 1 }), "row {r:#x}");
+        }
+    }
+
     /// An install folder assembled from the test data (the hed files, a sparse kh1_first.pkg
     /// with the three entries at their offsets, the key-carrying exe under KH1's exe name)
     /// loads the same kit as the loose files.

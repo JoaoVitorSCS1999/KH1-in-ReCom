@@ -157,6 +157,9 @@ pub enum Cue {
     Whoosh(u16),
     /// Ops 0..=7: a footstep.
     Step,
+    /// A Re:CoM sound of group 1 by index (M9 stage 9c.1: what a KH1 special's own sound stands
+    /// for, [`xl_cues`]).
+    Recom(u32),
 }
 
 /// The cues of a KH1 motion, frame (rounded down, 60 Hz as SES frames) and kind. Voice ops
@@ -228,6 +231,7 @@ pub fn add_clips(entries: &mut Vec<Entry>, clips: &[ClipSounds]) -> Result<usize
             events.push(match cue {
                 Cue::Whoosh(arg) => with(whoosh, Some(whoosh_index(arg, c.finisher)), frame),
                 Cue::Step => with(step1, None, frame),
+                Cue::Recom(i) => with(whoosh, Some(i), frame),
             });
         }
         events.push(with(if c.finisher { finisher_voice } else { swing_voice }, None, 0));
@@ -239,6 +243,52 @@ pub fn add_clips(entries: &mut Vec<Entry>, clips: &[ClipSounds]) -> Result<usize
         entries.push(Entry { head: h, events });
     }
     Ok(clips.len())
+}
+
+// ---- M9 stage 9c.1: Sonic Blade's clips (`xl_limit.dat`) ----
+
+/// KH1's specials' own sounds (op 0 with an argument of 4000 and up: the `xl_limit.dat` bank's) as
+/// Re:CoM's: 4003 (each dash, frame 0) none, Re:CoM plays its own Sonic Blade sound (group 1, 0xD1)
+/// for the dash's attack id 0xF when the weapon's attack starts (`0x140224610`, Sora's vtable
+/// `+0x108`, from the weapon step `0x140225840`), so the dash gets it natively; 4004 (the finisher,
+/// frame 0) the same 0xD1, which Re:CoM's finisher id 0x10 doesn't play. Checked (files: the
+/// cues; decomp: `0x140224610`). Assumption: Re:CoM's 0xD1 stands for KH1's 4003 / 4004 (Re:CoM's
+/// Sonic Blade sound; KH1's own bank is not converted).
+pub fn xl_sound(arg: u16) -> Option<u32> {
+    match arg {
+        4004 => Some(0xD1),
+        _ => None,
+    }
+}
+
+/// The cues of a special's KH1 motion: KH1's swing sounds and steps as [`kh1_cues`], its bank's
+/// sounds by [`xl_sound`].
+pub fn xl_cues(m: &kh1_formats::mset::Motion) -> Vec<(i32, Cue)> {
+    let mut out = Vec::new();
+    let Some(t) = m.tracks.iter().find(|t| t.kind == kh1_formats::mset::track::SOUND && t.sub == 0) else { return out };
+    for k in &t.keys {
+        let op = u16::from_le_bytes([k.payload[0], k.payload[1]]);
+        let arg = u16::from_le_bytes([k.payload[2], k.payload[3]]);
+        match op {
+            0x19 => out.push((k.time as i32, Cue::Whoosh(arg))),
+            0 if arg >= 4000 => out.extend(xl_sound(arg).map(|i| (k.time as i32, Cue::Recom(i)))),
+            0..=7 => out.push((k.time as i32, Cue::Step)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The SES entry for a Sonic Blade clip (`xl_limit.dat` entry, its clip name): the dash (entry 1)
+/// and the finisher (entry 2) with their cues and their row's voice (btltbl rows 0x1C..0x20 voice
+/// group 4: the swing grunts; row 0x21 group 6: the finisher's). The wind-up (entry 0) has no
+/// sound in KH1 (no sound track) and gets no entry. Assumption / deviation: the voice is the
+/// clip's, so the first dash (row 0x1B, KH1 voice −1) grunts too.
+pub fn xl_clip(entry: usize, m: &kh1_formats::mset::Motion, name: &str) -> Option<ClipSounds> {
+    match entry {
+        1 | 2 => Some(ClipSounds { name: name.to_string(), cues: xl_cues(m), finisher: entry == 2 }),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -319,6 +369,29 @@ mod tests {
         for (a, b) in back[..n0].iter().zip(orig.iter()) {
             assert_eq!((a.name(), &a.events), (b.name(), &b.events));
         }
+    }
+
+    /// Sonic Blade's clips on the player's `xl_limit.dat` (`KH1_TEST_DATA`): the dash's only cue
+    /// (4003) is left to Re:CoM's own dash sound; the finisher's 4004 at 0 → 0xD1, its step at 36,
+    /// its swing sound 13 at 40 (→ the finisher whoosh 235). Checked (files).
+    #[test]
+    fn sonic_blade_cues_on_the_players_file() {
+        let Ok(dir) = std::env::var("KH1_TEST_DATA") else { return };
+        let Ok(file) = std::fs::read(std::path::Path::new(&dir).join("xl_limit.dat")) else { return };
+        let set = kh1_formats::mset::MotionSet::parse(crate::build::xl_motion_set(&file).unwrap()).unwrap();
+        assert!(xl_clip(0, &set.motions[0], "p001_230").is_none());
+        let dash = xl_clip(1, &set.motions[1], "p001_231").unwrap();
+        assert_eq!((dash.cues.clone(), dash.finisher), (vec![], false));
+        let fin = xl_clip(2, &set.motions[2], "p001_232").unwrap();
+        assert_eq!((fin.cues.clone(), fin.finisher), (vec![(0, Cue::Recom(0xD1)), (36, Cue::Step), (40, Cue::Whoosh(13))], true));
+        let mut e = recom();
+        add_clips(&mut e, &[dash, fin]).unwrap();
+        let back = parse(&write(&e)).unwrap();
+        let ev = |n: &str| -> Vec<(u32, u32, i32)> {
+            back.iter().find(|x| x.name() == n).unwrap().events.iter().map(|x| (group(x), u32::from_le_bytes(x[4..8].try_into().unwrap()), i32::from_le_bytes(x[0x18..0x1C].try_into().unwrap()))).collect()
+        };
+        assert_eq!(ev("p001_231"), vec![(2, 0, 0)]);
+        assert_eq!(ev("p001_232"), vec![(1, 0xD1, 0), (601, 1, 36), (1, 235, 40), (2, 0, 0)]);
     }
 
     #[test]

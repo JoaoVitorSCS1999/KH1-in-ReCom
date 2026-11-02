@@ -1591,6 +1591,11 @@ unsafe fn release_blizzard(pl: usize, c: &CastStart) -> Option<u32> {
     Some(first)
 }
 
+/// A handle is an alive enemy ([`alive_enemy`]; the special offer's target, M9 stage 9c.1).
+pub(super) unsafe fn is_alive_enemy(h: u32) -> bool {
+    alive_enemy(h).is_some()
+}
+
 /// An alive enemy for a handle: Re:CoM's enemy (type 0x1004) with HP left. KH1's sys 120 / its
 /// actor walk count live actors (`+0x374` bit 0 set, bit 1 clear) not flagged defeated.
 unsafe fn alive_enemy(h: u32) -> Option<usize> {

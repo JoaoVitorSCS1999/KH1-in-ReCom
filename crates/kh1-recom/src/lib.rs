@@ -92,6 +92,7 @@ pub mod mp_bar;
 pub mod rows;
 pub mod settings;
 pub mod shop;
+pub mod specials;
 pub mod sites;
 pub mod trace;
 pub mod units;

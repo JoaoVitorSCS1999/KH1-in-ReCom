@@ -92,6 +92,23 @@ fn run() -> Result<(), String> {
         None => None,
     };
     let (mset, mdls) = install::read_kh1(&game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
+    // M9 stage 9c.1: KH1's specials' motions (Sonic Blade), as new clips; without the file the
+    // runtime offers no special.
+    let xl_file = match install::read_kh1_xl(&game, keys.clone()) {
+        Ok(f) => Some(f),
+        Err(e) => {
+            println!("note: {}: {e}; Sonic Blade's motions are not built (no KH1 specials in game)", install::XL_LIMIT);
+            None
+        }
+    };
+    let xl = match &xl_file {
+        Some(f) => Some(kh1_recom_assets::build::xl_motion_set(f).map_err(|e| e.to_string())?.to_vec()),
+        None => None,
+    };
+    let xl_set = match &xl {
+        Some(b) => Some(kh1_formats::mset::MotionSet::parse(b).map_err(|e| format!("{}: {e}", install::XL_LIMIT))?),
+        None => None,
+    };
     // The Keyblade (CPlayerWeapon, resource group 2): converted when both files are there.
     let weapon = match (arc.find(install::KEYBLADE_ANN), arc.find(install::KEYBLADE_MDL)) {
         (Some(_), Some(_)) => Some((
@@ -111,6 +128,9 @@ fn run() -> Result<(), String> {
         ("xa_ex_0010.mset sha256", kh1_formats::egs::sha256_hex(&mset)),
         ("xa_ex_0010.mdls sha256", kh1_formats::egs::sha256_hex(&mdls)),
     ];
+    if let Some(f) = &xl_file {
+        sources.push(("xl_limit.dat sha256", kh1_formats::egs::sha256_hex(f)));
+    }
     if let Some((a, m)) = &weapon {
         sources.push(("PL0002.ANN sha256", kh1_formats::egs::sha256_hex(a)));
         sources.push(("PL0002.MDL sha256", kh1_formats::egs::sha256_hex(m)));
@@ -118,7 +138,7 @@ fn run() -> Result<(), String> {
     let t1 = Instant::now();
     // M9 9a: the KH1 sound cues of the combo modifiers' motions (their SES entries, below).
     let kh1_set = kh1_formats::mset::MotionSet::parse(&mset).map_err(|e| format!("xa_ex_0010.mset: {e}"))?;
-    let built = build(&Inputs { mset, mdls, ann, mdl, weapon }, &opt).map_err(|e| e.to_string())?;
+    let built = build(&Inputs { mset, mdls, ann, mdl, weapon, xl }, &opt).map_err(|e| e.to_string())?;
     let t_conv = t1.elapsed();
     let n_recom = built.recom_entries();
     let n_new = built.new_slots();
@@ -134,6 +154,9 @@ fn run() -> Result<(), String> {
         t_read.as_secs_f64(),
         t_conv.as_secs_f64()
     );
+    if !built.xl.is_empty() {
+        println!("Sonic Blade (xl_limit.dat): wind-up, dash, finisher on new slots {:?}", built.xl.iter().map(|e| (e.slot, e.name.as_str(), e.frames)).collect::<Vec<_>>());
+    }
     for e in built.entries.iter().filter(|e| !e.ambiguous.is_empty()) {
         println!("note: KH1 entry {} also matches Re:CoM slots {:?} (chose {})", e.kh1_entry, e.ambiguous, e.slot);
     }
@@ -262,14 +285,31 @@ fn run() -> Result<(), String> {
         })
         .collect();
     let nm = kh1_recom_assets::ses::add_clips(&mut sound, &modifier_clips).map_err(|e| e.to_string())?;
+    // M9 stage 9c.1: Sonic Blade's clips, KH1's cues as Re:CoM's sounds (`ses::xl_clips`).
+    let xl_clips: Vec<kh1_recom_assets::ses::ClipSounds> = match &xl_set {
+        Some(xs) => built.xl.iter().filter_map(|e| kh1_recom_assets::ses::xl_clip(e.kh1_entry, xs.motions.get(e.kh1_entry)?, &e.name)).collect(),
+        None => Vec::new(),
+    };
+    let nx = kh1_recom_assets::ses::add_clips(&mut sound, &xl_clips).map_err(|e| e.to_string())?;
     let ses_path = ann_path.with_file_name("PL0001.SES");
     write(&ses_path, &kh1_recom_assets::ses::write(&sound))?;
-    println!("wrote {} ({} KH1 clip entries: guard {:?}, counterattack {:?}; {} combo modifier clips: {:?})", ses_path.display(), n, guard, counter, nm, modifier_clips.iter().map(|c| c.name.as_str()).collect::<Vec<_>>());
+    println!(
+        "wrote {} ({} KH1 clip entries: guard {:?}, counterattack {:?}; {} combo modifier clips: {:?}; {} Sonic Blade clips: {:?})",
+        ses_path.display(),
+        n,
+        guard,
+        counter,
+        nm,
+        modifier_clips.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+        nx,
+        xl_clips.iter().map(|c| c.name.as_str()).collect::<Vec<_>>()
+    );
     // Halloween Town's sound events: Re:CoM's `PL0011.SES` with the same KH1 entries.
     if let Some(hs) = &halloween_ses {
         let mut hsound = kh1_recom_assets::ses::parse(hs).map_err(|e| format!("{}: {e}", install::HALLOWEEN_SES))?;
         kh1_recom_assets::ses::add_kh1(&mut hsound, guard.as_deref(), counter.as_deref()).map_err(|e| e.to_string())?;
         kh1_recom_assets::ses::add_clips(&mut hsound, &modifier_clips).map_err(|e| e.to_string())?;
+        kh1_recom_assets::ses::add_clips(&mut hsound, &xl_clips).map_err(|e| e.to_string())?;
         write(&hw_dir.with_file_name("PL0011.SES"), &kh1_recom_assets::ses::write(&hsound))?;
     }
     // The Keyblade models, under the same root as the manifest (`<mod>/recom` or --out's folder).

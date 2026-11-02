@@ -598,6 +598,18 @@ impl Host for RecomHost {
         unsafe { super::items::end_item(self.pl, airborne) }
     }
 
+    fn start_special(&mut self, s: &crate::specials::SpecialStart) -> bool {
+        unsafe { super::specials::start_special(self.pl, s) }
+    }
+
+    fn special_row(&mut self, r: &crate::specials::RowStart) {
+        unsafe { super::specials::special_row(self.pl, r) }
+    }
+
+    fn end_special(&mut self, airborne: bool) -> bool {
+        unsafe { super::specials::end_special(self.pl, airborne) }
+    }
+
     fn battle_won(&mut self) -> bool {
         unsafe { rd::<u32>(self.pl + p::CARD) & crate::battle::end::WIN_PENDING != 0 }
     }
@@ -619,6 +631,11 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     }
     // An item from the command menu's Items list this frame (M8 stage 8a.1), on Sora.
     input.item = super::items::take_command();
+    // A special from the command menu this frame (M9 stage 9c.1), aimed at Re:CoM's target.
+    input.special = super::specials::take_command();
+    if input.special.is_some() && input.target.is_none() {
+        input.target = super::attack::attack_target(pl);
+    }
     let mut host = RecomHost::new(pl);
     slot.last = slot.sora.frame(&mut host, &input, fresh);
     // Re:CoM's end action entered its win action: it owns Sora; a later KH1 frame takes over.
@@ -631,6 +648,9 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     }
     if !slot.last.items.is_empty() {
         super::items::on_events(&slot.last.items);
+    }
+    if !slot.last.specials.is_empty() {
+        super::specials::on_events(&slot.last.specials);
     }
 }
 

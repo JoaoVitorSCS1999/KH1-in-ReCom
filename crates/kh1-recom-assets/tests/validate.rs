@@ -178,7 +178,7 @@ fn b_matches_recom_bakes() {
 fn c_extended_pack() {
     let Some(d) = data() else { return };
     let t0 = std::time::Instant::now();
-    let built = build(&Inputs { mset: d.mset.clone(), mdls: d.mdls.clone(), ann: d.ann.clone(), mdl: d.mdl.clone(), weapon: d.wep.clone() }, &BuildOptions::default()).unwrap();
+    let built = build(&Inputs { mset: d.mset.clone(), mdls: d.mdls.clone(), ann: d.ann.clone(), mdl: d.mdl.clone(), weapon: d.wep.clone(), xl: None }, &BuildOptions::default()).unwrap();
     let el = t0.elapsed();
     let orig = Ann::parse(&d.ann).unwrap();
     let ext = Ann::parse(&built.bytes).unwrap();
@@ -265,12 +265,12 @@ fn c_extended_pack() {
     );
     // A build whose entries are all on Re:CoM's clips writes nothing new.
     let opt = BuildOptions { only: Some(vec![4, 8, 98, 117]), ..BuildOptions::default() };
-    let b2 = build(&Inputs { mset: d.mset.clone(), mdls: d.mdls.clone(), ann: d.ann.clone(), mdl: d.mdl.clone(), weapon: d.wep.clone() }, &opt).unwrap();
+    let b2 = build(&Inputs { mset: d.mset.clone(), mdls: d.mdls.clone(), ann: d.ann.clone(), mdl: d.mdl.clone(), weapon: d.wep.clone(), xl: None }, &opt).unwrap();
     assert!(!b2.changed && b2.weapon.is_none() && b2.new_slots() == 0);
     assert_eq!(b2.bytes, d.ann);
     // The old behaviour (every entry converted) still builds.
     let opt = BuildOptions { reuse_recom: false, only: Some(vec![0, 98, 117]), ..BuildOptions::default() };
-    let b3 = build(&Inputs { mset: d.mset.clone(), mdls: d.mdls.clone(), ann: d.ann.clone(), mdl: d.mdl.clone(), weapon: None }, &opt).unwrap();
+    let b3 = build(&Inputs { mset: d.mset.clone(), mdls: d.mdls.clone(), ann: d.ann.clone(), mdl: d.mdl.clone(), weapon: None, xl: None }, &opt).unwrap();
     assert_eq!(b3.entries.iter().map(|e| (e.kh1_entry, e.slot)).collect::<Vec<_>>(), [(0, 161), (98, 259), (117, 278)]);
 }
 
@@ -497,7 +497,7 @@ fn g_halloween_pack_gets_the_same_slots() {
     let Some(d) = data() else { return };
     let Some(dir) = std::env::var_os("KH1_TEST_DATA").map(PathBuf::from) else { return };
     let Ok(hw) = std::fs::read(dir.join("PL0011.ANN")) else { return };
-    let built = build(&Inputs { mset: d.mset, mdls: d.mdls, ann: d.ann, mdl: d.mdl, weapon: d.wep }, &BuildOptions::default()).unwrap();
+    let built = build(&Inputs { mset: d.mset, mdls: d.mdls, ann: d.ann, mdl: d.mdl, weapon: d.wep, xl: None }, &BuildOptions::default()).unwrap();
     let out = kh1_recom_assets::build::extend_costume_pack(&built, &hw).unwrap();
     let base = Ann::parse(&hw).unwrap();
     let ext = Ann::parse(&out).unwrap();
@@ -512,4 +512,50 @@ fn g_halloween_pack_gets_the_same_slots() {
     }
     assert!(kh1_recom_assets::build::extend_costume_pack(&built, &out).is_err(), "refuses an extended pack");
     eprintln!("(g) PL0011.ANN: {} → {} slots", base.slots.len(), ext.slots.len());
+}
+
+/// M9 stage 9c.1: Sonic Blade's motions from the player's `xl_limit.dat` (in `KH1_TEST_DATA`): three
+/// new clips after the KH1-only entries' slots (wind-up, dash, finisher), played once, the dash and
+/// the finisher with root motion (KH1's request map), KH1's length, the Keyblade's clips at the
+/// same slots, the root's travel at the end KH1's (562.05 / 734.41 KH1 units = cm, Checked
+/// (files), `kh1_core::data::xl`), and the manifest's `xl_limit` section.
+#[test]
+fn h_specials_clips_from_xl_limit() {
+    let Some(d) = data() else { return };
+    let Some(dir) = std::env::var_os("KH1_TEST_DATA").map(PathBuf::from) else { return };
+    let Ok(file) = std::fs::read(dir.join("xl_limit.dat")) else { return };
+    let xl = kh1_recom_assets::build::xl_motion_set(&file).unwrap().to_vec();
+    let opt = BuildOptions { only: Some(Vec::new()), ..BuildOptions::default() };
+    let full = build(&Inputs { mset: d.mset.clone(), mdls: d.mdls.clone(), ann: d.ann.clone(), mdl: d.mdl.clone(), weapon: d.wep.clone(), xl: None }, &opt).unwrap();
+    assert!(full.xl.is_empty() && !full.changed, "no file, no clips; no entries asked, no pack");
+    let built = build(&Inputs { mset: d.mset, mdls: d.mdls, ann: d.ann, mdl: d.mdl, weapon: d.wep, xl: Some(xl) }, &opt).unwrap();
+    assert!(built.changed);
+    let ext = Ann::parse(&built.bytes).unwrap();
+    // The slots after every KH1-only entry's (the full build's count; `only` keeps the numbers).
+    let first = built.xl[0].slot;
+    assert!(first > RECOM_SORA_SLOTS);
+    let want = [(0usize, 0xC8u16, 30u32, false), (1, 0xC9, 54, true), (2, 0xCA, 82, true)];
+    for (e, (entry, req, frames, root)) in built.xl.iter().zip(want) {
+        assert_eq!((e.kh1_entry, e.kh1_request, e.kh1_frames, e.root_motion, e.looped), (entry, Some(req), frames, root, false));
+        assert_eq!(e.slot, first + entry);
+        assert_eq!(e.name, format!("p001_{:03}", e.slot));
+        let c = ext.slots[e.slot].clip.as_ref().unwrap();
+        assert_eq!((c.name_str(), c.fps(), c.looped()), (e.name.clone(), 60, false));
+        if let Some(w) = &built.weapon {
+            assert_eq!(w.ann.slots[e.slot].name_str(), format!("w001_{:03}", e.slot));
+        }
+    }
+    // Root travel (bone 0's translation, metres) at the end: KH1's, in the facing direction.
+    let travel = |slot: usize| {
+        let c = ext.slots[slot].clip.as_ref().unwrap();
+        let a = c.sample(0, 0.0).t;
+        let b = c.sample(0, c.frames as f64).t;
+        ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt()
+    };
+    assert!((travel(first + 1) - 5.6205).abs() < 0.01, "dash travel {}", travel(first + 1));
+    assert!((travel(first + 2) - 7.3441).abs() < 0.01, "finisher travel {}", travel(first + 2));
+    let j = built.manifest_json(&[]);
+    assert_eq!(j.matches("\"xl_entry\"").count(), 3);
+    assert!(j.contains(&format!("\"xl_entry\": 1, \"kh1_request\": 201, \"slot\": {}", first + 1)));
+    eprintln!("(h) xl_limit: clips {:?}", built.xl.iter().map(|e| (e.slot, e.frames, e.bytes)).collect::<Vec<_>>());
 }

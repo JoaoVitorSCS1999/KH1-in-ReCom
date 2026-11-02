@@ -622,3 +622,230 @@ sequence table `0x1407C11F0`: blue plate, icon sprite 168), as the Items page's 
    takes High Jump back; after Monstro it returns.
 5. The Abilities page's rows and the Customize page's slot and spell rows: blue plate, magic icon.
 6. Combat = Re:CoM: nothing changes (Re:CoM's own High Jump / glide unchanged).
+
+## Owner change (2026-11-01): Guard and Dodge Roll are Sora's kit
+
+Owner: "just have guard and dodge roll be a part of sora's movement kit from the start, dont add
+them as abilities." With it (lead's brief): High Jump, Glide and Superglide **equipped when Re:CoM
+gives them** (still removable; once removed, not equipped again). Answers the follow-ups' owner
+questions 1 and 2 above.
+
+### What changed (`abilities.rs`, `win/abilities.rs`)
+
+| | before | now |
+|---|---|---|
+| Guard, Dodge Roll | abilities on the Sora list (2 AP / 1 AP), `Source::Start` | `Source::Kit`: **always on at Combat = KH1**, no AP, not on the Abilities page, not in the AP sum (`KIT_BITS`; `to_core` sets `guard` / `dodge_roll`; `kh1_bits` ORs them in for the trace) |
+| High Jump, Glide, Superglide | arrive unequipped | arrive **equipped** (`arrive_equipped_bits`: the `Source::Recom` ones); removable; `sync` equips only on the unlock, so a removed one stays removed |
+| the ini's `guard` | read once for a v0 / v1 save | no longer read (Guard is the kit's) |
+| `kh1_all_abilities = on` | every ability | every ability but the kit (always on) and the specials not built yet |
+
+At Combat = Re:CoM nothing changes (the kit is the KH1 frame's; Re:CoM's own block and avoid run).
+
+### The block: layout v4 (`BLOCK_V4` = `BLOCK_NOW`)
+
+Same fields. `read` hides the kit bits; a block below v4 is migrated once at its first sync
+(`migrate(s, raw, from, …)`):
+- every older block: Guard and Dodge Roll leave the unlocked / equipped words (their AP is back:
+  up to 3 AP freed); the log names them (`kit_dropped`);
+- **v3**: High Jump / Glide / Superglide already unlocked (they arrived unequipped by v3's rule)
+  are equipped once;
+- v2 and older: as before (v2's ini-given story abilities taken back and asked their source again;
+  v0 / v1 read the ini's `counterattack` / `combo_plus` / `air_combo_plus` once);
+- then KH1's AP rule (`fit_ap`).
+
+### Checks
+
+- Checked (tests): `guard_and_dodge_roll_are_sora_s_kit`, `new_unlocks_arrive_unequipped` (level
+  unlocks still unequipped: KH1's rule), `movement_abilities_follow_recoms_variable` (equipped on
+  arrival, not again after removal), `v3_blocks_drop_the_kit_and_equip_recoms_movement`,
+  `migration_keeps_the_old_set_within_kh1s_ap`, `v2_story_abilities_move_to_their_new_sources`,
+  the screen test (no Guard / Dodge Roll rows), the btltbl test.
+- Not checked: in game.
+
+### What the owner should test
+
+1. A v3 save (0.52): the first Attack press or the Abilities page logs `block v3 -> v4 … Sora's kit
+   now, out of the block (their AP back) ["Guard", "Dodge Roll"]`; AP used goes down by what they cost; Square still rolls and
+   guards; the page no longer lists them; High Jump / Glide / Superglide that were unlocked are now
+   marked.
+2. Remove High Jump on the page, leave and come back: it stays removed.
+3. A new game: Guard and Dodge Roll work at once; AP 0/3 used.
+
+## Stage 9c.1: KH1's Sonic Blade (M9 stage 9c)
+
+Lead's brief: Sonic Blade 1:1 with KH1, native: on the Abilities page, the offer and its
+follow-ups in the command menu, run on Re:CoM's own sleight action, KH1's rows and damage, KH1's
+motions as new clips, its sounds in Re:CoM's sound events. KH1's scene tint skipped; Re:CoM's
+sleight effects (owner).
+
+### KH1 (Steam). Checked (decomp + exe + files) unless tagged
+
+The whole flow is in `crates/kh1-recom/src/specials.rs`'s head (offer `0x14028D0F0`, start
+`0x14028D800` / `0x14039EAD0`, rows `0x14039ECA0`, follow-ups `0x14039ED70` / `0x14039EA40`, physics
+`0x14039EBE0` / `0x14039EBA0`, end `0x14039EC10`). The numbers:
+
+| what | value | where |
+|---|---|---|
+| ability → command | Sonic Blade 11 → 0x4B (Ars Arcanum 12 → 0x57, Strike Raid 13 → 0x5E, Ragnarok 14 → 0x5A, Trinity 15 → 0x52) | table `0x140528340` |
+| offer order | Trinity, Ragnarok, Ars Arcanum, Sonic Blade, Strike Raid | `0x14052834C` = [4, 3, 1, 0, 2] |
+| MP cost | 200 (2 whole MP; ≥ 100 = whole points, `0x1402A4C10`), others 300 / 200 / 300 / 300 | btltbl `+0x14C` |
+| range | 600 (gap to the lock point minus its radius); Sonic Blade refuses a target > 160 above | command `+0xE`; `0x14028D0F0` |
+| score | 2 can pay, 1 can't (greyed); FM never draws a greyed context entry | `0x14028D0F0`, `0x140277CF0` |
+| AP | 3, learned at Re:CoM's sleight 9 (Sonic Blade) | btltbl ability row 11 (cost 3, key 801) |
+| state | 0x20; flags `0x1200080` (no damage, no reaction) | `0x14039EC50` |
+| wind-up | xl request 0xC8, blend 8, 30 frames, no root, no hit; end → dash 1, blend 0 | `0x14039EAD0`, `0x14039ED60` |
+| dash | rows 0x1B..0x20 (request 0xC9, 54 frames, root travel 562.05, hit 4–22, combo window 10–40) | btltbl rows; `xl_limit.dat` |
+| finisher | row 0x21 (request 0xCA, 82 frames, root 734.41, hit 16–34) | same |
+| follow-up | Rave (0x4D) in the Attack row, Blast (0x4E) once n > 5; greyed outside the window or without the attacking bit; Triangle: re-aim (none: turn 180°), next row, blend 8 | `0x14039ED70`, `0x14039EA40` |
+| records | element 10 (stun → Re:CoM kind 7), kind 3, bone 0x30, crit 200, no MP charge, radius 60, power 6 (dash) / 10 (finisher) | btltbl attacks 0x5C18 / 0x5C88 |
+| words | 319 "Sonic", 321 "Rave", 322 "Blast" (each language's Word.bin) | command records `+4` |
+
+Tick rates: both run 60 Hz frames here (as every earlier stage; `docs/recom-kh1-movement.md`); the
+xl clips are converted at 60 fps. Checked (decomp, earlier stages).
+
+### Re:CoM (Steam). Checked (decomp + exe)
+
+- Sleights run on action **0x16**: `initStockSkill` `0x140220DF0` (case 9 = Sonic Blade: attack id
+  0xE, `0x140211790(+0x3B8, 9, 0)` loads its effect group), `exeStockSkill` `0x140218950`
+  ("SONICRAVE": start 0x8C with `limit1` effect 0 on the bone `+0x3A4`, dashes 0x8D–0x92 on attack
+  id 0xF, finisher 0x93 on 0x10). Sora's vtable `+0x140` (`0x1405A9A78`).
+- The Battle exe calls it at `0x1401F9B5E` (`call [rax+0x140]`); the **Field exe has no case**
+  (its table `0x1401FA5F4`, entry for 0x16 = the default `0x1401FA599`): Re:CoM never plays a
+  sleight in the field.
+- Re:CoM's attack row for id 0xE is empty (no window); its weapon step `0x140225840` calls Sora's
+  vtable `+0x108` (`0x140224610`) when the weapon's attack starts: id 0xF plays group 1 sound 0xD1
+  (Re:CoM's Sonic Blade sound); id 0x10 none.
+
+### What runs (Combat = KH1, Sora's story)
+
+- **Abilities page**: Sonic Blade on the Sora list (3 AP) once Re:CoM's sleight 9 is learned
+  (`Source::Sleight`); the other four specials stay off the page (`SPECIALS_WAITING`).
+- **Offer** (`win::command_menu::special_offer`, each menu build): when no object took the context
+  entry, Sora is in KH1's state 0 with no special, Sonic Blade is equipped, and Re:CoM's attack
+  target is a live enemy: KH1's walk over the five (only Sonic Blade built) → the context tab shows
+  "Sonic" (greyed when MP < 2). Assumption: Re:CoM's lock / attack target stands for KH1's target.
+- **Start** (Triangle): the menu issues the command (`win::specials::issue`); Sora's KH1 frame takes
+  it (`Kh1Sora::command_special`), turns to the target, ends a playing swing's action, then
+  `win::specials::start_special`: KH1's MP paid on the press, **`initStockSkill`'s writes for case
+  9 without the card** (action 0x16, attack id 0xE, its sleight resources, gravity, phase 3, sub
+  1, the homing target; AP = the attack stat, as KH1 swings), Re:CoM's `limit1` start effect on
+  Sora. The KH1 frame: state 0x20, the wind-up clip.
+- **Each frame**: Re:CoM's Battle exe (vtable) or the Field exe (our new case) calls
+  `exeStockSkill`; our wrapper runs KH1's frame and then Re:CoM's own `procAttackCollision` on the
+  row with the motion's frame, as Re:CoM's own exes do. Not a KH1 special: Re:CoM's exeStockSkill
+  (its sleight cards, untouched).
+- **Rows** (`win::specials::special_row`): the last row's volume ends, `+0x3C8` = our KH1 row
+  (0x1B..0x21, appended to Re:CoM's attack table; KH1's window one frame earlier as every KH1 row),
+  `+0x638` = 0xF / 0x10 (Re:CoM's Sonic Blade ids: its dash sound and hit effects), the hit fields
+  cleared, a new KH1 attack (each row hits each enemy once). The pair dispatch and the enemy-hit
+  wrapper already key on the KH1 row: KH1's spheres and KH1's damage.
+- **Invincible**: KH1's flags `0x1200080` → our damage-check path (`+0x418` bit 0) for the whole
+  special.
+- **Follow-ups**: the Attack row shows Rave / Blast (greyed outside the window), Triangle runs
+  them; X on it is the error sound; a refused confirm clears the attacking bit.
+- **End**: after the last row's motion, or Sora airborne (falls, blend 8), or Re:CoM ran another
+  action: Re:CoM's end action `0x1401F6660`, KH1's state 0.
+- **Root motion**: the root-delay wrapper treats the special like a swing; its safety net is now
+  1.0 m a frame (was 0.5 m: the dash travels 0.61 m in a frame, the old net cut it to 6.23 m).
+
+### Asset step (`kh1-recom-build`)
+
+- Reads KH1's `xl_limit.dat` (its motion set at `+4`); converts entries 0, 1, 2 (wind-up, dash,
+  finisher) to **new 60 fps clips after the KH1-only entries' slots** (230, 231, 232 with the
+  owner's files), played once (KH1 requests them with end callbacks), dash and finisher with root
+  motion (the set's request map), Keyblade clips at the same slots, Halloween Town's pack too. The
+  manifest gains an `xl_limit` section (xl entry, KH1 request, slot, name, frames). Without the file:
+  a note, no clips, no special in game.
+- Sounds (`ses::xl_clip`), Re:CoM's sounds at KH1's frames: dash: the swing voice at 0 (rows 0x1C..
+  0x20's voice group 4); KH1's own dash sound (4003) is left to Re:CoM's 0xD1 above. Finisher:
+  0xD1 at 0 (for KH1's 4004), a step at 36, the finisher whoosh 235 at 40 (KH1's swing sound 13),
+  the finisher voice at 0. Wind-up: none (no sound track in KH1).
+- The menu words 319 / 321 / 322 in every language (German ß, KH1 byte 0xE2, written "ss": Re:CoM's
+  font codes for it are not known).
+
+### Sites (bytes re-read from the Steam exe with pefile)
+
+| site | bytes | use |
+|---|---|---|
+| `exeStockSkill` `0x140218950` | `48 8B C4 48 89 58 10 48 89 70 18` | hook (`SPECIAL_HOOKS`) |
+| Field table entry `0x1401FA648` | `99 A5 1F 00 99 A5 1F 00` | 0x16's entry → the cave (`SPECIAL_DATA`) |
+| cave `0x1401FB7B2` | `CC` × 14 (after `ret` at `0x1401FB7B1`) | stub `mov rcx,rbx; call exeStockSkill; jmp 0x1401FA599` |
+| `initStockSkill` `0x140220DF0` | 40 bytes to `BA 16 00` | checked (its writes copied) |
+| Battle case `0x1401F9B5E` | `48 8B 07 48 8B CF FF 90 40 01 00 00 E9 5A 01 00 00` | checked |
+| `procAttackCollision` `0x1401F5DC0` | `40 53 48 83 EC 30 48 8B D9 48 8B 89 C8 03 00 00 0F B6 41 04` | called |
+| sleight resources `0x140211790` | `40 53 41 54 48 83 EC 38 48 8B D9 E8 80 DF FF FF` | called |
+| vtable `+0x140` `0x1405A9A78` | → `0x140218950` | checked at start (`SPECIAL_PTRS`) |
+| data | `0x1407C7E10` → `"limit1"`; `0x1407C784C` = 4000; row 0xE empty | read; checked at start / by script |
+
+Other callees (`0x1401F6660`, `0x1401F3C00`, `0x1401F68A0`, `0x140224FB0`, `0x1401F7F90`) were
+checked by earlier stages' site lists.
+
+### Per frame
+
+Nothing new unless a special runs: the request-bits wrapper drops an untaken command (one lock),
+the menu's offer runs at its builds (only with Sonic Blade equipped and a target). During the
+special: our exeStockSkill wrapper (the KH1 frame Sora runs anyway, plus one Re:CoM call).
+
+### Logs and trace
+
+- start: `specials: KH1's Sonic Blade at combat = kh1 …`; missing clips: `specials: Sonic Blade's
+  rows are not in the attack table (no xl_limit clips: re-run kh1-recom-build)`.
+- per special (first 80 lines): `specials: special(0x4b)`, `specials: sp-row(0x1b n1 f31)`, `specials: sp-end(done f…)`, `specials: sp-refused(0x4d greyed)`.
+- F9 trace, events column: `sp -` or `sp 0 Row n3 f97 bit`, then that frame's events (`start`,
+  `row 0x1c n2`, the tokens above).
+
+### 1:1 checks (9c.1)
+
+- Checked (decomp + files, tests): every number in the KH1 table above; the xl motions' lengths,
+  flag windows and root travel at every frame against the player's `xl_limit.dat`
+  (`kh1-data::xl_motions_match_the_players_file`); rows 0x1B..0x21 and attacks 0x5C18 / 0x5C88
+  against btltbl (`kh1_defaults`); the clips' travel at the end (`validate::h_specials_clips_from_xl_limit`:
+  5.62 m / 7.34 m); the cues (`ses::sonic_blade_cues_on_the_players_file`); the offer, follow-ups
+  and refusals (`specials::tests`, `command_menu` tests); a full run in the movement fake
+  (`sonic_blade_runs_kh1s_rows_on_recoms_sleight_action`: dash 1 at frame 31, rows in order;
+  `sonic_blade_ends_after_one_dash_or_in_the_air`: one dash travels 562.05 ± 0.5 and ends at
+  frames 83..86); the menu words in all six languages (owner's Word.bin files).
+- Not checked: in game; against a KH1 trace of Sonic Blade (none in this session: frame for frame needs one).
+- Assumptions: KH1 starts the wind-up's callback request on the next update (dash 1 at frame 31,
+  not 30); Re:CoM's attack target stands for KH1's target; Re:CoM's 0xD1 stands for KH1's
+  4003 / 4004.
+
+### Not KH1's (by design or yet)
+
+- **Dash 1 grunts**: KH1's row 0x1B has no voice, rows 0x1C..0x20 do; the voice is the dash
+  clip's in Re:CoM's sound events, so all six dashes grunt (owner question 1).
+- **Re:CoM's per-dash sleight effects** (its exeStockSkill's per-state EET effects) are not played:
+  only its start effect (`limit1` 0) and its hit effects by attack id. Its sleight effect group's
+  ids for the dash trails are not in the session (owner question 2).
+- KH1's scene tint: skipped (owner).
+- KH1's own sound bank in `xl_limit.dat`: not converted (Re:CoM's 0xD1 plays).
+
+### Owner questions (9c.1)
+
+1. **Dash 1's grunt.** (a) keep (all six dashes grunt), (b) a fourth clip for dash 1 (a copy of the
+   dash at its own slot, no voice event): KH1's exact voices, one more slot.
+2. **Re:CoM's dash effects.** Re:CoM's own Sonic Blade plays effects per dash from its sleight
+   group; ours plays its start effect and its hit effects. (a) keep, (b) find and play its per-dash
+   effects (needs its effect group's ids: a Re:CoM Sonic Blade trace or its EET file).
+3. **Re:CoM's own Sonic Blade clip.** Re:CoM's sleight pack has its own Sonic Blade motion; we
+   convert KH1's (its frames and travel are KH1's: decision 11's "Re:CoM's clip when it has the
+   motion" would change the timing). (a) keep KH1's clips, (b) Re:CoM's clip (not 1:1).
+4. **In the field.** Re:CoM never plays a sleight outside battle; ours runs there through the new
+   Field case and loads the sleight's resources there too. Watch for a missing effect or a hitch
+   at the first Sonic Blade in the field.
+
+### What the owner should test (re-run the asset step first)
+
+1. `kh1-recom-build`: it prints `Sonic Blade (xl_limit.dat): wind-up, dash, finisher on new slots
+   [(230, …), (231, …), (232, …)]` and the SES line names the two Sonic Blade clips.
+2. Learn Sonic Blade (Re:CoM's sleight), equip it on KH1 > Abilities (3 AP).
+3. Near an enemy (in battle and in the field) with 2+ MP: the context tab shows "Sonic"; with
+   less, nothing (FM's rule). Triangle: 2 MP gone at once, the wind-up, the first dash.
+4. During each dash, "Rave" in the Attack row lights inside the window; Triangle there dashes
+   again (toward the target, or back the other way without one); the seventh is "Blast" → the
+   finisher. Not pressing: Sora stops after the dash.
+5. No damage taken during the whole special; enemies take KH1's damage; Re:CoM's sleight cards
+   (Sonic Blade included) still work at Combat = Re:CoM and with cards at Combat = KH1 if the deck
+   is there.
+6. F9 trace of one full Sonic Blade (seven rows): attach it; the `sp` column gives the frames for
+   the 1:1 check against KH1.

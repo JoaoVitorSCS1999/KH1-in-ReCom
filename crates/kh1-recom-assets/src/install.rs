@@ -86,6 +86,15 @@ pub fn read_kh1(game: &Path, keys: KeyTable) -> Result<(Vec<u8>, Vec<u8>)> {
     Ok((inst.read("xa_ex_0010.mset")?, inst.read("xa_ex_0010.mdls")?))
 }
 
+/// KH1's specials' file (M9 stage 9c.1): its motion set holds Sonic Blade's motions.
+pub const XL_LIMIT: &str = "xl_limit.dat";
+
+/// Reads KH1's [`XL_LIMIT`] from the game folder's `kh1_*` archives.
+pub fn read_kh1_xl(game: &Path, keys: KeyTable) -> Result<Vec<u8>> {
+    let inst = Install::with_keys(game, keys)?;
+    Ok(inst.read(XL_LIMIT)?)
+}
+
 /// Panacea's mod folder for a game folder: `mod_path=` of `panacea_settings.txt` (relative
 /// paths are relative to the game folder, Panacea's working directory).
 pub fn mod_path(game: &Path) -> Result<PathBuf> {

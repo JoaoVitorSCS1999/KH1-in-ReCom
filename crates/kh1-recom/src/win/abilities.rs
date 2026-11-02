@@ -7,8 +7,9 @@
 //!   camp's Abilities page opens, never per frame: the abilities not yet unlocked are checked
 //!   against Re:CoM's own learned-sleight test (`0x14023AB00`), Re:CoM's level and Re:CoM's
 //!   ability variable (0, 0x24) read with its getter `0x1401B08C0` (new ones arrive unequipped,
-//!   KH1's rule; Dodge Roll equipped, owner); a block older than layout v3 is migrated once
-//!   (`crate::abilities::migrate`); written back, logged.
+//!   KH1's rule; Re:CoM's High Jump / Glide / Superglide equipped, owner); a block older than layout
+//!   v4 is migrated once (`crate::abilities::migrate`: Guard and Dodge Roll leave it, they are
+//!   Sora's kit); written back, logged.
 //! - **Use:** [`equipped_live`] reads the equipped word from the block (a 15-byte read) for the
 //!   abilities the KH1 frame passes on (`win::movement::abilities`), so what the camp's page
 //!   changes applies at once, and a loaded save is followed with no event of ours.
@@ -80,6 +81,8 @@ pub fn sync() -> Option<State> {
     let mut block: [u8; ab::BLOCK_LEN] = unsafe { rd(at) };
     let version = ab::version(&block);
     let before = ab::read(&block);
+    // The words as stored (an older block may still hold the kit's bits, which `read` hides).
+    let raw = State { unlocked: u32::from_le_bytes(block[ab::field::UNLOCKED..ab::field::UNLOCKED + 4].try_into().unwrap_or([0; 4])), equipped: u32::from_le_bytes(block[ab::field::EQUIPPED..ab::field::EQUIPPED + 4].try_into().unwrap_or([0; 4])) };
     let mut s: State = before;
     let level = super::stats::sora_level();
     // SAFETY: Re:CoM's own getter (bytes checked at start), a pure read of its save variables.
@@ -89,7 +92,7 @@ pub fn sync() -> Option<State> {
     let learned = unsafe { func::<LearnedFn>(SLEIGHT_LEARNED) };
     let mut ask = |id: u16| unsafe { learned(id) } & 0xFF != 0;
     let migrating = version < ab::BLOCK_NOW;
-    let r = if migrating { ab::migrate(&mut s, version, level, recom_var, INI_EQUIPPED.load(Ordering::Relaxed), &mut ask) } else { ab::sync(&mut s, level, recom_var, &mut ask) };
+    let r = if migrating { ab::migrate(&mut s, raw, version, level, recom_var, INI_EQUIPPED.load(Ordering::Relaxed), &mut ask) } else { ab::sync(&mut s, level, recom_var, &mut ask) };
     if s != before || migrating {
         ab::write(&s, &mut block);
         // SAFETY: as above.
@@ -97,11 +100,12 @@ pub fn sync() -> Option<State> {
     }
     if migrating {
         log(&format!(
-            "abilities: block v{version} -> v{} at Re:CoM level {level} (max AP {}, Re:CoM's ability variable {recom_var:#x}): equipped {:?} ({} AP){}{}",
+            "abilities: block v{version} -> v{} at Re:CoM level {level} (max AP {}, Re:CoM's ability variable {recom_var:#x}): equipped {:?} ({} AP){}{}{}",
             ab::BLOCK_NOW,
             ab::max_ap(level),
             ab::names(s.equipped),
             ab::used_ap(s.equipped),
+            if r.kit_dropped != 0 { format!("; Sora's kit now, out of the block (their AP back) {:?}", ab::names(r.kit_dropped)) } else { String::new() },
             if r.taken != 0 { format!("; the ini's, not yet from their source, taken back {:?}", ab::names(r.taken)) } else { String::new() },
             if r.fitted != 0 { format!("; over KH1's AP, unequipped {:?}", ab::names(r.fitted)) } else { String::new() }
         ));
@@ -110,7 +114,7 @@ pub fn sync() -> Option<State> {
         log(&format!("abilities: learned at Re:CoM level {level} (unequipped, KH1's rule; Re:CoM's ability variable {recom_var:#x}): {:?}", ab::names(r.new)));
     }
     if r.new_equipped != 0 {
-        log(&format!("abilities: learned at Re:CoM level {level} and equipped (owner: from the start): {:?}", ab::names(r.new_equipped)));
+        log(&format!("abilities: learned at Re:CoM level {level} and equipped (owner: Re:CoM gave it; removable): {:?}", ab::names(r.new_equipped)));
     }
     if !LOGGED_FIRST.swap(true, Ordering::Relaxed) {
         log(&format!(
@@ -131,7 +135,7 @@ pub fn sync() -> Option<State> {
 /// once.
 pub fn equipped_live() -> Option<u32> {
     if ALL.load(Ordering::Relaxed) {
-        return Some(usable(ab::ALL_BITS & !specials()));
+        return Some(usable(ab::ALL_BITS & !ab::SPECIALS_WAITING & !ab::KIT_BITS));
     }
     // The KH1 frame runs only for Sora at the KH1 setting (never in Riku's story), so no story
     // test here: one atomic load, one pointer read and the block.
@@ -143,10 +147,6 @@ pub fn equipped_live() -> Option<u32> {
     let block: [u8; ab::BLOCK_LEN] = unsafe { rd(save + ab::BLOCK_FIRST) };
     let e = if ab::version(&block) < ab::BLOCK_NOW { sync()?.equipped } else { ab::read(&block).equipped };
     Some(usable(e))
-}
-
-fn specials() -> u32 {
-    ab::SPECIALS.fold(0, |b, i| b | 1 << i)
 }
 
 /// The camp's Abilities page: the state after a sync, and Sora's level. None when not live.

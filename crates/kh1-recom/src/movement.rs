@@ -74,9 +74,11 @@ pub mod phase {
 /// before the update that starts the new motion; kh1-core `MotionPlayer::update`), so the travel
 /// carries across a motion change. It is dropped when an update passed without a root step (Re:CoM
 /// calls `0x14024DCA0` only for root-motion clips): `tick` counts Sora's frames.
-/// [`RootDelay::position`]'s safety net in Re:CoM metres (KH1's fastest root travel is 0.18 m a
-/// frame).
-pub const ROOT_DELAY_MAX_GAP: f32 = 0.5;
+/// [`RootDelay::position`]'s safety net in Re:CoM metres: above every KH1 root travel of a frame
+/// (Sonic Blade's dash and finisher: 0.61 m a frame, M9 stage 9c.1; Sora's own motions at most
+/// 0.18 m). At 0.5 (before 9c.1) the net let Re:CoM's own same-update travel through on the dash's
+/// fastest frames, so one frame's travel was applied twice (the test caught 623 for KH1's 562).
+pub const ROOT_DELAY_MAX_GAP: f32 = 1.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RootDelay {
@@ -176,6 +178,9 @@ pub struct FrameInput {
     pub magic: Option<crate::magic::MagicCommand>,
     /// A KH1 item command this frame (the command menu's Items list, M8 stage 8a.1).
     pub item: Option<crate::items::ItemCommand>,
+    /// A KH1 special command this frame (the context tab's Triangle, M9 stage 9c.1): Sonic Blade,
+    /// Rave, Blast (`crate::specials::cmd`).
+    pub special: Option<u8>,
 }
 
 /// A KH1 swing for Re:CoM to start (`crate::attack`): Re:CoM's field-swing init with the KH1 row.
@@ -297,6 +302,18 @@ pub trait Host {
     fn battle_won(&mut self) -> bool {
         false
     }
+    /// M9 stage 9c.1: Re:CoM's sleight action `0x16` starts for a KH1 special: `initStockSkill`'s
+    /// writes, cardless; KH1's MP paid (the press frame). False when it can't (no rows, no MP).
+    fn start_special(&mut self, _s: &crate::specials::SpecialStart) -> bool {
+        false
+    }
+    /// A special row starts on Re:CoM's sleight action: the last row's volume ends, the KH1 row in
+    /// the attack row pointer, Re:CoM's attack id of it.
+    fn special_row(&mut self, _r: &crate::specials::RowStart) {}
+    /// Re:CoM ends its sleight action (`0x1401F6660`). True as for [`Host::end_swing`].
+    fn end_special(&mut self, _airborne: bool) -> bool {
+        false
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -318,7 +335,7 @@ pub struct MotionRec {
     /// KH1's blend length and clock (glide motions only switch once the blend is done).
     pub blend: f32,
     pub blend_clock: f32,
-    start_now: bool,
+    pub(crate) start_now: bool,
     queue: Vec<Queued>,
     /// The pending head has been sent to Re:CoM, and whether a Re:CoM row plays it.
     pub(crate) issued: bool,
@@ -360,6 +377,8 @@ pub struct FrameOut {
     pub cast: Vec<crate::magic::CastEvent>,
     /// What the item command did (M8 stage 8a.1).
     pub items: Vec<crate::items::ItemEvent>,
+    /// What the special did (M9 stage 9c.1).
+    pub specials: Vec<crate::specials::SpecialEvent>,
     /// Re:CoM's end action entered its win action (`0x1C`) in this frame: the KH1 frame wrote
     /// nothing to Re:CoM after it (no action, no motion), and the next one takes over afresh.
     pub recom_took: bool,
@@ -424,6 +443,9 @@ pub struct Kh1Sora {
     /// any. KH1's use task itself runs on its own (`win::items`), as KH1's does.
     pub item: Option<crate::items::ItemCommand>,
     pub(crate) item_log: Vec<crate::items::ItemEvent>,
+    /// The KH1 special running on Re:CoM's sleight action (M9 stage 9c.1): KH1's state 0x20.
+    pub special: Option<crate::specials::Special>,
+    pub(crate) special_log: Vec<crate::specials::SpecialEvent>,
     /// Re:CoM's end action (from [`Kh1Sora::leave_swing`] / `leave_cast`) entered its own win
     /// action: this frame yields to it.
     pub(crate) recom_took: bool,
@@ -442,6 +464,8 @@ impl Kh1Sora {
         crate::magic::add_motions(&mut motions);
         // KH1's item use motion (M8 stage 8a.1).
         crate::items::add_motions(&mut motions);
+        // KH1's specials' motions (M9 stage 9c.1), keyed by xl entry.
+        crate::specials::add_motions(&mut motions);
         Kh1Sora {
             params,
             abilities,
@@ -485,6 +509,8 @@ impl Kh1Sora {
             cast_log: Vec::new(),
             item: None,
             item_log: Vec::new(),
+            special: None,
+            special_log: Vec::new(),
             recom_took: false,
         }
     }
@@ -526,6 +552,11 @@ impl Kh1Sora {
         // use's motion is over too (its use task goes on by itself, as KH1's).
         self.swing = None;
         self.item = None;
+        // A special Re:CoM interrupted (an event, a Re:CoM action) is over; its MP stays paid, as
+        // KH1's (paid on the press).
+        if let Some(s) = self.special.take() {
+            self.special_log.push(crate::specials::SpecialEvent::Ended { why: "Re:CoM ran another action", frame: s.age });
+        }
         if let Some(c) = self.cast.take() {
             if !c.released && !c.cancelled {
                 if c.start.spell == crate::magic::spell::AERO {
@@ -566,6 +597,9 @@ impl Kh1Sora {
             return a;
         }
         if let Some(a) = self.item_action() {
+            return a;
+        }
+        if let Some(a) = self.special_action() {
             return a;
         }
         let a = |id, sub, phase| Action { id, sub, phase };
@@ -681,7 +715,15 @@ impl Kh1Sora {
             if ended && !self.rec.queue.is_empty() {
                 let over = len.map_or(0.0, |l| (self.rec.frame - l).max(0.0));
                 self.rec.queue[0].start += over;
+                let ended_req = self.rec.req;
                 release = self.start_head(dt);
+                // A special's motion ended into its end callback (M9 stage 9c.1): after the
+                // wind-up the first dash takes the motion (the lock stays); after a row the special
+                // ends and its queued idle plays.
+                if kh1_core::data::xl::entry_of(ended_req).is_some() && self.special_motion_end(h) {
+                    self.rec.flags = 0;
+                    return;
+                }
                 // A swing's motion ended into its queued idle / fall: Re:CoM ends its attack; a
                 // cast's: Re:CoM ends its magic action.
                 self.leave_swing(h);
@@ -721,7 +763,7 @@ impl Kh1Sora {
         }
     }
 
-    fn set_state(&mut self, new: u32) -> bool {
+    pub(crate) fn set_state(&mut self, new: u32) -> bool {
         if new == self.state {
             return false;
         }
@@ -779,6 +821,7 @@ impl Kh1Sora {
         if fresh {
             self.resync(h, airborne);
         } else {
+            self.special_tick(if self.last_step > 0.0 { self.last_step } else { step });
             // Re:CoM turned Sora itself (rare): its facing wins.
             let f = h.facing();
             if wrap_angle(f - self.facing).abs() > FACING_SYNC {
@@ -823,6 +866,11 @@ impl Kh1Sora {
         if let Some(i) = input.item.filter(|_| item_cmd.is_none()) {
             self.item_log.push(crate::items::ItemEvent::Refused { item: i.item, why });
         }
+        // A special command (M9 stage 9c.1): the context tab's Triangle (its own accept inside).
+        let special_cmd = input.special.filter(|_| !won);
+        if let Some(c) = input.special.filter(|_| won) {
+            self.special_log.push(crate::specials::SpecialEvent::Refused { command: c, why });
+        }
 
         // ---- think: pre-step ----
         self.speed = 0.0;
@@ -851,7 +899,9 @@ impl Kh1Sora {
             self.pad_handler(h, input, &mut dir, &mut w, pos, step, ev, &mut out.height, &mut out.recom_spring);
         }
         if !input.jump.pressed {
-            if counter_cmd {
+            if let Some(c) = special_cmd {
+                self.command_special(h, c, input.target, pos, &mut dir, &mut w);
+            } else if counter_cmd {
                 self.command_counterattack(h, &mut dir, &mut w, input.target, pos, ev);
             } else if attack_cmd {
                 self.command_attack(h, &mut dir, &mut w, input.target, input.locked, pos, ev);
@@ -955,6 +1005,7 @@ impl Kh1Sora {
         }
         out.cast = self.take_cast_log();
         out.items = self.take_item_log();
+        out.specials = self.take_special_log();
         out
     }
 
@@ -970,10 +1021,15 @@ impl Kh1Sora {
         self.swing = None;
         self.cast = None;
         self.item = None;
+        self.special = None;
+        if self.state == crate::specials::STATE {
+            self.state = state::GROUND;
+        }
         self.lock = false;
         self.rec = MotionRec::unknown();
         out.cast = self.take_cast_log();
         out.items = self.take_item_log();
+        out.specials = self.take_special_log();
         out.recom_took = true;
         true
     }
@@ -1007,7 +1063,8 @@ impl Kh1Sora {
 
     /// The 8-frame countdown of KH1's flag 0x80 (`0x140297FE0`): it starts at the next action
     /// request or when the lock releases. Assumption: leaving the recoil early (its free frames
-    /// 28–60) counts as the release.
+    /// 28–60) counts as the release. A special keeps the same flag on for its whole run (its
+    /// state's enter / exit, `0x14039EC50` / `0x14039EC10`: flags `0x1200080`).
     fn untouchable_step(&mut self, h: &mut dyn Host, step: f32) {
         if self.untouchable {
             if !self.untouchable_counting {
@@ -1022,9 +1079,10 @@ impl Kh1Sora {
                 }
             }
         }
-        if self.untouchable != self.untouchable_reported {
-            self.untouchable_reported = self.untouchable;
-            h.set_untouchable(self.untouchable);
+        let want = self.untouchable || self.special.is_some();
+        if want != self.untouchable_reported {
+            self.untouchable_reported = want;
+            h.set_untouchable(want);
         }
     }
 
@@ -1092,6 +1150,15 @@ impl Kh1Sora {
                 }
             }
             state::GLIDE => self.glide_next(h, airborne, pos, ev),
+            // M9 stage 9c.1, `0x14039EBA0`: in the air the special ends, Sora falls (state 2).
+            crate::specials::STATE => {
+                if airborne {
+                    self.special_fall(h);
+                    state::AIR
+                } else {
+                    crate::specials::STATE
+                }
+            }
             s => s,
         };
         if self.set_state(next) && next == state::AIR {

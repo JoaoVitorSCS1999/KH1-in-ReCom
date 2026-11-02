@@ -11,6 +11,29 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 96: M9 stage 9c.1: KH1's Sonic Blade; Guard and Dodge Roll in Sora's kit, version 0.54.0 (2026-11-01)
+
+- Asks (owner, 2026-11-01): "just have guard and dodge roll be a part of sora's movement kit from the start,
+  dont add them as abilities"; High Jump / Glide / Superglide equipped when Re:CoM gives them; Sonic Blade with
+  Re:CoM's sleight effects, no scene tint for now.
+- Kit: Guard and Dodge Roll always on at Combat = KH1 (no AP, not on the page); save block v4 (their AP back);
+  High Jump / Glide / Superglide auto-equipped once on arrival, removable.
+- KH1 (Checked (decomp + files)): offer `0x14028D0F0` (order, range 600, < 160 above, 2 MP), start
+  `0x14028D800` (MP on the press frame), `0x14039EAD0` state 0x20 (invincible, root motion only), dashes rows
+  0x1B–0x20 + finisher 0x21, follow-ups Rave / Blast on a fresh Triangle in the window; `xl_limit.dat`
+  motions 0–2 (30 / 54 / 82 f; travel 5.62 m / 7.34 m).
+- Built: asset step converts `xl_limit.dat` entries 0–2 into slots (230–232 with the owner's files) + SES
+  entries + words 319 / 321 / 322. The special runs on Re:CoM's action 0x16: `initStockSkill`'s writes for
+  case 9 without a card, `exeStockSkill` `0x140218950` hooked (11 bytes) to run the KH1 frame then Re:CoM's
+  `procAttackCollision` `0x1401F5DC0`; Field exe action-0x16 entry `0x1401FA648` → 13-byte cave stub at
+  `0x1401FB7B2`; Re:CoM's `limit1` start effect; invincible via the damage-check path. Offer in the
+  context tab ("Sonic"), follow-ups in the Attack row. Root-motion safety net 0.5 → 1.0 m/f.
+- Assumptions: dash 1 at frame 31; Re:CoM's lock target for KH1's; Re:CoM's sound 0xD1 for KH1's
+  4003 / 4004; nobody reads the sleight id `+0x82C`. `docs/recom-m9-abilities.md` § 9c.1.
+- Checked: tests, Windows build, site bytes. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 95: M9 9b follow-ups: Guard and Dodge Roll from the start, Re:CoM's High Jump / Glide / Superglide, Combo Master 50, Rod max MP, blue rows, version 0.53.0 (2026-11-01)
 
 - Asks (owner, 2026-11-01): Guard from the start; High Jump, Glide, Superglide where Re:CoM unlocks them;

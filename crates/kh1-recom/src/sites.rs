@@ -992,6 +992,48 @@ pub const ABILITY_CALLEES: &[Site] = &[
     Site { name: "sleight learned (0x14023AB00)", rva: 0x0023_AB00, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x0F, 0xB7, 0xD9, 0xE8, 0xF2, 0xFF, 0xF6, 0xFF, 0x85, 0xC0] },
 ];
 
+/// M9 stage 9c.1 (`win::specials`, `docs/recom-m9-abilities.md` § 9c.1): KH1's specials on
+/// Re:CoM's sleight action `0x16`. Same rule as [`HOOKS`].
+pub const SPECIAL_HOOKS: &[Site] = &[
+    // mov rax,rsp; mov [rax+0x10],rbx; mov [rax+0x18],rsi: CPlayerSora's exeStockSkill (Sora's
+    // vtable +0x140; the Battle exe calls it at 0x1401F9B64, the Field exe through our new case).
+    Site { name: "exeStockSkill (0x140218950)", rva: 0x0021_8950, expect: &[0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48, 0x89, 0x70, 0x18] },
+];
+
+/// Exe bytes the specials patch.
+pub const SPECIAL_DATA: &[Site] = &[
+    // The Field exe's jump table (`0x1401FA5F4`, index action − 1), entry for action 0x16: the
+    // default `0x1401FA599` (an RVA), then 0x17's (the default too, not changed).
+    Site { name: "Field exe jump table, action 0x16", rva: 0x001F_A648, expect: &[0x99, 0xA5, 0x1F, 0x00, 0x99, 0xA5, 0x1F, 0x00] },
+    // int3 padding after a `ret` (`0x1401FB7B1`), before `0x1401FB7C0`: the 13-byte stub.
+    Site { name: "code cave 0x1401FB7B2", rva: 0x001F_B7B2, expect: &[0xCC; 14] },
+];
+
+/// Re:CoM functions the specials call, and code they replicate (not patched).
+pub const SPECIAL_CHECKED: &[Site] = &[
+    // initStockSkill: its log call, then 0x1401F8D70(player, 0x16) (`mov edx,0x16`). The KH1
+    // special does its writes cardlessly (it reads the card's BattleCardList row for the AP).
+    Site {
+        name: "initStockSkill (0x140220DF0)",
+        rva: 0x0022_0DF0,
+        expect: &[
+            0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x8B, 0xDA, 0x48, 0x8B, 0xF9, 0x48, 0x8D, 0x15, 0x6D, 0x8D, 0x38, 0x00, 0xB9, 0x03, 0x00, 0x00, 0x00, 0xE8, 0xFB, 0xFB, 0x01, 0x00, 0xBA, 0x16, 0x00,
+        ],
+    },
+    // The Battle exe's case 0x16: mov rax,[rdi]; mov rcx,rdi; call [rax+0x140]; jmp to its end.
+    Site { name: "Battle exe case 0x16 (0x1401F9B5E)", rva: 0x001F_9B5E, expect: &[0x48, 0x8B, 0x07, 0x48, 0x8B, 0xCF, 0xFF, 0x90, 0x40, 0x01, 0x00, 0x00, 0xE9, 0x5A, 0x01, 0x00, 0x00] },
+    // procAttackCollision(player, frame): the row's window (+0x3C8 → +4 / +5), the weapon's
+    // attack (`0x1402250B0`) with +0x638 / +0x660 / +0x668 / +0x66C; called by the swing exe and
+    // exeStockSkill, here by our exeStockSkill wrapper for a KH1 special row.
+    Site { name: "procAttackCollision (0x1401F5DC0)", rva: 0x001F_5DC0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0x8B, 0xD9, 0x48, 0x8B, 0x89, 0xC8, 0x03, 0x00, 0x00, 0x0F, 0xB6, 0x41, 0x04] },
+    // The sleight resource load (`initStockSkill` calls it with (player+0x3B8, 9, 0) for Sonic
+    // Blade: group 0x3F1 through `0x14020F720` / `0x14020FB10`).
+    Site { name: "sleight resources (0x140211790)", rva: 0x0021_1790, expect: &[0x40, 0x53, 0x41, 0x54, 0x48, 0x83, 0xEC, 0x38, 0x48, 0x8B, 0xD9, 0xE8, 0x80, 0xDF, 0xFF, 0xFF] },
+];
+
+/// CPlayerSora's exeStockSkill slot (vtable `+0x140`), which the Battle exe calls through.
+pub const SPECIAL_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x140 (0x1405A9A78)", rva: 0x005A_9A78, target: 0x0021_8950 }];
+
 /// M8 stage 8a.3 (`win::shop`, `docs/recom-m8-items.md` § Stage 8a.3): the Moogle shop's pack screen
 /// update (`CMoogleShopCore` mode 4), wrapped for the Items tab. Same rule as [`HOOKS`].
 pub const SHOP_HOOKS: &[Site] = &[
@@ -1639,6 +1681,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         MAGIC_FX_CHECKED,
         CUSTOMIZE_GLYPHS_CHECKED,
         ABILITY_CALLEES,
+        SPECIAL_HOOKS,
+        SPECIAL_DATA,
+        SPECIAL_CHECKED,
     ];
     LISTS
         .iter()
@@ -1738,7 +1783,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, SHOP_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
@@ -2122,6 +2167,26 @@ mod tests {
         let rel = i32::from_le_bytes(sync.expect[7..11].try_into().unwrap()) as i64;
         assert_eq!(0x1_4000_0000 + sync.rva as i64 + 4 + 7 + rel, 0x1_4087_B390);
         assert!(all_sites().any(|s| s.rva == 0x001E_59A0), "the heal is checked");
+    }
+
+    /// M9 stage 9c.1: the specials' sites agree with `crate::specials::field_case` and each other.
+    #[test]
+    fn special_sites() {
+        use crate::specials::field_case as fc;
+        assert_eq!(SPECIAL_HOOKS[0].rva, fc::EXE_STOCK_RVA);
+        assert_eq!(SPECIAL_PTRS[0].target, SPECIAL_HOOKS[0].rva);
+        assert_eq!(0x1_4000_0000u64 + SPECIAL_PTRS[0].rva as u64, data::SORA_VTABLE + 0x140);
+        assert_eq!(SPECIAL_DATA[0].rva, fc::TABLE_ENTRY_RVA);
+        assert_eq!(u32::from_le_bytes(SPECIAL_DATA[0].expect[..4].try_into().unwrap()), fc::DEFAULT_RVA);
+        assert_eq!(SPECIAL_DATA[1].rva, fc::CAVE_RVA);
+        assert!(fc::STUB_LEN <= SPECIAL_DATA[1].expect.len());
+        // Not the caves the other cases use.
+        assert!([crate::items::field_case::CAVE_RVA, crate::magic::field_case::CAVE_RVA, crate::attack::battle_case::CAVE_RVA].iter().all(|&c| c.abs_diff(fc::CAVE_RVA) >= 16));
+        // initStockSkill sets action 0x16; the Battle case calls vtable +0x140.
+        let init = SPECIAL_CHECKED.iter().find(|s| s.name.starts_with("initStockSkill")).unwrap();
+        assert_eq!(&init.expect[init.expect.len() - 3..], &[0xBA, crate::specials::RECOM_ACTION as u8, 0x00]);
+        let case = SPECIAL_CHECKED.iter().find(|s| s.name.starts_with("Battle exe case 0x16")).unwrap();
+        assert_eq!(u32::from_le_bytes(case.expect[8..12].try_into().unwrap()), 0x140);
     }
 
     #[test]

@@ -87,12 +87,19 @@ pub const RECOIL: u16 = 0x6E;
 
 /// The appended rows: `rows[i]` is the row id of `KH1_ONLY[i]`, when its KH1-only clip exists;
 /// `recom[i]` Re:CoM's own action row playing that entry's clip, when the manifest maps the entry
-/// to one of Re:CoM's clips.
+/// to one of Re:CoM's clips; `xl[e]` (stage 9c.1) the row of KH1's specials' motion `e` of
+/// `xl_limit.dat` (`kh1_core::data::xl`: Sonic Blade's wind-up, dash, finisher), appended after
+/// the others when the asset step converted it (the manifest's `xl_limit` section).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Extension {
     pub rows: [Option<u32>; KH1_ONLY.len()],
     pub recom: [Option<u32>; KH1_ONLY.len()],
+    pub xl: [Option<u32>; XL_ENTRIES.len()],
 }
+
+/// KH1's specials' motions the asset step converts (`xl_limit.dat` entries; stage 9c.1: Sonic
+/// Blade's three), in the order their rows are appended.
+pub const XL_ENTRIES: [usize; 3] = kh1_core::data::xl::ENTRIES;
 
 impl Extension {
     /// Row ids for the KH1 entries the pack holds, in `KH1_ONLY` order, from `RECOM_ROWS` on.
@@ -106,6 +113,23 @@ impl Extension {
             }
         }
         e
+    }
+
+    /// The xl entries the pack holds, appended after the KH1-only rows (stage 9c.1).
+    pub fn with_xl(mut self, have: impl Fn(usize) -> bool) -> Extension {
+        let mut next = RECOM_ROWS + self.count() as u32;
+        for (i, &e) in XL_ENTRIES.iter().enumerate() {
+            if have(e) {
+                self.xl[i] = Some(next);
+                next += 1;
+            }
+        }
+        self
+    }
+
+    /// The action row playing xl entry `e` (stage 9c.1).
+    pub fn xl_row(&self, e: usize) -> Option<u32> {
+        XL_ENTRIES.iter().position(|&x| x == e).and_then(|i| self.xl[i])
     }
 
     /// Entries without a KH1-only clip that Re:CoM's own action table plays: `recom_row(entry)` is
@@ -129,9 +153,10 @@ impl Extension {
     }
 
     /// Whether `row` plays one of the KH1 requests above (our appended rows, or Re:CoM's rows of
-    /// the modifiers' bakes): they end in the battle stance like Re:CoM's swing rows.
+    /// the modifiers' bakes, or the specials' rows): they end in the battle stance like Re:CoM's
+    /// swing rows.
     pub fn has_row(&self, row: i32) -> bool {
-        self.rows.iter().chain(self.recom.iter()).flatten().any(|&r| r as i32 == row)
+        self.rows.iter().chain(self.recom.iter()).chain(self.xl.iter()).flatten().any(|&r| r as i32 == row)
     }
 }
 
@@ -238,19 +263,28 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         // An item on self (M8 stage 8a.1): Re:CoM's own item clip, KH1's entry 58 baked (no root
         // travel in either).
         crate::items::USE_SELF => row::ITEM,
+        // KH1's specials' motions (stage 9c.1), keyed by xl entry: their converted clips, with
+        // root motion where the xl set's request map has the bit (the dash and the finisher).
+        r if kh1_core::data::xl::entry_of(r).is_some() => {
+            let e = kh1_core::data::xl::entry_of(r)?;
+            let root = kh1_core::data::xl::motions()[e].root_motion;
+            return ext.xl_row(e).map(|row| (row, root));
+        }
         _ => return None,
     };
     Some((r, false))
 }
 
 /// The table rows to append after Re:CoM's 0x47: `(row id, clip name)`, from the manifest's KH1
-/// entries (`motions::clip_for_entry`).
-pub fn appended_rows(ext: &Extension, name_of_entry: impl Fn(u32) -> Option<String>) -> Vec<(u32, String)> {
-    KH1_ONLY
+/// entries (`motions::clip_for_entry`) and its xl entries (stage 9c.1).
+pub fn appended_rows(ext: &Extension, name_of_entry: impl Fn(u32) -> Option<String>, name_of_xl: impl Fn(usize) -> Option<String>) -> Vec<(u32, String)> {
+    let mut v: Vec<(u32, String)> = KH1_ONLY
         .iter()
         .zip(ext.rows.iter())
         .filter_map(|(&(_, entry), r)| Some((r.as_ref().copied()?, name_of_entry(entry)?)))
-        .collect()
+        .collect();
+    v.extend(XL_ENTRIES.iter().zip(ext.xl.iter()).filter_map(|(&e, r)| Some(((*r)?, name_of_xl(e)?))));
+    v
 }
 
 #[cfg(test)]
@@ -391,9 +425,30 @@ mod tests {
         assert_eq!(row_for(RECOIL, &s, &all), Some((row::RECOIL, false)));
         let no_guard = Extension::plan(|e| e != 110);
         assert_eq!(no_guard.rows[..2], [None, Some(0x47)], "the counterattack moves up when the guard clip is missing");
-        let rows = appended_rows(&all, |e| Some(format!("p001_{}", 150 + e)));
+        let rows = appended_rows(&all, |e| Some(format!("p001_{}", 150 + e)), |_| None);
         assert_eq!(rows[..2], [(0x47, "p001_260".to_string()), (0x48, "p001_261".to_string())]);
         assert_eq!(rows.len(), KH1_ONLY.len());
-        assert!(appended_rows(&all, |_| None).is_empty());
+        assert!(appended_rows(&all, |_| None, |_| None).is_empty());
+    }
+
+    /// Stage 9c.1: Sonic Blade's xl clips get rows after the KH1-only ones; our xl requests play
+    /// them (wind-up without root motion, dash and finisher with), and the idle after them is the
+    /// stance idle.
+    #[test]
+    fn xl_rows_follow_the_kh1_only_rows() {
+        use kh1_core::data::xl;
+        let e = Extension::plan(|e| e != 110).with_xl(|_| true);
+        let first = RECOM_ROWS + KH1_ONLY.len() as u32 - 1;
+        assert_eq!(e.xl, [Some(first), Some(first + 1), Some(first + 2)]);
+        let s = Stance::default();
+        assert_eq!(row_for(xl::request(xl::WINDUP), &s, &e), Some((first, false)));
+        assert_eq!(row_for(xl::request(xl::DASH), &s, &e), Some((first + 1, true)));
+        assert_eq!(row_for(xl::request(xl::FINISHER), &s, &e), Some((first + 2, true)));
+        assert_eq!(row_for(xl::request(xl::DASH), &s, &Extension::default()), None);
+        assert_eq!(row_for(0, &Stance { row: (first + 1) as i32, ..s }, &e), Some((row::STANCE_IDLE, false)));
+        let names = appended_rows(&e, |_| Some("k".into()), |x| Some(format!("p001_{}", 230 + x)));
+        assert_eq!(names[names.len() - 3..], [(first, "p001_230".to_string()), (first + 1, "p001_231".to_string()), (first + 2, "p001_232".to_string())]);
+        // Without the KH1-only rows the xl rows start right after Re:CoM's.
+        assert_eq!(Extension::default().with_xl(|x| x == xl::DASH).xl, [None, Some(RECOM_ROWS), None]);
     }
 }

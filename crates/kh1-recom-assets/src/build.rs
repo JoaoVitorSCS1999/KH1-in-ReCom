@@ -42,6 +42,24 @@ pub const RECOM_KEYBLADE_SLOTS: usize = 158;
 /// The Sora bone the Keyblade's bone 0 hangs from (`FUN_1401FA6E0` → `FUN_140224BA0`).
 pub const KEYBLADE_ATTACH: &str = "WeaponR";
 
+/// KH1's specials' motion set (M9 stage 9c.1): the entries of `xl_limit.dat`'s set that get new
+/// slots (wind-up, dash, finisher of Sonic Blade), the requests that play them (`0xC8 + entry`), and
+/// the file's motion set offset (`+4`). Checked (files: `xl_limit.dat` holds 7 sections, the motion
+/// set at `0x80`; its request map sends 0xC8 / 0xC9 / 0xCA to entries 0 / 1 / 2, the last two with
+/// root motion; decomp: KH1's Sonic Blade requests 0xC8 + n on the xl set, `0x14039EAD0` /
+/// `0x14039ECA0`).
+pub const XL_ENTRIES: [usize; 3] = [0, 1, 2];
+
+/// The motion set inside `xl_limit.dat` (the section at its `u32 +4`).
+pub fn xl_motion_set(file: &[u8]) -> Result<&[u8]> {
+    let u = |o: usize| file.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize);
+    let (Some(n), Some(at)) = (u(0), u(4)) else { return bad("xl_limit.dat: too short") };
+    if !(2..=16).contains(&n) || at < 8 || at >= file.len() {
+        return bad(format!("xl_limit.dat: {n} sections, motion set at {at:#x}: not KH1's layout"));
+    }
+    Ok(&file[at..])
+}
+
 /// The four input files.
 #[derive(Clone, Debug)]
 pub struct Inputs {
@@ -55,6 +73,8 @@ pub struct Inputs {
     pub mdl: Vec<u8>,
     /// Re:CoM `PLAYER/0002/PL0002.ANN` and `.MDL` (the Keyblade), when present.
     pub weapon: Option<(Vec<u8>, Vec<u8>)>,
+    /// KH1 `xl_limit.dat`'s motion set ([`xl_motion_set`]), when present (M9 stage 9c.1).
+    pub xl: Option<Vec<u8>>,
 }
 
 /// Options.
@@ -176,6 +196,9 @@ pub struct Built {
     pub entries: Vec<ManifestEntry>,
     /// The extended Keyblade pack, when the inputs had one and the pack changed.
     pub weapon: Option<WeaponPack>,
+    /// M9 stage 9c.1: the specials' clips ([`XL_ENTRIES`] of `xl_limit.dat`), after the KH1-only
+    /// entries' slots; `kh1_entry` is the xl entry. Empty without the file.
+    pub xl: Vec<ManifestEntry>,
 }
 
 /// The extended `PL0002.ANN`.
@@ -360,10 +383,70 @@ pub fn build(inp: &Inputs, opt: &BuildOptions) -> Result<Built> {
         }
         ann.slots.push(Slot { name: name16(&name), clip: Some(clip) });
     }
+    // M9 stage 9c.1: the specials' motions, always new clips after the KH1-only entries' slots
+    // (`new_rank` counts all of them, so the slots don't depend on `only`). Re:CoM's own Sonic
+    // Blade clip (its sleight pack) is not used: KH1's frames run the special.
+    let mut xl = Vec::new();
+    if let Some(xb) = &inp.xl {
+        let xs = MotionSet::parse(xb)?;
+        let xrefs = referenced_entries(&xs)?;
+        for (i, &e) in XL_ENTRIES.iter().enumerate() {
+            let Some((_, requests, root)) = xrefs.iter().find(|r| r.0 == e).cloned() else {
+                return bad(format!("xl_limit.dat: entry {e} is not in its request map"));
+            };
+            let m = xs.motions.get(e).ok_or_else(|| crate::Error::Format(format!("xl_limit.dat: no motion {e}")))?;
+            let slot = base + new_rank + i;
+            // Played once: KH1 requests each with an end callback (`0x14039ED60` / `0x14039EC90`),
+            // which needs the motion to end.
+            let looped = false;
+            let name = format!("{}{slot:03}", opt.prefix);
+            let clip = conv.convert(m, &ClipSpec { name: name.clone(), looped, root_motion: root, blend: opt.blend })?;
+            let mut weapon_name = None;
+            if let Some((wa, rig, _)) = weapon.as_mut() {
+                let wname = format!("{}{slot:03}", opt.weapon_prefix);
+                let wclip = conv.convert_weapon(rig, m, &ClipSpec { name: wname.clone(), looped, root_motion: false, blend: opt.blend })?;
+                while wa.slots.len() < slot {
+                    wa.slots.push(Slot { name: [0; 16], clip: None });
+                }
+                wa.slots.push(Slot { name: name16(&wname), clip: Some(wclip) });
+                weapon_name = Some(wname);
+            }
+            let bytes = clip.to_bytes().len();
+            let keys = clip.channels.iter().map(|c| if let crate::ann::Channel::Curve(cv) = c { cv.keys.len() } else { 0 }).sum();
+            xl.push(ManifestEntry {
+                kh1_entry: e,
+                kh1_request: main_request(&xs, e, &requests),
+                requests,
+                kh1_frames: m.frames,
+                slot,
+                name: name.clone(),
+                source: Source::Kh1,
+                match_kind: None,
+                match_error: None,
+                edited_bones: Vec::new(),
+                root_split_mm: None,
+                ambiguous: Vec::new(),
+                frames: clip.frames as usize,
+                fps: clip.fps(),
+                looped,
+                loop_overridden: false,
+                cycle_error_m: cycle_error(&conv, m),
+                root_motion: root,
+                bytes,
+                keys,
+                weapon_name,
+                weapon_match_error: None,
+            });
+            while ann.slots.len() < slot {
+                ann.slots.push(Slot { name: [0; 16], clip: None });
+            }
+            ann.slots.push(Slot { name: name16(&name), clip: Some(clip) });
+        }
+    }
     let changed = ann.slots.len() > base;
     if !changed {
         // Nothing new: Re:CoM's own pack, untouched (Panacea serves it when nothing is written).
-        return Ok(Built { ann, bytes: inp.ann.clone(), base_slots: base, changed, entries, weapon: None });
+        return Ok(Built { ann, bytes: inp.ann.clone(), base_slots: base, changed, entries, weapon: None, xl });
     }
     ann.pad_tail_like_recom();
     let bytes = ann.to_bytes();
@@ -372,7 +455,7 @@ pub fn build(inp: &Inputs, opt: &BuildOptions) -> Result<Built> {
         let bytes = wa.to_bytes();
         WeaponPack { ann: wa, bytes, base_slots: wbase }
     });
-    Ok(Built { ann, bytes, base_slots: base, changed, entries, weapon })
+    Ok(Built { ann, bytes, base_slots: base, changed, entries, weapon, xl })
 }
 
 /// Sora's Halloween Town body pack (`PLAYER/0011/PL0011.ANN`) with the same new clips at the
@@ -423,7 +506,8 @@ impl Built {
         self.entries.iter().filter(|e| e.source == Source::Recom).count()
     }
 
-    /// New slots (KH1 entries Re:CoM doesn't have).
+    /// New slots (KH1 entries Re:CoM doesn't have; the specials' clips are counted apart, in
+    /// [`Built::xl`]).
     pub fn new_slots(&self) -> usize {
         self.entries.iter().filter(|e| e.source == Source::Kh1).count()
     }
@@ -481,6 +565,26 @@ impl Built {
                 e.weapon_name.as_ref().map_or("null".to_string(), |w| format!("\"{}\"", esc(w))),
                 num(e.weapon_match_error, 4),
                 if i + 1 < self.entries.len() { "," } else { "" }
+            ));
+        }
+        s.push_str("  ],\n  \"xl_limit\": [\n");
+        // M9 stage 9c.1: the specials' clips by xl entry (the runtime's `motions::parse_xl`).
+        for (i, e) in self.xl.iter().enumerate() {
+            s.push_str(&format!(
+                "    {{\"xl_entry\": {}, \"kh1_request\": {}, \"slot\": {}, \"name\": \"{}\", \"kh1_frames\": {}, \"frames\": {}, \"fps\": {}, \"loop\": {}, \"root_motion\": {}, \"bytes\": {}, \"keys\": {}, \"weapon_name\": {}}}{}\n",
+                e.kh1_entry,
+                e.kh1_request.map_or(-1, |r| r as i64),
+                e.slot,
+                esc(&e.name),
+                e.kh1_frames,
+                e.frames,
+                e.fps,
+                e.looped,
+                e.root_motion,
+                e.bytes,
+                e.keys,
+                e.weapon_name.as_ref().map_or("null".to_string(), |w| format!("\"{}\"", esc(w))),
+                if i + 1 < self.xl.len() { "," } else { "" }
             ));
         }
         s.push_str("  ]\n}\n");
