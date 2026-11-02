@@ -312,12 +312,13 @@ pub fn hit_window(m: &kh1_formats::mset::Motion, sub: u16) -> Result<(f32, f32)>
 /// slot [`SLOT_BASE`] + entry unless Re:CoM has it as an exact bake. Returns the ANN, every
 /// request's clip and, per new clip, the Re:CoM clip the matcher pairs it with (bake or edit).
 pub fn extend_ann(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
-    extend_ann_own(ann_in, ms, conv, prefix, recom_slots, &[])
+    extend_ann_own(ann_in, ms, conv, prefix, recom_slots, &[], &[])
 }
 
 /// [`extend_ann`], with `own`: requests whose entry gets its own new clip even when Re:CoM has it as
 /// an exact bake ([`OWN_CLIPS`]); the new clip is paired with the bake (its sounds, `extend_ses`).
-pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize, own: &[u16]) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
+/// `loops`: requests whose new clip loops although its last pose isn't its first ([`LOOPS`]).
+pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize, own: &[u16], loops: &[u16]) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
     let mut ann = Ann::parse(ann_in)?;
     if ann.slots.len() != recom_slots {
         return bad(format!("{} slots, Re:CoM Steam's has {recom_slots} (already extended?)", ann.slots.len()));
@@ -363,7 +364,7 @@ pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &
                 if let Some((sc, _)) = other {
                     pairs.push((name.clone(), ann.slots[sc.slot].name_str()));
                 }
-                let looped = cycle_error(conv, m) <= LOOP_TOLERANCE_M;
+                let looped = cycle_error(conv, m) <= LOOP_TOLERANCE_M || reqs.iter().any(|r| loops.contains(r));
                 let clip = conv.convert(m, &ClipSpec { name: name.clone(), looped, root_motion: *root, blend: 8 })?;
                 while ann.slots.len() < slot {
                     ann.slots.push(Slot { name: [0; 16], clip: None });
@@ -565,7 +566,8 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     consts.extend(btltbl_consts(&inp.btltbl)?);
     consts.push(("weight".into(), weight(script, spec.records)?));
     let own: Vec<u16> = OWN_CLIPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
-    let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own)?;
+    let loops: Vec<u16> = LOOPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
+    let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own, &loops)?;
     consts.extend(bone_points(spec.name, &inp.mdls, &ms, &conv, &clips)?);
     // The attack rows → ASD records.
     let codes = bone_codes(&inp.mdls)?;
@@ -699,6 +701,13 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
     Ok(())
 }
 
+/// Requests whose new clip loops although its last pose isn't its first (M11): KH1 loops an enemy's motion
+/// unless its request has bit 16 (`0x14029FC40` copies it to `+0x160` bit 3; `0x14029F0A0` loops back to
+/// `+0x288`, 0 for enemies, or holds with it; Checked (decomp), § The Bandit), so a script that plays one past
+/// its length sees it start again; Re:CoM holds a clip not marked looping. Only the requests a script plays
+/// past their length: the Wyvern's wind-up 204 (108 frames) in its engaged charge `0xF52` (16 + 106 frames).
+pub const LOOPS: &[(&str, u16)] = &[("wyvern", 204)];
+
 /// Requests that get their own clip although Re:CoM has their motion as an exact bake (M11): the
 /// bake carries Re:CoM's own attack records (`.ASD`, bound by the clip's name), which would hit with
 /// KH1's rows. The Darkball's dash 202 (`e023_051`, Re:CoM's record id 0) and bite 204 (`e023_053`,
@@ -736,4 +745,4 @@ fn bone_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips:
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::airpirate::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC];

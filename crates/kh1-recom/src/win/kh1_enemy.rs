@@ -514,13 +514,22 @@ unsafe fn clock(en: usize) -> i32 {
 /// blend in Re:CoM's clock units (KH1 frames × 50; Assumption: the play's blend argument counts
 /// the same units as the clock).
 unsafe fn play(en: usize, rt: &mut Runtime, request: u16, blend: f32) {
+    play_at(en, rt, request, blend, 0.0);
+}
+
+/// [`play`] from `start` KH1 frames (`kh1_core::enemy::Cmd::MotionAt`): the play's third argument is
+/// the start time in clock units (`0x1401A3470` → `0x14024D840` → `0x14024C760` → `0x14024E9F0`:
+/// the controller's time `+0x3C` = it × its speed `+0x4C`, which the clock `0x1401A47C0` reads;
+/// Checked (decomp + disasm)). Assumption: the speed is 1 for our clips.
+unsafe fn play_at(en: usize, rt: &mut Runtime, request: u16, blend: f32, start: f32) {
     let Some(c) = manifest(rt.class).clip(request) else {
         line(rt.class, || format!("{en:#x}: no clip for KH1 request {request}"));
         return;
     };
     let vt: usize = rd(en);
     let p: PlayFn = std::mem::transmute_copy(&rd::<usize>(vt + 0x70));
-    p(en, c.slot, 0, c.root as u64, crate::shadow::blend_units(blend), 0, 0);
+    let from = crate::units::frames_to_units(start.max(0.0)) as u64;
+    p(en, c.slot, from, c.root as u64, crate::shadow::blend_units(blend), 0, 0);
     if !rt.hittable && rt.current != Some(request) {
         // Diagnostic (the sunk Shadow that shows standing): every motion change while unhittable.
         let from = rt.current;
@@ -684,6 +693,12 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         }
         Cmd::Scale(k) => set_scale(en, rt, k),
         Cmd::Visible(v) => set_visible(en, v),
+        Cmd::MotionAt { request, blend, start } => {
+            if rt.current != Some(request) {
+                rt.queued = None;
+                play_at(en, rt, request, blend, start);
+            }
+        }
         Cmd::Yaw(_) | Cmd::Jump { .. } | Cmd::Target(_) | Cmd::State(_) => {}
     }
     if ce::logged(c) {
