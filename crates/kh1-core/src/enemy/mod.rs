@@ -210,4 +210,7 @@ pub trait Behaviour {
     fn set_hp_ratio(&self, _r: f32) {}
     /// The state names for the log (`Cmd::State`).
     fn state_name(&self, s: u8) -> &'static str;
+    /// The host's safety net (the AI issued nothing for a long time in Re:CoM's state 1): the
+    /// behaviour starts again from its engaged state, as its supervisor does on a state request.
+    fn reset(&self) {}
 }

@@ -120,6 +120,34 @@ could leave that wait open forever; both are fixed, and a safety net now ends an
   (`Re:CoM state A -> B while unhittable`) is logged. The 0.68.0 log has no command of ours between
   `underground true` and `underground false`, so the cause is not found yet; an F9 trace of it is needed.
 
+### Re:CoM's own states hand back (owner 2026-11-02, 0.68.2: "once they got out of the stun … just standing still")
+
+- **What happened.** Stun Impact put two Soldiers into Re:CoM's stun state. Under the M10 choices, Stop,
+  freeze, Gravity and the stun keep Re:CoM's own states, outside our copies. They were stunned mid-kick (e321)
+  and mid-spin-kick. On leaving the stun Re:CoM entered state 1, but our runtime still held the attack
+  as the running action. Trace 20 shows both in state 1 with their action pending (200, 203) and the idle
+  playing. Checked (log, trace).
+  - The AI is not polled while an action runs.
+  - An attack ends only in its attack state's step, so it never ended.
+  - The watchdog didn't fire because a playing attack was left to `attack_step`.
+- **Fix: hand-back.** Every state 1 we ask for (an attack's end, a reaction's end, the appearance's end) is
+  marked. Any other state 1 begin follows a state Re:CoM owns: stun, Stop, freeze, Gravity's flatten, a
+  Re:CoM flinch, the first-strike stun. At that begin (`take_over`):
+  - the action, reaction, queued motion and clash are dropped;
+  - the motion Re:CoM played is forgotten, so the idle plays;
+  - the AI goes on from its wait, logged as `<class>: eNNN: back in state 1 after a Re:CoM state (…): action …
+    dropped; the AI goes on`.
+
+  This is KH1's rule: a status ends the current action. Assumption: the KH1 AI's next step after a status
+  is the rest of its routine. Its hit handler isn't told, since Re:CoM's stun hit didn't run our state 11.
+- **Fix: the appearance's default state.** It is now called outside our lock. It used to run inside, so
+  `try_lock` failed and Re:CoM's own state 1 begin ran at every appearance end.
+- **Safety nets added** (all logged past the cap):
+  - an attack still "playing" when the AI is polled in state 0 / 1 is released;
+  - a reaction that takes 600 frames is released (`REACTION_LIMIT`);
+  - an AI polled in state 1 that issues nothing for 600 frames, with no action or reaction pending, restarts
+    from its engaged state (`QUIET_LIMIT`, `Behaviour::reset`). KH1's longest silent wait is 180 frames.
+
 ## The Soldier
 
 ### KH1's side. Checked (files: `ex_2010.bd` disassembled; decomp: the VM `0x1402CC620` and syscalls)
