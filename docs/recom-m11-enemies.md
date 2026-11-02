@@ -704,10 +704,173 @@ kill one. The trace's enemy rows give the heights, the circle's radius and the c
 - Sora's KH1 movement state (`*(target + 0x70)`): 0 when his Re:CoM mover touches the floor, else 2 (**Assumption**: his
   glide counts as the air).
 
+## The Wyvern (M11 fliers)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Wyvern yet.
+
+### KH1's side. Checked (files: `ex_2320.bd` disassembled, folded and raw; decomp: the syscalls named)
+
+The script (0x3380 bytes; code from `0x378`, entry `0x21CC`) has the Air Soldier's newer shape (the actor at `wp+0`,
+the state object at `wp+0x20`, the search table handle at `wp+0x30`), on the flight of § Flying bodies, with its own
+routines (only the random draws and the frame wait are the shared ones). It never sets a turn rate at init: the stats
+block's π/16 (11.25°), which every routine that changes it puts back; it sets the flight easing (stats `+0x14`) in its
+circles, flights and chases (0.1 / 0.08 / 1, back to 0.2).
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x21CC` | init `0x2362` (KH1's world: `wp+0x54` = world 11; records LV1 `0x14` / LV2 `0x80`; stats `+0x10` = 800, the hop, unused; stats `+0` `|= 2`, not identified (no reader found): not ported; home; the state object; the search table `0x350`; handlers hit `0x2484`, `0x2460` (answers 0), `0x2478` (ends)), `sys 135` with (0, 0, 0, 1) (flight, no velocity), a yield; placed (`sys 132` = 0): a target within 5000 or Sora, engaged; spawned: the appearance `0xC3C` → `0xC4C`. Then each frame: while idle (state 1) a target within 1500 (`0x1930`: in world 11 within 10000 and always Sora; out of sight (`sys 139`): none) → the target and engaged; a state request restarts the behaviour: 1 idle `0xB4E` and 3 lost `0x5D2` with the target cleared, 2 engaged `0x7BE` with the target (or Sora), 4 hit `0x3C4` with the hitter (or Sora) |
+| appearance | `0xC4C` → `0xC6E` | face Sora now (`sys 11`); the 30-frame fade-in and flag 0x80 for 30 frames; a yield; 69 as an action (`0x1000045`, blend 8), the idle queued (bit 30, blend 12); effect 2; the idle state |
+| idle | `0xB4E` | not noticed; forever: less than 170 above Sora → rise 300 (`0x30C2`); the circle `0x26EA` ([250, 500) frames, turn [3, 5)); the idle (blend 30) at turn rate 3 facing Sora [90, 120) frames |
+| circle | `0x26EA(time, turn)` | turn rate 4; 60 %: the facing turned −90° and by the turn, 209; else +90°, the turn negated, 210 (blend 30); 10 frames; while the time lasts: the direction turned by turn × 0.5 a frame, facing it, flying at 16; the halt 211 easing off at 0.1 until 60 of its frames are left |
+| engaged | `0x7BE` | the notice once (`0xCCC`: 215 (the idle queued) at turn rate 8 for its length + 6 frames facing the target); rounds: from 3 counted attack rounds (`wp+0x5C`) the lost state; farther than 600: 70 % the far attack `0x904`, else the charge `0xF52`; closer: the roar (`0xAF2`: 213 as an action, the idle queued), then the dive attack `0xA8C`, every third time the far attack |
+| far attack | `0x904` | under 250 above the floor or less than 170 above the target: rise 300; turn to it (`0x322A` at 6°); the chase `0x2ADA` at it (30, to 2.5 m, 600 frames); the bite `0x13D8`; a round; a fly-by `0x28A4` to 6 m ahead and 4.5 m up (30, within 4 m, 500 frames); down to the target's height `0x2F5C`; then 70 % the charge (a round), else the dive attack |
+| dive attack | `0xA8C` | the chase to 4 m above the target (within 1 m), the dive `0x113E`, a round |
+| chase | `0x2ADA(target, p, speed, arrive, time)` | 207, 208 queued; toward `p` (its x / z the target's while he stands), facing him; after 10 frames banking (209 / 210, blend 16) while he is off to a side (cos ≤ 0.98), 208 after 16 frames (facing him until 60); within 2.5 m of him: done; within `arrive` of `p`: done once level, else stopped at once (easing 1) until the stuck test; stuck after 10 frames (moved < speed / 4): done |
+| fly to | `0x28A4(p, speed, arrive, time)` | 208; along the line to `p`, its vertical part × 0.7; within `arrive` or stuck: the halt 211 (easing 0.08 to its last 60 frames), the idle (blend 10) |
+| descend | `0x2F5C(target)` | turn to him (6°); 212 (blend 16) sinking at 4 until at his height (as it was) or the floor: the idle **from frame 16** (blend 24), 24 frames; stuck (< 0.4 a frame): stop |
+| rise | `0x30C2(target, from, speed, dy)` | 212 (blend 16) facing him, rising at `speed` until `dy` above `from`, 300 frames at most (stuck after 30) |
+| turn | `0x322A(p, rate)` | the idle; turning at `rate` until the facing's cosine to `p` is 0.99 (200 frames at most) |
+| bite | `0x13D8` | facing the target at turn rate 6; 200 with rows `0xEC` / `0x15C` (blend 0 out of 208, else 8 and 8 frames); its 120 frames along the facing at 4 (sinking 0.2 while more than 30 above him), the last 20 at 24; 208 |
+| dive | `0x113E(target)` | 201 (202 queued) for its length facing him, creeping at 4 while farther than 2.5 m (flat); 202 with row `0x23C` straight down at 24 until 2.5 m above where he was, 50 above the floor, or stuck; 203 with row `0x2AC` sinking at 14 until 10 above the floor, for its length; the idle |
+| charge | `0xD70` (hit) / `0xF52` (engaged) | turn to him (1.4° / 3°); 204 (blend 0 / 16; `0xF52` waits 16 frames first) for its length − 2 turning at 2°; 205 with row `0x1CC` for 40 frames along the facing at 40 (sinking 0.5 while above him); 206 with row `0x1CC` again (the same hit bit), the idle queued, its length + 6 frames |
+| hit | `0x3C4` | hit in the dive: 214 (blend 0) for its length; within 3 m: from 5 counted hits (`wp+0x48`, then 0) the idle 6 frames, the roar, the dive attack; within 10 m: from 5 hits the idle 6 frames, the roar, the charge `0xD70`, a rise when low, the lost state; else (or 1–4 hits) the engaged state |
+| lost | `0x5D2` | hits forgotten; Sora within 5000: the target, a yield, a rise when low, the circle, the idle 6 frames, engaged; else a rise when low, the circle, the idle facing Sora [90, 120) frames, again |
+| hit handler | `0x2484` | death (`sys 44` = 0): `0x26B8` (not ported: Re:CoM's defeat); attributes 2 / 3 / 4: `sys 42` (`0x1402B7E60`: the engine's element reaction) and nothing more; 9 / 11: nothing more; the turn rate 11.25; while 202 plays: a hit not a clash (kinds 6 / 7) nor of attribute 8 / 9 takes no reaction (`hp[0xC] &= ~0x1F`) and asks for 214; every hit counts; otherwise every hit but a clash counts; the hit state 4 |
+| leash | `0x26D6` → `0x163A` | **not ported**: spawned and 18 m (12.6 m out of sight) from Sora, outside world 11, it is removed; in a Re:CoM battle room it would never be defeated |
+
+Attacks (rows `0x70` bytes, `sys 23`, mode 2: each lives while its request plays; Checked (files)):
+
+| Attack | Request | Row (bone code → bone, t, radius, KH1 power) | Hit | Recoil `+0x40` | Re:CoM id | Re:CoM state |
+|---|---|---|---|---|---|---|
+| bite | 200 (120 f; steered) | `0xEC` (45 → `r_toes1a`, 0, 60, 100 %), `0x15C` (44 → `l_toes1a`, 0, 60, 100 %) | [20, 84) | 110 (no motion) | 0 | 2 |
+| dive | 202 (120 f loop; steered) | `0x23C` (0 → `head`, 0.5 → −2, 60, 100 %) | all along | 110 (no motion) | 1 | 3 |
+| landing | 203 (100 f; steered) | `0x2AC` (the same) | [0, 36) | 110 (no motion) | 1 | 3 |
+| charge | 205 (120 f loop; steered) | `0x1CC` (the same; attack type 3) | all along | 110 (no motion) | 1 | 3 |
+| charge end | 206 (106 f; steered) | `0x1CC` again | [0, 24) | 110 (no motion) | 1 | 3 |
+
+No row names a recoil the model has: guarding any Wyvern attack plays **Re:CoM's flinch** (owner 2026-11-02).
+
+Reactions: the flying forms (F `0x48..0x4B`, K `0x4C` / `0x4D`, a `0x4E` / `0x4F`, A `0x50` / `0x51`; no launches: kind
+5 → kind 4); weight 1.0 in both records; hurt parts: 11 (collision block group 2 → Re:CoM bones 35, 2, 4, 19, 27, 29, 37,
+3, 18, 4, 19). Checked (files).
+
+Motions (`xa_ex_2320.mset`, 28 entries): KH1's matcher finds Re:CoM bakes on `EN0024.ANN` (77 slots) for the two banks
+(209 → `e024_005`, 210 → `e024_006`); edits (≤ 20 bones differ): the idle → `e024_001`, flinches 72–75 → `e024_020..023`,
+66–70 → `e024_070..074`, the bite 200 → `e024_050`, the wind-up 204 → `e024_051`, the charge 205 → `e024_052`, its end 206
+→ `e024_053`, 207 → `e024_002`, 208 → `e024_003`, the halt 211 → `e024_004`, the notice 215 → `e024_075`. Every request
+but the banks is a new clip at 100 + entry; the edits get their Re:CoM clip's sounds.
+
+### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyWyvern` (vtable `0x140555DC8`, 139 slots, RTTI at −8), ctor `0x140195ED0` (`40 53 48 83 EC 20`: `CHeartless`'s base
+ctor, then `+0x154 |= 0x80`, `+0x260 |= 0x100` (gravity off), `+0x2E0` = 0.1, `+0xCBC` = 10; its only caller the factory
+`0x140188F40` case 24 at `0x14018938C`; no branch into the moved bytes, no pointer to them: exe scan), allocation
+`0x140189373` `mov ecx, 0xCF0` → 0xD10 (its states use fields up to `+0xCE8`). It overrides states 1 (the flying walk
+`0x1401960B0` → `0x1401979F0` with `e024_001` / `e024_003`, step `0x1401964E0`: circling with `e024_005` / `e024_006`,
+`e024_004`), 2 (`0x140195FB0` / `0x1401961B0`: beyond 4 m `e024_002` → `e024_003` to within 1 m, then the claw
+`e024_050`), 3 (`0x140196060` / `0x140196350`: `e024_051` → `e024_052` at `RushAtkSpd` → `e024_053`); its think is
+`CHeartless`'s `0x140196EC0`. Our copy: states 0, 1, 2, 3, 11, 12, 30, the think; KH1's bite in state 2, the dive, the
+landing, the charge and its end in state 3. `EN0024.ASD`: 3 records at `0x10C`, tail `0x2EC` (id 0 `e024_050` on
+`r_foot2` and `l_foot2`, 0.5 m, [20, 80); id 1 `e024_052`, a 0.55 m line `head` → `tail2`, the whole clip). `EN0024.SES`:
+`e024_050`, `e024_052`, `e024_053`, `e024_073`, `e024_075`.
+
+Power mapping (decision M10, "the Re:CoM attack of the same kind"): the bite on id 0 (Re:CoM's claw `e024_050` is an
+edit of KH1's 200, both on the feet); the charge and its end on id 1 (Re:CoM's rush `e024_051..053` are edits of KH1's
+204..206); the dive and its landing on id 1 (**Assumption**: no Re:CoM twin; their rows are the charge row's shape, a body
+ram; owner question 1).
+
+### Framework additions (M11, the Wyvern)
+
+- `Cmd::MotionAt { request, blend, start }`: KH1's `sys 13` with a start frame (its fourth word, the request entry's
+  `+4`, `0x1402B9F80` / `0x14029F980`). The host plays it with Re:CoM's own start argument: the motion play's third
+  argument (`0x1401A3470` → `0x14024D840` → `0x14024C760` → `0x14024E9F0`: the controller's time `+0x3C` = it × its
+  speed `+0x4C`, the clock `0x1401A47C0` reads `+0x3C`; Checked (decomp + disasm)), in clock units (50 a frame).
+  **Assumption**: the controller's speed is 1 for our clips. The Wyvern's descent ends in the idle from frame 16
+  (`0x2FD4` / `0x3022`): the survey's "`enemy::STARTS` covers it" was wrong (STARTS cuts the request's clip for every
+  play; the idle plays from frame 0 everywhere else).
+- Asset step `enemy::LOOPS`: requests whose new clip loops although its last pose isn't its first. KH1 loops an enemy
+  motion unless its request has bit 16 (§ The Bandit, Checked (decomp)); Re:CoM holds a clip not marked looping. Only
+  where a script plays one past its length: the Wyvern's wind-up 204 (108 frames) in its engaged charge (16 + 106).
+
+### What the asset step writes
+
+`ENEMY/0024/EN0024.ANN` (Re:CoM's 77 slots byte-identical; KH1's clips at 100 + entry: 100..127 but the banks), `.ASD`
+(Re:CoM's 3 records kept + 6: the bite's two feet on `e024_112`, the dive on `e024_114`, the landing on `e024_115`, the
+charge on `e024_117`, its end on `e024_118`), `.SES` (Re:CoM's 5 entries kept; the edits get their Re:CoM clip's sounds,
+the dive and the landing the rush's at their windows: Assumption), `kh1-wyvern.json` (`kh1-enemy 1`: 123 script
+constants read at checked offsets (and the stats block's two defaults), 49 request words checked, 5 attacks, 11 parts). Test:
+`wyvern::tests::builds_from_the_players_files`.
+
+### Owner install steps
+
+1. Run the step (`kh1-recom-build`): it prints a `wyvern (M11): …` line.
+2. Copy into the OpenKH mod folder and add to `mod.yml`:
+
+```yaml
+- {name: ENEMY/0024/EN0024.ANN, method: copy, source: [{name: ENEMY/0024/EN0024.ANN}]}
+- {name: ENEMY/0024/EN0024.ASD, method: copy, source: [{name: ENEMY/0024/EN0024.ASD}]}
+- {name: ENEMY/0024/EN0024.SES, method: copy, source: [{name: ENEMY/0024/EN0024.SES}]}
+- {name: kh1-wyvern.json, method: copy, source: [{name: kh1-wyvern.json}]}
+```
+
+3. The log shows `wyvern: KH1's wyvern (M11) …` at start and `battle N: Wyvern … gets KH1's AI` in a Wyvern battle.
+
+### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Wyvern battle in Hollow Bastion)
+
+1. Each Wyvern faces Sora and plays KH1's appearance (69, 1 s); within 15 m it notices him (215, ~3.5 s).
+2. Close (≤ 6 m): a roar (213), then it flies to about 4 m above Sora (207, then 208 / banking 209 / 210), hovers into
+   a dive (201), drops straight down (202) and lands (203); every third time the far attack instead.
+3. Far (> 6 m), most often: it flies at Sora (207 / 208), bites (200), flies on past and up (208, halting with 211),
+   comes down to his height (212, then the idle), then charges (wind-up 204, a rush 205 along the ground, 206) or dives.
+   Otherwise the charge alone.
+4. After three attack rounds it rises and circles (209 / 210, 4–8 s), halts (211), then attacks again.
+5. Hit it during the dive (202): no flinch; it plays 214. Other hits: KH1's flinch / knock-back in the air; from the
+   fifth counted hit within 3 m: the roar and a dive; at 3–10 m: the roar, the charge, then it rises and circles.
+6. Guard any attack: Re:CoM's flinch (no KH1 recoil in the model), then its hit behaviour.
+7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Wyverns.
+
+Please send `kh1-recom.log` (`wyvern:` lines: `state …`, `attack 200 (bite), steered`, `attack 202 (dive), steered`,
+`attack 205 (charge), steered`, `action 213 then 0`, `motion 0 b24 from 16`, `hit without a reaction` in the dive, the
+`rand` lines) and an F9 trace.
+
+### KH1 trace (what to record in KH1)
+
+Hollow Bastion (the Rising Falls or the Castle Gates): stand far 10 s; stand at 4 m 10 s; stand at 2 m 10 s; one swing /
+a full combo / a finisher; hit it while it dives; five quick hits close, five at 5 m; Guard a bite, a dive, a charge;
+kill one. The trace's enemy rows give the heights, the chase and charge speeds and the circle's radius to compare.
+
+### Not built / open (the Wyvern)
+
+- The leash, the party retargeting (`0x18D6`), `sys 139`'s out-of-sight test (taken as in sight), the placed start
+  (Re:CoM's battles spawn every Wyvern), the death routine.
+- KH1's hit attribute (`hp[0xC] >> 6 & 15`) isn't carried by the host: the element reactions of attributes 2 / 3 / 4
+  (`sys 42`; owner 2026-11-02: left out for now), attribute 8 / 9's dive reaction and 9 / 11's early end never come.
+- The effects (`sys 75` 2 at the appearance), the fade-in and flag 0x80 at the appearance, the stats block's flag 2.
+- KH1's world 11 rules (the 100 m search, always Sora) apply in Re:CoM's Olympus by decision 21's mapping, as the
+  Bandit's Agrabah rules (**Assumption**: Re:CoM's Olympus battles hold Wyverns at all).
+- The charge's two rows share one KH1 hit bit (one hit per charge); here 205's and 206's records are two Re:CoM attacks.
+  **Assumption**: no second hit in practice (206 starts 40 frames after 205; Sora's KH1 post-hit invulnerability, 30
+  frames from his reaction's end, decision 31, covers it). The bite's two rows are one Re:CoM attack (one clip).
+- The queued idle after 206 is played by the behaviour when 206 has played (the host gives a steered attack no queue;
+  the Darkball's rule).
+- The floor for `sys 89` is Sora's height when he last stood (**Assumption**: flat battle floors); the descent and the
+  dive end at it.
+- `sys 10`'s turning sign (the circle's and the banks' sides): the Air Soldier's convention (**Assumption**).
+- The 206 row is made the frame before 206 is asked for (`0xEFC`, then `sys 13` at `0xF14`): taken as living on 206
+  (**Assumption**: KH1's mode-2 object takes its owner's request at its first tick, after the script; 206's HIT track is
+  on [0, 24)).
+
+### Wyvern owner questions
+
+1. **The dive's power**: Re:CoM's Wyvern has its claw (id 0) and its rush (id 1). KH1's bite and charge have Re:CoM twins
+   (the claw, the rush); KH1's dive (202, its landing 203) has none. Chosen: the rush's (id 1), the same body-ram row as
+   the charge. (a) Keep, (b) the claw's, (c) another rule.
+
 ## The other fliers: not ported yet (survey for the next pass)
 
-Search Ghost, Air Pirate, Gargoyle, Darkball and Wyvern were surveyed, not ported (time); the Darkball and the
-Air Pirate are built since (§ The Darkball, § The Air Pirate). All five enter flight
+Search Ghost, Air Pirate, Gargoyle, Darkball and Wyvern were surveyed, not ported (time); the Darkball, the
+Air Pirate and the Wyvern are built since (§ The Darkball, § The Air Pirate, § The Wyvern). All five enter flight
 once with `sys 135` and steer through `+0x20` / `+0x2C` like the Air Soldier (6–14 steering writes each), so § Flying
 bodies covers their bodies; each is a new script (1170–1710 listing lines) to port routine by routine. Checked
 (files: the scripts listed; exe: ctors, allocation sites, vtables) unless marked:
@@ -718,7 +881,7 @@ bodies covers their bodies; each is a new script (1170–1710 listing lines) to 
 | Air Pirate (**built**) | `ex_2210.bd` (`0x228`) | `CEnemyAirpirate` `0x14018A0B0` / `0x14018931F` 0xCD0 / `0x1405309E8` | 2 (`r_hand`, ids 0 / 1) | `sys 118` (the stuck tests: `+0x10 − +0x490`), `sys1.0` (a no-op): § The Air Pirate |
 | Gargoyle | `ex_2220.bd` (`0x538`) | `CEnemyGargoyle` `0x14018E150` / `0x1401891A5` 0xCD0 / `0x14053F198` | 2 (both wings, id 0 only) | a child object (`sys 94` at `0x1B24` with rows `0x3FC` / `0x46C`, request 219): on Re:CoM's bullets; one Re:CoM power for all its attacks |
 | Darkball (**built**) | `ex_2280.bd` (`0x338`) | `CEnemyDarkball` `0x14018D5D0` / `0x140189349` 0xCD0 / `0x14053B7A8` | 2 (`ex_2280_sk`, a whole-clip window and a 1.3 m one) | `sys 86` (the warp), `sys 74` (effects), `sys1.0` / `sys1.3`: § The Darkball |
-| Wyvern | `ex_2320.bd` (`0x378`) | `CEnemyWyvern` `0x140195ED0` / `0x140189373` **0xCF0** / `0x140555DC8` | 3 (header to `0x10C`) | turn rate changed 19 times (`Body::turn` covers it), `sys 42`, an idle requested from frame 16 (`enemy::STARTS` covers it) |
+| Wyvern (**built**) | `ex_2320.bd` (`0x378`) | `CEnemyWyvern` `0x140195ED0` / `0x140189373` **0xCF0** / `0x140555DC8` | 3 (header to `0x10C`) | the turn rate (`Body::turn`), `sys 42` (KH1's element reactions: left out), the idle from frame 16 (`Cmd::MotionAt`, not `enemy::STARTS`): § The Wyvern |
 
 **Found in the second pass (2026-11-02).** Checked (exe + decomp + files) unless marked:
 
@@ -1110,7 +1273,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Sea Neon | `xa_ex_2070` (ex_2070.bd) | `CEnemySeaneon` 18 | `0x14054b0e8` | `0x1401920c0` / `0x140189277` 0xce0 | 1,2,3 | 201,204 | FKaA | — |
 | Aquatank | `xa_ex_2080` (ex_2080.bd) | `CEnemyAquatank` 20 | `0x140532fe8` | `0x14018a960` / `0x1401892cb` 0xcd0 | 1,2,3 | 202,203 | FKaA | — |
 | Screwdiver | `xa_ex_2240` (ex_2240.bd) | `CEnemyScrewdiver` 19 | `0x140549e18` | `0x140191d90` / `0x1401892a1` 0xcd0 | 1,2,3 | 203,205 | FK | — |
-| Wyvern | `xa_ex_2320` (ex_2320.bd) | `CEnemyWyvern` 24 | `0x140555dc8` | `0x140195ed0` / `0x140189373` 0xcf0 | 1,2,3 | 200,202,203,205,206 | FKaA | — |
+| Wyvern (built) | `xa_ex_2320` (ex_2320.bd) | `CEnemyWyvern` 24 | `0x140555dc8` | `0x140195ed0` / `0x140189373` 0xcf0 | 1,2,3 | 200,202,203,205,206 | FKaA | — |
 | White Mushroom | `xa_ex_2350` (ex_2350.bd) | `CEnemyWhitemushroom` 16 | `0x1405523f8` | `0x1401944b0` / `0x140189223` 0xce0 | 1,11,12,30 | — | FKaA | — |
 | Black Fungus | `xa_ex_2380` (ex_2380.bd) | `CEnemyBlackfungus` 17 | `0x1405369c8` | `0x14018bac0` / `0x14018924d` 0xce0 | 1,2,3 | 200 | FaLl | SES |
 | Creeper Plant | `xa_ex_2290` (ex_2290.bd) | `CEnemyCreapplant` 31 | `0x14053a348` | `0x14018ca40` / `0x140189499` 0xcd0 | 1,2,3,19 | 202,203,204,206,207 | FKaA | — |

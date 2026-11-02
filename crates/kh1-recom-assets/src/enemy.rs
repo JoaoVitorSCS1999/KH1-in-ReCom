@@ -705,8 +705,8 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
 /// unless its request has bit 16 (`0x14029FC40` copies it to `+0x160` bit 3; `0x14029F0A0` loops back to
 /// `+0x288`, 0 for enemies, or holds with it; Checked (decomp), § The Bandit), so a script that plays one past
 /// its length sees it start again; Re:CoM holds a clip not marked looping. Only the requests a script plays
-/// past their length.
-pub const LOOPS: &[(&str, u16)] = &[];
+/// past their length: the Wyvern's wind-up 204 (108 frames) in its engaged charge `0xF52` (16 + 106 frames).
+pub const LOOPS: &[(&str, u16)] = &[("wyvern", 204)];
 
 /// Requests that get their own clip although Re:CoM has their motion as an exact bake (M11): the
 /// bake carries Re:CoM's own attack records (`.ASD`, bound by the clip's name), which would hit with
@@ -745,4 +745,4 @@ fn bone_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips:
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::airpirate::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC];

@@ -35,6 +35,7 @@ pub mod powerwild;
 pub mod darkball;
 pub mod bandit;
 pub mod airpirate;
+pub mod wyvern;
 
 pub use arc::Arc;
 pub use combat::{blade_params, resolve_hits, Blade, CombatParams, HitReport};
