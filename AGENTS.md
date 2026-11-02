@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 122: Revenge moves untouchable whenever a boss plays them; Hook's hole closed, version 0.67.3 (2026-11-01)
+
+- Owner (2026-11-02): "you can still hit bosses during their revenge move (or if they use their revenge move naturally
+  instead of it being triggered by revenge value)".
+- Holes (Checked (decomp + code)): (1) the window opened only for a revenge-started state, so a boss's own use of the
+  same attack was hittable: now it opens every time the revenge-move state begins (own choice logged); (2) Captain
+  Hook's ctor `0x1403C6340` sets `+0x260 |= 0x2000000` permanently, so his handler always ended the attack and took the
+  hit (`0x14017E1D0`): held off for the handler call during the window; (3) every frame counted as an ignored hit (the
+  handler runs per frame, `0x140185630`): only real waiting hits counted.
+- Checked not holes: all attack states 2..10 begin through Re:CoM's wrappers calling `+0x438` → `0x14017DA80`; our
+  blade sweep and `strike_body` skip bodies off (`+0x10` = 0); all damage goes through `0x14017F7E0`.
+- Checked: tests (442), Windows build, sites. Not checked: in game (no boss log yet).
+
+---
+
 ## Stage 121: Shadow: unhittable from the sink's first frame to rise frame 50, as KH1, version 0.67.2 (2026-11-01)
 
 - Owner (2026-11-02): "i can attack the shadow when its flat on the ground". Trace 18: three hits during sinks.
