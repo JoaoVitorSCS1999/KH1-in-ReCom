@@ -362,6 +362,9 @@ At KH1 setting:
       here 1:1": KH1's own spell effects (same effect engine as Re:CoM's) are ported natively, behind
       **their own toggle** (KH1 or Re:CoM spell effects); **Re:CoM's spell sounds are kept**; built
       **after the M9 specials**, Fire first as the pilot.
+    - **Sonic Blade (owner, 2026-11-01, on 0.56.1's questions):** the dashes' voices "however it works
+      in base ReCoM"; the per-dash effects "however it works in base ReCoM"; usable **only in battle**
+      (not in the field rooms). Whether the other specials follow the same rule: ask at 9c.2.
 
 ## Known open design questions (ask the owner, don't guess)
 
