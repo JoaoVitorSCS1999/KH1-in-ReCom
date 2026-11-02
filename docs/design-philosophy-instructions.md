@@ -394,6 +394,10 @@ At KH1 setting:
       boss damage falloff is off for bosses that have revenge**. KH1 hits add KH2 Sora's ATKP revenge
       values (swing 8, finisher 24, air swing 12, air finisher 28, Fire 8, Blizzard 16, Thunder 32).
       Notes: `docs/recom-boss-revenge.md`.
+    - **Revenge moves untouchable (owner, 2026-11-02):** "the humanoid bosses that have revenge value
+      can't be damaged or interrupted during their retaliation move": while a boss plays the attack its
+      revenge started, Sora's hits do no damage and don't interrupt it (Re:CoM's own rule for an attacking
+      enemy, without decisions 14 / 26's bypass for that attack).
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
