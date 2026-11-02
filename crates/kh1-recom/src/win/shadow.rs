@@ -280,7 +280,10 @@ pub unsafe extern "win64" fn ctor(this: usize, a: usize, b: usize, c: usize) -> 
     }
     let battle = super::battle::battle_number();
     let seed = SEED.fetch_add(0x9E37_79B9, Ordering::Relaxed) ^ (this as u32);
-    let yaw = crate::units::yaw_to_kh1(rd::<f32>(rd::<usize>(this + e::MOVER) + mv::YAW));
+    // Re:CoM's ctor doesn't make the mover (`+0xF0` is still 0 here: 0.67.0's crash at every battle
+    // with a Shadow, owner 2026-11-02); the facing is taken again at state 0's begin (`appear_begin`).
+    let m0: usize = rd(this + e::MOVER);
+    let yaw = if m0 != 0 { crate::units::yaw_to_kh1(rd::<f32>(m0 + mv::YAW)) } else { 0.0 };
     let ai = Ai::new(m.consts.clone(), m.frames(), seed, yaw, false);
     let idx = (|| {
         let Ok(mut v) = RT.lock() else { return None };
@@ -567,13 +570,15 @@ pub unsafe extern "win64" fn appear_begin(en: usize) {
         rt.recom_appear = alt;
         rt.appear_sub = 0;
         let m = mover(en);
-        rt.last_pos = crate::units::to_kh1(rd_vec(m + mv::POS));
-        // The facing the spawn gave it (set after the ctor).
-        let y = crate::units::yaw_to_kh1(rd(m + mv::YAW));
-        let mut b = rt.ai.body();
-        b.yaw = y;
-        b.yaw_target = y;
-        drop(b);
+        if m != 0 {
+            rt.last_pos = crate::units::to_kh1(rd_vec(m + mv::POS));
+            // The facing the spawn gave it (set after the ctor).
+            let y = crate::units::yaw_to_kh1(rd(m + mv::YAW));
+            let mut b = rt.ai.body();
+            b.yaw = y;
+            b.yaw_target = y;
+            drop(b);
+        }
         if alt {
             rt.ai.skip_rise();
         }
@@ -690,6 +695,9 @@ unsafe fn hit_of(en: usize) -> Option<Hit> {
         return None;
     }
     let atk: usize = rd(info + hi::ATTACK);
+    if mover(en) == 0 {
+        return None;
+    }
     let me = crate::units::to_kh1(rd_vec(mover(en) + mv::POS));
     let swing = take_swing(en);
     let kind = swing.or_else(|| (atk != 0).then(|| sh::kh1_kind_of_recom(rd(atk + hi::KIND))))?;

@@ -292,3 +292,13 @@ attacker) and kind 3 in the air to the air knock-back (0x50 / 0x51, speed 16). K
 - The play's blend argument is taken as Re:CoM clock units (KH1 frames × 50). Assumption.
 - KH1's motion request semantics we follow: a new play clears the queue; a queued motion plays
   when the current one reaches KH1's length. Assumption (KH1's queue `0x14029FA30` not traced).
+
+## Fix 0.67.1: crash at the start of every battle with a Shadow
+
+Owner (2026-11-02): "the game crashes when getting into a battle with a shadow". Log: `CRASH: exception
+0xc0000005 at kh1-recom.dll+0xa4e44 (reading 0x54)`, stack `0x1402b4a49`, `0x140188fcb` (the factory, right
+after the ctor call). `+0xa4e44` is in `win::shadow::ctor`: it read the facing from the mover
+(`*(enemy+0xF0)+0x54`), but Re:CoM's ctor doesn't make the mover yet (`+0xF0` = 0; Checked (the log's
+registers: rax 0)). The ctor now takes facing 0 when there is no mover; state 0's begin (`appear_begin`)
+already takes the spawn's facing from the mover, and now skips that too if the mover is missing; the hit
+reader returns "no hit" without a mover. Checked: tests, Windows build. Not checked: in game.

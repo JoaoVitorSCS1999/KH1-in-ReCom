@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 120: Fix: crash at the start of every battle with a Shadow, version 0.67.1 (2026-11-01)
+
+- Owner (2026-11-02): "the game crashes when getting into a battle with a shadow". Log: access violation at
+  `kh1-recom.dll+0xa4e44` reading 0x54, called from the factory `0x140188fcb` right after the ctor.
+- Cause: `win::shadow::ctor` read the facing from the mover `*(enemy+0xF0)+0x54`; Re:CoM's ctor hasn't made the
+  mover yet (`+0xF0` = 0; the log's rax 0). Now facing 0 without a mover (state 0's begin takes the spawn's facing
+  from the mover, as before, and skips it without one); the hit reader returns no hit without a mover.
+- Checked: tests, Windows build, the crash address in the 0.67.0 DLL. Not checked: in game.
+
+---
+
 ## Stage 119: M10: the KH1 Shadow (AI, attacks, reactions, motions) on Re:CoM's own enemy states, Re:CoM's stats, version 0.67.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "lets move on to doing phase 4, except, i only want the AI, attacks, reactions and motions
