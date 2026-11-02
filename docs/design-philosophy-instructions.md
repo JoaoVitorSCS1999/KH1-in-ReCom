@@ -414,6 +414,12 @@ At KH1 setting:
       (timing, hit shapes, behaviour), reactions and motions**; **stats (HP, damage, defence, drops,
       EXP…) and everything else stay Re:CoM's** (the Damage setting still decides Sora's damage to
       them). M10 Shadow pilot first, then M11.
+      M10 choices (2026-11-02): native states (KH1's behaviour ported as new Re:CoM states; the
+      interpreter would run along: not offered); `enemy_ai = kh1 | recom` ini (default kh1); KH1's
+      motions incl. rise and death (Re:CoM's prizes / EXP); KH1's reactions (launch weight as KH1's;
+      flinch part from the hit's height, Re:CoM's hurt shapes); KH1's recoil when Sora guards; Re:CoM's
+      attack power per attack; Re:CoM's Stop / freeze / Gravity states; **battle enemies only** (field
+      Shadows keep Re:CoM's roaming, owner).
     - **Summons now (owner, 2026-11-01):** "Lets get summons working. I want the summon section on the
       command menu to work like KH1, but each summon should do their lv 3 recom summon equivalent, cloud
       included" (supersedes "wait for the party"). KH1's Summon list (Magic list's last entry, learn
