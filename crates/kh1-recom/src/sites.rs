@@ -1422,6 +1422,49 @@ pub const GIMMICK_CALLEES: &[Site] = &[
     },
 ];
 
+/// Option (c), the card break (owner, 2026-11-01): CBTL's message post, as the card-battle
+/// resolver `0x14015EAC0` posts a break: (queue CBTL +0x58, delay 0, from CBTL's handle +0x20, to
+/// the enemy's handle, message 3, data).
+pub const GIMMICK_BREAK_CALLEES: &[Site] = &[
+    // push rbx; mov eax,[rcx+0x60]; mov ebx,r9d; mov r11,rcx; cmp [rcx+0xE0],eax; jge (queue full).
+    Site { name: "message post (0x1401D2770)", rva: 0x001D_2770, expect: &[0x40, 0x53, 0x8B, 0x41, 0x60, 0x41, 0x8B, 0xD9, 0x4C, 0x8B, 0xD9, 0x39, 0x81, 0xE0, 0x00, 0x00, 0x00, 0x0F, 0x8D, 0x9A, 0x00, 0x00, 0x00] },
+];
+
+/// The enemy side of a card break (not patched, not called).
+pub const GIMMICK_BREAK_CHECKED: &[Site] = &[
+    // The enemy message handler's case 3 (jump-table entry 2): unless +0x260 & 4, vtable +0x418;
+    // +0x260 &= ~0x201; its attack collision +0x108 ends (0x140179D90, 10.0); +0x260 &= ~0x10;
+    // next state = enemy + 0x800 (state 13), stored at 0x140181994 (mov [rbx+0x68],rax).
+    Site {
+        name: "enemy message 3: card broken (0x140181739)",
+        rva: 0x0018_1739,
+        expect: &[
+            0x48, 0x8B, 0x83, 0x60, 0x02, 0x00, 0x00, 0xA8, 0x04, 0x75, 0x13, 0x48, 0x8B, 0x03, 0x48, 0x8B, 0xCB, 0xFF, 0x90, 0x18, 0x04, 0x00, 0x00, 0x48, 0x8B, 0x83, 0x60, 0x02, 0x00, 0x00, 0x48, 0x8B, 0x8B, 0x08, 0x01, 0x00, 0x00, 0x48, 0x25, 0xFE, 0xFD, 0xFF, 0xFF, 0x48,
+            0x89, 0x83, 0x60, 0x02, 0x00, 0x00, 0x48, 0x85, 0xC9, 0x74, 0x14, 0xF3, 0x0F, 0x10, 0x0D, 0x7C, 0xFA, 0x53, 0x00, 0xE8, 0x13, 0x86, 0xFF, 0xFF, 0x48, 0x8B, 0x83, 0x60, 0x02, 0x00, 0x00, 0x48, 0x83, 0xE0, 0xEF, 0x48, 0x89, 0x83, 0x60, 0x02, 0x00, 0x00, 0x48, 0x8D, 0x83,
+            0x00, 0x08, 0x00, 0x00, 0xE9, 0xF9, 0x01, 0x00, 0x00,
+        ],
+    },
+    // Its jump table (messages 1..12, RVAs): entry 2 (message 3) and 3.
+    Site { name: "enemy message table 3..4 (0x1401819B0)", rva: 0x0018_19B0, expect: &[0x39, 0x17, 0x18, 0x00, 0x9B, 0x17, 0x18, 0x00] },
+    // The store of the next state: mov [rbx+0x68],rax.
+    Site { name: "enemy message: next state (0x140181994)", rva: 0x0018_1994, expect: &[0x48, 0x89, 0x43, 0x68, 0x48, 0x8B, 0x5C, 0x24, 0x30] },
+];
+
+/// The five card-break bosses' message handler (`+0x48`, Re:CoM's base `0x140181620`) and
+/// state-13 begin (`+0x220`, their drop). Checked (exe; relocated pointers).
+pub const GIMMICK_BREAK_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CBossGuardarmor +0x48", rva: 0x0065_F500, target: 0x0018_1620 },
+    PtrSite { name: "CBossGuardarmor +0x220", rva: 0x0065_F6D8, target: 0x003A_B290 },
+    PtrSite { name: "CBossTrickMaster +0x48", rva: 0x0066_C640, target: 0x0018_1620 },
+    PtrSite { name: "CBossTrickMaster +0x220", rva: 0x0066_C818, target: 0x003C_B1C0 },
+    PtrSite { name: "CBossJafar +0x48", rva: 0x0066_E268, target: 0x0018_1620 },
+    PtrSite { name: "CBossJafar +0x220", rva: 0x0066_E440, target: 0x003D_0D80 },
+    PtrSite { name: "CBossParasiteCage +0x48", rva: 0x0066_9268, target: 0x0018_1620 },
+    PtrSite { name: "CBossParasiteCage +0x220", rva: 0x0066_9440, target: 0x003C_2B70 },
+    PtrSite { name: "CBossMDragon +0x48", rva: 0x0067_45B8, target: 0x0018_1620 },
+    PtrSite { name: "CBossMDragon +0x220", rva: 0x0067_4790, target: 0x003E_1690 },
+];
+
 /// Re:CoM code the gimmick cards rely on (not patched, not called).
 pub const GIMMICK_CHECKED: &[Site] = &[
     // The count getter (−1 without CBTL, else +0x1D0) and the "now playing" getter (byte +0x1E4):
@@ -1961,6 +2004,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         GIMMICK_HOOKS,
         GIMMICK_CALLEES,
         GIMMICK_CHECKED,
+        GIMMICK_BREAK_CALLEES,
+        GIMMICK_BREAK_CHECKED,
         SHOP_HOOKS,
         SHOP_CALLEES,
         SHOP_CHECKED,
@@ -2140,6 +2185,24 @@ mod tests {
             assert!(s.name.contains(name) && s.expect[0] & 0xF == crate::gimmick::TYPE, "{}", s.name);
         }
         assert_eq!(GIMMICK_PTRS[0].target, find("player card message handler").rva);
+        // Option (c): the break's sites, each the five bosses' two slots.
+        for s in GIMMICK_BREAK_CALLEES.iter().chain(GIMMICK_BREAK_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        for b in crate::gimmick::BREAK_BOSSES {
+            let h = GIMMICK_BREAK_PTRS.iter().find(|p| p.rva == b.vtable + 0x48).unwrap();
+            let st = GIMMICK_BREAK_PTRS.iter().find(|p| p.rva == b.vtable + crate::gimmick::STAGGER_SLOT).unwrap();
+            assert!(h.name.starts_with(b.rtti) && st.name.starts_with(b.rtti));
+            assert_eq!((h.target, st.target), (0x0018_1620, b.stagger));
+        }
+        let m3 = GIMMICK_BREAK_CHECKED.iter().find(|s| s.rva == 0x0018_1739).unwrap();
+        // lea rax,[rbx+0x800]: state 13; jmp to the store at 0x140181994.
+        assert_eq!(u32_at(m3, 0x59), crate::gimmick::state_at(crate::gimmick::STATE_BROKEN));
+        assert_eq!(target(m3, 0x5D, 5, 1), 0x1_4018_1994);
+        let t = GIMMICK_BREAK_CHECKED.iter().find(|s| s.rva == 0x0018_19B0).unwrap();
+        // Entry (message − 1) = 2 of the table at 0x1401819A8.
+        assert_eq!((t.rva - 0x0018_19A8) / 4 + 1, crate::gimmick::MESSAGE_BROKEN);
+        assert_eq!(u32_at(t, 0), m3.rva as usize);
     }
 
     #[test]

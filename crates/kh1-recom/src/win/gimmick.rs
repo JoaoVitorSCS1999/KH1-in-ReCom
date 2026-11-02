@@ -40,6 +40,26 @@ static SHOWN: AtomicU32 = AtomicU32::new(0);
 static PLAYED: AtomicU32 = AtomicU32::new(0);
 static PLAY_STAGE: AtomicU32 = AtomicU32::new(0);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(200);
+/// Option (c), the card break: its sites and the five classes are as read.
+static BREAK_OK: AtomicBool = AtomicBool::new(false);
+/// A break posted and not yet seen through (for the drop roll's log line): the boss's handle (0:
+/// none), its card, frames since, the frame state 13 was first seen (0: not yet; stored + 1).
+static BREAK_HANDLE: AtomicU32 = AtomicU32::new(0);
+static BREAK_KIND: AtomicU32 = AtomicU32::new(0);
+static BREAK_FRAMES: AtomicU32 = AtomicU32::new(0);
+static BREAK_ENTERED: AtomicU32 = AtomicU32::new(0);
+/// The last gimmick card kind the prize factory made (for the watch).
+static DROP_SEEN: AtomicU32 = AtomicU32::new(0);
+/// Re:CoM's message post (`sites::GIMMICK_BREAK_CALLEES`) and CBTL's queue / handle fields
+/// (`0x14015EAC0` posts its results with them). Checked (decomp + disasm).
+const POST: u32 = 0x001D_2770;
+const CBTL_QUEUE: usize = 0x58;
+const HANDLE: usize = 0x20;
+/// An enemy's flags (`+0x260`: bit 0 attacking, `0x2000000` the card interrupt) and current state
+/// (`+0x60`), HP (`+0x274`).
+const EN_FLAGS: usize = 0x260;
+const EN_STATE: usize = 0x60;
+const EN_HP: usize = 0x274;
 
 /// CBTL (`CCardBattle`, task 0x16). Checked (decomp + exe: every getter reads it).
 const CBTL_PTR: u64 = 0x1_4087_A818;
@@ -67,6 +87,7 @@ type ClearFn = unsafe extern "win64" fn();
 type CountFn = unsafe extern "win64" fn(i32);
 type MessageFn = unsafe extern "win64" fn(usize, i32, *const u32);
 type AddFn = unsafe extern "win64" fn(u32, u32, i32);
+type PostFn = unsafe extern "win64" fn(usize, u32, u32, u32, u32, usize) -> u32;
 type SpawnFn = unsafe extern "win64" fn(usize, *const PrizeDesc, usize) -> usize;
 
 fn note(line: impl FnOnce() -> String) {
@@ -89,7 +110,34 @@ pub unsafe fn install(b: usize) -> bool {
         log("gimmick: CPlayerSora's card message slot is not 0x1401F5580; no Stagger");
         return false;
     }
+    install_break(b);
     true
+}
+
+/// Option (c): the post, the enemy's message 3, the five classes (RTTI) and their two slots. Without
+/// them only the card break is left out.
+unsafe fn install_break(b: usize) {
+    let have = |at: usize, n: usize| std::slice::from_raw_parts(at as *const u8, n).to_vec();
+    for c in crate::sites::GIMMICK_BREAK_CALLEES.iter().chain(crate::sites::GIMMICK_BREAK_CHECKED) {
+        if have(b + c.rva as usize, c.expect.len()) != c.expect {
+            log(&format!("gimmick: {} is not as expected; no card break for the five bosses (their cards don't drop at combat = kh1)", c.name));
+            return;
+        }
+    }
+    for p in crate::sites::GIMMICK_BREAK_PTRS {
+        if rd::<usize>(b + p.rva as usize) != b + p.target as usize {
+            log(&format!("gimmick: {} is not {:#x}; no card break for the five bosses", p.name, 0x1_4000_0000u64 + p.target as u64));
+            return;
+        }
+    }
+    for k in gm::BREAK_BOSSES {
+        let want = format!(".?AV{}@@", k.rtti);
+        if super::stats::rtti_name(b, b + k.vtable as usize).as_deref() != Some(want.as_str()) {
+            log(&format!("gimmick: the vtable at {:#x} is not {}'s; no card break for the five bosses", 0x1_4000_0000u64 + k.vtable as u64, k.rtti));
+            return;
+        }
+    }
+    BREAK_OK.store(true, Ordering::Release);
 }
 
 pub fn mark_installed() {
@@ -97,6 +145,15 @@ pub fn mark_installed() {
 }
 
 pub fn start_line() -> String {
+    let brk = if BREAK_OK.load(Ordering::Acquire) {
+        "; a KH1 combo finisher that interrupts Guard Armor's, Trickmaster's, Jafar's, Parasite Cage's or Dragon Maleficent's attack posts CBTL's card-break message 3 (0x1401D2770), so its own state 13 staggers it and rolls its card"
+    } else {
+        "; no card break (sites not as read): those five bosses' cards don't drop"
+    };
+    format!("{}{brk}", start_base())
+}
+
+fn start_base() -> String {
     "gimmick: Re:CoM's gimmick cards at combat = kh1 in Sora's story: Re:CoM's drops (logged in the prize factory 0x1401A89C0), held on CBTL's gimmick count (+0x1D0, one at a time) instead of the revolver, \"Stagger\" in the context tab (after an object's command, before Sonic Blade), Triangle plays it through Re:CoM's play writes (0x140161D60, 0x14015D5B0, Sora's card handler 0x1401F5580) and Re:CoM's gimmick action 0x19".into()
 }
 
@@ -275,6 +332,9 @@ pub unsafe fn request(pl: usize, forced: bool) {
             wr(pl + player::REQUEST, gm::request(bits, r));
         }
     }
+    if BREAK_HANDLE.load(Ordering::Acquire) != 0 {
+        watch_break();
+    }
     let card = PLAYED.load(Ordering::Acquire);
     if card == 0 {
         return;
@@ -304,6 +364,7 @@ pub unsafe extern "win64" fn prize_spawn(factory: usize, desc: *const PrizeDesc,
     if !desc.is_null() {
         let kind = (*desc).kind;
         if gm::boss(kind).is_some() {
+            DROP_SEEN.store(kind, Ordering::Release);
             let pos = (*desc).pos;
             let c = cbtl_now();
             let pl: usize = rd(va(base(), data::MAIN_PLAYER));
@@ -312,4 +373,89 @@ pub unsafe extern "win64" fn prize_spawn(factory: usize, desc: *const PrizeDesc,
         }
     }
     prize
+}
+
+/// Option (c) (owner, 2026-11-01), from the KH1 enemy-hit wrapper after Re:CoM's hit handler: a KH1
+/// combo finisher (`row`) that interrupted (`interrupted`: the enemy was attacking and our
+/// interrupt bit was set for the handler) one of the five card-break bosses' attacks gets Re:CoM's
+/// own card break: CBTL's message 3 posted to it on CBTL's queue as the card-battle resolver
+/// `0x14015EAC0` posts a break (delay 0, from CBTL's handle, no record). Re:CoM delivers it to the
+/// boss's message handler `0x140181620`, whose case 3 sets state 13; the boss's state-13 begin
+/// (vtable `+0x220`) staggers it and rolls its card.
+pub unsafe fn after_kh1_hit(enemy: usize, row: Option<usize>, interrupted: bool) {
+    if !interrupted || !BREAK_OK.load(Ordering::Acquire) || !ON.load(Ordering::Acquire) {
+        return;
+    }
+    let b = base();
+    let Some(boss) = gm::break_boss((rd::<usize>(enemy).wrapping_sub(b)) as u32) else {
+        return;
+    };
+    if !mv::kh1_sora(rd(va(b, data::MAIN_PLAYER))) {
+        return;
+    }
+    let hit = gm::Hit {
+        boss: true,
+        finisher: row.is_some_and(|r| gm::is_finisher(r, super::attack::moveset())),
+        attacking: true,
+        ended: rd::<u64>(enemy + EN_FLAGS) & 1 == 0,
+        alive: rd::<i32>(enemy + EN_HP) > 0,
+    };
+    if !gm::breaks(hit) {
+        if hit.finisher {
+            note(|| format!("break: {}'s attack, KH1 finisher row {}: no break ({hit:?})", boss.rtti, row.unwrap_or(0)));
+        }
+        return;
+    }
+    let c = cbtl_now();
+    if c == 0 {
+        note(|| format!("break: {}: no CBTL, no card break", boss.rtti));
+        return;
+    }
+    let to: u32 = rd(enemy + HANDLE);
+    let ok = func::<PostFn>(POST)(rd(c + CBTL_QUEUE), 0, rd(c + HANDLE), to, gm::MESSAGE_BROKEN, 0);
+    if ok == 0 {
+        note(|| format!("break: {}: CBTL's message queue is full; no card break", boss.rtti));
+        return;
+    }
+    BREAK_KIND.store(boss.kind as u32, Ordering::Release);
+    BREAK_FRAMES.store(0, Ordering::Release);
+    BREAK_ENTERED.store(0, Ordering::Release);
+    DROP_SEEN.store(0, Ordering::Release);
+    BREAK_HANDLE.store(to, Ordering::Release);
+    note(|| {
+        format!(
+            "break: KH1 finisher row {} interrupted {}'s attack (HP {}): CBTL message 3 posted to handle {to:#x}; its state 13 ({:#x}) staggers it and rolls the {}",
+            row.unwrap_or(0),
+            boss.rtti,
+            rd::<i32>(enemy + EN_HP),
+            0x1_4000_0000u64 + boss.stagger as u64,
+            gm::describe(boss.kind as u32)
+        )
+    });
+}
+
+/// Each frame while a break is pending (from [`request`]): the boss's state 13 and its card's
+/// prize, for the drop roll's log line.
+unsafe fn watch_break() {
+    let h = BREAK_HANDLE.load(Ordering::Acquire);
+    let kind = BREAK_KIND.load(Ordering::Acquire);
+    let frames = BREAK_FRAMES.fetch_add(1, Ordering::AcqRel) + 1;
+    let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(h);
+    let in_state = obj != 0 && rd::<usize>(obj + EN_STATE) == obj + gm::state_at(gm::STATE_BROKEN);
+    let mut e = BREAK_ENTERED.load(Ordering::Acquire);
+    if in_state && e == 0 {
+        e = frames + 1;
+        BREAK_ENTERED.store(e, Ordering::Release);
+        note(|| format!("break: the {}'s boss entered its state 13 (card-break stagger)", gm::describe(kind)));
+    }
+    let r = gm::roll_step(frames, e.checked_sub(1), obj != 0, in_state, DROP_SEEN.load(Ordering::Acquire) == kind);
+    let line = match r {
+        gm::Roll::Wait => return,
+        gm::Roll::Dropped => "drop roll: the card dropped",
+        gm::Roll::NoDrop => "drop roll: no card (its chance missed, or its own condition refused)",
+        gm::Roll::NoStagger => "no state 13 within 120 frames (the boss didn't take message 3)",
+        gm::Roll::Gone => "the boss is gone",
+    };
+    BREAK_HANDLE.store(0, Ordering::Release);
+    note(|| format!("break: {}: {line} ({frames} frames)", gm::describe(kind)));
 }

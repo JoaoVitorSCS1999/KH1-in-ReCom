@@ -98,6 +98,112 @@ pub mod player {
     pub const GIMMICK_ACTION: u32 = 0x19;
 }
 
+/// The five bosses whose card drops only from Re:CoM's card-break stagger (enemy state 13, whose
+/// begin is the class's vtable `+0x220`). At Combat = KH1 (owner, 2026-11-01, option (c)): a KH1
+/// combo finisher that interrupts one of their attacks gives it Re:CoM's own card break: CBTL's
+/// message 3 posted to it as the card-battle resolver posts it, so its own state 13 rolls the drop.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BreakBoss {
+    /// Its gimmick card.
+    pub kind: u8,
+    /// The class's vtable (RVA, RTTI-checked at install) and its RTTI name.
+    pub vtable: u32,
+    pub rtti: &'static str,
+    /// Its state-13 begin (vtable `+0x220`): the stagger and the drop roll (RVA).
+    pub stagger: u32,
+}
+
+/// Checked (exe: RTTI vtables, the `+0x220` slots; decomp: each begin's drop code).
+pub const BREAK_BOSSES: [BreakBoss; 5] = [
+    BreakBoss { kind: 0x3A, vtable: 0x0065_F4B8, rtti: "CBossGuardarmor", stagger: 0x003A_B290 },
+    BreakBoss { kind: 0x3B, vtable: 0x0066_C5F8, rtti: "CBossTrickMaster", stagger: 0x003C_B1C0 },
+    BreakBoss { kind: 0x3C, vtable: 0x0066_E220, rtti: "CBossJafar", stagger: 0x003D_0D80 },
+    BreakBoss { kind: 0x3E, vtable: 0x0066_9220, rtti: "CBossParasiteCage", stagger: 0x003C_2B70 },
+    BreakBoss { kind: 0x40, vtable: 0x0067_4570, rtti: "CBossMDragon", stagger: 0x003E_1690 },
+];
+
+/// The state-13 begin's vtable slot (`+0xE8 + 0x18 × 13`).
+pub const STAGGER_SLOT: u32 = 0x220;
+/// CBTL's message 3 ("your card was broken"): the enemy's message handler (`0x140181620`, vtable
+/// `+0x48`) case 3 sets its next state to state 13 (`enemy + (13 + 0x13) × 0x40` = `+0x800`).
+pub const MESSAGE_BROKEN: u32 = 3;
+pub const STATE_BROKEN: usize = 13;
+/// An enemy's state object (`+0x68` next, `+0x60` current point at one).
+pub const fn state_at(s: usize) -> usize {
+    (s + 0x13) * 0x40
+}
+/// KH1's combo-finisher reaction kind (the attack record's `kind`, as `crate::damage::swing_column`).
+pub const KIND_FINISHER: u8 = 5;
+
+/// The card-break boss of a vtable.
+pub fn break_boss(vtable_rva: u32) -> Option<&'static BreakBoss> {
+    BREAK_BOSSES.iter().find(|b| b.vtable == vtable_rva)
+}
+
+/// A KH1 row is a combo finisher (its attack record's kind 5: the ground and air finishers,
+/// Blitz, Ripple Drive, Hurricane Blast).
+pub fn is_finisher(kh1_row: usize, m: &kh1_core::Moveset) -> bool {
+    m.row(kh1_row).and_then(|rw| m.attack(rw.attack)).is_some_and(|a| a.kind == KIND_FINISHER)
+}
+
+/// What a KH1 hit on an enemy was, for the card break.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Hit {
+    /// One of [`BREAK_BOSSES`].
+    pub boss: bool,
+    /// The KH1 row is a combo finisher.
+    pub finisher: bool,
+    /// The enemy was in an attack (`+0x260 & 1`) without the interrupt bit before the hit.
+    pub attacking: bool,
+    /// After Re:CoM's hit handler its attack is over (`+0x260 & 1` cleared: `0x14017E1D0` ended
+    /// it for the interrupt bit).
+    pub ended: bool,
+    /// Its HP after the hit is above 0 (Re:CoM's message handler ignores a dead enemy).
+    pub alive: bool,
+}
+
+/// Option (c): the finisher interrupted one of the five bosses' attacks.
+pub fn breaks(h: Hit) -> bool {
+    h.boss && h.finisher && h.attacking && h.ended && h.alive
+}
+
+/// The drop roll's outcome, watched after the break (for the log): each frame, whether the boss
+/// is still there, in state 13, and whether its card's prize was made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Roll {
+    Wait,
+    Dropped,
+    /// State 13's begin ran (2 frames in it) and made no card: the roll missed or the boss's own
+    /// condition refused it.
+    NoDrop,
+    /// Never entered state 13 (Re:CoM's handler or the boss refused the message).
+    NoStagger,
+    Gone,
+}
+
+/// Frames in state 13 after which its begin has surely run; frames without state 13 given up.
+pub const ROLL_SETTLE: u32 = 2;
+pub const ROLL_GIVE_UP: u32 = 120;
+
+/// One frame of the watch: `frames` since the post, `entered` the frame state 13 was first seen.
+pub fn roll_step(frames: u32, entered: Option<u32>, present: bool, in_state: bool, dropped: bool) -> Roll {
+    if dropped {
+        Roll::Dropped
+    } else if !present {
+        Roll::Gone
+    } else if let Some(e) = entered {
+        if in_state && frames >= e + ROLL_SETTLE || !in_state {
+            Roll::NoDrop
+        } else {
+            Roll::Wait
+        }
+    } else if frames > ROLL_GIVE_UP {
+        Roll::NoStagger
+    } else {
+        Roll::Wait
+    }
+}
+
 /// The boss a gimmick card belongs to.
 pub fn boss(kind: u32) -> Option<&'static str> {
     BOSSES.iter().find(|b| b.0 as u32 == kind).map(|b| b.1)
@@ -306,6 +412,51 @@ mod tests {
         assert_eq!(context_entry(0, STAGGER, 0x4B), (STAGGER, false));
         assert_eq!(context_entry(0, 0, 0x4B), (0x4B, true));
         assert_eq!(context_entry(0, 0, 0), (0, false));
+    }
+
+    #[test]
+    fn the_five_card_break_bosses() {
+        let kinds: Vec<u8> = BREAK_BOSSES.iter().map(|b| b.kind).collect();
+        assert_eq!(kinds, [0x3A, 0x3B, 0x3C, 0x3E, 0x40]);
+        for b in BREAK_BOSSES {
+            assert!(boss(b.kind as u32).is_some());
+            assert_eq!(break_boss(b.vtable), Some(&b));
+        }
+        // Oogie, Ursula, Darkside drop without a card break: not here.
+        assert!(BREAK_BOSSES.iter().all(|b| ![0x3D, 0x3F, 0x41].contains(&b.kind)));
+        assert_eq!(state_at(STATE_BROKEN), 0x800);
+        assert_eq!(0xE8 + 0x18 * STATE_BROKEN as u32, STAGGER_SLOT);
+        // None of them is a revenge boss (Stage 106: humanoid bosses only).
+        for b in BREAK_BOSSES {
+            assert!(crate::revenge::boss_by_vtable(b.vtable).is_none(), "{}", b.rtti);
+        }
+    }
+
+    #[test]
+    fn only_an_interrupting_finisher_on_a_live_boss_breaks() {
+        let ok = Hit { boss: true, finisher: true, attacking: true, ended: true, alive: true };
+        assert!(breaks(ok));
+        for h in [Hit { boss: false, ..ok }, Hit { finisher: false, ..ok }, Hit { attacking: false, ..ok }, Hit { ended: false, ..ok }, Hit { alive: false, ..ok }] {
+            assert!(!breaks(h), "{h:?}");
+        }
+    }
+
+    #[test]
+    fn finishers_are_kind_5_rows() {
+        let m = kh1_core::Moveset::kh1_defaults();
+        // The ground finisher (row 8) and the air finisher (row 16) are; swings 1 / 2 aren't.
+        assert!(is_finisher(8, &m) && is_finisher(16, &m));
+        assert!(!is_finisher(13, &m) && !is_finisher(11, &m) && !is_finisher(9999, &m));
+    }
+
+    #[test]
+    fn the_drop_roll_watch() {
+        assert_eq!(roll_step(1, None, true, false, false), Roll::Wait);
+        assert_eq!(roll_step(3, None, true, false, true), Roll::Dropped);
+        assert_eq!(roll_step(3, None, false, false, false), Roll::Gone);
+        assert_eq!(roll_step(3, Some(3), true, true, false), Roll::Wait);
+        assert_eq!(roll_step(5, Some(3), true, true, false), Roll::NoDrop);
+        assert_eq!(roll_step(ROLL_GIVE_UP + 1, None, true, false, false), Roll::NoStagger);
     }
 
     #[test]
