@@ -271,6 +271,38 @@ impl Converter {
         Ok(encode_clip(spec, &rows))
     }
 
+    /// Converts one KH1 motion from frame `start` on (a request a script only plays from a later
+    /// frame, M11): the clip holds KH1's frames `start..`, the root's travel counted from `start`
+    /// (Re:CoM's root motion starts at 0). `start` 0 is [`Converter::convert`].
+    pub fn convert_from(&self, m: &Motion, spec: &ClipSpec, start: u32) -> Result<Clip> {
+        if start == 0 {
+            return self.convert(m, spec);
+        }
+        if start >= m.frames {
+            return bad(format!("{}: start {start} past its {} frames", spec.name, m.frames));
+        }
+        let n = (m.frames - start) as usize;
+        let frames = if spec.looped { n } else { n + 1 };
+        let mut rig = self.rig();
+        rig.start_motion(m);
+        // Pose the frames before `start` in order (the rig keeps state between frames).
+        for f in 0..start {
+            let _ = self.targets(&mut rig, m, f as f32, spec.root_motion);
+        }
+        let mut rows: Vec<Vec<[f64; 9]>> = Vec::with_capacity(frames);
+        let mut base = None;
+        for f in 0..frames {
+            let mut tg = self.targets(&mut rig, m, (start as usize + f) as f32, spec.root_motion);
+            let b0 = *base.get_or_insert(tg[0].p);
+            for k in 0..3 {
+                tg[0].p[k] -= b0[k];
+            }
+            let l = self.locals(&tg, rows.last().map(|v| v.as_slice()));
+            rows.push(l);
+        }
+        Ok(encode_clip(spec, &rows))
+    }
+
     /// The Keyblade's skeleton (`PLAYER/0002/PL0002.MDL`) prepared for conversion. `attach` is
     /// the Sora bone the weapon's bone 0 hangs from (`WeaponR`).
     ///

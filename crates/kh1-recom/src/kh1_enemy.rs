@@ -89,56 +89,67 @@ pub struct Class {
     /// The manifest the asset step writes (recom root) and its format.
     pub manifest: &'static str,
     pub format: &'static str,
+    /// Its manifest's parser and its behaviour's constructor (`seed`, KH1 `yaw`).
+    pub parse: fn(&str) -> Result<Manifest, String>,
+    pub make: fn(&Manifest, u32, f32) -> Box<dyn ke::Behaviour>,
 }
 
 /// The Soldier's attack names (`kh1_core::soldier::Attack::ALL`'s order).
 const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin kick", "air kick", "rush", "rush leap"];
 
-/// Every class with a KH1 behaviour. Index = the runtime's class number.
-pub static CLASSES: [Class; 2] = [
-    Class {
-        name: "shadow",
-        title: "Shadow",
-        rtti: ".?AVCEnemyShadow@@",
-        recom_id: 1,
-        vtable: crate::shadow::VTABLE,
-        slots: crate::shadow::VTABLE_SLOTS,
-        alloc: crate::shadow::ALLOC,
-        magic: crate::shadow::tail::MAGIC,
-        ctor: &crate::sites::SHADOW_HOOKS[0],
-        alloc_site: &crate::sites::SHADOW_ALLOC[0],
-        ptrs: crate::sites::SHADOW_PTRS,
-        // Claw 2, swipe 4, leap claw 3 (`crate::shadow::attack_state`).
-        attack_states: &[2, 4, 3],
-        attack_names: &["claw", "swipe", "leap claw"],
-        appear: Appear::Shadow,
-        reads_hp: false,
-        manifest: crate::shadow::MANIFEST,
-        format: crate::shadow::FORMAT,
-    },
-    Class {
-        name: "soldier",
-        title: "Soldier",
-        rtti: ".?AVCEnemySoldier@@",
-        recom_id: 2,
-        vtable: 0x0054_EA68,
-        slots: 139,
-        alloc: 0xCD0,
-        magic: 0x4F53_314B, // "K1SO"
-        ctor: &crate::sites::SOLDIER_HOOKS[0],
-        alloc_site: &crate::sites::SOLDIER_ALLOC[0],
-        ptrs: crate::sites::SOLDIER_PTRS,
-        // Re:CoM's Soldier has two attack states (Checked (exe): `CEnemySoldier` overrides states
-        // 2 (its kick `e002_050`) and 3 (its spin kick `e002_051`)): the kicks on the ground in
-        // state 2, the attacks that leave the ground in state 3.
-        attack_states: &[2, 2, 3, 2, 3, 2, 3],
-        attack_names: SOLDIER_ATTACKS,
-        appear: Appear::Base,
-        reads_hp: true,
-        manifest: SOLDIER_MANIFEST,
-        format: FORMAT,
-    },
-];
+/// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
+/// row in their own module (`crate::m11`); one line here per enemy.
+pub static CLASSES: [&Class; 3] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS];
+
+/// M10's Shadow (class 0).
+pub static SHADOW: Class = Class {
+    name: "shadow",
+    title: "Shadow",
+    rtti: ".?AVCEnemyShadow@@",
+    recom_id: 1,
+    vtable: crate::shadow::VTABLE,
+    slots: crate::shadow::VTABLE_SLOTS,
+    alloc: crate::shadow::ALLOC,
+    magic: crate::shadow::tail::MAGIC,
+    ctor: &crate::sites::SHADOW_HOOKS[0],
+    alloc_site: &crate::sites::SHADOW_ALLOC[0],
+    ptrs: crate::sites::SHADOW_PTRS,
+    // Claw 2, swipe 4, leap claw 3 (`crate::shadow::attack_state`).
+    attack_states: &[2, 4, 3],
+    attack_names: &["claw", "swipe", "leap claw"],
+    appear: Appear::Shadow,
+    reads_hp: false,
+    manifest: crate::shadow::MANIFEST,
+    format: crate::shadow::FORMAT,
+    parse: from_shadow,
+    make: make_shadow,
+};
+
+/// M11's Soldier (class 1).
+pub static SOLDIER: Class = Class {
+    name: "soldier",
+    title: "Soldier",
+    rtti: ".?AVCEnemySoldier@@",
+    recom_id: 2,
+    vtable: 0x0054_EA68,
+    slots: 139,
+    alloc: 0xCD0,
+    magic: 0x4F53_314B, // "K1SO"
+    ctor: &crate::sites::SOLDIER_HOOKS[0],
+    alloc_site: &crate::sites::SOLDIER_ALLOC[0],
+    ptrs: crate::sites::SOLDIER_PTRS,
+    // Re:CoM's Soldier has two attack states (Checked (exe): `CEnemySoldier` overrides states
+    // 2 (its kick `e002_050`) and 3 (its spin kick `e002_051`)): the kicks on the ground in
+    // state 2, the attacks that leave the ground in state 3.
+    attack_states: &[2, 2, 3, 2, 3, 2, 3],
+    attack_names: SOLDIER_ATTACKS,
+    appear: Appear::Base,
+    reads_hp: true,
+    manifest: SOLDIER_MANIFEST,
+    format: FORMAT,
+    parse: parse_soldier,
+    make: make_soldier,
+};
 
 /// The generic manifest's format (the Shadow keeps `kh1-shadow 1`).
 pub const FORMAT: &str = "kh1-enemy 1";
@@ -292,13 +303,14 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Target(t) => format!("target {t}"),
         Cmd::State(s) => format!("state {}", state_name(*s)),
         Cmd::Held => "held (root motion carries it)".into(),
+        Cmd::Attack { request, attack, .. } => format!("attack {request} ({}), steered", names.get(*attack as usize).copied().unwrap_or("?")),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -386,23 +398,27 @@ pub mod watchdog {
     }
 }
 
+fn make_shadow(m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
+    let c = kh1_core::shadow::Consts::new(m.consts.pairs().to_vec()).expect("checked at parse");
+    Box::new(kh1_core::shadow::Ai::new(c, m.frames(), seed, yaw, false))
+}
+
+fn parse_soldier(text: &str) -> Result<Manifest, String> {
+    parse(text, "soldier", kh1_core::soldier::NAMES, SOLDIER_REQUESTS)
+}
+
+fn make_soldier(m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
+    Box::new(kh1_core::soldier::Ai::new(m.consts.clone(), m.frames(), seed, yaw, true))
+}
+
 /// A new behaviour for a class (`seed`: its random stream; `yaw`: its facing, KH1's).
 pub fn make(class: usize, m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
-    match class {
-        0 => {
-            let c = kh1_core::shadow::Consts::new(m.consts.pairs().to_vec()).expect("checked at parse");
-            Box::new(kh1_core::shadow::Ai::new(c, m.frames(), seed, yaw, false))
-        }
-        _ => Box::new(kh1_core::soldier::Ai::new(m.consts.clone(), m.frames(), seed, yaw, true)),
-    }
+    (CLASSES[class].make)(m, seed, yaw)
 }
 
 /// Parses a class's manifest.
 pub fn parse_for(class: usize, text: &str) -> Result<Manifest, String> {
-    match class {
-        0 => from_shadow(text),
-        _ => parse(text, CLASSES[class].name, kh1_core::soldier::NAMES, SOLDIER_REQUESTS),
-    }
+    (CLASSES[class].parse)(text)
 }
 
 #[cfg(test)]
@@ -459,8 +475,8 @@ mod tests {
             assert_eq!(c.alloc_site.expect, &alloc_bytes(c.alloc), "{}", c.name);
             assert!(CLASSES.iter().enumerate().all(|(j, d)| j == i || (d.magic != c.magic && d.vtable != c.vtable)));
         }
-        assert_eq!(replaced_states(&CLASSES[0]), vec![0, 1, 2, 4, 3, 11, 12, 30]);
-        assert_eq!(replaced_states(&CLASSES[1]), vec![0, 1, 2, 3, 11, 12, 30]);
+        assert_eq!(replaced_states(CLASSES[0]), vec![0, 1, 2, 4, 3, 11, 12, 30]);
+        assert_eq!(replaced_states(CLASSES[1]), vec![0, 1, 2, 3, 11, 12, 30]);
         assert_eq!(CLASSES[1].attack_names, kh1_core::soldier::Attack::ALL.map(|a| a.name()));
     }
 

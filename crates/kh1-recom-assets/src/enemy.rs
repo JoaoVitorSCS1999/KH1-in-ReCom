@@ -156,8 +156,14 @@ pub fn exe_consts() -> Vec<(&'static str, f32)> {
     crate::shadow::exe_consts()
 }
 
+/// KH1's stats-block defaults (`0x1402A5D70`: `+4` walk 2, `+8` run 8, `+0x10` hop 190; Checked
+/// (decomp)): a constant listed with no offsets takes its value here (a script that never writes
+/// it keeps the default; M11 fliers).
+pub const STATS_DEFAULTS: &[(&str, f32)] = &[("walk_speed", 2.0), ("run_speed", 8.0), ("hop_height", 190.0)];
+
 /// Reads the constants at `table` (`push`: an opcode word whose low byte is 0x12 / 0x52 (a float)
-/// or 0x02 / 0x42 (an integer, as a number), then the value).
+/// or 0x02 / 0x42 (an integer, as a number), then the value). A name with no offsets is one of
+/// [`STATS_DEFAULTS`].
 pub fn script_consts(script: &[u8], name: &[u8], table: &[(&str, &[usize])]) -> Result<Vec<(String, f32)>> {
     let sname = String::from_utf8_lossy(name);
     if script.get(4..4 + name.len()) != Some(name) {
@@ -165,6 +171,11 @@ pub fn script_consts(script: &[u8], name: &[u8], table: &[(&str, &[usize])]) -> 
     }
     let mut out = Vec::new();
     for (n, offs) in table {
+        if offs.is_empty() {
+            let d = STATS_DEFAULTS.iter().find(|d| d.0 == *n).ok_or_else(|| crate::Error::Format(format!("{sname}: {n} has no offset and no stats-block default")))?;
+            out.push((n.to_string(), d.1));
+            continue;
+        }
         let mut v: Option<f32> = None;
         for &o in offs.iter() {
             let w = script.get(o..o + 6).ok_or_else(|| crate::Error::Format(format!("{sname}: short at {o:#x}")))?;
@@ -544,8 +555,10 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
             }
         }
     }
-    let (asd, records) = extend_asd(&inp.asd, spec.asd, &conv, &ms, &new, &clips)?;
-    let ses = extend_ses(&inp.ses, &inp.asd, &ms, &clips, &pairs, &sound_rows)?;
+    let (mut asd, records) = extend_asd(&inp.asd, spec.asd, &conv, &ms, &new, &clips)?;
+    let mut ses = extend_ses(&inp.ses, &inp.asd, &ms, &clips, &pairs, &sound_rows)?;
+    let (mut ann, mut clips) = (ann, clips);
+    apply_starts(spec.name, &ms, &conv, &mut ann, &mut clips, &mut asd, spec.asd.0, &mut ses)?;
     let parts = hurt_parts(&inp.mdls, &conv)?;
     // The attacks and their clash recoils (row `+0x40`, request in the low 16 bits; the first row's,
     // as KH1's clash reads the record that met the Guard: Assumption that an attack's rows agree,
@@ -588,5 +601,66 @@ fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], a
     s
 }
 
+/// Requests a script only ever plays from a later frame (KH1's request word `+4`: the start time of
+/// the queue entry `0x14029F980` writes, added when the motion switches, `0x14029FC40`; Checked
+/// (decomp); M11): (enemy, request, KH1 frame). Their clip is the motion from that frame
+/// ([`Converter::convert_from`]), their attack records' windows and their sounds move by it, their
+/// manifest length is the rest. The Air Soldier's slash: `0x22F2` `sys 13(wp, 201, 8, 20)`.
+pub const STARTS: &[(&str, u16, u32)] = &[("airsoldier", 201, 20)];
+
+/// [`STARTS`]' requests of an enemy.
+pub fn starts_of(name: &str) -> Vec<(u16, u32)> {
+    STARTS.iter().filter(|s| s.0 == name).map(|s| (s.1, s.2)).collect()
+}
+
+/// Applies [`STARTS`] to a built enemy: the clip (each such request must be its entry's only one),
+/// the new records of `first..` bound to it (their windows move back by the start; a window that
+/// would start before 0 begins at 0), the clip's sounds (frames move back, a frame-0 sound stays),
+/// the manifest length.
+#[allow(clippy::too_many_arguments)]
+fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>, clips: &mut [RequestClip], asd: &mut [u8], first: usize, ses: &mut Vec<u8>) -> Result<()> {
+    let starts = starts_of(name);
+    if starts.is_empty() {
+        return Ok(());
+    }
+    let mut a = Ann::parse(ann)?;
+    let mut sounds = crate::ses::parse(ses)?;
+    for (req, start) in starts {
+        let Some(i) = clips.iter().position(|c| c.request == req) else { return bad(format!("{name}: request {req} has no clip")) };
+        let c = clips[i].clone();
+        if c.source != "kh1" || clips.iter().any(|d| d.entry == c.entry && d.request != req) {
+            return bad(format!("{name}: request {req} (entry {}) shares its clip; it can't start at {start}", c.entry));
+        }
+        let m = &ms.motions[c.entry];
+        let clip = conv.convert_from(m, &ClipSpec { name: c.name.clone(), looped: c.looped, root_motion: c.root, blend: 8 }, start)?;
+        a.slots[c.slot].clip = Some(clip);
+        clips[i].frames = m.frames - start;
+        let u = |d: &[u8], o: usize| u32::from_le_bytes(d[o..o + 4].try_into().unwrap());
+        let (n, off) = (u(asd, 0x10) as usize, u(asd, 0x14) as usize);
+        for r in first..n {
+            let at = off + REC * r;
+            if asd[at + 0x40..at + 0x50] == name16(&c.name) {
+                let shift = start * 50;
+                let on = u(asd, at + 0x5C).saturating_sub(shift);
+                let offw = u(asd, at + 0x60).saturating_sub(shift);
+                asd[at + 0x5C..at + 0x60].copy_from_slice(&on.to_le_bytes());
+                asd[at + 0x60..at + 0x64].copy_from_slice(&offw.to_le_bytes());
+            }
+        }
+        for e in sounds.iter_mut().filter(|e| e.name() == c.name) {
+            for ev in e.events.iter_mut() {
+                let f = i32::from_le_bytes(ev[0x18..0x1C].try_into().unwrap());
+                if f != 0 {
+                    ev[0x18..0x1C].copy_from_slice(&(f - start as i32).max(0).to_le_bytes());
+                }
+            }
+        }
+    }
+    a.pad_tail_like_recom();
+    *ann = a.to_bytes();
+    *ses = crate::ses::write(&sounds);
+    Ok(())
+}
+
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC];

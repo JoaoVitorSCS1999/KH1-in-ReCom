@@ -159,6 +159,18 @@ pub fn react<C: Engine + ?Sized>(hit: Hit, yaw: f32, current: Option<u16>, airbo
     }
 }
 
+/// KH1's choice for a hit on a flying enemy (movement state 4: its state flags `& 3 == 2`, so
+/// `0x1402B1AE0` is true and `0x1402B1B10` false; Checked (decomp)): `0x1402B8E10` then takes the
+/// ground forms. Kind 3 is the ground flinch (`0x1402B9230`, the push slide `0x1402B7E60`); kind 5
+/// skips the launch (`0x1402B8530` only when `0x1402B1AE0` is false) and falls into kind 4
+/// (`0x1402B77D0` → `0x1402B8CC0`: the knock-back 0x4C / 0x4D, else the launch, else the flinch);
+/// a clash is the ground recoil (`0x1402B9140`, [`clash`] with `airborne` false). M11 fliers.
+#[allow(clippy::too_many_arguments)]
+pub fn react_flying<C: Engine + ?Sized>(hit: Hit, yaw: f32, current: Option<u16>, m: &dyn Motions, c: &C, rng: &mut Kh1Rand, body: &mut Body, y: f32) -> Option<ReactionStart> {
+    let kind = if hit.kind == 5 { 4 } else { hit.kind };
+    react(Hit { kind, ..hit }, yaw, current, false, false, m, c, rng, body, y)
+}
+
 /// The clash recoil a blocked attack plays: the attack row's `+0x40` request (`0x1402B8E10` case
 /// 6 / 7 → `0x1402B9140`): on the ground the request as an action with the idle queued; in the air
 /// with a 20 hop and request 6 queued (`0x40000006`). The push of a negative-damage record is not
@@ -205,4 +217,48 @@ pub fn nearest_part(contact: Vec3, parts: &[Vec3]) -> u8 {
         }
     }
     best.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::enemy::Table;
+
+    struct Has(&'static [u16]);
+    impl Motions for Has {
+        fn has(&self, r: u16) -> bool {
+            self.0.contains(&r)
+        }
+    }
+
+    fn consts() -> Table {
+        let mut v: Vec<(String, f32)> = crate::enemy::EXE_NUMBERS.iter().map(|(k, x)| (k.to_string(), *x)).collect();
+        for (k, x) in [("walk_speed", 8.0), ("run_speed", 8.0), ("launch_min", 20.0), ("launch_max", 35.0), ("launch_hop", 1.35), ("flinch_push", 80.0), ("air_flinch_speed", 4.0), ("air_knock_speed", 16.0), ("weight", 1.0), ("attack_blend", 8.0)] {
+            v.push((k.to_string(), x));
+        }
+        Table::new(v, &[]).unwrap()
+    }
+
+    /// A flier (`F K a A` models, no launch): kind 3 is the ground flinch with its push; kind 4 and
+    /// kind 5 the knock-back 0x4C / 0x4D (`0x1402B8E10` with `0x1402B1AE0` true); no hop.
+    #[test]
+    fn flying_hits_take_the_ground_forms() {
+        let m = Has(&[0x48, 0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51]);
+        let c = consts();
+        let mut rng = Kh1Rand::new(1);
+        let front = Vec3::new(0.0, 0.0, -1.0);
+        for (kind, want) in [(3u8, 0x48u16), (4, 0x4C), (5, 0x4C)] {
+            let mut b = Body::default();
+            b.fly(Vec3::ZERO);
+            let s = react_flying(Hit { kind, dir: front, part: 0 }, 0.0, None, &m, &c, &mut rng, &mut b, 0.0).unwrap();
+            assert_eq!(s.request, want, "kind {kind}");
+            assert!(b.flying && b.arc.is_none(), "kind {kind}: still flying, no hop");
+            assert_eq!(b.push.is_some(), kind == 3, "kind {kind}: only the flinch pushes");
+        }
+        // The same kind 5 on a jumping (state 2) body is an air reaction.
+        let mut b = Body::default();
+        b.jump(20.0, Vec3::ZERO, 0.0, &c);
+        let s = react(Hit { kind: 5, dir: front, part: 0 }, 0.0, None, true, false, &m, &c, &mut rng, &mut b, 0.0).unwrap();
+        assert_eq!(s.request, 0x4E);
+    }
 }

@@ -117,13 +117,16 @@ type ScaleSetFn = unsafe extern "win64" fn(usize, *const [f32; 4]);
 type PlayFn = unsafe extern "win64" fn(usize, u32, u64, u64, i32, u32, u32);
 type MaxHpFn = unsafe extern "win64" fn(usize) -> i32;
 
-/// A running action (an attack, or a jump start, an appearance): the AI waits for it.
+/// A running action (an attack, or a jump start, an appearance): the AI waits for it, unless it
+/// is `steered` (KH1's plain request made with attack rows, `kh1_core::enemy::Cmd::Attack`: the AI
+/// keeps running and steering the body while it plays; M11 fliers).
 #[derive(Clone, Copy, Debug)]
 struct Act {
     request: u16,
     then: u16,
     attack: Option<u8>,
     blend: f32,
+    steered: bool,
 }
 
 struct Runtime {
@@ -171,6 +174,9 @@ struct Runtime {
     quiet: f32,
     /// KH1 frames the running reaction has taken (`ce::watchdog::REACTION_LIMIT`).
     reaction_age: f32,
+    /// The battle floor's height (KH1 y) for a flying body's `sys 89` (M11 fliers): Sora's height
+    /// the last time he stood on the floor (Assumption: Re:CoM's battle floors are flat).
+    floor: Option<f32>,
 }
 
 // SAFETY: a runtime (its behaviour holds `Rc`s that never leave it) is only touched under `RT`'s
@@ -324,11 +330,12 @@ pub fn start_line(k: usize) -> String {
 
 /// Class `K`'s ctor: Re:CoM's, then (KH1 battle, `enemy_ai = kh1`) our vtable and tail.
 pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usize, c: usize) -> usize {
-    let r = orig::<CtorFn>(&ORIG_CTOR[K])(this, a, b, c);
+    // `ctor_ptr` names a wrapper for 40 indices; only installed classes' are ever called.
+    let (Some(o), Some(cl)) = (ORIG_CTOR.get(K), CLASSES.get(K)) else { return 0 };
+    let r = orig::<CtorFn>(o)(this, a, b, c);
     if this == 0 || !live_battle(K) {
         return r;
     }
-    let cl = &CLASSES[K];
     let copy = COPY[K].load(Ordering::Acquire);
     let Some(m) = MANIFEST[K].get() else { return r };
     if copy == 0 || rd::<usize>(this) != base() + cl.vtable as usize {
@@ -371,6 +378,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             handing_back: false,
             quiet: 0.0,
             reaction_age: 0.0,
+            floor: None,
         });
         Some(v.len() - 1)
     })();
@@ -382,6 +390,55 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
     let name = cl.title;
     line(K, || format!("battle {battle}: {name} {this:#x} gets KH1's AI (seed {seed:#x})"));
     r
+}
+
+/// Class `k`'s ctor wrapper (`ctor::<K>` for every class index; room for 40 classes so a new class
+/// needs no line here).
+pub fn ctor_ptr(k: usize) -> usize {
+    const _: () = assert!(N <= 40);
+    match k {
+        0 => ctor::<0> as *const () as usize,
+        1 => ctor::<1> as *const () as usize,
+        2 => ctor::<2> as *const () as usize,
+        3 => ctor::<3> as *const () as usize,
+        4 => ctor::<4> as *const () as usize,
+        5 => ctor::<5> as *const () as usize,
+        6 => ctor::<6> as *const () as usize,
+        7 => ctor::<7> as *const () as usize,
+        8 => ctor::<8> as *const () as usize,
+        9 => ctor::<9> as *const () as usize,
+        10 => ctor::<10> as *const () as usize,
+        11 => ctor::<11> as *const () as usize,
+        12 => ctor::<12> as *const () as usize,
+        13 => ctor::<13> as *const () as usize,
+        14 => ctor::<14> as *const () as usize,
+        15 => ctor::<15> as *const () as usize,
+        16 => ctor::<16> as *const () as usize,
+        17 => ctor::<17> as *const () as usize,
+        18 => ctor::<18> as *const () as usize,
+        19 => ctor::<19> as *const () as usize,
+        20 => ctor::<20> as *const () as usize,
+        21 => ctor::<21> as *const () as usize,
+        22 => ctor::<22> as *const () as usize,
+        23 => ctor::<23> as *const () as usize,
+        24 => ctor::<24> as *const () as usize,
+        25 => ctor::<25> as *const () as usize,
+        26 => ctor::<26> as *const () as usize,
+        27 => ctor::<27> as *const () as usize,
+        28 => ctor::<28> as *const () as usize,
+        29 => ctor::<29> as *const () as usize,
+        30 => ctor::<30> as *const () as usize,
+        31 => ctor::<31> as *const () as usize,
+        32 => ctor::<32> as *const () as usize,
+        33 => ctor::<33> as *const () as usize,
+        34 => ctor::<34> as *const () as usize,
+        35 => ctor::<35> as *const () as usize,
+        36 => ctor::<36> as *const () as usize,
+        37 => ctor::<37> as *const () as usize,
+        38 => ctor::<38> as *const () as usize,
+        39 => ctor::<39> as *const () as usize,
+        _ => 0,
+    }
 }
 
 /// The class of an enemy that is one of ours (our vtable and tail).
@@ -476,6 +533,10 @@ unsafe fn ended(en: usize, rt: &mut Runtime) -> bool {
 /// The safety net: the running action is stuck (`ce::watchdog`), with the loud log line's detail.
 unsafe fn stuck(en: usize, rt: &Runtime) -> Option<(ce::watchdog::Stuck, String)> {
     let a = rt.action?;
+    if a.steered && rt.action_playing {
+        // The AI runs during a steered attack (M11 fliers): nothing waits on it.
+        return None;
+    }
     let frames = manifest(rt.class).clip(a.request).map_or(0.0, |c| c.frames as f32);
     let why = ce::watchdog::check(rt.action_playing, rt.action_age, frames)?;
     let st = crate::guard::state_index(en, rd(en + e::STATE)).map_or("?".to_string(), |s| s.to_string());
@@ -550,7 +611,7 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         }
         Cmd::Queue { request, blend } => rt.queued = Some((request, blend)),
         Cmd::Action { request, attack, then, blend } => {
-            rt.action = Some(Act { request, then, attack, blend });
+            rt.action = Some(Act { request, then, attack, blend, steered: false });
             rt.action_playing = false;
             rt.action_age = 0.0;
             match attack {
@@ -577,6 +638,14 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         }
         // KH1's flag 0x1000: the action's root motion carries the body (`kh1_core::enemy::Body::held`).
         Cmd::Held => rt.ai.body().held = true,
+        // A plain request with attack rows (M11 fliers): Re:CoM's attack state, the AI keeps
+        // running; its begin plays the motion (no queue: KH1's request replaces the queue).
+        Cmd::Attack { request, attack, blend } => {
+            rt.action = Some(Act { request, then: ke::react::req::IDLE, attack: Some(attack), blend, steered: true });
+            rt.action_playing = false;
+            rt.action_age = 0.0;
+            enter_state(en, CLASSES[rt.class].attack_states.get(attack as usize).copied().unwrap_or(2));
+        }
         Cmd::Yaw(_) | Cmd::Jump { .. } | Cmd::Target(_) | Cmd::State(_) => {}
     }
     if ce::logged(c) {
@@ -608,6 +677,10 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
     let moved = (pos - rt.last_pos).length();
     rt.last_pos = pos;
     let contact = rd::<u32>(mvr + mv::CONTACT) & 5 != 0;
+    let flying = rt.ai.body().flying;
+    if flying {
+        floor_note(rt);
+    }
     rt.watch.tick(step);
     // Diagnostic (owner 2026-11-02: a sunk Shadow sometimes shows standing mid-travel): a Re:CoM
     // state change while it cannot be hit (sinking, underground, rising) is logged with the KH1
@@ -645,8 +718,9 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         if let Some((why, detail)) = stuck(en, rt) {
             if why == ce::watchdog::Stuck::NeverStarted || rt.action.is_some_and(|a| a.attack.is_none()) {
                 release_line(en, rt, why, &detail);
-                // As if its motion had finished: the queued motion plays, the AI goes on.
-                let then = rt.action.map(|a| (a.then, a.blend));
+                // As if its motion had finished: the queued motion plays, the AI goes on (a steered
+                // attack queues nothing: the AI plays its next motion itself).
+                let then = rt.action.filter(|a| !a.steered).map(|a| (a.then, a.blend));
                 end_action(rt);
                 if let Some((q, b)) = then {
                     rt.queued = None;
@@ -671,8 +745,14 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         }
     }
     let airborne = rt.ai.body().airborne();
-    if poll && rt.action.is_none() {
-        let w = World { step, pos, target: sora_pos(), grounded: contact && !airborne, airborne, moved, motion: rt.current };
+    if poll && rt.action.is_none_or(|a| a.steered) {
+        // KH1's movement state 4 (flight) is neither state 0 nor state 2.
+        let grounded = contact && !airborne && !flying;
+        if let Some(f) = rt.floor {
+            rt.ai.set_floor(f);
+        }
+        rt.ai.set_targeted(sora_targets(en));
+        let w = World { step, pos, target: sora_pos(), grounded, airborne, moved, motion: rt.current };
         let cmds = rt.ai.frame(w);
         for c in &cmds {
             apply(en, rt, c);
@@ -707,6 +787,7 @@ unsafe fn body_step(en: usize, rt: &mut Runtime, step: f32, pos: Vec3) {
     let c = &manifest(rt.class).consts;
     let steer = rt.ai.take_steer();
     let airborne = rt.ai.body().airborne();
+    let flying = rt.ai.body().flying;
     let d = rt.ai.body().step(step, pos.y, steer, c);
     let yaw = rt.ai.body().yaw;
     wr(mvr + mv::YAW, crate::units::yaw_to_recom(yaw));
@@ -720,8 +801,39 @@ unsafe fn body_step(en: usize, rt: &mut Runtime, step: f32, pos: Vec3) {
     vel[2] = v.z * k;
     if airborne {
         vel[1] = v.y;
+    } else if flying {
+        // KH1's flight moves the body vertically too (`0x1402CC000`), at the same speed scale.
+        vel[1] = v.y * k;
     }
     wr(mvr + mv::VEL, vel);
+}
+
+/// Whether Sora's target (Re:CoM's attack target `player+0x84C`, a handle; KH1's party 0 `+0x74`)
+/// is this enemy.
+unsafe fn sora_targets(en: usize) -> bool {
+    let pl: usize = rd(super::va(base(), data::MAIN_PLAYER));
+    if pl == 0 {
+        return false;
+    }
+    let h: i32 = rd(pl + 0x84C);
+    h > 0 && func::<HandleFn>(f::HANDLE_OBJ)(h as u32) == en
+}
+
+/// The battle floor for a flying body (`sys 89`): Sora's height while he stands on the floor
+/// (his mover's contact `+0x120 & 5`), kept from the last time (Assumption: flat battle floors;
+/// Re:CoM's fliers keep no floor height: their gravity is off, `+0x260 & 0x100`).
+unsafe fn floor_note(rt: &mut Runtime) {
+    let pl: usize = rd(super::va(base(), data::MAIN_PLAYER));
+    if pl == 0 {
+        return;
+    }
+    let m: usize = rd(pl + e::MOVER);
+    if m != 0 && rd::<u32>(m + mv::CONTACT) & 5 != 0 {
+        let y = crate::units::to_kh1(rd_vec(m + mv::POS)).y;
+        if y.is_finite() {
+            rt.floor = Some(y);
+        }
+    }
 }
 
 /// The body touched the floor at the end of a KH1 arc (`0x1402B7260`'s landing).
@@ -905,7 +1017,8 @@ pub unsafe extern "win64" fn attack_begin(en: usize) {
     let done = with_rt(en, |rt| {
         let Some(a) = rt.action.filter(|a| a.attack.is_some()) else { return false };
         play(en, rt, a.request, a.blend);
-        rt.queued = Some((a.then, a.blend));
+        // An action queues its `then`; KH1's plain request (a steered attack) replaces the queue.
+        rt.queued = (!a.steered).then_some((a.then, a.blend));
         rt.action_playing = true;
         rt.action_age = 0.0;
         true
@@ -918,36 +1031,77 @@ pub unsafe extern "win64" fn attack_begin(en: usize) {
 }
 
 /// An attack state's step: KH1's frame without the behaviour; at the motion's end, Re:CoM's attack
-/// end (`0x14017E540`: bit 0 off, the default state).
+/// end (`0x14017E540`: bit 0 off, the default state). A steered attack (M11 fliers) runs the
+/// behaviour and ends when the behaviour plays another motion (KH1's rows end with their request,
+/// `0x1402B47A0`) or starts something else, or when a one-shot clip has played; it doesn't end at a
+/// looping clip's wrap (the script decides how long it loops) and the watchdog's end margin doesn't
+/// apply to it (the AI is not waiting on it).
 pub unsafe extern "win64" fn attack_step(en: usize) {
     let r = with_rt(en, |rt| {
-        let mut end = rt.action.is_some() && ended(en, rt);
-        if !end {
-            // The safety net: an attack that never ends, or none at all in an attack state (its
-            // begin was Re:CoM's): leave the attack state as at the motion's end.
-            match stuck(en, rt) {
-                Some((why, detail)) => {
-                    release_line(en, rt, why, &detail);
-                    end = true;
+        let steered = rt.action.is_some_and(|a| a.steered && rt.action_playing);
+        let mut end = false;
+        if steered {
+            let looped = rt.current.and_then(|q| manifest(rt.class).clip(q)).is_some_and(|c| c.looped);
+            if !looped && ended(en, rt) {
+                end = true;
+            }
+        } else {
+            end = rt.action.is_some() && ended(en, rt);
+            if !end {
+                // The safety net: an attack that never ends, or none at all in an attack state (its
+                // begin was Re:CoM's): leave the attack state as at the motion's end.
+                match stuck(en, rt) {
+                    Some((why, detail)) => {
+                        release_line(en, rt, why, &detail);
+                        end = true;
+                    }
+                    None if rt.action.is_none() => {
+                        let st = crate::guard::state_index(en, rd(en + e::STATE)).map_or("?".to_string(), |s| s.to_string());
+                        log(&ce::watchdog::line(CLASSES[rt.class].name, rd(en + e::ID), 0, ce::watchdog::Stuck::NeverStarted, &format!("Re:CoM attack state {st} without a KH1 action")));
+                        end = true;
+                    }
+                    None => {}
                 }
-                None if rt.action.is_none() => {
-                    let st = crate::guard::state_index(en, rd(en + e::STATE)).map_or("?".to_string(), |s| s.to_string());
-                    log(&ce::watchdog::line(CLASSES[rt.class].name, rd(en + e::ID), 0, ce::watchdog::Stuck::NeverStarted, &format!("Re:CoM attack state {st} without a KH1 action")));
-                    end = true;
-                }
-                None => {}
             }
         }
         if end {
             end_action(rt);
             rt.handing_back = true;
         }
-        tick(en, rt, false);
-        end
+        let poll = steered && !end;
+        let req = rt.action.map(|a| a.request);
+        tick(en, rt, poll);
+        if poll {
+            match rt.action {
+                // A new attack the behaviour started: `tick` asks for its state again.
+                Some(a) if a.attack.is_some() && !rt.action_playing => end = true,
+                Some(a) if a.steered && Some(a.request) == req && rt.current == req => {}
+                // A plain action (a jump start…): it carries on in state 1.
+                Some(a) if a.attack.is_none() => end = true,
+                // Another motion replaced it.
+                Some(_) => {
+                    end_action(rt);
+                    end = true;
+                }
+                None => end = true,
+            }
+            // Our own leave to state 1 (merge of Stage 127's hand-back with the fliers' steered
+            // attacks): not a Re:CoM takeover, so the pending action / queue are kept.
+            if end {
+                rt.handing_back = true;
+            }
+        }
+        let again = rt.action.filter(|a| a.attack.is_some() && !rt.action_playing).and_then(|a| CLASSES[rt.class].attack_states.get(a.attack.unwrap_or(0) as usize).copied());
+        (end, again)
     });
     match r {
-        Some(true) => func::<EndFn>(f::ATTACK_END)(en, 0, 0),
-        Some(false) => {}
+        Some((true, again)) => {
+            func::<EndFn>(f::ATTACK_END)(en, 0, 0);
+            if let Some(k) = again {
+                enter_state(en, k);
+            }
+        }
+        Some((false, _)) => {}
         None => {
             let s = crate::guard::state_index(en, rd(en + e::STATE)).map_or(2, |k| k as i32);
             call_original(en, ce::step_slot(s));
@@ -1056,7 +1210,12 @@ unsafe fn start_reaction(en: usize, rt: &mut Runtime, hit: Option<Hit>) -> bool 
     let yaw = rt.ai.body().yaw;
     let start = {
         let mut body = rt.ai.body();
-        ke::react(hit, yaw, current, airborne, lying, m, c, &mut rng, &mut body, y)
+        if body.flying {
+            // Movement state 4 (M11 fliers): KH1's ground forms, kind 5 as kind 4.
+            ke::react_flying(hit, yaw, current, m, c, &mut rng, &mut body, y)
+        } else {
+            ke::react(hit, yaw, current, airborne, lying, m, c, &mut rng, &mut body, y)
+        }
     };
     rt.ai.set_rng(rng);
     let id: u32 = rd(en + e::ID);
@@ -1118,6 +1277,9 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         // KH1's hit handler: a damaging hit or a clash (the Shadow ignores a clash).
         if CLASSES[rt.class].reads_hp {
             rt.ai.set_hp_ratio(hp_ratio(en));
+        }
+        if let Some(h) = hit {
+            rt.ai.set_hit_kind(h.kind);
         }
         rt.ai.on_hit(if rt.clash.is_none() { HitNews::Damage } else { HitNews::Clash });
         rt.reaction_age = 0.0;
@@ -1264,6 +1426,25 @@ pub(super) unsafe fn recom_flinch_settled(en: usize, flinched: bool) {
     if !flinched && any_installed() {
         with_rt(en, |rt| rt.recom_flinch = false);
     }
+}
+
+/// `super::guard`: an attack collision owned by `owner` (a handle) hit Sora: a KH1 enemy's
+/// behaviour hears it for the attack it runs (KH1's attack object hit callback, `+0x38`).
+pub(super) unsafe fn attack_landed(owner: u32) {
+    if !any_installed() {
+        return;
+    }
+    let en = func::<HandleFn>(f::HANDLE_OBJ)(owner);
+    if en == 0 || ours(en).is_none() {
+        return;
+    }
+    with_rt(en, |rt| {
+        if let Some(a) = rt.action.and_then(|a| a.attack) {
+            rt.ai.on_landed(a);
+            let name = CLASSES[rt.class].attack_names.get(a as usize).copied().unwrap_or("?");
+            line(rt.class, || format!("e{}: its {name} hit Sora", rd::<u32>(en + e::ID)));
+        }
+    });
 }
 
 /// The trace's tokens (F9 recording): per class (`shadow …`, `soldier …`), every KH1 enemy's
