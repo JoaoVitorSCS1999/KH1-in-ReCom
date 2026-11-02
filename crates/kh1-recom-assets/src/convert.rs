@@ -246,10 +246,26 @@ impl Converter {
     /// `m` at frame `t`: the point is `k`'s parent + `along` × (`k` − parent), as KH1's attack
     /// objects take their points (`t` along the bone; M10). Re:CoM places an offset on a bone as
     /// `offset · W + P` with the bone's scaled world (its composition, above).
+    ///
+    /// KH1's "k" is the parent's world matrix applied to `k`'s local translation (`0x1401D6320`:
+    /// `0x1401DAD10(parent world, locals[k] + 0x30)`, then the lerp `0x1400E64D0`; Checked
+    /// (decomp)). For a posed bone that is its world position; a bone the motion doesn't pose (an
+    /// end bone of a chain, flags 0x6000000: KH1 never builds its world matrix, which stays at the
+    /// origin) has only that (M11: the Bandit's blade code 48 → bone 120, 52 cm past its parent).
     pub fn kh1_point_in(&self, rig: &mut Rig, m: &Motion, t: f32, b: usize, k: usize, along: f64) -> [f64; 3] {
         let tg = self.targets(rig, m, t, false);
         let world = &rig.current().world;
-        let pk = Aff::kh1_to_recom(&world[k]).t;
+        let pk = match rig.parent(k).filter(|_| !rig.is_posed(k)) {
+            Some(p) => {
+                let (w, lt) = (&world[p], rig.locals(k).map_or([0.0; 3], |l| l.2));
+                let mut a = *w;
+                for c in 0..3 {
+                    a.t[c] = w.t[c] + lt[0] * w.r[0][c] + lt[1] * w.r[1][c] + lt[2] * w.r[2][c];
+                }
+                Aff::kh1_to_recom(&a).t
+            }
+            None => Aff::kh1_to_recom(&world[k]).t,
+        };
         let pp = rig.parent(k).map_or(pk, |p| Aff::kh1_to_recom(&world[p]).t);
         let point = [pp[0] + along * (pk[0] - pp[0]), pp[1] + along * (pk[1] - pp[1]), pp[2] + along * (pk[2] - pp[2])];
         let d = [point[0] - tg[b].p[0], point[1] - tg[b].p[1], point[2] - tg[b].p[2]];

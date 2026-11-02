@@ -156,6 +156,12 @@ fn world() -> i32 {
     unsafe { super::movement::func::<IntFn>(WORLD_FN)(0) & 0xFF }
 }
 
+/// Re:CoM's current world (`0x1402339C0(0)`, 1..13 in its world table's order; 0 in Castle
+/// Oblivion's halls): the KH1 enemies' world rules (M11, `kh1_enemy::kh1_world`).
+pub(super) fn recom_world() -> i32 {
+    world()
+}
+
 pub(super) fn riku_story() -> bool {
     // SAFETY: as above.
     unsafe { super::movement::func::<BoolFn>(RIKU_FN)() & 0xFF != 0 }
