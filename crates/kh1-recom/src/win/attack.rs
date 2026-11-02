@@ -735,30 +735,63 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
     r
 }
 
-/// Revenge moves untouchable (owner, 2026-11-02): a hit on a boss in the attack its revenge started
-/// (`super::revenge::untouchable`). Re:CoM's handler decides it with its own rule for an attacking
-/// enemy: no card-interrupt bit (decision 14's `0x2000000` not set for any source: swing, spell,
-/// Stop, turned-back shot), so it drops the hit while `+0x260 & 1` (`0x14017F8CB`): no damage, no
-/// reaction, the attack goes on. The KH1 swing's / spell's hit record is taken so it can't land on
-/// a later call; no MP charge (no hit landed). The Guard rule still sees the call (it skips a boss in
-/// its revenge attack). Returns Re:CoM's result and what the hit was.
-pub(super) unsafe fn untouchable_hit(enemy: usize) -> (u64, crate::revenge::IgnoredKind) {
+/// Whether a hit is waiting on one of the enemy's hurt bodies for Re:CoM's handler: a body's hit
+/// count `+0x90` (or its guarded / repelled bits `+0x9C & 0x28`), which the handler's gather
+/// `0x140154EB0` reads and clears. The handler runs every frame for every enemy (its only caller
+/// `0x140185630`), so this tells a real hit from the frame's call. Checked (decomp).
+unsafe fn hit_arrived(enemy: usize) -> bool {
+    let info: usize = rd(enemy + 0xF8);
+    if info == 0 {
+        return false;
+    }
+    let parts: usize = rd(info + 0x40);
+    let n: i32 = rd(info + 0x38);
+    (0..n.clamp(0, 32) as usize).any(|i| {
+        let part = parts + i * 0x120;
+        rd::<i16>(part + 0x90) != 0 || rd::<u32>(part + 0x9C) & 0x28 != 0
+    })
+}
+
+/// Revenge moves untouchable (owner, 2026-11-02): the frame's handler call for a boss in its revenge
+/// move (`super::revenge::untouchable`; revenge-started or its own choice). Re:CoM's handler decides
+/// with its own rule for an attacking enemy: no card-interrupt bit (decision 14's `0x2000000` not set
+/// for any source: swing, spell, Stop, turned-back shot), so it drops the hit while `+0x260 & 1`
+/// (`0x14017F8CB`): no damage, no reaction, the attack goes on.
+///
+/// Captain Hook's ctor `0x1403C6340` sets `0x2000000` for good (Re:CoM's "always interruptible"), which
+/// would make that rule end his attack and take the hit: the bit is held off for this call and put
+/// back after. The KH1 swing's / spell's hit record is taken so it can't land on a later call; no MP
+/// charge (no hit landed). The Guard rule still sees the call (it skips a boss in its revenge move).
+/// Returns Re:CoM's result and, when a hit had arrived, what it was.
+pub(super) unsafe fn untouchable_hit(enemy: usize) -> (u64, Option<crate::revenge::IgnoredKind>) {
     use crate::revenge::IgnoredKind;
     let o: PlRetFn = orig(&ORIG_ENEMY_HIT);
+    let arrived = hit_arrived(enemy);
     let kind = if take_kh1_hit(enemy).is_some() {
-        IgnoredKind::Swing
+        Some(IgnoredKind::Swing)
     } else if super::magic::take_hit(enemy).is_some() {
-        IgnoredKind::Spell
+        Some(IgnoredKind::Spell)
     } else {
-        IgnoredKind::Other
+        arrived.then_some(IgnoredKind::Other)
     };
     let hp: i32 = rd(enemy + 0x274);
+    let flags: u64 = rd(enemy + 0x260);
+    let held = flags & 0x200_0000 != 0;
+    if held {
+        wr(enemy + 0x260, flags & !0x200_0000);
+    }
     let r = o(enemy);
+    if held {
+        let now: u64 = rd(enemy + 0x260);
+        wr(enemy + 0x260, now | 0x200_0000);
+    }
     super::guard::after_enemy_hit(enemy, r, hp);
     let after: i32 = rd(enemy + 0x274);
-    if let Ok(mut g) = HIT_LOG.lock() {
-        if g.len() < 16 {
-            g.push(format!("e{:x}:untouchable:{kind:?}:dmg {}:hp {after}", enemy & 0x00FF_FFFF, hp - after));
+    if let Some(k) = kind {
+        if let Ok(mut g) = HIT_LOG.lock() {
+            if g.len() < 16 {
+                g.push(format!("e{:x}:untouchable:{k:?}:dmg {}:hp {after}{}", enemy & 0x00FF_FFFF, hp - after, if held { ":hook bit held" } else { "" }));
+            }
         }
     }
     (r, kind)

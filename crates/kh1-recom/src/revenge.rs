@@ -60,6 +60,29 @@ pub mod flag {
     pub const PENDING: u32 = 4;
     /// The boss is in the attack state its revenge started (the untouchable window).
     pub const UNTOUCHABLE: u32 = 8;
+    /// The open window is the boss's own use of its revenge move (owner, 2026-11-02: "untouchable
+    /// whenever played"), not one revenge started.
+    pub const OWN: u32 = 0x10;
+}
+
+/// Who opened an untouchable window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    /// Revenge started the move (its start marked the tail pending).
+    Revenge,
+    /// The boss chose its revenge move itself (its think, a card play).
+    Own,
+}
+
+/// At an attack state's begin: whether the window opens, and why. `current` is the state beginning
+/// (`+0x60` at the begin), `move_state` the boss's revenge-move state object. A pending revenge start
+/// opens it for its own state; any begin of the revenge-move state opens it otherwise (owner,
+/// 2026-11-02). `None`: an ordinary attack (decisions 14 / 26 stay).
+pub fn window_opens(tail_flags: u32, current: usize, move_state: usize) -> Option<Origin> {
+    if current != move_state {
+        return None;
+    }
+    Some(if tail_flags & flag::PENDING != 0 { Origin::Revenge } else { Origin::Own })
 }
 
 /// The enemy's "in an attack" bit (`+0x260 & 1`; Re:CoM's hit handler drops hits while it is set
@@ -491,6 +514,19 @@ mod tests {
             }
         }
         assert_eq!(fired, Some(2), "{c:?}");
+    }
+
+    #[test]
+    fn window_opens_for_the_revenge_move_whoever_started_it() {
+        assert_eq!(window_opens(flag::PENDING, 0x1000, 0x1000), Some(Origin::Revenge));
+        assert_eq!(window_opens(0, 0x1000, 0x1000), Some(Origin::Own));
+        assert_eq!(window_opens(flag::CHECKED | flag::HADES_LOW, 0x1000, 0x1000), Some(Origin::Own));
+        // Another attack: no window, whether a revenge start was pending or not.
+        assert_eq!(window_opens(flag::PENDING, 0x1040, 0x1000), None);
+        assert_eq!(window_opens(0, 0x1040, 0x1000), None);
+        // An own-choice window holds as a revenge one (bit 0, HP).
+        assert!(holds(flag::UNTOUCHABLE | flag::OWN, 1, 10));
+        assert!(!holds(flag::OWN, 1, 10));
     }
 
     #[test]
