@@ -170,6 +170,21 @@ mod tests {
         assert_eq!(s.clash(5, 30), None);
     }
 
+    /// The Search Ghost's burst rows (the player's `ex_2230.bd`: type 1, priority 40, cone 0 / 1.0): above the
+    /// Kingdom Key's 30 they repel (Sora kind 6, 10 under); their cos 1.0 passes only an attacker exactly along
+    /// the facing at the same height: never for a Ghost above or beside Sora.
+    #[test]
+    fn the_search_ghost_burst_rows() {
+        let b = GuardRow { name: "burst".into(), clash_type: 1, priority: 40, recoil: 205, turn: 0.0, cos: 1.0, windows: vec![(204, vec![(36.0, 48.0), (108.0, 118.0)])], rows: 4 };
+        assert_eq!(b.clash(0, 30), Some((Side::Clash { kind: 6, diff: -10 }, Side::Repels)));
+        assert_eq!(b.clash(0, 40), Some((Side::Clash { kind: 6, diff: 0 }, Side::Clash { kind: 6, diff: 0 })));
+        assert_eq!(b.clash(0, 60).map(|c| c.1), Some(Side::Clash { kind: 6, diff: -20 }));
+        assert!(!b.front(0.0, Vec3::new(1.0, 0.0, 100.0)) && !b.front(0.0, Vec3::new(0.0, -50.0, 400.0)) && !b.front(0.0, Vec3::new(0.0, 0.0, -100.0)));
+        assert!(b.front(0.0, Vec3::new(0.0, 0.0, 100.0)), "exactly ahead, level");
+        assert!(b.live(204, 36.0) && !b.live(204, 48.0) && b.live(204, 117.0) && !b.live(204, 60.0));
+        assert_eq!(b.half_angle(), Some(0.0));
+    }
+
     #[test]
     fn windows_and_cone() {
         let s = stance();

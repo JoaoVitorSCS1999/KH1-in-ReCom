@@ -956,8 +956,8 @@ kill one. The trace's enemy rows give the heights, the chase and charge speeds a
 ## The Search Ghost (M11 fliers)
 
 Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Search Ghost yet. The owner's
-choice of 2026-11-02 on its drain is built: KH1's drain rule on Re:CoM's HP, EXP and prizes (§ The drain's heal and
-reward); its burst's repel layer waits (§ Search Ghost owner questions).
+choices of 2026-11-02 (§ Search Ghost owner questions) are built: KH1's drain rule on Re:CoM's HP, EXP and prizes
+(§ The drain's heal and reward), and the burst's type-1 rows through the shared enemy guard (§ The burst's repel rows).
 
 ### KH1's side. Checked (files: `ex_2230.bd` and `ex_2230_00.bd` disassembled, folded and raw; decomp: the syscalls named)
 
@@ -999,7 +999,7 @@ Attacks (rows `0x70` bytes, `sys 23`, mode 2: each lives while its request plays
 The burst's other four rows (`0x38C` / `0x3FC` / `0x46C` / `0x4DC`, 90 at the hands at both strikes, no power words) are
 **attack type 1**: KH1's attack-vs-hurt test skips types 1 / 2 / 4 (`0x1402B3BE0`), and type 1 meets only attack types 0 /
 3 (the table `0x140528CB8`, byte 1 = 0x09): a repel layer for Sora's swings (§ Enemy guard: a type-1 side with the
-higher priority repels). Not made (owner question 2).
+higher priority repels). Built as the guard row `burst` (§ The burst's repel rows).
 
 Reactions: the flying forms (F `0x48..0x4B`, K `0x4C` / `0x4D`, a `0x4E` / `0x4F`, A `0x50` / `0x51`; no launches: kind 5
 → kind 4); weight 1.0 in both records; hurt parts: 5 (collision block group 2 → Re:CoM bones 19, 2, 17, 51, 35). Checked
@@ -1067,6 +1067,24 @@ carried); ability `0x40`'s gate on `sys 194` (its name not read; Re:CoM has no s
 Assumptions: Re:CoM's HP prize is the right twin of KH1's HP ball (Re:CoM's heal amount, decision M10); the descriptor's
 `+0x2C` = 1 (the defeat EXP drop's; Pluto's 0xD3 use 0: only `+0x2E` bit 0 is read by the prize init `0x1402315B0`).
 
+### The burst's repel rows (owner 2026-11-02: "its burst repels Sora's swings" through the shared enemy guard)
+
+- Rows (Checked (files)): `0x38C` / `0x3FC` (right / left hand, HIT slot 0, hit bit A) and `0x46C` / `0x4DC` (slot 1, hit
+  bit B), all type 1, priority 40, recoil 205, 0.9 m, front cone turn 0 / **cos 1.0**, made with 204 at `0x12D4..0x132A`.
+  The asset step merges them into one guard row `burst` (`GuardSpec::also`: same clash numbers checked; windows of slots
+  0 and 1 joined: 204 [36, 48) and [108, 118)); the behaviour sends `Cmd::Guard` with 204 at each burst.
+- KH1's rule (§ Enemy guard), with Sora's Kingdom Key swing at priority 30: the row is 10 above, type 1 → it **repels**:
+  Sora gets kind 6 (diff −10: recoil 0x6E, pushed back 25), the Ghost the swing's record flagged 0x20 (no damage, no
+  reaction; its hit handler hears it: during a hold that is the reward, then the hit state). A Keyblade at 40: both kind
+  6 (the Ghost plays 205); above 40: the Ghost kind 6 (or 7 at 40+ under), Sora kind 6 with no push.
+- **KH1's front cone makes them inert in practice.** `0x1402B4640` tests a guard-type row only when the 3D cosine between
+  the owner's facing (`actor+0x30` = (sin yaw, 0, cos yaw), `0x140297E10`) and the vector to the attacker is at least
+  row `+0x64`; these rows hold **1.0** (the damaging rows' default), so the test passes only for an attacker exactly
+  along its facing, at exactly its height (a hovering Ghost never is). Sora's swings (`0x1402B2DC0` via `0x1402B3150`)
+  carry no flag 0x40 that would skip the test. Checked (decomp + exe + files). The port keeps the number (the
+  manifest's `cos` 1.0) and KH1's 3D test (`win::kh1_enemy::kh1_front`, before Re:CoM's apply): **in game, Sora's
+  swings should land on a bursting Ghost as before**. Owner question below.
+
 ### Re:CoM's side. Checked (exe + decomp)
 
 `CEnemySearchghost` (vtable `0x14054C408`, 139 slots, RTTI at −8), ctor `0x1401923F0` (`40 53 48 83 EC 20`: `CHeartless`'s
@@ -1098,7 +1116,9 @@ edit of KH1's 203); the burst on id 0 (Re:CoM's other attack; `e014_050` is not 
   unchanged (their asset tests pass; the new tables are keyed by enemy).
 - The drain rule (owner 2026-11-02): `Cmd::HealFull`, `Cmd::Reward` / `enemy::Reward`, `Behaviour::take_now`,
   `Behaviour::on_defeat`; asset step `enemy::REWARDS`; sites `KH1_ENEMY_REWARD_CALLEES` (Re:CoM's enemy heal
-  `0x140181CE0`, its defeat EXP drop `0x1401810A0`) and the Ghost's vtable `+0x50` (prize point).
+  `0x140181CE0`, its defeat EXP drop `0x1401810A0`) and the Ghost's vtable `+0x50` (prize point) / `+0x3D8` (guard event).
+- The repel (owner 2026-11-02): `HitNews::Repelled`, the guard event's repel and "neither" outcomes, KH1's 3D front cone
+  before Re:CoM's apply, merged guard rows (`GuardSpec::also`) (§ Enemy guard).
 
 ### What the asset step writes
 
@@ -1107,7 +1127,8 @@ edit of KH1's 203); the burst on id 0 (Re:CoM's other attack; `e014_050` is not 
 (Re:CoM's entries kept; the edits get their Re:CoM clip's sounds: the drain `e014_051`'s; the burst its template's at its
 window: Assumption), `kh1-searchghost.json` (`kh1-enemy 1`: 121 script constants read at checked offsets (and the stats
 block's two defaults), 2 from the child, `sight_bone`, 25 request words checked + 5 in the child, 2 attacks, 5 parts; since the
-drain rule also `reward_exp_div` / `reward_exp_add` (4 pushes checked) and `reward_prize_0..6` (the table `0x580`)). Test: `searchghost::tests::builds_from_the_players_files`. **Re-run the step** for these
+drain rule also `reward_exp_div` / `reward_exp_add` (4 pushes checked) and `reward_prize_0..6` (the table `0x580`), and
+`guards`: the row `burst`). Test: `searchghost::tests::builds_from_the_players_files`. **Re-run the step** for these
 (`EN0014.ANN` / `.ASD` / `.SES` are byte-identical to the 0.76.0 step's; only `kh1-searchghost.json` changes; a 0.76.0
 manifest fails to load: no `reward_*`).
 
@@ -1150,10 +1171,12 @@ manifest fails to load: no `reward_*`).
     an HP prize heals Sora (Re:CoM's "Recover"). The log: `reward: EXP bonus EXP / 10 + 1 …`, `KH1's reward at … EXP bonus
     n (Re:CoM's EXP e / 10 + 1)`, the prizes made. Hit it again: no second reward.
 13. Kill it with the hit that ends the hold: the reward's prizes, then Re:CoM's defeat prizes.
+14. The burst: Sora's swings land on a bursting Ghost (its repel rows never meet him, as in KH1: § The burst's repel rows).
+    The log: `guard row 0 with 204` at each burst, and no `guard event` line.
 
 Please send `kh1-recom.log` (`searchghost:` lines: `state …`, `attack 204 (burst), steered`, `attack 203 (drain), steered`,
 `its drain hit Sora`, `visible false` / `visible true`, `hittable …`, `target true`, `heals to full HP`, `KH1's full heal`,
-`reward`, `KH1's reward`, `note: …`, the `rand` lines) and an F9 trace.
+`reward`, `KH1's reward`, `guard row`, `guard event`, `note: …`, the `rand` lines) and an F9 trace.
 
 ### KH1 trace (what to record in KH1)
 
@@ -1186,7 +1209,13 @@ rows give the warp timings, the cone's reach and the drain's hold to compare.
 
 ### Search Ghost owner questions
 
-Answered 2026-11-02: 1 (a) (built, § The drain's heal and reward), 3 kept; 2 (a), the repel to build.
+Answered 2026-11-02: 1 (a) (built, § The drain's heal and reward), 2 (a) (built, § The burst's repel rows), 3 kept.
+
+4. **The burst's cone (new, 2026-11-02).** KH1's four type-1 rows have the front cone cos 1.0, so KH1's own test lets them
+   meet only a swing from exactly along its facing at exactly its height: in KH1 the burst practically never repels Sora
+   (Checked (decomp + exe + files); a KH1 trace swinging into a burst would confirm). Built: KH1's number (inert).
+   (a) Keep KH1's (1:1: the swings land); (b) give the rows a cone of their own as a deliberate change (for example the
+   front half, as the Bandit's block), behind an ini key, so the burst repels Sora's swings from in front (not 1:1).
 
 Earlier questions (kept for the record):
 

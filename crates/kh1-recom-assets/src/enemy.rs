@@ -698,9 +698,13 @@ pub struct GuardSpec {
 /// Every built enemy's guard rows, in its behaviour's order (`kh1_core::bandit::Guard::ALL`).
 /// Checked (files): the Bandit's `ex_2090.bd` makes `0xEC` at `0x1ED6` / `0x1F6E` / `0x2188` (with
 /// 210, 211, 212) and `0x15C` at `0x408E` / `0x40CC` / `0x4186` (230, 231, 233).
+///
+/// The Search Ghost's burst (`ex_2230.bd` `0x128E`): `0x38C` / `0x3FC` with hit bit A (`0x12D4` / `0x12E4`)
+/// and `0x46C` / `0x4DC` with hit bit B (`0x131A` / `0x132A`), all made with 204. Checked (files).
 pub const GUARDS: &[GuardSpec] = &[
     GuardSpec { enemy: "bandit", name: "spin", row: 0xEC, also: &[], requests: &[210, 211, 212] },
     GuardSpec { enemy: "bandit", name: "stance", row: 0x15C, also: &[], requests: &[230, 231, 233] },
+    GuardSpec { enemy: "searchghost", name: "burst", row: 0x38C, also: &[0x3FC, 0x46C, 0x4DC], requests: &[204] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).

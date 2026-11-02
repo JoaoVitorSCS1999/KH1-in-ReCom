@@ -68,8 +68,11 @@ mod tests {
         // Both rows name the recoil 205, which the model has: KH1's clash recoil when Sora guards.
         assert_eq!((m.recoil_of(0), m.recoil_of(1)), (Some(205), Some(205)));
         assert_eq!(m.parts.len(), 5);
-        // The drain's reward numbers.
+        // The drain's reward numbers and the burst's guard row (four KH1 rows as one, cos 1.0).
         assert_eq!((m.consts.get("reward_exp_div"), m.consts.get("reward_exp_add"), m.consts.get("reward_prize_4")), (10.0, 1.0, 3.0));
+        let g = &m.guards;
+        assert_eq!((g.len(), g[0].name.as_str(), g[0].clash_type, g[0].priority, g[0].recoil, g[0].cos, g[0].rows), (1, "burst", 1, 40, 205, 1.0, 4));
+        assert_eq!(g[0].name, kh1_core::searchghost::Guard::Burst.name());
         let _ = (CLASS.make)(&m, 1, 0.0);
     }
 

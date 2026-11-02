@@ -2540,6 +2540,8 @@ pub const SEARCHGHOST_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemySearchghost +0x3B8 state 30 begin", rva: 0x0054_C7C0, target: 0x0017_BBC0 },
     PtrSite { name: "CEnemySearchghost +0x3C0 state 30 step", rva: 0x0054_C7C8, target: 0x0018_3260 },
     PtrSite { name: "CEnemySearchghost +0x3D0 think", rva: 0x0054_C7D8, target: 0x0019_6EC0 },
+    // The shared enemy-guard step: the hit handler's guard event (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemySearchghost +0x3D8 guard event", rva: 0x0054_C7E0, target: 0x0018_1600 },
     // Its prize point (`0x1401A4700`: the `+0x198` data's node and offset, else bone 0): where Re:CoM's defeat
     // makes its prizes (`0x14017BBC0`) and its drain heal reads (`0x140192630`); our reward's place.
     PtrSite { name: "CEnemySearchghost +0x50 prize point", rva: 0x0054_C458, target: 0x001A_4700 },

@@ -34,6 +34,10 @@
 //! - the hover after a drain (`0x2A50` mode 1): once the hold is off unhit (568 frames, or at once when the
 //!   orb never counted: it started within 1 m) its HP goes back to full (`0x2ADE`: [`ECmd::HealFull`], on
 //!   Re:CoM's HP).
+//! - the burst's four type-1 rows (`0x38C` / `0x3FC` / `0x46C` / `0x4DC`): one [`Guard`] for the shared
+//!   enemy-guard step. Their front cone is cos 1.0 (row `+0x64`): KH1's test (`0x1402B4640`, the 3D cosine
+//!   ≥ 1.0) passes only for an attacker exactly along its facing, so in KH1 they practically never meet a
+//!   swing; the port keeps that number.
 //!
 //! The work area: `wp+0x54` warping, `+0x58` drain landed (0, 1, 2, 3), `+0x5C` noticed, `+0x60` roam rounds,
 //! `+0x64` the notice's effect live, `+0x68` drained, `+0x6C` holding it, `+0x70` noticed (the leash),
@@ -86,6 +90,37 @@ pub enum Attack {
     Burst,
     /// `0x13BE`: the drain, 203 with rows `0xEC` / `0x15C`, steered (it creeps in, or backs off when on him).
     Drain,
+}
+
+/// The Search Ghost's guard rows (the shared enemy-guard step, `crate::enemy::guard`; the manifest's
+/// `guards`, in this order). The burst makes four attack-type-1 rows with its damaging ones (`0x128E`):
+/// `0x38C` / `0x3FC` (right / left hand, HIT slot 0, hit bit A) and `0x46C` / `0x4DC` (slot 1, hit bit B),
+/// all priority 40, recoil 205, front cone turn 0 / cos 1.0 (Checked (files)). Re:CoM's body guard is the
+/// whole body, so the four act as one row on while either slot is (the asset step merges their windows).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Guard {
+    Burst,
+}
+
+impl Guard {
+    pub const ALL: [Guard; 1] = [Guard::Burst];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Guard::Burst => "burst",
+        }
+    }
+
+    /// Its first row's script offset (the asset step reads the others with it).
+    pub fn row(self) -> usize {
+        match self {
+            Guard::Burst => 0x38C,
+        }
+    }
+
+    pub fn index(self) -> u8 {
+        Guard::ALL.iter().position(|&g| g == self).unwrap_or(0) as u8
+    }
 }
 
 impl Attack {
@@ -593,6 +628,9 @@ async fn warp_to(cx: &Cx, p: Vec3, speed: f32) {
 async fn burst(cx: &Cx) {
     yaw_to(cx, tgt(cx));
     attack(cx, Attack::Burst, k(cx, "motion_blend"));
+    // Its four type-1 rows (`0x38C` / `0x3FC` / `0x46C` / `0x4DC`), made with the damaging ones: they live
+    // while 204 plays, on in their HIT slots' windows (the shared enemy-guard step).
+    push(cx, ECmd::Guard(Some((Guard::Burst.index(), req::BURST))));
     let mut t = motion_frames(cx, req::BURST);
     while t - k(cx, "burst_turn_until") > 0.0 {
         yaw_to(cx, tgt(cx));
@@ -1675,6 +1713,19 @@ mod tests {
         let s = Sim::new(9, true, Vec3::ZERO);
         s.ai.on_defeat();
         assert!(s.ai.take_now().is_empty());
+    }
+
+    /// Each burst makes its type-1 guard row with 204 (the shared enemy-guard step).
+    #[test]
+    fn the_burst_makes_its_guard_row() {
+        let mut s = Sim::new(3, true, Vec3::new(0.0, -150.0, 0.0));
+        let sora = |_| Vec3::new(0.0, 0.0, 1200.0);
+        s.run(sora, 2);
+        s.start(st::ENGAGED, |cx| Box::pin(async move { attack_round(&cx).await }));
+        s.run(sora, 900);
+        let f = s.attacks().iter().find(|a| a.1 == Attack::Burst).expect("a burst").0;
+        assert!(s.log.iter().any(|(g, c)| *g == f && *c == ECmd::Guard(Some((Guard::Burst.index(), req::BURST)))), "{:?}", s.log);
+        assert_eq!((Guard::Burst.row(), Guard::Burst.name(), Guard::ALL.len()), (0x38C, "burst", 1));
     }
 
     /// The warp: unhittable at once, hidden after the 100-frame fade, shown 80 frames after it arrives, hittable
