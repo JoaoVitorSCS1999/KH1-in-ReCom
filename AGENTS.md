@@ -11,6 +11,31 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 109: Summons: KH1's Summon list issuing Re:CoM's LV3 summon sleights (Cloud: Omnislash), version 0.62.0 (2026-11-01)
+
+- Ask (owner, 2026-11-01): "Lets get summons working. I want the summon section on the command menu to work like KH1,
+  but each summon should do their lv 3 recom summon equivalent, cloud included"; chose MP from Re:CoM's CP (2 / 3),
+  KH1's party rule skipped until the party, Re:CoM's damage at both settings, KH1's once-per-battle kept.
+- KH1 (Checked (decomp + files)): Summon = the Magic list's last entry (`0x1402944C0`), row 3 opens the list
+  (`0x1402937F0`), place `0x14027B870` (x 27; one entry y 326, more 348 − 22n), learn order `save+0x7D0`, greying
+  `0x140288F30` (MP, battle mode, ground, once per battle, party), names Word.bin 286–291.
+- Re:CoM (Checked (decomp + exe + files)): LV3 = the same summon card ×3 (`0x1401669F0`): Simba Proud Roar LV3 0x35,
+  Genie Showtime LV3 0x3E, Bambi Paradise LV3 0x39, Dumbo Splash LV3 0x37, Tinker Bell Twinkle LV3 0x40, Mushu Flare
+  Breath LV3 0x3C, Cloud Omnislash 0x42. Started natively: `player+0x82C` = sleight, Sora's vtable `+0x130`
+  (`0x1402247A0`); Re:CoM loads the pack (`0x140211790`), spawns the `CSummon*`, hits, ends (`0x1401F6660`).
+- Built at Combat = KH1, Sora's story, battle rooms: KH1's Summon row / list / greying / sounds; MP 2 (Simba, Genie,
+  Bambi, Dumbo, Tinker Bell) / 3 (Mushu, Cloud), paid once Re:CoM's action is 0x16; row locked while one is out, no
+  Dismiss; each summon learns with its first Re:CoM summon card (`0x14015C7F0` wrapper); learn order in a new save
+  block `save+0x26AE..=0x26B6` (older saves: KH1 index order, Cloud last); preload on cursor rest; party rule in
+  `summons::party_ready()` (always true until the party). Cloud: command 0x35, word 0x8029 "Cloud" (English).
+- No new hook or patch; call sites checked at start.
+- Assumptions: the start from our wrapper equals Re:CoM's own (no card record needed); the once-per-battle reset at
+  the next battle; Cloud's name in every language; `UK_uibin_sum.bin`'s layout (the asset step reports it).
+- Asset step re-run: summon words and the Summon panels.
+- Checked: tests, Windows build, 539 sites. Not checked: in game.
+
+---
+
 ## Stage 108: Gimmick cards: Re:CoM's drops, a Triangle "Stagger" prompt that plays the card, version 0.61.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "certain bosses drop "gimmick cards" in their battles. I want these to drop, and when sora
