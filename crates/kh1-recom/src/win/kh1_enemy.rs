@@ -388,8 +388,14 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             // A new battle: the last one's thrown blades are gone.
             super::kh1_thrown::forget();
         }
-        v.retain(|x| x.battle == battle && x.enemy != this);
-        v.push(Runtime {
+        // Other battles' runtimes go (they come before this battle's, so no live index moves); an
+        // enemy rebuilt at the same address this battle replaces its old runtime **in place**
+        // (0.73.0's crash: removing it shifted every later runtime, their tails' indices went stale,
+        // the lookup failed and Re:CoM's own state 1 ran without its think: a divide by zero at
+        // `0x140197B60`). The lookup goes by address too (`with_rt`).
+        v.retain(|x| x.battle == battle);
+        let slot = v.iter().position(|x| x.enemy == this);
+        let fresh = Runtime {
             class: K,
             enemy: this,
             battle,
@@ -424,8 +430,17 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             guard_saved: Vec::new(),
             guard_kind: None,
             clash_recoil: None,
-        });
-        Some(v.len() - 1)
+        };
+        Some(match slot {
+            Some(i) => {
+                v[i] = fresh;
+                i
+            }
+            None => {
+                v.push(fresh);
+                v.len() - 1
+            }
+        })
     })();
     let Some(idx) = idx else { return r };
     wr(this, copy);
@@ -502,9 +517,40 @@ unsafe fn with_rt<T>(en: usize, f: impl FnOnce(&mut Runtime) -> T) -> Option<T> 
     let battle: u32 = rd(en + at + tail::OFF_BATTLE);
     let idx: u32 = rd(en + at + tail::OFF_INDEX);
     // `try_lock`: a state call re-entered from inside another (never expected) runs Re:CoM's slot.
-    let mut v = RT.try_lock().ok()?;
-    let r = v.get_mut(idx as usize).filter(|r| r.enemy == en && r.battle == battle)?;
-    Some(f(r))
+    let mut v = match RT.try_lock() {
+        Ok(v) => v,
+        Err(_) => {
+            miss(en, k, "the runtime table is busy (a re-entered state call)");
+            return None;
+        }
+    };
+    // By index when it still matches, else by address (an index can only go stale if the table
+    // was rebuilt).
+    let i = if v.get(idx as usize).is_some_and(|r| r.enemy == en && r.battle == battle) {
+        Some(idx as usize)
+    } else {
+        v.iter().position(|r| r.enemy == en && r.battle == battle)
+    };
+    let Some(i) = i else {
+        drop(v);
+        miss(en, k, "no runtime for it");
+        return None;
+    };
+    Some(f(&mut v[i]))
+}
+
+/// Logged once per enemy: one of ours whose runtime the lookup didn't find.
+unsafe fn miss(en: usize, k: usize, why: &str) {
+    static SEEN: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+    if let Ok(mut s) = SEEN.lock() {
+        if !s.contains(&en) {
+            if s.len() > 256 {
+                s.clear();
+            }
+            s.push(en);
+            log(&format!("{}: e{}: KH1 runtime lookup failed ({why}); this frame skips its KH1 state (Re:CoM's own state 1 needs the think we replaced)", CLASSES[k].name, rd::<u32>(en + e::ID)));
+        }
+    }
 }
 
 unsafe fn original(k: usize, off: usize) -> usize {
@@ -1103,6 +1149,7 @@ pub unsafe extern "win64" fn think_begin(en: usize) {
         }
     })
     .is_none()
+        && ours(en).is_none()
     {
         call_original(en, ce::begin_slot(state::THINK));
     }
@@ -1141,7 +1188,9 @@ unsafe fn take_over(en: usize, rt: &mut Runtime) {
 
 /// State 1 step: KH1's frame with the behaviour.
 pub unsafe extern "win64" fn think_step(en: usize) {
-    if with_rt(en, |rt| tick(en, rt, true)).is_none() {
+    // One of ours never runs Re:CoM's state 1 (its think is replaced; `+0xCA4` stays 0 and its
+    // walk divides by it, 0.73.0's crash): a failed lookup skips the frame (logged by `miss`).
+    if with_rt(en, |rt| tick(en, rt, true)).is_none() && ours(en).is_none() {
         call_original(en, ce::step_slot(state::THINK));
     }
 }

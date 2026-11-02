@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 137: Fix: crash when KH1 enemies were rebuilt mid-battle (runtime lookup), version 0.75.2 (2026-11-01)
+
+- Owner (2026-11-02, on 0.73.0): "game crashed". Divide by zero at exe `0x140197B60` (`CHeartless`'s state-1 walk step
+  `0x140197AD0`, dividing by `+0xCA4`, which Re:CoM's think sets; our copy replaces the think) called from
+  `win::kh1_enemy::think_step` (`kh1-recom.dll+0xb8d11`), as four Air Soldiers entered. Checked (decomp + DLL symbols).
+- Cause (Checked (code)): the ctor `retain`ed out an older runtime at the same address (an enemy rebuilt in the same
+  battle), shifting every later runtime; the tails' stored indices went stale, the lookup failed, and the fallback
+  ran Re:CoM's own state 1.
+- Fix: a same-address rebuild replaces its runtime in place; the lookup falls back to the address; a failed lookup
+  for one of ours is logged once and never runs Re:CoM's state 1 (the frame is skipped).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 136: M11: the Bandit's thrown scimitar as a Re:CoM homing bullet, version 0.75.1 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Re:CoM bullet + Re:CoM effect".

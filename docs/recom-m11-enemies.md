@@ -1532,3 +1532,20 @@ The Air Pirate's questions (M11, not answered yet):
    y −170; the approach aims at Sora himself when he is in the air above y −100), written for KH1 rooms whose floor is
    at y = 0. Built: heights above the battle floor (Sora's last standing height). (a) Keep, (b) world heights as KH1's
    script has them (Re:CoM's battle floors are not at 0, so the tests would always or never pass).
+
+## Fix 0.75.2: crash when Air Soldiers entered a battle (runtime lookup)
+
+Owner (2026-11-02, on 0.73.0): "game crashed". Log: `CRASH: exception 0xc0000094` (integer divide by zero)
+at exe `0x140197B60`, called from `kh1-recom.dll+0xb8d11` = `win::kh1_enemy::think_step`, right after four Air
+Soldiers got KH1's AI. `0x140197AD0` is `CHeartless`'s state-1 walk step; it divides by `+0xCA4`, which
+Re:CoM's think (`+0x3D0`) sets, and our copy replaces the think with nothing. Checked (decomp + the 0.73.0 DLL's
+symbols). So `think_step`'s lookup had failed and it ran Re:CoM's own state 1.
+
+Cause (Checked (code)): the runtime table was indexed by the tail's stored index, and the ctor
+`retain`ed out an older runtime at the same address (an enemy rebuilt in the same battle, as waves reuse
+freed memory), which shifted every later runtime: their indices went stale, the lookup failed.
+
+Fix: an enemy rebuilt at the same address replaces its runtime in place (other battles' runtimes, which
+come first, are still dropped); the lookup takes the stored index when it still matches, else the address;
+a failed lookup for one of ours is logged once (`KH1 runtime lookup failed (…)`) and **never runs Re:CoM's
+own state 1** (begin or step): the frame is skipped. Checked: tests, Windows build. Not checked: in game.
