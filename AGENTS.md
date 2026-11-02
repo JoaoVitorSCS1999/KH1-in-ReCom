@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 128: M11: the KH1 Air Soldier, with KH1's flight in the shared enemy framework, version 0.69.0 (2026-11-01)
+
+- M11 (owner, 2026-11-02, "bring in the remaining KH1 adjacent heartless"): the flying family's first.
+- Framework: KH1's flight (movement state 4, step `0x1402CC000`: horizontal eases at 0.1/frame, vertical at once, no
+  gravity; fliers' finishers knock back); steered attacks (`Cmd::Attack`: the AI keeps steering while the attack
+  plays in Re:CoM's attack state); behaviour inputs (floor height, Sora targeting it `player+0x84C`, the hit's KH1
+  kind, an attack landing: result 1 of `0x14016F1C0`); per-class rows (`parse` / `make`, `ctor_ptr`).
+- Air Soldier (`xa_ex_2160` ↔ `CEnemyAirsoldier` id 15; Checked (decomp + files)): appearance, air wander,
+  engages within 15 m or when targeted; < 3 m strafe + slash or spinning dash; 3–6 m swoop kick / swoop; far: hover,
+  90-frame wind-up, charge; hits fill an anger meter (+25 / +10 / +5), full and far: power-up slash. 127 constants
+  read from the player's script. Vtable `0x140531CC8`, ctor `0x14018A4E0` (6 bytes), alloc `0x1401891F9` 0xCD0 → 0xCF0.
+- Asset step: `ENEMY/0015/EN0015.ANN` (+ KH1 clips from 100), `.ASD` (5 records), `.SES`, `kh1-airsoldier.json`.
+- Merge fix: a steered attack's end is our own leave to state 1 (Stage 127's take-over doesn't drop its follow-up).
+- Assumptions: flat battle floors (Sora's last standing height); power by limb (hands / charge on Re:CoM's dash punch,
+  feet on its kick); the chest body-block row left out. Not ported: leash, group-leader messages, head look, fade.
+- Checked: tests, Windows build, 737 sites. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 127: Fix: KH1 enemies freezing after a Re:CoM state (Stun Impact's stun, Stop, freeze…), version 0.68.3 (2026-11-01)
 
 - Owner (2026-11-02): "i used stun impact on 2 soliders (check trace) and once they got out of the stun they are doing
