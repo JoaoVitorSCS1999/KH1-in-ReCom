@@ -11,6 +11,26 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 138: M11: the KH1 Search Ghost (its sight cone on Re:CoM's own bones), version 0.76.0 (2026-11-01)
+
+- M11 (owner, 2026-11-02): a flier.
+- Framework: `enemy::Sight` / `Behaviour::set_sight` (a bone's position and axis + Sora's lock point; the bone resolved
+  once at the ctor); `Behaviour::side_frame` (KH1's child objects run while the parent waits); `Cmd::Note` (log-only);
+  child-script constants (`.mdls` part 3) in the asset step; the quiet safety net 600 → 900 frames (the Ghost's idle
+  search is silent up to 600).
+- Search Ghost (`xa_ex_2230` ↔ `CEnemySearchghost` id 14; 121 + 2 constants; Checked (files + decomp)): appearance,
+  notice (206); above half HP: in to 4.5 m, burst (204, strikes 36–48 / 108–118), off 5–8 m and watch, warp if within
+  2 m; below half: lunge (200), drain (203), hover, roam with three warps, search, idle; the cone: Re:CoM's `l_eye`
+  (bone 32) to Sora's `chest1` (`player+0x3A8`), 3 m / 35°; hits: below half 50 % invisible lunge, above half 50 % warp
+  5–6 m else burst + hover; warps unhittable at once, hidden after 100 frames, shown 80 after arriving, hittable 80
+  later. Vtable `0x14054C408`, ctor `0x1401923F0`, alloc `0x1401891CF` 0xCE0 → 0xD00. Power: drain → id 1 (`e014_051`
+  edits KH1's 203), burst → id 0 (Assumption); guarding either plays KH1's recoil 205.
+- Not built (owner questions): the drain's heal / EXP bonus; the burst's repel rows. Looks wait for M13.
+- Asset step: `ENEMY/0014/EN0014.ANN`, `.ASD` (2 + 6), `.SES`, `kh1-searchghost.json`.
+- Checked: tests (760), Windows build, 612 + 250 sites. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 137: Fix: crash when KH1 enemies were rebuilt mid-battle (runtime lookup), version 0.75.2 (2026-11-01)
 
 - Owner (2026-11-02, on 0.73.0): "game crashed". Divide by zero at exe `0x140197B60` (`CHeartless`'s state-1 walk step
