@@ -11,6 +11,27 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 131: M11: the KH1 Darkball (warp, model scale and hide through Re:CoM's own calls), version 0.71.0 (2026-11-01)
+
+- M11 (owner, 2026-11-02): a flier.
+- Framework (Checked (exe + decomp)): uniform model scale through Re:CoM's getter / setter (`0x1401A4A20` / `0x1401A7050`);
+  hiding through Re:CoM's hide bit `enemy+0x154` bit 0 (its draw `0x1401A39B0`); KH1's warp (`sys 86`); the script's
+  flight easing writes (stats `+0x14`); a hit handler may cancel a hit's reaction; a steering flier counts as active
+  for the quiet watchdog. Asset step: `OWN_CLIPS` (KH1 requests on their own clips so Re:CoM's records stay on its
+  clips), `BONE_POINTS` (a bone's position in a frame as a constant).
+- Darkball (`xa_ex_2280` ↔ `CEnemyDarkball` id 23; `ex_2280.bd`, 151 constants): grows in 0.8 m up (unhittable until
+  grown); wanders, engages within 10 m after notice (205); close: bite (204), warp, circle and 3 dashes (201–203);
+  far: warp or circle + dashes; warp: shrinks, vanishes (unhittable), glides, reappears above Sora at twice the size
+  (drop 200) or plainly after 4 tries; counters (bite close, dash far), warps away after 5 counted hits, 5th light hit
+  in a row bites, from the 6th no flinch. Vtable `0x14053B7A8`, ctor `0x14018D5D0`, alloc `0x140189349` 0xCD0 → 0xCF0.
+- Power: dash → Re:CoM id 0, bite → id 1 (exact copies), drop → id 1 (Assumption). Guarding the dash: KH1's recoil
+  206; bite / drop: Re:CoM's flinch (no recoil 110 in the model).
+- Asset step: `ENEMY/0023/EN0023.ANN` (Re:CoM's 86 kept), `.ASD` (2 + 3), `.SES`, `kh1-darkball.json`.
+- Not ported: leash, party retargeting, world rules, KH1 hit attributes (no Gravity stagger), warp smoke / fades,
+  no-push flag. Checked: tests, Windows build, 765 sites. Not checked: in game, KH1 trace.
+
+---
+
 ## Stage 130: M11: the KH1 Powerwild; KH1's timed jump and scripted launch in the framework, version 0.70.0 (2026-11-01)
 
 - M11 (owner, 2026-11-02): the ground family's first.
