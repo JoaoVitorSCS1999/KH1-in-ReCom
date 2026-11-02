@@ -622,10 +622,12 @@ Owner: "for the item slots … lets use the green item symbol"; the plan "Yes, a
   a copy of Re:CoM's green row 0x131 with its icon's sprite group 85 (sprite 278, the Mickey
   symbol) swapped for 83 (sprite 166, the item symbol of Re:CoM's Deck tabs). In the file itself
   and in every PC asset that is a `camp.lad` (any language prefix) or a whole container with one;
-  any other asset is kept as it is. A set that is not Re:CoM Steam's stops it (a note; the item
-  rows keep 0x131).
+  any other asset is kept as it is. Each copy's new group is after its own groups (base file 353;
+  the owner's `FR_` .. `UK_camp.lad` have 367, so 367 there; 0.56.1). A set that is not Re:CoM
+  Steam's stops it (a note; the item rows keep 0x131).
 - **Writes**, under the manifest's root: `raw/FORM/0100/FO0100.SPR` (plain PKG entry, same asset
-  names, tags, date) and `kh1-camp-rows.json` (format `kh1-recom-assets camp-rows 1`). When it
+  names, tags, date) and `kh1-camp-rows.json` (format `kh1-recom-assets camp-rows 2`: `item_rows`
+  lists every copy's group). When it
   can't be built, an older `kh1-camp-rows.json` there is removed.
 - **Prints** `camp item row: camp:00 group 0x161 = group 0x131 with sprite group 83 (item symbol)
   for 85 added to [...] (PC assets of the entry: [...])`.

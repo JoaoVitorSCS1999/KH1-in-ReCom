@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 100: Item-row symbol in every language's camp menu, version 0.56.1 (2026-11-01)
+
+- Found on the owner's PC (asset step run, 0.56.0): `note: camp item row not built: FORM/0100/FO0100.SPR asset
+  FR_camp.lad: camp:00 has 367 animation groups, Re:CoM Steam's has 353`. The entry's language copies have 14
+  more groups than the base file (Checked: the run's log), as the MP bar's `<LANG>_Cockpit.lad` do.
+- Change: the asset step gives each copy the new group after its own groups (base 353, the language copies
+  367); the base file must still be Re:CoM Steam's. `kh1-camp-rows.json` format 2 lists them (`item_rows`).
+  The DLL picks the loaded set's last group when it is one of them, before each list set-up (no new hook).
+- Assumption: the extra groups come after Re:CoM's and 0x131 is the same green row in every copy (the step
+  checks 0x131's icon per copy). `docs/recom-m8-items.md` § Language copies.
+- Checked: tests, Windows build. Not checked: the owner's PC assets, in game.
+
+---
+
 ## Stage 99: Skip the intro tutorial and the Leon battle at Combat = KH1, version 0.56.0 (2026-11-01)
 
 - Ask (owner, 2026-11-01): "If a player has KH1 Combat enabled, have the player skip the leon training battle.

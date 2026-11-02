@@ -1025,3 +1025,22 @@ and every item slot row of Sora's list likewise. The Keyblade slot and the "Sora
   tinted 0x801EDC1E reads as the green item symbol (the atlas is not in the session; the Deck
   tabs draw it untinted). If it looks wrong, the copy can keep 0x131's tint off for the icon
   (Re:CoM's untinted draw) instead.
+
+### Language copies of `camp.lad` (0.56.1)
+
+- The owner's asset step run (0.56.0) refused the item row: `FORM/0100/FO0100.SPR asset FR_camp.lad:
+  camp:00 has 367 animation groups, Re:CoM Steam's has 353`. Checked (the run's log): the entry's
+  language copies `FR_` / `GR_` / `IT_` / `SP_` / `UK_camp.lad` have 14 more groups than the base file,
+  as `FO0002.SPR`'s `<LANG>_Cockpit.lad` have 157 to the base file's 151 (the MP bar already handles
+  that per copy).
+- Now each copy gets the new group after its own groups (base file 353; a copy with 367 → 367). The
+  base file must still have Re:CoM Steam's 353; a copy must have at least 353, pass the same checks on
+  0x131 / sprite groups 83, 85 / the Deck's item tab, and not already end with our group.
+- `kh1-camp-rows.json` is format `camp-rows 2`: `item_row` (the base file's), `item_rows` (every copy's,
+  sorted) and `files` with each one's group. The DLL keeps our table's last entry in its own memory
+  and, before each list set-up, sets it to the loaded set's last group when that is one of
+  `item_rows` (`camp_rows::loaded_row`; the count from Re:CoM's 2D registry, as before). Logged once:
+  `camp rows: camp:00 has N groups: item row = group 0x…`.
+- Assumption: a language's 14 extra groups come after Re:CoM's 353 and 0x131 is the same green row
+  in every copy (Re:CoM's table `0x1407C11F0` names 0x131 for every language, and the step's checks on
+  0x131's icon pass or it refuses). Checked: tests. Not checked: the owner's PC assets (next run's log).

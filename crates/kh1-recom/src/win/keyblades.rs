@@ -33,7 +33,7 @@ use crate::items_page as ip;
 use crate::abilities::page as ap;
 use crate::keyblades::{self as kb, list, sub, text, top};
 use crate::sites::data;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 pub static ORIG_UPDATE: AtomicUsize = AtomicUsize::new(0);
@@ -44,9 +44,12 @@ pub static ORIG_TEARDOWN: AtomicUsize = AtomicUsize::new(0);
 /// The camp our entry belongs to, and our entry's `C2DSeqCtrl`.
 static ENTRY_CAMP: AtomicUsize = AtomicUsize::new(0);
 /// The asset step's item row (`crate::camp_rows`): our list table, Re:CoM's 7 entries of
-/// `0x1407C11F0` (read from the image) and the new group. Set once at install from
-/// `kh1-camp-rows.json`; Re:CoM's row set-up keeps the pointer, so it lives as long as the DLL.
-static ITEM_TABLE: OnceLock<[u16; crate::camp_rows::RECOM_ENTRIES + 1]> = OnceLock::new();
+/// `0x1407C11F0` (read from the image) and the new group of the loaded language's copy (set before
+/// each set-up from the loaded set's group count); and every copy's group from
+/// `kh1-camp-rows.json`. Set once at install; Re:CoM's row set-up keeps the table's pointer, so it
+/// lives as long as the DLL (`AtomicU16` has `u16`'s layout).
+static ITEM_TABLE: OnceLock<[AtomicU16; crate::camp_rows::RECOM_ENTRIES + 1]> = OnceLock::new();
+static ITEM_ROWS: OnceLock<Vec<u16>> = OnceLock::new();
 static ITEM_SET_LOGGED: AtomicBool = AtomicBool::new(false);
 static ENTRY_BTN: AtomicUsize = AtomicUsize::new(0);
 static SPARE_LOGGED: AtomicBool = AtomicBool::new(false);
@@ -246,7 +249,7 @@ pub fn load_item_row(file: Option<&std::path::Path>) {
         log("camp rows: no kh1-camp-rows.json: item rows keep Re:CoM's green row 0x131 (Mickey symbol)");
         return;
     };
-    let row = match std::fs::read_to_string(path).map_err(|e| e.to_string()).and_then(|t| crate::camp_rows::parse(&t)) {
+    let rows = match std::fs::read_to_string(path).map_err(|e| e.to_string()).and_then(|t| crate::camp_rows::parse(&t)) {
         Ok(r) => r,
         Err(e) => {
             log(&format!("camp rows: {}: {e}: item rows keep Re:CoM's green row 0x131", path.display()));
@@ -255,16 +258,22 @@ pub fn load_item_row(file: Option<&std::path::Path>) {
     };
     // SAFETY: Re:CoM's camp list table in the image (its bytes checked at start-up, `sites`).
     let recom: [u16; crate::camp_rows::RECOM_ENTRIES] = std::array::from_fn(|i| unsafe { rd::<u16>(va(base(), LIST_SEQ) + 2 * i) });
-    let t = crate::camp_rows::list_table(recom, row);
-    let _ = ITEM_TABLE.set(t);
-    log(&format!("camp rows: {} item row = camp:00 group {row:#x} (variant {}, our table {t:x?}); used when the loaded camp:00 has it", path.display(), kb::row_look::ITEM));
+    let t = crate::camp_rows::list_table(recom, rows[0]);
+    let _ = ITEM_TABLE.set(t.map(AtomicU16::new));
+    log(&format!(
+        "camp rows: {} item rows = camp:00 groups {rows:x?} (base file, language copies; variant {}, our table {t:x?}); used when the loaded camp:00 ends with one",
+        path.display(),
+        kb::row_look::ITEM
+    ));
+    let _ = ITEM_ROWS.set(rows);
 }
 
-/// Whether the loaded camp set (`set`, Re:CoM's NUL-terminated name) has the item row `row`:
-/// exactly Re:CoM's groups + 1, read from Re:CoM's 2D registry. Logged once when not.
-unsafe fn item_row_loaded(set: *const u8, row: u16) -> bool {
+/// The item row of the loaded camp set (`set`, Re:CoM's NUL-terminated name): its last group when
+/// that is one of the manifest's, its group count read from Re:CoM's 2D registry. Logged once
+/// when none (and once with the row found).
+unsafe fn item_row_loaded(set: *const u8, rows: &[u16]) -> Option<u16> {
     if set.is_null() {
-        return false;
+        return None;
     }
     let mut name = Vec::with_capacity(16);
     for k in 0..32 {
@@ -275,19 +284,21 @@ unsafe fn item_row_loaded(set: *const u8, row: u16) -> bool {
         }
     }
     if name.last() != Some(&0) {
-        return false;
+        return None;
     }
     let n = super::mp_bar::set_groups(&name);
-    let ok = crate::camp_rows::loaded_has_it(n, row);
-    if !ok && !ITEM_SET_LOGGED.swap(true, Ordering::Relaxed) {
-        log(&format!(
-            "camp rows: {} has {} groups, not {} (Panacea serves Re:CoM's own FORM/0100/FO0100.SPR, or this language's copy was not patched): item rows keep Re:CoM's green row 0x131",
-            String::from_utf8_lossy(&name[..name.len() - 1]),
-            n.map_or("no".to_string(), |n| n.to_string()),
-            row as u32 + 1
-        ));
+    let row = crate::camp_rows::loaded_row(n, rows);
+    if !ITEM_SET_LOGGED.swap(true, Ordering::Relaxed) {
+        let set = String::from_utf8_lossy(&name[..name.len() - 1]);
+        let groups = n.map_or("no".to_string(), |n| n.to_string());
+        log(&match row {
+            Some(r) => format!("camp rows: {set} has {groups} groups: item row = group {r:#x}"),
+            None => format!(
+                "camp rows: {set} has {groups} groups, none of {rows:?} + 1 (Panacea serves Re:CoM's own FORM/0100/FO0100.SPR, or this language's copy was not patched): item rows keep Re:CoM's green row 0x131"
+            ),
+        });
     }
-    ok
+    row
 }
 
 /// `vt+0x20(obj, 0, set, sequence, 0.0, 0)`, as Re:CoM gives its menu sprites a sequence.
@@ -1286,8 +1297,12 @@ impl Page {
         let blink: u32 = at(camp, camp::BLINK);
         let setup = func::<SetupFn>(CBUTTON_SETUP);
         // The item row needs our table (Re:CoM's + the new group) and a loaded set that has it.
-        let item_table = ITEM_TABLE.get().filter(|t| item_row_loaded(set, t[crate::camp_rows::RECOM_ENTRIES]));
-        let seqs = item_table.map_or(va(base(), LIST_SEQ) as *const u16, |t| t.as_ptr());
+        let item_table = ITEM_TABLE.get().zip(ITEM_ROWS.get()).and_then(|(t, rows)| {
+            let r = item_row_loaded(set, rows)?;
+            t[crate::camp_rows::RECOM_ENTRIES].store(r, Ordering::Relaxed);
+            Some(t)
+        });
+        let seqs = item_table.map_or(va(base(), LIST_SEQ) as *const u16, |t| t.as_ptr() as *const u16);
         let item_row = item_table.is_some();
         for i in 0..list::VISIBLE as usize {
             delete(self.rows[i] as *mut u8);

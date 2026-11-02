@@ -38,7 +38,7 @@ pub const ITEM_TAB: usize = 0xED;
 /// The manifest the DLL reads, next to the other asset-step manifests.
 pub const MANIFEST: &str = "kh1-camp-rows.json";
 /// The manifest's `format`.
-pub const FORMAT: &str = "kh1-recom-assets camp-rows 1";
+pub const FORMAT: &str = "kh1-recom-assets camp-rows 2";
 
 fn i32_at(r: &[u8], at: usize) -> i32 {
     i32::from_le_bytes(r[at..at + 4].try_into().unwrap())
@@ -59,13 +59,17 @@ fn one_part(seq: &Seqd, sg: usize) -> bool {
 }
 
 /// Appends the green row with the item symbol (0x131 with its icon's sprite group 85 → 83) and
-/// returns the new group's index. Refused unless the set looks like Re:CoM Steam's: its group
-/// count, 0x131 with exactly one animation on sprite group 85, sprite groups 83 and 85 one part
-/// each, and the Deck's item tab 0xED drawing sprite group 83.
+/// returns the new group's index (after the set's own groups). Refused unless the set looks like
+/// Re:CoM Steam's: at least its 353 groups (a language's copy may have more after them: the
+/// owner's `FR_camp.lad` .. `UK_camp.lad` have 367, Checked (files)), not already patched (its
+/// last group is not our copy), 0x131 with exactly one animation on sprite group 85, sprite groups
+/// 83 and 85 one part each, and the Deck's item tab 0xED drawing sprite group 83.
 pub fn add_item_row(seq: &mut Seqd) -> Result<usize> {
-    if seq.agroups.len() != BASE_GROUPS {
-        let note = if seq.agroups.len() == BASE_GROUPS + 1 { " (already patched?)" } else { "" };
-        return bad(format!("{SET} has {} animation groups, Re:CoM Steam's has {BASE_GROUPS}{note}", seq.agroups.len()));
+    if seq.agroups.len() < BASE_GROUPS {
+        return bad(format!("{SET} has {} animation groups, Re:CoM Steam's has {BASE_GROUPS}", seq.agroups.len()));
+    }
+    if already_patched(seq) {
+        return bad(format!("{SET}: its last group is already the item row (already patched?)"));
     }
     if !one_part(seq, MICKEY_SG) || !one_part(seq, ITEM_SG) {
         return bad(format!("{SET}: sprite groups {MICKEY_SG} / {ITEM_SG} are not Re:CoM's one-part icons"));
@@ -91,6 +95,26 @@ pub fn add_item_row(seq: &mut Seqd) -> Result<usize> {
     r[0..2].copy_from_slice(&(first as u16).to_le_bytes());
     seq.agroups.push(r);
     Ok(seq.agroups.len() - 1)
+}
+
+/// Whether the set's last group is a copy of 0x131 with the item symbol (our group).
+fn already_patched(seq: &Seqd) -> bool {
+    let n = seq.agroups.len();
+    if n <= BASE_GROUPS {
+        return false;
+    }
+    let (Ok(last), Ok(green)) = (group_anims(seq, n - 1), group_anims(seq, GREEN_ROW)) else {
+        return false;
+    };
+    last.len() == green.len()
+        && last.zip(green).all(|(a, b)| {
+            let (x, y) = (&seq.anims[a], &seq.anims[b]);
+            if i32_at(&y[..], 4) as usize == MICKEY_SG {
+                i32_at(&x[..], 4) as usize == ITEM_SG && x[..4] == y[..4] && x[8..] == y[8..]
+            } else {
+                x == y
+            }
+        })
 }
 
 /// Adds the row to a `camp.lad` (its `camp:00`); returns the layout and the new group.
@@ -120,11 +144,15 @@ pub fn patch_container(spr: &[u8]) -> Result<(Vec<u8>, usize)> {
 
 /// Patches the `FO0100.SPR` container and every PC asset of its entry that is a `camp.lad`
 /// (any language prefix) or a whole container with one; returns the new group and the files
-/// patched. Every copy must give the same group (the DLL names one for all languages).
-pub fn patch_spr(spr: &mut Vec<u8>, assets: &mut [kh1_formats::egs::HdAsset]) -> Result<(usize, Vec<String>)> {
+/// patched with each one's new group. The base file must be Re:CoM Steam's (353 groups → 353); a
+/// language's copy gets the group after its own groups (the DLL picks the one the loaded set has).
+pub fn patch_spr(spr: &mut Vec<u8>, assets: &mut [kh1_formats::egs::HdAsset]) -> Result<(usize, Vec<(String, usize)>)> {
     let (out, g) = patch_container(spr)?;
+    if g != BASE_GROUPS {
+        return bad(format!("{SPR_PATH}: {SET} has {g} animation groups, Re:CoM Steam's has {BASE_GROUPS}"));
+    }
     *spr = out;
-    let mut files = vec![SPR_PATH.to_string()];
+    let mut files = vec![(SPR_PATH.to_string(), g)];
     for a in assets.iter_mut() {
         let patched = if a.data.starts_with(b"LAYD") {
             if !is_camp_layout(&a.name) {
@@ -138,18 +166,16 @@ pub fn patch_spr(spr: &mut Vec<u8>, assets: &mut [kh1_formats::egs::HdAsset]) ->
             }
         };
         let (d, f) = patched.map_err(|e| crate::Error::Format(format!("{} asset {}: {e}", SPR_PATH, a.name)))?;
-        if f != g {
-            return bad(format!("{SPR_PATH} asset {}: new group {f}, the base file's {g}", a.name));
-        }
         a.data = d;
-        files.push(a.name.clone());
+        files.push((a.name.clone(), f));
     }
     Ok((g, files))
 }
 
-/// `kh1-camp-rows.json`: the set, Re:CoM's group count, the new group, what it copies, the files
-/// patched and the input's sha256.
-pub fn manifest_json(group: usize, files: &[String], sources: &[(&str, String)]) -> String {
+/// `kh1-camp-rows.json`: the set, Re:CoM's group count, the base file's new group, every new
+/// group of the copies (`item_rows`, sorted), what it copies, the files patched (with their
+/// group) and the input's sha256.
+pub fn manifest_json(group: usize, files: &[(String, usize)], sources: &[(&str, String)]) -> String {
     use std::fmt::Write;
     let mut s = String::new();
     let _ = writeln!(s, "{{");
@@ -157,9 +183,14 @@ pub fn manifest_json(group: usize, files: &[String], sources: &[(&str, String)])
     let _ = writeln!(s, "  \"set\": \"{SET}\",");
     let _ = writeln!(s, "  \"base_groups\": {BASE_GROUPS},");
     let _ = writeln!(s, "  \"item_row\": {group},");
+    let mut rows: Vec<usize> = files.iter().map(|f| f.1).collect();
+    rows.sort_unstable();
+    rows.dedup();
+    let r: Vec<String> = rows.iter().map(|g| g.to_string()).collect();
+    let _ = writeln!(s, "  \"item_rows\": [{}],", r.join(", "));
     let _ = writeln!(s, "  \"copy_of\": {GREEN_ROW},");
     let _ = writeln!(s, "  \"icon_sprite_group\": {{\"from\": {MICKEY_SG}, \"to\": {ITEM_SG}}},");
-    let f: Vec<String> = files.iter().map(|n| format!("{n:?}")).collect();
+    let f: Vec<String> = files.iter().map(|(n, g)| format!("{{\"name\": {n:?}, \"item_row\": {g}}}")).collect();
     let _ = writeln!(s, "  \"files\": [{}],", f.join(", "));
     let src: Vec<String> = sources.iter().map(|(k, v)| format!("{k:?}: {v:?}")).collect();
     let _ = writeln!(s, "  \"sources\": {{{}}}", src.join(", "));
@@ -232,6 +263,9 @@ mod tests {
         add_item_row(&mut s).unwrap();
         assert!(add_item_row(&mut s).unwrap_err().to_string().contains("already patched"));
         let mut s = seq();
+        s.agroups.truncate(BASE_GROUPS - 1);
+        assert!(add_item_row(&mut s).is_err(), "fewer groups than Re:CoM's");
+        let mut s = seq();
         s.anims[5][4..8].copy_from_slice(&0i32.to_le_bytes()); // the tab no longer on 83
         assert!(add_item_row(&mut s).is_err());
         let mut s = seq();
@@ -261,6 +295,13 @@ mod tests {
     #[test]
     fn container_and_language_copies() {
         let lad = layd(&[seq().write()]);
+        // A language's copy with 14 more groups after Re:CoM's (the owner's FR_ .. UK_camp.lad).
+        let mut longer = seq();
+        for _ in 0..14 {
+            let r = longer.agroups[0];
+            longer.agroups.push(r);
+        }
+        let lad_fr = layd(&[longer.write()]);
         let other = layd(&[Seqd { agroups: seq().agroups[..3].to_vec(), ..seq() }.write()]);
         let entry = |name: &str, data: Vec<u8>| {
             let mut raw = [0u8; 0x18];
@@ -271,13 +312,18 @@ mod tests {
         let mut base = spr.clone();
         let mut assets = vec![
             kh1_formats::egs::HdAsset { name: "UK_camp.lad".into(), orig_offset: 0xFFFF, data: lad.clone() },
+            kh1_formats::egs::HdAsset { name: "FR_camp.lad".into(), orig_offset: 0xFFFF, data: lad_fr },
             kh1_formats::egs::HdAsset { name: "UK_worldmap.lad".into(), orig_offset: 0xFFFF, data: other.clone() },
             kh1_formats::egs::HdAsset { name: "whole".into(), orig_offset: 0xFFFF, data: spr.clone() },
         ];
         let (g, files) = patch_spr(&mut base, &mut assets).unwrap();
         assert_eq!(g, BASE_GROUPS);
-        assert_eq!(files, vec![SPR_PATH.to_string(), "UK_camp.lad".into(), "whole".into()]);
-        assert_eq!(assets[1].data, other, "other layouts kept");
+        assert_eq!(files, vec![(SPR_PATH.to_string(), 353), ("UK_camp.lad".into(), 353), ("FR_camp.lad".into(), 367), ("whole".into(), 353)]);
+        assert_eq!(assets[2].data, other, "other layouts kept");
+        let fr = Seqd::parse(&Layd::parse(&assets[1].data).unwrap().seqs[0]).unwrap();
+        assert_eq!(fr.agroups.len(), 368);
+        assert_eq!(fr.agroups[367][2..], fr.agroups[GREEN_ROW][2..]);
+        assert!(already_patched(&fr));
         let c = Container::parse(&base).unwrap();
         assert_eq!(c.find("worldmap.lad").unwrap().data, other);
         let s = Seqd::parse(&Layd::parse(&c.find("camp.lad").unwrap().data).unwrap().seqs[0]).unwrap();
@@ -286,7 +332,7 @@ mod tests {
         assert_eq!(s.agroups.len(), BASE_GROUPS + 1);
         assert!(is_camp_layout("FR_camp.lad") && is_camp_layout("CAMP.LAD") && !is_camp_layout("UK_worldmap.lad") && !is_camp_layout("UK_bootcamp.lad"));
         let m = manifest_json(g, &files, &[("FO0100.SPR sha256", "ab".into())]);
-        assert!(m.contains("\"item_row\": 353") && m.contains("\"format\": \"kh1-recom-assets camp-rows 1\""));
+        assert!(m.contains("\"item_row\": 353") && m.contains("\"item_rows\": [353, 367]") && m.contains("\"format\": \"kh1-recom-assets camp-rows 2\""));
     }
 
     /// The owner's `FO0100.SPR` container (`KH1_FO0100_SPR` = its path; the base file without
