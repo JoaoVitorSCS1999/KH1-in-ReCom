@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 170: Red Nocturne: KH1's rule for a big Fire whose caster dies, version 0.93.3 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Match KH1" (a big Fire flies if its caster dies late in the cast).
+- Finding (Checked (files `ex_2110_01.bd` `0x734..0x754`; decomp)): KH1 never reads the caster's HP; it checks the caster still exists and, while it does, that it still plays its cast motion 203. The killing hit's reaction replaces 203, so in KH1 a caster killed by a reacting hit throws no fire: the question's premise was wrong.
+- Built: KH1's exact rule: a defeated Red Nocturne's waiting spells keep counting until Re:CoM removes it (30 frames later): in practice no fire follows a kill. Owner question: keep, or a non-KH1 rule (a dead caster's waiting big Fire flies at its 90th frame).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 169: Red Nocturne: Re:CoM's stun when its own sent-back Fire hits it, version 0.93.2 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Re:CoM's stun" instead of KH1's 30 s dizzy.
