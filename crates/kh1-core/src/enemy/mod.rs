@@ -342,6 +342,17 @@ pub trait Behaviour {
     fn armoured(&self, _playing: Option<u16>, _launch_base: u16, _kind: Option<u8>) -> bool {
         false
     }
+    /// The battle the enemy was built for (`kh1-recom`'s battle number), once, right after it is made
+    /// (M11, the Neoshadow): KH1's enemy scripts that share a work block (`sys 138` → `0x1402BC620`: one
+    /// 0x80-byte block, `DAT_142DB7B5C`, zeroed at each room's set-up `0x140287C60`; Checked (decomp)) share
+    /// it here among the battle's enemies of the class (Re:CoM's battle is KH1's room). The default: none.
+    fn set_battle(&self, _battle: u32) {}
+    /// The motion the defeat plays instead of KH1's reaction to the killing hit, when the script's hit
+    /// handler zeroes that reaction and plays its own death motion (M11, the Neoshadow: `ex_2420.bd`
+    /// `0x4BD0` `hp[0xC] &= ~0x1F`, then `0x5304` request 72 facing the attacker). The default: none.
+    fn death_motion(&self) -> Option<u16> {
+        None
+    }
     /// A damaging hit taken while [`Behaviour::armoured`]: the hit handler's path for it (the Pirate's
     /// `sys 42`: KH1's push slide along `dir`, the push direction; the fliers: their counts and their hit
     /// state, no push), no reaction; the action goes on. [`Behaviour::set_hit_kind`] has given its kind.

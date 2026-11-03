@@ -2262,6 +2262,181 @@ kill one. The trace's enemy rows give the rounds' timings, the ring's reach and 
    (a) Leave it (as every port so far); (b) build it in the shared enemy guard (each damaging row also as an all-round
    clash while its window is on), research first which test KH1 runs first when a swing meets both the row and the body.
 
+### The Neoshadow (built)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Neoshadow yet. Its attacks run on
+Re:CoM's states 2 / 3; its body row bounces Sora's swings while it leaps, dives and rises slashing (the shared
+enemy-guard step, a row held in KH1's mode 3); the hits it takes no reaction for keep Re:CoM's state (§ Hits that take no
+reaction).
+
+#### KH1's side. Checked (files: `ex_2420.bd` disassembled, code from `0x36A`; decomp: the syscalls named)
+
+**Where KH1 has it.** Of the player's 214 KH1 rooms only `ew29.ard` (End of the World) names `ex_2420`
+(Checked (files): `grep` of every `.ard`; KH1's world 16 is `ew`, the world code table `0x1404DCCA0`, Checked (exe)). The
+other End of the World / Hollow Bastion / Olympus rooms' black Heartless are `ex_2310` / `ex_2312` (another model and
+script). Re:CoM's `CEnemyNeoshadow` is built from `ex_2420` (Checked (files): `EN0027.MDL`'s root bone `m_ex420_sk`,
+`EN0027.ASD` names `ex_2420`). The script names points and a height of room 29 (below).
+
+**The shared block.** All the room's Neoshadows share one 0x80-byte block (`sys 138` → `0x1402BC620`: `DAT_142DB7B5C`,
+zeroed by the room set-up `0x140287C60`; Checked (decomp)). Its first word counts them (each init adds one, each death
+takes one); most choices go by that count. The port: one `Group` per Re:CoM battle (`Behaviour::set_battle`).
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x443E` | init `0x46F8` (stat record `0x14`, run 12, the block's words `+4..+0x4C` cleared, one more counted unless one is calling `+0x50`: then a called one, hidden and unhittable); a yield; a called one comes up (`0xFC8`), the others idle (`0xF34`); each frame a state request restarts the behaviour (1 idle, 2 engaged `0x724`, 3 `0x680` (never asked), 4 dive `0x5C6`, 5 hit `0x3DE`); nothing else while it travels underground (`wp+0x50`); KH1's grab holding Sora sends a free one to state 4; the last counted one's death makes a called one vanish |
+| idle | `0xF34` | the search (Sora within 5000; at most four of them: Sora anyway), facing him now, engaged |
+| engaged | `0x724` | **five or more** (`0xBCC`): unless a gathered dive is on, the gathered dive; then 3 rounds. **Three or four**: join a gathered dive that waits, else the formation (`0x1FB0`). **Two**: the first to come goes underground for good (`+0x48`, `wp+0x48`: sink, hidden, unhittable) and ambushes Sora (`0xBA2`: [120, 180) frames, then `0x1AF6`); the other fights 3 rounds. **One**: `0x8FA` |
+| rounds | `0xC3A(n)` | < 500: 50 % the claw; sink, circle underground 600–1000 away and come up; with others, run to a point 800–900 away (180 f), alone 50 % the rising slash. < 900 (counts two): two or fewer 50 %, or alone: 50 % the rising slash, else a dive; else strafe (3 a frame, to 300, 150 f) and the approach (run, 180 f, re-aim 20, to 300). Farther: over 40 % or more than two: run at Sora (240 f, to 150, at 12) and the claw; else alone a dive, else sink, come up near Sora (200–300) and the rising slash. A gathered dive waiting ends them |
+| claw | `0x1878` | rows `0x1D0` / `0x240` (both hands), 202 (blend 8, root motion), idle queued; turning to Sora while more than 40 of its len + 6 frames are left |
+| rising slash | `0x1568` | sink; hidden; 20 f; Sora on the floor: straight under him (`sys 86`), else underground to within 50 of him (speed 30); the body row (`0x80`, mode 3) on, shown, facing Sora now, row `0x160` and 207 (blend 0), hittable; 70 f before 207's end the body row ends |
+| sink | `0x5A98` | 216 (blend 8), 217 queued; no reaction (`wp+0x40`) until frame 40 + 6, then KH1's flags 0x20 / 0x40 / 0x10 (unhittable) and the height 1 → 0 over 20 f |
+| come up | `0x596A` | 218 (blend 0), idle queued; height 0 → 1 over len − 2; then hittable |
+| underground | `0x552C` / `0x55D2` / `0x5652` | 180 f at 12 (30 to Sora); straight at a point, or (the rounds' sink) along its own facing turned 4° a frame (it circles; the side flips every 60 f); stuck (from 30 f, moved under speed × 0.25): turn toward room 29's spot `(8700, 5300, 100)` ±60°, 700–1000 away |
+| leap | `0x1950` / `0x3036` | the crouch 203 (blend 8), 204 queued; in its last 14 of len + 6 frames: movement state 7 (`sys 169`, no velocity), the body row on, rising at 20 a frame to 120 above the floor (`sys 89`) |
+| gathered dive | `0x3036` | the leap; one more up (`+4`); the dive starts when all are up or there are at most four (`+0xC`); 30 f; one diver at a time (the token `+8`) |
+| dive | `0x3326` | aim: Sora (80 above him when he is on the floor or within 80 of it), 1.4 × as far, 800 when under 500 (`0x3664`); 205 (blend 8), 8 f, row `0xF0` (mode 2); for len × 9 frames flying at the aim at 80 a frame (re-aimed farther than 600 from Sora; level under 80 above the floor), stopping within 250 of the aim or (from 30 f) when it moved under 40; then the easing 0.4 for good (stats `+0x14`), the body row off, 206 with 6 queued for len − 4, movement state 0 (`sys 88`), on the floor; higher than room 29's height 5380 it runs home 60 f (`0x372C`) |
+| formation | `0x1FB0` / `0x2430` | sink, hidden, 20 f; each sunk one counts (`+0x10`); all sunk (or two or fewer): go (`+0x14`); 6 f; a free place of a 9-place layout of room 29 (by Sora's x: < 8250, > 9200, else the middle one; each frame a draw in [1, 10) takes the first free place at or after it); 20 f; the rising slash out of it, all together |
+| two left | `0xBA2` → `0x1AF6` | while Sora is off the floor (≤ 180 f, unless alone or 13 m away), wait; 20 f under Sora, facing his way; then **KH1 grabs him** when he stands on the floor and can be hit: he plays motion 200 from the Neoshadow's own `.mset` (`sys 113`, `0x1402BA8C0`; request `0x10000C8`) while it plays 208 and another Neoshadow dives at him (`+0x4C` → state 4); else it misses: at his feet, shown, 209, hidden again |
+| alone | `0x8FA` | the hidden one: the block cleared, to room 29's spot `(9000, 5300, 100)`, 30 f, shown, come up, the call; then while alone: underground (straight) to `(8900, 5300, 100)` (other worlds: `(−100, 0, −1200)`, never in KH1), the call `0x11FA` (210, 240 + 6 f; in its last 80 KH1 wakes the room's sleeping objects 600..606, `sys 37` with `0xB0000 | id` → `0x140290D60` → `0x140287850`), 5 rounds |
+| a called one | `0xFC8` | (made while one calls) shown, facing Sora, 211, 212 four times its length, counted, action 213 with idle queued, idle |
+| hit state | `0x3DE` | after a counter mark (`wp+0x3C` 100: a knock-back / launch, or the 4th flinch in a row): with other than three or four and no gathering, two or fewer 50 % the rising slash, else sink away 600–1000; else (no gathering) five or more the claw, three or four turn to Sora, two or fewer the rising slash; then engaged |
+| hit handler | `0x498C` | a called one rising (`wp+0x54`): nothing, before the damage; the hidden one (`wp+0x48`) or the body row on (`wp+0x58`): no reaction; a killing hit by Sora outside the sink: death (`0x4E1C`: one fewer counted; the last: the called ones vanish; the drops) and 72 facing the attacker (`0x5304`); a killing hit during the sink (216) or by another: HP 1; the call (210) or `wp+0x40`: no reaction; 213: KH1's push only (`sys 42`); kinds 4 / 5 mark the counter; kind 3 counts the run, the 4th marks it and `wp+0x40`; the hit state |
+
+Attacks (KH1's rows; `0x1402B2DC0`, modes `0x1402B47A0` / `sys 213` `0x1402BBC10`: mode 2 lives while its request plays and
+its HIT slot is on, **mode 3 every frame** until `sys 213(row, 0)`; Checked (decomp)):
+
+| Attack | Request | Rows (bone code, t, radius; HIT slot) | Hit windows | Recoil | KH1 kind / power | Re:CoM id | How it plays |
+|---|---|---|---|---|---|---|---|
+| claw | 202 (74 f, root) | `0x1D0` (28, 50; 0), `0x240` (29, 50; 1) | [40, 54), [52, 68) | 215 | 1 / 4 | 0 | plain request (steered), state 2 |
+| rising slash | 207 (120 f) | `0x160` (8, a line 1 → 0, 150; 0) | [26, 50) | 110 (none) | 1 / 8 | 1 | plain request, state 3 |
+| dive | 205 (40 f, looped) | `0xF0` (8, 60; 0) | [0, 40) each cycle | 110 (none) | 4 / 6 | 1 | plain request, state 3, its body in movement state 7 |
+
+The body row `0x80` (code 8, radius 80, **type 4, priority 100, cone cos −1: all round**, mode 3): Sora's swings meet it
+(type 0 meets 4) and get KH1's strong recoil (kind 7: 70 under); a side at 100 is never moved, so the Neoshadow hears
+nothing (`0x1402B4BC0`). On while `wp+0x58` (the leap, the hover, the dive, and the rising slash's first 50 frames).
+
+Reactions: the shared engine with its motions (flinch 72..75 = 0x48..0x4B, knock-back 76 / 77, air flinch 78 / 79, air
+knock-back 80 / 81 = its 78 / 79; no launch: a launch is a flinch or knock-back). Weight 1.0. Hurt parts: 7 (Re:CoM bones
+30, 2, 3, 7, 12, 14, 54). Checked (files).
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyNeoshadow` (vtable `0x140545128`, 139 slots, RTTI `.?AVCEnemyNeoshadow@@` at −8), ctor `0x140190150` (`40 53 48 83 EC
+20`: hides it, `+0x154 |= 1`; its only reference the factory's call at `0x14018940A`; no branch into the moved bytes, no
+pointer to them: exe scan), allocation `0x1401893F1` `mov ecx, 0xCE0` → 0xD00. Its own states: 0 (`0x140190220`: shown, its
+rise `e027_011`, hurt and attack bodies off; step `0x140190480`: turning to Sora, the default state at the motion's end;
+end `0x140190400`: bodies on), 1 (`0x1401903E0` / `0x140190860`), 2 (its claw `e027_050`, `0x140190330` / `0x140190540`), 3
+(`0x140190380` / `0x1401905A0`: sink `e027_051`, come up 2 m from Sora at a random angle with `e027_052`, then `e027_053`);
+11 / 12 / 30 and the attack states' ends `CBattleEnemy`'s; think `0x140196EC0`. Our copy: states 0, 1, 2 (the claw), 3 (the
+rising slash, the dive), 11, 12, 30, the think. `EN0027.ASD`: 3 records at `0x6C`, tail `0x24C` (id 0 on `e027_050`: both
+hands, 0.35 m; id 1 on `e027_052`: `m_ex420_sk`, 1.0 m from frame 42). `EN0027.ANN`: 73 slots. KH1's appearance: none (a
+room Neoshadow just stands there): `Appear::Base` (Re:CoM's state 0 begin, our frame from the next, the default state).
+
+**Power mapping** (decision M10; "the Re:CoM attack of the same kind"): the matcher pairs none of KH1's attacks with Re:CoM's
+clips (no edits of 202 / 207 / 205). By kind: the claw 202 (both hands) → Re:CoM's claw (id 0); the rising slash 207 (out of
+the floor under Sora) → Re:CoM's come-up strike (id 1); the dive 205 (no Re:CoM twin) → id 1 (Assumption; owner question 4).
+
+#### Framework additions (M11, the Neoshadow)
+
+| Part | Where | What |
+|---|---|---|
+| `Behaviour::set_battle` | `kh1-core` `enemy/mod.rs`, `win::kh1_enemy::ctor` | the battle number right after `make`: scripts sharing KH1's room block share it per battle |
+| `Behaviour::death_motion` | `defeat_begin` | a script's own death motion in place of the killing hit's reaction (the Neoshadow's 72: its handler zeroes the reaction) |
+| `guard::HELD` | `enemy/guard.rs`, `guard_step` | a guard row in KH1's mode 3: on every frame until `Cmd::Guard(None)`; the asset step's `GuardSpec` with no requests (no windows) |
+| priority 100 | `guard_event` | a row at 100 is never moved by any attacker (Re:CoM's own attacks too); the asset step accepts its missing recoil |
+| host model | `enemy/host.rs` `model` | a body on the ground state above the floor falls (Re:CoM's mover gravity) |
+
+The Shadow's sunk-state machinery is reused as it is: `Cmd::Hittable` (Re:CoM's hurt-body switch), `Cmd::Height` (Re:CoM's
+model scale y), `Cmd::Underground` (log), `Cmd::Visible` (Re:CoM's hide bit). Owner decisions for the Shadow apply: sunk =
+unhittable (from the sink's frame 46 to the come-up's end), lockable stays, Sora's body push not mapped.
+
+**KH1's room 29 in Re:CoM's battles** (owner question 1). The script names room 29's points: the formations' 27 places,
+the spot the hidden one comes up at `(9000, 5300, 100)`, the spot a lone one goes to `(8900, 5300, 100)`, the stuck
+traveller's spot `(8700, 5300, 100)`, the height 5380. Built: the middle formation's first place `(8800, 5480, 100)` stands
+for where Sora was when the battle's first Neoshadow first saw him; x / z about it, heights from the battle floor (the floor
+the Neoshadow last stood on). Assumption (flat floors; room 29's floor at 5480).
+
+#### What the asset step writes
+
+`ENEMY/0027/EN0027.ANN` (Re:CoM's 73 slots byte-identical, KH1's clips at 100 + entry; 67 plays Re:CoM's exact bake
+`e027_071`), `EN0027.ASD` (Re:CoM's 3 records kept, 4 added: the claw's two hands (id 0), the rising slash (id 1, a 1.5 m
+line), the dive (id 1, 0.6 m)), `EN0027.SES` (Re:CoM's entries kept; KH1's attack clips take their template record's sounds
+at the hit window: Assumption), `kh1-neoshadow.json` (`kh1-enemy 1`, 207 numbers read at their pushes, the shield guard row).
+Test `neoshadow::tests::builds_from_the_players_files`. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0027/EN0027.ANN, method: copy, source: [{name: ENEMY/0027/EN0027.ANN}]}
+- {name: ENEMY/0027/EN0027.ASD, method: copy, source: [{name: ENEMY/0027/EN0027.ASD}]}
+- {name: ENEMY/0027/EN0027.SES, method: copy, source: [{name: ENEMY/0027/EN0027.SES}]}
+- {name: kh1-neoshadow.json, method: copy, source: [{name: kh1-neoshadow.json}]}
+```
+
+The step prints `neoshadow (M11): …`; the log shows `neoshadow: KH1's Neoshadow (M11) …` at start and `battle N: Neoshadow …
+gets KH1's AI` in a Neoshadow battle.
+
+#### Checked / Assumption
+
+- **Checked (files):** every script number at its offset (the asset test reads the 207 from the player's script; names with
+  several pushes agree), 27 request words, the rows (types, priorities, recoils, radii, slots), the hit windows, the hurt
+  parts, Re:CoM's records and clips, the only KH1 room with the model.
+- **Checked (decomp):** `sys 138` and the room set-up's clearing; `sys 213`'s modes; `sys 169` / `88` / `86` / `89` / `118`;
+  `sys 37` / `sys 4` with `0xB0000 | id` (no such object in Re:CoM's battles: nothing); `sys 113` (Sora takes a motion of
+  the enemy's `.mset`); `0x140299D60`'s mode (`& 0xFFFF`); the reactions read stats `+0xC4`, not `sys 124`'s block; KH1's
+  `+0x374` bit 3 (`sys 163`) is "drawn this frame" (`0x1402A14F0`).
+- **Checked (exe):** the class, its slots, RTTI, the ctor and its only call, the factory size, the world code table; every site
+  (911, pefile, 0 mismatches, 2026-11-02).
+- **Assumptions:** the power of the dive; room 29's points about where Sora started, heights from the battle floor (its floor
+  5480); the grab not built (the miss instead); the call wakes nothing; a called one unhittable while it comes up (KH1 takes
+  the hits without damage: Re:CoM can't); KH1's `+0x90` (a dive's other end) never set (not identified); `sys 124` (written 0
+  / 100 around its attacks) not ported (not identified); a killing hit during the sink's first frames kills (KH1 keeps it at
+  1 HP: Re:CoM's defeat); the dive's row on from 205's first frame (KH1: 8 frames in); the miss faces its own way (KH1:
+  Sora's); the script's world taken as 16 (room 29); KH1's `still` facing commands only for the host's quiet watchdog during
+  the group's long waits; per-enemy random streams; Re:CoM's sounds on KH1's clips; effects and fades (M13).
+- **Not ported:** the grab, the room's sleeping objects, the effects, the masks, the rumble, the fade-outs.
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; any Neoshadow battle)
+
+1. Neoshadows stand where they appear (no rise) and come at Sora at once.
+2. **One Neoshadow:** it sinks, slides underground to near where Sora started the battle, comes up and raises its arms for
+   about 4 s (KH1's call; nothing comes in a Re:CoM battle), then fights: claws, sinks and circles underground, comes up
+   slashing right under Sora, leaps up and dives at him. Then again.
+3. **Two:** one sinks and stays hidden; every 2–3 s it pops up at Sora's feet (209) and vanishes; it can't be hit. The other
+   fights. Kill the other: the hidden one comes up and does 2.
+4. **Three or four:** they all sink together and rise slashing out of the floor at once, from places of a formation around the
+   middle of the battle.
+5. **Five or more:** they all leap up and hover; once all are up they dive at Sora one after another.
+6. Swing at one while it leaps, hovers, dives or rises slashing: Sora bounces off (his strong recoil); no damage.
+7. Hit it with plain swings: KH1's flinch; after a flinch, two or fewer of them: it sinks and comes up slashing under Sora. The
+   fourth flinch in a row or a finisher: no reaction until it counters.
+8. Guard its claw: KH1's recoil 215; its rising slash or dive: Re:CoM's flinch. No Re:CoM "Guard" popup over it.
+9. Kill one: it turns to Sora and plays its death (72); Re:CoM's prizes and EXP.
+10. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Neoshadows.
+
+Please send `kh1-recom.log` (`neoshadow:` lines) and an F9 trace.
+
+#### KH1 trace (what to record in KH1)
+
+End of the World, the room with the Neoshadow ambush (KH1's `ew29`): stand still 10 s at the start (the count's behaviour);
+stand at 3 m and at 8 m 10 s each; one swing; a full combo and a finisher; swing at one while it dives and while it rises
+slashing; Guard its claw and its dive; kill them one by one down to two (the hidden one) and to one (the spot and the call);
+record each count once.
+
+#### Neoshadow owner questions
+
+1. **Room 29's points.** KH1 has this Neoshadow only in End of the World's room 29, and its script names that room's points
+   (the formations' places, where the hidden one and a lone one go). (a) Keep: about where Sora started the battle (built);
+   (b) about the battle room's own middle (research: where Re:CoM keeps it); (c) drop the points: a lone one stays where it
+   is and the formation's places are taken around Sora (same spacing).
+2. **The grab from below (two Neoshadows).** KH1's hidden one grabs Sora (he plays a held motion from the Neoshadow's file)
+   while the other dives at him. (a) Build it natively, its own version (a new Re:CoM player reaction holding Sora with KH1's
+   clip; the other's dive on cue); (b) keep KH1's miss only (built).
+3. **The call (one left).** KH1 wakes sleeping Neoshadows the room holds; Re:CoM's battles have none. (a) Keep the 4-second call
+   with nothing coming (built, as a KH1 room without them); (b) skip the call; (c) bring in new Re:CoM Neoshadows (a spawn of
+   Re:CoM's own; research).
+4. **The dive's power** (no Re:CoM twin). (a) Re:CoM's come-up strike, id 1 (built); (b) its claw, id 0.
+5. **Fire on a diving or rising Neoshadow.** KH1's fireball meets its body row (type 5 meets 4) and is turned back; ours hits
+   it. (a) Leave it (built); (b) build KH1's turn-back for this row.
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -2299,7 +2474,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | White Mushroom | `xa_ex_2350` (ex_2350.bd) | `CEnemyWhitemushroom` 16 | `0x1405523f8` | `0x1401944b0` / `0x140189223` 0xce0 | 1,11,12,30 | — | FKaA | — |
 | Black Fungus | `xa_ex_2380` (ex_2380.bd) | `CEnemyBlackfungus` 17 | `0x1405369c8` | `0x14018bac0` / `0x14018924d` 0xce0 | 1,2,3 | 200 | FaLl | SES |
 | Creeper Plant | `xa_ex_2290` (ex_2290.bd) | `CEnemyCreapplant` 31 | `0x14053a348` | `0x14018ca40` / `0x140189499` 0xcd0 | 1,2,3,19 | 202,203,204,206,207 | FKaA | — |
-| Neoshadow | `xa_ex_2420` (ex_2420.bd) | `CEnemyNeoshadow` 27 | `0x140545128` | `0x140190150` / `0x1401893f1` 0xce0 | 0,1,2,3 | 202,205,207 | FKaA | — |
+| Neoshadow (built) | `xa_ex_2420` (ex_2420.bd) | `CEnemyNeoshadow` 27 | `0x140545128` | `0x140190150` / `0x1401893f1` 0xce0 | 0,1,2,3 | 202,205,207 | FKaA | — |
 | Spade Soldier | `xa_aw_1030` (aw_1030.bd) | `CEnemySpadesoldier` 103 | `0x14054fd90` | `0x140193a20` / `0x140189afc` 0xcd0 | 0,1,2,3,30 | 209 | FKaA | — |
 | Heart Soldier | `xa_aw_1060` (aw_1060.bd) | `CEnemyHeartsoldier` 104 | `0x1405417d0` | `0x14018ec70` / `0x140189b23` 0xcd0 | 0,1,2,30 | 206,207,208,210 | FKaA | — |
 
@@ -2312,8 +2487,7 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
 
 1. **Ground melee** (the Soldier's shape: walk / run, hit tracks, kicks and lunges; the framework as built):
    Large Body (built: § The Large Body), Powerwild, Bandit,
-   Pirate, Wight Knight, Neoshadow (also sinks and rises like the Shadow; Re:CoM overrides its state 0 →
-   probably `Appear::Shadow`-like), Spade / Heart Soldier (Re:CoM overrides their states 0 and 30: check their
+   Pirate, Wight Knight, Neoshadow (built: `Appear::Base`, KH1 has no appearance for it; its sinks reuse the Shadow's machinery), Spade / Heart Soldier (Re:CoM overrides their states 0 and 30: check their
    own appearance and defeat before choosing `Appear::Base`).
 2. **Flying / hovering** (no walk on the floor; glide mode 2 of `sys 40`, height holding; `sys 125` sets the
    turn rate): Air Soldier (own Re:CoM think), Air Pirate (own Re:CoM think), Search Ghost, Gargoyle (no walk /

@@ -845,6 +845,10 @@ pub const GUARDS: &[GuardSpec] = &[
     // `sys 213(row, 3)`: mode 3, on every frame until `sys 213(row, 0)` removes it (`0x9B8`, at the charge's
     // start): no request, no HIT slot ([`GuardSpec::requests`] empty; `kh1_core::enemy::guard::ALWAYS`).
     GuardSpec { enemy: "largebody", name: "front", row: 0x38C, also: &[], requests: &[] },
+    // The Neoshadow's `ex_2420.bd` makes `0x80` in KH1's mode 3 (`sys 213(row, 3)`: on every frame until
+    // `sys 213(row, 0)`, `kh1_core::enemy::guard::HELD`) at `0x16CE` / `0x1A32` / `0x2260` / `0x3108`: no request,
+    // no windows.
+    GuardSpec { enemy: "neoshadow", name: "shield", row: 0x80, also: &[], requests: &[] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).
@@ -1222,4 +1226,4 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC];

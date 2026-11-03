@@ -404,6 +404,8 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
     let m0: usize = rd(this + e::MOVER);
     let yaw = if m0 != 0 { crate::units::yaw_to_kh1(rd::<f32>(m0 + mv::YAW)) } else { 0.0 };
     let ai = ce::make(K, m, seed, yaw);
+    // Scripts that share a work block among a room's enemies share it among the battle's (M11, the Neoshadow).
+    ai.set_battle(battle);
     let idx = (|| {
         let Ok(mut v) = RT.lock() else { return None };
         if v.iter().any(|x| x.battle != battle) {
@@ -1822,7 +1824,13 @@ pub unsafe extern "win64" fn defeat_begin(en: usize) {
         guard_bodies(en, rt, None);
         rt.recom_flinch = false;
         rt.recom_state = false;
-        if !start_reaction(en, rt, hit) {
+        if let Some(r) = rt.ai.death_motion() {
+            // The script's own death motion (its handler zeroed KH1's reaction; M11, the Neoshadow's 72).
+            end_action(rt);
+            rt.queued = None;
+            play(en, rt, r, 0.0);
+            rt.reaction = Some(Phase::Motion);
+        } else if !start_reaction(en, rt, hit) {
             play(en, rt, ke::react::req::FLINCH, 0.0);
             rt.reaction = Some(Phase::Motion);
         }
@@ -2019,7 +2027,8 @@ unsafe fn guard_step(en: usize, rt: &mut Runtime, step: f32) {
     rt.guard = Some(g);
     let m = manifest(rt.class);
     let Some(row) = m.guards.get(g.row as usize) else { return };
-    let on = playing && row.live(g.request, crate::units::units_to_frames(clock(en)));
+    // KH1's mode 3 (`ke::guard::HELD`, the Neoshadow's body row): on every frame until `Cmd::Guard(None)`.
+    let on = held || (playing && row.live(g.request, crate::units::units_to_frames(clock(en))));
     guard_bodies(en, rt, if on { row.half_angle() } else { None });
 }
 

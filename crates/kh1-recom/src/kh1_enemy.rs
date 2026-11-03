@@ -99,7 +99,7 @@ const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin 
 
 /// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
 /// row in their own module (`crate::m11`); one line here per enemy.
-pub static CLASSES: [&Class; 11] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS, &crate::ground::largebody::CLASS];
+pub static CLASSES: [&Class; 12] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS, &crate::ground::largebody::CLASS, &crate::ground::neoshadow::CLASS];
 
 /// M10's Shadow (class 0).
 pub static SHADOW: Class = Class {
@@ -395,6 +395,7 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Scale(k) => format!("scale {k:.2}"),
         Cmd::Visible(v) => format!("visible {v}"),
         Cmd::MotionAt { request, blend, start } => format!("motion {request} b{blend} from {start}"),
+        Cmd::Guard(Some((g, r))) if *r == ke::guard::HELD => format!("guard row {g} held (KH1's mode 3)"),
         Cmd::Guard(Some((g, r))) => format!("guard row {g} with {r}"),
         Cmd::Guard(None) => "guard rows end".into(),
         Cmd::Throw(n) => format!("throws its object {n}"),
