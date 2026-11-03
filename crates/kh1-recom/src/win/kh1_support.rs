@@ -7,6 +7,10 @@
 //!
 //! - **MP Rage** ([`after_damage`]): after Re:CoM's damage check took HP, KH1's charge for the HP
 //!   lost (`0x14029BBD0`), through KH1's gauge add (`super::mp::gain_charge`, `0x1402A4AE0`).
+//! - **Berserk** ([`swing_started`], [`berserk_bonus`], [`berserk_recom`]): KH1's +4 Strength on
+//!   Strength-source records while Sora's HP is low, tested at the swing's start (KH1 builds the
+//!   attack object then); at Damage = KH1 in KH1's damage, at Damage = Re:CoM as the share it gives
+//!   on the hit's Re:CoM value (owner).
 //! - **Leaf Bracer** ([`leaf_bracer`]): while Sora's KH1 Cure casts, the damage check runs with
 //!   Re:CoM's own protection bit `player+0x418 & 1` (its exit zeroes the hit: no damage, no
 //!   reaction), as the summons' invincibility does; KH1 sets its flag 0x80 for the cast
@@ -78,5 +82,58 @@ pub unsafe fn leaf_bracer(pl: usize) -> bool {
 pub fn bracer_hit(value: i16) {
     if BRACER_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
         log(&format!("support: Leaf Bracer: a hit of {value} on Sora during his Cure: no damage, no reaction (KH1's flag 0x80)"));
+    }
+}
+
+/// The Berserk test of the swing that started last: `(KH1 row + 1) << 1 | on`. KH1 makes the swing's
+/// attack object (and adds Berserk's Strength, `0x1402B2DC0`) at its start, so a swing keeps the
+/// state it began with.
+static SWING: AtomicU32 = AtomicU32::new(0);
+static BERSERK_LINES: AtomicU32 = AtomicU32::new(30);
+
+/// Berserk is on now: Sora's HP in KH1's low-HP state (`crate::kh1_support::berserk::low_hp` on
+/// Re:CoM's HP and max HP) and Berserk equipped.
+unsafe fn berserk_now(pl: usize) -> bool {
+    ks::berserk::low_hp(rd(pl + HP), rd(pl + MAX_HP)) && mp::active() && super::abilities::equipped_live().is_some_and(ab::berserk)
+}
+
+/// A KH1 swing row starts (`win::attack::apply_row`): KH1's moment for Berserk's test.
+pub unsafe fn swing_started(pl: usize, kh1_row: usize) {
+    let on = berserk_now(pl);
+    SWING.store(((kh1_row as u32 + 1) << 1) | on as u32, Ordering::Relaxed);
+}
+
+/// The Strength Berserk adds to a hit of `kh1_row` (KH1's G`+0xFE` = 4, or 0): the state its swing
+/// started with, else (a row that didn't start through [`swing_started`], e.g. a special's dash)
+/// the state now.
+pub unsafe fn berserk_bonus(pl: usize, kh1_row: usize) -> i32 {
+    let s = SWING.load(Ordering::Relaxed);
+    let on = if s >> 1 == kh1_row as u32 + 1 { s & 1 != 0 } else { berserk_now(pl) };
+    if on {
+        ks::berserk::STRENGTH
+    } else {
+        0
+    }
+}
+
+/// Damage = Re:CoM (owner, 2026-11-03: "a % damage bonus (the share KH1's +4 Strength gives at that
+/// level)"): the hit part's Re:CoM value (`+0x92`, before Re:CoM's resistance, weak part and boss
+/// falloff) × KH1's damage with Berserk ÷ without, for this row on this enemy.
+pub unsafe fn berserk_recom(enemy: usize, part: usize, kh1_row: usize, hp_now: i32, max_mp: i32) {
+    let Some((with, without)) = super::stats::berserk_share(enemy, kh1_row, super::stats::sora_level(), hp_now, max_mp) else { return };
+    let v: i16 = rd(part + 0x92);
+    let n = ks::berserk::scale(v, with, without);
+    if n != v {
+        super::movement::wr(part + 0x92, n);
+    }
+    if BERSERK_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("support: Berserk (Damage = Re:CoM): row {kh1_row:#x} on {:#x}: KH1 {with} / {without} with / without +4 Strength: Re:CoM's {v} -> {n}", enemy & 0x00FF_FFFF));
+    }
+}
+
+/// The log line for a Berserk hit at Damage = KH1 (30 lines shared with [`berserk_recom`]).
+pub fn berserk_kh1_line(enemy: usize, kh1_row: usize, d: Option<i32>) {
+    if BERSERK_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("support: Berserk (Damage = KH1): row {kh1_row:#x} on {:#x}: KH1's damage with Strength + 4 = {d:?}", enemy & 0x00FF_FFFF));
     }
 }

@@ -122,6 +122,8 @@ pub mod ix {
     pub const MP_RAGE: [usize; 2] = [26, 27];
     /// Leaf Bracer (KH1 id 62): Sora's own Cure can't be interrupted (`0x14028F140`).
     pub const LEAF_BRACER: usize = 28;
+    /// Berserk (KH1 id 26): + 4 Strength while HP is low (`0x1402B2DC0`).
+    pub const BERSERK: usize = 29;
 }
 
 /// Re:CoM's sleight ids (its `initStockSkill` `0x140220DF0` switch; level-up list `0x14010EF10`;
@@ -157,7 +159,7 @@ const fn special(name: &'static str, s: u16) -> Ability {
 /// Assumption, strong).
 /// Combo Master (0x41) has no row in btltbl's table (row 65 is zero: cost 0, key 0; Checked
 /// (files)); KH1 FM gives it by no level list.
-pub const ALL: [Ability; 29] = [
+pub const ALL: [Ability; 30] = [
     a("Sliding Dash", 54, 0x100_0000, 1, 205, Source::Sleight(sleight::SLIDING_DASH)),
     a("Blitz", 20, 0x8, 2, 208, Source::Sleight(sleight::BLITZ)),
     a("Stun Impact", 57, 0x800_0000, 2, 211, Source::Sleight(sleight::STUN_IMPACT)),
@@ -205,6 +207,8 @@ pub const ALL: [Ability; 29] = [
     a("MP Rage", 24, 0, 3, 305, Source::Level(75)),
     // Leaf Bracer: id 62 (`+0x184` bit 6), Rod level 39, 5 AP, sort key 308. Checked (decomp + files).
     a("Leaf Bracer", 62, 0, 5, 308, Source::Level(39)),
+    // Berserk: id 26 (`+0x184` bit 5), Rod level 60, 1 AP, sort key 306. Checked (decomp + files).
+    a("Berserk", 26, 0, 1, 306, Source::Level(60)),
 ];
 
 /// The combo modifiers (stage 9a), by [`ix`].
@@ -568,6 +572,13 @@ pub fn leaf_bracer(equipped: u32) -> bool {
     equipped & (1 << ix::LEAF_BRACER) != 0
 }
 
+/// Berserk equipped (KH1 `+0x184` bit 5 = `0x140284BE0(26) & 1`): Strength-source attacks get G
+/// `+0xFE` = 4 more Strength while the gauge is in its low-HP state (`0x1402B2DC0`,
+/// `0x14026E180`). Checked (decomp + files).
+pub fn berserk(equipped: u32) -> bool {
+    equipped & (1 << ix::BERSERK) != 0
+}
+
 /// The names of the abilities in `bits`, for the log.
 pub fn names(bits: u32) -> Vec<&'static str> {
     ALL.iter().enumerate().filter(|(i, _)| bits & (1 << i) != 0).map(|(_, a)| a.name).collect()
@@ -770,6 +781,7 @@ pub mod page {
                 MP_HASTE => b"Gain more MP from each hit on an enemy.\0",
                 26..=27 => b"Gain MP when you take damage. Copies add up.\0",
                 LEAF_BRACER => b"Nothing can interrupt Sora while he casts Cure.\0",
+                BERSERK => b"Raises Strength while Sora's HP is low.\0",
                 _ => b"\0",
             }
         }
@@ -812,8 +824,8 @@ mod tests {
     fn layout_follows_the_items_extension() {
         assert_eq!(BLOCK_FIRST, 0x269F);
         assert_eq!(BLOCK_LAST, 0x26AD);
-        assert_eq!(ALL.len(), 29);
-        assert_eq!(ALL_BITS, 0x1FFF_FFFF);
+        assert_eq!(ALL.len(), 30);
+        assert_eq!(ALL_BITS, 0x3FFF_FFFF);
     }
 
     /// Owner (M12, 2026-11-03): KH1's start 3, +2 per AP Up pick, no cap, nothing else (the
@@ -1129,6 +1141,12 @@ mod tests {
         let thirteen = 1 << ix::MP_HASTE | 1 << ix::MP_RAGE[0] | 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::STUN_IMPACT;
         assert_eq!(used_ap(thirteen), 13);
         assert!(!can_equip(thirteen, ix::LEAF_BRACER, 39), "4 AP left: refused (KH1's rule)");
+        // Berserk: Rod level 60, 1 AP.
+        assert_eq!(x(ix::BERSERK), (26, 1, 306, Source::Level(60), 0, false));
+        assert!(berserk(1 << ix::BERSERK) && !berserk(1 << ix::LEAF_BRACER));
+        let mut t = State::default();
+        assert!(!names(sync(&mut t, 59, NO_RECOM, &mut |_| false).new).contains(&"Berserk"));
+        assert!(names(sync(&mut t, 60, NO_RECOM, &mut |_| false).new).contains(&"Berserk"));
     }
 
     #[test]

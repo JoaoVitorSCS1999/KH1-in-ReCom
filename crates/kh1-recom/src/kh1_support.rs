@@ -54,6 +54,71 @@ pub mod mp_rage {
     }
 }
 
+/// Berserk (KH1 ability 26, `+0x184` bit 5): KH1's attack object `0x1402B2DC0`, for a record whose
+/// stat source is 0 (Strength: swings, finishers, the combo modifiers), adds G`+0xFE` (**4**) to its
+/// stat term when the owner's HUD gauge is in its low-HP state (`0x140285030(party id)` → slot,
+/// `0x140268950(slot)` → `0x14026E180`). The damage `0x1402BFA80` then indexes KH1's damage curve
+/// with power + stat − Defence. Checked (decomp + files: G = btltbl + 0x58, `+0xFE` = 4).
+///
+/// At Damage = Re:CoM (owner, 2026-11-03: "a % damage bonus (the share KH1's +4 Strength gives at
+/// that level)"): Re:CoM's damage for the hit × KH1's damage of that hit with the +4 ÷ KH1's damage
+/// without it ([`share`]): KH1's formula at Sora's KH1 Strength (his level and Keyblade) against the
+/// enemy's KH1 record (twin / proxy, else [`crate::attack::plain_record`]).
+pub mod berserk {
+    use crate::attack::{kh1_attack_on, EnemyStats, Sora};
+    use kh1_core::data::{Moveset, WeaponData};
+
+    /// G`+0xFE`: the Strength Berserk adds. Checked (files).
+    pub const STRENGTH: i32 = 4;
+    /// `0x14026E180`'s rule: above this max HP the share, else the count.
+    pub const MAX_HP_SPLIT: i32 = 0x2C;
+    pub const LOW_SHARE: f32 = 0.2;
+    pub const LOW_COUNT: i32 = 9;
+
+    /// KH1's low-HP state of a party member's gauge (`0x14026E180`, slot kinds 0..2: Sora is party
+    /// slot 0, `save + 0x48E` = 0xFFFFFF00 at a new game, `0x1402852C0`): HP above 0, and with max
+    /// HP above 44 HP ÷ max HP below 0.2 (`f32`), else HP below 9. Checked (decomp). On Re:CoM's HP
+    /// (Sora's HP at Combat = KH1): Re:CoM's max HP is above 44, so the 20 % rule, which is KH1's
+    /// own at Berserk's Rod level 60 (KH1 max HP 66).
+    pub fn low_hp(hp: i32, max: i32) -> bool {
+        if hp <= 0 {
+            return false;
+        }
+        if MAX_HP_SPLIT < max {
+            (hp as f32 / max as f32) < LOW_SHARE
+        } else {
+            hp < LOW_COUNT
+        }
+    }
+
+    /// KH1's damage of this hit with and without Berserk's Strength (no critical: the share of the
+    /// Strength alone), or None when Berserk changes nothing (a record with another stat source,
+    /// or no row).
+    pub fn share(m: &Moveset, kh1_row: usize, sora: Sora, weapon: &WeaponData, record: &EnemyStats, hp_now: i32) -> Option<(i32, i32)> {
+        let rw = m.row(kh1_row)?;
+        if m.attack(rw.attack)?.stat_source != 0 {
+            return None;
+        }
+        let curve = kh1_core::DamageCurve::kh1_defaults();
+        let mut rng = kh1_core::Kh1Rand::new(1);
+        let mut d = |bonus: i32| -> Option<i32> {
+            let (mut live, def) = kh1_attack_on(m, kh1_row, sora, bonus, weapon, record, hp_now)?;
+            live.crit_chance = 0.0;
+            Some(kh1_core::damage::compute_damage(&live, &curve, &def, &mut rng).damage)
+        };
+        let (with, without) = (d(STRENGTH)?, d(0)?);
+        (without > 0).then_some((with, without))
+    }
+
+    /// Re:CoM's hit value × with ÷ without (truncated), within Re:CoM's i16 hit value.
+    pub fn scale(value: i16, with: i32, without: i32) -> i16 {
+        if without <= 0 {
+            return value;
+        }
+        (value as i64 * with as i64 / without as i64).clamp(0, i16::MAX as i64) as i16
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,5 +160,59 @@ mod tests {
         assert_eq!(kh1_hp_lost(100, 400, 75), 21, "84 × 0.25 = 21");
         // A Re:CoM max HP equal to KH1's: KH1's own numbers.
         assert_eq!(units(51, 40, 51, 42, 2), 22);
+    }
+
+    /// KH1's `0x14026E180` for Sora's gauge.
+    #[test]
+    fn berserk_low_hp() {
+        use berserk::low_hp;
+        // Max HP above 44: below 20 %.
+        assert!(low_hp(19, 100) && !low_hp(20, 100));
+        assert!(low_hp(79, 400) && !low_hp(80, 400));
+        assert!(low_hp(1, 560));
+        assert!(!low_hp(0, 100), "HP 0: not");
+        // Max HP 44 or less: below 9 (KH1's low levels).
+        assert!(low_hp(8, 44) && !low_hp(9, 44));
+        assert!(low_hp(8, 18), "8 of 18 is low in KH1");
+        // KH1 at Berserk's Rod level 60: max HP 66, the 20 % rule (13 is low, 14 is not).
+        assert_eq!(mp_rage::kh1_max_hp(60), 66);
+        assert!(low_hp(13, 66) && !low_hp(14, 66));
+    }
+
+    /// The share of Berserk's +4 Strength: KH1's curve at power + Strength − Defence, + 4.
+    #[test]
+    fn berserk_share_is_kh1s_curve() {
+        use crate::attack::{plain_record, Sora};
+        use kh1_core::data::{row, Moveset, WeaponData};
+        let m = Moveset::kh1_defaults();
+        let w = WeaponData::kingdom_key();
+        let curve = kh1_core::DamageCurve::kh1_defaults().0;
+        let data = m.attack(m.row(row::SWING_1).unwrap().attack).unwrap().clone();
+        assert_eq!(data.stat_source, 0, "a swing reads Strength");
+        let mut rec = plain_record(500);
+        rec.defence = 20;
+        let sora = Sora { strength: 26, max_mp: 3 };
+        let (with, without) = berserk::share(&m, row::SWING_1, sora, &w, &rec, 500).unwrap();
+        let at = |s: i32| curve[(data.power + s - 20).clamp(0, curve.len() as i32 - 1) as usize] as i32;
+        if data.min == 0 && data.max == 0 {
+            assert_eq!((with, without), (at(26 + 4), at(26)));
+        }
+        assert!(with > without, "+4 Strength raises KH1's damage below the curve's cap");
+        // Re:CoM's value scaled by the share.
+        assert_eq!(berserk::scale(100, with, without) as i32, 100 * with / without);
+        assert_eq!(berserk::scale(30000, 3, 1), i16::MAX, "within Re:CoM's i16 hit value");
+        assert_eq!(berserk::scale(50, 1, 0), 50);
+        // At the curve's cap (300 from index 29) +4 adds nothing.
+        let rec0 = plain_record(500);
+        let (w2, wo2) = berserk::share(&m, row::SWING_1, Sora { strength: 60, max_mp: 3 }, &w, &rec0, 500).unwrap();
+        assert_eq!(w2, wo2);
+        // Zantetsuken's record has no stat term (source 2): Berserk changes nothing (KH1's case 2).
+        assert_eq!(berserk::share(&m, row::ZANTETSUKEN, sora, &w, &rec, 500), None);
+        // KH1's G+0xFE in the player's btltbl.
+        if let Ok(dir) = std::env::var("KH1_TEST_DATA") {
+            if let Ok(b) = std::fs::read(std::path::Path::new(&dir).join("btltbl.bin")) {
+                assert_eq!(b[0x58 + 0xFE] as i32, berserk::STRENGTH);
+            }
+        }
     }
 }

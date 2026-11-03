@@ -596,9 +596,24 @@ pub struct Sora {
 /// element (8: Gravity Break, Zantetsuken) reads with the record's `resist[8]` as its scale
 /// (stats `+0x98`, as the Gravity spell, `win::stats::kh1_spell_hit`).
 pub fn kh1_damage_at(m: &Moveset, kh1_row: usize, sora: Sora, weapon: &WeaponData, twin: &EnemyStats, hp_now: i32, rng: &mut kh1_core::Kh1Rand) -> Option<kh1_core::DamageResult> {
+    kh1_damage_with(m, kh1_row, sora, 0, weapon, twin, hp_now, rng)
+}
+
+/// [`kh1_damage_at`] with a Strength bonus on Strength-source records (M12 step 3, Berserk: KH1's
+/// attack object `0x1402B2DC0` case 0 adds G`+0xFE` = 4 to the stat term; kh1-core's
+/// `AttackerStats::strength_bonus`). `bonus` 0 = none.
+#[allow(clippy::too_many_arguments)]
+pub fn kh1_damage_with(m: &Moveset, kh1_row: usize, sora: Sora, bonus: i32, weapon: &WeaponData, twin: &EnemyStats, hp_now: i32, rng: &mut kh1_core::Kh1Rand) -> Option<kh1_core::DamageResult> {
+    let (live, stats) = kh1_attack_on(m, kh1_row, sora, bonus, weapon, twin, hp_now)?;
+    Some(kh1_core::damage::compute_damage(&live, &kh1_core::DamageCurve::kh1_defaults(), &stats, rng))
+}
+
+/// The attack object (`0x1402B2DC0` + `0x1402B3270`) and the defender's block that
+/// [`kh1_damage_with`] hands to KH1's damage (`0x1402BFA80`).
+pub fn kh1_attack_on(m: &Moveset, kh1_row: usize, sora: Sora, bonus: i32, weapon: &WeaponData, twin: &EnemyStats, hp_now: i32) -> Option<(LiveAttack, kh1_core::DefenderStats)> {
     let rw = m.row(kh1_row)?;
     let data = m.attack(rw.attack)?;
-    let attacker = AttackerStats { strength: sora.strength, max_mp: sora.max_mp, ..Default::default() };
+    let attacker = AttackerStats { strength: sora.strength, max_mp: sora.max_mp, strength_bonus: (bonus != 0).then_some(bonus), ..Default::default() };
     let live = LiveAttack::new(data, weapon, &attacker, 1.0);
     let mut resist = [1.0f32; 16];
     for (r, v) in resist.iter_mut().zip(twin.resist.iter()) {
@@ -615,7 +630,7 @@ pub fn kh1_damage_at(m: &Moveset, kh1_row: usize, sora: Sora, weapon: &WeaponDat
         hp_percent_scale: resist[8],
         ..Default::default()
     };
-    Some(kh1_core::damage::compute_damage(&live, &kh1_core::DamageCurve::kh1_defaults(), &stats, rng))
+    Some((live, stats))
 }
 
 /// Damage = Re:CoM (owner, 2026-11-01): Gravity Break and Zantetsuken take **KH1's percentage of
@@ -624,11 +639,24 @@ pub fn kh1_damage_at(m: &Moveset, kh1_row: usize, sora: Sora, weapon: &WeaponDat
 /// KH1's boss rule), or, with no record, 100 % and no floor (1), as the Gravity spell's fallback.
 /// None for any other row.
 pub fn kh1_percent_of_hp(m: &Moveset, kh1_row: usize, sora: Sora, weapon: &WeaponData, record: Option<&EnemyStats>, hp_now: i32, rng: &mut kh1_core::Kh1Rand) -> Option<i32> {
+    kh1_percent_of_hp_with(m, kh1_row, sora, 0, weapon, record, hp_now, rng)
+}
+
+/// [`kh1_percent_of_hp`] with a Strength bonus (Berserk, [`kh1_damage_with`]): Gravity Break's stat
+/// term is Strength, so + 4 % of the HP.
+#[allow(clippy::too_many_arguments)]
+pub fn kh1_percent_of_hp_with(m: &Moveset, kh1_row: usize, sora: Sora, bonus: i32, weapon: &WeaponData, record: Option<&EnemyStats>, hp_now: i32, rng: &mut kh1_core::Kh1Rand) -> Option<i32> {
     if !crate::damage::percent_of_hp_row(kh1_row, m) {
         return None;
     }
-    let plain = EnemyStats { hp: hp_now, strength: 0, defence: 0, min_damage: 0, max_damage: 0, level: 1, exp: 0, resist: [100; 16] };
-    kh1_damage_at(m, kh1_row, sora, weapon, record.unwrap_or(&plain), hp_now, rng).map(|d| d.damage)
+    let plain = plain_record(hp_now);
+    kh1_damage_with(m, kh1_row, sora, bonus, weapon, record.unwrap_or(&plain), hp_now, rng).map(|d| d.damage)
+}
+
+/// A KH1 record for an enemy without one (no twin, no proxy): no Defence, no floor or cap, 100 %
+/// everywhere (the Gravity spell's fallback).
+pub fn plain_record(hp: i32) -> EnemyStats {
+    EnemyStats { hp, strength: 0, defence: 0, min_damage: 0, max_damage: 0, level: 1, exp: 0, resist: [100; 16] }
 }
 
 /// One Keyblade Sora can equip at the KH1 setting (decision 25), keyed by Re:CoM's Keyblade card

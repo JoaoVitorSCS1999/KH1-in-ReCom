@@ -995,6 +995,7 @@ point (a TODO for the notices merge).
 | MP Haste | 23 | bit 0 | 21 | 3 | 304 | 25 |
 | MP Rage ×2 | 24 | bits 1..3 (count) | 42, 75 | 3 each | 305 | 26, 27 |
 | Leaf Bracer | 62 | bit 6 | 39 | 5 | 308 | 28 |
+| Berserk | 26 | bit 5 | 60 | 1 | 306 | 29 |
 
 ### MP Haste
 
@@ -1069,3 +1070,37 @@ point (a TODO for the notices merge).
 - **Test:** Re:CoM level 39: Leaf Bracer (5 AP) on the page; equip it, cast Cure next to an
   attacking enemy: the hit lands on Sora with no HP lost and no flinch, the heal comes; the log's
   `support: Leaf Bracer` line. Without it, the hit interrupts the cast as before.
+
+### Berserk
+
+- **KH1** (Checked (decomp + files)): the attack object `0x1402B2DC0`, case 0 (stat source 0,
+  Strength: the swings, finishers, combo modifiers, Gravity Break's stat term), adds G`+0xFE` = **4**
+  to the stat term when `+0x184` bit 5 is set and `0x140268950(0x140285030(party id))` is true: the
+  gauge's low-HP test `0x14026E180` (Sora's slot 0: HP > 0 and, with max HP > 44, HP ÷ max HP < 0.2
+  in `f32`, else HP < 9). It is tested **when the attack object is made** (each swing's start). Other
+  stat sources (Magic: the spells; 2: Zantetsuken) get nothing. The damage `0x1402BFA80` then reads
+  KH1's damage curve at power + stat − Defence; the curve doubles every 4 steps in its middle (6, 12,
+  24, 48…; ×4 at its foot, 1 → 4; nothing at its cap 300), so **+4 Strength is about ×2 damage**.
+- **Low HP on Re:CoM's HP**: KH1's rule as it is on `player+0x42C` / `+0x430`. Re:CoM's max HP is
+  above 44, so the 20 % rule, which is KH1's own at the Rod level 60 (KH1 max HP 66 there).
+- **Damage = KH1**: `win::stats::kh1_hit_with(…, 4)` → `attack::kh1_damage_with` (kh1-core's
+  `AttackerStats::strength_bonus`, Strength-source records only). Gravity Break's % at Damage =
+  Re:CoM: `recom_percent_hit_with(…, 4)` (+4 % of the HP, KH1's).
+- **Damage = Re:CoM** (owner, "M12 answers": "a % damage bonus (the share KH1's +4 Strength gives at
+  that level)"): the hit part's Re:CoM value (`+0x92`, the card AP; Re:CoM's resistance, weak part
+  and boss falloff still follow) × KH1's damage of that hit with the +4 ÷ without
+  (`kh1_support::berserk::share`: KH1's formula at Sora's KH1 Strength for his level and Keyblade,
+  no critical, against the enemy's KH1 record: twin / proxy / boss twin, else no Defence). E.g.
+  Strength 26 on Defence 20: KH1 12 / 6 → ×2.0; Strength 26 on Defence 0: 300 / 190 → ×1.58 (the cap).
+- **When**: our swing start (`win::attack::apply_row`, Re:CoM's row pick for a KH1 swing) records the
+  test with its row, as KH1 at its attack object; a hit of another row (a special's dash) tests at
+  the hit. No hook, nothing per frame (a test per swing start, a share per hit while it is on).
+- Log: `support: Berserk (Damage = Re:CoM): row 0xd on 0x…: KH1 12 / 6 with / without +4 Strength:
+  Re:CoM's 40 -> 80`, or `support: Berserk (Damage = KH1): row 0xd on 0x…: KH1's damage with
+  Strength + 4 = Some(12)` (30 lines).
+- Checked (tests): `kh1_support::tests::berserk_low_hp`, `berserk_share_is_kh1s_curve` (G`+0xFE` = 4
+  in the player's btltbl), `abilities::tests::rod_support_abilities`. Not checked: in game; KH1's
+  damage curve as kh1-core has it (`DamageCurve::kh1_defaults`, Checked there).
+- **Test:** Re:CoM level 60: Berserk (1 AP); equip it, bring Sora under 20 % of his max HP, swing at an
+  enemy: the log's `support: Berserk` line, about twice the damage of the same swing above 20 %.
+  Spells and Zantetsuken: unchanged.

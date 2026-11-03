@@ -446,7 +446,9 @@ pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32, hp:
 /// KH1's damage for Sora's swing row on this enemy's twin, or None (Re:CoM's number stands).
 /// `hp_now`: the enemy's current HP (KH1's for twins and proxies, `+0x274`), which the % of HP
 /// rows read (Gravity Break, Zantetsuken); `max_mp`: Sora's KH1 max MP (Ripple Drive's Magic × 3).
-pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32) -> Option<i32> {
+/// `bonus`: Strength added to Strength-source records (M12 step 3, Berserk's 4, else 0;
+/// `crate::attack::kh1_damage_with`).
+pub fn kh1_hit_with(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32, bonus: i32) -> Option<i32> {
     // Damage = Re:CoM: Re:CoM's AP stands (`super::damage`).
     if !super::damage::kh1() {
         return None;
@@ -461,15 +463,16 @@ pub fn kh1_hit(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_m
     let strength = STATS.get()?.strength_with(sora_level, &w)?;
     let mut g = RNG.lock().ok()?;
     let rng = g.get_or_insert_with(|| kh1_core::Kh1Rand::new(1));
-    let d = crate::attack::kh1_damage_at(super::attack::moveset(), kh1_row, crate::attack::Sora { strength, max_mp }, &w, &t, hp_now, rng)?;
+    let d = crate::attack::kh1_damage_with(super::attack::moveset(), kh1_row, crate::attack::Sora { strength, max_mp }, bonus, &w, &t, hp_now, rng)?;
     Some(d.damage)
 }
 
 /// Damage = Re:CoM (owner, 2026-11-01): Gravity Break's and Zantetsuken's KH1 percentage of the
 /// enemy's Re:CoM current HP `hp_now` (`crate::attack::kh1_percent_of_hp`: the twin's / proxy's
 /// `resist[8]` and floor, else 100 %), with Sora's KH1 Strength (Gravity Break's stat term). None for
-/// other rows, at Damage = KH1 (`kh1_hit` does it there), and in Riku's story.
-pub fn recom_percent_hit(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32) -> Option<i32> {
+/// other rows, at Damage = KH1 (`kh1_hit_with` does it there), and in Riku's story.
+/// `bonus`: Strength added (M12 step 3, Berserk: Gravity Break's stat term; else 0).
+pub fn recom_percent_hit_with(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32, bonus: i32) -> Option<i32> {
     if super::damage::kh1() || riku_story() {
         return None;
     }
@@ -482,7 +485,21 @@ pub fn recom_percent_hit(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: 
     let strength = STATS.get()?.strength_with(sora_level, &w)?;
     let mut g = RNG.lock().ok()?;
     let rng = g.get_or_insert_with(|| kh1_core::Kh1Rand::new(1));
-    crate::attack::kh1_percent_of_hp(m, kh1_row, crate::attack::Sora { strength, max_mp }, &w, record.as_ref(), hp_now, rng)
+    crate::attack::kh1_percent_of_hp_with(m, kh1_row, crate::attack::Sora { strength, max_mp }, bonus, &w, record.as_ref(), hp_now, rng)
+}
+
+/// M12 step 3, Berserk at Damage = Re:CoM: KH1's damage of this swing row on this enemy with and
+/// without Berserk's Strength (`crate::kh1_support::berserk::share`): Sora's KH1 Strength at his
+/// level with the equipped Keyblade, the enemy's KH1 record (twin / proxy / boss twin, else
+/// `crate::attack::plain_record`) at its current HP. None: Berserk changes nothing for this row.
+pub fn berserk_share(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32) -> Option<(i32, i32)> {
+    if riku_story() {
+        return None;
+    }
+    let record = kh1_record(enemy).unwrap_or_else(|| crate::attack::plain_record(hp_now));
+    let w = equipped_weapon();
+    let strength = STATS.get()?.strength_with(sora_level, &w)?;
+    crate::kh1_support::berserk::share(super::attack::moveset(), kh1_row, crate::attack::Sora { strength, max_mp }, &w, &record, hp_now)
 }
 
 /// The KH1 record (twin, else proxy / boss twin) of an enemy at the KH1 setting in Sora's story,
