@@ -11,6 +11,25 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 143: The KH1 Pirate; KH1's no-reaction hits on Re:CoM's own super armour, version 0.78.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
+- Pirate (KH1 `xa_ex_2100` ↔ Re:CoM `CEnemyPirate`, id 21): KH1's AI, attacks, reactions and motions; Re:CoM's stats. Every
+  number from the player's `ex_2100.bd` (Checked (files)). Wander and taunt; engage within 10 m at its height; close /
+  mid / far rounds (side hop + long slash 214, jump slash 210, hops, run in + leap 218 → 213 or stuck blade 205–207, laugh
+  212, spin 222 → 217 for 180 f, dizzy 219 after a hit); hit state: get-up slash 235 / 236 after its launch, block
+  stance 208 or counter 216 within 3 m. Spin and stance guard from the front (shared enemy guard, rows 0x1CC / 0x46C).
+- Re:CoM (Checked (exe + decomp)): vtable `0x140546458`, ctor `0x140190F30` (6 bytes, only caller `0x14018930E`), alloc
+  `0x1401892F5` 0xCD0 → 0xCF0; spin / jump slash / get-ups in state 2 (id 0), slash / counter / slam in state 3 (id 1).
+  Power: jump slash and get-ups take the spin's, counter and slam the slash's (Assumption: by kind; owner question).
+- Framework: KH1's `sys 42` (`0x1402BBD80` → `0x1402B7E60`: push slide, no reaction) on Re:CoM's own super armour
+  (`+0x260` bits 20 / 21, for one call of the hit handler `0x14017F7E0` through the existing wrapper); Stop / stun /
+  freeze / Gravity / defeat stay Re:CoM's. No new hook; nothing per frame.
+- Asset step: ENEMY/0021 (ANN / ASD / SES), `kh1-pirate.json`.
+- Checked: tests, Windows build, sites pefile-checked. Not checked: in game; no KH1 Pirate trace.
+
+---
+
 ## Stage 142: Search Ghost: KH1's drain rule on Re:CoM's HP / EXP / prizes; its burst's repel rows (the guard step's repel), version 0.77.0 (2026-11-01)
 
 - Asks (owner, 2026-11-02): "KH1's rule on Re:CoM HP"; burst repel "Yes".
