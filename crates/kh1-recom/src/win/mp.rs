@@ -372,11 +372,14 @@ pub unsafe extern "win64" fn checkpoint_call(a: i32) {
     }
 }
 
-/// Wrapper on the level-up screen `0x14010EF10`: the HP choice (max HP raised during the call).
+/// Wrapper on the level-up screen `0x14010EF10`: the HP choice (max HP raised during the call);
+/// M12: AP Up in place of CP Up and the learned notices (`super::level_up`, `super::notices`).
 pub unsafe extern "win64" fn level_up(this: usize) {
     let o: ThisFn = mv::orig(&ORIG_LEVEL_UP);
     let before = hp();
+    let m12 = super::level_up::before(this);
     o(this);
+    super::level_up::after(this, m12);
     if let (Some((_, m0)), Some((h, m1))) = (before, hp()) {
         if m1 > m0 && h >= m1 && active() {
             restore_full("Re:CoM's level-up HP choice (0x14010EF10)");

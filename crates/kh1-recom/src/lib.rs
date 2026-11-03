@@ -88,6 +88,7 @@ pub mod json;
 pub mod keyblade_models;
 pub mod keyblades;
 pub mod kh1_hud;
+pub mod level_up;
 pub mod magic;
 pub mod menu_sounds;
 pub mod menu;

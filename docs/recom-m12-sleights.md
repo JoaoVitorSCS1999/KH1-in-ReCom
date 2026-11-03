@@ -323,3 +323,41 @@ The summons' path (`win::summons`): `player+0x82C` = id, call Sora's vtable `+0x
 - Not checked: the Re:CoM message texts (`0xA807xx`, not in the session); other worlds' scripts and
   treasure-box data (sources tagged wiki); the stock's card loss; each special sleight's branch
   (Warp …); anything in game.
+
+## 8. Built (M12, owner's go-ahead 2026-11-03)
+
+### 8.1 AP Up replaces CP Up at Combat = KH1 (step 1)
+
+Owner: "On level up, instead of having the choice to level up CP, when the combat is set to KH1, it
+should be AP up, and it should give you 2 AP each level. this should be the only way to obtain AP,
+aside from the AP you start the game with"; answers: no cap, old saves' CP Ups count as AP Ups.
+
+| what | where | tag |
+|---|---|---|
+| **AP** = KH1's start 3 + 2 × AP Up picks, nothing else, no cap (`abilities::max_ap`, `State::max_ap`). KH1's level grants (`AP_UP_LEVELS`, the 24 kind-3 levels) are gone. | `crates/kh1-recom/src/abilities.rs` | Checked (decomp + files): KH1's start 3 (`0x1402852C0`, btltbl `0x39D8` byte 2) |
+| **The count**: `save + 0x26A8` (u8, our ability block's first reserved byte; layout v5). Nothing read or wrote it before (it was the block's zero reserve; the block sits in Re:CoM's spare tail `0x246B..0x2817`, which no Re:CoM code touches, `recom-keyblade-equip.md`). | `abilities::field::AP_UPS` | Checked (code) |
+| **Offer** (state 0 / 1 → 2, the init block): Re:CoM offers CP while CP < 1625 (`cmp [stats+0xC],0x659` at `0x14010F210`); at KH1 row 1 (`+0x23C`) is always offered; the cursor goes on it when HP isn't offered (Re:CoM's first-offered-row rule). | `win::level_up`, in the existing level-up wrapper (`0x14010EF10`) | Checked (decomp + exe) |
+| **Words**: row 1's label `+0xD8` "AP Up", value `+0xE0` "Max AP +2"; the status panel's row 1 label `+0x180` "Max AP" (Re:CoM's "Max CP" there) and value `+0x188`: the max AP as Re:CoM prints CP (`"%4d"`; highlighted, `"%4d \xF9Y\x81\xA8\xF9R%4d"` now → +2, the exe's format `0x140512C70`), re-set after Re:CoM re-prints it (states 3, 4, 6); the result line `+0x1E0` "Max AP increased by 2." Through Re:CoM's text copy `0x140258DE0` (its items keep a borrowed pointer until then: ctor `0x140258BC0`). | `crate::level_up` | Checked (decomp + exe) for the items; **Assumption**: our words fit Re:CoM's (its `0xA807xx` messages aren't in the session), and row 1's icon (levelup.lad items `0x3C` / `0x3E`) isn't CP-specific art |
+| **Pick** (6 → 7, cursor on row 1): Re:CoM adds 25 CP (`0x14010F6AB`); we put CP back as it was, then +1 AP Up (`win::abilities::add_ap_up`, which syncs first so an older block is migrated from the CP before the pick). | `win::level_up`, `win::stats::set_sora_cp` | Checked (decomp + exe) |
+| **Old saves** (block < v5): AP Ups = (CP − 275) ÷ 25, at most level − 1, read once at the block's migration, logged (`abilities: block vN -> v5 …: Re:CoM's CP C: K past CP Up pick(s) counted as AP Up(s)`). **275** = Sora's new-game CP: the new game `0x1401AD2A0` → `0x14023A040(1, 0, 0)` → CardInit record `index[0]` via `0x14023A250` (`SY0001.BIN` entry `CardInit.BIN`: level 1, HP 80, CP 275). Sora's CP has no other writer than the pick and the unreferenced debug givers `0x1400D1A00` (exe scan of every `[*0x14087CBF8 + 0xC]` access), so the base CP is 275 at every level. | `abilities::ap_ups_from_cp` | Checked (files + decomp + exe) |
+| **Over the AP after the migration**: unequipped from the most expensive down (ties: the later in `ALL`), the existing `fit_ap`. KH1 has no rule for this (its AP never drops). | `abilities::migrate` | Checked (decomp: KH1 only adds AP) |
+| **Re:CoM setting / Riku**: the screen is Re:CoM's (no change outside Combat = KH1 in Sora's story). | `super::mp::active()` | Checked (code) |
+
+**Who else reads CP** (exe scan, Checked (exe + decomp)): the camp's deck screen (`0x1400E13C0`),
+the deck check `0x140159620` (deck cost ≤ CP, from the camp `0x1400D9C80`), the camp status page
+(`0x1400E6DF0`), the level-up panel (`0x140110C60`). No event script command, Moogle shop or
+battle code reads it. At KH1 there is no deck in battle (decision 29), so a frozen CP changes nothing
+there; **switching back to Re:CoM combat leaves Sora with the CP he had before his KH1 AP Ups** (his
+deck limit lower than a Re:CoM-only save at that level).
+
+Owner test lines (step 1):
+- Combat = KH1, Sora's story, level up: the middle choice reads "AP Up" / "Max AP +2", the panel's
+  second row "Max AP" with the AP; pick it: "Max AP increased by 2."; the camp's Abilities page shows
+  2 more AP; the camp's status still shows the old CP. Screenshot the screen (our words beside
+  Re:CoM's, the row's icon).
+- A save with CP ≥ 1625: AP Up is still offered.
+- An older save: the log line `abilities: block v4 -> v5 … past CP Up pick(s) counted as AP Up(s)`;
+  its AP = 3 + 2 × those picks.
+- Combat = Re:CoM (and Riku's story): the CP choice as before (+25 CP).
+
+Not checked (8.1): anything in game; Re:CoM's message texts; the row icon.
