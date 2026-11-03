@@ -19,7 +19,8 @@
 //! - **The start**: Re:CoM's own sleight start for the id (the summons' path, Sora's vtable `+0x130`
 //!   = `0x1402247A0`); Re:CoM runs its motion, effects, hits, damage, protection and end.
 //! - **Damage = KH1** ([`kh1_scaled`], owner, "Sleights menu follow-ups"): each hit Re:CoM's × the
-//!   enemy's KH1 max HP / its Re:CoM max HP (twins only; `win::summons::scale_sleight_hit`).
+//!   enemy's KH1-scale max HP (a twin's, a proxy's or a boss twin's) / its Re:CoM max HP; the same
+//!   rule for the summons (`win::summons::scale_sleight_hit`).
 
 use crate::abilities::{self as ab, SleightMp};
 

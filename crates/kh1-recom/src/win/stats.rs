@@ -37,8 +37,8 @@ static KH1_HP: Mutex<Vec<(usize, i32)>> = Mutex::new(Vec::new());
 static RNG: Mutex<Option<kh1_core::Kh1Rand>> = Mutex::new(None);
 static LOGGED: Mutex<Vec<(&'static str, i32)>> = Mutex::new(Vec::new());
 /// Enemies without an ordinary twin that took KH1 numbers at their stats init (proxies and boss
-/// twins), with the record their hits use.
-static PROXIED: Mutex<Vec<(usize, EnemyStats)>> = Mutex::new(Vec::new());
+/// twins), with the record their hits use and what it is ("proxy", "proxy boss", "boss twin").
+static PROXIED: Mutex<Vec<(usize, EnemyStats, &'static str)>> = Mutex::new(Vec::new());
 /// (class, world, floor) already logged for proxies and the twins' Re:CoM HP check.
 static LOGGED_PROXY: Mutex<Vec<(String, i32, i16)>> = Mutex::new(Vec::new());
 
@@ -261,7 +261,7 @@ pub unsafe extern "win64" fn stat_init(enemy: usize, kind: i32, variant: i32, x:
     };
     g.retain(|(e, _)| *e != enemy);
     if let Ok(mut p) = PROXIED.lock() {
-        p.retain(|(e, _)| *e != enemy);
+        p.retain(|(e, _, _)| *e != enemy);
     }
     if r & 0xFF != 0 && super::movement::kh1_on() {
         let hp = match twin(enemy) {
@@ -351,8 +351,9 @@ unsafe fn proxy(enemy: usize, id: i32) -> Option<i32> {
         ));
     }
     let hp = p.stats.hp;
+    let what = if p.own { "boss twin" } else if p.boss { "proxy boss" } else { "proxy" };
     if let Ok(mut g) = PROXIED.lock() {
-        g.push((enemy, p.stats));
+        g.push((enemy, p.stats, what));
         if g.len() > 256 {
             g.remove(0);
         }
@@ -362,23 +363,48 @@ unsafe fn proxy(enemy: usize, id: i32) -> Option<i32> {
 
 /// The record a proxied enemy's hits use.
 fn proxied(enemy: usize) -> Option<EnemyStats> {
-    PROXIED.lock().ok()?.iter().find(|(e, _)| *e == enemy).map(|(_, s)| s.clone())
+    PROXIED.lock().ok()?.iter().find(|(e, _, _)| *e == enemy).map(|(_, s, _)| s.clone())
+}
+
+/// Where an enemy's KH1-scale HP came from ([`kh1_scale_hps`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HpFrom {
+    /// Its ordinary KH1 twin (`kh1-stats.json`).
+    Twin,
+    /// A proxy / proxy boss / boss twin (`Kh1Stats::proxy`; the label says which).
+    Proxy(&'static str),
+}
+
+impl HpFrom {
+    pub fn label(self) -> &'static str {
+        match self {
+            HpFrom::Twin => "KH1 twin",
+            HpFrom::Proxy(what) => what,
+        }
+    }
 }
 
 /// M12 follow-ups (owner, "Sleights menu follow-ups": at Damage = KH1 "sleight damage scaled by the
-/// enemy's KH1 max HP / its Re:CoM max HP"): (its KH1 max HP, its Re:CoM max HP) for an enemy with
-/// an ordinary KH1 twin (`kh1-stats.json`) whose KH1 HP the stats init set (Damage = KH1). The Re:CoM
-/// one is Re:CoM's own getter `0x14017F5A0` (its `@ENP` row HP × the difficulty %), the original
-/// under our wrapper. None: no twin (proxies and boss twins included), Damage = Re:CoM, Riku's story.
-pub fn twin_max_hps(enemy: usize) -> Option<(i32, i32)> {
-    twin(enemy)?;
+/// enemy's KH1 max HP / its Re:CoM max HP"; then "KH1 damage scaling": "sleights also scale on
+/// enemies without a KH1 twin (bosses, Re:CoM-only enemies) by their KH1-scale HP / Re:CoM HP"):
+/// (its KH1-scale max HP, its Re:CoM max HP, where the first came from) for an enemy whose HP the
+/// stats init set at Damage = KH1: an ordinary twin's KH1 HP, or the HP the mod already cuts a
+/// Re:CoM-only enemy or boss to (a proxy's: its Re:CoM row HP × the world's ratio; a boss twin's:
+/// its own KH1 record). The Re:CoM one is Re:CoM's own getter `0x14017F5A0` (its `@ENP` row HP × the
+/// difficulty %), the original under our wrapper. None: the init set no KH1 HP (Damage = Re:CoM,
+/// Riku's story, an enemy with no twin or proxy record, not an enemy-category object).
+pub fn kh1_scale_hps(enemy: usize) -> Option<(i32, i32, HpFrom)> {
     let kh1 = KH1_HP.lock().ok()?.iter().find(|(e, _)| *e == enemy).map(|(_, hp)| *hp)?;
+    let from = match twin(enemy) {
+        Some(_) => HpFrom::Twin,
+        None => HpFrom::Proxy(PROXIED.lock().ok()?.iter().find(|(e, _, _)| *e == enemy).map_or("proxy", |(_, _, w)| *w)),
+    };
     if ORIG_MAX_HP.load(std::sync::atomic::Ordering::Acquire) == 0 {
         return None;
     }
     // SAFETY: Re:CoM's own getter (its hook installed), on a live enemy.
     let recom = unsafe { orig::<MaxHpFn>(&ORIG_MAX_HP)(enemy) };
-    Some((kh1, recom))
+    Some((kh1, recom, from))
 }
 
 /// An enemy's class for a log line (its RTTI name).

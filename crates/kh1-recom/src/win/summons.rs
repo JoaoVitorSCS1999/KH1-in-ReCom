@@ -60,10 +60,13 @@ static SLEIGHT_OUT: AtomicUsize = AtomicUsize::new(0);
 static SLEIGHT_ID: AtomicU32 = AtomicU32::new(0);
 /// M12 step 5: the bottom row's choice with no save to keep it in (0 Summon, 1 Sleights).
 static BOTTOM_SESSION: AtomicU8 = AtomicU8::new(0);
-/// M12 follow-ups, Damage = KH1: the Sleights-list sleight whose hits are scaled ([`scale_sleight_hit`];
-/// its Re:CoM id + 1, 0 none): from its start until a summon starts or the battle ends, so its shots
-/// still flying after Sora's action ended count too.
+/// M12 follow-ups, Damage = KH1: the Sleights-list sleight or (owner, "KH1 damage scaling") the
+/// summon whose hits are scaled ([`scale_sleight_hit`]; its Re:CoM sleight id + 1, 0 none): from its
+/// start until the next one starts or the battle ends, so its shots still flying after Sora's
+/// action ended count too.
 static SLEIGHT_HITS: AtomicU32 = AtomicU32::new(0);
+/// The summon actors' vtables matched (`crate::sites::SUMMON_ACTOR_PTRS`): their hits can be told.
+static ACTORS_OK: AtomicBool = AtomicBool::new(false);
 static SCALE_LOG_LEFT: AtomicU32 = AtomicU32::new(48);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
 
@@ -124,6 +127,12 @@ pub unsafe fn install(b: usize) -> bool {
             log(&format!("summons: {} does not point at {:#x}; no KH1 summons", p.name, 0x1_4000_0000u64 + p.target as u64));
             return false;
         }
+    }
+    // M12 follow-ups (Damage = KH1): the summon actors' vtables, for the summons' hit scaling only.
+    let bad = crate::sites::SUMMON_ACTOR_PTRS.iter().find(|p| rd::<usize>(b + p.rva as usize) != b + p.target as usize);
+    match bad {
+        Some(p) => log(&format!("summons: {} does not point at {:#x}; summons keep Re:CoM's damage at Damage = KH1", p.name, 0x1_4000_0000u64 + p.target as u64)),
+        None => ACTORS_OK.store(true, Ordering::Release),
     }
     INSTALLED.store(true, Ordering::Release);
     true
@@ -255,9 +264,9 @@ pub unsafe fn start(pl: usize, i: usize) -> bool {
         return false;
     }
     let Some(before) = begin(pl, s.sleight, s.name) else { return false };
-    // A summon's hits keep Re:CoM's damage (no scaling): the last Sleights-list sleight's shots stop
-    // counting as its.
-    SLEIGHT_HITS.store(0, Ordering::Relaxed);
+    // Owner (2026-11-03, "KH1 damage scaling": "summons get the same rule"): at Damage = KH1 its hits
+    // (the summon actor's, its shots, Sora's own while it plays) scale as a sleight's.
+    SLEIGHT_HITS.store(s.sleight as u32 + 1, Ordering::Relaxed);
     // KH1 pays at once, in whole points (`0x140289210` → `0x1402A4A00(actor, −cost)`).
     super::mp::pay(cost * 100, s.name);
     OUT_SUMMON.store(i as u8, Ordering::Relaxed);
@@ -416,23 +425,37 @@ const BODY_OWNER: usize = 0x98;
 
 /// Whose a waiting hit is, for [`scale_sleight_hit`].
 enum Owner {
-    /// Sora (or his weapon) while the Sleights-list sleight runs.
+    /// Sora (or his weapon) while the Sleights-list sleight or our summon runs.
     Sora,
-    /// A Re:CoM shot (`CBullet` / `CHomingBullet`) Sora fired (its shooter `+0x238`).
+    /// A Re:CoM shot (`CBullet` / `CHomingBullet`) Sora or his summon fired (its shooter `+0x238`).
     Shot,
+    /// Sora's summon actor (`crate::summons::ACTOR_VTABLES`, its player `+0x248` = Sora): a summon's
+    /// own hits, and the summon-type sleights' (Idyll Romp: Bambi, Cross-slash+: Cloud).
+    Summon,
     /// Anything else (an enemy's, a summon's, an effect's): Re:CoM's value stands. The object's
     /// vtable RVA for the log (0: the id doesn't resolve).
     Other(usize),
 }
 
+/// Whether `obj` is one of Re:CoM's summon actors summoned for `pl` (its vtable one of
+/// `crate::summons::ACTOR_VTABLES`, checked at install; its player `+0x248`).
+unsafe fn is_our_summon(pl: usize, obj: usize) -> bool {
+    if obj == 0 || !ACTORS_OK.load(Ordering::Acquire) {
+        return false;
+    }
+    let vt = rd::<usize>(obj).wrapping_sub(base());
+    sm::ACTOR_VTABLES.iter().any(|&(_, v, _)| v as usize == vt) && rd::<usize>(obj + sm::ACTOR_PLAYER) == pl
+}
+
 unsafe fn owner_of(pl: usize, owner: u32) -> Owner {
     let b = base();
     let me: u32 = rd(pl + ACTOR_ID);
-    let running = SLEIGHT_OUT.load(Ordering::Relaxed) == pl && rd::<u32>(pl + p::ACTION) == STOCK_ACTION;
+    let running = (SLEIGHT_OUT.load(Ordering::Relaxed) == pl || OUT.load(Ordering::Relaxed) == pl) && rd::<u32>(pl + p::ACTION) == STOCK_ACTION;
     if owner == me && running {
         return Owner::Sora;
     }
-    let obj = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(owner);
+    let handle = super::movement::HANDLE_OBJ;
+    let obj = func::<super::movement::HandleFn>(handle)(owner);
     if obj == 0 {
         return Owner::Other(0);
     }
@@ -440,9 +463,17 @@ unsafe fn owner_of(pl: usize, owner: u32) -> Owner {
     if (obj == pl || (weapon != 0 && obj == weapon)) && running {
         return Owner::Sora;
     }
+    if is_our_summon(pl, obj) {
+        return Owner::Summon;
+    }
     let vt: usize = rd(obj);
-    if (vt == va(b, crate::guard::bullet::VTABLE) || vt == va(b, crate::guard::bullet::HOMING_VTABLE)) && rd::<u32>(obj + crate::guard::bullet::SHOOTER) == me {
-        return Owner::Shot;
+    if vt == va(b, crate::guard::bullet::VTABLE) || vt == va(b, crate::guard::bullet::HOMING_VTABLE) {
+        let shooter: u32 = rd(obj + crate::guard::bullet::SHOOTER);
+        // Sora's own shot, or his summon's (Re:CoM writes the summon's id: type 0x1000). A summon
+        // already gone when its shot lands doesn't resolve: Re:CoM's damage (logged as other).
+        if shooter == me || (shooter != 0 && is_our_summon(pl, func::<super::movement::HandleFn>(handle)(shooter))) {
+            return Owner::Shot;
+        }
     }
     Owner::Other(vt.wrapping_sub(b))
 }
@@ -456,13 +487,15 @@ fn scale_note(line: impl FnOnce() -> String) {
 /// M12 follow-ups (owner, 2026-11-03, "Sleights menu follow-ups": "at Damage = KH1 sleight damage
 /// scaled by the enemy's KH1 max HP / its Re:CoM max HP"): in the enemy-hit wrapper, just before
 /// Re:CoM's handler `0x14017F7E0` takes a hit that is neither a KH1 swing's nor a KH1 spell's: when it
-/// is the current Sleights-list sleight's ([`SLEIGHT_HITS`]: Sora's own collision while it runs, or a
-/// Re:CoM shot Sora fired), Re:CoM's value on the hurt body its gather takes (`+0x92`) becomes Re:CoM's
-/// × (the enemy's KH1 max HP / its Re:CoM max HP) (`crate::sleights::kh1_scaled`; damage kinds only).
-/// Re:CoM's handler then applies its resistance, weak part, frozen bonus and boss falloff to it as to
-/// any hit. An enemy without an ordinary KH1 twin (`win::stats::twin_max_hps`: proxies and boss twins
-/// too) keeps Re:CoM's value (logged). Damage = Re:CoM: nothing. One atomic load while no Sleights-list
-/// sleight has been used this battle.
+/// is the current Sleights-list sleight's or (owner, "KH1 damage scaling": "summons get the same
+/// rule") summon's ([`SLEIGHT_HITS`]: Sora's own collision while it runs, Sora's summon actor, or a
+/// Re:CoM shot Sora or his summon fired), Re:CoM's value on the hurt body its gather takes (`+0x92`)
+/// becomes Re:CoM's × (the enemy's KH1-scale max HP / its Re:CoM max HP) (`crate::sleights::kh1_scaled`;
+/// damage kinds only). Re:CoM's handler then applies its resistance, weak part, frozen bonus and boss
+/// falloff to it as to any hit. The KH1-scale HP (`win::stats::kh1_scale_hps`): a twin's KH1 HP, or
+/// (owner, "KH1 damage scaling") the proxy's / boss twin's HP the mod already cuts a Re:CoM-only enemy
+/// or boss to. An enemy whose HP the init didn't set keeps Re:CoM's value (logged). Damage = Re:CoM:
+/// nothing. One atomic load while no Sleights-list sleight or summon has been used this battle.
 pub unsafe fn scale_sleight_hit(enemy: usize) {
     let cur = SLEIGHT_HITS.load(Ordering::Relaxed);
     if cur == 0 || !super::damage::kh1() {
@@ -474,13 +507,14 @@ pub unsafe fn scale_sleight_hit(enemy: usize) {
         return;
     }
     let id = (cur - 1) as u16;
-    let name = crate::sleights::name(id);
+    let name = sm::hit_name(id);
     let owner: u32 = rd(body + BODY_OWNER);
     match owner_of(pl, owner) {
-        Owner::Sora | Owner::Shot => {}
+        Owner::Sora | Owner::Shot | Owner::Summon => {}
         Owner::Other(vt) => {
-            // Only worth a line while the sleight itself plays (an enemy's hits are the common case).
-            if SLEIGHT_OUT.load(Ordering::Relaxed) == pl && vt != 0 && vt != rd::<usize>(enemy).wrapping_sub(base()) {
+            // Only worth a line while the sleight or summon itself plays (an enemy's hits are the
+            // common case).
+            if (SLEIGHT_OUT.load(Ordering::Relaxed) == pl || OUT.load(Ordering::Relaxed) == pl) && vt != 0 && vt != rd::<usize>(enemy).wrapping_sub(base()) {
                 scale_note(|| format!("sleight {name}: a hit on {} by an object we don't count as Sora's (vtable {:#x}, owner {owner:#x}): Re:CoM's damage", super::stats::class_label(enemy), 0x1_4000_0000u64 + vt as u64));
             }
             return;
@@ -488,11 +522,11 @@ pub unsafe fn scale_sleight_hit(enemy: usize) {
     }
     let kind: u32 = rd(body + BODY_KIND);
     let value: i16 = rd(body + BODY_VALUE);
-    let Some((kh1, recom)) = super::stats::twin_max_hps(enemy) else {
-        scale_note(|| format!("sleight {name}: {} has no KH1 twin: Re:CoM's hit {value} (kind {kind:#x}) stands", super::stats::class_label(enemy)));
+    let Some((kh1, recom, from)) = super::stats::kh1_scale_hps(enemy) else {
+        scale_note(|| format!("sleight {name}: {} has no KH1-scale HP (no twin, proxy or boss twin set it): Re:CoM's hit {value} (kind {kind:#x}) stands", super::stats::class_label(enemy)));
         return;
     };
     let Some(v) = crate::sleights::kh1_scaled(value, kind, kh1, recom) else { return };
     wr(body + BODY_VALUE, v);
-    scale_note(|| format!("sleight {name} on {}: Re:CoM's hit {value} (kind {kind:#x}) -> {v} (KH1 max HP {kh1} / Re:CoM max HP {recom})", super::stats::class_label(enemy)));
+    scale_note(|| format!("sleight {name} on {}: Re:CoM's hit {value} (kind {kind:#x}) -> {v} (KH1-scale max HP {kh1} ({}) / Re:CoM max HP {recom})", super::stats::class_label(enemy), from.label()));
 }

@@ -82,6 +82,37 @@ pub fn mp_cost(i: usize) -> i32 {
     ALL.get(i).map_or(i32::MAX, |s| mp_from_cp(s.cp))
 }
 
+/// The summon actors (`Summon::CSummon*`, made by `0x14020EE80`), in [`ALL`]'s order: (class, its
+/// vtable RVA, the vtable's slot `+0` RVA). Every one's slot `+0x28` (the actor type getter) is
+/// `0x1401A4A30`, which returns 0x1000, so Re:CoM's bullet manager `0x140158DD0` writes the summon's
+/// own id `+0x20` as a shot's shooter `+0x238`; its melee hits come from its own attack holder
+/// `+0x100` (the actor base's `0x14014D420(holder, actor)`, as an enemy's). `+0x248` is the player
+/// it was summoned for (its set-up `0x1402271D0`, from `0x1402261D0`, copies it from `*0x14087B6B8 +
+/// 0x60`; the summon's own code reads Sora's `+0x418` / `+0x3D8` / `+0x854` through it). Checked
+/// (exe: RTTI `.?AVCSummon…@Summon@@`, the complete object locators and vtables; decomp).
+pub const ACTOR_VTABLES: [(&str, u32, u32); COUNT] = [
+    ("CSummonDumbo", 0x005A_EF98, 0x0022_ABD0),
+    ("CSummonBambi", 0x005A_CED8, 0x0022_7EC0),
+    ("CSummonGenie", 0x005A_FFD8, 0x0022_B460),
+    ("CSummonTink", 0x005B_2F68, 0x0022_DAB0),
+    ("CSummonMushu", 0x005B_0FC0, 0x0022_C540),
+    ("CSummonSinba", 0x005B_1FA8, 0x0022_D130),
+    ("CSummonCloud", 0x005A_DF70, 0x0022_8F00),
+];
+/// The actor type getter in every summon vtable's slot `+0x28` (returns 0x1000).
+pub const ACTOR_TYPE_GETTER: u32 = 0x001A_4A30;
+/// The summon's player (`+0x248`).
+pub const ACTOR_PLAYER: usize = 0x248;
+
+/// The name of a sleight whose hits are scaled at Damage = KH1 (`win::summons::scale_sleight_hit`):
+/// a sleight ability's, or a summon's LV3 sleight's.
+pub fn hit_name(id: u16) -> &'static str {
+    if crate::abilities::of_sleight(id).is_some() {
+        return crate::sleights::name(id);
+    }
+    ALL.iter().find(|s| s.sleight == id).map_or("?", |s| s.sleight_name)
+}
+
 /// Summon `i`'s command (`0x2F + i`).
 pub const fn command(i: usize) -> u8 {
     FIRST_COMMAND + i as u8
@@ -208,6 +239,21 @@ pub fn sync(old: [u8; BLOCK_LEN], mut owned: impl FnMut(u16) -> bool) -> ([u8; B
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// M12 follow-ups ("KH1 damage scaling"): the summons' hits are scaled as a sleight's and logged
+    /// by their sleight's name; the summon actors are the table's classes.
+    #[test]
+    fn scaled_hits_are_named_and_the_actors_are_the_summons_classes() {
+        assert_eq!(hit_name(0x42), "Omnislash");
+        assert_eq!(hit_name(0x35), "Proud Roar LV3");
+        assert_eq!(hit_name(crate::abilities::sleight::FIRE_RAID), "Fire Raid");
+        assert_eq!(hit_name(crate::abilities::sleight::IDYLL_ROMP), "Idyll Romp");
+        assert_eq!(hit_name(0x200), "?");
+        for (s, (class, vt, _)) in ALL.iter().zip(ACTOR_VTABLES) {
+            assert_eq!(s.class, class);
+            assert!((0x005A_C000..0x005B_4000).contains(&vt), "{class}");
+        }
+    }
 
     #[test]
     fn table_is_the_research() {
