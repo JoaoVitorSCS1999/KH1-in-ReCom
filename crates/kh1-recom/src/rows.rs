@@ -103,6 +103,10 @@ pub struct Extension {
     pub rows: [Option<u32>; KH1_ONLY.len()],
     pub recom: [Option<u32>; KH1_ONLY.len()],
     pub xl: [Option<u32>; XL_ENTRIES.len()],
+    /// M11 (the Neoshadow's grab): the row of KH1's held clip (request 200 of the Neoshadow's `.mset` player
+    /// set, the manifest's `held` section), appended after the xl rows; Sora's held reaction plays it
+    /// (`crate::held`).
+    pub held: Option<u32>,
 }
 
 /// KH1's specials' motions the asset step converts (`xl_limit.dat` entries; stage 9c.1: Sonic
@@ -132,6 +136,13 @@ impl Extension {
                 next += 1;
             }
         }
+        self
+    }
+
+    /// The held clip's row (M11, the Neoshadow's grab), appended after the KH1-only and xl rows when the
+    /// pack holds it.
+    pub fn with_held(mut self, have: bool) -> Extension {
+        self.held = have.then(|| RECOM_ROWS + self.count() as u32 + self.xl.iter().flatten().count() as u32);
         self
     }
 
@@ -284,6 +295,12 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         _ => return None,
     };
     Some((r, false))
+}
+
+/// The held clip's appended row (M11, the Neoshadow's grab): `(row id, clip name)`, after
+/// [`appended_rows`]' rows.
+pub fn held_row(ext: &Extension, name: Option<String>) -> Option<(u32, String)> {
+    Some((ext.held?, name?))
 }
 
 /// The table rows to append after Re:CoM's 0x47: `(row id, clip name)`, from the manifest's KH1
@@ -465,5 +482,21 @@ mod tests {
         assert_eq!(names[names.len() - 3..], [(first, "p001_230".to_string()), (first + 1, "p001_231".to_string()), (first + 2, "p001_232".to_string())]);
         // Without the KH1-only rows the xl rows start right after Re:CoM's.
         assert_eq!(Extension::default().with_xl(|x| x == xl::DASH).xl, [None, Some(RECOM_ROWS), None]);
+    }
+
+    /// M11 (the Neoshadow's grab): the held clip's row follows the KH1-only and xl rows; no clip, no row; no KH1
+    /// request plays it (only the held reaction does).
+    #[test]
+    fn the_held_row_follows_the_others() {
+        let e = Extension::plan(|e| e != 110).with_xl(|_| true).with_held(true);
+        let last_xl = e.xl[2].unwrap();
+        assert_eq!(e.held, Some(last_xl + 1));
+        assert_eq!(held_row(&e, Some("p001_233".into())), Some((last_xl + 1, "p001_233".to_string())));
+        assert_eq!(held_row(&e, None), None);
+        assert_eq!(Extension::default().with_held(true).held, Some(RECOM_ROWS));
+        assert_eq!(Extension::plan(|_| true).with_held(false).held, None);
+        let s = Stance::default();
+        assert!((0..=0x200u16).all(|r| row_for(r, &s, &e).map(|x| x.0) != e.held), "no KH1 request plays the held row");
+        assert!(!e.has_row(e.held.unwrap() as i32), "Re:CoM's own idle rule after it");
     }
 }

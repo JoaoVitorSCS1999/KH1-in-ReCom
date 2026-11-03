@@ -185,6 +185,20 @@ impl Numbers for Table {
     }
 }
 
+/// Sora's side of KH1's grab from below (M11, the Neoshadow, `ex_2420.bd` `0x1AF6`), from the host.
+///
+/// - `grabbable`: KH1's grab test passes for him now (`0x3FAA`: `sys 141` = `0x140291920`, he can be hit:
+///   flags `& 0x8048 == 0x8000` and none of `0x1000080`, so not in his post-hit / no-flinch frames; `sys 218`
+///   = `0x1402BB4B0`, his movement state not an air or swim one; Checked (decomp)), and the host has the
+///   held reaction to put him in (the KH1 setting, the held clip in the pack).
+/// - `held`: he is in the held reaction (the host's: Re:CoM's "held" status playing KH1's held clip); KH1
+///   reads it as his motion still being request 200 of the Neoshadow's player set (`sys 51`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Hold {
+    pub grabbable: bool,
+    pub held: bool,
+}
+
 /// What the host tells a behaviour that looks from one of its bones each frame (M11, the Search Ghost's
 /// child object `ex_2230_00.bd`, the cone that finds its target): KH1 units, y down.
 ///
@@ -271,6 +285,14 @@ pub trait Behaviour {
     /// (`+0x120 & 5`; Assumption: KH1's other player states (glide, swim) count as not on the ground).
     /// M11 (the Air Pirate).
     fn set_target_grounded(&self, _on_ground: bool) {}
+    /// Whether the behaviour reads [`Hold`] (KH1's grab, M11: the Neoshadow): the host reads Sora's state
+    /// for it each frame only then.
+    fn wants_hold(&self) -> bool {
+        false
+    }
+    /// Sora's side of KH1's grab ([`Hold`]), each frame before [`Behaviour::frame`] when
+    /// [`Behaviour::wants_hold`] (M11, the Neoshadow's grab from below).
+    fn set_target_hold(&self, _h: Hold) {}
     /// Whether the hit the last [`Behaviour::on_hit`] reported keeps its reaction: KH1's script hit
     /// handler may zero the hit record's reaction kind (`hp[0xC] &= ~0x1F`, then no reaction and the
     /// action goes on; the Darkball's `0x1E20` after its sixth light hit in a row, M11). The fallback for

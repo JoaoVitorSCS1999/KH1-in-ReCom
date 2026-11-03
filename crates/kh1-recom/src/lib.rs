@@ -80,6 +80,7 @@ pub mod fliers;
 pub mod ground;
 pub mod gimmick;
 pub mod guard;
+pub mod held;
 pub mod hookplan;
 pub mod items;
 pub mod items_page;

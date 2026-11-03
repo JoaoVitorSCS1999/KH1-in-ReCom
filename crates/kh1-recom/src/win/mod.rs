@@ -12,6 +12,7 @@ mod deck;
 mod drops;
 mod gimmick;
 mod guard;
+mod held;
 mod hook;
 mod items;
 mod keyblades;
@@ -154,7 +155,7 @@ fn kh1_clips(dirs: &[PathBuf]) -> (crate::rows::Extension, Vec<(u32, String)>) {
         }
     };
     // Stage 9c.1: KH1's specials' motions (`xl_limit.dat`), keyed by xl entry.
-    let xl = match text.and_then(|t| motions::parse_xl(&t)) {
+    let xl = match text.clone().and_then(|t| motions::parse_xl(&t)) {
         Ok(x) => x,
         Err(e) => {
             log(&format!("specials: {}: {e}; no special clips", manifest.display()));
@@ -180,12 +181,33 @@ fn kh1_clips(dirs: &[PathBuf]) -> (crate::rows::Extension, Vec<(u32, String)>) {
     // Entries Re:CoM already has (M9 9a: the modifiers it baked) play its own action row of the
     // clip; the row's name is read from Sora's action table in the running exe.
     let table = recom_row_names();
+    // M11 (the Neoshadow's grab): KH1's held clip, for Sora's held reaction (`held`).
+    let held = match text.and_then(|t| motions::parse_held(&t)) {
+        Ok(h) => h.filter(|h| match motions::held_in_pack(h, &ann) {
+            Ok(_) => true,
+            Err(e) => {
+                log(&format!("held: {e}; no held reaction"));
+                false
+            }
+        }),
+        Err(e) => {
+            log(&format!("held: {}: {e}; no held reaction", manifest.display()));
+            None
+        }
+    };
     let ext = rows::Extension::plan(|e| motions::clip_for_entry(&m, &ann, e).is_ok())
         .with_recom(|e| motions::recom_clip_for_entry(&m, e).and_then(|c| motions::row_of_clip(&table, &c.name)))
-        .with_xl(|e| motions::clip_for_entry(&xl, &ann, e as u32).is_ok());
-    let names = rows::appended_rows(&ext, |e| motions::clip_for_entry(&m, &ann, e).ok().map(|c| c.name.clone()), |e| motions::clip_for_entry(&xl, &ann, e as u32).ok().map(|c| c.name.clone()));
+        .with_xl(|e| motions::clip_for_entry(&xl, &ann, e as u32).is_ok())
+        .with_held(held.is_some());
+    let mut names = rows::appended_rows(&ext, |e| motions::clip_for_entry(&m, &ann, e).ok().map(|c| c.name.clone()), |e| motions::clip_for_entry(&xl, &ann, e as u32).ok().map(|c| c.name.clone()));
+    if let Some(r) = rows::held_row(&ext, held.as_ref().map(|h| h.clip.name.clone())) {
+        names.push(r);
+    }
+    if let Some(h) = &held {
+        let _ = held::PACK_BLEND.set(h.blend);
+    }
     let recom: Vec<(u16, u32)> = rows::KH1_ONLY.iter().zip(ext.recom.iter()).filter_map(|(&(req, _), r)| Some((req, (*r)?))).collect();
-    log(&format!("movement: manifest {}; KH1-only clips {:?}; Re:CoM's rows for KH1 requests {:x?}; xl_limit clips (specials) {:?}", manifest.display(), names, recom, ext.xl));
+    log(&format!("movement: manifest {}; KH1-only clips {:?}; Re:CoM's rows for KH1 requests {:x?}; xl_limit clips (specials) {:?}; held clip {:?}", manifest.display(), names, recom, ext.xl, ext.held));
     (ext, names)
 }
 
@@ -359,6 +381,9 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         install_gimmick(base);
         install_unlocks(base);
         install_summons(base);
+        // M11 (the Neoshadow's grab): Sora's held reaction, in the damage-check wrapper above.
+        // SAFETY: reads of the mapped exe; the data patch's old bytes are checked inside.
+        unsafe { held::install(base) };
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
     }

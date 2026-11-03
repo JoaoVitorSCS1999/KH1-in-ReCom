@@ -28,7 +28,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use kh1_recom_assets::ann::Ann;
-use kh1_recom_assets::build::{build, BuildOptions, Inputs, RECOM_SORA_SLOTS};
+use kh1_recom_assets::build::{build_with_held, BuildOptions, HeldInput, Inputs, RECOM_SORA_SLOTS};
 use kh1_recom_assets::install;
 use kh1_recom_assets::keyblade::{convert, convert_kh2, group_for_card, kh2_template_distance, Converted, KeybladeModel, KH2_TEMPLATE_MATCH};
 use kh1_recom_assets::kh2_keyblades;
@@ -112,6 +112,15 @@ fn run() -> Result<(), String> {
         Some(f) => Some(kh1_recom_assets::build::xl_motion_set(f).map_err(|e| e.to_string())?.to_vec()),
         None => None,
     };
+    // M11 (the Neoshadow's grab): KH1's held clip from the Neoshadow's files; without them the Neoshadow misses its
+    // grab (KH1's other branch).
+    let held_in = match install::kh1(&game, keys.clone()).map_err(|e| e.to_string()).and_then(|i| Ok(HeldInput { mset: i.read("xa_ex_2420.mset").map_err(|e| e.to_string())?, mdls: i.read("xa_ex_2420.mdls").map_err(|e| e.to_string())? })) {
+        Ok(h) => Some(h),
+        Err(e) => {
+            println!("note: xa_ex_2420.mset / .mdls: {e}; KH1's held clip is not built (the Neoshadow misses its grab)");
+            None
+        }
+    };
     // The Keyblade (CPlayerWeapon, resource group 2): converted when both files are there.
     let weapon = match (arc.find(install::KEYBLADE_ANN), arc.find(install::KEYBLADE_MDL)) {
         (Some(_), Some(_)) => Some((
@@ -134,6 +143,10 @@ fn run() -> Result<(), String> {
     if let Some(f) = &xl_file {
         sources.push(("xl_limit.dat sha256", kh1_formats::egs::sha256_hex(f)));
     }
+    if let Some(h) = &held_in {
+        sources.push(("xa_ex_2420.mset sha256", kh1_formats::egs::sha256_hex(&h.mset)));
+        sources.push(("xa_ex_2420.mdls sha256", kh1_formats::egs::sha256_hex(&h.mdls)));
+    }
     if let Some((a, m)) = &weapon {
         sources.push(("PL0002.ANN sha256", kh1_formats::egs::sha256_hex(a)));
         sources.push(("PL0002.MDL sha256", kh1_formats::egs::sha256_hex(m)));
@@ -141,7 +154,7 @@ fn run() -> Result<(), String> {
     let t1 = Instant::now();
     // M9 9a: the KH1 sound cues of the combo modifiers' motions (their SES entries, below).
     let kh1_set = kh1_formats::mset::MotionSet::parse(&mset).map_err(|e| format!("xa_ex_0010.mset: {e}"))?;
-    let built = build(&Inputs { mset, mdls, ann, mdl, weapon, xl }, &opt).map_err(|e| e.to_string())?;
+    let built = build_with_held(&Inputs { mset, mdls, ann, mdl, weapon, xl }, held_in.as_ref(), &opt).map_err(|e| e.to_string())?;
     let t_conv = t1.elapsed();
     let n_recom = built.recom_entries();
     let n_new = built.new_slots();
@@ -159,6 +172,9 @@ fn run() -> Result<(), String> {
     );
     if !built.xl.is_empty() {
         println!("Sonic Blade (xl_limit.dat): wind-up, dash, finisher on new slots {:?}", built.xl.iter().map(|e| (e.slot, e.name.as_str(), e.frames)).collect::<Vec<_>>());
+    }
+    if let Some((e, blend)) = &built.held {
+        println!("held (M11, the Neoshadow's grab): KH1's held clip (xa_ex_2420.mset player set, request {}) on new slot {} {}, {} frames, blend {blend}", e.kh1_request.unwrap_or(0), e.slot, e.name, e.frames);
     }
     for e in built.entries.iter().filter(|e| !e.ambiguous.is_empty()) {
         println!("note: KH1 entry {} also matches Re:CoM slots {:?} (chose {})", e.kh1_entry, e.ambiguous, e.slot);

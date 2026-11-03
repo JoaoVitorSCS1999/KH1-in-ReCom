@@ -2454,7 +2454,8 @@ kill one. The trace's enemy rows give the rounds' timings, the ring's reach and 
 
 ### The Neoshadow (built)
 
-Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Neoshadow yet. Its attacks run on
+Status: built (the grab from below too, owner 2026-11-02), tests and Windows build pass; **not seen in game**; no KH1 trace
+of the Neoshadow yet. Its attacks run on
 Re:CoM's states 2 / 3; its body row bounces Sora's swings while it leaps, dives and rises slashing (the shared
 enemy-guard step, a row held in KH1's mode 3); the hits it takes no reaction for keep Re:CoM's state (§ Hits that take no
 reaction).
@@ -2486,7 +2487,7 @@ takes one); most choices go by that count. The port: one `Group` per Re:CoM batt
 | gathered dive | `0x3036` | the leap; one more up (`+4`); the dive starts when all are up or there are at most four (`+0xC`); 30 f; one diver at a time (the token `+8`) |
 | dive | `0x3326` | aim: Sora (80 above him when he is on the floor or within 80 of it), 1.4 × as far, 800 when under 500 (`0x3664`); 205 (blend 8), 8 f, row `0xF0` (mode 2); for len × 9 frames flying at the aim at 80 a frame (re-aimed farther than 600 from Sora; level under 80 above the floor), stopping within 250 of the aim or (from 30 f) when it moved under 40; then the easing 0.4 for good (stats `+0x14`), the body row off, 206 with 6 queued for len − 4, movement state 0 (`sys 88`), on the floor; higher than room 29's height 5380 it runs home 60 f (`0x372C`) |
 | formation | `0x1FB0` / `0x2430` | sink, hidden, 20 f; each sunk one counts (`+0x10`); all sunk (or two or fewer): go (`+0x14`); 6 f; a free place of a 9-place layout of room 29 (by Sora's x: < 8250, > 9200, else the middle one; each frame a draw in [1, 10) takes the first free place at or after it); 20 f; the rising slash out of it, all together |
-| two left | `0xBA2` → `0x1AF6` | while Sora is off the floor (≤ 180 f, unless alone or 13 m away), wait; 20 f under Sora, facing his way; then **KH1 grabs him** when he stands on the floor and can be hit: he plays motion 200 from the Neoshadow's own `.mset` (`sys 113`, `0x1402BA8C0`; request `0x10000C8`) while it plays 208 and another Neoshadow dives at him (`+0x4C` → state 4); else it misses: at his feet, shown, 209, hidden again |
+| two left | `0xBA2` → `0x1AF6` | while Sora is off the floor (≤ 180 f, unless alone or 13 m away), wait; 20 f under Sora, facing his way; then **KH1 grabs him** when he stands on the floor and can be hit: he plays motion 200 from the Neoshadow's own `.mset` (`sys 113`, `0x1402BA8C0`; request `0x10000C8`) while it plays 208 and another Neoshadow dives at him (`+0x4C` → state 4); else it misses: at his feet, shown, 209, hidden again. **Built** (§ The grab from below): Sora's held reaction through the grab's record |
 | alone | `0x8FA` | the hidden one: the block cleared, to room 29's spot `(9000, 5300, 100)`, 30 f, shown, come up, the call; then while alone: underground (straight) to `(8900, 5300, 100)` (other worlds: `(−100, 0, −1200)`, never in KH1), the call `0x11FA` (210, 240 + 6 f; in its last 80 KH1 wakes the room's sleeping objects 600..606, `sys 37` with `0xB0000 | id` → `0x140290D60` → `0x140287850`), 5 rounds |
 | a called one | `0xFC8` | (made while one calls) shown, facing Sora, 211, 212 four times its length, counted, action 213 with idle queued, idle |
 | hit state | `0x3DE` | after a counter mark (`wp+0x3C` 100: a knock-back / launch, or the 4th flinch in a row): with other than three or four and no gathering, two or fewer 50 % the rising slash, else sink away 600–1000; else (no gathering) five or more the claw, three or four turn to Sora, two or fewer the rising slash; then engaged |
@@ -2497,6 +2498,7 @@ its HIT slot is on, **mode 3 every frame** until `sys 213(row, 0)`; Checked (dec
 
 | Attack | Request | Rows (bone code, t, radius; HIT slot) | Hit windows | Recoil | KH1 kind / power | Re:CoM id | How it plays |
 |---|---|---|---|---|---|---|---|
+| grab | 208 (126 f) | none (KH1 requests Sora's held motion itself) | the held record [0, 2) | 110 (none) | none / none | 1's record, the held kind | plain request, state 3 (§ The grab from below) |
 | claw | 202 (74 f, root) | `0x1D0` (28, 50; 0), `0x240` (29, 50; 1) | [40, 54), [52, 68) | 215 | 1 / 4 | 0 | plain request (steered), state 2 |
 | rising slash | 207 (120 f) | `0x160` (8, a line 1 → 0, 150; 0) | [26, 50) | 110 (none) | 1 / 8 | 1 | plain request, state 3 |
 | dive | 205 (40 f, looped) | `0xF0` (8, 60; 0) | [0, 40) each cycle | 110 (none) | 4 / 6 | 1 | plain request, state 3, its body in movement state 7 |
@@ -2561,9 +2563,11 @@ listed with `tools/kh1-ai-script.py`.
 #### What the asset step writes
 
 `ENEMY/0027/EN0027.ANN` (Re:CoM's 73 slots byte-identical, KH1's clips at 100 + entry; 67 plays Re:CoM's exact bake
-`e027_071`), `EN0027.ASD` (Re:CoM's 3 records kept, 4 added: the claw's two hands (id 0), the rising slash (id 1, a 1.5 m
-line), the dive (id 1, 0.6 m)), `EN0027.SES` (Re:CoM's entries kept; KH1's attack clips take their template record's sounds
-at the hit window: Assumption), `kh1-neoshadow.json` (`kh1-enemy 1`, 207 numbers read at their pushes, the shield guard row).
+`e027_071`), `EN0027.ASD` (Re:CoM's 3 records kept, 5 added: the claw's two hands (id 0), the rising slash (id 1, a 1.5 m
+line), the dive (id 1, 0.6 m), the grab's held record (id 1's record, kind index 21)), `EN0027.SES` (Re:CoM's entries kept; KH1's attack clips take their template record's sounds
+at the hit window: Assumption), `kh1-neoshadow.json` (`kh1-enemy 1`, 207 numbers read at their pushes, the shield guard row; since the grab four more:
+`grab_trim` / `grab_let_go` read at `0x1DAE` / `0x1DF6`, the held record's `grab_record_frames` / `grab_kind_index`).
+The held clip itself goes into Sora's packs (§ The grab from below).
 Test `neoshadow::tests::builds_from_the_players_files`. In `mod.yml`:
 
 ```yaml
@@ -2589,13 +2593,14 @@ gets KH1's AI` in a Neoshadow battle.
   (911, pefile, 0 mismatches, 2026-11-02).
 - **Assumptions:** the power of the dive (owner: id 1, as built); no fixed points (owner): a lone one and the hidden one go to
   a point 600–1000 about their own place, the formation rises where each sank, a stuck traveller turns toward Sora, heights
-  from the battle floor (room 29's floor 5480); the grab not built (the miss instead); the call wakes nothing; a called one unhittable while it comes up (KH1 takes
+  from the battle floor (room 29's floor 5480); the grab's (§ The grab from below); the call wakes nothing; a called one unhittable while it comes up (KH1 takes
   the hits without damage: Re:CoM can't); KH1's `+0x90` (a dive's other end) never set (not identified); `sys 124` (written 0
   / 100 around its attacks) not ported (not identified); a killing hit during the sink's first frames kills (KH1 keeps it at
   1 HP: Re:CoM's defeat); the dive's row on from 205's first frame (KH1: 8 frames in); the miss faces its own way (KH1:
   Sora's); the script's world taken as 16 (room 29); KH1's `still` facing commands only for the host's quiet watchdog during
   the group's long waits; per-enemy random streams; Re:CoM's sounds on KH1's clips; effects and fades (M13).
-- **Not ported:** the grab (researched, § The grab from below; owner question 2), the room's sleeping objects, the effects, the masks, the rumble, the fade-outs.
+- **Not ported:** the room's sleeping objects, the effects (the grab's hand effect 6 too), the masks, the rumble (the grab's
+  too), the fade-outs.
 
 #### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; any Neoshadow battle)
 
@@ -2603,8 +2608,13 @@ gets KH1's AI` in a Neoshadow battle.
 2. **One Neoshadow:** it sinks, slides underground 6–10 m from where it was (no fixed spot), comes up and raises its arms for
    about 4 s (KH1's call; nothing comes in a Re:CoM battle), then fights: claws, sinks and circles underground, comes up
    slashing right under Sora, leaps up and dives at him. Then again, each time from where it is.
-3. **Two:** one sinks and stays hidden; every 2–3 s it pops up at Sora's feet (209) and vanishes; it can't be hit. The other
-   fights. Kill the other: the hidden one comes up 6–10 m from where it last was and does 2.
+3. **Two:** one sinks and stays hidden; every 2–3 s it comes up under Sora (it can't be hit). Standing on the floor, not
+   guarding and not just hit, **Sora is grabbed**: he plays KH1's held clip (no damage), can't move or act, and the
+   Neoshadow holds him for about 1.6 s (94 frames), then sinks; Sora stands up at the clip's end (2.1 s). Meanwhile the
+   other Neoshadow leaps and dives at him; **its hit frees him at once** into Re:CoM's hit reaction (then KH1's 30 frames
+   of no hits), and the hidden one lets go that frame. In the air, guarding or right after a hit: it pops up at his feet
+   (209) and vanishes instead. Kill the other: the hidden one comes up 6–10 m from where it last was and does 2.
+   `combat = recom`: always the pop-up (209), never a grab.
 4. **Three or four:** they all sink together and rise slashing out of the floor at once, each where it sank (no formation
    places).
 5. **Five or more:** they all leap up and hover; once all are up they dive at Sora one after another.
@@ -2615,7 +2625,14 @@ gets KH1's AI` in a Neoshadow battle.
 9. Kill one: it turns to Sora and plays its death (72); Re:CoM's prizes and EXP.
 10. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Neoshadows.
 
-Please send `kh1-recom.log` (`neoshadow:` lines) and an F9 trace.
+Please send `kh1-recom.log` (`neoshadow:` and `held:` lines) and an F9 trace.
+
+**Owner test line (the grab):** Combat = KH1, re-run `kh1-recom-build` (new: the held clip in `PL0001.ANN` / `PL0002.ANN`
+/ `PL0011.ANN`, the grab's record in `EN0027.ASD`, `grab_*` numbers in `kh1-neoshadow.json`; the log says `held: … Re:CoM's
+kind table …` at start and `held: Sora held …` per grab), a battle with two Neoshadows: stand still on the floor until the
+hidden one comes up under you. Sora is held (KH1's held clip, no HP lost, no button works); without the other's dive he
+stands up after about 2 s; the other's dive hits him while held and frees him at once (normal hit reaction, then no hits
+for 0.5 s). No hit spark at the grab. Jump or guard as it comes up: it pops up and vanishes instead (209).
 
 #### KH1 trace (what to record in KH1)
 
@@ -2624,7 +2641,7 @@ stand at 3 m and at 8 m 10 s each; one swing; a full combo and a finisher; swing
 slashing; Guard its claw and its dive; kill them one by one down to two (the hidden one) and to one (the spot and the call);
 record each count once.
 
-#### The grab from below: research (owner choice 2, "build the grab from below natively"; not built: owner question 2)
+#### The grab from below (owner choice 2, "build the grab from below natively"; owner 2026-11-02: a new Re:CoM player reaction, "held"). Built
 
 **KH1's grab** (`0x1AF6`, two left, the hidden one; Checked (files: `ex_2420.bd` listed from `0x36A`, `xa_ex_2420.mset`
 parsed with `kh1-formats`) + decomp as named):
@@ -2633,7 +2650,7 @@ parsed with `kh1-formats`) + decomp as named):
 |---|---|---|
 | Wait | while Sora is off the floor (`Sora+0x70` = 21 or ≠ 0), unless one is left, he is 1300+ away or 180 frames passed | Checked (files) |
 | Follow | 20 frames at Sora's place (`sys 86`), facing his way (`sys 11` with his `+0x30`), its hand effect on | Checked (files) |
-| Grab test | `0x3FAA(Sora)` (`sys 141` and `sys 218` and his flag `0x400` clear), his height 0 (`sys 89`), `Sora+0x70` = 0, flag `0x400` clear; else the miss (209 at his feet + 8, shown, hidden again: built) | Checked (files); the meaning of `sys 141` / `218`: Assumption (alive / hittable) |
+| Grab test | `0x3FAA(Sora)` (`sys 141` and `sys 218` and his flag `0x400` clear), his height 0 (`sys 89`), `Sora+0x70` = 0, flag `0x400` clear; else the miss (209 at his feet + 8, shown, hidden again: built) | Checked (files); `sys 141` = `0x140291920` (can be hit: flags `& 0x8048 == 0x8000`, none of `0x1000080`) and `sys 218` = `0x1402BB4B0` (movement state not air / swim): Checked (decomp, 2026-11-02); flag `0x400`: not identified |
 | Sora | `sys 113` (`0x1402BA8C0`): his second motion set = the Neoshadow's player-set table (`.mset` `+0xA4B00`, ten entries, his at `+0xA4B80`); request `0x10000C8` (bit 24 = KH1's action lock, `0x14029F980` sets actor flag 4; request 200 of that set: **126 frames, no root motion, 293 bones**), blend 4; queued `0x40000000` (the lock's release) blend 8 | Checked (files + decomp) |
 | The Neoshadow | the group's grab word `+0x4C` = 1; shown; `sys 124(0)`; at Sora facing his way; effect 6; **208 (126 frames)**; if its `+0x90` = 1 Sora is moved to it once (not identified, as the dive's); the pad rumble (`sys 171`, pattern at `0x318` → `0x1401E1400`) | Checked (files + decomp) |
 | Hold | for len(208) − 2 frames it stays at Sora's place facing his way; it lets go when 30 or fewer are left (**94 frames held**) or when Sora's motion is no longer 200 (a hit's reaction replaced it); rumble off (`sys 196` → `0x1401E1490(0)`); `+0x4C` = 0; effect off; `sys 124(100)`; hidden | Checked (files + exe bytes of `sys 196`) |
@@ -2665,15 +2682,31 @@ shorten them), never (1), and (4) differently (they come back after a hit, or ta
 reactions through the damage check (action 0xC; `docs/recom-kh1-attack.md` § Post-hit invulnerability); that our KH1 frame
 leaves Re:CoM's status action 0x18 alone as it does 0xC: Assumption (not traced).
 
-Nothing built: the miss stays (owner question 2).
+**Built** (owner 2026-11-02: option (a), "the grab as a new Re:CoM player reaction ("held") playing KH1's held clip as a
+new Sora motion slot, freed by a hit"). Sora's side: `docs/recom-kh1-attack.md` § The held reaction (the kind table
+extended with the held kind at index 21, the damage check's new case, Re:CoM's status action `0x18` sub-state `0xC` on the
+held clip's row; no hook of its own). The Neoshadow's side:
+
+| Part | Where | What | Tag |
+|---|---|---|---|
+| The held clip | the Sora pack step (`build::build_with_held`, `HeldInput`) | `xa_ex_2420.mset` section 3, entry 0 (`+0xA4B80`), request 200 (the word `0x10000C8` read at `ex_2420.bd` `0x1CD4`), its blend 4.0 (`0x1CDA`): a new 60 fps clip of `PL0001.ANN` (and the Keyblade's of `PL0002.ANN`, the Halloween `PL0011.ANN`) after the xl slots, played once, no root motion; the manifest's `held` section (`"blend": 4.0`) | Checked (files: the player's files, `validate::i_held_clip_from_the_neoshadows_player_set`) |
+| The grab's record | `enemy::HOLDS`, `hold_records` | one `EN0027.ASD` record on 208's clip: Re:CoM's come-up strike record (id 1: `m_ex420_sk`, its root, 1.0 m, its power id), kind index 21 (`+0x68`: the held kind), live frames [0, 2), no hit effect (id 0, empty name, as Re:CoM's own records with none); the manifest's `grab_record_frames` 2 and `grab_kind_index` 21 (the DLL refuses another index) | Checked (files); the radius covering Sora on its spot and the 2 frames: Assumption |
+| The behaviour | `kh1_core::neoshadow::grab_or_miss` / `hold` | KH1's script: the test (the host's `Hold::grabbable` and Sora on the floor); `+0x4C` = 1, a note (KH1's Sora request), a yield; shown, `Attack::Grab` (208, blend 0, Re:CoM's state 3), a yield; then each frame at Sora's place facing his way, `t` = len(208) − `grab_trim` (2, `0x1DAE`) down to `grab_let_go` (30, `0x1DF6`): 94 frames; it lets go early when the host's `Hold::held` turns false after being true (a hit's reaction or the clip's end: KH1's "motion no longer 200"), or never turns true within `grab_record_frames` + 1 (the record missed him); `+0x4C` = 0, hidden | Checked (files) for the script; the "never held" rule: Assumption (KH1's grab is no hit) |
+| The second Neoshadow | the supervisor (as built) | `+0x4C` sends a free one to its dive (state 4) and clears `+0x4C` (`0x467A`) | Checked (files) |
+| The host | `win::kh1_enemy` | for a behaviour that asks (`Behaviour::wants_hold`), `win::held::hold()` each frame of its AI | — |
+
+Frames: KH1's script frames are kept (208 the frame after the test, the hold from the frame after that). Sora's hold starts
+when Re:CoM's hit lands: one or two frames after KH1's (Re:CoM's hit order; Assumption, not traced), and lasts his clip's
+126 frames unless a hit frees him. The asset step must be re-run (new: the held clip, the record, four numbers); with an
+older pack the log says so and the Neoshadow misses (KH1's other branch); an older `kh1-neoshadow.json` is refused (no
+`grab_*` numbers: Re:CoM's Neoshadow then). No new file, so `mod.yml` is unchanged.
 
 #### Neoshadow owner questions
 
 1. **Room 29's points.** Answered (owner, 2026-11-02): no fixed points, they wander and attack instead. Built (§ No fixed points
    of KH1's room 29).
-2. **The grab from below (two Neoshadows).** Owner (2026-11-02): "build the grab from below natively". Research (§ The grab
-   from below): Re:CoM has no reaction that holds Sora with an enemy's clip and lets a hit free him (its stun, Vexen's freeze and
-   Stop are the nearest), so nothing is built yet; KH1's miss stays. Which native build?
+2. **The grab from below (two Neoshadows).** Answered (owner, 2026-11-02): (a), a new Re:CoM player reaction. Built (§ The
+   grab from below). The research's options were:
    (a) **A new Re:CoM player reaction** (KH1's grab): a new reaction kind in Re:CoM's damage check `0x1401E6DE0` and a new
        case of its status action 0x18 (`0x1401EB0F0`): Sora plays KH1's held clip (the Neoshadow's `.mset` Sora set, request
        200, 126 frames) as a new motion slot of `PL0001.ANN` (asset step re-run), locked for it, no escape, any damaging hit's

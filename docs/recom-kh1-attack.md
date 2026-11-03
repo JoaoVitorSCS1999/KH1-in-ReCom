@@ -1005,6 +1005,71 @@ combo locked".
   window is one frame longer. Not traced.
 - Not seen in game.
 
+## The held reaction (M11, the Neoshadow's grab; owner 2026-11-02)
+
+Owner (2026-11-02, `docs/design-philosophy-instructions.md` "Neoshadow grab / stuck turn"): the grab as a new Re:CoM
+player reaction ("held") playing KH1's held clip as a new Sora motion slot, freed by a hit. Code: `crate::held` (the
+rules), `win::held` (the kind table, the case, the entry), the damage-check wrapper (`attack::damage_check`). Not
+seen in game; no KH1 trace.
+
+### KH1. Checked (files + decomp)
+
+- `ex_2420.bd` `0x1AF6` (the hidden Neoshadow, two left): when its grab test `0x3FAA` passes (`sys 141` =
+  `0x140291920`: Sora can be hit, flags `& 0x8048 == 0x8000` and none of `0x1000080`, so not in his post-hit / no-flinch
+  frames; `sys 218` = `0x1402BB4B0`: his movement state not an air / swim one; his height 0; his flag `0x400` clear,
+  not identified), it puts Sora into request 200 of its own `.mset` player set: `sys 113` (`0x1402BA8C0`: the set
+  `*(table + 4 + n × 4)` by the target's character number), `sys 13(Sora, 0x10000C8, 4, 0)` (the word at `0x1CD4`,
+  the blend 4.0 at `0x1CDA`; bit 24 = KH1's action lock, `0x14029F980` sets actor flag 4), the lock's release
+  `0x40000000` queued (`0x1CEC`, blend 8).
+- The clip: `xa_ex_2420.mset` section 3 (`+0xA4B00`, 10 player sets; entry 0 at `+0xA4B80` is the only one with its own
+  set, the nine others share `+0xB3B80`), request 200: **126 frames, no root motion**. Checked (files). That Sora's
+  character number is 0: Assumption (strong).
+- No damage: the grab makes no attack row. A damaging hit's reaction (its own motion request) replaces 200, and the
+  Neoshadow lets go when Sora's motion is no longer 200 (`0x1E06`). No button escape. KH1's reactions set the
+  post-hit frames (`0x140297F30(30)`); the grab doesn't: **a held Sora can be hit**, and the hit that frees him gives
+  him KH1's 30 frames after its reaction, as any hit.
+
+### Re:CoM. Checked (decomp + exe)
+
+- An enemy reaches Sora only through a hit. An `.ASD` record's `+0x68` indexes the kind table `0x14052A220` (21
+  entries: 1, 2, 3, 36, 37, 4, 5, 26, 7, 38, 6, 10, 39, 40, 8, 41, 28, 29, 30, 42, 32; Checked (exe)) through the getter
+  `0x140179410` (`movsxd rax,[rcx+0x68]; lea rcx,[0x14052A220]; mov eax,[rcx+rax*4]; ret`; the table's only reader,
+  Checked (decomp)); the attack set passes it through `0x14017F0E0` to the attack body's `+0x44`, the hit copies it to
+  Sora's body `+0x80` = `player+0x710`, read only by the damage check `0x1401E6DE0`.
+- The damage check's status kinds (8, 0xC, 0x11, 0x1B, 0x20) set a bit of `+0x420` and enter the status action `0x18`
+  (`0x1401F1200`); with no bit set, `0x1401F1200` takes sub-state `0xC` and plays row 0x28 (the get-up). The status exe
+  `0x1401EB0F0`'s case `0xC` waits for the clip's end (`0x1401A57D0`) and then stands Sora up (`0x1401F3180(pl, 0)`);
+  it reads no button. The Battle / Field exes run the damage check every frame of action `0x18`; a hit there takes
+  Re:CoM's reaction (action `0xC`) unless `+0x420 & 0x8010002`, and the reaction's end goes back to the status only
+  for `+0x420 & 0x8810023`.
+- Re:CoM's Stop kind (8) takes no HP in the check (`local_b0 != 8`): a kind that does no damage is the check's own
+  rule.
+
+### Ours
+
+| Part | Where | What | Tag |
+|---|---|---|---|
+| The kind | `win::held::install` | Re:CoM's 21 kinds copied next to the exe (`hook::place_data_near`) with the held kind `0x40` at index 21; the getter's `lea` displacement at `0x140179417` (old `05 0E 3B 00`) points at the copy. Re:CoM's records read the same 21 kinds. Installed when the held clip's row exists, at both Combat settings (inert at Re:CoM: only the KH1 Neoshadow's grab record names index 21) | Checked (exe: the getter's 15 bytes, `sites::THROWN_CALLEES`) |
+| The case | `win::held::on_damage` in the damage-check wrapper | a pending hit of kind `0x40`: its value set to 0 (no damage), Re:CoM's check run with its no-reaction bit `+0x420 & 2` (its gates first: dead, `+0x418 & 1`, `+0x7BC`, `+0x7B4`, Sora's guard `+0x72C & 8`: each returns with the hit pending); when it cleared the pending word `+0x720` and Sora lives, the held entry; else nothing. Not KH1 Sora, no held clip, already in a status, the no-flinch frames: no damage, no reaction | Checked (decomp) |
+| The entry | `win::held::enter` | Re:CoM's status entry as the check makes it: `0x1401F6990(pl, 6)` (its reaction prelude), `+0x408` = action, action `0xC` (8 bytes), `+0x414` = 0, `+0x64C` = 0, `+0x7B4` = 0; then `0x1401F1200`'s no-bit branch: `+0x408` = `0xC`, action `0x18` (8 bytes), velocity 0 (`0x1401A38D0`'s writes), `+0x414` = `0xC`, the held clip's row (`0x1401F7180`, KH1's blend 4, no root motion), `+0x428 &= ~8`. Left out: the damage face `0x1401F8AC0` (no damage) and Re:CoM's rumble `0x140211E40(2)` (KH1's grab rumble is not ported) | Checked (decomp); the face: Assumption |
+| The hold | Re:CoM | its status exe plays the clip to its end (127 samples = KH1's 126 frames at 60 fps) and stands him up; any damaging hit's reaction ends it for good; no button; nothing of ours runs | Checked (decomp) |
+| The row | `rows::Extension::held`, `movement::extend_action_table` | the held clip's row appended after the KH1-only and xl rows (`motions::parse_held`: the manifest's `held` section; the pack must hold the slot) | Checked (tests) |
+| The enemy's view | `win::held::hold` → `kh1_core::enemy::Hold` | grabbable: KH1 Sora, the row ready, alive, not `+0x418 & 1`, `+0x7BC <= 0`, `+0x7B4 == 0`, not the no-flinch frames, his KH1 Guard down, on the floor, not in action `0x18`; held: action `0x18`, sub-state `0xC`, row `+0x474` = the held row. Read only for a behaviour that asks (the Neoshadow), each frame of its AI | Checked (decomp) for the fields; Guard down: Assumption (KH1's flag `0x400` not identified) |
+
+- **Post-hit invulnerability** (decision 31, `+0x7BC`): the held entry sets none (KH1's grab sets no flag `0x80`), so the
+  dive's hit lands on a held Sora and frees him; its reaction (action `0xC`) arms KH1's 30 frames as any hit. A Sora in
+  his post-hit frames is not grabbable (KH1's `sys 141`), and Re:CoM's check would refuse the grab's hit anyway.
+- **At Combat = Re:CoM** nothing changes: the host says "not grabbable", the Neoshadow takes KH1's miss (209), and a
+  held-kind hit on Re:CoM's Sora (none is made) would do nothing.
+- Tests: `held::tests` (kind table, the case, the grab test, "taken"), `rows::tests::the_held_row_follows_the_others`,
+  `motions::tests::held_section`, `kh1_core::neoshadow::tests` (the grab, a hit freeing him, a grab that never lands),
+  the asset tests on the player's files (`validate::i_held_clip_from_the_neoshadows_player_set`,
+  `neoshadow::tests::builds_from_the_players_files`).
+- Assumptions: Re:CoM's message `0x14017F0E0` sends with the kind (to manager 0x16) leaves `0x40` as it is (no card
+  rewrites it in a KH1 battle); a held-kind hit on a friend card's Donald / Goofy would take their switch's default
+  (the grab's record is aimed at Sora's spot); the hold starts one or two frames after KH1's (Re:CoM's hit order: the
+  record lands on 208's first frames, the check runs in Sora's update); Sora's face during the hold stays as it was.
+
 ## Hooks and patches (`sites::ATTACK_HOOKS`, `ATTACK_CALLEES`, `ATTACK_DATA`)
 
 All bytes were compared with the Steam exe (54 sites, script check). Hooks are all or nothing,
@@ -1028,6 +1093,8 @@ Data (checked old values):
   relocation.
 - `0x1401FA074` (Battle jump table, id `0xA`): RVA `0x1F9CC9` → `0x1FA6C1`.
 - `0x1401FA6C1`: 13 × `CC` → the stub.
+- `0x140179417` (M11, the held reaction): the kind getter's `lea` displacement `05 0E 3B 00` (→ `0x14052A220`) → our
+  22-kind copy next to the exe (§ The held reaction). Its callee `0x1401F6990` is `sites::HELD_CALLEES`.
 - Re:CoM's rows 1–7 must equal `attack::RECOM_ROWS_1_7`.
 
 Called: `0x1401F6660` (end attack), `0x140224FB0` (weapon attack end), `0x1402ABB20` (bone),

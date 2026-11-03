@@ -15,8 +15,8 @@
 //!   the Neoshadows that came (each init adds one, each death takes one); most of the behaviour is chosen
 //!   by that count: five or more gather in the air and dive at Sora one after another; three or four sink
 //!   together and rise slashing out of nine places of a formation; with two, one of them goes underground
-//!   for good and ambushes Sora from below (KH1 grabs him there: not built, see [`grab_or_miss`]) while
-//!   the other fights; alone, it goes to the middle of the room, calls more Neoshadows and fights.
+//!   for good and ambushes Sora from below (KH1 grabs him there, see [`grab_or_miss`]) while the other
+//!   fights; alone, it goes to the middle of the room, calls more Neoshadows and fights.
 //! - entry `0x443E`: init `0x46F8`, a yield; a Neoshadow made while another is calling (`+0x50` = 1) rises
 //!   as a called one (`0xFC8`), the others go idle (`0xF34`); then each frame a state request restarts the
 //!   behaviour thread (1 idle `0xF34`, 2 engaged `0x724`, 3 `0x680` (never asked for), 4 dive `0x5C6`,
@@ -42,11 +42,22 @@
 //! written 0 during its attacks and 100 after: not identified, not the knock-back weight the reactions read,
 //! stats `+0xC4`; Checked (decomp)); `sys 129` / `173` / `208` / `214` (flags); the pad rumble `sys 206`;
 //! the spawn of the room's sleeping objects 600..606 (`sys 37` with `0xB0000 | id`, `0x140290D60` →
-//! `0x140287850`: Re:CoM's battles have none, so KH1's lookup finds nothing; Checked (decomp)); the grab.
+//! `0x140287850`: Re:CoM's battles have none, so KH1's lookup finds nothing; Checked (decomp)); the grab's hand
+//! effect (`sys 75` 6) and rumble (`sys 171` / `196`).
+//!
+//! # The grab from below (owner, 2026-11-02: a new Re:CoM player reaction, "held")
+//!
+//! KH1's grab (`0x1AF6`) is no attack row: the script puts Sora into request 200 of its own `.mset` player set
+//! itself. Re:CoM gives an enemy no such call, so the port grabs him through a hit: [`Attack::Grab`] plays 208
+//! with a Re:CoM attack record that carries the new "held" reaction kind (the asset step's record, live for
+//! `grab_record_frames` from 208's start, `kh1_recom_assets::enemy::HOLDS`); Re:CoM's damage check puts Sora
+//! into the held reaction (KH1's held clip, no damage; `kh1-recom`'s `held`), and the host tells the behaviour
+//! whether he is held ([`crate::enemy::Hold`]). The script's frames are KH1's; Sora's hold starts when Re:CoM's
+//! hit lands (one or two frames after KH1's: Re:CoM's hit order, Assumption, not traced).
 
 use crate::enemy::guard::HELD;
 use crate::enemy::script::{face_target, frame, motion_done, motion_frames, poll, pos, push, rand, set_state, set_target, take_state, target, tick_clock, wait_frames, wait_grounded, walk_to, warp};
-use crate::enemy::{Behaviour, Body, Cmd as ECmd, Draw, HitNews, Numbers, Table, World};
+use crate::enemy::{Behaviour, Body, Cmd as ECmd, Draw, HitNews, Hold, Numbers, Table, World};
 use crate::math::Vec3;
 use crate::rng::Kh1Rand;
 use std::cell::RefCell;
@@ -72,7 +83,7 @@ pub mod req {
     pub const LAND_DIVE: u16 = 206;
     /// The rising slash out of the floor (`0x1568`, `0x1FB0`), 120 frames, its body's HIT slot 0 [26, 50).
     pub const RISE_SLASH: u16 = 207;
-    /// KH1's grab from below (`0x1D66`, not built) and the miss (`0x1EB6`), 126 / 136 frames.
+    /// KH1's grab from below (`0x1D66`) and the miss (`0x1EB6`), 126 / 136 frames.
     pub const GRAB: u16 = 208;
     pub const MISS: u16 = 209;
     /// The call (`0x12C0`), 240 frames.
@@ -98,16 +109,20 @@ pub enum Attack {
     RiseSlash,
     /// 205, row `0xF0` (code 8).
     Dive,
+    /// 208, KH1's grab from below (`0x1D66`): no KH1 row (KH1 requests Sora's held motion itself, `sys 113`
+    /// and `sys 13`); in Re:CoM the asset step's held record on 208's clip (`kh1_recom_assets::enemy::HOLDS`).
+    Grab,
 }
 
 impl Attack {
-    pub const ALL: [Attack; 3] = [Attack::Claw, Attack::RiseSlash, Attack::Dive];
+    pub const ALL: [Attack; 4] = [Attack::Claw, Attack::RiseSlash, Attack::Dive, Attack::Grab];
 
     pub fn request(self) -> u16 {
         match self {
             Attack::Claw => req::CLAW,
             Attack::RiseSlash => req::RISE_SLASH,
             Attack::Dive => req::DIVE,
+            Attack::Grab => req::GRAB,
         }
     }
 
@@ -116,6 +131,7 @@ impl Attack {
             Attack::Claw => "claw",
             Attack::RiseSlash => "rise slash",
             Attack::Dive => "dive",
+            Attack::Grab => "grab",
         }
     }
 
@@ -125,6 +141,7 @@ impl Attack {
             Attack::Claw => &[0x1D0, 0x240],
             Attack::RiseSlash => &[0x160],
             Attack::Dive => &[0xF0],
+            Attack::Grab => &[],
         }
     }
 
@@ -175,6 +192,9 @@ pub const NAMES: &[&str] = &[
     "form_wait", "form_warp_wait", "form_rise_after", "layout_low", "layout_high", "slot_draw_min", "slot_draw_max",
     // Two left: the hidden one `0x7C2` / `0xBA2` / `0x1AF6`.
     "special_wait_min", "special_wait_max", "grab_follow", "grab_range", "grab_wait", "miss_depth",
+    // The grab's hold `0x1DAE` (len(208) − 2) and its let-go `0x1DF6` (30 left); the asset step's held record:
+    // its frames and its kind index (`kh1_recom_assets::enemy::HOLDS`).
+    "grab_trim", "grab_let_go", "grab_record_frames", "grab_kind_index",
     // Alone `0x8FA`: the hidden one's spot, the spot it goes to, the call `0x11FA`.
     "special_x", "special_y", "special_z", "special_rise_wait", "lone_x", "lone_y", "lone_z", "call_blend", "call_extra", "call_window",
     // A called one's rise `0xFC8`, a called one vanishing `0x5C6`.
@@ -245,7 +265,8 @@ pub struct Group {
     pub layout: usize,
     /// `+0x48`: two left: one went underground for good (`0x7D2`).
     pub special: bool,
-    /// `+0x4C`: KH1's grab holds Sora: the others dive at him (`0x1CC4`; never set: the grab is not built).
+    /// `+0x4C`: KH1's grab holds Sora: the others dive at him (set `0x1CC4`, cleared `0x1E5C` and by the
+    /// supervisor `0x467A` when it sends one).
     pub grab: bool,
     /// `+0x50`: one is calling (`0x1226`); a Neoshadow made then comes up as a called one.
     pub calling: bool,
@@ -296,6 +317,8 @@ struct Wp {
     push_only: bool,
     started: bool,
     defeated: bool,
+    /// Sora's side of the grab, from the host each frame.
+    hold: Hold,
 }
 
 impl Default for Wp {
@@ -318,6 +341,7 @@ impl Default for Wp {
             push_only: false,
             started: false,
             defeated: false,
+            hold: Hold::default(),
         }
     }
 }
@@ -1126,13 +1150,21 @@ async fn special_round(cx: &Cx) {
 
 /// `0x1AF6`: the hidden one's ambush. While Sora is off the floor (unless it is alone, 13 m away, or 180
 /// frames passed), wait; 20 frames under Sora, facing his way; then KH1 grabs him from below when he stands on
-/// the floor and can be hit: he plays request 200 of the Neoshadow's `.mset` player set (`sys 113`,
-/// `0x1402BA8C0`; set at `+0xA4B80`, 126 frames) action-locked (`0x10000C8`), the lock's release queued; it
-/// plays 208 (126 frames) at his place for up to len − 2, letting go 30 before the end or when his motion
-/// changes (a hit), no damage of its own, while the others dive at him (`+0x4C`). **Not built**: Re:CoM has no
-/// player reaction that holds Sora with an enemy's clip and gives way to a hit (owner question 2,
-/// `docs/recom-m11-enemies.md` § The grab from below); the port always takes KH1's other branch, the miss: at
+/// the floor and can be hit (`0x3FAA`, the host's [`Hold::grabbable`]): `+0x4C` = 1 and he plays request 200 of
+/// the Neoshadow's `.mset` player set (`sys 113`, `0x1402BA8C0`; set at `+0xA4B80`, 126 frames) action-locked
+/// (`0x10000C8`), the lock's release queued; a yield; it shows, plays 208 (126 frames, blend 0) at his place;
+/// a yield; then for up to len(208) − 2 frames it stays at his place facing his way, letting go when 30 or fewer
+/// are left (94 frames) or when his motion is no longer 200 (a hit's reaction replaced it); `+0x4C` = 0, hidden
+/// again. No damage of its own; the others dive at him meanwhile (`+0x4C`, the supervisor). Else it misses: at
 /// his feet, facing his way, shown, 209 until it has played, hidden again.
+///
+/// The port: KH1's Sora request is Re:CoM's held reaction, put on him by the grab's record on 208
+/// ([`Attack::Grab`]: the hit carries the held kind; Re:CoM's damage check holds him, `kh1-recom`'s `held`), so
+/// he is held from the frame that hit lands; "his motion is no longer 200" is the host's [`Hold::held`] going
+/// false once it was true, or never true within the record's frames and one more (`grab_record_frames`, the asset
+/// step's `kh1_recom_assets::enemy::HOLDS`: the record missed him, he stepped out of it, guarded or was protected;
+/// Assumption: KH1 has no such case, its grab is not a hit; the extra frame: Re:CoM's damage check runs in Sora's
+/// own update).
 async fn grab_or_miss(cx: &Cx) {
     let mut waited = 0.0f32;
     loop {
@@ -1155,7 +1187,12 @@ async fn grab_or_miss(cx: &Cx) {
         frame().await;
     }
     follow_sora(cx);
-    push(cx, ECmd::Note("Neoshadow grab from below not built (owner question 2: no Re:CoM reaction holds Sora): KH1's miss (209) instead"));
+    // `0x1C5C`: `0x3FAA(Sora)`, his height 0, `+0x70` = 0, his flag 0x400 clear (the host's test).
+    let grab = { cx.borrow().x.sora_grounded && cx.borrow().x.hold.grabbable };
+    if grab {
+        hold(cx).await;
+        return;
+    }
     let sora = cx.borrow().w.target;
     if let Some(s) = sora {
         let mut p = s;
@@ -1166,6 +1203,36 @@ async fn grab_or_miss(cx: &Cx) {
     push(cx, ECmd::Visible(true));
     play(cx, req::MISS, 0.0);
     wait_done(cx).await;
+    push(cx, ECmd::Visible(false));
+}
+
+/// `0x1CB6..0x1E62`: the grab (see [`grab_or_miss`]).
+async fn hold(cx: &Cx) {
+    group(cx, |g| g.grab = true);
+    push(cx, ECmd::Note("KH1's grab: Sora's request 200 of the Neoshadow's player set is Re:CoM's held reaction, from the grab's record on 208"));
+    frame().await;
+    push(cx, ECmd::Visible(true));
+    follow_sora(cx);
+    attack_now(cx, Attack::Grab, 0.0);
+    frame().await;
+    let mut t = motion_frames(cx, req::GRAB) - k(cx, "grab_trim");
+    let (mut age, mut seen) = (0.0f32, false);
+    loop {
+        follow_sora(cx);
+        let held = cx.borrow().x.hold.held;
+        seen |= held;
+        // KH1: his motion is no longer 200. Here: he was held and is no more (a hit's reaction, the clip's end), or
+        // the record's hit never held him.
+        let free = if seen { !held } else { age - (k(cx, "grab_record_frames") + 1.0) > 0.0 };
+        if t - k(cx, "grab_let_go") <= 0.0 || free {
+            break;
+        }
+        let s = step(cx);
+        t -= s;
+        age += s;
+        frame().await;
+    }
+    group(cx, |g| g.grab = false);
     push(cx, ECmd::Visible(false));
 }
 
@@ -1644,6 +1711,12 @@ impl Behaviour for Ai {
     fn set_target_grounded(&self, on_ground: bool) {
         self.io.borrow_mut().x.sora_grounded = on_ground;
     }
+    fn wants_hold(&self) -> bool {
+        true
+    }
+    fn set_target_hold(&self, h: Hold) {
+        self.io.borrow_mut().x.hold = h;
+    }
     fn set_battle(&self, battle: u32) {
         let g = group_for_battle(battle);
         self.io.borrow_mut().x.group = g;
@@ -1681,7 +1754,7 @@ mod tests {
             ("dive_near", 250.0), ("dive_level", 80.0), ("dive_speed", 80.0), ("dive_stuck_after", 30.0), ("dive_stuck", 40.0), ("dive_accel_after", 0.4000000059604645),
             ("land_trim", 4.0), ("aim_above", 80.0), ("aim_factor", 1.399999976158142), ("aim_min", 500.0), ("aim_far", 800.0), ("home_height", 5380.0),
             ("home_time", 60.0), ("form_wait", 20.0), ("form_warp_wait", 6.0), ("form_rise_after", 20.0), ("layout_low", 8250.0), ("layout_high", 9200.0),
-            ("slot_draw_min", 1.0), ("slot_draw_max", 10.0), ("special_wait_min", 120.0), ("special_wait_max", 180.0), ("grab_follow", 20.0), ("grab_range", 1300.0),
+            ("slot_draw_min", 1.0), ("slot_draw_max", 10.0), ("special_wait_min", 120.0), ("special_wait_max", 180.0), ("grab_follow", 20.0), ("grab_range", 1300.0), ("grab_trim", 2.0), ("grab_let_go", 30.0), ("grab_record_frames", 2.0), ("grab_kind_index", 21.0),
             ("grab_wait", 180.0), ("miss_depth", 8.0), ("special_x", 9000.0), ("special_y", 5300.0), ("special_z", 100.0), ("special_rise_wait", 30.0),
             ("lone_x", 8900.0), ("lone_y", 5300.0), ("lone_z", 100.0), ("call_blend", 8.0), ("call_extra", 6.0), ("call_window", 80.0),
             ("called_wait", 30.0), ("called_hold", 4.0), ("vanish_fade", 30.0), ("stuck_x", 8700.0), ("stuck_y", 5300.0), ("stuck_z", 100.0),
@@ -1742,11 +1815,21 @@ mod tests {
         visible: bool,
         hittable: bool,
         dead: bool,
+        /// Sora's side of the grab (the host's): grabbable; whether the grab's record lands (he is held from the
+        /// frame after [`Attack::Grab`] for the held clip's 126 frames); the frame a hit frees him.
+        grab_ok: bool,
+        lands: bool,
+        grab_at: Option<usize>,
+        hit_at: Option<usize>,
     }
 
     impl One {
         fn new(ai: Ai, pos: Vec3) -> One {
-            One { ai, pos, busy: 0.0, current: None, age: 0.0, queued: None, moved: 0.0, log: Vec::new(), visible: true, hittable: true, dead: false }
+            One { ai, pos, busy: 0.0, current: None, age: 0.0, queued: None, moved: 0.0, log: Vec::new(), visible: true, hittable: true, dead: false, grab_ok: false, lands: true, grab_at: None, hit_at: None }
+        }
+
+        fn held(&self, f: usize) -> bool {
+            self.lands && self.grab_at.is_some_and(|g| f > g && f <= g + 126) && self.hit_at.is_none_or(|h| f < h)
         }
 
         fn step(&mut self, f: usize, sora: Vec3) {
@@ -1770,7 +1853,12 @@ mod tests {
             if self.busy > 0.0 {
                 self.busy -= 1.0;
             } else {
+                let held = self.held(f);
+                self.ai.set_target_hold(Hold { grabbable: self.grab_ok && !held, held });
                 for c in self.ai.frame(w) {
+                    if matches!(c, ECmd::Attack { attack: Attack::Grab, .. }) {
+                        self.grab_at = Some(f);
+                    }
                     match c {
                         ECmd::Action { request, then, .. } => {
                             self.busy = len(request);
@@ -1934,8 +2022,8 @@ mod tests {
         assert!((stuck_aim(&ai.io, Vec3::ZERO) - (0.25 + std::f32::consts::PI)).abs() < 1e-6);
     }
 
-    /// Two of them: the first goes underground for good (hidden, unhittable), comes up at Sora's feet and misses
-    /// (209: KH1's grab is not built); the other fights. When the other dies, the hidden one comes up about its
+    /// Two of them: the first goes underground for good (hidden, unhittable), comes up at Sora's feet and, as the
+    /// host says Sora can't be grabbed (Combat = Re:CoM, or no held clip), misses (209); the other fights. When the other dies, the hidden one comes up about its
     /// own place (no fixed points) and calls.
     #[test]
     fn two_of_them_one_hides_and_ambushes() {
@@ -1949,7 +2037,7 @@ mod tests {
         assert!(!o.hittable && !o.visible || o.current == Some(req::MISS));
         let miss = o.first(|c| matches!(c, ECmd::Motion { request: req::MISS, .. })).expect("the miss at Sora's feet");
         assert!(o.log.iter().any(|(f, c)| *f == miss && *c == ECmd::Visible(true)));
-        assert!(o.log.iter().any(|(_, c)| matches!(c, ECmd::Note(n) if n.contains("grab"))));
+        assert!(!o.attacks().iter().any(|a| a.1 == Attack::Grab), "Sora can't be grabbed (the host says so): KH1's miss");
         assert!(!o.log.iter().any(|(_, c)| *c == ECmd::Hittable(true)), "never hittable while two are left");
         let other = &s.n[1 - h];
         assert!(other.motions().iter().any(|r| [req::CLAW, req::SINK, req::STRAFE_L, req::STRAFE_R, req::RUN, req::CROUCH].contains(r)), "{:?}", other.motions());
@@ -1965,6 +2053,74 @@ mod tests {
         assert!(later.iter().any(|(_, c)| *c == ECmd::Hittable(true)));
         assert!(later.iter().any(|(_, c)| matches!(c, ECmd::Motion { request: req::CALL, .. })));
         assert!(!o.ai.special());
+    }
+
+    /// Two of them, Sora grabbable: the hidden one comes up under him and grabs him (KH1's `0x1CB6..0x1E62`): `+0x4C`
+    /// set, a frame later shown and 208 with the grab's record ([`Attack::Grab`]); it holds him at his place until
+    /// 30 of 208's len − 2 frames are left (94 frames from the frame after 208: 95 after it), then hides again;
+    /// meanwhile the other one is sent to dive at him (state 4; its supervisor clears `+0x4C` as it sends it,
+    /// KH1's `0x467A`).
+    fn hidden_one(seed: u32, setup: impl Fn(&mut One)) -> (Sim, usize, usize) {
+        let mut s = Sim::new(seed, &[Vec3::new(-300.0, 0.0, 0.0), Vec3::new(300.0, 0.0, 0.0)]);
+        for o in s.n.iter_mut() {
+            setup(o);
+        }
+        let sora = Vec3::new(0.0, 0.0, 600.0);
+        for _ in 0..1200 {
+            s.run(sora, 1);
+            if s.n.iter().any(|o| o.grab_at.is_some() || o.log.iter().any(|(_, c)| matches!(c, ECmd::Motion { request: req::MISS, .. }))) {
+                break;
+            }
+        }
+        let h = s.n.iter().position(|o| o.ai.special()).expect("one hides");
+        let at = s.n[h].grab_at.or_else(|| s.n[h].first(|c| matches!(c, ECmd::Motion { request: req::MISS, .. }))).expect("its ambush");
+        (s, h, at)
+    }
+
+    fn hidden_line(o: &One, from: usize) -> Option<usize> {
+        o.log.iter().find(|(f, c)| *f > from && *c == ECmd::Visible(false)).map(|x| x.0)
+    }
+
+    #[test]
+    fn two_of_them_the_hidden_one_grabs_sora_from_below() {
+        let (mut s, h, at) = hidden_one(3, |o| o.grab_ok = true);
+        assert!(s.n[h].log.iter().any(|(f, c)| *f == at && *c == ECmd::Visible(true)), "shown with 208");
+        assert!(s.n[h].log.iter().any(|(f, c)| *f == at && matches!(c, ECmd::Attack { request: req::GRAB, attack: Attack::Grab, blend } if *blend == 0.0)));
+        assert!(s.n[h].log.iter().any(|(f, c)| *f + 1 == at && matches!(c, ECmd::Note(n) if n.contains("held reaction"))), "a frame before 208: KH1's request of Sora");
+        let sora = Vec3::new(0.0, 0.0, 600.0);
+        s.run(sora, 100);
+        let o = &s.n[h];
+        assert_eq!(hidden_line(o, at), Some(at + 95), "KH1's 94 held frames from the frame after 208");
+        assert!(!o.log.iter().any(|(f, c)| *f > at && *f < at + 95 && matches!(c, ECmd::Motion { .. } | ECmd::Attack { .. })), "it only holds");
+        assert!(!s.group().grab, "+0x4C clear after");
+        assert!(!o.log.iter().any(|(_, c)| matches!(c, ECmd::Motion { request: req::MISS, .. })), "no miss");
+        let other = &s.n[1 - h];
+        assert!(other.log.iter().any(|(f, c)| *f + 1 >= at && *f < at + 95 && *c == ECmd::State(st::DIVE)), "the other is sent to dive at him: {:?}", other.log.iter().filter(|x| x.0 > at).take(8).collect::<Vec<_>>());
+    }
+
+    /// A hit frees Sora (KH1: his motion is no longer 200): the hidden one lets go that frame.
+    #[test]
+    fn a_hit_on_held_sora_ends_the_grab() {
+        let (mut s, h, at) = hidden_one(3, |o| {
+            o.grab_ok = true;
+        });
+        s.n[h].hit_at = Some(at + 40);
+        s.run(Vec3::new(0.0, 0.0, 600.0), 41);
+        assert_eq!(hidden_line(&s.n[h], at), Some(at + 40));
+        assert!(!s.group().grab);
+    }
+
+    /// The grab's record never holds him (he stepped out, guarded or was protected): it lets go once the record's
+    /// frames and one more have passed.
+    #[test]
+    fn a_grab_that_never_lands_lets_go() {
+        let (mut s, h, at) = hidden_one(3, |o| {
+            o.grab_ok = true;
+            o.lands = false;
+        });
+        s.run(Vec3::new(0.0, 0.0, 600.0), 10);
+        assert_eq!(hidden_line(&s.n[h], at), Some(at + 1 + 2 + 2), "the record's 2 frames, one more, from the frame after 208");
+        assert!(!s.group().grab);
     }
 
     /// Three of them: they sink, wait for each other, take three different places of the formation's draw and
@@ -2158,7 +2314,8 @@ mod tests {
     #[test]
     fn rows() {
         assert_eq!((Attack::Claw.rows(), Attack::RiseSlash.rows(), Attack::Dive.rows()), (&[0x1D0, 0x240][..], &[0x160][..], &[0xF0][..]));
-        assert_eq!((Attack::Dive.index(), Attack::ALL.len(), SHIELD_ROW), (2, 3, 0x80));
+        assert_eq!((Attack::Dive.index(), Attack::Grab.index(), Attack::ALL.len(), SHIELD_ROW), (2, 3, 4, 0x80));
+        assert_eq!((Attack::Grab.request(), Attack::Grab.rows()), (req::GRAB, &[][..]));
         assert_eq!(ROOM_REF, (2, 0));
     }
 }
