@@ -134,9 +134,9 @@ pub use crate::shadow::RequestClip;
 pub struct Built {
     /// The extended `.ANN`.
     pub ann: Vec<u8>,
-    /// The extended `.ASD`.
+    /// The extended `.ASD` (Re:CoM's own bytes when the enemy makes no record: the step then doesn't write it).
     pub asd: Vec<u8>,
-    /// The extended `.SES`.
+    /// The extended `.SES` (empty for [`NO_SES`]: none written).
     pub ses: Vec<u8>,
     /// The manifest (`kh1-enemy 1`).
     pub manifest: String,
@@ -318,21 +318,25 @@ pub fn hit_window(m: &kh1_formats::mset::Motion, sub: u16) -> Result<(f32, f32)>
 /// slot [`SLOT_BASE`] + entry unless Re:CoM has it as an exact bake. Returns the ANN, every
 /// request's clip and, per new clip, the Re:CoM clip the matcher pairs it with (bake or edit).
 pub fn extend_ann(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
-    extend_ann_own(ann_in, ms, conv, prefix, recom_slots, &[], &[], &[])
+    extend_ann_own(ann_in, ms, conv, prefix, recom_slots, &[], &[], &[], &[])
 }
 
 /// [`extend_ann`], with `own`: requests whose entry gets its own new clip even when Re:CoM has it as
 /// an exact bake ([`OWN_CLIPS`]); the new clip is paired with the bake (its sounds, `extend_ses`).
 /// `loops`: requests whose new clip loops although its last pose isn't its first ([`LOOPS`]); `holds`: requests whose new
-/// clip holds at its end although its last pose is its first ([`HELD_CLIPS`]).
+/// clip holds at its end although its last pose is its first ([`HELD_CLIPS`]); `skip`: requests that get no clip
+/// ([`SKIPPED`]).
 #[allow(clippy::too_many_arguments)]
-pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize, own: &[u16], loops: &[u16], holds: &[u16]) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
+pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize, own: &[u16], loops: &[u16], holds: &[u16], skip: &[u16]) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
     let mut ann = Ann::parse(ann_in)?;
     if ann.slots.len() != recom_slots {
         return bad(format!("{} slots, Re:CoM Steam's has {recom_slots} (already extended?)", ann.slots.len()));
     }
     let mut by_entry: Vec<(usize, Vec<u16>, bool)> = Vec::new();
     for (rid, w) in ms.requests.iter().enumerate().take(LAST_REQUEST + 1) {
+        if skip.contains(&(rid as u16)) {
+            continue;
+        }
         for e in w.variants() {
             let e = e as usize;
             if e >= ms.motions.len() {
@@ -595,6 +599,18 @@ fn fmt_f(v: f32) -> String {
     }
 }
 
+/// Requests that get no clip (M11): KH1 status motions the port never plays (Re:CoM's own Stop / freeze / stun states
+/// stay, decision M10) whose entry another request plays with the other root-motion rule, which one clip can't hold. The
+/// Red Nocturne's 0x66 (entry 7 without root motion; `0x1402B7260` plays it for KH1's status of movement states 0x16 /
+/// 0x17, Checked (decomp)) shares entry 7 with its dizzy loop 0x43 (with root motion; the dizzy is not built either,
+/// owner question): 0x43 keeps the clip.
+pub const SKIPPED: &[(&str, u16)] = &[("rednocturne", 0x66)];
+
+/// Enemies Re:CoM keeps no `.SES` for (M11, the Red Nocturne: `Recom.hed` holds no `ENEMY/0003/EN0003.SES` and the
+/// exe's resource names for enemy 3 list none, so Re:CoM never loads one; Checked (files + exe)): their clips play no
+/// motion sounds in Re:CoM, the step reads none and writes none (`Built::ses` empty).
+pub const NO_SES: &[&str] = &["rednocturne"];
+
 /// Builds everything for one enemy.
 pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     let ms = MotionSet::parse(&inp.mset)?;
@@ -611,7 +627,8 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     let own: Vec<u16> = OWN_CLIPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
     let loops: Vec<u16> = LOOPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
     let holds: Vec<u16> = HELD_CLIPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
-    let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own, &loops, &holds)?;
+    let skip: Vec<u16> = SKIPPED.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
+    let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own, &loops, &holds, &skip)?;
     consts.extend(bone_points(spec.name, &inp.mdls, &ms, &conv, &clips)?);
     consts.extend(child_consts(spec.name, &inp.mdls)?);
     consts.extend(t_points(spec.name, &inp.mdls, &ms, &conv, &clips, &consts)?);
@@ -659,8 +676,12 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
         consts.push(("grab_record_frames".into(), h.frames));
         consts.push(("grab_kind_index".into(), HELD_KIND_INDEX as f32));
     }
-    let mut ses = extend_ses(&inp.ses, &inp.asd, &ms, &clips, &pairs, &sound_rows)?;
-    for r in &rings {
+    let no_ses = NO_SES.contains(&spec.name);
+    if no_ses && !inp.ses.is_empty() {
+        return bad(format!("{}: Re:CoM has no {}, yet one was given", spec.name, spec.path("SES")));
+    }
+    let mut ses = if no_ses { Vec::new() } else { extend_ses(&inp.ses, &inp.asd, &ms, &clips, &pairs, &sound_rows)? };
+    for r in rings.iter().filter(|_| !no_ses) {
         // The ring's clip takes its Re:CoM template's sounds at the ring's start (no HIT track on its motion).
         ses = ring_sounds(&ses, &inp.asd, &clips, &pairs, r.0, r.1)?;
     }
@@ -1354,6 +1375,9 @@ pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usiz
     // The Defender's flame `ex_2340_00.bd` and fireball `ex_2340_01.bd` (`crate::defender`, [`T_POINTS`]).
     ("defender", 0, b"ex_2340_00.bd", crate::defender::FLAME_CONSTS, crate::defender::FLAME_REQUESTS),
     ("defender", 1, b"ex_2340_01.bd", crate::defender::FIRE_CONSTS, crate::defender::FIRE_REQUESTS),
+    // The Red Nocturne's Fire `ex_2110_00.bd` and big Fire `ex_2110_01.bd` (`crate::rednocturne`, [`SHOTS`]).
+    ("rednocturne", 0, b"ex_2110_00.bd", crate::rednocturne::FIRE_CONSTS, crate::rednocturne::FIRE_REQUESTS),
+    ("rednocturne", 1, b"ex_2110_01.bd", crate::rednocturne::BIGFIRE_CONSTS, crate::rednocturne::BIGFIRE_REQUESTS),
 ];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
@@ -1446,7 +1470,19 @@ fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[
 /// `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018E350`; Checked (decomp)); the row the ball takes when a swing
 /// sends it back (`0x46C`, the child's `0x748`: owned by the swinger) gives `ball_bat_radius` (its id and kind unused:
 /// the batted ball keeps its power, Guard's turn-back rule).
-pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1), ("gargoyle", "ball", &[0x3FC], 1, 1), ("gargoyle", "ball_bat", &[0x46C], 1, 1), ("defender", "fire", &[0x2AC], 1, 1)];
+pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[
+    ("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1),
+    ("gargoyle", "ball", &[0x3FC], 1, 1),
+    ("gargoyle", "ball_bat", &[0x46C], 1, 1),
+    ("defender", "fire", &[0x2AC], 1, 1),
+    // The Red Nocturne's Fire (`0x4FC` passes `0xEC` / `0x15C`) and big Fire (`0x490`: `0x1CC` / `0x23C`): Re:CoM's own
+    // Red Nocturne shots take theirs with `0x14017F0E0(enemy, 0, 1)` (state 2 `0x140191C00`, the small shot) and
+    // `(enemy, 1, 1)` (state 3 `0x140191CC0`, the big one) (Checked (decomp)); the batted rows give `*_bat_radius`.
+    ("rednocturne", "fire", &[0xEC], 0, 1),
+    ("rednocturne", "fire_bat", &[0x15C], 0, 1),
+    ("rednocturne", "bigfire", &[0x1CC], 1, 1),
+    ("rednocturne", "bigfire_bat", &[0x23C], 1, 1),
+];
 ///
 /// The Defender's `0x15F6` passes `0x2AC` (its batted row `0x31C` is the child's second); Re:CoM's own fireball takes its
 /// power with `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018DAF0`; Checked (decomp)).
@@ -1524,7 +1560,7 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC, &crate::rednocturne::SPEC];
 
 #[cfg(test)]
 mod clash_tests {
