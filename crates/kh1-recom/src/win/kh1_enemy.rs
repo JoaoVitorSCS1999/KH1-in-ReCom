@@ -75,6 +75,8 @@ mod f {
     pub const EXP_DROP: u32 = 0x0018_10A0;
     /// Re:CoM's attack-set radius setter (`sites::KH1_ENEMY_RING_CALLEES`), on the enemy's attack set `+0x100`.
     pub const SET_RADIUS: u32 = 0x0014_E5C0;
+    /// Re:CoM's attack check on an attack set (`sites::GRAB_CALLEES`).
+    pub const ATTACK_CHECK: u32 = 0x0014_E6A0;
 }
 /// Enemy fields (Checked (decomp): `0x14017F7E0`, `0x14017C530`, `0x140185320`).
 mod e {
@@ -119,6 +121,8 @@ mod hi {
 
 type CtorFn = unsafe extern "win64" fn(usize, usize, usize, usize) -> usize;
 type StateFn = unsafe extern "win64" fn(usize);
+/// `0x14014E6A0(set) -> u32`.
+type CheckFn = unsafe extern "win64" fn(usize) -> u32;
 type EndFn = unsafe extern "win64" fn(usize, usize, i32);
 type IntFn = unsafe extern "win64" fn() -> i32;
 type BodiesFn = unsafe extern "win64" fn(usize, i32);
@@ -834,6 +838,14 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
             rt.action_playing = false;
             rt.action_age = 0.0;
             enter_state(en, CLASSES[rt.class].attack_states.get(attack as usize).copied().unwrap_or(2));
+            if ke::host::starts_at_once(rt.ai.grab_attack(), attack, crate::guard::state_index(en, rd(en + e::STATE))) {
+                // KH1's grab (M11, the Neoshadow): played now (its records attach, `0x14017D750`), its record tested
+                // against Sora once this state step returns ([`grab_test_now`]); the attack state's begin keeps it.
+                play(en, rt, request, blend);
+                rt.queued = None;
+                rt.action_playing = true;
+                GRAB_NOW.store(en, Ordering::Relaxed);
+            }
         }
         Cmd::Scale(k) => set_scale(en, rt, k),
         Cmd::Visible(v) => set_visible(en, v),
@@ -1347,6 +1359,38 @@ pub unsafe extern "win64" fn think_step(en: usize) {
     if with_rt(en, |rt| tick(en, rt, true)).is_none() && ours(en).is_none() {
         call_original(en, ce::step_slot(state::THINK));
     }
+    grab_test_now(en);
+}
+
+/// The enemy whose behaviour started its grab at once this step (`kh1_core::enemy::host::starts_at_once`), or 0.
+static GRAB_NOW: AtomicUsize = AtomicUsize::new(0);
+
+/// After a state step of `en` (outside the runtime lock: the hit's callbacks take it): when its behaviour started its
+/// grab at once (M11, the Neoshadow: KH1 asks for Sora's held motion in the frame of its test), Re:CoM's attack
+/// windows (`CAttackMotion` `+0x18`, `0x14014E830`, what the enemy's slot `+0x90` runs after the state machine) and its
+/// attack check (`0x14014E6A0`, what its slot `+0x78` runs before it, then its "connected" bit `+0x260 & 0x40`) run now,
+/// so the grab's record meets Sora in this update, and Sora, updated after the enemies, takes it in this frame (KH1's).
+/// Re:CoM's own passes then find the record's window open (no new serial) and its hit in Sora's hit-once ring
+/// (`0x14016F1C0`): no second hit. Checked (decomp + disasm). One atomic load per step otherwise.
+unsafe fn grab_test_now(en: usize) {
+    if GRAB_NOW.load(Ordering::Relaxed) != en || GRAB_NOW.compare_exchange(en, 0, Ordering::Relaxed, Ordering::Relaxed).is_err() {
+        return;
+    }
+    let id: u32 = rd(en + e::ID);
+    let name = ours(en).map_or("kh1 enemy", |k| CLASSES[k].name);
+    let b = base();
+    let set: usize = rd(en + e::ATTACKS);
+    let w = &crate::sites::ATTACK_WINDOWS_PTRS[0];
+    if set == 0 || rd::<usize>(set) != super::va(b, crate::guard::attack_motion::VTABLE) || rd::<usize>(rd::<usize>(set) + 0x18) != b + w.target as usize {
+        log(&format!("{name}: e{id}: the grab's attack set is not Re:CoM's CAttackMotion with 0x14014E830 at +0x18: its record is tested by Re:CoM's own passes (the hold a few frames late)"));
+        return;
+    }
+    func::<StateFn>(w.target)(set);
+    let r = func::<CheckFn>(f::ATTACK_CHECK)(set);
+    if r != 0 {
+        wr(en + e::FLAGS, rd::<u64>(en + e::FLAGS) | 0x40);
+    }
+    log(&format!("{name}: e{id}: the grab's record tested at once (Re:CoM's windows and attack check, result {r}): {}", if r != 0 { "it met Sora: his update takes it this frame (KH1's)" } else { "it met nothing" }));
 }
 
 /// The think (`+0x3D0`): nothing; KH1's behaviour picks the attacks.
@@ -1357,6 +1401,10 @@ pub unsafe extern "win64" fn attack_begin(en: usize) {
     let k = crate::guard::state_index(en, rd(en + e::NEXT)).or_else(|| crate::guard::state_index(en, rd(en + e::STATE)));
     let done = with_rt(en, |rt| {
         let Some(a) = rt.action.filter(|a| a.attack.is_some()) else { return false };
+        if !ke::host::begin_plays(running(a, rt.action_playing)) {
+            // Started at once (KH1's grab): it plays on.
+            return true;
+        }
         play(en, rt, a.request, a.blend);
         // An action queues its `then`; KH1's plain request (a steered attack) replaces the queue.
         rt.queued = (!a.steered).then_some((a.then, a.blend));
@@ -1446,6 +1494,7 @@ pub unsafe extern "win64" fn attack_step(en: usize) {
             call_original(en, ce::step_slot(s));
         }
     }
+    grab_test_now(en);
 }
 
 /// The hit Re:CoM's handler took (its hit info): KH1's kind (a KH1 swing's from its row, else from

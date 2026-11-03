@@ -293,6 +293,14 @@ pub trait Behaviour {
     /// Sora's side of KH1's grab ([`Hold`]), each frame before [`Behaviour::frame`] when
     /// [`Behaviour::wants_hold`] (M11, the Neoshadow's grab from below).
     fn set_target_hold(&self, _h: Hold) {}
+    /// The attack whose record holds Sora (KH1's grab, M11: the Neoshadow's `0x1AF6`), by its index. KH1's script asks
+    /// for Sora's held motion in the frame of its test, before its yield (`ex_2420.bd` `0x1CC6..0x1D00`: `sys 113`,
+    /// `sys 13` with `0x10000C8`); the port holds him through that attack's record, so the host starts this attack in
+    /// the frame it is asked for and tests its record at once ([`host::starts_at_once`]), not at its Re:CoM attack
+    /// state's begin in the next update.
+    fn grab_attack(&self) -> Option<u8> {
+        None
+    }
     /// Whether the hit the last [`Behaviour::on_hit`] reported keeps its reaction: KH1's script hit
     /// handler may zero the hit record's reaction kind (`hp[0xC] &= ~0x1F`, then no reaction and the
     /// action goes on; the Darkball's `0x1E20` after its sixth light hit in a row, M11). The fallback for

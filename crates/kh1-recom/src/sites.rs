@@ -2905,6 +2905,20 @@ pub const HELD_CALLEES: &[Site] = &[
     Site { name: "player reaction prelude (0x1401F6990)", rva: 0x001F_6990, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18, 0x56, 0x57, 0x41, 0x56, 0x48, 0x83] },
 ];
 
+/// M11, the Neoshadow's grab on KH1's frame (`win::kh1_enemy::grab_test_now`, `kh1_core::enemy::host::starts_at_once`):
+/// Re:CoM's attack check on an enemy's attack set (`0x14014E6A0(set) -> u32`: each live entry's collision against its
+/// list, as the enemy's slot `+0x78` `0x140185630` calls it with `rcx` = `enemy+0x100`, the "connected" bit `+0x260 &
+/// 0x40` from its result). Called only, once per grab. Checked (exe + decomp + disasm of `0x14018567B..0x1401856A1`).
+pub const GRAB_CALLEES: &[Site] = &[
+    // mov r11,rsp; push rbx; push rsi; push r14; sub rsp,0x70
+    Site { name: "enemy attack check (0x14014E6A0)", rva: 0x0014_E6A0, expect: &[0x4C, 0x8B, 0xDC, 0x53, 0x56, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x70] },
+];
+
+/// M11, the Neoshadow's grab: `CAttackMotion`'s attack windows (vtable `0x140523E70` + 0x18 = `0x14014E830`: each entry's
+/// window opened / closed by the motion clock, its collision set up with a new serial at the opening), the enemy's slot
+/// `+0x90` (`0x140180C90`) calls it after the state machine. Pointer-checked before the call. Checked (exe + decomp).
+pub const ATTACK_WINDOWS_PTRS: &[PtrSite] = &[PtrSite { name: "CAttackMotion +0x18 windows", rva: 0x0052_3E88, target: 0x0014_E830 }];
+
 /// M11 casters: the Defender's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp): its only caller
 /// is the enemy factory `0x140188F40` (case 26, the call at `0x1401893E0`); no branch lands inside the moved bytes and no
 /// pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-02).
@@ -3088,6 +3102,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         DEFENDER_HOOKS,
         DEFENDER_ALLOC,
         HELD_CALLEES,
+        GRAB_CALLEES,
     ];
     LISTS
         .iter()

@@ -2691,7 +2691,9 @@ Please send `kh1-recom.log` (`neoshadow:` and `held:` lines) and an F9 trace.
 kind table …` at start and `held: Sora held …` per grab), a battle with two Neoshadows: stand still on the floor until the
 hidden one comes up under you. Sora is held (KH1's held clip, no HP lost, no button works); without the other's dive he
 stands up after about 2 s; the other's dive hits him while held and frees him at once (normal hit reaction, then no hits
-for 0.5 s). No hit spark at the grab. Jump or guard as it comes up: it pops up and vanishes instead (209).
+for 0.5 s). No hit spark at the grab. Jump or guard as it comes up: it pops up and vanishes instead (209). Since
+2026-11-03 Sora is held in the very frame it shows up under him (KH1's frame; the log's `the grab's record tested at
+once … result 1` line, then `held: Sora held`); an F9 trace shows his held row from that frame.
 
 #### KH1 trace (what to record in KH1)
 
@@ -2750,15 +2752,64 @@ held clip's row; no hook of its own). The Neoshadow's side:
 |---|---|---|---|
 | The held clip | the Sora pack step (`build::build_with_held`, `HeldInput`) | `xa_ex_2420.mset` section 3, entry 0 (`+0xA4B80`), request 200 (the word `0x10000C8` read at `ex_2420.bd` `0x1CD4`), its blend 4.0 (`0x1CDA`): a new 60 fps clip of `PL0001.ANN` (and the Keyblade's of `PL0002.ANN`, the Halloween `PL0011.ANN`) after the xl slots, played once, no root motion; the manifest's `held` section (`"blend": 4.0`) | Checked (files: the player's files, `validate::i_held_clip_from_the_neoshadows_player_set`) |
 | The grab's record | `enemy::HOLDS`, `hold_records` | one `EN0027.ASD` record on 208's clip: Re:CoM's come-up strike record (id 1: `m_ex420_sk`, its root, 1.0 m, its power id), kind index 21 (`+0x68`: the held kind), live frames [0, 2), no hit effect (id 0, empty name, as Re:CoM's own records with none); the manifest's `grab_record_frames` 2 and `grab_kind_index` 21 (the DLL refuses another index) | Checked (files); the radius covering Sora on its spot and the 2 frames: Assumption |
-| The behaviour | `kh1_core::neoshadow::grab_or_miss` / `hold` | KH1's script: the test (the host's `Hold::grabbable` and Sora on the floor); `+0x4C` = 1, a note (KH1's Sora request), a yield; shown, `Attack::Grab` (208, blend 0, Re:CoM's state 3), a yield; then each frame at Sora's place facing his way, `t` = len(208) − `grab_trim` (2, `0x1DAE`) down to `grab_let_go` (30, `0x1DF6`): 94 frames; it lets go early when the host's `Hold::held` turns false after being true (a hit's reaction or the clip's end: KH1's "motion no longer 200"), or never turns true within `grab_record_frames` + 1 (the record missed him); `+0x4C` = 0, hidden | Checked (files) for the script; the "never held" rule: Assumption (KH1's grab is no hit) |
+| The behaviour | `kh1_core::neoshadow::grab_or_miss` / `hold` | KH1's script: the test (the host's `Hold::grabbable` and Sora on the floor); `+0x4C` = 1, a note (KH1's Sora request), and in that same frame (KH1's grab timing, 2026-11-03) shown, at Sora, `Attack::Grab` (208, blend 0, Re:CoM's state 3), a yield; at Sora (KH1's 208 frame), a yield; then each frame at Sora's place facing his way, `t` = len(208) − `grab_trim` (2, `0x1DAE`) down to `grab_let_go` (30, `0x1DF6`): 94 frames; it lets go early when the host's `Hold::held` turns false after being true (a hit's reaction or the clip's end: KH1's "motion no longer 200"), or never turns true within `grab_record_frames` + 1 (the record missed him); `+0x4C` = 0, hidden | Checked (files) for the script; the "never held" rule: Assumption (KH1's grab is no hit) |
 | The second Neoshadow | the supervisor (as built) | `+0x4C` sends a free one to its dive (state 4) and clears `+0x4C` (`0x467A`) | Checked (files) |
-| The host | `win::kh1_enemy` | for a behaviour that asks (`Behaviour::wants_hold`), `win::held::hold()` each frame of its AI | — |
+| The host | `win::kh1_enemy` | for a behaviour that asks (`Behaviour::wants_hold`), `win::held::hold()` each frame of its AI; the grab (`Behaviour::grab_attack`) started at once and its record tested at once (§ The grab on KH1's frame) | Checked (decomp + disasm) |
 
-Frames: KH1's script frames are kept (208 the frame after the test, the hold from the frame after that). Sora's hold starts
-when Re:CoM's hit lands: one or two frames after KH1's (Re:CoM's hit order; Assumption, not traced), and lasts his clip's
-126 frames unless a hit frees him. The asset step must be re-run (new: the held clip, the record, four numbers); with an
+Frames (2026-11-03, § The grab on KH1's frame): Sora is held in KH1's frame (the test's, where KH1's script asks for his held
+motion); 208 plays from that frame too, a frame earlier than KH1's (the owner's 1:1 rule, design-philosophy "Neoshadow grab
+timing"); the hold's loop and its let-go keep KH1's frames (the let-go 96 frames after the test). The hold lasts his
+clip's 126 frames unless a hit frees him. The asset step must be re-run (new: the held clip, the record, four numbers); with an
 older pack the log says so and the Neoshadow misses (KH1's other branch); an older `kh1-neoshadow.json` is refused (no
 `grab_*` numbers: Re:CoM's Neoshadow then). No new file, so `mod.yml` is unchanged.
+
+#### The grab on KH1's frame (design-philosophy "Neoshadow grab timing": the 1:1 rule; 2026-11-03)
+
+0.88.0 held Sora **three frames after KH1's**, not one or two (Re:CoM's update order, now Checked (decomp)):
+
+| Frame | KH1 (`ex_2420.bd`, Checked (files)) | 0.88.0's port | Now |
+|---|---|---|---|
+| T (the test) | `+0x4C` = 1; `sys 113` + `sys 13` Sora `0x10000C8` (his held motion asked for); yield (`0x1CB8..0x1D00`) | `+0x4C`, a note; yield | `+0x4C`, the note; shown, at Sora, 208 played at once (its records attach), Re:CoM's windows and attack check run at once: the record meets Sora; **Sora's update takes the hit: held** |
+| T + 1 | shown, `sys 124(0)`, at Sora, effect 6, 208 (`0x1D02..0x1D68`); yield | shown, `Attack::Grab` → state 3 asked for (`+0x68`) | state 3 begins (208 plays on, not restarted); at Sora |
+| T + 2 | the loop: t = len(208) − 2 | state 3 begins: 208 plays, records attach; the windows open after this update's check | the loop (KH1's) |
+| T + 3 | | the check meets Sora: **held** | |
+| T + 96 | let go (t ≤ 30) | let go | let go |
+
+Re:CoM's update order (Checked (decomp)):
+
+- **One actor** (`0x1401A59A0`, every actor's update; `CPlayerSora`'s too): slot `+0x78` (an enemy's: `0x140185630`, the
+  attack check `0x14014E6A0` on its attack set `+0x100`, then the hit handler `0x14017F7E0`; disasm `0x14018567B..
+  0x1401856A1`: `rcx` = the set, the result sets / clears `+0x260 & 0x40`); the state machine (`+0x58`, `0x140242F50`: a
+  state asked for begins at the next update); `+0x80`; the motion clock (`0x14024E470`); slot `+0x90` (an enemy's:
+  `0x140180C90`, the set's `+0x18` = `0x14014E830`: windows opened / closed by the clock, a new serial at an opening). So a
+  record played in a state step is first tested in the next update.
+- **Enemies before Sora:** a battle's `CGameParent` (task 1) gets, in order, … `CBattleEnemyManager` (`0x1401859B0`, task
+  `0x19`, the enemies' parent: the spawns `0x1401A86A0` pass it or 0, and 0 is task `0x19`, `0x140188F40`), …,
+  `CPlayerManager`, then `CPlayerSora` (`0x14020EC70(0, 0, 0)` → task 1) (`0x1401AEBF0`); children are appended
+  (`0x1402ABBA0`) and run depth-first in list order (`0x1402ACA10`). A hit an enemy lands in its update is taken by
+  Sora's damage check (`0x1401E6DE0`) in the same frame.
+
+The fix (no new hook, no per-frame work beyond one atomic load per KH1 enemy state step):
+
+- **The behaviour** (`kh1_core::neoshadow::hold`): 208 with the grab's record in the test's frame (KH1's request of
+  Sora), then a frame at Sora (KH1's 208 frame), then KH1's loop. `Behaviour::grab_attack` names the grab.
+- **The host** (`win::kh1_enemy`, rules `kh1_core::enemy::host::starts_at_once` / `begin_plays`): the grab asked for in
+  state 1 is played at once (Re:CoM's motion play attaches its records) and still enters state 3, whose begin leaves it
+  playing; after that state step (outside the runtime lock) `grab_test_now` runs Re:CoM's windows (`CAttackMotion`
+  `+0x18`, pointer-checked `sites::ATTACK_WINDOWS_PTRS`) and its attack check (`0x14014E6A0`, `sites::GRAB_CALLEES`,
+  first bytes `4C 8B DC 53 56 41 56 48 83 EC 70` from the Steam exe), setting the "connected" bit on a hit as
+  `0x140185630` does. Re:CoM's own passes then find the window open (no new serial) and the hit in Sora's hit-once ring
+  (`0x14016F1C0`): no second hit. Asked for from an attack state (never in the script), it takes the state's begin.
+- Log: `neoshadow: eNNN: the grab's record tested at once (…, result 1): it met Sora …`, then `held: Sora held …`.
+- Tests: `kh1_core::neoshadow::tests::the_hold_starts_on_kh1s_frame_in_the_host` (two Neoshadows through the host's
+  rules: Sora held in the test's frame, 208 from it in state 3 never restarted, the let-go at T + 96; 0.88.0's host
+  path: T + 2 even with 208 asked for at T), `host::tests::the_grab_rules`, the behaviour tests (note and 208 in one
+  frame, the let-go at T + 96).
+- Checked: KH1's frames (files), Re:CoM's order (decomp + disasm), the sites (Steam exe). Assumptions: KH1 takes Sora's
+  request in the frame its script writes it (KH1's party / enemy order not read); the record's sphere, placed from the
+  Neoshadow's last pose (at Sora's place after its 20 follow frames), covers Sora at the test (as before: 1.0 m);
+  nothing else waits on the "connected" bit for the grab. Not seen in game; no KH1 trace.
+- **Asset step: no re-run** (the manifest, the record and the held clip are unchanged since 0.88.0).
 
 #### Neoshadow owner questions
 
