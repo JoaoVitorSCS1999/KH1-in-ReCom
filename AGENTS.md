@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 148: The KH1 Neoshadow (End of the World's group rules, sink / rise, its dives), version 0.80.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
+- Neoshadow (KH1 `xa_ex_2420` / `ex_2420.bd`, only End of the World room 29 ↔ Re:CoM `CEnemyNeoshadow` id 27): every number from the player's files (Checked (files), the asset test reads all 207). The battle's Neoshadows share KH1's room block (`sys 138` → `0x1402BC620`; zeroed at room set-up `0x140287C60`; Checked (decomp)); their count picks the play: one goes to a fixed spot and calls; two: one hides and ambushes from below, the other fights; three or four sink together and rise slashing from a formation; five or more leap up and dive at Sora one by one. The claw, the rising slash, sinking and circling underground (the Shadow's machinery), its hit rules, its death motion 72 (KH1's handler zeroes the killing hit's reaction, `0x4BD0` / `0x5304`).
+- Its body row `0x80` in KH1's mode 3 (always on, `0x1402BBC10` / `0x1402B47A0`) while it leaps, dives or rises slashing, priority 100: Sora's swings bounce off (the shared guard's always-on mode, merged with the Large Body's).
+- Re:CoM (Checked (exe)): vtable `0x140545128`, ctor `0x140190150` (`40 53 48 83 EC 20`, only caller `0x14018940A`), alloc `0x1401893F1` 0xCE0 → 0xD00; Re:CoM's states 0..3 its own.
+- Assumptions (owner questions): room 29's fixed points relative to where Sora started; the grab from below misses (not built); the call brings no one; the dive on Re:CoM's id 1 power; a summoned one can't be hit while rising; a killing hit early in the sink kills it (KH1: 1 HP); the dive's row from frame 0 (KH1: 8); actor `+0x90` / `sys 124` unidentified.
+- Asset step: ENEMY/0027 (ANN / ASD / SES), `kh1-neoshadow.json`.
+- Checked: tests (20 000-frame fights with one and two, the host model with the real manifest), Windows build, 911 sites. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 147: The KH1 Large Body (front guard always on, no-reaction hits, rage charge), version 0.79.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
