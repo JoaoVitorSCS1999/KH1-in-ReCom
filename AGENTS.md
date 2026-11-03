@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 181: Yellow Opera: a Re:CoM effect over the marked spot before the Thunder, version 0.97.3 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Warning stand-in now".
+- Re:CoM's Yellow Opera shows no warning in code (state 2 `0x140196980` / `0x140196A80` only makes the bolt); its effect set `0x140557560` holds `"_ex_2130"` 11 (the bolt) and 12 (the hit) (Checked (decomp + exe)). KH1 (Checked (files) `ex_2130_00.bd` `0x376`): its effect 14 at 200 above the mark, 30 frames before the bolt.
+- Built: `Cmd::Warn` at the mark calls Re:CoM's effect call `0x1401A6B20` (the Yellow Opera as the actor) at KH1's cloud point: `"_ex_2130"` 14 first (Re:CoM appears to keep KH1's numbers), else the set's 12 (logged); ended by Re:CoM's effect end `0x1402585B0(handle, 0.0)` at the strike or when Stop / stun cancels it (new checked site `48 83 EC 38 8B D1 0F 29 74 24 20`). Nothing new per frame.
+- Assumptions: Re:CoM's pack uses KH1's numbers; a handle isn't reused within 30 frames. Known: a Stop during the 30 frames can leave the warning up until it ends. Not checked: `EN0005.EET` (not in the session).
+- Asset step: not needed. Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 180: Green Requiem: its Cure heals nobody when its target can't be hit (KH1), version 0.97.2 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Skip unhittable allies" (KH1's rule).
