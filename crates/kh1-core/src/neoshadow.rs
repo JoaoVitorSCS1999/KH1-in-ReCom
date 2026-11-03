@@ -23,16 +23,19 @@
 //!   5 hit `0x3DE`), and while it travels underground (`wp+0x50`) nothing else.
 //! - the hit handler `0x498C` (see [`Ai::on_hit`] and [`Behaviour::armoured`]).
 //!
-//! # Where KH1's room shows through (owner question, `docs/recom-m11-enemies.md` § Neoshadow owner questions)
+//! # No fixed points of KH1's room (owner, 2026-11-02: "no fixed points: they wander and attack instead")
 //!
 //! KH1 FM places this model only in End of the World's room 29 (Checked (files): of the player's 214
 //! `.ard` rooms only `ew29.ard` names `ex_2420`; KH1's world 16 is `ew`, the world code table
 //! `0x1404DCCA0`, Checked (exe)). Its script names points of that room: the nine places of three
 //! formations (`0x2430`, picked by Sora's x), the spot the last one goes to (`0xAE6`), the one the hidden
 //! one comes up at (`0xA32`), the one a stuck traveller turns to (`0x58AE`), and a height (`0x3736`). The
-//! port runs the script as it runs there (world 16) and takes that room's points about the battle: the
-//! middle formation's first place ([`ROOM_REF`]) stands for where Sora started the battle, heights from the
-//! battle floor ([`Group::centre`], Assumption).
+//! port keeps every other part of the script (counts, timings, the call, sinks, rises, dives) and sends a
+//! Neoshadow to none of those points: where KH1 sends it to a spot it goes to a point about its own place
+//! at the script's own sink-away distance ([`wander_point`], the rounds' `0x552C(actor+0x10, 600, 1000)`);
+//! the formation rises where each sank; a stuck traveller turns toward Sora (Assumptions, owner questions).
+//! The numbers of the points are still read (the manifest is unchanged); only the room's height is used
+//! (the walk home after a dive, [`dive`]).
 //!
 //! Not ported: KH1's effects and their positions (`sys 74` / `75` / `97` / `15` / `16` / `21` / `107`, the
 //! `sys 1.3` removals: M13); the hurt-part masks (`sys 116` / `117`); `sys 124` (a `+0x130` block's `+0x18`,
@@ -193,9 +196,8 @@ pub const NAMES: &[&str] = &[
 /// The Neoshadow's numbers.
 pub type Consts = Table;
 
-/// The point of KH1's room 29 that stands for the battle's middle (where Sora started it), on its floor:
-/// the middle formation's first place (`slot_2_0`, `0x275E`: (8800, 5480, 100), the place nearest the
-/// middle of the three formations and of the room's spots). Assumption (the mapping, owner question).
+/// The formation place whose height is room 29's floor (`slot_2_0`, `0x275E`: (8800, 5480, 100)): only its
+/// height is used, for the dive's walk home (`0x372C`: higher than 5380, 100 above that floor).
 pub const ROOM_REF: (usize, usize) = (2, 0);
 
 /// The Neoshadow's state objects (`wp+0x20`).
@@ -237,7 +239,8 @@ pub struct Group {
     pub effects: i32,
     /// `+0x1C..+0x3C`: the nine places taken (`0x28DC`..).
     pub slots: [bool; 9],
-    /// `+0x40` / `+0x44`: the formation picked (`0x245A`) and which (`0x247E`..).
+    /// `+0x40` / `+0x44`: the formation picked (`0x245A`) and which (`0x247E`..): cleared with each formation,
+    /// never set by the port (no fixed points: no layout of room 29 is picked).
     pub layout_chosen: bool,
     pub layout: usize,
     /// `+0x48`: two left: one went underground for good (`0x7D2`).
@@ -250,9 +253,6 @@ pub struct Group {
     pub coming: i32,
     /// `+0x58`: the last counted one died (`0x4EC6`): the called ones vanish.
     pub last_died: bool,
-    /// The port's: Sora's place when the first Neoshadow of the battle first saw him (KH1 units), the
-    /// battle's stand-in for [`ROOM_REF`].
-    pub centre: Option<Vec3>,
 }
 
 /// The battles' groups: the last battle's only (a new battle starts a new one; KH1's block is zeroed with
@@ -450,26 +450,21 @@ fn floor(cx: &Cx) -> f32 {
     io.x.floor.unwrap_or(io.w.pos.y)
 }
 
-/// One of KH1's room-29 points as a point of this battle: about the group's centre ([`ROOM_REF`] ↔ where
-/// Sora started), its height from the battle floor (Assumption, owner question).
-fn room_point(cx: &Cx, x: f32, y: f32, z: f32) -> Vec3 {
-    let (rx, ry, rz) = slot(cx, ROOM_REF.0, ROOM_REF.1);
-    let c = group(cx, |g| g.centre).unwrap_or_else(|| pos(cx));
-    Vec3::new(c.x + (x - rx), floor(cx) + (y - ry), c.z + (z - rz))
+/// Where the port sends it in place of one of room 29's spots (owner: no fixed points): a point about its
+/// own place at the script's own sink-away distance, [`near_away_min`, `near_away_max`) (600–1000, the
+/// rounds' and the hit state's `0x552C(actor+0x10, 600, 1000)`), at its own height. Assumption (the
+/// nearest KH1-native rule; owner question).
+fn wander_point(cx: &Cx) -> Vec3 {
+    let me = pos(cx);
+    let mut p = me + random_offset(cx, k(cx, "near_away_min"), k(cx, "near_away_max"));
+    p.y = me.y;
+    p
 }
 
 /// A formation place's numbers (`0x2430`: layout, place).
 fn slot(cx: &Cx, layout: usize, place: usize) -> (f32, f32, f32) {
     let n = |a: &str| k(cx, &format!("slot_{layout}_{place}_{a}"));
     (n("x"), n("y"), n("z"))
-}
-
-/// Sora's x in KH1's room-29 axes (the formation picks its layout by it, `0x245A`).
-fn sora_room_x(cx: &Cx) -> f32 {
-    let (rx, _, _) = slot(cx, ROOM_REF.0, ROOM_REF.1);
-    let c = group(cx, |g| g.centre).unwrap_or_else(|| pos(cx));
-    let s = cx.borrow().w.target.unwrap_or(c);
-    rx + (s.x - c.x)
 }
 
 /// The shield row (`0x80`, mode 3) on, unless it is (`0x16BE`: `wp+0x90` null).
@@ -506,18 +501,6 @@ fn random_offset(cx: &Cx, a: f32, b: f32) -> Vec3 {
 /// `0x3D50(a, b)`: rand × (b − a) + a.
 fn rand_range(cx: &Cx, a: f32, b: f32, what: &'static str) -> f32 {
     crate::enemy::script::rand_range(cx, a, b, what)
-}
-
-/// The battle's middle, once: where Sora stands when the first Neoshadow of the battle first sees him.
-fn note_centre(cx: &Cx) {
-    let s = cx.borrow().w.target;
-    if let Some(s) = s {
-        group(cx, |g| {
-            if g.centre.is_none() {
-                g.centre = Some(s);
-            }
-        });
-    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -577,9 +560,10 @@ async fn come_up(cx: &Cx) {
 /// `0x5652(goal, time, speed, near, motion, straight)`: underground travel. Each frame the motion (blend 8);
 /// stops within `near` of the goal or when a gathered dive waits; straight (`straight`) at the goal, else
 /// along its own facing turned 4° a frame (it circles; the turn's side flips every 60 frames, 120 once it
-/// got stuck); from 30 frames on, a frame that moved under speed × 0.25 × step turns it toward KH1's room
-/// spot ([`room_point`] `stuck_x..`) ±60°, 700–1000 away. Stops when another motion plays. Then the speed 0
-/// and the idle (blend 8).
+/// got stuck); from 30 frames on, a frame that moved under speed × 0.25 × step turns it ±60° about a line
+/// toward a new goal 700–1000 away: KH1 aims at room 29's spot (`0x58AE`, `stuck_x..`); the port (no fixed
+/// points) at Sora, else back the way it faces ([`stuck_aim`], Assumption). Stops when another motion
+/// plays. Then the speed 0 and the idle (blend 8).
 async fn travel(cx: &Cx, goal: Vec3, time: f32, speed: f32, near: f32, motion: u16, straight: bool) {
     let mut goal = goal;
     let mut left = time;
@@ -621,10 +605,8 @@ async fn travel(cx: &Cx, goal: Vec3, time: f32, speed: f32, near: f32, motion: u
         if since - k(cx, "stuck_after") > 0.0 && cx.borrow().w.moved - speed * k(cx, "stuck_factor") * step(cx) < 0.0 {
             flip_at = k(cx, "stuck_flip");
             let me = pos(cx);
-            let spot = room_point(cx, k(cx, "stuck_x"), k(cx, "stuck_y"), k(cx, "stuck_z"));
-            let to = spot - me;
             let a = rand_range(cx, k(cx, "stuck_angle_min"), k(cx, "stuck_angle_max"), "stuck turn");
-            let y = to.x.atan2(to.z) + a.to_radians();
+            let y = stuck_aim(cx, me) + a.to_radians();
             let len = rand_range(cx, k(cx, "stuck_dist_min"), k(cx, "stuck_dist_max"), "stuck distance");
             goal = me + Vec3::from_yaw(y) * len;
             goal.y = me.y;
@@ -633,6 +615,17 @@ async fn travel(cx: &Cx, goal: Vec3, time: f32, speed: f32, near: f32, motion: u
     }
     steer(cx, Vec3::ZERO, 0.0);
     play(cx, req::IDLE, k(cx, "under_blend"));
+}
+
+/// The heading a stuck traveller turns about (`0x58AE`). KH1: toward room 29's spot `(8700, 5300, 100)`, the
+/// middle of that room, away from its walls. The port (no fixed points): toward Sora, who stands in the
+/// open battle room; with no target, back the way it faces. Assumption (owner question).
+fn stuck_aim(cx: &Cx, me: Vec3) -> f32 {
+    let to = target(cx).map(|t| t - me).filter(|d| d.x != 0.0 || d.z != 0.0);
+    match to {
+        Some(d) => d.x.atan2(d.z),
+        None => cx.borrow().body.yaw + std::f32::consts::PI,
+    }
 }
 
 /// `0x552C(centre, lo, hi, straight)`: unless a gathered dive waits with more than `gather_max` of them:
@@ -1060,8 +1053,9 @@ async fn rounds(cx: &Cx, n: f32) {
 
 /// `0x1FB0`: the formation (three or four of them). The places and the layout cleared; on the floor; sink;
 /// hidden; 20 frames; while a formation still goes, wait (two or fewer: go on); one more sunk (`+0x10`);
-/// until it goes (`+0x14`: all sunk, or two or fewer), then 6 frames; a free place of the layout (`0x2430`);
-/// one fewer sunk (none: it no longer goes); height 1; 20 frames; the rising slash out of the place.
+/// until it goes (`+0x14`: all sunk, or two or fewer), then 6 frames; a free place (`0x2430`: KH1 moves it
+/// to that place of room 29; the port, no fixed points, leaves it where it sank); one fewer sunk (none: it
+/// no longer goes); height 1; 20 frames; the rising slash, all together.
 async fn formation(cx: &Cx) {
     cx.borrow_mut().x.flinches = 0;
     group(cx, |g| {
@@ -1105,34 +1099,18 @@ async fn formation(cx: &Cx) {
     rise_slash_out(cx).await;
 }
 
-/// `0x2430`: the layout (the first to come picks it by Sora's x in KH1's room: under 8250 the first, over
-/// 9200 the second, else the third); then each frame a draw in [1, 10): the first free place at or after the
-/// draw's (place k for a draw under k + 2) is taken and it moves there (`sys 86`, facing 0); else a yield and
-/// another draw.
+/// `0x2430`: KH1's first to come picks a layout of room 29 by Sora's x there (under 8250 the first, over 9200
+/// the second, else the third: `layout_low` / `layout_high`); then each frame a draw in [1, 10): the first free
+/// place at or after the draw's (place k for a draw under k + 2) is taken and it moves there (`sys 86`, facing
+/// 0); else a yield and another draw. The port (owner: no fixed points) keeps the draw and the places taken
+/// (KH1's frames and random numbers; the group's words) and neither picks a layout nor moves: it rises where
+/// it sank, facing as it was (the rise faces Sora at once). Assumption (owner question).
 async fn take_place(cx: &Cx) {
-    if !group(cx, |g| g.layout_chosen) {
-        let x = sora_room_x(cx);
-        let l = if x - k(cx, "layout_low") < 0.0 {
-            0
-        } else if x - k(cx, "layout_high") > 0.0 {
-            1
-        } else {
-            2
-        };
-        group(cx, |g| {
-            g.layout_chosen = true;
-            g.layout = l;
-        });
-    }
-    let l = group(cx, |g| g.layout);
     loop {
         let r = rand_range(cx, k(cx, "slot_draw_min"), k(cx, "slot_draw_max"), "formation place");
         let pick = group(cx, |g| (0..9).find(|&p| r - (p as f32 + 2.0) < 0.0 && !g.slots[p]));
         if let Some(p) = pick {
             group(cx, |g| g.slots[p] = true);
-            let (x, y, z) = slot(cx, l, p);
-            let to = room_point(cx, x, y, z);
-            warp(cx, to, 0.0);
             return;
         }
         frame().await;
@@ -1148,10 +1126,13 @@ async fn special_round(cx: &Cx) {
 
 /// `0x1AF6`: the hidden one's ambush. While Sora is off the floor (unless it is alone, 13 m away, or 180
 /// frames passed), wait; 20 frames under Sora, facing his way; then KH1 grabs him from below when he stands on
-/// the floor and can be hit: he plays its motion 200 from its own `.mset` (`sys 113`, `0x1402BA8C0`, request
-/// `0x10000C8`) while it plays 208 and the others dive at him (`+0x4C`). **Not built** (owner question): the
-/// port always takes KH1's other branch, the miss: at his feet, facing his way, shown, 209 until it has played,
-/// hidden again.
+/// the floor and can be hit: he plays request 200 of the Neoshadow's `.mset` player set (`sys 113`,
+/// `0x1402BA8C0`; set at `+0xA4B80`, 126 frames) action-locked (`0x10000C8`), the lock's release queued; it
+/// plays 208 (126 frames) at his place for up to len − 2, letting go 30 before the end or when his motion
+/// changes (a hit), no damage of its own, while the others dive at him (`+0x4C`). **Not built**: Re:CoM has no
+/// player reaction that holds Sora with an enemy's clip and gives way to a hit (owner question 2,
+/// `docs/recom-m11-enemies.md` § The grab from below); the port always takes KH1's other branch, the miss: at
+/// his feet, facing his way, shown, 209 until it has played, hidden again.
 async fn grab_or_miss(cx: &Cx) {
     let mut waited = 0.0f32;
     loop {
@@ -1174,7 +1155,7 @@ async fn grab_or_miss(cx: &Cx) {
         frame().await;
     }
     follow_sora(cx);
-    push(cx, ECmd::Note("Neoshadow grab from below not built (owner question): KH1's miss (209) instead"));
+    push(cx, ECmd::Note("Neoshadow grab from below not built (owner question 2: no Re:CoM reaction holds Sora): KH1's miss (209) instead"));
     let sora = cx.borrow().w.target;
     if let Some(s) = sora {
         let mut p = s;
@@ -1218,17 +1199,19 @@ async fn call(cx: &Cx) {
     }
 }
 
-/// `0x8FA`: alone. The hidden one first: the group's words cleared, no longer hidden (`wp+0x48` = 0), to KH1's
-/// room spot (`special_x..`, `sys 86`, facing 0), 30 frames, shown, come up, the call. Then while alone: with no
-/// called one still coming, underground to KH1's room spot (`lone_x..`, straight) and the call; five rounds.
+/// `0x8FA`: alone. The hidden one first: the group's words cleared, no longer hidden (`wp+0x48` = 0), moved
+/// (`sys 86`, facing 0; KH1: to room 29's spot `special_x..`), 30 frames, shown, come up, the call. Then while
+/// alone: with no called one still coming, underground (straight; KH1: to room 29's spot `lone_x..`) and the
+/// call; five rounds. The port (owner: no fixed points) sends it to a [`wander_point`] about its own place both
+/// times (Assumption).
 async fn lone(cx: &Cx) {
     if cx.borrow().x.special {
         group(cx, |g| {
-            let (count, centre, calling, coming, last) = (g.count, g.centre, g.calling, g.coming, g.last_died);
-            *g = Group { count, centre, calling, coming, last_died: last, ..Group::default() };
+            let (count, calling, coming, last) = (g.count, g.calling, g.coming, g.last_died);
+            *g = Group { count, calling, coming, last_died: last, ..Group::default() };
         });
         cx.borrow_mut().x.special = false;
-        let to = room_point(cx, k(cx, "special_x"), k(cx, "special_y"), k(cx, "special_z"));
+        let to = wander_point(cx);
         warp(cx, to, 0.0);
         wait_frames(cx, k(cx, "special_rise_wait")).await;
         push(cx, ECmd::Visible(true));
@@ -1237,7 +1220,7 @@ async fn lone(cx: &Cx) {
     }
     loop {
         if group(cx, |g| g.coming == 0) {
-            let spot = room_point(cx, k(cx, "lone_x"), k(cx, "lone_y"), k(cx, "lone_z"));
+            let spot = wander_point(cx);
             sink_travel(cx, spot, 0.0, 0.0, true).await;
             call(cx).await;
         }
@@ -1489,8 +1472,8 @@ impl Ai {
         let calling = {
             let a = io.x.group.clone();
             let mut g = a.lock().unwrap_or_else(|e| e.into_inner());
-            let (count, centre, calling, coming) = (g.count, g.centre, g.calling, g.coming);
-            *g = Group { count, centre, calling, coming, ..Group::default() };
+            let (count, calling, coming) = (g.count, g.calling, g.coming);
+            *g = Group { count, calling, coming, ..Group::default() };
             if !calling {
                 g.count += 1;
                 g.calling = false;
@@ -1523,7 +1506,6 @@ impl Ai {
             self.init(w);
             self.main = Some(Box::pin(supervisor(self.io.clone())));
         }
-        note_centre(&self.io);
         poll(&mut self.main);
         let restart = self.io.borrow().out.iter().rev().find_map(|c| match c {
             ECmd::State(s) => Some(*s),
@@ -1901,37 +1883,60 @@ mod tests {
         assert_eq!(states, vec![st::IDLE, st::ENGAGED]);
         assert!(s.n[0].ai.risen());
         assert_eq!(s.group().count, 1);
-        assert_eq!(s.group().centre, Some(Vec3::new(0.0, 0.0, 400.0)), "the battle's middle: where Sora stood");
     }
 
-    /// `0x8FA`: alone, it sinks, travels straight to KH1's room spot (here 1 m along x from where Sora started:
-    /// (8900, 100) against the reference (8800, 100)), comes up and calls (210); then its rounds.
+    /// `0x8FA`: alone, it sinks, travels straight underground (KH1: to room 29's spot; here, no fixed points: a
+    /// point 600–1000 about where it was), comes up and calls (210); then its rounds. Wherever it starts, it
+    /// ends up about its own place, not at one spot of the battle.
     #[test]
-    fn alone_it_goes_to_the_room_spot_and_calls() {
-        let mut s = Sim::new(2, &[Vec3::new(-800.0, 0.0, 0.0)]);
-        s.run(Vec3::ZERO, 900);
-        let o = &s.n[0];
-        let sink = o.first(|c| matches!(c, ECmd::Motion { request: req::SINK, .. })).expect("it sinks");
-        let hide = o.first(|c| *c == ECmd::Hittable(false)).unwrap();
-        assert_eq!(hide - sink, 47, "unhittable from frame 46 + 1 of the sink (its 6 frames past 40)");
-        let up = o.first(|c| matches!(c, ECmd::Motion { request: req::COME_UP, .. })).expect("it comes up");
-        let call = o.first(|c| matches!(c, ECmd::Motion { request: req::CALL, .. })).expect("it calls");
-        assert!(up < call);
-        assert!(o.log.iter().any(|(_, c)| matches!(c, ECmd::Note(n) if n.contains("600..606"))));
-        // It came up within 50 of the spot (100, 0, 0).
-        let at_up = o.log.iter().filter(|(f, _)| *f < up).count();
-        assert!(at_up > 0);
-        let spot = Vec3::new(100.0, 0.0, 0.0);
-        let d = (o.pos - spot).length();
-        assert!(d < 1500.0, "{:?}", o.pos);
-        // Then the rounds: something of its own after the call.
-        let after: Vec<u16> = o.log.iter().filter(|(f, _)| *f > call + 246).filter_map(|(_, c)| if let ECmd::Motion { request, .. } | ECmd::Attack { request, .. } = c { Some(*request) } else { None }).collect();
-        assert!(!after.is_empty(), "its rounds go on");
+    fn alone_it_travels_about_its_place_and_calls() {
+        let mut ends = Vec::new();
+        for (seed, start) in [(2u32, Vec3::new(-800.0, 0.0, 0.0)), (12, Vec3::new(3000.0, 0.0, 2000.0)), (22, Vec3::new(-2500.0, 0.0, -1500.0))] {
+            let mut s = Sim::new(seed, &[start]);
+            let sora = start + Vec3::new(0.0, 0.0, 2000.0);
+            let mut up_at = None;
+            for _ in 0..900 {
+                s.run(sora, 1);
+                if up_at.is_none() && s.n[0].current == Some(req::COME_UP) {
+                    up_at = Some(s.n[0].pos);
+                }
+            }
+            let o = &s.n[0];
+            let sink = o.first(|c| matches!(c, ECmd::Motion { request: req::SINK, .. })).expect("it sinks");
+            let hide = o.first(|c| *c == ECmd::Hittable(false)).unwrap();
+            assert_eq!(hide - sink, 47, "unhittable from frame 46 + 1 of the sink (its 6 frames past 40)");
+            let up = o.first(|c| matches!(c, ECmd::Motion { request: req::COME_UP, .. })).expect("it comes up");
+            let call = o.first(|c| matches!(c, ECmd::Motion { request: req::CALL, .. })).expect("it calls");
+            assert!(up < call);
+            assert!(o.log.iter().any(|(_, c)| matches!(c, ECmd::Note(n) if n.contains("600..606"))));
+            // It came up 600–1000 (± the 50 it may stop short) from where it started.
+            let p = up_at.expect("up");
+            let d = Vec3::new(p.x - start.x, 0.0, p.z - start.z).length();
+            assert!((550.0..1000.0).contains(&d), "seed {seed}: came up {d} from its start {p:?}");
+            ends.push(p);
+            // Then the rounds: something of its own after the call.
+            let after: Vec<u16> = o.log.iter().filter(|(f, _)| *f > call + 246).filter_map(|(_, c)| if let ECmd::Motion { request, .. } | ECmd::Attack { request, .. } = c { Some(*request) } else { None }).collect();
+            assert!(!after.is_empty(), "its rounds go on");
+        }
+        assert!((ends[1] - ends[0]).length() > 2000.0 && (ends[2] - ends[0]).length() > 1000.0, "no one spot: {ends:?}");
+    }
+
+    /// The stuck traveller (`0x58AE`): it turns toward Sora (KH1: room 29's spot); without a target, back the way
+    /// it faces.
+    #[test]
+    fn a_stuck_traveller_turns_toward_sora() {
+        let ai = Ai::new(consts(), frames(), 1, 0.0);
+        ai.io.borrow_mut().w.target = Some(Vec3::new(100.0, 0.0, 0.0));
+        ai.io.borrow_mut().has_target = true;
+        assert!((stuck_aim(&ai.io, Vec3::ZERO) - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        ai.io.borrow_mut().w.target = None;
+        ai.io.borrow_mut().body.yaw = 0.25;
+        assert!((stuck_aim(&ai.io, Vec3::ZERO) - (0.25 + std::f32::consts::PI)).abs() < 1e-6);
     }
 
     /// Two of them: the first goes underground for good (hidden, unhittable), comes up at Sora's feet and misses
-    /// (209: KH1's grab is not built); the other fights. When the other dies, the hidden one comes up at KH1's
-    /// spot and calls.
+    /// (209: KH1's grab is not built); the other fights. When the other dies, the hidden one comes up about its
+    /// own place (no fixed points) and calls.
     #[test]
     fn two_of_them_one_hides_and_ambushes() {
         let mut s = Sim::new(3, &[Vec3::new(-300.0, 0.0, 0.0), Vec3::new(300.0, 0.0, 0.0)]);
@@ -1962,8 +1967,8 @@ mod tests {
         assert!(!o.ai.special());
     }
 
-    /// Three of them: they sink, wait for each other, take three different places of a formation and rise
-    /// slashing together, the shield (row `0x80`, held) on from the rise to 70 frames before 207's end.
+    /// Three of them: they sink, wait for each other, take three different places of the formation's draw and
+    /// rise slashing together where each sank (no fixed points), the shield (row `0x80`, held) on from the rise to 70 frames before 207's end.
     #[test]
     fn three_rise_together_from_a_formation() {
         let mut s = Sim::new(4, &[Vec3::new(-400.0, 0.0, 0.0), Vec3::new(400.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -400.0)]);
@@ -1971,11 +1976,10 @@ mod tests {
         s.run(sora, 400);
         let rises: Vec<usize> = s.n.iter().map(|o| o.attacks().iter().find(|a| a.1 == Attack::RiseSlash).map(|a| a.0).expect("it rises slashing")).collect();
         assert!(rises.iter().all(|&f| f == rises[0]), "together: {rises:?}");
-        let places: Vec<Vec3> = s.n.iter().map(|o| o.pos).collect();
-        for i in 0..3 {
-            for j in i + 1..3 {
-                assert!((places[i] - places[j]).length() > 100.0, "different places {places:?}");
-            }
+        // No fixed points: each rises where it sank (its own place), not at a place of room 29.
+        let starts = [Vec3::new(-400.0, 0.0, 0.0), Vec3::new(400.0, 0.0, 0.0), Vec3::new(0.0, 0.0, -400.0)];
+        for (o, st) in s.n.iter().zip(starts) {
+            assert!((Vec3::new(o.pos.x - st.x, 0.0, o.pos.z - st.z)).length() < 60.0, "rose where it sank: {:?} from {st:?}", o.pos);
         }
         for o in &s.n {
             let on = o.first(|c| *c == ECmd::Guard(Some((SHIELD, HELD)))).unwrap();
@@ -1984,7 +1988,7 @@ mod tests {
             assert_eq!(off - on, 51, "120 − 70 frames, the frame after it ends");
         }
         let g = s.group();
-        assert!(g.layout_chosen && g.slots.iter().filter(|x| **x).count() == 3);
+        assert!(!g.layout_chosen && g.slots.iter().filter(|x| **x).count() == 3);
         assert_eq!((g.sunk, g.go), (0, 0));
     }
 
@@ -2077,12 +2081,12 @@ mod tests {
         assert_eq!((g.count, g.coming), (2, 0));
     }
 
-    /// A long fight (alone and two of them): each acts at least every 600 frames, Sora circling 2–7 m away and
-    /// a hit every 150–400 frames (12 seeds, 20 000 frames).
+    /// A long fight (one to five of them, no fixed points): each acts at least every 600 frames, Sora circling 2–7 m away and
+    /// a hit every 150–400 frames (12 seeds for one and two, 4 for three to five; 20 000 frames).
     #[test]
     fn a_long_fight_never_stalls() {
-        for k in [1usize, 2] {
-            for seed in 0..12u32 {
+        for k in [1usize, 2, 3, 4, 5] {
+            for seed in 0..if k <= 2 { 12u32 } else { 4 } {
                 let places: Vec<Vec3> = (0..k).map(|i| Vec3::new(-300.0 + 600.0 * i as f32, 0.0, 0.0)).collect();
                 let mut s = Sim::new(seed + 100, &places);
                 let mut r = Kh1Rand::new(seed + 7);
