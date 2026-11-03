@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 152: Re:CoM-AI Heartless wait their own attack-end cooldown in KH1 battles, version 0.83.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02, Fat Bandit video): "it attacks so frequently that there's no opening"; answers: keep porting; every not-yet-ported Heartless waits a longer cooldown, each enemy's own value.
+- Re:CoM (Checked (exe: all 198 calls; decomp)): the attack end `0x14017E540` is always called with next = 0, so Re:CoM drops the cooldown passed (197 calls pass 6000 ticks = 120 frames; Marluxia 2's `0x1403FBA20` passes 0) and writes 250 (5 frames) at `0x14017E5F5`. The value is the same for every Heartless class.
+- Built: a wrapper on `0x14017E540` (15 exact first bytes; nothing branches into them): Re:CoM's attack end, then the passed value written back, only in a KH1 battle (M6's switch), only for the 32 ordinary Heartless classes' own Re:CoM tables (our KH1-AI enemies never use them), only on Re:CoM's "no next state, 250" path. Once per finished attack; a log line per class.
+- 120 frames: Air Pirate, Air Soldier, Aquatank, Bandit, Barrel Spider, Black Fungus, Blue Rhapsody, Bouncywild, Creeper Plant, Darkball, Defender, Fat Bandit, Gargoyle, Green Requiem, Heart / Spade Soldier, Large Body, Loudness, Neoshadow, Pirate, Powerwild, Red Nocturne, Screwdiver, Sea Neon, Search Ghost, Shadow, Soldier, Tornado Step, Wight Knight, Wizard, Wyvern, Yellow Opera (the ported ones only while on Re:CoM's AI). Unchanged (250): Heartless bosses, Marluxia 2, human bosses, the bee, the White Mushroom (never calls it). An interrupted attack still gets 250 after the flinch (`0x14017D6F0`; Assumption which path each reaction ends on).
+- Checked: tests, Windows build, 935 sites. Not checked: in game.
+
+---
+
 ## Stage 151: KH1's attack-meets-attack clashes for every ported enemy, version 0.82.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02, Large Body question 3): "Build them": attack-vs-attack clashes in the shared enemy guard, KH1's order of tests researched first.
