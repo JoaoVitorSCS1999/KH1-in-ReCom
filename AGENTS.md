@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 167: KH1 camp entry always shown; its Combat and Movement settings pages; Re:CoM's Config menu restored, version 0.93.0 (2026-11-01)
+
+- Asks (owner, 2026-11-03): "Under the \"KH1\" tab in the pause menu, I want run speed, jump height, and air speed under a sub menu called \"Movement\" I also want the guard Reactions, combat, and enemy pace to be under a seperate sub menu in the KH1 tab called \"Combat.\" Also, Just have the \"KH1\" Tab in the camp menu always be there, regardless of if the combat is set to ReCoM or KH1"; answers: move the three rows out of Config; at Re:CoM only Combat + Movement; add Enemy AI, Boss revenge ("renamed to Revenge Value"), Dodge roll.
+- KH1 entry: shown at any Combat setting in Sora's story (hidden in Riku's story and the map-opening camp, as before). Combat = Re:CoM: Combat, Movement; Combat = KH1: Items, Customize, Abilities, Combat, Movement.
+- Combat page: Combat, Guard reactions, Enemy pace, Enemy AI, Revenge Value (ini `boss_revenge`). Movement page: Run speed, Jump height, Air speed, Dodge roll (Re:CoM / KH1 / Off).
+- Native: each page is Re:CoM's own Config screen running our rows: its draw `0x1400DF1B0` (now called, not hooked; 10 first bytes checked) keeps the window, cursor, open / close, cleanup, sounds, help line; only its row-building step is ours, at Re:CoM's own row positions. Changes saved through `settings::store`. The input hook `0x1400D3EB0` only routes the KH1 entry's pages.
+- Re:CoM's Config menu: our draw hook removed with its extra rows and window stretch (no data patches): its own five rows, as unmodded. `config_menu = off` now means no KH1 entry.
+- Effect: at once: Combat (read at each battle start), Guard reactions, Revenge Value, the four movement keys (read every KH1 frame; KH1 only); from the next battle: Enemy pace, Enemy AI. Changing Combat in the page redraws the entry's rows on close.
+- Checked: Re:CoM decomp (Config input states, draw modes, camp states 0x4A–0x4C, teardown), Steam exe bytes; tests, Windows build. Assumption: no jump / roll in progress while the camp is open. Not checked: in game. Asset step: not needed.
+
+---
+
 ## Stage 166: The KH1 Red Nocturne (its Fire and big Fire; the casters' shared module), version 0.92.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
