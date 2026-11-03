@@ -2790,6 +2790,60 @@ pub const WIGHTKNIGHT_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemyWightnight +0x440 attack end", rva: 0x0055_3B88, target: 0x0017_DA90 },
 ];
 
+/// M11 casters: the Fat Bandit's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp): its only
+/// caller is the enemy factory `0x140188F40` (case 10, the call at `0x140189140`); no branch lands inside the moved bytes
+/// and no pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-02).
+pub const FATBANDIT_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemyFatbandit ctor (0x14018DD70)", rva: 0x0018_DD70, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 casters: the factory's `mov ecx, 0xCD0` before `CEnemyFatbandit`'s ctor, raised by the framework's 0x20-byte
+/// tail. Checked (exe).
+pub const FATBANDIT_ALLOC: &[Site] = &[Site { name: "alloc CEnemyFatbandit (0x140189127)", rva: 0x0018_9127, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11 casters: `CEnemyFatbandit`'s vtable slots the copy keeps or replaces, checked against Re:CoM's functions before
+/// the copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12 / 30 are `CBattleEnemy`'s, 1..3 the
+/// Fat Bandit's own: 1 `0x14018DEB0` / the walk thunk `0x14018E140`, 2 its belly `e010_050` `0x14018DE30` /
+/// `0x14018DEE0`, 3 its fireball `e010_051` `0x14018DE60` / `0x14018DF20` (a `CBullet` from `head2`, homing 30 frames);
+/// the attack states' ends `CBattleEnemy`'s `0x14017E6C0` / `0x14017E700`; the think `CHeartless`'s `0x140196EC0`).
+pub const FATBANDIT_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyFatbandit +0x70 motion play", rva: 0x0053_DE68, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyFatbandit +0x80 update", rva: 0x0053_DE78, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyFatbandit +0xE8 state 0 begin", rva: 0x0053_DEE0, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyFatbandit +0xF0 state 0 step", rva: 0x0053_DEE8, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyFatbandit +0xF8 state 0 end", rva: 0x0053_DEF0, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyFatbandit +0x100 state 1 begin", rva: 0x0053_DEF8, target: 0x0018_DEB0 },
+    PtrSite { name: "CEnemyFatbandit +0x108 state 1 step", rva: 0x0053_DF00, target: 0x0018_E140 },
+    PtrSite { name: "CEnemyFatbandit +0x118 state 2 begin", rva: 0x0053_DF10, target: 0x0018_DE30 },
+    PtrSite { name: "CEnemyFatbandit +0x120 state 2 step", rva: 0x0053_DF18, target: 0x0018_DEE0 },
+    PtrSite { name: "CEnemyFatbandit +0x130 state 3 begin", rva: 0x0053_DF28, target: 0x0018_DE60 },
+    PtrSite { name: "CEnemyFatbandit +0x138 state 3 step", rva: 0x0053_DF30, target: 0x0018_DF20 },
+    PtrSite { name: "CEnemyFatbandit +0x1F0 state 11 begin", rva: 0x0053_DFE8, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyFatbandit +0x208 state 12 begin", rva: 0x0053_E000, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyFatbandit +0x3B8 state 30 begin", rva: 0x0053_E1B0, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyFatbandit +0x3C0 state 30 step", rva: 0x0053_E1B8, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyFatbandit +0x3D0 think", rva: 0x0053_E1C8, target: 0x0019_6EC0 },
+    // The shared enemy-guard step: the hit handler's guard event (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemyFatbandit +0x3D8 guard event", rva: 0x0053_E1D0, target: 0x0018_1600 },
+    PtrSite { name: "CEnemyFatbandit +0x438 attack hurt off", rva: 0x0053_E230, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyFatbandit +0x440 attack end", rva: 0x0053_E238, target: 0x0017_DA90 },
+];
+
+/// M11 casters: the Fat Bandit's own fireball's effect sets (`0x14018DF20`'s descriptor `+0xA8` = `0x14053E290`: slots
+/// 1..3 `"_ex_2060"` 7 / 15 / 5, the model's own effects; `+0xB8` = `0x14053E300`), copied into its KH1 fireballs and
+/// flame (owner 2026-11-02: "drawn with a Re:CoM effect (its own fireball's)"). Pointer-checked: slot 1's name pointer.
+/// Checked (exe + decomp).
+pub const FATBANDIT_FIRE_PTRS: &[PtrSite] = &[PtrSite { name: "the Fat Bandit's fireball effect set slot 1 name", rva: 0x0053_E2A8, target: 0x0053_E2F0 }];
+
+/// M11 casters: Re:CoM's collision radius setter (`0x140172690(coll, r)`: a sphere's `+0x70` / `+0x74`, the others'
+/// `+0x70`; 148 call sites, the attack set's `0x14014E5C0` among them), which the Fat Bandit's flame calls on its
+/// spheres' bullets each frame (`win::kh1_flame`). Called only. Checked (exe + decomp).
+pub const FLAME_CALLEES: &[Site] = &[
+    // mov rdx,[rcx+0x18]; mov r8,rcx; test rdx,rdx
+    Site { name: "collision radius setter (0x140172690)", rva: 0x0017_2690, expect: &[0x48, 0x8B, 0x51, 0x18, 0x4C, 0x8B, 0xC1, 0x48, 0x85, 0xD2] },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -2920,6 +2974,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         NEOSHADOW_ALLOC,
         WIGHTKNIGHT_HOOKS,
         WIGHTKNIGHT_ALLOC,
+        FATBANDIT_HOOKS,
+        FATBANDIT_ALLOC,
+        FLAME_CALLEES,
     ];
     LISTS
         .iter()
@@ -3019,7 +3076,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, KH1_ENEMY_RING_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, KH1_ENEMY_RING_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

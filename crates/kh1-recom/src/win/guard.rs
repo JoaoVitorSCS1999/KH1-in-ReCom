@@ -290,6 +290,15 @@ unsafe fn turn_back(obj: usize, c: usize, s: Shot) -> bool {
     true
 }
 
+/// M11 (the Fat Bandit's fireball, `win::kh1_thrown`): Sora's KH1 swing sent a shot back (KH1's projectile clash,
+/// `0x1402B4BC0`: the shot turned to the swinger's side): the same turn-back as a Guard block (its collision to the
+/// enemies' list, remembered for its hit, decision 28), without the block's log line or reaction. Its flight is the
+/// caller's from here.
+pub(super) unsafe fn send_back(obj: usize) -> bool {
+    let c: usize = rd(obj + bullet::COLL);
+    c != 0 && turn_back(obj, c, Shot::Homing)
+}
+
 /// A turned-back shot's later test hit something (its collision now walks the enemies' list).
 unsafe fn turned_hit(c: usize, r: i32) {
     let id: u32 = rd(c + coll::OWNER);

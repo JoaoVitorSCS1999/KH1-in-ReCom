@@ -424,6 +424,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
         if v.iter().any(|x| x.battle != battle) {
             // A new battle: the last one's thrown blades are gone.
             super::kh1_thrown::forget();
+            super::kh1_flame::forget();
         }
         // Other battles' runtimes go (they come before this battle's, so no live index moves); an
         // enemy rebuilt at the same address this battle replaces its old runtime **in place**
@@ -1016,6 +1017,10 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
     body_step(en, rt, step, pos);
     guard_step(en, rt, step);
     ring_step(en, rt);
+    // M11, the Fat Bandit's flame (KH1's child `ex_2060_01.bd`): its spheres on Re:CoM's bullets (one atomic load while
+    // no flame burns).
+    let yaw = rt.ai.body().yaw;
+    super::kh1_flame::step(en, manifest(rt.class), rt.current, !rt.dead, yaw, step);
     // KH1's hit counter goes back to 0 at the end of an update with no action playing (actor flag
     // 4: an action of ours the AI waits on, or a reaction).
     if rt.reaction.is_none() && rt.action.is_none_or(|a| a.steered) {
@@ -2718,6 +2723,10 @@ pub unsafe fn trace_token() -> String {
     let blades = super::kh1_thrown::trace_token();
     if !blades.is_empty() {
         out.push(blades);
+    }
+    let flames = super::kh1_flame::trace_token();
+    if !flames.is_empty() {
+        out.push(flames);
     }
     out.join("; ")
 }
