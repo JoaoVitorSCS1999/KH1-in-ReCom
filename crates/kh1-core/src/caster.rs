@@ -210,11 +210,18 @@ pub enum CastStep {
 /// `wait` frames (counted down by the step each frame, checked first) the parent must still play the cast request
 /// (`_01` also lets a dead parent go on: the host steps only a living parent's children, so the rule is the same
 /// here); then it acts. Charge effects (`sys 75` 2052 / 2054, 2053 / 2058) wait for M13.
+///
+/// The Blue Rhapsody's Blizzard (`ex_2120_00.bd` entry `0x1C2`, [`Cast::direct`]; Checked (files)) has no charge: from its
+/// first frame its parent must play the cast request (55), whose `wait` (84) frames it counts while the parent is not
+/// stopped (`+0x88 & 1`, KH1's Stop status: the port's Stop is Re:CoM's own state, which ends the cast); then it acts.
+/// Its first frame only yields (it checks the motion from its second), which ends it a frame later than here when the
+/// parent's motion changed in between: unseen either way (a child that ends does nothing).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cast {
     /// Its sub-object index (`sys 94`'s second word): the host's [`Cmd::Throw`].
     pub child: u8,
-    pub charge: u16,
+    /// The charge request it waits through first (none: [`Cast::direct`]).
+    pub charge: Option<u16>,
     pub cast: u16,
     pub wait: f32,
     left: Option<f32>,
@@ -222,7 +229,12 @@ pub struct Cast {
 
 impl Cast {
     pub fn new(child: u8, charge: u16, cast: u16, wait: f32) -> Cast {
-        Cast { child, charge, cast, wait, left: None }
+        Cast { child, charge: Some(charge), cast, wait, left: None }
+    }
+
+    /// A child with no charge (the Blue Rhapsody's Blizzard): its count runs in the cast request from its first frame.
+    pub fn direct(child: u8, cast: u16, wait: f32) -> Cast {
+        Cast { child, charge: None, cast, wait, left: None }
     }
 
     /// One frame of the child's script with its parent playing `motion`.
@@ -230,7 +242,7 @@ impl Cast {
         let left = match self.left {
             Some(l) => l,
             None => {
-                if motion == Some(self.charge) {
+                if self.charge.is_some() && motion == self.charge {
                     return CastStep::Waits;
                 }
                 if motion != Some(self.cast) {
@@ -303,6 +315,27 @@ mod tests {
         let mut c = Cast::new(0, 200, 201, 40.0);
         assert_eq!(c.step(Some(201), 1.0), CastStep::Waits);
         assert_eq!(c.step(Some(220), 1.0), CastStep::Ends);
+    }
+
+    /// The Blue Rhapsody's Blizzard: no charge; 84 frames counted in 55 from its first frame, then it acts (the 85th);
+    /// anything else ends it.
+    #[test]
+    fn a_direct_cast_counts_from_its_first_frame() {
+        let mut c = Cast::direct(0, 55, 84.0);
+        let mut f = 0;
+        loop {
+            f += 1;
+            match c.step(Some(55), 1.0) {
+                CastStep::Waits => {}
+                CastStep::Launches => break,
+                CastStep::Ends => panic!(),
+            }
+        }
+        assert_eq!(f, 85, "launches on its 85th frame (KH1: the frame after `sys 94` + 84)");
+        let mut c = Cast::direct(0, 55, 84.0);
+        assert_eq!(c.step(Some(55), 1.0), CastStep::Waits);
+        assert_eq!(c.step(Some(0x48), 1.0), CastStep::Ends);
+        assert_eq!(Cast::direct(0, 55, 84.0).step(Some(220), 1.0), CastStep::Ends);
     }
 
     #[test]

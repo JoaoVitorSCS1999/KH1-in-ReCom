@@ -56,6 +56,13 @@ pub struct Body {
     /// reactions (`0x1402B1B10`), never grounded. The Bandit's leap (M11). An arc, a timed jump,
     /// flight or `sys 88` ([`Body::ground`]) ends it.
     pub air_flight: bool,
+    /// KH1's movement state 5 (`sys 82` from flight: `0x1402AF150` with `+0x70` = 4 enters state 5 and keeps the height
+    /// above the floor it left from, `+0x3BC = +0x3D4`; Checked (decomp)): a [`Timed`] jump of a flier, `Some(that
+    /// height)`. Its step is state 3's (`0x1402AFAE0`); its flags are flight's (2, `0x1402AF2E0`: not airborne for the
+    /// reactions, `0x1402B1B10`), so [`Body::flying`] stays set; its end (`0x1402AFAA0`) goes back to flight (state 4),
+    /// the velocity kept, once it falls (`+0x3C4 ≥ 0`) to its starting height or touches the floor
+    /// ([`Body::flight_hop_done`]). M11, the Blue Rhapsody's hops.
+    pub flight_hop: Option<f32>,
 }
 
 /// Movement state 3's numbers (`actor+0x3B0` time, `+0x3B4` gravity, `+0x3B8` half the time,
@@ -73,10 +80,11 @@ impl Body {
     pub fn jump<C: Engine + ?Sized>(&mut self, h: f32, v: Vec3, y: f32, c: &C) {
         self.arc = Some(Arc::hop(h, y, c.gravity()));
         self.air_vel = v;
-        // `0x1402AF960` → movement state 2: flight (states 4 / 7) and state 3 end.
+        // `0x1402AF960` → movement state 2: flight (states 4 / 7) and state 3 / 5 end.
         self.flying = false;
         self.air_flight = false;
         self.timed = None;
+        self.flight_hop = None;
     }
 
     /// `sys 82` → `0x1402AF150(actor, v, drag, time)`: movement state 3. `v`: the horizontal
@@ -97,6 +105,36 @@ impl Body {
         self.arc = None;
         self.flying = false;
         self.air_flight = false;
+        self.flight_hop = None;
+    }
+
+    /// `sys 82` (`0x1402AF150`) whatever the movement state: from flight (state 4) KH1 enters state 5 with `height`, the
+    /// height above the floor it leaves from (`+0x3D4`, [`Body::flight_hop`]); otherwise state 3 ([`Body::timed_jump`]).
+    pub fn timed_hop(&mut self, v: Vec3, drag: f32, time: f32, height: f32) {
+        let from_flight = self.flying && self.arc.is_none() && self.timed.is_none() && !self.air_flight;
+        self.timed_jump(v, drag, time);
+        if from_flight {
+            self.flying = true;
+            self.flight_hop = Some(height);
+        }
+    }
+
+    /// State 5's end (`0x1402AFAA0`, Checked (exe bytes)): while rising (`+0x3C4 < 0`, y down) it stays; falling, it goes
+    /// back to flight (state 4) when its height above the floor is down to the one it left from (`+0x3BC ≥ +0x3D4`) or it
+    /// touches the floor (the check's second argument 0). `height`: the height above the floor now (none: no floor known,
+    /// only the touch counts). True when it ended now (flight goes on with the velocity it has).
+    pub fn flight_hop_done(&mut self, height: Option<f32>, touch: bool) -> bool {
+        let Some(h0) = self.flight_hop else { return false };
+        if self.timed.is_none() || self.air_vel.y < 0.0 {
+            return false;
+        }
+        if height.is_some_and(|h| h0 >= h) || touch {
+            self.timed = None;
+            self.flight_hop = None;
+            self.flying = true;
+            return true;
+        }
+        false
     }
 
     /// `0x1402AF630`: six frames before the top of a [`Timed`] jump (`+0x3B0 + 6 ≥ +0x3B8`), KH1
@@ -113,6 +151,7 @@ impl Body {
         self.air_flight = false;
         self.arc = None;
         self.timed = None;
+        self.flight_hop = None;
         self.held = false;
         self.air_vel = v;
     }
@@ -133,6 +172,7 @@ impl Body {
         self.flying = false;
         self.arc = None;
         self.timed = None;
+        self.flight_hop = None;
         self.held = false;
         self.air_vel = v;
     }
@@ -142,6 +182,9 @@ impl Body {
     pub fn ground(&mut self) {
         self.flying = false;
         self.air_flight = false;
+        if self.flight_hop.take().is_some() {
+            self.timed = None;
+        }
     }
 
     /// `0x1402C7300(dir, p)`: a push slide totalling `p` (speed `p × −ln 0.8`, ×0.8 a frame).
@@ -153,7 +196,8 @@ impl Body {
     /// In the air: movement state 2 (an arc) or 3 (a [`Timed`] jump; `0x1402B1B10`: the state
     /// table's flags `& 3 == 1`, state 3's are 5).
     pub fn airborne(&self) -> bool {
-        self.arc.is_some() || self.timed.is_some() || self.air_flight
+        // State 5 (a flier's timed hop, [`Body::flight_hop`]) has flight's flags: not airborne.
+        self.arc.is_some() || (self.timed.is_some() && self.flight_hop.is_none()) || self.air_flight
     }
 
     /// One frame: the displacement (KH1 units) for the host to move and collide. `steer`: the
@@ -170,7 +214,8 @@ impl Body {
         let want = self.walk;
         let mut d = want * step;
         self.walk = Vec3::ZERO;
-        if (self.flying || self.air_flight) && self.arc.is_none() {
+        // A flier's timed hop (state 5) steps as state 3 (`0x1402AFAE0`): the timed branch, not flight's.
+        if (self.flying || self.air_flight) && self.arc.is_none() && self.timed.is_none() {
             // `0x1402CC000`: the flight velocity follows the script's (`+0x20` × `+0x2C`, which the
             // actor task zeroes each frame, `0x140297FE0`, before the script sets it again).
             let a = self.accel.unwrap_or_else(|| c.air_accel());
@@ -234,11 +279,14 @@ impl Body {
         self.air_flight = false;
         self.arc = None;
         self.timed = None;
+        self.flight_hop = None;
         self.air_vel = Vec3::ZERO;
     }
 
+    /// Falling toward a landing (state 2 or 3): a flier's timed hop (state 5) never lands, it ends back in flight
+    /// ([`Body::flight_hop_done`]).
     pub fn falling(&self) -> bool {
-        !self.held && (self.arc.is_some_and(|a| !a.rising()) || (self.timed.is_some() && self.air_vel.y > 0.0))
+        !self.held && (self.arc.is_some_and(|a| !a.rising()) || (self.timed.is_some() && self.flight_hop.is_none() && self.air_vel.y > 0.0))
     }
 }
 
@@ -292,6 +340,47 @@ mod tests {
         assert_eq!(b.timed.map(|j| (j.half, j.drag)), Some((15.0, 0.9)));
         b.jump(20.0, Vec3::ZERO, 0.0, &c);
         assert!(b.timed.is_none());
+    }
+
+    /// Movement state 5 (a flier's `sys 82`, the Blue Rhapsody's hop: 30 a frame ahead, 60 high, drag 0.9, 12 frames from
+    /// 35 above the floor): it rises 6 frames, falls back and goes back to flight when down to its starting height (the
+    /// 13th / 14th frame, with the velocity it has); it is never airborne for the reactions nor falling toward a landing.
+    #[test]
+    fn a_flight_hop_ends_back_in_flight_at_its_height() {
+        let c = consts();
+        let mut b = Body::default();
+        b.fly(Vec3::ZERO);
+        b.timed_hop(Vec3::new(0.0, 60.0, 30.0), 0.9, 12.0, 35.0);
+        assert!(b.flying && b.timed.is_some() && b.flight_hop == Some(35.0));
+        assert!(!b.airborne() && !b.falling());
+        let (mut y, mut top) = (-35.0f32, 0.0f32);
+        let mut ended = None;
+        for f in 1..=30 {
+            b.walk = Vec3::new(0.0, 0.0, 0.0);
+            let d = b.step(1.0, y, None, &c);
+            y += d.y;
+            top = top.min(y);
+            if b.flight_hop_done(Some(0.0 - y), y >= 0.0) {
+                ended = Some(f);
+                break;
+            }
+        }
+        // n·vy₀ + g·n(n−1)/2 = 0 exactly at n = 13: a tie the float sums break either way (here a hair above: 14).
+        assert!(matches!(ended, Some(13) | Some(14)), "{ended:?}");
+        // KH1's discrete rise (displacement before the speed update): 6·(−20) + g·15 = −70 above where it left.
+        assert!((top + 105.0).abs() < 0.5, "70 above where it left (35 over the floor): {top}");
+        assert!(b.flying && b.timed.is_none() && b.flight_hop.is_none());
+        assert!(b.air_vel.z > 0.0, "the velocity kept");
+        // From the ground (not flying) it is state 3 as before.
+        let mut g = Body::default();
+        g.timed_hop(Vec3::new(0.0, 60.0, 30.0), 0.9, 12.0, 0.0);
+        assert!(!g.flying && g.flight_hop.is_none() && g.airborne());
+        // Touching the floor while falling ends it too.
+        let mut b = Body::default();
+        b.fly(Vec3::ZERO);
+        b.timed_hop(Vec3::new(0.0, 60.0, 0.0), 0.9, 12.0, 35.0);
+        b.air_vel.y = 1.0;
+        assert!(b.flight_hop_done(Some(100.0), true));
     }
 
     /// KH1's flight (`0x1402CC000`): the horizontal velocity eases toward the script's at the stats

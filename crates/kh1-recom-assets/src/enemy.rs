@@ -603,8 +603,10 @@ fn fmt_f(v: f32) -> String {
 /// stay, decision M10) whose entry another request plays with the other root-motion rule, which one clip can't hold. The
 /// Red Nocturne's 0x66 (entry 7 without root motion; `0x1402B7260` plays it for KH1's status of movement states 0x16 /
 /// 0x17, Checked (decomp)) shares entry 7 with its dizzy loop 0x43 (with root motion; the dizzy is not built either,
-/// owner question): 0x43 keeps the clip.
-pub const SKIPPED: &[(&str, u16)] = &[("rednocturne", 0x66)];
+/// owner question): 0x43 keeps the clip. The Blue Rhapsody's 0x66 the same (entry 12, shared with its dizzy loop 0x43;
+/// its dizzy is element-only, left out), and its 0x69 (entry 7 without root motion, another of those status motions;
+/// entry 7 keeps request 7, the landing, with root motion). Checked (files: the player's `xa_ex_2120.mset` map).
+pub const SKIPPED: &[(&str, u16)] = &[("rednocturne", 0x66), ("bluerhapsody", 0x66), ("bluerhapsody", 0x69)];
 
 /// Enemies Re:CoM keeps no `.SES` for (M11, the Red Nocturne: `Recom.hed` holds no `ENEMY/0003/EN0003.SES` and the
 /// exe's resource names for enemy 3 list none, so Re:CoM never loads one; Checked (files + exe)): their clips play no
@@ -1383,6 +1385,8 @@ pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usiz
     // The Red Nocturne's Fire `ex_2110_00.bd` and big Fire `ex_2110_01.bd` (`crate::rednocturne`, [`SHOTS`]).
     ("rednocturne", 0, b"ex_2110_00.bd", crate::rednocturne::FIRE_CONSTS, crate::rednocturne::FIRE_REQUESTS),
     ("rednocturne", 1, b"ex_2110_01.bd", crate::rednocturne::BIGFIRE_CONSTS, crate::rednocturne::BIGFIRE_REQUESTS),
+    // The Blue Rhapsody's Blizzard `ex_2120_00.bd` (`crate::bluerhapsody`, [`T_POINTS`], [`SHOTS`]).
+    ("bluerhapsody", 0, b"ex_2120_00.bd", crate::bluerhapsody::BLIZZARD_CONSTS, crate::bluerhapsody::BLIZZARD_REQUESTS),
 ];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
@@ -1428,6 +1432,9 @@ pub const T_POINTS: &[(&str, &str, usize, TFrom)] = &[
     // The Bouncywild's banana and peels all start at `sys 19(parent, 28, 1)` (`ex_2040_00.bd` `0x636`, `_01` `0x54A`,
     // `_02` `0x514`: code 28, the left hand, at t 1; the step checks the three t agree).
     ("bouncywild", "fire_at", 28, TFrom::Const("fire_t")),
+    // The Blue Rhapsody's Blizzard starts at `sys 19(parent, 0, t)` (`ex_2120_00.bd` `0x246..0x25C`: bone code 0 at
+    // `blizzard_t`, 0: the code's bone's parent's place).
+    ("bluerhapsody", "blizzard_at", 0, TFrom::Const("blizzard_t")),
 ];
 
 fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[RequestClip], consts: &[(String, f32)]) -> Result<Vec<(String, f32)>> {
@@ -1491,6 +1498,10 @@ pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[
     ("rednocturne", "fire_bat", &[0x15C], 0, 1),
     ("rednocturne", "bigfire", &[0x1CC], 1, 1),
     ("rednocturne", "bigfire_bat", &[0x23C], 1, 1),
+    // The Blue Rhapsody's Blizzard (`0x424` passes `0x1CC` and no second row: KH1's child ends on a clash, it is never
+    // batted): Re:CoM's own Blue Rhapsody shot takes its power with `0x14017F0E0(enemy, 0, 1)` (state 3 `0x14018C2D0`;
+    // Checked (decomp)).
+    ("bluerhapsody", "blizzard", &[0x1CC], 0, 1),
 ];
 ///
 /// The Defender's `0x15F6` passes `0x2AC` (its batted row `0x31C` is the child's second); Re:CoM's own fireball takes its
@@ -1569,7 +1580,7 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC, &crate::bouncywild::SPEC, &crate::rednocturne::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC, &crate::bouncywild::SPEC, &crate::rednocturne::SPEC, &crate::bluerhapsody::SPEC];
 
 #[cfg(test)]
 mod clash_tests {
@@ -1671,8 +1682,9 @@ mod clash_tests {
             eprintln!("never-hurting rows test skipped: KH1_M11_DIR / KH1_TEST_DATA not set");
             return;
         }
-        // M11, the Gargoyle: its swipe's and its swipe end's body rows (type 2, priority 30, front half).
-        let want = [("soldier", "spin kick", 1, 0x2AC, 1, 100), ("powerwild", "flurry", 2, 0x1CC, 2, 10), ("gargoyle", "swipe", 2, 0x2AC, 2, 30), ("gargoyle", "swipe end", 1, 0x38C, 2, 30)];
+        // M11, the Gargoyle: its swipe's and its swipe end's body rows (type 2, priority 30, front half); the Blue Rhapsody's
+        // melee body row (type 2, priority 30).
+        let want = [("soldier", "spin kick", 1, 0x2AC, 1, 100), ("powerwild", "flurry", 2, 0x1CC, 2, 10), ("gargoyle", "swipe", 2, 0x2AC, 2, 30), ("gargoyle", "swipe end", 1, 0x38C, 2, 30), ("bluerhapsody", "melee", 1, 0x15C, 2, 30)];
         for w in want {
             if seen == SPECS.len() || found.iter().any(|f| f.0 == w.0) {
                 assert!(found.contains(&w), "{w:?} not among {found:?}");
