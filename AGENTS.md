@@ -11,6 +11,13 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 187: M12 step 3: Berserk, version 0.98.5 (2026-11-01)
+
+- Berserk (KH1 ability 26, Rod level 60, 1 AP): KH1's `0x1402B2DC0` (Checked (decomp)): +4 Strength to swings while HP is above 0 and under 20 % of max (under 9 when max HP ≤ 44), tested at the swing's start. Damage = KH1: into KH1's formula. Damage = Re:CoM (owner: a % bonus): the Re:CoM hit × KH1's damage with the +4 / without, for that hit on the enemy's KH1 stats (KH1's table doubles every 4 steps: usually about × 2).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 186: M12 step 3: Leaf Bracer, version 0.98.4 (2026-11-01)
 
 - Leaf Bracer (KH1 ability 62, Rod level 39, 5 AP): KH1 (`0x14028F140` → `0x140297F30`, Checked (decomp)): Cure on oneself blocks damage and flinching for the whole cast motion. Ours: Re:CoM's own protection bit (`+0x418 & 1`, the summons' one) while our KH1 Cure casts (the end ±1 frame, Assumption).
