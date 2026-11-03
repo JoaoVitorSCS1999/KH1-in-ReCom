@@ -72,6 +72,7 @@ pub mod wightknight;
 pub mod fatbandit;
 pub mod gargoyle;
 pub mod defender;
+pub mod bouncywild;
 pub mod stats;
 pub mod texture;
 pub mod uibin;
