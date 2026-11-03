@@ -715,7 +715,7 @@ fn install_keyblades(base: usize, bases: &[PathBuf]) {
     ];
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
     if unsafe { hook::install_all(base, &hooks) } {
-        log("keyblades: camp wrappers in; the 8th entry \"KH1\" shows in Sora's story: Combat and Movement settings, and at Combat = KH1 Items, Customize and Abilities");
+        log("keyblades: camp wrappers in; the 8th entry \"KH1\" shows in both stories: Combat and Movement settings, and at Combat = KH1 in Sora's story Items, Customize and Abilities");
         keyblades::load_item_row(bases.iter().map(|b| b.join(crate::camp_rows::MANIFEST)).find(|p| p.is_file()).as_deref());
     } else {
         log("keyblades: not hooked; no KH1 entry (the Kingdom Key's numbers stand; shortcuts keep KH1's learn order)");

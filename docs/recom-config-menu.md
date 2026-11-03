@@ -212,9 +212,14 @@ Damage stays ini-only (owner). The row "Revenge Value" is the owner's name (2026
 
 ### Riku's story
 
-The KH1 entry stays hidden in Riku's story (as before, `win::keyblades::wanted`), and so does the
-camp that opens straight into the map page. So in Riku's story these settings are ini-only now
-(before, the Config rows showed there too). Owner question in the version's report.
+Since the follow-up of 2026-11-03 (owner: "show the KH1 tab in Riku's story too, with only Combat
+and Movement") the KH1 entry shows in Riku's story with the Combat and Movement pages only
+(`docs/recom-keyblade-equip.md` § Riku's story). The pages are the same; the entry's and the two
+rows' help lines say the settings are Sora's story's. **None of the nine rows has an effect in
+Riku's story** (Checked (code), each reader's gate): our KH1 battles, Guard, movement and enemies
+are Sora's story only; the values are saved and used in Sora's story. Owner question there: keep
+them shown in Riku's story, or hide them. The camp that opens straight into the map page still has
+no entry (it has no top list).
 
 ## Needs in-game testing
 

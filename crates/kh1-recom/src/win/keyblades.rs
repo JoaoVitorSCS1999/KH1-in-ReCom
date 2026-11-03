@@ -20,8 +20,11 @@
 //!   write camp fields Re:CoM's pages use.
 //!
 //! Nothing here runs in field or battle frames: the camp exists only while the pause menu is
-//! open, and without our entry (Re:CoM setting, Riku's story) every wrapper is one load and the
-//! original.
+//! open, and without our entry (the camp that opens straight onto the map) every wrapper is one
+//! load and the original.
+//! - Riku's story (owner, 2026-11-03): the same entry, wrappers and submenu, with only Combat and
+//!   Movement; Re:CoM's own per-story tables (labels, help ids, titles) keep its 7 entries as
+//!   they are (`kb::Story`, `top::RECOM_HELP`).
 //!
 //! Every offset and call below is Checked (decomp + disasm) unless tagged otherwise.
 
@@ -92,7 +95,7 @@ mod camp {
     pub const HELP: usize = 0x9D0;
     /// Non-zero: the camp opens straight into the map page and never shows the list.
     pub const DIRECT_MAP: usize = 0x20A4;
-    /// `0x1401AAAE0()` at ctor: Riku's story.
+    /// `0x1401AAAE0()` at ctor: Riku's story (Re:CoM's index for its per-story tables).
     pub const RIKU: usize = 0x21BC;
     pub const COUNT: usize = 0x21C4;
     /// Copied each update from a frame counter (`% 7000`); the list rows' marker sprites get it.
@@ -139,7 +142,6 @@ const BAR_UPDATE: u32 = 0x0011_2CB0;
 const TEXT_COPY: u32 = 0x0025_8DE0;
 const EVER_OBTAINED: u32 = 0x0015_B3F0;
 const CARD_NAME: u32 = 0x0016_4CA0;
-const RIKU_STORY: u32 = 0x001A_AAE0;
 
 // Re:CoM data (Steam addresses).
 /// The message tables (`CCtdList` owner) passed to `0x140240160`.
@@ -162,8 +164,6 @@ const ENTRY_STEP: f32 = 26.0;
 /// Label colours: normal, highlighted (`0x1400E3DE0`, `0x1400DEA10`).
 const LABEL_NORMAL: u32 = 0x8040_4040;
 const LABEL_HIGHLIGHT: u32 = 0x80C0_C0C0;
-/// The help ids of Sora's top entries 0..6: `0x500400 + index` (`0x1400DEA10`'s table).
-const TOP_HELP_BASE: u32 = 0x0050_0400;
 /// The status rows' value colour (`0x1400E6DF0`, rows 0..4).
 const VALUE_COLOUR: u32 = 0x8004_6060;
 /// The list cursor's second sprite: + (284, 168) from the row (`0x140509530`, `0x140509520`).
@@ -218,7 +218,6 @@ type BarUpdateFn = unsafe extern "win64" fn(*mut u8, f32, f32);
 type TextFn = unsafe extern "win64" fn(*mut u8, *const u8);
 type EverFn = unsafe extern "win64" fn(u32) -> u32;
 type NameFn = unsafe extern "win64" fn(*const u8) -> *const u8;
-type RikuFn = unsafe extern "win64" fn() -> u32;
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Default)]
@@ -390,27 +389,33 @@ pub fn page_active(camp: *mut u8) -> bool {
     !entry_of(camp).is_null() && unsafe { at::<i32>(camp, camp::SAVED) } == top::OURS
 }
 
-/// Whether the camp should show our entry now: Sora's story and the normal top list, whatever the
-/// Combat setting (owner, 2026-11-03: "always be there"). Riku's story keeps Re:CoM's camp as is
-/// (as before), and so does the camp that opens straight into the map page.
+/// Whether the camp should show our entry now: the normal top list, whatever the Combat setting
+/// (owner, 2026-11-03: "always be there") and in both stories (owner, 2026-11-03: Riku's story
+/// too, with only Combat and Movement). The camp that opens straight into the map page never
+/// builds the list (state 3 skips the entry build when `camp+0x20A4` is set; Checked (decomp)).
 unsafe fn wanted(camp: *mut u8) -> bool {
-    !(at::<i32>(camp, camp::RIKU) != 0 || func::<RikuFn>(RIKU_STORY)() & 0xFF != 0 || at::<i32>(camp, camp::DIRECT_MAP) != 0)
+    at::<i32>(camp, camp::DIRECT_MAP) == 0
 }
 
-/// Whether the submenu shows KH1's pages (Items, Customize, Abilities) besides the settings:
-/// Combat = KH1 and Keyblade numbers to list (the entry's condition before 2026-11-03). Read when
-/// the submenu opens and again when a settings page closes (Combat may have changed there).
-fn kh1_pages() -> bool {
-    if super::settings().combat != crate::settings::Mode::Kh1 {
+/// The camp's story, as Re:CoM's camp code reads it for its own tables.
+unsafe fn story(camp: *mut u8) -> kb::Story {
+    kb::Story::from_camp(at::<i32>(camp, camp::RIKU))
+}
+
+/// Whether the submenu shows KH1's pages (Items, Customize, Abilities) besides the settings
+/// (`sub::kh1_pages`): Combat = KH1, Keyblade numbers to list, Sora's story. Read when the
+/// submenu opens and again when a settings page closes (Combat may have changed there).
+unsafe fn kh1_pages(camp: *mut u8) -> bool {
+    let story = story(camp);
+    let combat = super::settings().combat == crate::settings::Mode::Kh1;
+    if story == kb::Story::Riku || !combat {
         return false;
     }
-    if super::stats::keyblade_cards().is_empty() {
-        if !NO_NUMBERS_LOGGED.swap(true, Ordering::Relaxed) {
-            log("keyblades: kh1-stats.json has no Keyblades (format 3, kh1-recom-build); the KH1 entry shows only Combat and Movement");
-        }
-        return false;
+    let listed = !super::stats::keyblade_cards().is_empty();
+    if !listed && !NO_NUMBERS_LOGGED.swap(true, Ordering::Relaxed) {
+        log("keyblades: kh1-stats.json has no Keyblades (format 3, kh1-recom-build); the KH1 entry shows only Combat and Movement");
     }
-    true
+    kb::sub::kh1_pages(story, combat, listed)
 }
 
 /// Logs, once per session, whether `save + 0x246B ..= 0x2817` is zero apart from our bytes (the
@@ -518,7 +523,7 @@ pub unsafe extern "win64" fn entry_build(camp: *mut u8, mode: i32, level: u64) -
                 create_entry(camp);
             } else if !want && !ours.is_null() {
                 delete_entry();
-                log("keyblades: camp entry removed (Riku's story or the map-only camp)");
+                log("keyblades: camp entry removed (the map-only camp)");
             } else if !ours.is_null() {
                 anim(ours, set_of(camp), 4);
             }
@@ -568,9 +573,10 @@ unsafe fn cursor_set_ours(camp: *mut u8, old: i32, new: i32, show: bool) -> u64 
         func::<CampIntFn>(GLIDE_TARGET)(camp, new, 0);
         put::<i32>(camp, camp::CURSOR, new);
         if new == top::OURS {
-            set_help(camp, text::entry_help(kh1_pages()).as_ptr());
-        } else {
-            set_help(camp, message(TOP_HELP_BASE + new as u32));
+            set_help(camp, text::entry_help(story(camp), kh1_pages(camp)).as_ptr());
+        } else if let Some(id) = top::recom_help(story(camp), new) {
+            // Re:CoM's own help id for its entry in this story (Riku's entries 0 and 5 differ).
+            set_help(camp, message(id));
         }
     }
     1
@@ -790,6 +796,8 @@ struct Sub {
     row: i32,
     /// The rows shown (`sub::rows`), chosen at open and after a settings page.
     rows: &'static [sub::Row],
+    /// The camp's story (Riku's: only Combat and Movement, with their Riku help lines).
+    story: kb::Story,
     page: Option<Open>,
 }
 
@@ -850,7 +858,8 @@ impl Sub {
     /// The page's first call (state 0x4A, after Re:CoM's state 0x11 saw the top buttons fade):
     /// what Re:CoM's state 0x10 does for the Deck at level 1, with our rows.
     unsafe fn open(camp: *mut u8) -> Sub {
-        let rows = sub::rows(kh1_pages());
+        let story = story(camp);
+        let rows = sub::rows(kh1_pages(camp));
         let labels: Vec<&'static [u8]> = rows.iter().map(|r| r.label()).collect();
         relabel(camp, &labels);
         put::<i32>(camp, camp::COUNT, rows.len() as i32);
@@ -860,8 +869,8 @@ impl Sub {
         // button at `camp+0xB8` first, which must be one of the submenu's.
         put::<i32>(camp, camp::CURSOR, 0);
         build(camp, 0, 1);
-        log(&format!("kh1 entry: submenu opened ({} rows: {:?})", rows.len(), rows));
-        Sub { camp: camp as usize, state: SubState::Opening, row: 0, rows, page: None }
+        log(&format!("kh1 entry: submenu opened ({} rows: {:?}; {})", rows.len(), rows, if story == kb::Story::Riku { "Riku's story" } else { "Sora's story" }));
+        Sub { camp: camp as usize, state: SubState::Opening, row: 0, rows, story, page: None }
     }
 
     /// After a settings page: the rows for the Combat setting now (Combat may have changed on the
@@ -869,7 +878,7 @@ impl Sub {
     /// they appear again (entry build mode 0 animates the first `count`; the others stay faded, as
     /// in Re:CoM's Deck submenu), and the cursor stays on the same row.
     unsafe fn refresh_rows(&mut self) {
-        let rows = sub::rows(kh1_pages());
+        let rows = sub::rows(kh1_pages(self.p()));
         if rows == self.rows {
             return;
         }
@@ -885,7 +894,7 @@ impl Sub {
 
     unsafe fn help(&self) {
         if let Some(r) = self.rows.get(self.row as usize) {
-            set_help(self.p(), r.help().as_ptr());
+            set_help(self.p(), r.help_in(self.story).as_ptr());
         }
     }
 
