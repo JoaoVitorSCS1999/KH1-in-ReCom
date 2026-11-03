@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 190: Fix: the mod switched itself off at start (two vtable checks as raw bytes), version 0.98.8 (2026-11-01)
+
+- Owner (2026-11-03, on 0.98.7): "The \"KH1\" tab in the camp menu should ALWAYS be visible, i loaded into a save and it wasnt there". Cause (Checked (log)): `site CHANGED 0x14051b4a8 CTechHelp vtable` and `0x140512c10 CLevelUp vtable`, then `result: checks FAILED. The mod changes nothing on this build.`: 0.98.1 checked the two vtables' slots as raw bytes (`0x14012C230` …), which the loader relocates, so every start failed and the whole mod stayed off (no KH1 tab, no KH1 combat). Since 0.98.1.
+- Fix: the two vtables are `sites::M12_PTRS` (four `PtrSite`s: CTechHelp +0 / +8 → `0x14012C230` / `0x14012D330`, CLevelUp +0 / +8 → `0x14010EB80` / `0x14010EF10`), checked lazily by `win::notices` (a mismatch turns the notices off, logged, not the mod). A new test fails any byte site holding an absolute exe pointer.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 189: Tests: the level abilities' test on the new AP rule, version 0.98.7 (2026-11-01)
 
 - The merge of M12 steps 1 and 3 left one test on the old `max_ap(level)` and a `State` without `ap_ups` (test code only; the DLL is unchanged in behaviour): now `max_ap(7)` (3 + 7 AP Up picks) and `ap_ups: 0`. 0.98.6's pushed state failed these two tests; its DLL was built and is the same code.

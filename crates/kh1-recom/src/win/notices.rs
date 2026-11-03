@@ -38,6 +38,20 @@ static CURRENT: AtomicUsize = AtomicUsize::new(0);
 static NAME: Mutex<[u8; crate::notices::NAME_MAX + 1]> = Mutex::new([0; crate::notices::NAME_MAX + 1]);
 static HAS_NAME: AtomicBool = AtomicBool::new(false);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(60);
+/// `crate::sites::M12_PTRS` checked once (a mismatch turns the notices off, logged).
+static PTRS_OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+fn ptrs_ok() -> bool {
+    *PTRS_OK.get_or_init(|| {
+        let b = base();
+        // SAFETY: the exe's own data section (each a pointer-sized vtable slot).
+        let bad = crate::sites::M12_PTRS.iter().find(|p| unsafe { rd::<usize>(b + p.rva as usize) } != b + p.target as usize);
+        if let Some(p) = bad {
+            log(&format!("notices: {} does not point at {:#x}; no learned notices", p.name, 0x1_4000_0000u64 + p.target as u64));
+        }
+        bad.is_none()
+    })
+}
 
 const NEW: u32 = 0x004A_CE54;
 const LEVEL_UP_CTOR: u32 = 0x0010_E9C0;
@@ -96,6 +110,9 @@ fn take_name(this: usize, l: Learned) {
 
 /// Turns an ending `CLevelUp` (state 0xD just set) to its sleight-learned mode for `l`.
 unsafe fn start_on(this: usize, l: Learned) {
+    if !ptrs_ok() {
+        return;
+    }
     take_name(this, l);
     wr(this + off::SLEIGHT, l.screen_id() as u32);
     wr(this + off::STATE, state::INIT);
@@ -129,6 +146,9 @@ pub(super) unsafe fn after_step(this: usize, before: i32, after: i32) {
 }
 
 unsafe fn skip_tech_help(this: usize) {
+    if !ptrs_ok() {
+        return;
+    }
     let node: usize = rd(this + off::CHILD_TAIL);
     if node == 0 {
         return;
@@ -161,7 +181,7 @@ unsafe fn field_gate() -> bool {
 /// `CLevelUp` is up the gate is shut: its ctor clears the game state's `+0x5A4` and its dtor sets it
 /// again, `0x1401A9CC0`.)
 pub(super) unsafe fn frame(pl: usize) {
-    if !PENDING.load(Ordering::Relaxed) {
+    if !PENDING.load(Ordering::Relaxed) || !ptrs_ok() {
         return;
     }
     if rd::<i32>(pl + super::movement::p::BATTLE) != 0 || !super::mp::active() || !field_gate() {

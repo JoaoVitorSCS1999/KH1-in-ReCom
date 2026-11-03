@@ -1278,6 +1278,18 @@ pub const M12_CALLEES: &[Site] = &[
 ];
 
 /// M12: Re:CoM code and data whose behaviour the AP Up row and the notices rely on. Checked only.
+/// M12 step 2: the two vtables the notices rely on, as relocated pointers (0.98.1 checked them as raw bytes,
+/// which the loader relocates: every start failed its checks, 2026-11-03). Checked lazily by
+/// `win::notices` (a mismatch turns the notices off, not the mod). Checked (exe).
+pub const M12_PTRS: &[PtrSite] = &[
+    // CTechHelp's vtable: the dtor 0x14012C230, the update 0x14012D330.
+    PtrSite { name: "CTechHelp vtable +0 dtor (0x14051B4A8)", rva: 0x0051_B4A8, target: 0x0012_C230 },
+    PtrSite { name: "CTechHelp vtable +8 update (0x14051B4B0)", rva: 0x0051_B4B0, target: 0x0012_D330 },
+    // CLevelUp's vtable: the dtor 0x14010EB80, the update 0x14010EF10.
+    PtrSite { name: "CLevelUp vtable +0 dtor (0x140512C10)", rva: 0x0051_2C10, target: 0x0010_EB80 },
+    PtrSite { name: "CLevelUp vtable +8 update (0x140512C18)", rva: 0x0051_2C18, target: 0x0010_EF10 },
+];
+
 pub const M12_CHECKED: &[Site] = &[
     // mov rax,[0x14087CBF8]; cmp dword [rax+0xC],0x659; jge: the CP row offered while CP < 1625.
     Site { name: "level-up CP offer (0x14010F209)", rva: 0x0010_F209, expect: &[0x48, 0x8B, 0x05, 0xE8, 0xD9, 0x76, 0x00, 0x81, 0x78, 0x0C, 0x59, 0x06, 0x00, 0x00, 0x7D, 0x06] },
@@ -1290,10 +1302,6 @@ pub const M12_CHECKED: &[Site] = &[
     Site { name: "CTechHelp ctor (0x14012BF80)", rva: 0x0012_BF80, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x48, 0x89, 0x7C, 0x24, 0x20, 0x55, 0x48, 0x8D, 0x6C, 0x24, 0xF0] },
     Site { name: "CTechHelp update (0x14012D330)", rva: 0x0012_D330, expect: &[0x48, 0x8B, 0xC4, 0x57, 0x48, 0x81, 0xEC, 0x90, 0x00, 0x00, 0x00, 0x48, 0xC7, 0x40, 0xB8, 0xFE] },
     Site { name: "CTechHelp dtor (0x14012C230)", rva: 0x0012_C230, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48] },
-    // Its vtable: the dtor 0x14012C230, the update 0x14012D330.
-    Site { name: "CTechHelp vtable (0x14051B4A8)", rva: 0x0051_B4A8, expect: &[0x30, 0xC2, 0x12, 0x40, 0x01, 0x00, 0x00, 0x00, 0x30, 0xD3, 0x12, 0x40, 0x01, 0x00, 0x00, 0x00] },
-    // CLevelUp's vtable: the dtor 0x14010EB80, the update 0x14010EF10.
-    Site { name: "CLevelUp vtable (0x140512C10)", rva: 0x0051_2C10, expect: &[0x80, 0xEB, 0x10, 0x40, 0x01, 0x00, 0x00, 0x00, 0x10, 0xEF, 0x10, 0x40, 0x01, 0x00, 0x00, 0x00] },
     // "%4d \xF9Y\x81\xA8\xF9R%4d": the panel's preview format (`crate::level_up::panel_value`).
     Site { name: "level-up panel preview format (0x140512C70)", rva: 0x0051_2C70, expect: &[0x25, 0x34, 0x64, 0x20, 0xF9, 0x59, 0x81, 0xA8, 0xF9, 0x52, 0x25, 0x34, 0x64] },
 ];
@@ -3615,6 +3623,18 @@ pub fn check_site(site: &Site, found: &[u8]) -> SiteCheck {
 mod tests {
     use super::*;
 
+    /// No byte site holds an absolute exe pointer (the loader relocates those; a byte check of one fails on every
+    /// start, as 0.98.1's vtable checks did): pointers go in `PtrSite`s.
+    #[test]
+    fn no_byte_site_holds_a_relocated_pointer() {
+        for s in all_sites() {
+            for w in s.expect.windows(8) {
+                let v = u64::from_le_bytes(w.try_into().unwrap());
+                assert!(!(0x1_4000_1000..0x1_4100_0000).contains(&v), "{}: an absolute pointer {v:#x} in its bytes", s.name);
+            }
+        }
+    }
+
     fn fake_headers(ts: u32, soi: u32) -> Vec<u8> {
         let mut h = vec![0u8; 0x200];
         h[0] = b'M';
@@ -4235,11 +4255,11 @@ mod tests {
         assert_eq!(find("level-up CP pick").expect[10] as i32, crate::abilities::RECOM_CP_PER_UP);
         assert_eq!(find("learned line ability wording").expect[6] as u16, crate::level_up::ABILITY_WORDING_ID);
         assert_eq!(u32::from_le_bytes(find("field menu gate").expect[8..12].try_into().unwrap()), 0x5A4);
-        let slot = |s: &Site, k: usize| u64::from_le_bytes(s.expect[8 * k..8 * k + 8].try_into().unwrap());
-        let th = find("CTechHelp vtable");
-        assert_eq!(0x1_4000_0000 + th.rva as u64, crate::level_up::tech_help::VTABLE);
-        assert_eq!((slot(th, 0), slot(th, 1)), (0x1_4012_C230, 0x1_4012_D330));
-        assert_eq!(slot(find("CLevelUp vtable"), 1), 0x1_4010_EF10);
+        // The vtables as relocated pointers (raw bytes would be relocated by the loader).
+        assert_eq!(0x1_4000_0000 + M12_PTRS[0].rva as u64, crate::level_up::tech_help::VTABLE);
+        assert_eq!((M12_PTRS[0].target, M12_PTRS[1].target, M12_PTRS[1].rva - M12_PTRS[0].rva), (0x0012_C230, 0x0012_D330, 8));
+        assert_eq!((M12_PTRS[3].target, M12_PTRS[3].rva - M12_PTRS[2].rva), (0x0010_EF10, 8));
+        assert!(all_sites().all(|s| !s.name.contains("vtable (0x14051B4A8)") && !s.name.contains("vtable (0x140512C10)")));
         assert!(all_sites().any(|s| s.rva == 0x0010_EF10), "the update's wrapper site");
         // The panel's preview: ours prints the same bytes between the numbers.
         let f = find("level-up panel preview format").expect;
