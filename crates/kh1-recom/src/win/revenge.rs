@@ -27,13 +27,21 @@
 //!   attack-state end `0x14017DA90` (hooked: [`attack_end`]), which turns the bodies back on.
 //!   Nothing adds to the counter during it; the counter keeps draining.
 //!
-//! Only in a KH1 battle (Combat = KH1, Sora's story) with `boss_revenge = on`.
+//! - **Room-dimming moves untouchable** (owner, 2026-11-03, `crate::dim`): the same window, opened
+//!   when the boss's own code asks Re:CoM for a dark room during an attack state (its begin: slot 0
+//!   snapshot in [`state_change`], compared in [`begin_untouchable`]; its step: [`EXES`]'s four
+//!   exe slots; Marluxia 3: its own slot dark at the begin), closed by the same state end. Whatever
+//!   `boss_revenge` says.
+//!
+//! Only in a KH1 battle (Combat = KH1, Sora's story); the revenge value with `boss_revenge = on`.
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
 use crate::revenge::{self as rv, flag, tail, Boss, Counter, Ignored, IgnoredKind, Source};
-use crate::sites::{PtrSite, REVENGE_CHECKED, REVENGE_FSM_SLOTS, REVENGE_HOOKS, REVENGE_PTRS, REVENGE_WINDUP_SLOTS};
+use crate::dim::{self, EXES, SLOT_SIZE};
+use crate::sites::{PtrSite, DIM_EXE_SLOTS, REVENGE_CHECKED, REVENGE_FSM_SLOTS, REVENGE_HOOKS, REVENGE_PTRS, REVENGE_WINDUP_SLOTS};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 pub static ORIG_FLINCH: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_BLOW: AtomicUsize = AtomicUsize::new(0);
@@ -49,6 +57,18 @@ static MARLUXIA_BODY: AtomicUsize = AtomicUsize::new(0);
 static MARLUXIA_BATTLE: AtomicU32 = AtomicU32::new(u32::MAX);
 static LINES: AtomicU32 = AtomicU32::new(0);
 const LINE_CAP: u32 = 200;
+/// The dim windows' own log lines (start and end of each move), apart from the revenge lines.
+static DIM_LINES: AtomicU32 = AtomicU32::new(0);
+/// Slot 0 of the scene colour table at the last revenge-boss state change (the boss, its bytes):
+/// the begin that follows is compared with it.
+static DIM_SNAP: Mutex<(usize, [u8; SLOT_SIZE])> = Mutex::new((0, [0; SLOT_SIZE]));
+/// The boss whose window a step opens now: its `+0x438` call reaches the hurt-off hook, which then
+/// runs Re:CoM's own call.
+static DIM_OPENING: AtomicUsize = AtomicUsize::new(0);
+/// Re:CoM's enemy vtable slot run by every attack state's begin: "hurt bodies off" (`0x14017DA80`,
+/// hooked: `super::attack::hurt_off`; Vexen's and Marluxia 2's own call it). Checked (exe:
+/// `REVENGE_PTRS`).
+const EN_HURT_OFF_SLOT: usize = 0x438;
 
 type StepFn = unsafe extern "win64" fn(usize);
 type MaxHpFn = unsafe extern "win64" fn(usize) -> i32;
@@ -112,7 +132,12 @@ pub fn set_enabled(on: bool) {
 }
 
 fn live() -> bool {
-    INSTALLED.load(Ordering::Relaxed) && ENABLED.load(Ordering::Relaxed) && super::battle::kh1_battle()
+    active() && ENABLED.load(Ordering::Relaxed)
+}
+
+/// A KH1 battle with the tails in place: the untouchable windows (revenge moves, dimming moves).
+fn active() -> bool {
+    INSTALLED.load(Ordering::Relaxed) && super::battle::kh1_battle()
 }
 
 /// Sora's frame (from the request-bits wrapper): the clock advances by his dt.
@@ -230,6 +255,12 @@ fn line(f: impl FnOnce() -> String) {
     }
 }
 
+fn dim_line(f: impl FnOnce() -> String) {
+    if DIM_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| (n < LINE_CAP).then_some(n + 1)).is_ok() {
+        log(&f());
+    }
+}
+
 /// The trace's hits column: `rv <counter>` on this enemy's hit.
 fn trace_tag(e: usize, value: f32) {
     if let Ok(mut g) = super::attack::HIT_LOG.lock() {
@@ -245,7 +276,7 @@ fn trace_tag(e: usize, value: f32) {
 
 /// The enemy-hit hook (Re:CoM's `0x14017F7E0`): the KH1 wrapper, then the revenge add.
 pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
-    if !live() {
+    if !active() {
         return super::attack::enemy_hit(enemy);
     }
     let (body, b) = match boss_of(enemy) {
@@ -279,6 +310,10 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
             line(|| format!("revenge: {} {enemy:#x} took a hit in its untouchable move: Re:CoM's handler applied it (flags {:#x})", b.name, rd::<u64>(enemy + EN_FLAGS)));
         }
         return r;
+    }
+    if !ENABLED.load(Ordering::Relaxed) {
+        // `boss_revenge = off`: no counter, Re:CoM's falloff (only the dim windows above).
+        return super::attack::enemy_hit(enemy);
     }
     let falloff = b.falloff_off().then(|| Falloff::save(enemy));
     NOTE.store(0, Ordering::Relaxed);
@@ -355,11 +390,18 @@ unsafe fn step(e: usize, o: StepFn) {
 /// 2026-11-02: KH2's frame 20, or the end if sooner). Runs on the bosses' state changes only.
 pub unsafe extern "win64" fn state_change(fsm: usize) {
     func::<StepFn>(rv::FSM_CHANGE)(fsm);
-    if !live() {
+    if !active() {
         return;
     }
     let e = fsm - rv::FSM_AT;
     let Some(b) = boss_of(e) else { return };
+    // The room's colour before the new state's begin runs (`crate::dim`).
+    if let (Some(now), Ok(mut g)) = (env_slot(dim::BOSS_SLOT), DIM_SNAP.lock()) {
+        *g = (e, now);
+    }
+    if !ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
     let old: usize = rd(e + EN_STATE);
     let next: usize = rd(e + EN_NEXT);
     let reaction = |s: usize| s == crate::battle::state_address(e, FLINCH_STATE) || s == crate::battle::state_address(e, BLOW_STATE);
@@ -386,7 +428,7 @@ pub unsafe extern "win64" fn blow_step(e: usize) {
 /// Whether `e` is a revenge boss body in (or about to begin) the attack its revenge started: Re:CoM's
 /// own rule for an attacking enemy then decides hits on it (`crate::revenge::holds`).
 pub(super) unsafe fn untouchable(e: usize) -> bool {
-    if !live() {
+    if !active() {
         return false;
     }
     let Some(b) = boss_of(e) else { return false };
@@ -409,10 +451,22 @@ pub(super) unsafe fn guard_skipped(e: usize) {
 /// or (owner, 2026-11-02: "untouchable whenever played") the same state chosen by the boss itself.
 /// A pending start that another attack state replaced is dropped.
 pub(super) unsafe fn begin_untouchable(e: usize) -> bool {
-    if !live() {
+    if !active() || e == 0 {
         return false;
     }
+    // A step opening a dim window now (its `+0x438` call).
+    if DIM_OPENING.load(Ordering::Relaxed) == e {
+        return true;
+    }
     let Some(b) = boss_of(e) else { return false };
+    if live() && revenge_begin(e, b) {
+        return true;
+    }
+    dim_begin(e, b)
+}
+
+/// The revenge-move part of [`begin_untouchable`].
+unsafe fn revenge_begin(e: usize, b: &Boss) -> bool {
     let Some((move_state, what)) = b.attack else { return false };
     let current: usize = rd(e + EN_STATE);
     let is_move = current == crate::battle::state_address(e, move_state);
@@ -434,7 +488,7 @@ pub(super) unsafe fn begin_untouchable(e: usize) -> bool {
         return false;
     };
     let own = if origin == rv::Origin::Own { flag::OWN } else { 0 };
-    wr(t + tail::FLAGS, (flags & !(flag::PENDING | flag::OWN)) | flag::UNTOUCHABLE | own);
+    wr(t + tail::FLAGS, (flags & !(flag::PENDING | flag::OWN | flag::DIM)) | flag::UNTOUCHABLE | own);
     wr(t + tail::STATE, move_state);
     wr(t + tail::IGNORED, [0u8; 4]);
     wr(t + tail::START, now() as f32);
@@ -463,8 +517,8 @@ unsafe fn close_window(e: usize, b: &Boss, why: &str) -> bool {
     }
     let t = e + b.size as usize;
     let flags: u32 = rd(t + tail::FLAGS);
-    if flags & (flag::UNTOUCHABLE | flag::PENDING | flag::OWN) != 0 {
-        wr(t + tail::FLAGS, flags & !(flag::UNTOUCHABLE | flag::PENDING | flag::OWN));
+    if flags & (flag::UNTOUCHABLE | flag::PENDING | flag::OWN | flag::DIM) != 0 {
+        wr(t + tail::FLAGS, flags & !(flag::UNTOUCHABLE | flag::PENDING | flag::OWN | flag::DIM));
     }
     if flags & flag::UNTOUCHABLE == 0 {
         return false;
@@ -474,9 +528,12 @@ unsafe fn close_window(e: usize, b: &Boss, why: &str) -> bool {
     let frames = now() as f32 - rd::<f32>(t + tail::START);
     let hp: i32 = rd(e + EN_HP);
     let own = if flags & flag::OWN != 0 { "own choice, " } else { "" };
-    line(|| {
+    let dimmed = flags & flag::DIM != 0;
+    let say = |f: &dyn Fn() -> String| if dimmed { dim_line(f) } else { line(f) };
+    say(&|| {
         format!(
-            "revenge: {} untouchable ends ({own}state {state}{why}) {e:#x} after {frames:.0} frames: ignored {} hits ({} KH1 swings, {} KH1 spells, {} other), {} Guard reactions skipped; HP {hp}{}",
+            "{}: {} untouchable ends ({own}state {state}{why}) {e:#x} after {frames:.0} frames: ignored {} hits ({} KH1 swings, {} KH1 spells, {} other), {} Guard reactions skipped; HP {hp}{}",
+            if dimmed { "dim" } else { "revenge" },
             b.name,
             ig.hits(),
             ig.swings,
@@ -488,6 +545,105 @@ unsafe fn close_window(e: usize, b: &Boss, why: &str) -> bool {
     });
     true
 }
+
+/// Slot `i` of Re:CoM's scene colour table (`crate::dim`; the table's global and layout are the
+/// setter's, byte-checked at start: `sites::DIM_CHECKED`), or `None` while there is no table.
+unsafe fn env_slot(i: usize) -> Option<[u8; SLOT_SIZE]> {
+    if i >= dim::SLOTS {
+        return None;
+    }
+    let table: usize = rd(base() + dim::ENV_TABLE as usize);
+    (table != 0).then(|| rd::<[u8; SLOT_SIZE]>(table + i * SLOT_SIZE))
+}
+
+/// Opens a dim window on the boss (its tail flags; `crate::revenge::holds` then makes it untouchable
+/// until Re:CoM's state end, [`attack_end`]) and logs it.
+unsafe fn open_dim(e: usize, b: &Boss, state: i32, cause: dim::Cause, level: f32) {
+    if !tail_ok(e, b) {
+        setup(e, b);
+    }
+    let t = e + b.size as usize;
+    let flags: u32 = rd(t + tail::FLAGS);
+    wr(t + tail::FLAGS, (flags & !(flag::PENDING | flag::OWN)) | flag::UNTOUCHABLE | flag::DIM);
+    wr(t + tail::STATE, state);
+    wr(t + tail::IGNORED, [0u8; 4]);
+    wr(t + tail::START, now() as f32);
+    let how = match cause {
+        dim::Cause::Begin => "its state begin dims the room",
+        dim::Cause::Step => "the room dims partway through its state",
+        dim::Cause::OwnSlot => "the room is dim (its own colour slot 1) as the state begins",
+    };
+    dim_line(|| format!("dim: {} untouchable (state {state}: {}) {e:#x}: {how} (Re:CoM's scene colour {level:.2}); hurt bodies off, its hit handler drops hits until the state ends", b.name, dim::what(b.id, state)));
+}
+
+/// The attack state (2..=10) the boss is in, by its current state object (`+0x60`).
+unsafe fn attack_state(e: usize) -> Option<i32> {
+    let current: usize = rd(e + EN_STATE);
+    (2..=10).find(|&k| current == crate::battle::state_address(e, k))
+}
+
+/// The dim part of [`begin_untouchable`]: the state's begin (Re:CoM's class begin ran just before
+/// this "hurt bodies off") asked for the dark room in slot 0 (compared with the snapshot of the state
+/// change), or the boss's own slot is dark (Marluxia 3).
+unsafe fn dim_begin(e: usize, b: &Boss) -> bool {
+    let snap = DIM_SNAP.lock().ok().and_then(|mut g| {
+        let (who, bytes) = *g;
+        g.0 = 0;
+        (who == e).then_some(bytes)
+    });
+    let Some(now) = env_slot(dim::BOSS_SLOT) else { return false };
+    let own = dim::own_slot(b.id).and_then(|i| env_slot(i));
+    let Some(cause) = dim::at_begin(snap.as_ref(), &now, own.as_ref()) else { return false };
+    if rd::<i32>(e + EN_HP) <= 0 {
+        return false;
+    }
+    let Some(state) = attack_state(e) else { return false };
+    let level = dim::Slot::parse(if cause == dim::Cause::OwnSlot { own.as_ref().unwrap_or(&now) } else { &now }).level();
+    open_dim(e, b, state, cause, level);
+    true
+}
+
+/// A dimming step ([`EXES`]`[i]`, as written in the class's vtable: `sites::DIM_EXE_SLOTS`): Re:CoM's
+/// exe always runs; when it asked for the dark room in its slot, the window opens and Re:CoM's own
+/// "hurt bodies off" (`+0x438`) runs now, as at an attack begin. Runs every frame only while the boss
+/// is in that state, and until its window is open: two 64-byte reads and a compare.
+unsafe fn dim_exe(e: usize, i: usize) {
+    let x = &EXES[i];
+    let exe = func::<StepFn>(x.exe);
+    let watch = active() && boss_of(e).is_some_and(|b| b.id == x.boss_id) && !untouchable(e);
+    let before = if watch { env_slot(x.slot) } else { None };
+    exe(e);
+    let (Some(before), Some(b)) = (before, boss_of(e)) else { return };
+    let Some(after) = env_slot(x.slot) else { return };
+    if !dim::requested(&before, &after) {
+        return;
+    }
+    // Not when the step also ended the move (a next state queued) or the boss is down.
+    if rd::<usize>(e + EN_NEXT) != 0 || rd::<i32>(e + EN_HP) <= 0 || attack_state(e) != Some(x.state) {
+        dim_line(|| format!("dim: {} {e:#x} state {}: the room dims, but its state is ending or it is down: not untouchable", b.name, x.state));
+        return;
+    }
+    open_dim(e, b, x.state, dim::Cause::Step, dim::Slot::parse(&after).level());
+    let vt: usize = rd(e);
+    let hurt_off: StepFn = std::mem::transmute_copy(&rd::<usize>(vt + EN_HURT_OFF_SLOT));
+    DIM_OPENING.store(e, Ordering::Relaxed);
+    hurt_off(e);
+    DIM_OPENING.store(0, Ordering::Relaxed);
+}
+
+pub unsafe extern "win64" fn dim_exe_0(e: usize) {
+    dim_exe(e, 0)
+}
+pub unsafe extern "win64" fn dim_exe_1(e: usize) {
+    dim_exe(e, 1)
+}
+pub unsafe extern "win64" fn dim_exe_2(e: usize) {
+    dim_exe(e, 2)
+}
+pub unsafe extern "win64" fn dim_exe_3(e: usize) {
+    dim_exe(e, 3)
+}
+const DIM_EXE_FNS: [unsafe extern "win64" fn(usize); 4] = [dim_exe_0, dim_exe_1, dim_exe_2, dim_exe_3];
 
 /// A wind-up-only revenge state's exe (Hades' state 5, `crate::revenge::HADES_WINDUP`), as written in
 /// the class's vtable (`sites::REVENGE_WINDUP_SLOTS`). Re:CoM's exe runs first; when it has moved its
@@ -511,7 +667,7 @@ pub unsafe extern "win64" fn windup_exe(e: usize) {
 }
 
 /// Checks the classes and their state steps, hooks the two steps and raises the bosses'
-/// allocation sizes: all or nothing.
+/// allocation sizes, then writes the state-machine, wind-up and dimming-step slots: all or nothing.
 pub unsafe fn install(bs: usize) -> bool {
     for b in rv::BOSSES {
         let want = format!(".?AV{}@@", b.rtti);
@@ -562,7 +718,13 @@ pub unsafe fn install(bs: usize) -> bool {
     }
     // The state-change callback of each class's state machine and Hades' state-5 exe: pointer
     // writes in those classes' own tables (Re:CoM's function checked as the old value).
-    let ours: Vec<(&PtrSite, usize)> = REVENGE_FSM_SLOTS.iter().map(|p| (p, state_change as *const () as usize)).chain(REVENGE_WINDUP_SLOTS.iter().map(|p| (p, windup_exe as *const () as usize))).collect();
+    // The dimming moves' steps (`crate::dim::EXES`, same order as `DIM_EXE_SLOTS`) go with them.
+    let ours: Vec<(&PtrSite, usize)> = REVENGE_FSM_SLOTS
+        .iter()
+        .map(|p| (p, state_change as *const () as usize))
+        .chain(REVENGE_WINDUP_SLOTS.iter().map(|p| (p, windup_exe as *const () as usize)))
+        .chain(DIM_EXE_SLOTS.iter().zip(DIM_EXE_FNS).map(|(p, f)| (p, f as usize)))
+        .collect();
     let mut written: Vec<(&PtrSite, usize)> = Vec::new();
     for &(p, f) in &ours {
         let old = ((bs + p.target as usize) as u64).to_le_bytes();
