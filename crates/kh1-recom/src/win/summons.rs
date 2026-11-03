@@ -33,7 +33,8 @@
 //!
 //! - **M12 step 5, the Sleights list** ([`start_sleight`]): the same start ([`begin`]) for an
 //!   equipped sleight ability's Re:CoM id, then the owner's MP by tier (all of it for Idyll Romp /
-//!   Cross-slash+). No invincibility of ours: Re:CoM's `exeStockSkill` sets its own protection bits
+//!   Cross-slash+). Re:CoM's air-start sleights (`crate::sleights::AIR_START`) also start mid-air:
+//!   Re:CoM's own start then takes their air version (owner, "Sleights menu follow-ups"). No invincibility of ours: Re:CoM's `exeStockSkill` sets its own protection bits
 //!   where its sleight has them. While any sleight runs ([`sleight_running`]) both rows lock. The
 //!   bottom row's choice ([`bottom_row`]) is the summon block's byte `save + 0x26B6`.
 //!
@@ -80,7 +81,13 @@ mod f {
     pub const WEAPON: usize = 0x3D0;
     /// The weapon's attack is live.
     pub const WEAPON_LIVE: usize = 0x23C;
+    /// Sora's state bits (`+0x418`; [`super::AIR_VERSION`]).
+    pub const FLAGS_418: usize = 0x418;
 }
+
+/// `initStockSkill`'s air version of a sleight started in the air (`+0x418 |= 0x800000`, only for
+/// `crate::sleights::AIR_START` and the -ra / -ga tiers). Checked (decomp `0x140220DF0`).
+const AIR_VERSION: u32 = 0x80_0000;
 
 type StartFn = unsafe extern "win64" fn(usize) -> u64;
 type LoadFn = unsafe extern "win64" fn(usize, u32, u32);
@@ -362,6 +369,9 @@ pub unsafe fn start_sleight(pl: usize, id: u16) -> bool {
     super::mp::pay(points * 100, name);
     SLEIGHT_ID.store(id as u32, Ordering::Relaxed);
     SLEIGHT_OUT.store(pl, Ordering::Relaxed);
-    note(|| format!("sleight {name} -> Re:CoM's sleight {id:#x} through Sora's sleight start, {points} MP ({:?}), from action {before:#x}; Re:CoM's own protection only", crate::sleights::cost(id).unwrap_or(crate::sleights::Cost::Points(0))));
+    // M12 follow-ups (owner, "Sleights menu follow-ups"): an air-start sleight started mid-air takes
+    // Re:CoM's air version (`initStockSkill` sets `+0x418 & 0x800000`; `crate::sleights::AIR_START`).
+    let air = rd::<u32>(pl + f::FLAGS_418) & AIR_VERSION != 0;
+    note(|| format!("sleight {name} -> Re:CoM's sleight {id:#x} through Sora's sleight start{}, {points} MP ({:?}), from action {before:#x}; Re:CoM's own protection only", if air { " (in the air: Re:CoM's air version)" } else { "" }, crate::sleights::cost(id).unwrap_or(crate::sleights::Cost::Points(0))));
     true
 }

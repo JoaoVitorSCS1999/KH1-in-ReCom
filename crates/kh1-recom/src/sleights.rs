@@ -13,7 +13,9 @@
 //!   words [`word`] (the abilities' names, English in every language, as Cloud's).
 //! - **Usable** ([`usable`]): the summons' rule (`crate::summons::usable`, KH1's `0x140288F30`
 //!   without its once-per-battle test): Re:CoM's battle room, KH1's ground state (flag 0x80), no
-//!   sleight running, and the owner's MP ([`Cost`]).
+//!   sleight running, and the owner's MP ([`Cost`]). **Mid-air** too for Re:CoM's air-start
+//!   sleights ([`AIR_START`], owner 2026-11-03, "Sleights menu follow-ups"), in a KH1 air state that
+//!   lets a command start.
 //! - **The start**: Re:CoM's own sleight start for the id (the summons' path, Sora's vtable `+0x130`
 //!   = `0x1402247A0`); Re:CoM runs its motion, effects, hits, damage, protection and end.
 
@@ -121,10 +123,25 @@ pub fn pay_points(id: u16, mp: i32) -> Option<i32> {
     }
 }
 
+/// Re:CoM's sleights of the 27 that start in the air (owner, 2026-11-03, "Sleights menu
+/// follow-ups": "Re:CoM's air-start sleights (Homing Blizzara, Warpinator, Warp, Bind, Confuse,
+/// Terror, Teleport) usable mid-air"): the ids whose case in `initStockSkill` `0x140220DF0` asks
+/// Re:CoM's airborne test `0x1401F3C00` and, in the air, takes its air version (`player+0x418 |=
+/// 0x800000`, `+0x478` = 4 (the air clips; Teleport −36), which `initStockSkill`'s end turns into the
+/// low-gravity bit `0x2000000`). Of Sora's other ids only the -ra / -ga tiers (0xD..=0x1A) do so; no
+/// other of the 27 has an air case. Checked (decomp).
+pub const AIR_START: [u16; 7] = [0x24, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x32];
+
+/// Sleight `id` may start mid-air ([`AIR_START`]).
+pub fn air_start(id: u16) -> bool {
+    AIR_START.contains(&id)
+}
+
 /// KH1's usable test for sleight `id` (the summons' gate; `crate::summons::Gate`'s `out` = any
-/// Re:CoM sleight running).
+/// Re:CoM sleight running): on the ground, or (an [`AIR_START`] sleight) in a KH1 air state that
+/// lets a command start (`Gate::air`); Re:CoM's start then picks its air version itself.
 pub fn usable(g: &crate::summons::Gate, id: u16) -> bool {
-    g.battle && g.ground && !g.out && pay_points(id, g.mp).is_some()
+    g.battle && (g.ground || (g.air && air_start(id))) && !g.out && pay_points(id, g.mp).is_some()
 }
 
 /// The list's ids from the equipped ones (Re:CoM's order; anything not a sleight ability dropped,
@@ -183,7 +200,7 @@ mod tests {
 
     #[test]
     fn usable_is_the_summons_gate_with_the_sleights_mp() {
-        let g = Gate { battle: true, ground: true, mp: 2, out: false };
+        let g = Gate { battle: true, ground: true, air: false, mp: 2, out: false };
         assert!(usable(&g, s::FIRE_RAID));
         assert!(!usable(&g, s::HOLY));
         assert!(usable(&g, s::IDYLL_ROMP));
@@ -191,6 +208,28 @@ mod tests {
         assert!(!usable(&Gate { ground: false, ..g }, s::FIRE_RAID), "on the ground");
         assert!(!usable(&Gate { out: true, ..g }, s::FIRE_RAID), "one sleight at a time");
         assert!(!usable(&Gate { mp: 0, ..g }, s::IDYLL_ROMP));
+    }
+
+    /// Owner (2026-11-03, "Sleights menu follow-ups"): Re:CoM's air-start sleights usable mid-air,
+    /// the rest ground-only; exactly the ids `initStockSkill` gives an air version.
+    #[test]
+    fn air_start_sleights_are_recoms_seven() {
+        let names: Vec<&str> = AIR_START.iter().map(|&id| name(id)).collect();
+        assert_eq!(names, ["Homing Blizzara", "Warpinator", "Warp", "Bind", "Confuse", "Terror", "Teleport"]);
+        let air = Gate { battle: true, ground: false, air: true, mp: 3, out: false };
+        for id in ab::SLEIGHTS.filter_map(ab::sleight_of) {
+            assert_eq!(usable(&air, id), air_start(id), "{}", name(id));
+            // On the ground every one is usable as before.
+            assert!(usable(&Gate { ground: true, air: false, ..air }, id), "{}", name(id));
+        }
+        // Mid-air still needs a battle room, nothing running and the MP; neither ground nor a KH1 air
+        // state that takes a command (e.g. a reaction): none.
+        assert!(!usable(&Gate { battle: false, ..air }, 0x24));
+        assert!(!usable(&Gate { out: true, ..air }, 0x2C));
+        assert!(!usable(&Gate { mp: 0, ..air }, 0x32));
+        assert!(!usable(&Gate { air: false, ..air }, 0x24));
+        // Not ours: the tiers (also air in Re:CoM) aren't sleight abilities.
+        assert!(!air_start(0xD) && !air_start(s::FIRE_RAID) && !air_start(s::IDYLL_ROMP));
     }
 
     #[test]

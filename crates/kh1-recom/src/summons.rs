@@ -114,6 +114,10 @@ pub struct Gate {
     pub battle: bool,
     /// KH1's movement state's flag 0x80 (state 0).
     pub ground: bool,
+    /// M12 follow-ups (the Sleights list's air start): KH1's movement state lets a command start
+    /// while Sora is off the ground: its magic flag 0x20 without the ground flag 0x80 (take-off 1,
+    /// air 2, flight 8; `crate::command_menu::state_flags`). The summons never read it (ground only).
+    pub air: bool,
     /// Sora's whole MP (KH1's `+0x44`; the charge doesn't count).
     pub mp: i32,
     /// A summon is out (Re:CoM's sleight running; KH1's in-progress flag `0x142867364 & 0x2000`):
@@ -254,11 +258,12 @@ mod tests {
 
     #[test]
     fn kh1_usable_rule() {
-        let g = Gate { battle: true, ground: true, mp: 2, out: false };
+        let g = Gate { battle: true, ground: true, air: false, mp: 2, out: false };
         assert!(usable(&g, 5), "Simba with 2 MP");
         assert!(!usable(&g, 4), "Mushu needs 3");
         assert!(!usable(&Gate { battle: false, ..g }, 5), "battle mode only");
         assert!(!usable(&Gate { ground: false, ..g }, 5), "state 0 only");
+        assert!(!usable(&Gate { ground: false, air: true, ..g }, 5), "summons stay ground-only");
         assert!(!usable(&Gate { out: true, ..g }, 5), "one out at a time");
         assert!(!usable(&g, 7));
         assert!(party_ready());
