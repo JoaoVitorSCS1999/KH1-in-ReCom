@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 196: Sleight abilities: a short description each, version 0.100.2 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Write short ones"; the name stays "Lethal Frame".
+- Each of the 27 sleight abilities' help line describes it and ends "Uses n MP." (Idyll Romp / Cross-slash+: "Uses all MP."), within the 66-character box. Checked: elements from Re:CoM's sleight table (files); how each hit acts from the decomp (Freeze / Bind / Warp / Confuse / Terror resist checks; Quake grounded enemies only; Teleport Stop's kind for 18000 ticks; Lethal Frame Stop's state; Synchro copies HP). Assumption: each look (thrown Keyblade, ring of fire …) from memory of Re:CoM; sources tabled in `docs/recom-m12-sleights.md` § 8.4.1.
+- Checked: tests, Windows build.
+
+---
+
 ## Stage 195: Wizard and Aquatank untouchable while they grey the room (on Re:CoM's AI), version 0.100.1 (2026-11-01)
 
 - Ask (owner, 2026-11-03, on 0.99.1): the Wizard and the Aquatank "Same rule".
