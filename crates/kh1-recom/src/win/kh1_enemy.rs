@@ -1012,10 +1012,13 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
     if let Some(s) = sight(en, rt.sight_bone) {
         rt.ai.set_sight(s);
     }
-    if !(poll && rt.action.is_none_or(|a| a.steered)) && !rt.dead {
-        // KH1's child objects run every frame, also while the parent's script waits (M11).
+    if !(poll && rt.action.is_none_or(|a| a.steered)) {
+        // KH1's child objects run every frame, also while the parent's script waits (M11), and after its death while
+        // Re:CoM keeps it (state 30; M11, the Red Nocturne's spells test its motion, not its HP: `Behaviour::dead_frame`,
+        // nothing for the other classes).
         let w = World { step, pos, target: sora_pos(), grounded: contact && !airborne && !flying, airborne, moved, motion: rt.current };
-        for c in &rt.ai.side_frame(w) {
+        let cmds = if rt.dead { rt.ai.dead_frame(w) } else { rt.ai.side_frame(w) };
+        for c in &cmds {
             apply(en, rt, c);
         }
     }

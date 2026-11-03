@@ -207,9 +207,15 @@ pub enum CastStep {
 
 /// A spell child's wait (the Red Nocturne's `ex_2110_00.bd` / `ex_2110_01.bd`, entry `0x6B6`; Checked (files)): while
 /// its parent plays the charge request it waits; then the parent must play the cast request (else it ends); then for
-/// `wait` frames (counted down by the step each frame, checked first) the parent must still play the cast request
-/// (`_01` also lets a dead parent go on: the host steps only a living parent's children, so the rule is the same
-/// here); then it acts. Charge effects (`sys 75` 2052 / 2054, 2053 / 2058) wait for M13.
+/// `wait` frames (counted down by the step each frame, checked first) the parent must still play the cast request; then
+/// it acts. Neither child tests its parent's HP: a dying parent's children go on by this rule (the host steps them after
+/// the defeat too, `Behaviour::dead_frame`), so the killing hit's reaction motion ends them. `_01` (the big Fire,
+/// `0x734..0x754`) tests the motion only while `sys 120` (`0x1402BAB10` → `0x140291FF0`: actor `+0x374` bit 0 set, bit 1
+/// clear; bit 1 is set only by the actor's removal `0x140292390`; Checked (decomp)) says the parent is still there: once
+/// it is removed (KH1: 30 frames after its death, its fade `0x1C9A(actor, 30)` with flag 8) the big Fire counts on and
+/// flies (from the removed actor's last place). Not modelled: the host has no enemy to step after Re:CoM removes it (30
+/// frames after its defeat), and it plays a reaction motion on every killing hit, so a cast never outlasts its parent's
+/// defeat here. Charge effects (`sys 75` 2052 / 2054, 2053 / 2058) wait for M13.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cast {
     /// Its sub-object index (`sys 94`'s second word): the host's [`Cmd::Throw`].

@@ -3954,7 +3954,7 @@ child's** (`ex_2340_01.bd` `0x72`, `0x16E`, `0x1B8`, `0x2F8`, `0x364`; Checked (
 |---|---|---|
 | waits while the parent plays | 200 | 202 |
 | then the parent must play (else it ends) | 201 | 203 |
-| for (frames, counted from the first frame of it; the parent must keep playing it) | 40 | 90 (only while the parent lives) |
+| for (frames, counted from the first frame of it; the parent must keep playing it) | 40 | 90 (only while the parent is there: `sys 120`, not removed; its HP is not tested) |
 | start `sys 19(parent, 0x8001, −0.5)`, then up | 80 | 70 |
 | init `0x434(…, turn, speed)` | 1° a frame, 12 a frame | 2°, 22 |
 | fly `0xE8(…, model, life, fade)` | 7, 90, 20 | 11, 90, 20 |
@@ -4077,7 +4077,29 @@ rednocturne eNNN: fire … / bigfire …` per fire, `fire N: Sora's swing bats i
   absorbs and heals it, Blizzard dizzies it: attributes are not carried), KH1's dizzy (`sys 179`; its own fire's hit takes
   Re:CoM's stun instead, owner 2026-11-03), effects (charge effects
   2052 / 2054 / 2053 / 2058, the fires' fade) and the appearance's flag 0x80 (M13), the death routine (Re:CoM's defeat,
-  prizes, EXP); a big Fire whose caster dies in its last 90 frames doesn't fly (KH1's does).
+  prizes, EXP); a big Fire still counting after its caster was removed (KH1: it flies; here Re:CoM removes the enemy 30
+  frames after its defeat and the killing hit's reaction has already ended the cast: see "A dying caster's spells").
+
+#### A dying caster's spells (owner 2026-11-03: KH1's rule). Checked (files: `ex_2110_00.bd` / `_01.bd` disassembled, raw `0x6B6..0x7D0`; decomp: the syscalls)
+
+- The Fire (`_00`): waits while 200 plays; 201 must play next (else `end_thread`); then 40 frames, each ending the child
+  if 201 no longer plays (`0x740`); no HP test. The big Fire (`_01`): the same with 202 / 203 and 90 frames, but its test
+  (`0x734..0x754`) is `sys 120(parent) && motion ≠ 203` → end: **only while the parent is there**. `sys 120`
+  (`0x1402BAB10` → `0x140291FF0`): actor `+0x374` bit 0 set and bit 1 clear; bit 1 is written only by the actor's
+  removal `0x140292390` (it unregisters the actor; Checked (decomp): the only `|= 2` of `+0x374`, no write clears bit 0).
+  So neither child tests HP. KH1's children are tasks of their own (`0x14028F5E0`, `0x14028F6D0`), not stopped by the
+  parent's death or removal.
+- The parent's death (`0x1F74` / `0x1FFE` → `0x1518` → `0x1A10`): effects, `sys 129`, its fade `0x1C9A(actor, 30)` (alpha
+  −1/30 a frame, flag 8: removed when faded), `sys 173`, EXP. Its hit handler zeroes no kind on a kill, so KH1's reaction
+  to the killing hit plays (the shared engine's rule since M10) and replaces 203: the big Fire ends the next frame. It
+  flies after a death only when the cast motion survives the killing hit (no reaction), counting on while the caster
+  fades and, once it is removed, without the motion test.
+- Built (`Behaviour::dead_frame`, `win::kh1_enemy::tick` in the defeat's state 30 step, Re:CoM's defeat kept): the
+  defeated Red Nocturne's waiting children are stepped each frame by the same `Cast` rule with the motion it plays, until
+  Re:CoM removes it (`0x14017BBC0` sets `+0x160` = 1500 ticks, its step `0x140183260` ends it below 1: Checked
+  (decomp); 30 frames, as the M10 trace's defeated Shadows drop out 31 frames after their defeat: Checked (trace 18)); a child that acts makes its fire from the dying caster's place and facing. Not modelled: the count after the
+  removal (no enemy to step; unreachable here: the host plays a reaction or a flinch on every killing hit, so the cast
+  has already ended). Per frame: nothing for the other classes (the default `dead_frame` is empty).
 
 #### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Red Nocturne battle (Traverse Town's or Wonderland's); run the asset step first)
 
@@ -4094,7 +4116,8 @@ rednocturne eNNN: fire … / bigfire …` per fire, `fire N: Sora's swing bats i
    about 5 s; the log's `e…: Re:CoM's stun (state 17) for its own fire`), gives a little extra EXP at once, and when the
    stun ends it flies off and casts a big Fire (its hit state).
 6. Hit it while it charges: no fire comes.
-7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP. Kill one during its big Fire's cast (1½ s after the charge):
+   no fire comes (KH1's rule: the killing hit's reaction ends the cast; owner question 3).
 8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Red Nocturnes (its own two shots).
 
 Please send `kh1-recom.log` (`rednocturne:`, `thrown:` lines) and an F9 trace (its `fire` / `bigfire` tokens).
@@ -4115,9 +4138,13 @@ frames (200 → 201 + 40, 202 → 203 + 90), the fires' start points and paths t
    motions from the model); (c) Re:CoM's own stun state for KH1's frames.
 2. **Facing while idle.** KH1's idle legs face it toward world yaw 0 every frame (`sys 11` of a zero vector). Built 1:1. (a)
    Keep; (b) face along its flight (not KH1).
-3. **A dying caster's big Fire.** KH1's big Fire child still flies when its caster dies in the cast's last 90 frames. Built:
-   it doesn't (the host steps only a living enemy's children). (a) Keep; (b) step a defeated caster's children until they
-   act.
+3. **A dying caster's big Fire.** **Answered (owner 2026-11-03): KH1's rule** ("a big Fire still flies if the caster dies
+   late in the cast"). Built: a defeated caster's spell children are stepped by KH1's own rule. **But KH1's rule is not
+   what this question said** (Checked (files + decomp), "A dying caster's spells" below): the big Fire child tests its
+   caster's *removal*, not its death; while the dying caster is still there it must keep playing the cast (203), and the
+   killing hit's reaction replaces it, so in KH1 the big Fire of a caster killed by a reacting hit does not fly. New
+   question for the owner: (a) keep KH1's rule (built: no fire after a kill in practice); (b) a non-KH1 rule: once the
+   caster is dead its waiting big Fire flies at its 90th frame whatever its motion (from where it died).
 4. **Guarding the other fireballs.** KH1's Guard sends the Fat Bandit's and the Defender's fireballs back the same way (the
    same row shape). Built: only the Red Nocturne's and the Gargoyle's; those two keep decision 28. (a) Keep; (b) KH1's way
    for them too (one version).
