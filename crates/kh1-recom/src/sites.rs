@@ -2707,6 +2707,45 @@ pub const NEOSHADOW_PTRS: &[PtrSite] = &[
     PtrSite { name: "CEnemyNeoshadow +0x438 attack hurt off", rva: 0x0054_5560, target: 0x0017_DA80 },
     PtrSite { name: "CEnemyNeoshadow +0x440 attack end", rva: 0x0054_5568, target: 0x0017_DA90 },
 ];
+/// M11 ground melee: the Wight Knight's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp):
+/// its only caller is the enemy factory `0x140188F40` (case 12, the call at `0x140189194`); no branch lands inside the
+/// moved bytes and no pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-02).
+pub const WIGHTKNIGHT_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemyWightnight ctor (0x140194ED0)", rva: 0x0019_4ED0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 ground melee: the factory's `mov ecx, 0xCD0` before `CEnemyWightnight`'s ctor, raised by the framework's
+/// 0x20-byte tail. Checked (exe).
+pub const WIGHTKNIGHT_ALLOC: &[Site] = &[Site { name: "alloc CEnemyWightnight (0x14018917B)", rva: 0x0018_917B, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11 ground melee: `CEnemyWightnight`'s vtable slots the copy keeps or replaces, checked against Re:CoM's functions
+/// before the copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12 / 30 are `CBattleEnemy`'s,
+/// 1..3 the Wight Knight's own: 1 `0x140195040` / `0x140195410`, 2 its two-strike claw `e012_052` `0x140194FA0` /
+/// `0x140195090` (then sometimes its jump `e012_003..007`), 3 its wind-up `e012_053` and lunge `e012_054` `0x140194FF0` /
+/// `0x140195320`; the attack states' ends its own `ret`s, as `CBattleEnemy`'s; the think `CHeartless`'s `0x140196EC0`).
+pub const WIGHTKNIGHT_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyWightnight +0x70 motion play", rva: 0x0055_37B8, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyWightnight +0x80 update", rva: 0x0055_37C8, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyWightnight +0xE8 state 0 begin", rva: 0x0055_3830, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyWightnight +0xF0 state 0 step", rva: 0x0055_3838, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyWightnight +0xF8 state 0 end", rva: 0x0055_3840, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyWightnight +0x100 state 1 begin", rva: 0x0055_3848, target: 0x0019_5040 },
+    PtrSite { name: "CEnemyWightnight +0x108 state 1 step", rva: 0x0055_3850, target: 0x0019_5410 },
+    PtrSite { name: "CEnemyWightnight +0x118 state 2 begin", rva: 0x0055_3860, target: 0x0019_4FA0 },
+    PtrSite { name: "CEnemyWightnight +0x120 state 2 step", rva: 0x0055_3868, target: 0x0019_5090 },
+    PtrSite { name: "CEnemyWightnight +0x130 state 3 begin", rva: 0x0055_3878, target: 0x0019_4FF0 },
+    PtrSite { name: "CEnemyWightnight +0x138 state 3 step", rva: 0x0055_3880, target: 0x0019_5320 },
+    PtrSite { name: "CEnemyWightnight +0x1F0 state 11 begin", rva: 0x0055_3938, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyWightnight +0x208 state 12 begin", rva: 0x0055_3950, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyWightnight +0x3B8 state 30 begin", rva: 0x0055_3B00, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyWightnight +0x3C0 state 30 step", rva: 0x0055_3B08, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyWightnight +0x3D0 think", rva: 0x0055_3B18, target: 0x0019_6EC0 },
+    // The shared enemy-guard step: the hit handler's guard event (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemyWightnight +0x3D8 guard event", rva: 0x0055_3B20, target: 0x0018_1600 },
+    PtrSite { name: "CEnemyWightnight +0x438 attack hurt off", rva: 0x0055_3B80, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyWightnight +0x440 attack end", rva: 0x0055_3B88, target: 0x0017_DA90 },
+];
 
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
@@ -2832,6 +2871,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         KH1_ENEMY_RING_CALLEES,
         NEOSHADOW_HOOKS,
         NEOSHADOW_ALLOC,
+        WIGHTKNIGHT_HOOKS,
+        WIGHTKNIGHT_ALLOC,
     ];
     LISTS
         .iter()
@@ -2931,7 +2972,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
