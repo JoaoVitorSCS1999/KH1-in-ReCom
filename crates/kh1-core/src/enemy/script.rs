@@ -94,6 +94,11 @@ pub enum Cmd<A> {
     /// KH1's stats-block write `+0x3C = +0x40` (HP = max HP; the Search Ghost's `0x2ADE`, M11): the
     /// host restores the enemy's own HP to its max (Re:CoM's HP, decision M10).
     HealFull,
+    /// KH1's `sys 102` for a support spell child (`0x1402BC0B0` → `0x1402B80A0`; M11, the Green Requiem's Cure, `ex_2140.bd`
+    /// `0x33C`): the child's target among the caster's allies, picked with this frame's draw (the same `rand` as `sys 25`)
+    /// by KH1's rule ([`crate::greenrequiem::pick`]) from the host's list of them (Re:CoM's battle enemies); the caster itself
+    /// when none qualifies. The host keeps it for the child's [`Cmd::Throw`].
+    Support { child: u8, draw: f32 },
     /// `sys 13` (`0x1402B9F80` → `0x14029F980`) of the request already playing: KH1 writes the request entry
     /// whatever plays (`+0x5E` = 1, the start time `+0x61`), so the motion starts again from `start` KH1
     /// frames (Checked (decomp)); [`Cmd::Motion`] / [`Cmd::MotionAt`] leave a playing request alone (`sys 12`'s
@@ -156,6 +161,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::Throw(n) => Cmd::Throw(n),
             Cmd::Note(n) => Cmd::Note(n),
             Cmd::HealFull => Cmd::HealFull,
+            Cmd::Support { child, draw } => Cmd::Support { child, draw },
             Cmd::Restart { request, blend, start } => Cmd::Restart { request, blend, start },
             Cmd::Reward(r) => Cmd::Reward(r),
         }

@@ -7,5 +7,6 @@ pub mod airpirate;
 pub mod wyvern;
 pub mod searchghost;
 pub mod gargoyle;
+pub mod greenrequiem;
 pub mod rednocturne;
 pub mod bluerhapsody;

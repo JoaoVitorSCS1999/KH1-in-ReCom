@@ -3179,6 +3179,73 @@ pub const BLUERHAPSODY_PTRS: &[PtrSite] = &[
 /// projectiles drawn with a Re:CoM effect, its own). Pointer-checked: slot 1's name pointer. Checked (exe + decomp).
 pub const BLUERHAPSODY_FIRE_PTRS: &[PtrSite] = &[PtrSite { name: "the Blue Rhapsody's Blizzard shot effect set slot 1 name", rva: 0x007C_2F28, target: 0x0053_8138 }];
 
+/// M11 casters: the Green Requiem's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp): its only
+/// caller is the enemy factory `0x140188F40` (case 6, the call at `0x140189098`); no branch lands inside the moved bytes
+/// and no pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-03).
+pub const GREENREQUIEM_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemyGreenrequiem ctor (0x14018E570)", rva: 0x0018_E570, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 casters: the factory's `mov ecx, 0xCE0` before `CEnemyGreenrequiem`'s ctor, raised by the framework's 0x20-byte
+/// tail. Checked (exe).
+pub const GREENREQUIEM_ALLOC: &[Site] = &[Site { name: "alloc CEnemyGreenrequiem (0x14018907F)", rva: 0x0018_907F, expect: &[0xB9, 0xE0, 0x0C, 0x00, 0x00] }];
+
+/// M11 casters: `CEnemyGreenrequiem`'s vtable slots the copy keeps or replaces, checked against Re:CoM's functions before
+/// the copy is made (Checked (exe), relocated pointers; decomp: states 0 / 3 / 11 / 12 / 30 are `CBattleEnemy`'s, 1 and 2
+/// the Green Requiem's own: 1 `0x14018E780` / `0x14018EC60` / `0x14018E7C0` (the family's flying walk with `e003_001` /
+/// `e003_002`), 2 its Cure `e006_051` `0x14018E640` / `0x14018E9B0` (the ally with the most HP missing, or itself; past
+/// clip time 6000 one heal by `0x140181CE0`); the think `CHeartless`'s `0x140196EC0`).
+pub const GREENREQUIEM_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyGreenrequiem +0x70 motion play", rva: 0x0054_0538, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyGreenrequiem +0x80 update", rva: 0x0054_0548, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyGreenrequiem +0xE8 state 0 begin", rva: 0x0054_05B0, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyGreenrequiem +0xF0 state 0 step", rva: 0x0054_05B8, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyGreenrequiem +0xF8 state 0 end", rva: 0x0054_05C0, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyGreenrequiem +0x100 state 1 begin", rva: 0x0054_05C8, target: 0x0018_E780 },
+    PtrSite { name: "CEnemyGreenrequiem +0x108 state 1 step", rva: 0x0054_05D0, target: 0x0018_EC60 },
+    PtrSite { name: "CEnemyGreenrequiem +0x110 state 1 end", rva: 0x0054_05D8, target: 0x0018_E7C0 },
+    PtrSite { name: "CEnemyGreenrequiem +0x118 state 2 begin", rva: 0x0054_05E0, target: 0x0018_E640 },
+    PtrSite { name: "CEnemyGreenrequiem +0x120 state 2 step", rva: 0x0054_05E8, target: 0x0018_E9B0 },
+    PtrSite { name: "CEnemyGreenrequiem +0x130 state 3 begin", rva: 0x0054_05F8, target: 0x0017_B750 },
+    PtrSite { name: "CEnemyGreenrequiem +0x138 state 3 step", rva: 0x0054_0600, target: 0x0018_2B70 },
+    PtrSite { name: "CEnemyGreenrequiem +0x1F0 state 11 begin", rva: 0x0054_06B8, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyGreenrequiem +0x208 state 12 begin", rva: 0x0054_06D0, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyGreenrequiem +0x3B8 state 30 begin", rva: 0x0054_0880, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyGreenrequiem +0x3C0 state 30 step", rva: 0x0054_0888, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyGreenrequiem +0x3D0 think", rva: 0x0054_0898, target: 0x0019_6EC0 },
+    // The shared enemy-guard step's slot (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemyGreenrequiem +0x3D8 guard event", rva: 0x0054_08A0, target: 0x0018_1600 },
+    PtrSite { name: "CEnemyGreenrequiem +0x438 attack hurt off", rva: 0x0054_0900, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyGreenrequiem +0x440 attack end", rva: 0x0054_0908, target: 0x0017_DA90 },
+];
+
+/// M11 casters: the Green Requiem's Cure on Re:CoM's own heal (`win::kh1_cure`), made as its state 2 step `0x14018E9B0`
+/// makes it: its power `0x14017F0E0(enemy, 0, 0x19, 0, 0, 0)` and the heal `0x140181CE0(target, power, "_ex_2140", effect,
+/// &(0, 0, 0, 1), 0x1402ABB20(target, 1))` with the effect 8 / 9 / 10 for a target of Re:CoM's enemy id 3 / 4 / 5 (`+0x128
+/// % 10000`), else 7. Check-only: the effect set's name the call passes (`lea r8` at `0x14018EAB8` → `0x140540958`), the
+/// effect's switch and the power call's arguments (Steam exe, 2026-11-03). The callees are checked in their own lists
+/// (`KH1_ENEMY_REWARD_CALLEES`, `THROWN_CALLEES`, …).
+pub const GREENREQUIEM_CURE_CHECKED: &[Site] = &[
+    Site { name: "the Green Requiem's heal effect set name \"_ex_2140\" (0x140540958)", rva: 0x0054_0958, expect: b"_ex_2140\0" },
+    // mov ecx,[rax+0x128]; lea esi,[r14+7]; … % 10000; 3 → 8, 4 → 9, 5 → 10 (lea esi,[rcx+9]); else 7.
+    Site {
+        name: "the Green Requiem's heal effect by its target's class (0x14018EA34)",
+        rva: 0x0018_EA34,
+        expect: &[
+            0x8B, 0x88, 0x28, 0x01, 0x00, 0x00, 0x41, 0x8D, 0x76, 0x07, 0xB8, 0xAD, 0x8B, 0xDB, 0x68, 0xF7, 0xE9, 0xC1, 0xFA, 0x0C, 0x8B, 0xC2, 0xC1, 0xE8, 0x1F, 0x03, 0xD0, 0x69, 0xC2, 0x10, 0x27, 0x00, 0x00, 0x2B, 0xC8, 0x83, 0xE9, 0x03, 0x74, 0x16, 0x83, 0xE9, 0x01,
+            0x74, 0x0A, 0x83, 0xF9, 0x01, 0x75, 0x11, 0x8D, 0x71, 0x09, 0xEB, 0x0C, 0xBE, 0x09, 0x00, 0x00, 0x00, 0xEB, 0x05, 0xBE, 0x08, 0x00, 0x00, 0x00,
+        ],
+    },
+    // xor r9d,r9d; mov [rsp+0x28],r14d; xor edx,edx; mov [rsp+0x20],r14; mov rcx,rdi; mov rbx,rax; lea r8d,[r9+0x19];
+    // call 0x14017F0E0.
+    Site {
+        name: "the Green Requiem's heal power call (0x14018EA84)",
+        rva: 0x0018_EA84,
+        expect: &[0x45, 0x33, 0xC9, 0x44, 0x89, 0x74, 0x24, 0x28, 0x33, 0xD2, 0x4C, 0x89, 0x74, 0x24, 0x20, 0x48, 0x8B, 0xCF, 0x48, 0x8B, 0xD8, 0x45, 0x8D, 0x41, 0x19, 0xE8, 0x3E, 0x06, 0xFF, 0xFF],
+    },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -3322,6 +3389,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         REDNOCTURNE_ALLOC,
         BLUERHAPSODY_HOOKS,
         BLUERHAPSODY_ALLOC,
+        GREENREQUIEM_HOOKS,
+        GREENREQUIEM_ALLOC,
+        GREENREQUIEM_CURE_CHECKED,
         HELD_CALLEES,
         GRAB_CALLEES,
         BOUNCYWILD_HOOKS,

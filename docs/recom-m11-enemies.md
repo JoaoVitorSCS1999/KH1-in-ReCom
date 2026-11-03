@@ -4338,6 +4338,173 @@ melee's frames (215 from 8, the hit 82..100) and the Blizzard's frame (55 + 84),
    (0x100) ends it at a hit, a wall or the range together, so a wall ends it (as every ported shot). (a) Keep; (b) research a
    Re:CoM bullet setting that keeps the hit end without the wall end.
 
+### The Green Requiem (built)
+
+Status: built on branch `green-wip`; tests and the Windows build pass; **not seen in game**; no KH1 trace of the Green
+Requiem yet. KH1's AI, reactions and motions on Re:CoM's `CEnemyGreenrequiem`, with Re:CoM's stats. It has no attack of its
+own: its one spell (its child) is a Cure on one of its allies, picked by KH1's rule, healed by Re:CoM's own Green Requiem
+heal (its power, its effect). The third of the casting family: `kh1_core::caster`'s idle leg, fly-to and spell wait are
+reused; its rounds, its cast flight, its pick and its hit handler are its own (`kh1_core::greenrequiem`).
+
+#### KH1's side. Checked (files: `ex_2140.bd` disassembled, code from `0x1B8`, folded and raw; its child `ex_2140_00.bd`, code from `0x18`; decomp: the syscalls named)
+
+The script (0x1E00 bytes) keeps the actor at `wp+0` (the Red Nocturne / Blue Rhapsody keep it at `wp+4`), the state object
+at `wp+0x20`, the search object at `wp+0x30` (its table at `0x190`), "seen" at `wp+0x38`. Its copies of the family's idle
+leg (`0x694`), fly-to (`0x812`) and stuck test (`0xD10`) are the Red Nocturne's routines but for that offset (Checked
+(files): `0x812..0x9B0` against the Red Nocturne's `0xABC`: 6 bytes differ, each the actor's load). Every motion it plays
+is a plain request except its appearance (69).
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x1BBE` | init `0x9EA` (records LV1 `0x14` / LV2 `0x80`; stats `+0x14` = 0.2, `+0x18` = 0.95; flight with no velocity `sys 135`; the state / search objects; home; seen cleared); handlers: hit `0x1CAA`, message `0x1D80` (answers 0), hit-effect filter `0x1C62` (element effects); a yield; the idle start `0x656`; then each frame the idle search (`0x7A8`: in state 1, Sora within 1000 → state 2 with the target) and a state request restarts the behaviour (1 idle `0x64A`, the target cleared; 2 engaged `0x21E`; 3 hit `0x1DC`, the hitter or Sora). No `sys 125`: π/16 a frame |
+| idle start | `0x666` | spawn type ≠ 0: the appearance `0xBEA` (fade-in 30 frames, flag 0x80 / 30, effect 2, **69 as an action with 219 queued at blend 8**, then facing Sora at once); state 1 |
+| idle | `0x64A` → `0x694` | the family's idle leg: 219, 5° a frame at 8, facing yaw 0, sinking 0.3 (rising below 150 over the floor), [150, 180) frames |
+| engaged | `0x21E` → `0x25A` | the first time: seen, and for spawn type 0 the notice `0xA70` (214, not in world 11); a yield; the leash `0xAD0` (not ported); **to its height** `0x584`; **one round** `0x280`; to its height; the search `0x9B0` (`sys 48`, entry 1: Sora, the only opponent); state 2 again |
+| to its height | `0x584` | to 180 above the floor under the target (`0x11BC`: `sys 77` down from 20 above it), the point read once: `0x812(2, point, 6, 100, 0, 180, 300)` |
+| round | `0x280` | 80 % a Cure; then 30 % a move; then a Cure and a move (so one or two Cures a round) |
+| move | `0x5CA` | a point [500, 600) from itself at a random angle, on the floor under it; `0x812(2, point, [6, 7.2), 10, 180, 180, 240)` |
+| **Cure** | `0x2CA` | a point [500, 600) from itself (`0x1566`: two draws; KH1 never reads it); **the pick** `0x1440(&wp30, 1, 5000, 1)` = `sys 102(actor, table entry 1, 5000, 1)`, none → itself; **the child** `sys 94(actor, 0, picked, 0xEC, 0xEC)`; `sys 13(212, blend 8, from frame 8)`; `sys 14(213, blend 8, from frame 8)`; the cast flight `0x3EA` until the cast has played; a yield; its target yaw toward its target |
+| cast flight | `0x3EA(999, target, 6, 10, 180, 180)` | until `sys 172` (213 played, nothing queued), checked first: toward 180 above the floor under its point (first the target's live place); within 10 a new point [600, 800) from the target at its own height (that frame still steers along the short way); while the aim is below it: no descent when it is below the point itself, else over 180 above the floor the way is scaled by the speed (no effect once normalised; kept); facing the target at once (`0x1922`); steering at 6 |
+| hit state | `0x1DC` | a Cure; the leash; to its height; state 2 |
+| hit handler | `0x1CAA` | a Fire / Blizzard / Thunder hit (attribute 2 / 3 / 4, `0xB1E`): kind 0, damage, HP to max (element: left out); attribute 8: `sys 194(EXP / 10 + 2)` (`0xB88`; attributes are not carried); seen; the damage `0x15CA` (a clash 6 / 7 or a repel → −1; killed → its death `0x126E`; attributes 8–11 → −1); −1: state 3 only for a clash or attributes 8 / 10 (`0x120C`); alive: state 3. The kind is never rewritten for the hits the port carries: KH1's reaction plays |
+
+**Its pick** (`sys 102` → `0x1402B80A0`, Checked (decomp)): over the actors `0x140291B60` lists (alive: `+0x374` bit 0 set,
+bit 1 clear; its side, `& 0x60`; **not itself**) with max HP above 0: ratio = HP / max; listed when ratio ≤ 1 (the call's
+fourth argument) and the distance ≤ 5000, keyed `(int)(ratio × 100)`; sorted lowest first (the CRT's `qsort`, imported from
+`api-ms-win-crt-utility-l1-1-0.dll`, with `0x1402B8DB0`: `a − b`); then one draw (`thunk 0x14031BA30`, `sys 25`'s rand):
+`(int)(draw × 100) − 60` under 0 → the first; else under 30 more, or fewer than three listed → the second when there are two
+or more (else the first); else → the third. The table entry (`0x1A4`: 60, 30, 10, 0, 0) is the player's data. Nobody listed:
+0, and `0x350` passes the caster itself. A dying ally (HP 0) is listed first: KH1's death fade keeps it in the list 30
+frames (`0x1A10`), so a Cure can be cast on it and then find nothing (`sys 120`).
+
+**Its child** (`ex_2140_00.bd`, entry `0x2EE`): effect 2052 on the parent; while the parent plays 212 it waits; then the
+parent must play 213 (else it ends); effects 2053 / 2054; **186 frames**, each needing 213 (else it ends); then its target
+must still exist (`sys 120`, else it ends); then a thread (`0x2C`) makes the row `0xEC` on the parent (`sys 23`) and hands
+it to the target at once (`sys 60` → `0x1402BF330` → `0x1402BF630`: a hit record on the target, no collision, only when it
+can be hit, `0x140292070`); an effect object (`sys 15(…, 7, 20000)`) follows the target's bone code 8. The row: power kind 0
+(the caster's stats `+0x4C`), **attribute 11**, reaction kind 0, free-standing (bone −1), `+0x14` 1000. KH1's damage rule
+for attribute 11 (`0x1402BFA80`: `0x2C0 − 0x281 < 0x80`) returns `+0x14` + the power, and the target's `0x1402BEEE0` adds
+it to its HP (`0x1402A4920(actor, +n)`): **a full heal** of every KH1 Heartless. The target's script hears the record (no
+reaction: kind 0; no state: its damage routine returns −1 for attribute 11; it is marked seen).
+
+KH1's reactions play for every hit: its model has the flinch (72..75), the knock-back (76 / 77), the air flinch (78 / 79)
+and the air knock-back (80 / 81); as a flier the shared engine takes the ground forms, kind 5 as 4.
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyGreenrequiem` (vtable `0x1405404C8`, 139 slots, RTTI COL at −8), ctor `0x14018E570` (`40 53 48 83 EC 20`:
+`CHeartless`'s base ctor, then `+0x154 |= 0x80`, `+0x260 |= 0x100`: gravity off; its only reference the factory's call at
+`0x140189098`; no branch into the moved bytes, no pointer to them: exe scan, 2026-11-03), allocation `0x14018907F` `mov ecx,
+0xCE0` → 0xD00. Its own states: 1 (`0x14018E780` → `0x1401979F0` with `e003_001` / `e003_002`, step `0x14018EC60`, end
+`0x14018E7C0`), **2, its Cure** (`e006_051`: begin `0x14018E640` walks the battle enemy manager's list (task `0x19`, `+0x40`)
+for enemies of its type `0x1004` but itself and takes the one with the most HP missing, else itself (`+0xCD0` its id), and
+flies about it; step `0x14018E9B0`: past clip time 6000 (120 frames) once `0x140181CE0(target, (int)0x14017F0E0(self, 0,
+0x19, 0, 0, 0), "_ex_2140", effect, &(0, 0, 0, 1), 0x1402ABB20(target, 1))`, the effect 8 / 9 / 10 for a target of enemy id
+3 / 4 / 5 (`+0x128 % 10000`), else 7; then Re:CoM's attack end 6000); 0 / 3 / 11 / 12 / 30 `CBattleEnemy`'s; think
+`0x140196EC0`. `EN0006.EPD`'s `@ENP`: one attack, id 0, × 30 (Checked (files)). `EN0006.ASD`: no record. `EN0006.ANN`: 76
+slots (`e006_051` the only own clip). **Re:CoM has no `EN0006.SES`**: the exe's resource names for enemy 6
+(`0x1405E0C32..`) list `.RTM`, `.MDL`, `.ANN`, `.EPD`, `.EET`, `.ASD`, `.SND`, no `.SES` (enemy 4 lists one); the session's
+extraction holds none. Re:CoM's heal `0x140181CE0`: nothing at HP 0; HP + n clamped to max; a stopped enemy's heal held for
+after its Stop; its HP gauge (`+0x430`) and the number popup (`0x14020C9A0(id, 1)`).
+
+Our copy: states 0, 1, 11, 12, 30 and the think (20 vtable slots pointer-checked, `sites::GREENREQUIEM_PTRS`); states 2 and 3
+are never entered. The attack-end cooldown (0.83.0) is keyed to Re:CoM's own vtable: `enemy_ai = recom` leaves Re:CoM's Green
+Requiem as Re:CoM has it.
+
+#### Its Cure (KH1's pick, Re:CoM's heal)
+
+- **The cast** is the behaviour's: 212 (its clip from frame 8: `enemy::STARTS`) with 213 queued (from frame 8), the cast
+  flight, the child's wait (`caster::Cast`: 212, then 186 frames of 213; a reaction, Re:CoM's Stop or any other motion ends
+  it unseen, owner 2026-11-03 for Stop). In the frame the cast starts the behaviour gives KH1's pick its draw
+  (`Cmd::Support`, new; the two draws of the unused point first).
+- **The pick** (`win::kh1_cure::pick`, once per cast): the battle enemy manager's enemies of Re:CoM's enemy type but itself,
+  in the manager's order (the list Re:CoM's own Green Requiem walks; `win::battle::enemies`), their Re:CoM HP and max HP
+  (decision M10) and distance, through KH1's rule (`kh1_core::greenrequiem::pick`, with the CRT `qsort`'s order of equal
+  keys: `crt_qsort`); its Re:CoM id kept, or its own.
+- **The heal** (`win::kh1_cure::cure`, when the child acts: 186 frames into 213): the kept id looked up (`0x1402AD350`; gone:
+  nothing, KH1's `sys 120`), then **Re:CoM's own Green Requiem heal exactly as its state 2 makes it** (above; the effect set
+  name and the switch check-only sites `sites::GREENREQUIEM_CURE_CHECKED`): Re:CoM's power (its `@ENP` attack id 0), Re:CoM's
+  effect on the target, Re:CoM's HP rules.
+- Per frame: nothing (one call per cast, one per heal).
+
+#### What the asset step writes
+
+`ENEMY/0006/EN0006.ANN` (Re:CoM's 76 slots byte-identical; KH1's clips at 100 + entry) and `kh1-greenrequiem.json` (`kh1-enemy
+1`: 54 numbers from `ex_2140.bd` (and the stats block's two speeds), the search entry's four weights (new reader
+`enemy::SEARCHES`), 1 from the child, 12 + 10 request words checked, no attack, 1 hurt part). Requests 212 / 213 start at frame
+8 (`enemy::STARTS`; the step now moves no sounds for an enemy without a `.SES`). **`EN0006.ASD` is not written** (no record)
+and **no `.SES`** (`enemy::NO_SES`). Request 0x66 gets no clip (`enemy::SKIPPED`: entry 7 without root motion, shared with the
+dizzy loop 0x43; neither played). Test `greenrequiem::tests::builds_from_the_players_files`. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0006/EN0006.ANN, method: copy, source: [{name: ENEMY/0006/EN0006.ANN}]}
+- {name: kh1-greenrequiem.json, method: copy, source: [{name: kh1-greenrequiem.json}]}
+```
+
+The log shows `greenrequiem: KH1's greenrequiem (M11) …` at start, `battle N: Green Requiem … gets KH1's AI` in a battle,
+`greenrequiem: eN: Cure 0: KH1's pick (sys 102, draw …) among [eM hp/max at d, …] -> eK` per cast and `greenrequiem: eN: Cure
+0 on eK: Re:CoM's Green Requiem heal (… power P …): HP a -> b` per heal.
+
+#### Checked / Assumption
+
+- **Checked (files):** every number at its push (the asset test reads them: 54 + 1 + 4 weights), the request words, the
+  row `0xEC` (power kind 0, attribute 11, kind 0, bone −1), the search table, the clip lengths (212 128 and 213 242 from frame
+  8, 69 90, 214 158), the hurt part, Re:CoM's ANN / ASD / EPD; the routines equal to the Red Nocturne's but for the actor's
+  offset.
+- **Checked (decomp):** `sys 102` / `0x1402B80A0` and its comparator, `0x140291B60`, `sys 60` / `0x1402BF330` /
+  `0x1402BF630`, `0x1402BFA80`'s attribute-11 case, `0x1402BEEE0`'s heal, `sys 120`, `sys 23`; Re:CoM's state 2 (`0x14018E640`
+  / `0x14018E9B0`), `0x140181CE0`, `0x14017F0E0`.
+- **Checked (exe):** the class, 139 slots, the ctor and its only call, the factory size, 20 vtable slots, the effect set name,
+  the effect switch and the power call (1129 sites match: 654 byte sites, 475 pointers); KH1's `qsort` import.
+- **Assumptions:** the child's first frame is the frame after `sys 94` (as the Red Nocturne's); the heal lands in the child's
+  act frame (KH1: a hit record its target takes in its own update, ±1 frame); flat battle floors (the floor under any point is
+  the battle floor); Re:CoM's manager order for KH1's actor-slot order; the UCRT's `qsort` source for the order of equal keys
+  (no `ucrtbase.dll` decomp in the session); KH1's "can it be hit" test on the target not carried (`0x140292070`: a sunk
+  Shadow or a hidden Darkball gets no KH1 heal; here every living ally Re:CoM keeps does, as Re:CoM's own Green Requiem's);
+  Re:CoM's sounds (none: no `.SES`); seeds per enemy.
+- **Not ported:** the leash, the notice for placed ones (battle spawns appear), the searches' draws (`sys 48`: Sora is the
+  only opponent), element rules (Fire / Blizzard / Thunder heal it to full; attributes not carried), effects (2052..2054, the
+  child's effect 7 on the target, the appearance's flag 0x80: M13; Re:CoM's own heal effect plays), the death routine
+  (Re:CoM's defeat, prizes, EXP).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Green Requiem battle with other Heartless, e.g. Traverse Town's or Wonderland's; run the asset step first)
+
+1. Each Green Requiem rises into view (about 1½ s) and fades in, then floats in small circles bobbing up and down, facing one
+   fixed direction (as KH1).
+2. Come within 10 m: it flies over and hovers about 1.8 m above the floor right by you.
+3. Then it casts: it charges for about 2 s, then holds the spell about 4 s more while it drifts around you, always facing you.
+   About 5¼ s after it started, one Heartless in the battle is healed with Re:CoM's own Green Requiem heal (its sparkle, its
+   number). It usually picks the most hurt one (6 times in 10), else the second (3 in 10) or the third (1 in 10); never
+   itself while it has allies; alone, it heals itself.
+4. Between casts it sometimes flies 5–6 m off and comes back over you.
+5. Hit it while it casts: no heal. Hit it: after its flinch it starts a new cast at once.
+6. Stop it while it casts (Re:CoM's Stop): no heal.
+7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Green Requiems (their own heal).
+
+Please send `kh1-recom.log` (`greenrequiem:` lines) and an F9 trace.
+
+#### KH1 trace (what to record in KH1)
+
+Traverse Town (the 2nd / 3rd District) or Wonderland, a Green Requiem with two or three other Heartless: stand far (12 m)
+10 s, then at 5 m 30 s; hurt one ally a little and another a lot, then watch three casts; hit it while it charges and while
+it holds the spell; hit it once from close; kill one. The trace's enemy rows give the hovering height over Sora, the casts'
+frames (212 → 213 + 186), who gets healed and by how much (HP rows) to compare.
+
+#### Green Requiem owner questions
+
+1. **How much it heals.** KH1's Cure is a full heal (1000 + its strength on KH1's HP: every KH1 Heartless goes back to full).
+   Built by the rule "each KH1 spell takes the power of the Re:CoM spell of the same kind": Re:CoM's own Green Requiem heal
+   (30 × its attack, through Re:CoM's heal and effect), so a badly hurt ally may not go back to full. (a) Keep Re:CoM's amount;
+   (b) KH1's full heal on Re:CoM's HP (Re:CoM's heal and effect, the amount = what is missing); (c) Re:CoM's amount but never
+   less than a set share of max HP.
+2. **Allies it can't reach in KH1.** KH1 never heals an ally it cannot hit (a sunk Shadow, an invisible Darkball, a warping
+   Search Ghost); Re:CoM's own Green Requiem heals any living one. Built: any living one (Re:CoM's rule). (a) Keep; (b) skip
+   our KH1 enemies while KH1 would call them unhittable (their KH1 flag; Re:CoM-AI enemies keep Re:CoM's rule).
+3. **Who counts as an ally.** Built: every enemy in Re:CoM's battle list of its enemy type (the list Re:CoM's own Green
+   Requiem uses), KH1-AI or Re:CoM-AI alike, in Re:CoM's list order (KH1 breaks ties by its own actor order). (a) Keep;
+   (b) only enemies on KH1's AI.
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -4353,7 +4520,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Red Nocturne (built) | `xa_ex_2110` (ex_2110.bd) | `CEnemyRednocturne` 3 | `0x140548a58` | `0x140191880` / `0x140189001` 0xcd0 | 1,2,3 | — | FKaA | SES |
 | Blue Rhapsody (built) | `xa_ex_2120` (ex_2120.bd) | `CEnemyBluerhapsody` 4 | `0x140537ca8` | `0x14018c120` / `0x14018902b` 0xcd0 | 1,2,3 | 215 | FKaA | — |
 | Yellow Opera | `xa_ex_2130` (ex_2130.bd) | `CEnemyYellowopera` 5 | `0x1405570c8` | `0x1401968b0` / `0x140189055` 0xcd0 | 1,2,3 | 209 | FKaA | SES |
-| Green Requiem | `xa_ex_2140` (ex_2140.bd) | `CEnemyGreenrequiem` 6 | `0x1405404c8` | `0x14018e570` / `0x14018907f` 0xce0 | 1,2 | — | FKaA | SES |
+| Green Requiem (built) | `xa_ex_2140` (ex_2140.bd) | `CEnemyGreenrequiem` 6 | `0x1405404c8` | `0x14018e570` / `0x14018907f` 0xce0 | 1,2 | — | FKaA | SES |
 | Powerwild | `xa_ex_2030` (ex_2030.bd) | `CEnemyPowerwild` 7 | `0x140547798` | `0x140191380` / `0x1401890a9` 0xcd0 | 1,2,3 | 212,214,222 | FaLl | — |
 | Bouncywild (built) | `xa_ex_2040` (ex_2040.bd) | `CEnemyBouncywild` 8 | `0x140538fb8` | `0x14018c4d0` / `0x1401890d3` 0xcd0 | 1,2,3 | — | FaLl | — |
 | Air Soldier (built) | `xa_ex_2160` (ex_2160.bd) | `CEnemyAirsoldier` 15 | `0x140531cc8` | `0x14018a4e0` / `0x1401891f9` 0xcd0 | 1,2,3, think `0x14018a5c0` | 200,201,202,203,210,211,212 | FKaA | — |

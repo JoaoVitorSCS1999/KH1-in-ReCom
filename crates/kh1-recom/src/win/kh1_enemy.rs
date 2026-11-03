@@ -894,6 +894,8 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
             rt.guard_under = None;
             guard_bodies(en, rt, None);
         }
+        // M11, the Green Requiem: its spell child is a support spell (Re:CoM's own heal on the ally KH1 picked).
+        Cmd::Throw(n) if super::kh1_cure::owns(CLASSES[rt.class].name) => super::kh1_cure::cure(en, n),
         Cmd::Throw(n) => {
             let yaw = rt.ai.body().yaw;
             let _ = super::kh1_thrown::throw(en, CLASSES[rt.class].name, manifest(rt.class), n, yaw);
@@ -901,6 +903,7 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         // Log only (KH1 does something here the port doesn't build: the line below says what).
         Cmd::Note(_) => {}
         Cmd::HealFull => heal_full(en, rt),
+        Cmd::Support { child, draw } => super::kh1_cure::pick(en, manifest(rt.class), child, draw),
         Cmd::Reward(r) => reward(en, rt, r),
         Cmd::Yaw(_) | Cmd::Jump { .. } | Cmd::Target(_) | Cmd::State(_) => {}
     }

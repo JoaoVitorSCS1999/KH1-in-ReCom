@@ -605,13 +605,15 @@ fn fmt_f(v: f32) -> String {
 /// 0x17, Checked (decomp)) shares entry 7 with its dizzy loop 0x43 (with root motion; the dizzy is not built either,
 /// owner question): 0x43 keeps the clip. The Blue Rhapsody's 0x66 the same (entry 12, shared with its dizzy loop 0x43;
 /// its dizzy is element-only, left out), and its 0x69 (entry 7 without root motion, another of those status motions;
-/// entry 7 keeps request 7, the landing, with root motion). Checked (files: the player's `xa_ex_2120.mset` map).
-pub const SKIPPED: &[(&str, u16)] = &[("rednocturne", 0x66), ("bluerhapsody", 0x66), ("bluerhapsody", 0x69)];
+/// entry 7 keeps request 7, the landing, with root motion). Checked (files: the player's `xa_ex_2120.mset` map). The Green
+/// Requiem's 0x66 the same as the Red Nocturne's (entry 7, shared with its dizzy loop 0x43; Checked (files: `xa_ex_2140.mset`)).
+pub const SKIPPED: &[(&str, u16)] = &[("greenrequiem", 0x66), ("rednocturne", 0x66), ("bluerhapsody", 0x66), ("bluerhapsody", 0x69)];
 
 /// Enemies Re:CoM keeps no `.SES` for (M11, the Red Nocturne: `Recom.hed` holds no `ENEMY/0003/EN0003.SES` and the
 /// exe's resource names for enemy 3 list none, so Re:CoM never loads one; Checked (files + exe)): their clips play no
-/// motion sounds in Re:CoM, the step reads none and writes none (`Built::ses` empty).
-pub const NO_SES: &[&str] = &["rednocturne"];
+/// motion sounds in Re:CoM, the step reads none and writes none (`Built::ses` empty). The Green Requiem (enemy 6) the same
+/// (Checked (files): no `EN0006.SES` in the session's extraction).
+pub const NO_SES: &[&str] = &["greenrequiem", "rednocturne"];
 
 /// Builds everything for one enemy.
 pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
@@ -636,6 +638,7 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     consts.extend(t_points(spec.name, &inp.mdls, &ms, &conv, &clips, &consts)?);
     consts.extend(shot_consts(spec.name, script)?);
     consts.extend(sight_bones(spec.name, &inp.mdls, &conv)?);
+    consts.extend(search_consts(spec.name, script)?);
     consts.extend(reward_consts(spec.name, script)?);
     // The attack rows → ASD records.
     let codes = bone_codes(&inp.mdls)?;
@@ -1249,7 +1252,9 @@ fn thrown_consts(enemy: &str, mdls: &[u8], script: &[u8], asd: &[u8], asd_shape:
 /// manifest length is the rest. The Air Soldier's slash: `0x22F2` `sys 13(wp, 201, 8, 20)`.
 /// The Pirate's jump slash (`0xDEA` `sys 13(wp, 0x10000D2, 8, 8)`, an action: `Cmd::MotionAt` can't
 /// carry it) and its spin's wind-up (`0xEEC` `sys 13(wp, 222, 8, 8)`), each played only there.
-pub const STARTS: &[(&str, u16, u32)] = &[("airsoldier", 201, 20), ("pirate", 210, 8), ("pirate", 222, 8)];
+/// The Green Requiem's Cure: 212 from frame 8 (`0x37E` `sys 13(wp, 212, 8, 8)`) and 213 queued from frame 8 (`0x396`
+/// `sys 14(wp, 213, 8, 8)`), each played only there.
+pub const STARTS: &[(&str, u16, u32)] = &[("airsoldier", 201, 20), ("greenrequiem", 212, 8), ("greenrequiem", 213, 8), ("pirate", 210, 8), ("pirate", 222, 8)];
 
 /// [`STARTS`]' requests of an enemy.
 pub fn starts_of(name: &str) -> Vec<(u16, u32)> {
@@ -1267,7 +1272,9 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
         return Ok(());
     }
     let mut a = Ann::parse(ann)?;
-    let mut sounds = crate::ses::parse(ses)?;
+    // An enemy Re:CoM keeps no `.SES` for ([`NO_SES`]: the Green Requiem) has no sounds to move.
+    let has_ses = !ses.is_empty();
+    let mut sounds = if has_ses { crate::ses::parse(ses)? } else { Vec::new() };
     for (req, start) in starts {
         let Some(i) = clips.iter().position(|c| c.request == req) else { return bad(format!("{name}: request {req} has no clip")) };
         let c = clips[i].clone();
@@ -1301,7 +1308,9 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
     }
     a.pad_tail_like_recom();
     *ann = a.to_bytes();
-    *ses = crate::ses::write(&sounds);
+    if has_ses {
+        *ses = crate::ses::write(&sounds);
+    }
     Ok(())
 }
 
@@ -1382,6 +1391,8 @@ pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usiz
     ("bouncywild", 0, b"ex_2040_00.bd", crate::bouncywild::FIRE_CONSTS, crate::bouncywild::FIRE_REQUESTS),
     ("bouncywild", 1, b"ex_2040_01.bd", crate::bouncywild::PEEL_CONSTS, crate::bouncywild::PEEL_REQUESTS),
     ("bouncywild", 2, b"ex_2040_02.bd", crate::bouncywild::DROP_CONSTS, crate::bouncywild::DROP_REQUESTS),
+    // The Green Requiem's Cure `ex_2140_00.bd` (`crate::greenrequiem`: its wait in 213).
+    ("greenrequiem", 0, b"ex_2140_00.bd", crate::greenrequiem::CURE_CONSTS, crate::greenrequiem::CURE_REQUESTS),
     // The Red Nocturne's Fire `ex_2110_00.bd` and big Fire `ex_2110_01.bd` (`crate::rednocturne`, [`SHOTS`]).
     ("rednocturne", 0, b"ex_2110_00.bd", crate::rednocturne::FIRE_CONSTS, crate::rednocturne::FIRE_REQUESTS),
     ("rednocturne", 1, b"ex_2110_01.bd", crate::rednocturne::BIGFIRE_CONSTS, crate::rednocturne::BIGFIRE_REQUESTS),
@@ -1544,6 +1555,26 @@ fn shot_consts(name: &str, script: &[u8]) -> Result<Vec<(String, f32)>> {
 /// bone 45, an end bone the motions don't pose, whose parent 44 is Re:CoM's `l_eye`.
 pub const SIGHTS: &[(&str, u32)] = &[("searchghost", 0x102D)];
 
+/// Search-table entries a script's target searches read (M11, the Green Requiem's ally pick): (enemy, the constants'
+/// prefix, the entry's script offset). KH1's `sys 102` (`0x1402BC0B0` → `0x1402B80A0`) and `sys 48` (`0x1402B8250`) take
+/// 20-byte entries of percent weights (the first `w0` % the best, the next `w1` % the second, …; Checked (decomp)); the
+/// Green Requiem's table at `0x190` (`0x9EA`: `0x14B4(&wp30, actor, 0x190)`), its Cure's entry 1 at `0x1A4` (`0x2CA`:
+/// `0x1440(&wp30, 1, 5000, 1)` → `entry × 20 + table`; Checked (files)). Read as `<prefix>_0..3`.
+pub const SEARCHES: &[(&str, &str, usize)] = &[("greenrequiem", "pick_weight", 0x1A4)];
+
+fn search_consts(name: &str, script: &[u8]) -> Result<Vec<(String, f32)>> {
+    let mut out = Vec::new();
+    for &(_, prefix, at) in SEARCHES.iter().filter(|s| s.0 == name) {
+        let w = script.get(at..at + 20).ok_or_else(|| crate::Error::Format(format!("{name}: no search entry at {at:#x}")))?;
+        let v: Vec<i32> = (0..5).map(|k| i32::from_le_bytes(w[k * 4..k * 4 + 4].try_into().unwrap())).collect();
+        if v.iter().any(|&x| !(0..=100).contains(&x)) || v.iter().sum::<i32>() > 100 {
+            return bad(format!("{name}: search entry {at:#x} is not percent weights ({v:?})"));
+        }
+        out.extend(v[..4].iter().enumerate().map(|(k, &x)| (format!("{prefix}_{k}"), x as f32)));
+    }
+    Ok(out)
+}
+
 /// Prize tables a script's handler hands to `sys 122` as a reward (M11, `kh1_core::enemy::Reward`): (enemy,
 /// the constants' prefix, the table's script offset). The Search Ghost's hold reward: `0x28EE` / `0x29C4`
 /// push `0x580` for `func_1F64` (`sys 32` → `sys 122`). Checked (files).
@@ -1580,7 +1611,7 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC, &crate::bouncywild::SPEC, &crate::rednocturne::SPEC, &crate::bluerhapsody::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC, &crate::bouncywild::SPEC, &crate::greenrequiem::SPEC, &crate::rednocturne::SPEC, &crate::bluerhapsody::SPEC];
 
 #[cfg(test)]
 mod clash_tests {

@@ -46,6 +46,7 @@ pub mod gargoyle;
 pub mod defender;
 pub mod bouncywild;
 pub mod caster;
+pub mod greenrequiem;
 pub mod rednocturne;
 pub mod bluerhapsody;
 
