@@ -501,7 +501,7 @@ At KH1 setting:
 - **Movement keys in the ini** (owner, 2026-11-03: "where is the toggle in the settings"): the three keys are written into the player's existing `kh1-recom.ini` (an old file has no lines for new keys; the defaults apply until then).
 - **KH1 camp tab: settings submenus** (owner, 2026-11-03: "Under the "KH1" tab in the pause menu, I want run speed, jump height, and air speed under a sub menu called "Movement" I also want the guard Reactions, combat, and enemy pace to be under a seperate sub menu in the KH1 tab called "Combat." Also, Just have the "KH1" Tab in the camp menu always be there, regardless of if the combat is set to ReCoM or KH1"; answers):
   - **Movement** submenu: Run speed, Jump height, Air speed, Dodge roll.
-  - **Combat** submenu: Combat, Guard reactions, Enemy pace, Enemy AI, Boss revenge.
+  - **Combat** submenu: Combat, Guard reactions, Enemy pace, Enemy AI, Revenge Value (owner, same night: "have \"boss revenge\" be renamed to \"Revenge Value\""; the ini key stays `boss_revenge`).
   - Combat, Guard reactions and Enemy pace **leave Re:CoM's Config menu** (it goes back to only Re:CoM's own rows).
   - The KH1 tab is **always shown**. At Combat = Re:CoM it shows only Combat and Movement; Items, Customize and Abilities appear at Combat = KH1.
   - Damage stays ini-only.
