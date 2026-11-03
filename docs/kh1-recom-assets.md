@@ -399,6 +399,23 @@ bones): local rotation (geodesic angle), translation and scale.
   per-slot `weapon_name` to the manifest. The runtime's parser ignores these and still plans all
   12 row swaps (checked).
 
+## KH1's held clip (M11, the Neoshadow's grab, owner 2026-11-02)
+
+- Input: KH1's `xa_ex_2420.mset` / `.mdls` from the `kh1_*` archives (optional: without them a note, no held clip,
+  and the Neoshadow misses its grab). `build::build_with_held` (`build` = without).
+- The clip: the `.mset`'s third section is the player-set table (`u32` count 10, then offsets from the section;
+  KH1's `sys 113` `0x1402BA8C0` indexes it by the target's character number; Checked (decomp)); entry 0 (`+0xA4B80`, the
+  only own set; Checked (files); Sora = 0: Assumption, strong), request 200 (the word `ex_2420.bd` pushes at `0x1CD4`,
+  `0x10000C8`), 126 frames, no root motion: converted on Sora's skeleton like his own KH1-only clips (60 fps, played
+  once: 127 samples), the Keyblade's clip at the same slot.
+- Its slot: after the KH1-only entries' and the three xl slots (kept free without `xl_limit.dat`; 233 with the
+  owner's files). The Halloween pack gets it like the others (`extend_costume_pack`).
+- The manifest's `held` section: `{"enemy": "neoshadow", "set", "kh1_entry", "kh1_request": 200, "slot", "name",
+  "kh1_frames": 126, "frames": 127, "fps": 60, "loop": false, "root_motion": false, "blend": 4.0, ...}` (the blend read
+  at `ex_2420.bd` `0x1CDA`); the runtime's `motions::parse_held` / `held_in_pack`.
+- Test: `validate::i_held_clip_from_the_neoshadows_player_set` (`KH1_TEST_DATA` + `KH1_M11_DIR`). No new file: the
+  clip is in the packs the step already writes; `mod.yml` is unchanged.
+
 ## Open
 
 - The loop rule is an Assumption. One KH1 entry played both looping and held would need two

@@ -81,6 +81,43 @@ pub fn parse_xl(text: &str) -> Result<Vec<Clip>, String> {
     Ok(out)
 }
 
+/// M11 (the Neoshadow's grab): the manifest's `held` section, KH1's held clip (request `kh1_request` of
+/// the Neoshadow's `.mset` player set) as a new slot of Sora's pack, with KH1's request blend.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Held {
+    pub clip: Clip,
+    /// KH1's frames (126 with the owner's files).
+    pub frames: u32,
+    /// KH1's blend of Sora's request (`ex_2420.bd` `0x1CDA`: 4).
+    pub blend: f32,
+}
+
+/// Reads the manifest's `held` section (`{"enemy", "kh1_request", "slot", "name", "frames", "blend"}`). An
+/// older manifest (none): `None`.
+pub fn parse_held(text: &str) -> Result<Option<Held>, String> {
+    let v = json::parse(text)?;
+    let Some(h) = v.get("held") else { return Ok(None) };
+    let n = |k: &str| h.get(k).and_then(Value::as_u32).ok_or_else(|| format!("held clip: no \"{k}\""));
+    let slot = n("slot")?;
+    let frames = n("frames")?;
+    let blend = h.get("blend").and_then(Value::as_f64).filter(|b| b.is_finite() && *b >= 0.0).ok_or("held clip: no \"blend\"")? as f32;
+    let name = h.get("name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| format!("p001_{slot:03}"));
+    if name.is_empty() || name.len() > 15 || !name.is_ascii() || slot < RECOM_SLOTS || frames == 0 {
+        return Err(format!("held clip: slot {slot} `{name}`, {frames} frames"));
+    }
+    Ok(Some(Held { clip: Clip { slot, name, entry: None, request: h.get("kh1_request").and_then(Value::as_u32) }, frames, blend }))
+}
+
+/// The held clip when the pack holds it at its slot (the name and a non-empty clip, as
+/// [`clip_for_entry`] checks).
+pub fn held_in_pack<'a>(h: &'a Held, ann: &[(u32, String)]) -> Result<&'a Held, String> {
+    match ann.get(h.clip.slot as usize) {
+        Some((size, name)) if *size > 0 && *name == h.clip.name => Ok(h),
+        Some((size, name)) => Err(format!("PL0001.ANN slot {} is `{name}` ({size} bytes), manifest says `{}`", h.clip.slot, h.clip.name)),
+        None => Err(format!("PL0001.ANN has {} slots, no slot {} for the held clip", ann.len(), h.clip.slot)),
+    }
+}
+
 /// `p001_161` → 161 (the three trailing digits, as Re:CoM's `0x1401A47E0` reads them).
 pub fn slot_of_name(name: &str) -> Option<u32> {
     let d = name.get(name.len().checked_sub(3)?..)?;
@@ -205,6 +242,18 @@ mod tests {
         let names = vec![None, Some("p001_001".to_string()), Some("p001_103".to_string())];
         assert_eq!(row_of_clip(&names, "p001_103"), Some(2));
         assert_eq!(row_of_clip(&names, "p001_104"), None);
+    }
+
+    #[test]
+    fn held_section() {
+        let t = r#"{"slots": [], "held": {"enemy": "neoshadow", "kh1_request": 200, "slot": 233, "name": "p001_233", "frames": 126, "blend": 4.0}}"#;
+        let h = parse_held(t).unwrap().unwrap();
+        assert_eq!((h.clip.slot, h.clip.name.as_str(), h.clip.request, h.frames, h.blend), (233, "p001_233", Some(200), 126, 4.0));
+        assert!(held_in_pack(&h, &ann(234)).is_ok());
+        assert!(held_in_pack(&h, &ann(233)).is_err(), "the pack lacks the slot");
+        assert_eq!(parse_held(MANIFEST).unwrap(), None, "an older manifest has none");
+        assert!(parse_held(r#"{"held": {"slot": 100, "frames": 126, "blend": 4}}"#).is_err(), "one of Re:CoM's own slots");
+        assert!(parse_held(r#"{"held": {"slot": 233, "frames": 126}}"#).is_err());
     }
 
     #[test]

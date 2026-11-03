@@ -646,6 +646,14 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     let rings = ring_records(spec.name, script, &inp.asd, &clips, &consts)?;
     add_records(&mut asd, &rings.iter().map(|r| r.1).collect::<Vec<_>>())?;
     records.extend(rings.iter().map(|r| r.4.clone()));
+    // M11 (the Neoshadow's grab): the held record on its grab's clip.
+    let holds = hold_records(spec.name, &inp.asd, &clips)?;
+    add_records(&mut asd, &holds.iter().map(|r| r.1).collect::<Vec<_>>())?;
+    records.extend(holds.iter().map(|r| r.2.clone()));
+    for h in HOLDS.iter().filter(|h| h.enemy == spec.name) {
+        consts.push(("grab_record_frames".into(), h.frames));
+        consts.push(("grab_kind_index".into(), HELD_KIND_INDEX as f32));
+    }
     let mut ses = extend_ses(&inp.ses, &inp.asd, &ms, &clips, &pairs, &sound_rows)?;
     for r in &rings {
         // The ring's clip takes its Re:CoM template's sounds at the ring's start (no HIT track on its motion).
@@ -674,6 +682,15 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
                 ClashOut { row: r.at, clash_type: row.clash_type, priority: row.priority, turn: row.turn, cos: row.cos, records }
             })
             .collect();
+        if a.rows.is_empty() && holds.iter().any(|h| h.0 == a.request) {
+            // A held record's attack ([`HOLDS`]): no KH1 row, so no clash (the grab is no attack in KH1) and no recoil
+            // (110: KH1's "none", Re:CoM's flinch when Sora's Guard blocks it).
+            if !clips.iter().any(|c| c.request == a.request) {
+                return bad(format!("{}: request {} has no motion", a.name, a.request));
+            }
+            attacks.push((a.name, a.request, NO_RECOIL, Vec::new(), clash));
+            continue;
+        }
         if a.rows.is_empty() {
             // A ring's attack ([`RINGS`]): its row's recoil (KH1's clash on the child's row goes to its owner).
             let Some(r) = rings.iter().find(|r| r.0 == a.request) else { return bad(format!("{}: no rows and no ring", a.name)) };
@@ -878,6 +895,63 @@ fn ring_records(name: &str, script: &[u8], asd: &[u8], clips: &[RequestClip], co
         put_f32(&mut rec, RING_OFFSET_Y, 0.0);
         let line = format!("{} (request {}) Re:CoM's circle record {} (its root, offset 0), radius grown by KH1's ring from 0, frames {at}..{}", c.name, r.request, r.recom_id, at + life);
         out.push((r.request, rec, recoil, r.row, line));
+    }
+    Ok(out)
+}
+
+/// M11 (the Neoshadow's grab from below, owner 2026-11-02: a new Re:CoM player reaction, "held"): a record that
+/// carries the held reaction kind to Sora. KH1's grab is no attack row (`ex_2420.bd` `0x1AF6` requests Sora's held
+/// motion itself, `sys 113` / `sys 13`); Re:CoM reaches Sora only through a hit, so the grab's clip gets one record:
+/// Re:CoM's template (its shape, bone, place, radius and power id), kind index [`HELD_KIND_INDEX`] (the DLL's
+/// extended kind table: the held kind; `kh1-recom`'s `held`), live from the clip's first frame for `frames`, no hit
+/// effect (as Re:CoM's records with an empty effect name). The DLL's damage check takes no damage for the kind.
+pub struct HoldSpec {
+    /// The enemy (the spec's `name`).
+    pub enemy: &'static str,
+    /// The grab's request (the attack's, [`AttackSpec::request`]).
+    pub request: u16,
+    /// The Re:CoM attack id whose record it takes its shape and place from.
+    pub recom_id: u32,
+    /// Frames from the clip's start the record lives (`kh1_core::neoshadow` waits as long for the hold).
+    pub frames: f32,
+}
+
+/// The held kind's index in the DLL's kind table (`kh1-recom`'s `held::HELD_INDEX`: the first after Re:CoM's 21,
+/// `0x14052A220`; the manifest's `grab_kind_index`, which the DLL checks). Checked (exe): Re:CoM's table holds 21.
+pub const HELD_KIND_INDEX: u32 = 21;
+
+/// KH1's "no recoil" request (`110`: no such motion; the host plays Re:CoM's flinch).
+const NO_RECOIL: u32 = 110;
+
+/// The held records. The Neoshadow's grab 208 takes Re:CoM's come-up strike (id 1: `m_ex420_sk`, its root, 1.0 m;
+/// the Re:CoM strike that comes out of the floor under Sora; Assumption: covers him standing on its spot, where KH1
+/// puts it), live for 2 frames (Assumption: KH1's grab is decided in one frame; a second covers Re:CoM's
+/// collision tick).
+pub const HOLDS: &[HoldSpec] = &[HoldSpec { enemy: "neoshadow", request: 208, recom_id: 1, frames: 2.0 }];
+
+/// [`HOLDS`]' records of an enemy: (its request, the record, a log line).
+fn hold_records(name: &str, asd: &[u8], clips: &[RequestClip]) -> Result<Vec<(u16, [u8; REC], String)>> {
+    let u = |o: usize| asd.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).ok_or_else(|| crate::Error::Format("ASD: short".into()));
+    let mut out = Vec::new();
+    for h in HOLDS.iter().filter(|h| h.enemy == name) {
+        let (n, off) = (u(0x10)? as usize, u(0x14)? as usize);
+        let tmpl = (0..n).map(|i| &asd[off + REC * i..off + REC * (i + 1)]).find(|x| u32::from_le_bytes(x[0x64..0x68].try_into().unwrap()) == h.recom_id).ok_or_else(|| crate::Error::Format(format!("{name}: no Re:CoM record with attack id {}", h.recom_id)))?;
+        let c = clips.iter().find(|c| c.request == h.request).ok_or_else(|| crate::Error::Format(format!("{name}: request {} has no clip", h.request)))?;
+        if !(h.frames > 0.0 && h.frames < c.frames as f32) {
+            return bad(format!("{name}: held record frames {} on a {}-frame motion", h.frames, c.frames));
+        }
+        let mut rec: [u8; REC] = tmpl.try_into().unwrap();
+        put_name(&mut rec, 0x40, &c.name);
+        put_u32(&mut rec, 0x50, u32::MAX);
+        put_u32(&mut rec, 0x5C, 0);
+        put_u32(&mut rec, 0x60, (h.frames * 50.0).round() as u32);
+        put_u32(&mut rec, 0x68, HELD_KIND_INDEX);
+        // No hit effect: id 0, no name (Re:CoM's own records with an empty effect name; Checked (files)).
+        put_u32(&mut rec, 0x6C, 0);
+        rec[0x70..0x80].fill(0);
+        let bone = String::from_utf8_lossy(&rec[0..16]).trim_end_matches('\0').to_string();
+        let line = format!("{} (request {}) Re:CoM's record {} ({bone}, r {:.2} m), the held kind (index {HELD_KIND_INDEX}), frames 0..{}, no effect", c.name, h.request, h.recom_id, f32::from_le_bytes(rec[0x58..0x5C].try_into().unwrap()), h.frames);
+        out.push((h.request, rec, line));
     }
     Ok(out)
 }

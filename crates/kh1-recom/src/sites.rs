@@ -2844,6 +2844,15 @@ pub const FLAME_CALLEES: &[Site] = &[
     Site { name: "collision radius setter (0x140172690)", rva: 0x0017_2690, expect: &[0x48, 0x8B, 0x51, 0x18, 0x4C, 0x8B, 0xC1, 0x48, 0x85, 0xD2] },
 ];
 
+/// M11, the Neoshadow's grab (`win::held`, `docs/recom-kh1-attack.md` § The held reaction): Re:CoM's reaction prelude,
+/// which its damage check `0x1401E6DE0` runs before every reaction it starts (`0x1401F6990(pl, 6)`); the held entry
+/// runs it too. Called, never patched. The kind getter `0x140179410` (its table's `lea` displacement is patched) is
+/// [`THROWN_CALLEES`]' site. Bytes read from the Steam exe (2026-11-02).
+pub const HELD_CALLEES: &[Site] = &[
+    // mov [rsp+0x10],rbx; mov [rsp+0x18],rbp; push rsi; push rdi; push r14; sub rsp,..
+    Site { name: "player reaction prelude (0x1401F6990)", rva: 0x001F_6990, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18, 0x56, 0x57, 0x41, 0x56, 0x48, 0x83] },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -2977,6 +2986,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         FATBANDIT_HOOKS,
         FATBANDIT_ALLOC,
         FLAME_CALLEES,
+        HELD_CALLEES,
     ];
     LISTS
         .iter()

@@ -117,6 +117,9 @@ pub const CONSTS: &[(&str, &[usize])] = &[
     ("special_wait_min", &[0xBA2]),
     ("special_wait_max", &[0xBA8]),
     ("grab_follow", &[0x1BCC]),
+    // The grab's hold: len(208) − 2 (`0x1DAE`), let go with 30 left (`0x1DF6`).
+    ("grab_trim", &[0x1DAE]),
+    ("grab_let_go", &[0x1DF6]),
     ("grab_range", &[0x1B70]),
     ("grab_wait", &[0x1B86]),
     ("miss_depth", &[0x1F92]),
@@ -237,7 +240,9 @@ pub const REQUESTS: &[(u32, usize)] = &[
     (207, 0x1720),         // the rising slash (`0x1568`, `0x1FB0`)
     (207, 0x22F2),
     (0, 0x1860),           // the idle after it
-    (208, 0x1D54),         // KH1's grab from below (not built) and its miss (`0x1AF6`)
+    (0x0100_00C8, 0x1CD4), // KH1's grab from below (`0x1AF6`): Sora's request 200 of the player set (the held clip)
+    (0x4000_0000, 0x1CEC), // and the lock's release queued
+    (208, 0x1D54),         // the grab and its miss
     (209, 0x1EA4),
     (210, 0x12AE),         // the call (`0x11FA`)
     (211, 0x10DE),         // a called one's rise (`0xFC8`): 211, 212, the action 213 with the idle queued
@@ -271,6 +276,8 @@ pub const ATTACKS: &[AttackSpec] = &[
     AttackSpec { name: "claw", request: 202, rows: &[CLAW_L, CLAW_R] },
     AttackSpec { name: "rise slash", request: 207, rows: &[RISE] },
     AttackSpec { name: "dive", request: 205, rows: &[DIVE] },
+    // KH1's grab from below 208: no KH1 row; the held record (`crate::enemy::HOLDS`).
+    AttackSpec { name: "grab", request: 208, rows: &[] },
 ];
 
 /// The Neoshadow.
@@ -344,12 +351,12 @@ mod tests {
             assert_eq!(a0.slots[i], a1.slots[i], "slot {i}");
         }
         // ASD: Re:CoM's 3 records kept, one per row's hit window (the claw's two hands, the rising slash, the
-        // dive), the tail moved.
+        // dive), the grab's held record, the tail moved.
         assert_eq!(&b.asd[0x6C..0x24C], &inp.asd[0x6C..0x24C]);
-        assert_eq!(u32::from_le_bytes(b.asd[0x10..0x14].try_into().unwrap()), 3 + 4);
-        assert_eq!(&b.asd[0x24C + 4 * 0xA0..], &inp.asd[0x24C..]);
+        assert_eq!(u32::from_le_bytes(b.asd[0x10..0x14].try_into().unwrap()), 3 + 5);
+        assert_eq!(&b.asd[0x24C + 5 * 0xA0..], &inp.asd[0x24C..]);
         let rec = |name: &str| -> Vec<(u32, u32, u32)> {
-            (3..7)
+            (3..8)
                 .map(|i| &b.asd[0x6C + i * 0xA0..0x6C + (i + 1) * 0xA0])
                 .filter(|r| r[0x40..0x50].starts_with(name.as_bytes()))
                 .map(|r| (u32::from_le_bytes(r[0x5C..0x60].try_into().unwrap()), u32::from_le_bytes(r[0x60..0x64].try_into().unwrap()), u32::from_le_bytes(r[0x64..0x68].try_into().unwrap())))
@@ -358,6 +365,16 @@ mod tests {
         assert_eq!(rec(&c(202).name), vec![(40 * 50, 54 * 50, 0), (52 * 50, 68 * 50, 0)], "the claw's hands on id 0");
         assert_eq!(rec(&c(207).name), vec![(26 * 50, 50 * 50, 1)], "the rising slash on id 1");
         assert_eq!(rec(&c(205).name), vec![(0, 40 * 50, 1)], "the dive on id 1");
+        // The grab's held record: Re:CoM's come-up strike record (id 1, `m_ex420_sk`, 1.0 m) on 208's clip, frames
+        // 0..2, the held kind's index 21, no hit effect.
+        assert_eq!(rec(&c(208).name), vec![(0, 2 * 50, 1)], "the grab on id 1's record");
+        let g = &b.asd[0x6C + 7 * 0xA0..0x6C + 8 * 0xA0];
+        let tmpl = &inp.asd[0x6C + 2 * 0xA0..0x6C + 3 * 0xA0];
+        assert_eq!(&g[..0x40], &tmpl[..0x40], "the template's bone, place and shape");
+        assert_eq!((&g[0x50..0x5C], u32::from_le_bytes(g[0x68..0x6C].try_into().unwrap())), (&tmpl[0x50..0x5C], 21));
+        assert_eq!((u32::from_le_bytes(g[0x6C..0x70].try_into().unwrap()), &g[0x70..0x80]), (0, &[0u8; 16][..]));
+        assert_eq!((get("grab_trim"), get("grab_let_go"), get("grab_record_frames"), get("grab_kind_index")), (2.0, 30.0, 2.0, 21.0));
+        assert!(b.manifest.contains(r#"{"name": "grab", "request": 208, "recoil": 110, "rows": [], "clash": []}"#), "{}", b.manifest);
         // SES: Re:CoM's entries kept, sounds on the attack clips.
         let s0 = crate::ses::parse(&inp.ses).unwrap();
         let s1 = crate::ses::parse(&b.ses).unwrap();

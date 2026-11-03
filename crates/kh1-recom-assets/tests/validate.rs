@@ -559,3 +559,44 @@ fn h_specials_clips_from_xl_limit() {
     assert!(j.contains(&format!("\"xl_entry\": 1, \"kh1_request\": 201, \"slot\": {}", first + 1)));
     eprintln!("(h) xl_limit: clips {:?}", built.xl.iter().map(|e| (e.slot, e.frames, e.bytes)).collect::<Vec<_>>());
 }
+
+/// M11 (the Neoshadow's grab, owner 2026-11-02): KH1's held clip from the player's `xa_ex_2420.mset` player set
+/// (`KH1_M11_DIR`; Sora's files in `KH1_TEST_DATA`): request 200 (the word `ex_2420.bd` pushes at `0x1CD4`), its
+/// blend 4 (`0x1CDA`), 126 frames at 60 fps, played once, no root motion, on the slot after the xl slots (kept free
+/// without `xl_limit.dat`), the Keyblade's clip at the same slot, and the manifest's `held` section.
+#[test]
+fn i_held_clip_from_the_neoshadows_player_set() {
+    use kh1_recom_assets::build::{build_with_held, held_source, HeldInput, HELD_SET_ENTRY};
+    let Some(d) = data() else { return };
+    let Some(m11) = std::env::var_os("KH1_M11_DIR").map(PathBuf::from) else { return };
+    let (Ok(mset), Ok(mdls)) = (std::fs::read(m11.join("xa_ex_2420.mset")), std::fs::read(m11.join("xa_ex_2420.mdls"))) else { return };
+    let h = HeldInput { mset, mdls };
+    let (set, request, blend) = held_source(&h).unwrap();
+    assert_eq!((request, blend, HELD_SET_ENTRY), (200, 4.0, 0));
+    let (me, m) = set.motion_for(200).unwrap();
+    assert_eq!((m.frames, me.root_motion()), (126, false));
+    let opt = BuildOptions { only: Some(Vec::new()), ..BuildOptions::default() };
+    let built = build_with_held(&Inputs { mset: d.mset.clone(), mdls: d.mdls.clone(), ann: d.ann.clone(), mdl: d.mdl.clone(), weapon: d.wep.clone(), xl: None }, Some(&h), &opt).unwrap();
+    assert!(built.changed && built.xl.is_empty());
+    let (e, b) = built.held.clone().unwrap();
+    // 127 samples: KH1's 126 frames played once (the converter holds t = N).
+    assert_eq!((e.kh1_request, e.kh1_frames, e.frames, e.fps, e.looped, e.root_motion, b), (Some(200), 126, 127, 60, false, false, 4.0));
+    let plain = build(&Inputs { mset: d.mset, mdls: d.mdls, ann: d.ann.clone(), mdl: d.mdl, weapon: d.wep, xl: None }, &BuildOptions::default()).unwrap();
+    // After every KH1-only entry's slot and the three xl slots.
+    assert_eq!(e.slot, plain.ann.slots.len() + 3, "held after the xl slots");
+    assert_eq!(e.name, format!("p001_{:03}", e.slot));
+    let ext = Ann::parse(&built.bytes).unwrap();
+    let c = ext.slots[e.slot].clip.as_ref().unwrap();
+    assert_eq!((c.name_str(), c.fps(), c.looped(), c.frames as usize), (e.name.clone(), 60, false, 127));
+    let base = Ann::parse(&d.ann).unwrap();
+    for i in 0..RECOM_SORA_SLOTS {
+        assert_eq!(ext.slots[i], base.slots[i], "Re:CoM's slot {i} kept");
+    }
+    if let Some(w) = &built.weapon {
+        assert_eq!(w.ann.slots[e.slot].name_str(), format!("w001_{:03}", e.slot));
+    }
+    let j = built.manifest_json(&[]);
+    assert!(j.contains(&format!("\"held\": {{\"enemy\": \"neoshadow\", \"set\": \"xa_ex_2420.mset player set 0\", \"kh1_entry\": {}, \"kh1_request\": 200, \"slot\": {}, \"name\": \"{}\", \"kh1_frames\": 126, \"frames\": 127, \"fps\": 60, \"loop\": false, \"root_motion\": false, \"blend\": 4.0", e.kh1_entry, e.slot, e.name)), "{}", &j[j.len().saturating_sub(600)..]);
+    std::fs::write(std::env::temp_dir().join("kh1-motions-held-test.json"), &j).unwrap();
+    eprintln!("(i) held clip: entry {} slot {} {} bytes", e.kh1_entry, e.slot, e.bytes);
+}

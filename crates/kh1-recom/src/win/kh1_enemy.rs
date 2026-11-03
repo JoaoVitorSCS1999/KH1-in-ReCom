@@ -991,6 +991,10 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
         }
         rt.ai.set_targeted(sora_targets(en));
         rt.ai.set_target_grounded(sora_grounded());
+        // M11 (the Neoshadow's grab): Sora's side of KH1's grab, for a behaviour that reads it.
+        if rt.ai.wants_hold() {
+            rt.ai.set_target_hold(super::held::hold());
+        }
         let w = World { step, pos, target: sora_pos(), grounded, airborne, moved, motion: rt.current };
         let cmds = rt.ai.frame(w);
         for c in &cmds {

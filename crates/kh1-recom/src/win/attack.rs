@@ -243,6 +243,11 @@ pub(super) fn set_no_flinch(pl: usize, on: bool) {
     NO_FLINCH.store(if on { pl } else { 0 }, Ordering::Relaxed);
 }
 
+/// KH1's no-flinch frames are on for this player (M11, the held reaction's grab test).
+pub(super) fn no_flinch(pl: usize) -> bool {
+    pl != 0 && NO_FLINCH.load(Ordering::Relaxed) == pl
+}
+
 /// A state exe ran for the main Sora (one per frame).
 pub(super) fn tick() {
     TICK.fetch_add(1, Ordering::Relaxed);
@@ -1201,16 +1206,23 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
         }
         wr(pl + p::FLAGS_418, f418 | 1);
     }
-    let r = if NO_FLINCH.load(Ordering::Relaxed) != pl || !kh1 {
-        o(pl)
-    } else {
-        let f: u32 = rd(pl + p::FLAGS_420);
-        wr(pl + p::FLAGS_420, f | 2);
-        let r = o(pl);
-        if f & 2 == 0 {
-            wr(pl + p::FLAGS_420, rd::<u32>(pl + p::FLAGS_420) & !2);
+    let run = |pl: usize| -> u64 {
+        if NO_FLINCH.load(Ordering::Relaxed) != pl || !kh1 {
+            o(pl)
+        } else {
+            let f: u32 = rd(pl + p::FLAGS_420);
+            wr(pl + p::FLAGS_420, f | 2);
+            let r = o(pl);
+            if f & 2 == 0 {
+                wr(pl + p::FLAGS_420, rd::<u32>(pl + p::FLAGS_420) & !2);
+            }
+            r
         }
-        r
+    };
+    // M11 (the Neoshadow's grab): the held kind's case (`win::held`); every other hit as ever.
+    let r = match super::held::on_damage(pl, &run) {
+        Some(r) => r,
+        None => run(pl),
     };
     if shield && f418 & 1 == 0 {
         wr(pl + p::FLAGS_418, rd::<u32>(pl + p::FLAGS_418) & !1);

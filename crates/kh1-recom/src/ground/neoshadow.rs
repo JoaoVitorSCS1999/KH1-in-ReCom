@@ -7,7 +7,7 @@ use kh1_core::enemy as ke;
 pub const MANIFEST: &str = "kh1-neoshadow.json";
 
 /// The attack names (`kh1_core::neoshadow::Attack::ALL`'s order).
-pub const ATTACKS: &[&str] = &["claw", "rise slash", "dive"];
+pub const ATTACKS: &[&str] = &["claw", "rise slash", "dive", "grab"];
 
 /// The requests the behaviour plays and the host plays for it (its manifest must map them): its reactions
 /// (flinch 72..75, knock-back 76 / 77, air flinch 78 / 79; the model has no launch) and the claw's recoil 215.
@@ -24,7 +24,8 @@ pub const REQUESTS: &[u16] = {
 /// `0x140190540`), 3 (sink `e027_051`, up 2 m from Sora `e027_052`, id 1, then `e027_053`: `0x140190380` /
 /// `0x1401905A0`); 11 / 12 / 30 `CBattleEnemy`'s; think `CHeartless`'s `0x140196EC0`. KH1's attacks run in the
 /// state whose Re:CoM attack id they take their power from (`kh1_recom_assets::neoshadow`): the claw 202 (id 0) in
-/// state 2, the rising slash 207 and the dive 205 (id 1) in state 3. Appearance: KH1's room Neoshadow has none
+/// state 2, the rising slash 207 and the dive 205 (id 1) in state 3, the grab 208 (its held record on id 1's, M11
+/// the held reaction) in state 3. Appearance: KH1's room Neoshadow has none
 /// (`Appear::Base`: Re:CoM's state 0 begin runs, KH1's frame from the next, then the default state).
 pub static CLASS: Class = Class {
     name: "neoshadow",
@@ -38,7 +39,7 @@ pub static CLASS: Class = Class {
     ctor: &crate::sites::NEOSHADOW_HOOKS[0],
     alloc_site: &crate::sites::NEOSHADOW_ALLOC[0],
     ptrs: crate::sites::NEOSHADOW_PTRS,
-    attack_states: &[2, 3, 3],
+    attack_states: &[2, 3, 3, 3],
     attack_names: ATTACKS,
     appear: Appear::Base,
     reads_hp: false,
@@ -57,6 +58,11 @@ fn parse_manifest(text: &str) -> Result<Manifest, String> {
     let g = &m.guards[kh1_core::neoshadow::SHIELD as usize];
     if !g.windows.is_empty() || g.half_angle().is_none() {
         return Err(format!("guard shield: windows {:?} turn {}: not KH1's held body row", g.windows, g.turn));
+    }
+    // The grab's record names the held kind by its index in our kind table (`crate::held`).
+    let k = m.consts.get("grab_kind_index");
+    if k != crate::held::HELD_INDEX as f32 {
+        return Err(format!("the grab's record names kind index {k}, the held kind's is {} (an older asset step? run it again)", crate::held::HELD_INDEX));
     }
     Ok(m)
 }
@@ -77,8 +83,9 @@ mod tests {
         let m = (CLASS.parse)(&std::fs::read_to_string(p).unwrap()).unwrap();
         assert_eq!((m.consts.get("crowd"), m.consts.get("dive_speed"), m.consts.get("slot_2_0_y")), (5.0, 80.0, 5480.0));
         // The claw's recoil 215 (in the model); the rising slash's and the dive's 110 (not: Re:CoM's flinch).
-        let r: Vec<Option<u16>> = (0..3).map(|i| m.recoil_of(i)).collect();
-        assert_eq!(r, vec![Some(215), None, None]);
+        let r: Vec<Option<u16>> = (0..4).map(|i| m.recoil_of(i)).collect();
+        assert_eq!(r, vec![Some(215), None, None, None]);
+        assert_eq!((m.consts.get("grab_trim"), m.consts.get("grab_let_go"), m.consts.get("grab_record_frames"), m.consts.get("grab_kind_index")), (2.0, 30.0, 2.0, 21.0));
         let g = &m.guards[0];
         assert_eq!((g.clash_type, g.priority, g.half_angle()), (4, 100, Some(std::f32::consts::PI)));
         assert!(m.clip(205).unwrap().looped && !m.clip(207).unwrap().looped);

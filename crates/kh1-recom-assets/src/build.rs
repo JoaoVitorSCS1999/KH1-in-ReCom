@@ -60,6 +60,48 @@ pub fn xl_motion_set(file: &[u8]) -> Result<&[u8]> {
     Ok(&file[at..])
 }
 
+/// M11 (the Neoshadow's grab from below, owner 2026-11-02): KH1's held clip, Sora's request 200 of the
+/// Neoshadow's `.mset` player set, for Sora's new held reaction (`kh1-recom`'s `held`). The Neoshadow's own files.
+#[derive(Clone, Debug)]
+pub struct HeldInput {
+    /// KH1 `xa_ex_2420.mset` (its third section: the player-set table, `sys 113` `0x1402BA8C0`).
+    pub mset: Vec<u8>,
+    /// KH1 `xa_ex_2420.mdls` (part 5: `ex_2420.bd`, which names the request and its blend).
+    pub mdls: Vec<u8>,
+}
+
+/// Where `ex_2420.bd` pushes Sora's held request (`0x10000C8`: bit 24 KH1's action lock, request 200) and its
+/// blend (4.0), in its grab `0x1AF6` (`sys 13(Sora, 0x10000C8, 4, 0)` at `0x1CE6`). Checked (files).
+pub const HELD_REQUEST_AT: usize = 0x1CD4;
+/// Where it pushes the request's blend (see [`HELD_REQUEST_AT`]).
+pub const HELD_BLEND_AT: usize = 0x1CDA;
+/// The request word there.
+pub const HELD_REQUEST_WORD: u32 = 0x0100_00C8;
+/// Sora's entry of the player-set table (`*(set + 4 + n × 4)` with the target's character number `+0x4C`,
+/// `0x1402BA8C0`; Checked (decomp)). Entry 0 is the only one with its own set in `xa_ex_2420.mset` (the other nine
+/// share one; Checked (files)); that Sora's number is 0: Assumption (strong).
+pub const HELD_SET_ENTRY: usize = 0;
+
+/// The held clip's motion set, request and blend from the Neoshadow's files.
+pub fn held_source(h: &HeldInput) -> Result<(MotionSet, u16, f32)> {
+    let script = crate::stats::mdls_part(&h.mdls, 5).ok_or_else(|| crate::Error::Format("xa_ex_2420.mdls: no AI script (part 5)".into()))?;
+    crate::enemy::check_requests(script, b"ex_2420.bd", &[(HELD_REQUEST_WORD, HELD_REQUEST_AT)])?;
+    let blend = crate::enemy::script_consts(script, b"ex_2420.bd", &[("held_blend", &[HELD_BLEND_AT])])?[0].1;
+    let u = |o: usize| h.mset.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize).ok_or_else(|| crate::Error::Format(format!("xa_ex_2420.mset: short at {o:#x}")));
+    if u(0)? != 3 {
+        return bad(format!("xa_ex_2420.mset: {} sections, not KH1's 3 (motions, map, player sets)", u(0)?));
+    }
+    let table = u(12)?;
+    let n = u(table)?;
+    if HELD_SET_ENTRY >= n || n > 16 {
+        return bad(format!("xa_ex_2420.mset: {n} player sets"));
+    }
+    let at = table + u(table + 4 + 4 * HELD_SET_ENTRY)?;
+    let set = h.mset.get(at..).ok_or_else(|| crate::Error::Format(format!("xa_ex_2420.mset: player set at {at:#x}")))?;
+    let ms = MotionSet::parse(set)?;
+    Ok((ms, (HELD_REQUEST_WORD & 0xFFFF) as u16, blend))
+}
+
 /// The four input files.
 #[derive(Clone, Debug)]
 pub struct Inputs {
@@ -199,6 +241,9 @@ pub struct Built {
     /// M9 stage 9c.1: the specials' clips ([`XL_ENTRIES`] of `xl_limit.dat`), after the KH1-only
     /// entries' slots; `kh1_entry` is the xl entry. Empty without the file.
     pub xl: Vec<ManifestEntry>,
+    /// M11 (the Neoshadow's grab): KH1's held clip and its request blend, after the xl slots (their places kept
+    /// with or without `xl_limit.dat`); `kh1_entry` is the player set's entry. None without the Neoshadow's files.
+    pub held: Option<(ManifestEntry, f32)>,
 }
 
 /// The extended `PL0002.ANN`.
@@ -242,6 +287,11 @@ pub fn referenced_entries(ms: &MotionSet) -> Result<Vec<(usize, Vec<u16>, bool)>
 
 /// Builds the pack and the map.
 pub fn build(inp: &Inputs, opt: &BuildOptions) -> Result<Built> {
+    build_with_held(inp, None, opt)
+}
+
+/// [`build`] and, with the Neoshadow's files, KH1's held clip (M11, [`HeldInput`]).
+pub fn build_with_held(inp: &Inputs, held_in: Option<&HeldInput>, opt: &BuildOptions) -> Result<Built> {
     let ms = MotionSet::parse(&inp.mset)?;
     let skel = RecomSkeleton::parse(&inp.mdl)?;
     let mut ann = Ann::parse(&inp.ann)?;
@@ -443,10 +493,63 @@ pub fn build(inp: &Inputs, opt: &BuildOptions) -> Result<Built> {
             ann.slots.push(Slot { name: name16(&name), clip: Some(clip) });
         }
     }
+    // M11 (the Neoshadow's grab): KH1's held clip, after the xl slots (kept free without `xl_limit.dat`). Played once,
+    // to its end (Re:CoM's status sub-state 0xC ends at it; KH1 queues the lock's release after it).
+    let mut held = None;
+    if let Some(hi) = held_in {
+        let (hs, request, blend) = held_source(hi)?;
+        let (me, m) = hs.motion_for(request).ok_or_else(|| crate::Error::Format(format!("xa_ex_2420.mset player set: no request {request}")))?;
+        let e = me.entry().ok_or_else(|| crate::Error::Format(format!("player set request {request}: no entry")))? as usize;
+        let root = me.root_motion();
+        let slot = base + new_rank + XL_ENTRIES.len();
+        let name = format!("{}{slot:03}", opt.prefix);
+        let clip = conv.convert(m, &ClipSpec { name: name.clone(), looped: false, root_motion: root, blend: opt.blend })?;
+        let mut weapon_name = None;
+        if let Some((wa, rig, _)) = weapon.as_mut() {
+            let wname = format!("{}{slot:03}", opt.weapon_prefix);
+            let wclip = conv.convert_weapon(rig, m, &ClipSpec { name: wname.clone(), looped: false, root_motion: false, blend: opt.blend })?;
+            while wa.slots.len() < slot {
+                wa.slots.push(Slot { name: [0; 16], clip: None });
+            }
+            wa.slots.push(Slot { name: name16(&wname), clip: Some(wclip) });
+            weapon_name = Some(wname);
+        }
+        let bytes = clip.to_bytes().len();
+        let keys = clip.channels.iter().map(|c| if let crate::ann::Channel::Curve(cv) = c { cv.keys.len() } else { 0 }).sum();
+        let entry = ManifestEntry {
+            kh1_entry: e,
+            kh1_request: Some(request),
+            requests: vec![request],
+            kh1_frames: m.frames,
+            slot,
+            name: name.clone(),
+            source: Source::Kh1,
+            match_kind: None,
+            match_error: None,
+            edited_bones: Vec::new(),
+            root_split_mm: None,
+            ambiguous: Vec::new(),
+            frames: clip.frames as usize,
+            fps: clip.fps(),
+            looped: false,
+            loop_overridden: false,
+            cycle_error_m: cycle_error(&conv, m),
+            root_motion: root,
+            bytes,
+            keys,
+            weapon_name,
+            weapon_match_error: None,
+        };
+        while ann.slots.len() < slot {
+            ann.slots.push(Slot { name: [0; 16], clip: None });
+        }
+        ann.slots.push(Slot { name: name16(&name), clip: Some(clip) });
+        held = Some((entry, blend));
+    }
     let changed = ann.slots.len() > base;
     if !changed {
         // Nothing new: Re:CoM's own pack, untouched (Panacea serves it when nothing is written).
-        return Ok(Built { ann, bytes: inp.ann.clone(), base_slots: base, changed, entries, weapon: None, xl });
+        return Ok(Built { ann, bytes: inp.ann.clone(), base_slots: base, changed, entries, weapon: None, xl, held });
     }
     ann.pad_tail_like_recom();
     let bytes = ann.to_bytes();
@@ -455,7 +558,7 @@ pub fn build(inp: &Inputs, opt: &BuildOptions) -> Result<Built> {
         let bytes = wa.to_bytes();
         WeaponPack { ann: wa, bytes, base_slots: wbase }
     });
-    Ok(Built { ann, bytes, base_slots: base, changed, entries, weapon, xl })
+    Ok(Built { ann, bytes, base_slots: base, changed, entries, weapon, xl, held })
 }
 
 /// Sora's Halloween Town body pack (`PLAYER/0011/PL0011.ANN`) with the same new clips at the
@@ -587,7 +690,26 @@ impl Built {
                 if i + 1 < self.xl.len() { "," } else { "" }
             ));
         }
-        s.push_str("  ]\n}\n");
+        s.push_str("  ]");
+        // M11 (the Neoshadow's grab): KH1's held clip (the runtime's `motions::parse_held`).
+        if let Some((e, blend)) = &self.held {
+            s.push_str(&format!(
+                ",\n  \"held\": {{\"enemy\": \"neoshadow\", \"set\": \"xa_ex_2420.mset player set {HELD_SET_ENTRY}\", \"kh1_entry\": {}, \"kh1_request\": {}, \"slot\": {}, \"name\": \"{}\", \"kh1_frames\": {}, \"frames\": {}, \"fps\": {}, \"loop\": false, \"root_motion\": {}, \"blend\": {:?}, \"bytes\": {}, \"keys\": {}, \"weapon_name\": {}}}",
+                e.kh1_entry,
+                e.kh1_request.map_or(-1, |r| r as i64),
+                e.slot,
+                esc(&e.name),
+                e.kh1_frames,
+                e.frames,
+                e.fps,
+                e.root_motion,
+                blend,
+                e.bytes,
+                e.keys,
+                e.weapon_name.as_ref().map_or("null".to_string(), |w| format!("\"{}\"", esc(w))),
+            ));
+        }
+        s.push_str("\n}\n");
         s
     }
 }
