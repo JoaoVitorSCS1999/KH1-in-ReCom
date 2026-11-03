@@ -1377,6 +1377,10 @@ async fn hit(cx: Cx) {
 /// has played; 212 for 4 times its length; no longer coming (`+0x54` = 0 when it was set); one more counted;
 /// action 213 with the idle queued; idle.
 async fn called(cx: Cx) {
+    // Its init hid it (KH1's flags at `0x4890..0x48B0`); Re:CoM's state-0 end turns its bodies on again after our
+    // first frame (`0x140190400`): hidden and unhittable again here.
+    push(&cx, ECmd::Hittable(false));
+    push(&cx, ECmd::Visible(false));
     wait_frames(&cx, k(&cx, "called_wait")).await;
     cx.borrow_mut().x.called = true;
     // `0xFDC`: "while in the air and 6 plays and 7 plays and above the floor": never (a motion can't be both;
