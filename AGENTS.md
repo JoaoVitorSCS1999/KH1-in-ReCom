@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 161: The KH1 Gargoyle (flier; its bouncing ball as a Re:CoM bullet), version 0.89.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11); its shot: "Re:CoM bullet, KH1 numbers".
+- Gargoyle (KH1 `xa_ex_2220` / `ex_2220.bd` ↔ Re:CoM `CEnemyGargoyle` id 13), a flier, every number from the player's files (Checked (files)): rises in, roars; close rounds (circling strafe, dive or two-part swipe, back-off while faded); far rounds (ball throw, swoop, approach); KH1's hit state and reactions. All three attacks in Re:CoM state 2 (state 3, Re:CoM's own shot, never entered). Power: dive and swipes on Re:CoM's wing strike (id 0); the ball on Re:CoM's Gargoyle shot (id 1).
+- The ball: one of Re:CoM's homing bullets made at the chin at KH1's frame 70 with its attack off; at frame 244 tossed up, bounces twice toward Sora, ends on the third floor touch (Checked (decomp): the child's setup, KH1's attack / floor-contact flags; Re:CoM's bullet end on a floor touch); drawn with Re:CoM's Gargoyle shot effect (`0x14053F630`), attack on through `0x14014DE90`. A swing sends it back (KH1: then it hurts enemies); Guard sends it back Re:CoM's way (decision 28).
+- Re:CoM (Checked (exe), 25 sites): vtable `0x14053F198`, ctor `0x14018E150` (`40 53 48 83 EC 20`, only caller `0x1401891BE`), alloc `0x1401891A5` 0xCD0 → 0xCF0.
+- Assumptions: the generic rising appearance on every battle spawn (not the perched one); KH1's fades as a hard hide / show (M13); flat battle floors (ball 2 cm above); KH1's floor test one-sided; Re:CoM's sounds. Framework: bone points by bone code, pushes checked in any mode, the converter accepts `ex_2220_sk_2`.
+- Asset step: ENEMY/0013 (ANN / ASD / SES), `kh1-gargoyle.json`.
+- Checked: tests, Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 160: Neoshadow grab from below: Sora's new held reaction, version 0.88.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "New Re:CoM reaction" for the Neoshadow's grab (the 1:1 option).
