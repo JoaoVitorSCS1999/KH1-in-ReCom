@@ -1265,15 +1265,33 @@ pub const ABILITY_CALLEES: &[Site] = &[
     Site { name: "sleight learned (0x14023AB00)", rva: 0x0023_AB00, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x0F, 0xB7, 0xD9, 0xE8, 0xF2, 0xFF, 0xF6, 0xFF, 0x85, 0xC0] },
 ];
 
-/// M12 step 1 (`win::level_up`, `crate::level_up`, `docs/recom-m12-sleights.md` § 8.1): Re:CoM's
-/// level-up screen offers AP Up for CP Up at Combat = KH1. Its update is the existing `MP_HOOKS`
-/// wrapper; the text copy is an earlier stage's checked callee. Re:CoM code and data whose
-/// behaviour the AP Up row relies on. Checked only.
+/// M12 (`win::level_up`, `win::notices`, `crate::level_up`, `docs/recom-m12-sleights.md` § 8):
+/// Re:CoM's level-up screen offers AP Up for CP Up at Combat = KH1, and its sleight-learned mode
+/// shows our "Sora learned X" notices. Called only, never hooked (the screen's update is the
+/// existing `MP_HOOKS` wrapper; `new`, the task root, the text copy and the flag get are earlier
+/// stages' checked callees).
+pub const M12_CALLEES: &[Site] = &[
+    // mov [rsp+8],rcx; push rdi; sub rsp,0x30; mov qword [rsp+0x20],-2: CLevelUp(this, parent, id).
+    Site { name: "CLevelUp ctor (0x14010E9C0)", rva: 0x0010_E9C0, expect: &[0x48, 0x89, 0x4C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE] },
+    // push rbx; sub rsp,0x20; cmp dword [rcx+0x5A4],0; mov rbx,rcx: the field's menu gate.
+    Site { name: "field menu gate (0x1401AAA90)", rva: 0x001A_AA90, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x83, 0xB9, 0xA4, 0x05, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9] },
+];
+
+/// M12: Re:CoM code and data whose behaviour the AP Up row and the notices rely on. Checked only.
 pub const M12_CHECKED: &[Site] = &[
     // mov rax,[0x14087CBF8]; cmp dword [rax+0xC],0x659; jge: the CP row offered while CP < 1625.
     Site { name: "level-up CP offer (0x14010F209)", rva: 0x0010_F209, expect: &[0x48, 0x8B, 0x05, 0xE8, 0xD9, 0x76, 0x00, 0x81, 0x78, 0x0C, 0x59, 0x06, 0x00, 0x00, 0x7D, 0x06] },
     // mov rcx,[0x14087CBF8]; add dword [rcx+0xC],0x19: the CP pick.
     Site { name: "level-up CP pick (0x14010F6A4)", rva: 0x0010_F6A4, expect: &[0x48, 0x8B, 0x0D, 0x4D, 0xD5, 0x76, 0x00, 0x83, 0x41, 0x0C, 0x19] },
+    // cmp dword [rbx+0x258],0x5A: the sleight-learned line's ability wording from id 0x5A.
+    Site { name: "learned line ability wording (0x1401102DD)", rva: 0x0011_02DD, expect: &[0x83, 0xBB, 0x58, 0x02, 0x00, 0x00, 0x5A] },
+    // push rdi; sub rsp,0x30; mov qword [rsp+0x20],-2; mov ...: the field step that opens the camp.
+    Site { name: "field camp gate step (0x1401A96C0)", rva: 0x001A_96C0, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48] },
+    Site { name: "CTechHelp ctor (0x14012BF80)", rva: 0x0012_BF80, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x48, 0x89, 0x7C, 0x24, 0x20, 0x55, 0x48, 0x8D, 0x6C, 0x24, 0xF0] },
+    Site { name: "CTechHelp update (0x14012D330)", rva: 0x0012_D330, expect: &[0x48, 0x8B, 0xC4, 0x57, 0x48, 0x81, 0xEC, 0x90, 0x00, 0x00, 0x00, 0x48, 0xC7, 0x40, 0xB8, 0xFE] },
+    Site { name: "CTechHelp dtor (0x14012C230)", rva: 0x0012_C230, expect: &[0x40, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x48] },
+    // Its vtable: the dtor 0x14012C230, the update 0x14012D330.
+    Site { name: "CTechHelp vtable (0x14051B4A8)", rva: 0x0051_B4A8, expect: &[0x30, 0xC2, 0x12, 0x40, 0x01, 0x00, 0x00, 0x00, 0x30, 0xD3, 0x12, 0x40, 0x01, 0x00, 0x00, 0x00] },
     // CLevelUp's vtable: the dtor 0x14010EB80, the update 0x14010EF10.
     Site { name: "CLevelUp vtable (0x140512C10)", rva: 0x0051_2C10, expect: &[0x80, 0xEB, 0x10, 0x40, 0x01, 0x00, 0x00, 0x00, 0x10, 0xEF, 0x10, 0x40, 0x01, 0x00, 0x00, 0x00] },
     // "%4d \xF9Y\x81\xA8\xF9R%4d": the panel's preview format (`crate::level_up::panel_value`).
@@ -3453,6 +3471,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         MAGIC_FX_CHECKED,
         CUSTOMIZE_GLYPHS_CHECKED,
         ABILITY_CALLEES,
+        M12_CALLEES,
         M12_CHECKED,
         SPECIAL_HOOKS,
         SPECIAL_CHECKED,
@@ -4185,24 +4204,29 @@ mod tests {
 
     #[test]
     fn m12_sites() {
-        for s in M12_CHECKED {
+        for s in M12_CALLEES.iter().chain(M12_CHECKED) {
             assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
         }
-        let find = |n: &str| M12_CHECKED.iter().find(|s| s.name.starts_with(n)).unwrap();
+        let find = |n: &str| M12_CALLEES.iter().chain(M12_CHECKED).find(|s| s.name.starts_with(n)).unwrap();
         let rip = |s: &Site, len: usize| (0x1_4000_0000i64 + s.rva as i64 + len as i64 + i32::from_le_bytes(s.expect[3..7].try_into().unwrap()) as i64) as u64;
         // Both CP sites read Sora's stats pointer; the cap is 1625, the pick +25.
         assert_eq!(rip(find("level-up CP offer"), 7), 0x1_4087_CBF8);
         assert_eq!(rip(find("level-up CP pick"), 7), 0x1_4087_CBF8);
         assert_eq!(i32::from_le_bytes(find("level-up CP offer").expect[10..14].try_into().unwrap()), crate::level_up::RECOM_CP_OFFER_CAP);
         assert_eq!(find("level-up CP pick").expect[10] as i32, crate::abilities::RECOM_CP_PER_UP);
+        assert_eq!(find("learned line ability wording").expect[6] as u16, crate::level_up::ABILITY_WORDING_ID);
+        assert_eq!(u32::from_le_bytes(find("field menu gate").expect[8..12].try_into().unwrap()), 0x5A4);
         let slot = |s: &Site, k: usize| u64::from_le_bytes(s.expect[8 * k..8 * k + 8].try_into().unwrap());
+        let th = find("CTechHelp vtable");
+        assert_eq!(0x1_4000_0000 + th.rva as u64, crate::level_up::tech_help::VTABLE);
+        assert_eq!((slot(th, 0), slot(th, 1)), (0x1_4012_C230, 0x1_4012_D330));
         assert_eq!(slot(find("CLevelUp vtable"), 1), 0x1_4010_EF10);
         assert!(all_sites().any(|s| s.rva == 0x0010_EF10), "the update's wrapper site");
         // The panel's preview: ours prints the same bytes between the numbers.
         let f = find("level-up panel preview format").expect;
         assert_eq!(&crate::level_up::panel_value(1, true)[4..11], &f[3..10]);
-        // The text copy win::level_up uses is an earlier stage's checked callee.
-        for rva in [0x0025_8DE0u32] {
+        // The callees win::notices / win::level_up also use are earlier stages' checked ones.
+        for rva in [0x004A_CE54u32, 0x002A_D300, 0x0025_8DE0, 0x001B_0870] {
             assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
         }
     }

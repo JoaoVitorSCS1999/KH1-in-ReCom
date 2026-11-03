@@ -1,5 +1,6 @@
 //! Re:CoM's level-up screen `CLevelUp` at Combat = KH1 (M12; `docs/recom-m12-sleights.md` § 8):
-//! its CP choice becomes **AP Up** (step 1).
+//! its CP choice becomes **AP Up** (step 1), and its "sleight learned" mode shows our "Sora learned
+//! X" notices (step 2, `crate::notices`).
 //!
 //! `CLevelUp` (vtable `0x140512C10`, ctor `0x14010E9C0(this, parent, sleight)`, update
 //! `0x14010EF10`, 0x2C0 bytes). Checked (decomp + exe) for every offset and state below:
@@ -23,6 +24,8 @@
 //!   `0x1407C1898[(n + char × 5) × 3]` `"%4d"`, the highlighted row `+1` `"%4d \xF9Y\x81\xA8\xF9R%4d"`;
 //!   the exe's English names beside them: "Max HP", "Max CP", "Sleights", Riku's "AP"); the result
 //!   line `+0x1E0` (`0x1407C1868[char × 3 + n]`: `0xA8070E`).
+//! - Its child tasks: list at `+0x30` (`CSLCListT<CTask>`), tail node `+0x48`, node `+8` the task
+//!   (`0x1402ABBA0` appends).
 //!
 //! Re:CoM's message texts (`0xA806xx` / `0xA807xx`) are not in the session; our words are English,
 //! as every text of ours (Assumption: they read well beside Re:CoM's).
@@ -30,6 +33,9 @@
 /// `CLevelUp` fields. Checked (decomp + exe).
 pub mod off {
     pub const STATE: usize = 0x6C;
+    /// Its child task list's tail node (`+0x30` list: `+0x48`); node `+8` = the task.
+    pub const CHILD_TAIL: usize = 0x48;
+    pub const NODE_TASK: usize = 0x8;
     pub const CURSOR: usize = 0x220;
     pub const CHARACTER: usize = 0x230;
     /// The three offers (i32: ≥ 0 offered, −1 greyed): HP, CP (Riku: AP), Sleight (Riku: DP).
@@ -70,6 +76,21 @@ pub mod state {
 pub const CP_ROW: usize = 1;
 /// Re:CoM's CP offer cap: offered while CP < 1625 (`cmp [stats+0xC],0x659` at `0x14010F210`).
 pub const RECOM_CP_OFFER_CAP: i32 = 0x659;
+/// The sleight id our ability notices open the sleight-learned screen with: Re:CoM's High Jump
+/// (0x5A), the first id its line words as an ability (`cmp [rbx+0x258],0x5A` at `0x1401102DD`).
+/// Only the wording follows the id; the name is ours (`+0x250`).
+pub const ABILITY_WORDING_ID: u16 = 0x5A;
+
+/// `CTechHelp` (vtable `0x14051B4A8`, ctor `0x14012BF80`, update `0x14012D330`, dtor `0x14012C230`):
+/// state `+0x88` (0 loads its page `+0x90` = 300 + n, …, 5 and up: the task ends itself), page
+/// `+0x90` (its dtor unloads it when ≠ 0), `0x14087A4B0` = 1 when it is gone. Checked (decomp + exe).
+pub mod tech_help {
+    pub const VTABLE: u64 = 0x1_4051_B4A8;
+    pub const STATE: usize = 0x88;
+    pub const PAGE: usize = 0x90;
+    /// Its update's default branch: the task ends (no page loaded, none unloaded with page 0).
+    pub const DONE: u32 = 5;
+}
 
 /// The AP Up row's words and values (owner, M12: "On level up, instead of having the choice to
 /// level up CP, when the combat is set to KH1, it should be AP up, and it should give you 2 AP").
@@ -132,6 +153,7 @@ mod tests {
 
     #[test]
     fn ids() {
+        assert_eq!(ABILITY_WORDING_ID, 0x5A);
         assert_eq!(RECOM_CP_OFFER_CAP, 1625);
         assert_eq!(off::ROW_LABEL + off::ROW_STEP * CP_ROW, 0xD8);
         assert_eq!(off::PANEL_VALUE + off::PANEL_STEP * CP_ROW, 0x188);

@@ -26,6 +26,7 @@ mod models;
 mod movement;
 mod mp;
 mod mp_bar;
+mod notices;
 mod revenge;
 mod kh1_enemy;
 mod kh1_thrown;

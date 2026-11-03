@@ -96,6 +96,7 @@ pub mod motions;
 pub mod movement;
 pub mod mp;
 pub mod mp_bar;
+pub mod notices;
 pub mod revenge;
 pub mod rows;
 pub mod settings;
