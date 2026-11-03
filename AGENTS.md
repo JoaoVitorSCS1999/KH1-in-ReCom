@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 162: The KH1 Defender (its shield, fireballs and flame), version 0.90.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
+- Defender (KH1 `xa_ex_2340` / `ex_2340.bd` ↔ Re:CoM `CEnemyDefender` id 26), every number from the player's files (Checked (files): 90 from the script, 13 from the flame child `ex_2340_00.bd`, 6 from the fireball child `ex_2340_01.bd`, 36 requests): its shield kept toward Sora, KH1's repel count and bash; the strike 209, spin 208 and bash 207 in state 2 (Re:CoM's melee id 0); side steps / turn-around held at their end (KH1's request bit 16, asset `HELD_CLIPS`).
+- Shield: two guard rows at once: the front (row `0xEC`, type 1, priority 99, 70°, mode 3) stays under the spin's (`0x23C`, priority 100, all round, with 208) and comes back when it ends; a row at 98+ is never moved by Re:CoM attackers (`0x1402B4BC0`).
+- Fireball (Re:CoM bullet, KH1's numbers): from bone `0x106C` at t 3 (Re:CoM chin), [8, 10) a frame, turning 1° a frame toward Sora's aim point, 100 frames; Re:CoM's fireball power (id 1), its own effect set `0x14053CF30`; batted: KH1's `0x1B8` re-aim; Guard-turned: Re:CoM's homing at KH1's 1°; one per round (KH1 clears the count, `0x1630`). Flame (212): 110-frame wait, KH1's 8-slot ring, 10-frame tail, 30-frame growth, 10-frame re-hit, on id 1.
+- Re:CoM (Checked (exe)): vtable `0x14053CA98`, ctor `0x14018D8E0` (6 exact bytes, only caller `0x1401893E0`), alloc `0x1401893C7` 0xCD0 → 0xCF0; state 3 (Re:CoM's fireball) never entered.
+- Assumption: its own batted fireball's big hit when it strikes from the front stands for KH1's shield-part test (owner question).
+- Asset step: ENEMY/0026 (ANN / ASD / SES), `kh1-defender.json`.
+- Checked: tests (12 seeds × 20 000 frames), Windows build. Not checked: in game; no KH1 trace. The porting session stopped before its report; tests and build re-run at the merge.
+
+---
+
 ## Stage 161: The KH1 Gargoyle (flier; its bouncing ball as a Re:CoM bullet), version 0.89.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11); its shot: "Re:CoM bullet, KH1 numbers".
