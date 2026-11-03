@@ -204,6 +204,7 @@ Every hook passes through to Re:CoM unless `combat = kh1` and the player is the 
 `kh1-recom.ini` keys `high_jump`, `glide`, `superglide`, `dodge_roll`, `guard` (on / off;
 defaults off, off, off, on, on) until abilities are in Re:CoM's progression (M9).
 Since 2026-11-02 `dodge_roll` is `recom | kh1 | off` (default `recom`; see § Re:CoM's roll).
+Since 2026-11-02 `run_speed`, `jump_height`, `air_speed` (`recom | kh1`; § Speed toggles).
 
 ### Trace
 
@@ -401,6 +402,95 @@ hook. No other launch writes the spring speed: the player's `+0x600` is written 
 
 Not checked: in game; the frame counts above at Re:CoM's 30 fps rooms (step 2: the log gives
 14 untouchable frames' worth at two frames a call).
+
+## Speed toggles: `run_speed`, `jump_height`, `air_speed` (2026-11-02)
+
+Owner (2026-11-02): "have sora run at the same speed as he does in recom"; then "have run speed,
+jump height, and air speed all be separate toggles in the settings". Three ini keys, each
+`recom | kh1`, read at start, only at `combat = kh1`, no Config rows (Re:CoM's 21 slots are
+full). Any combination works. Code: `movement/speeds.rs` (numbers and tests), `movement.rs`
+(`speed_map`, `run_speed`, `takeoff_input`, `air_move`, the walk-off), `win/movement.rs`
+(`RecomHost::recom_numbers`, `stick_class`, `set_speeds`). Logged at start in the settings
+lines and the `movement:` line.
+
+### Re:CoM's numbers. Checked (decomp + exe) unless marked
+
+- Sora's parameter block (`player+0x3C0` = `0x1407C5B60`): walk `+0x10` 1.3 m/s, run `+0x14`
+  6.2 m/s, jump `+0x1C` 28.0, higher jump `+0x20` 32.5. The runtime reads them from the block.
+- **Run** (stick class `0x1401E9630`, move step `0x1401EF3C0`): on Re:CoM's stick magnitude
+  (`+0x384` = the pad wrapper's `|(x, y)| / 4096`, at most 1, `0x1401FF150`): < 0.3 stand,
+  < 0.9 walk 1.3 m/s, else **magnitude × 6.2 m/s**; a frame moves that / 60 × (1 − |stick −
+  facing| / π). The run row (3, or 0x13 / 0x2C) is started by the row pick `0x1401F9380` through
+  `0x1401F7180` with the clip's own blend; **nothing sets a play rate from the speed** (no reader
+  of `+0x4DC` does). KH1 doesn't either (kh1-core's motion player). So the run clip, which is
+  Re:CoM's own (owner, 2026-10-30), plays at its own rate at both settings: at `recom` it runs at
+  the speed it was made for; at `kh1` it slides as noted in `recom-motion-switch.md`.
+- **Jump** (init `0x1401F29F0`, exe `0x1401EDA60`, globals by `0x1401FAB40`): take-off speed =
+  jump speed × `0x14087B39C` (0.6 × 0.008166667) m a frame, gravity `0x14087B398` (−0.6 ×
+  0.008166667 m a frame², **halved** while CBTL `+0x208 & 0x4000`). The take-off frame moves at
+  the take-off speed; each later frame adds gravity first (`+0x5D4 += +0x5D8 × step`). While
+  rising (phase 2, row 4): jump button up (`0x1401FF4D0`) and `+0x5DC` ≥ crouch `+0x24` (100) +
+  600 units, i.e. 12 frames after the take-off → speed × 0.43 (`0x1407C5B3C`), phase 3; else the
+  first frame the speed is below 0 it is set to 0 and the top row (5) plays. No fall cap in the
+  exe; the mover's lowest vertical speed is −0.5 m a frame (`CMovement+0x144`).
+- **Air** (same exe, phases 2 / 3): the horizontal speed `+0x5CC` starts at **0.8 × the ground
+  speed** (`0x1401F29F0`; the whole of it after walking off, `0x1401F1F20` = init(pl, 1)). With the
+  stick (stick class ≠ 0): facing eased toward the stick by 0.1 × step (`0x1401D4670`), f = 1 −
+  |stick − facing| / π, the speed eased toward speed-class / 60 × f × **0.8** by **5 %** × step,
+  and if that left it above the target, × f; Sora moves along the stick. Without: eased to 0 by
+  5 % × step, along the facing.
+
+### What each setting gives (KH1 units: cm, 60 Hz frames)
+
+| | `kh1` | `recom` |
+|---|---|---|
+| `run_speed` (default **recom**) | walk 2 (1.2 m/s) at tilt ≤ 0.8, run **8** (4.8 m/s) above: KH1's snap, no stick scaling | walk KH1's 2; run **Re:CoM's magnitude × 10.33** (× 6.2 m/s): 10.33 at full tilt, never under 8.27 where KH1's snap runs (test over every stick byte pair) |
+| `jump_height` (default **kh1**) | 190 / 290 (High Jump) over 28 frames, KH1's double-sine rise, gravity 0.4847, release cut (t ≥ 6 → a 5-frame rise), falls capped at 20 | take-off **13.72 / 15.93** a frame (28 / 32.5), gravity **0.49** (Re:CoM's live global), top **198.9 / 266.8** after 28 / 32.5 frames, released ≥ 12 frames after the take-off → × **0.43**, falls capped at 50 |
+| `air_speed` (default **kh1**) | take-off keeps the ground speed; stick: + 0.1 × 8 a frame up to max(8, take-off speed); none: × 0.95 a 30 Hz step; walk-off ≤ 8; turn π/16 a frame | take-off **0.8** × ground speed; stick: eased **5 %** to 0.8 × ground speed × f, × f when above, facing eased **10 %**, along the stick; none: eased 5 % to 0 along the facing; walk-off keeps the whole speed |
+
+- Both keep KH1's crouch (4 frames), KH1's motions and requests (the apex request 6 frames
+  before the top; Re:CoM's top and cut end the rise for `+0x604`), Glide / Superglide, the
+  air commands, the ledge checks, and KH1's arcs for everything that is not a jump (walk-off falls,
+  attack hops, a cast's hop, Glide's end, clash hops).
+- `air_speed = recom` runs only while Sora is free in the air; during an air swing, cast or
+  other action KH1's air rule moves him (KH1's attacks keep KH1's frame data), from the speed he
+  has.
+- Ground speed for the air rules: the walk is KH1's, the run follows `run_speed`. With the
+  defaults (`run_speed = recom`, `air_speed = kh1`) KH1's own cap rule keeps a running jump at
+  Re:CoM's run speed (it keeps any take-off speed above its run speed); a standing jump tops out
+  at KH1's 8.
+- High Jump at `jump_height = recom` is Re:CoM's higher jump (32.5), as its rows already are
+  (decision 17).
+
+### Tags
+
+- Checked (decomp + exe): every Re:CoM number and rule above; the parameter block and globals'
+  values. Checked (tests): the numbers per setting (`speeds` tests), the handler on the fake
+  Re:CoM per setting and all 8 combinations (`movement` tests), the ini keys (parse, store,
+  defaults).
+- Assumption: Re:CoM's take-off air speed uses the last ground frame's speed with its turn
+  factor; ours uses the stick's ground speed at the take-off (after KH1's crouch, during which
+  KH1 stands still). Re:CoM's own crouch (2 frames of `+0x24` = 100 units) is not used.
+- Assumption / not ported: after a cut Re:CoM zeroes a downward speed each frame while its rise
+  clip (row 4) still plays (a short hover, as long as that clip lasts), and its cut needs row 4
+  still playing (assumed to last to the top); our rise follows the speed alone. Enchant 0x70's
+  × 1.7 speed (a card effect: none at KH1) and the mover's speed scale `+0x13C` (1.0 from its
+  ctor) are not carried.
+- Not checked: anything in game; no trace of either game for these.
+
+### Owner test lines
+
+1. Start: the log's settings line `run_speed = recom …, jump_height = kh1 …, air_speed = kh1 …`
+   and the `movement:` line with the same three.
+2. Defaults: full tilt runs as fast as Re:CoM's Sora (Combat = Re:CoM to compare; the same
+   distance in the same time); half tilt still walks KH1's walk; a running jump keeps that speed.
+3. `run_speed = kh1`: KH1's slower run, as before.
+4. `jump_height = recom`: a held jump reaches about the same height as Re:CoM's (Combat = Re:CoM
+   next to it); a tapped jump is cut about 12 frames up; High Jump is a little lower than KH1's.
+5. `air_speed = recom`: a running jump is a little slower in the air (0.8), turning in the air is
+   gradual (Sora curves, his speed drops on a sharp turn), letting go of the stick drifts to a
+   stop.
+6. Any mix of the three: run, jump, turn, land, walk off a ledge, Glide; nothing sticks.
 
 ## Where Re:CoM can't match KH1 yet
 

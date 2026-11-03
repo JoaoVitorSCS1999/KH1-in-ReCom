@@ -187,6 +187,13 @@ pub fn startup_report(
                 s.dodge_roll.as_str(),
                 settings::switch_str(a.guard)
             );
+            let _ = writeln!(
+                r,
+                "settings: movement (only at combat = kh1): run_speed = {} (recom: Re:CoM's 6.2 m/s x stick; kh1: 4.8 m/s), jump_height = {} (recom: Re:CoM's 28 / 32.5 take-off, its gravity and cut; kh1: 190 / 290), air_speed = {} (recom: Re:CoM's air control; kh1: KH1's)",
+                s.run_speed.as_str(),
+                s.jump_height.as_str(),
+                s.air_speed.as_str()
+            );
             let _ = writeln!(r, "settings: KH1 combo: combo_plus = {}, air_combo_plus = {}, combo_master = {}", a.combo_plus, a.air_combo_plus, settings::switch_str(a.combo_master));
             for w in warnings {
                 let _ = writeln!(r, "settings warning: {w}");
@@ -220,6 +227,7 @@ mod tests {
         assert!(ok, "{r}");
         assert!(r.contains("combat = kh1, config_menu = on"), "{r}");
         assert!(r.contains("guard_reactions = on"), "{r}");
+        assert!(r.contains("run_speed = recom ") && r.contains("jump_height = kh1 ") && r.contains("air_speed = kh1 "), "{r}");
         assert!(r.contains("Config screen draw"));
     }
 

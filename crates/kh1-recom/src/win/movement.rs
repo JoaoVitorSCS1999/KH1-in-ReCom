@@ -51,6 +51,8 @@ static ABILITY_BITS: AtomicU32 = AtomicU32::new(0x30);
 static ABILITIES: Mutex<Option<Kh1Abilities>> = Mutex::new(None);
 /// `dodge_roll` from the ini (read at start): 0 Re:CoM's own roll, 1 KH1's, 2 none.
 static ROLL_MODE: AtomicU8 = AtomicU8::new(0);
+/// `run_speed`, `jump_height`, `air_speed` (bit set: Re:CoM's), from the ini at start.
+static SPEEDS: AtomicU8 = AtomicU8::new(1);
 /// The player whose roll Re:CoM runs ([`crate::movement::roll`]), 0 when none was handed over.
 static RECOM_ROLL: AtomicUsize = AtomicUsize::new(0);
 static ROLL_WATCH: Mutex<crate::movement::roll::Watch> = Mutex::new(crate::movement::roll::Watch { from: 0, frames: 0.0, calls: 0, untouchable: None, untouchable_at: None, clock: 0 });
@@ -106,7 +108,20 @@ pub(super) mod p {
     pub const JUMP_TOP: usize = 0x5F4;
     pub const PHASE: usize = 0x604;
     pub const LOCK_TARGET: usize = 0x84C;
+    /// Sora's parameter block (`0x1407C5B60`; `0x1401E9630` reads `+0x10` / `+0x14`, the jump init
+    /// `+0x1C` / `+0x20`).
+    pub const PARAMS: usize = 0x3C0;
 }
+
+/// Sora's parameter block: run m/s, jump and higher-jump speeds. Checked (exe + decomp).
+mod params {
+    pub const RUN: usize = 0x14;
+    pub const JUMP: usize = 0x1C;
+    pub const HIGH_JUMP: usize = 0x20;
+}
+/// Re:CoM's jump take-off scale and gravity (`0x1401FAB40` writes them). Checked (decomp).
+const RISE_SCALE: u64 = 0x1_4087_B39C;
+const GRAVITY: u64 = 0x1_4087_B398;
 
 // CMovement (`player+0xF0`, ctor `0x1401D4200`).
 pub(super) mod body {
@@ -231,6 +246,18 @@ pub fn set_roll_mode(m: RollMode) {
         },
         Ordering::Relaxed,
     );
+}
+
+pub fn set_speeds(s: crate::movement::speeds::Speeds) {
+    use crate::settings::Mode::Recom;
+    SPEEDS.store((s.run == Recom) as u8 | ((s.jump == Recom) as u8) << 1 | ((s.air == Recom) as u8) << 2, Ordering::Relaxed);
+}
+
+pub fn speeds() -> crate::movement::speeds::Speeds {
+    use crate::settings::Mode::{Kh1, Recom};
+    let b = SPEEDS.load(Ordering::Relaxed);
+    let m = |bit: u8| if b & bit != 0 { Recom } else { Kh1 };
+    crate::movement::speeds::Speeds { run: m(1), jump: m(2), air: m(4) }
 }
 
 pub fn roll_mode() -> RollMode {
@@ -644,6 +671,26 @@ impl Host for RecomHost {
         }
     }
 
+    fn recom_numbers(&mut self) -> crate::movement::speeds::RecomNumbers {
+        let mut n = crate::movement::speeds::RecomNumbers::EXE;
+        unsafe {
+            let block: usize = rd(self.pl + p::PARAMS);
+            if block != 0 {
+                n.run_mps = rd(block + params::RUN);
+                n.jump = rd(block + params::JUMP);
+                n.high_jump = rd(block + params::HIGH_JUMP);
+            }
+            let bs = base();
+            let (k, g): (f32, f32) = (rd(va(bs, RISE_SCALE)), rd(va(bs, GRAVITY)));
+            // Set by Re:CoM's player set-up (`0x1401FAB40`); the exe's until then.
+            if k.is_finite() && k > 0.0 && g.is_finite() && g < 0.0 {
+                n.rise_scale = k;
+                n.gravity = g;
+            }
+        }
+        n
+    }
+
     fn set_no_flinch(&mut self, on: bool) {
         // KH1's no-flinch (damage, no reaction) for the damage-check wrapper; not Re:CoM's
         // untouchable roll bit `+0x418 & 1` (KH1's roll has no untouchable frames).
@@ -735,6 +782,7 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     let Some(slot) = g.as_mut() else { return };
     slot.sora.abilities = abilities();
     slot.sora.recom_roll = roll_mode() == RollMode::Recom;
+    slot.sora.speeds = speeds();
     let mut input = trace::frame_input(&read_pad(pl));
     // A magic command from the command menu this frame (M7 stage 7.4), aimed at Re:CoM's target.
     input.magic = super::magic::take_command();
@@ -817,8 +865,17 @@ pub unsafe extern "win64" fn stick_class(pl: usize) -> u64 {
         return o(pl);
     }
     static PARAMS: OnceLock<Params> = OnceLock::new();
-    let tilt = trace::kh1_pad(&read_pad(pl)).tilt;
-    let (class, mps) = crate::movement::speed_class(PARAMS.get_or_init(Params::kh1_defaults), tilt);
+    let pad = read_pad(pl);
+    let tilt = trace::kh1_pad(&pad).tilt;
+    let params = PARAMS.get_or_init(Params::kh1_defaults);
+    // `run_speed = recom`: Re:CoM's run for its own stick magnitude (`crate::movement::speeds`).
+    let run = if speeds().run == crate::settings::Mode::Recom {
+        let n = RecomHost::new(pl).recom_numbers();
+        crate::movement::speeds::recom_run(&n, crate::movement::speeds::recom_tilt(pad.stick_int[0], pad.stick_int[1]))
+    } else {
+        params.run_speed
+    };
+    let (class, mps) = crate::movement::speed_class_run(params, tilt, run);
     wr(pl + p::SPEED, mps);
     class as u64
 }
