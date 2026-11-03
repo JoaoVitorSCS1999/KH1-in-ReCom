@@ -222,6 +222,16 @@ pub fn pick(allies: &[Ally], draw: f32, range: f32, ratio: f32, w0: i32, w1: i32
     out
 }
 
+/// Whether the Cure's heal reaches its picked target when the child acts (KH1's `sys 60` → `0x1402BF330`, Checked
+/// (decomp): its first test is `0x140292070(target)`, "can it be hit" (it has hurt parts, not all switched off, and its
+/// actor flags `& 0x8048 == 0x8000`: flag 0x40 clear); no: no hit record, so no heal, and the child goes on (nothing is
+/// re-picked: `sys 102` (`0x1402B80A0`) lists allies without that test, so a sunk Shadow can be picked and then get
+/// nothing). `hittable`: the host's KH1 flag for the target (`Some(false)` while it can't be hit: KH1's flag 0x40);
+/// `None`: not one of our KH1-AI enemies (Re:CoM's AI: Re:CoM's own rule, every living ally is healed).
+pub fn cure_lands(hittable: Option<bool>) -> bool {
+    hittable != Some(false)
+}
+
 /// The CRT's `qsort` (KH1 imports it from `api-ms-win-crt-utility-l1-1-0.dll`, Checked (exe)), whose order of equal keys
 /// decides which of several equally hurt allies [`pick`] takes: the UCRT's algorithm (Assumption: the published UCRT
 /// source; the session has no `ucrtbase.dll` decomp): eight elements or fewer by its `shortsort` (the largest of the run

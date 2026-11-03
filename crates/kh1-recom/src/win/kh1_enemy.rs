@@ -521,6 +521,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
     wr(this + cl.alloc as usize + tail::OFF_MAGIC, cl.magic);
     wr(this + cl.alloc as usize + tail::OFF_BATTLE, battle);
     wr(this + cl.alloc as usize + tail::OFF_INDEX, idx as u32);
+    wr(this + cl.alloc as usize + tail::OFF_UNHITTABLE, 0u32);
     let name = cl.title;
     line(K, || format!("battle {battle}: {name} {this:#x} gets KH1's AI (seed {seed:#x})"));
     r
@@ -640,6 +641,15 @@ pub(super) unsafe fn ours(en: usize) -> Option<usize> {
         let c = COPY[k].load(Ordering::Relaxed);
         c != 0 && vt == c && rd::<u32>(en + CLASSES[k].alloc as usize + tail::OFF_MAGIC) == CLASSES[k].magic
     })
+}
+
+/// KH1's "can it be hit" for one of our KH1-AI enemies (its runtime's flag 0x40, through the tail's copy: no lock, so
+/// another enemy's command can ask inside its own runtime call): `Some(false)` while it can't be hit, `Some(true)` while it
+/// can, `None` for any other enemy (Re:CoM's AI, or a runtime of another battle).
+pub(super) unsafe fn kh1_hittable(en: usize) -> Option<bool> {
+    let k = ours(en)?;
+    let at = en + CLASSES[k].alloc as usize;
+    (rd::<u32>(at + tail::OFF_BATTLE) == super::battle::battle_number()).then(|| rd::<u32>(at + tail::OFF_UNHITTABLE) == 0)
 }
 
 /// Runs `f` on the enemy's runtime; None when it has none (then the caller runs Re:CoM's slot).
@@ -903,6 +913,7 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         Cmd::Hittable(h) => {
             hurt(en, h);
             rt.hittable = h;
+            wr(en + CLASSES[rt.class].alloc as usize + tail::OFF_UNHITTABLE, (!h) as u32);
         }
         Cmd::Height(h) => set_height(en, h),
         Cmd::FadeIn(n) => {

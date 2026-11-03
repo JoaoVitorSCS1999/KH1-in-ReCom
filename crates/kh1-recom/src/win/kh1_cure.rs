@@ -14,17 +14,20 @@
 //!   "_ex_2140", effect, &(0, 0, 0, 1), 0x1402ABB20(target, 1))`, the effect 8 / 9 / 10 for a target of Re:CoM's enemy id 3
 //!   / 4 / 5, else 7 (`sites::GREENREQUIEM_CURE_CHECKED`). Re:CoM's heal keeps its own rules (nothing on an HP-0 enemy, a
 //!   stopped one's heal held for after its Stop, its HP gauge and number popup).
-//! - Not built: KH1's "can it be hit" test on the target (`0x140292070`: a sunk Shadow or a hidden Darkball takes no
-//!   heal in KH1; here every living ally Re:CoM keeps does, as Re:CoM's own Green Requiem's; Assumption: rare); KH1's
-//!   hit record reaching the target's script hit handler (it only marks it seen: no reaction, no state; nothing of ours
-//!   reads that for a battle spawn).
+//! - **KH1's "can it be hit"** (owner 2026-11-03: "skips allies KH1 can't hit"): KH1's pick (`sys 102`, `0x1402B80A0`)
+//!   has no hit test; the heal's record (`sys 60` → `0x1402BF330`) is made only when `0x140292070` says the target can be
+//!   hit (Checked (decomp)). So at the heal, a picked KH1-AI enemy whose runtime has KH1's flag 0x40 set (a sunk Shadow,
+//!   a vanished Darkball, a warping Search Ghost: `kh1_enemy::kh1_hittable`, the tail's copy of `rt.hittable`) gets
+//!   nothing, as in KH1 (no re-pick); a Re:CoM-AI enemy keeps Re:CoM's rule (healed while alive).
+//! - Not built: KH1's hit record reaching the target's script hit handler (it only marks it seen: no reaction, no
+//!   state; nothing of ours reads that for a battle spawn).
 //!
 //! Per frame: nothing (one call per pick, one per heal).
 
 use super::movement::{func, rd};
 use super::{base, log};
 use crate::kh1_enemy::Manifest;
-use kh1_core::greenrequiem::{pick as kh1_pick, Ally};
+use kh1_core::greenrequiem::{cure_lands as kh1_cure_lands, pick as kh1_pick, Ally};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
@@ -70,10 +73,12 @@ pub(super) unsafe fn pick(en: usize, m: &Manifest, child: u8, draw: f32) {
     let c = |n: &str| m.consts.get(n);
     let me = super::kh1_enemy::kh1_place(en);
     let max_hp = func::<MaxHpFn>(f::MAX_HP);
-    let allies: Vec<Ally> = super::battle::enemies(64)
-        .into_iter()
-        .filter(|&a| a != en)
-        .map(|a| {
+    let others: Vec<usize> = super::battle::enemies(64).into_iter().filter(|&a| a != en).collect();
+    // For the log only (KH1's pick has no hit test; the heal has: [`cure`]).
+    let unhittable: Vec<bool> = others.iter().map(|&a| super::kh1_enemy::kh1_hittable(a) == Some(false)).collect();
+    let allies: Vec<Ally> = others
+        .iter()
+        .map(|&a| {
             let dist = match (me, super::kh1_enemy::kh1_place(a)) {
                 (Some(p), Some(q)) => (q - p).length(),
                 _ => f32::INFINITY,
@@ -85,7 +90,7 @@ pub(super) unsafe fn pick(en: usize, m: &Manifest, child: u8, draw: f32) {
     let got = kh1_pick(&allies, draw, c("pick_range"), c("pick_ratio"), c("pick_weight_0") as i32, c("pick_weight_1") as i32);
     let id = got.unwrap_or(own);
     line(|| {
-        let list: Vec<String> = allies.iter().map(|a| format!("e{} {}/{} at {:.0}", a.id, a.hp, a.max, a.dist)).collect();
+        let list: Vec<String> = allies.iter().zip(&unhittable).map(|(a, u)| format!("e{} {}/{} at {:.0}{}", a.id, a.hp, a.max, a.dist, if *u { " (KH1 can't hit it now)" } else { "" })).collect();
         format!("e{own}: Cure {child}: KH1's pick (sys 102, draw {draw:.4}) among [{}] -> e{id}{}", list.join(", "), if got.is_none() { " (itself)" } else { "" })
     });
     if let Ok(mut v) = PICKED.lock() {
@@ -108,6 +113,13 @@ pub(super) unsafe fn cure(en: usize, child: u8) {
     let t = func::<HandleFn>(f::HANDLE_OBJ)(id);
     if t == 0 {
         line(|| format!("e{own}: Cure {child}: e{id} is gone (KH1's sys 120): nothing"));
+        return;
+    }
+    // KH1's `sys 60` makes the heal's record only on a target it can hit (`0x140292070`): one of our KH1 enemies whose
+    // runtime has KH1's flag 0x40 set now (sunk, vanished, warping) gets nothing; a Re:CoM-AI enemy keeps Re:CoM's rule.
+    let can_hit = super::kh1_enemy::kh1_hittable(t);
+    if !kh1_cure_lands(can_hit) {
+        line(|| format!("e{own}: Cure {child} on e{id}: KH1 can't hit it now (its flag 0x40: KH1's sys 60 / 0x140292070 makes no record): nothing"));
         return;
     }
     let ap = func::<ApFn>(f::ATTACK_AP)(en, 0, 0x19, 0, std::ptr::null_mut(), 0) as i32;
