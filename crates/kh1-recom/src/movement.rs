@@ -500,6 +500,9 @@ pub struct Kh1Sora {
     /// `jump_height = recom`: Re:CoM's vertical jump in place of KH1's arc, from the take-off
     /// until anything sets a new arc (a hop, a walk-off, a landing, a take-over).
     pub recom_rise: Option<speeds::RecomRise>,
+    /// `jump_height = recom`: Re:CoM's crouch in place of KH1's 4 frames, from the jump's start to its
+    /// take-off (owner 2026-11-02, "Pace / movement follow-ups").
+    pub recom_crouch: Option<speeds::RecomCrouch>,
     /// This frame's Re:CoM stick magnitude and jump button (held).
     recom_tilt: f32,
     jump_down: bool,
@@ -582,6 +585,7 @@ impl Kh1Sora {
             speeds: speeds::Speeds::default(),
             recom: speeds::RecomNumbers::EXE,
             recom_rise: None,
+            recom_crouch: None,
             recom_tilt: 0.0,
             jump_down: false,
             took_off: false,
@@ -1494,6 +1498,8 @@ impl Kh1Sora {
         self.play(req::HOLD | r as u32, 0.0);
         self.set_state(state::TAKE_OFF);
         self.arc.t = 0.0;
+        // `jump_height = recom`: Re:CoM's crouch from 0 (its every jump init zeroes `+0x5DC`, a land jump's too).
+        self.recom_crouch = (self.speeds.jump == Mode::Recom).then(|| speeds::RecomCrouch::start(&self.recom));
         self.glide_timer = 0.0;
         ev.push(Event::Jumped { high });
         true
@@ -1524,7 +1530,13 @@ impl Kh1Sora {
 
     /// `0x1402AFDA0`.
     fn takeoff_input(&mut self, dir: Vec3, w: &mut f32, step: f32, pos: Vec3, ev: &mut Vec<Event>) {
-        if self.arc.t < self.params.crouch_frames {
+        // `jump_height = recom`: Re:CoM's crouch (`0x1401EDA60` phase 1: 2 frames after the press frame); else
+        // KH1's (`crouch_frames`, 4 with the press frame).
+        let crouching = match self.recom_crouch.as_mut() {
+            Some(c) => c.crouching(step),
+            None => self.arc.t < self.params.crouch_frames,
+        };
+        if crouching {
             self.arc.t += step;
             *w = 0.0;
         } else if self.rec.req == request::JUMP || self.rec.req == request::HIGH_JUMP {
@@ -1540,6 +1552,7 @@ impl Kh1Sora {
                 self.recom_rise = None;
             }
             self.set_state(state::AIR);
+            self.recom_crouch = None;
             self.jump_offset = off;
             self.jump_held = true;
             // Re:CoM's own cut rule runs in its rise ([`speeds::RecomRise::advance`]).
@@ -1548,6 +1561,7 @@ impl Kh1Sora {
             ev.push(Event::TookOff);
         } else {
             self.set_state(state::GROUND);
+            self.recom_crouch = None;
             *w = 0.0;
             self.jump_held = true;
             self.cut_ok = true;

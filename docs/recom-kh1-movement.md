@@ -433,6 +433,17 @@ lines and the `movement:` line.
   600 units, i.e. 12 frames after the take-off → speed × 0.43 (`0x1407C5B3C`), phase 3; else the
   first frame the speed is below 0 it is set to 0 and the top row (5) plays. No fall cap in the
   exe; the mover's lowest vertical speed is −0.5 m a frame (`CMovement+0x144`).
+- **Crouch** (same exe, phase 1; built for `jump_height = recom`, owner 2026-11-02 "Pace / movement
+  follow-ups"): the init `0x1401F29F0` zeroes the jump's time `+0x5DC` (one qword with `+0x5D8`) and sets
+  phase 1, from each of its six callers (the land jump `0x1401EE360` too: Re:CoM has no shortened crouch).
+  The jump exe first runs the next frame (the Field / Battle exe `0x1401FA0F0` / `0x1401F9840` switch once
+  on the action). Each exe frame: if `+0x5DC` ≥ the crouch `params+0x24` (**100**, an int, exe
+  `0x1407C5B84`) Sora takes off (phase 2, the take-off speed into the mover, which moves him that same
+  frame) and returns; then `+0x5DC` += dt (`player+0x460`, 50 a 60 Hz frame). So the test comes before the
+  add: at 60 Hz Sora stands on the press frame and **2 crouch frames** (`+0x5DC` 0, 50) and takes off on the
+  **3rd frame after the press** (3 frames on the ground counting the press frame, KH1's 4). At 30 fps (dt
+  100) it is the press update, 1 crouch update and the take-off on the 2nd update after it (the same time); a
+  slow frame's larger dt counts whole. That is the "2–3 frames": 2 crouch frames, 3 with the press frame.
 - **Air** (same exe, phases 2 / 3): the horizontal speed `+0x5CC` starts at **0.8 × the ground
   speed** (`0x1401F29F0`; the whole of it after walking off, `0x1401F1F20` = init(pl, 1)). With the
   stick (stick class ≠ 0): facing eased toward the stick by 0.1 × step (`0x1401D4670`), f = 1 −
@@ -448,7 +459,11 @@ lines and the `movement:` line.
 | `jump_height` (default **kh1**) | 190 / 290 (High Jump) over 28 frames, KH1's double-sine rise, gravity 0.4847, release cut (t ≥ 6 → a 5-frame rise), falls capped at 20 | take-off **13.72 / 15.93** a frame (28 / 32.5), gravity **0.49** (Re:CoM's live global), top **198.9 / 266.8** after 28 / 32.5 frames, released ≥ 12 frames after the take-off → × **0.43**, falls capped at 50 |
 | `air_speed` (default **kh1**) | take-off keeps the ground speed; stick: + 0.1 × 8 a frame up to max(8, take-off speed); none: × 0.95 a 30 Hz step; walk-off ≤ 8; turn π/16 a frame | take-off **0.8** × ground speed; stick: eased **5 %** to 0.8 × ground speed × f, × f when above, facing eased **10 %**, along the stick; none: eased 5 % to 0 along the facing; walk-off keeps the whole speed |
 
-- Both keep KH1's crouch (4 frames), KH1's motions and requests (the apex request 6 frames
+- Crouch: `kh1` KH1's (4 frames with the press frame, a land jump 2); `recom` Re:CoM's (2 crouch
+  frames after the press frame, the take-off on the 3rd; a land jump the same whole crouch, as Re:CoM's
+  land jump runs its jump init). `movement/speeds.rs` `RecomCrouch` (the time from `params+0x24`, read live
+  with the other numbers), `Kh1Sora::takeoff_input`.
+- Both keep KH1's motions and requests (the apex request 6 frames
   before the top; Re:CoM's top and cut end the rise for `+0x604`), Glide / Superglide, the
   air commands, the ledge checks, and KH1's arcs for everything that is not a jump (walk-off falls,
   attack hops, a cast's hop, Glide's end, clash hops).
@@ -469,8 +484,16 @@ lines and the `movement:` line.
   Re:CoM per setting and all 8 combinations (`movement` tests), the ini keys (parse, store,
   defaults).
 - Assumption: Re:CoM's take-off air speed uses the last ground frame's speed with its turn
-  factor; ours uses the stick's ground speed at the take-off (after KH1's crouch, during which
-  KH1 stands still). Re:CoM's own crouch (2 frames of `+0x24` = 100 units) is not used.
+  factor; ours uses the stick's ground speed at the take-off (after the crouch, during which
+  Sora stands still).
+- Checked (decomp + exe): Re:CoM's crouch rule above (`0x1401EDA60` phase 1, `0x1401F29F0`, its callers,
+  `params+0x24` = 100). Checked (tests): `speeds::recoms_crouch_is_two_frames_after_the_press_frame` (60 Hz,
+  30 fps, a slow frame, another length), `movement` tests `jump_height_recom_is_recoms_jump_after_recoms_crouch`
+  (take-off on frame 3, held and tapped, High Jump), `jump_height_kh1_keeps_kh1s_4_frame_crouch` (frame 4,
+  every `run_speed` / `air_speed`), `jump_height_recom_land_jump_has_recoms_whole_crouch` (KH1 2, Re:CoM 3).
+- Assumption: at `recom` KH1's jump clip still starts at its frame 0 (its 4-frame crouch pose), so Sora
+  leaves the ground one frame before the clip's own lift (on a land jump, whose clip starts at KH1's frame 2,
+  one frame after it). Not seen in game.
 - Assumption / not ported: after a cut Re:CoM zeroes a downward speed each frame while its rise
   clip (row 4) still plays (a short hover, as long as that clip lasts), and its cut needs row 4
   still playing (assumed to last to the top); our rise follows the speed alone. Enchant 0x70's
@@ -487,6 +510,9 @@ lines and the `movement:` line.
 3. `run_speed = kh1`: KH1's slower run, as before.
 4. `jump_height = recom`: a held jump reaches about the same height as Re:CoM's (Combat = Re:CoM
    next to it); a tapped jump is cut about 12 frames up; High Jump is a little lower than KH1's.
+   Sora leaves the ground as soon after the press as Re:CoM's Sora does (2 frames of crouch, one
+   frame sooner than KH1's), a jump right after a landing too. `jump_height = kh1`: KH1's crouch as
+   before (4 frames; a jump during the landing lock 2).
 5. `air_speed = recom`: a running jump is a little slower in the air (0.8), turning in the air is
    gradual (Sora curves, his speed drops on a sharp turn), letting go of the stick drifts to a
    stop.

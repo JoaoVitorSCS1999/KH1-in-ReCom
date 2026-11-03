@@ -17,6 +17,15 @@
 //!   each later frame adds gravity first. Rising, the jump button up and 12 frames after the
 //!   take-off (`+0x5DC` ≥ `+0x24` 100 + 600 units): the speed × 0.43 (`0x1407C5B3C`) and the
 //!   fall begins; else the first frame the speed turns downward it is set to 0 (the top).
+//! - Crouch (`0x1401EDA60` phase 1; owner 2026-11-02: `jump_height = recom` uses it too): the init zeroes the
+//!   jump's time `+0x5DC` (with `+0x5D8`, one qword) and sets phase 1; the jump exe first runs the next frame
+//!   (the Field / Battle exe's one switch on the action, `0x1401FA0F0` / `0x1401F9840`). Each exe frame: when
+//!   `+0x5DC` ≥ the crouch `params+0x24` (100) Sora takes off (phase 2, the take-off speed into the mover,
+//!   which moves him that frame); then `+0x5DC` += dt (`player+0x460`, 50 a 60 Hz frame). So at 60 Hz Sora
+//!   stands the press frame and 2 crouch frames and takes off on the 3rd frame after the press; at 30 fps
+//!   (dt 100) the press update, 1 crouch update and the take-off on the 2nd. KH1's is 4 frames (the press
+//!   frame counts). Every jump init (`0x1401F29F0`, from each of its six callers, the land jump `0x1401EE360`
+//!   too) starts it from 0.
 //! - Air (`0x1401EDA60` phases 2 / 3): the horizontal speed `+0x5CC` starts at 0.8 × the ground
 //!   speed at the jump (`0x1401F29F0`; the whole speed after walking off, `0x1401F1F20`). With the
 //!   stick: the facing eases toward the stick by 0.1 × step (`0x1401D4670`), f = 1 − |stick −
@@ -52,12 +61,14 @@ pub struct RecomNumbers {
     /// m a frame per unit of jump speed (`0x14087B39C`) and gravity, m a frame² (`0x14087B398`).
     pub rise_scale: f32,
     pub gravity: f32,
+    /// The crouch, Re:CoM time units (`params+0x24`, an int).
+    pub crouch: i32,
 }
 
 impl RecomNumbers {
     /// The Steam exe's values. Checked (exe: `0x1407C5B74` 6.2, `0x1407C5B7C` 28.0, `0x1407C5B80`
-    /// 32.5, `0x1407C5B38` 0.6; decomp `0x1401FAB40`).
-    pub const EXE: RecomNumbers = RecomNumbers { run_mps: 6.2, jump: 28.0, high_jump: 32.5, rise_scale: 0.6 * 0.008_166_667, gravity: -0.6 * 0.008_166_667 };
+    /// 32.5, `0x1407C5B84` 100, `0x1407C5B38` 0.6; decomp `0x1401FAB40`).
+    pub const EXE: RecomNumbers = RecomNumbers { run_mps: 6.2, jump: 28.0, high_jump: 32.5, rise_scale: 0.6 * 0.008_166_667, gravity: -0.6 * 0.008_166_667, crouch: 100 };
 }
 
 impl Default for RecomNumbers {
@@ -134,6 +145,37 @@ pub fn recom_air(speed: f32, facing: f32, stick: Option<(f32, f32)>, step: f32) 
         }
     }
     (s, facing, yaw)
+}
+
+/// `jump_height = recom`: Re:CoM's crouch (`0x1401EDA60` phase 1, the module notes): the jump's time in KH1
+/// frames (`+0x5DC` / 50), not counted on the press frame (Re:CoM's jump exe first runs the next frame).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecomCrouch {
+    /// `+0x5DC` / 50.
+    pub time: f32,
+    /// `params+0x24` / 50 (2 frames with the exe's 100).
+    pub limit: f32,
+    /// The press frame (the init's): not yet one of the jump exe's.
+    pub fresh: bool,
+}
+
+impl RecomCrouch {
+    pub fn start(n: &RecomNumbers) -> RecomCrouch {
+        RecomCrouch { time: 0.0, limit: n.crouch.max(0) as f32 / crate::units::UNITS_PER_FRAME, fresh: true }
+    }
+
+    /// One frame of the take-off: true while Sora still crouches, false on the take-off frame (the exe's
+    /// `limit <= time`, tested before the frame's time is added).
+    pub fn crouching(&mut self, step: f32) -> bool {
+        if std::mem::take(&mut self.fresh) {
+            return true;
+        }
+        if self.limit <= self.time {
+            return false;
+        }
+        self.time += step;
+        true
+    }
 }
 
 /// `jump_height = recom`: Re:CoM's vertical jump from the take-off. Kept in Re:CoM's metres (its
@@ -254,6 +296,25 @@ mod tests {
         }
         // 32.5 + 31.5 + … + 0.5: 544.5 × 0.49 = 266.8 units (KH1: 290).
         assert!((top + 266.8).abs() < 0.1, "{top}");
+    }
+
+    #[test]
+    fn recoms_crouch_is_two_frames_after_the_press_frame() {
+        // 60 Hz: the press frame and 2 crouch frames; the take-off on the 3rd frame after the press.
+        let mut c = RecomCrouch::start(&RecomNumbers::EXE);
+        assert_eq!(c.limit, 2.0);
+        let calls: Vec<bool> = (0..4).map(|_| c.crouching(1.0)).collect();
+        assert_eq!(calls, vec![true, true, true, false]);
+        // 30 fps (step 2): the press update, 1 crouch update, the take-off on the 2nd update after it.
+        let mut c = RecomCrouch::start(&RecomNumbers::EXE);
+        let calls: Vec<bool> = (0..3).map(|_| c.crouching(2.0)).collect();
+        assert_eq!(calls, vec![true, true, false]);
+        // A slow 60 Hz frame (dt 100 = step 2) counts its whole time, as Re:CoM's dt does.
+        let mut c = RecomCrouch::start(&RecomNumbers::EXE);
+        assert_eq!([c.crouching(1.0), c.crouching(2.0), c.crouching(1.0)], [true, true, false]);
+        // A block holding another crouch (a mod's): its own length.
+        let mut c = RecomCrouch::start(&RecomNumbers { crouch: 150, ..RecomNumbers::EXE });
+        assert_eq!((0..5).map(|_| c.crouching(1.0)).collect::<Vec<_>>(), vec![true, true, true, true, false]);
     }
 
     #[test]

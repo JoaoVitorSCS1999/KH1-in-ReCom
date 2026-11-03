@@ -118,6 +118,8 @@ mod params {
     pub const RUN: usize = 0x14;
     pub const JUMP: usize = 0x1C;
     pub const HIGH_JUMP: usize = 0x20;
+    /// The jump's crouch, Re:CoM time units (int, 100; `0x1401EDA60` phase 1). Checked (exe + decomp).
+    pub const CROUCH: usize = 0x24;
 }
 /// Re:CoM's jump take-off scale and gravity (`0x1401FAB40` writes them). Checked (decomp).
 const RISE_SCALE: u64 = 0x1_4087_B39C;
@@ -679,6 +681,7 @@ impl Host for RecomHost {
                 n.run_mps = rd(block + params::RUN);
                 n.jump = rd(block + params::JUMP);
                 n.high_jump = rd(block + params::HIGH_JUMP);
+                n.crouch = rd(block + params::CROUCH);
             }
             let bs = base();
             let (k, g): (f32, f32) = (rd(va(bs, RISE_SCALE)), rd(va(bs, GRAVITY)));
