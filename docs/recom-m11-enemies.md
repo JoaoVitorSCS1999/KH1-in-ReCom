@@ -662,7 +662,7 @@ helper besides the random draws).
 | drop | `0x27F8` | the idle 10 frames; request 200 (row `0x1C8` made 8 frames later); shown; 0.2 → 2 scale over 10 frames, held 10, 2 → 1 over 64; hittable; not warping |
 | plain reappearance | `0x2A78` | the idle 20 frames; turn to the target; 200; shown; to bone code 0's place (`sys 19(actor, 0, 0)` → bone 3, the core, about 96 above the actor, `sys 86`); 0 → 1 scale over 70 frames, sinking 0.5 from frame 10; hittable; not warping |
 | hit | `0x35C` | the bite mark (100): the bite, engaged; the stagger mark (200, a Gravity hit): 205 for 170 frames; under 5 counted hits: the bite (< 3.5 m) or a dash (< 10 m), engaged; else the warp, lost |
-| hit handler | `0x1E20` | noticed; kinds 4 / 5: a hit counted, the light run reset; kinds 6 / 7 (clash): nothing counted; others: both counted, the 5th light hit in a row marks the bite, the 6th and later: no reaction (the hit's reaction kind zeroed) and no state change; else state 4 |
+| hit handler | `0x1E20` | noticed; kinds 4 / 5: a hit counted, the light run reset; kinds 6 / 7 (clash): nothing counted; others: both counted, the 5th light hit in a row marks the bite, the 6th and later: no reaction (the hit's reaction kind zeroed: `func_193a(hit, 0)` at `0x2078`, then the thread ends) and no state change; else state 4. No `sys 42` anywhere in the script (Checked (files): the whole `ex_2280.bd` listed); a kind-0 record runs no case of KH1's reaction `0x1402B8E10` (`uVar6 < uVar5` fails: no push, no motion; Checked (decomp)) |
 | lost | `0x538` | the side approach to Sora (3 m, 300 frames); within 3 m: 8 m back along the line from him (0–1 m higher) at 6; Sora within 10 m → engaged |
 | leash | `0x2112` | **not ported**: beyond 15 m (10.5 m out of sight, spawned) it sinks away (request 70) and is removed; in a Re:CoM battle room it would never be defeated |
 
@@ -741,6 +741,9 @@ Assumption), `kh1-darkball.json` (`kh1-enemy 1`: 151 constants, 29 requests, 3 a
 4. Far (> 6 m): the vanish / reappearance, or the side approach and the three dashes.
 5. Hit it: KH1's flinch / knock-back in the air; it counters (a bite when close, a dash further off); after five
    hits it warps away instead; five quick light hits in a row: the sixth and later don't flinch it and it bites.
+   **The no-reaction armour (owner 2026-11-02):** land five light hits in a row (no finisher), then hit it while it
+   dashes or bites: it takes the damage (Re:CoM's damage voice), doesn't flinch, and the dash or bite carries on to
+   its end (before: the attack stopped there).
 6. While it is shrinking, invisible or growing back it can't be hit.
 7. Guard the dash: KH1's clash recoil (206). Guard the bite or the drop: Re:CoM's flinch.
 8. Kill one: Re:CoM's prizes and EXP.
@@ -776,7 +779,19 @@ the glides' ends against Sora and the warps' timing to compare.
   reads the live pose).
 - The vanish's warp sets the facing to 1.0 rad (the position's fourth word): ported as read (Checked (decomp));
   it is invisible then and turns to its glide.
-- A sixth light hit that lands while it attacks: Re:CoM's handler has already cut the attack (KH1's would go on).
+- ~~A sixth light hit that lands while it attacks: Re:CoM's handler has already cut the attack (KH1's would go on).~~
+  Built on the no-reaction armour (owner 2026-11-02, Pirate question 3 (b); § Hits that take no reaction):
+  `darkball::Ai::armoured` is true for a light hit (kind not 4 / 5 / 6 / 7) that would be the `armor_limit`th (6th)
+  or later of the run; Re:CoM's super armour keeps its state, so the dash (state 2), the bite or the drop (state 3), a
+  reaction or a motion goes on; `on_armoured_hit` counts it as the handler does (noticed, a hit, a light hit, the
+  bite mark from the 5th) with no push and no state request. Checked (files + decomp): the handler, no `sys 42`,
+  kind 0 plays nothing. Checked (tests): unit `the_sixth_light_hit_on_the_armour`, host model
+  `hosted_the_sixth_light_hit_keeps_the_attack` (dash in state 2, bite in state 3, no state request, never
+  released). **Assumption:** Re:CoM's damage voice on the armoured hit (KH1 plays nothing), as the Pirate's. The
+  hit's attribute isn't carried (as before): KH1's attribute 10 (Stun Impact, Sonic Blade) and status exceptions to
+  the zeroing (`0x2048` / `func_170e`) don't apply, so those 6th+ hits take no reaction here. A hit whose kind the
+  host couldn't read, or one in the frame Sora's Guard blocked it, keeps the old path (`keeps_reaction`: Re:CoM cuts
+  the attack, back to state 1).
 
 ## The Air Pirate (M11 fliers)
 
@@ -1919,7 +1934,7 @@ Test `pirate::tests::builds_from_the_players_files`. In `mod.yml`:
 
 The step prints `pirate (M11): …`; the log shows `pirate: KH1's pirate (M11) …` at start, `battle N: Pirate … gets KH1's
 AI` in a Pirate battle, per Pirate `pirate: eNNN: KH1 world Some(13) (Re:CoM world 8)` (Neverland) at its appearance, and
-`pirate: eNNN: hit kind … without a reaction while Some(214) plays (KH1's sys 42 on Re:CoM's super armour)` for a hit its
+`pirate: eNNN: hit kind … without a reaction while Some(214) plays (KH1's no-reaction hit on Re:CoM's super armour)` for a hit its
 attacks took.
 
 #### Checked / Assumption

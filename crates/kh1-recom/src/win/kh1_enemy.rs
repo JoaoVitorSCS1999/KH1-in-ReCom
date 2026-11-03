@@ -1502,7 +1502,7 @@ pub(super) unsafe fn armour_off(a: Option<Armour>, result: u64) {
             (None, None) => {}
         }
         let (id, cur) = (rd::<u32>(en + e::ID), rt.current);
-        line(rt.class, || format!("e{id}: hit kind {:?} without a reaction while {cur:?} plays (KH1's sys 42 on Re:CoM's super armour)", hit.map(|h| h.kind)));
+        line(rt.class, || format!("e{id}: hit kind {:?} without a reaction while {cur:?} plays (KH1's no-reaction hit on Re:CoM's super armour)", hit.map(|h| h.kind).or(a.kind)));
     });
 }
 
