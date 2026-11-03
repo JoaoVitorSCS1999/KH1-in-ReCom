@@ -79,6 +79,20 @@ pub mod state {
 
 /// Sora's CP row (row 1; Riku's is his AP row).
 pub const CP_ROW: usize = 1;
+/// Sora's Sleight row (row 2; Riku's is his DP row).
+pub const SLEIGHT_ROW: usize = 2;
+
+/// Re:CoM's level-up Sleight list (the update's stack literal `local_58`, also in `0x14023A250`):
+/// (level, sleight id). The Sleight offer `+0x240` is an index into it (case 1: the first entry at
+/// or below the new level whose sleight isn't learned; the row's name is message `0x80100 + id`),
+/// and the confirm on row 2 for Sora (`+0x230` = 0) learns `0x14023AA60(list[+0x240].id)`.
+/// Checked (decomp).
+pub const SLEIGHT_LIST: [(u8, u16); 12] = [(2, 4), (7, 6), (12, 8), (17, 5), (22, 7), (27, 9), (32, 0x27), (37, 0x29), (42, 0xA), (47, 0x33), (52, 0xB), (57, 0x22)];
+
+/// The sleight a Sora level-up Sleight pick learns, from its offer `+0x240` (None outside the list).
+pub fn picked_sleight(offer: i32) -> Option<u16> {
+    usize::try_from(offer).ok().and_then(|k| SLEIGHT_LIST.get(k)).map(|&(_, id)| id)
+}
 /// Re:CoM's CP offer cap: offered while CP < 1625 (`cmp [stats+0xC],0x659` at `0x14010F210`).
 pub const RECOM_CP_OFFER_CAP: i32 = 0x659;
 /// Whether the AP Up pick keeps Re:CoM's +25 CP (owner, 2026-11-03: "AP Up also gives Re:CoM's +25
@@ -138,6 +152,18 @@ pub fn same_text(have: &[u8], want: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The level list's sleights: Re:CoM's level-up teaches four of the M12 sleight abilities.
+    #[test]
+    fn level_list_sleights() {
+        assert_eq!(picked_sleight(6), Some(0x27), "level 32: Lethal Frame");
+        assert_eq!(picked_sleight(11), Some(0x22), "level 57: Mega Flare");
+        assert_eq!(picked_sleight(12), None);
+        assert_eq!(picked_sleight(-1), None, "not offered");
+        let m12: Vec<u16> = SLEIGHT_LIST.iter().map(|&(_, id)| id).filter(|&id| crate::abilities::of_sleight(id).is_some()).collect();
+        assert_eq!(m12, vec![0x27, 0x29, 0x33, 0x22], "Lethal Frame, Tornado, Holy, Mega Flare");
+        assert!(SLEIGHT_LIST.windows(2).all(|w| w[0].0 < w[1].0));
+    }
 
     #[test]
     fn panel_value_matches_recoms_formats() {

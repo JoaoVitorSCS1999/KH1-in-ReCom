@@ -14,7 +14,13 @@
 //!   are queued as notices (`super::notices`), unless the block was never written (a save's
 //!   first sync: everything would be "new").
 //! - **AP Up** ([`add_ap_up`], M12): the level-up screen's AP Up pick adds one to the count.
-//! - **Use:** [`equipped_live`] reads the equipped word from the block (a 15-byte read) for the
+//! - **Sleight abilities (M12 step 4):** the 27 of `crate::abilities::SLEIGHTS` unlock with
+//!   Re:CoM's learned bit like the modifiers (read only, never set: trophy 0x45), unequipped; each
+//!   gets Re:CoM's own learned screen as a notice (`crate::notices::sleight_abilities`) unless
+//!   Re:CoM's screen just showed it (`super::notices::shown_by_recom`) or the block was older than
+//!   v6 (learned before this build). The words' bits 32.. live in the extension
+//!   (`crate::abilities::EXT_FIRST`, layout v6). [`equipped_sleights`] for the Sleights menu.
+//! - **Use:** [`equipped_live`] reads the equipped word from the block (15 + 8 bytes) for the
 //!   abilities the KH1 frame passes on (`win::movement::abilities`), so what the camp's page
 //!   changes applies at once, and a loaded save is followed with no event of ours.
 //! - **The page** (`win::keyblades`, the KH1 entry's Abilities row): [`page_state`] and
@@ -24,15 +30,15 @@ use super::movement::{func, rd, wr};
 use super::{base, log, va};
 use crate::abilities::{self as ab, State};
 use crate::settings::Kh1Abilities;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// The modifiers whose rows the attack table holds (`crate::attack::modifier_rows_ready`).
-static READY: AtomicU32 = AtomicU32::new(0);
+static READY: AtomicU64 = AtomicU64::new(0);
 /// `kh1_all_abilities = on` (debug): every ability equipped, nothing written.
 static ALL: AtomicBool = AtomicBool::new(false);
 /// The ini's movement abilities for the migration of a v0 / v1 block
 /// (`crate::abilities::ini_equipped`).
-static INI_EQUIPPED: AtomicU32 = AtomicU32::new(0);
+static INI_EQUIPPED: AtomicU64 = AtomicU64::new(0);
 static LOGGED_FIRST: AtomicBool = AtomicBool::new(false);
 
 /// Re:CoM's "sleight learned" (`0x14023AB00(u16 id)`, `sites::ABILITY_CALLEES`).
@@ -43,7 +49,7 @@ type LearnedFn = unsafe extern "win64" fn(u16) -> u64;
 const VAR_GET: u32 = 0x001B_08C0;
 type VarGetFn = unsafe extern "win64" fn(u32, u32) -> u64;
 
-pub fn set_rows_ready(bits: u32) {
+pub fn set_rows_ready(bits: ab::Bits) {
     READY.store(bits, Ordering::Relaxed);
 }
 
@@ -67,8 +73,21 @@ fn save() -> Option<usize> {
     (s != 0).then_some(s)
 }
 
+/// Writes the state into the block and its extension (layout `crate::abilities::BLOCK_NOW`).
+fn store(save: usize, s: &State) {
+    let (at, ext_at) = (save + ab::BLOCK_FIRST, save + ab::EXT_FIRST);
+    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST, EXT_LAST < 0x2818).
+    unsafe {
+        let mut block: [u8; ab::BLOCK_LEN] = rd(at);
+        let mut ext: [u8; ab::EXT_LEN] = rd(ext_at);
+        ab::write(s, &mut block, &mut ext);
+        wr(at, block);
+        wr(ext_at, ext);
+    }
+}
+
 /// The modifiers without rows never reach the pickers.
-fn usable(e: u32) -> u32 {
+fn usable(e: ab::Bits) -> ab::Bits {
     e & (READY.load(Ordering::Relaxed) | !ab::MODIFIER_BITS)
 }
 
@@ -81,12 +100,14 @@ pub fn sync() -> Option<State> {
     }
     let save = save()?;
     let at = save + ab::BLOCK_FIRST;
-    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST < 0x2818).
+    let ext_at = save + ab::EXT_FIRST;
+    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST, EXT_LAST < 0x2818).
     let mut block: [u8; ab::BLOCK_LEN] = unsafe { rd(at) };
+    let mut ext: [u8; ab::EXT_LEN] = unsafe { rd(ext_at) };
     let version = ab::version(&block);
-    let before = ab::read(&block);
+    let before = ab::read(&block, &ext);
     // The words as stored (an older block may still hold the kit's bits, which `read` hides).
-    let raw = State { ap_ups: 0, unlocked: u32::from_le_bytes(block[ab::field::UNLOCKED..ab::field::UNLOCKED + 4].try_into().unwrap_or([0; 4])), equipped: u32::from_le_bytes(block[ab::field::EQUIPPED..ab::field::EQUIPPED + 4].try_into().unwrap_or([0; 4])) };
+    let raw = ab::raw(&block, &ext);
     let mut s: State = before;
     let level = super::stats::sora_level();
     // SAFETY: Re:CoM's own getter (bytes checked at start), a pure read of its save variables.
@@ -101,9 +122,12 @@ pub fn sync() -> Option<State> {
     let cp_ups = ab::ap_ups_from_cp(cp, level);
     let r = if migrating { ab::migrate(&mut s, raw, version, level, recom_var, INI_EQUIPPED.load(Ordering::Relaxed), cp_ups, &mut ask) } else { ab::sync(&mut s, level, recom_var, &mut ask) };
     if s != before || migrating {
-        ab::write(&s, &mut block);
+        ab::write(&s, &mut block, &mut ext);
         // SAFETY: as above.
-        unsafe { wr(at, block) };
+        unsafe {
+            wr(at, block);
+            wr(ext_at, ext);
+        }
     }
     if migrating {
         log(&format!(
@@ -125,6 +149,28 @@ pub fn sync() -> Option<State> {
         }
     } else if r.new | r.new_equipped != 0 {
         log("abilities: a save's first sync: its abilities arrive without notices");
+    }
+    // M12 step 4: a sleight ability Re:CoM taught gets Re:CoM's own learned screen, unless Re:CoM
+    // just showed one for it (level-up pick, event, chest) or the block was older than v6.
+    let new_sleights = (r.new | r.new_equipped) & ab::SLEIGHT_BITS;
+    if new_sleights != 0 {
+        let mut skipped = Vec::new();
+        let notices = crate::notices::sleight_abilities(new_sleights, version, &mut |id| {
+            let shown = super::notices::shown_by_recom(id);
+            if shown {
+                skipped.push(id);
+            }
+            shown
+        });
+        for &l in &notices {
+            super::notices::notify_learned(l);
+        }
+        log(&format!(
+            "abilities: sleight abilities Re:CoM taught (its learned bits; unequipped): {:?}{}{}",
+            ab::names(new_sleights),
+            if version < ab::BLOCK_V6 { format!(" (block v{version}: learned before, no notices)") } else { String::new() },
+            if skipped.is_empty() { String::new() } else { format!("; no notice for {skipped:x?} (Re:CoM's own screen showed it)") }
+        ));
     }
     if r.new != 0 {
         log(&format!("abilities: learned at Re:CoM level {level} (unequipped, KH1's rule; Re:CoM's ability variable {recom_var:#x}): {:?}", ab::names(r.new)));
@@ -162,9 +208,9 @@ pub fn on_learned(i: usize) {
 
 /// The equipped abilities the KH1 frame passes on (`ab::ix` bits, the modifiers only with rows),
 /// or None at the Re:CoM setting or with no save block (the ini then stands, as before stage 9b).
-/// Each KH1 frame: one 15-byte read of the block; a block older than v3 is migrated by [`sync`]
-/// once.
-pub fn equipped_live() -> Option<u32> {
+/// Each KH1 frame: one 15-byte read of the block and an 8-byte read of its extension (M12 step 4);
+/// a block older than the layout now is migrated by [`sync`] once.
+pub fn equipped_live() -> Option<ab::Bits> {
     if ALL.load(Ordering::Relaxed) {
         return Some(usable(ab::ALL_BITS & !ab::SPECIALS_WAITING & !ab::KIT_BITS));
     }
@@ -176,8 +222,21 @@ pub fn equipped_live() -> Option<u32> {
     let save = save()?;
     // SAFETY: inside the 0x2AD4-byte save block.
     let block: [u8; ab::BLOCK_LEN] = unsafe { rd(save + ab::BLOCK_FIRST) };
-    let e = if ab::version(&block) < ab::BLOCK_NOW { sync()?.equipped } else { ab::read(&block).equipped };
+    let e = if ab::version(&block) < ab::BLOCK_NOW {
+        sync()?.equipped
+    } else {
+        // SAFETY: as above (EXT_LAST < 0x2818).
+        let ext: [u8; ab::EXT_LEN] = unsafe { rd(save + ab::EXT_FIRST) };
+        ab::read(&block, &ext).equipped
+    };
     Some(usable(e))
+}
+
+/// M12 step 4: the equipped sleight abilities' Re:CoM sleight ids, in Re:CoM's order, for the
+/// Sleights menu (the next step reads it). Empty when the state isn't live.
+#[allow(dead_code)]
+pub fn equipped_sleights() -> Vec<u16> {
+    equipped_live().map_or_else(Vec::new, ab::equipped_sleights)
 }
 
 /// The camp's Abilities page: the state after a sync, and Sora's level. None when not live.
@@ -193,12 +252,7 @@ pub fn add_ap_up() -> Option<(u8, i32)> {
     let mut s = sync()?;
     let save = save()?;
     s.ap_ups = s.ap_ups.saturating_add(1);
-    let at = save + ab::BLOCK_FIRST;
-    // SAFETY: inside the 0x2AD4-byte save block.
-    let mut block: [u8; ab::BLOCK_LEN] = unsafe { rd(at) };
-    ab::write(&s, &mut block);
-    // SAFETY: as above.
-    unsafe { wr(at, block) };
+    store(save, &s);
     Some((s.ap_ups, s.max_ap()))
 }
 
@@ -211,21 +265,16 @@ pub fn max_ap_now() -> Option<i32> {
     let save = save()?;
     // SAFETY: inside the 0x2AD4-byte save block.
     let block: [u8; ab::BLOCK_LEN] = unsafe { rd(save + ab::BLOCK_FIRST) };
-    let ups = if ab::version(&block) >= ab::BLOCK_V5 { ab::read(&block).ap_ups } else { ab::ap_ups_from_cp(super::stats::sora_cp().unwrap_or(ab::RECOM_START_CP), super::stats::sora_level()) };
+    let ups = if ab::version(&block) >= ab::BLOCK_V5 { block[ab::field::AP_UPS] } else { ab::ap_ups_from_cp(super::stats::sora_cp().unwrap_or(ab::RECOM_START_CP), super::stats::sora_level()) };
     Some(ab::max_ap(ups as u32))
 }
 
 /// The camp's Abilities page writes the equipped set (a subset of the unlocked set). False when
 /// the state isn't live.
-pub fn set_equipped(equipped: u32) -> bool {
+pub fn set_equipped(equipped: ab::Bits) -> bool {
     let Some(mut s) = sync() else { return false };
     let Some(save) = save() else { return false };
     s.equipped = equipped & s.unlocked;
-    let at = save + ab::BLOCK_FIRST;
-    // SAFETY: inside the 0x2AD4-byte save block.
-    let mut block: [u8; ab::BLOCK_LEN] = unsafe { rd(at) };
-    ab::write(&s, &mut block);
-    // SAFETY: as above.
-    unsafe { wr(at, block) };
+    store(save, &s);
     true
 }

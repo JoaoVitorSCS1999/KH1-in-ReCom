@@ -132,6 +132,10 @@ Right after the items extension, inside Re:CoM's spare tail `save + 0x246B ..= 0
 | `0x26A4` | 4 | equipped (a subset of unlocked) |
 | `0x26A8` | 1 | **M12 (layout v5)**: the AP Up picks (`abilities::field::AP_UPS`). Before v5 a reserved zero byte nothing read (Checked (code)). |
 | `0x26A9` | 5 | zero |
+| `0x26B7` | 8 | **M12 step 4 (layout v6)**: the words' extension, after the summon block (`0x26AE..=0x26B6`): u32 unlocked bits 32..64, u32 equipped bits 32..64 (`abilities::EXT_FIRST`, `abilities::ext`). Read only from a v6 block. The 27 sleight abilities are bits 31..57 (bit 31, Fire Raid, in the block's word; 32.. here). Checked (code): no other block of ours or Re:CoM code uses it (spare-range report). |
+
+The version byte: **4** = Guard / Dodge Roll left the words, **5** = the AP Up count, **6** = the
+extension (`docs/recom-m12-sleights.md` § 8.4).
 
 Fields never move. Re:CoM saves, checksums, loads, snapshots and zeroes it with its save block.
 An older save unlocks what it has at its first Attack press.
@@ -999,7 +1003,9 @@ point (a TODO for the notices merge).
 | Second Chance | 25 | bit 4 | 90 | 5 | 307 | 30 |
 
 With these the ability word's 31 bits are used (bit 31 is the last free one): a later step that
-adds more abilities (the M12 sleight abilities) needs a second word in the block.
+adds more abilities (the M12 sleight abilities) needs a second word in the block. **Done in M12
+step 4**: the words are 64 bits, their bits 32.. in an 8-byte extension (layout v6, the table above;
+`docs/recom-m12-sleights.md` § 8.4).
 
 ### MP Haste
 

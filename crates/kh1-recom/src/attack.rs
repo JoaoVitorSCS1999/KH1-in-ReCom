@@ -231,7 +231,7 @@ pub fn special_rows_ready(t: &[[u8; 16]]) -> bool {
 }
 
 /// The modifiers whose rows the table holds, as `abilities::ix` bits (the pickers only get those).
-pub fn modifier_rows_ready(t: &[[u8; 16]]) -> u32 {
+pub fn modifier_rows_ready(t: &[[u8; 16]]) -> crate::abilities::Bits {
     use crate::abilities::ix;
     let ready = |r: usize| t.get(r).is_some_and(|b| b[0] != 0);
     [

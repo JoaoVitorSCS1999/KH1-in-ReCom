@@ -82,17 +82,42 @@ impl Queue {
     pub fn len(&self) -> usize {
         self.0.len()
     }
+
+    /// Takes `l` out if it waits (Re:CoM's own screen just showed it). True when it was waiting.
+    pub fn remove(&mut self, l: Learned) -> bool {
+        let n = self.0.len();
+        self.0.retain(|&x| x != l);
+        self.0.len() != n
+    }
 }
 
 /// The abilities a sync newly unlocked that get a notice: those Sora gets at a level (KH1's level
 /// abilities: Combo Plus, Air Combo Plus and the other `Source::Level` ones). The others come with
 /// a screen of Re:CoM's (its level-up sleight pick, its High Jump / Glide events).
-pub fn level_abilities(new: u32) -> Vec<Learned> {
+pub fn level_abilities(new: crate::abilities::Bits) -> Vec<Learned> {
     crate::abilities::ALL
         .iter()
         .enumerate()
         .filter(|(i, a)| new & (1 << i) != 0 && matches!(a.source, crate::abilities::Source::Level(_)))
         .map(|(i, _)| Learned::Ability(i))
+        .collect()
+}
+
+/// M12 step 4: the sleight abilities a sync newly unlocked that get a notice (Re:CoM's own wording
+/// and name, `Learned::Sleight(id)`): each one Re:CoM taught (its learned bit) **unless Re:CoM's
+/// own screen just showed it** (`shown(id)`: its level-up Sleight pick, its sleight-learned screen
+/// from an event or a chest), and none from a block older than layout v6 (`from`: the block's
+/// version before the sync; a v0 block is a save's first sync, a v1..=v5 block learned them before
+/// this build, with Re:CoM's screens).
+pub fn sleight_abilities(new: crate::abilities::Bits, from: u8, shown: &mut dyn FnMut(u16) -> bool) -> Vec<Learned> {
+    if from < crate::abilities::BLOCK_V6 {
+        return Vec::new();
+    }
+    crate::abilities::SLEIGHTS
+        .filter(|&i| new & (1 << i) != 0)
+        .filter_map(crate::abilities::sleight_of)
+        .filter(|&id| !shown(id))
+        .map(Learned::Sleight)
         .collect()
 }
 
@@ -139,5 +164,32 @@ mod tests {
         let new = 1 << ix::COMBO_PLUS[0] | 1 << ix::AIR_COMBO_PLUS[1] | 1 << ix::SLIDING_DASH | 1 << ix::HIGH_JUMP | 1 << ix::RIPPLE_DRIVE;
         assert_eq!(level_abilities(new), vec![Learned::Ability(ix::RIPPLE_DRIVE), Learned::Ability(ix::COMBO_PLUS[0]), Learned::Ability(ix::AIR_COMBO_PLUS[1])]);
         assert!(level_abilities(0).is_empty());
+    }
+
+    /// M12 step 4: a sleight ability Re:CoM taught gets Re:CoM's own sleight wording and name,
+    /// unless Re:CoM's screen just showed it; none from before layout v6 (or a first sync).
+    #[test]
+    fn sleight_abilities_unless_recom_showed_them() {
+        use crate::abilities::{of_sleight, sleight, BLOCK_V5, BLOCK_V6};
+        let i = |id| of_sleight(id).unwrap();
+        let new = 1 << i(sleight::FREEZE) | 1 << i(sleight::HOLY) | 1 << i(sleight::IDYLL_ROMP) | 1 << ix::COMBO_PLUS[0] | 1 << ix::SLIDING_DASH;
+        assert_eq!(sleight_abilities(new, BLOCK_V6, &mut |_| false), vec![Learned::Sleight(0x23), Learned::Sleight(0x33), Learned::Sleight(0x3A)]);
+        // Holy came with Re:CoM's level-up Sleight pick (level 47): no second notice.
+        assert_eq!(sleight_abilities(new, BLOCK_V6, &mut |id| id == sleight::HOLY), vec![Learned::Sleight(0x23), Learned::Sleight(0x3A)]);
+        assert!(sleight_abilities(new, BLOCK_V5, &mut |_| false).is_empty(), "learned before v6");
+        assert!(sleight_abilities(new, 0, &mut |_| false).is_empty(), "a save's first sync");
+        assert_eq!(Learned::Sleight(0x23).screen_id(), 0x23, "Re:CoM's own wording and name");
+        // Level abilities are not sleight notices, and sleights are not level notices.
+        assert_eq!(level_abilities(new), vec![Learned::Ability(ix::COMBO_PLUS[0])]);
+    }
+
+    #[test]
+    fn queue_remove() {
+        let mut q = Queue::default();
+        q.push(Learned::Sleight(0x23));
+        q.push(Learned::Ability(20));
+        assert!(q.remove(Learned::Sleight(0x23)));
+        assert!(!q.remove(Learned::Sleight(0x23)));
+        assert_eq!(q.pop(), Some(Learned::Ability(20)));
     }
 }

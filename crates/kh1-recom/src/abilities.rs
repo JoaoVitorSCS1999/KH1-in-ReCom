@@ -26,8 +26,16 @@
 //!   level-up screen at Combat = KH1 (it replaces the CP choice there), no cap, nothing else
 //!   ([`max_ap`], [`State::ap_ups`]). KH1's own level grants are not used. An older save's past CP
 //!   picks count as AP Ups once ([`ap_ups_from_cp`]).
+//! - **Sleight abilities (M12 step 4, owner 2026-11-03):** the 25 magic sleights, Idyll Romp and
+//!   Cross-slash+ ([`SLEIGHTS`]) are abilities on Sora's page with the owner's AP costs, unlocked
+//!   when Re:CoM teaches them (its learned bit, `0x14023AB00`; never set by us), unequipped.
+//!   [`equipped_sleights`] gives the Sleights menu (next step) their ids in Re:CoM's order.
 //! - **The state** is a block of Re:CoM's own save (Re:CoM saves, loads and zeroes it), after the
-//!   items extension ([`BLOCK_FIRST`]).
+//!   items extension ([`BLOCK_FIRST`]), and its words' bits 32.. in an extension after the summon
+//!   block ([`EXT_FIRST`], layout v6).
+
+/// The ability words: bit [`ix`] (bits 0..32 in the block, 32.. in the extension).
+pub type Bits = u64;
 
 /// Where an ability unlocks from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -126,6 +134,9 @@ pub mod ix {
     pub const BERSERK: usize = 29;
     /// Second Chance (KH1 id 25): a hit that would kill from above 1 HP leaves 1 (`0x1402BFA80`).
     pub const SECOND_CHANCE: usize = 30;
+    // M12 step 4: the sleight abilities ([`super::SLEIGHTS`]), in Re:CoM's id order.
+    /// The first sleight ability (Fire Raid, Re:CoM's 0x1B).
+    pub const FIRST_SLEIGHT: usize = 31;
 }
 
 /// Re:CoM's sleight ids (its `initStockSkill` `0x140220DF0` switch; level-up list `0x14010EF10`;
@@ -139,6 +150,13 @@ pub mod sleight {
     pub const SONIC_BLADE: u16 = 9;
     pub const ARS_ARCANUM: u16 = 10;
     pub const RAGNAROK: u16 = 11;
+    // M12 step 4: the sleight abilities (`SY0002.CTD`'s names from id 4; Checked (files)).
+    pub const FIRE_RAID: u16 = 0x1B;
+    pub const FREEZE: u16 = 0x23;
+    pub const LETHAL_FRAME: u16 = 0x27;
+    pub const HOLY: u16 = 0x33;
+    pub const IDYLL_ROMP: u16 = 0x3A;
+    pub const CROSS_SLASH_PLUS: u16 = 0x43;
 }
 
 const fn a(name: &'static str, id: u8, kh1_bit: u32, ap: u8, key: u16, source: Source) -> Ability {
@@ -153,6 +171,15 @@ const fn special(name: &'static str, s: u16) -> Ability {
     Ability { name, kh1_id: None, kh1_bit: 0, ap: 0, key: 0, shared: false, source: Source::Sleight(s) }
 }
 
+/// The sleight abilities' sort key: after every KH1 ability (KH1's keys end at 801), in Re:CoM's
+/// id order.
+pub const SLEIGHT_KEY: u16 = 1000;
+
+/// A sleight ability (M12 step 4): no KH1 twin (no KH1 id, bit or row), the owner's AP cost.
+const fn sl(name: &'static str, id: u16, ap: u8) -> Ability {
+    Ability { name, kh1_id: None, kh1_bit: 0, ap, key: SLEIGHT_KEY + id, shared: false, source: Source::Sleight(id) }
+}
+
 /// Every ability of the state, by [`ix`]. Checked (decomp + files): KH1 ids and bits
 /// (`0x1402A6380`, `0x1402A5130`: Combo Plus 6, Air Combo Plus 7; `0x1402A7510`: Combo Master
 /// 0x41), AP costs and sort keys (btltbl `0x33D8`, row id − 1 as `0x14028F8F0` indexes it), learn
@@ -161,7 +188,14 @@ const fn special(name: &'static str, s: u16) -> Ability {
 /// Assumption, strong).
 /// Combo Master (0x41) has no row in btltbl's table (row 65 is zero: cost 0, key 0; Checked
 /// (files)); KH1 FM gives it by no level list.
-pub const ALL: [Ability; 31] = [
+/// M12 step 4 (owner, 2026-11-03, "M12 answers"): the 25 magic-category sleights (0x1B..=0x33) and
+/// Idyll Romp (0x3A), Cross-slash+ (0x43), ids and names as `SY0002.CTD` lists them from id 4
+/// (Checked (files); the CTD writes 0x27 "Lethal Flame", the owner "Lethal Frame"), AP costs the
+/// owner's: 2 — Judgment, Bind, Confuse, Terror, Warp, Warpinator, Synchro, Teleport, Gifted
+/// Miracle, Idyll Romp; 3 — Fire Raid, Blizzard Raid, Aqua Splash, Freeze, Firaga Burst, Reflect
+/// Raid, Homing Blizzara, Lethal Frame, Shock Impact; 4 — Thunder Raid, Raging Storm, Magnet Spiral,
+/// Quake, Tornado, Cross-slash+; 5 — Holy, Mega Flare.
+pub const ALL: [Ability; 58] = [
     a("Sliding Dash", 54, 0x100_0000, 1, 205, Source::Sleight(sleight::SLIDING_DASH)),
     a("Blitz", 20, 0x8, 2, 208, Source::Sleight(sleight::BLITZ)),
     a("Stun Impact", 57, 0x800_0000, 2, 211, Source::Sleight(sleight::STUN_IMPACT)),
@@ -213,7 +247,83 @@ pub const ALL: [Ability; 31] = [
     a("Berserk", 26, 0, 1, 306, Source::Level(60)),
     // Second Chance: id 25 (`+0x184` bit 4), Rod level 90, 5 AP, sort key 307. Checked (decomp + files).
     a("Second Chance", 25, 0, 5, 307, Source::Level(90)),
+    // M12 step 4: the sleight abilities, in Re:CoM's id order (ix 31..58).
+    sl("Fire Raid", 0x1B, 3),
+    sl("Blizzard Raid", 0x1C, 3),
+    sl("Thunder Raid", 0x1D, 4),
+    sl("Reflect Raid", 0x1E, 3),
+    sl("Judgment", 0x1F, 2),
+    sl("Firaga Burst", 0x20, 3),
+    sl("Raging Storm", 0x21, 4),
+    sl("Mega Flare", 0x22, 5),
+    sl("Freeze", 0x23, 3),
+    sl("Homing Blizzara", 0x24, 3),
+    sl("Aqua Splash", 0x25, 3),
+    sl("Magnet Spiral", 0x26, 4),
+    sl("Lethal Frame", 0x27, 3),
+    sl("Shock Impact", 0x28, 3),
+    sl("Tornado", 0x29, 4),
+    sl("Quake", 0x2A, 4),
+    sl("Warpinator", 0x2B, 2),
+    sl("Warp", 0x2C, 2),
+    sl("Bind", 0x2D, 2),
+    sl("Confuse", 0x2E, 2),
+    sl("Terror", 0x2F, 2),
+    sl("Synchro", 0x30, 2),
+    sl("Gifted Miracle", 0x31, 2),
+    sl("Teleport", 0x32, 2),
+    sl("Holy", 0x33, 5),
+    sl("Idyll Romp", 0x3A, 2),
+    sl("Cross-slash+", 0x43, 4),
 ];
+
+/// The sleight abilities (M12 step 4), by [`ix`]: every one from [`ix::FIRST_SLEIGHT`].
+pub const SLEIGHTS: std::ops::Range<usize> = ix::FIRST_SLEIGHT..ALL.len();
+/// Their bits.
+pub const SLEIGHT_BITS: Bits = ALL_BITS & !((1 << ix::FIRST_SLEIGHT) - 1);
+
+/// The Re:CoM sleight id of a sleight ability ([`SLEIGHTS`]).
+pub fn sleight_of(i: usize) -> Option<u16> {
+    match ALL.get(i) {
+        Some(Ability { source: Source::Sleight(id), .. }) if SLEIGHTS.contains(&i) => Some(*id),
+        _ => None,
+    }
+}
+
+/// The sleight ability of a Re:CoM sleight id.
+pub fn of_sleight(id: u16) -> Option<usize> {
+    SLEIGHTS.clone().find(|&i| sleight_of(i) == Some(id))
+}
+
+/// The equipped sleight abilities' Re:CoM ids, in Re:CoM's order (its sleight ids ascending; the
+/// Sleights menu lists these, owner: "only ACTIVELY EQUIPPED sleights").
+pub fn equipped_sleights(equipped: Bits) -> Vec<u16> {
+    let mut v: Vec<u16> = SLEIGHTS.clone().filter(|&i| equipped & (1 << i) != 0).filter_map(sleight_of).collect();
+    v.sort_unstable();
+    v
+}
+
+/// What a sleight ability costs to perform (owner, 2026-11-03, "M12 answers": "MP by tier: AP 2 → 1
+/// MP, 3 → 2 MP, 4 → 2 MP, 5 → 3 MP; Idyll Romp / Cross-slash+ cost all MP like KH1 summons").
+/// Read by the Sleights menu (next step); the page's help line says it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SleightMp {
+    Points(u8),
+    /// All of Sora's MP (KH1's summons' rule).
+    All,
+}
+
+pub fn sleight_mp(i: usize) -> Option<SleightMp> {
+    let id = sleight_of(i)?;
+    if id == sleight::IDYLL_ROMP || id == sleight::CROSS_SLASH_PLUS {
+        return Some(SleightMp::All);
+    }
+    Some(SleightMp::Points(match ALL[i].ap {
+        0..=2 => 1,
+        3 | 4 => 2,
+        _ => 3,
+    }))
+}
 
 /// The combo modifiers (stage 9a), by [`ix`].
 pub const MODIFIERS: std::ops::Range<usize> = ix::SLIDING_DASH..ix::GRAVITY_BREAK + 1;
@@ -221,16 +331,16 @@ pub const MODIFIERS: std::ops::Range<usize> = ix::SLIDING_DASH..ix::GRAVITY_BREA
 /// menu, the others wait (not on the screen, nothing reads them).
 pub const SPECIALS: std::ops::Range<usize> = ix::STRIKE_RAID..ix::RAGNAROK + 1;
 /// The specials built so far (stage 9c.1: Sonic Blade).
-pub const SPECIALS_BUILT: u32 = 1 << ix::SONIC_BLADE;
+pub const SPECIALS_BUILT: Bits = 1 << ix::SONIC_BLADE;
 /// Every bit of [`ALL`].
-pub const ALL_BITS: u32 = (1 << ALL.len()) - 1;
+pub const ALL_BITS: Bits = (1 << ALL.len()) - 1;
 /// The modifiers' bits.
-pub const MODIFIER_BITS: u32 = (1 << MODIFIERS.end) - 1;
-const SPECIAL_BITS: u32 = ((1 << SPECIALS.end) - 1) & !MODIFIER_BITS;
+pub const MODIFIER_BITS: Bits = (1 << MODIFIERS.end) - 1;
+const SPECIAL_BITS: Bits = ((1 << SPECIALS.end) - 1) & !MODIFIER_BITS;
 /// The specials not built yet: not on the screen, never equipped.
-pub const SPECIALS_WAITING: u32 = SPECIAL_BITS & !SPECIALS_BUILT;
+pub const SPECIALS_WAITING: Bits = SPECIAL_BITS & !SPECIALS_BUILT;
 /// Sora's movement kit ([`Source::Kit`]): always on, never in the block's words.
-pub const KIT_BITS: u32 = 1 << ix::GUARD | 1 << ix::DODGE_ROLL;
+pub const KIT_BITS: Bits = 1 << ix::GUARD | 1 << ix::DODGE_ROLL;
 
 // ---- AP ----
 
@@ -268,25 +378,25 @@ pub fn ap_ups_from_cp(cp: i32, level: u32) -> u8 {
 
 /// The AP the equipped abilities use: KH1's `0x1402E8660` sums the costs of Sora's equipped list
 /// (the shared list is not counted; nor is the movement kit, which is no ability here).
-pub fn used_ap(equipped: u32) -> i32 {
+pub fn used_ap(equipped: Bits) -> i32 {
     ALL.iter().enumerate().filter(|(i, a)| equipped & (1 << i) != 0 && !a.shared && a.source != Source::Kit).map(|(_, a)| a.ap as i32).sum()
 }
 
 /// The AP left: KH1's `0x1402E8660` (max − used, never below 0). `max`: [`max_ap`].
-pub fn ap_left(equipped: u32, max: i32) -> i32 {
+pub fn ap_left(equipped: Bits, max: i32) -> i32 {
     (max - used_ap(equipped)).max(0)
 }
 
 /// KH1's rule for equipping `i` (`0x140311C20` greys it, `0x140310650` refuses it): a shared
 /// ability always; else its cost must not exceed the AP left.
-pub fn can_equip(equipped: u32, i: usize, max: i32) -> bool {
+pub fn can_equip(equipped: Bits, i: usize, max: i32) -> bool {
     ALL.get(i).is_some_and(|a| a.shared || a.ap as i32 <= ap_left(equipped, max))
 }
 
 /// Unequips from the most expensive down (ties: the last in [`ALL`]) until the used AP fits.
 /// Returns the bits taken off. (KH1's AP never goes down, so KH1 has no rule for this; only a
 /// migration can need it.)
-pub fn fit_ap(equipped: &mut u32, max: i32) -> u32 {
+pub fn fit_ap(equipped: &mut Bits, max: i32) -> Bits {
     let mut off = 0;
     while used_ap(*equipped) > max {
         let worst = ALL.iter().enumerate().filter(|(i, a)| *equipped & (1 << i) != 0 && !a.shared && a.source != Source::Kit && a.ap > 0).max_by_key(|(i, a)| (a.ap, *i));
@@ -311,11 +421,12 @@ pub mod field {
     /// 2 = stage 9b (KH1's equip rules; the story abilities from the ini); 3 = the 9b follow-ups
     /// (their sources from Re:CoM, the start and levels); 4 = Guard and Dodge Roll in Sora's kit,
     /// not in the words (Re:CoM's movement abilities arrive equipped); 5 = the AP Up count
-    /// ([`AP_UPS`]) is valid (M12). Same fields in all.
+    /// ([`AP_UPS`]) is valid (M12); 6 = the words' bits 32.. are in the extension
+    /// ([`super::EXT_FIRST`], M12 step 4: the sleight abilities). Same fields in all.
     pub const VERSION: usize = 0;
-    /// u32 LE: unlocked abilities, bit [`super::ix`].
+    /// u32 LE: unlocked abilities, bits 0..32 of [`super::Bits`] (bit [`super::ix`]).
     pub const UNLOCKED: usize = 1;
-    /// u32 LE: equipped abilities, bit [`super::ix`].
+    /// u32 LE: equipped abilities, bits 0..32.
     pub const EQUIPPED: usize = 5;
     /// u8 (layout v5): the AP Up picks taken on Re:CoM's level-up screen at Combat = KH1 (M12),
     /// plus, once, the CP Up picks of the save before v5 ([`super::ap_ups_from_cp`]). Was the first
@@ -330,16 +441,36 @@ pub const BLOCK_V2: u8 = 2;
 pub const BLOCK_V3: u8 = 3;
 pub const BLOCK_V4: u8 = 4;
 pub const BLOCK_V5: u8 = 5;
+pub const BLOCK_V6: u8 = 6;
 /// The layout this build writes.
-pub const BLOCK_NOW: u8 = BLOCK_V5;
+pub const BLOCK_NOW: u8 = BLOCK_V6;
 
 const _: () = assert!(BLOCK_LAST <= crate::keyblades::SPARE_LAST && field::RESERVED + 5 == BLOCK_LEN && field::AP_UPS + 1 == field::RESERVED);
+
+/// The words' extension (layout v6, M12 step 4): bits 32.. of the unlocked and equipped words,
+/// right after the summon block (`crate::summons::BLOCK_LAST`), still inside Re:CoM's spare tail
+/// `save + 0x246B ..= 0x2817` (no Re:CoM code reads or writes it, `docs/recom-keyblade-equip.md`;
+/// none of our other blocks reaches it: Checked (code)). Read only from a v6 block: before v6 its
+/// bytes mean nothing (they are zero: the spare tail's report says so in the log).
+pub const EXT_FIRST: usize = crate::summons::BLOCK_LAST + 1;
+pub const EXT_LEN: usize = 8;
+pub const EXT_LAST: usize = EXT_FIRST + EXT_LEN - 1;
+
+/// Offsets inside the extension.
+pub mod ext {
+    /// u32 LE: unlocked abilities, bits 32..64.
+    pub const UNLOCKED_HIGH: usize = 0;
+    /// u32 LE: equipped abilities, bits 32..64.
+    pub const EQUIPPED_HIGH: usize = 4;
+}
+
+const _: () = assert!(EXT_LAST <= crate::keyblades::SPARE_LAST && ext::EQUIPPED_HIGH + 4 == EXT_LEN && ALL.len() <= 64);
 
 /// What a block holds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct State {
-    pub unlocked: u32,
-    pub equipped: u32,
+    pub unlocked: Bits,
+    pub equipped: Bits,
     /// AP Up picks (layout v5; 0 in an older block until its migration sets it).
     pub ap_ups: u8,
 }
@@ -351,20 +482,31 @@ impl State {
     }
 }
 
-fn u32_at(b: &[u8; BLOCK_LEN], o: usize) -> u32 {
+fn u32_at(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
 }
 
-/// The state a block holds (a block never written: nothing unlocked).
-pub fn read(block: &[u8; BLOCK_LEN]) -> State {
-    if block[field::VERSION] == 0 {
+/// The words as stored (with the kit's bits an older block may still hold, which [`read`] hides):
+/// bits 0..32 from the block; bits 32.. from the extension only at layout v6 (before v6 the low
+/// words never held bit 31 either: 31 abilities).
+pub fn raw(block: &[u8; BLOCK_LEN], ext: &[u8; EXT_LEN]) -> State {
+    let v = block[field::VERSION];
+    if v == 0 {
         return State::default();
     }
+    let (lo_mask, hi) = if v >= BLOCK_V6 { (u32::MAX, true) } else { (0x7FFF_FFFF, false) };
+    let word = |lo: usize, high: usize| (u32_at(block, lo) & lo_mask) as Bits | if hi { (u32_at(ext, high) as Bits) << 32 } else { 0 };
+    let ap_ups = if v >= BLOCK_V5 { block[field::AP_UPS] } else { 0 };
+    State { unlocked: word(field::UNLOCKED, ext::UNLOCKED_HIGH), equipped: word(field::EQUIPPED, ext::EQUIPPED_HIGH), ap_ups }
+}
+
+/// The state a block (and its extension) holds (a block never written: nothing unlocked).
+pub fn read(block: &[u8; BLOCK_LEN], ext: &[u8; EXT_LEN]) -> State {
+    let r = raw(block, ext);
     // The kit is never in the words (an older block's Guard / Dodge Roll bits read as nothing; the
-    // migration to v4 clears them in the save).
-    let unlocked = u32_at(block, field::UNLOCKED) & ALL_BITS & !KIT_BITS;
-    let ap_ups = if block[field::VERSION] >= BLOCK_V5 { block[field::AP_UPS] } else { 0 };
-    State { unlocked, equipped: u32_at(block, field::EQUIPPED) & unlocked, ap_ups }
+    // migration to v4 clears them in the save); bits past [`ALL`] mean nothing.
+    let unlocked = r.unlocked & ALL_BITS & !KIT_BITS;
+    State { unlocked, equipped: r.equipped & unlocked, ap_ups: r.ap_ups }
 }
 
 /// The block's version.
@@ -372,12 +514,15 @@ pub fn version(block: &[u8; BLOCK_LEN]) -> u8 {
     block[field::VERSION]
 }
 
-/// Writes the state as layout [`BLOCK_NOW`] (the AP Up count too); the reserved bytes are kept.
-pub fn write(s: &State, block: &mut [u8; BLOCK_LEN]) {
+/// Writes the state as layout [`BLOCK_NOW`] (the AP Up count, the words' bits 32.. into the
+/// extension); the reserved bytes are kept.
+pub fn write(s: &State, block: &mut [u8; BLOCK_LEN], ext: &mut [u8; EXT_LEN]) {
     block[field::VERSION] = block[field::VERSION].max(BLOCK_NOW);
-    block[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&s.unlocked.to_le_bytes());
-    block[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&s.equipped.to_le_bytes());
+    block[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&(s.unlocked as u32).to_le_bytes());
+    block[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&(s.equipped as u32).to_le_bytes());
     block[field::AP_UPS] = s.ap_ups;
+    ext[ext::UNLOCKED_HIGH..ext::UNLOCKED_HIGH + 4].copy_from_slice(&((s.unlocked >> 32) as u32).to_le_bytes());
+    ext[ext::EQUIPPED_HIGH..ext::EQUIPPED_HIGH + 4].copy_from_slice(&((s.equipped >> 32) as u32).to_le_bytes());
 }
 
 // ---- unlocks ----
@@ -396,28 +541,28 @@ pub fn source_met(a: &Ability, level: u32, recom_var: u32, learned: &mut dyn FnM
 
 /// The abilities that arrive equipped: High Jump, Glide and Superglide when Re:CoM gives them
 /// (owner, 2026-11-01: "equipped automatically when Re:CoM gives them"; shared, so no AP).
-pub fn arrive_equipped_bits() -> u32 {
+pub fn arrive_equipped_bits() -> Bits {
     ALL.iter().enumerate().filter(|(_, a)| matches!(a.source, Source::Recom(_))).fold(0, |b, (i, _)| b | 1 << i)
 }
 
 /// The abilities a layout-v2 block had from the ini's story keys (High Jump, Glide, Superglide,
 /// Combo Master): v2 → now takes them back and asks their new source.
-pub const V2_STORY_BITS: u32 = 1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE | 1 << ix::COMBO_MASTER;
+pub const V2_STORY_BITS: Bits = 1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE | 1 << ix::COMBO_MASTER;
 
 /// What a sync changed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Synced {
     /// Newly unlocked and left unequipped (KH1's rule).
-    pub new: u32,
+    pub new: Bits,
     /// Newly unlocked and equipped (Re:CoM's High Jump, Glide, Superglide; owner).
-    pub new_equipped: u32,
+    pub new_equipped: Bits,
     /// Taken back (only at the v2 → v3 migration: the ini's story abilities whose new source isn't
     /// met yet).
-    pub taken: u32,
+    pub taken: Bits,
     /// Taken off to fit the AP (only at a migration).
-    pub fitted: u32,
+    pub fitted: Bits,
     /// Guard and Dodge Roll found in an older block's words and dropped (the kit; their AP back).
-    pub kit_dropped: u32,
+    pub kit_dropped: Bits,
 }
 
 /// Brings the state up to Re:CoM's sleights, its level and its ability variable: every ability
@@ -446,7 +591,7 @@ pub fn sync(s: &mut State, level: u32, recom_var: u32, learned: &mut dyn FnMut(u
 /// The ini's movement abilities at the migration (stage 9a's block or none → now): which of the
 /// abilities that now come from KH1's levels the ini had equipped (Counterattack, the first
 /// `combo_plus` / `air_combo_plus` copies). The ini's `guard` no longer counts: Guard is Sora's kit.
-pub fn ini_equipped(a: &crate::settings::Kh1Abilities) -> u32 {
+pub fn ini_equipped(a: &crate::settings::Kh1Abilities) -> Bits {
     let mut b = 0;
     if a.counterattack {
         b |= 1 << ix::COUNTERATTACK;
@@ -477,10 +622,13 @@ pub fn ini_equipped(a: &crate::settings::Kh1Abilities) -> u32 {
 ///   save);
 /// - v0..=v4 → v5 (M12): the AP Up count starts at `cp_ups` (the save's past CP Up picks,
 ///   [`ap_ups_from_cp`]);
+/// - v0..=v5 → v6 (M12 step 4): the words' extension starts empty ([`raw`] reads none before v6);
+///   the sleight abilities Re:CoM already taught arrive with the sync, unequipped (their notices:
+///   none, `crate::notices::sleight_abilities`);
 /// - then over the max AP, unequipped from the most expensive down ([`fit_ap`]; KH1's AP never
 ///   drops, so KH1 has no rule here).
 #[allow(clippy::too_many_arguments)]
-pub fn migrate(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, ini: u32, cp_ups: u8, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
+pub fn migrate(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, ini: Bits, cp_ups: u8, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
     if from < BLOCK_V5 {
         s.ap_ups = cp_ups;
     }
@@ -516,12 +664,12 @@ pub fn migrate(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, 
 
 /// The equipped abilities as KH1's bits (`0x142D5EC10` layout), as the trace writes them; Sora's
 /// kit (Guard, Dodge Roll) is always in.
-pub fn kh1_bits(equipped: u32) -> u32 {
+pub fn kh1_bits(equipped: Bits) -> u32 {
     ALL.iter().enumerate().filter(|(i, _)| (equipped | KIT_BITS) & (1 << i) != 0).fold(0, |b, (_, a)| b | a.kh1_bit)
 }
 
 /// The equipped combo modifiers into the abilities the KH1 pickers read (the rest untouched).
-pub fn apply(equipped: u32, a: &mut kh1_core::Abilities) {
+pub fn apply(equipped: Bits, a: &mut kh1_core::Abilities) {
     let on = |i: usize| equipped & (1 << i) != 0;
     a.sliding_dash = on(ix::SLIDING_DASH);
     a.blitz = on(ix::BLITZ);
@@ -535,7 +683,7 @@ pub fn apply(equipped: u32, a: &mut kh1_core::Abilities) {
 }
 
 /// Every equipped ability as the abilities the KH1 frame passes on (handlers and pickers).
-pub fn to_core(equipped: u32) -> kh1_core::Abilities {
+pub fn to_core(equipped: Bits) -> kh1_core::Abilities {
     let on = |i: usize| equipped & (1 << i) != 0;
     let count = |v: &[usize]| v.iter().filter(|&&i| on(i)).count() as u8;
     let mut a = kh1_core::Abilities {
@@ -559,38 +707,38 @@ pub fn to_core(equipped: u32) -> kh1_core::Abilities {
 
 /// MP Haste equipped (KH1 `+0x184` bit 0 = `0x140284BE0(23) & 1`): the hit charge's factor + G
 /// `+0x95` / 100 = + 1.5 (`0x1402BF330`). Checked (decomp + files).
-pub fn mp_haste(equipped: u32) -> bool {
+pub fn mp_haste(equipped: Bits) -> bool {
     equipped & (1 << ix::MP_HASTE) != 0
 }
 
 /// The equipped MP Rage copies (KH1 `+0x184` bits 1..3 = `0x140284BE0(24) & 7`: every equipped
 /// copy counts): the charge from damage taken is HP lost × this (`0x14029BBD0`). Checked (decomp).
-pub fn mp_rage(equipped: u32) -> u8 {
+pub fn mp_rage(equipped: Bits) -> u8 {
     ix::MP_RAGE.iter().filter(|&&i| equipped & (1 << i) != 0).count() as u8
 }
 
 /// Leaf Bracer equipped (KH1 `+0x184` bit 6 = `0x140284BE0(62) & 1`): a Cure Sora casts on himself
 /// sets his "no damage, no reaction" flag 0x80 for the cast (`0x14028F140` → `0x140297F30(actor,
 /// 0)`). Checked (decomp).
-pub fn leaf_bracer(equipped: u32) -> bool {
+pub fn leaf_bracer(equipped: Bits) -> bool {
     equipped & (1 << ix::LEAF_BRACER) != 0
 }
 
 /// Berserk equipped (KH1 `+0x184` bit 5 = `0x140284BE0(26) & 1`): Strength-source attacks get G
 /// `+0xFE` = 4 more Strength while the gauge is in its low-HP state (`0x1402B2DC0`,
 /// `0x14026E180`). Checked (decomp + files).
-pub fn berserk(equipped: u32) -> bool {
+pub fn berserk(equipped: Bits) -> bool {
     equipped & (1 << ix::BERSERK) != 0
 }
 
 /// Second Chance equipped (KH1 `+0x184` bit 4 = `0x140284BE0(25) & 1`): the damage `0x1402BFA80`
 /// leaves 1 HP when a hit would kill from above 1. Checked (decomp).
-pub fn second_chance(equipped: u32) -> bool {
+pub fn second_chance(equipped: Bits) -> bool {
     equipped & (1 << ix::SECOND_CHANCE) != 0
 }
 
 /// The names of the abilities in `bits`, for the log.
-pub fn names(bits: u32) -> Vec<&'static str> {
+pub fn names(bits: Bits) -> Vec<&'static str> {
     ALL.iter().enumerate().filter(|(i, _)| bits & (1 << i) != 0).map(|(_, a)| a.name).collect()
 }
 
@@ -765,6 +913,15 @@ pub mod page {
         /// KH1's message 0xCA (not read).
         pub const NO_AP: &[u8] = b"Not enough AP to equip this ability.\0";
 
+        /// The sleight abilities' help lines by their MP cost (1, 2, 3, all): Re:CoM's own
+        /// descriptions are its messages, not in the session (owner question).
+        pub const SLEIGHT_HELP: [&[u8]; 4] = [
+            b"A sleight from Re:CoM. Equip it to use it. Uses 1 MP.\0",
+            b"A sleight from Re:CoM. Equip it to use it. Uses 2 MP.\0",
+            b"A sleight from Re:CoM. Equip it to use it. Uses 3 MP.\0",
+            b"A sleight from Re:CoM. Equip it to use it. Uses all MP.\0",
+        ];
+
         /// The ability's help line (KH1 shows its own description; ours).
         pub fn help(i: usize) -> &'static [u8] {
             use super::super::ix::*;
@@ -793,6 +950,13 @@ pub mod page {
                 LEAF_BRACER => b"Nothing can interrupt Sora while he casts Cure.\0",
                 BERSERK => b"Raises Strength while Sora's HP is low.\0",
                 SECOND_CHANCE => b"Survive a blow that would knock you out, with 1 HP.\0",
+                // M12 step 4: the sleight abilities (Re:CoM's sleights; the owner's MP costs).
+                i if super::super::SLEIGHTS.contains(&i) => match super::super::sleight_mp(i) {
+                    Some(super::super::SleightMp::Points(1)) => SLEIGHT_HELP[0],
+                    Some(super::super::SleightMp::Points(2)) => SLEIGHT_HELP[1],
+                    Some(super::super::SleightMp::Points(_)) => SLEIGHT_HELP[2],
+                    _ => SLEIGHT_HELP[3],
+                },
                 _ => b"\0",
             }
         }
@@ -804,39 +968,46 @@ mod tests {
     use super::page::{Label, Outcome, Owner, Screen};
     use super::*;
 
+    const NO_EXT: [u8; EXT_LEN] = [0; EXT_LEN];
+
     #[test]
     fn block_round_trip_and_new_game() {
         let mut b = [0u8; BLOCK_LEN];
-        assert_eq!(read(&b), State::default(), "a block never written: nothing unlocked");
+        assert_eq!(read(&b, &NO_EXT), State::default(), "a block never written: nothing unlocked");
         let s = State { unlocked: 0b1_0101, equipped: 0b101, ap_ups: 7 };
-        write(&s, &mut b);
-        assert_eq!(b[field::VERSION], BLOCK_V5);
+        write(&s, &mut b, &mut [0; EXT_LEN]);
+        assert_eq!(b[field::VERSION], BLOCK_V6);
         assert_eq!(b[field::AP_UPS], 7);
-        assert_eq!(read(&b), s);
+        assert_eq!(read(&b, &NO_EXT), s);
         // Equipped is only ever a subset of unlocked; unknown bits (and the kit) are dropped.
         b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert_eq!(read(&b), State { unlocked: ALL_BITS & !KIT_BITS, equipped: ALL_BITS & !KIT_BITS, ap_ups: 7 });
+        assert_eq!(read(&b, &NO_EXT), State { unlocked: 0xFFFF_FFFF & !KIT_BITS, equipped: 0xFFFF_FFFF & !KIT_BITS, ap_ups: 7 });
+        assert_eq!(read(&b, &[0xFF; EXT_LEN]), State { unlocked: ALL_BITS & !KIT_BITS, equipped: ALL_BITS & !KIT_BITS, ap_ups: 7 });
         assert!(b[field::RESERVED..].iter().all(|&x| x == 0));
         // A v1 block reads as before (its bits are a subset of v2's).
         let mut v1 = [0u8; BLOCK_LEN];
         v1[field::VERSION] = BLOCK_V1;
         v1[field::UNLOCKED] = 0x81;
         v1[field::EQUIPPED] = 0x81;
-        assert_eq!(read(&v1), State { unlocked: 0x81, equipped: 0x81, ap_ups: 0 });
+        assert_eq!(read(&v1, &NO_EXT), State { unlocked: 0x81, equipped: 0x81, ap_ups: 0 });
         // Before v5 the count's byte is a reserved zero byte: it reads as no AP Up yet.
         let mut v4 = v1;
         v4[field::VERSION] = BLOCK_V4;
         v4[field::AP_UPS] = 9;
-        assert_eq!(read(&v4).ap_ups, 0);
+        assert_eq!(read(&v4, &NO_EXT).ap_ups, 0);
     }
 
     #[test]
     fn layout_follows_the_items_extension() {
         assert_eq!(BLOCK_FIRST, 0x269F);
         assert_eq!(BLOCK_LAST, 0x26AD);
-        assert_eq!(ALL.len(), 31);
-        assert_eq!(ALL_BITS, 0x7FFF_FFFF);
+        assert_eq!(ALL.len(), 58);
+        assert_eq!(ALL_BITS, (1 << 58) - 1);
+        // M12 step 4: the words' extension right after the summon block (save+0x26AE..=0x26B6).
+        assert_eq!(crate::summons::BLOCK_LAST, 0x26B6);
+        assert_eq!((EXT_FIRST, EXT_LAST), (0x26B7, 0x26BE));
+        assert!(EXT_LAST <= crate::keyblades::SPARE_LAST);
     }
 
     /// Owner (M12, 2026-11-03): KH1's start 3, +2 per AP Up pick, no cap, nothing else (the
@@ -949,7 +1120,7 @@ mod tests {
     }
 
     const NO_RECOM: u32 = 0;
-    const MOVE: u32 = 1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE;
+    const MOVE: Bits = 1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE;
 
     /// Owner (2026-11-01): Guard and Dodge Roll are Sora's kit: always on, no AP, never in the block.
     #[test]
@@ -965,9 +1136,9 @@ mod tests {
         // A block that still holds them reads without them.
         let mut b = [0u8; BLOCK_LEN];
         b[field::VERSION] = BLOCK_V3;
-        b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&(KIT_BITS | 1).to_le_bytes());
-        b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&(KIT_BITS | 1).to_le_bytes());
-        assert_eq!(read(&b), State { unlocked: 1, equipped: 1, ap_ups: 0 });
+        b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&((KIT_BITS | 1) as u32).to_le_bytes());
+        b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&((KIT_BITS | 1) as u32).to_le_bytes());
+        assert_eq!(read(&b, &NO_EXT), State { unlocked: 1, equipped: 1, ap_ups: 0 });
     }
 
     #[test]
@@ -1067,9 +1238,9 @@ mod tests {
         let raw = State { unlocked: KIT_BITS | 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::HIGH_JUMP, equipped: KIT_BITS | 1 << ix::BLITZ, ap_ups: 0 };
         let mut b = [0u8; BLOCK_LEN];
         b[field::VERSION] = BLOCK_V3;
-        b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&raw.unlocked.to_le_bytes());
-        b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&raw.equipped.to_le_bytes());
-        let mut s = read(&b);
+        b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&(raw.unlocked as u32).to_le_bytes());
+        b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&(raw.equipped as u32).to_le_bytes());
+        let mut s = read(&b, &NO_EXT);
         // One past CP pick: 5 AP. v3 used Guard 2 + Dodge Roll 1 + Blitz 2 = 5: now 2, so Ripple
         // Drive (3) fits when the player equips it.
         let r = migrate(&mut s, raw, BLOCK_V3, 11, recom::HIGH_JUMP, 0, 1, &mut |_| false);
@@ -1078,8 +1249,8 @@ mod tests {
         assert_eq!(used_ap(s.equipped), 2);
         assert!(can_equip(s.equipped, ix::RIPPLE_DRIVE, s.max_ap()));
         assert_ne!(s.equipped & 1 << ix::HIGH_JUMP, 0, "Re:CoM's High Jump equipped once");
-        write(&s, &mut b);
-        assert_eq!((b[field::VERSION], u32_at(&b, field::UNLOCKED) & KIT_BITS, b[field::AP_UPS]), (BLOCK_V5, 0, 1));
+        write(&s, &mut b, &mut [0; EXT_LEN]);
+        assert_eq!((b[field::VERSION], u32_at(&b, field::UNLOCKED) as Bits & KIT_BITS, b[field::AP_UPS]), (BLOCK_V6, 0, 1));
     }
 
     #[test]
@@ -1090,7 +1261,7 @@ mod tests {
         let had = 1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE | 1 << ix::COMBO_MASTER;
         let raw = State { unlocked: had | KIT_BITS, equipped: had | 1 << ix::GUARD, ap_ups: 0 };
         let mut s = State { unlocked: had, equipped: had, ap_ups: 0 };
-        let r = migrate(&mut s, raw, BLOCK_V2, 40, recom::HIGH_JUMP, u32::MAX, 0, &mut |_| false);
+        let r = migrate(&mut s, raw, BLOCK_V2, 40, recom::HIGH_JUMP, Bits::MAX, 0, &mut |_| false);
         assert_eq!(names(r.taken), vec!["Glide", "Superglide", "Combo Master"]);
         assert_eq!(names(r.kit_dropped), vec!["Guard", "Dodge Roll"]);
         assert!(s.equipped & 1 << ix::HIGH_JUMP != 0, "Re:CoM has it: stays equipped");
@@ -1169,6 +1340,158 @@ mod tests {
         let l = page::list(page::Owner::Sora, &all);
         let pos = |i: usize| l.iter().position(|&x| x == i).unwrap();
         assert!(pos(ix::MP_HASTE) < pos(ix::MP_RAGE[0]) && pos(ix::MP_RAGE[1]) < pos(ix::BERSERK) && pos(ix::BERSERK) < pos(ix::SECOND_CHANCE) && pos(ix::SECOND_CHANCE) < pos(ix::LEAF_BRACER));
+    }
+
+    /// M12 step 4 (owner, "M12 answers"): the 25 magic sleights plus Idyll Romp and Cross-slash+,
+    /// with the owner's AP costs, in Re:CoM's id order.
+    #[test]
+    fn sleight_abilities_are_the_owners_27() {
+        assert_eq!(SLEIGHTS, 31..58);
+        let ids: Vec<u16> = SLEIGHTS.filter_map(sleight_of).collect();
+        let want: Vec<u16> = (0x1B..=0x33).chain([0x3A, 0x43]).collect();
+        assert_eq!(ids, want, "the 25 magic-category ids, Idyll Romp, Cross-slash+");
+        let by_ap = |ap: u8| -> Vec<&str> {
+            let mut v: Vec<&str> = SLEIGHTS.filter(|&i| ALL[i].ap == ap).map(|i| ALL[i].name).collect();
+            v.sort_unstable();
+            v
+        };
+        let sorted = |mut v: Vec<&'static str>| {
+            v.sort_unstable();
+            v
+        };
+        assert_eq!(by_ap(2), sorted(vec!["Judgment", "Bind", "Confuse", "Terror", "Warp", "Warpinator", "Synchro", "Teleport", "Gifted Miracle", "Idyll Romp"]));
+        assert_eq!(by_ap(3), sorted(vec!["Fire Raid", "Blizzard Raid", "Aqua Splash", "Freeze", "Firaga Burst", "Reflect Raid", "Homing Blizzara", "Lethal Frame", "Shock Impact"]));
+        assert_eq!(by_ap(4), sorted(vec!["Thunder Raid", "Raging Storm", "Magnet Spiral", "Quake", "Tornado", "Cross-slash+"]));
+        assert_eq!(by_ap(5), sorted(vec!["Holy", "Mega Flare"]));
+        for i in SLEIGHTS {
+            let a = &ALL[i];
+            assert!(on_screen(i) && !a.shared && a.kh1_id.is_none() && a.kh1_bit == 0, "{}", a.name);
+            assert_eq!(a.key, SLEIGHT_KEY + sleight_of(i).unwrap());
+            assert_eq!(of_sleight(sleight_of(i).unwrap()), Some(i));
+        }
+        assert_eq!(SLEIGHT_BITS.count_ones(), 27);
+        assert_eq!(SLEIGHT_BITS & (MODIFIER_BITS | KIT_BITS | SPECIALS_WAITING), 0);
+        // Not abilities: the generic tiers, the summon levels, friends, the KH1-twin sleights.
+        for id in [0xD, 0x1A, 0x35, 0x41, 0x42, 0x44, 0x56, 4, 9, 0xC] {
+            assert_eq!(of_sleight(id), None, "{id:#x}");
+        }
+        assert_eq!(kh1_bits(SLEIGHT_BITS), kh1_bits(0), "no KH1 bit");
+        assert_eq!(to_core(SLEIGHT_BITS), to_core(0), "nothing in KH1's frame");
+        // MP (owner): AP 2 → 1, 3 → 2, 4 → 2, 5 → 3; Idyll Romp / Cross-slash+ all.
+        let mp = |id| sleight_mp(of_sleight(id).unwrap()).unwrap();
+        assert_eq!([mp(0x1F), mp(0x1B), mp(0x1D), mp(0x33)], [SleightMp::Points(1), SleightMp::Points(2), SleightMp::Points(2), SleightMp::Points(3)]);
+        assert_eq!([mp(sleight::IDYLL_ROMP), mp(sleight::CROSS_SLASH_PLUS)], [SleightMp::All, SleightMp::All]);
+        assert_eq!(sleight_mp(ix::SONIC_BLADE), None);
+    }
+
+    /// The names as Re:CoM's `SY0002.CTD` lists them from id 4, read from the player's file when
+    /// `RECOM_SY0002_CTD` names it (the CTD's "Lethal Flame" is the owner's "Lethal Frame").
+    #[test]
+    fn sleight_names_match_recoms_ctd() {
+        let Ok(path) = std::env::var("RECOM_SY0002_CTD") else { return };
+        let Ok(b) = std::fs::read(path) else { return };
+        let words: Vec<&[u8]> = b.split(|&c| c == 0).filter(|w| !w.is_empty()).collect();
+        let first = words.iter().position(|w| *w == b"Sliding Dash").expect("the sleight names");
+        for i in SLEIGHTS {
+            let id = sleight_of(i).unwrap() as usize;
+            let ctd = std::str::from_utf8(words[first + id - 4]).unwrap();
+            let want = if ALL[i].name == "Lethal Frame" { "Lethal Flame" } else { ALL[i].name };
+            assert_eq!(ctd, want, "id {id:#x}");
+        }
+    }
+
+    /// Each sleight ability arrives when Re:CoM teaches it (its learned bit, a read), unequipped,
+    /// never taken back; equipping follows KH1's AP rule; the menu's list is in Re:CoM's order.
+    #[test]
+    fn sleight_abilities_learn_from_recoms_bits() {
+        let i = |id| of_sleight(id).unwrap();
+        let mut s = State { ap_ups: 1, ..Default::default() };
+        let mut asked = Vec::new();
+        let r = sync(&mut s, 1, NO_RECOM, &mut |id| {
+            asked.push(id);
+            id == sleight::FREEZE || id == sleight::HOLY
+        });
+        assert!(SLEIGHTS.clone().all(|k| asked.contains(&sleight_of(k).unwrap())), "every sleight's learned bit is read");
+        assert_eq!(names(r.new), vec!["Freeze", "Holy"]);
+        assert_eq!(s.equipped, 0, "KH1's rule: unequipped");
+        // Never taken back (Re:CoM never unlearns; a sync only asks about the rest).
+        sync(&mut s, 1, NO_RECOM, &mut |_| false);
+        assert_eq!(names(s.unlocked & SLEIGHT_BITS), vec!["Freeze", "Holy"]);
+        // 5 AP: Holy (5) fits alone; then Freeze (3) is refused; the page greys it.
+        assert!(can_equip(0, i(sleight::HOLY), s.max_ap()));
+        let mut sc = Screen::default();
+        assert_eq!(sc.confirm(&mut s), Outcome::Opened);
+        let l: Vec<Label> = sc.rows(&s).iter().map(|r| r.label).collect();
+        assert_eq!(l, vec![Label::Ability(i(sleight::FREEZE)), Label::Ability(i(sleight::HOLY))], "Re:CoM's order");
+        sc.set_cursor(1);
+        assert_eq!(sc.confirm(&mut s), Outcome::Equipped(i(sleight::HOLY)));
+        assert_eq!(sc.status(&s), ["0/5".to_string(), "5".into(), "5/5".into()]);
+        sc.set_cursor(0);
+        assert!(sc.rows(&s)[0].grey);
+        assert_eq!(sc.confirm(&mut s), Outcome::Refused(i(sleight::FREEZE)));
+        assert_eq!(equipped_sleights(s.equipped), vec![sleight::HOLY]);
+        // The Sleights menu's list: only the equipped ones, Re:CoM's id order.
+        let e = 1 << i(sleight::CROSS_SLASH_PLUS) | 1 << i(sleight::FIRE_RAID) | 1 << i(sleight::LETHAL_FRAME) | 1 << ix::SONIC_BLADE | 1 << ix::BLITZ;
+        assert_eq!(equipped_sleights(e), vec![0x1B, 0x27, 0x43]);
+        assert!(equipped_sleights(0).is_empty());
+        // On Sora's page after every KH1 ability.
+        let all = State { unlocked: ALL_BITS & !KIT_BITS & !SPECIALS_WAITING, equipped: 0, ap_ups: 0 };
+        let l = page::list(page::Owner::Sora, &all);
+        let first = l.iter().position(|&k| SLEIGHTS.contains(&k)).unwrap();
+        assert!(l[first..].iter().all(|k| SLEIGHTS.contains(k)) && l.len() - first == 27);
+        assert!(l[first..].windows(2).all(|w| sleight_of(w[0]) < sleight_of(w[1])));
+        assert!(page::list(page::Owner::Shared, &all).iter().all(|k| !SLEIGHTS.contains(k)));
+    }
+
+    /// Layout v6 (M12 step 4): the words' bits 32.. in the extension, read only from a v6 block; a
+    /// v5 block migrates once (its fields kept, the sleights Re:CoM already taught unlocked).
+    #[test]
+    fn migration_v5_to_v6() {
+        let i = |id| of_sleight(id).unwrap();
+        // A v5 save: level 40, Blitz and MP Haste unlocked, Blitz equipped, 4 AP Ups (11 AP).
+        let mut b = [0u8; BLOCK_LEN];
+        b[field::VERSION] = BLOCK_V5;
+        let lo = 1u32 << ix::BLITZ | 1 << ix::MP_HASTE;
+        b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&lo.to_le_bytes());
+        b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&(1u32 << ix::BLITZ).to_le_bytes());
+        b[field::AP_UPS] = 4;
+        // Whatever the extension's bytes say before v6, they mean nothing.
+        let junk = [0xFF; EXT_LEN];
+        assert_eq!(read(&b, &junk), read(&b, &NO_EXT));
+        assert_eq!(raw(&b, &junk).unlocked >> 31, 0);
+        let mut s = read(&b, &junk);
+        let raw0 = raw(&b, &junk);
+        assert_eq!((s.ap_ups, s.max_ap()), (4, 11));
+        // Re:CoM had taught Freeze (event) and Lethal Frame (level 32) before.
+        let r = migrate(&mut s, raw0, BLOCK_V5, 40, NO_RECOM, 0, 9, &mut |id| id == sleight::BLITZ || id == sleight::FREEZE || id == sleight::LETHAL_FRAME);
+        assert_eq!(s.ap_ups, 4, "the v5 count is kept (not the CP's)");
+        assert_eq!(names(r.new & SLEIGHT_BITS), vec!["Freeze", "Lethal Frame"]);
+        assert_eq!(s.equipped, 1 << ix::BLITZ, "the old set kept; the new ones unequipped");
+        assert_eq!(r.fitted, 0);
+        // Written as v6: the high bits go to the extension, the block's other bytes unchanged.
+        let mut e = junk;
+        write(&s, &mut b, &mut e);
+        assert_eq!((b[field::VERSION], b[field::AP_UPS]), (BLOCK_V6, 4));
+        assert!(b[field::RESERVED..].iter().all(|&x| x == 0));
+        assert_eq!(read(&b, &e), s);
+        let hi = (s.unlocked >> 32) as u32;
+        assert_eq!(u32_at(&e, ext::UNLOCKED_HIGH), hi);
+        assert_ne!(hi, 0);
+        assert_eq!(u32_at(&e, ext::EQUIPPED_HIGH), 0);
+        // An equipped sleight survives the round trip (bit 31 in the block, 32.. in the extension).
+        s.equipped |= 1 << i(sleight::FIRE_RAID) | 1 << i(sleight::LETHAL_FRAME);
+        s.unlocked |= 1 << i(sleight::FIRE_RAID);
+        write(&s, &mut b, &mut e);
+        assert_eq!(read(&b, &e), s);
+        assert_eq!(u32_at(&b, field::EQUIPPED) >> 31, 1, "Fire Raid is bit 31");
+        // A v6 block is not migrated again: a sync asks only about what isn't unlocked.
+        let mut asked = Vec::new();
+        let mut t = read(&b, &e);
+        sync(&mut t, 40, NO_RECOM, &mut |id| {
+            asked.push(id);
+            false
+        });
+        assert!(!asked.contains(&sleight::FREEZE) && asked.contains(&sleight::HOLY));
     }
 
     #[test]
