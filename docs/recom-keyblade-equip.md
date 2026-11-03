@@ -7,11 +7,12 @@
 > [The Keyblade slot in the Items menu](#the-keyblade-slot-in-the-items-menu-owner-2026-11-01) at
 > the end. The list itself (rows, mark, stats, scroll bar, equip) is unchanged.
 >
-> **Since 2026-11-03 (owner)** the "KH1" entry is there **whatever the Combat setting** (in Sora's
-> story) and its submenu has two settings rows, **Combat** and **Movement**; Items, Customize and
-> Abilities show only at Combat = KH1: see
+> **Since 2026-11-03 (owner)** the "KH1" entry is there **whatever the Combat setting**, **in both
+> stories** (Riku's: [only Combat and Movement](#rikus-story-the-entry-with-combat-and-movement-owner-2026-11-03))
+> and its submenu has two settings rows, **Combat** and **Movement**; Items, Customize and
+> Abilities show only at Combat = KH1 in Sora's story: see
 > [Settings pages](#settings-pages-the-entry-always-there-owner-2026-11-03) at the end. The
-> "Wanted" rule in the table below is replaced there.
+> "Wanted" rule in the table below, and every "Riku's story: no entry" below, are replaced there.
 
 At `combat = kh1`, in Sora's story, Re:CoM's camp (pause) menu gets an 8th top-level entry,
 "Keyblades", below Config. Its page lists the Keyblades Sora has earned, marks the equipped one,
@@ -36,7 +37,7 @@ or bytes read from the Steam exe, **Assumption**.
 | Spare range check | at the first camp open per session the log says whether `save + 0x246B ..= 0x2817` is all zero apart from our bytes (this byte and, since M7 stage 7.1, the MP block `save + 0x2675 ..= 0x2684`, `recom-m7-mp.md`). | — |
 | Unlocked | `0x14015B3F0(kind)` or `0x14015B3F0(kind | 0x100)` ("obtained at least once", discovery state 2 or 3), called only when the collection pointer `0x14087A7E8` is set. The Kingdom Key is always listed; Soul Eater never. Only Keyblades with numbers in the stats file are listed (kinds 1..0x11 from KH1's rows, and from step 3 0x13..0x18 from KH2's, `recom-keyblade-models.md` § 12). | Checked (decomp + exe) |
 | Names | `0x140164CA0(&kind)`: message `[0x140528560 + kind × 4]` through `0x140240160(*(u64*)0x14087CD78, id)`; it reads only byte 0 for kinds below 0xDB. Re:CoM's own localized card names. The stats file's name is used if the message is empty. | Checked (decomp + exe) |
-| Riku's story | `0x1401AAAE0() != 0`, and the camp's own copy `camp+0x21BC`. | Checked (exe) |
+| Riku's story | `0x1401AAAE0() != 0`, and the camp's own copy `camp+0x21BC` (0 / 1; Re:CoM's index for its per-story camp tables). | Checked (exe + decomp) |
 
 ## The entry: four wrappers
 
@@ -114,7 +115,8 @@ past the first row wraps to the last (Re:CoM's goes to its tab bar).
 ## Per frame
 
 The camp exists only while the pause menu is open: nothing of this runs in field or battle
-frames. With no entry (Re:CoM setting, Riku's story) each wrapper is one load and the original.
+frames. With no entry (the map-only camp; before 2026-11-03 also the Re:CoM setting and Riku's
+story) each wrapper is one load and the original.
 With the entry, the update reads the pad (pure reads) in state 0xF and a few fields; the page's
 code runs only while it is open, like Re:CoM's pages.
 
@@ -415,8 +417,8 @@ accessories as well we will have slots for them there but dont worry about that 
 - **The entry** (`win::keyblades::wanted`): Sora's story and not the map-only camp (`camp+0x20A4`),
   whatever the Combat setting. The four camp wrappers therefore also run at Combat = Re:CoM: the
   same code as at KH1 (8 entries, Re:CoM's order 0..6, ours at 7 below Config, Re:CoM's cursor
-  rules, `top::step`). Riku's story: still hidden (`camp+0x21BC`, `0x1401AAAE0`), as before.
-  Checked (code); not seen in game at Re:CoM.
+  rules, `top::step`). Riku's story: shown too since the follow-up below. Checked (code); not seen
+  in game at Re:CoM.
 - **The rows** (`keyblades::sub::rows`): Combat = KH1 (and the stats file lists Keyblades, the
   entry's old condition): Items, Customize, Abilities, Combat, Movement; otherwise Combat,
   Movement. The entry's help line says which (`text::entry_help`). The rows are chosen when the
@@ -439,6 +441,82 @@ accessories as well we will have slots for them there but dont worry about that 
   [...] (Combat changed)`, `kh1 entry: Combat page closed`.
 - **Sites**: no new hook; the Config draw `0x1400DF1B0` moved from hooked to called (its 10 bytes
   still checked). Asset step: not needed (the texts are in the DLL).
+
+### Riku's story: the entry with Combat and Movement (owner, 2026-11-03)
+
+> "KH1 tab follow-ups": show the KH1 tab in Riku's story too, with only Combat and Movement.
+
+Why it was hidden: only by our own rule (`wanted` refused `camp+0x21BC` / `0x1401AAAE0`), kept from
+the Keyblades entry (Riku has no Keyblade). Riku's camp is the same `CCamp` with the same code;
+what differs is data Re:CoM picks by `camp+0x21BC` (Checked (decomp + disasm), Steam):
+
+| what | Sora's story | Riku's story | where |
+|---|---|---|---|
+| Top entries | 7 (count `camp+0x21C4` = 7 at ctor and at every level-0 relabel) | 7, same positions (86, 88 + 26 × i) | ctor `0x1400D2730`, entry build `0x1400E3DE0` |
+| Top labels | messages 0xA80001..0xA80007 | 0xA80000, 0xA80001..0xA80005, 0xA80008 | `0x1407C1000 + (story × 14 + i) × 4` |
+| Top help ids | 0x500400..0x500406 | 0x50042A, 0x500401..0x500404, 0x50042C, 0x500406 | stack table of the cursor set `0x1400DEA10`, `(level + story × 2) × 7 + i` (`0x1400DEBF4..0x1400DEC0D`) |
+| Entry → state (0x11) | `1D 16 41 1A 44 47 4A` | the same table (no story index) | `0x1400D9C80` state 0x11 |
+| Deck submenu (level 1) | 6 rows | 2 rows; help 0x50042B, 0x50040A | entry build, cursor set |
+| Header titles | `0x1400D3890(camp, story, level, cursor)` | the same, Riku's half | `0x1400E4220` mode 1 |
+| Panels | `0x1400E6700`, `0x1400E46D0`, `0x1400E6040` pick Riku's sprites / positions themselves | | (ours calls them with Re:CoM's own modes) |
+
+None of the four wrappers, the confirm sequence or the submenu reads a story table except one: our
+cursor set's move **from ours to a Re:CoM entry** wrote Sora's help id `0x500400 + i`; in Riku's
+story entry 0 would have shown Sora's line. Now it takes Re:CoM's own id for the story
+(`keyblades::top::RECOM_HELP`, the immediates checked as two data sites `0x1400DEA45` (57 bytes)
+and `0x1400DEAA9` (49 bytes); a test reads the ids back from those bytes). The Config input
+`0x1400D3EB0` and draw `0x1400DF1B0` our pages run have no story branch (Checked (decomp)).
+
+Built (`win::keyblades`):
+
+- `wanted`: the normal top list in both stories; only the map-only camp (`camp+0x20A4`, whose
+  state 3 never runs the entry build) stays without the entry, as before (the same fix doesn't
+  reach it: it has no list).
+- Riku's story: the rows are always Combat, Movement (`sub::kh1_pages`: Sora's story, Combat = KH1
+  and Keyblade numbers); Items, Customize and Abilities never (they are Sora's). The entry and the
+  two rows have Riku help lines (`text::ENTRY_HELP_RIKU`, `COMBAT_HELP_RIKU`, `MOVEMENT_HELP_RIKU`):
+  "Combat and movement settings for Sora's story; no effect for Riku.", "For Sora's story: Combat,
+  Guard reactions, enemies, Revenge Value.", "For Sora's story: run speed, jump height, air speed,
+  Dodge roll." The pages' own rows and help are the same as in Sora's story.
+- Inside the submenu Re:CoM's cursor set (level 1) briefly writes its Riku Deck-submenu help
+  (0x50042B / 0x50040A) before ours replaces it in the same frame, as in Sora's story; with two
+  rows it never reads past Riku's two ids. Leaving the submenu, Re:CoM's state 0x4C relabels its
+  7 entries with Riku's own labels.
+- Riku's own entries, order, cursor: unchanged (Re:CoM's code, 8-entry wrap as in Sora's story:
+  down from entry 6 reaches KH1, a fresh down from KH1 wraps to entry 0).
+- Logs: `kh1 entry: submenu opened (2 rows: [Combat, Movement]; Riku's story)`.
+- Sites: no new hook; two new check-only data sites (above). 1077 sites match the Steam exe.
+- Assumption: nothing of Riku's camp layout is drawn where our entry sits (86, 270) (Sora's
+  layout leaves it free; Riku's panels differ, `0x1400E6700` mode 0). Not checked in game.
+
+**What each setting does in Riku's story** (Checked (code): every reader's gate; not in game):
+none of the nine acts there; the values are kept for Sora's story.
+
+| row | in Riku's story | why |
+|---|---|---|
+| Combat | no effect (the value is saved and used in Sora's story) | battles there are Re:CoM's (`battle::manager_ctor`: KH1 only with `!riku_story`), the KH1 field handlers run only for `CPlayerSora` (`movement::is_main_sora`), MP, HUD, magic effects, deck, drops, HP twins, summons, unlocks all test `riku_story` |
+| Guard reactions | no effect | needs Sora's KH1 Guard (`guard::on_result`: main player is Sora) |
+| Enemy pace | no effect | only in a KH1 battle (`battle::wanted`) |
+| Enemy AI | no effect | only in a KH1 battle (`kh1_enemy`) |
+| Revenge Value | no effect | only in a KH1 battle (`revenge`), whose boss list keeps Riku's story Re:CoM's |
+| Run speed, Jump height, Air speed, Dodge roll | no effect | read only by Sora's KH1 frame (`kh1_sora`); Riku keeps Re:CoM's handlers |
+
+Owner question: every row has no effect in Riku's story. Keep them shown there (as now, a place to
+set Sora's-story settings while playing Riku), or hide them in Riku's story (which would leave the
+entry empty, so the entry itself would go)?
+
+#### What the owner should test (Riku's story)
+
+1. Riku's story camp: "KH1" under Riku's last entry; Riku's 7 entries, labels, order as unmodded.
+2. Cursor: down from Riku's last entry reaches KH1; a fresh down on KH1 wraps to Riku's first entry
+   and its help line is Riku's own (not Sora's Deck line); up from KH1 goes to Riku's last entry.
+3. KH1's help: "Combat and movement settings for Sora's story; no effect for Riku."
+4. Confirm: submenu with Combat and Movement only (at either Combat setting); each row's help says
+   "For Sora's story: ..."; each page opens and changes the ini as in Sora's story.
+5. Combat set to KH1 on the page: the submenu stays Combat, Movement; Riku still plays and fights
+   as Re:CoM (a battle's log line says "Re:CoM (Riku's story)").
+6. Cancel back: Riku's entries relabelled correctly; Riku's own entries (and Config) still work.
+7. Send `kh1-recom.log` (the `kh1 entry:` lines) and a screenshot of the top list and submenu.
 
 ### What the owner should test
 

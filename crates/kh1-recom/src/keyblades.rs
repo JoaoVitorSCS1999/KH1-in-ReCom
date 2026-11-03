@@ -2,11 +2,11 @@
 //!
 //! Re:CoM's camp (pause) menu gets an 8th top-level entry, "KH1" (M7 stage 7.13; "Keyblades"
 //! before it), below Config, drawn and run by Re:CoM's own camp code through four wrappers
-//! (`win::keyblades`); since 2026-11-03 it is there whatever the Combat setting (Sora's story). It
-//! opens a submenu of Re:CoM's own entry buttons ([`sub`]): at Combat = KH1 Items
-//! (`crate::items_page`, whose Sora list starts with his Keyblade slot), Customize
-//! (`crate::customize`) and Abilities; always the Combat and Movement settings pages
-//! (`crate::menu`). The Keyblade slot opens the Keyblade list: the Keyblades Sora has earned,
+//! (`win::keyblades`); since 2026-11-03 it is there whatever the Combat setting, in both stories
+//! (Riku's since 2026-11-03, owner: "only Combat and Movement"). It opens a submenu of Re:CoM's
+//! own entry buttons ([`sub`]): at Combat = KH1 in Sora's story Items (`crate::items_page`, whose
+//! Sora list starts with his Keyblade slot), Customize (`crate::customize`) and Abilities; always
+//! the Combat and Movement settings pages (`crate::menu`). The Keyblade slot opens the Keyblade list: the Keyblades Sora has earned,
 //! the equipped one marked, the highlighted one's numbers, equip on confirm. The choice is one byte
 //! of Re:CoM's own save block.
 //! See `docs/recom-keyblade-equip.md`.
@@ -88,6 +88,26 @@ pub fn unlocked(cards: impl IntoIterator<Item = u16>, earned: impl Fn(u16) -> bo
     v.sort_unstable();
     v.dedup();
     v
+}
+
+/// The story the camp belongs to: Re:CoM's camp copies `0x1401AAAE0()` into `camp+0x21BC` at its
+/// ctor (`0x1400D2730`) and indexes its per-story tables with it (labels `0x1407C1000`, help ids
+/// in the cursor set `0x1400DEA10`, header titles `0x1400D3890`). Checked (decomp + disasm).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Story {
+    Sora,
+    Riku,
+}
+
+impl Story {
+    /// From `camp+0x21BC` (0 Sora's story, else Riku's; `0x1401AAAE0` returns a bool).
+    pub fn from_camp(v: i32) -> Story {
+        if v == 0 {
+            Story::Sora
+        } else {
+            Story::Riku
+        }
+    }
 }
 
 /// The camp's top list: Re:CoM's 7 entries (0..6) and ours (7).
@@ -185,6 +205,22 @@ pub mod top {
             Fix::MoveToOurs => Some(OURS),
             _ => None,
         }
+    }
+
+    /// The help message ids of Re:CoM's top entries 0..6, per story: the cursor set `0x1400DEA10`
+    /// builds them on its stack (`mov dword [rbp+d], id`) and reads index
+    /// `(level + story × 2) × 7 + entry`. Sora's at `0x1400DEA45`, Riku's at `0x1400DEAA9`
+    /// (`crate::sites::KEYBLADE_DATA`, the test reads these from the checked bytes). Riku's entries
+    /// 0 and 5 have their own. Checked (exe disasm).
+    pub const RECOM_HELP: [[u32; RECOM_ENTRIES as usize]; 2] = [
+        [0x50_0400, 0x50_0401, 0x50_0402, 0x50_0403, 0x50_0404, 0x50_0405, 0x50_0406],
+        [0x50_042A, 0x50_0401, 0x50_0402, 0x50_0403, 0x50_0404, 0x50_042C, 0x50_0406],
+    ];
+
+    /// The help id Re:CoM shows with the cursor on its top entry `i` in this story.
+    pub fn recom_help(story: super::Story, i: i32) -> Option<u32> {
+        let row = &RECOM_HELP[(story == super::Story::Riku) as usize];
+        usize::try_from(i).ok().and_then(|i| row.get(i)).copied()
     }
 }
 
@@ -339,15 +375,23 @@ pub mod text {
     pub const ENTRY_HELP: &[u8] = b"Items, shortcuts and abilities; combat and movement settings.\0";
     /// At Combat = Re:CoM (Combat, Movement).
     pub const ENTRY_HELP_SETTINGS: &[u8] = b"Combat and movement settings.\0";
+    /// In Riku's story (Combat, Movement): none of their rows acts there (our KH1 battles,
+    /// movement and Guard are Sora's; `docs/recom-config-menu.md` § Riku's story).
+    pub const ENTRY_HELP_RIKU: &[u8] = b"Combat and movement settings for Sora's story; no effect for Riku.\0";
 
     /// The entry's help line for the rows its submenu will show.
-    pub fn entry_help(kh1_pages: bool) -> &'static [u8] {
-        if kh1_pages {
+    pub fn entry_help(story: super::Story, kh1_pages: bool) -> &'static [u8] {
+        if story == super::Story::Riku {
+            ENTRY_HELP_RIKU
+        } else if kh1_pages {
             ENTRY_HELP
         } else {
             ENTRY_HELP_SETTINGS
         }
     }
+    /// The submenu's Combat and Movement rows in Riku's story.
+    pub const COMBAT_HELP_RIKU: &[u8] = b"For Sora's story: Combat, Guard reactions, enemies, Revenge Value.\0";
+    pub const MOVEMENT_HELP_RIKU: &[u8] = b"For Sora's story: run speed, jump height, air speed, Dodge roll.\0";
     /// The Keyblade list's help (opened from the Items page's Keyblade slot).
     pub const PAGE_HELP: &[u8] = b"Choose the Keyblade Sora fights with.\0";
     pub const STAT_LABELS: [&[u8]; 3] = [b"Strength\0", b"Magic\0", b"Reach\0"];
@@ -386,8 +430,16 @@ pub mod sub {
 
     /// The rows at Combat = KH1 (with Keyblade numbers to list), top to bottom.
     pub const KH1_ROWS: &[Row] = &[Row::Items, Row::Customize, Row::Abilities, Row::Combat, Row::Movement];
-    /// The rows at Combat = Re:CoM (owner, 2026-11-03: "only Combat and Movement").
+    /// The rows at Combat = Re:CoM, and in Riku's story at any setting (owner, 2026-11-03: "only
+    /// Combat and Movement", both times).
     pub const RECOM_ROWS: &[Row] = &[Row::Combat, Row::Movement];
+
+    /// Whether the submenu shows KH1's pages (Items, Customize, Abilities): Combat = KH1, the stats
+    /// file lists Keyblades (the entry's condition before 2026-11-03) and Sora's story (Riku's
+    /// story: only Combat and Movement, owner 2026-11-03).
+    pub fn kh1_pages(story: super::Story, combat_kh1: bool, keyblades_listed: bool) -> bool {
+        story == super::Story::Sora && combat_kh1 && keyblades_listed
+    }
 
     /// The rows the submenu shows: KH1's pages only at Combat = KH1 (`kh1_pages`: Combat = KH1 and
     /// the stats file lists Keyblades, the entry's old condition).
@@ -430,6 +482,16 @@ pub mod sub {
                 Row::Abilities => crate::abilities::page::text::HELP,
                 Row::Combat => crate::menu::Page::Combat.help(),
                 Row::Movement => crate::menu::Page::Movement.help(),
+            }
+        }
+
+        /// The help line in this story: in Riku's story the settings rows say they are Sora's
+        /// story's (none of their settings acts for Riku).
+        pub fn help_in(self, story: super::Story) -> &'static [u8] {
+            match (story, self) {
+                (super::Story::Riku, Row::Combat) => text::COMBAT_HELP_RIKU,
+                (super::Story::Riku, Row::Movement) => text::MOVEMENT_HELP_RIKU,
+                _ => self.help(),
             }
         }
 
@@ -692,6 +754,10 @@ mod tests {
             text::STAT_LABELS[2],
             text::CUSTOMIZE_LABEL,
             text::CUSTOMIZE_HELP,
+            text::ENTRY_HELP_SETTINGS,
+            text::ENTRY_HELP_RIKU,
+            text::COMBAT_HELP_RIKU,
+            text::MOVEMENT_HELP_RIKU,
         ];
         for s in all {
             assert_eq!(s.last(), Some(&0));
@@ -736,6 +802,62 @@ mod tests {
         assert_eq!(sub::step(1, 5, Pad { confirm: true, cancel: true, ..NONE }), Act::Close);
         assert_eq!(sub::step(0, 5, Pad { start: true, ..NONE }), Act::None);
         assert_eq!(sub::step(0, 5, Pad { confirm: true, down: true, ..NONE }), Act::Open(0), "confirm before moves");
-        assert!(text::entry_help(true).len() - 1 <= crate::menu::HELP_MAX && text::entry_help(false).len() - 1 <= crate::menu::HELP_MAX);
+        for story in [Story::Sora, Story::Riku] {
+            for k in [true, false] {
+                assert!(text::entry_help(story, k).len() - 1 <= crate::menu::HELP_MAX);
+            }
+        }
+    }
+
+    #[test]
+    fn rikus_story_shows_only_the_settings_rows() {
+        use sub::Row;
+        // Owner, 2026-11-03: "show the KH1 tab in Riku's story too, with only Combat and Movement".
+        assert!(sub::kh1_pages(Story::Sora, true, true));
+        assert!(!sub::kh1_pages(Story::Sora, false, true));
+        assert!(!sub::kh1_pages(Story::Sora, true, false));
+        for (combat, listed) in [(true, true), (true, false), (false, true), (false, false)] {
+            assert!(!sub::kh1_pages(Story::Riku, combat, listed));
+            assert_eq!(sub::rows(sub::kh1_pages(Story::Riku, combat, listed)), &[Row::Combat, Row::Movement]);
+        }
+        assert_eq!((Story::from_camp(0), Story::from_camp(1)), (Story::Sora, Story::Riku));
+        // Help: Riku's own lines for the entry and the two rows; Sora's story unchanged.
+        assert_eq!(text::entry_help(Story::Riku, false), text::ENTRY_HELP_RIKU);
+        assert_eq!(text::entry_help(Story::Riku, true), text::ENTRY_HELP_RIKU);
+        assert_eq!(text::entry_help(Story::Sora, true), text::ENTRY_HELP);
+        assert_eq!(text::entry_help(Story::Sora, false), text::ENTRY_HELP_SETTINGS);
+        assert_eq!(Row::Combat.help_in(Story::Riku), text::COMBAT_HELP_RIKU);
+        assert_eq!(Row::Movement.help_in(Story::Riku), text::MOVEMENT_HELP_RIKU);
+        for r in sub::KH1_ROWS {
+            assert_eq!(r.help_in(Story::Sora), r.help());
+        }
+    }
+
+    /// The `mov dword [rbp+d], imm32` immediates (`C7 45 d imm32`) in a checked byte run.
+    fn stack_ids(code: &[u8]) -> Vec<u32> {
+        let mut v = Vec::new();
+        let mut i = 0;
+        while i + 7 <= code.len() {
+            if code[i] == 0xC7 && code[i + 1] == 0x45 {
+                v.push(u32::from_le_bytes([code[i + 3], code[i + 4], code[i + 5], code[i + 6]]));
+                i += 7;
+            } else {
+                i += 1;
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn top_help_ids_are_the_cursor_sets_own() {
+        let site = |rva: u32| crate::sites::KEYBLADE_DATA.iter().find(|s| s.rva == rva).expect("site").expect;
+        assert_eq!(stack_ids(site(0x000D_EA45)), top::RECOM_HELP[0].to_vec(), "Sora's story");
+        assert_eq!(stack_ids(site(0x000D_EAA9)), top::RECOM_HELP[1].to_vec(), "Riku's story");
+        assert_eq!(top::recom_help(Story::Sora, 0), Some(0x50_0400));
+        assert_eq!(top::recom_help(Story::Riku, 0), Some(0x50_042A));
+        assert_eq!(top::recom_help(Story::Riku, 5), Some(0x50_042C));
+        assert_eq!(top::recom_help(Story::Riku, 6), Some(0x50_0406));
+        assert_eq!(top::recom_help(Story::Riku, top::OURS), None);
+        assert_eq!(top::recom_help(Story::Sora, -1), None);
     }
 }
