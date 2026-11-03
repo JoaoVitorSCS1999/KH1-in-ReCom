@@ -405,8 +405,9 @@ armour).** The Darkball's and the dives' decisions need the KH1 kind of the hit 
 
 Found, not changed (owner question in § The Pirate): the Wyvern's attribute 2 / 3 / 4 hits call the same `sys 42`
 (§ The Wyvern: "the engine's element reaction", left out); that is this no-reaction path, so KH1's Wyvern takes no
-reaction from those hits. The Darkball's, the Air Pirate's and the Wyvern's "doesn't flinch" cases zero the reaction
-kind (`keeps_reaction`) after Re:CoM's handler has already cut the attack; this armour would keep their attacks going.
+reaction from those hits. The Darkball's, the Air Pirate's and the Wyvern's "doesn't flinch" cases zeroed the reaction
+kind (`keeps_reaction`) after Re:CoM's handler had already cut the attack; they now take this armour (owner
+2026-11-02, below).
 
 ## The Soldier
 
@@ -962,7 +963,7 @@ circles, flights and chases (0.1 / 0.08 / 1, back to 0.2).
 | charge | `0xD70` (hit) / `0xF52` (engaged) | turn to him (1.4° / 3°); 204 (blend 0 / 16; `0xF52` waits 16 frames first) for its length − 2 turning at 2°; 205 with row `0x1CC` for 40 frames along the facing at 40 (sinking 0.5 while above him); 206 with row `0x1CC` again (the same hit bit), the idle queued, its length + 6 frames |
 | hit | `0x3C4` | hit in the dive: 214 (blend 0) for its length; within 3 m: from 5 counted hits (`wp+0x48`, then 0) the idle 6 frames, the roar, the dive attack; within 10 m: from 5 hits the idle 6 frames, the roar, the charge `0xD70`, a rise when low, the lost state; else (or 1–4 hits) the engaged state |
 | lost | `0x5D2` | hits forgotten; Sora within 5000: the target, a yield, a rise when low, the circle, the idle 6 frames, engaged; else a rise when low, the circle, the idle facing Sora [90, 120) frames, again |
-| hit handler | `0x2484` | death (`sys 44` = 0): `0x26B8` (not ported: Re:CoM's defeat); attributes 2 / 3 / 4: `sys 42` (`0x1402B7E60`: the engine's element reaction) and nothing more; 9 / 11: nothing more; the turn rate 11.25; while 202 plays: a hit not a clash (kinds 6 / 7) nor of attribute 8 / 9 takes no reaction (`hp[0xC] &= ~0x1F`) and asks for 214; every hit counts; otherwise every hit but a clash counts; the hit state 4 |
+| hit handler | `0x2484` | death (`sys 44` = 0): `0x26B8` (not ported: Re:CoM's defeat); attributes 2 / 3 / 4: `sys 42` (`0x1402B7E60`: the engine's element reaction) and nothing more; 9 / 11: nothing more; the turn rate 11.25; while 202 plays (`sys 51`, the request playing): a hit not a clash (kinds 6 / 7) nor of attribute 8 / 9 takes no reaction (`func_20de(hit, 0)`: `hp[0xC] &= ~0x1F`; no `sys 42` on this path) and marks the dive (`wp+0x50`, its hit behaviour plays 214); every hit counts; otherwise every hit but a clash counts; the hit state 4 (Checked (files): `0x2484..0x26B0`) |
 | leash | `0x26D6` → `0x163A` | **not ported**: spawned and 18 m (12.6 m out of sight) from Sora, outside world 11, it is removed; in a Re:CoM battle room it would never be defeated |
 
 Attacks (rows `0x70` bytes, `sys 23`, mode 2: each lives while its request plays; Checked (files)):
@@ -1053,6 +1054,9 @@ constants read at checked offsets (and the stats block's two defaults), 49 reque
 4. After three attack rounds it rises and circles (209 / 210, 4–8 s), halts (211), then attacks again.
 5. Hit it during the dive (202): no flinch; it plays 214. Other hits: KH1's flinch / knock-back in the air; from the
    fifth counted hit within 3 m: the roar and a dive; at 3–10 m: the roar, the charge, then it rises and circles.
+   **The no-reaction armour (owner 2026-11-02):** hit it during the straight drop: it takes the damage (Re:CoM's
+   damage voice), no flinch, and goes into 214 on the next frame, without first dropping to Re:CoM's flinch (the
+   log's `hit kind Some(3) without a reaction while Some(202) plays`); Guard the dive: still Re:CoM's flinch.
 6. Guard any attack: Re:CoM's flinch (no KH1 recoil in the model), then its hit behaviour.
 7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
 8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Wyverns.
@@ -1073,6 +1077,21 @@ kill one. The trace's enemy rows give the heights, the chase and charge speeds a
   (Re:CoM's battles spawn every Wyvern), the death routine.
 - KH1's hit attribute (`hp[0xC] >> 6 & 15`) isn't carried by the host: the element reactions of attributes 2 / 3 / 4
   (`sys 42`; owner 2026-11-02: left out for now), attribute 8 / 9's dive reaction and 9 / 11's early end never come.
+- **The dive's no-reaction hit on the armour** (owner 2026-11-02, Pirate question 3 (b); § Hits that take no
+  reaction). Before: Re:CoM's handler asked for its flinch and cut the dive's attack state; `react_begin` handed
+  back to state 1 and the hit state played 214 there. Now `wyvern::Ai::armoured` is true while 202 plays and the
+  hit's kind is known and not 6 / 7; Re:CoM's super armour keeps the attack state 3; `on_armoured_hit` puts the
+  turn rate back to 11.25°, marks the dive, counts the hit and asks for the hit state. The host (Checked (code +
+  tests)): the next `attack_step` polls the steered dive, the behaviour restarts in its hit state and plays 214,
+  `after_poll` sees another motion (Replaced): the action ends, Re:CoM's attack end runs and 214 plays on in
+  state 1. Checked (files): the handler (`sys 51`, the zeroing, no `sys 42` on the dive path); kind 0 plays nothing
+  (Checked (decomp) `0x1402B8E10`). Checked (tests): `the_dive_on_the_armour`,
+  `hosted_a_hit_in_the_dive_plays_214_in_state_1` (the host model: state 3 for the hit's frame, 214 at the next
+  AI frame, state 1 the frame after for its 92 frames, 202 not asked again, nothing released). **Assumption:**
+  Re:CoM's damage voice on that hit (KH1 plays none). Re:CoM's handler clears the attack bit (`+0x260` bit 0, its
+  `0x2000001` card path: no state change, Checked (decomp) `0x14017E1D0`) while the dive plays on, as for the
+  Pirate. Fallback as before for a hit whose kind the host couldn't read or one in the frame Sora's Guard blocked
+  it.
 - The effects (`sys 75` 2 at the appearance), the fade-in and flag 0x80 at the appearance, the stats block's flag 2.
 - KH1's world 11 rules (the 100 m search, always Sora) apply in Re:CoM's Olympus by decision 21's mapping, as the
   Bandit's Agrabah rules (**Assumption**: Re:CoM's Olympus battles hold Wyverns at all).
@@ -2015,7 +2034,8 @@ the leap land near you; kill one.
    change).
 3. **The fliers' "doesn't flinch"** (Darkball, Air Pirate's dive, Wyvern's dive): their handlers zero the reaction after
    Re:CoM's handler has already ended the attack, so the attack stops there (KH1's goes on). The armour built here keeps an
-   attack going. (a) Leave them, (b) move them onto it (one version each).
+   attack going. (a) Leave them, (b) move them onto it (one version each). **Answered (owner 2026-11-02): (b); built**
+   (§ Hits that take no reaction, and each flier's section).
 
 ## The other 29, by family
 

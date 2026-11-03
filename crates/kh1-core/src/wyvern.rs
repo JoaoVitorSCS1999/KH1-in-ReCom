@@ -1199,8 +1199,32 @@ impl Behaviour for Ai {
         }
         set_state(&self.io, st::HIT);
     }
+    /// The fallback when the host couldn't take the hit on the armour first ([`Behaviour::armoured`]).
     fn keeps_reaction(&self) -> bool {
         self.io.borrow().x.keep
+    }
+    /// The handler's no-reaction case, asked before Re:CoM's handler (M11, owner 2026-11-02: "move onto the
+    /// no-reaction armour"): `0x2560`: while 202 plays (`sys 51`, the request playing), a hit that is not a
+    /// clash (6 / 7; attributes 8 / 9, and 2 / 3 / 4's `sys 42`, aren't carried) has its reaction kind
+    /// zeroed. Unknown kind: not here.
+    fn armoured(&self, playing: Option<u16>, _launch_base: u16, kind: Option<u8>) -> bool {
+        playing == Some(req::DIVE) && kind.is_some_and(|k| !crate::enemy::host::is_clash(k))
+    }
+    /// That hit's handler (`0x254E`, `0x25DA..0x2610`): the turn rate back to 11.25°, the kind zeroed (no
+    /// push: no `sys 42` on this path, a kind-0 record plays nothing), the dive marked (`wp+0x50`), the hit
+    /// counted, the hit state asked for (its behaviour plays 214). Re:CoM's super armour keeps the dive's
+    /// attack state; the hit state's 214 replaces 202 at the next AI frame, which ends that state (the host's
+    /// `after_poll`: another motion replaced it) and 214 plays on in state 1.
+    fn on_armoured_hit(&self, _dir: Vec3) {
+        let turn = self.io.borrow().c.num("turn_default");
+        set_turn_rate(&self.io, turn);
+        {
+            let mut io = self.io.borrow_mut();
+            io.x.keep = true;
+            io.x.dive_hit = true;
+            io.x.hits += 1;
+        }
+        set_state(&self.io, st::HIT);
     }
     fn risen(&self) -> bool {
         self.io.borrow().x.appeared
@@ -1248,6 +1272,7 @@ impl Behaviour for Ai {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enemy::host::model::Model;
 
     /// Test numbers: the player's script's own (the asset step reads them; the disassembly's values), the
     /// shared engine's.
@@ -1455,6 +1480,62 @@ mod tests {
         assert!(s.log.iter().any(|(_, c)| matches!(c, ECmd::MotionAt { request: req::IDLE, start, .. } if *start == 16.0)), "the idle from frame 16");
         assert!(s.attacks().iter().any(|a| a.1 == Attack::Bite));
         assert!(s.attacks().iter().any(|a| matches!(a.1, Attack::Charge | Attack::Dive)), "{:?}", s.attacks());
+    }
+
+    /// The no-reaction armour (owner 2026-11-02): while 202 plays a hit that isn't a clash is taken without a
+    /// reaction (asked before Re:CoM's handler); the handler's turn rate, counts and hit state follow, no push.
+    #[test]
+    fn the_dive_on_the_armour() {
+        let s = Sim::new(1, false, Vec3::new(0.0, -150.0, -100.0));
+        assert!(s.ai.armoured(Some(req::DIVE), 0, Some(3)) && s.ai.armoured(Some(req::DIVE), 0, Some(5)));
+        for (p, k) in [(Some(req::DIVE), Some(6)), (Some(req::DIVE), Some(7)), (Some(req::DIVE), None), (Some(req::DIVE_START), Some(3)), (Some(req::LAND), Some(3)), (Some(req::CHARGE), Some(3)), (None, Some(3))] {
+            assert!(!s.ai.armoured(p, 0, k), "{p:?} {k:?}");
+        }
+        s.ai.io.borrow_mut().body.turn = Some(0.1);
+        s.ai.io.borrow_mut().state.1 = false;
+        s.ai.set_hit_kind(3);
+        s.ai.on_armoured_hit(Vec3::new(0.0, 0.0, -1.0));
+        let io = s.ai.io.borrow();
+        assert!(io.x.dive_hit && io.x.hits == 1 && io.state.1 && io.body.push.is_none(), "counted, the hit state, no push");
+        assert_eq!(io.body.turn, Some(11.25f32.to_radians()), "the turn rate back to 11.25");
+    }
+
+    /// The dive through the host's rules (`crate::enemy::host::model`, its class map: bite 2, the rest 3): 202
+    /// plays in Re:CoM's attack state 3; a hit on the armour keeps that state for the frame; at the next AI
+    /// frame (polled in the attack state: a steered attack) the hit state plays 214, which ends the attack
+    /// state (another motion replaced it) and plays on in state 1 for its length; 202 isn't asked again and
+    /// nothing is released.
+    #[test]
+    fn hosted_a_hit_in_the_dive_plays_214_in_state_1() {
+        let mut s = Sim::new(3, false, Vec3::new(0.0, -200.0, 0.0));
+        let sora = |_| (Vec3::new(100.0, 0.0, 600.0), true);
+        s.run(sora, 2);
+        let cx = s.ai.io.clone();
+        s.ai.behaviour = Some(Box::pin(async move { dive_attack(&cx).await }));
+        let Sim { ai, pos, .. } = s;
+        let mut m = Model::new(Box::new(ai), consts(), frames(), vec![req::DIVE, req::CHARGE], vec![2, 3, 3, 3, 3]);
+        m.pos = pos;
+        let at = Vec3::new(100.0, 0.0, 600.0);
+        for _ in 0..1200 {
+            if m.current == Some(req::DIVE) && m.state == 3 && m.age > 2.0 {
+                break;
+            }
+            m.run(at, 1);
+        }
+        assert_eq!((m.state, m.current), (3, Some(req::DIVE)), "diving in state 3");
+        assert!(!m.armoured_hit(7, Vec3::new(0.0, 0.0, -1.0)), "a clash is not armoured");
+        assert!(m.armoured_hit(3, Vec3::new(0.0, 0.0, -1.0)));
+        m.run(at, 1);
+        assert_eq!(m.current, Some(req::DIVE_HIT), "214 at the next AI frame");
+        assert_eq!(m.next, Some(1), "the attack state ends");
+        m.run(at, 1);
+        assert_eq!((m.state, m.current), (1, Some(req::DIVE_HIT)), "214 in state 1");
+        let from = m.trace.len();
+        m.run(at, 120);
+        assert!(m.longest_run(req::DIVE_HIT) >= 91, "214 for its 92 frames: {}", m.longest_run(req::DIVE_HIT));
+        assert!(m.trace[from..].iter().all(|t| t.0 == 1 || t.1 != Some(req::DIVE_HIT)), "214 only in state 1");
+        assert_eq!(m.attacks_of(req::DIVE).len(), 1, "202 not asked again");
+        assert_eq!(m.released, 0);
     }
 
     /// The dive attack: the chase to 4 m above Sora, 201 (202 queued), the dive 202 straight down to 2.5 m above
