@@ -315,4 +315,23 @@ pub trait Behaviour {
     fn take_now(&self) -> Vec<Cmd<u8>> {
         Vec::new()
     }
+    /// The push direction of the hit the next [`Behaviour::on_hit`] reports (KH1's hit record `+0x10`:
+    /// target − attacker, flat, unit; [`react::Hit::dir`]), for a script hit handler that reads it (M11,
+    /// the Pirate's `0x151E`: `sys 100` of its facing against it picks its get-up slash).
+    fn set_hit_dir(&self, _dir: Vec3) {}
+    /// Whether KH1's script hit handler takes no reaction for a damaging hit now: `sys 42`
+    /// (`0x1402BBD80` → `0x1402B7E60`: the flinch's push slide, the hit record marked done `*hit |= 2`,
+    /// so `0x1402B8E10` plays nothing) in place of a state request. `playing`: the request playing (KH1's
+    /// `+0x164`); `launch_base`: the base of its last launch (`+0x3EA`, written only by the launches
+    /// `0x1402B79F0` / `0x1402B8530`; 0 before any: Assumption, the actor's memory starts zeroed).
+    /// M11, the Pirate's `0x267E` (its attack motions, and `sys 70` `0x1402B7EE0`: `(+0x164 − +0x3EA)`
+    /// under 10 and `% 5 == 3`, lying after a launch). Checked (decomp). The host keeps Re:CoM's state
+    /// for such a hit through Re:CoM's own super armour ([`host::RECOM_ARMOUR`]) and tells the behaviour
+    /// with [`Behaviour::on_armoured_hit`] instead of [`Behaviour::on_hit`].
+    fn armoured(&self, _playing: Option<u16>, _launch_base: u16) -> bool {
+        false
+    }
+    /// A damaging hit taken while [`Behaviour::armoured`]: the hit handler's `sys 42` path (KH1's push
+    /// slide along `dir`, the push direction; no state request, the action goes on).
+    fn on_armoured_hit(&self, _dir: Vec3) {}
 }

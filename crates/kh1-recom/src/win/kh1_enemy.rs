@@ -209,6 +209,9 @@ struct Runtime {
     /// The Re:CoM bone a behaviour looks from (the manifest's `sight_bone`, M11: the Search Ghost's
     /// cone), read once at the ctor; None for the other classes (no per-frame read).
     sight_bone: Option<i32>,
+    /// KH1's `+0x3EA`: the base request of the last launch it played (KH1's own or a script's), 0 before
+    /// any (`kh1_core::enemy::Behaviour::armoured`, M11: the Pirate's `sys 70`).
+    launch_base: u16,
 }
 
 /// A guard row made with a request (`kh1_core::enemy::Cmd::Guard`): KH1's row lives while that
@@ -445,6 +448,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             guard_side: None,
             clash_recoil: None,
             sight_bone: sight_bone(m),
+            launch_base: 0,
         };
         Some(match slot {
             Some(i) => {
@@ -1432,6 +1436,57 @@ pub(super) unsafe fn note_swing(en: usize, kind: u8) {
     }
 }
 
+/// Re:CoM's super armour around one call of its hit handler (`kh1_core::enemy::host::RECOM_ARMOUR`), for a
+/// KH1 enemy whose script takes no reaction for a damaging hit now (`Behaviour::armoured`: KH1's
+/// `sys 42`; M11, the Pirate): the enemy, its flags and its next state before the call.
+pub(super) struct Armour {
+    en: usize,
+    flags: u64,
+    next: usize,
+}
+
+/// Before Re:CoM's hit handler (`super::attack::enemy_hit`, the wrapper every call of `0x14017F7E0` goes
+/// through): bits 20 / 21 on for the call while the behaviour's hit handler would take no reaction.
+/// Per hit: one atomic load while no KH1 class is installed, else one tail check and one question.
+pub(super) unsafe fn armour_on(en: usize) -> Option<Armour> {
+    if !any_installed() {
+        return None;
+    }
+    ours(en)?;
+    if !with_rt(en, |rt| !rt.dead && rt.ai.armoured(rt.current, rt.launch_base))? {
+        return None;
+    }
+    let flags: u64 = rd(en + e::FLAGS);
+    wr(en + e::FLAGS, ke::host::armour_flags(flags));
+    Some(Armour { en, flags, next: rd(en + e::NEXT) })
+}
+
+/// After the call: Re:CoM's two bits back as they were; a damaging hit it took without a reaction (a
+/// living enemy, no state asked for) goes to the behaviour's hit handler (`Behaviour::on_armoured_hit`:
+/// KH1's push slide) and KH1's hit counter. A Re:CoM state (Stop, stun, freeze…) or the defeat is left
+/// to Re:CoM, as before.
+pub(super) unsafe fn armour_off(a: Option<Armour>, result: u64) {
+    let Some(a) = a else { return };
+    let en = a.en;
+    let now: u64 = rd(en + e::FLAGS);
+    wr(en + e::FLAGS, ke::host::restore_armour(now, a.flags));
+    if !ke::host::armour_took(result, rd(en + e::HP), a.next, rd(en + e::NEXT)) {
+        return;
+    }
+    let Some(k) = ours(en) else { return };
+    let hit = hit_of(en, k);
+    with_rt(en, |rt| {
+        rt.hits = rt.hits.saturating_add(1);
+        rt.ai.set_hit_count(rt.hits);
+        if let Some(h) = hit {
+            rt.ai.set_hit_kind(h.kind);
+            rt.ai.on_armoured_hit(h.dir);
+        }
+        let (id, cur) = (rd::<u32>(en + e::ID), rt.current);
+        line(rt.class, || format!("e{id}: hit kind {:?} without a reaction while {cur:?} plays (KH1's sys 42 on Re:CoM's super armour)", hit.map(|h| h.kind)));
+    });
+}
+
 fn take_swing(en: usize) -> Option<u8> {
     let mut g = SWING.lock().ok()?;
     let i = g.iter().position(|x| x.0 == en)?;
@@ -1511,6 +1566,9 @@ unsafe fn start_reaction(en: usize, rt: &mut Runtime, hit: Option<Hit>) -> bool 
         }
         Some(s) => {
             rt.down = s.down;
+            if let Some(b) = s.base {
+                rt.launch_base = b;
+            }
             rt.queued = None;
             play(en, rt, s.request, 0.0);
             rt.queued = Some((s.then, c.get("attack_blend")));
@@ -1568,6 +1626,7 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         }
         if let Some(h) = hit {
             rt.ai.set_hit_kind(h.kind);
+            rt.ai.set_hit_dir(h.dir);
         }
         if let Some((_, k)) = rt.clash_recoil {
             rt.ai.set_hit_kind(k);

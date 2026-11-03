@@ -336,6 +336,48 @@ swings, then deciding what Re:CoM's own attacks see. Assumption (merged rows and
 stays on, since KH1's other row instances (the other hand, the other strike) could still meet a later swing, which
 Re:CoM's whole-body guard can't tell apart.
 
+### Hits that take no reaction (KH1's `sys 42` on Re:CoM's own super armour; M11, the Pirate)
+
+KH1's Pirate keeps attacking when it is hit during its attacks: its hit handler (`ex_2100.bd` `0x2A3C`) calls
+`sys 42` instead of asking for its hit state while one of its attack motions plays (`0x267E`) or while it lies
+after a launch (`sys 70`).
+
+**KH1. Checked (decomp + exe):**
+
+- `sys 42` = `0x1402BBD80`: an effect on a hurt part when the record's `+0xC & 0x800` (`0x1402B8790`, a look: M13),
+  then `0x1402B7E60`: the push slide `0x1402C7300` along the record's push direction `+0x10` at `G+0x2C` × the
+  stats block's `+0xC4` (the flinch's push, `react`'s `flinch_push × weight`), and `*hit |= 2`: KH1's reaction
+  (`0x1402B8E10`) then plays nothing, as after a scripted launch.
+- `sys 70` = `0x1402BBF00` → `0x1402B7EE0`: `u = +0x164 − +0x3EA` (the request playing minus the last launch's base,
+  a u16 written only by the launches `0x1402B79F0` / `0x1402B8530`); true when `u < 10` and `u % 5 == 3` (the lie
+  requests base + 3 / + 8). Before any launch `+0x3EA` is 0 (Assumption: the actor's memory starts zeroed), so the
+  test also holds for requests 3 and 8.
+
+**Re:CoM. Checked (decomp):** its hit handler `0x14017F7E0` applies the damage, calls vtable `+0x3E0` and then its
+reaction picker `0x14017D260`. With `+0x260` bit 20 the blow-away and knock kinds (2..6, 0x12, 0x1D, 0x1E) take the
+flinch's path `0x14017D800`, as kind 1 does; with bit 21 that path plays only the damage voice (`0x140181B50` /
+`0x140181A50`) and asks for no state (`+0x68` untouched). The status kinds keep their states (Stop 8 / 0x17, stun 7,
+Gravity's flatten 0xD, freeze 0x11, 0xB / 0xC / 0xE..0x10 / 0x14 / 0x16 / 0x1F: decision M10's rule), and a killing
+hit still goes to the defeat (`0x140180A80`). A KH1 hit on an attacking enemy carries the card-interrupt bit, so the
+handler's `0x2000001` path ends the "card" first (`0x14017E1D0`, `+0x260 &= ~1`; nothing for our cardless attacks);
+the attack state itself goes on.
+
+**Built (no new hook, no new site; nothing per frame):**
+
+| Part | Where | What |
+|---|---|---|
+| Behaviour | `kh1-core` `enemy/mod.rs` | `Behaviour::armoured(playing, launch_base)` (KH1's `+0x164`, `+0x3EA`; default false), `on_armoured_hit(dir)` (the `sys 42` path), `set_hit_dir(dir)` (the record's `+0x10`, for handlers that read it) |
+| Rules | `kh1-core` `enemy/host.rs` | `RECOM_ARMOUR` (bits 20 / 21), `armour_flags`, `restore_armour` (the two bits back as they were), `armour_took` (the handler answered 1, the enemy lives, `+0x68` unchanged) |
+| Host | `kh1-recom` `win/kh1_enemy.rs` | `armour_on` / `armour_off` around the existing enemy-hit wrapper's call (`win::attack::enemy_hit`, which every call of `0x14017F7E0` goes through): the bits on for the call when the behaviour says so, put back after; a hit the armour kept goes to `on_armoured_hit` with KH1's hit counter and a log line; the runtime keeps `launch_base` (each launch's base, `start_reaction`) |
+
+Per hit: one atomic load while no KH1 class is installed, else one tail check and the behaviour's answer. The
+other classes' behaviours answer false: nothing changes for them.
+
+Found, not changed (owner question in § The Pirate): the Wyvern's attribute 2 / 3 / 4 hits call the same `sys 42`
+(§ The Wyvern: "the engine's element reaction", left out); that is this no-reaction path, so KH1's Wyvern takes no
+reaction from those hits. The Darkball's, the Air Pirate's and the Wyvern's "doesn't flinch" cases zero the reaction
+kind (`keeps_reaction`) after Re:CoM's handler has already cut the attack; this armour would keep their attacks going.
+
 ## The Soldier
 
 ### KH1's side. Checked (files: `ex_2010.bd` disassembled; decomp: the VM `0x1402CC620` and syscalls)
@@ -1766,6 +1808,157 @@ The questions as asked (0.72.0):
    as decision 21 maps the records (Re:CoM's Agrabah = KH1's Agrabah). (a) Keep, (b) Agrabah's rules everywhere,
    (c) the other rules everywhere.
 
+### The Pirate (built)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Pirate yet. Its attacks keep
+going through damage as KH1's do (§ Hits that take no reaction), its block stance and its spin block Sora's swings
+from the front through the shared enemy-guard step (§ Enemy guard).
+
+#### KH1's side. Checked (files: `ex_2100.bd` disassembled, code from `0x5A8`; decomp: the syscalls named)
+
+The script (0x2B80 bytes) has the Soldier's older shape (the actor at `wp+0`, the state object at `wp+0x20`, a search
+object at `wp+0x30`). No child object (no `sys 94`).
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x2824` | init `0x2960` (records LV1 `0x14` / LV2 `0x80`, walk 3, run 6, home, the handlers: hit `0x2A3C`); a yield; the appearance thread `0x992`; each frame: while idle the search `0x182E(&wp30, 0, 1000, 1)` (Sora within 1000; in KH1's world 11 within 10000 and always found) and his height within ±100 of its own → engaged with the target, else no target; then a state request restarts the behaviour (1 idle `0x946`, 2 engaged `0x6B4`, 3 hit `0x5CC`) |
+| appearance | `0x992` → `0x1B58` | (spawn type ≠ 0) the 30-frame fade-in, actor flag 0x80 for 30 frames (`0x24FA`), facing Sora now, action 69 with bit 23 (`0x1800045`, blend 8) and 6 queued, `sys 50` with a zero vector, effect 2; while in the air; then idle |
+| idle | `0x946` | the shared wander `0x1A48(100, 300, &home)` (points [0, 100) and [200, 300) about where it stands, walked to (300 each), 40 % an idle of [90, 180), home beyond 700), then 60 % the taunt 220 |
+| engaged | `0x6B4` | (the leash `0x118C`) Sora above `0x870`; < 250 close `0x828`, < 450 mid `0x7DA`, else far `0x756`; Sora above again; (the leash); the engaged search; engaged again |
+| above | `0x870` | Sora on the ground (`*(target + 0x70)` = 0) above it (KH1 y down): 50–300 the leap; 400 or more the back hop, the run in and the leap. Heights relative to its own: no world height (the owner's rule for world heights doesn't apply) |
+| close | `0x828` | 30 % a side hop and the slash; under 50 % (the same draw) the jump slash; else the spin |
+| mid | `0x7DA` | 30 % the forward hop; then 40 % a side hop and the slash, else the spin |
+| far | `0x756` | 60 % the back hop, the run in (to 350) and the leap, then beyond 450 30 % the taunt; else 30 % the laugh 212, then the spin |
+| hit | `0x5CC` | after its own launch (`wp+0x48` ≠ 2) the get-up slash (235 from the front, 236 from behind) and the spin; with a hit marked (`wp+0x54` = 5) within 300: while it has raised the stance at most once (`wp+0x40` ≤ 1) 30 % the stance, else the counter slash; past that the count back to 0 and the counter slash; farther the jump slash; no hit marked: the leap. Then engaged |
+| hit handler | `0x2A3C` | `wp+0x48` = 2. A clash (kinds 6 / 7): turn to the attacker, mark, the hit state. A damaging hit (`0x1F40` → `sys 44`) while one of its attacks plays (216, 214, 235, 236, 218, 210) or while it lies (`sys 70`): **`sys 42`** only (§ Hits that take no reaction). Else kind 4 / 5 (`0x25CA`): its own launch (`sys 38`: 240 on the ground / 250 in the air, hop 100, speed 30, down 0), the side (`0x151E`: `sys 100` of its facing against the push < 0 is the front), the hit state (no mark). Else mark, the hit state. Death: `0x19CE` (not ported: Re:CoM's defeat) |
+
+Attacks (KH1's bone rows of mode 2 live while their request plays: `0x1402B2DC0` gives a bone row flags `1001b`;
+`sys 213(row, 2)` sets the same mode on the spin's and the stance's guard rows, `0x1402BBC10`; Checked (decomp)):
+
+| Attack | Requests | Damaging rows (bone code → bone, t, radius; HIT slot) | Hit windows | Recoil | Re:CoM id | How it plays |
+|---|---|---|---|---|---|---|
+| slash | 214 (178 f, root) | `0x23C` (48 → `wep0`, 2.5 → −0.5, 50; 0) | [122, 134) | 215 | 1 | plain request (steered): turning to Sora to its end, then the idle |
+| counter | 216 (110 f, root) | `0x4DC` (blade, 50; 0) | [32, 35) | 215 | 1 | action |
+| jump slash | 210 from frame 8 (58 f) | `0x31C` (blade, 35; 0) | [28, 34) of the motion, [20, 26) of the clip | 211 | 0 | action, at once in a 60-frame timed jump (facing × 18, height 12), 6 queued; then the forward hop |
+| slam | 218 (52 f) | `0x38C` (blade, 50; 0) | [0, 5) | 215 | 1 | plain request on landing from the leap (facing × 12, height 200, 45 frames); then 90 % 213, else 205 → 206 → 207 |
+| spin | 222 from frame 8 (122 f), 217 (48 f, looped) | `0xEC` (slot 0), `0x15C` (slot 1) (blade, 40) | [12, 18), [36, 42) each cycle | 221 | 0 | plain request: gliding at Sora at 3.6 (a random point 400–600 away within 30) for 180 frames, ended off the ground or 15 frames after a row landed (`0x117C`), then 219 |
+| get-up slash | 235 (88 f, root) / 236 (64 f, root) | `0x3FC` (blade, 50; 0) | [44, 62) / [20, 30) | 215 | 0 | action |
+
+Guard-type rows (type 2, front half: cos 0, turn 0): the spin's body `0x1CC` (code 8, 55, priority 90, recoil 221, HIT
+slot 2: on through 217) and the stance's blade `0x46C` (code 48, 25, priority 30, recoil 209, HIT slot 0: on through
+208). Row `0x2AC` (type 1, priority 100) is never made. The hops `0x157C(angle, speed, height, time, 3)`: forward 0°
+× 30, 150 high, 40 frames; sideways ±15° × 25, 30 high, 30 frames; back 180° × 20, 100 high, 30 frames (then the run
+in, `0x23B0(1, 300, 20, 350)`); drag 0.9; the trio 3 / 4 (bit 16) / 5 / 6. Reactions: the shared engine with its
+motions (flinch 0x48..0x4B, air flinch 0x4E / 0x4F, launch 0x52.., air launch 0x5C..; no knock-back 0x4C / 0x50, so a
+kind 4 launches, but its handler takes kinds 4 / 5 as its own launch); its own launch 240 / 250 (its get-up 244 / 249
+two frames long). Weight 1.0 in both records. Hurt parts: 7 (Re:CoM bones 16, 2, 15, 11, 7, 27, 43). Checked (files).
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyPirate` (vtable `0x140546458`, 139 slots, RTTI COL at −8), ctor `0x140190F30` (`40 53 48 83 EC 20`, its only
+reference the factory's call at `0x14018930E`; no branch into the moved bytes, no pointer to it: exe scan), allocation
+`0x1401892F5` `mov ecx, 0xCD0` → 0xCF0. Its own states 1 (`0x140191090` / `0x140191370`), 2 (its spin `e021_050`,
+`0x140191000` / `0x1401910C0`), 3 (its slash `e021_051`, `0x140191040` / `0x140191120`); 0 / 11 / 12 / 30 and the attack
+states' ends `CBattleEnemy`'s; think `0x140196EC0` (`CHeartless`'s). Our copy: states 0, 1, 2 (the spin, the jump slash,
+the get-up slashes), 3 (the slash, the counter, the slam), 11, 12, 30, the think. `EN0021.ASD`: 2 records at `0x6C`,
+tail `0x1AC` (id 0 on `e021_050`, `wep0`, 0.2 m, record kind index 0 = Re:CoM kind 1; id 1 on `e021_051` [113, 140),
+kind index 8 = Re:CoM kind 7). `EN0021.SES`: `e021_050`, `e021_051`. `EN0021.ANN`: 75 slots, 30 fps clips.
+
+**Power mapping** (decision M10; the owner's "the Re:CoM attack of the same kind"): the asset step's matcher pairs
+Re:CoM's `e021_050` with KH1's spin 217 and `e021_051` with KH1's slash 214 (Re:CoM's 30 fps edits: every bone but
+the root, hips and spine agrees; Checked (files)): spin → id 0, slash → id 1. The others have no Re:CoM twin; by the
+kind of hit (their rows' `+8`, KH1's reaction on Sora, and `+0x14`, KH1's power): the jump slash and the get-up
+slashes (kind 1, power 2, as the spin's) → id 0; the counter and the slam (kind 4, power 4; the slash's kind 4, power
+6) → id 1 (Assumption: the nearest kind; owner question 1). Each runs in the state of its id (2 / 3).
+
+#### What the asset step writes
+
+`ENEMY/0021/EN0021.ANN` (Re:CoM's 75 slots byte-identical, KH1's clips at 100 + entry: no exact bake, so every request
+plays a KH1 clip; the jump slash 210 and the wind-up 222 from frame 8, `enemy::STARTS`; the spin 217 looped,
+`enemy::LOOPS`), `EN0021.ASD` (Re:CoM's 2 records kept, 8 added: slash 1, counter 1, jump slash 1, slam 1, spin 2,
+get-ups 2), `EN0021.SES` (Re:CoM's 2 entries kept; the slash and the spin take their Re:CoM twins' sounds, the others
+their template's at the hit window: Assumption), `kh1-pirate.json` (`kh1-enemy 1`, 105 numbers, the two guard rows).
+Test `pirate::tests::builds_from_the_players_files`. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0021/EN0021.ANN, method: copy, source: [{name: ENEMY/0021/EN0021.ANN}]}
+- {name: ENEMY/0021/EN0021.ASD, method: copy, source: [{name: ENEMY/0021/EN0021.ASD}]}
+- {name: ENEMY/0021/EN0021.SES, method: copy, source: [{name: ENEMY/0021/EN0021.SES}]}
+- {name: kh1-pirate.json, method: copy, source: [{name: kh1-pirate.json}]}
+```
+
+The step prints `pirate (M11): …`; the log shows `pirate: KH1's pirate (M11) …` at start, `battle N: Pirate … gets KH1's
+AI` in a Pirate battle, per Pirate `pirate: eNNN: KH1 world Some(13) (Re:CoM world 8)` (Neverland) at its appearance, and
+`pirate: eNNN: hit kind … without a reaction while Some(214) plays (KH1's sys 42 on Re:CoM's super armour)` for a hit its
+attacks took.
+
+#### Checked / Assumption
+
+- **Checked (files):** every script number at its offset (the asset test reads them from the player's script), 39 request
+  words, the rows (types, priorities, recoils 215 / 211 / 221 / 209, all in the model), the hit windows, the hurt parts,
+  the start frames (the script's 8s equal `STARTS`), Re:CoM's records and clips, the matcher's pairs.
+- **Checked (decomp):** `sys 42` / `sys 70` / `sys 213` / `sys 38`, the attack rows' modes (`0x1402B2DC0`,
+  `0x1402B47A0`), `+0x3EA`'s writers, Re:CoM's hit handler and picker with bits 20 / 21, the state begins' clips.
+- **Checked (exe):** the class, its slots, the ctor and its only call, the factory size; every site (617 byte sites, 269
+  pointer sites, pefile, 2026-11-02).
+- **Assumptions:** the power of the five attacks without a Re:CoM twin; `+0x3EA` 0 before any launch (so a hit during the
+  first crouch 3 of a hop or jump slash takes no reaction until its first launch); Re:CoM's damage voice on an armoured
+  hit (KH1 plays no reaction); the search finds Sora within its range (`sys 48`'s cone and `sys 139` not ported); every hit
+  of Sora's as KH1's type 0; the apex motion a frame late (as the Powerwild); seeds per enemy; Re:CoM's sounds on the
+  new clips; KH1's queue blends taken as the host's (as every port); Pirates appear in Neverland battles (Re:CoM's).
+- **Ported as written:** the stance's hit count only grows when a hit comes without a state request (KH1's handler always
+  asks, so it restarts the behaviour first); the slam's landing callback is overwritten before it is read.
+- **Not ported:** the leash (KH1 removes it 200 m away), the death routine, the effects (the slash's 0x810 / 0x811, the
+  spin's 14, the appearance's 2: M13), the appearance's flag 0x80, the fade-in (no Re:CoM alpha).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Neverland Pirate battle)
+
+1. Each Pirate plays KH1's appearance (69, about 0.5 s), then wanders a few metres about where it stands, often taunting
+   (220).
+2. Within 10 m at its height it engages. Close (< 2.5 m): a small side hop and the long slash (214, turning to follow Sora,
+   the hit late in the swing), the jump slash (a low long jump with a slash, then a big hop forward), or the spin. Mid
+   (2.5–4.5 m): sometimes a big hop forward, then a side hop and the slash, or the spin. Far: a back hop, a run in and the
+   leap (a 2 m jump at Sora, a slam on landing; mostly it recovers (213), sometimes its sword sticks (205–207)), or a laugh
+   (212) and the spin.
+3. The spin: a wind-up (222), then about 3 s spinning after Sora; when it hits him it stops a quarter second later, dizzy
+   (219).
+4. Hit it during its slash, counter, jump slash, slam or get-up slash: it takes the damage (Re:CoM's damage voice), slides
+   back a little and keeps attacking (no flinch). Stop, Stun Impact, Blizzard's freeze and Gravity still take it over.
+5. Hit it at other times: KH1's flinch; a finisher (a knock or a launch): its own launch, then it gets up slashing (235
+   when hit from the front, 236 from behind) and spins.
+6. After a hit or a clash, within 3 m: the block stance (208; Sora's swings from the front bounce off: recoil 0x6E with the
+   Counterattack, it plays 209 and counters) or the counter slash (216); farther: the jump slash.
+7. Swing into its spin from the front: Sora's strong recoil (0x6F; in the air 0x70), the Pirate plays 221 and counters;
+   from behind the swing lands and it flinches.
+8. Guard its attacks: KH1's recoil 215 (slash, counter, slam, get-ups), 211 (jump slash), 221 (spin). No Re:CoM "Guard"
+   popup over it.
+9. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+10. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Pirates.
+
+Please send `kh1-recom.log` (`pirate:` lines) and an F9 trace.
+
+#### KH1 trace (what to record in KH1)
+
+A Neverland room with Pirates (the ship's hold): stand far 10 s; stand at 3 m 10 s; stand at 1.5 m 10 s; one swing; a full
+combo; a finisher (its launch and get-up slash, from the front and from behind); swing during its long slash and during
+its spin (front and back); swing at its block stance (front and back); Guard its slash, its jump slash and its spin; let
+the leap land near you; kill one.
+
+#### Pirate owner questions
+
+1. **The power of the attacks Re:CoM's Pirate lacks**: Re:CoM has its spin (id 0, Re:CoM's kind 1) and its long slash (id 1,
+   Re:CoM's kind 7). Built by the kind of hit: the jump slash and the get-up slashes (flinching hits, KH1 power 2) take the
+   spin's; the counter and the slam (knock-back hits, power 4) the slash's. (a) Keep, (b) all five on the slash's (id 1),
+   (c) all five on the spin's (id 0).
+2. **The Wyvern's "element reactions"** (found here): the Wyvern's hit handler calls the same `sys 42` for hits of
+   attribute 2 / 3 / 4 (§ The Wyvern, left out as "KH1's element-based reactions"); `sys 42` is KH1's no-reaction path (a
+   push slide, no reaction motion), so KH1's Wyvern doesn't react to those hits. (a) Leave it out (today: they react as
+   any hit), (b) build it on this armour (the host would pass our spells' KH1 attribute to the behaviours: a framework
+   change).
+3. **The fliers' "doesn't flinch"** (Darkball, Air Pirate's dive, Wyvern's dive): their handlers zero the reaction after
+   Re:CoM's handler has already ended the attack, so the attack stops there (KH1's goes on). The armour built here keeps an
+   attack going. (a) Leave them, (b) move them onto it (one version each).
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -1789,7 +1982,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Fat Bandit | `xa_ex_2060` (ex_2060.bd) | `CEnemyFatbandit` 10 | `0x14053ddf8` | `0x14018dd70` / `0x140189127` 0xcd0 | 1,2,3 | 200,205,206,207 | FKaALl | — |
 | Barrel Spider | `xa_ex_2170` (ex_2170.bd) | `CEnemyBarrelspider` 28 | `0x140535688` | `0x14018b3b0` / `0x14018941b` 0xce0 | 1,2,3,19 | 205,207,211,213,214 | FKaA | — |
 | Search Ghost | `xa_ex_2230` (ex_2230.bd) | `CEnemySearchghost` 14 | `0x14054c408` | `0x1401923f0` / `0x1401891cf` 0xce0 | 1,2,3 | 203,204 | FKaA | — |
-| Pirate | `xa_ex_2100` (ex_2100.bd) | `CEnemyPirate` 21 | `0x140546458` | `0x140190f30` / `0x1401892f5` 0xcd0 | 1,2,3 | 208,210,214,216,217,218,235,236 | FaLl | — |
+| Pirate (built) | `xa_ex_2100` (ex_2100.bd) | `CEnemyPirate` 21 | `0x140546458` | `0x140190f30` / `0x1401892f5` 0xcd0 | 1,2,3 | 208,210,214,216,217,218,235,236 | FaLl | — |
 | Air Pirate (built) | `xa_ex_2210` (ex_2210.bd) | `CEnemyAirpirate` 22 | `0x1405309e8` | `0x14018a0b0` / `0x14018931f` 0xcd0 | 1,2,3, think `0x14018a190` | 200,212 | FKaA | — |
 | Wight Knight | `xa_ex_2200` (ex_2200.bd) | `CEnemyWightnight` 12 | `0x140553748` | `0x140194ed0` / `0x14018917b` 0xcd0 | 1,2,3 | 200,201,202,211,216 | FaALl | — |
 | Gargoyle | `xa_ex_2220` (ex_2220.bd) | `CEnemyGargoyle` 13 | `0x14053f198` | `0x14018e150` / `0x1401891a5` 0xcd0 | 1,2,3 | 203,212,218 | FKA | — |
