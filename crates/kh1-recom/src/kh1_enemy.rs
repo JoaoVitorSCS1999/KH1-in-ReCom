@@ -99,7 +99,7 @@ const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin 
 
 /// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
 /// row in their own module (`crate::m11`); one line here per enemy.
-pub static CLASSES: [&Class; 18] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS, &crate::ground::largebody::CLASS, &crate::ground::neoshadow::CLASS, &crate::ground::wightknight::CLASS, &crate::ground::fatbandit::CLASS, &crate::fliers::gargoyle::CLASS, &crate::ground::defender::CLASS, &crate::ground::bouncywild::CLASS, &crate::fliers::rednocturne::CLASS];
+pub static CLASSES: [&Class; 19] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS, &crate::ground::largebody::CLASS, &crate::ground::neoshadow::CLASS, &crate::ground::wightknight::CLASS, &crate::ground::fatbandit::CLASS, &crate::fliers::gargoyle::CLASS, &crate::ground::defender::CLASS, &crate::ground::bouncywild::CLASS, &crate::fliers::rednocturne::CLASS, &crate::fliers::bluerhapsody::CLASS];
 
 /// M10's Shadow (class 0).
 pub static SHADOW: Class = Class {
@@ -600,6 +600,7 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::State(s) => format!("state {}", state_name(*s)),
         Cmd::Held => "held (root motion carries it)".into(),
         Cmd::Attack { request, attack, .. } => format!("attack {request} ({}), steered", names.get(*attack as usize).copied().unwrap_or("?")),
+        Cmd::AttackAt { request, attack, start, .. } => format!("attack {request} ({}) from {start}, steered", names.get(*attack as usize).copied().unwrap_or("?")),
         Cmd::Scale(k) => format!("scale {k:.2}"),
         Cmd::Visible(v) => format!("visible {v}"),
         Cmd::MotionAt { request, blend, start } => format!("motion {request} b{blend} from {start}"),
@@ -617,7 +618,7 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Restart { .. } | Cmd::Throw(_) | Cmd::Note(_) | Cmd::HealFull | Cmd::Reward(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::AttackAt { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Restart { .. } | Cmd::Throw(_) | Cmd::Note(_) | Cmd::HealFull | Cmd::Reward(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -938,7 +939,7 @@ mod tests {
                     h.run(Vec3::new(a.sin() * rad, 0.0, a.cos() * rad), 1);
                 }
                 assert_eq!(h.released, 0, "{} seed {seed}", c.name);
-                let issued: Vec<(usize, u16)> = h.log.iter().filter_map(|(f, c)| if let Cmd::Attack { request, .. } = c { Some((*f, *request)) } else { None }).collect();
+                let issued: Vec<(usize, u16)> = h.log.iter().filter_map(|(f, c)| if let Cmd::Attack { request, .. } | Cmd::AttackAt { request, .. } = c { Some((*f, *request)) } else { None }).collect();
                 for w in issued.windows(2) {
                     assert!(w[1].1 != w[0].1 || w[1].0 > w[0].0 + 2, "{} seed {seed}: {} asked again at {} after {}", c.name, w[0].1, w[1].0, w[0].0);
                 }
@@ -981,6 +982,9 @@ mod tests {
         assert!(logged(&Cmd::Visible(true)) && !logged(&Cmd::Scale(1.0)));
         assert_eq!(cmd_token(&Cmd::MotionAt { request: 0, blend: 24.0, start: 16.0 }, CLASSES[0].attack_names, &n), "motion 0 b24 from 16");
         assert!(logged(&Cmd::MotionAt { request: 0, blend: 24.0, start: 16.0 }));
+        // M11 (the Blue Rhapsody): a steered attack from a later frame.
+        assert_eq!(cmd_token(&Cmd::AttackAt { request: 215, attack: 0, blend: 8.0, start: 8.0 }, CLASSES[0].attack_names, &n), "attack 215 (claw) from 8, steered");
+        assert!(logged(&Cmd::AttackAt { request: 215, attack: 0, blend: 8.0, start: 8.0 }));
         // M11 (the Search Ghost): what KH1 does that isn't built is logged.
         assert_eq!(cmd_token(&Cmd::Note("x"), CLASSES[0].attack_names, &n), "note: x");
         assert!(logged(&Cmd::Note("x")));

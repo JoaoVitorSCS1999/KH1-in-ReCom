@@ -47,6 +47,7 @@ pub mod defender;
 pub mod bouncywild;
 pub mod caster;
 pub mod rednocturne;
+pub mod bluerhapsody;
 
 pub use arc::Arc;
 pub use combat::{blade_params, resolve_hits, Blade, CombatParams, HitReport};

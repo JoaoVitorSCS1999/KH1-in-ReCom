@@ -147,6 +147,8 @@ struct Act {
     attack: Option<u8>,
     blend: f32,
     steered: bool,
+    /// The KH1 frame its motion starts from (`kh1_core::enemy::Cmd::AttackAt`; 0 otherwise).
+    start: f32,
 }
 
 struct Runtime {
@@ -811,7 +813,7 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         }
         Cmd::Queue { request, blend } => rt.queued = Some((request, blend)),
         Cmd::Action { request, attack, then, blend } => {
-            rt.action = Some(Act { request, then, attack, blend, steered: false });
+            rt.action = Some(Act { request, then, attack, blend, steered: false, start: 0.0 });
             rt.action_playing = false;
             rt.action_age = 0.0;
             match attack {
@@ -840,15 +842,18 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         Cmd::Held => rt.ai.body().held = true,
         // A plain request with attack rows (M11 fliers): Re:CoM's attack state, the AI keeps
         // running; its begin plays the motion (no queue: KH1's request replaces the queue).
-        Cmd::Attack { request, attack, blend } => {
-            rt.action = Some(Act { request, then: ke::react::req::IDLE, attack: Some(attack), blend, steered: true });
+        Cmd::Attack { request, attack, blend } | Cmd::AttackAt { request, attack, blend, .. } => {
+            // M11 (the Blue Rhapsody's melee): a steered attack from a later frame (`sys 13`'s start), played from there by
+            // its state's begin (Re:CoM's records tick on the same clock, `0x14014E830` reads `0x1401A47C0`).
+            let start = if let Cmd::AttackAt { start, .. } = *c { start } else { 0.0 };
+            rt.action = Some(Act { request, then: ke::react::req::IDLE, attack: Some(attack), blend, steered: true, start });
             rt.action_playing = false;
             rt.action_age = 0.0;
             enter_state(en, CLASSES[rt.class].attack_states.get(attack as usize).copied().unwrap_or(2));
             if ke::host::starts_at_once(rt.ai.grab_attack(), attack, crate::guard::state_index(en, rd(en + e::STATE))) {
                 // KH1's grab (M11, the Neoshadow): played now (its records attach, `0x14017D750`), its record tested
                 // against Sora once this state step returns ([`grab_test_now`]); the attack state's begin keeps it.
-                play(en, rt, request, blend);
+                play_at(en, rt, request, blend, start);
                 rt.queued = None;
                 rt.action_playing = true;
                 GRAB_NOW.store(en, Ordering::Relaxed);
@@ -990,6 +995,12 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
                 }
             }
         }
+    }
+    // A flier's timed hop (KH1's movement state 5, M11: the Blue Rhapsody's) ends back in flight once it falls to the height
+    // above the battle floor it left from, or touches the floor (`0x1402AFAA0`); one load for every other body.
+    if rt.ai.body().flight_hop.is_some() {
+        let h = rt.floor.map(|f| f - pos.y);
+        let _ = rt.ai.body().flight_hop_done(h, contact);
     }
     if contact && rt.ai.body().falling() {
         rt.ai.body().land();
@@ -1415,7 +1426,7 @@ pub unsafe extern "win64" fn attack_begin(en: usize) {
             // Started at once (KH1's grab): it plays on.
             return true;
         }
-        play(en, rt, a.request, a.blend);
+        play_at(en, rt, a.request, a.blend, a.start);
         // An action queues its `then`; KH1's plain request (a steered attack) replaces the queue.
         rt.queued = (!a.steered).then_some((a.then, a.blend));
         rt.action_playing = true;

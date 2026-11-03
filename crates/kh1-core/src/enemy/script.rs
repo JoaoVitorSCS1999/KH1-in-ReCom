@@ -65,6 +65,10 @@ pub enum Cmd<A> {
     /// it in the class's Re:CoM attack state; it ends when another motion replaces it or its motion
     /// has played.
     Attack { request: u16, attack: A, blend: f32 },
+    /// [`Cmd::Attack`] played from `start` KH1 frames (`sys 13`'s fourth word, as [`Cmd::MotionAt`]): the attack's hit
+    /// windows are its motion's frames, so they come `start` frames sooner. M11, the Blue Rhapsody's melee (`ex_2120.bd`
+    /// `0x4BA`: 215 at blend 8 from frame 8).
+    AttackAt { request: u16, attack: A, blend: f32, start: f32 },
     /// The model's scale (actor `+0x40..+0x48`, all three axes; the Darkball's appearance and
     /// warps ramp it, M11): a factor on the model's own scale.
     Scale(f32),
@@ -144,6 +148,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::State(s) => Cmd::State(s),
             Cmd::Held => Cmd::Held,
             Cmd::Attack { request, attack, blend } => Cmd::Attack { request, attack: f(attack), blend },
+            Cmd::AttackAt { request, attack, blend, start } => Cmd::AttackAt { request, attack: f(attack), blend, start },
             Cmd::Scale(k) => Cmd::Scale(k),
             Cmd::Visible(v) => Cmd::Visible(v),
             Cmd::MotionAt { request, blend, start } => Cmd::MotionAt { request, blend, start },

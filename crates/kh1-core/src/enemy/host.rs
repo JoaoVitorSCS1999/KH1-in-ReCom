@@ -214,11 +214,13 @@ pub mod model {
         pub grabbable: bool,
         pub lands: bool,
         pub held_frames: usize,
+        /// The start frame of the attack asked for ([`Cmd::AttackAt`]; 0 for [`Cmd::Attack`]): its begin plays it from there.
+        pub attack_start: f32,
     }
 
     impl<C: Engine> Model<C> {
         pub fn new(ai: Box<dyn Behaviour>, c: C, frames: Vec<(u16, f32)>, loops: Vec<u16>, attack_states: Vec<i32>) -> Self {
-            Model { ai, c, frames, loops, attack_states, pos: Vec3::ZERO, moved: 0.0, state: 1, next: None, action: None, current: None, age: 0.0, queued: None, released: 0, log: Vec::new(), trace: Vec::new(), frame: 0, grab_test: None, grab_at_once: true, grabbable: true, lands: true, held_frames: 126 }
+            Model { ai, c, frames, loops, attack_states, pos: Vec3::ZERO, moved: 0.0, state: 1, next: None, action: None, current: None, age: 0.0, queued: None, released: 0, log: Vec::new(), trace: Vec::new(), frame: 0, grab_test: None, grab_at_once: true, grabbable: true, lands: true, held_frames: 126, attack_start: 0.0 }
         }
 
         fn len(&self, r: u16) -> f32 {
@@ -278,6 +280,7 @@ pub mod model {
                         return;
                     }
                     self.play(a.request);
+                    self.age = self.attack_start;
                     self.action = Some((Running { playing: true, ..a }, i));
                     if a.steered {
                         self.queued = None;
@@ -365,6 +368,11 @@ pub mod model {
             let d = self.ai.body().step(1.0, self.pos.y, steer, &self.c);
             self.pos += d;
             self.moved = d.length();
+            // A flier's timed hop (KH1's state 5) ends back in flight at its height or at the floor (M11, the Blue
+            // Rhapsody).
+            if self.ai.body().flight_hop_done(Some(-self.pos.y), self.pos.y >= 0.0) {
+                self.pos.y = self.pos.y.min(0.0);
+            }
             if self.pos.y >= 0.0 && self.ai.body().falling() {
                 self.pos.y = 0.0;
                 self.ai.body().land();
@@ -406,7 +414,8 @@ pub mod model {
                         }
                     }
                 }
-                Cmd::Attack { request, attack, .. } => {
+                Cmd::Attack { request, attack, .. } | Cmd::AttackAt { request, attack, .. } => {
+                    self.attack_start = if let Cmd::AttackAt { start, .. } = *c { start } else { 0.0 };
                     self.action = Some((Running { request, attack: true, steered: true, playing: false }, Some(attack)));
                     self.next = Some(self.attack_state(Some(attack)));
                     if self.grab_at_once && starts_at_once(self.ai.grab_attack(), attack, usize::try_from(self.state).ok()) {
@@ -436,7 +445,7 @@ pub mod model {
 
         /// The frames on which request `r` was asked for as a steered attack.
         pub fn attacks_of(&self, r: u16) -> Vec<usize> {
-            self.log.iter().filter_map(|(f, c)| matches!(c, Cmd::Attack { request, .. } if *request == r).then_some(*f)).collect()
+            self.log.iter().filter_map(|(f, c)| matches!(c, Cmd::Attack { request, .. } | Cmd::AttackAt { request, .. } if *request == r).then_some(*f)).collect()
         }
 
         /// The longest run of frames `r` played without a restart, from the trace.

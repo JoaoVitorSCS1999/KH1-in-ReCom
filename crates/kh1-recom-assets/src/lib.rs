@@ -74,6 +74,7 @@ pub mod gargoyle;
 pub mod defender;
 pub mod bouncywild;
 pub mod rednocturne;
+pub mod bluerhapsody;
 pub mod stats;
 pub mod texture;
 pub mod uibin;
