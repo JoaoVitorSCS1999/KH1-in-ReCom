@@ -171,7 +171,7 @@ fn run() -> Result<(), String> {
         t_conv.as_secs_f64()
     );
     if !built.xl.is_empty() {
-        println!("KH1's specials (xl_limit.dat): Sonic Blade's wind-up, dash, finisher and Strike Raid's wind-up, throws, catches and wait on new slots {:?}", built.xl.iter().map(|e| (e.slot, e.name.as_str(), e.frames)).collect::<Vec<_>>());
+        println!("KH1's specials (xl_limit.dat): Sonic Blade's wind-up, dash, finisher, Strike Raid's wind-up, throws, catches and wait, Ars Arcanum's wind-up, hits and finisher on new slots {:?}", built.xl.iter().map(|e| (e.slot, e.name.as_str(), e.frames)).collect::<Vec<_>>());
     }
     if let Some((e, blend)) = &built.held {
         println!("held (M11, the Neoshadow's grab): KH1's held clip (xa_ex_2420.mset player set, request {}) on new slot {} {}, {} frames, blend {blend}", e.kh1_request.unwrap_or(0), e.slot, e.name, e.frames);
@@ -361,7 +361,7 @@ fn run() -> Result<(), String> {
     let ses_path = ann_path.with_file_name("PL0001.SES");
     write(&ses_path, &kh1_recom_assets::ses::write(&sound))?;
     println!(
-        "wrote {} ({} KH1 clip entries: guard {:?}, counterattack {:?}; {} combo modifier clips: {:?}; Sonic Blade's and Strike Raid's clips: none, Re:CoM's own events play on them)",
+        "wrote {} ({} KH1 clip entries: guard {:?}, counterattack {:?}; {} combo modifier clips: {:?}; the specials' clips: none, Re:CoM's own events play on them)",
         ses_path.display(),
         n,
         guard,

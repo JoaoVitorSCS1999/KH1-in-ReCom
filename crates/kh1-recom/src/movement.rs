@@ -1257,6 +1257,14 @@ impl Kh1Sora {
             ev.push(Event::SwingClashed { kind });
             return;
         }
+        // M12 step 7: in state 0x20 (Sonic Blade, Ars Arcanum) KH1's reaction ends the special
+        // (`0x14029BBD0`'s case 0x20: state 0, the state's exit) and then recoils as from a swing.
+        if self.special.is_some() {
+            self.end_special(h, "clash");
+            if self.recom_took {
+                return;
+            }
+        }
         self.leave_swing(h);
         if self.recom_took {
             return;
@@ -1312,7 +1320,7 @@ impl Kh1Sora {
                 }
             }
         }
-        let want = self.untouchable || self.special.is_some();
+        let want = self.untouchable || self.special.is_some_and(|s| s.protected);
         if want != self.untouchable_reported {
             self.untouchable_reported = want;
             h.set_untouchable(want);

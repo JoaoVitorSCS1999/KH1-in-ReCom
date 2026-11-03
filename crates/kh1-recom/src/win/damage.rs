@@ -262,6 +262,11 @@ pub fn swing_tag(kh1_row: usize, value: i32) -> String {
     if crate::specials::ROWS_OF[crate::specials::STRIKE_RAID].contains(&kh1_row) {
         return dm::trace_tag(value, 0, Table::Sleight, crate::specials::recom::RAID_SLEIGHT);
     }
+    if crate::specials::ROWS_OF[crate::specials::ARS_ARCANUM].contains(&kh1_row) {
+        let id = crate::specials::recom::ID_ARCANUM_HIT + (kh1_row - kh1_core::data::row::ARS_ARCANUM_HIT) as u32;
+        let (s, col) = dm::special_source(id).unwrap_or((crate::specials::recom::ARCANUM_SLEIGHT, 0));
+        return dm::trace_tag(value, col, Table::Sleight, s);
+    }
     let col = if kh1_row == row::SONIC_BLADE_FINISHER { dm::COL_FINISHER } else { dm::COL_NORMAL };
     dm::trace_tag(value, col, Table::Sleight, dm::sonic_blade::SLEIGHT)
 }

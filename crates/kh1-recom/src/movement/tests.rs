@@ -2011,6 +2011,100 @@ fn strike_raid_clash_knocks_the_keyblade_back() {
     assert!((22..=27).contains(&k), "the 24-frame knocked-back catch, then the wait's window: {k}");
 }
 
+// ---- M12 step 7: Ars Arcanum on Re:CoM's sleight action ----
+
+/// KH1's flow (`0x14039EEB0`, `0x14039F090` / `0x14039F100`, `0x14039F1E0` / `0x14039EDD0`): the
+/// press starts the wind-up (0xD2, 16 frames) invincible in state 0x20; the first seven hits (rows
+/// 0x22..0x28, Re:CoM's ids 0x12..0x18) follow by themselves, travelling by their root motion; in
+/// the seventh's combo window "Bash" (0x58) runs the eighth, from which Sora can be hit; the
+/// twelfth is followed by "Finis" (0x59), the finisher (row 0x2E, id 0x1E); its end ends the special.
+#[test]
+fn ars_arcanum_runs_kh1s_hits_on_recoms_sleight_action() {
+    use crate::specials::{cmd, recom, SpecialEvent, ARS_ARCANUM, RECOM_ACTION, STATE};
+    use kh1_core::data::xl;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..3 {
+        step_special(&mut p, None);
+    }
+    let pos0 = p.recom.pos;
+    let out = step_special(&mut p, Some(cmd::ARS_ARCANUM));
+    assert_eq!(out.specials, vec![SpecialEvent::Started { index: ARS_ARCANUM }]);
+    assert_eq!(p.recom.specials.last().map(|s| (s.index, s.cost)), Some((ARS_ARCANUM, 300)), "KH1's 3 MP on the press");
+    assert_eq!((p.recom.act.id, p.ours.state, p.ours.rec.head()), (RECOM_ACTION, STATE, xl::request(xl::AA_WINDUP)));
+    assert!(p.recom.untouchable);
+    assert_eq!(p.ours.follow_up(), Some((cmd::ARCANUM, true)));
+    let k = until(&mut p, 30, |p| !p.recom.special_rows.is_empty());
+    assert_eq!(k, 17, "hit 1 as the 16-frame wind-up ends");
+    assert_eq!((p.recom.special_rows[0].kh1_row, p.recom.special_rows[0].recom_id), (0x22, recom::ID_ARCANUM_HIT));
+    // Seven by themselves, no input.
+    until(&mut p, 200, |p| p.recom.special_rows.len() == 7);
+    let ids: Vec<(usize, u32)> = p.recom.special_rows.iter().map(|r| (r.kh1_row, r.recom_id)).collect();
+    assert_eq!(ids, (0..7).map(|k| (0x22 + k, 0x12 + k as u32)).collect::<Vec<_>>());
+    assert_eq!(p.ours.rec.head(), xl::request(10), "the seventh hit (0xD9)");
+    // Its window (22..52) offers "Bash"; until then greyed.
+    let k = until(&mut p, 60, |p| p.ours.follow_up() == Some((cmd::ARCANUM, false)));
+    assert!((19..=23).contains(&k), "{k}");
+    let out = step_special(&mut p, Some(cmd::ARCANUM));
+    assert!(matches!(out.specials[..], [SpecialEvent::Row { counter: 8, kh1_row: 0x29, .. }]), "{:?}", out.specials);
+    assert_eq!(p.recom.special_rows.last().map(|r| r.recom_id), Some(0x19));
+    step_special(&mut p, None);
+    assert!(!p.recom.untouchable, "from the first follow-up on Sora can be hit (KH1 clears 0x1000080)");
+    for n in 9..=13u8 {
+        let c = if n == 13 { cmd::ARCANUM_LAST } else { cmd::ARCANUM };
+        until(&mut p, 80, |p| p.ours.follow_up() == Some((c, false)));
+        let out = step_special(&mut p, Some(c));
+        assert!(matches!(out.specials[..], [SpecialEvent::Row { counter, kh1_row, .. }] if counter == n && kh1_row == 0x21 + n as usize), "{:?}", out.specials);
+    }
+    assert_eq!(p.recom.special_rows.last().map(|r| (r.kh1_row, r.recom_id)), Some((0x2E, 0x1E)));
+    assert_eq!(p.ours.rec.head(), xl::request(xl::AA_FINISHER));
+    let k = until(&mut p, 120, |p| p.ours.special.is_none());
+    assert!((86..=91).contains(&k), "the 88-frame finisher: {k}");
+    assert_eq!((p.recom.special_ends, p.ours.state), (1, state::GROUND));
+    assert!((p.recom.pos - pos0).flat().length() > 800.0, "root travel moves Sora: {}", (p.recom.pos - pos0).flat().length());
+}
+
+/// Without a follow-up the special ends after the seventh hit (16 + the seven hits' 140 frames), its
+/// root travel KH1's (620); Sora invincible throughout.
+#[test]
+fn ars_arcanum_ends_after_seven_hits() {
+    use crate::specials::cmd;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_special(&mut p, None);
+    step_special(&mut p, Some(cmd::ARS_ARCANUM));
+    let start = p.recom.pos;
+    let mut k = 0;
+    while p.ours.special.is_some() {
+        assert!(p.recom.untouchable || k == 0);
+        step_special(&mut p, None);
+        k += 1;
+        assert!(k < 250);
+    }
+    assert!((156..=164).contains(&k), "{k}");
+    assert_eq!(p.recom.special_rows.len(), 7);
+    for _ in 0..3 {
+        step_special(&mut p, None);
+    }
+    let travel = (p.recom.pos - start).flat().length();
+    assert!((travel - 620.0).abs() < 1.0, "{travel}");
+}
+
+/// A clash in state 0x20 (Ars Arcanum, Sonic Blade; KH1's reaction `0x14029BBD0` case 0x20): the
+/// special ends (Re:CoM's sleight action ended) and Sora takes the swing's recoil.
+#[test]
+fn a_clash_ends_ars_arcanum_with_the_recoil() {
+    use crate::specials::cmd;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_special(&mut p, None);
+    step_special(&mut p, Some(cmd::ARS_ARCANUM));
+    until(&mut p, 30, |p| !p.recom.special_rows.is_empty());
+    step_special(&mut p, None);
+    p.recom.swing_clash = Some((6, -10));
+    step_special(&mut p, None);
+    assert!(p.ours.special.is_none() && p.ours.state == state::GROUND);
+    assert_eq!(p.recom.special_ends, 1);
+    assert_eq!(p.ours.rec.head(), crate::rows::RECOIL);
+}
+
 // ---- `dodge_roll = recom`: Re:CoM's own roll (owner, 2026-11-02, "The whole roll") ----
 
 /// One handler frame with the stick (no oracle: the roll after the hand-over is Re:CoM's), an

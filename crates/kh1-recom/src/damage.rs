@@ -351,12 +351,19 @@ pub mod sonic_blade {
 /// Damage = Re:CoM (owner, 2026-11-01, for Sonic Blade; M12 step 7, the same rule for the others:
 /// "damage = Re:CoM's sleight of the same name"): Sonic Blade's ids 0xE / 0xF / 0x10 (sleight 9,
 /// columns 0 / 0 / 2); Strike Raid's 0xD (sleight 8, row 0xD `+0xA` = column 0, `initStockSkill`'s
-/// rule 1: power × attack ÷ 100, its only hit row: every KH1 throw takes it). Checked (decomp + exe
-/// rows).
+/// rule 1: power × attack ÷ 100, its only hit row: every KH1 throw takes it); Ars Arcanum's
+/// 0x11..=0x1E (sleight 10, each row's column). Checked (decomp + exe rows).
 pub fn special_source(recom_id: u32) -> Option<(u16, u8)> {
     match recom_id {
         0xE | 0xF | 0x10 => Some((sonic_blade::SLEIGHT, sonic_blade::column(recom_id)?)),
         0xD => Some((crate::specials::recom::RAID_SLEIGHT, 0)),
+        // Ars Arcanum (sleight 10): rows 0x11..=0x1E `+0xA`: the start and the hits 0, the seventh
+        // hit (0x18) 1, the finisher (0x1E) 2 (Checked (exe): `sites::SPECIAL_AA_CHECKED`).
+        0x11..=0x1E => Some((crate::specials::recom::ARCANUM_SLEIGHT, match recom_id {
+            0x18 => 1,
+            0x1E => 2,
+            _ => 0,
+        })),
         _ => None,
     }
 }
