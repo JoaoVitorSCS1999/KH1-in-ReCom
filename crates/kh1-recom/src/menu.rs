@@ -1,149 +1,308 @@
-//! Our rows in Re:CoM's Config menu (camp menu → Config): the testable part.
+//! The "KH1" camp entry's settings pages (owner, 2026-11-03): **Combat** (Combat, Guard reactions,
+//! Enemy pace, Enemy AI, Revenge Value) and **Movement** (Run speed, Jump height, Air speed, Dodge
+//! roll). The testable part.
 //!
-//! Re:CoM's Config screen is `CCamp`'s sub-screen run by `0x1400D3EB0` (input) and drawn by
-//! `0x1400DF1B0` (mode 9 rebuilds the rows). It has 5 rows (cursor `camp+0xBE8`, 0..4): rows 0-3
-//! are two-choice toggles kept in bytes `camp+0xBED + row`, row 4 shows a 4-value setting it
-//! cannot change. Checked (decomp + disasm). We add rows 5 ("Combat"), 6 ("Guard reactions",
-//! decision 27) and 7 ("Enemy pace", decision 32) below row 4, drawn by the same game code (its `CButton` items, its layout
-//! positions, its cursor sprite and help line), and have Re:CoM's own 9-slice code draw its window
-//! panel one row taller per row we add (`panel`).
+//! Each page is Re:CoM's own Config screen machinery (`CCamp`'s Config draw `0x1400DF1B0`, its
+//! window panel, its `CButton` label and value items at its `camp.lad` positions, its cursor sprite,
+//! its help line, its sounds), opened from our submenu (`win::keyblades`) with our rows in place of
+//! Re:CoM's five: rows 0..4 sit exactly where Re:CoM's rows 0..4 sit, so the panel needs no
+//! resizing. A two-value row is drawn as Re:CoM's rows 0..3 (both options, the chosen one
+//! highlighted); the three-value Dodge roll row as Re:CoM's row 4 "Game Mode" (one value item
+//! showing the current option). Left / right change the row under the cursor as Re:CoM's rows do.
+//!
+//! Re:CoM's own Config screen (camp menu > Config) is back to exactly Re:CoM's five rows: the rows
+//! we used to add there (Combat, Guard reactions, Enemy pace) moved here.
 //! See `docs/recom-config-menu.md`.
 
-/// Re:CoM's last row.
-pub const LAST_RECOM_ROW: i32 = 4;
-/// Our first row.
-pub const FIRST_ROW: i32 = 5;
-/// How many rows we add: 5 "Combat", 6 "Guard reactions", 7 "Enemy pace".
-pub const ROWS: usize = 3;
-/// Our row indices (`k`, row `FIRST_ROW + k`).
-pub const ROW_COMBAT: usize = 0;
-pub const ROW_GUARD_REACTIONS: usize = 1;
-pub const ROW_ENEMY_PACE: usize = 2;
-/// The last row the cursor can reach.
-pub const LAST_ROW: i32 = FIRST_ROW + ROWS as i32 - 1;
+use crate::settings::{Mode, RollMode, Settings};
 
 /// Item slots in `camp+0xB38` (21 pointers, cleared and deleted by Re:CoM's own code in draw
-/// modes 6 and 9 and in the camp's teardown `0x1400D7C20`). Re:CoM fills 0..13 (5 labels, 9
-/// values); 14..20 are never written. Checked (decomp: every reference to `camp+0xB38..0xBE0`).
+/// modes 6 and 9 and in the camp's teardown `0x1400D7C20`). Checked (decomp: every reference to
+/// `camp+0xB38..0xBE0`). Our pages fill them from slot 0, as Re:CoM's mode 9 does.
 pub const SLOT_BASE: usize = 0xB38;
 pub const SLOT_COUNT: usize = 21;
-pub const FIRST_FREE_SLOT: usize = 14;
+
+/// Re:CoM's Config screen has 5 rows (0..4); a page of ours never has more, so every row has
+/// Re:CoM's own position. Checked (decomp `0x1400DF1B0` mode 9).
+pub const MAX_ROWS: usize = 5;
+
+/// The help box shows about 69 characters of one line and cuts the rest (owner's screenshots,
+/// 2026-10-31: the Combat help showed up to "combat." at 68 characters, the Guard reactions one
+/// up to "KH1 com" at 69). Checked (screenshot, at 1275 px wide); kept a few under.
+pub const HELP_MAX: usize = 66;
 
 /// How a row shows its values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Style {
     /// Both options side by side, the chosen one highlighted (Re:CoM's rows 0..3; 3 items).
     Pair,
-    /// One wide value showing the current option (Re:CoM's row 4, "Game Mode"; 2 items). Ours
-    /// flip with left / right.
+    /// One wide value showing the current option (Re:CoM's row 4, "Game Mode"; 2 items).
     Single,
 }
 
-/// Item slots our row `k` uses: the label, then its value items. The 7 free slots hold one
-/// pair row and two single rows (owner, 2026-10-31: option (a)).
-pub fn slots(k: usize) -> &'static [usize] {
-    const S: [&[usize]; ROWS] = [&[14, 15, 16], &[17, 18], &[19, 20]];
-    S[k]
+/// A settings page of the KH1 camp entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Page {
+    Combat,
+    Movement,
 }
 
-/// The style a row's slots give it.
-pub fn style(k: usize) -> Style {
-    if slots(k).len() == 3 {
-        Style::Pair
-    } else {
-        Style::Single
+/// A row of a settings page: one `kh1-recom.ini` key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Item {
+    /// `combat`
+    Combat,
+    /// `guard_reactions`
+    GuardReactions,
+    /// `enemy_pace`
+    EnemyPace,
+    /// `enemy_ai`
+    EnemyAi,
+    /// `boss_revenge` (owner, 2026-11-03: the row is named "Revenge Value").
+    RevengeValue,
+    /// `run_speed`
+    RunSpeed,
+    /// `jump_height`
+    JumpHeight,
+    /// `air_speed`
+    AirSpeed,
+    /// `dodge_roll`
+    DodgeRoll,
+}
+
+/// When a change takes effect (from what reads the setting; `docs/recom-config-menu.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Effect {
+    /// Read live (the next frame after the camp closes).
+    Now,
+    /// Read when a battle starts (the battle manager's construction / each enemy's).
+    NextBattle,
+}
+
+impl Page {
+    pub const ALL: [Page; 2] = [Page::Combat, Page::Movement];
+
+    /// Its rows, top to bottom (owner, 2026-11-03).
+    pub fn items(self) -> &'static [Item] {
+        match self {
+            Page::Combat => &[Item::Combat, Item::GuardReactions, Item::EnemyPace, Item::EnemyAi, Item::RevengeValue],
+            Page::Movement => &[Item::RunSpeed, Item::JumpHeight, Item::AirSpeed, Item::DodgeRoll],
+        }
+    }
+
+    /// The submenu row's label (also the page's breadcrumb title).
+    pub fn label(self) -> &'static [u8] {
+        match self {
+            Page::Combat => b"Combat\0",
+            Page::Movement => b"Movement\0",
+        }
+    }
+
+    /// The submenu row's help line.
+    pub fn help(self) -> &'static [u8] {
+        match self {
+            Page::Combat => b"Combat, Guard reactions, enemy pace and AI, Revenge Value.\0",
+            Page::Movement => b"Run speed, jump height, air speed and Dodge roll.\0",
+        }
     }
 }
 
-/// What a frame of input does with the cursor on the Config screen.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Step {
-    /// Re:CoM's own code handles this frame.
-    Original,
-    /// Move the cursor to this row (with Re:CoM's cursor sound and a redraw).
-    Move(i32),
-    /// Flip our row `k`.
-    Toggle(usize),
-    /// Our row has the cursor and nothing was pressed.
-    Idle,
+const RECOM_KH1: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0"];
+const OFF_ON: &[&[u8]] = &[b"Off\0", b"On\0"];
+const ROLL: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"Off\0"];
+
+fn mode_index(m: Mode) -> usize {
+    match m {
+        Mode::Recom => 0,
+        Mode::Kh1 => 1,
+    }
 }
 
-/// The input of one frame, as Re:CoM's own `0x140111A70` reports it (same masks as the
-/// original: up `0x101000`, down `0x204000`, left `0x408000`, right `0x802000`). Confirm/cancel
-/// is checked before this and always goes to Re:CoM's code (it closes the screen).
+fn mode_of(i: usize) -> Mode {
+    if i == 1 {
+        Mode::Kh1
+    } else {
+        Mode::Recom
+    }
+}
+
+impl Item {
+    /// The row's label.
+    pub fn label(self) -> &'static [u8] {
+        match self {
+            Item::Combat => b"Combat\0",
+            Item::GuardReactions => b"Guard reactions\0",
+            Item::EnemyPace => b"Enemy pace\0",
+            Item::EnemyAi => b"Enemy AI\0",
+            Item::RevengeValue => b"Revenge Value\0",
+            Item::RunSpeed => b"Run speed\0",
+            Item::JumpHeight => b"Jump height\0",
+            Item::AirSpeed => b"Air speed\0",
+            Item::DodgeRoll => b"Dodge roll\0",
+        }
+    }
+
+    /// Its options, in the order left / right cycle through them.
+    pub fn options(self) -> &'static [&'static [u8]] {
+        match self {
+            Item::GuardReactions | Item::RevengeValue => OFF_ON,
+            Item::DodgeRoll => ROLL,
+            _ => RECOM_KH1,
+        }
+    }
+
+    /// Two options: Re:CoM's pair row; more: Re:CoM's single-value row.
+    pub fn style(self) -> Style {
+        if self.options().len() == 2 {
+            Style::Pair
+        } else {
+            Style::Single
+        }
+    }
+
+    /// The help line with the cursor on the row (at most [`HELP_MAX`] characters, no `%`).
+    pub fn help(self) -> &'static [u8] {
+        match self {
+            Item::Combat => concat!("Re:CoM: card battles. KH1: Kingdom Hearts combat. (mod v", env!("CARGO_PKG_VERSION"), ")\0").as_bytes(),
+            Item::GuardReactions => b"On: blocked attackers flinch, blocked shots fly back. KH1 only.\0",
+            Item::EnemyPace => b"KH1: each enemy attacks as if alone. KH1 only, from next battle.\0",
+            Item::EnemyAi => b"KH1: KH1 enemies' own AI. KH1 only, from the next battle.\0",
+            Item::RevengeValue => b"On: humanoid bosses use KH2's revenge value. KH1 only.\0",
+            Item::RunSpeed => b"Re:CoM: 6.2 m/s run. KH1: 4.8 m/s. KH1 only.\0",
+            Item::JumpHeight => b"Re:CoM: Re:CoM's jump (2.0 m). KH1: KH1's jump (1.9 m). KH1 only.\0",
+            Item::AirSpeed => b"Speed and steering in the air: Re:CoM's or KH1's. KH1 only.\0",
+            Item::DodgeRoll => b"Re:CoM's roll, KH1's roll, or Off (Square guards). KH1 only.\0",
+        }
+    }
+
+    /// When a change takes effect.
+    pub fn effect(self) -> Effect {
+        match self {
+            Item::EnemyPace | Item::EnemyAi => Effect::NextBattle,
+            _ => Effect::Now,
+        }
+    }
+
+    /// The `kh1-recom.ini` key.
+    pub fn key(self) -> &'static str {
+        match self {
+            Item::Combat => "combat",
+            Item::GuardReactions => "guard_reactions",
+            Item::EnemyPace => "enemy_pace",
+            Item::EnemyAi => "enemy_ai",
+            Item::RevengeValue => "boss_revenge",
+            Item::RunSpeed => "run_speed",
+            Item::JumpHeight => "jump_height",
+            Item::AirSpeed => "air_speed",
+            Item::DodgeRoll => "dodge_roll",
+        }
+    }
+
+    /// The option index the settings hold.
+    pub fn value(self, s: &Settings) -> usize {
+        match self {
+            Item::Combat => mode_index(s.combat),
+            Item::GuardReactions => s.guard_reactions as usize,
+            Item::EnemyPace => mode_index(s.enemy_pace),
+            Item::EnemyAi => mode_index(s.enemy_ai),
+            Item::RevengeValue => s.boss_revenge as usize,
+            Item::RunSpeed => mode_index(s.run_speed),
+            Item::JumpHeight => mode_index(s.jump_height),
+            Item::AirSpeed => mode_index(s.air_speed),
+            Item::DodgeRoll => match s.dodge_roll {
+                RollMode::Recom => 0,
+                RollMode::Kh1 => 1,
+                RollMode::Off => 2,
+            },
+        }
+    }
+
+    /// The settings with this row at option `v` (everything else kept; Dodge roll also keeps
+    /// the ini's ability switch in step, as the ini's parser does).
+    pub fn set(self, s: &mut Settings, v: usize) {
+        match self {
+            Item::Combat => s.combat = mode_of(v),
+            Item::GuardReactions => s.guard_reactions = v == 1,
+            Item::EnemyPace => s.enemy_pace = mode_of(v),
+            Item::EnemyAi => s.enemy_ai = mode_of(v),
+            Item::RevengeValue => s.boss_revenge = v == 1,
+            Item::RunSpeed => s.run_speed = mode_of(v),
+            Item::JumpHeight => s.jump_height = mode_of(v),
+            Item::AirSpeed => s.air_speed = mode_of(v),
+            Item::DodgeRoll => {
+                s.dodge_roll = match v {
+                    1 => RollMode::Kh1,
+                    2 => RollMode::Off,
+                    _ => RollMode::Recom,
+                };
+                s.abilities.dodge_roll = s.dodge_roll.on();
+            }
+        }
+    }
+}
+
+/// Re:CoM's change of a row's value (`0x1400D3EB0` state 2): left −1, right +1, wrapping over the
+/// option count (its rows have 2: left from 0 gives 1, right from 1 gives 0). Checked (decomp).
+pub fn cycle(v: usize, n: usize, right: bool) -> usize {
+    if n == 0 {
+        return 0;
+    }
+    if right {
+        (v + 1) % n
+    } else {
+        (v + n - 1) % n
+    }
+}
+
+/// The input of one frame, as Re:CoM's own `0x140111A70` reports it (masks: up `0x101000`, down
+/// `0x204000`, left `0x408000`, right `0x802000`), and `0x140111B90` (confirm or cancel: closes the
+/// screen).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Input {
+    pub close: bool,
     pub up: bool,
     pub down: bool,
     pub left: bool,
     pub right: bool,
 }
 
-/// The original checks up, then down, then left, then right (`0x1400D3F1E..0x1400D4040`); this
-/// keeps that order. Re:CoM's rows keep their behaviour except at the two edges that now lead to
-/// our rows: up on row 0 (wrapped to 4, now to our last row) and down on row 4 (wrapped to 0, now
-/// to our first row).
-pub fn step(cursor: i32, i: Input) -> Step {
-    if cursor <= LAST_RECOM_ROW {
-        if i.up {
-            return if cursor == 0 { Step::Move(LAST_ROW) } else { Step::Original };
-        }
-        if i.down && cursor == LAST_RECOM_ROW {
-            return Step::Move(FIRST_ROW);
-        }
-        return Step::Original;
+/// What a frame of input does on a settings page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// Close the page (Re:CoM: draw mode 4, sound 4).
+    Close,
+    /// The cursor to this row (sound 1, redraw).
+    Move(usize),
+    /// The row under the cursor changes: right (true) or left (sound 1, redraw).
+    Change(bool),
+    Idle,
+}
+
+/// Re:CoM's Config input (`0x1400D3EB0` state 2), in its order: confirm / cancel closes; else up
+/// (from row 0 to the last), else down (from the last to row 0); else left, else right, on the row
+/// under the cursor (every row of ours changes; Re:CoM's own row 4 is display-only). Checked
+/// (decomp).
+pub fn step(cursor: usize, rows: usize, i: Input) -> Step {
+    if i.close {
+        return Step::Close;
+    }
+    if rows == 0 {
+        return Step::Idle;
     }
     if i.up {
-        return Step::Move(cursor - 1);
+        return Step::Move(if cursor == 0 || cursor >= rows { rows - 1 } else { cursor - 1 });
     }
     if i.down {
-        return Step::Move(if cursor >= LAST_ROW { 0 } else { cursor + 1 });
+        return Step::Move(if cursor + 1 >= rows { 0 } else { cursor + 1 });
     }
-    if i.left || i.right {
-        return Step::Toggle((cursor - FIRST_ROW).clamp(0, ROWS as i32 - 1) as usize);
+    if i.left {
+        return Step::Change(false);
+    }
+    if i.right {
+        return Step::Change(true);
     }
     Step::Idle
 }
-
-/// Text of our rows. Re:CoM's own rows take theirs from its message table (`0x140240160`, ids
-/// `0x5001xx`); ours are NUL-terminated ASCII handed to the same text items. That plain ASCII
-/// renders as itself is an Assumption (the message formatter `0x1402402B0` treats `a`-`z` as
-/// letters; not seen in game yet).
-pub struct RowText {
-    pub label: &'static [u8],
-    pub options: [&'static [u8]; 2],
-    pub help: &'static [u8],
-}
-
-pub const TEXT: [RowText; ROWS] = [
-    RowText {
-        label: b"Combat\0",
-        options: [b"Re:CoM\0", b"KH1\0"],
-        help: concat!(
-            "Re:CoM: card battles. KH1: Kingdom Hearts combat. (mod v",
-            env!("CARGO_PKG_VERSION"),
-            ")\0"
-        )
-        .as_bytes(),
-    },
-    // Decision 27: only has an effect at Combat = KH1 (Re:CoM's Sora has no Guard).
-    RowText {
-        label: b"Guard reactions\0",
-        options: [b"Off\0", b"On\0"],
-        help: b"On: blocked attackers flinch, blocked shots fly back. KH1 only.\0",
-    },
-    // Decision 32: only has an effect at Combat = KH1, from the next battle.
-    RowText {
-        label: b"Enemy pace\0",
-        options: [b"Re:CoM\0", b"KH1\0"],
-        help: b"Re:CoM: a crowd shares attacks. KH1: each attacks as if alone.\0",
-    },
-];
-
-/// The help box shows about 69 characters of one line and cuts the rest (owner's screenshots,
-/// 2026-10-31: the Combat help showed up to "combat." at 68 characters, the Guard reactions one
-/// up to "KH1 com" at 69). Checked (screenshot, at 1275 px wide); kept a few under.
-pub const HELP_MAX: usize = 66;
 
 /// Layout elements (group `0xB` of `camp.lad`, read with `0x140246100`) Re:CoM's rows use.
 /// Labels take x from the first and y from the second; values take x from the option's element
@@ -158,310 +317,200 @@ pub mod layout {
     pub const VALUE_Y: [u64; 5] = [9, 0xB, 0xD, 0xF, 0x11];
 }
 
-/// The y of our row `k`: one row step below the last, as many times as needed. `y3` and `y4`
-/// are the y of Re:CoM's rows 3 and 4. Assumption: the rows are evenly spaced (they are in the
-/// layout's elements as read at runtime).
-pub fn row_y(y3: f32, y4: f32, k: usize) -> f32 {
-    y4 + (y4 - y3) * (k as f32 + 1.0)
-}
-
-/// The value index a row shows as selected (Re:CoM's rows: byte == option).
-pub fn selected(value: bool, option: usize) -> bool {
-    (option == 1) == value
-}
-
-/// x offset Re:CoM adds to the cursor sprite on a value item: 0.0 for item 0, 150.0 for items
-/// 1..8 (floats at `rbp+0x64`, from `0x1405094F0` / `0x140509500`). Checked (exe + disasm).
-pub const CURSOR_X_OFFSET: f32 = 150.0;
-/// Cursor animation for a toggle row (row 4 uses 0x100). Checked (disasm `0x1400DF93B`).
+/// Cursor animation on a pair row's selected value (Re:CoM's rows 0..3). Checked (disasm
+/// `0x1400DF93B`).
 pub const CURSOR_ANIM: u32 = 0xFA;
 /// Cursor animation on a single-value row (Re:CoM's row 4). Checked (decomp `0x1400DF1B0`).
 pub const CURSOR_ANIM_SINGLE: u32 = 0x100;
-
-/// Re:CoM's row 4 value item: sequence index 8 of `0x1407C1240`, x element 0x16, selected
-/// argument 0. Checked (decomp `0x1400DF1B0`).
+/// Re:CoM's single-value item: index 8 (sequence `0x1407C1240[8]`, x element `0x16`).
 pub const SINGLE_VALUE_ITEM: usize = 8;
 
-/// The Config window panel (`camp+0xB30`, a `C2DSeqCtrl`), drawn taller by Re:CoM's own 9-slice
-/// code. Checked (decomp + disasm), see `docs/recom-config-menu.md`:
-///
-/// - The draw `0x1400DF1B0` gives the panel animation `0xF7` (open) in mode 0, `0xF8` (idle)
-///   in mode 1 once `0xF7` ends, and `0xF9` (close) in mode 4. Each change makes a new
-///   `C2DSeqObj` with new `C2DSprObj` children (vtable `0x1406077D8`), found through the
-///   panel's handle `+0x144` with `0x140246210` and the object's list `+0x20` (next at `+8`).
-/// - A `C2DSprObj` with exactly 9 parts (`+0x142`) is a 9-slice: with flag 8 in `+0x144` its
-///   update `0x14024BB10` calls `0x14024AD40`, which moves the parts' corners by the edge
-///   offsets left `+0xA0`, top `+0xA4`, right `+0xA8`, bottom `+0xAC` (top row by top, middle
-///   row stretched, bottom row by bottom). Re:CoM's own resize `0x14024C270` (vtable `+0x38`,
-///   used by the message window `0x1402B3040`) sets the same fields, but centres the window on
-///   its origin; we set only the bottom offset so the panel's top stays where it is.
-pub mod panel {
-    /// Draw modes after which the panel has a new animation (0 open, 1 opening tick that may
-    /// switch to idle, 4 close). Mode 3 (every frame while open) and 9 (rows) don't touch it.
-    pub fn restretch_after(mode: u32) -> bool {
-        matches!(mode, 0 | 1 | 4)
+/// x offset Re:CoM adds to the cursor sprite on value item `i` (floats at `rbp+0x64`: 0.0 for
+/// item 0, 150.0 for items 1..8). Checked (exe + decomp: the table starts with two 0.0 and the
+/// pointer starts 4 bytes in).
+pub fn cursor_x_offset(item: usize) -> f32 {
+    if item == 0 {
+        0.0
+    } else {
+        150.0
     }
+}
 
-    /// How much lower the bottom edge goes: one row step per row we add. Units are the
-    /// layout's, which are the panel's local units (its items are its children, positioned
-    /// with raw layout values). Assumption: the panel's animation has scale 1 at rest.
-    pub fn grow(y3: f32, y4: f32) -> f32 {
-        (y4 - y3) * super::ROWS as f32
-    }
+/// Where a value item of ours goes: Re:CoM's value item whose x element, sequence ids and cursor
+/// offset it takes (`item`, 0..8), at row `row`'s y.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ValueAt {
+    pub item: usize,
+    pub x_elem: u64,
+}
 
-    /// Parts of a 9-slice sprite (`C2DSprObj+0x142`).
-    pub const NINE: u8 = 9;
-    /// `C2DSprObj` fields.
-    pub const PARTS: usize = 0x120;
-    pub const PART_COUNT: usize = 0x142;
-    pub const FLAGS: usize = 0x144;
-    pub const FLAG_NINE_SLICE: u8 = 8;
-    pub const OFFSETS: usize = 0xA0;
-    /// `C2DSeqObj+0x20`: its sprite list; first object at list `+8`, next at object `+8`.
-    pub const SEQ_LIST: usize = 0x20;
-    /// `C2DSeqCtrl`: handles of its sequences at `+0x144`, count at `+0x16D`.
-    pub const CTRL_HANDLES: usize = 0x144;
-    pub const CTRL_COUNT: usize = 0x16D;
-
-    /// What to do with one sprite of the panel's sequence.
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    pub enum Sprite {
-        /// Not a 9-slice, or not a `C2DSprObj`: leave it.
-        Skip,
-        /// Already has flag 8 (ours from an earlier call, or Re:CoM's own resize): leave it.
-        Done,
-        /// Write these edge offsets (left, top, right, bottom) and set flag 8.
-        Stretch([f32; 4]),
-    }
-
-    /// The other sprites of the panel are drawn from their parts' rects as they are: each part
-    /// `+0` points at a 0x14-byte entry `{i32 x0, y0, x1, y1; u32 uv}` in the loaded sprite set
-    /// (shared with every other user of that set), read each update by `0x14024B380`. Re:CoM's
-    /// 9-slice offsets act only on exactly 9 parts (`0x14024AD40`). For the window's frame
-    /// sprites (8 parts: the 3x3 without its centre) the part is given its own copy of its
-    /// entry, with the same downward move the 9-slice bottom offset gives: every y below the
-    /// middle of the sprite moves down `grow` (bottom row moves, side edges stretch, top row
-    /// stays). Checked (decomp + disasm `0x14024B380`, `0x14024B910`, `0x14024BB10`).
-    pub const RECT_SIZE: usize = 0x14;
-    /// Part stride in `C2DSprObj+0x120`.
-    pub const PART_STRIDE: usize = 0x98;
-
-    /// New rects for a frame sprite, or None when it isn't one: it needs parts wholly above
-    /// its middle (top), wholly below (bottom) and across it (sides), and no part covering the
-    /// middle in both directions with nothing beside it (that would be a fill, not a frame).
-    /// `None` in the list means that part stays as it is.
-    pub fn frame_rects(rects: &[[i32; 4]], grow: i32) -> Option<Vec<Option<[i32; 4]>>> {
-        if rects.len() < 3 || grow == 0 {
-            return None;
-        }
-        let ys = |r: &[i32; 4]| (r[1].min(r[3]), r[1].max(r[3]));
-        let top = rects.iter().map(|r| ys(r).0).min()?;
-        let bottom = rects.iter().map(|r| ys(r).1).max()?;
-        // Twice the middle, to stay in integers.
-        let mid2 = top + bottom;
-        let (mut above, mut below, mut across) = (0, 0, 0);
-        for r in rects {
-            let (a, b) = ys(r);
-            if 2 * b <= mid2 {
-                above += 1;
-            } else if 2 * a >= mid2 {
-                below += 1;
-            } else {
-                across += 1;
-            }
-        }
-        if above == 0 || below == 0 || across == 0 {
-            return None;
-        }
-        let mv = |y: i32| if 2 * y > mid2 { y + grow } else { y };
-        Some(
-            rects
-                .iter()
-                .map(|r| {
-                    let n = [r[0], mv(r[1]), r[2], mv(r[3])];
-                    (n != *r).then_some(n)
-                })
-                .collect(),
-        )
-    }
-
-    pub fn plan(is_spr_obj: bool, parts: u8, has_parts: bool, flags: u8, grow: f32) -> Sprite {
-        if !is_spr_obj || parts != NINE || !has_parts {
-            Sprite::Skip
-        } else if flags & FLAG_NINE_SLICE != 0 {
-            Sprite::Done
-        } else {
-            Sprite::Stretch([0.0, 0.0, 0.0, grow])
+/// The value items of row `row` (0..4) in `style`: a pair row takes Re:CoM's row's own two items
+/// (row 4, a single row in Re:CoM, takes row 3's two, as our former Config rows did); a single row
+/// takes Re:CoM's item 8.
+pub fn values_at(row: usize, style: Style) -> Vec<ValueAt> {
+    match style {
+        Style::Single => vec![ValueAt { item: SINGLE_VALUE_ITEM, x_elem: layout::VALUE_X[SINGLE_VALUE_ITEM] }],
+        Style::Pair => {
+            let r = row.min(3);
+            (0..2).map(|o| ValueAt { item: 2 * r + o, x_elem: layout::VALUE_X[2 * r + o] }).collect()
         }
     }
+}
+
+/// Item slots a page uses (label + values per row), from slot 0.
+pub fn slots_used(page: Page) -> usize {
+    page.items().iter().map(|it| 1 + if it.style() == Style::Pair { 2 } else { 1 }).sum()
+}
+
+/// Whether a pair row's option `opt` shows as selected (Re:CoM: value byte == option).
+pub fn selected(value: usize, opt: usize) -> bool {
+    value == opt
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    const NONE: Input = Input { up: false, down: false, left: false, right: false };
-    const UP: Input = Input { up: true, ..NONE };
-    const DOWN: Input = Input { down: true, ..NONE };
-    const LEFT: Input = Input { left: true, ..NONE };
-    const RIGHT: Input = Input { right: true, ..NONE };
+    const NONE: Input = Input { close: false, up: false, down: false, left: false, right: false };
 
     #[test]
-    fn recom_rows_keep_their_behaviour() {
-        for c in 0..=4 {
-            assert_eq!(step(c, NONE), Step::Original);
-            assert_eq!(step(c, LEFT), Step::Original);
-            assert_eq!(step(c, RIGHT), Step::Original);
+    fn pages_hold_the_owners_rows() {
+        let labels = |p: Page| p.items().iter().map(|i| std::str::from_utf8(i.label()).unwrap().trim_end_matches('\0').to_string()).collect::<Vec<_>>();
+        assert_eq!(labels(Page::Combat), ["Combat", "Guard reactions", "Enemy pace", "Enemy AI", "Revenge Value"]);
+        assert_eq!(labels(Page::Movement), ["Run speed", "Jump height", "Air speed", "Dodge roll"]);
+        assert_eq!((Page::Combat.label(), Page::Movement.label()), (&b"Combat\0"[..], &b"Movement\0"[..]));
+        let keys: Vec<&str> = Page::ALL.iter().flat_map(|p| p.items().iter().map(|i| i.key())).collect();
+        assert_eq!(keys, ["combat", "guard_reactions", "enemy_pace", "enemy_ai", "boss_revenge", "run_speed", "jump_height", "air_speed", "dodge_roll"]);
+        // Damage stays ini-only (owner).
+        assert!(!keys.contains(&"damage"));
+    }
+
+    #[test]
+    fn pages_fit_recoms_config_screen() {
+        for p in Page::ALL {
+            assert!(p.items().len() <= MAX_ROWS);
+            assert!(slots_used(p) <= SLOT_COUNT, "{p:?}");
         }
-        for c in 1..=4 {
-            assert_eq!(step(c, UP), Step::Original);
+        assert_eq!(slots_used(Page::Combat), 15);
+        assert_eq!(slots_used(Page::Movement), 11);
+        assert_eq!(Item::DodgeRoll.style(), Style::Single);
+        assert!(Page::Combat.items().iter().all(|i| i.style() == Style::Pair));
+    }
+
+    #[test]
+    fn rows_take_recoms_positions() {
+        assert_eq!(values_at(0, Style::Pair), vec![ValueAt { item: 0, x_elem: 9 }, ValueAt { item: 1, x_elem: 10 }]);
+        assert_eq!(values_at(2, Style::Pair), vec![ValueAt { item: 4, x_elem: 15 }, ValueAt { item: 5, x_elem: 16 }]);
+        assert_eq!(values_at(4, Style::Pair), vec![ValueAt { item: 6, x_elem: 20 }, ValueAt { item: 7, x_elem: 21 }]);
+        assert_eq!(values_at(3, Style::Single), vec![ValueAt { item: 8, x_elem: 0x16 }]);
+        assert_eq!((cursor_x_offset(0), cursor_x_offset(1), cursor_x_offset(8)), (0.0, 150.0, 150.0));
+    }
+
+    #[test]
+    fn input_follows_recoms_config_input() {
+        assert_eq!(step(2, 5, Input { close: true, up: true, ..NONE }), Step::Close);
+        assert_eq!(step(0, 5, Input { up: true, ..NONE }), Step::Move(4));
+        assert_eq!(step(3, 5, Input { up: true, ..NONE }), Step::Move(2));
+        assert_eq!(step(4, 5, Input { down: true, ..NONE }), Step::Move(0));
+        assert_eq!(step(3, 4, Input { down: true, ..NONE }), Step::Move(0));
+        assert_eq!(step(1, 4, Input { down: true, ..NONE }), Step::Move(2));
+        assert_eq!(step(1, 4, Input { up: true, down: true, ..NONE }), Step::Move(0), "up first");
+        assert_eq!(step(1, 4, Input { down: true, left: true, ..NONE }), Step::Move(2), "moves before changes");
+        assert_eq!(step(1, 4, Input { left: true, right: true, ..NONE }), Step::Change(false), "left first");
+        assert_eq!(step(1, 4, Input { right: true, ..NONE }), Step::Change(true));
+        assert_eq!(step(1, 4, NONE), Step::Idle);
+    }
+
+    #[test]
+    fn values_cycle_with_wrap() {
+        // Re:CoM's two-value rows: left and right both flip.
+        assert_eq!((cycle(0, 2, false), cycle(1, 2, false), cycle(0, 2, true), cycle(1, 2, true)), (1, 0, 1, 0));
+        // Dodge roll: Re:CoM -> KH1 -> Off -> Re:CoM.
+        assert_eq!((cycle(0, 3, true), cycle(1, 3, true), cycle(2, 3, true)), (1, 2, 0));
+        assert_eq!((cycle(0, 3, false), cycle(2, 3, false)), (2, 1));
+        let mut s = Settings::default();
+        for it in Page::ALL.iter().flat_map(|p| p.items()) {
+            let n = it.options().len();
+            let start = it.value(&s);
+            assert!(start < n, "{it:?}");
+            // Right through every option comes back; each step is a different value.
+            let mut seen = vec![start];
+            for _ in 0..n {
+                let v = cycle(it.value(&s), n, true);
+                it.set(&mut s, v);
+                assert_eq!(it.value(&s), v, "{it:?}");
+                seen.push(v);
+            }
+            assert_eq!(seen.first(), seen.last());
+            seen.pop();
+            seen.sort();
+            seen.dedup();
+            assert_eq!(seen.len(), n, "{it:?}");
         }
-        for c in 0..=3 {
-            assert_eq!(step(c, DOWN), Step::Original);
-        }
-        // Up wins over down, as in the original.
-        assert_eq!(step(4, Input { up: true, down: true, ..NONE }), Step::Original);
+        assert_eq!(s, Settings::default(), "a full turn of every row changes nothing");
     }
 
     #[test]
-    fn edges_lead_to_our_rows() {
-        assert_eq!(LAST_ROW, 7);
-        assert_eq!(step(4, DOWN), Step::Move(5));
-        assert_eq!(step(0, UP), Step::Move(7));
-        assert_eq!(step(5, UP), Step::Move(4));
-        assert_eq!(step(5, DOWN), Step::Move(6));
-        assert_eq!(step(6, UP), Step::Move(5));
-        assert_eq!(step(6, DOWN), Step::Move(7));
-        assert_eq!(step(7, UP), Step::Move(6));
-        assert_eq!(step(7, DOWN), Step::Move(0));
-    }
-
-    #[test]
-    fn our_rows_toggle() {
-        assert_eq!(step(5, LEFT), Step::Toggle(ROW_COMBAT));
-        assert_eq!(step(5, RIGHT), Step::Toggle(ROW_COMBAT));
-        assert_eq!(step(5, NONE), Step::Idle);
-        assert_eq!(step(5, Input { up: true, left: true, ..NONE }), Step::Move(4));
-        assert_eq!(step(6, LEFT), Step::Toggle(ROW_GUARD_REACTIONS));
-        assert_eq!(step(6, RIGHT), Step::Toggle(ROW_GUARD_REACTIONS));
-        assert_eq!(step(6, NONE), Step::Idle);
-        assert_eq!(step(7, LEFT), Step::Toggle(ROW_ENEMY_PACE));
-        assert_eq!(step(7, RIGHT), Step::Toggle(ROW_ENEMY_PACE));
-    }
-
-    #[test]
-    fn enemy_pace_row_text() {
-        let t = &TEXT[ROW_ENEMY_PACE];
-        assert_eq!(t.label, b"Enemy pace\0");
-        // Option 1 (true) is KH1, as for Combat.
-        assert_eq!(t.options, [&b"Re:CoM\0"[..], &b"KH1\0"[..]]);
-    }
-
-    #[test]
-    fn guard_reactions_row_text() {
-        let t = &TEXT[ROW_GUARD_REACTIONS];
-        assert_eq!(t.label, b"Guard reactions\0");
-        // Option 1 is the one `selected(true, _)` highlights: On.
-        assert_eq!(t.options, [&b"Off\0"[..], &b"On\0"[..]]);
-        assert!(selected(true, 1));
-        for t in &TEXT {
-            assert!(t.help.len() - 1 <= HELP_MAX, "{}", std::str::from_utf8(t.help).unwrap());
-        }
-    }
-
-    #[test]
-    fn slots_fit_in_the_free_ones() {
-        let all: Vec<usize> = (0..ROWS).flat_map(|k| slots(k).iter().copied()).collect();
-        assert_eq!(all, vec![14, 15, 16, 17, 18, 19, 20]);
-        assert_eq!([style(ROW_COMBAT), style(ROW_GUARD_REACTIONS), style(ROW_ENEMY_PACE)], [Style::Pair, Style::Single, Style::Single]);
-        assert!(all.iter().all(|&s| (FIRST_FREE_SLOT..SLOT_COUNT).contains(&s)));
-    }
-
-    #[test]
-    fn rows_are_spaced_like_the_last_two() {
-        assert_eq!(row_y(300.0, 340.0, 0), 380.0);
-        assert_eq!(row_y(300.0, 340.0, 1), 420.0);
-    }
-
-    #[test]
-    fn texts_are_terminated_ascii() {
-        for t in &TEXT {
-            for s in [t.label, t.options[0], t.options[1], t.help] {
-                assert_eq!(s.last(), Some(&0));
-                assert!(s[..s.len() - 1].iter().all(|&b| (0x20..0x7F).contains(&b)));
-                assert!(!s[..s.len() - 1].contains(&b'%'), "the help line formatter treats % as a code");
+    fn rows_change_only_their_setting_and_round_trip_the_ini() {
+        use crate::settings::{parse, store, DEFAULT_FILE};
+        for it in Page::ALL.iter().flat_map(|p| p.items()) {
+            for v in 0..it.options().len() {
+                let mut s = Settings::default();
+                it.set(&mut s, v);
+                // Only this key differs from the defaults (Dodge roll carries its ability switch).
+                let text = store(DEFAULT_FILE, &s);
+                let (back, w) = parse(&text);
+                assert!(w.is_empty(), "{w:?}");
+                assert_eq!(back, s, "{it:?} = {v}");
+                assert_eq!(it.value(&back), v);
+                let changed: Vec<&str> = text.lines().zip(DEFAULT_FILE.lines()).filter(|(a, b)| a != b).map(|(a, _)| a).collect();
+                if v != it.value(&Settings::default()) {
+                    assert_eq!(changed.len(), 1, "{it:?}: {changed:?}");
+                    assert!(changed[0].starts_with(it.key()), "{it:?}: {changed:?}");
+                } else {
+                    assert!(changed.is_empty(), "{it:?}: {changed:?}");
+                }
             }
         }
-        assert!(selected(true, 1) && !selected(true, 0) && selected(false, 0));
+        let mut s = Settings::default();
+        Item::DodgeRoll.set(&mut s, 2);
+        assert_eq!((s.dodge_roll, s.abilities.dodge_roll), (RollMode::Off, false));
+        Item::DodgeRoll.set(&mut s, 1);
+        assert_eq!((s.dodge_roll, s.abilities.dodge_roll), (RollMode::Kh1, true));
+        Item::RevengeValue.set(&mut s, 0);
+        assert!(!s.boss_revenge);
+    }
+
+    #[test]
+    fn when_changes_take_effect() {
+        for it in Page::ALL.iter().flat_map(|p| p.items()) {
+            let want = if matches!(it, Item::EnemyPace | Item::EnemyAi) { Effect::NextBattle } else { Effect::Now };
+            assert_eq!(it.effect(), want, "{it:?}");
+        }
+    }
+
+    #[test]
+    fn texts_are_terminated_ascii_and_fit_the_help_box() {
+        let mut all: Vec<&[u8]> = Vec::new();
+        for p in Page::ALL {
+            all.extend([p.label(), p.help()]);
+            for it in p.items() {
+                all.extend([it.label(), it.help()]);
+                all.extend(it.options().iter().copied());
+            }
+        }
+        for s in all {
+            assert_eq!(s.last(), Some(&0));
+            assert!(s.len() - 1 <= HELP_MAX, "{}", std::str::from_utf8(s).unwrap());
+            assert!(s[..s.len() - 1].iter().all(|&b| (0x20..0x7F).contains(&b)));
+            assert!(!s[..s.len() - 1].contains(&b'%'), "the help line formatter treats % as a code");
+        }
+        assert!(selected(1, 1) && !selected(1, 0) && selected(0, 0));
     }
 
     #[test]
     fn combat_help_shows_the_mod_version() {
-        let help = std::str::from_utf8(TEXT[0].help).unwrap();
+        let help = std::str::from_utf8(Item::Combat.help()).unwrap();
         assert!(help.ends_with(&format!("(mod v{})\0", crate::VERSION)), "{help}");
-    }
-
-    #[test]
-    fn panel_restretches_only_when_its_animation_changes() {
-        for m in [0, 1, 4] {
-            assert!(panel::restretch_after(m));
-        }
-        for m in [2, 3, 5, 6, 7, 8, 9] {
-            assert!(!panel::restretch_after(m));
-        }
-    }
-
-    #[test]
-    fn frame_bottom_moves_and_sides_stretch() {
-        // A 3x3 ring without its centre, 100 x 120, corners 10 x 12.
-        let ring = [
-            [0, 0, 10, 12],
-            [10, 0, 90, 12],
-            [90, 0, 100, 12],
-            [0, 12, 10, 108],
-            [90, 12, 100, 108],
-            [0, 108, 10, 120],
-            [10, 108, 90, 120],
-            [90, 108, 100, 120],
-        ];
-        let n = panel::frame_rects(&ring, 26).unwrap();
-        assert_eq!(n[0..3], [None, None, None], "top row stays");
-        assert_eq!(n[3], Some([0, 12, 10, 134]), "left edge stretches");
-        assert_eq!(n[4], Some([90, 12, 100, 134]));
-        assert_eq!(n[5], Some([0, 134, 10, 146]), "bottom row moves");
-        assert_eq!(n[6], Some([10, 134, 90, 146]));
-        assert_eq!(n[7], Some([90, 134, 100, 146]));
-        // Flipped rects (y0 > y1) move the same way.
-        let flipped: Vec<[i32; 4]> = ring.iter().map(|r| [r[0], r[3], r[2], r[1]]).collect();
-        assert_eq!(panel::frame_rects(&flipped, 26).unwrap()[6], Some([10, 146, 90, 134]));
-    }
-
-    #[test]
-    fn non_frames_are_left_alone() {
-        // A single quad, a top strip only, a filled block: no frame.
-        assert_eq!(panel::frame_rects(&[[0, 0, 100, 120]], 26), None);
-        assert_eq!(panel::frame_rects(&[[0, 0, 10, 12], [10, 0, 90, 12], [90, 0, 100, 12]], 26), None);
-        assert_eq!(panel::frame_rects(&[[0, 0, 100, 60], [0, 60, 100, 120], [0, 10, 100, 110]], 0), None);
-        // Rows of a block split in two halves only (nothing across the middle).
-        assert_eq!(panel::frame_rects(&[[0, 0, 100, 60], [0, 60, 100, 120], [0, 0, 50, 60]], 26), None);
-    }
-
-    #[test]
-    fn panel_grows_by_one_row_step_per_row() {
-        assert_eq!(panel::grow(300.0, 319.5), 19.5 * ROWS as f32);
-        assert_eq!(ROWS, 3);
-        assert_eq!(panel::grow(300.0, 326.0), 78.0);
-    }
-
-    #[test]
-    fn panel_plan_stretches_only_fresh_nine_slices_downward() {
-        use panel::{plan, Sprite};
-        assert_eq!(plan(true, 9, true, 0, 20.0), Sprite::Stretch([0.0, 0.0, 0.0, 20.0]));
-        // Other flags kept apart from bit 3.
-        assert_eq!(plan(true, 9, true, 0x06, 20.0), Sprite::Stretch([0.0, 0.0, 0.0, 20.0]));
-        assert_eq!(plan(true, 9, true, 0x08, 20.0), Sprite::Done);
-        assert_eq!(plan(true, 1, true, 0, 20.0), Sprite::Skip);
-        assert_eq!(plan(true, 9, false, 0, 20.0), Sprite::Skip);
-        assert_eq!(plan(false, 9, true, 0, 20.0), Sprite::Skip);
     }
 }

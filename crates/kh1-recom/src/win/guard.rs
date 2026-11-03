@@ -20,7 +20,7 @@ use crate::sites::data;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-/// The Config row "Guard reactions" (ini `guard_reactions`).
+/// The KH1 entry's Combat page row "Guard reactions" (ini `guard_reactions`).
 static ON: AtomicBool = AtomicBool::new(true);
 /// Every class check passed at install.
 static READY: AtomicBool = AtomicBool::new(false);

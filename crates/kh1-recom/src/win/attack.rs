@@ -83,7 +83,7 @@ pub fn set_debug(on: bool) {
     DEBUG.store(on, Ordering::Relaxed);
 }
 
-/// The Config row "Guard reactions" (decision 27, `super::guard`).
+/// The KH1 entry's Combat page row "Guard reactions" (decision 27, `super::guard`).
 pub fn set_guard_reactions(on: bool) {
     super::guard::set_on(on);
 }
