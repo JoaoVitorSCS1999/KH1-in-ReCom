@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 150: The KH1 Wight Knight, version 0.81.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
+- Wight Knight (KH1 `xa_ex_2200` / `ex_2200.bd` ↔ Re:CoM `CEnemyWightnight` id 12), every number from the player's files (Checked (files): 66 constants, 39 requests, rows, windows, clips): appearance 69, then engaged at once (no idle); combo: wind-up 200, up to four alternating swipes 201 / 202, recovery 203 / 204 (a landed swipe ends it; Sora past 3.5 m: the leap slash); leap slash: crouch, a 5 m high timed jump at Sora, two strikes on landing (216), a forward flip first beyond 6 m; flips 205 / 206, circling walk with a 4 m hop when stuck, dance 212 and sway 218 (both end in the leap slash).
+- Its body rows on the shared enemy guard: the wind-up gives Sora's swings the strong recoil; a swipe or the leap slash's first half second: both recoil (Sora 0x6E, it 217, then it counters). Every hit takes KH1's reaction; a killing flinch becomes a knock-back (KH1's handler).
+- Re:CoM (Checked (exe + decomp)): vtable `0x140553748`, ctor `0x140194ED0` (`40 53 48 83 EC 20`, only caller `0x140189194`), alloc `0x14018917B` 0xCD0 → 0xCF0; swipes in state 3 (id 1, Checked (files): `e012_054` moves as KH1's 201), the leap slash in state 2 (id 0, Assumption: owner question).
+- Assumptions: `sys 163` always true; attribute 8 / 10 hits never arrive (no attribute passed); the flips' height from Re:CoM's root motion; the apex motion a frame late; the circling turn's sign. Not ported: the leash (KH1 world 11 only), the hanging spawn, effects (M13).
+- Asset step: ENEMY/0012 (ANN / ASD / SES), `kh1-wightknight.json`.
+- Checked: tests, Windows build, 954 sites. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 149: Build fix: the merged always-on guard rows (Large Body / Neoshadow), version 0.80.1 (2026-11-01)
 
 - Stage 148's merge left the Neoshadow's `held` test in the guard step after the Large Body's `ALWAYS` mode replaced it: the Windows build failed (0.80.0 was never built or installed). The two are one mode (`HELD = ALWAYS`, `u16::MAX`); the step uses `GuardRow::live`, which is on every frame for such a row.
