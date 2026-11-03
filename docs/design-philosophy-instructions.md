@@ -527,3 +527,4 @@ At KH1 setting:
   - **AP**: KH1's start 3, +2 per AP Up pick (replacing CP Up at Combat = KH1), **no cap**, nothing else; **old saves: each CP Up already taken counts as an AP Up**.
   - **Berserk at Damage = Re:CoM: a % damage bonus** (the share KH1's +4 Strength gives at that level).
   - **Notices: Re:CoM's sleight-learned screen** (`CLevelUp` sleight mode, its "ability" wording), without its card-stock help page at KH1.
+- **M12 step 1/2 follow-ups** (owner, 2026-11-03): AP Up also gives Re:CoM's +25 CP unseen (CP keeps growing for a switch back); skip the card help page after the level-up Sleight pick too; notices for every ability from a level.
