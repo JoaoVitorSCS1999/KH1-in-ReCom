@@ -245,6 +245,7 @@ pub fn cmd_token(c: &Cmd) -> String {
         // M11's shared commands; the Shadow never gives them.
         Cmd::Held => "held".into(),
         Cmd::Attack { request, attack, .. } => format!("attack {request} ({})", attack.name()),
+        Cmd::AttackAt { request, attack, start, .. } => format!("attack {request} ({}) from {start}", attack.name()),
         Cmd::Scale(k) => format!("scale {k:.2}"),
         Cmd::Visible(v) => format!("visible {v}"),
         Cmd::MotionAt { request, blend, start } => format!("motion {request} b{blend} from {start}"),

@@ -65,6 +65,15 @@
 //!   and the child reads only `+4 & 0x30` before its re-aim: the Gargoyle's rule, owner 2026-11-03; [`GUARD_BATS`]).
 //!   Either way it hurts enemies; its own kind's handler takes it as its own row (`own_shot`: KH1's `sys 188`).
 //!
+//! - **The Blue Rhapsody's Blizzard** (M11, `ex_2120_00.bd`; Checked (files)): the same bullet and exe ([`Kind::Fire`]),
+//!   made when the child's wait in its parent's cast 55 ends (84 frames, `kh1_core::caster::Cast::direct`) where KH1's child
+//!   starts (`sys 19(parent, 0, 0)`: bone code 0's parent, the manifest's `blizzard_at` point on Re:CoM's bone), along the
+//!   Blue Rhapsody's facing (`+0x30`), straight at 25 a frame (`sys 18`; no turn) for 60 frames; its power Re:CoM's own
+//!   Blue Rhapsody shot's (id 0, kind 1, `0x14018C2D0`), its look that shot's effect set (`0x1407C2F10`); radius KH1's
+//!   row's 40. KH1's child ends as soon as its row's `+4` is set (`0x34E`: a hit, or a clash with a swing or a guard, which
+//!   meet its type-0, priority-0 free-standing row through `0x1402B4BC0`; no re-aim, no batted row): **a swing or Sora's
+//!   Guard ends it** ([`ENDS_ON_CLASH`]), Re:CoM's guard spark at it.
+//!
 //! Runs once a frame per flying blade (at most [`MAX`]); nothing otherwise.
 
 use super::magic::{rt, Desc, DescInitFn, FactoryFn, ManagerFn, MoverFn, PlFn, DESC_INIT, FACTORY, HOMING_THUNK, SHOT_MANAGER, SHOT_MOVER};
@@ -119,6 +128,7 @@ pub(super) unsafe fn fire_look(class: &str, prefix: &str) -> Option<(u64, Option
         ("bouncywild", _) => ok(crate::sites::BOUNCYWILD_FIRE_PTRS).then_some((BOUNCYWILD_BANANA_EFFECT_SET, None)),
         ("rednocturne", "bigfire") => ok(crate::sites::REDNOCTURNE_FIRE_PTRS).then_some((REDNOCTURNE_BIG_EFFECT_SET, None)),
         ("rednocturne", _) => ok(crate::sites::REDNOCTURNE_FIRE_PTRS).then_some((REDNOCTURNE_FIRE_EFFECT_SET, None)),
+        ("bluerhapsody", _) => ok(crate::sites::BLUERHAPSODY_FIRE_PTRS).then_some((BLUERHAPSODY_BLIZZARD_EFFECT_SET, None)),
         _ => ok(crate::sites::FATBANDIT_FIRE_PTRS).then_some((FIRE_EFFECT_SET, Some(FIRE_EFFECT_PLACES))),
     }
 }
@@ -128,6 +138,14 @@ pub(super) unsafe fn fire_look(class: &str, prefix: &str) -> Option<(u64, Option
 /// Checked (decomp + exe).
 pub const REDNOCTURNE_FIRE_EFFECT_SET: u64 = 0x1_4054_8EF0;
 pub const REDNOCTURNE_BIG_EFFECT_SET: u64 = 0x1_4054_8F60;
+
+/// The Blue Rhapsody's own Blizzard shot's effect set (its state 2 `0x14018C2D0`: descriptor `+0xA8`, none at `+0xB8`; slot 1
+/// names `"_ex_2120"` (`sites::BLUERHAPSODY_FIRE_PTRS`)). Checked (decomp + exe).
+pub const BLUERHAPSODY_BLIZZARD_EFFECT_SET: u64 = 0x1_407C_2F10;
+
+/// The classes whose shot KH1's child ends at any clash (a swing or a guard meeting its row; `ex_2120_00.bd` `0x34E`: `+4 ≠
+/// 0` ends the flight, no re-aim; Checked (files)): the Blue Rhapsody's Blizzard.
+pub const ENDS_ON_CLASH: &[&str] = &["bluerhapsody"];
 
 /// The classes whose fires Sora's Guard sends back KH1's way, as a swing does (the fire's row is KH1's type 0, priority 0,
 /// free-standing: KH1's guard meets it through `0x1402B4BC0` as a swing does and hands it to Sora; its child reads only
@@ -164,6 +182,8 @@ struct Blade {
     bat_radius: Option<f32>,
     /// Sora's Guard sends it back KH1's way ([`GUARD_BATS`]).
     guard_bats: bool,
+    /// A swing or Sora's Guard ends it ([`ENDS_ON_CLASH`]).
+    ends_on_clash: bool,
     /// A fireball Sora's swing sent back: KH1's flight at its new aim (no Re:CoM homing).
     batted: bool,
     /// What a batted fireball turns toward (KH1's `hp[0x30]` after `0x1B8`: Sora's target, else its thrower), while it lives.
@@ -223,6 +243,10 @@ pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32
     if has("ball_life") && n == 0 {
         ball_start(en, class, m);
         return None;
+    }
+    // M11, the Blue Rhapsody's Blizzard (`ex_2120_00.bd`).
+    if has("blizzard_life") && n == index("blizzard_child", 0) {
+        return fire(en, class, m, yaw, "blizzard");
     }
     if has("fire_life") && n == fire_n {
         return fire(en, class, m, yaw, "fire");
@@ -308,7 +332,7 @@ pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32
         if g.len() >= MAX {
             g.remove(0);
         }
-        g.push(Blade { kind: Kind::Blade, prefix: "blade", bat_radius: None, guard_bats: false, batted: false, home: None, id: bid, shooter, flight, turned: false });
+        g.push(Blade { kind: Kind::Blade, prefix: "blade", bat_radius: None, guard_bats: false, ends_on_clash: false, batted: false, home: None, id: bid, shooter, flight, turned: false });
         FLYING.store(true, Ordering::Relaxed);
     }
     wr(bullet + rt::STATE_EXE, blade_exe as *const () as usize);
@@ -369,7 +393,9 @@ unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32, p: &'static str) 
         let r = RNG.lock().ok().and_then(|mut g| g.get_or_insert_with(|| Kh1Rand::new(0x2090_0001)).next_f32().into()).unwrap_or(0.5);
         r * (c("speed_max") - c("speed_min")) + c("speed_min")
     };
-    let n = Numbers { life: c("life"), turn_back: c("life"), speed, accel: 0.0, turn_deg: c("turn"), slide: 0.0, slide_drag: 0.0 };
+    // Its turn (the Blue Rhapsody's Blizzard has none: `sys 18` only, straight).
+    let turn = if c("turn").is_finite() { c("turn") } else { 0.0 };
+    let n = Numbers { life: c("life"), turn_back: c("life"), speed, accel: 0.0, turn_deg: turn, slide: 0.0, slide_drag: 0.0 };
     let flight = Thrown::aimed(crate::units::to_kh1(at), dir, n);
     let id = c("recom_id") as i32;
     // Re:CoM's own fireball's power: `0x14017F0E0(enemy, 1, 1, 0)` (no kind out, flag 0), `0x14017F050(enemy, 1)`.
@@ -433,7 +459,7 @@ unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32, p: &'static str) 
         if g.len() >= MAX {
             g.remove(0);
         }
-        g.push(Blade { kind: Kind::Fire, prefix: p, bat_radius: Some(c("bat_radius")).filter(|r| r.is_finite()), guard_bats: GUARD_BATS.contains(&class), batted: false, home: None, id: bid, shooter, flight, turned: false });
+        g.push(Blade { kind: Kind::Fire, prefix: p, bat_radius: Some(c("bat_radius")).filter(|r| r.is_finite()), guard_bats: GUARD_BATS.contains(&class), ends_on_clash: ENDS_ON_CLASH.contains(&class), batted: false, home: None, id: bid, shooter, flight, turned: false });
         FLYING.store(true, Ordering::Relaxed);
     }
     wr(bullet + rt::STATE_EXE, blade_exe as *const () as usize);
@@ -463,14 +489,20 @@ pub unsafe extern "win64" fn blade_exe(bullet: usize) {
         let mut end = false;
         if let Ok(mut g) = BLADES.lock() {
             if let Some(b) = g.iter_mut().find(|b| b.id == id) {
-                if turned && !b.turned && !b.batted && b.guard_bats && b.kind == Kind::Fire {
+                if turned && b.ends_on_clash {
+                    // Sora's Guard met it (Re:CoM's block turned it): KH1's child ends at the clash ([`ENDS_ON_CLASH`]).
+                    end_on_clash(bullet);
+                    note = Some(format!("{} {id}: Sora's Guard met it: it ends (KH1's clash)", b.prefix));
+                    end = true;
+                } else if turned && !b.turned && !b.batted && b.guard_bats && b.kind == Kind::Fire {
                     // Sora's Guard blocked it (Re:CoM's block: its list now the enemies'): KH1's re-aim, as a swing
                     // ([`GUARD_BATS`]). It flies on as a batted fire from this frame.
                     note = Some(reaim_fire(b, bullet, "Guard"));
                 }
                 // A fireball turns toward Sora's aim point at its own rate (the Fat Bandit's 0: straight; the Defender's 1°);
                 // a batted one toward its new target (`0x1B8`'s `hp[0x30]`) while that lives (`sys 120`), on the enemies' side.
-                if b.batted {
+                if end {
+                } else if b.batted {
                     if step > 0.0 {
                         b.flight.pos = crate::units::to_kh1(rd_vec(mover + rt::POSITION));
                         let home = b.home.and_then(|h| alive_aim(h));
@@ -585,6 +617,19 @@ pub(super) unsafe fn swing_at_blades(meets: impl Fn(usize) -> bool) {
         if shape == 0 || !meets(shape) {
             continue;
         }
+        if b.ends_on_clash {
+            // KH1's child ends at the clash (the Blue Rhapsody's Blizzard: no re-aim, [`ENDS_ON_CLASH`]).
+            end_on_clash(bullet);
+            b.flight.phase = Phase::Ended;
+            let mover: usize = rd(bullet + gb::MOVER);
+            if mover != 0 {
+                let p = rd_vec(mover + rt::POSITION);
+                super::attack::spark_at([p.x, p.y, p.z, 1.0]);
+            }
+            let (id, p) = (b.id, b.prefix);
+            line(|| format!("{p} {id}: Sora's swing met it: it ends (KH1's clash)"));
+            continue;
+        }
         if b.kind == Kind::Fire {
             // KH1's projectile clash: sent to the swinger's side and aimed anew (`0x1B8`): at Sora's target while it
             // lives, else at its thrower (`sys 32` of the parent: its lock point), straight, its whole life again.
@@ -624,6 +669,13 @@ pub(super) unsafe fn swing_at_blades(meets: impl Fn(usize) -> bool) {
         let (id, d) = (b.id, b.flight.dir);
         line(|| format!("blade {id}: Sora's swing knocked it away: back along ({:.2},{:.2},{:.2}), its attack off, a 60-frame slide (KH1's clash)", d.x, d.y, d.z));
     }
+}
+
+/// A shot KH1's child ends at a clash ([`ENDS_ON_CLASH`]): its attack off (Re:CoM's own off) and its life over, so Re:CoM's
+/// step ends it (flag 4) before it can hit anything again.
+unsafe fn end_on_clash(bullet: usize) {
+    super::magic::hold_off(bullet);
+    wr(bullet + rt::LIFE, 0i32);
 }
 
 /// KH1's projectile clash on a fire already on the enemies' side (Sora's swing through `super::guard::send_back`, or his

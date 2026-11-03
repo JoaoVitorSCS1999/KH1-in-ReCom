@@ -8,3 +8,4 @@ pub mod wyvern;
 pub mod searchghost;
 pub mod gargoyle;
 pub mod rednocturne;
+pub mod bluerhapsody;
