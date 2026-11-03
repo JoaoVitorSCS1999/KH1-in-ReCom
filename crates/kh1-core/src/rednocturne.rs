@@ -23,7 +23,8 @@
 //!   the Fire and its batted row, `0x1CC` / `0x23C` the big Fire's) are its children's.
 //! - the hit handler `0x1F1E`: seen (`wp+0x38`); a hit of one of its own rows (`sys 188` in [10500, 10504]: a fire of
 //!   its kind sent back) or a Blizzard (attribute 3): the damage; alive: KH1's EXP bonus (`sys 194(EXP / 10 + 2)`),
-//!   `sys 179(1800)` (KH1's dizzy status: not built, owner question) and the hit state; killed: its death. A Fire hit
+//!   `sys 179(1800)` (KH1's dizzy status: **Re:CoM's own stun state instead**, owner 2026-11-03: the host gives its own
+//!   fire's hit Re:CoM's stun kind, [`Behaviour::own_row_stun`]) and the hit state; killed: its death. A Fire hit
 //!   (attribute 2): no damage, HP to max, no reaction (`0xDC8`; element: left out, owner). Else the damage (`0x1854`):
 //!   killed → its death `0x1518` (Re:CoM's defeat here); a clash or a repel (−1): the hit state only for a clash (or
 //!   attributes 8 / 10); a living damaging hit: the hit state. KH1's reaction plays for every hit (the handler zeroes
@@ -609,8 +610,9 @@ impl Behaviour for Ai {
         self.io.borrow_mut().rng = r;
     }
     /// The hit handler (`0x1F1E`): seen; a hit of its own kind's fire sent back: KH1's EXP bonus (`sys 194(EXP / 10 +
-    /// 2)`) and, not built, `sys 179(1800)`; a living damaging hit or a clash asks for the hit state; a repel record
-    /// without a clash asks for nothing.
+    /// 2)`) and `sys 179(1800)` (Re:CoM's stun here, the host's: [`Behaviour::own_row_stun`]); a living damaging hit or a
+    /// clash asks for the hit state (after Re:CoM's stun it plays when the stun hands back); a repel record without a
+    /// clash asks for nothing.
     fn on_hit(&self, news: HitNews) {
         let mut io = self.io.borrow_mut();
         io.x.seen = true;
@@ -619,7 +621,7 @@ impl Behaviour for Ai {
                 if io.x.own {
                     let r = Reward { exp_div: io.c.num("exp_div") as i32, exp_add: io.c.num("exp_add") as i32, exp_min: 0, prizes: [0; 7] };
                     io.x.now.push(ECmd::Reward(r));
-                    io.x.now.push(ECmd::Note("sys 179(1800): KH1's dizzy status, not built (owner question)"));
+                    io.x.now.push(ECmd::Note("sys 179(1800): KH1's dizzy as Re:CoM's stun (the host's, owner 2026-11-03)"));
                 }
                 io.state = (st::HIT, true);
             }
@@ -654,6 +656,11 @@ impl Behaviour for Ai {
     }
     fn set_hit_own_row(&self, own: bool) {
         self.io.borrow_mut().x.own = own;
+    }
+    /// KH1's `sys 179(1800)` for its own fire's hit (`0x1FA8`: KH1's dizzy, `0x1402B8730`) as Re:CoM's own stun state
+    /// (owner 2026-11-03: "it takes Re:CoM's stun (instead of KH1's 30 s dizzy; the EXP bonus stays)").
+    fn own_row_stun(&self) -> bool {
+        true
     }
     /// The host's quiet watchdog: engaged again, flying with no velocity.
     fn reset(&self) {

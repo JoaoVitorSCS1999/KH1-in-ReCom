@@ -138,6 +138,7 @@ fn the_hit_handler() {
     let now = ai.take_now();
     assert!(now.iter().any(|c| matches!(c, ECmd::Reward(r) if r.exp_bonus(100) == 12)), "{now:?}");
     assert_eq!(ai.reaction_kind(3), 3, "the handler zeroes no kind (Fire's aside)");
+    assert!(ai.own_row_stun(), "its own fire's hit takes Re:CoM's stun (owner 2026-11-03)");
 }
 
 /// The start of a fire: 50 ahead along its facing (`sys 19(parent, 0x8001, −0.5)`: the matrix's z row is −facing), then
