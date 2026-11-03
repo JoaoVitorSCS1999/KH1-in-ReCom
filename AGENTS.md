@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 178: The KH1 Yellow Opera (its charge and Thunder); M11 stops here, version 0.97.0 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "finish the opera and requiem, but stop there" (M11; the last two of the Red Nocturne's family).
+- Yellow Opera (KH1 `xa_ex_2130` / `ex_2130.bd` ↔ Re:CoM `CEnemyYellowopera` id 5), a flier, every number from the player's files (Checked (files): 70 + 6 numbers, 26 + 14 words): near Sora a short dart, then half the time the charge; far 6 in 10 the Thunder, then two darts; hit: three flee darts, a drop to 1 m, a Thunder.
+- Charge: wind-up 208, the rush 209 steered toward where Sora stood in Re:CoM's rush state 3 (Re:CoM's rush power, id 1), stops on hitting him, recovery 210; Guard: KH1's recoil 211.
+- Thunder: casts on KH1's frames (205 from 8, 206 from 2, 207 from 3); 80 frames into 207 it marks Sora's floor spot, 30 frames later the bolt strikes there; after the mark nothing cancels it but Re:CoM's Stop / stun (owner question). Native: Re:CoM's own Yellow Opera bolt bullet with its reaction kind 0x1C, power (id 0, kind 1) and effect set `0x140557560`, made at the strike frame at the top of KH1's area cylinder (2.56 m above the mark), KH1's 0.5 m radius, sweeping to the floor in one frame; Re:CoM's collision pass hits. KH1's Thunder skips the attack-vs-attack test (Checked (decomp)): Sora's body guard is off while Re:CoM tests this bolt; swings pass through.
+- Framework: queued motions from a set frame; `Cmd::Strike`; a callback when Re:CoM's own state (Stop, stun, freeze) takes over.
+- Re:CoM (Checked (exe), 24 new sites): vtable `0x1405570C8`, ctor `0x1401968B0` (only caller `0x14018906E`), alloc `0x140189055` 0xCD0 → 0xCF0; no Re:CoM EN0005.SES.
+- Assumptions: the child's first frame after it is made; ±1 frame on queued starts and the bolt's first collision; flat battle floors; the flee drop's height above the battle floor; Sora's KH1 hit code doesn't make the Thunder a block.
+- Asset step: ENEMY/0005 (ANN / ASD), `kh1-yellowopera.json`.
+- Checked: tests (12 seeds × 20 000 frames), Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 177: T-posed Shadows: KH1's AI only on a motion pack that carries the KH1 clips, version 0.96.1 (2026-11-01)
 
 - Owner (2026-11-03): "switching from recom to KH1 enemy ai in the same room results in the ported enemies T Posing" (screenshot: a Shadow in Halloween Town).
