@@ -86,7 +86,7 @@ mod tests {
         assert!(g.always() && g.live(ke::guard::ALWAYS, 0.0));
         assert!((g.half_angle().unwrap().to_degrees() - 70.0).abs() < 0.01);
         let ring = m.ring.unwrap();
-        assert_eq!((ring.request, ring.start, ring.life, ring.growth), (230, 88.0, 28.0, 25.0));
+        assert_eq!((ring.request, ring.start, ring.life, ring.growth, ring.band, ring.height), (230, 88.0, 28.0, 25.0, 100.0, 50.0));
         assert_eq!((ring.radius(87.0), ring.radius(88.0), ring.radius(100.0), ring.radius(116.0)), (None, Some(0.0), Some(3.0), None));
         assert!(m.clip(207).unwrap().looped && !m.clip(230).unwrap().looped);
         // M11, attack meets attack: its rows' clash numbers (punch 30 ×2, slam 30, charge 90; the ring a child row).

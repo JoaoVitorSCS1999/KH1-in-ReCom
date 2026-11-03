@@ -331,28 +331,74 @@ fn parse_clash(list: &json::Value, attack: Option<u8>, attacks: usize) -> Result
 
 /// A KH1 child object that grows on the floor (`ex_2050_00.bd`: made at frame `start` of `request`, its radius
 /// `growth` × the frames since, for `life` frames; KH1 units). The asset step put Re:CoM's circle record on the
-/// request's clip for those frames; the host sets its radius each KH1 frame (`win::kh1_enemy::ring_step`).
+/// request's clip for those frames; the host sets its radius each KH1 frame (`win::kh1_enemy::ring_step`) and its
+/// band, so Re:CoM's circle test runs KH1's ring rule on it ([`ring_hits`], `win::kh1_enemy::circle_test`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ring {
     pub request: u16,
     pub start: f32,
     pub life: f32,
     pub growth: f32,
+    /// The band's width (`ring_band`, the child's 100 at `0x3CC`) and the height window (`ring_height`, its 50 at
+    /// `0x3D2`), KH1 units.
+    pub band: f32,
+    pub height: f32,
 }
 
 impl Ring {
     /// The ring's radius in metres at KH1 frame `t` of its request's motion, or none outside its life. The child
     /// tests with `r` then adds `growth` × the step (`0x384`..`0x43A`): `r` = `growth` × (t − `start`).
     pub fn radius(&self, t: f32) -> Option<f32> {
-        (t >= self.start && t < self.start + self.life).then(|| self.growth * (t - self.start) * 0.01)
+        (t >= self.start && t < self.start + self.life).then(|| self.growth * (t - self.start) * crate::units::METRES_PER_UNIT)
+    }
+
+    /// The band's width in metres (KH1's 100 → 1.0 m).
+    pub fn band_m(&self) -> f32 {
+        self.band * crate::units::METRES_PER_UNIT
+    }
+
+    /// The height window in metres (KH1's 50 → 0.5 m).
+    pub fn height_m(&self) -> f32 {
+        self.height * crate::units::METRES_PER_UNIT
     }
 
     fn from(c: &Table) -> Option<Ring> {
         let (r, start, life, growth) = (c.get("stomp_request"), c.get("ring_at"), c.get("ring_life"), c.get("ring_growth"));
+        let (band, height) = (c.get("ring_band"), c.get("ring_height"));
         if !(r.is_finite() && start.is_finite() && life > 0.0 && growth.is_finite()) || !(0.0..=65535.0).contains(&r) {
             return None;
         }
-        Some(Ring { request: r as u16, start, life, growth })
+        if !(band.is_finite() && band > 0.0 && height.is_finite() && height >= 0.0) {
+            return None;
+        }
+        Some(Ring { request: r as u16, start, life, growth, band, height })
+    }
+}
+
+/// KH1's ring test (`ex_2050_00.bd` routine `0x18`, Checked (files: the child disassembled; decomp: `sys 8` / `sys 6`))
+/// on Re:CoM's shapes, metres: `centre` the ring's centre (Re:CoM's circle `+0x10`), `r` its radius (`+0x70`), `band`
+/// its width (our `+0x74`), `height` the window, `foot` the target's position point (its body's bottom: KH1 reads
+/// the actor's `+0x50`). A miss when the heights differ by more than `height`; else a hit when the flat distance d
+/// is strictly inside (r − band, r). No body radius is added (KH1 adds none).
+pub fn ring_hits(centre: [f32; 3], r: f32, band: f32, height: f32, foot: [f32; 3]) -> bool {
+    if (foot[1] - centre[1]).abs() > height {
+        return false;
+    }
+    let (dx, dz) = (foot[0] - centre[0], foot[2] - centre[2]);
+    let d = (dx * dx + dz * dz).sqrt();
+    r - band < d && d < r
+}
+
+/// The position point [`ring_hits`] tests of a Re:CoM body shape (the body in the circle test `0x140177190`): a
+/// column (types 4 / 5: ends `+0x10` / `+0x20`, Sora's bottom at his toes' mean height, top at his head + 0.2, both at
+/// his hips' x / z; `0x1401F4000`) its lower end; a sphere (type 2: centre `+0x20` raised by `+0x74`, radius `+0x70`,
+/// as Re:CoM's test places it) its lowest point. Checked (decomp); that a column's lower end and a sphere's lowest
+/// point stand for KH1's position point: Assumption.
+pub fn body_foot(kind: u32, p10: [f32; 3], p20: [f32; 3], radius: f32, lift: f32) -> Option<[f32; 3]> {
+    match kind {
+        4 | 5 => Some(if p20[1] < p10[1] { p20 } else { p10 }),
+        2 => Some([p20[0], p20[1] + lift - radius, p20[2]]),
+        _ => None,
     }
 }
 
@@ -684,6 +730,44 @@ pub fn parse_for(class: usize, text: &str) -> Result<Manifest, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// KH1's ring rule (`ex_2050_00.bd` `0x18`): heights first (|Δy| ≤ 0.5 m, inclusive), then the flat distance
+    /// strictly inside (r − 1, r); no body radius; the inside of the ring misses.
+    #[test]
+    fn ring_rule() {
+        let c = [10.0, 2.0, -4.0];
+        let at = |d: f32, dy: f32| [10.0 + d * 0.6, 2.0 + dy, -4.0 + d * 0.8];
+        let hit = |r: f32, d: f32, dy: f32| ring_hits(c, r, 1.0, 0.5, at(d, dy));
+        // On the band.
+        assert!(hit(3.0, 2.5, 0.0) && hit(3.0, 2.01, 0.0) && hit(3.0, 2.99, 0.0));
+        // Inside the ring (it already passed): no hit, unlike Re:CoM's disk.
+        assert!(!hit(3.0, 1.0, 0.0) && !hit(3.0, 0.0, 0.0));
+        // Beyond the edge, and Re:CoM's body radius (0.25) isn't added.
+        assert!(!hit(3.0, 3.1, 0.0) && !hit(3.0, 3.2, 0.0));
+        // Both ends strict.
+        assert!(!ring_hits(c, 3.0, 1.0, 0.5, [13.0, 2.0, -4.0]) && !ring_hits(c, 3.0, 1.0, 0.5, [12.0, 2.0, -4.0]));
+        // Height: within 0.5 m either way hits, above (a jump) or below misses.
+        assert!(hit(3.0, 2.5, 0.5) && hit(3.0, 2.5, -0.5) && hit(3.0, 2.5, 0.3));
+        assert!(!hit(3.0, 2.5, 0.51) && !hit(3.0, 2.5, -0.51) && !hit(3.0, 2.5, 1.2));
+        // At its start (r = 0) and its first step (r = 0.25, the band reaches inside 0): only (−0.75, 0.25).
+        assert!(!hit(0.0, 0.0, 0.0));
+        assert!(hit(0.25, 0.1, 0.0) && !hit(0.25, 0.3, 0.0));
+        // KH1's numbers through the unit conversion.
+        let ring = Ring { request: 230, start: 88.0, life: 28.0, growth: 25.0, band: 100.0, height: 50.0 };
+        assert_eq!((ring.band_m(), ring.height_m()), (1.0, 0.5));
+        let near = |t: f32, want: f32| (ring.radius(t).unwrap() - want).abs() < 1e-5;
+        assert!(near(88.0, 0.0) && near(92.0, 1.0) && near(115.0, 6.75) && ring.radius(116.0).is_none());
+    }
+
+    /// The body's position point: a column's lower end (whichever end it is), a sphere's lowest point.
+    #[test]
+    fn ring_body_foot() {
+        let (lo, hi) = ([1.0, 0.1, 2.0], [1.0, 1.9, 2.0]);
+        assert_eq!(body_foot(4, lo, hi, 0.25, 0.0), Some(lo));
+        assert_eq!(body_foot(5, hi, lo, 0.25, 0.0), Some(lo));
+        assert_eq!(body_foot(2, [9.0; 3], [1.0, 0.0, 2.0], 0.5, 0.5), Some([1.0, 0.0, 2.0]));
+        assert_eq!(body_foot(7, lo, hi, 0.25, 0.0), None);
+    }
 
     fn soldier_text() -> String {
         let consts: Vec<String> = kh1_core::soldier::NAMES.iter().chain(ke::ENGINE_NAMES).map(|n| format!("\"{n}\": 1.0")).collect();
