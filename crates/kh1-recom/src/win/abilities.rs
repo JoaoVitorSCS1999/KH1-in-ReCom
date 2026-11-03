@@ -8,8 +8,10 @@
 //!   against Re:CoM's own learned-sleight test (`0x14023AB00`), Re:CoM's level and Re:CoM's
 //!   ability variable (0, 0x24) read with its getter `0x1401B08C0` (new ones arrive unequipped,
 //!   KH1's rule; Re:CoM's High Jump / Glide / Superglide equipped, owner); a block older than layout
-//!   v4 is migrated once (`crate::abilities::migrate`: Guard and Dodge Roll leave it, they are
-//!   Sora's kit); written back, logged.
+//!   v5 is migrated once (`crate::abilities::migrate`: Guard and Dodge Roll leave it, they are
+//!   Sora's kit; M12: the AP Up count starts at the save's past CP Up picks, from Re:CoM's CP);
+//!   written back, logged.
+//! - **AP Up** ([`add_ap_up`], M12): the level-up screen's AP Up pick adds one to the count.
 //! - **Use:** [`equipped_live`] reads the equipped word from the block (a 15-byte read) for the
 //!   abilities the KH1 frame passes on (`win::movement::abilities`), so what the camp's page
 //!   changes applies at once, and a loaded save is followed with no event of ours.
@@ -82,7 +84,7 @@ pub fn sync() -> Option<State> {
     let version = ab::version(&block);
     let before = ab::read(&block);
     // The words as stored (an older block may still hold the kit's bits, which `read` hides).
-    let raw = State { unlocked: u32::from_le_bytes(block[ab::field::UNLOCKED..ab::field::UNLOCKED + 4].try_into().unwrap_or([0; 4])), equipped: u32::from_le_bytes(block[ab::field::EQUIPPED..ab::field::EQUIPPED + 4].try_into().unwrap_or([0; 4])) };
+    let raw = State { ap_ups: 0, unlocked: u32::from_le_bytes(block[ab::field::UNLOCKED..ab::field::UNLOCKED + 4].try_into().unwrap_or([0; 4])), equipped: u32::from_le_bytes(block[ab::field::EQUIPPED..ab::field::EQUIPPED + 4].try_into().unwrap_or([0; 4])) };
     let mut s: State = before;
     let level = super::stats::sora_level();
     // SAFETY: Re:CoM's own getter (bytes checked at start), a pure read of its save variables.
@@ -92,7 +94,10 @@ pub fn sync() -> Option<State> {
     let learned = unsafe { func::<LearnedFn>(SLEIGHT_LEARNED) };
     let mut ask = |id: u16| unsafe { learned(id) } & 0xFF != 0;
     let migrating = version < ab::BLOCK_NOW;
-    let r = if migrating { ab::migrate(&mut s, raw, version, level, recom_var, INI_EQUIPPED.load(Ordering::Relaxed), &mut ask) } else { ab::sync(&mut s, level, recom_var, &mut ask) };
+    // M12: an older block's past CP Up picks count as AP Ups (owner), read once from Re:CoM's CP.
+    let cp = super::stats::sora_cp().unwrap_or(ab::RECOM_START_CP);
+    let cp_ups = ab::ap_ups_from_cp(cp, level);
+    let r = if migrating { ab::migrate(&mut s, raw, version, level, recom_var, INI_EQUIPPED.load(Ordering::Relaxed), cp_ups, &mut ask) } else { ab::sync(&mut s, level, recom_var, &mut ask) };
     if s != before || migrating {
         ab::write(&s, &mut block);
         // SAFETY: as above.
@@ -100,16 +105,18 @@ pub fn sync() -> Option<State> {
     }
     if migrating {
         log(&format!(
-            "abilities: block v{version} -> v{} at Re:CoM level {level} (max AP {}, Re:CoM's ability variable {recom_var:#x}): equipped {:?} ({} AP){}{}{}",
+            "abilities: block v{version} -> v{} at Re:CoM level {level} (Re:CoM's ability variable {recom_var:#x}){}: max AP {}, equipped {:?} ({} AP){}{}{}",
             ab::BLOCK_NOW,
-            ab::max_ap(level),
+            if version < ab::BLOCK_V5 { format!("; Re:CoM's CP {cp}: {} past CP Up pick(s) counted as AP Up(s) (({cp} - {}) / {}, at most level - 1)", s.ap_ups, ab::RECOM_START_CP, ab::RECOM_CP_PER_UP) } else { String::new() },
+            s.max_ap(),
             ab::names(s.equipped),
             ab::used_ap(s.equipped),
             if r.kit_dropped != 0 { format!("; Sora's kit now, out of the block (their AP back) {:?}", ab::names(r.kit_dropped)) } else { String::new() },
             if r.taken != 0 { format!("; the ini's, not yet from their source, taken back {:?}", ab::names(r.taken)) } else { String::new() },
-            if r.fitted != 0 { format!("; over KH1's AP, unequipped {:?}", ab::names(r.fitted)) } else { String::new() }
+            if r.fitted != 0 { format!("; over the AP, unequipped from the most expensive down {:?}", ab::names(r.fitted)) } else { String::new() }
         ));
     }
+
     if r.new != 0 {
         log(&format!("abilities: learned at Re:CoM level {level} (unequipped, KH1's rule; Re:CoM's ability variable {recom_var:#x}): {:?}", ab::names(r.new)));
     }
@@ -118,9 +125,10 @@ pub fn sync() -> Option<State> {
     }
     if !LOGGED_FIRST.swap(true, Ordering::Relaxed) {
         log(&format!(
-            "abilities: level {level}, Re:CoM's ability variable {recom_var:#x}, AP {}/{} left; unlocked {:?}; equipped {:?}; modifiers the pickers get {:?}",
-            ab::ap_left(s.equipped, level),
-            ab::max_ap(level),
+            "abilities: level {level}, Re:CoM's ability variable {recom_var:#x}, AP {}/{} left ({} AP Up pick(s)); unlocked {:?}; equipped {:?}; modifiers the pickers get {:?}",
+            ab::ap_left(s.equipped, s.max_ap()),
+            s.max_ap(),
+            s.ap_ups,
             ab::names(s.unlocked),
             ab::names(s.equipped),
             ab::names(usable(s.equipped) & ab::MODIFIER_BITS)
@@ -153,6 +161,35 @@ pub fn equipped_live() -> Option<u32> {
 pub fn page_state() -> Option<(State, u32)> {
     let s = sync()?;
     Some((s, super::stats::sora_level()))
+}
+
+/// M12: one AP Up pick on Re:CoM's level-up screen at Combat = KH1 (+2 max AP). The state is
+/// synced first (an older block is migrated with its past CP picks before this one is added).
+/// Returns (picks, max AP) after it, or None when the state isn't live.
+pub fn add_ap_up() -> Option<(u8, i32)> {
+    let mut s = sync()?;
+    let save = save()?;
+    s.ap_ups = s.ap_ups.saturating_add(1);
+    let at = save + ab::BLOCK_FIRST;
+    // SAFETY: inside the 0x2AD4-byte save block.
+    let mut block: [u8; ab::BLOCK_LEN] = unsafe { rd(at) };
+    ab::write(&s, &mut block);
+    // SAFETY: as above.
+    unsafe { wr(at, block) };
+    Some((s.ap_ups, s.max_ap()))
+}
+
+/// Sora's max AP now (for the level-up screen's panel), or None when the state isn't live. A read
+/// (an older block reads its count as the migration will set it).
+pub fn max_ap_now() -> Option<i32> {
+    if !super::mp::active() {
+        return None;
+    }
+    let save = save()?;
+    // SAFETY: inside the 0x2AD4-byte save block.
+    let block: [u8; ab::BLOCK_LEN] = unsafe { rd(save + ab::BLOCK_FIRST) };
+    let ups = if ab::version(&block) >= ab::BLOCK_V5 { ab::read(&block).ap_ups } else { ab::ap_ups_from_cp(super::stats::sora_cp().unwrap_or(ab::RECOM_START_CP), super::stats::sora_level()) };
+    Some(ab::max_ap(ups as u32))
 }
 
 /// The camp's Abilities page writes the equipped set (a subset of the unlocked set). False when

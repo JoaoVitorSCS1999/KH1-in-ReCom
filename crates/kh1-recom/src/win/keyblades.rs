@@ -1168,8 +1168,8 @@ impl Page {
             )),
             Content::Abilities { state, level, live, .. } => log(&format!(
                 "abilities page: opened at Re:CoM level {level}: AP {}/{} left; unlocked {:?}; equipped {:?}{}",
-                crate::abilities::ap_left(state.equipped, *level),
-                crate::abilities::max_ap(*level),
+                crate::abilities::ap_left(state.equipped, state.max_ap()),
+                state.max_ap(),
                 crate::abilities::names(state.unlocked),
                 crate::abilities::names(state.equipped),
                 if *live { "" } else { " (the ability state isn't live: nothing can change)" }
@@ -1265,7 +1265,7 @@ impl Page {
             }
             None => *live = false,
         }
-        *rows = screen.rows(state, *level);
+        *rows = screen.rows(state);
         let n = rows.len() as i32;
         let c = screen.cursor().clamp(0, (n - 1).max(0));
         screen.set_cursor(c);
@@ -1326,7 +1326,7 @@ impl Page {
                 let (name, count) = if item == 0 { (ip::text::NONE.to_vec(), ip::text::NONE.to_vec()) } else { (item_word(item), kb::c_text(&inv.stock_of(item).to_string())) };
                 (ip::text::STATUS, [o, name, count])
             }
-            Content::Abilities { screen, state, level, .. } => (ap::text::STATUS, screen.status(state, *level).map(|v| kb::c_text(&v))),
+            Content::Abilities { screen, state, .. } => (ap::text::STATUS, screen.status(state).map(|v| kb::c_text(&v))),
         }
     }
 
@@ -1569,11 +1569,11 @@ impl Page {
     /// 5 refused or nothing to open).
     unsafe fn abilities_confirm(&mut self) {
         let cursor = self.list.cursor;
-        let Content::Abilities { screen, state, level, msg, live, .. } = &mut self.content else { return };
+        let Content::Abilities { screen, state, msg, live, .. } = &mut self.content else { return };
         screen.set_cursor(cursor);
         *msg = None;
         let mut s = *state;
-        let out = screen.confirm(&mut s, *level);
+        let out = screen.confirm(&mut s);
         match out {
             ap::Outcome::Opened => sound(2),
             ap::Outcome::Equipped(i) | ap::Outcome::Removed(i) => {
@@ -1582,14 +1582,13 @@ impl Page {
                     log("abilities page: the ability state isn't live (no save block, or not Combat = KH1 in Sora's story); nothing changed");
                 } else {
                     sound(2);
-                    let lv = *level;
                     log(&format!(
                         "abilities page: {} {} ({} AP); AP {}/{} left; equipped {:?}",
                         if matches!(out, ap::Outcome::Equipped(_)) { "equipped" } else { "removed" },
                         crate::abilities::ALL[i].name,
                         crate::abilities::ALL[i].ap,
-                        crate::abilities::ap_left(s.equipped, lv),
-                        crate::abilities::max_ap(lv),
+                        crate::abilities::ap_left(s.equipped, s.max_ap()),
+                        s.max_ap(),
                         crate::abilities::names(s.equipped)
                     ));
                 }
@@ -1597,7 +1596,7 @@ impl Page {
             ap::Outcome::Refused(i) => {
                 *msg = Some(ap::text::NO_AP);
                 sound(5);
-                log(&format!("abilities page: refused {} ({} AP): AP {} left (KH1's rule)", crate::abilities::ALL[i].name, crate::abilities::ALL[i].ap, crate::abilities::ap_left(s.equipped, *level)));
+                log(&format!("abilities page: refused {} ({} AP): AP {} left (KH1's rule)", crate::abilities::ALL[i].name, crate::abilities::ALL[i].ap, crate::abilities::ap_left(s.equipped, s.max_ap())));
             }
             ap::Outcome::Empty => {
                 *msg = Some(ap::text::EMPTY_HELP);

@@ -167,6 +167,26 @@ pub(super) fn riku_story() -> bool {
     unsafe { super::movement::func::<BoolFn>(RIKU_FN)() & 0xFF != 0 }
 }
 
+/// Sora's CP (`stats + 0xC`; Re:CoM's level-up CP choice adds 25), or None without the stats.
+pub fn sora_cp() -> Option<i32> {
+    // SAFETY: a static pointer of the image, then the stat block it points at.
+    unsafe {
+        let p: usize = rd(va(base(), STATS_PTR));
+        (p != 0).then(|| rd::<i32>(p + 0xC))
+    }
+}
+
+/// Writes Sora's CP (M12: the AP Up pick at Combat = KH1 keeps Re:CoM's CP as it was).
+pub fn set_sora_cp(cp: i32) {
+    // SAFETY: as above.
+    unsafe {
+        let p: usize = rd(va(base(), STATS_PTR));
+        if p != 0 {
+            wr(p + 0xC, cp);
+        }
+    }
+}
+
 /// Sora's Re:CoM level (the menu's), 1 when the save isn't there.
 pub fn sora_level() -> u32 {
     // SAFETY: a static pointer of the image, then the save block it points at.

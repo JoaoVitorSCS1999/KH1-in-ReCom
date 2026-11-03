@@ -22,8 +22,10 @@
 //!   cost nothing and toggle freely. High Jump, Glide and Superglide arrive **equipped** when Re:CoM
 //!   gives them (owner, 2026-11-01; still removable, and once removed never equipped again by us:
 //!   only a new unlock is equipped, and the unlocked bit is the "seen" bit).
-//! - **AP:** Sora's max AP is KH1's record `+9` on Re:CoM's level ([`max_ap`]): 3 at a new game,
-//!   +2 at each level whose level-up bonus is kind 3.
+//! - **AP (M12, owner 2026-11-03):** KH1's starting 3, +2 for each "AP Up" Sora picks on Re:CoM's
+//!   level-up screen at Combat = KH1 (it replaces the CP choice there), no cap, nothing else
+//!   ([`max_ap`], [`State::ap_ups`]). KH1's own level grants are not used. An older save's past CP
+//!   picks count as AP Ups once ([`ap_ups_from_cp`]).
 //! - **The state** is a block of Re:CoM's own save (Re:CoM saves, loads and zeroes it), after the
 //!   items extension ([`BLOCK_FIRST`]).
 
@@ -209,19 +211,32 @@ pub const KIT_BITS: u32 = 1 << ix::GUARD | 1 << ix::DODGE_ROLL;
 /// `0x1402852C0`), plus the Dive's AP delta for keep Rod / give up Shield (choice 5's fourth byte,
 /// btltbl `0x128 + 4 × 5 + 3` = 0; `0x140284B70`). Checked (decomp + files).
 pub const START_AP: i32 = 3;
-/// The levels whose level-up bonus is kind 3 (record `+9` += 2, at most 100: `0x1402B5660`) in
-/// Sora's bonus list btltbl `0x3AC0` (byte `[L − 2]` for reaching level L). Checked (files +
-/// decomp). That `+9` is AP: the AP Up item (0x9A) raises it, capped at 100 (`0x1402CD780`; its
-/// use test `0x1402CD3A0`), the battle stats copy it to `+0xE4` (`0x1402A5130`), the Dive moves it
-/// by the choice's fourth byte (`0x140284B70`), and the new game fills it from the template's byte
-/// 2 (`0x1402852C0`). Checked (decomp).
-pub const AP_UP_LEVELS: [u32; 24] = [11, 17, 20, 23, 29, 32, 35, 41, 44, 47, 53, 56, 59, 65, 68, 71, 77, 80, 83, 86, 89, 92, 95, 98];
-/// KH1's cap of the record's AP (`0x1402B5660` case 3).
-pub const AP_CAP: i32 = 100;
+/// AP per "AP Up" pick (owner, M12, 2026-11-03: "it should give you 2 AP each level"; KH1's own
+/// AP bonus is also +2, btltbl `0x3AC0` kind 3 → `0x1402B5660` case 3). No cap (owner: "no cap";
+/// KH1's record caps at 100, not used).
+pub const AP_PER_UP: i32 = 2;
 
-/// Sora's max AP at a Re:CoM level (decision: KH1's AP +2 at KH1's levels, on Re:CoM's level).
-pub fn max_ap(level: u32) -> i32 {
-    AP_UP_LEVELS.iter().filter(|&&l| l <= level).fold(START_AP, |ap, _| (ap + 2).min(AP_CAP))
+/// Sora's max AP: KH1's starting AP plus 2 per AP Up pick (owner, M12). Nothing else gives AP.
+pub fn max_ap(ap_ups: u32) -> i32 {
+    START_AP.saturating_add(AP_PER_UP.saturating_mul(ap_ups.min(i32::MAX as u32) as i32))
+}
+
+/// Re:CoM's CP per CP Up pick: its level-up confirm adds 0x19 to `stats + 0xC` (`0x14010EF10`
+/// case 6, `add dword [rcx+0xC],0x19` at `0x14010F6AB`). Checked (decomp + exe).
+pub const RECOM_CP_PER_UP: i32 = 25;
+/// Sora's CP at a new game in Sora's story: the new game `0x1401AD2A0` calls `0x14023A040(1, 0,
+/// 0)`, which loads CardInit record `index[0]` through `0x14023A250` (CP = bytes 9 / 0xB): level 1,
+/// HP 80, **CP 275** (`SY0001.BIN` entry `CardInit.BIN`: index table at +0x10, records at +0x50).
+/// Nothing else writes Sora's CP but the level-up pick (+25) and the unreferenced debug givers
+/// `0x1400D1A00` (400 / 700): an exe-wide scan of every `[*0x14087CBF8 + 0xC]` access. So the base
+/// CP is 275 at every level. Checked (files + decomp + exe).
+pub const RECOM_START_CP: i32 = 275;
+
+/// Old saves (owner, M12: "each CP Up already taken counts as an AP Up"): the CP Up picks a save
+/// has taken, from its CP: (CP − 275) ÷ 25, at most one per level-up (level − 1), never below 0.
+pub fn ap_ups_from_cp(cp: i32, level: u32) -> u8 {
+    let picks = (cp.saturating_sub(RECOM_START_CP)).max(0) / RECOM_CP_PER_UP;
+    picks.min(level.saturating_sub(1).min(255) as i32).clamp(0, 255) as u8
 }
 
 /// The AP the equipped abilities use: KH1's `0x1402E8660` sums the costs of Sora's equipped list
@@ -230,22 +245,23 @@ pub fn used_ap(equipped: u32) -> i32 {
     ALL.iter().enumerate().filter(|(i, a)| equipped & (1 << i) != 0 && !a.shared && a.source != Source::Kit).map(|(_, a)| a.ap as i32).sum()
 }
 
-/// The AP left: KH1's `0x1402E8660` (max − used, never below 0).
-pub fn ap_left(equipped: u32, level: u32) -> i32 {
-    (max_ap(level) - used_ap(equipped)).max(0)
+/// The AP left: KH1's `0x1402E8660` (max − used, never below 0). `max`: [`max_ap`].
+pub fn ap_left(equipped: u32, max: i32) -> i32 {
+    (max - used_ap(equipped)).max(0)
 }
 
 /// KH1's rule for equipping `i` (`0x140311C20` greys it, `0x140310650` refuses it): a shared
 /// ability always; else its cost must not exceed the AP left.
-pub fn can_equip(equipped: u32, i: usize, level: u32) -> bool {
-    ALL.get(i).is_some_and(|a| a.shared || a.ap as i32 <= ap_left(equipped, level))
+pub fn can_equip(equipped: u32, i: usize, max: i32) -> bool {
+    ALL.get(i).is_some_and(|a| a.shared || a.ap as i32 <= ap_left(equipped, max))
 }
 
 /// Unequips from the most expensive down (ties: the last in [`ALL`]) until the used AP fits.
-/// Returns the bits taken off.
-pub fn fit_ap(equipped: &mut u32, level: u32) -> u32 {
+/// Returns the bits taken off. (KH1's AP never goes down, so KH1 has no rule for this; only a
+/// migration can need it.)
+pub fn fit_ap(equipped: &mut u32, max: i32) -> u32 {
     let mut off = 0;
-    while used_ap(*equipped) > max_ap(level) {
+    while used_ap(*equipped) > max {
         let worst = ALL.iter().enumerate().filter(|(i, a)| *equipped & (1 << i) != 0 && !a.shared && a.source != Source::Kit && a.ap > 0).max_by_key(|(i, a)| (a.ap, *i));
         let Some((i, _)) = worst else { break };
         *equipped &= !(1 << i);
@@ -267,31 +283,45 @@ pub mod field {
     /// 0 = never written (an older save, or a new game); 1 = stage 9a (unlocked = equipped);
     /// 2 = stage 9b (KH1's equip rules; the story abilities from the ini); 3 = the 9b follow-ups
     /// (their sources from Re:CoM, the start and levels); 4 = Guard and Dodge Roll in Sora's kit,
-    /// not in the words (Re:CoM's movement abilities arrive equipped). Same fields in all.
+    /// not in the words (Re:CoM's movement abilities arrive equipped); 5 = the AP Up count
+    /// ([`AP_UPS`]) is valid (M12). Same fields in all.
     pub const VERSION: usize = 0;
     /// u32 LE: unlocked abilities, bit [`super::ix`].
     pub const UNLOCKED: usize = 1;
     /// u32 LE: equipped abilities, bit [`super::ix`].
     pub const EQUIPPED: usize = 5;
-    /// 6 bytes kept zero (KH1's AP Up items, if they ever come: the max AP is derived from the
-    /// level, nothing to store).
-    pub const RESERVED: usize = 9;
+    /// u8 (layout v5): the AP Up picks taken on Re:CoM's level-up screen at Combat = KH1 (M12),
+    /// plus, once, the CP Up picks of the save before v5 ([`super::ap_ups_from_cp`]). Was the first
+    /// reserved byte (always zero before v5; nothing read it). Checked (code).
+    pub const AP_UPS: usize = 9;
+    /// 5 bytes kept zero.
+    pub const RESERVED: usize = 10;
 }
 
 pub const BLOCK_V1: u8 = 1;
 pub const BLOCK_V2: u8 = 2;
 pub const BLOCK_V3: u8 = 3;
 pub const BLOCK_V4: u8 = 4;
+pub const BLOCK_V5: u8 = 5;
 /// The layout this build writes.
-pub const BLOCK_NOW: u8 = BLOCK_V4;
+pub const BLOCK_NOW: u8 = BLOCK_V5;
 
-const _: () = assert!(BLOCK_LAST <= crate::keyblades::SPARE_LAST && field::RESERVED + 6 == BLOCK_LEN);
+const _: () = assert!(BLOCK_LAST <= crate::keyblades::SPARE_LAST && field::RESERVED + 5 == BLOCK_LEN && field::AP_UPS + 1 == field::RESERVED);
 
 /// What a block holds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct State {
     pub unlocked: u32,
     pub equipped: u32,
+    /// AP Up picks (layout v5; 0 in an older block until its migration sets it).
+    pub ap_ups: u8,
+}
+
+impl State {
+    /// Sora's max AP ([`max_ap`]).
+    pub fn max_ap(&self) -> i32 {
+        max_ap(self.ap_ups as u32)
+    }
 }
 
 fn u32_at(b: &[u8; BLOCK_LEN], o: usize) -> u32 {
@@ -306,7 +336,8 @@ pub fn read(block: &[u8; BLOCK_LEN]) -> State {
     // The kit is never in the words (an older block's Guard / Dodge Roll bits read as nothing; the
     // migration to v4 clears them in the save).
     let unlocked = u32_at(block, field::UNLOCKED) & ALL_BITS & !KIT_BITS;
-    State { unlocked, equipped: u32_at(block, field::EQUIPPED) & unlocked }
+    let ap_ups = if block[field::VERSION] >= BLOCK_V5 { block[field::AP_UPS] } else { 0 };
+    State { unlocked, equipped: u32_at(block, field::EQUIPPED) & unlocked, ap_ups }
 }
 
 /// The block's version.
@@ -314,11 +345,12 @@ pub fn version(block: &[u8; BLOCK_LEN]) -> u8 {
     block[field::VERSION]
 }
 
-/// Writes the state as layout [`BLOCK_NOW`]; the reserved bytes are kept.
+/// Writes the state as layout [`BLOCK_NOW`] (the AP Up count too); the reserved bytes are kept.
 pub fn write(s: &State, block: &mut [u8; BLOCK_LEN]) {
     block[field::VERSION] = block[field::VERSION].max(BLOCK_NOW);
     block[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&s.unlocked.to_le_bytes());
     block[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&s.equipped.to_le_bytes());
+    block[field::AP_UPS] = s.ap_ups;
 }
 
 // ---- unlocks ----
@@ -374,7 +406,7 @@ pub fn sync(s: &mut State, level: u32, recom_var: u32, learned: &mut dyn FnMut(u
             continue;
         }
         s.unlocked |= bit;
-        if eq & bit != 0 && can_equip(s.equipped, i, level) {
+        if eq & bit != 0 && can_equip(s.equipped, i, s.max_ap()) {
             s.equipped |= bit;
             out.new_equipped |= bit;
         } else {
@@ -416,8 +448,15 @@ pub fn ini_equipped(a: &crate::settings::Kh1Abilities) -> u32 {
 /// - everything equipped before stays equipped where it is still unlocked: the block's own set
 ///   (v1: 9a equipped every unlock) and, from v0 / v1, the ini's ([`ini_equipped`]; read once per
 ///   save);
-/// - then KH1's AP rule: over the max AP, unequipped from the most expensive down ([`fit_ap`]).
-pub fn migrate(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, ini: u32, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
+/// - v0..=v4 → v5 (M12): the AP Up count starts at `cp_ups` (the save's past CP Up picks,
+///   [`ap_ups_from_cp`]);
+/// - then over the max AP, unequipped from the most expensive down ([`fit_ap`]; KH1's AP never
+///   drops, so KH1 has no rule here).
+#[allow(clippy::too_many_arguments)]
+pub fn migrate(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, ini: u32, cp_ups: u8, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
+    if from < BLOCK_V5 {
+        s.ap_ups = cp_ups;
+    }
     let kit_dropped = (raw.unlocked | raw.equipped) & KIT_BITS;
     s.unlocked &= !KIT_BITS;
     s.equipped &= s.unlocked;
@@ -437,7 +476,8 @@ pub fn migrate(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, 
     let ini = if from < BLOCK_V2 { ini } else { 0 };
     let wanted = (out.new | out.new_equipped) & arrive_equipped_bits();
     s.equipped |= (before | ini | wanted) & s.unlocked;
-    out.fitted = fit_ap(&mut s.equipped, level);
+    let max = s.max_ap();
+    out.fitted = fit_ap(&mut s.equipped, max);
     // Report what really arrived equipped after the fit.
     let fresh = out.new | out.new_equipped;
     out.new_equipped = fresh & wanted & s.equipped;
@@ -508,7 +548,7 @@ pub fn on_screen(i: usize) -> bool {
 /// message 0xCA when the AP is short, else the bit 7 cleared; Remove sets it; a shared ability
 /// toggles with no AP test; `0x1403108E0` the panel: AP left / max AP.
 pub mod page {
-    use super::{ap_left, can_equip, max_ap, on_screen, used_ap, State, ALL};
+    use super::{ap_left, can_equip, on_screen, used_ap, State, ALL};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Owner {
@@ -572,14 +612,14 @@ pub mod page {
     }
 
     impl Screen {
-        pub fn rows(&self, s: &State, level: u32) -> Vec<Row> {
+        pub fn rows(&self, s: &State) -> Vec<Row> {
             match self.owner {
                 None => OWNERS.iter().map(|&o| Row { label: Label::Owner(o), grey: list(o, s).is_empty(), marked: false }).collect(),
                 Some(o) => list(OWNERS[o], s)
                     .into_iter()
                     .map(|i| {
                         let on = s.equipped & (1 << i) != 0;
-                        Row { label: Label::Ability(i), grey: !on && !can_equip(s.equipped, i, level), marked: on }
+                        Row { label: Label::Ability(i), grey: !on && !can_equip(s.equipped, i, s.max_ap()), marked: on }
                     })
                     .collect(),
             }
@@ -606,7 +646,7 @@ pub mod page {
 
         /// Confirm: open an owner's list (on its first row), or toggle the highlighted ability
         /// with KH1's rule. `s` is changed in place; the caller writes it.
-        pub fn confirm(&mut self, s: &mut State, level: u32) -> Outcome {
+        pub fn confirm(&mut self, s: &mut State) -> Outcome {
             match self.owner {
                 None => {
                     let o = self.owner_cursor.clamp(0, OWNERS.len() as i32 - 1) as usize;
@@ -623,7 +663,7 @@ pub mod page {
                     if s.equipped & bit != 0 {
                         s.equipped &= !bit;
                         Outcome::Removed(i)
-                    } else if can_equip(s.equipped, i, level) {
+                    } else if can_equip(s.equipped, i, s.max_ap()) {
                         s.equipped |= bit;
                         Outcome::Equipped(i)
                     } else {
@@ -644,10 +684,10 @@ pub mod page {
 
         /// The status panel's values: AP (KH1's panel: AP left / max AP), the highlighted
         /// ability's cost, the AP used / max AP.
-        pub fn status(&self, s: &State, level: u32) -> [String; 3] {
-            let max = max_ap(level);
+        pub fn status(&self, s: &State) -> [String; 3] {
+            let max = s.max_ap();
             let cost = self.ability(s).map_or_else(|| "-".to_string(), |i| ALL[i].ap.to_string());
-            [format!("{}/{max}", ap_left(s.equipped, level)), cost, format!("{}/{max}", used_ap(s.equipped))]
+            [format!("{}/{max}", ap_left(s.equipped, max)), cost, format!("{}/{max}", used_ap(s.equipped))]
         }
     }
 
@@ -702,21 +742,27 @@ mod tests {
     fn block_round_trip_and_new_game() {
         let mut b = [0u8; BLOCK_LEN];
         assert_eq!(read(&b), State::default(), "a block never written: nothing unlocked");
-        let s = State { unlocked: 0b1_0101, equipped: 0b101 };
+        let s = State { unlocked: 0b1_0101, equipped: 0b101, ap_ups: 7 };
         write(&s, &mut b);
-        assert_eq!(b[field::VERSION], BLOCK_V4);
+        assert_eq!(b[field::VERSION], BLOCK_V5);
+        assert_eq!(b[field::AP_UPS], 7);
         assert_eq!(read(&b), s);
         // Equipped is only ever a subset of unlocked; unknown bits (and the kit) are dropped.
         b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert_eq!(read(&b), State { unlocked: ALL_BITS & !KIT_BITS, equipped: ALL_BITS & !KIT_BITS });
+        assert_eq!(read(&b), State { unlocked: ALL_BITS & !KIT_BITS, equipped: ALL_BITS & !KIT_BITS, ap_ups: 7 });
         assert!(b[field::RESERVED..].iter().all(|&x| x == 0));
         // A v1 block reads as before (its bits are a subset of v2's).
         let mut v1 = [0u8; BLOCK_LEN];
         v1[field::VERSION] = BLOCK_V1;
         v1[field::UNLOCKED] = 0x81;
         v1[field::EQUIPPED] = 0x81;
-        assert_eq!(read(&v1), State { unlocked: 0x81, equipped: 0x81 });
+        assert_eq!(read(&v1), State { unlocked: 0x81, equipped: 0x81, ap_ups: 0 });
+        // Before v5 the count's byte is a reserved zero byte: it reads as no AP Up yet.
+        let mut v4 = v1;
+        v4[field::VERSION] = BLOCK_V4;
+        v4[field::AP_UPS] = 9;
+        assert_eq!(read(&v4).ap_ups, 0);
     }
 
     #[test]
@@ -727,19 +773,35 @@ mod tests {
         assert_eq!(ALL_BITS, 0x01FF_FFFF);
     }
 
-    /// KH1's AP: 3 at a new game (keep Rod / give up Shield adds 0), +2 at each kind-3 level of the
-    /// bonus list. Checked (files): the 24 levels.
+    /// Owner (M12, 2026-11-03): KH1's start 3, +2 per AP Up pick, no cap, nothing else (the
+    /// level gives nothing).
     #[test]
-    fn max_ap_is_kh1s_record_on_recoms_level() {
-        assert_eq!(max_ap(1), 3);
-        assert_eq!(max_ap(10), 3);
-        assert_eq!(max_ap(11), 5);
-        assert_eq!(max_ap(17), 7);
-        assert_eq!(max_ap(30), 13);
-        assert_eq!(max_ap(99), 51);
-        assert_eq!(max_ap(100), 51);
-        assert_eq!(AP_UP_LEVELS.len(), 24);
-        assert!(AP_UP_LEVELS.windows(2).all(|w| w[0] < w[1]));
+    fn max_ap_is_kh1s_start_plus_two_per_ap_up() {
+        assert_eq!(max_ap(0), 3);
+        assert_eq!(max_ap(1), 5);
+        assert_eq!(max_ap(10), 23);
+        assert_eq!(max_ap(98), 199, "a pick at every level-up: no cap at KH1's 100");
+        assert_eq!(max_ap(u32::MAX), i32::MAX, "saturates");
+        let s = State { ap_ups: 4, ..Default::default() };
+        assert_eq!(s.max_ap(), 11);
+        assert_eq!(State::default().max_ap(), START_AP);
+    }
+
+    /// Old saves (owner: "each CP Up already taken counts as an AP Up"): Re:CoM's CP is 275 at a
+    /// new game and only its +25 picks raise it.
+    #[test]
+    fn past_cp_picks_become_ap_ups() {
+        assert_eq!(ap_ups_from_cp(275, 1), 0, "a new game");
+        assert_eq!(ap_ups_from_cp(275, 30), 0, "every pick was HP or a sleight");
+        assert_eq!(ap_ups_from_cp(300, 2), 1);
+        assert_eq!(ap_ups_from_cp(525, 30), 10);
+        assert_eq!(ap_ups_from_cp(530, 30), 10, "a remainder (not Re:CoM's) rounds down");
+        assert_eq!(ap_ups_from_cp(1000, 5), 4, "at most one pick per level-up");
+        assert_eq!(ap_ups_from_cp(100, 40), 0, "below the start CP: none");
+        assert_eq!(ap_ups_from_cp(275 + 25 * 98, 99), 98);
+        assert_eq!(ap_ups_from_cp(i32::MAX, 99), 98);
+        assert_eq!(ap_ups_from_cp(i32::MIN, 99), 0);
+        assert_eq!(ap_ups_from_cp(400, 0), 0);
     }
 
     /// The btltbl values, read from the player's file when the test data is there.
@@ -748,8 +810,8 @@ mod tests {
         let Ok(dir) = std::env::var("KH1_TEST_DATA") else { return };
         let Ok(b) = std::fs::read(std::path::Path::new(&dir).join("btltbl.bin")) else { return };
         assert_eq!(b[0x39D8 + 2] as i32 + b[0x128 + 4 * 5 + 3] as i8 as i32, START_AP);
-        let kind3: Vec<u32> = (2..=100u32).filter(|&l| b[0x3AC0 + l as usize - 2] == 3).collect();
-        assert_eq!(kind3, AP_UP_LEVELS);
+        // KH1's own AP bonus (kind 3 of the bonus list btltbl `0x3AC0`) is +2 a time, as AP Up.
+        assert!((2..=100usize).any(|l| b[0x3AC0 + l - 2] == 3));
         for a in ALL.iter().filter(|a| a.kh1_id.is_some_and(|id| id < 64)) {
             let row = 0x33D8 + 12 * (a.kh1_id.unwrap() as usize - 1);
             assert_eq!((b[row], u16::from_le_bytes([b[row + 2], b[row + 3]])), (a.ap, a.key), "{}", a.name);
@@ -839,7 +901,7 @@ mod tests {
         b[field::VERSION] = BLOCK_V3;
         b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&(KIT_BITS | 1).to_le_bytes());
         b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&(KIT_BITS | 1).to_le_bytes());
-        assert_eq!(read(&b), State { unlocked: 1, equipped: 1 });
+        assert_eq!(read(&b), State { unlocked: 1, equipped: 1, ap_ups: 0 });
     }
 
     #[test]
@@ -908,12 +970,12 @@ mod tests {
         // A 9a save at level 34: 9a equipped every unlock (Sliding Dash, Blitz, Stun Impact,
         // Zantetsuken, Hurricane Blast, Ripple Drive, Aerial Sweep = 1+2+2+2+2+3+2 = 14 AP).
         let nine_a = [ix::SLIDING_DASH, ix::BLITZ, ix::STUN_IMPACT, ix::ZANTETSUKEN, ix::HURRICANE_BLAST, ix::RIPPLE_DRIVE, ix::AERIAL_SWEEP].iter().fold(0, |b, &i| b | 1 << i);
-        let mut s = State { unlocked: nine_a, equipped: nine_a };
+        let mut s = State { unlocked: nine_a, equipped: nine_a, ap_ups: 0 };
         let ini = crate::settings::Kh1Abilities::default(); // guard, counterattack on
         let raw = s;
-        let r = migrate(&mut s, raw, BLOCK_V1, 34, NO_RECOM, ini_equipped(&ini), &mut |id| id <= sleight::ZANTETSUKEN);
-        // Level 34: 15 AP; 14 wanted (the ini's Guard no longer costs anything).
-        assert_eq!(max_ap(34), 15);
+        // Six past CP picks: 6 AP Ups = 15 AP; 14 wanted (the ini's Guard no longer costs anything).
+        let r = migrate(&mut s, raw, BLOCK_V1, 34, NO_RECOM, ini_equipped(&ini), 6, &mut |id| id <= sleight::ZANTETSUKEN);
+        assert_eq!((s.ap_ups, s.max_ap()), (6, 15));
         assert_eq!(r.fitted, 0);
         assert_eq!(s.equipped, nine_a);
         assert!(s.equipped & 1 << ix::COUNTERATTACK == 0, "Counterattack not unlocked before 57");
@@ -921,13 +983,13 @@ mod tests {
         // A new game (block never written): nothing in the block.
         let mut n = State::default();
         let raw = n;
-        migrate(&mut n, raw, 0, 1, NO_RECOM, ini_equipped(&ini), &mut |_| false);
+        migrate(&mut n, raw, 0, 1, NO_RECOM, ini_equipped(&ini), 0, &mut |_| false);
         assert_eq!(n, State::default());
         // The ini's combo_plus copies at a level that has them.
         let cp = crate::settings::Kh1Abilities { combo_plus: 2, air_combo_plus: 1, ..ini };
         let mut m = State::default();
         let raw = m;
-        migrate(&mut m, raw, 0, 99, NO_RECOM, ini_equipped(&cp), &mut |_| false);
+        migrate(&mut m, raw, 0, 99, NO_RECOM, ini_equipped(&cp), 1, &mut |_| false);
         let c = to_core(m.equipped);
         assert_eq!((c.combo_plus, c.air_combo_plus, c.guard, c.counterattack, c.dodge_roll), (2, 1, true, true, true));
     }
@@ -936,22 +998,22 @@ mod tests {
     /// movement abilities, unequipped by v3's rule, are equipped once.
     #[test]
     fn v3_blocks_drop_the_kit_and_equip_recoms_movement() {
-        let raw = State { unlocked: KIT_BITS | 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::HIGH_JUMP, equipped: KIT_BITS | 1 << ix::BLITZ };
+        let raw = State { unlocked: KIT_BITS | 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::HIGH_JUMP, equipped: KIT_BITS | 1 << ix::BLITZ, ap_ups: 0 };
         let mut b = [0u8; BLOCK_LEN];
         b[field::VERSION] = BLOCK_V3;
         b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&raw.unlocked.to_le_bytes());
         b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&raw.equipped.to_le_bytes());
         let mut s = read(&b);
-        // Level 11: 5 AP. v3 used Guard 2 + Dodge Roll 1 + Blitz 2 = 5: now 2, so Ripple Drive (3)
-        // fits when the player equips it.
-        let r = migrate(&mut s, raw, BLOCK_V3, 11, recom::HIGH_JUMP, 0, &mut |_| false);
+        // One past CP pick: 5 AP. v3 used Guard 2 + Dodge Roll 1 + Blitz 2 = 5: now 2, so Ripple
+        // Drive (3) fits when the player equips it.
+        let r = migrate(&mut s, raw, BLOCK_V3, 11, recom::HIGH_JUMP, 0, 1, &mut |_| false);
         assert_eq!(names(r.kit_dropped), vec!["Guard", "Dodge Roll"]);
         assert_eq!(s.unlocked & KIT_BITS, 0);
         assert_eq!(used_ap(s.equipped), 2);
-        assert!(can_equip(s.equipped, ix::RIPPLE_DRIVE, 11));
+        assert!(can_equip(s.equipped, ix::RIPPLE_DRIVE, s.max_ap()));
         assert_ne!(s.equipped & 1 << ix::HIGH_JUMP, 0, "Re:CoM's High Jump equipped once");
         write(&s, &mut b);
-        assert_eq!((b[field::VERSION], u32_at(&b, field::UNLOCKED) & KIT_BITS), (BLOCK_V4, 0));
+        assert_eq!((b[field::VERSION], u32_at(&b, field::UNLOCKED) & KIT_BITS, b[field::AP_UPS]), (BLOCK_V5, 0, 1));
     }
 
     #[test]
@@ -960,9 +1022,9 @@ mod tests {
         // equipped), Guard equipped and Dodge Roll removed in the camp; Re:CoM has given only its
         // High Jump.
         let had = 1 << ix::HIGH_JUMP | 1 << ix::GLIDE | 1 << ix::SUPERGLIDE | 1 << ix::COMBO_MASTER;
-        let raw = State { unlocked: had | KIT_BITS, equipped: had | 1 << ix::GUARD };
-        let mut s = State { unlocked: had, equipped: had };
-        let r = migrate(&mut s, raw, BLOCK_V2, 40, recom::HIGH_JUMP, u32::MAX, &mut |_| false);
+        let raw = State { unlocked: had | KIT_BITS, equipped: had | 1 << ix::GUARD, ap_ups: 0 };
+        let mut s = State { unlocked: had, equipped: had, ap_ups: 0 };
+        let r = migrate(&mut s, raw, BLOCK_V2, 40, recom::HIGH_JUMP, u32::MAX, 0, &mut |_| false);
         assert_eq!(names(r.taken), vec!["Glide", "Superglide", "Combo Master"]);
         assert_eq!(names(r.kit_dropped), vec!["Guard", "Dodge Roll"]);
         assert!(s.equipped & 1 << ix::HIGH_JUMP != 0, "Re:CoM has it: stays equipped");
@@ -972,9 +1034,9 @@ mod tests {
         let r = sync(&mut s, 50, recom::HIGH_JUMP | recom::GLIDE, &mut |_| false);
         assert_eq!((names(r.new), names(r.new_equipped)), (vec!["Combo Master", "Air Combo Plus"], vec!["Glide"]));
         // At the migration itself, a source already met keeps the old equipped state.
-        let mut t = State { unlocked: had, equipped: had };
+        let mut t = State { unlocked: had, equipped: had, ap_ups: 0 };
         let raw = t;
-        let r = migrate(&mut t, raw, BLOCK_V2, 50, 7, 0, &mut |_| false);
+        let r = migrate(&mut t, raw, BLOCK_V2, 50, 7, 0, 0, &mut |_| false);
         assert_eq!(r.taken, 0);
         assert_eq!(t.equipped & V2_STORY_BITS, V2_STORY_BITS);
     }
@@ -983,12 +1045,12 @@ mod tests {
     fn fit_takes_the_most_expensive_first() {
         let mut e = 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::SLIDING_DASH | 1 << ix::HIGH_JUMP | KIT_BITS;
         assert_eq!(used_ap(e), 6, "the kit costs nothing");
-        assert_eq!(fit_ap(&mut e, 1), 1 << ix::RIPPLE_DRIVE);
+        assert_eq!(fit_ap(&mut e, max_ap(0)), 1 << ix::RIPPLE_DRIVE);
         assert_eq!(used_ap(e), 3);
         assert!(e & 1 << ix::HIGH_JUMP != 0, "shared: free");
         // Equal costs: the later index goes first.
         let mut e = 1 << ix::BLITZ | 1 << ix::STUN_IMPACT;
-        assert_eq!(fit_ap(&mut e, 1), 1 << ix::STUN_IMPACT);
+        assert_eq!(fit_ap(&mut e, max_ap(0)), 1 << ix::STUN_IMPACT);
     }
 
     #[test]
@@ -1000,44 +1062,44 @@ mod tests {
 
     #[test]
     fn the_screen_follows_kh1s_rules() {
-        let level = 11; // 5 AP
-        let mut s = State { unlocked: 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::VORTEX | 1 << ix::GLIDE | 1 << ix::STRIKE_RAID | 1 << ix::SONIC_BLADE, equipped: 1 << ix::GLIDE };
+        // One AP Up: 5 AP.
+        let mut s = State { unlocked: 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::VORTEX | 1 << ix::GLIDE | 1 << ix::STRIKE_RAID | 1 << ix::SONIC_BLADE, equipped: 1 << ix::GLIDE, ap_ups: 1 };
         let mut sc = Screen::default();
-        let rows = sc.rows(&s, level);
+        let rows = sc.rows(&s);
         assert_eq!(rows.iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared)]);
-        assert_eq!(sc.confirm(&mut s, level), Outcome::Opened);
+        assert_eq!(sc.confirm(&mut s), Outcome::Opened);
         // Sora's list in KH1's key order; Strike Raid (still waiting) isn't listed, Sonic Blade is.
-        let l: Vec<Label> = sc.rows(&s, level).iter().map(|r| r.label).collect();
+        let l: Vec<Label> = sc.rows(&s).iter().map(|r| r.label).collect();
         assert_eq!(l, vec![Label::Ability(ix::VORTEX), Label::Ability(ix::BLITZ), Label::Ability(ix::RIPPLE_DRIVE), Label::Ability(ix::SONIC_BLADE)]);
         // Equip Ripple Drive (3), then Blitz (2) = 5; Vortex (1) is greyed and refused.
         sc.set_cursor(2);
-        assert_eq!(sc.confirm(&mut s, level), Outcome::Equipped(ix::RIPPLE_DRIVE));
+        assert_eq!(sc.confirm(&mut s), Outcome::Equipped(ix::RIPPLE_DRIVE));
         sc.set_cursor(1);
-        assert_eq!(sc.confirm(&mut s, level), Outcome::Equipped(ix::BLITZ));
-        assert_eq!(sc.status(&s, level), ["0/5".to_string(), "2".into(), "5/5".into()]);
-        let rows = sc.rows(&s, level);
+        assert_eq!(sc.confirm(&mut s), Outcome::Equipped(ix::BLITZ));
+        assert_eq!(sc.status(&s), ["0/5".to_string(), "2".into(), "5/5".into()]);
+        let rows = sc.rows(&s);
         assert!(rows[0].grey && !rows[0].marked && rows[1].marked && rows[2].marked && rows[3].grey);
         sc.set_cursor(0);
-        assert_eq!(sc.confirm(&mut s, level), Outcome::Refused(ix::VORTEX));
+        assert_eq!(sc.confirm(&mut s), Outcome::Refused(ix::VORTEX));
         // Remove Ripple Drive: Sonic Blade (3) fits.
         sc.set_cursor(2);
-        assert_eq!(sc.confirm(&mut s, level), Outcome::Removed(ix::RIPPLE_DRIVE));
+        assert_eq!(sc.confirm(&mut s), Outcome::Removed(ix::RIPPLE_DRIVE));
         sc.set_cursor(3);
-        assert_eq!(sc.confirm(&mut s, level), Outcome::Equipped(ix::SONIC_BLADE));
+        assert_eq!(sc.confirm(&mut s), Outcome::Equipped(ix::SONIC_BLADE));
         // Shared: free toggles.
         assert_eq!(sc.cancel(), Outcome::Back);
         sc.set_cursor(1);
-        assert_eq!(sc.confirm(&mut s, level), Outcome::Opened);
-        assert_eq!(sc.confirm(&mut s, level), Outcome::Removed(ix::GLIDE));
-        assert_eq!(sc.confirm(&mut s, level), Outcome::Equipped(ix::GLIDE));
+        assert_eq!(sc.confirm(&mut s), Outcome::Opened);
+        assert_eq!(sc.confirm(&mut s), Outcome::Removed(ix::GLIDE));
+        assert_eq!(sc.confirm(&mut s), Outcome::Equipped(ix::GLIDE));
         assert_eq!(sc.cancel(), Outcome::Back);
         assert_eq!(sc.cursor(), 1, "back on the owner row");
         assert_eq!(sc.cancel(), Outcome::Close);
         // An owner with nothing.
         let mut e = State::default();
         let mut sc = Screen::default();
-        assert_eq!(sc.confirm(&mut e, 1), Outcome::Empty);
-        assert!(sc.rows(&e, 1)[0].grey);
+        assert_eq!(sc.confirm(&mut e), Outcome::Empty);
+        assert!(sc.rows(&e)[0].grey);
     }
 
     /// The page's rows take Re:CoM's list entry 0x131 (the green row with the green Mickey

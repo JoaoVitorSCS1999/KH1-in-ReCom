@@ -17,6 +17,7 @@ mod hook;
 mod items;
 mod keyblades;
 mod kh1_hud;
+mod level_up;
 mod magic;
 mod magic_fx;
 mod menu;

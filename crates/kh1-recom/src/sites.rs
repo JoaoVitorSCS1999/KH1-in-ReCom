@@ -1265,6 +1265,21 @@ pub const ABILITY_CALLEES: &[Site] = &[
     Site { name: "sleight learned (0x14023AB00)", rva: 0x0023_AB00, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x0F, 0xB7, 0xD9, 0xE8, 0xF2, 0xFF, 0xF6, 0xFF, 0x85, 0xC0] },
 ];
 
+/// M12 step 1 (`win::level_up`, `crate::level_up`, `docs/recom-m12-sleights.md` § 8.1): Re:CoM's
+/// level-up screen offers AP Up for CP Up at Combat = KH1. Its update is the existing `MP_HOOKS`
+/// wrapper; the text copy is an earlier stage's checked callee. Re:CoM code and data whose
+/// behaviour the AP Up row relies on. Checked only.
+pub const M12_CHECKED: &[Site] = &[
+    // mov rax,[0x14087CBF8]; cmp dword [rax+0xC],0x659; jge: the CP row offered while CP < 1625.
+    Site { name: "level-up CP offer (0x14010F209)", rva: 0x0010_F209, expect: &[0x48, 0x8B, 0x05, 0xE8, 0xD9, 0x76, 0x00, 0x81, 0x78, 0x0C, 0x59, 0x06, 0x00, 0x00, 0x7D, 0x06] },
+    // mov rcx,[0x14087CBF8]; add dword [rcx+0xC],0x19: the CP pick.
+    Site { name: "level-up CP pick (0x14010F6A4)", rva: 0x0010_F6A4, expect: &[0x48, 0x8B, 0x0D, 0x4D, 0xD5, 0x76, 0x00, 0x83, 0x41, 0x0C, 0x19] },
+    // CLevelUp's vtable: the dtor 0x14010EB80, the update 0x14010EF10.
+    Site { name: "CLevelUp vtable (0x140512C10)", rva: 0x0051_2C10, expect: &[0x80, 0xEB, 0x10, 0x40, 0x01, 0x00, 0x00, 0x00, 0x10, 0xEF, 0x10, 0x40, 0x01, 0x00, 0x00, 0x00] },
+    // "%4d \xF9Y\x81\xA8\xF9R%4d": the panel's preview format (`crate::level_up::panel_value`).
+    Site { name: "level-up panel preview format (0x140512C70)", rva: 0x0051_2C70, expect: &[0x25, 0x34, 0x64, 0x20, 0xF9, 0x59, 0x81, 0xA8, 0xF9, 0x52, 0x25, 0x34, 0x64] },
+];
+
 /// M9 stage 9c.1 (`win::specials`, `docs/recom-m9-abilities.md` § 9c.1): KH1's specials on
 /// Re:CoM's sleight action `0x16`. Same rule as [`HOOKS`].
 pub const SPECIAL_HOOKS: &[Site] = &[
@@ -3438,6 +3453,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         MAGIC_FX_CHECKED,
         CUSTOMIZE_GLYPHS_CHECKED,
         ABILITY_CALLEES,
+        M12_CHECKED,
         SPECIAL_HOOKS,
         SPECIAL_CHECKED,
         SPECIAL_TINT_CHECKED,
@@ -4165,6 +4181,30 @@ mod tests {
         let f = &ABILITY_CALLEES[0];
         let rel = i32::from_le_bytes(f.expect[10..14].try_into().unwrap()) as i64;
         assert_eq!(0x1_4000_0000 + f.rva as i64 + 9 + 5 + rel, 0x1_401A_AB00);
+    }
+
+    #[test]
+    fn m12_sites() {
+        for s in M12_CHECKED {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        let find = |n: &str| M12_CHECKED.iter().find(|s| s.name.starts_with(n)).unwrap();
+        let rip = |s: &Site, len: usize| (0x1_4000_0000i64 + s.rva as i64 + len as i64 + i32::from_le_bytes(s.expect[3..7].try_into().unwrap()) as i64) as u64;
+        // Both CP sites read Sora's stats pointer; the cap is 1625, the pick +25.
+        assert_eq!(rip(find("level-up CP offer"), 7), 0x1_4087_CBF8);
+        assert_eq!(rip(find("level-up CP pick"), 7), 0x1_4087_CBF8);
+        assert_eq!(i32::from_le_bytes(find("level-up CP offer").expect[10..14].try_into().unwrap()), crate::level_up::RECOM_CP_OFFER_CAP);
+        assert_eq!(find("level-up CP pick").expect[10] as i32, crate::abilities::RECOM_CP_PER_UP);
+        let slot = |s: &Site, k: usize| u64::from_le_bytes(s.expect[8 * k..8 * k + 8].try_into().unwrap());
+        assert_eq!(slot(find("CLevelUp vtable"), 1), 0x1_4010_EF10);
+        assert!(all_sites().any(|s| s.rva == 0x0010_EF10), "the update's wrapper site");
+        // The panel's preview: ours prints the same bytes between the numbers.
+        let f = find("level-up panel preview format").expect;
+        assert_eq!(&crate::level_up::panel_value(1, true)[4..11], &f[3..10]);
+        // The text copy win::level_up uses is an earlier stage's checked callee.
+        for rva in [0x0025_8DE0u32] {
+            assert!(all_sites().any(|s| s.rva == rva), "{rva:#x}");
+        }
     }
 
     #[test]

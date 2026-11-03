@@ -130,7 +130,8 @@ Right after the items extension, inside Re:CoM's spare tail `save + 0x246B ..= 0
 | `0x269F` | 1 | version: **0 = never written** (older save, new game) → nothing unlocked; 1 = written by 9a; **2 = 9b** (bits 13–24 below, KH1's equip rules); **3 = the 9b follow-ups** (same fields; the sources below) |
 | `0x26A0` | 4 | unlocked, bit = `abilities::ix` (0 Sliding Dash, 1 Blitz, 2 Stun Impact, 3 Zantetsuken, 4 Vortex, 5 Aerial Sweep, 6 Hurricane Blast, 7 Ripple Drive, 8 Gravity Break, 9 Strike Raid, 10 Sonic Blade, 11 Ars Arcanum, 12 Ragnarok; 9b: 13 Guard, 14 Counterattack, 15 Dodge Roll, 16 High Jump, 17 Glide, 18 Superglide, 19 Combo Master, 20–22 Combo Plus ×3, 23–24 Air Combo Plus ×2) |
 | `0x26A4` | 4 | equipped (a subset of unlocked) |
-| `0x26A8` | 6 | zero (9b derives the max AP from the level; kept for AP Up items, should they come) |
+| `0x26A8` | 1 | **M12 (layout v5)**: the AP Up picks (`abilities::field::AP_UPS`). Before v5 a reserved zero byte nothing read (Checked (code)). |
+| `0x26A9` | 5 | zero |
 
 Fields never move. Re:CoM saves, checksums, loads, snapshots and zeroes it with its save block.
 An older save unlocks what it has at its first Attack press.
@@ -356,8 +357,10 @@ questions 1–3. Code: `crates/kh1-recom/src/abilities.rs` (rules, AP, the scree
 The specials (Strike Raid, Sonic Blade, Ars Arcanum, Ragnarok; KH1 ids 13 / 11 / 12 / 14, costs
 3 / 3 / 4 / 4) keep their unlock state but are **not on the screen** until 9c gives them a use.
 
-**AP** (`abilities::max_ap`): 3 + 2 at each of KH1's 24 kind-3 levels reached, on Re:CoM's level
-(`*0x14087CBF8 + 0x1C`). Used = the costs of Sora's equipped abilities; left = max − used, never below 0.
+**AP** (`abilities::max_ap`): ~~3 + 2 at each of KH1's 24 kind-3 levels reached~~ **replaced by M12**
+(owner, 2026-11-03): KH1's start 3 + 2 per "AP Up" pick on Re:CoM's level-up screen at Combat = KH1,
+no cap, nothing else (`docs/recom-m12-sleights.md` § 8). Used = the costs of Sora's equipped
+abilities; left = max − used, never below 0.
 
 **Equipping** (`abilities::page::Screen::confirm`): equipped → removed; unequipped → equipped when
 its cost ≤ AP left (shared: always), else **refused**: Re:CoM's error sound (camp sound 5) and the
