@@ -1323,8 +1323,28 @@ impl Behaviour for Ai {
         }
         set_state(&self.io, st::HIT);
     }
+    /// The fallback when the host couldn't take the hit on the armour first ([`Behaviour::armoured`]).
     fn keeps_reaction(&self) -> bool {
         self.io.borrow().x.keep
+    }
+    /// The handler's no-reaction case, asked before Re:CoM's handler (M11, owner 2026-11-02: "move onto the
+    /// no-reaction armour"): `0x1F72`: while 206 plays (`sys 51`, the request playing), a hit that is not a
+    /// clash (6 / 7; attributes 8 / 9 aren't carried) has its reaction kind zeroed. Unknown kind: not here.
+    fn armoured(&self, playing: Option<u16>, _launch_base: u16, kind: Option<u8>) -> bool {
+        playing == Some(req::DIVE) && kind.is_some_and(|k| !crate::enemy::host::is_clash(k))
+    }
+    /// That hit's handler (`0x1FF4..0x2016`, `0x20DA`): the kind zeroed (no push: no `sys 42`, a kind-0
+    /// record plays nothing), the dive marked (`wp+0x4C`), the hit counted, the hit state asked for (its
+    /// behaviour plays 211). Re:CoM's state stays (the dive is a plain motion in state 1); the hit state's
+    /// 211 replaces 206 at the next AI frame, as KH1's state request does.
+    fn on_armoured_hit(&self, _dir: Vec3) {
+        {
+            let mut io = self.io.borrow_mut();
+            io.x.keep = true;
+            io.x.dive_hit = true;
+            io.x.hits += 1;
+        }
+        set_state(&self.io, st::HIT);
     }
     fn risen(&self) -> bool {
         self.io.borrow().x.appeared
@@ -1364,6 +1384,7 @@ impl Behaviour for Ai {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enemy::host::model::Model;
 
     /// Test numbers: the player's script's own (the asset step reads them; the disassembly's values),
     /// the shared engine's.
@@ -1568,6 +1589,55 @@ mod tests {
         assert!(at(req::DIVE_START) < at(req::DIVE) && at(req::DIVE) < at(req::DIVE_END) && at(req::DIVE_END) < at(req::SWOOP), "{order:?}");
         assert!(s.attacks().iter().any(|a| a.1 == Attack::Swoop));
         assert!(s.pos.y > -150.0, "it came down to him: {}", s.pos.y);
+    }
+
+    /// The no-reaction armour (owner 2026-11-02): while 206 plays a hit that isn't a clash is taken without a
+    /// reaction (asked before Re:CoM's handler); the handler's counts and its hit state follow, no push.
+    #[test]
+    fn the_dive_on_the_armour() {
+        let s = Sim::new(1, false, Vec3::new(0.0, -200.0, 0.0));
+        assert!(s.ai.armoured(Some(req::DIVE), 0, Some(3)) && s.ai.armoured(Some(req::DIVE), 0, Some(5)));
+        for (p, k) in [(Some(req::DIVE), Some(6)), (Some(req::DIVE), Some(7)), (Some(req::DIVE), None), (Some(req::DIVE_START), Some(3)), (Some(req::DIVE_END), Some(3)), (None, Some(3))] {
+            assert!(!s.ai.armoured(p, 0, k), "{p:?} {k:?}");
+        }
+        s.ai.io.borrow_mut().state.1 = false;
+        s.ai.set_hit_kind(3);
+        s.ai.on_armoured_hit(Vec3::new(0.0, 0.0, -1.0));
+        let io = s.ai.io.borrow();
+        assert!(io.x.dive_hit && io.x.hits == 1 && io.state.1 && io.body.push.is_none(), "counted, the hit state, no push");
+    }
+
+    /// The dive through the host's rules (`crate::enemy::host::model`, its class map: swoop 3, slash 2): 206
+    /// plays in Re:CoM's state 1 (a plain motion); a hit on the armour leaves that state alone and 211 plays
+    /// in state 1 from the next frame, for its length; nothing is released.
+    #[test]
+    fn hosted_a_hit_in_the_dive_plays_211_in_state_1() {
+        let mut s = Sim::new(3, false, Vec3::new(0.0, -900.0, 0.0));
+        let sora = |_| (Vec3::new(30.0, 0.0, 60.0), true);
+        s.run(sora, 2);
+        let cx = s.ai.io.clone();
+        s.ai.behaviour = Some(Box::pin(async move { far_round(&cx).await }));
+        let Sim { ai, pos, .. } = s;
+        let mut m = Model::new(Box::new(ai), consts(), frames(), vec![], vec![3, 2]);
+        m.pos = pos;
+        let at = Vec3::new(30.0, 0.0, 60.0);
+        for _ in 0..400 {
+            if m.current == Some(req::DIVE) && m.age > 2.0 {
+                break;
+            }
+            m.run(at, 1);
+        }
+        assert_eq!((m.state, m.current), (1, Some(req::DIVE)), "diving");
+        assert!(!m.armoured_hit(6, Vec3::new(0.0, 0.0, -1.0)), "a clash is not armoured");
+        assert!(m.armoured_hit(3, Vec3::new(0.0, 0.0, -1.0)));
+        m.run(at, 1);
+        assert_eq!((m.state, m.current), (1, Some(req::DIVE_HIT)), "211 at once, in state 1");
+        let from = m.trace.len();
+        m.run(at, 120);
+        let run = m.longest_run(req::DIVE_HIT);
+        assert!(run >= 85, "211 for its 86 frames: {run}");
+        assert!(m.trace[from..].iter().all(|t| t.0 == 1 || t.1 != Some(req::DIVE_HIT)), "211 only in state 1");
+        assert_eq!(m.released, 0);
     }
 
     /// A target high above: the climb (204) and the slash.
