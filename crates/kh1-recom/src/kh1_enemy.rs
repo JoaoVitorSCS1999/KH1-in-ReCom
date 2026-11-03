@@ -99,7 +99,7 @@ const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin 
 
 /// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
 /// row in their own module (`crate::m11`); one line here per enemy.
-pub static CLASSES: [&Class; 10] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS];
+pub static CLASSES: [&Class; 11] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS, &crate::ground::largebody::CLASS];
 
 /// M10's Shadow (class 0).
 pub static SHADOW: Class = Class {
@@ -187,6 +187,36 @@ pub struct Manifest {
     /// The enemy's guard-type rows (the shared enemy-guard step, `kh1_core::enemy::guard`; its
     /// manifest's `guards`, in the behaviour's order), none for an enemy without any.
     pub guards: Vec<ke::guard::GuardRow>,
+    /// A KH1 child ring on Re:CoM's own shockwave record (M11, the Large Body's stomp; the asset step's
+    /// `enemy::RINGS`), from the manifest's `ring_*` / `stomp_request` numbers; none for the others.
+    pub ring: Option<Ring>,
+}
+
+/// A KH1 child object that grows on the floor (`ex_2050_00.bd`: made at frame `start` of `request`, its radius
+/// `growth` × the frames since, for `life` frames; KH1 units). The asset step put Re:CoM's circle record on the
+/// request's clip for those frames; the host sets its radius each KH1 frame (`win::kh1_enemy::ring_step`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ring {
+    pub request: u16,
+    pub start: f32,
+    pub life: f32,
+    pub growth: f32,
+}
+
+impl Ring {
+    /// The ring's radius in metres at KH1 frame `t` of its request's motion, or none outside its life. The child
+    /// tests with `r` then adds `growth` × the step (`0x384`..`0x43A`): `r` = `growth` × (t − `start`).
+    pub fn radius(&self, t: f32) -> Option<f32> {
+        (t >= self.start && t < self.start + self.life).then(|| self.growth * (t - self.start) * 0.01)
+    }
+
+    fn from(c: &Table) -> Option<Ring> {
+        let (r, start, life, growth) = (c.get("stomp_request"), c.get("ring_at"), c.get("ring_life"), c.get("ring_growth"));
+        if !(r.is_finite() && start.is_finite() && life > 0.0 && growth.is_finite()) || !(0.0..=65535.0).contains(&r) {
+            return None;
+        }
+        Some(Ring { request: r as u16, start, life, growth })
+    }
 }
 
 impl Manifest {
@@ -218,7 +248,7 @@ pub fn from_shadow(text: &str) -> Result<Manifest, String> {
     let v = json::parse(text)?;
     let parts = parse_parts(&v, 2)?;
     let consts = Table::new(m.consts.pairs().to_vec(), kh1_core::shadow::NAMES)?;
-    Ok(Manifest { consts, clips: m.clips, recoil: vec![m.recoil[0], m.recoil[1], m.recoil[2]], parts, guards: Vec::new() })
+    Ok(Manifest { consts, clips: m.clips, recoil: vec![m.recoil[0], m.recoil[1], m.recoil[2]], parts, guards: Vec::new(), ring: None })
 }
 
 fn parse_parts(v: &json::Value, min: usize) -> Result<Vec<i32>, String> {
@@ -277,7 +307,13 @@ pub fn parse(text: &str, enemy: &str, names: &[&str], needed: &[u16]) -> Result<
     }
     let parts = parse_parts(&v, 1)?;
     let guards = parse_guards(&v, &clips)?;
-    let m = Manifest { consts, clips, recoil, parts, guards };
+    let ring = Ring::from(&consts);
+    if let Some(r) = ring {
+        if !clips.iter().any(|c| c.request == r.request && (r.start as u32) < c.frames) {
+            return Err(format!("the ring's request {} has no clip of more than {} frames", r.request, r.start));
+        }
+    }
+    let m = Manifest { consts, clips, recoil, parts, guards, ring };
     for &r in needed {
         if m.clip(r).is_none() {
             return Err(format!("no clip for KH1 request {r}"));

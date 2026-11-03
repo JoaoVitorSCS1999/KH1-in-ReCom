@@ -73,6 +73,8 @@ mod f {
     /// Re:CoM's enemy heal and its defeat EXP drop (`sites::KH1_ENEMY_REWARD_CALLEES`).
     pub const HEAL: u32 = 0x0018_1CE0;
     pub const EXP_DROP: u32 = 0x0018_10A0;
+    /// Re:CoM's attack-set radius setter (`sites::KH1_ENEMY_RING_CALLEES`), on the enemy's attack set `+0x100`.
+    pub const SET_RADIUS: u32 = 0x0014_E5C0;
 }
 /// Enemy fields (Checked (decomp): `0x14017F7E0`, `0x14017C530`, `0x140185320`).
 mod e {
@@ -90,6 +92,9 @@ mod e {
     pub const EXP: usize = 0x2E4;
     /// The `@ENP` row: Re:CoM makes no prize of an enemy without it (`0x1401810A0`). Checked (decomp).
     pub const ENP_ROW: usize = 0x310;
+    /// The enemy's attack set (its `.ASD` records' collisions), as Re:CoM's Large Body's state 3 step passes it to
+    /// `0x14014E5C0` (`0x14018F280`). Checked (decomp).
+    pub const ATTACKS: usize = 0x100;
     /// Re:CoM's state 0 alternate path (`0x140192850` / `0x14017B590`: `+0x260 & 0x20000000008`).
     pub const APPEAR_ALT: u64 = 0x200_0000_0008;
 }
@@ -410,6 +415,12 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
         // (0.73.0's crash: removing it shifted every later runtime, their tails' indices went stale,
         // the lookup failed and Re:CoM's own state 1 ran without its think: a divide by zero at
         // `0x140197B60`). The lookup goes by address too (`with_rt`).
+        // A runtime that goes while its guard flag is on (a KH1 mode-3 row lives until the defeat: the Large Body
+        // left behind by a fled battle) gives its count back.
+        let gone = v.iter().filter(|x| x.guarded && (x.battle != battle || x.enemy == this)).count();
+        if gone > 0 {
+            let _ = GUARDED.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_sub(gone)));
+        }
         v.retain(|x| x.battle == battle);
         let slot = v.iter().position(|x| x.enemy == this);
         let fresh = Runtime {
@@ -978,6 +989,7 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
     }
     body_step(en, rt, step, pos);
     guard_step(en, rt, step);
+    ring_step(en, rt);
     // KH1's hit counter goes back to 0 at the end of an update with no action playing (actor flag
     // 4: an action of ours the AI waits on, or a reaction).
     if rt.reaction.is_none() && rt.action.is_none_or(|a| a.steered) {
@@ -1262,9 +1274,13 @@ unsafe fn take_over(en: usize, rt: &mut Runtime) {
     rt.queued = None;
     rt.recom_flinch = false;
     rt.current = None;
-    rt.guard = None;
+    // KH1's mode-3 guard row (the Large Body's front) isn't tied to an action: it stays (`0x1402B47A0` tests it
+    // whatever plays; a status doesn't remove it: Checked (decomp), its owner's `+0x88 & 1` skips only non-guard rows).
+    if !rt.guard.is_some_and(|g| g.request == ke::guard::ALWAYS) {
+        rt.guard = None;
+        guard_bodies(en, rt, None);
+    }
     rt.clash_recoil = None;
-    guard_bodies(en, rt, None);
 }
 
 /// State 1 step: KH1's frame with the behaviour.
@@ -1448,12 +1464,25 @@ pub(super) struct Armour {
 /// Before Re:CoM's hit handler (`super::attack::enemy_hit`, the wrapper every call of `0x14017F7E0` goes
 /// through): bits 20 / 21 on for the call while the behaviour's hit handler would take no reaction.
 /// Per hit: one atomic load while no KH1 class is installed, else one tail check and one question.
-pub(super) unsafe fn armour_on(en: usize) -> Option<Armour> {
+pub(super) unsafe fn armour_on(en: usize, swing_kind: impl FnOnce() -> Option<u8>) -> Option<Armour> {
     if !any_installed() {
         return None;
     }
     ours(en)?;
-    if !with_rt(en, |rt| !rt.dead && rt.ai.armoured(rt.current, rt.launch_base))? {
+    // The hit's KH1 kind before Re:CoM's handler runs (a script whose `sys 42` depends on it: the Large Body's
+    // `0x2416`): a KH1 swing's from its row, else Re:CoM's kind of the attack in the hit info (`hit_of`'s rule).
+    let kind = swing_kind().or_else(|| {
+        let info: usize = rd(en + e::HIT_INFO);
+        let atk: usize = if info != 0 { rd(info + hi::ATTACK) } else { 0 };
+        (atk != 0).then(|| crate::shadow::kh1_kind_of_recom(rd(atk + hi::KIND)))
+    });
+    if !with_rt(en, |rt| {
+        if let Some(k) = kind {
+            rt.ai.set_hit_kind(k);
+        }
+        rt.ai.set_playing(rt.current);
+        !rt.dead && rt.ai.armoured(rt.current, rt.launch_base)
+    })? {
         return None;
     }
     let flags: u64 = rd(en + e::FLAGS);
@@ -1475,16 +1504,42 @@ pub(super) unsafe fn armour_off(a: Option<Armour>, result: u64) {
     }
     let Some(k) = ours(en) else { return };
     let hit = hit_of(en, k);
-    with_rt(en, |rt| {
+    let cut = with_rt(en, |rt| {
         rt.hits = rt.hits.saturating_add(1);
         rt.ai.set_hit_count(rt.hits);
+        if CLASSES[rt.class].reads_hp {
+            rt.ai.set_hp_ratio(hp_ratio(en));
+        }
         if let Some(h) = hit {
             rt.ai.set_hit_kind(h.kind);
             rt.ai.on_armoured_hit(h.dir);
         }
+        // What KH1's handler does in itself (the Large Body's front row made again).
+        run_now(en, rt);
         let (id, cur) = (rd::<u32>(en + e::ID), rt.current);
         line(rt.class, || format!("e{id}: hit kind {:?} without a reaction while {cur:?} plays (KH1's sys 42 on Re:CoM's super armour)", hit.map(|h| h.kind)));
+        if !rt.ai.ends_action() {
+            return false;
+        }
+        // KH1's handler cleared actor flag 4 (the Large Body's rage): the action ends now and the AI runs next frame.
+        // In one of our attack states, Re:CoM's attack end (our own leave to state 1); a plain action in state 1
+        // just stops being waited on; a reaction (states 11 / 12) plays on (Assumption: KH1's script would run
+        // during it, the rage starts after it here).
+        let st = crate::guard::state_index(en, rd(en + e::STATE)).map(|s| s as i32);
+        let in_attack = st.is_some_and(|s| CLASSES[rt.class].attack_states.contains(&s));
+        if rt.reaction.is_none() {
+            end_action(rt);
+            rt.queued = None;
+        }
+        if in_attack {
+            rt.handing_back = true;
+        }
+        line(rt.class, || format!("e{id}: its hit handler ends the action ({cur:?}, Re:CoM state {st:?}): KH1's flag 4 cleared"));
+        in_attack
     });
+    if cut == Some(true) {
+        func::<EndFn>(f::ATTACK_END)(en, 0, 0);
+    }
 }
 
 fn take_swing(en: usize) -> Option<u8> {
@@ -1609,6 +1664,7 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         rt.recom_state = true;
         rt.hits = rt.hits.saturating_add(1);
         rt.ai.set_hit_count(rt.hits);
+        rt.ai.set_playing(rt.current);
         rt.ai.on_hit(HitNews::Clash);
         run_now(en, rt);
         let k = rt.class;
@@ -1631,6 +1687,7 @@ pub unsafe extern "win64" fn react_begin(en: usize) {
         if let Some((_, k)) = rt.clash_recoil {
             rt.ai.set_hit_kind(k);
         }
+        rt.ai.set_playing(rt.current);
         rt.hits = rt.hits.saturating_add(1);
         rt.ai.set_hit_count(rt.hits);
         let clash = rt.clash.is_some() || rt.clash_recoil.is_some();
@@ -1938,7 +1995,7 @@ unsafe fn guard_step(en: usize, rt: &mut Runtime, step: f32) {
         guard_bodies(en, rt, None);
         return;
     };
-    let playing = rt.current == Some(g.request);
+    let playing = g.request == ke::guard::ALWAYS || rt.current == Some(g.request);
     if playing {
         g.seen = true;
     } else if g.seen || g.age >= ce::watchdog::START_LIMIT {
@@ -1968,12 +2025,37 @@ pub(super) unsafe fn guard_watch(en: usize) {
         return;
     }
     with_rt(en, |rt| {
-        if rt.guarded {
+        if rt.guarded && !rt.guard.is_some_and(|g| g.request == ke::guard::ALWAYS) {
             rt.guard = None;
             guard_bodies(en, rt, None);
             line(rt.class, || format!("e{}: Re:CoM state {st:?} runs: its guard row ends", rd::<u32>(en + e::ID)));
         }
     });
+}
+
+/// Re:CoM's attack-set radius setter (`0x14014E5C0`: the set, the radius in metres in xmm1).
+type RadiusFn = unsafe extern "win64" fn(usize, f32);
+
+/// A KH1 child ring on Re:CoM's own shockwave record (M11, the Large Body's stomp; `kh1_enemy::Ring`): while its
+/// request plays, inside the ring's frames, the record's radius is KH1's (`growth` × the frames since its start), set
+/// as Re:CoM's own Large Body grows its shockwave (`0x14018F280` → `0x14014E5C0(enemy+0x100, r)`). One option test a
+/// frame for every other class.
+unsafe fn ring_step(en: usize, rt: &mut Runtime) {
+    let Some(ring) = manifest(rt.class).ring else { return };
+    if rt.current != Some(ring.request) || rt.dead {
+        return;
+    }
+    let t = crate::units::units_to_frames(clock(en));
+    let Some(r) = ring.radius(t) else { return };
+    let set: usize = rd(en + e::ATTACKS);
+    if set == 0 {
+        return;
+    }
+    func::<RadiusFn>(f::SET_RADIUS)(set, r);
+    if t - ring.start < 1.0 {
+        let k = rt.class;
+        line(k, || format!("e{}: its ring starts (KH1's child at frame {:.0} of {}; Re:CoM's circle record grown {} a frame for {} frames)", rd::<u32>(en + e::ID), t, ring.request, ring.growth, ring.life));
+    }
 }
 
 /// What `pair_dispatch` needs of a guarded body a KH1 swing touched.
@@ -2131,8 +2213,10 @@ pub unsafe extern "win64" fn guard_event(en: usize) {
         let g = rt.guard.filter(|_| rt.guarded)?;
         let row = manifest(rt.class).guards.get(g.row as usize)?;
         // KH1's side for the enemy (`pair_dispatch`'s), a kind-6 clash for any other attacker (a Re:CoM
-        // attack has no KH1 priority).
-        let side = rt.guard_side.take().unwrap_or(ke::guard::Side::Clash { kind: 6, diff: 0 });
+        // attack has no KH1 priority); a row at 100 is never moved by anything (`0x1402B4BC0`: the Large Body's
+        // front keeps out Re:CoM's physical attacks too, and stays).
+        let fallback = if row.priority >= ke::guard::UNMOVED { ke::guard::Side::None } else { ke::guard::Side::Clash { kind: 6, diff: 0 } };
+        let side = rt.guard_side.take().unwrap_or(fallback);
         let (k, name, id) = (rt.class, row.name.clone(), rd::<u32>(en + e::ID));
         match side {
             ke::guard::Side::Clash { kind, .. } => {
@@ -2150,7 +2234,8 @@ pub unsafe extern "win64" fn guard_event(en: usize) {
                 if CLASSES[rt.class].reads_hp {
                     rt.ai.set_hp_ratio(hp_ratio(en));
                 }
-                if row.rows <= 1 {
+                rt.ai.set_playing(rt.current);
+                if row.rows <= 1 && g.request != ke::guard::ALWAYS {
                     rt.guard = None;
                     guard_bodies(en, rt, None);
                 }

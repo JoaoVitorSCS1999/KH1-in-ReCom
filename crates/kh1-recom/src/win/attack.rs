@@ -669,6 +669,32 @@ unsafe fn take_kh1_hit(enemy: usize) -> Option<usize> {
     None
 }
 
+/// The KH1 reaction kind of a KH1 swing waiting on one of the enemy's bodies, without taking it (`take_kh1_hit`'s
+/// test; M11, for a script whose no-reaction rule reads the kind: the Large Body).
+unsafe fn peek_kh1_kind(enemy: usize) -> Option<u8> {
+    let info: usize = rd(enemy + 0xF8);
+    if info == 0 {
+        return None;
+    }
+    let parts: usize = rd(info + 0x40);
+    let n: i32 = rd(info + 0x38);
+    let waiting = {
+        let g = KH1_HITS.lock().ok()?;
+        (0..n.clamp(0, 32) as usize).any(|i| {
+            let part = parts + i * 0x120;
+            g.iter().any(|&(x, _)| x == part) && rd::<i16>(part + 0x90) != 0
+        })
+    };
+    if !waiting {
+        return None;
+    }
+    let pl: usize = rd(va(base(), data::MAIN_PLAYER));
+    if pl == 0 {
+        return None;
+    }
+    kh1_row_of(pl).and_then(|r| moveset().row(r)).and_then(|x| moveset().attack(x.attack)).map(|a| a.kind)
+}
+
 /// Re:CoM's enemy hit handler. KH1's rule (decision 14): Sora's hits land during the enemy's card
 /// play. Re:CoM's own path for an interruptible card (`+0x260 & 0x2000001`: end the card, then
 /// take the hit) runs for a KH1 hit.
@@ -679,7 +705,7 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     let hp: i32 = rd(enemy + 0x274);
     // M11 (the Pirate): Re:CoM's super armour for the call while a KH1 enemy's script takes no reaction
     // (KH1's `sys 42`), then the hit to its script.
-    let armour = super::kh1_enemy::armour_on(enemy);
+    let armour = super::kh1_enemy::armour_on(enemy, || peek_kh1_kind(enemy));
     let r = kh1_enemy_hit(enemy);
     super::kh1_enemy::armour_off(armour, r);
     // Gimmick cards, trigger (d): a card-break boss crossing 50 % of its max HP.
