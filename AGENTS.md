@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 147: The KH1 Large Body (front guard always on, no-reaction hits, rage charge), version 0.79.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
+- Large Body (KH1 `xa_ex_2050` / `ex_2050.bd` ↔ Re:CoM `CEnemyLargebody` id 9), every number from the player's files (Checked (files)): appearance, wander; engages within 15 m with its first look (214); close: back step + punch; mid: belly slam; far: walk in, stomp, slam; after hits a punch counter (two counted: the stomp). Below 40 % HP once: the roar, then only charges (1.5 s wind-up, up to 3 s at 12 / frame, then a spot 3–5 m away).
+- Reactions: ordinary hits damage without a flinch (Re:CoM's super armour, the framework built for the Pirate); finishers knock it back (KH1's `sys 79`) except in the stomp / slam / roar; any hit in the charge knocks it back.
+- Front guard (Checked (decomp)): KH1's belly row always on except in the charge, 70° each side, priority 100: Sora's swings from the front take the strong recoil, no damage; magic and hits from behind land. Shared enemy guard's new always-on row mode.
+- Stomp shockwave: Re:CoM's own shockwave record (its Large Body's), grown by KH1's numbers (25 / frame for 28 frames from frame 88) through Re:CoM's radius setter `0x14014E5C0`. Assumption: Re:CoM's circle stands in for KH1's ring (edge 1 m wide, ±0.5 m height): owner question.
+- Re:CoM (Checked (exe)): vtable `0x140542AD0`, ctor `0x14018F090` (only caller `0x140189116`), alloc `0x1401890FD` 0xCE0 → 0xD00. Power: slam / stomp ↔ Re:CoM's two attacks (matcher); punch and charge on the belly bump's (Assumption).
+- Framework: a script hit handler can end the action (the roar); the HP ratio and playing request reach the armour decision; the guard counter released with the runtime; a priority-100 row stays on through Re:CoM's physical attacks. Merged onto Stage 144's waiting-hit kind (the Large Body reads it).
+- Asset step: ENEMY/0009 (ANN / ASD / SES), `kh1-largebody.json`.
+- Checked: tests, Windows build, 582 + 290 sites. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 146: Wyvern: a hit during its dive takes no reaction (the script's 214 follows), version 0.78.3 (2026-11-01)
 
 - Ask (owner, 2026-11-02, Pirate question 3): one version each.
