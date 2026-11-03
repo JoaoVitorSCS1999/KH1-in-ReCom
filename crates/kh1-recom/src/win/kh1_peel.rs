@@ -276,9 +276,10 @@ pub(super) fn is_peel(id: u32) -> bool {
     PEELS.try_lock().map(|g| g.iter().any(|p| p.id == id)).unwrap_or(false)
 }
 
-/// Whether the attacker `owner` is one of our KH1 Bouncywild's slipping bullets (its peels).
+/// Whether the attacker `owner` is one of our KH1 Bouncywild's slipping bullets: its peels, or its banana (Re:CoM's slip
+/// kind too, owner 2026-11-03: `super::kh1_thrown::SLIPS`).
 fn slips(owner: u32) -> bool {
-    owner != 0 && is_peel(owner)
+    owner != 0 && (is_peel(owner) || super::kh1_thrown::slip_shot(owner))
 }
 
 /// The damage-check wrapper, before Re:CoM's check (`super::attack::damage_check`): a pending slip from one of our bullets
@@ -317,7 +318,7 @@ pub unsafe extern "win64" fn slip_scatter(pl: usize) {
 }
 
 /// Retargets the damage check's slip scatter call to [`slip_scatter`] (once, after the classes are in, only with the KH1
-/// Bouncywild's; its context and callee checked first). Without it a slip on our peels scatters Moogle points (logged).
+/// Bouncywild's; its context and callee checked first). Without it a slip on our peels or banana scatters Moogle points (logged).
 pub unsafe fn install_slip_scatter(bs: usize) {
     if !crate::kh1_enemy::CLASSES.iter().enumerate().any(|(k, c)| c.name == "bouncywild" && super::kh1_enemy::installed(k)) {
         return;
@@ -337,7 +338,7 @@ pub unsafe fn install_slip_scatter(bs: usize) {
     };
     if super::hook::patch(at, s.expect, &call, s.name) {
         SCATTER_ON.store(true, Ordering::Relaxed);
-        log(&format!("peel: {} retargeted through {stub:#x}: a slip on the KH1 Bouncywild's peels keeps Sora's Moogle points", s.name));
+        log(&format!("peel: {} retargeted through {stub:#x}: a slip on the KH1 Bouncywild's peels and banana keeps Sora's Moogle points", s.name));
     }
 }
 

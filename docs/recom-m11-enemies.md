@@ -3757,8 +3757,8 @@ cooldown table (0.83.0, keyed to Re:CoM's own vtable). `enemy_ai = recom` leaves
 
 **Power mapping** (owner: "each KH1 attack takes the power of the Re:CoM attack of the same kind (its Re:CoM shot's for the
 banana)"): KH1's homing banana thrown from the hand → Re:CoM's homing banana thrown from the hand, **id 1**
-(`0x14017F0E0(enemy, 1, 1, 0)`, as its state 3 asks); KH1's ordinary hit reaction (Re:CoM's default bullet kind, as every
-port's fireball), not Re:CoM's slip. The peels: **no power** (KH1's peel does no damage) and **Re:CoM's slip kind 0x18**.
+(`0x14017F0E0(enemy, 1, 1, 0)`, as its state 3 asks); **Re:CoM's slip kind 0x18** as its state 3 gives it (owner
+2026-11-03: "its thrown banana makes Sora slip too", Re:CoM's banana rule, not KH1's flinch; without the Moogle points). The peels: **no power** (KH1's peel does no damage) and **Re:CoM's slip kind 0x18**.
 Re:CoM's straight shot (state 2, id 0) has no KH1 twin: unused.
 
 #### Its banana and peels (Re:CoM bullets moved by KH1's numbers)
@@ -3767,7 +3767,11 @@ Re:CoM's straight shot (state 2, id 0) has no KH1 twin: unused.
   code): a `CHomingBullet` made 82 frames into 211 (the behaviour asks for the throw then, only while 211 still plays: a
   reaction's motion ends KH1's child), at the manifest's `fire_at` point (bone code 28 at t 1 on Re:CoM's hand), along the
   facing, **25 a frame turning at most 1.25° a frame toward Sora's aim point for 75 frames**; Re:CoM's banana power (id 1)
-  and look (`0x1407C3010`, `sites::BOUNCYWILD_FIRE_PTRS`); radius KH1's 50 cm. Sora's Guard turns it back (decision 28:
+  and look (`0x1407C3010`, `sites::BOUNCYWILD_FIRE_PTRS`); radius KH1's 50 cm; **Re:CoM's slip kind 0x18** on its
+  descriptor `+0x68` (`win::kh1_thrown::SLIPS`, as Re:CoM's own banana's `0x14018C924`): it hurts and Sora slips
+  (`p001_049`), losing no Moogle points (the slip scatter call skipped for it as for the peels). Turned back or batted, it
+  keeps the kind: on an enemy Re:CoM's picker `0x14017D260` takes 0x18 by its default case, as kind 1 (Checked (decomp)),
+  and our KH1 enemies take it as KH1's flinch (`kh1_kind_of_recom`), as before. Sora's Guard turns it back (decision 28:
   Re:CoM's homing at 1.25° a frame takes it at the Bouncywild); his swing bats it (KH1's `0x1B8`: half-way between the
   Bouncywild and Sora's target, turning toward that target).
 - **The peels** (`win::kh1_peel`): one Re:CoM `CHomingBullet` per peel (tossed 80 frames into 200 while it still plays; dropped
@@ -3845,7 +3849,7 @@ tossed peel, 5 from the dropped one, 22 + 3 + 4 + 1 request words checked, the b
   (its own frames and the real manifest: nothing released, every request mapped), a peel's fall and lie, the asset step on
   the player's files.
 - **Assumptions:** the escape left out (rounds again; owner question 1); the call finds no helper (no kind-2 object in
-  Re:CoM's battles); the banana on Re:CoM's id 1 with KH1's ordinary reaction; Re:CoM's slip for KH1's (its clip is KH1's;
+  Re:CoM's battles); the banana on Re:CoM's id 1 with Re:CoM's slip (owner 2026-11-03); Re:CoM's slip for KH1's (its clip is KH1's;
   without its Moogle points, owner 2026-11-03); the peel's reach measured against Sora's hurt body (KH1: his
   root); a jumping Sora not touching a floor-high peel (KH1 tests "on the ground"); the peels' and the banana's draws from
   our own random stream; the battle floor flat at the thrower's height; `sys 140` keeping the sphere's centre at its
@@ -3865,7 +3869,7 @@ tossed peel, 5 from the dropped one, 22 + 3 + 4 + 1 request words checked, the b
    into the toss) or taunts (213, then 217); far (8 m or more) it throws a banana (about 1.4 s into the throw) or calls
    (206, then 207) and runs away. **It never walks up to Sora**: he has to chase it.
 4. The banana: a Re:CoM banana effect that curves slowly after Sora (1.25° a frame) for 1¼ s; it hurts like Re:CoM's
-   banana and flinches him (no slip, no Moogle points). Guard it: it flies back at the Bouncywild. Swing at it: it flies back
+   banana and **Sora slips** (Re:CoM's slip motion; no Moogle points lost). Guard it: it flies back at the Bouncywild. Swing at it: it flies back
    (at your target if you have one) and hurts enemies.
 5. The peels: they arc to the floor and lie there 2 s (the banana effect on the floor). Step on one: Sora slips (Re:CoM's
    slip motion, which is KH1's) and **loses nothing** (no Moogle points scatter; the log's `peel: Sora slipped on shot N:
@@ -3901,7 +3905,8 @@ run-away's line, the banana's curve and the peels' arcs to compare.
    Moogle points. Built: (a) Re:CoM's slip as a whole (its Moogle points, Re:CoM's twin of the munny). Other choices: (b)
    Re:CoM's slip motion with no points lost; (c) KH1's amount: 80 Moogle points (KH1 munny = Moogle points in the M8 shop),
    scattered as Re:CoM's prizes.
-3. **The banana's reaction.** Re:CoM's own banana makes Sora slip (and lose points) as well as hurting him; KH1's banana only
+3. **The banana's reaction.** **Answered (owner 2026-11-03): (b), the banana makes Sora slip too** (built: Re:CoM's
+   kind 0x18 on it, no Moogle points lost). Re:CoM's own banana makes Sora slip (and lose points) as well as hurting him; KH1's banana only
    hurts (a flinch), the peels make him slip. Built: (a) KH1's: the banana flinches, the peels slip. (b) The banana also
    slips (Re:CoM's kind 0x18 on it too).
 4. **Other enemies slipping.** In KH1 an enemy (another Bouncywild, a Powerwild) that walks over a peel slips too (its 208 or
