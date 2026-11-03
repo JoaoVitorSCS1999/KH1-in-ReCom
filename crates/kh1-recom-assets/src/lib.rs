@@ -63,6 +63,7 @@ pub mod powerwild;
 pub mod darkball;
 pub mod bandit;
 pub mod pirate;
+pub mod neoshadow;
 pub mod airpirate;
 pub mod wyvern;
 pub mod searchghost;

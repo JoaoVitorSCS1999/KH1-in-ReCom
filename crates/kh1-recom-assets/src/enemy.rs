@@ -708,6 +708,10 @@ pub const GUARDS: &[GuardSpec] = &[
     // The Pirate's `ex_2100.bd` makes `0x1CC` at `0x1156` (then 217) and `0x46C` at `0xAB4` (after 208).
     GuardSpec { enemy: "pirate", name: "spin", row: 0x1CC, also: &[], requests: &[217] },
     GuardSpec { enemy: "pirate", name: "stance", row: 0x46C, also: &[], requests: &[208] },
+    // The Neoshadow's `ex_2420.bd` makes `0x80` in KH1's mode 3 (`sys 213(row, 3)`: on every frame until
+    // `sys 213(row, 0)`, `kh1_core::enemy::guard::HELD`) at `0x16CE` / `0x1A32` / `0x2260` / `0x3108`: no request,
+    // no windows.
+    GuardSpec { enemy: "neoshadow", name: "shield", row: 0x80, also: &[], requests: &[] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).
@@ -759,7 +763,9 @@ pub fn guard_rows(enemy: &str, script: &[u8], ms: &MotionSet, clips: &[RequestCl
         if !(1..=4).contains(&clash_type) || !(0..=100).contains(&priority) {
             return bad(format!("{enemy}: row {:#x} is not a guard row (type {clash_type}, priority {priority})", g.row));
         }
-        if !clips.iter().any(|c| c.request as u32 == recoil) {
+        // A row at priority 100 is never moved (`0x1402B4BC0`), so its recoil never plays (the Neoshadow's
+        // shield names 110, which its model lacks).
+        if priority < 100 && !clips.iter().any(|c| c.request as u32 == recoil) {
             return bad(format!("{enemy}: guard row {:#x}'s recoil {recoil} has no motion", g.row));
         }
         if !(turn.is_finite() && cos.is_finite() && (-1.0..=1.0).contains(&cos)) {
@@ -1079,4 +1085,4 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::neoshadow::SPEC];
