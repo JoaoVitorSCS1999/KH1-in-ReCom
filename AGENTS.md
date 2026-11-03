@@ -11,6 +11,13 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 189: Tests: the level abilities' test on the new AP rule, version 0.98.7 (2026-11-01)
+
+- The merge of M12 steps 1 and 3 left one test on the old `max_ap(level)` and a `State` without `ap_ups` (test code only; the DLL is unchanged in behaviour): now `max_ap(7)` (3 + 7 AP Up picks) and `ap_ups: 0`. 0.98.6's pushed state failed these two tests; its DLL was built and is the same code.
+- Checked: tests (all green), Windows build.
+
+---
+
 ## Stage 188: M12 step 3: Second Chance, version 0.98.6 (2026-11-01)
 
 - Second Chance (KH1 ability 25, Rod level 90, 5 AP): KH1's `0x1402BFA80` (Checked (decomp)): a hit that would kill from above 1 HP leaves 1 HP; at 1 HP the next hit kills (a combo's next hit too).

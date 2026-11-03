@@ -1147,11 +1147,12 @@ mod tests {
         // Leaf Bracer: Rod level 39, 5 AP.
         assert_eq!(x(ix::LEAF_BRACER), (62, 5, 308, Source::Level(39), 0, false));
         assert!(leaf_bracer(1 << ix::LEAF_BRACER) && !leaf_bracer(0));
-        assert_eq!(max_ap(39), 17);
-        assert!(can_equip(0, ix::LEAF_BRACER, 39));
+        // 17 AP (KH1's 3 + 7 AP Up picks, M12 step 1).
+        assert_eq!(max_ap(7), 17);
+        assert!(can_equip(0, ix::LEAF_BRACER, 17));
         let thirteen = 1 << ix::MP_HASTE | 1 << ix::MP_RAGE[0] | 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::STUN_IMPACT;
         assert_eq!(used_ap(thirteen), 13);
-        assert!(!can_equip(thirteen, ix::LEAF_BRACER, 39), "4 AP left: refused (KH1's rule)");
+        assert!(!can_equip(thirteen, ix::LEAF_BRACER, 17), "4 AP left: refused (KH1's rule)");
         // Berserk: Rod level 60, 1 AP.
         assert_eq!(x(ix::BERSERK), (26, 1, 306, Source::Level(60), 0, false));
         assert!(berserk(1 << ix::BERSERK) && !berserk(1 << ix::LEAF_BRACER));
@@ -1164,7 +1165,7 @@ mod tests {
         assert!(!names(sync(&mut t, 89, NO_RECOM, &mut |_| false).new).contains(&"Second Chance"));
         assert_eq!(names(sync(&mut t, 90, NO_RECOM, &mut |_| false).new), vec!["Second Chance"]);
         // The page lists all six on Sora's list in KH1's key order (304 MP Haste .. 308 Leaf Bracer).
-        let all = State { unlocked: t.unlocked, equipped: 0 };
+        let all = State { unlocked: t.unlocked, equipped: 0, ap_ups: 0 };
         let l = page::list(page::Owner::Sora, &all);
         let pos = |i: usize| l.iter().position(|&x| x == i).unwrap();
         assert!(pos(ix::MP_HASTE) < pos(ix::MP_RAGE[0]) && pos(ix::MP_RAGE[1]) < pos(ix::BERSERK) && pos(ix::BERSERK) < pos(ix::SECOND_CHANCE) && pos(ix::SECOND_CHANCE) < pos(ix::LEAF_BRACER));
