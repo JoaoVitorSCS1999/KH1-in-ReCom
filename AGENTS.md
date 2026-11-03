@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 171: KH1 camp entry in Riku's story (Combat and Movement), version 0.93.4 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Show it" in Riku's story, with only Combat and Movement.
+- Why it was hidden (Checked (decomp + disasm)): only our own `wanted` rule (camp `+0x21BC` / `0x1401AAAE0`); Riku's camp is the same CCamp code with per-story data picked by `+0x21BC` (labels `0x1407C1000`, top help ids in the cursor set `0x1400DEA10`, header titles `0x1400D3890`, deck submenu, panels); 7 entries, same positions, same state-0x11 table.
+- Fix found: our cursor set wrote Sora's help ids 0x500400 + i; Riku's entries 0 / 5 use 0x50042A / 0x50042C: `top::RECOM_HELP` per story, checked as data sites `0x1400DEA45` (57 B) / `0x1400DEAA9` (49 B). 1077 sites match.
+- Built: `wanted` = not the map-only camp (`+0x20A4`, no top list; kept). Riku's story: rows Combat, Movement; Riku help lines. No new hook. None of the nine settings acts in Riku's story (Checked (code): KH1 battles need Sora's story; Guard / movement need CPlayerSora): values kept for Sora's story (owner question).
+- Assumption: nothing in Riku's layout at our entry's spot (86, 270). Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 170: Red Nocturne: KH1's rule for a big Fire whose caster dies, version 0.93.3 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Match KH1" (a big Fire flies if its caster dies late in the cast).
