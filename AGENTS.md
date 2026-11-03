@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 145: Air Pirate: a hit during its dive takes no reaction (the script's 211 follows), version 0.78.2 (2026-11-01)
+
+- Ask (owner, 2026-11-02, Pirate question 3): one version each.
+- Air Pirate (`ex_2210.bd` `0x1F0C`, Checked (files)): a non-clash hit during the dive 206 zeroes the reaction kind and asks for the hit state (211). Now on Re:CoM's super armour: no Re:CoM flinch frame; the behaviour's hit state ends the attack state and 211 plays in state 1 the next frame for its full length (host model). Before: one frame of Re:CoM's flinch state.
+- Clash kinds 6 / 7 never armoured. Assumption: KH1's attribute 8 / 9 exceptions not carried.
+- Checked: tests, Windows build, host model. Not checked: in game.
+
+---
+
 ## Stage 144: Darkball: its no-reaction hits on Re:CoM's super armour (the attack goes on), version 0.78.1 (2026-11-01)
 
 - Ask (owner, 2026-11-02, Pirate question 3): the fliers' "doesn't flinch" move onto the no-reaction armour, one version each.
