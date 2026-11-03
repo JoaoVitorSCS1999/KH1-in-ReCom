@@ -837,9 +837,13 @@ pub const RINGS: &[RingSpec] = &[RingSpec { enemy: "largebody", request: 230, ro
 /// Checked (exe)).
 const CIRCLE_SHAPE: u32 = 4;
 
+/// An `.ASD` record's offset from its bone: x / y / z at `+0x14` / `+0x18` / `+0x1C` (`0x14014D740` reads them as
+/// the point the bone's matrix places; Checked (decomp)). The ring's y.
+pub const RING_OFFSET_Y: usize = 0x18;
+
 /// [`RINGS`]' records of an enemy: (the record, its recoil, its row, a log line). The record is the Re:CoM
-/// template's (its shape must be the circle), on the request's clip, radius 0, on for frames
-/// `[ring_at, ring_at + ring_life)`.
+/// template's (its shape must be the circle), on the request's clip, radius 0, its centre on the bone (offset y 0:
+/// KH1's height is the stomp's spot), on for frames `[ring_at, ring_at + ring_life)`.
 fn ring_records(name: &str, script: &[u8], asd: &[u8], clips: &[RequestClip], consts: &[(String, f32)]) -> Result<Vec<(u16, [u8; REC], u32, usize, String)>> {
     let get = |n: &str| consts.iter().find(|c| c.0 == n).map(|c| c.1).ok_or_else(|| crate::Error::Format(format!("{name}: no {n} for its ring")));
     let u = |o: usize| asd.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).ok_or_else(|| crate::Error::Format("ASD: short".into()));
@@ -867,7 +871,10 @@ fn ring_records(name: &str, script: &[u8], asd: &[u8], clips: &[RequestClip], co
         put_f32(&mut rec, 0x58, 0.0);
         put_u32(&mut rec, 0x5C, (at * 50.0).round() as u32);
         put_u32(&mut rec, 0x60, ((at + life) * 50.0).round() as u32);
-        let line = format!("{} (request {}) Re:CoM's circle record {} (its root), radius grown by KH1's ring from 0, frames {at}..{}", c.name, r.request, r.recom_id, at + life);
+        // KH1 measures the ring's height from the stomp's own spot (the child at the parent's position, its band test
+        // `0x18` within `ring_height` of it): the centre at the bone itself (Re:CoM's template sits 0.3 m up its root).
+        put_f32(&mut rec, RING_OFFSET_Y, 0.0);
+        let line = format!("{} (request {}) Re:CoM's circle record {} (its root, offset 0), radius grown by KH1's ring from 0, frames {at}..{}", c.name, r.request, r.recom_id, at + life);
         out.push((r.request, rec, recoil, r.row, line));
     }
     Ok(out)

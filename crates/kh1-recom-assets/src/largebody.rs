@@ -235,7 +235,15 @@ mod tests {
         assert_eq!(rec("e009_138"), vec![(88 * 50, 116 * 50, 1, 4)], "the ring: Re:CoM's circle (shape 4), id 1, frames 88..116");
         let ring = &b.asd[0x6C + 8 * 0xA0..0x6C + 9 * 0xA0];
         assert_eq!(f32::from_le_bytes(ring[0x58..0x5C].try_into().unwrap()), 0.0);
-        assert_eq!(&ring[0..0x40], &inp.asd[0x6C..0x6C + 0x40], "Re:CoM's own record's place (its root, 0.3 up)");
+        // Re:CoM's own record's place (its root), the 0.3 m lift dropped: the centre at the root (KH1's stomp spot).
+        assert_eq!(&ring[0..0x18], &inp.asd[0x6C..0x6C + 0x18]);
+        assert_eq!(&ring[0x1C..0x40], &inp.asd[0x6C + 0x1C..0x6C + 0x40]);
+        assert_eq!(&ring[0..4], b"Root");
+        assert!((f32::from_le_bytes(inp.asd[0x6C + 0x18..0x6C + 0x1C].try_into().unwrap()) - 0.3).abs() < 1e-6, "Re:CoM's 0.3 m up");
+        assert_eq!(f32::from_le_bytes(ring[0x18..0x1C].try_into().unwrap()), 0.0);
+        assert_eq!((f32::from_le_bytes(ring[0x14..0x18].try_into().unwrap()), f32::from_le_bytes(ring[0x1C..0x20].try_into().unwrap())), (0.0, 0.0));
+        // The stomp has no root motion: its Root stays at the Large Body's own place for the ring's frames.
+        assert!(!c(230).root);
         // SES: Re:CoM's entries kept; the ring's clip takes its template's sounds.
         let s0 = crate::ses::parse(&inp.ses).unwrap();
         let s1 = crate::ses::parse(&b.ses).unwrap();

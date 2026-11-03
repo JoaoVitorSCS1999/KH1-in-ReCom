@@ -2667,6 +2667,19 @@ pub const KH1_ENEMY_RING_CALLEES: &[Site] = &[
     Site { name: "attack set radius (0x14014E5C0)", rva: 0x0014_E5C0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x8B, 0x41, 0x14, 0x48, 0x8B, 0x59, 0x18] },
 ];
 
+/// M11 (the Large Body's stomp ring as KH1's ring, `docs/recom-m11-enemies.md` § The stomp's ring): Re:CoM's
+/// circle-against-body test, the pair dispatch's cases 0xB2 / 0xB4 / 0xB5 (`0x14016EAD0`: a type-11
+/// `CCircleCollision` attack against a sphere or column body; its only caller), wrapped by
+/// `win::kh1_enemy::circle_test`: a circle with a band (`+0x74` > 0, set only on our ring by `ring_step`) takes KH1's
+/// ring rule, every other circle Re:CoM's test (the trampoline). Re:CoM's own circles keep `+0x74` at 0 (the
+/// factory `0x1401720E0`; its only other writers, `0x140172690` / `0x140172720`, never write it on type 11: decomp
+/// scan). The moved bytes are whole instructions with no rip operand; no branch or pointer lands inside them (exe
+/// scan, pefile + capstone, 2026-11-02). Checked (exe + decomp).
+pub const KH1_ENEMY_RING_HOOKS: &[Site] = &[
+    // rex push rbp; push rsi; push rdi; sub rsp,0x50
+    Site { name: "circle vs body (0x140177190)", rva: 0x0017_7190, expect: &[0x40, 0x55, 0x56, 0x57, 0x48, 0x83, 0xEC, 0x50] },
+];
+
 /// M11, attack meets attack (`docs/recom-m11-enemies.md` § Attack meets attack): Re:CoM's line-against-sphere overlap
 /// test, the pair dispatch's case 0x72 (`0x14016EAD0`: a type-7 `CPoly3Collision` attack against a sphere body), which
 /// `win::attack::attack_meets` calls with Sora's swing sphere as the body and a copy of a KH1 enemy row's line record
@@ -2879,6 +2892,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         LARGEBODY_HOOKS,
         LARGEBODY_ALLOC,
         KH1_ENEMY_RING_CALLEES,
+        KH1_ENEMY_RING_HOOKS,
         KH1_ENEMY_CLASH_CALLEES,
         NEOSHADOW_HOOKS,
         NEOSHADOW_ALLOC,
@@ -2983,7 +2997,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, KH1_ENEMY_RING_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
@@ -3946,5 +3960,17 @@ mod tests {
         assert_eq!(a.rva + a.expect.len() as u32, c.rva);
         assert_eq!(c.rva + 5, b.rva);
         assert_eq!(&a.expect[5..], &[0x8B, 0x4E, 0x20, 0x8D, 0x55, 0x03], "ecx = [rsi+0x20] (the handle), edx = 3");
+    }
+
+    /// The stomp ring's hook: Re:CoM's circle-against-body test, its prologue moved whole (push rbp / rsi / rdi, sub
+    /// rsp 0x50: 8 bytes, room for the 5-byte jump), listed once among every site, and apart from the ring's callee.
+    #[test]
+    fn m11_ring_hook() {
+        let h = &KH1_ENEMY_RING_HOOKS[0];
+        assert_eq!(h.rva, 0x0017_7190);
+        assert_eq!(h.expect, &[0x40, 0x55, 0x56, 0x57, 0x48, 0x83, 0xEC, 0x50]);
+        assert_eq!(all_sites().filter(|s| s.rva == h.rva).count(), 1);
+        assert_ne!(h.rva, KH1_ENEMY_RING_CALLEES[0].rva);
+        assert_eq!(KH1_ENEMY_RING_HOOKS.len(), 1);
     }
 }

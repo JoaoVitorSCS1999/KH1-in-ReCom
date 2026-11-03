@@ -2093,9 +2093,97 @@ unsafe fn ring_step(en: usize, rt: &mut Runtime) {
         return;
     }
     func::<RadiusFn>(f::SET_RADIUS)(set, r);
+    // KH1's band on the ring's circle (its live type-11 entry: the only circle record on the ring's clip), so
+    // Re:CoM's circle test runs KH1's ring rule on it ([`circle_test`]). Every ring frame: Re:CoM makes the entry's
+    // shape anew when the record's window opens (`0x14014E830` → the factory `0x1401720E0`, `+0x74` = 0).
+    RING_HEIGHT.store(ring.height_m().to_bits(), Ordering::Relaxed);
+    let band = ring.band_m();
+    let entries: usize = rd(set + set::ENTRIES);
+    let live = rd::<u32>(set + set::LIVE).min(set::MADE) as usize;
+    let mut marked = 0;
+    if entries != 0 {
+        for i in 0..live {
+            let at = entries + i * set::ENTRY;
+            let coll: usize = rd(at + set::E_COLL);
+            let shape: usize = if coll == 0 { 0 } else { rd(coll + set::C_SHAPE) };
+            if shape != 0 && rd::<u32>(at + set::E_STATE) == 1 && rd::<u32>(shape + circle::KIND) == circle::CIRCLE {
+                wr::<f32>(shape + circle::BAND, band);
+                marked += 1;
+            }
+        }
+    }
     if t - ring.start < 1.0 {
         let k = rt.class;
-        line(k, || format!("e{}: its ring starts (KH1's child at frame {:.0} of {}; Re:CoM's circle record grown {} a frame for {} frames)", rd::<u32>(en + e::ID), t, ring.request, ring.growth, ring.life));
+        line(k, || format!("e{}: its ring starts (KH1's child at frame {:.0} of {}; Re:CoM's circle record grown {} a frame for {} frames, KH1's band {band} m and height {} m on {marked} circle(s))", rd::<u32>(en + e::ID), t, ring.request, ring.growth, ring.life, ring.height_m()));
+    }
+}
+
+/// The ring's height window in metres (`f32` bits), set by [`ring_step`] before it marks a circle.
+static RING_HEIGHT: AtomicU32 = AtomicU32::new(0);
+pub static ORIG_CIRCLE: AtomicUsize = AtomicUsize::new(0);
+/// Our rings' hits so far (the log names the first few).
+static RING_HITS: AtomicU32 = AtomicU32::new(0);
+
+/// Re:CoM's shape fields the circle test reads (`0x140177190`, Checked (decomp)): `+0x10` the place (a circle's centre,
+/// a column's lower end), `+0x20` a column's other end / a sphere's centre, `+0x50` the contact point, `+0x60` the type,
+/// `+0x70` the radius, `+0x74` a sphere's lift (a circle's: 0 from the factory `0x1401720E0`, read by nothing: our
+/// band).
+mod circle {
+    pub const P10: usize = 0x10;
+    pub const P20: usize = 0x20;
+    pub const CONTACT: usize = 0x50;
+    pub const KIND: usize = 0x60;
+    pub const RADIUS: usize = 0x70;
+    pub const BAND: usize = 0x74;
+    pub const CIRCLE: u32 = 11;
+}
+
+/// Re:CoM's circle-against-body test (`0x140177190`: the collision context, the body's shape, the circle; 1 on a hit).
+type CircleFn = unsafe extern "win64" fn(usize, usize, usize) -> u64;
+
+/// The wrapper on Re:CoM's circle-against-body test (`sites::KH1_ENEMY_RING_HOOKS`; the pair dispatch `0x14016EAD0`
+/// cases 0xB2 / 0xB4 / 0xB5). A circle with a band (`+0x74` > 0: only our stomp ring, [`ring_step`]) is KH1's ring
+/// (`ex_2050_00.bd` `0x18`, [`ce::ring_hits`]) on Re:CoM's body: the body's position point ([`ce::body_foot`]) within
+/// the height window of the circle's centre and its flat distance strictly inside (r − band, r), no body radius; on a
+/// hit the contact point written as Re:CoM's test writes it (the body's x / z at the ring's height, on the circle and
+/// the body). Every other circle: Re:CoM's test, unchanged.
+pub unsafe extern "win64" fn circle_test(ctx: usize, body: usize, shape: usize) -> u64 {
+    let band: f32 = if shape == 0 { 0.0 } else { rd(shape + circle::BAND) };
+    if !(band > 0.0) || body == 0 {
+        return orig::<CircleFn>(&ORIG_CIRCLE)(ctx, body, shape);
+    }
+    let v = |at: usize| -> [f32; 3] { [rd(at), rd(at + 4), rd(at + 8)] };
+    let centre = v(shape + circle::P10);
+    let Some(foot) = ce::body_foot(rd(body + circle::KIND), v(body + circle::P10), v(body + circle::P20), rd(body + circle::RADIUS), rd(body + circle::BAND)) else {
+        return orig::<CircleFn>(&ORIG_CIRCLE)(ctx, body, shape);
+    };
+    let (r, height) = (rd::<f32>(shape + circle::RADIUS), f32::from_bits(RING_HEIGHT.load(Ordering::Relaxed)));
+    if !ce::ring_hits(centre, r, band, height, foot) {
+        return 0;
+    }
+    let contact = [foot[0], centre[1], foot[2], 1.0f32];
+    for (i, c) in contact.iter().enumerate() {
+        wr::<f32>(shape + circle::CONTACT + 4 * i, *c);
+        wr::<f32>(body + circle::CONTACT + 4 * i, *c);
+    }
+    if RING_HITS.fetch_add(1, Ordering::Relaxed) < 20 {
+        let (dx, dz) = (foot[0] - centre[0], foot[2] - centre[2]);
+        log(&format!("kh1 enemies: the stomp ring hit (KH1's ring: r {r:.2} m, band {band} m, distance {:.2} m, height {:+.2} m within {height} m)", (dx * dx + dz * dz).sqrt(), foot[1] - centre[1]));
+    }
+    1
+}
+
+/// Wraps Re:CoM's circle-against-body test (once, after the classes are in) when an installed class has a ring
+/// (the Large Body). Without it our ring is Re:CoM's solid disk (logged).
+pub unsafe fn install_ring_test(bs: usize) {
+    if !(0..N).any(|k| installed(k) && manifest(k).ring.is_some()) {
+        return;
+    }
+    let hooks = [super::hook::Hook { site: &crate::sites::KH1_ENEMY_RING_HOOKS[0], ours: circle_test as *const () as usize, original: &ORIG_CIRCLE }];
+    if super::hook::install_all(bs, &hooks) {
+        log("kh1 enemies: Re:CoM's circle test wrapped: the Large Body's stomp ring hits as KH1's ring (its 1 m edge, 0.5 m height); every other circle Re:CoM's");
+    } else {
+        log("kh1 enemies: Re:CoM's circle test not wrapped: the Large Body's stomp ring stays Re:CoM's solid disk");
     }
 }
 

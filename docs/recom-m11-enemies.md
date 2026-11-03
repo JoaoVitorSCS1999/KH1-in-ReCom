@@ -2187,7 +2187,8 @@ the leap land near you; kill one.
 
 Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Large Body yet. Its belly's front
 row repels Sora's swings from the front through the shared enemy guard (KH1's mode-3 row, new), its flinch-type hits take
-no reaction (§ Hits that take no reaction), its stomp's ring is Re:CoM's own shockwave record grown by KH1's numbers.
+no reaction (§ Hits that take no reaction), its stomp's ring is Re:CoM's own shockwave record grown by KH1's numbers and
+tested by KH1's ring rule inside Re:CoM's circle test (§ The stomp's ring, 2026-11-02).
 
 #### KH1's side. Checked (files: `ex_2050.bd` disassembled, code from `0x458`, folded and raw; its child `ex_2050_00.bd`; decomp: the syscalls named)
 
@@ -2287,17 +2288,47 @@ Re:CoM twin; both are body attacks (KH1 power 6 / 8, Re:CoM has no other melee r
 #### The stomp's ring (KH1's child on Re:CoM's own shockwave)
 
 - Asset step (`enemy::RINGS`, new): a copy of Re:CoM's id-1 record (its `e009_053` circle at its root; the step refuses a
-  template that isn't shape index 4) on KH1's 230 clip (`e009_138`), radius 0, on for frames [88, 116) (`ring_at` from
-  the parent, `ring_life` from the child); the manifest's attack "stomp" names the child's row `0x31C` (recoil 110).
+  template that isn't shape index 4) on KH1's 230 clip (`e009_138`), radius 0, **its offset y (`+0x18`) 0** (Re:CoM's
+  template sits 0.3 m up the root; KH1 measures the height from the stomp's own spot), on for frames [88, 116)
+  (`ring_at` from the parent, `ring_life` from the child); the manifest's attack "stomp" names the child's row `0x31C`
+  (recoil 110).
 - Host (`kh1_enemy::Ring`, `win::kh1_enemy::ring_step`): while 230 plays inside those frames, the record's radius is
   KH1's `ring_growth` × (frame − 88) (0 … 6.75 m) through Re:CoM's own `0x14014E5C0(enemy+0x100, r)`, the call Re:CoM's
   Large Body makes for its shockwave (`sites::KH1_ENEMY_RING_CALLEES`: `40 53 48 83 EC 30 8B 41 14 48 8B 59 18`; it sets
   every record's radius in the set: Re:CoM re-reads a record's own radius when it starts, `0x14014E830` is a caller of the
   radius setter `0x140172690`: Assumption that the other records aren't live then; none are during 230). Re:CoM collides
   it, hits Sora with id 1's power, ends it. One option test a frame for every other class.
-- Differences from KH1 (owner question 1): Re:CoM's circle test (`CCircleCollision`, not read) stands for KH1's band
-  `[r − 100, r)` horizontally within 50 of the stomp's height; the record follows the Large Body's root (KH1's ring stays
-  where it was made: it doesn't move during 230); a ring cut by a reaction ends with 230 (KH1's child runs its 28 frames).
+- **KH1's ring rule in Re:CoM's circle test** (owner 2026-11-02: research first; Re:CoM's is a disk, so KH1's ring):
+  - Re:CoM's test (Checked (decomp)): the pair dispatch `0x14016EAD0` sends a type-11 circle attack against a sphere or
+    column body (cases 0xB2 / 0xB4 / 0xB5) to `0x140177190` (its only caller; arguments: context, the body's shape, the
+    circle). Against Sora's column (`player+0x690`, type 4: `+0x10` the bottom at his toes' mean height, `+0x20` his head
+    + 0.2, both at his hips' x / z, `0x1401F4000`; radius 0.25) it hits when the column's axis at the circle's height is
+    within circle radius + 0.25 m (strict) and the circle's height lies between the column's ends: **a solid flat disk**
+    at the circle's centre `+0x10` (Re:CoM's last-frame place, `0x14014D740`), radius `+0x70`. On a hit it writes the
+    contact point (`+0x50`, the circle's height, w 1) on the circle and the body.
+  - **The wrapper** `win::kh1_enemy::circle_test` on `0x140177190` (`40 55 56 57 48 83 EC 50`, 8 bytes moved: whole
+    instructions, no rip operand; no branch or pointer lands inside them: exe scan, pefile + capstone, 2026-11-02;
+    `sites::KH1_ENEMY_RING_HOOKS`): a circle whose `+0x74` is above 0 is our ring; every other circle runs Re:CoM's test
+    (the trampoline). For our ring: KH1's routine `0x18` (`ex_2050_00.bd`: miss if |Δy| > 50, then hit if r − 100 < d <
+    r, d flat) on Re:CoM's body: the body's position point (a column's lower end; a sphere's lowest point, centre `+0x20`
+    + lift `+0x74` − radius) within 0.5 m of the circle's height (inclusive), its flat distance from the circle's centre
+    strictly inside (r − 1 m, r), **no body radius added**; the contact point as Re:CoM writes it (the body's x / z at
+    the ring's height). Pure rule `kh1_enemy::ring_hits` / `body_foot` (tests `ring_rule`, `ring_body_foot`).
+  - **Only our ring**: Re:CoM's factory `0x1401720E0` makes every circle with `+0x70` = 0.5, `+0x74` = 0; nothing else
+    writes a circle's `+0x74` (Checked (decomp scan): every function that loads a collision holder's shape `+0x18` and
+    writes its `+0x74`: only `0x140172690` (types 2 only for `+0x74`) and `0x140172720` (types 1 / 2); the other
+    `+0x74` writers in the collision code (`0x140170B60`, `0x140172830`, `0x140172B90`, `0x1401731E0`, `0x1401753F0`,
+    `0x140178F00`) write points, spheres or ride matrices, not a circle). `ring_step` writes the band (`ring_band` 100 →
+    1.0 m) on its enemy's live type-11 entry each ring frame (Re:CoM remakes the entry's shape when the record's window
+    opens) and the height (`ring_height` 50 → 0.5 m) for the wrapper. Re:CoM's own Large Body (`enemy_ai = recom`),
+    its shockwave, Riku's story and every other circle attack: Re:CoM's test, unchanged.
+  - **Per frame**: nothing new outside the hooked test itself, which runs only when Re:CoM's collision pass tests a
+    circle (one float read for Re:CoM's circles); `ring_step`'s band write runs only during the ring's 28 frames.
+  - Installed after the classes when one with a ring (the Large Body) is in; log `kh1 enemies: Re:CoM's circle test
+    wrapped …`, and the first 20 ring hits `kh1 enemies: the stomp ring hit (… distance … height …)`.
+- Differences from KH1 still standing: the record follows the Large Body's root (KH1's ring stays where it was made: it
+  doesn't move during 230); a ring cut by a reaction ends with 230 (KH1's child runs its 28 frames); Re:CoM hits once per
+  attack serial (KH1's child calls `sys 60` each frame: whether KH1 lands it more than once is not checked).
 
 #### The hit handler on Re:CoM's states
 
@@ -2349,8 +2380,16 @@ gets KH1's AI` in a Large Body battle, `guard row 0 with 65535` (its front row, 
   type 11 `+0x70`), the `CCollBody` guard bit never set on Re:CoM's enemies.
 - **Checked (exe):** the class, its 139 slots, the ctor and its only call, the factory size, the radius setter's bytes; every
   site (582 byte sites, 290 pointer sites, pefile, 2026-11-02).
-- **Assumptions:** the punch and the charge on id 0; `CCircleCollision`'s test for KH1's band and height; the ring on the
-  Large Body's root; the battle floors flat (the charge's floor point `0x12F6` is its own height); the search finds Sora
+- **Checked (decomp + exe), the ring's test:** `0x140177190` (a disk; its prologue bytes, no branch into them), its only
+  caller `0x14016EAD0`, Sora's column (`0x1401F3360`, `0x1401F4000`), the circle factory and the `+0x74` writers (scan),
+  the circle's centre `0x14014D740`, the window open `0x14014E830`. **Checked (files):** KH1's band 100 / height 50
+  (`0x3CC` / `0x3D2`), the ring record's offset y 0 and bone `Root`, the stomp 230 without root motion (asset test).
+- **Assumptions:** the punch and the charge on id 0; the ring's centre: Re:CoM's `Root` at the Large Body's own place on
+  its floor stands for KH1's parent position point (230 has no root motion, so `Root` is the model's origin; that the
+  origin sits on the floor is not checked), and Sora's column bottom (toes' mean height, hips' x / z) and a sphere's
+  lowest point for KH1's actor `+0x50` (the feet, as `notes/hitbox-compare.md`); the first frame of the ring: if
+  Re:CoM opens the record's window after `ring_step` in frame 88, that one frame tests Re:CoM's way at radius 0 (a hit
+  only within 0.25 m of its root, inside its own body; not checked which runs first); the ring on the Large Body's root; the battle floors flat (the charge's floor point `0x12F6` is its own height); the search finds Sora
   within its range (`sys 48`'s cone and `sys 139` not ported); every hit of Sora's as KH1's type 0 / attribute 0 (the
   attribute 1 exception of the charge's knock-back never comes); the rage during a reaction waits for its end; seeds per
   enemy; Re:CoM's sounds on the new clips; the queue blends the host's.
@@ -2375,6 +2414,10 @@ gets KH1's AI` in a Large Body battle, `guard row 0 with 65535` (its front row, 
    its front no longer blocks (swings from the front land) and any hit knocks it back; if the charge hit Sora it stops
    (208) and pauses, else it recovers (209, 5 s).
 6. Guard its punch, slam or charge: KH1's recoil (215 / 216 / 218) and its counter; Guard the ring: Re:CoM's flinch.
+6a. The stomp's ring (asset step re-run): jump as its edge reaches Sora: it passes under him (a jump of more than 0.5 m
+   clears it). Stand still inside it after its edge has passed, or close to the Large Body while it stomps: no hit
+   (only the 1 m wide edge hits). Standing on its path on the floor: hit as the edge passes. The log shows `the stomp
+   ring hit (KH1's ring: …)` with the distance and height.
 7. Stop, Stun Impact, Blizzard's freeze and Gravity still take it over; its front still blocks swings while it is stopped.
 8. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
 9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Large Bodies (no change).
@@ -2391,7 +2434,8 @@ kill one. The trace's enemy rows give the rounds' timings, the ring's reach and 
 
 #### Large Body owner questions
 
-1. **The stomp's ring shape.** KH1's ring hits Sora only where its edge passes (`[r − 1 m, r)` from the stomp's spot) and
+1. **The stomp's ring shape.** Answered (owner 2026-11-02: research first): Re:CoM's is a disk, so KH1's ring is built in
+   Re:CoM's circle test (§ The stomp's ring). The question was: KH1's ring hits Sora only where its edge passes (`[r − 1 m, r)` from the stomp's spot) and
    only within 0.5 m of its height (jumping clears it). Built: Re:CoM's own shockwave record (its Large Body's circle) grown
    by KH1's numbers (25 a frame for 28 frames from frame 88): KH1's reach and timing, Re:CoM's shape (its test isn't read
    yet; a jump may not clear it). (a) Keep; (b) add KH1's band and height test as a filter on that record's hits on Sora

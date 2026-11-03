@@ -618,6 +618,9 @@ fn install_enemies(base: usize, bases: &[PathBuf]) {
     // The shared enemy guard: no Re:CoM "Guard" popup over KH1 enemies (owner 2026-11-02).
     // SAFETY: the call's context and bytes are checked inside, before anything is written.
     unsafe { kh1_enemy::install_guard_popup(base) };
+    // The Large Body's stomp ring as KH1's ring: Re:CoM's circle test, KH1's rule for our ring only.
+    // SAFETY: the target's bytes are checked again inside, before anything is written.
+    unsafe { kh1_enemy::install_ring_test(base) };
 }
 
 /// Boss revenge at Combat = KH1 (`revenge`, owner 2026-11-01): KH2's revenge value on Re:CoM's
