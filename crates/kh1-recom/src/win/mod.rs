@@ -31,6 +31,7 @@ mod kh1_thrown;
 mod kh1_cure;
 mod kh1_flame;
 mod kh1_peel;
+mod kh1_support;
 mod shop;
 mod specials;
 mod stats;

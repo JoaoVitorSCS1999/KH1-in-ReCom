@@ -116,6 +116,8 @@ pub mod ix {
     // M12 step 3: KH1's Rod-list support abilities (`docs/recom-m12-sleights.md` § 3).
     /// MP Haste (KH1 id 23): the hit charge's factor + 1.5 (`0x1402BF330`).
     pub const MP_HASTE: usize = 25;
+    /// MP Rage (KH1 id 24) ×2: charge from HP lost × the copies (`0x14029BBD0`).
+    pub const MP_RAGE: [usize; 2] = [26, 27];
 }
 
 /// Re:CoM's sleight ids (its `initStockSkill` `0x140220DF0` switch; level-up list `0x14010EF10`;
@@ -151,7 +153,7 @@ const fn special(name: &'static str, s: u16) -> Ability {
 /// Assumption, strong).
 /// Combo Master (0x41) has no row in btltbl's table (row 65 is zero: cost 0, key 0; Checked
 /// (files)); KH1 FM gives it by no level list.
-pub const ALL: [Ability; 26] = [
+pub const ALL: [Ability; 28] = [
     a("Sliding Dash", 54, 0x100_0000, 1, 205, Source::Sleight(sleight::SLIDING_DASH)),
     a("Blitz", 20, 0x8, 2, 208, Source::Sleight(sleight::BLITZ)),
     a("Stun Impact", 57, 0x800_0000, 2, 211, Source::Sleight(sleight::STUN_IMPACT)),
@@ -193,6 +195,10 @@ pub const ALL: [Ability; 26] = [
     // They set KH1's actor ability block `+0x184` (`0x1402A6380`), not `0x142D5EC10`: kh1_bit 0.
     // MP Haste: id 23 (`+0x184` bit 0), Rod level 21, 3 AP, sort key 304. Checked (decomp + files).
     a("MP Haste", 23, 0, 3, 304, Source::Level(21)),
+    // MP Rage: id 24 (`+0x184` bits 1..3, the count of equipped copies), Rod levels 42 and 75, 3 AP
+    // each, sort key 305. Checked (decomp + files).
+    a("MP Rage", 24, 0, 3, 305, Source::Level(42)),
+    a("MP Rage", 24, 0, 3, 305, Source::Level(75)),
 ];
 
 /// The combo modifiers (stage 9a), by [`ix`].
@@ -505,6 +511,12 @@ pub fn mp_haste(equipped: u32) -> bool {
     equipped & (1 << ix::MP_HASTE) != 0
 }
 
+/// The equipped MP Rage copies (KH1 `+0x184` bits 1..3 = `0x140284BE0(24) & 7`: every equipped
+/// copy counts): the charge from damage taken is HP lost × this (`0x14029BBD0`). Checked (decomp).
+pub fn mp_rage(equipped: u32) -> u8 {
+    ix::MP_RAGE.iter().filter(|&&i| equipped & (1 << i) != 0).count() as u8
+}
+
 /// The names of the abilities in `bits`, for the log.
 pub fn names(bits: u32) -> Vec<&'static str> {
     ALL.iter().enumerate().filter(|(i, _)| bits & (1 << i) != 0).map(|(_, a)| a.name).collect()
@@ -705,6 +717,7 @@ pub mod page {
                 20..=22 => b"One more swing in a ground combo.\0",
                 23..=24 => b"One more swing in an air combo.\0",
                 MP_HASTE => b"Gain more MP from each hit on an enemy.\0",
+                26..=27 => b"Gain MP when you take damage. Copies add up.\0",
                 _ => b"\0",
             }
         }
@@ -741,8 +754,8 @@ mod tests {
     fn layout_follows_the_items_extension() {
         assert_eq!(BLOCK_FIRST, 0x269F);
         assert_eq!(BLOCK_LAST, 0x26AD);
-        assert_eq!(ALL.len(), 26);
-        assert_eq!(ALL_BITS, 0x03FF_FFFF);
+        assert_eq!(ALL.len(), 28);
+        assert_eq!(ALL_BITS, 0x0FFF_FFFF);
     }
 
     /// KH1's AP: 3 at a new game (keep Rod / give up Shield adds 0), +2 at each kind-3 level of the
@@ -885,9 +898,9 @@ mod tests {
         // Re:CoM's Sonic Blade sleight (9): Sonic Blade, unequipped (KH1's rule).
         let r = sync(&mut s, 30, NO_RECOM, &mut |id| id == sleight::SONIC_BLADE);
         assert_eq!(names(r.new), vec!["Sonic Blade"]);
-        // Level 50: Combo Master (owner), unequipped.
+        // Level 50: Combo Master (owner), unequipped; MP Rage 42 (M12).
         let r = sync(&mut s, 50, NO_RECOM, &mut |_| false);
-        assert_eq!(names(r.new), vec!["Aerial Sweep", "Combo Master", "Air Combo Plus"]);
+        assert_eq!(names(r.new), vec!["Aerial Sweep", "Combo Master", "Air Combo Plus", "MP Rage"]);
         // Level 99 and every sleight: everything but Re:CoM's movement abilities and the kit.
         sync(&mut s, 99, NO_RECOM, &mut |_| true);
         assert_eq!(s.unlocked, ALL_BITS & !MOVE & !KIT_BITS);
@@ -988,7 +1001,7 @@ mod tests {
         assert_eq!(s.equipped & 1 << ix::COUNTERATTACK, 0, "the ini is read only from v0 / v1");
         // Level 50 and Re:CoM's Glide later: Glide back equipped (Re:CoM's), Combo Master unequipped.
         let r = sync(&mut s, 50, recom::HIGH_JUMP | recom::GLIDE, &mut |_| false);
-        assert_eq!((names(r.new), names(r.new_equipped)), (vec!["Combo Master", "Air Combo Plus"], vec!["Glide"]));
+        assert_eq!((names(r.new), names(r.new_equipped)), (vec!["Combo Master", "Air Combo Plus", "MP Rage"], vec!["Glide"]));
         // At the migration itself, a source already met keeps the old equipped state.
         let mut t = State { unlocked: had, equipped: had };
         let raw = t;
@@ -1026,6 +1039,14 @@ mod tests {
         // Level 21: 7 AP (11, 17, 20); MP Haste's 3 fit.
         assert!(can_equip(0, ix::MP_HASTE, 21));
         assert_eq!(kh1_bits(1 << ix::MP_HASTE), kh1_bits(0));
+        // MP Rage: two copies, Rod levels 42 and 75, 3 AP each; equipped copies add up.
+        assert_eq!(ix::MP_RAGE.map(x), [(24, 3, 305, Source::Level(42), 0, false), (24, 3, 305, Source::Level(75), 0, false)]);
+        let r = sync(&mut s, 74, NO_RECOM, &mut |_| false);
+        assert_eq!(names(r.new).iter().filter(|&&n| n == "MP Rage").count(), 1);
+        let r = sync(&mut s, 75, NO_RECOM, &mut |_| false);
+        assert_eq!(names(r.new), vec!["MP Rage"]);
+        assert_eq!((mp_rage(0), mp_rage(1 << ix::MP_RAGE[1]), mp_rage(1 << ix::MP_RAGE[0] | 1 << ix::MP_RAGE[1])), (0, 1, 2));
+        assert_eq!(used_ap(1 << ix::MP_RAGE[0] | 1 << ix::MP_RAGE[1]), 6);
     }
 
     #[test]
