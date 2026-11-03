@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 199: M12 step 6: sleights as Customize shortcuts, version 0.100.5 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "I also would like sleights to be able to be added to the customize menu, for shortcuts."
+- A sleight goes in the existing shortcut byte as its Re:CoM id (the 27, all ≥ 8; older builds read it empty; KH1's fill-on-learn never overwrites a sleight slot). Customize picker: learned spells, then equipped sleights, then None. The L1 list: a sleight slot follows the Sleights list's rules (battle, ground or Re:CoM's air rule, nothing running, MP by tier, KH1's commit gate) and starts through Re:CoM's own sleight start; its packs preloaded when the list comes up. Unequipped later: the byte kept; the Customize row greyed with a help line; in the L1 list a grey dash and a buzz. (The shortcuts held spells only, not items.)
+- Assumption: a first use never before its pack loads. Asset step: not needed. Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 198: Sleights at Damage = KH1: damage scaled to the enemy's KH1 HP, version 0.100.4 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Scale to KH1 HP".
