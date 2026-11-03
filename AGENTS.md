@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 200: Damage = KH1: sleights scale on bosses / Re:CoM-only enemies; summons scale too, version 0.100.6 (2026-11-01)
+
+- Ask (owner, 2026-11-03, on 0.100.4): "Scale them too"; summons "Same rule" (this replaces the earlier "Re:CoM's summon damage at both Damage settings" at Damage = KH1).
+- (a) Bosses and Re:CoM-only enemies: the ratio uses the HP the mod already cuts them to (proxy, proxy boss or boss twin) / Re:CoM's max HP (`0x14017F5A0`). (b) Summons: hits from the summon object (`CSummon*` by its vtable, `+0x248` = Sora), its shots (Re:CoM writes the summon's id as the shooter, type 0x1000) and Sora's own hits while it plays; Idyll Romp / Cross-slash+ now scaled too. The Teleport / Lethal Frame / Shock Impact / Magnet Spiral / Gravity exceptions kept. Seven pointer checks (`SUMMON_ACTOR_PTRS`, each vtable's +0 / +0x28; a mismatch turns off only the summon scaling). No new hooks, byte sites or per-frame work.
+- Assumptions: Re:CoM's own non-damage list decides per hit; a summon's shot after it has gone, and a boss part whose HP the mod never set, keep Re:CoM's damage (logged).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 199: M12 step 6: sleights as Customize shortcuts, version 0.100.5 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "I also would like sleights to be able to be added to the customize menu, for shortcuts."
