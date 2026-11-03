@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 191: AP Up keeps Re:CoM's +25 CP unseen; no card help after the level-up Sleight pick, version 0.98.9 (2026-11-01)
+
+- Asks (owner, 2026-11-03): AP Up "Keep CP growing"; the level-up Sleight pick's help page "Skip it".
+- AP Up at Combat = KH1 keeps Re:CoM's +25 CP (`0x14010F6AB`) while CP < 1625 (Re:CoM's own offer cap: it never passes 1625), undone above it; the row still reads AP Up / Max AP +2. A switch back to Re:CoM finds Re:CoM's CP for the picks taken.
+- The level-up Sleight pick: CLevelUp case 8 makes its CTechHelp and goes 8 → 9 (waiting on `0x14087A4B0`): ended before its page at Combat = KH1, as 0.98.1 does after 0xF → 0x10 (Checked (decomp)).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 190: Fix: the mod switched itself off at start (two vtable checks as raw bytes), version 0.98.8 (2026-11-01)
 
 - Owner (2026-11-03, on 0.98.7): "The \"KH1\" tab in the camp menu should ALWAYS be visible, i loaded into a save and it wasnt there". Cause (Checked (log)): `site CHANGED 0x14051b4a8 CTechHelp vtable` and `0x140512c10 CLevelUp vtable`, then `result: checks FAILED. The mod changes nothing on this build.`: 0.98.1 checked the two vtables' slots as raw bytes (`0x14012C230` …), which the loader relocates, so every start failed and the whole mod stayed off (no KH1 tab, no KH1 combat). Since 0.98.1.
