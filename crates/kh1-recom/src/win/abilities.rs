@@ -129,6 +129,10 @@ pub fn sync() -> Option<State> {
     if r.new != 0 {
         log(&format!("abilities: learned at Re:CoM level {level} (unequipped, KH1's rule; Re:CoM's ability variable {recom_var:#x}): {:?}", ab::names(r.new)));
     }
+    // M12: the learned notice's call point (see [`on_learned`]).
+    for i in (0..ab::ALL.len()).filter(|&i| (r.new | r.new_equipped) & (1 << i) != 0) {
+        on_learned(i);
+    }
     if r.new_equipped != 0 {
         log(&format!("abilities: learned at Re:CoM level {level} and equipped (owner: Re:CoM gave it; removable): {:?}", ab::names(r.new_equipped)));
     }
@@ -144,6 +148,16 @@ pub fn sync() -> Option<State> {
         ));
     }
     Some(s)
+}
+
+/// M12 (owner, 2026-11-03: "… I want there to be a notification that lets the player know that
+/// they've obtained those abilities"): called once for each ability [`sync`] newly unlocks (`i` =
+/// `crate::abilities::ix`), e.g. MP Haste at Re:CoM level 21.
+///
+/// TODO(M12 notices merge): wire the learned-notice framework here (`notify_learned(...)`, built
+/// on another branch); nothing is shown yet.
+pub fn on_learned(i: usize) {
+    let _ = i;
 }
 
 /// The equipped abilities the KH1 frame passes on (`ab::ix` bits, the modifiers only with rows),

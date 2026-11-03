@@ -115,6 +115,9 @@ pub mod ix {
     pub const COMBO_PLUS: [usize; 3] = [20, 21, 22];
     /// Two copies (KH1's Rod list gives two).
     pub const AIR_COMBO_PLUS: [usize; 2] = [23, 24];
+    // M12 step 3: KH1's Rod-list support abilities (`docs/recom-m12-sleights.md` § 3).
+    /// MP Haste (KH1 id 23): the hit charge's factor + 1.5 (`0x1402BF330`).
+    pub const MP_HASTE: usize = 25;
 }
 
 /// Re:CoM's sleight ids (its `initStockSkill` `0x140220DF0` switch; level-up list `0x14010EF10`;
@@ -150,7 +153,7 @@ const fn special(name: &'static str, s: u16) -> Ability {
 /// Assumption, strong).
 /// Combo Master (0x41) has no row in btltbl's table (row 65 is zero: cost 0, key 0; Checked
 /// (files)); KH1 FM gives it by no level list.
-pub const ALL: [Ability; 25] = [
+pub const ALL: [Ability; 26] = [
     a("Sliding Dash", 54, 0x100_0000, 1, 205, Source::Sleight(sleight::SLIDING_DASH)),
     a("Blitz", 20, 0x8, 2, 208, Source::Sleight(sleight::BLITZ)),
     a("Stun Impact", 57, 0x800_0000, 2, 211, Source::Sleight(sleight::STUN_IMPACT)),
@@ -186,6 +189,12 @@ pub const ALL: [Ability; 25] = [
     a("Combo Plus", 6, 0, 1, 201, Source::Level(99)),
     a("Air Combo Plus", 7, 0, 1, 202, Source::Level(24)),
     a("Air Combo Plus", 7, 0, 1, 202, Source::Level(45)),
+    // M12 step 3 (owner, 2026-11-03: "As sora levels up in KH1, he receives abilities like MP Haste,
+    // MP Rage, Leaf Bracer, … second chance and Berserk … at the levels he would normally get them …
+    // regardless of level up choice"): KH1's Rod list (btltbl `0x3BF8`), on Re:CoM's level, unequipped.
+    // They set KH1's actor ability block `+0x184` (`0x1402A6380`), not `0x142D5EC10`: kh1_bit 0.
+    // MP Haste: id 23 (`+0x184` bit 0), Rod level 21, 3 AP, sort key 304. Checked (decomp + files).
+    a("MP Haste", 23, 0, 3, 304, Source::Level(21)),
 ];
 
 /// The combo modifiers (stage 9a), by [`ix`].
@@ -528,6 +537,14 @@ pub fn to_core(equipped: u32) -> kh1_core::Abilities {
     a
 }
 
+// ---- M12 step 3: KH1's support abilities (KH1's actor ability block `+0x184`, `0x1402A6380`) ----
+
+/// MP Haste equipped (KH1 `+0x184` bit 0 = `0x140284BE0(23) & 1`): the hit charge's factor + G
+/// `+0x95` / 100 = + 1.5 (`0x1402BF330`). Checked (decomp + files).
+pub fn mp_haste(equipped: u32) -> bool {
+    equipped & (1 << ix::MP_HASTE) != 0
+}
+
 /// The names of the abilities in `bits`, for the log.
 pub fn names(bits: u32) -> Vec<&'static str> {
     ALL.iter().enumerate().filter(|(i, _)| bits & (1 << i) != 0).map(|(_, a)| a.name).collect()
@@ -727,6 +744,7 @@ pub mod page {
                 COMBO_MASTER => b"Keep a combo going even when a swing misses.\0",
                 20..=22 => b"One more swing in a ground combo.\0",
                 23..=24 => b"One more swing in an air combo.\0",
+                MP_HASTE => b"Gain more MP from each hit on an enemy.\0",
                 _ => b"\0",
             }
         }
@@ -769,8 +787,8 @@ mod tests {
     fn layout_follows_the_items_extension() {
         assert_eq!(BLOCK_FIRST, 0x269F);
         assert_eq!(BLOCK_LAST, 0x26AD);
-        assert_eq!(ALL.len(), 25);
-        assert_eq!(ALL_BITS, 0x01FF_FFFF);
+        assert_eq!(ALL.len(), 26);
+        assert_eq!(ALL_BITS, 0x03FF_FFFF);
     }
 
     /// Owner (M12, 2026-11-03): KH1's start 3, +2 per AP Up pick, no cap, nothing else (the
@@ -923,9 +941,9 @@ mod tests {
         assert!(!asked.contains(&sleight::SLIDING_DASH));
         sync(&mut s, 1, NO_RECOM, &mut |_| false);
         assert_eq!(names(s.unlocked), vec!["Sliding Dash", "Ripple Drive"]);
-        // Level 30: Gravity Break (owner), Hurricane Blast 18, Air Combo Plus 24.
+        // Level 30: Gravity Break (owner), Hurricane Blast 18, Air Combo Plus 24, MP Haste 21 (M12).
         let r = sync(&mut s, 30, NO_RECOM, &mut |_| false);
-        assert_eq!(names(r.new), vec!["Hurricane Blast", "Gravity Break", "Air Combo Plus"]);
+        assert_eq!(names(r.new), vec!["Hurricane Blast", "Gravity Break", "Air Combo Plus", "MP Haste"]);
         // Re:CoM's Sonic Blade sleight (9): Sonic Blade, unequipped (KH1's rule).
         let r = sync(&mut s, 30, NO_RECOM, &mut |id| id == sleight::SONIC_BLADE);
         assert_eq!(names(r.new), vec!["Sonic Blade"]);
@@ -1051,6 +1069,25 @@ mod tests {
         // Equal costs: the later index goes first.
         let mut e = 1 << ix::BLITZ | 1 << ix::STUN_IMPACT;
         assert_eq!(fit_ap(&mut e, max_ap(0)), 1 << ix::STUN_IMPACT);
+    }
+
+    /// M12 step 3: KH1's Rod-list support abilities (btltbl `0x33D8` rows and `0x3BF8` levels:
+    /// `ap_tables_match_btltbl` reads them from the player's file). They arrive unequipped, cost
+    /// KH1's AP, are on Sora's page, and set no `0x142D5EC10` bit.
+    #[test]
+    fn rod_support_abilities() {
+        let x = |i: usize| (ALL[i].kh1_id.unwrap(), ALL[i].ap, ALL[i].key, ALL[i].source, ALL[i].kh1_bit, ALL[i].shared);
+        assert_eq!(x(ix::MP_HASTE), (23, 3, 304, Source::Level(21), 0, false));
+        assert!(on_screen(ix::MP_HASTE));
+        let mut s = State::default();
+        assert_eq!(names(sync(&mut s, 20, NO_RECOM, &mut |_| false).new).contains(&"MP Haste"), false);
+        assert!(names(sync(&mut s, 21, NO_RECOM, &mut |_| false).new).contains(&"MP Haste"));
+        assert_eq!(s.equipped, 0, "KH1's rule: unequipped");
+        assert!(!mp_haste(s.equipped));
+        assert!(mp_haste(1 << ix::MP_HASTE));
+        // Level 21: 7 AP (11, 17, 20); MP Haste's 3 fit.
+        assert!(can_equip(0, ix::MP_HASTE, 21));
+        assert_eq!(kh1_bits(1 << ix::MP_HASTE), kh1_bits(0));
     }
 
     #[test]

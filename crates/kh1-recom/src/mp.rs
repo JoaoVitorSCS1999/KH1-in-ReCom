@@ -241,10 +241,18 @@ impl Mp {
 /// level is not above 0: KH1 then charges nothing (it never calls the gauge add). Bit 0 of the
 /// ability block `+0x184` (ability 0x17, +150 %) is M9's: off here.
 pub fn hit_units(record_charge: i32, enemy_level: i32, sora_level: u32) -> Option<i32> {
+    hit_units_with(record_charge, enemy_level, sora_level, false)
+}
+
+/// [`hit_units`] with MP Haste (M12 step 3; KH1 ability 23 → ability block `+0x184` bit 0,
+/// `0x1402A6380`): the factor gets `+ G+0x95 / 100` = + 1.5 in `f32` (`0x1402BF330`), before the
+/// truncation, the floor 1 and the 250 % cap. So at equal levels a swing (3) charges 7 (3 × 2.5 =
+/// 7.5, cap 7), a finisher (6) 15, Counterattack (24) 60. Checked (decomp + files).
+pub fn hit_units_with(record_charge: i32, enemy_level: i32, sora_level: u32, mp_haste: bool) -> Option<i32> {
     if enemy_level <= 0 {
         return None;
     }
-    let attacker = AttackerStats { level: sora_level as i32, mp_charge_bonus: false, ..Default::default() };
+    let attacker = AttackerStats { level: sora_level as i32, mp_charge_bonus: mp_haste, ..Default::default() };
     Some(mp_charge(&MpChargeParams::default(), record_charge, enemy_level, &attacker))
 }
 
@@ -647,6 +655,30 @@ mod tests {
         assert_eq!(hit_units(3, 0, 1), None);
         // Guard's record (+0x2C = 0): 0.
         assert_eq!(hit_units(0, 10, 10), Some(0));
+    }
+
+    /// MP Haste (M12 step 3): `0x1402BF330`'s factor + 150 / 100 (G `+0x95`), then the same
+    /// truncation, floor 1 and 250 % cap (G `+0x96`).
+    #[test]
+    fn hit_charge_with_mp_haste() {
+        assert_eq!(hit_units_with(3, 10, 10, false), hit_units(3, 10, 10));
+        // Same level: 2.5f × 3 = 7.5 → 7 (the cap is 7 too); × 6 = 15; × 24 = 60.
+        assert_eq!(hit_units_with(3, 10, 10, true), Some(7));
+        assert_eq!(hit_units_with(6, 10, 10, true), Some(15));
+        assert_eq!(hit_units_with(24, 10, 10, true), Some(60));
+        // Two levels below: (1 − 0.4 + 1.5) = 2.1f × 6 = 12.6 → 12.
+        assert_eq!(hit_units_with(6, 8, 10, true), Some(12));
+        // Far below: 1 + (−39 × 0.2) + 1.5 < 0 → at least 1. Far above: the cap.
+        assert_eq!(hit_units_with(24, 1, 40, true), Some(1));
+        assert_eq!(hit_units_with(6, 50, 10, true), Some(15));
+        // Level 0 still charges nothing (KH1 never calls the gauge add).
+        assert_eq!(hit_units_with(3, 0, 1, true), None);
+        // KH1's G numbers in the player's btltbl (G = btltbl + 0x58).
+        if let Ok(dir) = std::env::var("KH1_TEST_DATA") {
+            if let Ok(b) = std::fs::read(std::path::Path::new(&dir).join("btltbl.bin")) {
+                assert_eq!((b[0x58 + 0x94], b[0x58 + 0x95], u16::from_le_bytes([b[0x58 + 0x96], b[0x58 + 0x97]])), (20, 150, 250));
+            }
+        }
     }
 
     #[test]
