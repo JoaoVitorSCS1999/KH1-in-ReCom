@@ -770,7 +770,8 @@ unsafe fn take_kh1_hit(enemy: usize) -> Option<usize> {
 /// `take_kh1_hit`; the kind of Sora's row, which the wrapper passes to `note_swing` only after the call),
 /// else the waiting body's Re:CoM kind `+0x80` mapped (written by the hit apply `0x14016F1C0` with the
 /// count; Checked (decomp)); Some(None) when neither gives one.
-unsafe fn incoming(enemy: usize) -> Option<(Option<u8>, u32)> {
+/// The hurt body holding the damaging hit Re:CoM's handler is about to take (its gather's pick, `gather`), if any.
+unsafe fn waiting_body(enemy: usize) -> Option<usize> {
     let info: usize = rd(enemy + 0xF8);
     if info == 0 {
         return None;
@@ -781,10 +782,18 @@ unsafe fn incoming(enemy: usize) -> Option<(Option<u8>, u32)> {
         return None;
     }
     let body = |i: usize| parts + i * 0x120;
-    let at = match kh1_core::enemy::host::gather((0..n).map(|i| (rd::<u32>(body(i) + 0x9C), rd::<i16>(body(i) + 0x90)))) {
-        kh1_core::enemy::host::Gathered::Hit(i) => body(i),
-        _ => return None,
-    };
+    match kh1_core::enemy::host::gather((0..n).map(|i| (rd::<u32>(body(i) + 0x9C), rd::<i16>(body(i) + 0x90)))) {
+        kh1_core::enemy::host::Gathered::Hit(i) => Some(body(i)),
+        _ => None,
+    }
+}
+
+unsafe fn incoming(enemy: usize) -> Option<(Option<u8>, u32)> {
+    let info: usize = rd(enemy + 0xF8);
+    let at = waiting_body(enemy)?;
+    let parts: usize = rd(info + 0x40);
+    let n = rd::<i32>(info + 0x38).clamp(0, 32) as usize;
+    let body = |i: usize| parts + i * 0x120;
     let swing = KH1_HITS.lock().map(|g| (0..n).any(|i| rd::<i16>(body(i) + 0x90) != 0 && g.iter().any(|&(x, _)| x == body(i)))).unwrap_or(false);
     let pl: usize = rd(va(base(), data::MAIN_PLAYER));
     let kind = swing.then(|| if pl != 0 { kh1_row_of(pl) } else { None }).flatten().and_then(|r| moveset().row(r)).and_then(|x| moveset().attack(x.attack)).map(|a| a.kind);
@@ -801,11 +810,15 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
         return orig::<PlRetFn>(&ORIG_ENEMY_HIT)(enemy);
     }
     let hp: i32 = rd(enemy + 0x274);
+    // M11 (the Red Nocturne, owner 2026-11-03): its own fire sent back takes Re:CoM's stun (the hit as Re:CoM's stun
+    // kind for its handler), then the hit to its script.
+    let stun = super::kh1_enemy::own_stun_on(enemy, || waiting_body(enemy));
     // M11 (the Pirate; the fliers' "doesn't flinch"): Re:CoM's super armour for the call while a KH1
     // enemy's script takes no reaction for the hit about to be handled, then the hit to its script.
     let armour = super::kh1_enemy::armour_on(enemy, || incoming(enemy));
     let r = kh1_enemy_hit(enemy);
     super::kh1_enemy::armour_off(armour, r);
+    super::kh1_enemy::own_stun_off(stun);
     // Gimmick cards, trigger (d): a card-break boss crossing 50 % of its max HP.
     super::gimmick::after_hp(enemy, hp);
     r

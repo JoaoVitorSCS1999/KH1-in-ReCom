@@ -108,6 +108,28 @@ pub fn armour_took(result: u64, hp: i32, next_before: usize, next_after: usize) 
     result == 1 && hp > 0 && next_before == next_after
 }
 
+/// Re:CoM's stun kind: its reaction picker `0x14017D260` sends kind 7 to the enemy's stun state (`+0x900`, state
+/// [`RECOM_STUN_STATE`]) when the enemy's `@ENP` gate (`+0x308` → `+0x28`) is not 0, else to the flinch (and its hit
+/// handler `0x14017F7E0` shows the popup 6 for a kind 7 with a zero gate); its damage `0x14017DC50` takes kind 7 as a plain
+/// hit. The stun state (`CBattleEnemy`'s begin `0x14017C0E0`, step `0x140183950`): the `@ENP` `+0x84` motion, then
+/// `+0x88` for 15000 ticks (300 frames) with gate 1 (5000 otherwise), then `+0x8C`, then Re:CoM's default state; the
+/// "abnormal" effect while it lasts. The state Re:CoM's Stun Impact (row 0xB, kind 7) puts enemies in. Checked (decomp).
+pub const RECOM_STUN_KIND: u32 = 7;
+/// Re:CoM's stun state's index (`+0x900` = (17 + 0x13) × 0x40).
+pub const RECOM_STUN_STATE: usize = 17;
+
+/// The kind the host gives a waiting hit before Re:CoM's handler (M11, [`crate::enemy::Behaviour::own_row_stun`]): Re:CoM's
+/// stun kind for a hit of the behaviour's own row on a living enemy whose Re:CoM gate allows the stun (`gate` ≠ 0: with
+/// 0 Re:CoM would flinch it and pop up its "immune" mark, so the hit is left as it came); None: the hit as it came.
+pub fn own_row_stun_kind(wants: bool, own: bool, alive: bool, gate: i32) -> Option<u32> {
+    (wants && own && alive && gate != 0).then_some(RECOM_STUN_KIND)
+}
+
+/// Whether Re:CoM's handler took that hit into its stun: the enemy lives and its next state is the stun state.
+pub fn stun_took(hp: i32, next_state: Option<usize>) -> bool {
+    hp > 0 && next_state == Some(RECOM_STUN_STATE)
+}
+
 /// KH1's clash kinds (6 / 7, `0x1402B8E10`'s cases 6 / 7): the fliers' handlers keep their reaction
 /// (`hp[0xC] & 0x1F` tested against 6 and 7 before zeroing it; Checked (files): `ex_2210.bd` `0x1F0C`,
 /// `ex_2320.bd` `0x2484`, `ex_2280.bd` `0x1FBC`).
@@ -433,6 +455,20 @@ pub mod model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Re:CoM's stun for a hit of the behaviour's own row: only when it asks, the hit is its own, it lives and Re:CoM's
+    /// gate allows it; taken when the next state is the stun state (`+0x900`) and the enemy lives.
+    #[test]
+    fn the_own_row_stun() {
+        assert_eq!(own_row_stun_kind(true, true, true, 1), Some(RECOM_STUN_KIND));
+        assert_eq!(own_row_stun_kind(false, true, true, 1), None, "a class that doesn't ask");
+        assert_eq!(own_row_stun_kind(true, false, true, 1), None, "Sora's own hits: as they came");
+        assert_eq!(own_row_stun_kind(true, true, false, 1), None);
+        assert_eq!(own_row_stun_kind(true, true, true, 0), None, "Re:CoM's gate 0: no stun, no immune mark");
+        assert_eq!((RECOM_STUN_STATE + 0x13) * 0x40, 0x900);
+        assert!(stun_took(10, Some(RECOM_STUN_STATE)));
+        assert!(!stun_took(0, Some(RECOM_STUN_STATE)) && !stun_took(10, Some(11)) && !stun_took(10, None));
+    }
 
     /// KH1's grab starts at once (only the behaviour's grab), and a begin doesn't play it again.
     #[test]

@@ -404,4 +404,11 @@ pub trait Behaviour {
     /// same-class enemy sent back by Sora's swing or Guard), before [`Behaviour::armoured`] / [`Behaviour::on_hit`] /
     /// [`Behaviour::on_defeat`]. M11, the Defender's batted fireball (`ex_2340.bd` `0x2DB6`). The default ignores it.
     fn set_hit_own_row(&self, _own: bool) {}
+    /// A hit from one of its own rows (KH1's `sys 188`, [`Behaviour::set_hit_own_row`]) puts it in Re:CoM's own stun state
+    /// instead of KH1's dizzy status (`sys 179`, `0x1402B8730`): the host hands that hit to Re:CoM's hit handler as Re:CoM's
+    /// stun kind (`host::RECOM_STUN_KIND`), then tells [`Behaviour::on_hit`] about it (its handler's other work, KH1's EXP
+    /// bonus and its hit state, stays). M11, the Red Nocturne (owner 2026-11-03). The default: no.
+    fn own_row_stun(&self) -> bool {
+        false
+    }
 }

@@ -3944,7 +3944,7 @@ four rows are passed to its two children (`sys 94`).
 
 `sys 179` (`0x1402BC120` → `0x1402B8730`): when the model has request 0x42, flag `+0x88 |= 2` and `+0x3E4` = 1800: **KH1's
 dizzy** (0x42 → 0x43 for up to 1800 frames → 0x44; `0x1402B7260` counts it down, a hit wakes it, `0x1402B8E10` /
-`0x1402B8DC0`; Checked (decomp)). Not built (owner question 1).
+`0x1402B8DC0`; Checked (decomp)). Not built: **Re:CoM's own stun instead** (owner 2026-11-03, below).
 
 **Its children** (`ex_2110_00.bd` the Fire, `ex_2110_01.bd` the big Fire; the same code with other numbers). Their flight
 loop, move, re-aim and homing (`0x142`, `0x23E`, `0x288`, `0x3C8`, `0x434`) are **byte for byte the Defender's fireball
@@ -4017,6 +4017,25 @@ same spell in both games (KH1's models 7 / 11 are Re:CoM's effect sets' 7 / 11 o
   Defender's fireballs keep decision 28 (owner question 4).
 - **Its own fire back**: the hit handler hears a fire of its own class sent back as its own row (`kh1_thrown::own_shot`,
   `Behaviour::set_hit_own_row`): KH1's EXP bonus (`EXP / 10 + 2`, Re:CoM's EXP, `Cmd::Reward`) and the hit state.
+- **Its own fire back stuns it: Re:CoM's stun** (owner 2026-11-03: "it takes Re:CoM's stun (instead of KH1's 30 s dizzy;
+  the EXP bonus stays)"). KH1's `sys 179(1800)` (`0x1FA8`) becomes Re:CoM's own stun state, the one Stun Impact uses:
+  before Re:CoM's enemy hit handler `0x14017F7E0` (the existing wrapper `win::attack::enemy_hit`), a damaging hit waiting
+  on the Red Nocturne whose attacker is a fire of its own class sent back (`own_shot`) gets Re:CoM's stun kind **7** on
+  the hurt body Re:CoM's gather takes (`+0x80`; `win::kh1_enemy::own_stun_on`, `Behaviour::own_row_stun`). Re:CoM's
+  handler then applies the damage as a plain hit (`0x14017DC50`) and its picker `0x14017D260` sends kind 7 to the stun
+  state **`+0x900` (state 17)** when the `@ENP` gate `+0x308 → +0x28` is not 0 (Checked (decomp); `EN0003.EPD`'s `@ENP`
+  `+0x28` = 1, Checked (files)). The stun is Re:CoM's (`CBattleEnemy`'s begin `0x14017C0E0` / step `0x140183950`: its
+  `@ENP` `+0x84` motion, `+0x88` for 15000 ticks = 300 frames (gate 1; 5000 otherwise), `+0x8C`, then its default
+  state; the "abnormal" effect; Checked (decomp)). After the call, when the next state is the stun and it lives
+  (`own_stun_off`, `kh1_core::enemy::host::stun_took`), its script's hit handler hears the hit: KH1's EXP bonus at once
+  and its hit state (flee, big Fire) for when the stun hands back. **The host's takeover** (Stage 127, `take_over`):
+  Re:CoM's state 17 ends in Re:CoM's default state, our state 1 begin sees no hand-back of ours and drops what played
+  (the cast motion: its waiting Fire ends, as KH1's child does when the dizzy replaces its motion), the idle plays and
+  the AI goes on from the hit state. With gate 0 (not the Red Nocturne) the hit is left as it came (no "immune" mark), and
+  a killing hit is Re:CoM's defeat as before. Nothing per frame (one atomic load per hit-handler call while no KH1
+  class is installed; the class's answer only with a hit waiting). Assumptions: KH1's script runs its hit state after the
+  dizzy (the state request is made in the handler; the script pauses for the status, as for an action); Re:CoM's stun
+  length (5 s) for KH1's up to 30 s (the owner's choice).
 - Per frame: one KH1 step per flying fire; one atomic load otherwise.
 
 #### What the asset step writes
@@ -4055,7 +4074,8 @@ rednocturne eNNN: fire … / bigfire …` per fire, `fire N: Sora's swing bats i
   for KH1's lock point; Re:CoM's sounds (none: no `.SES`); the batted fire's fallback direction when the Red Nocturne is
   gone (Sora's back along the flight; KH1: Sora's facing, as the Defender's port); seeds per enemy.
 - **Not ported:** the leash, the notice for placed ones (battle spawns appear), the search object, element rules (Fire
-  absorbs and heals it, Blizzard dizzies it: attributes are not carried), the dizzy (`sys 179`), effects (charge effects
+  absorbs and heals it, Blizzard dizzies it: attributes are not carried), KH1's dizzy (`sys 179`; its own fire's hit takes
+  Re:CoM's stun instead, owner 2026-11-03), effects (charge effects
   2052 / 2054 / 2053 / 2058, the fires' fade) and the appearance's flag 0x80 (M13), the death routine (Re:CoM's defeat,
   prizes, EXP); a big Fire whose caster dies in its last 90 frames doesn't fly (KH1's does).
 
@@ -4070,7 +4090,9 @@ rednocturne eNNN: fire … / bigfire …` per fire, `fire N: Sora's swing bats i
    curves more), then it flies closer.
 4. Hit it from close: it flies off 5–6 m and casts a big Fire.
 5. Swing at a flying fire: it flies back toward your target (or the Red Nocturne) and hurts enemies. Guard it: the same (not a
-   straight homing shot). A Red Nocturne hit by its own fire flinches (and gives a little extra EXP).
+   straight homing shot). A Red Nocturne hit by its own fire **is stunned** (Re:CoM's stun: its stun motions and stars,
+   about 5 s; the log's `e…: Re:CoM's stun (state 17) for its own fire`), gives a little extra EXP at once, and when the
+   stun ends it flies off and casts a big Fire (its hit state).
 6. Hit it while it charges: no fire comes.
 7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
 8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Red Nocturnes (its own two shots).
@@ -4086,7 +4108,8 @@ frames (200 → 201 + 40, 202 → 203 + 90), the fires' start points and paths t
 
 #### Red Nocturne owner questions
 
-1. **Its dizzy.** KH1 makes a Red Nocturne dizzy (requests 66 → 67 → 68, up to 1800 frames = 30 s, a hit wakes it) when
+1. **Its dizzy.** **Answered (owner 2026-11-03): (c), Re:CoM's own stun** (built, with Re:CoM's stun length: see "Its own
+   fire back stuns it"). KH1 makes a Red Nocturne dizzy (requests 66 → 67 → 68, up to 1800 frames = 30 s, a hit wakes it) when
    its own fire sent back hits it (and when Blizzard hits it: element, left out). Built: the EXP bonus and the hit state, no
    dizzy. (a) Keep it out; (b) build KH1's dizzy natively (a new reaction in the shared engine, on Re:CoM's states, its
    motions from the model); (c) Re:CoM's own stun state for KH1's frames.

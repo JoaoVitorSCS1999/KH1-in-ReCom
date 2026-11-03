@@ -1634,10 +1634,7 @@ unsafe fn incoming_from(en: usize, k: usize, owner: u32) -> Option<(Vec3, bool)>
         return None;
     }
     let me = crate::units::to_kh1(rd_vec(mover(en) + mv::POS));
-    let own = super::kh1_thrown::own_shot(owner).is_some_and(|shooter| {
-        let s = func::<HandleFn>(f::HANDLE_OBJ)(shooter);
-        s != 0 && ours(s) == Some(k)
-    });
+    let own = own_row(k, owner);
     let o = func::<HandleFn>(f::HANDLE_OBJ)(owner);
     if o == 0 {
         return Some((Vec3::ZERO, own));
@@ -1659,6 +1656,77 @@ unsafe fn incoming_from(en: usize, k: usize, owner: u32) -> Option<(Vec3, bool)>
         Vec3::ZERO
     };
     Some((dir, own))
+}
+
+/// Whether attacker `owner` is a fireball an enemy of class `k` threw, now on the enemies' side (`super::kh1_thrown::own_shot`).
+unsafe fn own_row(k: usize, owner: u32) -> bool {
+    owner != 0
+        && super::kh1_thrown::own_shot(owner).is_some_and(|shooter| {
+            let s = func::<HandleFn>(f::HANDLE_OBJ)(shooter);
+            s != 0 && ours(s) == Some(k)
+        })
+}
+
+/// The `@ENP` record (`+0x308`) and its stun gate `+0x28` (Re:CoM's hit handler and picker read it for kind 7). Checked
+/// (decomp `0x14017F7E0`, `0x14017D260`; files: `EN0003.EPD`'s `@ENP` `+0x28` = 1, the Red Nocturne can be stunned).
+const ENP: usize = 0x308;
+const STUN_GATE: usize = 0x28;
+
+/// Re:CoM's stun asked for a KH1 enemy's own row ([`own_stun_on`]): the enemy.
+pub(super) struct OwnStun {
+    en: usize,
+}
+
+/// Before Re:CoM's hit handler (`super::attack::enemy_hit`): a damaging hit waiting on one of our enemies whose behaviour
+/// takes Re:CoM's stun for its own rows (`Behaviour::own_row_stun`: the Red Nocturne hit by its own fire sent back, KH1's
+/// `sys 188` then `sys 179(1800)`, owner 2026-11-03) gets Re:CoM's stun kind 7 on the hurt body Re:CoM's gather takes
+/// (`+0x80`), so Re:CoM's handler applies the damage as a plain hit and its picker `0x14017D260` sends it to its own stun
+/// state (`+0x900`), as Stun Impact's hits do (`kh1_core::enemy::host::RECOM_STUN_KIND`). Only while Re:CoM's gate allows
+/// the stun. Per call: one atomic load while no class is installed, then the class's answer only with a hit waiting.
+pub(super) unsafe fn own_stun_on(en: usize, body: impl FnOnce() -> Option<usize>) -> Option<OwnStun> {
+    if !any_installed() {
+        return None;
+    }
+    let k = ours(en)?;
+    if !with_rt(en, |rt| rt.ai.own_row_stun())? {
+        return None;
+    }
+    let at = body()?;
+    let owner: u32 = rd(at + hi::OWNER);
+    let enp: usize = rd(en + ENP);
+    let gate: i32 = if enp != 0 { rd(enp + STUN_GATE) } else { 0 };
+    let alive = rd::<i32>(en + e::HP) > 0 && with_rt(en, |rt| !rt.dead).unwrap_or(false);
+    let kind = ke::host::own_row_stun_kind(true, own_row(k, owner), alive, gate)?;
+    let was: u32 = rd(at + hi::KIND);
+    wr(at + hi::KIND, kind);
+    let id: u32 = rd(en + e::ID);
+    line(k, || format!("e{id}: hit by its own fire (shot {owner}): Re:CoM's stun kind {kind} for its handler (was kind {was}; gate {gate})"));
+    Some(OwnStun { en })
+}
+
+/// After the call: when Re:CoM took it into its stun state, the behaviour's hit handler hears the hit (KH1's EXP bonus,
+/// its hit state for when the stun hands back: `take_over` drops what played, the AI goes on from the hit state). Any
+/// other outcome (the defeat, a guard) is Re:CoM's and our states' as before.
+pub(super) unsafe fn own_stun_off(s: Option<OwnStun>) {
+    let Some(OwnStun { en }) = s else { return };
+    let next = crate::guard::state_index(en, rd(en + e::NEXT));
+    if !ke::host::stun_took(rd(en + e::HP), next) {
+        let id: u32 = rd(en + e::ID);
+        if let Some(k) = ours(en) {
+            line(k, || format!("e{id}: Re:CoM's handler did not stun it (next state {next:?}): as Re:CoM took it"));
+        }
+        return;
+    }
+    with_rt(en, |rt| {
+        rt.hits = rt.hits.saturating_add(1);
+        rt.ai.set_hit_count(rt.hits);
+        rt.ai.set_hit_own_row(true);
+        rt.ai.set_playing(rt.current);
+        rt.ai.on_hit(HitNews::Damage);
+        run_now(en, rt);
+        let (id, k) = (rd::<u32>(en + e::ID), rt.class);
+        line(k, || format!("e{id}: Re:CoM's stun (state {}) for its own fire; KH1's EXP bonus and its hit state after it", ke::host::RECOM_STUN_STATE));
+    });
 }
 
 /// After the call: Re:CoM's two bits back as they were; a damaging hit it took without a reaction (a
