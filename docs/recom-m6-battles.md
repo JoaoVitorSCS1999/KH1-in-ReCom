@@ -383,6 +383,120 @@ finishers**: its hit callback's vtable slot (`cage_hit_callback`, `cage::callbac
 6. Combat = Re:CoM: as before (cards; 250 between attacks; finishers and Fire may make it faint;
    no `Parasite Cage` lines in battle).
 
+## Oogie Boogie
+
+Owner (2026-11-03, "Oogie Boogie" in `design-philosophy-instructions.md`): **"oogie boogie is
+impossible to defeat. you're supposed to break one of his attacks which lowers a gate where you
+can hit him. can we make it so that if he uses the attack that you're supposed to break twice
+without being broken, the gate lowers?"**, then corrected: the ask re-sent without "twice", and
+**"After once"**: each time the attack ends unbroken, the gate lowers. At Combat = KH1 in Sora's
+story (the battle decision of P1); Combat = Re:CoM and Riku's story unchanged. Code:
+`crate::battle::oogie` (rule, tests), `win/battle.rs` (`attack_end` → `oogie_after_end`,
+`oogie_broken_begin`, `install_oogie`); sites `OOGIE_CHECKED`, `OOGIE_PTRS`, `OOGIE_BROKEN_SLOT`.
+
+### Re:CoM's Oogie Boogie fight (Checked (decomp + exe) unless tagged)
+
+- **His class** `CBossBoogie` (vtable `0x140670A60`, RTTI checked at start). States (slot
+  `+0xE8 + 0x18·s`): 0 the scripted start (`0x1403D7740` / `0x1403D9250`), 1 idle and moves
+  (`0x1403D7EE0` / `0x1403D9E70`), **2 the dice throw** (begin `0x1403D7830`, step `0x1403D9340`),
+  3 another throw (`0x1403D7880` / `0x1403D9510`; dice with `+0xCB8` = 1), 4..8 his other attacks (knives `0x1403D78C0`,
+  saws `0x1403D7900`, Heartless `0x1403D7940`, healing `0x1403D7980`, a close attack `0x1403D7A00`;
+  meanings from their parameter names and objects: Assumption), **13 the card-break stagger**
+  (begin `0x1403D7A40`), 30 the defeat. Think `+0x3D0` = `0x1403D74A0`. Handler `+0x48` =
+  Re:CoM's base `0x140181620`.
+- **The attack to break is state 2, his dice throw.** Its begin sets the mark `+0xCD8 |= 1`
+  (motion 0x33); its step throws three dice (`CBossBoogieDice`, kind 0xC id 0xD1, `0x1403D7110`, at
+  motion frame 0xED8; it also rolls the result `+0xCE0` from the `Dice1..Dice6` weights) and ends
+  through Re:CoM's attack end `0x14017E540(boss, 0, 6000)` at `0x1403D9402` (its only call) once a
+  die has landed (`+0xC88 & 2`) or all are gone, or after his stomp (the low-HP variant, `+0xCD8 &
+  0x20`, `0x1403D5B70`). Unbroken, his state 1 then plays his reaction to the roll (motion 0x37) and
+  his think picks the roll's attack (states 5 / 6 / 4 / 7). His state 1 begin clears the mark.
+- **What a break does** (state 13 begin `0x1403D7A40`): the stagger (`0x14017BAA0`), then, only
+  while the mark is set: the dice (thrown now if none is out) marked `+0xC88 |= 0x41` (such a die
+  can drop his gimmick card when destroyed, `GMCPar` %, `0x1403D7C90`), and **the gate's count**
+  `*(boss+0xD10)+0x2E0` + 1, at most 3. At 3: his down time `+0xCF8` = `HDownTime`, `+0x260 &=
+  ~0x2000` (Assumption: the bit that keeps him from being hurt; it is set again when he jumps
+  back), `+0x154 |= 0x10000`. The mark is cleared. **No other attack's break touches the gate.**
+- **The gate** (Assumption: object id 0x28D is `CGimmickBBGHedge`, vtable `0x140671318`: its step
+  `0x1403DA7C0` is the only reader of `+0x2E0` against its shown step `+0x2E4`): each count above
+  the shown step lowers it one step (motions 2, 3, 4); after the third its collision goes off
+  (`0x1401A64B0(hedge, 0)`): the way to him is open. **So Re:CoM needs three breaks** (or his
+  gimmick card, `0x1403D8FA0`: count + 3 at once, his down time plus a bonus by the shown step, and
+  he plays motions 0x46 / 0x47 for it: Assumption, a stun). Count back to 0: Sora is pushed out (z ≥ −7.5), collision on, the gate rises (motion 5).
+- **The gate rises** when his down time runs out (counted down by his update `0x1403DB770`): he
+  jumps back with a shockwave (`0x1403D9E70` case 5 → `0x1403D5B70` step 5 sets the count to 0,
+  unless Sora's action is 0x20 that frame), and at the fight's scripted start (event variable 0xE1
+  = 4). While the gate is down (shown step ≥ 3) his think throws no dice (only his close attack).
+- **How often he throws**: idle, no dice out and no roll pending: 4 in 5 a state 2, 1 in 5 a state
+  3 (`rand % 5`), while none of his summoned Heartless is alive; with some alive, state 3 (or
+  nothing right after his Heartless attack). After an unbroken throw, the roll's attack first.
+- **At Combat = KH1 before this change** (Checked (code)): nothing breaks him. Sora plays no cards
+  (decision 29), and our KH1 break triggers (finisher interrupt, Guard block) and the HP drops are
+  for the five card-break bosses only (`win::gimmick`, by vtable: `gimmick::BREAK_BOSSES`). His
+  dice could still drop no card (only marked dice do), so the gate never lowered: the owner's
+  "impossible to defeat".
+
+### Built
+
+- **Where**: the attack-end wrapper (`0x14017E540`, § Attack-end cooldown), after Re:CoM's call, in
+  a KH1 battle, for Oogie's vtable only: his current state (`+0x60`) is state 2 (the only caller
+  there is his step's `0x1403D9402`), the attack really ended (`+0x260 & 1` clear: not Re:CoM's
+  enchant-0x72 repeat), HP above 0, the gate object present, the mark set, the gate not already
+  down (count < 3).
+- **The count**: each such end counts one unbroken throw; at `oogie::THROWS_TO_LOWER` (1, the
+  owner's "once") the break runs and the count starts again. It also starts again at any state-13
+  begin (a real break or ours) and in a new battle. With 1 nothing is ever carried over.
+- **The break: Re:CoM's own.** His message handler (`+0x48` = `0x140181620`, checked) is called with
+  **message 3 and no record**, as CBTL's message manager delivers a broken card (the five bosses'
+  triggers post the same message; here it is called at once, because a posted message would arrive
+  after his state 1 begin cleared the mark: Assumption on the order, not traced). Its case 3
+  (`0x140181739`, checked): `+0x418` (a `ret` for him), `+0x260 &= ~0x201`, his attack collision
+  ends, `+0x260 &= ~0x10`, next state 13 over the attack end's state 1. So his state 2 goes
+  straight to his state-13 begin with the mark still set, and **Re:CoM's begin does all of it**:
+  the stagger, the dice marked (a card may drop from them), the gate one step down, the down time
+  at the third. Nothing of his is written by us.
+- **What differs from a break in a card battle**: there a break comes while the throw plays (the
+  card clash), so the roll's attack never follows. Here the throw has played out unbroken, so its
+  roll's reaction and attack still follow the stagger (his state 1 reads `+0xCD8 & 2`, which state
+  13 leaves). The owner's rule: the attack was used.
+- **His state-13 slot** (`+0x220`, `0x140670C80`, old pointer `0x1403D7A40` checked; no code bytes
+  move) holds `win::battle::oogie_broken_begin`, which calls Re:CoM's begin as is and logs what it
+  did to the gate (the count before and after, the down time). Combat = Re:CoM: Re:CoM's, no line.
+- **Per frame**: nothing. Per attack end of any enemy in a KH1 battle: one load and compare (his
+  vtable); for him a few reads. Once per break: the handler call and the begin's log.
+- **Logs** (`oogie (battle n): …`, at most 100 a battle): `his dice throw (state 2) ended unbroken
+  (1 of 1): Re:CoM's card break (his handler, message 3 → state 13) … (count c of 3, shown step s)`;
+  then `state 13 (card break, ours (an unbroken throw)): Re:CoM's state-13 begin lowered the gate:
+  count c -> c+1 of 3` (at 3: `the gate is down: his down time …, he can be hit`). `… with the gate
+  already down …: nothing to lower`; `… did not take message 3 …` if his handler refused it. At
+  start: `m6: Oogie Boogie (CBossBoogie 0x140670A60) checked, …` or `… not as read …`.
+
+### Not checked / Assumptions
+
+- Nothing seen in game. `HDownTime`, the `BonusTime`s, `GMCPar` and the dice weights are in his
+  parameter file, not in this session.
+- Assumption: object 0x28D is the gate (`CGimmickBBGHedge`); its motions 2 / 3 / 4 are its three
+  visible steps; Sora can only pass after the third (its collision; partial steps keep it on).
+- Assumption: `+0x260 & 0x2000` is what keeps him from being hurt (set at his start and when he
+  jumps back, cleared at the third step and by his gimmick card).
+- Assumption: a posted message 3 would arrive after his state switch (why the handler is called at
+  once); the stagger's look with no record (`+0x308`) is the five bosses' (`0x14017BAA0`).
+- KH1's own Oogie fight is not this fight (KH1 has no gate): this is the owner's rule, not a KH1
+  number.
+
+### Owner test
+
+1. Combat = KH1, Halloween Town, Oogie Boogie: let him throw his dice (the throw that ends with three
+   dice landing). When it ends, he staggers and the gate goes down one step. Log: the `ended
+   unbroken (1 of 1): Re:CoM's card break` line, then `count 0 -> 1 of 3`.
+2. After his roll's attack, let him throw again, twice more: the gate goes down a step each time;
+   after the third it is open (`count 2 -> 3 of 3 …; the gate is down`). Walk up to him and hit him.
+3. When his down time ends he jumps back with a shockwave and the gate rises, pushing you out; the
+   next throws lower it again.
+4. Break a die that he threw (from a staggered throw) to see if his gimmick card drops (Re:CoM's
+   chance); picked up and used (Stagger), the gate opens at once and he is stunned.
+5. Combat = Re:CoM: as before (break his dice card three times; no `oogie` lines).
+
 ## Logs and trace
 
 - Start: `m6: wrappers in (…)`.

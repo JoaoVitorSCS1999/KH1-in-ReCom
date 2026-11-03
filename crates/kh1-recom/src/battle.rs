@@ -17,6 +17,7 @@
 
 pub mod cage;
 pub mod end;
+pub mod oogie;
 pub mod pace;
 
 /// Re:CoM's enemy (`CBattleEnemy`) fields this stage reads or writes. Checked (decomp

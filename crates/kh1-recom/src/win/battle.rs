@@ -284,6 +284,133 @@ pub unsafe extern "win64" fn attack_end(e: usize, next: usize, cooldown: i32) {
             class_once(e, 3, |_| b::pace::class_line(cd));
         }
     }
+    if is_oogie(vt) {
+        oogie_after_end(e);
+    }
+}
+
+/// Oogie's vtable (absolute), once [`install_oogie`] checked it and wrote his state-13 slot; 0: he
+/// stays Re:CoM's at KH1.
+static OOGIE_VT: AtomicUsize = AtomicUsize::new(0);
+/// His Re:CoM state-13 begin (`0x1403D7A40`, absolute).
+static OOGIE_BROKEN_BEGIN: AtomicUsize = AtomicUsize::new(0);
+/// Unbroken dice throws since the last break, and the battle they were counted in.
+static OOGIE_COUNT: AtomicU32 = AtomicU32::new(0);
+static OOGIE_BATTLE: AtomicU32 = AtomicU32::new(0);
+/// The boss we just sent Re:CoM's card break (his state-13 begin then reads it as ours).
+static OOGIE_SENT: AtomicUsize = AtomicUsize::new(0);
+/// Oogie's lines this battle (capped).
+static OOGIE_LINES: AtomicU32 = AtomicU32::new(0);
+const OOGIE_LOG_LINES: u32 = 100;
+
+type MessageFn = unsafe extern "win64" fn(usize, i32, usize);
+type BeginFn = unsafe extern "win64" fn(usize);
+
+fn is_oogie(vt: usize) -> bool {
+    let o = OOGIE_VT.load(Ordering::Relaxed);
+    o != 0 && vt == o
+}
+
+fn oogie_line(line: impl FnOnce(u32) -> String) {
+    let n = BATTLE_NO.load(Ordering::Relaxed);
+    if OOGIE_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |k| (k < OOGIE_LOG_LINES).then_some(k + 1)).is_ok() {
+        log(&line(n));
+    }
+}
+
+/// The unbroken throws counted this battle (0 in a new battle).
+fn oogie_count() -> u32 {
+    let n = BATTLE_NO.load(Ordering::Relaxed);
+    if OOGIE_BATTLE.swap(n, Ordering::Relaxed) != n {
+        OOGIE_COUNT.store(0, Ordering::Relaxed);
+    }
+    OOGIE_COUNT.load(Ordering::Relaxed)
+}
+
+/// After Re:CoM's attack end on Oogie in a KH1 battle (`crate::battle::oogie`, owner 2026-11-03):
+/// his dice throw (state 2) ended unbroken → once [`oogie::THROWS_TO_LOWER`] are counted, Re:CoM's
+/// own card break: his message handler (`+0x48`, Re:CoM's base `0x140181620`, checked) with message 3
+/// and no record, as CBTL's message manager delivers a broken card. Its case 3 sets his next state to
+/// 13 over the attack end's state 1, so his state 2 goes straight to his state-13 begin with state
+/// 2's mark still set, and Re:CoM's begin lowers the gate. Once per attack end: a few reads.
+unsafe fn oogie_after_end(e: usize) {
+    use crate::battle::oogie as oo;
+    let gate_obj: usize = rd(e + oo::GATE_OFF);
+    let gate: i32 = if gate_obj != 0 { rd(gate_obj + oo::GATE_COUNT) } else { 0 };
+    let end = oo::End {
+        kh1_battle: true,
+        oogie: true,
+        dice_state: rd::<usize>(e + enemy::STATE) == e + crate::gimmick::state_at(oo::DICE_STATE),
+        ended: rd::<u64>(e + enemy::FLAGS) & b::bits::PLAYING == 0,
+        alive: rd::<i32>(e + enemy::HP) > 0 && gate_obj != 0,
+        marked: rd::<u32>(e + oo::MARK_OFF) & oo::MARK_BIT != 0,
+        gate,
+    };
+    let (count, step) = oo::after_end(end, oogie_count());
+    OOGIE_COUNT.store(count, Ordering::Relaxed);
+    let shown: i32 = if gate_obj != 0 { rd(gate_obj + oo::GATE_SHOWN) } else { 0 };
+    match step {
+        oo::Step::Pass => {}
+        oo::Step::Count(n) => oogie_line(|b| oo::count_line(b, n, gate)),
+        oo::Step::Down => oogie_line(|b| oo::down_line(b, gate)),
+        oo::Step::Break => {
+            let handler: MessageFn = std::mem::transmute(rd::<usize>(rd::<usize>(e) + enemy::VT_MESSAGE));
+            OOGIE_SENT.store(e, Ordering::Relaxed);
+            handler(e, oo::BREAK_MESSAGE, 0);
+            let sent = rd::<usize>(e + enemy::NEXT_STATE) == e + crate::gimmick::state_at(oo::BROKEN_STATE);
+            if !sent {
+                OOGIE_SENT.store(0, Ordering::Relaxed);
+            }
+            oogie_line(|b| oo::break_line(b, gate, shown, sent));
+        }
+    }
+}
+
+/// Oogie's state-13 begin slot (`+0x220`, ours since [`install_oogie`]): Re:CoM's `0x1403D7A40` as
+/// is, with a log line of what it did to the gate in a KH1 battle, and the count of unbroken throws
+/// started again (a real break or ours). Once per card break.
+pub unsafe extern "win64" fn oogie_broken_begin(e: usize) {
+    use crate::battle::oogie as oo;
+    let theirs: BeginFn = std::mem::transmute(OOGIE_BROKEN_BEGIN.load(Ordering::Acquire));
+    if !KH1_BATTLE.load(Ordering::Acquire) {
+        return theirs(e);
+    }
+    let ours = OOGIE_SENT.swap(0, Ordering::Relaxed) == e;
+    let marked = rd::<u32>(e + oo::MARK_OFF) & oo::MARK_BIT != 0;
+    let gate_obj: usize = rd(e + oo::GATE_OFF);
+    let before: i32 = if gate_obj != 0 { rd(gate_obj + oo::GATE_COUNT) } else { 0 };
+    theirs(e);
+    let after: i32 = if gate_obj != 0 { rd(gate_obj + oo::GATE_COUNT) } else { 0 };
+    let down: f32 = rd(e + oo::DOWN_TIME_OFF);
+    OOGIE_COUNT.store(oo::after_break(ours, oogie_count()), Ordering::Relaxed);
+    oogie_line(|b| oo::broken_line(b, ours, marked, before, after, down));
+}
+
+/// Checks Oogie's vtable by its RTTI name, the Re:CoM code the rule relies on and his slots, then
+/// writes his state-13 begin slot with [`oogie_broken_begin`] (old pointer checked; no code bytes
+/// move). Needs the attack-end wrapper ([`install_pace`]). Without it he stays Re:CoM's at KH1.
+pub fn install_oogie(bs: usize) -> bool {
+    use crate::battle::oogie as oo;
+    let vt = bs + oo::VTABLE as usize;
+    // SAFETY: reads of the mapped exe's vtable, its RTTI locator and the checked sites.
+    let ok = unsafe { super::stats::rtti_name(bs, vt) }.as_deref() == Some(oo::RTTI)
+        && crate::sites::OOGIE_CHECKED.iter().all(|s| unsafe { std::slice::from_raw_parts((bs + s.rva as usize) as *const u8, s.expect.len()) } == s.expect)
+        && crate::sites::OOGIE_PTRS.iter().all(|p| unsafe { rd::<usize>(bs + p.rva as usize) } == bs + p.target as usize);
+    if !ok {
+        return false;
+    }
+    let p = crate::sites::OOGIE_BROKEN_SLOT;
+    let theirs = bs + p.target as usize;
+    OOGIE_BROKEN_BEGIN.store(theirs, Ordering::Release);
+    let ours = oogie_broken_begin as *const () as usize;
+    // SAFETY: the slot's old pointer is checked inside before the write.
+    if unsafe { super::hook::patch(bs + p.rva as usize, &(theirs as u64).to_le_bytes(), &(ours as u64).to_le_bytes(), p.name) } {
+        OOGIE_VT.store(vt, Ordering::Release);
+        true
+    } else {
+        OOGIE_BROKEN_BEGIN.store(0, Ordering::Release);
+        false
+    }
 }
 
 /// The Parasite Cage's vtable (absolute), once its RTTI name was checked ([`install_cage`]); 0: not
@@ -451,6 +578,7 @@ pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: us
     BOSS_BATTLE_LINES.store(0, Ordering::Relaxed);
     SIDE2_CARDS.store(0, Ordering::Relaxed);
     END_LINES.store(0, Ordering::Relaxed);
+    OOGIE_LINES.store(0, Ordering::Relaxed);
     capped(&BATTLE_LINES, b::BATTLE_LOG_LINES, || {
         format!(
             "battle start (battle {battle}): {}; no-card attacks (P1) {}; think gate (P2) and grant all (P3): {}; crowd pace (P4): {}; Sora attacking for bosses (P5): {}",

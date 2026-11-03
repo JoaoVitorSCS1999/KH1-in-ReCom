@@ -267,6 +267,14 @@ card).
 - Assumption: Re:CoM's `atan2f` (`0x1404E5898`) and Rust's agree; the random draws match the boss's
   in kind, not in sequence (ours draw from the same generator at another time).
 
+### Oogie Boogie's card break (owner, 2026-11-03)
+
+Oogie is not one of the five: no KH1 trigger breaks him. Instead, at Combat = KH1 each dice throw
+(his state 2) that ends unbroken gets Re:CoM's card break (his handler, message 3 → state 13;
+`recom-m6-battles.md` § Oogie Boogie): his state-13 begin lowers the gate one step and marks the
+dice out (`+0xC88 |= 0x41`), so destroying one of them may now drop his gimmick card (`GMCPar` %,
+his dice defeat `0x1403D7C90`), which the pickup and Stagger above then handle.
+
 ## 5. Sites (`sites::GIMMICK_*`, bytes from the Steam exe, pefile-checked)
 
 - Hook: prize factory `0x1401A89C0` (moved here from `DROP_CALLEES`).
