@@ -346,4 +346,16 @@ pub trait Behaviour {
     /// `sys 42`: KH1's push slide along `dir`, the push direction; the fliers: their counts and their hit
     /// state, no push), no reaction; the action goes on. [`Behaviour::set_hit_kind`] has given its kind.
     fn on_armoured_hit(&self, _dir: Vec3) {}
+    /// Read after [`Behaviour::on_armoured_hit`]: KH1's script hit handler cleared actor flag 4 (`*actor &= ~4`,
+    /// the action the script waits on ends at once) and asked for a state, so the next behaviour runs now instead
+    /// of after the action's motion (M11, the Large Body's rage at `0x2386`: `sys 42`, then the flag cleared and
+    /// its hit state). The host ends the action (its Re:CoM attack state through Re:CoM's attack end) and polls
+    /// the AI next frame. Taken once. Checked (files + decomp: `0x140297870` gates the script on flag 4).
+    fn ends_action(&self) -> bool {
+        false
+    }
+    /// The request playing when a hit record reaches the script's hit handler (KH1's `sys 51`, `+0x164`; the
+    /// host's current motion, which the AI's own last frame may not know while an action plays), before
+    /// [`Behaviour::on_hit`] / [`Behaviour::armoured`]. M11, the Large Body's charge test `0x21F6`.
+    fn set_playing(&self, _request: Option<u16>) {}
 }

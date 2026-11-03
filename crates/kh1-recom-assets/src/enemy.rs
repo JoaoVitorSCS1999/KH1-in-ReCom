@@ -545,6 +545,36 @@ pub fn extend_ses(ses: &[u8], asd: &[u8], ms: &MotionSet, clips: &[RequestClip],
     Ok(crate::ses::write(&entries))
 }
 
+/// A ring's clip ([`RINGS`]) with its template record's sounds, moved by (the ring's start − Re:CoM's window
+/// start), a frame-0 sound kept at 0; nothing when the matcher already gave the clip its Re:CoM twin's sounds.
+fn ring_sounds(ses: &[u8], asd: &[u8], clips: &[RequestClip], pairs: &[(String, String)], request: u16, rec: [u8; REC]) -> Result<Vec<u8>> {
+    let mut entries = crate::ses::parse(ses)?;
+    let c = clips.iter().find(|c| c.request == request).ok_or_else(|| crate::Error::Format(format!("request {request} has no clip")))?;
+    if c.source == "recom" || pairs.iter().any(|p| p.0 == c.name) || entries.iter().any(|e| e.name() == c.name) {
+        return Ok(ses.to_vec());
+    }
+    let id = u32::from_le_bytes(rec[0x64..0x68].try_into().unwrap());
+    let Some((tm, t_on)) = template_of(asd, id) else { return Ok(ses.to_vec()) };
+    let Some(src) = entries.iter().find(|e| e.name() == tm).cloned() else { return Ok(ses.to_vec()) };
+    let on = u32::from_le_bytes(rec[0x5C..0x60].try_into().unwrap()) as f32 / 50.0;
+    let events = src
+        .events
+        .iter()
+        .map(|e| {
+            let f = i32::from_le_bytes(e[0x18..0x1C].try_into().unwrap());
+            let mut e = *e;
+            if f != 0 {
+                e[0x18..0x1C].copy_from_slice(&((f as f32 - t_on + on).round().max(0.0) as i32).to_le_bytes());
+            }
+            e
+        })
+        .collect();
+    let mut h = src.head;
+    h[..16].copy_from_slice(&name16(&c.name));
+    entries.push(crate::ses::Entry { head: h, events });
+    Ok(crate::ses::write(&entries))
+}
+
 fn fmt_f(v: f32) -> String {
     let s = format!("{v}");
     if s.contains('.') || s.contains('e') || s.contains("inf") || s.contains("NaN") {
@@ -599,8 +629,16 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
             }
         }
     }
-    let (mut asd, records) = extend_asd(&inp.asd, spec.asd, &conv, &ms, &new, &clips)?;
+    let (mut asd, mut records) = extend_asd(&inp.asd, spec.asd, &conv, &ms, &new, &clips)?;
+    // M11 (the Large Body's stomp): a child ring on Re:CoM's own shockwave record.
+    let rings = ring_records(spec.name, script, &inp.asd, &clips, &consts)?;
+    add_records(&mut asd, &rings.iter().map(|r| r.1).collect::<Vec<_>>())?;
+    records.extend(rings.iter().map(|r| r.4.clone()));
     let mut ses = extend_ses(&inp.ses, &inp.asd, &ms, &clips, &pairs, &sound_rows)?;
+    for r in &rings {
+        // The ring's clip takes its Re:CoM template's sounds at the ring's start (no HIT track on its motion).
+        ses = ring_sounds(&ses, &inp.asd, &clips, &pairs, r.0, r.1)?;
+    }
     let (mut ann, mut clips) = (ann, clips);
     apply_starts(spec.name, &ms, &conv, &mut ann, &mut clips, &mut asd, spec.asd.0, &mut ses)?;
     let parts = hurt_parts(&inp.mdls, &conv)?;
@@ -613,6 +651,15 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     // checked below).
     let mut attacks = Vec::new();
     for a in spec.attacks {
+        if a.rows.is_empty() {
+            // A ring's attack ([`RINGS`]): its row's recoil (KH1's clash on the child's row goes to its owner).
+            let Some(r) = rings.iter().find(|r| r.0 == a.request) else { return bad(format!("{}: no rows and no ring", a.name)) };
+            if !clips.iter().any(|c| c.request == a.request) {
+                return bad(format!("{}: request {} has no motion", a.name, a.request));
+            }
+            attacks.push((a.name, a.request, r.2, vec![r.3]));
+            continue;
+        }
         let rs: Vec<u32> = a.rows.iter().map(|r| row_of(r.at).1.recoil & 0xFFFF).collect();
         if rs.iter().any(|&x| x != rs[0]) {
             return bad(format!("{}: its rows' clash recoils differ ({rs:?})", a.name));
@@ -691,8 +738,94 @@ pub struct GuardSpec {
     /// burst: both hands at both strikes). Re:CoM's body guard is the whole body, so they act as one row,
     /// on while any of their slots is on: their clash numbers must equal `row`'s.
     pub also: &'static [usize],
-    /// The requests it is made with.
+    /// The requests it is made with; none for a row KH1 makes with mode 3 (`sys 213(row, 3)`: `0x1402B47A0`
+    /// tests it every frame, whatever plays, until it is removed; the Large Body's front, M11).
     pub requests: &'static [u16],
+}
+
+/// A KH1 child object that is an expanding ring on the floor (M11, the Large Body's stomp `ex_2050_00.bd`: made
+/// by `sys 94` at the stomp's frame `ring_at` with the parent's row `row`; each frame for `ring_life` frames it hits
+/// every party member standing `[r − ring_band, r)` from where it was made and within `ring_height` of its height,
+/// then grows `r` by `ring_growth`; Checked (files: the child disassembled; decomp: `sys 23` / `sys 60`)). Built on
+/// **Re:CoM's own shockwave**: a copy of the Re:CoM record with attack id `recom_id` (its Large Body's
+/// `e009_053` circle, Re:CoM's type 11 `CCircleCollision` at its root, the record Re:CoM's state 3 grows each frame
+/// through `0x14014E5C0`) bound to the KH1 request's clip, on for the ring's frames; the DLL grows its radius by
+/// KH1's numbers (`win::kh1_enemy::ring_step`).
+pub struct RingSpec {
+    /// The enemy (the spec's `name`).
+    pub enemy: &'static str,
+    /// The request the ring is made during (the attack's, [`AttackSpec::request`]).
+    pub request: u16,
+    /// The parent's row the child's attack is made with (`sys 94`'s fourth word).
+    pub row: usize,
+    /// The Re:CoM attack id whose record (shape, place) and power it takes.
+    pub recom_id: u32,
+}
+
+/// The rings (checked against the scripts: `ex_2050.bd` `0xA68` passes `0x31C` to `sys 94`; its child's
+/// `0x330` makes it). The Large Body's ring takes Re:CoM's stomp shockwave (id 1).
+pub const RINGS: &[RingSpec] = &[RingSpec { enemy: "largebody", request: 230, row: 0x31C, recom_id: 1 }];
+
+/// Re:CoM's shape index of a type 11 `CCircleCollision` (`0x1407C1C98`: indices 0..4 → types 1, 2, 7, 8, 11;
+/// Checked (exe)).
+const CIRCLE_SHAPE: u32 = 4;
+
+/// [`RINGS`]' records of an enemy: (the record, its recoil, its row, a log line). The record is the Re:CoM
+/// template's (its shape must be the circle), on the request's clip, radius 0, on for frames
+/// `[ring_at, ring_at + ring_life)`.
+fn ring_records(name: &str, script: &[u8], asd: &[u8], clips: &[RequestClip], consts: &[(String, f32)]) -> Result<Vec<(u16, [u8; REC], u32, usize, String)>> {
+    let get = |n: &str| consts.iter().find(|c| c.0 == n).map(|c| c.1).ok_or_else(|| crate::Error::Format(format!("{name}: no {n} for its ring")));
+    let u = |o: usize| asd.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).ok_or_else(|| crate::Error::Format("ASD: short".into()));
+    let mut out = Vec::new();
+    for r in RINGS.iter().filter(|r| r.enemy == name) {
+        let row = script.get(r.row..r.row + 0x70).ok_or_else(|| crate::Error::Format(format!("{name}: no ring row {:#x}", r.row)))?;
+        if !crate::stats::pushes_address(script, r.row as u32) || i32::from_le_bytes(row[0x10..0x14].try_into().unwrap()) != -1 {
+            return bad(format!("{name}: row {:#x} is not the ring's (pushed, bone −1)", r.row));
+        }
+        let recoil = u32::from_le_bytes(row[0x40..0x44].try_into().unwrap()) & 0xFFFF;
+        let (n, off) = (u(0x10)? as usize, u(0x14)? as usize);
+        let tmpl = (0..n).map(|i| &asd[off + REC * i..off + REC * (i + 1)]).find(|x| u32::from_le_bytes(x[0x64..0x68].try_into().unwrap()) == r.recom_id).ok_or_else(|| crate::Error::Format(format!("{name}: no Re:CoM record with attack id {}", r.recom_id)))?;
+        let shape = u32::from_le_bytes(tmpl[0x54..0x58].try_into().unwrap());
+        if shape != CIRCLE_SHAPE {
+            return bad(format!("{name}: Re:CoM's record {} has shape {shape}, not the circle {CIRCLE_SHAPE}: not the record this step knows", r.recom_id));
+        }
+        let c = clips.iter().find(|c| c.request == r.request).ok_or_else(|| crate::Error::Format(format!("{name}: request {} has no clip", r.request)))?;
+        let (at, life) = (get("ring_at")?, get("ring_life")?);
+        if !(at >= 0.0 && life > 0.0 && at < c.frames as f32) {
+            return bad(format!("{name}: ring frames {at} + {life} on a {}-frame motion", c.frames));
+        }
+        let mut rec: [u8; REC] = tmpl.try_into().unwrap();
+        put_name(&mut rec, 0x40, &c.name);
+        put_u32(&mut rec, 0x50, u32::MAX);
+        put_f32(&mut rec, 0x58, 0.0);
+        put_u32(&mut rec, 0x5C, (at * 50.0).round() as u32);
+        put_u32(&mut rec, 0x60, ((at + life) * 50.0).round() as u32);
+        let line = format!("{} (request {}) Re:CoM's circle record {} (its root), radius grown by KH1's ring from 0, frames {at}..{}", c.name, r.request, r.recom_id, at + life);
+        out.push((r.request, rec, recoil, r.row, line));
+    }
+    Ok(out)
+}
+
+/// Re:CoM's ASD with `recs` added after its last record (the trailing section moved after them, its count and
+/// tail offset updated, as [`extend_asd`] does).
+fn add_records(asd: &mut Vec<u8>, recs: &[[u8; REC]]) -> Result<()> {
+    if recs.is_empty() {
+        return Ok(());
+    }
+    let u = |d: &[u8], o: usize| u32::from_le_bytes(d[o..o + 4].try_into().unwrap()) as usize;
+    let (n, off, tail) = (u(asd, 0x10), u(asd, 0x14), u(asd, 0x18));
+    if off + REC * n != tail || tail > asd.len() {
+        return bad("ASD: records and tail don't meet");
+    }
+    let rest = asd.split_off(tail);
+    for r in recs {
+        asd.extend_from_slice(r);
+    }
+    let new_tail = asd.len();
+    asd.extend_from_slice(&rest);
+    asd[0x10..0x14].copy_from_slice(&((n + recs.len()) as u32).to_le_bytes());
+    asd[0x18..0x1C].copy_from_slice(&(new_tail as u32).to_le_bytes());
+    Ok(())
 }
 
 /// Every built enemy's guard rows, in its behaviour's order (`kh1_core::bandit::Guard::ALL`).
@@ -708,6 +841,10 @@ pub const GUARDS: &[GuardSpec] = &[
     // The Pirate's `ex_2100.bd` makes `0x1CC` at `0x1156` (then 217) and `0x46C` at `0xAB4` (after 208).
     GuardSpec { enemy: "pirate", name: "spin", row: 0x1CC, also: &[], requests: &[217] },
     GuardSpec { enemy: "pirate", name: "stance", row: 0x46C, also: &[], requests: &[208] },
+    // The Large Body's `ex_2050.bd` makes `0x38C` at `0x9F2` (`0x9CA`, at init and after each charge) with
+    // `sys 213(row, 3)`: mode 3, on every frame until `sys 213(row, 0)` removes it (`0x9B8`, at the charge's
+    // start): no request, no HIT slot ([`GuardSpec::requests`] empty; `kh1_core::enemy::guard::ALWAYS`).
+    GuardSpec { enemy: "largebody", name: "front", row: 0x38C, also: &[], requests: &[] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).
@@ -759,7 +896,9 @@ pub fn guard_rows(enemy: &str, script: &[u8], ms: &MotionSet, clips: &[RequestCl
         if !(1..=4).contains(&clash_type) || !(0..=100).contains(&priority) {
             return bad(format!("{enemy}: row {:#x} is not a guard row (type {clash_type}, priority {priority})", g.row));
         }
-        if !clips.iter().any(|c| c.request as u32 == recoil) {
+        // A row at priority 100 is never moved (`0x1402B4BC0` returns before any record for its own side): its
+        // recoil never plays, so the model needn't have it (the Large Body's front row names 110).
+        if priority != 100 && !clips.iter().any(|c| c.request as u32 == recoil) {
             return bad(format!("{enemy}: guard row {:#x}'s recoil {recoil} has no motion", g.row));
         }
         if !(turn.is_finite() && cos.is_finite() && (-1.0..=1.0).contains(&cos)) {
@@ -1023,7 +1162,11 @@ pub fn child_script(mdls: &[u8], idx: usize) -> Result<&[u8]> {
 
 /// Numbers a behaviour reads from one of its model's child scripts (M11): (enemy, sub-object, script name,
 /// constants as [`Spec::consts`]). The Search Ghost's cone `ex_2230_00.bd` (`crate::searchghost`).
-pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usize)])] = &[("searchghost", 0, b"ex_2230_00.bd", crate::searchghost::CHILD_CONSTS, crate::searchghost::CHILD_REQUESTS)];
+pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usize)])] = &[
+    ("searchghost", 0, b"ex_2230_00.bd", crate::searchghost::CHILD_CONSTS, crate::searchghost::CHILD_REQUESTS),
+    // The Large Body's stomp ring `ex_2050_00.bd` (`crate::largebody`, [`RINGS`]).
+    ("largebody", 0, b"ex_2050_00.bd", crate::largebody::CHILD_CONSTS, crate::largebody::CHILD_REQUESTS),
+];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
     let mut out = Vec::new();
@@ -1079,4 +1222,4 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC];

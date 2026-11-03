@@ -30,6 +30,12 @@ pub fn is_guard_type(t: u32) -> bool {
     (1..=4).contains(&t)
 }
 
+/// The request a guard row made with KH1's mode 3 is "made with" (`sys 213(row, 3)`, `0x1402BBC10` writes the
+/// mode to the object's bits 2..3; `0x1402B47A0` tests a mode-3 row every frame without looking at the owner's
+/// request or HIT slots, until `sys 213(row, 0)` removes it; Checked (decomp)). M11, the Large Body's front row.
+/// Such a row's manifest entry has no windows.
+pub const ALWAYS: u16 = u16::MAX;
+
 /// A side of 100 is never moved (`0x1402B4BC0`: `a.priority == 100` → 0x10, no record).
 pub const UNMOVED: i32 = 100;
 /// Clashes happen only while one side is under 98 (`0x1402B4BC0`'s first test).
@@ -95,12 +101,23 @@ impl GuardRow {
     /// Whether the row is on at KH1 frame `t` of request `r`'s motion (`0x1402B47A0`: the slot's
     /// bit, `+0x1CC & 0x10000 << slot`). False for a request that doesn't make it.
     pub fn live(&self, r: u16, t: f32) -> bool {
+        if r == ALWAYS {
+            return self.always();
+        }
         self.windows.iter().find(|w| w.0 == r).is_some_and(|w| w.1.iter().any(|&(a, b)| a <= t && t < b))
     }
 
-    /// Whether the row's request list holds `r`.
+    /// Whether the row's request list holds `r` (a mode-3 row: [`ALWAYS`]).
     pub fn made_with(&self, r: u16) -> bool {
+        if r == ALWAYS {
+            return self.always();
+        }
         self.windows.iter().any(|w| w.0 == r)
+    }
+
+    /// A row KH1 makes with mode 3 ([`ALWAYS`]): no request makes it, so its manifest entry has no windows.
+    pub fn always(&self) -> bool {
+        self.windows.is_empty()
     }
 
     /// The front cone as a half angle about the facing (radians), when the row's cone is centred on
@@ -194,6 +211,24 @@ mod tests {
         assert!(b.front(0.0, Vec3::new(0.0, 0.0, 100.0)), "exactly ahead, level");
         assert!(b.live(204, 36.0) && !b.live(204, 48.0) && b.live(204, 117.0) && !b.live(204, 60.0));
         assert_eq!(b.half_angle(), Some(0.0));
+    }
+
+    /// The Large Body's front row (the player's `ex_2050.bd` `0x38C`: type 1, priority 100, recoil 110, cone turn 0 /
+    /// cos 0.34202 = 70°, mode 3): on whatever plays; against the Kingdom Key's 30 Sora gets kind 7 (70 under) and
+    /// the Large Body nothing (a side at 100 is never moved); a 98+ swing meets no clash at all.
+    #[test]
+    fn the_large_body_front_row() {
+        let f = GuardRow { name: "front".into(), clash_type: 1, priority: 100, recoil: 110, turn: 0.0, cos: 0.342_02, windows: vec![], rows: 1 };
+        assert!(f.always() && f.live(ALWAYS, 0.0) && f.made_with(ALWAYS) && !f.live(200, 10.0) && !f.made_with(200));
+        assert_eq!(f.clash(0, 30), Some((Side::Clash { kind: 7, diff: -70 }, Side::None)));
+        assert_eq!(f.clash(0, 98), Some((Side::None, Side::None)));
+        assert_eq!(f.clash(5, 30), None, "magic (type 5) never meets a type-1 row");
+        let half = f.half_angle().unwrap();
+        assert!((half.to_degrees() - 70.0).abs() < 0.01, "{}", half.to_degrees());
+        // Facing +z: ahead and 60° off pass; 80° off and behind don't; a Sora 2 m ahead and 2 m above is 45° up.
+        let at = |deg: f32| Vec3::new(deg.to_radians().sin(), 0.0, deg.to_radians().cos()) * 200.0;
+        assert!(f.front(0.0, at(0.0)) && f.front(0.0, at(60.0)) && !f.front(0.0, at(80.0)) && !f.front(0.0, at(180.0)));
+        assert!(f.front(0.0, Vec3::new(0.0, -200.0, 200.0)) && !f.front(0.0, Vec3::new(0.0, -600.0, 200.0)));
     }
 
     #[test]
