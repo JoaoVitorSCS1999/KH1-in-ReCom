@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 146: Wyvern: a hit during its dive takes no reaction (the script's 214 follows), version 0.78.3 (2026-11-01)
+
+- Ask (owner, 2026-11-02, Pirate question 3): one version each.
+- Wyvern (`ex_2320.bd` `0x2484`, Checked (files)): a non-clash hit during the dive 202 resets the turn rate, zeroes the reaction kind and asks for 214. Now on Re:CoM's super armour: Re:CoM no longer cuts the attack state; the attack state ends the next frame and 214 plays on in state 1 (host model). Guarding the dive still gives Re:CoM's flinch (no KH1 recoil motion).
+- Element no-reaction (attribute 2 / 3 / 4) stays left out (owner). Assumption: attribute 8 / 9 exceptions not carried.
+- Checked: tests, Windows build, host model. Not checked: in game.
+
+---
+
 ## Stage 145: Air Pirate: a hit during its dive takes no reaction (the script's 211 follows), version 0.78.2 (2026-11-01)
 
 - Ask (owner, 2026-11-02, Pirate question 3): one version each.
