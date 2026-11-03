@@ -982,7 +982,7 @@ fn spells() -> ([u8; 7], [u8; 3]) {
     if !ALL_SPELLS.load(Ordering::Relaxed) {
         return (levels, slots);
     }
-    let none = slots.iter().all(|&b| cm::shortcut::slot_spell(b).is_none());
+    let none = slots.iter().all(|&b| !cm::shortcut::is_set(b));
     ([3; 7], if none { [1, 2, 3] } else { slots })
 }
 
@@ -1050,10 +1050,11 @@ unsafe fn world(pl: usize) -> World {
         (w.summons, w.summon_count) = super::summons::learned();
         (w.battle, w.summon_out) = super::summons::gate_state(pl);
         // M12 step 5: the bottom row (one save byte), the equipped sleights only while it says
-        // Sleights, and any Re:CoM sleight running locks both rows (one at a time).
+        // Sleights (or, M12 step 6, a shortcut slot holds a sleight), and any Re:CoM sleight
+        // running locks both rows (one at a time).
         w.summon_out |= super::summons::sleight_running(pl);
         w.bottom = super::summons::bottom_row();
-        if w.bottom == crate::sleights::Bottom::Sleights {
+        if w.bottom == crate::sleights::Bottom::Sleights || w.shortcuts.iter().any(|&b| cm::shortcut::slot_sleight(b).is_some()) {
             let ids = crate::sleights::list(&super::abilities::equipped_sleights());
             for (k, &id) in ids.iter().enumerate() {
                 w.sleights[k] = id as u8;
@@ -1119,7 +1120,7 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
     let pad = read_pad(pl);
     let w = world(pl);
     let step = (rd::<i32>(pl + p::DT).max(0) as f32) / 50.0;
-    let (out, token_events, summon_at) = {
+    let (out, token_events, summon_at, short_sleights) = {
         let mut s = STATE.lock().ok()?;
         let State { menu, uis } = &mut *s;
         let m = menu.as_mut()?;
@@ -1167,7 +1168,9 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
         } else {
             None
         };
-        (out, ev, at)
+        // M12 step 6: the shortcut list's sleights (their commands), for the preload.
+        let short_sleights: [Option<u16>; 3] = std::array::from_fn(|k| m.shortcut.cmds.get(k).copied().and_then(crate::sleights::of_command));
+        (out, ev, at, short_sleights)
     };
     // KH1's own sounds with KH1's look (`menu_sounds`), else Re:CoM's.
     let kh1_sounds = super::kh1_hud::menu_on();
@@ -1210,6 +1213,12 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
     }
     if super::summons::installed() {
         super::summons::preload_sleight(pl, summon_at);
+        // M12 step 6: the shortcut list came on top: its sleights' packs, as the Sleights list's
+        // cursor preloads its entry.
+        if out.events.contains(&Event::ShortcutList(true)) {
+            let ids: Vec<u16> = short_sleights.iter().copied().flatten().collect();
+            super::summons::preload_sleights(pl, &ids);
+        }
     }
     // M9 stage 9c.1: a special (the context tab's Triangle, or Rave / Blast in the Attack row).
     if let Some(c) = out.special {

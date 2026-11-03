@@ -315,6 +315,23 @@ pub unsafe fn preload_sleight(pl: usize, id: Option<u16>) {
     }
 }
 
+/// M12 step 6: the L1 shortcut list came on top: Re:CoM's sleight resource load for each sleight
+/// its slots hold (at most three, once per time the list comes up), in battle, as
+/// [`preload_sleight`] does for the Sleights list's cursor. Re:CoM's load returns at once for a
+/// pack already in its 16-entry table (`0x140211790`'s first loop). Checked (decomp).
+pub unsafe fn preload_sleights(pl: usize, ids: &[u16]) {
+    if !installed() || pl == 0 || ids.is_empty() || rd::<i32>(pl + p::BATTLE) == 0 {
+        return;
+    }
+    let res: usize = rd(pl + f::SLEIGHTS);
+    if res == 0 {
+        return;
+    }
+    for &id in ids.iter().take(3) {
+        func::<LoadFn>(SLEIGHT_LOAD)(res, id as u32, 0);
+    }
+}
+
 // ---- M12 step 5: the Sleights row and list ----
 
 /// The command menu's bottom row (`crate::sleights::Bottom`): the save's choice (the summon block's

@@ -229,7 +229,7 @@ draws only the box's header today (`recom-kh1-hud.md` H8).
 - A Sleights list fits as a fourth list kind beside `Kind::Summon` (same place and panels), filled
   with the equipped sleight abilities; names: Re:CoM's (message `0x80100 + id`) or our words (as
   Cloud's `0x8029`).
-- **Customize** (`crates/kh1-recom/src/customize.rs`, page in `win/keyblades.rs`): three slots,
+- **Customize** (`crates/kh1-recom/src/customize.rs`, page in `win/keyblades.rs`; sleights since step 6, § 8.6): three slots,
   bytes `save + 0x2681..0x2683` (`mp::off::SHORTCUTS`): 0 = none, 1..7 = spell + 1; **any other byte
   reads as none** (`shortcut::slot_spell`), so a sleight range (e.g. ≥ 0x10) is free and old builds
   ignore it. The picker lists learned spells then "None" (KH1 `0x1403041A0`, at most 8 rows in KH1);
@@ -654,3 +654,41 @@ Owner test lines (8.5.2):
 - A line `… by an object we don't count as Sora's (vtable …)`: send us the log (that sleight hits
   through something else).
 - Damage = Re:CoM: no change.
+
+### 8.6 Sleights as shortcuts (step 6)
+
+Owner ("M12 sleights and progression", 2026-11-03): "I also would like sleights to be able to be
+added to the customize menu, for shortcuts." KH1's shortcuts hold spells only (Checked (decomp),
+`customize.rs` head: `0x1402857C0` writes a spell or −1); the sleights are ours, on KH1's slots.
+Combat = KH1 in Sora's story only (the camp's Customize page and the command menu's own rule);
+Combat = Re:CoM and Riku's story unchanged.
+
+| what | where | tag |
+|---|---|---|
+| **The slot byte**: `save + 0x2681..0x2683` (`mp::off::SHORTCUTS`), as before: 0 none, 1..=7 spell + 1, and now **a sleight ability's Re:CoM id** (0x1B..=0x33, 0x3A, 0x43: the 27, all ≥ 8). Every other byte stays "none". Before this step any byte ≥ 8 read as none (`shortcut::slot_spell`), so an older build shows such a slot empty and keeps the byte unless that slot is set there. No layout change. | `command_menu::shortcut::{slot_sleight, slot_of, byte_of}` | Checked (code + tests) |
+| **KH1's fill-on-learn** (`0x140285260`: a learned spell goes into the first empty slot): a sleight slot counts as set, never overwritten; the one-time set-up of a pre-7.12 save keeps it too. | `unlocks::fill_slot`, `unlocks::shortcuts` | Checked (code + tests) |
+| **The picker** (Customize, a slot confirmed): KH1's learned spells, then **the equipped sleights** in Re:CoM's order (the Sleights list's `sleights::list`), then None; the blue magic row for both (the page scrolls past 8 rows as the Abilities page does). Names: the command menu's sleight word (`0x8100 + id`), else the Abilities page's English name. Help lines now say "spell or sleight" / "use this shortcut". | `customize::picks`, `win::keyblades` | Checked (code + tests) |
+| **The L1 list**: a sleight slot shows its command `0x80 + id` (the Sleights list's word), greyed and locked unless the **Sleights list's own test** passes (`sleights::usable`: Re:CoM's battle room, KH1's ground state or Re:CoM's seven air-start sleights in a KH1 air state that takes a command, nothing running, the owner's MP by tier / all MP with ≥ 1). A sleight slot makes the list available with or without a spell learned (KH1's rule "a slot is set and a spell is learned" for spell slots). Works with the bottom row on Summon or Sleights. | `Menu::build` | Checked (code + tests) |
+| **Pressing it**: Triangle / Square / confirm as for a spell slot: greyed → KH1's error sound; KH1's commit gate refusing (Sora busy) → dropped silently; else **the Sleights list's start**: `Outcome::sleight` → `win::summons::start_sleight` (Re:CoM's own sleight start `0x1402247A0` via Sora's vtable `+0x130`, the MP paid after Re:CoM took it, Re:CoM's air version when mid-air, the Damage = KH1 scaling of § 8.5.2). | `Menu::step_shortcut`, `win::command_menu` | Checked (code + tests) |
+| **Preload**: when the L1 list comes on top in battle, Re:CoM's sleight resource load `0x140211790(player+0x3B8, id, 0)` for each sleight slot (at most three; it returns at once for a pack already in its 16-entry table), as the Sleights list's cursor preloads its entry. | `win::summons::preload_sleights` | Checked (decomp); a first use never before its pack is in: **Assumption** (as the Sleights list) |
+| **Unequipped later** (owner: "follow what the page does for an item you no longer have": the Items page greys rows it can't use): the byte is kept; on the Customize page that slot's row is **greyed**, its value still names the sleight, and its help line reads "Not equipped: equip this sleight on the Abilities page."; it isn't in the picker (no row mark). In the L1 list it shows **the blank dash, greyed** (KH1's look for a slot whose spell isn't learned), and pressing it is the error sound. Equipping it again brings the shortcut back. | `customize::unequipped`, `Page::row_grey` / `help` | Checked (code + tests) |
+
+Per frame: the equipped read (15 + 8 bytes) now also while a shortcut slot holds a sleight; one
+byte test per slot. No hook, site or asset change: the sleight words in KH1's font already come
+with 0.100.0's asset step (Re:CoM's look needs none).
+
+Owner test lines (8.6):
+- Combat = KH1, camp KH1 tab > Customize: confirm a slot: the picker lists the learned spells, then
+  the equipped sleights (Re:CoM's order), then None. Pick Fire Raid for Square: the slot shows
+  "Fire Raid"; the log says `customize: shortcut 2 = sleight Fire Raid (0x1b) …`.
+- In battle on the ground, hold L1: the panel shows Fire Raid; Square plays Re:CoM's Fire Raid, MP
+  down by 2 (log: `summons: sleight Fire Raid -> Re:CoM's sleight 0x1b …`). With 1 MP, in the
+  field, or while a summon / sleight plays: greyed, Square buzzes.
+- A mid-air shortcut: Homing Blizzara (or Warp, Bind …) plays its air version; Fire Raid buzzes.
+- Unequip Fire Raid on the Abilities page: Customize shows Square's row greyed with "Not equipped …";
+  the L1 panel shows a grey dash and Square buzzes. Equip it again: the shortcut is back.
+- Learn a new spell while a slot holds a sleight: the sleight stays (the spell goes to an empty
+  slot, if any).
+- Combat = Re:CoM: no change.
+
+Not checked (8.6): anything in game.

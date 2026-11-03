@@ -399,7 +399,7 @@ pub mod text {
     pub const STAT_LABELS: [&[u8]; 3] = [b"Strength\0", b"Magic\0", b"Reach\0"];
     /// The Customize row (KH1's pause-menu word) and its help.
     pub const CUSTOMIZE_LABEL: &[u8] = b"Customize\0";
-    pub const CUSTOMIZE_HELP: &[u8] = b"Set the spells of the three shortcuts.\0";
+    pub const CUSTOMIZE_HELP: &[u8] = b"Set the spells and sleights of the three shortcuts.\0";
 }
 
 /// The "KH1" entry's submenu (M7 stage 7.13): Re:CoM's own entry buttons relabelled with these
