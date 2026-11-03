@@ -507,3 +507,4 @@ At KH1 setting:
   - Damage stays ini-only.
 - **KH1 tab follow-ups** (owner, 2026-11-03, on 0.93.0): show the KH1 tab in Riku's story too, with only Combat and Movement (built 0.93.4); English-only rows (as built); row order Items, Customize, Abilities, Combat, Movement (as built).
 - **Red Nocturne dead caster** (owner, 2026-11-03, on 0.93.3): keep KH1's rule (a kill cancels the big Fire).
+- **Riku tab / casts / Blizzard** (owner, 2026-11-03): hide the KH1 tab in Riku's story again (none of its settings act there); Re:CoM's Stop keeps cancelling a caster's spell (not KH1's paused wait); a wall still ends the Blizzard.

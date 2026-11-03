@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 173: KH1 camp entry hidden again in Riku's story, version 0.94.1 (2026-11-01)
+
+- Ask (owner, 2026-11-03, on 0.93.4): "Hide it" (none of the nine settings acts in Riku's story).
+- `win::keyblades::wanted`: the normal top list and Sora's story only (`story(camp) != Riku`, camp `+0x21BC`); the map-only camp unchanged. 0.93.4's per-story help ids (`top::RECOM_HELP`, data sites `0x1400DEA45` / `0x1400DEAA9`) stay.
+- Also recorded: Re:CoM's Stop keeps cancelling a caster's spell; a wall still ends the Blue Rhapsody's Blizzard (owner).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 172: The KH1 Blue Rhapsody (its melee, hops and Blizzard), version 0.94.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).

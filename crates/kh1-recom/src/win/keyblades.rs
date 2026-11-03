@@ -390,11 +390,12 @@ pub fn page_active(camp: *mut u8) -> bool {
 }
 
 /// Whether the camp should show our entry now: the normal top list, whatever the Combat setting
-/// (owner, 2026-11-03: "always be there") and in both stories (owner, 2026-11-03: Riku's story
-/// too, with only Combat and Movement). The camp that opens straight into the map page never
+/// (owner, 2026-11-03: "always be there"), in Sora's story only (owner, 2026-11-03, on 0.93.4: Riku's
+/// story "Hide it": none of its settings acts there; 0.93.4's per-story help ids stay). The camp that opens straight into the map page never
 /// builds the list (state 3 skips the entry build when `camp+0x20A4` is set; Checked (decomp)).
 unsafe fn wanted(camp: *mut u8) -> bool {
-    at::<i32>(camp, camp::DIRECT_MAP) == 0
+    // Owner (2026-11-03, on 0.93.4): "Hide it" in Riku's story (none of the nine settings acts there).
+    at::<i32>(camp, camp::DIRECT_MAP) == 0 && story(camp) != kb::Story::Riku
 }
 
 /// The camp's story, as Re:CoM's camp code reads it for its own tables.

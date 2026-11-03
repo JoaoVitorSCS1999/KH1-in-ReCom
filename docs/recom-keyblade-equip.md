@@ -444,6 +444,10 @@ accessories as well we will have slots for them there but dont worry about that 
 
 ### Riku's story: the entry with Combat and Movement (owner, 2026-11-03)
 
+> **Hidden again in 0.94.1** (owner, 2026-11-03, on 0.93.4: "Hide it": none of the nine settings acts in Riku's
+> story). `win::keyblades::wanted` is false in Riku's story; the per-story help ids below (`top::RECOM_HELP`) stay, so the
+> section remains the record of Riku's camp for any later use.
+
 > "KH1 tab follow-ups": show the KH1 tab in Riku's story too, with only Combat and Movement.
 
 Why it was hidden: only by our own rule (`wanted` refused `camp+0x21BC` / `0x1401AAAE0`), kept from
