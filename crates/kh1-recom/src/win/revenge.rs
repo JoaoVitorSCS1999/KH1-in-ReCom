@@ -33,13 +33,20 @@
 //!   exe slots; Marluxia 3: its own slot dark at the begin), closed by the same state end. Whatever
 //!   `boss_revenge` says.
 //!
+//! - **The Wizard and the Aquatank** (owner, 2026-11-03: "the same rule", `crate::dim::NORMAL`):
+//!   normal enemies on Re:CoM's AI whose attack begin always dims the room (Wizard state 4,
+//!   Aquatank state 3). No tail: at that begin's "hurt bodies off" ([`begin_untouchable`]) a fresh
+//!   dark request in slot 0 lets Re:CoM's own call run and opens a window kept in a small list
+//!   (`NORMAL_WINDOWS`); hits on it go through `super::attack::untouchable_hit`, no Guard reaction;
+//!   Re:CoM's state end (`0x14017DA90`, [`attack_end`]) turns the bodies on and closes it.
+//!
 //! Only in a KH1 battle (Combat = KH1, Sora's story); the revenge value with `boss_revenge = on`.
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
 use crate::revenge::{self as rv, flag, tail, Boss, Counter, Ignored, IgnoredKind, Source};
 use crate::dim::{self, EXES, SLOT_SIZE};
-use crate::sites::{PtrSite, DIM_EXE_SLOTS, REVENGE_CHECKED, REVENGE_FSM_SLOTS, REVENGE_HOOKS, REVENGE_PTRS, REVENGE_WINDUP_SLOTS};
+use crate::sites::{PtrSite, DIM_EXE_SLOTS, DIM_NORMAL_PTRS, REVENGE_CHECKED, REVENGE_FSM_SLOTS, REVENGE_HOOKS, REVENGE_PTRS, REVENGE_WINDUP_SLOTS};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -65,6 +72,12 @@ static DIM_SNAP: Mutex<(usize, [u8; SLOT_SIZE])> = Mutex::new((0, [0; SLOT_SIZE]
 /// The boss whose window a step opens now: its `+0x438` call reaches the hurt-off hook, which then
 /// runs Re:CoM's own call.
 static DIM_OPENING: AtomicUsize = AtomicUsize::new(0);
+/// The Wizard's and the Aquatank's dim windows (`crate::dim::NORMAL`): their classes and slots
+/// checked at install (`sites::DIM_NORMAL_PTRS`), the open windows, and how many (one load on the
+/// hit handler's path while none is open).
+static NORMAL_OK: AtomicBool = AtomicBool::new(false);
+static NORMAL_WINDOWS: Mutex<dim::Windows> = Mutex::new(dim::Windows::new());
+static NORMAL_OPEN: AtomicUsize = AtomicUsize::new(0);
 /// Re:CoM's enemy vtable slot run by every attack state's begin: "hurt bodies off" (`0x14017DA80`,
 /// hooked: `super::attack::hurt_off`; Vexen's and Marluxia 2's own call it). Checked (exe:
 /// `REVENGE_PTRS`).
@@ -289,6 +302,9 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
                 None => return super::attack::enemy_hit(enemy),
             }
         }
+        // The Wizard / Aquatank in a dimming move (`crate::dim::NORMAL`): Re:CoM's rule for an
+        // attacking enemy, as for a boss.
+        None if normal_window(enemy) => return normal_hit(enemy),
         None => return super::attack::enemy_hit(enemy),
     };
     // Revenge moves untouchable (owner, 2026-11-02): while the body plays the attack its revenge
@@ -431,18 +447,25 @@ pub(super) unsafe fn untouchable(e: usize) -> bool {
     if !active() {
         return false;
     }
-    let Some(b) = boss_of(e) else { return false };
+    let Some(b) = boss_of(e) else { return normal_window(e) };
     tail_ok(e, b) && rv::holds(rd(e + b.size as usize + tail::FLAGS), rd(e + EN_FLAGS), rd(e + EN_HP))
 }
 
 /// A Guard reaction (decision 27) the window skipped (`super::guard`).
 pub(super) unsafe fn guard_skipped(e: usize) {
-    if let Some(b) = boss_of(e) {
-        let t = e + b.size as usize;
-        let mut ig = Ignored::from_bytes(rd(t + tail::IGNORED));
-        ig.add(IgnoredKind::Guard);
-        wr(t + tail::IGNORED, ig.to_bytes());
-    }
+    let Some(b) = boss_of(e) else {
+        // A Wizard / Aquatank in its window.
+        if let Ok(mut g) = NORMAL_WINDOWS.lock() {
+            if let Some(w) = g.get_mut(e, super::battle::battle_number()) {
+                w.ignored.add(IgnoredKind::Guard);
+            }
+        }
+        return;
+    };
+    let t = e + b.size as usize;
+    let mut ig = Ignored::from_bytes(rd(t + tail::IGNORED));
+    ig.add(IgnoredKind::Guard);
+    wr(t + tail::IGNORED, ig.to_bytes());
 }
 
 /// Re:CoM's "hurt bodies off" at an attack state's begin (`super::attack::hurt_off`, at the KH1
@@ -458,7 +481,7 @@ pub(super) unsafe fn begin_untouchable(e: usize) -> bool {
     if DIM_OPENING.load(Ordering::Relaxed) == e {
         return true;
     }
-    let Some(b) = boss_of(e) else { return false };
+    let Some(b) = boss_of(e) else { return normal_begin(e) };
     if live() && revenge_begin(e, b) {
         return true;
     }
@@ -505,6 +528,8 @@ pub unsafe extern "win64" fn attack_end(e: usize) {
     if INSTALLED.load(Ordering::Relaxed) {
         if let Some(b) = boss_of(e) {
             close_window(e, b, "");
+        } else if NORMAL_OPEN.load(Ordering::Relaxed) != 0 {
+            close_normal(e);
         }
     }
     orig::<StepFn>(&ORIG_ATTACK_END)(e)
@@ -645,6 +670,122 @@ pub unsafe extern "win64" fn dim_exe_3(e: usize) {
 }
 const DIM_EXE_FNS: [unsafe extern "win64" fn(usize); 4] = [dim_exe_0, dim_exe_1, dim_exe_2, dim_exe_3];
 
+/// The normal dimming class of `e` (`crate::dim::NORMAL`): Re:CoM's own vtable, so only while it
+/// runs Re:CoM's AI (a KH1-AI enemy has our vtable copy).
+unsafe fn normal_of(e: usize) -> Option<(usize, &'static dim::Normal)> {
+    if e == 0 || !NORMAL_OK.load(Ordering::Relaxed) {
+        return None;
+    }
+    dim::normal_by_vtable(vt_rva(e)).map(|i| (i, &dim::NORMAL[i]))
+}
+
+/// Whether `e` is a Wizard / Aquatank in the dimming state its window opened for, alive, in this
+/// battle. One load while no window is open.
+unsafe fn normal_window(e: usize) -> bool {
+    if NORMAL_OPEN.load(Ordering::Relaxed) == 0 || !active() {
+        return false;
+    }
+    let Some((_, n)) = normal_of(e) else { return false };
+    if rd::<usize>(e + EN_STATE) != crate::battle::state_address(e, n.state) || rd::<i32>(e + EN_HP) <= 0 {
+        return false;
+    }
+    NORMAL_WINDOWS.lock().is_ok_and(|g| g.holds(e, super::battle::battle_number()))
+}
+
+/// The dim part of [`begin_untouchable`] for the Wizard / Aquatank: the state beginning is the
+/// dimming one and its begin (run just before this "hurt bodies off": the begin wrapper) left a fresh
+/// dark request in slot 0: the window opens and Re:CoM's own call runs.
+unsafe fn normal_begin(e: usize) -> bool {
+    let Some((class, n)) = normal_of(e) else { return false };
+    if !active() || rd::<i32>(e + EN_HP) <= 0 || rd::<usize>(e + EN_STATE) != crate::battle::state_address(e, n.state) {
+        return false;
+    }
+    let Some(now) = env_slot(dim::BOSS_SLOT) else { return false };
+    if !dim::fresh_dark(&now) {
+        dim_line(|| format!("dim: {} {e:#x} state {}: the room didn't dim at its begin (slot 0 holds no fresh dark request): hittable", n.name, n.state));
+        return false;
+    }
+    let opened = NORMAL_WINDOWS.lock().is_ok_and(|mut g| {
+        let ok = g.open(e, super::battle::battle_number(), class, now_frame());
+        NORMAL_OPEN.store(g.len(), Ordering::Relaxed);
+        ok
+    });
+    if !opened {
+        dim_line(|| format!("dim: {} {e:#x}: too many open windows ({}): hittable", n.name, dim::Windows::CAP));
+        return false;
+    }
+    let level = dim::Slot::parse(&now).level();
+    dim_line(|| format!("dim: {} untouchable (state {}: {}) {e:#x}: its state begin dims the room (Re:CoM's scene colour {level:.2}); Re:CoM's hurt bodies off, its hit handler drops hits until the state ends", n.name, n.state, n.what));
+    true
+}
+
+fn now_frame() -> f32 {
+    now() as f32
+}
+
+/// The hit handler's call for a Wizard / Aquatank in its window: Re:CoM's rule for an attacking
+/// enemy (`super::attack::untouchable_hit`), the ignored hit counted in its window.
+unsafe fn normal_hit(e: usize) -> u64 {
+    let (r, kind) = super::attack::untouchable_hit(e);
+    if let Some(kind) = kind {
+        if let Ok(mut g) = NORMAL_WINDOWS.lock() {
+            if let Some(w) = g.get_mut(e, super::battle::battle_number()) {
+                w.ignored.add(kind);
+            }
+        }
+    }
+    if r != 0 {
+        dim_line(|| format!("dim: {e:#x} took a hit in its untouchable move: Re:CoM's handler applied it (flags {:#x})", rd::<u64>(e + EN_FLAGS)));
+    }
+    r
+}
+
+/// Re:CoM's state end for a Wizard / Aquatank: its window (if open) closes and is logged.
+unsafe fn close_normal(e: usize) {
+    let w = NORMAL_WINDOWS.lock().ok().and_then(|mut g| {
+        let w = g.close(e);
+        NORMAL_OPEN.store(g.len(), Ordering::Relaxed);
+        w
+    });
+    let Some(w) = w else { return };
+    let Some(n) = dim::NORMAL.get(w.class) else { return };
+    let ig = w.ignored;
+    let frames = now_frame() - w.start;
+    let hp: i32 = rd(e + EN_HP);
+    let stale = if w.battle != super::battle::battle_number() { " (another battle's window)" } else { "" };
+    dim_line(|| {
+        format!(
+            "dim: {} untouchable ends (state {}) {e:#x} after {frames:.0} frames{stale}: ignored {} hits ({} KH1 swings, {} KH1 spells, {} other), {} Guard reactions skipped; HP {hp}{}",
+            n.name,
+            n.state,
+            ig.hits(),
+            ig.swings,
+            ig.spells,
+            ig.other,
+            ig.guards,
+            if hp <= 0 { " (dead)" } else { "" }
+        )
+    });
+}
+
+/// Checks the Wizard's and the Aquatank's classes and slots (`sites::DIM_NORMAL_PTRS`): their dim
+/// windows only when all hold (the bosses' don't depend on it).
+unsafe fn install_normal(bs: usize) {
+    for n in &dim::NORMAL {
+        let want = format!(".?AV{}@@", n.class);
+        if super::stats::rtti_name(bs, bs + n.vtable as usize).as_deref() != Some(want.as_str()) {
+            log(&format!("dim: {} vtable {:#x} is not {want}: the Wizard / Aquatank stay hittable", n.name, 0x1_4000_0000u64 + n.vtable as u64));
+            return;
+        }
+    }
+    if let Some(p) = DIM_NORMAL_PTRS.iter().find(|p| rd::<usize>(bs + p.rva as usize) != bs + p.target as usize) {
+        log(&format!("dim: {} holds another pointer: the Wizard / Aquatank stay hittable", p.name));
+        return;
+    }
+    NORMAL_OK.store(true, Ordering::Release);
+    log("dim: the Wizard (state 4) and the Aquatank (state 3) untouchable during their moves that dim the room (on Re:CoM's AI)");
+}
+
 /// A wind-up-only revenge state's exe (Hades' state 5, `crate::revenge::HADES_WINDUP`), as written in
 /// the class's vtable (`sites::REVENGE_WINDUP_SLOTS`). Re:CoM's exe runs first; when it has moved its
 /// sub-step off 0 (the wind-up motion ended, the spin and its timer started) the window closes and
@@ -741,6 +882,7 @@ pub unsafe fn install(bs: usize) -> bool {
         log(&format!("revenge: {} held another pointer; revenge off (the step hooks pass through)", p.name));
         return false;
     }
+    install_normal(bs);
     INSTALLED.store(true, Ordering::Release);
     true
 }

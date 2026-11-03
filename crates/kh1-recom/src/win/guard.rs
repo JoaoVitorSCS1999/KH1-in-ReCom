@@ -365,10 +365,10 @@ pub(super) unsafe fn after_enemy_hit(e: usize, r: u64, hp: i32) {
         return;
     }
     // Revenge moves untouchable (owner, 2026-11-02): a block doesn't interrupt the attack a boss's
-    // revenge started.
+    // revenge started; nor a room-dimming move (a boss's, the Wizard's, the Aquatank's; `crate::dim`).
     if super::revenge::untouchable(e) {
         super::revenge::guard_skipped(e);
-        block_log(|| format!("{name} id={id}: in the attack its revenge started (untouchable); no reaction"));
+        block_log(|| format!("{name} id={id}: in its untouchable move (revenge or room-dimming); no reaction"));
         return;
     }
     if flags & enemy::NO_REACTION != 0 {
