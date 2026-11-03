@@ -634,10 +634,10 @@ the share of the enemy's HP a hit takes as in Re:CoM. Damage = Re:CoM: unchanged
 | what | where | tag |
 |---|---|---|
 | **Where**: the existing enemy-hit wrapper on Re:CoM's handler `0x14017F7E0`, in its path for hits that are neither a KH1 swing's nor a KH1 spell shot's, just before Re:CoM's handler: on the hurt body Re:CoM's gather `0x140154EB0` takes (the first with a hit; it reads the value `+0x92` through `0x14016FDB0` into the hit Re:CoM then applies), the value is scaled. Re:CoM's handler then applies its resistance %, weak part, frozen bonus and boss falloff to it as to any hit (all multiply, so the ratio carries through). No new hook or site. | `win::summons::scale_sleight_hit`, `win::attack::kh1_enemy_hit` | Checked (decomp `0x14017F7E0`, `0x140154EB0`) |
-| **Which hits**: the current Sleights-list sleight's (from our start until a summon starts or the battle ends): one whose owner (the body's `+0x98`, the attack's `+0x20` id, `0x14016F1C0`) is **Sora or his weapon while that sleight runs** (his action `0x16` from our start), or a **Re:CoM shot** (`CBullet` `0x140525430` / `CHomingBullet` `0x140525530`) whose shooter `+0x238` is Sora (shots still flying after he lands count). A summon's hits keep Re:CoM's damage (not asked). Others (an enemy's, e.g. under Confuse) are untouched; an owner we don't count while the sleight plays is logged once per line budget. | `win::summons::owner_of` | Checked (decomp: the owner / shooter fields); that every one of the 27 hits through Sora's collisions or Re:CoM shots: **Assumption** (the log names any other) |
+| **Which hits**: the current Sleights-list sleight's or (since "KH1 damage scaling", below) summon's (from our start until the next one starts or the battle ends): one whose owner (the body's `+0x98`, the attack's `+0x20` id, `0x14016F1C0`) is **Sora or his weapon while that sleight or summon runs** (his action `0x16` from our start), **Sora's summon actor**, or a **Re:CoM shot** (`CBullet` `0x140525430` / `CHomingBullet` `0x140525530`) whose shooter `+0x238` is Sora or his summon (shots still flying after he lands count). Others (an enemy's, e.g. under Confuse) are untouched; an owner we don't count while the sleight plays is logged once per line budget. | `win::summons::owner_of` | Checked (decomp: the owner / shooter fields); that every one of the 27 hits through Sora's collisions or Re:CoM shots: **Assumption** (the log names any other) |
 | **Damage kinds only**: Re:CoM's own list of kinds whose value isn't damage stays as is (the handler's mask `0x912100`: Stop ticks 8 (Teleport), Gravity % 0xD, the timed states 0x10 (Shock Impact) / 0x17 (Lethal Frame), Magnet 0x14 (Magnet Spiral)); the durations stay Re:CoM's. | `sleights::is_damage_kind` | Checked (decomp `0x14017F7E0`, `0x14017DC50`) |
 | **The numbers**: KH1 max HP = the twin's KH1 HP the stats init set for that enemy (`kh1-stats.json`, Damage = KH1); Re:CoM max HP = Re:CoM's getter `0x14017F5A0` (its `@ENP` row HP × the difficulty %, the original under our max-HP wrapper). Value × KH1 / Re:CoM, rounded, at least 1, at most 32767. | `win::stats::twin_max_hps`, `sleights::kh1_scaled` | Checked (decomp `0x14017F5A0`; code + tests) |
-| **No KH1 twin** (Re:CoM-only enemies, bosses: their KH1 HP is a proxy's or a boss twin's, `docs/recom-kh1-attack.md`): Re:CoM's value stands (the brief: only `kh1-stats.json` twins); logged `… has no KH1 twin: Re:CoM's hit n stands`. | | Checked (code) |
+| **No KH1 twin** (Re:CoM-only enemies, bosses): since "KH1 damage scaling" (below) scaled by their **KH1-scale HP** too. Until then Re:CoM's value stood. | `win::stats::kh1_scale_hps` | Checked (code) |
 
 Per frame: one atomic load per enemy-hit call while no Sleights-list sleight was used this battle;
 after one, a read of the enemy's hurt bodies per call (as the other hit checks; not measured), and
@@ -648,12 +648,41 @@ Owner test lines (8.5.2):
   Soldiers …): use Fire Raid, Homing Blizzara or Holy: each hit takes about the same share of the
   enemy's HP bar as in Re:CoM (not a one-shot). Log: `summons: sleight <name> on CEnemy…: Re:CoM's hit
   a (kind k) -> b (KH1 max HP x / Re:CoM max HP y)`.
-- On a boss or a Re:CoM-only enemy: `… has no KH1 twin: Re:CoM's hit n stands` (Re:CoM's damage on its
-  KH1-scale HP: tell us how it feels).
+- On a boss or a Re:CoM-only enemy: scaled too since "KH1 damage scaling" (§ 8.5.3).
 - Teleport / Lethal Frame / Shock Impact / Magnet Spiral: their stop / hold times as in Re:CoM.
 - A line `… by an object we don't count as Sora's (vtable …)`: send us the log (that sleight hits
   through something else).
 - Damage = Re:CoM: no change.
+
+#### 8.5.3 Bosses, Re:CoM-only enemies and summons (owner, 2026-11-03, "KH1 damage scaling")
+
+Owner: "at Damage = KH1, sleights also scale on enemies without a KH1 twin (bosses, Re:CoM-only
+enemies) by their KH1-scale HP / Re:CoM HP; summons get the same rule." Damage = Re:CoM: unchanged.
+
+| what | where | tag |
+|---|---|---|
+| **(a) The KH1-scale HP of an enemy without a twin**: the HP the mod already cuts it to at Damage = KH1, in the same stats-init wrapper (`0x14017FF50`, `docs/recom-kh1-attack.md` § KH1 numbers for enemies without a twin): a **proxy** (Re:CoM-only enemies: its own Re:CoM `@ENP` row HP × the world's ratio from the twins or the world's boss twin), a **proxy boss**, or a **boss twin** (a boss with a KH1 equivalent: its own KH1 record). Its hits: Re:CoM's value × that HP / Re:CoM's max HP (Re:CoM's getter `0x14017F5A0`, the original under our wrapper: row HP × the difficulty %), the same formula, damage kinds only (Teleport / Lethal Frame / Shock Impact / Magnet Spiral / Gravity values stay Re:CoM's). An enemy whose HP the init didn't set (Riku's story, not an enemy-category object, no proxy record) keeps Re:CoM's value, logged `… has no KH1-scale HP …`. The log names the source: `(KH1 twin)`, `(proxy)`, `(proxy boss)`, `(boss twin)`. | `win::stats::kh1_scale_hps` (was `twin_max_hps`, twins only), `win::summons::scale_sleight_hit` | Checked (code: the init writes `KH1_HP` for twins, proxies and boss twins alike at Damage = KH1) |
+| **(b) Summons**: KH1's Summon list (the seven LV3 summon sleights, Cloud's Omnislash) set the scaled sleight at their start, as the Sleights list does. Their hits come from the **summon actor** (`Summon::CSummon*`), not Sora: told by its vtable (`crate::summons::ACTOR_VTABLES`, 7 classes; `sites::SUMMON_ACTOR_PTRS` checks each vtable's slot `+0` and type getter `+0x28` at the summons' install; a mismatch only turns this off, logged) and its player `+0x248` = Sora. Its shots: Re:CoM's bullet manager `0x140158DD0` writes the shooter id only for actor types 0x1000.. / 0x2000.. / 0x4000; the summon's type getter `0x1401A4A30` returns 0x1000, so the shooter is the summon's own id: counted when it resolves to Sora's summon. Sora's own collisions while the summon plays count too. The same covers the summon-type Sleights-list sleights Idyll Romp (Bambi's actor) and Cross-slash+ (Cloud's), whose actor hits were not counted before. | `win::summons::{start, owner_of, is_our_summon}` | Checked (exe: RTTI, vtables, relocated pointers; decomp: `0x14020EE80` makes the actors, `0x1402271D0` sets `+0x248` from `*0x14087B6B8 + 0x60`, `0x1401A4xxx`'s `0x14014D420(holder, actor)` makes the attack holder `+0x100` the summon's melee hits use (`0x140226890`), `0x140158DD0`'s shooter rule) |
+| **Same exceptions**: Re:CoM's own non-damage kinds (`sleights::is_damage_kind`, the handler's mask `0x912100`). Which kinds each summon's hits carry: not read one by one (Re:CoM's mask decides at the hit). | | **Assumption** (per summon) |
+
+Assumptions: a summon's shot landing after the summon actor is gone doesn't resolve its shooter
+(Re:CoM's damage, logged as another object); `*0x14087B6B8 + 0x60` is Sora's player in Sora's
+story (the summon's code uses it as Sora's: `+0x418`, `+0x3D8`, `+0x854`); multi-part bosses: a hit
+on a part object whose stats init set no KH1 HP keeps Re:CoM's value (logged).
+
+Per frame: nothing new (the owner lookup and one more vtable compare run only when a hit waits
+after a sleight or summon was used this battle).
+
+Owner test lines (8.5.3):
+- Damage = KH1 (ini `damage = kh1`), Combat = KH1: on a boss (e.g. Guard Armor, Axel) and a
+  Re:CoM-only Heartless, use Fire Raid / Holy: each hit takes about the share of the HP bar it takes
+  in Re:CoM. Log: `summons: sleight <name> on CBoss…: Re:CoM's hit a (kind k) -> b (KH1-scale max HP
+  x (boss twin | proxy boss | proxy) / Re:CoM max HP y)`.
+- Summon Simba / Genie / Cloud on ordinary Heartless and on a boss: the same share as in Re:CoM, not
+  a one-shot. Log: `summons: sleight Proud Roar LV3 on …` (or Omnislash …).
+- Idyll Romp / Cross-slash+ from the Sleights list: scaled the same way now.
+- A line `… by an object we don't count as Sora's (vtable …)`: send us the log.
+- Damage = Re:CoM: no change (summons and sleights at Re:CoM's damage).
 
 ### 8.6 Sleights as shortcuts (step 6)
 

@@ -295,7 +295,7 @@ bit's set / restore.
    sits beside row 3; more end at the bottom row.
 9. Not enough MP (e.g. 2 MP and Cloud): greyed; in the air: all greyed.
 10. Mid-combo (in a combo window): a summon is taken; mid-swing outside the window: nothing (no sound).
-11. Damage: Re:CoM's summon damage at both `damage = recom` and `damage = kh1`.
+11. Damage: Re:CoM's summon damage at `damage = recom`; at `damage = kh1` scaled by the enemy's KH1-scale max HP / its Re:CoM max HP (since the owner's "KH1 damage scaling", 2026-11-03: `docs/recom-m12-sleights.md` § 8.5.2).
 12. Cloud: Omnislash. The list's word "Cloud".
 13. Ending a battle with a summon (its attack kills the last enemy): no stuck invincibility in the next
     battle.

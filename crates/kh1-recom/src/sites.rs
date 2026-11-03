@@ -1492,6 +1492,27 @@ pub const SUMMON_ALSO: [u32; 3] = [0x0022_0DF0, 0x0021_1790, 0x0022_4FB0];
 /// CPlayerSora's sleight start slot (vtable `+0x130`), which the summons call through.
 pub const SUMMON_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x130 (0x1405A9A68)", rva: 0x005A_9A68, target: 0x0022_47A0 }];
 
+/// M12 follow-ups (Damage = KH1, summons scaled as sleights): the summon actors' vtables, which
+/// `win::summons` compares a hit's owner against (`crate::summons::ACTOR_VTABLES`): each one's slot
+/// `+0` and its type getter `+0x28`. Checked lazily at the summons' install; a mismatch turns only the
+/// summon scaling off (logged). Checked (exe: RTTI and the vtables, relocated pointers).
+pub const SUMMON_ACTOR_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CSummonDumbo vtable +0 (0x1405AEF98)", rva: 0x005A_EF98, target: 0x0022_ABD0 },
+    PtrSite { name: "CSummonDumbo vtable +0x28 (0x1405AEFC0)", rva: 0x005A_EFC0, target: 0x001A_4A30 },
+    PtrSite { name: "CSummonBambi vtable +0 (0x1405ACED8)", rva: 0x005A_CED8, target: 0x0022_7EC0 },
+    PtrSite { name: "CSummonBambi vtable +0x28 (0x1405ACF00)", rva: 0x005A_CF00, target: 0x001A_4A30 },
+    PtrSite { name: "CSummonGenie vtable +0 (0x1405AFFD8)", rva: 0x005A_FFD8, target: 0x0022_B460 },
+    PtrSite { name: "CSummonGenie vtable +0x28 (0x1405B0000)", rva: 0x005B_0000, target: 0x001A_4A30 },
+    PtrSite { name: "CSummonTink vtable +0 (0x1405B2F68)", rva: 0x005B_2F68, target: 0x0022_DAB0 },
+    PtrSite { name: "CSummonTink vtable +0x28 (0x1405B2F90)", rva: 0x005B_2F90, target: 0x001A_4A30 },
+    PtrSite { name: "CSummonMushu vtable +0 (0x1405B0FC0)", rva: 0x005B_0FC0, target: 0x0022_C540 },
+    PtrSite { name: "CSummonMushu vtable +0x28 (0x1405B0FE8)", rva: 0x005B_0FE8, target: 0x001A_4A30 },
+    PtrSite { name: "CSummonSinba vtable +0 (0x1405B1FA8)", rva: 0x005B_1FA8, target: 0x0022_D130 },
+    PtrSite { name: "CSummonSinba vtable +0x28 (0x1405B1FD0)", rva: 0x005B_1FD0, target: 0x001A_4A30 },
+    PtrSite { name: "CSummonCloud vtable +0 (0x1405ADF70)", rva: 0x005A_DF70, target: 0x0022_8F00 },
+    PtrSite { name: "CSummonCloud vtable +0x28 (0x1405ADF98)", rva: 0x005A_DF98, target: 0x001A_4A30 },
+];
+
 /// M8 stage 8a.3 (`win::shop`, `docs/recom-m8-items.md` § Stage 8a.3): the Moogle shop's pack screen
 /// update (`CMoogleShopCore` mode 4), wrapped for the Items tab. Same rule as [`HOOKS`].
 pub const SHOP_HOOKS: &[Site] = &[
@@ -3943,6 +3964,22 @@ mod tests {
         for h in KEYBLADE_HOOKS {
             assert!(h.expect.len() >= 12, "{}", h.name);
             assert!(!HOOKS.iter().chain(CALLEES).chain(KEYBLADE_CALLEES).any(|s| s.rva == h.rva), "{}", h.name);
+        }
+    }
+
+    /// M12 follow-ups: the summon actors' vtable checks are `crate::summons::ACTOR_VTABLES`, two per
+    /// class (slot +0 and the type getter +0x28), pointers only (never byte sites).
+    #[test]
+    fn summon_actor_vtables_are_checked_pointers() {
+        assert_eq!(SUMMON_ACTOR_PTRS.len(), 2 * crate::summons::COUNT);
+        for ((class, vt, slot0), p) in crate::summons::ACTOR_VTABLES.iter().zip(SUMMON_ACTOR_PTRS.chunks(2)) {
+            assert!(p[0].name.starts_with(class) && p[1].name.starts_with(class), "{class}");
+            assert_eq!((p[0].rva, p[0].target), (*vt, *slot0), "{class}");
+            assert_eq!((p[1].rva, p[1].target), (*vt + 0x28, crate::summons::ACTOR_TYPE_GETTER), "{class}");
+            assert!(!all_sites().any(|s| s.rva == p[0].rva || s.rva == p[1].rva), "{class}");
+        }
+        for (s, (class, _, _)) in crate::summons::ALL.iter().zip(crate::summons::ACTOR_VTABLES) {
+            assert_eq!(s.class, class);
         }
     }
 
