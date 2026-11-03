@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 165: The KH1 Bouncywild (its banana and peels), version 0.91.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
+- Bouncywild (KH1 `xa_ex_2040` / `ex_2040.bd` ↔ Re:CoM `CEnemyBouncywild` id 8), every number from the player's files (Checked (files), 69 from the script): appearance, wander, bounce-about, a 6 m leap over Sora, the run-away dropping two peels; rounds: a peel toss, a homing banana, taunt, call, look-about; its own launch from its hit handler; it never walks up to Sora. No body attack: all in Re:CoM's state 1.
+- Banana: KH1's child script is byte-identical to the Fat Bandit's / Defender's fireball (Checked (files)): the same Re:CoM-bullet code, Re:CoM's homing-banana power (id 1), Re:CoM's banana effect (`0x1407C3010`); a plain flinch (KH1).
+- Peels (`win::kh1_peel`): Re:CoM bullets falling by KH1's numbers, lying 120 frames, no damage; they hit with Re:CoM's banana reaction kind 0x18 (Checked (decomp): it plays Sora's row 0x29 `p001_049`, matched as an exact bake of KH1's slip; scatters a tenth of his Moogle points; check-only site `0x14018C924`). No new player reaction.
+- Re:CoM (Checked (exe), 23 sites): vtable `0x140538FB8`, ctor `0x14018C4D0` (`40 53 48 83 EC 20`, only caller `0x1401890EC`), alloc `0x1401890D3` 0xCD0 → 0xCF0.
+- Assumptions: KH1's escape left out (it never leaves; owner question); the call summons no helpers; a peel's reach against Sora's body; flat floor at its throw height; our own random stream; Guard uses a peel up. Not built: other enemies slipping on peels.
+- Asset step: ENEMY/0008 (ANN / ASD / SES), `kh1-bouncywild.json`.
+- Checked: tests (956), Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 164: Neoshadow grab on KH1's frame, version 0.90.2 (2026-11-01)
 
 - Decision (1:1 rule, 2026-11-03): the hold starts on KH1's frame.
