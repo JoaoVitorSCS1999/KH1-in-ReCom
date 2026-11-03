@@ -478,3 +478,5 @@ At KH1 setting:
 ## Known open design questions (ask the owner, don't guess)
 
 - Revisit later: party, progression.
+
+- **Search Ghost burst cone** (owner, 2026-11-02): keep KH1's cone (cos 1.0, 1:1); the repel rows stay as KH1 has them and practically never fire.
