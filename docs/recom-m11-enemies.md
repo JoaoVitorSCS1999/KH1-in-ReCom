@@ -324,7 +324,8 @@ wrapper's check only when a KH1 swing meets a body.
   carry Re:CoM's spell attributes (KH1's types 5 / 6 meet no type-2 row, so they land as in KH1). Assumption:
   Re:CoM's other physical attacks (a turned-back shot, a summon) count as KH1's type 0.
 
-**For the Large Body and the Defender:** their rows are types 1 / 4 with priorities above Sora's: KH1 repels. The repel
+**For the Large Body and the Defender:** (the Large Body is built, § The Large Body: its front row is type 1 at
+priority 100, made with KH1's mode 3: a side at 100 is never moved, so Sora gets kind 7 and it gets nothing; no repel.) Their rows are types 1 / 4 with priorities above Sora's: KH1 repels. The repel
 is built (2026-11-02, first used by the Search Ghost's burst rows): Sora gets his kind 6 / 7 from his own side, the enemy
 the 0x20 record (`HitNews::Repelled`: its script's hit handler decides; no damage, no reaction, its attack goes on).
 Their ports add their rows to `GUARDS` and send `Cmd::Guard`; their scripts' hit handlers must treat `Repelled` as KH1's
@@ -1959,6 +1960,230 @@ the leap land near you; kill one.
    Re:CoM's handler has already ended the attack, so the attack stops there (KH1's goes on). The armour built here keeps an
    attack going. (a) Leave them, (b) move them onto it (one version each).
 
+### The Large Body (built)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Large Body yet. Its belly's front
+row repels Sora's swings from the front through the shared enemy guard (KH1's mode-3 row, new), its flinch-type hits take
+no reaction (§ Hits that take no reaction), its stomp's ring is Re:CoM's own shockwave record grown by KH1's numbers.
+
+#### KH1's side. Checked (files: `ex_2050.bd` disassembled, code from `0x458`, folded and raw; its child `ex_2050_00.bd`; decomp: the syscalls named)
+
+The script (0x2600 bytes) has the Pirate's shape (the actor at `wp+0`, the state object at `wp+0x20`, the search object
+at `wp+0x30`). One child object (`.mdls` part 3: `ex_2050_00.bd`, 0x480 bytes, entry `0x2F8`): the stomp's ring.
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x1FF8` | init `0x20DC` (records LV1 `0x14` / LV2 `0x80`; stats `+4` walk 3.5, `+8` run 5, `+0x10` hop 20 (unused: no jump motion); `sys 125(8)`: 8° a frame; home; `wp+0x48` = 0, `+0x54` = 4, `+0x58` = 7; **the front row** `0x9CA`; handlers: hit `0x21BE`); a yield; the appearance thread `0x672`; each frame: while idle the search `0x11B8(&wp30, 0, 1500, 1)` (world 11: 10000 and always found) → engaged with the target; a state request restarts the behaviour (1 idle `0x61E`, 2 engaged `0x516`, 3 hit `0x458`) |
+| appearance | `0x682` → `0x1B30` | spawn type ≠ 0 and ≠ 30: face Sora now (`sys 11`); 69 (a plain request, blend 0); the 30-frame fade-in; flag 0x80 for 30 frames; effect 2; 30 frames; actor flag 4 with the idle queued (bit 30, blend 0): the script waits until 69 ends; idle |
+| idle | `0x636` | spawn type 30 (asleep): 211, 212 (not ported); else forever the shared wander `0x1422(300, 400, &home)` (points [200, 300) and [300, 400) about where it stands, 300 frames each, 40 % an idle of [90, 180), home beyond 700) |
+| engaged | `0x53A` | the first look once (`0xC30`: `wp+0x54` = 5; 214, blend 0, to its end turning to the target; the idle at 8); the leash `0xBEA` (not ported); not enraged `0x5C8`: < 250 the positioning and the punch, < 750 the positioning and the slam, farther the positioning, the stomp and the slam; enraged: the charge `0x6D8`; the leash; the search (Sora); engaged again |
+| positioning | `0xB0C` | walk (run once enraged): within 400 of the target to a random point 400–600 from where it stands (120–150 frames, the shared walk); farther than 450 the shared approach (240–300 frames, the target re-read every 5, until within 350) |
+| punch | `0xAB4` | one hit bit; turning to the target; rows `0xEC` / `0x15C` (the two hands); action 200 (blend 8, the idle queued at 8); then 75 frames |
+| slam | `0xA74` | row `0x1CC` (the belly); turning to the target; action 231 (blend 8); then 60 frames |
+| stomp | `0xA08` | on the ground; turning to the target; 230 (a plain request, blend 0); 88 frames; effect 13; **the child** (`sys 94(actor, 0, target, 0x31C, 0x31C)`); until 230 is done |
+| the ring | child `0x2F8` | effect 7; an attack object from the row `0x31C` (flag 64: no front cone) at the parent's position; for 28 frames each frame: every party member standing `[r − 100, r)` from that point (horizontally) and within 50 of its height (`0x18`) takes the attack (`sys 60`); then `r` += 25 × step (r starts 0: 0 … 675) |
+| rage | `0xCC2` | effect 9; 217 (blend 8) to its end turning to the target; the idle at 8 |
+| charge | `0x6D8` | on the ground; the wind-up 206 (blend 8) to its end turning to the target; the belly row `0x23C` (`sys 213(row, 2)`: lives while 207 plays; its callback `0x968`: `wp+0x58` = 10); **the front row removed** (`0x978`); `wp+0x58` = 6; for at most 180 frames while it is 6: at the target until within 100 of the floor under him (`0x12F6`), then on to a random point 300–500 from where it is until within 100 of it or stuck (moved under 3.6 × step × 0.5 last frame, `sys 118`); each frame `sys 12(207, 8)`, the stats block's `+0xC` = 12 and the glide (`sys 40` mode 2); ended when 207 no longer plays. Then the front row back (`0x908`), on the ground: its row hit Sora → action 208 (blend 0) and 45–120 frames; else action 209 (blend 8) and 30–150 frames; `wp+0x58` = 7 |
+| hit state | `0x47C` | (target: the hitter or Sora) `wp+0x4C` = 2: not enraged: fewer than 2 counted hits (`wp+0x50`) the punch, else the stomp and the count back to 0; enraged the charge. `wp+0x4C` = 3: enraged, the rage. Then the leash and engaged |
+| hit handler | `0x21BE` | `wp+0x54` = 5 (no first look after a hit); a clash (kinds 6 / 7) or a repel record (`hp[0] & 0x20`): during 207 the charge ends (`wp+0x58` = 9) and the front row comes back (`0x908`); else the count + 1 and the hit state (2). The damage (`0x1854` → `sys 44`): killed → its death `0x24EA` (the front row removed; KH1 then plays the hit's own reaction). Alive: **not enraged and HP / max under 0.4** (`0x1C1E`: stats `+0x3C` / `+0x40`) → `sys 42` (no reaction, the push slide), actor flag 4 cleared (`0x1DF6`: its action ends now), `wp+0x48` = 1, the hit state (3); **during 207** → the charge ends (8), the front row back, `sys 79` (unless attribute 1) and the hit state (2); **kinds 4 / 5**: during 230, 231 or 217 `sys 42`, else `sys 79` and the hit state (2); the count + 1 either way; **any other kind (a flinch): `sys 42` only**. Hits of attribute 8 / 9 / 10 / 11 (`0x1346`) take other paths (not carried by the host, as every port) |
+
+`sys 79` (`0x1402BBF40` → `0x1402B77D0`): KH1's knock-back whatever the record's kind (on the ground `0x1402B8CC0`: 0x4C /
+0x4D by side when the model has them, else the launch 0x52, else the flinch; in the air 0x50 / 0x51), the record marked
+done (`*hit |= 2`). `sys 213` (`0x1402BBC10`): an attack object's mode (bits 2..3); mode 2 lives while the request it
+first saw plays and its HIT slot is on, **mode 3 is tested every frame** whatever plays (`0x1402B47A0`), until mode 0
+removes it. Checked (decomp).
+
+Attacks (rows `0x70` bytes; Checked (files)):
+
+| Attack | Request | Rows (bone code → Re:CoM bone, t, radius; HIT slot) | Hit windows | Recoil `+0x40` | KH1 `+8` / power `+0x14` | Re:CoM id | Re:CoM state |
+|---|---|---|---|---|---|---|---|
+| punch | 200 (158 f, action) | `0xEC` (25 → `r_foarm`, 1.3 → 0, 60; 0), `0x15C` (24 → `l_foarm`; 1) | right [54, 68), [84, 106); left [50, 72), [86, 100) | 215 | 1 / 6, priority 30 | 0 | 2 |
+| slam | 231 (272 f, action, root) | `0x1CC` (12 → `hip1`, −0.3 → 0.5, 150; 0) | [102, 120) | 216 | 4 / 8, priority 30 | 0 | 2 |
+| charge | 207 (24 f looped, steered) | `0x23C` (12 → `hip1`, −0.3 → 0.5, 125; 0) | [0, 24) each cycle | 218 | 4 / 8, **priority 90** | 0 | 2 |
+| stomp's ring | 230 (182 f, steered) | the child's `0x31C` (no bone; type 6, priority 0) | the child's 28 frames from 88 | 110 (not in the model) | 1 / 6 | 1 | 3 |
+
+The front row `0x38C` (bone code 12, −0.2, 100; HIT slot 0): **type 1, priority 100, recoil 110, cone turn 0 / cos
+0.34202 (70°)**, made with mode 3. Row `0x2AC` (type 2, priority 99, cos −1) is never made (no push of its address).
+
+**What the front does in KH1** (`0x1402B4A20` / `0x1402B4BC0` / `0x1402B4640`, Checked (decomp)): a type-1 row meets only
+attack types 0 and 3 (Sora's swings; no magic: Fire / Blizzard / Thunder are types 5 / 6), only from inside its cone (the
+3D cosine between its facing and the vector to the attacker ≥ 0.342: 70° either side, and up to about 70° above). Its own
+side: `0x1402B4BC0` returns before any record when its priority is 100 (**a side at 100 is never moved**: no clash, no
+repel, the row isn't marked met: it stays). Sora's side: his swing (the Kingdom Key's 30) is 70 under → **kind 7, the
+strong recoil 0x6F** (in the air 0x70), no damage. A swing of 98 or more meets no clash at all (both 98+). So the Large
+Body is hit only from behind or the sides beyond 70°, by magic, and during the charge (its row removed). Its hit handler's
+repel branch (`hp[0] & 0x20`) never runs for this row.
+
+Reactions: F (0x48..0x4B), K (0x4C / 0x4D), L (0x52.., 0x57..); no air flinch or air knock-back, no jump motions (3, 4,
+5): it never leaves the ground of its own. Weight 1.0 in both records. Hurt parts: 9 (Re:CoM bones 39, 3, 17, 48, 18,
+49, 15, 23, 54). Checked (files).
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyLargebody` (vtable `0x140542AD0`, 139 slots, RTTI COL at −8), ctor `0x14018F090` (`40 53 48 83 EC 20`: `CHeartless`'s
+base ctor, then `+0x2E0` = 0.1; its only reference the factory's call at `0x140189116`; no branch into the moved bytes, no
+pointer to them: exe scan), allocation `0x1401890FD` `mov ecx, 0xCE0` → 0xD00. Its own states 1 (`0x14018F1F0` / the walk
+thunk `0x14018F3E0`), 2 (its belly bump `e009_050`, `0x14018F150` / `0x14018F220`: forward at 0.35 until frame 92), 3 (its
+stomp `e009_053`, `0x14018F1A0` / `0x14018F280`: a camera quake at frame 90, then `+0xCD0` grows 0.3 a frame and
+`0x14014E5C0(+0x100, +0xCD0)` sets every record's radius until frame 130); 0 / 11 / 12 / 30 and the attack states' ends
+`CBattleEnemy`'s; think `0x140196EC0`. `EN0009.ASD`: 2 records at `0x6C`, tail `0x1AC`: id 0 on `e009_050` (`ex_2050_sk`,
+1.0 m, shape index 3, frames 92–130, kind index 1), id 1 on `e009_053` (Root, 0.3 m up, **shape index 4 = type 11
+`CCircleCollision`** (`0x1407C1C98`: indices 0..4 → types 1, 2, 7, 8, 11; ctor case 11 `0x1401720E0`), radius 0.76,
+frames 90–120, kind index 0). `EN0009.SES`: `e009_031`, `e009_033`, `e009_050`, `e009_053`. `EN0009.ANN`: 75 slots.
+
+**Re:CoM's Large Body has no body guard**: the `CCollBody` ctor `0x14016F820` clears `+0x98..+0x9F` (and sets `+0x8C` all
+elements, `+0xB0` π); the enemy body builder `0x140155160` never sets bit 0 of `+0x9C`; no Re:CoM code sets it on an enemy
+body (decomp scan of every `+0x9C` write: only the player's guard, `player+0x72C`). Its front / back difference in
+Re:CoM is a damage matter (Assumption: weak parts in its `.EPD`, kept by decision 13). So `enemy_ai = recom` leaves it
+exactly as Re:CoM has it (nothing of ours touches a Re:CoM Large Body).
+
+Our copy: states 0, 1, 2 (the punch, the slam, the charge), 3 (the stomp), 11, 12, 30, the think.
+
+**Power mapping** (decision M10, "the Re:CoM attack of the same kind"): the asset step's matcher pairs Re:CoM's
+`e009_050` with KH1's slam 231 and `e009_053` with KH1's stomp 230 (Re:CoM's 30 fps edits: their SES entries carry over;
+Checked (files)): the slam → id 0, the stomp's ring → id 1 (Re:CoM's own shockwave). The punch and the charge have no
+Re:CoM twin; both are body attacks (KH1 power 6 / 8, Re:CoM has no other melee record): id 0 (Assumption; owner question 2).
+
+#### The front guard (KH1's mode 3 on the shared enemy guard)
+
+- Framework (`kh1_core::enemy::guard::ALWAYS`): a guard row KH1 makes with mode 3 has no windows in the manifest (the
+  asset step's `GUARDS` entry with no requests); `GuardRow::live(ALWAYS, _)` / `made_with(ALWAYS)` / `always()`.
+  `Cmd::Guard(Some((row, ALWAYS)))` turns it on; `guard_step` keeps it on whatever plays; Re:CoM's states (Stop, stun,
+  freeze: `guard_watch`, `take_over`) don't end it (KH1: `0x1402B47A0` skips only non-guard rows of an owner with `+0x88 &
+  1`); the defeat does. A row at priority 100 also stays on through Re:CoM's own physical attacks (a turned-back shot, a
+  summon: `guard_event`'s fallback is "neither" for it, not the kind-6 clash).
+- The behaviour sends it at its first frame (KH1's init), `Cmd::Guard(None)` when the charge starts (`0x978`), and again at
+  the charge's end or when a hit ends the charge (`0x908`, the handler's through `take_now`).
+- Host (unchanged rules): Re:CoM's body guard on every hurt part (`+0x9C` bit 1, physical, half angle acos(0.342) = 70°);
+  each KH1 swing that reaches a hurt part: KH1's 3D cone (`kh1_front`) and type rule, then `guard_after_swing`: Sora kind 7
+  (`Kh1Sora::swing_clash`: 0x6F; 0x70 in the air), the Large Body "neither" (`guard_event`: no reaction, no news, the row
+  stays). Re:CoM's "Guard" popup is hidden over it (0.76.2). Magic lands (our spells carry Re:CoM's spell attributes).
+- `GUARDED` is given back when a runtime whose bodies still carry the flag is dropped (a battle left with a Large Body
+  alive), so the per-swing / per-frame early-outs stay cheap.
+
+#### The stomp's ring (KH1's child on Re:CoM's own shockwave)
+
+- Asset step (`enemy::RINGS`, new): a copy of Re:CoM's id-1 record (its `e009_053` circle at its root; the step refuses a
+  template that isn't shape index 4) on KH1's 230 clip (`e009_138`), radius 0, on for frames [88, 116) (`ring_at` from
+  the parent, `ring_life` from the child); the manifest's attack "stomp" names the child's row `0x31C` (recoil 110).
+- Host (`kh1_enemy::Ring`, `win::kh1_enemy::ring_step`): while 230 plays inside those frames, the record's radius is
+  KH1's `ring_growth` × (frame − 88) (0 … 6.75 m) through Re:CoM's own `0x14014E5C0(enemy+0x100, r)`, the call Re:CoM's
+  Large Body makes for its shockwave (`sites::KH1_ENEMY_RING_CALLEES`: `40 53 48 83 EC 30 8B 41 14 48 8B 59 18`; it sets
+  every record's radius in the set: Re:CoM re-reads a record's own radius when it starts, `0x14014E830` is a caller of the
+  radius setter `0x140172690`: Assumption that the other records aren't live then; none are during 230). Re:CoM collides
+  it, hits Sora with id 1's power, ends it. One option test a frame for every other class.
+- Differences from KH1 (owner question 1): Re:CoM's circle test (`CCircleCollision`, not read) stands for KH1's band
+  `[r − 100, r)` horizontally within 50 of the stomp's height; the record follows the Large Body's root (KH1's ring stays
+  where it was made: it doesn't move during 230); a ring cut by a reaction ends with 230 (KH1's child runs its 28 frames).
+
+#### The hit handler on Re:CoM's states
+
+- **No reaction** (`sys 42`): every damaging hit but a knock-back / launch outside 230 / 231 / 217, and none during 207,
+  takes Re:CoM's super armour for the handler call (§ Hits that take no reaction): Re:CoM's damage, no state, KH1's push
+  slide (`on_armoured_hit`). The decision needs the hit's KH1 kind *before* Re:CoM's handler: `armour_on` now sets it
+  (`Behaviour::set_hit_kind`) from the KH1 swing waiting on the body (`attack::peek_kh1_kind`, `take_kh1_hit`'s test
+  without taking it) or Re:CoM's kind of the hit info (`hit_of`'s rule) — the other classes ignore it.
+- **The rage** after the damage: `armour_off` now passes Re:CoM's HP / max (`reads_hp`) before `on_armoured_hit`; the
+  behaviour asks for the hit state and `Behaviour::ends_action` (new: KH1's flag 4 cleared): the host ends the action
+  (Re:CoM's attack end in an attack state, our own leave to state 1; a plain action in state 1 stops being waited on; a
+  running reaction plays on: Assumption, KH1's script would run during it). A rage hit on Re:CoM's reaction path (a
+  knock-back kind) is `keeps_reaction` false (Re:CoM's handler already cut the action: KH1's flag 4).
+- **KH1's knock-back** (`sys 79`): `reaction_kind` 4 (the shared `react` then plays 0x4C / 0x4D by side); the killing hit
+  keeps its own kind (`on_defeat`).
+- **"Is it charging"** reads the request playing when the hit arrives (`Behaviour::set_playing`, new: KH1's `sys 51`), not
+  the AI's last frame (stale while an action plays).
+
+#### What the asset step writes
+
+`ENEMY/0009/EN0009.ANN` (Re:CoM's 75 slots byte-identical; KH1's clips at 100 + entry, 100..139: no exact Re:CoM bake),
+`EN0009.ASD` (Re:CoM's 2 records kept + 7: the punch's two hands × two windows, the slam, the charge, the ring), `EN0009.SES`
+(Re:CoM's 4 entries kept; the slam and the stomp take their Re:CoM twins' sounds, the punch and the charge their template's
+at the hit window: Assumption), `kh1-largebody.json` (`kh1-enemy 1`: 65 numbers from `ex_2050.bd` at checked offsets, 4
+from the child, 21 request words checked + 2 in the child, 4 attacks, the guard row `front` (no windows), 9 parts). Test
+`largebody::tests::builds_from_the_players_files`. Other enemies' outputs are unchanged (their entries in `GUARDS`,
+`RINGS`, `CHILD_CONSTS` are their own; the recoil rule relaxed only for a priority-100 row). In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0009/EN0009.ANN, method: copy, source: [{name: ENEMY/0009/EN0009.ANN}]}
+- {name: ENEMY/0009/EN0009.ASD, method: copy, source: [{name: ENEMY/0009/EN0009.ASD}]}
+- {name: ENEMY/0009/EN0009.SES, method: copy, source: [{name: ENEMY/0009/EN0009.SES}]}
+- {name: kh1-largebody.json, method: copy, source: [{name: kh1-largebody.json}]}
+```
+
+The step prints `largebody (M11): …`; the log shows `largebody: KH1's largebody (M11) …` at start, `battle N: Large Body …
+gets KH1's AI` in a Large Body battle, `guard row 0 with 65535` (its front row, at the start and after each charge),
+`its guard row stopped Sora's swing (priority 30 vs 100): Sora Clash { kind: 7, diff: -70 }, it None`, `its ring starts`,
+`hit kind … without a reaction while … plays`, and `its hit handler ends the action` at its rage.
+
+#### Checked / Assumption
+
+- **Checked (files):** every script number at its offset (the asset test reads them), 21 request words and the child's 2,
+  the rows (types, priorities, cones, recoils 215 / 216 / 218 in the model, 110 not), the hit windows, the hurt parts, the
+  clip lengths, Re:CoM's records (shape index 4 for id 1) and clips, the matcher's pairs (231 ↔ `e009_050`, 230 ↔
+  `e009_053`).
+- **Checked (decomp):** `sys 79` / `sys 42` / `sys 213` / `sys 23` / `sys 94`, mode 3 (`0x1402B47A0`), the priority-100 rule
+  and the cone (`0x1402B4BC0`, `0x1402B4640`), Re:CoM's state 3 shockwave (`0x14018F280` → `0x14014E5C0` → `0x140172690`
+  type 11 `+0x70`), the `CCollBody` guard bit never set on Re:CoM's enemies.
+- **Checked (exe):** the class, its 139 slots, the ctor and its only call, the factory size, the radius setter's bytes; every
+  site (582 byte sites, 290 pointer sites, pefile, 2026-11-02).
+- **Assumptions:** the punch and the charge on id 0; `CCircleCollision`'s test for KH1's band and height; the ring on the
+  Large Body's root; the battle floors flat (the charge's floor point `0x12F6` is its own height); the search finds Sora
+  within its range (`sys 48`'s cone and `sys 139` not ported); every hit of Sora's as KH1's type 0 / attribute 0 (the
+  attribute 1 exception of the charge's knock-back never comes); the rage during a reaction waits for its end; seeds per
+  enemy; Re:CoM's sounds on the new clips; the queue blends the host's.
+- **Not ported:** the leash (`0xBEA`: 18 m / 10.8 m out of sight), the sleeping spawn (30), the death routine, the effects
+  (2, 7, 9, 10, 13, 14: M13), the appearance's flag 0x80 and fade-in; **Sora's swings against its damaging rows** (KH1
+  tests attack against attack: owner question 3).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; any Large Body battle)
+
+1. Each Large Body plays KH1's appearance (69, about 1.7 s), wanders a few metres about where it stands, and turns to
+   look at Sora (214) the first time it notices him (within 15 m).
+2. Swing at it from the front (within about 70° of where its belly faces): Sora bounces off hard (the strong recoil), it
+   takes no damage and doesn't react; no "Guard" popup. From behind or well to the side the swings land.
+3. Hit it from behind with ordinary swings: the damage lands, it slides back a little and carries on (no flinch). A combo
+   finisher (a knock-back or launch) knocks it back (its own knock-back), then it counters: a punch (both fists), and after
+   two such hits the stomp.
+4. Close (< 2.5 m): it steps away 4–6 m first if Sora is within 4 m, then punches; mid (< 7.5 m): the belly slam (a big
+   forward belly flop, about 1.7 s in); far: it walks in, stomps (230: after about 1.5 s a shockwave ring spreads 6.75 m
+   along the floor over half a second) and then slams.
+5. Bring it under 40 % HP: it stops whatever it is doing, roars (217, about 2 s), and from then on only charges: a wind-up
+   (206, 1.5 s), then it runs at Sora fast (12 a frame) for up to 3 s, past him to a spot 3–5 m on; during the charge
+   its front no longer blocks (swings from the front land) and any hit knocks it back; if the charge hit Sora it stops
+   (208) and pauses, else it recovers (209, 5 s).
+6. Guard its punch, slam or charge: KH1's recoil (215 / 216 / 218) and its counter; Guard the ring: Re:CoM's flinch.
+7. Stop, Stun Impact, Blizzard's freeze and Gravity still take it over; its front still blocks swings while it is stopped.
+8. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Large Bodies (no change).
+
+Please send `kh1-recom.log` (`largebody:` lines) and an F9 trace.
+
+#### KH1 trace (what to record in KH1)
+
+A KH1 room with Large Bodies (Traverse Town after Guard Armor, for example): stand far 10 s;
+stand at 5 m 10 s; stand at 2 m 10 s; swing at its front once and a full combo (front), then from behind (one swing, a
+full combo, a finisher); stand on the ring's path and jump over it; bring one under 40 % HP and let it charge you, then
+dodge one charge; Guard a punch, a slam, a charge and the ring; swing into its belly while it charges (front and back);
+kill one. The trace's enemy rows give the rounds' timings, the ring's reach and the charge's path to compare.
+
+#### Large Body owner questions
+
+1. **The stomp's ring shape.** KH1's ring hits Sora only where its edge passes (`[r − 1 m, r)` from the stomp's spot) and
+   only within 0.5 m of its height (jumping clears it). Built: Re:CoM's own shockwave record (its Large Body's circle) grown
+   by KH1's numbers (25 a frame for 28 frames from frame 88): KH1's reach and timing, Re:CoM's shape (its test isn't read
+   yet; a jump may not clear it). (a) Keep; (b) add KH1's band and height test as a filter on that record's hits on Sora
+   (Re:CoM still collides it; we only refuse a hit KH1 wouldn't land); (c) research `CCircleCollision`'s test first and
+   decide then.
+2. **The power of the punch and the charge.** Re:CoM's Large Body has only its belly bump (id 0, the twin of KH1's slam)
+   and its stomp's shockwave (id 1, the twin of KH1's ring). Built: the punch and the charge on the belly bump's power.
+   (a) Keep; (b) the charge on id 0, the punch at a fraction; (c) another rule.
+3. **Sora's swings against its attacks.** KH1 tests attack against attack: Sora's swing meeting the charge's belly sphere
+   (priority 90, all round) gets the strong recoil and ends the charge (the Large Body gets a clash: 209); meeting a punching
+   fist (30 against 30) both recoil. The framework builds this only for guard-type rows (and the Bandit's blade), so here a
+   swing that reaches a charging Large Body hits its body. This is every enemy's damaging rows, not only the Large Body's.
+   (a) Leave it (as every port so far); (b) build it in the shared enemy guard (each damaging row also as an all-round
+   clash while its window is on), research first which test KH1 runs first when a swing meets both the row and the body.
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -1970,7 +2195,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Enemy | KH1 model (script) | Re:CoM class, id | vtable | ctor / alloc site, size | States | Hits | Reactions | Missing |
 |---|---|---|---|---|---|---|---|---|
 | Soldier (built) | `xa_ex_2010` (ex_2010.bd) | `CEnemySoldier` 2 | `0x14054ea68` | `0x140193510` / `0x140188fd7` 0xcd0 | 1,2,3 | 200,201,202,203,204,207,209 | FaLl | — |
-| Large Body | `xa_ex_2050` (ex_2050.bd) | `CEnemyLargebody` 9 | `0x140542ad0` | `0x14018f090` / `0x1401890fd` 0xce0 | 1,2,3 | 200,207,231 | FKL | — |
+| Large Body (built) | `xa_ex_2050` (ex_2050.bd) | `CEnemyLargebody` 9 | `0x140542ad0` | `0x14018f090` / `0x1401890fd` 0xce0 | 1,2,3 | 200,207,231 | FKL | — |
 | Red Nocturne | `xa_ex_2110` (ex_2110.bd) | `CEnemyRednocturne` 3 | `0x140548a58` | `0x140191880` / `0x140189001` 0xcd0 | 1,2,3 | — | FKaA | SES |
 | Blue Rhapsody | `xa_ex_2120` (ex_2120.bd) | `CEnemyBluerhapsody` 4 | `0x140537ca8` | `0x14018c120` / `0x14018902b` 0xcd0 | 1,2,3 | 215 | FKaA | — |
 | Yellow Opera | `xa_ex_2130` (ex_2130.bd) | `CEnemyYellowopera` 5 | `0x1405570c8` | `0x1401968b0` / `0x140189055` 0xcd0 | 1,2,3 | 209 | FKaA | SES |
@@ -2008,7 +2233,7 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
 ### Families
 
 1. **Ground melee** (the Soldier's shape: walk / run, hit tracks, kicks and lunges; the framework as built):
-   Large Body (no jump motion; KH1's hits from the front bounce off it: research its guard, Assumption), Powerwild, Bandit,
+   Large Body (built: § The Large Body), Powerwild, Bandit,
    Pirate, Wight Knight, Neoshadow (also sinks and rises like the Shadow; Re:CoM overrides its state 0 →
    probably `Appear::Shadow`-like), Spade / Heart Soldier (Re:CoM overrides their states 0 and 30: check their
    own appearance and defeat before choosing `Appear::Base`).
