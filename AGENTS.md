@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 160: Neoshadow grab from below: Sora's new held reaction, version 0.88.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "New Re:CoM reaction" for the Neoshadow's grab (the 1:1 option).
+- Sora: Re:CoM's reaction-kind getter `0x140179410` reads a 22-kind copy (data patch of its `lea` at `0x140179417`, old `05 0E 3B 00`); Re:CoM's 21 kinds kept, held kind `0x40` at index 21. In the existing damage-check wrapper (`0x1401E6DE0`) the held kind does no damage; Re:CoM's check runs with its no-reaction bit (its gates apply); if it took the hit: Re:CoM's reaction prelude `0x1401F6990(pl, 6)` and its status entry (action 0x18, sub 0xC) on the held clip's new action row, blend 4. Re:CoM's status exe `0x1401EB0F0` ends it at the clip's end; a damaging hit frees him (action 0xC). Nothing of ours runs during it. Checked (decomp + exe).
+- KH1 (Checked (files)): `ex_2420.bd` `0x1AF6`: Sora's request 200 from the Neoshadow's player set (`+0xA4B80`, 126 frames, no root motion), held by its 208 up to 94 frames, freed by the other's dive on `+0x4C`; no damage itself; KH1's grab sets no 0x80 (no post-hit frames, the dive lands); a Sora in his 30 post-hit frames is not grabbable (sys 141).
+- Neoshadow: when the host says Sora is grabbable: `+0x4C`, 208 with the grab's record, the hold, release when he's no longer held; else KH1's miss (209).
+- Assumptions: Sora is player set 0; the record 1.0 m for 2 frames; the hold starts 1–2 frames after KH1's; no damage face / rumble; guarding gives the miss (flag 0x400 unidentified).
+- Asset step must be re-run: held clip on slot 233 in PL0001 / 0002 / 0011.ANN, `held` in kh1-motions.json, EN0027.ASD, four `grab_*` numbers in kh1-neoshadow.json (the DLL refuses an older manifest). No mod.yml change.
+- Checked: tests, Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 159: jump_height = recom: Re:CoM's crouch, version 0.87.2 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Re:CoM's crouch" for `jump_height = recom`.
