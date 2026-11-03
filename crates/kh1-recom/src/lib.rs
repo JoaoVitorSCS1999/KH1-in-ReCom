@@ -105,6 +105,7 @@ pub mod settings;
 pub mod kh1_enemy;
 pub mod shadow;
 pub mod shop;
+pub mod sleights;
 pub mod specials;
 pub mod sites;
 pub mod story_skip;

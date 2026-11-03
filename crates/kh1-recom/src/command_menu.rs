@@ -22,7 +22,8 @@
 //! - **Cursor** (`0x1402931B0`), on the fresh-press word compared for equality: Up / Down move and
 //!   wrap; Right opens the row's submenu (sound 6), a locked row sounds 4; Left or cancel closes a
 //!   submenu (sound 3; cancel also puts the root cursor on Attack); Left at the root puts the
-//!   cursor on Attack (sound 1). No auto-repeat.
+//!   cursor on Attack (sound 1). No auto-repeat. **M12 step 5** (owner): Left at the root, on any
+//!   row, switches the 4th row between Summon and Sleights instead (sound 1, the cursor stays).
 //! - **Step** (`0x1402937F0`): at the root a fresh jump is the jump (no menu input that frame);
 //!   Triangle runs the context command when its tab is fully in (`0x140277CF0` state 2); Square
 //!   (without Triangle) is the roll / guard (no cursor that frame); then the cursor; then confirm
@@ -67,6 +68,13 @@
 //!   item flag 0x40 (the air): row 2 greyed but openable, every entry greyed and locked. KH1 greys
 //!   no entry for full HP. Confirm on an entry passes KH1's commit gate (free or a combo window)
 //!   and issues the item on Sora (no party list: as Cure; `crate::items`).
+//!
+//! - **Sleights** (M12 step 5, `crate::sleights`, `docs/recom-m12-sleights.md` § 8.5): in Sleights
+//!   mode the 4th row says "Sleights" (always shown; greyed when none is usable, greyed and locked
+//!   with none equipped or while a sleight runs); confirm or Right opens the Sleights list (the
+//!   equipped sleight abilities in Re:CoM's order, placed as the Summon list, grey = lock by the
+//!   summons' gate with the sleight's MP); confirm on an entry passes KH1's commit gate and issues
+//!   it (Re:CoM's own sleight start, `win/summons.rs`).
 //!
 //! Re:CoM side: `win/command_menu.rs`; notes `docs/recom-m7-command-menu.md`.
 
@@ -127,6 +135,8 @@ pub mod cmd {
             crate::gimmick::STAGGER => crate::gimmick::STAGGER_WORD,
             // M8b: the summons (`0x2F + summon`: KH1's words 286..291, Cloud ours).
             c if crate::summons::of_command(c).is_some() => crate::summons::ALL[crate::summons::of_command(c).unwrap_or(0)].word,
+            // M12 step 5: the sleights (`0x80 + id`, our words `0x8100 + id`).
+            c if crate::sleights::of_command(c).is_some() => crate::sleights::word(crate::sleights::of_command(c).unwrap_or(0)),
             // M9 stage 9c.1: the specials and Sonic Blade's follow-ups (`crate::specials::cmd`).
             c => crate::specials::cmd::name(c).unwrap_or(c as u16),
         }
@@ -296,6 +306,12 @@ pub struct World {
     /// M8b: KH1's battle mode (Re:CoM's battle room) and a summon out (Re:CoM's sleight running).
     pub battle: bool,
     pub summon_out: bool,
+    /// M12 step 5: what the root's 4th row shows (the save's choice, `crate::sleights::Bottom`).
+    pub bottom: crate::sleights::Bottom,
+    /// M12 step 5: the equipped sleight abilities' Re:CoM ids (`crate::sleights::list`, Re:CoM's
+    /// order) and their count. Read only while the bottom row is Sleights.
+    pub sleights: [u8; crate::sleights::MAX],
+    pub sleight_count: u8,
 }
 
 /// The fresh presses of one frame (Re:CoM's pad, mapped to KH1's buttons).
@@ -342,6 +358,8 @@ pub enum Kind {
     Items,
     /// M8b: KH1's Summon list (type 3, `0x1405289A8`).
     Summon,
+    /// M12 step 5: the Sleights list (ours, in the Summon list's place).
+    Sleight,
 }
 
 /// One KH1 list.
@@ -433,6 +451,10 @@ pub enum Event {
     Item(u8, u8, ShortResult),
     /// M8b: a Summon list entry confirmed: (its command, what happened).
     Summon(u8, ShortResult),
+    /// M12 step 5: a Sleights list entry confirmed: (its command, what happened).
+    Sleight(u8, ShortResult),
+    /// M12 step 5: D-pad Left at the root switched the 4th row (to this).
+    Bottom(crate::sleights::Bottom),
 }
 
 /// What a shortcut press did (`0x140293480` on the shortcut list).
@@ -470,6 +492,10 @@ pub struct Outcome {
     pub item: Option<crate::items::ItemCommand>,
     /// M8b: the summon issued this frame (`crate::summons` index).
     pub summon: Option<usize>,
+    /// M12 step 5: the sleight issued this frame (its Re:CoM id).
+    pub sleight: Option<u16>,
+    /// M12 step 5: the 4th row switched this frame (to keep in the save).
+    pub bottom: Option<crate::sleights::Bottom>,
     /// M9 stage 9c.1: a special command run by Triangle this frame (Sonic Blade, Rave, Blast):
     /// ours to run, not Re:CoM's Triangle action.
     pub special: Option<u8>,
@@ -524,6 +550,12 @@ pub struct Menu {
     pub summon_on: bool,
     pub summon_grey: bool,
     pub summon_lock: bool,
+    /// M12 step 5: what the 4th row shows, the Sleights list (Re:CoM ids in `0x80 + id` commands)
+    /// and the Sleights row's grey / lock (it always shows in Sleights mode).
+    pub bottom: crate::sleights::Bottom,
+    pub sleight: List,
+    pub sleight_grey: bool,
+    pub sleight_lock: bool,
     /// The fade (`0x14285280C`) and its speed.
     pub alpha: f32,
     pub alpha_speed: f32,
@@ -566,6 +598,10 @@ impl Menu {
             summon_on: false,
             summon_grey: true,
             summon_lock: true,
+            bottom: crate::sleights::Bottom::Summon,
+            sleight: List::new(Kind::Sleight),
+            sleight_grey: true,
+            sleight_lock: true,
             alpha: 0.0,
             alpha_speed: 0.0,
             top: None,
@@ -695,9 +731,33 @@ impl Menu {
         if self.summon.cursor >= slen {
             self.summon.cursor = (slen - 1).max(0);
         }
-        self.summon_on = !learned.is_empty() && !list.is_empty();
+        // M12 step 5: in Sleights mode the 4th row is Sleights, not Summon (the Summon entry isn't
+        // there: the Magic list's "fewer than 3" test doesn't count it).
+        self.bottom = w.bottom;
+        let summon_mode = w.bottom == crate::sleights::Bottom::Summon;
+        self.summon_on = summon_mode && !learned.is_empty() && !list.is_empty();
         self.summon_lock = !self.summon_on || w.summon_out;
         self.summon_grey = self.summon_lock || sgrey == !0;
+        // M12 step 5: the Sleights list (the equipped sleight abilities), each greyed and locked
+        // when the summons' gate with its MP says no; the row greyed when none is usable, greyed and
+        // locked with none equipped or while a sleight runs (as the Summon row's).
+        let n = (w.sleight_count as usize).min(crate::sleights::MAX);
+        let sl = if summon_mode { Vec::new() } else { crate::sleights::list(&w.sleights[..n].iter().map(|&b| b as u16).collect::<Vec<_>>()) };
+        let mut lgrey = !0u32;
+        for (k, &id) in sl.iter().enumerate() {
+            if crate::sleights::usable(&gate, id) {
+                lgrey &= !(1 << k);
+            }
+        }
+        self.sleight.cmds = sl.iter().map(|&id| crate::sleights::command(id)).collect();
+        self.sleight.grey = lgrey;
+        self.sleight.lock = lgrey;
+        let llen = self.sleight.cmds.len() as i32;
+        if self.sleight.cursor >= llen {
+            self.sleight.cursor = (llen - 1).max(0);
+        }
+        self.sleight_lock = summon_mode || sl.is_empty() || w.summon_out;
+        self.sleight_grey = self.sleight_lock || lgrey == !0;
         // Items (M8 stage 8a.1, `0x140294220`; KH1's save `+0x874` bits 0x10 / 2, items disabled /
         // sealed, are never set in Re:CoM): row 2 Items, unlocked; the list holds the filled slots
         // (command `item + 0x1E`, `0x142D53A90[k]` = the slot), each entry's bit cleared. With
@@ -744,7 +804,7 @@ impl Menu {
                 r.lock &= !8;
             }
         }
-        for l in [&mut self.root, &mut self.magic, &mut self.items, &mut self.summon] {
+        for l in [&mut self.root, &mut self.magic, &mut self.items, &mut self.summon, &mut self.sleight] {
             l.bright.resize(l.cmds.len(), BRIGHT_GREY);
         }
     }
@@ -754,6 +814,7 @@ impl Menu {
         match self.sub {
             Kind::Items => &self.items,
             Kind::Summon => &self.summon,
+            Kind::Sleight => &self.sleight,
             _ => &self.magic,
         }
     }
@@ -762,6 +823,7 @@ impl Menu {
         match self.sub {
             Kind::Items => &mut self.items,
             Kind::Summon => &mut self.summon,
+            Kind::Sleight => &mut self.sleight,
             _ => &mut self.magic,
         }
     }
@@ -782,6 +844,7 @@ impl Menu {
         let row_can_open = match self.sub {
             Kind::Items => !self.root.locked(2) && !self.items.cmds.is_empty(),
             Kind::Summon => self.summon_on && !self.summon_lock && !self.summon.cmds.is_empty(),
+            Kind::Sleight => self.bottom == crate::sleights::Bottom::Sleights && !self.sleight_lock && !self.sleight.cmds.is_empty(),
             _ => !self.root.locked(1) && self.root.cmds[1] == cmd::MAGIC && !self.magic.cmds.is_empty(),
         };
         if self.open && !row_can_open {
@@ -882,6 +945,9 @@ impl Menu {
         } else if self.sub == Kind::Summon {
             out.attack = false;
             self.run_summon(w, &mut out);
+        } else if self.sub == Kind::Sleight {
+            out.attack = false;
+            self.run_sleight(w, &mut out);
         } else {
             out.attack = false;
             let row = self.magic.cursor;
@@ -977,6 +1043,17 @@ impl Menu {
     /// M8b: confirm (or Right) on the root's row 3 (`0x1402937F0` → `0x140293480` on the Magic
     /// list's last entry).
     fn run_row3(&mut self, out: &mut Outcome) {
+        // M12 step 5: in Sleights mode the row opens the Sleights list (locked: the error sound).
+        if self.bottom == crate::sleights::Bottom::Sleights {
+            out.confirm_refused = true;
+            if self.sleight_lock {
+                out.sounds.push(Sound::Error);
+                out.events.push(Event::Refused(ROW3_CMD));
+            } else {
+                self.open_sub(4, out);
+            }
+            return;
+        }
         if !self.summon_on {
             out.sounds.push(Sound::Error);
             out.events.push(Event::Refused(ROW3_CMD));
@@ -1017,6 +1094,32 @@ impl Menu {
         out.events.push(Event::Summon(c, result));
     }
 
+    /// M12 step 5: confirm on a Sleights list entry, as on a Summon list entry: locked (greyed) →
+    /// the error sound; KH1's commit gate (free or a combo window) may refuse it silently; else it
+    /// is issued (no menu sound) and the stack unwinds to Attack.
+    fn run_sleight(&mut self, w: &World, out: &mut Outcome) {
+        let row = self.sleight.cursor;
+        let c = self.sleight.cmds.get(row as usize).copied().unwrap_or(0);
+        let result = match crate::sleights::of_command(c) {
+            Some(_) if !self.sleight.locked(row) && !w.gate_any => {
+                out.confirm_refused = true;
+                ShortResult::NotNow
+            }
+            Some(id) if !self.sleight.locked(row) => {
+                out.sleight = Some(id);
+                self.open = false;
+                self.root.cursor = 0;
+                ShortResult::Cast
+            }
+            _ => {
+                out.sounds.push(Sound::Error);
+                out.confirm_refused = true;
+                ShortResult::Greyed
+            }
+        };
+        out.events.push(Event::Sleight(c, result));
+    }
+
     fn run_root(&mut self, row: i32, out: &mut Outcome) {
         let c = self.root.cmds[row as usize];
         // `0x140293480` returns 0 for each of these (a locked row, a submenu opened, a command it
@@ -1032,12 +1135,13 @@ impl Menu {
         }
     }
 
-    /// Opens the Magic list (1), the Items list (2) or the Summon list (3) (`0x140293480` /
-    /// `0x1402931B0`: sound 6).
+    /// Opens the Magic list (1), the Items list (2), the Summon list (3) or (M12 step 5) the
+    /// Sleights list (4) (`0x140293480` / `0x1402931B0`: sound 6).
     fn open_sub(&mut self, which: u8, out: &mut Outcome) {
         self.sub = match which {
             2 => Kind::Items,
             3 => Kind::Summon,
+            4 => Kind::Sleight,
             _ => Kind::Magic,
         };
         self.open = true;
@@ -1081,8 +1185,13 @@ impl Menu {
                 return true;
             }
             if word & 0x80 != 0 {
-                self.root.cursor = 0;
+                // M12 step 5 (owner, 2026-11-03: "D-pad Left toggles Summon / Sleights anywhere on
+                // the command menu (drops KH1's Left → Attack)"): Left at the root, on any row,
+                // switches the 4th row; the cursor stays (KH1's `0x1402931B0` put it on Attack).
+                self.bottom = self.bottom.other();
+                out.bottom = Some(self.bottom);
                 out.sounds.push(Sound::Move);
+                out.events.push(Event::Bottom(self.bottom));
                 return true;
             }
             return false;
@@ -1123,6 +1232,7 @@ impl Menu {
                 Kind::Magic => (&mut self.magic, Some(&mut self.root)),
                 Kind::Items => (&mut self.items, Some(&mut self.root)),
                 Kind::Summon => (&mut self.summon, Some(&mut self.root)),
+                Kind::Sleight => (&mut self.sleight, Some(&mut self.root)),
                 Kind::Root => (&mut self.root, None),
             };
             for (i, b) in t.bright.iter_mut().enumerate() {
@@ -1137,6 +1247,7 @@ impl Menu {
                 Kind::Magic => &mut self.magic,
                 Kind::Items => &mut self.items,
                 Kind::Summon => &mut self.summon,
+                Kind::Sleight => &mut self.sleight,
                 Kind::Root => &mut self.root,
             };
             for (i, b) in t.bright.iter_mut().enumerate() {
@@ -1233,7 +1344,10 @@ impl Menu {
             // FM's 4th row (`0x140278B40`): Summon (0x73 / 0xE6 by its grey bit) or the blank
             // command (0xE6 under the cursor), never the context command (that is the tab's); its
             // brightness is set, not eased.
-            let (name, bright) = if i == 3 && self.summon_on {
+            let (name, bright) = if i == 3 && self.bottom == crate::sleights::Bottom::Sleights {
+                // M12 step 5: "Sleights", always shown in Sleights mode, set as Summon's.
+                (crate::sleights::ROW_WORD, if self.sleight_grey { BRIGHT_GREY } else { BRIGHT_ON })
+            } else if i == 3 && self.summon_on {
                 (SUMMON_NAME, if self.summon_grey { BRIGHT_GREY } else { BRIGHT_ON })
             } else if i == 3 {
                 (cmd::name(ROW3_CMD), if cursor_here { BRIGHT_ON } else { BRIGHT_GREY })
@@ -1252,8 +1366,9 @@ impl Menu {
             let y0 = match self.sub {
                 Kind::Items if n < 2 => ROOT_Y + 2.0 * PITCH,
                 Kind::Items => BOTTOM - PITCH * n as f32,
-                Kind::Summon if ROOT_Y + 20.0 + (3.0 + n as f32) * PITCH < 369.0 => ROOT_Y + 3.0 * PITCH,
-                Kind::Summon => BOTTOM - PITCH * n as f32,
+                // M12 step 5: the Sleights list where the Summon list goes.
+                Kind::Summon | Kind::Sleight if ROOT_Y + 20.0 + (3.0 + n as f32) * PITCH < 369.0 => ROOT_Y + 3.0 * PITCH,
+                Kind::Summon | Kind::Sleight => BOTTOM - PITCH * n as f32,
                 _ if n + (self.summon_on as usize) < 3 => ROOT_Y + PITCH,
                 _ => BOTTOM - PITCH * n as f32,
             };
@@ -1292,6 +1407,7 @@ impl Menu {
         let (tag, gtag) = match self.sub {
             Kind::Items => ("i", "ig"),
             Kind::Summon => ("s", "sg"),
+            Kind::Sleight => ("l", "lg"),
             _ => ("m", "mg"),
         };
         let mut t = if self.open { format!("menu {tag}:{}", self.sub_list().cursor) } else { format!("menu r:{}", self.root.cursor) };
@@ -1308,6 +1424,9 @@ impl Menu {
         }
         if self.summon_on {
             t.push_str(if self.summon_lock { " sum:lock" } else if self.summon_grey { " sum:grey" } else { " sum" });
+        }
+        if self.bottom == crate::sleights::Bottom::Sleights {
+            t.push_str(if self.sleight_lock { " sl:lock" } else if self.sleight_grey { " sl:grey" } else { " sl" });
         }
         for e in events {
             t.push(' ');
@@ -1481,7 +1600,7 @@ pub fn text_colour(bright: u8, alpha: f32) -> u32 {
 
 /// Our own menu words (message ids above KH1's `Word.bin`), English in every language: the
 /// asset step's `command_menu::OUR_WORDS` holds the same.
-pub const OUR_WORDS: &[(u16, &str)] = &[(crate::gimmick::STAGGER_WORD, crate::gimmick::STAGGER_TEXT)];
+pub const OUR_WORDS: &[(u16, &str)] = &[(crate::gimmick::STAGGER_WORD, crate::gimmick::STAGGER_TEXT), (crate::sleights::ROW_WORD, crate::sleights::ROW_TEXT)];
 
 /// The words (`kh1-command-menu.json`) of one language, as Re:CoM's font bytes (NUL-terminated),
 /// by message id.
@@ -1569,9 +1688,9 @@ pub fn parse_words(text: &str, lang: &str) -> Result<Words, String> {
     }
     // Our own words (not KH1's): the asset step writes them; a manifest from before them gets the
     // built-in text (the Re:CoM look draws it; the KH1 look needs the asset step's glyphs).
-    for (id, text) in OUR_WORDS {
-        if out.get(*id).is_none() {
-            out.by_id.push((*id, font_bytes(text).0));
+    for (id, text) in OUR_WORDS.iter().copied().chain(crate::sleights::words()) {
+        if out.get(id).is_none() {
+            out.by_id.push((id, font_bytes(text).0));
         }
     }
     Ok(out)
@@ -1682,10 +1801,13 @@ mod tests {
         assert!(m.open);
         let o = m.step(&w, press(|p| p.cancel = true));
         assert!(!m.open && m.root.cursor == 0 && !o.jump);
-        // Left at the root: the cursor to Attack.
+        // Left at the root (M12 step 5, owner: KH1's Left → Attack dropped): the 4th row switches
+        // to Sleights, the cursor stays.
         m.root.cursor = 2;
         let o = m.step(&w, press(|p| p.left = true));
-        assert!(m.root.cursor == 0 && o.sounds == vec![Sound::Move]);
+        assert!(m.root.cursor == 2 && o.sounds == vec![Sound::Move]);
+        assert_eq!(o.bottom, Some(crate::sleights::Bottom::Sleights));
+        m.bottom = crate::sleights::Bottom::Summon;
         // The magic cursor is kept when the list opens again (KH1 keeps its list's cursor).
         m.magic.cursor = 4;
         m.root.cursor = 1;
@@ -2247,6 +2369,162 @@ mod tests {
         // Cancel closes it (sound 3), the root back on Attack.
         let o = m.step(&w2, press(|p| p.cancel = true));
         assert!(!m.open && m.root.cursor == 0 && o.sounds == vec![Sound::Back]);
+    }
+
+    /// M12 step 5: Sleights mode, Fire Raid (2 MP), Holy (3 MP), Idyll Romp (all MP) equipped, in
+    /// battle, the summons of [`summon_world`] learned too.
+    fn sleight_world() -> World {
+        use crate::abilities::sleight as s;
+        let mut sleights = [0u8; crate::sleights::MAX];
+        sleights[..3].copy_from_slice(&[s::HOLY as u8, s::IDYLL_ROMP as u8, s::FIRE_RAID as u8]);
+        World { bottom: crate::sleights::Bottom::Sleights, sleights, sleight_count: 3, ..summon_world() }
+    }
+
+    #[test]
+    fn left_at_the_root_switches_summon_and_sleights() {
+        use crate::sleights::Bottom;
+        // From any root row, Left switches the 4th row (sound 1) and keeps the cursor; the save
+        // keeps it (the next frame's world says Sleights).
+        for row in 0..4 {
+            let mut w = summon_world();
+            let mut m = Menu::new();
+            m.root.cursor = row;
+            let o = m.step(&w, press(|p| p.left = true));
+            assert_eq!((o.bottom, o.sounds.clone(), o.events.clone(), m.root.cursor), (Some(Bottom::Sleights), vec![Sound::Move], vec![Event::Bottom(Bottom::Sleights)], row));
+            assert!(!o.attack, "Left is no Attack");
+            w.bottom = Bottom::Sleights;
+            m.step(&w, Pad::default());
+            m.show();
+            assert_eq!(m.scene().rows[3].name, crate::sleights::ROW_WORD);
+            assert!(!m.summon_on, "the Summon entry isn't there in Sleights mode");
+            // And back.
+            let o = m.step(&w, press(|p| p.left = true));
+            assert_eq!(o.bottom, Some(Bottom::Summon));
+            w.bottom = Bottom::Summon;
+            m.step(&w, Pad::default());
+            assert_eq!(m.scene().rows[3].name, SUMMON_NAME);
+        }
+        // In an open list Left still closes it (KH1), with no switch.
+        let w = summon_world();
+        let mut m = Menu::new();
+        m.root.cursor = 1;
+        m.step(&w, press(|p| p.confirm = true));
+        assert!(m.open);
+        let o = m.step(&w, press(|p| p.left = true));
+        assert!(!m.open && o.bottom.is_none() && o.sounds == vec![Sound::Back]);
+        // The shortcut list (L1 held) has no cursor: no switch.
+        let mut m = Menu::new();
+        let ws = World { shortcuts: [1, 0, 0], ..w };
+        let o = m.step(&ws, press(|p| {
+            p.l1 = true;
+            p.left = true
+        }));
+        assert!(m.short_on && o.bottom.is_none());
+    }
+
+    #[test]
+    fn sleights_list_holds_the_equipped_ones_greyed_by_mp() {
+        use crate::abilities::sleight as s;
+        let mut m = Menu::new();
+        // 3 MP: all three usable, in Re:CoM's id order.
+        m.build(&sleight_world());
+        assert_eq!(m.sleight.cmds, vec![crate::sleights::command(s::FIRE_RAID), crate::sleights::command(s::HOLY), crate::sleights::command(s::IDYLL_ROMP)]);
+        assert_eq!(m.sleight.grey & 7, 0);
+        assert!(!m.sleight_grey && !m.sleight_lock);
+        // Its names are the sleights' words.
+        assert_eq!(cmd::name(m.sleight.cmds[1]), crate::sleights::word(s::HOLY));
+        // 2 MP: Holy (3) greyed and locked.
+        m.build(&World { mp: Some((2, 3, 0)), ..sleight_world() });
+        assert_eq!((m.sleight.grey & 7, m.sleight.lock & 7), (0b010, 0b010));
+        // 0 MP (a full charge doesn't count): all greyed, the row greyed but openable.
+        m.build(&World { mp: Some((0, 3, 29)), ..sleight_world() });
+        assert_eq!(m.sleight.grey & 7, 0b111);
+        assert!(m.sleight_grey && !m.sleight_lock);
+        // The field, the air: all greyed.
+        m.build(&World { battle: false, ..sleight_world() });
+        assert_eq!(m.sleight.grey & 7, 0b111);
+        m.build(&World { state: 2, ..sleight_world() });
+        assert_eq!(m.sleight.grey & 7, 0b111);
+        // A sleight (or a summon) running: greyed and locked; the Summon row too.
+        m.build(&World { summon_out: true, ..sleight_world() });
+        assert!(m.sleight_grey && m.sleight_lock);
+        // Nothing equipped: the row still says Sleights, greyed and locked; confirm buzzes.
+        let w = World { sleight_count: 0, ..sleight_world() };
+        let mut m = Menu::new();
+        m.step(&w, press(|p| p.up = true));
+        assert!(m.sleight.cmds.is_empty() && m.sleight_grey && m.sleight_lock);
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert!(!m.open && o.sounds == vec![Sound::Error] && o.sleight.is_none());
+        m.show();
+        let sc = m.scene();
+        assert_eq!((sc.rows[3].name, sc.rows[3].bright), (crate::sleights::ROW_WORD, BRIGHT_GREY as u8), "set by its grey bit, as Summon's");
+    }
+
+    #[test]
+    fn sleights_list_opens_beside_row_3_and_issues_through_kh1s_gate() {
+        use crate::abilities::sleight as s;
+        let w = sleight_world();
+        let mut m = Menu::new();
+        m.step(&w, press(|p| p.up = true));
+        // Right (or confirm) on row 3 opens it (sound 6).
+        let o = m.step(&w, press(|p| p.right = true));
+        assert!(m.open && m.sub == Kind::Sleight);
+        assert_eq!((o.sounds, o.events), (vec![Sound::Open], vec![Event::Opened(Kind::Sleight)]));
+        // Placed as the Summon list: three entries bottom-anchored at 348 − 66 = 282, x + 11.
+        m.show();
+        let ys: Vec<(f32, f32, u16)> = m.scene().rows.iter().filter(|r| r.list == Kind::Sleight).map(|r| (r.x, r.y, r.name)).collect();
+        assert_eq!(ys, vec![(27.0, 282.0, crate::sleights::word(s::FIRE_RAID)), (27.0, 304.0, crate::sleights::word(s::HOLY)), (27.0, 326.0, crate::sleights::word(s::IDYLL_ROMP))]);
+        // KH1's gate refuses (busy): no sound, the list stays.
+        m.step(&w, press(|p| p.down = true));
+        let o = m.step(&World { gate_any: false, ..w }, press(|p| p.confirm = true));
+        assert_eq!(o.events, vec![Event::Sleight(crate::sleights::command(s::HOLY), ShortResult::NotNow)]);
+        assert!(o.sounds.is_empty() && o.sleight.is_none() && m.open);
+        // Taken: Holy, no sound, the stack back on Attack.
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert_eq!((o.sleight, o.sounds.clone()), (Some(s::HOLY), vec![]));
+        assert!(!m.open && m.root.cursor == 0 && !o.attack);
+        // Greyed (2 MP): the error sound, nothing issued.
+        let w2 = World { mp: Some((2, 3, 0)), ..w };
+        m.step(&w2, press(|p| p.up = true));
+        m.step(&w2, press(|p| p.confirm = true));
+        m.sleight.cursor = 1;
+        let o = m.step(&w2, press(|p| p.confirm = true));
+        assert_eq!((o.sounds, o.sleight), (vec![Sound::Error], None));
+        // One entry: beside row 3.
+        let mut one = [0u8; crate::sleights::MAX];
+        one[0] = s::FREEZE as u8;
+        let w1 = World { sleights: one, sleight_count: 1, ..w };
+        let mut m = Menu::new();
+        m.step(&w1, press(|p| p.up = true));
+        m.step(&w1, press(|p| p.confirm = true));
+        m.show();
+        let ys: Vec<f32> = m.scene().rows.iter().filter(|r| r.list == Kind::Sleight).map(|r| r.y).collect();
+        assert_eq!(ys, vec![326.0]);
+        // Switched back to Summon while it is open (another frame's world): it closes.
+        m.step(&World { bottom: crate::sleights::Bottom::Summon, ..w1 }, Pad::default());
+        assert!(!m.open);
+    }
+
+    #[test]
+    fn sleights_words_are_in_the_word_list() {
+        // A manifest from before M12 step 5: the built-in English words (Re:CoM's look draws them).
+        let text = r#"{"format": "kh1-recom-assets command-menu 1", "words": {"us": {"1": "Attack", "2": "Magic", "3": "Items"}}}"#;
+        let w = parse_words(text, "fr").unwrap();
+        assert_eq!(w.get(crate::sleights::ROW_WORD), Some(&b"Sleights\0"[..]));
+        assert_eq!(w.get(crate::sleights::word(crate::abilities::sleight::CROSS_SLASH_PLUS)), Some(&b"Cross-slash+\0"[..]));
+        assert_eq!(crate::sleights::words().filter(|(id, _)| w.get(*id).is_some()).count(), crate::sleights::MAX);
+    }
+
+    /// The asset step writes the same words under the same ids (its `command_menu::SLEIGHT_WORDS`
+    /// and `OUR_WORDS`; the crates don't depend on each other).
+    #[test]
+    fn the_asset_steps_sleight_words_match() {
+        let src = include_str!("../../kh1-recom-assets/src/command_menu.rs");
+        for (id, name) in crate::sleights::words() {
+            let line = format!("({id:#06X}, \"{name}\")");
+            assert!(src.contains(&line), "the asset step lacks {line}");
+        }
+        assert!(src.contains(&format!("({}, \"{}\")", crate::sleights::ROW_WORD, crate::sleights::ROW_TEXT)));
     }
 
     #[test]

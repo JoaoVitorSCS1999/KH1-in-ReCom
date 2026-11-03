@@ -482,3 +482,60 @@ Owner test lines (step 4):
 
 Not checked (8.4): anything in game; which chest / event gives each "wiki" sleight; Re:CoM's message
 texts.
+
+### 8.5 The Sleights row and list (step 5)
+
+Owner ("M12 answers", 2026-11-03): "**D-pad Left toggles Summon / Sleights anywhere on the command
+menu** (drops KH1's Left → Attack)"; "In the sleights menu I only want ACTIVELY EQUIPPED sleights to
+show in the list"; "**Cost: MP by tier**: AP 2 → 1 MP, 3 → 2 MP, 4 → 2 MP, 5 → 3 MP; Idyll Romp /
+Cross-slash+ cost all MP like KH1 summons". Combat = KH1 in Sora's story only (the command menu's
+own rule); Combat = Re:CoM and Riku's story unchanged.
+
+| what | where | tag |
+|---|---|---|
+| **Left at the root** (any of the four rows): the 4th row switches Summon ↔ Sleights, KH1's move sound (1), the cursor stays. KH1's own Left-at-root (cursor to Attack, `0x1402931B0`) is dropped (owner). In an open list Left still closes it (KH1's back); the L1 shortcut list has no cursor (no switch). | `crate::command_menu` (`Menu::cursor`) | Checked (code + tests) |
+| **Kept per save**: the summon block's last byte `save + 0x26B6` (`summons::field::BOTTOM_ROW`; 0 Summon, 1 Sleights). It was the block's zero reserve: every older save reads Summon, and older builds' summon sync copies the byte unchanged. Written only on the press; without a save (none loaded) the choice lasts the session. | `win::summons::bottom_row` / `set_bottom_row` | Checked (code + tests) |
+| **The row in Sleights mode**: our word "Sleights" (902), always shown (also with nothing equipped), brightness by its grey bit as Summon's; **greyed** when no entry is usable, **greyed and locked** (confirm: KH1's error sound) with nothing equipped or while any Re:CoM sleight runs (Sora's action `0x16` in battle: a summon, a sleight, Sonic Blade). The Summon entry isn't there in this mode (the Magic list's "fewer than 3" placement test doesn't count it). | `Menu::build`, `Menu::scene` | Checked (code + tests) |
+| **The list**: `win::abilities::equipped_sleights()` (the equipped sleight abilities, Re:CoM's id order), commands `0x80 + id` (ours; KH1's table ends below 0x80), words `0x8100 + id` (the Abilities page's English names, in every language as Cloud's). Opened by confirm or Right on the row (sound 6), placed and drawn as the Summon list (beside row 3 with one entry, else bottom-anchored at 348 − 22 n; KH1's look: the Summon list's panels without its title). Read only while the row says Sleights. | `crate::sleights`, `win::command_menu` | Checked (code + tests) |
+| **Greying** (grey = lock, KH1's list rule): the summons' gate (`summons::usable` = KH1's `0x140288F30` without its once-per-battle test): Re:CoM's battle room, KH1's ground state (flag 0x80), nothing running, and the sleight's MP in whole points (the charge doesn't count): **Points n** needs MP ≥ n; **All** (Idyll Romp, Cross-slash+) needs MP ≥ 1. Confirm on an entry passes KH1's commit gate (free or a combo window, `0x140293480`), else nothing (no sound, the list stays). | `sleights::usable`, `Menu::run_sleight` | Checked (code + tests); ground only: **Assumption** (the summons' rule; see below) |
+| **The start**: Re:CoM's own sleight start, the summons' path (`win::summons::begin`, shared): Sora's vtable `+0x130` checked to be `0x1402247A0`, a live swing's volume ended (`0x140224FB0`), `player+0x82C` = the id, the start called, action `0x16` checked after. `0x1402247A0`'s case list holds every one of the 27 (0x1B..0x33, 0x3A, 0x43): use counter `0x14020E590`, `initStockSkill` `0x140220DF0` (per id: its attack row `+0x638`, resource load `0x140211790`, AP from `StockSkillList` × attack stat), `+0x838` = 10. Re:CoM then runs `exeStockSkill` `0x140218950`: motion, effects, hits, damage, end. No new hook or site: the callees are `sites::SUMMON_CHECKED`'s. | `win::summons::start_sleight` | Checked (decomp + exe: existing checked sites) |
+| **MP**: paid at once in whole points after Re:CoM's start took it (KH1's `0x1402A5B60` with cost ≥ 100, as the summons): the tier's points, or all of Sora's whole MP (the charge stays). The sleight's hits give no MP charge (KH1's charge comes from KH1's hits, `mp::on_kh1_hit`; Re:CoM's sleight hits aren't KH1 rows), as the summons'. | `sleights::pay_points` | Checked (code); that KH1 would charge nothing here: **Assumption** (no KH1 twin) |
+| **Invincibility**: none of ours (unlike the summons, owner's earlier ask for them only). Re:CoM's `exeStockSkill` sets its own protection bits in `player+0x418` where its sleight has them (e.g. `|= 0x1001` in one sub-state, cleared at its end); the damage-check wrapper's summon rule (`summons::out`) is not armed for these. | `0x140218950` | Checked (decomp) |
+| **Damage**: Re:CoM's own at both Damage settings: `initStockSkill`'s AP (power × attack stat `+0x43C` ÷ 100 or the row's mode) through Re:CoM's hit path, as Sonic Blade's at Damage = Re:CoM. These 27 have no KH1 twin, so Damage = KH1 has no KH1 number for them (as the summons). | | Checked (decomp `0x140220DF0`) |
+| **Preload**: Re:CoM's sleight resource load `0x140211790(player+0x3B8, id, 0)` when the Sleights list's cursor lands on an entry, or on the list's first entry while the root's cursor rests on the Sleights row (battle only; once per landing), as the summons' preload and as Re:CoM loads a formed sleight (`0x1401669F0`). | `win::summons::preload_sleight` | Checked (decomp); that a first use never starts before its pack is in: **Assumption** (as Sonic Blade's) |
+| **No deck needed** (the brief's check): the start and `initStockSkill` read only `+0x82C`, `StockSkillList` and the attack stat (§ 6). Synchro's effect is an enemy reaction, kind 0x13 in `0x14017DC50`: every enemy whose "Synchro" parameter is set takes the hit enemy's HP (`+0x274`); no card read. Warp, Warpinator, Teleport, Bind, Confuse, Terror: their rows' reaction kinds go through the same enemy handler; their branches were not read one by one. | `0x14017DC50` | Checked (decomp) for Synchro; **Assumption** for the others' details |
+| **Words for KH1's look**: the asset step writes "Sleights" (902) and the 27 names (`command_menu::SLEIGHT_WORDS`) in KH1's menu font; a DLL test checks both lists match. Re:CoM's look draws them from the built-in text without the asset step. KH1's look with an older `kh1-hud.json`: the rows have no word (logged once). | `kh1-recom-assets` `command_menu` | Checked (tests) |
+
+Per frame: in Summon mode one more byte read (the bottom row) and two loads (a sleight running)
+in the menu's build; in Sleights mode also the equipped read (15 + 8 bytes). Nothing outside the
+menu.
+
+Re:CoM differences found (not changed): Re:CoM has air versions of some sleights
+(`initStockSkill` tests `0x1401F3C00`, Sora airborne, for 0x24 Homing Blizzara, 0x2B..0x2F
+Warpinator, Warp, Bind, Confuse, Terror, 0x32 Teleport, and the -ra / -ga tiers), so Re:CoM lets
+those start in the air; the list keeps the summons' ground rule (owner question).
+
+Owner test lines (step 5):
+- Combat = KH1, a save with some sleight abilities equipped (camp KH1 tab > Abilities): in the
+  field press D-pad Left on any root row: the bottom row reads "Sleights" (the cursor stays);
+  Left again: "Summon". Save, reload: the row keeps the last choice. Log:
+  `summons: bottom row -> Sleights (kept in the save at save+0x26B6)`.
+- In battle on the ground, Sleights row, Right or confirm: the list shows only the equipped ones,
+  in Re:CoM's order; one Sora can't pay is greyed and buzzes. Pick each and watch it play as in
+  Re:CoM (motion, effects, hits, end), MP going down by its tier: Fire Raid, Blizzard Raid, Thunder
+  Raid, Reflect Raid, Judgment, Firaga Burst, Raging Storm, Mega Flare, Freeze, Homing Blizzara,
+  Aqua Splash, Magnet Spiral, Lethal Frame, Shock Impact, Tornado, Quake, Warpinator, Warp, Bind,
+  Confuse, Terror, Synchro, Gifted Miracle, Teleport, Holy, Idyll Romp and Cross-slash+ (the last
+  two take all MP, usable with 1). Log: `summons: sleight <name> -> Re:CoM's sleight 0x.. … n MP`
+  and `… Re:CoM's sleight ended …`. Tell us any that freezes Sora, plays without effects on its
+  first use, or ends the battle oddly (Warp, Warpinator, Teleport).
+- While one plays, the Summon / Sleights row is greyed and locked; Sora can be hit only where
+  Re:CoM's own sleight lets him.
+- Nothing equipped: "Sleights" greyed; confirm buzzes. In the field or in the air: every entry
+  greyed.
+- KH1's look (the KH1 HUD) needs this version's asset step for the words; Re:CoM's look shows them
+  without it.
+- Combat = Re:CoM: no change.
+
+Not checked (8.5): anything in game; each sleight's branch of `exeStockSkill` one by one (Warp,
+Warpinator, Teleport and how they end a battle); the resource wait for the magic-category sleights.

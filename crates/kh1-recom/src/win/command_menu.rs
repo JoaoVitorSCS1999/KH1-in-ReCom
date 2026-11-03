@@ -677,7 +677,9 @@ impl Ui {
             let base_y = m0.y;
             let sub = sub_groups(g, m0.list);
             // M8b: the Magic list's panels stand in for a missing Summon list: no "MAGIC" title.
-            let stand_in = m0.list == Kind::Summon && g.summon_list.is_none();
+            // M12 step 5: the Sleights list on the Summon list's panels (or the Magic list's), without
+            // a title (KH1 has no "SLEIGHTS" art).
+            let stand_in = (m0.list == Kind::Summon && g.summon_list.is_none()) || m0.list == Kind::Sleight;
             let layers: &[(u32, Option<f32>)] = if stand_in { &[(sub + kh::menu::HEADER, None)] } else { &[(sub + kh::menu::HEADER, None), (sub + kh::menu::TITLE, None)] };
             if let Some(h) = self.kh1_ctrl(PRIORITY_SUB, m0.x, base_y, 1.0, layers) {
                 func::<VecFn>(COLOUR)(h, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
@@ -702,7 +704,7 @@ impl Ui {
                 // list's hat). Which row takes which: Assumption (by their pictures).
                 let icon = match (v.list, v.name) {
                     // The Magic list's hat; the Items list's potion (`ite_sel_ico_d`).
-                    (Kind::Magic | Kind::Items | Kind::Summon, _) => Some(base_g + 5),
+                    (Kind::Magic | Kind::Items | Kind::Summon | Kind::Sleight, _) => Some(base_g + 5),
                     (_, 1) | (_, 343) => Some(look + kh::menu::ICON),
                     (_, 2) => Some(look + kh::menu::ICON + 1),
                     (_, 3) => Some(look + kh::menu::ICON + 2),
@@ -723,6 +725,12 @@ impl Ui {
                     let b = kh1_word_level(v.bright);
                     func::<VecFn>(COLOUR)(t, V4([b, b, b, sc.alpha]).0.as_ptr());
                     text = t;
+                }
+            } else if v.name == crate::sleights::ROW_WORD || v.name & 0xFF00 == crate::sleights::WORD_BASE {
+                // M12 step 5: an asset step from before the Sleights words: the row has no word.
+                static LOGGED: AtomicBool = AtomicBool::new(false);
+                if !LOGGED.swap(true, Ordering::Relaxed) {
+                    log(&format!("command menu: kh1-hud.json has no KH1-font word {:#x} (\"Sleights\" / a sleight's name): run this version's asset step; drawn without it", v.name));
                 }
             }
             self.rows.push(Row { ctrl: c, fnt: 0, view: *v, text });
@@ -816,7 +824,7 @@ fn kh1_word_level(bright: u8) -> f32 {
 fn sub_groups(g: &kh::MenuGroups, list: Kind) -> u32 {
     static LOGGED: AtomicBool = AtomicBool::new(false);
     static LOGGED_SUMMON: AtomicBool = AtomicBool::new(false);
-    if list == Kind::Summon {
+    if list == Kind::Summon || list == Kind::Sleight {
         return match g.summon_list {
             Some(first) => first,
             None => {
@@ -1041,6 +1049,17 @@ unsafe fn world(pl: usize) -> World {
     if super::summons::installed() {
         (w.summons, w.summon_count) = super::summons::learned();
         (w.battle, w.summon_out) = super::summons::gate_state(pl);
+        // M12 step 5: the bottom row (one save byte), the equipped sleights only while it says
+        // Sleights, and any Re:CoM sleight running locks both rows (one at a time).
+        w.summon_out |= super::summons::sleight_running(pl);
+        w.bottom = super::summons::bottom_row();
+        if w.bottom == crate::sleights::Bottom::Sleights {
+            let ids = crate::sleights::list(&super::abilities::equipped_sleights());
+            for (k, &id) in ids.iter().enumerate() {
+                w.sleights[k] = id as u8;
+            }
+            w.sleight_count = ids.len() as u8;
+        }
     }
     // M9 stage 9c.1: KH1's special offer (`0x14028D0F0`) when nothing took the context entry.
     // Battle only (owner, 2026-11-01: "Only in battle"): Re:CoM's battle room (`player+0x390`).
@@ -1136,8 +1155,18 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
             }
         }
         let ev: Vec<String> = out.events.iter().map(|e| describe(e, m)).collect();
-        // M8b: the summon under the Summon list's cursor (the preload).
-        let at = (m.open && m.sub == Kind::Summon).then(|| m.summon.cmds.get(m.summon.cursor.max(0) as usize).copied().and_then(cm::cmd::summon)).flatten();
+        // M8b: the summon under the Summon list's cursor (the preload): its LV3 sleight. M12 step 5:
+        // the sleight under the Sleights list's cursor, or its first while the root's cursor rests
+        // on the Sleights row.
+        let at = if m.open && m.sub == Kind::Summon {
+            m.summon.cmds.get(m.summon.cursor.max(0) as usize).copied().and_then(cm::cmd::summon).and_then(|i| crate::summons::ALL.get(i)).map(|s| s.sleight)
+        } else if m.open && m.sub == Kind::Sleight {
+            m.sleight.cmds.get(m.sleight.cursor.max(0) as usize).copied().and_then(crate::sleights::of_command)
+        } else if !m.open && m.root.cursor == 3 && m.bottom == crate::sleights::Bottom::Sleights {
+            m.sleight.cmds.first().copied().and_then(crate::sleights::of_command)
+        } else {
+            None
+        };
         (out, ev, at)
     };
     // KH1's own sounds with KH1's look (`menu_sounds`), else Re:CoM's.
@@ -1154,6 +1183,7 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
             Event::Shortcut(_, c, _) => note(|| format!("{d} [{c:#x}]")),
             Event::Item(c, _, _) => note(|| format!("{d} [{c:#x}]")),
             Event::Summon(c, _) => note(|| format!("{d} [{c:#x}]")),
+            Event::Sleight(c, _) => note(|| format!("{d} [{c:#x}]")),
             _ => note(|| d.clone()),
         }
     }
@@ -1170,8 +1200,16 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
     if let Some(i) = out.summon {
         super::summons::start(pl, i);
     }
+    // M12 step 5: a Sleights list entry: Re:CoM's own sleight start for it (the summons' path);
+    // D-pad Left's switch kept in the save.
+    if let Some(id) = out.sleight {
+        super::summons::start_sleight(pl, id);
+    }
+    if let Some(b) = out.bottom {
+        super::summons::set_bottom_row(b);
+    }
     if super::summons::installed() {
-        super::summons::preload(pl, summon_at);
+        super::summons::preload_sleight(pl, summon_at);
     }
     // M9 stage 9c.1: a special (the context tab's Triangle, or Rave / Blast in the Attack row).
     if let Some(c) = out.special {
@@ -1194,6 +1232,17 @@ fn describe(e: &Event, m: &Menu) -> String {
     match *e {
         Event::Opened(Kind::Items) => format!("open items ({} filled slots {:?}, grey {:#x})", m.items.cmds.len(), m.item_slots, m.items.grey & 0xFF),
         Event::Opened(Kind::Summon) => format!("open summon ({} learned, grey {:#x})", m.summon.cmds.len(), m.summon.grey & 0x7F),
+        Event::Opened(Kind::Sleight) => format!("open sleights ({} equipped, grey {:#x})", m.sleight.cmds.len(), m.sleight.grey & 0x7FF_FFFF),
+        Event::Bottom(b) => format!("bottom row {b:?}"),
+        Event::Sleight(c, r) => format!(
+            "sleight {} {}",
+            name(c),
+            match r {
+                ShortResult::Cast => "issued",
+                ShortResult::Greyed => "greyed",
+                ShortResult::NotNow => "not-now",
+            }
+        ),
         Event::Opened(_) => format!("open magic ({} spells, grey {:#x})", m.magic.cmds.len(), m.magic.grey & 0x7F),
         Event::Closed => "close".into(),
         Event::Spell(c, _) => format!("spell {}", name(c)),
