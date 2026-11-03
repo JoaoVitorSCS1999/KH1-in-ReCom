@@ -2094,11 +2094,15 @@ fn run_speed_recom_runs_at_recoms_6_2_mps_and_walks_kh1s() {
 }
 
 #[test]
-fn jump_height_recom_is_recoms_jump_after_kh1s_crouch() {
+fn jump_height_recom_is_recoms_jump_after_recoms_crouch() {
     for (high, top) in [(false, 198.94), (true, 266.8)] {
         let mut p = with_speeds(Abilities { high_jump: high, ..Default::default() }, Mode::Kh1, Mode::Recom, Mode::Kh1);
         let f: Vec<Frame> = (0..120).map(|k| p.step(Pad { jump: k < 70, ..Default::default() })).collect();
-        assert_eq!(f[3].ours.y, 0.0, "KH1's 4 crouch frames");
+        // Re:CoM's crouch (`0x1401EDA60` phase 1, `params+0x24` = 100 units): the press frame and 2 crouch frames
+        // on the ground, the take-off on frame 3 (KH1: frame 4).
+        assert_eq!((f[0].ours.y, f[1].ours.y, f[2].ours.y), (0.0, 0.0, 0.0), "Re:CoM's crouch");
+        assert!(f[3].ours.y < 0.0, "the take-off on the 3rd frame after the press: {}", f[3].ours.y);
+        assert!(f[3].out.events.contains(&Event::TookOff) && !f[2].out.events.contains(&Event::TookOff));
         let peak = f.iter().map(|x| -x.ours.y).fold(0.0, f32::max);
         assert!((peak - top).abs() < 0.1, "high {high}: peak {peak}");
         // The take-off frame rises at Re:CoM's take-off speed (13.72 units, 15.93 high).
@@ -2115,6 +2119,38 @@ fn jump_height_recom_is_recoms_jump_after_kh1s_crouch() {
     assert!((up(first + 11) - (13.72 - 11.0 * 0.49)).abs() < 1e-2);
     assert!((up(first + 12) - (13.72 - 12.0 * 0.49) * 0.43).abs() < 1e-2);
     assert!(!f.iter().any(|x| x.out.events.contains(&Event::JumpCut)), "KH1's cut doesn't run");
+    assert_eq!(first, 3, "a tapped jump takes off after Re:CoM's crouch too");
+}
+
+#[test]
+fn jump_height_kh1_keeps_kh1s_4_frame_crouch() {
+    for run in [Mode::Kh1, Mode::Recom] {
+        for air in [Mode::Kh1, Mode::Recom] {
+            let mut p = with_speeds(Abilities::default(), run, Mode::Kh1, air);
+            let f: Vec<Frame> = (0..40).map(|k| p.step(Pad { jump: k < 30, ..Default::default() })).collect();
+            assert!(f[..4].iter().all(|x| x.ours.y == 0.0), "KH1's 4 crouch frames");
+            assert!(f[4].ours.y < 0.0 && f[4].out.events.contains(&Event::TookOff), "the take-off on frame 4");
+            assert!(p.ours.recom_crouch.is_none());
+        }
+    }
+}
+
+#[test]
+fn jump_height_recom_land_jump_has_recoms_whole_crouch() {
+    // KH1's land jump starts its crouch at t = 2 (`0x1402A6220`: 2 frames on the ground); Re:CoM's land jump runs its
+    // jump init (`0x1401EE360` → `0x1401F29F0`), whose crouch starts from 0 like any jump.
+    for (jump, ground) in [(Mode::Kh1, 2), (Mode::Recom, 3)] {
+        let mut p = with_speeds(Abilities::default(), Mode::Kh1, jump, Mode::Kh1);
+        let mut k = 0;
+        while !p.step(Pad { jump: k < 2, ..Default::default() }).out.events.contains(&Event::Landed) {
+            k += 1;
+            assert!(k < 200, "{jump:?}: never landed");
+        }
+        // Pressed 2 frames into the landing lock (12 frames).
+        let f: Vec<Frame> = (0..30).map(|k| p.step(Pad { jump: k == 2, ..Default::default() })).collect();
+        let took = f.iter().position(|x| x.out.events.contains(&Event::TookOff)).unwrap_or_else(|| panic!("{jump:?}: no land jump"));
+        assert_eq!(took - 2, ground, "{jump:?}");
+    }
 }
 
 #[test]
