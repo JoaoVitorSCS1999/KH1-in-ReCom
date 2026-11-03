@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 197: Sleights: Re:CoM's seven air-start sleights usable mid-air, version 0.100.3 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Allow Re:CoM's air ones".
+- Re:CoM's sleight setup `0x140220DF0` gives an air version only to 0x24, 0x2B–0x2F and 0x32 (Checked (decomp)): exactly Homing Blizzara, Warpinator, Warp, Bind, Confuse, Terror, Teleport. Usable in KH1's take-off, air and flight states; the rest greyed in the air; summons ground-only. Not read: Re:CoM with a ground-only sleight in the air. Assumption: the hand-back to KH1 controls after landing.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 196: Sleight abilities: a short description each, version 0.100.2 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Write short ones"; the name stays "Lethal Frame".
