@@ -641,7 +641,7 @@ unsafe fn mover(en: usize) -> usize {
     rd(en + e::MOVER)
 }
 
-unsafe fn sora_pos() -> Option<Vec3> {
+pub(super) unsafe fn sora_pos() -> Option<Vec3> {
     let pl: usize = rd(super::va(base(), data::MAIN_PLAYER));
     if pl == 0 {
         return None;

@@ -339,7 +339,8 @@ fn a_long_fight_never_stalls() {
         for f in 0..20_000usize {
             let a = f as f32 / 600.0;
             let rad = 200.0 + 450.0 * (1.0 + (f as f32 / 1700.0).sin());
-            let sora = Vec3::new(a.sin() * rad, 0.0, a.cos() * rad);
+            // Sora keeps 2–11 m from it (it never comes to him: he chases it).
+            let sora = Vec3::new(s.pos.x + a.sin() * rad, 0.0, s.pos.z + a.cos() * rad);
             if f == next_hit {
                 let x = r.next_f32();
                 s.ai.set_hit_kind(if x < 0.3 { 5 } else { 3 });
@@ -374,10 +375,13 @@ fn hosted_a_long_fight_never_releases() {
         for f in 0..20_000usize {
             let a = f as f32 / 600.0;
             let rad = 200.0 + 450.0 * (1.0 + (f as f32 / 1700.0).sin());
-            m.run(Vec3::new(a.sin() * rad, 0.0, a.cos() * rad), 1);
+            let p = m.pos;
+            m.run(Vec3::new(p.x + a.sin() * rad, 0.0, p.z + a.cos() * rad), 1);
         }
         assert_eq!(m.released, 0, "seed {seed}");
-        assert!(m.log.iter().any(|(_, c)| matches!(c, ECmd::Throw(_))), "seed {seed}: it throws");
+        for n in [child::BANANA, child::PEEL, child::DROP] {
+            assert!(m.log.iter().any(|(_, c)| *c == ECmd::Throw(n)), "seed {seed}: throw {n}");
+        }
     }
 }
 

@@ -2950,6 +2950,60 @@ pub const DEFENDER_PTRS: &[PtrSite] = &[
 /// 2026-11-02: "drawn with a Re:CoM effect (its own)"). Pointer-checked: slot 1's name pointer. Checked (exe + decomp).
 pub const DEFENDER_FIRE_PTRS: &[PtrSite] = &[PtrSite { name: "the Defender's fireball effect set slot 1 name", rva: 0x0053_CF48, target: 0x0053_CF90 }];
 
+/// M11 casters: the Bouncywild's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp): its only caller
+/// is the enemy factory `0x140188F40` (case 8, the call at `0x1401890EC`); no branch lands inside the moved bytes and no
+/// pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-03).
+pub const BOUNCYWILD_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemyBouncywild ctor (0x14018C4D0)", rva: 0x0018_C4D0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 casters: the factory's `mov ecx, 0xCD0` before `CEnemyBouncywild`'s ctor, raised by the framework's 0x20-byte tail.
+/// Checked (exe).
+pub const BOUNCYWILD_ALLOC: &[Site] = &[Site { name: "alloc CEnemyBouncywild (0x1401890D3)", rva: 0x0018_90D3, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11 casters: `CEnemyBouncywild`'s vtable slots the copy keeps or replaces, checked against Re:CoM's functions before the
+/// copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12 / 30 are `CBattleEnemy`'s, 1..3 the
+/// Bouncywild's own: 1 `0x14018C630` (`e008_001` / `e008_002`) / the walk thunk `0x14018CA30`, 2 `e008_050` → `_051` →
+/// `_052` `0x14018C590` / `0x14018C660` (a straight `CBullet` from `wep0`, attack id 0), 3 `e008_053` `0x14018C5E0` /
+/// `0x14018C870` (a homing banana from `l_fing1a`, attack id 1, Sora's slip kind 0x18); the think `CHeartless`'s
+/// `0x140196EC0`).
+pub const BOUNCYWILD_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyBouncywild +0x70 motion play", rva: 0x0053_9028, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyBouncywild +0x80 update", rva: 0x0053_9038, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyBouncywild +0xE8 state 0 begin", rva: 0x0053_90A0, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyBouncywild +0xF0 state 0 step", rva: 0x0053_90A8, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyBouncywild +0xF8 state 0 end", rva: 0x0053_90B0, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyBouncywild +0x100 state 1 begin", rva: 0x0053_90B8, target: 0x0018_C630 },
+    PtrSite { name: "CEnemyBouncywild +0x108 state 1 step", rva: 0x0053_90C0, target: 0x0018_CA30 },
+    PtrSite { name: "CEnemyBouncywild +0x118 state 2 begin", rva: 0x0053_90D0, target: 0x0018_C590 },
+    PtrSite { name: "CEnemyBouncywild +0x120 state 2 step", rva: 0x0053_90D8, target: 0x0018_C660 },
+    PtrSite { name: "CEnemyBouncywild +0x130 state 3 begin", rva: 0x0053_90E8, target: 0x0018_C5E0 },
+    PtrSite { name: "CEnemyBouncywild +0x138 state 3 step", rva: 0x0053_90F0, target: 0x0018_C870 },
+    PtrSite { name: "CEnemyBouncywild +0x1F0 state 11 begin", rva: 0x0053_91A8, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyBouncywild +0x208 state 12 begin", rva: 0x0053_91C0, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyBouncywild +0x3B8 state 30 begin", rva: 0x0053_9370, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyBouncywild +0x3C0 state 30 step", rva: 0x0053_9378, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyBouncywild +0x3D0 think", rva: 0x0053_9388, target: 0x0019_6EC0 },
+    // The shared enemy-guard step: the hit handler's guard event (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemyBouncywild +0x3D8 guard event", rva: 0x0053_9390, target: 0x0018_1600 },
+    PtrSite { name: "CEnemyBouncywild +0x438 attack hurt off", rva: 0x0053_93F0, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyBouncywild +0x440 attack end", rva: 0x0053_93F8, target: 0x0017_DA90 },
+];
+
+/// M11 casters: the Bouncywild's own homing banana's effect set (`0x14018C870`'s descriptor `+0xA8` = `0x1407C3010`: slots
+/// 1 / 3 `"_ex_2040"` 5 / 10, the model's own effects), copied into its KH1 banana and peels (owner 2026-11-02: "drawn
+/// with a Re:CoM effect (its own)"). Pointer-checked: slot 1's name pointer. Checked (exe + decomp).
+pub const BOUNCYWILD_FIRE_PTRS: &[PtrSite] = &[PtrSite { name: "the Bouncywild's banana effect set slot 1 name", rva: 0x007C_3028, target: 0x0053_9448 }];
+
+/// M11 casters: the reaction kind Re:CoM's own banana carries (`0x14018C870`: its descriptor's `+0x68` = 0x18), which the
+/// player damage check `0x1401E6DE0` takes as Sora's slip (row 0x29 `p001_049`, KH1's slip clip baked; `0x1401F6190`
+/// scatters a tenth of his Moogle points): the KH1 peels' hits carry it. Checked only (decomp + exe), never patched.
+pub const BOUNCYWILD_CHECKED: &[Site] = &[
+    // mov dword [rsp+0x98],0x18
+    Site { name: "the Bouncywild banana's slip kind (0x14018C924)", rva: 0x0018_C924, expect: &[0xC7, 0x84, 0x24, 0x98, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00] },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -3088,6 +3142,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         DEFENDER_HOOKS,
         DEFENDER_ALLOC,
         HELD_CALLEES,
+        BOUNCYWILD_HOOKS,
+        BOUNCYWILD_ALLOC,
+        BOUNCYWILD_CHECKED,
     ];
     LISTS
         .iter()
@@ -3187,7 +3244,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS, BOUNCYWILD_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

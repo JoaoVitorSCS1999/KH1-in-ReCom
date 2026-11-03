@@ -145,6 +145,12 @@ pub(super) unsafe fn on_result(c: usize, list: usize, r: i32) -> i32 {
         None
     };
     if let Some(s) = shot {
+        // M11, the Bouncywild's peels (`super::kh1_peel`): KH1's peel is no attack, nothing turns it back; Re:CoM's
+        // block stands (it is used up).
+        if super::kh1_peel::is_peel(rd(obj + 0x20)) {
+            other(obj, c, "a KH1 banana peel: blocked, not turned back");
+            return r;
+        }
         if rd::<usize>(obj + bullet::COLL) == c && turn_back(obj, c, s) {
             return 0;
         }

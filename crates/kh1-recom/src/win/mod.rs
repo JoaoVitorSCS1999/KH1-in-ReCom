@@ -29,6 +29,7 @@ mod revenge;
 mod kh1_enemy;
 mod kh1_thrown;
 mod kh1_flame;
+mod kh1_peel;
 mod shop;
 mod specials;
 mod stats;
