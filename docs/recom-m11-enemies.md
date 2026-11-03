@@ -3677,6 +3677,205 @@ flame's lag and the repel count to compare.
 3. **One fireball a round.** KH1's script passes 1, 2 or 3 to its fireball routine but clears the count before the first shot
    (`0x1630`), so KH1's Defender fires one fireball each time. Built 1:1. (a) Keep (KH1); (b) fire the count passed (not KH1).
 
+### The Red Nocturne (built)
+
+Status: built on branch `rednoc-wip`; tests and the Windows build pass; **not seen in game**; no KH1 trace of the Red
+Nocturne yet. KH1's AI, reactions and motions on Re:CoM's `CEnemyRednocturne`, with Re:CoM's stats; it has no attack of its
+own: its two spells (its children) are Re:CoM bullets moved by KH1's numbers, drawn with Re:CoM's own Red Nocturne shot
+effects, with Re:CoM's own Red Nocturne shot power. The first of the casting family (Red Nocturne, Blue Rhapsody, Yellow
+Opera, Green Requiem): the routines the family shares are `kh1_core::caster`.
+
+#### KH1's side. Checked (files: `ex_2110.bd` disassembled, code from `0x308`, folded and raw; its children `ex_2110_00.bd` / `ex_2110_01.bd`, code from `0x18`; decomp: the syscalls named)
+
+The script (0x2180 bytes) keeps the actor at `wp+4`, the state object at `wp+0x20`, the search object at `wp+0x30`, a random
+draw at `wp+0` (the hover's side, read by the next strafe), "seen" at `wp+0x38`. Every motion it plays is a plain request
+(no action bit) except its appearance (69): it pauses only for KH1's reactions. **It makes no attack row of its own**: its
+four rows are passed to its two children (`sys 94`).
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x1E48` | init `0xC94` (records LV1 `0x14` / LV2 `0x80`; stats `+0x14` = 0.2 (the flight's easing), `+0x18` = 0.95; flight with no velocity `sys 135`; the state / search objects; home); handlers: hit `0x1F1E`, message `0x20EA` (answers 0), hit-effect filter `0x1EEC` (a Fire hit's effect 14: element, left out); a yield; the idle start `0x910`; then each frame: in state 1 the search (`0xA52`: Sora within 1000 → state 2 with the target), and a state request restarts the behaviour (1 idle `0x8F4`, the target cleared; 2 engaged `0x384`; 3 hit `0x32C`). No `sys 125`: KH1's default turn π/16 a frame |
+| idle start | `0x910` | spawn type ≠ 0: the appearance `0xE94` (alpha 0 → 1 over 30 frames, flag 0x80, effect 2, **69 as an action with 219 queued**, then facing Sora at once); state 1 |
+| idle | `0x8F4` → `0x93E` | legs of [150, 180) frames: the idle hover 219 (blend 8), its direction turning 5° a frame at 8 a frame, **facing yaw 0** (`0x1BAC(actor, actor)`: `sys 11` of a zero vector, `atan2f(0, 0)` = 0, `0x1402B9EF0`), sinking 0.3 × 8 a frame, or rising when lower than 150 over the floor (`sys 89`) |
+| engaged | `0x384` | the first time: seen, and for spawn type 0 the notice `0xD1A` (214, not in world 11); a yield; the leash (not ported); by the distance (`0x15F8`, 3D): < 500 `0x46A` or < 700 `0x444` (the same bytes): 40 % the strafe and Fire, then the circling hover; ≥ 700 `0x41E`: 50 % the big Fire, then the approach; the search (`0xC5A`: Sora); state 2 again |
+| strafe and Fire | `0x4FC` | its facing turned −90° when `wp+0` < 0.5, else +90° and the turn −5°; **the Fire child** (`sys 94(actor, 0, target, 0xEC, 0x15C)`); 200 (`sys 13`, blend 8) with 201 queued; until the cast has played (`sys 172`: nothing queued, played to its end): `0x9FA` (the direction turned 5° a frame, steering at 8.4 with height 0, facing the target at once); then 220 (blend 8) |
+| circling hover | `0x686` | `wp+0` = rand: < 0.8 −90°, else +90° and the turn −2°; high if at or above 90 over the target's floor (`0x1466`: `sys 77` straight down from 20 above the target); [90, 120) frames: request 2 (blend 8), `0x9FA` at 2° a frame, 3.64 a frame; its height: high: 0.2 (down, × 3.64) until [15, 30) over the floor (a draw each frame), then 0; low: −0.2 (up) until 90 over it, then 0; stuck (`0xFBA(0.84)`: moved under 0.42 × step): done |
+| big Fire | `0x490` | **the big Fire child** (`sys 94(actor, 1, target, 0x1CC, 0x23C)`); 202 (blend 8, **from frame 8**) with 203 queued; until the cast has played or request 6 plays (`0x1592`): turning to the target (`sys 36`); then 220 |
+| approach | `0x652` | `0xABC(2, target, 8.4, 500, 100, 300, 240)` |
+| fly to | `0xABC(m, p, speed, stop, up, high, t)` | each frame toward `p` (re-read: the target's live place) aimed `up` above it; done within `stop` (3D), out of time, or stuck (`speed × 0.3`); `m` played (blend 8); while the aim is below it: no descent when it is below `p` itself, else over `high` above the floor the way is scaled by the speed before it is normalised (no effect; kept); `sys 36` along the way; steering at `speed` |
+| hit state | `0x32C` | within 500: the flee `0x5EA` (a point [500, 600) away at a random angle, `0xABC(217, point, 14, 100, 0, 300, [120, 180))`, then turning to the target) and the big Fire; state 2 |
+| hit handler | `0x1F1E` | seen; attribute 3 / 8: `sys 194` (not carried: no attribute); **its own row** (`sys 188` in [10500, 10504]: a fire of its kind sent back) or attribute 3: the damage, killed → its death; alive: `sys 194(EXP / 10 + 2)`, `sys 179(actor, 1800)`, state 3. Attribute 2 (Fire): no damage, HP to max, kind 0 (left out: element). Else `0x1854`: a clash (kinds 6 / 7) or a repel → −1; the damage (killed → its death `0x1518`); attacker gone / attributes 8–11 → −1; −1 with a clash (or 8 / 10): state 3; alive: (attribute 3: `sys 179`) state 3. The kind is never rewritten (KH1's reaction plays) |
+
+`sys 179` (`0x1402BC120` → `0x1402B8730`): when the model has request 0x42, flag `+0x88 |= 2` and `+0x3E4` = 1800: **KH1's
+dizzy** (0x42 → 0x43 for up to 1800 frames → 0x44; `0x1402B7260` counts it down, a hit wakes it, `0x1402B8E10` /
+`0x1402B8DC0`; Checked (decomp)). Not built (owner question 1).
+
+**Its children** (`ex_2110_00.bd` the Fire, `ex_2110_01.bd` the big Fire; the same code with other numbers). Their flight
+loop, move, re-aim and homing (`0x142`, `0x23E`, `0x288`, `0x3C8`, `0x434`) are **byte for byte the Defender's fireball
+child's** (`ex_2340_01.bd` `0x72`, `0x16E`, `0x1B8`, `0x2F8`, `0x364`; Checked (files)). The entry `0x6B6`:
+
+| | Fire (`_00`) | big Fire (`_01`) |
+|---|---|---|
+| waits while the parent plays | 200 | 202 |
+| then the parent must play (else it ends) | 201 | 203 |
+| for (frames, counted from the first frame of it; the parent must keep playing it) | 40 | 90 (only while the parent lives) |
+| start `sys 19(parent, 0x8001, −0.5)`, then up | 80 | 70 |
+| init `0x434(…, turn, speed)` | 1° a frame, 12 a frame | 2°, 22 |
+| fly `0xE8(…, model, life, fade)` | 7, 90, 20 | 11, 90, 20 |
+| rows (fire / batted) | `0xEC` (r 30) / `0x15C` (r 60, type 5) | `0x1CC` (r 40) / `0x23C` (r 60, type 5) |
+
+`sys 19(actor, 0x8001, t)` (`0x14029EB20`, Checked (decomp)): a code with bit 15 and none of the special ones is the actor's
+place `+0x10` plus `(0, 0, t × 100, 0)` through its matrix `+0xD0`, whose z row is `0 − facing` (`0x1402A0A40`): with t
+−0.5, **50 ahead along its facing**. Its first direction is the parent's facing (`+0x30`); each frame it turns toward its
+target's lock point by at most turn × step (`sys 24`), moves speed × step, for 90 frames (fading the last 20: M13). A hit ends
+it. A clash (`+4 & 0x30`) re-aims it (`0x288` = the Defender's `0x1B8`) at the swinger's target or its thrower and flies it
+its life again with the batted row. The fire rows are type 0, priority 0, bone −1 (`0x1402B2DC0`: a bone code < 0 sets the
+object's `+0x30 |= 0x400`, free-standing; Checked (decomp)).
+
+KH1's reactions play for every hit: its model has the flinch (72..75), the knock-back (76 / 77), the air flinch (78 / 79) and
+the air knock-back (80 / 81); as a flier the shared engine takes the ground forms, kind 5 as 4.
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyRednocturne` (vtable `0x140548A58`, 139 slots, RTTI COL at −8), ctor `0x140191880` (`40 53 48 83 EC 20`: `CHeartless`'s
+base ctor, then `+0x154 |= 0x80`, `+0x260 |= 0x100`: gravity off; its only reference the factory's call at `0x14018901A`; no
+branch into the moved bytes, no pointer to them: exe scan, 2026-11-03), allocation `0x140189001` `mov ecx, 0xCD0` → 0xCF0.
+Its own states 1 (`0x1401919F0` with `e003_001` / `e003_002`, step → `0x140197450`), 2 (`e003_051`, its small shot: at clip
+time 0x79D (39 frames) a `CBullet` from its own aim point at Sora's, `0x14017F0E0(enemy, 0, 1)`'s AP, 0.2 m a frame,
+radius 0.25, homing 2.5° a frame for 1500 ticks, effect set `0x140548EF0` (`"_ex_2110"` 8 / 9 / 7); `0x140191950` /
+`0x140191C00`), 3 (`e003_053`, its big shot: at 0x1035 (83 frames), id 1, 0.25 m a frame, effect set `0x140548F60` (12 / 13 /
+11); `0x1401919A0` / `0x140191CC0`); 0 / 11 / 12 / 30 `CBattleEnemy`'s; think `0x140196EC0`. `EN0003.ASD`: no record.
+`EN0003.ANN`: 75 slots (`e003_051` 58 frames at 30 fps = KH1's 201's 116; `e003_053` 100 = 203's 200; the matcher finds no
+exact bake: every KH1 request gets its own clip). **Re:CoM has no `EN0003.SES`**: `Recom.hed` holds no
+`ENEMY/0003/EN0003.SES` (its MD5 absent) and the exe's resource names for enemy 3 (`0x1405E0A18..`) list `.RTM`, `.ANN`,
+`.EET`, `.ASD`, `.SND` but no `.SES` (enemies 2 and 4 list one): Re:CoM never loads one for it; its clips play no motion
+sounds (the Yellow Opera's and the Green Requiem's are missing the same way).
+
+Our copy: states 0, 1, 11, 12, 30 and the think (20 vtable slots pointer-checked, `sites::REDNOCTURNE_PTRS`); states 2 and 3
+are never entered (no attack of its own). The attack-end cooldown (0.83.0) is keyed to Re:CoM's own vtable: `enemy_ai =
+recom` leaves Re:CoM's Red Nocturne as Re:CoM has it.
+
+**Power mapping** (decision M10, "each KH1 spell takes its Re:CoM shot's power"): the Fire → Re:CoM's small shot, id 0 kind 1
+(`0x14017F0E0(enemy, 0, 1)`, as its state 2 asks); the big Fire → its big shot, id 1 kind 1 (state 3). Both pairs are the
+same spell in both games (KH1's models 7 / 11 are Re:CoM's effect sets' 7 / 11 of `_ex_2110`). A batted fire keeps its power.
+
+#### Its fires (Re:CoM bullets moved by KH1's numbers)
+
+- **The wait** is the behaviour's (`kh1_core::caster::Cast`, stepped once a frame in `frame` / `side_frame` with the motion
+  the host plays: KH1's child runs every frame): it waits while 200 / 202 plays, ends unseen when the cast (201 / 203) isn't
+  next, counts 40 / 90 frames of it, then asks for the throw (`Cmd::Throw(0 / 1)`). No per-frame host work while it waits.
+- **The bullet** (`win::kh1_thrown`, `Kind::Fire`, the Defender's machinery, now by prefix `fire` / `bigfire`): one of
+  Re:CoM's own `CHomingBullet`s made at KH1's start (`kh1_core::rednocturne::fire_start` on the Red Nocturne's KH1 place and
+  facing), along its facing, at 12 / 22 a frame, turning 1° / 2° a frame toward Sora's aim point (Re:CoM's vtable `+0x50`
+  for KH1's lock point 0, Assumption as every port), 90 frames; its power above; its look Re:CoM's own Red Nocturne shot's
+  effect set (`sites::REDNOCTURNE_FIRE_PTRS`, pointer-checked); radius KH1's 30 / 40 cm. Re:CoM's step collides it and hits
+  Sora (a hit ends it).
+- **Swing**: KH1's re-aim (`0x288`): Guard's turn-back to the enemies' side, then aimed half-way between the Red Nocturne and
+  Sora's target (or at the Red Nocturne), turning toward that target, its life again, **radius KH1's batted row's 60 cm**
+  (Re:CoM's radius setter `0x140172690`); Re:CoM's guard spark.
+- **Guard: KH1's way** (the task's rule: "if KH1's guard sends it back as a swing, do that"): KH1's guard row (type 2) meets
+  the fire's type-0, priority-0, free-standing row through `0x1402B4BC0` exactly as a swing does (the Gargoyle's check,
+  Stage 163; the same row shape here, Checked (files + decomp `0x1402B2DC0`)), and the child reads only `+4 & 0x30` before
+  `0x288`. Built: when Re:CoM blocks it (decision 27's turn-back), its exe runs the same re-aim (`reaim_fire`, `GUARD_BATS`)
+  instead of Re:CoM's homing at the thrower. With "Guard reactions" off, Re:CoM's block ends it. The Fat Bandit's and the
+  Defender's fireballs keep decision 28 (owner question 4).
+- **Its own fire back**: the hit handler hears a fire of its own class sent back as its own row (`kh1_thrown::own_shot`,
+  `Behaviour::set_hit_own_row`): KH1's EXP bonus (`EXP / 10 + 2`, Re:CoM's EXP, `Cmd::Reward`) and the hit state.
+- Per frame: one KH1 step per flying fire; one atomic load otherwise.
+
+#### What the asset step writes
+
+`ENEMY/0003/EN0003.ANN` (Re:CoM's 75 slots byte-identical; KH1's clips at 100 + entry, 100..118) and `kh1-rednocturne.json`
+(`kh1-enemy 1`: 70 numbers from `ex_2110.bd` (and the stats block's two speeds), 7 from each child, 16 + 7 + 7 request words checked, the four shot rows'
+radii and Re:CoM powers, no attack, 1 hurt part). **`EN0003.ASD` is not written** (no record: Re:CoM's own stays) and **no
+`.SES`** (`enemy::NO_SES`: Re:CoM has none and never loads one). Request 0x66 gets no clip (`enemy::SKIPPED`: KH1's status
+motion on entry 7 without root motion, which its dizzy loop 0x43 plays with it; neither is played by the port). Framework
+changes (other enemies' outputs unchanged, their tests pass): `NO_SES`, `SKIPPED`, the writer skipping an `.ASD` with no new
+record and an empty `.SES`. Test `rednocturne::tests::builds_from_the_players_files`. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0003/EN0003.ANN, method: copy, source: [{name: ENEMY/0003/EN0003.ANN}]}
+- {name: kh1-rednocturne.json, method: copy, source: [{name: kh1-rednocturne.json}]}
+```
+
+The step prints `rednocturne (M11): …` and `rednocturne: ENEMY/0003/EN0003.ASD not written (Re:CoM's own stays)`; the log
+shows `rednocturne: KH1's rednocturne (M11) …` at start, `battle N: Red Nocturne … gets KH1's AI` in a battle, and `thrown:
+rednocturne eNNN: fire … / bigfire …` per fire, `fire N: Sora's swing bats it back …` / `Sora's Guard bats it back …`.
+
+#### Checked / Assumption
+
+- **Checked (files):** every number at its push (the asset test reads them: 70 + 14), the request words, the four rows
+  (types, priorities, radii, serials 10500..10503), the clip lengths (200 60, 201 116, 202 120, 203 200, 69 90), the hurt
+  part, Re:CoM's ANN / ASD; the children's library equal to the Defender's; the family's shared routines (table in
+  `kh1_core::caster`).
+- **Checked (decomp):** the VM ops; `sys 19`'s bit-15 case and the actor matrix (`0x14029EB20`, `0x1402A0A40`); `sys 11`
+  of a zero vector (`0x1402B9EF0`); `sys 13`'s blend / start (`0x1402B9F80`, `0x14029F980`); `sys 172` (`0x14029EFC0`);
+  `sys 179`'s dizzy; the free-standing bit (`0x1402B2DC0`); Re:CoM's states 2 / 3 (`0x140191A30`).
+- **Checked (exe):** the class, its 139 slots, the ctor and its only call, the factory size, 20 vtable slots, the two effect
+  sets' names; 1055 sites match (pefile).
+- **Assumptions:** a child's first frame is the frame after `sys 94` (its first check sees the charge: KH1 casts); its frames
+  counted in the same frame the host switches to the cast (±1 frame); `sys 19`'s default matrix branch (actor flag 0x1000
+  clear); the facing the host has that frame; flat battle floors (the floor under Sora is the battle floor); Sora's aim point
+  for KH1's lock point; Re:CoM's sounds (none: no `.SES`); the batted fire's fallback direction when the Red Nocturne is
+  gone (Sora's back along the flight; KH1: Sora's facing, as the Defender's port); seeds per enemy.
+- **Not ported:** the leash, the notice for placed ones (battle spawns appear), the search object, element rules (Fire
+  absorbs and heals it, Blizzard dizzies it: attributes are not carried), the dizzy (`sys 179`), effects (charge effects
+  2052 / 2054 / 2053 / 2058, the fires' fade) and the appearance's flag 0x80 (M13), the death routine (Re:CoM's defeat,
+  prizes, EXP); a big Fire whose caster dies in its last 90 frames doesn't fly (KH1's does).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Red Nocturne battle (Traverse Town's or Wonderland's); run the asset step first)
+
+1. Each Red Nocturne rises into view (about 1½ s) and fades in, then hovers in small circles bobbing up and down; while it
+   does it keeps facing one fixed direction (KH1 does the same).
+2. Come within 10 m: it starts its rounds. Close (under 7 m): sometimes it slides sideways in a circle while charging a Fire
+   in its hands (about 1 s), then casts it (about ⅔ s into the cast); the Fire flies at you and curves a little toward you,
+   about 11 m before it goes out. Then it circles you slowly for 1½–2 s, drifting up or down.
+3. Far (over 7 m): half the time it charges a big Fire (about 2 s; 1½ s into its cast it throws a bigger, faster fire that
+   curves more), then it flies closer.
+4. Hit it from close: it flies off 5–6 m and casts a big Fire.
+5. Swing at a flying fire: it flies back toward your target (or the Red Nocturne) and hurts enemies. Guard it: the same (not a
+   straight homing shot). A Red Nocturne hit by its own fire flinches (and gives a little extra EXP).
+6. Hit it while it charges: no fire comes.
+7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Red Nocturnes (its own two shots).
+
+Please send `kh1-recom.log` (`rednocturne:`, `thrown:` lines) and an F9 trace (its `fire` / `bigfire` tokens).
+
+#### KH1 trace (what to record in KH1)
+
+Traverse Town (the 2nd District) or Wonderland: stand far (12 m) 10 s, then at 8 m 15 s, then at 4 m 15 s; side-step three
+Fires and two big Fires; swing at a Fire; Guard a Fire and a big Fire; hit one while it charges; hit one from close (its
+flee and big Fire); bat a fire back into it; kill one. The trace's enemy rows give the rounds, the circling, the casts'
+frames (200 → 201 + 40, 202 → 203 + 90), the fires' start points and paths to compare.
+
+#### Red Nocturne owner questions
+
+1. **Its dizzy.** KH1 makes a Red Nocturne dizzy (requests 66 → 67 → 68, up to 1800 frames = 30 s, a hit wakes it) when
+   its own fire sent back hits it (and when Blizzard hits it: element, left out). Built: the EXP bonus and the hit state, no
+   dizzy. (a) Keep it out; (b) build KH1's dizzy natively (a new reaction in the shared engine, on Re:CoM's states, its
+   motions from the model); (c) Re:CoM's own stun state for KH1's frames.
+2. **Facing while idle.** KH1's idle legs face it toward world yaw 0 every frame (`sys 11` of a zero vector). Built 1:1. (a)
+   Keep; (b) face along its flight (not KH1).
+3. **A dying caster's big Fire.** KH1's big Fire child still flies when its caster dies in the cast's last 90 frames. Built:
+   it doesn't (the host steps only a living enemy's children). (a) Keep; (b) step a defeated caster's children until they
+   act.
+4. **Guarding the other fireballs.** KH1's Guard sends the Fat Bandit's and the Defender's fireballs back the same way (the
+   same row shape). Built: only the Red Nocturne's and the Gargoyle's; those two keep decision 28. (a) Keep; (b) KH1's way
+   for them too (one version).
+
+#### What the other three can reuse
+
+- **Shared, ready:** `kh1_core::caster` (`turn_step` `0x9FA` = Blue Rhapsody `0x91A`; `wander_leg` `0x93E` = Blue's
+  `0x85E`; `fly_to` `0xABC` = Blue's `0x9DC`, Yellow Opera's `0xBE2`; `stuck`; `Cast`, the spell child's wait); the host's
+  fires by prefix with their look per class and prefix and `GUARD_BATS`; `enemy::NO_SES` (Yellow Opera and Green Requiem
+  have no `.SES` either); `enemy::SKIPPED`; the class row and tests as templates.
+- **Their own:** each script's rounds and hit handler (no other routine matches byte for byte); their children are other
+  spells, not the fireball library: Blue Rhapsody's Blizzard (`ex_2120_00.bd`, `sys 18` / `sys 23` shards), Yellow Opera's
+  Thunder (`ex_2130_00.bd`, an area test over the party, `sys 90` / `sys 65`), Green Requiem's support spell
+  (`ex_2140_00.bd`, on its allies); Blue Rhapsody also has a melee row (215, rows `0xEC` / `0x15C`) and a timed jump
+  (`sys 82`, the Powerwild's framework). Re:CoM: Blue Rhapsody / Yellow Opera have one `.ASD` record each, Green Requiem
+  none and no state 3.
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -3689,7 +3888,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 |---|---|---|---|---|---|---|---|---|
 | Soldier (built) | `xa_ex_2010` (ex_2010.bd) | `CEnemySoldier` 2 | `0x14054ea68` | `0x140193510` / `0x140188fd7` 0xcd0 | 1,2,3 | 200,201,202,203,204,207,209 | FaLl | — |
 | Large Body (built) | `xa_ex_2050` (ex_2050.bd) | `CEnemyLargebody` 9 | `0x140542ad0` | `0x14018f090` / `0x1401890fd` 0xce0 | 1,2,3 | 200,207,231 | FKL | — |
-| Red Nocturne | `xa_ex_2110` (ex_2110.bd) | `CEnemyRednocturne` 3 | `0x140548a58` | `0x140191880` / `0x140189001` 0xcd0 | 1,2,3 | — | FKaA | SES |
+| Red Nocturne (built) | `xa_ex_2110` (ex_2110.bd) | `CEnemyRednocturne` 3 | `0x140548a58` | `0x140191880` / `0x140189001` 0xcd0 | 1,2,3 | — | FKaA | SES |
 | Blue Rhapsody | `xa_ex_2120` (ex_2120.bd) | `CEnemyBluerhapsody` 4 | `0x140537ca8` | `0x14018c120` / `0x14018902b` 0xcd0 | 1,2,3 | 215 | FKaA | — |
 | Yellow Opera | `xa_ex_2130` (ex_2130.bd) | `CEnemyYellowopera` 5 | `0x1405570c8` | `0x1401968b0` / `0x140189055` 0xcd0 | 1,2,3 | 209 | FKaA | SES |
 | Green Requiem | `xa_ex_2140` (ex_2140.bd) | `CEnemyGreenrequiem` 6 | `0x1405404c8` | `0x14018e570` / `0x14018907f` 0xce0 | 1,2 | — | FKaA | SES |
@@ -3735,7 +3934,7 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
    state 2 without gravity: Assumption, research in `0x1402AF6A0` / the movement states), Re:CoM's mover
    without gravity for them.
 3. **Casters with projectiles** (KH1 child objects `sys 94`, effects `sys 225`; little or no HIT track):
-   Red Nocturne, Blue Rhapsody, Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
+   Red Nocturne (built: § The Red Nocturne; the family's shared routines `kh1_core::caster`), Blue Rhapsody, Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
    Bouncywild (bananas), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs, flame + shield; built: § The Defender), Search Ghost (its
    drain). Needs: the child object's script → Re:CoM's own bullets (checklist step 9), Green Requiem's
    support spell (Re:CoM overrides no state 3 for it; KH1's: a barrier / heal on its allies, Assumption).
