@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 177: T-posed Shadows: KH1's AI only on a motion pack that carries the KH1 clips, version 0.96.1 (2026-11-01)
+
+- Owner (2026-11-03): "switching from recom to KH1 enemy ai in the same room results in the ported enemies T Posing" (screenshot: a Shadow in Halloween Town).
+- Cause (Checked (decomp + exe + log)): Re:CoM's factory `0x140188F40` builds `CEnemyShadow` for ids 1 and 32 and `CEnemySearchghost` for 14 and 33, each id with its own files (`ENEMY/0032` …); the asset step extends only 0001 / 0014, so an id-32 Shadow ran KH1's AI on Re:CoM's plain pack: every KH1 slot past the pack's count, Re:CoM's clip lookup (`0x14024DC60` / `0x14024C760`) finds nothing, bind pose. The log's battle 28 Shadow had its actions released with the motion clock at 0. Not the switch: `enemy_ai` is read only by the ctor wrapper and the packs are the same at either setting; KH1 → Re:CoM and Combat switches can't leave an enemy without motions (Checked (code)).
+- Fix: a new slot `+0x38` in our vtable copy (no new hook; Re:CoM's spawn `0x1401A8900` calls it right after the factory with (enemy, kind, id); every ported class's `+0x38` runs its init `+0x30` first, Checked (exe + decomp)): Re:CoM's init, then every slot the class's manifest plays checked against the enemy's own motion set; one missing: the swap undone before any state runs (Re:CoM's vtable back, tail marker cleared, runtime dropped): that enemy plays as at `enemy_ai = recom`. One log line per class and id.
+- Assumptions: Halloween Town uses id 32 for its Shadows (the log line will say); the set's `+0x68` is the pack's slot count.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 176: The KH1 Green Requiem (its Cure on allies), version 0.96.0 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "finish the opera and requiem, but stop there" (M11).
