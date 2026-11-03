@@ -821,7 +821,7 @@ block's defaults (π/16 a frame, 0.1).
 | swoop | `0xC4E` / `0xEBC` | face him; low (under 50 above him): stop, two yields; high (over 80 above him) over a standing target: sink at 4 to 80; 200 with row `0xEC`, steering at him flat at 8 beyond 200 until 80 frames are left, those still; the idle |
 | slash | `0xBC6` | 212 with row `0x15C`, facing him until 60 frames are left, those; the idle |
 | hit | `0x274` | hit in the dive: 211 (blend 0) for its length; launched: 8 frames; within 150: 1–4 hits the swoop (over 50 above the floor) or the slash, 5–9 the back-off (600), else idle; within 500: 5–9 the back-off, 10+ idle; then engaged (rounds cleared) |
-| hit handler | `0x1F0C` | attributes 9 / 11: nothing more (not carried); while 206 plays: a hit that is not a clash takes no reaction (`hp[0xC] &= ~0x1F`) and asks for 211, every hit counts; else a launch (kind 5) counts and asks for the pause, other hits but clashes count; the hit state 3 |
+| hit handler | `0x1F0C` | attributes 9 / 11: nothing more (not carried); while 206 plays (`sys 51`, the request playing): a hit that is not a clash (6 / 7) nor of attribute 8 / 9 takes no reaction (`func_1c08(hit, 0)`: `hp[0xC] &= ~0x1F`) and marks the dive (`wp+0x4C`, its hit behaviour plays 211), every hit counts; else a launch (kind 5) counts and asks for the pause, other hits but clashes count; the hit state 3. No `sys 42` in the script (Checked (files)) |
 
 Attacks (rows `0x70` bytes, `sys 23`, mode 2: each lives while its request plays; Checked (files)):
 
@@ -888,6 +888,9 @@ words checked, 2 attacks, 7 parts). Test: `airpirate::tests::builds_from_the_pla
    circles again.
 7. Hit it in the dive (206): no flinch; it plays 211, then counters. Other hits: KH1's flinch / knock-back in the air;
    1–4 hits close: a swoop or a slash; 5–9: it backs off; 10+: it circles again.
+   **The no-reaction armour (owner 2026-11-02):** stand under one so it dives, hit it during the straight drop: it
+   takes the damage (Re:CoM's damage voice) and goes straight into 211 with no flinch frame in between (the log's
+   `hit kind Some(3) without a reaction while Some(206) plays`); Guard its swoop: still KH1's recoil 213.
 8. Guard the swoop: KH1's clash recoil (213). Guard the slash: Re:CoM's flinch.
 9. Kill one: Re:CoM's prizes and EXP.
 10. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Air Pirates.
@@ -907,6 +910,16 @@ kill one. The trace's enemy rows give the heights, the circle's radius and the c
   retargeting to another party member (`0x1364`), `sys 139`'s out-of-sight test (taken as in sight).
 - KH1's hit attribute (`hp[0xC] >> 6 & 15`) is not carried by the host: attributes 9 / 11 (which end KH1's handler at
   once) and 8 / 9 (which keep the dive's reaction) never come.
+- **The dive's no-reaction hit on the armour** (owner 2026-11-02, Pirate question 3 (b); § Hits that take no
+  reaction). Before: Re:CoM's handler asked for its flinch (state 11) and our `react_begin` handed straight back to
+  state 1 (`keeps_reaction` false), a frame in state 11. Now `airpirate::Ai::armoured` is true while 206 plays and
+  the hit's kind is known and not 6 / 7; Re:CoM's super armour keeps state 1 (206 is a plain motion, no attack
+  rows: nothing to cut), `on_armoured_hit` marks the dive, counts the hit and asks for the hit state; 211 plays from
+  the next AI frame. Checked (files): the handler `0x1F0C` (`sys 51` = the request playing, the zeroing, no `sys 42`;
+  a kind-0 record plays nothing, Checked (decomp) `0x1402B8E10`). Checked (tests): `the_dive_on_the_armour`,
+  `hosted_a_hit_in_the_dive_plays_211_in_state_1` (the host model: state 1 throughout, 211 the next frame for its
+  86 frames, nothing released). **Assumption:** Re:CoM's damage voice on that hit (KH1 plays none). Fallback as
+  before for a hit whose kind the host couldn't read or one in the frame Sora's Guard blocked it.
 - The effects (`sys 75` 2 at the appearance, 7 at each swoop; `sys 74`), the fade-in and flag 0x80 at the appearance.
 - The script's two world-height tests (the close round's rise below y −170, the approach's target over y −100) are read
   as heights above the battle floor (**Assumption**: KH1's Air Pirate rooms have their floor at y = 0; Re:CoM's battle
