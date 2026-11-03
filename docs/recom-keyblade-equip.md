@@ -6,6 +6,12 @@
 > **Keyblade slot** at the top of Sora's list on the Items page: see
 > [The Keyblade slot in the Items menu](#the-keyblade-slot-in-the-items-menu-owner-2026-11-01) at
 > the end. The list itself (rows, mark, stats, scroll bar, equip) is unchanged.
+>
+> **Since 2026-11-03 (owner)** the "KH1" entry is there **whatever the Combat setting** (in Sora's
+> story) and its submenu has two settings rows, **Combat** and **Movement**; Items, Customize and
+> Abilities show only at Combat = KH1: see
+> [Settings pages](#settings-pages-the-entry-always-there-owner-2026-11-03) at the end. The
+> "Wanted" rule in the table below is replaced there.
 
 At `combat = kh1`, in Sora's story, Re:CoM's camp (pause) menu gets an 8th top-level entry,
 "Keyblades", below Config. Its page lists the Keyblades Sora has earned, marks the equipped one,
@@ -395,3 +401,57 @@ accessories as well we will have slots for them there but dont worry about that 
 - Checked (tests): `customize::tests::slots_and_spells_are_recoms_blue_magic_row` (reads 0x133
   from the checked table's bytes; the Abilities test now reads 0x131). No new site. Assumption: sprite 168 is Re:CoM's magic icon (`FO0100.RTM` not in the
   session; it is what Re:CoM's magic sleight rows draw). Not seen in game.
+
+## Settings pages; the entry always there (owner, 2026-11-03)
+
+> "Under the "KH1" tab in the pause menu, I want run speed, jump height, and air speed under a sub
+> menu called "Movement" I also want the guard Reactions, combat, and enemy pace to be under a
+> seperate sub menu in the KH1 tab called "Combat." Also, Just have the "KH1" Tab in the camp menu
+> always be there, regardless of if the combat is set to ReCoM or KH1"; answers: Movement = Run
+> speed, Jump height, Air speed, Dodge roll; Combat = Combat, Guard reactions, Enemy pace, Enemy AI,
+> Boss revenge (named **"Revenge Value"**, owner 2026-11-03); those three rows leave Re:CoM's
+> Config menu; Damage stays ini-only.
+
+- **The entry** (`win::keyblades::wanted`): Sora's story and not the map-only camp (`camp+0x20A4`),
+  whatever the Combat setting. The four camp wrappers therefore also run at Combat = Re:CoM: the
+  same code as at KH1 (8 entries, Re:CoM's order 0..6, ours at 7 below Config, Re:CoM's cursor
+  rules, `top::step`). Riku's story: still hidden (`camp+0x21BC`, `0x1401AAAE0`), as before.
+  Checked (code); not seen in game at Re:CoM.
+- **The rows** (`keyblades::sub::rows`): Combat = KH1 (and the stats file lists Keyblades, the
+  entry's old condition): Items, Customize, Abilities, Combat, Movement; otherwise Combat,
+  Movement. The entry's help line says which (`text::entry_help`). The rows are chosen when the
+  submenu opens and again when a settings page closes: if Combat changed there, Re:CoM's buttons
+  are relabelled (`relabel`, Re:CoM's level-1 relabel) and the count `camp+0x21C4` set before entry
+  build mode 0 makes them appear (it animates the first `count` buttons; the rest stay faded, as in
+  Re:CoM's Deck submenu), and the cursor stays on the Combat row (`sub::row_in`). Checked (decomp
+  `0x1400E3DE0`, code).
+- **The pages**: Re:CoM's Config screen run with our rows (`win::menu::SettingsPage`):
+  `docs/recom-config-menu.md` § The KH1 entry's settings pages (rows, options, when each change
+  takes effect). The submenu opens them as it opens the list pages (sound 2, breadcrumb title
+  "Combat" / "Movement", buttons fade, main panel layer 2 hidden; back: header item 1 closes,
+  buttons reappear).
+- **Teardown with a page open**: a list page deletes its objects (as before); a settings page's
+  objects are the Config screen's, which Re:CoM's teardown deletes itself.
+- **Per frame**: nothing new outside the camp menu; in it, a settings page is Re:CoM's draw mode
+  1 / 3 / 5 and its pad reads each frame, our rows rebuilt only on a change.
+- **Logs**: `kh1 entry: submenu opened (2 rows: [Combat, Movement])`, `kh1 entry: Combat page
+  opened (combat = KH1, …)`, `kh1 entry: run_speed = KH1 (now)`, `kh1 entry: submenu rows now
+  [...] (Combat changed)`, `kh1 entry: Combat page closed`.
+- **Sites**: no new hook; the Config draw `0x1400DF1B0` moved from hooked to called (its 10 bytes
+  still checked). Asset step: not needed (the texts are in the DLL).
+
+### What the owner should test
+
+1. Combat = Re:CoM: the camp shows "KH1" under Config; its submenu shows Combat and Movement only;
+   Re:CoM's 7 entries, their order and cursor as unmodded (down from Config reaches KH1, a fresh
+   down from KH1 wraps to the top).
+2. Config: exactly Re:CoM's 5 rows and panel (no Combat / Guard reactions / Enemy pace there).
+3. KH1 > Combat: Re:CoM's Config-style window with Combat, Guard reactions, Enemy pace, Enemy AI,
+   Revenge Value; up / down move (wrap), left / right switch (sound), the help line per row, the
+   ini changes at once; confirm or cancel closes back to the submenu on Combat.
+4. KH1 > Movement: Run speed, Jump height, Air speed as two-option rows, Dodge roll as one value
+   cycling Re:CoM, KH1, Off.
+5. On the Combat page switch Combat to KH1, close: the submenu now lists Items, Customize,
+   Abilities, Combat, Movement with the cursor on Combat (and the reverse).
+6. Change Run speed and close the camp: Sora runs at the new speed at once (Combat = KH1).
+7. Send `kh1-recom.log` (the `kh1 entry:` lines) and a screenshot of each page.

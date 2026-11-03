@@ -1,42 +1,42 @@
-//! Our rows in Re:CoM's Config screen ("Combat", "Guard reactions", "Enemy pace"), run by Re:CoM's own menu
-//! code.
+//! Re:CoM's Config screen code, run for the "KH1" camp entry's settings pages (Combat, Movement;
+//! owner, 2026-11-03).
 //!
-//! - `cfg_input` wraps the screen's input handler `0x1400D3EB0`. Re:CoM's rows go to the
-//!   original unchanged; at the two edges and on our rows it does what the original does for a
-//!   row (cursor sound, value flip, redraw) with the same game functions.
-//! - `cfg_draw` wraps the screen's draw `0x1400DF1B0`. After Re:CoM's mode 9 (rebuild the rows)
-//!   it adds our label and value items in the camp's free item slots, built by the same
-//!   `CButton` code with positions from the same layout, and moves Re:CoM's cursor sprite and
-//!   help line when the cursor is on our row. Re:CoM deletes those items itself (modes 6 / 9 and
-//!   the camp teardown clear all 21 slots). After the modes that give the window panel a new
-//!   animation (0, 1, 4) it sets the bottom edge offset of the panel's 9-slice sprites, so
-//!   Re:CoM's own sprite code draws the panel one row taller per row we add (`menu::panel`).
+//! - `cfg_input` wraps the Config screen's input/state function `0x1400D3EB0`. The camp runs it in
+//!   its states 0x4A..0x4C; when our "KH1" entry was the one confirmed it runs our submenu and its
+//!   pages (`keyblades::page`) instead. Re:CoM's own Config screen always goes to the original,
+//!   untouched: its five rows, layout, panel and input are exactly Re:CoM's (the rows we used to add
+//!   there moved to the settings pages, and the draw wrapper that added them is gone).
+//! - [`SettingsPage`]: a settings page is Re:CoM's Config screen run with our rows. Re:CoM's own
+//!   Config draw `0x1400DF1B0` (called, not hooked) makes the window panel and the cursor sprite
+//!   (mode 0), opens them (mode 1), glides the cursor (mode 3), closes (modes 4 / 5) and deletes
+//!   everything (mode 6); our rows replace its mode 9 only: the same `CButton` items built by the
+//!   same calls with the same arguments, at Re:CoM's rows 0..4 positions in `camp.lad`, in the same
+//!   21 item slots its modes 6 / 9 and the camp teardown delete. Input is Re:CoM's Config input
+//!   (its pad reads, its order, its sound 1 / 4). Nothing of ours runs outside the camp menu.
 //!
-//! `cfg_input` also runs the "KH1" entry's submenu and its pages (`keyblades`, the camp's 8th
-//! entry: Keyblades, Customize), which Re:CoM's camp opens through these same Config states.
+//! The Config fields used (`camp+0xB30` panel, `+0xB38` slots, `+0xBE0` cursor sprite) are
+//! free while our submenu is open: Re:CoM's Config screen runs only from its own top entry 6.
+//! Our page keeps its cursor itself; Re:CoM's cursor `+0xBE8` and value bytes `+0xBED..0xBF1` are
+//! never touched.
 //!
 //! Offsets and calls: `docs/recom-config-menu.md`. Checked (decomp + disasm) unless noted.
 
 use super::{base, log, va};
-use crate::menu::{self, layout, Input, Step};
+use crate::menu::{self, layout, Input, Item, Page, Step, Style};
 use crate::sites;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 pub static ORIG_INPUT: AtomicUsize = AtomicUsize::new(0);
-pub static ORIG_DRAW: AtomicUsize = AtomicUsize::new(0);
 static LAYOUT_WARNED: AtomicBool = AtomicBool::new(false);
-static PANEL_LOGS: AtomicUsize = AtomicUsize::new(0);
 
 // CCamp fields used by the Config screen.
-const STATE: usize = 0xA8;
 const NO_SCALE: usize = 0x9C;
 const LAYOUT: usize = 0x78;
 const SET: usize = 0x80;
 const HELP: usize = 0x9D0;
 const PANEL: usize = 0xB30;
 const CURSOR_SPRITE: usize = 0xBE0;
-const CURSOR: usize = 0xBE8;
 
 // Pad masks the original uses.
 const UP: u32 = 0x101000;
@@ -51,6 +51,7 @@ type ConfirmFn = unsafe extern "win64" fn(*mut u8, u32) -> u32;
 type SoundFn = unsafe extern "win64" fn(i32, i32) -> u64;
 type NewFn = unsafe extern "win64" fn(usize) -> *mut u8;
 type CtorFn = unsafe extern "win64" fn(*mut u8) -> *mut u8;
+type DeleteFn = unsafe extern "win64" fn(*mut u8, u32) -> *mut u8;
 #[allow(clippy::type_complexity)]
 type SetupFn = unsafe extern "win64" fn(
     *mut u8,     // CButton
@@ -71,7 +72,6 @@ type LayoutFn = unsafe extern "win64" fn(*const u8, u32, u64, *mut f32, i32) -> 
 type SetTextFn = unsafe extern "win64" fn(*mut u8, *const u8);
 type SetPosFn = unsafe extern "win64" fn(*mut u8, *const f32);
 type AnimFn = unsafe extern "win64" fn(*mut u8, u32, *const u8, u32, f32, u32) -> u64;
-type SeqByHandleFn = unsafe extern "win64" fn(u32) -> *mut u8;
 
 const DIR_FN: u32 = 0x0011_1A70;
 const CONFIRM_FN: u32 = 0x0011_1B90;
@@ -82,8 +82,8 @@ const SETUP_FN: u32 = 0x0011_2F10;
 const LAYOUT_FN: u32 = 0x0024_6100;
 const SET_TEXT_FN: u32 = 0x0025_9000;
 const SET_POS_FN: u32 = 0x0024_85B0;
-const DRAW_RVA: u32 = 0x000D_F1B0;
-const SEQ_BY_HANDLE_FN: u32 = 0x0024_6210;
+/// Re:CoM's Config draw (`sites::CALLEES`, called only).
+const DRAW_FN: u32 = 0x000D_F1B0;
 
 unsafe fn f<T: Copy>(rva: u32) -> T {
     let p = base() + rva as usize;
@@ -98,223 +98,193 @@ unsafe fn rd<T: Copy>(p: *mut u8, off: usize) -> T {
 #[derive(Clone, Copy, Default)]
 struct Vec4([f32; 4]);
 
-/// Settings value our row `k` shows (option 1: KH1 for Combat, On for Guard reactions).
-fn row_value(k: usize) -> bool {
-    let s = super::settings();
-    match k {
-        menu::ROW_GUARD_REACTIONS => s.guard_reactions,
-        menu::ROW_ENEMY_PACE => s.enemy_pace == crate::settings::Mode::Kh1,
-        _ => s.combat == crate::settings::Mode::Kh1,
-    }
-}
-
 /// Hook on `0x1400D3EB0` (the Config screen's input/state function).
 pub unsafe extern "win64" fn cfg_input(camp: *mut u8) -> u64 {
-    let orig: InputFn = std::mem::transmute(ORIG_INPUT.load(Ordering::Acquire));
-    // Before anything else: the camp's Config states 0x4A..0x4C run the "KH1" entry's submenu and
-    // pages when our 8th entry was the one confirmed (`keyblades`); Re:CoM's Config screen is
-    // never touched then.
+    // The camp's Config states 0x4A..0x4C run the "KH1" entry's submenu and pages when our 8th
+    // entry was the one confirmed (`keyblades`); Re:CoM's Config screen is never touched then.
     if super::keyblades::page_active(camp) {
         return super::keyblades::page(camp);
     }
-    if camp.is_null() || rd::<i32>(camp, STATE) != 2 {
-        return orig(camp);
-    }
-    let confirm: ConfirmFn = f(CONFIRM_FN);
-    if confirm(camp, 0) != 0 {
-        // Closing the screen: Re:CoM's own path (it never indexes by the cursor there).
-        return orig(camp);
-    }
-    let dir: DirFn = f(DIR_FN);
-    let i = Input { up: dir(camp, UP, 0) != 0, down: dir(camp, DOWN, 0) != 0, left: dir(camp, LEFT, 0) != 0, right: dir(camp, RIGHT, 0) != 0 };
-    let cursor = rd::<i32>(camp, CURSOR);
-    let step = menu::step(cursor, i);
-    if step == Step::Original {
-        return orig(camp);
-    }
-    // What the original does every frame in this state before reading the pad: animate.
-    let draw: DrawFn = f(DRAW_RVA);
-    draw(camp, 3);
-    let sound: SoundFn = f(SOUND_FN);
-    match step {
-        Step::Move(c) => {
-            *(camp.add(CURSOR) as *mut i32) = c;
-        }
-        Step::Toggle(k) => super::toggle(k),
-        Step::Idle | Step::Original => return 0,
-    }
-    // As the original after any change: cursor sound (1, -1) and a redraw.
-    sound(1, -1);
-    draw(camp, 9);
-    0
+    let orig: InputFn = std::mem::transmute(ORIG_INPUT.load(Ordering::Acquire));
+    orig(camp)
 }
 
-/// Hook on `0x1400DF1B0` (the Config screen's draw).
-pub unsafe extern "win64" fn cfg_draw(camp: *mut u8, mode: u32) -> u64 {
-    let orig: DrawFn = std::mem::transmute(ORIG_DRAW.load(Ordering::Acquire));
-    let r = orig(camp, mode);
-    if !camp.is_null() {
-        if mode == 9 {
-            build_rows(camp);
-        } else if menu::panel::restretch_after(mode) {
-            stretch_panel(camp);
-        }
-    }
-    r
+unsafe fn draw(camp: *mut u8, mode: u32) -> u64 {
+    f::<DrawFn>(DRAW_FN)(camp, mode)
 }
 
-/// Re:CoM's Config window panel, one row taller (`menu::panel`). On each sprite of the panel's
-/// current sequence: a fresh 9-slice gets its bottom edge offset and flag 8; a frame sprite (the
-/// 3x3 without its centre) gets, for each part that moves, its own copy of the part's rect
-/// moved down. Re:CoM's sprite code does all the drawing; nothing runs per frame once the
-/// screen is open (mode 3 is not touched).
-unsafe fn stretch_panel(camp: *mut u8) {
-    use menu::panel;
-    let ctrl: *mut u8 = rd(camp, PANEL);
-    if ctrl.is_null() || rd::<u8>(ctrl, panel::CTRL_COUNT) == 0 {
-        return;
-    }
-    let seq_by_handle: SeqByHandleFn = f(SEQ_BY_HANDLE_FN);
-    let seq = seq_by_handle(rd::<u32>(ctrl, panel::CTRL_HANDLES));
-    if seq.is_null() {
-        return;
-    }
-    let list: *mut u8 = rd(seq, panel::SEQ_LIST);
-    if list.is_null() {
-        return;
-    }
-    let spr_vt = va(base(), sites::data::SPR_OBJ_VTABLE);
-    let mut grow: Option<Option<f32>> = None;
-    let mut grow_now = || *grow.get_or_insert_with(|| row_step(camp).map(|(y3, y4)| panel::grow(y3, y4)));
-    let mut report: Vec<String> = Vec::new();
-    let mut changed = false;
-    let mut obj: *mut u8 = rd(list, 8);
-    // The list is Re:CoM's; a bound guards against a broken one.
-    for _ in 0..64 {
-        if obj.is_null() {
-            break;
-        }
-        let (what, did) = stretch_sprite(obj, spr_vt, &mut grow_now);
-        report.push(what);
-        changed |= did;
-        obj = rd(obj, 8);
-    }
-    // Logged when something changed (each animation's new sprites), a few times per session.
-    if changed && PANEL_LOGS.fetch_add(1, Ordering::Relaxed) < 6 {
-        let g = grow.flatten().map(|g| format!("{g:.1}")).unwrap_or_else(|| "?".into());
-        log(&format!("config menu: window panel, {} rows ({g} units) taller; sprites: {}", menu::ROWS, report.join("; ")));
-    }
+unsafe fn sound(id: i32) {
+    f::<SoundFn>(SOUND_FN)(id, -1);
 }
 
-/// One sprite of the panel; returns what was done (for the log) and whether it changed it.
-unsafe fn stretch_sprite(obj: *mut u8, spr_vt: usize, grow: &mut dyn FnMut() -> Option<f32>) -> (String, bool) {
-    let what = stretch_sprite_inner(obj, spr_vt, grow);
-    let changed = what.starts_with("9 parts (9-slice)") || what.contains("moved/stretched");
-    (what, changed)
+/// A settings page open in the KH1 entry's submenu: Re:CoM's Config screen with our rows.
+pub struct SettingsPage {
+    camp: usize,
+    page: Page,
+    cursor: usize,
+    /// 1 opening (Re:CoM's Config state 1), 2 input (state 2), 3 closing (state 3).
+    state: u8,
 }
 
-unsafe fn stretch_sprite_inner(obj: *mut u8, spr_vt: usize, grow: &mut dyn FnMut() -> Option<f32>) -> String {
-    use menu::panel::{self, Sprite};
-    if rd::<usize>(obj, 0) != spr_vt {
-        return "other object, left".into();
+impl SettingsPage {
+    fn p(&self) -> *mut u8 {
+        self.camp as *mut u8
     }
-    let n = rd::<u8>(obj, panel::PART_COUNT);
-    let parts: *mut u8 = rd(obj, panel::PARTS);
-    if parts.is_null() || n == 0 {
-        return format!("{n} parts, no part array, left");
+
+    /// Re:CoM's Config state 0: draw modes 0 (panel and cursor sprite) and our rows for its 9.
+    pub unsafe fn open(camp: *mut u8, page: Page) -> SettingsPage {
+        draw(camp, 0);
+        let mut p = SettingsPage { camp: camp as usize, page, cursor: 0, state: 1 };
+        p.rows();
+        let s = super::settings();
+        let now: Vec<String> = page.items().iter().map(|it| format!("{} = {}", it.key(), String::from_utf8_lossy(&it.options()[it.value(&s)][..it.options()[it.value(&s)].len() - 1]))).collect();
+        log(&format!("kh1 entry: {page:?} page opened ({})", now.join(", ")));
+        p
     }
-    let flags = rd::<u8>(obj, panel::FLAGS);
-    if n == panel::NINE {
-        let fresh = flags & panel::FLAG_NINE_SLICE == 0;
-        let g = if fresh { grow() } else { Some(0.0) };
-        let Some(g) = g else { return "9 parts, layout unreadable, left".into() };
-        return match panel::plan(true, n, true, flags, g) {
-            Sprite::Stretch(off) => {
-                std::ptr::write_unaligned(obj.add(panel::OFFSETS) as *mut [f32; 4], off);
-                *obj.add(panel::FLAGS) |= panel::FLAG_NINE_SLICE;
-                "9 parts (9-slice), bottom edge offset set".into()
+
+    /// One frame (≥ 0 running, −1 closed and deleted).
+    pub unsafe fn step(&mut self) -> i32 {
+        let camp = self.p();
+        match self.state {
+            1 => {
+                // State 1: mode 1 until the panel's opening ends (it also glides the cursor).
+                if draw(camp, 1) as u32 != 0 {
+                    self.state = 2;
+                }
+                0
             }
-            Sprite::Done => "9 parts, already set".into(),
-            Sprite::Skip => "9 parts, left".into(),
-        };
-    }
-    // Part rects (and whether a part already has one of our copies).
-    let mut src: Vec<*const u8> = Vec::with_capacity(n as usize);
-    for i in 0..n as usize {
-        let p: *const u8 = rd(parts.add(i * panel::PART_STRIDE), 0);
-        if p.is_null() {
-            return format!("{n} parts, a part without a rect, left");
+            2 => {
+                // State 2: mode 3 (animate), then the pad in Re:CoM's order.
+                draw(camp, 3);
+                let dir: DirFn = f(DIR_FN);
+                let close = f::<ConfirmFn>(CONFIRM_FN)(camp, 0) != 0;
+                let i = if close {
+                    Input { close, ..Default::default() }
+                } else {
+                    Input { close, up: dir(camp, UP, 0) != 0, down: dir(camp, DOWN, 0) != 0, left: dir(camp, LEFT, 0) != 0, right: dir(camp, RIGHT, 0) != 0 }
+                };
+                let items = self.page.items();
+                match menu::step(self.cursor, items.len(), i) {
+                    Step::Close => {
+                        draw(camp, 4);
+                        sound(4);
+                        self.state = 3;
+                        return 0;
+                    }
+                    Step::Move(c) => self.cursor = c,
+                    Step::Change(right) => {
+                        let it = items[self.cursor.min(items.len() - 1)];
+                        let v = menu::cycle(it.value(&super::settings()), it.options().len(), right);
+                        super::set_item(it, v);
+                    }
+                    Step::Idle => return 0,
+                }
+                sound(1);
+                self.rows();
+                0
+            }
+            _ => {
+                // State 3: mode 5 until the close ends, then mode 6 deletes the panel, the items
+                // and the cursor sprite.
+                if draw(camp, 5) as u32 != 0 {
+                    draw(camp, 6);
+                    log(&format!("kh1 entry: {:?} page closed", self.page));
+                    return -1;
+                }
+                0
+            }
         }
-        src.push(p);
     }
-    let rect = |p: *const u8| -> [i32; 4] { std::ptr::read_unaligned(p as *const [i32; 4]) };
-    let scissor = !rd::<*const u8>(obj, 0x128).is_null();
-    if n == 1 {
-        let r = rect(src[0]);
-        return format!("1 part{} rect {:?}, left", if scissor { " (scissor)" } else { "" }, r);
-    }
-    if src.iter().any(|&p| is_our_copy(p)) {
-        return format!("{n} parts, frame already moved");
-    }
-    let rects: Vec<[i32; 4]> = src.iter().map(|&p| rect(p)).collect();
-    let Some(g) = grow() else { return format!("{n} parts, layout unreadable, left") };
-    let Some(new) = panel::frame_rects(&rects, g.round() as i32) else {
-        return format!("{n} parts, not a frame, left (rects {rects:?})");
-    };
-    // Every copy first, so the frame is moved whole or not at all.
-    let mut writes = Vec::new();
-    for (i, nr) in new.iter().enumerate() {
-        let Some(nr) = nr else { continue };
-        let Some(copy) = rect_copy(src[i], *nr) else {
-            return format!("{n} parts, frame: copy limit reached, left");
+
+    /// Our mode 9: Re:CoM's 21 item slots emptied as its mode 9 empties them, then our rows built
+    /// with its calls; the cursor sprite onto the cursor row's value and the row's help line.
+    unsafe fn rows(&mut self) {
+        let camp = self.p();
+        let slots = camp.add(menu::SLOT_BASE) as *mut *mut u8;
+        for k in 0..menu::SLOT_COUNT {
+            let o = *slots.add(k);
+            if !o.is_null() {
+                let vt: *const usize = rd(o, 0);
+                let del: DeleteFn = std::mem::transmute(*vt);
+                del(o, 1);
+            }
+            *slots.add(k) = std::ptr::null_mut();
+        }
+        let panel: *mut u8 = rd(camp, PANEL);
+        let lay: *const u8 = rd(camp, LAYOUT);
+        let set: *const u8 = rd(camp, SET);
+        if panel.is_null() || lay.is_null() || set.is_null() {
+            return;
+        }
+        let new: NewFn = f(NEW_FN);
+        let ctor: CtorFn = f(CTOR_FN);
+        let setup: SetupFn = f(SETUP_FN);
+        let no_scale = rd::<i32>(camp, NO_SCALE) != 0;
+        let f10 = if no_scale { 0.0 } else { 2.0 };
+        let font_global = *(va(base(), sites::data::FONT_GLOBAL) as *const *const u8);
+        let lang = if font_global.is_null() { 0 } else { std::ptr::read_unaligned(font_global.add(0x274) as *const i32) };
+        let label_font = if !no_scale && (lang == 3 || lang == 6) { 0xC } else { 0xD };
+        let label_seq = va(base(), sites::data::LABEL_SEQ) as *const u16;
+        let value_seq = va(base(), sites::data::VALUE_SEQ) as *const *const u16;
+        let s = super::settings();
+        let mut slot = 0usize;
+        let mut alloc = || -> *mut u8 {
+            if slot >= menu::SLOT_COUNT {
+                return std::ptr::null_mut();
+            }
+            let b = new(0x30);
+            if b.is_null() {
+                return b;
+            }
+            ctor(b);
+            *slots.add(slot) = b;
+            slot += 1;
+            b
         };
-        writes.push((i, copy));
+        let mut highlighted: Option<(Item, *mut u8, u32, f32)> = None;
+        for (row, &it) in self.page.items().iter().enumerate().take(menu::MAX_ROWS) {
+            let (lx, ly) = layout::LABEL[row];
+            let (Some(lx), Some(ly), Some(vy)) = (pos(lay, lx), pos(lay, ly), pos(lay, layout::VALUE_Y[row])) else {
+                if !LAYOUT_WARNED.swap(true, Ordering::Relaxed) {
+                    log("kh1 entry: a camp.lad layout element was not found; the settings rows are not drawn");
+                }
+                return;
+            };
+            let label = alloc();
+            if label.is_null() {
+                return;
+            }
+            let lp = Vec4([lx.0[0], ly.0[1], 0.0, 1.0]);
+            setup(label, set, 0x10, label_seq, lp.0.as_ptr(), panel, it.label().as_ptr(), label_font, 0.0, f10, 0x42, std::ptr::null(), -1);
+            let value = it.value(&s);
+            let style = it.style();
+            for (opt, at) in menu::values_at(row, style).into_iter().enumerate() {
+                let Some(vx) = pos(lay, at.x_elem) else { return };
+                let item = alloc();
+                if item.is_null() {
+                    return;
+                }
+                let vp = Vec4([vx.0[0], vy.0[1], 0.0, 1.0]);
+                let seq = *value_seq.add(at.item);
+                let (text, sel, anim) = match style {
+                    // As Re:CoM's row 4: one value item showing the current option, selected 0.
+                    Style::Single => (it.options()[value], false, menu::CURSOR_ANIM_SINGLE),
+                    Style::Pair => (it.options()[opt], menu::selected(value, opt), menu::CURSOR_ANIM),
+                };
+                setup(item, set, 0x10, seq, vp.0.as_ptr(), panel, text.as_ptr(), 0xD, 0.0, f10, 0x42, std::ptr::null(), sel as i32);
+                if row == self.cursor && (sel || style == Style::Single) {
+                    highlighted = Some((it, item, anim, menu::cursor_x_offset(at.item)));
+                }
+            }
+        }
+        if let Some((it, item, anim, dx)) = highlighted {
+            move_cursor(camp, set, item, anim, dx);
+            let help: *mut u8 = rd(camp, HELP);
+            if !help.is_null() {
+                f::<SetTextFn>(SET_TEXT_FN)(help, it.help().as_ptr());
+            }
+        }
     }
-    for &(i, copy) in &writes {
-        std::ptr::write_unaligned(parts.add(i * panel::PART_STRIDE) as *mut *const u8, copy);
-    }
-    format!("{n} parts (frame), {} parts moved/stretched", writes.len())
-}
-
-/// Our rect copies: (source entry, its bytes when copied, our copy). Copies live for the whole
-/// process (Re:CoM's parts keep pointing at them). Bounded.
-#[allow(clippy::type_complexity)]
-static RECT_COPIES: std::sync::Mutex<Vec<(usize, [u8; menu::panel::RECT_SIZE], [i32; 4], usize)>> = std::sync::Mutex::new(Vec::new());
-const RECT_COPY_LIMIT: usize = 256;
-
-unsafe fn is_our_copy(p: *const u8) -> bool {
-    RECT_COPIES.lock().map(|v| v.iter().any(|e| e.3 == p as usize)).unwrap_or(false)
-}
-
-/// A copy of the rect entry at `src` with the rect `r` (other bytes as in `src`), reused when the
-/// same source, with the same bytes, was copied before.
-unsafe fn rect_copy(src: *const u8, r: [i32; 4]) -> Option<*const u8> {
-    let orig: [u8; menu::panel::RECT_SIZE] = std::ptr::read_unaligned(src as *const [u8; menu::panel::RECT_SIZE]);
-    let mut v = RECT_COPIES.lock().ok()?;
-    if let Some(e) = v.iter().find(|e| e.0 == src as usize && e.1 == orig && e.2 == r) {
-        return Some(e.3 as *const u8);
-    }
-    if v.len() >= RECT_COPY_LIMIT {
-        return None;
-    }
-    let mut b = orig;
-    for (k, y) in r.iter().enumerate() {
-        b[k * 4..k * 4 + 4].copy_from_slice(&y.to_le_bytes());
-    }
-    let copy = Box::leak(Box::new(b)).as_ptr();
-    v.push((src as usize, orig, r, copy as usize));
-    Some(copy)
-}
-
-/// Re:CoM's value-row step (layout y of row 4 minus row 3), as `build_rows` uses it.
-unsafe fn row_step(camp: *mut u8) -> Option<(f32, f32)> {
-    let lay: *const u8 = rd(camp, LAYOUT);
-    if lay.is_null() {
-        return None;
-    }
-    let y3 = pos(lay, layout::VALUE_Y[3])?;
-    let y4 = pos(lay, layout::VALUE_Y[4])?;
-    Some((y3.0[1], y4.0[1]))
 }
 
 unsafe fn pos(lay: *const u8, elem: u64) -> Option<Vec4> {
@@ -323,95 +293,9 @@ unsafe fn pos(lay: *const u8, elem: u64) -> Option<Vec4> {
     (layout_pos(lay, layout::GROUP, elem, v.0.as_mut_ptr(), 0) != 0).then_some(v)
 }
 
-unsafe fn build_rows(camp: *mut u8) {
-    let panel: *mut u8 = rd(camp, PANEL);
-    let lay: *const u8 = rd(camp, LAYOUT);
-    let set: *const u8 = rd(camp, SET);
-    if panel.is_null() || lay.is_null() || set.is_null() {
-        return;
-    }
-    // Positions: below Re:CoM's last row, one row step at a time.
-    let (lx, ly3, ly4) = (pos(lay, layout::LABEL[3].0), pos(lay, layout::LABEL[3].1), pos(lay, layout::LABEL[4].1));
-    let (vx0, vx1) = (pos(lay, layout::VALUE_X[6]), pos(lay, layout::VALUE_X[7]));
-    let vxs = pos(lay, layout::VALUE_X[menu::SINGLE_VALUE_ITEM]);
-    let (vy3, vy4) = (pos(lay, layout::VALUE_Y[3]), pos(lay, layout::VALUE_Y[4]));
-    let (Some(lx), Some(ly3), Some(ly4), Some(vx0), Some(vx1), Some(vxs), Some(vy3), Some(vy4)) = (lx, ly3, ly4, vx0, vx1, vxs, vy3, vy4) else {
-        if !LAYOUT_WARNED.swap(true, Ordering::Relaxed) {
-            log("config menu: a camp.lad layout element was not found; our rows are not drawn");
-        }
-        return;
-    };
-    let new: NewFn = f(NEW_FN);
-    let ctor: CtorFn = f(CTOR_FN);
-    let setup: SetupFn = f(SETUP_FN);
-    let no_scale = rd::<i32>(camp, NO_SCALE) != 0;
-    let f10 = if no_scale { 0.0 } else { 2.0 };
-    let font_global = *(va(base(), sites::data::FONT_GLOBAL) as *const *const u8);
-    let lang = if font_global.is_null() { 0 } else { std::ptr::read_unaligned(font_global.add(0x274) as *const i32) };
-    let label_font = if !no_scale && (lang == 3 || lang == 6) { 0xC } else { 0xD };
-    let label_seq = va(base(), sites::data::LABEL_SEQ) as *const u16;
-    let value_seq = va(base(), sites::data::VALUE_SEQ) as *const *const u16;
-    // Row 3's value items (6 and 7) are the two-choice ones we copy; row 4's (8) the single one.
-    let seq = [*value_seq.add(6), *value_seq.add(7)];
-    let seq_single = *value_seq.add(menu::SINGLE_VALUE_ITEM);
-    let cursor = rd::<i32>(camp, CURSOR);
-    let slots = camp.add(menu::SLOT_BASE) as *mut *mut u8;
-    let mut highlighted: Option<(usize, *mut u8, u32)> = None;
-    for k in 0..menu::ROWS {
-        let row_slots = menu::slots(k);
-        let text = &menu::TEXT[k];
-        let mut items = [std::ptr::null_mut::<u8>(); 3];
-        for (n, &slot) in row_slots.iter().enumerate() {
-            if !(*slots.add(slot)).is_null() {
-                // Not ours to replace (Re:CoM never fills these; another mod might).
-                log("config menu: item slot already in use; our rows are not drawn");
-                return;
-            }
-            let b = new(0x30);
-            if b.is_null() {
-                return;
-            }
-            ctor(b);
-            *slots.add(slot) = b;
-            items[n] = b;
-        }
-        let row = menu::FIRST_ROW + k as i32;
-        let lp = Vec4([lx.0[0], menu::row_y(ly3.0[1], ly4.0[1], k), 0.0, 1.0]);
-        setup(items[0], set, 0x10, label_seq, lp.0.as_ptr(), panel, text.label.as_ptr(), label_font, 0.0, f10, 0x42, std::ptr::null(), -1);
-        let vy = menu::row_y(vy3.0[1], vy4.0[1], k);
-        let value = row_value(k);
-        if menu::style(k) == menu::Style::Single {
-            // As Re:CoM's row 4: one wide value item showing the current option, selected 0.
-            let vp = Vec4([vxs.0[0], vy, 0.0, 1.0]);
-            setup(items[1], set, 0x10, seq_single, vp.0.as_ptr(), panel, text.options[value as usize].as_ptr(), 0xD, 0.0, f10, 0x42, std::ptr::null(), 0);
-            if row == cursor {
-                highlighted = Some((k, items[1], menu::CURSOR_ANIM_SINGLE));
-            }
-            continue;
-        }
-        for opt in 0..2 {
-            let x = if opt == 0 { vx0.0[0] } else { vx1.0[0] };
-            let vp = Vec4([x, vy, 0.0, 1.0]);
-            let sel = menu::selected(value, opt);
-            setup(items[1 + opt], set, 0x10, seq[opt], vp.0.as_ptr(), panel, text.options[opt].as_ptr(), 0xD, 0.0, f10, 0x42, std::ptr::null(), sel as i32);
-            if sel && row == cursor {
-                highlighted = Some((k, items[1 + opt], menu::CURSOR_ANIM));
-            }
-        }
-    }
-    if let Some((k, item, anim)) = highlighted {
-        move_cursor(camp, set, item, anim);
-        let help: *mut u8 = rd(camp, HELP);
-        if !help.is_null() {
-            let set_text: SetTextFn = f(SET_TEXT_FN);
-            set_text(help, menu::TEXT[k].help.as_ptr());
-        }
-    }
-}
-
-/// Re:CoM's cursor sprite onto `item`, as the original does for a selected value
+/// Re:CoM's cursor sprite onto `item`, as its mode 9 does for the selected value
 /// (disasm `0x1400DF931..0x1400DF9EF`).
-unsafe fn move_cursor(camp: *mut u8, set: *const u8, item: *mut u8, cursor_anim: u32) {
+unsafe fn move_cursor(camp: *mut u8, set: *const u8, item: *mut u8, cursor_anim: u32, dx: f32) {
     let cur: *mut u8 = rd(camp, CURSOR_SPRITE);
     if cur.is_null() {
         return;
@@ -430,7 +314,7 @@ unsafe fn move_cursor(camp: *mut u8, set: *const u8, item: *mut u8, cursor_anim:
         return;
     }
     let mut v: Vec4 = rd(sprite, 0xF0);
-    v.0[0] += menu::CURSOR_X_OFFSET;
+    v.0[0] += dx;
     std::ptr::write_unaligned(cur.add(0x190) as *mut Vec4, v);
     std::ptr::write_unaligned(cur.add(0x1B0) as *mut u64, 1);
     let src: Vec4 = if rd::<i32>(cur, 0x1B8) != 0 { rd(cur, 0x180) } else { v };

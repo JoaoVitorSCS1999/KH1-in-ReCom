@@ -390,18 +390,23 @@ pub fn page_active(camp: *mut u8) -> bool {
     !entry_of(camp).is_null() && unsafe { at::<i32>(camp, camp::SAVED) } == top::OURS
 }
 
-/// Whether the camp should show our entry now: Combat = KH1, Sora's story, the normal top list,
-/// and Keyblade numbers to list.
+/// Whether the camp should show our entry now: Sora's story and the normal top list, whatever the
+/// Combat setting (owner, 2026-11-03: "always be there"). Riku's story keeps Re:CoM's camp as is
+/// (as before), and so does the camp that opens straight into the map page.
 unsafe fn wanted(camp: *mut u8) -> bool {
+    !(at::<i32>(camp, camp::RIKU) != 0 || func::<RikuFn>(RIKU_STORY)() & 0xFF != 0 || at::<i32>(camp, camp::DIRECT_MAP) != 0)
+}
+
+/// Whether the submenu shows KH1's pages (Items, Customize, Abilities) besides the settings:
+/// Combat = KH1 and Keyblade numbers to list (the entry's condition before 2026-11-03). Read when
+/// the submenu opens and again when a settings page closes (Combat may have changed there).
+fn kh1_pages() -> bool {
     if super::settings().combat != crate::settings::Mode::Kh1 {
-        return false;
-    }
-    if at::<i32>(camp, camp::RIKU) != 0 || func::<RikuFn>(RIKU_STORY)() & 0xFF != 0 || at::<i32>(camp, camp::DIRECT_MAP) != 0 {
         return false;
     }
     if super::stats::keyblade_cards().is_empty() {
         if !NO_NUMBERS_LOGGED.swap(true, Ordering::Relaxed) {
-            log("keyblades: kh1-stats.json has no Keyblades (format 3, kh1-recom-build); no camp entry");
+            log("keyblades: kh1-stats.json has no Keyblades (format 3, kh1-recom-build); the KH1 entry shows only Combat and Movement");
         }
         return false;
     }
@@ -513,7 +518,7 @@ pub unsafe extern "win64" fn entry_build(camp: *mut u8, mode: i32, level: u64) -
                 create_entry(camp);
             } else if !want && !ours.is_null() {
                 delete_entry();
-                log("keyblades: camp entry removed (Combat = Re:CoM)");
+                log("keyblades: camp entry removed (Riku's story or the map-only camp)");
             } else if !ours.is_null() {
                 anim(ours, set_of(camp), 4);
             }
@@ -563,7 +568,7 @@ unsafe fn cursor_set_ours(camp: *mut u8, old: i32, new: i32, show: bool) -> u64 
         func::<CampIntFn>(GLIDE_TARGET)(camp, new, 0);
         put::<i32>(camp, camp::CURSOR, new);
         if new == top::OURS {
-            set_help(camp, text::ENTRY_HELP.as_ptr());
+            set_help(camp, text::entry_help(kh1_pages()).as_ptr());
         } else {
             set_help(camp, message(TOP_HELP_BASE + new as u32));
         }
@@ -753,12 +758,39 @@ enum SubState {
     Closing,
 }
 
+/// The page open in the submenu: a list page (Re:CoM's entry-4 page) or a settings page (Re:CoM's
+/// Config screen, `super::menu::SettingsPage`).
+enum Open {
+    List(Page),
+    Settings(super::menu::SettingsPage),
+}
+
+impl Open {
+    unsafe fn step(&mut self) -> i32 {
+        match self {
+            Open::List(p) => p.step(),
+            Open::Settings(p) => p.step(),
+        }
+    }
+
+    /// At the camp's teardown: a list page deletes its objects; a settings page's objects are the
+    /// Config screen's, which Re:CoM's teardown `0x1400D7C20` deletes itself (`camp+0xB30`, the 21
+    /// slots, `+0xBE0`). Checked (decomp).
+    unsafe fn delete_all(&self) {
+        if let Open::List(p) = self {
+            p.delete_all();
+        }
+    }
+}
+
 /// The submenu and the page open in it.
 struct Sub {
     camp: usize,
     state: SubState,
     row: i32,
-    page: Option<Page>,
+    /// The rows shown (`sub::rows`), chosen at open and after a settings page.
+    rows: &'static [sub::Row],
+    page: Option<Open>,
 }
 
 /// Re:CoM's relabel of its entry buttons (`0x1400E3DE0` mode 0 with a new level,
@@ -818,21 +850,41 @@ impl Sub {
     /// The page's first call (state 0x4A, after Re:CoM's state 0x11 saw the top buttons fade):
     /// what Re:CoM's state 0x10 does for the Deck at level 1, with our rows.
     unsafe fn open(camp: *mut u8) -> Sub {
-        let labels: Vec<&'static [u8]> = sub::ROWS.iter().map(|r| r.label()).collect();
+        let rows = sub::rows(kh1_pages());
+        let labels: Vec<&'static [u8]> = rows.iter().map(|r| r.label()).collect();
         relabel(camp, &labels);
-        put::<i32>(camp, camp::COUNT, sub::ROWS.len() as i32);
+        put::<i32>(camp, camp::COUNT, rows.len() as i32);
         // Re:CoM's Deck submenu level; the cursor set and entry build read it (`< 2`: help).
         put::<i32>(camp, camp::LEVEL, 1);
         // Our wrapper reads the cursor as the top index; Re:CoM's cursor set unhighlights the
         // button at `camp+0xB8` first, which must be one of the submenu's.
         put::<i32>(camp, camp::CURSOR, 0);
         build(camp, 0, 1);
-        log(&format!("kh1 entry: submenu opened ({} rows: {:?})", sub::ROWS.len(), sub::ROWS));
-        Sub { camp: camp as usize, state: SubState::Opening, row: 0, page: None }
+        log(&format!("kh1 entry: submenu opened ({} rows: {:?})", rows.len(), rows));
+        Sub { camp: camp as usize, state: SubState::Opening, row: 0, rows, page: None }
+    }
+
+    /// After a settings page: the rows for the Combat setting now (Combat may have changed on the
+    /// Combat page). When they differ, Re:CoM's buttons are relabelled and the count set before
+    /// they appear again (entry build mode 0 animates the first `count`; the others stay faded, as
+    /// in Re:CoM's Deck submenu), and the cursor stays on the same row.
+    unsafe fn refresh_rows(&mut self) {
+        let rows = sub::rows(kh1_pages());
+        if rows == self.rows {
+            return;
+        }
+        let camp = self.p();
+        let was = self.rows.get(self.row as usize).copied().unwrap_or(sub::Row::Combat);
+        let labels: Vec<&'static [u8]> = rows.iter().map(|r| r.label()).collect();
+        relabel(camp, &labels);
+        put::<i32>(camp, camp::COUNT, rows.len() as i32);
+        self.rows = rows;
+        self.row = sub::row_in(rows, was);
+        log(&format!("kh1 entry: submenu rows now {rows:?} (Combat changed)"));
     }
 
     unsafe fn help(&self) {
-        if let Some(r) = sub::ROWS.get(self.row as usize) {
+        if let Some(r) = self.rows.get(self.row as usize) {
             set_help(self.p(), r.help().as_ptr());
         }
     }
@@ -851,7 +903,7 @@ impl Sub {
                 }
             }
             SubState::Input => {
-                match sub::step(self.row, top_pad()) {
+                match sub::step(self.row, self.rows.len(), top_pad()) {
                     sub::Act::Close => {
                         recom_cursor(camp, self.row, false);
                         build(camp, 2, 0);
@@ -863,7 +915,7 @@ impl Sub {
                         // row's title, buttons fade, highlight bar and glove hidden; Re:CoM's page
                         // entries' confirm also hides the main panel's layer 2.
                         sound(2);
-                        header_title(camp, 1, sub::ROWS[i].label());
+                        header_title(camp, 1, self.rows[i].label());
                         build(camp, 2, 0);
                         func::<CampIntFn>(HIGHLIGHT_BAR)(camp, -1, 0);
                         func::<CampIntFn>(GLIDE_TARGET)(camp, -1, 0);
@@ -882,8 +934,11 @@ impl Sub {
             }
             SubState::ToPage => {
                 if button0_ended(camp) {
-                    let row = sub::ROWS.get(self.row as usize).copied().unwrap_or(sub::Row::Items);
-                    self.page = Some(Page::open(camp, row));
+                    let row = self.rows.get(self.row as usize).copied().unwrap_or(sub::Row::Combat);
+                    self.page = Some(match row.settings_page() {
+                        Some(sp) => Open::Settings(super::menu::SettingsPage::open(camp, sp)),
+                        None => Open::List(Page::open(camp, row)),
+                    });
                     self.state = SubState::InPage;
                 }
             }
@@ -893,7 +948,11 @@ impl Sub {
                     // Re:CoM's return from a Deck page (states 0x34 / 0x35): header item 1
                     // closes, the buttons appear again (entry build mode 0 at the same level),
                     // then idle and the cursor on the row (`Opening`).
+                    let settings = matches!(self.page, Some(Open::Settings(_)));
                     self.page = None;
+                    if settings {
+                        self.refresh_rows();
+                    }
                     func::<HeaderFn>(HEADER)(camp, 4, 1);
                     build(camp, 0, 1);
                     main_layer2(camp, true);
@@ -1069,7 +1128,8 @@ impl Page {
                 let content = Content::Items { screen: ip::Screen::new(), msg: None, inv: Default::default(), ctx: Default::default(), rows: Vec::new() };
                 (content, list::open_on(2, 0))
             }
-            sub::Row::Abilities => {
+            sub::Row::Abilities | sub::Row::Combat | sub::Row::Movement => {
+                // Combat / Movement open a settings page (`Open::Settings`), never a list page.
                 let content = Content::Abilities { screen: ap::Screen::default(), state: Default::default(), level: 1, rows: Vec::new(), msg: None, live: false };
                 (content, list::open_on(2, 0))
             }

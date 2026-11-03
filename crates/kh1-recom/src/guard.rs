@@ -1,7 +1,7 @@
 //! Enemy reactions to Sora's KH1 Guard (decision 27; `docs/recom-kh1-attack.md` § Enemy
 //! reactions to Guard): the testable part. The runtime is `win/guard.rs`.
 //!
-//! At Combat = KH1 with the Config row "Guard reactions" on, when Re:CoM's own hit apply
+//! At Combat = KH1 with the row "Guard reactions" (KH1 entry > Combat) on, when Re:CoM's own hit apply
 //! (`0x14016F1C0`) returns 2 (guarded) on Sora's body:
 //!
 //! - a **melee** attacker (the collision is one of its `CAttackMotion` entries) plays Re:CoM's own

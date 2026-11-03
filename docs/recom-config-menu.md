@@ -1,7 +1,9 @@
 # Re:CoM's Config menu, and our rows in it
 
 Steam addresses. Tags: Checked (decomp / disasm / exe) means read; Assumption means inferred.
-Built in `crates/kh1-recom` (`src/menu.rs`, `src/win/menu.rs`).
+Built in `crates/kh1-recom` (`src/menu.rs`, `src/win/menu.rs`). Since 2026-11-03 our rows are no
+longer in Re:CoM's Config screen: they are the KH1 camp entry's settings pages, drawn with this
+screen's code (§ The KH1 entry's settings pages).
 
 ## Where it is
 
@@ -52,6 +54,9 @@ Built in `crates/kh1-recom` (`src/menu.rs`, `src/win/menu.rs`).
 
 ## The window panel
 
+> History: 0.4.1 .. 0.92.0 stretched this panel for our rows. Since 2026-11-03 nothing of ours
+> touches it (the rows left Re:CoM's Config screen); the notes stay as findings.
+
 - `camp+0xB30` is a `D2::C2DSeqCtrl` (ctor `0x140247260`, base vtable `0x140607340`), made in
   draw mode 0 with `vtable+8` (`0x140247850`) playing animation **`0xF7`** (open) from the
   camp's sprite set `camp+0x80`. Mode 1 switches it to **`0xF8`** (idle) once `0xF7` ends
@@ -96,116 +101,127 @@ Built in `crates/kh1-recom` (`src/menu.rs`, `src/win/menu.rs`).
   Nothing else in the screenshot ends at the old bottom, so the 1-part sprite needs nothing
   (Assumption; the log now prints its rect and whether it is a scissor).
 
-## Our rows (native)
+## Re:CoM's Config screen: back to Re:CoM's own (2026-11-03)
 
-Rows after row 4, drawn and run by the code above (the "KH1 motions test" row was removed by
-owner decision, 2026-10-30; see `recom-motion-switch.md`):
+Owner decision (2026-11-03, `design-philosophy-instructions.md` § KH1 camp tab: settings
+submenus): Combat, Guard reactions and Enemy pace **leave Re:CoM's Config menu**; the camp
+menu's "KH1" entry gets two settings pages, **Combat** and **Movement**.
 
-| row | label | options | ini key |
-|---|---|---|---|
-| 5 | Combat | Re:CoM / KH1 | `combat` (default kh1) |
-| 6 | Guard reactions | Off / On | `guard_reactions` (default on; decision 27) |
+- What 0.4.1 .. 0.92.0 changed (all undone): a wrapper on the draw `0x1400DF1B0` (our rows in the
+  free item slots 14..20 after mode 9; the panel's 9-slice bottom offset and rect copies after
+  modes 0 / 1 / 4) and a wrapper on the input `0x1400D3EB0` (cursor edges at rows 0 / 4 leading to
+  our rows 5..7, left / right on them). No data patch, no byte of the exe or of the sprite set was
+  ever written (the panel's frame used our own rect copies). Checked (the 0.92.0 code).
+- Now: **the draw is not hooked** (it is only called, for our pages; its first 10 bytes
+  `48 8B C4 55 41 54 41 55 41 56` are still checked at start, `sites::CALLEES`), and the input
+  wrapper (`48 89 5C 24 08 57 48 83 EC 20`, 10 bytes moved, unchanged since 0.4) hands every call
+  to the original unless our "KH1" entry is the one open (`win::keyblades::page_active`: our entry
+  exists for this camp and `camp+0xBC` = 7). So Re:CoM's Config screen runs Re:CoM's code only:
+  its 5 rows, cursor wrap 0..4, panel size, help lines. Checked (code). The panel-only callees
+  (`0x140246210`, `0x14024AD40`, `0x14024C270`) and the `C2DSprObj` vtable check are gone.
+- `config_menu = off` (ini) installs neither the input wrapper nor the KH1 entry: Re:CoM's camp
+  menu is wholly untouched.
 
-- "Guard reactions" only has an effect at Combat = KH1 (Re:CoM's Sora has no Guard; at Re:CoM
-  nothing reads it). What it does: `recom-kh1-attack.md` § Enemy reactions to Guard. Its flip
-  takes effect at once (no restart).
+## The KH1 entry's settings pages (native: Re:CoM's Config screen with our rows)
 
-- **Hook `0x1400D3EB0`** (bytes `48 89 5C 24 08 57 48 83 EC 20`). Re:CoM's rows go to the
-  original. Changed only: up on row 0 → row 6, our last (was 4), down on row 4 → row 5 (was 0).
-  On our rows: up → the row above (5 → 4), down → the row below (6 → 0), left/right flip that
-  row, each followed by Re:CoM's cursor sound and a mode-9 redraw, as the original does.
-  Confirm/cancel always goes to the original (it never indexes by the cursor there; its draw
-  only compares its rows 0..4 with the cursor, `0x1400DF91C..0x1400DF925`, Checked (disasm)).
-- **Hook `0x1400DF1B0`** (bytes `48 8B C4 55 41 54 41 55 41 56`).
-  - After mode 9, builds each row's label and 2 values (row 5: slots 14..16, row 6: 17..19;
-    Re:CoM leaves 14..20 unused) with the same calls and arguments the original uses for row 3
-    (same fonts, sequence tables `0x1407C1230` / `0x1407C1240[6..7]`), at row 3's x and one row
-    step (row 4 − row 3) below the row before. When the cursor is on one of our rows, moves the
-    cursor sprite and sets that row's help line exactly as the original does for its rows.
-    Re:CoM deletes our items with its own.
-  - **Panel taller by one row step per row we add (two).** After modes 0, 1 and 4 (the ones
-    that can give the panel a new animation), on each object of the panel's current sequence
-    with the `C2DSprObj` vtable. The row step is layout group `0xB` element `0x11` y − element
-    `0xF` y; the panel grows by 2 × that.
-    - **9 parts** with flag 8 clear (the fill): edge offsets (0, 0, 0, 2 × row step) and flag
-      8. Re:CoM's own 9-slice code draws its bottom two rows lower, the top where it was. Not
-      Re:CoM's resize call, because that recentres the window on its origin (the screen's
-      top-left here). Flag 8 set means done.
-    - **Other part counts (≥ 2) shaped like a frame** (parts wholly above the sprite's middle,
-      wholly below, and across it; `menu::panel::frame_rects`): each part with a y below the
-      middle gets its own copy of its rect entry with those y moved down by 2 × the row step, and
-      its `+0` repointed to the copy. The bottom row moves, the side edges stretch, the top row
-      keeps Re:CoM's entry. It is the same move the 9-slice bottom offset makes, in the same
-      part-local units, so frame and fill stay together through the open and close
-      animations. The copies are made once per source entry, kept for the process, reused
-      (keyed by source address, its bytes and the new rect; at most 256), and a sprite whose
-      parts already point at a copy is done. The set's own data is never written.
-    - **1 part:** left (logged with its rect and whether it is a scissor).
-    - Mode 1 runs each frame only while the screen opens; mode 3 (every frame while open) is
-      not touched, so nothing of ours runs per frame once open.
-  - The log prints `window panel, 2 rows (X units) taller; sprites: …` (what each sprite
-    got) whenever something changed, at most 6 times per session.
-  - **Assumption:** the frame sprites have the same scale as the fill at rest (seen for the
-    fill; the frame is checked by the next screenshot).
-- New checked sites (bytes from the Steam exe): `0x140246210` (called:
-  `48 83 EC 28 48 83 3D 1C 6C 63 00 00 8B D1`), `0x14024AD40`
-  (`48 83 B9 20 01 00 00 00 0F 84 0B 06 00 00`) and `0x14024C270`
-  (`40 53 48 81 EC 90 00 00 00 0F 29 B4 24 80 00 00`), checked only, since their meaning of
-  the fields we write is what we rely on. The `C2DSprObj` vtable `0x1406077D8` is compared
-  with each object's vtable before anything is written.
-- A flip updates the setting and rewrites `kh1-recom.ini` at once (other lines and comments
-  kept; an old `kh1_motions` line is left and ignored).
-- Text: our label, options and help are NUL-terminated ASCII handed to the same text items
-  (the message table is bypassed, not changed). Seen in game (owner's screenshot,
-  2026-10-30): the rows render with Re:CoM's buttons, text and highlights. Checked (in game).
-- **Help line:** with the cursor on our rows the help line shows our text:
-  - Combat: "Re:CoM: card battles. KH1: Kingdom Hearts combat. (mod v0.13.3)" (the version
-    is the DLL's own, built in from `Cargo.toml` since 0.6.2);
-  - Guard reactions: "On: blocked attackers flinch, blocked shots fly back. KH1 only."
-  - The box shows about 69 characters and cuts the rest: before 0.13.3 the Combat help ended at
-    "combat." and its version never showed. Checked (owner's screenshots, 2026-10-31). Ours are
-    kept within 66 (`menu::HELP_MAX`). Mode 9 of the
-  original first sets help `0x50041A` (its highlighted item index stays 0 when the cursor is
-  on row 5), then our hook sets ours on the same help object. `0x140259000` keeps the pointer
-  as is when `help+0x9C` is 0, else formats it with `0x1402402B0`; our text is static and has
-  no `%`. Checked (decomp); not seen in game yet. On Re:CoM's rows it is Re:CoM's own help
-  (the screenshots show the camera help with the cursor on row 0, which is correct).
-- `config_menu = off` in the ini installs neither hook: the menu, the panel and its size stay
-  exactly Re:CoM's.
-- Every hooked and called function's first bytes are checked against the Steam exe before
-  anything is written; the two hooks go in together or not at all.
+Built in `crates/kh1-recom` (`src/menu.rs` rules and texts, `src/win/menu.rs` the page,
+`src/win/keyblades.rs` the submenu). Opened from the "KH1" camp entry's submenu rows **Combat**
+and **Movement** (`docs/recom-keyblade-equip.md` § Settings pages).
+
+| page | row | options (left / right cycle) | style | ini key | takes effect |
+|---|---|---|---|---|---|
+| Combat | Combat | Re:CoM / KH1 | pair | `combat` | at once (see below) |
+| Combat | Guard reactions | Off / On | pair | `guard_reactions` | at once |
+| Combat | Enemy pace | Re:CoM / KH1 | pair | `enemy_pace` | next battle |
+| Combat | Enemy AI | Re:CoM / KH1 | pair | `enemy_ai` | next battle |
+| Combat | Revenge Value | Off / On | pair | `boss_revenge` | at once (next boss fight) |
+| Movement | Run speed | Re:CoM / KH1 | pair | `run_speed` | at once |
+| Movement | Jump height | Re:CoM / KH1 | pair | `jump_height` | at once |
+| Movement | Air speed | Re:CoM / KH1 | pair | `air_speed` | at once |
+| Movement | Dodge roll | Re:CoM / KH1 / Off | single | `dodge_roll` | at once |
+
+Damage stays ini-only (owner). The row "Revenge Value" is the owner's name (2026-11-03) for
+`boss_revenge`.
+
+### How a page runs (Checked (decomp `0x1400D3EB0`, `0x1400DF1B0`, `0x1400D9C80` states 0x4A..0x4C))
+
+- The camp's states 0x4A..0x4C call `0x1400D3EB0`; with our entry open the input wrapper runs our
+  submenu; its settings row opens a page that is **Re:CoM's Config state machine with our rows**:
+  - state 0: Re:CoM's draw mode 0 (makes the window panel `camp+0xB30`, animation 0xF7, and the
+    cursor sprite `camp+0xBE0`), then our rows in place of its mode 9;
+  - state 1: draw mode 1 each frame until it reports the panel's opening ended (idle 0xF8, cursor
+    shown; it also glides the cursor);
+  - state 2: draw mode 3, then the pad in Re:CoM's order: `0x140111B90` (confirm or cancel) closes:
+    draw mode 4 and sound 4; else up / down (`0x140111A70`, masks `0x101000` / `0x204000`, wrapping)
+    or left / right (`0x408000` / `0x802000`) on the cursor row; after any of those sound 1 and our
+    rows rebuilt (`menu::step`, `menu::cycle`: left −1, right +1, wrapping over the options; for
+    two options both flip, as Re:CoM's bytes do);
+  - state 3: draw mode 5 until the close ends, then mode 6 (deletes panel, the 21 item slots and the
+    cursor sprite) and back to the submenu (header item 1 closes, buttons reappear).
+- **Our rows (Re:CoM's mode 9 with our rows):** the 21 slots `camp+0xB38` emptied as mode 9 empties
+  them (each item's vtable `+0` with 1), then from slot 0: per row a label `CButton` (label
+  sequences `0x1407C1230`, `camp.lad` group 0xB label elements of Re:CoM's row `r`, font 0xD, or
+  0xC when `camp+0x9C` = 0 and the language global `[0x140AF73B0]+0x274` is 3 or 6, selected −1)
+  and its value item(s) (font 0xD, at the row's value y element). Pages have at most 5 rows, so
+  row `r` is exactly where Re:CoM's row `r` is: the panel needs no resizing.
+  - pair rows (two options) are Re:CoM's rows 0..3: value items `2r`, `2r + 1` (sequence ids
+    `0x1407C1240[item]`, x elements 9/10, 11/12, 15/16, 20/21); the chosen option has selected = 1
+    (Re:CoM: byte == option). A pair on row 4 (Revenge Value) takes row 3's two items at row 4's y,
+    as our former Config rows did.
+  - single rows (Dodge roll, three options) are Re:CoM's row 4 "Game Mode": value item 8 (x element
+    0x16) showing the current option, selected 0.
+  - Combat page: 15 slots; Movement page: 11 (of 21).
+  - With the cursor on a row: the cursor sprite plays 0xFA (pair, on the chosen value) or 0x100
+    (single), is moved to the item's sprite position plus Re:CoM's x offset for that item (0.0 for
+    item 0, 150.0 for items 1..8), and the help line `camp+0x9D0` gets the row's help through
+    `0x140259000`, as mode 9 does for Re:CoM's rows.
+- The Config fields are free while our submenu is open (Re:CoM's Config runs only from its top
+  entry 6). Re:CoM's Config cursor `camp+0xBE8` and value bytes `camp+0xBED..0xBF1` (save data) are
+  never read or written by our pages: our cursor is ours. If the camp is torn down with a page open,
+  Re:CoM's teardown `0x1400D7C20` deletes the panel, the 21 slots and the cursor sprite itself
+  (Checked (decomp)).
+- A change: `settings::Settings` updated, `kh1-recom.ini` rewritten through `settings::store`
+  (other lines and comments kept), and the live readers told (`win::set_item`), log line
+  `kh1 entry: <key> = <value> (now | from the next battle)`.
+- Text: our labels, options and help are NUL-terminated ASCII handed to the same text items (the
+  message table is bypassed). English, as every text of ours in the camp (the Config rows, the KH1
+  pages); `menu_language` only picks the command menu's KH1 words from KH1's own files.
+  Help lines are kept within 66 characters (`menu::HELP_MAX`; the box cuts at about 69, Checked
+  (owner's screenshots, 2026-10-31)).
+
+### When each change takes effect (Checked (code))
+
+- **Combat**: at once. `movement::set_mode` (every KH1 handler, the MP state `mp::active`, the
+  command menu, Guard, items and abilities read it live), the MP bar refreshed on the live gauges,
+  the Keyblade model prefetched (shown when the camp closes), the KH1 magic effect set loaded in the
+  field (`magic_fx`). A battle reads it when it starts (`battle::kh1_battle`), so a field change
+  applies to the next battle. This is exactly what the former Config row did. Inside the camp the
+  KH1 entry's submenu shows the new row list when the Combat page closes (Items / Customize /
+  Abilities appear or go; the cursor stays on Combat).
+- **Guard reactions**: at once (`attack::set_guard_reactions`).
+- **Enemy pace**: next battle (read at the battle manager's construction, `battle::manager_ctor`).
+- **Enemy AI**: next battle (read in each enemy's ctor wrapper when a battle makes it,
+  `kh1_enemy`).
+- **Revenge Value**: at once (`revenge::set_enabled`; its hooks and boss sizes are installed
+  whatever the value, and each hit checks it); in practice the next boss fight.
+- **Run speed / Jump height / Air speed / Dodge roll**: at once: each KH1 frame copies them
+  (`movement::run_frame`, `stick_class`; `set_speeds` / `set_roll_mode`). Assumption: a jump or
+  roll is not in progress while the camp is open (the camp opens from the field's idle states).
+- The movement rows only act at Combat = KH1 (Re:CoM's own movement otherwise); their help lines
+  say "KH1 only".
+
+### Riku's story
+
+The KH1 entry stays hidden in Riku's story (as before, `win::keyblades::wanted`), and so does the
+camp that opens straight into the map page. So in Riku's story these settings are ini-only now
+(before, the Config rows showed there too). Owner question in the version's report.
 
 ## Needs in-game testing
 
-- The panel's border (frame and highlight) now ends just below "Guard reactions" with its
-  corners intact, lined up with the fill, through the open and close animations. Send the
-  "window panel, 2 rows … taller; sprites: …" log lines (they list each sprite's parts and
-  what it got, including the 1-part sprite's rect).
-- The cursor and help line on both our rows; up/down wrap through rows 0..6; left/right flip
-  the row under the cursor; the ini changes on each flip (`combat`, `guard_reactions`).
-- Opening and closing the camp and the Config screen repeatedly (item ownership and deletion).
-
-## Room for more rows (2026-10-31; 0.13.4)
-
-- Each two-value row takes 3 item slots (label, 2 values) in `camp+0xB38`. Re:CoM's array has
-  21 slots and fills 0..13, so 7 are free (14..20). Checked (decomp, as above).
-- Owner's choice (a): Combat stays a two-value row (14..16); **Guard reactions (17, 18) and Enemy
-  pace (19, 20) use Re:CoM's row 4 style** ("Game Mode"): the label and one wide value item that
-  shows the current option. All 21 slots are now used. `menu::slots`, `menu::Style`.
-- Row 4's item as Re:CoM builds it in mode 9 (Checked (decomp `0x1400DF1B0`)): value sequence
-  index 8 of `0x1407C1240`, x element `0x16`, the row's y element, selected argument 0, font 0xD;
-  with the cursor on it the cursor sprite plays animation `0x100` (not `0xFA`) and sits at the
-  item's position + the item's x offset. Our single rows build their value item the same way at
-  their own y; left / right flip the setting and the redraw shows the other option's text.
-- Enemy pace takes effect from the next battle (read at the battle manager's construction).
-- Assumption: the panel, now 3 rows taller, still ends above the camp's bottom bars (from the
-  owner's screenshot at 1275 × 716 there are about 60 px left below Guard reactions; one row is
-  about 49 px). Not seen in game.
-
-## "Damage" (owner, 2026-11-01): no slot left
-
-- The owner asked for a setting "Damage: Re:CoM / KH1" (`recom-kh1-attack.md` § Re:CoM damage
-  setting). All 21 item slots are in use (above), so it is an ini key for now: `damage = recom |
-  kh1` (default `recom`), parsed, defaulted and stored like the others (`settings::Settings::damage`;
-  `store` writes it), read once at start (no Config row, no runtime flip). Owner question: where
-  the row should go (options in the version's report).
+- Re:CoM's Config screen: exactly 5 rows, its own panel size, cursor wrap 0..4, help lines.
+- KH1 entry at Combat = Re:CoM: shown under Config; its submenu shows Combat and Movement only.
+- Each settings page: Re:CoM's panel opens, rows at Re:CoM's row positions, cursor and help on each
+  row, left / right change the value (sound 1), the ini changes at once; confirm or cancel closes
+  (sound 4) back to the submenu with the cursor on the row.
+- Combat flipped on the Combat page: closing the page shows the new row list.
+- Opening and closing the camp and the pages repeatedly (item ownership and deletion).

@@ -2,9 +2,11 @@
 //!
 //! Re:CoM's camp (pause) menu gets an 8th top-level entry, "KH1" (M7 stage 7.13; "Keyblades"
 //! before it), below Config, drawn and run by Re:CoM's own camp code through four wrappers
-//! (`win::keyblades`). It opens a submenu of Re:CoM's own entry buttons ([`sub`]): Items
-//! (`crate::items_page`, whose Sora list starts with his Keyblade slot) and Customize
-//! (`crate::customize`). The Keyblade slot opens the Keyblade list: the Keyblades Sora has earned,
+//! (`win::keyblades`); since 2026-11-03 it is there whatever the Combat setting (Sora's story). It
+//! opens a submenu of Re:CoM's own entry buttons ([`sub`]): at Combat = KH1 Items
+//! (`crate::items_page`, whose Sora list starts with his Keyblade slot), Customize
+//! (`crate::customize`) and Abilities; always the Combat and Movement settings pages
+//! (`crate::menu`). The Keyblade slot opens the Keyblade list: the Keyblades Sora has earned,
 //! the equipped one marked, the highlighted one's numbers, equip on confirm. The choice is one byte
 //! of Re:CoM's own save block.
 //! See `docs/recom-keyblade-equip.md`.
@@ -333,7 +335,19 @@ pub mod text {
     /// submenu"), its header title and help line.
     pub const ENTRY_LABEL: &[u8] = b"KH1\0";
     pub const TITLE: &[u8] = b"KH1\0";
-    pub const ENTRY_HELP: &[u8] = b"Sora's Keyblade and items, spell shortcuts and abilities.\0";
+    /// At Combat = KH1 (Items, Customize, Abilities, Combat, Movement).
+    pub const ENTRY_HELP: &[u8] = b"Items, shortcuts and abilities; combat and movement settings.\0";
+    /// At Combat = Re:CoM (Combat, Movement).
+    pub const ENTRY_HELP_SETTINGS: &[u8] = b"Combat and movement settings.\0";
+
+    /// The entry's help line for the rows its submenu will show.
+    pub fn entry_help(kh1_pages: bool) -> &'static [u8] {
+        if kh1_pages {
+            ENTRY_HELP
+        } else {
+            ENTRY_HELP_SETTINGS
+        }
+    }
     /// The Keyblade list's help (opened from the Items page's Keyblade slot).
     pub const PAGE_HELP: &[u8] = b"Choose the Keyblade Sora fights with.\0";
     pub const STAT_LABELS: [&[u8]; 3] = [b"Strength\0", b"Magic\0", b"Reach\0"];
@@ -346,9 +360,11 @@ pub mod text {
 /// rows, as Re:CoM's Deck submenu relabels them (`0x1400E3DE0` mode 0 at level 1), run with
 /// Re:CoM's Deck-submenu input rule (update state 0x22, `0x1400D9C80`). Checked (decomp).
 ///
-/// Adding a row is one more [`Row`] in [`ROWS`] with its label, help and page (M8 stage 8a.2 added
-/// Items this way, M9 stage 9b Abilities). Since the owner's ask of 2026-11-01 the Keyblades row is gone:
-/// the Keyblade is the first slot of the Items page's Sora list (`crate::items_page::SORA_KINDS`).
+/// Adding a row is one more [`Row`] with its label, help and page (M8 stage 8a.2 added Items this
+/// way, M9 stage 9b Abilities). Since the owner's ask of 2026-11-01 the Keyblades row is gone: the
+/// Keyblade is the first slot of the Items page's Sora list (`crate::items_page::SORA_KINDS`).
+/// Since 2026-11-03 (owner) the entry is always there and has two settings rows, Combat and
+/// Movement (`crate::menu`); Items, Customize and Abilities are there only at Combat = KH1.
 pub mod sub {
     use super::text;
     use super::top::Pad;
@@ -362,15 +378,37 @@ pub mod sub {
         Customize,
         /// M9 stage 9b: KH1's ability screen with AP (`crate::abilities::page`).
         Abilities,
+        /// The Combat settings page (`crate::menu::Page::Combat`).
+        Combat,
+        /// The Movement settings page (`crate::menu::Page::Movement`).
+        Movement,
     }
 
-    /// The rows, top to bottom.
-    pub const ROWS: &[Row] = &[Row::Items, Row::Customize, Row::Abilities];
+    /// The rows at Combat = KH1 (with Keyblade numbers to list), top to bottom.
+    pub const KH1_ROWS: &[Row] = &[Row::Items, Row::Customize, Row::Abilities, Row::Combat, Row::Movement];
+    /// The rows at Combat = Re:CoM (owner, 2026-11-03: "only Combat and Movement").
+    pub const RECOM_ROWS: &[Row] = &[Row::Combat, Row::Movement];
+
+    /// The rows the submenu shows: KH1's pages only at Combat = KH1 (`kh1_pages`: Combat = KH1 and
+    /// the stats file lists Keyblades, the entry's old condition).
+    pub fn rows(kh1_pages: bool) -> &'static [Row] {
+        if kh1_pages {
+            KH1_ROWS
+        } else {
+            RECOM_ROWS
+        }
+    }
 
     /// Re:CoM's camp has 7 entry buttons (`camp+0x1B8[7]`); the submenu reuses them. Checked
     /// (decomp).
     pub const MAX_ROWS: usize = 7;
-    const _: () = assert!(ROWS.len() <= MAX_ROWS && !ROWS.is_empty());
+    const _: () = assert!(KH1_ROWS.len() <= MAX_ROWS && !RECOM_ROWS.is_empty());
+
+    /// Where the cursor goes when the row list changes (Combat flipped on the Combat page): the
+    /// same row in the new list, else the first.
+    pub fn row_in(rows: &[Row], row: Row) -> i32 {
+        rows.iter().position(|&r| r == row).unwrap_or(0) as i32
+    }
 
     impl Row {
         /// The button's label, also the page's header title (header item 1, the breadcrumb).
@@ -379,6 +417,8 @@ pub mod sub {
                 Row::Items => crate::items_page::text::LABEL,
                 Row::Customize => text::CUSTOMIZE_LABEL,
                 Row::Abilities => crate::abilities::page::text::LABEL,
+                Row::Combat => crate::menu::Page::Combat.label(),
+                Row::Movement => crate::menu::Page::Movement.label(),
             }
         }
 
@@ -388,6 +428,17 @@ pub mod sub {
                 Row::Items => crate::items_page::text::HELP,
                 Row::Customize => text::CUSTOMIZE_HELP,
                 Row::Abilities => crate::abilities::page::text::HELP,
+                Row::Combat => crate::menu::Page::Combat.help(),
+                Row::Movement => crate::menu::Page::Movement.help(),
+            }
+        }
+
+        /// The settings page the row opens, if it is one.
+        pub fn settings_page(self) -> Option<crate::menu::Page> {
+            match self {
+                Row::Combat => Some(crate::menu::Page::Combat),
+                Row::Movement => Some(crate::menu::Page::Movement),
+                _ => None,
             }
         }
     }
@@ -404,12 +455,13 @@ pub mod sub {
         Move(i32),
     }
 
-    /// Re:CoM's Deck submenu (state 0x22, `0x1400DB3F5..`): cancel first (`0x14029B410`; Start
-    /// does nothing there), then confirm (`0x14029B490`), then up / down (repeat masks 0x101000 /
-    /// 0x204000): at the ends a held repeat stops and only a fresh press goes on, and the cursor
-    /// set `0x1400DEA10` wraps over the count (`camp+0x21C4`). Checked (decomp).
-    pub fn step(cursor: i32, p: Pad) -> Act {
-        let n = ROWS.len() as i32;
+    /// Re:CoM's Deck submenu (state 0x22, `0x1400DB3F5..`) over `n` rows: cancel first
+    /// (`0x14029B410`; Start does nothing there), then confirm (`0x14029B490`), then up / down
+    /// (repeat masks 0x101000 / 0x204000): at the ends a held repeat stops and only a fresh press
+    /// goes on, and the cursor set `0x1400DEA10` wraps over the count (`camp+0x21C4`). Checked
+    /// (decomp).
+    pub fn step(cursor: i32, n: usize, p: Pad) -> Act {
+        let n = n as i32;
         if p.cancel {
             return Act::Close;
         }
@@ -652,25 +704,38 @@ mod tests {
 
     #[test]
     fn submenu_rows_and_moves_follow_recoms_deck_submenu() {
-        use sub::{Act, Row, ROWS};
-        // The owner's ask (2026-11-01): Items (the Keyblade slot and the item slots), Customize;
-        // M9 9b: Abilities.
-        assert_eq!(ROWS, &[Row::Items, Row::Customize, Row::Abilities]);
+        use sub::{Act, Row};
+        // The owner's asks: Items (the Keyblade slot and the item slots), Customize; M9 9b:
+        // Abilities; 2026-11-03: Combat and Movement, the only two at Combat = Re:CoM.
+        assert_eq!(sub::rows(true), &[Row::Items, Row::Customize, Row::Abilities, Row::Combat, Row::Movement]);
+        assert_eq!(sub::rows(false), &[Row::Combat, Row::Movement]);
         assert_eq!((Row::Items.label(), Row::Customize.label(), Row::Abilities.label()), (&b"Items\0"[..], &b"Customize\0"[..], &b"Abilities\0"[..]));
-        // Inside: held or fresh moves.
-        assert_eq!(sub::step(0, DOWN_HELD), Act::Move(1));
-        assert_eq!(sub::step(1, DOWN_HELD), Act::Move(2));
-        assert_eq!(sub::step(1, UP_HELD), Act::Move(0));
-        // Ends: held stops, fresh wraps (Re:CoM's cursor set wraps over the count).
-        assert_eq!(sub::step(2, DOWN_HELD), Act::None);
-        assert_eq!(sub::step(2, DOWN_FRESH), Act::Move(0));
-        assert_eq!(sub::step(0, UP_HELD), Act::None);
-        assert_eq!(sub::step(0, UP_FRESH), Act::Move(2));
+        assert_eq!((Row::Combat.label(), Row::Movement.label()), (&b"Combat\0"[..], &b"Movement\0"[..]));
+        assert_eq!(Row::Combat.settings_page(), Some(crate::menu::Page::Combat));
+        assert_eq!(Row::Movement.settings_page(), Some(crate::menu::Page::Movement));
+        assert_eq!(Row::Items.settings_page(), None);
+        // Combat flipped on the Combat page: the cursor stays on Combat in the new list.
+        assert_eq!(sub::row_in(sub::rows(false), Row::Combat), 0);
+        assert_eq!(sub::row_in(sub::rows(true), Row::Combat), 3);
+        assert_eq!(sub::row_in(sub::rows(true), Row::Movement), 4);
+        assert_eq!(sub::row_in(sub::rows(false), Row::Items), 0);
+        for n in [2usize, 3, 5] {
+            let last = n as i32 - 1;
+            // Inside: held or fresh moves.
+            assert_eq!(sub::step(0, n, DOWN_HELD), Act::Move(1));
+            assert_eq!(sub::step(last, n, UP_HELD), Act::Move(last - 1));
+            // Ends: held stops, fresh wraps (Re:CoM's cursor set wraps over the count).
+            assert_eq!(sub::step(last, n, DOWN_HELD), Act::None);
+            assert_eq!(sub::step(last, n, DOWN_FRESH), Act::Move(0));
+            assert_eq!(sub::step(0, n, UP_HELD), Act::None);
+            assert_eq!(sub::step(0, n, UP_FRESH), Act::Move(last));
+            assert_eq!(sub::step(n as i32, n, Pad { confirm: true, ..NONE }), Act::None);
+        }
         // Cancel first, then confirm; Start is nothing here.
-        assert_eq!(sub::step(1, Pad { confirm: true, ..NONE }), Act::Open(1));
-        assert_eq!(sub::step(1, Pad { confirm: true, cancel: true, ..NONE }), Act::Close);
-        assert_eq!(sub::step(0, Pad { start: true, ..NONE }), Act::None);
-        assert_eq!(sub::step(5, Pad { confirm: true, ..NONE }), Act::None);
-        assert_eq!(sub::step(0, Pad { confirm: true, down: true, ..NONE }), Act::Open(0), "confirm before moves");
+        assert_eq!(sub::step(1, 5, Pad { confirm: true, ..NONE }), Act::Open(1));
+        assert_eq!(sub::step(1, 5, Pad { confirm: true, cancel: true, ..NONE }), Act::Close);
+        assert_eq!(sub::step(0, 5, Pad { start: true, ..NONE }), Act::None);
+        assert_eq!(sub::step(0, 5, Pad { confirm: true, down: true, ..NONE }), Act::Open(0), "confirm before moves");
+        assert!(text::entry_help(true).len() - 1 <= crate::menu::HELP_MAX && text::entry_help(false).len() - 1 <= crate::menu::HELP_MAX);
     }
 }

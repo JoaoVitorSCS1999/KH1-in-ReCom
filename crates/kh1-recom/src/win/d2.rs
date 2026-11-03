@@ -4,7 +4,7 @@
 //!
 //! A release finds its handle only in Re:CoM's current draw list, and a new layer goes into the
 //! current list. Our objects belong to the player gauge's list (read at the gauge's init). When
-//! another list is current (our Config rows and the Keyblades page run inside the camp, list 1),
+//! another list is current (the KH1 entry's pages run inside the camp, list 1),
 //! the call runs with Re:CoM's own list setter `0x140249800` on our list and sets the current one
 //! back right after (nothing else runs between: one game thread). Without this, a Config flip in
 //! the camp made or released the MP bar and the menu's layers on the wrong list: each release

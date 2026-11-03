@@ -1,9 +1,9 @@
 //! `kh1-recom.ini`, next to the game. Written with the defaults when missing, read at start.
 //!
-//! Every setting switches between Re:CoM's behaviour and KH1's. The rows we add to Re:CoM's
-//! Config menu change these values and rewrite this file at once, so the file stays the backup
-//! (and the only store: Re:CoM's own config bytes live in its save data, see
-//! `docs/recom-config-menu.md`).
+//! Every setting switches between Re:CoM's behaviour and KH1's. The camp menu's "KH1" entry has two
+//! settings pages, Combat and Movement (`crate::menu`), whose rows change these values and rewrite
+//! this file at once, so the file stays the backup (and the only store: Re:CoM's own config bytes
+//! live in its save data, see `docs/recom-config-menu.md`).
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
@@ -103,10 +103,11 @@ pub struct Settings {
     /// `Kh1`: KH1's formula on the KH1 twins' / proxies' records and HP (decisions 12, 21).
     pub damage: Mode,
     /// Boss revenge at `combat = kh1` (owner, 2026-11-01; `crate::revenge`): KH2's revenge value on
-    /// Re:CoM's humanoid bosses. No Config row (Re:CoM's 21 item slots are full).
+    /// Re:CoM's humanoid bosses. The KH1 entry's Combat page row "Revenge Value".
     pub boss_revenge: bool,
-    /// Our rows in Re:CoM's Config menu. `off` leaves the menu untouched (a safety switch while
-    /// the rows are untested in game; the settings then come from this file only).
+    /// The camp menu's "KH1" entry (and the Config input wrapper it runs through). `off` leaves
+    /// Re:CoM's camp menu untouched (a safety switch; the settings then come from this file only).
+    /// The key keeps its old name (it once added rows to Re:CoM's Config menu).
     pub config_menu: bool,
     /// KH1 abilities from the ini (M9 stage 9b, `crate::abilities`): the story abilities' unlock
     /// (High Jump, Glide, Superglide, Dodge Roll, Combo Master), the movement abilities a save
@@ -114,10 +115,10 @@ pub struct Settings {
     /// Combo Plus), and all of them while there is no save block.
     pub abilities: Kh1Abilities,
     /// Which Dodge Roll Sora has at `combat = kh1` ([`RollMode`]); `abilities.dodge_roll` follows
-    /// it (on unless `Off`). No Config row (Re:CoM's 21 item slots are full).
+    /// it (on unless `Off`). The KH1 entry's Movement page.
     pub dodge_roll: RollMode,
     /// Sora's movement speeds at `combat = kh1` (owner, 2026-11-02; `crate::movement::speeds`), each
-    /// Re:CoM's or KH1's. No Config rows (Re:CoM's 21 item slots are full). `run_speed`: the full
+    /// Re:CoM's or KH1's. The KH1 entry's Movement page. `run_speed`: the full
     /// run (default Re:CoM's 6.2 m/s × the stick; KH1's 4.8 m/s); the walk stays KH1's.
     pub run_speed: Mode,
     /// `jump_height`: the jump's take-off speed, gravity and release cut (default KH1's 190 / 290
@@ -277,7 +278,9 @@ impl Default for Settings {
 
 pub const DEFAULT_FILE: &str = "\
 ; KH1 combat in Re:Chain of Memories -- settings
-; The Config menu (camp menu > Config) changes these and rewrites this file.
+; The camp menu's KH1 entry changes these and rewrites this file: its Combat page (combat,
+; guard_reactions, enemy_pace, enemy_ai, boss_revenge) and its Movement page (run_speed,
+; jump_height, air_speed, dodge_roll). The rest are set here only.
 ;
 ; combat = kh1 | recom
 ;   kh1:   Sora fights as in KH1 (no cards in battle).
@@ -310,14 +313,14 @@ enemy_ai = kh1
 ;   kh1:   KH1's damage formula and KH1's HP for the enemies (each Re:CoM enemy's KH1 twin).
 damage = recom
 ;
-; boss_revenge = on | off (only at combat = kh1, in Sora's story; read at start)
+; boss_revenge = on | off (only at combat = kh1, in Sora's story; the row Revenge Value)
 ;   on:  humanoid bosses count Sora's hits as KH2's revenge value (Axel 92, Vexen 150, Hades 80
 ;        then 50, the rest 100) and, past it, break out of their flinch with an attack of their own.
 ;   off: bosses keep Re:CoM's rules.
 boss_revenge = on
 ;
 ; config_menu = on | off
-;   off: don't add our rows to Re:CoM's Config menu (use this file instead).
+;   off: no KH1 entry in the camp menu: Re:CoM's camp menu untouched (use this file instead).
 config_menu = on
 ;
 ; KH1 abilities at combat = kh1 (on | off). Since M9 9b they live in the save and are equipped
@@ -333,7 +336,7 @@ high_jump = off
 glide = off
 superglide = off
 ;
-; dodge_roll = recom | kh1 | off (only at combat = kh1; read at start)
+; dodge_roll = recom | kh1 | off (only at combat = kh1)
 ;   Square while running rolls (KH1's rule: slower, or standing, guards).
 ;   recom: Re:CoM's own roll (its motion, speed, distance, timing and invulnerable frames).
 ;   kh1:   KH1's roll (KH1's frames; damage still taken, no flinch for 12 frames).
@@ -341,7 +344,7 @@ superglide = off
 ;   (on, from older files, reads as recom.)
 dodge_roll = recom
 ;
-; Sora's movement speeds at combat = kh1 (recom | kh1 each; read at start):
+; Sora's movement speeds at combat = kh1 (recom | kh1 each):
 ; run_speed:   recom: the full run at Re:CoM's speed (6.2 m/s, scaled by the stick as in Re:CoM).
 ;              kh1:   KH1's run (4.8 m/s). The walk is KH1's either way.
 run_speed = recom

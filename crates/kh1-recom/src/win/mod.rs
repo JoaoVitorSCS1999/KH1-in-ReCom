@@ -1,5 +1,5 @@
 //! Windows side: start-up (from Panacea's `OnInit`, or a fallback thread), hooks, and the glue
-//! between our Config row and `kh1-recom.ini`.
+//! between the KH1 camp entry's settings pages and `kh1-recom.ini`.
 
 mod abilities;
 mod attack;
@@ -78,21 +78,17 @@ pub(crate) fn settings() -> Settings {
     SETTINGS.lock().ok().and_then(|g| g.clone()).unwrap_or_default()
 }
 
-/// Our Config row `k` was flipped: change the setting, rewrite the ini.
-pub(crate) fn toggle(k: usize) {
+/// A row of the KH1 entry's settings pages (`crate::menu`) set to option `v`: the setting changes,
+/// `kh1-recom.ini` is rewritten (other lines and comments kept), and whatever reads the setting
+/// live is told now. When each change takes effect: `menu::Item::effect` and
+/// `docs/recom-config-menu.md`.
+pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
+    use crate::menu::Item;
     let mut s = settings();
-    if k == crate::menu::ROW_GUARD_REACTIONS {
-        s.guard_reactions = !s.guard_reactions;
-    } else if k == crate::menu::ROW_ENEMY_PACE {
-        s.enemy_pace = match s.enemy_pace {
-            settings::Mode::Kh1 => settings::Mode::Recom,
-            settings::Mode::Recom => settings::Mode::Kh1,
-        };
-    } else {
-        s.combat = match s.combat {
-            settings::Mode::Kh1 => settings::Mode::Recom,
-            settings::Mode::Recom => settings::Mode::Kh1,
-        };
+    let was = s.clone();
+    item.set(&mut s, v);
+    if s == was {
+        return;
     }
     if let Ok(mut g) = SETTINGS.lock() {
         *g = Some(s.clone());
@@ -100,27 +96,36 @@ pub(crate) fn toggle(k: usize) {
     if let Some(p) = INI_PATH.lock().ok().and_then(|g| g.clone()) {
         let text = std::fs::read_to_string(&p).unwrap_or_else(|_| settings::DEFAULT_FILE.to_string());
         if let Err(e) = std::fs::write(&p, settings::store(&text, &s)) {
-            log(&format!("config menu: could not write {}: {e}", p.display()));
+            log(&format!("kh1 entry: could not write {}: {e}", p.display()));
         }
     }
-    if k == crate::menu::ROW_ENEMY_PACE {
-        // Read at each battle start (`battle::manager_ctor`).
-        log(&format!("config menu: enemy_pace = {} (from the next battle)", s.enemy_pace.as_str()));
-        return;
+    let shown = String::from_utf8_lossy(item.options()[v.min(item.options().len() - 1)]).trim_end_matches('\0').to_string();
+    let when = match item.effect() {
+        crate::menu::Effect::Now => "now",
+        crate::menu::Effect::NextBattle => "from the next battle",
+    };
+    log(&format!("kh1 entry: {} = {shown} ({when})", item.key()));
+    match item {
+        // Read at each battle start (`battle::manager_ctor`, each enemy's ctor).
+        Item::EnemyPace | Item::EnemyAi => {}
+        Item::GuardReactions => attack::set_guard_reactions(s.guard_reactions),
+        Item::RevengeValue => revenge::set_enabled(s.boss_revenge),
+        // Read by each KH1 frame (`movement::run_frame`, `stick_class`).
+        Item::RunSpeed | Item::JumpHeight | Item::AirSpeed => movement::set_speeds(crate::movement::speeds::Speeds { run: s.run_speed, jump: s.jump_height, air: s.air_speed }),
+        Item::DodgeRoll => {
+            movement::set_roll_mode(s.dodge_roll);
+            movement::set_abilities(s.abilities);
+        }
+        Item::Combat => {
+            movement::set_mode(s.combat == settings::Mode::Kh1);
+            // The MP bar follows the setting (made or removed on the live player gauges).
+            mp_bar::refresh();
+            // The weapon's group follows Combat: its files start loading now; the camp close shows it.
+            models::prefetch();
+            // KH1 casts' effects: Re:CoM's battle set starts loading now in the field (`magic_fx`).
+            magic_fx::setting_changed();
+        }
     }
-    if k == crate::menu::ROW_GUARD_REACTIONS {
-        attack::set_guard_reactions(s.guard_reactions);
-        log(&format!("config menu: guard_reactions = {}", settings::switch_str(s.guard_reactions)));
-        return;
-    }
-    movement::set_mode(s.combat == settings::Mode::Kh1);
-    log(&format!("config menu: combat = {}", s.combat.as_str()));
-    // The MP bar follows the setting (made or removed on the live player gauges).
-    mp_bar::refresh();
-    // The weapon's group follows Combat: its files start loading now; the camp close shows it.
-    models::prefetch();
-    // KH1 casts' effects: Re:CoM's battle set starts loading now in the field (`magic_fx`).
-    magic_fx::setting_changed();
 }
 
 /// The KH1-only clips the asset step added (Guard): the manifest
@@ -694,9 +699,8 @@ fn install_story_skip(base: usize) {
     }
 }
 
-/// The camp menu's "KH1" entry (`keyblades`, decision 25; stage 7.13: its submenu of Keyblades and
-/// Customize): four camp wrappers, all or
-/// nothing. Needs the Config input hook (the page runs through it), so it is installed only
+/// The camp menu's "KH1" entry (`keyblades`, decision 25; stage 7.13: its submenu; 2026-11-03: always
+/// there, with the Combat and Movement settings pages): four camp wrappers, all or nothing. Needs the Config input hook (the page runs through it), so it is installed only
 /// after that one. Whether the entry shows is decided each time Re:CoM builds the list.
 fn install_keyblades(base: usize, bases: &[PathBuf]) {
     let site = |name: &str| crate::sites::KEYBLADE_HOOKS.iter().find(|h| h.name == name).expect("site");
@@ -708,7 +712,7 @@ fn install_keyblades(base: usize, bases: &[PathBuf]) {
     ];
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
     if unsafe { hook::install_all(base, &hooks) } {
-        log("keyblades: camp wrappers in; the 8th entry \"KH1\" (Keyblades, Customize) shows at Combat = KH1 in Sora's story");
+        log("keyblades: camp wrappers in; the 8th entry \"KH1\" shows in Sora's story: Combat and Movement settings, and at Combat = KH1 Items, Customize and Abilities");
         keyblades::load_item_row(bases.iter().map(|b| b.join(crate::camp_rows::MANIFEST)).find(|p| p.is_file()).as_deref());
     } else {
         log("keyblades: not hooked; no KH1 entry (the Kingdom Key's numbers stand; shortcuts keep KH1's learn order)");
@@ -817,21 +821,19 @@ fn run(mod_dir: Option<PathBuf>) {
     BASE.store(base, Ordering::Relaxed);
     crash::install(MODULE.load(Ordering::Relaxed));
 
-    // Config menu rows.
+    // The camp menu's "KH1" entry: its submenu and pages run in the camp's Config states through
+    // the Config input wrapper (Re:CoM's own Config screen goes to the original, unchanged).
     if s.config_menu {
-        let hooks = [
-            hook::Hook { site: &crate::sites::HOOKS[0], ours: menu::cfg_input as *const () as usize, original: &menu::ORIG_INPUT },
-            hook::Hook { site: &crate::sites::HOOKS[1], ours: menu::cfg_draw as *const () as usize, original: &menu::ORIG_DRAW },
-        ];
-        // SAFETY: the targets' bytes are checked again inside, before anything is written.
+        let hooks = [hook::Hook { site: &crate::sites::HOOKS[0], ours: menu::cfg_input as *const () as usize, original: &menu::ORIG_INPUT }];
+        // SAFETY: the target's bytes are checked again inside, before anything is written.
         if unsafe { hook::install_all(base, &hooks) } {
-            log("config menu: rows added (camp menu > Config, below Re:CoM's rows: Combat, Guard reactions)");
+            log("camp menu: Config input wrapped for the KH1 entry's pages (Re:CoM's Config screen and its rows as unmodded)");
             install_keyblades(base, &recom_bases(&manifest_dirs(&mod_dir, &dll, &game_dir)));
         } else {
-            log("config menu: not hooked; use kh1-recom.ini");
+            log("camp menu: Config input not hooked; no KH1 entry (settings from kh1-recom.ini only)");
         }
     } else {
-        log("config menu: off in the ini; Re:CoM's menu untouched (no Keyblades entry either)");
+        log("camp menu: config_menu = off in the ini; Re:CoM's camp menu untouched (no KH1 entry; settings from kh1-recom.ini only)");
     }
 
     let dirs = manifest_dirs(&mod_dir, &dll, &game_dir);
