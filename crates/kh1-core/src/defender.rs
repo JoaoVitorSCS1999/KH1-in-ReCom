@@ -339,9 +339,9 @@ fn playing(cx: &Cx) -> Option<u16> {
     }).or(io.w.motion)
 }
 
-/// `sys 12` (`0x14029F7C0`): a plain request, nothing when it already plays (bit 16, KH1's hold at the end, is the
-/// clip's own: Re:CoM plays it as the asset step marked it; Assumption, a look past the scripts' waits); `sys 172`'s
-/// clock restarts for a request that plays anew.
+/// `sys 12` (`0x14029F7C0`): a plain request, nothing when it already plays (bit 16, KH1's hold at its end, is the clip's
+/// own: the asset step marks the three requests the script plays with it as held, `enemy::HELD_CLIPS`); `sys 172`'s clock
+/// restarts for a request that plays anew.
 fn play(cx: &Cx, r: u16, blend: f32) {
     if playing(cx) != Some(r) {
         cx.borrow_mut().clock = (Some(r), 0.0);

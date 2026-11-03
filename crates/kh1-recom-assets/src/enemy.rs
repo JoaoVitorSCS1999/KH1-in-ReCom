@@ -316,13 +316,15 @@ pub fn hit_window(m: &kh1_formats::mset::Motion, sub: u16) -> Result<(f32, f32)>
 /// slot [`SLOT_BASE`] + entry unless Re:CoM has it as an exact bake. Returns the ANN, every
 /// request's clip and, per new clip, the Re:CoM clip the matcher pairs it with (bake or edit).
 pub fn extend_ann(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
-    extend_ann_own(ann_in, ms, conv, prefix, recom_slots, &[], &[])
+    extend_ann_own(ann_in, ms, conv, prefix, recom_slots, &[], &[], &[])
 }
 
 /// [`extend_ann`], with `own`: requests whose entry gets its own new clip even when Re:CoM has it as
 /// an exact bake ([`OWN_CLIPS`]); the new clip is paired with the bake (its sounds, `extend_ses`).
-/// `loops`: requests whose new clip loops although its last pose isn't its first ([`LOOPS`]).
-pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize, own: &[u16], loops: &[u16]) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
+/// `loops`: requests whose new clip loops although its last pose isn't its first ([`LOOPS`]); `holds`: requests whose new
+/// clip holds at its end although its last pose is its first ([`HELD_CLIPS`]).
+#[allow(clippy::too_many_arguments)]
+pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize, own: &[u16], loops: &[u16], holds: &[u16]) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
     let mut ann = Ann::parse(ann_in)?;
     if ann.slots.len() != recom_slots {
         return bad(format!("{} slots, Re:CoM Steam's has {recom_slots} (already extended?)", ann.slots.len()));
@@ -368,7 +370,7 @@ pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &
                 if let Some((sc, _)) = other {
                     pairs.push((name.clone(), ann.slots[sc.slot].name_str()));
                 }
-                let looped = cycle_error(conv, m) <= LOOP_TOLERANCE_M || reqs.iter().any(|r| loops.contains(r));
+                let looped = (cycle_error(conv, m) <= LOOP_TOLERANCE_M || reqs.iter().any(|r| loops.contains(r))) && !reqs.iter().any(|r| holds.contains(r));
                 let clip = conv.convert(m, &ClipSpec { name: name.clone(), looped, root_motion: *root, blend: 8 })?;
                 while ann.slots.len() < slot {
                     ann.slots.push(Slot { name: [0; 16], clip: None });
@@ -606,7 +608,8 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     consts.push(("weight".into(), weight(script, spec.records)?));
     let own: Vec<u16> = OWN_CLIPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
     let loops: Vec<u16> = LOOPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
-    let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own, &loops)?;
+    let holds: Vec<u16> = HELD_CLIPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
+    let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own, &loops, &holds)?;
     consts.extend(bone_points(spec.name, &inp.mdls, &ms, &conv, &clips)?);
     consts.extend(child_consts(spec.name, &inp.mdls)?);
     consts.extend(t_points(spec.name, &inp.mdls, &ms, &conv, &clips, &consts)?);
@@ -1284,6 +1287,12 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
 /// past their length: the Wyvern's wind-up 204 (108 frames) in its engaged charge `0xF52` (16 + 106 frames).
 /// The Pirate's spin 217 (48 frames) in its spin `0xED0` (up to 180 frames).
 pub const LOOPS: &[(&str, u16)] = &[("wyvern", 204), ("pirate", 217)];
+
+/// Requests whose new clip holds at its end although its last pose is its first (M11): the script plays them only with
+/// bit 16 (KH1 holds them, `0x14029FC40` → `+0x160` bit 3, `0x14029F0A0`), so a script that plays one again sees it held
+/// at its end. The Defender's side steps 200 / 202 and turn-around 201 (`0x1AB8` / `0x19D2` / `0x1B96`: `0x100C8` /
+/// `0x100CA` / `0x100C9`; Checked (files): no other request of them in its script).
+pub const HELD_CLIPS: &[(&str, u16)] = &[("defender", 200), ("defender", 201), ("defender", 202)];
 
 /// Requests that get their own clip although Re:CoM has their motion as an exact bake (M11): the
 /// bake carries Re:CoM's own attack records (`.ASD`, bound by the clip's name), which would hit with

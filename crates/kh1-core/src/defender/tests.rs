@@ -47,7 +47,7 @@ pub(super) fn frames() -> Vec<(u16, f32)> {
 
 /// The asset step's looping clips (the pose rule), by request.
 pub(super) fn loops() -> Vec<u16> {
-    vec![0, 1, 6, 78, 79, 102, 104, 200, 201, 202, 204, 206, 212]
+    vec![0, 1, 6, 78, 79, 102, 104, 204, 206, 212]
 }
 
 /// The class map (`ground::defender::CLASS.attack_states`).

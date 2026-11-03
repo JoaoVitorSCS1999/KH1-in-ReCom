@@ -291,6 +291,8 @@ mod tests {
         let c = |r: u16| b.clips.iter().find(|c| c.request == r).unwrap().clone();
         assert_eq!((c(200).frames, c(201).frames, c(204).frames, c(207).frames, c(208).frames, c(209).frames, c(211).frames, c(212).frames, c(213).frames), (60, 76, 140, 208, 120, 128, 100, 280, 66));
         assert!(c(207).root && c(209).root && c(211).root && !c(208).root && !c(208).looped && !c(209).looped);
+        // The steps and the turn-around hold at their end (`enemy::HELD_CLIPS`: KH1's bit 16); the guard held and the flame loop.
+        assert!(!c(200).looped && !c(201).looped && !c(202).looped && c(204).looped && c(212).looped);
         assert!(b.clips.iter().all(|x| x.source == "kh1"));
         for r in [0, 1, 6, 7, 72, 73, 74, 75, 76, 77, 78, 79] {
             assert!(b.clips.iter().any(|x| x.request == r), "request {r}");
