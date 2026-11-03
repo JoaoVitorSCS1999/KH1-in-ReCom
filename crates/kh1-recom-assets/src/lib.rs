@@ -73,6 +73,7 @@ pub mod fatbandit;
 pub mod gargoyle;
 pub mod defender;
 pub mod bouncywild;
+pub mod greenrequiem;
 pub mod rednocturne;
 pub mod bluerhapsody;
 pub mod stats;

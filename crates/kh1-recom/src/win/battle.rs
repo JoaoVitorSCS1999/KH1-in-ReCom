@@ -152,7 +152,7 @@ unsafe fn class_once(obj: usize, path: u8, what: impl FnOnce(&str) -> String) {
 }
 
 /// The enemies in Re:CoM's battle enemy manager (task type 0x1004), at most `max`.
-unsafe fn enemies(max: usize) -> Vec<usize> {
+pub(super) unsafe fn enemies(max: usize) -> Vec<usize> {
     let mut out = Vec::new();
     let m = task(b::TASK_ENEMY_MANAGER);
     if m == 0 {

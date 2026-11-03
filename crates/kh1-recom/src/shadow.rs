@@ -253,6 +253,7 @@ pub fn cmd_token(c: &Cmd) -> String {
         Cmd::Throw(n) => format!("throw {n}"),
         Cmd::Note(n) => format!("note: {n}"),
         Cmd::HealFull => "heal full".into(),
+        Cmd::Support { child, draw } => format!("support {child} draw {draw}"),
         Cmd::Reward(r) => format!("reward {r:?}"),
         Cmd::Restart { request, blend, start } => format!("motion {request} b{blend} again from {start}"),
     }
