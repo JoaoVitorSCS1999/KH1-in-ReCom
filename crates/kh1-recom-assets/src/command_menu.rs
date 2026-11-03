@@ -46,8 +46,9 @@ pub const LANGUAGES: &[(&str, &str)] = &[("us", "US_"), ("uk", "UK_"), ("fr", "F
 /// Counter (0x63, the Counterattack); M8 stage 8a.1: 31..34, 36..38 the battle items' commands
 /// (`item + 0x1E`: Potion, Hi-Potion, Ether, Elixir, Mega-Potion, Mega-Ether, Megalixir; 35 is an
 /// empty row); M9 stage 9c.1: 319 Sonic Blade (0x4B), 321 Rave (0x4D), 322 Blast (0x4E); M8b:
-/// 286..291 the summons (commands 0x2F..0x34: Dumbo, Bambi, Genie, Tinker Bell, Mushu, Simba).
-pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 286, 287, 288, 289, 290, 291, 293, 294, 305, 313, 319, 321, 322, 343];
+/// 286..291 the summons (commands 0x2F..0x34: Dumbo, Bambi, Genie, Tinker Bell, Mushu, Simba); M12
+/// step 7: 338 Strike Raid (0x5E, "Strike"), 339 / 340 its follow-ups (0x5F "Raid", 0x60 "Judgment").
+pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 286, 287, 288, 289, 290, 291, 293, 294, 305, 313, 319, 321, 322, 338, 339, 340, 343];
 
 /// M8b: Cloud's word (the DLL's `crate::summons::CLOUD_NAME`, the same value). KH1's `Word.bin` has
 /// no "Cloud" (Checked (files)) and Re:CoM's card-name text is not in our word system: "Cloud" in
@@ -466,6 +467,7 @@ mod tests {
                 assert_eq!([get(1), get(2), get(3), get(4), get(7), get(9), get(27), get(294), get(343)], ["Attack", "Magic", "Items", "Talk", "Fire", "Firaga", "Aeroga", "Open", "Counter"]);
                 assert_eq!([get(5), get(293)], ["Examine", "Save"]);
                 assert_eq!([get(319), get(321), get(322)], ["Sonic", "Rave", "Blast"]);
+                assert_eq!([get(338), get(339), get(340)], ["Strike", "Raid", "Judgment"]);
                 assert_eq!([get(286), get(287), get(288), get(289), get(290), get(291)], ["Dumbo", "Bambi", "Genie", "Tinker Bell", "Mushu", "Simba"]);
                 assert_eq!(get(CLOUD_NAME), "Cloud");
             }

@@ -206,28 +206,30 @@ pub fn kh1_table(recom_rows_1_7: &[[u8; 16]; 7], m: &Moveset, clip_row: &dyn Fn(
     t
 }
 
-/// M9 stage 9c.1: Sonic Blade's rows (`0x1B..=0x21`) into the table: their motions are the xl
-/// set's (`kh1_core::data::xl`, not Sora's own requests 0xC9 / 0xCA), their clip rows `xl_row(xl
-/// entry)` (the asset step's converted clips); the layout a copy of Re:CoM's swing 1 (dashes) or
-/// finisher (row 4) as the modifiers'. Re:CoM's attack id is written by the special's row start
-/// (`specials::recom`), not taken from the row. Without the clip the rows stay empty.
+/// M9 stage 9c.1: the specials' rows into the table (Sonic Blade `0x1B..=0x21`; M12 step 7, Strike
+/// Raid `0x2F..=0x33`): their motions are the xl set's (`kh1_core::data::xl`, not Sora's own
+/// requests 0xC9 / 0xCA / 0xE7 / 0xE8), their clip rows `xl_row(xl entry)` (the asset step's
+/// converted clips); the layout a copy of Re:CoM's swing 1 (dashes, throws) or finisher (row 4,
+/// each special's last row) as the modifiers'. Re:CoM's attack id is written by the special's row
+/// start (`specials::recom`), not taken from the row. Without the clip the rows stay empty.
 pub fn add_special_rows(t: &mut [[u8; 16]], recom_rows_1_7: &[[u8; 16]; 7], m: &Moveset, xl_row: &dyn Fn(usize) -> Option<u32>) {
-    let infos = kh1_core::data::xl::motions();
-    for r in row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER {
-        let Some(rw) = m.row(r).filter(|_| r < t.len()) else { continue };
-        let Some(e) = kh1_core::data::xl::entry_of_kh1_request(rw.request) else { continue };
-        let Some(clip) = xl_row(e).filter(|c| *c <= 0xFF) else { continue };
-        let template = &recom_rows_1_7[if r == row::SONIC_BLADE_FINISHER { 3 } else { 0 }];
-        if let Some(mut b) = m.attack(rw.attack).and_then(|d| row_bytes_from(template, &infos[e], d)) {
-            b[0] = clip as u8;
-            t[r] = b;
+    for rows in crate::specials::ROWS_OF {
+        for r in rows.clone() {
+            let Some(rw) = m.row(r).filter(|_| r < t.len()) else { continue };
+            let Some(e) = kh1_core::data::xl::entry_of_kh1_request(rw.request) else { continue };
+            let Some(clip) = xl_row(e).filter(|c| *c <= 0xFF) else { continue };
+            let template = &recom_rows_1_7[if r == *rows.end() { 3 } else { 0 }];
+            if let Some(mut b) = m.attack(rw.attack).and_then(|d| row_bytes_from(template, &kh1_core::data::xl::motion(e)?, d)) {
+                b[0] = clip as u8;
+                t[r] = b;
+            }
         }
     }
 }
 
-/// Whether the table holds every Sonic Blade row (stage 9c.1).
-pub fn special_rows_ready(t: &[[u8; 16]]) -> bool {
-    (row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER).all(|r| t.get(r).is_some_and(|b| b[0] != 0))
+/// Whether the table holds every row of special `index` (`crate::specials::ROWS_OF`).
+pub fn special_rows_ready(t: &[[u8; 16]], index: usize) -> bool {
+    crate::specials::ROWS_OF.get(index).is_some_and(|rows| !rows.is_empty() && rows.clone().all(|r| t.get(r).is_some_and(|b| b[0] != 0)))
 }
 
 /// The modifiers whose rows the table holds, as `abilities::ix` bits (the pickers only get those).

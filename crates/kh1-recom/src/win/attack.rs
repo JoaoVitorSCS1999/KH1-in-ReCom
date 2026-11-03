@@ -215,14 +215,15 @@ pub(super) fn row_ptr(r: usize) -> Option<usize> {
     TABLE.get().and_then(|t| t.get(r)).filter(|b| b[0] != 0).map(|b| b.as_ptr() as usize)
 }
 
-/// M9 stage 9c.1: every Sonic Blade row is in the table (their clips were converted).
-pub(super) fn special_rows_ready() -> bool {
-    TABLE.get().is_some_and(|t| atk::special_rows_ready(t))
+/// M9 stage 9c.1: every row of special `index` is in the table (their clips were converted; M12
+/// step 7: per special).
+pub(super) fn special_rows_ready(index: usize) -> bool {
+    TABLE.get().is_some_and(|t| atk::special_rows_ready(t, index))
 }
 
 /// M9 stage 9c.1: `player+0x3C8` points at one of our special rows.
 pub(super) unsafe fn special_row_live(pl: usize) -> bool {
-    kh1_row_of(pl).is_some_and(|r| (kh1_core::data::row::SONIC_BLADE_DASH..=kh1_core::data::row::SONIC_BLADE_FINISHER).contains(&r))
+    kh1_row_of(pl).is_some_and(|r| crate::specials::ROWS_OF.iter().any(|rows| rows.contains(&r)))
 }
 
 /// A new KH1 attack starts (a swing's row, M9 9c.1 a special's): the KH1 hits of attacks two
@@ -1458,9 +1459,11 @@ pub unsafe fn build_table(b: usize) -> bool {
     }
     let ext = mv::EXT.get().copied().unwrap_or_default();
     let mut rows = atk::kh1_table(&live, moveset(), &|req| ext.get(req));
-    // M9 stage 9c.1: Sonic Blade's rows on the xl clips' action rows.
+    // M9 stage 9c.1 / M12 step 7: the specials' rows on the xl clips' action rows.
     atk::add_special_rows(&mut rows, &live, moveset(), &|e| ext.xl_row(e));
-    log(&format!("attack: Sonic Blade rows 0x1B..=0x21 {}", if atk::special_rows_ready(&rows) { "ready" } else { "missing (no xl_limit clips in the motion pack: re-run kh1-recom-build)" }));
+    for (i, r) in crate::specials::ROWS_OF.iter().enumerate().filter(|(_, r)| !r.is_empty()) {
+        log(&format!("attack: {} rows {:#x}..={:#x} {}", crate::specials::NAME[i], r.start(), r.end(), if atk::special_rows_ready(&rows, i) { "ready" } else { "missing (no xl_limit clips in the motion pack: re-run kh1-recom-build)" }));
+    }
     let t: &'static [[u8; 16]] = Box::leak(rows.into_boxed_slice());
     // M9 9a: the pickers only get the modifiers whose rows Re:CoM can play.
     let ready = atk::modifier_rows_ready(t);

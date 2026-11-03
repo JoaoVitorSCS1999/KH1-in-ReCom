@@ -312,6 +312,9 @@ pub struct World {
     /// order) and their count. Read only while the bottom row is Sleights.
     pub sleights: [u8; crate::sleights::MAX],
     pub sleight_count: u8,
+    /// M12 step 7: the listed KH1 specials (`crate::sleights::SPECIALS`) their prompt would offer
+    /// now, by `crate::specials` index bit (`0x14028D0F0`'s score 2).
+    pub sleight_specials: u8,
 }
 
 /// The fresh presses of one frame (Re:CoM's pad, mapped to KH1's buttons).
@@ -745,7 +748,12 @@ impl Menu {
         let sl = if summon_mode { Vec::new() } else { crate::sleights::list(&w.sleights[..n].iter().map(|&b| b as u16).collect::<Vec<_>>()) };
         let mut lgrey = !0u32;
         for (k, &id) in sl.iter().enumerate() {
-            if crate::sleights::usable(&gate, id) {
+            let ok = match crate::sleights::special_index(id) {
+                // M12 step 7: a KH1 special as its prompt (`crate::sleights::special_usable`).
+                Some(_) => crate::sleights::special_usable(&gate, id, w.sleight_specials),
+                None => crate::sleights::usable(&gate, id),
+            };
+            if ok {
                 lgrey &= !(1 << k);
             }
         }
@@ -1106,7 +1114,12 @@ impl Menu {
                 ShortResult::NotNow
             }
             Some(id) if !self.sleight.locked(row) => {
-                out.sleight = Some(id);
+                // M12 step 7: a listed KH1 special runs as its prompt's Triangle does (its start
+                // command, `crate::specials`), not as Re:CoM's sleight.
+                match crate::sleights::special_index(id) {
+                    Some(i) => out.special = Some(crate::specials::TABLE[i].1),
+                    None => out.sleight = Some(id),
+                }
                 self.open = false;
                 self.root.cursor = 0;
                 ShortResult::Cast
@@ -1681,6 +1694,13 @@ pub fn parse_words(text: &str, lang: &str) -> Result<Words, String> {
     for s in crate::summons::ALL.iter() {
         if out.get(s.word).is_none() {
             out.by_id.push((s.word, font_bytes(s.name).0));
+        }
+    }
+    // M12 step 7: Strike Raid's words from a manifest written before them: KH1's English ones
+    // (re-run the asset step for each language's).
+    for (id, text) in crate::specials::ENGLISH_WORDS {
+        if out.get(*id).is_none() {
+            out.by_id.push((*id, font_bytes(text).0));
         }
     }
     if [1u16, 2, 3].iter().any(|id| out.get(*id).is_none()) {
@@ -2542,6 +2562,38 @@ mod tests {
         assert!(!m.open);
     }
 
+    /// M12 step 7 (owner, 2026-11-03: "also show up in the sleights menu"): an equipped Strike Raid
+    /// is listed under Re:CoM's sleight 8 (first: Re:CoM's order), named "Strike" (KH1's word 338),
+    /// usable exactly when its prompt would offer it (the world's bit), on the ground; confirm issues
+    /// its KH1 command (0x5E), not Re:CoM's sleight.
+    #[test]
+    fn sleights_list_holds_strike_raid_as_its_prompt() {
+        use crate::abilities::sleight as s;
+        use crate::specials::{cmd as sp, STRIKE_RAID};
+        let mut sleights = [0u8; crate::sleights::MAX];
+        sleights[..2].copy_from_slice(&[s::FIRE_RAID as u8, s::STRIKE_RAID as u8]);
+        let w = World { sleights, sleight_count: 2, sleight_specials: 1 << STRIKE_RAID, ..sleight_world() };
+        let mut m = Menu::new();
+        m.build(&w);
+        assert_eq!(m.sleight.cmds, vec![crate::sleights::command(s::STRIKE_RAID), crate::sleights::command(s::FIRE_RAID)]);
+        assert_eq!(cmd::name(m.sleight.cmds[0]), 338);
+        assert_eq!(m.sleight.grey & 3, 0);
+        // Its prompt wouldn't offer it (no target in range, MP short): greyed; Fire Raid unchanged.
+        m.build(&World { sleight_specials: 0, ..w });
+        assert_eq!(m.sleight.grey & 3, 0b01);
+        // In the air: greyed (KH1's specials start from state 0).
+        m.build(&World { state: 2, ..w });
+        assert_eq!(m.sleight.grey & 1, 1);
+        // Confirm: the special's own command, as the prompt's Triangle.
+        let mut m = Menu::new();
+        m.step(&w, press(|p| p.up = true));
+        m.step(&w, press(|p| p.confirm = true));
+        assert!(m.open && m.sub == Kind::Sleight);
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert_eq!((o.special, o.sleight), (Some(sp::STRIKE_RAID), None));
+        assert!(!m.open);
+    }
+
     #[test]
     fn sleights_words_are_in_the_word_list() {
         // A manifest from before M12 step 5: the built-in English words (Re:CoM's look draws them).
@@ -2549,7 +2601,7 @@ mod tests {
         let w = parse_words(text, "fr").unwrap();
         assert_eq!(w.get(crate::sleights::ROW_WORD), Some(&b"Sleights\0"[..]));
         assert_eq!(w.get(crate::sleights::word(crate::abilities::sleight::CROSS_SLASH_PLUS)), Some(&b"Cross-slash+\0"[..]));
-        assert_eq!(crate::sleights::words().filter(|(id, _)| w.get(*id).is_some()).count(), crate::sleights::MAX);
+        assert_eq!(crate::sleights::words().filter(|(id, _)| w.get(*id).is_some()).count(), crate::sleights::MAX - crate::sleights::SPECIALS.len());
     }
 
     /// The asset step writes the same words under the same ids (its `command_menu::SLEIGHT_WORDS`

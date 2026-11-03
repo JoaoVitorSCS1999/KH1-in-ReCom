@@ -1054,11 +1054,20 @@ unsafe fn world(pl: usize) -> World {
         w.summon_out |= super::summons::sleight_running(pl);
         w.bottom = super::summons::bottom_row();
         if w.bottom == crate::sleights::Bottom::Sleights {
-            let ids = crate::sleights::list(&super::abilities::equipped_sleights());
+            // M12 step 7: the equipped KH1 specials listed too (Strike Raid; owner: "also show up in
+            // the sleights menu"), each usable as its prompt would offer it.
+            let mut equipped = super::abilities::equipped_sleights();
+            if let Some(e) = equipped_specials() {
+                equipped.extend(crate::sleights::SPECIALS.iter().filter(|&&i| e[i]).filter_map(|&i| crate::sleights::special_sleight(i)));
+            }
+            let ids = crate::sleights::list(&equipped);
             for (k, &id) in ids.iter().enumerate() {
                 w.sleights[k] = id as u8;
             }
             w.sleight_count = ids.len() as u8;
+            if special_free && super::specials::installed() && rd::<i32>(pl + p::BATTLE) != 0 {
+                w.sleight_specials = sleight_specials(pl);
+            }
         }
     }
     // M9 stage 9c.1: KH1's special offer (`0x14028D0F0`) when nothing took the context entry.
@@ -1072,20 +1081,49 @@ unsafe fn world(pl: usize) -> World {
 /// `0x14028D0F0` on Sora's equipped specials and Re:CoM's attack target, when it is a live enemy
 /// (KH1 picks its target among enemies; Assumption: Re:CoM's lock target stands for KH1's).
 unsafe fn special_offer(pl: usize) -> Option<(u8, bool)> {
-    use crate::abilities::ix;
-    let e = super::abilities::equipped_live()?;
-    let mut equipped = [false; 5];
-    equipped[crate::specials::SONIC_BLADE] = e & 1 << ix::SONIC_BLADE != 0;
+    let equipped = equipped_specials()?;
     if !equipped.iter().any(|&b| b) {
         return None;
     }
+    let t = special_target(pl)?;
+    crate::specials::offer(&equipped, Some(t), &mut |c| super::mp::can_pay(c))
+}
+
+/// The built specials Sora has equipped (by `crate::specials` index), each only when it is in.
+fn equipped_specials() -> Option<[bool; 5]> {
+    use crate::abilities::ix;
+    let e = super::abilities::equipped_live()?;
+    let mut equipped = [false; 5];
+    for (i, a) in [(crate::specials::SONIC_BLADE, ix::SONIC_BLADE), (crate::specials::STRIKE_RAID, ix::STRIKE_RAID)] {
+        equipped[i] = e & 1 << a != 0 && super::specials::ready(i);
+    }
+    Some(equipped)
+}
+
+/// What `0x14028D0F0` sees of Re:CoM's attack target, when it is a live enemy.
+unsafe fn special_target(pl: usize) -> Option<crate::specials::OfferTarget> {
     let t = super::attack::attack_target(pl).filter(|t| super::magic::is_alive_enemy(t.owner))?;
     let b: usize = rd(pl + p::BODY);
     if b == 0 {
         return None;
     }
     let sora = to_kh1(rd_vec(b + body::POS));
-    crate::specials::offer(&equipped, Some(crate::specials::OfferTarget::new(sora, &t)), &mut |c| super::mp::can_pay(c))
+    Some(crate::specials::OfferTarget::new(sora, &t))
+}
+
+/// M12 step 7 (owner, 2026-11-03: "also show up in the sleights menu"): the Sleights list's specials
+/// Sora could start now, by `crate::specials` index bit: each one's own `0x14028D0F0` score is 2 (in
+/// range of a live target, enough MP), as its prompt would offer it.
+unsafe fn sleight_specials(pl: usize) -> u8 {
+    let Some(equipped) = equipped_specials() else { return 0 };
+    let Some(t) = special_target(pl) else { return 0 };
+    let mut ok = 0u8;
+    for i in crate::sleights::SPECIALS {
+        if equipped[i] && crate::specials::score(i, &t, &mut |c| super::mp::can_pay(c)) == 2 {
+            ok |= 1 << i;
+        }
+    }
+    ok
 }
 
 /// Re:CoM's request bits the menu lets through this frame: (Attack, jump, Triangle, Square).

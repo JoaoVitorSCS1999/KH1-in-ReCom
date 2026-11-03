@@ -47,8 +47,43 @@ pub const KEYBLADE_ATTACH: &str = "WeaponR";
 /// the file's motion set offset (`+4`). Checked (files: `xl_limit.dat` holds 7 sections, the motion
 /// set at `0x80`; its request map sends 0xC8 / 0xC9 / 0xCA to entries 0 / 1 / 2, the last two with
 /// root motion; decomp: KH1's Sonic Blade requests 0xC8 + n on the xl set, `0x14039EAD0` /
-/// `0x14039ECA0`).
-pub const XL_ENTRIES: [usize; 3] = [0, 1, 2];
+/// `0x14039ECA0`). M12 step 7: Strike Raid's nine (17..=25: wind-up 0xE6, throw 0xE7, finishing
+/// throw 0xE8, catch 0xE9, high throw / finishing throw / catch 0xEA..0xEC, knocked-back catch 0xED,
+/// wait 0xEE; `0x14039FFD0` / `0x1403A0290` / `0x1403A00A0`), after the held clip's slot (so no
+/// earlier slot moves). The same list as `kh1_core::data::xl::ENTRIES` (a test checks).
+pub const XL_ENTRIES: [usize; 12] = [0, 1, 2, 17, 18, 19, 20, 21, 22, 23, 24, 25];
+/// Sonic Blade's three come before the held clip's slot; the later specials' after it.
+pub const XL_BEFORE_HELD: usize = 3;
+
+/// Puts `x` at `slot`: padding with empty slots up to it, or over an empty one already there.
+fn put_slot(slots: &mut Vec<Slot>, slot: usize, x: Slot) {
+    while slots.len() < slot {
+        slots.push(Slot { name: [0; 16], clip: None });
+    }
+    if slots.len() == slot {
+        slots.push(x);
+    } else {
+        slots[slot] = x;
+    }
+}
+
+#[cfg(test)]
+mod xl_tests {
+    #[test]
+    fn xl_entries_are_kh1_cores() {
+        assert_eq!(super::XL_ENTRIES, kh1_core::data::xl::ENTRIES);
+        assert_eq!((super::xl_slot(230, 0), super::xl_slot(230, 2), super::xl_slot(230, 3), super::xl_slot(230, 11)), (230, 232, 234, 242));
+    }
+}
+
+/// The slot of the `i`th of [`XL_ENTRIES`] (`first` = the first xl slot).
+pub fn xl_slot(first: usize, i: usize) -> usize {
+    if i < XL_BEFORE_HELD {
+        first + i
+    } else {
+        first + i + 1
+    }
+}
 
 /// The motion set inside `xl_limit.dat` (the section at its `u32 +4`).
 pub fn xl_motion_set(file: &[u8]) -> Result<&[u8]> {
@@ -445,7 +480,7 @@ pub fn build_with_held(inp: &Inputs, held_in: Option<&HeldInput>, opt: &BuildOpt
                 return bad(format!("xl_limit.dat: entry {e} is not in its request map"));
             };
             let m = xs.motions.get(e).ok_or_else(|| crate::Error::Format(format!("xl_limit.dat: no motion {e}")))?;
-            let slot = base + new_rank + i;
+            let slot = xl_slot(base + new_rank, i);
             // Played once: KH1 requests each with an end callback (`0x14039ED60` / `0x14039EC90`),
             // which needs the motion to end.
             let looped = false;
@@ -493,7 +528,8 @@ pub fn build_with_held(inp: &Inputs, held_in: Option<&HeldInput>, opt: &BuildOpt
             ann.slots.push(Slot { name: name16(&name), clip: Some(clip) });
         }
     }
-    // M11 (the Neoshadow's grab): KH1's held clip, after the xl slots (kept free without `xl_limit.dat`). Played once,
+    // M11 (the Neoshadow's grab): KH1's held clip, after Sonic Blade's xl slots (kept free without `xl_limit.dat`;
+    // M12 step 7: Strike Raid's come after it, so the slot may already be padded). Played once,
     // to its end (Re:CoM's status sub-state 0xC ends at it; KH1 queues the lock's release after it).
     let mut held = None;
     if let Some(hi) = held_in {
@@ -501,17 +537,14 @@ pub fn build_with_held(inp: &Inputs, held_in: Option<&HeldInput>, opt: &BuildOpt
         let (me, m) = hs.motion_for(request).ok_or_else(|| crate::Error::Format(format!("xa_ex_2420.mset player set: no request {request}")))?;
         let e = me.entry().ok_or_else(|| crate::Error::Format(format!("player set request {request}: no entry")))? as usize;
         let root = me.root_motion();
-        let slot = base + new_rank + XL_ENTRIES.len();
+        let slot = base + new_rank + XL_BEFORE_HELD;
         let name = format!("{}{slot:03}", opt.prefix);
         let clip = conv.convert(m, &ClipSpec { name: name.clone(), looped: false, root_motion: root, blend: opt.blend })?;
         let mut weapon_name = None;
         if let Some((wa, rig, _)) = weapon.as_mut() {
             let wname = format!("{}{slot:03}", opt.weapon_prefix);
             let wclip = conv.convert_weapon(rig, m, &ClipSpec { name: wname.clone(), looped: false, root_motion: false, blend: opt.blend })?;
-            while wa.slots.len() < slot {
-                wa.slots.push(Slot { name: [0; 16], clip: None });
-            }
-            wa.slots.push(Slot { name: name16(&wname), clip: Some(wclip) });
+            put_slot(&mut wa.slots, slot, Slot { name: name16(&wname), clip: Some(wclip) });
             weapon_name = Some(wname);
         }
         let bytes = clip.to_bytes().len();
@@ -540,10 +573,7 @@ pub fn build_with_held(inp: &Inputs, held_in: Option<&HeldInput>, opt: &BuildOpt
             weapon_name,
             weapon_match_error: None,
         };
-        while ann.slots.len() < slot {
-            ann.slots.push(Slot { name: [0; 16], clip: None });
-        }
-        ann.slots.push(Slot { name: name16(&name), clip: Some(clip) });
+        put_slot(&mut ann.slots, slot, Slot { name: name16(&name), clip: Some(clip) });
         held = Some((entry, blend));
     }
     let changed = ann.slots.len() > base;

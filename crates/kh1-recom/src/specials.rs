@@ -33,6 +33,22 @@
 //!   motion); Sora in the air falls out (motion 6, blend 8, state 2).
 //! - **The end** (`0x14039EC10`): the flags and the follow-up offer off.
 //!
+//! - **Strike Raid** (M12 step 7, owner 2026-11-03: "in KH1FM are triangle prompts. Let them be
+//!   triangle prompts and also show up in the sleights menu"; script `0x14039FFD0`): state
+//!   **0x27** (enter `0x1403A01D0`: flags `0x1200080` and the follow-up offer `0x1403A0230`; physics
+//!   `0x1403A0170`: speed 0; its air callback `0x1402B1840` keeps the state: no falling out), the
+//!   wind-up 0xE6 at blend 0 with the first throw as the next entry's callback (`0x1403A0290`).
+//!   **Each throw** (`0x1403A0290`, throw n = 1..=5): toward the target (`0x1402A3B00`), row `0x2E +
+//!   n` (`0x1402A3980`: its motion 0xE7, the fifth 0xE8; the attacking bit), the high version 0xEA /
+//!   0xEB instead when the target's lock point is more than 200 above Sora, then the catch 0xE9 (high:
+//!   0xEC), the wait 0xEE (its combo window 0..52 offers the next throw) and the end (state 0,
+//!   `0x1403A0220`). The Keyblade flies in the throw motion itself (KH1's weapon bone: no object).
+//!   **The follow-up** (`0x1403A0230`): command 0x5F, 0x60 once n > 3, greyed from n = 5 or outside
+//!   the window or without the attacking bit; Triangle throws again (`0x14039FFC0` → `0x1403A0290`).
+//!   **A clash** (the reaction `0x14029BBD0`'s case 0x27 → `0x1403A00A0`): the knocked-back catch
+//!   0xED, the wait, the end; no recoil. MP 2 (btltbl), range 900, no height rule. Checked (decomp +
+//!   files).
+//!
 //! Re:CoM runs it on its own sleight action `0x16` (`crate::movement::Host::start_special`):
 //! `initStockSkill`'s writes without the card, its Sonic Blade attack ids (0xE start, 0xF dash,
 //! 0x10 finisher) so its own hit sounds and effects play, the KH1 rows in the attack row pointer,
@@ -54,14 +70,26 @@ pub mod cmd {
     pub const ARS_ARCANUM: u8 = 0x57;
     pub const RAGNAROK: u8 = 0x5A;
     pub const STRIKE_RAID: u8 = 0x5E;
+    /// M12 step 7: Strike Raid's follow-ups (`0x1403A0230`: `'_' + (n > 3)`).
+    pub const RAID: u8 = 0x5F;
+    pub const RAID_LAST: u8 = 0x60;
 
-    /// The commands this stage runs (the start and Sonic Blade's follow-ups).
+    /// The commands built so far (the starts and their follow-ups).
     pub fn is_ours(c: u8) -> bool {
-        matches!(c, SONIC_BLADE | RAVE | BLAST)
+        matches!(c, SONIC_BLADE | RAVE | BLAST | STRIKE_RAID | RAID | RAID_LAST)
+    }
+
+    /// The special a built start command starts (KH1's `0x14028D3D0`: 0x4B → 0, 0x5E → 2).
+    pub fn start_of(c: u8) -> Option<usize> {
+        match c {
+            SONIC_BLADE => Some(super::SONIC_BLADE),
+            STRIKE_RAID => Some(super::STRIKE_RAID),
+            _ => None,
+        }
     }
 
     /// The command's name (its record's `+4`): Sonic 319, Rave 321, Blast 322, Trinity 326, Ars
-    /// Arcanum 331, Ragnarok 334, Strike Raid 338. Checked (files).
+    /// Arcanum 331, Ragnarok 334, Strike Raid 338, its follow-ups 339 / 340. Checked (files).
     pub fn name(c: u8) -> Option<u16> {
         Some(match c {
             SONIC_BLADE => 319,
@@ -71,10 +99,16 @@ pub mod cmd {
             ARS_ARCANUM => 331,
             RAGNAROK => 334,
             STRIKE_RAID => 338,
+            RAID => 339,
+            RAID_LAST => 340,
             _ => return None,
         })
     }
 }
+
+/// KH1's English words of the built specials after Sonic Blade's (US / UK `Word.bin`; the asset step
+/// writes each language's): Strike Raid 338 "Strike", 339 "Raid", 340 "Judgment". Checked (files).
+pub const ENGLISH_WORDS: &[(u16, &str)] = &[(338, "Strike"), (339, "Raid"), (340, "Judgment")];
 
 /// KH1's specials by index (`0x140528340`: (ability id, command) pairs): 0 Sonic Blade, 1 Ars
 /// Arcanum, 2 Strike Raid, 3 Ragnarok, 4 Trinity. Checked (exe).
@@ -91,9 +125,33 @@ pub const RANGE: [f32; 5] = [600.0, 300.0, 900.0, 600.0, 1200.0];
 /// Sonic Blade refuses a target more than this above Sora (`0x14028D0F0`, command 'K').
 pub const SONIC_MAX_ABOVE: f32 = 160.0;
 pub const SONIC_BLADE: usize = 0;
+pub const ARS_ARCANUM: usize = 1;
+pub const STRIKE_RAID: usize = 2;
+pub const RAGNAROK: usize = 3;
+/// The specials' names (logs).
+pub const NAME: [&str; 5] = ["Sonic Blade", "Ars Arcanum", "Strike Raid", "Ragnarok", "Trinity"];
+/// The KH1 rows each built special plays (Sonic Blade's dashes and finisher; M12 step 7, Strike
+/// Raid's five throws); an empty range: not built.
+#[allow(clippy::reversed_empty_ranges)]
+pub const ROWS_OF: [std::ops::RangeInclusive<usize>; 5] = [row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER, 1..=0, row::STRIKE_RAID_THROW..=row::STRIKE_RAID_FINISHER, 1..=0, 1..=0];
 
 /// KH1's special state (`0x14039EAD0` registers it).
 pub const STATE: u32 = 0x20;
+/// Each special's KH1 state (its script's `0x1402B1B80` first argument: Sonic Blade / Ars Arcanum
+/// 0x20, Strike Raid 0x27, Ragnarok 0x25, Trinity 0x29). Checked (decomp).
+pub const STATE_OF: [u32; 5] = [0x20, 0x20, 0x27, 0x25, 0x29];
+
+/// Whether `s` is a built special's KH1 state.
+pub fn is_state(s: u32) -> bool {
+    s == STATE || s == STATE_OF[STRIKE_RAID]
+}
+
+/// Strike Raid's throw rows start at `0x2E + n` (`0x1403A0290`), n = 1..=5; the fifth is the
+/// finishing throw.
+pub const RAID_THROWS: u8 = 5;
+/// A target more than this above Sora makes a throw the high one (`0x1403A0290`: lock point −
+/// Sora's position, y < −200; KH1 y is down).
+pub const RAID_HIGH_ABOVE: f32 = 200.0;
 /// The wind-up's blend and each Rave's (`0x41000000` = 8.0); the first dash has none.
 pub const BLEND: f32 = 8.0;
 /// The finisher's row is the seventh (`0x14039ECA0`: `0x1B + n`).
@@ -114,6 +172,12 @@ pub mod recom {
     pub const ID_START: u32 = 0xE;
     pub const ID_DASH: u32 = 0xF;
     pub const ID_FINISHER: u32 = 0x10;
+    /// M12 step 7: Re:CoM's Strike Raid sleight (id 8, `initStockSkill` case 8: attack id 0xD, no
+    /// resource load; its `exeStockSkill` sub-states 0x82 (`p001_074`, action row 0x3F), 0x83 (the
+    /// throw `p001_075`, row 0x40, the weapon thrown as an object `0x140226160`), 0x84 (the catch
+    /// `p001_076`, row 0x41)). Every KH1 throw takes its attack id. Checked (decomp + exe).
+    pub const RAID_SLEIGHT: u16 = 8;
+    pub const ID_RAID: u32 = 0xD;
 }
 
 /// What the offer sees of the target: the horizontal gap to its lock point minus the point's
@@ -132,6 +196,20 @@ impl OfferTarget {
     }
 }
 
+/// `0x14028D0F0`'s score of special `i` on the target: 0 out of range (or Sonic Blade's height
+/// rule), 1 in range but MP short (greyed), 2 offered.
+pub fn score(i: usize, t: &OfferTarget, can_pay: &mut dyn FnMut(i32) -> bool) -> u8 {
+    if t.gap < RANGE[i] {
+        if i == SONIC_BLADE && SONIC_MAX_ABOVE < t.above {
+            0
+        } else {
+            1 + can_pay(COST[i]) as u8
+        }
+    } else {
+        0
+    }
+}
+
 /// `0x14028D0F0`: the special offered in the context entry, and whether it is greyed (in range,
 /// MP short). `equipped[i]` by special index (only the built ones count); `can_pay(cost)` is KH1's
 /// `0x1402A4C10`.
@@ -143,15 +221,7 @@ pub fn offer(equipped: &[bool; 5], target: Option<OfferTarget>, can_pay: &mut dy
         if !equipped[i] {
             continue;
         }
-        let score = if t.gap < RANGE[i] {
-            if i == SONIC_BLADE && SONIC_MAX_ABOVE < t.above {
-                0
-            } else {
-                1 + can_pay(COST[i]) as u8
-            }
-        } else {
-            0
-        };
+        let score = score(i, &t, can_pay);
         if best < score {
             best = score;
             pick = Some(i);
@@ -169,9 +239,18 @@ pub fn follow_cmd(counter: u8) -> u8 {
     }
 }
 
-/// Our request of a special row's motion (the xl set's 0xC9 / 0xCA by xl entry).
+/// `0x1403A0230`: Strike Raid's follow-up: 0x5F, or 0x60 once n > 3 (`'_' + (n > 3)`).
+pub fn raid_cmd(counter: u8) -> u8 {
+    if counter > 3 {
+        cmd::RAID_LAST
+    } else {
+        cmd::RAID
+    }
+}
+
+/// Our request of a special row's motion (the xl set's 0xC9 / 0xCA / 0xE7 / 0xE8 by xl entry).
 pub fn row_request(m: &kh1_core::Moveset, r: usize) -> Option<u16> {
-    if !(row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER).contains(&r) {
+    if !ROWS_OF.iter().any(|rows| rows.contains(&r)) {
         return None;
     }
     m.row(r).and_then(|rw| xl::entry_of_kh1_request(rw.request)).map(xl::request)
@@ -179,8 +258,10 @@ pub fn row_request(m: &kh1_core::Moveset, r: usize) -> Option<u16> {
 
 /// Adds KH1's specials' motions to the motion set (keyed by xl entry, `xl::request`).
 pub fn add_motions(m: &mut MotionSet) {
-    for (e, info) in xl::ENTRIES.iter().zip(xl::motions()) {
-        m.add(&[xl::request(*e)], info);
+    for e in xl::ENTRIES {
+        if let Some(info) = xl::motion(e) {
+            m.add(&[xl::request(e)], info);
+        }
     }
 }
 
@@ -195,10 +276,11 @@ pub enum Phase {
 /// A running special (KH1's state 0x20 and its script's variables).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Special {
-    /// The special's index (0 Sonic Blade).
+    /// The special's index (0 Sonic Blade, 2 Strike Raid).
     pub index: usize,
     pub phase: Phase,
-    /// Rows started (KH1's `0x142F10750`): 1..=6 the dashes, 7 the finisher.
+    /// Rows started (Sonic Blade: KH1's `0x142F10750`, 1..=6 the dashes, 7 the finisher; Strike
+    /// Raid: `0x142F114CC`, the throws 1..=5).
     pub counter: u8,
     /// KH1's attacking bit (`weapon +0x42 & 1`): set at each row start, cleared by a refused
     /// menu confirm.
@@ -231,6 +313,8 @@ pub enum SpecialEvent {
     Started { index: usize },
     Row { counter: u8, kh1_row: usize, frame: f32 },
     Refused { command: u8, why: &'static str },
+    /// M12 step 7: Strike Raid's thrown Keyblade clashed (`0x1403A00A0`).
+    Clashed { frame: f32 },
     Ended { why: &'static str, frame: f32 },
 }
 
@@ -240,6 +324,7 @@ impl SpecialEvent {
             SpecialEvent::Started { index } => format!("special({})", TABLE.get(*index).map_or(0, |t| t.1)),
             SpecialEvent::Row { counter, kh1_row, frame } => format!("sp-row({kh1_row:#x} n{counter} f{frame:.0})"),
             SpecialEvent::Refused { command, why } => format!("sp-refused({command:#x} {why})"),
+            SpecialEvent::Clashed { frame } => format!("sp-clash(f{frame:.0})"),
             SpecialEvent::Ended { why, frame } => format!("sp-end({why} f{frame:.0})"),
         }
     }
@@ -266,7 +351,11 @@ impl Kh1Sora {
     pub fn follow_up(&self) -> Option<(u8, bool)> {
         let s = self.special.as_ref()?;
         let window = self.in_window() && !self.rec.start_now;
-        Some((follow_cmd(s.counter), !(window && s.attack_bit)))
+        Some(match s.index {
+            // `0x1403A0230`: no next throw after the fifth.
+            STRIKE_RAID => (raid_cmd(s.counter), !(s.counter < RAID_THROWS && window && s.attack_bit)),
+            _ => (follow_cmd(s.counter), !(window && s.attack_bit)),
+        })
     }
 
     /// A menu confirm KH1 refused (or a submenu it opened) during the special: the attacking bit
@@ -285,9 +374,19 @@ impl Kh1Sora {
             return refuse(self, "not now");
         }
         match c {
-            cmd::SONIC_BLADE => self.start_sonic_blade(h, target, pos, dir, w),
+            cmd::SONIC_BLADE | cmd::STRIKE_RAID => self.start_special(h, c, target, pos, dir, w),
+            cmd::RAID | cmd::RAID_LAST => {
+                let Some(s) = self.special.filter(|s| s.index == STRIKE_RAID) else { return refuse(self, "no special") };
+                if self.follow_up() != Some((c, false)) || s.counter >= RAID_THROWS {
+                    return refuse(self, "greyed");
+                }
+                // `0x14039FFC0` → `0x1403A0290`: the next throw (it turns toward the target itself).
+                self.raid_throw(h, target, pos);
+                *dir = Vec3::from_yaw(self.target_yaw);
+                *w = 0.0;
+            }
             cmd::RAVE | cmd::BLAST => {
-                let Some(s) = self.special else { return refuse(self, "no special") };
+                let Some(s) = self.special.filter(|s| s.index == SONIC_BLADE) else { return refuse(self, "no special") };
                 if self.follow_up() != Some((c, false)) || s.counter as usize >= ROWS {
                     return refuse(self, "greyed");
                 }
@@ -309,9 +408,10 @@ impl Kh1Sora {
         }
     }
 
-    /// `0x14028D800` + `0x14039EAD0`.
-    fn start_sonic_blade(&mut self, h: &mut dyn Host, target: Option<TargetPart>, pos: Vec3, dir: &mut Vec3, w: &mut f32) {
-        let refuse = |me: &mut Kh1Sora, why| me.special_log.push(SpecialEvent::Refused { command: cmd::SONIC_BLADE, why });
+    /// `0x14028D800` + the special's script: Sonic Blade `0x14039EAD0`, Strike Raid `0x14039FFD0`.
+    fn start_special(&mut self, h: &mut dyn Host, c: u8, target: Option<TargetPart>, pos: Vec3, dir: &mut Vec3, w: &mut f32) {
+        let refuse = |me: &mut Kh1Sora, why| me.special_log.push(SpecialEvent::Refused { command: c, why });
+        let Some(index) = cmd::start_of(c) else { return refuse(self, "not built") };
         if self.state != state::GROUND || self.special.is_some() {
             return refuse(self, "state");
         }
@@ -329,15 +429,70 @@ impl Kh1Sora {
         if self.recom_took {
             return refuse(self, "Re:CoM's win");
         }
-        if !h.start_special(&SpecialStart { index: SONIC_BLADE, cost: COST[SONIC_BLADE] }) {
+        if !h.start_special(&SpecialStart { index, cost: COST[index] }) {
             return refuse(self, "no Re:CoM rows or MP");
         }
-        self.set_state(STATE);
-        self.special = Some(Special { index: SONIC_BLADE, phase: Phase::WindUp, counter: 0, attack_bit: false, age: 0.0 });
-        self.play(xl::request(xl::WINDUP) as u32 | req::ACTION, BLEND);
+        self.set_state(STATE_OF[index]);
+        self.special = Some(Special { index, phase: Phase::WindUp, counter: 0, attack_bit: false, age: 0.0 });
+        if index == STRIKE_RAID {
+            // `0x14039FFD0`: the wind-up 0xE6 at blend 0; the next entry (0xE7) calls the first
+            // throw when the wind-up ends (`0x1403A0290`, which plays its row's motion afresh).
+            self.play(xl::request(xl::SR_WINDUP) as u32 | req::ACTION, 0.0);
+        } else {
+            self.play(xl::request(xl::WINDUP) as u32 | req::ACTION, BLEND);
+        }
         // The end callback entry (`0x14029FA30(actor, 0x40000000, 0)` with `0x14039ED60`).
         self.append(req::RELEASE | request::IDLE as u32, 0.0);
-        self.special_log.push(SpecialEvent::Started { index: SONIC_BLADE });
+        self.special_log.push(SpecialEvent::Started { index });
+    }
+
+    /// `0x1403A0290`: Strike Raid's next throw (n + 1): toward the target (`0x1402A3B00`: its lock
+    /// point, else the facing kept), its row `0x2E + n` (the fifth the finishing throw), the high
+    /// motion when the target is more than 200 above, then the catch, the wait and the end queued.
+    fn raid_throw(&mut self, h: &mut dyn Host, target: Option<TargetPart>, pos: Vec3) {
+        let Some(mut s) = self.special.filter(|s| s.index == STRIKE_RAID) else { return };
+        if let Some(t) = target {
+            let d = (t.centre - pos).flat().normalized();
+            if !d.is_zero_xz() {
+                self.target_yaw = d.yaw();
+            }
+        }
+        let n = s.counter + 1;
+        let r = row::STRIKE_RAID_THROW + s.counter as usize;
+        let high = target.is_some_and(|t| pos.y - t.centre.y > RAID_HIGH_ABOVE);
+        let request = match (high, n == RAID_THROWS) {
+            (true, true) => xl::request(xl::SR_FINISHER_HIGH),
+            (true, false) => xl::request(xl::SR_THROW_HIGH),
+            _ => match row_request(&self.moveset, r) {
+                Some(q) => q,
+                None => return,
+            },
+        };
+        h.special_row(&RowStart { kh1_row: r, recom_id: recom::ID_RAID, request, counter: n });
+        self.play(request as u32 | req::ACTION, 0.0);
+        self.append(xl::request(if high { xl::SR_CATCH_HIGH } else { xl::SR_CATCH }) as u32, 0.0);
+        self.append(xl::request(xl::SR_WAIT) as u32, 0.0);
+        self.append(req::RELEASE | request::IDLE as u32, 0.0);
+        s.counter = n;
+        s.phase = Phase::Row;
+        s.attack_bit = true;
+        self.special = Some(s);
+        self.clashed = false;
+        self.special_log.push(SpecialEvent::Row { counter: n, kh1_row: r, frame: s.age });
+    }
+
+    /// The reaction `0x14029BBD0` in Strike Raid's state 0x27 (a clash of the thrown Keyblade, kind
+    /// 6 / 7: KH1's only reactions through its flags `0x1200080`) → `0x1403A00A0`: the knocked-back
+    /// catch 0xED at blend 0, the wait and the end; no recoil, Sora stays in the special. True when
+    /// it took the clash.
+    pub(crate) fn special_clash(&mut self, h: &mut dyn Host) -> bool {
+        let Some(s) = self.special.filter(|s| s.index == STRIKE_RAID) else { return false };
+        h.special_row_end();
+        self.play(xl::request(xl::SR_CLASH) as u32 | req::ACTION, 0.0);
+        self.append(xl::request(xl::SR_WAIT) as u32, 0.0);
+        self.append(req::RELEASE | request::IDLE as u32, 0.0);
+        self.special_log.push(SpecialEvent::Clashed { frame: s.age });
+        true
     }
 
     /// `0x14039ECA0`: the next row (a dash, the seventh the finisher).
@@ -359,9 +514,31 @@ impl Kh1Sora {
 
     /// The special motion's end callback, when the queue moves on from it (from the motion
     /// update): after the wind-up, dash 1 without a blend (`0x14039ED60`); after a row, state 0 and
-    /// the queued idle (`0x14039EC90`). True when a new row took the motion (the update stops).
-    pub(crate) fn special_motion_end(&mut self, h: &mut dyn Host) -> bool {
+    /// the queued idle (`0x14039EC90`). Strike Raid: after the wind-up the first throw
+    /// (`0x1403A0290`); after a throw its row's attack ends and the catch plays (`0x1403A0440`: its
+    /// effect); after the wait state 0 (`0x1403A0220`). True when a new row took the motion (the
+    /// update stops).
+    pub(crate) fn special_motion_end(&mut self, h: &mut dyn Host, ended: u16) -> bool {
         let Some(s) = self.special else { return false };
+        if s.index == STRIKE_RAID {
+            let Some(e) = xl::entry_of(ended) else { return false };
+            return match e {
+                xl::SR_WINDUP => {
+                    let pos = h.pos();
+                    self.raid_throw(h, self.special_target, pos);
+                    true
+                }
+                xl::SR_THROW | xl::SR_FINISHER | xl::SR_THROW_HIGH | xl::SR_FINISHER_HIGH => {
+                    h.special_row_end();
+                    false
+                }
+                xl::SR_WAIT => {
+                    self.end_special(h, "done");
+                    false
+                }
+                _ => false,
+            };
+        }
         match s.phase {
             Phase::WindUp => {
                 // The callback's request starts at the next update, as any request of the think;
@@ -378,12 +555,16 @@ impl Kh1Sora {
     }
 
     /// `0x14039EBA0`: Sora in the air during the special falls out (motion 6, blend 8, state 2).
-    pub(crate) fn special_fall(&mut self, h: &mut dyn Host) {
-        if self.special.is_none() {
-            return;
+    /// Strike Raid's air callback (`0x1402B1840`) only keeps the state: false, nothing ends.
+    pub(crate) fn special_fall(&mut self, h: &mut dyn Host) -> bool {
+        match self.special {
+            None => return false,
+            Some(s) if s.index == STRIKE_RAID => return false,
+            Some(_) => {}
         }
         self.end_special(h, "airborne");
         self.play(request::FALL as u32, BLEND);
+        true
     }
 
     /// `0x14039EC10`: the special ends (state 0 unless the caller sets another), its flags go, and
@@ -391,7 +572,7 @@ impl Kh1Sora {
     pub(crate) fn end_special(&mut self, h: &mut dyn Host, why: &'static str) {
         let Some(s) = self.special.take() else { return };
         self.special_log.push(SpecialEvent::Ended { why, frame: s.age });
-        if self.state == STATE {
+        if is_state(self.state) {
             self.set_state(state::GROUND);
         }
         if self.swing.is_none() && self.cast.is_none() && self.item.is_none() && h.end_special(self.state != state::GROUND) {
@@ -436,6 +617,8 @@ impl Kh1Sora {
 /// clip and clock: Re:CoM's events at Re:CoM's frames. Assumption: Re:CoM's sleight motions are
 /// as long as KH1's (its pack is not in the session).
 pub mod recom_events {
+    use kh1_core::data::xl;
+
     /// Re:CoM's sleight motion pack id for Sonic Blade (0x3F1 + 10000).
     pub const PACK: u32 = 10_000 + 0x3F1;
     /// Re:CoM's motion for each xl entry (wind-up, dash, finisher): rows 0xE / 0xF / 0x10 byte 0.
@@ -444,9 +627,40 @@ pub mod recom_events {
     pub const EET_VARIANT: u32 = 0;
     pub const SES_VARIANT: u32 = 0;
 
-    /// Re:CoM's sleight motion for a KH1 xl entry.
+    /// Re:CoM's sleight motion for a KH1 xl entry (Sonic Blade's).
     pub fn motion_of(xl_entry: usize) -> Option<u32> {
         MOTION.get(xl_entry).copied()
+    }
+
+    /// Where a KH1 special motion's Re:CoM events come from.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Source {
+        /// A motion of a sleight's own pack, started on Sora's sleight event players
+        /// (`player+0x110` / `+0x120`), as `0x1401A3580` does (Sonic Blade).
+        Sleight { pack: u32, motion: u32 },
+        /// One of Sora's own motions, by its row of Sora's action table (`0x1401F7180` resolves the
+        /// row's slot, `0x1407C6300[player+0x398]` row `+8`), started on his own players
+        /// (`player+0x108` / `+0x118`), as his own motion play `0x1401A3470` does (M12 step 7:
+        /// Re:CoM's Strike Raid plays Sora's own `p001_074` / `p001_075` / `p001_076`).
+        Own { row: u32 },
+    }
+
+    /// The Re:CoM events of a KH1 special motion: their source and the (EET, SES) variants
+    /// `exeStockSkill` passes for them. Checked (decomp `0x140218950`):
+    /// - Sonic Blade: start / dashes / finisher → pack 11009 motions 0 / 1 / 2, variants 0.
+    /// - Strike Raid (sub-states 0x82 → 0x83 → 0x84): the wind-up → row 0x3F (`p001_074`, `row 0xD
+    ///   [0] + +0x478`) with EET variant `row 0xD [1]` = 1 and SES variant Sora's vtable `+0x110(3)` =
+    ///   0 (`0x14021FEF0` lists no 0xD); each throw (and its high version) → row 0x40 (`p001_075`),
+    ///   EET 1, SES 0; each catch → row 0x41 (`p001_076`), 0, 0. KH1's knocked-back catch 0xED →
+    ///   the catch's too (Assumption: Re:CoM has no other); the wait 0xEE: none (Re:CoM has no wait).
+    pub fn of(xl_entry: usize) -> Option<(Source, u32, u32)> {
+        Some(match xl_entry {
+            xl::WINDUP | xl::DASH | xl::FINISHER => (Source::Sleight { pack: PACK, motion: motion_of(xl_entry)? }, EET_VARIANT, SES_VARIANT),
+            xl::SR_WINDUP => (Source::Own { row: 0x3F }, 1, 0),
+            xl::SR_THROW | xl::SR_FINISHER | xl::SR_THROW_HIGH | xl::SR_FINISHER_HIGH => (Source::Own { row: 0x40 }, 1, 0),
+            xl::SR_CATCH | xl::SR_CATCH_HIGH | xl::SR_CLASH => (Source::Own { row: 0x41 }, 0, 0),
+            _ => return None,
+        })
     }
 }
 

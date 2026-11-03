@@ -458,16 +458,25 @@ mod tests {
                 let z = w.root_at(f as f32).z;
                 assert!((p.z - z).abs() < 0.02 && p.x.abs() < 0.01 && p.y.abs() < 0.01, "xl entry {e} frame {f}: {p:?} vs {z}");
             }
-            let word = ms.requests[(kh1_core::data::xl::KH1_REQUEST_BASE as usize) + e];
+            let word = ms.requests[kh1_core::data::xl::kh1_request_of(*e).unwrap() as usize];
             assert_eq!(word.entry(), Some(*e as u16));
             assert_eq!(word.root_motion(), !w.root.is_empty(), "xl entry {e}");
         }
+        // Every request word of the set with an entry is `kh1_request_of`'s (M12 step 7).
+        for e in 0..36usize {
+            let r = kh1_core::data::xl::kh1_request_of(e).unwrap() as usize;
+            assert_eq!(ms.requests[r].entry(), Some(e as u16), "xl entry {e}");
+        }
         // Sonic Blade's rows play the xl requests 0xC9 / 0xCA (Sora's own set has other motions
-        // there: the rows are read with the xl set).
+        // there: the rows are read with the xl set); Strike Raid's 0xE7 / 0xE8 (M12 step 7).
         let Some(k) = kit() else { return };
         for r in kh1_core::data::row::SONIC_BLADE_DASH..=kh1_core::data::row::SONIC_BLADE_FINISHER {
             let row = k.moveset.row(r).unwrap();
             assert_eq!(kh1_core::data::xl::entry_of_kh1_request(row.request), Some(if r == 0x21 { 2 } else { 1 }), "row {r:#x}");
+        }
+        for r in kh1_core::data::row::STRIKE_RAID_THROW..=kh1_core::data::row::STRIKE_RAID_FINISHER {
+            let row = k.moveset.row(r).unwrap();
+            assert_eq!(kh1_core::data::xl::entry_of_kh1_request(row.request), Some(if r == 0x33 { 19 } else { 18 }), "row {r:#x}");
         }
     }
 

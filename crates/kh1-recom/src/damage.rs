@@ -347,6 +347,20 @@ pub mod sonic_blade {
     }
 }
 
+/// The Re:CoM sleight and `StockSkillList` column a KH1 special row's Re:CoM attack id takes at
+/// Damage = Re:CoM (owner, 2026-11-01, for Sonic Blade; M12 step 7, the same rule for the others:
+/// "damage = Re:CoM's sleight of the same name"): Sonic Blade's ids 0xE / 0xF / 0x10 (sleight 9,
+/// columns 0 / 0 / 2); Strike Raid's 0xD (sleight 8, row 0xD `+0xA` = column 0, `initStockSkill`'s
+/// rule 1: power × attack ÷ 100, its only hit row: every KH1 throw takes it). Checked (decomp + exe
+/// rows).
+pub fn special_source(recom_id: u32) -> Option<(u16, u8)> {
+    match recom_id {
+        0xE | 0xF | 0x10 => Some((sonic_blade::SLEIGHT, sonic_blade::column(recom_id)?)),
+        0xD => Some((crate::specials::recom::RAID_SLEIGHT, 0)),
+        _ => None,
+    }
+}
+
 /// The hits trace's tag for a Re:CoM AP (`:recom <ap> col <n> card <kind>`).
 pub fn trace_tag(ap: i32, col: u8, table: Table, id: u16) -> String {
     format!(":recom {ap} col {col} {} {id:#x}", table.name())
