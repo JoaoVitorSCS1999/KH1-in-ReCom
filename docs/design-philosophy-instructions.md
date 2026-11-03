@@ -530,3 +530,4 @@ At KH1 setting:
 - **M12 step 1/2 follow-ups** (owner, 2026-11-03): AP Up also gives Re:CoM's +25 CP unseen (CP keeps growing for a switch back); skip the card help page after the level-up Sleight pick too; notices for every ability from a level.
 - **MP Rage / Berserk** (owner, 2026-11-03, on 0.98.x): MP Rage's HP lost scaled to KH1's share (as built); Berserk at Damage = Re:CoM per hit from KH1's table (as built).
 - **Bosses invulnerable during dimming moves** (owner, 2026-11-03: "anytime bosses use a move that dims the room, just make them invulnerable for that move"): at Combat = KH1, a boss is untouchable for the whole of any move during which Re:CoM dims the room (its sleights / big moves), ending with the move.
+- **Sleight ability texts** (owner, 2026-11-03, on 0.99.0): a short description for each sleight's help line (what it does + its MP cost); the name stays "Lethal Frame".
