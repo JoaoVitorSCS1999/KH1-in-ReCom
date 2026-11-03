@@ -594,6 +594,12 @@ impl Behaviour for Ai {
         self.children();
         std::mem::take(&mut self.io.borrow_mut().out).iter().map(|c| c.map(Attack::index)).collect()
     }
+    /// After its death, while Re:CoM keeps it (KH1's dying Red Nocturne fades 30 frames before it is removed, `0x1A10` →
+    /// `0x1C9A(actor, 30)`): its spell children go on by their own rule (`Cast`: the cast motion still playing; neither
+    /// child tests its HP), so a caster whose cast motion survives the killing hit still throws.
+    fn dead_frame(&mut self, w: World) -> Vec<ECmd<u8>> {
+        self.side_frame(w)
+    }
     fn body(&self) -> std::cell::RefMut<'_, Body> {
         std::cell::RefMut::map(self.io.borrow_mut(), |io| &mut io.body)
     }

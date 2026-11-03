@@ -122,6 +122,28 @@ fn a_reaction_in_the_wait_ends_the_cast() {
     assert!(ai.io.borrow().x.casts.is_empty());
 }
 
+/// After its death (Re:CoM's defeat, before Re:CoM removes it) its spell children go on by their own rule: the big Fire
+/// still flies 90 frames into 203 while the dying caster plays it (KH1's child tests its motion, not its HP), and the
+/// killing hit's reaction motion ends it unseen.
+#[test]
+fn a_dying_casters_spells_follow_its_motion() {
+    let w = |motion: Option<u16>| World { step: 1.0, pos: Vec3::new(0.0, -150.0, 0.0), target: Some(Vec3::new(900.0, 0.0, 0.0)), grounded: false, airborne: false, moved: 0.0, motion };
+    let mut ai = Ai::new(consts(), frames(), 3, 0.0, false);
+    ai.on_defeat();
+    ai.io.borrow_mut().x.casts.push(Cast::new(child::BIG_FIRE, req::BIG_CHARGE, req::BIG_CAST, 90.0));
+    for f in 0..90 {
+        assert!(Behaviour::dead_frame(&mut ai, w(Some(req::BIG_CAST))).is_empty(), "frame {f}");
+    }
+    assert_eq!(Behaviour::dead_frame(&mut ai, w(Some(req::BIG_CAST))), vec![ECmd::Throw(child::BIG_FIRE)]);
+    // The killing hit's reaction (here a flinch, 72) replaces the cast: no fire.
+    ai.io.borrow_mut().x.casts.push(Cast::new(child::BIG_FIRE, req::BIG_CHARGE, req::BIG_CAST, 90.0));
+    for _ in 0..60 {
+        assert!(Behaviour::dead_frame(&mut ai, w(Some(req::BIG_CAST))).is_empty());
+    }
+    assert!(Behaviour::dead_frame(&mut ai, w(Some(72))).is_empty());
+    assert!(ai.io.borrow().x.casts.is_empty());
+}
+
 /// The hit handler: a living hit asks for the hit state; one from its own kind's fire sent back also gives KH1's EXP bonus
 /// (EXP / 10 + 2) at once; a repel record asks nothing.
 #[test]

@@ -338,6 +338,13 @@ pub trait Behaviour {
     fn side_frame(&mut self, _w: World) -> Vec<Cmd<u8>> {
         Vec::new()
     }
+    /// A frame after the killing hit while Re:CoM keeps the defeated enemy (its state 30, until it removes it): the child
+    /// objects that go on after their parent's death run their own scripts (KH1's children are tasks of their own,
+    /// `0x14028F5E0`, that outlive the parent's HP; the M11 Red Nocturne's spells, which test its motion, not its HP).
+    /// The default: none.
+    fn dead_frame(&mut self, _w: World) -> Vec<Cmd<u8>> {
+        Vec::new()
+    }
     /// The killing hit (Re:CoM's defeat, state 30), before Re:CoM's defeat prizes: KH1's script hit
     /// handler runs for it too, and some act before they apply its damage (the Search Ghost's reward
     /// at `0x28A6` comes before `sys 44` and its death `0x2A14`). The default: nothing.
