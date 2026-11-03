@@ -913,14 +913,47 @@ pub mod page {
         /// KH1's message 0xCA (not read).
         pub const NO_AP: &[u8] = b"Not enough AP to equip this ability.\0";
 
-        /// The sleight abilities' help lines by their MP cost (1, 2, 3, all): Re:CoM's own
-        /// descriptions are its messages, not in the session (owner question).
-        pub const SLEIGHT_HELP: [&[u8]; 4] = [
-            b"A sleight from Re:CoM. Equip it to use it. Uses 1 MP.\0",
-            b"A sleight from Re:CoM. Equip it to use it. Uses 2 MP.\0",
-            b"A sleight from Re:CoM. Equip it to use it. Uses 3 MP.\0",
-            b"A sleight from Re:CoM. Equip it to use it. Uses all MP.\0",
+        /// The sleight abilities' help lines (owner, 2026-11-03, "Sleight ability texts": "a short
+        /// description for each sleight's help line (what it does + its MP cost)"): what each does
+        /// in Re:CoM, then its MP (the owner's tier, [`super::super::sleight_mp`]). Ours, in
+        /// English: Re:CoM's own descriptions are its messages, not in the session. What each line
+        /// rests on (Re:CoM's `StockSkillList` element, its attack row's hit kind and what Re:CoM's
+        /// hit handler `0x14017DC50` does with it; the rest Assumption (wiki)):
+        /// `docs/recom-m12-sleights.md` § 8.4.1. By Re:CoM id.
+        pub const SLEIGHT_HELP: [(u16, &[u8]); 27] = [
+            (0x1B, b"Hurl the Keyblade over and over, wreathed in fire. Uses 2 MP.\0"),
+            (0x1C, b"Hurl the Keyblade over and over, wrapped in ice. Uses 2 MP.\0"),
+            (0x1D, b"Hurl the Keyblade over and over, charged with thunder. Uses 2 MP.\0"),
+            (0x1E, b"Inside a barrier, bounce from enemy to enemy. Uses 2 MP.\0"),
+            (0x1F, b"A rapid flurry of Keyblade blows on enemies. Uses 1 MP.\0"),
+            (0x20, b"A ring of fire bursts out around Sora. Uses 2 MP.\0"),
+            (0x21, b"Flames whirl around Sora as he moves. Uses 2 MP.\0"),
+            (0x22, b"A huge blast of fire over the area. Uses 3 MP.\0"),
+            (0x23, b"Freezes the enemies around Sora. Ice. Some resist. Uses 2 MP.\0"),
+            (0x24, b"Ice shots that home in on enemies. Uses 2 MP.\0"),
+            (0x25, b"Water bursts out around Sora. Ice. Uses 2 MP.\0"),
+            (0x26, b"Pulls enemies in and holds them. Some resist. Uses 2 MP.\0"),
+            (0x27, b"Stops enemies in time while Sora strikes them. Uses 2 MP.\0"),
+            (0x28, b"Leap up and crash down with a shock wave. Uses 2 MP.\0"),
+            (0x29, b"A tornado that catches enemies and hits many times. Uses 2 MP.\0"),
+            (0x2A, b"Shakes the ground: hits only enemies standing on it. Uses 2 MP.\0"),
+            (0x2B, b"A strike that warps an enemy away half the time. Uses 1 MP.\0"),
+            (0x2C, b"Warps enemies out of the battle. Some resist. Uses 1 MP.\0"),
+            (0x2D, b"Binds enemies on the ground in place. Some resist. Uses 1 MP.\0"),
+            (0x2E, b"Confuses enemies. Some resist. Uses 1 MP.\0"),
+            (0x2F, b"Frightens enemies. Some resist. Uses 1 MP.\0"),
+            (0x30, b"Gives other enemies the HP of the one it hits. Uses 1 MP.\0"),
+            (0x31, b"A shower of light that restores Sora's HP. Uses 1 MP.\0"),
+            (0x32, b"Stops the enemies it hits for a long time. Some resist. Uses 1 MP.\0"),
+            (0x33, b"Orbs of holy light strike enemies all around. Uses 3 MP.\0"),
+            (0x3A, b"Romp with Bambi; enemies hit drop HP prizes. Uses all MP.\0"),
+            (0x43, b"Cloud's Cross-slash: three powerful slashes. Uses all MP.\0"),
         ];
+
+        /// The help line of sleight `id` (one of the 27).
+        pub fn sleight_help(id: u16) -> Option<&'static [u8]> {
+            SLEIGHT_HELP.iter().find(|(s, _)| *s == id).map(|(_, t)| *t)
+        }
 
         /// The ability's help line (KH1 shows its own description; ours).
         pub fn help(i: usize) -> &'static [u8] {
@@ -951,12 +984,7 @@ pub mod page {
                 BERSERK => b"Raises Strength while Sora's HP is low.\0",
                 SECOND_CHANCE => b"Survive a blow that would knock you out, with 1 HP.\0",
                 // M12 step 4: the sleight abilities (Re:CoM's sleights; the owner's MP costs).
-                i if super::super::SLEIGHTS.contains(&i) => match super::super::sleight_mp(i) {
-                    Some(super::super::SleightMp::Points(1)) => SLEIGHT_HELP[0],
-                    Some(super::super::SleightMp::Points(2)) => SLEIGHT_HELP[1],
-                    Some(super::super::SleightMp::Points(_)) => SLEIGHT_HELP[2],
-                    _ => SLEIGHT_HELP[3],
-                },
+                i if super::super::SLEIGHTS.contains(&i) => super::super::sleight_of(i).and_then(sleight_help).unwrap_or(b"\0"),
                 _ => b"\0",
             }
         }
@@ -1564,5 +1592,29 @@ mod tests {
             assert!(s[..s.len() - 1].iter().all(|&b| (0x20..0x7F).contains(&b) && b != b'%'));
             assert!(s.len() - 1 <= crate::menu::HELP_MAX, "{}", std::str::from_utf8(s).unwrap());
         }
+    }
+
+    /// Owner (2026-11-03, "Sleight ability texts"): each of the 27 sleight abilities has its own
+    /// one-line description, ending in its MP ("Uses n MP." by the owner's tier, "Uses all MP." for
+    /// Idyll Romp / Cross-slash+); the name stays "Lethal Frame".
+    #[test]
+    fn sleight_help_lines_say_what_and_the_mp() {
+        assert_eq!(page::text::SLEIGHT_HELP.len(), 27);
+        let mut seen = std::collections::HashSet::new();
+        for i in SLEIGHTS {
+            let id = sleight_of(i).unwrap();
+            let line = std::str::from_utf8(page::text::help(i)).unwrap().trim_end_matches('\0');
+            assert_eq!(Some(page::text::help(i)), page::text::sleight_help(id), "{id:#x}");
+            let want = match sleight_mp(i).unwrap() {
+                SleightMp::Points(n) => format!(" Uses {n} MP."),
+                SleightMp::All => " Uses all MP.".to_string(),
+            };
+            assert!(line.ends_with(&want), "{}: {line:?} should end with {want:?}", ALL[i].name);
+            let what = &line[..line.len() - want.len()];
+            assert!(what.len() >= 20 && !what.contains("A sleight from Re:CoM"), "{}: {line:?}", ALL[i].name);
+            assert!(seen.insert(what.to_string()), "{}: the same description twice", ALL[i].name);
+        }
+        assert_eq!(ALL[of_sleight(sleight::LETHAL_FRAME).unwrap()].name, "Lethal Frame");
+        assert_eq!(page::text::sleight_help(sleight::SONIC_BLADE), None);
     }
 }

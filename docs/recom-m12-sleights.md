@@ -448,7 +448,7 @@ page) "Lethal Frame". Every other name matches the owner's list.
 
 | what | where | tag |
 |---|---|---|
-| **The abilities** (`abilities::ALL[31..58]`, `SLEIGHTS`, `Source::Sleight(id)`): no KH1 id, bit or row (nothing in KH1's frame: `to_core` / `kh1_bits` unchanged); sort key 1000 + id, so Sora's page lists them after every KH1 ability, in Re:CoM's id order; help line "A sleight from Re:CoM. Equip it to use it. Uses n MP." (Re:CoM's own descriptions are its messages, not in the session). | `crate::abilities` | Checked (code) |
+| **The abilities** (`abilities::ALL[31..58]`, `SLEIGHTS`, `Source::Sleight(id)`): no KH1 id, bit or row (nothing in KH1's frame: `to_core` / `kh1_bits` unchanged); sort key 1000 + id, so Sora's page lists them after every KH1 ability, in Re:CoM's id order; help line: what it does and its MP (§ 8.4.1; was "A sleight from Re:CoM. Equip it to use it. Uses n MP." until the owner's "Sleight ability texts"). | `crate::abilities` | Checked (code) |
 | **Learning**: the sync (Attack presses, the Abilities page, a level-up's end) asks Re:CoM's own `0x14023AB00(id)` for each one not yet unlocked; a learned one is unlocked **unequipped** (KH1's rule), never taken back. We never call the learner `0x14023AA60` or write `save + 0x2840` (trophy 0x45 stays Re:CoM's). Re:CoM's learners: its level-up pick, event `0xAD 7`, the chest `0x1401C9520`, the card's first pickup (none of these 27). | `abilities::sync`, `win::abilities::sync` | Checked (decomp + code) |
 | **Equipping**: the existing AP rules (KH1's `0x140310650` / `0x140311C20`): refused / greyed when the cost is over the AP left. | `abilities::page` | Checked (code + tests) |
 | **For the Sleights menu**: `win::abilities::equipped_sleights() -> Vec<u16>` (Re:CoM's ids ascending), `abilities::sleight_mp` (the owner's MP: AP 2 → 1, 3 / 4 → 2, 5 → 3; Idyll Romp, Cross-slash+ all). Nothing reads them yet. | | |
@@ -482,6 +482,63 @@ Owner test lines (step 4):
 
 Not checked (8.4): anything in game; which chest / event gives each "wiki" sleight; Re:CoM's message
 texts.
+
+#### 8.4.1 The help lines (owner, 2026-11-03, "Sleight ability texts")
+
+Owner: "a short description for each sleight's help line (what it does + its MP cost); the name stays
+"Lethal Frame"". Each sleight's line on the Abilities page (`abilities::page::text::SLEIGHT_HELP`):
+what it does in Re:CoM, then "Uses n MP." (the owner's tier) or "Uses all MP." (Idyll Romp,
+Cross-slash+); at most 66 characters (`menu::HELP_MAX`, the help box's width); English (Re:CoM's own
+descriptions are its messages, not in the session). Before: one generic line per MP cost.
+
+What the lines rest on:
+- **Element**: `StockSkillList` `+0xA` (Checked (files)): 2 fire, 3 ice, 4 thunder (the same values
+  as Fira / Blizzara / Thundara's rows), 6 Cure's (heal); 0 / 1 / 5 are not named in the lines.
+- **Hit kind**: the sleight's attack row (`initStockSkill` `0x140220DF0` → table `0x1407C6C70`, row
+  byte `+0xB` → `player+0x668`; Checked (decomp + exe)) and what Re:CoM's enemy hit code does with it
+  (`0x14017DC50`, then `0x14017D260` for the state; Checked (decomp)).
+- **Look** (how it plays: thrown Keyblade, ring, tornado …): **Assumption (wiki / Re:CoM's sleights
+  as players know them)**: the sleights' motions and effects were not read.
+
+| id | name | line (before the MP) | data | tag |
+|---|---|---|---|---|
+| 0x1B | Fire Raid | Hurl the Keyblade over and over, wreathed in fire. | fire, kind 1 (damage) | element Checked; look Assumption |
+| 0x1C | Blizzard Raid | Hurl the Keyblade over and over, wrapped in ice. | ice, kind 1 | as above |
+| 0x1D | Thunder Raid | Hurl the Keyblade over and over, charged with thunder. | thunder, kind 0x1D (damage path) | as above |
+| 0x1E | Reflect Raid | Inside a barrier, bounce from enemy to enemy. | attribute 0, kind 1 | Assumption |
+| 0x1F | Judgment | A rapid flurry of Keyblade blows on enemies. | attribute 1, kind 1 | Assumption |
+| 0x20 | Firaga Burst | A ring of fire bursts out around Sora. | fire, kind 3 | element Checked; look Assumption |
+| 0x21 | Raging Storm | Flames whirl around Sora as he moves. | fire, kind 3 | as above |
+| 0x22 | Mega Flare | A huge blast of fire over the area. | fire, kind 3 | as above |
+| 0x23 | Freeze | Freezes the enemies around Sora. Ice. Some resist. | ice, kind 0xC: no effect on an enemy whose `"Freeze"` parameter is < 1; else Re:CoM's freeze state `+0x9C0` | Checked (decomp); "around Sora" Assumption |
+| 0x24 | Homing Blizzara | Ice shots that home in on enemies. | ice, kind 2 | element Checked; look Assumption |
+| 0x25 | Aqua Splash | Water bursts out around Sora. Ice. | ice (attribute 3), kind 2 | element Checked; look Assumption |
+| 0x26 | Magnet Spiral | Pulls enemies in and holds them. Some resist. | kind 0x14: only enemies with the `"Magnet"` parameter; a timed state `+0xB80` | Checked (decomp); "pulls in" Assumption |
+| 0x27 | Lethal Frame | Stops enemies in time while Sora strikes them. | kind 0x17: Stop's state `+0x940` for the row's value (9000 ticks = 3 s), without Stop's resistance gate | Checked (decomp); "while Sora strikes" Assumption |
+| 0x28 | Shock Impact | Leap up and crash down with a shock wave. | kind 0x10: a timed state `+0xA00` (12000 ticks) | look Assumption; the state not identified |
+| 0x29 | Tornado | A tornado that catches enemies and hits many times. | attribute 1, kind 0x11: each hit's damage × 0.1 | Checked (decomp) for the small hits; look Assumption |
+| 0x2A | Quake | Shakes the ground: hits only enemies standing on it. | kind 0x12: nothing for an enemy off the ground (its mover `+0x120 & 5`) | Checked (decomp) |
+| 0x2B | Warpinator | A strike that warps an enemy away half the time. | kind 0xE: only enemies with parameter `+0x30`, then a 1-in-2 roll (`0x14029CDC0` odd: nothing); the warp state `+0xA80` | Checked (decomp); "out of the battle" not read |
+| 0x2C | Warp | Warps enemies out of the battle. Some resist. | kind 0xF: only enemies with parameter `+0x30`; the warp state `+0xA80` | Checked (decomp) for the gate; "out of the battle" Assumption (wiki) |
+| 0x2D | Bind | Binds enemies on the ground in place. Some resist. | kind 9: only with parameter `+0x34` and on the ground; `0x14017E240` | Checked (decomp); "in place" Assumption |
+| 0x2E | Confuse | Confuses enemies. Some resist. | kind 0xA: parameter `+0x38` 0 → a plain flinch, else `0x14017E350` | gate Checked; "confuses" Assumption (name) |
+| 0x2F | Terror | Frightens enemies. Some resist. | kind 0xB: only with parameter `+0x3C`; state `+0x980` | gate Checked; "frightens" Assumption (name) |
+| 0x30 | Synchro | Gives other enemies the HP of the one it hits. | kind 0x13: every other enemy with the `"Synchro"` parameter takes the hit enemy's HP `+0x274` | Checked (decomp) |
+| 0x31 | Gifted Miracle | A shower of light that restores Sora's HP. | attribute 6 (Cure's), AP mode 2 (heal 50) | heal Checked (files); look Assumption |
+| 0x32 | Teleport | Stops the enemies it hits for a long time. Some resist. | kind 8 (Re:CoM's Stop kind, gate: the Stop parameter `+0x2C`), 18000 ticks (6 s; the Stop card's 9000) | Checked (decomp + files); Sora's vanishing not described |
+| 0x33 | Holy | Orbs of holy light strike enemies all around. | attribute 1, kind 3, four power columns | look Assumption |
+| 0x3A | Idyll Romp | Romp with Bambi; enemies hit drop HP prizes. | summon category, AP mode 0 (its actor computes) | Assumption (wiki) |
+| 0x43 | Cross-slash+ | Cloud's Cross-slash: three powerful slashes. | summon category, three 500 columns (as Cross-slash 0x41) | three hits Checked (files); look Assumption |
+
+Test: `abilities::tests::sleight_help_lines_say_what_and_the_mp` (each line its own, ending in the
+owner's MP; fits the box). No hook, no site; the page shows the line as before.
+
+Owner test lines (8.4.1):
+- Combat = KH1, camp KH1 tab > Abilities > Sora: on each learned sleight the help line describes it
+  and ends "Uses n MP." (1 / 2 / 3) or "Uses all MP." (Idyll Romp, Cross-slash+); nothing is cut off
+  at the box's right edge (tell us any that is). Lethal Frame keeps its name.
+- Tell us any line that doesn't match what the sleight does in game (the look is from memory of
+  Re:CoM, not read from its files).
 
 ### 8.5 The Sleights row and list (step 5)
 
