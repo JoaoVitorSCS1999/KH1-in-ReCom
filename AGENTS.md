@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 184: M12 step 3: MP Haste, version 0.98.2 (2026-11-01)
+
+- Ask (owner, 2026-11-03): KH1's level abilities "added to his ability list at the levels he would normally get them".
+- MP Haste (KH1 ability 23, Rod level 21, 3 AP; Checked (btltbl)): KH1's `0x1402BF330` adds 1.5 to the MP charge factor per hit (same 250 % cap): at equal levels a swing gives 7 instead of 3, a finisher 15 instead of 6 (Checked (decomp)). In KH1 it speeds MP from hits, not the refill rate. Learned at its level on Re:CoM's level whatever the level-up pick, unequipped, on the Abilities page; Combat = KH1 only; a learned notice.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 183: M12 step 2: "Sora learned X" notices on Re:CoM's sleight-learned screen, version 0.98.1 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "I want there to be a notification that lets the player know that they've obtained those abilities"; answer: Re:CoM's sleight-learned screen.
