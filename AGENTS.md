@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 158: Rows that only clash: the Soldier's spin-kick chest and the Powerwild's flurry body never hurt Sora, version 0.87.1 (2026-11-01)
+
+- Ask (owner, 2026-11-02, clash question 2): "Fix: block only".
+- KH1 (Checked (decomp `0x1402B3BE0`)): an attack is tested against a hurt body only if `((t<<17)−0x20000) & 0xFFF9FFFF ≠ 0 || t == 3`: rows of clash type 1, 2 or 4 never hurt. Soldier `ex_2010` row `0x2AC` is type 1, Powerwild `ex_2030` row `0x1CC` type 2 (Checked (files)); no other ported row is (the Wyvern's charge is type 3, it hurts in KH1 too).
+- Re:CoM has no record field that skips the player (Checked (decomp `0x14016F110` / `0x14016EAD0` / `0x14016F1C0`; exe: CCollAttack vtable `0x140523E28`): the existing pair-dispatch wrapper answers 0 for these collisions against the player list (owner `CCollAttack+0x20` → `0x1402AD350` → our enemy → its live record's row type from the manifest). The clash test still sees them (swings bounce off). Sora's KH1 Guard (type 2) never met type 1 / 2 rows in KH1 either.
+- Asset step: not needed (manifests since 0.82.0 carry each row's type). Per frame: one load while no class has such a row.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 157: The KH1 Fat Bandit (KH1's waits, aimed fireballs, the fire breath), version 0.87.0 (2026-11-01)
 
 - Asks (owner, 2026-11-02): "it is nearly impossible to attack this fat bandit because it attacks so frequently"; "keep porting heartless" (M11).
