@@ -4478,9 +4478,26 @@ Requiem as Re:CoM has it.
   (decision M10) and distance, through KH1's rule (`kh1_core::greenrequiem::pick`, with the CRT `qsort`'s order of equal
   keys: `crt_qsort`); its Re:CoM id kept, or its own.
 - **The heal** (`win::kh1_cure::cure`, when the child acts: 186 frames into 213): the kept id looked up (`0x1402AD350`; gone:
-  nothing, KH1's `sys 120`), then **Re:CoM's own Green Requiem heal exactly as its state 2 makes it** (above; the effect set
+  nothing, KH1's `sys 120`); **KH1's hit test on it** (below); then **Re:CoM's own Green Requiem heal exactly as its state 2 makes it** (above; the effect set
   name and the switch check-only sites `sites::GREENREQUIEM_CURE_CHECKED`): Re:CoM's power (its `@ENP` attack id 0), Re:CoM's
   effect on the target, Re:CoM's HP rules.
+- **Allies KH1 can't hit** (owner 2026-11-03, question 2 (b): "skips allies KH1 can't hit (a sunk Shadow, an invisible
+  Darkball)"; built after 0.97.1). KH1 (Checked (decomp)): its pick `sys 102` (`0x1402BC0B0` → `0x1402B80A0`) lists allies
+  with **no** hit test (only alive, its side, not itself, max HP > 0, ratio, distance); the test is in the heal: the
+  child's `sys 60` → `0x1402BF330`, whose first call is `0x140292070(target)` ("can be hit": hurt parts, not all switched
+  off (`+0x3A8` bits), actor byte `+6` ≠ 2, flags `& 0x8048 == 0x8000`, i.e. flag 0x40 clear); no: no record, no heal,
+  the child just ends (Checked (files): `ex_2140_00.bd`, nothing after it re-picks). So KH1 can pick a sunk Shadow (it is
+  often the most hurt) and then heal nobody; it never re-picks and never heals itself instead. Built as KH1: the pick is
+  unchanged; at the heal, a picked enemy on our KH1 AI whose runtime says it can't be hit **now** (`rt.hittable ==
+  false`: KH1's flag 0x40, `Cmd::Hittable`; a sunk Shadow / Neoshadow, a vanished Darkball, a warping Search Ghost, a
+  hidden Gargoyle) gets nothing (log: `KH1 can't hit it now`); Re:CoM-AI enemies keep Re:CoM's rule (healed while alive);
+  any enemy in the battle stays eligible for the pick (owner question 3: either AI). The flag is read without the runtime
+  table's lock (the Cure runs inside the caster's runtime call): a copy in the enemy's tail (`kh1_enemy::tail::OFF_UNHITTABLE`
+  = `+0xC`, written with `Cmd::Hittable` and zeroed at the ctor; `win::kh1_enemy::kh1_hittable`, which also checks the
+  tail's battle number). Test `greenrequiem::tests::the_heal_needs_a_target_kh1_can_hit`.
+  - Differs from the brief's wording ("skip them when picking; nobody left: heal itself"): that is not KH1's (Checked
+    (decomp) above). Owner: if you want the pick-time skip anyway, say so (a one-line change; it changes how often the
+    Cure lands on someone).
 - Per frame: nothing (one call per cast, one per heal).
 
 #### What the asset step writes
@@ -4512,12 +4529,14 @@ The log shows `greenrequiem: KH1's greenrequiem (M11) …` at start, `battle N: 
   / `0x14018E9B0`), `0x140181CE0`, `0x14017F0E0`.
 - **Checked (exe):** the class, 139 slots, the ctor and its only call, the factory size, 20 vtable slots, the effect set name,
   the effect switch and the power call (1129 sites match: 654 byte sites, 475 pointers); KH1's `qsort` import.
+- **Checked (decomp), the hit test:** `0x1402B80A0` (no hit test in the pick), `0x1402BF330` (its first test
+  `0x140292070`), `0x140292070`'s conditions.
 - **Assumptions:** the child's first frame is the frame after `sys 94` (as the Red Nocturne's); the heal lands in the child's
   act frame (KH1: a hit record its target takes in its own update, ±1 frame); flat battle floors (the floor under any point is
   the battle floor); Re:CoM's manager order for KH1's actor-slot order; the UCRT's `qsort` source for the order of equal keys
-  (no `ucrtbase.dll` decomp in the session); KH1's "can it be hit" test on the target not carried (`0x140292070`: a sunk
-  Shadow or a hidden Darkball gets no KH1 heal; here every living ally Re:CoM keeps does, as Re:CoM's own Green Requiem's);
-  Re:CoM's sounds (none: no `.SES`); seeds per enemy.
+  (no `ucrtbase.dll` decomp in the session); KH1's "can it be hit" as our runtime's flag 0x40 only (KH1's other parts of
+  `0x140292070`, flag 0x8 and per-part switches, are not carried: no ported enemy sets them, Assumption); a Re:CoM-AI ally
+  always counts as hittable (Re:CoM's own rule); Re:CoM's sounds (none: no `.SES`); seeds per enemy.
 - **Not ported:** the leash, the notice for placed ones (battle spawns appear), the searches' draws (`sys 48`: Sora is the
   only opponent), element rules (Fire / Blizzard / Thunder heal it to full; attributes not carried), effects (2052..2054, the
   child's effect 7 on the target, the appearance's flag 0x80: M13; Re:CoM's own heal effect plays), the death routine
@@ -4537,6 +4556,9 @@ The log shows `greenrequiem: KH1's greenrequiem (M11) …` at start, `battle N: 
 6. Stop it while it casts (Re:CoM's Stop): no heal.
 7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
 8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Green Requiems (their own heal).
+9. A battle with a Green Requiem and Shadows (or a Darkball / Search Ghost), `enemy_ai = kh1`: hurt a Shadow, then let it
+   sink. When the Cure lands while it is sunk (or a Darkball has vanished, a Search Ghost is warping), nobody is healed:
+   no sparkle, no number, and the log says `KH1 can't hit it now`. A Shadow that is up again is healed as before.
 
 Please send `kh1-recom.log` (`greenrequiem:` lines) and an F9 trace.
 
@@ -4549,15 +4571,16 @@ frames (212 → 213 + 186), who gets healed and by how much (HP rows) to compare
 
 #### Green Requiem owner questions
 
-1. **How much it heals.** KH1's Cure is a full heal (1000 + its strength on KH1's HP: every KH1 Heartless goes back to full).
+1. **How much it heals.** Answered (owner 2026-11-03): (a) Re:CoM's amount. KH1's Cure is a full heal (1000 + its strength on KH1's HP: every KH1 Heartless goes back to full).
    Built by the rule "each KH1 spell takes the power of the Re:CoM spell of the same kind": Re:CoM's own Green Requiem heal
    (30 × its attack, through Re:CoM's heal and effect), so a badly hurt ally may not go back to full. (a) Keep Re:CoM's amount;
    (b) KH1's full heal on Re:CoM's HP (Re:CoM's heal and effect, the amount = what is missing); (c) Re:CoM's amount but never
    less than a set share of max HP.
-2. **Allies it can't reach in KH1.** KH1 never heals an ally it cannot hit (a sunk Shadow, an invisible Darkball, a warping
+2. **Allies it can't reach in KH1.** Answered (owner 2026-11-03): (b), built (§ Its Cure, "Allies KH1 can't hit": KH1's
+   test is at the heal, not the pick). The question as asked: KH1 never heals an ally it cannot hit (a sunk Shadow, an invisible Darkball, a warping
    Search Ghost); Re:CoM's own Green Requiem heals any living one. Built: any living one (Re:CoM's rule). (a) Keep; (b) skip
    our KH1 enemies while KH1 would call them unhittable (their KH1 flag; Re:CoM-AI enemies keep Re:CoM's rule).
-3. **Who counts as an ally.** Built: every enemy in Re:CoM's battle list of its enemy type (the list Re:CoM's own Green
+3. **Who counts as an ally.** Answered (owner 2026-11-03): (a) keep. Built: every enemy in Re:CoM's battle list of its enemy type (the list Re:CoM's own Green
    Requiem uses), KH1-AI or Re:CoM-AI alike, in Re:CoM's list order (KH1 breaks ties by its own actor order). (a) Keep;
    (b) only enemies on KH1's AI.
 

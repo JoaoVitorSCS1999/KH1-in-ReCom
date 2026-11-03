@@ -50,12 +50,16 @@ pub enum Appear {
 }
 
 /// The 0x20-byte tail after a converted enemy's body (the factory's `mov ecx, size` raised, as the
-/// revenge bosses' sizes): magic, battle number, the runtime's index.
+/// revenge bosses' sizes): magic, battle number, the runtime's index, KH1's flag 0x40.
 pub mod tail {
     pub const SIZE: u32 = 0x20;
     pub const OFF_MAGIC: usize = 0;
     pub const OFF_BATTLE: usize = 4;
     pub const OFF_INDEX: usize = 8;
+    /// 1 while the runtime says it can't be hit (KH1's actor flag 0x40, `Cmd::Hittable(false)`: a sunk Shadow, a warping
+    /// Darkball or Search Ghost), else 0: a copy of the runtime's flag that other enemies' code can read without the
+    /// runtime table's lock (the Green Requiem's Cure, `win::kh1_cure`). Written with the flag (never per frame).
+    pub const OFF_UNHITTABLE: usize = 0xC;
 }
 
 /// One Re:CoM class with a KH1 behaviour.

@@ -181,6 +181,23 @@ fn the_pick_follows_kh1s_rule() {
     assert_eq!((p(0.1, &full), p(0.7, &full), p(0.95, &full)), (Some(2), Some(3), Some(1)));
 }
 
+/// KH1's `sys 60` gate (`0x1402BF330` → `0x140292070`): the heal reaches a picked KH1 enemy only while it can be hit (a
+/// sunk Shadow, a vanished Darkball, a warping Search Ghost get nothing; the pick is not redone, the caster doesn't heal
+/// itself instead); a Re:CoM-AI ally (no KH1 flag) keeps Re:CoM's rule and is healed. The pick itself never looks at it:
+/// an unhittable ally is listed by its HP like any other (KH1's `0x1402B80A0`).
+#[test]
+fn the_heal_needs_a_target_kh1_can_hit() {
+    assert!(cure_lands(Some(true)), "a KH1 enemy that can be hit");
+    assert!(!cure_lands(Some(false)), "a sunk / hidden / warping KH1 enemy");
+    assert!(cure_lands(None), "a Re:CoM-AI enemy (any enemy in the battle, either AI)");
+    // The sunk Shadow (id 2) is the most hurt: KH1 picks it (the pick has no hit test) and then heals nobody.
+    let a = [ally(1, 50, 100), ally(2, 10, 100)];
+    let got = pick(&a, 0.1, 5000.0, 1.0, 60, 30);
+    assert_eq!(got, Some(2));
+    let hittable = |id: u32| if id == 2 { Some(false) } else { Some(true) };
+    assert!(!cure_lands(hittable(got.unwrap())));
+}
+
 /// The CRT sort sorts (any length; its ties are its own).
 #[test]
 fn crt_qsort_sorts() {
