@@ -402,3 +402,83 @@ Owner test lines (step 1/2 follow-ups):
   ended before its page`. At Combat = Re:CoM the help page stays.
 
 Not checked (8.1 / 8.2): anything in game; Re:CoM's message texts; the row icon.
+
+### 8.4 The sleight abilities (step 4)
+
+Owner ("M12 answers", 2026-11-03): "the 25 magic sleights plus Idyll Romp and Cross-slash+" become
+abilities with the owner's AP costs; "A sleight is **added when Re:CoM teaches it** (its learned bit
+via `0x14023AA60`: level-up, event, chest, first card); the notice fires then". This step adds the
+abilities, the save layout, the page and the notices; performing them comes with the Sleights menu
+(next step). Combat = Re:CoM and Riku's story: unchanged (nothing here runs there but the
+"shown by Re:CoM" mark below, a read).
+
+| ix | id | name | AP | MP (owner) | Re:CoM teaches it (§ 1.2) |
+|---|---|---|---|---|---|
+| 31 | 0x1B | Fire Raid | 3 | 2 | wiki: Monstro Bounty |
+| 32 | 0x1C | Blizzard Raid | 3 | 2 | wiki: Olympus Bounty |
+| 33 | 0x1D | Thunder Raid | 4 | 2 | wiki: Neverland Room of Rewards |
+| 34 | 0x1E | Reflect Raid | 3 | 2 | wiki: Hollow Bastion Bounty |
+| 35 | 0x1F | Judgment | 2 | 1 | wiki: Destiny Islands Bounty |
+| 36 | 0x20 | Firaga Burst | 3 | 2 | wiki: 100 AW |
+| 37 | 0x21 | Raging Storm | 4 | 2 | wiki: Castle Oblivion Bounty |
+| 38 | 0x22 | Mega Flare | 5 | 3 | level-up Lv57 |
+| 39 | 0x23 | Freeze | 3 | 2 | event `WORLD00` 2020, screen |
+| 40 | 0x24 | Homing Blizzara | 3 | 2 | wiki: Atlantica Bounty |
+| 41 | 0x25 | Aqua Splash | 3 | 2 | wiki: Monstro Room of Rewards |
+| 42 | 0x26 | Magnet Spiral | 4 | 2 | event `WORLD00` 2016, screen |
+| 43 | 0x27 | Lethal Frame | 3 | 2 | level-up Lv32 |
+| 44 | 0x28 | Shock Impact | 3 | 2 | wiki: Atlantica Bounty |
+| 45 | 0x29 | Tornado | 4 | 2 | level-up Lv37 |
+| 46 | 0x2A | Quake | 4 | 2 | wiki: Atlantica Room of Rewards |
+| 47 | 0x2B | Warpinator | 2 | 1 | wiki: Twilight Town Bounty |
+| 48 | 0x2C | Warp | 2 | 1 | wiki: Agrabah Room of Rewards |
+| 49 | 0x2D | Bind | 2 | 1 | wiki: Halloween Town Room of Rewards |
+| 50 | 0x2E | Confuse | 2 | 1 | wiki: 100 AW |
+| 51 | 0x2F | Terror | 2 | 1 | wiki: entering Halloween Town |
+| 52 | 0x30 | Synchro | 2 | 1 | wiki: Wonderland Room of Rewards |
+| 53 | 0x31 | Gifted Miracle | 2 | 1 | wiki: Halloween Town Bounty |
+| 54 | 0x32 | Teleport | 2 | 1 | wiki: Neverland Bounty |
+| 55 | 0x33 | Holy | 5 | 3 | level-up Lv47 |
+| 56 | 0x3A | Idyll Romp | 2 | all | wiki: 100 AW |
+| 57 | 0x43 | Cross-slash+ | 4 | all | wiki: 100 AW |
+
+Ids and names: `SY0002.CTD`'s list from id 4 (Checked (files); test `sleight_names_match_recoms_ctd`
+with `RECOM_SY0002_CTD`). **One difference**: the CTD writes 0x27 "Lethal Flame"; the owner (and the
+page) "Lethal Frame". Every other name matches the owner's list.
+
+| what | where | tag |
+|---|---|---|
+| **The abilities** (`abilities::ALL[31..58]`, `SLEIGHTS`, `Source::Sleight(id)`): no KH1 id, bit or row (nothing in KH1's frame: `to_core` / `kh1_bits` unchanged); sort key 1000 + id, so Sora's page lists them after every KH1 ability, in Re:CoM's id order; help line "A sleight from Re:CoM. Equip it to use it. Uses n MP." (Re:CoM's own descriptions are its messages, not in the session). | `crate::abilities` | Checked (code) |
+| **Learning**: the sync (Attack presses, the Abilities page, a level-up's end) asks Re:CoM's own `0x14023AB00(id)` for each one not yet unlocked; a learned one is unlocked **unequipped** (KH1's rule), never taken back. We never call the learner `0x14023AA60` or write `save + 0x2840` (trophy 0x45 stays Re:CoM's). Re:CoM's learners: its level-up pick, event `0xAD 7`, the chest `0x1401C9520`, the card's first pickup (none of these 27). | `abilities::sync`, `win::abilities::sync` | Checked (decomp + code) |
+| **Equipping**: the existing AP rules (KH1's `0x140310650` / `0x140311C20`): refused / greyed when the cost is over the AP left. | `abilities::page` | Checked (code + tests) |
+| **For the Sleights menu**: `win::abilities::equipped_sleights() -> Vec<u16>` (Re:CoM's ids ascending), `abilities::sleight_mp` (the owner's MP: AP 2 → 1, 3 / 4 → 2, 5 → 3; Idyll Romp, Cross-slash+ all). Nothing reads them yet. | | |
+| **Save, layout v6**: the words widen to 64 bits; bits 0..32 stay in the block (`0x26A0` / `0x26A4`), bits 32..64 in an 8-byte extension `save + 0x26B7 ..= 0x26BE` right after the summon block (`0x26AE..=0x26B6`; u32 unlocked high, u32 equipped high), read only from a v6 block. Inside Re:CoM's spare tail (no Re:CoM code reads or writes it); the camp's spare-range report counts it as ours. | `abilities::EXT_FIRST`, `raw` / `read` / `write` | Checked (code) |
+| **Migration v5 → v6** (once, at the first sync or KH1 frame): every v5 field kept (the AP Up count too); the extension starts empty; the sleights Re:CoM already taught arrive unequipped **without notices** (they were learned before, with Re:CoM's screens). An older build that writes a v6 block keeps the extension but clears bit 31 (Fire Raid): the next sync of this build finds it again (with a notice). | `abilities::migrate` | Checked (tests) |
+| **Notices**: each newly unlocked sleight ability gets `notify_learned(Learned::Sleight(id))`: Re:CoM's own sleight-learned screen with its own name and wording (no card help page at KH1, step 2). None on a save's first sync, none from a block older than v6. | `notices::sleight_abilities` | Checked (code + tests) |
+| **No second notice when Re:CoM just showed it** (at any Combat setting, in the existing level-up wrapper `0x14010EF10`, no new hook): (1) a Sora level-up's Sleight pick: case 6's confirm on row 2 (`+0x220` = 2, `+0x230` = 0, `+0x258` = 0) learns `0x14023AA60(list[+0x240].id)` (the stack list, `level_up::SLEIGHT_LIST`): marked at 6 → 7; (2) a sleight-learned screen (event / chest) entering 0xE from 1 / 0 with `+0x258` = id (not our own notice). The id is marked for the session; a notice for it still waiting is taken out of the queue. | `win::notices::shown_by_recom` | Checked (decomp `0x14010EF10` cases 1, 6, 0xE..0x11) |
+
+Per frame: the KH1 frame's equipped read is now 15 + 8 bytes (the extension); nothing else.
+
+Assumptions / known:
+- The "shown" mark lasts the session: a sleight Re:CoM taught with its screen in an **earlier session**
+  (e.g. at Combat = Re:CoM) that our sync first sees now gets a notice.
+- A sleight Re:CoM teaches without a screen (event `0xAD 7` with its second argument 0) gets its notice
+  at the next sync (Attack press, the Abilities page, a level-up's end), then at Re:CoM's camp gate.
+- Unlock sources tagged "wiki" come from § 1.2 (not the session's files).
+
+Owner test lines (step 4):
+- Combat = KH1, a save from 0.98.x (layout v5) that already has Freeze / Magnet Spiral / Lethal Frame
+  etc.: the log says `abilities: block v5 -> v6 …` and `sleight abilities Re:CoM taught …: [...]
+  (block v5: learned before, no notices)`; no notice boxes; the Abilities page (Sora) lists them after
+  the KH1 abilities, unequipped, in Re:CoM's order, with their AP costs. Equip one: the AP goes down by
+  its cost; one over the AP left is greyed and refused. Save, reload: still equipped.
+- Reach level 32 / 37 / 47 / 57 and pick the Sleight row (Lethal Frame, Tornado, Holy, Mega Flare): no
+  extra "learned" box after Re:CoM's level-up (the log: `sleight 0x27 shown by Re:CoM (its level-up
+  Sleight pick): no second notice`); the ability is on the page.
+- A sleight from an event or chest with Re:CoM's box (Freeze, Magnet Spiral, a Bounty): one box only
+  (Re:CoM's), no card help page; the ability is on the page.
+- Combat = Re:CoM: everything as before (the camp's KH1 tab shows no Abilities row there).
+- Nothing performs the sleights yet (the Sleights menu is the next step).
+
+Not checked (8.4): anything in game; which chest / event gives each "wiki" sleight; Re:CoM's message
+texts.

@@ -23,12 +23,17 @@
 //!   level-up Sleight pick too"), it has just made its `CTechHelp`, the last child of its task list:
 //!   set to state 5 with no page, Re:CoM's own update ends it on its first run (nothing loaded, none
 //!   unloaded) and its dtor sets `0x14087A4B0`, which 0x10 / 9 wait for.
+//! - **Shown by Re:CoM** (M12 step 4, at any Combat setting): a sleight ability whose screen Re:CoM
+//!   itself just showed gets no second notice ([`shown_by_recom`]): a Sora level-up's Sleight pick
+//!   (6 → 7 on row 2: the sleight `crate::level_up::SLEIGHT_LIST[+0x240]` it learns) and every
+//!   sleight-learned screen (state 1 / 0 → 0xE with `+0x258` = the id: its event `0xAD 7`, its
+//!   chest) mark the id for the session; a notice for it still waiting is taken out.
 
 use super::movement::{func, rd, wr};
 use super::{base, log, va};
 use crate::level_up::{off, state, tech_help};
 use crate::notices::{Learned, Queue};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 static QUEUE: Mutex<Queue> = Mutex::new(Queue::new());
@@ -41,6 +46,28 @@ static HAS_NAME: AtomicBool = AtomicBool::new(false);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(60);
 /// `crate::sites::M12_PTRS` checked once (a mismatch turns the notices off, logged).
 static PTRS_OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+/// The sleight ids (0..128) whose screen Re:CoM showed this session ([`shown_by_recom`]).
+static SHOWN: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+
+/// Whether Re:CoM's own screen showed sleight `id` this session (its level-up Sleight pick, its
+/// sleight-learned screen).
+pub fn shown_by_recom(id: u16) -> bool {
+    SHOWN.get(id as usize / 64).is_some_and(|w| w.load(Ordering::Relaxed) & (1 << (id % 64)) != 0)
+}
+
+fn mark_shown(id: u16, how: &str) {
+    if crate::abilities::of_sleight(id).is_none() {
+        return;
+    }
+    let Some(w) = SHOWN.get(id as usize / 64) else { return };
+    w.fetch_or(1 << (id % 64), Ordering::Relaxed);
+    let removed = QUEUE.lock().map(|mut q| {
+        let r = q.remove(Learned::Sleight(id));
+        PENDING.store(!q.is_empty(), Ordering::Relaxed);
+        r
+    });
+    note(|| format!("sleight {id:#x} shown by Re:CoM ({how}): no second notice{}", if removed.unwrap_or(false) { " (its waiting notice taken out)" } else { "" }));
+}
 
 fn ptrs_ok() -> bool {
     *PTRS_OK.get_or_init(|| {
@@ -122,6 +149,21 @@ unsafe fn start_on(this: usize, l: Learned) {
 
 /// From the level-up wrapper, after Re:CoM's update ran (`before` → `after` its state).
 pub(super) unsafe fn after_step(this: usize, before: i32, after: i32) {
+    // M12 step 4: Re:CoM's own screens for a sleight (any Combat setting).
+    if before == state::PICK && after == state::PICKED {
+        let character: u32 = rd(this + off::CHARACTER);
+        if rd::<u32>(this + off::SLEIGHT) == 0 && character == 0 && rd::<i32>(this + off::CURSOR) == crate::level_up::SLEIGHT_ROW as i32 {
+            if let Some(id) = crate::level_up::picked_sleight(rd(this + off::OFFER + 4 * crate::level_up::SLEIGHT_ROW)) {
+                mark_shown(id, "its level-up Sleight pick");
+            }
+        }
+    }
+    if after == state::LEARNED && (before == state::INIT || before == state::RESOURCES) && CURRENT.load(Ordering::Relaxed) != this {
+        let id: u32 = rd(this + off::SLEIGHT);
+        if let Ok(id) = u16::try_from(id) {
+            mark_shown(id, "its sleight-learned screen");
+        }
+    }
     // Our name into the line, once Re:CoM has set its own (state 1 / 0 → 0xE); used once.
     if after == state::LEARNED && (before == state::INIT || before == state::RESOURCES) && CURRENT.load(Ordering::Relaxed) == this {
         CURRENT.store(0, Ordering::Relaxed);
