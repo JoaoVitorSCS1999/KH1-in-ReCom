@@ -10,7 +10,7 @@
 //!
 //! # The script's shape
 //!
-//! - entry `0x22F4`: init `0x23FE` (`wp+0x5C` the world, `wp+0x64` = room 8, the stats block's walk `+4` = 5, the
+//! - entry `0x22F4`: init `0x23FE` (`wp+0x5C` the world, `wp+0x64`: `sys 105`'s second word is 8, the stats block's walk `+4` = 5, the
 //!   state object `wp+0x20`, the hit handler `0x24D2`, the search object `wp+0x30`, `wp+0x50` / `+0x58` / `+0x60` = 0,
 //!   the stat record `0x14` / `0x80`), a yield, the target party 0, the appearance thread `0xA90`; then each frame: an
 //!   effect ends unless 212 / 218 / 207 / 213 / 200 / 69 plays (M13); a state request restarts the behaviour thread:

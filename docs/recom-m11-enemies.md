@@ -2437,6 +2437,148 @@ record each count once.
 5. **Fire on a diving or rising Neoshadow.** KH1's fireball meets its body row (type 5 meets 4) and is turned back; ours hits
    it. (a) Leave it (built); (b) build KH1's turn-back for this row.
 
+### The Wight Knight (built)
+
+Status: built, tests and Windows build pass; **not seen in game**; no KH1 trace of the Wight Knight yet. Its attacks run on
+Re:CoM's states 2 / 3; its three body rows bounce Sora's swings during its wind-up, its swipes and its leap slash (the shared
+enemy guard, KH1's mode 2 rows); every hit it takes plays KH1's reaction (no `sys 42` in its script).
+
+#### KH1's side. Checked (files: `ex_2200.bd` disassembled, code from `0x618`; decomp: the syscalls named)
+
+The script (0x2900 bytes) keeps the actor at `wp+0`, the state object at `wp+0x20`, the search object at `wp+0x30`; no child
+object (no `sys 94`). The Wight Knight has **no idle state**: it engages at once and never wanders.
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x22F4` | init `0x23FE` (`wp+0x5C` = KH1's world, `wp+0x64` = `sys 105`'s second word is 8 (a room: Assumption), stats `+4` walk 5 (run never written: 8, the default), the hit handler `0x24D2`, stat record `0x14` / `0x80`); a yield; the target party 0; the appearance thread `0xA90`; each frame: an effect ends unless 212 / 218 / 207 / 213 / 200 / 69 plays (M13); a state request restarts the behaviour (1 engaged `0x7AA` → `0x7E2`, 2 hit `0x618` → `0x664`) |
+| appearance | `0xA90` → `0xC46` | `wp+0x64` or spawn type ≠ 0 / 5: the 30-frame fade-in, flag 0x80 30 frames, effect 10, facing Sora now, 69 (a plain request, blend 0, the idle queued at 0) for len − 4 = 108 frames turning to Sora (off the ground: the end), the idle at 8 and 6 frames (`0x2870`); spawn type 5: hangs (215) until Sora is within 6 m and not standing / walking (or it falls), then drops (213, an action): not ported (Re:CoM's battle spawns play 69); then engaged |
+| engaged | `0x7E2` | the first time: above 80 % the combo, under 50 % the leap slash, else the forward leap and the leap slash; then forever: < 300 close, else far; a yield; (world 11: the leash `0x2764(1000, 1000)`, not ported); the search `0x1D2E(&wp30, 1, 5000, 3)` (Sora) |
+| close | `0x95A` | above 50 %: the back leap (206), then beyond 400: under 30 % the leap slash, above 50 % the sway (218), else the circling walk (0.5° a frame) and the forward leap; within 400: under 40 % the leap slash, above 80 % the sway, else the combo. Else: the combo and the back leap |
+| far | `0x910` | above 80 %: the forward leap and `0xD34` (beyond 250: above 50 % the leap slash, else the dance 212; within: the combo); else the circling walk (0.6° a frame) and the dance |
+| hit state | `0x664` | (`wp+0x58` = 1, attribute 8: the leap slash; not carried) beyond 400: under 80 % the leap slash, else the forward leap; within: above 70 % the leap slash, else a leap (above 50 % forward, else back) and beyond 300 the leap slash, else the combo. Then engaged |
+| hit handler | `0x24D2` | a clash (kinds 6 / 7): the hit state. The damage (`0x1E38` → `sys 44`, 0 = killed): killed → attribute 8 an EXP bonus (`sys 194`), **kind 3 → 4** (`0x222A`), the death `0x2644` (drops `0x5BC`, fade, EXP: Re:CoM's defeat here); alive (attribute 0) → the hit state; attribute 8: EXP bonus, `wp+0x50` = `wp+0x58` = 1, the hit state; attribute 10: the hit state; a repel record (`hp[0] & 0x20`, never: its rows don't repel): nothing |
+| combo | `0x146E` | on the ground; the start `0x1834`: `wp+0x40` / `+0x54` / `+0x48` = 0, body row `0xEC`, action 200 (blend 4, 201 queued); then by turns `0x16FC` (201, `wp+0x40` = 1) / `0x15C4` (202, `wp+0x40` = 0): `wp+0x4C` = 0, `wp+0x54` + 1, `wp+0x48` = 0, turning to Sora, body row `0x15C` and the two hands, the action (blend 0, the other swipe queued); a landed hand (callback `0x1D0C`: `wp+0x48` = 1) → `wp+0x54` = 4; Sora beyond 350 → `wp+0x4C` = 1; until `wp+0x4C` or 4 swipes (a yield between); then 203 after 201 / 204 after 202 (actions, the idle queued); `wp+0x4C`: the leap slash |
+| leap slash | `0x18CA` | on the ground; beyond 600 the far leap `0x1BAA` (205, lift at 22); Sora's way (3D, unit) and distance d; turning to him, action 207 (blend 0, 208 queued); 208 (bit 16) and movement state 3 (`sys 82`: way × d × 0.035 with height 500, drag 0.9, 30 frames; `sys 83(207)`: 209 at the top, 210 queued), facing him now each frame in the air; on landing facing him now, the hands `0x38C` / `0x3FC` / `0x46C` / `0x4DC` and body row `0x54C`, 216 (blend 0, a plain request) with the idle queued, for len − 2 − 8 = 86 frames (off the ground: the end) |
+| leaps | `0x1284(back, facing)` | on the ground; turning to Sora; 205 forward / 206 back (blend 4, 6 queued, root motion: 4.1 m / 3.8 m); from frame 20 movement state 7 with no velocity (`sys 169`); at the motion's end movement state 0 (`sys 88`), a yield, until on the ground (turning to Sora when `facing`) |
+| circling walk | `0xD96(rate)` | on the ground; [100, 200) frames; Sora's way turned −90° (60 %, the rate as given) or +90° (the rate negated); each frame the walk (1, blend 16), the way turned rate × step, the target yaw along it, the walk at 5 along it; after the yield: moved under 2.5 → the idle and the stuck hop `0x266C` (3 action, 4 bit 16, `sys 82`: facing × 20, height 400, 0.9, 50 frames); off the ground: the end; within 100 of Sora after 50 frames: the idle and the back leap; else at the end the idle |
+| dance / sway | `0x103C(dance)` | on the ground; 212 for 200 frames (`dance`) or 218 for 150 turning to Sora (blend 16); off the ground: the end; another motion playing: the idle, the end; within 200 after 80 frames: the idle and the back leap facing Sora; unless stopped the idle; **then the leap slash** |
+
+Rows (`0x70` bytes; Checked (files)):
+
+| Row | Bone code, t, radius; HIT slot | Type / priority / recoil | KH1 `+8` / power | Made with | Windows |
+|---|---|---|---|---|---|
+| `0xEC` | 8 (body), 50; 0 | **1 / 100 / 110**, cone cos −1 (all round) | 0 / 0 | 200 | [6, 40) |
+| `0x15C` | 8, 50; 2 | **2 / 20 / 217**, cos −1 | 0 / 0 | 201, 202 | [0, 70) |
+| `0x1CC` / `0x23C` | 29 / 28 (hands), line 0 → −5, 40; 0 / 1 | 0 / 20 / 217 | 3 / 4 | 201 | [20, 60) |
+| `0x2AC` / `0x31C` | the same | 0 / 20 / 217 | 3 / 4 | 202 | [20, 60) |
+| `0x38C` / `0x3FC` | 29 / 28, line 1 → −4, 30; 0 | 0 / 20 / 217 | 3 / 2 | 216 | [2, 10) |
+| `0x46C` / `0x4DC` | the same; 2 | 0 / 20 / 217 | 3 / 2 | 216 | [24, 34) |
+| `0x54C` | 8, 50; 1 | **2 / 20 / 217**, cos −1 | 0 / 0 | 216 | [2, 34) |
+
+What the body rows do (`0x1402B4A20` / `0x1402B4BC0` / `0x1402B4640`, the shared enemy guard's rules): Sora's swing (type 0,
+the Kingdom Key's 30) meets them from any side; against `0xEC` (100) Sora gets **kind 7, the strong recoil 0x6F**, the Wight
+Knight nothing; against `0x15C` / `0x54C` (20) **both get kind 6**: Sora's recoil 0x6E (no push: he is 10 over), the Wight
+Knight its recoil 217 and its hit state. A clashed swing hits nothing more: during the wind-up's [6, 40), the swipes and the
+leap slash's [2, 34) Sora's swings never damage it; magic (types 5 / 6) does.
+
+Reactions: F (72..75), a (78 / 79), A (80 / 81 = its 78 / 79), L (82..86, 87..101); no ground knock-back (a kind 4 launches);
+no run motion (request 2). Weight 1.0 in both records. Hurt parts: 5 (Re:CoM bones 39, 2, 3, 8, 17). Checked (files).
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyWightnight` (vtable `0x140553748`, 139 slots, RTTI `.?AVCEnemyWightnight@@` at −8), ctor `0x140194ED0` (`40 53 48 83 EC
+20`: `CHeartless`'s base ctor, then `+0xCC0 |= 1`, `+0x298` = 6, `+0x29C` = 7; its only reference the factory's call at
+`0x140189194`; no branch into the moved bytes, no pointer to them: exe scan), allocation `0x14018917B` `mov ecx, 0xCD0` →
+0xCF0. Its own states 1 (`0x140195040` / `0x140195410`, end the shared thunk `0x140195080`), 2 (`0x140194FA0` / `0x140195090`:
+its two-strike claw `e012_052`, then 10 % a jump `e012_003..007`), 3 (`0x140194FF0` / `0x140195320`: the wind-up `e012_053`
+turning to Sora, then `e012_054`); the attack states' ends are its own `ret`s (as `CBattleEnemy`'s `0x14017E6C0` /
+`0x14017E700`); 0 / 11 / 12 / 30 `CBattleEnemy`'s; think `0x140196EC0`. Our copy: states 0, 1, 2 (the leap slash), 3 (the
+swipes), 11, 12, 30, the think. `EN0012.ASD`: 6 records at `0xBC`, tail `0x47C` (id 0 on `e012_052`: each hand at [0, 16)
+and [20, 45), 0.4 m; id 1 on `e012_054`: each hand, the whole motion). `EN0012.SES`: `e012_004`, `e012_052`, `e012_054`.
+`EN0012.ANN`: 75 slots.
+
+**Power mapping** (decision M10, "the Re:CoM attack of the same kind"): the matcher pairs none of KH1's attacks. `e012_054` is
+KH1's swipe in Re:CoM's hands: its root goes 0.94 m forward by KH1 frame 42 and back to 0.90 m by 66, as KH1's 201 (0.94 m at
+42, 0.89 m at 68), after a wind-up as KH1's 200 (Checked (files): both roots read). So the swipes 201 / 202 → **id 1** (state
+3). The leap slash 216 (two strikes) → **id 0**, Re:CoM's two-strike claw (Assumption: by elimination; owner question 1).
+
+#### What the asset step writes
+
+`ENEMY/0012/EN0012.ANN` (Re:CoM's 75 slots byte-identical; KH1's clips at 100 + entry, 100..143; 5 and 6 play Re:CoM's exact
+bakes `e012_005` / `e012_006`), `EN0012.ASD` (Re:CoM's 6 records kept + 8: each swipe's two hands (id 1, a 1.48 m line, 0.40
+m, [20, 60)), the leap slash's two hands at its two strikes (id 0, 1.48 m line from 0.30 m, 0.30 m, [2, 10) and [24, 34))),
+`EN0012.SES` (Re:CoM's 3 entries kept; the swipes and the leap slash take their template's sounds at the hit window:
+Assumption), `kh1-wightknight.json` (`kh1-enemy 1`: 66 numbers read at their pushes and the run speed's stats default, 39 request words checked, 3 attacks
+(recoil 217), the 3 body rows, 5 parts). Test `wightknight::tests::builds_from_the_players_files`. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0012/EN0012.ANN, method: copy, source: [{name: ENEMY/0012/EN0012.ANN}]}
+- {name: ENEMY/0012/EN0012.ASD, method: copy, source: [{name: ENEMY/0012/EN0012.ASD}]}
+- {name: ENEMY/0012/EN0012.SES, method: copy, source: [{name: ENEMY/0012/EN0012.SES}]}
+- {name: kh1-wightknight.json, method: copy, source: [{name: kh1-wightknight.json}]}
+```
+
+The step prints `wightknight (M11): …`; the log shows `wightknight: KH1's wightknight (M11) …` at start, `battle N: Wight Knight …
+gets KH1's AI` in a Wight Knight battle, and `its guard row stopped Sora's swing` when a swing bounces.
+
+#### Checked / Assumption
+
+- **Checked (files):** every script number at its offset (the asset test reads the 66 from the player's script; names with
+  several pushes agree), 39 request words, the rows (types, priorities, cones, recoils, radii, slots), the hit windows, the
+  hurt parts, the clip lengths and root travel, Re:CoM's records, clips and sounds, `e012_054`'s root against KH1's 201.
+- **Checked (decomp):** the VM's ops; `sys 13` writes the request entry whatever plays (`0x14029F980`: an action asked while
+  its queued twin plays restarts it); `sys 169` / `sys 88` / `sys 82` / `sys 83` (the framework's); the guard rules
+  (`0x1402B4BC0`, `0x1402B4640`); Re:CoM's class's states and ctor.
+- **Checked (exe):** the class, its 139 slots, RTTI, the ctor and its only call, the factory size; every site (954, pefile, 0
+  mismatches, 2026-11-02).
+- **Assumptions:** the leap slash on id 0; `sys 163` ("drawn this frame") always true; attribute-8 / 10 hits never come (the
+  host passes no attribute; `wp+0x50` / `+0x58` paths not built); the leaps' height comes from Re:CoM playing the clip's root
+  (KH1's state 7 holds the body while the root lifts it); the apex motion a frame late (as the Powerwild); `sys 10`'s sign
+  (one rule for both turns of the circling walk); seeds per enemy; Re:CoM's sounds on KH1's clips; KH1's queue blends taken as
+  the host's; Wight Knights appear in Re:CoM's Halloween Town battles (Re:CoM's).
+- **Not ported:** the leash (world 11 only), the hanging appearance (spawn type 5), the death routine, the effects (9, 10: M13),
+  the appearance's flag 0x80; Sora's swings against its damaging hand rows (KH1 tests attack against attack: the owner's Large
+  Body question 3 (b), framework work to come; its body rows already bounce every swing during those attacks).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Halloween Town Wight Knight battle)
+
+1. Each Wight Knight plays KH1's appearance (69, about 2 s, turning to Sora), then comes at once (no wandering).
+2. Its first move: the combo, the leap slash, or a forward leap and the leap slash.
+3. Close (< 3 m): half the time a big back flip (206), then the leap slash, the sway (218) or the combo; otherwise the combo then
+   the back flip. Far: sometimes a forward flip (205), else it walks sideways around Sora for 2–3 s and dances (212) for 3 s;
+   after a dance or sway it always does the leap slash. The flips should carry it 4 m and leave the floor (KH1 lifts it
+   by the motion's root from frame 20).
+4. The combo: a wind-up (200, swings bounce hard off it), then up to four alternating long-armed swipes (201 / 202) stepping
+   forward, then a recovery (203 / 204). A swipe that hits Sora ends the combo; if Sora backs off past 3.5 m it ends and leap-slashes.
+5. The leap slash: a crouch, a 5 m high jump at Sora (covering about half the distance), facing him in the air, a two-strike
+   slash on landing (216). Beyond 6 m a forward flip comes first.
+6. Swing into it during a swipe or the leap slash's first half second: both recoil (Sora 0x6E, it 217), no damage, then it
+   counters. During the wind-up: Sora's strong recoil (0x6F). Magic lands. No "Guard" popup.
+7. Hit it at other times: KH1's flinch, then the hit state (a leap slash, a flip, or a flip and the combo).
+8. Guard its swipes or leap slash: KH1's recoil 217, then it counters.
+9. Circling it near a wall: when it is stuck it hops 4 m high (the stuck hop).
+10. Kill one: KH1's launch reaction (a killing flinch becomes a knock-back), Re:CoM's prizes and EXP.
+11. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Wight Knights.
+
+Please send `kh1-recom.log` (`wightknight:` lines) and an F9 trace.
+
+#### KH1 trace (what to record in KH1)
+
+Halloween Town (the square or the graveyard): stand far (10 m) 10 s; stand at 5 m 10 s; stand at 2 m 10 s; walk around one; one
+swing and a full combo between its attacks; swing into it during its wind-up, a swipe and the leap slash; Guard a swipe and the
+leap slash; kill one with a flinching hit. The trace's enemy rows give the flips' travel and height, the leap slash's arc and
+the combo's timing to compare.
+
+#### Wight Knight owner questions
+
+1. **The leap slash's power.** Re:CoM's Wight Knight has its two-strike claw (id 0, `e012_052`) and its lunge (id 1, `e012_054`,
+   the twin of KH1's swipe by its root). Built: the swipes on the lunge's power, the leap slash (two strikes on landing) on the
+   claw's. (a) Keep; (b) the leap slash on id 1 too; (c) another rule.
+2. **Hits of KH1 attribute 8 / 10.** Its hit handler gives an attribute-8 hit an EXP bonus and switches it to lower leaps (100
+   high, 50 frames) with no flips, and an attribute-10 hit only asks for its hit state; the host passes no hit attribute (every
+   port so far), so these never happen. (a) Leave them out (built); (b) research which KH1 hits carry attributes 8 / 10 first
+   (a framework change for every enemy, as the Darkball's Gravity question).
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -2462,7 +2604,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Search Ghost | `xa_ex_2230` (ex_2230.bd) | `CEnemySearchghost` 14 | `0x14054c408` | `0x1401923f0` / `0x1401891cf` 0xce0 | 1,2,3 | 203,204 | FKaA | — |
 | Pirate (built) | `xa_ex_2100` (ex_2100.bd) | `CEnemyPirate` 21 | `0x140546458` | `0x140190f30` / `0x1401892f5` 0xcd0 | 1,2,3 | 208,210,214,216,217,218,235,236 | FaLl | — |
 | Air Pirate (built) | `xa_ex_2210` (ex_2210.bd) | `CEnemyAirpirate` 22 | `0x1405309e8` | `0x14018a0b0` / `0x14018931f` 0xcd0 | 1,2,3, think `0x14018a190` | 200,212 | FKaA | — |
-| Wight Knight | `xa_ex_2200` (ex_2200.bd) | `CEnemyWightnight` 12 | `0x140553748` | `0x140194ed0` / `0x14018917b` 0xcd0 | 1,2,3 | 200,201,202,211,216 | FaALl | — |
+| Wight Knight (built) | `xa_ex_2200` (ex_2200.bd) | `CEnemyWightnight` 12 | `0x140553748` | `0x140194ed0` / `0x14018917b` 0xcd0 | 1,2,3 | 200,201,202,211,216 | FaALl | — |
 | Gargoyle | `xa_ex_2220` (ex_2220.bd) | `CEnemyGargoyle` 13 | `0x14053f198` | `0x14018e150` / `0x1401891a5` 0xcd0 | 1,2,3 | 203,212,218 | FKA | — |
 | Darkball (built) | `xa_ex_2280` (ex_2280.bd) | `CEnemyDarkball` 23 | `0x14053b7a8` | `0x14018d5d0` / `0x140189349` 0xcd0 | 1,2,3 | 200,202,204 | FKaA | — |
 | Defender | `xa_ex_2340` (ex_2340.bd) | `CEnemyDefender` 26 | `0x14053ca98` | `0x14018d8e0` / `0x1401893c7` 0xcd0 | 1,2,3 | 207,208,209 | FKa | — |
@@ -2487,7 +2629,7 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
 
 1. **Ground melee** (the Soldier's shape: walk / run, hit tracks, kicks and lunges; the framework as built):
    Large Body (built: § The Large Body), Powerwild, Bandit,
-   Pirate, Wight Knight, Neoshadow (built: `Appear::Base`, KH1 has no appearance for it; its sinks reuse the Shadow's machinery), Spade / Heart Soldier (Re:CoM overrides their states 0 and 30: check their
+   Pirate, Wight Knight (built: § The Wight Knight), Neoshadow (built: `Appear::Base`, KH1 has no appearance for it; its sinks reuse the Shadow's machinery), Spade / Heart Soldier (Re:CoM overrides their states 0 and 30: check their
    own appearance and defeat before choosing `Appear::Base`).
 2. **Flying / hovering** (no walk on the floor; glide mode 2 of `sys 40`, height holding; `sys 125` sets the
    turn rate): Air Soldier (own Re:CoM think), Air Pirate (own Re:CoM think), Search Ghost, Gargoyle (no walk /
