@@ -717,7 +717,7 @@ impl Menu {
         // Owner (2026-11-02): Cloud first, then the others in learn order.
         let learned_summons: Vec<usize> = w.summons[..n].iter().map(|&i| i as usize).filter(|&i| i < crate::summons::COUNT).collect();
         let list = crate::summons::list_order(&learned_summons);
-        let gate = crate::summons::Gate { battle: w.battle, ground: flags & 0x80 != 0, mp: w.mp.map_or(0, |m| m.0), out: w.summon_out };
+        let gate = crate::summons::Gate { battle: w.battle, ground: flags & 0x80 != 0, air: flags & 0x20 != 0 && flags & 0x80 == 0, mp: w.mp.map_or(0, |m| m.0), out: w.summon_out };
         let mut sgrey = !0u32;
         for (k, &i) in list.iter().enumerate() {
             if crate::summons::usable(&gate, i) {
@@ -2458,6 +2458,43 @@ mod tests {
         m.show();
         let sc = m.scene();
         assert_eq!((sc.rows[3].name, sc.rows[3].bright), (crate::sleights::ROW_WORD, BRIGHT_GREY as u8), "set by its grey bit, as Summon's");
+    }
+
+    /// Owner (2026-11-03, "Sleights menu follow-ups"): in the air only Re:CoM's air-start sleights
+    /// (`crate::sleights::AIR_START`) are usable; KH1's air states that take a command (take-off 1,
+    /// air 2, flight 8), not one that doesn't (a reaction, state 4).
+    #[test]
+    fn sleights_list_in_the_air_offers_recoms_air_start_ones() {
+        use crate::abilities::sleight as s;
+        let mut sleights = [0u8; crate::sleights::MAX];
+        // Fire Raid (ground only), Warp, Teleport (air start).
+        sleights[..3].copy_from_slice(&[s::FIRE_RAID as u8, 0x2C, 0x32]);
+        let w = World { sleights, sleight_count: 3, ..sleight_world() };
+        let mut m = Menu::new();
+        m.build(&w);
+        assert_eq!(m.sleight.grey & 7, 0, "on the ground: all three");
+        for state in [1, 2, 8] {
+            m.build(&World { state, ..w });
+            assert_eq!((m.sleight.grey & 7, m.sleight.lock & 7), (0b001, 0b001), "state {state}: Fire Raid greyed, Warp / Teleport usable");
+            assert!(!m.sleight_grey && !m.sleight_lock);
+        }
+        m.build(&World { state: 4, ..w });
+        assert_eq!(m.sleight.grey & 7, 0b111, "a KH1 state that takes no command");
+        // Issued mid-air through KH1's gate.
+        let wa = World { state: 2, ..w };
+        let mut m = Menu::new();
+        m.step(&wa, press(|p| p.up = true));
+        m.step(&wa, press(|p| p.confirm = true));
+        assert!(m.open && m.sub == Kind::Sleight);
+        m.sleight.cursor = 1;
+        let o = m.step(&wa, press(|p| p.confirm = true));
+        assert_eq!(o.sleight, Some(0x2C));
+        // Fire Raid in the air: the error sound.
+        m.step(&wa, press(|p| p.up = true));
+        m.step(&wa, press(|p| p.confirm = true));
+        m.sleight.cursor = 0;
+        let o = m.step(&wa, press(|p| p.confirm = true));
+        assert_eq!((o.sounds, o.sleight), (vec![Sound::Error], None));
     }
 
     #[test]
