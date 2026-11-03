@@ -41,6 +41,7 @@ pub mod airpirate;
 pub mod wyvern;
 pub mod searchghost;
 pub mod wightknight;
+pub mod fatbandit;
 
 pub use arc::Arc;
 pub use combat::{blade_params, resolve_hits, Blade, CombatParams, HitReport};

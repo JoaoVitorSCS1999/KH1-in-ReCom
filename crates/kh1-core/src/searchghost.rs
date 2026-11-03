@@ -1304,7 +1304,7 @@ impl Behaviour for Ai {
         for (i, p) in prizes.iter_mut().enumerate() {
             *p = n(&format!("reward_prize_{i}")).clamp(0.0, 255.0) as u8;
         }
-        vec![ECmd::Reward(crate::enemy::Reward { exp_div: n("reward_exp_div") as i32, exp_add: n("reward_exp_add") as i32, prizes })]
+        vec![ECmd::Reward(crate::enemy::Reward { exp_div: n("reward_exp_div") as i32, exp_add: n("reward_exp_add") as i32, exp_min: 0, prizes })]
     }
     /// The drain's rows' callback (`0x1794`): once per drain, the drained target and its orb (`wp+0x58` = 1).
     /// KH1 refuses a target that is reacting (`sys 71`), has flag 0x80 or isn't `sys 170`'s 1: taken as
@@ -1673,7 +1673,7 @@ mod tests {
     /// The reward the player's script gives (`0x28A6`: `sys 194(EXP / 10 + 1)`, the drop table `0x580`: 3
     /// prizes of KH1 kind 4).
     fn the_reward() -> ECmd<u8> {
-        ECmd::Reward(crate::enemy::Reward { exp_div: 10, exp_add: 1, prizes: [0, 0, 0, 0, 3, 0, 0] })
+        ECmd::Reward(crate::enemy::Reward { exp_div: 10, exp_add: 1, exp_min: 0, prizes: [0, 0, 0, 0, 3, 0, 0] })
     }
 
     /// A hit while it holds the drain: the hold ends, KH1's reward comes in the handler itself (`take_now`,
@@ -1698,7 +1698,7 @@ mod tests {
         s.ai.on_hit(HitNews::Damage);
         assert!(s.ai.take_now().is_empty());
         // KH1's numbers: the LV1 record's EXP 10 → 2, LV2's 120 → 13.
-        let r = crate::enemy::Reward { exp_div: 10, exp_add: 1, prizes: [0; 7] };
+        let r = crate::enemy::Reward { exp_div: 10, exp_add: 1, exp_min: 0, prizes: [0; 7] };
         assert_eq!((r.exp_bonus(10), r.exp_bonus(120), r.exp_bonus(9), r.exp_bonus(0)), (2, 13, 1, 1));
     }
 

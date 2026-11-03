@@ -90,6 +90,12 @@ pub enum Cmd<A> {
     /// KH1's stats-block write `+0x3C = +0x40` (HP = max HP; the Search Ghost's `0x2ADE`, M11): the
     /// host restores the enemy's own HP to its max (Re:CoM's HP, decision M10).
     HealFull,
+    /// `sys 13` (`0x1402B9F80` → `0x14029F980`) of the request already playing: KH1 writes the request entry
+    /// whatever plays (`+0x5E` = 1, the start time `+0x61`), so the motion starts again from `start` KH1
+    /// frames (Checked (decomp)); [`Cmd::Motion`] / [`Cmd::MotionAt`] leave a playing request alone (`sys 12`'s
+    /// rule, `0x14029F7C0`). M11, the Fat Bandit's fireballs (`ex_2060.bd` `0x16FC` / `0x166A`: 201 again while
+    /// 201 plays).
+    Restart { request: u16, blend: f32, start: f32 },
     /// KH1's `sys 194` (`0x1402BC9A0`: an EXP bonus for the party) and `sys 122` with a prize table
     /// (`0x1402ABC40`) from a script handler (M11, the Search Ghost's hit during its drain's hold).
     /// The host carries it out on the enemy's own EXP and prizes ([`Reward`]).
@@ -105,6 +111,9 @@ pub enum Cmd<A> {
 pub struct Reward {
     pub exp_div: i32,
     pub exp_add: i32,
+    /// The bonus is at least this (the Fat Bandit's stagger `0x6B8..0x746`: `sys 195(point, 1)` when
+    /// `EXP / 5 − 1 < 0`, else `EXP / 5`; 0 for a script with no floor). M11.
+    pub exp_min: i32,
     pub prizes: [u8; 7],
 }
 
@@ -112,9 +121,9 @@ impl Reward {
     /// KH1's bonus on an enemy EXP `exp` (`sys 194`'s argument). A zero divisor gives the addend.
     pub fn exp_bonus(&self, exp: i32) -> i32 {
         if self.exp_div == 0 {
-            return self.exp_add;
+            return self.exp_add.max(self.exp_min);
         }
-        exp / self.exp_div + self.exp_add
+        (exp / self.exp_div + self.exp_add).max(self.exp_min)
     }
 }
 
@@ -142,6 +151,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::Throw(n) => Cmd::Throw(n),
             Cmd::Note(n) => Cmd::Note(n),
             Cmd::HealFull => Cmd::HealFull,
+            Cmd::Restart { request, blend, start } => Cmd::Restart { request, blend, start },
             Cmd::Reward(r) => Cmd::Reward(r),
         }
     }

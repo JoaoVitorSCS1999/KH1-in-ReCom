@@ -125,7 +125,7 @@ pub(super) const HOMING_THUNK: u32 = 0x0015_60B8;
 /// handler (`0x140154EB0`) then records it on all the enemy's bodies and takes one hit body per
 /// run. So with one serial, a cast hits an enemy once, as KH1's shared hit bit. Checked (decomp
 /// + exe).
-const SHOT_SERIAL: u32 = 0x0015_6770;
+pub(super) const SHOT_SERIAL: u32 = 0x0015_6770;
 /// Re:CoM's Blizzard side-shard effect sets (`0x1405A1790` = the row's set + 1). Checked (decomp
 /// `0x140222170` case `0x23`).
 const EFFECT_SETS_NEXT: u64 = 0x1_405A_1790;
@@ -187,7 +187,7 @@ pub(super) type FactoryFn = unsafe extern "win64" fn() -> usize;
 pub(super) type ManagerFn = unsafe extern "win64" fn(usize, *const u8, usize) -> usize;
 pub(super) type MoverFn = unsafe extern "win64" fn(usize, f32, f32, i32, i32);
 type GroundFn = unsafe extern "win64" fn(usize) -> u32;
-type SerialFn = unsafe extern "win64" fn(usize) -> u32;
+pub(super) type SerialFn = unsafe extern "win64" fn(usize) -> u32;
 
 /// The shot descriptor (`0x140156790` fills 0xE0 bytes; the bullet init reads up to `+0xD8`).
 #[repr(C, align(16))]
@@ -500,7 +500,7 @@ const AERO_FLAGS: u64 = 7;
 /// `0x14016F7D0(attack)`: Re:CoM's new hit serial for an attack (its multi-hit attacks call it to
 /// hit again; the apply's hit-once ring `0x14016F960` then lets the attack through once more).
 /// Checked (decomp; 78 call sites).
-const NEW_SERIAL: u32 = 0x0016_F7D0;
+pub(super) const NEW_SERIAL: u32 = 0x0016_F7D0;
 /// `0x1401A49B0(actor)`: its position (the Aero case's point). Checked (decomp).
 const ACTOR_POSITION: u32 = 0x001A_49B0;
 

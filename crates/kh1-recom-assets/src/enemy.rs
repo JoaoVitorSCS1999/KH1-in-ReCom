@@ -609,6 +609,8 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own, &loops)?;
     consts.extend(bone_points(spec.name, &inp.mdls, &ms, &conv, &clips)?);
     consts.extend(child_consts(spec.name, &inp.mdls)?);
+    consts.extend(t_points(spec.name, &inp.mdls, &ms, &conv, &clips, &consts)?);
+    consts.extend(shot_consts(spec.name, script)?);
     consts.extend(sight_bones(spec.name, &inp.mdls, &conv)?);
     consts.extend(reward_consts(spec.name, script)?);
     // The attack rows → ASD records.
@@ -929,6 +931,9 @@ pub const GUARDS: &[GuardSpec] = &[
     GuardSpec { enemy: "wightknight", name: "windup", row: 0xEC, also: &[], requests: &[200] },
     GuardSpec { enemy: "wightknight", name: "swipe", row: 0x15C, also: &[], requests: &[201, 202] },
     GuardSpec { enemy: "wightknight", name: "leap", row: 0x54C, also: &[], requests: &[216] },
+    // The Fat Bandit's `ex_2060.bd` makes `0xEC` (type 1, priority 100, 70° front) with `sys 213(row, 3)` at its init
+    // (`0x254E`), after the breath (`0x1444`) and in its hit handler (`0x2ED6`); `0x13DC` removes it for the breath.
+    GuardSpec { enemy: "fatbandit", name: "front", row: 0xEC, also: &[], requests: &[] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).
@@ -1250,6 +1255,9 @@ pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usiz
     ("searchghost", 0, b"ex_2230_00.bd", crate::searchghost::CHILD_CONSTS, crate::searchghost::CHILD_REQUESTS),
     // The Large Body's stomp ring `ex_2050_00.bd` (`crate::largebody`, [`RINGS`]).
     ("largebody", 0, b"ex_2050_00.bd", crate::largebody::CHILD_CONSTS, crate::largebody::CHILD_REQUESTS),
+    // The Fat Bandit's fireball `ex_2060_00.bd` and flame `ex_2060_01.bd` (`crate::fatbandit`, [`T_POINTS`]).
+    ("fatbandit", 0, b"ex_2060_00.bd", crate::fatbandit::FIRE_CONSTS, crate::fatbandit::FIRE_REQUESTS),
+    ("fatbandit", 1, b"ex_2060_01.bd", crate::fatbandit::FLAME_CONSTS, crate::fatbandit::FLAME_REQUESTS),
 ];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
@@ -1258,6 +1266,98 @@ fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
         let s = child_script(mdls, idx)?;
         out.extend(script_consts(s, script, table)?);
         check_requests(s, script, requests)?;
+    }
+    Ok(out)
+}
+
+/// Where a [`T_POINTS`] point's t comes from: a constant already read (a child's push), or a number of KH1's exe.
+#[derive(Clone, Copy, Debug)]
+pub enum TFrom {
+    Const(&'static str),
+    Value(f32),
+}
+
+/// Points on a KH1 bone code's line the host reads each time it needs them (M11, the Fat Bandit): (enemy, name, KH1
+/// bone code, t). KH1's `sys 19(actor, code, t)` (`0x14029EB20` → `0x1401D6320`: the code's bone's parent's world
+/// place, then the lerp `0x1400E64D0` toward the bone by t; Checked (decomp)). The point is constant in the frame of
+/// the bone's parent (the bone's local translation scaled by t), so it is written as `<name>_bone` (the Re:CoM bone
+/// the converter maps to that KH1 parent: the same, not an ancestor; refused otherwise) and `<name>_x / _y / _z` (the
+/// point in that bone's frame, metres, as the step's `.ASD` records hold theirs). The step checks it is the same in two
+/// poses. The Fat Bandit's fireball start (`ex_2060_00.bd` `0x610`: code 4 at `fire_t`), the head's point its aim
+/// starts from (`0x1402A2980`: `sys 19(actor, 0, 0.5)`, KH1's exe), the flame's ends (`ex_2060_01.bd` `0x2EC` /
+/// `0x318`: code 0 at `flame_t0` / `flame_t1`).
+pub const T_POINTS: &[(&str, &str, usize, TFrom)] = &[
+    ("fatbandit", "fire_at", 4, TFrom::Const("fire_t")),
+    ("fatbandit", "eye", 0, TFrom::Value(0.5)),
+    ("fatbandit", "flame0", 0, TFrom::Const("flame_t0")),
+    ("fatbandit", "flame1", 0, TFrom::Const("flame_t1")),
+];
+
+fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[RequestClip], consts: &[(String, f32)]) -> Result<Vec<(String, f32)>> {
+    let mut out = Vec::new();
+    for &(_, point, code, from) in T_POINTS.iter().filter(|p| p.0 == name) {
+        let t = match from {
+            TFrom::Value(v) => v,
+            TFrom::Const(c) => consts.iter().find(|x| x.0 == c).map(|x| x.1).ok_or_else(|| crate::Error::Format(format!("{name}: {point}'s t {c} not read")))?,
+        };
+        let codes = bone_codes(mdls)?;
+        let k = *codes.get(code).filter(|b| **b >= 0).ok_or_else(|| crate::Error::Format(format!("{name}: bone code {code} names no bone")))? as usize;
+        let rig = conv.rig();
+        let parent = rig.parent(k).ok_or_else(|| crate::Error::Format(format!("{name}: KH1 bone {k} has no parent")))?;
+        let hand = conv.map().iter().position(|m| *m == Some(parent)).ok_or_else(|| crate::Error::Format(format!("{name}: {point}: KH1 bone {parent} (code {code}'s parent) has no Re:CoM bone")))?;
+        // Two poses: the idle's first frame and another motion's middle; the point must agree (its parent's frame).
+        let mut at = Vec::new();
+        for (req, frame) in [(0u16, 0.0f32), (clips.iter().map(|c| c.request).filter(|&r| r >= 200).max().unwrap_or(0), 0.5)] {
+            let c = clips.iter().find(|c| c.request == req).ok_or_else(|| crate::Error::Format(format!("{name}: request {req} has no clip")))?;
+            let m = &ms.motions[c.entry];
+            let mut rig = conv.rig();
+            rig.start_motion(m);
+            at.push(conv.kh1_point_in(&mut rig, m, frame * m.frames as f32, hand, k, t as f64));
+        }
+        if (0..3).any(|i| (at[0][i] - at[1][i]).abs() > 1e-3 || !at[0][i].is_finite()) {
+            return bad(format!("{name}: {point} moves in its parent's frame ({:?} / {:?})", at[0], at[1]));
+        }
+        out.push((format!("{point}_bone"), hand as f32));
+        for (axis, v) in ["x", "y", "z"].iter().zip(at[0]) {
+            out.push((format!("{point}_{axis}"), v as f32));
+        }
+    }
+    Ok(out)
+}
+
+/// A child object flying from its parent as one of Re:CoM's bullets (M11, the Fat Bandit's fireball): (enemy, the
+/// constants' prefix, the parent's rows the script passes (`sys 94`), the Re:CoM attack id and kind its power is asked
+/// with). The row (a free-standing row: bone −1) gives `<prefix>_radius` (`+0x5C`, `0x1402B2DC0` takes it as it is);
+/// every row listed must be the same apart from its place. The Fat Bandit's `0x16FC` passes `0x1CC`, its volley `0x23C`
+/// (Checked (files): the two rows' bytes equal); Re:CoM's own fireball takes its power with
+/// `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018DF20`; Checked (decomp)).
+pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1)];
+
+fn shot_consts(name: &str, script: &[u8]) -> Result<Vec<(String, f32)>> {
+    let mut out = Vec::new();
+    for &(_, prefix, rows, id, kind) in SHOTS.iter().filter(|s| s.0 == name) {
+        let row = |at: usize| -> Result<&[u8]> {
+            let r = script.get(at..at + 0x70).ok_or_else(|| crate::Error::Format(format!("{name}: no row {at:#x}")))?;
+            if !crate::stats::pushes_address(script, at as u32) || i32::from_le_bytes(r[0x10..0x14].try_into().unwrap()) != -1 {
+                return bad(format!("{name}: row {at:#x} is not a shot's (pushed, bone −1)"));
+            }
+            Ok(r)
+        };
+        let first = row(rows[0])?;
+        for &at in &rows[1..] {
+            let r = row(at)?;
+            // The rows' last word is their own serial; the rest must agree.
+            if r[..0x6C] != first[..0x6C] {
+                return bad(format!("{name}: rows {:#x} and {at:#x} differ", rows[0]));
+            }
+        }
+        let radius = f32::from_le_bytes(first[0x5C..0x60].try_into().unwrap());
+        if !(radius > 0.0 && radius < 1000.0) {
+            return bad(format!("{name}: shot radius {radius}"));
+        }
+        out.push((format!("{prefix}_radius"), radius));
+        out.push((format!("{prefix}_recom_id"), id as f32));
+        out.push((format!("{prefix}_kind"), kind as f32));
     }
     Ok(out)
 }
@@ -1306,7 +1406,7 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC];
 
 #[cfg(test)]
 mod clash_tests {

@@ -32,6 +32,16 @@
 //!   bullet's attack off (Re:CoM's own off), Re:CoM's guard spark at the contact, the slide on our
 //!   flight step, then Re:CoM's end.
 //!
+//! - **The Fat Bandit's fireball** (M11, `ex_2060_00.bd`; owner 2026-11-02: "Re:CoM bullets moved by KH1's numbers ...
+//!   drawn with a Re:CoM effect (its own fireball's)"): the same bullet and exe ([`Kind::Fire`]), made where KH1's child
+//!   starts (bone code 4 at t 2.5: the manifest's `fire_at` point on Re:CoM's `neck`), along the head's direction to
+//!   Sora's aim point (`kh1_core::fatbandit::fire_dir` from the `eye` point), flying straight at 45 a frame (no turn)
+//!   for 240 frames; its power Re:CoM's own fireball's (`0x14017F0E0(enemy, 1, 1, 0)`, `0x14018DF20`), its look Re:CoM's
+//!   own fireball's effect sets (`0x14053E290` / `0x14053E300`). Sora's Guard turns it back (decision 28); **his swing
+//!   bats it** (KH1: its row `0x1CC` has priority 0, a projectile's clash turns it to the swinger, `0x40` → `0x1B8` aims it
+//!   at the swinger's target, else at its thrower, and flies it its whole life again): Guard's turn-back
+//!   (`super::guard::send_back`: it then hurts enemies), aimed at Sora's target or the Fat Bandit, straight again.
+//!
 //! Runs once a frame per flying blade (at most [`MAX`]); nothing otherwise.
 
 use super::magic::{rt, Desc, DescInitFn, FactoryFn, ManagerFn, MoverFn, PlFn, DESC_INIT, FACTORY, HOMING_THUNK, SHOT_MANAGER, SHOT_MOVER};
@@ -65,6 +75,10 @@ pub const BLADE_EFFECT_SET: u64 = 0x1_405A_2030;
 /// `0x8000` (our exe writes the velocity; the angles are only its look). Checked (decomp `0x140156E20`,
 /// `0x1401569B0`).
 const FLAGS: u64 = 0x100 | 4;
+/// The Fat Bandit's own fireball's effect sets (its state 3 `0x14018DF20`: descriptor `+0xA8` and `+0xB8`; slot 1 of
+/// the first names `"_ex_2060"` (`sites::FATBANDIT_FIRE_PTRS`)). Checked (decomp + exe).
+pub const FIRE_EFFECT_SET: u64 = 0x1_4053_E290;
+pub const FIRE_EFFECT_PLACES: u64 = 0x1_4053_E300;
 /// The range from its spawn (m; KH1's life ends it), the homing gate (m) after a turn-back.
 const RANGE: f32 = 255.0;
 const GATE: f32 = 255.0;
@@ -78,7 +92,19 @@ type AttrFn = unsafe extern "win64" fn(usize, i32) -> u32;
 type KindFn = unsafe extern "win64" fn(*const u8) -> u32;
 type BoneFn = unsafe extern "win64" fn(usize, i32) -> usize;
 
+/// Which child flies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    /// The Bandit's scimitar (`blade_*`).
+    Blade,
+    /// The Fat Bandit's fireball (`fire_*`).
+    Fire,
+}
+
 struct Blade {
+    kind: Kind,
+    /// A fireball Sora's swing sent back: KH1's straight flight at its new aim (no Re:CoM homing).
+    batted: bool,
     id: u32,
     /// The thrower's id (Re:CoM's `+0x20`, the bullet's `+0x238`).
     shooter: u32,
@@ -118,11 +144,21 @@ unsafe fn sora_target() -> Option<Vec3> {
     Some(crate::units::to_kh1(Vec3::new(p[0], p[1], p[2])))
 }
 
-/// `sys 94`: enemy `en` (class manifest `m`, KH1 facing `yaw`) throws its object `n`. The bullet's id.
+/// `sys 94`: enemy `en` (class manifest `m`, KH1 facing `yaw`) makes its child `n`: the Bandit's blade (0), the Fat
+/// Bandit's fireball (0) or flame (1, `super::kh1_flame`). The bullet's id.
 pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32) -> Option<u32> {
-    if n != 0 {
-        line(|| format!("{class}: no thrown object {n}"));
-        return None;
+    let has = |k: &str| m.consts.get(k).is_finite();
+    match n {
+        0 if has("fire_life") => return fire(en, class, m, yaw),
+        1 if has("flame_life") => {
+            super::kh1_flame::start(en, class, m);
+            return None;
+        }
+        0 if has("blade_life") => {}
+        _ => {
+            line(|| format!("{class}: no thrown object {n}"));
+            return None;
+        }
     }
     let c = |k: &str| m.consts.get(k);
     let bone = func::<BoneFn>(f::BONE)(en, c("blade_bone") as i32);
@@ -193,11 +229,109 @@ pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32
         if g.len() >= MAX {
             g.remove(0);
         }
-        g.push(Blade { id: bid, shooter, flight, turned: false });
+        g.push(Blade { kind: Kind::Blade, batted: false, id: bid, shooter, flight, turned: false });
         FLYING.store(true, Ordering::Relaxed);
     }
     wr(bullet + rt::STATE_EXE, blade_exe as *const () as usize);
     line(|| format!("{class} e{shooter}: throws its blade: shot {bid} at ({:.2},{:.2},{:.2}) yaw {yaw:.2}, AP {ap} kind {kind_out} attribute {attr} (Re:CoM attack id {id}), radius {:.2} m, life {} frames", at.x, at.y, at.z, c("blade_radius") * 0.01, flight.n.life));
+    Some(bid)
+}
+
+/// A Re:CoM bone's world point from an offset in its frame (metres), as Re:CoM places its own attack records
+/// (`0x14014D740` → `0x1402B4A30(out, bone+0xA0, offset)`: x·row0 + y·row1 + z·row2 + row3, `0x1402ECEB0`; Checked
+/// (decomp)).
+unsafe fn bone_point(en: usize, bone: i32, off: [f32; 3]) -> Option<Vec3> {
+    let b = func::<BoneFn>(f::BONE)(en, bone);
+    if b == 0 {
+        return None;
+    }
+    let r = |i: usize| rd_vec(b + 0xA0 + 0x10 * i);
+    Some(r(0) * off[0] + r(1) * off[1] + r(2) * off[2] + r(3))
+}
+
+/// The manifest's bone point `p` (`<p>_bone`, `<p>_x / _y / _z`; the asset step's `T_POINTS`) on enemy `en`, Re:CoM
+/// metres.
+pub(super) unsafe fn manifest_point(en: usize, m: &Manifest, p: &str) -> Option<Vec3> {
+    let c = |k: &str| m.consts.get(&format!("{p}_{k}"));
+    bone_point(en, c("bone") as i32, [c("x"), c("y"), c("z")])
+}
+
+/// The Fat Bandit's fireball (`ex_2060_00.bd`, module doc): a `CHomingBullet` as the blade, at the `fire_at` point,
+/// aimed by KH1's head direction from the `eye` point at Sora's aim point, flying KH1's straight 45 a frame for 240
+/// frames; Re:CoM's own fireball's power (id 1, kind 1, `0x14018DF20`) and look; KH1's radius (the row's 30).
+unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32) -> Option<u32> {
+    let c = |k: &str| m.consts.get(k);
+    let (Some(at), Some(eye)) = (manifest_point(en, m, "fire_at"), manifest_point(en, m, "eye")) else {
+        line(|| format!("{class}: no bone for the fireball's points ({} / {})", c("fire_at_bone"), c("eye_bone")));
+        return None;
+    };
+    let target = sora_target();
+    let dir = kh1_core::fatbandit::fire_dir(yaw, crate::units::to_kh1(eye), target, c("look_cone_out"), c("look_up"), c("look_down"), c("look_left"), c("look_right"));
+    let n = Numbers { life: c("fire_life"), turn_back: c("fire_life"), speed: c("fire_speed"), accel: 0.0, turn_deg: c("fire_turn"), slide: 0.0, slide_drag: 0.0 };
+    let flight = Thrown::aimed(crate::units::to_kh1(at), dir, n);
+    let id = c("fire_recom_id") as i32;
+    // Re:CoM's own fireball's power: `0x14017F0E0(enemy, 1, 1, 0)` (no kind out, flag 0), `0x14017F050(enemy, 1)`.
+    let ap = func::<ApFn>(f::ATTACK_AP)(en, id, c("fire_kind") as i32, 0, std::ptr::null_mut(), 0) as i32;
+    let attr = func::<AttrFn>(f::ATTACK_ATTR)(en, id);
+    let mut d = Desc([0; 0x100]);
+    let dp = d.0.as_mut_ptr();
+    func::<DescInitFn>(DESC_INIT)(dp, 2, 3);
+    let w = |o: usize| dp.add(o);
+    std::ptr::write_unaligned(w(0x6C) as *mut u32, attr);
+    std::ptr::write_unaligned(w(0x70) as *mut i32, ap);
+    std::ptr::write_unaligned(w(0x60) as *mut u64, FLAGS);
+    std::ptr::write_unaligned(w(0x30) as *mut f32, flight.speed * crate::units::METRES_PER_UNIT);
+    let life = crate::units::frames_to_units(flight.n.life);
+    std::ptr::write_unaligned(w(0x38) as *mut i32, life);
+    std::ptr::write_unaligned(w(0x3C) as *mut i32, life);
+    std::ptr::write_unaligned(w(0x34) as *mut f32, RANGE);
+    std::ptr::write_unaligned(w(0x44) as *mut i32, 0);
+    std::ptr::write_unaligned(w(0x48) as *mut f32, GATE);
+    std::ptr::write_unaligned(w(0x4C) as *mut f32, 0.0);
+    std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], [at.x, at.y, at.z, 0.5]);
+    let v = crate::units::to_recom(flight.dir);
+    let (pitch, ryaw) = crate::guard::aim_angles([v.x, v.y, v.z]).unwrap_or((0.0, crate::units::yaw_to_recom(yaw)));
+    std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [pitch, ryaw, 0.0, 0.0]);
+    if crate::sites::FATBANDIT_FIRE_PTRS.iter().all(|p| rd::<usize>(base() + p.rva as usize) == base() + p.target as usize) {
+        std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), FIRE_EFFECT_SET));
+        std::ptr::write_unaligned(w(0xB8) as *mut usize, va(base(), FIRE_EFFECT_PLACES));
+    } else {
+        line(|| format!("{class}: the Fat Bandit's fireball effect set is not where 0x14053E290 was: the fireball has no look"));
+    }
+    std::ptr::write_unaligned(w(0x78) as *mut f32, c("fire_radius") * crate::units::METRES_PER_UNIT);
+    std::ptr::write_unaligned(w(0x94) as *mut i32, FADE);
+    let factory = func::<FactoryFn>(FACTORY)();
+    if factory == 0 {
+        line(|| format!("{class}: no entity factory: no fireball"));
+        return None;
+    }
+    let bullet = func::<ManagerFn>(SHOT_MANAGER)(factory, dp, en);
+    if bullet == 0 {
+        line(|| format!("{class}: Re:CoM's shot manager made no fireball"));
+        return None;
+    }
+    func::<MoverFn>(SHOT_MOVER)(bullet, 0.1, 0.0, 0, -1);
+    let bid: u32 = rd(bullet + 0x20);
+    let b = base();
+    let vt: usize = rd(bullet);
+    let exe: usize = rd(bullet + rt::STATE_EXE);
+    let adj: i32 = rd(bullet + rt::STATE_EXE_ADJUST);
+    if vt != va(b, gb::HOMING_VTABLE) || exe != b + HOMING_THUNK as usize || adj != 0 {
+        line(|| format!("{class}: fireball {bid} is not a plain CHomingBullet in flight (vt {vt:#x}, exe {exe:#x}): Re:CoM's straight flight"));
+        return Some(bid);
+    }
+    let shooter: u32 = rd(en + 0x20);
+    if let Ok(mut g) = BLADES.lock() {
+        g.retain(|b| b.id != bid);
+        if g.len() >= MAX {
+            g.remove(0);
+        }
+        g.push(Blade { kind: Kind::Fire, batted: false, id: bid, shooter, flight, turned: false });
+        FLYING.store(true, Ordering::Relaxed);
+    }
+    wr(bullet + rt::STATE_EXE, blade_exe as *const () as usize);
+    let dd = flight.dir;
+    line(|| format!("{class} e{shooter}: fireball {bid} from ({:.2},{:.2},{:.2}) along ({:.3},{:.3},{:.3}) (KH1's head aim at {:?}), {} a frame for {} frames, AP {ap} attribute {attr} (Re:CoM's fireball, id {id}), radius {:.2} m", at.x, at.y, at.z, dd.x, dd.y, dd.z, target.map(|t| (t.x as i32, t.y as i32, t.z as i32)), flight.n.speed, flight.n.life, c("fire_radius") * 0.01));
     Some(bid)
 }
 
@@ -221,7 +355,22 @@ pub unsafe extern "win64" fn blade_exe(bullet: usize) {
         let mut end = false;
         if let Ok(mut g) = BLADES.lock() {
             if let Some(b) = g.iter_mut().find(|b| b.id == id) {
-                if turned {
+                // A fireball flies straight (turn 0: no target); a batted one too, on the enemies' side.
+                let target = if b.kind == Kind::Fire { None } else { target };
+                if b.batted {
+                    if step > 0.0 {
+                        b.flight.pos = crate::units::to_kh1(rd_vec(mover + rt::POSITION));
+                        let d = b.flight.step(None, step);
+                        let v = crate::units::to_recom(d * (1.0 / step));
+                        wr(mover + gb::VELOCITY, [v.x, v.y, v.z, 0.0f32]);
+                        if let Some((p, y)) = crate::guard::aim_angles([v.x, v.y, v.z]) {
+                            wr(mover + gb::PITCH, p);
+                            wr(mover + gb::YAW, y);
+                        }
+                        wr(bullet + gb::HOMING_TARGET, 0i32);
+                        end = b.flight.ended();
+                    }
+                } else if turned {
                     if !b.turned {
                         b.turned = true;
                         wr(bullet + gb::HOMING_TARGET, b.shooter as i32);
@@ -258,6 +407,24 @@ pub unsafe extern "win64" fn blade_exe(bullet: usize) {
     func::<PlFn>(HOMING_THUNK)(bullet)
 }
 
+/// Sora's target (Re:CoM's attack target `player+0x84C`) while it is an enemy with HP: its aim point, KH1 units.
+unsafe fn sora_target_enemy() -> Option<Vec3> {
+    let pl: usize = rd(va(base(), crate::sites::data::MAIN_PLAYER));
+    if pl == 0 {
+        return None;
+    }
+    let h: u32 = rd(pl + 0x84C);
+    if h == 0 {
+        return None;
+    }
+    let o = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(h);
+    if o == 0 || rd::<usize>(o) == 0 || rd::<i32>(o + crate::guard::enemy::HP) <= 0 {
+        return None;
+    }
+    let p = super::magic::aim_point(o);
+    Some(crate::units::to_kh1(Vec3::new(p[0], p[1], p[2])))
+}
+
 /// The battle ended (or a new one began): no blade of the last one is ours any more.
 pub(super) fn forget() {
     if let Ok(mut g) = BLADES.lock() {
@@ -276,7 +443,7 @@ pub(super) unsafe fn swing_at_blades(meets: impl Fn(usize) -> bool) {
     }
     let Ok(mut g) = BLADES.try_lock() else { return };
     let b0 = base();
-    for b in g.iter_mut().filter(|b| !b.turned && b.flight.phase == Phase::Flying) {
+    for b in g.iter_mut().filter(|b| !b.turned && !b.batted && b.flight.phase == Phase::Flying) {
         let bullet = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(b.id);
         // Still our blade in flight (the handle may have been reused after Re:CoM ended it).
         if bullet == 0 || rd::<usize>(bullet) != va(b0, gb::HOMING_VTABLE) || rd::<usize>(bullet + rt::STATE_EXE) != blade_exe as *const () as usize || rd::<i32>(bullet + rt::LIFE) <= 0 {
@@ -285,6 +452,39 @@ pub(super) unsafe fn swing_at_blades(meets: impl Fn(usize) -> bool) {
         let coll: usize = rd(bullet + gb::COLL);
         let shape: usize = if coll != 0 { rd(coll + crate::guard::coll::SHAPE) } else { 0 };
         if shape == 0 || !meets(shape) {
+            continue;
+        }
+        if b.kind == Kind::Fire {
+            // KH1's projectile clash: sent to the swinger's side and aimed anew (`0x1B8`): at Sora's target while it
+            // lives, else at its thrower (`sys 32` of the parent: its lock point), straight, its whole life again.
+            if !super::guard::send_back(bullet) {
+                continue;
+            }
+            let aim = sora_target_enemy().or_else(|| {
+                let o = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(b.shooter);
+                (o != 0).then(|| {
+                    let p = super::magic::aim_point(o);
+                    crate::units::to_kh1(Vec3::new(p[0], p[1], p[2]))
+                })
+            });
+            let mover: usize = rd(bullet + gb::MOVER);
+            if mover != 0 {
+                b.flight.pos = crate::units::to_kh1(rd_vec(mover + rt::POSITION));
+            }
+            let dir = match aim {
+                Some(t) if (t - b.flight.pos).length() > 1.0 => t - b.flight.pos,
+                _ => -b.flight.dir,
+            };
+            b.flight.retarget(dir);
+            b.batted = true;
+            let life = crate::units::frames_to_units(b.flight.n.life + 2.0);
+            wr(bullet + rt::LIFE, life);
+            if mover != 0 {
+                let p = rd_vec(mover + rt::POSITION);
+                super::attack::spark_at([p.x, p.y, p.z, 1.0]);
+            }
+            let (id, d) = (b.id, b.flight.dir);
+            line(|| format!("fireball {id}: Sora's swing bats it back along ({:.2},{:.2},{:.2}) (KH1's projectile clash), on the enemies' side", d.x, d.y, d.z));
             continue;
         }
         let r = {
@@ -316,5 +516,5 @@ pub(super) unsafe fn swing_at_blades(meets: impl Fn(usize) -> bool) {
 /// The trace's token: the blades flying (id, frames, speed, turned back).
 pub fn trace_token() -> String {
     let Ok(g) = BLADES.try_lock() else { return String::new() };
-    g.iter().map(|b| format!("blade {}:{:.0}:{:.1}{}", b.id, b.flight.time, b.flight.speed, if b.turned { ":back" } else { "" })).collect::<Vec<_>>().join(" ")
+    g.iter().map(|b| format!("{} {}:{:.0}:{:.1}{}", if b.kind == Kind::Fire { "fire" } else { "blade" }, b.id, b.flight.time, b.flight.speed, if b.turned { ":back" } else if b.batted { ":batted" } else { "" })).collect::<Vec<_>>().join(" ")
 }

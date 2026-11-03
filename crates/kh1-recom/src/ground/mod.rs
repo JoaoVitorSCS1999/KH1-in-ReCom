@@ -7,3 +7,4 @@ pub mod pirate;
 pub mod largebody;
 pub mod neoshadow;
 pub mod wightknight;
+pub mod fatbandit;

@@ -2834,6 +2834,240 @@ the combo's timing to compare.
    port so far), so these never happen. (a) Leave them out (built); (b) research which KH1 hits carry attributes 8 / 10 first
    (a framework change for every enemy, as the Darkball's Gravity question).
 
+### The Fat Bandit (built)
+
+Status: built on branch `fatbandit-wip`; tests and the Windows build pass; **not seen in game**; no KH1 trace of the Fat
+Bandit yet. Owner (2026-11-02, on a Fat Bandit video): in Re:CoM's AI "it attacks so frequently that there's no opening";
+KH1's own Fat Bandit waits long between its attacks (research `pace-report.md` § 2). This port gives it KH1's AI, attacks,
+reactions and motions on Re:CoM's `CEnemyFatbandit`, with Re:CoM's stats; its fireballs and its flame are Re:CoM bullets
+moved by KH1's numbers.
+
+#### KH1's side. Checked (files: `ex_2060.bd` disassembled, code from `0x4C0`, folded and raw; its children `ex_2060_00.bd` / `ex_2060_01.bd`, code from `0x18`; decomp: the syscalls named)
+
+The script (0x3900 bytes) keeps the actor at `wp+0`, the state object at `wp+0x50`, the search object at `wp+0x60`; two
+children in the `.mdls` part 3 (0x80..0x780 the fireball, 0x780..0xD00 the flame). **Every motion it plays is a plain
+request** (no action bit 24): its script never pauses for one (only the appearance's flag 4 holds it), so a state request
+takes effect the next frame whatever plays.
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x24E8` | init `0x27A0` / `0x280C` (records LV1 `0x14` / LV2 `0x80`; stats `+4` walk 2, `+8` run 6, `+0x10` hop 20 (unused); `sys 125(10)`; the head look's cone and limits `0x3810`: `+0x1C` 45°, `+0x20` 60°, `+0x2C` 20° up, `+0x30` 15° down, `+0x34` / `+0x38` 90°; Agrabah's rooms 1 / 2: `sys 111`, else `sys 112`; the hit handler `0x29BC`); a yield; the party handles (`wp+0x18` = `sys 4(0xB0000 | 160)`: no such object in Re:CoM's battles); the appearance thread `0x1132`; **the front row `0xEC`** (`sys 23`, `|= 512`, `sys 213(row, 3)`: KH1's mode 3); then each frame: while idle the search (a room-spawned Fat Bandit, `sys 132` ≠ 0: Sora within 1500; placed ones 1000, 2000 in Agrabah's rooms 1 / 9 / 10 / 11 / 17, 20000 in world 11) → engaged; a state request restarts the behaviour thread (1 idle `0xCDE`, 2 engaged `0xA56`, 3 lost `0x83E`, 4 hit `0x4F2`) |
+| appearance | `0x1132` → `0x20F8` | home and facing kept; spawn type 23 (a scripted Agrabah one: not ported); spawn type ≠ 0: Sora faced now, 69 (blend 0), the 30-frame fade-in, flag 0x80 30 frames, effect 2, 30 frames, flag 4 with the idle queued (the script waits until 69 ends); idle |
+| idle | `0xCDE` | Sora's target is it → engaged (the party members' too); the wander `0xEDA`; world 12 / Agrabah rooftops: the leash's vanishing (not ported); again |
+| wander | `0xEDA` | points [200, 400) and [400, 500) about where it stands, each walked to by the route `0x36BE` (walk 1 at 2 a frame, the way taken every 4 frames, 300 frames, within 60); 70 %: done (40 % of all first an idle of [120, 180)); else in Agrabah above its home and 300 away: run home (never on a battle floor); again |
+| route | `0x36BE(goal, motion, speed, time, reaim, stop)` | the turn rate 5° a frame; while time is left and the goal (a point, or the target's live position) is farther than `stop`: the yaw toward it (`sys 36`), then `reaim` frames along the facing as it is at that moment (`actor+0x20` / `+0x2C`) with the motion, then a frame with no speed (the actor task zeroes `+0x2C`); the time goes down by `reaim` frames only; the turn rate back to 10 |
+| engaged | `0xA56` | the target dead → lost; the leash (not ported); the idle (blend 8); **close (< 300)** `0xC5C`: 70 % the belly else the breath, then 40 % two fireballs and a flame; **mid (< 600)** `0xC08`: 30 % the volley then the approach (180 frames, to 300), else the approach, the breath and the belly; **far** `0xBC8`: 80 % the approach (180, to 600) and the breath, else the volley; the search; engaged again |
+| approach | `0x35E0(time, dist)` | the route at the target: run 2 at 6, the way every 6 frames (Agrabah's rooms but 1 / 2 / 5: walk 1 at 2, every 4: not ported, Re:CoM's arenas take the run) |
+| belly | `0x1750` | turning to the target; its two hand rows `0x31C` / `0x38C` (hit callback `0x17F0`: a message to `wp+0x18`'s object, not ported); 200 (blend 14, a plain request) to its end; the idle (8); **75 frames**; on the ground |
+| breath | `0x1308` | turning to the target; 205 (blend 8); 68 frames; **the front row removed** (`0x13DC`: `wp+0x84` = 1); 90 frames; 207 (blend 8); 8 frames; the head look; 60 frames: **a 226-frame wind-up**; the flame `0x14B8`; the front row back (`0x1444`) |
+| flame | `0x14B8` | turning to the target; the child `sys 94(actor, 1, target, 0x15C, 0)`; at most 140 frames while 207 plays (the head looks at a target more than 150 above); to 207's end; the idle (8) |
+| fireball | `0x16FC` | the head looks at the target (`sys 121`); 201 (blend 8, from 0: `sys 13`, again when it plays); **64 frames** turning to the target; the child `sys 94(actor, 0, target, 0x1CC, 0x2AC)`; on the ground |
+| volley | `0x1610` | one fireball; 6 frames; twice while 201 plays: 201 again from frame 12 (blend 4), 48 frames turning, the child (row `0x23C`), 6 frames, a yield; to 201's end; the look off; the idle (8); **60 frames** |
+| two fireballs and a flame | `0x129A` | two fireballs (the second 201 starts again from 0); 18 frames; 207 from frame 40 (blend 18); 38 frames turning; the flame |
+| quick flame | `0x12DC` | 207 from frame 40 (blend 18); 18 frames turning; the flame |
+| hit state | `0x4F2` | the target: Sora the first time, then 25 % back to Sora (one draw); dead → lost. **Staggered** (`wp+0x7C`): 208 (`0x400000D0`, blend 0), `sys 195` (an EXP bonus max(EXP / 5, 1) shown 140 above it), the drop table `0x464` after an attribute-8 hit only, to 208's end. Else at most 2 counted hits (`wp+0x70`): 80 % the quick flame, else two fireballs and a flame; more: the count to 0 and the volley. Then engaged |
+| lost | `0x83E` | Sora's target is it, or the last target (`wp+0x4`) alive → engaged; else the search (10000) or the idle / vanishing (the leash, not ported) |
+| hit handler | `0x29BC` | the turn rate back to 10. Attributes 9 / 11: damage only. A clash (kinds 6 / 7) or a repel record: the hit state (no attacker: lost). The damage (`sys 44`): kind 5 → 4 (and attribute 3 → 4); killed → its death `0x30F8` (the row removed; the stagger's conditions → 208 and drop table `0x430`, else `0x3FC`; `0x1FD8`: effects, EXP `sys 167`). Alive: attribute 10 → the row back, the hit state; `sys 188` = 11104 (one attack of KH1's: an EXP bonus, not carried); `wp+0x18`'s object hit it → `sys 179` and the hit state (no such object); attribute 8 during the breath → `wp+0x7C` / `+0x88`; then **the stagger** (`0x2D3E`): the hit landed on its hurt part id 2 (record `+0x20`) or, while its front row is down, came from within 80° of its front (`sys 100` of the facing with the way to the attacker), and is not a flinch (kind ≠ 3, or attribute 3): the row back, `wp+0x7C` = 1, `sys 42`, the hit state; a flinch there with attribute 1: `sys 42` only. Then the look off; **the row down → back up, the kind 4** (`0x2EC6`); the count (a run's first hit: past 3 → 0, +1 a flinch / +2 another kind; its second +1); attribute 2 from `wp+0x18`'s object: `sys 42`; attribute 3 → 4 or kind 5 → 4: the hit state; **else (every other hit: the kind zeroed and `sys 42`): no reaction, no state** (`0x308E`). Since kind 5 became 4 at `0x2B4C`, an ordinary hit of any kind ends here |
+
+So KH1's Fat Bandit never flinches or is knocked back by a living hit; it reacts to the killing hit (KH1's reaction of its
+kind), a clash (its belly rows' recoil 202) and the stagger (208). Hits only change what it does through the hit state
+(the stagger, a clash) and the count its counters read.
+
+Its hurt parts (`CLS\x03` group 2, ten: Checked (files)): id 0 on bone codes 0 / 20 / 21 / 24 / 25 / 8 / 28 / 29 and the
+belly's id 1 on code 12; **id 2 a 0.8 m sphere 1.5 m above its head** (code 2, flag 128). Re:CoM bones: `head1`, `hip1`,
+both arms, `chest1`, both hands, `head1` (id 2).
+
+Rows (`0x70` bytes; Checked (files)):
+
+| Row | Made with | Bone code, t, radius; HIT slot | Type / priority / recoil | KH1 `+8` / power `+0x14` | What |
+|---|---|---|---|---|---|
+| `0xEC` | init, `0x1444`, the handler | 12 (belly), 0 → 0.7, 110; 0 | **1 / 100 / 110**, cone cos 0.342 (70°) | 0 / 4 | the front guard, KH1's mode 3 (every frame until the breath removes it) |
+| `0x31C` / `0x38C` | 200 | 25 / 24 (hands), 1.3 → 0, 60; 0 / 1 | 0 / 30 / 202 | 1 / 6 | the belly's hands, [54, 68) and [84, 106) / [50, 72) and [86, 100) |
+| `0x1CC` / `0x23C` | the fireball child | none, 30 | 0 / 0 / 110 | 1 / 6 | the fireball (the volley's the same bytes) |
+| `0x2AC` | the fireball after a repel | none, 30 | 5 / 1 / 110 | 5 / 10 | the batted fireball (it hurts enemies) |
+| `0x15C` | the flame child | none (the child sets it), 0 | 5 / 100 / 110 | 4 / 8 | the flame |
+
+The front row against Sora's swing (the Kingdom Key's 30, `0x1402B4BC0` / `0x1402B4640`): a side at 100 is never moved;
+Sora is 70 under: **kind 7, the strong recoil 0x6F** (in the air 0x70), no damage, from within 70° of its front. Magic
+(types 5 / 6) and swings from behind land. The flame (type 5) and the batted fireball meet no swing.
+
+The children (Checked (files + decomp)):
+
+- **The fireball** `ex_2060_00.bd` (entry `0x5E6`): effect 18 on the parent; its start `sys 19(parent, 4, 2.5)` (bone
+  code 4's line at t 2.5: past `neck`, at the mouth); `0x364(…, turn 0, speed 45)`; its direction `sys 143` →
+  `0x1402BAE10`: with the head look on (`+0x1CC & 8`), the head's direction `+0x450` in the world, else the facing; then
+  `0x18(…, model 5, life 240, fade 20)`: each frame `sys 24` with turn 0 (no turn), `sys 18` (45 × step along it), its
+  attack follows; the last 20 frames it fades; a hit ends it; **a repel** (its row has priority 0: a swing that meets it
+  gives it the clash bit and, a projectile, turns it to the swinger's side, `0x1402B4BC0`) → `0x1B8`: aimed at the
+  swinger's target while it lives (else at the parent's lock point), a new attack with row `0x2AC`, its clock back to 0,
+  another 240 frames. **It doesn't home.**
+- The head look (`0x1402A2510` / `0x1402A2980`): from bone code 0 at t 0.5 toward the target's lock point 0, in the
+  actor's frame, inside the cone (45° to start, 60° while looking) its pitch clamped to 20° up / 15° down and its turn to
+  90°; it turns 2° a frame (stats `+0x24`, the default).
+- **The flame** `ex_2060_01.bd` (entry `0x22A`): one attack object from row `0x15C` in mode 3 with shape 2 (`func_1D0(…,
+  2)`): KH1's attack pass lays it as **a chain of spheres** from `+0x10` (radius `+0xC`) to `+0x40` (radius `+0x3C`), one
+  every (r0 + r1) / 2, the radius stepping between (`0x1402B3800` → `0x1402B3D50`); `+0x50` = 60: its hit-once mask
+  clears every 60 frames (`0x1402B3380`). Each frame for at most 140 frames while the parent plays 207: from bone code 0
+  at t 3, 25 lower, to bone code 0 at t 15, 75 lower; radii 23 and 60; its first 60 frames the end and both radii × t /
+  60; a wall on the line (`sys 77`) cuts it and lights an effect there. On the player's files: 2.96 m along `head1`, 8
+  spheres.
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyFatbandit` (vtable `0x14053DDF8`, 139 slots, RTTI COL at −8), ctor `0x14018DD70` (`40 53 48 83 EC 20`: `CHeartless`'s
+base ctor, then `+0x2E0` = 0.1; its only reference the factory's call at `0x140189140`; no branch into the moved bytes, no
+pointer to them: exe scan, 2026-11-02), allocation `0x140189127` `mov ecx, 0xCD0` → 0xCF0. Its own states 1 (`0x14018DEB0` /
+the walk thunk `0x14018E140`), 2 (its belly `e010_050`, `0x14018DE30` / `0x14018DEE0`), 3 (its fireball `e010_051`,
+`0x14018DE60` / `0x14018DF20`: at clip time 2849 a `CBullet` (`0x140156790(desc, 1, 3)`) from `head2` pitched at Sora's aim
+point, flags `0x8800`, 0.2 m a frame, homing 2.5° a frame for 1500 ticks, radius 0.25, `0x14017F0E0(enemy, 1, 1, 0)`'s AP,
+`0x14017F050(enemy, 1)`'s attribute, effect sets `0x14053E290` (slots `"_ex_2060"` 7 / 15 / 5) and `0x14053E300`); 0 / 11 /
+12 / 30 and the attack states' ends `CBattleEnemy`'s; think `0x140196EC0`. `EN0010.ASD`: 2 records (id 0 on `e010_050`:
+`r_hand` [45, 72), `l_hand` [75, 115)); no record for id 1 (the fireball is code). `EN0010.ANN`: 74 slots. Re:CoM's Fat
+Bandit has no breath.
+
+Our copy: states 0, 1, 2 (the belly), 11, 12, 30, the think. State 3 is never entered (its fireballs and flame are made from
+state 1).
+
+**The attack-end cooldown** (`docs/recom-m6-battles.md` § Attack-end cooldown, 0.83.0): keyed to Re:CoM's own vtable
+(`battle::pace::heartless`); our copy's vtable is not in it, so KH1's Fat Bandit never gets Re:CoM's 120 frames. Checked
+(code). `enemy_ai = recom` leaves Re:CoM's Fat Bandit as Re:CoM has it (it gets that cooldown, as before).
+
+**Power mapping** (decision M10, "the Re:CoM attack of the same kind"): the belly 200 (both hands, KH1 power 6) → Re:CoM's
+belly, id 0 (its records are both hands too); the fireballs → Re:CoM's fireball, id 1 (`0x14017F0E0(enemy, 1, 1, 0)`, as its
+state 3 asks); **the flame → id 1** (Re:CoM has no breath; fire like its fireball: Assumption, owner question 1).
+
+#### Its fireballs and flame (Re:CoM bullets moved by KH1's numbers)
+
+- **The fireball** (`win::kh1_thrown`, `Kind::Fire`, the Bandit's blade machinery): a `CHomingBullet` (descriptor type 2, as
+  the blade) made at KH1's start point (the manifest's `fire_at`: bone 36 `neck` + (0.197, 0, 0) m), along KH1's head
+  direction (`kh1_core::fatbandit::fire_dir` from the `eye` point on `head1` to Sora's aim point: Re:CoM's vtable `+0x50`
+  for KH1's lock point 0, Assumption as the blade's), **straight at 45 a frame for 240 frames**: its flight exe writes the
+  velocity each frame (no Re:CoM homing), then Re:CoM's own step moves, collides, hits Sora (a hit ends it) and ends it
+  at the life. Power and look: Re:CoM's own fireball's (above; the sets pointer-checked, `sites::FATBANDIT_FIRE_PTRS`).
+  Radius KH1's 30 cm. Re:CoM's 20-frame end fade after the life (KH1 fades the last 20 frames of it).
+- **Sora's Guard** turns it back (decision 28: Re:CoM's homing takes it at the Fat Bandit, it hurts enemies).
+- **Sora's swing bats it back** (KH1's projectile clash, above): in the swing's pair test (`win::attack`, as the blade's) a
+  fireball that meets the swing gets Guard's turn-back (`guard::send_back`: its collision to the enemies' list, remembered
+  for its hit with the card-interrupt bit), then KH1's re-aim: at Sora's target (Re:CoM's `player+0x84C` while it lives,
+  its aim point) or else the Fat Bandit's aim point, straight, its life 240 frames again; Re:CoM's guard spark there.
+- **The flame** (`win::kh1_flame`): one Re:CoM `CBullet` per KH1 sphere (made as Re:CoM's Aero shot is: flags 7, a shot
+  that stays through its hits; no speed), sharing one hit serial (`desc+0x74`, Re:CoM's Blizzard rule); each frame from the
+  Fat Bandit's update each one is put on KH1's sphere (the ends from `head1` + the manifest's `flame0` / `flame1` offsets,
+  KH1's 25 / 75 lower, `kh1_core::fatbandit::flame_spheres` with the growth) through its mover's place and Re:CoM's own
+  radius setter `0x140172690` (byte-checked, `sites::FLAME_CALLEES`), its life a few frames; every 60 frames the serial
+  renewed through `0x14016F7D0` (KH1's re-hit); it ends when 207 stops, after 140 frames, at the defeat, or when a Re:CoM
+  state takes the Fat Bandit (its spheres' lives run out). Re:CoM's fireball's power and look on every sphere (8 Re:CoM
+  fireball effects in a row: owner question 2).
+- Per frame: one KH1 step per flying fireball; one bone read and ≤ 16 bullet writes per burning flame; one atomic load
+  otherwise.
+
+#### KH1's pace (the owner's video)
+
+Re:CoM's Fat Bandit (`pace-report.md` § 1): attack end → next attack ≈ 33 frames when Sora plays no card. KH1's (this port):
+every round ends in a long wait (the belly's 75 frames, the volley's 60, the breath's 226-frame wind-up before its 140-frame
+flame) and walks between rounds at 2 a frame in bursts. The test `kh1_pace_leaves_openings` (Sora circling 2–7 m away, 6
+seeds, 12 000 frames): **a new round every 293–324 frames (about 5 s)**. Not a trace: KH1's own frames are the script's,
+the lengths the `.mset`'s (Checked (files)).
+
+#### What the asset step writes
+
+`ENEMY/0010/EN0010.ANN` (Re:CoM's 74 slots byte-identical; KH1's clips at 100 + entry, 100..128: no exact Re:CoM bake),
+`EN0010.ASD` (Re:CoM's 2 records kept + 4: the belly's two hands at their two windows each, id 0), `EN0010.SES` (Re:CoM's
+entries kept; the belly's clip takes its template's sounds at the hit window: Assumption), `kh1-fatbandit.json` (`kh1-enemy
+1`: 87 numbers from `ex_2060.bd`, 15 from the children, 24 + 10 request words checked, the four bone points, the fireball's
+radius and Re:CoM power, the belly attack (recoil 202), the guard row `front` (no windows), 10 parts). Test
+`fatbandit::tests::builds_from_the_players_files`. Other enemies' outputs are unchanged (their entries in the new
+`T_POINTS` / `SHOTS` tables are their own: none). In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0010/EN0010.ANN, method: copy, source: [{name: ENEMY/0010/EN0010.ANN}]}
+- {name: ENEMY/0010/EN0010.ASD, method: copy, source: [{name: ENEMY/0010/EN0010.ASD}]}
+- {name: ENEMY/0010/EN0010.SES, method: copy, source: [{name: ENEMY/0010/EN0010.SES}]}
+- {name: kh1-fatbandit.json, method: copy, source: [{name: kh1-fatbandit.json}]}
+```
+
+The step prints `fatbandit (M11): …`; the log shows `fatbandit: KH1's fatbandit (M11) …` at start, `battle N: Fat Bandit …
+gets KH1's AI` in a Fat Bandit battle, `thrown: fatbandit eNNN: fireball …` per fireball, `flame: … its flame starts` /
+`ends`, `fireball …: Sora's swing bats it back`, `its guard row stopped Sora's swing (priority 30 vs 100)` and `hit kind …
+without a reaction` for every hit it takes alive.
+
+#### Checked / Assumption
+
+- **Checked (files):** every number at its push (the asset test reads them from the player's scripts), 34 request words,
+  the rows (types, priorities, cones, recoils, radii, slots; `0x1CC` = `0x23C`), the hit windows, the hurt parts, the clip
+  lengths (69 102, 200 158, 201 108 with root motion, 205 180, 207 264, 208 268 frames; 207 and 201 don't loop), Re:CoM's
+  records and clips, the four bone points the same in two poses.
+- **Checked (decomp):** the VM's ops; `sys 13` writes the request whatever plays (`0x14029F980`: the restart); `sys 143`
+  (`0x1402BAE10`), the head look (`0x1402A2510`, `0x1402A2980`, the stats defaults `0x1402A5D70`), `sys 19` / `sys 24` /
+  `sys 18`, the shape-2 chain (`0x1402B3800`, `0x1402B3D50`), the re-hit `+0x50` (`0x1402B3380`), the hit record's `+0x20`
+  (the hurt part's id, `0x1402B4060` / `0x1402B4460`) and `+0x24`, `sys 195` (an EXP bonus, as `sys 194`); Re:CoM's state 3
+  fireball (`0x14018DF20`), the radius setter (`0x140172690`), the point transform (`0x1402ECEB0`).
+- **Checked (exe):** the class, its slots, the ctor and its only call, the factory size, the effect set's name pointer, the
+  setter's bytes; 22 sites (pefile, 2026-11-02).
+- **Assumptions:** the flame on id 1; the fireball's aim from a converged head look (KH1 turns it 2° a frame after 64 frames
+  facing Sora) and the 60° cone in force; Re:CoM's aim point for KH1's lock point 0; the front test's cosine flat (KH1's
+  is 3D); `sys 13` with bit 30 (`0x400000D0`) plays 208 at once; the killing hit plays KH1's reaction of its kind (5 → 4)
+  over its death's 208; the flame's wall cut left out (open arenas); the flame's spheres a frame behind the head at most
+  (Re:CoM's update order); one flame per Fat Bandit (a second replaces the first; KH1 would run both); the Aero shot's
+  flags keep a sphere through its hits; Re:CoM's sounds on the new clips; the approach always runs (Agrabah's narrow rooms
+  walk in KH1); seeds per enemy.
+- **Not ported:** the leash and vanishing, the party handles and messages (`wp+0x18`), the spawn type 23, Agrabah's room
+  rules, the home return, the death routine (Re:CoM's defeat, prizes, EXP), the effects (M13), the appearance's flag 0x80 and
+  fade-in, the head look as a pose (Re:CoM's model), the hit attributes (1, 2, 3, 8..11: attribute 0), **the hurt part id 2
+  stagger** (owner question 3), the stagger's drop table `0x464` (attribute 8 only).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Fat Bandit battle in Agrabah; run the asset step first)
+
+1. Each Fat Bandit plays KH1's appearance (69, about 1.7 s), then wanders a few metres about where it stands in short
+   walking bursts, and comes at Sora within 15 m.
+2. **Its waits** (the owner's video): after its belly flop it stands for 1¼ s; after a fireball volley 1 s; its fire
+   breath has a long wind-up (about 3¾ s: an inhale, then the breath pose) before the flame. Between rounds it walks or runs
+   toward Sora. It should attack far less often than Re:CoM's Fat Bandit (about one round every 5 s at 2–7 m).
+3. Close (< 3 m): the belly flop (200) or the breath; then sometimes two fireballs and a short flame. Mid (3–6 m): a volley
+   of three fireballs and then it runs closer, or it runs closer, breathes fire and belly-flops. Far: it runs to 6 m and
+   breathes, or a volley.
+4. Its fireballs fly straight where it aimed (at Sora's chest when it fired), fast (27 m/s), and don't turn: side-step them.
+   Guard one: it flies back and hurts the Fat Bandit. **Swing at one: it flies back at your target** (or the Fat Bandit)
+   and hurts enemies.
+5. The flame: a chain of Re:CoM fireball effects from its mouth, growing over a second to about 3 m and 0.2–0.6 m wide; it
+   can hit again each second you stay in it; it ends with the breath pose.
+6. Swing at it from the front (within about 70° of its belly): Sora bounces off hard, no damage, no "Guard" popup. From behind
+   or the side the swings land, with no flinch at all (it never flinches while alive); magic lands from the front too.
+7. During the breath's wind-up (from about 1 s into it) its front is open: a combo finisher on its front staggers it (208,
+   about 4½ s, and an EXP bonus); an ordinary swing there lands but closes the opening again (the breath goes on). Any hit
+   from behind during the wind-up also closes it.
+8. After a clash with its belly flop (Guard it, or swing into its hands), it plays its recoil 202, then counters: a short
+   flame, two fireballs and a flame, or (after several hits) a volley.
+9. Kill one: KH1's reaction motion for the killing hit, Re:CoM's prizes and EXP.
+10. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Fat Bandits (its homing fireball, no breath).
+
+Please send `kh1-recom.log` (`fatbandit:`, `thrown:`, `flame:` lines) and an F9 trace (its `fire` / `flame` tokens).
+
+#### KH1 trace (what to record in KH1)
+
+Agrabah (the Main Street or the Bazaar): stand far (10 m) 10 s; stand at 5 m 10 s; stand at 2 m 10 s; side-step a volley;
+Guard a fireball; swing at a fireball; stand in a flame for 3 s; hit its front with a combo finisher during the breath's
+wind-up, then an ordinary swing there; hit it from behind during the wind-up; jump onto / above its head with an air
+finisher (its hurt part id 2); Guard its belly flop; kill one. The trace's enemy rows give the rounds' timings, the
+fireball's path and the flame's reach to compare.
+
+#### Fat Bandit owner questions
+
+1. **The flame's power.** Re:CoM's Fat Bandit has no breath: only its belly (id 0) and its fireball (id 1). Built: the flame on
+   the fireball's power (fire). (a) Keep; (b) the belly's (id 0); (c) another rule (a fraction of the fireball's).
+2. **The flame's look.** Each of KH1's flame spheres is a Re:CoM bullet showing Re:CoM's own fireball effect (8 of them in a
+   row). (a) Keep until the effects milestone (M13); (b) the effect on the tip sphere only, the others invisible; (c) research
+   Re:CoM's own fire breaths (Dragon Maleficent, Mushu) and use one of their effects.
+3. **The weak spot above its head.** KH1's hurt part id 2 (a 0.8 m sphere 1.5 m above `head1`): a finisher that lands only
+   there staggers it as the open front does. The host passes no KH1 hurt part (Re:CoM's hurt shapes, decision 24), so it never
+   happens here. (a) Leave it out; (b) build it: KH1's part spheres tested against the hit's contact point on Re:CoM's bones,
+   a framework input for every enemy (research first which of Re:CoM's hurt bodies reach that high).
+4. **Batting fireballs.** Built as KH1: a swing that meets a fireball sends it back at Sora's target (or the Fat Bandit) and it
+   hurts enemies with Re:CoM's fireball damage. (a) Keep; (b) knock it away harmless (the Bandit's blade's rule); (c) leave it
+   out (swings pass through fireballs).
+5. **The stagger's EXP bonus.** KH1 gives max(EXP / 5, 1) on its own EXP; built on Re:CoM's EXP (as the Search Ghost's
+   reward). (a) Keep; (b) leave it out.
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -2854,7 +3088,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Bouncywild | `xa_ex_2040` (ex_2040.bd) | `CEnemyBouncywild` 8 | `0x140538fb8` | `0x14018c4d0` / `0x1401890d3` 0xcd0 | 1,2,3 | — | FaLl | — |
 | Air Soldier (built) | `xa_ex_2160` (ex_2160.bd) | `CEnemyAirsoldier` 15 | `0x140531cc8` | `0x14018a4e0` / `0x1401891f9` 0xcd0 | 1,2,3, think `0x14018a5c0` | 200,201,202,203,210,211,212 | FKaA | — |
 | Bandit (built) | `xa_ex_2090` (ex_2090.bd) | `CEnemyBandit` 11 | `0x140534368` | `0x14018aeb0` / `0x140189151` 0xcd0 | 1,2,3 | 200,202,210,211,212,216,217,218,230..233 | FaALl | — |
-| Fat Bandit | `xa_ex_2060` (ex_2060.bd) | `CEnemyFatbandit` 10 | `0x14053ddf8` | `0x14018dd70` / `0x140189127` 0xcd0 | 1,2,3 | 200,205,206,207 | FKaALl | — |
+| Fat Bandit (built) | `xa_ex_2060` (ex_2060.bd) | `CEnemyFatbandit` 10 | `0x14053ddf8` | `0x14018dd70` / `0x140189127` 0xcd0 | 1,2,3 | 200,205,206,207 | FKaALl | — |
 | Barrel Spider | `xa_ex_2170` (ex_2170.bd) | `CEnemyBarrelspider` 28 | `0x140535688` | `0x14018b3b0` / `0x14018941b` 0xce0 | 1,2,3,19 | 205,207,211,213,214 | FKaA | — |
 | Search Ghost | `xa_ex_2230` (ex_2230.bd) | `CEnemySearchghost` 14 | `0x14054c408` | `0x1401923f0` / `0x1401891cf` 0xce0 | 1,2,3 | 203,204 | FKaA | — |
 | Pirate (built) | `xa_ex_2100` (ex_2100.bd) | `CEnemyPirate` 21 | `0x140546458` | `0x140190f30` / `0x1401892f5` 0xcd0 | 1,2,3 | 208,210,214,216,217,218,235,236 | FaLl | — |
@@ -2893,7 +3127,7 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
    without gravity for them.
 3. **Casters with projectiles** (KH1 child objects `sys 94`, effects `sys 225`; little or no HIT track):
    Red Nocturne, Blue Rhapsody, Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
-   Bouncywild (bananas), Fat Bandit (fire breath + belly), Defender (fireballs + shield), Search Ghost (its
+   Bouncywild (bananas), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs + shield), Search Ghost (its
    drain). Needs: the child object's script → Re:CoM's own bullets (checklist step 9), Green Requiem's
    support spell (Re:CoM overrides no state 3 for it; KH1's: a barrier / heal on its allies, Assumption).
    Which of these shoot what is from KH1's play (Assumption) and the scripts' syscalls (Checked (files)).
