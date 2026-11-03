@@ -68,6 +68,19 @@ fn parse_manifest(text: &str) -> Result<Manifest, String> {
     Ok(m)
 }
 
+/// Re:CoM's slip: the reaction kind its own Bouncywild's homing banana carries (`0x14018C870`, descriptor `+0x68`, the write
+/// at `0x14018C924`), which the player damage check `0x1401E6DE0` plays as Sora's slip (case 0x18: `+0x414` = 6, row 0x29
+/// `p001_049`, then `0x1401F6190`, a tenth of his Moogle points scattered as prizes). Checked (decomp + exe).
+pub const SLIP_KIND: u32 = 0x18;
+
+/// The owner's rule (2026-11-03, "a slip loses nothing"): a slip from one of our KH1 Bouncywild's peels or bananas (`ours`:
+/// the pending hit's attacker, Sora's body `+0x98`, is one of their bullets) plays Re:CoM's slip without its Moogle point
+/// scatter. Only Re:CoM's slip kind with a hit pending (the damage check reads `+0x710` only past its hit-pending test
+/// `+0x720`); Re:CoM's own Bouncywild's banana (not ours) and every other kind keep Re:CoM's scatter.
+pub fn slip_keeps_points(pending: bool, kind: u32, ours: bool) -> bool {
+    pending && kind == SLIP_KIND && ours
+}
+
 fn make(m: &Manifest, seed: u32, yaw: f32) -> Box<dyn ke::Behaviour> {
     // Re:CoM's battle spawns play KH1's appearance (owner 2026-11-02, Soldier choices).
     Box::new(kh1_core::bouncywild::Ai::new(m.consts.clone(), m.frames(), seed, yaw, true))
@@ -121,6 +134,16 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Only a pending slip from our KH1 Bouncywild's bullets keeps Sora's Moogle points.
+    #[test]
+    fn a_slip_loses_nothing_only_on_our_bullets() {
+        assert!(slip_keeps_points(true, SLIP_KIND, true));
+        assert!(!slip_keeps_points(true, SLIP_KIND, false), "Re:CoM's own Bouncywild's banana: Re:CoM's scatter");
+        assert!(!slip_keeps_points(false, SLIP_KIND, true), "no hit pending: the check never reaches its switch");
+        assert!(!slip_keeps_points(true, 1, true), "a flinch: no scatter call to skip");
+        assert!(!slip_keeps_points(true, 0x27, true) && !slip_keeps_points(true, 0x28, true), "Re:CoM's other scatter kinds");
     }
 
     #[test]

@@ -134,6 +134,11 @@ pub const REDNOCTURNE_BIG_EFFECT_SET: u64 = 0x1_4054_8F60;
 /// `+4 & 0x30` before its re-aim; Checked (decomp + files), the Gargoyle's rule, owner 2026-11-03). The Fat Bandit's and
 /// the Defender's keep decision 28 (Re:CoM's homing turn-back), as built.
 pub const GUARD_BATS: &[&str] = &["rednocturne"];
+/// The classes whose fire makes Sora slip (Re:CoM's slip kind 0x18 on the bullet, `crate::ground::bouncywild::SLIP_KIND`):
+/// the Bouncywild's banana (owner 2026-11-03: "its thrown banana makes Sora slip too", Re:CoM's banana rule: its own
+/// state 3 `0x14018C870` writes 0x18 to the descriptor's `+0x68`, `0x14018C924`; Checked (decomp + exe)). Its slip loses no
+/// Moogle points (`super::kh1_peel::slip_scatter`).
+pub const SLIPS: &[&str] = &["bouncywild"];
 /// The range from its spawn (m; KH1's life ends it), the homing gate (m) after a turn-back.
 pub(super) const RANGE: f32 = 255.0;
 pub(super) const GATE: f32 = 255.0;
@@ -174,6 +179,8 @@ struct Blade {
     flight: Thrown,
     /// Sora's Guard turned it back (decision 28): Re:CoM's homing flies it from here.
     turned: bool,
+    /// It carries Re:CoM's slip kind ([`SLIPS`]).
+    slips: bool,
 }
 
 static BLADES: Mutex<Vec<Blade>> = Mutex::new(Vec::new());
@@ -308,7 +315,7 @@ pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32
         if g.len() >= MAX {
             g.remove(0);
         }
-        g.push(Blade { kind: Kind::Blade, prefix: "blade", bat_radius: None, guard_bats: false, batted: false, home: None, id: bid, shooter, flight, turned: false });
+        g.push(Blade { kind: Kind::Blade, prefix: "blade", bat_radius: None, guard_bats: false, batted: false, home: None, id: bid, shooter, flight, turned: false, slips: false });
         FLYING.store(true, Ordering::Relaxed);
     }
     wr(bullet + rt::STATE_EXE, blade_exe as *const () as usize);
@@ -379,6 +386,12 @@ unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32, p: &'static str) 
     let dp = d.0.as_mut_ptr();
     func::<DescInitFn>(DESC_INIT)(dp, 2, 3);
     let w = |o: usize| dp.add(o);
+    // The Bouncywild's banana: Re:CoM's slip kind, as its own banana's descriptor (`0x14018C924`); the others keep the
+    // init's kind.
+    let slips = p == "fire" && SLIPS.contains(&class);
+    if slips {
+        std::ptr::write_unaligned(w(0x68) as *mut u32, crate::ground::bouncywild::SLIP_KIND);
+    }
     std::ptr::write_unaligned(w(0x6C) as *mut u32, attr);
     std::ptr::write_unaligned(w(0x70) as *mut i32, ap);
     std::ptr::write_unaligned(w(0x60) as *mut u64, FLAGS);
@@ -433,12 +446,12 @@ unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32, p: &'static str) 
         if g.len() >= MAX {
             g.remove(0);
         }
-        g.push(Blade { kind: Kind::Fire, prefix: p, bat_radius: Some(c("bat_radius")).filter(|r| r.is_finite()), guard_bats: GUARD_BATS.contains(&class), batted: false, home: None, id: bid, shooter, flight, turned: false });
+        g.push(Blade { kind: Kind::Fire, prefix: p, bat_radius: Some(c("bat_radius")).filter(|r| r.is_finite()), guard_bats: GUARD_BATS.contains(&class), batted: false, home: None, id: bid, shooter, flight, turned: false, slips });
         FLYING.store(true, Ordering::Relaxed);
     }
     wr(bullet + rt::STATE_EXE, blade_exe as *const () as usize);
     let dd = flight.dir;
-    line(|| format!("{class} e{shooter}: {p} {bid} from ({:.2},{:.2},{:.2}) along ({:.3},{:.3},{:.3}) (KH1's aim at {:?}), {:.2} a frame turning {}° for {} frames, AP {ap} attribute {attr} (Re:CoM's shot, id {id}), radius {:.2} m", at.x, at.y, at.z, dd.x, dd.y, dd.z, target.map(|t| (t.x as i32, t.y as i32, t.z as i32)), flight.n.speed, flight.n.turn_deg, flight.n.life, c("radius") * 0.01));
+    line(|| format!("{class} e{shooter}: {p} {bid} from ({:.2},{:.2},{:.2}) along ({:.3},{:.3},{:.3}) (KH1's aim at {:?}), {:.2} a frame turning {}° for {} frames, AP {ap} attribute {attr} (Re:CoM's shot, id {id}){}, radius {:.2} m", at.x, at.y, at.z, dd.x, dd.y, dd.z, target.map(|t| (t.x as i32, t.y as i32, t.z as i32)), flight.n.speed, flight.n.turn_deg, flight.n.life, if slips { ", Re:CoM's slip (kind 0x18, no Moogle points lost)" } else { "" }, c("radius") * 0.01));
     Some(bid)
 }
 
@@ -549,6 +562,14 @@ pub(super) fn own_shot(id: u32) -> Option<u32> {
     }
     let g = BLADES.try_lock().ok()?;
     g.iter().find(|b| b.id == id && b.kind == Kind::Fire && (b.batted || b.turned)).map(|b| b.shooter)
+}
+
+/// Whether shot `id` is one of our fires carrying Re:CoM's slip ([`SLIPS`]: the Bouncywild's banana), for the damage
+/// check's slip without Moogle points (`super::kh1_peel::before_damage`). Kept after Re:CoM's hit ends it (the entry
+/// stays until the battle's end or [`MAX`] newer throws).
+/// Called only for a pending slip (rare): `FLYING` is not consulted, the entry outlives the flight.
+pub(super) fn slip_shot(id: u32) -> bool {
+    BLADES.try_lock().map(|g| g.iter().any(|b| b.id == id && b.slips)).unwrap_or(false)
 }
 
 /// The battle ended (or a new one began): no blade of the last one is ours any more.
