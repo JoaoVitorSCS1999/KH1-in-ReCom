@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 183: M12 step 2: "Sora learned X" notices on Re:CoM's sleight-learned screen, version 0.98.1 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "I want there to be a notification that lets the player know that they've obtained those abilities"; answer: Re:CoM's sleight-learned screen.
+- `notify_learned(...)` queues a notice shown on Re:CoM's own learned screen (`CLevelUp` sleight mode `0x14010E9C0`) in its "ability" wording (id 0x5A) with our ability name. After a level-up: the same screen reused (the game waits as for Re:CoM's own). Otherwise: when the field would let the camp open (Re:CoM's own check `0x1401A96C0`, minus the Start press); one atomic load a frame while nothing waits.
+- At KH1 the card-stock help page `CTechHelp` is ended before it shows (also after Re:CoM's own event / chest sleight screens at KH1).
+- Used now for every ability from a level: Combo Plus ×3, Air Combo Plus ×2, Ripple Drive, Hurricane Blast, Gravity Break, Aerial Sweep, Combo Master, Counterattack, Vortex. A save's first sync shows none.
+- Assumptions: our English words fit; Re:CoM's ability wording (`0xA80710`) has one slot for the name; the field holds still under a field notice; the skipped help page first runs after its parent's update.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 182: M12 step 1: AP Up replaces CP Up at Combat = KH1 (3 + 2 per pick, no cap), version 0.98.0 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "On level up, instead of having the choice to level up CP, when the combat is set to KH1, it should be AP up, and it should give you 2 AP each level. this should be the only way to obtain AP, aside from the AP you start the game with."; answers: no cap; old saves: each CP Up already taken counts as an AP Up.
