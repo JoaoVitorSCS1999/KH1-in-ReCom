@@ -849,6 +849,12 @@ pub const GUARDS: &[GuardSpec] = &[
     // `sys 213(row, 0)`, `kh1_core::enemy::guard::HELD`) at `0x16CE` / `0x1A32` / `0x2260` / `0x3108`: no request,
     // no windows.
     GuardSpec { enemy: "neoshadow", name: "shield", row: 0x80, also: &[], requests: &[] },
+    // The Wight Knight's `ex_2200.bd` (M11): its body row `0xEC` (type 1, priority 100, all round) made with the combo's
+    // start 200 (`0x187A`); its body row `0x15C` (type 2, priority 20, all round) made with each swipe (`0x1632` with 202,
+    // `0x176A` with 201); its body row `0x54C` (the same numbers) made with the leap slash 216 (`0x1B2E`).
+    GuardSpec { enemy: "wightknight", name: "windup", row: 0xEC, also: &[], requests: &[200] },
+    GuardSpec { enemy: "wightknight", name: "swipe", row: 0x15C, also: &[], requests: &[201, 202] },
+    GuardSpec { enemy: "wightknight", name: "leap", row: 0x54C, also: &[], requests: &[216] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).
@@ -1226,4 +1232,4 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC];

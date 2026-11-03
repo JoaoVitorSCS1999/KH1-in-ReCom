@@ -40,6 +40,7 @@ pub mod neoshadow;
 pub mod airpirate;
 pub mod wyvern;
 pub mod searchghost;
+pub mod wightknight;
 
 pub use arc::Arc;
 pub use combat::{blade_params, resolve_hits, Blade, CombatParams, HitReport};
