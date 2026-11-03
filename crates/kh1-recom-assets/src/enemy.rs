@@ -606,12 +606,15 @@ fn fmt_f(v: f32) -> String {
 /// owner question): 0x43 keeps the clip. The Blue Rhapsody's 0x66 the same (entry 12, shared with its dizzy loop 0x43;
 /// its dizzy is element-only, left out), and its 0x69 (entry 7 without root motion, another of those status motions;
 /// entry 7 keeps request 7, the landing, with root motion). Checked (files: the player's `xa_ex_2120.mset` map).
-pub const SKIPPED: &[(&str, u16)] = &[("rednocturne", 0x66), ("bluerhapsody", 0x66), ("bluerhapsody", 0x69)];
+/// The Yellow Opera's 0x66 the same (entry 7 without root motion; entry 7 keeps the request with root motion; Checked
+/// (files: the player's `xa_ex_2130.mset` map), M11).
+pub const SKIPPED: &[(&str, u16)] = &[("rednocturne", 0x66), ("bluerhapsody", 0x66), ("bluerhapsody", 0x69), ("yellowopera", 0x66)];
 
 /// Enemies Re:CoM keeps no `.SES` for (M11, the Red Nocturne: `Recom.hed` holds no `ENEMY/0003/EN0003.SES` and the
 /// exe's resource names for enemy 3 list none, so Re:CoM never loads one; Checked (files + exe)): their clips play no
-/// motion sounds in Re:CoM, the step reads none and writes none (`Built::ses` empty).
-pub const NO_SES: &[&str] = &["rednocturne"];
+/// motion sounds in Re:CoM, the step reads none and writes none (`Built::ses` empty). The Yellow Opera's enemy 5 the same
+/// (Checked (files + exe), M11).
+pub const NO_SES: &[&str] = &["rednocturne", "yellowopera"];
 
 /// Builds everything for one enemy.
 pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
@@ -635,6 +638,7 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     consts.extend(child_consts(spec.name, &inp.mdls)?);
     consts.extend(t_points(spec.name, &inp.mdls, &ms, &conv, &clips, &consts)?);
     consts.extend(shot_consts(spec.name, script)?);
+    consts.extend(strike_consts(spec.name, script)?);
     consts.extend(sight_bones(spec.name, &inp.mdls, &conv)?);
     consts.extend(reward_consts(spec.name, script)?);
     // The attack rows → ASD records.
@@ -1387,6 +1391,8 @@ pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usiz
     ("rednocturne", 1, b"ex_2110_01.bd", crate::rednocturne::BIGFIRE_CONSTS, crate::rednocturne::BIGFIRE_REQUESTS),
     // The Blue Rhapsody's Blizzard `ex_2120_00.bd` (`crate::bluerhapsody`, [`T_POINTS`], [`SHOTS`]).
     ("bluerhapsody", 0, b"ex_2120_00.bd", crate::bluerhapsody::BLIZZARD_CONSTS, crate::bluerhapsody::BLIZZARD_REQUESTS),
+    // The Yellow Opera's Thunder `ex_2130_00.bd` (`crate::yellowopera`, [`STRIKES`]).
+    ("yellowopera", 0, b"ex_2130_00.bd", crate::yellowopera::THUNDER_CONSTS, crate::yellowopera::THUNDER_REQUESTS),
 ];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
@@ -1536,6 +1542,28 @@ fn shot_consts(name: &str, script: &[u8]) -> Result<Vec<(String, f32)>> {
     Ok(out)
 }
 
+/// A child object that strikes an area once (M11, the Yellow Opera's Thunder `ex_2130_00.bd`): (enemy, the constants'
+/// prefix, the parent's row the script passes (`sys 94`), the Re:CoM attack id and kind its power is asked with). KH1's
+/// child makes the row free-standing at its mark (`sys 23`, bone −1) and applies its hit to each opponent inside its area
+/// (`sys 90` → `0x1402B6AF0`, `sys 60` → `0x1402BF330`: no clash pass, so neither a swing nor a guard meets it; Checked
+/// (decomp)): the row's radius is unused (0) and only its power matters. The Yellow Opera's `0x466` passes `0x23C`;
+/// Re:CoM's own Yellow Opera Thunder takes its power with `0x14017F0E0(enemy, 0, 1)` (its state 2 `0x140196A80`; Checked
+/// (decomp)).
+pub const STRIKES: &[(&str, &str, usize, u32, u32)] = &[("yellowopera", "thunder", 0x23C, 0, 1)];
+
+fn strike_consts(name: &str, script: &[u8]) -> Result<Vec<(String, f32)>> {
+    let mut out = Vec::new();
+    for &(_, prefix, at, id, kind) in STRIKES.iter().filter(|s| s.0 == name) {
+        let r = script.get(at..at + 0x70).ok_or_else(|| crate::Error::Format(format!("{name}: no row {at:#x}")))?;
+        if !crate::stats::pushes_address(script, at as u32) || i32::from_le_bytes(r[0x10..0x14].try_into().unwrap()) != -1 {
+            return bad(format!("{name}: row {at:#x} is not a strike's (pushed, bone −1)"));
+        }
+        out.push((format!("{prefix}_recom_id"), id as f32));
+        out.push((format!("{prefix}_kind"), kind as f32));
+    }
+    Ok(out)
+}
+
 /// Bones a behaviour looks from (M11, `kh1_core::enemy::Sight`): (enemy, KH1 bone code). KH1's `sys 19` (t
 /// 0) and `sys 115` take the code's bone's **parent** (`0x1401D6320`'s lerp at t = 0, `0x14029EA00` →
 /// `0x1401D62B0`); a code with bit 12 names a bone directly (`0x14029FAB0`: `code & 0xFFF`). Checked (decomp).
@@ -1580,7 +1608,7 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC, &crate::bouncywild::SPEC, &crate::rednocturne::SPEC, &crate::bluerhapsody::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC, &crate::bouncywild::SPEC, &crate::rednocturne::SPEC, &crate::bluerhapsody::SPEC, &crate::yellowopera::SPEC];
 
 #[cfg(test)]
 mod clash_tests {
@@ -1683,8 +1711,8 @@ mod clash_tests {
             return;
         }
         // M11, the Gargoyle: its swipe's and its swipe end's body rows (type 2, priority 30, front half); the Blue Rhapsody's
-        // melee body row (type 2, priority 30).
-        let want = [("soldier", "spin kick", 1, 0x2AC, 1, 100), ("powerwild", "flurry", 2, 0x1CC, 2, 10), ("gargoyle", "swipe", 2, 0x2AC, 2, 30), ("gargoyle", "swipe end", 1, 0x38C, 2, 30), ("bluerhapsody", "melee", 1, 0x15C, 2, 30)];
+        // melee body row (type 2, priority 30); the Yellow Opera's charge body row (type 2, priority 30).
+        let want = [("soldier", "spin kick", 1, 0x2AC, 1, 100), ("powerwild", "flurry", 2, 0x1CC, 2, 10), ("gargoyle", "swipe", 2, 0x2AC, 2, 30), ("gargoyle", "swipe end", 1, 0x38C, 2, 30), ("bluerhapsody", "melee", 1, 0x15C, 2, 30), ("yellowopera", "charge", 1, 0x15C, 2, 30)];
         for w in want {
             if seen == SPECS.len() || found.iter().any(|f| f.0 == w.0) {
                 assert!(found.contains(&w), "{w:?} not among {found:?}");

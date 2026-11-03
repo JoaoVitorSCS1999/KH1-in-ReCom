@@ -6,14 +6,16 @@
 //!
 //! | Routine | Red Nocturne | Blue Rhapsody | Yellow Opera | Green Requiem | Here |
 //! |---|---|---|---|---|---|
-//! | one frame of circling steering, facing a target | `0x9FA` | `0x91A` | — | — | [`turn_step`] |
-//! | the idle hover leg | `0x93E` | `0x85E` | — | — | [`wander_leg`] |
+//! | one frame of circling steering, facing a target | `0x9FA` | `0x91A` | `0xB20` | — | [`turn_step`] |
+//! | the idle hover leg | `0x93E` | `0x85E` | `0xA64` | — | [`wander_leg`] |
 //! | fly to a point (the approach, the flee) | `0xABC` | `0x9DC` | `0xBE2` | — | [`fly_to`] |
 //! | the stuck test (`sys 118`) | `0xFBA` | `0xEDA` | `0x10E0` | — | [`stuck`] |
 //!
 //! Their spells are child objects (`sys 94`, part 3 of the `.mdls`) that wait on their parent's motion before they act:
 //! [`Cast`] is that wait (the Red Nocturne's `ex_2110_00.bd` / `ex_2110_01.bd` entry `0x6B6`); what the spell does once
-//! it acts is the host's (a Re:CoM bullet moved by KH1's numbers, `kh1-recom`'s `win::kh1_thrown`).
+//! it acts is the host's (a Re:CoM bullet moved by KH1's numbers, `kh1-recom`'s `win::kh1_thrown`). The Yellow Opera's
+//! Thunder (`ex_2130_00.bd`) is a strike, not a flight: [`Strike`] waits through its parent's three cast motions, marks
+//! Sora's place and strikes there a fixed time later.
 //!
 //! The constants are each enemy's own (its manifest); the routines take them as arguments.
 
@@ -283,9 +285,202 @@ pub fn step_casts<A>(casts: &mut Vec<Cast>, motion: Option<u16>, step: f32) -> V
     out
 }
 
+/// What a strike child's wait did this frame ([`Strike::step`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StrikeStep {
+    Waits,
+    /// Its parent's motion left the cast before the mark: it ends unseen (`end_thread`).
+    Ends,
+    /// The mark (KH1 units, y down: the floor under the target's place this frame): KH1's cloud effect 14 above it.
+    Marks(Vec3),
+    /// The strike, at the mark.
+    Strikes(Vec3),
+}
+
+/// A strike child's wait (the Yellow Opera's Thunder, `ex_2130_00.bd` entry `0x22A`; Checked (files): the child
+/// disassembled from `0x18`). Its first frame keeps the target's place (`sp+0x10`); then each frame: while its parent
+/// plays the charge (205) it yields; the parent must then play the hold (206), through which it yields; then the cast
+/// (207), whose first frame starts a `wait`-frame count (80, `0x4C2`: counted down by the step, a yield each frame,
+/// no motion test while it counts); then, its parent still in the cast (else it ends), the mark: the target's place
+/// read again while the target is there (`sys 120`), on the floor under it (`0x18`: `sys 77` straight down; KH1's cloud
+/// effect 14 200 above it); then `delay` frames (30, the same count, **no parent test**) and the strike at the mark
+/// (effect 11; `sys 90` / `sys 60` on each opponent inside its cylinder). Nothing tests the parent's HP; after the mark
+/// nothing tests the parent at all (KH1's children are tasks of their own, `0x14028F5E0`). Effects (2056, 9, 2058, 14,
+/// 11, 12) wait for M13.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Strike {
+    /// Its sub-object index (`sys 94`'s second word).
+    pub child: u8,
+    pub charge: u16,
+    pub hold: u16,
+    pub cast: u16,
+    pub wait: f32,
+    pub delay: f32,
+    phase: StrikePhase,
+    left: f32,
+    seen: Option<Vec3>,
+    mark: Vec3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StrikePhase {
+    Start,
+    Charge,
+    Hold,
+    Wait,
+    Delay,
+}
+
+impl Strike {
+    pub fn new(child: u8, charge: u16, hold: u16, cast: u16, wait: f32, delay: f32) -> Strike {
+        Strike { child, charge, hold, cast, wait, delay, phase: StrikePhase::Start, left: 0.0, seen: None, mark: Vec3::ZERO }
+    }
+
+    /// Whether it has marked its place (from then on only time ends its wait).
+    pub fn marked(&self) -> bool {
+        self.phase == StrikePhase::Delay
+    }
+
+    /// One frame of the child's script with its parent playing `motion`; `target`: the target's place while it is
+    /// there; `floor`: the floor's height (KH1 y) under it (the battle floor; Assumption: flat battle floors, as every
+    /// flier's).
+    pub fn step(&mut self, motion: Option<u16>, step: f32, target: Option<Vec3>, floor: Option<f32>) -> StrikeStep {
+        if self.phase == StrikePhase::Start {
+            // `0x23A`: the target's place, then the charge effect and the first motion test in the same frame.
+            self.seen = target;
+            self.phase = StrikePhase::Charge;
+        }
+        loop {
+            match self.phase {
+                StrikePhase::Start => unreachable!(),
+                StrikePhase::Charge => {
+                    if motion == Some(self.charge) {
+                        return StrikeStep::Waits;
+                    }
+                    if motion != Some(self.hold) {
+                        return StrikeStep::Ends;
+                    }
+                    self.phase = StrikePhase::Hold;
+                }
+                StrikePhase::Hold => {
+                    if motion == Some(self.hold) {
+                        return StrikeStep::Waits;
+                    }
+                    if motion != Some(self.cast) {
+                        return StrikeStep::Ends;
+                    }
+                    self.phase = StrikePhase::Wait;
+                    self.left = self.wait;
+                }
+                StrikePhase::Wait => {
+                    if self.left > 0.0 {
+                        self.left -= step;
+                        return StrikeStep::Waits;
+                    }
+                    if motion != Some(self.cast) {
+                        return StrikeStep::Ends;
+                    }
+                    let p = target.or(self.seen).unwrap_or(Vec3::ZERO);
+                    self.mark = Vec3::new(p.x, floor.unwrap_or(p.y), p.z);
+                    self.phase = StrikePhase::Delay;
+                    self.left = self.delay - step;
+                    return StrikeStep::Marks(self.mark);
+                }
+                StrikePhase::Delay => {
+                    if self.left > 0.0 {
+                        self.left -= step;
+                        return StrikeStep::Waits;
+                    }
+                    return StrikeStep::Strikes(self.mark);
+                }
+            }
+        }
+    }
+}
+
+/// Steps a parent's waiting strike children once: the [`Cmd::Strike`]s of those that strike (and a [`Cmd::Note`] for
+/// each mark), in their order; the finished ones are dropped.
+pub fn step_strikes<A>(strikes: &mut Vec<Strike>, motion: Option<u16>, step: f32, target: Option<Vec3>, floor: Option<f32>) -> Vec<Cmd<A>> {
+    let mut out = Vec::new();
+    strikes.retain_mut(|s| match s.step(motion, step, target, floor) {
+        StrikeStep::Waits => true,
+        StrikeStep::Ends => false,
+        StrikeStep::Marks(_) => {
+            out.push(Cmd::Note("the Thunder's mark: Sora's place on the floor (KH1's cloud effect 14 above it: M13)"));
+            true
+        }
+        StrikeStep::Strikes(at) => {
+            out.push(Cmd::Strike { child: s.child, at });
+            false
+        }
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Yellow Opera's Thunder: waits through 205 and 206; 207's first frame starts the 80-frame count; the mark on
+    /// the 81st frame of 207 at Sora's place then, on the floor; the strike 30 frames after the mark, whatever plays.
+    #[test]
+    fn a_strike_marks_then_strikes() {
+        let mut s = Strike::new(0, 205, 206, 207, 80.0, 30.0);
+        let sora = |x: f32| Some(Vec3::new(x, -20.0, 0.0));
+        for _ in 0..96 {
+            assert_eq!(s.step(Some(205), 1.0, sora(0.0), Some(0.0)), StrikeStep::Waits);
+        }
+        for _ in 0..68 {
+            assert_eq!(s.step(Some(206), 1.0, sora(0.0), Some(0.0)), StrikeStep::Waits);
+        }
+        let mut f = 0;
+        let mark = loop {
+            f += 1;
+            match s.step(Some(207), 1.0, sora(f as f32), Some(0.0)) {
+                StrikeStep::Waits => {}
+                StrikeStep::Marks(m) => break m,
+                other => panic!("{other:?}"),
+            }
+        };
+        assert_eq!(f, 81, "the mark on 207's 81st frame (its first counts one of the 80)");
+        assert_eq!(mark, Vec3::new(81.0, 0.0, 0.0), "Sora's place then, on the floor");
+        assert!(s.marked());
+        // After the mark nothing tests the parent: a reaction's motion doesn't stop it.
+        let mut g = 0;
+        let at = loop {
+            g += 1;
+            match s.step(Some(0x48), 1.0, sora(500.0), Some(0.0)) {
+                StrikeStep::Waits => {}
+                StrikeStep::Strikes(a) => break a,
+                other => panic!("{other:?}"),
+            }
+        };
+        assert_eq!(g, 30, "the strike 30 frames after the mark");
+        assert_eq!(at, mark, "at the mark, not where Sora went");
+        // Before the mark a changed motion ends it: in the charge, the hold, or at the end of the count.
+        let mut s = Strike::new(0, 205, 206, 207, 80.0, 30.0);
+        assert_eq!(s.step(Some(205), 1.0, None, None), StrikeStep::Waits);
+        assert_eq!(s.step(Some(0x48), 1.0, None, None), StrikeStep::Ends);
+        let mut s = Strike::new(0, 205, 206, 207, 80.0, 30.0);
+        assert_eq!(s.step(Some(206), 1.0, None, None), StrikeStep::Waits);
+        assert_eq!(s.step(Some(220), 1.0, None, None), StrikeStep::Ends);
+        let mut s = Strike::new(0, 205, 206, 207, 2.0, 30.0);
+        assert_eq!(s.step(Some(206), 1.0, None, None), StrikeStep::Waits);
+        assert_eq!(s.step(Some(207), 1.0, None, None), StrikeStep::Waits);
+        assert_eq!(s.step(Some(0x48), 1.0, None, None), StrikeStep::Waits, "the count tests no motion");
+        assert_eq!(s.step(Some(0x48), 1.0, None, None), StrikeStep::Ends, "the test after the count");
+        // No target at the mark: the place its first frame saw.
+        let mut s = Strike::new(1, 205, 206, 207, 1.0, 1.0);
+        assert_eq!(s.step(Some(205), 1.0, Some(Vec3::new(7.0, 0.0, 9.0)), None), StrikeStep::Waits);
+        assert_eq!(s.step(Some(207), 1.0, None, None), StrikeStep::Ends, "the cast must follow the hold");
+        let mut s = Strike::new(1, 205, 206, 207, 1.0, 1.0);
+        assert_eq!(s.step(Some(206), 1.0, Some(Vec3::new(7.0, 0.0, 9.0)), None), StrikeStep::Waits);
+        assert_eq!(s.step(Some(207), 1.0, None, None), StrikeStep::Waits);
+        assert_eq!(s.step(Some(207), 1.0, None, Some(3.0)), StrikeStep::Marks(Vec3::new(7.0, 3.0, 9.0)));
+        let mut v = vec![s];
+        assert_eq!(step_strikes::<u8>(&mut v, None, 1.0, None, None), vec![Cmd::Strike { child: 1, at: Vec3::new(7.0, 3.0, 9.0) }]);
+        assert!(v.is_empty());
+    }
 
     /// The Fire child: waits through 200, needs 201, 40 frames, then acts (on the 41st frame of 201).
     #[test]

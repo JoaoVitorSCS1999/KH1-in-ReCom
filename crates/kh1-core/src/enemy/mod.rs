@@ -418,4 +418,9 @@ pub trait Behaviour {
     fn own_row_stun(&self) -> bool {
         false
     }
+    /// A Re:CoM state (its Stop, stun, freeze, Gravity's flatten, its flinch) ran and handed back to state 1 (the host's
+    /// take-over, Stage 127): what played is dropped. M11, the Yellow Opera: its Thunder already marked (no motion test
+    /// after the mark in KH1) ends too (owner 2026-11-03: Re:CoM's Stop keeps cancelling a caster's spell). The
+    /// default: nothing.
+    fn on_recom_state(&self) {}
 }

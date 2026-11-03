@@ -30,6 +30,12 @@ pub enum Cmd<A> {
     Motion { request: u16, blend: f32 },
     /// The motion queued after the current one (`0x14029FA30`).
     Queue { request: u16, blend: f32 },
+    /// [`Cmd::Queue`] played from `start` KH1 frames when it comes (`sys 14`'s fourth word: `0x1402B9FB0` writes it to the
+    /// queued entry's start `+4`, as `sys 13`'s; Checked (decomp)). M11, the Yellow Opera's Thunder (`ex_2130.bd`
+    /// `0x4A8..0x4E4`: 206 queued from frame 2, 207 from frame 3). KH1's request list holds several entries
+    /// (`0x14029FA30` appends, `+0x5E` counts); the host's one queued slot takes the next when the behaviour sees the
+    /// previous start.
+    QueueAt { request: u16, blend: f32, start: f32 },
     /// An action (bit 24): the AI is not polled again until the host says it ended. `attack`:
     /// the attack objects made with it. `then`: the queued request.
     Action { request: u16, attack: Option<A>, then: u16, blend: f32 },
@@ -88,6 +94,9 @@ pub enum Cmd<A> {
     /// `sys 94`: the enemy throws its thrown object `n` (its child script,
     /// `crate::enemy::thrown`; the Bandit's scimitar, M11).
     Throw(u8),
+    /// A spell child strikes an area once at `at` (KH1 units, y down: the floor point it marked; M11, the Yellow Opera's
+    /// Thunder `ex_2130_00.bd`, `crate::caster::Strike`): the host's strike (a Re:CoM bullet placed by KH1's numbers).
+    Strike { child: u8, at: Vec3 },
     /// Something KH1's script does here that the port doesn't build (an owner question or a later
     /// milestone): for the log only.
     Note(&'static str),
@@ -137,6 +146,7 @@ impl<A: Copy> Cmd<A> {
         match *self {
             Cmd::Motion { request, blend } => Cmd::Motion { request, blend },
             Cmd::Queue { request, blend } => Cmd::Queue { request, blend },
+            Cmd::QueueAt { request, blend, start } => Cmd::QueueAt { request, blend, start },
             Cmd::Action { request, attack, then, blend } => Cmd::Action { request, attack: attack.map(f), then, blend },
             Cmd::Yaw(y) => Cmd::Yaw(y),
             Cmd::Jump { height, velocity } => Cmd::Jump { height, velocity },
@@ -154,6 +164,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::MotionAt { request, blend, start } => Cmd::MotionAt { request, blend, start },
             Cmd::Guard(g) => Cmd::Guard(g),
             Cmd::Throw(n) => Cmd::Throw(n),
+            Cmd::Strike { child, at } => Cmd::Strike { child, at },
             Cmd::Note(n) => Cmd::Note(n),
             Cmd::HealFull => Cmd::HealFull,
             Cmd::Restart { request, blend, start } => Cmd::Restart { request, blend, start },
