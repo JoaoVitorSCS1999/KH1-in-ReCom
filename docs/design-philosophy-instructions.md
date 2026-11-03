@@ -534,3 +534,4 @@ At KH1 setting:
 - **Dim-move follow-ups** (owner, 2026-11-03, on 0.99.1): Larxene from the grey (as built); Marluxia 3 only during attacks (as built); **the Wizard and the Aquatank get the same rule** (to build); no other moves added.
 - **Sleights menu follow-ups** (owner, 2026-11-03, on 0.100.0): Re:CoM's air-start sleights (Homing Blizzara, Warpinator, Warp, Bind, Confuse, Terror, Teleport) usable mid-air (to build); no MP shown in the list (as built); at Damage = KH1 sleight damage scaled by the enemy's KH1 max HP / its Re:CoM max HP (to build).
 - **KH1 damage scaling** (owner, 2026-11-03, on 0.100.4): at Damage = KH1, sleights also scale on enemies without a KH1 twin (bosses, Re:CoM-only enemies) by their KH1-scale HP / Re:CoM HP; summons get the same rule.
+- **Sleight shortcuts** (owner, 2026-11-03, on 0.100.6): a sleight shortcut opens the L1 list even before any spell is learned (as built).
