@@ -141,6 +141,8 @@ fn kh1_core_gravity() -> f32 {
 pub const ATTACK_ROWS: [usize; 4] = [0x884, 0x8F4, 0x964, 0x9D4];
 /// Their requests (the motion each is made with in the script: `0xF6E`, `0xF18`, `0xE12`).
 pub const ATTACK_REQUESTS: [u16; 4] = [200, 204, 201, 201];
+/// The DLL's attack (claw 0, swipe 1, leap claw 2: `crate::kh1_enemy::SHADOW`'s names) each row belongs to.
+pub const ATTACK_OF_ROW: [u8; 4] = [0, 1, 2, 2];
 /// KH1's Shadow hurt parts' bones: part 0 (the head ellipsoid) on bone 30, part 1 (the hips) on
 /// bone 2 (Checked (files): `xa_ex_2020.mdls`'s collision block).
 pub const HURT_PART_BONES: [usize; 2] = [30, 2];
@@ -162,6 +164,16 @@ pub struct AttackRow {
     pub radius: f32,
     /// The clash recoil (`+0x40`: request in the low 16 bits, bit 22 the push).
     pub recoil: u32,
+    /// KH1's attack-meets-attack numbers (M11, `0x1402B3BE0` / `0x1402B4BC0` / `0x1402B4640`): the clash type
+    /// (`+0x38 & 7`), the priority (`+0x3C`), the front cone (`+0x60` turn, `+0x64` cosine; only guard types test
+    /// it). Checked (decomp + files).
+    pub clash_type: u32,
+    /// `+0x3C`.
+    pub priority: i32,
+    /// `+0x60` (radians).
+    pub turn: f32,
+    /// `+0x64`.
+    pub cos: f32,
 }
 
 /// Reads an attack row (the script must push its address).
@@ -183,7 +195,11 @@ pub fn attack_row(script: &[u8], at: usize, codes: &[i32]) -> Result<AttackRow> 
     if !(t.iter().all(|x| x.is_finite() && (-100.0..=100.0).contains(x)) && radius > 0.0 && radius < 1000.0) {
         return bad(format!("attack row {at:#x}: t {t:?} radius {radius}"));
     }
-    Ok(AttackRow { code, bone: bone as usize, t, radius, recoil: u(0x40) })
+    let (clash_type, priority, turn, cos) = (u(0x38) & 7, u(0x3C) as i32, f(0x60), f(0x64));
+    if !(0..=100).contains(&priority) || !turn.is_finite() || !(-1.0..=1.0).contains(&cos) {
+        return bad(format!("attack row {at:#x}: priority {priority}, cone {turn} / {cos}"));
+    }
+    Ok(AttackRow { code, bone: bone as usize, t, radius, recoil: u(0x40), clash_type, priority, turn, cos })
 }
 
 /// The model's bone code table (`MOBJ` → model at `MOBJ + [MOBJ + 0x20]`; the model's header
@@ -345,7 +361,7 @@ pub fn build(inp: &Inputs) -> Result<Built> {
     // M11: the shared record writer: the claw and the swipe on Re:CoM's claw record (attack id 0),
     // the leap claw's two rows on its leap record (id 1), every row on hit slot 0 (their `+0x34`).
     let new: Vec<crate::enemy::NewRecord> = (0..ATTACK_ROWS.len()).map(|i| crate::enemy::NewRecord { request: ATTACK_REQUESTS[i], row: &rows[i], sub: 0, recom_id: ATTACK_IDS[i] }).collect();
-    let (asd, records) = crate::enemy::extend_asd(&inp.asd, (3, 0x6C, 0x24C), &conv, &ms, &new, &clips).map_err(|e| crate::Error::Format(format!("EN0001.ASD: {e}")))?;
+    let (asd, records, made) = crate::enemy::extend_asd(&inp.asd, (3, 0x6C, 0x24C), &conv, &ms, &new, &clips).map_err(|e| crate::Error::Format(format!("EN0001.ASD: {e}")))?;
     // Sounds.
     let ses = extend_ses(&inp.ses, &ms, &clips)?;
 
@@ -355,15 +371,19 @@ pub fn build(inp: &Inputs) -> Result<Built> {
             return bad(format!("clash recoil request {r} has no motion"));
         }
     }
-    // Check the constants against the behaviour's list.
-    let names: Vec<&str> = consts.iter().map(|c| c.0.as_str()).collect();
     // KH1's hurt parts (part 0 on bone 30, part 1 on bone 2: the `.mdls` collision block's hurt
     // entries, Checked (files)) as Re:CoM bones, for the DLL's "part from the hit's height".
     let parts: Vec<usize> = HURT_PART_BONES
         .iter()
         .map(|&k| conv.map().iter().position(|m| *m == Some(k)).ok_or_else(|| crate::Error::Format(format!("KH1 bone {k} has no Re:CoM bone"))))
         .collect::<Result<_>>()?;
-    let manifest = manifest_json(&consts, &clips, &recoil, &parts, &names);
+    // M11, attack meets attack: each row's clash numbers and the ASD records made from it.
+    let clash: Vec<(u8, crate::enemy::ClashOut)> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (ATTACK_OF_ROW[i], crate::enemy::ClashOut { row: ATTACK_ROWS[i], clash_type: r.clash_type, priority: r.priority, turn: r.turn, cos: r.cos, records: made[i].clone() }))
+        .collect();
+    let manifest = manifest_json(&consts, &clips, &recoil, &parts, &clash);
     Ok(Built { ann: ann_bytes, asd, ses, manifest, clips, consts, records })
 }
 
@@ -413,7 +433,7 @@ fn extend_ses(ses: &[u8], ms: &MotionSet, clips: &[RequestClip]) -> Result<Vec<u
     Ok(crate::ses::write(&entries))
 }
 
-fn manifest_json(consts: &[(String, f32)], clips: &[RequestClip], recoil: &[u32], parts: &[usize], _names: &[&str]) -> String {
+fn manifest_json(consts: &[(String, f32)], clips: &[RequestClip], recoil: &[u32], parts: &[usize], clash: &[(u8, crate::enemy::ClashOut)]) -> String {
     let mut s = String::new();
     s.push_str("{\n");
     s.push_str(&format!("  \"format\": \"{FORMAT}\",\n"));
@@ -423,6 +443,9 @@ fn manifest_json(consts: &[(String, f32)], clips: &[RequestClip], recoil: &[u32]
     s.push_str("\n  },\n");
     s.push_str(&format!("  \"recoil\": [{}],\n", recoil.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", ")));
     s.push_str(&format!("  \"parts\": [{}],\n", parts.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", ")));
+    // Per attack row: its attack and KH1's attack-meets-attack numbers (M11; an older DLL ignores the key).
+    let c: Vec<String> = clash.iter().map(|(a, c)| format!("    {{\"attack\": {a}, {}", &c.json()[1..])).collect();
+    s.push_str(&format!("  \"clash\": [\n{}\n  ],\n", c.join(",\n")));
     s.push_str("  \"requests\": [\n");
     let r: Vec<String> = clips
         .iter()
@@ -501,6 +524,12 @@ mod tests {
         assert_eq!(s.len(), 5);
         // The manifest is the DLL's format.
         assert!(b.manifest.contains("\"format\": \"kh1-shadow 1\""));
+        // M11, attack meets attack: the four rows (type 0, priority 40, `ex_2020.bd`), each on its own record after
+        // Re:CoM's three.
+        for (i, at) in ATTACK_ROWS.iter().enumerate() {
+            let line = format!("{{\"attack\": {}, \"row\": \"{at:#x}\", \"type\": 0, \"priority\": 40, \"turn\": 0.0, \"cos\": 1.0, \"records\": [{}]}}", ATTACK_OF_ROW[i], 3 + i);
+            assert!(b.manifest.contains(&line), "{line}");
+        }
         let head = b.manifest.find("\"parts\": [").unwrap();
         println!("{}", &b.manifest[head..head + 20]);
         std::fs::write(std::env::temp_dir().join("kh1-shadow-test.json"), &b.manifest).unwrap();

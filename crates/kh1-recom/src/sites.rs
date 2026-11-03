@@ -2667,6 +2667,16 @@ pub const KH1_ENEMY_RING_CALLEES: &[Site] = &[
     Site { name: "attack set radius (0x14014E5C0)", rva: 0x0014_E5C0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x8B, 0x41, 0x14, 0x48, 0x8B, 0x59, 0x18] },
 ];
 
+/// M11, attack meets attack (`docs/recom-m11-enemies.md` § Attack meets attack): Re:CoM's line-against-sphere overlap
+/// test, the pair dispatch's case 0x72 (`0x14016EAD0`: a type-7 `CPoly3Collision` attack against a sphere body), which
+/// `win::attack::attack_meets` calls with Sora's swing sphere as the body and a copy of a KH1 enemy row's line record
+/// as the attack (the sphere records use `0x1401777E0`, in [`ATTACK_CALLEES`]). Called, never patched. Checked (exe +
+/// decomp).
+pub const KH1_ENEMY_CLASH_CALLEES: &[Site] = &[
+    // push rbp; push rbx; push rsi; push rdi; push r12; push r14; push r15; lea rbp,[rsp-0x27]
+    Site { name: "line vs sphere (0x140177480)", rva: 0x0017_7480, expect: &[0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x56, 0x41, 0x57, 0x48, 0x8D, 0x6C, 0x24, 0xD9] },
+];
+
 /// M11 ground melee: the Neoshadow's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp):
 /// its only caller is the enemy factory `0x140188F40` (case 27, the call at `0x14018940A`); no branch lands inside
 /// the moved bytes and no pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers;
@@ -2869,6 +2879,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         LARGEBODY_HOOKS,
         LARGEBODY_ALLOC,
         KH1_ENEMY_RING_CALLEES,
+        KH1_ENEMY_CLASH_CALLEES,
         NEOSHADOW_HOOKS,
         NEOSHADOW_ALLOC,
         WIGHTKNIGHT_HOOKS,

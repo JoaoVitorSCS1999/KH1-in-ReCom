@@ -217,6 +217,9 @@ struct Runtime {
     /// KH1's `+0x3EA`: the base request of the last launch it played (KH1's own or a script's), 0 before
     /// any (`kh1_core::enemy::Behaviour::armoured`, M11: the Pirate's `sys 70`).
     launch_base: u16,
+    /// M11, attack meets attack: the record one of its attack rows got from Sora's swing this frame
+    /// ([`swing_meets_attacks`]), played at its next hit-handler call ([`attack_clash_watch`]).
+    attack_clash: Option<ce::EnemyGets>,
 }
 
 /// A guard row made with a request (`kh1_core::enemy::Cmd::Guard`): KH1's row lives while that
@@ -358,15 +361,16 @@ pub fn start_line(k: usize) -> String {
     let c = &CLASSES[k];
     if k == 0 {
         return format!(
-            "shadow: KH1's Shadow (M10) at combat = kh1 in Sora's story with enemy_ai = kh1 (read at each battle start): ctor 0x140192770 wrapped, vtable copy at {:#x} (states 0, 1, 2, 3, 4, 11, 12, 30, think 0x3D0), size 0xCE0 -> 0xD00 at 0x140188FAD; {} clips, recoil {:?}",
+            "shadow: KH1's Shadow (M10) at combat = kh1 in Sora's story with enemy_ai = kh1 (read at each battle start): ctor 0x140192770 wrapped, vtable copy at {:#x} (states 0, 1, 2, 3, 4, 11, 12, 30, think 0x3D0), size 0xCE0 -> 0xD00 at 0x140188FAD; {} clips, recoil {:?}; {}",
             COPY[k].load(Ordering::Relaxed),
             m.map_or(0, |m| m.clips.len()),
-            m.map(|m| [m.recoil[0], m.recoil[1], m.recoil[2], m.recoil[2]])
+            m.map(|m| [m.recoil[0], m.recoil[1], m.recoil[2], m.recoil[2]]),
+            clash_line(m)
         );
     }
     let states: Vec<String> = ce::replaced_states(c).iter().map(|s| s.to_string()).collect();
     format!(
-        "{}: KH1's {} (M11) at combat = kh1 in Sora's story with enemy_ai = kh1 (read at each battle start): ctor {:#x} wrapped, vtable copy at {:#x} (states {}, think 0x3D0), size {:#X} -> {:#X} at {:#x}; {} clips, recoil {:?}",
+        "{}: KH1's {} (M11) at combat = kh1 in Sora's story with enemy_ai = kh1 (read at each battle start): ctor {:#x} wrapped, vtable copy at {:#x} (states {}, think 0x3D0), size {:#X} -> {:#X} at {:#x}; {} clips, recoil {:?}; {}",
         c.name,
         c.name,
         0x1_4000_0000u64 + c.ctor.rva as u64,
@@ -376,8 +380,17 @@ pub fn start_line(k: usize) -> String {
         c.alloc + tail::SIZE,
         0x1_4000_0000u64 + c.alloc_site.rva as u64,
         m.map_or(0, |m| m.clips.len()),
-        m.map(|m| m.recoil.clone())
+        m.map(|m| m.recoil.clone()),
+        clash_line(m)
     )
+}
+
+/// The start line's attack-meets-attack part (M11): the rows a swing can meet, or why there are none.
+fn clash_line(m: Option<&Manifest>) -> String {
+    match m.map(|m| &m.clash) {
+        Some(c) if !c.is_empty() => format!("{} attack rows meet Sora's swings (priorities {:?})", c.len(), c.iter().map(|r| r.priority).collect::<Vec<_>>()),
+        _ => "no attack rows for clashes (a manifest from an older asset step: run kh1-recom-build again)".into(),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -423,6 +436,11 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
         if gone > 0 {
             let _ = GUARDED.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_sub(gone)));
         }
+        // So does a clash with Sora's swing still waiting (M11, attack meets attack).
+        let waiting = v.iter().filter(|x| x.attack_clash.is_some() && (x.battle != battle || x.enemy == this)).count();
+        if waiting > 0 {
+            let _ = CLASH_WAITING.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_sub(waiting)));
+        }
         v.retain(|x| x.battle == battle);
         let slot = v.iter().position(|x| x.enemy == this);
         let fresh = Runtime {
@@ -462,6 +480,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             clash_recoil: None,
             sight_bone: sight_bone(m),
             launch_base: 0,
+            attack_clash: None,
         };
         Some(match slot {
             Some(i) => {
@@ -2278,6 +2297,236 @@ pub unsafe extern "win64" fn guard_event(en: usize) {
         Some(Then::Clash(false)) => wr(en + e::NEXT, crate::battle::state_address(en, state::FLINCH)),
         Some(Then::Done) => {}
         None => call_original(en, GUARD_EVENT_SLOT),
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Attack meets attack (M11; `docs/recom-m11-enemies.md` § Attack meets attack (clashes)).
+// ---------------------------------------------------------------------------------------------
+
+/// Re:CoM's attack set (`enemy+0x100`, `CAttackMotion`): its live entries' count `+0x14`, entries `+0x18` (0x40
+/// bytes each, 12 made: `+0x10`), its `.ASD` records `+0x28` (`+0x24` of them). An entry: `+0x14` its window state
+/// (1: on, `0x14014E830`), `+0x18` its record, `+0x20` its collision (`CCollAttack`: `+0x10` on / off, set by
+/// vtable `+0x10` / `+8`, `0x14014DE90` / `0x14014DE80`; `+0x18` its shape, `+0x60` the shape's type). Checked
+/// (decomp: `0x14014DBE0`, `0x14014E010`, `0x14014E830`, `0x14014E6A0`, `0x14016F110`).
+mod set {
+    pub const LIVE: usize = 0x14;
+    pub const ENTRIES: usize = 0x18;
+    pub const RECORD_COUNT: usize = 0x24;
+    pub const RECORDS: usize = 0x28;
+    pub const MADE: u32 = 12;
+    pub const ENTRY: usize = 0x40;
+    pub const E_STATE: usize = 0x14;
+    pub const E_RECORD: usize = 0x18;
+    pub const E_COLL: usize = 0x20;
+    pub const C_ON: usize = 0x10;
+    pub const C_SHAPE: usize = 0x18;
+}
+
+/// The collisions of KH1 enemy rows a clash marked this frame (KH1's `+4 & 0x30`: they meet no hurt body), and
+/// their enemies, until each enemy's hit-handler call ([`attack_clash_watch`]); [`suppressed`] answers for
+/// `win::attack::pair_dispatch`.
+static SUPPRESS: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
+static SUPPRESSED: AtomicUsize = AtomicUsize::new(0);
+/// Enemies with an `attack_clash` waiting (one load per enemy update otherwise).
+static CLASH_WAITING: AtomicUsize = AtomicUsize::new(0);
+/// KH1's met masks: (Sora's swing, the enemy row's collision) pairs that met; two attack objects meet once while
+/// both live (`0x1402B4BC0` sets `+0x9C` both ways, `0x1402B3BE0` tests it). Kept for the swing (`gen`).
+static MET: Mutex<Vec<(u32, usize)>> = Mutex::new(Vec::new());
+
+/// A live KH1 enemy row a swing may meet.
+struct Candidate {
+    enemy: usize,
+    coll: usize,
+    shape: usize,
+    row: ce::ClashRow,
+    front: bool,
+}
+
+/// KH1's front cone (`0x1402B4640`) of a row of clash type `t` against Sora (only guard types test it), with
+/// [`kh1_front`]'s positions.
+unsafe fn row_front(en: usize, r: &ce::ClashRow) -> bool {
+    if !ke::guard::is_guard_type(r.clash_type) {
+        return true;
+    }
+    let m = mover(en);
+    let Some(sora) = sora_pos() else { return false };
+    if m == 0 {
+        return false;
+    }
+    let me = crate::units::to_kh1(rd_vec(m + mv::POS));
+    ke::guard::front(r.clash_type, r.turn, r.cos, crate::units::yaw_to_kh1(rd(m + mv::YAW)), sora - me)
+}
+
+/// The live rows of this battle's KH1 enemies: each Re:CoM attack entry on (window state 1, collision on) whose
+/// record the asset step made from a KH1 row (the manifest's `clash`), with a sphere or line shape (types 2 / 7).
+unsafe fn live_rows() -> Vec<Candidate> {
+    let Ok(v) = RT.try_lock() else { return Vec::new() };
+    let battle = super::battle::battle_number();
+    let mut out = Vec::new();
+    for rt in v.iter().filter(|r| r.battle == battle && !r.dead) {
+        let m = manifest(rt.class);
+        if m.clash.is_empty() {
+            continue;
+        }
+        let en = rt.enemy;
+        let s: usize = rd(en + e::ATTACKS);
+        if s == 0 {
+            continue;
+        }
+        let entries: usize = rd(s + set::ENTRIES);
+        let (records, rcount): (usize, u32) = (rd(s + set::RECORDS), rd(s + set::RECORD_COUNT));
+        let live = rd::<u32>(s + set::LIVE).min(set::MADE) as usize;
+        if entries == 0 || records == 0 {
+            continue;
+        }
+        for i in 0..live {
+            let at = entries + i * set::ENTRY;
+            let (rec, coll): (usize, usize) = (rd(at + set::E_RECORD), rd(at + set::E_COLL));
+            if rec == 0 || coll == 0 || rd::<u32>(at + set::E_STATE) != 1 || rd::<i32>(coll + set::C_ON) == 0 {
+                continue;
+            }
+            let Some(row) = ce::record_index(rec, records, rcount).and_then(|r| m.clash_of(r)) else { continue };
+            let shape: usize = rd(coll + set::C_SHAPE);
+            if shape == 0 || !matches!(rd::<u32>(shape + 0x60), 2 | 7) {
+                continue;
+            }
+            out.push(Candidate { enemy: en, coll, shape, row: row.clone(), front: row_front(en, row) });
+        }
+    }
+    out
+}
+
+/// One KH1 swing frame against the KH1 enemies' live attack rows (`win::attack::pair_dispatch`, before the hurt
+/// bodies, as KH1's attack pass comes before its body pass, `0x1402B4460`). `swing`: KH1's clash type and priority;
+/// `gen`: the swing; `touch`: the swing's spheres against a Re:CoM shape (Re:CoM's own overlap tests), the contact
+/// point when they meet. Returns Sora's clash record and whether the swing is marked (it meets no hurt body this
+/// frame). Each enemy that got a record keeps it for its hit-handler call; each marked row's collision answers 0
+/// against Sora until then. Re:CoM's guard spark at each meeting. Nothing while no KH1 enemy row is live.
+pub(super) unsafe fn swing_meets_attacks(swing: (u32, i32), gen: u32, touch: &mut dyn FnMut(usize) -> Option<[f32; 4]>) -> (Option<(u8, i32)>, bool) {
+    if !any_installed() {
+        return (None, false);
+    }
+    let cands = live_rows();
+    if cands.is_empty() {
+        return (None, false);
+    }
+    let met: Vec<usize> = match MET.lock() {
+        Ok(mut g) => {
+            g.retain(|x| x.0 == gen);
+            g.iter().map(|x| x.1).collect()
+        }
+        Err(_) => return (None, false),
+    };
+    let points: Vec<Option<[f32; 4]>> = cands.iter().map(|c| if met.contains(&c.coll) || !c.front || !ke::guard::meets(swing.0, c.row.clash_type) { None } else { touch(c.shape) }).collect();
+    let rows = cands.iter().zip(&points).map(|(c, p)| ce::LiveRow { enemy: c.enemy, coll: c.coll, row: &c.row, touches: p.is_some(), front: c.front, met_before: met.contains(&c.coll) });
+    let (sora, marked, meetings) = ce::sweep(swing, rows);
+    for m in &meetings {
+        if let Ok(mut g) = MET.lock() {
+            g.push((gen, m.coll));
+        }
+        if m.stops {
+            if let Ok(mut g) = SUPPRESS.lock() {
+                g.push((m.coll, m.enemy));
+                SUPPRESSED.store(g.len(), Ordering::Relaxed);
+            }
+        }
+        let c = cands.iter().position(|c| c.coll == m.coll).expect("a meeting is one of the candidates");
+        if let Some(p) = points[c] {
+            super::attack::spark_at(p);
+        }
+        let row = &cands[c].row;
+        let en = m.enemy;
+        let gets = m.gets;
+        with_rt(en, |rt| {
+            let before = rt.attack_clash;
+            rt.attack_clash = ce::stronger(before, gets);
+            if before.is_none() && rt.attack_clash.is_some() {
+                CLASH_WAITING.fetch_add(1, Ordering::Relaxed);
+            }
+            let (k, id) = (rt.class, rd::<u32>(en + e::ID));
+            let name = CLASSES[k].attack_names.get(row.attack as usize).copied().unwrap_or("?");
+            line(k, || format!("e{id}: its {name} row (type {}, priority {}) met Sora's swing (type {}, priority {}): Sora {sora:?}, it {gets:?}{}", row.clash_type, row.priority, swing.0, swing.1, if m.stops { ", its row stops this frame" } else { ", its row goes on" }));
+        });
+    }
+    (sora, marked)
+}
+
+/// `win::attack::pair_dispatch`: this attack collision belongs to a KH1 enemy row a clash marked this frame (it
+/// meets no hurt body: Re:CoM's test answers 0). One load while none is marked.
+pub(super) fn suppressed(coll: usize) -> bool {
+    SUPPRESSED.load(Ordering::Relaxed) != 0 && SUPPRESS.lock().is_ok_and(|g| g.iter().any(|x| x.0 == coll))
+}
+
+/// `win::attack`'s enemy-hit wrapper, each enemy update before Re:CoM's hit handler (Re:CoM tests the enemy's
+/// attacks just before, `0x140185630`: its marked rows have answered 0): the record its attack row got from Sora's
+/// swing plays, as KH1's reaction step plays a clash record (`0x1402B8E10` cases 6 / 7):
+/// - a clash: its row's recoil through our state 11 (Re:CoM's attack end with state 11 next, as for a guard row's
+///   clash); its script's hit handler hears the clash there. A row whose recoil the model lacks: Re:CoM's flinch
+///   (the owner's rule for a guarded attack, 2026-11-02);
+/// - a repel: its script's hit handler hears the 0x20 record; no damage, no reaction, its attack goes on.
+///
+/// Only in one of our states (a Re:CoM state such as Stop or a stun has ended its attack: dropped).
+pub(super) unsafe fn attack_clash_watch(en: usize) {
+    if CLASH_WAITING.load(Ordering::Relaxed) == 0 && SUPPRESSED.load(Ordering::Relaxed) == 0 {
+        return;
+    }
+    let Some(k) = ours(en) else { return };
+    if let Ok(mut g) = SUPPRESS.lock() {
+        g.retain(|x| x.1 != en);
+        SUPPRESSED.store(g.len(), Ordering::Relaxed);
+    }
+    let st = crate::guard::state_index(en, rd(en + e::STATE)).map(|s| s as i32);
+    let ours_now = st.is_some_and(|s| ce::replaced_states(CLASSES[k]).contains(&s));
+    let alive = rd::<i32>(en + e::HP) > 0;
+    enum Then {
+        End(bool),
+        Done,
+    }
+    let then = with_rt(en, |rt| {
+        let gets = rt.attack_clash.take()?;
+        let _ = CLASH_WAITING.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1));
+        let id: u32 = rd(en + e::ID);
+        if !ours_now || !alive || rt.dead {
+            line(rt.class, || format!("e{id}: its clash with Sora's swing dropped (Re:CoM state {st:?}, alive {alive})"));
+            return Some(Then::Done);
+        }
+        match gets {
+            ce::EnemyGets::Clash { attack, kind, diff } => {
+                let name = CLASSES[rt.class].attack_names.get(attack as usize).copied().unwrap_or("?");
+                match manifest(rt.class).recoil_of(attack) {
+                    Some(r) => {
+                        rt.clash_recoil = Some((r, kind));
+                        line(rt.class, || format!("e{id}: its {name} clashed with Sora's swing (kind {kind}, {diff:+}): recoil {r}"));
+                    }
+                    None => {
+                        rt.recom_flinch = true;
+                        line(rt.class, || format!("e{id}: its {name} clashed with Sora's swing (kind {kind}): no KH1 recoil motion, Re:CoM's flinch"));
+                    }
+                }
+                Some(Then::End(rt.action.is_some_and(|a| a.attack.is_some() && rt.action_playing)))
+            }
+            ce::EnemyGets::Repelled { attack } => {
+                rt.hits = rt.hits.saturating_add(1);
+                rt.ai.set_hit_count(rt.hits);
+                if CLASSES[rt.class].reads_hp {
+                    rt.ai.set_hp_ratio(hp_ratio(en));
+                }
+                rt.ai.set_playing(rt.current);
+                rt.ai.on_hit(HitNews::Repelled);
+                run_now(en, rt);
+                let name = CLASSES[rt.class].attack_names.get(attack as usize).copied().unwrap_or("?");
+                line(rt.class, || format!("e{id}: its {name} repelled Sora's swing (no damage, no reaction; its hit handler hears it)"));
+                Some(Then::Done)
+            }
+            ce::EnemyGets::Nothing => Some(Then::Done),
+        }
+    });
+    match then.flatten() {
+        // Re:CoM's attack end with state 11 next (bit 0 off), as for a guard row's clash.
+        Some(Then::End(true)) => func::<EndFn>(f::ATTACK_END)(en, crate::battle::state_address(en, state::FLINCH), 0),
+        Some(Then::End(false)) => wr(en + e::NEXT, crate::battle::state_address(en, state::FLINCH)),
+        _ => {}
     }
 }
 

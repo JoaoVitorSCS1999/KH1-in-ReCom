@@ -410,6 +410,151 @@ reaction from those hits. The Darkball's, the Air Pirate's and the Wyvern's "doe
 kind (`keeps_reaction`) after Re:CoM's handler had already cut the attack; they now take this armour (owner
 2026-11-02, below).
 
+### Attack meets attack (clashes)
+
+Owner (2026-11-02, Large Body choices): "build them into the shared enemy guard for every ported enemy, researching
+KH1's order of tests first". Status: built on branch `clash-wip`; tests and the Windows build pass; **not seen in
+game**; no KH1 trace of a clash yet. The asset step must be run again (the manifests gain each attack row's clash
+numbers; the `.ANN` / `.ASD` / `.SES` files are byte-identical).
+
+**KH1's order of tests. Checked (decomp), Steam addresses:**
+
+- One collision pass a frame, `0x1402B4460`. First the **attack pass** `0x1402B47A0`: for each live attack object
+  (64 slots of 0xC0 at `0x142DB4710`), `0x1402B3800` → `0x1402B3D50` lays its spheres along its swept bone line into one
+  list, and **each new sphere is tested at once against every sphere already in the list** (`0x1402B3BE0`). Only after
+  every attack is in the list comes the **body pass**: each actor's hurt parts (`0x1402B5E50`) against the whole list
+  (`0x1402B3BE0` again; a hit → `0x1402B4060`, the damage record).
+- `0x1402B3BE0`, for a pair: other side (`+0` bits 12..13), other owner, the attack not freed (`+0` bit 21) and not
+  off (bit 10). **Against a hurt body**: the attack not clashed this frame (`+4 & 0x30` = 0), and not a guard type 1, 2
+  or 4 (type 3 still hurts); the owner's hit-once mask (`actor+0x3E0`). **Against another attack**: they have not met
+  before (their met masks `+0x54` / `+0x9C`, set both ways on a meeting, kept while both live) and their types meet
+  (`0x140528CB8`). Then the shapes (`0x1402B5EF0`) and `0x1402B4A20`.
+- `0x1402B4A20(a, b)`: each guard-type side's front cone (`0x1402B4640`, both orders; types 0, 5, 6, 7 always pass),
+  then `0x1402B4BC0` both ways, returning 0, 0x10 or 0x20 per side:
+  - 0 when that side already clashed this frame, when the other's priority is 0, or when both are 98 or more;
+  - 0x10 with no record and **no mark** for a side at **100** (it is never moved), or at 98 / 99 against a side under 98;
+  - a **repel** (0x10, marked) for a type 1 / 3 / 4 side above the other (the other side's record flagged 0x20 goes to
+    its owner: no damage, no reaction, its hit handler hears it);
+  - else a **clash record** on that side's owner (`0x1402BF060`): kind 6, or **7 when 40 or more under**, `+8` = its
+    priority minus the other's, `+0x2C` its own row (whose `+0x40` is the recoil it plays); 0x10 / 0x20, marked.
+  - A side that returned 0 is marked by the other side's non-zero return. A marked attack (`+4 |= 0x10 / 0x20`) meets
+    **no hurt body and gets no other record for the rest of the frame**; `+4` is cleared each frame (`0x1402B47A0`), and
+    the persistent mark goes to the script's hit word (`+0x60`). (Correction to § Enemy guard: a clashed row is not
+    shut for good; it ends because its owner's reaction changes the request.)
+  - Effects: each side's own hit effect when it returned non-zero (`0x1402B4400` → `0x1402B4320`), else a generic one
+    at the midpoint of the two spheres (`0x1402AE650`, 10 / 11). A hit-stop and a pad rumble when the other attack is
+    the player's (`0x14028C660(10)`, `0x140270990`).
+- **Damage**: a clash record does none (`0x1402BEEE0` returns the HP for kinds 6 / 7 and for 0x20 records); and
+  since the attack pass comes first, a swing and a row that clash in a frame both miss every body in that frame. The
+  next frame the reactions (Sora `0x14029BBD0`, the enemy `0x1402B8E10` cases 6 / 7 → `0x1402B9140`) change both
+  requests and their rows end. A side at 100 (or 98 / 99 against a lower one) is not marked: it still hits that frame.
+- **Who recoils**: the lower side gets kind 6 (7 when 40+ under); equal priorities both get kind 6 (difference 0); a
+  side at 100 never; a type 0 row never repels. **Sora** plays 0x6E (kind 6, pushed back −diff × 2.5 when under), 0x6F
+  (kind 7) or 0x70 (in the air), as for a guard row (§ Enemy guard). **The enemy** plays its row's recoil (`+0x40`),
+  its script's hit handler hearing the clash; KH1's reaction step plays only the strongest clash of a frame (`uVar6 <
+  uVar5`).
+- **Body spheres count**: a row is a row whatever its bone. The Large Body's charge belly `0x23C` (type 0, priority 90)
+  meets Sora's swing like a fist.
+
+**Each class's attack rows (Checked (files): the players' scripts, `+0x38 & 7`, `+0x3C`, `+0x40`, `+0x64`; the asset
+step reads them):**
+
+| Class | Rows: type / priority | Against the Kingdom Key's 30 |
+|---|---|---|
+| Shadow | claw, swipe, leap claw: 0 / 40 | both recoil (Sora kind 6, pushed 25; it 207 / 208) |
+| Soldier | kicks, double kick, rush, air kick: 0 / 20; jumping kick, rush leap, spin-kick foot: 0 / 100; spin-kick chest `0x2AC`: **1 / 100, cone ±120°** | 20: both kind 6 (it is pushed); 100: Sora's strong recoil, it goes on |
+| Air Soldier | slash 0 / 20; swoop kick, swoop 0 / 30; spin, charge 0 / 50 | both recoil |
+| Powerwild | swipe 0 / 50; flurry hands, pounce 0 / 10; flurry body `0x1CC`: **2 / 10, front half** | both recoil |
+| Darkball | dash 0 / 40; bite, drop 0 / 100 | dash: both; bite / drop: Sora's strong recoil |
+| Bandit | slash, spin, spin end, leap (blade and body): 0 / 30 | both kind 6, no push |
+| Pirate | every row 0 / 90 | Sora's strong recoil, it kind 6 (its recoil) |
+| Air Pirate | swoop 0 / 50; slash 0 / 100 | swoop: both; slash: Sora's strong recoil |
+| Wyvern | bite, dive, landing 0 / 100; charge `0x1CC`: 3 / 100, all round | Sora's strong recoil; it never moves |
+| Search Ghost | burst 0 / 40 (hit A), 0 / 70 (hit B); drain 0 / 40 | both recoil |
+| Large Body | punch (both fists), slam 0 / 30; charge 0 / 90; the stomp's ring: the child's row, type 6 | punch / slam: both kind 6; charge: Sora's strong recoil, it kind 6 (its handler ends the charge: 218, then 209); ring: **never** (type 6 meets no swing) |
+| Neoshadow | claw 0 / 40; rise slash, dive 0 / 100 | claw: both; the others: Sora's strong recoil |
+
+Every class has rows that clash; the only rows that can't are the Large Body's stomp ring (type 6) and the Bandit's
+thrown blade (built before, § The Bandit's thrown scimitar). A Keyblade of priority 98+ makes Sora's side move only for
+an enemy under 98.
+
+**Re:CoM's side. Checked (decomp + exe):** Re:CoM has no attack-against-attack test: its collision step for an attack
+(`0x14016F110`) tests it only against a body list (`*0x14087A838` player side / `*0x14087A840` enemies) through the
+pair dispatch `0x14016EAD0`. An enemy's attacks are its attack set (`enemy+0x100`, `CAttackMotion`, built from its
+`.ASD` by `0x14014DBE0`): each live entry (`+0x18` the `.ASD` record, `0x14014E010`; `+0x14` its window state, 1 = on,
+`0x14014E830`; `+0x20` its collision, `+0x10` on / off by `0x14014DE90` / `0x14014DE80`, `+0x18` its shape: a sphere
+`CSphereCollision` type 2, 0x80 bytes, or a line `CPoly3Collision` type 7, 0x90 bytes, `0x1401720E0`). The enemy update
+`0x140185630` tests its attacks (`0x14014E6A0`) and then runs its hit handler `0x14017F7E0`.
+
+**Built (no new hook; one new callee; nothing per frame outside a KH1 swing's hit window):**
+
+| Part | Where | What |
+|---|---|---|
+| KH1's rule | `kh1-core` `enemy/guard.rs` | `met` (`0x1402B4BC0` with its return: `Met::{Nothing, Unmoved, Repels, Clash}`), `meeting` (both orders and the marks of `0x1402B4A20`), `front` (`0x1402B4640` by type) |
+| The swing's frame | `kh1-recom` `kh1_enemy.rs` | `sweep`: one KH1 swing against the live rows in order: Sora keeps his first record, a marked swing gets no other, each row's record; `stronger` (KH1 plays a frame's strongest clash); `ClashRow`, `record_index`, `Manifest::clash_of` |
+| Asset step | `kh1-recom-assets` `enemy.rs`, `shadow.rs` | each attack row's type, priority and cone (`attack_row`), and the `.ASD` records made from it (`extend_asd` returns their indices): the manifests' per-attack `"clash"` (the Shadow's top-level `"clash"` with each row's attack) |
+| Live rows | `win/kh1_enemy.rs` `live_rows` | this battle's KH1 enemies' attack-set entries that are on, whose record the manifest names (Re:CoM's own records: none), with a sphere or line shape |
+| The test | `win/attack.rs` `pair_dispatch` → `swing_meets_attacks` | in Sora's KH1 swing test (the existing wrapper), **before the hurt bodies** (KH1's attack pass first): the swing's spheres against each live row's own Re:CoM shape with Re:CoM's overlap tests (`0x1401777E0` for spheres, `0x140177480` for lines, the pair dispatch's cases 0x22 / 0x72, on a copy of the enemy's shape so Re:CoM's own stays untouched); KH1's types, the row's cone (guard types), the met masks (once per swing and row) |
+| Sora's clash | `win/attack.rs` | his record into `SWING_CLASH` → `Kh1Sora::swing_clash` (0x6E / 0x6F / 0x70, push, combo counter, Counterattack from frame 12 of 0x6E), as for a guard row; a marked swing applies to no hurt body for the rest of that frame |
+| The enemy's clash | `win/kh1_enemy.rs` `attack_clash_watch` (enemy-hit wrapper, before Re:CoM's handler) | a marked row's collision answers 0 in Re:CoM's test against Sora until then (`suppressed`); then its record plays: a clash = its row's recoil through our state 11 (Re:CoM's attack end with state 11 next, `clash_recoil`, the script hears `HitNews::Clash`), Re:CoM's flinch when the model lacks that recoil (the owner's rule for a guarded attack); a repel = `HitNews::Repelled` (no damage, no reaction); dropped in a Re:CoM state (Stop, stun) or when dead |
+| Look | `win/attack.rs` | Re:CoM's guard spark and clink at the midpoint of the swing sphere and the row (KH1's midpoint) |
+| Start log | `win/kh1_enemy.rs` | `<class>: … N attack rows meet Sora's swings (priorities …)`, or that the manifest is an older one |
+
+Re:CoM's own enemies (`enemy_ai = recom`), Combat = Re:CoM and Riku's story: nothing runs (only our enemies' runtimes
+have rows). Sora's Guard, card plays and Re:CoM's attacks are untouched.
+
+Per frame: two atomic loads per enemy update and one per Re:CoM pair test while no clash is pending; during a KH1
+swing's hit window, one walk of this battle's KH1 enemies' attack sets (at most 12 entries each) and Re:CoM's overlap
+test for each live row. Not measured in game (Assumption: small next to Re:CoM's own collision step, which tests every
+attack against every body each frame).
+
+**Checked / Assumption:**
+
+- Checked (decomp): the order and rules above; Re:CoM's attack set, entry, collision and shape layouts; the pair
+  dispatch's cases; the enemy update's order. Checked (files): every class's row numbers (the asset test reads them from
+  the players' scripts; each record a row names is one of the step's, on the attack's clip). Checked (exe): the new
+  callee's first 16 bytes. Tests: `guard::attack_meets_attack`, `kh1_enemy::a_swing_frame_against_enemy_rows`,
+  `clash_rows_parse_and_look_up`, `enemy::clash_tests` (players' files), the Large Body's real manifest.
+- Assumption: Re:CoM's order of Sora's weapon test and the enemies' attack tests in a frame (an enemy updated before
+  Sora's test this frame has already tested its row against Sora; KH1 tests attacks against attacks first); the enemy's
+  shape positions as Re:CoM last set them (at most a frame old); Re:CoM's guard spark for KH1's clash effects; no
+  hit-stop or rumble; the special-state test (`+0x88 & 1`) not modelled; the row's push bit (`+0x40` bit 22) not carried
+  (as for a guard row).
+- Not KH1's (found, owner question 2): the Soldier's spin-kick chest (type 1) and the Powerwild's flurry body (type 2)
+  are guard types that never hurt in KH1, but the asset step made Re:CoM attack records of them, so they hurt Sora here
+  (since 0.68.0 / 0.70.0). They now also clash as KH1's rows do.
+
+**Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; run the asset step first):**
+
+1. Large Body: swing into its fist as it punches: both bounce (Sora's light recoil, it plays its punch recoil), no
+   damage either way. Swing into its belly while it charges: Sora's strong recoil, the charge stops (its recoil, then
+   its recovery). From behind while it charges: the swing lands (its back isn't a row).
+2. Soldier: meet a kick with a swing: both bounce, it is pushed a little. Meet its spin kick or jumping kick: Sora
+   bounces hard, the kick goes on and can still hit him.
+3. Pirate: meet any slash with a swing: Sora bounces hard, the Pirate plays its recoil.
+4. Wyvern / Neoshadow dive / Darkball bite: Sora bounces hard; they never stop.
+5. Shadow, Bandit, Air Soldier, Powerwild, Search Ghost, Air Pirate's swoop: meeting their attacks makes both recoil.
+6. The swing that bounced does no damage that frame, even when it also touched the body.
+7. Magic never clashes (Fire passes through a fist and hits).
+8. Re:CoM enemies, `enemy_ai = recom`, Combat = Re:CoM: as before.
+
+Please send `kh1-recom.log` (`met Sora's swing`, `clashed with Sora's swing` lines) and an F9 trace. A KH1 recording
+of the same meetings would let us check the frames.
+
+**Owner questions:**
+
+1. **Sora's Keyblade sparks.** KH1 plays each side's own hit effect, or a clash spark, and a 10-frame hit-stop with a
+   pad rumble when Sora's swing clashes. Built: Re:CoM's guard spark and clink only. (a) Keep; (b) add Re:CoM's own
+   hit-stop for Sora's clashes (research its hit-stop first); (c) wait for the effects milestone (M13).
+2. **Guard-type rows inside attacks hurt Sora.** The Soldier's spin-kick chest and the Powerwild's flurry body never
+   hurt in KH1 (they only bounce swings), but they do here. (a) Leave it; (b) keep their records for the clash test and
+   make Re:CoM's test of them against Sora answer 0 (the clash step's path, one more lookup per enemy attack test);
+   (c) have the asset step make them guard rows of the shared enemy guard instead (the Bandit's way: Re:CoM's body
+   guard while they are on), no records.
+3. **Re:CoM's test order.** If an enemy's row already hit Sora earlier in the same frame, KH1 would have clashed first.
+   (a) Keep (at most one frame, rare); (b) research where Re:CoM runs Sora's weapon test against the enemies' updates
+   and move the clash test to the earlier of the two.
+
 ## The Soldier
 
 ### KH1's side. Checked (files: `ex_2010.bd` disassembled; decomp: the VM `0x1402CC620` and syscalls)
@@ -2210,8 +2355,8 @@ gets KH1's AI` in a Large Body battle, `guard row 0 with 65535` (its front row, 
   attribute 1 exception of the charge's knock-back never comes); the rage during a reaction waits for its end; seeds per
   enemy; Re:CoM's sounds on the new clips; the queue blends the host's.
 - **Not ported:** the leash (`0xBEA`: 18 m / 10.8 m out of sight), the sleeping spawn (30), the death routine, the effects
-  (2, 7, 9, 10, 13, 14: M13), the appearance's flag 0x80 and fade-in; **Sora's swings against its damaging rows** (KH1
-  tests attack against attack: owner question 3).
+  (2, 7, 9, 10, 13, 14: M13), the appearance's flag 0x80 and fade-in. Sora's swings against its damaging rows: built
+  (owner question 3 answered (b), § Attack meets attack (clashes)).
 
 #### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; any Large Body battle)
 
@@ -2255,7 +2400,8 @@ kill one. The trace's enemy rows give the rounds' timings, the ring's reach and 
 2. **The power of the punch and the charge.** Re:CoM's Large Body has only its belly bump (id 0, the twin of KH1's slam)
    and its stomp's shockwave (id 1, the twin of KH1's ring). Built: the punch and the charge on the belly bump's power.
    (a) Keep; (b) the charge on id 0, the punch at a fraction; (c) another rule.
-3. **Sora's swings against its attacks.** KH1 tests attack against attack: Sora's swing meeting the charge's belly sphere
+3. **Sora's swings against its attacks.** Answered (owner 2026-11-02: (b), every ported enemy): built, § Attack meets
+   attack (clashes). The question was: KH1 tests attack against attack: Sora's swing meeting the charge's belly sphere
    (priority 90, all round) gets the strong recoil and ends the charge (the Large Body gets a clash: 209); meeting a punching
    fist (30 against 30) both recoil. The framework builds this only for guard-type rows (and the Bandit's blade), so here a
    swing that reaches a charging Large Body hits its body. This is every enemy's damaging rows, not only the Large Body's.

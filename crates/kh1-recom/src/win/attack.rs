@@ -511,6 +511,11 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     if !mv::kh1_on() {
         return recom_pair(coll, list);
     }
+    // M11, attack meets attack: a KH1 enemy row a clash with Sora's swing marked this frame meets no hurt body
+    // (KH1's `+4 & 0x30`, `0x1402B3BE0`): Re:CoM's test of it answers 0 (one load while none is marked).
+    if super::kh1_enemy::suppressed(coll) {
+        return 0;
+    }
     let b = base();
     let pl: usize = rd(va(b, data::MAIN_PLAYER));
     if !mv::is_main_sora(pl) {
@@ -558,7 +563,21 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     let fp = fake.0.as_mut_ptr() as usize;
     wr(fp + 0x60, 2u32);
     let mut result = 0;
-    let mut node: usize = rd(list + 8);
+    // M11, attack meets attack: KH1 tests attacks against attacks before any hurt body (`0x1402B4460`: the attack
+    // pass, then the bodies). The swing against the KH1 enemies' live attack rows (their Re:CoM attack records'
+    // shapes, Re:CoM's overlap tests); a clash plays Sora's KH1 recoil; a marked swing meets no hurt body this frame.
+    let gen = SWING_GEN.load(Ordering::Relaxed);
+    let tick = TICK.load(Ordering::Relaxed);
+    let (clash, marked) = super::kh1_enemy::swing_meets_attacks((live.data.clash_type(), live.priority), gen, &mut |eshape| attack_meets(ctx, fp, eshape, &spheres));
+    if let Some((kind, diff)) = clash {
+        SWING_CLASH_KIND.store((kind as u32) << 16 | (diff as i16 as u16 as u32), Ordering::Relaxed);
+        SWING_CLASH.store(pl, Ordering::Relaxed);
+    }
+    let key = marked_key(gen, tick);
+    if marked {
+        SWING_MARKED.store(key, Ordering::Relaxed);
+    }
+    let mut node: usize = if SWING_MARKED.load(Ordering::Relaxed) == key { 0 } else { rd(list + 8) };
     while node != 0 {
         let next: usize = rd(node + 8);
         if rd::<i32>(node + 0x10) != 0 && rd::<i32>(node + 0x20) != owner_id {
@@ -599,6 +618,59 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     // `0x1402B4A20`), with the same spheres and Re:CoM's primitives (`super::kh1_thrown`).
     super::kh1_thrown::swing_at_blades(|bshape| spheres_meet(ctx, fp, bshape, &spheres));
     result
+}
+
+/// M11, attack meets attack: the swing and Sora frame ([`marked_key`]) in which a clash marked his swing (it meets
+/// no hurt body for the rest of that frame, KH1's `+4 & 0x30`), 0 for none. Keyed by the swing too, so a frame
+/// count that doesn't move (no trace hooks) can't mark a later swing.
+static SWING_MARKED: AtomicU64 = AtomicU64::new(0);
+
+fn marked_key(gen: u32, tick: u64) -> u64 {
+    (1 << 63) | ((gen as u64) << 31) | (tick & 0x7FFF_FFFF)
+}
+
+/// A copy of an enemy attack shape for Re:CoM's overlap tests (they write contact fields into both shapes; the
+/// enemy's own stays as Re:CoM left it). `CSphereCollision` is 0x80 bytes, `CPoly3Collision` (the line records,
+/// type 7) 0x90 (`0x1401720E0`). Checked (decomp).
+#[repr(C, align(16))]
+struct ShapeCopy([u8; 0x90]);
+
+/// `0x140177480(ctx, body sphere, type-7 attack shape)`: Re:CoM's line-against-sphere test (the pair dispatch's case
+/// 0x72). Checked (decomp): reads the attack's `+0x10` / `+0x20` / `+0x80` and radius `+0x70`, the body's `+0x20`,
+/// `+0x70`, `+0x74`; 1 on contact.
+const POLY3_SPHERE: u32 = 0x0017_7480;
+type Prim3Fn = unsafe extern "win64" fn(usize, usize, usize) -> u32;
+
+/// Whether one of the swing's spheres meets a KH1 enemy's attack shape `eshape` (a sphere, type 2, or a line, type
+/// 7: the asset step's records), with Re:CoM's own tests (the swing's fake sphere as the body, a copy of the enemy's
+/// shape as the attack: the pair dispatch's cases 0x22 / 0x72). The contact point KH1 sparks at: halfway between the
+/// two centres (`0x1402B4A20`: `0x140386B70(a + 0x30, b + 0x30, 0.5)`).
+unsafe fn attack_meets(ctx: usize, fp: usize, eshape: usize, spheres: &[(Vec3, f32)]) -> Option<[f32; 4]> {
+    let kind: u32 = rd(eshape + 0x60);
+    let size = match kind {
+        2 => 0x80,
+        7 => 0x90,
+        _ => return None,
+    };
+    let mut copy = ShapeCopy([0; 0x90]);
+    let cp = copy.0.as_mut_ptr() as usize;
+    std::ptr::copy_nonoverlapping(eshape as *const u8, cp as *mut u8, size);
+    let centre: [f32; 4] = rd(eshape + 0x20);
+    for &(c, r) in spheres {
+        for o4 in [0x10, 0x20] {
+            wr(fp + o4, [c.x, c.y, c.z, 1.0f32]);
+        }
+        wr(fp + 0x70, r);
+        wr(fp + 0x74, 0f32);
+        let hit = match kind {
+            2 => func::<PrimFn>(SPHERE_SPHERE)(ctx, fp, cp, 0) != 0,
+            _ => func::<Prim3Fn>(POLY3_SPHERE)(ctx, fp, cp) & 0xFF != 0,
+        };
+        if hit {
+            return Some([(c.x + centre[0]) * 0.5, (c.y + centre[1]) * 0.5, (c.z + centre[2]) * 0.5, 1.0]);
+        }
+    }
+    None
 }
 
 /// Whether one of the swing's spheres meets Re:CoM shape `bshape` (a sphere: kind 2; a column: 4 /
@@ -718,6 +790,9 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
 
 unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
     let o: PlRetFn = orig(&ORIG_ENEMY_HIT);
+    // M11, attack meets attack: a clash of one of its attack rows with Sora's swing plays now (two loads while
+    // none waits).
+    super::kh1_enemy::attack_clash_watch(enemy);
     // M11, the shared enemy-guard step: a guard row left on while a Re:CoM state runs ends (one
     // atomic load while no KH1 enemy guards).
     super::kh1_enemy::guard_watch(enemy);

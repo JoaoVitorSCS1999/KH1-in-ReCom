@@ -190,6 +190,143 @@ pub struct Manifest {
     /// A KH1 child ring on Re:CoM's own shockwave record (M11, the Large Body's stomp; the asset step's
     /// `enemy::RINGS`), from the manifest's `ring_*` / `stomp_request` numbers; none for the others.
     pub ring: Option<Ring>,
+    /// M11, attack meets attack: every attack row's KH1 clash numbers and the `.ASD` records made from it (the
+    /// manifest's per-attack `clash`, the Shadow's top-level `clash`); empty for a manifest from an older asset
+    /// step (then no clashes: logged at start).
+    pub clash: Vec<ClashRow>,
+}
+
+/// One KH1 attack row as Re:CoM's attack records carry it (M11, attack meets attack; `docs/recom-m11-enemies.md`
+/// § Attack meets attack): the attack it belongs to (the class's index), KH1's clash type (`+0x38 & 7`), priority
+/// (`+0x3C`) and front cone (`+0x60` / `+0x64`), and the indices of the `.ASD` records the asset step made from it
+/// (Re:CoM's attack set gives each live entry its record: entry `+0x18`, records at set `+0x28`, 0xA0 apart).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClashRow {
+    /// The class's attack index.
+    pub attack: u8,
+    /// `+0x38 & 7`.
+    pub clash_type: u32,
+    /// `+0x3C`.
+    pub priority: i32,
+    /// `+0x60` (radians) and `+0x64`: only guard types (1..4) test the cone (`0x1402B4640`).
+    pub turn: f32,
+    pub cos: f32,
+    /// The `.ASD` records made from it.
+    pub records: Vec<u16>,
+}
+
+/// The size of a Re:CoM `.ASD` attack record (`0x14014E010` steps its records by 0xA0). Checked (decomp).
+pub const ASD_RECORD: usize = 0xA0;
+
+/// The index of a live attack entry's record (entry `+0x18`) in the set's records (`+0x28`, `count` of them), or
+/// None when it isn't one of them.
+pub fn record_index(record: usize, records: usize, count: u32) -> Option<u16> {
+    let d = record.checked_sub(records)?;
+    (d.is_multiple_of(ASD_RECORD) && d / ASD_RECORD < count as usize).then(|| u16::try_from(d / ASD_RECORD).ok()).flatten()
+}
+
+/// One live KH1 enemy attack row a KH1 swing's frame looks at (M11, attack meets attack; `win::kh1_enemy`
+/// fills it from Re:CoM's attack set): its enemy (any key), its Re:CoM collision, its KH1 numbers, whether the
+/// swing's spheres touch its Re:CoM shape, whether the swing comes from inside its front cone (`0x1402B4640`, only
+/// guard types test it), whether this swing already met it (KH1's met masks `+0x9C`, `0x1402B3BE0`: two attack
+/// objects meet once while both live).
+#[derive(Clone, Copy, Debug)]
+pub struct LiveRow<'a> {
+    pub enemy: usize,
+    pub coll: usize,
+    pub row: &'a ClashRow,
+    pub touches: bool,
+    pub front: bool,
+    pub met_before: bool,
+}
+
+/// What a meeting gives the enemy (KH1's record on it, `0x1402B4BC0`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnemyGets {
+    /// A clash record (kind 6 / 7): its row's recoil, its script hears the clash.
+    Clash { attack: u8, kind: u8, diff: i32 },
+    /// The swing's record flagged 0x20 (its type 1 / 3 / 4 row repelled it): no damage, no reaction.
+    Repelled { attack: u8 },
+    /// No record.
+    Nothing,
+}
+
+/// One meeting of the swing with an enemy row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Met {
+    pub enemy: usize,
+    pub coll: usize,
+    pub gets: EnemyGets,
+    /// The row is marked for the rest of the frame: it meets no hurt body (here: Re:CoM's test of that
+    /// collision against Sora answers 0 until the enemy's hit handler has run).
+    pub stops: bool,
+}
+
+/// One KH1 swing frame against the live enemy rows (KH1's attack pass `0x1402B47A0` → `0x1402B3BE0` → `0x1402B4A20`,
+/// before any hurt body is tested: `0x1402B4460`). The swing: KH1's clash type and priority (row + Keyblade). Returns
+/// Sora's record (his first: once marked he gets no other this frame), whether the swing is marked (it meets no hurt
+/// body this frame), and each meeting. Rows the swing doesn't touch, whose types don't meet (`0x140528CB8`), outside
+/// their cone or met before are skipped. Checked (decomp).
+pub fn sweep<'a>(swing: (u32, i32), rows: impl IntoIterator<Item = LiveRow<'a>>) -> (Option<(u8, i32)>, bool, Vec<Met>) {
+    let (mut sora, mut marked, mut out) = (None, false, Vec::new());
+    for r in rows {
+        if !r.touches || r.met_before || !r.front || !ke::guard::meets(swing.0, r.row.clash_type) {
+            continue;
+        }
+        let m = ke::guard::meeting((swing.0, swing.1, marked), (r.row.clash_type, r.row.priority, false));
+        if let ke::guard::Met::Clash { kind, diff } = m.a {
+            sora.get_or_insert((kind, diff));
+        }
+        marked = m.a_stops;
+        let gets = match m.b {
+            ke::guard::Met::Clash { kind, diff } => EnemyGets::Clash { attack: r.row.attack, kind, diff },
+            ke::guard::Met::Repels => EnemyGets::Repelled { attack: r.row.attack },
+            _ => EnemyGets::Nothing,
+        };
+        out.push(Met { enemy: r.enemy, coll: r.coll, gets, stops: m.b_stops });
+    }
+    (sora, marked, out)
+}
+
+/// KH1's reaction step takes the strongest clash of a frame (`0x1402B8E10`: a record plays only when its kind is
+/// above the last played, `uVar6 < uVar5`): the pending clash after `new` arrives.
+pub fn stronger(old: Option<EnemyGets>, new: EnemyGets) -> Option<EnemyGets> {
+    match (old, new) {
+        (_, EnemyGets::Nothing) => old,
+        (Some(EnemyGets::Clash { kind: k0, .. }), EnemyGets::Clash { kind: k1, .. }) if k1 <= k0 => old,
+        (Some(EnemyGets::Clash { .. }), EnemyGets::Repelled { .. }) => old,
+        _ => Some(new),
+    }
+}
+
+/// The manifest's clash rows (`"clash"`): per row `type`, `priority`, `turn`, `cos`, `records`, and `attack` when
+/// `attack` is None (the Shadow's list).
+fn parse_clash(list: &json::Value, attack: Option<u8>, attacks: usize) -> Result<Vec<ClashRow>, String> {
+    let list = list.as_array().ok_or("\"clash\" is not a list")?;
+    let mut out = Vec::with_capacity(list.len());
+    for c in list {
+        let n = |k: &str| c.get(k).and_then(|x| x.as_f64()).filter(|x| x.is_finite()).ok_or_else(|| format!("clash row without \"{k}\""));
+        let a = match attack {
+            Some(a) => a,
+            None => n("attack")? as u8,
+        };
+        if a as usize >= attacks {
+            return Err(format!("clash row of attack {a}: the class has {attacks}"));
+        }
+        let (t, p, turn, cos) = (n("type")?, n("priority")?, n("turn")? as f32, n("cos")? as f32);
+        if !(0.0..=7.0).contains(&t) || !(0.0..=100.0).contains(&p) || !(-1.0..=1.0).contains(&cos) {
+            return Err(format!("clash row: type {t} priority {p} cos {cos}"));
+        }
+        let records = c
+            .get("records")
+            .and_then(|r| r.as_array())
+            .ok_or("clash row without \"records\"")?
+            .iter()
+            .map(|r| r.as_u32().filter(|&r| r <= 0xFFFF).map(|r| r as u16).ok_or_else(|| "bad clash record".to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        out.push(ClashRow { attack: a, clash_type: t as u32, priority: p as i32, turn, cos, records });
+    }
+    Ok(out)
 }
 
 /// A KH1 child object that grows on the floor (`ex_2050_00.bd`: made at frame `start` of `request`, its radius
@@ -234,6 +371,11 @@ impl Manifest {
     pub fn recoil_of(&self, attack: u8) -> Option<u16> {
         self.recoil.get(attack as usize).copied().filter(|&r| self.clip(r).is_some())
     }
+
+    /// The attack row a live `.ASD` record (by index) was made from (M11, attack meets attack).
+    pub fn clash_of(&self, record: u16) -> Option<&ClashRow> {
+        self.clash.iter().find(|c| c.records.contains(&record))
+    }
 }
 
 impl ke::Motions for Manifest {
@@ -248,7 +390,11 @@ pub fn from_shadow(text: &str) -> Result<Manifest, String> {
     let v = json::parse(text)?;
     let parts = parse_parts(&v, 2)?;
     let consts = Table::new(m.consts.pairs().to_vec(), kh1_core::shadow::NAMES)?;
-    Ok(Manifest { consts, clips: m.clips, recoil: vec![m.recoil[0], m.recoil[1], m.recoil[2]], parts, guards: Vec::new(), ring: None })
+    let clash = match v.get("clash") {
+        Some(c) => parse_clash(c, None, 3)?,
+        None => Vec::new(),
+    };
+    Ok(Manifest { consts, clips: m.clips, recoil: vec![m.recoil[0], m.recoil[1], m.recoil[2]], parts, guards: Vec::new(), ring: None, clash })
 }
 
 fn parse_parts(v: &json::Value, min: usize) -> Result<Vec<i32>, String> {
@@ -297,7 +443,11 @@ pub fn parse(text: &str, enemy: &str, names: &[&str], needed: &[u16]) -> Result<
     }
     let atk = v.get("attacks").and_then(|a| a.as_array()).ok_or("no \"attacks\"")?;
     let mut recoil = Vec::new();
-    for a in atk {
+    let mut clash = Vec::new();
+    for (i, a) in atk.iter().enumerate() {
+        if let Some(c) = a.get("clash") {
+            clash.extend(parse_clash(c, Some(i as u8), atk.len())?);
+        }
         let r = a.get("recoil").and_then(|x| x.as_u32()).filter(|&r| r <= 0xFFFF).ok_or("attack without \"recoil\"")?;
         let q = a.get("request").and_then(|x| x.as_u32()).filter(|&r| r <= 0xFFFF).ok_or("attack without \"request\"")?;
         if !clips.iter().any(|c| c.request as u32 == q) {
@@ -313,7 +463,7 @@ pub fn parse(text: &str, enemy: &str, names: &[&str], needed: &[u16]) -> Result<
             return Err(format!("the ring's request {} has no clip of more than {} frames", r.request, r.start));
         }
     }
-    let m = Manifest { consts, clips, recoil, parts, guards, ring };
+    let m = Manifest { consts, clips, recoil, parts, guards, ring, clash };
     for &r in needed {
         if m.clip(r).is_none() {
             return Err(format!("no clip for KH1 request {r}"));
@@ -563,6 +713,77 @@ mod tests {
         assert_eq!(m.consts.get("close_range"), 350.0);
         assert_eq!(m.recoil_of(0), Some(218));
         let _ = make(1, &m, 1, 0.0);
+    }
+
+    /// M11, attack meets attack: the per-attack `clash` rows (the asset step's), their record lookup and
+    /// the record index of a live attack entry.
+    #[test]
+    fn clash_rows_parse_and_look_up() {
+        let consts: Vec<String> = ke::ENGINE_NAMES.iter().map(|n| format!("\"{n}\": 1.0")).collect();
+        let r: Vec<String> = [0u16, 200, 207, 215, 218].iter().map(|q| format!("{{\"request\": {q}, \"entry\": 0, \"slot\": {}, \"name\": \"e009_100\", \"frames\": 30, \"root\": false, \"loop\": false, \"source\": \"kh1\"}}", 100 + q % 50)).collect();
+        let punch = r#"{"name": "punch", "request": 200, "recoil": 215, "rows": ["0xec", "0x15c"], "clash": [{"row": "0xec", "type": 0, "priority": 30, "turn": 0.0, "cos": 1.0, "records": [2, 3]}, {"row": "0x15c", "type": 0, "priority": 30, "turn": 0.0, "cos": 1.0, "records": [4, 5]}]}"#;
+        let charge = r#"{"name": "charge", "request": 207, "recoil": 218, "rows": ["0x23c"], "clash": [{"row": "0x23c", "type": 0, "priority": 90, "turn": 0.0, "cos": 1.0, "records": [7]}]}"#;
+        let t = format!("{{\"format\": \"kh1-enemy 1\", \"enemy\": \"x\", \"consts\": {{{}}}, \"attacks\": [{punch}, {charge}], \"parts\": [5], \"requests\": [{}]}}", consts.join(", "), r.join(", "));
+        let m = parse(&t, "x", &[], &[0]).unwrap();
+        assert_eq!(m.clash.len(), 3);
+        assert_eq!(m.clash_of(7).map(|c| (c.attack, c.clash_type, c.priority)), Some((1, 0, 90)));
+        assert_eq!(m.clash_of(4).map(|c| (c.attack, c.priority)), Some((0, 30)));
+        assert!(m.clash_of(0).is_none() && m.clash_of(6).is_none(), "Re:CoM's own records and others: none");
+        // An older manifest (no "clash"): parses, no rows.
+        let old = t.replace(r#", "clash": [{"row": "0x23c", "type": 0, "priority": 90, "turn": 0.0, "cos": 1.0, "records": [7]}]"#, "");
+        assert_eq!(parse(&old, "x", &[], &[0]).unwrap().clash.len(), 2);
+        assert!(parse(&t.replace("\"priority\": 90", "\"priority\": 190"), "x", &[], &[0]).is_err());
+        // Entry `+0x18` against the set's records `+0x28` (0xA0 apart, `+0x24` of them).
+        assert_eq!(record_index(0x1000 + 7 * 0xA0, 0x1000, 9), Some(7));
+        assert_eq!(record_index(0x1000 + 9 * 0xA0, 0x1000, 9), None);
+        assert_eq!(record_index(0x1000 + 0x50, 0x1000, 9), None);
+        assert_eq!(record_index(0xF00, 0x1000, 9), None);
+    }
+
+    /// One swing frame against live rows (M11, attack meets attack): the Kingdom Key's 30.
+    #[test]
+    fn a_swing_frame_against_enemy_rows() {
+        let row = |attack: u8, t: u32, p: i32| ClashRow { attack, clash_type: t, priority: p, turn: 0.0, cos: 1.0, records: vec![] };
+        let (punch, charge, dive, chest, flurry_body) = (row(0, 0, 30), row(2, 0, 90), row(2, 0, 100), row(3, 1, 100), row(1, 2, 10));
+        fn live(enemy: usize, r: &ClashRow) -> LiveRow<'_> {
+            LiveRow { enemy, coll: enemy * 16, row: r, touches: true, front: true, met_before: false }
+        }
+        // A fist: both kind 6; the swing is marked (no damage this frame), so is the fist.
+        let (sora, marked, m) = sweep((0, 30), [live(1, &punch)]);
+        assert_eq!((sora, marked), (Some((6, 0)), true));
+        assert_eq!(m, vec![Met { enemy: 1, coll: 16, gets: EnemyGets::Clash { attack: 0, kind: 6, diff: 0 }, stops: true }]);
+        // A charging Large Body's belly: Sora the strong recoil, the Large Body kind 6 (its handler ends the charge).
+        let (sora, _, m) = sweep((0, 30), [live(1, &charge)]);
+        assert_eq!((sora, m[0].gets), (Some((7, -60)), EnemyGets::Clash { attack: 2, kind: 6, diff: 60 }));
+        // A diving Neoshadow (100): Sora bounces, the dive goes on and still hits.
+        let (sora, marked, m) = sweep((0, 30), [live(1, &dive)]);
+        assert_eq!((sora, marked, m[0].gets, m[0].stops), (Some((7, -70)), true, EnemyGets::Nothing, false));
+        // Two fists in one frame: Sora's first record only; the second fist still takes its clash.
+        let (sora, _, m) = sweep((0, 30), [live(1, &punch), live(2, &punch)]);
+        assert_eq!((sora, m.len(), m[1].gets), (Some((6, 0)), 2, EnemyGets::Clash { attack: 0, kind: 6, diff: 0 }));
+        // Skipped: not touching, met before, outside a guard row's cone; Fire (type 5) meets no type-0 row.
+        let mut l = live(1, &punch);
+        l.touches = false;
+        assert!(sweep((0, 30), [l]).2.is_empty());
+        let mut l = live(1, &punch);
+        l.met_before = true;
+        assert!(sweep((0, 30), [l]).2.is_empty());
+        let mut l = live(1, &chest);
+        l.front = false;
+        assert!(sweep((0, 30), [l]).2.is_empty());
+        assert!(sweep((5, 30), [live(1, &punch)]).2.is_empty());
+        // The Soldier's spin-kick chest (type 1, 100) from the front: the strong recoil; the Powerwild's flurry body
+        // (type 2, 10): Sora kind 6 above it, the Powerwild kind 6 (a type 2 never repels).
+        assert_eq!(sweep((0, 30), [live(1, &chest)]).0, Some((7, -70)));
+        let (sora, _, m) = sweep((0, 30), [live(1, &flurry_body)]);
+        assert_eq!((sora, m[0].gets), (Some((6, 20)), EnemyGets::Clash { attack: 1, kind: 6, diff: -20 }));
+        // KH1 plays the strongest clash of the frame.
+        let c6 = EnemyGets::Clash { attack: 0, kind: 6, diff: 0 };
+        let c7 = EnemyGets::Clash { attack: 1, kind: 7, diff: -50 };
+        assert_eq!(stronger(Some(c6), c7), Some(c7));
+        assert_eq!(stronger(Some(c7), c6), Some(c7));
+        assert_eq!(stronger(None, EnemyGets::Nothing), None);
+        assert_eq!(stronger(Some(c6), EnemyGets::Repelled { attack: 0 }), Some(c6));
     }
 
     #[test]

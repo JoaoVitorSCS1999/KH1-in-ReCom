@@ -244,7 +244,7 @@ mod tests {
         }
         // The front row: type 1, priority 100, recoil 110 (never played), 70° front (cos 0.342), mode 3 (no windows).
         assert!(b.manifest.contains(r#"{"name": "front", "row": "0x38c", "type": 1, "priority": 100, "recoil": 110, "slot": 0, "turn": 0.0, "cos": 0.34202, "windows": []}"#), "{}", b.manifest);
-        assert!(b.manifest.contains(r#"{"name": "stomp", "request": 230, "recoil": 110, "rows": ["0x31c"]}"#));
+        assert!(b.manifest.contains(r#"{"name": "stomp", "request": 230, "recoil": 110, "rows": ["0x31c"], "clash": []}"#));
         assert!(b.manifest.contains("\"format\": \"kh1-enemy 1\"") && b.manifest.contains("\"enemy\": \"largebody\""));
         assert_eq!(b.parts.len(), 9);
         std::fs::write(std::env::temp_dir().join("kh1-largebody-test.json"), &b.manifest).unwrap();
