@@ -10,3 +10,4 @@ pub mod gargoyle;
 pub mod greenrequiem;
 pub mod rednocturne;
 pub mod bluerhapsody;
+pub mod yellowopera;

@@ -197,6 +197,8 @@ pub mod model {
         /// Frames the current request has played.
         pub age: f32,
         pub queued: Option<u16>,
+        /// The start frame of the queued request ([`Cmd::QueueAt`]; 0 otherwise).
+        pub queued_start: f32,
         /// Attacks released by Stage 127's net.
         pub released: usize,
         /// Every command, with its frame.
@@ -220,7 +222,7 @@ pub mod model {
 
     impl<C: Engine> Model<C> {
         pub fn new(ai: Box<dyn Behaviour>, c: C, frames: Vec<(u16, f32)>, loops: Vec<u16>, attack_states: Vec<i32>) -> Self {
-            Model { ai, c, frames, loops, attack_states, pos: Vec3::ZERO, moved: 0.0, state: 1, next: None, action: None, current: None, age: 0.0, queued: None, released: 0, log: Vec::new(), trace: Vec::new(), frame: 0, grab_test: None, grab_at_once: true, grabbable: true, lands: true, held_frames: 126, attack_start: 0.0 }
+            Model { ai, c, frames, loops, attack_states, pos: Vec3::ZERO, moved: 0.0, state: 1, next: None, action: None, current: None, age: 0.0, queued: None, queued_start: 0.0, released: 0, log: Vec::new(), trace: Vec::new(), frame: 0, grab_test: None, grab_at_once: true, grabbable: true, lands: true, held_frames: 126, attack_start: 0.0 }
         }
 
         fn len(&self, r: u16) -> f32 {
@@ -344,6 +346,7 @@ pub mod model {
                 }
                 if let Some(q) = self.queued.take() {
                     self.play(q);
+                    self.age = std::mem::take(&mut self.queued_start);
                 }
             }
             if poll && self.action.is_none_or(|(a, _)| a.steered) {
@@ -386,6 +389,12 @@ pub mod model {
             if !airborne && !flying && self.pos.y < 0.0 {
                 self.pos.y = (self.pos.y + 20.0).min(0.0);
             }
+            // A flier aimed under the floor (M11, the Yellow Opera's darting points: KH1's `0x934` puts them on the far
+            // side of Sora's head height) meets the floor: KH1's flight and Re:CoM's mover both collide with the
+            // background (Assumption: Re:CoM's mover keeps a flying enemy on the battle floor).
+            if flying && self.pos.y > 0.0 {
+                self.pos.y = 0.0;
+            }
         }
 
         fn apply(&mut self, c: &Cmd<u8>) {
@@ -402,7 +411,14 @@ pub mod model {
                     self.play(request);
                     self.age = start;
                 }
-                Cmd::Queue { request, .. } => self.queued = Some(request),
+                Cmd::Queue { request, .. } => {
+                    self.queued = Some(request);
+                    self.queued_start = 0.0;
+                }
+                Cmd::QueueAt { request, start, .. } => {
+                    self.queued = Some(request);
+                    self.queued_start = start;
+                }
                 Cmd::Action { request, attack, then, .. } => {
                     let a = Running { request, attack: attack.is_some(), steered: false, playing: attack.is_none() };
                     self.action = Some((a, attack));

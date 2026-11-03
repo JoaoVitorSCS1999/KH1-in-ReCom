@@ -99,7 +99,7 @@ const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin 
 
 /// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
 /// row in their own module (`crate::m11`); one line here per enemy.
-pub static CLASSES: [&Class; 20] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS, &crate::ground::largebody::CLASS, &crate::ground::neoshadow::CLASS, &crate::ground::wightknight::CLASS, &crate::ground::fatbandit::CLASS, &crate::fliers::gargoyle::CLASS, &crate::ground::defender::CLASS, &crate::ground::bouncywild::CLASS, &crate::fliers::rednocturne::CLASS, &crate::fliers::bluerhapsody::CLASS, &crate::fliers::greenrequiem::CLASS];
+pub static CLASSES: [&Class; 21] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS, &crate::ground::largebody::CLASS, &crate::ground::neoshadow::CLASS, &crate::ground::wightknight::CLASS, &crate::ground::fatbandit::CLASS, &crate::fliers::gargoyle::CLASS, &crate::ground::defender::CLASS, &crate::ground::bouncywild::CLASS, &crate::fliers::rednocturne::CLASS, &crate::fliers::bluerhapsody::CLASS, &crate::fliers::greenrequiem::CLASS, &crate::fliers::yellowopera::CLASS];
 
 /// M10's Shadow (class 0).
 pub static SHADOW: Class = Class {
@@ -612,6 +612,8 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::HealFull => "heals to full HP (KH1's HP = max HP)".into(),
         Cmd::Support { child, draw } => format!("its spell {child}'s target among its allies (KH1's sys 102, draw {draw:.4})"),
         Cmd::Reward(r) => format!("reward: EXP bonus EXP / {} + {}{}, KH1 prizes {:?}", r.exp_div, r.exp_add, if r.exp_min > 0 { format!(" (at least {})", r.exp_min) } else { String::new() }, r.prizes),
+        Cmd::QueueAt { request, blend, start } => format!("queue {request} b{blend} from {start}"),
+        Cmd::Strike { child, at } => format!("strike {child} at ({:.0},{:.0},{:.0})", at.x, at.y, at.z),
         Cmd::Restart { request, blend, start } => format!("motion {request} b{blend} again from {start}"),
     }
 }
@@ -619,7 +621,7 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::AttackAt { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Restart { .. } | Cmd::Throw(_) | Cmd::Note(_) | Cmd::HealFull | Cmd::Support { .. } | Cmd::Reward(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::AttackAt { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Restart { .. } | Cmd::Throw(_) | Cmd::Strike { .. } | Cmd::Note(_) | Cmd::HealFull | Cmd::Support { .. } | Cmd::Reward(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -1109,6 +1111,11 @@ mod tests {
         // M11 (the Blue Rhapsody): a steered attack from a later frame.
         assert_eq!(cmd_token(&Cmd::AttackAt { request: 215, attack: 0, blend: 8.0, start: 8.0 }, CLASSES[0].attack_names, &n), "attack 215 (claw) from 8, steered");
         assert!(logged(&Cmd::AttackAt { request: 215, attack: 0, blend: 8.0, start: 8.0 }));
+        // M11 (the Yellow Opera): a queued request from a later frame; a strike at a KH1 point.
+        assert_eq!(cmd_token(&Cmd::QueueAt { request: 206, blend: 0.0, start: 2.0 }, CLASSES[0].attack_names, &n), "queue 206 b0 from 2");
+        assert!(!logged(&Cmd::QueueAt { request: 206, blend: 0.0, start: 2.0 }));
+        assert_eq!(cmd_token(&Cmd::Strike { child: 0, at: kh1_core::Vec3::new(1.0, 2.0, 3.0) }, CLASSES[0].attack_names, &n), "strike 0 at (1,2,3)");
+        assert!(logged(&Cmd::Strike { child: 0, at: kh1_core::Vec3::new(1.0, 2.0, 3.0) }));
         // M11 (the Search Ghost): what KH1 does that isn't built is logged.
         assert_eq!(cmd_token(&Cmd::Note("x"), CLASSES[0].attack_names, &n), "note: x");
         assert!(logged(&Cmd::Note("x")));

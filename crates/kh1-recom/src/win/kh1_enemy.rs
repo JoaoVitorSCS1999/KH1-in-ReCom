@@ -158,6 +158,9 @@ struct Runtime {
     ai: Box<dyn Behaviour>,
     current: Option<u16>,
     queued: Option<(u16, f32)>,
+    /// The start frame of the queued request when the behaviour gave one (`Cmd::QueueAt`, M11: the Yellow Opera's Thunder),
+    /// for that request only.
+    queued_start: Option<(u16, f32)>,
     action: Option<Act>,
     /// The action motion has started (its clock now counts).
     action_playing: bool,
@@ -467,6 +470,7 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
             ai,
             current: None,
             queued: None,
+            queued_start: None,
             action: None,
             action_playing: false,
             reaction: None,
@@ -871,7 +875,15 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
                 play(en, rt, request, blend);
             }
         }
-        Cmd::Queue { request, blend } => rt.queued = Some((request, blend)),
+        Cmd::Queue { request, blend } => {
+            rt.queued = Some((request, blend));
+            rt.queued_start = None;
+        }
+        // KH1's `sys 14` with a start frame (M11, the Yellow Opera's Thunder: 206 from frame 2, 207 from frame 3).
+        Cmd::QueueAt { request, blend, start } => {
+            rt.queued = Some((request, blend));
+            rt.queued_start = Some((request, start));
+        }
         Cmd::Action { request, attack, then, blend } => {
             rt.action = Some(Act { request, then, attack, blend, steered: false, start: 0.0 });
             rt.action_playing = false;
@@ -959,6 +971,10 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         Cmd::Throw(n) => {
             let yaw = rt.ai.body().yaw;
             let _ = super::kh1_thrown::throw(en, CLASSES[rt.class].name, manifest(rt.class), n, yaw);
+        }
+        // M11, the Yellow Opera's Thunder: Re:CoM's own bolt at KH1's mark.
+        Cmd::Strike { child, at } => {
+            let _ = super::kh1_thrown::strike(en, CLASSES[rt.class].name, manifest(rt.class), child, at);
         }
         // Log only (KH1 does something here the port doesn't build: the line below says what).
         Cmd::Note(_) => {}
@@ -1077,7 +1093,8 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
             }
         }
         if let Some((q, b)) = rt.queued.take() {
-            play(en, rt, q, b);
+            let start = rt.queued_start.take().filter(|s| s.0 == q).map_or(0.0, |s| s.1);
+            play_at(en, rt, q, b, start);
         }
     }
     let airborne = rt.ai.body().airborne();
@@ -1428,6 +1445,9 @@ unsafe fn take_over(en: usize, rt: &mut Runtime) {
     rt.queued = None;
     rt.recom_flinch = false;
     rt.current = None;
+    // A Re:CoM state ran (Stop, stun, freeze…): the behaviour drops what waits on it (M11, the Yellow Opera's marked
+    // Thunder; owner 2026-11-03: Re:CoM's Stop keeps cancelling a caster's spell).
+    rt.ai.on_recom_state();
     // KH1's mode-3 guard row (the Large Body's front) isn't tied to an action: it stays (`0x1402B47A0` tests it
     // whatever plays; a status doesn't remove it: Checked (decomp), its owner's `+0x88 & 1` skips only non-guard rows).
     if !rt.guard.is_some_and(|g| g.request == ke::guard::ALWAYS) {

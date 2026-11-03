@@ -3246,6 +3246,57 @@ pub const GREENREQUIEM_CURE_CHECKED: &[Site] = &[
     },
 ];
 
+/// M11 casters: the Yellow Opera's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp): its only
+/// caller is the enemy factory `0x140188F40` (case 5, the call at `0x14018906E`); no branch lands inside the moved bytes
+/// and no pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-03).
+pub const YELLOWOPERA_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemyYellowopera ctor (0x1401968B0)", rva: 0x0019_68B0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 casters: the factory's `mov ecx, 0xCD0` before `CEnemyYellowopera`'s ctor, raised by the framework's 0x20-byte
+/// tail. Checked (exe).
+pub const YELLOWOPERA_ALLOC: &[Site] = &[Site { name: "alloc CEnemyYellowopera (0x140189055)", rva: 0x0018_9055, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11 casters: `CEnemyYellowopera`'s vtable slots the copy keeps or replaces, checked against Re:CoM's functions before
+/// the copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12 / 30 are `CBattleEnemy`'s, 1..3 the
+/// Yellow Opera's own: 1 `0x140196A20` (`0x1401979F0` with `e003_001` / `e003_002`) / its step `0x140196DE0` →
+/// `0x140197450` / its end `0x140196A70` → `0x1401979C0`, 2 its Thunder `e005_052` `0x140196980` / `0x140196A80` (a
+/// `CBullet` 4 m above Sora past clip time 0xD15), 3 its rush `e005_053` → `e005_054` → `e005_055` `0x1401969D0` /
+/// `0x140196C10`; the think `CHeartless`'s `0x140196EC0`).
+pub const YELLOWOPERA_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyYellowopera +0x70 motion play", rva: 0x0055_7138, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyYellowopera +0x80 update", rva: 0x0055_7148, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyYellowopera +0xE8 state 0 begin", rva: 0x0055_71B0, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyYellowopera +0xF0 state 0 step", rva: 0x0055_71B8, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyYellowopera +0xF8 state 0 end", rva: 0x0055_71C0, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyYellowopera +0x100 state 1 begin", rva: 0x0055_71C8, target: 0x0019_6A20 },
+    PtrSite { name: "CEnemyYellowopera +0x108 state 1 step", rva: 0x0055_71D0, target: 0x0019_6DE0 },
+    PtrSite { name: "CEnemyYellowopera +0x110 state 1 end", rva: 0x0055_71D8, target: 0x0019_6A70 },
+    PtrSite { name: "CEnemyYellowopera +0x118 state 2 begin", rva: 0x0055_71E0, target: 0x0019_6980 },
+    PtrSite { name: "CEnemyYellowopera +0x120 state 2 step", rva: 0x0055_71E8, target: 0x0019_6A80 },
+    PtrSite { name: "CEnemyYellowopera +0x130 state 3 begin", rva: 0x0055_71F8, target: 0x0019_69D0 },
+    PtrSite { name: "CEnemyYellowopera +0x138 state 3 step", rva: 0x0055_7200, target: 0x0019_6C10 },
+    PtrSite { name: "CEnemyYellowopera +0x1F0 state 11 begin", rva: 0x0055_72B8, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyYellowopera +0x208 state 12 begin", rva: 0x0055_72D0, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyYellowopera +0x3B8 state 30 begin", rva: 0x0055_7480, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyYellowopera +0x3C0 state 30 step", rva: 0x0055_7488, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyYellowopera +0x3D0 think", rva: 0x0055_7498, target: 0x0019_6EC0 },
+    // The shared enemy-guard step's slot (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemyYellowopera +0x3D8 guard event", rva: 0x0055_74A0, target: 0x0018_1600 },
+    PtrSite { name: "CEnemyYellowopera +0x438 attack hurt off", rva: 0x0055_7500, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyYellowopera +0x440 attack end", rva: 0x0055_7508, target: 0x0017_DA90 },
+];
+
+/// M11 casters: the Yellow Opera's own Thunder's effect set (`0x140196A80`'s descriptor `+0xA8` = `0x140557560`: slots 0 / 1
+/// `"_ex_2130"` 11 / 12, the model's own effects, KH1's bolt and hit effect numbers), copied into its KH1 Thunder (owner
+/// 2026-11-02: strikes drawn with their own Re:CoM effect). Pointer-checked: the two slots' name pointers. Checked (exe +
+/// decomp).
+pub const YELLOWOPERA_THUNDER_PTRS: &[PtrSite] = &[
+    PtrSite { name: "the Yellow Opera's Thunder effect set slot 0 name", rva: 0x0055_7560, target: 0x0055_75C0 },
+    PtrSite { name: "the Yellow Opera's Thunder effect set slot 1 name", rva: 0x0055_7578, target: 0x0055_75C0 },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -3392,6 +3443,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         GREENREQUIEM_HOOKS,
         GREENREQUIEM_ALLOC,
         GREENREQUIEM_CURE_CHECKED,
+        YELLOWOPERA_HOOKS,
+        YELLOWOPERA_ALLOC,
         HELD_CALLEES,
         GRAB_CALLEES,
         BOUNCYWILD_HOOKS,
@@ -3498,7 +3551,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS, BOUNCYWILD_HOOKS, REDNOCTURNE_HOOKS, BLUERHAPSODY_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS, BOUNCYWILD_HOOKS, REDNOCTURNE_HOOKS, BLUERHAPSODY_HOOKS, GREENREQUIEM_HOOKS, YELLOWOPERA_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

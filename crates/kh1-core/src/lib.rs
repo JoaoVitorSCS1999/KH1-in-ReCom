@@ -49,6 +49,7 @@ pub mod caster;
 pub mod greenrequiem;
 pub mod rednocturne;
 pub mod bluerhapsody;
+pub mod yellowopera;
 
 pub use arc::Arc;
 pub use combat::{blade_params, resolve_hits, Blade, CombatParams, HitReport};
