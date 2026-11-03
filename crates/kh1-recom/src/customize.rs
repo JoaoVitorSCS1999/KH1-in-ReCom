@@ -21,30 +21,46 @@
 //! button sheet. KH1's sysmsg file is not in the asset step: "None" and the help lines are our
 //! English words (Assumption: KH1's own words for 0xCE..0xD0 / 0xD4 not read); the spell names
 //! are KH1's words from `kh1-command-menu.json`, as the command menu shows them.
+//!
+//! **M12 step 6** (owner, 2026-11-03: "I also would like sleights to be able to be added to the
+//! customize menu, for shortcuts"; `docs/recom-m12-sleights.md` § 8.6): the picker lists the
+//! learned spells, then the **equipped** sleight abilities (Re:CoM's order, as the Sleights list),
+//! then "none". A sleight is saved in the same slot byte as its Re:CoM id
+//! (`crate::command_menu::shortcut::slot_sleight`). A slot whose sleight is no longer equipped keeps
+//! its byte: the page shows it greyed with a help line saying so ([`unequipped`]), and the L1 list
+//! shows the blank command, greyed (as a slot whose spell isn't learned).
 
 use crate::command_menu::{cmd, shortcut as sc};
 
 pub const SLOTS: usize = 3;
 pub const SPELLS: usize = 7;
 
-/// A picker row: a spell (0..6), or None for KH1's last row, "none".
-pub type Pick = Option<u8>;
+/// A picker row: a spell (0..6) or (M12 step 6) a sleight, or None for KH1's last row, "none".
+pub type Pick = Option<sc::Slot>;
 
-/// KH1's picker list (`0x1403041A0`): the learned spells (level 1..3) in KH1's order, then "none".
-pub fn picks(levels: [u8; SPELLS]) -> Vec<Pick> {
-    let mut v: Vec<Pick> = (0..SPELLS as u8).filter(|&s| (1..=3).contains(&levels[s as usize])).map(Some).collect();
+/// KH1's picker list (`0x1403041A0`): the learned spells (level 1..3) in KH1's order, then (M12
+/// step 6) the equipped sleight abilities in Re:CoM's order (`crate::sleights::list`), then "none".
+pub fn picks(levels: [u8; SPELLS], equipped_sleights: &[u16]) -> Vec<Pick> {
+    let mut v: Vec<Pick> = (0..SPELLS as u8).filter(|&s| (1..=3).contains(&levels[s as usize])).map(|s| Some(sc::Slot::Spell(s))).collect();
+    v.extend(crate::sleights::list(equipped_sleights).into_iter().map(|id| Some(sc::Slot::Sleight(id))));
     v.push(None);
     v
 }
 
 /// KH1's write (`0x1402857C0`): the slot gets the pick, whatever the other slots hold (KH1 has no
-/// duplicate check). Our byte: 0 = none, else spell + 1.
+/// duplicate check). Our byte: 0 = none, else spell + 1, or a sleight's Re:CoM id.
 pub fn set(slots: [u8; SLOTS], slot: usize, pick: Pick) -> [u8; SLOTS] {
     let mut s = slots;
     if slot < SLOTS {
-        s[slot] = pick.map_or(0, sc::slot_byte);
+        s[slot] = pick.map_or(0, sc::byte_of);
     }
     s
+}
+
+/// A slot holding a sleight that is no longer equipped (the page greys it; the L1 list shows the
+/// blank command, greyed). Its Re:CoM id.
+pub fn unequipped(slot_byte: u8, equipped_sleights: &[u16]) -> Option<u16> {
+    sc::slot_sleight(slot_byte).filter(|id| !equipped_sleights.contains(id))
 }
 
 /// The row the picker opens on: KH1 keeps one picker cursor for every slot (`0x142E9A040`) and
@@ -56,14 +72,16 @@ pub fn picker_cursor(last: i32, count: i32) -> i32 {
 
 /// The picker row that holds the slot's spell (the None row for an empty slot), for the row mark.
 pub fn row_of(picks: &[Pick], slot_byte: u8) -> Option<usize> {
-    let want = sc::slot_spell(slot_byte);
+    let want = sc::slot_of(slot_byte);
     picks.iter().position(|&p| p == want)
 }
 
 /// A row's look on Re:CoM's camp list (`crate::keyblades::row_look`; owner, 2026-11-01: "in the
 /// customize menu, make these slots be blue with the magic symbol"): the three shortcut slots
 /// (`picking` false) and the picker's spells are Re:CoM's blue magic row (list entry 0x133 through
-/// its row set-up `0x140112F10`); the picker's "None" row is no spell and keeps the red row.
+/// its row set-up `0x140112F10`); the picker's "None" row is no spell and keeps the red row. The
+/// sleights (M12 step 6: Re:CoM's magic-category sleights, `StockSkillList +9` = 2, and the two
+/// summon-type ones) take the same blue row as the spells.
 pub fn row_look(picking: bool, pick: Pick) -> i32 {
     use crate::keyblades::row_look::{BLUE, RED};
     if !picking || pick.is_some() {
@@ -114,17 +132,19 @@ pub mod text {
     /// The slot list's help: which buttons cast the slot (stage 7.12: L1 + Triangle / Square /
     /// confirm, KH1's `0x1402937F0`).
     pub const SLOT_HELP_GLYPHS: [&[u8]; 3] = [
-        b"Hold \xF5\x68 and press \xF5\x67 to cast this spell.\0",
-        b"Hold \xF5\x68 and press \xF5\x66 to cast this spell.\0",
-        b"Hold \xF5\x68 and press \xF5\x64 to cast this spell.\0",
+        b"Hold \xF5\x68 and press \xF5\x67 to use this shortcut.\0",
+        b"Hold \xF5\x68 and press \xF5\x66 to use this shortcut.\0",
+        b"Hold \xF5\x68 and press \xF5\x64 to use this shortcut.\0",
     ];
-    pub const SLOT_HELP: [&[u8]; 3] = [b"Hold L1 and press Triangle to cast this spell.\0", b"Hold L1 and press Square to cast this spell.\0", b"Hold L1 and press Cross to cast this spell.\0"];
+    pub const SLOT_HELP: [&[u8]; 3] = [b"Hold L1 and press Triangle to use this shortcut.\0", b"Hold L1 and press Square to use this shortcut.\0", b"Hold L1 and press Cross to use this shortcut.\0"];
     /// Slot 3's help when Re:CoM's confirm button is Circle.
-    pub const SLOT3_HELP_CIRCLE: &[u8] = b"Hold L1 and press Circle to cast this spell.\0";
+    pub const SLOT3_HELP_CIRCLE: &[u8] = b"Hold L1 and press Circle to use this shortcut.\0";
+    /// M12 step 6: the slot list's help on a slot whose sleight is no longer equipped.
+    pub const UNEQUIPPED_HELP: &[u8] = b"Not equipped: equip this sleight on the Abilities page.\0";
     /// The picker's help.
-    pub const PICK_HELP_GLYPHS: [&[u8]; 3] = [b"Choose the spell for \xF5\x68 + \xF5\x67.\0", b"Choose the spell for \xF5\x68 + \xF5\x66.\0", b"Choose the spell for \xF5\x68 + \xF5\x64.\0"];
-    pub const PICK_HELP: [&[u8]; 3] = [b"Choose the spell for L1 + Triangle.\0", b"Choose the spell for L1 + Square.\0", b"Choose the spell for L1 + Cross.\0"];
-    pub const PICK3_HELP_CIRCLE: &[u8] = b"Choose the spell for L1 + Circle.\0";
+    pub const PICK_HELP_GLYPHS: [&[u8]; 3] = [b"Choose the spell or sleight for \xF5\x68 + \xF5\x67.\0", b"Choose the spell or sleight for \xF5\x68 + \xF5\x66.\0", b"Choose the spell or sleight for \xF5\x68 + \xF5\x64.\0"];
+    pub const PICK_HELP: [&[u8]; 3] = [b"Choose the spell or sleight for L1 + Triangle.\0", b"Choose the spell or sleight for L1 + Square.\0", b"Choose the spell or sleight for L1 + Cross.\0"];
+    pub const PICK3_HELP_CIRCLE: &[u8] = b"Choose the spell or sleight for L1 + Circle.\0";
 
     /// Slot `k`'s label (0..2): Re:CoM's glyph, else the button's name.
     pub fn slot_label(k: usize, glyphs: bool, confirm_is_circle: bool) -> &'static [u8] {
@@ -163,21 +183,47 @@ pub mod text {
 mod tests {
     use super::*;
 
+    use sc::Slot::{Sleight, Spell};
+
     #[test]
     fn the_picker_lists_learned_spells_in_kh1_order_then_none() {
-        assert_eq!(picks([0; 7]), vec![None]);
-        assert_eq!(picks([1, 0, 3, 0, 0, 2, 0]), vec![Some(0), Some(2), Some(5), None]);
-        assert_eq!(picks([3; 7]).len(), 8, "KH1's 8 rows at most");
+        assert_eq!(picks([0; 7], &[]), vec![None]);
+        assert_eq!(picks([1, 0, 3, 0, 0, 2, 0], &[]), vec![Some(Spell(0)), Some(Spell(2)), Some(Spell(5)), None]);
+        assert_eq!(picks([3; 7], &[]).len(), 8, "KH1's 8 rows at most");
         // A bad level byte is not a learned spell.
-        assert_eq!(picks([4, 0, 0, 0, 0, 0, 1]), vec![Some(6), None]);
+        assert_eq!(picks([4, 0, 0, 0, 0, 0, 1], &[]), vec![Some(Spell(6)), None]);
+    }
+
+    /// M12 step 6 (owner: sleights "added to the customize menu, for shortcuts"): the equipped
+    /// sleights after the spells, in Re:CoM's order; anything not one of the 27 left out.
+    #[test]
+    fn the_picker_adds_the_equipped_sleights_after_the_spells() {
+        use crate::abilities::sleight as sl;
+        let p = picks([1, 0, 0, 0, 0, 0, 0], &[sl::HOLY, sl::FIRE_RAID, sl::SONIC_BLADE]);
+        assert_eq!(p, vec![Some(Spell(0)), Some(Sleight(sl::FIRE_RAID)), Some(Sleight(sl::HOLY)), None]);
+        // Written as the sleight's Re:CoM id; read back to its picker row.
+        let slots = set([1, 0, 0], 2, p[2]);
+        assert_eq!(slots, [1, 0, sl::HOLY as u8]);
+        assert_eq!(row_of(&p, slots[2]), Some(2));
+        assert_eq!(set(slots, 2, None), [1, 0, 0]);
+        // Unequipped later: not in the picker (no row mark), the slot byte kept and reported.
+        let later = picks([1, 0, 0, 0, 0, 0, 0], &[sl::FIRE_RAID]);
+        assert_eq!(row_of(&later, slots[2]), None);
+        assert_eq!(unequipped(slots[2], &[sl::FIRE_RAID]), Some(sl::HOLY));
+        assert_eq!(unequipped(slots[2], &[sl::HOLY]), None);
+        assert_eq!(unequipped(slots[0], &[]), None, "a spell slot");
+        assert_eq!(unequipped(0, &[]), None);
+        // Every sleight row is the blue magic row.
+        assert_eq!(row_look(true, Some(Sleight(sl::IDYLL_ROMP))), crate::keyblades::row_look::BLUE);
     }
 
     #[test]
     fn the_write_is_kh1s_without_a_duplicate_check() {
-        assert_eq!(set([1, 2, 3], 0, Some(1)), [2, 2, 3], "Blizzard twice: allowed, as KH1");
+        assert_eq!(set([1, 2, 3], 0, Some(Spell(1))), [2, 2, 3], "Blizzard twice: allowed, as KH1");
         assert_eq!(set([1, 2, 3], 2, None), [1, 2, 0]);
-        assert_eq!(set([0, 0, 0], 1, Some(6)), [0, 7, 0]);
-        assert_eq!(set([1, 2, 3], 3, Some(0)), [1, 2, 3], "no fourth slot");
+        assert_eq!(set([0, 0, 0], 1, Some(Spell(6))), [0, 7, 0]);
+        assert_eq!(set([1, 2, 3], 3, Some(Spell(0))), [1, 2, 3], "no fourth slot");
+        assert_eq!(set([0x1B, 0, 0], 1, Some(Sleight(0x1B))), [0x1B, 0x1B, 0], "a sleight twice: allowed too");
     }
 
     #[test]
@@ -186,7 +232,7 @@ mod tests {
         assert_eq!(picker_cursor(3, 5), 3);
         assert_eq!(picker_cursor(7, 4), 3);
         assert_eq!(picker_cursor(-1, 4), 0);
-        let p = picks([2, 0, 1, 0, 0, 0, 0]);
+        let p = picks([2, 0, 1, 0, 0, 0, 0], &[]);
         assert_eq!(row_of(&p, 3), Some(1), "Thunder");
         assert_eq!(row_of(&p, 0), Some(2), "empty: the None row");
         assert_eq!(row_of(&p, 2), None, "Blizzard not learned");
@@ -197,9 +243,9 @@ mod tests {
     fn slots_and_spells_are_recoms_blue_magic_row() {
         use crate::keyblades::row_look::{BLUE, RED};
         assert_eq!(row_look(false, None), BLUE, "every shortcut slot, empty or not");
-        assert_eq!(row_look(false, Some(2)), BLUE);
-        assert_eq!(row_look(true, Some(0)), BLUE, "Fire");
-        assert_eq!(row_look(true, Some(6)), BLUE, "Aero");
+        assert_eq!(row_look(false, Some(Spell(2))), BLUE);
+        assert_eq!(row_look(true, Some(Spell(0))), BLUE, "Fire");
+        assert_eq!(row_look(true, Some(Spell(6))), BLUE, "Aero");
         assert_eq!(row_look(true, None), RED, "the picker's None row is no spell");
         // BLUE is the list's entry 0x133 (the checked sequence table 0x1407C11F0).
         let seqs = crate::sites::KEYBLADE_DATA.iter().find(|s| s.rva == 0x007C_11F0).unwrap().expect;
@@ -235,7 +281,7 @@ mod tests {
 
     #[test]
     fn texts_fit_the_help_box() {
-        let all = [text::NONE, text::SLOT3_HELP_CIRCLE, text::SLOT3_WORD_CIRCLE, text::PICK3_HELP_CIRCLE]
+        let all = [text::NONE, text::UNEQUIPPED_HELP, text::SLOT3_HELP_CIRCLE, text::SLOT3_WORD_CIRCLE, text::PICK3_HELP_CIRCLE]
             .into_iter()
             .chain(text::SLOT_GLYPHS)
             .chain(text::SLOT_WORDS)

@@ -151,10 +151,11 @@ pub const SHORTCUTS_SET: u8 = 2;
 
 /// KH1's learn (`0x140285260`, the script's learn-a-spell command): the spell goes into the first
 /// empty shortcut slot, if one is empty (no duplicate check; a learn happens once per spell).
-/// Checked (decomp). Slots: 0 = none, else spell + 1 (`crate::command_menu::shortcut`).
+/// Checked (decomp). Slots: 0 = none, else spell + 1 (`crate::command_menu::shortcut`); a slot
+/// holding a sleight (M12 step 6) is set, not empty: KH1's learn never overwrites it.
 pub fn fill_slot(slots: &mut [u8; 3], spell: u8) -> Option<usize> {
     use crate::command_menu::shortcut as sc;
-    let k = slots.iter().position(|&b| sc::slot_spell(b).is_none())?;
+    let k = slots.iter().position(|&b| !sc::is_set(b))?;
     slots[k] = sc::slot_byte(spell);
     Some(k)
 }
@@ -164,13 +165,13 @@ pub fn fill_slot(slots: &mut [u8; 3], spell: u8) -> Option<usize> {
 /// learned, in KH1's spell order, first three"):
 /// - a save whose slots were never set up (`set_up` false) first gets the spells it already had
 ///   (`before`), in KH1's spell order, into the first three slots (bytes other than a spell + 1
-///   count as empty and are cleared);
+///   or, M12 step 6, a sleight ability's id count as empty and are cleared);
 /// - then every spell learned now (level 0 → more), in spell order, fills the first empty slot.
 ///
 /// Returns the slots and, per slot filled, the spell (for the log).
 pub fn shortcuts(slots: [u8; 3], set_up: bool, before: [u8; SPELLS], after: [u8; SPELLS]) -> ([u8; 3], Vec<(usize, u8)>) {
     use crate::command_menu::shortcut as sc;
-    let mut s = slots.map(|b| if sc::slot_spell(b).is_some() { b } else { 0 });
+    let mut s = slots.map(|b| if sc::is_set(b) { b } else { 0 });
     let mut filled = Vec::new();
     if !set_up {
         for sp in (0..SPELLS as u8).filter(|&i| (1..=3).contains(&before[i as usize])) {
@@ -280,6 +281,9 @@ mod tests {
         assert_eq!(s, [4, 1, 0]);
         // A bad byte counts as empty.
         assert_eq!(shortcuts([9, 0, 0], true, none, [0, 0, 1, 0, 0, 0, 0]).0, [3, 0, 0]);
+        // M12 step 6: a sleight slot (Fire Raid 0x1B) is set: kept, and a learn skips it.
+        assert_eq!(shortcuts([0x1B, 0, 0], true, none, [0, 0, 1, 0, 0, 0, 0]).0, [0x1B, 3, 0]);
+        assert_eq!(shortcuts([0x1B, 0x43, 0x24], true, none, [1, 0, 0, 0, 0, 0, 0]).0, [0x1B, 0x43, 0x24]);
         assert_eq!(SHORTCUTS_SET & SYNCED, 0);
     }
 }

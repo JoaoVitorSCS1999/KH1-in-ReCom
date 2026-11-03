@@ -50,7 +50,9 @@
 //! - **Shortcuts** (stage 7.12, `0x1402937F0`, `0x1402944C0`, `0x14027B870` case 5): while L1 is
 //!   held and a slot is set (and Sora has a spell), the shortcut list takes the root's place (any
 //!   submenu closes; released, the root returns on Attack); a fresh Triangle / Square / Cross casts
-//!   slot 1 / 2 / 3 through the same commit path as the menu (see [`shortcut`]).
+//!   slot 1 / 2 / 3 through the same commit path as the menu (see [`shortcut`]). **M12 step 6**
+//!   (owner): a slot may also hold an equipped sleight, run as the Sleights list runs it
+//!   (`docs/recom-m12-sleights.md` § 8.6).
 //! - **Summons** (M8b, `crate::summons`, `docs/recom-summons.md`): with a spell learned and a summon
 //!   learned, Summon (command 6) is the Magic list's extra last entry (`0x1402944C0`), shown as the
 //!   root's 4th row (FM). Confirm or Right on row 3 opens KH1's Summon list (type 3, `0x1405289A8`):
@@ -280,7 +282,8 @@ pub struct World {
     /// Fire alone is also taken from frame 14 of its release motion (`0x3D` / `0x8A`).
     pub gate_fire: bool,
     /// Stage 7.12: the three shortcut slots as our save block keeps them (KH1 save
-    /// `+0x844..0x846`): 0 = none, else spell + 1 ([`shortcut::slot_spell`]).
+    /// `+0x844..0x846`): 0 = none, 1..=7 spell + 1 ([`shortcut::slot_spell`]), or (M12 step 6) a
+    /// sleight ability's Re:CoM id ([`shortcut::slot_sleight`]).
     pub shortcuts: [u8; 3],
     /// M8 stage 8a.1: Sora's item slots (KH1 party record `+0x22..`: item ids, 0 = empty) and their
     /// count (`+0x21`).
@@ -309,7 +312,8 @@ pub struct World {
     /// M12 step 5: what the root's 4th row shows (the save's choice, `crate::sleights::Bottom`).
     pub bottom: crate::sleights::Bottom,
     /// M12 step 5: the equipped sleight abilities' Re:CoM ids (`crate::sleights::list`, Re:CoM's
-    /// order) and their count. Read only while the bottom row is Sleights.
+    /// order) and their count. Read for the list only while the bottom row is Sleights, and (M12
+    /// step 6) for the shortcut slots that hold a sleight.
     pub sleights: [u8; crate::sleights::MAX],
     pub sleight_count: u8,
 }
@@ -670,27 +674,49 @@ impl Menu {
                 }
             }
         }
+        // The summons' gate (M8b), shared by the Summon list, the Sleights list and (M12 step 6) the
+        // sleight shortcuts.
+        let gate = crate::summons::Gate { battle: w.battle, ground: flags & 0x80 != 0, air: flags & 0x20 != 0 && flags & 0x80 == 0, mp: w.mp.map_or(0, |m| m.0), out: w.summon_out };
+        let n_sl = (w.sleight_count as usize).min(crate::sleights::MAX);
+        let equipped_sl = &w.sleights[..n_sl];
         // The shortcut list (stage 7.12, the same build `0x1402944C0`, only with a spell learned):
         // slot k shows its spell at the spell's current level (`level + (spell + 2) × 3`) or the
         // blank command 0x42; grey = lock = all but the slots whose spell is usable. A slot set
         // makes the list available (`0x142D53A5C` = 1). Re:CoM never seals magic (KH1's save
         // `+0x874` bits 0 / 3): not modelled.
+        // M12 step 6: a slot holding a sleight (ours; KH1's slots hold spells only) shows it as the
+        // Sleights list does (its command `0x80 + id`), greyed and locked unless the Sleights list's
+        // test passes (`crate::sleights::usable`: battle room, ground or its air rule, nothing
+        // running, its MP). A sleight no longer equipped shows the blank command, greyed (as a
+        // slot whose spell isn't learned); the byte stays, so equipping it again brings it back.
+        // A sleight slot makes the list available with or without a spell learned.
         let mut short_grey = !0u32;
         let mut short_cmds = vec![cmd::BLANK; 3];
         let mut short_ok = false;
-        if !learned.is_empty() {
-            for (k, &b) in w.shortcuts.iter().enumerate() {
-                let Some(s) = shortcut::slot_spell(b) else { continue };
-                short_ok = true;
-                let lv = w.spells[s as usize];
-                // A slot whose spell isn't learned (not reachable: slots only get learned spells)
-                // shows the blank command, greyed.
-                if (1..=3).contains(&lv) {
-                    short_cmds[k] = cmd::spell(s, lv);
+        for (k, &b) in w.shortcuts.iter().enumerate() {
+            match shortcut::slot_of(b) {
+                Some(shortcut::Slot::Spell(s)) if !learned.is_empty() => {
+                    short_ok = true;
+                    let lv = w.spells[s as usize];
+                    // A slot whose spell isn't learned (not reachable: slots only get learned
+                    // spells) shows the blank command, greyed.
+                    if (1..=3).contains(&lv) {
+                        short_cmds[k] = cmd::spell(s, lv);
+                    }
+                    if usable_spell[s as usize] {
+                        short_grey &= !(1 << k);
+                    }
                 }
-                if usable_spell[s as usize] {
-                    short_grey &= !(1 << k);
+                Some(shortcut::Slot::Sleight(id)) => {
+                    short_ok = true;
+                    if equipped_sl.iter().any(|&e| e as u16 == id) {
+                        short_cmds[k] = crate::sleights::command(id);
+                        if crate::sleights::usable(&gate, id) {
+                            short_grey &= !(1 << k);
+                        }
+                    }
                 }
+                _ => {}
             }
         }
         self.shortcut.cmds = short_cmds;
@@ -717,7 +743,6 @@ impl Menu {
         // Owner (2026-11-02): Cloud first, then the others in learn order.
         let learned_summons: Vec<usize> = w.summons[..n].iter().map(|&i| i as usize).filter(|&i| i < crate::summons::COUNT).collect();
         let list = crate::summons::list_order(&learned_summons);
-        let gate = crate::summons::Gate { battle: w.battle, ground: flags & 0x80 != 0, air: flags & 0x20 != 0 && flags & 0x80 == 0, mp: w.mp.map_or(0, |m| m.0), out: w.summon_out };
         let mut sgrey = !0u32;
         for (k, &i) in list.iter().enumerate() {
             if crate::summons::usable(&gate, i) {
@@ -741,8 +766,7 @@ impl Menu {
         // M12 step 5: the Sleights list (the equipped sleight abilities), each greyed and locked
         // when the summons' gate with its MP says no; the row greyed when none is usable, greyed and
         // locked with none equipped or while a sleight runs (as the Summon row's).
-        let n = (w.sleight_count as usize).min(crate::sleights::MAX);
-        let sl = if summon_mode { Vec::new() } else { crate::sleights::list(&w.sleights[..n].iter().map(|&b| b as u16).collect::<Vec<_>>()) };
+        let sl = if summon_mode { Vec::new() } else { crate::sleights::list(&equipped_sl.iter().map(|&b| b as u16).collect::<Vec<_>>()) };
         let mut lgrey = !0u32;
         for (k, &id) in sl.iter().enumerate() {
             if crate::sleights::usable(&gate, id) {
@@ -996,6 +1020,22 @@ impl Menu {
             return out;
         };
         let c = self.shortcut.cmds[slot];
+        // M12 step 6: a sleight slot runs as the Sleights list's entry (`run_sleight`): a locked
+        // (greyed) one plays the error sound, KH1's commit gate may refuse it (dropped), else
+        // Re:CoM's own sleight start this frame (`Outcome::sleight`).
+        if let Some(id) = crate::sleights::of_command(c) {
+            let result = if self.shortcut.locked(slot as i32) {
+                out.sounds.push(Sound::Error);
+                ShortResult::Greyed
+            } else if !w.gate_any {
+                ShortResult::NotNow
+            } else {
+                out.sleight = Some(id);
+                ShortResult::Cast
+            };
+            out.events.push(Event::Shortcut(slot as u8, c, result));
+            return out;
+        }
         let fire = cmd::spell_of(c).is_some_and(|(s, _)| s == 0);
         let result = if self.shortcut.locked(slot as i32) || cmd::spell_of(c).is_none() {
             out.sounds.push(Sound::Error);
@@ -1579,6 +1619,50 @@ pub mod shortcut {
     /// The slot byte of a spell.
     pub fn slot_byte(spell: u8) -> u8 {
         spell + 1
+    }
+
+    /// What a shortcut slot holds (M12 step 6, owner 2026-11-03: "I also would like sleights to be
+    /// able to be added to the customize menu, for shortcuts"): a spell (KH1's) or one of the 27
+    /// sleight abilities (`crate::sleights`).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Slot {
+        Spell(u8),
+        Sleight(u16),
+    }
+
+    /// The sleight of a slot byte: the byte **is** the Re:CoM sleight id (0x1B..=0x33, 0x3A, 0x43,
+    /// the sleight abilities'; all ≥ 8, so never a spell byte). Any other byte: none. Bytes 8.. were
+    /// "none" before step 6 (`slot_spell`), so an older build shows such a slot empty and keeps the
+    /// byte unless the player sets that slot. Checked (code).
+    pub fn slot_sleight(b: u8) -> Option<u16> {
+        let id = b as u16;
+        (b >= 8 && crate::abilities::of_sleight(id).is_some()).then_some(id)
+    }
+
+    /// The slot byte of a sleight ability's Re:CoM id (None: not one of the 27).
+    pub fn sleight_byte(id: u16) -> Option<u8> {
+        u8::try_from(id).ok().filter(|&b| slot_sleight(b) == Some(id))
+    }
+
+    /// What slot byte `b` holds (None: an empty slot).
+    pub fn slot_of(b: u8) -> Option<Slot> {
+        match slot_spell(b) {
+            Some(s) => Some(Slot::Spell(s)),
+            None => slot_sleight(b).map(Slot::Sleight),
+        }
+    }
+
+    /// The slot byte of `s` (0 for a sleight that isn't one of the 27).
+    pub fn byte_of(s: Slot) -> u8 {
+        match s {
+            Slot::Spell(sp) => slot_byte(sp),
+            Slot::Sleight(id) => sleight_byte(id).unwrap_or(0),
+        }
+    }
+
+    /// Whether slot byte `b` is set (a spell or a sleight): KH1's fill-on-learn skips it.
+    pub fn is_set(b: u8) -> bool {
+        slot_of(b).is_some()
     }
 
     /// KH1's 0x41 glyph is the confirm button (`0x1402D4A50`: Cross unless the confirm swap is
@@ -2803,6 +2887,80 @@ mod tests {
         let fire_only = World { gate_any: false, gate_fire: true, ..w };
         assert_eq!(m.step(&fire_only, held(|p| p.triangle = true)).cast, Some(cmd::spell(0, 2)));
         assert_eq!(m.step(&fire_only, held(|p| p.square = true)).cast, None, "Cure isn't taken from Fire's release");
+    }
+
+    /// M12 step 6 (owner: "I also would like sleights to be able to be added to the customize menu,
+    /// for shortcuts"): slots Fire, Fire Raid, Homing Blizzara; both sleights equipped; in battle.
+    fn sleight_short_world() -> World {
+        let mut sleights = [0u8; crate::sleights::MAX];
+        sleights[0] = 0x1B;
+        sleights[1] = 0x24;
+        World { shortcuts: [1, 0x1B, 0x24], battle: true, sleights, sleight_count: 2, ..short_world() }
+    }
+
+    #[test]
+    fn sleight_shortcuts_run_as_the_sleights_list() {
+        use crate::abilities::sleight as s;
+        // The slot bytes: a sleight is its Re:CoM id (the 27 only, all ≥ 8: never a spell).
+        assert_eq!(shortcut::slot_of(0x1B), Some(shortcut::Slot::Sleight(s::FIRE_RAID)));
+        assert_eq!(shortcut::slot_of(3), Some(shortcut::Slot::Spell(2)));
+        for b in [0u8, 8, 9, 0x1A, 0x34, 0x42, 0x44, 0xFF] {
+            assert_eq!(shortcut::slot_of(b), None, "{b:#x}: not one of the 27 (Sonic Blade 9, a summon's LV3 0x42…)");
+        }
+        for id in crate::abilities::SLEIGHTS.filter_map(crate::abilities::sleight_of) {
+            let b = shortcut::sleight_byte(id).unwrap();
+            assert!(b >= 8 && shortcut::slot_spell(b).is_none(), "{id:#x}");
+            assert_eq!(shortcut::slot_of(shortcut::byte_of(shortcut::Slot::Sleight(id))), Some(shortcut::Slot::Sleight(id)));
+        }
+        assert_eq!(shortcut::sleight_byte(s::SONIC_BLADE), None);
+        assert!(shortcut::is_set(0x43) && !shortcut::is_set(0x42));
+
+        let w = sleight_short_world();
+        let mut m = Menu::new();
+        m.show();
+        m.build(&w);
+        assert_eq!(m.shortcut.cmds, vec![cmd::spell(0, 2), crate::sleights::command(s::FIRE_RAID), crate::sleights::command(0x24)]);
+        // MP 3: Fire Raid (2 MP) and Homing Blizzara (2) usable on the ground in battle.
+        assert_eq!(m.shortcut.grey & 7, 0);
+        // The panel's words: the sleights' (as the Sleights list names them).
+        assert_eq!(cmd::name(m.shortcut.cmds[1]), crate::sleights::word(s::FIRE_RAID));
+        // The Sleights list's greying: out of battle, short of MP, a sleight running, mid-air (only
+        // Re:CoM's air-start ones: Homing Blizzara).
+        m.build(&World { battle: false, ..w });
+        assert_eq!(m.shortcut.grey & 6, 6);
+        m.build(&World { mp: Some((1, 3, 0)), ..w });
+        assert_eq!(m.shortcut.grey & 6, 6);
+        m.build(&World { summon_out: true, ..w });
+        assert_eq!(m.shortcut.grey & 6, 6);
+        m.build(&World { state: 2, ..w });
+        assert_eq!(m.shortcut.grey & 6, 0b010, "air: Fire Raid greyed, Homing Blizzara usable");
+        // Unequipped later: the blank command, greyed; the slot byte untouched.
+        let un = World { sleight_count: 1, ..w };
+        m.build(&un);
+        assert_eq!((m.shortcut.cmds[2], m.shortcut.grey & 4), (cmd::BLANK, 4));
+        // A sleight slot shows the list even with no spell learned (the spell slot then doesn't).
+        m.build(&World { spells: [0; 7], ..w });
+        assert!(m.short_ok);
+        assert_eq!(m.shortcut.cmds[0], cmd::BLANK);
+        // In Summon mode as in Sleights mode (the shortcut doesn't need the bottom row).
+        assert_eq!(w.bottom, crate::sleights::Bottom::Summon);
+
+        // Square: slot 2 (Fire Raid): Re:CoM's sleight start, no cast, no menu sound.
+        m.step(&w, held(|_| {}));
+        let o = m.step(&w, held(|p| p.square = true));
+        assert_eq!((o.sleight, o.cast, o.square), (Some(s::FIRE_RAID), None, false));
+        assert!(o.sounds.is_empty() && m.short_on);
+        assert_eq!(o.events, vec![Event::Shortcut(1, crate::sleights::command(s::FIRE_RAID), ShortResult::Cast)]);
+        // Greyed: the error sound, nothing started.
+        let o = m.step(&World { mp: Some((1, 3, 0)), ..w }, held(|p| p.confirm = true));
+        assert_eq!((o.sleight, o.sounds.clone()), (None, vec![Sound::Error]));
+        assert_eq!(o.events, vec![Event::Shortcut(2, crate::sleights::command(0x24), ShortResult::Greyed)]);
+        let o = m.step(&un, held(|p| p.confirm = true));
+        assert_eq!((o.sleight, o.sounds.clone()), (None, vec![Sound::Error]), "unequipped");
+        // KH1's commit gate (Sora busy): dropped silently, as the Sleights list.
+        let o = m.step(&World { gate_any: false, ..w }, held(|p| p.square = true));
+        assert_eq!((o.sleight, o.sounds.is_empty()), (None, true));
+        assert_eq!(o.events, vec![Event::Shortcut(1, crate::sleights::command(s::FIRE_RAID), ShortResult::NotNow)]);
     }
 
     #[test]

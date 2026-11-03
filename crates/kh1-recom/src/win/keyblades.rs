@@ -1002,9 +1002,11 @@ enum Content {
         equipped: u16,
     },
     /// KH1's Customize (`crate::customize`): the slot list, or (`picking` = the slot) the picker.
+    /// `sleights`: the equipped sleight abilities when the page opened (M12 step 6).
     Customize {
         levels: [u8; 7],
         slots: [u8; 3],
+        sleights: Vec<u16>,
         picks: Vec<customize::Pick>,
         picking: Option<usize>,
     },
@@ -1086,6 +1088,16 @@ fn spell_word(spell: u8, level: u8) -> Vec<u8> {
     super::command_menu::word(customize::name_id(spell, level)).unwrap_or_else(|| kb::c_text(crate::unlocks::level_name(spell, level.clamp(1, 3))))
 }
 
+/// A shortcut pick's name: a spell at its level, (M12 step 6) a sleight's name as the Sleights list
+/// shows it (the command menu's word, else the Abilities page's English name), or "None".
+fn pick_word(p: customize::Pick, levels: &[u8; 7]) -> Vec<u8> {
+    match p {
+        Some(cm::shortcut::Slot::Spell(s)) => spell_word(s, levels.get(s as usize).copied().unwrap_or(1)),
+        Some(cm::shortcut::Slot::Sleight(id)) => super::command_menu::word(crate::sleights::word(id)).unwrap_or_else(|| kb::c_text(crate::sleights::name(id))),
+        None => customize::text::NONE.to_vec(),
+    }
+}
+
 impl Page {
     fn p(&self) -> *mut u8 {
         self.camp as *mut u8
@@ -1131,8 +1143,9 @@ impl Page {
         let (content, list) = match row {
             sub::Row::Customize => {
                 let (levels, slots) = super::command_menu::spell_view();
-                let picks = customize::picks(levels);
-                (Content::Customize { levels, slots, picks, picking: None }, list::open_on(customize::SLOTS as i32, 0))
+                let sleights = super::abilities::equipped_sleights();
+                let picks = customize::picks(levels, &sleights);
+                (Content::Customize { levels, slots, sleights, picks, picking: None }, list::open_on(customize::SLOTS as i32, 0))
             }
             sub::Row::Items => {
                 let content = Content::Items { screen: ip::Screen::new(), msg: None, inv: Default::default(), ctx: Default::default(), rows: Vec::new() };
@@ -1156,7 +1169,7 @@ impl Page {
         p.redraw();
         match &p.content {
             Content::Keyblades { .. } => {}
-            Content::Customize { levels, slots, .. } => log(&format!("customize: page opened: spell levels {levels:?}, shortcut slots {slots:?} (0 none, else spell + 1)")),
+            Content::Customize { levels, slots, sleights, .. } => log(&format!("customize: page opened: spell levels {levels:?}, shortcut slots {slots:x?} (0 none, 1..=7 spell + 1, else a sleight's Re:CoM id), equipped sleights {sleights:x?}")),
             Content::Items { inv, ctx, .. } => log(&format!(
                 "items page: opened: slots {:?} (of {}), stock {:?}, HP below max {}, MP below max {}{}",
                 &inv.slots[..(inv.slot_count as usize).min(crate::items::MAX_SLOTS)],
@@ -1218,10 +1231,7 @@ impl Page {
         match &self.content {
             // SAFETY: Re:CoM's card-name call (reads its message tables).
             Content::Keyblades { cards, .. } => unsafe { card_name(cards[idx]) },
-            Content::Customize { levels, picks, picking: Some(_), .. } => match picks.get(idx).copied().flatten() {
-                Some(s) => spell_word(s, levels[s as usize]),
-                None => customize::text::NONE.to_vec(),
-            },
+            Content::Customize { levels, picks, picking: Some(_), .. } => pick_word(picks.get(idx).copied().flatten(), levels),
             Content::Customize { picking: None, .. } => customize::text::slot_label(idx, button_glyphs(ROW_FONT), super::command_menu::confirm_is_circle()).to_vec(),
             Content::Items { rows, .. } => rows.get(idx).map_or_else(|| ip::text::NONE.to_vec(), |r| item_label(r.label)),
             Content::Abilities { rows, .. } => match rows.get(idx).map(|r| r.label) {
@@ -1238,6 +1248,8 @@ impl Page {
         match &self.content {
             Content::Items { rows, .. } => rows.get(idx).is_some_and(|r| r.grey),
             Content::Abilities { rows, .. } => rows.get(idx).is_some_and(|r| r.grey),
+            // M12 step 6: a slot whose sleight is no longer equipped.
+            Content::Customize { slots, sleights, picking: None, .. } => slots.get(idx).is_some_and(|&b| customize::unequipped(b, sleights).is_some()),
             _ => false,
         }
     }
@@ -1309,10 +1321,7 @@ impl Page {
                 (text::STAT_LABELS, values.map(|v| kb::c_text(&v)))
             }
             Content::Customize { levels, slots, .. } => {
-                let v = |k: usize| match cm::shortcut::slot_spell(slots[k]) {
-                    Some(s) => spell_word(s, levels.get(s as usize).copied().unwrap_or(1)),
-                    None => customize::text::NONE.to_vec(),
-                };
+                let v = |k: usize| pick_word(cm::shortcut::slot_of(slots[k]), levels);
                 (customize::text::slot_labels(button_glyphs(ROW_FONT), super::command_menu::confirm_is_circle()), [v(0), v(1), v(2)])
             }
             // Sora's Keyblade slot: the equipped Keyblade's numbers, as the Keyblade list shows them.
@@ -1335,6 +1344,7 @@ impl Page {
         let t: &[u8] = match &self.content {
             Content::Keyblades { .. } => text::PAGE_HELP,
             Content::Customize { picking: Some(k), .. } => customize::text::pick_help(*k, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
+            Content::Customize { slots, sleights, picking: None, .. } if slots.get(self.list.cursor.max(0) as usize).is_some_and(|&b| customize::unequipped(b, sleights).is_some()) => customize::text::UNEQUIPPED_HELP,
             Content::Customize { picking: None, .. } => customize::text::slot_help(self.list.cursor.max(0) as usize, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
             Content::Items { screen, rows, msg, .. } => screen.help(rows, self.list.cursor, *msg),
             Content::Abilities { msg: Some(m), .. } => m,
@@ -1542,17 +1552,21 @@ impl Page {
                 sound(2);
                 self.customize_mode(Some(cursor as usize), at);
             }
-            Content::Customize { picking: Some(k), picks, slots, levels } => {
+            Content::Customize { picking: Some(k), picks, slots, levels, .. } => {
                 let (k, slots, levels) = (*k, *slots, *levels);
                 let pick = picks.get(cursor as usize).copied().flatten();
                 let new = customize::set(slots, k, pick);
-                let name = |p: customize::Pick| p.map_or_else(|| "None".to_string(), |s| crate::unlocks::level_name(s, levels[s as usize].clamp(1, 3)).to_string());
+                let name = |p: customize::Pick| match p {
+                    None => "None".to_string(),
+                    Some(cm::shortcut::Slot::Spell(s)) => crate::unlocks::level_name(s, levels[s as usize].clamp(1, 3)).to_string(),
+                    Some(cm::shortcut::Slot::Sleight(id)) => format!("sleight {} ({id:#x})", crate::sleights::name(id)),
+                };
                 if super::mp::set_shortcuts(new) {
                     if let Content::Customize { slots: s, .. } = &mut self.content {
                         *s = new;
                     }
                     sound(2);
-                    log(&format!("customize: shortcut {} = {} (was {}); slots {new:?}", k + 1, name(pick), name(cm::shortcut::slot_spell(slots[k]))));
+                    log(&format!("customize: shortcut {} = {} (was {}); slots {new:?}", k + 1, name(pick), name(cm::shortcut::slot_of(slots[k]))));
                 } else {
                     sound(5);
                     log("customize: the save block isn't there (MP not live); shortcut not set");
