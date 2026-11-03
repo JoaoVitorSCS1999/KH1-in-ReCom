@@ -257,6 +257,15 @@ pub mod model {
                 self.pos.y = 0.0;
                 self.ai.body().land();
             }
+            // A body on KH1's ground state above the floor (the Neoshadow's `sys 88` at the end of its dive, M11)
+            // falls with Re:CoM's mover gravity, here at KH1's fall cap a frame.
+            let (airborne, flying) = {
+                let b = self.ai.body();
+                (b.airborne(), b.flying)
+            };
+            if !airborne && !flying && self.pos.y < 0.0 {
+                self.pos.y = (self.pos.y + 20.0).min(0.0);
+            }
         }
 
         fn apply(&mut self, c: &Cmd<u8>) {

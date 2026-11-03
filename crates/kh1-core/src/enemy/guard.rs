@@ -32,6 +32,13 @@ pub fn is_guard_type(t: u32) -> bool {
 
 /// A side of 100 is never moved (`0x1402B4BC0`: `a.priority == 100` → 0x10, no record).
 pub const UNMOVED: i32 = 100;
+
+/// The request a guard row made in KH1's mode 3 stands for (`Cmd::Guard(Some((row, HELD)))`, M11, the
+/// Neoshadow's body row `0x80`): `sys 213(row, 3)` (`0x1402BBC10`: the object's bits 2..3 = 3) makes the
+/// attack object live every frame, whatever its owner plays and whatever its HIT slots say (`0x1402B47A0`:
+/// mode 3 goes straight to the hit tests, `0x1402B3380`), until `sys 213(row, 0)` ends it (mode 0: the
+/// object is freed, `| 0x200000`). Checked (decomp). Its manifest row has no windows.
+pub const HELD: u16 = 0xFFFF;
 /// Clashes happen only while one side is under 98 (`0x1402B4BC0`'s first test).
 pub const CLASH_BELOW: i32 = 98;
 /// 40 or more under the other side: kind 7 (`diff < −0x28`), else kind 6.
