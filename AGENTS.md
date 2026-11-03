@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 174: Parasite Cage: no flinch from Sora's hits; about 3 s between its attacks, version 0.95.0 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "the parasite cage shouldnt flinch when you attack, let it go through with its attacks, give it about 3 seconds between each attack". Combat = KH1 in Sora's story only.
+- No flinch: each call of Re:CoM's hit handler `0x14017F7E0` on `CBossParasiteCage` (vtable `0x140669220`, RTTI checked at start) runs with Re:CoM's own super armour (`+0x260` bits 20 / 21, `RECOM_ARMOUR`), put back after, through the existing enemy-hit wrapper: damage and the damage voice only, no state 11 / 12, its attack goes on (swings, spells, turned-back shots). Kept Re:CoM's: Stop, stun, freeze, Gravity, the defeat, its faint (state 17, `0x1403C4060`), the card break and the used gimmick card letting Sora go. Skipped when Sora's Guard blocked it that frame (Guard reaction and Guard card break unchanged).
+- About 3 s: 50 ticks per 60 Hz frame (Checked (decomp)); the 0.83.0 attack-end wrapper (`0x14017E540`) writes 9000 ticks (180 frames) for the cage; its four attack states end there passing (0, 6000) at `0x1403C490D` / `0x1403C49EE` / `0x1403C5149` / `0x1403C523D`. Measured from one attack's end to the first frame its think may start the next (its idle turn and its think's own roll come on top).
+- Gimmick cards: 50 % HP and Guard block unchanged; finisher interrupt still works, as rare as before.
+- 6 byte and 6 slot checks (1116 sites match). Assumption: the room objects 550–554 it moves are scenery. Unknown: its faint chances and think rate (parameter file not in the session). Not KH1 numbers (owner's choice).
+- Checked: tests (990), Windows build. Not checked: in game.
+
+---
+
 ## Stage 173: KH1 camp entry hidden again in Riku's story, version 0.94.1 (2026-11-01)
 
 - Ask (owner, 2026-11-03, on 0.93.4): "Hide it" (none of the nine settings acts in Riku's story).
