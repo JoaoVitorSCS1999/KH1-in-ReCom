@@ -59,7 +59,7 @@ fn asked(m: &Model<Consts>, r: u16) -> Vec<usize> {
 }
 
 fn marks(m: &Model<Consts>) -> Vec<usize> {
-    m.log.iter().filter(|(_, c)| matches!(c, ECmd::Note(n) if n.starts_with("the Thunder's mark"))).map(|(f, _)| *f).collect()
+    m.log.iter().filter(|(_, c)| matches!(c, ECmd::Warn { child: child::THUNDER, .. })).map(|(f, _)| *f).collect()
 }
 
 /// Sora keeps `d` away (horizontally) from the Yellow Opera, on the floor, for `n` frames; his place each frame.
@@ -110,6 +110,8 @@ fn far_it_casts_the_thunder() {
             assert_eq!(f - mark, 30, "seed {seed}: the strike 30 frames after the mark");
             let s = sora_at[mark];
             assert!((at - Vec3::new(s.x, 0.0, s.z)).length() < 1e-3, "seed {seed}: the strike at Sora's place at the mark ({at:?} / {s:?})");
+            // The warning (the host's stand-in for KH1's cloud) is made at the mark's frame, at the same place.
+            assert!(m.log.iter().any(|(g, c)| *g == mark && matches!(c, ECmd::Warn { child: child::THUNDER, at: w } if *w == at)), "seed {seed}: the warning at the mark");
             // The mark on 207's 81st frame.
             let first207 = (0..mark).rev().take_while(|&i| m.trace[i].1 == Some(req::STRIKE)).last().unwrap();
             assert_eq!(mark - first207, 80, "seed {seed}");
@@ -239,7 +241,7 @@ fn the_thunder_and_reactions() {
     for _ in 0..81 {
         out.extend(Behaviour::side_frame(&mut ai, w(Some(req::STRIKE))));
     }
-    assert!(out.iter().any(|c| matches!(c, ECmd::Note(_))));
+    assert!(out.iter().any(|c| matches!(c, ECmd::Warn { child: 0, at } if *at == Vec3::new(200.0, 0.0, 0.0))), "the mark's warning on the floor under Sora");
     let mut hit = None;
     for f in 0..40 {
         let cmds = if f < 10 { Behaviour::side_frame(&mut ai, w(Some(0x48))) } else { Behaviour::dead_frame(&mut ai, w(Some(0x48))) };

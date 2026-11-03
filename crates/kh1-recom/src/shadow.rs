@@ -257,6 +257,7 @@ pub fn cmd_token(c: &Cmd) -> String {
         Cmd::Reward(r) => format!("reward {r:?}"),
         Cmd::QueueAt { request, start, .. } => format!("queue {request} from {start}"),
         Cmd::Strike { child, at } => format!("strike {child} at {at:?}"),
+        Cmd::Warn { child, at } => format!("warn {child} at {at:?}"),
         Cmd::Restart { request, blend, start } => format!("motion {request} b{blend} again from {start}"),
     }
 }

@@ -1231,9 +1231,109 @@ pub(super) unsafe fn unguarded(coll: usize) -> bool {
     g.iter().any(|b| b.coll == coll)
 }
 
+// The Yellow Opera's warning before its bolt (owner 2026-11-03: "a Re:CoM effect over the marked spot now as a stand-in for
+// KH1's warning cloud").
+//
+// - **KH1** (Checked (files: `ex_2130_00.bd` `0x342..0x3B0`)): at the mark the child plays its model's effect 14 with
+//   `sys 74(effect group, 14, 20000, point)` at a point 200 above the mark (the cloud), counts 30 frames, then plays
+//   effect 11 (the bolt) the same way at the mark and strikes. The cloud is never removed by the script (its own length).
+// - **Re:CoM's own Yellow Opera** shows no warning by code (Checked (decomp): its state 2 begin `0x140196980` plays
+//   `e005_052`, its step `0x140196A80` only makes the bolt at clip time 0xD15); its effect set `0x140557560` holds only
+//   `"_ex_2130"` 11 (slot 0, played where the shot starts: the bolt) and 12 (slot 1, played on the flying shot,
+//   `0x140157C20` / `0x1401577A0`): the same numbers as KH1's bolt and hit effects (KH1's script plays 11 / 12 / 14 from
+//   one group, `*(child+12)`). Its motion's own effect events (`EN0005.EET`) are not in the session (Assumption: none).
+// - **Here**: Re:CoM's effect-at-actor `0x1401A6B20(yellow opera, "_ex_2130", id, point, 0, 0.0)` (the call Re:CoM's
+//   shots use; the actor non-null: it reads its `+0x150` group) at KH1's cloud point (`thunder_cloud` above the mark),
+//   first effect 14 (KH1's cloud number; Assumption: Re:CoM's `_ex_2130` pack kept KH1's numbering, as 11 and 12 show),
+//   and when Re:CoM's pack has no 14 (the call returns no handle: `0x1402553B0` finds no entry, Checked (decomp)) the set's
+//   own 12; the log says which. Ended by Re:CoM's effect end `0x1402585B0(handle, 0.0)` (at once) at the strike, when
+//   Re:CoM's Stop / stun cancels the marked Thunder, or at the next warning of another battle. Nothing per frame.
+
+/// Re:CoM's effect at a point with an actor's group (`0x1401A6B20`, `sites::SITES`' "effect at actor").
+const EFFECT_AT: u32 = 0x001A_6B20;
+/// Re:CoM's effect end by handle (`0x1402585B0(handle, fade)`: fade ≤ 0 ends it now, `0x140254D60`; `sites::THROWN_CALLEES`).
+const EFFECT_END: u32 = 0x0025_85B0;
+type EffectAtFn = unsafe extern "win64" fn(usize, usize, u32, *const [f32; 4], u64, f32) -> i32;
+type EffectEndFn = unsafe extern "win64" fn(i32, f32);
+/// KH1's cloud (effect 14 of its model's group), then Re:CoM's own Thunder set's effect 12.
+pub const WARN_EFFECTS: [u32; 2] = [14, 12];
+
+struct Warning {
+    en: usize,
+    child: u8,
+    battle: u32,
+    handle: i32,
+}
+
+static WARNINGS: Mutex<Vec<Warning>> = Mutex::new(Vec::new());
+
+unsafe fn end_warning(w: &Warning) {
+    func::<EffectEndFn>(EFFECT_END)(w.handle, 0.0);
+}
+
+/// `Cmd::Warn`: enemy `en`'s child `n` marked `at` (KH1 units, the floor): the stand-in for KH1's cloud over it until the
+/// strike (section above).
+pub(super) unsafe fn warn(en: usize, class: &str, m: &Manifest, n: u8, at: Vec3) {
+    let battle = super::battle::battle_number();
+    let Ok(mut g) = WARNINGS.lock() else { return };
+    // Another battle's: ended (its enemy is gone).
+    g.retain(|w| {
+        let keep = w.battle == battle;
+        if !keep {
+            end_warning(w);
+        }
+        keep
+    });
+    let ok = crate::sites::YELLOWOPERA_THUNDER_PTRS.iter().all(|p| rd::<usize>(base() + p.rva as usize) == base() + p.target as usize);
+    let name: usize = if ok { rd(va(base(), YELLOWOPERA_THUNDER_EFFECT_SET)) } else { 0 };
+    if name == 0 || std::slice::from_raw_parts(name as *const u8, 9) != b"_ex_2130\0" {
+        line(|| format!("{class}: the Yellow Opera's effect set is not where 0x140557560 was: no warning at the mark"));
+        return;
+    }
+    let up = m.consts.get("thunder_cloud");
+    let p = crate::units::to_recom(Vec3::new(at.x, at.y - if up.is_finite() { up } else { 0.0 }, at.z));
+    let point = [p.x, p.y, p.z, 1.0];
+    let shooter: u32 = rd(en + 0x20);
+    for id in WARN_EFFECTS {
+        let h = func::<EffectAtFn>(EFFECT_AT)(en, name, id, &point, 0, 0.0);
+        if h != 0 {
+            if g.len() >= 2 * MAX {
+                let w = g.remove(0);
+                end_warning(&w);
+            }
+            g.push(Warning { en, child: n, battle, handle: h });
+            line(|| format!("{class} e{shooter}: Thunder {n}'s mark: Re:CoM's \"_ex_2130\" effect {id} at ({:.2},{:.2},{:.2}) as the stand-in for KH1's cloud (effect 14, {up:.0} above the mark), until the strike", p.x, p.y, p.z));
+            return;
+        }
+    }
+    line(|| format!("{class} e{shooter}: Thunder {n}'s mark: Re:CoM's \"_ex_2130\" pack made none of effects {WARN_EFFECTS:?}: no warning"));
+}
+
+/// Ends enemy `en`'s warnings: its child `n`'s oldest (its strike), or all of them (`None`: Re:CoM's Stop / stun cancelled
+/// its marked Thunder).
+pub(super) unsafe fn end_warnings(en: usize, n: Option<u8>) {
+    let Ok(mut g) = WARNINGS.lock() else { return };
+    match n {
+        Some(n) => {
+            if let Some(i) = g.iter().position(|w| w.en == en && w.child == n) {
+                let w = g.remove(i);
+                end_warning(&w);
+            }
+        }
+        None => g.retain(|w| {
+            let keep = w.en != en;
+            if !keep {
+                end_warning(w);
+            }
+            keep
+        }),
+    }
+}
+
 /// `Cmd::Strike`: enemy `en` (class manifest `m`) strikes with its child `n` at KH1's mark `at` (KH1 units): the Yellow
 /// Opera's Thunder (module section above). The bullet's id.
 pub(super) unsafe fn strike(en: usize, class: &str, m: &Manifest, n: u8, at: Vec3) -> Option<u32> {
+    end_warnings(en, Some(n));
     let c = |k: &str| m.consts.get(&format!("thunder_{k}"));
     if !(c("half").is_finite() && n as f32 == m.consts.get("thunder_child")) {
         line(|| format!("{class}: no strike child {n}"));
