@@ -447,7 +447,7 @@ impl Pair {
         self.prev = pad;
         let o = self.oracle.step(&Input { move_dir: dir, tilt, jump, square, attack, ..Default::default() }, &[], &mut self.world, step);
         self.o_out = Some(o.clone());
-        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: self.magic.take(), item: None, special: self.special.take() }, self.first);
+        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, recom_tilt: tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: self.magic.take(), item: None, special: self.special.take() }, self.first);
         self.first = false;
         self.recom.after_exe();
         let airborne = !self.recom.contact;
@@ -882,7 +882,7 @@ fn step_with_target(p: &mut Pair, pad: Pad) -> FrameOut {
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
     let target = kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, 0.0, 150.0), radius: 30.0 };
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: Vec3::ZERO, tilt: 0.0, jump, square, lock_target: None, attack, target: Some(target), locked: false, magic: None, item: None, special: None }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: Vec3::ZERO, tilt: 0.0, recom_tilt: 0.0, jump, square, lock_target: None, attack, target: Some(target), locked: false, magic: None, item: None, special: None }, p.first);
     p.first = false;
     p.recom.after_exe();
     out
@@ -1016,7 +1016,7 @@ fn step_cast(p: &mut Pair, pad: Pad, magic: Option<crate::magic::MagicCommand>) 
     let square = Button::from_held(p.prev.square, pad.square);
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic, item: None, special: None }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, recom_tilt: tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic, item: None, special: None }, p.first);
     p.first = false;
     p.recom.after_exe();
     out
@@ -1654,7 +1654,7 @@ fn step_item(p: &mut Pair, pad: Pad, item: Option<crate::items::ItemCommand>) ->
     let square = Button::from_held(p.prev.square, pad.square);
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: None, item, special: None }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, recom_tilt: tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: None, item, special: None }, p.first);
     p.first = false;
     p.recom.after_exe();
     out
@@ -1887,7 +1887,7 @@ fn step_free(p: &mut Pair, pad: Pad, target: bool) -> FrameOut {
     let attack = Button::from_held(p.prev.attack, pad.attack);
     p.prev = pad;
     let target = target.then(|| kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, 0.0, 150.0), radius: 30.0 });
-    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, jump, square, lock_target: None, attack, target, locked: false, magic: None, item: None, special: None }, p.first);
+    let out = p.ours.frame(&mut p.recom, &FrameInput { move_dir: dir, tilt, recom_tilt: tilt, jump, square, lock_target: None, attack, target, locked: false, magic: None, item: None, special: None }, p.first);
     p.first = out.handed_to_recom();
     p.recom.after_exe();
     out
@@ -2059,4 +2059,118 @@ fn a_kh1_swings_pending_travel_lands_once_on_recoms_roll() {
     assert_eq!(d.position(5, 10, a, a + v, 1.0), a);
     assert!((d.swap(5, 11, Vec3::ZERO) - v).length() < 1e-6, "the roll's first update");
     assert_eq!(d.swap(5, 12, Vec3::ZERO), Vec3::ZERO, "then nothing of ours");
+}
+
+// ---- Speed toggles (`run_speed`, `jump_height`, `air_speed`; owner 2026-11-02, `speeds`) ----
+
+fn with_speeds(ab: Abilities, run: Mode, jump: Mode, air: Mode) -> Pair {
+    let mut p = Pair::new(ab, Floor::flat());
+    p.ours.speeds = speeds::Speeds { run, jump, air };
+    p
+}
+
+fn horizontal(a: Vec3, b: Vec3) -> f32 {
+    (b - a).flat().length()
+}
+
+#[test]
+fn run_speed_recom_runs_at_recoms_6_2_mps_and_walks_kh1s() {
+    let mut p = with_speeds(Abilities::default(), Mode::Recom, Mode::Kh1, Mode::Kh1);
+    let f: Vec<Frame> = (0..120).map(|k| p.step(match k { 0..=39 => stick(0.0, 0.5), 40..=79 => stick(0.0, 1.0), _ => stick(0.0, 0.9) })).collect();
+    // Walk: KH1's 2 units (1.2 m/s).
+    assert!((horizontal(f[29].ours, f[30].ours) - 2.0).abs() < 1e-3);
+    // Run: Re:CoM's 6.2 m/s × the stick = 10.33 units a frame (KH1: 8).
+    assert!((horizontal(f[69].ours, f[70].ours) - 10.333_333).abs() < 1e-3);
+    assert!((horizontal(f[109].ours, f[110].ours) - 9.3).abs() < 1e-3);
+    assert_eq!(p.recom.act.id, action::RUN);
+    // Re:CoM's stick class sees Re:CoM's speed (`player+0x4DC`, m/s).
+    let (class, mps) = speed_class_run(&p.ours.params, 1.0, speeds::recom_run(&speeds::RecomNumbers::EXE, 1.0));
+    assert_eq!(class, 2);
+    assert!((mps - 6.2).abs() < 1e-5);
+    // At kh1, KH1's 8.
+    let mut q = with_speeds(Abilities::default(), Mode::Kh1, Mode::Kh1, Mode::Kh1);
+    let f: Vec<Frame> = (0..60).map(|_| q.step(stick(0.0, 1.0))).collect();
+    assert!((horizontal(f[49].ours, f[50].ours) - 8.0).abs() < 1e-3);
+}
+
+#[test]
+fn jump_height_recom_is_recoms_jump_after_kh1s_crouch() {
+    for (high, top) in [(false, 198.94), (true, 266.8)] {
+        let mut p = with_speeds(Abilities { high_jump: high, ..Default::default() }, Mode::Kh1, Mode::Recom, Mode::Kh1);
+        let f: Vec<Frame> = (0..120).map(|k| p.step(Pad { jump: k < 70, ..Default::default() })).collect();
+        assert_eq!(f[3].ours.y, 0.0, "KH1's 4 crouch frames");
+        let peak = f.iter().map(|x| -x.ours.y).fold(0.0, f32::max);
+        assert!((peak - top).abs() < 0.1, "high {high}: peak {peak}");
+        // The take-off frame rises at Re:CoM's take-off speed (13.72 units, 15.93 high).
+        let first = f.iter().position(|x| x.ours.y < 0.0).unwrap();
+        let v0 = if high { 32.5 } else { 28.0 } * 0.6 * 0.816_666_7;
+        assert!((-f[first].ours.y - v0).abs() < 1e-3, "{}", f[first].ours.y);
+        assert!(f.iter().any(|x| x.out.events.contains(&Event::Landed)));
+    }
+    // Released at once: Re:CoM's cut 12 frames after the take-off (speed × 0.43), lower than held.
+    let mut p = with_speeds(Abilities::default(), Mode::Kh1, Mode::Recom, Mode::Kh1);
+    let f: Vec<Frame> = (0..80).map(|k| p.step(Pad { jump: k == 0, ..Default::default() })).collect();
+    let first = f.iter().position(|x| x.ours.y < 0.0).unwrap();
+    let up = |k: usize| f[k - 1].ours.y - f[k].ours.y;
+    assert!((up(first + 11) - (13.72 - 11.0 * 0.49)).abs() < 1e-2);
+    assert!((up(first + 12) - (13.72 - 12.0 * 0.49) * 0.43).abs() < 1e-2);
+    assert!(!f.iter().any(|x| x.out.events.contains(&Event::JumpCut)), "KH1's cut doesn't run");
+}
+
+#[test]
+fn air_speed_recom_keeps_0_8_of_the_ground_speed_and_eases() {
+    // A running jump: 0.8 of the run at the take-off, held there.
+    let mut p = with_speeds(Abilities::default(), Mode::Kh1, Mode::Kh1, Mode::Recom);
+    let f: Vec<Frame> = (0..80).map(|k| p.step(Pad { jump: (30..60).contains(&k), stick: [0.0, 1.0], ..Default::default() })).collect();
+    let first = f.iter().position(|x| x.ours.y < 0.0).unwrap();
+    assert!((horizontal(f[first - 1].ours, f[first].ours) - 6.4).abs() < 1e-3);
+    assert!((horizontal(f[first + 5].ours, f[first + 6].ours) - 6.4).abs() < 1e-3);
+    // A standing jump, then the stick: 5 % of the gap to 0.8 × run a frame.
+    let mut p = with_speeds(Abilities::default(), Mode::Kh1, Mode::Kh1, Mode::Recom);
+    let f: Vec<Frame> = (0..30).map(|k| p.step(Pad { jump: k < 25, stick: if k >= 10 { [0.0, 1.0] } else { [0.0, 0.0] }, ..Default::default() })).collect();
+    assert!((horizontal(f[9].ours, f[10].ours) - 0.05 * 6.4).abs() < 1e-3);
+    assert!((horizontal(f[10].ours, f[11].ours) - (0.32 + 0.05 * (6.4 - 0.32))).abs() < 1e-3);
+    // With Re:CoM's run: 0.8 × 10.33.
+    let mut p = with_speeds(Abilities::default(), Mode::Recom, Mode::Kh1, Mode::Recom);
+    let f: Vec<Frame> = (0..80).map(|k| p.step(Pad { jump: (30..60).contains(&k), stick: [0.0, 1.0], ..Default::default() })).collect();
+    let first = f.iter().position(|x| x.ours.y < 0.0).unwrap();
+    assert!((horizontal(f[first + 3].ours, f[first + 4].ours) - 0.8 * 10.333_333).abs() < 1e-3);
+}
+
+#[test]
+fn kh1_air_keeps_a_recom_run_through_the_jump() {
+    // The defaults (run_speed = recom, air_speed = kh1): KH1's air rule keeps a take-off speed
+    // above its run speed (`0x1402AF6A0`'s cap), so a running jump goes on at Re:CoM's run.
+    let mut p = with_speeds(Abilities::default(), Mode::Recom, Mode::Kh1, Mode::Kh1);
+    let f: Vec<Frame> = (0..80).map(|k| p.step(Pad { jump: (30..60).contains(&k), stick: [0.0, 1.0], ..Default::default() })).collect();
+    let first = f.iter().position(|x| x.ours.y < 0.0).unwrap();
+    for k in first..first + 20 {
+        assert!((horizontal(f[k].ours, f[k + 1].ours) - 10.333_333).abs() < 1e-3, "frame {k}");
+    }
+    // A standing jump tops out at KH1's 8.
+    let mut p = with_speeds(Abilities::default(), Mode::Recom, Mode::Kh1, Mode::Kh1);
+    let f: Vec<Frame> = (0..60).map(|k| p.step(Pad { jump: k < 50, stick: if k >= 6 { [0.0, 1.0] } else { [0.0, 0.0] }, ..Default::default() })).collect();
+    let fastest = (6..50).map(|k| horizontal(f[k].ours, f[k + 1].ours)).fold(0.0, f32::max);
+    assert!((fastest - 8.0).abs() < 1e-3, "{fastest}");
+}
+
+#[test]
+fn every_combination_runs_jumps_and_lands() {
+    for b in 0..8u8 {
+        let m = |bit: u8| if b & bit != 0 { Mode::Recom } else { Mode::Kh1 };
+        let mut p = with_speeds(all(), m(1), m(2), m(4));
+        let f: Vec<Frame> = (0..300)
+            .map(|k| {
+                let s = match k % 100 {
+                    0..=19 => [0.0, 1.0],
+                    20..=39 => [1.0, 0.0],
+                    40..=59 => [-0.6, -0.6],
+                    _ => [0.0, 0.0],
+                };
+                p.step(Pad { jump: k % 50 < 20, stick: s, ..Default::default() })
+            })
+            .collect();
+        assert!(f.iter().all(|x| x.ours.x.is_finite() && x.ours.y.is_finite() && x.ours.z.is_finite()), "combination {b}");
+        assert!(f.iter().filter(|x| x.out.events.contains(&Event::Landed)).count() >= 3, "combination {b}");
+    }
 }

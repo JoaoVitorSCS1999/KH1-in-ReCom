@@ -72,7 +72,7 @@ pub fn kh1_pad(p: &PadView) -> Kh1Pad {
 
 pub fn frame_input(p: &PadView) -> FrameInput {
     let k = kh1_pad(p);
-    FrameInput { move_dir: k.move_dir, tilt: k.tilt, jump: p.jump, square: p.square, lock_target: p.lock, attack: p.confirm, target: p.target, locked: p.lock.is_some(), magic: None, item: None, special: None }
+    FrameInput { move_dir: k.move_dir, tilt: k.tilt, recom_tilt: if p.enabled { crate::movement::speeds::recom_tilt(p.stick_int[0], p.stick_int[1]) } else { 0.0 }, jump: p.jump, square: p.square, lock_target: p.lock, attack: p.confirm, target: p.target, locked: p.lock.is_some(), magic: None, item: None, special: None }
 }
 
 fn replay(b: Button) -> i32 {

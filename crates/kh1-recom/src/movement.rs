@@ -41,6 +41,7 @@ use kh1_core::controller::{state, Button, Event};
 use kh1_core::math::{clamp_sym, turn_toward, wrap_angle};
 use kh1_core::motion::{flag, req, request, MotionInfo, MotionSet};
 use kh1_core::{Abilities, Moveset, Params, Vec3};
+use crate::settings::Mode;
 
 /// Re:CoM action ids (`player+0x40C`). Checked (decomp, both switches).
 pub mod action {
@@ -153,6 +154,7 @@ pub mod spring {
 }
 
 pub mod roll;
+pub mod speeds;
 
 /// The Re:CoM action that stands for a KH1 state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,6 +172,9 @@ pub struct FrameInput {
     /// World move direction (unit or zero) and KH1 tilt (KH1's dead zone, `stick_from_raw`).
     pub move_dir: Vec3,
     pub tilt: f32,
+    /// Re:CoM's own stick magnitude (`player+0x384`, the pad wrapper's `|(x, y)| / 4096`, at most
+    /// 1): what `run_speed = recom` scales Re:CoM's run by ([`speeds`]).
+    pub recom_tilt: f32,
     pub jump: Button,
     pub square: Button,
     /// The lock-on target's position, KH1 units.
@@ -230,6 +235,10 @@ pub trait Host {
     fn motion_ended(&mut self) -> bool;
     /// Re:CoM's own roll protection (`player+0x418` bit 0) carries KH1's no-flinch window.
     fn set_no_flinch(&mut self, on: bool);
+    /// Re:CoM's run, jump and gravity numbers as it holds them now ([`speeds::RecomNumbers`]).
+    fn recom_numbers(&mut self) -> speeds::RecomNumbers {
+        speeds::RecomNumbers::EXE
+    }
     /// Re:CoM's spring (jump-pad gimmick, object type `0x2002`): when Re:CoM's own jump init
     /// would launch Sora from a spring here (`player+0x41C & 0x20000` and `0x1401E80C0(player,
     /// 0x2002) == 7`), the host runs Re:CoM's own jump init and returns true; Re:CoM then owns
@@ -484,6 +493,19 @@ pub struct Kh1Sora {
     /// KH1's rule asked for the roll this frame; Re:CoM's starts after the frame's commands, if
     /// none replaced it (as a command replaces KH1's roll).
     recom_roll_wanted: bool,
+    /// `run_speed`, `jump_height`, `air_speed` (the host sets them; all KH1's by default) and
+    /// Re:CoM's numbers they use, read from Re:CoM each frame ([`speeds`]).
+    pub speeds: speeds::Speeds,
+    pub recom: speeds::RecomNumbers,
+    /// `jump_height = recom`: Re:CoM's vertical jump in place of KH1's arc, from the take-off
+    /// until anything sets a new arc (a hop, a walk-off, a landing, a take-over).
+    pub recom_rise: Option<speeds::RecomRise>,
+    /// This frame's Re:CoM stick magnitude and jump button (held).
+    recom_tilt: f32,
+    jump_down: bool,
+    /// The take-off of a jump happened in this frame's state input (`air_speed = recom` keeps 0.8 of
+    /// the ground speed then, `0x1401F29F0`).
+    took_off: bool,
 }
 
 /// btltbl's globals the player's clash reactions read (Checked (files): `G+0x1C` 2.5, `G+0x30` 40,
@@ -557,6 +579,12 @@ impl Kh1Sora {
             recom_roll: false,
             recom_roll_wanted: false,
             push: None,
+            speeds: speeds::Speeds::default(),
+            recom: speeds::RecomNumbers::EXE,
+            recom_rise: None,
+            recom_tilt: 0.0,
+            jump_down: false,
+            took_off: false,
         }
     }
 
@@ -582,6 +610,7 @@ impl Kh1Sora {
         self.cut_ok = false;
         self.jump_offset = 0;
         self.arc = Arc::timed(0.0, pos.y, self.params.gravity);
+        self.recom_rise = None;
         self.air_vel = Vec3::ZERO;
         self.recom_roll_wanted = false;
         self.no_flinch_on = false;
@@ -843,11 +872,13 @@ impl Kh1Sora {
 
     pub(crate) fn hop(&mut self, h: f32, y: f32) {
         self.arc = Arc::hop(h, y, self.params.gravity);
+        self.recom_rise = None;
         self.set_state(state::AIR);
     }
 
-    /// `0x1402A5F10`.
-    fn speed_map(&self, dir: &mut Vec3, w: &mut f32) {
+    /// `0x1402A5F10`. `ground`: Sora's ground speed for the stick (the run per `run_speed`); else
+    /// KH1's (the air at `air_speed = kh1`).
+    fn speed_map(&self, dir: &mut Vec3, w: &mut f32, ground: bool) {
         if *w <= 0.0 {
             if dir.is_zero_xz() {
                 *dir = self.move_dir;
@@ -857,12 +888,26 @@ impl Kh1Sora {
         } else if *w <= self.params.run_tilt {
             *w = self.params.walk_speed;
         } else {
-            *w = self.params.run_speed;
+            *w = if ground { self.run_speed() } else { self.params.run_speed };
         }
     }
 
+    /// Sora's run, KH1 units a frame: KH1's 8, or at `run_speed = recom` Re:CoM's `magnitude × 6.2`
+    /// m/s (`0x1401E9630`), always above KH1's 8 where KH1's snap runs ([`speeds`]' tests).
+    pub fn run_speed(&self) -> f32 {
+        match self.speeds.run {
+            Mode::Recom => speeds::recom_run(&self.recom, self.recom_tilt),
+            Mode::Kh1 => self.params.run_speed,
+        }
+    }
+
+    /// The air at `air_speed = recom` while Sora is free in it (not in an attack or another action).
+    fn recom_air_now(&self) -> bool {
+        self.state == state::AIR && !self.lock && self.speeds.air == Mode::Recom
+    }
+
     pub fn speed_class(&self, tilt: f32) -> (u32, f32) {
-        speed_class(&self.params, tilt)
+        speed_class_run(&self.params, tilt, self.run_speed())
     }
 
     /// One 60 Hz frame of KH1 for the movement actions. `fresh`: Re:CoM ran something else last
@@ -876,6 +921,10 @@ impl Kh1Sora {
         }
         let pos = h.pos();
         let airborne = h.airborne();
+        self.recom = h.recom_numbers();
+        self.recom_tilt = input.recom_tilt;
+        self.jump_down = input.jump.held;
+        self.took_off = false;
         if fresh {
             self.resync(h, airborne);
         } else {
@@ -1017,9 +1066,13 @@ impl Kh1Sora {
             state::GLIDE => self.glide_input(&mut fdir, fw, step),
             _ => {}
         }
-        self.facing = turn_toward(self.facing, self.target_yaw, self.params.turn_rate, step);
+        // `air_speed = recom`: Re:CoM eases the facing in the air itself ([`Self::air_move`]).
+        if !self.recom_air_now() {
+            self.facing = turn_toward(self.facing, self.target_yaw, self.params.turn_rate, step);
+        }
         if self.state_changed && self.state == state::AIR {
-            self.air_vel = self.move_dir * self.speed;
+            let keep = if std::mem::take(&mut self.took_off) && self.speeds.air == Mode::Recom { speeds::AIR_KEEP } else { 1.0 };
+            self.air_vel = self.move_dir * (self.speed * keep);
         }
         self.state_changed = false;
 
@@ -1326,10 +1379,13 @@ impl Kh1Sora {
         if self.set_state(next) && next == state::AIR {
             // Walk-off: fall at once with the last frame's travel, at most 8.
             self.arc = Arc::timed(0.0, pos.y, self.params.gravity);
+            self.recom_rise = None;
             self.lock = false;
             let s = if self.last_step > 0.0 { self.last_step } else { 1.0 };
             let (d, len) = (self.last_disp * (1.0 / s)).flat().normalize_len();
-            self.air_vel = d * len.min(self.params.walk_off_cap);
+            // `air_speed = recom`: Re:CoM's fall keeps the whole ground speed (`0x1401F1F20`).
+            let cap = if self.speeds.air == Mode::Recom { len } else { len.min(self.params.walk_off_cap) };
+            self.air_vel = d * cap;
             ev.push(Event::WalkedOff);
         }
     }
@@ -1339,13 +1395,13 @@ impl Kh1Sora {
     fn pad_handler(&mut self, h: &mut dyn Host, input: &FrameInput, dir: &mut Vec3, w: &mut f32, pos: Vec3, step: f32, ev: &mut Vec<Event>, probed: &mut Option<f32>, spring: &mut bool) {
         match self.state {
             state::AIR => {
-                self.speed_map(dir, w);
+                self.speed_map(dir, w, self.speeds.air == Mode::Recom);
                 if self.abilities.superglide && input.square.pressed {
                     self.glide_start(h, true, ev, probed);
                     return;
                 }
             }
-            state::GROUND | state::TAKE_OFF => self.speed_map(dir, w),
+            state::GROUND | state::TAKE_OFF => self.speed_map(dir, w, true),
             state::GLIDE => self.glide_button(input, dir, w, step, pos, ev),
             _ => {}
         }
@@ -1473,11 +1529,22 @@ impl Kh1Sora {
             *w = 0.0;
         } else if self.rec.req == request::JUMP || self.rec.req == request::HIGH_JUMP {
             let off = self.jump_offset;
-            self.arc = Arc::hop(self.reach(), pos.y, self.params.gravity);
+            if self.speeds.jump == Mode::Recom {
+                // `jump_height = recom`: Re:CoM's take-off speed and gravity; the arc only keeps
+                // the time and the top's frame for KH1's motions and Re:CoM's phase.
+                let r = speeds::RecomRise::start(&self.recom, off != 0);
+                self.arc = Arc { t: 0.0, y0: pos.y, rise_time: r.rise_frames(), rise: 0.0 };
+                self.recom_rise = Some(r);
+            } else {
+                self.arc = Arc::hop(self.reach(), pos.y, self.params.gravity);
+                self.recom_rise = None;
+            }
             self.set_state(state::AIR);
             self.jump_offset = off;
             self.jump_held = true;
-            self.cut_ok = true;
+            // Re:CoM's own cut rule runs in its rise ([`speeds::RecomRise::advance`]).
+            self.cut_ok = self.recom_rise.is_none();
+            self.took_off = true;
             ev.push(Event::TookOff);
         } else {
             self.set_state(state::GROUND);
@@ -1503,8 +1570,15 @@ impl Kh1Sora {
 
     /// `0x1402AF6A0`.
     fn air_move(&mut self, step: f32, pos: Vec3) -> Vec3 {
+        let recom_air = self.recom_air_now();
         let p = &self.params;
-        let v = if self.speed <= 0.0 {
+        let v = if recom_air {
+            // `air_speed = recom`: Re:CoM's air control (`0x1401EDA60`).
+            let stick = (self.speed > 0.0).then(|| (self.move_dir.yaw(), self.speed));
+            let (s, facing, yaw) = speeds::recom_air(self.air_vel.horizontal_length(), self.facing, stick, step);
+            self.facing = facing;
+            Vec3::from_yaw(yaw) * s
+        } else if self.speed <= 0.0 {
             let k = if step < 2.0 { p.air_drag.sqrt() } else { p.air_drag };
             self.air_vel * k
         } else {
@@ -1520,7 +1594,19 @@ impl Kh1Sora {
         };
         self.air_vel = v;
         let mut disp = v * step;
-        disp.y = self.arc.advance(pos.y, step, p.gravity, p.fall_cap);
+        disp.y = match self.recom_rise.as_mut() {
+            Some(r) => {
+                let was = r.rising;
+                let dy = r.advance(step, self.jump_down);
+                self.arc.t += step;
+                if was && !r.rising {
+                    // Re:CoM's top or cut: its phase 3 (falling) from here.
+                    self.arc.rise_time = self.arc.t;
+                }
+                dy
+            }
+            None => self.arc.advance(pos.y, step, self.params.gravity, self.params.fall_cap),
+        };
         self.air_vel.y = disp.y;
         // `0x1402AF630`: the apex motion 6 frames before the top, then the fall loop.
         if self.arc.rising() && self.arc.rise_time <= self.arc.t + 6.0 && self.rec.queue_len() == 0 && self.rec.req == self.jump_offset + request::JUMP {
@@ -1670,12 +1756,18 @@ impl Kh1Sora {
 /// (KH1's speed snap `0x1402A5F10`: tilt 0, up to 0.8, over), and the speed in Re:CoM's m/s for
 /// `player+0x4DC`.
 pub fn speed_class(params: &Params, tilt: f32) -> (u32, f32) {
+    speed_class_run(params, tilt, params.run_speed)
+}
+
+/// [`speed_class`] with Sora's run (`run`, KH1 units a frame: KH1's, or Re:CoM's at `run_speed =
+/// recom`).
+pub fn speed_class_run(params: &Params, tilt: f32, run: f32) -> (u32, f32) {
     let w = if tilt <= 0.0 {
         0.0
     } else if tilt <= params.run_tilt {
         params.walk_speed
     } else {
-        params.run_speed
+        run
     };
     let class = if w <= 0.0 {
         0
