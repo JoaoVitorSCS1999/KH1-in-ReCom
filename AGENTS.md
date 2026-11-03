@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 180: Green Requiem: its Cure heals nobody when its target can't be hit (KH1), version 0.97.2 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Skip unhittable allies" (KH1's rule).
+- KH1 (Checked (decomp)): the pick (`sys 102`, `0x1402B80A0`) does no hit test; the test is at the heal: `sys 60` → `0x1402BF330`, whose first call is the can-be-hit check `0x140292070`. A sunk Shadow can be picked, and then nobody is healed (no re-pick, no self-heal).
+- Built: the pick unchanged; when the heal lands, a picked enemy on our KH1 AI with `rt.hittable == false` gets nothing (logged); Re:CoM-AI enemies keep Re:CoM's rule. The flag is copied into the enemy's tail `+0xC` at each `Cmd::Hittable` (the Cure runs while the runtime table is locked), read through `kh1_enemy::kh1_hittable`.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 179: Oogie Boogie: a dice throw that ends unbroken counts as Re:CoM's card break, version 0.97.1 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "oogie boogie is impossible to defeat. you're supposed to break one of his attacks which lowers a gate where you can hit him. can we make it so that if he uses the attack that you're supposed to break without being broken, the gate lowers?" (confirmed "After once").
