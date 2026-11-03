@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 168: Bouncywild: a slip loses nothing; its thrown banana makes Sora slip, version 0.93.1 (2026-11-01)
+
+- Asks (owner, 2026-11-03): slip money "Nothing lost"; banana "Slip too".
+- Re:CoM's slip calls its Moogle-point scatter `0x1401F6190` from one place, `0x1401E7665` (Checked (decomp + exe; no branch into it)): that call goes through `win::kh1_peel::slip_scatter`, which skips the scatter only for a slip from our KH1 Bouncywild's peels / banana (the damage-check wrapper tells the hit by Sora's body `+0x690+0x98`). Every other slip scatters, Re:CoM's own Bouncywild included. 4 byte-checked sites.
+- The KH1 banana carries Re:CoM's slip kind 0x18, set as Re:CoM's banana sets it (`0x14018C924`); Re:CoM's banana damage; guarded or batted into an enemy, a normal hit.
+- Assumption: the peel is still in our list when Sora's damage check runs. Checked: tests, Windows build. Not checked: in game. Asset step: not needed.
+
+---
+
 ## Stage 167: KH1 camp entry always shown; its Combat and Movement settings pages; Re:CoM's Config menu restored, version 0.93.0 (2026-11-01)
 
 - Asks (owner, 2026-11-03): "Under the \"KH1\" tab in the pause menu, I want run speed, jump height, and air speed under a sub menu called \"Movement\" I also want the guard Reactions, combat, and enemy pace to be under a seperate sub menu in the KH1 tab called \"Combat.\" Also, Just have the \"KH1\" Tab in the camp menu always be there, regardless of if the combat is set to ReCoM or KH1"; answers: move the three rows out of Config; at Re:CoM only Combat + Movement; add Enemy AI, Boss revenge ("renamed to Revenge Value"), Dodge roll.
