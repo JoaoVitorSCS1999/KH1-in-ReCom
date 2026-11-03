@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 144: Darkball: its no-reaction hits on Re:CoM's super armour (the attack goes on), version 0.78.1 (2026-11-01)
+
+- Ask (owner, 2026-11-02, Pirate question 3): the fliers' "doesn't flinch" move onto the no-reaction armour, one version each.
+- Framework: the armour's decision gets the waiting hit's KH1 kind, read without consuming from the enemy's hurt bodies in the order Re:CoM's gather `0x140154EB0` picks them (Checked (decomp): `0x14016F1C0` writes the hit's count / kind / owner on the body before the handler `0x14017F7E0`); armour only while a damaging hit waits; never over a Guard block of the same frame (Re:CoM's flinch for a blocked attack without a KH1 recoil stays). The Pirate ignores the kind (unchanged).
+- Darkball (`ex_2280.bd` `0x1E20`, Checked (files)): from its `armor_limit`th light hit in a row the hit takes no reaction: KH1 zeroes the reaction kind (no `sys 42`; `0x1402B8E10` plays nothing for kind 0: no push, Checked (decomp)). Now Re:CoM's super armour keeps its dash / bite going; the counts and the bite mark as its handler. `keeps_reaction` stays the fallback (kind unreadable, same-frame Guard block).
+- Assumption: Re:CoM's damage voice plays (KH1: none); KH1's attribute-10 / status exceptions not carried.
+- Checked: tests, Windows build, host model. Not checked: in game.
+
+---
+
 ## Stage 143: The KH1 Pirate; KH1's no-reaction hits on Re:CoM's own super armour, version 0.78.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
