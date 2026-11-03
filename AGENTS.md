@@ -11,6 +11,13 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 169: Red Nocturne: Re:CoM's stun when its own sent-back Fire hits it, version 0.93.2 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Re:CoM's stun" instead of KH1's 30 s dizzy.
+- Its own sent-back Fire's hit becomes Re:CoM's stun kind 7 before Re:CoM's hit handler `0x14017F7E0`; Re:CoM puts it in its own stun (`+0x900`, state 17, Stun Impact's; its stun gate allows it, `EN0003.EPD`, Checked (files)): about 5 s with its stun motions. KH1's EXP bonus at once. After the stun the takeover rules drop what played and it flees and casts a big Fire (KH1's after-hit; Assumption that KH1 runs it after its dizzy). No new hook. Checked (decomp + files), tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 168: Bouncywild: a slip loses nothing; its thrown banana makes Sora slip, version 0.93.1 (2026-11-01)
 
 - Asks (owner, 2026-11-03): slip money "Nothing lost"; banana "Slip too".
