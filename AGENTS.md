@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 163: Gargoyle: Sora's Guard sends its ball back KH1's way, version 0.90.1 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Guard: KH1's send-back" for the Gargoyle's ball.
+- KH1 (Checked (decomp `0x1402B4A20` / `0x1402B4BC0`; files `ex_2220_00.bd`)): Guard meets the ball's row in the same pass as a swing and hands it to Sora with the same flags; the ball's script runs `0x748` alike: row `0x46C` owned by Sora, aimed between the Gargoyle and Sora's target, bouncing, hurting enemies, once.
+- Built (`win::kh1_thrown`): when Re:CoM blocks the ball, its step runs the swing's send-back (`send_back_kh1`) instead of Re:CoM's homing turn-back. A wall still ends it; the Fat Bandit's and Defender's shots unchanged; with Guard reactions off a blocked ball ends as before.
+- Assumption: Re:CoM's body guard stands in for KH1's guard hitbox along the Keyblade.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 162: The KH1 Defender (its shield, fireballs and flame), version 0.90.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
