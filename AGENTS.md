@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 166: The KH1 Red Nocturne (its Fire and big Fire; the casters' shared module), version 0.92.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
+- Red Nocturne (KH1 `xa_ex_2110` / `ex_2110.bd` ↔ Re:CoM `CEnemyRednocturne` id 3), a flier, every number from the player's files (Checked (files)): rises in, hovers in small circles until Sora is within 10 m; within 7 m 40 % of rounds a strafe casting a Fire, then a slow circle; beyond 7 m half the time a big Fire, then closer; hit close: flees 5–6 m and casts a big Fire. No attack rows of its own: only Re:CoM state 1 (states 2 / 3 never entered).
+- Spells (each waits on its caster's motion, as KH1; a reaction mid-cast stops it): the Fire leaves 40 frames into its cast, the big Fire 90; Re:CoM bullets with KH1's numbers: 50 ahead and 80 (big 70) up, 12 (22) a frame, curving 1° (2°) a frame toward Sora, 90 frames; Re:CoM's own Red Nocturne shot powers (id 0 / 1) and effect sets (`0x140548EF0` / `0x140548F60`). Guard and a swing both send them back KH1's way (KH1's Guard meets them as a swing; Checked (decomp)); its own fire on it gives KH1's EXP bonus (EXP/10 + 2).
+- `kh1_core::caster`: the routines the family's scripts share byte for byte (Blue Rhapsody 3, Yellow Opera 2) and the spell's wait.
+- Re:CoM (Checked (exe), 1055 sites): vtable `0x140548A58`, ctor `0x140191880` (`40 53 48 83 EC 20`, only caller `0x14018901A`), alloc `0x140189001` 0xCD0 → 0xCF0.
+- Assumptions: the spell's first check the frame after it is made; ±1-frame alignment; flat battle floors; Sora's aim point for KH1's lock point. Not built: its dizzy from its own fire (owner question).
+- Asset step: ENEMY/0003/EN0003.ANN, `kh1-rednocturne.json` (Re:CoM has no EN0003.SES; the .ASD unchanged).
+- Checked: tests (12 seeds × 20 000 frames), Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 165: The KH1 Bouncywild (its banana and peels), version 0.91.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
