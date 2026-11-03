@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 155: Crash fix: the clash spark's effect actor, version 0.85.1 (2026-11-01)
+
+- Owner (2026-11-02, on 0.85.0): "game crashed". Crash dump (Checked): access violation reading 0x150 at `0x1401A6B23` (Re:CoM's effect-at-actor `0x1401A6B20`: `mov r8d, [rcx+0x150]` with rcx = 0), called from `win::kh1_enemy::swing_meets_attacks` (Stage 151's attack-meets-attack clash) through `attack::spark_at`, which passed a null actor.
+- Fix: `spark_at` plays Re:CoM's guard spark on Sora as the actor (as `guard_clink` does); nothing without a player. Also covers the thrown scimitar's knock-away spark (same call, since 0.75.x).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 154: Large Body: KH1's stomp ring in Re:CoM's circle test, version 0.85.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Research Re:CoM's first": Re:CoM's shockwave is a solid flat disk (`CCircleCollision`, type 11; its body test `0x140177190`, only caller `0x14016EAD0`; Checked (decomp)), not KH1's ring (`ex_2050_00.bd` routine `0x18`: r − 100 < d < r, |Δh| ≤ 50; Checked (files)).

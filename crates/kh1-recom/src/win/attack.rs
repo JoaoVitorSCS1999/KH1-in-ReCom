@@ -695,14 +695,21 @@ unsafe fn spheres_meet(ctx: usize, fp: usize, bshape: usize, spheres: &[(Vec3, f
     false
 }
 
-/// Re:CoM's guard spark and clink at `point` with no actor (as `0x140182260` plays it for an
-/// enemy's guard: actor 0); nothing when the `"always"` name isn't where it was.
+/// Re:CoM's guard spark and clink at `point`, on Sora as the actor (`0x1401A6B20` reads its actor's
+/// `+0x150` before anything else: it can't take a null actor); nothing when the `"always"` name isn't
+/// where it was.
 pub(super) unsafe fn spark_at(point: [f32; 4]) {
     let name: usize = rd(base() + EFFECT_ALWAYS as usize);
     if name == 0 || std::slice::from_raw_parts(name as *const u8, 7) != b"always\0" {
         return;
     }
-    func::<EffectFn>(EFFECT_AT)(0, name, GUARD_SPARK, &point, 0, 0.0);
+    // The effect's actor: Sora, as `guard_clink` (`0x1401A6B20` reads the actor's `+0x150` first: a null actor
+    // crashed 0.82.0–0.85.0 at the first clash, Checked (crash dump)).
+    let pl: usize = rd(va(base(), data::MAIN_PLAYER));
+    if pl == 0 {
+        return;
+    }
+    func::<EffectFn>(EFFECT_AT)(pl, name, GUARD_SPARK, &point, 0, 0.0);
 }
 
 /// M11, the shared enemy-guard step: Sora's swing met a KH1 enemy's guard row (the player, and
