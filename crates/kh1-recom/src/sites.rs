@@ -353,6 +353,26 @@ pub const M6_HOOKS: &[Site] = &[
     Site { name: "CBTL setPlayCard (0x140163830)", rva: 0x0016_3830, expect: &[0x48, 0x8B, 0xC4, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57] },
 ];
 
+/// Re:CoM-AI Heartless wait their own attack-end cooldown at KH1 (owner, 2026-11-02; `crate::battle::pace`,
+/// `win::battle::attack_end`, `docs/recom-m6-battles.md` § Attack-end cooldown): the wrapper on the
+/// enemy attack end. Same rule as [`HOOKS`]. Checked (exe): no branch in `.text` and no relocated
+/// pointer lands inside the moved bytes; the start is called directly from 198 sites (and from
+/// our KH1 enemies' states, which the wrapper passes through).
+pub const M6_PACE_HOOKS: &[Site] = &[
+    // mov [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x20 (15 bytes, position-free).
+    Site { name: "enemy attack end (0x14017E540)", rva: 0x0017_E540, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// The attack end's body the wrapper relies on. Not called, not patched. Checked (exe).
+pub const M6_PACE_CHECKED: &[Site] = &[
+    // mov rbx,rcx; mov esi,r8d (the cooldown argument kept in esi).
+    Site { name: "attack end: enemy and cooldown (0x14017E54F)", rva: 0x0017_E54F, expect: &[0x48, 0x8B, 0xD9, 0x41, 0x8B, 0xF0] },
+    // mov rax,[rbx+0x260]; and rax,~1; mov [rbx+0x2C8],esi; mov [rbx+0x260],rax; test rdi,rdi;
+    // je; (next given) mov [rbx+0x68],rdi; …; ret; (no next) mov rcx,[rbx+0x2F8];
+    // mov dword [rbx+0x2C8],0xFA (Re:CoM's 250 at 0x14017E5F5); test rcx,rcx.
+    Site { name: "attack end: cooldown, then 250 without a next state (0x14017E5BD)", rva: 0x0017_E5BD, expect: &[0x48, 0x8B, 0x83, 0x60, 0x02, 0x00, 0x00, 0x48, 0x83, 0xE0, 0xFE, 0x89, 0xB3, 0xC8, 0x02, 0x00, 0x00, 0x48, 0x89, 0x83, 0x60, 0x02, 0x00, 0x00, 0x48, 0x85, 0xFF, 0x74, 0x14, 0x48, 0x89, 0x7B, 0x68, 0x48, 0x8B, 0x5C, 0x24, 0x30, 0x48, 0x8B, 0x74, 0x24, 0x38, 0x48, 0x83, 0xC4, 0x20, 0x5F, 0xC3, 0x48, 0x8B, 0x8B, 0xF8, 0x02, 0x00, 0x00, 0xC7, 0x83, 0xC8, 0x02, 0x00, 0x00, 0xFA, 0x00, 0x00, 0x00, 0x48, 0x85, 0xC9] },
+];
+
 /// Re:CoM functions the M6 code calls.
 pub const M6_CALLEES: &[Site] = &[
     // sub rsp,0x28; mov eax,ecx; test ecx,ecx; jne; mov rax,[rip+…]: a task by id (0 if none).
@@ -2183,9 +2203,9 @@ pub const SHADOW_ALLOC: &[Site] = &[Site { name: "alloc CEnemyShadow (0x140188FA
 /// M10: Re:CoM functions the KH1 Shadow's states call (the others it calls are checked in their
 /// own lists: `0x1401A2D90`, `0x1401A2DB0`, `0x1402ABB20`, `0x1402AD350`, `0x1401A4A20`,
 /// `0x1401A7050`). Checked (exe + decomp).
+/// The enemy attack end `0x14017E540` they call is hooked (and checked) in [`M6_PACE_HOOKS`] /
+/// [`M6_PACE_CHECKED`].
 pub const SHADOW_CALLEES: &[Site] = &[
-    // mov [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x20; mov rbx,rcx; mov esi,r8d
-    Site { name: "enemy attack end (0x14017E540)", rva: 0x0017_E540, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0x41, 0x8B, 0xF0] },
     // mov rax,[rcx+0x2F8]; mov dword [rcx+0x2C8],0xFA; test rax,rax
     Site { name: "enemy default state (0x14017D6F0)", rva: 0x0017_D6F0, expect: &[0x48, 0x8B, 0x81, 0xF8, 0x02, 0x00, 0x00, 0xC7, 0x81, 0xC8, 0x02, 0x00, 0x00, 0xFA, 0x00, 0x00, 0x00, 0x48, 0x85, 0xC0] },
     // sub rsp,0x28; call 0x1402336C0; cmp ax,5
@@ -2779,6 +2799,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         MODEL_HOOKS,
         MODEL_CALLEES,
         M6_HOOKS,
+        M6_PACE_HOOKS,
+        M6_PACE_CHECKED,
         M6_CALLEES,
         M6_CHECKED,
         M6_DECK_HOOKS,
@@ -2983,7 +3005,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
@@ -3145,6 +3167,26 @@ mod tests {
         }
         // The handle lookup it also calls is already checked.
         assert!(MOVE_CALLEES.iter().any(|s| s.rva == 0x002A_D350));
+    }
+
+    #[test]
+    fn m6_pace_sites() {
+        // The attack-end wrapper: the 15 position-free prologue bytes, checked body right after
+        // them, Re:CoM's 250 at 0x14017E5F5 and the passed value's store inside it.
+        let h = &M6_PACE_HOOKS[0];
+        assert_eq!((M6_PACE_HOOKS.len(), h.rva, h.expect.len()), (1, 0x0017_E540, 15));
+        assert_eq!(M6_PACE_CHECKED[0].rva, h.rva + 15);
+        let body = &M6_PACE_CHECKED[1];
+        let at = |rva: u32, bytes: &[u8]| &body.expect[(rva - body.rva) as usize..(rva - body.rva) as usize + bytes.len()] == bytes;
+        assert!(at(0x0017_E5F5, &[0xC7, 0x83, 0xC8, 0x02, 0x00, 0x00, 0xFA, 0x00, 0x00, 0x00]));
+        assert!(at(0x0017_E5C8, &[0x89, 0xB3, 0xC8, 0x02, 0x00, 0x00]));
+        assert_eq!(crate::battle::enemy::COOLDOWN, 0x2C8);
+        assert_eq!(0xFA, crate::battle::pace::RECOM_COOLDOWN);
+        // No other stage hooks it; the KH1 enemies call it (checked here now, not in SHADOW_CALLEES).
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, REVENGE_HOOKS];
+        assert!(!hooks.iter().flat_map(|l| l.iter()).any(|s| s.rva == h.rva));
+        assert!(!SHADOW_CALLEES.iter().any(|s| s.rva == h.rva));
+        assert_eq!(all_sites().filter(|s| s.rva == h.rva).count(), 1);
     }
 
     #[test]

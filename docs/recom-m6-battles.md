@@ -23,6 +23,10 @@ supersedes `recom-cardless-battle-design.md` §8 ("CBTL is the only gate").
 - **Enemy card sounds silent (2026-11-02, not versioned yet, not heard in game):** in the same
   battles, the enemy side's stock, Reload, deal and item-card page-switch sounds don't play.
   § Enemy card sounds below.
+- **Attack-end cooldown (2026-11-02, not versioned yet, not seen in game):** in the same battles,
+  ordinary Heartless still on Re:CoM's AI wait the cooldown their class passes to Re:CoM's
+  attack end (6000 ticks = 120 frames) instead of Re:CoM's 250 (5 frames). § Attack-end cooldown
+  below.
 
 ## Stage 1: what changes
 
@@ -144,6 +148,76 @@ What the skipped steps gave Re:CoM (Checked (decomp) unless tagged):
   Assumption: boss ids are ≥ 100 (research) and the fights are solo.
 - Tutorial Leon still never attacks at KH1 (P5, action `0xB`, stage 3). Not new.
 
+## Attack-end cooldown (Re:CoM-AI Heartless)
+
+Owner (2026-11-02, "Enemy pace, Re:CoM-AI Heartless" in `design-philosophy-instructions.md`):
+every Heartless not yet ported to KH1's AI waits a longer cooldown before each attack, its
+class's own value. Code: `crate::battle::pace` (rule, class table, tests), `win/battle.rs`
+`attack_end` / `install_pace`, sites `M6_PACE_HOOKS` / `M6_PACE_CHECKED`.
+
+### Re:CoM (Checked (decomp + exe))
+
+- `0x14017E540(enemy, next, cooldown)`: unless enchant 0x72 repeats the attack (early return,
+  bit 0 kept), ends the enemy's card (`0x14017E1D0`), clears bit 0, writes `cooldown` to `+0x2C8`
+  (`0x14017E5C8`), then with `next` set makes it the next state; **with `next == 0` it writes 250
+  over it** (`mov dword [rbx+0x2C8], 0xFA` at `0x14017E5F5`) and goes to the default state
+  `+0x2F8` (think on, `0x10`).
+- **All 198 call sites pass `next = 0`** (`xor edx,edx`), so Re:CoM never keeps the value: 197
+  pass 6000 (`mov r8d, 0x1770`), one passes 0 (`0x1403FBAEC` in `0x1403FBA20`, Marluxia 2's
+  shared tail). Checked (exe: every site disassembled; callers mapped to classes through their
+  vtable slots and RTTI).
+- The enemy update `0x140185320` counts `+0x2C8` down by the task step `+0x14` (50 a frame) and
+  runs the think (`+0x3D0`) or the granted card play (`+0x98`) only while it is < 1.
+- Other writers of 250 (not changed): the default state `0x14017D6F0` (68 callers: appearance,
+  flinch / reaction ends) and `0x14017D260`, `0x1401838C0`, `0x140184C80`, `0x140184CE0`,
+  `0x1401851E0`. So an attack Sora interrupts (the hit path clears bit 0 itself, Stage 1) keeps
+  Re:CoM's 250 after the flinch. Checked (decomp) for the writers; which one each reaction ends
+  in: Assumption (not traced).
+
+### At KH1 (Combat = KH1, Sora's story: the battle decision of P1)
+
+A wrapper on `0x14017E540` (15 bytes moved: `48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20`; no
+branch or relocated pointer lands inside them, Checked (exe)) calls Re:CoM's attack end, then
+writes the passed cooldown back when all of these hold (`pace::kept`):
+
+| Test | Why |
+|---|---|
+| the battle is a KH1 one | Combat = Re:CoM and Riku's story untouched |
+| the enemy's vtable is one of the 32 classes below, **Re:CoM's own** | bosses, the bee and our KH1-AI enemies (they run a copy of the vtable) keep Re:CoM's |
+| `next == 0`, bit 0 now clear and `+0x2C8 == 250` | Re:CoM took its "no next state" path (not enchant 0x72's early return) |
+| passed > 250 | never shorter than Re:CoM's (our KH1 enemies call it with 0) |
+
+Once per finished attack, nothing per frame. The 32 vtables are checked against their RTTI names
+before the hook goes in (else not hooked, Re:CoM's 250 for all).
+
+| Class (Re:CoM) | Vtable | Passed (ticks / frames) | States calling it |
+|---|---|---|---|
+| Airpirate, Airsoldier, Aquatank, Bandit, Barrelspider, Blackfungus, Bluerhapsody, Bouncywild, Creapplant, Darkball, Defender, Fatbandit, Gargoyle, Largebody, Neoshadow, Pirate, Powerwild, Rednocturne, Screwdiver, Seaneon, Searchghost, Shadow, Soldier, Spadesoldier, Tornadostep, Wightnight, Wyvern, Yellowopera (`CEnemy…`) | `crate::battle::pace::HEARTLESS` | 6000 / 120 | states 2 and 3 (`+0x120`, `+0x138`) |
+| Greenrequiem, Heartsoldier | as above | 6000 / 120 | state 2 only |
+| Loudness, Wizard | as above | 6000 / 120 | states 2, 3, 4 |
+
+The 12 classes we port to KH1's AI (`kh1_enemy::CLASSES`) are in the list: they get it only while
+they run Re:CoM's AI (`enemy_ai = recom`, or no manifest). Not in the list: `CEnemyWhitemushroom`
+(no attack end), `CEnemy100AcreBB_Bee` (6000; 100 Acre Wood, not a Heartless).
+
+**Left as Re:CoM (all go through the same attack end, all discarded to 250):** Heartless bosses
+Guard Armor, Parasite Cage, Trickmaster, Jafar, Oogie, Ursula, Dragon Maleficent, Dark Side,
+Marluxia 3 (6000 each); Marluxia 2 (0); the human bosses' own states and `CHumanBoss`'s shared
+`0x14019AA00` (Leon, Cloud, Hades, Vexen, Riku, Larxene, Axel, Hook, Marluxia, Lexaeus, Zexion,
+Ansem: 6000). Checked (exe).
+
+Logs: at start `m6: attack end 0x14017E540 wrapped: …` (or `not wrapped`); once per class
+`m6: class CEnemyFatbandit: waits its own attack-end cooldown at KH1: 6000 ticks (120 frames)
+instead of Re:CoM's 250 (5 frames)`. F9 trace: the `m6 … enemies=[id:s<state>:<flags>:<cooldown>]`
+cells show it counting down from 6000.
+
+Not checked: anything in game. Assumption: the gap between attacks grows by about 115 frames
+(the research's ~25-frame gap at KH1 + 115); the think's own 1-in-20 roll still follows.
+
+Owner test: a battle with a Fat Bandit (or any unported Heartless) at Combat = KH1: after each
+attack it waits about two seconds before the next; the log shows the class line; the F9 trace's
+cooldown starts at 6000. Then a boss (Guard Armor) and Combat = Re:CoM: as before (cooldown 250).
+
 ## Logs and trace
 
 - Start: `m6: wrappers in (…)`.
@@ -169,8 +243,8 @@ What the skipped steps gave Re:CoM (Checked (decomp) unless tagged):
 - Scripts (tutorial flags): files not in this session. `CTutorialHood` takes P1.
 - KH1 has no shared attack limiter as far as the Shadow's script and the common syscalls were
   read (research §4.3); rarer syscalls: Assumption.
-- Re:CoM enemies keep Re:CoM's AI: what each chooses, think rate and cooldowns are Re:CoM's until
-  their KH1 twins' AI (M10). P4 makes crowds attack more often than Re:CoM's tuning (decision 30
+- Re:CoM enemies keep Re:CoM's AI: what each chooses and think rate are Re:CoM's until their KH1
+  twins' AI (M10); their attack-end cooldown is their class's own (§ Attack-end cooldown). P4 makes crowds attack more often than Re:CoM's tuning (decision 30
   chose that).
 
 ## In-game checklist (stage 1), in priority order

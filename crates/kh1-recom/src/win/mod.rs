@@ -581,6 +581,12 @@ fn install_battles(base: usize) {
     } else {
         log("m6: not hooked; battles stay Re:CoM's (cards and turn-taking)");
     }
+    // Re:CoM-AI Heartless keep their own attack-end cooldown in KH1 battles (owner, 2026-11-02).
+    if battle::install_pace(base) {
+        log("m6: attack end 0x14017E540 wrapped: in a KH1 battle, ordinary Heartless on Re:CoM's AI keep the cooldown their class passes (6000 ticks = 120 frames) instead of Re:CoM's 250 (0x14017E5F5); bosses and KH1-AI enemies keep Re:CoM's");
+    } else {
+        log("m6: attack end not wrapped; Re:CoM's 250-tick cooldown stays for every enemy");
+    }
     // Stage 2: no deck for Sora (decision 29), on its own: it doesn't need stage 1's hooks.
     if deck::install(base) {
         log("m6: no-deck wrappers in (revolver build 0x1401F43D0, hit drop 0x14017E190); the 16 deck and enemy-card HUD mask reads are switched at each battle start by the setting");

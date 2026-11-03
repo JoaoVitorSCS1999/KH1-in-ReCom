@@ -35,6 +35,7 @@ pub static ORIG_CARD_PLAY: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_MANAGER_CTOR: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_SET_PLAY_CARD: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_DUEL_INIT: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_ENEMY_ATTACK_END: AtomicUsize = AtomicUsize::new(0);
 
 /// This battle is a KH1 one (decided when Re:CoM built its battle enemy manager).
 static KH1_BATTLE: AtomicBool = AtomicBool::new(false);
@@ -67,6 +68,7 @@ type PlayFn = unsafe extern "win64" fn(usize) -> u64;
 type CtorFn = unsafe extern "win64" fn(usize, usize, usize, usize) -> usize;
 type SetPlayFn = unsafe extern "win64" fn(usize, u32, i32, usize, usize, i32) -> u64;
 type TypeFn = unsafe extern "win64" fn(usize) -> u32;
+type AttackEndFn = unsafe extern "win64" fn(usize, usize, i32);
 
 fn capped(counter: &AtomicU32, cap: u32, line: impl FnOnce() -> String) {
     if counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| (n < cap).then_some(n + 1)).is_ok() {
@@ -251,6 +253,44 @@ pub unsafe extern "win64" fn card_play(e: usize) -> u64 {
             o(e)
         }
     }
+}
+
+/// Re:CoM's enemy attack end (`0x14017E540(enemy, next, cooldown)`, once per finished attack;
+/// `crate::battle::pace`). In a KH1 battle, an ordinary Heartless on Re:CoM's own AI keeps the
+/// cooldown its class passed instead of the 250 Re:CoM writes without a next state. Everything
+/// else (bosses, our KH1-AI enemies, Re:CoM battles) passes through untouched.
+pub unsafe extern "win64" fn attack_end(e: usize, next: usize, cooldown: i32) {
+    orig::<AttackEndFn>(&ORIG_ENEMY_ATTACK_END)(e, next, cooldown);
+    if !KH1_BATTLE.load(Ordering::Acquire) || e == 0 {
+        return;
+    }
+    let vt: usize = rd(e);
+    let class = vt.checked_sub(base()).and_then(|r| b::pace::heartless(r as u64));
+    let end = b::pace::End {
+        kh1_battle: true,
+        heartless: class.is_some(),
+        next,
+        passed: cooldown,
+        flags_after: rd(e + enemy::FLAGS),
+        cooldown_after: rd(e + enemy::COOLDOWN),
+    };
+    if let Some(cd) = b::pace::kept(&end) {
+        wr(e + enemy::COOLDOWN, cd);
+        class_once(e, 3, |_| b::pace::class_line(cd));
+    }
+}
+
+/// Installs the attack-end wrapper on its own (a failure leaves Re:CoM's 250 and the rest of M6).
+/// Checks the 32 classes' vtables by their RTTI names first.
+pub fn install_pace(bs: usize) -> bool {
+    // SAFETY: reads of the mapped exe's vtables and their RTTI locators.
+    if let Some(h) = b::pace::HEARTLESS.iter().find(|h| unsafe { super::stats::rtti_name(bs, bs + h.vtable as usize) }.as_deref() != Some(h.rtti)) {
+        log(&format!("m6: {}'s vtable is not at {:#x}: attack-end cooldown not hooked", h.rtti, 0x1_4000_0000u64 + h.vtable as u64));
+        return false;
+    }
+    let hooks = [super::hook::Hook { site: &crate::sites::M6_PACE_HOOKS[0], ours: attack_end as *const () as usize, original: &ORIG_ENEMY_ATTACK_END }];
+    // SAFETY: the target's bytes are checked again inside, before anything is written.
+    unsafe { super::hook::install_all(bs, &hooks) }
 }
 
 /// Re:CoM's battle enemy manager ctor (once per battle): the battle's setting and P2–P4.
