@@ -787,7 +787,7 @@ unsafe fn take_kh1_hit(enemy: usize) -> Option<usize> {
 /// else the waiting body's Re:CoM kind `+0x80` mapped (written by the hit apply `0x14016F1C0` with the
 /// count; Checked (decomp)); Some(None) when neither gives one.
 /// The hurt body holding the damaging hit Re:CoM's handler is about to take (its gather's pick, `gather`), if any.
-unsafe fn waiting_body(enemy: usize) -> Option<usize> {
+pub(super) unsafe fn waiting_body(enemy: usize) -> Option<usize> {
     let info: usize = rd(enemy + 0xF8);
     if info == 0 {
         return None;
@@ -866,6 +866,9 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
         if force {
             wr(enemy + 0x260, flags | 0x200_0000);
         }
+        // M12 follow-ups: a Sleights-list sleight's hit at Damage = KH1 takes the enemy's KH1 / Re:CoM
+        // max HP ratio (one load while no such sleight was used this battle).
+        super::summons::scale_sleight_hit(enemy);
         let r = o(enemy);
         if force {
             let now: u64 = rd(enemy + 0x260);

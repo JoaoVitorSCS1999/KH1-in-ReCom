@@ -365,6 +365,28 @@ fn proxied(enemy: usize) -> Option<EnemyStats> {
     PROXIED.lock().ok()?.iter().find(|(e, _)| *e == enemy).map(|(_, s)| s.clone())
 }
 
+/// M12 follow-ups (owner, "Sleights menu follow-ups": at Damage = KH1 "sleight damage scaled by the
+/// enemy's KH1 max HP / its Re:CoM max HP"): (its KH1 max HP, its Re:CoM max HP) for an enemy with
+/// an ordinary KH1 twin (`kh1-stats.json`) whose KH1 HP the stats init set (Damage = KH1). The Re:CoM
+/// one is Re:CoM's own getter `0x14017F5A0` (its `@ENP` row HP × the difficulty %), the original
+/// under our wrapper. None: no twin (proxies and boss twins included), Damage = Re:CoM, Riku's story.
+pub fn twin_max_hps(enemy: usize) -> Option<(i32, i32)> {
+    twin(enemy)?;
+    let kh1 = KH1_HP.lock().ok()?.iter().find(|(e, _)| *e == enemy).map(|(_, hp)| *hp)?;
+    if ORIG_MAX_HP.load(std::sync::atomic::Ordering::Acquire) == 0 {
+        return None;
+    }
+    // SAFETY: Re:CoM's own getter (its hook installed), on a live enemy.
+    let recom = unsafe { orig::<MaxHpFn>(&ORIG_MAX_HP)(enemy) };
+    Some((kh1, recom))
+}
+
+/// An enemy's class for a log line (its RTTI name).
+pub(super) fn class_label(enemy: usize) -> String {
+    // SAFETY: an enemy object's first field is its vtable.
+    unsafe { class_name(enemy) }
+}
+
 /// Re:CoM's max-HP getter: the KH1 HP of an enemy whose init set it.
 pub unsafe extern "win64" fn max_hp(enemy: usize) -> i32 {
     if let Ok(g) = KH1_HP.lock() {
