@@ -119,6 +119,62 @@ pub mod berserk {
     }
 }
 
+/// Second Chance (KH1 ability 25, `+0x184` bit 4): KH1's damage `0x1402BFA80`, last step of its
+/// ordinary branch: `if (target +0x184 & 0x10 && target HP <= damage) damage = HP − 1;` then `damage
+/// == 0 ? 1 : damage`. So a hit that would kill from above 1 HP leaves exactly 1 HP; at 1 HP the
+/// damage is 0 → 1 and kills; each hit (each damage record) is its own test, so the next hit of a
+/// combo kills. Its % of HP (element 8) and power-as-damage (9 / 11 / 12) branches return before it.
+/// Checked (decomp).
+///
+/// Re:CoM's player damage check `0x1401E6DE0` already has this rule for one of its enemy cards
+/// (`0x1401E720C`: with the side's card 0x6C, new HP < 1 and old HP > 1 → HP 1, Checked (disasm)).
+/// Ours adds Second Chance to the same place: the check's HP store (`0x1401E7238`: `test ebx,ebx;
+/// mov r12d,r15d; cmovns r12d,ebx; mov [rdi+0x42C],r12d`) goes through [`stub`], which sets the new
+/// HP `ebx` to 1 when Sora (`rdi`) is armed, `ebx` < 1, the HP before (`r8d`) > 1 and the reaction
+/// kind (`r13d`) is not 0x22 (Re:CoM's "take all HP", which skips the damage scale, as KH1's raw
+/// branches skip Second Chance: Assumption), then runs the four instructions and jumps back.
+pub mod second_chance {
+    /// Re:CoM's reaction kind whose damage is the whole HP (`cmp r13d,0x22; cmovne` at
+    /// `0x1401E71C9`). Checked (disasm).
+    pub const TAKE_ALL_HP: i32 = 0x22;
+
+    /// The rule as the stub runs it: the new HP for `old` HP and Re:CoM's unclamped `new` HP.
+    pub fn new_hp(armed: bool, old: i32, new: i32, kind: i32) -> i32 {
+        if armed && new < 1 && old > 1 && kind != TAKE_ALL_HP {
+            1
+        } else {
+            new
+        }
+    }
+
+    /// The four instructions the patch moves (Re:CoM's HP store at `0x1401E7238`).
+    pub const STORE: [u8; 16] = [0x85, 0xDB, 0x45, 0x8B, 0xE7, 0x44, 0x0F, 0x49, 0xE3, 0x44, 0x89, 0xA7, 0x2C, 0x04, 0x00, 0x00];
+
+    /// The stub at `at`: `armed` is the address of a `{ u64 player, u32 count }` pair (the armed
+    /// player; the count of hits it saved), `back` the instruction after the store (`0x1401E7248`).
+    /// 62 bytes; rax is free there (the next instruction is a call). None if `back` is out of reach.
+    pub fn stub(armed: u64, at: u64, back: u64) -> Option<Vec<u8>> {
+        let mut v = Vec::with_capacity(64);
+        v.extend_from_slice(&[0x48, 0xB8]); // mov rax, armed
+        v.extend_from_slice(&armed.to_le_bytes());
+        v.extend_from_slice(&[0x48, 0x3B, 0x38]); // cmp rdi, [rax]
+        v.extend_from_slice(&[0x75, 26]); // jne store
+        v.extend_from_slice(&[0x83, 0xFB, 0x01]); // cmp ebx, 1
+        v.extend_from_slice(&[0x7D, 21]); // jge store
+        v.extend_from_slice(&[0x41, 0x83, 0xF8, 0x01]); // cmp r8d, 1
+        v.extend_from_slice(&[0x7E, 15]); // jle store
+        v.extend_from_slice(&[0x41, 0x83, 0xFD, TAKE_ALL_HP as u8]); // cmp r13d, 0x22
+        v.extend_from_slice(&[0x74, 9]); // je store
+        v.extend_from_slice(&[0xBB, 0x01, 0x00, 0x00, 0x00]); // mov ebx, 1
+        v.extend_from_slice(&[0xF0, 0xFF, 0x40, 0x08]); // lock inc dword [rax+8]
+        debug_assert_eq!(v.len(), 41);
+        v.extend_from_slice(&STORE);
+        let from = at + v.len() as u64;
+        v.extend_from_slice(&crate::hookplan::rel_jmp(from, back)?);
+        Some(v)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +270,43 @@ mod tests {
                 assert_eq!(b[0x58 + 0xFE] as i32, berserk::STRENGTH);
             }
         }
+    }
+
+    /// KH1's `0x1402BFA80` step on Re:CoM's HP store.
+    #[test]
+    fn second_chance_rule() {
+        use second_chance::new_hp;
+        assert_eq!(new_hp(true, 50, -10, 1), 1, "a killing hit from above 1 HP leaves 1");
+        assert_eq!(new_hp(true, 50, 0, 1), 1, "damage = HP: KH1's `HP <= damage`");
+        assert_eq!(new_hp(true, 2, -100, 1), 1);
+        assert_eq!(new_hp(true, 1, 0, 1), 0, "at 1 HP the hit kills (KH1: 0 → 1 damage)");
+        assert_eq!(new_hp(true, 50, 20, 1), 20, "a hit that doesn't kill is untouched");
+        assert_eq!(new_hp(false, 50, -10, 1), -10, "not equipped");
+        assert_eq!(new_hp(true, 50, 0, 0x22), 0, "Re:CoM's take-all-HP reaction");
+        // A combo: the first hit leaves 1, the next kills.
+        let hp = new_hp(true, 30, 30 - 40, 1);
+        assert_eq!(new_hp(true, hp, hp - 5, 1), -4);
+    }
+
+    #[test]
+    fn second_chance_stub_layout() {
+        let at = 0x7FF0_0000_0000u64;
+        let back = at + 0x1000;
+        let v = second_chance::stub(0x1122_3344_5566_7788, at, back).unwrap();
+        assert_eq!(v.len(), 62);
+        assert!(v.len() <= crate::hookplan::BLOCK);
+        assert_eq!(&v[2..10], &0x1122_3344_5566_7788u64.to_le_bytes());
+        // Every short jump lands on the moved store (offset 41).
+        for (op_at, op) in [(13usize, 0x75u8), (18, 0x7D), (24, 0x7E), (30, 0x74)] {
+            assert_eq!(v[op_at], op);
+            assert_eq!(op_at + 2 + v[op_at + 1] as usize, 41, "jump at {op_at}");
+        }
+        assert_eq!(&v[41..57], &second_chance::STORE);
+        assert_eq!(v[57], 0xE9);
+        let rel = i32::from_le_bytes(v[58..62].try_into().unwrap()) as i64;
+        assert_eq!((at as i64 + 62 + rel) as u64, back);
+        // The Steam exe's store bytes (`sites::SECOND_CHANCE_PATCH`).
+        assert_eq!(crate::sites::SECOND_CHANCE_PATCH[0].expect, &second_chance::STORE);
+        assert_eq!(second_chance::stub(0, 0, 1 << 40), None, "out of rel32 reach");
     }
 }

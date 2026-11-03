@@ -3,7 +3,8 @@
 //! `docs/recom-m9-abilities.md` § M12 step 3).
 //!
 //! Nothing of ours per frame: each part runs inside a wrapper that already exists, and only when
-//! something happens there (a hit reaching Sora in Re:CoM's player damage check `0x1401E6DE0`).
+//! something happens there (a hit reaching Sora in Re:CoM's player damage check `0x1401E6DE0`, a
+//! KH1 swing's start or hit). One code patch: Second Chance's stub in that check's HP store.
 //!
 //! - **MP Rage** ([`after_damage`]): after Re:CoM's damage check took HP, KH1's charge for the HP
 //!   lost (`0x14029BBD0`), through KH1's gauge add (`super::mp::gain_charge`, `0x1402A4AE0`).
@@ -11,6 +12,10 @@
 //!   Strength-source records while Sora's HP is low, tested at the swing's start (KH1 builds the
 //!   attack object then); at Damage = KH1 in KH1's damage, at Damage = Re:CoM as the share it gives
 //!   on the hit's Re:CoM value (owner).
+//! - **Second Chance** ([`install_second_chance`], [`arm`], [`disarm`]): Re:CoM's damage check's
+//!   HP store (`0x1401E7238`) runs through a stub that keeps 1 HP when a hit would kill Sora from
+//!   above 1 HP (KH1's `0x1402BFA80` rule; Re:CoM's own card-0x6C rule sits just above it). The
+//!   wrapper arms it for Sora's check only while Second Chance is equipped and a hit arrived.
 //! - **Leaf Bracer** ([`leaf_bracer`]): while Sora's KH1 Cure casts, the damage check runs with
 //!   Re:CoM's own protection bit `player+0x418 & 1` (its exit zeroes the hit: no damage, no
 //!   reaction), as the summons' invincibility does; KH1 sets its flag 0x80 for the cast
@@ -20,7 +25,7 @@ use super::movement::rd;
 use super::{log, mp};
 use crate::abilities as ab;
 use crate::kh1_support as ks;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 /// Sora's HP and max HP (`player+0x42C` / `+0x430`; the damage check's own fields). Checked
 /// (decomp `0x1401E6DE0`, disasm `0x1401E71AB` / `0x1401E7241`).
@@ -136,4 +141,74 @@ pub fn berserk_kh1_line(enemy: usize, kh1_row: usize, d: Option<i32>) {
     if BERSERK_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
         log(&format!("support: Berserk (Damage = KH1): row {kh1_row:#x} on {:#x}: KH1's damage with Strength + 4 = {d:?}", enemy & 0x00FF_FFFF));
     }
+}
+
+/// What the Second Chance stub reads: the armed player (`+0`, 0 = none) and the hits it saved
+/// (`+8`, `lock inc`). `repr(C)`: the stub's offsets.
+#[repr(C)]
+struct Armed {
+    pl: AtomicUsize,
+    saved: AtomicU32,
+}
+static ARMED: Armed = Armed { pl: AtomicUsize::new(0), saved: AtomicU32::new(0) };
+static SECOND_CHANCE_ON: AtomicBool = AtomicBool::new(false);
+static SAVED_BEFORE: AtomicU32 = AtomicU32::new(0);
+static SECOND_LINES: AtomicU32 = AtomicU32::new(20);
+
+/// Before Re:CoM's damage check (`win::attack::damage_check`, a hit having arrived, Combat = KH1):
+/// arms the stub for Sora when Second Chance is equipped.
+pub unsafe fn arm(pl: usize) {
+    if !SECOND_CHANCE_ON.load(Ordering::Relaxed) || !mp::active() || !super::abilities::equipped_live().is_some_and(ab::second_chance) {
+        return;
+    }
+    SAVED_BEFORE.store(ARMED.saved.load(Ordering::Relaxed), Ordering::Relaxed);
+    ARMED.pl.store(pl, Ordering::Relaxed);
+}
+
+/// After the check: disarmed; a saved hit logged.
+pub unsafe fn disarm(pl: usize, hp_before: i32) {
+    if ARMED.pl.swap(0, Ordering::Relaxed) == 0 {
+        return;
+    }
+    if ARMED.saved.load(Ordering::Relaxed) != SAVED_BEFORE.load(Ordering::Relaxed) && SECOND_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("support: Second Chance: a hit that would have killed Sora at HP {hp_before} left him at {} (KH1's 0x1402BFA80)", rd::<i32>(pl + HP)));
+    }
+}
+
+/// Puts Second Chance's rule into Re:CoM's damage check: its context and the HP store checked
+/// (`sites::SECOND_CHANCE_CHECKED` / `SECOND_CHANCE_PATCH`), the stub placed near it
+/// (`crate::kh1_support::second_chance::stub`), the store replaced by a jump to it. Once, after the
+/// damage-check wrapper is in. Without it Second Chance does nothing (logged).
+pub unsafe fn install_second_chance(bs: usize) {
+    use crate::sites::{SECOND_CHANCE_CHECKED, SECOND_CHANCE_PATCH};
+    for c in SECOND_CHANCE_CHECKED.iter().chain(SECOND_CHANCE_PATCH) {
+        if std::slice::from_raw_parts((bs + c.rva as usize) as *const u8, c.expect.len()) != c.expect {
+            log(&format!("support: {} is not as expected: Second Chance does nothing", c.name));
+            return;
+        }
+    }
+    let s = &SECOND_CHANCE_PATCH[0];
+    let at = bs + s.rva as usize;
+    let back = (at + s.expect.len()) as u64;
+    let armed = &ARMED as *const Armed as u64;
+    // The stub's jump back is relative: place a block, then write the stub for its address.
+    let Some(len) = ks::second_chance::stub(armed, 0, 0).map(|v| v.len()) else { return };
+    let filler = vec![0xCCu8; len];
+    let Some(block) = super::hook::place_near(at, &filler) else {
+        log("support: no memory near the damage check: Second Chance does nothing");
+        return;
+    };
+    let Some(code) = ks::second_chance::stub(armed, block as u64, back) else {
+        log("support: the damage check is out of the stub's reach: Second Chance does nothing");
+        return;
+    };
+    let Some(entry) = crate::hookplan::entry_patch(at as u64, s.expect.len(), block as u64) else {
+        log("support: the stub is out of the damage check's reach: Second Chance does nothing");
+        return;
+    };
+    if !super::hook::patch(block, &filler, &code, "Second Chance stub") || !super::hook::patch(at, s.expect, &entry, s.name) {
+        return;
+    }
+    SECOND_CHANCE_ON.store(true, Ordering::Relaxed);
+    log(&format!("support: {} through the stub at {block:#x}: Second Chance keeps 1 HP (KH1's 0x1402BFA80) for Sora's check while it is equipped", s.name));
 }

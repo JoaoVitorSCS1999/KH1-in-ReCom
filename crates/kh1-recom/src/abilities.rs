@@ -122,6 +122,8 @@ pub mod ix {
     pub const LEAF_BRACER: usize = 28;
     /// Berserk (KH1 id 26): + 4 Strength while HP is low (`0x1402B2DC0`).
     pub const BERSERK: usize = 29;
+    /// Second Chance (KH1 id 25): a hit that would kill from above 1 HP leaves 1 (`0x1402BFA80`).
+    pub const SECOND_CHANCE: usize = 30;
 }
 
 /// Re:CoM's sleight ids (its `initStockSkill` `0x140220DF0` switch; level-up list `0x14010EF10`;
@@ -157,7 +159,7 @@ const fn special(name: &'static str, s: u16) -> Ability {
 /// Assumption, strong).
 /// Combo Master (0x41) has no row in btltbl's table (row 65 is zero: cost 0, key 0; Checked
 /// (files)); KH1 FM gives it by no level list.
-pub const ALL: [Ability; 30] = [
+pub const ALL: [Ability; 31] = [
     a("Sliding Dash", 54, 0x100_0000, 1, 205, Source::Sleight(sleight::SLIDING_DASH)),
     a("Blitz", 20, 0x8, 2, 208, Source::Sleight(sleight::BLITZ)),
     a("Stun Impact", 57, 0x800_0000, 2, 211, Source::Sleight(sleight::STUN_IMPACT)),
@@ -207,6 +209,8 @@ pub const ALL: [Ability; 30] = [
     a("Leaf Bracer", 62, 0, 5, 308, Source::Level(39)),
     // Berserk: id 26 (`+0x184` bit 5), Rod level 60, 1 AP, sort key 306. Checked (decomp + files).
     a("Berserk", 26, 0, 1, 306, Source::Level(60)),
+    // Second Chance: id 25 (`+0x184` bit 4), Rod level 90, 5 AP, sort key 307. Checked (decomp + files).
+    a("Second Chance", 25, 0, 5, 307, Source::Level(90)),
 ];
 
 /// The combo modifiers (stage 9a), by [`ix`].
@@ -539,6 +543,12 @@ pub fn berserk(equipped: u32) -> bool {
     equipped & (1 << ix::BERSERK) != 0
 }
 
+/// Second Chance equipped (KH1 `+0x184` bit 4 = `0x140284BE0(25) & 1`): the damage `0x1402BFA80`
+/// leaves 1 HP when a hit would kill from above 1. Checked (decomp).
+pub fn second_chance(equipped: u32) -> bool {
+    equipped & (1 << ix::SECOND_CHANCE) != 0
+}
+
 /// The names of the abilities in `bits`, for the log.
 pub fn names(bits: u32) -> Vec<&'static str> {
     ALL.iter().enumerate().filter(|(i, _)| bits & (1 << i) != 0).map(|(_, a)| a.name).collect()
@@ -742,6 +752,7 @@ pub mod page {
                 26..=27 => b"Gain MP when you take damage. Copies add up.\0",
                 LEAF_BRACER => b"Nothing can interrupt Sora while he casts Cure.\0",
                 BERSERK => b"Raises Strength while Sora's HP is low.\0",
+                SECOND_CHANCE => b"Survive a blow that would knock you out, with 1 HP.\0",
                 _ => b"\0",
             }
         }
@@ -778,8 +789,8 @@ mod tests {
     fn layout_follows_the_items_extension() {
         assert_eq!(BLOCK_FIRST, 0x269F);
         assert_eq!(BLOCK_LAST, 0x26AD);
-        assert_eq!(ALL.len(), 30);
-        assert_eq!(ALL_BITS, 0x3FFF_FFFF);
+        assert_eq!(ALL.len(), 31);
+        assert_eq!(ALL_BITS, 0x7FFF_FFFF);
     }
 
     /// KH1's AP: 3 at a new game (keep Rod / give up Shield adds 0), +2 at each kind-3 level of the
@@ -1085,6 +1096,16 @@ mod tests {
         let mut t = State::default();
         assert!(!names(sync(&mut t, 59, NO_RECOM, &mut |_| false).new).contains(&"Berserk"));
         assert!(names(sync(&mut t, 60, NO_RECOM, &mut |_| false).new).contains(&"Berserk"));
+        // Second Chance: Rod level 90, 5 AP.
+        assert_eq!(x(ix::SECOND_CHANCE), (25, 5, 307, Source::Level(90), 0, false));
+        assert!(second_chance(1 << ix::SECOND_CHANCE) && !second_chance(1 << ix::BERSERK));
+        assert!(!names(sync(&mut t, 89, NO_RECOM, &mut |_| false).new).contains(&"Second Chance"));
+        assert_eq!(names(sync(&mut t, 90, NO_RECOM, &mut |_| false).new), vec!["Second Chance"]);
+        // The page lists all six on Sora's list in KH1's key order (304 MP Haste .. 308 Leaf Bracer).
+        let all = State { unlocked: t.unlocked, equipped: 0 };
+        let l = page::list(page::Owner::Sora, &all);
+        let pos = |i: usize| l.iter().position(|&x| x == i).unwrap();
+        assert!(pos(ix::MP_HASTE) < pos(ix::MP_RAGE[0]) && pos(ix::MP_RAGE[1]) < pos(ix::BERSERK) && pos(ix::BERSERK) < pos(ix::SECOND_CHANCE) && pos(ix::SECOND_CHANCE) < pos(ix::LEAF_BRACER));
     }
 
     #[test]
