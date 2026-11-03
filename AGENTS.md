@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 188: M12 step 3: Second Chance, version 0.98.6 (2026-11-01)
+
+- Second Chance (KH1 ability 25, Rod level 90, 5 AP): KH1's `0x1402BFA80` (Checked (decomp)): a hit that would kill from above 1 HP leaves 1 HP; at 1 HP the next hit kills (a combo's next hit too).
+- Re:CoM's damage check already has this rule for one enemy card (`0x1401E720C`): Second Chance sits there: Re:CoM's HP store at `0x1401E7238` (16 bytes checked with 150 bytes of context) jumps to a 62-byte stub leaving 1 HP, armed only for Sora with a hit arriving and Second Chance equipped; Re:CoM's take-all-HP kind 0x22 skipped (Assumption: as KH1's raw hits). Exe scan: no branch or pointer into the patched bytes. 1186 sites match.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 187: M12 step 3: Berserk, version 0.98.5 (2026-11-01)
 
 - Berserk (KH1 ability 26, Rod level 60, 1 AP): KH1's `0x1402B2DC0` (Checked (decomp)): +4 Strength to swings while HP is above 0 and under 20 % of max (under 9 when max HP ≤ 44), tested at the swing's start. Damage = KH1: into KH1's formula. Damage = Re:CoM (owner: a % bonus): the Re:CoM hit × KH1's damage with the +4 / without, for that hit on the enemy's KH1 stats (KH1's table doubles every 4 steps: usually about × 2).
