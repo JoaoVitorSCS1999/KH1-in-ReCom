@@ -30,6 +30,29 @@ pub fn attack_state_left(a: Running, now: Option<usize>, attack_state: i32) -> b
     a.attack && a.playing && now != usize::try_from(attack_state).ok()
 }
 
+/// KH1's grab (M11, the Neoshadow): the steered attack `attack` is the behaviour's grab
+/// ([`super::Behaviour::grab_attack`]), started in the frame it is asked for. Re:CoM's actor update
+/// (`0x1401A59A0`, Checked (decomp)) runs, in order: the attack check and hit handler (slot `+0x78`,
+/// `0x140185630`: `0x14014E6A0` on the attack set `+0x100`), the state machine (`+0x58`, `0x140242F50`: a state
+/// asked for begins in the next update), the motion clock, then the attack windows (slot `+0x90`, `0x140180C90`:
+/// the set's `+0x18`, `0x14014E830`). An attack started at its state's begin is first tested against Sora two
+/// updates after the frame that asked for it; started at once with its windows and the check run right after
+/// the play, its record meets Sora in that same update, and Sora (updated after the enemies: the battle's
+/// `CBattleEnemyManager` (task `0x19`, the enemies' parent) comes before `CPlayerSora` among `CGameParent`'s
+/// children, `0x1401AEBF0`, run depth-first in list order, `0x1402ACA10` / `0x1402ABBA0`; Checked (decomp)) takes
+/// the hit in that frame: KH1's frame. Only from state 1 (`state`, Re:CoM's state index), the behaviour's own
+/// step: asked for from an attack state's step, the old attack's end hands back to state 1 before the new state
+/// begins, so the attack takes its state's begin there (as any steered attack).
+pub fn starts_at_once(grab: Option<u8>, attack: u8, state: Option<usize>) -> bool {
+    grab == Some(attack) && state == Some(1)
+}
+
+/// An attack state's begin plays the attack's motion unless it already plays (a grab started at once,
+/// [`starts_at_once`]): played again it would start over and attach its records a second time.
+pub fn begin_plays(a: Running) -> bool {
+    !a.playing
+}
+
 /// What a steered attack's state does after the behaviour ran in it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AfterPoll {
@@ -159,11 +182,21 @@ pub mod model {
         /// Per frame: Re:CoM's state and the request playing at the frame's end.
         pub trace: Vec<(i32, Option<u16>)>,
         pub frame: usize,
+        /// KH1's grab ([`starts_at_once`]): the update its record is first tested against Sora (the frame of
+        /// the play when started at once, else the update after its state's begin: the windows open after the
+        /// check), and Sora's side as the host reads it ([`crate::enemy::Hold`]; he can be grabbed unless
+        /// `grabbable` is false; the record holds him for `held_frames` from that update unless `lands` is false).
+        pub grab_test: Option<usize>,
+        /// The host starts the grab at once (false: 0.88.0's host, through its state's begin).
+        pub grab_at_once: bool,
+        pub grabbable: bool,
+        pub lands: bool,
+        pub held_frames: usize,
     }
 
     impl<C: Engine> Model<C> {
         pub fn new(ai: Box<dyn Behaviour>, c: C, frames: Vec<(u16, f32)>, loops: Vec<u16>, attack_states: Vec<i32>) -> Self {
-            Model { ai, c, frames, loops, attack_states, pos: Vec3::ZERO, moved: 0.0, state: 1, next: None, action: None, current: None, age: 0.0, queued: None, released: 0, log: Vec::new(), trace: Vec::new(), frame: 0 }
+            Model { ai, c, frames, loops, attack_states, pos: Vec3::ZERO, moved: 0.0, state: 1, next: None, action: None, current: None, age: 0.0, queued: None, released: 0, log: Vec::new(), trace: Vec::new(), frame: 0, grab_test: None, grab_at_once: true, grabbable: true, lands: true, held_frames: 126 }
         }
 
         fn len(&self, r: u16) -> f32 {
@@ -177,6 +210,18 @@ pub mod model {
         fn play(&mut self, r: u16) {
             self.current = Some(r);
             self.age = 0.0;
+        }
+
+        /// The frame Sora is held from (Sora updates after the enemies: the frame the grab's record meets him).
+        pub fn held_from(&self) -> Option<usize> {
+            self.grab_test.filter(|_| self.lands)
+        }
+
+        /// Sora's side of the grab the behaviour reads in frame `f` (before its AI frame: his update of the frame
+        /// before).
+        fn hold_at(&self, f: usize) -> crate::enemy::Hold {
+            let held = self.held_from().is_some_and(|h| f > h && f <= h + self.held_frames);
+            crate::enemy::Hold { grabbable: self.grabbable && !held, held }
         }
 
         fn attack_state(&self, i: Option<u8>) -> i32 {
@@ -207,10 +252,16 @@ pub mod model {
         fn attack_begin(&mut self) {
             match self.action {
                 Some((a, i)) if a.attack => {
+                    if !begin_plays(a) {
+                        return;
+                    }
                     self.play(a.request);
                     self.action = Some((Running { playing: true, ..a }, i));
                     if a.steered {
                         self.queued = None;
+                    }
+                    if self.grab_test.is_none() && i.is_some_and(|i| self.ai.grab_attack() == Some(i)) {
+                        self.grab_test = Some(self.frame + 1);
                     }
                 }
                 // Re:CoM's own begin (never expected).
@@ -277,6 +328,10 @@ pub mod model {
                 };
                 // The battle floor (Sora standing at y = 0), as the DLL passes it.
                 self.ai.set_floor(0.0);
+                if self.ai.wants_hold() {
+                    let h = self.hold_at(self.frame);
+                    self.ai.set_target_hold(h);
+                }
                 let contact = self.pos.y >= 0.0;
                 let w = World { step: 1.0, pos: self.pos, target: Some(sora), grounded: contact && !airborne && !flying, airborne, moved: self.moved, motion: self.current };
                 for c in self.ai.frame(w) {
@@ -332,6 +387,13 @@ pub mod model {
                 Cmd::Attack { request, attack, .. } => {
                     self.action = Some((Running { request, attack: true, steered: true, playing: false }, Some(attack)));
                     self.next = Some(self.attack_state(Some(attack)));
+                    if self.grab_at_once && starts_at_once(self.ai.grab_attack(), attack, usize::try_from(self.state).ok()) {
+                        // Played now, its windows and the check run at once: its record meets Sora this update.
+                        self.play(request);
+                        self.queued = None;
+                        self.action = Some((Running { request, attack: true, steered: true, playing: true }, Some(attack)));
+                        self.grab_test = Some(self.frame);
+                    }
                 }
                 _ => {}
             }
@@ -371,6 +433,17 @@ pub mod model {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// KH1's grab starts at once (only the behaviour's grab), and a begin doesn't play it again.
+    #[test]
+    fn the_grab_rules() {
+        assert!(starts_at_once(Some(3), 3, Some(1)));
+        assert!(!starts_at_once(Some(3), 2, Some(1)) && !starts_at_once(None, 3, Some(1)));
+        assert!(!starts_at_once(Some(3), 3, Some(3)) && !starts_at_once(Some(3), 3, None), "from state 1 only");
+        let a = Running { request: 208, attack: true, steered: true, playing: true };
+        assert!(!begin_plays(a));
+        assert!(begin_plays(Running { playing: false, ..a }));
+    }
 
     #[test]
     fn the_rules() {

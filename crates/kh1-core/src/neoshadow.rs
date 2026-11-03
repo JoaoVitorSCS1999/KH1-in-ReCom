@@ -52,8 +52,10 @@
 //! with a Re:CoM attack record that carries the new "held" reaction kind (the asset step's record, live for
 //! `grab_record_frames` from 208's start, `kh1_recom_assets::enemy::HOLDS`); Re:CoM's damage check puts Sora
 //! into the held reaction (KH1's held clip, no damage; `kh1-recom`'s `held`), and the host tells the behaviour
-//! whether he is held ([`crate::enemy::Hold`]). The script's frames are KH1's; Sora's hold starts when Re:CoM's
-//! hit lands (one or two frames after KH1's: Re:CoM's hit order, Assumption, not traced).
+//! whether he is held ([`crate::enemy::Hold`]). The script's frames are KH1's but one: KH1 asks for Sora's held
+//! motion in the frame of its test and plays 208 the frame after; here 208 and its record start in the test's frame
+//! (a frame early) and the host tests the record at once ([`Behaviour::grab_attack`],
+//! [`crate::enemy::host::starts_at_once`]), so Sora is held in KH1's frame (owner 2026-11-03, the 1:1 rule).
 
 use crate::enemy::guard::HELD;
 use crate::enemy::script::{face_target, frame, motion_done, motion_frames, poll, pos, push, rand, set_state, set_target, take_state, target, tick_clock, wait_frames, wait_grounded, walk_to, warp};
@@ -1160,7 +1162,9 @@ async fn special_round(cx: &Cx) {
 ///
 /// The port: KH1's Sora request is Re:CoM's held reaction, put on him by the grab's record on 208
 /// ([`Attack::Grab`]: the hit carries the held kind; Re:CoM's damage check holds him, `kh1-recom`'s `held`), so
-/// he is held from the frame that hit lands; "his motion is no longer 200" is the host's [`Hold::held`] going
+/// 208 starts in the test's frame (KH1's request of Sora; 208 itself a frame earlier than KH1's) and the host lands
+/// its record in that frame ([`Behaviour::grab_attack`]): he is held in KH1's frame; the hold's loop and its let-go
+/// keep KH1's frames (from the frame after 208's KH1 frame); "his motion is no longer 200" is the host's [`Hold::held`] going
 /// false once it was true, or never true within the record's frames and one more (`grab_record_frames`, the asset
 /// step's `kh1_recom_assets::enemy::HOLDS`: the record missed him, he stepped out of it, guarded or was protected;
 /// Assumption: KH1 has no such case, its grab is not a hit; the extra frame: Re:CoM's damage check runs in Sora's
@@ -1210,10 +1214,15 @@ async fn grab_or_miss(cx: &Cx) {
 async fn hold(cx: &Cx) {
     group(cx, |g| g.grab = true);
     push(cx, ECmd::Note("KH1's grab: Sora's request 200 of the Neoshadow's player set is Re:CoM's held reaction, from the grab's record on 208"));
-    frame().await;
+    // KH1's request of Sora is this frame's (`0x1CC6..0x1D00`, before the yield); its 208 is the next frame's
+    // (`0x1D02..0x1D68`: shown, `sys 124(0)`, at Sora facing his way, effect 6, 208). The port's request is 208's
+    // record: shown, at Sora and 208 now, the record tested at once by the host (`Behaviour::grab_attack`).
     push(cx, ECmd::Visible(true));
     follow_sora(cx);
     attack_now(cx, Attack::Grab, 0.0);
+    frame().await;
+    // KH1's 208 frame: at Sora's place facing his way.
+    follow_sora(cx);
     frame().await;
     let mut t = motion_frames(cx, req::GRAB) - k(cx, "grab_trim");
     let (mut age, mut seen) = (0.0f32, false);
@@ -1714,6 +1723,9 @@ impl Behaviour for Ai {
     fn wants_hold(&self) -> bool {
         true
     }
+    fn grab_attack(&self) -> Option<u8> {
+        Some(Attack::Grab.index())
+    }
     fn set_target_hold(&self, h: Hold) {
         self.io.borrow_mut().x.hold = h;
     }
@@ -1815,8 +1827,9 @@ mod tests {
         visible: bool,
         hittable: bool,
         dead: bool,
-        /// Sora's side of the grab (the host's): grabbable; whether the grab's record lands (he is held from the
-        /// frame after [`Attack::Grab`] for the held clip's 126 frames); the frame a hit frees him.
+        /// Sora's side of the grab (the host's): grabbable; whether the grab's record lands (the host tests it in
+        /// [`Attack::Grab`]'s frame and Sora, updated after the enemies, is held in that frame: the behaviour reads
+        /// him held from the frame after, for the held clip's 126 frames); the frame a hit frees him.
         grab_ok: bool,
         lands: bool,
         grab_at: Option<usize>,
@@ -2056,8 +2069,9 @@ mod tests {
     }
 
     /// Two of them, Sora grabbable: the hidden one comes up under him and grabs him (KH1's `0x1CB6..0x1E62`): `+0x4C`
-    /// set, a frame later shown and 208 with the grab's record ([`Attack::Grab`]); it holds him at his place until
-    /// 30 of 208's len − 2 frames are left (94 frames from the frame after 208: 95 after it), then hides again;
+    /// set and, in that same frame (KH1's request of Sora; 208 a frame earlier than KH1's), shown and 208 with the
+    /// grab's record ([`Attack::Grab`]); it holds him at his place until 30 of 208's len − 2 frames are left (94
+    /// frames from the frame after KH1's 208 frame: 96 after the test, as KH1), then hides again;
     /// meanwhile the other one is sent to dive at him (state 4; its supervisor clears `+0x4C` as it sends it,
     /// KH1's `0x467A`).
     fn hidden_one(seed: u32, setup: impl Fn(&mut One)) -> (Sim, usize, usize) {
@@ -2086,16 +2100,16 @@ mod tests {
         let (mut s, h, at) = hidden_one(3, |o| o.grab_ok = true);
         assert!(s.n[h].log.iter().any(|(f, c)| *f == at && *c == ECmd::Visible(true)), "shown with 208");
         assert!(s.n[h].log.iter().any(|(f, c)| *f == at && matches!(c, ECmd::Attack { request: req::GRAB, attack: Attack::Grab, blend } if *blend == 0.0)));
-        assert!(s.n[h].log.iter().any(|(f, c)| *f + 1 == at && matches!(c, ECmd::Note(n) if n.contains("held reaction"))), "a frame before 208: KH1's request of Sora");
+        assert!(s.n[h].log.iter().any(|(f, c)| *f == at && matches!(c, ECmd::Note(n) if n.contains("held reaction"))), "208 in the frame of KH1's request of Sora");
         let sora = Vec3::new(0.0, 0.0, 600.0);
         s.run(sora, 100);
         let o = &s.n[h];
-        assert_eq!(hidden_line(o, at), Some(at + 95), "KH1's 94 held frames from the frame after 208");
-        assert!(!o.log.iter().any(|(f, c)| *f > at && *f < at + 95 && matches!(c, ECmd::Motion { .. } | ECmd::Attack { .. })), "it only holds");
+        assert_eq!(hidden_line(o, at), Some(at + 96), "KH1's 94 held frames from the frame after KH1's 208 frame (at + 1)");
+        assert!(!o.log.iter().any(|(f, c)| *f > at && *f < at + 96 && matches!(c, ECmd::Motion { .. } | ECmd::Attack { .. })), "it only holds");
         assert!(!s.group().grab, "+0x4C clear after");
         assert!(!o.log.iter().any(|(_, c)| matches!(c, ECmd::Motion { request: req::MISS, .. })), "no miss");
         let other = &s.n[1 - h];
-        assert!(other.log.iter().any(|(f, c)| *f + 1 >= at && *f < at + 95 && *c == ECmd::State(st::DIVE)), "the other is sent to dive at him: {:?}", other.log.iter().filter(|x| x.0 > at).take(8).collect::<Vec<_>>());
+        assert!(other.log.iter().any(|(f, c)| *f + 1 >= at && *f < at + 96 && *c == ECmd::State(st::DIVE)), "the other is sent to dive at him: {:?}", other.log.iter().filter(|x| x.0 > at).take(8).collect::<Vec<_>>());
     }
 
     /// A hit frees Sora (KH1: his motion is no longer 200): the hidden one lets go that frame.
@@ -2119,8 +2133,57 @@ mod tests {
             o.lands = false;
         });
         s.run(Vec3::new(0.0, 0.0, 600.0), 10);
-        assert_eq!(hidden_line(&s.n[h], at), Some(at + 1 + 2 + 2), "the record's 2 frames, one more, from the frame after 208");
+        assert_eq!(hidden_line(&s.n[h], at), Some(at + 2 + 2 + 2), "the record's 2 frames, one more, from the frame after KH1's 208 frame");
         assert!(!s.group().grab);
+    }
+
+    /// The hold starts on KH1's frame, through the host's rules (`crate::enemy::host::model`: Re:CoM's state machine
+    /// begins an attack state in the next update, its windows open after the attack check): KH1 asks for Sora's held
+    /// motion in the test's frame (the `+0x4C` note); the grab is started at once (`Behaviour::grab_attack`) and its
+    /// record meets Sora in that frame, so he is held in it, with 208 playing from it (KH1's 208 the frame after).
+    /// Through the attack state's begin (0.88.0's host, 208 a frame after the test) he was held three frames later.
+    /// Its let-go stays KH1's: the test's frame + 96.
+    #[test]
+    fn the_hold_starts_on_kh1s_frame_in_the_host() {
+        // (Sora's held frame, KH1's request frame, the hidden one's model) with the host starting the grab at once or not.
+        let run = |at_once: bool| {
+            let g = Arc::new(Mutex::new(Group::default()));
+            let mk = |i: u32, p: Vec3| {
+                let mut m = Model::new(Box::new(Ai::with_group(consts(), frames(), 3 * 31 + i, 0.0, g.clone())), consts(), frames(), vec![], vec![2, 3, 3, 3]);
+                m.pos = p;
+                m.grab_at_once = at_once;
+                m
+            };
+            let mut n = [mk(0, Vec3::new(-300.0, 0.0, 0.0)), mk(1, Vec3::new(300.0, 0.0, 0.0))];
+            let sora = Vec3::new(0.0, 0.0, 600.0);
+            let mut f = 0;
+            while f < 3000 && n.iter().all(|m| m.grab_test.is_none()) {
+                for m in n.iter_mut() {
+                    m.run(sora, 1);
+                }
+                f += 1;
+            }
+            let h = n.iter().position(|m| m.grab_test.is_some()).expect("the hidden one grabs");
+            for m in n.iter_mut() {
+                m.run(sora, 110);
+            }
+            let [a, b] = n;
+            let m = if h == 0 { a } else { b };
+            let t = m.log.iter().find(|(_, c)| matches!(c, ECmd::Note(x) if x.contains("held reaction"))).map(|x| x.0).expect("KH1's request of Sora");
+            (m.held_from(), t, m)
+        };
+        let (held, t, m) = run(true);
+        assert_eq!(held, Some(t), "Sora held in KH1's frame");
+        assert_eq!(m.trace[t].1, Some(req::GRAB), "208 plays from that frame (KH1's: the frame after)");
+        assert!(m.trace[t + 1..t + 90].iter().all(|x| x.1 == Some(req::GRAB) && x.0 == 3), "208 in its attack state, not started over");
+        assert_eq!(m.log.iter().filter(|(_, c)| matches!(c, ECmd::Attack { request: req::GRAB, .. })).count(), 1);
+        assert_eq!(m.log.iter().find(|(x, c)| *x > t && *c == ECmd::Visible(false)).map(|x| x.0), Some(t + 96), "KH1's let-go");
+        assert_eq!(m.released, 0);
+        // 0.88.0's host: the attack state's begin in the next update, the record's window opened after that update's
+        // check: two frames late even with 208 asked for in the test's frame (0.88.0 asked for it a frame later, as
+        // KH1's 208: three).
+        let (held, t, _) = run(false);
+        assert_eq!(held, Some(t + 2));
     }
 
     /// Three of them: they sink, wait for each other, take three different places of the formation's draw and

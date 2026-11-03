@@ -1067,8 +1067,9 @@ seen in game; no KH1 trace.
   `neoshadow::tests::builds_from_the_players_files`).
 - Assumptions: Re:CoM's message `0x14017F0E0` sends with the kind (to manager 0x16) leaves `0x40` as it is (no card
   rewrites it in a KH1 battle); a held-kind hit on a friend card's Donald / Goofy would take their switch's default
-  (the grab's record is aimed at Sora's spot); the hold starts one or two frames after KH1's (Re:CoM's hit order: the
-  record lands on 208's first frames, the check runs in Sora's update); Sora's face during the hold stays as it was.
+  (the grab's record is aimed at Sora's spot); Sora's face during the hold stays as it was. The hold starts on KH1's
+  frame since 2026-11-03 (the grab's record tested at once in the test's frame; Sora updates after the enemies, so his damage
+  check takes it in that frame: `docs/recom-m11-enemies.md` § The grab on KH1's frame).
 
 ## Hooks and patches (`sites::ATTACK_HOOKS`, `ATTACK_CALLEES`, `ATTACK_DATA`)
 
