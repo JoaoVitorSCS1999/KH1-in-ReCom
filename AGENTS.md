@@ -11,6 +11,13 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 185: M12 step 3: MP Rage ×2, version 0.98.3 (2026-11-01)
+
+- MP Rage (KH1 ability 24, Rod levels 42 and 75, 3 AP each): KH1's `0x14029BBD0`: MP charge = HP lost × equipped copies (the two stack; Checked (decomp)). Sora's HP is Re:CoM's (several times KH1's): the HP lost first taken as the same share of KH1's max HP at his level (18 + 3 at each of KH1's 23 HP levels) (Assumption, owner question). Combat = KH1; learned notices.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 184: M12 step 3: MP Haste, version 0.98.2 (2026-11-01)
 
 - Ask (owner, 2026-11-03): KH1's level abilities "added to his ability list at the levels he would normally get them".

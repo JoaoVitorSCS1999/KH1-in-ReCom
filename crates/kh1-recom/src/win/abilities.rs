@@ -154,8 +154,8 @@ pub fn sync() -> Option<State> {
 /// they've obtained those abilities"): called once for each ability [`sync`] newly unlocks (`i` =
 /// `crate::abilities::ix`), e.g. MP Haste at Re:CoM level 21.
 ///
-/// TODO(M12 notices merge): wire the learned-notice framework here (`notify_learned(...)`, built
-/// on another branch); nothing is shown yet.
+/// The notice itself comes from [`crate::notices::level_abilities`] in [`sync`] (M12 step 2, merged):
+/// every level ability [`sync`] newly unlocks is queued there; this hook stays for later callers.
 pub fn on_learned(i: usize) {
     let _ = i;
 }
