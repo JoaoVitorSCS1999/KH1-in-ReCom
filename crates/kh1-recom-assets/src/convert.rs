@@ -181,9 +181,11 @@ impl Converter {
         let rig = Rig::from_mdls(mdls)?;
         // Bone 1 is the model's own `ex_NNNN_sk` (Sora's `ex_0010_sk`, the Shadow's
         // `ex_2020_sk`; Checked (files)); Re:CoM's Air Pirate names it `m_ex210_sk` (Checked (files):
-        // `EN0022.MDL`, M11).
+        // `EN0022.MDL`, M11); Re:CoM's Gargoyle `ex_2220_sk_2` (Checked (files): `EN0013.MDL`, M11). The map itself is by
+        // rest pose, not by name.
         let sk = &skel.bones.get(1).map(|b| b.name.clone()).unwrap_or_default();
-        if skel.bones.len() < 2 || skel.bones[0].name != "Root" || !((sk.starts_with("ex_") || sk.starts_with("m_ex")) && sk.ends_with("_sk")) {
+        let sk_name = sk.ends_with("_sk") || sk.rsplit_once("_sk_").is_some_and(|(_, n)| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()));
+        if skel.bones.len() < 2 || skel.bones[0].name != "Root" || !((sk.starts_with("ex_") || sk.starts_with("m_ex")) && sk_name) {
             return bad("Re:CoM skeleton: bone 0/1 are not Root/ex_NNNN_sk");
         }
         let map = bone_map(&kskel, &skel);
