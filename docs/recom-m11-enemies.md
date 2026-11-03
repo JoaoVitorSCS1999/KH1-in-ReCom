@@ -239,6 +239,14 @@ New for the Darkball (Checked (decomp) unless marked):
 | asset step `enemy::OWN_CLIPS` | requests that get their own new clip although Re:CoM has their motion as an exact bake, because the bake carries Re:CoM's own attack records (bound by the clip's name, `0x14014DBE0`): they would hit with KH1's rows. The new clip gets the bake's SES entry (same frames) |
 | asset step `enemy::BONE_POINTS` | a bone code's place in a motion's frame (KH1's pose through `kh1-anim`, actor frame, root motion off) as `<name>_x / _y / _z` constants |
 
+New for the Blue Rhapsody (Checked (decomp + exe bytes)):
+
+| Part | What |
+|---|---|
+| `Body::timed_hop`, `Body::flight_hop`, `Body::flight_hop_done` | `sys 82` from flight (`0x1402AF150` with `+0x70` = 4): KH1's movement state 5, the timed jump's step (`0x1402AFAE0`) with flight's flags (not airborne for the reactions, never "falling" toward a landing); its end `0x1402AFAA0`: falling (`+0x3C4 ≥ 0`) and down to the height above the floor it left from (`+0x3BC ≥ +0x3D4`) or on the floor → flight (state 4), velocity kept. The DLL and the host model end it before the landing check (one load per enemy). Other bodies unchanged (a jump, flight, `sys 88` or a landing clear it) |
+| `Cmd::AttackAt` | a steered attack (`Cmd::Attack`) from a start frame (`sys 13`'s fourth word): its state's begin plays it there (`play_at`); Re:CoM's records tick on the same motion clock (`0x14014E830` reads `0x1401A47C0`) |
+| `caster::Cast::direct` | a spell child with no charge: its count runs in the cast request from its first frame |
+
 Re:CoM's fliers (Checked (decomp)): every flier ctor sets `+0x154 |= 0x80` and `+0x260 |= 0x100` (gravity off in
 Re:CoM's state code, `0x14017EB80`, `0x14017EED0`, `0x140198600`); their clips hold the body 0.61 m above the
 actor (Air Soldier: `ex_2160_sk` at y 0.614 in `e015_001` and in KH1's idle, Checked (files)), so Re:CoM's
@@ -4088,6 +4096,174 @@ frames (200 → 201 + 40, 202 → 203 + 90), the fires' start points and paths t
   (`sys 82`, the Powerwild's framework). Re:CoM: Blue Rhapsody / Yellow Opera have one `.ASD` record each, Green Requiem
   none and no state 3.
 
+### The Blue Rhapsody (built)
+
+Status: built on branch `bluerh-wip`; tests and the Windows build pass; **not seen in game**; no KH1 trace of the Blue
+Rhapsody yet. KH1's AI, attacks, reactions and motions on Re:CoM's `CEnemyBluerhapsody`, with Re:CoM's stats. The second of
+the casting family: the shared routines `kh1_core::caster` (idle leg, fly-to, the stuck test, the spell child's wait) are
+reused; its rounds, hops, melee, Blizzard and hit handler are its own (`kh1_core::bluerhapsody`).
+
+#### KH1's side. Checked (files: `ex_2120.bd` disassembled, code from `0x298`, folded and raw; its child `ex_2120_00.bd`, code from `0x18`; decomp: the syscalls named)
+
+The script (0x2080 bytes) keeps the actor at `wp+4`, the state object at `wp+0x20`, the search object at `wp+0x30`, the hops'
+side at `wp+0` (0 or 1), "seen" at `wp+0x38`. Every motion is a plain request except its appearance (69).
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x1E1A` | init `0x1E9A` → `0xBB4` (records LV1 `0x14` / LV2 `0x80`; stats `+0x14` = 0.2, `+0x18` = 0.95; flight with no velocity `sys 135`; state / search objects; home; seen cleared); handlers hit `0x1EFA`, message `0x1FD2` (answers 0), filter `0x1EDA`; stats `+0x10` = 500 (`sys 50`'s hop, never called: unused); a yield; the idle start `0x820`; each frame the idle search `0x972` (state 1: Sora within 1000 → engaged) and the state requests (1 idle `0x7FC`, target cleared; 2 engaged `0x2F0`; 3 hit `0x298`, the hitter or Sora). No `sys 125`: π/16 a frame |
+| idle start | `0x830` | spawn type ≠ 0: the appearance `0xDB4` (fade-in 30 frames, flag 0x80 / 30, effect 2, **69 as an action with 219 queued at blend 8**, then facing Sora at once); state 1 |
+| idle | `0x814` → `0x85E` | the family's idle leg (the Red Nocturne's `0x93E`, the same bytes): 219, 5° a frame at 8, facing yaw 0, sinking 0.3 (rising below 150 over the floor), [150, 180) frames |
+| engaged | `0x314` | the first time: seen, and for spawn type 0 the notice `0xC3A` (214, not in world 11); a yield; the leash (not ported); **to its height** `0x78E`; by the distance (`0x1518`, 3D): < 250 `0x41A` (back-off, Blizzard), < 500 `0x3BC` (hops, melee), else `0x3B6` → `0x666` (approach); to its height; the search `0xB7A` (Sora); engaged again |
+| to its height | `0x78E` | to 35 above the floor under the target (`0x1386`: `sys 77` down from 20 above it), straight up or down from where it is: `0x9DC(220, point, 6, 20, 0, 500, 300)` (the family's fly-to, the Red Nocturne's `0xABC`) |
+| hops and melee | `0x3BC` | `wp+0` = 0 (rand < 0.5) or 1; 60 %: two hops, else one; then the melee |
+| hop | `0x4DE` | facing the target at once; its facing turned 20° (−20° when `wp+0` = 1), × 30, 60 high; `sys 13(3)` (the crouch, 16 frames, waited `0x1FEA`), `sys 13(0x10004)`, **`sys 82(v, 0.9, 12)`**, `sys 83(3)`; facing the target at once each frame while `+0x70` is 3 or 5 |
+| back-off | `0x600` | facing the target at once; its facing turned 180°, × 35, 250 high; `0x18E2(v, 0.9, 40, 3)` (the same crouch / rise / `sys 82` / `sys 83`, no facing in the air); to its height |
+| approach | `0x666` | to its height; count 120: while ≥ 0: facing the target at once, a hop 20 ahead, 120 high, `0x18E2(v, 0.9, 25, 3)`; `sys 92(v)` = 1 (a step up ahead): a climb 5 ahead, 500 high, `0x18E2(v, 1, 60, 3)` and the next round at once; within 750: done; else the count − step, a yield; to its height |
+| Blizzard | `0x424` | **the child** `sys 94(actor, 0, target, 0x1CC, 0)` (no batted row); `sys 13(55, 0, 0)`; `0x14B2` (until `sys 172` or request 6 plays, turning to the target); `sys 13(220, 0, 2)`; to its height |
+| melee | `0x47E` | one hit serial (`sys 22`), rows `0xEC` and `0x15C` on itself (`sys 23`); **`sys 13(215, blend 8, from frame 8)`**; `0x14B2`; `sys 13(220, 0, 2)`; to its height |
+| hit state | `0x2BC` | within 500: the back-off and the Blizzard; the leash; engaged |
+| hit handler | `0x1EFA` | seen; attribute 3 (Blizzard, `0xCE8`): no damage, HP to max, kind 0, done; the damage `0x1774` (clash kinds 6 / 7 or a repel: −1; killed 0); attribute 2 (Fire) or 8 (`0xD52`): `sys 194(EXP / 10 + 2)`; killed: its death `0x1438`; −1: state 3 only for a clash or attributes 8 / 10 (`0x13D6`); alive: attribute 2: `sys 179(1800)` (dizzy); state 3 |
+
+`sys 82` from flight (`0x1402AF150`, Checked (decomp)): with `+0x70` = 4 KH1 enters **movement state 5** and keeps the height
+above the floor it left (`+0x3BC = +0x3D4`, `+0x3D4` = floor − y, written by `0x1402998A0`); state 5's step is state 3's (`0x1402AFAE0`:
+the velocity × step, x / z × √drag, y + step × g, at most 20); its flags are flight's (2, `0x1402AF2E0`: not airborne for the
+reactions); its end check `0x1402AFAA0` (Checked (exe bytes)): rising (`+0x3C4 < 0`) it stays, falling it returns to state 4
+(flight, its velocity kept) once `+0x3BC ≥ +0x3D4` (down to its starting height) or on the floor. `sys 83(3)`: the base 0,
+six frames before the top 5 plays and 6 is queued while 4 plays (`0x1402AF630`).
+
+`sys 92` (`0x1402BA630` → `0x140299390`, Checked (decomp)): a probe 2 × its radius ahead; 1 when the floor there is above its
+middle (a step up), 2 a drop, 0 / 3 otherwise.
+
+**Its child** (`ex_2120_00.bd`, entry `0x1C2`): effects 2054 / 2055 on the parent; 84 frames: each frame after a yield, the
+parent must play 55 (else it ends), the count down by the step only while the parent isn't stopped (`+0x88 & 1`, KH1's Stop
+status, `0x1402BEEE0`); then `sys 19(parent, 0, 0)` (bone code 0's parent's place) and the parent's facing `+0x30`;
+`0x2AE`: an effect object (`sys 15`), its row `0x1CC` made on the parent with a new serial, 60 frames: `sys 18` (25 × step
+along the facing), the effect and the row moved there, `sys 213(row, 1)` (on), a yield; **its row's `+4` set (a hit, or a
+clash with a swing or a guard) ends it**; then the effect removed (`sys1.3`). No re-aim, no homing, no wall test.
+
+Rows (Checked (files)): `0xEC` type 0, priority 30, recoil 216, bone code 0 (`head1`) t 30 → 1, radius 25; `0x15C` type 2
+(never hurts: the shared "rows that only clash"), priority 30, recoil 216, radius 50; `0x1CC` (the Blizzard) type 0, priority
+0, bone −1 (free-standing), radius 40, recoil 110. 215's HIT track: frames 82..100 (records on Re:CoM's `head1`). KH1's
+reactions play for every hit: flinch 72..75, knock-back 76 / 77, air flinch 78, air knock-back 80 / 81 (a flier: the ground
+forms, kind 5 as 4).
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyBluerhapsody` (vtable `0x140537CA8`, 139 slots, RTTI COL at −8), ctor `0x14018C120` (`40 53 48 83 EC 20`: `CHeartless`'s
+base ctor, then `+0x154 |= 0x80`, `+0x260 |= 0x100`, `+0xCC0 |= 4`; its only reference the factory's call at `0x140189044`;
+no branch into the moved bytes, no pointer to them: exe scan, 2026-11-03), allocation `0x14018902B` `mov ecx, 0xCD0` → 0xCF0.
+Its own states: 1 (`0x14018C280` with `e003_001` / `e003_002`; step `0x14018C460`: a 0.15 m/frame bounce off the floor in
+its walk phases 2 / 5 / 8, → `0x140197AD0`), 2 (its Blizzard shot `e004_050`: begin `0x14018C200`, step `0x14018C2D0`: past
+clip time 0x1099 (85 frames) one `CBullet` from its aim point, `0x14017F0E0(enemy, 0, 1)`'s AP, 0.4 m a frame, radius 0.2,
+effect set `0x1407C2F10` (`"_ex_2120"` 9 / 10 / 8)), 3 (its body attack `e004_051`: begin `0x14018C250`, step `0x14018C430`;
+its `.ASD`'s one record: attack id 1 on `ante2`, frames 75..120); 0 / 11 / 12 / 30 `CBattleEnemy`'s; think `0x140196EC0`.
+`@ENP` attacks: id 0 (× 2.4) and id 1 (× 2.8). `EN0004.ANN`: 75 slots (no KH1 request has an exact Re:CoM bake: every one
+gets its own clip). `EN0004.SES` exists.
+
+Our copy: states 0, 1, 3, 11, 12, 30 and the think (20 vtable slots pointer-checked, `sites::BLUERHAPSODY_PTRS`); the melee
+plays in state 3; state 2 is never entered. The attack-end cooldown (0.83.0) is keyed to Re:CoM's own vtable: `enemy_ai =
+recom` leaves Re:CoM's Blue Rhapsody as Re:CoM has it.
+
+**Power mapping** (decision M10, "each KH1 attack takes the power of the Re:CoM attack of the same kind; its spells its own
+Re:CoM shot"): the melee (both rows) → Re:CoM's body attack, id 1 (its only `.ASD` record, the template); the Blizzard →
+Re:CoM's Blizzard shot, id 0 kind 1 (`0x14017F0E0(enemy, 0, 1)`, as its state 2 asks). The two are the same moves in both
+games (Re:CoM's shot leaves 85 frames into `e004_050`, KH1's 84 into 55).
+
+#### What the port does
+
+- **Flight and hops**: KH1's flight (state 4) as every flier; each hop is KH1's movement state 5 in the shared body
+  (`Body::timed_hop` / `flight_hop_done`, new): the timed jump's step, not airborne for the reactions, back in flight with its
+  velocity at its starting height above the battle floor or on touching the floor; the DLL ends it before the landing check
+  (one load for every other body), Re:CoM's mover moved by KH1's displacement. The apex motions (5, 6 queued) as the
+  Powerwild's.
+- **The melee**: KH1's 215 as a steered attack in Re:CoM's state 3, **from frame 8** (new `Cmd::AttackAt`; Re:CoM's records
+  tick on the motion clock `0x1401A47C0`, `0x14014E830`: Checked (decomp)): two `.ASD` records on 215's clip at frames 82..100
+  (the hit, and the body row that never hurts Sora but clashes with his swings), Re:CoM's id 1 power. Guarding it: KH1's recoil
+  216 (the model has it). The script keeps turning to Sora while it plays; 220 from frame 2 ends it.
+- **The Blizzard** (`win::kh1_thrown`, prefix `blizzard`, the fires' machinery): the child's wait (`caster::Cast::direct`, no
+  charge: 84 frames counted in 55 from its first frame; acts on the 85th frame after the cast is asked); one of Re:CoM's
+  `CHomingBullet`s made at bone code 0's parent (the manifest's `blizzard_at` point), along the Blue Rhapsody's facing,
+  straight at 25 a frame for 60 frames (no homing), radius 40, Re:CoM's power (id 0) and look (`0x1407C2F10`,
+  `sites::BLUERHAPSODY_FIRE_PTRS`); Re:CoM's step collides it and hits Sora (a hit ends it). **A swing or Sora's Guard ends
+  it** (KH1: its row meets a swing's or a guard's through `0x1402B4BC0` and the child ends on `+4 ≠ 0`; `ENDS_ON_CLASH`):
+  its attack off, its life over, Re:CoM's guard spark (swing). It is never sent back, so it never hits its caster.
+- A dying or flinching caster's Blizzard doesn't fly (KH1's child checks 55 every frame; the host steps only living casters'
+  children).
+- Per frame: one KH1 step per flying Blizzard; one load per enemy for the flight hop's end.
+
+#### What the asset step writes
+
+`ENEMY/0004/EN0004.ANN` (Re:CoM's 75 slots byte-identical; KH1's clips at 100 + entry), `EN0004.ASD` (Re:CoM's record kept;
+the melee's two records added: 3), `EN0004.SES` (Re:CoM's entries kept; the attack clip's sounds from its template), and
+`kh1-bluerhapsody.json` (`kh1-enemy 1`: 63 numbers from `ex_2120.bd` (and the stats block's two speeds), 4 from the child, 20
+request words checked, the Blizzard row's radius and Re:CoM power, its start point, the melee's rows / clash numbers / recoil
+216, 1 hurt part). Requests 0x66 and 0x69 (KH1's status motions, never played) get no clip (`enemy::SKIPPED`: they share
+entries 12 / 7 with 0x43 / 7 under the other root-motion rule). Test `bluerhapsody::tests::builds_from_the_players_files`.
+In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0004/EN0004.ANN, method: copy, source: [{name: ENEMY/0004/EN0004.ANN}]}
+- {name: ENEMY/0004/EN0004.ASD, method: copy, source: [{name: ENEMY/0004/EN0004.ASD}]}
+- {name: ENEMY/0004/EN0004.SES, method: copy, source: [{name: ENEMY/0004/EN0004.SES}]}
+- {name: kh1-bluerhapsody.json, method: copy, source: [{name: kh1-bluerhapsody.json}]}
+```
+
+The step prints `bluerhapsody (M11): …`; the log shows `bluerhapsody: KH1's bluerhapsody (M11) …` at start, `battle N: Blue
+Rhapsody … gets KH1's AI` in a battle, `attack 215 (melee) from 8, steered`, `thrown: bluerhapsody eNNN: blizzard …` per
+Blizzard and `blizzard N: Sora's swing met it: it ends` / `Sora's Guard met it: it ends`.
+
+#### Checked / Assumption
+
+- **Checked (files):** every number at its push (the asset test reads them: 63 + 4), the 20 request words and the child's 7,
+  the three rows (types, priorities, radii, recoils), the clip lengths (55 148, 215 148, 216 52, 3 16, 4 8, 69 90, 214 158),
+  the HIT window (82..100), the hurt part, Re:CoM's ANN / ASD / EPD attacks; the idle leg and fly-to equal to the Red
+  Nocturne's.
+- **Checked (decomp):** `sys 82`'s state 5 and its end bytes (`0x1402AF150`, `0x1402AFAA0`), `+0x3D4` (`0x1402998A0`), `sys
+  18` (`0x1402B9BF0`: × step), `sys 92` (`0x140299390`), `sys 213` (`0x1402BBC10`), `sys 13`'s blend / start
+  (`0x1402B9F80`), `+0x88 & 1` = KH1's Stop (`0x1402BEEE0`), Re:CoM's states 1..3 and the record clock (`0x14014E830`).
+- **Checked (exe):** the class, 139 slots, the ctor and its only call, the factory size, 20 vtable slots, the effect set's
+  names.
+- **Assumptions:** the child's first frame is the frame after `sys 94` (as the Red Nocturne's); the apex motions at the next
+  frame's script (±1 frame, as the Powerwild's); request bit 16 as a plain request (as the Powerwild's); state 5's end checked
+  after the step (±1 frame); flat battle floors (the floor under Sora; `sys 92` never 1, so it never climbs);
+  Re:CoM's sounds; seeds per enemy.
+- **Not ported:** the leash, the notice for placed ones (battle spawns appear), the search object, the element rules (its
+  Fire EXP bonus and 30 s dizzy, Blizzard's full heal: attributes are not carried, owner), effects (the appearance's effect 2
+  and flag 0x80, the child's 2054 / 2055: M13), the death routine (Re:CoM's defeat, prizes, EXP).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Blue Rhapsody battle (Traverse Town's or Wonderland's); run the asset step first)
+
+1. Each Blue Rhapsody rises into view (about 1½ s), then floats in small circles bobbing up and down, facing one fixed
+   direction (as KH1).
+2. Come within 10 m: it drops (or rises) to hover low, about 35 cm above the floor, and starts its rounds.
+3. Farther than 5 m: it hops toward you in bounces (about ⅔ s and 3 m each) until it is within 7.5 m.
+4. Between 2.5 and 5 m: one or two quick hops toward you, 20° off to one side (about 3 m each), then a head-butt (it hits
+   about 1¼ s in); it keeps turning to you while it does it. Guard it: it recoils.
+5. Closer than 2.5 m, or hit it within 5 m: it bounces back about 6 m, then casts a Blizzard (it charges about 1½ s): a
+   straight ice shot along its facing, about 15 m long. Swing at the shot or Guard it: it vanishes.
+6. Hit it while it charges: no Blizzard comes.
+7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Blue Rhapsodies (bouncing, their own shot).
+
+Please send `kh1-recom.log` (`bluerhapsody:`, `thrown:` lines) and an F9 trace (its `blizzard` tokens).
+
+#### KH1 trace (what to record in KH1)
+
+Traverse Town (the 2nd / 3rd District) or Wonderland: stand far (9 m) 10 s, then at 4 m 15 s, then at 2 m 15 s; side-step
+three Blizzards; swing at one; Guard one; Guard a head-butt; hit one while it charges; hit one from close (its back-off and
+Blizzard); kill one. The trace's enemy rows give the rounds, the hops' heights and lengths (the return to flight), the
+melee's frames (215 from 8, the hit 82..100) and the Blizzard's frame (55 + 84), start point and path to compare.
+
+#### Blue Rhapsody owner questions
+
+1. **Stop during its cast.** KH1's Blizzard keeps waiting while its caster is stopped (its count pauses under KH1's Stop) and
+   still flies once Stop ends. Here Re:CoM's own Stop state (kept, decision M10) replaces the cast motion, so the waiting
+   Blizzard ends: a stopped Blue Rhapsody never finishes that cast (the Red Nocturne's fires the same). (a) Keep; (b) hold the
+   child's count while Re:CoM's Stop holds the caster and let the cast go on after it (one version for the family).
+2. **Walls.** KH1's Blizzard has no wall test (it flies its 15 m through walls). Here it is a Re:CoM bullet whose end flag
+   (0x100) ends it at a hit, a wall or the range together, so a wall ends it (as every ported shot). (a) Keep; (b) research a
+   Re:CoM bullet setting that keeps the hit end without the wall end.
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -4101,7 +4277,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Soldier (built) | `xa_ex_2010` (ex_2010.bd) | `CEnemySoldier` 2 | `0x14054ea68` | `0x140193510` / `0x140188fd7` 0xcd0 | 1,2,3 | 200,201,202,203,204,207,209 | FaLl | — |
 | Large Body (built) | `xa_ex_2050` (ex_2050.bd) | `CEnemyLargebody` 9 | `0x140542ad0` | `0x14018f090` / `0x1401890fd` 0xce0 | 1,2,3 | 200,207,231 | FKL | — |
 | Red Nocturne (built) | `xa_ex_2110` (ex_2110.bd) | `CEnemyRednocturne` 3 | `0x140548a58` | `0x140191880` / `0x140189001` 0xcd0 | 1,2,3 | — | FKaA | SES |
-| Blue Rhapsody | `xa_ex_2120` (ex_2120.bd) | `CEnemyBluerhapsody` 4 | `0x140537ca8` | `0x14018c120` / `0x14018902b` 0xcd0 | 1,2,3 | 215 | FKaA | — |
+| Blue Rhapsody (built) | `xa_ex_2120` (ex_2120.bd) | `CEnemyBluerhapsody` 4 | `0x140537ca8` | `0x14018c120` / `0x14018902b` 0xcd0 | 1,2,3 | 215 | FKaA | — |
 | Yellow Opera | `xa_ex_2130` (ex_2130.bd) | `CEnemyYellowopera` 5 | `0x1405570c8` | `0x1401968b0` / `0x140189055` 0xcd0 | 1,2,3 | 209 | FKaA | SES |
 | Green Requiem | `xa_ex_2140` (ex_2140.bd) | `CEnemyGreenrequiem` 6 | `0x1405404c8` | `0x14018e570` / `0x14018907f` 0xce0 | 1,2 | — | FKaA | SES |
 | Powerwild | `xa_ex_2030` (ex_2030.bd) | `CEnemyPowerwild` 7 | `0x140547798` | `0x140191380` / `0x1401890a9` 0xcd0 | 1,2,3 | 212,214,222 | FaLl | — |
@@ -4149,7 +4325,7 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
    Red Nocturne, Blue Rhapsody, Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
    Bouncywild (bananas and peels; built: § The Bouncywild), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs, flame + shield; built: § The Defender), Search Ghost (its
 
-   Red Nocturne (built: § The Red Nocturne; the family's shared routines `kh1_core::caster`), Blue Rhapsody, Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
+   Red Nocturne (built: § The Red Nocturne; the family's shared routines `kh1_core::caster`), Blue Rhapsody (built: § The Blue Rhapsody), Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
    Bouncywild (bananas), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs, flame + shield; built: § The Defender), Search Ghost (its
    drain). Needs: the child object's script → Re:CoM's own bullets (checklist step 9), Green Requiem's
    support spell (Re:CoM overrides no state 3 for it; KH1's: a barrier / heal on its allies, Assumption).
