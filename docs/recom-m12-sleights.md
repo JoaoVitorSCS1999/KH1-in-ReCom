@@ -324,7 +324,7 @@ The summons' path (`win::summons`): `player+0x82C` = id, call Sora's vtable `+0x
   treasure-box data (sources tagged wiki); the stock's card loss; each special sleight's branch
   (Warp …); anything in game.
 
-## 8. Built (M12, owner's go-ahead 2026-11-03)
+## 8. Built (M12 steps 1 and 2, owner's go-ahead 2026-11-03)
 
 ### 8.1 AP Up replaces CP Up at Combat = KH1 (step 1)
 
@@ -360,4 +360,28 @@ Owner test lines (step 1):
   its AP = 3 + 2 × those picks.
 - Combat = Re:CoM (and Riku's story): the CP choice as before (+25 CP).
 
-Not checked (8.1): anything in game; Re:CoM's message texts; the row icon.
+### 8.2 "Sora learned X" on Re:CoM's sleight-learned screen (step 2)
+
+Owner: notices on "Re:CoM's sleight-learned screen (`CLevelUp` sleight mode, its "ability"
+wording), without its card-stock help page at KH1".
+
+| what | where | tag |
+|---|---|---|
+| **Queue**: `win::notices::notify_learned(Learned)` (`Learned::Ability(ix)` / `Learned::Sleight(id)` for later steps); once each while waiting, 32 at most. | `crate::notices`, `win::notices` | Checked (code) |
+| **What gets one now**: every ability a sync newly unlocks from a **level** (`Source::Level`: Combo Plus ×3, Air Combo Plus ×2, and the KH1 Rod-list / owner-level modifiers Ripple Drive 12, Hurricane Blast 18, Gravity Break 30, Aerial Sweep 36, Combo Master 50, Counterattack 57, Vortex 84). Not on a save's very first sync (block never written: everything would be "new"). Abilities from Re:CoM's own sleights / movement abilities already come with Re:CoM's screens. | `notices::level_abilities`, `win::abilities::sync` | Checked (code) |
+| **The screen**: Re:CoM's `CLevelUp` sleight-learned mode (`+0x258` = id, states 0xE..0x11): an ability opens it with id **0x5A** (Re:CoM's High Jump: from 0x5A the line takes Re:CoM's ability wording `0xA80710` in Sora's story, `cmp [rbx+0x258],0x5A` at `0x1401102DD`; the id only picks the wording) and `+0x250` (the `%s` of the line, Re:CoM's sprintf `0x14004FAA0` at `0x14011032C`) pointed at our name (the Abilities page's, e.g. "Combo Plus") when it leaves state 1 for 0xE. | `win::notices` | Checked (decomp + exe); **Assumption**: `0xA80710`'s text has one `%s` for the name (the texts aren't in the session) |
+| **When, after a level-up**: the level-up wrapper syncs the abilities when the last level's screen ends (0xB → 0xD), then turns the same task to sleight-learned mode for the next notice (state 1 with `+0x258` set; Re:CoM's case 1 re-inits and enters 0xE; its resources are still loaded). Also chained after any of Re:CoM's own sleight-learned screens (0x11 → 0xD). The level-up's game step (`0x1401AE340`) waits for the task as for Re:CoM's screen. | `win::level_up`, `win::notices::after_step` | Checked (decomp) |
+| **Otherwise** (e.g. levels gained at Combat = Re:CoM): at the next KH1 frame of Sora in the field where Re:CoM's own camp gate holds (`0x1401A96C0` without its Start press: game state `*0x14087B0B0`, `+0x18 & 0x8008` and `+0x5A0` bit 11 clear, not flags (1, 0x33) and (1, 0x34), `0x1401AAA90`: `+0x5A4` (any `CLevelUp` clears it while up), flag (1, 6) clear, `0x140234570`, `+0x5A0 & 0x80201C01`; `+0x580` = 9): `CLevelUp(new 0x2C0, 0x1402AD300(1), 0x5A)` as event `0xAD 7` makes it. Per frame: one atomic load when nothing waits. | `win::notices::frame` (from the request-bits wrapper) | Checked (decomp + exe); **Assumption**: the field (enemies) holds still under the screen as it does for Re:CoM's event and chest screens (those come while an event / chest holds Sora) |
+| **No `CTechHelp`** at Combat = KH1: when a sleight-learned screen goes 0xF → 0x10 it has just made `CTechHelp` (`0x14012BF80`), the last child of its task list (`+0x48` tail node, `+8` task; vtable `0x14051B4A8` checked): set to state 5 and page 0, so Re:CoM's update ends it on its first run (default branch) with nothing loaded or unloaded, and its dtor sets `0x14087A4B0`, which state 0x10 waits for. Applies to Re:CoM's own sleight-learned screens at KH1 too (event / chest sleights); Re:CoM's level-up **Sleight pick** keeps its help page (case 8, not this mode). | `win::notices::skip_tech_help` | Checked (decomp + exe); Assumption: a child task first runs after its parent's update returns |
+
+Owner test lines (step 2):
+- Combat = KH1: reach level 24 (Air Combo Plus) or 87 / 93 / 99 (Combo Plus): after the level-up
+  screen, Re:CoM's "learned" box names the ability with Re:CoM's ability wording, then closes on its
+  own or on a press, with **no card help page**; the Abilities page lists it (unequipped). Log:
+  `notices: queued ability Air Combo Plus`, `notices: … on Re:CoM's sleight-learned screen`.
+- Level up at Combat = Re:CoM past such a level, switch to KH1, walk in the field: the box comes when
+  the camp could open; tell us if enemies keep moving or can hit Sora under it.
+- A Re:CoM sleight from an event or chest at KH1 (e.g. Freeze, Magnet Spiral): its box as before,
+  but no card help page after it. At Combat = Re:CoM the help page stays.
+
+Not checked (8.1 / 8.2): anything in game; Re:CoM's message texts; the row icon.

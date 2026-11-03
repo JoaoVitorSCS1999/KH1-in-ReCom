@@ -10,7 +10,9 @@
 //!   KH1's rule; Re:CoM's High Jump / Glide / Superglide equipped, owner); a block older than layout
 //!   v5 is migrated once (`crate::abilities::migrate`: Guard and Dodge Roll leave it, they are
 //!   Sora's kit; M12: the AP Up count starts at the save's past CP Up picks, from Re:CoM's CP);
-//!   written back, logged.
+//!   written back, logged. New level abilities (KH1's level list: Combo Plus, Air Combo Plus, …)
+//!   are queued as notices (`super::notices`), unless the block was never written (a save's
+//!   first sync: everything would be "new").
 //! - **AP Up** ([`add_ap_up`], M12): the level-up screen's AP Up pick adds one to the count.
 //! - **Use:** [`equipped_live`] reads the equipped word from the block (a 15-byte read) for the
 //!   abilities the KH1 frame passes on (`win::movement::abilities`), so what the camp's page
@@ -116,7 +118,14 @@ pub fn sync() -> Option<State> {
             if r.fitted != 0 { format!("; over the AP, unequipped from the most expensive down {:?}", ab::names(r.fitted)) } else { String::new() }
         ));
     }
-
+    // M12 step 2: the level abilities get Re:CoM's learned screen (not on a save's first sync).
+    if version != 0 {
+        for l in crate::notices::level_abilities(r.new | r.new_equipped) {
+            super::notices::notify_learned(l);
+        }
+    } else if r.new | r.new_equipped != 0 {
+        log("abilities: a save's first sync: its abilities arrive without notices");
+    }
     if r.new != 0 {
         log(&format!("abilities: learned at Re:CoM level {level} (unequipped, KH1's rule; Re:CoM's ability variable {recom_var:#x}): {:?}", ab::names(r.new)));
     }

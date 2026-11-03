@@ -363,6 +363,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     // KH1's MP refill runs in the actor pre-step, at the start of the frame (`0x1402A43A0` →
     // `0x1402A4CB0`): one point per frame while one is waiting (M7 stage 7.1).
     super::mp::frame();
+    // M12: a waiting "Sora learned X" notice, at Re:CoM's field camp gate (one atomic load).
+    super::notices::frame(pl);
     // Boss revenge: the game clock its decay reads (one add).
     super::revenge::frame(pl);
     // A magic command no KH1 frame took last frame is gone (M7 stage 7.4).

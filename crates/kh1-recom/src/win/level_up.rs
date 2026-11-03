@@ -11,6 +11,8 @@
 //!   whenever Re:CoM re-prints the panel (states 3, 4 and 6: `0x140110C60(this, 7)`).
 //! - **Pick** (6 → 7 with the cursor on row 1): Re:CoM's +25 CP is undone (CP stays as it was:
 //!   no deck at KH1) and one AP Up is added (`super::abilities::add_ap_up`), the result line ours.
+//! - **The end** (0xB → 0xD): the ability state is synced (the new level's KH1 abilities are
+//!   queued as notices), then the notices' step (`super::notices::after_step`).
 
 use super::movement::{func, rd, wr};
 use super::log;
@@ -75,6 +77,12 @@ pub(super) unsafe fn after(this: usize, b: Before) {
     if b.state != st || b.cp.is_some() || matches!(st, state::OPENING | 4 | state::PICK) {
         step(this, &b, st);
     }
+    // The last level's screen ended: the ability state follows the new level now (KH1's level
+    // abilities are queued as notices by the sync), before the notices' step looks.
+    if b.state == state::NEXT && st == state::END && rd::<u32>(this + off::SLEIGHT) == 0 && super::mp::active() {
+        super::abilities::sync();
+    }
+    super::notices::after_step(this, b.state, st);
 }
 
 unsafe fn step(this: usize, b: &Before, st: i32) {
