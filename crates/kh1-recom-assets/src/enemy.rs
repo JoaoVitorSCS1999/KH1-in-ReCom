@@ -1008,6 +1008,11 @@ pub const GUARDS: &[GuardSpec] = &[
     // The Fat Bandit's `ex_2060.bd` makes `0xEC` (type 1, priority 100, 70° front) with `sys 213(row, 3)` at its init
     // (`0x254E`), after the breath (`0x1444`) and in its hit handler (`0x2ED6`); `0x13DC` removes it for the breath.
     GuardSpec { enemy: "fatbandit", name: "front", row: 0xEC, also: &[], requests: &[] },
+    // The Defender's `ex_2340.bd` makes its shield's front row `0xEC` (type 1, priority 99, 70° front) with `sys 213(row,
+    // 3)` at its init (`0x2828`) and removes it only at its death (`0x3230`); its spin makes `0x23C` (type 1, priority
+    // 100, all round) with 208 (`0x1CBE`).
+    GuardSpec { enemy: "defender", name: "front", row: 0xEC, also: &[], requests: &[] },
+    GuardSpec { enemy: "defender", name: "spin", row: 0x23C, also: &[], requests: &[208] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).
@@ -1059,9 +1064,10 @@ pub fn guard_rows(enemy: &str, script: &[u8], ms: &MotionSet, clips: &[RequestCl
         if !(1..=4).contains(&clash_type) || !(0..=100).contains(&priority) {
             return bad(format!("{enemy}: row {:#x} is not a guard row (type {clash_type}, priority {priority})", g.row));
         }
-        // A row at priority 100 is never moved (`0x1402B4BC0` returns before any record for its own side): its
-        // recoil never plays, so the model needn't have it (the Large Body's front row names 110).
-        if priority != 100 && !clips.iter().any(|c| c.request as u32 == recoil) {
+        // A row at priority 98 or more never gets a clash record (`0x1402B4BC0` returns before any record for a side at
+        // 100, and records only a side under 98): its recoil never plays, so the model needn't have it (the Large Body's
+        // front row names 110 at 100, the Defender's 110 at 99).
+        if priority < 98 && !clips.iter().any(|c| c.request as u32 == recoil) {
             return bad(format!("{enemy}: guard row {:#x}'s recoil {recoil} has no motion", g.row));
         }
         if !(turn.is_finite() && cos.is_finite() && (-1.0..=1.0).contains(&cos)) {
@@ -1332,6 +1338,9 @@ pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usiz
     // The Fat Bandit's fireball `ex_2060_00.bd` and flame `ex_2060_01.bd` (`crate::fatbandit`, [`T_POINTS`]).
     ("fatbandit", 0, b"ex_2060_00.bd", crate::fatbandit::FIRE_CONSTS, crate::fatbandit::FIRE_REQUESTS),
     ("fatbandit", 1, b"ex_2060_01.bd", crate::fatbandit::FLAME_CONSTS, crate::fatbandit::FLAME_REQUESTS),
+    // The Defender's flame `ex_2340_00.bd` and fireball `ex_2340_01.bd` (`crate::defender`, [`T_POINTS`]).
+    ("defender", 0, b"ex_2340_00.bd", crate::defender::FLAME_CONSTS, crate::defender::FLAME_REQUESTS),
+    ("defender", 1, b"ex_2340_01.bd", crate::defender::FIRE_CONSTS, crate::defender::FIRE_REQUESTS),
 ];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
@@ -1365,6 +1374,11 @@ pub const T_POINTS: &[(&str, &str, usize, TFrom)] = &[
     ("fatbandit", "eye", 0, TFrom::Value(0.5)),
     ("fatbandit", "flame0", 0, TFrom::Const("flame_t0")),
     ("fatbandit", "flame1", 0, TFrom::Const("flame_t1")),
+    // The Defender's fireball start (`ex_2340_01.bd` `0x600`: code `0x106C`, bone 108, at `fire_t`) and its flame's ends
+    // (`ex_2340_00.bd` `0x2F8` / `0x336`: code `0x1069`, bone 105, at `flame_t0` / `flame_t1`).
+    ("defender", "fire_at", 0x106C, TFrom::Const("fire_t")),
+    ("defender", "flame0", 0x1069, TFrom::Const("flame_t0")),
+    ("defender", "flame1", 0x1069, TFrom::Const("flame_t1")),
 ];
 
 fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[RequestClip], consts: &[(String, f32)]) -> Result<Vec<(String, f32)>> {
@@ -1374,8 +1388,13 @@ fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[
             TFrom::Value(v) => v,
             TFrom::Const(c) => consts.iter().find(|x| x.0 == c).map(|x| x.1).ok_or_else(|| crate::Error::Format(format!("{name}: {point}'s t {c} not read")))?,
         };
-        let codes = bone_codes(mdls)?;
-        let k = *codes.get(code).filter(|b| **b >= 0).ok_or_else(|| crate::Error::Format(format!("{name}: bone code {code} names no bone")))? as usize;
+        // A code with bit 12 names a bone directly (`0x14029FAB0`: `code & 0xFFF`; the Defender's `0x1069` / `0x106C`).
+        let k = if code & 0x1000 != 0 {
+            code & 0xFFF
+        } else {
+            let codes = bone_codes(mdls)?;
+            *codes.get(code).filter(|b| **b >= 0).ok_or_else(|| crate::Error::Format(format!("{name}: bone code {code} names no bone")))? as usize
+        };
         let rig = conv.rig();
         let parent = rig.parent(k).ok_or_else(|| crate::Error::Format(format!("{name}: KH1 bone {k} has no parent")))?;
         let hand = conv.map().iter().position(|m| *m == Some(parent)).ok_or_else(|| crate::Error::Format(format!("{name}: {point}: KH1 bone {parent} (code {code}'s parent) has no Re:CoM bone")))?;
@@ -1405,7 +1424,9 @@ fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[
 /// every row listed must be the same apart from its place. The Fat Bandit's `0x16FC` passes `0x1CC`, its volley `0x23C`
 /// (Checked (files): the two rows' bytes equal); Re:CoM's own fireball takes its power with
 /// `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018DF20`; Checked (decomp)).
-pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1)];
+/// The Defender's `0x15F6` passes `0x2AC` (its batted row `0x31C` is the child's second); Re:CoM's own fireball takes its
+/// power with `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018DAF0`; Checked (decomp)).
+pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1), ("defender", "fire", &[0x2AC], 1, 1)];
 
 fn shot_consts(name: &str, script: &[u8]) -> Result<Vec<(String, f32)>> {
     let mut out = Vec::new();
@@ -1480,7 +1501,7 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::defender::SPEC];
 
 #[cfg(test)]
 mod clash_tests {
