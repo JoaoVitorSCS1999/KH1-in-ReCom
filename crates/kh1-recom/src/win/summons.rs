@@ -31,7 +31,13 @@
 //!   resource load `0x140211790(player+0x3B8, sleight, 0)`, as Re:CoM loads a sleight's resources
 //!   when its cards form it in the stock (`0x1401669F0`).
 //!
-//! Nothing of ours runs per frame besides the menu's build (a save-block read and two loads).
+//! - **M12 step 5, the Sleights list** ([`start_sleight`]): the same start ([`begin`]) for an
+//!   equipped sleight ability's Re:CoM id, then the owner's MP by tier (all of it for Idyll Romp /
+//!   Cross-slash+). No invincibility of ours: Re:CoM's `exeStockSkill` sets its own protection bits
+//!   where its sleight has them. While any sleight runs ([`sleight_running`]) both rows lock. The
+//!   bottom row's choice ([`bottom_row`]) is the summon block's byte `save + 0x26B6`.
+//!
+//! Nothing of ours runs per frame besides the menu's build (a save-block read and a few loads).
 
 use super::movement::{func, p, rd, wr};
 use super::{base, log, va};
@@ -44,8 +50,15 @@ static OUT: AtomicUsize = AtomicUsize::new(0);
 static OUT_SUMMON: AtomicU8 = AtomicU8::new(0);
 /// The hits skipped during the summon out (for the end's log line).
 static SKIPPED: AtomicU32 = AtomicU32::new(0);
-/// The last summon preloaded (+ 1; 0 none).
-static PRELOADED: AtomicU8 = AtomicU8::new(0);
+/// The last sleight preloaded (its Re:CoM id + 1; 0 none): a summon's LV3 or (M12 step 5) a
+/// Sleights list entry.
+static PRELOADED: AtomicU32 = AtomicU32::new(0);
+/// M12 step 5: the player whose Sleights-list sleight is out (Re:CoM's action 0x16 from our
+/// start; no invincibility of ours), and which sleight; for the end's log line.
+static SLEIGHT_OUT: AtomicUsize = AtomicUsize::new(0);
+static SLEIGHT_ID: AtomicU32 = AtomicU32::new(0);
+/// M12 step 5: the bottom row's choice with no save to keep it in (0 Summon, 1 Sleights).
+static BOTTOM_SESSION: AtomicU8 = AtomicU8::new(0);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
 
 /// Re:CoM's sleight start (Sora's vtable `+0x130`), the sleight resource load, the weapon's attack
@@ -228,27 +241,7 @@ pub unsafe fn start(pl: usize, i: usize) -> bool {
         note(|| format!("{}: MP short ({cost})", s.name));
         return false;
     }
-    // Sora's own vtable slot, as Re:CoM calls it (`0x1401F8150`).
-    let vt: usize = rd(pl);
-    let slot: usize = if vt != 0 { rd(vt + f::VT_START) } else { 0 };
-    if slot != base() + SLEIGHT_START as usize {
-        note(|| format!("{}: Sora's vtable +0x130 is {slot:#x}, not Re:CoM's sleight start", s.name));
-        return false;
-    }
-    // A live swing's volume ends first (the specials' rule; Re:CoM's own card chain ends the
-    // weapon's attack before the next card, `0x1401F9520`).
-    let w: usize = rd(pl + f::WEAPON);
-    if w != 0 && rd::<i32>(w + f::WEAPON_LIVE) != 0 {
-        func::<PlFn>(WEAPON_END)(w);
-    }
-    let before: u32 = rd(pl + p::ACTION);
-    wr(pl + f::SLEIGHT, s.sleight as u32);
-    let r = std::mem::transmute::<usize, StartFn>(slot)(pl);
-    let now: u32 = rd(pl + p::ACTION);
-    if r & 0xFF == 0 || now != STOCK_ACTION {
-        note(|| format!("{}: Re:CoM's sleight start refused sleight {:#x} (returned {r}, action {now:#x})", s.name, s.sleight));
-        return false;
-    }
+    let Some(before) = begin(pl, s.sleight, s.name) else { return false };
     // KH1 pays at once, in whole points (`0x140289210` → `0x1402A4A00(actor, −cost)`).
     super::mp::pay(cost * 100, s.name);
     OUT_SUMMON.store(i as u8, Ordering::Relaxed);
@@ -258,19 +251,117 @@ pub unsafe fn start(pl: usize, i: usize) -> bool {
     true
 }
 
-/// The Summon list's cursor rests on summon `i` (`None`: the list is closed): Re:CoM's sleight
-/// resource load for its LV3 once per landing, in battle (Re:CoM's own cache decides what stays).
-pub unsafe fn preload(pl: usize, i: Option<usize>) {
-    let tag = i.map_or(0, |i| i as u8 + 1);
+/// Re:CoM's own sleight start for `sleight` (the summons' and the Sleights list's): Sora's vtable
+/// `+0x130` checked to be `0x1402247A0`, a live swing's volume ended, `player+0x82C` = the id, the
+/// start called as Re:CoM calls it (`0x1401F8150`), and Re:CoM's action `0x16` checked after it.
+/// Some(the action before) when it started; None (logged) when it refused.
+unsafe fn begin(pl: usize, sleight: u16, name: &str) -> Option<u32> {
+    // Sora's own vtable slot, as Re:CoM calls it (`0x1401F8150`).
+    let vt: usize = rd(pl);
+    let slot: usize = if vt != 0 { rd(vt + f::VT_START) } else { 0 };
+    if slot != base() + SLEIGHT_START as usize {
+        note(|| format!("{name}: Sora's vtable +0x130 is {slot:#x}, not Re:CoM's sleight start"));
+        return None;
+    }
+    // A live swing's volume ends first (the specials' rule; Re:CoM's own card chain ends the
+    // weapon's attack before the next card, `0x1401F9520`).
+    let w: usize = rd(pl + f::WEAPON);
+    if w != 0 && rd::<i32>(w + f::WEAPON_LIVE) != 0 {
+        func::<PlFn>(WEAPON_END)(w);
+    }
+    let before: u32 = rd(pl + p::ACTION);
+    wr(pl + f::SLEIGHT, sleight as u32);
+    let r = std::mem::transmute::<usize, StartFn>(slot)(pl);
+    let now: u32 = rd(pl + p::ACTION);
+    if r & 0xFF == 0 || now != STOCK_ACTION {
+        note(|| format!("{name}: Re:CoM's sleight start refused sleight {sleight:#x} (returned {r}, action {now:#x})"));
+        return None;
+    }
+    Some(before)
+}
+
+/// The Summon list's cursor rests on a summon (its LV3 sleight) or (M12 step 5) a Sleights list
+/// entry: Re:CoM's sleight resource load `0x140211790(player+0x3B8, id, 0)` for `id` once per landing
+/// (`None`: nothing under the cursor), in battle, as Re:CoM loads a sleight's resources when its
+/// cards form it in the stock (`0x1401669F0`). The summons' and (M12 step 5) the Sleights list's.
+pub unsafe fn preload_sleight(pl: usize, id: Option<u16>) {
+    let tag = id.map_or(0, |id| id as u32 + 1);
     if PRELOADED.swap(tag, Ordering::Relaxed) == tag || !installed() {
         return;
     }
-    let Some(s) = i.and_then(|i| sm::ALL.get(i)) else { return };
+    let Some(id) = id else { return };
     if pl == 0 || rd::<i32>(pl + p::BATTLE) == 0 {
         return;
     }
     let res: usize = rd(pl + f::SLEIGHTS);
     if res != 0 {
-        func::<LoadFn>(SLEIGHT_LOAD)(res, s.sleight as u32, 0);
+        func::<LoadFn>(SLEIGHT_LOAD)(res, id as u32, 0);
     }
+}
+
+// ---- M12 step 5: the Sleights row and list ----
+
+/// The command menu's bottom row (`crate::sleights::Bottom`): the save's choice (the summon block's
+/// byte `save + 0x26B6`), or this session's without a save. A one-byte read.
+pub unsafe fn bottom_row() -> crate::sleights::Bottom {
+    let b = match block_at() {
+        Some(at) => rd::<u8>(at + sm::field::BOTTOM_ROW),
+        None => BOTTOM_SESSION.load(Ordering::Relaxed),
+    };
+    crate::sleights::Bottom::of_byte(b)
+}
+
+/// D-pad Left switched the bottom row: kept in the save (read by every later frame; written only on
+/// the press), else for the session.
+pub unsafe fn set_bottom_row(b: crate::sleights::Bottom) {
+    BOTTOM_SESSION.store(b.byte(), Ordering::Relaxed);
+    let saved = match block_at() {
+        Some(at) => {
+            // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST < 0x2818).
+            wr::<u8>(at + sm::field::BOTTOM_ROW, b.byte());
+            true
+        }
+        None => false,
+    };
+    note(|| format!("bottom row -> {b:?} ({})", if saved { "kept in the save at save+0x26B6" } else { "no save: this session only" }));
+}
+
+/// Any Re:CoM sleight is running for `pl` (its action `0x16` in the battle room: a summon, a
+/// Sleights-list sleight, or Sonic Blade's): the Summon and Sleights rows lock (one at a time). The
+/// first call that sees ours end logs it. Two loads.
+pub unsafe fn sleight_running(pl: usize) -> bool {
+    let running = pl != 0 && rd::<u32>(pl + p::ACTION) == STOCK_ACTION && rd::<i32>(pl + p::BATTLE) != 0;
+    let o = SLEIGHT_OUT.load(Ordering::Relaxed);
+    if o != 0 && !(o == pl && running) && SLEIGHT_OUT.compare_exchange(o, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+        let id = SLEIGHT_ID.load(Ordering::Relaxed) as u16;
+        note(|| format!("sleight {} ({id:#x}): Re:CoM's sleight ended (action {:#x}); the KH1 frame takes Sora back", crate::sleights::name(id), if pl != 0 { rd::<u32>(pl + p::ACTION) } else { 0 }));
+    }
+    running
+}
+
+/// M12 step 5: a Sleights list entry (the menu's command, the usable test passed): Re:CoM's own
+/// sleight start for `id` (as a summon's, [`begin`]), then the owner's MP (KH1's whole-point
+/// payment `0x1402A5B60`: the tier's points, or all of Sora's whole MP). Re:CoM runs the rest: its
+/// motion, effects, hits and damage, its own protection bits (`+0x418`, set by `exeStockSkill`
+/// where its sleights have them; nothing of ours), its end. False (nothing changed) when it can't.
+pub unsafe fn start_sleight(pl: usize, id: u16) -> bool {
+    let name = crate::sleights::name(id);
+    if !installed() || pl == 0 {
+        return false;
+    }
+    if rd::<i32>(pl + p::BATTLE) == 0 {
+        note(|| format!("sleight {name}: not in battle"));
+        return false;
+    }
+    let mp = super::mp::current().map_or(0, |m| m.0);
+    let Some(points) = crate::sleights::pay_points(id, mp) else {
+        note(|| format!("sleight {name}: MP short ({:?}, MP {mp})", crate::sleights::cost(id)));
+        return false;
+    };
+    let Some(before) = begin(pl, id, name) else { return false };
+    super::mp::pay(points * 100, name);
+    SLEIGHT_ID.store(id as u32, Ordering::Relaxed);
+    SLEIGHT_OUT.store(pl, Ordering::Relaxed);
+    note(|| format!("sleight {name} -> Re:CoM's sleight {id:#x} through Sora's sleight start, {points} MP ({:?}), from action {before:#x}; Re:CoM's own protection only", crate::sleights::cost(id).unwrap_or(crate::sleights::Cost::Points(0))));
+    true
 }

@@ -293,7 +293,42 @@ pub fn decode(s: &[u8]) -> Option<String> {
 /// in every language: 901 "Stagger", the context tab's command for a held Re:CoM gimmick card
 /// (owner's word, 2026-11-01; KH1 has no such word, Checked (files: the six `Word.bin`); English
 /// everywhere: no translation was asked for). The DLL's `command_menu::OUR_WORDS` holds the same.
-pub const OUR_WORDS: &[(u16, &str)] = &[(901, "Stagger")];
+/// M12 step 5: 902 "Sleights", the command menu's 4th row in Sleights mode (owner's word, 2026-11-03).
+pub const OUR_WORDS: &[(u16, &str)] = &[(901, "Stagger"), (902, "Sleights")];
+
+/// M12 step 5: the Sleights list's names (the DLL's `crate::sleights::words`: our id `0x8100 +` the
+/// Re:CoM sleight id, the camp's Abilities page's English names, in every language as Cloud's; a
+/// DLL test checks this list against its own). Re:CoM's own sleight names are its messages
+/// (`0x80100 + id`), not in our word system.
+pub const SLEIGHT_WORDS: &[(u16, &str)] = &[
+    (0x811B, "Fire Raid"),
+    (0x811C, "Blizzard Raid"),
+    (0x811D, "Thunder Raid"),
+    (0x811E, "Reflect Raid"),
+    (0x811F, "Judgment"),
+    (0x8120, "Firaga Burst"),
+    (0x8121, "Raging Storm"),
+    (0x8122, "Mega Flare"),
+    (0x8123, "Freeze"),
+    (0x8124, "Homing Blizzara"),
+    (0x8125, "Aqua Splash"),
+    (0x8126, "Magnet Spiral"),
+    (0x8127, "Lethal Frame"),
+    (0x8128, "Shock Impact"),
+    (0x8129, "Tornado"),
+    (0x812A, "Quake"),
+    (0x812B, "Warpinator"),
+    (0x812C, "Warp"),
+    (0x812D, "Bind"),
+    (0x812E, "Confuse"),
+    (0x812F, "Terror"),
+    (0x8130, "Synchro"),
+    (0x8131, "Gifted Miracle"),
+    (0x8132, "Teleport"),
+    (0x8133, "Holy"),
+    (0x813A, "Idyll Romp"),
+    (0x8143, "Cross-slash+"),
+];
 
 /// The menu's words of one language: (message id, text) for each of [`NAMES`] found, then
 /// [`OUR_WORDS`], and the ids that could not be decoded.
@@ -310,6 +345,9 @@ pub fn words(word_bin: &[u8]) -> (Vec<(u16, String)>, Vec<u16>) {
         ok.push((id, t.to_string()));
     }
     ok.push((CLOUD_NAME, CLOUD_TEXT.to_string()));
+    for &(id, t) in SLEIGHT_WORDS {
+        ok.push((id, t.to_string()));
+    }
     (ok, missing)
 }
 
@@ -398,7 +436,11 @@ mod tests {
         }
         let (ok, missing) = words(&d);
         assert!(missing.is_empty(), "{missing:?}");
-        assert_eq!(ok.len(), NAMES.len() + OUR_WORDS.len() + 1, "and Cloud");
+        assert_eq!(ok.len(), NAMES.len() + OUR_WORDS.len() + 1 + SLEIGHT_WORDS.len(), "and Cloud, and the sleights");
+        assert_eq!(SLEIGHT_WORDS.len(), 27);
+        assert!(ok.contains(&(902, "Sleights".into())));
+        assert!(ok.contains(&(0x8143, "Cross-slash+".into())));
+        assert!(SLEIGHT_WORDS.iter().all(|(id, _)| (0x811B..=0x8143).contains(id) && *id != CLOUD_NAME));
         assert!(ok.contains(&(CLOUD_NAME, "Cloud".into())));
         assert!(ok.contains(&(7, "Fire".into())));
         // Ours, after KH1's, above every KH1 message id.
