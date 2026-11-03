@@ -83,6 +83,7 @@ pub mod guard;
 pub mod held;
 pub mod hookplan;
 pub mod items;
+pub mod kh1_support;
 pub mod items_page;
 pub mod json;
 pub mod keyblade_models;

@@ -1229,6 +1229,10 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
         no_card_duel(pl);
         aero_halve(pl);
     }
+    // M12 step 3 (KH1's support abilities, `super::kh1_support`): only when a hit arrived (the
+    // check's own gate `+0x41C & 0x200`), Sora's HP before the check.
+    let arrived = kh1 && rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0;
+    let hp_before = if arrived { super::kh1_support::hp(pl) } else { 0 };
     // M8b (owner, 2026-11-02: "sora should have iframes through all summon animations"): while his
     // Re:CoM summon sleight is out, Re:CoM's own protection bit `+0x418 & 1` for this check (its
     // exit zeroes the hit's value: no damage, no reaction; the roll's and Sonic Blade's path).
@@ -1263,6 +1267,10 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
         None => run(pl),
     };
     super::kh1_peel::after_damage();
+    if arrived {
+        // M12 step 3: MP Rage's charge for the HP the check took.
+        super::kh1_support::after_damage(pl, hp_before);
+    }
     if shield && f418 & 1 == 0 {
         wr(pl + p::FLAGS_418, rd::<u32>(pl + p::FLAGS_418) & !1);
     }

@@ -993,6 +993,7 @@ point (a TODO for the notices merge).
 | ability | KH1 id | `+0x184` | Rod level(s) | AP | sort key | bit (`ix`) |
 |---|---|---|---|---|---|---|
 | MP Haste | 23 | bit 0 | 21 | 3 | 304 | 25 |
+| MP Rage ×2 | 24 | bits 1..3 (count) | 42, 75 | 3 each | 305 | 26, 27 |
 
 ### MP Haste
 
@@ -1012,3 +1013,29 @@ point (a TODO for the notices merge).
 - **Test:** reach Re:CoM level 21 (Attack once): the Abilities page lists MP Haste (3 AP),
   unequipped. Equip it; swing at a Traverse Town Shadow of your level: the F9 trace's MP events show
   `+7` per swing hit and `+15` per finisher hit (`+3` / `+6` without it).
+
+### MP Rage
+
+- **KH1** (Checked (decomp)): the damage function `0x14029BBD0` keeps the HP at its start; after its
+  damage records, when HP went down and `(+0x184 >> 1) & 7` (`0x140284BE0(24)`: the number of
+  **equipped** copies; the Rod list gives two, which **add up**) is not 0:
+  `0x1402A4AE0(actor, (int)((float)(HP before − HP after) × (float)copies))`, KH1's gauge add (charge
+  capped at max MP × 30; 30·k make point k). Also for a hit that kills.
+- **Sora's HP is Re:CoM's**, several times KH1's (KH1: 18 at level 1, + 3 at each kind-1 level of
+  btltbl `0x3AC0` (23 levels), 87 at 76+; the Rod Dive changes no HP, `0x140284B70`). Built: **the
+  HP lost is taken as the same share of KH1's max HP at Sora's level** (`kh1_support::mp_rage`,
+  rounded to the nearest point), then KH1's rule. E.g. level 42 (KH1 max HP 51), Re:CoM max HP 400,
+  a 40-HP hit: 5 KH1 HP → charge +5 (one copy), +10 (two). **Owner question** below.
+- **Ours** (`win::kh1_support::after_damage`): inside the existing player damage-check wrapper
+  (`win::attack::damage_check` on `0x1401E6DE0`), only when a hit arrived (its gate `+0x41C &
+  0x200`): HP `+0x42C` before and after Re:CoM's check, max HP `+0x430`; then `win::mp::gain_charge`.
+  No hook, nothing per frame (one load of `+0x41C` on frames the wrapper already runs).
+- Log: `support: MP Rage x2: HP 400 -> 360 of 400 = 5 of KH1's 51 at level 42: charge +10` (40
+  lines), and the MP line `charge +10 (MP Rage x2, 5 KH1 HP lost)`.
+- Checked (tests): `kh1_support::tests::mp_rage_charge`, `kh1_max_hp_by_level` (the player's btltbl:
+  start HP 18, the 23 kind-1 levels), `abilities::tests::rod_support_abilities`. Not checked: in game.
+- **Owner question (MP Rage):** (a) the share of KH1's max HP (built: about KH1's MP per hit);
+  (b) Re:CoM's HP lost as it is (KH1's code on Re:CoM's numbers: several times KH1's MP).
+- **Test:** Re:CoM level 42: MP Rage on the page (3 AP), unequipped; equip it, let a Shadow hit
+  Sora: the log's `support: MP Rage` line and the trace's `+n` MP event. Level 75: the second copy;
+  with both equipped the charge doubles.
