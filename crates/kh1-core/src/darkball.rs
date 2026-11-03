@@ -1045,6 +1045,18 @@ impl Ai {
     }
 }
 
+/// The hit handler's light-hit count (`0x1FBC..0x2058`): a hit and a light hit counted, the bite mark
+/// (`wp+0x48` = 100) from the `light_limit`th in a row; true from the `armor_limit`th on (no reaction, no
+/// state change).
+fn light_hit(io: &mut crate::enemy::script::Core<Consts, Attack, Wp>) -> bool {
+    io.x.hits += 1;
+    io.x.light += 1;
+    if io.x.light as f32 - io.c.num("light_limit") >= 0.0 {
+        io.x.hits = io.c.num("bite_mark") as i32;
+    }
+    io.x.light as f32 - io.c.num("armor_limit") >= 0.0
+}
+
 impl Behaviour for Ai {
     fn frame(&mut self, w: World) -> Vec<ECmd<u8>> {
         Ai::frame(self, w).iter().map(|c| c.map(Attack::index)).collect()
@@ -1082,12 +1094,7 @@ impl Behaviour for Ai {
                     }
                     6 | 7 => {}
                     _ => {
-                        io.x.hits += 1;
-                        io.x.light += 1;
-                        if io.x.light as f32 - io.c.num("light_limit") >= 0.0 {
-                            io.x.hits = io.c.num("bite_mark") as i32;
-                        }
-                        if io.x.light as f32 - io.c.num("armor_limit") >= 0.0 {
+                        if light_hit(&mut io) {
                             io.x.keep = false;
                             return;
                         }
@@ -1097,8 +1104,31 @@ impl Behaviour for Ai {
         }
         set_state(&self.io, st::HIT);
     }
+    /// The fallback when the host couldn't take the hit on the armour first ([`Behaviour::armoured`]).
     fn keeps_reaction(&self) -> bool {
         self.io.borrow().x.keep
+    }
+    /// The handler's no-reaction case, asked before Re:CoM's handler (M11, owner 2026-11-02: "move onto the
+    /// no-reaction armour"): a light hit (not 4 / 5, not a clash 6 / 7) that would be the `armor_limit`th or
+    /// later of the run (`0x2040`: `wp+0x54` counted first, then `>= 6`). Whatever plays (an attack, a
+    /// reaction, a motion) goes on. The kind unknown: not here (`keeps_reaction` then).
+    fn armoured(&self, _playing: Option<u16>, _launch_base: u16, kind: Option<u8>) -> bool {
+        let Some(k) = kind else { return false };
+        if matches!(k, 4 | 5) || crate::enemy::host::is_clash(k) {
+            return false;
+        }
+        let io = self.io.borrow();
+        (io.x.light + 1) as f32 - io.c.num("armor_limit") >= 0.0
+    }
+    /// The handler for that hit (`0x1E20` → `0x1FBC`): noticed, a hit and a light hit counted, the bite
+    /// mark from the `light_limit`th, the reaction kind zeroed (`func_193a(hit, 0)`) and the thread ended:
+    /// no state request. No push: KH1 doesn't call `sys 42` here, and a kind-0 record runs no case of the
+    /// reaction `0x1402B8E10` (Checked (files + decomp)).
+    fn on_armoured_hit(&self, _dir: Vec3) {
+        let mut io = self.io.borrow_mut();
+        io.x.noticed = true;
+        io.x.keep = true;
+        light_hit(&mut io);
     }
     fn risen(&self) -> bool {
         self.io.borrow().x.appeared
@@ -1134,6 +1164,7 @@ impl Behaviour for Ai {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enemy::host::model::Model;
 
     /// Test numbers: the player's script's own (the asset step reads them; the disassembly's
     /// values), the shared engine's; the core offset is the asset step's idle pose (rounded).
@@ -1362,6 +1393,81 @@ mod tests {
         s.log.clear();
         s.run(|_| Vec3::new(0.0, 0.0, 300.0), 250);
         assert_eq!(s.attacks().first().map(|a| a.1), Some(Attack::Bite), "{:?}", s.log.iter().take(10).collect::<Vec<_>>());
+    }
+
+    /// The no-reaction armour (owner 2026-11-02): asked before Re:CoM's handler, the `armor_limit`th light hit
+    /// in a row (and later ones) is taken without a reaction or a state request, counted as the handler
+    /// counts it, no push; knock-backs / launches (4 / 5), clashes (6 / 7) and an unknown kind are not.
+    #[test]
+    fn the_sixth_light_hit_on_the_armour() {
+        let mut s = Sim::new(1, false);
+        s.run(|_| Vec3::new(0.0, 0.0, 300.0), 50);
+        for i in 1..=5 {
+            assert!(!s.ai.armoured(None, 0, Some(3)), "hit {i}");
+            s.ai.set_hit_kind(3);
+            s.ai.on_hit(HitNews::Damage);
+        }
+        assert!(s.ai.armoured(Some(req::DASH), 0, Some(3)) && s.ai.armoured(None, 0, Some(0)));
+        for k in [Some(4), Some(5), Some(6), Some(7), None] {
+            assert!(!s.ai.armoured(Some(req::DASH), 0, k), "{k:?}");
+        }
+        s.ai.io.borrow_mut().state.1 = false;
+        s.ai.set_hit_kind(3);
+        s.ai.on_armoured_hit(Vec3::new(0.0, 0.0, -1.0));
+        {
+            let io = s.ai.io.borrow();
+            assert_eq!((io.x.light, io.x.hits), (6, 100));
+            assert!(io.x.noticed && !io.state.1 && io.body.push.is_none(), "no state, no push");
+        }
+        assert!(s.ai.keeps_reaction());
+        assert!(s.ai.armoured(None, 0, Some(3)), "the seventh too");
+        s.ai.set_hit_kind(4);
+        s.ai.on_hit(HitNews::Damage);
+        assert!(!s.ai.armoured(None, 0, Some(3)), "a knock-back ends the run");
+    }
+
+    /// The Darkball through the host's rules (`crate::enemy::host::model`) with its class map
+    /// (`fliers::darkball::CLASS.attack_states`: bite 3, dash 2, drop 3) and its looping dash.
+    fn hosted(seed: u32, light: i32) -> Model<Consts> {
+        let ai = Ai::new(consts(), frames(), seed, 0.0, false);
+        ai.io.borrow_mut().x.light = light;
+        let mut m = Model::new(Box::new(ai), consts(), frames(), vec![req::DASH], vec![3, 2, 3]);
+        m.pos = Vec3::new(0.0, -80.0, 0.0);
+        m
+    }
+
+    /// The sixth light hit lands during a dash (202, steered, Re:CoM's state 2) and during the bite (204, an
+    /// action, state 3): no reaction, the attack plays on in its state to its end (KH1: the hit handler
+    /// ends without a state request; Re:CoM's super armour keeps the state); a knock-back is not armoured.
+    #[test]
+    fn hosted_the_sixth_light_hit_keeps_the_attack() {
+        for (r, state) in [(req::DASH, 2), (req::BITE, 3)] {
+            let mut done = false;
+            for seed in 1..40u32 {
+                let mut m = hosted(seed.wrapping_mul(0x9E37_79B9), 5);
+                let sora = Vec3::new(0.0, 0.0, if r == req::DASH { 900.0 } else { 300.0 });
+                let mut f = 0;
+                while f < 3000 && !(m.current == Some(r) && m.state == state && m.age > 3.0) {
+                    m.run(sora, 1);
+                    f += 1;
+                }
+                if f == 3000 {
+                    continue;
+                }
+                assert!(!m.armoured_hit(5, Vec3::new(0.0, 0.0, -1.0)), "a launch kind is not armoured");
+                let n = m.log.len();
+                assert!(m.armoured_hit(3, Vec3::new(0.0, 0.0, -1.0)), "seed {seed}: the sixth light hit");
+                let age = m.age;
+                m.run(sora, 2);
+                assert_eq!((m.state, m.current), (state, Some(r)), "seed {seed}: {r} goes on in state {state}");
+                assert!(m.age > age, "not restarted");
+                assert!(!m.log[n..].iter().any(|(_, c)| matches!(c, ECmd::State(_))), "seed {seed}: no state request: {:?}", &m.log[n..]);
+                assert_eq!(m.released, 0);
+                done = true;
+                break;
+            }
+            assert!(done, "no seed played {r}");
+        }
     }
 
     /// The quiet watchdog's reset mid-warp: shown, its scale, hittable, engaged.

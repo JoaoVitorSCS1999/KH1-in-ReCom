@@ -669,6 +669,35 @@ unsafe fn take_kh1_hit(enemy: usize) -> Option<usize> {
     None
 }
 
+/// The hit Re:CoM's handler is about to take on `enemy` (M11, the no-reaction armour), read before the
+/// call without taking anything: its gather's pick (`kh1_core::enemy::host::gather`, `0x140154EB0`) over
+/// the hurt bodies (`+0xF8` → `+0x40`, count `+0x38`, 0x120 each). None: no damaging hit waits (nothing,
+/// or a guarded / repelled one: the handler's guard branch). Some(kind): KH1's reaction kind as
+/// `kh1_enemy::hit_of` reads it after the call: a KH1 swing's (one of its bodies in `KH1_HITS`, as
+/// `take_kh1_hit`; the kind of Sora's row, which the wrapper passes to `note_swing` only after the call),
+/// else the waiting body's Re:CoM kind `+0x80` mapped (written by the hit apply `0x14016F1C0` with the
+/// count; Checked (decomp)); Some(None) when neither gives one.
+unsafe fn incoming(enemy: usize) -> Option<Option<u8>> {
+    let info: usize = rd(enemy + 0xF8);
+    if info == 0 {
+        return None;
+    }
+    let parts: usize = rd(info + 0x40);
+    let n = rd::<i32>(info + 0x38).clamp(0, 32) as usize;
+    if parts == 0 {
+        return None;
+    }
+    let body = |i: usize| parts + i * 0x120;
+    let at = match kh1_core::enemy::host::gather((0..n).map(|i| (rd::<u32>(body(i) + 0x9C), rd::<i16>(body(i) + 0x90)))) {
+        kh1_core::enemy::host::Gathered::Hit(i) => body(i),
+        _ => return None,
+    };
+    let swing = KH1_HITS.lock().map(|g| (0..n).any(|i| rd::<i16>(body(i) + 0x90) != 0 && g.iter().any(|&(x, _)| x == body(i)))).unwrap_or(false);
+    let pl: usize = rd(va(base(), data::MAIN_PLAYER));
+    let kind = swing.then(|| if pl != 0 { kh1_row_of(pl) } else { None }).flatten().and_then(|r| moveset().row(r)).and_then(|x| moveset().attack(x.attack)).map(|a| a.kind);
+    Some(kind.or_else(|| Some(crate::shadow::kh1_kind_of_recom(rd(at + 0x80)))))
+}
+
 /// Re:CoM's enemy hit handler. KH1's rule (decision 14): Sora's hits land during the enemy's card
 /// play. Re:CoM's own path for an interruptible card (`+0x260 & 0x2000001`: end the card, then
 /// take the hit) runs for a KH1 hit.
@@ -677,9 +706,9 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
         return orig::<PlRetFn>(&ORIG_ENEMY_HIT)(enemy);
     }
     let hp: i32 = rd(enemy + 0x274);
-    // M11 (the Pirate): Re:CoM's super armour for the call while a KH1 enemy's script takes no reaction
-    // (KH1's `sys 42`), then the hit to its script.
-    let armour = super::kh1_enemy::armour_on(enemy);
+    // M11 (the Pirate; the fliers' "doesn't flinch"): Re:CoM's super armour for the call while a KH1
+    // enemy's script takes no reaction for the hit about to be handled, then the hit to its script.
+    let armour = super::kh1_enemy::armour_on(enemy, || incoming(enemy));
     let r = kh1_enemy_hit(enemy);
     super::kh1_enemy::armour_off(armour, r);
     // Gimmick cards, trigger (d): a card-break boss crossing 50 % of its max HP.

@@ -85,6 +85,41 @@ pub fn armour_took(result: u64, hp: i32, next_before: usize, next_after: usize) 
     result == 1 && hp > 0 && next_before == next_after
 }
 
+/// KH1's clash kinds (6 / 7, `0x1402B8E10`'s cases 6 / 7): the fliers' handlers keep their reaction
+/// (`hp[0xC] & 0x1F` tested against 6 and 7 before zeroing it; Checked (files): `ex_2210.bd` `0x1F0C`,
+/// `ex_2320.bd` `0x2484`, `ex_2280.bd` `0x1FBC`).
+pub fn is_clash(kind: u8) -> bool {
+    matches!(kind, 6 | 7)
+}
+
+/// What Re:CoM's hit handler `0x14017F7E0` is about to take, as its gather `0x140154EB0` picks it: the
+/// enemy's hurt bodies in order, the first with the repel bit (`+0x9C & 8`) or the guarded bit (`& 0x20`)
+/// (the handler's guard branch: no damage, no reaction picker, returns 0) or a hit count (`+0x90` ≠ 0, a
+/// damaging hit: the hit apply `0x14016F1C0` writes it with the attack's Re:CoM kind into `+0x80` and its
+/// owner into `+0x98`, before the handler runs). Checked (decomp).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gathered {
+    /// No hit waits (the handler returns 0 at once).
+    Nothing,
+    /// A guarded or repelled hit, at this body.
+    Guarded(usize),
+    /// A damaging hit, at this body.
+    Hit(usize),
+}
+
+/// [`Gathered`] from the bodies' `(+0x9C flags, +0x90 count)` in order.
+pub fn gather(bodies: impl IntoIterator<Item = (u32, i16)>) -> Gathered {
+    for (i, (flags, count)) in bodies.into_iter().enumerate() {
+        if flags & 0x28 != 0 {
+            return Gathered::Guarded(i);
+        }
+        if count != 0 {
+            return Gathered::Hit(i);
+        }
+    }
+    Gathered::Nothing
+}
+
 /// A model of the host for tests (the behaviours', and `kh1-recom`'s with each class's map and
 /// manifest; the DLL never runs it): Re:CoM's state 1 and attack states as
 /// `win::kh1_enemy` runs them (`think_step`, `attack_begin`, `attack_step`, `tick`), on a flat
@@ -287,6 +322,19 @@ pub mod model {
             }
         }
 
+        /// A damaging hit of KH1 kind `kind` arrives now, as `win::kh1_enemy`'s `armour_on` / `armour_off`
+        /// hand it to the behaviour (no launch yet: base 0): true when the behaviour took it without a
+        /// reaction (Re:CoM's super armour: Re:CoM's state stays, the action goes on). False: Re:CoM's
+        /// flinch would follow (not modelled).
+        pub fn armoured_hit(&mut self, kind: u8, dir: Vec3) -> bool {
+            if !self.ai.armoured(self.current, 0, Some(kind)) {
+                return false;
+            }
+            self.ai.set_hit_kind(kind);
+            self.ai.on_armoured_hit(dir);
+            true
+        }
+
         /// The frames on which request `r` was asked for as a steered attack.
         pub fn attacks_of(&self, r: u16) -> Vec<usize> {
             self.log.iter().filter_map(|(f, c)| matches!(c, Cmd::Attack { request, .. } if *request == r).then_some(*f)).collect()
@@ -336,5 +384,17 @@ mod tests {
         assert!(!armour_took(0, 10, 0x780, 0x780), "no hit (dropped, guarded)");
         assert!(!armour_took(1, 0, 0x780, 0x780), "the killing hit");
         assert!(!armour_took(1, 10, 0, 0x940), "a Re:CoM state (Stop) was asked for");
+    }
+
+    /// The gather's order (`0x140154EB0`): the first body with a guard / repel bit or a hit count wins.
+    #[test]
+    fn the_gather_rule() {
+        assert_eq!(gather([]), Gathered::Nothing);
+        assert_eq!(gather([(0, 0), (0, 0)]), Gathered::Nothing);
+        assert_eq!(gather([(0, 0), (0, 1)]), Gathered::Hit(1));
+        assert_eq!(gather([(0x20, 0), (0, 1)]), Gathered::Guarded(0));
+        assert_eq!(gather([(0, 1), (0x8, 0)]), Gathered::Hit(0));
+        assert_eq!(gather([(0x1, 0), (0x8, 1)]), Gathered::Guarded(1), "the guard bit (body flag 1) alone is not a hit");
+        assert!(is_clash(6) && is_clash(7) && !is_clash(5) && !is_clash(0));
     }
 }
