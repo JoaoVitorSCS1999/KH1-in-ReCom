@@ -89,6 +89,10 @@ mod tests {
         assert_eq!((ring.request, ring.start, ring.life, ring.growth), (230, 88.0, 28.0, 25.0));
         assert_eq!((ring.radius(87.0), ring.radius(88.0), ring.radius(100.0), ring.radius(116.0)), (None, Some(0.0), Some(3.0), None));
         assert!(m.clip(207).unwrap().looped && !m.clip(230).unwrap().looped);
+        // M11, attack meets attack: its rows' clash numbers (punch 30 ×2, slam 30, charge 90; the ring a child row).
+        let p: Vec<(u8, u32, i32)> = m.clash.iter().map(|c| (c.attack, c.clash_type, c.priority)).collect();
+        assert_eq!(p, vec![(0, 0, 30), (0, 0, 30), (1, 0, 30), (2, 0, 90)]);
+        assert!(m.clash.iter().all(|c| !c.records.is_empty()));
         let _ = (CLASS.make)(&m, 1, 0.0);
     }
 

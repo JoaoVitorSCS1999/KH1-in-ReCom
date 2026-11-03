@@ -85,6 +85,100 @@ pub fn resolve(a_type: u32, a_priority: i32, b_priority: i32) -> Side {
     Side::None
 }
 
+/// What `0x1402B4BC0(a, b)` returns for side `a` and does (M11, attack meets attack). Checked (decomp):
+/// the return is 0, 0x10 or 0x20; `0x1402B4A20` reads it (both orders) to mark the sides and pick the sparks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Met {
+    /// 0: nothing (`a` already clashed this frame, `b`'s priority is 0, both 98 or more; not modelled: the
+    /// owner in KH1's special state, `+0x88 & 1`).
+    Nothing,
+    /// 0x10 with no record and `a` not marked: `a` at 100, or at 98 / 99 against a side under 98. Its attack
+    /// goes on and still meets bodies this frame.
+    Unmoved,
+    /// 0x10: `a` (type 1, 3 or 4, higher priority) repels; `b`'s attack record flagged 0x20 goes to `a`'s owner
+    /// (no damage, no reaction; its script's hit handler hears it); `a` is marked.
+    Repels,
+    /// 0x10 / 0x20: `a`'s owner gets a clash record (kind 6, or 7 when 40 or more under, `diff` = a − b); `a`
+    /// is marked.
+    Clash { kind: u8, diff: i32 },
+}
+
+impl Met {
+    /// The return value is not 0.
+    pub fn returned(self) -> bool {
+        self != Met::Nothing
+    }
+
+    /// `a`'s own `+4 |= 0x10 / 0x20` (a repel or a clash).
+    fn marks(self) -> bool {
+        matches!(self, Met::Repels | Met::Clash { .. })
+    }
+
+    /// The same as [`resolve`]'s answer.
+    pub fn side(self) -> Side {
+        match self {
+            Met::Nothing | Met::Unmoved => Side::None,
+            Met::Repels => Side::Repels,
+            Met::Clash { kind, diff } => Side::Clash { kind, diff },
+        }
+    }
+}
+
+/// `0x1402B4BC0(a, b)` with KH1's return value ([`Met`]): `a`'s clash type and priority, whether `a` already
+/// clashed this frame (its `+4 & 0x30`, cleared each frame by `0x1402B47A0`), `b`'s priority. Types and front
+/// cones are tested before (`0x1402B3BE0`, `0x1402B4640`). Not modelled: a projectile `a` (`+0x30 & 0x400`:
+/// turned to `b`'s side instead of a record), either owner's special state (`+0x88 & 1`). Checked (decomp).
+pub fn met(a_type: u32, a_priority: i32, a_marked: bool, b_priority: i32) -> Met {
+    if a_marked || b_priority == 0 || (a_priority >= CLASH_BELOW && b_priority >= CLASH_BELOW) {
+        return Met::Nothing;
+    }
+    if a_priority == UNMOVED {
+        return Met::Unmoved;
+    }
+    let diff = a_priority - b_priority;
+    if diff > 0 && matches!(a_type, 1 | 3 | 4) {
+        return Met::Repels;
+    }
+    if a_priority < CLASH_BELOW {
+        return Met::Clash { kind: if diff < -STRONG { 7 } else { 6 }, diff };
+    }
+    Met::Unmoved
+}
+
+/// Two attacks that met (`0x1402B4A20`): each side's [`Met`] and whether it is marked for the rest of the frame
+/// (`+4 & 0x30`: it meets no hurt body and gets no other record this frame, `0x1402B3BE0` / `0x1402B4BC0`). A
+/// side marks itself by a repel or a clash; a side that returned 0 is marked by the other side's non-zero return
+/// (`0x1402B4A20`: `puVar1[1] |= uVar5` when `uVar4 == 0`). Checked (decomp).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Meeting {
+    pub a: Met,
+    pub b: Met,
+    pub a_stops: bool,
+    pub b_stops: bool,
+}
+
+/// [`Meeting`] of attack `a` (clash type, priority, marked this frame) and `b`.
+pub fn meeting(a: (u32, i32, bool), b: (u32, i32, bool)) -> Meeting {
+    let ma = met(a.0, a.1, a.2, b.1);
+    let mb = met(b.0, b.1, b.2, a.1);
+    let a_stops = a.2 || ma.marks() || (ma == Met::Nothing && mb.returned());
+    let b_stops = b.2 || mb.marks() || (mb == Met::Nothing && ma.returned());
+    Meeting { a: ma, b: mb, a_stops, b_stops }
+}
+
+/// `0x1402B4640`'s front cone of a row of clash type `t` (`+0x60` a turn of the facing, `+0x64` the cosine
+/// limit): only guard types (1..4) test it (`((t − 1) & ~3) == 0`); any other type passes. The 3D cosine
+/// (`0x1402A8C70`) is 0 when either vector is zero.
+pub fn front(t: u32, turn: f32, cos: f32, facing_yaw: f32, to_attacker: crate::Vec3) -> bool {
+    if !is_guard_type(t) {
+        return true;
+    }
+    let f = crate::Vec3::from_yaw(facing_yaw + turn);
+    let (la, lb) = (f.length(), to_attacker.length());
+    let c = if la == 0.0 || lb == 0.0 { 0.0 } else { (f.dot(to_attacker) / (la * lb)).clamp(-1.0, 1.0) };
+    cos <= c
+}
+
 /// One guard row of an enemy (its manifest's `guards`): the row's clash type (`+0x38 & 7`),
 /// priority (`+0x3C`), recoil request (`+0x40`, low 16 bits), the front cone (`+0x60` a turn of the
 /// facing in radians, `+0x64` the cosine limit) and, per request that makes it, the frames its HIT
@@ -138,10 +232,8 @@ impl GuardRow {
     /// cos(facing turned by `+0x60`, `to_attacker`) ≥ `+0x64` (3D cosine `0x1402A8C70`, 0 when either
     /// is zero, so a zero vector passes only a cone of 90° or more).
     pub fn front(&self, facing_yaw: f32, to_attacker: crate::Vec3) -> bool {
-        let f = crate::Vec3::from_yaw(facing_yaw + self.turn);
-        let (la, lb) = (f.length(), to_attacker.length());
-        let c = if la == 0.0 || lb == 0.0 { 0.0 } else { (f.dot(to_attacker) / (la * lb)).clamp(-1.0, 1.0) };
-        self.cos <= c
+        // Every guard row is a guard type ([`is_guard_type`]): the cone always applies.
+        front(1, self.turn, self.cos, facing_yaw, to_attacker)
     }
 
     /// The clash an attack of type `kind` and priority `priority` gets from this row and the one the
@@ -236,6 +328,54 @@ mod tests {
         let at = |deg: f32| Vec3::new(deg.to_radians().sin(), 0.0, deg.to_radians().cos()) * 200.0;
         assert!(f.front(0.0, at(0.0)) && f.front(0.0, at(60.0)) && !f.front(0.0, at(80.0)) && !f.front(0.0, at(180.0)));
         assert!(f.front(0.0, Vec3::new(0.0, -200.0, 200.0)) && !f.front(0.0, Vec3::new(0.0, -600.0, 200.0)));
+    }
+
+    /// Attack meets attack (M11, `0x1402B4A20` / `0x1402B4BC0`): Sora's swing (type 0, the Kingdom Key's 30)
+    /// against enemy attack rows (type 0) with the priorities the players' scripts give them.
+    #[test]
+    fn attack_meets_attack() {
+        let sora = |p: i32| (0u32, p, false);
+        // The Large Body's punch (30): both kind 6, no push; both stop (no damage either way this frame).
+        let m = meeting(sora(30), (0, 30, false));
+        assert_eq!((m.a, m.b), (Met::Clash { kind: 6, diff: 0 }, Met::Clash { kind: 6, diff: 0 }));
+        assert!(m.a_stops && m.b_stops);
+        // Its charge's belly (90): Sora the strong recoil (60 under), the Large Body kind 6 (a type 0 never repels).
+        let m = meeting(sora(30), (0, 90, false));
+        assert_eq!((m.a, m.b), (Met::Clash { kind: 7, diff: -60 }, Met::Clash { kind: 6, diff: 60 }));
+        // The Soldier's kick (20): Sora kind 6 above it (no push), the Soldier kind 6 with its push.
+        let m = meeting(sora(30), (0, 20, false));
+        assert_eq!((m.a, m.b), (Met::Clash { kind: 6, diff: 10 }, Met::Clash { kind: 6, diff: -10 }));
+        // A row at 100 (the Neoshadow's dive, the Wyvern's bite): Sora bounces; it is never moved and still meets
+        // bodies this frame.
+        let m = meeting(sora(30), (0, 100, false));
+        assert_eq!((m.a, m.b), (Met::Clash { kind: 7, diff: -70 }, Met::Unmoved));
+        assert!(m.a_stops && !m.b_stops);
+        // A 98+ swing against a 30 row: the swing goes on (no record, not marked), the row gets kind 7 and stops.
+        let m = meeting(sora(99), (0, 30, false));
+        assert_eq!((m.a, m.b), (Met::Unmoved, Met::Clash { kind: 7, diff: -69 }));
+        assert!(!m.a_stops && m.b_stops);
+        // Both 98 or more: nothing at all.
+        let m = meeting(sora(99), (0, 100, false));
+        assert_eq!((m.a, m.b, m.a_stops, m.b_stops), (Met::Nothing, Met::Nothing, false, false));
+        // A swing that already clashed this frame gets nothing more; the row it meets still takes its clash, and
+        // the swing stays marked.
+        let m = meeting((0, 30, true), (0, 30, false));
+        assert_eq!((m.a, m.b, m.a_stops, m.b_stops), (Met::Nothing, Met::Clash { kind: 6, diff: 0 }, true, true));
+        // A row of priority 0 (the thrown blade's): the swing returns 0 but is marked by the row's clash.
+        let m = meeting(sora(30), (0, 0, false));
+        assert_eq!((m.a, m.b, m.a_stops), (Met::Nothing, Met::Clash { kind: 6, diff: -30 }, true));
+        // A type 1 / 3 / 4 row above the swing (under 100) repels it.
+        let m = meeting(sora(30), (3, 60, false));
+        assert_eq!((m.a, m.b), (Met::Clash { kind: 6, diff: -30 }, Met::Repels));
+        // `resolve` is `met`'s side.
+        for (a, b) in [(30, 30), (30, 90), (30, 100), (99, 30), (99, 100), (30, 0)] {
+            assert_eq!(resolve(0, a, b), met(0, a, false, b).side(), "{a} {b}");
+        }
+        // Only guard types test the cone.
+        assert!(front(0, 0.0, 1.0, 0.0, Vec3::new(0.0, 0.0, -100.0)));
+        assert!(!front(2, 0.0, 0.0, 0.0, Vec3::new(0.0, 0.0, -100.0)) && front(2, 0.0, 0.0, 0.0, Vec3::new(0.0, 0.0, 100.0)));
+        // The Soldier's spin-kick chest row (type 1, cos −0.5: 120° each side).
+        assert!(front(1, 0.0, -0.5, 0.0, Vec3::new(100.0, 0.0, -50.0)) && !front(1, 0.0, -0.5, 0.0, Vec3::new(10.0, 0.0, -100.0)));
     }
 
     #[test]

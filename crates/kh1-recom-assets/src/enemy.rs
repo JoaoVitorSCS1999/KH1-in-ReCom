@@ -148,6 +148,8 @@ pub struct Built {
     pub records: Vec<String>,
     /// The hurt parts (KH1 bone, Re:CoM bone).
     pub parts: Vec<(usize, usize)>,
+    /// Per attack (the spec's order), its rows' attack-meets-attack numbers as the manifest lists them.
+    pub clash: Vec<Vec<ClashOut>>,
 }
 
 /// KH1's exe numbers the shared code reads (`kh1_core::enemy::EXE_NUMBERS`, the same values;
@@ -412,9 +414,11 @@ pub struct NewRecord<'a> {
 /// The ASD with the new records added after Re:CoM's (Re:CoM's header, body and records
 /// byte-identical, the trailing section moved after them, its offset `+0x18` updated; Re:CoM's
 /// loader `0x140179340` / binder `0x14014DBE0` read only the counts and offsets `+8..+0x14`). The
-/// template of each is Re:CoM's record with its attack id. Returns the ASD, log lines and each
-/// record's window (on, off frames).
-pub fn extend_asd(asd: &[u8], want: (usize, usize, usize), conv: &Converter, ms: &MotionSet, recs: &[NewRecord], clips: &[RequestClip]) -> Result<(Vec<u8>, Vec<String>)> {
+/// template of each is Re:CoM's record with its attack id. Returns the ASD, log lines and, per new record
+/// asked for, the indices of the records it made in the ASD (one per hit window; Re:CoM's records come first:
+/// the index Re:CoM's attack set gives each live entry, `0x14014E010` / `0x14014DF10`: entry `+0x18` = the
+/// record, records `+0x28` 0xA0 apart; M11, attack meets attack).
+pub fn extend_asd(asd: &[u8], want: (usize, usize, usize), conv: &Converter, ms: &MotionSet, recs: &[NewRecord], clips: &[RequestClip]) -> Result<(Vec<u8>, Vec<String>, Vec<Vec<u16>>)> {
     let u = |o: usize| -> Result<u32> { asd.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).ok_or_else(|| crate::Error::Format("ASD: short".into())) };
     if asd.get(0..4) != Some(b"@COP".as_slice()) || u(4)? != 3 {
         return bad("ASD: not @COP version 3");
@@ -427,7 +431,9 @@ pub fn extend_asd(asd: &[u8], want: (usize, usize, usize), conv: &Converter, ms:
     let skel = conv.skeleton();
     let mut out_recs = Vec::new();
     let mut notes = Vec::new();
+    let mut made: Vec<Vec<u16>> = Vec::with_capacity(recs.len());
     for nr in recs {
+        made.push(Vec::new());
         let tmpl = (0..n).map(rec).find(|r| u32::from_le_bytes(r[0x64..0x68].try_into().unwrap()) == nr.recom_id).ok_or_else(|| crate::Error::Format(format!("ASD: no Re:CoM record with attack id {}", nr.recom_id)))?;
         let row = nr.row;
         let c = clips.iter().find(|c| c.request == nr.request).ok_or_else(|| crate::Error::Format(format!("request {} has no clip", nr.request)))?;
@@ -483,6 +489,7 @@ pub fn extend_asd(asd: &[u8], want: (usize, usize, usize), conv: &Converter, ms:
             nr.sub,
             nr.recom_id
         ));
+        made.last_mut().expect("pushed above").push(u16::try_from(n + out_recs.len()).map_err(|_| crate::Error::Format("ASD: too many records".into()))?);
         out_recs.push(r);
         }
     }
@@ -494,7 +501,7 @@ pub fn extend_asd(asd: &[u8], want: (usize, usize, usize), conv: &Converter, ms:
     d.extend_from_slice(&asd[tail..]);
     d[0x10..0x14].copy_from_slice(&((n + out_recs.len()) as u32).to_le_bytes());
     d[0x18..0x1C].copy_from_slice(&(new_tail as u32).to_le_bytes());
-    Ok((d, notes))
+    Ok((d, notes, made))
 }
 
 /// The record of an ASD whose attack id is `id`: (its motion name, its window start in frames).
@@ -620,16 +627,19 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     let row_of = |at: usize| rows.iter().find(|x| x.0 == at).expect("read above");
     let mut new = Vec::new();
     let mut sound_rows = Vec::new();
-    for a in spec.attacks {
+    // Per new record: its attack and its row (the manifest's clash rows).
+    let mut new_of = Vec::new();
+    for (ai, a) in spec.attacks.iter().enumerate() {
         for (i, r) in a.rows.iter().enumerate() {
             let (_, row, sub) = row_of(r.at);
             new.push(NewRecord { request: a.request, row, sub: *sub, recom_id: r.recom_id });
+            new_of.push((ai, i));
             if i == 0 {
                 sound_rows.push((a.request, r.recom_id, *sub));
             }
         }
     }
-    let (mut asd, mut records) = extend_asd(&inp.asd, spec.asd, &conv, &ms, &new, &clips)?;
+    let (mut asd, mut records, made) = extend_asd(&inp.asd, spec.asd, &conv, &ms, &new, &clips)?;
     // M11 (the Large Body's stomp): a child ring on Re:CoM's own shockwave record.
     let rings = ring_records(spec.name, script, &inp.asd, &clips, &consts)?;
     add_records(&mut asd, &rings.iter().map(|r| r.1).collect::<Vec<_>>())?;
@@ -650,14 +660,25 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     // as KH1's clash reads the record that met the Guard: Assumption that an attack's rows agree,
     // checked below).
     let mut attacks = Vec::new();
-    for a in spec.attacks {
+    for (ai, a) in spec.attacks.iter().enumerate() {
+        // M11, attack meets attack: each row's clash numbers and the ASD records it made.
+        let clash: Vec<ClashOut> = a
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let row = &row_of(r.at).1;
+                let records = new_of.iter().zip(&made).filter(|(o, _)| **o == (ai, i)).flat_map(|(_, m)| m.iter().copied()).collect();
+                ClashOut { row: r.at, clash_type: row.clash_type, priority: row.priority, turn: row.turn, cos: row.cos, records }
+            })
+            .collect();
         if a.rows.is_empty() {
             // A ring's attack ([`RINGS`]): its row's recoil (KH1's clash on the child's row goes to its owner).
             let Some(r) = rings.iter().find(|r| r.0 == a.request) else { return bad(format!("{}: no rows and no ring", a.name)) };
             if !clips.iter().any(|c| c.request == a.request) {
                 return bad(format!("{}: request {} has no motion", a.name, a.request));
             }
-            attacks.push((a.name, a.request, r.2, vec![r.3]));
+            attacks.push((a.name, a.request, r.2, vec![r.3], clash));
             continue;
         }
         let rs: Vec<u32> = a.rows.iter().map(|r| row_of(r.at).1.recoil & 0xFFFF).collect();
@@ -667,13 +688,50 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
         if !clips.iter().any(|c| c.request == a.request) {
             return bad(format!("{}: request {} has no motion", a.name, a.request));
         }
-        attacks.push((a.name, a.request, rs[0], a.rows.iter().map(|r| r.at).collect::<Vec<_>>()));
+        attacks.push((a.name, a.request, rs[0], a.rows.iter().map(|r| r.at).collect::<Vec<_>>(), clash));
     }
     let manifest = manifest_json(spec, &consts, &clips, &attacks, &parts, &guards);
-    Ok(Built { ann, asd, ses, manifest, clips, consts, records, parts })
+    let clash = attacks.iter().map(|a| a.4.clone()).collect();
+    Ok(Built { ann, asd, ses, manifest, clips, consts, records, parts, clash })
 }
 
-fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], attacks: &[(&str, u16, u32, Vec<usize>)], parts: &[(usize, usize)], guards: &[Guard]) -> String {
+/// One attack row's KH1 attack-meets-attack numbers in the manifest (M11, `docs/recom-m11-enemies.md` § Attack
+/// meets attack): the row, its clash type, priority, front cone, and the ASD records made from it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClashOut {
+    /// The row's script offset.
+    pub row: usize,
+    /// `+0x38 & 7`.
+    pub clash_type: u32,
+    /// `+0x3C`.
+    pub priority: i32,
+    /// `+0x60` (radians).
+    pub turn: f32,
+    /// `+0x64`.
+    pub cos: f32,
+    /// The ASD records made from it (indices; Re:CoM's records first).
+    pub records: Vec<u16>,
+}
+
+impl ClashOut {
+    /// The manifest's entry: `{"row", "type", "priority", "turn", "cos", "records"}`.
+    pub fn json(&self) -> String {
+        format!(
+            "{{\"row\": \"{:#x}\", \"type\": {}, \"priority\": {}, \"turn\": {}, \"cos\": {}, \"records\": [{}]}}",
+            self.row,
+            self.clash_type,
+            self.priority,
+            fmt_f(self.turn),
+            fmt_f(self.cos),
+            self.records.iter().map(|r| r.to_string()).collect::<Vec<_>>().join(", ")
+        )
+    }
+}
+
+/// One attack in the manifest: name, request, clash recoil, rows, the rows' clash numbers.
+type AttackOut<'a> = (&'a str, u16, u32, Vec<usize>, Vec<ClashOut>);
+
+fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], attacks: &[AttackOut], parts: &[(usize, usize)], guards: &[Guard]) -> String {
     let mut s = String::new();
     s.push_str("{\n");
     s.push_str(&format!("  \"format\": \"{FORMAT}\",\n  \"enemy\": \"{}\",\n  \"recom_id\": {},\n  \"kh1\": \"{}\",\n", spec.name, spec.recom_id, spec.kh1));
@@ -681,7 +739,16 @@ fn manifest_json(spec: &Spec, consts: &[(String, f32)], clips: &[RequestClip], a
     let c: Vec<String> = consts.iter().map(|(k, v)| format!("    \"{k}\": {}", fmt_f(*v))).collect();
     s.push_str(&c.join(",\n"));
     s.push_str("\n  },\n  \"attacks\": [\n");
-    let a: Vec<String> = attacks.iter().map(|(n, r, rc, rows)| format!("    {{\"name\": \"{n}\", \"request\": {r}, \"recoil\": {rc}, \"rows\": [{}]}}", rows.iter().map(|x| format!("\"{x:#x}\"")).collect::<Vec<_>>().join(", "))).collect();
+    let a: Vec<String> = attacks
+        .iter()
+        .map(|(n, r, rc, rows, clash)| {
+            format!(
+                "    {{\"name\": \"{n}\", \"request\": {r}, \"recoil\": {rc}, \"rows\": [{}], \"clash\": [{}]}}",
+                rows.iter().map(|x| format!("\"{x:#x}\"")).collect::<Vec<_>>().join(", "),
+                clash.iter().map(|c| c.json()).collect::<Vec<_>>().join(", ")
+            )
+        })
+        .collect();
     s.push_str(&a.join(",\n"));
     s.push_str("\n  ],\n");
     if !guards.is_empty() {
@@ -1227,3 +1294,80 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
 pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC];
+
+#[cfg(test)]
+mod clash_tests {
+    use super::*;
+
+    /// The player's files (`KH1_M11_DIR`: KH1's `.mdls` / `.mset`, Re:CoM's `ENEMY__NNNN__ENNNNN.*`;
+    /// `KH1_TEST_DATA`: `btltbl.bin`) for one spec.
+    fn inputs(spec: &Spec) -> Option<Inputs> {
+        let d = std::path::PathBuf::from(std::env::var_os("KH1_M11_DIR")?);
+        let t = std::path::PathBuf::from(std::env::var_os("KH1_TEST_DATA")?);
+        let r = |n: &str| std::fs::read(d.join(n)).ok();
+        Some(Inputs {
+            mset: r(&format!("{}.mset", spec.kh1))?,
+            mdls: r(&format!("{}.mdls", spec.kh1))?,
+            ann: r(&spec.flat("ANN"))?,
+            mdl: r(&spec.flat("MDL"))?,
+            asd: r(&spec.flat("ASD"))?,
+            ses: r(&spec.flat("SES")).unwrap_or_default(),
+            btltbl: std::fs::read(t.join("btltbl.bin")).ok()?,
+        })
+    }
+
+    /// M11, attack meets attack: every ported class's manifest lists, per attack row, KH1's clash type,
+    /// priority and cone and the ASD records made from it; each record is one of the step's (after Re:CoM's) on
+    /// the attack's clip. The numbers the doc's table gives (the players' scripts).
+    #[test]
+    fn every_class_lists_its_attack_rows_clash_numbers() {
+        let mut seen = 0;
+        for spec in SPECS {
+            let Some(inp) = inputs(spec) else { continue };
+            let Ok(b) = build(spec, &inp) else { continue };
+            seen += 1;
+            let n: usize = u32::from_le_bytes(b.asd[0x10..0x14].try_into().unwrap()) as usize;
+            let off: usize = u32::from_le_bytes(b.asd[0x14..0x18].try_into().unwrap()) as usize;
+            assert_eq!(b.clash.len(), spec.attacks.len());
+            for (clash, spec_a) in b.clash.iter().zip(spec.attacks) {
+                assert_eq!(clash.len(), spec_a.rows.len(), "{} {}", spec.name, spec_a.name);
+                let clip = b.clips.iter().find(|c| c.request == spec_a.request).unwrap();
+                for c in clash {
+                    assert!(!c.records.is_empty(), "{} {}: a row without records", spec.name, spec_a.name);
+                    for &i in &c.records {
+                        let i = i as usize;
+                        assert!(i >= spec.asd.0 && i < n, "{} {}: record {i}", spec.name, spec_a.name);
+                        assert_eq!(&b.asd[off + REC * i + 0x40..off + REC * i + 0x50], &name16(&clip.name), "{} {}: record {i} on another clip", spec.name, spec_a.name);
+                    }
+                    assert!(b.manifest.contains(&c.json()), "{} {}: {}", spec.name, spec_a.name, c.json());
+                }
+            }
+            let row = |attack: &str, k: usize| {
+                let i = spec.attacks.iter().position(|a| a.name == attack).unwrap();
+                let c = &b.clash[i][k];
+                (c.clash_type, c.priority, c.cos)
+            };
+            match spec.name {
+                "largebody" => {
+                    assert_eq!((row("punch", 0), row("punch", 1)), ((0, 30, 1.0), (0, 30, 1.0)));
+                    assert_eq!((row("slam", 0), row("charge", 0)), ((0, 30, 1.0), (0, 90, 1.0)));
+                    assert!(b.clash[3].is_empty(), "the ring is a child row");
+                }
+                "soldier" => {
+                    assert_eq!((row("kick", 0), row("jumping kick", 0)), ((0, 20, 1.0), (0, 100, 1.0)));
+                    assert_eq!(row("spin kick", 1), (1, 100, -0.5), "the spin kick's chest: a guard type");
+                }
+                "powerwild" => assert_eq!((row("swipe", 0), row("flurry", 2)), ((0, 50, 1.0), (2, 10, 0.0))),
+                "pirate" => assert_eq!(row("slash", 0), (0, 90, 1.0)),
+                "wyvern" => assert_eq!(row("charge", 0), (3, 100, -1.0)),
+                "neoshadow" => assert_eq!((row("claw", 0), row("dive", 0)), ((0, 40, 1.0), (0, 100, 1.0))),
+                "bandit" => assert_eq!(row("leap", 1), (0, 30, 1.0)),
+                "searchghost" => assert_eq!((row("burst", 0), row("burst", 2)), ((0, 40, 1.0), (0, 70, 1.0))),
+                _ => {}
+            }
+        }
+        if seen == 0 {
+            eprintln!("attack-meets-attack manifest test skipped: KH1_M11_DIR / KH1_TEST_DATA not set");
+        }
+    }
+}
