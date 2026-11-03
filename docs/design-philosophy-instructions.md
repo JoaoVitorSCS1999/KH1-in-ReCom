@@ -480,3 +480,5 @@ At KH1 setting:
 - Revisit later: party, progression.
 
 - **Search Ghost burst cone** (owner, 2026-11-02): keep KH1's cone (cos 1.0, 1:1); the repel rows stay as KH1 has them and practically never fire.
+
+- **Pirate choices** (owner, 2026-11-02): the five attacks Re:CoM's Pirate lacks take power by kind (as built). The Wyvern's element no-reaction (`sys 42` for attribute 2 / 3 / 4 hits) stays left out. The fliers' "doesn't flinch" (Darkball, Air Pirate's dive, Wyvern's dive) move onto the no-reaction armour, one version each.
