@@ -981,6 +981,8 @@ unsafe fn hit_arrived(enemy: usize) -> bool {
 /// for any source: swing, spell, Stop, turned-back shot), so it drops the hit while `+0x260 & 1`
 /// (`0x14017F8CB`): no damage, no reaction, the attack goes on.
 ///
+/// Also a boss in a room-dimming move (owner, 2026-11-03, `crate::dim`), the same way.
+///
 /// Captain Hook's ctor `0x1403C6340` sets `0x2000000` for good (Re:CoM's "always interruptible"), which
 /// would make that rule end his attack and take the hit: the bit is held off for this call and put
 /// back after. The KH1 swing's / spell's hit record is taken so it can't land on a later call; no MP
@@ -1000,13 +1002,18 @@ pub(super) unsafe fn untouchable_hit(enemy: usize) -> (u64, Option<crate::reveng
     let hp: i32 = rd(enemy + 0x274);
     let flags: u64 = rd(enemy + 0x260);
     let held = flags & 0x200_0000 != 0;
-    if held {
-        wr(enemy + 0x260, flags & !0x200_0000);
+    // A dim window (`crate::dim`) holds with Re:CoM's attack bit cleared too (a KH1 hit before the dim
+    // ended the card, decision 14): the bit is set for this call only, so Re:CoM's handler takes its
+    // drop branch, and cleared again after.
+    let lent = flags & crate::revenge::ATTACKING == 0;
+    if held || lent {
+        wr(enemy + 0x260, (flags & !0x200_0000) | crate::revenge::ATTACKING);
     }
     let r = o(enemy);
-    if held {
+    if held || lent {
         let now: u64 = rd(enemy + 0x260);
-        wr(enemy + 0x260, now | 0x200_0000);
+        let now = if held { now | 0x200_0000 } else { now };
+        wr(enemy + 0x260, if lent { now & !crate::revenge::ATTACKING } else { now });
     }
     super::guard::after_enemy_hit(enemy, r, hp);
     let after: i32 = rd(enemy + 0x274);
@@ -1218,6 +1225,8 @@ unsafe fn recom_stop_hit(enemy: usize, part: usize, lv: u8, o: PlRetFn) -> u64 {
 ///
 /// Except the attack a boss's revenge started (owner, 2026-11-02, "can't be damaged or interrupted
 /// during their retaliation move"): Re:CoM's own call runs for it (`super::revenge::begin_untouchable`).
+/// And a boss attack whose begin dims the room, or that begins while Marluxia 3's own dim is up, or
+/// whose step dims it (that step calls this then) (owner, 2026-11-03, `crate::dim`).
 pub unsafe extern "win64" fn hurt_off(enemy: usize) {
     if mv::kh1_on() && !super::stats::riku_story() && !super::revenge::begin_untouchable(enemy) {
         return;

@@ -17,6 +17,10 @@ Code: `crates/kh1-recom/src/revenge.rs` (table, values, counter rules, tests),
 Owner (2026-11-02): "Can we make it so where the humanoid bosses that have revenge value can't be
 damaged or interrupted during their retaliation move?" → § 4.
 
+Owner (2026-11-03): "anytime bosses use a move that dims the room, just make them invulnerable for
+that move" → the same window (§ 4) for every move that dims the room, `docs/recom-boss-dim.md`
+(tail flag `DIM`; works with `boss_revenge = off`).
+
 ## 1. KH2 FM (Steam exe, timestamp `0x669E384A`)
 
 | Piece | Address | What it does | Tag |

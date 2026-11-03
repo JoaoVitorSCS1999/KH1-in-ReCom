@@ -704,6 +704,10 @@ fn install_revenge(base: usize, s: &Settings) {
             crate::revenge::BOSSES.len(),
             settings::switch_str(s.boss_revenge)
         ));
+        log(&format!(
+            "dim: bosses untouchable during the moves that dim the room (any boss_revenge): Re:CoM's scene colour 0x140232170 read at each attack begin (slot 0 against the state change's snapshot; Marluxia 3's own slot 1) and in {} dimming steps (Larxene states 3 / 4, Marluxia 3 states 7 / 9); the same untouchable rule until the state end 0x14017DA90",
+            crate::dim::EXES.len()
+        ));
     } else {
         log("revenge: not installed; bosses keep Re:CoM's rules (no revenge, Re:CoM's falloff)");
     }

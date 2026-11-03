@@ -63,6 +63,9 @@ pub mod flag {
     /// The open window is the boss's own use of its revenge move (owner, 2026-11-02: "untouchable
     /// whenever played"), not one revenge started.
     pub const OWN: u32 = 0x10;
+    /// The open window is a move that dimmed the room (owner, 2026-11-03: `crate::dim`): it holds
+    /// until the state ends, whether or not Re:CoM's attack bit is still set.
+    pub const DIM: u32 = 0x20;
 }
 
 /// Who opened an untouchable window.
@@ -92,7 +95,13 @@ pub const ATTACKING: u64 = 1;
 /// Whether Re:CoM's own rule makes the boss untouchable now: the window is open (or its start is
 /// pending), Re:CoM still has the attack running (bit 0; its attack end `0x14017E540` and state end
 /// `0x14017DA90` clear it) and the boss lives.
+/// A dim window (`flag::DIM`, `crate::dim`) holds while it is open and the boss lives, bit 0 or not
+/// (a KH1 hit before the dim may have ended Re:CoM's card, decision 14, without a flinch): the hit
+/// handler's call then has bit 0 set for it, so Re:CoM's own rule drops the hit.
 pub fn holds(tail_flags: u32, enemy_flags: u64, hp: i32) -> bool {
+    if tail_flags & flag::DIM != 0 {
+        return tail_flags & flag::UNTOUCHABLE != 0 && hp > 0;
+    }
     tail_flags & (flag::PENDING | flag::UNTOUCHABLE) != 0 && enemy_flags & ATTACKING != 0 && hp > 0
 }
 
@@ -543,6 +552,21 @@ mod tests {
         assert!(begins_revenge(flag::PENDING, 0x1000, 0x1000));
         assert!(!begins_revenge(flag::PENDING, 0x1040, 0x1000));
         assert!(!begins_revenge(flag::UNTOUCHABLE, 0x1000, 0x1000));
+    }
+
+    #[test]
+    fn a_dim_window_holds_until_the_state_ends() {
+        // Bit 0 cleared (a KH1 hit ended the card before the dim, or Re:CoM's attack end): still
+        // untouchable until the state end closes it.
+        assert!(holds(flag::UNTOUCHABLE | flag::DIM, 0, 100));
+        assert!(holds(flag::UNTOUCHABLE | flag::DIM, 1, 1));
+        // Dead, or closed (the state end clears UNTOUCHABLE and DIM).
+        assert!(!holds(flag::UNTOUCHABLE | flag::DIM, 1, 0));
+        assert!(!holds(flag::DIM, 1, 100));
+        assert!(!holds(0, 1, 100));
+        // The flag bits don't overlap.
+        let all = [flag::CHECKED, flag::HADES_LOW, flag::PENDING, flag::UNTOUCHABLE, flag::OWN, flag::DIM];
+        assert_eq!(all.iter().fold(0, |a, f| a | f).count_ones() as usize, all.len());
     }
 
     #[test]

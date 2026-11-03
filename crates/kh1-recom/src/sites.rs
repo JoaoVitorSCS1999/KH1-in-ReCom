@@ -803,6 +803,32 @@ pub const REVENGE_WINDUP_SLOTS: &[PtrSite] = &[
     PtrSite { name: "CBossHades +0x168 (state 5 exe)", rva: 0x0066_21A0, target: 0x003B_1DB0 },
 ];
 
+/// Bosses untouchable during room-dimming moves (owner, 2026-11-03; `crate::dim`): the four attack
+/// states whose step asks for the dark room partway through, their exes' vtable slots
+/// (`crate::dim::EXES`), written with ours (`win::revenge::dim_exe_*`), which call Re:CoM's.
+/// Reached by Re:CoM's state handlers (`jmp [rax+0x138]` `0x140182B84` / `0x14019B1C7`, `+0x150`
+/// `0x140182BA4` / `0x14019B1EB`, `+0x198` `0x140182C04`, `+0x1C8` `0x140182C44`). Checked (exe).
+pub const DIM_EXE_SLOTS: &[PtrSite] = &[
+    PtrSite { name: "CBossLarxene +0x138 (state 3 exe)", rva: 0x0066_66D0, target: 0x003B_BAF0 },
+    PtrSite { name: "CBossLarxene +0x150 (state 4 exe)", rva: 0x0066_66E8, target: 0x003B_C1D0 },
+    PtrSite { name: "CBossMarluxia3 +0x198 (state 7 exe)", rva: 0x0067_8750, target: 0x003F_5F90 },
+    PtrSite { name: "CBossMarluxia3 +0x1C8 (state 9 exe)", rva: 0x0067_8780, target: 0x003F_6960 },
+];
+
+/// Bosses untouchable during room-dimming moves: Re:CoM's scene colour setter `0x140232170` (read,
+/// not hooked), whose bytes give the table's global and the slot layout `crate::dim` reads:
+/// movsxd rax,[rsp+0x28] (slot); shl rax,6 (0x40 a slot); add rax,[rip+0x649670] (the table
+/// `0x14087B7F0`); … mov [rax+0x34],0 (progress); … movdqa [rax+0x10] (target); or [rax+0x3C],1;
+/// movdqa [rax+0x20] (current); mov [rax+0x30],ecx (mask); ret. Checked (exe + decomp).
+pub const DIM_CHECKED: &[Site] = &[Site {
+    name: "scene colour setter (0x140232170)",
+    rva: 0x0023_2170,
+    expect: &[
+        0x48, 0x63, 0x44, 0x24, 0x28, 0x48, 0xC1, 0xE0, 0x06, 0x48, 0x03, 0x05, 0x70, 0x96, 0x64, 0x00, 0x4D, 0x85, 0xC9, 0x74, 0x09, 0x41, 0x0F, 0x28, 0x01, 0x66, 0x0F, 0x7F, 0x40, 0x20, 0x0F, 0x28, 0x40, 0x20, 0x66, 0x0F, 0x7F, 0x00, 0x0F, 0x57, 0xC0, 0x0F, 0x2F, 0xC1, 0xC7, 0x40, 0x34, 0x00, 0x00, 0x00, 0x00,
+        0x72, 0x21, 0xC7, 0x40, 0x38, 0x00, 0x00, 0x80, 0x3F, 0x41, 0x0F, 0x28, 0x00, 0x66, 0x0F, 0x7F, 0x40, 0x10, 0x41, 0x0F, 0x28, 0x08, 0x83, 0x48, 0x3C, 0x01, 0x66, 0x0F, 0x7F, 0x48, 0x20, 0x89, 0x48, 0x30, 0xC3,
+    ],
+}];
+
 /// Decision 35 (MP to full where Re:CoM fills HP). Moved bytes are whole, position-independent
 /// instructions.
 pub const MP_HOOKS: &[Site] = &[
@@ -3446,6 +3472,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         M6_BOSS_HOOKS,
         REVENGE_HOOKS,
         REVENGE_ALLOC,
+        DIM_CHECKED,
         REVENGE_CHECKED,
         MP_HOOKS,
         MP_CHECKED,
@@ -3645,6 +3672,30 @@ mod tests {
         h[0x98..0x9A].copy_from_slice(&0x020Bu16.to_le_bytes());
         h[0x98 + 56..0x98 + 60].copy_from_slice(&soi.to_le_bytes());
         h
+    }
+
+    #[test]
+    fn dim_sites() {
+        // The setter's table global (rip-relative at +9, 7 bytes) and the slot size / fields.
+        let s = &DIM_CHECKED[0];
+        let d = i32::from_le_bytes(s.expect[12..16].try_into().unwrap()) as i64;
+        assert_eq!(0x1_4000_0000i64 + s.rva as i64 + 16 + d, 0x1_4000_0000i64 + crate::dim::ENV_TABLE as i64);
+        assert_eq!(&s.expect[5..9], &[0x48, 0xC1, 0xE0, 0x06]);
+        assert_eq!(1usize << 6, crate::dim::SLOT_SIZE);
+        assert!(s.expect.windows(7).any(|w| w == [0xC7, 0x40, crate::dim::slot::T as u8, 0, 0, 0, 0]));
+        assert!(s.expect.windows(4).any(|w| w == [0x66, 0x0F, 0x7F, 0x40]) && s.expect.windows(5).any(|w| w == [0x0F, 0x7F, 0x40, crate::dim::slot::TARGET as u8, 0x41]));
+        assert!(s.expect.windows(4).any(|w| w == [0x83, 0x48, crate::dim::slot::FLAGS as u8, 0x01]));
+        assert!(s.expect.ends_with(&[0x89, 0x48, crate::dim::slot::MASK as u8, 0xC3]));
+        assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1);
+        // The exe slots are the dim table's, never byte sites, and not another list's pointer.
+        let ours: Vec<(u32, u32)> = DIM_EXE_SLOTS.iter().map(|p| (p.rva, p.target)).collect();
+        let want: Vec<(u32, u32)> = crate::dim::EXES.iter().map(|x| (x.slot_rva(), x.exe)).collect();
+        assert_eq!(ours, want);
+        for p in DIM_EXE_SLOTS {
+            assert!(!all_sites().any(|s| s.rva == p.rva), "{}", p.name);
+            assert!(!REVENGE_PTRS.iter().chain(REVENGE_FSM_SLOTS).chain(REVENGE_WINDUP_SLOTS).any(|q| q.rva == p.rva), "{}", p.name);
+            assert_eq!(p.rva % 8, 0, "{}", p.name);
+        }
     }
 
     #[test]

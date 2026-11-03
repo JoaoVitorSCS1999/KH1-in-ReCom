@@ -73,6 +73,7 @@ pub mod camp_rows;
 pub mod command_menu;
 pub mod customize;
 pub mod d2;
+pub mod dim;
 pub mod damage;
 pub mod deck;
 pub mod drops;
