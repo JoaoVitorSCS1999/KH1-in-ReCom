@@ -11,6 +11,13 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 149: Build fix: the merged always-on guard rows (Large Body / Neoshadow), version 0.80.1 (2026-11-01)
+
+- Stage 148's merge left the Neoshadow's `held` test in the guard step after the Large Body's `ALWAYS` mode replaced it: the Windows build failed (0.80.0 was never built or installed). The two are one mode (`HELD = ALWAYS`, `u16::MAX`); the step uses `GuardRow::live`, which is on every frame for such a row.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 148: The KH1 Neoshadow (End of the World's group rules, sink / rise, its dives), version 0.80.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).

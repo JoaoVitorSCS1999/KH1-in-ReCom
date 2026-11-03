@@ -2027,8 +2027,9 @@ unsafe fn guard_step(en: usize, rt: &mut Runtime, step: f32) {
     rt.guard = Some(g);
     let m = manifest(rt.class);
     let Some(row) = m.guards.get(g.row as usize) else { return };
-    // KH1's mode 3 (`ke::guard::HELD`, the Neoshadow's body row): on every frame until `Cmd::Guard(None)`.
-    let on = held || (playing && row.live(g.request, crate::units::units_to_frames(clock(en))));
+    // KH1's mode 3 (`ke::guard::ALWAYS` = `HELD`: the Large Body's front, the Neoshadow's body row): `live`
+    // is on every frame until `Cmd::Guard(None)`.
+    let on = playing && row.live(g.request, crate::units::units_to_frames(clock(en)));
     guard_bodies(en, rt, if on { row.half_angle() } else { None });
 }
 
