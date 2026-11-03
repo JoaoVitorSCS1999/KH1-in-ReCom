@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 194: M12 step 5: the Sleights menu (Left toggles Summon / Sleights; equipped sleights; MP by tier), version 0.100.0 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "If you press left on the d-pad, instead of summons at the bottom of the command menu, it should say \"sleights\" In the sleights menu I only want ACTIVELY EQUIPPED sleights to show in the list."; answers: Left anywhere; MP by tier (1 / 2 / 2 / 3; Idyll Romp / Cross-slash+ all MP).
+- Command menu at Combat = KH1: Left on any root row switches the 4th row Summon ↔ Sleights (cursor kept; KH1's Left → Attack dropped; Left in an open list still closes it); saved per save at `save+0x26B6` (the summon block's last byte; older saves read Summon).
+- The list: only the equipped sleights (`equipped_sleights()`, Re:CoM's order), placed and drawn as the Summon list (KH1's look: the Summon panels, no title). Usable as summons: battle room, on the ground, no sleight running, enough whole MP. Greyed when none usable; locked with the error sound when none equipped or one plays.
+- Performing: KH1's commit gate, then Re:CoM's own sleight start (the summons' path, `0x1402247A0` via Sora's vtable `+0x130`); MP paid once Re:CoM took it; its pack preloaded on cursor. Re:CoM's sleight code (`0x140218950`) sets its own protection; Re:CoM's damage at either Damage setting. Checked (decomp): the start covers all 27, reads no card; Synchro an enemy reaction (kind 0x13 in `0x14017DC50`).
+- Assumptions: ground-only (the summons' rule); Warp / Warpinator / Teleport not read one by one; a first use never before its pack loads; no MP charge from sleight hits. No new hooks or sites.
+- Asset step: re-run for KH1's look ("Sleights" and the 27 names in KH1's font); Re:CoM's look needs none.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 193: Bosses untouchable during moves that dim the room, version 0.99.1 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "anytime bosses use a move that dims the room, just make them invulnerable for that move". Combat = KH1 in Sora's story.
