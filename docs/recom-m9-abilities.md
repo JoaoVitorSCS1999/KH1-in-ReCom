@@ -970,3 +970,42 @@ four Re:CoM calls at each of its eight motion starts.
 - **Test:** start Sonic Blade in battle: the screen takes Re:CoM's blue-grey tint as its Sonic
   Blade card does at Combat = Re:CoM, and fades back when the special ends (the finisher's end, or
   stopping after a dash). Compare side by side with Re:CoM's own Sonic Blade sleight.
+
+## M12 step 3: KH1's Rod-list support abilities
+
+Owner (2026-11-03, "M12 sleights and progression"): "As sora levels up in KH1, he receives abilities
+like MP Haste, MP Rage, Leaf Bracer, combo plus, air combo plus, second chance and Berserk. I want
+those to be added to his ability list at the levels he would normally get them (subject to change,)
+regardless of level up choice". Go-ahead 2026-11-03. Research: `recom-m12-sleights.md` § 3.
+
+All five: KH1's **Rod list** (btltbl `0x3BF8`, decision 18) on **Re:CoM's level**, unlocked by
+`abilities::sync` (Attack presses, the Abilities page; `Source::Level`), whatever the level-up
+choice; they arrive **unequipped** (KH1's `0x140284E10`), cost KH1's AP (btltbl `0x33D8`), and are
+on Sora's Abilities page in KH1's sort-key order. KH1 counts them into the actor's ability block
+`+0x184` (`0x1402A6380`: `0x140284BE0(id)` = the number of **equipped** copies in Sora's list), not
+`0x142D5EC10`, so their `kh1_bit` is 0. Checked (decomp + files; `ap_tables_match_btltbl` reads
+the player's btltbl). The learned notice is another step: `win::abilities::on_learned` is its call
+point (a TODO for the notices merge).
+
+| ability | KH1 id | `+0x184` | Rod level(s) | AP | sort key | bit (`ix`) |
+|---|---|---|---|---|---|---|
+| MP Haste | 23 | bit 0 | 21 | 3 | 304 | 25 |
+
+### MP Haste
+
+- **KH1** (Checked (decomp + files)): `0x1402BF330`, the MP charge of a hit: factor f = (enemy level
+  − Sora's level) × G`+0x94` (20) / 100 + 1, **+ G`+0x95` (150) / 100 with `+0x184` bit 0**, in
+  `f32`; charge = trunc(`+0x2C` × f), at least 1, at most G`+0x96` (250) × `+0x2C` / 100. G =
+  btltbl + 0x58 (`0x14028F9D0` sets the pointer `0x142D22D30` = `0x142D22D98`). So at equal levels a swing
+  (3) charges **7** instead of 3 (7.5, cap 7), a finisher (6) **15**, Counterattack (24) **60**: the
+  cap stops it above about +0.5 of factor. It doesn't touch the refill (`0x1402A4CB0`, 30·k charge
+  per point) or MP from damage.
+- **Ours**: `crate::mp::hit_units_with(…, mp_haste)` (kh1-core's `mp_charge` with its
+  `mp_charge_bonus`), from the existing enemy-hit path (`win::mp::on_kh1_hit`, one per KH1 damage
+  record); the equipped word is read there (`win::abilities::equipped_live`, a 15-byte read per KH1
+  hit). No hook, nothing per frame. The log's charge line ends `, MP Haste +1.5`.
+- Checked (tests): `mp::tests::hit_charge_with_mp_haste`, `abilities::tests::rod_support_abilities`.
+  Not checked: in game; no KH1 trace with MP Haste.
+- **Test:** reach Re:CoM level 21 (Attack once): the Abilities page lists MP Haste (3 AP),
+  unequipped. Equip it; swing at a Traverse Town Shadow of your level: the F9 trace's MP events show
+  `+7` per swing hit and `+15` per finisher hit (`+3` / `+6` without it).

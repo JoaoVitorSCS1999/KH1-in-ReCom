@@ -234,7 +234,9 @@ pub fn on_kh1_hit(enemy: usize, kh1_row: Option<usize>) {
     let sora = super::stats::sora_level();
     let twin = super::stats::twin_level(enemy);
     let level = twin.unwrap_or_else(|| m::no_twin_level(sora));
-    let Some(units) = m::hit_units(record.mp_charge, level, sora) else {
+    // M12 step 3: MP Haste (KH1 ability 23, ability block `+0x184` bit 0) on the factor.
+    let haste = super::abilities::equipped_live().is_some_and(crate::abilities::mp_haste);
+    let Some(units) = m::hit_units_with(record.mp_charge, level, sora, haste) else {
         event("+0lv0".into());
         note(|| format!("hit on {:#x}: enemy level {level} (twin), no charge (KH1: level 0)", enemy & 0x00FF_FFFF));
         return;
@@ -244,7 +246,7 @@ pub fn on_kh1_hit(enemy: usize, kh1_row: Option<usize>) {
         kh1_row.unwrap_or(0),
         record.mp_charge,
         if twin.is_some() { " (twin)" } else { " (no twin)" }
-    );
+    ) + if haste { ", MP Haste +1.5" } else { "" };
     gain_charge(units, &why);
 }
 
