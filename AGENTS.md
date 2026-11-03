@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 198: Sleights at Damage = KH1: damage scaled to the enemy's KH1 HP, version 0.100.4 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Scale to KH1 HP".
+- Just before Re:CoM's hit handler `0x14017F7E0`, a sleight hit's value × the enemy's KH1 max HP / its Re:CoM max HP (`0x14017F5A0`): Sora's own collisions while the sleight runs and the shots he fired. Durations / HP percentages (Teleport, Lethal Frame, Shock Impact, Magnet Spiral, Gravity) left as they are, by Re:CoM's own list. Enemies without a KH1 twin keep Re:CoM's damage (logged; owner question on bosses / Re:CoM-only enemies). Damage = Re:CoM unchanged. Assumption: every sleight hits through Sora's collisions or shots (others logged, not scaled).
+- No new hooks or sites. Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 197: Sleights: Re:CoM's seven air-start sleights usable mid-air, version 0.100.3 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Allow Re:CoM's air ones".
