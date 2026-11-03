@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 159: jump_height = recom: Re:CoM's crouch, version 0.87.2 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Re:CoM's crouch" for `jump_height = recom`.
+- Re:CoM (Checked (decomp `0x1401EDA60` phase 1, `0x1401F29F0` and its 6 callers; exe `params+0x24` = 100)): the jump init zeroes `+0x5DC`; from the frame after the press, each frame Sora takes off once `+0x5DC` ≥ 100, else `+0x5DC` += dt (50 per 60 Hz frame): the press frame plus 2 crouch frames, the same time at 30 fps. A land jump gets the whole crouch too.
+- Built: `speeds::RecomCrouch`, `Kh1Sora::takeoff_input`, `params+0x24` read live. `jump_height = kh1` unchanged (4 frames, 2 for a land jump).
+- Assumption: KH1's jump clip still starts at frame 0 (at recom Sora leaves the ground a frame before the clip's lift).
+- Checked: tests (both settings, 30 fps, a slow frame, land jumps), Windows build. Not checked: in game.
+
+---
+
 ## Stage 158: Rows that only clash: the Soldier's spin-kick chest and the Powerwild's flurry body never hurt Sora, version 0.87.1 (2026-11-01)
 
 - Ask (owner, 2026-11-02, clash question 2): "Fix: block only".
