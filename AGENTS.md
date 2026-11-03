@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 176: The KH1 Green Requiem (its Cure on allies), version 0.96.0 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "finish the opera and requiem, but stop there" (M11).
+- Green Requiem (KH1 `xa_ex_2140` / `ex_2140.bd` ↔ Re:CoM `CEnemyGreenrequiem` id 6), a flier, every number from the player's files (Checked (files)): rises in, drifts in small circles; within 10 m flies over and hovers about 1.8 m above the floor next to Sora; rounds: 80 % a Cure, 30 % a short move away, then always a Cure and a move; the cast charges about 2 s, then holds about 4 s circling and facing Sora, the heal landing about 5¼ s in; after its flinch a new Cure at once; a hit, flinch or Re:CoM's Stop cancels it.
+- Who (Checked (KH1 decomp)): the most hurt ally 60 %, the second 30 %, the third 10 %; none: itself; allies = the other enemies in Re:CoM's battle list. How much: Re:CoM's own Green Requiem heal (its state 2's call), its power and sparkle effect (KH1's full heal: owner question).
+- Re:CoM (Checked (exe), 1129 sites): vtable `0x1405404C8`, ctor `0x14018E570` (only caller `0x140189098`), alloc `0x14018907F` 0xCE0 → 0xD00; Re:CoM's Cure state 2 (`0x14018E640` / `0x14018E9B0`) never entered. Framework: `Cmd::Support`; asset search-table reader, STARTS / NO_SES / SKIPPED entries.
+- Assumptions: ±1-frame child timing; flat floors; battle-list order for KH1's actor order on HP ties; KH1's "can the target be hit" not carried; no motion sounds (no Re:CoM .SES).
+- Asset step: ENEMY/0006/EN0006.ANN, `kh1-greenrequiem.json`.
+- Checked: tests (999), Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 175: Parasite Cage: its faint only from Fire at Combat = KH1, version 0.95.1 (2026-11-01)
 
 - Ask (owner, 2026-11-03, on 0.95.0): faint "Fire only".
