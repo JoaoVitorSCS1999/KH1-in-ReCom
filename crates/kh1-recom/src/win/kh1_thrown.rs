@@ -150,6 +150,10 @@ pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32
     let has = |k: &str| m.consts.get(k).is_finite();
     match n {
         0 if has("fire_life") => return fire(en, class, m, yaw),
+        0 if has("ball_life") => {
+            ball_start(en, class, m);
+            return None;
+        }
         1 if has("flame_life") => {
             super::kh1_flame::start(en, class, m);
             return None;
@@ -431,6 +435,10 @@ pub(super) fn forget() {
         g.clear();
     }
     FLYING.store(false, Ordering::Relaxed);
+    if let Ok(mut g) = BALLS.lock() {
+        g.clear();
+    }
+    BALLS_ANY.store(false, Ordering::Relaxed);
 }
 
 /// Sora's live KH1 swing against the flying blades (`meets(shape)`: the swing's spheres against a
@@ -516,5 +524,392 @@ pub(super) unsafe fn swing_at_blades(meets: impl Fn(usize) -> bool) {
 /// The trace's token: the blades flying (id, frames, speed, turned back).
 pub fn trace_token() -> String {
     let Ok(g) = BLADES.try_lock() else { return String::new() };
-    g.iter().map(|b| format!("{} {}:{:.0}:{:.1}{}", if b.kind == Kind::Fire { "fire" } else { "blade" }, b.id, b.flight.time, b.flight.speed, if b.turned { ":back" } else if b.batted { ":batted" } else { "" })).collect::<Vec<_>>().join(" ")
+    let mut t: Vec<String> = g.iter().map(|b| format!("{} {}:{:.0}:{:.1}{}", if b.kind == Kind::Fire { "fire" } else { "blade" }, b.id, b.flight.time, b.flight.speed, if b.turned { ":back" } else if b.batted { ":batted" } else { "" })).collect();
+    drop(g);
+    if let Ok(g) = BALLS.try_lock() {
+        t.extend(g.iter().map(|b| format!("ball e{}:{}:{:?}:{:.0}:{:.0}{}", b.shooter, b.bullet.unwrap_or(0), b.ball.phase, b.ball.time, b.ball.bounces, if b.turned { ":back" } else if b.ball.batted { ":batted" } else { "" })));
+    }
+    t.join(" ")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// M11, the Gargoyle's ball (`ex_2220_00.bd`, `kh1_core::gargoyle::Ball`; owner 2026-11-02: "Re:CoM bullet, KH1
+// numbers").
+//
+// - **KH1** (Checked (files + decomp)): `sys 94` makes the child with 219; it waits 70 frames, then shows its model at
+//   the parent's chin point 15 up for 160 frames, eases it toward bone code 28 (the left hand) for 14, then makes its
+//   attack (row `0x3FC`: radius 30, priority 0) and flies: tossed up along the parent's facing at 10 a frame, falling
+//   0.5 a frame faster each frame; each floor contact re-aims it at its target's lock point (10..20 a frame by the
+//   distance, tilted up by the height gap); the third contact ends it; a hit ends it. Before the launch it ends when the
+//   parent no longer plays 219 (a hit's reaction). A swing that meets it sends it back (`0x748`: owned by the swinger
+//   with row `0x46C`, radius 60, aimed between the parent and the swinger's target, one more flight).
+// - **Here**: one of Re:CoM's own `CHomingBullet`s (as the Fat Bandit's fireball), made when KH1's model appears, at the
+//   chin point, its attack held off (`CCollAttack` off) until KH1's launch (on: `sites::COLL_ON_PTRS`), its life KH1's
+//   charge + ease + flight; its power Re:CoM's own Gargoyle shot's (`0x14017F0E0(enemy, 1, 1, 0)`, `0x14018E350`), its
+//   look that shot's effect set `0x14053F630` (`sites::GARGOYLE_BALL_PTRS`). Its flight-state exe ([`ball_exe`]) steps
+//   KH1's child and writes the velocity that puts it on KH1's place (kept 2 cm above the battle floor: Re:CoM's mover
+//   must not touch it, flag 0x100 would end it; Assumption ±2 cm), then Re:CoM's own step collides it and hits Sora
+//   (a hit ends it). The 70-frame wait and the parent's place come from the parent's update ([`ball_parent_step`]).
+// - Sora's Guard turns it back (decision 28: Re:CoM's homing takes it at the Gargoyle); his swing bats it (KH1's
+//   `0x748`, [`swing_at_balls`]: Guard's turn-back to the enemies' side, radius 60, KH1's re-aim and second flight).
+//
+// Per frame: one atomic load while no ball lives; one KH1 step per ball.
+
+/// At most this many balls (older ones are forgotten: Re:CoM's own step flies them).
+const MAX_BALLS: usize = 8;
+/// The ball's request (`ex_2220_00.bd` checks 219 after each yield before its launch).
+const BALL_REQUEST: u16 = kh1_core::gargoyle::req::BALL;
+/// The ball's mover radius (`0x140157DA0`'s second word: its background shape; Re:CoM's shots pass 0.1): small, so the
+/// ball can come down to 2 cm over the floor before KH1's contact without Re:CoM's mover touching it.
+const BALL_MOVER_RADIUS: f32 = 0.01;
+/// KH1 units above the battle floor the ball is kept (Re:CoM's mover radius 1 cm + 1 cm).
+const BALL_FLOOR_CLEAR: f32 = 2.0;
+/// Re:CoM's collision radius setter (`0x140172690`; `sites::FLAME_CALLEES`).
+const SET_RADIUS: u32 = 0x0017_2690;
+type RadiusFn = unsafe extern "win64" fn(usize, f32);
+
+struct BallRec {
+    /// The Gargoyle (its address and Re:CoM id).
+    en: usize,
+    shooter: u32,
+    class: &'static str,
+    ball: kh1_core::gargoyle::Ball,
+    /// Its bullet once KH1's model appears.
+    bullet: Option<u32>,
+    /// From the parent's update: it plays 219, its points (KH1 units), its facing, the battle floor; frames since.
+    parent_plays: bool,
+    hold: Vec3,
+    at: Vec3,
+    facing: Vec3,
+    floor: Option<f32>,
+    stale: u32,
+    /// The parent stepped it this frame (its bullet was just made): the exe skips one step.
+    skip: bool,
+    ap: i32,
+    attr: u32,
+    /// Its row's radius and the batted row's (KH1 units: 30, 60).
+    radius: f32,
+    bat_radius: f32,
+    /// Sora's Guard turned it back (decision 28): Re:CoM's homing flies it.
+    turned: bool,
+    /// After a bat: KH1's new target (Sora's target, or the Gargoyle).
+    bat_target: u32,
+}
+
+static BALLS: Mutex<Vec<BallRec>> = Mutex::new(Vec::new());
+static BALLS_ANY: AtomicBool = AtomicBool::new(false);
+
+/// `sys 94(actor, 0, target, 0x3FC, 0x46C)`: the Gargoyle `en` makes its ball (KH1's child: nothing for its first 70
+/// frames).
+unsafe fn ball_start(en: usize, class: &str, m: &Manifest) {
+    let c = |k: &str| m.consts.get(k);
+    let id = c("ball_recom_id") as i32;
+    let ap = func::<ApFn>(f::ATTACK_AP)(en, id, c("ball_kind") as i32, 0, std::ptr::null_mut(), 0) as i32;
+    let attr = func::<AttrFn>(f::ATTACK_ATTR)(en, id);
+    let shooter: u32 = rd(en + 0x20);
+    let class: &'static str = crate::kh1_enemy::CLASSES.iter().find(|k| k.name == class).map_or("gargoyle", |k| k.name);
+    let ball = kh1_core::gargoyle::Ball::new(kh1_core::gargoyle::BallNumbers::from(&m.consts));
+    if let Ok(mut g) = BALLS.lock() {
+        if g.len() >= MAX_BALLS {
+            g.remove(0);
+        }
+        g.push(BallRec { en, shooter, class, ball, bullet: None, parent_plays: true, hold: Vec3::ZERO, at: Vec3::ZERO, facing: Vec3::ZERO, floor: None, stale: 0, skip: false, ap, attr, radius: c("ball_radius"), bat_radius: c("ball_bat_radius"), turned: false, bat_target: 0 });
+        BALLS_ANY.store(true, Ordering::Relaxed);
+    }
+    line(|| format!("{class} e{shooter}: its ball (KH1's child: {} frames, then held {} at its chin, eased {}, flown {} frames), AP {ap} attribute {attr} (Re:CoM's Gargoyle shot, id {id})", c("ball_wait"), c("ball_charge"), c("ball_ease"), c("ball_life")));
+}
+
+/// From the Gargoyle's update each frame (`win::kh1_enemy::tick`): its balls' parent inputs (it plays 219 and lives, its
+/// chin and hand points, its facing, the battle floor), and the waiting balls' steps (no bullet yet).
+pub(super) unsafe fn ball_parent_step(en: usize, m: &Manifest, playing: Option<u16>, live: bool, yaw: f32, floor: Option<f32>, step: f32) {
+    if !BALLS_ANY.load(Ordering::Relaxed) {
+        return;
+    }
+    let Ok(mut g) = BALLS.try_lock() else { return };
+    // Balls Re:CoM has ended (a hit, a wall): forgotten (their exe no longer runs).
+    g.retain(|b| {
+        b.bullet.is_none_or(|id| {
+            let o = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(id);
+            o != 0 && rd::<usize>(o + rt::STATE_EXE) == ball_exe as *const () as usize && rd::<i32>(o + rt::LIFE) > 0
+        })
+    });
+    if g.is_empty() {
+        BALLS_ANY.store(false, Ordering::Relaxed);
+        return;
+    }
+    if !g.iter().any(|b| b.en == en) {
+        return;
+    }
+    let hold = manifest_point(en, m, "ball_hold").map(crate::units::to_kh1);
+    let at = manifest_point(en, m, "ball_at").map(crate::units::to_kh1);
+    let mut ended = Vec::new();
+    for b in g.iter_mut().filter(|b| b.en == en) {
+        b.parent_plays = live && playing == Some(BALL_REQUEST);
+        b.stale = 0;
+        if let Some(h) = hold {
+            b.hold = h;
+        }
+        if let Some(a) = at {
+            b.at = a;
+        }
+        b.facing = Vec3::from_yaw(yaw);
+        if floor.is_some() {
+            b.floor = floor;
+        }
+        if b.bullet.is_some() || b.ball.ended() {
+            continue;
+        }
+        let w = kh1_core::gargoyle::BallWorld { step, parent_plays: b.parent_plays, hold: b.hold, at: b.at, facing: b.facing, target: None, floor: b.floor };
+        match b.ball.step(&w) {
+            kh1_core::gargoyle::BallEvent::Appears => {
+                b.bullet = ball_bullet(b);
+                b.skip = true;
+                if b.bullet.is_none() {
+                    ended.push(b.shooter);
+                }
+            }
+            kh1_core::gargoyle::BallEvent::Ended => ended.push(b.shooter),
+            _ => {}
+        }
+    }
+    g.retain(|b| !(b.en == en && b.bullet.is_none() && (b.ball.ended() || ended.contains(&b.shooter))));
+    if g.is_empty() {
+        BALLS_ANY.store(false, Ordering::Relaxed);
+    }
+    drop(g);
+    for s in ended {
+        line(|| format!("ball e{s}: ends before it appears (219 {})", if playing == Some(BALL_REQUEST) { "plays" } else { "no longer plays" }));
+    }
+}
+
+/// The ball's bullet: a `CHomingBullet` as the Fat Bandit's fireball, at KH1's place, its attack held off.
+unsafe fn ball_bullet(b: &BallRec) -> Option<u32> {
+    let at = crate::units::to_recom(b.ball.pos);
+    let n = b.ball.n;
+    let mut d = Desc([0; 0x100]);
+    let dp = d.0.as_mut_ptr();
+    func::<DescInitFn>(DESC_INIT)(dp, 2, 3);
+    let w = |o: usize| dp.add(o);
+    std::ptr::write_unaligned(w(0x6C) as *mut u32, b.attr);
+    std::ptr::write_unaligned(w(0x70) as *mut i32, b.ap);
+    std::ptr::write_unaligned(w(0x60) as *mut u64, FLAGS);
+    std::ptr::write_unaligned(w(0x30) as *mut f32, 0.0);
+    let life = crate::units::frames_to_units(n.charge + n.ease + n.life + 4.0);
+    std::ptr::write_unaligned(w(0x38) as *mut i32, life);
+    std::ptr::write_unaligned(w(0x3C) as *mut i32, life);
+    std::ptr::write_unaligned(w(0x34) as *mut f32, RANGE);
+    std::ptr::write_unaligned(w(0x44) as *mut i32, 0);
+    std::ptr::write_unaligned(w(0x48) as *mut f32, GATE);
+    std::ptr::write_unaligned(w(0x4C) as *mut f32, 0.0);
+    std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], [at.x, at.y, at.z, 0.5]);
+    std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [0.0, crate::units::yaw_to_recom(b.facing.yaw()), 0.0, 0.0]);
+    if crate::sites::GARGOYLE_BALL_PTRS.iter().all(|p| rd::<usize>(base() + p.rva as usize) == base() + p.target as usize) {
+        std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), BALL_EFFECT_SET));
+    } else {
+        line(|| format!("{}: the Gargoyle's shot effect set is not where 0x14053F630 was: the ball has no look", b.class));
+    }
+    let radius = b.radius * crate::units::METRES_PER_UNIT;
+    std::ptr::write_unaligned(w(0x78) as *mut f32, radius);
+    std::ptr::write_unaligned(w(0x94) as *mut i32, FADE);
+    let factory = func::<FactoryFn>(FACTORY)();
+    if factory == 0 {
+        line(|| "no entity factory: no ball".into());
+        return None;
+    }
+    let bullet = func::<ManagerFn>(SHOT_MANAGER)(factory, dp, b.en);
+    if bullet == 0 {
+        line(|| "Re:CoM's shot manager made no ball".into());
+        return None;
+    }
+    func::<MoverFn>(SHOT_MOVER)(bullet, BALL_MOVER_RADIUS, 0.0, 0, -1);
+    let bid: u32 = rd(bullet + 0x20);
+    let bs = base();
+    let vt: usize = rd(bullet);
+    let exe: usize = rd(bullet + rt::STATE_EXE);
+    let adj: i32 = rd(bullet + rt::STATE_EXE_ADJUST);
+    if vt != va(bs, gb::HOMING_VTABLE) || exe != bs + HOMING_THUNK as usize || adj != 0 {
+        line(|| format!("ball {bid} is not a plain CHomingBullet in flight (vt {vt:#x}, exe {exe:#x}): ended"));
+        wr(bullet + rt::LIFE, 0i32);
+        return None;
+    }
+    // KH1 makes its attack only at the launch: held off until then.
+    super::magic::hold_off(bullet);
+    wr(bullet + rt::STATE_EXE, ball_exe as *const () as usize);
+    let s = b.shooter;
+    line(|| format!("ball e{s}: appears as shot {bid} at ({:.2},{:.2},{:.2}), its attack off until the launch, radius {radius:.2} m", at.x, at.y, at.z));
+    Some(bid)
+}
+
+/// The Gargoyle's own shot's effect set (`0x14018E350`'s descriptor `+0xA8`; `sites::GARGOYLE_BALL_PTRS`).
+pub const BALL_EFFECT_SET: u64 = 0x1_4053_F630;
+
+/// `CCollAttack`'s "on" (vtable +0x10, `0x14014DE90`; `sites::COLL_ON_PTRS`): the ball's attack at KH1's launch.
+unsafe fn hold_on(bullet: usize) -> bool {
+    let c: usize = rd(bullet + gb::COLL);
+    if c == 0 {
+        return false;
+    }
+    let on = &crate::sites::COLL_ON_PTRS[0];
+    let vt: usize = rd(c);
+    if rd::<usize>(vt + 0x10) != base() + on.target as usize {
+        return false;
+    }
+    func::<PlFn>(on.target)(c);
+    true
+}
+
+/// An enemy's aim point (Re:CoM's vtable `+0x50`, KH1's lock point 0) while it is there with HP left, KH1 units.
+unsafe fn enemy_aim(id: u32) -> Option<Vec3> {
+    if id == 0 {
+        return None;
+    }
+    let o = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(id);
+    if o == 0 || rd::<usize>(o) == 0 || rd::<i32>(o + crate::guard::enemy::HP) <= 0 {
+        return None;
+    }
+    let p = super::magic::aim_point(o);
+    Some(crate::units::to_kh1(Vec3::new(p[0], p[1], p[2])))
+}
+
+/// The ball's flight-state exe: KH1's child this frame ([`kh1_core::gargoyle::Ball::step`]), the velocity that puts the
+/// bullet on KH1's place (kept 2 cm over the floor) and its look angles; then Re:CoM's own step (the thunk). Once Sora's
+/// Guard turned it back, Re:CoM's homing takes it at the Gargoyle (decision 28).
+pub unsafe extern "win64" fn ball_exe(bullet: usize) {
+    use kh1_core::gargoyle::{BallEvent, BallWorld};
+    let mover: usize = rd(bullet + gb::MOVER);
+    let live = rd::<i32>(bullet + rt::HOLD) == 0 && rd::<i32>(bullet + rt::LIFE) > 0 && mover != 0;
+    let id: u32 = rd(bullet + 0x20);
+    if live {
+        let coll: usize = rd(bullet + gb::COLL);
+        let shape: usize = if coll != 0 { rd(coll + crate::guard::coll::SHAPE) } else { 0 };
+        let turned = shape != 0 && rd::<u32>(shape + crate::guard::coll::SHAPE_LIST_FLAGS) & 0xE == 0;
+        let dt: i32 = rd(bullet + 0x14);
+        let step = crate::units::step_from_dt(dt.clamp(0, 1000));
+        let mut note: Option<String> = None;
+        let mut end = false;
+        if let Ok(mut g) = BALLS.lock() {
+            if let Some(b) = g.iter_mut().find(|b| b.bullet == Some(id)) {
+                if turned && !b.ball.batted {
+                    // A Guard turn-back (decision 28): Re:CoM's homing from here. (A batted ball is on the enemies' side
+                    // by our own turn-back and flies on.)
+                    if !b.turned {
+                        b.turned = true;
+                        wr(bullet + gb::HOMING_TARGET, b.shooter as i32);
+                        note = Some(format!("ball {id}: Sora's Guard turned it back: Re:CoM's homing takes it at e{}", b.shooter));
+                    }
+                }
+                if !b.turned && step > 0.0 {
+                    if b.skip {
+                        b.skip = false;
+                    } else {
+                        b.stale += 1;
+                        if b.stale > 3 {
+                            // The parent no longer updates (removed): KH1's check of 219 fails.
+                            b.parent_plays = false;
+                        }
+                        let target = if b.ball.batted { enemy_aim(b.bat_target) } else { sora_target() };
+                        let w = BallWorld { step, parent_plays: b.parent_plays, hold: b.hold, at: b.at, facing: b.facing, target, floor: b.floor };
+                        match b.ball.step(&w) {
+                            BallEvent::Launched => {
+                                let on = hold_on(bullet);
+                                let d = b.ball.dir;
+                                note = Some(format!("ball {id}: launched along ({:.2},{:.2},{:.2}) at {} a frame, its attack {}", d.x, d.y, d.z, b.ball.speed, if on { "on" } else { "NOT on (CCollAttack's slot +0x10 is not 0x14014DE90)" }));
+                            }
+                            BallEvent::Bounced => {
+                                let (n, sp) = (b.ball.bounces, b.ball.speed);
+                                note = Some(format!("ball {id}: floor contact {n}: re-aimed at {:?} at {sp:.1} a frame", target.map(|t| (t.x as i32, t.y as i32, t.z as i32))));
+                            }
+                            BallEvent::Ended => {
+                                end = true;
+                                note = Some(format!("ball {id}: ends (KH1: {})", if b.ball.flying() || b.ball.time > 0.0 { "its third contact or its life" } else { "219 no longer plays" }));
+                            }
+                            _ => {}
+                        }
+                        if !end {
+                            // KH1's place, kept over the floor; the velocity that takes the bullet there this frame.
+                            let mut p = b.ball.pos;
+                            if let Some(f) = b.floor {
+                                p.y = p.y.min(f - BALL_FLOOR_CLEAR);
+                            }
+                            let to = crate::units::to_recom(p);
+                            let now = rd_vec(mover + rt::POSITION);
+                            let v = (to - now) * (1.0 / step);
+                            wr(mover + gb::VELOCITY, [v.x, v.y, v.z, 0.0f32]);
+                            if v.length() > 1e-4 {
+                                if let Some((pt, y)) = crate::guard::aim_angles([v.x, v.y, v.z]) {
+                                    wr(mover + gb::PITCH, pt);
+                                    wr(mover + gb::YAW, y);
+                                }
+                            }
+                            wr(bullet + gb::HOMING_TARGET, 0i32);
+                        }
+                    }
+                }
+            }
+            if end {
+                g.retain(|b| b.bullet != Some(id));
+                if g.is_empty() {
+                    BALLS_ANY.store(false, Ordering::Relaxed);
+                }
+            }
+        }
+        if end {
+            wr(bullet + rt::LIFE, 0i32);
+        }
+        if let Some(n) = note {
+            line(|| n);
+        }
+    }
+    func::<PlFn>(HOMING_THUNK)(bullet)
+}
+
+/// Sora's live KH1 swing against the flying balls (`meets(shape)`, as [`swing_at_blades`]): a ball it meets is sent back
+/// as KH1's `0x748` does (its row priority 0: Sora's swing gets nothing): Guard's turn-back to the enemies' side, its
+/// radius KH1's batted row's (60), aimed between the Gargoyle and Sora's target (or the Gargoyle), tossed again for
+/// one more flight.
+pub(super) unsafe fn swing_at_balls(meets: impl Fn(usize) -> bool) {
+    if !BALLS_ANY.load(Ordering::Relaxed) {
+        return;
+    }
+    let Ok(mut g) = BALLS.try_lock() else { return };
+    let b0 = base();
+    for b in g.iter_mut().filter(|b| !b.turned && !b.ball.batted && b.ball.flying()) {
+        let Some(bid) = b.bullet else { continue };
+        let bullet = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(bid);
+        if bullet == 0 || rd::<usize>(bullet) != va(b0, gb::HOMING_VTABLE) || rd::<usize>(bullet + rt::STATE_EXE) != ball_exe as *const () as usize || rd::<i32>(bullet + rt::LIFE) <= 0 {
+            continue;
+        }
+        let coll: usize = rd(bullet + gb::COLL);
+        let shape: usize = if coll != 0 { rd(coll + crate::guard::coll::SHAPE) } else { 0 };
+        if shape == 0 || !meets(shape) {
+            continue;
+        }
+        if !super::guard::send_back(bullet) {
+            continue;
+        }
+        func::<RadiusFn>(SET_RADIUS)(coll, b.bat_radius * crate::units::METRES_PER_UNIT);
+        let mover: usize = rd(bullet + gb::MOVER);
+        if mover != 0 {
+            let p = crate::units::to_kh1(rd_vec(mover + rt::POSITION));
+            if p.y < b.ball.pos.y {
+                // Its KH1 place (it may sit 2 cm under the bullet's).
+                b.ball.pos = p;
+            }
+        }
+        let parent = enemy_aim(b.shooter);
+        let pl: usize = rd(va(b0, crate::sites::data::MAIN_PLAYER));
+        let sora_t: u32 = if pl != 0 { rd(pl + 0x84C) } else { 0 };
+        let st = enemy_aim(sora_t);
+        b.bat_target = if st.is_some() { sora_t } else { b.shooter };
+        let back = -b.ball.dir;
+        b.ball.bat(parent, st, back);
+        let life = crate::units::frames_to_units(b.ball.n.life + 2.0);
+        wr(bullet + rt::LIFE, life);
+        if mover != 0 {
+            let p = rd_vec(mover + rt::POSITION);
+            super::attack::spark_at([p.x, p.y, p.z, 1.0]);
+        }
+        let (d, t) = (b.ball.dir, b.bat_target);
+        line(|| format!("ball {bid}: Sora's swing sends it back along ({:.2},{:.2},{:.2}) at e{t} (KH1's 0x748), on the enemies' side, radius {:.2} m", d.x, d.y, d.z, b.bat_radius * 0.01));
+    }
 }

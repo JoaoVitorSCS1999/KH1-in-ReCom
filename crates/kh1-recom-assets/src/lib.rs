@@ -70,6 +70,7 @@ pub mod searchghost;
 pub mod largebody;
 pub mod wightknight;
 pub mod fatbandit;
+pub mod gargoyle;
 pub mod stats;
 pub mod texture;
 pub mod uibin;

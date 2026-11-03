@@ -207,7 +207,9 @@ pub fn check_requests(script: &[u8], name: &[u8], table: &[(u32, usize)]) -> Res
     for &(want, o) in table {
         let w = script.get(o..o + 6).ok_or_else(|| crate::Error::Format(format!("{sname}: short at {o:#x}")))?;
         let got = u32::from_le_bytes(w[2..6].try_into().unwrap());
-        if w[0] & 0xBF != 0x02 || got != want {
+        // Any push mode (bits 6..7 don't change the immediate, `0x1402CC620` op 2 sub 0; the Gargoyle's ball pushes its
+        // bone codes with mode 2, M11).
+        if w[0] & 0x3F != 0x02 || got != want {
             return bad(format!("{sname} {o:#x}: request {got:#x}, not {want:#x}: not the script this step knows"));
         }
     }
@@ -1332,6 +1334,8 @@ pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usiz
     // The Fat Bandit's fireball `ex_2060_00.bd` and flame `ex_2060_01.bd` (`crate::fatbandit`, [`T_POINTS`]).
     ("fatbandit", 0, b"ex_2060_00.bd", crate::fatbandit::FIRE_CONSTS, crate::fatbandit::FIRE_REQUESTS),
     ("fatbandit", 1, b"ex_2060_01.bd", crate::fatbandit::FLAME_CONSTS, crate::fatbandit::FLAME_REQUESTS),
+    // The Gargoyle's ball `ex_2220_00.bd` (`crate::gargoyle`, [`T_POINTS`], [`SHOTS`]).
+    ("gargoyle", 0, b"ex_2220_00.bd", crate::gargoyle::BALL_CONSTS, crate::gargoyle::BALL_REQUESTS),
 ];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
@@ -1365,6 +1369,10 @@ pub const T_POINTS: &[(&str, &str, usize, TFrom)] = &[
     ("fatbandit", "eye", 0, TFrom::Value(0.5)),
     ("fatbandit", "flame0", 0, TFrom::Const("flame_t0")),
     ("fatbandit", "flame1", 0, TFrom::Const("flame_t1")),
+    // The Gargoyle's ball (`ex_2220_00.bd`): held at `sys 19(parent, 0x1027, 0)` (`0xFA`: bit 12, bone 39 itself; t 0:
+    // its parent's place) 15 up, then eased toward `sys 19(parent, 28, 1)` (`0x1A6` / `0x1AC`: bone code 28's bone).
+    ("gargoyle", "ball_hold", 0x1027, TFrom::Value(0.0)),
+    ("gargoyle", "ball_at", 28, TFrom::Const("ball_ease_t")),
 ];
 
 fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[RequestClip], consts: &[(String, f32)]) -> Result<Vec<(String, f32)>> {
@@ -1374,8 +1382,13 @@ fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[
             TFrom::Value(v) => v,
             TFrom::Const(c) => consts.iter().find(|x| x.0 == c).map(|x| x.1).ok_or_else(|| crate::Error::Format(format!("{name}: {point}'s t {c} not read")))?,
         };
-        let codes = bone_codes(mdls)?;
-        let k = *codes.get(code).filter(|b| **b >= 0).ok_or_else(|| crate::Error::Format(format!("{name}: bone code {code} names no bone")))? as usize;
+        // A code with bit 12 names a bone directly (`0x14029FAB0`: `code & 0xFFF`; Checked (decomp)).
+        let k = if code & 0x1000 != 0 {
+            code & 0xFFF
+        } else {
+            let codes = bone_codes(mdls)?;
+            *codes.get(code).filter(|b| **b >= 0).ok_or_else(|| crate::Error::Format(format!("{name}: bone code {code} names no bone")))? as usize
+        };
         let rig = conv.rig();
         let parent = rig.parent(k).ok_or_else(|| crate::Error::Format(format!("{name}: KH1 bone {k} has no parent")))?;
         let hand = conv.map().iter().position(|m| *m == Some(parent)).ok_or_else(|| crate::Error::Format(format!("{name}: {point}: KH1 bone {parent} (code {code}'s parent) has no Re:CoM bone")))?;
@@ -1405,7 +1418,12 @@ fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[
 /// every row listed must be the same apart from its place. The Fat Bandit's `0x16FC` passes `0x1CC`, its volley `0x23C`
 /// (Checked (files): the two rows' bytes equal); Re:CoM's own fireball takes its power with
 /// `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018DF20`; Checked (decomp)).
-pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1)];
+///
+/// The Gargoyle's ball: its row `0x3FC` (`ex_2220.bd` `0x1B24` passes it), Re:CoM's own Gargoyle shot's power
+/// `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018E350`; Checked (decomp)); the row the ball takes when a swing
+/// sends it back (`0x46C`, the child's `0x748`: owned by the swinger) gives `ball_bat_radius` (its id and kind unused:
+/// the batted ball keeps its power, Guard's turn-back rule).
+pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1), ("gargoyle", "ball", &[0x3FC], 1, 1), ("gargoyle", "ball_bat", &[0x46C], 1, 1)];
 
 fn shot_consts(name: &str, script: &[u8]) -> Result<Vec<(String, f32)>> {
     let mut out = Vec::new();
@@ -1480,7 +1498,7 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC];
 
 #[cfg(test)]
 mod clash_tests {
@@ -1559,8 +1577,8 @@ mod clash_tests {
     }
 
     /// Fix (owner, 2026-11-02, "Clash choices": block only): the attack rows KH1 never tests against a hurt
-    /// body (clash types 1, 2, 4, `0x1402B3BE0`) are, of every ported class, only the Soldier's spin-kick chest
-    /// and the Powerwild's flurry body. The host reads their type from the manifest (`kh1_enemy::Manifest::
+    /// body (clash types 1, 2, 4, `0x1402B3BE0`) are, of every ported class, only the Soldier's spin-kick chest,
+    /// the Powerwild's flurry body and the Gargoyle's two body rows (M11). The host reads their type from the manifest (`kh1_enemy::Manifest::
     /// never_hurts`), so the manifests the step already wrote serve.
     #[test]
     fn only_two_attack_rows_never_hurt() {
@@ -1582,7 +1600,8 @@ mod clash_tests {
             eprintln!("never-hurting rows test skipped: KH1_M11_DIR / KH1_TEST_DATA not set");
             return;
         }
-        let want = [("soldier", "spin kick", 1, 0x2AC, 1, 100), ("powerwild", "flurry", 2, 0x1CC, 2, 10)];
+        // M11, the Gargoyle: its swipe's and its swipe end's body rows (type 2, priority 30, front half).
+        let want = [("soldier", "spin kick", 1, 0x2AC, 1, 100), ("powerwild", "flurry", 2, 0x1CC, 2, 10), ("gargoyle", "swipe", 2, 0x2AC, 2, 30), ("gargoyle", "swipe end", 1, 0x38C, 2, 30)];
         for w in want {
             if seen == SPECS.len() || found.iter().any(|f| f.0 == w.0) {
                 assert!(found.contains(&w), "{w:?} not among {found:?}");

@@ -1607,7 +1607,7 @@ bodies covers their bodies; each is a new script (1170–1710 listing lines) to 
 |---|---|---|---|---|
 | Search Ghost (**built**) | `ex_2230.bd` (`0x5DC`) | `CEnemySearchghost` `0x1401923F0` / `0x1401891CF` **0xCE0** / `0x14054C408` | 2 (`l_fing3b`, ids 0 / 1) | its child is the cone (no bullet), the drain's orb is an effect, `sys1.3` removes it: § The Search Ghost |
 | Air Pirate (**built**) | `ex_2210.bd` (`0x228`) | `CEnemyAirpirate` `0x14018A0B0` / `0x14018931F` 0xCD0 / `0x1405309E8` | 2 (`r_hand`, ids 0 / 1) | `sys 118` (the stuck tests: `+0x10 − +0x490`), `sys1.0` (a no-op): § The Air Pirate |
-| Gargoyle | `ex_2220.bd` (`0x538`) | `CEnemyGargoyle` `0x14018E150` / `0x1401891A5` 0xCD0 / `0x14053F198` | 2 (both wings, id 0 only) | a child object (`sys 94` at `0x1B24` with rows `0x3FC` / `0x46C`, request 219): on Re:CoM's bullets; one Re:CoM power for all its attacks |
+| Gargoyle (**built**) | `ex_2220.bd` (`0x538`) | `CEnemyGargoyle` `0x14018E150` / `0x1401891A5` 0xCD0 / `0x14053F198` | 2 (both wings, id 0) | its ball (`sys 94` at `0x1B24` with rows `0x3FC` / `0x46C`, request 219) on Re:CoM's bullets; Re:CoM's shot (state 3) is id 1: § The Gargoyle |
 | Darkball (**built**) | `ex_2280.bd` (`0x338`) | `CEnemyDarkball` `0x14018D5D0` / `0x140189349` 0xCD0 / `0x14053B7A8` | 2 (`ex_2280_sk`, a whole-clip window and a 1.3 m one) | `sys 86` (the warp), `sys 74` (effects), `sys1.0` / `sys1.3`: § The Darkball |
 | Wyvern (**built**) | `ex_2320.bd` (`0x378`) | `CEnemyWyvern` `0x140195ED0` / `0x140189373` **0xCF0** / `0x140555DC8` | 3 (header to `0x10C`) | the turn rate (`Body::turn`), `sys 42` (KH1's element reactions: left out), the idle from frame 16 (`Cmd::MotionAt`, not `enemy::STARTS`): § The Wyvern |
 
@@ -3159,6 +3159,207 @@ fireball's path and the flame's reach to compare.
 5. **The stagger's EXP bonus.** KH1 gives max(EXP / 5, 1) on its own EXP; built on Re:CoM's EXP (as the Search Ghost's
    reward). (a) Keep; (b) leave it out.
 
+### The Gargoyle (built)
+
+Status: built on branch `gargoyle-wip`; tests and the Windows build pass; **not seen in game**; no KH1 trace of the
+Gargoyle yet. This port gives Re:CoM's `CEnemyGargoyle` KH1's AI, attacks, reactions and motions, with Re:CoM's stats;
+its ball is one of Re:CoM's own bullets moved by KH1's numbers (owner 2026-11-02: "Re:CoM bullet, KH1 numbers").
+
+#### KH1's side. Checked (files: `ex_2220.bd` disassembled, code from `0x538`, folded and raw; its child `ex_2220_00.bd`, code from `0x18`; decomp: the syscalls named)
+
+The script (0x2A00 bytes) keeps the actor at `wp+0`, Sora at `wp+4`, the state object at `wp+0x20`, the search object at
+`wp+0x30`. **Every motion it plays is a plain request** (no action bit 24): it never pauses for its own motions, only for
+KH1's reactions. Its three attacks are plain requests made with rows (KH1's mode 2), steered while they play.
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x2706` | init `0x279C` (records LV1 `0x14` / LV2 `0x80`, the hit handler `0x2896`, `wp+0x5C` = 1 only in KH1 world 10 room 9 area 1: the ball off there; no Re:CoM battle is that room); flight with no velocity (`sys 135`); a yield; Sora as its target at once (`0xA14`); the appearance as its behaviour; then each frame a state request restarts the behaviour (1 engaged `0x5E0`, 2 hit `0x584`). No `sys 125`: KH1's default turn rate π/16 a frame |
+| appearance | `0xA30` | spawn type 5 (a perched KH1 Gargoyle: 210, then 211 / 213 when Sora comes within 6 m): not ported; any other spawn (`0xC5C`): effect 11, the 30-frame fade-in, 205 (the idle queued) rising 1 a frame for its 50 frames facing Sora; spawn type 0: none |
+| engaged | `0x5E0` | the roar once (`0x1E48`: 213, 78 frames); the first round (< 250: 50 % the dive else the swipe; farther: 30 % the approach, > 60 % the swoop, else the ball); then each round close (< 250) `0x892` or far `0x7E6`; the leash checks (not ported) and the search (Sora) |
+| close | `0x892` | the strafe, the roar, 20 % the dive else the swipe; then 70 % (still close) the strafe, 50 % another strafe, the roar and the swipe; the back-off |
+| far | `0x7E6` | 70 % the ball; then 70 % the swoop, else the approach (mode 1) |
+| hit state | `0x584` → `0x9A2` | roared; within 400: 60 % the swipe, 20 % the dive (20 % neither), then the back-off; farther the swoop; engaged |
+| strafe | `0x13E2` | the way to Sora turned −90° (202) or +90° (217, one draw), 8 frames, then for len − 2 frames circling 4° a frame at 16 a frame facing Sora, its height kept 50..80 above him (±0.1) |
+| roar | `0x1E48` | 213 (the idle queued), len − 2 frames facing Sora |
+| dive | `0x1B98` | effect 6; 203 with its wing rows `0xEC` / `0x15C` (the idle queued); len − 2 frames holding 50..80 above Sora (`0x1FAE(0)`) |
+| swipe | `0x1C86` | 212 with rows `0x1CC` / `0x23C` (hands) and `0x2AC` (body), 218 queued; len − 2 frames; then 218 with `0x31C` (foot) and `0x38C` (body), the idle queued, len − 8 frames; holding 50..80 above Sora |
+| hold | `0x1FAE(mode)` | Sora less than 50 (180) below: up (0, −0.5, 0); more than 80 (210): down; in between the direction stays; speed 1 |
+| ball | `0x1AF0` | its child (`sys 94(actor, 0, target, 0x3FC, 0x46C)`), 219 (the idle queued), len − 2 frames holding 180..210 above Sora (`0x1FAE(1)`) |
+| approach | `0x1786(mode)` | 200, 8 frames, then up to 300 frames along its facing (turning to Sora), the mode's speed and height window; mode 1 (4 a frame, 50..80, ±0.5): within 300 the swipe; modes 2 / 3 (10, −20..20, ±1): done within 400 / 50 at the height window; stuck (moved < speed × 0.05): done |
+| swoop | `0xDAA` | near (< 300): 50 % the hover else the back-off; then the vanish (204, or 206 beyond 700; unhittable and fading out over 20 frames from 20 before its end + 6), the unseen approach (mode 3, or 2 far), the reappearance (205 rising 2 a frame facing away, turning to Sora after 40 frames; or 207 facing him; fading in over 20), hittable again halfway; 90 % the dive, else the swipe |
+| hover | `0x15BC` | within 400: 201, 12 frames, then up to 300 frames flying away from Sora at 4 facing him, 180..210 above him, until 600 away or stuck |
+| back-off | `0x11BE` | 208 (root motion): from about its middle unhittable, fading out over 30; then 209: from about its middle fading in over 30, hittable |
+| hit handler | `0x2896` | its effect removed, its model shown at once (`0x25E8(actor, 0)`); a clash, a repel or a living damaging hit: the hit state; the killing hit: kind 3 → 4, its death `0x29B4`; attributes 8 / 10: the hit state, other attribute hits nothing (no attribute carried here) |
+
+KH1's reactions play for every hit (the handler zeroes no kind): its model has the flinch (72..75), the knock-back
+(76 / 77) and the air knock-back (80 / 81); as a flier (movement state 4) the shared engine takes the ground forms, kind 5
+as 4.
+
+Its attack rows (`0x70` bytes; Checked (files)):
+
+| Row | Made with | Bone code, radius, HIT slot | Type / priority / recoil | Window | What |
+|---|---|---|---|---|---|
+| `0xEC` / `0x15C` | 203 | 48 / 49 (`l_wep0` / `r_wep0`), 50; 0 | 0 / 100 / 110 | [32, 38) | the dive's wings (no background test: `+0x38` bit 16) |
+| `0x1CC` / `0x23C` | 212 | 29 / 28 (hands), 50; 0 / 1 | 0 / 30 / 215 | [60, 70) | the swipe's hands |
+| `0x2AC` | 212 | 8 (`chest1`), 50; 2 | **2** / 30 / 215, cos 0 | [60, 80) | its body: only meets swings (§ Rows that only clash) |
+| `0x31C` | 218 | 41 (`r_foot`), 50; 0 | 0 / 30 / 216 | [40, 54) | the swipe end's foot |
+| `0x38C` | 218 | 8 (`chest1`), 50; 1 | **2** / 30 / 216, cos 0 | [36, 54) | its body |
+| `0x3FC` | the ball | none, 30 | 0 / 0 / 110 | (the child's) | the ball (background test on) |
+| `0x46C` | a batted ball | none, 60 | 5 / 1 / 110 | | the ball sent back by a swing, owned by the swinger |
+
+Against the Kingdom Key's 30 (§ Attack meets attack): the dive's wings (100) give Sora the strong recoil and go on; the
+swipes' hands / foot (30) and bodies: both recoil (Sora kind 6, it 215 / 216); the ball (priority 0) gives Sora nothing.
+
+**The ball** `ex_2220_00.bd` (entry `0xB22`: `0x58A(…, turn 1, speed 10)`, `0x18(…, model 7, life 600, fade 20)`):
+70 frames with nothing; its model 7 at `sys 19(parent, 0x1027, 0)` (bit 12: bone 39 itself, t 0: its parent's place;
+Re:CoM's `chin`) 15 up, growing 0.005 a frame, for 160 frames; 14 frames easing 40 % a frame toward `sys 19(parent, 28,
+1)` (Re:CoM's `l_hand`, 6.7 cm out); each of those frames it ends if the parent no longer plays 219 (a reaction cut it);
+then (frame 244 of 219's 328) its attack (row `0x3FC`, flag 128) and `0x2BA`: along the parent's facing with y = −0.8,
+normalised, at 10 a frame, the height falling 0.5 a frame faster each frame (`sp+0x3C`); each frame after a floor contact
+(KH1's background test from its last place to its new one, `0x1402B3A00`: surface type 0 → `+4 & 0x100`) it is re-aimed
+at the target's lock point: speed 10 + 10 × min(distance, 1200) / 1200, tilt −0.4 − 1.6 × min(height gap, 500) / 500,
+the fall back to 0; the third contact ends it (effect 9); a hit ends it; its 600-frame life ends it (fading its last 20).
+A swing that meets it (`+4 & 0x30`; its row's priority 0: KH1's projectile clash turns it to the swinger) runs `0x748`:
+a new attack with row `0x46C` owned by the swinger, aimed at the normalised sum of the ways to the Gargoyle and to the
+swinger's target (or at the Gargoyle), then `0x2BA` once more (tossed again, its life and count anew, its speed kept).
+**It does not home**; it bounces toward its target. Checked (files + decomp).
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyGargoyle` (vtable `0x14053F198`, 139 slots, RTTI COL at −8), ctor `0x14018E150` (`40 53 48 83 EC 20`:
+`CHeartless`'s base ctor, then `+0x154 |= 0x80`, `+0x260 |= 0x100`: gravity off; its only reference the factory's call at
+`0x1401891BE`; no branch into the moved bytes, no pointer to them: exe scan, 2026-11-02), allocation `0x1401891A5`
+`mov ecx, 0xCD0` → 0xCF0. Its own states 1 (`0x14018E2C0` with `e013_001` / `e013_002`, step → `0x140197450`, end →
+`0x1401979C0`), 2 (its wing strike `e013_050`, `0x14018E220` / `0x14018E310`), 3 (its shot `e013_051`, `0x14018E270` /
+`0x14018E350`: at clip time 3150 a `CBullet` from `chin`, `0x14017F0E0(enemy, 1, 1, 0)`'s AP, `0x14017F050(enemy, 1)`'s
+attribute, 0.25 m a frame homing 2.5° a frame for 1500 ticks, range 400 m, radius 0.25, flags `0x8800`, effect set
+`0x14053F630` (slots 1..3 `"_ex_2220"` 8 / 9 / 7)); 0 / 11 / 12 / 30 `CBattleEnemy`'s; think `0x140196EC0`. `EN0013.ASD`:
+2 records (id 0 on `e013_050`: `l_wing2c` / `r_wing2c`, 0.35 m, [25, 40)); no record for id 1 (the shot is code).
+`EN0013.ANN`: 75 slots. Its skeleton names bone 1 `ex_2220_sk_2` (the asset step's converter now takes a `_sk_N` name; the
+map is by rest pose).
+
+Our copy: states 0, 1, 2 (all three attacks), 11, 12, 30, the think (21 vtable slots pointer-checked before the copy,
+`sites::GARGOYLE_PTRS`). State 3 is never entered. The attack-end cooldown (0.83.0) is keyed to Re:CoM's own vtable: KH1's
+Gargoyle never gets it; `enemy_ai = recom` leaves Re:CoM's Gargoyle as Re:CoM has it.
+
+**Power mapping** (decision M10, "the Re:CoM attack of the same kind"): the dive, the swipe and the swipe end (wings,
+hands, foot) → Re:CoM's wing strike, id 0 (its only body attack); the ball → Re:CoM's shot, id 1 kind 1
+(`0x14017F0E0(enemy, 1, 1, 0)`, as its state 3 asks). A batted ball keeps that power (Guard's turn-back rule; KH1's
+`0x46C` power 10 isn't carried, as every enemy's KH1 power).
+
+#### Its ball (a Re:CoM bullet moved by KH1's numbers)
+
+- `kh1_core::gargoyle::Ball` is the child script as a pure step (its wait, hold, ease, launch, flight, contacts, the
+  bat); tests check its frames (appears at 70, launched at 244, two bounces then the end, 600-frame life, a parent that
+  stops 219 ends it before the launch).
+- `win::kh1_thrown` (`ball_start`, `ball_parent_step`, `ball_exe`, `swing_at_balls`): `sys 94` records the ball; the
+  Gargoyle's update steps its 70-frame wait and passes its 219 / alive state, its `chin` and `l_hand` points (the
+  manifest's `ball_hold` / `ball_at`), its facing and the battle floor; at KH1's model frame one of Re:CoM's own
+  `CHomingBullet`s is made there (as the Fat Bandit's fireball: descriptor type 2, flags `0x100 | 4`), **its attack held
+  off** (`CCollAttack` off) until KH1's launch, then on (`0x14014DE90`, vtable-checked: `sites::COLL_ON_PTRS`); its life
+  KH1's charge + ease + 600 frames; its look Re:CoM's own Gargoyle shot's effect set (`sites::GARGOYLE_BALL_PTRS`); its
+  radius KH1's 30 cm. Its flight-state exe steps KH1's child and writes the velocity that puts the bullet on KH1's place,
+  then Re:CoM's own step moves it, collides it, hits Sora (a hit ends it).
+- **The floor**: KH1's contact is its background test; here the battle floor's height (the fliers' floor, Sora's last
+  standing height; Assumption: flat battle floors, as every flier). The bullet is kept 2 cm over the floor and its mover's
+  background radius is 1 cm (Re:CoM's shots pass 0.1 m), so Re:CoM's own mover never touches the floor (with flag 0x100
+  a touch would end it): KH1 lets the ball dip under the floor by up to a frame's fall before it bounces (Assumption: ≤ a
+  frame, unseen). A Re:CoM wall ends it (Re:CoM's rule; KH1 bounces off walls too: owner question 4).
+- **Sora's Guard** turns it back (decision 28: Re:CoM's homing takes it at the Gargoyle; owner question 2).
+- **Sora's swing sends it back** (KH1's `0x748`): in the swing's pair test, Guard's turn-back (`guard::send_back`: it then
+  hurts enemies), its radius KH1's 60 cm (Re:CoM's radius setter `0x140172690`), aimed between the Gargoyle and Sora's
+  target (Re:CoM's `player+0x84C` while it lives) or at the Gargoyle, tossed again, bouncing toward that target; Re:CoM's
+  guard spark there. Once only.
+- Per frame: one atomic load while no ball lives; one KH1 step per ball; a bone read per Gargoyle with a ball.
+
+#### What the asset step writes
+
+`ENEMY/0013/EN0013.ANN` (Re:CoM's 75 slots byte-identical; KH1's clips at 100 + entry; 200 and the flinches play Re:CoM's
+exact bakes), `EN0013.ASD` (Re:CoM's 2 records kept + 7: the dive's two wings, the swipe's two hands and body, the swipe
+end's foot and body, all id 0), `EN0013.SES` (Re:CoM's entries kept; the new attack clips take the wing strike's sounds at
+their hit windows: Assumption), `kh1-gargoyle.json` (`kh1-enemy 1`: 82 numbers from `ex_2220.bd`, 20 from the ball, 38 +
+9 request words checked, the ball's two points, its Re:CoM power and radii, the three attacks with their rows' clash
+numbers, 6 parts). Test `gargoyle::tests::builds_from_the_players_files`. Framework changes (other enemies' outputs
+unchanged, their tests pass): `T_POINTS` takes a code with bit 12 (a bone itself), request pushes in any mode, the
+converter's `_sk_N` name. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0013/EN0013.ANN, method: copy, source: [{name: ENEMY/0013/EN0013.ANN}]}
+- {name: ENEMY/0013/EN0013.ASD, method: copy, source: [{name: ENEMY/0013/EN0013.ASD}]}
+- {name: ENEMY/0013/EN0013.SES, method: copy, source: [{name: ENEMY/0013/EN0013.SES}]}
+- {name: kh1-gargoyle.json, method: copy, source: [{name: kh1-gargoyle.json}]}
+```
+
+The step prints `gargoyle (M11): …`; the log shows `gargoyle: KH1's gargoyle (M11) …` at start, `battle N: Gargoyle …
+gets KH1's AI` in a Gargoyle battle, and `thrown: gargoyle eNNN: its ball …`, `ball …: appears`, `launched`, `floor contact
+N`, `ends`, `Sora's swing sends it back` per ball.
+
+#### Checked / Assumption
+
+- **Checked (files):** every number at its push (the asset test reads them from the player's scripts), 47 request words,
+  the rows (types, priorities, cones, recoils, radii, slots, the background bit), the hit windows, the hurt parts, the clip
+  lengths (205 50, 212 84, 218 114, 219 328; 219 doesn't loop), the two ball points the same in two poses, Re:CoM's
+  records and clips.
+- **Checked (decomp):** the VM ops; `sys 94` → `0x14028F0A0` / `0x14028F5E0` (the child's block: parent, target, rows);
+  the attack object's flags (`0x1402B2DC0`: a free-standing row's `+0x30 & 0x400`, `+0x38` bit 16 → no background test;
+  `0x1402B47A0` clears `+4` each pass; `0x1402B3A00`: surface type 0 → `0x100`, 5 → 8, else 2; `0x140191D70`); `sys 19`'s
+  bit 12; Re:CoM's state 3 shot (`0x14018E350`), the homing step (`0x1401575D0`), the bullet step's contact path
+  (`0x140156E20`: flag `0x100` ends a bullet whose mover touches the floor or a wall), `CCollAttack` off / on.
+- **Checked (exe):** the class, its 139 slots, the ctor and its only call, the factory size, the vtable slots, the effect
+  set's name pointer, the collision on slot; 25 sites (pefile, 2026-11-02).
+- **Assumptions:** the generic appearance (205) for every battle spawn (KH1's perched spawn type 5 not used); `sys 10`'s
+  turn sign (as every port); a fade's end hides the model and a fade-in shows it at once (KH1 ramps the alpha; owner
+  question 3); the ball's first frame the same frame as the throw (±1); its floor a flat battle floor and its bounce 2 cm
+  higher than KH1's crossing; KH1's floor test one-sided (a ball rising through the floor after a bounce meets nothing);
+  the hand point for `sys 19(parent, 28, 1)` from the idle's pose; Re:CoM's sounds on the new clips; seeds per enemy.
+- **Not ported:** the leash, the perched spawn, KH1's room rules (world 10 rooms 7 / 9), the search object, effects 6 / 9
+  / 11 and `sys 21` (M13), the ball's growth from 0.005 (its model's scale: M13), the alpha ramps, the appearance's flag 0x80
+  and fade-in, hit attributes (8 / 10), the death routine (Re:CoM's defeat, prizes, EXP).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Gargoyle battle (Halloween Town); run the asset step first)
+
+1. Each Gargoyle rises into view (about 1 s), roars, and starts its first move.
+2. Close (under 2.5 m): it circles you quickly to one side, roars, then dives (a short wing strike) or swipes twice (hands,
+   then a kick); sometimes it circles again and swipes again; then it flies back and fades out for a moment (it can't be
+   hit while faded) and comes back.
+3. Far: often it throws a dark ball: it holds a ball at its chin for about 2½ s (Re:CoM's Gargoyle shot effect), then
+   tosses it up toward you; the ball falls, bounces toward you twice and ends on its third touch of the floor. Side-step
+   it; it never steers in the air.
+4. Swing at a flying ball: it bounces back toward your target (or the Gargoyle) and hurts enemies. Guard it: it flies
+   back at the Gargoyle (Re:CoM's way).
+5. Hit it while it holds the ball: the ball disappears (KH1: the throw was cut).
+6. The swoop: it fades out, flies unseen to you, reappears rising above you and then dives or swipes. It can't be hit while
+   unseen; it can be hit again about halfway through its reappearance.
+7. Swing into its dive: Sora bounces hard, the dive goes on. Swing into its swipe: both bounce. Its body during a swipe
+   never hurts you.
+8. Kill one: KH1's reaction motion for the killing hit (a flinch becomes a knock-back), Re:CoM's prizes and EXP.
+9. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Gargoyles (its wing strike and homing shot).
+
+Please send `kh1-recom.log` (`gargoyle:`, `thrown:` lines) and an F9 trace (its `ball` tokens).
+
+#### KH1 trace (what to record in KH1)
+
+Halloween Town (the Gargoyles of the Guillotine Square or the graveyard): stand far (8 m) 15 s and side-step two balls; let a
+ball bounce three times; swing at a flying ball; Guard a ball; hit one while it holds the ball; stand close (2 m) 15 s;
+Guard its dive and its swipe; swing into its dive; hit it during its swoop's reappearance; kill one. The trace's enemy rows
+give the rounds' timings, the ball's path and bounces and the fade windows to compare.
+
+#### Gargoyle owner questions
+
+1. **The ball while it charges.** KH1 shows its ball model at the Gargoyle's chin growing from nothing (0.005 a frame) for
+   160 frames before the throw. Built: Re:CoM's own Gargoyle shot effect at full size there for those 160 frames (its attack
+   off). (a) Keep until the effects milestone (M13); (b) show nothing until the launch (frame 244); (c) research a Re:CoM
+   effect that can grow.
+2. **Guarding the ball.** In KH1 a Guard sends the ball back as a swing does (`0x748`: toward the Gargoyle and your target,
+   bouncing, hurting enemies). Built: decision 28 (Re:CoM's homing takes it at the Gargoyle), as the Fat Bandit's fireball.
+   (a) Keep decision 28; (b) KH1's send-back for Guard too.
+3. **The fades.** KH1 fades the Gargoyle out (20 / 30 frames) for the swoop and the back-off and fades it back in. Built: it
+   is hidden when the fade-out would reach 0 and shown as the fade-in starts (a hard cut; when it can't be hit is KH1's).
+   (a) Keep until M13; (b) research a model alpha in Re:CoM (none found for the Shadow's rise, M10).
+4. **Walls.** KH1's ball bounces off any ordinary surface (walls too, toward its target). Built: it bounces off the battle
+   floor only; a Re:CoM wall ends it (Re:CoM's bullet rule). (a) Keep (Re:CoM's battle arenas are open); (b) research
+   Re:CoM's mover contact to bounce off walls as KH1.
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -3185,7 +3386,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Pirate (built) | `xa_ex_2100` (ex_2100.bd) | `CEnemyPirate` 21 | `0x140546458` | `0x140190f30` / `0x1401892f5` 0xcd0 | 1,2,3 | 208,210,214,216,217,218,235,236 | FaLl | — |
 | Air Pirate (built) | `xa_ex_2210` (ex_2210.bd) | `CEnemyAirpirate` 22 | `0x1405309e8` | `0x14018a0b0` / `0x14018931f` 0xcd0 | 1,2,3, think `0x14018a190` | 200,212 | FKaA | — |
 | Wight Knight (built) | `xa_ex_2200` (ex_2200.bd) | `CEnemyWightnight` 12 | `0x140553748` | `0x140194ed0` / `0x14018917b` 0xcd0 | 1,2,3 | 200,201,202,211,216 | FaALl | — |
-| Gargoyle | `xa_ex_2220` (ex_2220.bd) | `CEnemyGargoyle` 13 | `0x14053f198` | `0x14018e150` / `0x1401891a5` 0xcd0 | 1,2,3 | 203,212,218 | FKA | — |
+| Gargoyle (built) | `xa_ex_2220` (ex_2220.bd) | `CEnemyGargoyle` 13 | `0x14053f198` | `0x14018e150` / `0x1401891a5` 0xcd0 | 1,2,3 | 203,212,218 | FKA | — |
 | Darkball (built) | `xa_ex_2280` (ex_2280.bd) | `CEnemyDarkball` 23 | `0x14053b7a8` | `0x14018d5d0` / `0x140189349` 0xcd0 | 1,2,3 | 200,202,204 | FKaA | — |
 | Defender | `xa_ex_2340` (ex_2340.bd) | `CEnemyDefender` 26 | `0x14053ca98` | `0x14018d8e0` / `0x1401893c7` 0xcd0 | 1,2,3 | 207,208,209 | FKa | — |
 | Wizard | `xa_ex_2150` (ex_2150.bd) | `CEnemyWizard` 25 | `0x140554a58` | `0x140195420` / `0x14018939d` 0xcd0 | 1,2,3,4 | — | FKaA | SES |
@@ -3263,7 +3464,8 @@ The questions as asked (0.68.0):
 8. **The Gargoyle's child object** (`ex_2220_00.bd`, a moving hit made with its attack 219): (a) a Re:CoM bullet
    (`CBullet` / `CHomingBullet`, as KH1 magic's shots) moved by KH1's child script's numbers, (b) the hit
    kept on the Gargoyle's own body as an attack record (only if the child turns out to stay on the parent),
-   (c) leave the Gargoyle on Re:CoM's behaviour for now. To be chosen once its movement syscalls are read.
+   (c) leave the Gargoyle on Re:CoM's behaviour for now. To be chosen once its movement syscalls are read. Answered
+   (owner 2026-11-02): (a), built (§ The Gargoyle).
 
 The Darkball's questions (M11, not answered yet):
 

@@ -629,6 +629,8 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     // M11: the swing against the KH1 enemies' flying thrown objects (KH1's attack-vs-attack test,
     // `0x1402B4A20`), with the same spheres and Re:CoM's primitives (`super::kh1_thrown`).
     super::kh1_thrown::swing_at_blades(|bshape| spheres_meet(ctx, fp, bshape, &spheres));
+    // M11, the Gargoyle's ball: a swing sends it back (KH1's `0x748`).
+    super::kh1_thrown::swing_at_balls(|bshape| spheres_meet(ctx, fp, bshape, &spheres));
     result
 }
 
