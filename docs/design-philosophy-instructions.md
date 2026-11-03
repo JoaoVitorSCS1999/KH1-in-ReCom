@@ -484,3 +484,5 @@ At KH1 setting:
 - **Pirate choices** (owner, 2026-11-02): the five attacks Re:CoM's Pirate lacks take power by kind (as built). The Wyvern's element no-reaction (`sys 42` for attribute 2 / 3 / 4 hits) stays left out. The fliers' "doesn't flinch" (Darkball, Air Pirate's dive, Wyvern's dive) move onto the no-reaction armour, one version each.
 
 - **Large Body choices** (owner, 2026-11-02): the stomp shockwave: research how Re:CoM's shockwave tests its hit first (if already a ring, nothing changes). Punch and charge on the belly bump's power (as built). Attack-meets-attack clashes (a swing into a charging belly, fist against blade): build them into the shared enemy guard for every ported enemy, researching KH1's order of tests first.
+
+- **Neoshadow choices** (owner, 2026-11-02): (1) drop room 29's fixed spots: no fixed points, they wander and attack instead. (2) Build the grab from below natively. (3) The call stays, nothing comes. (4) The dive on Re:CoM's come-up strike power (id 1). (5) Fire hits a diving / rising Neoshadow (no turn-back).
