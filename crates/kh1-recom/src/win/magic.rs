@@ -381,6 +381,17 @@ pub unsafe fn kh1_cast(pl: usize) -> bool {
     ptr >= start && ptr < start + t.len() * 16
 }
 
+/// M12 step 3 (Leaf Bracer): Sora's KH1 Cure is casting: Re:CoM's magic action (`initMagic`'s
+/// `+0x40C` = 0x13, which [`start_cast`] writes and the KH1 frame holds while the cast motion plays)
+/// with a KH1 Cure row of our table (`+0x3C8`).
+pub unsafe fn kh1_cure_casting(pl: usize) -> bool {
+    if rd::<u32>(pl + f::ACTION) != mg::RECOM_MAGIC_ACTION {
+        return false;
+    }
+    let ptr: usize = rd(pl + f::ROW_PTR);
+    (1..=3).any(|lv| row(mg::spell::CURE, lv).is_some_and(|r| r.as_ptr() as usize == ptr))
+}
+
 fn row(s: u8, level: u8) -> Option<&'static [u8; 16]> {
     let t = TABLE.get()?;
     t.get(mg::table_index(s, level)?).filter(|r| r[0] != 0)

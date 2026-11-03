@@ -1237,11 +1237,20 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // Re:CoM summon sleight is out, Re:CoM's own protection bit `+0x418 & 1` for this check (its
     // exit zeroes the hit's value: no damage, no reaction; the roll's and Sonic Blade's path).
     // Restored after unless it was already set (Re:CoM's attached summons set it themselves).
-    let shield = kh1 && super::summons::out(pl);
+    let summon = kh1 && super::summons::out(pl);
+    // M12 step 3, Leaf Bracer (KH1 `0x14028F140` → `0x140297F30(Sora, 0)`: no damage, no reaction
+    // through his own Cure's cast): the same protection bit for this check while Sora's KH1 Cure
+    // casts with it equipped (`super::kh1_support::leaf_bracer`; only when a hit arrived).
+    let bracer = arrived && !summon && super::kh1_support::leaf_bracer(pl);
+    let shield = summon || bracer;
     let f418: u32 = if shield { rd(pl + p::FLAGS_418) } else { 0 };
     if shield {
         if rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0 && rd::<i16>(pl + HIT_VALUE) != 0 {
-            super::summons::hit_skipped(rd(pl + HIT_VALUE));
+            if summon {
+                super::summons::hit_skipped(rd(pl + HIT_VALUE));
+            } else {
+                super::kh1_support::bracer_hit(rd(pl + HIT_VALUE));
+            }
         }
         wr(pl + p::FLAGS_418, f418 | 1);
     }
