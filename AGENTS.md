@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 154: Large Body: KH1's stomp ring in Re:CoM's circle test, version 0.85.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Research Re:CoM's first": Re:CoM's shockwave is a solid flat disk (`CCircleCollision`, type 11; its body test `0x140177190`, only caller `0x14016EAD0`; Checked (decomp)), not KH1's ring (`ex_2050_00.bd` routine `0x18`: r − 100 < d < r, |Δh| ≤ 50; Checked (files)).
+- Built: a wrapper on `0x140177190` (`40 55 56 57 48 83 EC 50`, Checked (exe); no branch or pointer into the 8 moved bytes). A circle with `+0x74` > 0 is our ring (no Re:CoM code writes a circle's `+0x74`: decomp scan): KH1's rule on Re:CoM's body shape: Sora's column bottom within 0.5 m of the ring's height, flat distance strictly in (r − 1 m, r), no body radius. Every other circle: Re:CoM's own test (Re:CoM's Large Body included).
+- `ring_step` writes the band and the height window each of the ring's 28 frames (Re:CoM rebuilds the circle when the window opens). Asset step: the ring record's `+0x18` = 0 (the centre is `Root`; Re:CoM's template sits 0.3 m up).
+- Assumptions: `Root` on the floor for KH1's stomp spot; the column bottom for KH1's actor `+0x50`; the first ring frame may use Re:CoM's test (radius 0, inside its body). Not checked: KH1's hits per ring (Re:CoM: one per attack).
+- Asset step must be re-run (EN0009.ASD).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 153: Movement toggles: run_speed (recom), jump_height, air_speed, version 0.84.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "have sora run at the same speed as he does in recom"; then "have run speed, jump height, and air speed all be separate toggles in the settings". Reason found: Re:CoM's homing shots (2.5°/frame for 30 frames) are tuned to be outrun by Re:CoM's Sora (6.2 m/s; KH1's 4.8).
