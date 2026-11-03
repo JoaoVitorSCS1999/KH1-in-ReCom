@@ -991,6 +991,7 @@ point (a TODO for the notices merge).
 |---|---|---|---|---|---|---|
 | MP Haste | 23 | bit 0 | 21 | 3 | 304 | 25 |
 | MP Rage ×2 | 24 | bits 1..3 (count) | 42, 75 | 3 each | 305 | 26, 27 |
+| Leaf Bracer | 62 | bit 6 | 39 | 5 | 308 | 28 |
 
 ### MP Haste
 
@@ -1036,3 +1037,32 @@ point (a TODO for the notices merge).
 - **Test:** Re:CoM level 42: MP Rage on the page (3 AP), unequipped; equip it, let a Shadow hit
   Sora: the log's `support: MP Rage` line and the trace's `+n` MP event. Level 75: the second copy;
   with both equipped the charge doubles.
+
+### Leaf Bracer
+
+- **KH1** (Checked (decomp)): the spell list start `0x14028F140(actor, list, args)`: for **list 3**
+  (Cure: the ground cast plays `0x36 + spell`, the air cast `0x83 + spell`, so list = spell index,
+  Cure = 3) **cast by the actor on itself** (`args[0]` = the actor) with `+0x184` bit 6, it calls
+  `0x140297F30(actor, 0)`: actor flag **0x80** with a zero timer. Its callers are the cast commands
+  (`0x1402A3600`, `0x1402A3DB0`, `0x1402A4150`; `0x1402A7510` starts only list 0, Fire's fast path):
+  it is set **at the cast command**. The actor tick `0x140297FE0` (branch at `0x1402984BA`) starts counting it only once the
+  motion lock (flag 4, set by `0x14029F980` / `0x14029FA30` with bit 0x1000000: the cast motion) is
+  released, and with a zero timer clears it the next frame. While flag 0x80 is set,
+  `0x1402BEEE0` takes **no HP** and `0x14029BBD0` starts **no reaction** (except record kinds 6 / 7,
+  which do no damage at all). So "can't be interrupted" covers the whole cast motion, with no damage
+  either. Status elements (9, 10, 12) in the same records still apply in KH1 (Assumption: none of
+  Re:CoM's enemies' hits maps to them).
+- **Ours** (`win::kh1_support::leaf_bracer`): in the existing damage-check wrapper, only when a hit
+  arrived, while Sora's KH1 Cure is casting (`win::magic::kh1_cure_casting`: Re:CoM's magic action
+  `+0x40C` = 0x13 with one of our KH1 Cure rows at `+0x3C8`) and Leaf Bracer is equipped: Re:CoM's own
+  protection bit `player+0x418 & 1` for the check (its test at `0x1401E6F7A`, after the hit gate `0x1401E6F32`: the hit's value zeroed,
+  no damage, no reaction; the summons' invincibility, M8b), put back after. No hook, nothing per frame.
+- Differences: ours ends with Re:CoM's magic action (the KH1 frame holds it while the cast motion
+  plays), KH1's one frame after the lock: ±1 frame (Assumption). Re:CoM's statuses that a hit sets
+  are skipped with the hit (as for the summons).
+- Log: `support: Leaf Bracer: a hit of 25 on Sora during his Cure: no damage, no reaction (KH1's flag
+  0x80)` (20 lines).
+- Checked (tests): `abilities::tests::rod_support_abilities`. Not checked: in game.
+- **Test:** Re:CoM level 39: Leaf Bracer (5 AP) on the page; equip it, cast Cure next to an
+  attacking enemy: the hit lands on Sora with no HP lost and no flinch, the heal comes; the log's
+  `support: Leaf Bracer` line. Without it, the hit interrupts the cast as before.

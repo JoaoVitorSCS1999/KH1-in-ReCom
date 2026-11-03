@@ -7,6 +7,10 @@
 //!
 //! - **MP Rage** ([`after_damage`]): after Re:CoM's damage check took HP, KH1's charge for the HP
 //!   lost (`0x14029BBD0`), through KH1's gauge add (`super::mp::gain_charge`, `0x1402A4AE0`).
+//! - **Leaf Bracer** ([`leaf_bracer`]): while Sora's KH1 Cure casts, the damage check runs with
+//!   Re:CoM's own protection bit `player+0x418 & 1` (its exit zeroes the hit: no damage, no
+//!   reaction), as the summons' invincibility does; KH1 sets its flag 0x80 for the cast
+//!   (`0x14028F140` → `0x140297F30(Sora, 0)`).
 
 use super::movement::rd;
 use super::{log, mp};
@@ -52,5 +56,27 @@ pub unsafe fn after_damage(pl: usize, hp_before: i32) {
     note(|| format!("MP Rage x{copies}: HP {hp_before} -> {after} of {max} = {kh1_lost} of KH1's {} at level {level}: charge +{units}", ks::mp_rage::kh1_max_hp(level)));
     if units > 0 {
         mp::gain_charge(units, &format!("MP Rage x{copies}, {kh1_lost} KH1 HP lost"));
+    }
+}
+
+static BRACER_LINES: AtomicU32 = AtomicU32::new(20);
+
+/// Leaf Bracer covers this hit: Sora's KH1 Cure is casting (`super::magic::kh1_cure_casting`:
+/// Re:CoM's magic action with a KH1 Cure row) and Leaf Bracer is equipped. KH1: the list start
+/// `0x14028F140` for list 3 (Cure: spell index 3, its cast motion `0x36 + 3` / `0x83 + 3`) cast by
+/// the actor on itself, with `+0x184` bit 6, calls `0x140297F30(actor, 0)`: flag 0x80 with a zero
+/// timer, which the actor tick (`0x140297FE0`, its `0x1402984BA` branch) clears the frame after the cast
+/// motion's lock (flag 4, set by `0x14029F980` with 0x1000000) is released. While it is set, the
+/// damage function `0x14029BBD0` / `0x1402BEEE0` takes no HP and starts no reaction (but for the
+/// no-damage record kinds 6 / 7). Checked (decomp). Ours ends with Re:CoM's magic action (the
+/// cast motion's end): ±1 frame (Assumption).
+pub unsafe fn leaf_bracer(pl: usize) -> bool {
+    super::magic::kh1_cure_casting(pl) && super::abilities::equipped_live().is_some_and(ab::leaf_bracer)
+}
+
+/// A hit Leaf Bracer took (logged, 20 lines).
+pub fn bracer_hit(value: i16) {
+    if BRACER_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("support: Leaf Bracer: a hit of {value} on Sora during his Cure: no damage, no reaction (KH1's flag 0x80)"));
     }
 }

@@ -118,6 +118,8 @@ pub mod ix {
     pub const MP_HASTE: usize = 25;
     /// MP Rage (KH1 id 24) ×2: charge from HP lost × the copies (`0x14029BBD0`).
     pub const MP_RAGE: [usize; 2] = [26, 27];
+    /// Leaf Bracer (KH1 id 62): Sora's own Cure can't be interrupted (`0x14028F140`).
+    pub const LEAF_BRACER: usize = 28;
 }
 
 /// Re:CoM's sleight ids (its `initStockSkill` `0x140220DF0` switch; level-up list `0x14010EF10`;
@@ -153,7 +155,7 @@ const fn special(name: &'static str, s: u16) -> Ability {
 /// Assumption, strong).
 /// Combo Master (0x41) has no row in btltbl's table (row 65 is zero: cost 0, key 0; Checked
 /// (files)); KH1 FM gives it by no level list.
-pub const ALL: [Ability; 28] = [
+pub const ALL: [Ability; 29] = [
     a("Sliding Dash", 54, 0x100_0000, 1, 205, Source::Sleight(sleight::SLIDING_DASH)),
     a("Blitz", 20, 0x8, 2, 208, Source::Sleight(sleight::BLITZ)),
     a("Stun Impact", 57, 0x800_0000, 2, 211, Source::Sleight(sleight::STUN_IMPACT)),
@@ -199,6 +201,8 @@ pub const ALL: [Ability; 28] = [
     // each, sort key 305. Checked (decomp + files).
     a("MP Rage", 24, 0, 3, 305, Source::Level(42)),
     a("MP Rage", 24, 0, 3, 305, Source::Level(75)),
+    // Leaf Bracer: id 62 (`+0x184` bit 6), Rod level 39, 5 AP, sort key 308. Checked (decomp + files).
+    a("Leaf Bracer", 62, 0, 5, 308, Source::Level(39)),
 ];
 
 /// The combo modifiers (stage 9a), by [`ix`].
@@ -517,6 +521,13 @@ pub fn mp_rage(equipped: u32) -> u8 {
     ix::MP_RAGE.iter().filter(|&&i| equipped & (1 << i) != 0).count() as u8
 }
 
+/// Leaf Bracer equipped (KH1 `+0x184` bit 6 = `0x140284BE0(62) & 1`): a Cure Sora casts on himself
+/// sets his "no damage, no reaction" flag 0x80 for the cast (`0x14028F140` → `0x140297F30(actor,
+/// 0)`). Checked (decomp).
+pub fn leaf_bracer(equipped: u32) -> bool {
+    equipped & (1 << ix::LEAF_BRACER) != 0
+}
+
 /// The names of the abilities in `bits`, for the log.
 pub fn names(bits: u32) -> Vec<&'static str> {
     ALL.iter().enumerate().filter(|(i, _)| bits & (1 << i) != 0).map(|(_, a)| a.name).collect()
@@ -718,6 +729,7 @@ pub mod page {
                 23..=24 => b"One more swing in an air combo.\0",
                 MP_HASTE => b"Gain more MP from each hit on an enemy.\0",
                 26..=27 => b"Gain MP when you take damage. Copies add up.\0",
+                LEAF_BRACER => b"Nothing can interrupt Sora while he casts Cure.\0",
                 _ => b"\0",
             }
         }
@@ -754,8 +766,8 @@ mod tests {
     fn layout_follows_the_items_extension() {
         assert_eq!(BLOCK_FIRST, 0x269F);
         assert_eq!(BLOCK_LAST, 0x26AD);
-        assert_eq!(ALL.len(), 28);
-        assert_eq!(ALL_BITS, 0x0FFF_FFFF);
+        assert_eq!(ALL.len(), 29);
+        assert_eq!(ALL_BITS, 0x1FFF_FFFF);
     }
 
     /// KH1's AP: 3 at a new game (keep Rod / give up Shield adds 0), +2 at each kind-3 level of the
@@ -898,9 +910,9 @@ mod tests {
         // Re:CoM's Sonic Blade sleight (9): Sonic Blade, unequipped (KH1's rule).
         let r = sync(&mut s, 30, NO_RECOM, &mut |id| id == sleight::SONIC_BLADE);
         assert_eq!(names(r.new), vec!["Sonic Blade"]);
-        // Level 50: Combo Master (owner), unequipped; MP Rage 42 (M12).
+        // Level 50: Combo Master (owner), unequipped; MP Rage 42, Leaf Bracer 39 (M12).
         let r = sync(&mut s, 50, NO_RECOM, &mut |_| false);
-        assert_eq!(names(r.new), vec!["Aerial Sweep", "Combo Master", "Air Combo Plus", "MP Rage"]);
+        assert_eq!(names(r.new), vec!["Aerial Sweep", "Combo Master", "Air Combo Plus", "MP Rage", "Leaf Bracer"]);
         // Level 99 and every sleight: everything but Re:CoM's movement abilities and the kit.
         sync(&mut s, 99, NO_RECOM, &mut |_| true);
         assert_eq!(s.unlocked, ALL_BITS & !MOVE & !KIT_BITS);
@@ -1047,6 +1059,14 @@ mod tests {
         assert_eq!(names(r.new), vec!["MP Rage"]);
         assert_eq!((mp_rage(0), mp_rage(1 << ix::MP_RAGE[1]), mp_rage(1 << ix::MP_RAGE[0] | 1 << ix::MP_RAGE[1])), (0, 1, 2));
         assert_eq!(used_ap(1 << ix::MP_RAGE[0] | 1 << ix::MP_RAGE[1]), 6);
+        // Leaf Bracer: Rod level 39, 5 AP.
+        assert_eq!(x(ix::LEAF_BRACER), (62, 5, 308, Source::Level(39), 0, false));
+        assert!(leaf_bracer(1 << ix::LEAF_BRACER) && !leaf_bracer(0));
+        assert_eq!(max_ap(39), 17);
+        assert!(can_equip(0, ix::LEAF_BRACER, 39));
+        let thirteen = 1 << ix::MP_HASTE | 1 << ix::MP_RAGE[0] | 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::STUN_IMPACT;
+        assert_eq!(used_ap(thirteen), 13);
+        assert!(!can_equip(thirteen, ix::LEAF_BRACER, 39), "4 AP left: refused (KH1's rule)");
     }
 
     #[test]
