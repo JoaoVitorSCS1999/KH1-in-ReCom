@@ -11,6 +11,13 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 186: M12 step 3: Leaf Bracer, version 0.98.4 (2026-11-01)
+
+- Leaf Bracer (KH1 ability 62, Rod level 39, 5 AP): KH1 (`0x14028F140` → `0x140297F30`, Checked (decomp)): Cure on oneself blocks damage and flinching for the whole cast motion. Ours: Re:CoM's own protection bit (`+0x418 & 1`, the summons' one) while our KH1 Cure casts (the end ±1 frame, Assumption).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 185: M12 step 3: MP Rage ×2, version 0.98.3 (2026-11-01)
 
 - MP Rage (KH1 ability 24, Rod levels 42 and 75, 3 AP each): KH1's `0x14029BBD0`: MP charge = HP lost × equipped copies (the two stack; Checked (decomp)). Sora's HP is Re:CoM's (several times KH1's): the HP lost first taken as the same share of KH1's max HP at his level (18 + 3 at each of KH1's 23 HP levels) (Assumption, owner question). Combat = KH1; learned notices.
