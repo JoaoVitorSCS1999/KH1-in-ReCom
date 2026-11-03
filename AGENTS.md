@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 179: Oogie Boogie: a dice throw that ends unbroken counts as Re:CoM's card break, version 0.97.1 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "oogie boogie is impossible to defeat. you're supposed to break one of his attacks which lowers a gate where you can hit him. can we make it so that if he uses the attack that you're supposed to break without being broken, the gate lowers?" (confirmed "After once").
+- Re:CoM (Checked (decomp + exe)): the attack is his dice throw, state 2 of `CBossBoogie` (vtable `0x140670A60`): its begin `0x1403D7830` sets `+0xCD8 |= 1`; its step's only attack end `0x14017E540` at `0x1403D9402`. A break sends him to state 13 (begin `0x1403D7A40`): stagger; while the mark is set, the dice marked (a destroyed die may drop his gimmick card), the gate count `*(+0xD10)+0x2E0` + 1 up to 3, at 3 his down time and `+0x260 & 0x2000` cleared (Assumption: what stops him being hurt). The gate lowers a step per count, passable at 3 (Assumption: `CGimmickBBGHedge`, step `0x1403DA7C0`); reset when he jumps back (`0x1403D5B70`). At Combat = KH1 he could never be broken.
+- Built (Combat = KH1, Sora's story): the existing attack-end wrapper watches his dice throw ending unbroken (state 2, really ended, alive, mark set, gate not fully down) and calls his own message handler (`+0x48` = `0x140181620`) with message 3 (Re:CoM's card break; direct, a posted one would arrive after state 1 clears the mark, Assumption): Re:CoM's state-13 begin does the rest. His state-13 slot `+0x220` wrapped only to log the gate count. No new hook, no code bytes moved; 7 byte and 5 slot checks.
+- Differs from a card break: it lands after the throw (the roll's attack still follows). Owner question: three unbroken throws open the gate fully (Re:CoM's three steps).
+- Checked: tests, Windows build. Not checked: in game; HDownTime, card chance and dice weights (parameter file not in the session).
+
+---
+
 ## Stage 178: The KH1 Yellow Opera (its charge and Thunder); M11 stops here, version 0.97.0 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "finish the opera and requiem, but stop there" (M11; the last two of the Red Nocturne's family).
