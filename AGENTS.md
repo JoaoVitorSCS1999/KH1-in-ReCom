@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 151: KH1's attack-meets-attack clashes for every ported enemy, version 0.82.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02, Large Body question 3): "Build them": attack-vs-attack clashes in the shared enemy guard, KH1's order of tests researched first.
+- KH1 (Checked (decomp)): each frame attacks against attacks first (`0x1402B47A0` → `0x1402B3BE0` → `0x1402B4A20` → `0x1402B4BC0`, both ways), then against bodies. The lower priority gets kind 6 (7 at 40+ under), equal both 6; a side at 100 never moves and still hits; both ≥ 98: nothing; a type-0 row never repels, types 1 / 3 / 4 repel when higher. Clashing rows miss every body that frame; a clash record does no damage (`0x1402BEEE0`). Sora 0x6E / 0x6F / 0x70; the enemy its row's `+0x40`. Body spheres count (the Large Body's charge belly: type 0, priority 90).
+- Built: Re:CoM has no attack-against-attack test; ours runs inside the existing swing test before the bodies, Sora's swing against each KH1 enemy's live Re:CoM attack records with Re:CoM's own overlap tests (callee `0x140177480`, byte-checked). Sora's side through the existing `swing_clash`; the enemy's in its hit-handler wrapper through our state 11 (Re:CoM's flinch when the model lacks the recoil; a higher type 1 / 3 / 4 row repels). No new hook; outside a swing's window two atomic loads per enemy update (not measured).
+- With the Kingdom Key (30): both recoil: Shadow, Bandit, Air Soldier, Powerwild, Search Ghost, Darkball dash, Air Pirate swoop, Neoshadow claw, Large Body punch / slam, Soldier kicks; Sora's strong recoil and the enemy's: Pirate (rows at 90), Large Body charge (ends it); Sora's strong recoil, the enemy carries on (rows at 100): Wyvern, Darkball bite / drop, Air Pirate slash, Neoshadow rise slash / dive, Soldier jumping kick / rush leap / spin kick; never: the stomp ring (child row). The Wight Knight (merged after): its attack rows clash the same way beside its body rows (Assumption: the same outcome either way; check in game).
+- Asset step: every `kh1-*.json` gains a `clash` list per attack (older manifests load with none). No mod.yml change.
+- Assumptions: Re:CoM's update order (at most one frame off); Re:CoM's guard spark for KH1's clash effects (no hit-stop / rumble); recoil push bit and KH1's `+0x88 & 1` not carried.
+- Checked: tests (835), Windows build, 585 byte sites. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 150: The KH1 Wight Knight, version 0.81.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
