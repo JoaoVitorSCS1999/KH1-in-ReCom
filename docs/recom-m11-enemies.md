@@ -70,6 +70,62 @@ At Combat = KH1, Sora's story, `enemy_ai = kh1`, a battle enemy of a listed clas
   does when its motion ends). Re:CoM's alternate appearance (`+0x260 & 0x20000000008`, the first-strike
   stun) stays Re:CoM's for every class.
 
+### Enemies whose pack has no KH1 clips (owner 2026-11-03, 0.93.3: T-posed Shadows)
+
+> "switching from recom to KH1 enemy ai in the same room results in the ported enemies T Posing" (Halloween
+> Town, Combat = KH1; screenshots of a Shadow in its bind pose).
+
+- **What the log shows** (`kh1-recom-tpose-0933.log`; Checked (log)). Battles 7–26 ran at `enemy_ai = recom`
+  (world 5, then Halloween Town from battle 17); the switch to KH1 came before battle 27. In battle 28 Shadow
+  e5194's actions 200, 3 and 201 were released by the watchdog with Re:CoM's motion clock still **0** after
+  their whole length (`clock 0 of 4600 units, 122 of 92 frames`): its KH1 clips never played. The Wight Knight,
+  Gargoyles and Search Ghosts of the same battles played theirs. In world 5 at the start of the log (battles
+  1–6, KH1 AI) the Shadows' actions ended on their clips (no release). Battles 27, 29 and 30 were first-strike
+  battles (Re:CoM's alternate appearance: Re:CoM's stun motion 71 first, then KH1's reactions on the same pack).
+- **Why** (Checked (decomp + exe)). The factory `0x140188F40` builds `CEnemyShadow` for Re:CoM ids **1 and 32**
+  (`case 1: case 0x20:`) and `CEnemySearchghost` for **14 and 33** (also 16 / 34, 17 / 35, 31 / 36: classes not
+  ported). Each id has its own files (Re:CoM's resource table at `0x1407F98C0`: `ENEMY/0032/EN0032.*`, with the
+  Shadow's sound bank 34000; `ENEMY/0033/EN0033.*` with the Search Ghost's 34013). The model id is kind × 10000 +
+  id (`0x1401A4E70`), and its `.ANN` is found by that id (`0x1402A4820`). The asset step extends only
+  `ENEMY/0001` (and `0014`): an id-32 Shadow's pack is Re:CoM's plain one, every KH1 request's slot (100 + entry)
+  is past its count, Re:CoM's lookup `0x14024DC60` / `0x14024C760` gives no clip (the current clip is set to 0
+  and the play returns), and the model stands in its bind pose. Our class swap is keyed on the class (its ctor),
+  so it gave that Shadow KH1's AI anyway.
+- **Not the switch, not the room** (Checked (code)). `enemy_ai` is read only by the ctor wrapper (`live_battle`);
+  the packs are the same files at any setting (Panacea serves the mod's copy; no hook of ours loads or picks a
+  pack; the `.ANN` loader `0x14029F3A0` is only byte-checked). The owner had never had KH1's AI in Halloween Town
+  before the switch, which made the switch look like the cause. Assumption: Halloween Town's battles use id 32
+  for their Shadows (the log line below names the id).
+- **Built.** Our vtable copy's `+0x38` (`ce::pack::INIT_SLOT`, `win::kh1_enemy::init`): the entity spawn
+  `0x1401A8900` calls it right after the factory with (enemy, kind 0xC, Re:CoM id); every ported class's `+0x38`
+  runs its init `+0x30` (`0x140192AE0`, `0x14018A360` ×15, `0x140196170`, `0x14018D760`, `0x14018A790`: each calls
+  `+0x30` first), which builds the model and its motion controller. Ours runs Re:CoM's, then reads the enemy's own
+  set as `0x14024DC60` reads it (controller `+0xD8`, set `+0x20`, count `+0x68`, clip pointers `+8` → `+8`) and
+  checks every slot its manifest plays (`ce::pack::check`). Any missing (or no set): the swap is undone before any
+  state runs (Re:CoM's vtable back, the tail's magic cleared, the runtime dropped): that enemy is Re:CoM's, as at
+  `enemy_ai = recom`. A failed init (the spawn deletes the enemy) drops the runtime too. No new hook (a slot of our
+  own copy), no data patch; once per spawned enemy, nothing per frame.
+- **Log.** Once per class and id: `shadow: Re:CoM id 1 (ENEMY/0001): its motion pack carries the KH1 clips (N slots):
+  its Shadows get KH1's AI` or `shadow: Re:CoM id 32 (ENEMY/0032): its motion pack has no clip for KH1's request 69
+  (slot 143; the pack has 76 slots): its Shadows keep Re:CoM's AI and motions …`; per enemy given back: `battle N:
+  Shadow 0x… (Re:CoM id 32) back to Re:CoM's AI: …` (after its ctor's `gets KH1's AI` line).
+- **When the setting acts:** unchanged, from the next battle (each enemy's ctor). Combat = KH1 ↔ Re:CoM: decided at
+  each battle start (`battle::manager_ctor`); at Re:CoM no enemy is swapped. `enemy_ai` KH1 → Re:CoM: Re:CoM's
+  classes play only Re:CoM's slots, which every pack keeps. Neither can leave an enemy without motions. Checked
+  (code).
+- Tests: `kh1_ai_only_on_a_pack_with_the_kh1_clips`, `shared_factory_cases_of_ported_classes`.
+- Not checked: in game; that the set's `+0x68` is the `.ANN`'s slot count as loaded (Assumption, from
+  `0x14024DC60`'s bound check and `docs/kh1-recom-assets.md` § Loader limits); which worlds use ids 32 / 33.
+- **Owner test lines** (Combat = KH1, Sora's story, `enemy_ai = kh1`): (1) Halloween Town, a battle with Shadows,
+  no camp switch: no Shadow T-poses; the log shows the `Re:CoM id … (ENEMY/00NN)` line for `shadow` (and
+  `searchghost` when one appears). If it says id 32, those Shadows act as Re:CoM's (its moves and timing, at KH1's
+  battle rules) until their pack is extended (question below). (2) The same with a camp switch Re:CoM → KH1 in the room: the same.
+  (3) Traverse Town / any world-5-style Shadow battle: KH1's Shadow as before (`Re:CoM id 1 … get KH1's AI`).
+- **Owner question:** extend the variants' packs too (the asset step writes `ENEMY/0032` and `ENEMY/0033` with
+  KH1's clips, as for `0001` / `0014`, so those Shadows and Search Ghosts also get KH1's AI)? It needs the player's
+  `ENEMY/0032` / `0033` files read first (their skeletons against `EN0001` / `EN0014`'s) and a re-run of the asset
+  step. Until then they keep Re:CoM's AI.
+
 New for M11:
 
 - `Cmd::Held` (KH1's request bit 23 → actor flag `0x1000`, `0x14029F980`; the air step `0x1402AF6A0` then

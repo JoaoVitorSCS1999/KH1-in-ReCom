@@ -662,6 +662,82 @@ impl ClipWatch {
     }
 }
 
+/// Whether an enemy's own motion pack carries its class's KH1 clips (owner 2026-11-03: "switching from recom to KH1
+/// enemy ai in the same room results in the ported enemies T Posing"). A class can be built for more than one Re:CoM
+/// enemy id, each with its own `ENEMY/<id>` files: the factory `0x140188F40` builds `CEnemyShadow` for ids 1 and 32
+/// and `CEnemySearchghost` for 14 and 33 (also 16 / 34, 17 / 35, 31 / 36, classes not ported). The asset step extends
+/// only `ENEMY/<recom_id>`, so an enemy of the other id has Re:CoM's plain pack: every KH1 request names a slot past
+/// its count, Re:CoM's clip lookup gives no clip and the model stands in its bind pose (Checked (decomp + exe + log)).
+/// So the class swap is undone, in the spawn's init, for an enemy whose pack lacks any clip its manifest plays: it
+/// keeps Re:CoM's AI and motions, as at `enemy_ai = recom`.
+pub mod pack {
+    use super::Clip;
+
+    /// Re:CoM's motion set as its clip lookup `0x14024DC60` reads it: the enemy's motion controller `+0xD8`
+    /// (`0x1401A5110` makes it, `0x1401A3470` plays through it), its set `+0x20` (`0x14024E060` binds the `.ANN`
+    /// found by the model id, `0x1402A4820`), the set's slot count `+0x68`, its clip pointers at `+8` → `+8`, one
+    /// per slot, 0 for an empty one. Checked (decomp).
+    pub const CONTROLLER: usize = 0xD8;
+    pub const SET: usize = 0x20;
+    pub const COUNT: usize = 0x68;
+    pub const TABLE: usize = 0x8;
+    pub const CLIPS: usize = 0x8;
+    /// The entity spawn `0x1401A8900` calls the new enemy's vtable `+0x38` right after the factory, with (enemy,
+    /// kind 0xC, Re:CoM id); every class's `+0x38` runs its init `+0x30` (`0x140198600` / `0x1401996F0` →
+    /// `0x1401805A0`, which builds the model and its motion controller). A failed init (0) makes the spawn delete
+    /// the enemy. Checked (decomp: `0x1401A8900`, `0x140192AE0`, `0x14018A360`).
+    pub const INIT_SLOT: usize = 0x38;
+
+    /// What an enemy's pack holds for its class's clips.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Verdict {
+        /// Every clip the manifest names is there (`count`: the pack's slots).
+        Carries { count: i32 },
+        /// The first clip missing: past the pack's `count` slots, or an empty slot.
+        Missing { count: i32, request: u16, slot: u32 },
+        /// The enemy has no motion controller or set (nothing can play on it).
+        NoSet,
+    }
+
+    impl Verdict {
+        pub fn carries(self) -> bool {
+            matches!(self, Verdict::Carries { .. })
+        }
+    }
+
+    /// `count`: the set's slots (None: no set); `has(slot)`: the slot's clip pointer is not 0, asked only for a
+    /// slot under `count` (as `0x14024DC60` reads it).
+    pub fn check(count: Option<i32>, clips: &[Clip], has: impl Fn(u32) -> bool) -> Verdict {
+        let Some(count) = count else { return Verdict::NoSet };
+        for c in clips {
+            if i64::from(c.slot) >= i64::from(count) || !has(c.slot) {
+                return Verdict::Missing { count, request: c.request, slot: c.slot };
+            }
+        }
+        Verdict::Carries { count }
+    }
+
+    /// The first time this class meets this Re:CoM id (the once-per-id log line).
+    pub fn first_time(seen: &mut Vec<(usize, u32)>, class: usize, id: u32) -> bool {
+        if seen.contains(&(class, id)) {
+            return false;
+        }
+        seen.push((class, id));
+        true
+    }
+
+    /// The once-per-id line: what the pack of `ENEMY/<id>` holds and which AI the class's enemies of that id get.
+    pub fn line(name: &str, title: &str, id: u32, v: Verdict) -> String {
+        match v {
+            Verdict::Carries { count } => format!("{name}: Re:CoM id {id} (ENEMY/{id:04}): its motion pack carries the KH1 clips ({count} slots): its {title}s get KH1's AI"),
+            Verdict::Missing { count, request, slot } => format!(
+                "{name}: Re:CoM id {id} (ENEMY/{id:04}): its motion pack has no clip for KH1's request {request} (slot {slot}; the pack has {count} slots): its {title}s keep Re:CoM's AI and motions (KH1's would leave them in the bind pose; the asset step extends only the class's own id's pack)"
+            ),
+            Verdict::NoSet => format!("{name}: Re:CoM id {id} (ENEMY/{id:04}): no motion set on the enemy after its init: its {title}s keep Re:CoM's AI"),
+        }
+    }
+}
+
 /// The safety net for an action the behaviour waits on (KH1's script pauses while an action
 /// motion plays): no KH1 enemy may wait forever.
 pub mod watchdog {
@@ -771,6 +847,53 @@ mod tests {
         assert_eq!((ring.band_m(), ring.height_m()), (1.0, 0.5));
         let near = |t: f32, want: f32| (ring.radius(t).unwrap() - want).abs() < 1e-5;
         assert!(near(88.0, 0.0) && near(92.0, 1.0) && near(115.0, 6.75) && ring.radius(116.0).is_none());
+    }
+
+    /// Owner 2026-11-03 (T-posed Shadows in Halloween Town): KH1's AI only on a pack that carries every clip the
+    /// manifest plays. The Shadow's own pack (`ENEMY/0001`, extended: 76 Re:CoM slots, KH1's at 100 + entry) carries
+    /// them; Re:CoM's plain pack of its other id (`ENEMY/0032`, 76 slots) has none past 75; an empty slot counts as
+    /// missing; no set, no KH1 AI.
+    #[test]
+    fn kh1_ai_only_on_a_pack_with_the_kh1_clips() {
+        let clip = |request: u16, slot: u32| Clip { request, slot, frames: 30, root: false, looped: false };
+        // Entry 6 on Re:CoM's bake (slot 5), the rise 69 at 143, the claw 200 at 137.
+        let clips = [clip(6, 5), clip(69, 143), clip(200, 137)];
+        let extended = |s: u32| s < 76 || (100..160).contains(&s);
+        assert_eq!(pack::check(Some(160), &clips, extended), pack::Verdict::Carries { count: 160 });
+        assert!(pack::check(Some(160), &clips, extended).carries());
+        // Re:CoM's plain pack: the first KH1 clip is past its count; its own slots are never asked past it.
+        let asked = std::cell::RefCell::new(Vec::new());
+        let plain = |s: u32| {
+            asked.borrow_mut().push(s);
+            s < 76
+        };
+        assert_eq!(pack::check(Some(76), &clips, plain), pack::Verdict::Missing { count: 76, request: 69, slot: 143 });
+        assert!(asked.borrow().iter().all(|&s| s < 76));
+        // A pack as long as ours with the KH1 slot empty (an older asset step's pack).
+        assert_eq!(pack::check(Some(160), &clips, |s| s != 137), pack::Verdict::Missing { count: 160, request: 200, slot: 137 });
+        assert_eq!(pack::check(None, &clips, extended), pack::Verdict::NoSet);
+        assert!(!pack::Verdict::NoSet.carries());
+        // Logged once per class and id.
+        let mut seen = Vec::new();
+        assert!(pack::first_time(&mut seen, 0, 32));
+        assert!(!pack::first_time(&mut seen, 0, 32));
+        assert!(pack::first_time(&mut seen, 0, 1) && pack::first_time(&mut seen, 8, 32));
+        let l = pack::line("shadow", "Shadow", 32, pack::Verdict::Missing { count: 76, request: 69, slot: 143 });
+        assert!(l.starts_with("shadow: Re:CoM id 32 (ENEMY/0032): its motion pack has no clip for KH1's request 69 (slot 143; the pack has 76 slots)"), "{l}");
+        assert!(l.contains("keep Re:CoM's AI"));
+        assert!(pack::line("shadow", "Shadow", 1, pack::Verdict::Carries { count: 160 }).contains("ENEMY/0001): its motion pack carries the KH1 clips (160 slots): its Shadows get KH1's AI"));
+    }
+
+    /// Every ported class's Re:CoM id is the one its asset step extends, and the factory's shared cases (two ids, one
+    /// class: Checked (decomp `0x140188F40`)) are the ones the pack check must catch for the ported classes.
+    #[test]
+    fn shared_factory_cases_of_ported_classes() {
+        // (class's id, the factory's other id for the same ctor).
+        const SHARED: [(u16, u16); 5] = [(1, 0x20), (0xE, 0x21), (0x10, 0x22), (0x11, 0x23), (0x1F, 0x24)];
+        let ported: Vec<u16> = CLASSES.iter().map(|c| c.recom_id).collect();
+        let caught: Vec<u16> = SHARED.iter().filter(|(a, _)| ported.contains(a)).map(|&(_, b)| b).collect();
+        assert_eq!(caught, [0x20, 0x21], "the Shadow's id 32 and the Search Ghost's id 33");
+        assert!(CLASSES.iter().all(|c| !SHARED.iter().any(|&(_, b)| b == c.recom_id)));
     }
 
     /// The body's position point: a column's lower end (whichever end it is), a sphere's lowest point.

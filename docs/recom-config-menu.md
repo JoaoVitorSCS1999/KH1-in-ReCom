@@ -201,7 +201,11 @@ Damage stays ini-only (owner). The row "Revenge Value" is the owner's name (2026
 - **Guard reactions**: at once (`attack::set_guard_reactions`).
 - **Enemy pace**: next battle (read at the battle manager's construction, `battle::manager_ctor`).
 - **Enemy AI**: next battle (read in each enemy's ctor wrapper when a battle makes it,
-  `kh1_enemy`).
+  `kh1_enemy`). Nothing else reads it, and the enemy motion packs (`ENEMY/<id>/EN<id>.ANN`) are the
+  same files whatever the setting (Panacea serves the mod's copy; no code of ours picks a file), so a
+  switch in the same room needs no room reload. Checked (code). An enemy whose own pack lacks its
+  class's KH1 clips keeps Re:CoM's AI even at KH1 (`recom-m11-enemies.md` § Enemies whose pack has no
+  KH1 clips; owner's T-posed Shadows, 2026-11-03).
 - **Revenge Value**: at once (`revenge::set_enabled`; its hooks and boss sizes are installed
   whatever the value, and each hit checks it); in practice the next boss fight.
 - **Run speed / Jump height / Air speed / Dodge roll**: at once: each KH1 frame copies them
