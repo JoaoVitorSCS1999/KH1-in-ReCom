@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 175: Parasite Cage: its faint only from Fire at Combat = KH1, version 0.95.1 (2026-11-01)
+
+- Ask (owner, 2026-11-03, on 0.95.0): faint "Fire only".
+- Re:CoM's faint test `0x1403C4060` (Checked (decomp + disassembly)): the hit body at `*(cage+0xF8)+0x50`; already fainted (`+0xCD4 & 4`): prizes only; else attribute `+0x84 == 2` (`0x1403C42B4`, rolls FireFaint) and hit kind `+0x80 == 2` (`0x1403C432C`, rolls AtkFaint); every KH1 finisher is kind 2.
+- Found: at Damage = KH1 our KH1 Fire set the body's attribute to 0xFF for the hit-handler call (no Re:CoM resistance on top of KH1's), so the cage never saw it as Fire.
+- Built: the cage's vtable slot `+0x3E0` (`0x140669600`, old pointer checked) holds `win::battle::cage_hit_callback` calling Re:CoM's (17 first bytes and three reads checked; no code bytes move). In a KH1 battle, outside the faint: a non-Fire kind-2 hit skips the callback; our KH1 Fire reads as attribute 2 for that call (Re:CoM's FireFaint chance). Re:CoM's own Fire and all other hits unchanged; Combat = Re:CoM unchanged.
+- Assumptions: a Stop-held Fire hit still matched to its shot (last 32 kept); FireFaint / AtkFaint chances unknown (parameter file not in the session).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 174: Parasite Cage: no flinch from Sora's hits; about 3 s between its attacks, version 0.95.0 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "the parasite cage shouldnt flinch when you attack, let it go through with its attacks, give it about 3 seconds between each attack". Combat = KH1 in Sora's story only.
