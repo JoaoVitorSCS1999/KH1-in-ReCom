@@ -505,3 +505,4 @@ At KH1 setting:
   - Combat, Guard reactions and Enemy pace **leave Re:CoM's Config menu** (it goes back to only Re:CoM's own rows).
   - The KH1 tab is **always shown**. At Combat = Re:CoM it shows only Combat and Movement; Items, Customize and Abilities appear at Combat = KH1.
   - Damage stays ini-only.
+- **KH1 tab follow-ups** (owner, 2026-11-03, on 0.93.0): show the KH1 tab in Riku's story too, with only Combat and Movement (to build); English-only rows (as built); row order Items, Customize, Abilities, Combat, Movement (as built).
