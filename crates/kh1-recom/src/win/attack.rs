@@ -329,6 +329,8 @@ unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     wr(pl + field::ROW_PTR, row.as_ptr() as usize);
     func::<mv::MotionFn>(mv::MOTION_REQUEST)(pl, row[0] as i32, 0, s.root as u64, 0, 0, 0);
     wr(pl + field::CARD_7B4, 0i32);
+    // M12 step 3: KH1 tests Berserk when the swing's attack object is made (`0x1402B2DC0`).
+    super::kh1_support::swing_started(pl, s.kh1_row);
     // Re:CoM's cardless AP (the attack stat): at Damage = KH1 the KH1 numbers replace it per hit
     // (`enemy_hit`); in the field it is Re:CoM's own field-swing AP.
     wr(pl + field::AP, rd::<i32>(pl + field::ATTACK_STAT));
@@ -885,16 +887,28 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
     // M9 9a: the % of HP rows (Gravity Break, Zantetsuken) read the current HP; Ripple Drive Sora's
     // max MP (KH1's default 2 when the MP block isn't live).
     let max_mp = super::mp::current().map_or(kh1_core::AttackerStats::default().max_mp, |v| v.1);
-    let kh1 = if recom { None } else { row.and_then(|r| super::stats::kh1_hit(enemy, r, super::stats::sora_level(), hp, max_mp)) };
+    // M12 step 3, Berserk: + 4 Strength on this hit's Strength-source record (or 0).
+    let berserk = match row {
+        Some(r) if pl != 0 => super::kh1_support::berserk_bonus(pl, r),
+        _ => 0,
+    };
+    let kh1 = if recom { None } else { row.and_then(|r| super::stats::kh1_hit_with(enemy, r, super::stats::sora_level(), hp, max_mp, berserk)) };
+    if berserk != 0 && !recom {
+        super::kh1_support::berserk_kh1_line(enemy, row.unwrap_or(0), kh1);
+    }
     if let Some(d) = kh1 {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
     }
     // Damage = Re:CoM (owner, 2026-11-01, follow-ups): Gravity Break and Zantetsuken take KH1's
     // percentage of the enemy's Re:CoM current HP instead of the card's column 2.
-    let pct = if recom { row.and_then(|r| super::stats::recom_percent_hit(enemy, r, super::stats::sora_level(), hp, max_mp)) } else { None };
+    let pct = if recom { row.and_then(|r| super::stats::recom_percent_hit_with(enemy, r, super::stats::sora_level(), hp, max_mp, berserk)) } else { None };
     if let Some(d) = pct {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
         super::damage::note(|| format!("swing row {}: KH1's % of Re:CoM's HP {hp} = {d} (was the card's AP {carried})", row.unwrap_or(0)));
+    }
+    // M12 step 3, Berserk at Damage = Re:CoM (owner): the card AP × the share of KH1's + 4 Strength.
+    if let (true, None, Some(r), true) = (recom, pct, row, berserk != 0) {
+        super::kh1_support::berserk_recom(enemy, part, r, hp, max_mp);
     }
     // Damage = Re:CoM (owner, 2026-11-01, follow-ups 2): Gravity Break and Zantetsuken skip
     // Re:CoM's boss falloff: its multiplier at 1.0 for the handler, its three fields put back after
