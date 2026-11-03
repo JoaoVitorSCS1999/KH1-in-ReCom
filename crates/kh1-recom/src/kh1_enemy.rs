@@ -99,7 +99,7 @@ const SOLDIER_ATTACKS: &[&str] = &["kick", "double kick", "jumping kick", "spin 
 
 /// Every class with a KH1 behaviour. Index = the runtime's class number. M11's enemies each keep their
 /// row in their own module (`crate::m11`); one line here per enemy.
-pub static CLASSES: [&Class; 14] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS, &crate::ground::largebody::CLASS, &crate::ground::neoshadow::CLASS, &crate::ground::wightknight::CLASS, &crate::ground::fatbandit::CLASS];
+pub static CLASSES: [&Class; 15] = [&SHADOW, &SOLDIER, &crate::fliers::airsoldier::CLASS, &crate::ground::powerwild::CLASS, &crate::fliers::darkball::CLASS, &crate::ground::bandit::CLASS, &crate::fliers::airpirate::CLASS, &crate::fliers::wyvern::CLASS, &crate::fliers::searchghost::CLASS, &crate::ground::pirate::CLASS, &crate::ground::largebody::CLASS, &crate::ground::neoshadow::CLASS, &crate::ground::wightknight::CLASS, &crate::ground::fatbandit::CLASS, &crate::ground::defender::CLASS];
 
 /// M10's Shadow (class 0).
 pub static SHADOW: Class = Class {

@@ -139,7 +139,7 @@ pub const NAMES: &[&str] = &[
     "close_range",
     "far_range",
     "close_flame_chance",
-    "close_mace_above",
+    "close_strike_above",
     "close_follow_range",
     "close_follow_flame_above",
     "close_follow_far",
@@ -167,10 +167,10 @@ pub const NAMES: &[&str] = &[
     "guard_cone",
     "guard_hold_wait",
     "guard_aim_cone",
-    "guard_mace_range",
+    "guard_strike_range",
     "guard_far",
     "guard_close",
-    "guard_close_mace",
+    "guard_close_strike",
     "guard_drop_blend",
     "recoil_blend",
     "flame_len_less",
@@ -180,7 +180,7 @@ pub const NAMES: &[&str] = &[
     "flame_turn_chance",
     "fire_len_less",
     "shot_len_less",
-    "mace_cone",
+    "strike_cone",
     "face_cone",
     "back_deg",
     "back_cone",
@@ -198,7 +198,7 @@ pub const NAMES: &[&str] = &[
     "fall_max",
     "hit_far",
     "hit_far_fire_above",
-    "hit_near_mace",
+    "hit_near_strike",
     "hit_near_spin_above",
     "repel_count",
     "exp_div",
@@ -492,7 +492,7 @@ async fn turn_to_target(cx: &Cx) {
 /// (an action, blend 0) with the idle queued.
 async fn strike_at(cx: &Cx) {
     on_ground(cx).await;
-    if off(cx, 0.0, k(cx, "mace_cone")) {
+    if off(cx, 0.0, k(cx, "strike_cone")) {
         face(cx);
     }
     action(cx, req::STRIKE, Some(Attack::Strike), 0.0).await;
@@ -688,7 +688,7 @@ async fn guard(cx: &Cx) {
             out = true;
             idle_rest(cx).await;
             let d = dist(cx);
-            if d - k(cx, "guard_mace_range") < 0.0 {
+            if d - k(cx, "guard_strike_range") < 0.0 {
                 strike(cx, 2).await;
             } else if d - k(cx, "guard_far") > 0.0 {
                 fireballs(cx, 1).await;
@@ -700,7 +700,7 @@ async fn guard(cx: &Cx) {
         if dist(cx) - k(cx, "guard_close") < 0.0 {
             out = true;
             idle_rest(cx).await;
-            if rand(cx, "guard close") - k(cx, "guard_close_mace") < 0.0 {
+            if rand(cx, "guard close") - k(cx, "guard_close_strike") < 0.0 {
                 strike(cx, 2).await;
             } else {
                 flame(cx).await;
@@ -739,7 +739,7 @@ async fn close(cx: &Cx) {
     let r = rand(cx, "close");
     if r - k(cx, "close_flame_chance") < 0.0 {
         flame(cx).await;
-    } else if r - k(cx, "close_mace_above") > 0.0 {
+    } else if r - k(cx, "close_strike_above") > 0.0 {
         strike(cx, 1).await;
         let d = dist(cx);
         if d - k(cx, "close_follow_range") < 0.0 {
@@ -882,7 +882,7 @@ async fn hit(cx: Cx) {
         }
     } else {
         let r = rand(&cx, "hit near");
-        if r - k(&cx, "hit_near_mace") < 0.0 {
+        if r - k(&cx, "hit_near_strike") < 0.0 {
             strike(&cx, 2).await;
         } else if r - k(&cx, "hit_near_spin_above") > 0.0 {
             spin(&cx).await;

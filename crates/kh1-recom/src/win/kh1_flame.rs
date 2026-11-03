@@ -17,6 +17,11 @@
 //!   re-hit). Re:CoM collides the spheres with Sora, applies the damage (Re:CoM's own fireball's power, id 1: the
 //!   attack of the same kind, Assumption) and draws each with its own fireball's effects (`0x14053E290`).
 //! - Ends when 207 stops playing, after 140 frames, at the defeat or a new battle (the shots' lives run out).
+//! - **The Defender's flame** (M11, `ex_2340_00.bd`, Checked (files)), the same chain with its own numbers (the manifest's,
+//!   [`Shape`]): it waits 110 frames while 212 plays (it never burns if 212 stops first), then burns 140 frames from bone
+//!   105's line (`0x1069` at t 3 / 15, both 25 lower; Re:CoM's `lb_wep0`), radii 20 → 40, growing over its first 30
+//!   frames, **placed where the line was 7 frames before** (KH1's 8-slot ring `0x7A6`: the flame trails the shield),
+//!   re-hitting every 10 frames; once 212 stops it burns 10 frames more. Its look: the Defender's own fireball effect set.
 //!
 //! Per frame: nothing while no flame burns; one bone read and ≤ 16 bullet writes per burning flame.
 
@@ -44,10 +49,34 @@ type AttrFn = unsafe extern "win64" fn(usize, i32) -> u32;
 const ATTACK_AP: u32 = 0x0017_F0E0;
 const ATTACK_ATTR: u32 = 0x0017_F050;
 
+/// A flame's own rule beyond the Fat Bandit's (the manifest's numbers; absent: the Fat Bandit's).
+#[derive(Clone, Copy, Debug)]
+struct Shape {
+    /// The parent's request it lives with (`flame_request`; the Fat Bandit's 207).
+    request: u16,
+    /// Frames it waits first while that request plays (`flame_delay`; 0).
+    delay: f32,
+    /// The ring's slots (`flame_ring`: the line of `ring` − 1 frames before; 0: the line now).
+    ring: usize,
+    /// Frames it burns on once the request stops (`flame_tail`; none: it ends at once).
+    tail: Option<f32>,
+    /// Its first `grow` frames it grows (`flame_grow`, or `flame_life` − `flame_grow_until`).
+    grow: f32,
+}
+
 struct Flame {
     /// The Fat Bandit (its address and Re:CoM id).
     en: usize,
     id: u32,
+    shape: Shape,
+    /// The frames of its wait left.
+    wait: f32,
+    /// The ring: the lines (start, end) of its last `ring` frames, oldest first.
+    lines: std::collections::VecDeque<(Vec3, Vec3)>,
+    /// The tail began (once).
+    cut: bool,
+    /// The look (descriptor `+0xA8` / `+0xB8`).
+    look: Option<(u64, Option<u64>)>,
     /// Its spheres' shot ids, in the chain's order.
     shots: Vec<u32>,
     /// KH1's clock (`sp+0x38`) and the re-hit clock (`+0xA4`).
@@ -71,6 +100,16 @@ fn line(s: impl FnOnce() -> String) {
 /// `sys 94(actor, 1, …, 0x15C)`: the Fat Bandit `en` starts its flame (a new one replaces an older one of the same
 /// enemy: Assumption, KH1 would run both).
 pub(super) unsafe fn start(en: usize, class: &str, m: &Manifest) {
+    let c = |k: &str| m.consts.get(k);
+    let has = |k: &str| c(k).is_finite();
+    let shape = Shape {
+        request: if has("flame_request") { c("flame_request") as u16 } else { BREATH },
+        delay: if has("flame_delay") { c("flame_delay") } else { 0.0 },
+        ring: if has("flame_ring") { c("flame_ring") as usize } else { 0 },
+        tail: has("flame_tail").then(|| c("flame_tail")),
+        grow: if has("flame_grow") { c("flame_grow") } else { c("flame_life") - c("flame_grow_until") },
+    };
+    let look = super::kh1_thrown::fire_look(class);
     let id = m.consts.get("fire_recom_id") as i32;
     let ap = func::<ApFn>(ATTACK_AP)(en, id, m.consts.get("fire_kind") as i32, 0, std::ptr::null_mut(), 0) as i32;
     let attr = func::<AttrFn>(ATTACK_ATTR)(en, id);
@@ -80,10 +119,10 @@ pub(super) unsafe fn start(en: usize, class: &str, m: &Manifest) {
             end_shots(f);
         }
         g.retain(|f| f.en != en);
-        g.push(Flame { en, id: eid, shots: Vec::new(), t: 0.0, rehit: 0.0, serial: 0, ap, attr });
+        g.push(Flame { en, id: eid, shape, wait: shape.delay, lines: std::collections::VecDeque::new(), cut: false, look, shots: Vec::new(), t: 0.0, rehit: 0.0, serial: 0, ap, attr });
         BURNING.store(true, Ordering::Relaxed);
     }
-    line(|| format!("{class} e{eid}: its flame starts (KH1's child: spheres {} → {} cm for at most {} frames while 207 plays, re-hitting every {}), AP {ap} attribute {attr} (Re:CoM's fireball, id {id})", m.consts.get("flame_r0"), m.consts.get("flame_r1"), m.consts.get("flame_life"), m.consts.get("flame_rehit")));
+    line(|| format!("{class} e{eid}: its flame starts (KH1's child: after {} frames, spheres {} → {} cm for at most {} frames while {} plays, re-hitting every {}, {} frames behind), AP {ap} attribute {attr} (Re:CoM's fireball, id {id})", shape.delay, m.consts.get("flame_r0"), m.consts.get("flame_r1"), m.consts.get("flame_life"), shape.request, m.consts.get("flame_rehit"), shape.ring.saturating_sub(1)));
 }
 
 /// The shots' lives run out (Re:CoM ends and fades them).
@@ -118,9 +157,11 @@ unsafe fn make(f: &Flame, at: Vec3, yaw: f32, r: f32) -> Option<u32> {
     std::ptr::write_unaligned(w(0x3C) as *mut i32, LIFE);
     std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], [at.x, at.y, at.z, 1.0]);
     std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [0.0, crate::units::yaw_to_recom(yaw), 0.0, 0.0]);
-    if crate::sites::FATBANDIT_FIRE_PTRS.iter().all(|p| rd::<usize>(base() + p.rva as usize) == base() + p.target as usize) {
-        std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), super::kh1_thrown::FIRE_EFFECT_SET));
-        std::ptr::write_unaligned(w(0xB8) as *mut usize, va(base(), super::kh1_thrown::FIRE_EFFECT_PLACES));
+    if let Some((set, places)) = f.look {
+        std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), set));
+        if let Some(p) = places {
+            std::ptr::write_unaligned(w(0xB8) as *mut usize, va(base(), p));
+        }
     }
     std::ptr::write_unaligned(w(0x78) as *mut f32, r.max(0.001));
     let factory = func::<FactoryFn>(FACTORY)();
@@ -144,21 +185,41 @@ pub(super) unsafe fn step(en: usize, m: &Manifest, playing: Option<u16>, live: b
     let Ok(mut g) = FLAMES.try_lock() else { return };
     let Some(i) = g.iter().position(|f| f.en == en) else { return };
     let c = |k: &str| m.consts.get(k);
-    if !live || playing != Some(BREATH) || g[i].t - c("flame_life") >= 0.0 {
+    let sh = g[i].shape;
+    // The Defender's child first waits while the request plays (`0x72E`: it ends if the request stops first).
+    let waiting = g[i].wait - 0.0 > 0.0;
+    let stopped = playing != Some(sh.request) && (sh.tail.is_none() || waiting);
+    if !live || stopped || g[i].t - c("flame_life") >= 0.0 {
         let f = g.remove(i);
         end_shots(&f);
         let (id, t) = (f.id, f.t);
-        line(|| format!("e{id}: its flame ends after {t:.0} frames (207 {}, alive {live})", if playing == Some(BREATH) { "plays" } else { "no longer plays" }));
+        line(|| format!("e{id}: its flame ends after {t:.0} frames ({} {}, alive {live}{})", sh.request, if playing == Some(sh.request) { "plays" } else { "no longer plays" }, if waiting { ", before it burned" } else { "" }));
         if g.is_empty() {
             BURNING.store(false, Ordering::Relaxed);
         }
+        return;
+    }
+    if waiting {
+        g[i].wait -= step;
         return;
     }
     let (Some(p0), Some(p1)) = (super::kh1_thrown::manifest_point(en, m, "flame0"), super::kh1_thrown::manifest_point(en, m, "flame1")) else { return };
     let a = crate::units::to_kh1(p0) + Vec3::new(0.0, c("flame_lift0"), 0.0);
     let b = crate::units::to_kh1(p1) + Vec3::new(0.0, c("flame_lift1"), 0.0);
     let f = &mut g[i];
-    let spheres = kh1_core::fatbandit::flame_spheres(a, b, c("flame_r0"), c("flame_r1"), f.t, c("flame_grow"), c("flame_grow_div"));
+    // KH1's ring (`0x7A6`): the line of `ring` − 1 frames before (its first frame's until then).
+    let (a, b) = if sh.ring > 1 {
+        if f.lines.is_empty() {
+            f.lines.extend(std::iter::repeat((a, b)).take(sh.ring));
+        } else {
+            f.lines.push_back((a, b));
+            f.lines.pop_front();
+        }
+        f.lines[0]
+    } else {
+        (a, b)
+    };
+    let spheres = kh1_core::fatbandit::flame_spheres(a, b, c("flame_r0"), c("flame_r1"), f.t, sh.grow, c("flame_grow_div"));
     let n = spheres.len().min(MAX_SPHERES);
     while f.shots.len() < n {
         let (centre, r) = spheres[f.shots.len()];
@@ -207,9 +268,21 @@ pub(super) unsafe fn step(en: usize, m: &Manifest, playing: Option<u16>, live: b
     }
     if f.t == 0.0 || again {
         let (id, t, k) = (f.id, f.t, f.shots.len());
-        line(|| format!("e{id}: flame frame {t:.0}: {n} spheres ({k} shots){}", if again { ", its hit-once mask cleared (KH1's 60 frames)" } else { "" }));
+        line(|| format!("e{id}: flame frame {t:.0}: {n} spheres ({k} shots){}", if again { ", its hit-once mask cleared (KH1's re-hit)" } else { "" }));
     }
     f.t += step;
+    // The Defender's tail (`0x6A4`): the parent no longer plays the request: 10 frames more, once.
+    if let Some(tail) = sh.tail {
+        if playing != Some(sh.request) && !f.cut {
+            f.cut = true;
+            let life = c("flame_life");
+            if life - f.t - tail > 0.0 {
+                f.t = life - tail;
+            }
+            let id = f.id;
+            line(|| format!("e{id}: its flame's request stopped: {tail} frames more (KH1's tail)"));
+        }
+    }
 }
 
 /// The battle ended (or a new one began): the flames are gone.
