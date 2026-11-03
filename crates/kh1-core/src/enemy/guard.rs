@@ -30,6 +30,14 @@ pub fn is_guard_type(t: u32) -> bool {
     (1..=4).contains(&t)
 }
 
+/// An attack row of clash type `t` is tested against hurt bodies (`0x1402B3BE0`: `((t << 17) − 0x20000) &
+/// 0xFFF9FFFF != 0 || t == 3` on the object's bits 17..19): every type but 1, 2 and 4. A row of those types only
+/// meets other attacks: it never hurts anyone. Checked (decomp).
+pub fn hurts_bodies(t: u32) -> bool {
+    let bits = (t & 7) << 17;
+    (bits.wrapping_sub(0x20000) & 0xFFF9_FFFF) != 0 || bits == 0x60000
+}
+
 /// The request a guard row made with KH1's mode 3 is "made with" (`sys 213(row, 3)`, `0x1402BBC10` writes the
 /// mode to the object's bits 2..3; `0x1402B47A0` tests a mode-3 row every frame without looking at the owner's
 /// request or HIT slots, until `sys 213(row, 0)` removes it; Checked (decomp)). M11, the Large Body's front row.
@@ -252,6 +260,15 @@ mod tests {
         // The Bandit's block stance row `0x15C` (the player's `ex_2090.bd`): type 2, priority 30,
         // recoil 232, cone 0 / 0 (the front half), slot 0 on 230 [0, 12), 231 [0, 60), 233 [0, 10).
         GuardRow { name: "stance".into(), clash_type: 2, priority: 30, recoil: 232, turn: 0.0, cos: 0.0, windows: vec![(230, vec![(0.0, 12.0)]), (231, vec![(0.0, 60.0)]), (233, vec![(0.0, 10.0)])], rows: 1 }
+    }
+
+    #[test]
+    fn types_1_2_and_4_never_hurt_a_body() {
+        // `0x1402B3BE0`'s body test: type 3 (the Wyvern's charge) still hurts; Sora's Guard (type 2) meets
+        // neither a type 1 nor a type 2 row (`MEETS`), so such rows pass him without a block too.
+        let hurts: Vec<u32> = (0..8).filter(|&t| hurts_bodies(t)).collect();
+        assert_eq!(hurts, vec![0, 3, 5, 6, 7]);
+        assert!(!meets(2, 1) && !meets(2, 2) && !meets(2, 4));
     }
 
     #[test]

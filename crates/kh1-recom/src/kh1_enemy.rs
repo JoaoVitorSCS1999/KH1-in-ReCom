@@ -422,6 +422,18 @@ impl Manifest {
     pub fn clash_of(&self, record: u16) -> Option<&ClashRow> {
         self.clash.iter().find(|c| c.records.contains(&record))
     }
+
+    /// A live `.ASD` record (by index) was made from a row KH1 never tests against a hurt body (clash type 1, 2
+    /// or 4, `0x1402B3BE0`): it only meets Sora's swings, it never hurts (owner 2026-11-02, "Clash choices":
+    /// block only). `win::attack::pair_dispatch` answers 0 for its collision against the player side.
+    pub fn never_hurts(&self, record: u16) -> bool {
+        self.clash_of(record).is_some_and(|c| !ke::guard::hurts_bodies(c.clash_type))
+    }
+
+    /// The manifest has a row that never hurts ([`Manifest::never_hurts`]): the Soldier's and the Powerwild's.
+    pub fn has_never_hurting(&self) -> bool {
+        self.clash.iter().any(|c| !ke::guard::hurts_bodies(c.clash_type))
+    }
 }
 
 impl ke::Motions for Manifest {
@@ -822,6 +834,28 @@ mod tests {
         assert_eq!(record_index(0x1000 + 9 * 0xA0, 0x1000, 9), None);
         assert_eq!(record_index(0x1000 + 0x50, 0x1000, 9), None);
         assert_eq!(record_index(0xF00, 0x1000, 9), None);
+        assert!(!m.has_never_hurting() && !(0..10).any(|r| m.never_hurts(r)), "type 0 rows all hurt");
+    }
+
+    /// Owner 2026-11-02 ("Clash choices": block only): a record made from a KH1 row of clash type 1, 2 or 4 never
+    /// hurts (Re:CoM's test of it against the player side answers 0); the rest of its attack's records, Re:CoM's own
+    /// records and a type 3 row (the Wyvern's charge) still hurt.
+    #[test]
+    fn guard_type_rows_inside_attacks_never_hurt() {
+        let consts: Vec<String> = ke::ENGINE_NAMES.iter().map(|n| format!("\"{n}\": 1.0")).collect();
+        let r: Vec<String> = [0u16, 200, 207, 215, 218].iter().map(|q| format!("{{\"request\": {q}, \"entry\": 0, \"slot\": {}, \"name\": \"e002_100\", \"frames\": 30, \"root\": false, \"loop\": false, \"source\": \"kh1\"}}", 100 + q % 50)).collect();
+        // The Soldier's spin kick: its foot (type 0, 100) and its chest `0x2AC` (type 1, 100, cone ±120°).
+        let spin = r#"{"name": "spin kick", "request": 200, "recoil": 215, "rows": ["0x23c", "0x2ac"], "clash": [{"row": "0x23c", "type": 0, "priority": 100, "turn": 0.0, "cos": 1.0, "records": [2, 3]}, {"row": "0x2ac", "type": 1, "priority": 100, "turn": 0.0, "cos": -0.5, "records": [4]}]}"#;
+        let charge = r#"{"name": "charge", "request": 207, "recoil": 218, "rows": ["0x1cc"], "clash": [{"row": "0x1cc", "type": 3, "priority": 100, "turn": 0.0, "cos": -1.0, "records": [5]}]}"#;
+        let t = format!("{{\"format\": \"kh1-enemy 1\", \"enemy\": \"x\", \"consts\": {{{}}}, \"attacks\": [{spin}, {charge}], \"parts\": [5], \"requests\": [{}]}}", consts.join(", "), r.join(", "));
+        let m = parse(&t, "x", &[], &[0]).unwrap();
+        assert!(m.has_never_hurting());
+        assert_eq!((0..8).filter(|&r| m.never_hurts(r)).collect::<Vec<_>>(), vec![4], "only the chest's record");
+        // The Powerwild's flurry body (type 2) too; a type 4 row likewise.
+        for (t2, never) in [(2, true), (4, true), (3, false), (0, false)] {
+            let m2 = parse(&t.replace("\"type\": 1,", &format!("\"type\": {t2},")), "x", &[], &[0]).unwrap();
+            assert_eq!(m2.never_hurts(4), never, "type {t2}");
+        }
     }
 
     /// One swing frame against live rows (M11, attack meets attack): the Kingdom Key's 30.

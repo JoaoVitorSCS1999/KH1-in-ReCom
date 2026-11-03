@@ -1383,4 +1383,37 @@ mod clash_tests {
             eprintln!("attack-meets-attack manifest test skipped: KH1_M11_DIR / KH1_TEST_DATA not set");
         }
     }
+
+    /// Fix (owner, 2026-11-02, "Clash choices": block only): the attack rows KH1 never tests against a hurt
+    /// body (clash types 1, 2, 4, `0x1402B3BE0`) are, of every ported class, only the Soldier's spin-kick chest
+    /// and the Powerwild's flurry body. The host reads their type from the manifest (`kh1_enemy::Manifest::
+    /// never_hurts`), so the manifests the step already wrote serve.
+    #[test]
+    fn only_two_attack_rows_never_hurt() {
+        let mut seen = 0;
+        let mut found = Vec::new();
+        for spec in SPECS {
+            let Some(inp) = inputs(spec) else { continue };
+            let Ok(b) = build(spec, &inp) else { continue };
+            seen += 1;
+            for (clash, a) in b.clash.iter().zip(spec.attacks) {
+                for (i, c) in clash.iter().enumerate() {
+                    if !kh1_core::enemy::guard::hurts_bodies(c.clash_type) {
+                        found.push((spec.name, a.name, i, c.row, c.clash_type, c.priority));
+                    }
+                }
+            }
+        }
+        if seen == 0 {
+            eprintln!("never-hurting rows test skipped: KH1_M11_DIR / KH1_TEST_DATA not set");
+            return;
+        }
+        let want = [("soldier", "spin kick", 1, 0x2AC, 1, 100), ("powerwild", "flurry", 2, 0x1CC, 2, 10)];
+        for w in want {
+            if seen == SPECS.len() || found.iter().any(|f| f.0 == w.0) {
+                assert!(found.contains(&w), "{w:?} not among {found:?}");
+            }
+        }
+        assert!(found.iter().all(|f| want.contains(f)), "{found:?}");
+    }
 }
