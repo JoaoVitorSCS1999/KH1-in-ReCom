@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 192: M12 step 4: the 27 sleight abilities on Sora's Abilities page, version 0.99.0 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "When unlocking each sleight (not including friend sleights, the generic magic sleights, and any sleights that have a KH1 combo modifier/finisher equivalent) it will be added as an ability that you can equip with AP, with reasonable AP costs relative to their damage."; answers: added when Re:CoM teaches it; the 25 magic sleights + Idyll Romp and Cross-slash+; the owner's AP costs (2 / 3 / 4 / 5).
+- On Sora's Abilities page after the KH1 abilities, in Re:CoM's sleight order; each appears unequipped once Re:CoM's own check (`0x14023AB00`) says Sora learned it (Re:CoM's learned bits read, never set: trophy 0x45 untouched). Equipping: the existing AP rules. `win::abilities::equipped_sleights()` and `abilities::sleight_mp` (the owner's MP by tier) for the next step; nothing performs a sleight yet.
+- Save layout v6: ability words 64-bit, bits 32.. in 8 new bytes at `save+0x26B7..=0x26BE` (after the summon block; Checked unused), read only at v6; v5 saves keep everything (sleights already learned arrive without notices).
+- Notices: Re:CoM's own learned box with its wording and name; none on a save's first load; none when Re:CoM just showed its own screen for it (the level-up Sleight pick `0x14010EF10` case 6 row 2, its event / chest screen; caught in the existing level-up wrapper, no new hook). Limits: that record lasts the session; a sleight taught with no screen gets its notice at the next Attack press, Abilities page or level-up end.
+- Checked (files): names against Re:CoM's `SY0002.CTD` (it says "Lethal Flame"; the page uses the owner's "Lethal Frame": owner question). Help lines generic for now.
+- Checked: tests (1053), Windows build. Not checked: in game. Asset step: not needed.
+
+---
+
 ## Stage 191: AP Up keeps Re:CoM's +25 CP unseen; no card help after the level-up Sleight pick, version 0.98.9 (2026-11-01)
 
 - Asks (owner, 2026-11-03): AP Up "Keep CP growing"; the level-up Sleight pick's help page "Skip it".
