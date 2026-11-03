@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 195: Wizard and Aquatank untouchable while they grey the room (on Re:CoM's AI), version 0.100.1 (2026-11-01)
+
+- Ask (owner, 2026-11-03, on 0.99.1): the Wizard and the Aquatank "Same rule".
+- Re:CoM (Checked (decomp + exe)): one greying state each; its begin asks the colour fade `0x140232170` for 0.5 grey (mask 0x1800, slot 0, 30 frames), its end for normal: the Wizard's state 4 (begin `0x140195590`, vtable `0x140554A58` +0x148: `e025_052`, about 180 frames of `_ex_2150` shots near Sora, `e025_054`); the Aquatank's state 3 (begin `0x14018AA70`, vtable `0x140532FE8` +0x130: `e020_051`..`053`, one `_thunder_all` shot over Sora). Move identities from motion / shot names (Assumption).
+- Built (no new hook, no vtable writes; the bosses' revenge tail doesn't exist on normal Heartless): right after that begin, with Re:CoM's own vtable (Re:CoM's AI) and a fresh grey request, Re:CoM's own hurt-bodies-off; hits arriving anyway dropped by Re:CoM's rule for an attacking enemy, no Guard flinch; Re:CoM's state end `0x14017DA90` turns them back on. Stop / stun / defeat and the 0.83.0 cooldown unchanged. Checks: `DIM_NORMAL_PTRS` (6 vtable pointers), `DIM_NORMAL_CHECKED` (both begins and Re:CoM's state 3 / 4 begin wrappers).
+- Assumption: a battle ending mid-move leaves a harmless entry, cleared at the next.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 194: M12 step 5: the Sleights menu (Left toggles Summon / Sleights; equipped sleights; MP by tier), version 0.100.0 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "If you press left on the d-pad, instead of summons at the bottom of the command menu, it should say \"sleights\" In the sleights menu I only want ACTIVELY EQUIPPED sleights to show in the list."; answers: Left anywhere; MP by tier (1 / 2 / 2 / 3; Idyll Romp / Cross-slash+ all MP).
