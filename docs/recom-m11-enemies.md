@@ -2540,11 +2540,23 @@ The Shadow's sunk-state machinery is reused as it is: `Cmd::Hittable` (Re:CoM's 
 model scale y), `Cmd::Underground` (log), `Cmd::Visible` (Re:CoM's hide bit). Owner decisions for the Shadow apply: sunk =
 unhittable (from the sink's frame 46 to the come-up's end), lockable stays, Sora's body push not mapped.
 
-**KH1's room 29 in Re:CoM's battles** (owner question 1). The script names room 29's points: the formations' 27 places,
-the spot the hidden one comes up at `(9000, 5300, 100)`, the spot a lone one goes to `(8900, 5300, 100)`, the stuck
-traveller's spot `(8700, 5300, 100)`, the height 5380. Built: the middle formation's first place `(8800, 5480, 100)` stands
-for where Sora was when the battle's first Neoshadow first saw him; x / z about it, heights from the battle floor (the floor
-the Neoshadow last stood on). Assumption (flat floors; room 29's floor at 5480).
+**No fixed points of KH1's room 29** (owner, 2026-11-02, question 1: "drop room 29's fixed spots: no fixed points, they
+wander and attack instead"). The script names room 29's points: the formations' 27 places, the spot the hidden one comes up
+at `(9000, 5300, 100)`, the spot a lone one goes to `(8900, 5300, 100)`, the stuck traveller's spot `(8700, 5300, 100)`, the
+height 5380. None is used as a point now; every other part of the script (counts, timings, the call, sinks, rises, dives) is
+kept:
+
+| KH1 (room 29) | The port | Tag |
+|---|---|---|
+| alone `0x8FA`: underground straight to `(8900, 5300, 100)`, come up, the call | underground straight to a point 600–1000 about its own place (the script's own sink-away rule `0x552C(actor+0x10, 600, 1000)`, `near_away_min` / `near_away_max`), come up, the call | Assumption (nearest KH1-native rule) |
+| the hidden one alone: `sys 86` to `(9000, 5300, 100)`, 30 f, come up, the call | `sys 86` to a point 600–1000 about its own place (same rule), 30 f, come up, the call | Assumption |
+| the formation `0x2430`: a layout by Sora's x in room 29, `sys 86` to a free place of it | the place draw kept (KH1's frames and random numbers, the group's words), no layout, no move: each rises where it sank, all together, facing Sora at once (the rise's own `0x403C`) | Assumption |
+| the stuck traveller `0x58AE`: turn toward `(8700, 5300, 100)` ±60°, 700–1000 away | turn toward Sora ±60°, 700–1000 away (no target: back the way it faces) | Assumption (owner question 6) |
+| the walk home after a dive `0x372C`: higher than 5380 (100 above room 29's floor 5480), walk to its home (`wp+0x10`, its own spawn) 60 f | kept: more than 100 above the battle floor, walk home (its own spawn point, not a room point; never on Re:CoM's flat floors after the landing) | Assumption (flat floors) |
+
+The point numbers are still read from the player's script (the manifest is unchanged: the asset step need not be re-run).
+Checked (files): every use of the point numbers in `ex_2420.bd` (`0x58AE`, `0xA32`, `0xAE6`, `0x2430`..`0x28DC`, `0x3736`)
+listed with `tools/kh1-ai-script.py`.
 
 #### What the asset step writes
 
@@ -2575,8 +2587,9 @@ gets KH1's AI` in a Neoshadow battle.
   `+0x374` bit 3 (`sys 163`) is "drawn this frame" (`0x1402A14F0`).
 - **Checked (exe):** the class, its slots, RTTI, the ctor and its only call, the factory size, the world code table; every site
   (911, pefile, 0 mismatches, 2026-11-02).
-- **Assumptions:** the power of the dive; room 29's points about where Sora started, heights from the battle floor (its floor
-  5480); the grab not built (the miss instead); the call wakes nothing; a called one unhittable while it comes up (KH1 takes
+- **Assumptions:** the power of the dive (owner: id 1, as built); no fixed points (owner): a lone one and the hidden one go to
+  a point 600–1000 about their own place, the formation rises where each sank, a stuck traveller turns toward Sora, heights
+  from the battle floor (room 29's floor 5480); the grab not built (the miss instead); the call wakes nothing; a called one unhittable while it comes up (KH1 takes
   the hits without damage: Re:CoM can't); KH1's `+0x90` (a dive's other end) never set (not identified); `sys 124` (written 0
   / 100 around its attacks) not ported (not identified); a killing hit during the sink's first frames kills (KH1 keeps it at
   1 HP: Re:CoM's defeat); the dive's row on from 205's first frame (KH1: 8 frames in); the miss faces its own way (KH1:
@@ -2587,13 +2600,13 @@ gets KH1's AI` in a Neoshadow battle.
 #### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; any Neoshadow battle)
 
 1. Neoshadows stand where they appear (no rise) and come at Sora at once.
-2. **One Neoshadow:** it sinks, slides underground to near where Sora started the battle, comes up and raises its arms for
+2. **One Neoshadow:** it sinks, slides underground 6–10 m from where it was (no fixed spot), comes up and raises its arms for
    about 4 s (KH1's call; nothing comes in a Re:CoM battle), then fights: claws, sinks and circles underground, comes up
-   slashing right under Sora, leaps up and dives at him. Then again.
+   slashing right under Sora, leaps up and dives at him. Then again, each time from where it is.
 3. **Two:** one sinks and stays hidden; every 2–3 s it pops up at Sora's feet (209) and vanishes; it can't be hit. The other
-   fights. Kill the other: the hidden one comes up and does 2.
-4. **Three or four:** they all sink together and rise slashing out of the floor at once, from places of a formation around the
-   middle of the battle.
+   fights. Kill the other: the hidden one comes up 6–10 m from where it last was and does 2.
+4. **Three or four:** they all sink together and rise slashing out of the floor at once, each where it sank (no formation
+   places).
 5. **Five or more:** they all leap up and hover; once all are up they dive at Sora one after another.
 6. Swing at one while it leaps, hovers, dives or rises slashing: Sora bounces off (his strong recoil); no damage.
 7. Hit it with plain swings: KH1's flinch; after a flinch, two or fewer of them: it sinks and comes up slashing under Sora. The
@@ -2613,19 +2626,17 @@ record each count once.
 
 #### Neoshadow owner questions
 
-1. **Room 29's points.** KH1 has this Neoshadow only in End of the World's room 29, and its script names that room's points
-   (the formations' places, where the hidden one and a lone one go). (a) Keep: about where Sora started the battle (built);
-   (b) about the battle room's own middle (research: where Re:CoM keeps it); (c) drop the points: a lone one stays where it
-   is and the formation's places are taken around Sora (same spacing).
+1. **Room 29's points.** Answered (owner, 2026-11-02): no fixed points, they wander and attack instead. Built (§ No fixed points
+   of KH1's room 29).
 2. **The grab from below (two Neoshadows).** KH1's hidden one grabs Sora (he plays a held motion from the Neoshadow's file)
    while the other dives at him. (a) Build it natively, its own version (a new Re:CoM player reaction holding Sora with KH1's
    clip; the other's dive on cue); (b) keep KH1's miss only (built).
-3. **The call (one left).** KH1 wakes sleeping Neoshadows the room holds; Re:CoM's battles have none. (a) Keep the 4-second call
-   with nothing coming (built, as a KH1 room without them); (b) skip the call; (c) bring in new Re:CoM Neoshadows (a spawn of
-   Re:CoM's own; research).
-4. **The dive's power** (no Re:CoM twin). (a) Re:CoM's come-up strike, id 1 (built); (b) its claw, id 0.
-5. **Fire on a diving or rising Neoshadow.** KH1's fireball meets its body row (type 5 meets 4) and is turned back; ours hits
-   it. (a) Leave it (built); (b) build KH1's turn-back for this row.
+3. **The call (one left).** Answered (owner, 2026-11-02): the call stays, nothing comes (as built).
+4. **The dive's power** (no Re:CoM twin). Answered (owner, 2026-11-02): Re:CoM's come-up strike, id 1 (as built).
+5. **Fire on a diving or rising Neoshadow.** Answered (owner, 2026-11-02): Fire hits it, no turn-back (as built).
+6. **Where a stuck traveller turns** (new, from question 1). KH1 turns a Neoshadow that is stuck underground toward room 29's
+   middle (`(8700, 5300, 100)`), away from walls. Built: (a) toward Sora (he stands in the open room). Other choices: (b) back
+   the way it faces; (c) toward where it came from.
 
 ### The Wight Knight (built)
 
