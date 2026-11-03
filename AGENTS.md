@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 153: Movement toggles: run_speed (recom), jump_height, air_speed, version 0.84.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "have sora run at the same speed as he does in recom"; then "have run speed, jump height, and air speed all be separate toggles in the settings". Reason found: Re:CoM's homing shots (2.5°/frame for 30 frames) are tuned to be outrun by Re:CoM's Sora (6.2 m/s; KH1's 4.8).
+- Ini keys at Combat = KH1, each `recom | kh1`, any combination, logged at start-up:
+  - `run_speed` (default recom): run = Re:CoM's stick × 6.2 m/s (10.33 KH1 units at full tilt); walk stays KH1's 2. `kh1`: walk 2, run 8, no stick scaling.
+  - `jump_height` (default kh1): `recom` = take-off 13.72 / 15.93 with Re:CoM's gravity 0.49 (read live), peak 198.9 / 266.8; letting go 12+ frames after take-off cuts the speed to 43 %; falls capped at 50. KH1's 4-frame crouch kept.
+  - `air_speed` (default kh1): `recom` = 0.8 of the ground speed at take-off, easing 5 % a frame toward 0.8 × ground speed, facing 10 % a frame, drifting to a stop with the stick let go; only while free in the air (air swings and casts keep KH1's).
+- Run clip: neither game ties its playback to the speed (Checked (decomp)); Re:CoM's own clip at its own speed.
+- Assumptions: Re:CoM's hold after a release cut not ported; take-off air speed from the stick, not the previous frame.
+- Checked: Re:CoM's numbers (decomp + exe), tests for all 8 combinations, Windows build. Not checked: in game.
+
+---
+
 ## Stage 152: Re:CoM-AI Heartless wait their own attack-end cooldown in KH1 battles, version 0.83.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02, Fat Bandit video): "it attacks so frequently that there's no opening"; answers: keep porting; every not-yet-ported Heartless waits a longer cooldown, each enemy's own value.
