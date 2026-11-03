@@ -2905,6 +2905,51 @@ pub const HELD_CALLEES: &[Site] = &[
     Site { name: "player reaction prelude (0x1401F6990)", rva: 0x001F_6990, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18, 0x56, 0x57, 0x41, 0x56, 0x48, 0x83] },
 ];
 
+/// M11 casters: the Defender's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp): its only caller
+/// is the enemy factory `0x140188F40` (case 26, the call at `0x1401893E0`); no branch lands inside the moved bytes and no
+/// pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-02).
+pub const DEFENDER_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemyDefender ctor (0x14018D8E0)", rva: 0x0018_D8E0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 casters: the factory's `mov ecx, 0xCD0` before `CEnemyDefender`'s ctor, raised by the framework's 0x20-byte tail.
+/// Checked (exe).
+pub const DEFENDER_ALLOC: &[Site] = &[Site { name: "alloc CEnemyDefender (0x1401893C7)", rva: 0x0018_93C7, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11 casters: `CEnemyDefender`'s vtable slots the copy keeps or replaces, checked against Re:CoM's functions before the
+/// copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12 / 30 are `CBattleEnemy`'s, 1..3 the
+/// Defender's own: 1 `0x14018DA40` / the walk thunk `0x14018DD60`, 2 its melee `e026_050` `0x14018D9A0` / `0x14018DA90`,
+/// 3 its fireball `e026_051` → `e026_052` `0x14018D9F0` / `0x14018DAF0` (a `CBullet` from `lb_wep0`, homing 2° a frame
+/// for 30 frames); the think `CHeartless`'s `0x140196EC0`).
+pub const DEFENDER_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyDefender +0x70 motion play", rva: 0x0053_CB08, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyDefender +0x80 update", rva: 0x0053_CB18, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyDefender +0xE8 state 0 begin", rva: 0x0053_CB80, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyDefender +0xF0 state 0 step", rva: 0x0053_CB88, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyDefender +0xF8 state 0 end", rva: 0x0053_CB90, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyDefender +0x100 state 1 begin", rva: 0x0053_CB98, target: 0x0018_DA40 },
+    PtrSite { name: "CEnemyDefender +0x108 state 1 step", rva: 0x0053_CBA0, target: 0x0018_DD60 },
+    PtrSite { name: "CEnemyDefender +0x118 state 2 begin", rva: 0x0053_CBB0, target: 0x0018_D9A0 },
+    PtrSite { name: "CEnemyDefender +0x120 state 2 step", rva: 0x0053_CBB8, target: 0x0018_DA90 },
+    PtrSite { name: "CEnemyDefender +0x130 state 3 begin", rva: 0x0053_CBC8, target: 0x0018_D9F0 },
+    PtrSite { name: "CEnemyDefender +0x138 state 3 step", rva: 0x0053_CBD0, target: 0x0018_DAF0 },
+    PtrSite { name: "CEnemyDefender +0x1F0 state 11 begin", rva: 0x0053_CC88, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyDefender +0x208 state 12 begin", rva: 0x0053_CCA0, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyDefender +0x3B8 state 30 begin", rva: 0x0053_CE50, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyDefender +0x3C0 state 30 step", rva: 0x0053_CE58, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyDefender +0x3D0 think", rva: 0x0053_CE68, target: 0x0019_6EC0 },
+    // The shared enemy-guard step: the hit handler's guard event (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemyDefender +0x3D8 guard event", rva: 0x0053_CE70, target: 0x0018_1600 },
+    PtrSite { name: "CEnemyDefender +0x438 attack hurt off", rva: 0x0053_CED0, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyDefender +0x440 attack end", rva: 0x0053_CED8, target: 0x0017_DA90 },
+];
+
+/// M11 casters: the Defender's own fireball's effect set (`0x14018DAF0`'s descriptor `+0xA8` = `0x14053CF30`: slots 1..3
+/// `"_ex_2340"` 12 / 13 / 11, the model's own effects; no `+0xB8`), copied into its KH1 fireballs and flame (owner
+/// 2026-11-02: "drawn with a Re:CoM effect (its own)"). Pointer-checked: slot 1's name pointer. Checked (exe + decomp).
+pub const DEFENDER_FIRE_PTRS: &[PtrSite] = &[PtrSite { name: "the Defender's fireball effect set slot 1 name", rva: 0x0053_CF48, target: 0x0053_CF90 }];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -3040,6 +3085,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         FLAME_CALLEES,
         GARGOYLE_HOOKS,
         GARGOYLE_ALLOC,
+        DEFENDER_HOOKS,
+        DEFENDER_ALLOC,
         HELD_CALLEES,
     ];
     LISTS
@@ -3140,7 +3187,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

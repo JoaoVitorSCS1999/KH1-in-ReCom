@@ -391,4 +391,9 @@ pub trait Behaviour {
     /// host's current motion, which the AI's own last frame may not know while an action plays), before
     /// [`Behaviour::on_hit`] / [`Behaviour::armoured`]. M11, the Large Body's charge test `0x21F6`.
     fn set_playing(&self, _request: Option<u16>) {}
+    /// Whether the damaging hit about to be handled comes from one of the class's own attack rows (KH1's `sys 188`: the
+    /// hit record's attack object `+0x6C`, its row's serial, inside the script's own range; the host: a thrown shot of a
+    /// same-class enemy sent back by Sora's swing or Guard), before [`Behaviour::armoured`] / [`Behaviour::on_hit`] /
+    /// [`Behaviour::on_defeat`]. M11, the Defender's batted fireball (`ex_2340.bd` `0x2DB6`). The default ignores it.
+    fn set_hit_own_row(&self, _own: bool) {}
 }

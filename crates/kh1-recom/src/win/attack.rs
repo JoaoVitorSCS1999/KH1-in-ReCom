@@ -770,7 +770,7 @@ unsafe fn take_kh1_hit(enemy: usize) -> Option<usize> {
 /// `take_kh1_hit`; the kind of Sora's row, which the wrapper passes to `note_swing` only after the call),
 /// else the waiting body's Re:CoM kind `+0x80` mapped (written by the hit apply `0x14016F1C0` with the
 /// count; Checked (decomp)); Some(None) when neither gives one.
-unsafe fn incoming(enemy: usize) -> Option<Option<u8>> {
+unsafe fn incoming(enemy: usize) -> Option<(Option<u8>, u32)> {
     let info: usize = rd(enemy + 0xF8);
     if info == 0 {
         return None;
@@ -788,7 +788,9 @@ unsafe fn incoming(enemy: usize) -> Option<Option<u8>> {
     let swing = KH1_HITS.lock().map(|g| (0..n).any(|i| rd::<i16>(body(i) + 0x90) != 0 && g.iter().any(|&(x, _)| x == body(i)))).unwrap_or(false);
     let pl: usize = rd(va(base(), data::MAIN_PLAYER));
     let kind = swing.then(|| if pl != 0 { kh1_row_of(pl) } else { None }).flatten().and_then(|r| moveset().row(r)).and_then(|x| moveset().attack(x.attack)).map(|a| a.kind);
-    Some(kind.or_else(|| Some(crate::shadow::kh1_kind_of_recom(rd(at + 0x80)))))
+    // The attacker (`0x14016F1C0` writes the attack's owner on the body: the actor, or the bullet itself for a shot; M11,
+    // the Defender's own fireball and KH1's push direction before the handler).
+    Some((kind.or_else(|| Some(crate::shadow::kh1_kind_of_recom(rd(at + 0x80)))), rd::<u32>(at + 0x98)))
 }
 
 /// Re:CoM's enemy hit handler. KH1's rule (decision 14): Sora's hits land during the enemy's card

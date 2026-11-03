@@ -325,7 +325,8 @@ wrapper's check only when a KH1 swing meets a body.
   Re:CoM's other physical attacks (a turned-back shot, a summon) count as KH1's type 0.
 
 **For the Large Body and the Defender:** (the Large Body is built, § The Large Body: its front row is type 1 at
-priority 100, made with KH1's mode 3: a side at 100 is never moved, so Sora gets kind 7 and it gets nothing; no repel.) Their rows are types 1 / 4 with priorities above Sora's: KH1 repels. The repel
+priority 100, made with KH1's mode 3: a side at 100 is never moved, so Sora gets kind 7 and it gets nothing; no repel. The
+Defender is built, § The Defender: its front row is at 99, so it repels; its spin's row sits over it, two rows at once.) Their rows are types 1 / 4 with priorities above Sora's: KH1 repels. The repel
 is built (2026-11-02, first used by the Search Ghost's burst rows): Sora gets his kind 6 / 7 from his own side, the enemy
 the 0x20 record (`HitNews::Repelled`: its script's hit handler decides; no damage, no reaction, its attack goes on).
 Their ports add their rows to `GUARDS` and send `Cmd::Guard`; their scripts' hit handlers must treat `Repelled` as KH1's
@@ -3360,6 +3361,245 @@ give the rounds' timings, the ball's path and bounces and the fade windows to co
    floor only; a Re:CoM wall ends it (Re:CoM's bullet rule). (a) Keep (Re:CoM's battle arenas are open); (b) research
    Re:CoM's mover contact to bounce off walls as KH1.
 
+### The Defender (built)
+
+Status: built on branch `defender-wip`; tests and the Windows build pass; **not seen in game**; no KH1 trace of the Defender
+yet. KH1's AI, attacks, reactions and motions on Re:CoM's `CEnemyDefender`, with Re:CoM's stats; its shield's front row
+repels Sora's swings through the shared enemy guard's repel outcome (KH1's own cone and priority); it keeps its shield
+toward Sora with KH1's turning steps; its fireballs and its flame are Re:CoM bullets moved by KH1's numbers.
+
+#### KH1's side. Checked (files: `ex_2340.bd` disassembled, code from `0x4C8`, folded and raw; its children `ex_2340_00.bd` / `ex_2340_01.bd`, code from `0x18`; decomp: the syscalls named)
+
+The script (0x3480 bytes) keeps the actor at `wp+0`, Sora at `wp+4`, the state object at `wp+0x20`, the search object at
+`wp+0x30`; two children in the `.mdls` part 3 (0x80..0x900 the flame, 0x900..0xF80 the fireball). Its actions (bit 24:
+the script waits) are 203, 205, 206, 207 and 209; everything else is a plain request.
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x2644` | init `0x27EC` (stats `+4` walk 2.5; **the front row `0xEC`**: `sys 23`, `\|= 512`, `sys 213(row, 3)`: KH1's mode 3; handlers: hit `0x2BC0`, message `0x2A44`, the hit-effect filter `0x2A9C`; the world (`wp+0x8C`; world 11 `wp+0x80`; world 15 rooms (2, 0) / (10, 16) `wp+0xB0`); `sys 125(12)`; records LV1 `0x14` / LV2 `0x80`); a yield; Sora; a partner object of kind 300 (`sys 4(0xB0000 \| 300)`; with one, `sys 81(…, 5403)`: `wp+0x98` = 1, `wp+0x9C` its answer; none in Re:CoM's battles: `wp+0x98` = 0); the appearance thread `0x9CA`; a yield; then each frame: out of the appearance (`wp+0x90` ≠ 1) flag 0x40 cleared and the meshes shown (`sys 99`); the turn rate 2° while the walk (1) or the wind-up (210) plays, else 12° (`0x2768`); a state request restarts the behaviour (2 engaged `0x6B6` → `0x6EE`, 4 hit `0x4C8` → `0x514`) |
+| appearance | `0x9F8` | spawn type ≠ 0: `wp+0x90` = 1; the meshes hidden (`sys 98(1, 2)`); movement state 7 with no velocity (`sys 169`); flag 0x40 (unhittable); off the ground (always, after `sys 169`): facing the target, falling (`+0x20` down, its speed + 0.5 × step × 0.5 a frame to 20) until `sys 89` ≤ 0, then `sys 88` (state 0); effect 2; 213 (`sys 13`, blend 0) to its end turning to the target (frame 34: a part fade-in callback `sys 150` / `sys 153`; frame 54: the meshes shown); flag 0x40 cleared; the idle |
+| engaged | `0x6EE` | the target dead → Sora; `wp+0x90` = 0; with a partner `0x7EC` (not ported); else close (< 470) `0x8E0`, far (> 600) `0x84C`, else mid `0x896`; the leash `0x3268(1700, 1700)` outside world 11 (not ported); the search (5000); a yield; again |
+| close | `0x8E0` | rand < 0.3 the flame; > 0.4 the strike after the turn (`0x16F8(1)`), then within 400 the spin and (rand > 0.3) the flame else two fireballs, beyond 600 two fireballs, else the approach; else (0.3..0.4) the spin |
+| mid / far | `0x896` / `0x84C` | rand < 0.3 the approach; > 0.5 fireballs (2 / 3); else the guard |
+| the turn | `0x17C0` | **keeps the shield toward Sora**: within 30° of its front nothing; within 50° of its back the turn-around; else side steps (Sora within 80° of its −90° side: 202 turning −0.45°, else 200 turning +0.45°), each followed by `0x192E` (within 35° of its front: done; within 50° of its back: done and the turn-around), the strike after the 3rd |
+| a step | `0x1A80` / `0x199A` / `0x1B5E` | on the ground; the request with **bit 16** (`0x100C8` / `0x100CA` / `0x100C9`: held at its end, not looped); for its length − 2 frames: the facing turned by 0.45° × step (200), −0.45° (202) or 2.36° (201, the turn-around: 174.6° in 74 frames) and set now (`sys 10`, `sys 11`); cut off the ground or when done (a second step of the same request is done at once: one frame) |
+| strike | `0x16F8(mode)` / `0x1D64` | (mode 1: the turn first); Sora off its front (30°): it turns to him (`sys 36`); the row `0x15C`; 209 (action, blend 0), the idle queued |
+| spin | `0x1C58` | within 400: the rows `0x1CC` and `0x23C`; 208 (plain, blend 0), each frame the facing −3° × step (one turn in its 120 frames), to its end; beyond: the strike |
+| fireballs | `0x150C(n)` | on the ground; the turn; `wp+0x70` = n; 210 (`sys 13`) with 211 queued for 211's length − 2 frames; then the shot while `wp+0x70` > 0 — **the shot `0x15F6` sets it to 0 first (`0x1630`): one fireball per round whatever n** |
+| the shot | `0x15F6` | 211 (blend 0) and the child 1 (`sys 94(actor, 1, target, 0x2AC, 0x31C)`) at its start; effects 18 / 10; for 211's length − 4 frames |
+| flame | `0x1302` | on the ground; the turn; 212 (`sys 13`) with the idle queued; the child 0 (`sys 94(actor, 0, target, 0x38C, 0)`); for 212's length − 2 frames: effect 19 at 100; from frame 180 with Sora off its front (100°): the idle, then within 500 50 % the turn-around else the spin, beyond a fireball |
+| approach | `0xD38` | on the ground; the turn; a walk of [100, 300) frames within 500, else [300, 500); the walk (blend 8), 8 frames; each frame the walk, turning to the target (2° a frame while walking), along its facing at 2.5; within 250: the idle and the strike; stuck (moved under 1.25 × step): stop; the idle |
+| guard | `0xEF6` | three draws (a threshold [30, 60), a time [60, 120), rand > 0.5 may break out); only with Sora within 40°: 203 (action) then 204 held; 10 frames; for the time: Sora off its front (40°): the idle and a fireball; may break out, under the threshold and Sora within 30°: the idle, within 350 the strike, beyond 600 a fireball, else the flame; within 200: the idle, 50 % the strike else the flame; then (no break-out) 205 (action, blend 8) |
+| recoil / bash | `0x1230` / `0x1280` | 206 (action, blend 2) / facing the target now, the row `0x3FC`, 207 (action) |
+| hit state | `0x514` | the bash (`wp+0xA8`) or the recoil (`wp+0xAC`) its handler asked for; else (no partner) beyond 400: rand > 0.3 a fireball else the approach; within: < 0.3 the strike, > 0.7 the spin, else a fireball; then engaged |
+| hit handler | `0x2BC0` | clears its flags (`wp+0x90` too). **A repel record** (`hp[0] & 0x20`; off the ground: nothing): `wp+0x58` + 1; the motion sorted (`0x1E58`: 72..77 / 6 / 206 / 207 / 209 / 201 / 208 → 0; 210 / 211 / 212 → 1; else 2); 5 or more and sort 1 / 2: the count 0, `sys 194(EXP / 10 + 1)`, the bash next, the hit state; under 5 and sort 2: the recoil next, the hit state. **Its shield** (record `+0x20` = hurt part 2, from the front: `sys 100(facing, rec+0x10)` < 0): a hit from one of its own rows (`sys 188` in [12900, 12908]: every row's `+0x6C` serial, so its batted fireball `0x31C`) → `sys 194`, the damage, kind 4, the hit state; attribute 2 (Fire) unless 212 plays, attribute 3 (Blizzard) unless 210 / 211 play → kind 0, no damage at all (effects 14 / 15). Hollow Bastion's rule (`wp+0xB0`). Then the damage (`0x2100`, −1 for a clash / repel): killed → kind 3 → 4, its death `0x321C` (the front row removed, drops `0x46C`, EXP); alive: 207 from the front, or 209 / 208 / 201 playing, or attribute 1 with kind 3 → `sys 42` (no reaction); else the hit state (KH1's reaction plays) |
+
+`sys 188` (`0x1402BBC50`): the hit record's attack object's `+0x6C` (its row's last word, a serial). `sys 98` / `sys 99`
+(`0x1402A0880` / `0x1402A1070`): mesh hide bits `+0x38C` / `+0x390`. `sys 163` (`0x1402BAFE0`): `+0x374 >> 3 & 1` (drawn,
+taken as true, as every port). The handler slot 2 (`0x2A9C`) runs at the hit record's creation (`0x1402BF0D0` from
+`0x1402B4060`) and only sets the record's `0x10` (no hit effect). `sys 10` turns (sin y, 0, cos y) to yaw + deg
+(`0x1402B9AD0` → the Y rotation `0x1400E6C80`, the row-vector product `0x1400E5AD0`; the axis matrix `0x1428672D0` taken
+as the identity: Assumption). Checked (decomp).
+
+Rows (`0x70` bytes; Checked (files)):
+
+| Row | Made with | Bone code, radius; HIT slot | Type / priority / recoil | Serial `+0x6C` | What |
+|---|---|---|---|---|---|
+| `0xEC` | init (mode 3) | 48, 80; 0 | **1 / 99 / 110**, cone cos 0.342 (70°) | 12900 | the shield's front |
+| `0x15C` | 209 | 48, 100; 1 | 0 / 100 / 110 | 12901 | the strike, [10, 24) |
+| `0x1CC` | 208 | 48, 100; 1 | 0 / 100 / 110 | 12902 | the spin, [44, 80) |
+| `0x23C` | 208 | 48, 80; 2 | **1 / 100 / 110**, cos −1 (all round) | 12903 | the spin's guard, [0, 116) |
+| `0x2AC` | the fireball | none, 60 | 0 / 0 / 110 | 12904 | the fireball |
+| `0x31C` | the fireball batted | none, 60 | 5 / 1 / 110 | 12905 | the batted fireball (hurts enemies) |
+| `0x38C` | the flame | none (the child's) | 5 / 100 / 110 | 12906 | the flame |
+| `0x3FC` | 207 | 48, 100; 1 | 0 / 100 / 110 | 12907 | the bash, [120, 140) |
+
+Bone code 48 is the shield's face (Re:CoM's `lf_wep0`): all three melee rows are shield blows. Hurt parts (`CLS\x03`
+group 2): 14, id 2 an 80 cm sphere on the shield (code 50, Re:CoM's `lb_wep0`). Reactions: F (72..75), K (76 / 77),
+a (78 / 79); no launch, no jump motions.
+
+**The front row against Sora's swing** (`0x1402B4BC0`): the row at 99 is above Sora's 30 and of type 1: **it repels**
+(the Defender gets Sora's record flagged 0x20: no damage, no reaction, its handler counts it); Sora is 69 under: **kind 7,
+the strong recoil 0x6F** (0x70 in the air). A swing of 98 or more meets nothing (both 98+) and lands. Magic (types 5 / 6)
+and swings from beyond 70° land. During the spin the all-round row (100) gives Sora the same strong recoil from any side
+and moves nothing of the Defender's; from its front the front row repels too.
+
+The children (Checked (files + decomp)):
+
+- **The flame** `ex_2340_00.bd` (entry `0x22A`): waits 110 frames while the parent plays 212 (`0x72E`: it ends if 212 stops
+  first; it pauses while the parent's `+0x88 & 1`); one attack object from the row `0x38C` in mode 3, shape 2 (a chain of
+  spheres, `0x1D0`), its hit-once mask cleared every **10** frames (`+0x50`); for 140 frames: from bone 105 (code `0x1069`:
+  bit 12 names the bone) at t 3, 25 lower, to the same bone at t 15, 25 lower, radii 20 → 40, **the line of 7 frames
+  before** (an 8-slot ring, `0x7A6`), its first 30 frames growing by (140 − life) / 30; a wall cuts it (`sys 77`); once 212
+  stops, 10 frames more.
+- **The fireball** `ex_2340_01.bd` (entry `0x5E6`): from bone 108 (`0x106C`) at t 3 along the parent's facing (`sys 143`,
+  no head look), at rand [8, 10) a frame (`0x418`), **turning at most 1° a frame toward its target's lock point** while
+  that lives (`0x2F8`, `sys 24`), for 100 frames (model 11, a 10-frame fade); a hit ends it; a clash (Sora's swing: its row
+  at 0; Sora's Guard: a projectile turned to his side) → `0x1B8`: aimed at its thrower (`sys 32`), or half-way between that
+  and the swinger's target when he has one (`dir + to target`, normalised; straight at it for a turn of 0), its new target
+  that one (else its thrower), with the row `0x31C`, its clock back to 0.
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyDefender` (vtable `0x14053CA98`, 139 slots, RTTI COL at −8), ctor `0x14018D8E0` (`40 53 48 83 EC 20`: `CHeartless`'s
+base ctor, then `+0x2E0` = 0.1; its only reference the factory's call at `0x1401893E0`; no branch into the moved bytes, no
+pointer to them: exe scan, 2026-11-02), allocation `0x1401893C7` `mov ecx, 0xCD0` → 0xCF0. Its own states 1 (`0x14018DA40` /
+the walk thunk `0x14018DD60`), 2 (its melee `e026_050`, `0x14018D9A0` / `0x14018DA90`), 3 (its fireball: `e026_051`, then
+`e026_052` and at clip time 149 a `CBullet` (`0x140156790(desc, 1, 3)`) from `lb_wep0`, 0.3 m a frame, homing 2° a frame for
+1500 ticks, radius 0.25, `0x14017F0E0(enemy, 1, 1, 0)`'s AP, `0x14017F050(enemy, 1)`'s attribute (2, fire: `@ENP` attack 1),
+effect set `0x14053CF30` (slots `"_ex_2340"` 12 / 13 / 11), `0x14018D9F0` / `0x14018DAF0`); 0 / 11 / 12 / 30 `CBattleEnemy`'s;
+think `0x140196EC0`. `EN0026.ASD`: 1 record at `0xBC`, tail `0x15C` (id 0 on `e026_050`, `lb_wep0`, 0.7 m, frames 10–80).
+`EN0026.ANN`: 75 slots. Re:CoM's Defender has no flame, spin, bash or guard.
+
+Our copy: states 0, 1, 2 (the strike, the spin, the bash), 11, 12, 30, the think. State 3 is never entered (its fireballs
+and flame are made from state 1). Like the Fat Bandit, our copy's vtable is not in Re:CoM's attack-end cooldown table
+(0.83.0): KH1's own waits. `enemy_ai = recom` leaves Re:CoM's Defender as Re:CoM has it.
+
+**Power mapping** (decision M10, "the Re:CoM attack of the same kind"): the strike 209, the spin 208 and the bash 207 (all
+blows of the shield, KH1 power 8 / 8 / 6) → Re:CoM's melee, id 0 (its record is on the shield too); the fireballs → Re:CoM's
+fireball, id 1; the flame → id 1 (fire, as the owner chose for the Fat Bandit's flame).
+
+#### Its shield (the shared enemy guard, two rows)
+
+- The behaviour makes the front row at its first frame (`Cmd::Guard(Some((front, ALWAYS)))`, KH1's mode 3) and never removes
+  it (the host's defeat does: KH1's death `0x321C`). The spin makes its all-round row with 208.
+- **Two rows at once** (new in the host, `win::kh1_enemy`): a mode-3 row stays *under* a windowed one made after it and comes
+  back when that one ends (its request changes, a Re:CoM state, a clash); Re:CoM's body guard takes the wider half angle
+  (70° alone, all round during the spin); before each KH1 swing's apply every live row is tested with KH1's own type rule and
+  3D cone (`kh1_front`), and each that meets resolves both ways (`0x1402B4A20`): Sora keeps the first record (kind 7 here
+  either way), the Defender hears a repel first. Other classes have one row at a time: unchanged.
+- **The repel** (`HitNews::Repelled`, built for the Search Ghost): no damage, no reaction; the Defender's handler counts it
+  (above): four in a quiet motion play its shield recoil 206 each, the fifth (in a quiet motion, its fireball or its
+  flame) gives KH1's EXP bonus EXP / 10 + 1 on Re:CoM's EXP (as the Search Ghost's reward) and its counter, the shield bash 207.
+- **Re:CoM's own attacks**: a guard row at 98 or more is never moved (`0x1402B4BC0` records only a side under 98): the guard
+  event moves neither side for them (was: only at 100; no other class has a row at 98 / 99). Its own batted / turned-back
+  fireballs are fire (`@ENP` attack 1's attribute 2) and pass Re:CoM's physical-only body guard, as KH1's type-5 `0x31C`
+  passes its type-1 row.
+- Re:CoM's "Guard" popup is hidden over it (0.76.2's rule).
+
+#### Its fireballs and flame (Re:CoM bullets moved by KH1's numbers)
+
+- **The fireball** (`win::kh1_thrown`, `Kind::Fire`, the Fat Bandit's machinery): a `CHomingBullet` made at KH1's start
+  (the manifest's `fire_at`: bone `0x106C` at t 3 on Re:CoM's `chin`), along its facing, at a speed drawn in [8, 10) (our own
+  random stream: Assumption), **turning 1° a frame toward Sora's aim point** (Re:CoM's vtable `+0x50` for KH1's lock point 0,
+  Assumption as every port) for 100 frames; Re:CoM's fireball power (id 1) and **the Defender's own effect set**
+  `0x14053CF30` (pointer-checked, `sites::DEFENDER_FIRE_PTRS`); radius KH1's 60 cm.
+- **Sora's Guard** turns it back (decision 28): Re:CoM's homing at KH1's 1° a frame takes it at the Defender. **His swing
+  bats it** (KH1's projectile clash): Guard's turn-back, then KH1's re-aim `0x1B8` (half-way between the Defender and Sora's
+  target when he has one, turning toward that target; else at the Defender, turning toward it), its life again.
+- **Its own fireball on its shield**: before Re:CoM's hit handler the host tells the behaviour whether the waiting hit comes
+  from a same-class enemy's fireball sent back (`kh1_thrown::own_shot`, `Behaviour::set_hit_own_row`: KH1's `sys 188` range)
+  and KH1's push direction (from the attacker; a shot's own mover place, not its bone 0). From the front: no armour, KH1's EXP
+  bonus, a knock-back (kind 4) and its hit state; KH1 also requires the hit on its shield part (id 2): the front test stands
+  for it (owner question 1).
+- **The flame** (`win::kh1_flame`, the Fat Bandit's, generalised by the manifest's numbers): it waits 110 frames while 212
+  plays, then one Re:CoM `CBullet` per KH1 sphere, placed each frame on KH1's chain **of 7 frames before** (the ring), radii
+  20 → 40 growing over 30 frames, one shared hit serial renewed every 10 frames, 10 frames more once 212 stops; the
+  Defender's fireball look. Its power: id 1.
+- The child indices come from the manifest (`flame_child` 0, `fire_child` 1; the Fat Bandit's fireball 0 / flame 1 when
+  absent).
+- Per frame: one KH1 step per flying fireball; one bone read and ≤ 16 bullet writes per burning flame; one atomic load
+  otherwise. Per hit on a Defender: one list look-up.
+
+#### The turning steps
+
+KH1 plays 200 / 201 / 202 only with bit 16 (held at the end); the asset step's pose rule would loop them, so
+`enemy::HELD_CLIPS` makes them hold (Re:CoM then shows a second step of the same request as KH1 does: one held frame).
+
+#### What the asset step writes
+
+`ENEMY/0026/EN0026.ANN` (Re:CoM's 75 slots byte-identical; KH1's clips at 100 + entry, 100..124: no exact Re:CoM bake),
+`EN0026.ASD` (Re:CoM's record kept + 3: the strike, the spin and the bash on `lf_wep0`, 1 m, id 0), `EN0026.SES` (Re:CoM's
+entries kept; the three attack clips take their template's sounds at the hit window: Assumption), `kh1-defender.json`
+(`kh1-enemy 1`: 76 numbers from `ex_2340.bd`, 14 from the flame, 6 from the fireball, 37 + 8 + 2 request words checked, the
+three bone points, the fireball's radius and Re:CoM power, 3 attacks, the guard rows `front` (no windows) and `spin` (208:
+[0, 116)), 14 parts). The steps 200 / 201 / 202 hold. Test `defender::tests::builds_from_the_players_files`. Other enemies'
+outputs are unchanged (the bone-code bit 12 rule in `T_POINTS`, the guard-row recoil check now passing any row at 98+ and
+`HELD_CLIPS` touch only the Defender). In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0026/EN0026.ANN, method: copy, source: [{name: ENEMY/0026/EN0026.ANN}]}
+- {name: ENEMY/0026/EN0026.ASD, method: copy, source: [{name: ENEMY/0026/EN0026.ASD}]}
+- {name: ENEMY/0026/EN0026.SES, method: copy, source: [{name: ENEMY/0026/EN0026.SES}]}
+- {name: kh1-defender.json, method: copy, source: [{name: kh1-defender.json}]}
+```
+
+The step prints `defender (M11): …`; the log shows `defender: KH1's defender (M11) …` at start, `battle N: Defender … gets KH1's
+AI`, `guard row 0 with 65535` (its front), `its guard row stopped Sora's swing (priority 30 vs [99]): Sora Clash { kind: 7, … },
+it Some((Repels, false))`, `guard event on its front row: KH1's repel`, `thrown: defender eNNN: fireball …`, `flame: … its flame
+starts` / `ends`, `hit kind … without a reaction` in its strike / spin / turn-around.
+
+#### Checked / Assumption
+
+- **Checked (files):** every number at its push (the asset test reads them from the player's scripts), the request words, the
+  rows (types, priorities, cones, recoils, radii, slots, serials 12900..12907 inside the handler's range), the hit windows,
+  the hurt parts (id 2 the shield), the clip lengths, Re:CoM's record and clips, the bone points (bit-12 codes) in two poses,
+  the one-shot count (`0x1630`).
+- **Checked (decomp):** `sys 188` / `sys 98` / `sys 99` / `sys 163` / `sys 169` / `sys 3` / `sys 10` (its sign) / `sys 12`
+  (bit 16 → hold) / `sys 81`, the handler slot 2's caller, the clash resolver's 98 / 99 / 100 rules and the repel, Re:CoM's
+  state 3 fireball (`0x14018DAF0`), `0x14017F050` (attribute 2 for id 1), the bone getter `0x1402ABB20` (a shot's).
+- **Checked (exe):** the class, its slots, the ctor and its only call, the factory size, the effect set's name pointer; the
+  ctor scan (no branch / pointer into the moved bytes).
+- **Tests:** the appearance, the turn (step angles, the one-frame second step, the turn-around, the strike after three), the
+  cone rule, one fireball per round, the flame's order, the spin's turn, the guard, the repel count to the bash, its own
+  fireball and the no-reaction hits, a 20 000-frame fight (12 seeds: never 600 frames silent; it shoots, burns, guards,
+  strikes, spins, turns), the host model (behaviour tables and the real manifest: nothing released, no re-ask, the attacks in
+  state 2), the asset step on the player's files.
+- **Assumptions:** the front test standing for KH1's shield part (owner question 1); the strike / spin / bash on id 0 and the
+  flame on id 1; the fireball's speed from our own random stream; Re:CoM's aim point for KH1's lock point 0; KH1's push
+  direction from the attacker's place (a shot's mover; Sora's swing clamped 45° as every port); the order of the two guard
+  rows (the front first: its object is older) and that KH1's flag 512 on the front / bash rows changes nothing here; the
+  flame's ring one slot a host frame; the flame's wall cut left out (open arenas); `sys 163` true; the axis matrix of `sys 10`
+  the identity; the battle floors flat; Re:CoM's sounds on the new clips; seeds per enemy.
+- **Not ported:** the partner object's rounds and messages (`wp+0x98`: no kind-300 object in Re:CoM's battles), the leash,
+  Hollow Bastion's room rule, the hit attributes (Fire / Blizzard on its shield, attribute 1's flinch rule: owner rule), the
+  hurt part test (owner question 1), the effects (2, 7, 9, 10, 14, 15, 18, 19: M13), the appearance's mesh hiding and part
+  fade, the hit-effect filter, the death routine (Re:CoM's defeat, prizes, EXP).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Defender battle in Hollow Bastion or Castle Oblivion; run the asset step first)
+
+1. Each Defender plays KH1's appearance (213, about 1 s) and can't be hit during it.
+2. **Its shield**: swing at it from the front (within about 70° of where the shield faces): Sora bounces off hard (the strong
+   recoil), no damage, no "Guard" popup; while it stands, walks or guards it shoves back with its shield (206) each time, and
+   the 5th such bounce (also during its fireball or flame) makes it hit back with a shield bash (207, a rushing blow) and gives
+   a little EXP. From behind or the side (beyond about 70°) the swings land; magic lands from the front too.
+3. **Turning**: walk around it: it turns its shield toward Sora with small side steps (about 26° each), turns right round when
+   he gets behind it, and after three steps without facing him it swings at him.
+4. Close (< 4.7 m): the shield strike (209), the spin (208: one full turn; from any side a swing bounces off hard while it
+   spins), or the flame; mid / far: it walks in, raises its shield (203/204) or shoots.
+5. **Fireballs**: a wind-up (about 1.7 s), then **one** slow fireball that curves after Sora (1° a frame) for about 1.7 s.
+   Guard it: it flies back at the Defender. Swing at it: it flies back (at your target if you have one) — **when it hits the
+   Defender's front it knocks it back** (and a little EXP).
+6. **The flame**: about 1.8 s after it starts, a stream of fire from the shield's mouth for about 2.3 s that trails the shield
+   as it turns, hitting about every 10 frames; get behind it and after 3 s it stops and turns or spins.
+7. Hits during its strike, spin or turn-around, and from the front during its bash: damage, no flinch. Other hits: KH1's
+   flinch, then it answers (a fireball, the strike, the spin or a walk in).
+8. Stop, Stun Impact, Blizzard's freeze and Gravity still take it over; its shield still turns swings away while stopped.
+9. Kill one: KH1's reaction motion (a knock-back for a flinch), Re:CoM's prizes and EXP.
+10. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Defenders (no change).
+
+Please send `kh1-recom.log` (`defender:`, `thrown:`, `flame:` lines) and an F9 trace (its `fire` / `flame` tokens).
+
+#### KH1 trace (what to record in KH1)
+
+Hollow Bastion (the Rising Falls or the Castle Gates): stand far (10 m) 10 s; stand at 5 m 10 s; stand at 2 m 10 s; walk a
+slow circle round it at 3 m; swing at its shield five times in a row while it stands; swing at it from behind; guard a
+fireball; swing at a fireball (with and without a target locked); stand in the flame, then get behind it; hit it during its
+spin and its strike; kill one. The trace's enemy rows give the turning steps' angles, the fireball's curve and speed, the
+flame's lag and the repel count to compare.
+
+#### Defender owner questions
+
+1. **Its own fireball on its shield.** KH1 gives the big hit (knock-back, EXP bonus) only when its batted fireball strikes
+   the shield part (hurt part 2, an 80 cm sphere) from the front. The host passes no KH1 hurt part (decision 24). Built: from
+   the front stands for "on the shield". (a) Keep; (b) leave it out (its fireball is an ordinary hit: KH1's flinch and its
+   counter); (c) build KH1's part test for this one part (its sphere on Re:CoM's `lb_wep0` against the hit's contact point).
+2. **The power of its blows and flame.** Re:CoM's Defender has one melee (id 0, a shield blow) and its fireball (id 1). Built:
+   the strike, the spin and the bash on id 0; the flame on id 1 (the Fat Bandit's rule). (a) Keep; (b) the bash (KH1 power 6,
+   the others 8) at id 0 and the strike / spin above it (no Re:CoM number: a rule to choose); (c) another rule.
+3. **One fireball a round.** KH1's script passes 1, 2 or 3 to its fireball routine but clears the count before the first shot
+   (`0x1630`), so KH1's Defender fires one fireball each time. Built 1:1. (a) Keep (KH1); (b) fire the count passed (not KH1).
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -3388,7 +3628,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Wight Knight (built) | `xa_ex_2200` (ex_2200.bd) | `CEnemyWightnight` 12 | `0x140553748` | `0x140194ed0` / `0x14018917b` 0xcd0 | 1,2,3 | 200,201,202,211,216 | FaALl | — |
 | Gargoyle (built) | `xa_ex_2220` (ex_2220.bd) | `CEnemyGargoyle` 13 | `0x14053f198` | `0x14018e150` / `0x1401891a5` 0xcd0 | 1,2,3 | 203,212,218 | FKA | — |
 | Darkball (built) | `xa_ex_2280` (ex_2280.bd) | `CEnemyDarkball` 23 | `0x14053b7a8` | `0x14018d5d0` / `0x140189349` 0xcd0 | 1,2,3 | 200,202,204 | FKaA | — |
-| Defender | `xa_ex_2340` (ex_2340.bd) | `CEnemyDefender` 26 | `0x14053ca98` | `0x14018d8e0` / `0x1401893c7` 0xcd0 | 1,2,3 | 207,208,209 | FKa | — |
+| Defender (built) | `xa_ex_2340` (ex_2340.bd) | `CEnemyDefender` 26 | `0x14053ca98` | `0x14018d8e0` / `0x1401893c7` 0xcd0 | 1,2,3 | 207,208,209 | FKa | — |
 | Wizard | `xa_ex_2150` (ex_2150.bd) | `CEnemyWizard` 25 | `0x140554a58` | `0x140195420` / `0x14018939d` 0xcd0 | 1,2,3,4 | — | FKaA | SES |
 | Sea Neon | `xa_ex_2070` (ex_2070.bd) | `CEnemySeaneon` 18 | `0x14054b0e8` | `0x1401920c0` / `0x140189277` 0xce0 | 1,2,3 | 201,204 | FKaA | — |
 | Aquatank | `xa_ex_2080` (ex_2080.bd) | `CEnemyAquatank` 20 | `0x140532fe8` | `0x14018a960` / `0x1401892cb` 0xcd0 | 1,2,3 | 202,203 | FKaA | — |
@@ -3419,7 +3659,7 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
    without gravity for them.
 3. **Casters with projectiles** (KH1 child objects `sys 94`, effects `sys 225`; little or no HIT track):
    Red Nocturne, Blue Rhapsody, Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
-   Bouncywild (bananas), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs + shield), Search Ghost (its
+   Bouncywild (bananas), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs, flame + shield; built: § The Defender), Search Ghost (its
    drain). Needs: the child object's script → Re:CoM's own bullets (checklist step 9), Green Requiem's
    support spell (Re:CoM overrides no state 3 for it; KH1's: a barrier / heal on its allies, Assumption).
    Which of these shoot what is from KH1's play (Assumption) and the scripts' syscalls (Checked (files)).

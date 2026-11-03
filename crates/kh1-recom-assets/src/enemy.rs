@@ -318,13 +318,15 @@ pub fn hit_window(m: &kh1_formats::mset::Motion, sub: u16) -> Result<(f32, f32)>
 /// slot [`SLOT_BASE`] + entry unless Re:CoM has it as an exact bake. Returns the ANN, every
 /// request's clip and, per new clip, the Re:CoM clip the matcher pairs it with (bake or edit).
 pub fn extend_ann(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
-    extend_ann_own(ann_in, ms, conv, prefix, recom_slots, &[], &[])
+    extend_ann_own(ann_in, ms, conv, prefix, recom_slots, &[], &[], &[])
 }
 
 /// [`extend_ann`], with `own`: requests whose entry gets its own new clip even when Re:CoM has it as
 /// an exact bake ([`OWN_CLIPS`]); the new clip is paired with the bake (its sounds, `extend_ses`).
-/// `loops`: requests whose new clip loops although its last pose isn't its first ([`LOOPS`]).
-pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize, own: &[u16], loops: &[u16]) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
+/// `loops`: requests whose new clip loops although its last pose isn't its first ([`LOOPS`]); `holds`: requests whose new
+/// clip holds at its end although its last pose is its first ([`HELD_CLIPS`]).
+#[allow(clippy::too_many_arguments)]
+pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &str, recom_slots: usize, own: &[u16], loops: &[u16], holds: &[u16]) -> Result<(Vec<u8>, Vec<RequestClip>, Vec<(String, String)>)> {
     let mut ann = Ann::parse(ann_in)?;
     if ann.slots.len() != recom_slots {
         return bad(format!("{} slots, Re:CoM Steam's has {recom_slots} (already extended?)", ann.slots.len()));
@@ -370,7 +372,7 @@ pub fn extend_ann_own(ann_in: &[u8], ms: &MotionSet, conv: &Converter, prefix: &
                 if let Some((sc, _)) = other {
                     pairs.push((name.clone(), ann.slots[sc.slot].name_str()));
                 }
-                let looped = cycle_error(conv, m) <= LOOP_TOLERANCE_M || reqs.iter().any(|r| loops.contains(r));
+                let looped = (cycle_error(conv, m) <= LOOP_TOLERANCE_M || reqs.iter().any(|r| loops.contains(r))) && !reqs.iter().any(|r| holds.contains(r));
                 let clip = conv.convert(m, &ClipSpec { name: name.clone(), looped, root_motion: *root, blend: 8 })?;
                 while ann.slots.len() < slot {
                     ann.slots.push(Slot { name: [0; 16], clip: None });
@@ -608,7 +610,8 @@ pub fn build(spec: &Spec, inp: &Inputs) -> Result<Built> {
     consts.push(("weight".into(), weight(script, spec.records)?));
     let own: Vec<u16> = OWN_CLIPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
     let loops: Vec<u16> = LOOPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
-    let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own, &loops)?;
+    let holds: Vec<u16> = HELD_CLIPS.iter().filter(|o| o.0 == spec.name).map(|o| o.1).collect();
+    let (ann, clips, pairs) = extend_ann_own(&inp.ann, &ms, &conv, spec.prefix, spec.recom_slots, &own, &loops, &holds)?;
     consts.extend(bone_points(spec.name, &inp.mdls, &ms, &conv, &clips)?);
     consts.extend(child_consts(spec.name, &inp.mdls)?);
     consts.extend(t_points(spec.name, &inp.mdls, &ms, &conv, &clips, &consts)?);
@@ -1010,6 +1013,11 @@ pub const GUARDS: &[GuardSpec] = &[
     // The Fat Bandit's `ex_2060.bd` makes `0xEC` (type 1, priority 100, 70° front) with `sys 213(row, 3)` at its init
     // (`0x254E`), after the breath (`0x1444`) and in its hit handler (`0x2ED6`); `0x13DC` removes it for the breath.
     GuardSpec { enemy: "fatbandit", name: "front", row: 0xEC, also: &[], requests: &[] },
+    // The Defender's `ex_2340.bd` makes its shield's front row `0xEC` (type 1, priority 99, 70° front) with `sys 213(row,
+    // 3)` at its init (`0x2828`) and removes it only at its death (`0x3230`); its spin makes `0x23C` (type 1, priority
+    // 100, all round) with 208 (`0x1CBE`).
+    GuardSpec { enemy: "defender", name: "front", row: 0xEC, also: &[], requests: &[] },
+    GuardSpec { enemy: "defender", name: "spin", row: 0x23C, also: &[], requests: &[208] },
 ];
 
 /// A guard row as read (the manifest's `guards` entry).
@@ -1061,9 +1069,10 @@ pub fn guard_rows(enemy: &str, script: &[u8], ms: &MotionSet, clips: &[RequestCl
         if !(1..=4).contains(&clash_type) || !(0..=100).contains(&priority) {
             return bad(format!("{enemy}: row {:#x} is not a guard row (type {clash_type}, priority {priority})", g.row));
         }
-        // A row at priority 100 is never moved (`0x1402B4BC0` returns before any record for its own side): its
-        // recoil never plays, so the model needn't have it (the Large Body's front row names 110).
-        if priority != 100 && !clips.iter().any(|c| c.request as u32 == recoil) {
+        // A row at priority 98 or more never gets a clash record (`0x1402B4BC0` returns before any record for a side at
+        // 100, and records only a side under 98): its recoil never plays, so the model needn't have it (the Large Body's
+        // front row names 110 at 100, the Defender's 110 at 99).
+        if priority < 98 && !clips.iter().any(|c| c.request as u32 == recoil) {
             return bad(format!("{enemy}: guard row {:#x}'s recoil {recoil} has no motion", g.row));
         }
         if !(turn.is_finite() && cos.is_finite() && (-1.0..=1.0).contains(&cos)) {
@@ -1281,6 +1290,12 @@ fn apply_starts(name: &str, ms: &MotionSet, conv: &Converter, ann: &mut Vec<u8>,
 /// The Pirate's spin 217 (48 frames) in its spin `0xED0` (up to 180 frames).
 pub const LOOPS: &[(&str, u16)] = &[("wyvern", 204), ("pirate", 217)];
 
+/// Requests whose new clip holds at its end although its last pose is its first (M11): the script plays them only with
+/// bit 16 (KH1 holds them, `0x14029FC40` → `+0x160` bit 3, `0x14029F0A0`), so a script that plays one again sees it held
+/// at its end. The Defender's side steps 200 / 202 and turn-around 201 (`0x1AB8` / `0x19D2` / `0x1B96`: `0x100C8` /
+/// `0x100CA` / `0x100C9`; Checked (files): no other request of them in its script).
+pub const HELD_CLIPS: &[(&str, u16)] = &[("defender", 200), ("defender", 201), ("defender", 202)];
+
 /// Requests that get their own clip although Re:CoM has their motion as an exact bake (M11): the
 /// bake carries Re:CoM's own attack records (`.ASD`, bound by the clip's name), which would hit with
 /// KH1's rows. The Darkball's dash 202 (`e023_051`, Re:CoM's record id 0) and bite 204 (`e023_053`,
@@ -1336,6 +1351,9 @@ pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usiz
     ("fatbandit", 1, b"ex_2060_01.bd", crate::fatbandit::FLAME_CONSTS, crate::fatbandit::FLAME_REQUESTS),
     // The Gargoyle's ball `ex_2220_00.bd` (`crate::gargoyle`, [`T_POINTS`], [`SHOTS`]).
     ("gargoyle", 0, b"ex_2220_00.bd", crate::gargoyle::BALL_CONSTS, crate::gargoyle::BALL_REQUESTS),
+    // The Defender's flame `ex_2340_00.bd` and fireball `ex_2340_01.bd` (`crate::defender`, [`T_POINTS`]).
+    ("defender", 0, b"ex_2340_00.bd", crate::defender::FLAME_CONSTS, crate::defender::FLAME_REQUESTS),
+    ("defender", 1, b"ex_2340_01.bd", crate::defender::FIRE_CONSTS, crate::defender::FIRE_REQUESTS),
 ];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
@@ -1373,6 +1391,11 @@ pub const T_POINTS: &[(&str, &str, usize, TFrom)] = &[
     // its parent's place) 15 up, then eased toward `sys 19(parent, 28, 1)` (`0x1A6` / `0x1AC`: bone code 28's bone).
     ("gargoyle", "ball_hold", 0x1027, TFrom::Value(0.0)),
     ("gargoyle", "ball_at", 28, TFrom::Const("ball_ease_t")),
+    // The Defender's fireball start (`ex_2340_01.bd` `0x600`: code `0x106C`, bone 108, at `fire_t`) and its flame's ends
+    // (`ex_2340_00.bd` `0x2F8` / `0x336`: code `0x1069`, bone 105, at `flame_t0` / `flame_t1`).
+    ("defender", "fire_at", 0x106C, TFrom::Const("fire_t")),
+    ("defender", "flame0", 0x1069, TFrom::Const("flame_t0")),
+    ("defender", "flame1", 0x1069, TFrom::Const("flame_t1")),
 ];
 
 fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[RequestClip], consts: &[(String, f32)]) -> Result<Vec<(String, f32)>> {
@@ -1423,7 +1446,10 @@ fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[
 /// `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018E350`; Checked (decomp)); the row the ball takes when a swing
 /// sends it back (`0x46C`, the child's `0x748`: owned by the swinger) gives `ball_bat_radius` (its id and kind unused:
 /// the batted ball keeps its power, Guard's turn-back rule).
-pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1), ("gargoyle", "ball", &[0x3FC], 1, 1), ("gargoyle", "ball_bat", &[0x46C], 1, 1)];
+pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1), ("gargoyle", "ball", &[0x3FC], 1, 1), ("gargoyle", "ball_bat", &[0x46C], 1, 1), ("defender", "fire", &[0x2AC], 1, 1)];
+///
+/// The Defender's `0x15F6` passes `0x2AC` (its batted row `0x31C` is the child's second); Re:CoM's own fireball takes its
+/// power with `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018DAF0`; Checked (decomp)).
 
 fn shot_consts(name: &str, script: &[u8]) -> Result<Vec<(String, f32)>> {
     let mut out = Vec::new();
@@ -1498,7 +1524,7 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC];
 
 #[cfg(test)]
 mod clash_tests {
