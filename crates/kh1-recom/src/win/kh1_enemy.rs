@@ -987,6 +987,9 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
         Cmd::Strike { child, at } => {
             let _ = super::kh1_thrown::strike(en, CLASSES[rt.class].name, manifest(rt.class), child, at);
         }
+        // M11, the Yellow Opera's Thunder marked its place: one of Re:CoM's own effects there until the strike (the stand-in
+        // for KH1's warning cloud, owner 2026-11-03).
+        Cmd::Warn { child, at } => super::kh1_thrown::warn(en, CLASSES[rt.class].name, manifest(rt.class), child, at),
         // Log only (KH1 does something here the port doesn't build: the line below says what).
         Cmd::Note(_) => {}
         Cmd::HealFull => heal_full(en, rt),
@@ -1459,6 +1462,8 @@ unsafe fn take_over(en: usize, rt: &mut Runtime) {
     // A Re:CoM state ran (Stop, stun, freeze…): the behaviour drops what waits on it (M11, the Yellow Opera's marked
     // Thunder; owner 2026-11-03: Re:CoM's Stop keeps cancelling a caster's spell).
     rt.ai.on_recom_state();
+    // Its marked Thunder's warning goes with it (`kh1_thrown::warn`; nothing when it has none).
+    super::kh1_thrown::end_warnings(en, None);
     // KH1's mode-3 guard row (the Large Body's front) isn't tied to an action: it stays (`0x1402B47A0` tests it
     // whatever plays; a status doesn't remove it: Checked (decomp), its owner's `+0x88 & 1` skips only non-guard rows).
     if !rt.guard.is_some_and(|g| g.request == ke::guard::ALWAYS) {

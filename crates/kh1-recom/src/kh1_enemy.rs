@@ -618,6 +618,7 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Reward(r) => format!("reward: EXP bonus EXP / {} + {}{}, KH1 prizes {:?}", r.exp_div, r.exp_add, if r.exp_min > 0 { format!(" (at least {})", r.exp_min) } else { String::new() }, r.prizes),
         Cmd::QueueAt { request, blend, start } => format!("queue {request} b{blend} from {start}"),
         Cmd::Strike { child, at } => format!("strike {child} at ({:.0},{:.0},{:.0})", at.x, at.y, at.z),
+        Cmd::Warn { child, at } => format!("mark {child} at ({:.0},{:.0},{:.0}): the warning until its strike", at.x, at.y, at.z),
         Cmd::Restart { request, blend, start } => format!("motion {request} b{blend} again from {start}"),
     }
 }
@@ -625,7 +626,7 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::AttackAt { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Restart { .. } | Cmd::Throw(_) | Cmd::Strike { .. } | Cmd::Note(_) | Cmd::HealFull | Cmd::Support { .. } | Cmd::Reward(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::AttackAt { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Restart { .. } | Cmd::Throw(_) | Cmd::Strike { .. } | Cmd::Warn { .. } | Cmd::Note(_) | Cmd::HealFull | Cmd::Support { .. } | Cmd::Reward(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -1120,6 +1121,8 @@ mod tests {
         assert!(!logged(&Cmd::QueueAt { request: 206, blend: 0.0, start: 2.0 }));
         assert_eq!(cmd_token(&Cmd::Strike { child: 0, at: kh1_core::Vec3::new(1.0, 2.0, 3.0) }, CLASSES[0].attack_names, &n), "strike 0 at (1,2,3)");
         assert!(logged(&Cmd::Strike { child: 0, at: kh1_core::Vec3::new(1.0, 2.0, 3.0) }));
+        assert_eq!(cmd_token(&Cmd::Warn { child: 0, at: kh1_core::Vec3::new(1.0, 2.0, 3.0) }, CLASSES[0].attack_names, &n), "mark 0 at (1,2,3): the warning until its strike");
+        assert!(logged(&Cmd::Warn { child: 0, at: kh1_core::Vec3::new(1.0, 2.0, 3.0) }));
         // M11 (the Search Ghost): what KH1 does that isn't built is logged.
         assert_eq!(cmd_token(&Cmd::Note("x"), CLASSES[0].attack_names, &n), "note: x");
         assert!(logged(&Cmd::Note("x")));

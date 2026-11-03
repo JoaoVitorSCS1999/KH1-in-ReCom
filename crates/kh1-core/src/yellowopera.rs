@@ -171,7 +171,7 @@ pub const NAMES: &[&str] = &[
 
 /// Its child's numbers (`ex_2130_00.bd`): the wait in the cast (80 frames) and the delay to the strike (30) the behaviour
 /// runs ([`Strike`]); the area (radius 50, half-height 128 centred 128 above the mark) the host's; the cloud's height
-/// (200 above the mark) for the log.
+/// (200 above the mark) the host's warning (`ECmd::Warn`: a Re:CoM effect there until the strike, owner 2026-11-03).
 pub const THUNDER_NAMES: &[&str] = &["thunder_wait", "thunder_cloud", "thunder_delay", "thunder_radius", "thunder_half", "thunder_mid"];
 
 /// Every name the manifest must hold for the behaviour.

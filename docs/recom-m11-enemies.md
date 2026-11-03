@@ -4669,8 +4669,32 @@ Thunder, id 0 kind 1 (`0x14017F0E0(enemy, 0, 1)`, as its state 2 asks). The two 
 - **The Thunder's wait** (`caster::Strike`, stepped once a frame in `frame` / `side_frame` / `dead_frame` with the motion
   the host plays): 205 from frame 8, 206 queued from frame 2 and, once 206 plays, 207 queued from frame 3 (new
   `Cmd::QueueAt`: the host has one queued slot, KH1 a list); the mark on 207's 81st frame at Sora's place then on the battle
-  floor (a log note: KH1's cloud effect waits for M13); the strike 30 frames later at the mark (new `Cmd::Strike`), even if
-  a reaction or its death came in between (KH1).
+  floor (`Cmd::Warn`: the warning below); the strike 30 frames later at the mark (new `Cmd::Strike`), even if a reaction or
+  its death came in between (KH1).
+- **The warning over the mark** (owner 2026-11-03, question 2 (b): "a Re:CoM effect over the marked spot now as a stand-in
+  for KH1's warning cloud"; built after 0.97.1; `win::kh1_thrown::warn`).
+  - KH1 (Checked (files: `ex_2130_00.bd` `0x342..0x3B0`, listed with `tools/kh1-ai-script.py`)): at the mark the child
+    plays its model's effect 14 by `sys 74(*(child+12), 14, 20000, point)` at a point **200 above the mark** (`thunder_cloud`),
+    counts 30 frames, then plays effect 11 (the bolt) the same way at the mark and strikes; it never removes the cloud
+    (the effect's own length). 11, 12 and 14 come from the same group (the model's).
+  - Re:CoM's own Yellow Opera (Checked (decomp)): **no warning by code**: its state 2 begin `0x140196980` only plays
+    `e005_052`, its step `0x140196A80` only makes the bolt at clip time 0xD15. Its effect set `0x140557560` (Checked (exe))
+    holds two entries, both `"_ex_2130"`: slot 0 = 11 (played where a shot starts: `0x140157C20`), slot 1 = 12 (played on
+    the flying shot, `0x1401577A0` case 1), the same numbers as KH1's bolt and hit; slot 2 empty. Its motion's effect
+    events (`EN0005.EET`, the per-motion effect table) are not in the session's extraction: whether its `e005_052` shows a
+    charge on the caster is not known (Assumption: it shows nothing at Sora's spot; its bolt comes from 4 m above him).
+  - Built: Re:CoM's effect-at-actor `0x1401A6B20(the Yellow Opera, "_ex_2130", id, point, 0, 0.0)` (the call Re:CoM's
+    shots make; a non-null actor: it reads `+0x150`, the effect's group; Checked (disasm): a tail jump to `0x1402588B0`, its
+    handle returned) at KH1's cloud point (200 above the mark), **first effect 14** (KH1's own cloud number: Assumption that
+    Re:CoM's `_ex_2130` pack kept KH1's numbering, as 11 and 12 do), **else the set's own 12** (Re:CoM's pack has no 14: the
+    call returns no handle, `0x1402553B0` finds no entry and frees the effect, Checked (decomp)). The log says which:
+    `Thunder 0's mark: Re:CoM's "_ex_2130" effect N at (…)`. It ends at once (Re:CoM's effect end `0x1402585B0(handle,
+    0.0)` → `0x140254D60`, its own fade ≤ 0 path; first bytes `48 83 EC 38 8B D1 0F 29 74 24 20` checked) at the strike
+    (exactly KH1's 30 frames), when Re:CoM's Stop / stun cancels the marked Thunder (at Re:CoM's hand-back, below), or when
+    a warning of another battle is made. One call at the mark, one at its end: nothing per frame.
+  - Known difference: Re:CoM's Stop / stun during the 30 frames holds the caster in Re:CoM's state, where none of our code
+    runs: the warning stays up until Re:CoM hands the caster back (then it ends, no bolt), unless the effect ends by
+    itself first (its length is in Re:CoM's effect pack, not in the session).
 - **The strike: the nearest native equivalent** (owner rule: "research how KH1 places it"). Re:CoM's own Yellow Opera
   Thunder is already a strike from above at Sora's place (a bolt bullet whose swept sphere passes down through him in one
   frame), only placed differently (4 m above where he is at its 67th frame, radius 0.25). Built (`win::kh1_thrown::strike`):
@@ -4706,7 +4730,8 @@ the charge's two records added: 3), **no `.SES`** (`enemy::NO_SES`: Re:CoM has n
 ```
 
 The step prints `yellowopera (M11): …`; the log shows `battle N: Yellow Opera … gets KH1's AI` in a battle, `attack 209
-(charge), steered`, `note: the Thunder's mark: …`, `strike 0 at (…)`, and `thrown: yellowopera eNNN: Thunder … at KH1's
+(charge), steered`, `mark 0 at (…): the warning until its strike`, `thrown: yellowopera eNNN: Thunder 0's mark: Re:CoM's
+"_ex_2130" effect N at (…)`, `strike 0 at (…)`, and `thrown: yellowopera eNNN: Thunder … at KH1's
 mark …` / `thunder N (eNNN): its frame is over …` per bolt; the F9 trace's `thunder` tokens.
 
 #### Checked / Assumption
@@ -4721,7 +4746,13 @@ mark …` / `thunder N (eNNN): its frame is over …` per bolt; the F9 trace's `
   `0x140156790`, kind 0x1C in Re:CoM's damage check.
 - **Checked (exe):** the class, 139 slots, the ctor and its only call, the factory size, 20 vtable slots, the effect set's
   two names, no `EN0005.SES` resource name; 24 new sites match (pefile).
-- **Assumptions:** the child's first frame is the frame after `sys 94` (as the family's); ±1 frame for the queued starts
+- **Checked (files / decomp / exe), the warning:** KH1's cloud (`ex_2130_00.bd` `0x376`, effect 14, 200 above the mark, 30
+  frames before the bolt); Re:CoM's state 2 shows none; its set `0x140557560` = 11 / 12; `0x1401A6B20` returns
+  `0x1402588B0`'s handle; a missing id gives 0; `0x1402585B0`'s bytes and its fade-0 path.
+- **Assumptions:** Re:CoM's `_ex_2130` pack numbers its effects as KH1's (14 the cloud; if it has no 14 the set's 12
+  shows); Re:CoM's `EN0005.EET` shows nothing at Sora's spot (file not in the session); a handle ended within 30 frames is
+  still ours (Re:CoM reuses effect handles; it ends its own stored handles the same way); the child's first frame is the
+  frame after `sys 94` (as the family's); ±1 frame for the queued starts
   and the bolt's first collision (made in the Yellow Opera's update; when Re:CoM first collides a new bullet); flat battle
   floors (the mark on the floor under Sora; the drop's world height as a height above the battle floor, owner 2026-11-02);
   Re:CoM's mover keeps it on the floor when KH1 aims below it; Sora's own KH1 hit handling doesn't turn the Thunder's record
@@ -4729,7 +4760,8 @@ mark …` / `thunder N (eNNN): its frame is over …` per bolt; the F9 trace's `
   no `.SES`); seeds per enemy.
 - **Not ported:** the leash, the notice for placed ones (battle spawns appear), the search object, the element rules (a
   Thunder hit's full heal, attribute-8 EXP bonus: attributes are not carried, owner), effects (the appearance's effect 2 and
-  flag 0x80, the child's 2056 / 9 / 2058, the cloud 14, the bolt 11 and hit 12: M13), the death routine (Re:CoM's defeat,
+  flag 0x80, the child's 2056 / 9 / 2058, the bolt 11 and hit 12 as KH1 places them: M13; the cloud 14 has a Re:CoM
+  stand-in, above), the death routine (Re:CoM's defeat,
   prizes, EXP).
 
 #### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Yellow Opera battle (Traverse Town's or Wonderland's); run the asset step first)
@@ -4740,12 +4772,16 @@ mark …` / `thunder N (eNNN): its frame is over …` per bolt; the F9 trace's `
    you, alternately above and below your head height, each followed by a short pause facing you.
 3. Farther than 5 m: often (6 times in 10) it casts Thunder: about 1½ s of charging, a pose, then a second pose; about 1⅓ s
    into that pose it picks the spot where you stand; half a second later a bolt strikes that spot (move away in that
-   half second to dodge it). **Guarding doesn't block it** (KH1); swinging at it does nothing.
+   half second to dodge it). **Guarding doesn't block it** (KH1); swinging at it does nothing. In that half second a
+   Re:CoM effect shows about 2 m above the picked spot (the stand-in for KH1's warning cloud) and vanishes as the bolt
+   strikes; the log's `Thunder 0's mark` line says which effect (14 or 12). Please say what it looks like (a cloud, a
+   spark, nothing).
 4. Closer than 5 m: after one dart, half the time it charges: a 2 s wind-up, then it rams toward where you stood (up to 2½ s,
    fast) and stops as soon as it hits you; then a short recovery. Guard it: it recoils.
 5. Hit it: it darts away three times quickly, drops to about 1 m above the floor, then casts Thunder.
-6. Hit it while it charges a Thunder (before the spot is picked): no bolt. Hit it after the spot is picked: the bolt still
-   comes. Stop it (Re:CoM's Stop) during a Thunder: no bolt.
+6. Hit it while it charges a Thunder (before the spot is picked): no bolt, no warning. Hit it after the spot is picked: the
+   warning stays and the bolt still comes. Stop it (Re:CoM's Stop) during a Thunder: no bolt (if it was already marked, the
+   warning may stay until the Stop wears off, then goes).
 7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
 8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Yellow Operas (their own bolt from 4 m above you, their
    own rush).
@@ -4762,13 +4798,15 @@ strike 30 later), the strike's place against Sora's, and the charge's frames and
 
 #### Yellow Opera owner questions
 
-1. **Re:CoM's Stop after the Thunder's mark.** In KH1, once the spot is picked nothing stops the bolt (the child no longer
+1. **Re:CoM's Stop after the Thunder's mark.** Answered (owner 2026-11-03): (a) keep (Stop / stun still cancels it after the
+   mark). The question as asked: In KH1, once the spot is picked nothing stops the bolt (the child no longer
    looks at its caster). Here Re:CoM's own Stop / stun / freeze holds the caster in Re:CoM's state, during which none of
    our code runs for it. Built: (a) the marked bolt is cancelled too (as your rule for casts: Re:CoM's Stop cancels a
    caster's spell). Other choices: (b) the bolt still strikes on time while Re:CoM holds the caster (KH1's timing; needs one
    more small hook so the waiting bolt is counted during Re:CoM's states); (c) the bolt strikes when the caster comes out
    of Re:CoM's state (late; not KH1).
-2. **The warning before the bolt.** KH1 shows a small cloud over the picked spot for the half second before the bolt
+2. **The warning before the bolt.** Answered (owner 2026-11-03): (b), built (§ What the port does, "The warning over the
+   mark": KH1's cloud number 14 from Re:CoM's `_ex_2130` pack, else the Thunder set's 12). The question as asked: KH1 shows a small cloud over the picked spot for the half second before the bolt
    (effect 14). Effects wait for M13 (your rule), so the spot is not shown yet: the bolt simply strikes. (a) Keep it for
    M13; (b) show one of Re:CoM's own effects at the spot now as a stand-in (which one: research first).
 

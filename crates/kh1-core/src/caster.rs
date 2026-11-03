@@ -305,8 +305,8 @@ pub enum StrikeStep {
 /// read again while the target is there (`sys 120`), on the floor under it (`0x18`: `sys 77` straight down; KH1's cloud
 /// effect 14 200 above it); then `delay` frames (30, the same count, **no parent test**) and the strike at the mark
 /// (effect 11; `sys 90` / `sys 60` on each opponent inside its cylinder). Nothing tests the parent's HP; after the mark
-/// nothing tests the parent at all (KH1's children are tasks of their own, `0x14028F5E0`). Effects (2056, 9, 2058, 14,
-/// 11, 12) wait for M13.
+/// nothing tests the parent at all (KH1's children are tasks of their own, `0x14028F5E0`). Effects (2056, 9, 2058, 11, 12)
+/// wait for M13; the cloud 14 has a Re:CoM stand-in ([`Cmd::Warn`], owner 2026-11-03).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Strike {
     /// Its sub-object index (`sys 94`'s second word).
@@ -398,15 +398,15 @@ impl Strike {
     }
 }
 
-/// Steps a parent's waiting strike children once: the [`Cmd::Strike`]s of those that strike (and a [`Cmd::Note`] for
-/// each mark), in their order; the finished ones are dropped.
+/// Steps a parent's waiting strike children once: the [`Cmd::Strike`]s of those that strike (and a [`Cmd::Warn`] for
+/// each mark: the host's stand-in for KH1's cloud until the strike), in their order; the finished ones are dropped.
 pub fn step_strikes<A>(strikes: &mut Vec<Strike>, motion: Option<u16>, step: f32, target: Option<Vec3>, floor: Option<f32>) -> Vec<Cmd<A>> {
     let mut out = Vec::new();
     strikes.retain_mut(|s| match s.step(motion, step, target, floor) {
         StrikeStep::Waits => true,
         StrikeStep::Ends => false,
-        StrikeStep::Marks(_) => {
-            out.push(Cmd::Note("the Thunder's mark: Sora's place on the floor (KH1's cloud effect 14 above it: M13)"));
+        StrikeStep::Marks(at) => {
+            out.push(Cmd::Warn { child: s.child, at });
             true
         }
         StrikeStep::Strikes(at) => {
@@ -476,6 +476,8 @@ mod tests {
         let mut s = Strike::new(1, 205, 206, 207, 1.0, 1.0);
         assert_eq!(s.step(Some(206), 1.0, Some(Vec3::new(7.0, 0.0, 9.0)), None), StrikeStep::Waits);
         assert_eq!(s.step(Some(207), 1.0, None, None), StrikeStep::Waits);
+        let mut w = vec![s];
+        assert_eq!(step_strikes::<u8>(&mut w, Some(207), 1.0, None, Some(3.0)), vec![Cmd::Warn { child: 1, at: Vec3::new(7.0, 3.0, 9.0) }], "the mark: the host's warning there");
         assert_eq!(s.step(Some(207), 1.0, None, Some(3.0)), StrikeStep::Marks(Vec3::new(7.0, 3.0, 9.0)));
         let mut v = vec![s];
         assert_eq!(step_strikes::<u8>(&mut v, None, 1.0, None, None), vec![Cmd::Strike { child: 1, at: Vec3::new(7.0, 3.0, 9.0) }]);

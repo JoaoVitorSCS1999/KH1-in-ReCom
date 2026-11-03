@@ -97,6 +97,11 @@ pub enum Cmd<A> {
     /// A spell child strikes an area once at `at` (KH1 units, y down: the floor point it marked; M11, the Yellow Opera's
     /// Thunder `ex_2130_00.bd`, `crate::caster::Strike`): the host's strike (a Re:CoM bullet placed by KH1's numbers).
     Strike { child: u8, at: Vec3 },
+    /// A strike child marked its place `at` (KH1 units, y down: the floor point; M11, the Yellow Opera's Thunder
+    /// `ex_2130_00.bd` `0x376`: KH1's warning cloud, its model's effect 14, `sys 74` 200 above the mark, for the 30 frames
+    /// before its [`Cmd::Strike`]): the host's stand-in, one of Re:CoM's own effects there until that child strikes
+    /// (owner 2026-11-03).
+    Warn { child: u8, at: Vec3 },
     /// Something KH1's script does here that the port doesn't build (an owner question or a later
     /// milestone): for the log only.
     Note(&'static str),
@@ -170,6 +175,7 @@ impl<A: Copy> Cmd<A> {
             Cmd::Guard(g) => Cmd::Guard(g),
             Cmd::Throw(n) => Cmd::Throw(n),
             Cmd::Strike { child, at } => Cmd::Strike { child, at },
+            Cmd::Warn { child, at } => Cmd::Warn { child, at },
             Cmd::Note(n) => Cmd::Note(n),
             Cmd::HealFull => Cmd::HealFull,
             Cmd::Support { child, draw } => Cmd::Support { child, draw },
