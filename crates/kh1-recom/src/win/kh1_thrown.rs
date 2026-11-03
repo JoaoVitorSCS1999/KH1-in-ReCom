@@ -53,6 +53,18 @@
 //!   turning 1° a frame toward that target; else at its thrower, turning toward it). Either way it hurts enemies
 //!   ([`own_shot`]: the Defender's handler takes its own fireball on its shield as KH1's big hit).
 //!
+//! - **The Red Nocturne's Fire and big Fire** (M11, `ex_2110_00.bd` / `ex_2110_01.bd`; the Defender's fireball library, its
+//!   flight, re-aim and homing routines byte for byte: Checked (files)): the same bullet and exe ([`Kind::Fire`]), one
+//!   per child (prefixes `fire` / `bigfire`), made when the child's wait in its parent's cast ends (the behaviour's
+//!   `kh1_core::caster::Cast`) at KH1's start, `sys 19(parent, 0x8001, −0.5)` then 80 / 70 up: 50 ahead of the Red
+//!   Nocturne's place along its facing ([`kh1_core::rednocturne::fire_start`]), along its facing, 12 / 22 a frame,
+//!   turning 1° / 2° a frame toward Sora's aim point, 90 frames; its power Re:CoM's own Red Nocturne shots' (id 0 / 1,
+//!   kind 1, `0x140191C00` / `0x140191CC0`), its look their effect sets (`0x140548EF0` / `0x140548F60`); radius KH1's
+//!   30 / 40. His swing bats it (the Defender's `0x1B8` = its `0x288`), with KH1's batted row's radius 60; **so does his
+//!   Guard** (KH1's guard row meets the fire's type-0, priority-0 free-standing row through `0x1402B4BC0` as a swing does,
+//!   and the child reads only `+4 & 0x30` before its re-aim: the Gargoyle's rule, owner 2026-11-03; [`GUARD_BATS`]).
+//!   Either way it hurts enemies; its own kind's handler takes it as its own row (`own_shot`: KH1's `sys 188`).
+//!
 //! Runs once a frame per flying blade (at most [`MAX`]); nothing otherwise.
 
 use super::magic::{rt, Desc, DescInitFn, FactoryFn, ManagerFn, MoverFn, PlFn, DESC_INIT, FACTORY, HOMING_THUNK, SHOT_MANAGER, SHOT_MOVER};
@@ -96,13 +108,27 @@ pub const DEFENDER_FIRE_EFFECT_SET: u64 = 0x1_4053_CF30;
 
 /// A class's own fireball look (descriptor `+0xA8`, `+0xB8`) when its effect set is where the exe had it: the Fat Bandit's
 /// (`0x14053E290` / `0x14053E300`), the Defender's (`0x14053CF30`); None (no look) otherwise.
-pub(super) unsafe fn fire_look(class: &str) -> Option<(u64, Option<u64>)> {
+pub(super) unsafe fn fire_look(class: &str, prefix: &str) -> Option<(u64, Option<u64>)> {
     let ok = |sites: &[crate::sites::PtrSite]| sites.iter().all(|p| rd::<usize>(base() + p.rva as usize) == base() + p.target as usize);
-    match class {
-        "defender" => ok(crate::sites::DEFENDER_FIRE_PTRS).then_some((DEFENDER_FIRE_EFFECT_SET, None)),
+    match (class, prefix) {
+        ("defender", _) => ok(crate::sites::DEFENDER_FIRE_PTRS).then_some((DEFENDER_FIRE_EFFECT_SET, None)),
+        ("rednocturne", "bigfire") => ok(crate::sites::REDNOCTURNE_FIRE_PTRS).then_some((REDNOCTURNE_BIG_EFFECT_SET, None)),
+        ("rednocturne", _) => ok(crate::sites::REDNOCTURNE_FIRE_PTRS).then_some((REDNOCTURNE_FIRE_EFFECT_SET, None)),
         _ => ok(crate::sites::FATBANDIT_FIRE_PTRS).then_some((FIRE_EFFECT_SET, Some(FIRE_EFFECT_PLACES))),
     }
 }
+
+/// The Red Nocturne's own shots' effect sets (`0x140191A30`'s descriptor `+0xA8`, none at `+0xB8`: its state 2's small shot
+/// `0x140548EF0`, its state 3's big shot `0x140548F60`; slot 1 of each names `"_ex_2110"` (`sites::REDNOCTURNE_FIRE_PTRS`)).
+/// Checked (decomp + exe).
+pub const REDNOCTURNE_FIRE_EFFECT_SET: u64 = 0x1_4054_8EF0;
+pub const REDNOCTURNE_BIG_EFFECT_SET: u64 = 0x1_4054_8F60;
+
+/// The classes whose fires Sora's Guard sends back KH1's way, as a swing does (the fire's row is KH1's type 0, priority 0,
+/// free-standing: KH1's guard meets it through `0x1402B4BC0` as a swing does and hands it to Sora; its child reads only
+/// `+4 & 0x30` before its re-aim; Checked (decomp + files), the Gargoyle's rule, owner 2026-11-03). The Fat Bandit's and
+/// the Defender's keep decision 28 (Re:CoM's homing turn-back), as built.
+pub const GUARD_BATS: &[&str] = &["rednocturne"];
 /// The range from its spawn (m; KH1's life ends it), the homing gate (m) after a turn-back.
 const RANGE: f32 = 255.0;
 const GATE: f32 = 255.0;
@@ -127,6 +153,12 @@ enum Kind {
 
 struct Blade {
     kind: Kind,
+    /// Its constants' prefix (`blade`, `fire`, `bigfire`).
+    prefix: &'static str,
+    /// KH1's batted row's radius (KH1 units) when the manifest gives it (the Red Nocturne's 60).
+    bat_radius: Option<f32>,
+    /// Sora's Guard sends it back KH1's way ([`GUARD_BATS`]).
+    guard_bats: bool,
     /// A fireball Sora's swing sent back: KH1's flight at its new aim (no Re:CoM homing).
     batted: bool,
     /// What a batted fireball turns toward (KH1's `hp[0x30]` after `0x1B8`: Sora's target, else its thrower), while it lives.
@@ -183,7 +215,11 @@ pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32
         return None;
     }
     if has("fire_life") && n == fire_n {
-        return fire(en, class, m, yaw);
+        return fire(en, class, m, yaw, "fire");
+    }
+    // M11, the Red Nocturne's second fire child (`ex_2110_01.bd`, the big Fire).
+    if has("bigfire_life") && n == index("bigfire_child", 1) {
+        return fire(en, class, m, yaw, "bigfire");
     }
     if has("flame_life") && n == flame_n {
         super::kh1_flame::start(en, class, m);
@@ -262,7 +298,7 @@ pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32
         if g.len() >= MAX {
             g.remove(0);
         }
-        g.push(Blade { kind: Kind::Blade, batted: false, home: None, id: bid, shooter, flight, turned: false });
+        g.push(Blade { kind: Kind::Blade, prefix: "blade", bat_radius: None, guard_bats: false, batted: false, home: None, id: bid, shooter, flight, turned: false });
         FLYING.store(true, Ordering::Relaxed);
     }
     wr(bullet + rt::STATE_EXE, blade_exe as *const () as usize);
@@ -292,36 +328,42 @@ pub(super) unsafe fn manifest_point(en: usize, m: &Manifest, p: &str) -> Option<
 /// The Fat Bandit's fireball (`ex_2060_00.bd`, module doc): a `CHomingBullet` as the blade, at the `fire_at` point,
 /// aimed by KH1's head direction from the `eye` point at Sora's aim point, flying KH1's straight 45 a frame for 240
 /// frames; Re:CoM's own fireball's power (id 1, kind 1, `0x14018DF20`) and look; KH1's radius (the row's 30).
-unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32) -> Option<u32> {
-    let c = |k: &str| m.consts.get(k);
-    let Some(at) = manifest_point(en, m, "fire_at") else {
-        line(|| format!("{class}: no bone for the fireball's start ({})", c("fire_at_bone")));
+unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32, p: &'static str) -> Option<u32> {
+    let c = |k: &str| m.consts.get(&format!("{p}_{k}"));
+    let start = if c("at_bone").is_finite() {
+        manifest_point(en, m, &format!("{p}_at"))
+    } else {
+        // M11, the Red Nocturne: `sys 19(parent, 0x8001, t)` then `up`, from its own place and facing.
+        super::kh1_enemy::kh1_place(en).map(|pos| crate::units::to_recom(kh1_core::rednocturne::fire_start(pos, yaw, c("t"), c("up"))))
+    };
+    let Some(at) = start else {
+        line(|| format!("{class}: no place for the {p}'s start ({})", c("at_bone")));
         return None;
     };
     let target = sora_target();
     // `sys 143` (`0x1402BAE10`): the head's direction while its look is on (the Fat Bandit's, from its `eye` point), else
     // the facing (the Defender's script never turns a head look on).
-    let dir = if c("eye_bone").is_finite() {
+    let dir = if m.consts.get("eye_bone").is_finite() {
         let Some(eye) = manifest_point(en, m, "eye") else {
-            line(|| format!("{class}: no bone for the fireball's aim ({})", c("eye_bone")));
+            line(|| format!("{class}: no bone for the fireball's aim ({})", m.consts.get("eye_bone")));
             return None;
         };
-        kh1_core::fatbandit::fire_dir(yaw, crate::units::to_kh1(eye), target, c("look_cone_out"), c("look_up"), c("look_down"), c("look_left"), c("look_right"))
+        kh1_core::fatbandit::fire_dir(yaw, crate::units::to_kh1(eye), target, m.consts.get("look_cone_out"), m.consts.get("look_up"), m.consts.get("look_down"), m.consts.get("look_left"), m.consts.get("look_right"))
     } else {
         Vec3::from_yaw(yaw)
     };
     // Its speed: the Fat Bandit's 45, the Defender's drawn in [8, 10) (`0x418(8, 10)`: rand × (10 − 8) + 8).
-    let speed = if c("fire_speed").is_finite() {
-        c("fire_speed")
+    let speed = if c("speed").is_finite() {
+        c("speed")
     } else {
         let r = RNG.lock().ok().and_then(|mut g| g.get_or_insert_with(|| Kh1Rand::new(0x2090_0001)).next_f32().into()).unwrap_or(0.5);
-        r * (c("fire_speed_max") - c("fire_speed_min")) + c("fire_speed_min")
+        r * (c("speed_max") - c("speed_min")) + c("speed_min")
     };
-    let n = Numbers { life: c("fire_life"), turn_back: c("fire_life"), speed, accel: 0.0, turn_deg: c("fire_turn"), slide: 0.0, slide_drag: 0.0 };
+    let n = Numbers { life: c("life"), turn_back: c("life"), speed, accel: 0.0, turn_deg: c("turn"), slide: 0.0, slide_drag: 0.0 };
     let flight = Thrown::aimed(crate::units::to_kh1(at), dir, n);
-    let id = c("fire_recom_id") as i32;
+    let id = c("recom_id") as i32;
     // Re:CoM's own fireball's power: `0x14017F0E0(enemy, 1, 1, 0)` (no kind out, flag 0), `0x14017F050(enemy, 1)`.
-    let ap = func::<ApFn>(f::ATTACK_AP)(en, id, c("fire_kind") as i32, 0, std::ptr::null_mut(), 0) as i32;
+    let ap = func::<ApFn>(f::ATTACK_AP)(en, id, c("kind") as i32, 0, std::ptr::null_mut(), 0) as i32;
     let attr = func::<AttrFn>(f::ATTACK_ATTR)(en, id);
     let mut d = Desc([0; 0x100]);
     let dp = d.0.as_mut_ptr();
@@ -344,7 +386,7 @@ unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32) -> Option<u32> {
     let v = crate::units::to_recom(flight.dir);
     let (pitch, ryaw) = crate::guard::aim_angles([v.x, v.y, v.z]).unwrap_or((0.0, crate::units::yaw_to_recom(yaw)));
     std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [pitch, ryaw, 0.0, 0.0]);
-    match fire_look(class) {
+    match fire_look(class, p) {
         Some((set, places)) => {
             std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), set));
             if let Some(p) = places {
@@ -353,7 +395,7 @@ unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32) -> Option<u32> {
         }
         None => line(|| format!("{class}: its fireball effect set is not where the exe had it: the fireball has no look")),
     }
-    std::ptr::write_unaligned(w(0x78) as *mut f32, c("fire_radius") * crate::units::METRES_PER_UNIT);
+    std::ptr::write_unaligned(w(0x78) as *mut f32, c("radius") * crate::units::METRES_PER_UNIT);
     std::ptr::write_unaligned(w(0x94) as *mut i32, FADE);
     let factory = func::<FactoryFn>(FACTORY)();
     if factory == 0 {
@@ -381,12 +423,12 @@ unsafe fn fire(en: usize, class: &str, m: &Manifest, yaw: f32) -> Option<u32> {
         if g.len() >= MAX {
             g.remove(0);
         }
-        g.push(Blade { kind: Kind::Fire, batted: false, home: None, id: bid, shooter, flight, turned: false });
+        g.push(Blade { kind: Kind::Fire, prefix: p, bat_radius: Some(c("bat_radius")).filter(|r| r.is_finite()), guard_bats: GUARD_BATS.contains(&class), batted: false, home: None, id: bid, shooter, flight, turned: false });
         FLYING.store(true, Ordering::Relaxed);
     }
     wr(bullet + rt::STATE_EXE, blade_exe as *const () as usize);
     let dd = flight.dir;
-    line(|| format!("{class} e{shooter}: fireball {bid} from ({:.2},{:.2},{:.2}) along ({:.3},{:.3},{:.3}) (KH1's aim at {:?}), {:.2} a frame turning {}° for {} frames, AP {ap} attribute {attr} (Re:CoM's fireball, id {id}), radius {:.2} m", at.x, at.y, at.z, dd.x, dd.y, dd.z, target.map(|t| (t.x as i32, t.y as i32, t.z as i32)), flight.n.speed, flight.n.turn_deg, flight.n.life, c("fire_radius") * 0.01));
+    line(|| format!("{class} e{shooter}: {p} {bid} from ({:.2},{:.2},{:.2}) along ({:.3},{:.3},{:.3}) (KH1's aim at {:?}), {:.2} a frame turning {}° for {} frames, AP {ap} attribute {attr} (Re:CoM's shot, id {id}), radius {:.2} m", at.x, at.y, at.z, dd.x, dd.y, dd.z, target.map(|t| (t.x as i32, t.y as i32, t.z as i32)), flight.n.speed, flight.n.turn_deg, flight.n.life, c("radius") * 0.01));
     Some(bid)
 }
 
@@ -407,9 +449,15 @@ pub unsafe extern "win64" fn blade_exe(bullet: usize) {
         let dt: i32 = rd(bullet + 0x14);
         let step = crate::units::step_from_dt(dt.clamp(0, 1000));
         let mut log_turn = None;
+        let mut note = None;
         let mut end = false;
         if let Ok(mut g) = BLADES.lock() {
             if let Some(b) = g.iter_mut().find(|b| b.id == id) {
+                if turned && !b.turned && !b.batted && b.guard_bats && b.kind == Kind::Fire {
+                    // Sora's Guard blocked it (Re:CoM's block: its list now the enemies'): KH1's re-aim, as a swing
+                    // ([`GUARD_BATS`]). It flies on as a batted fire from this frame.
+                    note = Some(reaim_fire(b, bullet, "Guard"));
+                }
                 // A fireball turns toward Sora's aim point at its own rate (the Fat Bandit's 0: straight; the Defender's 1°);
                 // a batted one toward its new target (`0x1B8`'s `hp[0x30]`) while that lives (`sys 120`), on the enemies' side.
                 if b.batted {
@@ -461,6 +509,9 @@ pub unsafe extern "win64" fn blade_exe(bullet: usize) {
         }
         if let Some(s) = log_turn {
             line(|| format!("blade {id}: Sora's Guard turned it back: Re:CoM's homing takes it at e{s}"));
+        }
+        if let Some(n) = note {
+            line(|| n);
         }
     }
     func::<PlFn>(HOMING_THUNK)(bullet)
@@ -529,38 +580,13 @@ pub(super) unsafe fn swing_at_blades(meets: impl Fn(usize) -> bool) {
             if !super::guard::send_back(bullet) {
                 continue;
             }
+            let n = reaim_fire(b, bullet, "swing");
             let mover: usize = rd(bullet + gb::MOVER);
-            if mover != 0 {
-                b.flight.pos = crate::units::to_kh1(rd_vec(mover + rt::POSITION));
-            }
-            // `0x1B8`: the way to its thrower (`sys 32`) while it lives, else the swinger's facing (Sora's back along the
-            // flight: Assumption); with Sora's target alive, its new target is that one and, for a turning fireball, the
-            // way is half-way between the two (normalised sum), else straight at it; else its thrower stays the target.
-            let to = |t: Vec3| (t - b.flight.pos).normalized();
-            let shooter_aim = alive_aim(b.shooter);
-            let mut dir = shooter_aim.map(to).unwrap_or(-b.flight.dir);
-            let pl: usize = rd(va(b0, crate::sites::data::MAIN_PLAYER));
-            let sora_t: u32 = if pl != 0 { rd(pl + 0x84C) } else { 0 };
-            match alive_aim(sora_t).filter(|_| sora_t != 0) {
-                Some(t) => {
-                    dir = if b.flight.n.turn_deg == 0.0 { to(t) } else { (dir + to(t)).normalized() };
-                    b.home = Some(sora_t);
-                }
-                None => b.home = shooter_aim.map(|_| b.shooter),
-            }
-            if dir.length() < 1e-3 {
-                dir = -b.flight.dir;
-            }
-            b.flight.retarget(dir);
-            b.batted = true;
-            let life = crate::units::frames_to_units(b.flight.n.life + 2.0);
-            wr(bullet + rt::LIFE, life);
             if mover != 0 {
                 let p = rd_vec(mover + rt::POSITION);
                 super::attack::spark_at([p.x, p.y, p.z, 1.0]);
             }
-            let (id, d) = (b.id, b.flight.dir);
-            line(|| format!("fireball {id}: Sora's swing bats it back along ({:.2},{:.2},{:.2}) (KH1's projectile clash), on the enemies' side", d.x, d.y, d.z));
+            line(|| n);
             continue;
         }
         let r = {
@@ -589,10 +615,50 @@ pub(super) unsafe fn swing_at_blades(meets: impl Fn(usize) -> bool) {
     }
 }
 
+/// KH1's projectile clash on a fire already on the enemies' side (Sora's swing through `super::guard::send_back`, or his
+/// Guard's block for a [`GUARD_BATS`] class): aimed anew (`0x1B8`, the Red Nocturne's `0x288`: the same bytes) at Sora's
+/// target while it lives, else at its thrower, its whole life again, turning toward that target; KH1's batted row's radius
+/// when the manifest gives it (Re:CoM's radius setter). The log line.
+unsafe fn reaim_fire(b: &mut Blade, bullet: usize, by: &str) -> String {
+    let mover: usize = rd(bullet + gb::MOVER);
+    if mover != 0 {
+        b.flight.pos = crate::units::to_kh1(rd_vec(mover + rt::POSITION));
+    }
+    // `0x1B8`: the way to its thrower (`sys 32`) while it lives, else the swinger's facing (Sora's back along the
+    // flight: Assumption); with Sora's target alive, its new target is that one and, for a turning fireball, the
+    // way is half-way between the two (normalised sum), else straight at it; else its thrower stays the target.
+    let to = |t: Vec3| (t - b.flight.pos).normalized();
+    let shooter_aim = alive_aim(b.shooter);
+    let mut dir = shooter_aim.map(to).unwrap_or(-b.flight.dir);
+    let pl: usize = rd(va(base(), crate::sites::data::MAIN_PLAYER));
+    let sora_t: u32 = if pl != 0 { rd(pl + 0x84C) } else { 0 };
+    match alive_aim(sora_t).filter(|_| sora_t != 0) {
+        Some(t) => {
+            dir = if b.flight.n.turn_deg == 0.0 { to(t) } else { (dir + to(t)).normalized() };
+            b.home = Some(sora_t);
+        }
+        None => b.home = shooter_aim.map(|_| b.shooter),
+    }
+    if dir.length() < 1e-3 {
+        dir = -b.flight.dir;
+    }
+    b.flight.retarget(dir);
+    b.batted = true;
+    let life = crate::units::frames_to_units(b.flight.n.life + 2.0);
+    wr(bullet + rt::LIFE, life);
+    wr(bullet + gb::HOMING_TARGET, 0i32);
+    let coll: usize = rd(bullet + gb::COLL);
+    if let Some(r) = b.bat_radius.filter(|_| coll != 0) {
+        func::<RadiusFn>(SET_RADIUS)(coll, r * crate::units::METRES_PER_UNIT);
+    }
+    let (id, d, p) = (b.id, b.flight.dir, b.prefix);
+    format!("{p} {id}: Sora's {by} bats it back along ({:.2},{:.2},{:.2}) (KH1's projectile clash), on the enemies' side{}", d.x, d.y, d.z, b.bat_radius.map_or(String::new(), |r| format!(", radius {:.2} m", r * 0.01)))
+}
+
 /// The trace's token: the blades flying (id, frames, speed, turned back).
 pub fn trace_token() -> String {
     let Ok(g) = BLADES.try_lock() else { return String::new() };
-    let mut t: Vec<String> = g.iter().map(|b| format!("{} {}:{:.0}:{:.1}{}", if b.kind == Kind::Fire { "fire" } else { "blade" }, b.id, b.flight.time, b.flight.speed, if b.turned { ":back" } else if b.batted { ":batted" } else { "" })).collect();
+    let mut t: Vec<String> = g.iter().map(|b| format!("{} {}:{:.0}:{:.1}{}", b.prefix, b.id, b.flight.time, b.flight.speed, if b.turned { ":back" } else if b.batted { ":batted" } else { "" })).collect();
     drop(g);
     if let Ok(g) = BALLS.try_lock() {
         t.extend(g.iter().map(|b| format!("ball e{}:{}:{:?}:{:.0}:{:.0}{}", b.shooter, b.bullet.unwrap_or(0), b.ball.phase, b.ball.time, b.ball.bounces, if b.guarded { ":guarded" } else if b.ball.batted { ":batted" } else { "" })));

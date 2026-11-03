@@ -645,6 +645,13 @@ unsafe fn mover(en: usize) -> usize {
     rd(en + e::MOVER)
 }
 
+/// The enemy's KH1 place (its Re:CoM mover's position in KH1 units, as each frame's `World::pos`), for a thrown object that
+/// starts from it (M11, the Red Nocturne's fires: `sys 19(parent, 0x8001, t)`).
+pub(super) unsafe fn kh1_place(en: usize) -> Option<Vec3> {
+    let m = mover(en);
+    (m != 0).then(|| crate::units::to_kh1(rd_vec(m + mv::POS)))
+}
+
 unsafe fn sora_pos() -> Option<Vec3> {
     let pl: usize = rd(super::va(base(), data::MAIN_PLAYER));
     if pl == 0 {

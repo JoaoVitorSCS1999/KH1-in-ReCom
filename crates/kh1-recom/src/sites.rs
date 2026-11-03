@@ -2964,6 +2964,56 @@ pub const DEFENDER_PTRS: &[PtrSite] = &[
 /// 2026-11-02: "drawn with a Re:CoM effect (its own)"). Pointer-checked: slot 1's name pointer. Checked (exe + decomp).
 pub const DEFENDER_FIRE_PTRS: &[PtrSite] = &[PtrSite { name: "the Defender's fireball effect set slot 1 name", rva: 0x0053_CF48, target: 0x0053_CF90 }];
 
+/// M11 casters: the Red Nocturne's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp): its only
+/// caller is the enemy factory `0x140188F40` (case 3, the call at `0x14018901A`); no branch lands inside the moved bytes
+/// and no pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-03).
+pub const REDNOCTURNE_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemyRednocturne ctor (0x140191880)", rva: 0x0019_1880, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 casters: the factory's `mov ecx, 0xCD0` before `CEnemyRednocturne`'s ctor, raised by the framework's 0x20-byte
+/// tail. Checked (exe).
+pub const REDNOCTURNE_ALLOC: &[Site] = &[Site { name: "alloc CEnemyRednocturne (0x140189001)", rva: 0x0018_9001, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11 casters: `CEnemyRednocturne`'s vtable slots the copy keeps or replaces, checked against Re:CoM's functions before
+/// the copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12 / 30 are `CBattleEnemy`'s, 1..3 the
+/// Red Nocturne's own: 1 `0x1401919F0` / the walk thunk `0x140191D80` / `0x140191BF0`, 2 its small shot `e003_051`
+/// `0x140191950` / `0x140191C00`, 3 its big shot `e003_053` `0x1401919A0` / `0x140191CC0` (a `CBullet` from its aim point,
+/// homing 2.5° a frame for 1500 ticks); the think `CHeartless`'s `0x140196EC0`).
+pub const REDNOCTURNE_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyRednocturne +0x70 motion play", rva: 0x0054_8AC8, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyRednocturne +0x80 update", rva: 0x0054_8AD8, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyRednocturne +0xE8 state 0 begin", rva: 0x0054_8B40, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyRednocturne +0xF0 state 0 step", rva: 0x0054_8B48, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyRednocturne +0xF8 state 0 end", rva: 0x0054_8B50, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyRednocturne +0x100 state 1 begin", rva: 0x0054_8B58, target: 0x0019_19F0 },
+    PtrSite { name: "CEnemyRednocturne +0x108 state 1 step", rva: 0x0054_8B60, target: 0x0019_1D80 },
+    PtrSite { name: "CEnemyRednocturne +0x110 state 1 end", rva: 0x0054_8B68, target: 0x0019_1BF0 },
+    PtrSite { name: "CEnemyRednocturne +0x118 state 2 begin", rva: 0x0054_8B70, target: 0x0019_1950 },
+    PtrSite { name: "CEnemyRednocturne +0x120 state 2 step", rva: 0x0054_8B78, target: 0x0019_1C00 },
+    PtrSite { name: "CEnemyRednocturne +0x130 state 3 begin", rva: 0x0054_8B88, target: 0x0019_19A0 },
+    PtrSite { name: "CEnemyRednocturne +0x138 state 3 step", rva: 0x0054_8B90, target: 0x0019_1CC0 },
+    PtrSite { name: "CEnemyRednocturne +0x1F0 state 11 begin", rva: 0x0054_8C48, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyRednocturne +0x208 state 12 begin", rva: 0x0054_8C60, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyRednocturne +0x3B8 state 30 begin", rva: 0x0054_8E10, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyRednocturne +0x3C0 state 30 step", rva: 0x0054_8E18, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyRednocturne +0x3D0 think", rva: 0x0054_8E28, target: 0x0019_6EC0 },
+    // The shared enemy-guard step's slot (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemyRednocturne +0x3D8 guard event", rva: 0x0054_8E30, target: 0x0018_1600 },
+    PtrSite { name: "CEnemyRednocturne +0x438 attack hurt off", rva: 0x0054_8E90, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyRednocturne +0x440 attack end", rva: 0x0054_8E98, target: 0x0017_DA90 },
+];
+
+/// M11 casters: the Red Nocturne's own shots' effect sets (`0x140191A30`'s descriptor `+0xA8`: state 2's small shot
+/// `0x140548EF0`, slots 1..3 `"_ex_2110"` 8 / 9 / 7; state 3's big shot `0x140548F60`, 12 / 13 / 11: the model's own
+/// effects), copied into its KH1 Fire and big Fire (owner 2026-11-02: projectiles drawn with a Re:CoM effect, its own).
+/// Pointer-checked: each set's slot 1 name pointer. Checked (exe + decomp).
+pub const REDNOCTURNE_FIRE_PTRS: &[PtrSite] = &[
+    PtrSite { name: "the Red Nocturne's small shot effect set slot 1 name", rva: 0x0054_8F08, target: 0x0054_8F50 },
+    PtrSite { name: "the Red Nocturne's big shot effect set slot 1 name", rva: 0x0054_8F78, target: 0x0054_8F50 },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -3101,6 +3151,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         GARGOYLE_ALLOC,
         DEFENDER_HOOKS,
         DEFENDER_ALLOC,
+        REDNOCTURNE_HOOKS,
+        REDNOCTURNE_ALLOC,
         HELD_CALLEES,
         GRAB_CALLEES,
     ];
@@ -3202,7 +3254,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS, REDNOCTURNE_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

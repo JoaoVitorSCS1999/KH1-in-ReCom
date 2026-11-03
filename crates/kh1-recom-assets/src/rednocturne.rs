@@ -30,6 +30,8 @@ pub const CONSTS: &[(&str, &[usize])] = &[
     // The casts' requests (`sys 13(actor, r, blend, start)`): 200 / 202 at blend 8 (202 from frame 8), the casts queued
     // at blend 0; the idle 220 after them.
     ("cast_blend", &[0x57E, 0x4B8]),
+    // The blend the host gives the motion a reaction queues (`Engine::attack_blend`): the scripts' 8.
+    ("attack_blend", &[0x57E, 0x4B8]),
     ("cast_start", &[0x584]),
     ("bigfire_start", &[0x4BE]),
     ("cast_queue_blend", &[0x596, 0x4D0]),
