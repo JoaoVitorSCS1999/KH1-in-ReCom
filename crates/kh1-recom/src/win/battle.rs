@@ -351,8 +351,78 @@ pub fn install_cage(bs: usize) -> bool {
         && crate::sites::CAGE_PTRS.iter().all(|p| unsafe { rd::<usize>(bs + p.rva as usize) } == bs + p.target as usize);
     if ok {
         CAGE_VT.store(vt, Ordering::Release);
+        // SAFETY: the callback's bytes and the slot's old pointer are checked before the write.
+        if unsafe { install_cage_faint(bs) } {
+            log("m6: Parasite Cage hit callback 0x1403C4060 wrapped (its vtable +0x3E0): in a KH1 battle its faint (state 17) only from Fire; a finisher-type hit that isn't Fire takes no AtkFaint roll");
+        } else {
+            log("m6: Parasite Cage hit callback not as read: its faint stays Re:CoM's (Fire or a finisher-type hit, by chance)");
+        }
     }
     ok
+}
+
+/// Re:CoM's hit callback of the cage (absolute), once its slot holds ours; 0: not installed.
+static CAGE_CALLBACK: AtomicUsize = AtomicUsize::new(0);
+static CAGE_SKIP_LOGGED: AtomicU32 = AtomicU32::new(0);
+static CAGE_FIRE_LOGGED: AtomicU32 = AtomicU32::new(0);
+
+type CallbackFn = unsafe extern "win64" fn(usize);
+
+/// The cage's hit callback slot (`+0x3E0`, `sites::CAGE_FAINT_SLOT`) written with
+/// [`cage_hit_callback`], after its first bytes and the reads the rule mirrors
+/// (`sites::CAGE_FAINT_CHECKED`) and the slot's old pointer are checked. No code bytes move.
+unsafe fn install_cage_faint(bs: usize) -> bool {
+    if let Some(s) = crate::sites::CAGE_FAINT_CHECKED.iter().find(|s| std::slice::from_raw_parts((bs + s.rva as usize) as *const u8, s.expect.len()) != s.expect) {
+        log(&format!("m6: {} holds other bytes", s.name));
+        return false;
+    }
+    let p = crate::sites::CAGE_FAINT_SLOT;
+    let theirs = bs + p.target as usize;
+    CAGE_CALLBACK.store(theirs, Ordering::Release);
+    let ours = cage_hit_callback as *const () as usize;
+    if super::hook::patch(bs + p.rva as usize, &(theirs as u64).to_le_bytes(), &(ours as u64).to_le_bytes(), p.name) {
+        true
+    } else {
+        CAGE_CALLBACK.store(0, Ordering::Release);
+        false
+    }
+}
+
+/// The cage's hit callback (its vtable `+0x3E0`; called by Re:CoM's hit handler `0x14017F7E0` before
+/// the reaction picker, and by its stop exe `0x1401843A0` for a held hit). At Combat = KH1 its faint
+/// only from Fire (`crate::battle::cage::callback`): a finisher-type hit (body kind 2) that isn't
+/// Fire skips the call (its only work there is the `AtkFaint` roll); our KH1 Fire's hit (attribute
+/// neutral for KH1's damage) reads as Fire for the call. Combat = Re:CoM, or in its faint: Re:CoM's.
+/// Per hit on the cage: one atomic load at Combat = Re:CoM, else a few reads.
+pub unsafe extern "win64" fn cage_hit_callback(e: usize) {
+    let theirs: CallbackFn = std::mem::transmute(CAGE_CALLBACK.load(Ordering::Acquire));
+    if !KH1_BATTLE.load(Ordering::Acquire) {
+        return theirs(e);
+    }
+    let info: usize = rd(e + 0xF8);
+    let body: usize = if info != 0 { rd(info + 0x50) } else { 0 };
+    if body == 0 {
+        return theirs(e);
+    }
+    let attr: u32 = rd(body + super::magic::PART_ATTR);
+    let neutral_fire = attr == super::magic::NEUTRAL_ATTR && super::magic::shot_spell(rd(body + 0x98)) == Some(crate::magic::spell::FIRE);
+    let ask = b::cage::Faint {
+        kh1_battle: true,
+        fainted: rd::<u8>(e + b::cage::FAINTED_OFF) & b::cage::FAINTED_BIT != 0,
+        fire: attr == b::cage::FIRE_ATTR,
+        neutral_fire,
+        finisher: rd::<u32>(body + 0x80) == b::cage::FINISHER_KIND,
+    };
+    match b::cage::callback(ask) {
+        b::cage::Callback::Run => theirs(e),
+        b::cage::Callback::RunAsFire => {
+            wr(body + super::magic::PART_ATTR, b::cage::FIRE_ATTR);
+            theirs(e);
+            wr(body + super::magic::PART_ATTR, attr);
+            once_per_battle(&CAGE_FIRE_LOGGED, b::cage::faint_fire_line);
+        }
+        b::cage::Callback::Skip => once_per_battle(&CAGE_SKIP_LOGGED, b::cage::faint_skip_line),
+    }
 }
 
 /// Installs the attack-end wrapper on its own (a failure leaves Re:CoM's 250 and the rest of M6).

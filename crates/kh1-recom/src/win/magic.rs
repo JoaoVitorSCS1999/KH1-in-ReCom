@@ -2103,6 +2103,12 @@ pub unsafe extern "win64" fn exe_magic(pl: usize) {
     mv::run_frame(pl, false);
 }
 
+/// The spell of one of our recent shots, by the attacker id a hit body carries (`+0x98`), without
+/// taking anything (the Parasite Cage's faint, `win::battle::cage_hit_callback`).
+pub fn shot_spell(id: u32) -> Option<u8> {
+    SHOTS.try_lock().ok()?.iter().find(|&&(x, _, _, _)| x == id).map(|&(_, s, _, _)| s)
+}
+
 /// One of our balls hit this enemy this frame: the hit part (`*(enemy+0xF8)+0x40`, `0x120` bytes
 /// each, hit flag `+0x90`, attacker id `+0x98`; Checked (decomp `0x140154EB0`, `0x14016F1C0`)),
 /// the spell and level.

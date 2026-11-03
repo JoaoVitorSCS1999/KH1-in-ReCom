@@ -1750,6 +1750,24 @@ pub const CAGE_PTRS: &[PtrSite] = &[
     PtrSite { name: "CBossParasiteCage +0x3E0", rva: 0x0066_9600, target: 0x003C_4060 },
 ];
 
+/// The Parasite Cage's faint only from Fire at Combat = KH1 (owner, 2026-11-03, "Parasite Cage faint /
+/// card"): its hit callback `0x1403C4060` (vtable `+0x3E0`, written with ours,
+/// `win::battle::cage_hit_callback`, which calls it). Its first bytes and the three reads the rule
+/// mirrors. Checked (exe + disasm).
+pub const CAGE_FAINT_CHECKED: &[Site] = &[
+    // mov r11,rsp; push rbp; push rdi; sub rsp,0xA8; movaps [r11-0x28],xmm6
+    Site { name: "Parasite Cage hit callback (0x1403C4060)", rva: 0x003C_4060, expect: &[0x4C, 0x8B, 0xDC, 0x55, 0x57, 0x48, 0x81, 0xEC, 0xA8, 0x00, 0x00, 0x00, 0x41, 0x0F, 0x29, 0x73, 0xD8] },
+    // test byte [rcx+0xCD4],4; mov rdi,rcx; mov rax,[rcx+0xF8]; mov rbp,[rax+0x50]: in its faint?, the hit body.
+    Site { name: "Parasite Cage hit callback: faint test, hit body (0x1403C4080)", rva: 0x003C_4080, expect: &[0xF6, 0x81, 0xD4, 0x0C, 0x00, 0x00, 0x04, 0x48, 0x8B, 0xF9, 0x48, 0x8B, 0x81, 0xF8, 0x00, 0x00, 0x00, 0x48, 0x8B, 0x68, 0x50] },
+    // cmp dword [rbp+0x84],2; jne: Fire (attribute 2) → its FireFaint roll.
+    Site { name: "Parasite Cage hit callback: Fire test (0x1403C42B4)", rva: 0x003C_42B4, expect: &[0x83, 0xBD, 0x84, 0x00, 0x00, 0x00, 0x02, 0x75, 0x6F] },
+    // cmp dword [rbp+0x80],2; jne: kind 2 (finisher-type) → its AtkFaint roll.
+    Site { name: "Parasite Cage hit callback: kind-2 test (0x1403C432C)", rva: 0x003C_432C, expect: &[0x83, 0xBD, 0x80, 0x00, 0x00, 0x00, 0x02, 0x0F, 0x85, 0x5C, 0xFF, 0xFF, 0xFF] },
+];
+
+/// Its slot (also in [`CAGE_PTRS`], checked first). Checked (exe; relocated pointer).
+pub const CAGE_FAINT_SLOT: PtrSite = PtrSite { name: "CBossParasiteCage +0x3E0 (hit callback)", rva: 0x0066_9600, target: 0x003C_4060 };
+
 /// Re:CoM code the gimmick cards rely on (not patched, not called).
 pub const GIMMICK_CHECKED: &[Site] = &[
     // The count getter (−1 without CBTL, else +0x1D0) and the "now playing" getter (byte +0x1E4):
@@ -3186,6 +3204,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         M6_PACE_HOOKS,
         M6_PACE_CHECKED,
         CAGE_CHECKED,
+        CAGE_FAINT_CHECKED,
         M6_CALLEES,
         M6_CHECKED,
         M6_DECK_HOOKS,
