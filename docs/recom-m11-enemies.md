@@ -3225,6 +3225,19 @@ a new attack with row `0x46C` owned by the swinger, aimed at the normalised sum 
 swinger's target (or at the Gargoyle), then `0x2BA` once more (tossed again, its life and count anew, its speed kept).
 **It does not home**; it bounces toward its target. Checked (files + decomp).
 
+**Sora's Guard meets it the same way** (owner 2026-11-03: "Sora's Guard sends the Gargoyle's ball back KH1's way").
+KH1's guard is an attack object of clash type 2 (row 0x3D, `0x1402A3980`; priority the Keyblade's, Kingdom Key 30;
+±100° of Sora's facing; the research note `kh1-guard-counter.md` § 1, kept with the decomp tools) and meets the ball's row `0x3FC` (type 0: the
+clash table `0x140528CB8` lets a type-2 object meet types 0 and 3) in the same pair pass as a swing, `0x1402B4A20` →
+`0x1402B4BC0(ball, guard)`. There the ball (priority 0 < 98, the guard's priority ≠ 0; free-standing, `+0x30 & 0x400`)
+takes the free-standing branch a swing's clash takes: its team bits swapped, flag `0x1000000`, **its owner `+0x34` =
+the guard's owner (Sora)**, `+4 |= 0x10` (0x20 when 0 − G < −40: a Keyblade of priority over 40). The guard's own side
+gets nothing (`0x1402B4BC0(guard, ball)` returns 0: the ball's priority is 0). Checked (decomp `0x1402B4BC0`,
+`0x1402B4A20`). The child (`0x27C..0x2AC`) then reads only `+4 & 0x30` (`0xAB2`) and calls `0x748` with the attack's
+`+0x34` (its owner, now Sora): a swing's clash and a guard's are the same to it. Checked (files: `ex_2220_00.bd`
+listed from `0x18`). So in KH1 Guard sends the ball back exactly as a swing: row `0x46C` owned by Sora, aimed between
+the Gargoyle and Sora's target, bouncing, hurting enemies; once only.
+
 #### Re:CoM's side. Checked (exe + decomp)
 
 `CEnemyGargoyle` (vtable `0x14053F198`, 139 slots, RTTI COL at −8), ctor `0x14018E150` (`40 53 48 83 EC 20`:
@@ -3266,7 +3279,13 @@ hands, foot) → Re:CoM's wing strike, id 0 (its only body attack); the ball →
   background radius is 1 cm (Re:CoM's shots pass 0.1 m), so Re:CoM's own mover never touches the floor (with flag 0x100
   a touch would end it): KH1 lets the ball dip under the floor by up to a frame's fall before it bounces (Assumption: ≤ a
   frame, unseen). A Re:CoM wall ends it (Re:CoM's rule; KH1 bounces off walls too: owner question 4).
-- **Sora's Guard** turns it back (decision 28: Re:CoM's homing takes it at the Gargoyle; owner question 2).
+- **Sora's Guard sends it back KH1's way** (owner question 2, answered (b) 2026-11-03): Re:CoM's block of the ball
+  (`super::guard`'s turn-back: its collision on the enemies' list, decision 27 / 28) is seen by the ball's exe the next
+  frame (`ball_exe`: its shape's list flags), which runs KH1's `0x748` exactly as for a swing (`send_back_kh1`: radius
+  60 cm, aimed between the Gargoyle and Sora's target or at the Gargoyle, tossed again, bouncing toward that target, its
+  life anew; Re:CoM's homing target cleared). Once only. No extra spark (Re:CoM's block plays its own guard spark). With
+  the Config row "Guard reactions" off, Re:CoM's block ends the ball (Re:CoM's rule for a blocked shot, as before).
+  A wall still ends it. The Fat Bandit's and the Defender's fireballs keep decision 28.
 - **Sora's swing sends it back** (KH1's `0x748`): in the swing's pair test, Guard's turn-back (`guard::send_back`: it then
   hurts enemies), its radius KH1's 60 cm (Re:CoM's radius setter `0x140172690`), aimed between the Gargoyle and Sora's
   target (Re:CoM's `player+0x84C` while it lives) or at the Gargoyle, tossed again, bouncing toward that target; Re:CoM's
@@ -3293,7 +3312,8 @@ converter's `_sk_N` name. In `mod.yml`:
 
 The step prints `gargoyle (M11): …`; the log shows `gargoyle: KH1's gargoyle (M11) …` at start, `battle N: Gargoyle …
 gets KH1's AI` in a Gargoyle battle, and `thrown: gargoyle eNNN: its ball …`, `ball …: appears`, `launched`, `floor contact
-N`, `ends`, `Sora's swing sends it back` per ball.
+N`, `ends`, `Sora's swing sends it back` / `Sora's Guard sends it back` per ball (the trace's `ball` token ends `:batted`
+or `:guarded`).
 
 #### Checked / Assumption
 
@@ -3308,11 +3328,16 @@ N`, `ends`, `Sora's swing sends it back` per ball.
   (`0x140156E20`: flag `0x100` ends a bullet whose mover touches the floor or a wall), `CCollAttack` off / on.
 - **Checked (exe):** the class, its 139 slots, the ctor and its only call, the factory size, the vtable slots, the effect
   set's name pointer, the collision on slot; 25 sites (pefile, 2026-11-02).
+- **Checked (decomp + files), Guard (2026-11-03):** KH1's guard meets the ball through `0x1402B4BC0`'s free-standing
+  branch as a swing does (owner → Sora, `+4 |= 0x10 / 0x20`), and the child reads only `+4 & 0x30` before `0x748`.
 - **Assumptions:** the generic appearance (205) for every battle spawn (KH1's perched spawn type 5 not used); `sys 10`'s
   turn sign (as every port); a fade's end hides the model and a fade-in shows it at once (KH1 ramps the alpha; owner
   question 3); the ball's first frame the same frame as the throw (±1); its floor a flat battle floor and its bounce 2 cm
   higher than KH1's crossing; KH1's floor test one-sided (a ball rising through the floor after a bounce meets nothing);
   the hand point for `sys 19(parent, 28, 1)` from the idle's pose; Re:CoM's sounds on the new clips; seeds per enemy.
+- **Assumptions (Guard, 2026-11-03):** Re:CoM's block (Sora's body guard, `+0x9C & 0x20`) stands for KH1's blade capsule
+  meeting the ball (where and when they meet can differ by the capsule's reach); the send-back runs at the ball's next
+  step after the block, as after a swing (KH1: the child reads `+4` after its yield).
 - **Not ported:** the leash, the perched spawn, KH1's room rules (world 10 rooms 7 / 9), the search object, effects 6 / 9
   / 11 and `sys 21` (M13), the ball's growth from 0.005 (its model's scale: M13), the alpha ramps, the appearance's flag 0x80
   and fade-in, hit attributes (8 / 10), the death routine (Re:CoM's defeat, prizes, EXP).
@@ -3326,8 +3351,8 @@ N`, `ends`, `Sora's swing sends it back` per ball.
 3. Far: often it throws a dark ball: it holds a ball at its chin for about 2½ s (Re:CoM's Gargoyle shot effect), then
    tosses it up toward you; the ball falls, bounces toward you twice and ends on its third touch of the floor. Side-step
    it; it never steers in the air.
-4. Swing at a flying ball: it bounces back toward your target (or the Gargoyle) and hurts enemies. Guard it: it flies
-   back at the Gargoyle (Re:CoM's way).
+4. Swing at a flying ball: it bounces back toward your target (or the Gargoyle) and hurts enemies. Guard it: the same
+   (tossed up, bouncing toward your target or the Gargoyle, hurting enemies), not a straight homing shot.
 5. Hit it while it holds the ball: the ball disappears (KH1: the throw was cut).
 6. The swoop: it fades out, flies unseen to you, reappears rising above you and then dives or swipes. It can't be hit while
    unseen; it can be hit again about halfway through its reappearance.
@@ -3351,9 +3376,10 @@ give the rounds' timings, the ball's path and bounces and the fade windows to co
    160 frames before the throw. Built: Re:CoM's own Gargoyle shot effect at full size there for those 160 frames (its attack
    off). (a) Keep until the effects milestone (M13); (b) show nothing until the launch (frame 244); (c) research a Re:CoM
    effect that can grow.
-2. **Guarding the ball.** In KH1 a Guard sends the ball back as a swing does (`0x748`: toward the Gargoyle and your target,
-   bouncing, hurting enemies). Built: decision 28 (Re:CoM's homing takes it at the Gargoyle), as the Fat Bandit's fireball.
-   (a) Keep decision 28; (b) KH1's send-back for Guard too.
+2. **Guarding the ball.** Answered (owner, 2026-11-03): (b), KH1's send-back for Guard too. Built (§ Its ball: Sora's
+   Guard sends it back KH1's way). The question was: in KH1 a Guard sends the ball back as a swing does (`0x748`: toward
+   the Gargoyle and your target, bouncing, hurting enemies). Built then: decision 28 (Re:CoM's homing takes it at the
+   Gargoyle), as the Fat Bandit's fireball. (a) Keep decision 28; (b) KH1's send-back for Guard too.
 3. **The fades.** KH1 fades the Gargoyle out (20 / 30 frames) for the swoop and the back-off and fades it back in. Built: it
    is hidden when the fade-out would reach 0 and shown as the fade-in starts (a hard cut; when it can't be hit is KH1's).
    (a) Keep until M13; (b) research a model alpha in Re:CoM (none found for the Shadow's rise, M10).
