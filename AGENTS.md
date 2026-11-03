@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 156: Neoshadow: no fixed points (they move about their own place), version 0.86.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02, Neoshadow question 1): "Drop them": no room 29 fixed spots; they wander and attack instead.
+- Built (Assumptions: the script's own place rule stands in for the room's points): a lone one, and the hidden one left alone, go to a point 600–1000 from where they are (the script's sink-away rule `0x552C(actor+0x10, 600, 1000)`), come up and call (before: room 29's spots); three or four: the place draw still runs (KH1's frames and random numbers unchanged) but each rises where it sank, together; stuck underground (`0x58AE`): turns toward Sora instead of room 29's (8700, 5300, 100) (owner question 6). Kept: the walk home after a dive (its own spawn, `0x372C`). Everything else (counts, timings, the call, sinks, rises, dives) as KH1.
+- The grab from below (owner: build it) researched, not built: KH1's `0x1AF6` (Checked (files + decomp)) plays Sora's request 200 from the Neoshadow's `.mset` player set (126 frames), actions locked, held up to 94 frames by its 208, freed when a hit lands (the other Neoshadow's dive); no damage itself. Re:CoM has no player reaction that holds Sora on an enemy's clip until hit (Checked (decomp + exe)): owner question on the native design.
+- Asset step: not needed. Checked: tests (1–5 Neoshadow 20 000-frame fights), Windows build. Not checked: in game.
+
+---
+
 ## Stage 155: Crash fix: the clash spark's effect actor, version 0.85.1 (2026-11-01)
 
 - Owner (2026-11-02, on 0.85.0): "game crashed". Crash dump (Checked): access violation reading 0x150 at `0x1401A6B23` (Re:CoM's effect-at-actor `0x1401A6B20`: `mov r8d, [rcx+0x150]` with rcx = 0), called from `win::kh1_enemy::swing_meets_attacks` (Stage 151's attack-meets-attack clash) through `attack::spark_at`, which passed a null actor.
