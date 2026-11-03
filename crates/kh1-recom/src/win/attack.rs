@@ -528,6 +528,18 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     if super::kh1_enemy::never_hurts(coll, list) {
         return 0;
     }
+    // M11, the Yellow Opera's Thunder (`super::kh1_thrown::strike`): KH1 applies it with no clash pass (`sys 60` →
+    // `0x1402BF330`), so Sora's Guard never meets it: his body guard (`+0x9C` bit 0) is off for Re:CoM's apply of this
+    // attack and put back after (one load while no bolt lives).
+    if super::kh1_thrown::unguarded(coll) {
+        let pl: usize = rd(va(base(), data::MAIN_PLAYER));
+        if pl != 0 && rd::<u32>(pl + BODY_GUARD) & 1 != 0 {
+            wr(pl + BODY_GUARD, rd::<u32>(pl + BODY_GUARD) & !1);
+            let r = recom_pair(coll, list);
+            wr(pl + BODY_GUARD, rd::<u32>(pl + BODY_GUARD) | 1);
+            return r;
+        }
+    }
     let b = base();
     let pl: usize = rd(va(b, data::MAIN_PLAYER));
     if !mv::is_main_sora(pl) {

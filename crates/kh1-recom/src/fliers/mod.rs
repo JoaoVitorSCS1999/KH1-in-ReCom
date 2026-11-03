@@ -9,3 +9,4 @@ pub mod searchghost;
 pub mod gargoyle;
 pub mod rednocturne;
 pub mod bluerhapsody;
+pub mod yellowopera;

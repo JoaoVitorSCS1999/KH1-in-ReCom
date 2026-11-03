@@ -74,6 +74,9 @@
 //!   meet its type-0, priority-0 free-standing row through `0x1402B4BC0`; no re-aim, no batted row): **a swing or Sora's
 //!   Guard ends it** ([`ENDS_ON_CLASH`]), Re:CoM's guard spark at it.
 //!
+//! - **The Yellow Opera's Thunder** (M11, `ex_2130_00.bd`): a strike, not a flight: Re:CoM's own Yellow Opera bolt placed
+//!   by KH1's numbers ([`strike`], [`bolt_exe`]; the section at the end of this file).
+//!
 //! Runs once a frame per flying blade (at most [`MAX`]); nothing otherwise.
 
 use super::magic::{rt, Desc, DescInitFn, FactoryFn, ManagerFn, MoverFn, PlFn, DESC_INIT, FACTORY, HOMING_THUNK, SHOT_MANAGER, SHOT_MOVER};
@@ -614,6 +617,7 @@ pub(super) fn forget() {
         g.clear();
     }
     BALLS_ANY.store(false, Ordering::Relaxed);
+    forget_bolts();
     super::kh1_peel::forget();
 }
 
@@ -746,6 +750,9 @@ pub fn trace_token() -> String {
     drop(g);
     if let Ok(g) = BALLS.try_lock() {
         t.extend(g.iter().map(|b| format!("ball e{}:{}:{:?}:{:.0}:{:.0}{}", b.shooter, b.bullet.unwrap_or(0), b.ball.phase, b.ball.time, b.ball.bounces, if b.guarded { ":guarded" } else if b.ball.batted { ":batted" } else { "" })));
+    }
+    if let Ok(g) = BOLTS.try_lock() {
+        t.extend(g.iter().map(|b| format!("thunder e{}:{}:{}", b.shooter, b.id, b.frames)));
     }
     let p = super::kh1_peel::trace_token();
     if !p.is_empty() {
@@ -1156,4 +1163,199 @@ unsafe fn send_back_kh1(b: &mut BallRec, bullet: usize, by: &str) -> String {
     wr(bullet + gb::HOMING_TARGET, 0i32);
     let (d, t) = (b.ball.dir, b.bat_target);
     format!("ball {bid}: Sora's {by} sends it back along ({:.2},{:.2},{:.2}) at e{t} (KH1's 0x748), on the enemies' side, radius {:.2} m", d.x, d.y, d.z, b.bat_radius * 0.01)
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// M11, the Yellow Opera's Thunder (`ex_2130_00.bd`, `kh1_core::caster::Strike`; owner rule: "KH1's Thunder is a strike from
+// above at Sora's position: research how KH1 places it and build the nearest native Re:CoM equivalent").
+//
+// - **KH1** (Checked (files + decomp)): the child marks Sora's place on the floor 80 frames into its parent's 207 and, 30
+//   frames later, makes the row `0x23C` free-standing at the mark and tests each opponent once against a cylinder of
+//   radius 50 and half-height 128 centred 128 above the mark (`sys 90` → `0x1402B6AF0` → `0x1402B5EF0`, type 2: |Δy| <
+//   the two half-heights and the flat distance < the two radii); each one inside gets the row's hit (`sys 60` →
+//   `0x1402BF330` → `0x1402BF630`). No clash pass runs for it, so neither a swing nor Sora's Guard meets it (Guard is a
+//   type-2 row of the clash pass, `0x1402B4BC0`; the record maker tests no guard).
+// - **Re:CoM's own** (its state 2 `0x140196A80`, Checked (decomp)): at clip time 0xD15 of `e005_052` a `CBullet` 4 m above
+//   Sora's place (`0x1401F0AB0`), pitched straight down (π/2), 5 m a frame, radius 0.25, reaction kind 0x1C (Re:CoM's
+//   damage check takes it as its flinch, kind 1: `0x1401E6DE0`'s switch), its AP `0x14017F0E0(enemy, 0, 1)`, its effect
+//   set `0x140557560` (`"_ex_2130"` 11 / 12: KH1's own bolt and hit effects' numbers). Its swept sphere (`+0x10` → `+0x20`)
+//   passes down through Sora in one frame.
+// - **Here**: that bolt, placed by KH1's numbers: one of Re:CoM's `CHomingBullet`s (as every port's) at KH1's strike frame,
+//   at the cylinder's top above the mark (256 above the floor), Re:CoM's own kind, power and effect set, KH1's radius 50,
+//   swept down to 2 cm over the floor in its first frame ([`bolt_exe`]: KH1's whole cylinder, its rounded top 50 higher;
+//   Re:CoM's mover radius 1 cm so its floor touch can't end it first), its attack off after that frame, then ended.
+//   Re:CoM's collision pass hits Sora with it (one hit: its serial). Sora's Guard doesn't meet it ([`unguarded`]: his body
+//   guard off for Re:CoM's apply of this attack only); it isn't in [`BLADES`], so no swing meets it.
+//
+// Per frame: one atomic load in the pair test while no bolt lives; two exe frames per bolt.
+
+/// Re:CoM's own Yellow Opera Thunder's effect set (its state 2 `0x140196A80`: descriptor `+0xA8`; slots 0 / 1 name
+/// `"_ex_2130"`, `sites::YELLOWOPERA_THUNDER_PTRS`). Checked (decomp + exe).
+pub const YELLOWOPERA_THUNDER_EFFECT_SET: u64 = 0x1_4055_7560;
+/// Re:CoM's own bolt's reaction kind (`0x140196A80`: descriptor `+0x68` = 0x1C). Checked (decomp).
+pub const THUNDER_KIND: u32 = 0x1C;
+/// Re:CoM's own bolt's pitch (`*0x1401A4A00(bullet) = π/2`, straight down). Checked (decomp).
+const THUNDER_PITCH: f32 = std::f32::consts::FRAC_PI_2;
+/// The bolt's mover radius (Re:CoM's shots pass 0.1; the Gargoyle's ball's 1 cm: its floor touch would end it).
+const BOLT_MOVER_RADIUS: f32 = 0.01;
+
+struct Bolt {
+    id: u32,
+    coll: usize,
+    shooter: u32,
+    /// KH1 units: the top it starts from, the bottom its first frame sweeps to.
+    top: Vec3,
+    bottom: Vec3,
+    /// Its exe frames so far.
+    frames: u32,
+}
+
+static BOLTS: Mutex<Vec<Bolt>> = Mutex::new(Vec::new());
+static BOLTS_ANY: AtomicBool = AtomicBool::new(false);
+
+/// Whether a Re:CoM attack collision is one of our live bolts (the pair test's question: Sora's Guard doesn't meet it).
+/// Bolts Re:CoM has ended (a hit ends one) are forgotten here: their bullet no longer runs [`bolt_exe`] with that
+/// collision.
+pub(super) unsafe fn unguarded(coll: usize) -> bool {
+    if !BOLTS_ANY.load(Ordering::Relaxed) {
+        return false;
+    }
+    let Ok(mut g) = BOLTS.try_lock() else { return false };
+    g.retain(|b| {
+        let o = func::<super::movement::HandleFn>(super::movement::HANDLE_OBJ)(b.id);
+        o != 0 && rd::<usize>(o + rt::STATE_EXE) == bolt_exe as *const () as usize && rd::<usize>(o + gb::COLL) == b.coll && rd::<i32>(o + rt::LIFE) > 0
+    });
+    if g.is_empty() {
+        BOLTS_ANY.store(false, Ordering::Relaxed);
+    }
+    g.iter().any(|b| b.coll == coll)
+}
+
+/// `Cmd::Strike`: enemy `en` (class manifest `m`) strikes with its child `n` at KH1's mark `at` (KH1 units): the Yellow
+/// Opera's Thunder (module section above). The bullet's id.
+pub(super) unsafe fn strike(en: usize, class: &str, m: &Manifest, n: u8, at: Vec3) -> Option<u32> {
+    let c = |k: &str| m.consts.get(&format!("thunder_{k}"));
+    if !(c("half").is_finite() && n as f32 == m.consts.get("thunder_child")) {
+        line(|| format!("{class}: no strike child {n}"));
+        return None;
+    }
+    // The cylinder's top and the floor (KH1 y down).
+    let top = Vec3::new(at.x, at.y - (c("mid") + c("half")), at.z);
+    let bottom = Vec3::new(at.x, at.y - BALL_FLOOR_CLEAR, at.z);
+    let from = crate::units::to_recom(top);
+    let id = c("recom_id") as i32;
+    let ap = func::<ApFn>(f::ATTACK_AP)(en, id, c("kind") as i32, 0, std::ptr::null_mut(), 0) as i32;
+    let attr = func::<AttrFn>(f::ATTACK_ATTR)(en, id);
+    let mut d = Desc([0; 0x100]);
+    let dp = d.0.as_mut_ptr();
+    func::<DescInitFn>(DESC_INIT)(dp, 2, 3);
+    let w = |o: usize| dp.add(o);
+    std::ptr::write_unaligned(w(0x68) as *mut u32, THUNDER_KIND);
+    std::ptr::write_unaligned(w(0x6C) as *mut u32, attr);
+    std::ptr::write_unaligned(w(0x70) as *mut i32, ap);
+    std::ptr::write_unaligned(w(0x60) as *mut u64, FLAGS);
+    std::ptr::write_unaligned(w(0x30) as *mut f32, 0.0);
+    let life = crate::units::frames_to_units(4.0);
+    std::ptr::write_unaligned(w(0x38) as *mut i32, life);
+    std::ptr::write_unaligned(w(0x3C) as *mut i32, life);
+    std::ptr::write_unaligned(w(0x34) as *mut f32, RANGE);
+    std::ptr::write_unaligned(w(0x44) as *mut i32, 0);
+    std::ptr::write_unaligned(w(0x48) as *mut f32, GATE);
+    std::ptr::write_unaligned(w(0x4C) as *mut f32, 0.0);
+    std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], [from.x, from.y, from.z, 0.5]);
+    std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [THUNDER_PITCH, 0.0, 0.0, 0.0]);
+    if crate::sites::YELLOWOPERA_THUNDER_PTRS.iter().all(|p| rd::<usize>(base() + p.rva as usize) == base() + p.target as usize) {
+        std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), YELLOWOPERA_THUNDER_EFFECT_SET));
+    } else {
+        line(|| format!("{class}: the Yellow Opera's Thunder effect set is not where 0x140557560 was: the bolt has no look"));
+    }
+    let radius = c("radius") * crate::units::METRES_PER_UNIT;
+    std::ptr::write_unaligned(w(0x78) as *mut f32, radius);
+    std::ptr::write_unaligned(w(0x94) as *mut i32, FADE);
+    let factory = func::<FactoryFn>(FACTORY)();
+    if factory == 0 {
+        line(|| format!("{class}: no entity factory: no Thunder"));
+        return None;
+    }
+    let bullet = func::<ManagerFn>(SHOT_MANAGER)(factory, dp, en);
+    if bullet == 0 {
+        line(|| format!("{class}: Re:CoM's shot manager made no Thunder"));
+        return None;
+    }
+    func::<MoverFn>(SHOT_MOVER)(bullet, BOLT_MOVER_RADIUS, 0.0, 0, -1);
+    let bid: u32 = rd(bullet + 0x20);
+    let b = base();
+    let vt: usize = rd(bullet);
+    let exe: usize = rd(bullet + rt::STATE_EXE);
+    let adj: i32 = rd(bullet + rt::STATE_EXE_ADJUST);
+    if vt != va(b, gb::HOMING_VTABLE) || exe != b + HOMING_THUNK as usize || adj != 0 {
+        line(|| format!("{class}: Thunder {bid} is not a plain CHomingBullet in flight (vt {vt:#x}, exe {exe:#x}): ended"));
+        super::magic::hold_off(bullet);
+        wr(bullet + rt::LIFE, 0i32);
+        return None;
+    }
+    let shooter: u32 = rd(en + 0x20);
+    let coll: usize = rd(bullet + gb::COLL);
+    if let Ok(mut g) = BOLTS.lock() {
+        g.retain(|x| x.id != bid);
+        if g.len() >= MAX {
+            g.remove(0);
+        }
+        g.push(Bolt { id: bid, coll, shooter, top, bottom, frames: 0 });
+        BOLTS_ANY.store(true, Ordering::Relaxed);
+    }
+    wr(bullet + rt::STATE_EXE, bolt_exe as *const () as usize);
+    line(|| format!("{class} e{shooter}: Thunder {bid} at KH1's mark ({:.0},{:.0},{:.0}): from ({:.2},{:.2},{:.2}) down to 2 cm over the floor in one frame, radius {radius:.2} m, AP {ap} attribute {attr} kind {THUNDER_KIND:#x} (Re:CoM's Yellow Opera Thunder, id {id}); Guard doesn't meet it", at.x, at.y, at.z, from.x, from.y, from.z));
+    Some(bid)
+}
+
+/// The bolt's flight-state exe: its first frame the velocity that sweeps it from the cylinder's top to the floor (Re:CoM's
+/// step moves it and its collision; the pass hits Sora inside); its second its attack off and its life over (Re:CoM ends
+/// it); then Re:CoM's own step (the thunk).
+pub unsafe extern "win64" fn bolt_exe(bullet: usize) {
+    let mover: usize = rd(bullet + gb::MOVER);
+    let id: u32 = rd(bullet + 0x20);
+    let dt: i32 = rd(bullet + 0x14);
+    let step = crate::units::step_from_dt(dt.clamp(0, 1000));
+    if mover != 0 && rd::<i32>(bullet + rt::LIFE) > 0 && step > 0.0 {
+        let mut note = None;
+        if let Ok(mut g) = BOLTS.lock() {
+            let mut gone = false;
+            if let Some(b) = g.iter_mut().find(|b| b.id == id) {
+                b.frames += 1;
+                if b.frames == 1 {
+                    let now = rd_vec(mover + rt::POSITION);
+                    let v = (crate::units::to_recom(b.bottom) - now) * (1.0 / step);
+                    wr(mover + gb::VELOCITY, [v.x, v.y, v.z, 0.0f32]);
+                    wr(mover + gb::PITCH, THUNDER_PITCH);
+                    wr(bullet + gb::HOMING_TARGET, 0i32);
+                } else {
+                    wr(mover + gb::VELOCITY, [0.0f32; 4]);
+                    super::magic::hold_off(bullet);
+                    wr(bullet + rt::LIFE, 0i32);
+                    gone = true;
+                    let (s, t) = (b.shooter, b.top);
+                    note = Some(format!("thunder {id} (e{s}): its frame is over (swept from KH1 y {:.0})", t.y));
+                }
+            }
+            if gone {
+                g.retain(|b| b.id != id);
+            }
+            if g.is_empty() {
+                BOLTS_ANY.store(false, Ordering::Relaxed);
+            }
+        }
+        if let Some(n) = note {
+            line(|| n);
+        }
+    }
+    func::<PlFn>(HOMING_THUNK)(bullet)
+}
+
+/// The battle ended: no bolt of the last one is ours any more.
+pub(super) fn forget_bolts() {
+    if let Ok(mut g) = BOLTS.lock() {
+        g.clear();
+    }
+    BOLTS_ANY.store(false, Ordering::Relaxed);
 }
