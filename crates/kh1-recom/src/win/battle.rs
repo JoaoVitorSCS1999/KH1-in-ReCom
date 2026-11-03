@@ -266,9 +266,11 @@ pub unsafe extern "win64" fn attack_end(e: usize, next: usize, cooldown: i32) {
     }
     let vt: usize = rd(e);
     let class = vt.checked_sub(base()).and_then(|r| b::pace::heartless(r as u64));
+    let cage = is_cage(vt);
     let end = b::pace::End {
         kh1_battle: true,
         heartless: class.is_some(),
+        cage,
         next,
         passed: cooldown,
         flags_after: rd(e + enemy::FLAGS),
@@ -276,8 +278,81 @@ pub unsafe extern "win64" fn attack_end(e: usize, next: usize, cooldown: i32) {
     };
     if let Some(cd) = b::pace::kept(&end) {
         wr(e + enemy::COOLDOWN, cd);
-        class_once(e, 3, |_| b::pace::class_line(cd));
+        if cage {
+            once_per_battle(&CAGE_WAIT_LOGGED, |n| b::cage::wait_line(n, cooldown));
+        } else {
+            class_once(e, 3, |_| b::pace::class_line(cd));
+        }
     }
+}
+
+/// The Parasite Cage's vtable (absolute), once its RTTI name was checked ([`install_cage`]); 0: not
+/// checked, the cage stays Re:CoM's.
+static CAGE_VT: AtomicUsize = AtomicUsize::new(0);
+/// The battle number its lines were last logged for.
+static CAGE_ARMOUR_LOGGED: AtomicU32 = AtomicU32::new(0);
+static CAGE_WAIT_LOGGED: AtomicU32 = AtomicU32::new(0);
+
+fn is_cage(vt: usize) -> bool {
+    let c = CAGE_VT.load(Ordering::Relaxed);
+    c != 0 && vt == c
+}
+
+/// `what(battle)` logged once per battle (`last`: the battle it was last logged for).
+fn once_per_battle(last: &AtomicU32, what: impl FnOnce(u32) -> String) {
+    let n = BATTLE_NO.load(Ordering::Relaxed);
+    if last.swap(n, Ordering::Relaxed) != n {
+        log(&what(n));
+    }
+}
+
+/// The Parasite Cage's flags before an armoured call of the hit handler.
+pub(super) struct CageArmour {
+    e: usize,
+    flags: u64,
+}
+
+/// Before Re:CoM's hit handler (`super::attack::enemy_hit`, which every call of `0x14017F7E0` goes
+/// through): in a KH1 battle, the Parasite Cage takes Re:CoM's own super armour (bits 20 / 21) for
+/// the call (`crate::battle::cage`, owner 2026-11-03), unless Sora's Guard blocked it this frame
+/// (the block's reaction runs inside the call). Per call: one atomic load while the cage isn't
+/// checked or the battle isn't a KH1 one, else one vtable read.
+pub(super) unsafe fn cage_armour_on(e: usize) -> Option<CageArmour> {
+    if CAGE_VT.load(Ordering::Relaxed) == 0 || !KH1_BATTLE.load(Ordering::Acquire) || e == 0 || !is_cage(rd(e)) {
+        return None;
+    }
+    let ask = b::cage::Ask { kh1_battle: true, cage: true, guard_block: super::guard::block_pending(e) };
+    if !b::cage::armoured(ask) {
+        return None;
+    }
+    let flags: u64 = rd(e + enemy::FLAGS);
+    wr(e + enemy::FLAGS, b::cage::flags_for_call(flags));
+    Some(CageArmour { e, flags })
+}
+
+/// After the call: Re:CoM's two bits back as they were; the battle's line once a hit landed.
+pub(super) unsafe fn cage_armour_off(a: Option<CageArmour>, result: u64) {
+    let Some(CageArmour { e, flags }) = a else { return };
+    let now: u64 = rd(e + enemy::FLAGS);
+    wr(e + enemy::FLAGS, b::cage::flags_after(now, flags));
+    if result == 1 {
+        once_per_battle(&CAGE_ARMOUR_LOGGED, b::cage::armour_line);
+    }
+}
+
+/// Checks the Parasite Cage's vtable by its RTTI name (nothing written; no hook of its own: the
+/// armour rides the enemy-hit wrapper, the wait the attack-end wrapper). Without it the cage stays
+/// Re:CoM's at KH1 (it flinches, 250 ticks between attacks).
+pub fn install_cage(bs: usize) -> bool {
+    let vt = bs + b::cage::VTABLE as usize;
+    // SAFETY: reads of the mapped exe's vtable, its RTTI locator and the checked sites.
+    let ok = unsafe { super::stats::rtti_name(bs, vt) }.as_deref() == Some(b::cage::RTTI)
+        && crate::sites::CAGE_CHECKED.iter().all(|s| unsafe { std::slice::from_raw_parts((bs + s.rva as usize) as *const u8, s.expect.len()) } == s.expect)
+        && crate::sites::CAGE_PTRS.iter().all(|p| unsafe { rd::<usize>(bs + p.rva as usize) } == bs + p.target as usize);
+    if ok {
+        CAGE_VT.store(vt, Ordering::Release);
+    }
+    ok
 }
 
 /// Installs the attack-end wrapper on its own (a failure leaves Re:CoM's 250 and the rest of M6).

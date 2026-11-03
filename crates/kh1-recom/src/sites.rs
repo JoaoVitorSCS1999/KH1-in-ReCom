@@ -1725,6 +1725,31 @@ pub const GIMMICK_BREAK_PTRS: &[PtrSite] = &[
     PtrSite { name: "CBossMDragon +0x220", rva: 0x0067_4790, target: 0x003E_1690 },
 ];
 
+/// The Parasite Cage at Combat = KH1 (owner, 2026-11-03; `crate::battle::cage`): what its armour
+/// and its wait rely on. Not patched, not called. Checked (exe).
+pub const CAGE_CHECKED: &[Site] = &[
+    // Its four attack states end with xor edx,edx; mov r8d,0x1770; …; mov rcx,rbx; call 0x14017E540.
+    Site { name: "Parasite Cage state 2 attack end (0x1403C4902)", rva: 0x003C_4902, expect: &[0x33, 0xD2, 0x41, 0xB8, 0x70, 0x17, 0x00, 0x00, 0x48, 0x8B, 0xCB, 0xE8, 0x2E, 0x9C, 0xDB, 0xFF] },
+    Site { name: "Parasite Cage state 3 attack end (0x1403C49DD)", rva: 0x003C_49DD, expect: &[0x33, 0xD2, 0x41, 0xB8, 0x70, 0x17, 0x00, 0x00, 0x89, 0x83, 0xD8, 0x0C, 0x00, 0x00, 0x48, 0x8B, 0xCB, 0xE8, 0x4D, 0x9B, 0xDB, 0xFF] },
+    Site { name: "Parasite Cage state 4 attack end (0x1403C513E)", rva: 0x003C_513E, expect: &[0x33, 0xD2, 0x41, 0xB8, 0x70, 0x17, 0x00, 0x00, 0x48, 0x8B, 0xCB, 0xE8, 0xF2, 0x93, 0xDB, 0xFF] },
+    Site { name: "Parasite Cage state 5 attack end (0x1403C5232)", rva: 0x003C_5232, expect: &[0x33, 0xD2, 0x41, 0xB8, 0x70, 0x17, 0x00, 0x00, 0x48, 0x8B, 0xCB, 0xE8, 0xFE, 0x92, 0xDB, 0xFF] },
+    // Its state 1 begin clears bit 21 (mov rax,[0x14052A4B8]; not rax; and [rbx+0x260],rax), and the mask is 0x200000.
+    Site { name: "Parasite Cage state 1 begin clears bit 21 (0x1403C2E4B)", rva: 0x003C_2E4B, expect: &[0x48, 0x8B, 0x05, 0x66, 0x76, 0x16, 0x00, 0x48, 0xF7, 0xD0, 0x48, 0x21, 0x83, 0x60, 0x02, 0x00, 0x00] },
+    Site { name: "flag mask 0x200000 (0x14052A4B8)", rva: 0x0052_A4B8, expect: &[0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00] },
+];
+
+/// `CBossParasiteCage`'s slots the cage relies on: Re:CoM's enemy update (it counts `+0x2C8`), its
+/// four attack-state steps (each ends through the attack end) and its hit callback (its faint).
+/// Checked (exe; relocated pointers).
+pub const CAGE_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CBossParasiteCage +0x80", rva: 0x0066_92A0, target: 0x0018_5320 },
+    PtrSite { name: "CBossParasiteCage +0x120", rva: 0x0066_9340, target: 0x003C_48F0 },
+    PtrSite { name: "CBossParasiteCage +0x138", rva: 0x0066_9358, target: 0x003C_4930 },
+    PtrSite { name: "CBossParasiteCage +0x150", rva: 0x0066_9370, target: 0x003C_4A10 },
+    PtrSite { name: "CBossParasiteCage +0x168", rva: 0x0066_9388, target: 0x003C_5220 },
+    PtrSite { name: "CBossParasiteCage +0x3E0", rva: 0x0066_9600, target: 0x003C_4060 },
+];
+
 /// Re:CoM code the gimmick cards rely on (not patched, not called).
 pub const GIMMICK_CHECKED: &[Site] = &[
     // The count getter (−1 without CBTL, else +0x1D0) and the "now playing" getter (byte +0x1E4):
@@ -3160,6 +3185,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         M6_HOOKS,
         M6_PACE_HOOKS,
         M6_PACE_CHECKED,
+        CAGE_CHECKED,
         M6_CALLEES,
         M6_CHECKED,
         M6_DECK_HOOKS,
