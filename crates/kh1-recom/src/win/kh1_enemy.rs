@@ -338,6 +338,8 @@ pub unsafe fn prepare(bs: usize, k: usize, manifest: Option<&std::path::Path>) -
     set(ce::begin_slot(state::DEFEAT), defeat_begin as *const () as usize);
     set(ce::step_slot(state::DEFEAT), defeat_step as *const () as usize);
     set(ce::THINK_SLOT, think_none as *const () as usize);
+    // The spawn's init (`+0x38`): Re:CoM's, then the pack check (`init`).
+    set(ce::pack::INIT_SLOT, init as *const () as usize);
     // The shared enemy-guard step: Re:CoM's hit handler calls `+0x3D8` when a hit met a guarded body
     // (`0x14017F7E0`: the guard spark, popup 3, then this; `CBattleEnemy`'s is a no-op `0x140181600`).
     set(GUARD_EVENT_SLOT, guard_event as *const () as usize);
@@ -517,6 +519,64 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
     wr(this + cl.alloc as usize + tail::OFF_INDEX, idx as u32);
     let name = cl.title;
     line(K, || format!("battle {battle}: {name} {this:#x} gets KH1's AI (seed {seed:#x})"));
+    r
+}
+
+/// (class, Re:CoM id) pairs whose pack line was logged (`ce::pack::first_time`).
+static PACK_SEEN: Mutex<Vec<(usize, u32)>> = Mutex::new(Vec::new());
+
+/// What the enemy's own motion pack holds for its class's clips (`ce::pack`; Re:CoM's set as `0x14024DC60` reads it).
+unsafe fn pack_verdict(en: usize, k: usize) -> ce::pack::Verdict {
+    use ce::pack as p;
+    let ctrl: usize = rd(en + p::CONTROLLER);
+    let set: usize = if ctrl != 0 { rd(ctrl + p::SET) } else { 0 };
+    let table: usize = if set != 0 { rd(set + p::TABLE) } else { 0 };
+    let clips: usize = if table != 0 { rd(table + p::CLIPS) } else { 0 };
+    let count = (set != 0).then(|| rd::<i32>(set + p::COUNT));
+    p::check(count, &manifest(k).clips, |s| clips != 0 && rd::<usize>(clips + 8 * s as usize) != 0)
+}
+
+/// Undoes the ctor's swap: Re:CoM's vtable, no tail magic, no runtime. Before any state of ours ran (the spawn's
+/// init), so the enemy is Re:CoM's from its first state on, as at `enemy_ai = recom`.
+unsafe fn give_back(en: usize, k: usize) {
+    let c = CLASSES[k];
+    wr(en, base() + c.vtable as usize);
+    wr(en + c.alloc as usize + tail::OFF_MAGIC, 0u32);
+    if let Ok(mut v) = RT.lock() {
+        // Lookups go by address when an index no longer matches (`with_rt`), so later runtimes may move.
+        v.retain(|x| x.enemy != en);
+    }
+}
+
+/// The spawn's init (vtable `+0x38`, `ce::pack::INIT_SLOT`) of a converted enemy: Re:CoM's (it builds the model and
+/// its motion controller), then the enemy keeps KH1's AI only when its own pack carries every clip its manifest
+/// plays (owner 2026-11-03: T-posed Shadows of Re:CoM id 32, whose `ENEMY/0032` pack the asset step doesn't extend);
+/// else it goes back to Re:CoM's class (logged once per class and id). A failed init (the spawn deletes the enemy)
+/// gives the runtime back too. Once per spawned enemy.
+pub unsafe extern "win64" fn init(en: usize, kind: usize, id: usize, d: usize) -> usize {
+    let vt: usize = rd(en);
+    let Some(k) = (0..N).find(|&k| COPY[k].load(Ordering::Relaxed) == vt) else { return 0 };
+    let f = original(k, ce::pack::INIT_SLOT);
+    if f == 0 {
+        return 0;
+    }
+    let g: CtorFn = std::mem::transmute_copy(&f);
+    let r = g(en, kind, id, d);
+    if r as u32 == 0 {
+        give_back(en, k);
+        return r;
+    }
+    let v = pack_verdict(en, k);
+    let id = id as u32;
+    let c = CLASSES[k];
+    if PACK_SEEN.lock().is_ok_and(|mut s| ce::pack::first_time(&mut s, k, id)) {
+        log(&ce::pack::line(c.name, c.title, id, v));
+    }
+    if !v.carries() {
+        give_back(en, k);
+        let battle = super::battle::battle_number();
+        line(k, || format!("battle {battle}: {} {en:#x} (Re:CoM id {id}) back to Re:CoM's AI: its motion pack lacks the KH1 clips ({v:?})", c.title));
+    }
     r
 }
 
