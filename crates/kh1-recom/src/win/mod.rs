@@ -623,6 +623,12 @@ fn install_battles(base: usize) {
     } else {
         log("m6: attack end not wrapped; Re:CoM's 250-tick cooldown stays for every enemy");
     }
+    // The Parasite Cage (owner, 2026-11-03): no flinch from Sora's hits, about 3 s between attacks.
+    if battle::install_cage(base) {
+        log("m6: Parasite Cage (CBossParasiteCage 0x140669220) checked: in a KH1 battle Sora's hits land on Re:CoM's super armour (+0x260 bits 20 / 21 around the hit handler 0x14017F7E0: no flinch or blow-away, its attacks go on) and it waits 9000 ticks (180 frames) after each attack (the attack-end wrapper)");
+    } else {
+        log("m6: Parasite Cage not as read (RTTI, its attack ends or slots): it stays Re:CoM's at KH1 (flinches, 250 ticks between attacks)");
+    }
     // Stage 2: no deck for Sora (decision 29), on its own: it doesn't need stage 1's hooks.
     if deck::install(base) {
         log("m6: no-deck wrappers in (revolver build 0x1401F43D0, hit drop 0x14017E190); the 16 deck and enemy-card HUD mask reads are switched at each battle start by the setting");

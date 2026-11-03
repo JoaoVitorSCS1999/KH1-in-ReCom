@@ -192,6 +192,10 @@ the attack** of Guard Armor, Trickmaster, Jafar, Parasite Cage or Dragon Malefic
 - Assumption: Re:CoM's message manager is stepped in KH1 battles as in card battles (CBTL's task;
   Stage 108's message 6 relies on it too); that bosses stagger "about as often" as in Re:CoM
   (not measured).
+- **Parasite Cage on Re:CoM's super armour** (owner, 2026-11-03; `recom-m6-battles.md` § Parasite
+  Cage): Sora's hits no longer flinch it, but the card-interrupt path still clears bit 0 under the
+  armour, so this trigger works as before: a finisher that is the first of Sora's hits to land in
+  one of its attacks breaks it. The Guard and 50 % triggers are unchanged.
 
 ### More triggers for the five (owner, 2026-11-01: "interrupting an attack with a finisher is very rare")
 

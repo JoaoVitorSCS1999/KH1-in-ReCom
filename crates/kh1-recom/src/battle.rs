@@ -15,6 +15,7 @@
 //!
 //! Every offset is Steam, read in the Re:CoM decomp and checked in the exe where noted.
 
+pub mod cage;
 pub mod end;
 pub mod pace;
 

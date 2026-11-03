@@ -27,6 +27,9 @@ supersedes `recom-cardless-battle-design.md` §8 ("CBTL is the only gate").
   ordinary Heartless still on Re:CoM's AI wait the cooldown their class passes to Re:CoM's
   attack end (6000 ticks = 120 frames) instead of Re:CoM's 250 (5 frames). § Attack-end cooldown
   below.
+- **Parasite Cage (2026-11-03, not versioned yet, not seen in game):** in the same battles,
+  Sora's hits never flinch it or cut its attacks (Re:CoM's own super armour), and it waits 9000
+  ticks (180 frames, about 3 s) after each attack. § Parasite Cage below.
 
 ## Stage 1: what changes
 
@@ -201,10 +204,11 @@ they run Re:CoM's AI (`enemy_ai = recom`, or no manifest). Not in the list: `CEn
 (no attack end), `CEnemy100AcreBB_Bee` (6000; 100 Acre Wood, not a Heartless).
 
 **Left as Re:CoM (all go through the same attack end, all discarded to 250):** Heartless bosses
-Guard Armor, Parasite Cage, Trickmaster, Jafar, Oogie, Ursula, Dragon Maleficent, Dark Side,
+Guard Armor, Trickmaster, Jafar, Oogie, Ursula, Dragon Maleficent, Dark Side,
 Marluxia 3 (6000 each); Marluxia 2 (0); the human bosses' own states and `CHumanBoss`'s shared
 `0x14019AA00` (Leon, Cloud, Hades, Vexen, Riku, Larxene, Axel, Hook, Marluxia, Lexaeus, Zexion,
-Ansem: 6000). Checked (exe).
+Ansem: 6000). Checked (exe). The Parasite Cage (6000 passed) waits its own 9000 instead
+(§ Parasite Cage).
 
 Logs: at start `m6: attack end 0x14017E540 wrapped: …` (or `not wrapped`); once per class
 `m6: class CEnemyFatbandit: waits its own attack-end cooldown at KH1: 6000 ticks (120 frames)
@@ -217,6 +221,121 @@ Not checked: anything in game. Assumption: the gap between attacks grows by abou
 Owner test: a battle with a Fat Bandit (or any unported Heartless) at Combat = KH1: after each
 attack it waits about two seconds before the next; the log shows the class line; the F9 trace's
 cooldown starts at 6000. Then a boss (Guard Armor) and Combat = Re:CoM: as before (cooldown 250).
+
+## Parasite Cage
+
+Owner (2026-11-03, "Parasite Cage" in `design-philosophy-instructions.md`): **"the parasite cage
+shouldnt flinch when you attack, let it go through with its attacks, give it about 3 seconds
+between each attack"**. At Combat = KH1 in Sora's story (the battle decision of P1); Combat =
+Re:CoM and Riku's story unchanged. Code: `crate::battle::cage` (rules, tests), `win/battle.rs`
+(`cage_armour_on` / `cage_armour_off`, `attack_end`, `install_cage`), the enemy-hit wrapper
+`win::attack::enemy_hit`; sites `CAGE_CHECKED`, `CAGE_PTRS`. No new hook.
+
+### Re:CoM's Parasite Cage (Checked (decomp + exe) unless tagged)
+
+- **One body**, `CBossParasiteCage` (vtable `0x140669220`, RTTI checked at start). Its states
+  (slot `+0xE8 + 0x18·s`): 0 appearance (`0x1403C29F0`), 1 idle (begin `0x1403C2E00`: think on
+  `0x10`, bit 21 cleared; step `0x1403C53A0`: turns to face Sora), attack states 2..5 (begins
+  `0x1403C2A40` / `0x1403C2AD0` / `0x1403C2B20` / `0x1403C2B30`, motions e110_052/053, 054, 050,
+  051/055; steps `0x1403C48F0`, `0x1403C4930`, `0x1403C4A10`, `0x1403C5220`; state 4 calls
+  `0x14024E630` at motion time > 6500 (`+0xCD4 |= 1`; Assumption: the grab that holds Sora, which
+  message 6 lets go) and later shoots from `mouth3` (`0x140158DD0`)),
+  13 the card-break stagger (`0x1403C2B70`, its gimmick-card drop), 17 its **faint** (begin
+  `0x1403C2DD0`, step `0x1403C5290`, end `0x1403C3560`), 30 the defeat (`0x1403C2CF0`). Think
+  `+0x3D0` = `0x1403C26F0`, hit callback `+0x3E0` = `0x1403C4060`, message 6 `0x1403C43C0`.
+- Its think and message 6 also move room objects of ids 550..554 (task list `0x11`, `+0x2D4`,
+  `+0x2C0`): Assumption that these are scenery parts, not enemies Sora hits (not traced); nothing
+  here touches them.
+- **What a hit did at KH1 before this change**: the hit handler `0x14017F7E0` drops a hit while
+  `+0x260 & 1` (in an attack) unless the card-interrupt bit `0x2000000` is set; our wrapper sets
+  it for KH1 swings (decision 14) and its hurt bodies stay on in attacks (decision 26), so the
+  handler ends Re:CoM's "card" (`0x14017E1D0`, bit 0 cleared), applies the damage, calls the hit
+  callback, then the reaction picker `0x14017D260`: kind 1 (KH1's ordinary hits,
+  `attack::recom_kind`) → the flinch (state 11, `+0x780`); kind 2 (KH1's finishers) → the flinch
+  or the blow-away (state 12, `+0x7C0`) by its `@ENP +0xC`. Either replaced its attack state.
+  The cage has no attack state that sets bits 20 / 21 itself.
+- **Its faint** (hit callback `0x1403C4060`, before the picker, while `+0xCD4 & 4` is clear): a
+  Fire hit (attribute `+0x84` = 2) by its parameter `FireFaint` %, or a kind-2 hit (`+0x80` = 2:
+  every KH1 finisher) by `AtkFaint` %: state 17 (`0x14017D1F0`) and bit 21 set by itself (so the
+  picker only plays the voice). In the faint (`+0xCD4 & 4`, bit 19) each hit knocks out prizes
+  (kind 0xD2, `MDSBNM` + `rand % (MDSBNMR + 1)`, `BDSBNM…` for kind 2). Its parameter file is not
+  in this session: the chances and counts are not known.
+- **Its pacing**: all four attack states end with `0x14017E540(cage, 0, 6000)` (`0x1403C490D`,
+  `0x1403C49EE`, `0x1403C5149`, `0x1403C523D`; the only four calls in its code), which writes 250
+  over the 6000 (`0x14017E5F5`). Its update is Re:CoM's `0x140185320` (vtable `+0x80`), which
+  counts `+0x2C8` down by the task step `+0x14` (50 a 60 Hz frame; 100 a frame at 30 fps, the same
+  time; `docs/recom-timing.md`) in every state and runs the think only while it is < 1 with the
+  think bit `0x10`. The think: above 30 % HP an attack 1 in `0x14017F380` (its `@ENP +0x98 +
+  level × 4`, × 10 while `+0x2D0` ≥ 1) per call; below 30 % at once while Sora attacks (P5), else 1
+  in 30; then state 2..5 by distance and angle (and 41 % a state 3 once it lost 25 % of its max HP
+  since its last state 3, while its card is unused).
+
+### Built
+
+- **No flinch**: for each call of the hit handler on the cage (Re:CoM's vtable, checked), the
+  enemy-hit wrapper sets Re:CoM's super armour `+0x260` bits 20 / 21 for the call and puts both
+  back after (`kh1_core::enemy::host::RECOM_ARMOUR`, the same armour KH1's no-reaction enemies take;
+  § "Hits that take no reaction" in `recom-m11-enemies.md`). The picker then plays only the damage
+  voice and asks for no state, so the damage lands and its attack state goes on (bit 0 is still
+  cleared by the card-interrupt path, as before; its attack state, not bit 0, runs the attack, and
+  its think stays off until the attack end, bit `0x10`). Every hit counts: swings, spells, shots
+  Sora's Guard turned back.
+- **Kept Re:CoM's**: Stop (kinds 8 / 0x17), stun (7), Gravity's flatten (0xD), freeze (0x11), the
+  other status kinds, the defeat, its faint (it writes state 17 itself; owner question below),
+  the card break (message 3 → state 13), message 6 (the used gimmick card lets Sora go).
+  Bit 21 the faint sets is cleared again after the call: in state 17 the picker takes its bit-19
+  path and never reads it, and its state 1 begin clears it anyway (`0x1403C2E4B`).
+- **Guard**: a call in which Sora's Guard blocked the cage this frame takes no armour
+  (`win::guard::block_pending`), so the Guard reaction (Re:CoM's flinch through the picker, Guard
+  reactions on) and the Guard card break stay as they were.
+- **About 3 s between attacks**: the attack-end wrapper (§ Attack-end cooldown) writes
+  `cage::WAIT` = 9000 ticks (180 frames) after Re:CoM's attack end for the cage, on Re:CoM's "no
+  next state" path (bit 0 clear, 250 written). **What it measures**: from the frame its attack
+  state ends (the attack end's call, at its motion's end) to the first frame its think may start
+  the next attack. Then Re:CoM's own time adds on: the idle turn toward Sora (think bit off while
+  it turns) and the think's roll (unknown above 30 % HP, its `@ENP` rate; none below 30 % while
+  Sora attacks). A faint or a card-break stagger ends through Re:CoM's default state (250), not an
+  attack end: the wait follows attacks only.
+- **Logs** (once per battle): `m6: Parasite Cage (battle n): Sora's hits land on Re:CoM's super
+  armour …` at its first landed hit; `m6: Parasite Cage (battle n): waits 9000 ticks (180 frames,
+  about 3 s) …` at its first attack end. At start `m6: Parasite Cage (CBossParasiteCage
+  0x140669220) checked: …` (or `not as read`: it stays Re:CoM's).
+- **Per frame**: no new hook; per call of the existing enemy-hit wrapper, one atomic load (two
+  in a KH1 battle) and one vtable read.
+
+### Gimmick-card triggers (`recom-gimmick-cards.md`)
+
+- **50 % HP**: unchanged (the damage lands as before).
+- **Guard block**: unchanged (no armour for that call; the block posts message 3 as before).
+- **Finisher interrupt**: still possible. It fires when a KH1 finisher lands while bit 0 is set and
+  bit 0 is clear after the handler; the card-interrupt path still clears it under the armour. As
+  before, only the first of Sora's hits landing in one of its attacks finds bit 0 set (before, that
+  hit flinched it; now it only clears bit 0), so it fires when a finisher is that first hit: as
+  rare as before. The break's stagger (state 13) does cut that attack: it is Re:CoM's card break.
+
+### Not checked / Assumptions
+
+- Nothing seen in game. The faint chances (`FireFaint`, `AtkFaint`) and the think rate are in its
+  parameter file, not in this session.
+- KH1's own Parasite Cage (reference): its script `pi_3000.bd` (and `pi_3000_00.bd`) is in the
+  player's `xa_pi_3000.mdls`; not decoded this session, so nothing here is KH1's number: the 3 s
+  and the no-flinch are the owner's choice. Its KH1 stats row: `recom-kh1-attack.md` (Parasite
+  Cage (110)).
+
+### Owner test
+
+1. Combat = KH1, Monstro, the Parasite Cage: hit it during each of its attacks (combo, finisher,
+   Fire / Blizzard / Thunder): damage and the damage voice, no flinch or knock-back, the attack
+   (the grab and spit included) plays to its end. Log: the `Sora's hits land on Re:CoM's super
+   armour` line once.
+2. After each attack it waits about 3 s before the next (below 30 % HP while you attack: right
+   after the 3 s). Log: the `waits 9000 ticks` line once; F9 trace `enemies=[…:<cooldown>]` starts
+   at 9000 after each attack.
+3. Stop, Gravity and stun still take it; it can be beaten; a used gimmick card still lets Sora go.
+4. Its card: at 50 % HP it drops it; blocking its attack with Guard staggers it (state 13) and rolls
+   it; a finisher as the first hit landing in an attack breaks it.
+5. A finisher or Fire may still make it faint (Re:CoM's own chance): note how often.
+6. Combat = Re:CoM: as before (cards; 250 between attacks; no `Parasite Cage` lines in battle).
 
 ## Logs and trace
 

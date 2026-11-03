@@ -816,7 +816,11 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     // M11 (the Pirate; the fliers' "doesn't flinch"): Re:CoM's super armour for the call while a KH1
     // enemy's script takes no reaction for the hit about to be handled, then the hit to its script.
     let armour = super::kh1_enemy::armour_on(enemy, || incoming(enemy));
+    // The Parasite Cage (owner, 2026-11-03): Sora's hits never flinch it or cut its attacks (Re:CoM's
+    // own super armour for the call; `crate::battle::cage`).
+    let cage = super::battle::cage_armour_on(enemy);
     let r = kh1_enemy_hit(enemy);
+    super::battle::cage_armour_off(cage, r);
     super::kh1_enemy::armour_off(armour, r);
     super::kh1_enemy::own_stun_off(stun);
     // Gimmick cards, trigger (d): a card-break boss crossing 50 % of its max HP.

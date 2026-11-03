@@ -16,8 +16,9 @@
 //!
 //! At Combat = KH1 in Sora's story, for the ordinary Heartless classes below while their
 //! instances still run Re:CoM's AI (Re:CoM's own vtable; our KH1-AI enemies run a copy of it),
-//! the wrapper writes the passed value back after Re:CoM's attack end. Bosses, the 100 Acre Wood
-//! bee and our KH1-AI enemies keep Re:CoM's 250.
+//! the wrapper writes the passed value back after Re:CoM's attack end. The Parasite Cage keeps its
+//! own wait instead (`crate::battle::cage::WAIT`, owner 2026-11-03). The other bosses, the 100 Acre
+//! Wood bee and our KH1-AI enemies keep Re:CoM's 250.
 
 /// Re:CoM's cooldown at every attack end with no next state (`0x14017E5F5`).
 pub const RECOM_COOLDOWN: i32 = 250;
@@ -90,6 +91,8 @@ pub struct End {
     pub kh1_battle: bool,
     /// The enemy's class is a listed Heartless on Re:CoM's own vtable.
     pub heartless: bool,
+    /// The enemy is the Parasite Cage (`crate::battle::cage`).
+    pub cage: bool,
     /// The arguments.
     pub next: usize,
     pub passed: i32,
@@ -100,10 +103,16 @@ pub struct End {
 
 /// The cooldown to write after Re:CoM's attack end, or None to leave Re:CoM's. Only when
 /// Re:CoM took its "no next state" path (bit 0 cleared, 250 written) and the class passed a
-/// longer wait than Re:CoM's.
+/// longer wait than Re:CoM's; the Parasite Cage gets its own wait (`cage::WAIT`).
 pub fn kept(e: &End) -> Option<i32> {
     let recom_path = e.next == 0 && e.flags_after & PLAYING == 0 && e.cooldown_after == RECOM_COOLDOWN;
-    (e.kh1_battle && e.heartless && recom_path && e.passed > RECOM_COOLDOWN).then_some(e.passed)
+    if !e.kh1_battle || !recom_path {
+        return None;
+    }
+    if e.cage {
+        return Some(crate::battle::cage::WAIT);
+    }
+    (e.heartless && e.passed > RECOM_COOLDOWN).then_some(e.passed)
 }
 
 /// Frames of a cooldown in Re:CoM time units.
@@ -125,7 +134,18 @@ mod tests {
     use super::*;
 
     fn end() -> End {
-        End { kh1_battle: true, heartless: true, next: 0, passed: PASSED, flags_after: 0x10, cooldown_after: RECOM_COOLDOWN }
+        End { kh1_battle: true, heartless: true, cage: false, next: 0, passed: PASSED, flags_after: 0x10, cooldown_after: RECOM_COOLDOWN }
+    }
+
+    #[test]
+    fn parasite_cage_waits_180_frames() {
+        let cage = End { heartless: false, cage: true, ..end() };
+        assert_eq!(kept(&cage), Some(9000));
+        // Combat = Re:CoM, Riku's story, enchant 0x72's repeat, a next state: Re:CoM's.
+        assert_eq!(kept(&End { kh1_battle: false, ..cage }), None);
+        assert_eq!(kept(&End { flags_after: 0x11, cooldown_after: -40, ..cage }), None);
+        assert_eq!(kept(&End { next: 0x1234, ..cage }), None);
+        assert!(heartless(crate::battle::cage::VTABLE as u64).is_none());
     }
 
     #[test]
