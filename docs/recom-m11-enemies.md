@@ -3600,6 +3600,218 @@ flame's lag and the repel count to compare.
 3. **One fireball a round.** KH1's script passes 1, 2 or 3 to its fireball routine but clears the count before the first shot
    (`0x1630`), so KH1's Defender fires one fireball each time. Built 1:1. (a) Keep (KH1); (b) fire the count passed (not KH1).
 
+### The Bouncywild (built)
+
+Status: built on branch `bouncy-wip`; tests and the Windows build pass; **not seen in game**; no KH1 trace of the
+Bouncywild yet. KH1's AI, reactions and motions on Re:CoM's `CEnemyBouncywild`, with Re:CoM's stats; its thrown banana
+and its banana peels are Re:CoM bullets moved by KH1's numbers, drawn with Re:CoM's own Bouncywild banana effect; Sora's
+slip on a peel is **Re:CoM's own slip reaction**, which plays Re:CoM's bake of KH1's slip clip.
+
+#### KH1's side. Checked (files: `ex_2040.bd` disassembled, code from `0x300`, folded and raw; its children `ex_2040_00.bd` / `_01.bd` / `_02.bd`, code from `0x18`; decomp: the syscalls named)
+
+The script (0x2100 bytes) has the Powerwild's older shape (state object `wp+0x20`, search object `wp+0x30`, the hit
+behaviour's word `wp+0x38`, the first round's flag `wp+0x3C`, the round count `wp+0x44`). Three children in the `.mdls`
+part 3 (0x80..0x780 the banana, 0x780..0xE00 the tossed peel, 0xE00..0x1480 the dropped peel). **It has no attack on its
+body**: no request has a HIT track, no row names a bone (Checked (files)); its actions (bit 24) are 204, 206, 207, 208, 212
+and 216 (through `0x13FA`), everything else is a plain request.
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x1DD8` | init `0x1EBC` (records LV1 `0x14` / LV2 `0x80`; stats `+4` walk 5, `+8` run 13, `+0x10` hop 500; home; handlers hit `0x1FAC`, message `0x1F4C`, `0x1FA0` (ends its thread)); a yield; the appearance thread `0x550`; then each frame: while idle (state 1) the search `0x1050(&wp30, 0, 1500, 4)` (Sora within 1500; world 11: 10000; out of sight (`sys 139`): none, outside world 11) → the target and engaged; a state request restarts the behaviour: 1 idle `0x4F2`, 2 engaged `0x39C`, 3 hit `0x300` |
+| appearance | `0x560` → `0x1A2A` | spawn type ≠ 0: facing Sora now; 69 (`sys 13`, blend 0); the 30-frame fade-in; flag 0x80 for 30 frames; effect 2; 30 frames; flag 4 with the idle queued (the script waits until 69 ends); idle |
+| idle | `0x4F2` → `0x50A` | the target cleared; the shared wander (`0x126A(350, 450, &home)`: points [250, 350) and [350, 450) about where it stands, walked to (mode 0) for at most 300 frames each, 40 % an idle (blend 8) of [90, 180), home when 700 away); the idle (`sys 12`, blend 12) for [120, 180) frames; the stretch 216 (an action); again |
+| engaged | `0x39C` → `0x3C0` | the target (or Sora). The first time (`wp+0x3C`): a placed one (`sys 132` = 0) looks first (`0x89A`: 209); then the bounce-about, the leap and the run-away (`0x4E4`). Then while fewer than 5 rounds were played (`wp+0x44`, never reset): close (< 400) the leap and the run-away; mid (< 800) 70 % the peel toss, else the taunt; far 80 % the banana, else the call and the run-away; a yield between rounds. Then the look-about `0x59E`, which ends in **its escape** |
+| bounce-about | `0xA30` | on the ground; 202 (blend 8) to its end or Sora within 300; effect `sys 106(8, 12)`; 8 legs: a point [250, 300) away at a random angle about where it stands, 203 (`sys 12`, blend 8; the run's clip) gliding at 13 (stats `+0xC`, `sys 40` mode 2) for at most 180 frames until stuck (moved under 6.5 × step × 0.5) or within 100, the effect again every 52 frames; then the pose 204 (action, blend 0) and 8 frames |
+| leap | `0xD4A` → `0x180A` | facing the target now; request 3 for its length, then 4 (bit 16) and movement state 3 (`sys 82`: the facing × 33 with height 130, drag 0.9, 50 frames), `sys 83` base 3 (5 near the top, 6 queued); it waits while the jump lasts, not turning: a 6 m leap 1.3 m high over Sora |
+| run-away | `0xC24` | a point 800 straight away from the target; run there (`0x1B6C`, mode 1) for 10 frames; drop a peel (`0xD18`: child 2); run on for at most 180 frames until stuck or within 100; drop another; the pose 204 and 8 frames; on the ground |
+| banana | `0x952` | on the ground; child 0 with rows `0xEC` / `0x15C` (and `sys 23` of `0xEC` on itself with a shared hit bit: no bone, no window); 211 (blend 8) to its end or the fall, turning to the target; the idle queued (blend 8) |
+| peel toss | `0x9B8` | on the ground; effect `sys 110(9, 0x1039)`; child 1 with the munny table `0x2A4`, one peel (`+24` = 1); `sys 23` of `0x1CC` (type 6, radius 0: nothing); 200 (`sys 13`, blend 0) to its end or the fall, turning |
+| taunt | `0x736` → `0x7BE` | 213 (blend 8) to its end, cut once 90 frames have passed with Sora within 800; on the ground; 217 (blend 8) to its end; the idle (blend 8); **its escape** |
+| call | `0x600` | turning; 206 (action, blend 8); within 1500 of Sora, up to two of the room's helpers (`sys 37(0xB0000 \| 2)`) are sent 150..250 near it (`sys 134`) and it waits 90; with none (the first try finds nothing) or Sora farther: 207 (action, blend 12) |
+| look-about | `0x59E` | 215 (blend 8) to its end, turning; Sora within 300: the leap and the run-away; then **its escape** |
+| escape | `0x92C` | turning; `sys 129` (`+0x374 \|= 0x80000`); `0x19D0(30)`: request 70 (`0x40000046`), flag 0x80, 30 frames, effect 3, a 30-frame fade with flag 8 (removed when faded); its thread then waits forever: **it leaves the fight, no EXP, no prizes** |
+| hit state | `0x300` → `0x324` | the last attacker (or Sora) the target; `wp+0x38` = 3 (a message 1001): the drops `0x270` and the slip 208 (action); 4 (its own launch): the recovery 212 (action) and the look-about (its escape); else within 400 the turn (`0x850`: facing it now, 205 to its end, the idle) and the run-away, farther the look-about (its escape). Then the leash `0x8D4` (out of sight and 1500 away, or 1800: its escape), engaged |
+| hit handler | `0x1FAC` | the first round counts as played; the damage (`0x169C`: −1 for a clash or a repel record, an attacker-less hit or attributes 8..11); killed: its death `0x11F0` (drops `0x23C`, EXP); −1: a clash or attributes 8 / 10 → the hit state (2); alive: kinds 4 / 5 → **its own launch** `sys 38(actor, hit, 0, 350, 35, 0)` (base 0: KH1's launch 0x52 on the ground, 0x5C in the air; hop 350, speed 35, no down time) and 4; else 2; the hit state. No kind is zeroed: KH1's reaction plays (its model has F 72..75, a 78 / 79, L 0x52.., l 0x5C..; no knock-back) |
+| message | `0x1F4C` | 1001 (another Bouncywild's peel, `ex_2040_0N.bd` `0x29A`): flag 4 cleared, `wp+0x38` = 3, the hit state |
+
+The children (Checked (files + decomp)):
+
+- **The banana** `ex_2040_00.bd`: its routines `0x18..0x5E6` are byte for byte the Fat Bandit's and the Defender's fireball's
+  (Checked (files)); its entry `0x5E6`: effects 2062 / 2060; 82 frames; ends unless the parent plays 211; from `sys
+  19(parent, 28, 1)` (the left hand); model 13, **life 75, turn 1.25° a frame, speed 25**, along the parent's facing, toward
+  its target's lock point; a hit ends it; a repel (a swing: its row `0xEC` has priority 0) re-aims it (`0x1B8`) with the row
+  `0x15C` (type 5: it hurts enemies). Row `0xEC`: type 0, priority 0, radius 50, KH1 power 2.
+- **The peels** `ex_2040_01.bd` (tossed, entry `0x502`: effect 2057, 80 frames, ends unless the parent plays 200; along the
+  parent's facing at rand [8, 10) with rand [10, 15) up) and `ex_2040_02.bd` (dropped, at once: toward the parent's target's
+  place at rand [3, 10) with rand [5, 10) up); the same peel routine `0x18..0x502`: it falls (`y += 0.8 × step` a frame,
+  KH1 y down) through a radius-30 sweep (`sys 140`) until it touches the ground, then lies 120 frames (effect 11); each frame
+  every party member that can be hit (`sys 141`), stands on the ground (`+0x70` = 0) and has no flag 0x400, within 50 of it,
+  **slips** (`0x29A`): Sora's motion set = the Bouncywild's player set (`sys 113`), request 200 as an action (blend 0, the
+  idle queued at 8), flag 0x80 for 30 frames, he **loses munny** `sys 142(−sys 155(0x2A4))` (`0x1402E7E10` on the save's
+  `+0x1C`; `0x1402AB790`: p0 + 5 p1 + 20 p2 × Jackpot = 30 + 50 = 80) which drops at his feet (`sys 122(0x2A4)`: 30 one-munny
+  and 10 five-munny prizes); an enemy (kind ≥ 10) gets message 1001 (its own slip 208 and the drops `0x270`: 20 + 25 munny,
+  20 % item 3, 4 % item 7, 8 % item 238). The peel ends. **A peel is no attack**: no row, no damage; KH1's swings and Guard
+  never meet it.
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyBouncywild` (vtable `0x140538FB8`, 139 slots, RTTI COL at −8), ctor `0x14018C4D0` (`40 53 48 83 EC 20`: `CHeartless`'s
+base ctor, then `+0xCC0 |= 2`; its only reference the factory's call at `0x1401890EC`; no branch into the moved bytes, no
+pointer to them: exe scan, 2026-11-03), allocation `0x1401890D3` `mov ecx, 0xCD0` → 0xCF0. Its own states 1 (`0x14018C630`:
+`e008_001` / `e008_002`, the walk thunk `0x14018CA30`), 2 (`e008_050` → `_051` → `_052`, `0x14018C590` / `0x14018C660`: at clip
+time 3800 a straight `CBullet` from `wep0`, 0.6 m a frame, range 20 m, radius 0.2, `0x14017F0E0(enemy, 0, 1)`'s AP, effect set
+`0x1407C2FA0`), 3 (`e008_053`, `0x14018C5E0` / `0x14018C870`: at clip time 3800 **a homing banana** from `l_fing1a` pitched 30°
+up, 0.2 m a frame, homing, 15000 ticks, radius 0.4, `0x14017F0E0(enemy, 1, 1, 0)`'s AP, effect set `0x1407C3010` (slots
+`"_ex_2040"` 5 / 10), **reaction kind 0x18** (`+0x68`, the write at `0x14018C924`)); 0 / 11 / 12 / 30 `CBattleEnemy`'s; think
+`0x140196EC0`. `EN0008.ASD`: no record (its attacks are its bullets). `EN0008.ANN`: 75 slots; no `e008_05x` clip is a bake of
+a KH1 request (the matcher: only the walk and the appearance are Re:CoM bakes).
+
+**Re:CoM's slip (kind 0x18)**: the player damage check `0x1401E6DE0` takes it into the flinch action with `+0x414` = 6, **row
+0x29** (`p001_049`, facing the hit), after `0x1401F6190`, which takes a tenth of Sora's Moogle points (`player+0x448`, at least
+4 when he has 4, at most 500) and scatters them as Re:CoM's 4-point (0xD4) and 10-point (0xD5) prizes around him (the prize
+factory `0x1401A89C0`), then updates the HUD (`0x14020CD60`). **`p001_049` is an exact bake of KH1's slip clip** (request 200 of
+`xa_ex_2040.mset`'s player set 0, 68 frames at 30 fps; Checked (files): the asset step's matcher, `Bake`, 0.007°, 0 mm). So
+Re:CoM's Bouncywild already has KH1's peel slip, moved onto its thrown banana (with damage) and with Moogle points for
+KH1's munny.
+
+Our copy: states 0, 1, 11, 12, 30, the think (20 vtable slots pointer-checked, `sites::BOUNCYWILD_PTRS`); **no attack
+state**: its banana and peels are made from state 1 (states 2 / 3, Re:CoM's own, never entered). Not in Re:CoM's attack-end
+cooldown table (0.83.0, keyed to Re:CoM's own vtable). `enemy_ai = recom` leaves Re:CoM's Bouncywild as Re:CoM has it.
+
+**Power mapping** (owner: "each KH1 attack takes the power of the Re:CoM attack of the same kind (its Re:CoM shot's for the
+banana)"): KH1's homing banana thrown from the hand → Re:CoM's homing banana thrown from the hand, **id 1**
+(`0x14017F0E0(enemy, 1, 1, 0)`, as its state 3 asks); KH1's ordinary hit reaction (Re:CoM's default bullet kind, as every
+port's fireball), not Re:CoM's slip. The peels: **no power** (KH1's peel does no damage) and **Re:CoM's slip kind 0x18**.
+Re:CoM's straight shot (state 2, id 0) has no KH1 twin: unused.
+
+#### Its banana and peels (Re:CoM bullets moved by KH1's numbers)
+
+- **The banana** (`win::kh1_thrown`, `Kind::Fire`: the Fat Bandit's / Defender's fireball path, since the child is the same
+  code): a `CHomingBullet` made 82 frames into 211 (the behaviour asks for the throw then, only while 211 still plays: a
+  reaction's motion ends KH1's child), at the manifest's `fire_at` point (bone code 28 at t 1 on Re:CoM's hand), along the
+  facing, **25 a frame turning at most 1.25° a frame toward Sora's aim point for 75 frames**; Re:CoM's banana power (id 1)
+  and look (`0x1407C3010`, `sites::BOUNCYWILD_FIRE_PTRS`); radius KH1's 50 cm. Sora's Guard turns it back (decision 28:
+  Re:CoM's homing at 1.25° a frame takes it at the Bouncywild); his swing bats it (KH1's `0x1B8`: half-way between the
+  Bouncywild and Sora's target, turning toward that target).
+- **The peels** (`win::kh1_peel`): one Re:CoM `CHomingBullet` per peel (tossed 80 frames into 200 while it still plays; dropped
+  twice in each run-away), from the same point, with KH1's speeds and our own random stream (Assumption, as the Defender's
+  fireball speed); KH1's fall (`kh1_core::bouncywild::Peel`) over the battle floor (the thrower's height when it throws:
+  Assumption, flat floors) until its 30-unit sphere touches it, its attack held off; then it lies 120 frames with its
+  attack on (`0x14014DE90`), radius KH1's 50 cm, **no power, Re:CoM's slip kind 0x18**: Sora slips (Re:CoM's `p001_049`)
+  and drops a tenth of his Moogle points; the peel ends (Re:CoM's hit ends the bullet). Drawn with the banana's effect set.
+  Sora's KH1 Guard blocks a peel as any Re:CoM shot (KH1's never meets it): it is used up, not turned back (`win::guard`).
+- Per frame: one KH1 step per flying banana or peel; one atomic load otherwise.
+
+#### KH1's escape (left out)
+
+KH1's Bouncywild leaves the fight for good (`0x92C`: 70, a 30-frame fade, removed; no EXP, no prizes) after its five rounds,
+after its taunt, after a hit from 4 m or more, after its own launch, and by its leash. In a Re:CoM battle room an enemy that
+leaves without a defeat would leave the battle unwinnable (the owner's reason for leaving out every leash). **Built**: the
+escape is not ported; where KH1's would leave, this one starts its five rounds again (`wp+0x44` = 0) and goes on (the
+log's `escape … left out` note). Owner question 1.
+
+#### What the asset step writes
+
+`ENEMY/0008/EN0008.ANN` (Re:CoM's 75 slots byte-identical; KH1's clips at 100 + entry; the walk 1 and the appearance 69 play
+Re:CoM's exact bakes), `EN0008.ASD` (Re:CoM's file unchanged: no new record), `EN0008.SES` (Re:CoM's entries kept; the bake
+pairs' entries added), `kh1-bouncywild.json` (`kh1-enemy 1`: 69 numbers from `ex_2040.bd`, 6 from the banana, 14 from the
+tossed peel, 5 from the dropped one, 22 + 3 + 4 + 1 request words checked, the banana's point and Re:CoM power, no attacks,
+6 parts). Test `bouncywild::tests::builds_from_the_players_files`. Other enemies' outputs are unchanged. In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0008/EN0008.ANN, method: copy, source: [{name: ENEMY/0008/EN0008.ANN}]}
+- {name: ENEMY/0008/EN0008.ASD, method: copy, source: [{name: ENEMY/0008/EN0008.ASD}]}
+- {name: ENEMY/0008/EN0008.SES, method: copy, source: [{name: ENEMY/0008/EN0008.SES}]}
+- {name: kh1-bouncywild.json, method: copy, source: [{name: kh1-bouncywild.json}]}
+```
+
+(The `.ASD` line copies Re:CoM's own bytes, as the step writes the file for every enemy; it can be left out.) The step prints
+`bouncywild (M11): …`; the log shows `bouncywild: KH1's bouncywild (M11) …` at start, `battle N: Bouncywild … gets KH1's AI`,
+`thrown: bouncywild eNNN: fireball …` per banana, `peel: … tossed / dropped peel …`, `peel N: lies at …`, `peel N: ends`.
+
+#### Checked / Assumption
+
+- **Checked (files):** every number at its push (the asset test reads them from the player's scripts), the request words, the
+  rows (`0xEC` type 0 / priority 0 / radius 50; `0x15C` type 5; `0x1CC` type 6, radius 0), the children's bytes (the banana's
+  routines = the Fat Bandit's / Defender's fireball's; the two peels' = each other's), the clip lengths (69 80, 200 140, 202
+  48, 203 52 (the run's), 204 46, 205 122, 206 130, 207 240, 211 140, 212 204, 213 98, 215 240, 216 266, 217 134), the hurt
+  parts (6), the drop tables `0x23C` / `0x270` / `0x2A4`, **`p001_049` = KH1's slip clip** (the matcher).
+- **Checked (decomp):** `sys 38` (`0x1402BBC80` → `0x1402B79F0`: base 0 → 0x52 / 0x5C), `sys 82` / `sys 83`, `sys 113`
+  (`0x1402BA8C0`), `sys 129` (`0x1402BAC20`), `sys 142` (`0x1402BC820` → `0x1402E7E10`: munny on the save's `+0x1C`), `sys 155`
+  (`0x1402BC690` → `0x1402AB790`), `sys 37` (`0x1402BA180`); Re:CoM's states 2 / 3 (`0x14018C660` / `0x14018C870`), the damage
+  check's case 0x18 (`0x1401E6DE0`: row 0x29), `0x1401F6190` (the Moogle points), the action row table `0x1407C5E80` (row 0x29
+  `p001_049`).
+- **Checked (exe):** the class, its slots, the ctor and its only call, the factory size, the vtable slots, the banana's effect
+  set name pointer, the slip kind's write at `0x14018C924`; 23 sites (pefile, 2026-11-03).
+- **Tests:** the appearance, the first round (bounce-about, leap, run-away with two drops), the leap's 6 m / 1.3 m, the
+  run-away, the banana at 82 and the peel at 80 (none when a reaction cut 211), the rounds by distance, the look-about after
+  five rounds (no escape: it fights on), the hit handler (its own launch 0x52 / 0x5C, hop 350, speed 35; the turn; the
+  look-about), a 20 000-frame fight (12 seeds: never 600 frames silent; it throws, tosses, drops and leaps), the host model
+  (its own frames and the real manifest: nothing released, every request mapped), a peel's fall and lie, the asset step on
+  the player's files.
+- **Assumptions:** the escape left out (rounds again; owner question 1); the call finds no helper (no kind-2 object in
+  Re:CoM's battles); the banana on Re:CoM's id 1 with KH1's ordinary reaction; Re:CoM's slip for KH1's (its clip is KH1's;
+  its Moogle points stand for KH1's munny: owner question 2); the peel's reach measured against Sora's hurt body (KH1: his
+  root); a jumping Sora not touching a floor-high peel (KH1 tests "on the ground"); the peels' and the banana's draws from
+  our own random stream; the battle floor flat at the thrower's height; `sys 140` keeping the sphere's centre at its
+  contact; the leap's 4 as a plain request (bit 16) and its apex motion a frame late; the shared hit bit rows `0xEC` / `0x1CC`
+  on the parent doing nothing; Re:CoM's sounds on the new clips; seeds per enemy.
+- **Not ported:** the escape and the leash, the helpers its call sends, another enemy's slip on its peels (message 1001;
+  Re:CoM's bullets test only Sora's side), KH1's munny (owner question 2), the effects (M13), world 11's search rule and
+  room rule (world 16 room 34's drop call), the hit attributes, the death routine (Re:CoM's defeat, prizes, EXP).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Bouncywild battle in Deep Jungle; run the asset step first)
+
+1. Each Bouncywild plays KH1's appearance (69, about 1.3 s), then wanders a few metres about where it stands and stretches.
+2. When Sora comes within 15 m: it bounces about (a little hop, then eight quick bounding runs in random directions), leaps
+   over Sora (a 6 m jump, 1.3 m high), and runs 8 m away from him, dropping a banana peel just after it starts and another
+   where it stops; then it poses.
+3. Its rounds by distance: close (under 4 m) the leap and the run-away; mid (4–8 m) it tosses a peel at you (about 1.3 s
+   into the toss) or taunts (213, then 217); far (8 m or more) it throws a banana (about 1.4 s into the throw) or calls
+   (206, then 207) and runs away. **It never walks up to Sora**: he has to chase it.
+4. The banana: a Re:CoM banana effect that curves slowly after Sora (1.25° a frame) for 1¼ s; it hurts like Re:CoM's
+   banana and flinches him (no slip, no Moogle points). Guard it: it flies back at the Bouncywild. Swing at it: it flies back
+   (at your target if you have one) and hurts enemies.
+5. The peels: they arc to the floor and lie there 2 s (the banana effect on the floor). Step on one: Sora slips (Re:CoM's
+   slip motion, which is KH1's) and **drops Moogle points** around him (Re:CoM's own rule: a tenth of them; pick them back
+   up); no damage. Jump over it: nothing. Guard over one: no slip, the peel is used up.
+6. After five rounds it looks about (215, 4 s); if Sora comes within 3 m it leaps and runs. **In KH1 it would now leave the
+   fight**; here it starts its rounds again.
+7. Hit it from close: it turns (205) and runs away. From farther: it looks about. Hit it with a launching finisher: it flips
+   high (its own launch) and gets up (212).
+8. Stop, Stun Impact, freeze and Gravity still take it over (Re:CoM's states).
+9. Kill one: KH1's reaction motion for the killing hit, Re:CoM's prizes and EXP.
+10. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Bouncywilds (its two shots, its banana's slip).
+
+Please send `kh1-recom.log` (`bouncywild:`, `thrown:`, `peel:` lines) and an F9 trace (its `fire` / `peel` tokens).
+
+#### KH1 trace (what to record in KH1)
+
+Deep Jungle (the Tree House or the Bamboo Thicket): stand still at 10 m for 20 s; at 6 m for 20 s; walk up to it at 2 m;
+chase it after it runs; step on a tossed peel and on a dropped one (with munny to lose); jump over a peel; guard a banana;
+swing at a banana (with and without a target locked); hit it once from close and once from 5 m; launch it with a finisher;
+watch one leave after its rounds and after its taunt. The trace's enemy rows give the rounds' timings, the leap, the
+run-away's line, the banana's curve and the peels' arcs to compare.
+
+#### Bouncywild owner questions
+
+1. **Its escape.** KH1's Bouncywild leaves the fight for good after five rounds, after its taunt, after a hit from 4 m or
+   more, after its own launch, and by its leash (no EXP, no prizes). In a Re:CoM battle room the battle could not end without
+   it. Built: (a) it never leaves; where KH1's would, it starts its rounds again. Other choices: (b) it leaves as KH1's (70,
+   the fade) and Re:CoM counts it as defeated **without** its prizes or EXP (research Re:CoM's battle end first); (c) it
+   leaves as KH1's and Re:CoM counts it as defeated **with** its prizes and EXP (Re:CoM's defeat after the fade).
+2. **The slip's Moogle points.** KH1 takes 80 munny from Sora when he slips on a peel and scatters it at his feet (and drops
+   munny from an enemy that slips). Re:CoM's own slip (its banana's kind 0x18, the same slip clip) scatters a tenth of his
+   Moogle points. Built: (a) Re:CoM's slip as a whole (its Moogle points, Re:CoM's twin of the munny). Other choices: (b)
+   Re:CoM's slip motion with no points lost; (c) KH1's amount: 80 Moogle points (KH1 munny = Moogle points in the M8 shop),
+   scattered as Re:CoM's prizes.
+3. **The banana's reaction.** Re:CoM's own banana makes Sora slip (and lose points) as well as hurting him; KH1's banana only
+   hurts (a flinch), the peels make him slip. Built: (a) KH1's: the banana flinches, the peels slip. (b) The banana also
+   slips (Re:CoM's kind 0x18 on it too).
+4. **Other enemies slipping.** In KH1 an enemy (another Bouncywild, a Powerwild) that walks over a peel slips too (its 208 or
+   260) and drops munny and items. Built: (a) left out (Re:CoM's bullets test only Sora's side). (b) Build it: the peel
+   tests the battle's KH1 enemies too and sends them KH1's message 1001 (their own slip; Re:CoM's drops kept).
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -3617,7 +3829,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Yellow Opera | `xa_ex_2130` (ex_2130.bd) | `CEnemyYellowopera` 5 | `0x1405570c8` | `0x1401968b0` / `0x140189055` 0xcd0 | 1,2,3 | 209 | FKaA | SES |
 | Green Requiem | `xa_ex_2140` (ex_2140.bd) | `CEnemyGreenrequiem` 6 | `0x1405404c8` | `0x14018e570` / `0x14018907f` 0xce0 | 1,2 | — | FKaA | SES |
 | Powerwild | `xa_ex_2030` (ex_2030.bd) | `CEnemyPowerwild` 7 | `0x140547798` | `0x140191380` / `0x1401890a9` 0xcd0 | 1,2,3 | 212,214,222 | FaLl | — |
-| Bouncywild | `xa_ex_2040` (ex_2040.bd) | `CEnemyBouncywild` 8 | `0x140538fb8` | `0x14018c4d0` / `0x1401890d3` 0xcd0 | 1,2,3 | — | FaLl | — |
+| Bouncywild (built) | `xa_ex_2040` (ex_2040.bd) | `CEnemyBouncywild` 8 | `0x140538fb8` | `0x14018c4d0` / `0x1401890d3` 0xcd0 | 1,2,3 | — | FaLl | — |
 | Air Soldier (built) | `xa_ex_2160` (ex_2160.bd) | `CEnemyAirsoldier` 15 | `0x140531cc8` | `0x14018a4e0` / `0x1401891f9` 0xcd0 | 1,2,3, think `0x14018a5c0` | 200,201,202,203,210,211,212 | FKaA | — |
 | Bandit (built) | `xa_ex_2090` (ex_2090.bd) | `CEnemyBandit` 11 | `0x140534368` | `0x14018aeb0` / `0x140189151` 0xcd0 | 1,2,3 | 200,202,210,211,212,216,217,218,230..233 | FaALl | — |
 | Fat Bandit (built) | `xa_ex_2060` (ex_2060.bd) | `CEnemyFatbandit` 10 | `0x14053ddf8` | `0x14018dd70` / `0x140189127` 0xcd0 | 1,2,3 | 200,205,206,207 | FKaALl | — |
@@ -3659,7 +3871,7 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
    without gravity for them.
 3. **Casters with projectiles** (KH1 child objects `sys 94`, effects `sys 225`; little or no HIT track):
    Red Nocturne, Blue Rhapsody, Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
-   Bouncywild (bananas), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs, flame + shield; built: § The Defender), Search Ghost (its
+   Bouncywild (bananas and peels; built: § The Bouncywild), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs, flame + shield; built: § The Defender), Search Ghost (its
    drain). Needs: the child object's script → Re:CoM's own bullets (checklist step 9), Green Requiem's
    support spell (Re:CoM overrides no state 3 for it; KH1's: a barrier / heal on its allies, Assumption).
    Which of these shoot what is from KH1's play (Assumption) and the scripts' syscalls (Checked (files)).
