@@ -366,12 +366,42 @@ the attack state itself goes on.
 
 | Part | Where | What |
 |---|---|---|
-| Behaviour | `kh1-core` `enemy/mod.rs` | `Behaviour::armoured(playing, launch_base)` (KH1's `+0x164`, `+0x3EA`; default false), `on_armoured_hit(dir)` (the `sys 42` path), `set_hit_dir(dir)` (the record's `+0x10`, for handlers that read it) |
+| Behaviour | `kh1-core` `enemy/mod.rs` | `Behaviour::armoured(playing, launch_base, kind)` (KH1's `+0x164`, `+0x3EA`, the hit's KH1 kind; default false), `on_armoured_hit(dir)` (the `sys 42` path), `set_hit_dir(dir)` (the record's `+0x10`, for handlers that read it) |
 | Rules | `kh1-core` `enemy/host.rs` | `RECOM_ARMOUR` (bits 20 / 21), `armour_flags`, `restore_armour` (the two bits back as they were), `armour_took` (the handler answered 1, the enemy lives, `+0x68` unchanged) |
 | Host | `kh1-recom` `win/kh1_enemy.rs` | `armour_on` / `armour_off` around the existing enemy-hit wrapper's call (`win::attack::enemy_hit`, which every call of `0x14017F7E0` goes through): the bits on for the call when the behaviour says so, put back after; a hit the armour kept goes to `on_armoured_hit` with KH1's hit counter and a log line; the runtime keeps `launch_base` (each launch's base, `start_reaction`) |
 
 Per hit: one atomic load while no KH1 class is installed, else one tail check and the behaviour's answer. The
 other classes' behaviours answer false: nothing changes for them.
+
+**The hit's kind before the call (owner 2026-11-02, Pirate question 3 (b): the fliers' "doesn't flinch" on this
+armour).** The Darkball's and the dives' decisions need the KH1 kind of the hit about to be handled.
+
+- Re:CoM (Checked (decomp)): the handler's first call, its gather `0x140154EB0`, walks the hurt bodies in order
+  and picks the first with the repel bit (`+0x9C & 8`), the guarded bit (`& 0x20`; both: its guard branch, no
+  picker, returns 0) or a hit count (`+0x90`); the hit apply `0x14016F1C0` writes the count, the attack's Re:CoM
+  kind (`+0x80`, from the attack's `+0x44`) and the owner (`+0x98`) when it applies, before the handler. So the
+  hit info `+0xF8` → `+0x50` is stale before the call (the gather writes it), but the bodies already describe
+  this hit.
+- Built: `kh1_core::enemy::host::gather` (the gather's order, a pure rule) and `win::attack::incoming`: read
+  before the call, nothing taken. A KH1 swing's kind is the kind of Sora's row (the same value the wrapper gives
+  `note_swing` after the call: `SWING` is noted only after the handler, so a peek of `SWING` itself would read
+  the previous hit's); otherwise the waiting body's Re:CoM kind mapped (`kh1_kind_of_recom`, as `hit_of` reads it
+  after the call): Re:CoM attackers and our spells too.
+- `Behaviour::armoured(playing, launch_base, kind)` is asked only while a damaging hit waits; `kind` is None only
+  when no kind could be read. The Pirate ignores it (its handler's clash test comes first, but no damaging hit
+  through Re:CoM's handler carries kind 6 / 7: Sora's rows are kinds 0 / 3 / 5 / 8, Re:CoM's map to 3 / 5;
+  Checked (code)); its tests are unchanged in meaning.
+- **Clashes are never armoured.** A clash reaches our state 11 two ways: Sora's Guard block (`after_enemy_hit`
+  → `guard_block`, which runs *inside* the wrapped call) and the enemy's guard row meeting a swing (the
+  handler's guard branch → `guard_event`, no picker, so no armour is even asked for: no damaging hit waits). `guard_block` with a KH1 recoil ends the attack itself
+  (no picker, unaffected); without one it hands the block to Re:CoM's picker (`recom_flinch`), which bit 21 would
+  turn into the damage voice only. So the armour stays off for a call whose enemy has a Guard block pending
+  (`win::guard::block_pending`, nothing taken); and the fliers answer false for kinds 6 / 7.
+- `keeps_reaction` stays as the fallback for a hit the armour didn't take (no kind read, or a Guard block in the
+  same frame): Re:CoM has then already asked for its flinch and cut the attack; `react_begin` hands back to
+  state 1 as before.
+- Per call: the tail check, then a scan of the hit bodies (≤ 32 reads, no lock) before the behaviour is asked
+  (the old per-call lock now only while a hit waits). No new hook, no new site.
 
 Found, not changed (owner question in § The Pirate): the Wyvern's attribute 2 / 3 / 4 hits call the same `sys 42`
 (§ The Wyvern: "the engine's element reaction", left out); that is this no-reaction path, so KH1's Wyvern takes no

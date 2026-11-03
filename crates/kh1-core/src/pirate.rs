@@ -1080,7 +1080,10 @@ impl Behaviour for Ai {
         }
         set_state(&self.io, st::HIT);
     }
-    fn armoured(&self, playing: Option<u16>, launch_base: u16) -> bool {
+    /// The hit's kind isn't read: the handler's clash test (kinds 6 / 7) comes first, but no damaging hit
+    /// through Re:CoM's handler carries a clash kind (Sora's rows are kinds 0 / 3 / 5 / 8, Re:CoM's kinds
+    /// map to 3 / 5; the clashes reach it as [`HitNews::Clash`]).
+    fn armoured(&self, playing: Option<u16>, launch_base: u16, _kind: Option<u8>) -> bool {
         let Some(r) = playing else { return false };
         // `0x267E`: its attacks; `sys 70` (`0x1402B7EE0`, unsigned): lying after a launch.
         let d = u32::from(r).wrapping_sub(u32::from(launch_base));
@@ -1339,15 +1342,17 @@ mod tests {
     fn the_armour() {
         let s = ready(1);
         for r in ARMOUR {
-            assert!(s.ai.armoured(Some(r), 0x52), "{r}");
+            assert!(s.ai.armoured(Some(r), 0x52, Some(3)), "{r}");
         }
         for r in [0, 1, 2, 208, 217, 222, 219, 72, 0x52, 0x53, 0x54, 0x56, 240, 244] {
-            assert!(!s.ai.armoured(Some(r), 240) || r == 243, "{r}");
+            assert!(!s.ai.armoured(Some(r), 240, Some(3)) || r == 243, "{r}");
         }
-        assert!(s.ai.armoured(Some(243), 240) && s.ai.armoured(Some(248), 240) && s.ai.armoured(Some(0x55), 0x52) && s.ai.armoured(Some(0x5A), 0x52));
-        assert!(!s.ai.armoured(Some(0x55), 240), "below the base");
-        assert!(s.ai.armoured(Some(req::JUMP), 0) && !s.ai.armoured(Some(req::JUMP), 0x52));
-        assert!(!s.ai.armoured(None, 0));
+        assert!(s.ai.armoured(Some(243), 240, Some(3)) && s.ai.armoured(Some(248), 240, Some(3)) && s.ai.armoured(Some(0x55), 0x52, Some(3)) && s.ai.armoured(Some(0x5A), 0x52, Some(3)));
+        assert!(!s.ai.armoured(Some(0x55), 240, Some(3)), "below the base");
+        assert!(s.ai.armoured(Some(req::JUMP), 0, Some(3)) && !s.ai.armoured(Some(req::JUMP), 0x52, Some(3)));
+        assert!(!s.ai.armoured(None, 0, Some(3)));
+        // The kind is not read (the host may not know it).
+        assert!(s.ai.armoured(Some(req::SLASH), 0x52, None) && s.ai.armoured(Some(req::SLASH), 0x52, Some(5)));
         // `sys 42`: the push slide only; no state asked for.
         s.ai.on_armoured_hit(Vec3::new(0.0, 0.0, -1.0));
         let io = s.ai.io.borrow();
@@ -1513,7 +1518,7 @@ mod tests {
                     let kind = [3u8, 3, 4, 5][(r.next_f32() * 4.0) as usize % 4];
                     s.ai.set_hit_kind(kind);
                     s.ai.set_hit_dir(Vec3::new(0.0, 0.0, if r.next_f32() < 0.5 { 1.0 } else { -1.0 }));
-                    if s.current.is_some_and(|c| s.ai.armoured(Some(c), 0x52)) {
+                    if s.current.is_some_and(|c| s.ai.armoured(Some(c), 0x52, Some(kind))) {
                         s.ai.on_armoured_hit(Vec3::new(0.0, 0.0, -1.0));
                     } else {
                         Behaviour::on_hit(&s.ai, if r.next_f32() < 0.15 { HitNews::Clash } else { HitNews::Damage });

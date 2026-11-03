@@ -273,7 +273,10 @@ pub trait Behaviour {
     fn set_target_grounded(&self, _on_ground: bool) {}
     /// Whether the hit the last [`Behaviour::on_hit`] reported keeps its reaction: KH1's script hit
     /// handler may zero the hit record's reaction kind (`hp[0xC] &= ~0x1F`, then no reaction and the
-    /// action goes on; the Darkball's `0x1E20` after its sixth light hit in a row, M11).
+    /// action goes on; the Darkball's `0x1E20` after its sixth light hit in a row, M11). The fallback for
+    /// the hits [`Behaviour::armoured`] couldn't take first (the host didn't know the hit's kind, or
+    /// Sora's Guard blocked the enemy in the same frame): Re:CoM's handler has then already asked for its
+    /// flinch and cut the attack; the host hands back to state 1.
     fn keeps_reaction(&self) -> bool {
         true
     }
@@ -328,10 +331,19 @@ pub trait Behaviour {
     /// under 10 and `% 5 == 3`, lying after a launch). Checked (decomp). The host keeps Re:CoM's state
     /// for such a hit through Re:CoM's own super armour ([`host::RECOM_ARMOUR`]) and tells the behaviour
     /// with [`Behaviour::on_armoured_hit`] instead of [`Behaviour::on_hit`].
-    fn armoured(&self, _playing: Option<u16>, _launch_base: u16) -> bool {
+    ///
+    /// Also a handler that zeroes the hit's reaction kind (`hp[0xC] &= ~0x1F`: KH1's reaction `0x1402B8E10`
+    /// then plays nothing, kind 0 runs no case; Checked (decomp)) without a state request: the Darkball's
+    /// light-hit run, the Air Pirate's and the Wyvern's dives (M11).
+    ///
+    /// `kind`: KH1's reaction kind of the damaging hit Re:CoM's handler is about to take (the record's
+    /// `+0xC & 0x1F`), when the host knows it before the call ([`host::gather`]); None otherwise. The host
+    /// asks only while a damaging hit waits.
+    fn armoured(&self, _playing: Option<u16>, _launch_base: u16, _kind: Option<u8>) -> bool {
         false
     }
-    /// A damaging hit taken while [`Behaviour::armoured`]: the hit handler's `sys 42` path (KH1's push
-    /// slide along `dir`, the push direction; no state request, the action goes on).
+    /// A damaging hit taken while [`Behaviour::armoured`]: the hit handler's path for it (the Pirate's
+    /// `sys 42`: KH1's push slide along `dir`, the push direction; the fliers: their counts and their hit
+    /// state, no push), no reaction; the action goes on. [`Behaviour::set_hit_kind`] has given its kind.
     fn on_armoured_hit(&self, _dir: Vec3) {}
 }

@@ -1443,22 +1443,33 @@ pub(super) struct Armour {
     en: usize,
     flags: u64,
     next: usize,
+    /// KH1's kind of the hit the behaviour was asked about (the fallback when `hit_of` has none).
+    kind: Option<u8>,
 }
 
 /// Before Re:CoM's hit handler (`super::attack::enemy_hit`, the wrapper every call of `0x14017F7E0` goes
-/// through): bits 20 / 21 on for the call while the behaviour's hit handler would take no reaction.
-/// Per hit: one atomic load while no KH1 class is installed, else one tail check and one question.
-pub(super) unsafe fn armour_on(en: usize) -> Option<Armour> {
+/// through): bits 20 / 21 on for the call while the behaviour's hit handler would take no reaction for
+/// the damaging hit about to be handled (`incoming`: None when none waits; else its KH1 kind, if known).
+/// Not while Sora's Guard blocked the enemy this frame (`super::guard::block_pending`): the block's
+/// reaction runs inside this call (`after_enemy_hit`) and Re:CoM's picker would only play the damage voice
+/// under the armour (a clash KH1 plays: kinds 6 / 7 come before every `hp[0xC]` zeroing and `sys 42`).
+/// Per call (every frame, every enemy): one atomic load while no KH1 class is installed, else one tail
+/// check, a scan of the hit bodies and, with a hit waiting, one question.
+pub(super) unsafe fn armour_on(en: usize, incoming: impl FnOnce() -> Option<Option<u8>>) -> Option<Armour> {
     if !any_installed() {
         return None;
     }
     ours(en)?;
-    if !with_rt(en, |rt| !rt.dead && rt.ai.armoured(rt.current, rt.launch_base))? {
+    let kind = incoming()?;
+    if super::guard::block_pending(en) {
+        return None;
+    }
+    if !with_rt(en, |rt| !rt.dead && rt.ai.armoured(rt.current, rt.launch_base, kind))? {
         return None;
     }
     let flags: u64 = rd(en + e::FLAGS);
     wr(en + e::FLAGS, ke::host::armour_flags(flags));
-    Some(Armour { en, flags, next: rd(en + e::NEXT) })
+    Some(Armour { en, flags, next: rd(en + e::NEXT), kind })
 }
 
 /// After the call: Re:CoM's two bits back as they were; a damaging hit it took without a reaction (a
@@ -1478,9 +1489,17 @@ pub(super) unsafe fn armour_off(a: Option<Armour>, result: u64) {
     with_rt(en, |rt| {
         rt.hits = rt.hits.saturating_add(1);
         rt.ai.set_hit_count(rt.hits);
-        if let Some(h) = hit {
-            rt.ai.set_hit_kind(h.kind);
-            rt.ai.on_armoured_hit(h.dir);
+        match (hit, a.kind) {
+            (Some(h), _) => {
+                rt.ai.set_hit_kind(h.kind);
+                rt.ai.on_armoured_hit(h.dir);
+            }
+            // No hit info after the call (not expected): the kind it was armoured for, no push.
+            (None, Some(kind)) => {
+                rt.ai.set_hit_kind(kind);
+                rt.ai.on_armoured_hit(Vec3::ZERO);
+            }
+            (None, None) => {}
         }
         let (id, cur) = (rd::<u32>(en + e::ID), rt.current);
         line(rt.class, || format!("e{id}: hit kind {:?} without a reaction while {cur:?} plays (KH1's sys 42 on Re:CoM's super armour)", hit.map(|h| h.kind)));

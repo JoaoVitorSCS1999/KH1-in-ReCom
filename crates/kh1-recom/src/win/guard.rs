@@ -302,6 +302,17 @@ unsafe fn turned_hit(c: usize, r: i32) {
     hit_log(|| format!("turned-back shot id={id} met id={target} ({}) result {r}", class_name(func::<mv::HandleFn>(mv::HANDLE_OBJ)(target))));
 }
 
+/// Whether Sora's Guard blocked `e`'s attack and its reaction (`after_enemy_hit`, in this frame's call of
+/// the enemy-hit wrapper) is still to come; nothing is taken. M11: a KH1 enemy's no-reaction armour stays
+/// off for that call, so Re:CoM's picker can still give the block's flinch (`win::kh1_enemy::armour_on`).
+pub(super) unsafe fn block_pending(e: usize) -> bool {
+    if PENDING_N.load(Ordering::Relaxed) == 0 {
+        return false;
+    }
+    let id: u32 = rd(e + enemy::ID);
+    PENDING.lock().map(|v| v.iter().any(|&(x, _)| x == id)).unwrap_or(false)
+}
+
 /// From the enemy-hit wrapper, after Re:CoM's hit handler returned `r` for `e` (`hp` before).
 pub(super) unsafe fn after_enemy_hit(e: usize, r: u64, hp: i32) {
     if TURNED_N.load(Ordering::Relaxed) != 0 {
