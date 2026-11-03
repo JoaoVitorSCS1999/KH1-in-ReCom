@@ -44,6 +44,7 @@ pub mod wightknight;
 pub mod fatbandit;
 pub mod gargoyle;
 pub mod defender;
+pub mod bouncywild;
 
 pub use arc::Arc;
 pub use combat::{blade_params, resolve_hits, Blade, CombatParams, HitReport};

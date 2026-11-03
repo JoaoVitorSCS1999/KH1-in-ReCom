@@ -85,7 +85,7 @@ pub const BLADE_EFFECT_SET: u64 = 0x1_405A_2030;
 /// Its flags: `0x100` (a hit, a wall, the range or the life ends it) and 4 (the life ends it); no
 /// `0x8000` (our exe writes the velocity; the angles are only its look). Checked (decomp `0x140156E20`,
 /// `0x1401569B0`).
-const FLAGS: u64 = 0x100 | 4;
+pub(super) const FLAGS: u64 = 0x100 | 4;
 /// The Fat Bandit's own fireball's effect sets (its state 3 `0x14018DF20`: descriptor `+0xA8` and `+0xB8`; slot 1 of
 /// the first names `"_ex_2060"` (`sites::FATBANDIT_FIRE_PTRS`)). Checked (decomp + exe).
 pub const FIRE_EFFECT_SET: u64 = 0x1_4053_E290;
@@ -94,20 +94,26 @@ pub const FIRE_EFFECT_PLACES: u64 = 0x1_4053_E300;
 /// `"_ex_2340"` (`sites::DEFENDER_FIRE_PTRS`)). Checked (decomp + exe).
 pub const DEFENDER_FIRE_EFFECT_SET: u64 = 0x1_4053_CF30;
 
+/// The Bouncywild's own homing banana's effect set (its state 3 `0x14018C870`: descriptor `+0xA8`, none at `+0xB8`; slot 1
+/// names `"_ex_2040"` (`sites::BOUNCYWILD_FIRE_PTRS`)). Checked (decomp + exe).
+pub const BOUNCYWILD_BANANA_EFFECT_SET: u64 = 0x1_407C_3010;
+
 /// A class's own fireball look (descriptor `+0xA8`, `+0xB8`) when its effect set is where the exe had it: the Fat Bandit's
-/// (`0x14053E290` / `0x14053E300`), the Defender's (`0x14053CF30`); None (no look) otherwise.
+/// (`0x14053E290` / `0x14053E300`), the Defender's (`0x14053CF30`), the Bouncywild's banana (`0x1407C3010`, its peels too);
+/// None (no look) otherwise.
 pub(super) unsafe fn fire_look(class: &str) -> Option<(u64, Option<u64>)> {
     let ok = |sites: &[crate::sites::PtrSite]| sites.iter().all(|p| rd::<usize>(base() + p.rva as usize) == base() + p.target as usize);
     match class {
         "defender" => ok(crate::sites::DEFENDER_FIRE_PTRS).then_some((DEFENDER_FIRE_EFFECT_SET, None)),
+        "bouncywild" => ok(crate::sites::BOUNCYWILD_FIRE_PTRS).then_some((BOUNCYWILD_BANANA_EFFECT_SET, None)),
         _ => ok(crate::sites::FATBANDIT_FIRE_PTRS).then_some((FIRE_EFFECT_SET, Some(FIRE_EFFECT_PLACES))),
     }
 }
 /// The range from its spawn (m; KH1's life ends it), the homing gate (m) after a turn-back.
-const RANGE: f32 = 255.0;
-const GATE: f32 = 255.0;
+pub(super) const RANGE: f32 = 255.0;
+pub(super) const GATE: f32 = 255.0;
 /// The fade after its end (ticks, as our Fire's).
-const FADE: i32 = 1000;
+pub(super) const FADE: i32 = 1000;
 /// At most this many blades fly at once (older ones are forgotten: Re:CoM's own step flies them).
 const MAX: usize = 8;
 
@@ -178,6 +184,11 @@ pub(super) unsafe fn throw(en: usize, class: &str, m: &Manifest, n: u8, yaw: f32
     // fireball 1), else the Fat Bandit's (the fireball 0, the flame 1).
     let index = |k: &str, d: u8| if has(k) { m.consts.get(k) as u8 } else { d };
     let (fire_n, flame_n) = (index("fire_child", 0), index("flame_child", 1));
+    // The Bouncywild's peels (`ex_2040_01.bd` tossed, `_02.bd` dropped; `super::kh1_peel`).
+    if has("peel_lie") && (n == index("peel_child", 1) || n == index("drop_child", 2)) {
+        super::kh1_peel::start(en, class, m, n == index("peel_child", 1), yaw);
+        return None;
+    }
     if has("ball_life") && n == 0 {
         ball_start(en, class, m);
         return None;
@@ -500,6 +511,7 @@ pub(super) fn forget() {
         g.clear();
     }
     BALLS_ANY.store(false, Ordering::Relaxed);
+    super::kh1_peel::forget();
 }
 
 /// Sora's live KH1 swing against the flying blades (`meets(shape)`: the swing's spheres against a
@@ -596,6 +608,10 @@ pub fn trace_token() -> String {
     drop(g);
     if let Ok(g) = BALLS.try_lock() {
         t.extend(g.iter().map(|b| format!("ball e{}:{}:{:?}:{:.0}:{:.0}{}", b.shooter, b.bullet.unwrap_or(0), b.ball.phase, b.ball.time, b.ball.bounces, if b.guarded { ":guarded" } else if b.ball.batted { ":batted" } else { "" })));
+    }
+    let p = super::kh1_peel::trace_token();
+    if !p.is_empty() {
+        t.push(p);
     }
     t.join(" ")
 }
@@ -816,8 +832,9 @@ unsafe fn ball_bullet(b: &BallRec) -> Option<u32> {
 /// The Gargoyle's own shot's effect set (`0x14018E350`'s descriptor `+0xA8`; `sites::GARGOYLE_BALL_PTRS`).
 pub const BALL_EFFECT_SET: u64 = 0x1_4053_F630;
 
-/// `CCollAttack`'s "on" (vtable +0x10, `0x14014DE90`; `sites::COLL_ON_PTRS`): the ball's attack at KH1's launch.
-unsafe fn hold_on(bullet: usize) -> bool {
+/// `CCollAttack`'s "on" (vtable +0x10, `0x14014DE90`; `sites::COLL_ON_PTRS`): the ball's attack at KH1's launch (the
+/// Bouncywild's peels' once they lie).
+pub(super) unsafe fn hold_on(bullet: usize) -> bool {
     let c: usize = rd(bullet + gb::COLL);
     if c == 0 {
         return false;

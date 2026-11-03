@@ -1354,6 +1354,11 @@ pub const CHILD_CONSTS: &[(&str, usize, &[u8], &[(&str, &[usize])], &[(u32, usiz
     // The Defender's flame `ex_2340_00.bd` and fireball `ex_2340_01.bd` (`crate::defender`, [`T_POINTS`]).
     ("defender", 0, b"ex_2340_00.bd", crate::defender::FLAME_CONSTS, crate::defender::FLAME_REQUESTS),
     ("defender", 1, b"ex_2340_01.bd", crate::defender::FIRE_CONSTS, crate::defender::FIRE_REQUESTS),
+    // The Bouncywild's banana `ex_2040_00.bd`, tossed peel `ex_2040_01.bd` and dropped peel `ex_2040_02.bd`
+    // (`crate::bouncywild`, [`T_POINTS`], [`SHOTS`]).
+    ("bouncywild", 0, b"ex_2040_00.bd", crate::bouncywild::FIRE_CONSTS, crate::bouncywild::FIRE_REQUESTS),
+    ("bouncywild", 1, b"ex_2040_01.bd", crate::bouncywild::PEEL_CONSTS, crate::bouncywild::PEEL_REQUESTS),
+    ("bouncywild", 2, b"ex_2040_02.bd", crate::bouncywild::DROP_CONSTS, crate::bouncywild::DROP_REQUESTS),
 ];
 
 fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
@@ -1396,6 +1401,9 @@ pub const T_POINTS: &[(&str, &str, usize, TFrom)] = &[
     ("defender", "fire_at", 0x106C, TFrom::Const("fire_t")),
     ("defender", "flame0", 0x1069, TFrom::Const("flame_t0")),
     ("defender", "flame1", 0x1069, TFrom::Const("flame_t1")),
+    // The Bouncywild's banana and peels all start at `sys 19(parent, 28, 1)` (`ex_2040_00.bd` `0x636`, `_01` `0x54A`,
+    // `_02` `0x514`: code 28, the left hand, at t 1; the step checks the three t agree).
+    ("bouncywild", "fire_at", 28, TFrom::Const("fire_t")),
 ];
 
 fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[RequestClip], consts: &[(String, f32)]) -> Result<Vec<(String, f32)>> {
@@ -1446,7 +1454,7 @@ fn t_points(name: &str, mdls: &[u8], ms: &MotionSet, conv: &Converter, clips: &[
 /// `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018E350`; Checked (decomp)); the row the ball takes when a swing
 /// sends it back (`0x46C`, the child's `0x748`: owned by the swinger) gives `ball_bat_radius` (its id and kind unused:
 /// the batted ball keeps its power, Guard's turn-back rule).
-pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1), ("gargoyle", "ball", &[0x3FC], 1, 1), ("gargoyle", "ball_bat", &[0x46C], 1, 1), ("defender", "fire", &[0x2AC], 1, 1)];
+pub const SHOTS: &[(&str, &str, &[usize], u32, u32)] = &[("fatbandit", "fire", &[0x1CC, 0x23C], 1, 1), ("gargoyle", "ball", &[0x3FC], 1, 1), ("gargoyle", "ball_bat", &[0x46C], 1, 1), ("defender", "fire", &[0x2AC], 1, 1), ("bouncywild", "fire", &[0xEC], 1, 1)];
 ///
 /// The Defender's `0x15F6` passes `0x2AC` (its batted row `0x31C` is the child's second); Re:CoM's own fireball takes its
 /// power with `0x14017F0E0(enemy, 1, 1, 0)` (its state 3 `0x14018DAF0`; Checked (decomp)).
@@ -1524,7 +1532,7 @@ fn sight_bones(name: &str, mdls: &[u8], conv: &Converter) -> Result<Vec<(String,
 }
 
 /// Every enemy this step builds (M11); the Shadow (M10) is `crate::shadow`.
-pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC];
+pub const SPECS: &[&Spec] = &[&crate::soldier::SPEC, &crate::airsoldier::SPEC, &crate::powerwild::SPEC, &crate::darkball::SPEC, &crate::bandit::SPEC, &crate::pirate::SPEC, &crate::airpirate::SPEC, &crate::wyvern::SPEC, &crate::searchghost::SPEC, &crate::largebody::SPEC, &crate::neoshadow::SPEC, &crate::wightknight::SPEC, &crate::fatbandit::SPEC, &crate::gargoyle::SPEC, &crate::defender::SPEC, &crate::bouncywild::SPEC];
 
 #[cfg(test)]
 mod clash_tests {
