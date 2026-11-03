@@ -1223,11 +1223,15 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
             r
         }
     };
+    // M11 (the KH1 Bouncywild, owner 2026-11-03: "a slip loses nothing"): a slip from one of its bullets skips Re:CoM's
+    // Moogle point scatter in this check (`win::kh1_peel::slip_scatter`).
+    super::kh1_peel::before_damage(pl);
     // M11 (the Neoshadow's grab): the held kind's case (`win::held`); every other hit as ever.
     let r = match super::held::on_damage(pl, &run) {
         Some(r) => r,
         None => run(pl),
     };
+    super::kh1_peel::after_damage();
     if shield && f418 & 1 == 0 {
         wr(pl + p::FLAGS_418, rd::<u32>(pl + p::FLAGS_418) & !1);
     }

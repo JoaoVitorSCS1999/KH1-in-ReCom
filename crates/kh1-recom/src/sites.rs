@@ -3018,6 +3018,29 @@ pub const BOUNCYWILD_CHECKED: &[Site] = &[
     Site { name: "the Bouncywild banana's slip kind (0x14018C924)", rva: 0x0018_C924, expect: &[0xC7, 0x84, 0x24, 0x98, 0x00, 0x00, 0x00, 0x18, 0x00, 0x00, 0x00] },
 ];
 
+/// M11, the KH1 Bouncywild's slip without its Moogle points (owner 2026-11-03, "a slip loses nothing"): the player damage
+/// check `0x1401E6DE0`'s case 0x18 (Re:CoM's slip; case 0x27 falls into it) runs `mov rcx,rdi` and its writes (`+0x414` = 6,
+/// `+0x5CC` = 0, `+0x7B8` = 0), then `call 0x1401F6190` (a tenth of Sora's Moogle points scattered as prizes), then `jmp
+/// 0x1401E7901` (the reaction's tail). The call is retargeted once at install, through a stub near it, to
+/// `win::kh1_peel::slip_scatter`, which skips it only while the damage-check wrapper takes a slip from one of our KH1
+/// Bouncywild's peels or bananas; every other slip runs Re:CoM's scatter. Case 0x28's own call (`0x1401E78C3`) is
+/// untouched. Bytes read from the Steam exe; no branch or pointer lands inside the call (exe scan: rel32 / rel8 / jcc,
+/// 8-byte pointers, 4-byte RVAs; 2026-11-03).
+pub const SLIP_SCATTER_CALLS: &[Site] = &[Site { name: "player damage check slip scatter call (0x1401E7665)", rva: 0x001E_7665, expect: &[0xE8, 0x26, 0xEB, 0x00, 0x00] }];
+
+/// The call's context (the case's writes before it, its jump after it) and its callee, called by the stub.
+pub const SLIP_SCATTER_CHECKED: &[Site] = &[
+    // mov rcx,rdi; mov dword [rdi+0x414],6; mov [rdi+0x5CC],r15d; mov ebx,r15d; mov [rdi+0x7B8],r15d
+    Site {
+        name: "slip case writes before the scatter call (0x1401E7647)",
+        rva: 0x001E_7647,
+        expect: &[0x48, 0x8B, 0xCF, 0xC7, 0x87, 0x14, 0x04, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x44, 0x89, 0xBF, 0xCC, 0x05, 0x00, 0x00, 0x41, 0x8B, 0xDF, 0x44, 0x89, 0xBF, 0xB8, 0x07, 0x00, 0x00],
+    },
+    Site { name: "slip case jump after the scatter call (0x1401E766A)", rva: 0x001E_766A, expect: &[0xE9, 0x92, 0x02, 0x00, 0x00] },
+    // mov [rsp+0x18],rbx; push rbp; push rdi; push r14; sub rsp,0xB0
+    Site { name: "Moogle point scatter (0x1401F6190)", rva: 0x001F_6190, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x55, 0x57, 0x41, 0x56, 0x48, 0x81, 0xEC, 0xB0, 0x00, 0x00, 0x00] },
+];
+
 /// M11 casters: the Red Nocturne's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp): its only
 /// caller is the enemy factory `0x140188F40` (case 3, the call at `0x14018901A`); no branch lands inside the moved bytes
 /// and no pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-03).
@@ -3212,6 +3235,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         BOUNCYWILD_HOOKS,
         BOUNCYWILD_ALLOC,
         BOUNCYWILD_CHECKED,
+        SLIP_SCATTER_CALLS,
+        SLIP_SCATTER_CHECKED,
     ];
     LISTS
         .iter()
@@ -4294,6 +4319,18 @@ mod tests {
         assert_eq!(a.rva + a.expect.len() as u32, c.rva);
         assert_eq!(c.rva + 5, b.rva);
         assert_eq!(&a.expect[5..], &[0x8B, 0x4E, 0x20, 0x8D, 0x55, 0x03], "ecx = [rsi+0x20] (the handle), edx = 3");
+    }
+
+    /// The slip's scatter call targets `0x1401F6190` and sits between its context; the callee is its own site.
+    #[test]
+    fn m11_slip_scatter_call() {
+        let c = &SLIP_SCATTER_CALLS[0];
+        assert_eq!(crate::hookplan::call_target(0x1_4000_0000 + c.rva as u64, c.expect), Some(0x1_401F_6190));
+        let (a, b, callee) = (&SLIP_SCATTER_CHECKED[0], &SLIP_SCATTER_CHECKED[1], &SLIP_SCATTER_CHECKED[2]);
+        assert_eq!(a.rva + a.expect.len() as u32, c.rva);
+        assert_eq!(c.rva + 5, b.rva);
+        assert_eq!(callee.rva, 0x001F_6190);
+        assert_eq!(&a.expect[3..13], &[0xC7, 0x87, 0x14, 0x04, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00], "+0x414 = 6: the slip's action");
     }
 
     /// The stomp ring's hook: Re:CoM's circle-against-body test, its prologue moved whole (push rbp / rsi / rdi, sub

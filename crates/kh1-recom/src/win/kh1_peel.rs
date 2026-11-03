@@ -18,8 +18,10 @@
 //!   power (KH1's peel does no damage) and Re:CoM's Bouncywild banana's reaction kind 0x18 (`0x14018C870`; Checked
 //!   (decomp + exe: `sites::BOUNCYWILD_CHECKED`)), which Re:CoM's damage check `0x1401E6DE0` plays as Sora's slip: row
 //!   0x29 `p001_049`, an exact bake of KH1's slip clip (Checked (files): the asset step's matcher, KH1's request 200 of
-//!   `xa_ex_2040.mset`'s player set 0 against `PL0001.ANN`), and `0x1401F6190`, which scatters a tenth of his Moogle
-//!   points (4..500) as Re:CoM's 4 / 10-point prizes (Re:CoM's twin of KH1's munny; owner question). A hit ends the
+//!   `xa_ex_2040.mset`'s player set 0 against `PL0001.ANN`). **A slip loses nothing** (owner 2026-11-03): Re:CoM's
+//!   case then calls `0x1401F6190` (a tenth of his Moogle points scattered as prizes); that one call is retargeted
+//!   ([`install_slip_scatter`], `sites::SLIP_SCATTER_CALLS`) to [`slip_scatter`], which skips it while the damage-check
+//!   wrapper takes a slip from one of our bullets ([`before_damage`]). A hit ends the
 //!   bullet (Re:CoM's flag `0x100`). Its reach: KH1's 50 as the bullet's radius against Sora's hurt body (KH1 measures
 //!   to his root: Assumption, it reaches a little farther by his body's width).
 //! - Not built: an enemy slipping (KH1's message 1001: Re:CoM's bullet tests only Sora's side); KH1's "on the ground"
@@ -37,12 +39,22 @@ use crate::kh1_enemy::Manifest;
 use kh1_core::bouncywild::{Peel, PeelNumbers};
 use kh1_core::rng::Kh1Rand;
 use kh1_core::Vec3;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-/// Re:CoM's slip: the reaction kind its own Bouncywild banana carries (`0x14018C870`, descriptor `+0x68`), played by the
-/// player damage check `0x1401E6DE0` (case 0x18: row 0x29 and `0x1401F6190`). Checked (decomp + exe).
-pub const SLIP_KIND: u32 = 0x18;
+/// Re:CoM's slip (`crate::ground::bouncywild::SLIP_KIND`): the reaction kind its own Bouncywild banana carries, played by
+/// the player damage check `0x1401E6DE0` (case 0x18: row 0x29 and `0x1401F6190`). Checked (decomp + exe).
+pub const SLIP_KIND: u32 = crate::ground::bouncywild::SLIP_KIND;
+/// Re:CoM's Moogle point scatter (`sites::SLIP_SCATTER_CHECKED`), called by [`slip_scatter`] for every slip not ours.
+const SCATTER: u32 = 0x001F_6190;
+/// Sora's pending hit: its kind (`+0x710`), pending (`+0x720`), its attacker's handle (his body `+0x690`'s `+0x98`,
+/// `0x14016F1C0`'s first write: the attack's owner, the bullet itself for a shot). Checked (decomp).
+const HIT_KIND: usize = 0x710;
+const HIT_PENDING: usize = 0x720;
+/// The player whose damage check is taking a slip from one of our bullets (0: none).
+static KEEP_POINTS: AtomicUsize = AtomicUsize::new(0);
+/// The scatter call is retargeted.
+static SCATTER_ON: AtomicBool = AtomicBool::new(false);
 /// The enemy attack attribute getter (`0x14017F050`, `sites::THROWN_CALLEES`).
 const ATTACK_ATTR: u32 = 0x0017_F050;
 type AttrFn = unsafe extern "win64" fn(usize, i32) -> u32;
@@ -139,7 +151,7 @@ pub(super) unsafe fn start(en: usize, class: &str, m: &Manifest, tossed: bool, y
                     g.push(PeelRec { id, shooter, peel, n, floor, on: false });
                     ANY.store(true, Ordering::Relaxed);
                 }
-                line(|| format!("{class} e{shooter}: {} peel {id} from ({:.0},{:.0},{:.0}) at ({:.1},{:.1},{:.1}) a frame (facing ({:.2},{:.2})), floor {floor:.0}, reach {:.2} m, Re:CoM's slip (kind {SLIP_KIND:#x}, no power)", if tossed { "tossed" } else { "dropped" }, at.x, at.y, at.z, v.x, v.y, v.z, d.x, d.z, c("peel_reach") * 0.01));
+                line(|| format!("{class} e{shooter}: {} peel {id} from ({:.0},{:.0},{:.0}) at ({:.1},{:.1},{:.1}) a frame (facing ({:.2},{:.2})), floor {floor:.0}, reach {:.2} m, Re:CoM's slip (kind {SLIP_KIND:#x}, no power, no Moogle points lost)", if tossed { "tossed" } else { "dropped" }, at.x, at.y, at.z, v.x, v.y, v.z, d.x, d.z, c("peel_reach") * 0.01));
             }
             None => line(|| format!("{class} e{shooter}: no peel made")),
         }
@@ -262,6 +274,71 @@ pub(super) fn is_peel(id: u32) -> bool {
         return false;
     }
     PEELS.try_lock().map(|g| g.iter().any(|p| p.id == id)).unwrap_or(false)
+}
+
+/// Whether the attacker `owner` is one of our KH1 Bouncywild's slipping bullets (its peels).
+fn slips(owner: u32) -> bool {
+    owner != 0 && is_peel(owner)
+}
+
+/// The damage-check wrapper, before Re:CoM's check (`super::attack::damage_check`): a pending slip from one of our bullets
+/// keeps Sora's Moogle points for this check ([`slip_scatter`]). One atomic load while the call isn't retargeted.
+pub(super) unsafe fn before_damage(pl: usize) {
+    if !SCATTER_ON.load(Ordering::Relaxed) {
+        return;
+    }
+    let pending = rd::<i16>(pl + HIT_PENDING) != 0;
+    let kind: u32 = rd(pl + HIT_KIND);
+    if !pending || kind != SLIP_KIND {
+        return;
+    }
+    let owner: u32 = rd(pl + crate::guard::body::SORA + crate::guard::body::ATTACKER);
+    if crate::ground::bouncywild::slip_keeps_points(pending, kind, slips(owner)) {
+        KEEP_POINTS.store(pl, Ordering::Relaxed);
+    }
+}
+
+/// After Re:CoM's check: the next slip is Re:CoM's again.
+pub(super) fn after_damage() {
+    KEEP_POINTS.store(0, Ordering::Relaxed);
+}
+
+/// The damage check's slip-case call of `0x1401F6190` (`sites::SLIP_SCATTER_CALLS`, retargeted at install): skipped while
+/// [`before_damage`] marked this player's slip as ours (owner 2026-11-03: "a slip loses nothing"); Re:CoM's scatter
+/// otherwise, as its call was.
+pub unsafe extern "win64" fn slip_scatter(pl: usize) {
+    if pl != 0 && KEEP_POINTS.load(Ordering::Relaxed) == pl {
+        let owner: u32 = rd(pl + crate::guard::body::SORA + crate::guard::body::ATTACKER);
+        let pts: i32 = rd(pl + 0x448);
+        line(|| format!("Sora slipped on shot {owner}: Re:CoM's slip without its Moogle point scatter ({pts} points kept)"));
+        return;
+    }
+    func::<PlFn>(SCATTER)(pl)
+}
+
+/// Retargets the damage check's slip scatter call to [`slip_scatter`] (once, after the classes are in, only with the KH1
+/// Bouncywild's; its context and callee checked first). Without it a slip on our peels scatters Moogle points (logged).
+pub unsafe fn install_slip_scatter(bs: usize) {
+    if !crate::kh1_enemy::CLASSES.iter().enumerate().any(|(k, c)| c.name == "bouncywild" && super::kh1_enemy::installed(k)) {
+        return;
+    }
+    for c in crate::sites::SLIP_SCATTER_CHECKED {
+        if std::slice::from_raw_parts((bs + c.rva as usize) as *const u8, c.expect.len()) != c.expect {
+            log(&format!("peel: {} is not as expected: a slip on a KH1 peel scatters Moogle points (Re:CoM's)", c.name));
+            return;
+        }
+    }
+    let s = &crate::sites::SLIP_SCATTER_CALLS[0];
+    let at = bs + s.rva as usize;
+    let call = super::hook::place_near(at, &crate::hookplan::abs_jmp(slip_scatter as *const () as u64)).and_then(|stub| crate::hookplan::call_rel32(at as u64, stub as u64).map(|c| (stub, c)));
+    let Some((stub, call)) = call else {
+        log("peel: no stub within reach of the slip scatter call: a slip on a KH1 peel scatters Moogle points (Re:CoM's)");
+        return;
+    };
+    if super::hook::patch(at, s.expect, &call, s.name) {
+        SCATTER_ON.store(true, Ordering::Relaxed);
+        log(&format!("peel: {} retargeted through {stub:#x}: a slip on the KH1 Bouncywild's peels keeps Sora's Moogle points", s.name));
+    }
 }
 
 /// The battle ended (or a new one began).
