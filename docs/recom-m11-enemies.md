@@ -520,9 +520,57 @@ attack against every body each frame).
   shape positions as Re:CoM last set them (at most a frame old); Re:CoM's guard spark for KH1's clash effects; no
   hit-stop or rumble; the special-state test (`+0x88 & 1`) not modelled; the row's push bit (`+0x40` bit 22) not carried
   (as for a guard row).
-- Not KH1's (found, owner question 2): the Soldier's spin-kick chest (type 1) and the Powerwild's flurry body (type 2)
-  are guard types that never hurt in KH1, but the asset step made Re:CoM attack records of them, so they hurt Sora here
-  (since 0.68.0 / 0.70.0). They now also clash as KH1's rows do.
+- Fixed (owner question 2, answered (b) "block only", 2026-11-02): the Soldier's spin-kick chest (type 1) and the
+  Powerwild's flurry body (type 2) are guard types that never hurt in KH1, but the asset step made Re:CoM attack records
+  of them, so they hurt Sora here (since 0.68.0 / 0.70.0). They keep their records for the clash test and now never
+  hurt Sora (§ Rows that only clash).
+
+#### Rows that only clash (never hurt)
+
+**KH1. Checked (decomp + files):** `0x1402B3BE0` tests an attack against a hurt body only when its object's type
+(`+0` bits 17..19, the row's `+0x38 & 7`) passes `((type << 17) − 0x20000) & 0xFFF9FFFF != 0 || type == 3`: types 1,
+2 and 4 never meet a hurt body (`kh1_core::enemy::guard::hurts_bodies`); type 3 (the Wyvern's charge) does. Such a row
+only meets other attacks (`0x140528CB8`). Sora's KH1 Guard row is type 2 (`docs/recom-kh1-attack.md` § Guard), and
+type 2 meets neither type 1 nor type 2 (`MEETS[2]` = 0x09): KH1's Guard doesn't block them either; they just pass.
+
+**Which rows. Checked (files: every ported class's script through the asset step, test
+`enemy::clash_tests::only_two_attack_rows_never_hurt`; the Shadow's four rows read from `ex_2020.bd`: all type 0):**
+of the 13 ported classes' attack rows only the Soldier's spin-kick chest `0x2AC` (type 1, priority 100, cos −0.5) and the
+Powerwild's flurry body `0x1CC` (type 2, priority 10, cos 0). Every other row is type 0 or 3 (the guard rows of the
+shared enemy guard make no records and are not attack rows).
+
+**Re:CoM has no record field for it. Checked (decomp):** an enemy attack's collision (`CCollAttack`, vtable
+`0x140523E28`) gets its side from the attack set's entry `+0x34` (`0x14014DBE0`: 2 for an enemy, 0 for the player),
+which `0x14016F720` → `0x1401720E0` writes to its shape `+0x64` (`side | 1`, slot `+0x20` = `0x14014E5A0`); the
+collision step `0x14016F110` always tests one body list by it (`side & 0xE`: 0 → the enemies' `*0x14087A840`, else the
+player side's `*0x14087A838`, 4 → both); the pair dispatch `0x14016EAD0` tests every body of another owner whose side
+isn't 6; the hit `0x14016F1C0` hurts unless the body already took that swing (`0x14016F960`) or guards it. The `.ASD`
+record's fields (`0x14014E010`, `0x14014E830`, `0x140179340`: `+0x50` motion, `+0x54` shape, `+0x58` radius, `+0x5C` /
+`+0x60` window, `+0x64` attack id, `+0x68` kind, `+0x98` / `+0x9C` filled at load) have no "never hurts" flag; a 0-power
+attack id still hits and makes Sora react.
+
+**Built (no new hook, no asset re-run):** in the pair-dispatch wrapper that already answers 0 for a clash-marked row
+(`win/attack.rs` `pair_dispatch`), `win/kh1_enemy.rs` `never_hurts`: when `list` is the player side's, the collision's
+owner (`CCollAttack +0x20`, the entry's `+0x30` = its owner's handle, `0x1401720E0`; resolved with `0x1402AD350`) is one
+of our enemies, and the collision is a live entry of its attack set whose record the manifest names from a type 1 / 2 / 4
+row (`Manifest::never_hurts`, read from each row's `"clash"` `"type"`): Re:CoM's test answers 0. The clash test
+(`live_rows`) still sees the row, so Sora's swings still bounce off it. The manifests the asset step wrote since 0.82.0
+carry each row's type: **the asset step need not be run again** (an older manifest has no `"clash"`: then the row still
+hurts, and the start line already asks for a re-run). Per frame: one load while no installed class has such a row; with
+the Soldier or Powerwild installed, for each enemy attack collision's test against the player side the owner lookup, and
+for a Soldier / Powerwild a walk of its live entries (at most 12). Not measured (Assumption: small next to Re:CoM's own
+collision step). A log line `<class>: eN: its record … is on: Re:CoM's tests of it against Sora answer 0` when the
+record or collision changes.
+
+Owner test lines (Combat = KH1, Sora's story, `enemy_ai = kh1`; no re-run needed):
+
+1. Soldier: stand close while it spin-kicks: its body passing through Sora does nothing; only the foot (the last part of
+   the spin, frames 46–64) hurts. Swing at its chest from the front during the spin: Sora's strong recoil, as before.
+2. Powerwild: let its flurry run into Sora: only the hands hurt, its body pushing through does nothing. Swing at its
+   front during the flurry: both bounce, as before.
+3. Guard during either: the hands / foot are blocked as before; the body passes with no block (KH1's Guard doesn't meet
+   it either).
+4. `enemy_ai = recom` or Combat = Re:CoM: Re:CoM's Soldiers and Powerwilds as before.
 
 **Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; run the asset step first):**
 
@@ -546,7 +594,8 @@ of the same meetings would let us check the frames.
 1. **Sora's Keyblade sparks.** KH1 plays each side's own hit effect, or a clash spark, and a 10-frame hit-stop with a
    pad rumble when Sora's swing clashes. Built: Re:CoM's guard spark and clink only. (a) Keep; (b) add Re:CoM's own
    hit-stop for Sora's clashes (research its hit-stop first); (c) wait for the effects milestone (M13).
-2. **Guard-type rows inside attacks hurt Sora.** The Soldier's spin-kick chest and the Powerwild's flurry body never
+2. **Guard-type rows inside attacks hurt Sora.** Answered (owner 2026-11-02, "Clash choices": (b), block only): built,
+   § Rows that only clash. The question was: the Soldier's spin-kick chest and the Powerwild's flurry body never
    hurt in KH1 (they only bounce swings), but they do here. (a) Leave it; (b) keep their records for the clash test and
    make Re:CoM's test of them against Sora answer 0 (the clash step's path, one more lookup per enemy attack test);
    (c) have the asset step make them guard rows of the shared enemy guard instead (the Bandit's way: Re:CoM's body
@@ -589,6 +638,12 @@ object's bits 4..5 and the hit test reads `0x10000 << sub`, Checked (decomp)):
 | air kick | 204 (58 f, bit 23) | `0x31C` (40 → 10 l. foot, 4 → 0, 50) | [20, 30) | 210 (no motion) | 0 |
 | rush | 207 (120 f) | `0xEC`, `0x15C` | [60, 70), [92, 110) | 218 | 0 |
 | rush leap | 209 (92 f, bit 23) | `0x1CC` | [16, 56) | 110 (no motion) | 1 |
+
+The spin kick's chest `0x2AC` is clash type 1 (priority 100, cone ±120°): KH1 never tests it against a hurt body
+(`0x1402B3BE0`), so for its first 46 frames the spin kick only bounces Sora's swings and never hurts; only the foot
+`0x23C` hurts. Its `.ASD` record stays (the clash test reads it) and Re:CoM's test of it against Sora answers 0 (owner
+2026-11-02, "Clash choices": block only; § Attack meets attack, Rows that only clash). Checked (files + decomp). Before
+this fix it hurt Sora (since 0.68.0).
 
 Reactions: the shared engine with the Soldier's motions (flinch 0x48..0x4B, air flinch 0x4E / 0x4F, launch
 0x52..0x5B, air launch 0x5C..0x65; no 0x4C / 0x4D / 0x50 / 0x51: kind 4 launches); weight 1.0 in both
@@ -1683,7 +1738,10 @@ Attack states and clips (state begin → the clip name it plays; Checked (exe)):
     `0x31C`.
 - **Rows** (`+0x3C` / clash recoil):
   - 212: `0x23C` (50 / 226);
-  - 214: `0xEC`, `0x15C`, `0x1CC` (10 / 225);
+  - 214: `0xEC`, `0x15C`, `0x1CC` (10 / 225); the body `0x1CC` is clash type 2 (front half): KH1 never tests it
+    against a hurt body (`0x1402B3BE0`), so it only bounces Sora's swings and never hurts. Its `.ASD` record stays (the
+    clash test reads it) and Re:CoM's test of it against Sora answers 0 (owner 2026-11-02, "Clash choices": block only;
+    § Attack meets attack, Rows that only clash). Checked (files + decomp). Before this fix it hurt Sora (since 0.70.0).
   - 222: `0x2AC`, `0x31C` (10 / 229).
 - **Power mapping** (decision M10 pattern).
   - Checked (files): Re:CoM's `e007_051` is KH1's 212 (62 frames, one hit), and its `e007_050` is KH1's

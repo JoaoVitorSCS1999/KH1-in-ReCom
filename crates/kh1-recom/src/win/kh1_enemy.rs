@@ -339,6 +339,9 @@ pub unsafe fn prepare(bs: usize, k: usize, manifest: Option<&std::path::Path>) -
         return false;
     }
     let _ = ORIGINAL[k].set(original);
+    if m.has_never_hurting() {
+        NEVER_HURTING.store(true, Ordering::Release);
+    }
     let _ = MANIFEST[k].set(m);
     COPY[k].store(at, Ordering::Release);
     true
@@ -2554,6 +2557,65 @@ pub(super) unsafe fn swing_meets_attacks(swing: (u32, i32), gen: u32, touch: &mu
 /// meets no hurt body: Re:CoM's test answers 0). One load while none is marked.
 pub(super) fn suppressed(coll: usize) -> bool {
     SUPPRESSED.load(Ordering::Relaxed) != 0 && SUPPRESS.lock().is_ok_and(|g| g.iter().any(|x| x.0 == coll))
+}
+
+/// Some installed class's manifest has an attack row that never hurts ([`Manifest::has_never_hurting`]: the
+/// Soldier's spin-kick chest, the Powerwild's flurry body); set at [`prepare`].
+static NEVER_HURTING: AtomicBool = AtomicBool::new(false);
+
+/// The owner handle of an attack collision (`CCollAttack +0x20`: the attack set's entry `+0x30`, its owner's
+/// `+0x20`, written by `0x1401720E0` when `0x14016F720` makes the shape; the pair dispatch `0x14016EAD0` skips
+/// bodies of that handle). Checked (decomp: `0x14014DBE0`, `0x14014E830`, `0x14016F720`, `0x1401720E0`).
+const COLL_OWNER: usize = 0x20;
+
+/// `win::attack::pair_dispatch`, Re:CoM's test of an attack collision against the body list `list`: the
+/// collision is a live entry of one of our enemies' attack sets whose `.ASD` record the asset step made from a
+/// KH1 row of clash type 1, 2 or 4, and `list` is the player side's (`*0x14087A838`). KH1 never tests such a row
+/// against a hurt body (`0x1402B3BE0`): it only meets Sora's swings (the clash test, [`live_rows`], still sees
+/// it), so Re:CoM's test answers 0 (owner 2026-11-02, "Clash choices": block only). Sora's KH1 Guard (type 2)
+/// doesn't meet types 1 / 2 either (`0x140528CB8`), so no block is lost. One load while no installed class has
+/// such a row; else, for a test against the player side, the owner lookup and, for one of our enemies with
+/// such a row, a walk of its live entries (at most 12).
+pub(super) unsafe fn never_hurts(coll: usize, list: usize) -> bool {
+    if !NEVER_HURTING.load(Ordering::Relaxed) || coll == 0 || list == 0 || list != rd::<usize>(super::va(base(), crate::guard::PLAYER_LIST)) {
+        return false;
+    }
+    let owner: i32 = rd(coll + COLL_OWNER);
+    if owner <= 0 {
+        return false;
+    }
+    let en = func::<HandleFn>(f::HANDLE_OBJ)(owner as u32);
+    if en == 0 {
+        return false;
+    }
+    let Some(k) = ours(en) else { return false };
+    let Some(m) = MANIFEST[k].get().filter(|m| m.has_never_hurting()) else { return false };
+    let s: usize = rd(en + e::ATTACKS);
+    if s == 0 {
+        return false;
+    }
+    let entries: usize = rd(s + set::ENTRIES);
+    let (records, rcount): (usize, u32) = (rd(s + set::RECORDS), rd(s + set::RECORD_COUNT));
+    if entries == 0 || records == 0 {
+        return false;
+    }
+    let live = rd::<u32>(s + set::LIVE).min(set::MADE) as usize;
+    for i in 0..live {
+        let at = entries + i * set::ENTRY;
+        if rd::<usize>(at + set::E_COLL) == coll {
+            let rec: usize = rd(at + set::E_RECORD);
+            let never = rec != 0 && ce::record_index(rec, records, rcount).is_some_and(|r| m.never_hurts(r));
+            // Logged when the record or the collision changes, not each frame.
+            static LAST: AtomicUsize = AtomicUsize::new(0);
+            if never && LAST.swap(rec ^ coll.rotate_left(32), Ordering::Relaxed) != rec ^ coll.rotate_left(32) {
+                let id: u32 = rd(en + e::ID);
+                let r = ce::record_index(rec, records, rcount);
+                line(k, || format!("e{id}: its record {r:?} (a KH1 row of clash type 1 / 2 / 4) is on: Re:CoM's tests of it against Sora answer 0 (it only meets swings)"));
+            }
+            return never;
+        }
+    }
+    false
 }
 
 /// `win::attack`'s enemy-hit wrapper, each enemy update before Re:CoM's hit handler (Re:CoM tests the enemy's

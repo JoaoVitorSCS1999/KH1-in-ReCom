@@ -516,6 +516,13 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     if super::kh1_enemy::suppressed(coll) {
         return 0;
     }
+    // Owner 2026-11-02 ("Clash choices": block only): a KH1 enemy row of clash type 1 / 2 / 4 (the Soldier's
+    // spin-kick chest, the Powerwild's flurry body) never meets a hurt body in KH1 (`0x1402B3BE0`); it only
+    // meets Sora's swings. Re:CoM's test of it against the player side answers 0 (one load while no installed
+    // class has such a row).
+    if super::kh1_enemy::never_hurts(coll, list) {
+        return 0;
+    }
     let b = base();
     let pl: usize = rd(va(b, data::MAIN_PLAYER));
     if !mv::is_main_sora(pl) {
