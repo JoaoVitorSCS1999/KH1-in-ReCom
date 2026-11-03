@@ -16,6 +16,7 @@
 //! Every offset is Steam, read in the Re:CoM decomp and checked in the exe where noted.
 
 pub mod end;
+pub mod pace;
 
 /// Re:CoM's enemy (`CBattleEnemy`) fields this stage reads or writes. Checked (decomp
 /// `0x140198870`, `0x140181620`, `0x140185320`, `0x14017E540`; disasm `0x1401816AC`).
