@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 193: Bosses untouchable during moves that dim the room, version 0.99.1 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "anytime bosses use a move that dims the room, just make them invulnerable for that move". Combat = KH1 in Sora's story.
+- What dims (Checked (decomp + exe)): Re:CoM's scene colour fade `0x140232170(mask, frames, &rgba, start, slot)` writes one of four colour slots at `[0x14087B7F0]`; the map and sky (`CMap` / `CSky`, mask 0x1800) take it; a boss state asks for 0.5 grey and its end for 1.0.
+- Who (every caller read): Riku 2 (spawn `+0x294` > 0), 5, 6, 7; Larxene 3 (at its lightning end), 4, 5, 8; Axel 4, 5; Marluxia 5, 6, 7; Marluxia 2 6; Marluxia 3 7, 9 and its own slot 1 (its idle think darkens before some attacks). Never: Vexen, Cloud, Hades, Hook, Leon, the hooded figure, every Heartless boss.
+- Detection: the room colour copied at the boss's state change (the revenge callback) and compared at the attack's hurt-bodies-off step; partway (Larxene 3 / 4, Marluxia 3 7 / 9) four step slots compare before / after Re:CoM's step (the only new per-frame work: two 64-byte reads and a compare while in that state, not measured); Marluxia 3's attack starting under its dark slot 1 counts.
+- The change: the revenge move's untouchable window (Re:CoM turns the hurt bodies off; its hit handler drops the hit; no Guard flinch, no revenge count) until the state ends (`0x14017DA90`); works with `boss_revenge = off`. The colour function's 86 first bytes checked.
+- Assumptions: the dim the owner sees is this fade (no effect files read); move names from motion names; no field menu leaves Marluxia 3's slot 1 dark; which Riku fights have `+0x294` > 0 not read.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 192: M12 step 4: the 27 sleight abilities on Sora's Abilities page, version 0.99.0 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "When unlocking each sleight (not including friend sleights, the generic magic sleights, and any sleights that have a KH1 combo modifier/finisher equivalent) it will be added as an ability that you can equip with AP, with reasonable AP costs relative to their damage."; answers: added when Re:CoM teaches it; the 25 magic sleights + Idyll Romp and Cross-slash+; the owner's AP costs (2 / 3 / 4 / 5).
