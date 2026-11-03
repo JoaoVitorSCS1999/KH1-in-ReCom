@@ -3177,6 +3177,50 @@ pub const BLUERHAPSODY_PTRS: &[PtrSite] = &[
 /// M11 casters: the Blue Rhapsody's own Blizzard shot's effect set (`0x14018C2D0`'s descriptor `+0xA8` = `0x1407C2F10`:
 /// slots 1..3 `"_ex_2120"` 9 / 10 / 8, the model's own effects), copied into its KH1 Blizzard (owner 2026-11-02:
 /// projectiles drawn with a Re:CoM effect, its own). Pointer-checked: slot 1's name pointer. Checked (exe + decomp).
+/// Oogie Boogie at Combat = KH1 (owner, 2026-11-03: the gate lowers after his dice throw ends once
+/// unbroken; `crate::battle::oogie`, `win::battle::attack_end` / `oogie_broken_begin`). Re:CoM code the
+/// rule relies on (not patched; his state-13 begin is called through his slot). Checked (exe + disasm).
+pub const OOGIE_CHECKED: &[Site] = &[
+    // push rbx; sub rsp,0x20; mov rbx,rcx; call 0x14017BAA0 (the stagger); test byte [rbx+0xCD8],1;
+    // je: his state-13 begin, the gate work only while state 2's mark is set.
+    Site { name: "Oogie state 13 begin (0x1403D7A40)", rva: 0x003D_7A40, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0xE8, 0x52, 0x40, 0xDA, 0xFF, 0xF6, 0x83, 0xD8, 0x0C, 0x00, 0x00, 0x01, 0x0F, 0x84, 0xDB, 0x00, 0x00, 0x00] },
+    // mov rcx,[rbx+0xD10]; (restores); mov eax,[rcx+0x2E0]; inc eax; mov [rcx+0x2E0],eax; cmp eax,3;
+    // jle; mov dword [rcx+0x2E0],3; jmp; jl (below 3: done): the gate's count + 1, at most 3.
+    Site {
+        name: "Oogie state 13 begin: gate count + 1 (0x1403D7ACD)",
+        rva: 0x003D_7ACD,
+        expect: &[
+            0x48, 0x8B, 0x8B, 0x10, 0x0D, 0x00, 0x00, 0x48, 0x8B, 0x7C, 0x24, 0x40, 0x48, 0x8B, 0x74, 0x24, 0x38, 0x48, 0x8B, 0x6C, 0x24, 0x30, 0x8B, 0x81, 0xE0, 0x02, 0x00, 0x00, 0xFF, 0xC0, 0x89, 0x81,
+            0xE0, 0x02, 0x00, 0x00, 0x83, 0xF8, 0x03, 0x7E, 0x0C, 0xC7, 0x81, 0xE0, 0x02, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0xEB, 0x02, 0x7C, 0x32,
+        ],
+    },
+    // mov rdx,[HDownTime]; mov rcx,rbx; call 0x14017F4E0; movss [rbx+0xCF8],xmm0: the down time at 3.
+    Site { name: "Oogie state 13 begin: down time (0x1403D7B04)", rva: 0x003D_7B04, expect: &[0x48, 0x8B, 0x15, 0x0D, 0xB2, 0x46, 0x00, 0x48, 0x8B, 0xCB, 0xE8, 0xCD, 0x79, 0xDA, 0xFF, 0xF3, 0x0F, 0x11, 0x83, 0xF8, 0x0C, 0x00, 0x00] },
+    // push rbx; sub rsp,0x40; or dword [rcx+0xCD8],1: his state 2 begin sets the mark.
+    Site { name: "Oogie state 2 begin (0x1403D7830)", rva: 0x003D_7830, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x40, 0x83, 0x89, 0xD8, 0x0C, 0x00, 0x00, 0x01] },
+    // and dword [rcx+0xCD8],~1: his state 1 begin clears it.
+    Site { name: "Oogie state 1 begin (0x1403D7EE0)", rva: 0x003D_7EE0, expect: &[0x83, 0xA1, 0xD8, 0x0C, 0x00, 0x00, 0xFE] },
+    // xor edx,edx; mov r8d,0x1770; mov rcx,rbx; call 0x14017E540: his state 2 step's only attack end.
+    Site { name: "Oogie state 2 attack end (0x1403D93F7)", rva: 0x003D_93F7, expect: &[0x33, 0xD2, 0x41, 0xB8, 0x70, 0x17, 0x00, 0x00, 0x48, 0x8B, 0xCB, 0xE8, 0x39, 0x51, 0xDA, 0xFF] },
+    // mov [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x20: the enemy message
+    // handler we call with message 3 (its case 3: `GIMMICK_BREAK_CHECKED`).
+    Site { name: "enemy message handler (0x140181620)", rva: 0x0018_1620, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// `CBossBoogie`'s slots the rule relies on: the message handler (Re:CoM's base), his state 1 begin,
+/// state 2 begin and step, state 13 begin (written with ours, [`OOGIE_BROKEN_SLOT`]). Checked (exe;
+/// relocated pointers).
+pub const OOGIE_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CBossBoogie +0x48", rva: 0x0067_0AA8, target: 0x0018_1620 },
+    PtrSite { name: "CBossBoogie +0x100", rva: 0x0067_0B60, target: 0x003D_7EE0 },
+    PtrSite { name: "CBossBoogie +0x118", rva: 0x0067_0B78, target: 0x003D_7830 },
+    PtrSite { name: "CBossBoogie +0x120", rva: 0x0067_0B80, target: 0x003D_9340 },
+    PtrSite { name: "CBossBoogie +0x220", rva: 0x0067_0C80, target: 0x003D_7A40 },
+];
+
+/// His state-13 begin slot (also in [`OOGIE_PTRS`], checked first).
+pub const OOGIE_BROKEN_SLOT: PtrSite = PtrSite { name: "CBossBoogie +0x220 (state 13 begin)", rva: 0x0067_0C80, target: 0x003D_7A40 };
+
 pub const BLUERHAPSODY_FIRE_PTRS: &[PtrSite] = &[PtrSite { name: "the Blue Rhapsody's Blizzard shot effect set slot 1 name", rva: 0x007C_2F28, target: 0x0053_8138 }];
 
 /// Every site the startup check reads: checked-only, hooked, called.
@@ -3205,6 +3249,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         M6_PACE_CHECKED,
         CAGE_CHECKED,
         CAGE_FAINT_CHECKED,
+        OOGIE_CHECKED,
         M6_CALLEES,
         M6_CHECKED,
         M6_DECK_HOOKS,

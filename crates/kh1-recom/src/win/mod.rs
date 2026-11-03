@@ -618,10 +618,17 @@ fn install_battles(base: usize) {
         log("m6: not hooked; battles stay Re:CoM's (cards and turn-taking)");
     }
     // Re:CoM-AI Heartless keep their own attack-end cooldown in KH1 battles (owner, 2026-11-02).
-    if battle::install_pace(base) {
+    let pace = battle::install_pace(base);
+    if pace {
         log("m6: attack end 0x14017E540 wrapped: in a KH1 battle, ordinary Heartless on Re:CoM's AI keep the cooldown their class passes (6000 ticks = 120 frames) instead of Re:CoM's 250 (0x14017E5F5); bosses and KH1-AI enemies keep Re:CoM's");
     } else {
         log("m6: attack end not wrapped; Re:CoM's 250-tick cooldown stays for every enemy");
+    }
+    // Oogie Boogie (owner, 2026-11-03): his dice throw ending unbroken lowers the gate as a break.
+    if pace && battle::install_oogie(base) {
+        log("m6: Oogie Boogie (CBossBoogie 0x140670A60) checked, his state-13 begin slot +0x220 wrapped (0x1403D7A40 as is, logged): in a KH1 battle each dice throw (state 2) that ends unbroken gets Re:CoM's card break (his handler 0x140181620, message 3 -> state 13), whose begin lowers the gate one step");
+    } else {
+        log("m6: Oogie Boogie not as read (RTTI, his code or slots) or the attack end not wrapped: he stays Re:CoM's at KH1 (the gate lowers only from a card break or his gimmick card)");
     }
     // The Parasite Cage (owner, 2026-11-03): no flinch from Sora's hits, about 3 s between attacks.
     if battle::install_cage(base) {
