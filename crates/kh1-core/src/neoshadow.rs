@@ -1126,10 +1126,13 @@ async fn special_round(cx: &Cx) {
 
 /// `0x1AF6`: the hidden one's ambush. While Sora is off the floor (unless it is alone, 13 m away, or 180
 /// frames passed), wait; 20 frames under Sora, facing his way; then KH1 grabs him from below when he stands on
-/// the floor and can be hit: he plays its motion 200 from its own `.mset` (`sys 113`, `0x1402BA8C0`, request
-/// `0x10000C8`) while it plays 208 and the others dive at him (`+0x4C`). **Not built** (owner question): the
-/// port always takes KH1's other branch, the miss: at his feet, facing his way, shown, 209 until it has played,
-/// hidden again.
+/// the floor and can be hit: he plays request 200 of the Neoshadow's `.mset` player set (`sys 113`,
+/// `0x1402BA8C0`; set at `+0xA4B80`, 126 frames) action-locked (`0x10000C8`), the lock's release queued; it
+/// plays 208 (126 frames) at his place for up to len − 2, letting go 30 before the end or when his motion
+/// changes (a hit), no damage of its own, while the others dive at him (`+0x4C`). **Not built**: Re:CoM has no
+/// player reaction that holds Sora with an enemy's clip and gives way to a hit (owner question 2,
+/// `docs/recom-m11-enemies.md` § The grab from below); the port always takes KH1's other branch, the miss: at
+/// his feet, facing his way, shown, 209 until it has played, hidden again.
 async fn grab_or_miss(cx: &Cx) {
     let mut waited = 0.0f32;
     loop {
@@ -1152,7 +1155,7 @@ async fn grab_or_miss(cx: &Cx) {
         frame().await;
     }
     follow_sora(cx);
-    push(cx, ECmd::Note("Neoshadow grab from below not built (owner question): KH1's miss (209) instead"));
+    push(cx, ECmd::Note("Neoshadow grab from below not built (owner question 2: no Re:CoM reaction holds Sora): KH1's miss (209) instead"));
     let sora = cx.borrow().w.target;
     if let Some(s) = sora {
         let mut p = s;
