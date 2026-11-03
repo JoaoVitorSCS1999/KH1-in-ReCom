@@ -996,6 +996,10 @@ point (a TODO for the notices merge).
 | MP Rage ×2 | 24 | bits 1..3 (count) | 42, 75 | 3 each | 305 | 26, 27 |
 | Leaf Bracer | 62 | bit 6 | 39 | 5 | 308 | 28 |
 | Berserk | 26 | bit 5 | 60 | 1 | 306 | 29 |
+| Second Chance | 25 | bit 4 | 90 | 5 | 307 | 30 |
+
+With these the ability word's 31 bits are used (bit 31 is the last free one): a later step that
+adds more abilities (the M12 sleight abilities) needs a second word in the block.
 
 ### MP Haste
 
@@ -1104,3 +1108,56 @@ point (a TODO for the notices merge).
 - **Test:** Re:CoM level 60: Berserk (1 AP); equip it, bring Sora under 20 % of his max HP, swing at an
   enemy: the log's `support: Berserk` line, about twice the damage of the same swing above 20 %.
   Spells and Zantetsuken: unchanged.
+
+### Second Chance
+
+- **KH1** (Checked (decomp)): the damage `0x1402BFA80`, last step of its ordinary branch (after
+  the curve, floor / cap, resistance, Aero's halving and the doubling): when the target's `+0x184`
+  bit 4 is set and **its HP ≤ the damage**, damage = HP − 1; then a damage of 0 becomes 1. So a hit
+  that would kill from **above 1 HP leaves exactly 1 HP**; **at 1 HP the next hit kills** (0 → 1).
+  Each damage record is its own test: in a combo the first hit leaves 1 HP and the next one kills
+  (KH1's own 30-frame post-hit invulnerability, decision 31, keeps most combos from landing twice).
+  Its % of HP branch (element 8) and its power-as-damage kinds (9 / 11 / 12) return before it.
+- **Re:CoM has the same rule** for one of its enemy cards: the player damage check `0x1401E6DE0` at
+  `0x1401E720C` (side `+0x3E8`, card `+0x1E8` = 0x6C: new HP < 1 and old HP > 1 → HP 1, and the
+  card's use counted by `0x14015E010`). Checked (decomp + disasm).
+- **Ours**: Second Chance goes **into that place** of Re:CoM's check: its HP store at `0x1401E7238`
+  (`test ebx,ebx; mov r12d,r15d; cmovns r12d,ebx; mov [rdi+0x42C],r12d`, 16 bytes) is replaced by a
+  jump to a 62-byte stub near the exe (`kh1_support::second_chance::stub`): when Sora (`rdi`) is
+  armed, the new HP `ebx` < 1, the HP before `r8d` > 1 and the reaction kind `r13d` is not 0x22
+  (Re:CoM's "all HP" kind: Assumption, as KH1's raw branches), `ebx` = 1 (and a counter for the log);
+  then the four moved instructions and a jump back to `0x1401E7248`. Re:CoM's death test, its HP
+  gauge update (`0x14020C530`) and the reaction then run on 1 HP as for any hit. The wrapper
+  (`win::attack::damage_check`) arms it only for Sora's check, only when a hit arrived and Second
+  Chance is equipped, and disarms it after. Re:CoM's card-0x6C rule, Riku and Combat = Re:CoM: as ever
+  (never armed).
+- Sites (`sites::SECOND_CHANCE_PATCH`, `SECOND_CHANCE_CHECKED`; 1186 sites re-read from the Steam exe
+  with pefile, 0 mismatches): the store (patched), its context `0x1401E71A2..0x1401E7238` (150 bytes:
+  where `r13d`, `r8d`, `ebx` come from, the card 0x7E and 0x6C rules) and the call after it
+  (`0x1401E7248`), checked only. No branch or pointer lands inside the 16 bytes (exe scan: rel8,
+  rel32, jcc at every offset, 8-byte pointers; the function's jump tables), only on their first
+  byte (Re:CoM's card branch). Placed once after the damage-check wrapper; any mismatch: logged,
+  Second Chance does nothing.
+- Log: `support: damage check: HP store (0x1401E7238) through the stub at 0x…` at start;
+  `support: Second Chance: a hit that would have killed Sora at HP 30 left him at 1 (KH1's
+  0x1402BFA80)` (20 lines).
+- Checked (tests): `kh1_support::tests::second_chance_rule`, `second_chance_stub_layout` (the
+  jumps, the moved bytes = the exe's, the jump back), `abilities::tests::rod_support_abilities`;
+  the stub's bytes disassembled with capstone. Not checked: in game.
+- **Test:** Re:CoM level 90 (or `kh1_all_abilities = on`): Second Chance (5 AP); equip it, let an
+  enemy hit Sora with more than his HP while above 1 HP: he stays at 1 HP and reacts; the next hit
+  knocks him out. At 1 HP it doesn't save him. Without it, as before.
+
+### Per frame, sites, asset step (M12 step 3)
+
+- Nothing new per frame: MP Haste in the per-hit charge; MP Rage, Leaf Bracer and Second Chance in
+  the existing damage-check wrapper only when a hit arrived (one load of `+0x41C` on its frames);
+  Berserk at each KH1 swing start and on its hits. One code patch (Second Chance's store), no hook.
+- No asset step: no new motion, sound or file.
+
+### Owner questions (M12 step 3)
+
+1. **MP Rage's HP** (above): (a) the share of KH1's max HP (built); (b) Re:CoM's HP lost as it is.
+2. **Berserk at Damage = Re:CoM** reads the share per hit against the enemy's KH1 record (built: ×2
+   on most hits, KH1's curve; ×4 against high Defence, ×1 at the curve's cap). Or one share per level
+   (e.g. KH1's ×2 for every hit)?

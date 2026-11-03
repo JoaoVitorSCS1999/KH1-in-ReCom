@@ -395,6 +395,9 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         // M11 (the Neoshadow's grab): Sora's held reaction, in the damage-check wrapper above.
         // SAFETY: reads of the mapped exe; the data patch's old bytes are checked inside.
         unsafe { held::install(base) };
+        // M12 step 3: Second Chance's rule in Re:CoM's damage check (armed by its wrapper above).
+        // SAFETY: the patch site's and its context's bytes are checked inside, before anything is written.
+        unsafe { kh1_support::install_second_chance(base) };
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
     }
