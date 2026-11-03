@@ -29,7 +29,8 @@ supersedes `recom-cardless-battle-design.md` §8 ("CBTL is the only gate").
   below.
 - **Parasite Cage (2026-11-03, not versioned yet, not seen in game):** in the same battles,
   Sora's hits never flinch it or cut its attacks (Re:CoM's own super armour), and it waits 9000
-  ticks (180 frames, about 3 s) after each attack. § Parasite Cage below.
+  ticks (180 frames, about 3 s) after each attack. Its chance faint only from Fire (not from
+  finishers). § Parasite Cage below.
 
 ## Stage 1: what changes
 
@@ -229,7 +230,10 @@ shouldnt flinch when you attack, let it go through with its attacks, give it abo
 between each attack"**. At Combat = KH1 in Sora's story (the battle decision of P1); Combat =
 Re:CoM and Riku's story unchanged. Code: `crate::battle::cage` (rules, tests), `win/battle.rs`
 (`cage_armour_on` / `cage_armour_off`, `attack_end`, `install_cage`), the enemy-hit wrapper
-`win::attack::enemy_hit`; sites `CAGE_CHECKED`, `CAGE_PTRS`. No new hook.
+`win::attack::enemy_hit`; sites `CAGE_CHECKED`, `CAGE_PTRS`. Owner (2026-11-03, on 0.95.0, "Parasite
+Cage faint / card"): **its chance faint only from Fire at Combat = KH1, not from Sora's
+finishers**: its hit callback's vtable slot (`cage_hit_callback`, `cage::callback`; sites
+`CAGE_FAINT_CHECKED`, `CAGE_FAINT_SLOT`); § "Faint only from Fire" below.
 
 ### Re:CoM's Parasite Cage (Checked (decomp + exe) unless tagged)
 
@@ -260,6 +264,21 @@ Re:CoM and Riku's story unchanged. Code: `crate::battle::cage` (rules, tests), `
   picker only plays the voice). In the faint (`+0xCD4 & 4`, bit 19) each hit knocks out prizes
   (kind 0xD2, `MDSBNM` + `rand % (MDSBNMR + 1)`, `BDSBNM…` for kind 2). Its parameter file is not
   in this session: the chances and counts are not known.
+- **What the faint test reads** (Checked (exe + disasm + decomp)): the hit body
+  `*(cage+0xF8)+0x50` (the hurt body Re:CoM's handler gathered; `mov rbp,[rax+0x50]` at
+  `0x1403C4091`), the faint bit `test byte [rcx+0xCD4],4` (`0x1403C4080`), then two independent
+  tests in order: `cmp [rbp+0x84],2` (`0x1403C42B4`, the attribute: Fire → `FireFaint` roll) and
+  `cmp [rbp+0x80],2` (`0x1403C432C`, the Re:CoM hit kind: kind 2 → `AtkFaint` roll). Each roll
+  is `rand % 100 <= chance` → state 17 via `0x14017D1F0` and bit 4 cleared, bit 21 set. Nothing
+  else runs outside the faint: no card flag or reaction is read. A Fire kind-2 hit rolls both.
+  Kind 2 is every KH1 combo finisher (`attack::recom_kind`: KH1 kind 5 → 2). Callers of slot
+  `+0x3E0`: the hit handler `0x14017F7E0` (before the picker) and Re:CoM's stop exe
+  `0x1401843A0` (a held hit landing); the only data ref to `0x1403C4060` is the cage's slot
+  `0x140669600`.
+- **Our KH1 Fire before this change** (Checked (code + decomp)): its shots carry Re:CoM's Fire
+  attribute 2 (`win::magic` `RECOM_ATTR`), but at Damage = KH1 `spell_hit` writes the body's
+  attribute as `0xFF` for the handler's call (Re:CoM's resistance not stacked on KH1's), so the
+  callback never saw Fire: our KH1 Fire could not make it faint at Damage = KH1.
 - **Its pacing**: all four attack states end with `0x14017E540(cage, 0, 6000)` (`0x1403C490D`,
   `0x1403C49EE`, `0x1403C5149`, `0x1403C523D`; the only four calls in its code), which writes 250
   over the 6000 (`0x14017E5F5`). Its update is Re:CoM's `0x140185320` (vtable `+0x80`), which
@@ -281,8 +300,7 @@ Re:CoM and Riku's story unchanged. Code: `crate::battle::cage` (rules, tests), `
   its think stays off until the attack end, bit `0x10`). Every hit counts: swings, spells, shots
   Sora's Guard turned back.
 - **Kept Re:CoM's**: Stop (kinds 8 / 0x17), stun (7), Gravity's flatten (0xD), freeze (0x11), the
-  other status kinds, the defeat, its faint (it writes state 17 itself; owner question below),
-  the card break (message 3 → state 13), message 6 (the used gimmick card lets Sora go).
+  other status kinds, the defeat, its faint from Fire (it writes state 17 itself), the card break (message 3 → state 13), message 6 (the used gimmick card lets Sora go).
   Bit 21 the faint sets is cleared again after the call: in state 17 the picker takes its bit-19
   path and never reads it, and its state 1 begin clears it anyway (`0x1403C2E4B`).
 - **Guard**: a call in which Sora's Guard blocked the cage this frame takes no armour
@@ -296,12 +314,34 @@ Re:CoM and Riku's story unchanged. Code: `crate::battle::cage` (rules, tests), `
   it turns) and the think's roll (unknown above 30 % HP, its `@ENP` rate; none below 30 % while
   Sora attacks). A faint or a card-break stagger ends through Re:CoM's default state (250), not an
   attack end: the wait follows attacks only.
+- **Faint only from Fire** (owner, 2026-11-03, on 0.95.0): the cage's vtable slot `+0x3E0`
+  (`0x140669600`, old pointer `0x1403C4060` checked; the callback's first 17 bytes `4C 8B DC 55 57
+  48 81 EC A8 00 00 00 41 0F 29 73 D8` and its three reads checked from the Steam exe; no code
+  bytes move) holds `win::battle::cage_hit_callback`, which calls Re:CoM's. In a KH1 battle,
+  outside its faint (`+0xCD4 & 4` clear), by `cage::callback`:
+  - attribute 2 (any Fire Re:CoM put on the body): Re:CoM's callback as is (both rolls if kind 2);
+  - attribute `0xFF` and the body's attacker (`+0x98`) one of our KH1 Fire shots
+    (`magic::shot_spell`, the last 32 shot ids): the attribute reads 2 for the callback's call and
+    `0xFF` again after: Re:CoM's `FireFaint` chance (Re:CoM's resistance still not stacked);
+  - kind 2, not Fire: the callback is not called. Outside the faint its only work for that hit
+    is the `AtkFaint` roll, so this is the same as the body presenting kind 1 for the call (no
+    roll, no state, no flag; the handler's own reads of the kind, the picker included, are
+    untouched);
+  - anything else: Re:CoM's callback (it rolls nothing).
+  In its faint (prizes, `BDSBNM` for kind 2) and at Combat = Re:CoM: Re:CoM's as is. The rule
+  takes every hit source (swings, sleights, party, shots Guard turned back), not only Sora's
+  swings: the owner's "only from Fire".
 - **Logs** (once per battle): `m6: Parasite Cage (battle n): Sora's hits land on Re:CoM's super
   armour …` at its first landed hit; `m6: Parasite Cage (battle n): waits 9000 ticks (180 frames,
-  about 3 s) …` at its first attack end. At start `m6: Parasite Cage (CBossParasiteCage
+  about 3 s) …` at its first attack end; `… a finisher-type hit (kind 2, not Fire) takes no faint
+  roll …` at the first one skipped; `… our KH1 Fire's hit rolls Re:CoM's FireFaint …` at the first
+  KH1 Fire hit outside its faint. At start `m6: Parasite Cage hit callback 0x1403C4060 wrapped …`
+  (or `… not as read: its faint stays Re:CoM's`), and `m6: Parasite Cage (CBossParasiteCage
   0x140669220) checked: …` (or `not as read`: it stays Re:CoM's).
-- **Per frame**: no new hook; per call of the existing enemy-hit wrapper, one atomic load (two
-  in a KH1 battle) and one vtable read.
+- **Per frame**: no new code hook; per call of the existing enemy-hit wrapper, one atomic load (two
+  in a KH1 battle) and one vtable read. The callback wrapper runs only on hits that land on the
+  cage: one atomic load at Combat = Re:CoM, a few reads in a KH1 battle (a lock only for an
+  `0xFF` attribute).
 
 ### Gimmick-card triggers (`recom-gimmick-cards.md`)
 
@@ -315,6 +355,8 @@ Re:CoM and Riku's story unchanged. Code: `crate::battle::cage` (rules, tests), `
 
 ### Not checked / Assumptions
 
+- Assumption: a KH1 Fire hit held by Re:CoM's stop and landed later by its stop exe still finds
+  its shot id among our last 32 (else it rolls nothing, as before this change). Not traced.
 - Nothing seen in game. The faint chances (`FireFaint`, `AtkFaint`) and the think rate are in its
   parameter file, not in this session.
 - KH1's own Parasite Cage (reference): its script `pi_3000.bd` (and `pi_3000_00.bd`) is in the
@@ -334,8 +376,12 @@ Re:CoM and Riku's story unchanged. Code: `crate::battle::cage` (rules, tests), `
 3. Stop, Gravity and stun still take it; it can be beaten; a used gimmick card still lets Sora go.
 4. Its card: at 50 % HP it drops it; blocking its attack with Guard staggers it (state 13) and rolls
    it; a finisher as the first hit landing in an attack breaks it.
-5. A finisher or Fire may still make it faint (Re:CoM's own chance): note how often.
-6. Combat = Re:CoM: as before (cards; 250 between attacks; no `Parasite Cage` lines in battle).
+5. Its faint only from Fire: many combos with finishers, no Fire: it never faints. Log: the `a
+   finisher-type hit (kind 2, not Fire) takes no faint roll` line once. Then Fire (the KH1 spell)
+   on it repeatedly: it may faint (Re:CoM's own chance, note how often); log: the `our KH1 Fire's
+   hit rolls Re:CoM's FireFaint` line once. In its faint, hits still knock out prizes.
+6. Combat = Re:CoM: as before (cards; 250 between attacks; finishers and Fire may make it faint;
+   no `Parasite Cage` lines in battle).
 
 ## Logs and trace
 
