@@ -4338,6 +4338,194 @@ melee's frames (215 from 8, the hit 82..100) and the Blizzard's frame (55 + 84),
    (0x100) ends it at a hit, a wall or the range together, so a wall ends it (as every ported shot). (a) Keep; (b) research a
    Re:CoM bullet setting that keeps the hit end without the wall end.
 
+### The Yellow Opera (built)
+
+Status: built on branch `yellow-wip`; tests and the Windows build pass; **not seen in game**; no KH1 trace of the Yellow
+Opera yet. KH1's AI, attacks, reactions and motions on Re:CoM's `CEnemyYellowopera`, with Re:CoM's stats. The third of the
+casting family: the shared routines `kh1_core::caster` (idle leg, fly-to, the stuck test) are reused, and its spell child's
+wait is the family's new `caster::Strike`; its rounds, repositions, charge, flee and hit handler are its own
+(`kh1_core::yellowopera`).
+
+#### KH1's side. Checked (files: `ex_2130.bd` disassembled, code from `0x308`, folded and raw; its child `ex_2130_00.bd`, code from `0x18`; decomp: the syscalls named)
+
+The script (0x2100 bytes) keeps the actor at `wp+4`, the state object at `wp+0x20`, the search object at `wp+0x30`, the
+rush's mark at `wp+0` (0 at the rush's start, 1 from the hit handler, 2 from the rush rows' hit callback), "seen" at
+`wp+0x38`. Every motion is a plain request except its appearance (69). It never calls `sys 125` (KH1's π/16 a frame).
+
+| Routine | Offset | What |
+|---|---|---|
+| entry | `0x1F3C` | init `0x1FBC` → `0xDBA` (records LV1 `0x14` / LV2 `0x80`; stats `+0x14` = 0.2, `+0x18` = 0.95; flight with no velocity `sys 135`; state / search objects; home; seen cleared); handlers hit `0x2000`, message `0x20BC` (answers 0), filter `0x1FE0` (a Thunder hit's effect 13: element); a yield; the idle start `0xA26`; each frame the idle search `0xB78` (state 1: Sora within 1000 → engaged) and the state requests (1 idle `0xA02`, target cleared; 2 engaged `0x34A`; 3 hit `0x308`, the hitter or Sora) |
+| idle start | `0xA36` | spawn type ≠ 0: the appearance `0xFBA` (fade-in 30 frames, flag 0x80 / 30, effect 2, **69 as an action with 219 queued at blend 8**, then facing Sora at once); state 1 |
+| idle | `0xA1A` → `0xA64` | the family's idle leg (the Red Nocturne's `0x93E` with its turn step `0x9FA` = here `0xB20`, the same bytes up to their relative calls): 219, 5° a frame at 8, facing yaw 0, sinking 0.3 (rising below 150 over the floor), [150, 180) frames |
+| engaged | `0x36E` | the first time: seen, and for spawn type 0 the notice `0xE40` (214, not in world 11); a yield; the leash (not ported); by the distance (`0x16CE`, 3D): < 250 `0x438`, < 500 `0x432` → `0x438` (the same round), else `0x408`; the search `0xD80` (Sora); engaged again |
+| near round | `0x438` | a reposition `0x8D6`; then 50 %: the charge `0x508`, else another reposition |
+| far round | `0x408` | 60 %: the Thunder `0x466`; then two repositions |
+| point | `0x934(a, vert)` | a point [a, a + 100) from the target in a random direction (`0x18C6`), 50 above the target's place; then `vert` farther **on the far side of that height** from the Yellow Opera's (below it when the Yellow Opera is level or higher, else above it): the up-and-down darting |
+| reposition | `0x8D6` | `0x934(200, 150)`; `0xBE2(220, point, 15, 10, 0, 500, 30)` (the family's fly-to, the Red Nocturne's `0xABC`, the same bytes); turning to the target (`sys 36`); `0x9E2(25)`: 220 (`sys 12`, blend 8) and 25 frames |
+| Thunder | `0x466` | **the child** `sys 94(actor, 0, target, 0x23C, 0)`; `sys 13(205, blend 8, from frame 8)`; `sys 14(206, 0, from 2)`, `sys 14(207, 0, from 3)` (KH1's request list holds both: `0x14029FA30` appends; `sys 14`'s fourth word is the entry's start, `0x1402B9FB0`); `0x1668` (until `sys 172` with nothing queued, or request 6 plays, turning to the target); `sys 13(220, 8, 8)` |
+| charge | `0x508` | a hit serial (`sys 22`); `sys 13(208, 8, 8)`; `0x1668`; `sys 12(209, 0)`; the rows `0xEC` / `0x15C` (`sys 23`, `sys 213(row, 2)`, hit callback `+0x38` = `0x79A`: `wp+0` = 2); `wp+0` = 0; the target's place then (fixed); up to 150 frames while `wp+0` = 0: toward that place (`sys 36`), done within 30 flat (`+0x2C` = 0); its height followed (with the place below it and more than 500 over the floor: straight down); normalised, 25 a frame, `sys 12(209)`; stuck (`0x10E0(12.5)`): done. Then unless `wp+0` = 1: `sys 13(210, 0, 2)`, `0x1C58` (a yield, then until `sys 172`), `sys 13(220, 8, 8)` |
+| hit state | `0x32C` | the flee `0x7AA`: three legs `0x934(200, 250)` (the last 50 higher), `0xBE2(220, point, 40, 10, 0, 500, 20)` each, a yield between; then to 100 above the floor under it (`0x1760`: `sys 77` from 20 above) at 40 (stop 30, 20 frames) when that floor is above world y −400; **the Thunder** (whatever the distance); the leash; engaged |
+| hit handler | `0x2000` | seen; attribute 8: `sys 194(EXP / 10 + 2)` (`0xF58`); attribute 4 (Thunder, `0xEEE`): no damage, HP to max, kind 0, done; `wp+0` = 1; the damage `0x192A` (clash kinds 6 / 7 or a repel: −1; killed 0 → its death `0x15EE`; attributes 8–11 or no attacker: −1); −1: state 3 only for a clash or attributes 8 / 10 (`0x158C`); alive: state 3. No dizzy (`sys 179` never called) |
+
+**Its child** (`ex_2130_00.bd`, entry `0x22A`; Checked (files)): its first frame keeps the target's place; the charge effect
+2056 on the parent; while the parent plays 205 it yields; the parent must then play 206 (else it ends); effect 9; while 206
+it yields; the parent must then play 207 (else it ends; effect 9 removed); effect 2058; **80 frames** (`0x4C2`, counted
+by the step, no motion test while it counts); the parent must still play 207 (else it ends); **the mark**: the target's
+place again (`sys 120`: while it is there), on the floor under it (`0x18`: `sys 77` straight down), KH1's cloud effect 14
+200 above it; **30 frames** (no test of the parent at all from here); effect 11 (the bolt) at the mark; the row `0x23C`
+made on the parent free-standing at the mark (`sys 23`, flag 64); an area `(type 2, radius 50, half-height 128, centre 128
+above the mark)`; for each opponent (`sys 65`): `sys 90` (`0x1402B6AF0` → `0x1402B5EF0`: type 2 against its hurt shapes,
+|Δy| < the two half-heights and the flat distance < the two radii) → `sys 60` (`0x1402BF330` → `0x1402BF630`: the row's
+hit applied, its `+0x38` callback; Checked (decomp)) and effect 12 at it. **No clash pass** runs for this row (it is never
+switched on, `sys 213`): neither a swing nor Sora's Guard (a type-2 row of the clash pass, `0x1402B4BC0`) meets it, and
+the record maker tests no guard (Checked (decomp)). Nothing tests the parent's HP; after the mark nothing tests the parent.
+
+Rows (Checked (files)): `0xEC` type 0, priority 30, recoil 211, bone code 0 (`head1`), radius 60, HIT slot 0; `0x15C` type
+2 (never hurts: the shared "rows that only clash"), priority 30, recoil 211, radius 90; `0x23C` (the Thunder) bone −1,
+radius 0, type 6, priority 0, recoil 110. 209's HIT track: its whole 40-frame looping clip. KH1's reactions play for every
+hit: flinch 72..75, knock-back 76 / 77, air flinch 78 / 79, air knock-back 80 / 81 (a flier: the ground forms, kind 5 as 4).
+
+#### Re:CoM's side. Checked (exe + decomp)
+
+`CEnemyYellowopera` (vtable `0x1405570C8`, 139 slots, RTTI COL at −8), ctor `0x1401968B0` (`40 53 48 83 EC 20`: `CHeartless`'s
+base ctor `0x140196DF0`, then `+0x154 |= 0x80`, `+0x260 |= 0x100`: gravity off; its only reference the factory's call at
+`0x14018906E`; no branch into the moved bytes, no pointer to them: exe scan, 2026-11-03), allocation `0x140189055` `mov ecx,
+0xCD0` → 0xCF0. Its own states: 1 (`0x140196A20` → `0x1401979F0` with `e003_001` / `e003_002`; step `0x140196DE0` →
+`0x140197450`; end `0x140196A70` → `0x1401979C0`), 2 (its Thunder `e005_052`: begin `0x140196980`, step `0x140196A80`: past
+clip time 0xD15 (67 frames) one `CBullet` (`0x140156790(desc, 1, 3)`) **4 m above Sora's place** (`0x1401F0AB0`), pitched
+straight down (π/2), 5 m a frame, radius 0.25, reaction kind 0x1C (Re:CoM's damage check `0x1401E6DE0` takes 0x1C as its
+flinch, kind 1), `0x14017F0E0(enemy, 0, 1)`'s AP, `0x14017F050(enemy, 0)`'s attribute, effect set `0x140557560` (slots 0 / 1
+`"_ex_2130"` 11 / 12: the same numbers as KH1's child's bolt and hit effects)), 3 (its rush: `e005_053`, `e005_054` for
+`RushAtkTime` at `RushSpeed` toward Sora (its `.ASD`'s one record: attack id 1, the root bone `ex_2110_sk`, r 0.57), `e005_055`;
+begin `0x1401969D0`, step `0x140196C10`); 0 / 11 / 12 / 30 `CBattleEnemy`'s; think `0x140196EC0`. `EN0005.ANN`: 79 slots (no
+KH1 request has an exact Re:CoM bake). **Re:CoM has no `EN0005.SES`**: the exe's resource names for enemy 5
+(`0x1405DF18B..`) list `.RTM`, `.MDL`, `.ANN`, `.EPD`, `.EET`, `.ASD`, `.SND` and no `.SES` (enemy 4's list one; Checked
+(exe)); the session's extraction has none either.
+
+Our copy: states 0, 1, 3, 11, 12, 30 and the think (20 vtable slots pointer-checked, `sites::YELLOWOPERA_PTRS`); the charge
+plays in state 3; state 2 is never entered. The attack-end cooldown (0.83.0) is keyed to Re:CoM's own vtable: `enemy_ai =
+recom` leaves Re:CoM's Yellow Opera as Re:CoM has it.
+
+**Power mapping** (decision M10, "each KH1 attack takes the power of the Re:CoM attack of the same kind; its spells its own
+Re:CoM shot"): the charge (both rows) → Re:CoM's rush, id 1 (its only `.ASD` record, the template); the Thunder → Re:CoM's
+Thunder, id 0 kind 1 (`0x14017F0E0(enemy, 0, 1)`, as its state 2 asks). The two are the same moves in both games.
+
+#### What the port does
+
+- **Flight and darting**: KH1's flight (state 4) as every flier; the reposition and flee points are KH1's (`0x934`), so it
+  darts up and down around Sora's head height; points under the floor (KH1 aims there often) end at the floor (KH1's
+  background; Re:CoM's mover: Assumption).
+- **The charge**: 208 from frame 8 to its end, then KH1's 209 as a steered attack in Re:CoM's state 3 (its rows two new
+  `.ASD` records on 209's clip, the whole clip; Re:CoM's id 1 power; the body row never hurts Sora but clashes with his
+  swings), steered by the script toward where Sora stood, up to 150 frames at 25 a frame; **it stops when it lands**
+  (Re:CoM's apply answering 1: the rows' callback, `Behaviour::on_landed`), when it arrives or is stuck; then 210 from
+  frame 2 and 220. Guarding it: KH1's recoil 211 (the model has it).
+- **The Thunder's wait** (`caster::Strike`, stepped once a frame in `frame` / `side_frame` / `dead_frame` with the motion
+  the host plays): 205 from frame 8, 206 queued from frame 2 and, once 206 plays, 207 queued from frame 3 (new
+  `Cmd::QueueAt`: the host has one queued slot, KH1 a list); the mark on 207's 81st frame at Sora's place then on the battle
+  floor (a log note: KH1's cloud effect waits for M13); the strike 30 frames later at the mark (new `Cmd::Strike`), even if
+  a reaction or its death came in between (KH1).
+- **The strike: the nearest native equivalent** (owner rule: "research how KH1 places it"). Re:CoM's own Yellow Opera
+  Thunder is already a strike from above at Sora's place (a bolt bullet whose swept sphere passes down through him in one
+  frame), only placed differently (4 m above where he is at its 67th frame, radius 0.25). Built (`win::kh1_thrown::strike`):
+  that same bolt (Re:CoM's kind 0x1C, power, attribute and effect set; one of Re:CoM's `CHomingBullet`s as every port's,
+  pitched straight down), made at KH1's strike frame at **the top of KH1's cylinder above KH1's mark** (256 above the
+  floor), with **KH1's radius 50**, swept to 2 cm over the floor in its first frame (`bolt_exe`: its velocity; Re:CoM's
+  step moves it and collides it; its mover radius 1 cm so the floor can't end it first), its attack off and its life over
+  the next frame. So the volume Re:CoM's collision tests covers KH1's whole cylinder (radius 50, floor to 256), plus the
+  sweep's rounded top 50 higher. Re:CoM's collision pass hits Sora with it (one hit: its serial).
+- **Guard and swings: KH1's way.** KH1's Thunder never meets a guard or a swing (no clash pass, above): the pair test
+  (`win::attack::pair_dispatch`) turns Sora's body guard off for Re:CoM's apply of this attack only and puts it back
+  (`kh1_thrown::unguarded`); the bolt is not one of the thrown objects swings test. So a guarding Sora is struck (and takes
+  Re:CoM's kind 0x1C flinch); a swing passes through it.
+- **Re:CoM's Stop, stun, freeze, flatten** (decision M10; owner 2026-11-03: Re:CoM's Stop keeps cancelling a caster's
+  spell): before the mark Re:CoM's state replaces the cast motion and the Thunder ends (KH1's own rule); a Thunder already
+  marked ends too when Re:CoM hands back (new `Behaviour::on_recom_state`, called by the host's take-over; owner question 1).
+- Its own spell can't be sent back (no swing or Guard meets it), so KH1 has no dizzy for it, and none is built.
+- Per frame: one atomic load in the pair test while no bolt lives; two exe frames per bolt.
+
+#### What the asset step writes
+
+`ENEMY/0005/EN0005.ANN` (Re:CoM's 79 slots byte-identical; KH1's clips at 100 + entry), `EN0005.ASD` (Re:CoM's record kept;
+the charge's two records added: 3), **no `.SES`** (`enemy::NO_SES`: Re:CoM has none and never loads one), and
+`kh1-yellowopera.json` (`kh1-enemy 1`: 70 numbers from `ex_2130.bd` (and the stats block's two speeds), 6 from the child, 26 +
+14 request words checked, the strike row's Re:CoM power (`enemy::STRIKES`), the charge's rows / clash numbers / recoil 211,
+1 hurt part). Request 0x66 (KH1's status motion on entry 7 without root motion) gets no clip (`enemy::SKIPPED`). Test
+`yellowopera::tests::builds_from_the_players_files` (the session's files: run). In `mod.yml`:
+
+```yaml
+- {name: ENEMY/0005/EN0005.ANN, method: copy, source: [{name: ENEMY/0005/EN0005.ANN}]}
+- {name: ENEMY/0005/EN0005.ASD, method: copy, source: [{name: ENEMY/0005/EN0005.ASD}]}
+- {name: kh1-yellowopera.json, method: copy, source: [{name: kh1-yellowopera.json}]}
+```
+
+The step prints `yellowopera (M11): …`; the log shows `battle N: Yellow Opera … gets KH1's AI` in a battle, `attack 209
+(charge), steered`, `note: the Thunder's mark: …`, `strike 0 at (…)`, and `thrown: yellowopera eNNN: Thunder … at KH1's
+mark …` / `thunder N (eNNN): its frame is over …` per bolt; the F9 trace's `thunder` tokens.
+
+#### Checked / Assumption
+
+- **Checked (files):** every number at its push (the asset test reads them: 70 + 6), the 26 + 14 request words, the three
+  rows (types, priorities, radii, recoils), the clip lengths (205 104, 206 70, 207 164, 208 126, 209 40 looping, 210 54, 211
+  80, 69 90, 214 158), the HIT window (209: 0..40), the hurt part, Re:CoM's ANN (79) / ASD (1 record); the idle leg, turn
+  step, fly-to and stuck test equal to the Red Nocturne's.
+- **Checked (decomp):** `sys 14`'s start word (`0x1402B9FB0` → `0x14029FA30`, KH1's request list), `sys 60` / `sys 65` /
+  `sys 90` (`0x1402BF330`, `0x140291AB0`, `0x1402B6AF0` → `0x1402B5EF0` type 2), the record maker without a guard test
+  (`0x1402BF630`), the rows' hit callback (`0x1402BF330`'s `+0x38` call), Re:CoM's states 2 / 3, the descriptor init
+  `0x140156790`, kind 0x1C in Re:CoM's damage check.
+- **Checked (exe):** the class, 139 slots, the ctor and its only call, the factory size, 20 vtable slots, the effect set's
+  two names, no `EN0005.SES` resource name; 24 new sites match (pefile).
+- **Assumptions:** the child's first frame is the frame after `sys 94` (as the family's); ±1 frame for the queued starts
+  and the bolt's first collision (made in the Yellow Opera's update; when Re:CoM first collides a new bullet); flat battle
+  floors (the mark on the floor under Sora; the drop's world height as a height above the battle floor, owner 2026-11-02);
+  Re:CoM's mover keeps it on the floor when KH1 aims below it; Sora's own KH1 hit handling doesn't turn the Thunder's record
+  into a block (only the clash pass was read); Sora's place (his position) for KH1's target `+0x10`; Re:CoM's sounds (none:
+  no `.SES`); seeds per enemy.
+- **Not ported:** the leash, the notice for placed ones (battle spawns appear), the search object, the element rules (a
+  Thunder hit's full heal, attribute-8 EXP bonus: attributes are not carried, owner), effects (the appearance's effect 2 and
+  flag 0x80, the child's 2056 / 9 / 2058, the cloud 14, the bolt 11 and hit 12: M13), the death routine (Re:CoM's defeat,
+  prizes, EXP).
+
+#### Owner test list (Combat = KH1, Sora's story, `enemy_ai = kh1`; a Yellow Opera battle (Traverse Town's or Wonderland's); run the asset step first)
+
+1. Each Yellow Opera rises into view (about 1½ s), then floats in small circles bobbing up and down, facing one fixed
+   direction (as KH1).
+2. Come within 10 m: it starts darting about you: quick hops through the air (half a second each) to a spot 2–3 m from
+   you, alternately above and below your head height, each followed by a short pause facing you.
+3. Farther than 5 m: often (6 times in 10) it casts Thunder: about 1½ s of charging, a pose, then a second pose; about 1⅓ s
+   into that pose it picks the spot where you stand; half a second later a bolt strikes that spot (move away in that
+   half second to dodge it). **Guarding doesn't block it** (KH1); swinging at it does nothing.
+4. Closer than 5 m: after one dart, half the time it charges: a 2 s wind-up, then it rams toward where you stood (up to 2½ s,
+   fast) and stops as soon as it hits you; then a short recovery. Guard it: it recoils.
+5. Hit it: it darts away three times quickly, drops to about 1 m above the floor, then casts Thunder.
+6. Hit it while it charges a Thunder (before the spot is picked): no bolt. Hit it after the spot is picked: the bolt still
+   comes. Stop it (Re:CoM's Stop) during a Thunder: no bolt.
+7. Kill one: KH1's reaction motion, Re:CoM's prizes and EXP.
+8. `enemy_ai = recom`, Combat = Re:CoM, Riku's story: Re:CoM's Yellow Operas (their own bolt from 4 m above you, their
+   own rush).
+
+Please send `kh1-recom.log` (`yellowopera:`, `thrown:` lines) and an F9 trace (its `thunder` tokens).
+
+#### KH1 trace (what to record in KH1)
+
+Traverse Town or Wonderland: stand far (8 m) 15 s, then at 3 m 15 s; dodge three Thunders by stepping away after the spot
+is picked; stand in one Thunder; Guard one Thunder; Guard a charge; let a charge hit you; hit one while it charges a
+Thunder (early and late in its second pose); hit one (its flee and Thunder); kill one. The trace's enemy rows give the
+rounds, the darting points' heights, the Thunder's frames (205 from 8, 206 from 2, 207 from 3, the mark at 207 + 80, the
+strike 30 later), the strike's place against Sora's, and the charge's frames and path to compare.
+
+#### Yellow Opera owner questions
+
+1. **Re:CoM's Stop after the Thunder's mark.** In KH1, once the spot is picked nothing stops the bolt (the child no longer
+   looks at its caster). Here Re:CoM's own Stop / stun / freeze holds the caster in Re:CoM's state, during which none of
+   our code runs for it. Built: (a) the marked bolt is cancelled too (as your rule for casts: Re:CoM's Stop cancels a
+   caster's spell). Other choices: (b) the bolt still strikes on time while Re:CoM holds the caster (KH1's timing; needs one
+   more small hook so the waiting bolt is counted during Re:CoM's states); (c) the bolt strikes when the caster comes out
+   of Re:CoM's state (late; not KH1).
+2. **The warning before the bolt.** KH1 shows a small cloud over the picked spot for the half second before the bolt
+   (effect 14). Effects wait for M13 (your rule), so the spot is not shown yet: the bolt simply strikes. (a) Keep it for
+   M13; (b) show one of Re:CoM's own effects at the spot now as a stand-in (which one: research first).
+
 ## The other 29, by family
 
 States: those the Re:CoM class overrides (besides `CBattleEnemy`'s). Hits: KH1 requests with a HIT track.
@@ -4352,7 +4540,7 @@ files); the family is from the scripts' syscalls and the models' motions (Assump
 | Large Body (built) | `xa_ex_2050` (ex_2050.bd) | `CEnemyLargebody` 9 | `0x140542ad0` | `0x14018f090` / `0x1401890fd` 0xce0 | 1,2,3 | 200,207,231 | FKL | — |
 | Red Nocturne (built) | `xa_ex_2110` (ex_2110.bd) | `CEnemyRednocturne` 3 | `0x140548a58` | `0x140191880` / `0x140189001` 0xcd0 | 1,2,3 | — | FKaA | SES |
 | Blue Rhapsody (built) | `xa_ex_2120` (ex_2120.bd) | `CEnemyBluerhapsody` 4 | `0x140537ca8` | `0x14018c120` / `0x14018902b` 0xcd0 | 1,2,3 | 215 | FKaA | — |
-| Yellow Opera | `xa_ex_2130` (ex_2130.bd) | `CEnemyYellowopera` 5 | `0x1405570c8` | `0x1401968b0` / `0x140189055` 0xcd0 | 1,2,3 | 209 | FKaA | SES |
+| Yellow Opera (built) | `xa_ex_2130` (ex_2130.bd) | `CEnemyYellowopera` 5 | `0x1405570c8` | `0x1401968b0` / `0x140189055` 0xcd0 | 1,2,3 | 209 | FKaA | SES |
 | Green Requiem | `xa_ex_2140` (ex_2140.bd) | `CEnemyGreenrequiem` 6 | `0x1405404c8` | `0x14018e570` / `0x14018907f` 0xce0 | 1,2 | — | FKaA | SES |
 | Powerwild | `xa_ex_2030` (ex_2030.bd) | `CEnemyPowerwild` 7 | `0x140547798` | `0x140191380` / `0x1401890a9` 0xcd0 | 1,2,3 | 212,214,222 | FaLl | — |
 | Bouncywild (built) | `xa_ex_2040` (ex_2040.bd) | `CEnemyBouncywild` 8 | `0x140538fb8` | `0x14018c4d0` / `0x1401890d3` 0xcd0 | 1,2,3 | — | FaLl | — |
@@ -4399,7 +4587,7 @@ others. Re:CoM `.ANN` slots: 73–95 (all under the step's slot 100). Checked (f
    Red Nocturne, Blue Rhapsody, Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
    Bouncywild (bananas and peels; built: § The Bouncywild), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs, flame + shield; built: § The Defender), Search Ghost (its
 
-   Red Nocturne (built: § The Red Nocturne; the family's shared routines `kh1_core::caster`), Blue Rhapsody (built: § The Blue Rhapsody), Yellow Opera, Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
+   Red Nocturne (built: § The Red Nocturne; the family's shared routines `kh1_core::caster`), Blue Rhapsody (built: § The Blue Rhapsody), Yellow Opera (built: § The Yellow Opera), Green Requiem (the four also fly), Wizard (Re:CoM state 4 too),
    Bouncywild (bananas), Fat Bandit (fire breath + belly; built: § The Fat Bandit), Defender (fireballs, flame + shield; built: § The Defender), Search Ghost (its
    drain). Needs: the child object's script → Re:CoM's own bullets (checklist step 9), Green Requiem's
    support spell (Re:CoM overrides no state 3 for it; KH1's: a barrier / heal on its allies, Assumption).
