@@ -558,7 +558,7 @@ own rule); Combat = Re:CoM and Riku's story unchanged.
 | **The start**: Re:CoM's own sleight start, the summons' path (`win::summons::begin`, shared): Sora's vtable `+0x130` checked to be `0x1402247A0`, a live swing's volume ended (`0x140224FB0`), `player+0x82C` = the id, the start called, action `0x16` checked after. `0x1402247A0`'s case list holds every one of the 27 (0x1B..0x33, 0x3A, 0x43): use counter `0x14020E590`, `initStockSkill` `0x140220DF0` (per id: its attack row `+0x638`, resource load `0x140211790`, AP from `StockSkillList` × attack stat), `+0x838` = 10. Re:CoM then runs `exeStockSkill` `0x140218950`: motion, effects, hits, damage, end. No new hook or site: the callees are `sites::SUMMON_CHECKED`'s. | `win::summons::start_sleight` | Checked (decomp + exe: existing checked sites) |
 | **MP**: paid at once in whole points after Re:CoM's start took it (KH1's `0x1402A5B60` with cost ≥ 100, as the summons): the tier's points, or all of Sora's whole MP (the charge stays). The sleight's hits give no MP charge (KH1's charge comes from KH1's hits, `mp::on_kh1_hit`; Re:CoM's sleight hits aren't KH1 rows), as the summons'. | `sleights::pay_points` | Checked (code); that KH1 would charge nothing here: **Assumption** (no KH1 twin) |
 | **Invincibility**: none of ours (unlike the summons, owner's earlier ask for them only). Re:CoM's `exeStockSkill` sets its own protection bits in `player+0x418` where its sleight has them (e.g. `|= 0x1001` in one sub-state, cleared at its end); the damage-check wrapper's summon rule (`summons::out`) is not armed for these. | `0x140218950` | Checked (decomp) |
-| **Damage**: Re:CoM's own at both Damage settings: `initStockSkill`'s AP (power × attack stat `+0x43C` ÷ 100 or the row's mode) through Re:CoM's hit path, as Sonic Blade's at Damage = Re:CoM. These 27 have no KH1 twin, so Damage = KH1 has no KH1 number for them (as the summons). | | Checked (decomp `0x140220DF0`) |
+| **Damage**: Re:CoM's own: `initStockSkill`'s AP (power × attack stat `+0x43C` ÷ 100 or the row's mode) through Re:CoM's hit path, as Sonic Blade's at Damage = Re:CoM. These 27 have no KH1 twin; at Damage = KH1 scaled by the enemy's KH1 / Re:CoM max HP since the follow-ups (§ 8.5.2). | | Checked (decomp `0x140220DF0`) |
 | **Preload**: Re:CoM's sleight resource load `0x140211790(player+0x3B8, id, 0)` when the Sleights list's cursor lands on an entry, or on the list's first entry while the root's cursor rests on the Sleights row (battle only; once per landing), as the summons' preload and as Re:CoM loads a formed sleight (`0x1401669F0`). | `win::summons::preload_sleight` | Checked (decomp); that a first use never starts before its pack is in: **Assumption** (as Sonic Blade's) |
 | **No deck needed** (the brief's check): the start and `initStockSkill` read only `+0x82C`, `StockSkillList` and the attack stat (§ 6). Synchro's effect is an enemy reaction, kind 0x13 in `0x14017DC50`: every enemy whose "Synchro" parameter is set takes the hit enemy's HP (`+0x274`); no card read. Warp, Warpinator, Teleport, Bind, Confuse, Terror: their rows' reaction kinds go through the same enemy handler; their branches were not read one by one. | `0x14017DC50` | Checked (decomp) for Synchro; **Assumption** for the others' details |
 | **Words for KH1's look**: the asset step writes "Sleights" (902) and the 27 names (`command_menu::SLEIGHT_WORDS`) in KH1's menu font; a DLL test checks both lists match. Re:CoM's look draws them from the built-in text without the asset step. KH1's look with an older `kh1-hud.json`: the rows have no word (logged once). | `kh1-recom-assets` `command_menu` | Checked (tests) |
@@ -571,6 +571,31 @@ Re:CoM differences found: Re:CoM has air versions of some sleights (`initStockSk
 `0x1401F3C00`, Sora airborne, for 0x24 Homing Blizzara, 0x2B..0x2F Warpinator, Warp, Bind, Confuse,
 Terror, 0x32 Teleport, and the -ra / -ga tiers), so Re:CoM lets those start in the air. Built since
 (owner, "Sleights menu follow-ups"): § 8.5.1.
+
+Owner test lines (step 5):
+- Combat = KH1, a save with some sleight abilities equipped (camp KH1 tab > Abilities): in the
+  field press D-pad Left on any root row: the bottom row reads "Sleights" (the cursor stays);
+  Left again: "Summon". Save, reload: the row keeps the last choice. Log:
+  `summons: bottom row -> Sleights (kept in the save at save+0x26B6)`.
+- In battle on the ground, Sleights row, Right or confirm: the list shows only the equipped ones,
+  in Re:CoM's order; one Sora can't pay is greyed and buzzes. Pick each and watch it play as in
+  Re:CoM (motion, effects, hits, end), MP going down by its tier: Fire Raid, Blizzard Raid, Thunder
+  Raid, Reflect Raid, Judgment, Firaga Burst, Raging Storm, Mega Flare, Freeze, Homing Blizzara,
+  Aqua Splash, Magnet Spiral, Lethal Frame, Shock Impact, Tornado, Quake, Warpinator, Warp, Bind,
+  Confuse, Terror, Synchro, Gifted Miracle, Teleport, Holy, Idyll Romp and Cross-slash+ (the last
+  two take all MP, usable with 1). Log: `summons: sleight <name> -> Re:CoM's sleight 0x.. … n MP`
+  and `… Re:CoM's sleight ended …`. Tell us any that freezes Sora, plays without effects on its
+  first use, or ends the battle oddly (Warp, Warpinator, Teleport).
+- While one plays, the Summon / Sleights row is greyed and locked; Sora can be hit only where
+  Re:CoM's own sleight lets him.
+- Nothing equipped: "Sleights" greyed; confirm buzzes. In the field: every entry greyed; in the
+  air: all but Re:CoM's air-start ones (§ 8.5.1).
+- KH1's look (the KH1 HUD) needs this version's asset step for the words; Re:CoM's look shows them
+  without it.
+- Combat = Re:CoM: no change.
+
+Not checked (8.5): anything in game; each sleight's branch of `exeStockSkill` one by one (Warp,
+Warpinator, Teleport and how they end a battle); the resource wait for the magic-category sleights.
 
 #### 8.5.1 Air start (owner, 2026-11-03, "Sleights menu follow-ups")
 
@@ -599,27 +624,33 @@ Owner test lines (8.5.1):
   version) …`. Tell us if Sora floats, drops oddly, or the KH1 controls don't come back on landing.
 - On the ground all equipped sleights work as before; the summons stay ground-only.
 
-Owner test lines (step 5):
-- Combat = KH1, a save with some sleight abilities equipped (camp KH1 tab > Abilities): in the
-  field press D-pad Left on any root row: the bottom row reads "Sleights" (the cursor stays);
-  Left again: "Summon". Save, reload: the row keeps the last choice. Log:
-  `summons: bottom row -> Sleights (kept in the save at save+0x26B6)`.
-- In battle on the ground, Sleights row, Right or confirm: the list shows only the equipped ones,
-  in Re:CoM's order; one Sora can't pay is greyed and buzzes. Pick each and watch it play as in
-  Re:CoM (motion, effects, hits, end), MP going down by its tier: Fire Raid, Blizzard Raid, Thunder
-  Raid, Reflect Raid, Judgment, Firaga Burst, Raging Storm, Mega Flare, Freeze, Homing Blizzara,
-  Aqua Splash, Magnet Spiral, Lethal Frame, Shock Impact, Tornado, Quake, Warpinator, Warp, Bind,
-  Confuse, Terror, Synchro, Gifted Miracle, Teleport, Holy, Idyll Romp and Cross-slash+ (the last
-  two take all MP, usable with 1). Log: `summons: sleight <name> -> Re:CoM's sleight 0x.. … n MP`
-  and `… Re:CoM's sleight ended …`. Tell us any that freezes Sora, plays without effects on its
-  first use, or ends the battle oddly (Warp, Warpinator, Teleport).
-- While one plays, the Summon / Sleights row is greyed and locked; Sora can be hit only where
-  Re:CoM's own sleight lets him.
-- Nothing equipped: "Sleights" greyed; confirm buzzes. In the field: every entry greyed; in the
-  air: all but Re:CoM's air-start ones (§ 8.5.1).
-- KH1's look (the KH1 HUD) needs this version's asset step for the words; Re:CoM's look shows them
-  without it.
-- Combat = Re:CoM: no change.
+#### 8.5.2 Damage = KH1: the enemy's KH1 / Re:CoM max HP (owner, 2026-11-03, "Sleights menu follow-ups")
 
-Not checked (8.5): anything in game; each sleight's branch of `exeStockSkill` one by one (Warp,
-Warpinator, Teleport and how they end a battle); the resource wait for the magic-category sleights.
+Owner: "at Damage = KH1 sleight damage scaled by the enemy's KH1 max HP / its Re:CoM max HP (to
+build)". At Damage = KH1 the enemies have KH1's HP (the stats init), while a sleight hits for
+Re:CoM's AP: so each sleight hit is Re:CoM's × (that enemy's KH1 max HP / its Re:CoM max HP), keeping
+the share of the enemy's HP a hit takes as in Re:CoM. Damage = Re:CoM: unchanged.
+
+| what | where | tag |
+|---|---|---|
+| **Where**: the existing enemy-hit wrapper on Re:CoM's handler `0x14017F7E0`, in its path for hits that are neither a KH1 swing's nor a KH1 spell shot's, just before Re:CoM's handler: on the hurt body Re:CoM's gather `0x140154EB0` takes (the first with a hit; it reads the value `+0x92` through `0x14016FDB0` into the hit Re:CoM then applies), the value is scaled. Re:CoM's handler then applies its resistance %, weak part, frozen bonus and boss falloff to it as to any hit (all multiply, so the ratio carries through). No new hook or site. | `win::summons::scale_sleight_hit`, `win::attack::kh1_enemy_hit` | Checked (decomp `0x14017F7E0`, `0x140154EB0`) |
+| **Which hits**: the current Sleights-list sleight's (from our start until a summon starts or the battle ends): one whose owner (the body's `+0x98`, the attack's `+0x20` id, `0x14016F1C0`) is **Sora or his weapon while that sleight runs** (his action `0x16` from our start), or a **Re:CoM shot** (`CBullet` `0x140525430` / `CHomingBullet` `0x140525530`) whose shooter `+0x238` is Sora (shots still flying after he lands count). A summon's hits keep Re:CoM's damage (not asked). Others (an enemy's, e.g. under Confuse) are untouched; an owner we don't count while the sleight plays is logged once per line budget. | `win::summons::owner_of` | Checked (decomp: the owner / shooter fields); that every one of the 27 hits through Sora's collisions or Re:CoM shots: **Assumption** (the log names any other) |
+| **Damage kinds only**: Re:CoM's own list of kinds whose value isn't damage stays as is (the handler's mask `0x912100`: Stop ticks 8 (Teleport), Gravity % 0xD, the timed states 0x10 (Shock Impact) / 0x17 (Lethal Frame), Magnet 0x14 (Magnet Spiral)); the durations stay Re:CoM's. | `sleights::is_damage_kind` | Checked (decomp `0x14017F7E0`, `0x14017DC50`) |
+| **The numbers**: KH1 max HP = the twin's KH1 HP the stats init set for that enemy (`kh1-stats.json`, Damage = KH1); Re:CoM max HP = Re:CoM's getter `0x14017F5A0` (its `@ENP` row HP × the difficulty %, the original under our max-HP wrapper). Value × KH1 / Re:CoM, rounded, at least 1, at most 32767. | `win::stats::twin_max_hps`, `sleights::kh1_scaled` | Checked (decomp `0x14017F5A0`; code + tests) |
+| **No KH1 twin** (Re:CoM-only enemies, bosses: their KH1 HP is a proxy's or a boss twin's, `docs/recom-kh1-attack.md`): Re:CoM's value stands (the brief: only `kh1-stats.json` twins); logged `… has no KH1 twin: Re:CoM's hit n stands`. | | Checked (code) |
+
+Per frame: one atomic load per enemy-hit call while no Sleights-list sleight was used this battle;
+after one, a read of the enemy's hurt bodies per call (as the other hit checks; not measured), and
+the owner lookup only when a hit waits.
+
+Owner test lines (8.5.2):
+- Damage = KH1 (ini `damage = kh1`), Combat = KH1, a battle with ordinary Heartless (Shadows,
+  Soldiers …): use Fire Raid, Homing Blizzara or Holy: each hit takes about the same share of the
+  enemy's HP bar as in Re:CoM (not a one-shot). Log: `summons: sleight <name> on CEnemy…: Re:CoM's hit
+  a (kind k) -> b (KH1 max HP x / Re:CoM max HP y)`.
+- On a boss or a Re:CoM-only enemy: `… has no KH1 twin: Re:CoM's hit n stands` (Re:CoM's damage on its
+  KH1-scale HP: tell us how it feels).
+- Teleport / Lethal Frame / Shock Impact / Magnet Spiral: their stop / hold times as in Re:CoM.
+- A line `… by an object we don't count as Sora's (vtable …)`: send us the log (that sleight hits
+  through something else).
+- Damage = Re:CoM: no change.

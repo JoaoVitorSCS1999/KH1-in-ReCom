@@ -18,6 +18,8 @@
 //!   lets a command start.
 //! - **The start**: Re:CoM's own sleight start for the id (the summons' path, Sora's vtable `+0x130`
 //!   = `0x1402247A0`); Re:CoM runs its motion, effects, hits, damage, protection and end.
+//! - **Damage = KH1** ([`kh1_scaled`], owner, "Sleights menu follow-ups"): each hit Re:CoM's × the
+//!   enemy's KH1 max HP / its Re:CoM max HP (twins only; `win::summons::scale_sleight_hit`).
 
 use crate::abilities::{self as ab, SleightMp};
 
@@ -144,6 +146,32 @@ pub fn usable(g: &crate::summons::Gate, id: u16) -> bool {
     g.battle && (g.ground || (g.air && air_start(id))) && !g.out && pay_points(id, g.mp).is_some()
 }
 
+/// Re:CoM's hit kinds (the hurt body's `+0x80`) whose value isn't damage: Stop's ticks (8), Gravity's
+/// percent (0xD), the timed states 0x10 / 0x17 (Shock Impact's, Lethal Frame's) and Magnet's 0x14
+/// (their value goes to `+0x2D8` or is a share of HP, `0x14017DC50`). Re:CoM's own mask for them,
+/// the hit handler's `0x912100` (`0x14017F7E0`: kinds above 0x17 or with their bit clear take its
+/// frozen bonus). Checked (decomp).
+pub const NOT_DAMAGE_KINDS: u32 = 0x0091_2100;
+
+/// Whether a hit of Re:CoM kind `kind` carries damage (Re:CoM's rule, [`NOT_DAMAGE_KINDS`]).
+pub fn is_damage_kind(kind: u32) -> bool {
+    kind > 0x17 || (NOT_DAMAGE_KINDS >> kind) & 1 == 0
+}
+
+/// Damage = KH1 (owner, 2026-11-03, "Sleights menu follow-ups": "at Damage = KH1 sleight damage
+/// scaled by the enemy's KH1 max HP / its Re:CoM max HP"): a sleight hit's value `value` (Re:CoM's,
+/// on the hurt body `+0x92`, before Re:CoM's resistance, weak part and boss falloff, which then apply
+/// to it as to any hit) on an enemy whose KH1 max HP is `kh1_max` and Re:CoM max HP `recom_max`:
+/// value × kh1_max / recom_max, rounded, at least 1. None (Re:CoM's value stands): not a damage kind,
+/// nothing to scale, or no HP to scale by.
+pub fn kh1_scaled(value: i16, kind: u32, kh1_max: i32, recom_max: i32) -> Option<i16> {
+    if !is_damage_kind(kind) || value <= 0 || kh1_max <= 0 || recom_max <= 0 {
+        return None;
+    }
+    let v = (value as i64 * kh1_max as i64 * 2 + recom_max as i64) / (recom_max as i64 * 2);
+    Some(v.clamp(1, i16::MAX as i64) as i16)
+}
+
 /// The list's ids from the equipped ones (Re:CoM's order; anything not a sleight ability dropped,
 /// at most [`MAX`]).
 pub fn list(equipped: &[u16]) -> Vec<u16> {
@@ -230,6 +258,35 @@ mod tests {
         assert!(!usable(&Gate { air: false, ..air }, 0x24));
         // Not ours: the tiers (also air in Re:CoM) aren't sleight abilities.
         assert!(!air_start(0xD) && !air_start(s::FIRE_RAID) && !air_start(s::IDYLL_ROMP));
+    }
+
+    /// Owner (2026-11-03, "Sleights menu follow-ups"): at Damage = KH1 a sleight's damage is Re:CoM's
+    /// × (the enemy's KH1 max HP / its Re:CoM max HP); values that aren't damage stay Re:CoM's.
+    #[test]
+    fn kh1_damage_scales_by_the_enemys_max_hp_ratio() {
+        // A Shadow-like twin: KH1 max HP 24 against Re:CoM's 160: × 0.15.
+        assert_eq!(kh1_scaled(500, 1, 24, 160), Some(75));
+        // Rounded to the nearest (1000 × 37 / 300 = 123.3; 50 × 3 / 4 = 37.5 → 38).
+        assert_eq!(kh1_scaled(1000, 1, 37, 300), Some(123));
+        assert_eq!(kh1_scaled(50, 3, 3, 4), Some(38));
+        // At least 1 (Re:CoM's own floor for a damaging hit); capped at the carrier.
+        assert_eq!(kh1_scaled(3, 2, 1, 1000), Some(1));
+        assert_eq!(kh1_scaled(i16::MAX, 1, 10, 1), Some(i16::MAX));
+        // A KH1 HP above Re:CoM's scales up (the same formula).
+        assert_eq!(kh1_scaled(100, 1, 300, 200), Some(150));
+        // Not damage (Re:CoM's mask): Stop ticks 8 (Teleport), Gravity % 0xD, timed states 0x10 / 0x17,
+        // Magnet 0x14.
+        for k in [8u32, 0xD, 0x10, 0x14, 0x17] {
+            assert!(!is_damage_kind(k));
+            assert_eq!(kh1_scaled(9000, k, 24, 160), None, "kind {k:#x}");
+        }
+        for k in [0u32, 1, 2, 3, 7, 9, 0xA, 0xB, 0xC, 0xE, 0xF, 0x11, 0x12, 0x13, 0x15, 0x16, 0x1D, 0x1E] {
+            assert!(is_damage_kind(k), "kind {k:#x}");
+        }
+        // Nothing to scale.
+        assert_eq!(kh1_scaled(0, 1, 24, 160), None);
+        assert_eq!(kh1_scaled(500, 1, 0, 160), None);
+        assert_eq!(kh1_scaled(500, 1, 24, 0), None);
     }
 
     #[test]
