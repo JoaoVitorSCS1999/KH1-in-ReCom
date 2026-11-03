@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 182: M12 step 1: AP Up replaces CP Up at Combat = KH1 (3 + 2 per pick, no cap), version 0.98.0 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "On level up, instead of having the choice to level up CP, when the combat is set to KH1, it should be AP up, and it should give you 2 AP each level. this should be the only way to obtain AP, aside from the AP you start the game with."; answers: no cap; old saves: each CP Up already taken counts as an AP Up.
+- AP = KH1's start 3 (Checked (decomp `0x1402852C0`)) + 2 × AP Up picks; KH1's level grants (`AP_UP_LEVELS`) removed. The count at `save+0x26A8` (the ability block's first reserved byte, layout v5; Checked (code) unused before).
+- In the existing level-up wrapper on `0x14010EF10` (no new hook): the CP row always offered (even at CP ≥ 1625), reading "AP Up" / "Max AP +2", the status panel "Max AP" in Re:CoM's own number format; the pick undoes Re:CoM's +25 CP (`0x14010F6AB`) and adds one AP Up.
+- Old saves: past CP picks = (CP − 275) / 25, at most level − 1, once, logged; 275 = Sora's new-game CP (Checked (files + decomp): CardInit record 0 in `SY0001.BIN`, `0x1401AD2A0` → `0x14023A040` → `0x14023A250`; exe-wide scan: no other CP writer but an unused debug function). Equipped abilities over the AP: unequipped from the most expensive down (KH1 never lowers AP).
+- CP readers: the deck screen / check, the camp status page, the level-up panel; no events, shop or battle code. Combat = Re:CoM and Riku's story unchanged.
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 181: Yellow Opera: a Re:CoM effect over the marked spot before the Thunder, version 0.97.3 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Warning stand-in now".
