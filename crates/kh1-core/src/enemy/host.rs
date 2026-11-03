@@ -311,6 +311,12 @@ pub mod model {
                         self.play(request);
                     }
                 }
+                // `sys 13` of the playing request: it starts again (M11, the Fat Bandit).
+                Cmd::Restart { request, start, .. } => {
+                    self.queued = None;
+                    self.play(request);
+                    self.age = start;
+                }
                 Cmd::Queue { request, .. } => self.queued = Some(request),
                 Cmd::Action { request, attack, then, .. } => {
                     let a = Running { request, attack: attack.is_some(), steered: false, playing: attack.is_none() };

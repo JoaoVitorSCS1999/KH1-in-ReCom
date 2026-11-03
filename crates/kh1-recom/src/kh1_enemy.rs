@@ -597,14 +597,15 @@ pub fn cmd_token(c: &Cmd<u8>, names: &[&str], state_name: &dyn Fn(u8) -> &'stati
         Cmd::Throw(n) => format!("throws its object {n}"),
         Cmd::Note(n) => format!("note: {n}"),
         Cmd::HealFull => "heals to full HP (KH1's HP = max HP)".into(),
-        Cmd::Reward(r) => format!("reward: EXP bonus EXP / {} + {}, KH1 prizes {:?}", r.exp_div, r.exp_add, r.prizes),
+        Cmd::Reward(r) => format!("reward: EXP bonus EXP / {} + {}{}, KH1 prizes {:?}", r.exp_div, r.exp_add, if r.exp_min > 0 { format!(" (at least {})", r.exp_min) } else { String::new() }, r.prizes),
+        Cmd::Restart { request, blend, start } => format!("motion {request} b{blend} again from {start}"),
     }
 }
 
 /// Whether a command is worth a log line (state changes, actions, jumps, underground; not the
 /// per-frame walk / yaw / height).
 pub fn logged(c: &Cmd<u8>) -> bool {
-    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Throw(_) | Cmd::Note(_) | Cmd::HealFull | Cmd::Reward(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
+    matches!(c, Cmd::Action { .. } | Cmd::Attack { .. } | Cmd::Jump { .. } | Cmd::Underground(_) | Cmd::Hittable(_) | Cmd::State(_) | Cmd::Target(_) | Cmd::FadeIn(_) | Cmd::Held | Cmd::Visible(_) | Cmd::Guard(_) | Cmd::MotionAt { .. } | Cmd::Restart { .. } | Cmd::Throw(_) | Cmd::Note(_) | Cmd::HealFull | Cmd::Reward(_)) || matches!(c, Cmd::Motion { request, .. } if *request != ke::react::req::WALK && *request != ke::react::req::RUN)
 }
 
 /// The end of the motion playing, read from Re:CoM's motion clock (`0x1401A47C0`, units).
@@ -949,8 +950,8 @@ mod tests {
         // M11 (the Search Ghost): what KH1 does that isn't built is logged.
         assert_eq!(cmd_token(&Cmd::Note("x"), CLASSES[0].attack_names, &n), "note: x");
         assert!(logged(&Cmd::Note("x")));
-        assert!(logged(&Cmd::HealFull) && logged(&Cmd::Reward(ke::Reward { exp_div: 10, exp_add: 1, prizes: [0, 0, 0, 0, 3, 0, 0] })));
-        assert_eq!(cmd_token(&Cmd::Reward(ke::Reward { exp_div: 10, exp_add: 1, prizes: [0, 0, 0, 0, 3, 0, 0] }), CLASSES[0].attack_names, &n), "reward: EXP bonus EXP / 10 + 1, KH1 prizes [0, 0, 0, 0, 3, 0, 0]");
+        assert!(logged(&Cmd::HealFull) && logged(&Cmd::Reward(ke::Reward { exp_div: 10, exp_add: 1, exp_min: 0, prizes: [0, 0, 0, 0, 3, 0, 0] })));
+        assert_eq!(cmd_token(&Cmd::Reward(ke::Reward { exp_div: 10, exp_add: 1, exp_min: 0, prizes: [0, 0, 0, 0, 3, 0, 0] }), CLASSES[0].attack_names, &n), "reward: EXP bonus EXP / 10 + 1, KH1 prizes [0, 0, 0, 0, 3, 0, 0]");
     }
 
     /// Re:CoM's worlds → KH1's world ids (decision 21's pairing): Traverse Town 3, Agrabah 8,

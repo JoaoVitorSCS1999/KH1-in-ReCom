@@ -832,6 +832,11 @@ unsafe fn apply(en: usize, rt: &mut Runtime, c: &Cmd<u8>) {
                 play_at(en, rt, request, blend, start);
             }
         }
+        // KH1's `sys 13` of the request playing: it starts again (M11, the Fat Bandit's fireballs).
+        Cmd::Restart { request, blend, start } => {
+            rt.queued = None;
+            play_at(en, rt, request, blend, start);
+        }
         Cmd::Guard(Some((row, request))) => {
             let m = manifest(rt.class);
             match m.guards.get(row as usize) {

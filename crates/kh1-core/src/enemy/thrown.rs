@@ -79,6 +79,22 @@ impl Thrown {
         Thrown { pos: at, dir: Vec3::from_yaw(facing), speed: n.speed, time: 0.0, phase: Phase::Flying, n }
     }
 
+    /// Thrown from `at` along the unit direction `dir` (M11, the Fat Bandit's fireball: `sys 143`'s head direction,
+    /// `kh1_core::fatbandit::fire_dir`, its height included).
+    pub fn aimed(at: Vec3, dir: Vec3, n: Numbers) -> Thrown {
+        Thrown { pos: at, dir: dir.normalized(), speed: n.speed, time: 0.0, phase: Phase::Flying, n }
+    }
+
+    /// Sent off again along `dir` from where it is, its clock back to 0 (the Fat Bandit's fireball after a repel:
+    /// `ex_2060_00.bd` `0x40` → `0x1B8` aims it anew, `hp[0x44]` = 0, and `0x72` flies it its whole life again;
+    /// Checked (files)).
+    pub fn retarget(&mut self, dir: Vec3) {
+        self.dir = dir.normalized();
+        self.speed = self.n.speed;
+        self.time = 0.0;
+        self.phase = Phase::Flying;
+    }
+
     /// One frame (`step` KH1 frames): the displacement. `target`: the target's lock point while it
     /// lives (`sys 120`), else none (no turn). Ends at the life's end or after the repelled slide.
     pub fn step(&mut self, target: Option<Vec3>, step: f32) -> Vec3 {
@@ -170,6 +186,32 @@ mod tests {
         let mut v = Thrown::new(Vec3::ZERO, 0.0, n());
         v.step(Some(Vec3::new(1f32.to_radians().sin() * 100.0, 0.0, 1f32.to_radians().cos() * 100.0)), 1.0);
         assert!((v.dir.x.atan2(v.dir.z).to_degrees() - 1.0).abs() < 1e-2);
+    }
+
+    /// The Fat Bandit's fireball (`ex_2060_00.bd`: 45 a frame, no turn, 240 frames): straight along its aim, height
+    /// included, whatever its target does; a retarget flies it its whole life again.
+    #[test]
+    fn an_aimed_shot_flies_straight() {
+        let n = Numbers { life: 240.0, turn_back: 240.0, speed: 45.0, accel: 0.0, turn_deg: 0.0, slide: 0.0, slide_drag: 0.0 };
+        let d = Vec3::new(0.0, 30.0, 400.0).normalized();
+        let mut t = Thrown::aimed(Vec3::ZERO, d, n);
+        let mut k = 0;
+        while !t.ended() {
+            t.step(Some(Vec3::new(500.0, 0.0, 0.0)), 1.0);
+            k += 1;
+        }
+        assert_eq!(k, 241);
+        assert!((t.pos - d * (45.0 * 240.0)).length() < 0.5, "{:?}", t.pos);
+        let mut t = Thrown::aimed(Vec3::ZERO, d, n);
+        for _ in 0..100 {
+            t.step(None, 1.0);
+        }
+        t.retarget(-d);
+        assert_eq!((t.time, t.phase), (0.0, Phase::Flying));
+        for _ in 0..100 {
+            t.step(None, 1.0);
+        }
+        assert!(t.pos.length() < 1e-2, "back where it started: {:?}", t.pos);
     }
 
     #[test]
