@@ -1028,6 +1028,9 @@ unsafe fn tick(en: usize, rt: &mut Runtime, poll: bool) {
     // no flame burns).
     let yaw = rt.ai.body().yaw;
     super::kh1_flame::step(en, manifest(rt.class), rt.current, !rt.dead, yaw, step);
+    // M11, the Gargoyle's ball (KH1's child `ex_2220_00.bd`): its parent's request, points, facing and floor (one atomic
+    // load while no ball lives).
+    super::kh1_thrown::ball_parent_step(en, manifest(rt.class), rt.current, !rt.dead, yaw, rt.floor, step);
     // KH1's hit counter goes back to 0 at the end of an update with no action playing (actor flag
     // 4: an action of ours the AI waits on, or a reaction).
     if rt.reaction.is_none() && rt.action.is_none_or(|a| a.steered) {

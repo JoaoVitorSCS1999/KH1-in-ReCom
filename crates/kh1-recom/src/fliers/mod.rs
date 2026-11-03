@@ -6,3 +6,4 @@ pub mod darkball;
 pub mod airpirate;
 pub mod wyvern;
 pub mod searchghost;
+pub mod gargoyle;

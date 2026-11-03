@@ -2836,6 +2836,58 @@ pub const FATBANDIT_PTRS: &[PtrSite] = &[
 /// Checked (exe + decomp).
 pub const FATBANDIT_FIRE_PTRS: &[PtrSite] = &[PtrSite { name: "the Fat Bandit's fireball effect set slot 1 name", rva: 0x0053_E2A8, target: 0x0053_E2F0 }];
 
+/// M11 fliers: the Gargoyle's ctor (the Soldier's shape). Same rule as [`HOOKS`]. Checked (exe + decomp): its only caller
+/// is the enemy factory `0x140188F40` (case 13, the call at `0x1401891BE`); no branch lands inside the moved bytes and no
+/// pointer names them (exe scan: rel32 calls / jumps, jcc, rel8 jumps, 8-byte pointers; 2026-11-02).
+pub const GARGOYLE_HOOKS: &[Site] = &[
+    // rex push rbx; sub rsp,0x20 (then xor r9d,r9d; xor r8d,r8d; mov rbx,rcx; call 0x140196DF0)
+    Site { name: "CEnemyGargoyle ctor (0x14018E150)", rva: 0x0018_E150, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// M11 fliers: the factory's `mov ecx, 0xCD0` before `CEnemyGargoyle`'s ctor, raised by the framework's 0x20-byte tail.
+/// Checked (exe).
+pub const GARGOYLE_ALLOC: &[Site] = &[Site { name: "alloc CEnemyGargoyle (0x1401891A5)", rva: 0x0018_91A5, expect: &[0xB9, 0xD0, 0x0C, 0x00, 0x00] }];
+
+/// M11 fliers: `CEnemyGargoyle`'s vtable slots the copy keeps or replaces, checked against Re:CoM's functions before the
+/// copy is made (Checked (exe), relocated pointers; decomp: states 0 / 11 / 12 / 30 are `CBattleEnemy`'s, 1..3 the
+/// Gargoyle's own: 1 `0x14018E2C0` / `0x14018E560` (→ `0x140197450`), its end `0x14018E300` (→ `0x1401979C0`, kept), 2 its
+/// wing strike `e013_050` `0x14018E220` / `0x14018E310`, 3 its shot `e013_051` `0x14018E270` / `0x14018E350`; the attack
+/// states' ends `CBattleEnemy`'s `0x14017E6C0` / `0x14017E700`; the think `CHeartless`'s `0x140196EC0`).
+pub const GARGOYLE_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CEnemyGargoyle +0x70 motion play", rva: 0x0053_F208, target: 0x0017_D750 },
+    PtrSite { name: "CEnemyGargoyle +0x80 update", rva: 0x0053_F218, target: 0x0018_5320 },
+    PtrSite { name: "CEnemyGargoyle +0xE8 state 0 begin", rva: 0x0053_F280, target: 0x0017_B590 },
+    PtrSite { name: "CEnemyGargoyle +0xF0 state 0 step", rva: 0x0053_F288, target: 0x0018_29E0 },
+    PtrSite { name: "CEnemyGargoyle +0xF8 state 0 end", rva: 0x0053_F290, target: 0x0017_E630 },
+    PtrSite { name: "CEnemyGargoyle +0x100 state 1 begin", rva: 0x0053_F298, target: 0x0018_E2C0 },
+    PtrSite { name: "CEnemyGargoyle +0x108 state 1 step", rva: 0x0053_F2A0, target: 0x0018_E560 },
+    PtrSite { name: "CEnemyGargoyle +0x110 state 1 end", rva: 0x0053_F2A8, target: 0x0018_E300 },
+    PtrSite { name: "CEnemyGargoyle +0x118 state 2 begin", rva: 0x0053_F2B0, target: 0x0018_E220 },
+    PtrSite { name: "CEnemyGargoyle +0x120 state 2 step", rva: 0x0053_F2B8, target: 0x0018_E310 },
+    PtrSite { name: "CEnemyGargoyle +0x128 state 2 end", rva: 0x0053_F2C0, target: 0x0017_E6C0 },
+    PtrSite { name: "CEnemyGargoyle +0x130 state 3 begin", rva: 0x0053_F2C8, target: 0x0018_E270 },
+    PtrSite { name: "CEnemyGargoyle +0x138 state 3 step", rva: 0x0053_F2D0, target: 0x0018_E350 },
+    PtrSite { name: "CEnemyGargoyle +0x1F0 state 11 begin", rva: 0x0053_F388, target: 0x0017_C530 },
+    PtrSite { name: "CEnemyGargoyle +0x208 state 12 begin", rva: 0x0053_F3A0, target: 0x0017_B9D0 },
+    PtrSite { name: "CEnemyGargoyle +0x3B8 state 30 begin", rva: 0x0053_F550, target: 0x0017_BBC0 },
+    PtrSite { name: "CEnemyGargoyle +0x3C0 state 30 step", rva: 0x0053_F558, target: 0x0018_3260 },
+    PtrSite { name: "CEnemyGargoyle +0x3D0 think", rva: 0x0053_F568, target: 0x0019_6EC0 },
+    // The shared enemy-guard step's slot (`CBattleEnemy`'s no-op `ret 0`).
+    PtrSite { name: "CEnemyGargoyle +0x3D8 guard event", rva: 0x0053_F570, target: 0x0018_1600 },
+    PtrSite { name: "CEnemyGargoyle +0x438 attack hurt off", rva: 0x0053_F5D0, target: 0x0017_DA80 },
+    PtrSite { name: "CEnemyGargoyle +0x440 attack end", rva: 0x0053_F5D8, target: 0x0017_DA90 },
+];
+
+/// M11 fliers: the Gargoyle's own shot's effect set (`0x14018E350`'s descriptor `+0xA8` = `0x14053F630`: slots 1..3
+/// `"_ex_2220"` 8 / 9 / 7, the model's own effects), copied into its KH1 ball (owner 2026-11-02: projectiles drawn with a
+/// Re:CoM effect). Pointer-checked: slot 1's name pointer. Checked (exe + decomp).
+pub const GARGOYLE_BALL_PTRS: &[PtrSite] = &[PtrSite { name: "the Gargoyle's shot effect set slot 1 name", rva: 0x0053_F648, target: 0x0053_F690 }];
+
+/// M11 fliers: `CCollAttack`'s "on" (vtable `0x140523E28` + 0x10 = `0x14014DE90`: `mov dword [rcx+0x10], 1; ret`), which
+/// the Gargoyle's ball calls at its launch (its attack held off through its charge, `win::magic::hold_off`'s "off" at
+/// +8). Pointer-checked before each call. Checked (exe + decomp).
+pub const COLL_ON_PTRS: &[PtrSite] = &[PtrSite { name: "CCollAttack +0x10 on", rva: 0x0052_3E38, target: 0x0014_DE90 }];
+
 /// M11 casters: Re:CoM's collision radius setter (`0x140172690(coll, r)`: a sphere's `+0x70` / `+0x74`, the others'
 /// `+0x70`; 148 call sites, the attack set's `0x14014E5C0` among them), which the Fat Bandit's flame calls on its
 /// spheres' bullets each frame (`win::kh1_flame`). Called only. Checked (exe + decomp).
@@ -2986,6 +3038,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         FATBANDIT_HOOKS,
         FATBANDIT_ALLOC,
         FLAME_CALLEES,
+        GARGOYLE_HOOKS,
+        GARGOYLE_ALLOC,
         HELD_CALLEES,
     ];
     LISTS
@@ -3086,7 +3140,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, KH1_ENEMY_RING_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);
