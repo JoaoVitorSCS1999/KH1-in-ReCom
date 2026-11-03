@@ -170,7 +170,7 @@ unsafe fn bullet(en: usize, class: &str, m: &Manifest, p: &Peel, attr: u32) -> O
     std::ptr::write_unaligned(w(0x4C) as *mut f32, 0.0);
     std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], [at.x, at.y, at.z, 0.5]);
     std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [0.0, 0.0, 0.0, 0.0]);
-    match fire_look(class) {
+    match fire_look(class, "peel") {
         Some((set, places)) => {
             std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), set));
             if let Some(pl) = places {

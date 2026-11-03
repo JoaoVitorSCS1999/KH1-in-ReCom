@@ -109,7 +109,7 @@ pub(super) unsafe fn start(en: usize, class: &str, m: &Manifest) {
         tail: has("flame_tail").then(|| c("flame_tail")),
         grow: if has("flame_grow") { c("flame_grow") } else { c("flame_life") - c("flame_grow_until") },
     };
-    let look = super::kh1_thrown::fire_look(class);
+    let look = super::kh1_thrown::fire_look(class, "fire");
     let id = m.consts.get("fire_recom_id") as i32;
     let ap = func::<ApFn>(ATTACK_AP)(en, id, m.consts.get("fire_kind") as i32, 0, std::ptr::null_mut(), 0) as i32;
     let attr = func::<AttrFn>(ATTACK_ATTR)(en, id);

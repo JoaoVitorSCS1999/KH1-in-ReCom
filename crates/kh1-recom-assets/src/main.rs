@@ -500,7 +500,19 @@ fn run() -> Result<(), String> {
         let at = |p: &str| p.split('/').fold(root.clone(), |acc, s| acc.join(s));
         match b {
             Some(b) => {
+                // An enemy with no new attack record keeps Re:CoM's `.ASD` (the Red Nocturne: its rows are its
+                // children's); one Re:CoM keeps no `.SES` for gets none (`enemy::NO_SES`).
+                let records = b.asd.get(0x10..0x14).map_or(0, |w| u32::from_le_bytes(w.try_into().unwrap()) as usize);
                 for (p, i) in &files {
+                    let skip = match *i {
+                        1 => records == spec.asd.0,
+                        2 => b.ses.is_empty(),
+                        _ => false,
+                    };
+                    if skip {
+                        println!("{}: {p} not written (Re:CoM's own stays)", spec.name);
+                        continue;
+                    }
                     write(&at(p), [&b.ann, &b.asd, &b.ses][*i])?;
                 }
                 write(&man, b.manifest.as_bytes())?;
@@ -553,7 +565,8 @@ fn enemy_build(spec: &kh1_recom_assets::enemy::Spec, keys: kh1_formats::egs::Key
         ann: r(&spec.path("ANN"))?,
         mdl: r(&spec.path("MDL"))?,
         asd: r(&spec.path("ASD"))?,
-        ses: r(&spec.path("SES"))?,
+        // Re:CoM keeps none for some enemies (`enemy::NO_SES`, the Red Nocturne): none read.
+        ses: if kh1_recom_assets::enemy::NO_SES.contains(&spec.name) { Vec::new() } else { r(&spec.path("SES"))? },
         btltbl: k("btltbl.bin")?,
     };
     kh1_recom_assets::enemy::build(spec, &inp).map_err(|e| e.to_string())
