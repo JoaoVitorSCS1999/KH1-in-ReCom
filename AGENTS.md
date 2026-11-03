@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 164: Neoshadow grab on KH1's frame, version 0.90.2 (2026-11-01)
+
+- Decision (1:1 rule, 2026-11-03): the hold starts on KH1's frame.
+- Cause (Checked (decomp + disassembly)): Sora was held 3 frames late: an enemy's attack check `0x14014E6A0` runs before its state machine and a requested state begins next update; attack windows open after the check; enemies update before Sora.
+- Built: the Neoshadow plays 208 and its grab record in the test frame (where KH1 asks for Sora's held motion); the host starts that attack at once and runs Re:CoM's own attack windows and attack check once right after (new checked sites `0x14014E6A0` `4C 8B DC 53 56 41 56 48 83 EC 70`, `0x140523E88` → `0x14014E830`). Sora is held on KH1's frame; 208 starts a frame before KH1's; the let-go on KH1's frame (test + 96). 1031 sites match.
+- Assumptions: KH1 applies the held motion in the frame its script asks; the 1 m grab sphere from the last pose still covers Sora.
+- Asset step: not needed. Checked: tests (host model, two Neoshadows), Windows build. Not checked: in game.
+
+---
+
 ## Stage 163: Gargoyle: Sora's Guard sends its ball back KH1's way, version 0.90.1 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Guard: KH1's send-back" for the Gargoyle's ball.
