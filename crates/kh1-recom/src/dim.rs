@@ -180,6 +180,114 @@ pub fn what(boss_id: u16, state: i32) -> &'static str {
     MOVES.iter().find(|m| m.0 == boss_id && m.1 == state).map_or("a move not in the table", |m| m.2)
 }
 
+/// Whether a slot holds a dark request made this frame, before the fade task stepped it: what
+/// `0x140232170` leaves (progress 0, bit 0) with a colour under 1.0 on the room's layers. For a begin
+/// that always asks (the normal enemies'), read right after it.
+pub fn fresh_dark(after: &[u8; SLOT_SIZE]) -> bool {
+    let a = Slot::parse(after);
+    a.t == 0.0 && a.flags & 1 != 0 && a.dark()
+}
+
+/// A normal enemy on Re:CoM's AI whose attack state's begin dims the room (owner, 2026-11-03: "the
+/// Wizard and the Aquatank get the same rule"). Checked (decomp + exe): the begin always calls
+/// `0x140232170(0x1800, 30.0, &(0.5, 0.5, 0.5, 1.0), 0, slot 0)` after its first motion; the state's
+/// end asks for 1.0 again; the class keeps Re:CoM's "hurt bodies off" (`+0x438` = `0x14017DA80`) and
+/// attack-state end (`+0x440` = `0x14017DA90`); neither the step nor the end turns the bodies on.
+#[derive(Clone, Copy, Debug)]
+pub struct Normal {
+    pub name: &'static str,
+    /// The RTTI class name.
+    pub class: &'static str,
+    /// Re:CoM's own vtable (RVA): a KH1-AI copy never matches.
+    pub vtable: u32,
+    pub state: i32,
+    /// Re:CoM's begin of that state (RVA).
+    pub begin: u32,
+    pub what: &'static str,
+}
+
+impl Normal {
+    /// The vtable slot (RVA) holding the state's begin (`+0x118 + (state − 2) × 0x18`; Re:CoM's begin
+    /// wrappers `0x14017B760` / `0x14017B7A0`: `call [rax+0x130]` / `[rax+0x148]`, then `jmp
+    /// [rax+0x438]`). Checked (exe).
+    pub fn begin_slot(&self) -> u32 {
+        self.vtable + 0x118 + (self.state as u32 - 2) * 0x18
+    }
+}
+
+/// Checked (decomp + exe); what each move is: Assumption (from its motions and the shots it makes).
+pub const NORMAL: [Normal; 2] = [
+    Normal {
+        name: "Wizard",
+        class: "CEnemyWizard",
+        vtable: 0x0055_4A58,
+        state: 4,
+        begin: 0x0019_5590,
+        what: "e025_052, then e025_053 for 9000 ticks (180 frames) with an _ex_2150 shot near Sora every 250 ticks, then e025_054",
+    },
+    Normal { name: "Aquatank", class: "CEnemyAquatank", vtable: 0x0053_2FE8, state: 3, begin: 0x0018_AA70, what: "e020_051 / 052, then e020_053 with a thunder (_thunder_all) over Sora" },
+];
+
+/// The normal dimming class of a vtable (its index in [`NORMAL`]).
+pub fn normal_by_vtable(vt: u32) -> Option<usize> {
+    NORMAL.iter().position(|n| n.vtable == vt)
+}
+
+/// One normal enemy's open window (it has no tail of its own: the windows are kept here).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Window {
+    pub enemy: usize,
+    pub battle: u32,
+    pub class: usize,
+    /// The game clock's frame when it opened.
+    pub start: f32,
+    pub ignored: crate::revenge::Ignored,
+}
+
+/// The open normal windows. At most [`Windows::CAP`]; another battle's are dropped at each open.
+#[derive(Debug, Default)]
+pub struct Windows(Vec<Window>);
+
+impl Windows {
+    pub const CAP: usize = 32;
+
+    pub const fn new() -> Windows {
+        Windows(Vec::new())
+    }
+
+    /// Opens (or opens again) the enemy's window; false when the list is full.
+    pub fn open(&mut self, enemy: usize, battle: u32, class: usize, start: f32) -> bool {
+        self.0.retain(|w| w.battle == battle && w.enemy != enemy);
+        if self.0.len() >= Self::CAP {
+            return false;
+        }
+        self.0.push(Window { enemy, battle, class, start, ignored: Default::default() });
+        true
+    }
+
+    pub fn get_mut(&mut self, enemy: usize, battle: u32) -> Option<&mut Window> {
+        self.0.iter_mut().find(|w| w.enemy == enemy && w.battle == battle)
+    }
+
+    pub fn holds(&self, enemy: usize, battle: u32) -> bool {
+        self.0.iter().any(|w| w.enemy == enemy && w.battle == battle)
+    }
+
+    /// Closes the enemy's window (any battle's), returning it.
+    pub fn close(&mut self, enemy: usize) -> Option<Window> {
+        let i = self.0.iter().position(|w| w.enemy == enemy)?;
+        Some(self.0.swap_remove(i))
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,5 +363,60 @@ mod tests {
         }
         assert_eq!(what(118, 5), MOVES[9].2);
         assert_eq!(what(106, 4), "a move not in the table");
+    }
+
+    #[test]
+    fn normal_classes() {
+        // Checked (exe): the begin slots hold the dimming begins.
+        let slots: Vec<(u32, u32)> = NORMAL.iter().map(|n| (n.begin_slot(), n.begin)).collect();
+        assert_eq!(slots, vec![(0x0055_4BA0, 0x0019_5590), (0x0053_3118, 0x0018_AA70)]);
+        assert_eq!(normal_by_vtable(0x0055_4A58), Some(0));
+        assert_eq!(normal_by_vtable(0x0053_2FE8), Some(1));
+        // Bosses are not normal dimmers.
+        for b in crate::revenge::BOSSES {
+            assert_eq!(normal_by_vtable(b.vtable), None, "{}", b.name);
+        }
+        assert_eq!(normal_by_vtable(0x0054_D728), None);
+        for n in &NORMAL {
+            assert_eq!(n.state, if n.name == "Wizard" { 4 } else { 3 });
+            assert!(n.class.starts_with("CEnemy"));
+        }
+    }
+
+    #[test]
+    fn fresh_requests() {
+        assert!(fresh_dark(&slot_bytes(GREY, 0x1800, 0.0, 1)));
+        // Already fading (the task stepped it), finished, a restore, or another layer: no.
+        assert!(!fresh_dark(&slot_bytes(GREY, 0x1800, 0.1, 1)));
+        assert!(!fresh_dark(&slot_bytes(GREY, 0x1800, 1.0, 0)));
+        assert!(!fresh_dark(&slot_bytes(WHITE, 0x1800, 0.0, 1)));
+        assert!(!fresh_dark(&slot_bytes([1.0, 1.0, 1.0, 0.0], 2, 0.0, 1)));
+    }
+
+    #[test]
+    fn windows() {
+        let mut w = Windows::new();
+        assert!(w.open(0x100, 7, 0, 10.0));
+        assert!(w.open(0x200, 7, 1, 12.0));
+        assert!(w.holds(0x100, 7) && w.holds(0x200, 7));
+        // Another battle's address is not this one's.
+        assert!(!w.holds(0x100, 8));
+        w.get_mut(0x100, 7).unwrap().ignored.add(crate::revenge::IgnoredKind::Swing);
+        // Opening again replaces (fresh counts).
+        assert!(w.open(0x100, 7, 0, 20.0));
+        assert_eq!(w.len(), 2);
+        assert_eq!(w.get_mut(0x100, 7).unwrap().ignored.hits(), 0);
+        let c = w.close(0x100).unwrap();
+        assert_eq!((c.enemy, c.class, c.start), (0x100, 0, 20.0));
+        assert!(w.close(0x100).is_none());
+        // A new battle drops the old one's.
+        assert!(w.open(0x300, 8, 0, 1.0));
+        assert_eq!(w.len(), 1);
+        assert!(!w.holds(0x200, 7));
+        for i in 0..Windows::CAP {
+            w.open(0x1000 + i, 8, 0, 0.0);
+        }
+        assert_eq!(w.len(), Windows::CAP);
+        assert!(!w.open(0x9000, 8, 0, 0.0));
     }
 }

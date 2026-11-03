@@ -4,6 +4,9 @@ Owner (2026-11-03): "anytime bosses use a move that dims the room, just make the
 that move". Recorded in `docs/design-philosophy-instructions.md`. Combat = KH1, Sora's story;
 Re:CoM's card battles and Riku's story unchanged.
 
+Follow-up (owner, 2026-11-03, on 0.99.1: "the Wizard and the Aquatank get the same rule"): the two
+normal enemies that grey the room, on Re:CoM's AI, at Combat = KH1: § 3b.
+
 Code: `crates/kh1-recom/src/dim.rs` (the rule, the slot layout, the tables, tests),
 `crates/kh1-recom/src/win/revenge.rs` (`dim_begin`, `dim_exe_*`, `open_dim`; the window is the
 revenge move's, `docs/recom-boss-revenge.md` § 4), `win/attack.rs` (`untouchable_hit`, `hurt_off`);
@@ -55,8 +58,8 @@ what the move is: Assumption.
 figure, and every Heartless boss (Guard Armor, Trickmaster, Jafar, Parasite Cage, Oogie Boogie,
 Ursula, Dragon Maleficent, Darkside). Their moves keep decision 26 (hittable).
 
-Also dim, not bosses or not in scope: `CEnemyWizard` state 4 (`0x140195590`), `CEnemyAquatank`
-state 3 (`0x14018AA70`), Ansem (Riku's story: states 4, 6, 7). Sora's own code dims slots 0 / 2 too
+Also dim, not bosses: `CEnemyWizard` state 4 (`0x140195590`), `CEnemyAquatank` state 3
+(`0x14018AA70`) (built since: § 3b). Not in scope: Ansem (Riku's story: states 4, 6, 7). Sora's own code dims slots 0 / 2 too
 (player code `0x1401E4EB0`, `0x1401F6660`, `0x1401F9840` …; that these are his sleights: Assumption).
 
 Slot 1 in battle: only Marluxia 3 and its part `CBossMarluxia3AllRangeBit` write it; the other
@@ -80,6 +83,40 @@ is never still dark in a battle: Assumption.
 A revenge move that also dims (Axel 4, Larxene 4) opens the revenge window first (its own rule, bit
 0); the dim rule adds nothing then.
 
+## 3b. The Wizard and the Aquatank (normal enemies, Re:CoM's AI)
+
+What dims (Checked (decomp + exe)): their only calls of `0x140232170` are one state's begin and end
+each. Both begins (whole bytes checked: `sites::DIM_NORMAL_CHECKED`) play their first motion, then
+call the setter with mask `0x1800`, 30.0 frames, colour (0.5, 0.5, 0.5, 1.0) (`[0x1405094E0]`,
+`[0x1406C120C]`), slot 0, unconditionally; the state's end asks for 1.0 (30 frames). Neither the
+step nor the end turns the hurt bodies on (not callers of `0x1401A2DB0`).
+
+| Class (vtable) | State | Begin / step / end | The move (motions: Checked; what it is: Assumption) |
+|---|---|---|---|
+| `CEnemyWizard` (`0x140554A58`) | 4 | `0x140195590` / `0x140195B80` / `0x140195670` (vtable `+0x148` / `+0x150` / `+0x158`) | `e025_052`, then `e025_053` for 9000 ticks (180 frames) making an `_ex_2150` shot near Sora each time `+0x160` is a multiple of 250, then `e025_054`; ends with Re:CoM's attack end `0x14017E540(e, 0, 6000)` |
+| `CEnemyAquatank` (`0x140532FE8`) | 3 | `0x14018AA70` / `0x14018AC50` / `0x14018AB50` (`+0x130` / `+0x138` / `+0x140`) | `e020_051`, `e020_052`, then `e020_053` with one `_thunder_all` shot over Sora; ends with `0x14017E540(e, 0, 6000)` |
+
+Re:CoM's begin wrappers of states 3 / 4 (`0x14017B760` / `0x14017B7A0`, bytes checked): the class
+begin, then `jmp [rax+0x438]`; both classes keep Re:CoM's `+0x438` (`0x14017DA80`, hurt bodies off) and
+`+0x440` (`0x14017DA90`, attack-state end: bits cleared, bodies on), read at install
+(`sites::DIM_NORMAL_PTRS`, `PtrSite`s; RTTI names checked too). Checked (exe + decomp).
+
+The bosses' revenge tail and counter exist only for the 12 boss classes (their factory sizes); a
+normal Heartless has neither, and no state-machine callback of ours. So the narrowest native
+equivalent (no new hook, no written slot, no allocation change):
+
+| Part | How | Tag |
+|---|---|---|
+| Open | the existing hurt-off hook (`win::attack::hurt_off`), right after the class begin: a Wizard / Aquatank with Re:CoM's own vtable (so only on Re:CoM's AI), alive, whose current state is that state, and slot 0 holds a fresh dark request (progress 0, bit 0, under 1.0 on `0x1800`: `crate::dim::fresh_dark`): Re:CoM's own hurt bodies off runs (as at Combat = Re:CoM) and the window is noted in a small list (`dim::Windows`, enemy + battle number, at most 32) | Checked (decomp: begin then `+0x438`; the fade task steps the slot later) |
+| Hits | the frame's hit-handler call goes through `win::attack::untouchable_hit` (as a boss's dim window): no card-interrupt bit, Re:CoM's attack bit lent if a KH1 hit cleared it, so Re:CoM's own rule drops any hit that still arrives; counted for the end line | Checked (decomp) |
+| Guard | Sora's Guard blocking its attack gives it no flinch (`win::guard`: `revenge::untouchable` now also answers for these) | — |
+| End | Re:CoM's state end `0x14017DA90` (the existing revenge hook): the window leaves the list and is logged; Re:CoM turns the bodies on and asks for 1.0 | Checked (decomp) |
+| Holds only | while its current state is still that state and it lives (a stale entry never holds) | — |
+| Kept | Stop / stun / freeze / defeat: Re:CoM's (they can't reach it while its bodies are off, as for a boss; they work before and after the move); the 0.83.0 cooldown: its step's attack end (`0x14017E540(e, 0, 6000)`) is untouched, so the 120-frame wait follows the move as before | Checked (code) |
+| Per frame | one atomic load on the hit handler's path while no window is open; while one is, a vtable compare (and for these two classes a state compare and a lock) | not measured |
+
+Combat = Re:CoM, Riku's story, or no revenge install (it holds the state-end hook): nothing changes.
+
 ## 4. Logs
 
 - Start: `dim: bosses untouchable during the moves that dim the room …`.
@@ -87,6 +124,11 @@ A revenge move that also dims (Axel 4, Larxene 4) opens the revenge window first
   (or `the room dims partway through its state`, or `the room is dim (its own colour slot 1) as the state begins`).
 - `dim: Axel untouchable ends (state 5) 0x… after N frames: ignored M hits (… KH1 swings, … KH1 spells, … other), K Guard reactions skipped; HP …`.
 - `dim: <boss> … the room dims, but its state is ending or it is down: not untouchable` (rare).
+- Wizard / Aquatank: at start `dim: the Wizard (state 4) and the Aquatank (state 3) untouchable during
+  their moves that dim the room (on Re:CoM's AI)`; then `dim: Wizard untouchable (state 4: e025_052 …)
+  0x…: its state begin dims the room (Re:CoM's scene colour 0.50); …` and `dim: Wizard untouchable
+  ends (state 4) 0x… after N frames: ignored M hits …`. A failed check: `dim: … the Wizard / Aquatank
+  stay hittable`; a begin without the grey: `… the room didn't dim at its begin …: hittable`.
 - Own cap of 200 lines. F9 trace `hits`: `e…:untouchable:Swing:dmg 0:hp …` as for revenge.
 
 ## 5. Assumptions and not checked
@@ -99,6 +141,9 @@ A revenge move that also dims (Axel 4, Larxene 4) opens the revenge window first
 - Riku's `+0x294` (which fights have it > 0) not read.
 - A boss that dims while Sora's own sleight dims slot 0 on the same frame before it: still seen (the
   comparison is around the boss's own code).
+- Wizard / Aquatank: what their moves are (motion and shot names only); that a battle ending in the
+  middle of their move runs Re:CoM's state end (if not, the stale entry is dropped at the next open
+  and never holds); not seen in game, no trace.
 
 ## 6. Owner test list
 
@@ -117,6 +162,12 @@ A revenge move that also dims (Axel 4, Larxene 4) opens the revenge window first
 8. Vexen, Cloud, Hades, Hook and the Heartless bosses: unchanged (their moves don't dim).
 9. Sora's own sleight greying the room: bosses stay hittable.
 10. Combat = Re:CoM, Riku's story: no `dim:` lines; everything as Re:CoM.
+11. Wizard: when the room greys (its spell rain), swings, spells and Stop do nothing to it until the
+    grey lifts; Guard blocks its shots without it flinching; log `dim: Wizard untouchable (state 4 …)`
+    then `… untouchable ends (state 4) after N frames …` (its rain alone is 180 frames). Before and after the grey it can be
+    hit, stopped, stunned and defeated as before, and it still waits about 2 s before its next attack.
+12. Aquatank: the same during its grey (thunder) move, `state 3`.
+13. Other Heartless (Shadow, Soldier, Red Nocturne …): unchanged, hittable while attacking.
 
 ## 7. Owner questions
 
@@ -126,7 +177,6 @@ A revenge move that also dims (Axel 4, Larxene 4) opens the revenge window first
    attacks of one pattern: (a) each attack that starts or turns dark is untouchable (as built), the
    moments in between hittable; (b) also untouchable in between while the room is dark (a new
    untouchable state outside Re:CoM's attack rule).
-3. Normal enemies that grey the room (Wizard, Aquatank): (a) leave them (as built: "bosses");
-   (b) the same rule.
+3. Normal enemies that grey the room (Wizard, Aquatank): answered (b), the same rule (§ 3b).
 4. Bosses with big moves that don't grey the room (Cloud's Omnislash, Hades, Vexen …): (a) leave
    them (as built); (b) name the moves to add.
