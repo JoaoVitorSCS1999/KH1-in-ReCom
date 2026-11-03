@@ -338,7 +338,7 @@ aside from the AP you start the game with"; answers: no cap, old saves' CP Ups c
 | **The count**: `save + 0x26A8` (u8, our ability block's first reserved byte; layout v5). Nothing read or wrote it before (it was the block's zero reserve; the block sits in Re:CoM's spare tail `0x246B..0x2817`, which no Re:CoM code touches, `recom-keyblade-equip.md`). | `abilities::field::AP_UPS` | Checked (code) |
 | **Offer** (state 0 / 1 → 2, the init block): Re:CoM offers CP while CP < 1625 (`cmp [stats+0xC],0x659` at `0x14010F210`); at KH1 row 1 (`+0x23C`) is always offered; the cursor goes on it when HP isn't offered (Re:CoM's first-offered-row rule). | `win::level_up`, in the existing level-up wrapper (`0x14010EF10`) | Checked (decomp + exe) |
 | **Words**: row 1's label `+0xD8` "AP Up", value `+0xE0` "Max AP +2"; the status panel's row 1 label `+0x180` "Max AP" (Re:CoM's "Max CP" there) and value `+0x188`: the max AP as Re:CoM prints CP (`"%4d"`; highlighted, `"%4d \xF9Y\x81\xA8\xF9R%4d"` now → +2, the exe's format `0x140512C70`), re-set after Re:CoM re-prints it (states 3, 4, 6); the result line `+0x1E0` "Max AP increased by 2." Through Re:CoM's text copy `0x140258DE0` (its items keep a borrowed pointer until then: ctor `0x140258BC0`). | `crate::level_up` | Checked (decomp + exe) for the items; **Assumption**: our words fit Re:CoM's (its `0xA807xx` messages aren't in the session), and row 1's icon (levelup.lad items `0x3C` / `0x3E`) isn't CP-specific art |
-| **Pick** (6 → 7, cursor on row 1): Re:CoM adds 25 CP (`0x14010F6AB`); we put CP back as it was, then +1 AP Up (`win::abilities::add_ap_up`, which syncs first so an older block is migrated from the CP before the pick). | `win::level_up`, `win::stats::set_sora_cp` | Checked (decomp + exe) |
+| **Pick** (6 → 7, cursor on row 1): +1 AP Up (`win::abilities::add_ap_up`, which syncs first so an older block is migrated from the CP before the pick). Re:CoM's own +25 CP (`0x14010F6AB`) is **kept, unseen** (owner, 2026-11-03, step 1/2 follow-ups: "AP Up also gives Re:CoM's +25 CP unseen (CP keeps growing for a switch back)"; 0.98.0 undid it) while CP < 1625 before the pick, the cap at which Re:CoM itself greys its CP row (`0x14010F209`); at 1625 and above it is undone (`level_up::keeps_recom_cp`), so Sora's CP never passes what Re:CoM alone can reach (275 + 25 × 54 = 1625). | `win::level_up`, `win::stats::set_sora_cp` | Checked (decomp + exe) |
 | **Old saves** (block < v5): AP Ups = (CP − 275) ÷ 25, at most level − 1, read once at the block's migration, logged (`abilities: block vN -> v5 …: Re:CoM's CP C: K past CP Up pick(s) counted as AP Up(s)`). **275** = Sora's new-game CP: the new game `0x1401AD2A0` → `0x14023A040(1, 0, 0)` → CardInit record `index[0]` via `0x14023A250` (`SY0001.BIN` entry `CardInit.BIN`: level 1, HP 80, CP 275). Sora's CP has no other writer than the pick and the unreferenced debug givers `0x1400D1A00` (exe scan of every `[*0x14087CBF8 + 0xC]` access), so the base CP is 275 at every level. | `abilities::ap_ups_from_cp` | Checked (files + decomp + exe) |
 | **Over the AP after the migration**: unequipped from the most expensive down (ties: the later in `ALL`), the existing `fit_ap`. KH1 has no rule for this (its AP never drops). | `abilities::migrate` | Checked (decomp: KH1 only adds AP) |
 | **Re:CoM setting / Riku**: the screen is Re:CoM's (no change outside Combat = KH1 in Sora's story). | `super::mp::active()` | Checked (code) |
@@ -346,14 +346,23 @@ aside from the AP you start the game with"; answers: no cap, old saves' CP Ups c
 **Who else reads CP** (exe scan, Checked (exe + decomp)): the camp's deck screen (`0x1400E13C0`),
 the deck check `0x140159620` (deck cost ≤ CP, from the camp `0x1400D9C80`), the camp status page
 (`0x1400E6DF0`), the level-up panel (`0x140110C60`). No event script command, Moogle shop or
-battle code reads it. At KH1 there is no deck in battle (decision 29), so a frozen CP changes nothing
-there; **switching back to Re:CoM combat leaves Sora with the CP he had before his KH1 AP Ups** (his
-deck limit lower than a Re:CoM-only save at that level).
+battle code reads it. At KH1 there is no deck in battle (decision 29), so the CP changes nothing
+there. Since the step 1/2 follow-ups the CP grows with each AP Up as with Re:CoM's CP Up (up to
+Re:CoM's own 1625), so **switching back to Re:CoM combat gives the deck limit a Re:CoM-only save
+would have** with the same picks (the deck check's rule, cost ≤ CP, unchanged).
+
+**Where CP is still seen at Combat = KH1** (Checked (decomp)): the level-up screen shows none (its
+row 1 and its panel's row 1 carry our AP words, set again whenever Re:CoM re-prints the panel:
+states 3, 4, 6; the panel is not re-printed after the pick, `0x140110C60` modes 3 / 4 only play
+its close). The camp's **Deck** screen still prints "deck cost / CP" (`0x1400E13C0`: the cost total
+`+0x21B8` against `[stats + 0xC]`, red when over) and the camp status page reads it: the camp's
+Deck entry is Re:CoM's own and stays at KH1 (the deck is kept for a switch back). Hiding it belongs
+to the open question "the deck at KH1 setting" (owner question in the step-4 report).
 
 Owner test lines (step 1):
 - Combat = KH1, Sora's story, level up: the middle choice reads "AP Up" / "Max AP +2", the panel's
   second row "Max AP" with the AP; pick it: "Max AP increased by 2."; the camp's Abilities page shows
-  2 more AP; the camp's status still shows the old CP. Screenshot the screen (our words beside
+  2 more AP; the camp's Deck screen shows CP + 25 (step 1/2 follow-ups). Screenshot the screen (our words beside
   Re:CoM's, the row's icon).
 - A save with CP ≥ 1625: AP Up is still offered.
 - An older save: the log line `abilities: block v4 -> v5 … past CP Up pick(s) counted as AP Up(s)`;
@@ -372,7 +381,7 @@ wording), without its card-stock help page at KH1".
 | **The screen**: Re:CoM's `CLevelUp` sleight-learned mode (`+0x258` = id, states 0xE..0x11): an ability opens it with id **0x5A** (Re:CoM's High Jump: from 0x5A the line takes Re:CoM's ability wording `0xA80710` in Sora's story, `cmp [rbx+0x258],0x5A` at `0x1401102DD`; the id only picks the wording) and `+0x250` (the `%s` of the line, Re:CoM's sprintf `0x14004FAA0` at `0x14011032C`) pointed at our name (the Abilities page's, e.g. "Combo Plus") when it leaves state 1 for 0xE. | `win::notices` | Checked (decomp + exe); **Assumption**: `0xA80710`'s text has one `%s` for the name (the texts aren't in the session) |
 | **When, after a level-up**: the level-up wrapper syncs the abilities when the last level's screen ends (0xB → 0xD), then turns the same task to sleight-learned mode for the next notice (state 1 with `+0x258` set; Re:CoM's case 1 re-inits and enters 0xE; its resources are still loaded). Also chained after any of Re:CoM's own sleight-learned screens (0x11 → 0xD). The level-up's game step (`0x1401AE340`) waits for the task as for Re:CoM's screen. | `win::level_up`, `win::notices::after_step` | Checked (decomp) |
 | **Otherwise** (e.g. levels gained at Combat = Re:CoM): at the next KH1 frame of Sora in the field where Re:CoM's own camp gate holds (`0x1401A96C0` without its Start press: game state `*0x14087B0B0`, `+0x18 & 0x8008` and `+0x5A0` bit 11 clear, not flags (1, 0x33) and (1, 0x34), `0x1401AAA90`: `+0x5A4` (any `CLevelUp` clears it while up), flag (1, 6) clear, `0x140234570`, `+0x5A0 & 0x80201C01`; `+0x580` = 9): `CLevelUp(new 0x2C0, 0x1402AD300(1), 0x5A)` as event `0xAD 7` makes it. Per frame: one atomic load when nothing waits. | `win::notices::frame` (from the request-bits wrapper) | Checked (decomp + exe); **Assumption**: the field (enemies) holds still under the screen as it does for Re:CoM's event and chest screens (those come while an event / chest holds Sora) |
-| **No `CTechHelp`** at Combat = KH1: when a sleight-learned screen goes 0xF → 0x10 it has just made `CTechHelp` (`0x14012BF80`), the last child of its task list (`+0x48` tail node, `+8` task; vtable `0x14051B4A8` checked): set to state 5 and page 0, so Re:CoM's update ends it on its first run (default branch) with nothing loaded or unloaded, and its dtor sets `0x14087A4B0`, which state 0x10 waits for. Applies to Re:CoM's own sleight-learned screens at KH1 too (event / chest sleights); Re:CoM's level-up **Sleight pick** keeps its help page (case 8, not this mode). | `win::notices::skip_tech_help` | Checked (decomp + exe); Assumption: a child task first runs after its parent's update returns |
+| **No `CTechHelp`** at Combat = KH1: when a sleight-learned screen goes 0xF → 0x10 it has just made `CTechHelp` (`0x14012BF80`), the last child of its task list (`+0x48` tail node, `+8` task; vtable `0x14051B4A8` checked): set to state 5 and page 0, so Re:CoM's update ends it on its first run (default branch) with nothing loaded or unloaded, and its dtor sets `0x14087A4B0`, which state 0x10 waits for. Applies to Re:CoM's own sleight-learned screens at KH1 too (event / chest sleights). **Also after the level-up's Sleight pick** (owner, 2026-11-03, follow-ups: "skip the card help page after the level-up Sleight pick too"): case 8, once the result line has played, makes `CTechHelp(this, id)` for a Sora Sleight pick (`+0x230` = 0, `+0x220` = 2) and goes 8 → 9, which waits for `0x14087A4B0` (its ctor clears it), then 10: the same skip at 8 → 9. | `win::notices::skip_tech_help` | Checked (decomp + exe); Assumption: a child task first runs after its parent's update returns |
 
 Owner test lines (step 2):
 - Combat = KH1: reach level 24 (Air Combo Plus) or 87 / 93 / 99 (Combo Plus): after the level-up
@@ -383,5 +392,13 @@ Owner test lines (step 2):
   the camp could open; tell us if enemies keep moving or can hit Sora under it.
 - A Re:CoM sleight from an event or chest at KH1 (e.g. Freeze, Magnet Spiral): its box as before,
   but no card help page after it. At Combat = Re:CoM the help page stays.
+
+Owner test lines (step 1/2 follow-ups):
+- Combat = KH1, level up and pick AP Up: still "AP Up" / "Max AP +2", AP + 2 on the Abilities page;
+  the log says `Re:CoM's +25 CP kept, unseen: CP a -> a + 25`. Switch Combat to Re:CoM: the camp's
+  Deck screen shows the higher CP (as if each AP Up had been a CP Up).
+- Combat = KH1, a level-up whose Sleight row is offered (e.g. level 32, Lethal Frame): pick it: no
+  card help page after the result line; the log says `level-up (its Sleight pick) …: CTechHelp …
+  ended before its page`. At Combat = Re:CoM the help page stays.
 
 Not checked (8.1 / 8.2): anything in game; Re:CoM's message texts; the row icon.

@@ -9,8 +9,10 @@
 //! - **Words** (rows built: 2 → 3): row 1's label and value, the status panel's row 1 label, and
 //!   its value (the max AP, or "now → +2" while the cursor is on row 1, as Re:CoM prints its CP)
 //!   whenever Re:CoM re-prints the panel (states 3, 4 and 6: `0x140110C60(this, 7)`).
-//! - **Pick** (6 → 7 with the cursor on row 1): Re:CoM's +25 CP is undone (CP stays as it was:
-//!   no deck at KH1) and one AP Up is added (`super::abilities::add_ap_up`), the result line ours.
+//! - **Pick** (6 → 7 with the cursor on row 1): one AP Up is added (`super::abilities::add_ap_up`),
+//!   the result line ours. Re:CoM's +25 CP (`0x14010F6AB`) is kept, unseen (owner, 2026-11-03:
+//!   CP keeps growing so a switch back to Re:CoM is fair), while Re:CoM itself would have offered
+//!   its CP row (CP < 1625, `crate::level_up::keeps_recom_cp`); above Re:CoM's ceiling it is undone.
 //! - **The end** (0xB → 0xD): the ability state is synced (the new level's KH1 abilities are
 //!   queued as notices), then the notices' step (`super::notices::after_step`).
 
@@ -33,7 +35,7 @@ fn note(line: impl FnOnce() -> String) {
 /// What the wrapper keeps across Re:CoM's update.
 pub(super) struct Before {
     state: i32,
-    /// Sora's CP before a confirm on the AP Up row.
+    /// Sora's CP before a confirm on the AP Up row (Re:CoM's +25 is kept only below its cap).
     cp: Option<i32>,
 }
 
@@ -125,14 +127,21 @@ unsafe fn step(this: usize, b: &Before, st: i32) {
             return;
         }
         let raised = super::stats::sora_cp();
-        super::stats::set_sora_cp(cp);
+        let keep = crate::level_up::keeps_recom_cp(cp);
+        if !keep {
+            super::stats::set_sora_cp(cp);
+        }
         let r = super::abilities::add_ap_up();
         set_text(this, off::RESULT, text::RESULT);
         log(&format!(
-            "level-up: AP Up picked at Re:CoM level {}: {}; Re:CoM's CP kept at {cp} (it had made it {:?})",
+            "level-up: AP Up picked at Re:CoM level {}: {}; {}",
             super::stats::sora_level(),
             r.map_or_else(|| "the ability state isn't live: nothing added".to_string(), |(n, max)| format!("{n} AP Up pick(s), max AP {max}")),
-            raised
+            if keep {
+                format!("Re:CoM's +{} CP kept, unseen: CP {cp} -> {raised:?}", crate::abilities::RECOM_CP_PER_UP)
+            } else {
+                format!("Re:CoM's CP kept at {cp} (its own ceiling {}: it had made it {raised:?})", crate::level_up::RECOM_CP_OFFER_CAP)
+            }
         ));
     }
 }

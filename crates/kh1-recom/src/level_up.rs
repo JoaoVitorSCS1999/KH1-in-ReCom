@@ -12,7 +12,8 @@
 //!   state 0xE). 2: builds the rows (`0x140110480(this, 0)`), the status panel (`0x140110C60(this,
 //!   0)`); 3 / 4: they open; 6: the pick (cursor moves re-print the panel, `0x140110C60(this, 7)`);
 //!   confirm: row 0 max HP + 15, **row 1 (Sora) CP + 25**, row 2 learns the sleight; the result
-//!   line (`0x140110140(this, 0)`) → 7; 8: a sleight pick opens `CTechHelp`; 0xB: the next level
+//!   line (`0x140110140(this, 0)`) → 7; 8: when the result line has played, a Sleight pick makes
+//!   `CTechHelp(this, id)` and goes to 9, which waits for it (`0x14087A4B0`), then 10; 0xB: the next level
 //!   (state 1) or the end (0xD). Sleight mode: 0xE the line (its wording `0xA8070F`, or for ids
 //!   ≥ 0x5A in Sora's story Re:CoM's "ability" wording `0xA80710`, with the name `+0x250`), 0xF a
 //!   180-frame timer or a press, then `CTechHelp(this, id)` → 0x10 waits for it (`0x14087A4B0`),
@@ -64,6 +65,10 @@ pub mod state {
     pub const OPENING: i32 = 3;
     pub const PICK: i32 = 6;
     pub const PICKED: i32 = 7;
+    /// The result line plays; when it has, a Sleight pick makes `CTechHelp` (→ [`PICK_HELP`]).
+    pub const RESULT: i32 = 8;
+    /// Waits for the Sleight pick's `CTechHelp` (`0x14087A4B0`).
+    pub const PICK_HELP: i32 = 9;
     pub const NEXT: i32 = 0xB;
     pub const END: i32 = 0xD;
     pub const LEARNED: i32 = 0xE;
@@ -76,6 +81,15 @@ pub mod state {
 pub const CP_ROW: usize = 1;
 /// Re:CoM's CP offer cap: offered while CP < 1625 (`cmp [stats+0xC],0x659` at `0x14010F210`).
 pub const RECOM_CP_OFFER_CAP: i32 = 0x659;
+/// Whether the AP Up pick keeps Re:CoM's +25 CP (owner, 2026-11-03: "AP Up also gives Re:CoM's +25
+/// CP unseen (CP keeps growing for a switch back)"): while Re:CoM itself would have offered its CP
+/// row (CP < 1625 before the pick, [`RECOM_CP_OFFER_CAP`]), so the CP never passes Re:CoM's own
+/// ceiling (275 + 25 × 54 = 1625: a Re:CoM-only save at the same level could have no more). At
+/// 1625 and above the add is undone (the AP Up still counts).
+pub fn keeps_recom_cp(cp_before: i32) -> bool {
+    cp_before < RECOM_CP_OFFER_CAP
+}
+
 /// The sleight id our ability notices open the sleight-learned screen with: Re:CoM's High Jump
 /// (0x5A), the first id its line words as an ability (`cmp [rbx+0x258],0x5A` at `0x1401102DD`).
 /// Only the wording follows the id; the name is ours (`+0x250`).
@@ -151,11 +165,29 @@ mod tests {
         assert!(!same_text(b"CP Up", text::ROW_LABEL));
     }
 
+    /// Re:CoM's CP stays within what Re:CoM itself can reach (its offer cap 1625 = 275 + 25 × 54).
+    #[test]
+    fn ap_up_keeps_recoms_cp_up_to_its_cap() {
+        assert!(keeps_recom_cp(crate::abilities::RECOM_START_CP));
+        assert!(keeps_recom_cp(1600), "1600 + 25 = 1625: Re:CoM's last offered pick");
+        assert!(!keeps_recom_cp(1625), "Re:CoM greys its CP row from 1625");
+        assert!(!keeps_recom_cp(i32::MAX));
+        assert_eq!(crate::abilities::RECOM_START_CP + crate::abilities::RECOM_CP_PER_UP * 54, RECOM_CP_OFFER_CAP);
+        let mut cp = crate::abilities::RECOM_START_CP;
+        for _ in 0..98 {
+            if keeps_recom_cp(cp) {
+                cp += crate::abilities::RECOM_CP_PER_UP;
+            }
+        }
+        assert_eq!(cp, RECOM_CP_OFFER_CAP, "a pick at every level-up ends at Re:CoM's 1625");
+    }
+
     #[test]
     fn ids() {
         assert_eq!(ABILITY_WORDING_ID, 0x5A);
         assert_eq!(RECOM_CP_OFFER_CAP, 1625);
         assert_eq!(off::ROW_LABEL + off::ROW_STEP * CP_ROW, 0xD8);
         assert_eq!(off::PANEL_VALUE + off::PANEL_STEP * CP_ROW, 0x188);
+        assert_eq!((state::RESULT, state::PICK_HELP), (8, 9));
     }
 }

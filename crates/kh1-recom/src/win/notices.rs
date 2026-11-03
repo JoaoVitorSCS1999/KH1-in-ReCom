@@ -18,10 +18,11 @@
 //!   the id in `+0x250`), `+0x250` is pointed at our name (static; the line is formatted at 0xE),
 //!   once per notice (the task's pointer is forgotten then, so a later screen at a reused address
 //!   is never touched).
-//! - **No `CTechHelp` at KH1** (owner): when a sleight-learned screen goes 0xF → 0x10 it has just
-//!   made its `CTechHelp`, the last child of its task list: set to state 5 with no page, Re:CoM's own
-//!   update ends it on its first run (nothing loaded, none unloaded) and its dtor sets
-//!   `0x14087A4B0`, which 0x10 waits for.
+//! - **No `CTechHelp` at KH1** (owner): when a sleight-learned screen goes 0xF → 0x10, or a level-up
+//!   whose Sleight row was picked goes 8 → 9 (owner, 2026-11-03: "skip the card help page after the
+//!   level-up Sleight pick too"), it has just made its `CTechHelp`, the last child of its task list:
+//!   set to state 5 with no page, Re:CoM's own update ends it on its first run (nothing loaded, none
+//!   unloaded) and its dtor sets `0x14087A4B0`, which 0x10 / 9 wait for.
 
 use super::movement::{func, rd, wr};
 use super::{base, log, va};
@@ -114,7 +115,7 @@ pub(super) unsafe fn after_step(this: usize, before: i32, after: i32) {
         }
     }
     // No card-stock help page at KH1 (owner): the CTechHelp 0xF just made ends at once.
-    if before == state::LEARNED_SHOW && after == state::LEARNED_HELP && super::mp::active() {
+    if ((before == state::LEARNED_SHOW && after == state::LEARNED_HELP) || (before == state::RESULT && after == state::PICK_HELP)) && super::mp::active() {
         skip_tech_help(this);
     }
     if after != state::END || before == state::END {
@@ -135,12 +136,16 @@ unsafe fn skip_tech_help(this: usize) {
     }
     let th: usize = rd(node + off::NODE_TASK);
     if th == 0 || rd::<usize>(th) != va(base(), tech_help::VTABLE) || rd::<u32>(th + tech_help::STATE) != 0 {
-        note(|| format!("sleight-learned screen {this:#x}: its last child is not a fresh CTechHelp ({th:#x}); left as is"));
+        note(|| format!("CLevelUp {this:#x}: its last child is not a fresh CTechHelp ({th:#x}); left as is"));
         return;
     }
     wr(th + tech_help::STATE, tech_help::DONE);
     wr(th + tech_help::PAGE, 0u32);
-    note(|| format!("sleight-learned screen {:#x} (id {:#x}): CTechHelp {th:#x} ended before its page (KH1: no card-stock help)", this, rd::<u32>(this + off::SLEIGHT)));
+    note(|| {
+        let id = rd::<u32>(this + off::SLEIGHT);
+        let what = if id == 0 { "level-up (its Sleight pick)".to_string() } else { format!("sleight-learned screen (id {id:#x})") };
+        format!("{what} {this:#x}: CTechHelp {th:#x} ended before its page (KH1: no card-stock help)")
+    });
 }
 
 /// Re:CoM's gate for opening the camp in the field, without the Start press (`0x1401A96C0`).
