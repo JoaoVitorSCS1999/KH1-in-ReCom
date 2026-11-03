@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 157: The KH1 Fat Bandit (KH1's waits, aimed fireballs, the fire breath), version 0.87.0 (2026-11-01)
+
+- Asks (owner, 2026-11-02): "it is nearly impossible to attack this fat bandit because it attacks so frequently"; "keep porting heartless" (M11).
+- Fat Bandit (KH1 `xa_ex_2060` / `ex_2060.bd` ↔ Re:CoM `CEnemyFatbandit` id 10), every number from the player's files (Checked (files)): KH1's attack choice by distance, wander, hit reactions and waits (75 frames after the belly flop, 60 after a fireball volley, a 226-frame wind-up before the fire breath); in the model a new attack round every 293–324 frames with Sora 2–7 m away (Re:CoM's own: about 33).
+- Fireball: a Re:CoM bullet moved by KH1's numbers: straight at 45 / frame for 240 frames, aimed where the head looks (no homing; Checked (decomp)); Re:CoM's fireball power and effect (`0x14053E290` / `0x14053E300`); Guard sends it back, a swing bats it back at Sora's target (KH1). Flame: KH1's chain of up to 16 spheres, each a Re:CoM bullet (radius `0x140172690`), re-hit every 60 frames, up to 140 frames while the breath plays; the fireball's power (owner). Belly flop: Re:CoM's belly power. Front guard: swings from the front bounce off.
+- Re:CoM (Checked (exe), 22 sites): vtable `0x14053DDF8`, ctor `0x14018DD70` (`40 53 48 83 EC 20`, only caller `0x140189140`), alloc `0x140189127`; power getter `0x14017F0E0`, hit serial `0x14016F7D0`.
+- Assumptions: the head has turned when it fires; the front check ignores height; the flame ignores walls; one flame per enemy; Re:CoM's sounds. Not ported: leash, party messages, the weak-spot stagger (owner: left out), hit attributes. Not on Re:CoM's 0.83.0 cooldown.
+- Asset step: ENEMY/0010 (ANN / ASD / SES), `kh1-fatbandit.json`.
+- Checked: tests, Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 156: Neoshadow: no fixed points (they move about their own place), version 0.86.0 (2026-11-01)
 
 - Ask (owner, 2026-11-02, Neoshadow question 1): "Drop them": no room 29 fixed spots; they wander and attack instead.
