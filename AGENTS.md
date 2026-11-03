@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 172: The KH1 Blue Rhapsody (its melee, hops and Blizzard), version 0.94.0 (2026-11-01)
+
+- Ask (owner, 2026-11-02): "Now let's bring in the remaining KH1 adjacent heartless" (M11).
+- Blue Rhapsody (KH1 `xa_ex_2120` / `ex_2120.bd` ↔ Re:CoM `CEnemyBluerhapsody` id 4), a flier, every number from the player's files (Checked (files): 63 + 4 numbers, 20 + 7 requests): idle legs; flies to 35 above the floor under Sora (`0x78E`); under 2.5 m a back-off and Blizzard; 2.5–5 m one or two hops (60 % two) and its melee; farther hops toward Sora to within 7.5 m; hit state: back-off and Blizzard. Reuses `kh1_core::caster`.
+- Framework: `Body::timed_hop` / `flight_hop_done` (KH1's movement state 5, `sys 82` from flight, `0x1402AF150`; back to flight at the height it left, `0x1402AFAA0`); `Cmd::AttackAt` (215 from frame 8); `Cast::direct` (a spell wait without charge).
+- Melee: a steered attack in Re:CoM's melee state 3, two new .ASD records (window frames 82..100), Re:CoM id 1, KH1's Guard recoil 216; its body row type 2 (only clashes).
+- Blizzard: acts 84 frames into cast 55; a Re:CoM bullet straight at 25 / frame for 60 frames; Re:CoM shot power id 0 and its effect set `0x1407C2F10`; a swing or Guard ends it (KH1's child ends at any clash), never sent back.
+- Re:CoM (Checked (exe)): vtable `0x140537CA8`, ctor `0x14018C120` (`40 53 48 83 EC 20`, only caller `0x140189044`), alloc `0x14018902B` 0xCD0 → 0xCF0; state 2 never entered.
+- Assumptions: the child's first frame after `sys 94`; apex ±1 frame; request bit 16 as plain; flat battle floors; Re:CoM's sounds. Not ported: element rules, leash, effects (M13).
+- Asset step: ENEMY/0004 (ANN / ASD / SES), `kh1-bluerhapsody.json`.
+- Checked: tests (985), Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 171: KH1 camp entry in Riku's story (Combat and Movement), version 0.93.4 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Show it" in Riku's story, with only Combat and Movement.
