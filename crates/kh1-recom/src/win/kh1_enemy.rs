@@ -399,6 +399,8 @@ pub unsafe extern "win64" fn ctor<const K: usize>(this: usize, a: usize, b: usiz
     let m0: usize = rd(this + e::MOVER);
     let yaw = if m0 != 0 { crate::units::yaw_to_kh1(rd::<f32>(m0 + mv::YAW)) } else { 0.0 };
     let ai = ce::make(K, m, seed, yaw);
+    // Scripts that share a work block among a room's enemies share it among the battle's (M11, the Neoshadow).
+    ai.set_battle(battle);
     let idx = (|| {
         let Ok(mut v) = RT.lock() else { return None };
         if v.iter().any(|x| x.battle != battle) {
@@ -1753,7 +1755,13 @@ pub unsafe extern "win64" fn defeat_begin(en: usize) {
         guard_bodies(en, rt, None);
         rt.recom_flinch = false;
         rt.recom_state = false;
-        if !start_reaction(en, rt, hit) {
+        if let Some(r) = rt.ai.death_motion() {
+            // The script's own death motion (its handler zeroed KH1's reaction; M11, the Neoshadow's 72).
+            end_action(rt);
+            rt.queued = None;
+            play(en, rt, r, 0.0);
+            rt.reaction = Some(Phase::Motion);
+        } else if !start_reaction(en, rt, hit) {
             play(en, rt, ke::react::req::FLINCH, 0.0);
             rt.reaction = Some(Phase::Motion);
         }
@@ -1938,7 +1946,8 @@ unsafe fn guard_step(en: usize, rt: &mut Runtime, step: f32) {
         guard_bodies(en, rt, None);
         return;
     };
-    let playing = rt.current == Some(g.request);
+    let held = g.request == ke::guard::HELD;
+    let playing = held || rt.current == Some(g.request);
     if playing {
         g.seen = true;
     } else if g.seen || g.age >= ce::watchdog::START_LIMIT {
@@ -1950,7 +1959,8 @@ unsafe fn guard_step(en: usize, rt: &mut Runtime, step: f32) {
     rt.guard = Some(g);
     let m = manifest(rt.class);
     let Some(row) = m.guards.get(g.row as usize) else { return };
-    let on = playing && row.live(g.request, crate::units::units_to_frames(clock(en)));
+    // KH1's mode 3 (`ke::guard::HELD`, the Neoshadow's body row): on every frame until `Cmd::Guard(None)`.
+    let on = held || (playing && row.live(g.request, crate::units::units_to_frames(clock(en))));
     guard_bodies(en, rt, if on { row.half_angle() } else { None });
 }
 
@@ -2131,8 +2141,10 @@ pub unsafe extern "win64" fn guard_event(en: usize) {
         let g = rt.guard.filter(|_| rt.guarded)?;
         let row = manifest(rt.class).guards.get(g.row as usize)?;
         // KH1's side for the enemy (`pair_dispatch`'s), a kind-6 clash for any other attacker (a Re:CoM
-        // attack has no KH1 priority).
+        // attack has no KH1 priority); a row at 100 is never moved by anything (`0x1402B4BC0`; M11, the
+        // Neoshadow's body row).
         let side = rt.guard_side.take().unwrap_or(ke::guard::Side::Clash { kind: 6, diff: 0 });
+        let side = if row.priority >= ke::guard::UNMOVED { ke::guard::Side::None } else { side };
         let (k, name, id) = (rt.class, row.name.clone(), rd::<u32>(en + e::ID));
         match side {
             ke::guard::Side::Clash { kind, .. } => {
