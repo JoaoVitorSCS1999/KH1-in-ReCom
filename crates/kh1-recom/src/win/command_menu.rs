@@ -1055,7 +1055,7 @@ unsafe fn world(pl: usize) -> World {
         w.summon_out |= super::summons::sleight_running(pl);
         w.bottom = super::summons::bottom_row();
         if w.bottom == crate::sleights::Bottom::Sleights || w.shortcuts.iter().any(|&b| cm::shortcut::slot_sleight(b).is_some()) {
-            // M12 step 7: the equipped KH1 specials listed too (Strike Raid, Ars Arcanum, Ragnarok; owner: "also
+            // M12 step 7: the equipped KH1 specials listed too (Strike Raid, Sonic Blade, Ars Arcanum, Ragnarok; owner: "also
             // show up in the sleights menu"), each usable as its prompt would offer it.
             let mut equipped = super::abilities::equipped_sleights();
             if let Some(e) = equipped_specials() {

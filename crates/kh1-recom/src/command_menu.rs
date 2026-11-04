@@ -2678,6 +2678,40 @@ mod tests {
         assert!(!m.open);
     }
 
+    /// Owner (2026-11-03, "KH1 specials follow-ups": "Sonic Blade also in the Sleights list"): an
+    /// equipped Sonic Blade is listed under Re:CoM's sleight 9 (after Strike Raid 8, before Ars
+    /// Arcanum 10), named "Sonic" (KH1's word 319), usable exactly when its prompt would offer it, on
+    /// the ground; confirm issues its KH1 command 0x4B, as the prompt's Triangle does (the same
+    /// `Outcome::special`), not Re:CoM's sleight.
+    #[test]
+    fn sleights_list_holds_sonic_blade_as_its_prompt() {
+        use crate::abilities::sleight as s;
+        use crate::specials::{cmd as sp, SONIC_BLADE, STRIKE_RAID};
+        let mut sleights = [0u8; crate::sleights::MAX];
+        sleights[..3].copy_from_slice(&[s::FIRE_RAID as u8, s::SONIC_BLADE as u8, s::STRIKE_RAID as u8]);
+        let w = World { sleights, sleight_count: 3, sleight_specials: 1 << SONIC_BLADE, ..sleight_world() };
+        let mut m = Menu::new();
+        m.build(&w);
+        assert_eq!(m.sleight.cmds, vec![crate::sleights::command(s::STRIKE_RAID), crate::sleights::command(s::SONIC_BLADE), crate::sleights::command(s::FIRE_RAID)]);
+        assert_eq!(cmd::name(m.sleight.cmds[1]), 319);
+        // Sonic Blade and Fire Raid usable; Strike Raid's prompt wouldn't offer it (its bit clear).
+        assert_eq!(m.sleight.grey & 7, 0b001);
+        m.build(&World { sleight_specials: 0, ..w });
+        assert_eq!(m.sleight.grey & 7, 0b011, "its prompt wouldn't offer it: greyed");
+        m.build(&World { state: 2, ..w });
+        assert_eq!(m.sleight.grey & 2, 2, "in the air: greyed (KH1's specials start from state 0)");
+        // Confirm on its row (the second): KH1's own Sonic Blade command, as the prompt's Triangle.
+        let w = World { sleight_specials: 1 << SONIC_BLADE | 1 << STRIKE_RAID, ..w };
+        let mut m = Menu::new();
+        m.step(&w, press(|p| p.up = true));
+        m.step(&w, press(|p| p.confirm = true));
+        assert!(m.open && m.sub == Kind::Sleight);
+        m.step(&w, press(|p| p.down = true));
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert_eq!((o.special, o.sleight), (Some(sp::SONIC_BLADE), None));
+        assert!(!m.open);
+    }
+
     #[test]
     fn sleights_words_are_in_the_word_list() {
         // A manifest from before M12 step 5: the built-in English words (Re:CoM's look draws them).
