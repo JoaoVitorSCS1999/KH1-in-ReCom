@@ -202,6 +202,36 @@ ripple drive or stun impact,".
   Re:CoM's `0x140474EB0` is KH1's stop byte (the particles finish); KH1's frame and Re:CoM's motion time agree within a
   frame; a detached event outlives the motion's end.
 
+## Stage 4 plan (not built yet): per-Keyblade trails and sounds
+
+Research for the stage (2026-11-04); the open choices below go to the owner first.
+
+- **Each Keyblade's data** (Checked (files): btltbl weapon rows, the player's hed):
+  - its effect set is its `.wpn` section 0 (trail id 5; Ultima's lifetime 9 and attach code 0x30, the Kingdom Key's 12
+    and 0: `recom-m13-kh1-fx.md` § 1);
+  - its sounds are its own `<model>.se` (the Kingdom Key's `xw_ex_5010.se`: 40 SCDs), from its weapon row's `+0x34`
+    base, 40 ids each (bases every 0x28: Kingdom Key `0x2B10`, Oathkeeper `0x3887`, Ultima `0x2C00`, …; a few ids such
+    as 11018–11019 are in several `.se` files);
+  - the hit sounds are the same base + row `+0xC..+0xE` (stage 5).
+- **Where Re:CoM keeps them:** our converted Keyblade groups 21–36 / 38–43 share Re:CoM's `PL0002.EET` by name
+  (`recom-keyblade-models.md` § 10.2; group 2 must stay its first loader). A per-Keyblade trail needs:
+  - one EET per group (`PL00GG.EET`, the group row's EET name made its own);
+  - its set loaded with it.
+- **Sounds:** Sora's `PL0001.SES` is per motion, not per Keyblade. So each Keyblade's ids would go in at their own
+  variant (1301 + k), the DLL picking k by the equipped Keyblade, and only the equipped Keyblade's banks registered.
+- **Open for the owner:**
+  1. Where the 16 KH1 sets load:
+     - (a) with Sora in `EF1000.EFF` (always in memory, about 2 MB plus textures; simplest);
+     - (b) one new `EF09GG.EFF` per Keyblade group, through a new EFFECT-table row and the group's LINK (only the
+       equipped one in memory, as the Keyblade models; more DLL table work).
+  2. The trail's length on longer blades: Re:CoM's three nodes fit the Kingdom Key (`w001_055`: −0.11 / −0.78 m on
+     `wep0`). KH1's own trail follows its program's tracked point (`pppPObjPoint` / `pppRyjMegaBirth` data, not decoded).
+     Options:
+     - (a) the same nodes for every Keyblade (Re:CoM's look today);
+     - (b) nodes scaled by each Keyblade's KH1 blade reach (W `+0x24`; Ultima −5.6 against −3.7);
+     - (c) decode the PPP point ops first (research before building).
+  3. The six KH2 Keyblades have no KH1 set: (a) the Kingdom Key's trail; (b) Re:CoM's.
+
 ## Open (ask at their stage)
 
 - No hit-stop at KH1 (none found in KH1: `recom-m13-kh1-fx.md` § 2; this corrects the clash "hit-stop" in
