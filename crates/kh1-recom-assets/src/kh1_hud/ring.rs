@@ -60,7 +60,8 @@ pub mod group {
     pub const CHARGE_GAIN: usize = 21;
     /// Charge loss fades.
     pub const CHARGE_LOSS: usize = 291;
-    /// The ticks at 90° / 180° past them in max MP, centred on this ring's seams (0.41.0).
+    /// The dividers at 90° / 180° once max MP passes them, on this ring's seams (0.41.0; drawn
+    /// as KH1's own 30° gaps since 0.102.4, [`super::dividers`]).
     pub const TICKS: usize = 561;
     /// Groups in all.
     pub const COUNT: usize = 562;
@@ -426,6 +427,8 @@ pub(crate) struct Inputs<'a> {
     pub charge: Quarter,
     /// One texel of the MP back's black outline (PS2 1 × 1, PC 2 × 2), for the closing outline.
     pub black: usize,
+    /// The 90° and 180° dividers ([`dividers`]).
+    pub div: Dividers,
 }
 
 /// The ring's centre (KH1 units): Re:CoM's HP ring's centre at KH1's place (the DLL's
@@ -475,6 +478,188 @@ pub fn black_texel(ps2: &Pic, hd: &[Pic], ring: (i32, i32, i32), scale: usize) -
         }
     }
     None
+}
+
+/// Half the dividers' width, units. KH1's 30° gaps fade the MP cells over about ±2.25 units of
+/// their centre line (Checked (files): the cells' alpha across the 30° and 60° gaps of the
+/// owner's `-a2c0.dds`: clear within ±1, half at ±1.5, whole by ±2.25, the same at every radius of
+/// the band), so ±3 holds the whole fade. Even widths only: the seams are on the ring's centre,
+/// and parts and translations are whole units.
+pub const DIV_HALF: i32 = 3;
+
+/// The 90° / 180° dividers: their atlas items (the vertical strip at 12 o'clock, the horizontal
+/// one at 3 o'clock) and where their strips start inside the ring (units from the centre).
+#[derive(Clone, Debug)]
+pub struct Dividers {
+    /// Vertical, horizontal.
+    pub items: [usize; 2],
+    /// The strips run from here out to the MP back's radius.
+    pub r_in: i32,
+}
+
+/// The MP cells' coverage (0..1) across KH1's 30° gaps (both gaps of the quarter, both sides,
+/// every half unit of the band's radius), averaged over each PC texel column of a divider, from
+/// −[`DIV_HALF`] to +[`DIV_HALF`] (the strips' alpha is 1 − this).
+fn gap_cover(mp: &Quarter) -> Result<Vec<f64>> {
+    let (n, s) = (mp.n, mp.n as f64 / mp.r as f64);
+    // Bilinear alpha (0..1) at a point of the quarter (PC texels, from its top-left corner).
+    let alpha = |x: f64, y: f64| -> f64 {
+        let (x, y) = (x - 0.5, y - 0.5);
+        let (x0, y0) = (x.floor(), y.floor());
+        let (fx, fy) = (x - x0, y - y0);
+        let at = |i: f64, j: f64| -> f64 {
+            let (i, j) = (i.clamp(0.0, n as f64 - 1.0) as usize, j.clamp(0.0, n as f64 - 1.0) as usize);
+            mp.alpha[j * n + i] as f64 / 128.0
+        };
+        at(x0, y0) * (1.0 - fx) * (1.0 - fy) + at(x0 + 1.0, y0) * fx * (1.0 - fy) + at(x0, y0 + 1.0) * (1.0 - fx) * fy + at(x0 + 1.0, y0 + 1.0) * fx * fy
+    };
+    // At (radius, texture angle), units and degrees.
+    let polar = |r: f64, t: f64| alpha(n as f64 - r * s * t.to_radians().cos(), n as f64 - r * s * t.to_radians().sin());
+    // The cells' band: where the middle of a cell (45°) is mostly covered.
+    let band: Vec<f64> = (0..mp.r * 4).map(|k| k as f64 / 4.0).filter(|&r| polar(r, 45.0) > 0.75).collect();
+    let (lo, hi) = match (band.first(), band.last()) {
+        (Some(&a), Some(&b)) if b - a > 4.0 => (a + 1.0, b - 1.0),
+        _ => return bad("kh1hud ring: no MP cells at 45° of picture 5's MP ring"),
+    };
+    let cols = (2 * DIV_HALF) as usize * s.round() as usize;
+    let mut cover = vec![0.0; cols];
+    let mut count = 0usize;
+    for gap in [30.0, 60.0] {
+        let mut r = lo;
+        while r <= hi + 1e-9 {
+            for (c, v) in cover.iter_mut().enumerate() {
+                for k in 0..4 {
+                    let d = -DIV_HALF as f64 + (c as f64 + (k as f64 + 0.5) / 4.0) / s;
+                    *v += polar(r, gap + (d / r).to_degrees()) + polar(r, gap - (d / r).to_degrees());
+                }
+            }
+            count += 8;
+            r += 0.5;
+        }
+    }
+    cover.iter_mut().for_each(|v| *v /= count as f64);
+    let (mid, edge) = (cover[cols / 2 - 1].max(cover[cols / 2]), cover[0].min(cover[cols - 1]));
+    if mid > 0.1 || edge < 0.9 {
+        return bad(format!("kh1hud ring: picture 5's MP cells have no clear 30° / 60° gaps (coverage {mid:.2} at the gap, {edge:.2} at ±{DIV_HALF})"));
+    }
+    Ok(cover)
+}
+
+/// KH1 marks 90° and 180° of max MP with two ticks over the ring (`g_s` objects 37 / 38: 2 × 14
+/// units of navy (24, 28, 42) with one black texel at each end, picture 7 (70, 97) / (74, 97);
+/// clear on PC, so redrawn from the PS2 texels, [`super::fit_layouts`]); its quarter pictures have
+/// gaps at 30° and 60° only. Drawn as they were on this ring (0.41.0–0.102.3) the 12 o'clock tick
+/// read thinner than the gaps (2 units against the gaps' 3 at half coverage), stuck half a unit
+/// out past the ring's outer edge (its top at r 57, the ring's art ends at r 56.5) and broke the
+/// ring's 2-unit outlines with its 1-unit ends (owner, 2026-11-04). Here each divider is a strip
+/// of the MP back's own art on the seam (the back's radial profile at that edge: its outlines and
+/// navy), its alpha 1 − the cells' coverage across KH1's own 30° gaps, on the back's opaque
+/// texels only: over the cells it composes exactly what a gap shows (the back through the cells'
+/// fading edges), and it never reaches past the back's art (the back draws its own soft edges). One PC texture for every language (the ring's art is the same in all
+/// five; Checked (files)).
+pub(crate) fn dividers(atlas: &mut Atlas, back: &Quarter, mp: &Quarter) -> Result<Dividers> {
+    let cover = gap_cover(mp)?;
+    let (n, s) = (back.n, back.n / back.r as usize);
+    if s % 2 != 0 || s == 0 {
+        return bad(format!("kh1hud ring: picture 7's PC scale {s} is not even"));
+    }
+    // The back's radial profile, from its outer edge in: at 12 o'clock (the quarter's right
+    // column) and at 3 o'clock (its bottom row, mirrored there).
+    let col: Vec<[u8; 4]> = (0..n).map(|j| back.pc.px[j * n + n - 1]).collect();
+    let row: Vec<[u8; 4]> = (0..n).map(|i| back.pc.px[(n - 1) * n + i]).collect();
+    let last = |v: &[[u8; 4]]| v.iter().rposition(|t| t[3] >= ALPHA_MIN);
+    let deepest = match (last(&col), last(&row)) {
+        (Some(a), Some(b)) => a.max(b),
+        _ => return bad("kh1hud ring: the MP back's 12 / 3 o'clock edge is clear"),
+    };
+    let depth = (deepest + s) / s; // whole units from the outer edge
+    let r_in = back.r - depth as i32;
+    let rows = depth * s;
+    let cols = cover.len();
+    // Only where the back is opaque and its neighbours too: the strip then lies on the back's own
+    // opaque art, and its filtered edge falls on the outlines (the back's soft outer and inner
+    // edge texels are drawn once, by the back).
+    let solid = |p: &[[u8; 4]], k: usize| (k.saturating_sub(1)..=(k + 1).min(n - 1)).all(|j| p[j][3] >= 0x80);
+    let fade = |p: &[[u8; 4]], k: usize, c: usize| {
+        let t = p[k];
+        let a = if solid(p, k) { (t[3] as f64 * (1.0 - cover[c]).clamp(0.0, 1.0)).round() as u8 } else { 0 };
+        [t[0], t[1], t[2], a]
+    };
+    let mut v = Pic::blank(cols, rows);
+    let mut h = Pic::blank(rows, cols);
+    for c in 0..cols {
+        for k in 0..rows {
+            v.px[k * cols + c] = fade(&col, k, c);
+            h.px[c * rows + k] = fade(&row, rows - 1 - k, c);
+        }
+    }
+    let half = |p: &Pic| (0..s / 2).fold(p.clone(), |p, _| super::menu::half(&p));
+    let items = [atlas.add(half(&v), vec![v], s), atlas.add(half(&h), vec![h], s)];
+    Ok(Dividers { items, r_in })
+}
+
+/// The pieces of `groups` drawn from the whole pictures `items` (the straight segments past 270°
+/// and their cap; the ring draws nothing else from them): (group, step, piece). Taken before
+/// [`super::split_raw`] gives each its own atlas box, for [`lift_straights`].
+pub(crate) fn straight_marks(groups: &[Group], items: &[usize]) -> Vec<(usize, usize, usize)> {
+    let mut v = Vec::new();
+    for (g, gr) in groups.iter().enumerate() {
+        for (s, st) in gr.steps.iter().enumerate() {
+            for (p, pc) in st.pieces.iter().enumerate() {
+                if items.contains(&pc.item) {
+                    v.push((g, s, p));
+                }
+            }
+        }
+    }
+    v
+}
+
+/// KH1's straight MP pieces (back segments `g_s` 17, cap 21, MP 32, charge 33 at KH1's (−1, +1)
+/// / (0, +1)) have their art flush with their rects (the back 358..374, MP 360..372, charge
+/// 368..372; Checked (files)), while the ring's bottom half ends half a unit inside its quarter
+/// (the PC art's outermost texel row is clear: the back's art spans r 40.5..56.5, the MP cells'
+/// r 42.5..54.5, about the centre; KH1's fan draws the bottom half unstretched from its apex
+/// (443, 317), `0x14026E450`: its arc ends at 373.5 / 371.5 too, Checked (decomp + files)). So
+/// the straight part sat half a unit lower than the arc it continues, and under Re:CoM's HP bar
+/// (which hides both tops) it read half a unit thicker (owner, 2026-11-04). Parts and
+/// translations are whole units, so each marked piece's art moves up half a unit in its texture
+/// instead: a copy of its box with half a unit of clear texels above and below (the PC copy; the
+/// PS2 one, a whole unit a texel, keeps its place), its rect one unit taller at the top. Returns
+/// the copies made.
+pub(crate) fn lift_straights(atlas: &mut Atlas, groups: &mut [Group], marks: &[(usize, usize, usize)]) -> Result<usize> {
+    let mut made: BTreeMap<usize, usize> = BTreeMap::new();
+    for &(g, s, p) in marks {
+        let pc = groups[g].steps[s].pieces[p];
+        if pc.uv[0] != 0 || pc.uv[1] != 0 || pc.rect[1] >= pc.rect[3] {
+            return bad(format!("kh1hud ring: straight piece {pc:?} is not a whole box drawn upright"));
+        }
+        let item = match made.get(&pc.item) {
+            Some(&i) => i,
+            None => {
+                let (ps2, hds, sc) = &atlas.items[pc.item];
+                let sc = *sc;
+                if sc % 2 != 0 {
+                    return bad(format!("kh1hud ring: PC scale {sc} is not even"));
+                }
+                let pad = |p: &Pic, top: usize, bottom: usize| {
+                    let mut q = Pic::blank(p.w, p.h + top + bottom);
+                    q.px[top * p.w..(top + p.h) * p.w].copy_from_slice(&p.px);
+                    q
+                };
+                let ps2 = pad(ps2, 1, 0);
+                let hds: Vec<Pic> = hds.iter().map(|h| pad(h, sc / 2, sc / 2)).collect();
+                let i = atlas.add(ps2, hds, sc);
+                made.insert(pc.item, i);
+                i
+            }
+        };
+        let q = &mut groups[g].steps[s].pieces[p];
+        q.item = item;
+        q.uv[3] += 1;
+        q.rect[1] -= 1;
+    }
+    Ok(made.len())
 }
 
 /// Quadrant `q`'s scissor (centre-relative cells; one cell past the centre lines toward the
@@ -610,21 +795,23 @@ pub(crate) fn groups(i: &Inputs, stats: &mut CutStats) -> Result<Vec<Group>> {
     for ops in &charge_cells {
         out.push(fade(ops, alpha(mb::FADE_FIRST), alpha(mb::FADE_LAST), 0x0080_8080, false, CENTRE));
     }
-    // Ticks: KH1's two ticks (picture 7, `g_s` objects 37 / 38) once max MP passes 90° / 180°,
-    // each centred on this ring's seam there (x = CENTRE.0 at 12 o'clock, y = CENTRE.1 at 3
-    // o'clock). Their width and art are KH1's.
-    let mid = |o: &Obj, k: usize| o.rect[k] * 2 + o.rect[k + 2];
-    let t90 = &objs[obj::TICK_90];
-    let t180 = &objs[obj::TICK_180];
-    let (dx90, dy180) = ((2 * CENTRE.0 - mid(t90, 0)) / 2, (2 * CENTRE.1 - mid(t180, 1)) / 2);
+    // Dividers: once max MP passes 90° / 180° (KH1's rule for its ticks, `g_s` objects 37 / 38,
+    // `0x14026E630` `+0x78` / `+0x80`), a strip of the MP back's own art on the seam, faded at
+    // its sides as KH1's 30° gaps fade the cells (owner, 2026-11-04: the 12 o'clock one was "too
+    // narrow, differently drawn, and extends past the bar"; [`dividers`]).
+    let [dv, dh] = i.div.items;
+    let (w, rin, rout) = (DIV_HALF, i.div.r_in, i.back.r);
+    let strip = |item: usize, rect: [i32; 4], uv: [i32; 4]| Op { stage: 0, scissor: [0; 4], piece: Piece { item, uv, rect, colour: 0x8080_8080, grad: 0 }, turn: 0, tr: CENTRE };
+    let s90 = strip(dv, [-w, -rout, w, -rin], [0, 0, 2 * w, rout - rin]);
+    let s180 = strip(dh, [rin, -w, rout, w], [0, 0, rout - rin, 2 * w]);
     let mut f = Vec::new();
     for m in 0..=kh1::MP_CAP {
         let mut v = Vec::new();
         if m * kh1::MP_DEG > 90 {
-            v.push(plain(obj_piece(t90, i.it7, dx90, 0, 0, None)));
+            v.push(s90);
         }
         if m * kh1::MP_DEG > 180 {
-            v.push(plain(obj_piece(t180, i.it7, 0, dy180, 0, None)));
+            v.push(s180);
         }
         f.push(v);
     }
@@ -755,6 +942,91 @@ mod tests {
                 assert_eq!(act.iter().map(|s| s.pieces.len()).sum::<usize>(), f as usize / 3);
             }
         }
+    }
+
+    /// A synthetic MP back quarter (picture 7's shape): black r 40.5..42.5 and 54.5..56.5, navy
+    /// between, clear elsewhere, PC 2 texels a unit.
+    fn back_quarter(atlas: &mut Atlas) -> Quarter {
+        let n = 114usize;
+        let mut pc = Pic { w: 256, h: 256, px: vec![[0; 4]; 256 * 256] };
+        let (uc, vc) = (215usize, 189usize);
+        for j in 0..n {
+            for i in 0..n {
+                let (dx, dy) = ((n - i) as f64 - 0.5, (n - j) as f64 - 0.5);
+                let rr = (dx * dx + dy * dy).sqrt() / 2.0;
+                let t = if (40.5..42.5).contains(&rr) || (54.5..56.5).contains(&rr) {
+                    [0, 0, 0, 0x80]
+                } else if (42.5..54.5).contains(&rr) {
+                    [24, 28, 42, 0x80]
+                } else {
+                    [0; 4]
+                };
+                pc.px[(vc - n + j) * pc.w + uc - n + i] = t;
+            }
+        }
+        let ps2 = Pic { w: 128, h: 128, px: vec![[0; 4]; 128 * 128] };
+        Quarter::new(atlas, (1720, 1512, 912), &ps2, &[pc], 2).unwrap()
+    }
+
+    #[test]
+    fn dividers_are_the_back_faded_as_kh1s_gaps() {
+        let (mut atlas, mp) = quarter();
+        let back = back_quarter(&mut atlas);
+        let d = dividers(&mut atlas, &back, &mp).unwrap();
+        // The cells' coverage across a gap: symmetric, clear in the middle, whole at the sides.
+        let c = &gap_cover(&mp).unwrap();
+        assert_eq!(c.len(), 12);
+        for k in 0..6 {
+            assert!((c[k] - c[11 - k]).abs() < 1e-9);
+        }
+        assert!(c[5] < 0.05 && c[0] > 0.95, "{c:?}");
+        // The strips start where the back's art ends inside (r 40) and reach its radius.
+        assert_eq!(d.r_in, 40);
+        let (_, hv, _) = &atlas.items[d.items[0]];
+        let (_, hh, _) = &atlas.items[d.items[1]];
+        let (v, h) = (&hv[0], &hh[0]);
+        assert_eq!((v.w, v.h, h.w, h.h), (12, 34, 34, 12));
+        // Never past the back's opaque art (no texel the back draws soft or not at all), and the
+        // middle columns are the back itself.
+        let n = back.n;
+        for k in 0..34 {
+            let b = back.pc.px[k * n + n - 1];
+            for col in 0..12 {
+                let t = v.px[k * 12 + col];
+                assert!(t[3] <= b[3]);
+                if b[3] < 0x80 {
+                    assert_eq!(t[3], 0);
+                }
+            }
+            let mid = v.px[k * 12 + 5];
+            if k >= 2 && k <= 31 {
+                assert_eq!(mid[..3], b[..3]);
+                assert!(mid[3] >= 0x7A, "row {k}: {mid:?}");
+            }
+            // The horizontal strip is the same profile, the ring's outside on the right.
+            assert_eq!(h.px[5 * 34 + 33 - k], mid);
+        }
+    }
+
+    #[test]
+    fn straights_lift_half_a_unit() {
+        let mut atlas = Atlas { items: Vec::new() };
+        let mut hd = Pic::blank(4, 4);
+        hd.px.iter_mut().for_each(|t| *t = [1, 2, 3, 0x80]);
+        let item = atlas.add(Pic::blank(2, 2), vec![hd], 2);
+        let p = Piece { item, uv: [0, 0, 2, 2], rect: [10, 20, 12, 22], colour: 0x8080_8080, grad: 0 };
+        let one = 0x8080_8080;
+        let mut gs = vec![Group { steps: vec![Step { pieces: vec![p, p], frames: (0, 1), colour: (one, one), flags: FLAGS_STATIC, tr: [0; 4], rot: 0.0 }], once: true, word: GROUP_WORD_SCRUB }];
+        let marks = straight_marks(&gs, &[item]);
+        assert_eq!(marks.len(), 2);
+        assert_eq!(lift_straights(&mut atlas, &mut gs, &marks).unwrap(), 1);
+        let q = gs[0].steps[0].pieces[0];
+        assert_eq!((q.uv, q.rect), ([0, 0, 2, 3], [10, 19, 12, 22]));
+        let (ps2, hds, _) = &atlas.items[q.item];
+        assert_eq!((ps2.w, ps2.h, hds[0].w, hds[0].h), (2, 3, 4, 6));
+        // Half a unit (one PC texel) clear above and below: the art 19.5..21.5 in the rect 19..22.
+        let a: Vec<u8> = (0..6).map(|j| hds[0].px[j * 4][3]).collect();
+        assert_eq!(a, vec![0, 0x80, 0x80, 0x80, 0x80, 0]);
     }
 
     #[test]

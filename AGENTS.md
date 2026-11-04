@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 212: The MP ring's 90° / 180° dividers drawn as KH1's gaps; its straight part lined up with the arc, version 0.102.4 (2026-11-04)
+
+Owner, 2026-11-04 (KH1 MP ring around Re:CoM's HP ring): "there is a segment line at the top of the MP bar that is too narrow, differently drawn, and extends past the bar"; "once the curve of the MP bar flattens, the thickness of the bar very slightly increases".
+
+- **Causes** (Checked (files + offline render)): the 12 o'clock divider was KH1's tick `g_s` 37 (2 × 14, navy with 1-unit black ends, PS2 texels) placed for KH1's stretched top: on our ring it stuck 0.5 unit past the outer edge, cut the 2-unit outlines and was 2.0 units dark against the gaps' 2.7–2.9. The straight pieces (`g_s` 17 / 21 / 32 / 33) have art flush with their rects, the arc's bottom half ends half a unit inside its quarter (PC art r 40.5..56.5): the straights sat 0.5 unit lower (same thickness), so under Re:CoM's HP bar they read 0.5 thicker. KH1's own data has both (its tick 2 units against 3-unit gaps; its straights 0.5 below its arc: fan `0x14026E450`, Checked (decomp + files)).
+- **Change** (asset step `kh1_hud::ring` only): the 90° / 180° dividers are strips of the MP back's own art faded by the cells' measured coverage across KH1's 30° gaps (they compose a gap over the cells, nothing past the back's art); the ring's straight pieces get atlas copies shifted up one PC texel (rects one unit taller). Not KH1's data: owner's ask. The full KH1 gauge keeps KH1's ticks / straights. DLL unchanged.
+- Asset step: must be re-run. Checked: tests, offline render of the owner's files (before / after). Not checked: in game; Re:CoM's HP gauge art (placeholder in the render); KH1 on screen. Docs: `recom-kh1-hud.md` § 0.102.4.
+
+---
+
 ## Stage 211: Combat = Re:CoM shows Re:CoM's HUD as Re:CoM places it, version 0.102.3 (2026-11-03)
 
 Owner, 2026-11-04: "with combat set to RE:CoM the hud should also go back to the normal positioning".

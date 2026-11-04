@@ -959,3 +959,65 @@ Owner, 2026-11-04: "with combat set to RE:CoM the hud should also go back to the
 - **Side effect:** the KH1-look Donald / Goofy gauges for Re:CoM's friend cards (H6, `hud_kh1_party`) showed only
   at Combat = Re:CoM, so they no longer show. They were off in the owner's ini.
 - Not checked: in game.
+
+## 0.102.4: the MP ring's 90° / 180° dividers and its straight part (owner, 2026-11-04)
+
+Owner (screenshots, `hud = kh1`, `hud_kh1_mp_ring = on`, `hud_recom_hp_kh1_place = on`,
+`hud_kh1_gauge = off`): "there is a segment line at the top of the MP bar that is too narrow,
+differently drawn, and extends past the bar"; "once the curve of the MP bar flattens, the
+thickness of the bar very slightly increases".
+
+### KH1's data (Checked (files + decomp) unless tagged)
+
+| what | where | tag |
+|---|---|---|
+| KH1's fan: left / top edges at centre − R, right / bottom at centre + R + 1, apex (centre x, centre y + 1) = (443, 317) with the ring's texture centre. From the apex the bottom half is drawn 1:1 (57 units for the back's 57), the top half over 58 | `0x14026E450`, `0x14026B790` | Checked (decomp) |
+| The MP back's PC art (`UK_uitex_bin10780.dds`, the same visible texels in all five languages) spans r 40.5..56.5 of its quarter: black 40.5..42.5 and 54.5..56.5, navy (24, 28, 42) between; the outermost PC texel row (56.5..57) is clear (alpha 13 / 255). The MP cells (`-a2c0.dds`) span r 42.5..54.5 | picture 7 / 5 | Checked (files) |
+| KH1's 30° / 60° gaps in the MP cells: clear within ±1 unit of the gap's centre line, half covered at ±1.5, whole by ±2.25, the same at every radius (parallel sides) | `-a2c0.dds` | Checked (files) |
+| KH1's ticks (`g_s` 37 / 38): 2 × 14 units, navy (24, 28, 42) with one black texel at each end (PS2 picture 7 (70, 97) / (74, 97); clear on PC, so redrawn from the PS2 texels by the 0.33.1 refit), at (444, 260) / (486, 316). So KH1's own tick is narrower than its gaps: 2 units against 3 at half coverage (2 fully clear) | `UK_uibin_g_s.bin`, picture 7 | Checked (files) |
+| KH1's straight pieces' art is flush with its rects: back segment 17 at 358..374 (black 358..360, 372..374), MP 32 at 360..372, charge 33 at 368..372; KH1's arc bottom half ends at 373.5 (back) / 371.5 (MP). So in KH1's own data the straight part sits half a unit below the arc it continues | `g_s`, pictures 5 / 7 | Checked (files + decomp); in KH1 on screen: not seen |
+
+### Causes (Checked (offline render of the owner's files, Re:CoM's draw rules))
+
+1. **The 12 o'clock divider** was KH1's tick 37 drawn as it is, centred on our seam: x 443.25..445.25,
+   y 260.25..274.25 (with Re:CoM's + 0.25). Our ring (one centre with Re:CoM's HP ring, unstretched,
+   0.41.0) has its art at y 260.75..276.75 there: the tick's top stuck 0.5 unit out past the outer
+   edge (alpha 0.95 beyond r 56.4), its 1-unit black ends cut the ring's 2-unit outlines (navy notch
+   at 261.25..262.75), it stopped 0.5 unit short of the cells' inner end (274.25 against 274.75),
+   and it was 2.0 units dark against the gaps' 2.7–2.9 (luminance < 60). The 3 o'clock tick (r
+   42..56) did not stick out but had the same narrow, hard look. KH1's tick fits KH1's own
+   stretched top (outer edge 259.5) within half a unit.
+2. **The straight part**: arc bottom 357.75..373.75 (back) / 359.75..371.75 (MP) / 367.75..371.6
+   (charge); straights 358.25..374.25 / 360.25..372.25 / 368.25..372.25: the same thickness (16 / 12
+   / 4), half a unit lower. Under Re:CoM's HP bar, which hides both tops, the straight part reads
+   half a unit thicker (the owner's second screenshot: its bottom one pixel lower than the arc's).
+
+### Built (asset step only)
+
+- **Dividers** (`ring::dividers`, group `TICKS`, same frames: max MP past 90° / 180°): a strip of
+  the MP back's own art on each seam, ±3 units (12 o'clock: centre-relative (−3, −57)–(3, −40);
+  3 o'clock: (40, −3)–(57, 3)), each texel the back's radial profile at that edge, alpha × (1 − the
+  cells' coverage across KH1's 30° / 60° gaps, measured from picture 5 at build time), on the
+  back's opaque texels only. Over the cells it composes what a gap shows; it adds nothing past
+  the back's art (offline render: 0 alpha added beyond r 56.4 or inside 40.6). Dark width 2.6–2.9
+  units, the 30° gaps 2.7–2.9. Two new atlas items (12 × 34 PC texels, one for all languages).
+  Not KH1's tick: KH1's own tick is 2 units, narrower than its gaps; owner's ask ("looks like the
+  others").
+- **Straights** (`ring::lift_straights`): the ring's back segments, cap, MP and charge segments
+  get copies of their atlas boxes with half a unit (one PC texel) of clear texels above and below,
+  their rects one unit taller at the top: their art moves up half a unit and lines up with the
+  arc (offline render: 357.75..373.75 / 359.75..371.75 / 367.75..371.75, as the arc). Parts and
+  translations are whole units, hence the texture shift. The PS2 copy (the base `kh1hud.lad`,
+  used only without a language copy) keeps its old place. Not KH1's data (KH1 has the half-unit
+  step); owner's ask. The full KH1 gauge (`hud_kh1_gauge`) keeps KH1's ticks and straights.
+- DLL: unchanged (same groups, frames, manifest format). Atlas 556 items (was 550).
+- Asset step: must be re-run.
+
+### Not checked
+
+- In game; Re:CoM's HP gauge art (the offline render draws it as a flat placeholder); the PC
+  renderer's sampling exactly as modelled (bilinear, texel centres); KH1's look on screen (only its
+  data and draw code: whether KH1 PC itself shows the half-unit step or its tick narrower than its
+  gaps was not seen in a KH1 screenshot).
+- Assumption: the charge's 30° gaps fade like the MP cells' (the dividers use the MP cells'
+  profile over the charge line too, as KH1's ticks cover it).

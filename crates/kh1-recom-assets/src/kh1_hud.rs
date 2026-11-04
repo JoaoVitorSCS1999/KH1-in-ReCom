@@ -1649,10 +1649,13 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         let charge_q = ring::Quarter::new(&mut atlas, kh1::RING_CHARGE, &pics[p5].ps2, &pic_langs[p5][..1], pics[p5].scale)?;
         let (bx, by) = ring::black_texel(&pics[p7].ps2, &pic_langs[p7], kh1::RING_MP_BACK, s7).ok_or_else(|| crate::Error::Format("uitex.bin: no black outline texel at picture 7's MP back end".into()))?;
         let black = atlas.add(pics[p7].ps2.crop(bx, by, 1, 1), pic_langs[p7].iter().map(|p| p.crop(bx * s7, by * s7, s7, s7)).collect(), s7);
-        let inputs = ring::Inputs { objs, it5, it7, back, mp: mp_q, charge: charge_q, black };
+        let div = ring::dividers(&mut atlas, &back, &mp_q)?;
+        let inputs = ring::Inputs { objs, it5, it7, back, mp: mp_q, charge: charge_q, black, div };
         groups.extend(ring::groups(&inputs, &mut ring_stats)?);
     }
     let groups_total = groups.len();
+    // The ring's straight pieces, before they get boxes of their own (`ring::lift_straights`).
+    let straights = ring::straight_marks(&groups[ring_first..], &[it5, it7]);
     let mut raw = vec![it5, it6, it7, p0, p0_whole];
     raw.extend(&faces);
     raw.extend(&mp);
@@ -1660,6 +1663,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
     raw.extend(party5);
     let refit = fit_layouts(&mut atlas, &groups, &raw);
     split_raw(&mut atlas, &mut groups, &raw);
+    ring::lift_straights(&mut atlas, &mut groups[ring_first..], &straights)?;
     let packed = build_atlas(&atlas, langs.len())?;
     let base = seqd(&groups, &packed, false)?;
     let hd = seqd(&groups, &packed, true)?;
