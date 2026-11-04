@@ -564,3 +564,8 @@ At KH1 setting:
   - **Settings** opens a short list in Sora's story at both Combat settings: **Game Settings** (Re:CoM's own page, unchanged), **Combat** and **Movement** (our pages). Owner: "Settings opens a short list".
   - **Riku's story**: Re:CoM's default menu, with no Combat or Movement.
   - The "KH1" top entry goes. At Combat = KH1 the top list is the owner's nine entries; at Combat = Re:CoM it is Re:CoM's seven, with Settings opening the short list.
+- **Enemy Skills plan answers** (owner, 2026-11-04, on `recom-enemy-skills.md`):
+  - "Go ahead": build in 5 stages, stage 1 first.
+  - Boss skills give the **skill only**, without the boss's elemental affinities.
+  - **Wyvern (Reload Lock) is left out.**
+  - **Softer numbers for the strongest permanent skills**: proposed to the owner before the stages that use them (2–4).
