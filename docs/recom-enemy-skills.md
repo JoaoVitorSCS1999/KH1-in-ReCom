@@ -36,6 +36,124 @@ research is below. Plan first; no code until the owner's go-ahead.
 4. Route 3: the direct-compare skills, in batches.
 5. The deck-to-KH1 meanings (MP recharge, no-interrupt, sleight MP, clash wins).
 
+## Stage 1 (built, 0.106.0)
+
+Ask (owner, 2026-11-04, "Go ahead": stage 1 of the plan): the Enemy Skills section, learning, save,
+names, AP, descriptions, notices; the five KH1 matches. Combat = KH1 in Sora's story only; Combat =
+Re:CoM and Riku's story unchanged (the ability state isn't live there: `win::mp::active`).
+
+Code: `crates/kh1-recom/src/enemy_skills.rs` (the table, tested), `abilities.rs` (the abilities, the
+page, the save), `notices.rs` (`card_abilities`), `win/abilities.rs` (the sync), `win/unlocks.rs`
+(the first pickup), `win/keyblades.rs` (the page's rows).
+
+### The table (`enemy_skills::SKILLS`)
+
+48 skills, one per enemy card kept (0x44..=0x7E minus the 11 left out). Each: the card kind, the
+card's name, Re:CoM's effect name, the AP, the help line, and whether its effect is built.
+
+- **Names**: Re:CoM's card-info table `0x1405256D0` (16-byte rows, name pointer at `+8`; e.g. row
+  0x4C → "Bouncywild", 0x7E → "Platinum Card"). Checked (exe). The page shows Re:CoM's own
+  localized name through its card-name call `0x140164CA0` (message `[0x140528560 + kind × 4]`, which
+  is the kind itself for 0x44..=0x7E: Checked (exe)); our English is the fallback and the notice's
+  name (ASCII: Saïx is "Saix"; Re:CoM's string carries its own byte for the ï).
+- **AP**: the owner's table; the five matches KH1's (btltbl `0x33D8`: Combo Plus 1, Second Chance 5,
+  Berserk 1, Leaf Bracer 5, Treasure Magnet 2 with sort key 302; Rod levels of Treasure Magnet 9 and
+  72). Checked (files: the player's `btltbl.bin`; `ap_tables_match_btltbl`).
+- **Help lines**: ours, "Effect: what it does at KH1." within the 66-character box; the 43 skills
+  whose effect comes in stages 2..5 end "(effect coming)". The KH1 meaning of three is ours, not
+  the owner's (Assumption, to settle at their stage): Ansem "hides sleights from the enemy", Gold
+  Card "sleights keep their premium cards", Lexaeus "sleights may warp enemies away".
+
+### The abilities
+
+- Every skill is an ability of `abilities::ALL` with `Source::Card(kind)`. The words widen to 128
+  bits (`abilities::Bits = u128`): 58 before, Treasure Magnet ×2 (58, 59), the 43 skills of their
+  own (60..102, in the table's order, never to be reordered).
+- **The five KH1 matches** are KH1's own abilities, so their effects are the existing ones: Soldier
+  = `ix::COMBO_PLUS[0]` (the Rod level-87 copy; 93 and 99 stay by level), Hook = Second Chance
+  (was level 90), Hades = Berserk (60), Creeper Plant = Leaf Bracer (39), Bouncywild =
+  `ix::TREASURE_MAGNET[0]`. KH1 gives Treasure Magnet at levels 9 and 72; by the owner's rule (the
+  card replaces the ability) **the card gives one copy, replacing the level-9 one; the level-72 copy
+  stays by level** (on Sora's list as "Treasure Magnet").
+- **Built or not** (`abilities::built`, `UNBUILT_BITS`): the four matches act; Treasure Magnet (both
+  copies) and the 43 own skills are shown **greyed and never equipped** (chosen over "equippable,
+  effect coming": a skill that does nothing would cost AP, and switch on unannounced when its stage
+  lands). Confirming one: error sound 5, "Not built yet: this can't be equipped."; the help line
+  still describes it. `equipped_live` and the debug `kh1_all_abilities` drop them too.
+
+### Learning
+
+- A skill unlocks when its card was ever obtained: Re:CoM's discovery state (`0x14015B3F0`, state 2
+  or 3; `win::keyblades::ever_obtained`), asked in the ability sync (`abilities::sync_with`). It
+  arrives **unequipped** (KH1's rule).
+- **At the first pickup**: the existing wrapper on `0x14015C7F0` (`win::unlocks::first_obtained`) runs
+  the ability sync for an enemy card with a skill; logged `unlocks: <card> card 0x.. obtained for the
+  first time: Enemy Skill …`. At Combat = Re:CoM the sync does nothing; the next KH1 read learns it
+  from the discovery state.
+- **Notice**: Re:CoM's learned screen with its ability wording and the card's name
+  (`notices::card_abilities`, `Learned::Ability`), for a block at v7. None at a save's first sync
+  or from an older block (the cards were picked up before this build).
+- **Older saves** get their skills at the first KH1 read (the sync at the first Attack press, the
+  Abilities page, or the first KH1 frame's `equipped_live`), as the spells do.
+
+### The page
+
+- A third owner row **"Enemy Skills"** after "Sora" and "Shared" (`page::OWNERS`); greyed until a
+  skill is learned. Its rows: the learned skills by card kind, under the card's name (the five
+  matches here, not on Sora's list). The status panel shows the AP cost; the help line the
+  description. Equip / remove: KH1's AP rules, the same AP pool as Sora's abilities.
+
+### The save (layout v7)
+
+- The **skill extension** `save + 0x26BF ..= 0x26CF` (17 bytes) right after the words' extension
+  (`0x26B7..=0x26BE`): u8 version (1), u64 unlocked bits 64..128, u64 equipped bits 64..128
+  (`abilities::SKILL_EXT_FIRST`). Inside Re:CoM's spare tail; the spare-range report counts it as
+  ours. Checked (code): no block of ours and no Re:CoM code uses it.
+- The block's version becomes **7**. Read only from a v7 block whose extension version is set; a v6
+  block's words hold nothing past its 58 abilities (masked).
+- **Migration (once, at the first KH1 sync of a block older than v7)**: the four matches that came
+  by level before (Combo Plus 87, Leaf Bracer, Berserk, Second Chance) are **taken back and asked
+  again from their card** (as v2 → v3 did for the ini's story abilities); one whose card Sora already
+  has comes straight back, as equipped as it was; the rest give their AP back. Then every skill whose
+  card Sora has arrives unequipped, without notices. Logged (`abilities: block v6 -> v7 …; … taken
+  back [...]`). Older DLLs read a v7 block as before (they never look past bit 63).
+
+### Treasure Magnet: KH1's rule, and why it isn't built
+
+- **KH1** (Checked (decomp)): prizes are collected (and then fly to Sora) when a party member is
+  within a radius; `0x1402AC080` (HP / MP / munny prizes) and `0x1402AB420` (item drops, from
+  `0x1402C08D0`) test distance² against **6400 (80 cm)** in the normal mode, with the height
+  difference first required ≤ 30 cm (50 less for actor kind 0x21) and then left out (a flat distance),
+  14400 / 40000 in the two other modes; with Treasure Magnet equipped (`0x140284BE0(5, member)`, the
+  count of equipped copies) **one copy: 40000 (2 m), two or more: 160000 (4 m)**, whatever the mode.
+- **Re:CoM** (Checked (decomp + exe)): its prizes are pulled toward Sora when within the player's
+  `+0x550` (default **5.0 m**, `0x140161E10` / `0x140164C20`): `0x140230C70`, used by the EXP / HP /
+  Moogle-point prizes (`0x140231010`, kinds ≥ 0xCB) and the card prizes (`0x14022F2B0`). The cards
+  scattered by `0x1401682D0` (`0x14022EE30`) use a fixed **1.5 m** (2.25) unless Sora's slot is
+  Bouncywild (`0x14022F23A`, then `+0x550`). Re:CoM's Draw sets `+0x550` = 10 m (`+0x54C` = 30 has
+  no reader: exe scan); Re:CoM's win action (Battle exe action 0x1C, `0x1401F9C5E`, and
+  `0x1401EC55E`) sets both to 50 m to pull every prize at a battle's end.
+- **Why not mapped**: Re:CoM's normal radius (5 m) is already wider than KH1's Treasure Magnet with
+  two copies (4 m). Setting `+0x550` to KH1's values while it's equipped would shrink Re:CoM's pull
+  (to 2 m) instead of widening it, and KH1's own base (0.8 m, flat, ±0.3 m height) is not Re:CoM's at
+  Combat = KH1 today. So the ability ships greyed, "(not built yet)" (the brief's rule). Native
+  options for the owner:
+  (a) KH1's whole rule at Combat = KH1: `+0x550` = 0.8 m without it, 2 m / 4 m with one / two copies
+      (every prize pull then KH1's distance; Re:CoM's 50 m win pull kept; the height test not
+      carried);
+  (b) KH1's ratio on Re:CoM's base: 5 m × 2.5 = 12.5 m / × 5 = 25 m;
+  (c) Re:CoM's own Draw: 10 m with either copy.
+
+### Checked / not checked
+
+- Checked: tests (the table, AP, names, help lines, learning from the cards, the four matches' level
+  grants gone, the page's third row and greyed rows, the save round trip, v6 → v7, notices), the
+  Windows build (no warnings); KH1's Treasure Magnet rule (decomp); Re:CoM's radius readers (decomp
+  + exe scan of every `+0x54C` / `+0x550` access).
+- Not checked: in game (the page's third row, the card-name call for enemy kinds in the camp, the
+  notices); whether every enemy card's first pickup reaches `0x14015C7F0` (the doc's rule: types
+  1–4 and 7, Checked (decomp) in `recom-m7-unlocks.md`).
+
 ## Left out (owner's choice 1. C, or no meaning at KH1)
 
 - Card values: Shadow, Screwdiver, Powerwild, Sea Neon, Pirate.

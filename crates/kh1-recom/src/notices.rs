@@ -121,6 +121,17 @@ pub fn sleight_abilities(new: crate::abilities::Bits, from: u8, shown: &mut dyn 
         .collect()
 }
 
+/// Enemy Skills: the skills a sync newly unlocked that get a notice ("Sora learned X", Re:CoM's
+/// ability wording with the card's name): every [`crate::abilities::Source::Card`] ability learned
+/// at its card's first pickup, and none from a block older than layout v7 (`from`: a v0 block is a
+/// save's first sync, a v1..=v6 block had its cards before this build).
+pub fn card_abilities(new: crate::abilities::Bits, from: u8) -> Vec<Learned> {
+    if from < crate::abilities::BLOCK_V7 {
+        return Vec::new();
+    }
+    (0..crate::abilities::ALL.len()).filter(|&i| new & (1 << i) & crate::abilities::CARD_BITS != 0).map(Learned::Ability).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,7 +145,7 @@ mod tests {
         assert_eq!(Learned::Ability(ix::AIR_COMBO_PLUS[0]).name().unwrap(), b"Air Combo Plus\0");
         assert_eq!(Learned::Sleight(0x23).screen_id(), 0x23);
         assert_eq!(Learned::Sleight(0x23).name(), None);
-        assert_eq!(Learned::Ability(99).name(), None);
+        assert_eq!(Learned::Ability(ALL.len()).name(), None);
         for i in 0..ALL.len() {
             let n = Learned::Ability(i).name().unwrap();
             assert!(n.len() > 1 && n.len() <= NAME_MAX + 1 && n.last() == Some(&0));
@@ -161,8 +172,8 @@ mod tests {
     /// ability from a Re:CoM sleight or Re:CoM's movement abilities don't (Re:CoM shows its own).
     #[test]
     fn only_level_abilities() {
-        let new = 1 << ix::COMBO_PLUS[0] | 1 << ix::AIR_COMBO_PLUS[1] | 1 << ix::SLIDING_DASH | 1 << ix::HIGH_JUMP | 1 << ix::RIPPLE_DRIVE;
-        assert_eq!(level_abilities(new), vec![Learned::Ability(ix::RIPPLE_DRIVE), Learned::Ability(ix::COMBO_PLUS[0]), Learned::Ability(ix::AIR_COMBO_PLUS[1])]);
+        let new = 1 << ix::COMBO_PLUS[1] | 1 << ix::AIR_COMBO_PLUS[1] | 1 << ix::SLIDING_DASH | 1 << ix::HIGH_JUMP | 1 << ix::RIPPLE_DRIVE;
+        assert_eq!(level_abilities(new), vec![Learned::Ability(ix::RIPPLE_DRIVE), Learned::Ability(ix::COMBO_PLUS[1]), Learned::Ability(ix::AIR_COMBO_PLUS[1])]);
         assert!(level_abilities(0).is_empty());
     }
 
@@ -172,7 +183,7 @@ mod tests {
     fn sleight_abilities_unless_recom_showed_them() {
         use crate::abilities::{of_sleight, sleight, BLOCK_V5, BLOCK_V6};
         let i = |id| of_sleight(id).unwrap();
-        let new = 1 << i(sleight::FREEZE) | 1 << i(sleight::HOLY) | 1 << i(sleight::IDYLL_ROMP) | 1 << ix::COMBO_PLUS[0] | 1 << ix::SLIDING_DASH;
+        let new = 1 << i(sleight::FREEZE) | 1 << i(sleight::HOLY) | 1 << i(sleight::IDYLL_ROMP) | 1 << ix::COMBO_PLUS[1] | 1 << ix::SLIDING_DASH;
         assert_eq!(sleight_abilities(new, BLOCK_V6, &mut |_| false), vec![Learned::Sleight(0x23), Learned::Sleight(0x33), Learned::Sleight(0x3A)]);
         // Holy came with Re:CoM's level-up Sleight pick (level 47): no second notice.
         assert_eq!(sleight_abilities(new, BLOCK_V6, &mut |id| id == sleight::HOLY), vec![Learned::Sleight(0x23), Learned::Sleight(0x3A)]);
@@ -180,7 +191,24 @@ mod tests {
         assert!(sleight_abilities(new, 0, &mut |_| false).is_empty(), "a save's first sync");
         assert_eq!(Learned::Sleight(0x23).screen_id(), 0x23, "Re:CoM's own wording and name");
         // Level abilities are not sleight notices, and sleights are not level notices.
-        assert_eq!(level_abilities(new), vec![Learned::Ability(ix::COMBO_PLUS[0])]);
+        assert_eq!(level_abilities(new), vec![Learned::Ability(ix::COMBO_PLUS[1])]);
+    }
+
+    /// Enemy Skills: a skill learned from its card gets the notice with the card's name; none from
+    /// before layout v7 (or a first sync); the level notices never carry them.
+    #[test]
+    fn card_abilities_get_a_notice() {
+        use crate::abilities::{BLOCK_V6, BLOCK_V7};
+        let soldier = ix::COMBO_PLUS[0];
+        let zexion = crate::enemy_skills::ability_of(crate::enemy_skills::of_card(0x75).unwrap());
+        let new = 1 << soldier | 1 << zexion | 1 << ix::COMBO_PLUS[1] | 1 << ix::LEAF_BRACER;
+        assert_eq!(card_abilities(new, BLOCK_V7), vec![Learned::Ability(ix::COMBO_PLUS[0]), Learned::Ability(ix::LEAF_BRACER), Learned::Ability(zexion)]);
+        assert!(card_abilities(new, BLOCK_V6).is_empty(), "had before v7");
+        assert!(card_abilities(new, 0).is_empty(), "a save's first sync");
+        assert_eq!(level_abilities(new), vec![Learned::Ability(ix::COMBO_PLUS[1])], "Combo Plus 93 by level; the card ones are not level notices");
+        assert_eq!(Learned::Ability(soldier).name().unwrap(), b"Soldier\0");
+        assert_eq!(Learned::Ability(zexion).name().unwrap(), b"Zexion\0");
+        assert_eq!(Learned::Ability(ix::LEAF_BRACER).name().unwrap(), b"Creeper Plant\0");
     }
 
     #[test]

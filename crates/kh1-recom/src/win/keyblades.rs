@@ -1444,7 +1444,13 @@ impl Page {
             Content::Abilities { rows, .. } => match rows.get(idx).map(|r| r.label) {
                 Some(ap::Label::Owner(ap::Owner::Sora)) => ap::text::SORA.to_vec(),
                 Some(ap::Label::Owner(ap::Owner::Shared)) => ap::text::SHARED.to_vec(),
-                Some(ap::Label::Ability(i)) => kb::c_text(crate::abilities::ALL[i].name),
+                Some(ap::Label::Owner(ap::Owner::EnemySkills)) => ap::text::ENEMY_SKILLS.to_vec(),
+                // Enemy Skills: the card's own name as Re:CoM shows it (its card-name call, localized).
+                Some(ap::Label::Ability(i)) => match crate::abilities::ALL[i].source {
+                    // SAFETY: Re:CoM's card-name call (reads its message tables), as the Keyblade list's rows.
+                    crate::abilities::Source::Card(c) => unsafe { enemy_card_name(c, crate::abilities::ALL[i].name) },
+                    _ => kb::c_text(crate::abilities::ALL[i].name),
+                },
                 None => ip::text::NONE.to_vec(),
             },
         }
@@ -1559,6 +1565,7 @@ impl Page {
                 Some(ap::Row { label: ap::Label::Owner(_), grey: true, .. }) | None => ap::text::EMPTY_HELP,
                 Some(ap::Row { label: ap::Label::Owner(ap::Owner::Sora), .. }) => ap::text::OWNER_HELP[0],
                 Some(ap::Row { label: ap::Label::Owner(ap::Owner::Shared), .. }) => ap::text::OWNER_HELP[1],
+                Some(ap::Row { label: ap::Label::Owner(ap::Owner::EnemySkills), .. }) => ap::text::OWNER_HELP[2],
                 Some(ap::Row { label: ap::Label::Ability(i), .. }) => ap::text::help(*i),
             },
         };
@@ -1819,6 +1826,11 @@ impl Page {
                 sound(5);
                 log(&format!("abilities page: refused {} ({} AP): AP {} left (KH1's rule)", crate::abilities::ALL[i].name, crate::abilities::ALL[i].ap, crate::abilities::ap_left(s.equipped, s.max_ap())));
             }
+            ap::Outcome::NotBuilt(i) => {
+                *msg = Some(ap::text::NOT_BUILT);
+                sound(5);
+                log(&format!("abilities page: refused {} ({} AP): its effect isn't built yet", crate::abilities::ALL[i].name, crate::abilities::ALL[i].ap));
+            }
             ap::Outcome::Empty => {
                 *msg = Some(ap::text::EMPTY_HELP);
                 sound(5);
@@ -2021,6 +2033,21 @@ unsafe fn card_name(card: u16) -> Vec<u8> {
         return v;
     }
     kb::c_text(super::stats::keyblade(card).map(|k| k.name.as_str()).unwrap_or("?"))
+}
+
+/// An enemy card's localized name (Re:CoM's card-name call `0x140164CA0`: message `[0x140528560 +
+/// kind × 4]`, which is the kind itself for 0x44..=0x7E, Checked (exe)), or our English name when
+/// that message isn't loaded.
+unsafe fn enemy_card_name(card: u16, english: &str) -> Vec<u8> {
+    let id = [card as u8, 0, 0, 0];
+    let p = func::<NameFn>(CARD_NAME)(id.as_ptr());
+    if !p.is_null() && *p != 0 {
+        let s = std::ffi::CStr::from_ptr(p as *const std::ffi::c_char);
+        let mut v = s.to_bytes().to_vec();
+        v.push(0);
+        return v;
+    }
+    kb::c_text(english)
 }
 
 /// Re:CoM's "obtained at least once" (`0x14015B3F0`), when the collection is there.

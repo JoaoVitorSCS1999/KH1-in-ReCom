@@ -30,12 +30,21 @@
 //!   Cross-slash+ ([`SLEIGHTS`]) are abilities on Sora's page with the owner's AP costs, unlocked
 //!   when Re:CoM teaches them (its learned bit, `0x14023AB00`; never set by us), unequipped.
 //!   [`equipped_sleights`] gives the Sleights menu (next step) their ids in Re:CoM's order.
+//! - **Enemy Skills (owner, 2026-11-03 / -04; `crate::enemy_skills`, plan stage 1):** Re:CoM's enemy
+//!   cards as abilities on a third owner row, "Enemy Skills" ([`page::Owner::EnemySkills`]): each one
+//!   [`Source::Card`], learned at its card's first pickup (Re:CoM's discovery state `0x14015B3F0`),
+//!   unequipped, with the owner's AP. The five KH1 matches are KH1's own abilities whose level grant
+//!   the card replaces (Soldier: the Rod level-87 Combo Plus; Hook: Second Chance; Hades: Berserk;
+//!   Creeper Plant: Leaf Bracer; Bouncywild: the level-9 Treasure Magnet). Skills whose effect isn't
+//!   built yet are shown greyed and never equipped ([`built`]).
 //! - **The state** is a block of Re:CoM's own save (Re:CoM saves, loads and zeroes it), after the
-//!   items extension ([`BLOCK_FIRST`]), and its words' bits 32.. in an extension after the summon
-//!   block ([`EXT_FIRST`], layout v6).
+//!   items extension ([`BLOCK_FIRST`]), its words' bits 32..64 in an extension after the summon
+//!   block ([`EXT_FIRST`], layout v6), and bits 64..128 in the skill extension after that
+//!   ([`SKILL_EXT_FIRST`], layout v7).
 
-/// The ability words: bit [`ix`] (bits 0..32 in the block, 32.. in the extension).
-pub type Bits = u64;
+/// The ability words: bit [`ix`] (bits 0..32 in the block, 32..64 in the extension, 64..128 in the
+/// skill extension).
+pub type Bits = u128;
 
 /// Where an ability unlocks from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +58,9 @@ pub enum Source {
     Kit,
     /// Re:CoM gives Sora its own: any of these bits of Re:CoM's ability variable ([`recom`]).
     Recom(u32),
+    /// Enemy Skills: Re:CoM's enemy card of this kind obtained at least once (its discovery state,
+    /// `0x14015B3F0`; `crate::enemy_skills`).
+    Card(u16),
 }
 
 /// Re:CoM's own movement abilities: the bits of its save int variable (set 0, id 0x24), read with
@@ -137,7 +149,15 @@ pub mod ix {
     // M12 step 4: the sleight abilities ([`super::SLEIGHTS`]), in Re:CoM's id order.
     /// The first sleight ability (Fire Raid, Re:CoM's 0x1B).
     pub const FIRST_SLEIGHT: usize = 31;
+    /// Treasure Magnet (KH1 id 5) ×2: KH1's Rod list gives it at 9 and 72 (btltbl `0x3BF8`); the
+    /// first copy is Bouncywild's card (Enemy Skills), the second stays by level. Not built yet.
+    pub const TREASURE_MAGNET: [usize; 2] = [58, 59];
+    /// The first Enemy Skill of its own (`crate::enemy_skills::Kind::Own`, in that table's order).
+    pub const FIRST_SKILL: usize = 60;
 }
+
+/// The first Enemy Skill of its own ([`ix::FIRST_SKILL`]).
+pub const FIRST_SKILL: usize = ix::FIRST_SKILL;
 
 /// Re:CoM's sleight ids (its `initStockSkill` `0x140220DF0` switch; level-up list `0x14010EF10`;
 /// names in `SY0002.CTD`'s order, Fira = 0xD). Checked (decomp + files).
@@ -176,7 +196,8 @@ const fn sl(name: &'static str, id: u16, ap: u8) -> Ability {
     Ability { name, kh1_id: None, kh1_bit: 0, ap, key: SLEIGHT_KEY + id, shared: false, source: Source::Sleight(id) }
 }
 
-/// Every ability of the state, by [`ix`]. Checked (decomp + files): KH1 ids and bits
+/// The abilities before the Enemy Skills of their own ([`ALL`] adds them), by [`ix`]. Checked
+/// (decomp + files): KH1 ids and bits
 /// (`0x1402A6380`, `0x1402A5130`: Combo Plus 6, Air Combo Plus 7; `0x1402A7510`: Combo Master
 /// 0x41), AP costs and sort keys (btltbl `0x33D8`, row id − 1 as `0x14028F8F0` indexes it), learn
 /// levels (Rod list `0x3BF8`, entry i = level i + 2, `0x1402B51B0`). Names: English (KH1's own
@@ -191,7 +212,7 @@ const fn sl(name: &'static str, id: u16, ap: u8) -> Ability {
 /// Miracle, Idyll Romp; 3 — Fire Raid, Blizzard Raid, Aqua Splash, Freeze, Firaga Burst, Reflect
 /// Raid, Homing Blizzara, Lethal Frame, Shock Impact; 4 — Thunder Raid, Raging Storm, Magnet Spiral,
 /// Quake, Tornado, Cross-slash+; 5 — Holy, Mega Flare.
-pub const ALL: [Ability; 58] = [
+const BASE: [Ability; BASE_LEN] = [
     a("Sliding Dash", 54, 0x100_0000, 1, 205, Source::Sleight(sleight::SLIDING_DASH)),
     a("Blitz", 20, 0x8, 2, 208, Source::Sleight(sleight::BLITZ)),
     a("Stun Impact", 57, 0x800_0000, 2, 211, Source::Sleight(sleight::STUN_IMPACT)),
@@ -225,7 +246,8 @@ pub const ALL: [Ability; 58] = [
     shared("Superglide", 4, 0x100, 4, recom::SUPERGLIDE),
     a("Combo Master", 0x41, 0, 0, 0, Source::Level(50)),
     // The Rod list's Combo Plus (87, 93, 99) and Air Combo Plus (24, 45).
-    a("Combo Plus", 6, 0, 1, 201, Source::Level(87)),
+    // Enemy Skills (owner): the first copy is the Soldier card's (KH1's Rod level 87 replaced).
+    a("Soldier", 6, 0, 1, 201, Source::Card(0x45)),
     a("Combo Plus", 6, 0, 1, 201, Source::Level(93)),
     a("Combo Plus", 6, 0, 1, 201, Source::Level(99)),
     a("Air Combo Plus", 7, 0, 1, 202, Source::Level(24)),
@@ -241,11 +263,14 @@ pub const ALL: [Ability; 58] = [
     a("MP Rage", 24, 0, 3, 305, Source::Level(42)),
     a("MP Rage", 24, 0, 3, 305, Source::Level(75)),
     // Leaf Bracer: id 62 (`+0x184` bit 6), Rod level 39, 5 AP, sort key 308. Checked (decomp + files).
-    a("Leaf Bracer", 62, 0, 5, 308, Source::Level(39)),
+    // Enemy Skills (owner): from the Creeper Plant card instead (KH1's Rod level 39 replaced).
+    a("Creeper Plant", 62, 0, 5, 308, Source::Card(0x60)),
     // Berserk: id 26 (`+0x184` bit 5), Rod level 60, 1 AP, sort key 306. Checked (decomp + files).
-    a("Berserk", 26, 0, 1, 306, Source::Level(60)),
+    // Enemy Skills (owner): from the Hades card instead (KH1's Rod level 60 replaced).
+    a("Hades", 26, 0, 1, 306, Source::Card(0x68)),
     // Second Chance: id 25 (`+0x184` bit 4), Rod level 90, 5 AP, sort key 307. Checked (decomp + files).
-    a("Second Chance", 25, 0, 5, 307, Source::Level(90)),
+    // Enemy Skills (owner): from the Hook card instead (KH1's Rod level 90 replaced).
+    a("Hook", 25, 0, 5, 307, Source::Card(0x6C)),
     // M12 step 4: the sleight abilities, in Re:CoM's id order (ix 31..58).
     sl("Fire Raid", 0x1B, 3),
     sl("Blizzard Raid", 0x1C, 3),
@@ -274,12 +299,100 @@ pub const ALL: [Ability; 58] = [
     sl("Holy", 0x33, 5),
     sl("Idyll Romp", 0x3A, 2),
     sl("Cross-slash+", 0x43, 4),
+    // Enemy Skills: Treasure Magnet (KH1 id 5, 2 AP, sort key 302: btltbl `0x33D8 + 12 × 4`; Rod
+    // levels 9 and 72: Checked (files)). The level-9 copy is Bouncywild's card (owner: "the card
+    // replaces the ability"); the level-72 copy stays by level. Not built yet ([`built`]).
+    a("Bouncywild", 5, 0, 2, 302, Source::Card(0x4C)),
+    a("Treasure Magnet", 5, 0, 2, 302, Source::Level(72)),
 ];
 
-/// The sleight abilities (M12 step 4), by [`ix`]: every one from [`ix::FIRST_SLEIGHT`].
-pub const SLEIGHTS: std::ops::Range<usize> = ix::FIRST_SLEIGHT..ALL.len();
+/// [`BASE`]'s length: KH1's abilities, the sleight abilities and Treasure Magnet.
+pub const BASE_LEN: usize = ix::FIRST_SKILL;
+/// Every ability: [`BASE`], then the Enemy Skills of their own (`crate::enemy_skills::Kind::Own`, in
+/// that table's order), each [`Source::Card`] with the owner's AP.
+pub const ALL_LEN: usize = BASE_LEN + crate::enemy_skills::OWN_COUNT;
+pub const ALL: [Ability; ALL_LEN] = build_all();
+
+/// The Enemy Skills' sort key base (after every KH1 ability and sleight; the page sorts its Enemy
+/// Skills row by card kind).
+pub const SKILL_KEY: u16 = 2000;
+
+const fn build_all() -> [Ability; ALL_LEN] {
+    let mut out = [BASE[0]; ALL_LEN];
+    let mut i = 0;
+    while i < BASE_LEN {
+        out[i] = BASE[i];
+        i += 1;
+    }
+    let mut k = 0;
+    while k < crate::enemy_skills::OWN_COUNT {
+        let s = crate::enemy_skills::own_at(k);
+        out[BASE_LEN + k] = Ability { name: s.name, kh1_id: None, kh1_bit: 0, ap: s.ap, key: SKILL_KEY + s.card, shared: false, source: Source::Card(s.card) };
+        k += 1;
+    }
+    out
+}
+
+/// The sleight abilities (M12 step 4), by [`ix`]: the 27 from [`ix::FIRST_SLEIGHT`].
+pub const SLEIGHTS: std::ops::Range<usize> = ix::FIRST_SLEIGHT..ix::TREASURE_MAGNET[0];
 /// Their bits.
-pub const SLEIGHT_BITS: Bits = ALL_BITS & !((1 << ix::FIRST_SLEIGHT) - 1);
+pub const SLEIGHT_BITS: Bits = ((1 << SLEIGHTS.end) - 1) & !((1 << ix::FIRST_SLEIGHT) - 1);
+
+/// Enemy Skills: every [`Source::Card`] ability (the five KH1 matches and the skills of their own).
+pub const CARD_BITS: Bits = {
+    let mut b: Bits = 0;
+    let mut i = 0;
+    while i < ALL_LEN {
+        if let Source::Card(_) = ALL[i].source {
+            b |= 1 << i;
+        }
+        i += 1;
+    }
+    b
+};
+
+/// The abilities whose effect isn't built yet: shown greyed, never equipped (stage 1: Treasure
+/// Magnet, both copies; every Enemy Skill of its own until stages 2..5).
+pub const UNBUILT_BITS: Bits = {
+    let mut b: Bits = 1 << ix::TREASURE_MAGNET[0] | 1 << ix::TREASURE_MAGNET[1];
+    let mut k = 0;
+    while k < crate::enemy_skills::SKILLS.len() {
+        let s = &crate::enemy_skills::SKILLS[k];
+        if !s.built {
+            if let crate::enemy_skills::Kind::Kh1(i) = s.kind {
+                b |= 1 << i;
+            }
+        }
+        k += 1;
+    }
+    let mut k = 0;
+    while k < crate::enemy_skills::OWN_COUNT {
+        if !crate::enemy_skills::own_at(k).built {
+            b |= 1 << (BASE_LEN + k);
+        }
+        k += 1;
+    }
+    b
+};
+
+/// Whether ability `i`'s effect is built (an unbuilt one is shown greyed and never equipped).
+pub fn built(i: usize) -> bool {
+    i < ALL.len() && UNBUILT_BITS & (1 << i) == 0
+}
+
+/// The Enemy Skill of ability `i` (a [`Source::Card`] ability).
+pub fn skill_of(i: usize) -> Option<&'static crate::enemy_skills::Skill> {
+    match ALL.get(i)?.source {
+        Source::Card(c) => crate::enemy_skills::of_card(c),
+        _ => None,
+    }
+}
+
+/// The abilities whose source v7 changed to a card (the four KH1 matches built before as level
+/// grants): an older block's are taken back at its migration and asked again from their card.
+pub const V7_CARD_BITS: Bits = 1 << ix::COMBO_PLUS[0] | 1 << ix::LEAF_BRACER | 1 << ix::BERSERK | 1 << ix::SECOND_CHANCE;
+/// The 58 abilities before layout v7 (a v6 block's words hold nothing past them).
+pub const V6_BITS: Bits = (1 << 58) - 1;
 
 /// The Re:CoM sleight id of a sleight ability ([`SLEIGHTS`]).
 pub fn sleight_of(i: usize) -> Option<u16> {
@@ -428,7 +541,9 @@ pub mod field {
     /// (their sources from Re:CoM, the start and levels); 4 = Guard and Dodge Roll in Sora's kit,
     /// not in the words (Re:CoM's movement abilities arrive equipped); 5 = the AP Up count
     /// ([`AP_UPS`]) is valid (M12); 6 = the words' bits 32.. are in the extension
-    /// ([`super::EXT_FIRST`], M12 step 4: the sleight abilities). Same fields in all.
+    /// ([`super::EXT_FIRST`], M12 step 4: the sleight abilities); 7 = Enemy Skills: bits 64.. in
+    /// the skill extension ([`super::SKILL_EXT_FIRST`]), the KH1 matches from their cards. Same
+    /// fields in all.
     pub const VERSION: usize = 0;
     /// u32 LE: unlocked abilities, bits 0..32 of [`super::Bits`] (bit [`super::ix`]).
     pub const UNLOCKED: usize = 1;
@@ -448,8 +563,9 @@ pub const BLOCK_V3: u8 = 3;
 pub const BLOCK_V4: u8 = 4;
 pub const BLOCK_V5: u8 = 5;
 pub const BLOCK_V6: u8 = 6;
+pub const BLOCK_V7: u8 = 7;
 /// The layout this build writes.
-pub const BLOCK_NOW: u8 = BLOCK_V6;
+pub const BLOCK_NOW: u8 = BLOCK_V7;
 
 const _: () = assert!(BLOCK_LAST <= crate::keyblades::SPARE_LAST && field::RESERVED + 5 == BLOCK_LEN && field::AP_UPS + 1 == field::RESERVED);
 
@@ -470,7 +586,29 @@ pub mod ext {
     pub const EQUIPPED_HIGH: usize = 4;
 }
 
-const _: () = assert!(EXT_LAST <= crate::keyblades::SPARE_LAST && ext::EQUIPPED_HIGH + 4 == EXT_LEN && ALL.len() <= 64);
+const _: () = assert!(EXT_LAST <= crate::keyblades::SPARE_LAST && ext::EQUIPPED_HIGH + 4 == EXT_LEN && ALL.len() <= 128);
+
+/// The skill extension (layout v7, Enemy Skills): bits 64..128 of the unlocked and equipped words,
+/// right after the words' extension ([`EXT_LAST`]), still inside Re:CoM's spare tail `save + 0x246B
+/// ..= 0x2817` (no Re:CoM code reads or writes it, `docs/recom-keyblade-equip.md`; none of our
+/// other blocks reaches it: Checked (code)). Its own version byte: 0 = never written (read as
+/// nothing, whatever the rest holds).
+pub const SKILL_EXT_FIRST: usize = EXT_LAST + 1;
+pub const SKILL_EXT_LEN: usize = 17;
+pub const SKILL_EXT_LAST: usize = SKILL_EXT_FIRST + SKILL_EXT_LEN - 1;
+pub const SKILL_EXT_V1: u8 = 1;
+
+/// Offsets inside the skill extension.
+pub mod skill_ext {
+    /// u8: 0 never written; 1 = [`super::SKILL_EXT_V1`].
+    pub const VERSION: usize = 0;
+    /// u64 LE: unlocked abilities, bits 64..128.
+    pub const UNLOCKED_TOP: usize = 1;
+    /// u64 LE: equipped abilities, bits 64..128.
+    pub const EQUIPPED_TOP: usize = 9;
+}
+
+const _: () = assert!(SKILL_EXT_LAST <= crate::keyblades::SPARE_LAST && skill_ext::EQUIPPED_TOP + 8 == SKILL_EXT_LEN);
 
 /// What a block holds.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -492,23 +630,35 @@ fn u32_at(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
 }
 
+fn u64_at(b: &[u8], o: usize) -> u64 {
+    let mut x = [0u8; 8];
+    x.copy_from_slice(&b[o..o + 8]);
+    u64::from_le_bytes(x)
+}
+
 /// The words as stored (with the kit's bits an older block may still hold, which [`read`] hides):
-/// bits 0..32 from the block; bits 32.. from the extension only at layout v6 (before v6 the low
-/// words never held bit 31 either: 31 abilities).
-pub fn raw(block: &[u8; BLOCK_LEN], ext: &[u8; EXT_LEN]) -> State {
+/// bits 0..32 from the block; bits 32..64 from the extension only at layout v6 and later (before v6
+/// the low words never held bit 31 either: 31 abilities; v6 held 58); bits 64..128 from the skill
+/// extension only at layout v7 with its version byte set.
+pub fn raw(block: &[u8; BLOCK_LEN], ext: &[u8; EXT_LEN], skills: &[u8; SKILL_EXT_LEN]) -> State {
     let v = block[field::VERSION];
     if v == 0 {
         return State::default();
     }
     let (lo_mask, hi) = if v >= BLOCK_V6 { (u32::MAX, true) } else { (0x7FFF_FFFF, false) };
-    let word = |lo: usize, high: usize| (u32_at(block, lo) & lo_mask) as Bits | if hi { (u32_at(ext, high) as Bits) << 32 } else { 0 };
+    let top = v >= BLOCK_V7 && skills[skill_ext::VERSION] >= SKILL_EXT_V1;
+    let mask: Bits = if v >= BLOCK_V7 { Bits::MAX } else { V6_BITS };
+    let word = |lo: usize, high: usize, t: usize| {
+        let w = (u32_at(block, lo) & lo_mask) as Bits | if hi { (u32_at(ext, high) as Bits) << 32 } else { 0 } | if top { (u64_at(skills, t) as Bits) << 64 } else { 0 };
+        w & mask
+    };
     let ap_ups = if v >= BLOCK_V5 { block[field::AP_UPS] } else { 0 };
-    State { unlocked: word(field::UNLOCKED, ext::UNLOCKED_HIGH), equipped: word(field::EQUIPPED, ext::EQUIPPED_HIGH), ap_ups }
+    State { unlocked: word(field::UNLOCKED, ext::UNLOCKED_HIGH, skill_ext::UNLOCKED_TOP), equipped: word(field::EQUIPPED, ext::EQUIPPED_HIGH, skill_ext::EQUIPPED_TOP), ap_ups }
 }
 
-/// The state a block (and its extension) holds (a block never written: nothing unlocked).
-pub fn read(block: &[u8; BLOCK_LEN], ext: &[u8; EXT_LEN]) -> State {
-    let r = raw(block, ext);
+/// The state a block (and its extensions) holds (a block never written: nothing unlocked).
+pub fn read(block: &[u8; BLOCK_LEN], ext: &[u8; EXT_LEN], skills: &[u8; SKILL_EXT_LEN]) -> State {
+    let r = raw(block, ext, skills);
     // The kit is never in the words (an older block's Guard / Dodge Roll bits read as nothing; the
     // migration to v4 clears them in the save); bits past [`ALL`] mean nothing.
     let unlocked = r.unlocked & ALL_BITS & !KIT_BITS;
@@ -520,10 +670,13 @@ pub fn version(block: &[u8; BLOCK_LEN]) -> u8 {
     block[field::VERSION]
 }
 
-/// Writes the state as layout [`BLOCK_NOW`] (the AP Up count, the words' bits 32.. into the
-/// extension); the reserved bytes are kept.
-pub fn write(s: &State, block: &mut [u8; BLOCK_LEN], ext: &mut [u8; EXT_LEN]) {
+/// Writes the state as layout [`BLOCK_NOW`] (the AP Up count, the words' bits 32..64 into the
+/// extension, 64..128 into the skill extension, its version byte set); the reserved bytes are kept.
+pub fn write(s: &State, block: &mut [u8; BLOCK_LEN], ext: &mut [u8; EXT_LEN], skills: &mut [u8; SKILL_EXT_LEN]) {
     block[field::VERSION] = block[field::VERSION].max(BLOCK_NOW);
+    skills[skill_ext::VERSION] = skills[skill_ext::VERSION].max(SKILL_EXT_V1);
+    skills[skill_ext::UNLOCKED_TOP..skill_ext::UNLOCKED_TOP + 8].copy_from_slice(&((s.unlocked >> 64) as u64).to_le_bytes());
+    skills[skill_ext::EQUIPPED_TOP..skill_ext::EQUIPPED_TOP + 8].copy_from_slice(&((s.equipped >> 64) as u64).to_le_bytes());
     block[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&(s.unlocked as u32).to_le_bytes());
     block[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&(s.equipped as u32).to_le_bytes());
     block[field::AP_UPS] = s.ap_ups;
@@ -534,14 +687,16 @@ pub fn write(s: &State, block: &mut [u8; BLOCK_LEN], ext: &mut [u8; EXT_LEN]) {
 // ---- unlocks ----
 
 /// Whether an ability's source is met: Re:CoM's sleight learned (`learned`, Re:CoM's own
-/// `0x14023AB00`), Re:CoM's level, or Re:CoM's ability variable (`recom_var`, [`recom`]). The kit
-/// is never unlocked (it is always on, outside the block).
-pub fn source_met(a: &Ability, level: u32, recom_var: u32, learned: &mut dyn FnMut(u16) -> bool) -> bool {
+/// `0x14023AB00`), Re:CoM's level, Re:CoM's ability variable (`recom_var`, [`recom`]), or (Enemy
+/// Skills) its enemy card obtained at least once (`card`, Re:CoM's discovery state `0x14015B3F0`).
+/// The kit is never unlocked (it is always on, outside the block).
+pub fn source_met(a: &Ability, level: u32, recom_var: u32, learned: &mut dyn FnMut(u16) -> bool, card: &mut dyn FnMut(u16) -> bool) -> bool {
     match a.source {
         Source::Sleight(id) => learned(id),
         Source::Level(l) => l <= level,
         Source::Kit => false,
         Source::Recom(bits) => recom_var & bits != 0,
+        Source::Card(c) => card(c),
     }
 }
 
@@ -574,13 +729,20 @@ pub struct Synced {
 /// Brings the state up to Re:CoM's sleights, its level and its ability variable: every ability
 /// not yet unlocked whose source is met is unlocked **unequipped** (KH1's `0x140284E10`), but
 /// Re:CoM's movement abilities arrive equipped (owner). Never taken back; only abilities not yet
-/// unlocked are asked about, so one the player removed is never equipped again.
+/// unlocked are asked about, so one the player removed is never equipped again. No enemy card
+/// counts as obtained ([`sync_with`] asks Re:CoM's discovery state).
 pub fn sync(s: &mut State, level: u32, recom_var: u32, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
+    sync_with(s, level, recom_var, learned, &mut |_| false)
+}
+
+/// [`sync`], with the Enemy Skills' cards: `card(kind)` = Re:CoM's "obtained at least once"
+/// (`0x14015B3F0`). A skill arrives unequipped (KH1's rule, owner).
+pub fn sync_with(s: &mut State, level: u32, recom_var: u32, learned: &mut dyn FnMut(u16) -> bool, card: &mut dyn FnMut(u16) -> bool) -> Synced {
     let mut out = Synced::default();
     let eq = arrive_equipped_bits();
     for (i, a) in ALL.iter().enumerate() {
         let bit = 1 << i;
-        if s.unlocked & bit != 0 || !source_met(a, level, recom_var, learned) {
+        if s.unlocked & bit != 0 || !source_met(a, level, recom_var, learned, card) {
             continue;
         }
         s.unlocked |= bit;
@@ -602,7 +764,8 @@ pub fn ini_equipped(a: &crate::settings::Kh1Abilities) -> Bits {
     if a.counterattack {
         b |= 1 << ix::COUNTERATTACK;
     }
-    for (k, &i) in ix::COMBO_PLUS.iter().enumerate() {
+    // The level copies first (93, 99), then the Soldier card's (Enemy Skills).
+    for (k, &i) in [ix::COMBO_PLUS[1], ix::COMBO_PLUS[2], ix::COMBO_PLUS[0]].iter().enumerate() {
         if (k as u8) < a.combo_plus {
             b |= 1 << i;
         }
@@ -631,10 +794,22 @@ pub fn ini_equipped(a: &crate::settings::Kh1Abilities) -> Bits {
 /// - v0..=v5 → v6 (M12 step 4): the words' extension starts empty ([`raw`] reads none before v6);
 ///   the sleight abilities Re:CoM already taught arrive with the sync, unequipped (their notices:
 ///   none, `crate::notices::sleight_abilities`);
+/// - v0..=v6 → v7 (Enemy Skills): the four KH1 matches built before as level grants
+///   ([`V7_CARD_BITS`]: Combo Plus 87, Leaf Bracer, Berserk, Second Chance) are taken back and asked
+///   again from their card (owner: "That ability then comes from the card, not from its level"; as
+///   v2 → v3 did for the ini's story abilities); one whose card Sora already has comes straight back,
+///   equipped as it was; the skills of the cards Sora already has arrive unequipped (no notices:
+///   `crate::notices::card_abilities`);
 /// - then over the max AP, unequipped from the most expensive down ([`fit_ap`]; KH1's AP never
 ///   drops, so KH1 has no rule here).
 #[allow(clippy::too_many_arguments)]
 pub fn migrate(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, ini: Bits, cp_ups: u8, learned: &mut dyn FnMut(u16) -> bool) -> Synced {
+    migrate_with(s, raw, from, level, recom_var, ini, cp_ups, learned, &mut |_| false)
+}
+
+/// [`migrate`], with the Enemy Skills' cards (`card`, as [`sync_with`]).
+#[allow(clippy::too_many_arguments)]
+pub fn migrate_with(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, ini: Bits, cp_ups: u8, learned: &mut dyn FnMut(u16) -> bool, card: &mut dyn FnMut(u16) -> bool) -> Synced {
     if from < BLOCK_V5 {
         s.ap_ups = cp_ups;
     }
@@ -651,7 +826,14 @@ pub fn migrate(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, 
         s.unlocked &= !V2_STORY_BITS;
         s.equipped &= s.unlocked;
     }
-    let mut out = sync(s, level, recom_var, learned);
+    let mut taken7 = 0;
+    if from < BLOCK_V7 {
+        taken7 = s.unlocked & V7_CARD_BITS;
+        taken |= taken7;
+        s.unlocked &= !V7_CARD_BITS;
+        s.equipped &= s.unlocked;
+    }
+    let mut out = sync_with(s, level, recom_var, learned, card);
     out.taken = taken & !s.unlocked;
     out.kit_dropped = kit_dropped;
     let ini = if from < BLOCK_V2 { ini } else { 0 };
@@ -663,6 +845,8 @@ pub fn migrate(s: &mut State, raw: State, from: u8, level: u32, recom_var: u32, 
     let fresh = out.new | out.new_equipped;
     out.new_equipped = fresh & wanted & s.equipped;
     out.new = fresh & !out.new_equipped;
+    // v7: a KH1 match whose card Sora already had came straight back: not new.
+    out.new &= !taken7;
     out
 }
 
@@ -763,15 +947,37 @@ pub fn on_screen(i: usize) -> bool {
 /// message 0xCA when the AP is short, else the bit 7 cleared; Remove sets it; a shared ability
 /// toggles with no AP test; `0x1403108E0` the panel: AP left / max AP.
 pub mod page {
-    use super::{ap_left, can_equip, on_screen, used_ap, State, ALL};
+    use super::{ap_left, built, can_equip, on_screen, used_ap, Source, State, ALL};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Owner {
         Sora,
         Shared,
+        /// Enemy Skills (owner, 2026-11-03: "let the enemy cards have their own separate section
+        /// in the ability tabs called "Enemy Skills""): every [`Source::Card`] ability.
+        EnemySkills,
     }
 
-    pub const OWNERS: [Owner; 2] = [Owner::Sora, Owner::Shared];
+    /// The owner rows: Sora, Shared, then Enemy Skills.
+    pub const OWNERS: [Owner; 3] = [Owner::Sora, Owner::Shared, Owner::EnemySkills];
+
+    /// The owner row ability `i` is listed under.
+    pub fn owner_of(i: usize) -> Owner {
+        match ALL[i] {
+            super::Ability { source: Source::Card(_), .. } => Owner::EnemySkills,
+            super::Ability { shared: true, .. } => Owner::Shared,
+            _ => Owner::Sora,
+        }
+    }
+
+    /// The order within an owner's list: KH1's sort key; Enemy Skills by card kind (Re:CoM's card
+    /// order).
+    fn sort_key(i: usize) -> u16 {
+        match ALL[i].source {
+            Source::Card(c) => c,
+            _ => ALL[i].key,
+        }
+    }
 
     /// Every row of the page (owners and abilities) is Re:CoM's green row with the green Mickey
     /// symbol: list entry 0x131 through its row set-up `0x140112F10` (owner, 2026-11-01: "have the
@@ -796,8 +1002,8 @@ pub mod page {
     /// The owner's unlocked abilities in KH1's sort order (its Sort option 0, `0x140310260`: by
     /// the record's key; ours keeps that order fixed, ties by our index).
     pub fn list(owner: Owner, s: &State) -> Vec<usize> {
-        let mut v: Vec<usize> = (0..ALL.len()).filter(|&i| on_screen(i) && s.unlocked & (1 << i) != 0 && ALL[i].shared == (owner == Owner::Shared)).collect();
-        v.sort_by_key(|&i| (ALL[i].key, i));
+        let mut v: Vec<usize> = (0..ALL.len()).filter(|&i| on_screen(i) && s.unlocked & (1 << i) != 0 && owner_of(i) == owner).collect();
+        v.sort_by_key(|&i| (sort_key(i), i));
         v
     }
 
@@ -812,6 +1018,8 @@ pub mod page {
         Removed(usize),
         /// Not enough AP (KH1's message 0xCA; error sound).
         Refused(usize),
+        /// Its effect isn't built yet ([`super::built`]): never equipped (error sound).
+        NotBuilt(usize),
         /// Back to the owner list (sound 4).
         Back,
         /// Close the page.
@@ -834,7 +1042,7 @@ pub mod page {
                     .into_iter()
                     .map(|i| {
                         let on = s.equipped & (1 << i) != 0;
-                        Row { label: Label::Ability(i), grey: !on && !can_equip(s.equipped, i, s.max_ap()), marked: on }
+                        Row { label: Label::Ability(i), grey: !on && (!built(i) || !can_equip(s.equipped, i, s.max_ap())), marked: on }
                     })
                     .collect(),
             }
@@ -878,6 +1086,8 @@ pub mod page {
                     if s.equipped & bit != 0 {
                         s.equipped &= !bit;
                         Outcome::Removed(i)
+                    } else if !built(i) {
+                        Outcome::NotBuilt(i)
                     } else if can_equip(s.equipped, i, s.max_ap()) {
                         s.equipped |= bit;
                         Outcome::Equipped(i)
@@ -913,11 +1123,16 @@ pub mod page {
         pub const HELP: &[u8] = b"Equip Sora's abilities with AP.\0";
         pub const SORA: &[u8] = b"Sora\0";
         pub const SHARED: &[u8] = b"Shared\0";
+        /// Enemy Skills (owner's words).
+        pub const ENEMY_SKILLS: &[u8] = b"Enemy Skills\0";
         pub const STATUS: [&[u8]; 3] = [b"AP\0", b"Cost\0", b"AP used\0"];
-        pub const OWNER_HELP: [&[u8]; 2] = [b"Sora's abilities. Equipping one uses AP.\0", b"Abilities for movement. They use no AP.\0"];
+        /// By [`super::OWNERS`].
+        pub const OWNER_HELP: [&[u8]; 3] = [b"Sora's abilities. Equipping one uses AP.\0", b"Abilities for movement. They use no AP.\0", b"Skills from enemy cards. Equipping one uses AP.\0"];
         pub const EMPTY_HELP: &[u8] = b"No abilities learned yet.\0";
         /// KH1's message 0xCA (not read).
         pub const NO_AP: &[u8] = b"Not enough AP to equip this ability.\0";
+        /// A greyed row whose effect isn't built yet ([`super::super::built`]).
+        pub const NOT_BUILT: &[u8] = b"Not built yet: this can't be equipped.\0";
 
         /// The sleight abilities' help lines (owner, 2026-11-03, "Sleight ability texts": "a short
         /// description for each sleight's help line (what it does + its MP cost)"): what each does
@@ -964,6 +1179,10 @@ pub mod page {
         /// The ability's help line (KH1 shows its own description; ours).
         pub fn help(i: usize) -> &'static [u8] {
             use super::super::ix::*;
+            // Enemy Skills: the skill's own line (`crate::enemy_skills`; the five KH1 matches too).
+            if let Some(s) = super::super::skill_of(i) {
+                return s.help;
+            }
             match i {
                 SLIDING_DASH => b"Dash at a distant locked-on enemy.\0",
                 BLITZ => b"A rising strike to end a combo.\0",
@@ -992,6 +1211,8 @@ pub mod page {
                 LEAF_BRACER => b"Nothing can interrupt Sora while he casts Cure.\0",
                 BERSERK => b"Raises Strength while Sora's HP is low.\0",
                 SECOND_CHANCE => b"Survive a blow that would knock you out, with 1 HP.\0",
+                // KH1's level-72 copy (the level-9 one is Bouncywild's card).
+                i if i == TREASURE_MAGNET[1] => b"Draws prizes in from afar. (not built yet)\0",
                 // M12 step 4: the sleight abilities (Re:CoM's sleights; the owner's MP costs).
                 i if super::super::SLEIGHTS.contains(&i) => super::super::sleight_of(i).and_then(sleight_help).unwrap_or(b"\0"),
                 _ => b"\0",
@@ -1006,45 +1227,77 @@ mod tests {
     use super::*;
 
     const NO_EXT: [u8; EXT_LEN] = [0; EXT_LEN];
+    const NO_SK: [u8; SKILL_EXT_LEN] = [0; SKILL_EXT_LEN];
 
     #[test]
     fn block_round_trip_and_new_game() {
         let mut b = [0u8; BLOCK_LEN];
-        assert_eq!(read(&b, &NO_EXT), State::default(), "a block never written: nothing unlocked");
+        assert_eq!(read(&b, &NO_EXT, &NO_SK), State::default(), "a block never written: nothing unlocked");
         let s = State { unlocked: 0b1_0101, equipped: 0b101, ap_ups: 7 };
-        write(&s, &mut b, &mut [0; EXT_LEN]);
-        assert_eq!(b[field::VERSION], BLOCK_V6);
+        write(&s, &mut b, &mut [0; EXT_LEN], &mut [0; SKILL_EXT_LEN]);
+        assert_eq!(b[field::VERSION], BLOCK_V7);
         assert_eq!(b[field::AP_UPS], 7);
-        assert_eq!(read(&b, &NO_EXT), s);
+        assert_eq!(read(&b, &NO_EXT, &NO_SK), s);
         // Equipped is only ever a subset of unlocked; unknown bits (and the kit) are dropped.
         b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&u32::MAX.to_le_bytes());
         b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert_eq!(read(&b, &NO_EXT), State { unlocked: 0xFFFF_FFFF & !KIT_BITS, equipped: 0xFFFF_FFFF & !KIT_BITS, ap_ups: 7 });
-        assert_eq!(read(&b, &[0xFF; EXT_LEN]), State { unlocked: ALL_BITS & !KIT_BITS, equipped: ALL_BITS & !KIT_BITS, ap_ups: 7 });
+        assert_eq!(read(&b, &NO_EXT, &NO_SK), State { unlocked: 0xFFFF_FFFF & !KIT_BITS, equipped: 0xFFFF_FFFF & !KIT_BITS, ap_ups: 7 });
+        let low64: Bits = u64::MAX as Bits;
+        assert_eq!(read(&b, &[0xFF; EXT_LEN], &NO_SK), State { unlocked: ALL_BITS & low64 & !KIT_BITS, equipped: ALL_BITS & low64 & !KIT_BITS, ap_ups: 7 }, "the skill extension never written: nothing past bit 63");
+        let mut sk = [0xFF; SKILL_EXT_LEN];
+        sk[skill_ext::VERSION] = SKILL_EXT_V1;
+        assert_eq!(read(&b, &[0xFF; EXT_LEN], &sk), State { unlocked: ALL_BITS & !KIT_BITS, equipped: ALL_BITS & !KIT_BITS, ap_ups: 7 });
         assert!(b[field::RESERVED..].iter().all(|&x| x == 0));
         // A v1 block reads as before (its bits are a subset of v2's).
         let mut v1 = [0u8; BLOCK_LEN];
         v1[field::VERSION] = BLOCK_V1;
         v1[field::UNLOCKED] = 0x81;
         v1[field::EQUIPPED] = 0x81;
-        assert_eq!(read(&v1, &NO_EXT), State { unlocked: 0x81, equipped: 0x81, ap_ups: 0 });
+        assert_eq!(read(&v1, &NO_EXT, &NO_SK), State { unlocked: 0x81, equipped: 0x81, ap_ups: 0 });
         // Before v5 the count's byte is a reserved zero byte: it reads as no AP Up yet.
         let mut v4 = v1;
         v4[field::VERSION] = BLOCK_V4;
         v4[field::AP_UPS] = 9;
-        assert_eq!(read(&v4, &NO_EXT).ap_ups, 0);
+        assert_eq!(read(&v4, &NO_EXT, &NO_SK).ap_ups, 0);
     }
 
     #[test]
     fn layout_follows_the_items_extension() {
         assert_eq!(BLOCK_FIRST, 0x269F);
         assert_eq!(BLOCK_LAST, 0x26AD);
-        assert_eq!(ALL.len(), 58);
-        assert_eq!(ALL_BITS, (1 << 58) - 1);
+        // 58 before Enemy Skills; Treasure Magnet's two copies; the 43 skills of their own.
+        assert_eq!(ALL.len(), 103);
+        assert_eq!(ALL_BITS, (1 << 103) - 1);
         // M12 step 4: the words' extension right after the summon block (save+0x26AE..=0x26B6).
         assert_eq!(crate::summons::BLOCK_LAST, 0x26B6);
         assert_eq!((EXT_FIRST, EXT_LAST), (0x26B7, 0x26BE));
         assert!(EXT_LAST <= crate::keyblades::SPARE_LAST);
+        // Enemy Skills: the skill extension right after it (save+0x26BF..=0x26CF).
+        assert_eq!((SKILL_EXT_FIRST, SKILL_EXT_LAST), (0x26BF, 0x26CF));
+        assert!(SKILL_EXT_LAST <= crate::keyblades::SPARE_LAST);
+    }
+
+    /// Layout v7 (Enemy Skills): bits 64.. in the skill extension, read only from a v7 block whose
+    /// extension's version byte is set; a v6 block's words hold nothing past its 58 abilities.
+    #[test]
+    fn skill_extension_round_trip() {
+        let top = crate::enemy_skills::ability_of(crate::enemy_skills::of_card(0x7E).unwrap());
+        assert!(top >= 64, "Platinum Card's skill is in the extension");
+        let s = State { unlocked: 1 << top | 1 << ix::COMBO_PLUS[0] | 1 << ix::TREASURE_MAGNET[0] | 1 << 40, equipped: 1 << ix::COMBO_PLUS[0] | 1 << 40, ap_ups: 2 };
+        let (mut b, mut e, mut k) = ([0u8; BLOCK_LEN], [0u8; EXT_LEN], [0u8; SKILL_EXT_LEN]);
+        write(&s, &mut b, &mut e, &mut k);
+        assert_eq!((b[field::VERSION], k[skill_ext::VERSION]), (BLOCK_V7, SKILL_EXT_V1));
+        assert_eq!(read(&b, &e, &k), s);
+        assert_eq!(u64_at(&k, skill_ext::UNLOCKED_TOP), 1 << (top - 64));
+        assert_eq!(u64_at(&k, skill_ext::EQUIPPED_TOP), 0);
+        // Its version byte cleared (an older DLL never writes it): the top bits mean nothing.
+        let mut k0 = k;
+        k0[skill_ext::VERSION] = 0;
+        assert_eq!(read(&b, &e, &k0).unlocked, s.unlocked & u64::MAX as Bits);
+        // A v6 block: the extension and bits 58.. mean nothing.
+        let mut b6 = b;
+        b6[field::VERSION] = BLOCK_V6;
+        assert_eq!(raw(&b6, &[0xFF; EXT_LEN], &[0xFF; SKILL_EXT_LEN]).unlocked, s.unlocked & V6_BITS | (V6_BITS & !(u32::MAX as Bits)));
     }
 
     /// Owner (M12, 2026-11-03): KH1's start 3, +2 per AP Up pick, no cap, nothing else (the
@@ -1147,8 +1400,13 @@ mod tests {
         assert_eq!(lv(ix::COUNTERATTACK), 57, "KH1's Rod list");
         assert_eq!((ALL[ix::GUARD].source, ALL[ix::DODGE_ROLL].source), (Source::Kit, Source::Kit), "owner: Sora's movement kit, not abilities");
         assert_eq!(ALL[ix::SONIC_BLADE].source, Source::Sleight(sleight::SONIC_BLADE), "Re:CoM's sleight 9 (level 27)");
-        assert_eq!(ix::COMBO_PLUS.map(lv), [87, 93, 99]);
+        // Enemy Skills (owner): the Rod level-87 copy comes from the Soldier card; 93 and 99 by level.
+        assert_eq!(ix::COMBO_PLUS.map(lv), [0, 93, 99]);
+        assert_eq!(ALL[ix::COMBO_PLUS[0]].source, Source::Card(0x45));
         assert_eq!(ix::AIR_COMBO_PLUS.map(lv), [24, 45]);
+        // Treasure Magnet: KH1's level-9 copy from the Bouncywild card, the level-72 one by level.
+        assert_eq!(ALL[ix::TREASURE_MAGNET[0]].source, Source::Card(0x4C));
+        assert_eq!(lv(ix::TREASURE_MAGNET[1]), 72);
         // Re:CoM's own movement abilities (its variable (0, 0x24)), equipped when it gives them.
         assert_eq!(ALL[ix::HIGH_JUMP].source, Source::Recom(1));
         assert_eq!(ALL[ix::GLIDE].source, Source::Recom(2 | 4), "Re:CoM glides with either bit");
@@ -1175,7 +1433,7 @@ mod tests {
         b[field::VERSION] = BLOCK_V3;
         b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&((KIT_BITS | 1) as u32).to_le_bytes());
         b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&((KIT_BITS | 1) as u32).to_le_bytes());
-        assert_eq!(read(&b, &NO_EXT), State { unlocked: 1, equipped: 1, ap_ups: 0 });
+        assert_eq!(read(&b, &NO_EXT, &NO_SK), State { unlocked: 1, equipped: 1, ap_ups: 0 });
     }
 
     #[test]
@@ -1203,13 +1461,105 @@ mod tests {
         // Re:CoM's Sonic Blade sleight (9): Sonic Blade, unequipped (KH1's rule).
         let r = sync(&mut s, 30, NO_RECOM, &mut |id| id == sleight::SONIC_BLADE);
         assert_eq!(names(r.new), vec!["Sonic Blade"]);
-        // Level 50: Combo Master (owner), unequipped; MP Rage 42, Leaf Bracer 39 (M12).
+        // Level 50: Combo Master (owner), unequipped; MP Rage 42 (M12). Leaf Bracer no longer comes
+        // at 39: the Creeper Plant card gives it (Enemy Skills).
         let r = sync(&mut s, 50, NO_RECOM, &mut |_| false);
-        assert_eq!(names(r.new), vec!["Aerial Sweep", "Combo Master", "Air Combo Plus", "MP Rage", "Leaf Bracer"]);
-        // Level 99 and every sleight: everything but Re:CoM's movement abilities and the kit.
-        sync(&mut s, 99, NO_RECOM, &mut |_| true);
+        assert_eq!(names(r.new), vec!["Aerial Sweep", "Combo Master", "Air Combo Plus", "MP Rage"]);
+        // Level 99 and every sleight: everything but Re:CoM's movement abilities, the kit and the
+        // Enemy Skills (no card yet); Treasure Magnet's level-72 copy among them.
+        let r = sync(&mut s, 99, NO_RECOM, &mut |_| true);
+        assert_eq!(s.unlocked, ALL_BITS & !MOVE & !KIT_BITS & !CARD_BITS);
+        assert!(names(r.new).contains(&"Treasure Magnet"));
+        // Every enemy card: every Enemy Skill, unequipped.
+        let r = sync_with(&mut s, 99, NO_RECOM, &mut |_| true, &mut |_| true);
+        assert_eq!(r.new, CARD_BITS);
         assert_eq!(s.unlocked, ALL_BITS & !MOVE & !KIT_BITS);
         assert_eq!(s.equipped, 0);
+    }
+
+    /// Enemy Skills (owner): a skill unlocks when its card was ever obtained (Re:CoM's discovery
+    /// state), unequipped; the four KH1 matches built before replace their level grants; the page
+    /// lists them all under "Enemy Skills" by card, the unbuilt ones greyed and refused.
+    #[test]
+    fn enemy_skills_learn_from_their_cards() {
+        let skill = |c: u16| crate::enemy_skills::ability_of(crate::enemy_skills::of_card(c).unwrap());
+        let mut s = State { ap_ups: 10, ..Default::default() };
+        // Level 99 without the cards: none of the four matches (nor Soldier's Combo Plus).
+        sync(&mut s, 99, NO_RECOM, &mut |_| false);
+        assert_eq!(s.unlocked & CARD_BITS, 0);
+        assert_eq!(to_core(s.unlocked).combo_plus, 2, "only the level copies (93, 99)");
+        // The cards Sora has: Hook, Zexion, Creeper Plant (and Shadow, which has no skill).
+        let mut asked = Vec::new();
+        let r = sync_with(&mut s, 99, NO_RECOM, &mut |_| false, &mut |c| {
+            asked.push(c);
+            [0x6C, 0x75, 0x60, 0x44].contains(&c)
+        });
+        assert_eq!(names(r.new), vec!["Creeper Plant", "Hook", "Zexion"]);
+        assert!(!asked.contains(&0x44), "a left-out card is never asked");
+        assert_eq!(s.equipped, 0, "KH1's rule: unequipped");
+        // Hook's skill is Second Chance, Creeper Plant's Leaf Bracer: their effects.
+        assert_eq!(skill(0x6C), ix::SECOND_CHANCE);
+        assert_eq!(skill(0x60), ix::LEAF_BRACER);
+        // The page: a third owner row; Enemy Skills by card kind; Zexion greyed (not built).
+        let mut sc = Screen::default();
+        assert_eq!(sc.rows(&s).iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared), Label::Owner(Owner::EnemySkills)]);
+        sc.set_cursor(2);
+        assert_eq!(sc.confirm(&mut s), Outcome::Opened);
+        let rows = sc.rows(&s);
+        assert_eq!(rows.iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Ability(ix::LEAF_BRACER), Label::Ability(ix::SECOND_CHANCE), Label::Ability(skill(0x75))]);
+        assert!(!rows[0].grey && !rows[1].grey && rows[2].grey);
+        sc.set_cursor(2);
+        assert_eq!(sc.confirm(&mut s), Outcome::NotBuilt(skill(0x75)));
+        assert_eq!(s.equipped, 0);
+        // Equip Hook (5 AP) and Creeper Plant (5): 10 of 23; their status panel cost.
+        sc.set_cursor(1);
+        assert_eq!(sc.status(&s)[1], "5");
+        assert_eq!(sc.confirm(&mut s), Outcome::Equipped(ix::SECOND_CHANCE));
+        sc.set_cursor(0);
+        assert_eq!(sc.confirm(&mut s), Outcome::Equipped(ix::LEAF_BRACER));
+        assert_eq!(sc.status(&s), ["13/23".to_string(), "5".into(), "10/23".into()]);
+        assert!(second_chance(s.equipped) && leaf_bracer(s.equipped));
+        // Not on Sora's list.
+        assert!(page::list(Owner::Sora, &s).iter().all(|&i| ALL[i].source != Source::Card(0x6C) && i != ix::LEAF_BRACER));
+        // Soldier gives one Combo Plus; with 93 and 99, three.
+        sync_with(&mut s, 99, NO_RECOM, &mut |_| false, &mut |c| c == 0x45);
+        let all_cp = 1 << ix::COMBO_PLUS[0] | 1 << ix::COMBO_PLUS[1] | 1 << ix::COMBO_PLUS[2];
+        assert_eq!(s.unlocked & all_cp, all_cp);
+        assert_eq!(to_core(all_cp).combo_plus, 3);
+        assert_eq!(page::owner_of(ix::COMBO_PLUS[0]), Owner::EnemySkills);
+        assert_eq!(page::owner_of(ix::COMBO_PLUS[1]), Owner::Sora);
+        // Treasure Magnet (both copies) and every own skill: unbuilt; the four other matches built.
+        assert!(!built(ix::TREASURE_MAGNET[0]) && !built(ix::TREASURE_MAGNET[1]));
+        assert!([ix::COMBO_PLUS[0], ix::LEAF_BRACER, ix::BERSERK, ix::SECOND_CHANCE].iter().all(|&i| built(i)));
+        assert_eq!(UNBUILT_BITS.count_ones(), 2 + 43);
+        assert_eq!(CARD_BITS.count_ones(), 48);
+        assert_eq!(page::owner_of(ix::TREASURE_MAGNET[1]), Owner::Sora);
+        assert_eq!(kh1_bits(CARD_BITS), kh1_bits(0), "no KH1 0x142D5EC10 bit");
+        // The sleights' range ends before Treasure Magnet.
+        assert_eq!(SLEIGHT_BITS & (CARD_BITS | 1 << ix::TREASURE_MAGNET[1]), 0);
+    }
+
+    /// v6 → v7 (Enemy Skills): the four matches learned by level before are taken back and asked
+    /// again from their card; one whose card Sora has comes straight back, as equipped as it was.
+    #[test]
+    fn migration_v6_to_v7_moves_the_matches_to_their_cards() {
+        let had = 1 << ix::COMBO_PLUS[0] | 1 << ix::COMBO_PLUS[1] | 1 << ix::LEAF_BRACER | 1 << ix::BERSERK | 1 << ix::SECOND_CHANCE | 1 << ix::BLITZ;
+        let mut s = State { unlocked: had, equipped: 1 << ix::LEAF_BRACER | 1 << ix::BERSERK | 1 << ix::BLITZ, ap_ups: 10 };
+        let raw0 = s;
+        // Level 95, the Creeper Plant and Gargoyle cards had; not Hades, Hook or Soldier.
+        let r = migrate_with(&mut s, raw0, BLOCK_V6, 95, NO_RECOM, 0, 0, &mut |id| id == sleight::BLITZ, &mut |c| c == 0x60 || c == 0x56);
+        assert_eq!(names(r.taken), vec!["Soldier", "Hades", "Hook"]);
+        assert_eq!(s.unlocked & had, had & !(1 << ix::COMBO_PLUS[0] | 1 << ix::BERSERK | 1 << ix::SECOND_CHANCE));
+        assert_eq!(s.equipped, 1 << ix::LEAF_BRACER | 1 << ix::BLITZ, "Creeper Plant back, equipped as before; Berserk's AP back");
+        assert_eq!(names(r.new & CARD_BITS), vec!["Gargoyle"], "Leaf Bracer came straight back: not new");
+        assert_eq!(s.ap_ups, 10);
+        // A v7 block is not migrated again; a card later gives its match back.
+        let r = sync_with(&mut s, 95, NO_RECOM, &mut |_| false, &mut |c| c == 0x68);
+        assert_eq!(names(r.new), vec!["Hades"]);
+        // A new game (v0): nothing taken.
+        let mut n = State::default();
+        let r = migrate_with(&mut n, State::default(), 0, 1, NO_RECOM, 0, 0, &mut |_| false, &mut |_| false);
+        assert_eq!((r.taken, n), (0, State::default()));
     }
 
     /// Owner (2026-11-01): High Jump / Glide / Superglide are equipped when Re:CoM gives them, still
@@ -1277,7 +1627,7 @@ mod tests {
         b[field::VERSION] = BLOCK_V3;
         b[field::UNLOCKED..field::UNLOCKED + 4].copy_from_slice(&(raw.unlocked as u32).to_le_bytes());
         b[field::EQUIPPED..field::EQUIPPED + 4].copy_from_slice(&(raw.equipped as u32).to_le_bytes());
-        let mut s = read(&b, &NO_EXT);
+        let mut s = read(&b, &NO_EXT, &NO_SK);
         // One past CP pick: 5 AP. v3 used Guard 2 + Dodge Roll 1 + Blitz 2 = 5: now 2, so Ripple
         // Drive (3) fits when the player equips it.
         let r = migrate(&mut s, raw, BLOCK_V3, 11, recom::HIGH_JUMP, 0, 1, &mut |_| false);
@@ -1286,8 +1636,8 @@ mod tests {
         assert_eq!(used_ap(s.equipped), 2);
         assert!(can_equip(s.equipped, ix::RIPPLE_DRIVE, s.max_ap()));
         assert_ne!(s.equipped & 1 << ix::HIGH_JUMP, 0, "Re:CoM's High Jump equipped once");
-        write(&s, &mut b, &mut [0; EXT_LEN]);
-        assert_eq!((b[field::VERSION], u32_at(&b, field::UNLOCKED) as Bits & KIT_BITS, b[field::AP_UPS]), (BLOCK_V6, 0, 1));
+        write(&s, &mut b, &mut [0; EXT_LEN], &mut [0; SKILL_EXT_LEN]);
+        assert_eq!((b[field::VERSION], u32_at(&b, field::UNLOCKED) as Bits & KIT_BITS, b[field::AP_UPS]), (BLOCK_V7, 0, 1));
     }
 
     #[test]
@@ -1352,8 +1702,8 @@ mod tests {
         assert_eq!(names(r.new), vec!["MP Rage"]);
         assert_eq!((mp_rage(0), mp_rage(1 << ix::MP_RAGE[1]), mp_rage(1 << ix::MP_RAGE[0] | 1 << ix::MP_RAGE[1])), (0, 1, 2));
         assert_eq!(used_ap(1 << ix::MP_RAGE[0] | 1 << ix::MP_RAGE[1]), 6);
-        // Leaf Bracer: Rod level 39, 5 AP.
-        assert_eq!(x(ix::LEAF_BRACER), (62, 5, 308, Source::Level(39), 0, false));
+        // Leaf Bracer: KH1's Rod level 39, 5 AP; Enemy Skills: from the Creeper Plant card instead.
+        assert_eq!(x(ix::LEAF_BRACER), (62, 5, 308, Source::Card(0x60), 0, false));
         assert!(leaf_bracer(1 << ix::LEAF_BRACER) && !leaf_bracer(0));
         // 17 AP (KH1's 3 + 7 AP Up picks, M12 step 1).
         assert_eq!(max_ap(7), 17);
@@ -1361,22 +1711,26 @@ mod tests {
         let thirteen = 1 << ix::MP_HASTE | 1 << ix::MP_RAGE[0] | 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::STUN_IMPACT;
         assert_eq!(used_ap(thirteen), 13);
         assert!(!can_equip(thirteen, ix::LEAF_BRACER, 17), "4 AP left: refused (KH1's rule)");
-        // Berserk: Rod level 60, 1 AP.
-        assert_eq!(x(ix::BERSERK), (26, 1, 306, Source::Level(60), 0, false));
+        // Berserk: KH1's Rod level 60, 1 AP; Enemy Skills: from the Hades card instead.
+        assert_eq!(x(ix::BERSERK), (26, 1, 306, Source::Card(0x68), 0, false));
         assert!(berserk(1 << ix::BERSERK) && !berserk(1 << ix::LEAF_BRACER));
         let mut t = State::default();
-        assert!(!names(sync(&mut t, 59, NO_RECOM, &mut |_| false).new).contains(&"Berserk"));
-        assert!(names(sync(&mut t, 60, NO_RECOM, &mut |_| false).new).contains(&"Berserk"));
-        // Second Chance: Rod level 90, 5 AP.
-        assert_eq!(x(ix::SECOND_CHANCE), (25, 5, 307, Source::Level(90), 0, false));
+        assert!(!names(sync(&mut t, 99, NO_RECOM, &mut |_| false).new).contains(&"Hades"), "no level gives it");
+        assert!(names(sync_with(&mut t, 99, NO_RECOM, &mut |_| false, &mut |c| c == 0x68).new).contains(&"Hades"));
+        // Second Chance: KH1's Rod level 90, 5 AP; Enemy Skills: from the Hook card instead.
+        assert_eq!(x(ix::SECOND_CHANCE), (25, 5, 307, Source::Card(0x6C), 0, false));
         assert!(second_chance(1 << ix::SECOND_CHANCE) && !second_chance(1 << ix::BERSERK));
-        assert!(!names(sync(&mut t, 89, NO_RECOM, &mut |_| false).new).contains(&"Second Chance"));
-        assert_eq!(names(sync(&mut t, 90, NO_RECOM, &mut |_| false).new), vec!["Second Chance"]);
-        // The page lists all six on Sora's list in KH1's key order (304 MP Haste .. 308 Leaf Bracer).
+        assert_eq!(names(sync_with(&mut t, 99, NO_RECOM, &mut |_| false, &mut |c| c == 0x6C).new), vec!["Hook"]);
+        // Sora's list keeps MP Haste and MP Rage in KH1's key order; the matches are Enemy Skills.
+        sync_with(&mut t, 99, NO_RECOM, &mut |_| false, &mut |c| c == 0x60);
         let all = State { unlocked: t.unlocked, equipped: 0, ap_ups: 0 };
         let l = page::list(page::Owner::Sora, &all);
         let pos = |i: usize| l.iter().position(|&x| x == i).unwrap();
-        assert!(pos(ix::MP_HASTE) < pos(ix::MP_RAGE[0]) && pos(ix::MP_RAGE[1]) < pos(ix::BERSERK) && pos(ix::BERSERK) < pos(ix::SECOND_CHANCE) && pos(ix::SECOND_CHANCE) < pos(ix::LEAF_BRACER));
+        assert!(pos(ix::MP_HASTE) < pos(ix::MP_RAGE[0]) && pos(ix::MP_RAGE[0]) < pos(ix::MP_RAGE[1]));
+        for i in [ix::BERSERK, ix::SECOND_CHANCE, ix::LEAF_BRACER] {
+            assert!(!l.contains(&i));
+        }
+        assert_eq!(page::list(page::Owner::EnemySkills, &all), vec![ix::LEAF_BRACER, ix::BERSERK, ix::SECOND_CHANCE], "by card: Creeper Plant 0x60, Hades 0x68, Hook 0x6C");
     }
 
     /// M12 step 4 (owner, "M12 answers"): the 25 magic sleights plus Idyll Romp and Cross-slash+,
@@ -1494,10 +1848,10 @@ mod tests {
         b[field::AP_UPS] = 4;
         // Whatever the extension's bytes say before v6, they mean nothing.
         let junk = [0xFF; EXT_LEN];
-        assert_eq!(read(&b, &junk), read(&b, &NO_EXT));
-        assert_eq!(raw(&b, &junk).unlocked >> 31, 0);
-        let mut s = read(&b, &junk);
-        let raw0 = raw(&b, &junk);
+        assert_eq!(read(&b, &junk, &NO_SK), read(&b, &NO_EXT, &NO_SK));
+        assert_eq!(raw(&b, &junk, &NO_SK).unlocked >> 31, 0);
+        let mut s = read(&b, &junk, &NO_SK);
+        let raw0 = raw(&b, &junk, &NO_SK);
         assert_eq!((s.ap_ups, s.max_ap()), (4, 11));
         // Re:CoM had taught Freeze (event) and Lethal Frame (level 32) before.
         let r = migrate(&mut s, raw0, BLOCK_V5, 40, NO_RECOM, 0, 9, &mut |id| id == sleight::BLITZ || id == sleight::FREEZE || id == sleight::LETHAL_FRAME);
@@ -1507,10 +1861,10 @@ mod tests {
         assert_eq!(r.fitted, 0);
         // Written as v6: the high bits go to the extension, the block's other bytes unchanged.
         let mut e = junk;
-        write(&s, &mut b, &mut e);
-        assert_eq!((b[field::VERSION], b[field::AP_UPS]), (BLOCK_V6, 4));
+        write(&s, &mut b, &mut e, &mut [0; SKILL_EXT_LEN]);
+        assert_eq!((b[field::VERSION], b[field::AP_UPS]), (BLOCK_V7, 4));
         assert!(b[field::RESERVED..].iter().all(|&x| x == 0));
-        assert_eq!(read(&b, &e), s);
+        assert_eq!(read(&b, &e, &NO_SK), s);
         let hi = (s.unlocked >> 32) as u32;
         assert_eq!(u32_at(&e, ext::UNLOCKED_HIGH), hi);
         assert_ne!(hi, 0);
@@ -1518,12 +1872,12 @@ mod tests {
         // An equipped sleight survives the round trip (bit 31 in the block, 32.. in the extension).
         s.equipped |= 1 << i(sleight::FIRE_RAID) | 1 << i(sleight::LETHAL_FRAME);
         s.unlocked |= 1 << i(sleight::FIRE_RAID);
-        write(&s, &mut b, &mut e);
-        assert_eq!(read(&b, &e), s);
+        write(&s, &mut b, &mut e, &mut [0; SKILL_EXT_LEN]);
+        assert_eq!(read(&b, &e, &NO_SK), s);
         assert_eq!(u32_at(&b, field::EQUIPPED) >> 31, 1, "Fire Raid is bit 31");
         // A v6 block is not migrated again: a sync asks only about what isn't unlocked.
         let mut asked = Vec::new();
-        let mut t = read(&b, &e);
+        let mut t = read(&b, &e, &NO_SK);
         sync(&mut t, 40, NO_RECOM, &mut |id| {
             asked.push(id);
             false
@@ -1544,7 +1898,8 @@ mod tests {
         let mut s = State { unlocked: 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::VORTEX | 1 << ix::GLIDE | 1 << ix::STRIKE_RAID | 1 << ix::SONIC_BLADE, equipped: 1 << ix::GLIDE, ap_ups: 1 };
         let mut sc = Screen::default();
         let rows = sc.rows(&s);
-        assert_eq!(rows.iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared)]);
+        assert_eq!(rows.iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared), Label::Owner(Owner::EnemySkills)]);
+        assert!(rows[2].grey, "no Enemy Skill yet");
         assert_eq!(sc.confirm(&mut s), Outcome::Opened);
         // Sora's list in KH1's key order; Sonic Blade (801) and, since M12 step 7, Strike Raid (803).
         let l: Vec<Label> = sc.rows(&s).iter().map(|r| r.label).collect();
@@ -1591,7 +1946,7 @@ mod tests {
 
     #[test]
     fn texts_fit() {
-        let mut all: Vec<&[u8]> = vec![page::text::LABEL, page::text::HELP, page::text::SORA, page::text::SHARED, page::text::EMPTY_HELP, page::text::NO_AP];
+        let mut all: Vec<&[u8]> = vec![page::text::LABEL, page::text::HELP, page::text::SORA, page::text::SHARED, page::text::ENEMY_SKILLS, page::text::EMPTY_HELP, page::text::NO_AP, page::text::NOT_BUILT];
         all.extend(page::text::STATUS);
         all.extend(page::text::OWNER_HELP);
         all.extend((0..ALL.len()).filter(|&i| on_screen(i)).map(page::text::help));

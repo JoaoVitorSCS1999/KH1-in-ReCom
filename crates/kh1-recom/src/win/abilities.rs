@@ -20,7 +20,14 @@
 //!   Re:CoM's screen just showed it (`super::notices::shown_by_recom`) or the block was older than
 //!   v6 (learned before this build). The words' bits 32.. live in the extension
 //!   (`crate::abilities::EXT_FIRST`, layout v6). [`equipped_sleights`] for the Sleights menu.
-//! - **Use:** [`equipped_live`] reads the equipped word from the block (15 + 8 bytes) for the
+//! - **Enemy Skills (plan stage 1):** the `Source::Card` abilities (`crate::enemy_skills`) unlock in
+//!   the same sync from Re:CoM's discovery state (`0x14015B3F0` through
+//!   `super::keyblades::ever_obtained`), unequipped, each with a "Sora learned X" notice
+//!   (`crate::notices::card_abilities`) unless the block was older than v7 (cards had before this
+//!   build: no notices). The first-obtained wrapper (`super::unlocks::first_obtained`) runs the sync
+//!   when an enemy card is picked up for the first time. Bits 64.. live in the skill extension
+//!   (`crate::abilities::SKILL_EXT_FIRST`, layout v7); the unbuilt ones are never equipped.
+//! - **Use:** [`equipped_live`] reads the equipped word from the block (15 + 8 + 17 bytes) for the
 //!   abilities the KH1 frame passes on (`win::movement::abilities`), so what the camp's page
 //!   changes applies at once, and a loaded save is followed with no event of ours.
 //! - **The page** (`win::keyblades`, the KH1 entry's Abilities row): [`page_state`] and
@@ -50,7 +57,8 @@ const VAR_GET: u32 = 0x001B_08C0;
 type VarGetFn = unsafe extern "win64" fn(u32, u32) -> u64;
 
 pub fn set_rows_ready(bits: ab::Bits) {
-    READY.store(bits, Ordering::Relaxed);
+    // The modifiers' bits are all below 64.
+    READY.store((bits & ab::MODIFIER_BITS) as u64, Ordering::Relaxed);
 }
 
 pub fn set_all(on: bool) {
@@ -64,7 +72,8 @@ pub fn set_all(on: bool) {
 /// `high_jump`, `glide`, `superglide`, `dodge_roll`, `combo_master` no longer unlock anything:
 /// only the KH1 frame's fallback with no save block reads them, `win::movement::abilities`.)
 pub fn set_ini(a: &Kh1Abilities) {
-    INI_EQUIPPED.store(ab::ini_equipped(a), Ordering::Relaxed);
+    // Counterattack and the copies: all below 64.
+    INI_EQUIPPED.store(ab::ini_equipped(a) as u64, Ordering::Relaxed);
 }
 
 fn save() -> Option<usize> {
@@ -73,22 +82,24 @@ fn save() -> Option<usize> {
     (s != 0).then_some(s)
 }
 
-/// Writes the state into the block and its extension (layout `crate::abilities::BLOCK_NOW`).
+/// Writes the state into the block and its extensions (layout `crate::abilities::BLOCK_NOW`).
 fn store(save: usize, s: &State) {
-    let (at, ext_at) = (save + ab::BLOCK_FIRST, save + ab::EXT_FIRST);
-    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST, EXT_LAST < 0x2818).
+    let (at, ext_at, sk_at) = (save + ab::BLOCK_FIRST, save + ab::EXT_FIRST, save + ab::SKILL_EXT_FIRST);
+    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST, EXT_LAST, SKILL_EXT_LAST < 0x2818).
     unsafe {
         let mut block: [u8; ab::BLOCK_LEN] = rd(at);
         let mut ext: [u8; ab::EXT_LEN] = rd(ext_at);
-        ab::write(s, &mut block, &mut ext);
+        let mut skills: [u8; ab::SKILL_EXT_LEN] = rd(sk_at);
+        ab::write(s, &mut block, &mut ext, &mut skills);
         wr(at, block);
         wr(ext_at, ext);
+        wr(sk_at, skills);
     }
 }
 
-/// The modifiers without rows never reach the pickers.
+/// The modifiers without rows never reach the pickers; an unbuilt ability never acts.
 fn usable(e: ab::Bits) -> ab::Bits {
-    e & (READY.load(Ordering::Relaxed) | !ab::MODIFIER_BITS)
+    e & (READY.load(Ordering::Relaxed) as ab::Bits | !ab::MODIFIER_BITS) & !ab::UNBUILT_BITS
 }
 
 /// Brings the state up to Re:CoM's (sleights learned, level, its ability variable), migrating an
@@ -101,13 +112,15 @@ pub fn sync() -> Option<State> {
     let save = save()?;
     let at = save + ab::BLOCK_FIRST;
     let ext_at = save + ab::EXT_FIRST;
-    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST, EXT_LAST < 0x2818).
+    let sk_at = save + ab::SKILL_EXT_FIRST;
+    // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST, EXT_LAST, SKILL_EXT_LAST < 0x2818).
     let mut block: [u8; ab::BLOCK_LEN] = unsafe { rd(at) };
     let mut ext: [u8; ab::EXT_LEN] = unsafe { rd(ext_at) };
+    let mut skills: [u8; ab::SKILL_EXT_LEN] = unsafe { rd(sk_at) };
     let version = ab::version(&block);
-    let before = ab::read(&block, &ext);
+    let before = ab::read(&block, &ext, &skills);
     // The words as stored (an older block may still hold the kit's bits, which `read` hides).
-    let raw = ab::raw(&block, &ext);
+    let raw = ab::raw(&block, &ext, &skills);
     let mut s: State = before;
     let level = super::stats::sora_level();
     // SAFETY: Re:CoM's own getter (bytes checked at start), a pure read of its save variables.
@@ -116,17 +129,25 @@ pub fn sync() -> Option<State> {
     // its save.
     let learned = unsafe { func::<LearnedFn>(SLEIGHT_LEARNED) };
     let mut ask = |id: u16| unsafe { learned(id) } & 0xFF != 0;
+    // Enemy Skills: Re:CoM's "obtained at least once" (`0x14015B3F0`) for the skill's card.
+    // SAFETY: Re:CoM's own read of its collection (Keyblades' checked call), guarded by the collection.
+    let mut card = |kind: u16| unsafe { super::keyblades::ever_obtained(kind) };
     let migrating = version < ab::BLOCK_NOW;
     // M12: an older block's past CP Up picks count as AP Ups (owner), read once from Re:CoM's CP.
     let cp = super::stats::sora_cp().unwrap_or(ab::RECOM_START_CP);
     let cp_ups = ab::ap_ups_from_cp(cp, level);
-    let r = if migrating { ab::migrate(&mut s, raw, version, level, recom_var, INI_EQUIPPED.load(Ordering::Relaxed), cp_ups, &mut ask) } else { ab::sync(&mut s, level, recom_var, &mut ask) };
+    let r = if migrating {
+        ab::migrate_with(&mut s, raw, version, level, recom_var, INI_EQUIPPED.load(Ordering::Relaxed) as ab::Bits, cp_ups, &mut ask, &mut card)
+    } else {
+        ab::sync_with(&mut s, level, recom_var, &mut ask, &mut card)
+    };
     if s != before || migrating {
-        ab::write(&s, &mut block, &mut ext);
+        ab::write(&s, &mut block, &mut ext, &mut skills);
         // SAFETY: as above.
         unsafe {
             wr(at, block);
             wr(ext_at, ext);
+            wr(sk_at, skills);
         }
     }
     if migrating {
@@ -138,7 +159,7 @@ pub fn sync() -> Option<State> {
             ab::names(s.equipped),
             ab::used_ap(s.equipped),
             if r.kit_dropped != 0 { format!("; Sora's kit now, out of the block (their AP back) {:?}", ab::names(r.kit_dropped)) } else { String::new() },
-            if r.taken != 0 { format!("; the ini's, not yet from their source, taken back {:?}", ab::names(r.taken)) } else { String::new() },
+            if r.taken != 0 { format!("; not yet from their source (the ini's story abilities at v2; v7: the KH1 matches now from their enemy cards), taken back {:?}", ab::names(r.taken)) } else { String::new() },
             if r.fitted != 0 { format!("; over the AP, unequipped from the most expensive down {:?}", ab::names(r.fitted)) } else { String::new() }
         ));
     }
@@ -149,6 +170,19 @@ pub fn sync() -> Option<State> {
         }
     } else if r.new | r.new_equipped != 0 {
         log("abilities: a save's first sync: its abilities arrive without notices");
+    }
+    // Enemy Skills: a skill learned from its card gets Re:CoM's learned screen with the card's name
+    // (not from a block older than v7: those cards were picked up before this build).
+    let new_skills = (r.new | r.new_equipped) & ab::CARD_BITS;
+    if new_skills != 0 {
+        for l in crate::notices::card_abilities(new_skills, version) {
+            super::notices::notify_learned(l);
+        }
+        log(&format!(
+            "abilities: Enemy Skills learned from their cards (Re:CoM's discovery state 0x14015b3f0; unequipped): {}{}",
+            ab::ALL.iter().enumerate().filter(|(i, _)| new_skills & (1 << i) != 0).map(|(i, a)| format!("{} ({}, {} AP{})", a.name, crate::enemy_skills::of_ability(i).map_or("?", |k| k.effect), a.ap, if ab::built(i) { "" } else { ", not built yet" })).collect::<Vec<_>>().join(", "),
+            if version < ab::BLOCK_V7 { format!(" (block v{version}: cards had before, no notices)") } else { String::new() }
+        ));
     }
     // M12 step 4: a sleight ability Re:CoM taught gets Re:CoM's own learned screen, unless Re:CoM
     // just showed one for it (level-up pick, event, chest) or the block was older than v6.
@@ -172,8 +206,8 @@ pub fn sync() -> Option<State> {
             if skipped.is_empty() { String::new() } else { format!("; no notice for {skipped:x?} (Re:CoM's own screen showed it)") }
         ));
     }
-    if r.new != 0 {
-        log(&format!("abilities: learned at Re:CoM level {level} (unequipped, KH1's rule; Re:CoM's ability variable {recom_var:#x}): {:?}", ab::names(r.new)));
+    if r.new & !ab::CARD_BITS != 0 {
+        log(&format!("abilities: learned at Re:CoM level {level} (unequipped, KH1's rule; Re:CoM's ability variable {recom_var:#x}): {:?}", ab::names(r.new & !ab::CARD_BITS)));
     }
     // M12: the learned notice's call point (see [`on_learned`]).
     for i in (0..ab::ALL.len()).filter(|&i| (r.new | r.new_equipped) & (1 << i) != 0) {
@@ -212,7 +246,7 @@ pub fn on_learned(i: usize) {
 /// a block older than the layout now is migrated by [`sync`] once.
 pub fn equipped_live() -> Option<ab::Bits> {
     if ALL.load(Ordering::Relaxed) {
-        return Some(usable(ab::ALL_BITS & !ab::SPECIALS_WAITING & !ab::KIT_BITS));
+        return Some(usable(ab::ALL_BITS & !ab::SPECIALS_WAITING & !ab::KIT_BITS & !ab::UNBUILT_BITS));
     }
     // The KH1 frame runs only for Sora at the KH1 setting (never in Riku's story), so no story
     // test here: one atomic load, one pointer read and the block.
@@ -225,9 +259,10 @@ pub fn equipped_live() -> Option<ab::Bits> {
     let e = if ab::version(&block) < ab::BLOCK_NOW {
         sync()?.equipped
     } else {
-        // SAFETY: as above (EXT_LAST < 0x2818).
+        // SAFETY: as above (EXT_LAST, SKILL_EXT_LAST < 0x2818).
         let ext: [u8; ab::EXT_LEN] = unsafe { rd(save + ab::EXT_FIRST) };
-        ab::read(&block, &ext).equipped
+        let skills: [u8; ab::SKILL_EXT_LEN] = unsafe { rd(save + ab::SKILL_EXT_FIRST) };
+        ab::read(&block, &ext, &skills).equipped
     };
     Some(usable(e))
 }
@@ -274,7 +309,8 @@ pub fn max_ap_now() -> Option<i32> {
 pub fn set_equipped(equipped: ab::Bits) -> bool {
     let Some(mut s) = sync() else { return false };
     let Some(save) = save() else { return false };
-    s.equipped = equipped & s.unlocked;
+    // An unbuilt ability is never equipped (the page greys and refuses it).
+    s.equipped = equipped & s.unlocked & !ab::UNBUILT_BITS;
     store(save, &s);
     true
 }

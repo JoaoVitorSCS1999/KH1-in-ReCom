@@ -133,9 +133,12 @@ Right after the items extension, inside Re:CoM's spare tail `save + 0x246B ..= 0
 | `0x26A8` | 1 | **M12 (layout v5)**: the AP Up picks (`abilities::field::AP_UPS`). Before v5 a reserved zero byte nothing read (Checked (code)). |
 | `0x26A9` | 5 | zero |
 | `0x26B7` | 8 | **M12 step 4 (layout v6)**: the words' extension, after the summon block (`0x26AE..=0x26B6`): u32 unlocked bits 32..64, u32 equipped bits 32..64 (`abilities::EXT_FIRST`, `abilities::ext`). Read only from a v6 block. The 27 sleight abilities are bits 31..57 (bit 31, Fire Raid, in the block's word; 32.. here). Checked (code): no other block of ours or Re:CoM code uses it (spare-range report). |
+| `0x26BF` | 17 | **Enemy Skills (layout v7)**: the skill extension (`abilities::SKILL_EXT_FIRST`, `abilities::skill_ext`): u8 version (0 never written, 1), u64 unlocked bits 64..128, u64 equipped bits 64..128. Read only from a v7 block with its version byte set. Bits 58 / 59 Treasure Magnet (Bouncywild's card / level 72), 60..102 the 43 Enemy Skills of their own (`docs/recom-enemy-skills.md` § Stage 1). Checked (code): no other block of ours or Re:CoM code uses `0x26BF..=0x26CF` (spare-range report). |
 
 The version byte: **4** = Guard / Dodge Roll left the words, **5** = the AP Up count, **6** = the
-extension (`docs/recom-m12-sleights.md` § 8.4).
+extension (`docs/recom-m12-sleights.md` § 8.4), **7** = Enemy Skills: the skill extension, and the
+four KH1 matches (Combo Plus 87, Leaf Bracer, Berserk, Second Chance) from their enemy cards
+(`docs/recom-enemy-skills.md` § Stage 1).
 
 Fields never move. Re:CoM saves, checksums, loads, snapshots and zeroes it with its save block.
 An older save unlocks what it has at its first Attack press.

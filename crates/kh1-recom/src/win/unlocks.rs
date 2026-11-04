@@ -12,6 +12,8 @@
 //!   slot (KH1's `0x140285260`); a save whose slots were never set up (spare bit
 //!   `crate::unlocks::SHORTCUTS_SET` clear) first gets the spells it already had, in KH1's order
 //!   (`crate::unlocks::shortcuts`).
+//! - **Enemy Skills**: an enemy card's first pickup runs the ability sync (`super::abilities::sync`),
+//!   which learns its skill from the same discovery state (`crate::enemy_skills`).
 //! - Each learn is logged. Nothing of ours runs per frame (one byte test in a read the menu already
 //!   makes).
 
@@ -69,6 +71,15 @@ pub unsafe extern "win64" fn first_obtained(id: u64) {
     if let Some(i) = crate::summons::of_card(id) {
         if !super::stats::riku_story() {
             super::summons::sync(&format!("{} card {id:#x} obtained for the first time", crate::summons::ALL[i].name));
+        }
+    }
+    // Enemy Skills: an enemy card's first pickup learns its skill (unequipped, with its notice) at
+    // once. The ability sync does nothing unless KH1's state is live (Combat = KH1, Sora's story, a
+    // save); otherwise the next KH1 read learns it from Re:CoM's discovery state.
+    if let Some(s) = crate::enemy_skills::of_card(id) {
+        if !super::stats::riku_story() {
+            let live = super::abilities::sync().is_some();
+            note(|| format!("{} card {id:#x} obtained for the first time: Enemy Skill {} ({}){}", s.name, s.name, s.effect, if live { "" } else { " (KH1's ability state not live: learned at the next KH1 read)" }));
         }
     }
 }
