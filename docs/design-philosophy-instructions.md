@@ -588,3 +588,8 @@ At KH1 setting:
   - **Vexen** Auto-Life: once per battle, ¼ HP.
   - Every other skill keeps Re:CoM's numbers.
   - "Build everything": stages 2–5.
+- **Moogle shop redesign at KH1** (owner, 2026-11-04, verbatim: "the item shop looks REALLY bad. … I was expecting an item list that looks like screenshot 3 (not exactly mind you) But you can keep how the original menu looks, without the "buy, sell, card packs" Ideally, selecting the left side (usually to buy card packs) it should bring up a menu similar to screenshot 4, with all "card packs" replaced with the item card graphics of each item sold. I'm not sure how to re organize screenshot 5 (the sell page,) but Ideally i would like to keep the feel of the page, with the functionality to sell items of course"; answers). This replaces the 0.103.0 Buy / Sell / Card Packs list:
+  - **The two-Moogle menu** (Re:CoM's mode 3) stays as Re:CoM's; the text list goes.
+  - **Buy** (left Moogle, Re:CoM's pack screen): an **Items tab first, then Re:CoM's 4 pack tabs** (owner: "Items tab, then packs"). The Items tab's cells show Re:CoM's own item card faces with prices.
+  - **Sell** (right Moogle, Re:CoM's Card Trade-in screen): an Items tab beside Re:CoM's card tabs, keeping the page's feel. Re:CoM's count window picks how many; items come **from the stock first, then the quick slots** (owner: "Count window, stock then slots").
+  - **Tents and Camping Sets are removed from the game** (owner: "just remove tents and camping sets from the game"), which leaves 4 shop items (Potion, Hi-Potion, Ether, Elixir): one Items tab of 4 cells. (The owner had picked "Two tabs" for 6 items; with 4 items one tab is enough.)
