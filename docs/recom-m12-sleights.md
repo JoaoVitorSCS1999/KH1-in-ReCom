@@ -819,6 +819,9 @@ text has no x-scale (above). The most native levers, for the owner:
 Re:CoM's width routine `0x14025A380` would measure these names for (a) or (b) (Re:CoM's font tables
 are not in the session, so their widths aren't listed here).
 
+**Built in 0.113.0** (owner: "(a) true squeeze"): § 8.8. Not at `0x14025AC56`: the scale lives in
+the text's vtable and Re:CoM's draw is not patched (why: § 8.8.2).
+
 #### 8.7.3 The "Sleights" section of the ability list
 
 | what | where | tag |
@@ -850,6 +853,140 @@ Owner test lines (8.7):
 
 Not checked (8.7): anything in game; the scale's anchor (left edge kept); Re:CoM-text overflow on
 the Customize rows (needs the owner's screenshot).
+
+### 8.8 True squeeze for Re:CoM's text (0.113.0)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § M13 and camp text answers): "Camp-page
+long names (Customize, Abilities, Re:CoM's text): **(a) true squeeze**, an x-scale taught to Re:CoM's
+text drawing". Scope (the ask): names of ours drawn in Re:CoM's own text that overflow their boxes:
+the camp's Customize rows and right-hand panel, the Abilities list (Sleights and Enemy Skills rows
+included), the command menu in Re:CoM's look, the Party list and shortcut names if drawn in Re:CoM's
+text, the KH1 Items page and the shop's names if they overflow, anything else of ours. Code:
+`crate::text_fit` (pure, tested), `win::text_fit`; callers `win::keyblades::Page::redraw` / `stats`,
+`win::command_menu::Ui::make_row` / `show_tab_recom`.
+
+#### 8.8.1 What Re:CoM's text does (Checked (decomp + disasm + exe))
+
+| what | where |
+|---|---|
+| `D2::C2DFnt` (0xB0; CFntM2 is 0xA8 and C2DFnt adds `+0xA8`) has the vtable `0x140606C98`: COL at −8 (`0x140718CF8`), 7 slots: `+0` deleting dtor `0x140243FB0`, `+8` register `0x140261D70` (calls `+0x20`, then the ordering list `0x140271920`), `+0x10` packet size `0x140289430`, `+0x18` draw `0x140289450`, `+0x20` depth `0x1400D3D00`, `+0x28` measure `0x140289440`, `+0x30` `0x140243FF0`; the next word is the next vtable's COL. | `sites::TEXT_FIT_PTRS` |
+| The vtable is written only by C2DFnt's two ctors (`0x140243F47`, `0x140243F81`); no absolute pointer to it anywhere in the image (exe scan, 8-byte values), no other code reference (rel32 scan): no Re:CoM code tells a C2DFnt by its vtable. | exe scan |
+| Draw `+0x18` (`0x140289450`): no text → return; else `0x14025AA20`. That draw is reached only from there (rel32 scan: one reference, the thunk's `jne`); `0x140289450` itself has no direct caller (rel32 scan) and sits only in three vtables' `+0x18`, so a text's draw is always reached through its own vtable pointer (the 2D lists' `0x140271920` path calls `(*obj)[3](obj)`). | `0x140289450`, `0x14025AA20` |
+| The draw expands the button escapes into its 2048-byte buffer (`0x14025AC2B`: `0x1403480C0(text, buf)`), reads the size `+0x3C` once (`0x14025AC3B`), the x origin `+0x28` (`r12d`), the line table `+0x80`; with no table and flags & 3 it subtracts Re:CoM's width (right) or half (centre) from the origin, with the routine `0x14025A380`; with a table, origin + its first entry. | `0x14025AC2B`, `0x14025AC3B..0x14025ACD6` |
+| Its output: one packet in Re:CoM's packet buffer. `0x140281180` takes the write pointer `[[0x140882DD8]]` as the packet's start, reserves 16 bytes (the GIF tag) and returns the next; the draw writes 16-byte (data, register) pairs there: (5, 9), (`[0x14087CFB0]`, 0x17), (0x356, 0), (colour, 1), then per glyph `0x14025A0A0`'s (TEX0, 7), (UV, 3), (XYZ, 5), (UV, 3), (XYZ, 5), colour pairs (1) between, and (.., 9) last; `0x140280F30` leaves the write pointer after it (`0x140281E40`: the GIF tag, +8 to keep 16-byte alignment). | `0x14025AD01`, `0x14025B719`, `0x140281180`, `0x140280F30` |
+| An XYZ word: x + 0x8000 & 0x1FFFF in bits 0..16, y + 0x8000 & 0x1FFFF in bits 17..33, the rest above (`0x14025A286`: `lea eax,[rbp+0x8000]; and eax,0x1FFFF`). x is the pen in 1/16 units, the same units as `+0x28`. | `0x14025A286` |
+| Measure `+0x28` (`0x140289440`): (this, out, lines, count) → `0x14025A380(out, this, lines, count)`: width and height in 1/16 units, the raw text (no escape expansion), returns the line count; writes nothing and returns 0 without text or a loaded font. Its only virtual caller, `CTextWnd`'s `0x1402B1D50`, measures its own CFntM2s (0xA8, made by `0x140258CB0`) and stores the line table in their `+0x80`. | `0x14025A380`, `0x1402B1D50` |
+| Re:CoM's fonts are runtime files (`uk/font/menufont.*` …, loaded by `0x14025BB10`, widths at font `+0x130`): not in the session, so Re:CoM-text widths are measured in game (logged), not listed here. | `0x14025BB10`, `0x14025C2C0` |
+
+#### 8.8.2 The change
+
+- **The scale lives in the text's vtable.** A text of ours that needs squeezing gets a copy of
+  Re:CoM's C2DFnt vtable (`text_fit::vtable::copy`): Re:CoM's COL and 7 slots as they are, `+0x18`
+  and `+0x28` ours, and two words before the COL: our marker `"KH1TXSQZ"` and the scale in 1/1024
+  steps. One copy per step, made once, never freed (`win::text_fit::POOL`). No field of Re:CoM's
+  object is used (none is provably free: `+0xAC` is padding the ctor never clears), and nothing goes
+  stale: Re:CoM's own dtor (slot `+0`, kept) replaces the vtable pointer when the text is deleted.
+  Scale 1.0 is Re:CoM's own vtable, never a copy.
+- **Draw** (our `+0x18`): reads the write pointer, calls Re:CoM's `0x140289450`, reads it again; if
+  the holder is the same and the packet starts with Re:CoM's C2DFnt header (`text_fit::packet`;
+  else logged and left alone), the x of every XYZ pair is scaled about the text's `+0x28`:
+  `x' = x0 + floor((x − x0) × s)`. Glyphs, spaces, letter spacing, the escape icons and the outline
+  passes narrow together: a true squeeze. Re:CoM aligns from `+0x28`, so the left edge
+  (left-aligned), the right edge (right-aligned: the status values) or the centre stays.
+- **Measure** (our `+0x28`): Re:CoM's routine, then the width × s (the drawn width); its line table
+  stays in pen space (the draw reads such a table from `+0x80`, and our draw scales the result).
+- **Who sets it** (`win::text_fit::fit`): each of our boxes measures its text with Re:CoM's
+  `0x14025A380` at scale 1, as the draw sees it (the text expanded by Re:CoM's `0x1403480C0`, on a
+  copy of the object: the routine reads `+0x3C`, `+0x40`, `+0x44`, `+0x58` only), and sets
+  `s = floor(min(1, box / width) × 1024) / 1024` (at least 0.25). Fits, unknown width (no font,
+  no text) or scale 1: Re:CoM's vtable stays.
+- **Why not the patch at `0x14025AC56` (the proposal):** it scales only what the size drives: the
+  space, tab, full-width space and letter spacing read `+0x3C` / `+0x44` again at their own places
+  (a half squeeze unless each is patched too); every Re:CoM text would run the patched code and
+  test its scale each draw; and the scale would still need a home in the object. The vtable copy
+  needs no Re:CoM code byte changed.
+
+**Default 1.0, every Re:CoM text as before** (the disasm argument and the tests): no byte of
+Re:CoM's code is patched and no hook is added; Re:CoM's texts keep the vtable `0x140606C98`, which
+only its ctors write and nothing compares; a copy is made only by `fit` for a scale below 1 and
+only on our own objects; scale 1 restores Re:CoM's vtable. Tests: `text_fit::tests`
+(`scale_one_is_the_identity_and_y_is_untouched`, the packet squeeze byte for byte at 1.0,
+`the_vtable_copy_is_recoms_but_draw_and_measure`), `sites::tests::text_fit_sites` (the thunks'
+targets, the header immediates, the holder both packet calls read, the XYZ packing, the vtable's
+slots in order).
+
+**Per frame:** Re:CoM's own texts: **nothing** (no instruction added: their vtable is Re:CoM's).
+Our texts that fit: nothing. Our squeezed texts: per draw about 20 instructions (two holder reads,
+the header check) and, per glyph, its 5 pairs tested (about 4 instructions each) and its 2 XYZ
+words rewritten (about 10 each): about 40 instructions per glyph, against Re:CoM's own few hundred
+per glyph (`0x14025AA20`'s loop with `0x1402591A0`, `0x140346ED0` / `0x140346CB0` and the 664-byte
+`0x14025A0A0` with two divides). Counted from the disasm, not measured (Assumption); a camp page has
+at most 8 rows + 3 values, the command menu at most its rows. `fit` runs when a row is made (a
+camp list rebuild, a command menu rebuild), never per frame.
+
+#### 8.8.3 The boxes
+
+Units from the text's aligned edge; 2 units kept before an edge (as 0.107.0's).
+
+| box | text | measured | box | tag |
+|---|---|---|---|---|
+| a camp list row (Items, Abilities incl. the Enemy Skills and Sleights rows, Customize rows and its picker, the Keyblade list) | `CButton +0x20`, left-aligned | plate (sprite group 270, groups 0x12E / 0x131 / 0x133 and our item row) x 0..197; the cursor frame 0x12D −1..198 hugs it; the text from 23: the group's first 1 × 1 piece at (22, 14) + the row text's (1, 2) | **172** | Checked (files: the owner's `FO0100.SPR`); the text's left edge: Assumption |
+| a camp status value (all four pages) | ours, right-aligned at 220 (flags 0x41) | 220 − the label's width (Re:CoM's routine on the label, same row sprite) − 8 | **212 − label** | Checked (decomp: `0x1400E6DF0` rows 0..4); the 8-unit gap ours |
+| a command menu row in Re:CoM's look (root, Magic, Items, Summon, Sleights, Party lists, both pages) and its context tab | ours, left-aligned | Re:CoM's text plate: cap −13..13, strip 0..152 at X translate 13 (right edge 165); our plate groups copy cap and strip only; the text at (0, 0) − 4 (`CStockFolder`'s) | **167** | Checked (files: the owner's `FO0002.SPR`; exe `0x140165BEC`) |
+
+The camp row's left edge: if that first 1 × 1 piece does not place the text (it then starts at 1),
+the box squeezes up to 22 units more than needed; the log line gives each squeezed name's width
+for a check on a screenshot. Which names squeeze: decided in game by Re:CoM's width routine on the
+loaded font, logged once each ("text fit: squeezed: …"); the font files aren't in the session. The
+longest of ours: camp rows "□ Homing Blizzara" (Customize, the glyph + a space), "Homing Blizzara",
+"Treasure Magnet", "Hurricane Blast", the Enemy Skills' card names; status values the bound
+sleight's name beside a Customize label; Re:CoM-look rows "Homing Blizzara", "Furious Volley",
+"Gifted Miracle".
+
+**One width per name on every row** (the 0.107.0 question, Re:CoM text): yes. Re:CoM's camp cursor
+is a frame around the whole plate (0x12D, −1..198) and the command menu's highlighted plate is the
+same plate in another colour, so no row has a smaller box: a name keeps one width wherever the
+cursor is. The camp's row mark (0x1D / 0x1E at (170, −13): x 127..166, alpha 0x20 for 0x1D) is
+drawn over the plate as Re:CoM draws it over its own names (Assumption: not a box edge). KH1's look
+is unchanged (a sleight name still squeezes more on the cursor row, up to the hat icon; 0.107.0).
+
+**Not covered, and why:**
+- The shop's rows: a `CTextWnd`'s own CFntM2 objects (not C2DFnt); the four item names ("Hi-Potion"
+  at most) are shorter than Re:CoM's pack names in the same window. Not needed (Assumption: fits).
+- The L1 shortcut panel: KH1's look in both menu looks (0.107.0 squeezes it).
+- The Settings pages' rows (Re:CoM's Config draw; our words as short as Re:CoM's own), the camp's
+  top list and header titles, the help line (our lines are cut to its 66 characters), the learned
+  notice (Re:CoM's sentence with our name): not seen to overflow; the same `fit` call covers any of
+  them if one does.
+
+#### 8.8.4 Logs
+
+- `text fit: Re:CoM's C2DFnt vtable checked (COL + 7 slots): long names in Re:CoM's text squeeze to
+  fit` (first use), or `text fit: … does not point at …; long names are not squeezed` (nothing
+  squeezed, everything else as before).
+- `text fit: squeezed: Customize list row 2: "\xf5\x66 Homing Blizzara" 181.0 units wide, box 172:
+  x scale 0.950 (972/1024)` (an example: the widths come from the game's font): once per text, box
+  and scale (80 lines at most). The raw text is shown (escapes as `\x..`); the width is the
+  expanded one.
+- `text fit: draw of 0x…: not a C2DFnt draw's header; drawn unsqueezed` (5 at most): should never
+  appear.
+
+#### 8.8.5 What to test
+
+- Combat = KH1, camp > Customize: bind Homing Blizzara to a slot. If the log has a "squeezed" line
+  for it, the row's name is narrower and ends inside the row plate; the right-hand value ends at the
+  same place as before and starts after its label. Names without a log line look exactly as before.
+- Camp > Abilities: Enemy Skills and Sleights rows; Items; the Keyblade list: long names inside the
+  plates, every short one unchanged; move the cursor: no name changes width.
+- `hud = recom`: the command menu's Sleights / Party lists: a long name ends inside its plate,
+  highlighted or not.
+- Re:CoM's own texts (Config, Status, Journal, Re:CoM's sleight list, the Moogle shop, battle
+  text): unchanged. Combat = Re:CoM: nothing changes (our pages and menu aren't made).
+- Screenshot a squeezed camp row next to an unsqueezed one: whether the text starts right of the
+  row icon (the box's left edge, § 8.8.3).
+
+Not checked (8.8): anything in game; the camp row text's left edge; the per-glyph cost (counted, not
+measured); Re:CoM-text widths (font files not in the session).
 
 #### 8.5.4 KH1's specials in the Sleights list (owner, 2026-11-03, "M12 answers": "Strike raid are arcanum and ragnarok in KH1FM are triangle prompts. Let them be triangle prompts and also show up in the sleights menu")
 

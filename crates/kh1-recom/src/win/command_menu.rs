@@ -647,6 +647,7 @@ impl Ui {
             if fp != 0 {
                 let tc = cm::text_colour(t.bright, t.alpha);
                 fnt = func::<FntCtorFn>(FNT_CTOR)(fp, 0, 0, &tc, FONT, text.as_ptr(), FONT_FLAGS);
+                super::text_fit::fit(fnt, crate::text_fit::boxes::COMMAND_ROW, || format!("command menu (Re:CoM's look) context tab word {:#x}", t.name));
                 super::d2::attach(c, self.list, set, fnt, 0.0, 0.0, TEXT_DX + self.xoff);
             }
         }
@@ -837,6 +838,9 @@ impl Ui {
             if f != 0 {
                 let colour = cm::text_colour(v.bright, sc.alpha);
                 fnt = func::<FntCtorFn>(FNT_CTOR)(f, 0, 0, &colour, FONT, text.as_ptr(), FONT_FLAGS);
+                // 0.113.0, true squeeze (owner, 2026-11-04): a word wider than Re:CoM's plate is
+                // drawn narrower; the highlighted plate is the same plate, so one width on every row.
+                super::text_fit::fit(fnt, crate::text_fit::boxes::COMMAND_ROW, || format!("command menu (Re:CoM's look) {:?} row {} word {:#x}", v.list, v.index, v.name));
                 super::d2::attach(c, self.list, set, fnt, 0.0, 0.0, TEXT_DX + self.xoff);
             }
         }

@@ -1435,6 +1435,17 @@ impl Page {
         self.help();
     }
 
+    /// The page's name (logs).
+    fn kind(&self) -> &'static str {
+        match &self.content {
+            Content::Keyblades { .. } => "Keyblades",
+            Content::Customize { picking: Some(_), .. } => "Customize picker",
+            Content::Customize { .. } => "Customize",
+            Content::Items { .. } => "Items",
+            Content::Abilities { .. } => "Abilities",
+        }
+    }
+
     /// The text of list row `idx`.
     fn row_text(&self, idx: usize) -> Vec<u8> {
         match &self.content {
@@ -1628,6 +1639,10 @@ impl Page {
             let name = self.row_text(idx as usize);
             let c = if self.row_grey(idx as usize) { ip::grey_colour(colour) } else { colour };
             setup(btn, set, 0x11, seqs, pos.0.as_ptr(), self.list_panel as *mut u8, name.as_ptr(), font, f9, f10, 0x40, &c, self.row_look(idx as usize, item_row));
+            // 0.113.0, true squeeze (owner, 2026-11-04): a name wider than the row's plate is drawn
+            // narrower (`CButton +0x20` = the row's `C2DFnt`, `0x140112F10`). One box on every row
+            // (Re:CoM's cursor frame hugs the plate), so a name keeps one width.
+            super::text_fit::fit(at::<usize>(btn, crate::text_fit::recom::BUTTON_TEXT), crate::text_fit::boxes::CAMP_ROW, || format!("{} list row {idx}", self.kind()));
             let spr: *mut u8 = at(btn, 0x18);
             if self.marked(idx as usize) && !spr.is_null() {
                 let m = vfn::<MarkFn>(spr, 0x40)(spr, set, EQUIPPED_MARK, MARK_X, MARK_Y, 0.0, 0);
@@ -1694,6 +1709,10 @@ impl Page {
                 let colour = VALUE_COLOUR;
                 v = func::<FntCtorFn>(FNT_CTOR)(v, 0, 0, &colour, 0xE, std::ptr::null(), 0x41);
                 func::<TextFn>(TEXT_COPY)(v, value.as_ptr());
+                // 0.113.0, true squeeze: the value (right-aligned at 220) ends where it ends and
+                // starts no further left than its label's end + a gap (both measured by Re:CoM).
+                let label = super::text_fit::width(at::<usize>(btn, crate::text_fit::recom::BUTTON_TEXT)).map_or(0.0, |w| w as f32 / 16.0);
+                super::text_fit::fit(v as usize, crate::text_fit::boxes::status(label), || format!("{} status value {i} (label {label:.1} units)", self.kind()));
             }
             let spr: *mut u8 = at(btn, 0x18);
             if !spr.is_null() {

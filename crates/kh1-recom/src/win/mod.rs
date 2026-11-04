@@ -45,6 +45,7 @@ mod story_skip;
 mod party;
 mod summons;
 mod sys;
+mod text_fit;
 mod trace;
 mod unlocks;
 

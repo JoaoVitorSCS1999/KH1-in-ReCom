@@ -116,6 +116,7 @@ pub mod sites;
 pub mod story_skip;
 pub mod party;
 pub mod summons;
+pub mod text_fit;
 pub mod trace;
 pub mod units;
 pub mod unlocks;
