@@ -166,6 +166,10 @@ pub mod row {
     /// the finishing throw. The picker never names them.
     pub const STRIKE_RAID_THROW: usize = 0x2F;
     pub const STRIKE_RAID_FINISHER: usize = 0x33;
+    /// M12 step 7, Ars Arcanum (`0x14039F100` / `0x14039EDD0`: row `0x22 + n` for hit n = 0..=12):
+    /// twelve hits and the finisher. The picker never names them.
+    pub const ARS_ARCANUM_HIT: usize = 0x22;
+    pub const ARS_ARCANUM_FINISHER: usize = 0x2E;
     /// Rows the ground picker walks (0..=0x41).
     pub const GROUND_COUNT: usize = 0x42;
 }
@@ -198,9 +202,15 @@ pub mod xl {
     pub const SR_CATCH_HIGH: usize = 23;
     pub const SR_CLASH: usize = 24;
     pub const SR_WAIT: usize = 25;
+    /// M12 step 7, Ars Arcanum (`0x14039EEB0` / `0x14039F100` / `0x14039EDD0`): the wind-up 0xD2,
+    /// the twelve hits 0xD3..=0xDE (rows 0x22..=0x2D: the first seven chain by themselves, the rest
+    /// by Triangle) and the finisher 0xDF (row 0x2E).
+    pub const AA_WINDUP: usize = 3;
+    pub const AA_HIT: usize = 4;
+    pub const AA_FINISHER: usize = 16;
     /// The entries built so far, in the order the asset step gives them slots and the DLL rows
     /// (later specials append theirs, so earlier slots never move).
-    pub const ENTRIES: [usize; 12] = [WINDUP, DASH, FINISHER, SR_WINDUP, SR_THROW, SR_FINISHER, SR_CATCH, SR_THROW_HIGH, SR_FINISHER_HIGH, SR_CATCH_HIGH, SR_CLASH, SR_WAIT];
+    pub const ENTRIES: [usize; 26] = [WINDUP, DASH, FINISHER, SR_WINDUP, SR_THROW, SR_FINISHER, SR_CATCH, SR_THROW_HIGH, SR_FINISHER_HIGH, SR_CATCH_HIGH, SR_CLASH, SR_WAIT, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
     /// The xl set's request map for its 36 entries (`xl_limit.dat` `+0x80`, the request words with
     /// an entry): 0xC8..=0xCA → 0..=2, 0xD2..=0xDF → 3..=16, 0xE6..=0xEE → 17..=25, 0xF0..=0xF8 →
     /// 26..=34, 0xFA → 35. Checked (files).
@@ -285,6 +295,22 @@ pub mod xl {
             SR_CATCH_HIGH => MotionInfo::new(8.0),
             SR_CLASH => MotionInfo::new(24.0),
             SR_WAIT => MotionInfo::new(64.0).with_flag(FlagKind::ComboWindow, 0.0, 52.0),
+            // Ars Arcanum: every hit with root travel (the request map's bit), the wind-up none; the
+            // seventh (entry 10) and the five after it with a combo window (KH1's follow-up window).
+            AA_WINDUP => MotionInfo::new(16.0),
+            4 => MotionInfo::new(18.0).with_flag(FlagKind::Hit(0), 8.0, 16.0).with_flag(FlagKind::Trail, 2.0, inf).with_forward_keys(&[(0.0, 0.0), (8.0, 69.35), (12.0, 118.76), (16.0, 140.00), (18.0, 140.00)]),
+            5 => MotionInfo::new(16.0).with_flag(FlagKind::Hit(0), 8.0, 16.0).with_flag(FlagKind::Trail, 0.0, inf).with_forward_keys(&[(0.0, 0.0), (2.0, 0.0), (12.0, 80.00), (16.0, 80.00)]),
+            6 => MotionInfo::new(12.0).with_flag(FlagKind::Hit(0), 6.0, 12.0).with_flag(FlagKind::Trail, 0.0, inf).with_forward_keys(&[(0.0, 0.0), (2.0, 0.0), (10.0, 100.00), (12.0, 100.00)]),
+            7 => MotionInfo::new(10.0).with_flag(FlagKind::Hit(0), 2.0, 8.0).with_flag(FlagKind::Trail, 0.0, inf).with_forward_keys(&[(0.0, 0.0), (2.0, 0.0), (8.0, 80.00), (10.0, 80.00)]),
+            8 => MotionInfo::new(12.0).with_flag(FlagKind::Hit(0), 2.0, 10.0).with_flag(FlagKind::Trail, 0.0, inf).with_forward_keys(&[(0.0, 0.0), (2.0, 0.0), (8.0, 90.00), (12.0, 90.00)]),
+            9 => MotionInfo::new(12.0).with_flag(FlagKind::Hit(0), 4.0, 12.0).with_flag(FlagKind::Trail, 0.0, inf).with_forward_keys(&[(0.0, 0.0), (2.0, 0.0), (10.0, 80.00), (12.0, 80.00)]),
+            10 => MotionInfo::new(60.0).with_flag(FlagKind::Hit(0), 14.0, 22.0).with_flag(FlagKind::Trail, 0.0, 52.0).with_flag(FlagKind::ComboWindow, 22.0, 52.0).with_forward_keys(&[(0.0, 0.0), (2.0, 0.0), (12.0, 15.40), (20.0, 50.00), (60.0, 50.00)]),
+            11 => MotionInfo::new(56.0).with_flag(FlagKind::Hit(0), 10.0, 18.0).with_flag(FlagKind::ComboWindow, 14.0, 36.0).with_flag(FlagKind::Trail, 0.0, 36.0).with_forward_keys(&[(0.0, 0.0), (8.0, 0.0), (14.0, 100.00), (24.0, 100.00), (56.0, 160.00)]),
+            12 => MotionInfo::new(56.0).with_flag(FlagKind::Hit(0), 12.0, 20.0).with_flag(FlagKind::Trail, 0.0, 36.0).with_flag(FlagKind::ComboWindow, 16.0, 36.0).with_forward_keys(&[(0.0, 0.0), (8.0, 0.0), (20.0, 110.00), (36.0, 110.00), (56.0, 160.00)]),
+            13 => MotionInfo::new(64.0).with_flag(FlagKind::Hit(0), 10.0, 18.0).with_flag(FlagKind::Trail, 0.0, 32.0).with_flag(FlagKind::ComboWindow, 14.0, 32.0).with_forward_keys(&[(0.0, 0.0), (10.0, 100.00), (32.0, 100.00), (64.0, 180.00)]),
+            14 => MotionInfo::new(64.0).with_flag(FlagKind::Hit(0), 12.0, 22.0).with_flag(FlagKind::ComboWindow, 18.0, 34.0).with_flag(FlagKind::Trail, 0.0, 34.0).with_forward_keys(&[(0.0, 0.0), (18.0, 135.00), (64.0, 135.00)]),
+            15 => MotionInfo::new(64.0).with_flag(FlagKind::Hit(0), 22.0, 30.0).with_flag(FlagKind::ComboWindow, 28.0, 52.0).with_flag(FlagKind::Trail, 0.0, 44.0).with_forward_keys(&[(0.0, 0.0), (18.0, 0.0), (26.0, 120.00), (32.0, 120.00), (64.0, 210.00)]),
+            AA_FINISHER => MotionInfo::new(88.0).with_flag(FlagKind::Hit(0), 30.0, 36.0).with_flag(FlagKind::Trail, 0.0, 48.0).with_forward_keys(&[(0.0, 0.0), (14.0, 0.0), (22.0, 117.93), (32.0, 143.06), (44.0, 180.00), (88.0, 180.00)]),
             _ => return None,
         })
     }
@@ -425,6 +451,30 @@ impl Moveset {
             rows[r] = ActionRow { trail: 5, ..special(0xE7, 0x55F8, [2, 5, 6], voice) };
         }
         rows[row::STRIKE_RAID_FINISHER] = ActionRow { trail: 5, ..special(0xE8, 0x5668, [24, 25, 24], 6) };
+        // Ars Arcanum (M12 step 7): the hits on the xl set's requests 0xD3..=0xDE, the finisher
+        // 0xDF; the first with the trail 5. Checked (files).
+        let arcanum: [(u32, [u8; 3], i8); 13] = [
+            (0x5A58, [4, 5, 6], -1),
+            (0x5A58, [0, 5, 6], 4),
+            (0x5A58, [1, 5, 6], 4),
+            (0x5A58, [1, 5, 6], -1),
+            (0x5A58, [1, 5, 6], 4),
+            (0x5A58, [4, 5, 6], -1),
+            (0x5B38, [19, 5, 19], 5),
+            (0x5A58, [2, 5, 6], 4),
+            (0x5A58, [1, 5, 6], 4),
+            (0x5A58, [1, 5, 6], 4),
+            (0x5A58, [3, 5, 6], 4),
+            (0x52E8, [0, 5, 6], 5),
+            (0x5BA8, [20, 5, 20], 6),
+        ];
+        for (k, (attack, sounds, voice)) in arcanum.into_iter().enumerate() {
+            let mut r = special(0xD3 + k as i16, attack, sounds, voice);
+            if k == 0 {
+                r.trail = 5;
+            }
+            rows[row::ARS_ARCANUM_HIT + k] = r;
+        }
 
         let rec = |kind: u8, power: i32, crit: i32, crit_bonus: i32, mp: i32, clash: u32, frac_b: f32, radius: f32| AttackData {
             stat_source: 0,
@@ -475,6 +525,15 @@ impl Moveset {
         let raid = |kind: u8, power: i32, radius: f32| AttackData { power_party: power, power, crit: 200, mp_charge: 0, clash: 6, frac_a: 0.799_999_95, frac_b: -0.399_999_98, radius, ..rec(kind, 0, 0, 0, 0, 0, 0.0, 0.0) };
         attacks.insert(0x55F8, raid(3, 10, 65.0));
         attacks.insert(0x5668, raid(5, 12, 80.0));
+        // Ars Arcanum's records (M12 step 7; Checked (files)): element 1, swept (clash type 6, spent
+        // on birth), radius 30, blade fractions 1.0 / 0.0, no MP charge: the plain hits power 0 (no
+        // crit), the seventh 10, the twelfth 6, the finisher 10 and a launch (kind 5); those three
+        // crit 200.
+        let arc = |kind: u8, power: i32, crit: i32| AttackData { power_party: power, power, crit, mp_charge: 0, clash: 0x10006, frac_a: 1.0, frac_b: 0.0, radius: 30.0, ..rec(kind, 0, 0, 0, 0, 0, 0.0, 0.0) };
+        attacks.insert(0x5A58, arc(3, 0, 0));
+        attacks.insert(0x5B38, arc(3, 10, 200));
+        attacks.insert(0x52E8, arc(3, 6, 200));
+        attacks.insert(0x5BA8, arc(5, 10, 200));
         Moveset { motions: m, rows, attacks }
     }
 }

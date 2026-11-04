@@ -44,7 +44,9 @@ fn follow_ups_and_numbers() {
     assert_eq!(ROWS, 7);
     assert_eq!(COST[SONIC_BLADE], 200);
     assert_eq!(TABLE[SONIC_BLADE], (11, 0x4B));
-    assert!(cmd::is_ours(0x4B) && cmd::is_ours(0x4D) && cmd::is_ours(0x4E) && !cmd::is_ours(0x57));
+    assert!(cmd::is_ours(0x4B) && cmd::is_ours(0x4D) && cmd::is_ours(0x4E) && cmd::is_ours(0x57) && cmd::is_ours(0x5E));
+    assert!(!cmd::is_ours(0x5A) && !cmd::is_ours(0x52), "Ragnarok and Trinity not built");
+    assert_eq!([0x57, 0x58, 0x59, 0x5E, 0x5F, 0x60].map(|c| cmd::name(c).unwrap()), [331, 332, 333, 338, 339, 340]);
     assert_eq!([0x4B, 0x4D, 0x4E].map(|c| cmd::name(c).unwrap()), [319, 321, 322]);
     // The special rows play the xl set's motions under our requests.
     let m = kh1_core::Moveset::kh1_defaults();
@@ -72,7 +74,14 @@ fn special_rows_take_the_xl_windows() {
     assert!(!special_rows_ready(&t, SONIC_BLADE) && !special_rows_ready(&t, STRIKE_RAID));
     add_special_rows(&mut t, &RECOM_ROWS_1_7, &m, &|e| Some(0x50 + e as u32));
     assert!(special_rows_ready(&t, SONIC_BLADE) && special_rows_ready(&t, STRIKE_RAID));
-    assert!(!special_rows_ready(&t, ARS_ARCANUM), "not built");
+    assert!(special_rows_ready(&t, ARS_ARCANUM));
+    assert!(!special_rows_ready(&t, RAGNAROK), "not built");
+    // M12 step 7: Ars Arcanum's rows: KH1's windows one frame early, the seventh's combo window
+    // 22..52 (the follow-ups), the finisher on Re:CoM's finisher layout.
+    let a7 = t[0x28];
+    assert_eq!((a7[0], a7[1], a7[3], a7[4], a7[5]), (0x50 + 10, 22, 52, 13, 21));
+    assert_eq!((t[0x22][0], t[0x22][4], t[0x22][5], t[0x22][1]), (0x54, 7, 15, 0));
+    assert_eq!(t[0x2E][0], 0x50 + 16);
     let d = t[0x1B];
     assert_eq!((d[0], d[1], d[3], d[4], d[5], d[0xB], d[0xF]), (0x51, 10, 40, 3, 21, RECOM_STUN_KIND, 0x80));
     let f = t[0x21];

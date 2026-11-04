@@ -1105,6 +1105,92 @@ Keyblade's packs (Halloween Town's too); the manifest's `xl_limit` section lists
 8. Sleights row (D-pad Left): Strike Raid listed first when equipped; usable when the prompt would
    show; choosing it plays the same special.
 
+## M12 step 7: KH1's Ars Arcanum (the triangle prompt, and in the Sleights list)
+
+Owner (2026-11-03): the same ask as Strike Raid's (§ above). Built the same way.
+
+### KH1 (Steam). Checked (decomp + files) unless tagged
+
+| what | value | where |
+|---|---|---|
+| command | 0x57 "Arcanum" (331), follow-ups 0x58 "Bash" (332), 0x59 "Finis" (333; UK "Finish") | `0x14028D3D0`, command records |
+| offer | range 300, no height rule; MP 300 = 3 whole MP on the press | `0x14028D0F0`, btltbl `+0x14C` |
+| AP | 4, sort key 802; learned with Re:CoM's sleight 10 | btltbl ability row 12 |
+| state | 0x20; flags `0x1200080`; physics speed 0 (the travel is the hits' root motion) | `0x14039EEB0`, `0x14039F0D0`, `0x14039F020` |
+| wind-up | 0xD2 (xl 3, 16 frames), blend 8, the release queued | `0x14039EEB0` |
+| hits 1..7 | **by themselves**: whenever Sora is free in the state, the pad handler (`0x1402A6220` → `0x1402A7B30`) calls the state's free callback `0x14039F090`: n < 7: `0x14039F100` (toward the target, row `0x22 + n` at blend 0, the release queued, n + 1); else state 0 (the end) | decomp |
+| hit rows | 0x22..0x28 = 0xD3..0xD9 (xl 4..10: 18 / 16 / 12 / 10 / 12 / 12 / 60 frames); the seventh (0xD9) has the combo window 22–52 | btltbl rows, `xl_limit.dat` |
+| follow-ups | `0x14039F1E0`: 0x58, 0x59 once n > 11; greyed outside the playing motion's combo window or without the attacking bit; Triangle `0x14039EDD0`: toward the target, row `0x22 + n` (n = 7..=12: 0xDA..0xDE, the finisher 0xDF), the end queued after it (`0x14039F1B0`), and **KH1's flags `0x1000080` cleared**: from the first follow-up on Sora can be hit | decomp |
+| air | `0x14039EFB0`: in the air Sora falls out (motion 6, blend 8) once a follow-up ran (n > 7) or the seventh hit is past its frame 20; else the state stays | decomp |
+| clash | state 0x20 in the reaction `0x14029BBD0`: state 0 (the special ends), then the swing's recoil (kinds 6 / 7) | decomp |
+| records | 0x5A58 (the plain hits): element 1, flinch, power 0, no crit, radius 30, fractions 1 / 0, clash 6 (spent); 0x5B38 (the seventh): power 10, crit 200; 0x52E8 (the twelfth): power 6, crit 200; 0x5BA8 (finisher): launch, power 10, crit 200; no MP charge | btltbl |
+
+### Re:CoM (Steam). Checked (decomp + exe)
+
+- `initStockSkill` case 10: attack id **0x11**, its resources `0x140211790(+0x3B8, 10, 0)`.
+- `exeStockSkill` "LASTARCANUM": the start 0xAA (id 0x11, motion 0, `limit2`), seven hits chained
+  by themselves 0xAB..0xB1 (ids 0x12..0x18), five by a press 0xB2..0xB6 (0x19..0x1D), the finisher
+  0xB7 (0x1E): **KH1's structure** (wind-up, 7 + 5 hits, finisher). Each part plays motion
+  `row[0]` (0..13) of its pack **11010** (sleight 10 → 3 → 0x3F2, `0x14020F720` / `0x14020FB10`),
+  variants 0. Columns (rows `+0xA`): the hits 0, the seventh (0x18) 1, the finisher (0x1E) 2.
+- Its start row 0x11 has flag 0x20: the tint `0x1407C5D60` (0.75, 0.5, 0.6, 1) over 20.0
+  (`0x140218CF2` → `0x140218DF9` → `0x140218D0E`), the resource wait, then `limit2` on the bone
+  `+0x3A4` (`PTR 0x1407C7E18` → `"limit2"`).
+
+### What runs (Combat = KH1, Sora's story, battle rooms)
+
+- Abilities page (4 AP) once Re:CoM's sleight 10 is learned; the prompt "Arcanum" within 300; the
+  Sleights list (§ 8.5.3 of `docs/recom-m12-sleights.md`).
+- Start: KH1's 3 MP; `initStockSkill` case 10 cardless (action 0x16, id 0x11, its resources), Re:CoM's
+  tint and `limit2`; the KH1 frame: state 0x20, the wind-up.
+- Hits: KH1's row `0x22 + n` on Re:CoM's id `0x12 + n` (its sounds / effects of that hit), Re:CoM's
+  collision with KH1's spheres; the first seven chain when each one's motion ends; "Bash" / "Finis"
+  in the Attack row in each window; the first follow-up turns the invincibility off.
+- Events: each KH1 motion starts the events of motion `n` of pack 11010 on Sora's sleight players
+  (the wind-up 0, hit k 1 + k, the finisher 13), as Sonic Blade's.
+- Damage: at Damage = Re:CoM each hit Re:CoM's Ars Arcanum AP at its row's column (trace `:recom
+  <ap> col <0|1|2> sleight 0xa`); at Damage = KH1 KH1's records.
+- A clash ends the special and plays the recoil (KH1's case 0x20; Sonic Blade's state too, which
+  until now kept its state after a clash).
+
+### Sites (`sites::SPECIAL_AA_CHECKED`; a mismatch: no Ars Arcanum)
+
+`0x140220F73` (initStockSkill case 10), `0x140218CF2` (the dispatch), `0x140218DF9` (the colour's
+`lea`), `0x1407C5D60` (the colour), `0x1407C6D80` (Re:CoM's rows 0x11..0x1E, 224 bytes); the
+`limit2` pointer read at start (`0x1407C7E18`, the string compared). All 700 byte sites of
+`sites.rs` re-read with pefile: 0 mismatches.
+
+### Asset step: **re-run it**
+
+Ars Arcanum's fourteen entries (3..=16) on slots 243..256 (with the owner's files), after Strike
+Raid's; words 331..333. Without it: `specials: Ars Arcanum's rows are not in the attack table`.
+
+### 1:1 checks
+
+- Checked (decomp + files, tests): the table above; the motions' lengths, windows and root travel
+  at every integer frame (`xl_motions_match_the_players_file`); rows 0x22..0x2E and the four
+  records against btltbl (`matches_kh1_core_defaults`); a full run in the movement fake
+  (`ars_arcanum_runs_kh1s_hits_on_recoms_sleight_action`: hit 1 at frame 17, seven by themselves,
+  the window, five follow-ups, the finisher; `ars_arcanum_ends_after_seven_hits`: 156–164 frames,
+  620 travel; `a_clash_ends_ars_arcanum_with_the_recoil`); the finisher clip's travel 1.80 m.
+- Not checked: in game; a KH1 trace; Re:CoM's pack 11010's event contents.
+- Assumptions: KH1's free callback runs in the frame the release is reached (our chain starts the
+  next hit at that motion end, the same frame); Re:CoM's sleight motions as long as KH1's (as
+  Sonic Blade's); Re:CoM's attack target for KH1's; Re:CoM's resources loaded by the first press
+  (Re:CoM waits, KH1 can't; logged).
+
+### What the owner should test (re-run the asset step first)
+
+1. Learn Ars Arcanum (Re:CoM's sleight, level 42), equip it (4 AP).
+2. In battle, an enemy within 3 m and 3+ MP: "Arcanum" in the context tab; Triangle: the tint,
+   Re:CoM's `limit2` effect, seven hits by themselves while Sora closes in.
+3. During the seventh hit "Bash" lights; Triangle hits on; the last is "Finis" (the launching
+   finisher). From the first "Bash" on, enemies can hit Sora (KH1's rule).
+4. Without a press Sora stops after the seventh hit.
+5. Sounds / effects as Re:CoM's Ars Arcanum card; the log's `Re:CoM's sleight events: pack 11010 …`
+   lines say `started`.
+6. Sleights row: Ars Arcanum listed (after Strike Raid) and played the same way.
+
 ## M12 step 3: KH1's Rod-list support abilities
 
 Owner (2026-11-03, "M12 sleights and progression"): "As sora levels up in KH1, he receives abilities

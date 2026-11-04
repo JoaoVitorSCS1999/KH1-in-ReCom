@@ -1100,7 +1100,7 @@ fn equipped_specials() -> Option<[bool; 5]> {
     use crate::abilities::ix;
     let e = super::abilities::equipped_live()?;
     let mut equipped = [false; 5];
-    for (i, a) in [(crate::specials::SONIC_BLADE, ix::SONIC_BLADE), (crate::specials::STRIKE_RAID, ix::STRIKE_RAID)] {
+    for (i, a) in [(crate::specials::SONIC_BLADE, ix::SONIC_BLADE), (crate::specials::ARS_ARCANUM, ix::ARS_ARCANUM), (crate::specials::STRIKE_RAID, ix::STRIKE_RAID)] {
         equipped[i] = e & 1 << a != 0 && super::specials::ready(i);
     }
     Some(equipped)

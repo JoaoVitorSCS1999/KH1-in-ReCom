@@ -482,7 +482,8 @@ mod tests {
         assert_eq!(row_for(xl::request(xl::DASH), &s, &Extension::default()), None);
         assert_eq!(row_for(0, &Stance { row: (first + 1) as i32, ..s }, &e), Some((row::STANCE_IDLE, false)));
         let names = appended_rows(&e, |_| Some("k".into()), |x| Some(format!("p001_{}", 230 + x)));
-        assert_eq!(names[names.len() - 12..names.len() - 9], [(first, "p001_230".to_string()), (first + 1, "p001_231".to_string()), (first + 2, "p001_232".to_string())]);
+        let n0 = names.len() - kh1_core::data::xl::ENTRIES.len();
+        assert_eq!(names[n0..n0 + 3], [(first, "p001_230".to_string()), (first + 1, "p001_231".to_string()), (first + 2, "p001_232".to_string())]);
         // Without the KH1-only rows the xl rows start right after Re:CoM's.
         assert_eq!(Extension::default().with_xl(|x| x == xl::DASH).xl[..3], [None, Some(RECOM_ROWS), None]);
     }

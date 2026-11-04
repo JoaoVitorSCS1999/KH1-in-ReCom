@@ -29,6 +29,10 @@
 //!   no `limit` effect (Re:CoM plays none for it); each throw on id 0xD; the events of Re:CoM's own
 //!   `p001_074` / `p001_075` / `p001_076` on KH1's wind-up / throws / catches (Sora's own event
 //!   players, [`motion_events`]); a throw's attack ends with its motion ([`special_row_end`]).
+//! - **Ars Arcanum** (M12 step 7): `initStockSkill`'s case 10 (attack id 0x11, its resources
+//!   `0x140211790(+0x3B8, 10, 0)`), Re:CoM's Ars Arcanum start tint (`0x1407C5D60`, 20.0) and its
+//!   `limit2` start effect; KH1's row `0x22 + n` on Re:CoM's id `0x12 + n`; the events of its pack
+//!   11010 (motions 0..=13) on KH1's motions.
 
 use super::movement::{self as mv, func, orig, p, rd, wr};
 use super::{base, log, va};
@@ -48,6 +52,8 @@ static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static PENDING: Mutex<Option<u8>> = Mutex::new(None);
 /// Re:CoM's `limit1` effect name is where `exeStockSkill` reads it.
 static EFFECT_OK: AtomicBool = AtomicBool::new(false);
+/// M12 step 7: `"limit2"` is where `exeStockSkill`'s Ars Arcanum start reads it.
+static EFFECT2_OK: AtomicBool = AtomicBool::new(false);
 /// Re:CoM's start tint and its end are as read (`sites::SPECIAL_TINT_CHECKED`).
 static TINT_OK: AtomicBool = AtomicBool::new(false);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
@@ -79,6 +85,12 @@ const LIMIT1_PTR: u64 = 0x1_407C_7E10;
 /// `0x140218F4A`: the same call with xmm6 = 20.0, flags 0; `sites::SPECIAL_SR_CHECKED`). Checked
 /// (decomp + disasm + exe).
 const TINT_COLOUR_RAID: u64 = 0x1_407C_5D70;
+/// M12 step 7: Re:CoM's Ars Arcanum start tint: its start row 0x11 has flag 0x20 (`+0xF` = 0x60):
+/// the colour by id × 10 = 0xAA (`0x140218CF2` → `0x140218DF9`: `lea rdx,[0x1407C5D60]` (0.75,
+/// 0.5, 0.6, 1)), then the call at `0x140218D0E` (20.0, flags 0); `sites::SPECIAL_AA_CHECKED`.
+const TINT_COLOUR_ARCANUM: u64 = 0x1_407C_5D60;
+/// `"limit2"`'s pointer, as `exeStockSkill`'s 0xAA start passes it (`PTR_s_limit2_1407c7e18`).
+const LIMIT2_PTR: u64 = 0x1_407C_7E18;
 /// Sora's own action table's per-variant row lists (`0x1401F7180`: `[0x1407C6300 + 8 ×
 /// player+0x398]` + row × 16 + 8 = the row's slot in his pack). Checked (disasm `0x1401F71BB..`).
 const OWN_ROW_LISTS: u64 = 0x1_407C_6300;
@@ -177,7 +189,7 @@ fn event(e: String) {
 /// Checks the rows and Re:CoM's effect name (no exe patch: battle only, through the Battle exe's
 /// own case). The exeStockSkill hook is installed by the caller after.
 pub unsafe fn install(b: usize) -> bool {
-    for i in [sp::SONIC_BLADE, sp::STRIKE_RAID] {
+    for i in sp::BUILT {
         let ok = super::attack::special_rows_ready(i);
         READY[i].store(ok, Ordering::Release);
         if !ok {
@@ -208,6 +220,16 @@ pub unsafe fn install(b: usize) -> bool {
     if READY[sp::STRIKE_RAID].load(Ordering::Acquire) && !crate::sites::SPECIAL_SR_CHECKED.iter().all(|c| have(b + c.rva as usize, c.expect.len()) == c.expect) {
         READY[sp::STRIKE_RAID].store(false, Ordering::Release);
         log("specials: Re:CoM's Strike Raid code is not as read (sites::SPECIAL_SR_CHECKED); no KH1 Strike Raid");
+    }
+    if READY[sp::ARS_ARCANUM].load(Ordering::Acquire) && !crate::sites::SPECIAL_AA_CHECKED.iter().all(|c| have(b + c.rva as usize, c.expect.len()) == c.expect) {
+        READY[sp::ARS_ARCANUM].store(false, Ordering::Release);
+        log("specials: Re:CoM's Ars Arcanum code is not as read (sites::SPECIAL_AA_CHECKED); no KH1 Ars Arcanum");
+    }
+    let name2: usize = rd(va(b, LIMIT2_PTR));
+    let ok2 = name2 != 0 && have(name2, 7) == b"limit2\0";
+    EFFECT2_OK.store(ok2, Ordering::Release);
+    if !ok2 {
+        log("specials: Re:CoM's effect name at 0x1407C7E18 is not limit2: Ars Arcanum without Re:CoM's start effect");
     }
     let name: usize = rd(va(b, LIMIT1_PTR));
     let ok = name != 0 && have(name, 7) == b"limit1\0";
@@ -278,6 +300,13 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
         return false;
     }
     let raid = s.index == sp::STRIKE_RAID;
+    let arcanum = s.index == sp::ARS_ARCANUM;
+    // `initStockSkill`'s case: Sonic Blade 9, Ars Arcanum 10, Strike Raid 8.
+    let sleight = match s.index {
+        sp::ARS_ARCANUM => sp::recom::ARCANUM_SLEIGHT,
+        sp::STRIKE_RAID => sp::recom::RAID_SLEIGHT,
+        _ => sp::recom::SLEIGHT,
+    };
     if !super::mp::can_pay(s.cost) || !super::mp::pay(s.cost, sp::NAME[s.index]) {
         note(|| format!("special {}: MP short ({})", s.index, s.cost));
         return false;
@@ -310,16 +339,20 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
     func::<PlFn>(HOMING)(pl);
     // Case 9: the attack id 0xE and the sleight's resources (its effects). Case 8 (Strike Raid): the
     // attack id 0xD, no resources (its motions are Sora's own).
-    let start_id = if raid { sp::recom::ID_RAID } else { sp::recom::ID_START };
+    let start_id = match s.index {
+        sp::ARS_ARCANUM => sp::recom::ID_ARCANUM_START,
+        sp::STRIKE_RAID => sp::recom::ID_RAID,
+        _ => sp::recom::ID_START,
+    };
     wr(pl + f::ATTACK_ID, start_id);
     let sleights: usize = rd(pl + f::SLEIGHTS);
     if sleights != 0 && !raid {
-        func::<LoadFn>(SLEIGHT_LOAD)(sleights, sp::recom::SLEIGHT as u32, 0);
+        func::<LoadFn>(SLEIGHT_LOAD)(sleights, sleight as u32, 0);
         // Re:CoM waits for them (`exeStockSkill` sub-state 4, motion 0x2E); KH1 starts at once:
         // until they are in, Re:CoM's sleight events find nothing (logged).
-        let ready = func::<ReadyFn>(RES_READY)(sleights, sp::recom::SLEIGHT as u32);
+        let ready = func::<ReadyFn>(RES_READY)(sleights, sleight as u32);
         if ready != 1 {
-            note(|| format!("start: Re:CoM's Sonic Blade resources not loaded yet ({ready}): its sleight events may be missing at first"));
+            note(|| format!("start: Re:CoM's {} resources not loaded yet ({ready}): its sleight events may be missing at first", sp::NAME[s.index]));
         }
     }
     wr(pl + f::ROW_PTR, va(base(), RECOM_ROWS) + start_id as usize * 16);
@@ -342,13 +375,23 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
     // `SPECIAL_SR_CHECKED`, checked at start with the special).
     if TINT_OK.load(Ordering::Acquire) {
         let time: f32 = rd(va(base(), TINT_TIME));
-        func::<TintFn>(TINT)(pl, va(base(), if raid { TINT_COLOUR_RAID } else { TINT_COLOUR }), time, 0);
+        let colour = match s.index {
+            sp::ARS_ARCANUM => TINT_COLOUR_ARCANUM,
+            sp::STRIKE_RAID => TINT_COLOUR_RAID,
+            _ => TINT_COLOUR,
+        };
+        func::<TintFn>(TINT)(pl, va(base(), colour), time, 0);
         event("tint".into());
     }
     // Re:CoM's own Sonic Blade start effect (`exeStockSkill` sub-state 0x8C: `0x1401F7F90(player,
     // "limit1", 0, bone +0x3A4)`, kept on Sora), at KH1's start (owner: Re:CoM's sleight effects).
     // Re:CoM's Strike Raid plays no start effect (its 0x82 start only tints).
-    if EFFECT_OK.load(Ordering::Acquire) && !raid {
+    // Ars Arcanum: `limit2` the same way (`exeStockSkill`'s 0xAA start).
+    if arcanum && EFFECT2_OK.load(Ordering::Acquire) {
+        let name: usize = rd(va(base(), LIMIT2_PTR));
+        super::magic::effect_on_bone(pl, pl, rd::<i32>(pl + f::EFFECT_BONE), name, 0, &[0.0, 0.0, 0.0, 1.0], true);
+    }
+    if EFFECT_OK.load(Ordering::Acquire) && !raid && !arcanum {
         let name: usize = rd(va(base(), LIMIT1_PTR));
         super::magic::effect_on_bone(pl, pl, rd::<i32>(pl + f::EFFECT_BONE), name, 0, &[0.0, 0.0, 0.0, 1.0], true);
     }
@@ -415,8 +458,8 @@ pub unsafe fn motion_events(pl: usize, xl_entry: usize) {
     if c == 0 {
         return;
     }
-    let motion = match source {
-        re::Source::Sleight { motion, .. } => motion,
+    let (pack, motion) = match source {
+        re::Source::Sleight { pack, motion } => (pack, motion),
         re::Source::Own { row } => return own_events(pl, xl_entry, row, eet_variant, ses_variant),
     };
     if rd::<u16>(c + ev::CTRL_FLAGS) & ev::SUB_PACK == 0 {
@@ -428,22 +471,22 @@ pub unsafe fn motion_events(pl: usize, xl_entry: usize) {
     let (mut eet, mut ses) = (false, false);
     let e: usize = rd(pl + ev::SLEIGHT_EET);
     if e != 0 {
-        func::<SetPackFn>(EET_SET)(e, re::PACK);
+        func::<SetPackFn>(EET_SET)(e, pack);
         let e: usize = rd(pl + ev::SLEIGHT_EET);
         if e != 0 && mute & ev::NO_EET == 0 {
-            eet = func::<EvStartFn>(EET_START)(e, motion, re::EET_VARIANT, 1) & 1 != 0;
+            eet = func::<EvStartFn>(EET_START)(e, motion, eet_variant, 1) & 1 != 0;
         }
     }
     let s: usize = rd(pl + ev::SLEIGHT_SES);
     if s != 0 {
-        func::<SetPackFn>(SES_SET)(s, re::PACK);
+        func::<SetPackFn>(SES_SET)(s, pack);
         let s: usize = rd(pl + ev::SLEIGHT_SES);
         if s != 0 && mute & ev::NO_SES == 0 {
-            ses = func::<EvStartFn>(SES_START)(s, motion, re::SES_VARIANT, 1) & 1 != 0;
+            ses = func::<EvStartFn>(SES_START)(s, motion, ses_variant, 1) & 1 != 0;
         }
     }
     event(format!("ev m{motion}{}{}", if eet { " eet" } else { "" }, if ses { " ses" } else { "" }));
-    note(|| format!("Re:CoM's Sonic Blade events: pack {} motion {motion} (xl entry {xl_entry}): effects {}, sounds {}", re::PACK, if eet { "started" } else { "none" }, if ses { "started" } else { "none" }));
+    note(|| format!("Re:CoM's sleight events: pack {pack} motion {motion} (xl entry {xl_entry}): effects {}, sounds {}", if eet { "started" } else { "none" }, if ses { "started" } else { "none" }));
 }
 
 /// M12 step 7: the events of Sora's own Re:CoM clip of action row `row` (its slot: `0x1401F7180`'s
@@ -578,8 +621,13 @@ pub fn start_line() -> String {
     } else {
         "; Strike Raid OFF (no clips or Re:CoM's code not as read)"
     };
+    let arcanum = if ready(sp::ARS_ARCANUM) {
+        "; KH1's Ars Arcanum (M12 step 7): offered in the context tab (gap < 300, 3 MP) and in the Sleights list when equipped, on Re:CoM's sleight action 0x16 (initStockSkill case 10, cardless; Re:CoM's tint and limit2 start effect), KH1's wind-up / 7 hits by themselves / 5 by Triangle / finisher (rows 0x22..=0x2E) on the xl_limit clips; Re:CoM's Ars Arcanum ids 0x12..=0x1E, its pack 11010's motion events on KH1's motions"
+    } else {
+        "; Ars Arcanum OFF (no clips or Re:CoM's code not as read)"
+    };
     format!(
-        "specials: KH1's Sonic Blade{} at combat = kh1 in Sora's story, in battle (M9 stage 9c.1): offered in the context tab (KH1's 0x14028D0F0: equipped, target gap < 600, not 160 above, 2 MP), Triangle starts it on Re:CoM's sleight action 0x16 (initStockSkill's writes, cardless; MP on the press), KH1's wind-up / 6 dashes / finisher (rows 0x1B..=0x21) on the xl_limit clips, Rave / Blast in the Attack row; Re:CoM's Sonic Blade ids 0xE / 0xF / 0x10 (its hit sounds and effects), its limit1 start effect{}, its sleight motions' sound and effect events (pack 11009 motions 0 / 1 / 2) on KH1's motions; the Battle exe's own case 0x16 -> exeStockSkill{raid}",
+        "specials: KH1's Sonic Blade{} at combat = kh1 in Sora's story, in battle (M9 stage 9c.1): offered in the context tab (KH1's 0x14028D0F0: equipped, target gap < 600, not 160 above, 2 MP), Triangle starts it on Re:CoM's sleight action 0x16 (initStockSkill's writes, cardless; MP on the press), KH1's wind-up / 6 dashes / finisher (rows 0x1B..=0x21) on the xl_limit clips, Rave / Blast in the Attack row; Re:CoM's Sonic Blade ids 0xE / 0xF / 0x10 (its hit sounds and effects), its limit1 start effect{}, its sleight motions' sound and effect events (pack 11009 motions 0 / 1 / 2) on KH1's motions; the Battle exe's own case 0x16 -> exeStockSkill{raid}{arcanum}",
         if ready(sp::SONIC_BLADE) { "" } else { " (OFF: no clips)" },
         if EFFECT_OK.load(Ordering::Acquire) { "" } else { " (OFF: name not found)" }
     )

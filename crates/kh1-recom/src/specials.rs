@@ -49,6 +49,20 @@
 //!   0xED, the wait, the end; no recoil. MP 2 (btltbl), range 900, no height rule. Checked (decomp +
 //!   files).
 //!
+//! - **Ars Arcanum** (M12 step 7, the same ask; script `0x14039EEB0`): state **0x20** (enter
+//!   `0x14039F0D0`: flags `0x1200080` and the follow-up offer `0x14039F1E0`; physics `0x14039F020`:
+//!   speed 0, the travel is the root motion), the wind-up 0xD2 at blend 8 with the release queued.
+//!   **The first seven hits** chain by themselves: whenever Sora is free in the state (the pad
+//!   handler `0x1402A6220` → `0x1402A7B30` → the state's free callback `0x14039F090`), the next
+//!   hit (`0x14039F100`: toward the target, row `0x22 + n`, n = 0..=6, blend 0, the release
+//!   queued); once seven are done, the special ends there. **The follow-ups** (`0x14039F1E0`):
+//!   command 0x58, 0x59 once n > 11, greyed outside the motion's combo window (the seventh hit's
+//!   22..52 on) or without the attacking bit; Triangle (`0x14039EDD0`): toward the target, row
+//!   `0x22 + n` (n = 7..=12, the thirteenth the finisher), the end queued after it (`0x14039F1B0`),
+//!   and **the flags `0x1000080` cleared** (from the first follow-up on Sora can be hit). In the air
+//!   (`0x14039EFB0`) Sora falls out once a follow-up ran or the seventh hit passed its frame 20.
+//!   MP 3 (btltbl), range 300, no height rule. Checked (decomp + files).
+//!
 //! Re:CoM runs it on its own sleight action `0x16` (`crate::movement::Host::start_special`):
 //! `initStockSkill`'s writes without the card, its Sonic Blade attack ids (0xE start, 0xF dash,
 //! 0x10 finisher) so its own hit sounds and effects play, the KH1 rows in the attack row pointer,
@@ -73,16 +87,21 @@ pub mod cmd {
     /// M12 step 7: Strike Raid's follow-ups (`0x1403A0230`: `'_' + (n > 3)`).
     pub const RAID: u8 = 0x5F;
     pub const RAID_LAST: u8 = 0x60;
+    /// M12 step 7: Ars Arcanum's follow-ups (`0x14039F1E0`: `'X' + (n > 11)`).
+    pub const ARCANUM: u8 = 0x58;
+    pub const ARCANUM_LAST: u8 = 0x59;
 
     /// The commands built so far (the starts and their follow-ups).
     pub fn is_ours(c: u8) -> bool {
-        matches!(c, SONIC_BLADE | RAVE | BLAST | STRIKE_RAID | RAID | RAID_LAST)
+        matches!(c, SONIC_BLADE | RAVE | BLAST | STRIKE_RAID | RAID | RAID_LAST | ARS_ARCANUM | ARCANUM | ARCANUM_LAST)
     }
 
-    /// The special a built start command starts (KH1's `0x14028D3D0`: 0x4B → 0, 0x5E → 2).
+    /// The special a built start command starts (KH1's `0x14028D3D0`: 0x4B → 0, 0x57 → 1, 0x5E →
+    /// 2).
     pub fn start_of(c: u8) -> Option<usize> {
         match c {
             SONIC_BLADE => Some(super::SONIC_BLADE),
+            ARS_ARCANUM => Some(super::ARS_ARCANUM),
             STRIKE_RAID => Some(super::STRIKE_RAID),
             _ => None,
         }
@@ -97,6 +116,8 @@ pub mod cmd {
             BLAST => 322,
             TRINITY => 326,
             ARS_ARCANUM => 331,
+            ARCANUM => 332,
+            ARCANUM_LAST => 333,
             RAGNAROK => 334,
             STRIKE_RAID => 338,
             RAID => 339,
@@ -107,8 +128,9 @@ pub mod cmd {
 }
 
 /// KH1's English words of the built specials after Sonic Blade's (US / UK `Word.bin`; the asset step
-/// writes each language's): Strike Raid 338 "Strike", 339 "Raid", 340 "Judgment". Checked (files).
-pub const ENGLISH_WORDS: &[(u16, &str)] = &[(338, "Strike"), (339, "Raid"), (340, "Judgment")];
+/// writes each language's): Strike Raid 338 "Strike", 339 "Raid", 340 "Judgment"; Ars Arcanum 331
+/// "Arcanum", 332 "Bash", 333 "Finis" (US; UK "Finish"). Checked (files).
+pub const ENGLISH_WORDS: &[(u16, &str)] = &[(338, "Strike"), (339, "Raid"), (340, "Judgment"), (331, "Arcanum"), (332, "Bash"), (333, "Finis")];
 
 /// KH1's specials by index (`0x140528340`: (ability id, command) pairs): 0 Sonic Blade, 1 Ars
 /// Arcanum, 2 Strike Raid, 3 Ragnarok, 4 Trinity. Checked (exe).
@@ -133,7 +155,7 @@ pub const NAME: [&str; 5] = ["Sonic Blade", "Ars Arcanum", "Strike Raid", "Ragna
 /// The KH1 rows each built special plays (Sonic Blade's dashes and finisher; M12 step 7, Strike
 /// Raid's five throws); an empty range: not built.
 #[allow(clippy::reversed_empty_ranges)]
-pub const ROWS_OF: [std::ops::RangeInclusive<usize>; 5] = [row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER, 1..=0, row::STRIKE_RAID_THROW..=row::STRIKE_RAID_FINISHER, 1..=0, 1..=0];
+pub const ROWS_OF: [std::ops::RangeInclusive<usize>; 5] = [row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER, row::ARS_ARCANUM_HIT..=row::ARS_ARCANUM_FINISHER, row::STRIKE_RAID_THROW..=row::STRIKE_RAID_FINISHER, 1..=0, 1..=0];
 
 /// KH1's special state (`0x14039EAD0` registers it).
 pub const STATE: u32 = 0x20;
@@ -146,9 +168,17 @@ pub fn is_state(s: u32) -> bool {
     s == STATE || s == STATE_OF[STRIKE_RAID]
 }
 
+/// The built specials' indices.
+pub const BUILT: [usize; 3] = [SONIC_BLADE, ARS_ARCANUM, STRIKE_RAID];
+
 /// Strike Raid's throw rows start at `0x2E + n` (`0x1403A0290`), n = 1..=5; the fifth is the
 /// finishing throw.
 pub const RAID_THROWS: u8 = 5;
+/// Ars Arcanum's hits that chain by themselves (`0x14039F090`: n < 7), and all its rows (twelve
+/// hits and the finisher, `0x22 + n`).
+pub const ARCANUM_AUTO: u8 = 7;
+pub const ARCANUM_ROWS: u8 = 13;
+
 /// A target more than this above Sora makes a throw the high one (`0x1403A0290`: lock point −
 /// Sora's position, y < −200; KH1 y is down).
 pub const RAID_HIGH_ABOVE: f32 = 200.0;
@@ -178,6 +208,14 @@ pub mod recom {
     /// `p001_076`, row 0x41)). Every KH1 throw takes its attack id. Checked (decomp + exe).
     pub const RAID_SLEIGHT: u16 = 8;
     pub const ID_RAID: u32 = 0xD;
+    /// M12 step 7: Re:CoM's Ars Arcanum sleight (id 10, `initStockSkill` case 10: attack id 0x11,
+    /// its resources `0x140211790(+0x3B8, 10, 0)`; `exeStockSkill` "LASTARCANUM": the start 0xAA (id
+    /// 0x11, `limit2`), seven hits chained by themselves 0xAB..=0xB1 (ids 0x12..=0x18), five by a
+    /// press 0xB2..=0xB6 (0x19..=0x1D), the finisher 0xB7 (0x1E)): KH1's row `0x22 + n` takes id
+    /// `0x12 + n`. Checked (decomp + exe).
+    pub const ARCANUM_SLEIGHT: u16 = 10;
+    pub const ID_ARCANUM_START: u32 = 0x11;
+    pub const ID_ARCANUM_HIT: u32 = 0x12;
 }
 
 /// What the offer sees of the target: the horizontal gap to its lock point minus the point's
@@ -285,6 +323,9 @@ pub struct Special {
     /// KH1's attacking bit (`weapon +0x42 & 1`): set at each row start, cleared by a refused
     /// menu confirm.
     pub attack_bit: bool,
+    /// KH1's flags `0x1000080` (no damage, no reaction) still on: the whole special, except Ars
+    /// Arcanum after its first follow-up (`0x14039EDD0` clears them).
+    pub protected: bool,
     /// Frames since the press (log and trace).
     pub age: f32,
 }
@@ -354,6 +395,8 @@ impl Kh1Sora {
         Some(match s.index {
             // `0x1403A0230`: no next throw after the fifth.
             STRIKE_RAID => (raid_cmd(s.counter), !(s.counter < RAID_THROWS && window && s.attack_bit)),
+            // `0x14039F1E0`: 0x58, 0x59 once n > 11.
+            ARS_ARCANUM => (if s.counter > 11 { cmd::ARCANUM_LAST } else { cmd::ARCANUM }, !(window && s.attack_bit)),
             _ => (follow_cmd(s.counter), !(window && s.attack_bit)),
         })
     }
@@ -374,7 +417,17 @@ impl Kh1Sora {
             return refuse(self, "not now");
         }
         match c {
-            cmd::SONIC_BLADE | cmd::STRIKE_RAID => self.start_special(h, c, target, pos, dir, w),
+            cmd::SONIC_BLADE | cmd::STRIKE_RAID | cmd::ARS_ARCANUM => self.start_special(h, c, target, pos, dir, w),
+            cmd::ARCANUM | cmd::ARCANUM_LAST => {
+                let Some(s) = self.special.filter(|s| s.index == ARS_ARCANUM) else { return refuse(self, "no special") };
+                if self.follow_up() != Some((c, false)) || s.counter >= ARCANUM_ROWS {
+                    return refuse(self, "greyed");
+                }
+                // `0x14039EDD0`: toward the target, the next row, the end after it, the flags off.
+                self.arcanum_hit(h, target, pos, true);
+                *dir = Vec3::from_yaw(self.target_yaw);
+                *w = 0.0;
+            }
             cmd::RAID | cmd::RAID_LAST => {
                 let Some(s) = self.special.filter(|s| s.index == STRIKE_RAID) else { return refuse(self, "no special") };
                 if self.follow_up() != Some((c, false)) || s.counter >= RAID_THROWS {
@@ -433,11 +486,15 @@ impl Kh1Sora {
             return refuse(self, "no Re:CoM rows or MP");
         }
         self.set_state(STATE_OF[index]);
-        self.special = Some(Special { index, phase: Phase::WindUp, counter: 0, attack_bit: false, age: 0.0 });
+        self.special = Some(Special { index, phase: Phase::WindUp, counter: 0, attack_bit: false, protected: true, age: 0.0 });
         if index == STRIKE_RAID {
             // `0x14039FFD0`: the wind-up 0xE6 at blend 0; the next entry (0xE7) calls the first
             // throw when the wind-up ends (`0x1403A0290`, which plays its row's motion afresh).
             self.play(xl::request(xl::SR_WINDUP) as u32 | req::ACTION, 0.0);
+        } else if index == ARS_ARCANUM {
+            // `0x14039EEB0`: the wind-up 0xD2 at blend 8, the release after it (its hits follow
+            // from the free callback).
+            self.play(xl::request(xl::AA_WINDUP) as u32 | req::ACTION, BLEND);
         } else {
             self.play(xl::request(xl::WINDUP) as u32 | req::ACTION, BLEND);
         }
@@ -476,6 +533,38 @@ impl Kh1Sora {
         s.counter = n;
         s.phase = Phase::Row;
         s.attack_bit = true;
+        self.special = Some(s);
+        self.clashed = false;
+        self.special_log.push(SpecialEvent::Row { counter: n, kh1_row: r, frame: s.age });
+    }
+
+    /// Ars Arcanum's next hit: `0x14039F100` (one of the first seven, from the free callback) or
+    /// `0x14039EDD0` (a follow-up, `follow`): toward the target (`0x1402A3B00`), row `0x22 + n` at
+    /// blend 0 (`0x1402A3980`), the release queued (a follow-up's carries the end, `0x14039F1B0`);
+    /// a follow-up clears KH1's flags `0x1000080`.
+    fn arcanum_hit(&mut self, h: &mut dyn Host, target: Option<TargetPart>, pos: Vec3, follow: bool) {
+        let Some(mut s) = self.special.filter(|s| s.index == ARS_ARCANUM) else { return };
+        if s.counter >= ARCANUM_ROWS {
+            return;
+        }
+        if let Some(t) = target {
+            let d = (t.centre - pos).flat().normalized();
+            if !d.is_zero_xz() {
+                self.target_yaw = d.yaw();
+            }
+        }
+        let r = row::ARS_ARCANUM_HIT + s.counter as usize;
+        let Some(request) = row_request(&self.moveset, r) else { return };
+        let n = s.counter + 1;
+        h.special_row(&RowStart { kh1_row: r, recom_id: recom::ID_ARCANUM_HIT + s.counter as u32, request, counter: n });
+        self.play(request as u32 | req::ACTION, 0.0);
+        self.append(req::RELEASE | request::IDLE as u32, 0.0);
+        s.counter = n;
+        s.phase = Phase::Row;
+        s.attack_bit = true;
+        if follow {
+            s.protected = false;
+        }
         self.special = Some(s);
         self.clashed = false;
         self.special_log.push(SpecialEvent::Row { counter: n, kh1_row: r, frame: s.age });
@@ -539,6 +628,21 @@ impl Kh1Sora {
                 _ => false,
             };
         }
+        if s.index == ARS_ARCANUM {
+            // `0x14039F090`, Sora free in the state (the wind-up's or a hit's release): the next of
+            // the first seven hits; after the seventh, or a follow-up's row (`0x14039F1B0`), the end.
+            return match s.phase {
+                Phase::Row if s.counter >= ARCANUM_AUTO => {
+                    self.end_special(h, "done");
+                    false
+                }
+                _ => {
+                    let pos = h.pos();
+                    self.arcanum_hit(h, self.special_target, pos, false);
+                    true
+                }
+            };
+        }
         match s.phase {
             Phase::WindUp => {
                 // The callback's request starts at the next update, as any request of the think;
@@ -560,6 +664,9 @@ impl Kh1Sora {
         match self.special {
             None => return false,
             Some(s) if s.index == STRIKE_RAID => return false,
+            // `0x14039EFB0`: Ars Arcanum falls out once a follow-up ran (n > 7) or the seventh hit
+            // (0xD9, xl entry 10) passed its frame 20; before that it keeps the state.
+            Some(s) if s.index == ARS_ARCANUM && !(s.counter > ARCANUM_AUTO || (self.rec.req == xl::request(10) && 20.0 <= self.rec.frame)) => return false,
             Some(_) => {}
         }
         self.end_special(h, "airborne");
@@ -621,6 +728,8 @@ pub mod recom_events {
 
     /// Re:CoM's sleight motion pack id for Sonic Blade (0x3F1 + 10000).
     pub const PACK: u32 = 10_000 + 0x3F1;
+    /// M12 step 7: Ars Arcanum's (0x3F2 + 10000).
+    pub const ARCANUM_PACK: u32 = 10_000 + 0x3F2;
     /// Re:CoM's motion for each xl entry (wind-up, dash, finisher): rows 0xE / 0xF / 0x10 byte 0.
     pub const MOTION: [u32; 3] = [0, 1, 2];
     /// The variants `exeStockSkill` passes (EET, SES): 0 for all three.
@@ -659,6 +768,10 @@ pub mod recom_events {
             xl::SR_WINDUP => (Source::Own { row: 0x3F }, 1, 0),
             xl::SR_THROW | xl::SR_FINISHER | xl::SR_THROW_HIGH | xl::SR_FINISHER_HIGH => (Source::Own { row: 0x40 }, 1, 0),
             xl::SR_CATCH | xl::SR_CATCH_HIGH | xl::SR_CLASH => (Source::Own { row: 0x41 }, 0, 0),
+            // Ars Arcanum: its pack 11010 (sleight 10 → 3 → 0x3F2, `0x14020F720` / `0x14020FB10`):
+            // the start motion 0, hit k (rows 0x12 + k) motion 1 + k, the finisher 13; variants 0
+            // (rows' byte 1 = 0; `+0x110(3)` = 0 for 0x11).
+            xl::AA_WINDUP..=xl::AA_FINISHER => (Source::Sleight { pack: ARCANUM_PACK, motion: (xl_entry - xl::AA_WINDUP) as u32 }, 0, 0),
             _ => return None,
         })
     }

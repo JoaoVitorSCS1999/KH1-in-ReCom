@@ -211,7 +211,8 @@ pub const ALL: [Ability; 58] = [
     // Raid (KH1 id 13, 3 AP, key 803: `0x33D8 + 12 × 12`, Checked (files)); the others wait.
     a("Strike Raid", 13, 0, 3, 803, Source::Sleight(sleight::STRIKE_RAID)),
     a("Sonic Blade", 11, 0, 3, 801, Source::Sleight(sleight::SONIC_BLADE)),
-    special("Ars Arcanum", sleight::ARS_ARCANUM),
+    // M12 step 7, Ars Arcanum (KH1 id 12, 4 AP, key 802: `0x33D8 + 12 × 11`, Checked (files)).
+    a("Ars Arcanum", 12, 0, 4, 802, Source::Sleight(sleight::ARS_ARCANUM)),
     special("Ragnarok", sleight::RAGNAROK),
     // Guard and Dodge Roll: Sora's movement kit (owner, 2026-11-01: "just have guard and dodge roll
     // be a part of sora's movement kit from the start, dont add them as abilities"). KH1's ids, bits
@@ -331,8 +332,8 @@ pub const MODIFIERS: std::ops::Range<usize> = ix::SLIDING_DASH..ix::GRAVITY_BREA
 /// The specials (stage 9c): kept; Sonic Blade (9c.1) is on the screen and offered by the command
 /// menu, the others wait (not on the screen, nothing reads them).
 pub const SPECIALS: std::ops::Range<usize> = ix::STRIKE_RAID..ix::RAGNAROK + 1;
-/// The specials built so far (stage 9c.1: Sonic Blade; M12 step 7: Strike Raid).
-pub const SPECIALS_BUILT: Bits = 1 << ix::SONIC_BLADE | 1 << ix::STRIKE_RAID;
+/// The specials built so far (stage 9c.1: Sonic Blade; M12 step 7: Strike Raid, Ars Arcanum).
+pub const SPECIALS_BUILT: Bits = 1 << ix::SONIC_BLADE | 1 << ix::STRIKE_RAID | 1 << ix::ARS_ARCANUM;
 
 /// The ability of a KH1 special (`crate::specials` index: 0 Sonic Blade, 1 Ars Arcanum, 2 Strike
 /// Raid, 3 Ragnarok).
@@ -977,6 +978,7 @@ pub mod page {
                 GRAVITY_BREAK => b"A combo finisher that cuts an enemy's HP.\0",
                 SONIC_BLADE => b"A flurry of dashing strikes. Triangle at a nearby enemy.\0",
                 STRIKE_RAID => b"Hurl the Keyblade at an enemy, up to five times. Triangle.\0",
+                ARS_ARCANUM => b"A furious flurry of strikes on one enemy. Triangle.\0",
                 GUARD => b"Press Square to block an attack.\0",
                 COUNTERATTACK => b"After a block, press Triangle to strike back.\0",
                 DODGE_ROLL => b"Press Square while moving to roll.\0",

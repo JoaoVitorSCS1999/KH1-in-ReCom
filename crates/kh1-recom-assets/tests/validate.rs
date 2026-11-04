@@ -548,6 +548,22 @@ fn h_specials_clips_from_xl_limit() {
         (23, 0xEC, 8, false),
         (24, 0xED, 24, false),
         (25, 0xEE, 64, false),
+        // Ars Arcanum's fourteen after them: the wind-up without, every hit and the finisher with root
+        // motion (KH1's request map).
+        (3, 0xD2, 16, false),
+        (4, 0xD3, 18, true),
+        (5, 0xD4, 16, true),
+        (6, 0xD5, 12, true),
+        (7, 0xD6, 10, true),
+        (8, 0xD7, 12, true),
+        (9, 0xD8, 12, true),
+        (10, 0xD9, 60, true),
+        (11, 0xDA, 56, true),
+        (12, 0xDB, 56, true),
+        (13, 0xDC, 64, true),
+        (14, 0xDD, 64, true),
+        (15, 0xDE, 64, true),
+        (16, 0xDF, 88, true),
     ];
     assert_eq!(built.xl.len(), want.len());
     for (i, (e, (entry, req, frames, root))) in built.xl.iter().zip(want).enumerate() {
@@ -580,7 +596,9 @@ fn h_specials_clips_from_xl_limit() {
         eprintln!("(h) Strike Raid throw: the Keyblade's grip moves {d:.2} m from the hand's start");
     }
     let j = built.manifest_json(&[]);
-    assert_eq!(j.matches("\"xl_entry\"").count(), 12);
+    assert_eq!(j.matches("\"xl_entry\"").count(), 26);
+    // Ars Arcanum's finisher travels KH1's 180 (1.80 m).
+    assert!((travel(first + 26) - 1.80).abs() < 0.01, "Ars Arcanum finisher travel {}", travel(first + 26));
     assert!(j.contains(&format!("\"xl_entry\": 1, \"kh1_request\": 201, \"slot\": {}", first + 1)));
     eprintln!("(h) xl_limit: clips {:?}", built.xl.iter().map(|e| (e.slot, e.frames, e.bytes)).collect::<Vec<_>>());
 }
