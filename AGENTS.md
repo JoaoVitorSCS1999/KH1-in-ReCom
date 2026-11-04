@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 203: M12 step 7: Ragnarok (KH1 FM's triangle prompt; also in Sleights), version 0.101.2 (2026-11-01)
+
+- Ragnarok (Checked (KH1 decomp + files)): wind-up 0xF0, 5 rising hits on their own (rows 0x36..0x3A, hops 60 / 40 / 40 / 40 / 40, speeds 8 / 4 / 4 / 4 / 8); the charge 0xF6 (Sora hovers, hittable), "Impact" 0x5B lit while t is 10..70 frames; fired by t: 10 shots, 17 and a hop back at 40..50, 25 and the big release at 50..60; then the fall and landing; range 600, 3 MP, 4 AP. Re:CoM side: case 0xB (id 0x1F), tint `0x1407C5D90`, `limit3`, pack 11011. In the Sleights menu as command 0x8B.
+- KH1 fires real objects: Re:CoM's own homing bullets made as Re:CoM's Ragnarok makes them; a wrapper on Re:CoM's homing step applies KH1's curve and 5° turn each frame per shot, then Re:CoM's step (owner: "Ship it", as Fire's re-target). Damage = KH1: KH1's record 0x5748 (Magic × 2, power 20).
+- Assumptions: the shots start at Re:CoM's hand point; the turn's direction; KH1's 0–7-frame per-shot delay not carried; random life / curve from our stream (KH1's ranges); Re:CoM's opening-strike sounds; Re:CoM's resource wait skipped. Offered only for a target 1.6 m above Sora (KH1) in this version; owner: any target (next).
+- Asset step: re-run (slots 257..265). 705 byte checks match. Checked: tests, Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 202: M12 step 7: Ars Arcanum (KH1 FM's triangle prompt; also in Sleights), version 0.101.1 (2026-11-01)
 
 - Ars Arcanum (Checked (KH1 decomp + files)): wind-up 0xD2, 7 hits on their own (rows from 0x22), then 5 follow-ups (0x58 / 0x59) ending in the finisher; the first follow-up ends the invincibility; range 300, 3 MP, 4 AP. Re:CoM side: case 10 (ids 0x11..0x1E), tint `0x1407C5D60`, `limit2` (checked by its string), pack 11010. In the Sleights menu as command 0x8A.
