@@ -570,3 +570,21 @@ At KH1 setting:
   - **Wyvern (Reload Lock) is left out.**
   - **Softer numbers for the strongest permanent skills**: proposed to the owner before the stages that use them (2–4).
 - **Treasure Magnet** (owner, 2026-11-04: "Re:CoM's Bouncywild radius"): with either copy equipped (Bouncywild's skill or KH1's level-72 copy), prizes are pulled from 10 m (Re:CoM's Draw: `player+0x550` = 10, plus the scattered-card test `0x14022F23A`). Without it, Re:CoM's 5 m. Built with Enemy Skills stage 2 (Re:CoM's play-time setters).
+- **Enemy Skills numbers** (owner, 2026-11-04: "oogie- (every 6s) large body - (reduce damage from front half by 10%) platinum - (first 5 hits) build everything"). The rest of the proposal stands:
+  - **Card Soldier** Attack Haste: swings ×1.25.
+  - **Larxene** Dash: run ×1.25.
+  - **Guard Armor** Wide Attack: hit size ×1.5.
+  - **Wight Knight** Float: Sora only, gravity ×0.75.
+  - **Oogie Boogie** Regen: every **6 s**, heal max(1, missing HP ÷ 8).
+  - **Neoshadow** Bio: every 1 s.
+  - **Defender** Protect / **Ursula** Shell: −25 %.
+  - **Large Body** Guard: damage from the **front half reduced by 10 %** (not a block).
+  - **Xemnas** Quick Barrier: 1 s.
+  - **Roxas** Double Strike: second hit at half power.
+  - **Lexaeus** Warp Break: 15 %, never bosses.
+  - **Zexion** Confu-Strike: 10 %.
+  - **Demyx** Water Charge: ×1.75.
+  - **Platinum Card** Invincible: the **first 5 hits** each battle do no damage.
+  - **Vexen** Auto-Life: once per battle, ¼ HP.
+  - Every other skill keeps Re:CoM's numbers.
+  - "Build everything": stages 2–5.
