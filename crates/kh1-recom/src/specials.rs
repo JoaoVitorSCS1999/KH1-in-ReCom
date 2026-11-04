@@ -77,8 +77,9 @@
 //!   (50 ≤ t < 60: hop 30, 8 back, the full release 0xF8), else 10, from the Keyblade's tip, in a
 //!   ring about Sora's facing axis, each a homing shot (`0x14039FBB0`, [`ragnarok`]); then the
 //!   fall (state 2: the end). Landing after the hits (`0x14039F6C0`, n > 5): the land motion,
-//!   state 0. MP 3, range 600, **only at a target 160 or more above Sora** (`0x14028D0F0`, 'Z').
-//!   Checked (decomp + exe + files).
+//!   state 0. MP 3, range 600; KH1 offers it **only at a target 160 or more above Sora**
+//!   (`0x14028D0F0`, 'Z'). Checked (decomp + exe + files). **Not KH1's here** (owner, 2026-11-03,
+//!   "KH1 specials follow-ups"): offered against any target ([`RAGNAROK_HEIGHT_RULE`] off).
 //!
 //! Re:CoM runs it on its own sleight action `0x16` (`crate::movement::Host::start_special`):
 //! `initStockSkill`'s writes without the card, its Sonic Blade attack ids (0xE start, 0xF dash,
@@ -264,14 +265,22 @@ impl OfferTarget {
     }
 }
 
+/// KH1's Ragnarok height rule (`0x14028D0F0`, command 'Z': only a target whose lock point is 160 or
+/// more above Sora). **Off: a deliberate non-KH1 choice by the owner** (2026-11-03, "KH1 specials
+/// follow-ups": "Ragnarok offered against any target" at the KH1 setting); everything else of
+/// Ragnarok's offer (range 600, its 3 MP, the ground rule) stays KH1's.
+pub const RAGNAROK_HEIGHT_RULE: bool = false;
+
 /// `0x14028D0F0`'s score of special `i` on the target: 0 out of range (or Sonic Blade's height
-/// rule), 1 in range but MP short (greyed), 2 offered.
+/// rule), 1 in range but MP short (greyed), 2 offered. Ragnarok: any height (the owner's choice,
+/// [`RAGNAROK_HEIGHT_RULE`]).
 pub fn score(i: usize, t: &OfferTarget, can_pay: &mut dyn FnMut(i32) -> bool) -> u8 {
     if t.gap < RANGE[i] {
         if i == SONIC_BLADE && SONIC_MAX_ABOVE < t.above {
             0
-        } else if i == RAGNAROK && t.above < SONIC_MAX_ABOVE {
-            // 'Z': only a target 160 or more above Sora.
+        } else if i == RAGNAROK && RAGNAROK_HEIGHT_RULE && t.above < SONIC_MAX_ABOVE {
+            // KH1's 'Z': only a target 160 or more above Sora (off: the owner's choice,
+            // [`RAGNAROK_HEIGHT_RULE`]).
             0
         } else {
             1 + can_pay(COST[i]) as u8

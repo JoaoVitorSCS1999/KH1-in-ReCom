@@ -1201,7 +1201,7 @@ Re:CoM's own homing bullets (KH1 shoots objects: `0x14039FBB0` children).
 | what | value | where |
 |---|---|---|
 | command | 0x5A "Ragnarok" (334), its release 0x5B "Impact" (335; DE "Ragnarök" / "Apokalypse") | `0x14028D3D0`, command records |
-| offer | range 600; **only at a target whose lock point is 160 or more above Sora** ('Z': `sora.y − point.y < 160` refuses); MP 300 = 3 whole MP | `0x14028D0F0`, btltbl |
+| offer | range 600; **only at a target whose lock point is 160 or more above Sora** ('Z': `sora.y − point.y < 160` refuses; **not used here**, the owner's choice: § Not KH1's below); MP 300 = 3 whole MP | `0x14028D0F0`, btltbl |
 | AP | 4, sort key 804 (KH1 id 14); learned with Re:CoM's sleight 11 | btltbl ability row 13 |
 | state | 0x25: enter `0x14039FAF0` (flags `0x1200000`: no damage, no reaction), physics KH1's air step `0x1402AF6A0` with speed 0 (arcs, the air drag), exit `0x14039F740` | `0x14039F250` |
 | wind-up | 0xF0 (xl 26, 24 frames), blend 8, the release queued | `0x14039F250` |
@@ -1226,8 +1226,9 @@ Re:CoM's own homing bullets (KH1 shoots objects: `0x14039FBB0` children).
 
 ### What runs (Combat = KH1, Sora's story, battle rooms)
 
-- Abilities page (4 AP) once Re:CoM's sleight 11 is learned; the prompt "Ragnarok" at a target 1.6 m
-  or more above and within 6 m; the Sleights list (§ 8.5.3 of `docs/recom-m12-sleights.md`).
+- Abilities page (4 AP) once Re:CoM's sleight 11 is learned; the prompt "Ragnarok" at any target
+  within 6 m (see **Not KH1's: any height** below); the Sleights list (§ 8.5.4 of
+  `docs/recom-m12-sleights.md`).
 - Start: KH1's 3 MP; case 0xB cardless (action 0x16, id 0x1F, its resources), Re:CoM's tint and
   `limit3`; the wind-up on Re:CoM's empty row 0xE (no hit); KH1 frame state 0x25.
 - Hits: KH1's row `0x36 + n` on Re:CoM's id 0x1F, KH1's hops; then the charge (row ended, Sora
@@ -1239,6 +1240,22 @@ Re:CoM's own homing bullets (KH1 shoots objects: `0x14039FBB0` children).
   `:recom <ap> col 0 sleight 0xb`); at Damage = KH1 KH1's records (the shots record 0x5748, trace
   `:ragnarok:kh1 <d>`).
 - Events: the wind-up and each hit motion 0 of pack 11011, the charge 1, the releases 2 / 3.
+
+### Not KH1's: any height (owner, 2026-11-03, "KH1 specials follow-ups")
+
+**A deliberate non-KH1 choice by the owner**: "Ragnarok offered against any target" at the KH1
+setting. KH1's offer (`0x14028D0F0`, command 'Z') refuses a target whose lock point is less than 160
+above Sora (Checked (decomp)); here that one condition is off (`specials::RAGNAROK_HEIGHT_RULE =
+false`), in the prompt and in the Sleights list (both read `specials::score`). Everything else
+stays as built: range 600 (gap to the lock point minus its radius), its 3 MP (greyed when short),
+state 0 on the ground (KH1's state-0 rule; the Sleights list's ground test), battle rooms, the move
+itself. Sonic Blade's own rule (no target more than 160 above) stays KH1's.
+
+A consequence of KH1's walk order (`0x14052834C`: Trinity, Ragnarok, Ars Arcanum, Sonic Blade,
+Strike Raid; the first best score wins), kept: with Ragnarok equipped and 3+ MP, the prompt shows
+"Ragnarok" for any target within 6 m, ahead of Ars Arcanum / Sonic Blade (and Strike Raid within
+6 m); in KH1 the height rule let them show against ground enemies. They stay reachable from the
+Sleights list (each by its own score). Checked (code + tests: `the_offer_is_kh1s`).
 
 ### Sites (`sites::SPECIAL_RAG_CHECKED`; a mismatch: no Ragnarok)
 
@@ -1270,12 +1287,17 @@ it: `specials: Ragnarok's rows are not in the attack table`.
 ### What the owner should test (re-run the asset step first)
 
 1. Learn Ragnarok (Re:CoM's sleight 11), equip it (4 AP).
-2. In battle, an enemy 1.6 m or more above Sora (a flyer) within 6 m and 3+ MP: "Ragnarok" in the
-   context tab (not for an enemy on the ground). Triangle: the tint, `limit3`, five rising hits.
+2. In battle, any enemy within 6 m and 3+ MP: "Ragnarok" in the context tab, an enemy on the ground
+   too (owner's choice, not KH1's 1.6 m-above rule); a flyer high above too. Triangle: the tint,
+   `limit3`, five rising hits.
 3. The charge: Sora hovers; "Impact" lights after 10 frames. Triangle early: 10 shots; after about
    0.7 s: 17 and a hop back; after about 0.85 s: 25, the big release. The shots curl and home.
 4. Not pressing: Sora drops after the charge. Hit during the charge: he takes it.
 5. Damage = KH1 vs Re:CoM: the hits log `:recom … sleight 0xb` at Re:CoM, the shots `:ragnarok`.
+6. Any height (owner's choice): a ground enemy within 6 m shows "Ragnarok" (with Ars Arcanum / Sonic
+   Blade also equipped, Ragnarok takes the prompt: KH1's order; they stay in the Sleights list);
+   more than 6 m away: no Ragnarok; under 3 MP: no tab (FM draws no greyed one); in the Sleights
+   list Ragnarok lights against the same targets, greyed in the air.
 - Combat = Re:CoM: no change.
 
 ## M12 step 3: KH1's Rod-list support abilities

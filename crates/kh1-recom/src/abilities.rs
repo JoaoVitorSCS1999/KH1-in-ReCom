@@ -977,7 +977,7 @@ pub mod page {
                 SONIC_BLADE => b"A flurry of dashing strikes. Triangle at a nearby enemy.\0",
                 STRIKE_RAID => b"Hurl the Keyblade at an enemy, up to five times. Triangle.\0",
                 ARS_ARCANUM => b"A furious flurry of strikes on one enemy. Triangle.\0",
-                RAGNAROK => b"Rising strikes, then a burst of light. Triangle at an enemy above.\0",
+                RAGNAROK => b"Rising strikes, then a burst of light. Triangle at a nearby enemy.\0",
                 GUARD => b"Press Square to block an attack.\0",
                 COUNTERATTACK => b"After a block, press Triangle to strike back.\0",
                 DODGE_ROLL => b"Press Square while moving to roll.\0",
