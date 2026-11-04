@@ -12,6 +12,7 @@ mod deck;
 mod drops;
 mod effects;
 mod enemy_skills_cmp;
+mod enemy_skills_deck;
 mod fx;
 mod field_sleights;
 mod gimmick;

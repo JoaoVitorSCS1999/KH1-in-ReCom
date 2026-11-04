@@ -124,12 +124,21 @@ pub fn cost(id: u16) -> Option<Cost> {
 /// The whole MP points sleight `id` takes from `mp` (None: it can't pay). A Party sleight (owner,
 /// 2026-11-04: "Same MP as sleights"): its own tier's points (`crate::party::points`).
 pub fn pay_points(id: u16, mp: i32) -> Option<i32> {
-    if crate::party::index(id).is_some() {
-        return crate::party::points(id, mp);
+    pay_points_with(id, mp, crate::enemy_skills_deck::sleight_lock())
+}
+
+/// [`pay_points`] with Riku's Sleight Lock on or off (Enemy Skills stage 5,
+/// `crate::enemy_skills_deck::discount`: 1 point less, at least 1; Party sleights and the all-MP
+/// ones too).
+pub fn pay_points_with(id: u16, mp: i32, lock: bool) -> Option<i32> {
+    let d = |n: i32| crate::enemy_skills_deck::discount(n, lock);
+    if let Some(i) = crate::party::index(id) {
+        let n = d(crate::party::ALL[i].mp);
+        return (mp >= n).then_some(n);
     }
     match cost(id)? {
-        Cost::Points(n) if mp >= n => Some(n),
-        Cost::All if mp >= 1 => Some(mp),
+        Cost::Points(n) if mp >= d(n) => Some(d(n)),
+        Cost::All if mp >= 1 => Some(d(mp)),
         _ => None,
     }
 }

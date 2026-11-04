@@ -171,6 +171,8 @@ pub fn pay(cost: i32, why: &str) -> bool {
     let Some((b, a)) = r else { return false };
     event(format!("pay{cost}"));
     note(|| format!("paid {cost} ({why}): MP {}/{} c{} -> {}/{} c{}", b.0, b.1, b.2, a.0, a.1, a.2));
+    // Enemy Skills stage 5: Aquatank's / Barrel Spider's refill once a battle.
+    super::enemy_skills_deck::after_pay(a);
     true
 }
 
@@ -207,7 +209,6 @@ pub fn add_points(n: i32, why: &str) -> bool {
 
 /// KH1's full restore (`0x1402A56F0`): for a later stage, once the owner picks Re:CoM's
 /// equivalent (not wired in 7.1).
-#[allow(dead_code)] // Waits for the owner's answer on Re:CoM's refill points.
 pub fn restore_full(why: &str) {
     if let Some((b, a)) = with_state(|mp| {
         let before = mp.view();
@@ -236,7 +237,9 @@ pub fn on_kh1_hit(enemy: usize, kh1_row: Option<usize>) {
     let level = twin.unwrap_or_else(|| m::no_twin_level(sora));
     // M12 step 3: MP Haste (KH1 ability 23, ability block `+0x184` bit 0) on the factor.
     let haste = super::abilities::equipped_live().is_some_and(crate::abilities::mp_haste);
-    let Some(units) = m::hit_units_with(record.mp_charge, level, sora, haste) else {
+    // Enemy Skills stage 5: Tornado Step (+0.75 on the factor, `crate::enemy_skills_deck`).
+    let tornado = super::enemy_skills_deck::tornado();
+    let Some(units) = crate::enemy_skills_deck::hit_units(record.mp_charge, level, sora, haste, tornado) else {
         event("+0lv0".into());
         note(|| format!("hit on {:#x}: enemy level {level} (twin), no charge (KH1: level 0)", enemy & 0x00FF_FFFF));
         return;
@@ -246,7 +249,8 @@ pub fn on_kh1_hit(enemy: usize, kh1_row: Option<usize>) {
         kh1_row.unwrap_or(0),
         record.mp_charge,
         if twin.is_some() { " (twin)" } else { " (no twin)" }
-    ) + if haste { ", MP Haste +1.5" } else { "" };
+    ) + if haste { ", MP Haste +1.5" } else { "" }
+        + if tornado { ", Tornado Step +0.75" } else { "" };
     gain_charge(units, &why);
 }
 

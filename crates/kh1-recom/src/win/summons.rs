@@ -410,6 +410,8 @@ pub unsafe fn sleight_running(pl: usize) -> bool {
     if o != 0 && !(o == pl && running) && SLEIGHT_OUT.compare_exchange(o, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
         let id = SLEIGHT_ID.load(Ordering::Relaxed) as u16;
         note(|| format!("sleight {} ({id:#x}): Re:CoM's sleight ended (action {:#x}); the KH1 frame takes Sora back", crate::sleights::name(id), if pl != 0 { rd::<u32>(pl + p::ACTION) } else { 0 }));
+        // Enemy Skills stage 5: Marluxia's second play waits for the next frame.
+        super::enemy_skills_deck::sleight_ended(o, id);
     }
     running
 }
@@ -463,6 +465,22 @@ pub unsafe fn start_sleight(pl: usize, id: u16) -> bool {
     // Re:CoM's air version (`initStockSkill` sets `+0x418 & 0x800000`; `crate::sleights::AIR_START`).
     let air = rd::<u32>(pl + f::FLAGS_418) & AIR_VERSION != 0;
     note(|| format!("sleight {name} -> Re:CoM's sleight {id:#x} through Sora's sleight start{}{}, {points} MP ({:?}), from action {before:#x}; Re:CoM's own protection only", if air { " (in the air: Re:CoM's air version)" } else { "" }, if field { " in the field (free; a hit on a field Heartless is Re:CoM's field strike)" } else { "" }, crate::sleights::cost(id).unwrap_or(crate::sleights::Cost::Points(0))));
+    true
+}
+
+/// Enemy Skills stage 5 (Marluxia's Double Sleight): Re:CoM's own sleight start for `id` again, free
+/// (Re:CoM's Double Sleight plays the second without a second payment), with the Sleights list's
+/// marks. False when Re:CoM's start refused it.
+pub unsafe fn replay_sleight(pl: usize, id: u16) -> bool {
+    let name = crate::sleights::name(id);
+    if !installed() || pl == 0 {
+        return false;
+    }
+    let Some(before) = begin(pl, id, name) else { return false };
+    SLEIGHT_ID.store(id as u32, Ordering::Relaxed);
+    SLEIGHT_OUT.store(pl, Ordering::Relaxed);
+    SLEIGHT_HITS.store(id as u32 + 1, Ordering::Relaxed);
+    note(|| format!("sleight {name} -> Re:CoM's sleight {id:#x} again (Marluxia's Double Sleight, free), from action {before:#x}"));
     true
 }
 

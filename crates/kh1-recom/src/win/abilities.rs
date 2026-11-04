@@ -264,7 +264,9 @@ pub fn equipped_live() -> Option<ab::Bits> {
         let skills: [u8; ab::SKILL_EXT_LEN] = unsafe { rd(save + ab::SKILL_EXT_FIRST) };
         ab::read(&block, &ext, &skills).equipped
     };
-    Some(usable(e))
+    // Enemy Skills stage 5: Black Fungus's skill counts as equipped in its battle (one atomic load
+    // without it).
+    Some(usable(e | super::enemy_skills_deck::live_bonus()))
 }
 
 /// M12 step 4: the equipped sleight abilities' Re:CoM sleight ids, in Re:CoM's order, for the

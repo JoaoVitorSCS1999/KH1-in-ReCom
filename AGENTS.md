@@ -11,6 +11,26 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 238: Enemy Skills stage 5: the deck skills' KH1 meanings (Tornado Step, Aquatank, Barrel Spider, Air Soldier, Jafar, Air Pirate, Riku, Marluxia, Luxord, Black Fungus), version 0.126.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Enemy Skills numbers): "build everything" (stages 2–5); the brief's meanings for the deck cards (plan stage 5). Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story unchanged.
+
+- **Code** (`crate::enemy_skills_deck`, `win::enemy_skills_deck`): armed once per battle in the battle manager's ctor wrapper (before stage 4's arming) from the equipped skills and Black Fungus's; one call each in our own `win::mp::pay` / `on_kh1_hit`, `win::attack::damage_check` / `request_bits`, `win::kh1_enemy::swing_meets_attacks`, `win::summons::sleight_running` (+ `replay_sleight`), `win::abilities::equipped_live`, `crate::sleights::pay_points`. No Re:CoM code patched, no new site. Per frame: one atomic load unless Air Soldier is armed or a second play waits.
+- **Tornado Step**: KH1's hit charge (`0x1402BF330`) + 0.75 on its factor (ours; MP Haste +1.5), KH1's 250 % cap (swing 3 → 5, finisher 6 → 10).
+- **Aquatank**: once a battle, the payment that leaves 0 MP points: KH1's full restore (`0x1402A56F0`).
+- **Barrel Spider**: once a battle, the payment that empties the charge gauge below max MP: the gauge fills to the next point; KH1's refill makes it the next frame.
+- **Air Soldier**: 1 charge unit per 20 frames running in battle (Re:CoM's run action 4; ours: 3 a second).
+- **Jafar / Air Pirate**: a hit during a KH1 swing (action 0xA with a KH1 row) / a KH1 item use (action 0xE) takes Re:CoM's no-reaction bit (KH1's roll no-flinch path): damage, no flinch.
+- **Riku**: sleights 1 MP point less, at least 1, Party and all-MP ones too (`sleights::pay_points_with`).
+- **Marluxia**: a Sleights-list sleight plays twice: Re:CoM's own sleight start again, free, the frame after the first ends (from stand / walk / run within 30 frames; a hit, KO or win drops it). Re:CoM's bit `+0x428 & 0x2000` not used: its replay is the request bits `0x1401F8150`'s battle branch, which KH1 battles skip (Checked (decomp); `recom-enemy-skills.md` § Stage 5).
+- **Luxord**: Sora's KH1 swing wins every clash with a KH1 enemy's attack row: the enemy gets KH1's clash record (kind 7 / 6 by KH1's 40 rule) and its row stops; Sora gets none and hits on.
+- **Black Fungus**: at each KH1 battle start one random built Enemy Skill not equipped (Re:CoM's random float `0x14029CF00`; any card, as Re:CoM's Random Flush) counts as equipped that battle (logged).
+- Abilities page: the ten un-greyed, help lines updated. Every Enemy Skill is now built except Gold Card (and stages 2–3's, on their own branch).
+- Assumptions: Re:CoM's sleight start takes the same sleight a frame after its end; Black Fungus's skill acts through every reader of `equipped_live`.
+- Checked: tests (`enemy_skills_deck::tests`: Tornado on KH1's charge, refills through KH1's refill step, the running rate, Riku through `pay_points_with`, Luxord, Black Fungus's pool and pick, the replay rule; `enemy_skills::tests`), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-enemy-skills.md` § Stage 5 (built).
+
+---
+
 ## Stage 237: Enemy Skills stage 4: Re:CoM's direct compares answer for the equipped skills (Quick Recovery, Dash ×1.25, Auto-Life once, Invincible 5 hits, Sleightblind's resistance); Gold Card greyed, version 0.125.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Enemy Skills numbers): "platinum - (first 5 hits) build everything"; the proposal's Larxene "Dash: run ×1.25", Vexen "Auto-Life: once per battle, ¼ HP". Plan stage 4 (route 3, research § 2.3). Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story unchanged.

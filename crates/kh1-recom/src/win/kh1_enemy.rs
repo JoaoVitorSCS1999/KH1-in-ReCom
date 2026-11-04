@@ -2905,6 +2905,20 @@ pub(super) unsafe fn swing_meets_attacks(swing: (u32, i32), gen: u32, touch: &mu
     let points: Vec<Option<[f32; 4]>> = cands.iter().map(|c| if met.contains(&c.coll) || !c.front || !ke::guard::meets(swing.0, c.row.clash_type) { None } else { touch(c.shape) }).collect();
     let rows = cands.iter().zip(&points).map(|(c, p)| ce::LiveRow { enemy: c.enemy, coll: c.coll, row: &c.row, touches: p.is_some(), front: c.front, met_before: met.contains(&c.coll) });
     let (sora, marked, meetings) = ce::sweep(swing, rows);
+    // Enemy Skills stage 5: Luxord's Omni Break: Sora's swing wins every meeting
+    // (`crate::enemy_skills_deck::omni_break`).
+    let (sora, marked, meetings) = if super::enemy_skills_deck::luxord() && !meetings.is_empty() {
+        let won = meetings
+            .into_iter()
+            .map(|m| match cands.iter().find(|c| c.coll == m.coll) {
+                Some(c) => crate::enemy_skills_deck::omni_break(m, c.row.attack, c.row.priority, swing.1),
+                None => m,
+            })
+            .collect::<Vec<_>>();
+        (None, false, won)
+    } else {
+        (sora, marked, meetings)
+    };
     for m in &meetings {
         if let Ok(mut g) = MET.lock() {
             g.push((gen, m.coll));

@@ -7,7 +7,8 @@
 //!   Auto-Life count call retargeted to [`revive_count`]. A skill whose sites aren't all in stays inert
 //!   (logged).
 //! - **Arm** ([`battle_start`], from the battle manager's ctor wrapper, once per battle): the stubs'
-//!   bytes ([`ARMED`]) from the equipped skills at Combat = KH1 in Sora's story; Platinum's 5 hits and
+//!   bytes ([`ARMED`]) from the equipped skills at Combat = KH1 in Sora's story (Black Fungus's skill
+//!   for the battle too, `super::enemy_skills_deck::bonus_bits`); Platinum's 5 hits and
 //!   Auto-Life's one revive start again. Nothing of ours per frame: the stubs run inside Re:CoM's
 //!   code only when it reaches the compares (a hit, Sora's stick class, a KO).
 //! - **Dash in KH1's run** ([`dash_on`]): `super::movement::stick_class` multiplies KH1's run by the
@@ -101,7 +102,7 @@ pub fn battle_start(kh1: bool) {
     if REVIVED.swap(0, Ordering::Relaxed) != 0 {
         note(|| "last battle: Auto-Life revived Sora".into());
     }
-    let equipped = if kh1 { super::abilities::equipped_live().unwrap_or(0) } else { 0 };
+    let equipped = if kh1 { super::abilities::equipped_live().unwrap_or(0) | super::enemy_skills_deck::bonus_bits() } else { 0 };
     let has = |c: u8| crate::enemy_skills::of_card(c as u16).is_some_and(|s| equipped & (1 << crate::enemy_skills::ability_of(s)) != 0);
     let placed = PLACED.load(Ordering::Acquire);
     let a = ec::arm(kh1, &has, &|c| placed & bit(c) != 0);

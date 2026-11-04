@@ -157,6 +157,15 @@ unsafe fn kh1_row_of(pl: usize) -> Option<usize> {
     (ptr >= start && ptr < start + t.len() * 16 && (ptr - start).is_multiple_of(16)).then(|| (ptr - start) / 16)
 }
 
+/// A KH1 swing is live: Re:CoM's attack action (`0xA`) with a KH1 row (`+0x3C8` into our table).
+/// Enemy Skills stage 5 (Jafar's Attack Bracer).
+pub(super) unsafe fn kh1_swing(pl: usize) -> bool {
+    rd::<u32>(pl + p::ACTION) == ATTACK_ACTION && kh1_row_of(pl).is_some()
+}
+
+/// Re:CoM's attack action (`0x1401F0D90` / `0x1401F0EBA` set it; `win::models`). Checked (decomp).
+const ATTACK_ACTION: u32 = 0xA;
+
 /// Sora's body (`player+0x690`) guard fields (Checked (decomp `0x14016F1C0`, body ctor)):
 /// `+0x9C` flags (1 guard, 0x20 guarded), `+0x8C` guard element mask (all by default), `+0xB0`
 /// the guard's half-angle (π by default).
@@ -366,6 +375,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     // KH1's MP refill runs in the actor pre-step, at the start of the frame (`0x1402A43A0` →
     // `0x1402A4CB0`): one point per frame while one is waiting (M7 stage 7.1).
     super::mp::frame();
+    // Enemy Skills stage 5: Air Soldier's running charge, Marluxia's second play (one atomic load).
+    super::enemy_skills_deck::frame(pl);
     // M12: a waiting "Sora learned X" notice, at Re:CoM's field camp gate (one atomic load).
     super::notices::frame(pl);
     // Boss revenge: the game clock its decay reads (one add).
@@ -1347,8 +1358,11 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
         }
         wr(pl + p::FLAGS_418, f418 | 1);
     }
+    // Enemy Skills stage 5: Jafar's swings and Air Pirate's item uses take no reaction (the roll's
+    // no-flinch path; only when a hit arrived).
+    let bracer_skill = arrived && super::enemy_skills_deck::no_flinch(pl);
     let run = |pl: usize| -> u64 {
-        if NO_FLINCH.load(Ordering::Relaxed) != pl || !kh1 {
+        if (NO_FLINCH.load(Ordering::Relaxed) != pl && !bracer_skill) || !kh1 {
             o(pl)
         } else {
             let f: u32 = rd(pl + p::FLAGS_420);

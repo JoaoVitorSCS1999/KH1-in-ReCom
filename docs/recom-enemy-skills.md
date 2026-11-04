@@ -205,6 +205,59 @@ Code: `crates/kh1-recom/src/enemy_skills_cmp.rs` (the sites, the stubs, the rule
   move / attack inits are hooked).
 - Not checked: in game. KH1 has none of these skills (no 1:1 to check).
 
+## Stage 5 (built): the deck-to-KH1 meanings
+
+Ask (manager brief, 2026-11-04, on the owner's "build everything"): Tornado Step, Aquatank, Barrel
+Spider, Air Soldier, Jafar, Air Pirate, Riku, Marluxia, Luxord, Black Fungus, on our KH1 systems.
+Their Re:CoM effects act on the deck (reload, card breaks, sleight stocks), which Sora doesn't have
+at KH1. Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story: nothing armed.
+
+Code: `crates/kh1-recom/src/enemy_skills_deck.rs` (the rules, tested), `win/enemy_skills_deck.rs`
+(arming, the per-frame step, the hooks into our code); one call each in `win::battle::manager_ctor`
+(before stage 4's arming), `win::attack::request_bits` (the frame), `win::attack::damage_check`
+(no reaction), `win::mp::pay` / `on_kh1_hit`, `win::kh1_enemy::swing_meets_attacks`,
+`win::summons::sleight_running` (+ `replay_sleight`), `win::abilities::equipped_live` (Black
+Fungus), `crate::sleights::pay_points` (Riku). No Re:CoM code patched; no new site.
+
+- **Armed once per battle** at the battle manager's ctor from the equipped skills (and Black
+  Fungus's). Per frame: one atomic load (`enemy_skills_deck::frame`) unless Air Soldier is armed
+  or a second play waits; then two loads and, every 20 frames of running, an MP read.
+
+| skill | Re:CoM (research) | at KH1 (built) | numbers |
+|---|---|---|---|
+| Tornado Step, Reload Haste | reload counter reset to 1 (`0x140167C54`) | KH1's hit charge (`0x1402BF330`) gets a bonus on its factor, as MP Haste's | **+0.75** (ours; MP Haste +1.5), KH1's 250 % cap: at equal levels a swing 3 → 5 (MP Haste 7), a finisher 6 → 10 (15); with both, the cap |
+| Aquatank, Auto-Reload | an empty deck reloads by itself (`0x1401695E3`) | once a battle, the payment that leaves 0 MP points: KH1's full restore (`0x1402A56F0`: MP = max, charge 0) | once / battle |
+| Barrel Spider, Quickload | the reload completes at once (`0x140167C9B`) | once a battle, the payment that empties the charge gauge below max MP: the gauge fills to the next point ((MP + 1) × 30), KH1's refill makes it the next frame | once / battle; Aquatank first when both apply |
+| Air Soldier, Reload Kinesis | reload while not idle (`0x1401E6C98`) | MP charge while Sora runs (Re:CoM's run action 4) in battle | **1 unit / 20 frames** (ours: 3 a second, half of steady swinging; point 1 from 0 MP in 10 s) |
+| Jafar, Attack Bracer | attack plays can't be broken (`0x14015DAF0`) | a hit during a KH1 swing (Re:CoM's attack action 0xA with a KH1 row) takes Re:CoM's no-reaction bit `+0x420 & 2` for the check (KH1's roll no-flinch path): damage, no flinch | — |
+| Air Pirate, Item Bracer | item plays can't be broken (`0x14015DAE8`) | the same during a KH1 item use (Re:CoM's item action 0xE) | — |
+| Riku, Sleight Lock | stocked cards locked (`0x14015266F`) | a sleight's MP: 1 point less, at least 1, Party sleights and the all-MP ones too (`sleights::pay_points_with`) | Holy 3 → 2, Magic LV3 2 → 1, Lucky Bounty 1, Idyll Romp all − 1 |
+| Marluxia, Double Sleight | `+0x428 \|= 0x2000` at a sleight play (`0x1401F5B22`) | when a Sleights-list sleight ends, Re:CoM's own sleight start for it again, free (`summons::replay_sleight`), from Sora's free ground actions 2 / 3 / 4 within 30 frames; dropped by a hit reaction, the KO or the win | once per play (not the replay), battle only, not Party sleights |
+| Luxord, Omni Break | plays never broken (`0x14015DAF4`, `0x140164999`) | Sora's KH1 swing wins every meeting with a KH1 enemy's attack row: the enemy gets KH1's clash record (kind 7 when its row is more than 40 under Sora's, else 6) and its row stops; Sora gets none and goes on into the body | — (KH1's own rule would leave rows at 98+ unmoved: ours) |
+| Black Fungus, Random Flush | the slot becomes a random enemy card (`0x140163170` case 0x5F) | at each KH1 battle start, one random built Enemy Skill not equipped (any, learned or not, as Re:CoM's draws from all cards; never Black Fungus) counts as equipped for that battle, by Re:CoM's random float `0x14029CF00`; logged | one a battle |
+
+### Marluxia: why not Re:CoM's Double Sleight bit (Checked (decomp))
+
+Re:CoM's bit 0x2000 makes the sleight's end `0x1401F6660` keep the play (no `0x14015E0E0`), stand
+Sora (`0x1401F2890`) and set `+0x428 |= 0x41000`; the replay is the request bits `0x1401F8150`'s
+**battle branch**: with bit 0x1000 it calls Sora's sleight start `vt+0x130` again (the id still in
+`+0x82C`). At KH1 our request-bits wrapper runs Re:CoM's **field** branch in battle (the KH1 Attack,
+`win::attack::request_bits`'s `forced`), so the replay never comes, and `0x1000` would stay set:
+other exes (`0x1402176C0`, `0x140217EE0` through `0x1401EF330`) would then call the sleight start at
+their own moments. So the second play is Re:CoM's same start called once more by us, at the next
+frame after the first ends (what Re:CoM's battle branch does a frame later).
+
+### Tags
+
+- Checked (code): every hook point is our own code; Re:CoM's actions 0xA / 0xE / 4 and
+  `+0x420 & 2` as earlier stages use them; Re:CoM's Double Sleight path (decomp above).
+- Ours (brief "pick"): Tornado Step's +0.75, Air Soldier's rate, Barrel Spider's meaning, Luxord's
+  kinds, Marluxia's 30-frame wait, Black Fungus's pool (all built skills).
+- Assumption: Re:CoM's sleight start accepts the same sleight again a frame after its end (its pack
+  is still loaded); Black Fungus's skill acts through every reader of the equipped skills (the KH1
+  frame, stage 4's stubs, the MP hooks; stages 2–3's readers if they read `equipped_live`).
+- Not checked: in game. KH1 has none of these (no 1:1 to check).
+
 ## Left out (owner's choice 1. C, or no meaning at KH1)
 
 - Card values: Shadow, Screwdiver, Powerwild, Sea Neon, Pirate.
