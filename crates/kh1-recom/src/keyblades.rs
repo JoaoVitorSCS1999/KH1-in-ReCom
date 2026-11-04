@@ -255,7 +255,13 @@ pub mod top {
     /// touch. Step 24 overlaps neighbouring plates by 2. The first entry's plate top (64) stays
     /// below the header (layout group 0 elements 11 / 12 at y 51, plate 37 .. 63), which Re:CoM
     /// shows on a confirm while the entries fade; the last's bottom (282) where the 8th entry's was.
-    pub const KH1_Y0: f32 = 78.0;
+    ///
+    /// **Moved down 10 (owner, 2026-11-04, screenshot: "items is kind of clipping through the top, there's enough
+    /// space at the bottom to bring everything down a little bit"):** the header frame's lower border covers
+    /// screen y 0..≈ 69 (720p screenshot: its bar at ≈ 130 px of 720 = 69.3 units), so the first plate's top 64 was
+    /// under it; the bottom info panel starts at ≈ 297 (558 px). Now y 88 .. 280 (Re:CoM's own first y): plates
+    /// 74 .. 292, glows 72 .. 294. Checked (owner's screenshot; plate / glow sizes as above).
+    pub const KH1_Y0: f32 = 88.0;
     pub const KH1_STEP: f32 = 24.0;
 
     fn y0_step(l: Layout) -> (f32, f32) {
@@ -820,17 +826,18 @@ mod tests {
         }
         // KH1's nine: 78 .. 270 in steps of 24; the bar and glove keep Re:CoM's offsets.
         let ys: Vec<f32> = (0..9).map(|s| top::entry_pos(Layout::Kh1, s).1).collect();
-        assert_eq!(ys, vec![78.0, 102.0, 126.0, 150.0, 174.0, 198.0, 222.0, 246.0, 270.0]);
+        assert_eq!(ys, vec![88.0, 112.0, 136.0, 160.0, 184.0, 208.0, 232.0, 256.0, 280.0]);
         for s in 0..9 {
             let (x, y) = top::entry_pos(Layout::Kh1, s);
             assert_eq!(x, 86.0);
             assert_eq!(top::bar_pos(Layout::Kh1, s), (48.0, y - 8.0));
             assert_eq!(top::glove_pos(Layout::Kh1, s), (150.0, y - 6.0));
         }
-        // The last entry where the 8th entry was (Re:CoM's index 7 at 26 per step), the first's
-        // plate (−14) below the header's (y 51, +12), the plates (26 high) overlapping by 2.
-        assert_eq!(top::entry_pos(Layout::Kh1, 8).1, 88.0 + 26.0 * 7.0);
-        assert!(top::entry_pos(Layout::Kh1, 0).1 - 14.0 > 51.0 + 12.0);
+        // The first plate (−14) clear of the header frame's lower border (≈ 69.3 on screen), the last
+        // plate (+12) and glow (+14) above the bottom panel (≈ 297), the plates (26 high) overlapping by 2.
+        assert_eq!(top::entry_pos(Layout::Kh1, 0).1, top::RECOM_Y0);
+        assert!(top::entry_pos(Layout::Kh1, 0).1 - 14.0 > 70.0);
+        assert!(top::entry_pos(Layout::Kh1, 8).1 + 14.0 < 297.0);
         assert_eq!(26.0 - top::KH1_STEP, 2.0);
     }
 

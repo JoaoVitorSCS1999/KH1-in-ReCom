@@ -598,7 +598,7 @@ high, −14 .. +12 around the button, so Re:CoM's step 26 makes the plates touch
 plate 37 .. 63, shown by Re:CoM on a confirm while the entries fade; the 8th entry ("KH1") sat at
 y 270 and was seen in game (0.8.0: clear of the bottom HUD).
 
-KH1's list: **y = 78 + 24 × slot** (78 .. 270), x 86; bar and glove keep Re:CoM's offsets (y − 8,
+KH1's list: **y = 88 + 24 × slot** (88 .. 280; 78 .. 270 until 0.106.1, owner: the first entry clipped under the header), x 86; bar and glove keep Re:CoM's offsets (y − 8,
 y − 6). The first plate's top (64) stays below the header's bottom (63), the last entry is where the
 8th entry was; neighbouring plates overlap by 2 (step 24 against a 26-high plate). Re:CoM's list
 keeps Re:CoM's places. The help line (`camp+0x9D0`) does not move.
@@ -669,7 +669,7 @@ reads) once in state 0xF; nothing else per frame. Riku's story / the map camp: o
 
 ### Assumptions and risks
 
-1. **Room**: the nine at y 78 .. 270 with plates overlapping by 2. Measured from `camp.lad`, not seen.
+1. **Room**: the nine at y 88 .. 280 (0.106.1; 78 .. 270 clipped the first under the header in game) with plates overlapping by 2.
    The header (y 51) and the KH1 list's first plate don't overlap; whether 2 overlapping pixels read
    well, and whether the glove (150, y − 6) sits right on a 24 step, are for the screenshot.
 2. **Our labels**: deleted only as Re:CoM deletes its own (relabels; the buttons' teardown takes their

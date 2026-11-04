@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 218: The KH1 camp list moved down 10 (Items no longer under the header), version 0.106.1 (2026-11-03)
+
+Owner, 2026-11-04 (screenshot): "you'll notice, items is kind of clipping through the top, there's enough space at the bottom to bring everything down a little bit".
+
+- **Measured** (Checked (owner's 720p screenshot)): the header frame's lower border reaches ≈ 69 units (130 px), the first plate's top was 64; the bottom info panel starts at ≈ 297 (558 px), the last plate ended at 282.
+- **Change** (`keyblades::top::KH1_Y0` 78 → 88 = Re:CoM's own first y): the nine at y 88 .. 280 (step 24 kept), plates 74 .. 292, glows 72 .. 294; the highlight bar and glove follow (Re:CoM's offsets). Re:CoM's seven untouched.
+- Tests updated. Not checked: in game.
+
+---
+
 ## Stage 217: Enemy Skills stage 1: Re:CoM's enemy cards as KH1 abilities on a third "Enemy Skills" row; the five KH1 matches from their cards, version 0.106.0 (2026-11-04)
 
 Owner, 2026-11-03 (`design-philosophy-instructions.md` § Enemy cards as abilities): "all enemy cards that are the same as a KH1 Ability should replace its respective KH1 ability. Soldier card should only replace 1 combo plus. … let the enemy cards have their own separate section in the ability tabs called "Enemy Skills" Have each ability have the name of the original card, and a description of what the ability does."; 2026-11-04 (§ Enemy Skills plan answers): "Go ahead": build in 5 stages, stage 1 first. Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story unchanged.
