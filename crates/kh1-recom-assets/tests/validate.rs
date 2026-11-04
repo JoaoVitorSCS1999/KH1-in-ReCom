@@ -564,6 +564,17 @@ fn h_specials_clips_from_xl_limit() {
         (14, 0xDD, 64, true),
         (15, 0xDE, 64, true),
         (16, 0xDF, 88, true),
+        // M12 step 7: Ragnarok's nine after them: the wind-up, the five rising hits, the charge, the
+        // two releases.
+        (26, 0xF0, 24, false),
+        (27, 0xF1, 14, false),
+        (28, 0xF2, 12, false),
+        (29, 0xF3, 14, false),
+        (30, 0xF4, 18, false),
+        (31, 0xF5, 22, false),
+        (32, 0xF6, 76, true),
+        (33, 0xF7, 80, false),
+        (34, 0xF8, 50, false),
     ];
     assert_eq!(built.xl.len(), want.len());
     for (i, (e, (entry, req, frames, root))) in built.xl.iter().zip(want).enumerate() {
@@ -596,7 +607,7 @@ fn h_specials_clips_from_xl_limit() {
         eprintln!("(h) Strike Raid throw: the Keyblade's grip moves {d:.2} m from the hand's start");
     }
     let j = built.manifest_json(&[]);
-    assert_eq!(j.matches("\"xl_entry\"").count(), 26);
+    assert_eq!(j.matches("\"xl_entry\"").count(), 35);
     // Ars Arcanum's finisher travels KH1's 180 (1.80 m).
     assert!((travel(first + 26) - 1.80).abs() < 0.01, "Ars Arcanum finisher travel {}", travel(first + 26));
     assert!(j.contains(&format!("\"xl_entry\": 1, \"kh1_request\": 201, \"slot\": {}", first + 1)));

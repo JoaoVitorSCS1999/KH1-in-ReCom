@@ -31,7 +31,7 @@ use crate::abilities::{self as ab, SleightMp};
 
 /// The KH1 specials (by `crate::specials` index) the list also holds when equipped (M12 step 7):
 /// Strike Raid, Ars Arcanum. Sonic Blade isn't (the owner named the other three).
-pub const SPECIALS: [usize; 2] = [crate::specials::ARS_ARCANUM, crate::specials::STRIKE_RAID];
+pub const SPECIALS: [usize; 3] = [crate::specials::ARS_ARCANUM, crate::specials::STRIKE_RAID, crate::specials::RAGNAROK];
 
 /// The list's most rows: the sleight abilities and [`SPECIALS`].
 pub const MAX: usize = ab::SLEIGHTS.end - ab::SLEIGHTS.start + SPECIALS.len();
@@ -347,6 +347,9 @@ mod tests {
         // Ars Arcanum the same way: Re:CoM's sleight 10, KH1's word 331 ("Arcanum").
         assert_eq!(special_sleight(crate::specials::ARS_ARCANUM), Some(s::ARS_ARCANUM));
         assert_eq!((command(s::ARS_ARCANUM), word(s::ARS_ARCANUM)), (0x8A, 331));
+        assert_eq!(special_sleight(crate::specials::RAGNAROK), Some(s::RAGNAROK));
+        assert_eq!(special_index(s::RAGNAROK), Some(crate::specials::RAGNAROK));
+        assert_eq!((command(s::RAGNAROK), word(s::RAGNAROK)), (0x8B, 334));
         assert_eq!(list(&[s::FIRE_RAID, s::ARS_ARCANUM, s::STRIKE_RAID]), vec![s::STRIKE_RAID, s::ARS_ARCANUM, s::FIRE_RAID]);
         assert!(special_usable(&g, s::ARS_ARCANUM, 1 << crate::specials::ARS_ARCANUM) && !special_usable(&g, s::ARS_ARCANUM, bit));
     }

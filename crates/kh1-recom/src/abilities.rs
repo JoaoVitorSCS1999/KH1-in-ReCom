@@ -167,10 +167,6 @@ const fn shared(name: &'static str, id: u8, kh1_bit: u32, key: u16, bits: u32) -
     Ability { name, kh1_id: Some(id), kh1_bit, ap: 0, key, shared: true, source: Source::Recom(bits) }
 }
 
-const fn special(name: &'static str, s: u16) -> Ability {
-    Ability { name, kh1_id: None, kh1_bit: 0, ap: 0, key: 0, shared: false, source: Source::Sleight(s) }
-}
-
 /// The sleight abilities' sort key: after every KH1 ability (KH1's keys end at 801), in Re:CoM's
 /// id order.
 pub const SLEIGHT_KEY: u16 = 1000;
@@ -213,7 +209,8 @@ pub const ALL: [Ability; 58] = [
     a("Sonic Blade", 11, 0, 3, 801, Source::Sleight(sleight::SONIC_BLADE)),
     // M12 step 7, Ars Arcanum (KH1 id 12, 4 AP, key 802: `0x33D8 + 12 × 11`, Checked (files)).
     a("Ars Arcanum", 12, 0, 4, 802, Source::Sleight(sleight::ARS_ARCANUM)),
-    special("Ragnarok", sleight::RAGNAROK),
+    // M12 step 7, Ragnarok (KH1 id 14, 4 AP, key 804: `0x33D8 + 12 × 13`, Checked (files)).
+    a("Ragnarok", 14, 0, 4, 804, Source::Sleight(sleight::RAGNAROK)),
     // Guard and Dodge Roll: Sora's movement kit (owner, 2026-11-01: "just have guard and dodge roll
     // be a part of sora's movement kit from the start, dont add them as abilities"). KH1's ids, bits
     // and costs stay for reference (KH1's Rod list has Guard at 33; Dodge Roll comes by story).
@@ -332,8 +329,9 @@ pub const MODIFIERS: std::ops::Range<usize> = ix::SLIDING_DASH..ix::GRAVITY_BREA
 /// The specials (stage 9c): kept; Sonic Blade (9c.1) is on the screen and offered by the command
 /// menu, the others wait (not on the screen, nothing reads them).
 pub const SPECIALS: std::ops::Range<usize> = ix::STRIKE_RAID..ix::RAGNAROK + 1;
-/// The specials built so far (stage 9c.1: Sonic Blade; M12 step 7: Strike Raid, Ars Arcanum).
-pub const SPECIALS_BUILT: Bits = 1 << ix::SONIC_BLADE | 1 << ix::STRIKE_RAID | 1 << ix::ARS_ARCANUM;
+/// The specials built so far (stage 9c.1: Sonic Blade; M12 step 7: Strike Raid, Ars Arcanum,
+/// Ragnarok).
+pub const SPECIALS_BUILT: Bits = 1 << ix::SONIC_BLADE | 1 << ix::STRIKE_RAID | 1 << ix::ARS_ARCANUM | 1 << ix::RAGNAROK;
 
 /// The ability of a KH1 special (`crate::specials` index: 0 Sonic Blade, 1 Ars Arcanum, 2 Strike
 /// Raid, 3 Ragnarok).
@@ -979,6 +977,7 @@ pub mod page {
                 SONIC_BLADE => b"A flurry of dashing strikes. Triangle at a nearby enemy.\0",
                 STRIKE_RAID => b"Hurl the Keyblade at an enemy, up to five times. Triangle.\0",
                 ARS_ARCANUM => b"A furious flurry of strikes on one enemy. Triangle.\0",
+                RAGNAROK => b"Rising strikes, then a burst of light. Triangle at an enemy above.\0",
                 GUARD => b"Press Square to block an attack.\0",
                 COUNTERATTACK => b"After a block, press Triangle to strike back.\0",
                 DODGE_ROLL => b"Press Square while moving to roll.\0",

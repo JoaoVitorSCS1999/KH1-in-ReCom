@@ -2011,7 +2011,7 @@ unsafe fn lock_on_enemies(skip: usize) -> Vec<(u32, [f32; 3])> {
 
 /// Re:CoM's lock-on list's enemies (type 0x1004, HP left), with or without its lock-on flag
 /// (`+0x154 & 0x10000`: Thunder's area test reads the bodies instead, as KH1's sys 90 does).
-unsafe fn lock_on_list(skip: usize, lockable_only: bool) -> Vec<(u32, [f32; 3])> {
+pub(super) unsafe fn lock_on_list(skip: usize, lockable_only: bool) -> Vec<(u32, [f32; 3])> {
     type TypeFn = unsafe extern "win64" fn(usize) -> u32;
     let mut out = Vec::new();
     let m: usize = rd(va(base(), LOCK_ON_MANAGER));

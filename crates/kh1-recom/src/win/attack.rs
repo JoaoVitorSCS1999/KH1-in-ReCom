@@ -860,6 +860,10 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
         if let Some((part, s, lv)) = super::magic::take_hit(enemy) {
             return spell_hit(enemy, part, s, lv, o);
         }
+        // M12 step 7: one of Ragnarok's shots.
+        if let Some(part) = super::specials::take_shot_hit(enemy) {
+            return ragnarok_shot_hit(enemy, part, o);
+        }
         let hp: i32 = rd(enemy + 0x274);
         // Decision 28: a shot Sora's Guard turned back breaks into the card like a KH1 swing.
         let flags: u64 = rd(enemy + 0x260);
@@ -999,7 +1003,7 @@ pub(super) unsafe fn untouchable_hit(enemy: usize) -> (u64, Option<crate::reveng
     let arrived = hit_arrived(enemy);
     let kind = if take_kh1_hit(enemy).is_some() {
         Some(IgnoredKind::Swing)
-    } else if super::magic::take_hit(enemy).is_some() {
+    } else if super::magic::take_hit(enemy).is_some() || super::specials::take_shot_hit(enemy).is_some() {
         Some(IgnoredKind::Spell)
     } else {
         arrived.then_some(IgnoredKind::Other)
@@ -1030,6 +1034,38 @@ pub(super) unsafe fn untouchable_hit(enemy: usize) -> (u64, Option<crate::reveng
         }
     }
     (r, kind)
+}
+
+/// M12 step 7: a Ragnarok shot's hit: KH1's damage of its record at Damage = KH1
+/// (`super::specials::shot_damage`), Re:CoM's row 0x20 AP otherwise; the card interrupt as a spell's
+/// (decision 14); Re:CoM's path applies it.
+unsafe fn ragnarok_shot_hit(enemy: usize, part: usize, o: PlRetFn) -> u64 {
+    let attr: u32 = rd(part + super::magic::PART_ATTR);
+    let carried: i16 = rd(part + 0x92);
+    let kh1 = super::specials::shot_damage(enemy, part);
+    let flags: u64 = rd(enemy + 0x260);
+    let force = crate::damage::interrupts(flags, None);
+    if force {
+        wr(enemy + 0x260, flags | 0x200_0000);
+    }
+    let hp: i32 = rd(enemy + 0x274);
+    let r = o(enemy);
+    if force {
+        let now: u64 = rd(enemy + 0x260);
+        wr(enemy + 0x260, now & !0x200_0000);
+    }
+    if kh1.is_some() && !super::magic::stopped(enemy) {
+        wr(part + super::magic::PART_ATTR, attr);
+    }
+    super::guard::after_enemy_hit(enemy, r, hp);
+    let after: i32 = rd(enemy + 0x274);
+    if let Ok(mut g) = HIT_LOG.lock() {
+        if g.len() < 16 {
+            let tag = kh1.map_or(format!(":recom {carried}"), |d| format!(":kh1 {d}"));
+            g.push(format!("e{:x}:dmg {}:hp {after}{}:ragnarok{}", enemy & 0x00FF_FFFF, hp - after, if force { ":card" } else { "" }, tag));
+        }
+    }
+    r
 }
 
 /// A KH1 spell shot's hit (M7 stage 7.4): KH1's spell damage (power + max MP through KH1's curve,

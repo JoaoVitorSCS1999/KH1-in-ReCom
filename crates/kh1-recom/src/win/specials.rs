@@ -34,7 +34,7 @@
 //!   `limit2` start effect; KH1's row `0x22 + n` on Re:CoM's id `0x12 + n`; the events of its pack
 //!   11010 (motions 0..=13) on KH1's motions.
 
-use super::movement::{self as mv, func, orig, p, rd, wr};
+use super::movement::{self as mv, func, orig, p, rd, rd_vec, wr};
 use super::{base, log, va};
 use crate::specials::{self as sp, RowStart, SpecialEvent, SpecialStart};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
@@ -54,6 +54,8 @@ static PENDING: Mutex<Option<u8>> = Mutex::new(None);
 static EFFECT_OK: AtomicBool = AtomicBool::new(false);
 /// M12 step 7: `"limit2"` is where `exeStockSkill`'s Ars Arcanum start reads it.
 static EFFECT2_OK: AtomicBool = AtomicBool::new(false);
+/// M12 step 7: `"limit3"` is where Ragnarok's start reads it.
+static EFFECT3_OK: AtomicBool = AtomicBool::new(false);
 /// Re:CoM's start tint and its end are as read (`sites::SPECIAL_TINT_CHECKED`).
 static TINT_OK: AtomicBool = AtomicBool::new(false);
 static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
@@ -91,6 +93,14 @@ const TINT_COLOUR_RAID: u64 = 0x1_407C_5D70;
 const TINT_COLOUR_ARCANUM: u64 = 0x1_407C_5D60;
 /// `"limit2"`'s pointer, as `exeStockSkill`'s 0xAA start passes it (`PTR_s_limit2_1407c7e18`).
 const LIMIT2_PTR: u64 = 0x1_407C_7E18;
+/// M12 step 7: Re:CoM's Ragnarok start tint (id × 10 = 0x136: `0x140218CFB` → `0x140218E29`: `lea
+/// rdx,[0x1407C5D90]` (0.5, 0.75, 0.5, 1)) and its start effect `"limit3"` (`0x1407C7E20` → the
+/// string at `0x1405A30E8`); `sites::SPECIAL_RAG_CHECKED`. Checked (decomp + disasm + exe).
+const TINT_COLOUR_RAGNAROK: u64 = 0x1_407C_5D90;
+const LIMIT3_PTR: u64 = 0x1_407C_7E20;
+/// Re:CoM's shot class (2 = `CHomingBullet`) and descriptor kind (3), as its Ragnarok burst passes
+/// them (`exeStockSkill`: `0x140156790(desc, 2, 3)`). Checked (decomp).
+const RAGNAROK_CLASS: i32 = 2;
 /// Sora's own action table's per-variant row lists (`0x1401F7180`: `[0x1407C6300 + 8 ×
 /// player+0x398]` + row × 16 + 8 = the row's slot in his pack). Checked (disasm `0x1401F71BB..`).
 const OWN_ROW_LISTS: u64 = 0x1_407C_6300;
@@ -225,6 +235,16 @@ pub unsafe fn install(b: usize) -> bool {
         READY[sp::ARS_ARCANUM].store(false, Ordering::Release);
         log("specials: Re:CoM's Ars Arcanum code is not as read (sites::SPECIAL_AA_CHECKED); no KH1 Ars Arcanum");
     }
+    if READY[sp::RAGNAROK].load(Ordering::Acquire) && !crate::sites::SPECIAL_RAG_CHECKED.iter().all(|c| have(b + c.rva as usize, c.expect.len()) == c.expect) {
+        READY[sp::RAGNAROK].store(false, Ordering::Release);
+        log("specials: Re:CoM's Ragnarok code is not as read (sites::SPECIAL_RAG_CHECKED); no KH1 Ragnarok");
+    }
+    let name3: usize = rd(va(b, LIMIT3_PTR));
+    let ok3 = name3 != 0 && have(name3, 7) == b"limit3\0";
+    EFFECT3_OK.store(ok3, Ordering::Release);
+    if !ok3 {
+        log("specials: Re:CoM's effect name at 0x1407C7E20 is not limit3: Ragnarok without Re:CoM's start effect");
+    }
     let name2: usize = rd(va(b, LIMIT2_PTR));
     let ok2 = name2 != 0 && have(name2, 7) == b"limit2\0";
     EFFECT2_OK.store(ok2, Ordering::Release);
@@ -301,10 +321,12 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
     }
     let raid = s.index == sp::STRIKE_RAID;
     let arcanum = s.index == sp::ARS_ARCANUM;
+    let ragnarok = s.index == sp::RAGNAROK;
     // `initStockSkill`'s case: Sonic Blade 9, Ars Arcanum 10, Strike Raid 8.
     let sleight = match s.index {
         sp::ARS_ARCANUM => sp::recom::ARCANUM_SLEIGHT,
         sp::STRIKE_RAID => sp::recom::RAID_SLEIGHT,
+        sp::RAGNAROK => sp::recom::RAGNAROK_SLEIGHT,
         _ => sp::recom::SLEIGHT,
     };
     if !super::mp::can_pay(s.cost) || !super::mp::pay(s.cost, sp::NAME[s.index]) {
@@ -342,6 +364,7 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
     let start_id = match s.index {
         sp::ARS_ARCANUM => sp::recom::ID_ARCANUM_START,
         sp::STRIKE_RAID => sp::recom::ID_RAID,
+        sp::RAGNAROK => sp::recom::ID_RAGNAROK,
         _ => sp::recom::ID_START,
     };
     wr(pl + f::ATTACK_ID, start_id);
@@ -355,7 +378,10 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
             note(|| format!("start: Re:CoM's {} resources not loaded yet ({ready}): its sleight events may be missing at first", sp::NAME[s.index]));
         }
     }
-    wr(pl + f::ROW_PTR, va(base(), RECOM_ROWS) + start_id as usize * 16);
+    // Ragnarok: Re:CoM's row 0x1F holds its strike's window; KH1's wind-up hits nothing, so the row
+    // pointer waits on the empty row 0xE until the first hit's row (`special_row`).
+    let row_id = if ragnarok { EMPTY_ROW } else { start_id };
+    wr(pl + f::ROW_PTR, va(base(), RECOM_ROWS) + row_id as usize * 16);
     // Re:CoM's cardless AP (the attack stat), as KH1 swings: at Damage = KH1 KH1's damage replaces
     // it per hit; at Damage = Re:CoM `initStockSkill`'s own AP for the start row (no hit window).
     wr(pl + f::AP, rd::<i32>(pl + f::ATTACK_STAT));
@@ -378,6 +404,7 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
         let colour = match s.index {
             sp::ARS_ARCANUM => TINT_COLOUR_ARCANUM,
             sp::STRIKE_RAID => TINT_COLOUR_RAID,
+            sp::RAGNAROK => TINT_COLOUR_RAGNAROK,
             _ => TINT_COLOUR,
         };
         func::<TintFn>(TINT)(pl, va(base(), colour), time, 0);
@@ -391,7 +418,12 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
         let name: usize = rd(va(base(), LIMIT2_PTR));
         super::magic::effect_on_bone(pl, pl, rd::<i32>(pl + f::EFFECT_BONE), name, 0, &[0.0, 0.0, 0.0, 1.0], true);
     }
-    if EFFECT_OK.load(Ordering::Acquire) && !raid && !arcanum {
+    // Ragnarok: `limit3` the same way (`exeStockSkill`'s 0x136 start).
+    if ragnarok && EFFECT3_OK.load(Ordering::Acquire) {
+        let name: usize = rd(va(base(), LIMIT3_PTR));
+        super::magic::effect_on_bone(pl, pl, rd::<i32>(pl + f::EFFECT_BONE), name, 0, &[0.0, 0.0, 0.0, 1.0], true);
+    }
+    if EFFECT_OK.load(Ordering::Acquire) && !raid && !arcanum && !ragnarok {
         let name: usize = rd(va(base(), LIMIT1_PTR));
         super::magic::effect_on_bone(pl, pl, rd::<i32>(pl + f::EFFECT_BONE), name, 0, &[0.0, 0.0, 0.0, 1.0], true);
     }
@@ -593,6 +625,239 @@ pub fn on_events(ev: &[SpecialEvent]) {
         event(t.clone());
         note(|| t);
     }
+}
+
+/// M12 step 7: Ragnarok's shots (`0x14039F330`): each a Re:CoM `CHomingBullet` made as Re:CoM's
+/// own Ragnarok burst makes its shots (`exeStockSkill`: descriptor class 2 / kind 3, the hand point
+/// `0x1401F0B30`, the angles `0x1401A4A00`, effect set `0x1405A1730 + row 0x20[2] × 0x60`, the
+/// shot manager `0x140158DD0`; Re:CoM steps, draws, collides, hits and ends it) with KH1's numbers:
+/// its ring of directions, 12 units a frame, life 180 + rand × 60 frames, radius 50, one hit. Its
+/// flight state's exe becomes [`kh1_ragnarok_exe`] (KH1's bend and 5° turn, `0x14039FBB0`), which
+/// hands Re:CoM's own homing step the point to steer to. Its hit takes KH1's damage of record
+/// `0x5748` at Damage = KH1 ([`take_shot_hit`]), Re:CoM's row 0x20 AP at Damage = Re:CoM.
+const HAND_POINT: u32 = 0x001F_0B30;
+const ANGLES: u32 = 0x001A_4A00;
+/// The homing step's fields (`0x1401575D0`, Checked (decomp)): flags `+0x230` (`0x80000`: steer to
+/// the point `+0x300`; `0x8000`: by angles, `0x1401D7F00` at `+0x170` degrees a frame), the gate
+/// `+0x2F8` (it turns while the point is nearer).
+const SHOT_FLAGS: u64 = 0x8000 | 0x100 | 4;
+const POINT_FLAG: u64 = 0x8_0000;
+const SHOT_TURN: usize = 0x170;
+const SHOT_GATE: usize = 0x2F8;
+/// Our turn is KH1's (at most 5° a frame, done before): Re:CoM's step snaps to it.
+const SNAP_DEG: f32 = 180.0;
+
+#[derive(Clone, Copy)]
+struct Shot {
+    id: u32,
+    bend: f32,
+    target: u32,
+}
+
+static SHOTS: Mutex<Vec<Shot>> = Mutex::new(Vec::new());
+static SHOT_LINES: AtomicU32 = AtomicU32::new(40);
+
+fn shot_line(line: impl FnOnce() -> String) {
+    if SHOT_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("specials: {}", line()));
+    }
+}
+
+/// KH1's `0x1403A3A20`-style draw in [0, 1) for the shots' life and bend (KH1's own generator
+/// state isn't Re:CoM's: Assumption, the distribution is KH1's).
+fn draw() -> f32 {
+    use std::sync::atomic::AtomicU64;
+    static SEED: AtomicU64 = AtomicU64::new(0x2545_F491_4F6C_DD1D);
+    let mut x = SEED.load(Ordering::Relaxed);
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    SEED.store(x, Ordering::Relaxed);
+    (x >> 40) as f32 / (1u64 << 24) as f32
+}
+
+/// "Impact": the ring of shots from Sora's hand.
+pub unsafe fn ragnarok_fire(pl: usize, f: &sp::ragnarok::FireStart) {
+    use crate::guard::bullet as gb;
+    use crate::units::to_recom;
+    use kh1_core::Vec3;
+    use sp::ragnarok as rg;
+    type PlOutFn = unsafe extern "win64" fn(usize, *mut [f32; 4]);
+    type AnglesFn = unsafe extern "win64" fn(usize) -> *const [f32; 4];
+    if ACTIVE.load(Ordering::Acquire) != pl || !ready(sp::RAGNAROK) {
+        return;
+    }
+    // Damage = Re:CoM: row 0x20's AP, kind and attribute into the player's fields (as Re:CoM's
+    // burst computes them), read into each shot; at Damage = KH1 the hit's value is KH1's.
+    wr(pl + f::AP, rd::<i32>(pl + f::ATTACK_STAT));
+    wr(pl + f::KIND, rd::<u8>(va(base(), RECOM_ROWS) + sp::recom::ID_RAGNAROK_SHOT as usize * 16 + 0xB) as u32);
+    wr(pl + f::ATTR, 0u32);
+    super::damage::special(pl, sp::recom::ID_RAGNAROK_SHOT);
+    let body: usize = rd(pl + p::BODY);
+    let mut hand = [0f32; 4];
+    if body != 0 {
+        let b = rd_vec(body + 0x30);
+        hand = [b.x, b.y, b.z, 1.0];
+    }
+    func::<PlOutFn>(HAND_POINT)(pl, &mut hand);
+    let ang = func::<AnglesFn>(ANGLES)(pl);
+    let base_ang = if ang.is_null() { [0f32; 4] } else { std::ptr::read_unaligned(ang) };
+    // KH1's ring in KH1's frame: up (0, −1, 0), turned about Sora's facing; his local x is (cos ψ, 0,
+    // −sin ψ).
+    let psi = f.facing;
+    let dirs = rg::ring(Vec3::new(0.0, -1.0, 0.0), Vec3::new(psi.cos(), 0.0, -psi.sin()), f.shots);
+    let target = f.target.filter(|&h| super::magic::is_alive_enemy(h)).unwrap_or(0);
+    let row = va(base(), RECOM_ROWS) + sp::recom::ID_RAGNAROK_SHOT as usize * 16;
+    let set = rd::<u8>(row + 2) as usize;
+    let mut made = 0;
+    for d in dirs {
+        let r = to_recom(d);
+        let Some((pitch, yaw)) = crate::guard::aim_angles([r.x, r.y, r.z]) else { continue };
+        let life = rg::shot_life(draw());
+        let bend = rg::shot_bend(draw());
+        let mut desc = super::magic::Desc([0; 0x100]);
+        let dp = desc.0.as_mut_ptr();
+        func::<super::magic::DescInitFn>(super::magic::DESC_INIT)(dp, RAGNAROK_CLASS, 3);
+        let at = |o: usize| dp.add(o);
+        std::ptr::write_unaligned(at(0x68) as *mut u32, rd::<u32>(pl + f::KIND));
+        std::ptr::write_unaligned(at(0x6C) as *mut u32, rd::<u32>(pl + f::ATTR));
+        std::ptr::write_unaligned(at(0x70) as *mut i32, rd::<i32>(pl + f::AP));
+        std::ptr::write_unaligned(at(0x0C) as *mut u32, 0x8000_0000);
+        std::ptr::write_unaligned(at(0x60) as *mut u64, SHOT_FLAGS);
+        std::ptr::write_unaligned(at(0x30) as *mut f32, rg::SHOT_SPEED * crate::units::METRES_PER_UNIT);
+        std::ptr::write_unaligned(at(0x3C) as *mut i32, (life * crate::units::UNITS_PER_FRAME) as i32);
+        std::ptr::write_unaligned(at(0x34) as *mut f32, 1000.0);
+        std::ptr::write_unaligned(at(0x44) as *mut i32, target as i32);
+        std::ptr::write_unaligned(at(0x48) as *mut f32, 1000.0);
+        std::ptr::write_unaligned(at(0x4C) as *mut f32, SNAP_DEG);
+        std::ptr::write_unaligned(at(0x10) as *mut [f32; 4], [hand[0], hand[1], hand[2], 0.0]);
+        std::ptr::write_unaligned(at(0x20) as *mut [f32; 4], [pitch, yaw, base_ang[2], base_ang[3]]);
+        std::ptr::write_unaligned(at(0xA8) as *mut usize, va(base(), super::magic::EFFECT_SETS) + set * 0x60);
+        std::ptr::write_unaligned(at(0x78) as *mut f32, rg::shot_record().radius * crate::units::METRES_PER_UNIT);
+        let factory = func::<super::magic::FactoryFn>(super::magic::FACTORY)();
+        if factory == 0 {
+            break;
+        }
+        let bullet = func::<super::magic::ManagerFn>(super::magic::SHOT_MANAGER)(factory, dp, pl);
+        if bullet == 0 {
+            continue;
+        }
+        let id: u32 = rd(bullet + 0x20);
+        let b = base();
+        let vt: usize = rd(bullet);
+        let exe: usize = rd(bullet + super::magic::rt::STATE_EXE);
+        let adj: i32 = rd(bullet + super::magic::rt::STATE_EXE_ADJUST);
+        if vt == va(b, gb::HOMING_VTABLE) && exe == b + super::magic::HOMING_THUNK as usize && adj == 0 {
+            wr(bullet + gb::FLAGS, rd::<u64>(bullet + gb::FLAGS) | POINT_FLAG);
+            wr(bullet + SHOT_TURN, SNAP_DEG);
+            wr(bullet + SHOT_GATE, 1000.0f32);
+            wr(bullet + gb::HOMING_POINT, [hand[0] + r.x, hand[1] + r.y, hand[2] + r.z, 1.0]);
+            wr(bullet + super::magic::rt::STATE_EXE, kh1_ragnarok_exe as *const () as usize);
+        } else {
+            shot_line(|| format!("Ragnarok shot {id} is not a plain CHomingBullet (vt {vt:#x}): Re:CoM's homing"));
+        }
+        if let Ok(mut g) = SHOTS.lock() {
+            if g.len() >= 64 {
+                g.remove(0);
+            }
+            g.push(Shot { id, bend, target });
+        }
+        made += 1;
+    }
+    event(format!("fire {made}/{} t{}", f.shots, target));
+    shot_line(|| format!("Ragnarok: {made} of {} shots from ({:.2},{:.2},{:.2}), target {target}", f.shots, hand[0], hand[1], hand[2]));
+}
+
+/// The flight-state exe of Ragnarok's shots: KH1's step for this frame
+/// (`crate::specials::ragnarok::shot_step` in KH1's units: the target's aim point, else the nearest
+/// live enemy within 1000 of the shot, `0x1402B0E90`), its new direction handed to Re:CoM's homing
+/// step as the point to steer to (a full turn: KH1's 5° limit is in the step), then Re:CoM's own step
+/// (the thunk → `0x1401575D0`: the angles, the velocity at the shot's speed). Once a frame a shot.
+pub unsafe extern "win64" fn kh1_ragnarok_exe(bullet: usize) {
+    use crate::guard::bullet as gb;
+    use crate::units::{to_kh1, to_recom};
+    use kh1_core::Vec3;
+    use super::magic::rt;
+    let mover: usize = rd(bullet + gb::MOVER);
+    let live = rd::<i32>(bullet + rt::HOLD) == 0 && rd::<i32>(bullet + rt::LIFE) > 0 && mover != 0;
+    let id: u32 = rd(bullet + 0x20);
+    let shot = SHOTS.lock().ok().and_then(|g| g.iter().find(|s| s.id == id).copied());
+    if let (true, Some(mut s)) = (live, shot) {
+        let p = rd_vec(mover + rt::POSITION);
+        let fw = crate::guard::forward(rd(mover + gb::PITCH), rd(mover + gb::YAW));
+        let pos = to_kh1(p);
+        let dir = to_kh1(Vec3::new(fw[0], fw[1], fw[2])).normalized();
+        if !super::magic::is_alive_enemy(s.target) {
+            // `0x1402B0E90(Sora, pos, dir, 1000)`: the nearest live enemy within 1000 of the shot.
+            let mut best: Option<(f32, u32)> = None;
+            // Re:CoM's lock-on list's live enemies (with or without its lock-on flag), by position.
+            for (h, a) in super::magic::lock_on_list(bullet, false) {
+                let d = (to_kh1(Vec3::new(a[0], a[1], a[2])) - pos).length();
+                if d <= sp::ragnarok::SEARCH && best.is_none_or(|b| d < b.0) {
+                    best = Some((d, h));
+                }
+            }
+            s.target = best.map_or(0, |b| b.1);
+        }
+        let obj = if s.target != 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(s.target) } else { 0 };
+        let aim = (obj != 0).then(|| {
+            let a = super::magic::aim_point(obj);
+            to_kh1(Vec3::new(a[0], a[1], a[2]))
+        });
+        let (_, d) = sp::ragnarok::shot_step(pos, dir, aim, s.bend, 1.0);
+        let r = to_recom(d);
+        wr(bullet + gb::FLAGS, rd::<u64>(bullet + gb::FLAGS) | POINT_FLAG);
+        wr(bullet + gb::HOMING_POINT, [p.x + r.x * 100.0, p.y + r.y * 100.0, p.z + r.z * 100.0, 1.0]);
+        if let Ok(mut g) = SHOTS.lock() {
+            if let Some(e) = g.iter_mut().find(|e| e.id == id) {
+                e.target = s.target;
+            }
+        }
+    }
+    func::<PlFn>(super::magic::HOMING_THUNK)(bullet)
+}
+
+/// One of Ragnarok's shots hit this enemy this frame (a hit part whose attacker `+0x98` is one of
+/// them, as `super::magic::take_hit`): the part; the shot is forgotten (one hit, KH1's).
+pub unsafe fn take_shot_hit(enemy: usize) -> Option<usize> {
+    let info: usize = rd(enemy + 0xF8);
+    if info == 0 {
+        return None;
+    }
+    let mut g = SHOTS.lock().ok()?;
+    if g.is_empty() {
+        return None;
+    }
+    let parts: usize = rd(info + 0x40);
+    let n: i32 = rd(info + 0x38);
+    for i in 0..n.clamp(0, 32) as usize {
+        let part = parts + i * 0x120;
+        if rd::<i16>(part + 0x90) == 0 {
+            continue;
+        }
+        let by: u32 = rd(part + 0x98);
+        if let Some(k) = g.iter().position(|s| s.id == by) {
+            g.remove(k);
+            return Some(part);
+        }
+    }
+    None
+}
+
+/// A Ragnarok shot's hit: KH1's damage of its record (`0x5748`: Magic × 2, power 20) on the enemy's
+/// twin or proxy as the hit part's value at Damage = KH1 (Re:CoM's resistance not on top, as a KH1
+/// spell's); at Damage = Re:CoM the part keeps row 0x20's AP. Returns the KH1 damage written.
+pub unsafe fn shot_damage(enemy: usize, part: usize) -> Option<i32> {
+    if !super::damage::kh1() {
+        return None;
+    }
+    let max_mp = super::mp::current().map(|v| v.1)?;
+    let hp: i32 = rd(enemy + 0x274);
+    let d = super::stats::kh1_spell_hit(enemy, &sp::ragnarok::shot_record(), max_mp, hp)?;
+    wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
+    wr(part + super::magic::PART_ATTR, super::magic::NEUTRAL_ATTR);
+    shot_line(|| format!("Ragnarok shot hit {:#x}: KH1 {d} (max MP {max_mp})", enemy & 0x00FF_FFFF));
+    Some(d)
 }
 
 /// The F9 trace's special token: the running special (the recorder holds Sora's lock) and this

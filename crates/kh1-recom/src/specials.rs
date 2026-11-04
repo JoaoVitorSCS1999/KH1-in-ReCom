@@ -63,6 +63,23 @@
 //!   (`0x14039EFB0`) Sora falls out once a follow-up ran or the seventh hit passed its frame 20.
 //!   MP 3 (btltbl), range 300, no height rule. Checked (decomp + files).
 //!
+//! - **Ragnarok** (M12 step 7, the same ask; script `0x14039F250`): state **0x25** (enter
+//!   `0x14039FAF0`: flags `0x1200000`, the offer `0x14039FF70` of 0x5B "Impact" for the whole special;
+//!   its physics KH1's air step `0x1402AF6A0` with speed 0: the hops' arcs, the horizontal speed
+//!   decaying by the air drag), the wind-up 0xF0 at blend 8, the release queued. **Five rising
+//!   hits** by themselves (the free callback `0x14039F7A0`: row `0x36 + n`, toward the target, a
+//!   hop of the row's height (60, then 40) and a speed along the facing of 8 / 4 / 4 / 4 / 8
+//!   (`0x1406A0C00`), the release and the fall queued). After the fifth **the charge** 0xF6 (no
+//!   action lock, KH1's hold-still flag: Sora hovers; the flags `0x1000000` off: he can be hit),
+//!   the fall queued after it with state 2 (`0x14039FFB0`: the special ends); the charge time t
+//!   counts while Sora is free. **"Impact"** is lit while 10 ≤ t < 70 (`0x14039FF70`); Triangle
+//!   (`0x14039F330`) fires 10 shots (t < 40, a hop of 10), 17 (40 ≤ t < 50: hop 20, 4 back), 25
+//!   (50 ≤ t < 60: hop 30, 8 back, the full release 0xF8), else 10, from the Keyblade's tip, in a
+//!   ring about Sora's facing axis, each a homing shot (`0x14039FBB0`, [`ragnarok`]); then the
+//!   fall (state 2: the end). Landing after the hits (`0x14039F6C0`, n > 5): the land motion,
+//!   state 0. MP 3, range 600, **only at a target 160 or more above Sora** (`0x14028D0F0`, 'Z').
+//!   Checked (decomp + exe + files).
+//!
 //! Re:CoM runs it on its own sleight action `0x16` (`crate::movement::Host::start_special`):
 //! `initStockSkill`'s writes without the card, its Sonic Blade attack ids (0xE start, 0xF dash,
 //! 0x10 finisher) so its own hit sounds and effects play, the KH1 rows in the attack row pointer,
@@ -73,7 +90,7 @@ use crate::movement::{Action, Host, Kh1Sora};
 use kh1_core::controller::state;
 use kh1_core::data::{row, xl};
 use kh1_core::motion::{req, request, MotionSet};
-use kh1_core::{TargetPart, Vec3};
+use kh1_core::{Arc, TargetPart, Vec3};
 
 /// KH1's special commands (the command table `btltbl.bin +0xA58`; Checked (files)).
 pub mod cmd {
@@ -90,10 +107,12 @@ pub mod cmd {
     /// M12 step 7: Ars Arcanum's follow-ups (`0x14039F1E0`: `'X' + (n > 11)`).
     pub const ARCANUM: u8 = 0x58;
     pub const ARCANUM_LAST: u8 = 0x59;
+    /// M12 step 7: Ragnarok's release (`0x14039FF70`: `0x5B`).
+    pub const IMPACT: u8 = 0x5B;
 
     /// The commands built so far (the starts and their follow-ups).
     pub fn is_ours(c: u8) -> bool {
-        matches!(c, SONIC_BLADE | RAVE | BLAST | STRIKE_RAID | RAID | RAID_LAST | ARS_ARCANUM | ARCANUM | ARCANUM_LAST)
+        matches!(c, SONIC_BLADE | RAVE | BLAST | STRIKE_RAID | RAID | RAID_LAST | ARS_ARCANUM | ARCANUM | ARCANUM_LAST | RAGNAROK | IMPACT)
     }
 
     /// The special a built start command starts (KH1's `0x14028D3D0`: 0x4B → 0, 0x57 → 1, 0x5E →
@@ -103,6 +122,7 @@ pub mod cmd {
             SONIC_BLADE => Some(super::SONIC_BLADE),
             ARS_ARCANUM => Some(super::ARS_ARCANUM),
             STRIKE_RAID => Some(super::STRIKE_RAID),
+            RAGNAROK => Some(super::RAGNAROK),
             _ => None,
         }
     }
@@ -119,6 +139,7 @@ pub mod cmd {
             ARCANUM => 332,
             ARCANUM_LAST => 333,
             RAGNAROK => 334,
+            IMPACT => 335,
             STRIKE_RAID => 338,
             RAID => 339,
             RAID_LAST => 340,
@@ -129,8 +150,9 @@ pub mod cmd {
 
 /// KH1's English words of the built specials after Sonic Blade's (US / UK `Word.bin`; the asset step
 /// writes each language's): Strike Raid 338 "Strike", 339 "Raid", 340 "Judgment"; Ars Arcanum 331
-/// "Arcanum", 332 "Bash", 333 "Finis" (US; UK "Finish"). Checked (files).
-pub const ENGLISH_WORDS: &[(u16, &str)] = &[(338, "Strike"), (339, "Raid"), (340, "Judgment"), (331, "Arcanum"), (332, "Bash"), (333, "Finis")];
+/// "Arcanum", 332 "Bash", 333 "Finis" (US; UK "Finish"); Ragnarok 334 "Ragnarok", 335 "Impact".
+/// Checked (files).
+pub const ENGLISH_WORDS: &[(u16, &str)] = &[(338, "Strike"), (339, "Raid"), (340, "Judgment"), (331, "Arcanum"), (332, "Bash"), (333, "Finis"), (334, "Ragnarok"), (335, "Impact")];
 
 /// KH1's specials by index (`0x140528340`: (ability id, command) pairs): 0 Sonic Blade, 1 Ars
 /// Arcanum, 2 Strike Raid, 3 Ragnarok, 4 Trinity. Checked (exe).
@@ -155,7 +177,7 @@ pub const NAME: [&str; 5] = ["Sonic Blade", "Ars Arcanum", "Strike Raid", "Ragna
 /// The KH1 rows each built special plays (Sonic Blade's dashes and finisher; M12 step 7, Strike
 /// Raid's five throws); an empty range: not built.
 #[allow(clippy::reversed_empty_ranges)]
-pub const ROWS_OF: [std::ops::RangeInclusive<usize>; 5] = [row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER, row::ARS_ARCANUM_HIT..=row::ARS_ARCANUM_FINISHER, row::STRIKE_RAID_THROW..=row::STRIKE_RAID_FINISHER, 1..=0, 1..=0];
+pub const ROWS_OF: [std::ops::RangeInclusive<usize>; 5] = [row::SONIC_BLADE_DASH..=row::SONIC_BLADE_FINISHER, row::ARS_ARCANUM_HIT..=row::ARS_ARCANUM_FINISHER, row::STRIKE_RAID_THROW..=row::STRIKE_RAID_FINISHER, row::RAGNAROK_HIT..=row::RAGNAROK_LAST, 1..=0];
 
 /// KH1's special state (`0x14039EAD0` registers it).
 pub const STATE: u32 = 0x20;
@@ -165,11 +187,11 @@ pub const STATE_OF: [u32; 5] = [0x20, 0x20, 0x27, 0x25, 0x29];
 
 /// Whether `s` is a built special's KH1 state.
 pub fn is_state(s: u32) -> bool {
-    s == STATE || s == STATE_OF[STRIKE_RAID]
+    s == STATE || s == STATE_OF[STRIKE_RAID] || s == STATE_OF[RAGNAROK]
 }
 
 /// The built specials' indices.
-pub const BUILT: [usize; 3] = [SONIC_BLADE, ARS_ARCANUM, STRIKE_RAID];
+pub const BUILT: [usize; 4] = [SONIC_BLADE, ARS_ARCANUM, STRIKE_RAID, RAGNAROK];
 
 /// Strike Raid's throw rows start at `0x2E + n` (`0x1403A0290`), n = 1..=5; the fifth is the
 /// finishing throw.
@@ -216,6 +238,14 @@ pub mod recom {
     pub const ARCANUM_SLEIGHT: u16 = 10;
     pub const ID_ARCANUM_START: u32 = 0x11;
     pub const ID_ARCANUM_HIT: u32 = 0x12;
+    /// M12 step 7: Re:CoM's Ragnarok sleight (id 11, `initStockSkill` case 0xB: attack id 0x1F, its
+    /// resources; `exeStockSkill` 0x136 (its opening strike, motion 0, `limit3`), 0x137 (the charge,
+    /// motion 1, `limit4`), 0x138 / 0x139 (the release, motion 2 / 3, its shots on attack id 0x20
+    /// through the shot manager `0x140158DD0`), 0x13A (the fall)). KH1's hits take id 0x1F, its
+    /// shots id 0x20's power and look. Checked (decomp + exe).
+    pub const RAGNAROK_SLEIGHT: u16 = 11;
+    pub const ID_RAGNAROK: u32 = 0x1F;
+    pub const ID_RAGNAROK_SHOT: u32 = 0x20;
 }
 
 /// What the offer sees of the target: the horizontal gap to its lock point minus the point's
@@ -239,6 +269,9 @@ impl OfferTarget {
 pub fn score(i: usize, t: &OfferTarget, can_pay: &mut dyn FnMut(i32) -> bool) -> u8 {
     if t.gap < RANGE[i] {
         if i == SONIC_BLADE && SONIC_MAX_ABOVE < t.above {
+            0
+        } else if i == RAGNAROK && t.above < SONIC_MAX_ABOVE {
+            // 'Z': only a target 160 or more above Sora.
             0
         } else {
             1 + can_pay(COST[i]) as u8
@@ -309,6 +342,10 @@ pub enum Phase {
     WindUp,
     /// A dash or the finisher is playing (`Special::counter` rows started).
     Row,
+    /// Ragnarok's charge (0xF6): Sora hovers, the charge time counts.
+    Charge,
+    /// Ragnarok's release (0xF7 / 0xF8) after the shots.
+    Fire,
 }
 
 /// A running special (KH1's state 0x20 and its script's variables).
@@ -324,8 +361,13 @@ pub struct Special {
     /// menu confirm.
     pub attack_bit: bool,
     /// KH1's flags `0x1000080` (no damage, no reaction) still on: the whole special, except Ars
-    /// Arcanum after its first follow-up (`0x14039EDD0` clears them).
+    /// Arcanum after its first follow-up (`0x14039EDD0` clears them) and Ragnarok from its charge on
+    /// (`0x14039F7A0`).
     pub protected: bool,
+    /// Ragnarok: the charge time (`0x142F11494`, frames while free in the charge) and the hover
+    /// (KH1's hold-still flag `+0 & 0x1000`, set by the charge's request bit 23).
+    pub charge: f32,
+    pub hover: bool,
     /// Frames since the press (log and trace).
     pub age: f32,
 }
@@ -356,6 +398,8 @@ pub enum SpecialEvent {
     Refused { command: u8, why: &'static str },
     /// M12 step 7: Strike Raid's thrown Keyblade clashed (`0x1403A00A0`).
     Clashed { frame: f32 },
+    /// M12 step 7: Ragnarok's release: its shots and the charge time.
+    Fired { shots: u8, charge: f32 },
     Ended { why: &'static str, frame: f32 },
 }
 
@@ -366,6 +410,7 @@ impl SpecialEvent {
             SpecialEvent::Row { counter, kh1_row, frame } => format!("sp-row({kh1_row:#x} n{counter} f{frame:.0})"),
             SpecialEvent::Refused { command, why } => format!("sp-refused({command:#x} {why})"),
             SpecialEvent::Clashed { frame } => format!("sp-clash(f{frame:.0})"),
+            SpecialEvent::Fired { shots, charge } => format!("sp-fire({shots} shots t{charge:.0})"),
             SpecialEvent::Ended { why, frame } => format!("sp-end({why} f{frame:.0})"),
         }
     }
@@ -397,6 +442,8 @@ impl Kh1Sora {
             STRIKE_RAID => (raid_cmd(s.counter), !(s.counter < RAID_THROWS && window && s.attack_bit)),
             // `0x14039F1E0`: 0x58, 0x59 once n > 11.
             ARS_ARCANUM => (if s.counter > 11 { cmd::ARCANUM_LAST } else { cmd::ARCANUM }, !(window && s.attack_bit)),
+            // `0x14039FF70`: lit while 10 ≤ t < 70 (the charge time); no window or bit test.
+            RAGNAROK => (cmd::IMPACT, !(s.phase == Phase::Charge && ragnarok::offered(s.charge))),
             _ => (follow_cmd(s.counter), !(window && s.attack_bit)),
         })
     }
@@ -417,7 +464,17 @@ impl Kh1Sora {
             return refuse(self, "not now");
         }
         match c {
-            cmd::SONIC_BLADE | cmd::STRIKE_RAID | cmd::ARS_ARCANUM => self.start_special(h, c, target, pos, dir, w),
+            cmd::SONIC_BLADE | cmd::STRIKE_RAID | cmd::ARS_ARCANUM | cmd::RAGNAROK => self.start_special(h, c, target, pos, dir, w),
+            cmd::IMPACT => {
+                if self.special.filter(|s| s.index == RAGNAROK).is_none() {
+                    return refuse(self, "no special");
+                }
+                if self.follow_up() != Some((c, false)) {
+                    return refuse(self, "greyed");
+                }
+                self.ragnarok_fire(h, target, pos);
+                *w = 0.0;
+            }
             cmd::ARCANUM | cmd::ARCANUM_LAST => {
                 let Some(s) = self.special.filter(|s| s.index == ARS_ARCANUM) else { return refuse(self, "no special") };
                 if self.follow_up() != Some((c, false)) || s.counter >= ARCANUM_ROWS {
@@ -486,11 +543,16 @@ impl Kh1Sora {
             return refuse(self, "no Re:CoM rows or MP");
         }
         self.set_state(STATE_OF[index]);
-        self.special = Some(Special { index, phase: Phase::WindUp, counter: 0, attack_bit: false, protected: true, age: 0.0 });
+        self.special = Some(Special { index, phase: Phase::WindUp, counter: 0, attack_bit: false, protected: true, charge: 0.0, hover: false, age: 0.0 });
         if index == STRIKE_RAID {
             // `0x14039FFD0`: the wind-up 0xE6 at blend 0; the next entry (0xE7) calls the first
             // throw when the wind-up ends (`0x1403A0290`, which plays its row's motion afresh).
             self.play(xl::request(xl::SR_WINDUP) as u32 | req::ACTION, 0.0);
+        } else if index == RAGNAROK {
+            // `0x14039F250`: the wind-up 0xF0 at blend 8, the release after it.
+            self.play(xl::request(xl::RAG_WINDUP) as u32 | req::ACTION, BLEND);
+            self.arc = Arc::hop(0.0, pos.y, self.params.gravity);
+            self.air_vel = Vec3::ZERO;
         } else if index == ARS_ARCANUM {
             // `0x14039EEB0`: the wind-up 0xD2 at blend 8, the release after it (its hits follow
             // from the free callback).
@@ -570,6 +632,104 @@ impl Kh1Sora {
         self.special_log.push(SpecialEvent::Row { counter: n, kh1_row: r, frame: s.age });
     }
 
+    /// `0x14039F7A0`, Sora free in Ragnarok's state: hit n (row `0x36 + n`, n < 5) toward the target
+    /// with its hop and speed, the release and the fall queued; after the fifth the charge.
+    fn ragnarok_next(&mut self, h: &mut dyn Host, target: Option<TargetPart>, pos: Vec3) {
+        let Some(mut s) = self.special.filter(|s| s.index == RAGNAROK) else { return };
+        if s.counter as usize >= ragnarok::HITS {
+            // The charge: 0xF6 without the action lock (bit 23: hold still), the fall after it
+            // (`0x14039FFB0`: state 2); KH1's flags 0x1000000 off. No aim.
+            h.special_row_end();
+            self.play(xl::request(xl::RAG_CHARGE) as u32, 0.0);
+            self.append(request::FALL as u32, BLEND);
+            self.lock = false;
+            s.counter += 1;
+            s.phase = Phase::Charge;
+            s.hover = true;
+            s.protected = false;
+            s.charge = 0.0;
+            self.special = Some(s);
+            self.arc = Arc::hop(0.0, pos.y, self.params.gravity);
+            self.air_vel = Vec3::ZERO;
+            self.special_log.push(SpecialEvent::Row { counter: s.counter, kh1_row: 0, frame: s.age });
+            return;
+        }
+        self.target_toward(target, pos);
+        let r = row::RAGNAROK_HIT + s.counter as usize;
+        let (Some(request), Some(rw)) = (row_request(&self.moveset, r), self.moveset.row(r).cloned()) else { return };
+        let n = s.counter + 1;
+        h.special_row(&RowStart { kh1_row: r, recom_id: recom::ID_RAGNAROK, request, counter: n });
+        self.play(request as u32 | req::ACTION, 0.0);
+        // 0x40000006: the release and the fall motion, blend 8.
+        self.append(req::RELEASE | request::FALL as u32, BLEND);
+        // The hop: KH1's arc of the row's height; the speed along the (new) facing.
+        self.arc = Arc::hop(rw.hop, pos.y, self.params.gravity);
+        self.air_vel = Vec3::from_yaw(self.target_yaw) * ragnarok::HOP_SPEED[s.counter as usize];
+        s.counter = n;
+        s.phase = Phase::Row;
+        s.attack_bit = true;
+        self.special = Some(s);
+        self.clashed = false;
+        self.special_log.push(SpecialEvent::Row { counter: n, kh1_row: r, frame: s.age });
+    }
+
+    /// `0x1402A3B00`: toward the target's lock point, else the facing kept.
+    fn target_toward(&mut self, target: Option<TargetPart>, pos: Vec3) {
+        if let Some(t) = target {
+            let d = (t.centre - pos).flat().normalized();
+            if !d.is_zero_xz() {
+                self.target_yaw = d.yaw();
+            }
+        }
+    }
+
+    /// `0x14039F330`: "Impact": the shots by the charge time ([`ragnarok::fire_of`]), a hop back,
+    /// the release motion, the fall queued (state 2 after it: the end).
+    fn ragnarok_fire(&mut self, h: &mut dyn Host, target: Option<TargetPart>, pos: Vec3) {
+        let Some(mut s) = self.special.filter(|s| s.index == RAGNAROK) else { return };
+        let f = ragnarok::fire_of(s.charge);
+        self.arc = Arc::hop(f.hop, pos.y, self.params.gravity);
+        self.air_vel = Vec3::from_yaw(self.target_yaw) * f.back;
+        let m = if f.big { xl::RAG_FIRE_BIG } else { xl::RAG_FIRE };
+        self.play(xl::request(m) as u32 | req::ACTION, 0.0);
+        self.append(req::RELEASE | request::FALL as u32, BLEND);
+        h.ragnarok_fire(&ragnarok::FireStart { shots: f.shots, facing: self.target_yaw, target: target.map(|t| t.owner) });
+        s.phase = Phase::Fire;
+        s.hover = false;
+        self.special = Some(s);
+        self.special_log.push(SpecialEvent::Fired { shots: f.shots, charge: s.charge });
+    }
+
+    /// Ragnarok's physics (its state's `0x1402AF6A0` with speed 0): hovering in the charge (KH1's
+    /// hold-still branch: no velocity, the arc anchored where Sora is), else the arc and the
+    /// horizontal speed decaying by the air drag.
+    pub(crate) fn ragnarok_move(&mut self, step: f32, pos: Vec3) -> Vec3 {
+        if self.special.is_some_and(|s| s.hover) {
+            self.arc = Arc::hop(0.0, pos.y, self.params.gravity);
+            self.air_vel = Vec3::ZERO;
+            return Vec3::ZERO;
+        }
+        let p = &self.params;
+        let k = if step < 2.0 { p.air_drag.sqrt() } else { p.air_drag };
+        let v = self.air_vel * k;
+        self.air_vel = v;
+        let mut disp = v * step;
+        disp.y = self.arc.advance(pos.y, step, self.params.gravity, self.params.fall_cap);
+        self.air_vel.y = disp.y;
+        disp
+    }
+
+    /// `0x14039F6C0`: Ragnarok on the ground after its hits (n > 5): the land motion, state 0.
+    pub(crate) fn ragnarok_landed(&mut self, h: &mut dyn Host, airborne: bool) -> bool {
+        if airborne || !self.special.is_some_and(|s| s.index == RAGNAROK && s.counter as usize > ragnarok::HITS) {
+            return false;
+        }
+        self.end_special(h, "landed");
+        self.play(request::LAND as u32 | req::ACTION, 0.0);
+        self.append(req::RELEASE | request::IDLE as u32, BLEND);
+        true
+    }
+
     /// The reaction `0x14029BBD0` in Strike Raid's state 0x27 (a clash of the thrown Keyblade, kind
     /// 6 / 7: KH1's only reactions through its flags `0x1200080`) → `0x1403A00A0`: the knocked-back
     /// catch 0xED at blend 0, the wait and the end; no recoil, Sora stays in the special. True when
@@ -628,6 +788,24 @@ impl Kh1Sora {
                 _ => false,
             };
         }
+        if s.index == RAGNAROK {
+            let Some(e) = xl::entry_of(ended) else { return false };
+            return match e {
+                // The wind-up's or a hit's release: the next hit, or the charge.
+                xl::RAG_WINDUP | 27..=31 => {
+                    let pos = h.pos();
+                    self.ragnarok_next(h, self.special_target, pos);
+                    true
+                }
+                // The charge or the release ended into the fall: state 2 (`0x14039FFB0`).
+                xl::RAG_CHARGE | xl::RAG_FIRE | xl::RAG_FIRE_BIG => {
+                    self.end_special(h, "fall");
+                    self.set_state(state::AIR);
+                    false
+                }
+                _ => false,
+            };
+        }
         if s.index == ARS_ARCANUM {
             // `0x14039F090`, Sora free in the state (the wind-up's or a hit's release): the next of
             // the first seven hits; after the seventh, or a follow-up's row (`0x14039F1B0`), the end.
@@ -651,7 +829,7 @@ impl Kh1Sora {
                 self.special_row(h, 0.0);
                 true
             }
-            Phase::Row => {
+            Phase::Row | Phase::Charge | Phase::Fire => {
                 self.end_special(h, "done");
                 false
             }
@@ -663,7 +841,8 @@ impl Kh1Sora {
     pub(crate) fn special_fall(&mut self, h: &mut dyn Host) -> bool {
         match self.special {
             None => return false,
-            Some(s) if s.index == STRIKE_RAID => return false,
+            // Ragnarok's air callback (`0x14039F6C0`) keeps the state until it lands after its hits.
+            Some(s) if s.index == STRIKE_RAID || s.index == RAGNAROK => return false,
             // `0x14039EFB0`: Ars Arcanum falls out once a follow-up ran (n > 7) or the seventh hit
             // (0xD9, xl entry 10) passed its frame 20; before that it keeps the state.
             Some(s) if s.index == ARS_ARCANUM && !(s.counter > ARCANUM_AUTO || (self.rec.req == xl::request(10) && 20.0 <= self.rec.frame)) => return false,
@@ -691,6 +870,10 @@ impl Kh1Sora {
     pub(crate) fn special_tick(&mut self, step: f32) {
         if let Some(s) = self.special.as_mut() {
             s.age += step;
+            // `0x14039F7A0`'s last branch: the charge time while Sora is free in it.
+            if s.phase == Phase::Charge {
+                s.charge += step;
+            }
         }
     }
 
@@ -728,8 +911,9 @@ pub mod recom_events {
 
     /// Re:CoM's sleight motion pack id for Sonic Blade (0x3F1 + 10000).
     pub const PACK: u32 = 10_000 + 0x3F1;
-    /// M12 step 7: Ars Arcanum's (0x3F2 + 10000).
+    /// M12 step 7: Ars Arcanum's (0x3F2 + 10000), Ragnarok's (0x3F3 + 10000).
     pub const ARCANUM_PACK: u32 = 10_000 + 0x3F2;
+    pub const RAGNAROK_PACK: u32 = 10_000 + 0x3F3;
     /// Re:CoM's motion for each xl entry (wind-up, dash, finisher): rows 0xE / 0xF / 0x10 byte 0.
     pub const MOTION: [u32; 3] = [0, 1, 2];
     /// The variants `exeStockSkill` passes (EET, SES): 0 for all three.
@@ -772,8 +956,126 @@ pub mod recom_events {
             // the start motion 0, hit k (rows 0x12 + k) motion 1 + k, the finisher 13; variants 0
             // (rows' byte 1 = 0; `+0x110(3)` = 0 for 0x11).
             xl::AA_WINDUP..=xl::AA_FINISHER => (Source::Sleight { pack: ARCANUM_PACK, motion: (xl_entry - xl::AA_WINDUP) as u32 }, 0, 0),
+            // Ragnarok: its pack 11011 (sleight 11 → 4 → 0x3F3): Re:CoM's opening strike (motion 0)
+            // for KH1's wind-up and each rising hit (Assumption: Re:CoM has no five-hit combo), its
+            // charge (1), its releases (2 / 3); variants 0.
+            xl::RAG_WINDUP..=31 => (Source::Sleight { pack: RAGNAROK_PACK, motion: 0 }, 0, 0),
+            xl::RAG_CHARGE => (Source::Sleight { pack: RAGNAROK_PACK, motion: 1 }, 0, 0),
+            xl::RAG_FIRE => (Source::Sleight { pack: RAGNAROK_PACK, motion: 2 }, 0, 0),
+            xl::RAG_FIRE_BIG => (Source::Sleight { pack: RAGNAROK_PACK, motion: 3 }, 0, 0),
             _ => return None,
         })
+    }
+}
+
+/// M12 step 7: KH1's Ragnarok numbers and its shots' flight (`0x14039F330`, `0x14039FBB0`). Checked
+/// (decomp + exe + files) unless tagged.
+pub mod ragnarok {
+    use kh1_core::{AttackData, Vec3};
+
+    /// The rising hits before the charge.
+    pub const HITS: usize = 5;
+    /// The hits' speed along the facing (`0x1406A0C00`: 8, 4, 4, 4, 8). Checked (exe).
+    pub const HOP_SPEED: [f32; HITS] = [8.0, 4.0, 4.0, 4.0, 8.0];
+    /// "Impact" is lit while the charge time is in [10, 70) (`0x14039FF70`).
+    pub fn offered(t: f32) -> bool {
+        (10.0..70.0).contains(&t)
+    }
+
+    /// What "Impact" does at charge time `t` (`0x14039F330`).
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct Fire {
+        pub shots: u8,
+        /// The hop's height and the speed along the facing (negative: back).
+        pub hop: f32,
+        pub back: f32,
+        /// The full release 0xF8 (else 0xF7).
+        pub big: bool,
+    }
+
+    /// t < 40: 10 shots, hop 10; [40, 50): 17, hop 20, 4 back; [50, 60): 25, hop 30, 8 back, 0xF8;
+    /// from 60: as under 40.
+    pub fn fire_of(t: f32) -> Fire {
+        if (40.0..50.0).contains(&t) {
+            Fire { shots: 17, hop: 20.0, back: -4.0, big: false }
+        } else if (50.0..60.0).contains(&t) {
+            Fire { shots: 25, hop: 30.0, back: -8.0, big: true }
+        } else {
+            Fire { shots: 10, hop: 10.0, back: 0.0, big: false }
+        }
+    }
+
+    /// The release for the host: the shots to make, Sora's facing, Re:CoM's target (its owner).
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct FireStart {
+        pub shots: u8,
+        pub facing: f32,
+        pub target: Option<u32>,
+    }
+
+    /// A shot's speed (KH1 units a frame), turn limit (5° a frame) and search range for a new
+    /// target (`0x1402B0E90(Sora, pos, dir, 1000)`).
+    pub const SHOT_SPEED: f32 = 12.0;
+    pub const SHOT_TURN: f32 = 0.087_266_47;
+    pub const SEARCH: f32 = 1000.0;
+
+    /// A shot's life (frames) and its bend (`+0x44`), from two of KH1's random draws: rand × 60 + 180,
+    /// rand × 0.4 + 0.4.
+    pub fn shot_life(r: f32) -> f32 {
+        r * 60.0 + 180.0
+    }
+    pub fn shot_bend(r: f32) -> f32 {
+        r * 0.4 + 0.4
+    }
+
+    /// The shots' directions: from Sora's up, a ring about his facing axis, `2π / n` apart
+    /// (`0x14039F330`: `(0, −1, 0)` in his frame, each next turned by `0x1400E6E30`, a turn in his
+    /// local x–y plane). `up` and `side` in world space.
+    pub fn ring(up: Vec3, side: Vec3, n: u8) -> Vec<Vec3> {
+        let a = std::f32::consts::TAU / n.max(1) as f32;
+        (0..n).map(|k| up * (a * k as f32).cos() + side * (a * k as f32).sin()).collect()
+    }
+
+    fn cross(a: Vec3, b: Vec3) -> Vec3 {
+        Vec3::new(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+    }
+
+    fn norm(v: Vec3) -> Vec3 {
+        let l = v.length();
+        if l > 0.0 {
+            v * (1.0 / l)
+        } else {
+            v
+        }
+    }
+
+    /// One frame of a shot (`0x14039FBB0`): the aim (the target's point − the shot; without one KH1
+    /// takes its own direction − its position, as the code does), bent toward `cross(dir, aim)` by
+    /// `bend` (`0x140386B70`: `a × t + b × (1 − t)`), the turn toward it at most 5° × step, then 12 ×
+    /// step along the new direction. Returns (position, direction).
+    pub fn shot_step(pos: Vec3, dir: Vec3, target: Option<Vec3>, bend: f32, step: f32) -> (Vec3, Vec3) {
+        let mut aim = norm(match target {
+            Some(t) => t - pos,
+            None => dir - pos,
+        });
+        if bend > 0.0 {
+            let c = norm(cross(dir, aim));
+            aim = norm(c * bend + aim * (1.0 - bend));
+        }
+        let ang = dir.dot(aim).clamp(-1.0, 1.0).acos().min(SHOT_TURN * step);
+        let axis = norm(cross(dir, aim));
+        // Rodrigues: the turn toward the aim (Assumption: `0x1402A7D40`'s turn is the one that
+        // closes on it).
+        let d = if axis.length() > 0.0 { norm(dir * ang.cos() + cross(axis, dir) * ang.sin() + axis * (axis.dot(dir) * (1.0 - ang.cos()))) } else { dir };
+        (pos + d * (SHOT_SPEED * step), d)
+    }
+
+    /// The shot's attack record (btltbl `0x5748`, `0x14028F930(0xF)`: the table `0x1405287D0`):
+    /// Magic × 2 (stat source 3), flinch, power 20, no crit, no MP charge, radius 50, free-standing,
+    /// clash type 6. Checked (files + exe); its other fields (floor, cap, priority) KH1's defaults:
+    /// Assumption.
+    pub fn shot_record() -> AttackData {
+        AttackData { stat_source: 3, element: 0, kind: 3, bone: -1, power: 20, crit: 0, clash: 6, radius: 50.0, ..Default::default() }
     }
 }
 

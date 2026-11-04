@@ -334,6 +334,8 @@ pub trait Host {
     /// A special row starts on Re:CoM's sleight action: the last row's volume ends, the KH1 row in
     /// the attack row pointer, Re:CoM's attack id of it.
     fn special_row(&mut self, _r: &crate::specials::RowStart) {}
+    /// M12 step 7: Ragnarok's release (`0x14039F330`): its shots from the Keyblade's tip.
+    fn ragnarok_fire(&mut self, _f: &crate::specials::ragnarok::FireStart) {}
     /// M12 step 7: a special row's attack is over (Strike Raid's throw ended into its catch): the
     /// weapon's volume ends and the attack row pointer holds no window, so the catch and the wait
     /// hit nothing (KH1's attack object goes with the throw's motion).
@@ -1112,6 +1114,9 @@ impl Kh1Sora {
         // ---- physics: this frame's displacement; Re:CoM's mover moves and collides ----
         let disp = match self.state {
             state::AIR => self.air_move(step, pos),
+            // M12 step 7: Ragnarok's state 0x25 runs KH1's air step with speed 0 (its hops and the
+            // charge's hover), whatever the air toggle says (Re:CoM has no such hop).
+            s if s == crate::specials::STATE_OF[crate::specials::RAGNAROK] && self.special.is_some() => self.ragnarok_move(step, pos),
             state::GLIDE => self.glide_move(h, step, &mut out.height),
             _ => self.move_dir.flat().normalized() * (step * self.speed) + self.push_step(step),
         };
@@ -1393,6 +1398,14 @@ impl Kh1Sora {
             state::GLIDE => self.glide_next(h, airborne, pos, ev),
             // M9 stage 9c.1, `0x14039EBA0`: in the air the special ends, Sora falls (state 2); M12
             // step 7: Strike Raid's air callback (`0x1402B1840`) keeps its state.
+            s if s == crate::specials::STATE_OF[crate::specials::RAGNAROK] => {
+                // `0x14039F6C0`: down after the hits, the landing (state 0); else the state holds.
+                if self.ragnarok_landed(h, airborne) {
+                    state::GROUND
+                } else {
+                    s
+                }
+            }
             s if crate::specials::is_state(s) => {
                 if airborne && self.special_fall(h) {
                     state::AIR

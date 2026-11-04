@@ -769,6 +769,10 @@ impl Host for RecomHost {
         unsafe { super::specials::special_row_end(self.pl) }
     }
 
+    fn ragnarok_fire(&mut self, f: &crate::specials::ragnarok::FireStart) {
+        unsafe { super::specials::ragnarok_fire(self.pl, f) }
+    }
+
     fn end_special(&mut self, airborne: bool) -> bool {
         unsafe { super::specials::end_special(self.pl, airborne) }
     }

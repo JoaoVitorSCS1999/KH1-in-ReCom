@@ -52,7 +52,7 @@ pub const KEYBLADE_ATTACH: &str = "WeaponR";
 /// wait 0xEE; `0x14039FFD0` / `0x1403A0290` / `0x1403A00A0`), after the held clip's slot (so no
 /// earlier slot moves); then Ars Arcanum's fourteen (3..=16: wind-up 0xD2, hits 0xD3..=0xDE,
 /// finisher 0xDF; `0x14039EEB0`). The same list as `kh1_core::data::xl::ENTRIES` (a test checks).
-pub const XL_ENTRIES: [usize; 26] = [0, 1, 2, 17, 18, 19, 20, 21, 22, 23, 24, 25, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+pub const XL_ENTRIES: [usize; 35] = [0, 1, 2, 17, 18, 19, 20, 21, 22, 23, 24, 25, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 26, 27, 28, 29, 30, 31, 32, 33, 34];
 /// Sonic Blade's three come before the held clip's slot; the later specials' after it.
 pub const XL_BEFORE_HELD: usize = 3;
 

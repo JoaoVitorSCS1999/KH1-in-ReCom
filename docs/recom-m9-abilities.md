@@ -1191,6 +1191,93 @@ Raid's; words 331..333. Without it: `specials: Ars Arcanum's rows are not in the
    lines say `started`.
 6. Sleights row: Ars Arcanum listed (after Strike Raid) and played the same way.
 
+## M12 step 7: KH1's Ragnarok (the triangle prompt, and in the Sleights list)
+
+Owner (2026-11-03): the same ask as Strike Raid's (§ above). Built the same way; its shots are
+Re:CoM's own homing bullets (KH1 shoots objects: `0x14039FBB0` children).
+
+### KH1 (Steam). Checked (decomp + exe + files) unless tagged
+
+| what | value | where |
+|---|---|---|
+| command | 0x5A "Ragnarok" (334), its release 0x5B "Impact" (335; DE "Ragnarök" / "Apokalypse") | `0x14028D3D0`, command records |
+| offer | range 600; **only at a target whose lock point is 160 or more above Sora** ('Z': `sora.y − point.y < 160` refuses); MP 300 = 3 whole MP | `0x14028D0F0`, btltbl |
+| AP | 4, sort key 804 (KH1 id 14); learned with Re:CoM's sleight 11 | btltbl ability row 13 |
+| state | 0x25: enter `0x14039FAF0` (flags `0x1200000`: no damage, no reaction), physics KH1's air step `0x1402AF6A0` with speed 0 (arcs, the air drag), exit `0x14039F740` | `0x14039F250` |
+| wind-up | 0xF0 (xl 26, 24 frames), blend 8, the release queued | `0x14039F250` |
+| hits 1..5 | **by themselves** (free callback `0x14039F7A0`, n < 5): toward the target, row `0x36 + n` (0xF1..0xF5: 14 / 12 / 14 / 18 / 22 frames, no root motion) at blend 0, a hop of the row's height (60, then 40 × 4: `0x1402AF960`), a speed along the facing of 8 / 4 / 4 / 4 / 8 (`0x1406A0C00`), the release and the fall queued (`0x40000006`, blend 8) | decomp + exe |
+| charge | n == 5: 0xF6 (xl 32, 76 frames, root −150) **without** the action lock (bit 23: KH1's hold-still flag: Sora hovers), the fall queued with `0x14039FFB0` (state 2: the end); KH1's flag `0x1000000` cleared: Sora can be hit; then the charge time t counts while he is free | decomp |
+| "Impact" | `0x14039FF70`: shown the whole special, lit while 10 ≤ t < 70 | decomp |
+| release | `0x14039F330` by t: t < 40 or t ≥ 60: 10 shots, hop 10, 0xF7 (80 frames); 40 ≤ t < 50: 17, hop 20, 4 back; 50 ≤ t < 60: 25, hop 30, 8 back, 0xF8 (50 frames); the fall queued with state 2 after it | decomp |
+| shots | from the Keyblade's tip, a ring about Sora's facing: the first his up, each next turned 2π / n (`0x1400E6E30`); each (`0x14039FBB0`) flies 12 a frame for 180 + rand × 60 frames, aims at its target's lock point (none: the nearest enemy within 1000, `0x1402B0E90`), bent by `cross(dir, aim)` × (0.4 + rand × 0.4) (`0x140386C70`, `0x140386B70`), turning at most 5° a frame; it ends on its hit | decomp + disasm |
+| record | 0x5748: Magic × 2 (stat source 3), element 0, flinch, power 20, no crit, radius 50, clash 6 | btltbl (`0x14028F930(0xF)`) |
+| land | `0x14039F6C0`: on the ground after the hits (n > 5): the land motion, state 0; earlier the state holds | decomp |
+
+### Re:CoM (Steam). Checked (decomp + exe)
+
+- `initStockSkill` case 0xB (`0x140220F84`): attack id **0x1F**, its resources (sleight 11).
+- `exeStockSkill`: the start 0x136 (motion 0, `limit3`, the tint `0x1407C5D90` (0.5, 0.75, 0.5, 1)
+  by `0x140218CFB` → `0x140218E29`), 0x137 the charge (motion 1, `limit4`), the release 0x138 /
+  0x139 (motion 2 / 3) with its ring of `CHomingBullet`s (class 2 / kind 3, the hand point
+  `0x1401F0B30`, the angles `0x1401A4A00`, row 0x20: effect set 2, kind 2, column 0, through
+  `0x140158DD0`), 0x13A the fall. Pack **11011** (sleight 11 → 4 → 0x3F3).
+- `CHomingBullet`'s step `0x1401575D0`: with `+0x230 & 0x80000` it steers to the point `+0x300`
+  (by angles with `0x8000`: `0x1401D7F00`, `+0x170` degrees a frame) while nearer than `+0x2F8`.
+
+### What runs (Combat = KH1, Sora's story, battle rooms)
+
+- Abilities page (4 AP) once Re:CoM's sleight 11 is learned; the prompt "Ragnarok" at a target 1.6 m
+  or more above and within 6 m; the Sleights list (§ 8.5.3 of `docs/recom-m12-sleights.md`).
+- Start: KH1's 3 MP; case 0xB cardless (action 0x16, id 0x1F, its resources), Re:CoM's tint and
+  `limit3`; the wind-up on Re:CoM's empty row 0xE (no hit); KH1 frame state 0x25.
+- Hits: KH1's row `0x36 + n` on Re:CoM's id 0x1F, KH1's hops; then the charge (row ended, Sora
+  hovers, can be hit); "Impact" lights at t = 10; Triangle: the shots, the hop back, the release.
+- Shots: Re:CoM's own `CHomingBullet`s (it draws, collides, hits, ends them) with KH1's numbers;
+  their flight state's exe runs KH1's bend and 5° turn each frame (`win::specials::kh1_ragnarok_exe`:
+  running beside Re:CoM's homing step for the steering only, then Re:CoM's step).
+- Damage: at Damage = Re:CoM, the hits and the shots Re:CoM's Ragnarok AP (column 0, trace
+  `:recom <ap> col 0 sleight 0xb`); at Damage = KH1 KH1's records (the shots record 0x5748, trace
+  `:ragnarok:kh1 <d>`).
+- Events: the wind-up and each hit motion 0 of pack 11011, the charge 1, the releases 2 / 3.
+
+### Sites (`sites::SPECIAL_RAG_CHECKED`; a mismatch: no Ragnarok)
+
+`0x140220F84` (case 0xB), `0x140218CFB` (the dispatch), `0x140218E29` (the colour's `lea`),
+`0x1407C5D90` (the colour), `0x1407C6E60` (rows 0x1F..0x20, 32 bytes); the `limit3` pointer read at
+start (`0x1407C7E20`, the string compared). All 705 byte sites re-read with pefile: 0 mismatches.
+
+### Asset step: **re-run it**
+
+Ragnarok's nine entries (26..=34) on slots 257..265, after Ars Arcanum's; words 334, 335. Without
+it: `specials: Ragnarok's rows are not in the attack table`.
+
+### 1:1 checks
+
+- Checked (decomp + exe + files, tests): the table above; the nine clips' lengths and root flags
+  against `xl_limit.dat` (`h_specials_clips_from_xl_limit`: 24 / 14 / 12 / 14 / 18 / 22 / 76 (root) /
+  80 / 50); rows 0x36..0x3A and record 0x5AC8 against btltbl; a full run in the movement fake
+  (`ragnarok_runs_kh1s_hits_charge_and_shots`: five rows by themselves, Sora rising, hovering in the
+  charge, "Impact" lit at t 10, 17 shots at t ≥ 40, the fall and the landing;
+  `ragnarok_without_impact_falls_after_the_charge`); the shot step (`ragnarok_shots_home_as_kh1s`).
+- Not checked: in game; a KH1 trace; Re:CoM's pack 11011's event contents.
+- Assumptions: the shots start at Re:CoM's hand point (Re:CoM's own Ragnarok uses it; KH1's is the
+  Keyblade's tip, about a blade's length on); the turn's direction about `cross(dir, aim)` (the one
+  that closes on the aim); KH1's attack delay of `k & 7` frames per shot not carried; the shots'
+  random draws from our own generator (KH1's distribution); shots stop at walls (Re:CoM's flag
+  0x100); KH1's hits on Re:CoM's motion 0 events (Re:CoM has no five-hit part); record 0x5748's
+  floor, cap and priority KH1's defaults.
+
+### What the owner should test (re-run the asset step first)
+
+1. Learn Ragnarok (Re:CoM's sleight 11), equip it (4 AP).
+2. In battle, an enemy 1.6 m or more above Sora (a flyer) within 6 m and 3+ MP: "Ragnarok" in the
+   context tab (not for an enemy on the ground). Triangle: the tint, `limit3`, five rising hits.
+3. The charge: Sora hovers; "Impact" lights after 10 frames. Triangle early: 10 shots; after about
+   0.7 s: 17 and a hop back; after about 0.85 s: 25, the big release. The shots curl and home.
+4. Not pressing: Sora drops after the charge. Hit during the charge: he takes it.
+5. Damage = KH1 vs Re:CoM: the hits log `:recom … sleight 0xb` at Re:CoM, the shots `:ragnarok`.
+- Combat = Re:CoM: no change.
+
 ## M12 step 3: KH1's Rod-list support abilities
 
 Owner (2026-11-03, "M12 sleights and progression"): "As sora levels up in KH1, he receives abilities

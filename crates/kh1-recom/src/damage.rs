@@ -364,6 +364,9 @@ pub fn special_source(recom_id: u32) -> Option<(u16, u8)> {
             0x1E => 2,
             _ => 0,
         })),
+        // Ragnarok (sleight 11): its strike 0x1F and its shots 0x20, both `+0xA` = 0 (Checked (exe):
+        // `sites::SPECIAL_RAG_CHECKED`).
+        0x1F | 0x20 => Some((crate::specials::recom::RAGNAROK_SLEIGHT, 0)),
         _ => None,
     }
 }
