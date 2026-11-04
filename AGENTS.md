@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 204: Fix: the KH1 specials' merge (0.101.0–0.101.2 didn't build), version 0.101.3 (2026-11-01)
+
+- The merge of M12 step 7 into testing hit three conflicts with 0.100.5 / 0.100.6 (`sleights.rs` doc lines, `win/command_menu.rs`'s Sleights-list fill, `docs/recom-m12-sleights.md` § 8.5.3), and 0.101.0–0.101.2 were committed with the conflict markers in them: those three versions didn't compile and were never built or installed.
+- Resolved: the command menu fills the Sleights list (and the shortcut picker) with the equipped sleights plus the equipped KH1 specials (Strike Raid, Ars Arcanum, Ragnarok) whenever the bottom row is Sleights or a shortcut holds a sleight; the specials' doc section is § 8.5.4.
+- Checked: tests (all green), Windows build. Not checked: in game.
+
+---
+
 ## Stage 203: M12 step 7: Ragnarok (KH1 FM's triangle prompt; also in Sleights), version 0.101.2 (2026-11-01)
 
 - Ragnarok (Checked (KH1 decomp + files)): wind-up 0xF0, 5 rising hits on their own (rows 0x36..0x3A, hops 60 / 40 / 40 / 40 / 40, speeds 8 / 4 / 4 / 4 / 8); the charge 0xF6 (Sora hovers, hittable), "Impact" 0x5B lit while t is 10..70 frames; fired by t: 10 shots, 17 and a hop back at 40..50, 25 and the big release at 50..60; then the fall and landing; range 600, 3 MP, 4 AP. Re:CoM side: case 0xB (id 0x1F), tint `0x1407C5D90`, `limit3`, pack 11011. In the Sleights menu as command 0x8B.

@@ -1054,19 +1054,14 @@ unsafe fn world(pl: usize) -> World {
         // running locks both rows (one at a time).
         w.summon_out |= super::summons::sleight_running(pl);
         w.bottom = super::summons::bottom_row();
-<<<<<<< HEAD
         if w.bottom == crate::sleights::Bottom::Sleights || w.shortcuts.iter().any(|&b| cm::shortcut::slot_sleight(b).is_some()) {
-            let ids = crate::sleights::list(&super::abilities::equipped_sleights());
-=======
-        if w.bottom == crate::sleights::Bottom::Sleights {
-            // M12 step 7: the equipped KH1 specials listed too (Strike Raid; owner: "also show up in
-            // the sleights menu"), each usable as its prompt would offer it.
+            // M12 step 7: the equipped KH1 specials listed too (Strike Raid, Ars Arcanum, Ragnarok; owner: "also
+            // show up in the sleights menu"), each usable as its prompt would offer it.
             let mut equipped = super::abilities::equipped_sleights();
             if let Some(e) = equipped_specials() {
                 equipped.extend(crate::sleights::SPECIALS.iter().filter(|&&i| e[i]).filter_map(|&i| crate::sleights::special_sleight(i)));
             }
             let ids = crate::sleights::list(&equipped);
->>>>>>> ec6ca67
             for (k, &id) in ids.iter().enumerate() {
                 w.sleights[k] = id as u8;
             }

@@ -654,7 +654,6 @@ Owner test lines (8.5.2):
   through something else).
 - Damage = Re:CoM: no change.
 
-<<<<<<< HEAD
 #### 8.5.3 Bosses, Re:CoM-only enemies and summons (owner, 2026-11-03, "KH1 damage scaling")
 
 Owner: "at Damage = KH1, sleights also scale on enemies without a KH1 twin (bosses, Re:CoM-only
@@ -722,8 +721,8 @@ Owner test lines (8.6):
 - Combat = Re:CoM: no change.
 
 Not checked (8.6): anything in game.
-=======
-#### 8.5.3 KH1's specials in the Sleights list (owner, 2026-11-03, "M12 answers": "Strike raid are arcanum and ragnarok in KH1FM are triangle prompts. Let them be triangle prompts and also show up in the sleights menu")
+
+#### 8.5.4 KH1's specials in the Sleights list (owner, 2026-11-03, "M12 answers": "Strike raid are arcanum and ragnarok in KH1FM are triangle prompts. Let them be triangle prompts and also show up in the sleights menu")
 
 | what | where | tag |
 |---|---|---|
@@ -734,4 +733,3 @@ Not checked (8.6): anything in game.
 
 Owner question: Sonic Blade in the list too?
 
->>>>>>> ec6ca67

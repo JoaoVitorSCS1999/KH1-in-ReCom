@@ -19,18 +19,14 @@
 //! - **The start**: Re:CoM's own sleight start for the id (the summons' path, Sora's vtable `+0x130`
 //!   = `0x1402247A0`); Re:CoM runs its motion, effects, hits, damage, protection and end.
 //! - **Damage = KH1** ([`kh1_scaled`], owner, "Sleights menu follow-ups"): each hit Re:CoM's × the
-<<<<<<< HEAD
 //!   enemy's KH1-scale max HP (a twin's, a proxy's or a boss twin's) / its Re:CoM max HP; the same
 //!   rule for the summons (`win::summons::scale_sleight_hit`).
-=======
-//!   enemy's KH1 max HP / its Re:CoM max HP (twins only; `win::summons::scale_sleight_hit`).
 //! - **KH1's specials** (M12 step 7, owner 2026-11-03: "Strike raid are arcanum and ragnarok in KH1FM
 //!   are triangle prompts. Let them be triangle prompts and also show up in the sleights menu"):
 //!   [`SPECIALS`] when equipped, under Re:CoM's sleight id of the same name (Strike Raid 8), named by
 //!   KH1's own command word (338), usable when the special's own prompt would offer it (its
 //!   `0x14028D0F0` score 2: a live target in range, its MP); confirm issues the special's command
 //!   exactly as its prompt's Triangle does (`crate::specials`), not Re:CoM's sleight.
->>>>>>> ec6ca67
 
 use crate::abilities::{self as ab, SleightMp};
 
