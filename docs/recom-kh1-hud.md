@@ -943,3 +943,19 @@ optional key: the format stays 3): the panel (`UK_uibin_cut.bin`'s `cut_fra_a` f
 (`Icon.tm2` `0xE411` / `0xE410` / `0xE412` / `0xE413`). Drawn in both menu looks (owner,
 2026-11-01). KH1's rules and the DLL side: `recom-m7-command-menu.md` § 7.12. Checked (decomp +
 files + offline render).
+
+## Combat = Re:CoM: Re:CoM's HUD (0.102.3)
+
+Owner, 2026-11-04: "with combat set to RE:CoM the hud should also go back to the normal positioning".
+
+- `win::kh1_hud::active()` also needs Combat = KH1. At Combat = Re:CoM, Re:CoM's HUD is shown as Re:CoM places it,
+  whatever `hud = kh1` and the `hud_*` pieces say:
+  - Re:CoM's HP gauge stays at its own place (not KH1's, not turned);
+  - the room plate stays where Re:CoM puts it;
+  - nothing is hidden (FRIENDS, prizes, minimap, HP);
+  - no KH1 MP ring, gauge or command-menu look.
+- A switch takes effect where each piece is set up: the HP gauge at its init, the room plate at its set-up. In
+  practice that is the next room or battle.
+- **Side effect:** the KH1-look Donald / Goofy gauges for Re:CoM's friend cards (H6, `hud_kh1_party`) showed only
+  at Combat = Re:CoM, so they no longer show. They were off in the owner's ini.
+- Not checked: in game.

@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 211: Combat = Re:CoM shows Re:CoM's HUD as Re:CoM places it, version 0.102.3 (2026-11-03)
+
+Owner, 2026-11-04: "with combat set to RE:CoM the hud should also go back to the normal positioning".
+
+- **Change** (`win::kh1_hud::active`): KH1's HUD also needs Combat = KH1 (`movement::kh1_on`). At Combat = Re:CoM every piece is off whatever `hud = kh1` / `hud_*` say: Re:CoM's HP gauge at Re:CoM's place (not turned), the room plate where Re:CoM puts it, nothing hidden, no KH1 MP ring / gauge / command-menu look. A switch applies where each piece is set up (the gauge's init, the plate's set-up: the next room or battle).
+- Side effect: H6's KH1-look friend gauges (`hud_kh1_party`, only at Combat = Re:CoM) no longer show (off in the owner's ini).
+- No new hook or site. Not checked: in game. Docs: `recom-kh1-hud.md` § Combat = Re:CoM.
+
+---
+
 ## Stage 210: Sleight and summon hits break into attacking enemies (Combat = KH1), version 0.102.2 (2026-11-03)
 
 Owner, 2026-11-04: "for some reason using mega flare doesnt really do much damage", then "check the traces, some hits from the lethal frame also arent hitting, same goes for the summons at times".

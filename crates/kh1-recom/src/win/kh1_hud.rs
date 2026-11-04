@@ -222,9 +222,12 @@ pub fn wanted() -> bool {
     manifest().is_some() && super::settings().hud == Mode::Kh1
 }
 
-/// KH1's HUD is drawn here: `hud = kh1`, the set registered, Sora's story.
+/// KH1's HUD is drawn here: `hud = kh1`, the set registered, Sora's story, **Combat = KH1** (owner,
+/// 2026-11-04: "with combat set to RE:CoM the hud should also go back to the normal positioning": at
+/// Combat = Re:CoM every piece, its placements and hides included, is Re:CoM's; a switch takes
+/// effect where each piece is set up: the next room or battle for the gauges and the room plate).
 pub fn active() -> bool {
-    wanted() && HOOKED.load(Ordering::Relaxed) && !super::stats::riku_story()
+    wanted() && HOOKED.load(Ordering::Relaxed) && !super::stats::riku_story() && super::movement::kh1_on()
 }
 
 /// The pieces chosen in the settings (`hud_kh1_*`, `hud_hide_*`).
