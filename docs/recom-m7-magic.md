@@ -864,8 +864,56 @@ Sites (7.8):
   squash list springs it back +0.05 a frame from there (18 frames from 0.1; the per-frame spell
   check runs only while it does). Combat = Re:CoM / Riku's story: Re:CoM's rule (untouchable).
   Assumptions: Re:CoM's flinch for KH1's knock 0x4E / 0x4F (Re:CoM owns the reaction); Re:CoM's
-  base height 1.0 (its own flatten writes 1.0). At Damage = KH1 no flatten happens (the KH1 row's
-  kind is a flinch; KH1's own hit flatten is open question 2 below).
+  base height 1.0 (its own flatten writes 1.0). At Damage = KH1 no flatten happened until 0.122.0
+  (next point).
+- **KH1's own hit flatten at Damage = KH1 (0.122.0)**, owner 2026-11-04 ("2 yes", on question 2
+  below). KH1 (Checked (decomp)):
+
+  | what | KH1 (Steam) | tag |
+  |---|---|---|
+  | Start: reaction kind 8 (KH1 Gravity's row kind) in the reaction pass `0x1402B8E10` → `0x1402B7DE0` | on the ground (`0x1402B1AE0`, `0x1402B1B10` false): request **0x66**, timer `+0x404` = **68**; in the air (movement 0x17 / air type) or a special movement (2, 0xB, 0x10, 0x11, 0x13, 0x14, 0x16 or the table's type 1): movement **0x16 / 0x17** (`0x1402B1960`), request **0x68**, timer **75**, `+0x2C` = 0 | Checked (decomp) |
+  | Each frame (`0x1402B7260`, before the reaction pass) | timer −= the frame step; above 60: height `+0x480` = **0.1 + 0.9 × (t − 60) / 8** (request 0x66: `× 0.125`) or **/ 15** (movement 0x16 / 0x17; also `+0x20..+0x2C` = (0, 1, 0, 40): a 40-a-frame drop); at or under 60: **0.1**; at 0: request **0x67** queued (`0x14029F980` writes `+0x17C`, not `+0x164`) and movement 0 / 4; while `+0x164` = 0x67: **h += (1 − h) × 0.3**; after: `0x140297FE0` springs **+0.05** a frame | Checked (decomp) |
+  | Frame step | 1.0 a 60 Hz frame; Re:CoM 50 ticks (`recom-timing.md`) | Checked (decomp) |
+
+  So on the ground: the hit's frame full height, 7 squashed frames (0.8875 … 0.2125), 0.1 from the
+  8th to the 68th, the get-up's ease from the 69th (0.37, 0.559, …), then +0.05 a frame.
+
+  **Built** (`magic::flatten::kh1`, `win::magic::kh1_flatten_hit` / `flatten_exe`, the begin / end
+  wrappers; `win::attack::spell_hit`): Re:CoM's own flatten state `+0xAC0` runs it.
+  1. **The hit**: right after Re:CoM's hit handler takes a KH1 Gravity strike at Damage = KH1 (KH1's
+     damage as before, Re:CoM's kind 1), when Re:CoM gave it its flinch (next state `+0x780`: alive,
+     not stopped, no super armour or voice-only rule), Re:CoM's own picker `0x14017D260` again with
+     its kind **0xD** (the handler's last call; case 0xD → `+0xAC0`): the same state Re:CoM's own
+     Gravity enters at Damage = Re:CoM. The variant: on Re:CoM's floor (its mover `+0x120 & 5`) and
+     not a flier (`+0x260` bit 8) is KH1's ground one, else KH1's air one.
+  2. **The begin** (wrapper, after Re:CoM's begin and 0.117.0's hurt bodies on): Re:CoM's timer
+     `+0x160` = KH1's 68 / 75 frames × 50. Re:CoM's actor update counts the timer, runs the hit
+     handler, then the state step, which switches and runs the new state's exe at once
+     (`0x1401A59A0`, `0x140242F50`): begin and first exe on the hit's frame.
+  3. **The exe** (`0x140183BA0`, a new hook, 6 bytes, no branch in: exe scan): phase 0 KH1's squash
+     from the timer (Re:CoM's own `timer / 250` not run), then 0.1 and Re:CoM's phase 1, whose wait
+     on the same timer is KH1's 60-frame hold; at its end Re:CoM pops to 1.0 and plays its own get-up
+     motion (its param `+0x5C`), the height put back to 0.1 (KH1 only queues 0x67 that frame); in
+     phase 2 (the get-up motion) KH1's +30 % a frame after Re:CoM's step; when it ends, 0.117.0's end
+     wrapper springs it back +0.05 a frame. Heights through Re:CoM's own setter `0x1401A7050`.
+  4. **Hittable / knocked out**: as 0.117.0 (hurt bodies on; a hit's reaction ends the state, then
+     KH1's spring-back). A second Gravity re-picks it: Re:CoM's state step runs end and begin again
+     (next = current), the timer restarts at 68 (KH1's `0x1402B7DE0` again).
+  - Per frame: one atomic load per flattened enemy update (nothing when no KH1 flatten runs); a KH1
+    flatten: one list lookup and one height write an update.
+  - Combat = Re:CoM, Damage = Re:CoM (Re:CoM's own flatten and numbers), Riku's story: unchanged.
+  - Assumptions: Re:CoM's flinch decision (super armour, stop, death) stands for KH1's per-actor
+    reaction rules (`0x1402B7070`, AI-script hit handlers: bosses that never flatten in KH1 may in
+    Re:CoM when Re:CoM flinches them); Re:CoM's "off the floor or a flier" for KH1's air / special
+    movements; KH1's get-up request applied by the next frame (±1); Re:CoM's own get-up motion and its
+    length (decision 10: Re:CoM's clips); Re:CoM's base height 1.0. **Not carried**: KH1's 40-a-frame
+    drop during the squash and the hold's pause while above the floor (movement 0x16 with `+0x3D4`
+    > 0): Re:CoM's own gravity in its flatten (its begin sets the mover's `+0x118` bit 2) moves it.
+  - Sites: `FLATTEN_EXE_HOOK` (6 bytes) + `FLATTEN_EXE_CHECKED` (the rest of the exe, 376 bytes);
+    1312 sites, 0 mismatches (`check_sites_rs.py`).
+  - Test: `magic::tests::kh1_flatten_in_recoms_state_is_kh1s_frame_by_frame` (Re:CoM's state model
+    with our steps against KH1's timeline, 100 frames, both variants).
+  - Not checked: in game.
 - **Not built in 7.8: the slow under the falling sphere** (M7 f2 below: it is a squash, not a
   slow; KH1: `+0x88 |= 4` each frame, the actor's time scale eased to 0.8 with a wobble and back at
   +0.05 a frame). Re:CoM's enemies have a per-actor
@@ -892,7 +940,7 @@ it is wrong:
 | The falling thread (`L000ee`), each fall frame: the sphere down 230 / N cm, its scale up, then `L0055c(sphere centre, 170 × scale)`: every enemy (sys 65) whose bodies touch that sphere (sys 90 type 1) gets **`actor+0x88 |= 4`**. Not on the impact run. | `xm_gravity01.mag` `0xEE..0x168`, `0x55C..0x5FA` (`magdis.py`) | Checked (files) |
 | The actor update `0x140297FE0`, normal branch (skipped while `+0x88 & 1`, stopped; and for the flattened requests 0x66..0x68, and when the param block `+0x6C`'s byte 0 bit 0 is set): with bit 4, `+0x480 = (+0x480 − 0.8) × 0.95 + 0.8 − sin(+0x484) × 0.05`, `+0x484 = wrap(+0x484 + π/2)` (`0x1402A8280`, [−π, π]); without it, `+0x480 += 0.05` up to 1.0 and `+0x484 = 0`; then bit 4 is cleared. `+0x480` starts at 1.0 (`0x140292660`). | `0x140297FE0` | Checked (decomp) |
 | **`+0x480`'s only reader**: the actor's world-matrix build `0x1402A0A40`: its scale `+0x40` with **y × `+0x480`**, applied with `0x1402A9090` (flag `+0x374 |= 0x2000`). Bit 4 of `+0x88` has no other reader (the other `|= 4` writers, `0x14027D4B0` / `0x14027E460`, are another struct's). | `0x1402A0A40` | Checked (decomp) |
-| (Related, not asked) KH1's Gravity **hit** flattens the enemy: the hit pass `0x1402B7260` holds `+0x480` at 0.1 in states 0x16 / 0x17 or request 0x66 while its timer `+0x404` is ≤ 60, then eases it back (`(t − 60) / 15 × 0.9 + 0.1`, or `× 0.125`), and request 0x67 pulls it toward 1 by 0.3 a frame. | `0x1402B7260` | Checked (decomp); not built (owner question 2) |
+| (Related, not asked) KH1's Gravity **hit** flattens the enemy: the hit pass `0x1402B7260` holds `+0x480` at 0.1 in states 0x16 / 0x17 or request 0x66 while its timer `+0x404` is ≤ 60, squashed above 60 (`0.1 + 0.9 × (t − 60) / 15`, or `× 0.125`: it squashes down, the timer counting down), and request 0x67 pulls it toward 1 by 0.3 a frame. | `0x1402B7260` | Checked (decomp); built 0.122.0 (owner question 2: yes) |
 
 So **KH1's "slow" is a vertical squash of the model** to about 0.8 of its height, wobbling with a
 4-frame period, springing back at 0.05 a frame once out from under the sphere. Nothing of the
@@ -943,7 +991,8 @@ Owner questions (M7 f2):
    `actor+0x14`, which Re:CoM's actor update `0x1401A59A0` counts its timers by; its writer not yet
    found); (c) neither.
 2. **KH1's Gravity hit flattens the enemy** (height 0.1 for about a second, then it springs back):
-   add it to the impact's hit, on the same height lever? (a) yes; (b) no (built: KH1's damage only).
+   add it to the impact's hit, on the same height lever? (a) yes; (b) no. **Answered (owner,
+   2026-11-04): yes**; built 0.122.0 in Re:CoM's own flatten state (§ 7.8, KH1's own hit flatten).
 
 In-game checklist (7.8):
 

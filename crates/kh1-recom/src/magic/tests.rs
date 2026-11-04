@@ -795,3 +795,77 @@ fn field_heartless_get_recoms_thunder_and_stop_kinds() {
     assert_eq!(MAP_ENEMY_TYPE, 0x1002);
     assert_ne!(MAP_ENEMY_TYPE, crate::battle::ENEMY_TYPE);
 }
+
+/// KH1's own hit flatten (owner, 2026-11-04, "2 yes"): Re:CoM's flatten state run with KH1's numbers
+/// gives KH1's height frame by frame (`0x1402B7DE0` / `0x1402B7260`), both variants.
+#[test]
+fn kh1_flatten_in_recoms_state_is_kh1s_frame_by_frame() {
+    use flatten::kh1::*;
+    for v in [Variant::Ground, Variant::Air] {
+        // KH1: the hit frame sets t = start (full height); each later frame counts 1, then the height.
+        let mut kh1 = vec![1.0f32];
+        let (mut t, mut h, mut getup_on) = (v.start(), 1.0f32, false);
+        for _ in 1..100 {
+            if getup_on {
+                h = getup(h);
+            } else {
+                t -= 1.0;
+                if t > HOLD {
+                    h = LOW + 0.9 * (t - HOLD) / v.squash();
+                } else if t > 0.0 {
+                    h = LOW;
+                } else {
+                    getup_on = true; // request 0x67 queued: the ease from the next frame
+                }
+            }
+            kh1.push(h);
+        }
+        // Re:CoM: on the hit's frame the begin (our timer) and the first exe; then the timer counted,
+        // the exe.
+        let mut recom = Vec::new();
+        let (mut timer, mut phase, mut y) = (begin_ticks(v), 0, 1.0f32);
+        for k in 0..100 {
+            if k > 0 && timer > 0 {
+                timer -= 50;
+            }
+            match step(v, phase, timer) {
+                Step::Squash(hh) => y = hh,
+                Step::Hold => {
+                    y = LOW;
+                    phase = 1;
+                }
+                Step::Wait => {
+                    // Re:CoM's phase 1: at the timer's end height 1.0, its get-up, phase 2.
+                    // (it writes 1.0; ours puts 0.1 back in the same call).
+                    if timer <= 0 {
+                        phase = 2;
+                        y = LOW;
+                    }
+                }
+                Step::GetUp => y = getup(y),
+            }
+            recom.push(y);
+        }
+        for (k, (a, b)) in kh1.iter().zip(&recom).enumerate() {
+            assert!((a - b).abs() < 1e-5, "{v:?} frame {k} after the hit: KH1 {a} Re:CoM {b}");
+        }
+        // The numbers (index = frames after the hit): full height on the hit's frame, the first
+        // squashed frame, the hold, the get-up's start.
+        let n = v.squash() as usize;
+        assert_eq!(kh1[0], 1.0);
+        assert!((kh1[1] - (0.1 + 0.9 * (n as f32 - 1.0) / n as f32)).abs() < 1e-6);
+        assert_eq!(kh1[n], LOW, "{v:?}: held from frame {n}");
+        let end = v.start() as usize;
+        assert_eq!(kh1[end], LOW, "{v:?}: still 0.1 on the timer's last frame");
+        assert!((kh1[end + 1] - 0.37).abs() < 1e-6, "{v:?}: the get-up's first frame");
+    }
+    assert_eq!(begin_ticks(Variant::Ground), 3400);
+    assert_eq!(begin_ticks(Variant::Air), 3750);
+    assert_eq!(Variant::of(true, false), Variant::Ground);
+    assert_eq!(Variant::of(false, false), Variant::Air);
+    assert_eq!(Variant::of(true, true), Variant::Air);
+    assert_eq!((PICK_KIND, STATE), (0xD, (24 + 0x13) * 0x40));
+    // After the get-up motion the spring-back is KH1's +0.05 (0.117.0's).
+    let s = flatten::spring_back(0.9).unwrap();
+    assert!((s.y - 0.9).abs() < 1e-6);
+}

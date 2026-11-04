@@ -1127,6 +1127,9 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
         wr(part + super::magic::PART_ATTR, attr);
     }
     super::guard::after_enemy_hit(enemy, r, hp);
+    // KH1's own hit flatten at Damage = KH1 (owner, 2026-11-04): Re:CoM's flinch for the hit becomes
+    // Re:CoM's Gravity flatten with KH1's numbers (`crate::magic::flatten::kh1`).
+    let kh1_flat = if !recom && s == crate::magic::spell::GRAVITY && r & 0xFF != 0 { super::magic::kh1_flatten_hit(enemy) } else { None };
     let after: i32 = rd(enemy + 0x274);
     let name = crate::magic::spell::NAMES.get(s as usize).copied().unwrap_or("?");
     let flat = recom && s == crate::magic::spell::GRAVITY && super::magic::flattening(enemy);
@@ -1137,11 +1140,19 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
             Some(false) => ", Re:CoM's gate shut: immune",
             None => "",
         };
-        format!("hit {name}{lv} on {:#x}: {what} (max MP {}){g}, Re:CoM took {} -> HP {after}{}{}", enemy & 0x00FF_FFFF, max_mp.unwrap_or(0), hp - after, if force { " (card broken)" } else { "" }, if flat { ", Re:CoM's flatten state" } else { "" })
+        let flat = match (flat, kh1_flat) {
+            (true, _) => ", Re:CoM's flatten state".to_string(),
+            (_, Some(v)) => format!(", KH1's flatten ({v:?}) in Re:CoM's flatten state"),
+            _ => String::new(),
+        };
+        format!("hit {name}{lv} on {:#x}: {what} (max MP {}){g}, Re:CoM took {} -> HP {after}{}{flat}", enemy & 0x00FF_FFFF, max_mp.unwrap_or(0), hp - after, if force { " (card broken)" } else { "" })
     });
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {
-            let tag = if recom { super::damage::spell_tag(s, lv, carried as i32) } else { kh1.map_or(String::new(), |d| format!(":kh1 {d}")) };
+            let mut tag = if recom { super::damage::spell_tag(s, lv, carried as i32) } else { kh1.map_or(String::new(), |d| format!(":kh1 {d}")) };
+            if kh1_flat.is_some() {
+                tag.push_str(":flat");
+            }
             g.push(format!("e{:x}:dmg {}:hp {after}{}:{name}{lv}{}", enemy & 0x00FF_FFFF, hp - after, if force { ":card" } else { "" }, tag));
         }
     }

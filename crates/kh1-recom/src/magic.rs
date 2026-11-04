@@ -757,6 +757,119 @@ pub mod flatten {
     pub fn spring_back(y: f32) -> Option<super::squash::Squash> {
         (y.is_finite() && y > 0.0 && y < RECOM_HEIGHT - 1e-3).then_some(super::squash::Squash { y: y / RECOM_HEIGHT, phase: 0.0 })
     }
+
+    /// KH1's own hit flatten at Damage = KH1 (owner, 2026-11-04: "2 yes"; `win::magic::kh1_flatten_hit`
+    /// / `flatten_exe`). KH1 (Checked (decomp)):
+    ///
+    /// - a hit of reaction kind 8 (KH1 Gravity's, btltbl kind 8) runs `0x1402B7DE0` from the reaction
+    ///   pass `0x1402B8E10`: on the ground (`0x1402B1AE0` and `0x1402B1B10` false) request **0x66**
+    ///   and timer `+0x404` = **68**; in the air or a special movement, movement **0x16** (ground) /
+    ///   **0x17** (air) (`0x1402B1960`), request **0x68**, timer **75**;
+    /// - each frame the hit pass `0x1402B7260` counts the timer down by the frame step and sets the
+    ///   height `+0x480`: above 60 the squash, **0.1 + 0.9 × (t − 60) / 8** (request 0x66: `× 0.125`) or
+    ///   **/ 15** (movement 0x16 / 0x17); at or under 60 **0.1**; at 0 request **0x67** (the get-up)
+    ///   (and movement 0 / 4); while 0x67 plays, **h += (1 − h) × 0.3** a frame; after it, the actor
+    ///   update `0x140297FE0` springs h **+0.05** a frame to 1 ([`spring_back`]);
+    /// - nothing makes it unhittable; a flinch knocks it out (0.117.0).
+    ///
+    /// Re:CoM: its own flatten state `+0xAC0` (the reaction picker's case 0xD) owns the enemy: begin
+    /// `0x14017C350` (bodies off, then 0.117.0's hurt bodies on), exe `0x140183BA0` (phase `+0x270`:
+    /// 0 squash, 1 hold until its timer `+0x160` runs out, then height 1.0 and its get-up motion, 2
+    /// until that motion ends), end `0x14017EB80`. Ours: KH1's numbers in its phases ([`Step`]).
+    pub mod kh1 {
+        /// Re:CoM's kind for the picker: its Gravity flatten (`0x14017D260` case 0xD → `+0xAC0`).
+        pub const PICK_KIND: i32 = 0xD;
+        /// Re:CoM's flatten state's offset in the enemy (state 24: (24 + 0x13) × 0x40).
+        pub const STATE: usize = 0xAC0;
+        /// KH1's held height, the hold's end (frames left), the get-up ease.
+        pub const LOW: f32 = 0.1;
+        pub const HOLD: f32 = 60.0;
+        pub const GETUP: f32 = 0.3;
+        /// Re:CoM ticks a 60 Hz frame (`recom-timing.md`, Checked (decomp)); KH1's frame step is 1.0.
+        pub const TICKS: f32 = 50.0;
+
+        /// Which of KH1's two flattens.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum Variant {
+            /// Request 0x66: timer 68, squash over 8 frames.
+            Ground,
+            /// Movement 0x16 / 0x17, request 0x68: timer 75, squash over 15 frames.
+            Air,
+        }
+
+        impl Variant {
+            /// KH1's start timer (frames).
+            pub fn start(self) -> f32 {
+                match self {
+                    Variant::Ground => 68.0,
+                    Variant::Air => 75.0,
+                }
+            }
+            /// The squash's length (frames above the hold).
+            pub fn squash(self) -> f32 {
+                match self {
+                    Variant::Ground => 8.0,
+                    Variant::Air => 15.0,
+                }
+            }
+            /// KH1's variant: on Re:CoM's floor (its mover's `+0x120 & 5`) and not a flier (`+0x260`
+            /// bit 8) is the ground one. **Assumption**: Re:CoM's "off the floor" stands for KH1's
+            /// air and special movements (`0x1402B1AE0` / `0x1402B1B10`).
+            pub fn of(on_floor: bool, flier: bool) -> Variant {
+                if on_floor && !flier {
+                    Variant::Ground
+                } else {
+                    Variant::Air
+                }
+            }
+        }
+
+        /// Re:CoM's state timer at its begin: KH1's start (KH1's hit frame sets 68 at full height; the
+        /// next frame's pass reads 67). Re:CoM's actor update `0x1401A59A0` counts the timer, runs the
+        /// hit handler (its picker sets the next state), then the state step `0x140242F50`, which
+        /// switches (end, begin) and runs the new state's exe in the same call: begin and the first exe
+        /// on the hit's frame, the next frame's count first. Checked (decomp); the handler's place in
+        /// the update: as `win::magic::held_hit_pace` (Checked (decomp + disasm)).
+        pub fn begin_ticks(v: Variant) -> i32 {
+            (v.start() * TICKS) as i32
+        }
+
+        /// The height `t` frames left (KH1's `+0x404` after this frame's count), while above the hold.
+        pub fn squash_height(v: Variant, t: f32) -> Option<f32> {
+            (t > HOLD).then(|| LOW + (1.0 - LOW) * ((t - HOLD) / v.squash()))
+        }
+
+        /// One frame of the get-up (request 0x67).
+        pub fn getup(h: f32) -> f32 {
+            h + (1.0 - h) * GETUP
+        }
+
+        /// What the KH1 flatten does in one of Re:CoM's flatten-exe calls.
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        pub enum Step {
+            /// Phase 0, above the hold: this height; Re:CoM's phase-0 code not run.
+            Squash(f32),
+            /// Phase 0, the hold reached: height 0.1 and Re:CoM's phase 1 (its timer runs on: KH1's).
+            Hold,
+            /// Phase 1: Re:CoM's (it waits out the timer, then pops to 1.0 and plays its get-up); if it
+            /// went to phase 2, height back to 0.1 (KH1's request 0x67 is only queued that frame).
+            Wait,
+            /// Phase 2 (Re:CoM's get-up motion): Re:CoM's, then the height one get-up frame on.
+            GetUp,
+        }
+
+        /// The step for Re:CoM's phase and timer (ticks).
+        pub fn step(v: Variant, phase: i32, timer: i32) -> Step {
+            match phase {
+                0 => match squash_height(v, timer as f32 / TICKS) {
+                    Some(h) => Step::Squash(h),
+                    None => Step::Hold,
+                },
+                1 => Step::Wait,
+                _ => Step::GetUp,
+            }
+        }
+    }
 }
 
 /// The falling thread's clock (`xm_gravity01.mag` `0x44..`): the release's run counts the first

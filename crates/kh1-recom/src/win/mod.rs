@@ -464,6 +464,20 @@ fn install_magic(base: usize) {
         } else {
             log("magic: the flatten state's begin / end not hooked; a flattened enemy can't be hit (Re:CoM's rule)");
         }
+        // KH1's own hit flatten at Damage = KH1 (`crate::magic::flatten::kh1`): its numbers in Re:CoM's
+        // flatten state's exe. Only with the begin / end wrappers (they arm and drop it).
+        let fe = [hook::Hook { site: &crate::sites::FLATTEN_EXE_HOOK[0], ours: magic::flatten_exe as *const () as usize, original: &magic::ORIG_FLATTEN_EXE }];
+        let checked = crate::sites::FLATTEN_EXE_CHECKED.iter().all(|s| {
+            // SAFETY: a read of the mapped exe's code.
+            unsafe { std::slice::from_raw_parts((base + s.rva as usize) as *const u8, s.expect.len()) == s.expect }
+        });
+        // SAFETY: the target's bytes are checked again inside, before anything is written.
+        if magic::ORIG_FLATTEN_END.load(std::sync::atomic::Ordering::Acquire) != 0 && checked && unsafe { hook::install_all(base, &fe) } {
+            magic::kh1_flatten_on();
+            log("magic: KH1's hit flatten at damage = kh1: KH1 Gravity's flinch becomes Re:CoM's flatten (picker 0xD) with KH1's numbers in its exe 0x140183BA0 (squash 8 / 15 frames, hold 60, get-up +30 % a frame)");
+        } else {
+            log("magic: the flatten state's exe not hooked; at damage = kh1 KH1 Gravity flinches (no flatten)");
+        }
         // SAFETY: branch patches with checked old bytes (code of the mapped exe).
         if unsafe { magic_fx::install(base) } {
             log("magic fx: Re:CoM's battle set (spell effects) in the field at combat = kh1 in Sora's story: field state 1 0x1401AF933 -> 0x140211AA0 then 0x140211960; camp unloads 0x1401A95BD / 0x1401A99F9 keep it");

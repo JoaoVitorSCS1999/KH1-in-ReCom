@@ -1342,13 +1342,181 @@ pub unsafe extern "win64" fn flatten_begin(enemy: usize) {
     }
     type BodiesFn = unsafe extern "win64" fn(usize, i32);
     func::<BodiesFn>(mg::flatten::HURT_ON_RVA)(enemy, -1);
+    // KH1's own hit flatten (Damage = KH1): KH1's timer in Re:CoM's (its phase 0 from KH1's squash).
+    if let Some(v) = kh1_flatten_begins(enemy) {
+        wr(enemy + FLATTEN_TIMER, mg::flatten::kh1::begin_ticks(v));
+        flatten_note(|| format!("flatten on {enemy:#x}: KH1's hit flatten ({v:?}: timer {} frames, squash {} frames, hold 60, then the get-up), hurt bodies kept on", v.start(), v.squash()));
+        return;
+    }
     flatten_note(|| format!("flatten on {enemy:#x}: Re:CoM's Gravity flatten, its hurt bodies kept on (KH1: a flattened enemy stays hittable)"));
+}
+
+/// Re:CoM's flatten state fields its exe reads (`0x140183BA0`): phase `+0x270`, timer `+0x160`
+/// (ticks, counted down by the actor update `0x1401A59A0` before the state step). Checked (decomp).
+const FLATTEN_PHASE: usize = 0x270;
+const FLATTEN_TIMER: usize = 0x160;
+
+/// An enemy KH1's hit flatten owns (Damage = KH1; `crate::magic::flatten::kh1`): its handle, the
+/// variant, and whether the flatten was picked and its begin hasn't run yet.
+struct Kh1Flatten {
+    h: u32,
+    v: mg::flatten::kh1::Variant,
+    pending: bool,
+}
+
+/// At most 32; empty: the exe wrapper is one atomic load per flattened enemy update.
+static KH1_FLATTENS: Mutex<Vec<Kh1Flatten>> = Mutex::new(Vec::new());
+static KH1_FLATTEN_ANY: AtomicBool = AtomicBool::new(false);
+/// The flatten exe's wrapper is in (`win::install`): only then does a KH1 Gravity hit flatten.
+static KH1_FLATTEN_ON: AtomicBool = AtomicBool::new(false);
+
+pub fn kh1_flatten_on() {
+    KH1_FLATTEN_ON.store(true, Ordering::Release);
+}
+
+/// KH1's Gravity hit at Damage = KH1 (`win::attack::spell_hit`, right after Re:CoM's hit handler):
+/// when Re:CoM gave the hit its flinch (its picker's kind-1 answer: the enemy alive, not stopped, no
+/// super armour; its next state `+0x780`), the reaction becomes Re:CoM's own Gravity flatten:
+/// Re:CoM's picker again with its kind 0xD (`0x14017D260`, the handler's last call, case 0xD →
+/// `+0xAC0`), and the enemy is marked for KH1's numbers. What it did, for the hit line.
+pub unsafe fn kh1_flatten_hit(enemy: usize) -> Option<mg::flatten::kh1::Variant> {
+    use crate::guard::{enemy as ge, state_offset};
+    use mg::flatten::kh1;
+    if !KH1_FLATTEN_ON.load(Ordering::Acquire) || !super::battle::kh1_battle() || rd::<i32>(enemy + ge::HP) <= 0 {
+        return None;
+    }
+    if rd::<usize>(enemy + ge::NEXT_STATE) != enemy + state_offset(ge::FLINCH_STATE) {
+        return None;
+    }
+    type PickerFn = unsafe extern "win64" fn(usize, i32);
+    func::<PickerFn>(crate::guard::func::PICKER)(enemy, kh1::PICK_KIND);
+    if rd::<usize>(enemy + ge::NEXT_STATE) != enemy + kh1::STATE {
+        return None;
+    }
+    let mover: usize = rd(enemy + rt::MOVER);
+    let on_floor = mover != 0 && rd::<u32>(mover + MOVER_CONTACT) & FLOOR_CONTACT != 0;
+    let flier = rd::<u64>(enemy + ge::FLAGS) & FLIER != 0;
+    let v = kh1::Variant::of(on_floor, flier);
+    let h: u32 = rd(enemy + 0x20);
+    let Ok(mut g) = KH1_FLATTENS.lock() else { return None };
+    if let Some(e) = g.iter_mut().find(|e| e.h == h) {
+        e.v = v;
+        e.pending = true;
+    } else {
+        if g.len() >= 32 {
+            g.remove(0);
+        }
+        g.push(Kh1Flatten { h, v, pending: true });
+    }
+    KH1_FLATTEN_ANY.store(true, Ordering::Release);
+    Some(v)
+}
+
+/// A mover's contact flags (`+0x120`: bit 0 a floor normal, bit 2 the floor test's; `0x1401D58F0`,
+/// `0x1401D65B0`) and an enemy's flier flag (`+0x260` bit 8: no gravity). Checked (decomp).
+const MOVER_CONTACT: usize = 0x120;
+const FLOOR_CONTACT: u32 = 5;
+const FLIER: u64 = 0x100;
+
+/// At the flatten's begin: the variant when this flatten is KH1's (picked by `kh1_flatten_hit`);
+/// an entry left from an older flatten (Re:CoM's own now) is dropped.
+unsafe fn kh1_flatten_begins(enemy: usize) -> Option<mg::flatten::kh1::Variant> {
+    if !KH1_FLATTEN_ANY.load(Ordering::Acquire) {
+        return None;
+    }
+    let h: u32 = rd(enemy + 0x20);
+    let mut g = KH1_FLATTENS.lock().ok()?;
+    let k = g.iter().position(|e| e.h == h)?;
+    if g[k].pending {
+        g[k].pending = false;
+        return Some(g[k].v);
+    }
+    g.swap_remove(k);
+    KH1_FLATTEN_ANY.store(!g.is_empty(), Ordering::Release);
+    None
+}
+
+/// The KH1 flatten running on this enemy, if any (not one still waiting for its begin).
+unsafe fn kh1_flatten_of(enemy: usize) -> Option<mg::flatten::kh1::Variant> {
+    if !KH1_FLATTEN_ANY.load(Ordering::Acquire) {
+        return None;
+    }
+    let h: u32 = rd(enemy + 0x20);
+    let g = KH1_FLATTENS.lock().ok()?;
+    g.iter().find(|e| e.h == h && !e.pending).map(|e| e.v)
+}
+
+/// At the flatten's end: a KH1 flatten over (one picked again stays, for its next begin).
+unsafe fn kh1_flatten_ends(enemy: usize) {
+    if !KH1_FLATTEN_ANY.load(Ordering::Acquire) {
+        return;
+    }
+    let h: u32 = rd(enemy + 0x20);
+    if let Ok(mut g) = KH1_FLATTENS.lock() {
+        g.retain(|e| e.h != h || e.pending);
+        KH1_FLATTEN_ANY.store(!g.is_empty(), Ordering::Release);
+    }
+}
+
+/// Re:CoM's flatten state's exe (`sites::FLATTEN_EXE_HOOK`), wrapped: for KH1's hit flatten, KH1's
+/// numbers in Re:CoM's phases (`crate::magic::flatten::kh1::step`): phase 0 KH1's squash (Re:CoM's
+/// own squash not run), then 0.1 and Re:CoM's phase 1 (its timer, KH1's, runs out: KH1's 60-frame
+/// hold); Re:CoM's phase 1 end (its 1.0, its get-up motion) with the height kept at 0.1; Re:CoM's
+/// phase 2 with KH1's get-up ease. Every other flatten: Re:CoM's.
+pub static ORIG_FLATTEN_EXE: AtomicUsize = AtomicUsize::new(0);
+pub unsafe extern "win64" fn flatten_exe(enemy: usize) {
+    use mg::flatten::kh1::{self, Step};
+    let Some(v) = kh1_flatten_of(enemy) else {
+        return orig::<StateFn>(&ORIG_FLATTEN_EXE)(enemy);
+    };
+    let phase: i32 = rd(enemy + FLATTEN_PHASE);
+    match kh1::step(v, phase, rd(enemy + FLATTEN_TIMER)) {
+        Step::Squash(y) => set_height(enemy, y),
+        Step::Hold => {
+            set_height(enemy, kh1::LOW);
+            wr(enemy + FLATTEN_PHASE, 1i32);
+        }
+        Step::Wait => {
+            orig::<StateFn>(&ORIG_FLATTEN_EXE)(enemy);
+            if rd::<i32>(enemy + FLATTEN_PHASE) != 1 {
+                set_height(enemy, kh1::LOW);
+                flatten_note(|| format!("flatten on {enemy:#x}: KH1's hold over: Re:CoM's get-up motion, KH1's get-up ease (+30 % a frame)"));
+            }
+        }
+        Step::GetUp => {
+            let y = height(enemy).unwrap_or(kh1::LOW);
+            orig::<StateFn>(&ORIG_FLATTEN_EXE)(enemy);
+            set_height(enemy, kh1::getup(y));
+        }
+    }
+}
+
+/// The enemy's height scale (Re:CoM's scale y, `0x1401A4A20`).
+unsafe fn height(obj: usize) -> Option<f32> {
+    type GetFn = unsafe extern "win64" fn(usize) -> *const [f32; 4];
+    let v = func::<GetFn>(SCALE_GET)(obj);
+    (!v.is_null()).then(|| std::ptr::read_unaligned(v)[1])
+}
+
+/// Its height scale set through Re:CoM's own setter (`0x1401A7050`), as Re:CoM's flatten writes it.
+unsafe fn set_height(obj: usize, y: f32) {
+    type GetFn = unsafe extern "win64" fn(usize) -> *const [f32; 4];
+    type SetFn = unsafe extern "win64" fn(usize, *const Scale);
+    let v = func::<GetFn>(SCALE_GET)(obj);
+    if v.is_null() {
+        return;
+    }
+    let mut v = std::ptr::read_unaligned(v);
+    v[1] = y;
+    let s = Scale(v);
+    func::<SetFn>(SCALE_SET)(obj, &s);
 }
 
 /// Re:CoM's flatten end; in a KH1 battle, a flatten cut short (a hit's reaction took over before
 /// Re:CoM stood it up) springs back KH1's way from where it is.
 pub unsafe extern "win64" fn flatten_end(enemy: usize) {
     orig::<StateFn>(&ORIG_FLATTEN_END)(enemy);
+    kh1_flatten_ends(enemy);
     if !super::battle::kh1_battle() {
         return;
     }

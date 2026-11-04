@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 234: KH1's own hit flatten at Damage = KH1 (KH1's numbers in Re:CoM's own flatten state), version 0.122.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Gravity and Lucky Bounty answers, verbatim "2 yes", on 0.117.0's open question: "KH1's own hit flatten at Damage = KH1"): a Gravity-hit enemy flattens as in KH1.
+
+- **KH1** (Checked (decomp)): reaction kind 8 → `0x1402B7DE0`: on the ground request 0x66, timer `+0x404` = 68; in the air / a special movement movement 0x16 / 0x17, request 0x68, timer 75. `0x1402B7260` each frame: timer − step; above 60 the height `+0x480` = 0.1 + 0.9 × (t − 60) / 8 (ground) or / 15; at or under 60 0.1; at 0 request 0x67 (queued, `0x14029F980`); during 0x67 h += (1 − h) × 0.3; after it +0.05 a frame (`0x140297FE0`). Frame step 1.0 a 60 Hz frame = 50 Re:CoM ticks (`recom-timing.md`).
+- **Change** (`magic::flatten::kh1`, `win::magic::kh1_flatten_hit` / `flatten_exe` / the begin and end wrappers, `win::attack::spell_hit`; new hook `sites::FLATTEN_EXE_HOOK` 6 bytes on Re:CoM's flatten exe `0x140183BA0` (no branch in: exe scan) + `FLATTEN_EXE_CHECKED` its rest): a KH1 Gravity strike at Damage = KH1 that Re:CoM's hit handler gave its flinch (next state `+0x780`) is re-picked with Re:CoM's own picker `0x14017D260(enemy, 0xD)` → Re:CoM's flatten state `+0xAC0` (KH1's damage unchanged). Its begin sets Re:CoM's timer to KH1's 68 / 75 × 50; its exe runs KH1's squash in phase 0, Re:CoM's phase 1 wait as KH1's 60-frame hold, Re:CoM's get-up motion with the height kept at 0.1 then KH1's +30 % a frame; the end springs +0.05 (0.117.0). Hurt bodies stay on (0.117.0): a hit's reaction knocks it out. Ground / air by Re:CoM's floor contact and flier flag. Per frame: one atomic load per flattened enemy update; a KH1 flatten one lookup and one height write. Combat = Re:CoM, Damage = Re:CoM, Riku's story: unchanged.
+- Assumptions: Re:CoM's flinch decision stands for KH1's per-actor reaction rules (bosses Re:CoM flinches flatten); Re:CoM's "off the floor or a flier" for KH1's air / special movements; KH1's queued 0x67 applied by the next frame (±1); Re:CoM's own get-up motion (decision 10). Not carried: KH1's 40-a-frame drop and the hold's pause above the floor (Re:CoM's own gravity in its flatten moves it).
+- Checked: tests (`magic::tests::kh1_flatten_in_recoms_state_is_kh1s_frame_by_frame`: 100 frames against KH1's timeline, both variants; `sites::tests::flatten_sites`), `check_sites_rs.py` (1312 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game; no KH1 trace. Asset step: not needed. Docs: `recom-m7-magic.md` § 7.8 (KH1's own hit flatten at Damage = KH1).
+
+---
+
 ## Stage 233: KH1 Gravity's sphere drawn at Re:CoM's Gravity size (Re:CoM's own growth and draw rule on KH1's radius and frames), version 0.121.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Gravity and Lucky Bounty answers, verbatim "3 make it the size of re:com gravity"): the sphere is drawn at Re:CoM's Gravity size (over 0.115.0's KH1 size); the hit radius stays KH1's.
