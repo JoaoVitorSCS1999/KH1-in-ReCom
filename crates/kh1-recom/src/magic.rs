@@ -878,6 +878,28 @@ pub fn stop_row_bytes(recom: &[u8; 16]) -> [u8; 16] {
 /// Re:CoM's stop kind (`0x14017DC50` case 8 / `0x14017D260` case 8). Checked (decomp).
 pub const RECOM_STOP_KIND: u32 = 8;
 
+/// Re:CoM's field Heartless (`CMapEnemy`, vtable `0x14055ACB0`): its type getter (`+0x28`,
+/// `0x14019D050`) returns 0x1002; a battle enemy's is [`crate::battle::ENEMY_TYPE`] 0x1004. Map
+/// enemies exist only in field rooms (the field's objects are destroyed before the battle room
+/// loads: `docs/recom-battle-entry.md`). Checked (exe + decomp).
+pub const MAP_ENEMY_TYPE: u32 = 0x1002;
+
+/// The kind a KH1 Thunder / Stop strike carries onto a **field Heartless** (owner, 2026-11-04,
+/// "Sleights outside battle": "KH1 Thunder and Stop in the field get Re:CoM's paralyse / freeze too,
+/// instead of starting the battle at once"): its hit handler `0x14019E020` picks its reaction by the
+/// hit's kind (`body+0x80`): Re:CoM's Thunder rows' kinds 0x1C / 0x1D / 0x1E (by level: row 0x24,
+/// 0x2E, 0x2F `+0xB`) → state 5 (paralysed, no battle; a later contact: Re:CoM's halved HP); Stop's 8
+/// → state 6 (frozen, no battle; a later contact: the enemy starts the battle stopped 4 s). Any
+/// other spell keeps its KH1 row's kind (1: Re:CoM's field strike, the battle with first strike).
+/// Battle enemies never get this (their kinds stay the KH1 rows'). Checked (decomp + exe rows).
+pub fn field_kind(s: u8, level: u8, kh1_kind: u32) -> u32 {
+    match s {
+        spell::THUNDER => RECOM_THUNDER_ROWS[level.clamp(1, 3) as usize - 1][0xB] as u32,
+        spell::STOP => RECOM_STOP_KIND,
+        _ => kh1_kind,
+    }
+}
+
 /// KH1's Aero (`xm_air01.mag`, one file for every level; the levels differ in their data: decoded
 /// with `magdis.py`, Checked (files), the syscalls in the KH1 decomp):
 ///

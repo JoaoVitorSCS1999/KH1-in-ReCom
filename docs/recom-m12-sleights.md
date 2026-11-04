@@ -252,6 +252,9 @@ The summons' path (`win::summons`): `player+0x82C` = id, call Sora's vtable `+0x
   `CCardBattle` play path). The played record's `+0x826 / +0x827` (→ `player+0x830 / +0x834`) gate the
   start (`+0x834` < 1) and a re-attack (`+0x830`); a direct start leaves them 0. Checked (decomp).
 - **Battle only**: the Field exe has no case for action 0x16 (`recom-summons.md`). Checked (exe).
+  **Lifted in 0.110.0** (owner, 2026-11-04, "Sleights outside battle"): the Field case 0x16, the
+  list pointers, field packs, the gate's `field` / `packs` and no MP in the field
+  (`recom-field-sleights.md` § Built).
 - **Damage**: mode-1 sleights scale with Sora's attack stat `+0x43C` (KH1 frames keep it; Stage 18 /
   Damage = Re:CoM). At Damage = KH1 there is no KH1 number for these (no KH1 twin).
 - Per kind: attack sleights with a KH1 twin stay KH1's (M9); magic-category and summon-type sleights run

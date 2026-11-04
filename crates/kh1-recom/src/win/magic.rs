@@ -703,11 +703,11 @@ static STOP_CMD: Mutex<Option<u32>> = Mutex::new(None);
 /// first run now, then the MP (two points). The first strike's shot id.
 unsafe fn release_stop(pl: usize, c: &CastStart) -> Option<u32> {
     let h = STOP_CMD.lock().ok().and_then(|mut g| g.take()).unwrap_or(0);
-    let centre = match alive_enemy(h) {
+    let centre = match target_enemy(h) {
         Some(e) => aim_point(e),
         None => sora_pos_dir(pl).0,
     };
-    let enemies: Vec<(u32, [f32; 3])> = lock_on_list(0, false).into_iter().filter_map(|(h, _)| Some((h, position(alive_enemy(h)?)?))).collect();
+    let enemies: Vec<(u32, [f32; 3])> = lock_on_targets(0).into_iter().filter_map(|(h, _)| Some((h, position(target_enemy(h)?)?))).collect();
     let order = mg::thunder_order(centre, enemies);
     let n = order.len();
     let run = ThunderRun { s: mg::Strikes::every(order, mg::stop::INTERVAL), spell: mg::spell::STOP, area: mg::stop::area(c.level), level: c.level, centre, kind: rd(pl + f::KIND), attr: rd(pl + f::ATTR), ap: rd(pl + f::AP) };
@@ -1645,11 +1645,6 @@ unsafe fn release_blizzard(pl: usize, c: &CastStart) -> Option<u32> {
     Some(first)
 }
 
-/// A handle is an alive enemy ([`alive_enemy`]; the special offer's target, M9 stage 9c.1).
-pub(super) unsafe fn is_alive_enemy(h: u32) -> bool {
-    alive_enemy(h).is_some()
-}
-
 /// An alive enemy for a handle: Re:CoM's enemy (type 0x1004) with HP left. KH1's sys 120 / its
 /// actor walk count live actors (`+0x374` bit 0 set, bit 1 clear) not flagged defeated.
 unsafe fn alive_enemy(h: u32) -> Option<usize> {
@@ -1664,6 +1659,38 @@ unsafe fn alive_enemy(h: u32) -> Option<usize> {
     let vt: usize = rd(obj);
     let ty: TypeFn = std::mem::transmute_copy(&rd::<usize>(vt + crate::battle::enemy::VT_TYPE));
     (ty(obj) == crate::battle::ENEMY_TYPE && rd::<i32>(obj + crate::battle::enemy::HP) > 0).then_some(obj)
+}
+
+/// A field Heartless (Re:CoM's `CMapEnemy`, type [`mg::MAP_ENEMY_TYPE`]) Re:CoM's own field lock-on
+/// would take (`0x1401CD810`: type 0x1002 and `+0x154 & 0x10000`). Only field rooms have them.
+unsafe fn is_map_enemy(obj: usize) -> bool {
+    type TypeFn = unsafe extern "win64" fn(usize) -> u32;
+    if obj == 0 {
+        return false;
+    }
+    let vt: usize = rd(obj);
+    let ty: TypeFn = std::mem::transmute_copy(&rd::<usize>(vt + crate::battle::enemy::VT_TYPE));
+    ty(obj) == mg::MAP_ENEMY_TYPE && rd::<u32>(obj + rt::ACTOR_FLAGS) & rt::LOCKABLE != 0
+}
+
+/// A strike target for a handle (owner, 2026-11-04, "Sleights outside battle"): an alive battle
+/// enemy ([`alive_enemy`]), or in a field room a field Heartless ([`is_map_enemy`]): KH1's Thunder,
+/// Stop and specials there strike Re:CoM's field Heartless as its own field attacks do (its hit
+/// handler `0x14019E020` decides by the kind). The two never meet: map enemies are field-only.
+unsafe fn target_enemy(h: u32) -> Option<usize> {
+    if let Some(e) = alive_enemy(h) {
+        return Some(e);
+    }
+    if h == 0 || h as i32 <= 0 {
+        return None;
+    }
+    let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(h);
+    is_map_enemy(obj).then_some(obj)
+}
+
+/// [`target_enemy`] as a test (the specials' targets).
+pub(super) unsafe fn is_target_enemy(h: u32) -> bool {
+    target_enemy(h).is_some()
 }
 
 /// An actor's aim point (vtable `+0x50`, what Re:CoM homes and its Thunder strikes at; KH1's target
@@ -1689,7 +1716,7 @@ unsafe fn position(obj: usize) -> Option<[f32; 3]> {
 /// enemy, and the area centre: its aim point, else Sora's position.
 unsafe fn thunder_command(pl: usize) {
     let h: u32 = rd(pl + f::TARGET);
-    let cmd = match alive_enemy(h) {
+    let cmd = match target_enemy(h) {
         Some(e) => (h, aim_point(e)),
         None => {
             let b: usize = rd(pl + p::BODY);
@@ -1731,7 +1758,7 @@ unsafe fn bodies(enemy: usize) -> Vec<(usize, mg::BodyShape)> {
 /// frames from Sora's frame start ([`strikes_frame`]). The first bolt's id, if one struck.
 unsafe fn release_thunder(pl: usize, c: &CastStart) -> Option<u32> {
     let (h, mut centre) = THUNDER_CMD.lock().ok().and_then(|mut g| g.take()).unwrap_or((0, [0.0; 3]));
-    let target = alive_enemy(h);
+    let target = target_enemy(h);
     if let Some(t) = target {
         centre = aim_point(t);
     }
@@ -1746,7 +1773,7 @@ unsafe fn release_thunder(pl: usize, c: &CastStart) -> Option<u32> {
         }
     }
     .unwrap_or(centre);
-    let enemies: Vec<(u32, [f32; 3])> = lock_on_list(0, false).into_iter().filter_map(|(h, _)| Some((h, position(alive_enemy(h)?)?))).collect();
+    let enemies: Vec<(u32, [f32; 3])> = lock_on_targets(0).into_iter().filter_map(|(h, _)| Some((h, position(target_enemy(h)?)?))).collect();
     let order = mg::thunder_order(from, enemies);
     let n = order.len();
     // Re:CoM's Thunder case's first effect: id 1 at the hand.
@@ -1821,7 +1848,7 @@ unsafe fn strike_step(pl: usize, step: f32, only: Option<usize>) -> Vec<u32> {
             }
             let (centre, area, spell, level) = (run.centre, run.area, run.spell, run.level);
             let hit = run.s.run(if step > 0.0 { step } else { 1.0 }, |h| {
-                let Some(e) = alive_enemy(h) else {
+                let Some(e) = target_enemy(h) else {
                     bolt_line(|| format!("{}{level}: {h:#x} passed over (not alive)", mg::spell::NAMES.get(spell as usize).copied().unwrap_or("?")));
                     return false;
                 };
@@ -1839,7 +1866,11 @@ unsafe fn strike_step(pl: usize, step: f32, only: Option<usize>) -> Vec<u32> {
     }
     let mut ids = Vec::new();
     for (h, sp, level, kind, attr, ap, n) in due {
-        let Some(e) = alive_enemy(h) else { continue };
+        let Some(e) = target_enemy(h) else { continue };
+        // Owner (2026-11-04, "Sleights outside battle"): a field Heartless takes Re:CoM's own Thunder /
+        // Stop kind, its handler's paralyse / freeze (`crate::magic::field_kind`); battle enemies the
+        // KH1 row's.
+        let kind = if is_map_enemy(e) { mg::field_kind(sp, level, kind) } else { kind };
         let (id, what) = if sp == mg::spell::STOP { (stop_strike(pl, e, h, level, kind, attr, ap), "stop") } else { (strike(pl, e, h, level, kind, attr, ap), "bolt") };
         event(format!("{what} {n} e{h:x}{}", id.map_or(" -".into(), |i| format!(" shot {i}"))));
         ids.extend(id);
@@ -2012,6 +2043,17 @@ unsafe fn lock_on_enemies(skip: usize) -> Vec<(u32, [f32; 3])> {
 /// Re:CoM's lock-on list's enemies (type 0x1004, HP left), with or without its lock-on flag
 /// (`+0x154 & 0x10000`: Thunder's area test reads the bodies instead, as KH1's sys 90 does).
 pub(super) unsafe fn lock_on_list(skip: usize, lockable_only: bool) -> Vec<(u32, [f32; 3])> {
+    lock_on_walk(skip, lockable_only, false)
+}
+
+/// [`lock_on_list`]'s enemies and (owner, 2026-11-04, "Sleights outside battle") in a field room the
+/// field Heartless Re:CoM's field lock-on takes ([`is_map_enemy`]): the strike lists of KH1's Thunder
+/// and Stop and Ragnarok's shots.
+pub(super) unsafe fn lock_on_targets(skip: usize) -> Vec<(u32, [f32; 3])> {
+    lock_on_walk(skip, false, true)
+}
+
+unsafe fn lock_on_walk(skip: usize, lockable_only: bool, map_too: bool) -> Vec<(u32, [f32; 3])> {
     type TypeFn = unsafe extern "win64" fn(usize) -> u32;
     let mut out = Vec::new();
     let m: usize = rd(va(base(), LOCK_ON_MANAGER));
@@ -2031,7 +2073,8 @@ pub(super) unsafe fn lock_on_list(skip: usize, lockable_only: bool) -> Vec<(u32,
             let vt: usize = rd(obj);
             let ty: TypeFn = std::mem::transmute_copy(&rd::<usize>(vt + crate::battle::enemy::VT_TYPE));
             let mover: usize = rd(obj + rt::MOVER);
-            if ty(obj) == crate::battle::ENEMY_TYPE && rd::<i32>(obj + crate::battle::enemy::HP) > 0 && mover != 0 {
+            let battle_enemy = ty(obj) == crate::battle::ENEMY_TYPE && rd::<i32>(obj + crate::battle::enemy::HP) > 0;
+            if (battle_enemy || (map_too && is_map_enemy(obj))) && mover != 0 {
                 let p = rd_vec(mover + rt::POSITION);
                 out.push((h, [p.x, p.y, p.z]));
             }

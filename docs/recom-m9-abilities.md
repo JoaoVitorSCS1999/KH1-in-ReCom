@@ -778,6 +778,9 @@ xl clips are converted at 60 fps. Checked (decomp, earlier stages).
   (`player+0x390`, the field / battle test Re:CoM's own attack route uses), and `start_special`
   refuses outside it. The Field exe is Re:CoM's again (no case, no cave: `0x1401FA648` /
   `0x1401FB7B2` untouched). Assumption: `+0x390` ≠ 0 exactly when the Battle exe runs Sora.
+  **Lifted in 0.110.0** (owner, 2026-11-04, "Sleights outside battle"): the specials run in field
+  rooms too, free, through the field sleights' Field case 0x16 (`docs/recom-field-sleights.md` §
+  Built).
 - **Each frame**: Re:CoM's Battle exe calls `exeStockSkill` through Sora's vtable; our wrapper runs KH1's frame and then Re:CoM's own `procAttackCollision` on the
   row with the motion's frame, as Re:CoM's own exes do. Not a KH1 special: Re:CoM's exeStockSkill
   (its sleight cards, untouched).
@@ -823,7 +826,7 @@ xl clips are converted at 60 fps. Checked (decomp, earlier stages).
 | site | bytes | use |
 |---|---|---|
 | `exeStockSkill` `0x140218950` | `48 8B C4 48 89 58 10 48 89 70 18` | hook (`SPECIAL_HOOKS`) |
-| Field table entry `0x1401FA648`, cave `0x1401FB7B2` | `99 A5 1F 00 99 A5 1F 00`, `CC` × 14 | **not patched any more** (battle only; Re:CoM's bytes, re-read) |
+| Field table entry `0x1401FA648`, cave `0x1401FB7B2` | `99 A5 1F 00 99 A5 1F 00`, `CC` × 14 | not patched in 9c.1's battle-only build; **patched again in 0.110.0** by the field sleights (`sites::FIELD_SLEIGHT_DATA`) |
 | `initStockSkill` `0x140220DF0` | 40 bytes to `BA 16 00` | checked (its writes copied) |
 | Battle case `0x1401F9B5E` | `48 8B 07 48 8B CF FF 90 40 01 00 00 E9 5A 01 00 00` | checked |
 | `procAttackCollision` `0x1401F5DC0` | `40 53 48 83 EC 30 48 8B D9 48 8B 89 C8 03 00 00 0F B6 41 04` | called |

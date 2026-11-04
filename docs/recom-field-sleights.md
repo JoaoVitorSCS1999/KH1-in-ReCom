@@ -1,4 +1,4 @@
-# Sleights outside battle (research, no code)
+# Sleights outside battle (research; option (a) built in 0.110.0: § Built)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Customize page and long names), verbatim:
 "lets sora use sleights outside of battle". Context: the field's SHORT CUT panel shows a bound
@@ -38,7 +38,7 @@ decomp this session; **Checked (exe)** = bytes / tables read from `recomsteam.ex
 | **Battle exe cases**: 1–4, 6–9, 0xB (card attack), 0xC/0xD, 0xE, 0x12 (reload), **0x13 magic → vt `+0x150`**, **0x16 sleight → vt `+0x140`**, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C (win), 0x1D, 0x20–0x24. | `0x1401F9840` | Checked (decomp) |
 | **Field exe cases**: 1–4, 0x1F, 5–9, **0xA (field swing)**, 0xC/0xD, 0x10, 0x11, 0x14, 0x15, 0x18, 0x1D, 0x1E. Its table `0x1401FA5F4` (index = action − 1, up to 0x1F) sends everything else to the default `0x1401FA599`. | switch `0x1401FA1B0` | Checked (exe: table dumped) |
 | **Action 0x16's entry is `0x1401FA648` → `0x1401FA599`** (the default), so the Field exe never runs `exeStockSkill`. Re:CoM needs no case: a sleight comes only from a card play, and card plays exist only in card battles (`recom-player.md` § Card path). | `0x1401FA648` = `99 A5 1F 00` | Checked (exe); "only from a card play": Checked (decomp) for the request path, Assumption that nothing else sets 0x16 |
-| Our patches already in this table: action **0x13** → cave `0x1401FB0E1` (magic, `crate::magic::field_case`); action **0xE** → cave `0x1401FAEA2` (items, `crate::items::field_case`). A free 15-byte int3 cave follows the Field-exe area at **`0x1401FA6C1`** (no site of ours uses it: grep). | | Checked (exe + code) |
+| Our patches already in this table: action **0x13** → cave `0x1401FB0E1` (magic, `crate::magic::field_case`); action **0xE** → cave `0x1401FAEA2` (items, `crate::items::field_case`). A free 15-byte int3 cave follows the Field-exe area at **`0x1401FA6C1`** (no site of ours uses it: grep). **Correction (0.110.0)**: the Attack's Battle case uses it (`ATTACK_DATA`); the build uses `0x1401FB7B2` (§ Built). | | Checked (exe + code) |
 | Sora's sleight functions: start `+0x130` = `0x1402247A0`, `initStockSkill` `+0x138` = `0x140220DF0`, `exeStockSkill` `+0x140` = `0x140218950`. | vtable | Checked (exe) |
 | Built with the player in **both** room kinds (`0x1401F42B0`): camera `+0x3D8` (`CPlayerCamera`), target cursor `+0x3F8`, gauge `+0x3E0`. The escape gauge `+0x400` exists **only in battle**, and `exeStockSkill` never reads it. | `0x1401F42B0` | Checked (decomp) |
 | `PLM::CPlayerManager` (`player+0x3B8`, the sleight-resource owner): built for the field too (`CGameSubField`'s state at `0x1401AFDA0`) as well as for battle (`0x1401AEBF0`). | `0x14020E1E0` | Checked (decomp) |
@@ -297,6 +297,133 @@ come later on top of it if the cut feels bad in play.
     (owner's call).
   - KH1 itself has no field/battle split, so KH1 gives no answer.
 
+## Built (0.110.0, Stage 222): option (a), both steps at once
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Sleights outside battle): **(a) Plain field
+strike**; **free in the field**; **Re:CoM's special field reactions kept, for sleights and spells**
+(KH1 Thunder and Stop in the field get Re:CoM's paralyse / freeze); **which**: all sleights, the KH1
+specials (this lifts "only in battle") and the LV3 summons. Combat = KH1 in Sora's story only.
+Code: `crates/kh1-recom/src/field_sleights.rs` (pure, tested), `src/win/field_sleights.rs`, the gate
+in `sleights.rs` / `summons.rs` / `command_menu.rs`, the starts in `win/summons.rs` /
+`win/specials.rs`, the field strikes in `win/magic.rs`. Shipped as **one version** (the 9 pack-less
+sleights and the pack ones together): the pack part only acts when a pack sleight is chosen in the
+field, and without its hook the pack sleights simply stay greyed.
+
+### What runs
+
+| piece | what | where | tag |
+|---|---|---|---|
+| **Field case 0x16** | The Field exe's table entry `0x1401FA648` → a 13-byte stub at **`0x1401FB7B2`**: `mov rcx,rbx; call 0x140218950 (exeStockSkill); jmp 0x1401FA599`. The cave the research named, `0x1401FA6C1`, **is not free**: the Attack's Battle case (`attack::battle_case`, `ATTACK_DATA`) has used it since M4 (the research's grep missed `ATTACK_DATA`'s entry). `0x1401FB7B2` (14 × int3 after `pop r14; ret`, before `0x1401FB7C0`; no branch into it: exe scan) was M9 9c.1's first Field case, unpatched since 9c.1's "Only in battle". The direct call reaches our `exeStockSkill` hook (Re:CoM's sleights pass through; a KH1 special runs its KH1 frame). Patched at start, as the magic / items cases; nothing sets 0x16 in the field at Combat = Re:CoM. | `sites::FIELD_SLEIGHT_DATA` | Checked (exe + decomp) |
+| **List pointers** | At each field start (`win::field_sleights::prepare`, from the summons' / Sleights list's / specials' start): `0x1402A43E0(1, "BattleCardList", 0)` → `0x1402A49C0` into `*0x14087A808`, the same for `"StockSkillList"` into `*0x14087A810` (the `CCardBattle` ctor's own two calls, `0x140160830..`). Written every field start (a stale pointer after a battle gets a fresh value; the next battle's ctor writes them again). Not found: the start is refused (logged). BattleCardList too: the summon actors' power pick `0x140226BB0` and the magic sleights' shot code read it (no reader tests either for null). | `field_sleights::lists` | Checked (decomp: every reader); that both lists stay loaded in field rooms: **Assumption** (the log says if not) |
+| **Packs in field rooms** | A wrapper on the PLM init `0x140210100` (13 bytes checked; once per PLM = once per room build): after Re:CoM's init, for a PLM whose `+0x88 & 1` Re:CoM left clear, at Combat = KH1 in Sora's story, where the field's own ring condition holds (world ≠ 10, not rooms 2000–2999: `0x1402339C0(1)`, `0x140235240()`, as `0x1401AF841..`) and the ring exists (`*0x14087B6C0 > 0`): the battle branch's writes (`+0x88 \|= 1`, `+0x98` ring, `+0xA0` ring + `*0x1407C7AE8`, `+0xA8` size, each slot's `+8` = `+0xA0`). Not copied: `+0x58` = `0x1401607A0()` (it **builds a `CCardBattle`** if none; nothing reads PLM `+0x58`) and `0x14087B6B0` = 1 (read only by `0x14020E6F0`, a battle start position rule). | `field_sleights::packs`, `sites::FIELD_SLEIGHT_HOOKS` / `_CHECKED` | Checked (decomp + disasm) |
+| **Gate** | `summons::Gate` gains `field` (a field room where sleights run: the case in, the main player the KH1 `CPlayerSora`, `player+0x390` = 0) and `packs` (this room's PLM `+0x88 & 1`). `field_sleights::room_ok`: battle, or a field room for the 27 sleight abilities and the listed specials (not friend sleights: `exeStockSkill`'s friend branch reads `player+0x3E8` without a null test), a pack one only with `packs`. Summons: field + packs (every LV3 has a pack). **No MP in a field room** (`field_sleights::free`): the lists, the shortcuts, the special offer and the starts skip it. | `sleights::usable` / `special_usable`, `summons::usable`, `win::field_sleights::gate` | Checked (tests) |
+| **Which need a pack** | `field_sleights::pack` = `0x14020F720`'s switch. Without packs (100 Acre Wood, rooms 2000–2999): Fire / Blizzard / Thunder / Reflect Raid, Judgment, Homing Blizzara, Warpinator, Warp, Teleport and Strike Raid; greyed there: the other 18 sleights, Sonic Blade (pack 2), Ars Arcanum (3), Ragnarok (4), every summon. | | Checked (decomp) |
+| **Specials** | The offer (Triangle) and the Sleights list's specials: a field room too; their target may be a field Heartless (`win::magic::is_target_enemy`: Re:CoM's `CMapEnemy`, type 0x1002, lockable `+0x154 & 0x10000`, as its field lock-on `0x1401CD810` takes them); free. `start_special` through the same room check; Ragnarok's shots home on field Heartless too. | `win::command_menu`, `win::specials` | Checked (code) |
+| **Preloads** | The Summon / Sleights list's cursor preload and the shortcut list's: in battle, or a field room whose PLM loads packs (never a load where Re:CoM's step can't finish it). The "already asked" mark is the room's PLM. | `win::summons::preload_room` | Checked (code) |
+| **Running marks** | `sleight_running` and the summon's `out` no longer need the battle room (action 0x16, the player). At each battle start (the battle manager ctor's existing wrapper) the specials' running player and the summons' / Sleights list's marks are dropped. | | Checked (code) |
+
+### What a field hit does (all Re:CoM's)
+
+- A sleight's, special's or summon's hit on a field Heartless goes through Re:CoM's own collision,
+  and its handler `0x14019E020` decides by the hit's kind (§ 4): most give the field strike (pause,
+  then the battle with the first-strike bonus); Thunder Raid (kind 0x1D) paralyses; Teleport (8)
+  freezes. Nothing of ours in it.
+- **KH1 Thunder and Stop in the field** (owner: Re:CoM's paralyse / freeze, "instead of starting the
+  battle at once"). Finding: **before 0.110.0 they did not touch field Heartless at all**. Their
+  strike lists and targets took only Re:CoM's battle enemies (type 0x1004 with HP,
+  `win::magic::alive_enemy` / `lock_on_list`); a field Heartless's type is **0x1002**
+  (`0x14019D050`, Checked (exe)), and the bolts' and Stop shots' own collision is held off (their one
+  hit is our direct strike). So nothing started a battle from them; Fire, Blizzard and Aero did
+  (their shots collide through Re:CoM's pass with the KH1 rows' kind 1). Built: in a field room
+  their targets and strike lists also take field Heartless (`target_enemy`, `lock_on_targets`), each
+  struck through Re:CoM's contact and apply (`strike_body`, the battle path) with **Re:CoM's own kind**
+  (`crate::magic::field_kind`): Thunder / Thundara / Thundaga the Re:CoM Thunder rows' 0x1C / 0x1D /
+  0x1E (→ state 5, paralysed, no battle), Stop's 8 (→ state 6, frozen, no battle). Battle enemies keep
+  the KH1 rows' kinds (map enemies exist only in field rooms). Checked (decomp + exe rows + code); in
+  game: not seen.
+- Found, not changed (not asked): **KH1 Gravity in the field hits nothing either** (the same
+  battle-only lists). Re:CoM's Gravity kind 0xD would be the plain field strike (state 4).
+
+### The battle start cutting a sleight
+
+- **The room dim is cleared by Re:CoM itself.** The encounter sends the field Sora to its Wait state
+  (`0x1401EA290`: `+0x418 |= 0x1101`, player state 2; the action stays 0x16), then the field is torn
+  down. Re:CoM's player dtor `0x1401E4EB0` has a dim exit (`0x1401E51AD`): with `+0x418` bit 31 set it
+  clears the bit and fades colour slot 0 (mask 0x1808) back to white **in 0 frames**
+  (`0x140232170(0x1808, 0.0, white, 0, 0)`). Checked (decomp + exe; site "player dtor dim exit"). No
+  fix needed; nothing of ours. (The colour slots are global and survive scenes, `0x14029D4B0` /
+  `0x140231CF0`; `CGameMain`'s main state 6 `0x1401A9FC0`, the one the field-running state 5 switches
+  to, does not reset them itself, unlike state 7 `0x1401ACAA0`. Checked (decomp); that state 6 is the
+  battle entry's path: **Assumption**.)
+- **The sleight's i-frames end**: Re:CoM's protection bits (`+0x418` bits 0, 0x1000, …) are the field
+  player's, which is destroyed; the battle builds a new player. Ours: the dim shield is battle-only
+  and per player and action; the summon invincibility per player and action 0x16; and the battle
+  start drops our running marks (above). Checked (code); that the field player's dtor runs before
+  the battle's player exists: **Assumption** (`recom-battle-entry.md`: the battle room loads after
+  the field's objects are destroyed).
+- The cut's log line: `field sleights: <name> (<id>): cut by the battle start …` with slot 0's mask
+  at the battle start (0 = back to white).
+
+### Summons, Idyll Romp and Cross-slash+ in the field
+
+Built (free, where the packs load). Static scan of the summon code (`0x140226000..0x14022F000`):
+
+- the list pointers (`0x140226BB0`: both lists, no null test): filled at the field start;
+- `CCardBattle` uses: through `0x14015D8A0` (null-tested: in the field the summon's damage message
+  is simply not sent; field Heartless take no damage anyway) and the task getter `0x1402AD300(0x1B)`
+  (null-tested);
+- the PLM and player globals (null-tested); targets through Re:CoM's lock-on pick `0x1401CDB90`
+  (no type filter: field Heartless count);
+- `0x14022EE30` reads the `CCardBattle` task (`0x1402AD300(0x16)`) without a null test, but it is a
+  state of the card-prize object (`0x14022F7E0`, set up from `0x1401682D0`), not a summon's.
+
+No blocker found. **Not read**: each summon's whole state code (their camera, Bambi's and Tinker
+Bell's own targets): **Assumption** that they run in a field room as in battle. To test first.
+
+### Per frame
+
+- The menu's build (already per frame): `win::field_sleights::gate` (one atomic load; in a field
+  room the KH1-Sora test and the PLM's flag: about five loads), the preload's room mark (one swap).
+  Not measured.
+- The PLM wrapper: once per room build. The list fill: once per field start. The stub: only during
+  action 0x16 in the field (Re:CoM's own exe).
+
+### Sites (bytes re-read from `recomsteam.exe`, `check_sites_rs.py`: 1267 sites, 0 mismatches)
+
+| site | bytes | use |
+|---|---|---|
+| Field table entry `0x1401FA648` | `99 A5 1F 00 99 A5 1F 00` | patched (→ `0x1FB7B2`) |
+| cave `0x1401FB7B2` | `CC` × 14 | patched (the stub) |
+| PLM init `0x140210100` | `48 89 5C 24 18 56 57 41 56 48 83 EC 20` | hook (no branch into it: the scan's one hit, `0x14020F106`, is the immediate of `or [rcx+0x88],0x1000`) |
+| lookup `0x1402A43E0`, data `0x1402A49C0` | 16 / 15 bytes | called |
+| `CCardBattle` lookups `0x140160830` | 25 bytes | checked (the calls we repeat) |
+| room test `0x140235240`; field ring allocation `0x1401AF841` | 20 / 31 bytes | called / checked (its condition) |
+| PLM init ring writes `0x1402103E6` | 39 bytes | checked (the writes we repeat) |
+| player dtor dim exit `0x1401E51AD` | 57 bytes | relied on |
+| map enemy type `0x14019D050` | `B8 02 10 00 00 C3` | checked (the field Heartless' type) |
+| also: current world `0x1402339C0`, exeStockSkill `0x140218950`, the Field exe's switch `0x1401FA1B0` and default `0x1401FA599` | other lists' | checked again at install |
+
+### Risks
+
+- **A pack queued when the battle starts** (a pack sleight chosen in the field, still loading, and a
+  field Heartless touches Sora): the field PLM's dtor releases only loaded packs (state 2); the
+  queued file load and the ring then follow Re:CoM's teardown. Re:CoM's battles end the same way with
+  a stock's preload in flight. **Assumption**: the scene change waits for the loader (the field
+  states poll its idle test `0x14023CA80`).
+- **The camp opened mid-sleight**: Re:CoM's camp gate (`0x1401A96C0` → `0x1401AAA90`) reads no player
+  action (Checked (decomp)), so Start opens the camp during a field sleight, as during a field swing
+  or a KH1 cast. Not tried.
+- **Dashing sleights and specials touching first**: a field Heartless's contact starts a plain battle
+  (type 0, no first-strike bonus) whenever pause mode 4 is off (§ 4).
+- The sleight use counter (`0x14020E590`) counts field uses; Re:CoM's field-strike counter (trophy
+  0x28) counts sleight strikes.
+- A Combat switch in the camp applies to the packs at the next room build (the PLM is built with the
+  room): switching to KH1 inside a room leaves its pack sleights greyed until the next room.
+- Summons: § above (static scan only).
+- For the merge (`wt-cmd`'s Party list): friend sleights must not run in the field
+  (`field_sleights::in_field` says no; a Party start should go through `win::field_sleights::start_room`
+  or stay battle-only).
+
 ## 1:1 checks
 
 - **Checked**:
@@ -312,3 +439,7 @@ come later on top of it if the cut feels bad in play.
   - the field colour slot after a cut sleight;
   - KH1's battle-mode rule (taken from `recom-summons.md`, not re-read).
 - **No KH1 numbers** are involved: the sleights stay Re:CoM's own (owner's M12 decisions).
+- 0.110.0 (§ Built): Checked (decomp + exe) every address it patches, calls or relies on; tests for
+  the stub, the pack table, the room / MP gate, the field kinds and the menu; the Windows build.
+  **Not checked in game**: anything (no field sleight, field Thunder / Stop on a field Heartless, or
+  cut sleight seen yet).

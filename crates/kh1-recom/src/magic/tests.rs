@@ -707,3 +707,20 @@ fn strike_contact_finite_points() {
     assert!(!strike_contact::finite([f32::NAN, 0.0, 0.0]));
     assert!(!strike_contact::finite([0.0, f32::NEG_INFINITY, 0.0]));
 }
+
+/// Owner (2026-11-04, "Sleights outside battle"): KH1 Thunder and Stop on a field Heartless carry
+/// Re:CoM's own kinds, which its handler `0x14019E020` turns into its paralyse (0x1C..0x1E → state 5)
+/// and freeze (8 → state 6); other spells keep their KH1 row's kind 1 (the field strike).
+#[test]
+fn field_heartless_get_recoms_thunder_and_stop_kinds() {
+    assert_eq!([1u8, 2, 3].map(|lv| field_kind(spell::THUNDER, lv, 1)), [0x1C, 0x1D, 0x1E]);
+    assert_eq!(field_kind(spell::THUNDER, 0, 1), 0x1C, "a level outside 1..=3 clamps");
+    assert_eq!([1u8, 2, 3].map(|lv| field_kind(spell::STOP, lv, 8)), [8, 8, 8]);
+    for s in [spell::FIRE, spell::BLIZZARD, spell::GRAVITY, spell::AERO] {
+        assert_eq!(field_kind(s, 2, 1), 1);
+    }
+    // The KH1 Thunder rows themselves (battle) keep kind 1.
+    assert_eq!(thunder_row_bytes(&RECOM_THUNDER_ROWS[1])[0xB], 1);
+    assert_eq!(MAP_ENEMY_TYPE, 0x1002);
+    assert_ne!(MAP_ENEMY_TYPE, crate::battle::ENEMY_TYPE);
+}

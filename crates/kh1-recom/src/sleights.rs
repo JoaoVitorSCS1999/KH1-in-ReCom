@@ -174,14 +174,22 @@ pub fn air_start(id: u16) -> bool {
 /// KH1's usable test for sleight `id` (the summons' gate; `crate::summons::Gate`'s `out` = any
 /// Re:CoM sleight running): on the ground, or (an [`AIR_START`] sleight) in a KH1 air state that
 /// lets a command start (`Gate::air`); Re:CoM's start then picks its air version itself.
+///
+/// Outside battle (owner, 2026-11-04, "Sleights outside battle"): a field room too
+/// (`crate::field_sleights::room_ok`: the pack ones only where Re:CoM's packs load), and free there.
 pub fn usable(g: &crate::summons::Gate, id: u16) -> bool {
-    g.battle && (g.ground || (g.air && air_start(id))) && !g.out && pay_points(id, g.mp).is_some()
+    crate::field_sleights::room_ok(g, id)
+        && (g.ground || (g.air && air_start(id)))
+        && !g.out
+        && (crate::field_sleights::free(g) || pay_points(id, g.mp).is_some())
 }
 
-/// A listed special's usable test (M12 step 7): battle, on the ground, nothing running, and its own
-/// prompt's offer (`offered`: the bit of its `crate::specials` index, `0x14028D0F0`'s score 2).
+/// A listed special's usable test (M12 step 7): battle (or, owner 2026-11-04, a field room:
+/// `crate::field_sleights::room_ok`), on the ground, nothing running, and its own prompt's offer
+/// (`offered`: the bit of its `crate::specials` index, `0x14028D0F0`'s score 2; its MP free in the
+/// field, the caller's).
 pub fn special_usable(g: &crate::summons::Gate, id: u16, offered: u8) -> bool {
-    special_index(id).is_some_and(|i| g.battle && g.ground && !g.out && offered & (1 << i) != 0)
+    special_index(id).is_some_and(|i| crate::field_sleights::room_ok(g, id) && g.ground && !g.out && offered & (1 << i) != 0)
 }
 
 /// Re:CoM's hit kinds (the hurt body's `+0x80`) whose value isn't damage: Stop's ticks (8), Gravity's
@@ -291,7 +299,7 @@ mod tests {
 
     #[test]
     fn usable_is_the_summons_gate_with_the_sleights_mp() {
-        let g = Gate { battle: true, ground: true, air: false, mp: 2, out: false };
+        let g = Gate { battle: true, ground: true, air: false, mp: 2, out: false, ..Default::default() };
         assert!(usable(&g, s::FIRE_RAID));
         assert!(!usable(&g, s::HOLY));
         assert!(usable(&g, s::IDYLL_ROMP));
@@ -301,13 +309,37 @@ mod tests {
         assert!(!usable(&Gate { mp: 0, ..g }, s::IDYLL_ROMP));
     }
 
+    /// Owner (2026-11-04, "Sleights outside battle"): every sleight in a field room, free; the 18
+    /// pack ones only where Re:CoM's packs load; the KH1 specials as their prompt.
+    #[test]
+    fn sleights_in_the_field_are_free() {
+        let f = Gate { field: true, packs: true, ground: true, mp: 0, ..Default::default() };
+        for id in ab::SLEIGHTS.filter_map(ab::sleight_of) {
+            assert!(usable(&f, id), "{}: free in the field", name(id));
+        }
+        let none = Gate { packs: false, ..f };
+        let ok: Vec<&str> = ab::SLEIGHTS.filter_map(ab::sleight_of).filter(|&id| usable(&none, id)).map(name).collect();
+        assert_eq!(ok.len(), 9, "without packs only the 9 pack-less: {ok:?}");
+        assert!(!usable(&Gate { out: true, ..f }, s::FIRE_RAID));
+        assert!(!usable(&Gate { ground: false, ..f }, s::FIRE_RAID));
+        assert!(usable(&Gate { ground: false, air: true, ..f }, 0x24), "Re:CoM's air start in the field too");
+        // In battle the MP rule stays (0 MP: no).
+        assert!(!usable(&Gate { battle: true, ..f }, s::FIRE_RAID));
+        // The specials: their prompt's offer (MP free in the field: the caller's score).
+        let bit = 1 << crate::specials::STRIKE_RAID;
+        assert!(special_usable(&f, s::STRIKE_RAID, bit));
+        assert!(special_usable(&none, s::STRIKE_RAID, bit), "Strike Raid has no pack");
+        assert!(!special_usable(&none, s::SONIC_BLADE, 1 << crate::specials::SONIC_BLADE), "Sonic Blade's pack 11009");
+        assert!(!special_usable(&Gate { field: false, ..f }, s::STRIKE_RAID, bit));
+    }
+
     /// Owner (2026-11-03, "Sleights menu follow-ups"): Re:CoM's air-start sleights usable mid-air,
     /// the rest ground-only; exactly the ids `initStockSkill` gives an air version.
     #[test]
     fn air_start_sleights_are_recoms_seven() {
         let names: Vec<&str> = AIR_START.iter().map(|&id| name(id)).collect();
         assert_eq!(names, ["Homing Blizzara", "Warpinator", "Warp", "Bind", "Confuse", "Terror", "Teleport"]);
-        let air = Gate { battle: true, ground: false, air: true, mp: 3, out: false };
+        let air = Gate { battle: true, ground: false, air: true, mp: 3, out: false, ..Default::default() };
         for id in ab::SLEIGHTS.filter_map(ab::sleight_of) {
             assert_eq!(usable(&air, id), air_start(id), "{}", name(id));
             // On the ground every one is usable as before.
@@ -363,7 +395,7 @@ mod tests {
         assert_eq!(word(s::STRIKE_RAID), 338);
         assert_eq!(cost(s::STRIKE_RAID), None, "its MP is KH1's (the special's own)");
         assert_eq!(list(&[s::HOLY, s::STRIKE_RAID, s::FIRE_RAID]), vec![s::STRIKE_RAID, s::FIRE_RAID, s::HOLY]);
-        let g = Gate { battle: true, ground: true, air: false, mp: 0, out: false };
+        let g = Gate { battle: true, ground: true, air: false, mp: 0, out: false, ..Default::default() };
         let bit = 1 << crate::specials::STRIKE_RAID;
         assert!(special_usable(&g, s::STRIKE_RAID, bit));
         assert!(!special_usable(&g, s::STRIKE_RAID, 0), "its prompt wouldn't offer it");
@@ -404,7 +436,7 @@ mod tests {
             list(&[s::RAGNAROK, s::HOLY, s::SONIC_BLADE, s::ARS_ARCANUM, s::STRIKE_RAID]),
             vec![s::STRIKE_RAID, s::SONIC_BLADE, s::ARS_ARCANUM, s::RAGNAROK, s::HOLY]
         );
-        let g = Gate { battle: true, ground: true, air: false, mp: 0, out: false };
+        let g = Gate { battle: true, ground: true, air: false, mp: 0, out: false, ..Default::default() };
         let bit = 1 << SONIC_BLADE;
         assert!(special_usable(&g, s::SONIC_BLADE, bit));
         assert!(!special_usable(&g, s::SONIC_BLADE, 0), "its prompt wouldn't offer it");

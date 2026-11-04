@@ -80,6 +80,7 @@ pub mod fx;
 pub mod enemy_skills;
 pub mod deck;
 pub mod drops;
+pub mod field_sleights;
 pub mod fliers;
 pub mod ground;
 pub mod gimmick;

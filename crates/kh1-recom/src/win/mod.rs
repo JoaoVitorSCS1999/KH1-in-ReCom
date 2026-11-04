@@ -12,6 +12,7 @@ mod deck;
 mod drops;
 mod effects;
 mod fx;
+mod field_sleights;
 mod gimmick;
 mod guard;
 mod held;
@@ -407,6 +408,7 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         install_gimmick(base);
         install_unlocks(base);
         install_summons(base);
+        install_field_sleights(base);
         // M11 (the Neoshadow's grab): Sora's held reaction, in the damage-check wrapper above.
         // SAFETY: reads of the mapped exe; the data patch's old bytes are checked inside.
         unsafe { held::install(base) };
@@ -603,6 +605,21 @@ fn install_summons(base: usize) {
         if !unlocks::installed() {
             log("summons: the unlocks wrapper is not in: summons learned only at a save's first read");
         }
+    }
+}
+
+/// Sleights outside battle (owner, 2026-11-04, option (a); `field_sleights`): the Field exe's case for
+/// action 0x16 and the PLM init wrapper (packs in field rooms). Needs the command menu (its lists and
+/// shortcuts start them) and the summons' start (Re:CoM's sleight start through Sora's vtable).
+fn install_field_sleights(base: usize) {
+    if !command_menu::installed() || !summons::installed() {
+        log("field sleights: no KH1 command menu or summons' start; sleights stay battle-only");
+        return;
+    }
+    // SAFETY: reads of the mapped exe; data patches with checked old values; the hook's target
+    // bytes are checked again inside, before anything is written.
+    if unsafe { field_sleights::install(base) } {
+        log(&field_sleights::start_line());
     }
 }
 

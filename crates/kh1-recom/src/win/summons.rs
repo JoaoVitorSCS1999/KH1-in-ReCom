@@ -4,7 +4,8 @@
 //!   (from the request-bits wrapper, where Re:CoM's own `0x1401F8150` starts a played sleight)
 //!   calls [`start`] the same frame, as KH1's command step runs `0x140289210` the frame it is
 //!   issued.
-//! - **The start** ([`start`]): battle only; a live swing's weapon volume ends (as the specials
+//! - **The start** ([`start`]): battle, or (owner, 2026-11-04, "Sleights outside battle") a field
+//!   room where its pack loads, free there (`win::field_sleights::start_room`); a live swing's weapon volume ends (as the specials
 //!   do); `player+0x82C` = the summon's LV3 sleight id; then **Re:CoM's own sleight start**, Sora's
 //!   vtable `+0x130` (`0x1402247A0`: its use counter, `initStockSkill`, `+0x838` = 10). Re:CoM then
 //!   runs everything: its tint and "summon" effect, its resource wait (motion 0x2E), the summon
@@ -145,7 +146,7 @@ pub fn installed() -> bool {
 pub fn start_line() -> String {
     let t: Vec<String> = sm::ALL.iter().map(|s| format!("{} -> {} (sleight {:#x}, {} MP)", s.name, s.sleight_name, s.sleight, sm::mp_from_cp(s.cp))).collect();
     format!(
-        "summons: KH1's Summon list at combat = kh1 in Sora's story (M8b), battle only, each Re:CoM's LV3 sleight through Sora's sleight start 0x1402247A0: {}; learn order at save+{:#x}..={:#x} (layout v{}); KH1's party rule skipped until the party exists",
+        "summons: KH1's Summon list at combat = kh1 in Sora's story (M8b), in battle and (free) in field rooms with sleight packs, each Re:CoM's LV3 sleight through Sora's sleight start 0x1402247A0: {}; learn order at save+{:#x}..={:#x} (layout v{}); KH1's party rule skipped until the party exists",
         t.join(", "),
         BLOCK_FIRST,
         sm::BLOCK_LAST,
@@ -209,28 +210,37 @@ pub unsafe fn learned() -> ([u8; sm::COUNT], u8) {
 pub unsafe fn gate_state(pl: usize) -> (bool, bool) {
     let battle = rd::<i32>(pl + p::BATTLE) != 0;
     if !battle {
-        PRELOADED.store(0, Ordering::Relaxed);
         SLEIGHT_HITS.store(0, Ordering::Relaxed);
+    }
+    // The preload's "already asked" mark is the room's (its PLM, new each room build): a field room
+    // preloads too now (owner, 2026-11-04, "Sleights outside battle").
+    let plm: usize = if pl != 0 { rd(pl + f::SLEIGHTS) } else { 0 };
+    if PRELOAD_ROOM.swap(plm, Ordering::Relaxed) != plm {
+        PRELOADED.store(0, Ordering::Relaxed);
     }
     (battle, out(pl))
 }
 
-/// `pl`'s Re:CoM summon sleight (ours) is out: from [`start`] while Sora's action is `0x16` in the
-/// battle room. The first call that sees otherwise (Re:CoM's end action `0x1401F6660`, its win
-/// action, the room's end, another player) ends it. Two loads unless one is out.
+/// The PLM [`PRELOADED`] belongs to.
+static PRELOAD_ROOM: AtomicUsize = AtomicUsize::new(0);
+
+/// `pl`'s Re:CoM summon sleight (ours) is out: from [`start`] while Sora's action is `0x16` (the
+/// battle room, or since 2026-11-04 a field room). The first call that sees otherwise (Re:CoM's end
+/// action `0x1401F6660`, its win action, another player: a new room's) ends it. Two loads unless
+/// one is out.
 pub unsafe fn out(pl: usize) -> bool {
     let o = OUT.load(Ordering::Relaxed);
     if o == 0 || pl == 0 {
         return false;
     }
-    if o == pl && rd::<u32>(pl + p::ACTION) == STOCK_ACTION && rd::<i32>(pl + p::BATTLE) != 0 {
+    if o == pl && rd::<u32>(pl + p::ACTION) == STOCK_ACTION {
         return true;
     }
     if OUT.compare_exchange(o, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
         let s = &sm::ALL[OUT_SUMMON.load(Ordering::Relaxed) as usize % sm::COUNT];
         let skipped = SKIPPED.swap(0, Ordering::Relaxed);
         if o == pl {
-            note(|| format!("{}: Re:CoM's {} ended (action {:#x}{}); invincibility off ({skipped} hits skipped); the KH1 frame takes Sora back", s.name, s.sleight_name, rd::<u32>(pl + p::ACTION), if rd::<i32>(pl + p::BATTLE) == 0 { ", out of the battle room" } else { "" }));
+            note(|| format!("{}: Re:CoM's {} ended (action {:#x}{}); invincibility off ({skipped} hits skipped); the KH1 frame takes Sora back", s.name, s.sleight_name, rd::<u32>(pl + p::ACTION), if rd::<i32>(pl + p::BATTLE) == 0 { ", in a field room" } else { "" }));
         } else {
             note(|| format!("{}: its player is gone (another player {pl:#x}); invincibility off ({skipped} hits skipped)", s.name));
         }
@@ -254,12 +264,10 @@ pub unsafe fn start(pl: usize, i: usize) -> bool {
     if !installed() || pl == 0 {
         return false;
     }
-    if rd::<i32>(pl + p::BATTLE) == 0 {
-        note(|| format!("{}: not in battle", s.name));
-        return false;
-    }
-    let cost = sm::mp_cost(i);
-    if !super::mp::can_pay(cost * 100) {
+    // Owner (2026-11-04, "Sleights outside battle"): a field room too (its pack loads there), free.
+    let Some(field) = super::field_sleights::start_room(pl, s.sleight, s.name) else { return false };
+    let cost = if field { 0 } else { sm::mp_cost(i) };
+    if !field && !super::mp::can_pay(cost * 100) {
         note(|| format!("{}: MP short ({cost})", s.name));
         return false;
     }
@@ -267,12 +275,15 @@ pub unsafe fn start(pl: usize, i: usize) -> bool {
     // Owner (2026-11-03, "KH1 damage scaling": "summons get the same rule"): at Damage = KH1 its hits
     // (the summon actor's, its shots, Sora's own while it plays) scale as a sleight's.
     SLEIGHT_HITS.store(s.sleight as u32 + 1, Ordering::Relaxed);
-    // KH1 pays at once, in whole points (`0x140289210` → `0x1402A4A00(actor, −cost)`).
-    super::mp::pay(cost * 100, s.name);
+    // KH1 pays at once, in whole points (`0x140289210` → `0x1402A4A00(actor, −cost)`); free in the
+    // field.
+    if !field {
+        super::mp::pay(cost * 100, s.name);
+    }
     OUT_SUMMON.store(i as u8, Ordering::Relaxed);
     SKIPPED.store(0, Ordering::Relaxed);
     OUT.store(pl, Ordering::Relaxed);
-    note(|| format!("{} -> Re:CoM's {} (sleight {:#x}, attack {:#x}, {} from PLAYER/{:04}), {cost} MP, from action {before:#x}; Sora invincible until it ends", s.name, s.sleight_name, s.sleight, s.attack_id, s.class, s.pack));
+    note(|| format!("{} -> Re:CoM's {} (sleight {:#x}, attack {:#x}, {} from PLAYER/{:04}), {cost} MP{}, from action {before:#x}; Sora invincible until it ends", s.name, s.sleight_name, s.sleight, s.attack_id, s.class, s.pack, if field { " (in the field: free)" } else { "" }));
     true
 }
 
@@ -315,7 +326,7 @@ pub unsafe fn preload_sleight(pl: usize, id: Option<u16>) {
         return;
     }
     let Some(id) = id else { return };
-    if pl == 0 || rd::<i32>(pl + p::BATTLE) == 0 {
+    if !preload_room(pl) {
         return;
     }
     let res: usize = rd(pl + f::SLEIGHTS);
@@ -329,7 +340,7 @@ pub unsafe fn preload_sleight(pl: usize, id: Option<u16>) {
 /// [`preload_sleight`] does for the Sleights list's cursor. Re:CoM's load returns at once for a
 /// pack already in its 16-entry table (`0x140211790`'s first loop). Checked (decomp).
 pub unsafe fn preload_sleights(pl: usize, ids: &[u16]) {
-    if !installed() || pl == 0 || ids.is_empty() || rd::<i32>(pl + p::BATTLE) == 0 {
+    if !installed() || ids.is_empty() || !preload_room(pl) {
         return;
     }
     let res: usize = rd(pl + f::SLEIGHTS);
@@ -339,6 +350,21 @@ pub unsafe fn preload_sleights(pl: usize, ids: &[u16]) {
     for &id in ids.iter().take(3) {
         func::<LoadFn>(SLEIGHT_LOAD)(res, id as u32, 0);
     }
+}
+
+/// A room where Re:CoM loads sleight packs for us: battle, or (owner, 2026-11-04, "Sleights outside
+/// battle") a field room whose PLM loads them (`win::field_sleights::packs_on`). In any other field
+/// room a load would queue a file Re:CoM's step never finishes: none is asked.
+unsafe fn preload_room(pl: usize) -> bool {
+    pl != 0 && (rd::<i32>(pl + p::BATTLE) != 0 || (super::field_sleights::field_on(pl) && super::field_sleights::packs_on(pl)))
+}
+
+/// A battle starts (its manager's ctor, before its Sora's first frame): nothing of ours can still
+/// be running from the field (owner, 2026-11-04: a field sleight its strike cut); the next check
+/// would see a new player anyway.
+pub fn forget_running() {
+    OUT.store(0, Ordering::Relaxed);
+    SLEIGHT_OUT.store(0, Ordering::Relaxed);
 }
 
 // ---- M12 step 5: the Sleights row and list ----
@@ -368,11 +394,13 @@ pub unsafe fn set_bottom_row(b: crate::sleights::Bottom) {
     note(|| format!("bottom row -> {b:?} ({})", if saved { "kept in the save at save+0x26B6" } else { "no save: this session only" }));
 }
 
-/// Any Re:CoM sleight is running for `pl` (its action `0x16` in the battle room: a summon, a
+/// Any Re:CoM sleight is running for `pl` (its action `0x16`, any room: a summon, a
 /// Sleights-list sleight, or Sonic Blade's): the Summon and Sleights rows lock (one at a time). The
 /// first call that sees ours end logs it. Two loads.
 pub unsafe fn sleight_running(pl: usize) -> bool {
-    let running = pl != 0 && rd::<u32>(pl + p::ACTION) == STOCK_ACTION && rd::<i32>(pl + p::BATTLE) != 0;
+    // Any room (owner, 2026-11-04: sleights in the field too; Re:CoM's action 0x16 is busy there as
+    // in battle).
+    let running = pl != 0 && rd::<u32>(pl + p::ACTION) == STOCK_ACTION;
     let o = SLEIGHT_OUT.load(Ordering::Relaxed);
     if o != 0 && !(o == pl && running) && SLEIGHT_OUT.compare_exchange(o, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
         let id = SLEIGHT_ID.load(Ordering::Relaxed) as u16;
@@ -407,24 +435,29 @@ pub unsafe fn start_sleight(pl: usize, id: u16) -> bool {
     if !installed() || pl == 0 {
         return false;
     }
-    if rd::<i32>(pl + p::BATTLE) == 0 {
-        note(|| format!("sleight {name}: not in battle"));
-        return false;
-    }
+    // Owner (2026-11-04, "Sleights outside battle"): a field room too, free.
+    let Some(field) = super::field_sleights::start_room(pl, id, name) else { return false };
     let mp = super::mp::current().map_or(0, |m| m.0);
-    let Some(points) = crate::sleights::pay_points(id, mp) else {
-        note(|| format!("sleight {name}: MP short ({:?}, MP {mp})", crate::sleights::cost(id)));
-        return false;
+    let points = if field {
+        0
+    } else {
+        let Some(points) = crate::sleights::pay_points(id, mp) else {
+            note(|| format!("sleight {name}: MP short ({:?}, MP {mp})", crate::sleights::cost(id)));
+            return false;
+        };
+        points
     };
     let Some(before) = begin(pl, id, name) else { return false };
-    super::mp::pay(points * 100, name);
+    if !field {
+        super::mp::pay(points * 100, name);
+    }
     SLEIGHT_ID.store(id as u32, Ordering::Relaxed);
     SLEIGHT_OUT.store(pl, Ordering::Relaxed);
     SLEIGHT_HITS.store(id as u32 + 1, Ordering::Relaxed);
     // M12 follow-ups (owner, "Sleights menu follow-ups"): an air-start sleight started mid-air takes
     // Re:CoM's air version (`initStockSkill` sets `+0x418 & 0x800000`; `crate::sleights::AIR_START`).
     let air = rd::<u32>(pl + f::FLAGS_418) & AIR_VERSION != 0;
-    note(|| format!("sleight {name} -> Re:CoM's sleight {id:#x} through Sora's sleight start{}, {points} MP ({:?}), from action {before:#x}; Re:CoM's own protection only", if air { " (in the air: Re:CoM's air version)" } else { "" }, crate::sleights::cost(id).unwrap_or(crate::sleights::Cost::Points(0))));
+    note(|| format!("sleight {name} -> Re:CoM's sleight {id:#x} through Sora's sleight start{}{}, {points} MP ({:?}), from action {before:#x}; Re:CoM's own protection only", if air { " (in the air: Re:CoM's air version)" } else { "" }, if field { " in the field (free; a hit on a field Heartless is Re:CoM's field strike)" } else { "" }, crate::sleights::cost(id).unwrap_or(crate::sleights::Cost::Points(0))));
     true
 }
 

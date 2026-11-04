@@ -1621,6 +1621,83 @@ pub const SUMMON_CHECKED: &[Site] = &[
 /// resource load, the weapon's attack end).
 pub const SUMMON_ALSO: [u32; 3] = [0x0022_0DF0, 0x0021_1790, 0x0022_4FB0];
 
+/// Sleights outside battle (owner, 2026-11-04; `crate::field_sleights`, `win::field_sleights`,
+/// `docs/recom-field-sleights.md` § Built): the PLM init wrapper (field sleight packs).
+pub const FIELD_SLEIGHT_HOOKS: &[Site] = &[
+    // mov [rsp+0x18],rbx; push rsi; push rdi; push r14; sub rsp,0x20: PLM::CPlayerManager's init
+    // (its ctor `0x14020E1E0`'s only call; no branch into these 13 bytes: exe scan).
+    Site { name: "PLM init (0x140210100)", rva: 0x0021_0100, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x56, 0x57, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// Exe bytes the field case patches.
+pub const FIELD_SLEIGHT_DATA: &[Site] = &[
+    // The Field exe's jump table (`0x1401FA5F4`), entry for action 0x16: the default `0x1401FA599`
+    // (an RVA), then 0x17's (the default too, not changed).
+    Site { name: "Field exe jump table, action 0x16", rva: 0x001F_A648, expect: &[0x99, 0xA5, 0x1F, 0x00, 0x99, 0xA5, 0x1F, 0x00] },
+    // int3 padding after a `pop r14; ret` (`0x1401FB7AF`), before `0x1401FB7C0`: the 13-byte stub.
+    Site { name: "code cave 0x1401FB7B2", rva: 0x001F_B7B2, expect: &[0xCC; 14] },
+];
+
+/// Re:CoM code the field sleights call or rely on (not patched).
+pub const FIELD_SLEIGHT_CHECKED: &[Site] = &[
+    // push r15; sub rsp,0x60; mov rax,[rip+…] (the cookie); xor rax,rsp: the resource lookup by
+    // name (group, name, case-insensitive), the `CCardBattle` ctor's for both lists. Called.
+    Site { name: "resource lookup (0x1402A43E0)", rva: 0x002A_43E0, expect: &[0x41, 0x57, 0x48, 0x83, 0xEC, 0x60, 0x48, 0x8B, 0x05, 0xDB, 0xE6, 0x5B, 0x00, 0x48, 0x33, 0xC4] },
+    // The whole function: mov rax,[rcx+8]; test rax,rax; je; mov rax,[rax+8]; ret; ret. Called.
+    Site { name: "resource data (0x1402A49C0)", rva: 0x002A_49C0, expect: &[0x48, 0x8B, 0x41, 0x08, 0x48, 0x85, 0xC0, 0x74, 0x05, 0x48, 0x8B, 0x40, 0x08, 0xC3, 0xC3] },
+    // The inline `CCardBattle` build in `0x1401607A0`: lookup(1, "BattleCardList", 0) → data →
+    // [0x14087A808] (else 0); lookup(1, "StockSkillList", 0) → data → [0x14087A810]: the calls we
+    // repeat (the stores are `DAMAGE_CHECKED`'s two sites inside these bytes' tail).
+    Site {
+        name: "CCardBattle list lookups (0x140160830)",
+        rva: 0x0016_0830,
+        expect: &[
+            0x0C, 0x1A, 0x66, 0x00, 0x8D, 0x4F, 0x01, 0xE8, 0xA4, 0x3B, 0x14, 0x00, 0x48, 0x85, 0xC0, 0x74, 0x11, 0x48, 0x8B, 0xC8, 0xE8, 0x77, 0x41, 0x14, 0x00,
+        ],
+    },
+    // mov rax,[0x14087B110]; mov edx,999; movzx ecx,word [rax+0x187A]; mov eax,2000; sub cx,ax;
+    // xor eax,eax; cmp cx,dx; setbe al; ret: a room 2000–2999. Called.
+    Site { name: "room 2000-2999 test (0x140235240)", rva: 0x0023_5240, expect: &[0x48, 0x8B, 0x05, 0xC9, 0x5E, 0x64, 0x00, 0xBA, 0xE7, 0x03, 0x00, 0x00, 0x0F, 0xB7, 0x88, 0x7A, 0x18, 0x00, 0x00, 0xB8] },
+    // `CGameSubField` state 0: mov ecx,1; call world; cmp eax,10; je; call 0x140235240; test eax,eax;
+    // jne; xor ecx,ecx; call 0x140210BD0: the field's ring allocation and its condition, which the
+    // wrapper repeats.
+    Site {
+        name: "field ring allocation (0x1401AF841)",
+        rva: 0x001A_F841,
+        expect: &[0xB9, 0x01, 0x00, 0x00, 0x00, 0xE8, 0x75, 0x41, 0x08, 0x00, 0x83, 0xF8, 0x0A, 0x74, 0x10, 0xE8, 0xEB, 0x59, 0x08, 0x00, 0x85, 0xC0, 0x75, 0x07, 0x33, 0xC9, 0xE8, 0x70, 0x13, 0x06, 0x00],
+    },
+    // The PLM init's battle branch: mov [rdi+0x98],rcx (the ring); mov eax,[0x1407C7AE8]; add
+    // rax,[0x14087B6C0]; mov [rdi+0xA0],rax; mov eax,[0x1407C7AE8]; mov [rdi+0xA8],eax: the writes
+    // the wrapper does for a field PLM.
+    Site {
+        name: "PLM init ring writes (0x1402103E6)",
+        rva: 0x0021_03E6,
+        expect: &[
+            0x48, 0x89, 0x8F, 0x98, 0x00, 0x00, 0x00, 0x8B, 0x05, 0xF5, 0x76, 0x5B, 0x00, 0x48, 0x03, 0x05, 0xC6, 0xB2, 0x66, 0x00, 0x48, 0x89, 0x87, 0xA0, 0x00, 0x00, 0x00, 0x8B, 0x05, 0xE1, 0x76, 0x5B, 0x00, 0x89,
+            0x87, 0xA8, 0x00, 0x00, 0x00,
+        ],
+    },
+    // The player dtor `0x1401E4EB0`'s dim exit: mov eax,[rbx+0x418]; test eax,eax; jns; (white);
+    // btr eax,31; mov [rbx+0x418],eax; …; xorps xmm1,xmm1 (0 frames); mov ecx,0x1808; call
+    // 0x140232170: a field player destroyed with its sleight's dim on (the battle start cutting it)
+    // fades the room back at once. Relied on (not called).
+    Site {
+        name: "player dtor dim exit (0x1401E51AD)",
+        rva: 0x001E_51AD,
+        expect: &[
+            0x8B, 0x83, 0x18, 0x04, 0x00, 0x00, 0x85, 0xC0, 0x79, 0x30, 0x0F, 0x28, 0x05, 0x92, 0xC2, 0x4D, 0x00, 0x0F, 0x29, 0x44, 0x24, 0x40, 0x0F, 0xBA, 0xF0, 0x1F, 0x89, 0x83, 0x18, 0x04, 0x00, 0x00, 0x89,
+            0x6C, 0x24, 0x20, 0x45, 0x33, 0xC9, 0x4C, 0x8D, 0x44, 0x24, 0x40, 0x0F, 0x57, 0xC9, 0xB9, 0x08, 0x18, 0x00, 0x00, 0xE8, 0x8A, 0xCF, 0x04, 0x00,
+        ],
+    },
+    // mov eax,0x1002; ret: CMapEnemy's type getter (vtable `0x14055ACB0` +0x28): the field Heartless
+    // our KH1 Thunder / Stop strike in a field room (`win::magic::target_enemy`).
+    Site { name: "map enemy type (0x14019D050)", rva: 0x0019_D050, expect: &[0xB8, 0x02, 0x10, 0x00, 0x00, 0xC3] },
+];
+
+/// The other lists' sites the field sleights call (the current world, `STATS`'s; exeStockSkill,
+/// `SPECIAL_HOOKS`'; the Field exe's switch and default, `MAGIC_CHECKED`'s).
+pub const FIELD_SLEIGHT_ALSO: [u32; 4] = [0x0023_39C0, 0x0021_8950, 0x001F_A1B0, 0x001F_A599];
+
 /// CPlayerSora's sleight start slot (vtable `+0x130`), which the summons call through.
 pub const SUMMON_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x130 (0x1405A9A68)", rva: 0x005A_9A68, target: 0x0022_47A0 }];
 
@@ -3720,6 +3797,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SPECIAL_AA_CHECKED,
         SPECIAL_RAG_CHECKED,
         SUMMON_CHECKED,
+        FIELD_SLEIGHT_HOOKS,
+        FIELD_SLEIGHT_DATA,
+        FIELD_SLEIGHT_CHECKED,
         EFFECT_CHECKED,
         FX_HOOKS,
         FX_CALLS,
@@ -4577,9 +4657,9 @@ mod tests {
         assert!(all_sites().any(|s| s.rva == 0x001E_59A0), "the heal is checked");
     }
 
-    /// M9 stage 9c.1: the specials' sites agree with `crate::specials` and each other; battle only:
-    /// nothing of the Field exe's (its action-0x16 entry `0x1401FA648` and the cave `0x1401FB7B2`
-    /// stay Re:CoM's).
+    /// M9 stage 9c.1: the specials' sites agree with `crate::specials` and each other. (The Field
+    /// exe's action-0x16 entry `0x1401FA648` and the cave `0x1401FB7B2` are the field sleights' now:
+    /// `field_sleight_sites`.)
     #[test]
     fn special_sites() {
         assert_eq!(SPECIAL_HOOKS[0].rva, 0x0021_8950);
@@ -4597,7 +4677,11 @@ mod tests {
             assert!(SUMMON_CHECKED.iter().any(|c| c.rva == rva && c.expect[0] == 0x33), "{}", s.name);
         }
         assert_eq!(0x1_4000_0000u64 + SPECIAL_PTRS[0].rva as u64, data::SORA_VTABLE + 0x140);
-        assert!(all_sites().all(|s| !(0x001F_A648..0x001F_A64C).contains(&s.rva) && !(0x001F_B7B2..0x001F_B7C0).contains(&s.rva)), "the Field exe is Re:CoM's");
+        // Only the field sleights' own sites touch the Field exe's action-0x16 entry and its cave.
+        assert!(
+            all_sites().filter(|s| (0x001F_A648..0x001F_A64C).contains(&s.rva) || (0x001F_B7B2..0x001F_B7C0).contains(&s.rva)).all(|s| FIELD_SLEIGHT_DATA.iter().any(|d| d.rva == s.rva && d.name == s.name)),
+            "the Field exe's 0x16 entry and cave are the field sleights'"
+        );
         // Re:CoM's rows 0xE..=0x10: their sleight motions are `recom_events::MOTION`, the start's
         // EET variant 0, all three sleight-pack motions (flag 0x40).
         let rows = SPECIAL_CHECKED.iter().find(|s| s.name.starts_with("Re:CoM rows 0xE")).unwrap();
@@ -4612,6 +4696,55 @@ mod tests {
         assert_eq!(&init.expect[init.expect.len() - 3..], &[0xBA, crate::specials::RECOM_ACTION as u8, 0x00]);
         let case = SPECIAL_CHECKED.iter().find(|s| s.name.starts_with("Battle exe case 0x16")).unwrap();
         assert_eq!(u32::from_le_bytes(case.expect[8..12].try_into().unwrap()), 0x140);
+    }
+
+    /// Sleights outside battle (owner, 2026-11-04): the field case's entry and stub agree with
+    /// `crate::field_sleights`, its stub goes where the Battle exe's case calls, every site is its
+    /// own, and the other lists' sites it relies on are checked.
+    #[test]
+    fn field_sleight_sites() {
+        use crate::field_sleights::{field_case as fc, lists, packs};
+        for s in FIELD_SLEIGHT_HOOKS.iter().chain(FIELD_SLEIGHT_DATA).chain(FIELD_SLEIGHT_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        for rva in FIELD_SLEIGHT_ALSO {
+            assert!(all_sites().any(|c| c.rva == rva), "{rva:#x}");
+        }
+        assert_eq!(FIELD_SLEIGHT_HOOKS[0].rva, packs::PLM_INIT_RVA);
+        assert!(FIELD_SLEIGHT_HOOKS[0].expect.len() >= 5);
+        assert_eq!(FIELD_SLEIGHT_DATA[0].rva, fc::TABLE_ENTRY_RVA);
+        assert_eq!(u32::from_le_bytes(FIELD_SLEIGHT_DATA[0].expect[..4].try_into().unwrap()), fc::DEFAULT_RVA);
+        assert_eq!(FIELD_SLEIGHT_DATA[1].rva, fc::CAVE_RVA);
+        assert_eq!(FIELD_SLEIGHT_DATA[1].expect.len(), fc::CAVE_LEN);
+        // The Field exe's switch table base (`MAGIC_CHECKED`'s switch) + (0x16 − 1) × 4.
+        let sw = MAGIC_CHECKED[0].expect;
+        let base = u32::from_le_bytes(sw[30..34].try_into().unwrap());
+        assert_eq!(base + (fc::ACTION - 1) * 4, fc::TABLE_ENTRY_RVA);
+        // The stub's call is exeStockSkill, the function the Battle exe's case reaches through the
+        // vtable slot (`SPECIAL_PTRS`) and the specials hook.
+        assert_eq!(fc::EXE_STOCK_RVA, SPECIAL_PTRS[0].target);
+        assert_eq!(fc::EXE_STOCK_RVA, SPECIAL_HOOKS[0].rva);
+        // The lookups in the ctor's bytes call the two functions we call.
+        let l = FIELD_SLEIGHT_CHECKED.iter().find(|s| s.name.starts_with("CCardBattle list lookups")).unwrap();
+        let call = |at: usize| (l.rva as i64 + at as i64 + 5 + i32::from_le_bytes(l.expect[at + 1..at + 5].try_into().unwrap()) as i64) as u32;
+        assert_eq!(call(7), lists::LOOKUP_RVA);
+        assert_eq!(call(20), lists::DATA_RVA);
+        // The field's ring allocation calls the world getter, the room test and the allocator.
+        let a = FIELD_SLEIGHT_CHECKED.iter().find(|s| s.name.starts_with("field ring allocation")).unwrap();
+        let call = |at: usize| (a.rva as i64 + at as i64 + 5 + i32::from_le_bytes(a.expect[at + 1..at + 5].try_into().unwrap()) as i64) as u32;
+        assert_eq!((call(5), call(15), call(26)), (packs::WORLD_RVA, packs::ROOM_2000_RVA, 0x0021_0BD0));
+        assert_eq!(a.expect[12], packs::NO_RING_WORLD as u8);
+        // The battle branch's writes are the PLM fields the wrapper writes.
+        let w = FIELD_SLEIGHT_CHECKED.iter().find(|s| s.name.starts_with("PLM init ring writes")).unwrap();
+        assert_eq!((w.expect[3] as usize, w.expect[23] as usize, w.expect[35] as usize), (packs::CURSOR, packs::END, packs::SPACE));
+        // A rip-relative operand: its displacement at `disp`, the instruction `len` long from `at`.
+        let rip = |at: usize, disp: usize, len: usize| 0x1_4000_0000u64 + (w.rva as i64 + at as i64 + len as i64 + i32::from_le_bytes(w.expect[disp..disp + 4].try_into().unwrap()) as i64) as u64;
+        assert_eq!(rip(7, 9, 6), packs::RING_SIZE);
+        assert_eq!(rip(13, 16, 7), packs::RING);
+        // The dtor's fade: mask 0x1808, Re:CoM's colour fade.
+        let d = FIELD_SLEIGHT_CHECKED.iter().find(|s| s.name.starts_with("player dtor dim exit")).unwrap();
+        assert_eq!(u32::from_le_bytes(d.expect[48..52].try_into().unwrap()), 0x1808);
+        assert_eq!((d.rva as i64 + 52 + 5 + i32::from_le_bytes(d.expect[53..57].try_into().unwrap()) as i64) as u32, 0x0023_2170);
     }
 
     #[test]

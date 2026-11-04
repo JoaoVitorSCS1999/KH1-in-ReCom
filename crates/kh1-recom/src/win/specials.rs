@@ -16,9 +16,10 @@
 //!   events of Re:CoM's own sleight motion for it (start, dash, finisher), started on Sora's sleight
 //!   event players as `exeStockSkill`'s `0x1401F73A0` → `0x1401A3580` starts them
 //!   (`crate::specials::recom_events`); stopped at the end.
-//! - **Battle only** (owner, 2026-11-01): Re:CoM's Battle exe calls `exeStockSkill` through Sora's
-//!   vtable (the Field exe has no case for it and is not patched; the menu offers no special
-//!   outside battle, [`start_special`] refuses one); our wrapper runs KH1's frame for a KH1
+//! - **Battle and field** (owner, 2026-11-01: "Only in battle"; lifted 2026-11-04, "Sleights outside
+//!   battle"): Re:CoM's Battle exe calls `exeStockSkill` through Sora's vtable, the Field exe through
+//!   its case 0x16 (`win::field_sleights`; free there, a hit on a field Heartless Re:CoM's field
+//!   strike); our wrapper runs KH1's frame for a KH1
 //!   special and then Re:CoM's own `procAttackCollision` (`0x1401F5DC0`) on the row with the
 //!   motion's frame, as `exeStockSkill` and the swing exe do (its window, the weapon's attack, our
 //!   KH1 spheres in the pair dispatch, KH1's damage in the enemy-hit wrapper); Re:CoM's
@@ -301,6 +302,14 @@ pub fn take_command() -> Option<u8> {
     PENDING.try_lock().ok().and_then(|mut g| g.take())
 }
 
+/// A battle starts (its manager's ctor): no KH1 special runs across it (owner, 2026-11-04: a field
+/// special its first strike cut; the field player is gone, and the battle's could take its address).
+pub fn forget_running() {
+    if ACTIVE.swap(0, Ordering::AcqRel) != 0 {
+        note(|| "a battle starts: the special that was running is over (its player is gone)".into());
+    }
+}
+
 /// Whether this player's sleight action is a KH1 special.
 pub unsafe fn kh1_special(pl: usize) -> bool {
     pl != 0 && ACTIVE.load(Ordering::Acquire) == pl
@@ -310,11 +319,6 @@ pub unsafe fn kh1_special(pl: usize) -> bool {
 /// Sonic Blade (case 9) or Strike Raid (case 8), cardless, in its order (Checked (decomp
 /// `0x140220DF0`)). False (nothing changed) when KH1's MP can't pay or the special isn't in.
 pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
-    // Battle only (owner): the Field exe never runs action 0x16.
-    if rd::<i32>(pl + p::BATTLE) == 0 {
-        note(|| format!("special {}: not in battle", s.index));
-        return false;
-    }
     if !ready(s.index) {
         note(|| format!("special {}: not installed", s.index));
         return false;
@@ -329,7 +333,10 @@ pub unsafe fn start_special(pl: usize, s: &SpecialStart) -> bool {
         sp::RAGNAROK => sp::recom::RAGNAROK_SLEIGHT,
         _ => sp::recom::SLEIGHT,
     };
-    if !super::mp::can_pay(s.cost) || !super::mp::pay(s.cost, sp::NAME[s.index]) {
+    // Owner (2026-11-04, "Sleights outside battle": "this lifts the old 'only in battle' rule"): a
+    // field room too (the Field exe's case 0x16, `win::field_sleights`), free there.
+    let Some(field) = super::field_sleights::start_room(pl, sleight, sp::NAME[s.index]) else { return false };
+    if !field && (!super::mp::can_pay(s.cost) || !super::mp::pay(s.cost, sp::NAME[s.index])) {
         note(|| format!("special {}: MP short ({})", s.index, s.cost));
         return false;
     }
@@ -706,7 +713,7 @@ pub unsafe fn ragnarok_fire(pl: usize, f: &sp::ragnarok::FireStart) {
     // −sin ψ).
     let psi = f.facing;
     let dirs = rg::ring(Vec3::new(0.0, -1.0, 0.0), Vec3::new(psi.cos(), 0.0, -psi.sin()), f.shots);
-    let target = f.target.filter(|&h| super::magic::is_alive_enemy(h)).unwrap_or(0);
+    let target = f.target.filter(|&h| super::magic::is_target_enemy(h)).unwrap_or(0);
     let row = va(base(), RECOM_ROWS) + sp::recom::ID_RAGNAROK_SHOT as usize * 16;
     let set = rd::<u8>(row + 2) as usize;
     let mut made = 0;
@@ -787,11 +794,11 @@ pub unsafe extern "win64" fn kh1_ragnarok_exe(bullet: usize) {
         let fw = crate::guard::forward(rd(mover + gb::PITCH), rd(mover + gb::YAW));
         let pos = to_kh1(p);
         let dir = to_kh1(Vec3::new(fw[0], fw[1], fw[2])).normalized();
-        if !super::magic::is_alive_enemy(s.target) {
+        if !super::magic::is_target_enemy(s.target) {
             // `0x1402B0E90(Sora, pos, dir, 1000)`: the nearest live enemy within 1000 of the shot.
             let mut best: Option<(f32, u32)> = None;
             // Re:CoM's lock-on list's live enemies (with or without its lock-on flag), by position.
-            for (h, a) in super::magic::lock_on_list(bullet, false) {
+            for (h, a) in super::magic::lock_on_targets(bullet) {
                 let d = (to_kh1(Vec3::new(a[0], a[1], a[2])) - pos).length();
                 if d <= sp::ragnarok::SEARCH && best.is_none_or(|b| d < b.0) {
                     best = Some((d, h));

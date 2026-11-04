@@ -154,11 +154,23 @@ pub struct Gate {
     /// A summon is out (Re:CoM's sleight running; KH1's in-progress flag `0x142867364 & 0x2000`):
     /// none can start until it ends.
     pub out: bool,
+    /// Sleights outside battle (owner, 2026-11-04): a field room where Re:CoM's sleight code runs
+    /// (Combat = KH1 in Sora's story, the Field exe's case 0x16 in: `crate::field_sleights`).
+    pub field: bool,
+    /// Re:CoM's sleight packs load in this room (`crate::field_sleights::packs`: always in battle;
+    /// in a field room where the field PLM got the battle branch's writes).
+    pub packs: bool,
 }
 
-/// `0x140288F30` for summon `i`, without KH1's once-per-battle test (owner).
+/// `0x140288F30` for summon `i`, without KH1's once-per-battle test (owner). Outside battle (owner,
+/// 2026-11-04: the LV3 summons too, free): a field room where the packs load, no MP.
 pub fn usable(g: &Gate, i: usize) -> bool {
-    i < COUNT && g.battle && g.ground && !g.out && g.mp >= mp_cost(i) && party_ready()
+    i < COUNT
+        && (g.battle || (g.field && g.packs))
+        && g.ground
+        && !g.out
+        && (crate::field_sleights::free(g) || g.mp >= mp_cost(i))
+        && party_ready()
 }
 
 /// Our index of Cloud.
@@ -304,7 +316,7 @@ mod tests {
 
     #[test]
     fn kh1_usable_rule() {
-        let g = Gate { battle: true, ground: true, air: false, mp: 2, out: false };
+        let g = Gate { battle: true, ground: true, air: false, mp: 2, out: false, ..Default::default() };
         assert!(usable(&g, 5), "Simba with 2 MP");
         assert!(!usable(&g, 4), "Mushu needs 3");
         assert!(!usable(&Gate { battle: false, ..g }, 5), "battle mode only");
@@ -313,6 +325,22 @@ mod tests {
         assert!(!usable(&Gate { out: true, ..g }, 5), "one out at a time");
         assert!(!usable(&g, 7));
         assert!(party_ready());
+    }
+
+    /// Owner (2026-11-04, "Sleights outside battle"): the LV3 summons in the field too, free, where
+    /// Re:CoM's packs load (every summon has one: `crate::field_sleights::packs_are_recoms`).
+    #[test]
+    fn summons_in_the_field_are_free_where_the_packs_load() {
+        let f = Gate { field: true, packs: true, ground: true, mp: 0, ..Default::default() };
+        for i in 0..COUNT {
+            assert!(usable(&f, i), "{}: free in the field", ALL[i].name);
+        }
+        assert!(!usable(&Gate { packs: false, ..f }, 5), "100 Acre Wood / rooms 2000-2999: greyed");
+        assert!(!usable(&Gate { ground: false, ..f }, 5));
+        assert!(!usable(&Gate { out: true, ..f }, 5));
+        assert!(!usable(&Gate { field: false, ..f }, 5), "neither room");
+        // In battle the MP rule stays.
+        assert!(!usable(&Gate { battle: true, ..f }, 5));
     }
 
     #[test]

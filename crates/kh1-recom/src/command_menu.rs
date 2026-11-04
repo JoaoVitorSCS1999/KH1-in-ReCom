@@ -309,6 +309,10 @@ pub struct World {
     /// M8b: KH1's battle mode (Re:CoM's battle room) and a summon out (Re:CoM's sleight running).
     pub battle: bool,
     pub summon_out: bool,
+    /// Sleights outside battle (owner, 2026-11-04): a field room where Re:CoM's sleight code runs
+    /// (`crate::summons::Gate::field`) and whether its packs load (`Gate::packs`).
+    pub field: bool,
+    pub packs: bool,
     /// M12 step 5: what the root's 4th row shows (the save's choice, `crate::sleights::Bottom`).
     pub bottom: crate::sleights::Bottom,
     /// M12 step 5: the equipped sleight abilities' Re:CoM ids (`crate::sleights::list`, Re:CoM's
@@ -679,7 +683,7 @@ impl Menu {
         }
         // The summons' gate (M8b), shared by the Summon list, the Sleights list and (M12 step 6) the
         // sleight shortcuts.
-        let gate = crate::summons::Gate { battle: w.battle, ground: flags & 0x80 != 0, air: flags & 0x20 != 0 && flags & 0x80 == 0, mp: w.mp.map_or(0, |m| m.0), out: w.summon_out };
+        let gate = crate::summons::Gate { battle: w.battle, ground: flags & 0x80 != 0, air: flags & 0x20 != 0 && flags & 0x80 == 0, mp: w.mp.map_or(0, |m| m.0), out: w.summon_out, field: w.field, packs: w.packs };
         let n_sl = (w.sleight_count as usize).min(crate::sleights::MAX);
         let equipped_sl = &w.sleights[..n_sl];
         // The shortcut list (stage 7.12, the same build `0x1402944C0`, only with a spell learned):
@@ -2544,9 +2548,16 @@ mod tests {
         m.build(&World { mp: Some((0, 3, 29)), ..sleight_world() });
         assert_eq!(m.sleight.grey & 7, 0b111);
         assert!(m.sleight_grey && !m.sleight_lock);
-        // The field, the air: all greyed.
+        // The field (no field case: Combat = Re:CoM or not installed), the air: all greyed.
         m.build(&World { battle: false, ..sleight_world() });
         assert_eq!(m.sleight.grey & 7, 0b111);
+        // Owner (2026-11-04, "Sleights outside battle"): a field room where Re:CoM's sleight code
+        // runs: all usable with no MP; without the packs (100 Acre Wood, rooms 2000-2999) only Fire
+        // Raid (Holy and Idyll Romp need theirs).
+        m.build(&World { battle: false, field: true, packs: true, mp: Some((0, 3, 0)), ..sleight_world() });
+        assert_eq!(m.sleight.grey & 7, 0);
+        m.build(&World { battle: false, field: true, packs: false, mp: Some((0, 3, 0)), ..sleight_world() });
+        assert_eq!(m.sleight.grey & 7, 0b110);
         m.build(&World { state: 2, ..sleight_world() });
         assert_eq!(m.sleight.grey & 7, 0b111);
         // A sleight (or a summon) running: greyed and locked; the Summon row too.

@@ -1074,6 +1074,9 @@ unsafe fn world(pl: usize) -> World {
     if super::summons::installed() {
         (w.summons, w.summon_count) = super::summons::learned();
         (w.battle, w.summon_out) = super::summons::gate_state(pl);
+        // Owner (2026-11-04, "Sleights outside battle"): a field room where Re:CoM's sleights run,
+        // and whether its packs load (two loads in a field room).
+        (w.field, w.packs) = super::field_sleights::gate(pl);
         // M12 step 5: the bottom row (one save byte), the equipped sleights only while it says
         // Sleights (or, M12 step 6, a shortcut slot holds a sleight), and any Re:CoM sleight
         // running locks both rows (one at a time).
@@ -1091,28 +1094,41 @@ unsafe fn world(pl: usize) -> World {
                 w.sleights[k] = id as u8;
             }
             w.sleight_count = ids.len() as u8;
-            if special_free && super::specials::installed() && rd::<i32>(pl + p::BATTLE) != 0 {
-                w.sleight_specials = sleight_specials(pl);
+            if special_free && super::specials::installed() && (w.battle || w.field) {
+                w.sleight_specials = sleight_specials(pl, w.field);
             }
         }
     }
     // M9 stage 9c.1: KH1's special offer (`0x14028D0F0`) when nothing took the context entry.
-    // Battle only (owner, 2026-11-01: "Only in battle"): Re:CoM's battle room (`player+0x390`).
+    // Battle only (owner, 2026-11-01: "Only in battle"), lifted (owner, 2026-11-04, "Sleights outside
+    // battle"): a field room too, free there, Sonic Blade / Ars Arcanum / Ragnarok where their packs
+    // load (`crate::field_sleights::room_ok`).
     if w.context == 0 && w.gimmick == 0 && special_free && super::specials::installed() && rd::<i32>(pl + p::BATTLE) != 0 {
-        (w.special, w.special_grey) = special_offer(pl).unwrap_or((0, false));
+        (w.special, w.special_grey) = special_offer(pl, false, true).unwrap_or((0, false));
+    } else if w.context == 0 && w.gimmick == 0 && special_free && super::specials::installed() && w.field {
+        (w.special, w.special_grey) = special_offer(pl, true, w.packs).unwrap_or((0, false));
     }
     w
 }
 
 /// `0x14028D0F0` on Sora's equipped specials and Re:CoM's attack target, when it is a live enemy
 /// (KH1 picks its target among enemies; Assumption: Re:CoM's lock target stands for KH1's).
-unsafe fn special_offer(pl: usize) -> Option<(u8, bool)> {
-    let equipped = equipped_specials()?;
+///
+/// In a field room (`field`): free, and a special with a pack only where packs load (`packs`).
+unsafe fn special_offer(pl: usize, field: bool, packs: bool) -> Option<(u8, bool)> {
+    let mut equipped = equipped_specials()?;
+    if field && !packs {
+        for (i, e) in equipped.iter_mut().enumerate() {
+            if crate::sleights::special_sleight(i).is_some_and(crate::field_sleights::needs_pack) {
+                *e = false;
+            }
+        }
+    }
     if !equipped.iter().any(|&b| b) {
         return None;
     }
     let t = special_target(pl)?;
-    crate::specials::offer(&equipped, Some(t), &mut |c| super::mp::can_pay(c))
+    crate::specials::offer(&equipped, Some(t), &mut |c| field || super::mp::can_pay(c))
 }
 
 /// The built specials Sora has equipped (by `crate::specials` index), each only when it is in.
@@ -1126,9 +1142,10 @@ fn equipped_specials() -> Option<[bool; 5]> {
     Some(equipped)
 }
 
-/// What `0x14028D0F0` sees of Re:CoM's attack target, when it is a live enemy.
+/// What `0x14028D0F0` sees of Re:CoM's attack target, when it is a live enemy (or, in a field room,
+/// a field Heartless: `win::magic::is_target_enemy`).
 unsafe fn special_target(pl: usize) -> Option<crate::specials::OfferTarget> {
-    let t = super::attack::attack_target(pl).filter(|t| super::magic::is_alive_enemy(t.owner))?;
+    let t = super::attack::attack_target(pl).filter(|t| super::magic::is_target_enemy(t.owner))?;
     let b: usize = rd(pl + p::BODY);
     if b == 0 {
         return None;
@@ -1140,12 +1157,15 @@ unsafe fn special_target(pl: usize) -> Option<crate::specials::OfferTarget> {
 /// M12 step 7 (owner, 2026-11-03: "also show up in the sleights menu"): the Sleights list's specials
 /// Sora could start now, by `crate::specials` index bit: each one's own `0x14028D0F0` score is 2 (in
 /// range of a live target, enough MP), as its prompt would offer it.
-unsafe fn sleight_specials(pl: usize) -> u8 {
+///
+/// In a field room (`field`): free (owner, 2026-11-04, "Sleights outside battle"); the pack rule is
+/// the list's (`crate::sleights::special_usable`).
+unsafe fn sleight_specials(pl: usize, field: bool) -> u8 {
     let Some(equipped) = equipped_specials() else { return 0 };
     let Some(t) = special_target(pl) else { return 0 };
     let mut ok = 0u8;
     for i in crate::sleights::SPECIALS {
-        if equipped[i] && crate::specials::score(i, &t, &mut |c| super::mp::can_pay(c)) == 2 {
+        if equipped[i] && crate::specials::score(i, &t, &mut |c| field || super::mp::can_pay(c)) == 2 {
             ok |= 1 << i;
         }
     }

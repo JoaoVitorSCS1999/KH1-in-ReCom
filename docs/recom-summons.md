@@ -6,7 +6,8 @@ Choices (owner, 2026-11-01; `design-philosophy-instructions.md`, "Summons now"):
 CP** (2 MP for the 20-CP cards, 3 for the 25-CP ones), paid at once on the command with KH1's
 "whole MP ≥ cost" rule; **KH1's party rule skipped until the party exists**; **Re:CoM's summon
 damage at both Damage settings**; the Summon row greyed and locked while one is out (no Dismiss);
-Cloud with Omnislash; battle rooms only; each summon unlocks
+Cloud with Omnislash; battle rooms only (lifted in 0.110.0: field rooms too, free, where Re:CoM's
+sleight packs load: `docs/recom-field-sleights.md` § Built); each summon unlocks
 with its first Re:CoM summon card; learn order (older saves: KH1's index order, Cloud last); the
 start through Re:CoM's own sleight start `0x1402247A0` (its use counter counts it).
 
