@@ -598,3 +598,6 @@ At KH1 setting:
   - A Customize row toggles whether the command menu's 4th row shows **Summon or Sleights**. It is the **same saved choice** as D-pad Left (owner: "Same as the saved choice"): D-pad Left changes the toggle too.
   - **Long names squeeze to fit** (owner: "Squeeze to fit"): only a name too long for its box is drawn narrower so it ends inside the box; short names are unchanged.
   - **Sleights outside battle**: wanted. Research first (Re:CoM's field has no sleight action), then options to the owner.
+- **Sleights list and ability section** (owner, 2026-11-04, verbatim: "The same thing for the sleights menu. I think we should have also have "sleights" have its own menu in the ability list"):
+  - Squeeze to fit also covers the command menu's Sleights list (e.g. "Firaga Burst", "Homing Blizzara").
+  - The sleight abilities get their own **"Sleights"** section in the KH1 ability list, like "Enemy Skills", with the same equip rules, AP and order.
