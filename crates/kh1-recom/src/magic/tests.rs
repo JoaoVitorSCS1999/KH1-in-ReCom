@@ -411,6 +411,22 @@ fn gravity_rows_numbers_and_fall_are_kh1s() {
     assert_eq!(gravity::scale_at(3, 99.0), 1.6);
 }
 
+/// KH1 Gravity in the field (owner, 2026-11-04): its kind on a field Heartless is Re:CoM's plain field
+/// strike (the battle with first strike), whether the KH1 row's (1) or Re:CoM's Gravity (0xD);
+/// Thunder / Stop keep their paralyse / freeze.
+#[test]
+fn gravity_is_a_plain_field_strike() {
+    for lv in 1..=3u8 {
+        let row = gravity_row_bytes(&RECOM_GRAVITY_ROWS[lv as usize - 1]);
+        let k = field_kind(spell::GRAVITY, lv, row[0xB] as u32);
+        assert_eq!(k, 1);
+        assert!(field_plain_strike(k));
+        assert!(field_plain_strike(RECOM_GRAVITY_ROWS[lv as usize - 1][0xB] as u32), "0xD");
+        assert!(!field_plain_strike(field_kind(spell::THUNDER, lv, 1)), "paralyse");
+    }
+    assert!(!field_plain_strike(field_kind(spell::STOP, 1, 1)), "freeze");
+}
+
 /// A flatten a hit cut short springs back KH1's way (+0.05 a frame): from Re:CoM's 0.1, 18 frames.
 #[test]
 fn a_cut_flatten_springs_back_at_kh1s_rate() {

@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 231: KH1 Gravity in the field strikes field Heartless (Re:CoM's plain field strike: the battle with first strike), version 0.119.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Party and field follow-ups): "KH1 Gravity in the field: strikes field Heartless (Re:CoM's field strike: the battle starts with first strike)".
+
+- **Re:CoM** (Checked (decomp)): the field Heartless hit handler `0x14019E020` switches on the hit's kind: 7 / 0x2A → `+0x440`, 8 → frozen `+0x400`, 0x1C..0x1E / 0x24..0x26 → paralysed `+0x3C0`, 0x29 → nothing; **every other kind → the struck state `+0x380`** (the battle starts with first strike). KH1 Gravity's kind in a field room is the KH1 row's 1 (Re:CoM's 0xD only in battle rooms): a plain strike; `magic::field_kind` keeps it.
+- **Change** (`win::magic::gravity_command` / `release_gravity` / `gravity_frame`), as 0.110.0 routed Thunder and Stop: the command's target and the release's point take a field Heartless (`target_enemy`), the impact's list Re:CoM's lock-on targets with field Heartless (`lock_on_targets`), each struck once through Re:CoM's contact and apply (`strike_body`). Battle enemies unchanged. No new hook, site or patch; nothing new per frame.
+- Not carried to field Heartless: KH1's squash under the falling sphere (battle enemies only).
+- Checked: tests (`magic::tests::gravity_is_a_plain_field_strike`), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-field-sleights.md` § Built, What a field hit does.
+
+---
+
 ## Stage 230: Lucky Bounty at KH1: Pluto's card find brings a KH1 item of the floor's tier (a KH1 item prize, KH1's pickup), version 0.118.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Party and field follow-ups): "Lucky Bounty at KH1 brings a random KH1 item (Potion, Hi-Potion, Ether, Elixir by the floor's tier) instead of a deck card (the deck is empty at KH1)".

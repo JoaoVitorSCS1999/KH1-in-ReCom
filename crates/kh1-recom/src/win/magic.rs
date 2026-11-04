@@ -973,7 +973,9 @@ unsafe fn gravity_command(pl: usize, r: &[u8; 16]) {
     let (pos, dir) = sora_pos_dir(pl);
     let ahead = mg::gravity::AHEAD / 100.0;
     let off = [dir[0] * ahead, 0.0, dir[2] * ahead];
-    let (h, point) = match alive_enemy(h) {
+    // A battle enemy, or in a field room a field Heartless (owner, 2026-11-04: KH1 Gravity in the
+    // field strikes field Heartless, as 0.110.0's Thunder / Stop).
+    let (h, point) = match target_enemy(h) {
         Some(e) => (h, aim_point(e)),
         None => (0, [pos[0] + off[0], pos[1], pos[2] + off[2]]),
     };
@@ -1007,7 +1009,7 @@ unsafe fn effect_at(pl: usize, name: usize, id: u32, at: [f32; 4]) {
 unsafe fn release_gravity(pl: usize, c: &CastStart) -> Option<u32> {
     let r = row(c.spell, c.level)?;
     let (h, off) = GRAVITY_CMD.lock().ok().and_then(|mut g| g.take()).unwrap_or((0, [0.0; 3]));
-    let point = match alive_enemy(h) {
+    let point = match target_enemy(h) {
         Some(e) => aim_point(e),
         None => {
             let (pos, _) = sora_pos_dir(pl);
@@ -1395,8 +1397,12 @@ unsafe fn gravity_frame(pl: usize, step: f32) {
         let area = mg::Area::Sphere { radius: mg::gravity::impact_radius_m(level) };
         let carrier = shot_object(shot).or_else(|| carrier_at(pl, level, centre, kind, attr, ap));
         let mut n = 0;
-        for (h, _) in lock_on_list(0, false) {
-            let Some(e) = alive_enemy(h) else { continue };
+        // Battle enemies, and in a field room the field Heartless (owner, 2026-11-04): the sphere's
+        // kind is the KH1 row's (1; no Re:CoM kind outside battle rooms), which Re:CoM's field
+        // Heartless handler `0x14019E020` takes as its plain field strike (state `+0x380`: the
+        // battle starts with first strike); `magic::field_kind` keeps it.
+        for (h, _) in lock_on_targets(0) {
+            let Some(e) = target_enemy(h) else { continue };
             if !bodies(e).iter().any(|(_, b)| mg::body_touches(centre, area, b)) {
                 continue;
             }

@@ -968,6 +968,17 @@ pub fn field_kind(s: u8, level: u8, kh1_kind: u32) -> u32 {
     }
 }
 
+/// The kinds Re:CoM's field Heartless hit handler `0x14019E020` turns into something other than its
+/// plain field strike (its switch on the hit's `+0x80`): 7 / 0x2A → state `+0x440`, 8 → `+0x400`
+/// (frozen), 0x1C..0x1E / 0x24..0x26 → `+0x3C0` (paralysed), 0x29 → nothing. Every other kind →
+/// `+0x380`, the struck state (the battle starts with first strike). Checked (decomp).
+pub const FIELD_SPECIAL_KINDS: [u32; 10] = [7, 0x2A, 8, 0x1C, 0x1D, 0x1E, 0x24, 0x25, 0x26, 0x29];
+
+/// Whether a kind is Re:CoM's plain field strike on a field Heartless.
+pub fn field_plain_strike(kind: u32) -> bool {
+    !FIELD_SPECIAL_KINDS.contains(&kind)
+}
+
 /// KH1's Aero (`xm_air01.mag`, one file for every level; the levels differ in their data: decoded
 /// with `magdis.py`, Checked (files), the syscalls in the KH1 decomp):
 ///

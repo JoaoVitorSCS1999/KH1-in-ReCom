@@ -341,8 +341,18 @@ field, and without its hook the pack sleights simply stay greyed.
   0x1E (→ state 5, paralysed, no battle), Stop's 8 (→ state 6, frozen, no battle). Battle enemies keep
   the KH1 rows' kinds (map enemies exist only in field rooms). Checked (decomp + exe rows + code); in
   game: not seen.
-- Found, not changed (not asked): **KH1 Gravity in the field hits nothing either** (the same
-  battle-only lists). Re:CoM's Gravity kind 0xD would be the plain field strike (state 4).
+- ~~Found, not changed (not asked): **KH1 Gravity in the field hits nothing either** (the same
+  battle-only lists).~~ **Built 0.119.0** (owner, 2026-11-04, § Party and field follow-ups: "KH1
+  Gravity in the field: strikes field Heartless (Re:CoM's field strike: the battle starts with first
+  strike)"): the command's target, the release's point and the impact's list take field Heartless
+  (`target_enemy`, `lock_on_targets`), struck through the same contact and apply. Its kind is the KH1
+  row's 1 (Re:CoM's 0xD is written only in battle rooms, `win::damage::spell`); Re:CoM's field
+  Heartless handler `0x14019E020` sends every kind but 7 / 0x2A / 8 / 0x1C..0x1E / 0x24..0x26 / 0x29
+  to its struck state `+0x380` (the plain field strike: the battle with first strike; Checked
+  (decomp); `magic::field_plain_strike`, test `gravity_is_a_plain_field_strike`), so `field_kind`
+  keeps it. Every field Heartless under the 1.7 / 2.55 / 2.72 m impact sphere is struck once, as in
+  a battle. Not carried to field Heartless: KH1's squash under the falling sphere (it reads battle
+  enemy state fields; the field ones are gone at the battle start anyway). Not checked: in game.
 
 ### The battle start cutting a sleight
 
