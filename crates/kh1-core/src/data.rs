@@ -162,6 +162,10 @@ pub mod row {
     /// `0x14039ECA0` with KH1's dash counter) and its finisher. The picker never names them.
     pub const SONIC_BLADE_DASH: usize = 0x1B;
     pub const SONIC_BLADE_FINISHER: usize = 0x21;
+    /// M12 step 7, Strike Raid (`0x1403A0290`: row `0x2E + n` for throw n = 1..=5): four throws and
+    /// the finishing throw. The picker never names them.
+    pub const STRIKE_RAID_THROW: usize = 0x2F;
+    pub const STRIKE_RAID_FINISHER: usize = 0x33;
     /// Rows the ground picker walks (0..=0x41).
     pub const GROUND_COUNT: usize = 0x42;
 }
@@ -181,10 +185,35 @@ pub mod xl {
     pub const WINDUP: usize = 0;
     pub const DASH: usize = 1;
     pub const FINISHER: usize = 2;
-    /// The entries built so far.
-    pub const ENTRIES: [usize; 3] = [WINDUP, DASH, FINISHER];
-    /// KH1's own requests of the entries in the xl set (`0xC8 + entry`).
-    pub const KH1_REQUEST_BASE: u16 = 0xC8;
+    /// M12 step 7, Strike Raid (`0x14039FFD0` / `0x1403A0290` / `0x1403A00A0`): the wind-up 0xE6,
+    /// the throw 0xE7 (rows 0x2F..=0x32) and the finishing throw 0xE8 (row 0x33), their high
+    /// versions 0xEA / 0xEB (target more than 200 above), the catches 0xE9 / 0xEC, the knocked-back
+    /// catch 0xED and the wait 0xEE (its combo window offers the next throw).
+    pub const SR_WINDUP: usize = 17;
+    pub const SR_THROW: usize = 18;
+    pub const SR_FINISHER: usize = 19;
+    pub const SR_CATCH: usize = 20;
+    pub const SR_THROW_HIGH: usize = 21;
+    pub const SR_FINISHER_HIGH: usize = 22;
+    pub const SR_CATCH_HIGH: usize = 23;
+    pub const SR_CLASH: usize = 24;
+    pub const SR_WAIT: usize = 25;
+    /// The entries built so far, in the order the asset step gives them slots and the DLL rows
+    /// (later specials append theirs, so earlier slots never move).
+    pub const ENTRIES: [usize; 12] = [WINDUP, DASH, FINISHER, SR_WINDUP, SR_THROW, SR_FINISHER, SR_CATCH, SR_THROW_HIGH, SR_FINISHER_HIGH, SR_CATCH_HIGH, SR_CLASH, SR_WAIT];
+    /// The xl set's request map for its 36 entries (`xl_limit.dat` `+0x80`, the request words with
+    /// an entry): 0xC8..=0xCA → 0..=2, 0xD2..=0xDF → 3..=16, 0xE6..=0xEE → 17..=25, 0xF0..=0xF8 →
+    /// 26..=34, 0xFA → 35. Checked (files).
+    pub const fn kh1_request_of(entry: usize) -> Option<u16> {
+        Some(match entry {
+            0..=2 => 0xC8 + entry as u16,
+            3..=16 => 0xD2 + (entry - 3) as u16,
+            17..=25 => 0xE6 + (entry - 17) as u16,
+            26..=34 => 0xF0 + (entry - 26) as u16,
+            35 => 0xFA,
+            _ => return None,
+        })
+    }
     /// Our request ids for them in kh1-core's motion set (none of Sora's own reach 0x300).
     pub const REQUEST_BASE: u16 = 0x300;
 
@@ -198,53 +227,71 @@ pub mod xl {
         ENTRIES.contains(&e).then_some(e)
     }
 
-    /// The xl entry a special row's KH1 request plays (the xl set's map: 0xC8 → 0, 0xC9 → 1,
-    /// 0xCA → 2).
+    /// The xl entry a special row's KH1 request plays (the xl set's map, [`kh1_request_of`]).
     pub fn entry_of_kh1_request(r: i16) -> Option<usize> {
-        let e = usize::try_from(r).ok()?.checked_sub(KH1_REQUEST_BASE as usize)?;
-        ENTRIES.contains(&e).then_some(e)
+        let r = u16::try_from(r).ok()?;
+        ENTRIES.iter().copied().find(|&e| kh1_request_of(e) == Some(r))
     }
 
-    /// The three motions: lengths, flag tracks (hit slot 0, combo window: KH1's follow-up window,
-    /// `0x14039ED70` reads `+0x1CC & 0x400000`), root travel (forward, KH1 units). Checked (files:
+    /// One built entry's motion: length, flag tracks (hit slot 0, combo window: the specials'
+    /// follow-up window, `+0x1CC & 0x400000`), root travel (forward, KH1 units). Checked (files:
     /// `kh1-data`'s `xl_motions_match_the_players_file`, every integer frame).
-    pub fn motions() -> [MotionInfo; 3] {
-        let windup = MotionInfo::new(30.0);
-        let dash = MotionInfo::new(54.0).with_flag(FlagKind::Hit(0), 4.0, 22.0).with_flag(FlagKind::ComboWindow, 10.0, 40.0).with_forward_keys(&[
-            (0.0, 0.0),
-            (2.0, 0.0),
-            (4.0, 122.07),
-            (6.0, 214.66),
-            (10.0, 356.97),
-            (14.0, 467.44),
-            (18.0, 556.62),
-            (22.0, 584.74),
-            (30.0, 598.40),
-            (38.0, 588.27),
-            (44.0, 562.05),
-            (54.0, 562.05),
-        ]);
-        let finisher = MotionInfo::new(82.0).with_flag(FlagKind::Hit(0), 16.0, 34.0).with_forward_keys(&[
-            (0.0, 0.0),
-            (14.0, 0.0),
-            (16.0, 122.07),
-            (18.0, 214.66),
-            (22.0, 375.07),
-            (24.0, 469.54),
-            (26.0, 555.38),
-            (28.0, 615.61),
-            (30.0, 672.39),
-            (32.0, 702.45),
-            (34.0, 725.60),
-            (38.0, 746.91),
-            (44.0, 756.73),
-            (54.0, 761.56),
-            (62.0, 760.56),
-            (72.0, 757.15),
-            (78.0, 734.41),
-            (82.0, 734.41),
-        ]);
-        [windup, dash, finisher]
+    pub fn motion(entry: usize) -> Option<MotionInfo> {
+        let inf = f32::INFINITY;
+        Some(match entry {
+            WINDUP => MotionInfo::new(30.0),
+            DASH => MotionInfo::new(54.0).with_flag(FlagKind::Hit(0), 4.0, 22.0).with_flag(FlagKind::ComboWindow, 10.0, 40.0).with_forward_keys(&[
+                (0.0, 0.0),
+                (2.0, 0.0),
+                (4.0, 122.07),
+                (6.0, 214.66),
+                (10.0, 356.97),
+                (14.0, 467.44),
+                (18.0, 556.62),
+                (22.0, 584.74),
+                (30.0, 598.40),
+                (38.0, 588.27),
+                (44.0, 562.05),
+                (54.0, 562.05),
+            ]),
+            FINISHER => MotionInfo::new(82.0).with_flag(FlagKind::Hit(0), 16.0, 34.0).with_forward_keys(&[
+                (0.0, 0.0),
+                (14.0, 0.0),
+                (16.0, 122.07),
+                (18.0, 214.66),
+                (22.0, 375.07),
+                (24.0, 469.54),
+                (26.0, 555.38),
+                (28.0, 615.61),
+                (30.0, 672.39),
+                (32.0, 702.45),
+                (34.0, 725.60),
+                (38.0, 746.91),
+                (44.0, 756.73),
+                (54.0, 761.56),
+                (62.0, 760.56),
+                (72.0, 757.15),
+                (78.0, 734.41),
+                (82.0, 734.41),
+            ]),
+            // Strike Raid: no root travel in any of them (the Keyblade flies in the motion itself:
+            // KH1's weapon bone goes about 8.9 m out over the throw).
+            SR_WINDUP => MotionInfo::new(30.0),
+            SR_THROW => MotionInfo::new(42.0).with_flag(FlagKind::Trail, 4.0, 8.0).with_flag(FlagKind::Hit(0), 10.0, inf),
+            SR_FINISHER => MotionInfo::new(76.0).with_flag(FlagKind::Trail, 24.0, 30.0).with_flag(FlagKind::Hit(0), 32.0, inf),
+            SR_CATCH => MotionInfo::new(8.0),
+            SR_THROW_HIGH => MotionInfo::new(42.0).with_flag(FlagKind::Trail, 2.0, 8.0).with_flag(FlagKind::Hit(0), 10.0, inf),
+            SR_FINISHER_HIGH => MotionInfo::new(76.0).with_flag(FlagKind::Trail, 24.0, 30.0).with_flag(FlagKind::Hit(0), 32.0, inf),
+            SR_CATCH_HIGH => MotionInfo::new(8.0),
+            SR_CLASH => MotionInfo::new(24.0),
+            SR_WAIT => MotionInfo::new(64.0).with_flag(FlagKind::ComboWindow, 0.0, 52.0),
+            _ => return None,
+        })
+    }
+
+    /// The built entries' motions, in [`ENTRIES`] order.
+    pub fn motions() -> Vec<MotionInfo> {
+        ENTRIES.iter().filter_map(|&e| motion(e)).collect()
     }
 }
 
@@ -372,6 +419,12 @@ impl Moveset {
             rows[r] = special(0xC9, 0x5C18, [2, 5, 6], if n == 0 { -1 } else { 4 });
         }
         rows[row::SONIC_BLADE_FINISHER] = special(0xCA, 0x5C88, [18, 5, 18], 6);
+        // Strike Raid (M12 step 7): four throws on the xl set's request 0xE7 (voices: none, 4, 4,
+        // 5), the finishing throw on 0xE8; the trail 5, no weapon effect. Checked (files).
+        for (r, voice) in (row::STRIKE_RAID_THROW..row::STRIKE_RAID_FINISHER).zip([-1, 4, 4, 5]) {
+            rows[r] = ActionRow { trail: 5, ..special(0xE7, 0x55F8, [2, 5, 6], voice) };
+        }
+        rows[row::STRIKE_RAID_FINISHER] = ActionRow { trail: 5, ..special(0xE8, 0x5668, [24, 25, 24], 6) };
 
         let rec = |kind: u8, power: i32, crit: i32, crit_bonus: i32, mp: i32, clash: u32, frac_b: f32, radius: f32| AttackData {
             stat_source: 0,
@@ -416,6 +469,12 @@ impl Moveset {
         let sonic = |power: i32| AttackData { element: 10, power_party: power, power, crit: 200, mp_charge: 0, clash: 0x10006, frac_a: -0.199_999_99, frac_b: -0.2, radius: 60.0, ..rec(3, 0, 0, 0, 0, 0, 0.0, 0.0) };
         attacks.insert(0x5C18, sonic(6));
         attacks.insert(0x5C88, sonic(10));
+        // Strike Raid's records (M12 step 7; Checked (files)): element 1, flinch (the finishing
+        // throw launches, kind 5), crit 200, no MP charge, swept (clash type 6, not spent on birth),
+        // blade fractions 0.8 / −0.4, radius 65 (the finishing throw 80): power 10 / 12.
+        let raid = |kind: u8, power: i32, radius: f32| AttackData { power_party: power, power, crit: 200, mp_charge: 0, clash: 6, frac_a: 0.799_999_95, frac_b: -0.399_999_98, radius, ..rec(kind, 0, 0, 0, 0, 0, 0.0, 0.0) };
+        attacks.insert(0x55F8, raid(3, 10, 65.0));
+        attacks.insert(0x5668, raid(5, 12, 80.0));
         Moveset { motions: m, rows, attacks }
     }
 }

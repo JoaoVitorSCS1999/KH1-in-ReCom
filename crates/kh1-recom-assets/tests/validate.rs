@@ -534,10 +534,25 @@ fn h_specials_clips_from_xl_limit() {
     // The slots after every KH1-only entry's (the full build's count; `only` keeps the numbers).
     let first = built.xl[0].slot;
     assert!(first > RECOM_SORA_SLOTS);
-    let want = [(0usize, 0xC8u16, 30u32, false), (1, 0xC9, 54, true), (2, 0xCA, 82, true)];
-    for (e, (entry, req, frames, root)) in built.xl.iter().zip(want) {
+    // M12 step 7: Strike Raid's nine after the held clip's slot (first + 3), none with root motion.
+    let want = [
+        (0usize, 0xC8u16, 30u32, false),
+        (1, 0xC9, 54, true),
+        (2, 0xCA, 82, true),
+        (17, 0xE6, 30, false),
+        (18, 0xE7, 42, false),
+        (19, 0xE8, 76, false),
+        (20, 0xE9, 8, false),
+        (21, 0xEA, 42, false),
+        (22, 0xEB, 76, false),
+        (23, 0xEC, 8, false),
+        (24, 0xED, 24, false),
+        (25, 0xEE, 64, false),
+    ];
+    assert_eq!(built.xl.len(), want.len());
+    for (i, (e, (entry, req, frames, root))) in built.xl.iter().zip(want).enumerate() {
         assert_eq!((e.kh1_entry, e.kh1_request, e.kh1_frames, e.root_motion, e.looped), (entry, Some(req), frames, root, false));
-        assert_eq!(e.slot, first + entry);
+        assert_eq!(e.slot, if i < 3 { first + i } else { first + i + 1 });
         assert_eq!(e.name, format!("p001_{:03}", e.slot));
         let c = ext.slots[e.slot].clip.as_ref().unwrap();
         assert_eq!((c.name_str(), c.fps(), c.looped()), (e.name.clone(), 60, false));
@@ -554,8 +569,18 @@ fn h_specials_clips_from_xl_limit() {
     };
     assert!((travel(first + 1) - 5.6205).abs() < 0.01, "dash travel {}", travel(first + 1));
     assert!((travel(first + 2) - 7.3441).abs() < 0.01, "finisher travel {}", travel(first + 2));
+    assert!(ext.slots[first + 3].clip.is_none(), "the held clip's slot stays free without its files");
+    // Strike Raid's throw: KH1's Keyblade flies out in the motion itself (no object): the weapon
+    // clip's grip goes about 8.9 m out by the throw's end (Checked (files): KH1's weapon bone).
+    if let Some(w) = &built.weapon {
+        let c = w.ann.slots[first + 5].clip.as_ref().unwrap();
+        let a = c.sample(1, 0.0).t;
+        let b = c.sample(1, c.frames as f64 - 1.0).t;
+        let d = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt();
+        eprintln!("(h) Strike Raid throw: the Keyblade's grip moves {d:.2} m from the hand's start");
+    }
     let j = built.manifest_json(&[]);
-    assert_eq!(j.matches("\"xl_entry\"").count(), 3);
+    assert_eq!(j.matches("\"xl_entry\"").count(), 12);
     assert!(j.contains(&format!("\"xl_entry\": 1, \"kh1_request\": 201, \"slot\": {}", first + 1)));
     eprintln!("(h) xl_limit: clips {:?}", built.xl.iter().map(|e| (e.slot, e.frames, e.bytes)).collect::<Vec<_>>());
 }

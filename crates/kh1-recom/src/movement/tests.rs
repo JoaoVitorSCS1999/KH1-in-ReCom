@@ -96,6 +96,8 @@ struct FakeRecom {
     specials: Vec<crate::specials::SpecialStart>,
     special_rows: Vec<crate::specials::RowStart>,
     special_ends: usize,
+    /// M12 step 7: special rows whose attack ended (Strike Raid's throws).
+    special_row_ends: usize,
     /// `dodge_roll = recom`: Re:CoM's own avoid init runs (its roll), the order of Re:CoM's calls
     /// around it, and how often our frame wrote Re:CoM's untouchable bit.
     recom_rolls: usize,
@@ -150,6 +152,7 @@ impl FakeRecom {
             specials: Vec::new(),
             special_rows: Vec::new(),
             special_ends: 0,
+            special_row_ends: 0,
             recom_rolls: 0,
             order: Vec::new(),
             untouchable_writes: 0,
@@ -355,6 +358,10 @@ impl Host for FakeRecom {
         self.specials.push(*s);
         true
     }
+    fn special_row_end(&mut self) {
+        self.special_row_ends += 1;
+    }
+
     fn special_row(&mut self, r: &crate::specials::RowStart) {
         self.special_rows.push(*r);
     }
@@ -394,6 +401,8 @@ struct Pair {
     magic: Option<crate::magic::MagicCommand>,
     /// A special command for the next frame (M9 stage 9c.1; the oracle has none).
     special: Option<u8>,
+    /// Re:CoM's attack target for every frame (M12 step 7; None by default).
+    target: Option<kh1_core::TargetPart>,
 }
 
 #[derive(Debug)]
@@ -430,6 +439,7 @@ impl Pair {
             o_out: None,
             magic: None,
             special: None,
+            target: None,
         }
     }
 
@@ -447,7 +457,7 @@ impl Pair {
         self.prev = pad;
         let o = self.oracle.step(&Input { move_dir: dir, tilt, jump, square, attack, ..Default::default() }, &[], &mut self.world, step);
         self.o_out = Some(o.clone());
-        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, recom_tilt: tilt, jump, square, lock_target: None, attack, target: None, locked: false, magic: self.magic.take(), item: None, special: self.special.take() }, self.first);
+        let out = self.ours.frame(&mut self.recom, &FrameInput { move_dir: dir, tilt, recom_tilt: tilt, jump, square, lock_target: None, attack, target: self.target, locked: false, magic: self.magic.take(), item: None, special: self.special.take() }, self.first);
         self.first = false;
         self.recom.after_exe();
         let airborne = !self.recom.contact;
@@ -1873,6 +1883,132 @@ fn sonic_blade_refusals() {
     }
     let out = step_special(&mut p, Some(cmd::SONIC_BLADE));
     assert!(matches!(out.specials[..], [SpecialEvent::Refused { .. }]), "in the air");
+}
+
+// ---- M12 step 7: Strike Raid on Re:CoM's sleight action ----
+
+/// Steps until `f` holds (at most `max` frames); the frames it took.
+fn until(p: &mut Pair, max: usize, f: impl Fn(&Pair) -> bool) -> usize {
+    let mut k = 0;
+    while !f(p) {
+        step_special(p, None);
+        k += 1;
+        assert!(k < max, "not within {max} frames");
+    }
+    k
+}
+
+/// KH1's flow (`0x14039FFD0`, `0x1403A0290`, `0x1403A0230`): the press starts the wind-up (0xE6, 30
+/// frames) on Re:CoM's sleight action, invincible, in state 0x27; then throw 1 (row 0x2F, Re:CoM's
+/// Strike Raid id 0xD), its catch and the wait, whose combo window offers the next throw ("Raid");
+/// from n = 4 the follow-up is "Judgment" (0x60), the fifth throw the finishing one (row 0x33,
+/// 0xE8); after it nothing more is offered and the wait ends the special. No travel. Each throw's
+/// attack ends with its motion.
+#[test]
+fn strike_raid_runs_kh1s_throws_on_recoms_sleight_action() {
+    use crate::specials::{cmd, recom, SpecialEvent, RECOM_ACTION, STATE_OF, STRIKE_RAID};
+    use kh1_core::data::xl;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    for _ in 0..3 {
+        step_special(&mut p, None);
+    }
+    let pos0 = p.recom.pos;
+    let out = step_special(&mut p, Some(cmd::STRIKE_RAID));
+    assert_eq!(out.specials, vec![SpecialEvent::Started { index: STRIKE_RAID }]);
+    assert_eq!(p.recom.specials.last().map(|s| (s.index, s.cost)), Some((STRIKE_RAID, 200)), "KH1's 2 MP on the press");
+    assert_eq!((p.recom.act.id, p.ours.state), (RECOM_ACTION, STATE_OF[STRIKE_RAID]));
+    assert_eq!((p.ours.state, p.ours.rec.head()), (0x27, xl::request(xl::SR_WINDUP)));
+    assert!(p.recom.untouchable);
+    assert_eq!(p.ours.follow_up(), Some((cmd::RAID, true)), "Raid in the Attack row, greyed in the wind-up");
+    // The wind-up's 30 frames, then throw 1 (row 0x2F) at blend 0.
+    let k = until(&mut p, 40, |p| !p.recom.special_rows.is_empty());
+    assert_eq!(k, 31, "throw 1 as the wind-up ends");
+    assert_eq!((p.recom.special_rows[0].kh1_row, p.recom.special_rows[0].counter, p.recom.special_rows[0].recom_id), (0x2F, 1, recom::ID_RAID));
+    assert_eq!(p.ours.rec.head(), xl::request(xl::SR_THROW));
+    // No window in the throw: the next one waits for the wait's combo window (after the 42-frame
+    // throw and the 8-frame catch); the throw's attack ends with it.
+    let out = step_special(&mut p, Some(cmd::RAID));
+    assert!(matches!(out.specials[..], [SpecialEvent::Refused { command: cmd::RAID, .. }]), "{:?}", out.specials);
+    let k = until(&mut p, 80, |p| p.ours.follow_up() == Some((cmd::RAID, false)));
+    assert!((48..=53).contains(&k), "the wait's window opens after the throw and the catch: {k}");
+    assert_eq!(p.ours.rec.req, xl::request(xl::SR_WAIT));
+    assert_eq!(p.recom.special_row_ends, 1);
+    for n in 2..=5u8 {
+        let c = if n > 4 { cmd::RAID_LAST } else { cmd::RAID };
+        until(&mut p, 120, |p| p.ours.follow_up() == Some((c, false)));
+        let out = step_special(&mut p, Some(c));
+        assert!(matches!(out.specials[..], [SpecialEvent::Row { counter, kh1_row, .. }] if counter == n && kh1_row == 0x2E + n as usize), "{:?}", out.specials);
+        assert_eq!(p.recom.special_rows.last().map(|r| (r.kh1_row, r.recom_id)), Some((0x2E + n as usize, recom::ID_RAID)));
+    }
+    assert_eq!(p.ours.rec.head(), xl::request(xl::SR_FINISHER), "the fifth: the finishing throw 0xE8");
+    // After the fifth nothing more is offered; the wait ends the special.
+    let mut k = 0;
+    while p.ours.special.is_some() {
+        assert!(p.ours.follow_up().is_some_and(|f| f.1), "nothing after the fifth");
+        step_special(&mut p, None);
+        k += 1;
+        assert!(k < 200);
+    }
+    assert!((145..=152).contains(&k), "76 + 8 + 64 frames: {k}");
+    assert_eq!((p.recom.special_ends, p.ours.state, p.recom.special_row_ends), (1, state::GROUND, 5));
+    assert_ne!(p.recom.act.id, RECOM_ACTION);
+    assert!((p.recom.pos - pos0).flat().length() < 0.01, "Strike Raid doesn't move Sora");
+    step_special(&mut p, None);
+    assert!(!p.recom.untouchable);
+}
+
+/// One throw without a follow-up: wind-up 30 + throw 42 + catch 8 + wait 64; a target more than 200
+/// above makes it the high throw and catch (`0x1403A0290`); toward the target; the fifth is never
+/// offered after it ends.
+#[test]
+fn strike_raid_one_throw_high_and_aimed() {
+    use crate::specials::cmd;
+    use kh1_core::data::xl;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_special(&mut p, None);
+    step_special(&mut p, Some(cmd::STRIKE_RAID));
+    let k = until(&mut p, 200, |p| p.ours.special.is_none());
+    assert!((143..=147).contains(&k), "{k}");
+    assert_eq!(p.recom.special_rows.len(), 1);
+    // A target 250 above (KH1 y is down) and to the side: the high throw 0xEA, then the catch 0xEC.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_special(&mut p, None);
+    p.target = Some(kh1_core::TargetPart { owner: 1, centre: Vec3::new(400.0, -250.0, 0.0), radius: 30.0 });
+    step_special(&mut p, Some(cmd::STRIKE_RAID));
+    until(&mut p, 40, |p| !p.recom.special_rows.is_empty());
+    assert_eq!(p.ours.rec.head(), xl::request(xl::SR_THROW_HIGH));
+    assert!((wrap_angle(p.ours.target_yaw - Vec3::new(1.0, 0.0, 0.0).yaw())).abs() < 1e-3, "toward the target");
+    until(&mut p, 60, |p| p.ours.rec.req == xl::request(xl::SR_CATCH_HIGH));
+    // 200 above or less: the plain throw.
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_special(&mut p, None);
+    p.target = Some(kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, -200.0, 400.0), radius: 30.0 });
+    step_special(&mut p, Some(cmd::STRIKE_RAID));
+    until(&mut p, 40, |p| !p.recom.special_rows.is_empty());
+    assert_eq!(p.ours.rec.head(), xl::request(xl::SR_THROW));
+}
+
+/// A clash of the thrown Keyblade (KH1's reaction in state 0x27 → `0x1403A00A0`): the knocked-back
+/// catch 0xED, the wait, the end; no recoil; Sora stays in the special and may still throw again.
+#[test]
+fn strike_raid_clash_knocks_the_keyblade_back() {
+    use crate::specials::{cmd, SpecialEvent};
+    use kh1_core::data::xl;
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    step_special(&mut p, None);
+    step_special(&mut p, Some(cmd::STRIKE_RAID));
+    until(&mut p, 40, |p| !p.recom.special_rows.is_empty());
+    for _ in 0..12 {
+        step_special(&mut p, None);
+    }
+    p.recom.swing_clash = Some((6, -30));
+    let out = step_special(&mut p, None);
+    assert!(out.specials.iter().any(|e| matches!(e, SpecialEvent::Clashed { .. })), "{:?}", out.specials);
+    assert_eq!(p.ours.rec.head(), xl::request(xl::SR_CLASH));
+    assert!(p.ours.special.is_some() && p.ours.state == 0x27, "no recoil, still the special");
+    assert_eq!(p.recom.special_row_ends, 1);
+    let k = until(&mut p, 120, |p| p.ours.follow_up() == Some((cmd::RAID, false)));
+    assert!((22..=27).contains(&k), "the 24-frame knocked-back catch, then the wait's window: {k}");
 }
 
 // ---- `dodge_roll = recom`: Re:CoM's own roll (owner, 2026-11-02, "The whole roll") ----

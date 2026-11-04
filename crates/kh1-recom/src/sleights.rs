@@ -19,13 +19,43 @@
 //! - **The start**: Re:CoM's own sleight start for the id (the summons' path, Sora's vtable `+0x130`
 //!   = `0x1402247A0`); Re:CoM runs its motion, effects, hits, damage, protection and end.
 //! - **Damage = KH1** ([`kh1_scaled`], owner, "Sleights menu follow-ups"): each hit Re:CoM's × the
+<<<<<<< HEAD
 //!   enemy's KH1-scale max HP (a twin's, a proxy's or a boss twin's) / its Re:CoM max HP; the same
 //!   rule for the summons (`win::summons::scale_sleight_hit`).
+=======
+//!   enemy's KH1 max HP / its Re:CoM max HP (twins only; `win::summons::scale_sleight_hit`).
+//! - **KH1's specials** (M12 step 7, owner 2026-11-03: "Strike raid are arcanum and ragnarok in KH1FM
+//!   are triangle prompts. Let them be triangle prompts and also show up in the sleights menu"):
+//!   [`SPECIALS`] when equipped, under Re:CoM's sleight id of the same name (Strike Raid 8), named by
+//!   KH1's own command word (338), usable when the special's own prompt would offer it (its
+//!   `0x14028D0F0` score 2: a live target in range, its MP); confirm issues the special's command
+//!   exactly as its prompt's Triangle does (`crate::specials`), not Re:CoM's sleight.
+>>>>>>> ec6ca67
 
 use crate::abilities::{self as ab, SleightMp};
 
-/// How many sleight abilities there are (and so the list's most rows).
-pub const MAX: usize = ab::SLEIGHTS.end - ab::SLEIGHTS.start;
+/// The KH1 specials (by `crate::specials` index) the list also holds when equipped (M12 step 7):
+/// Strike Raid. Sonic Blade isn't (the owner named the other three).
+pub const SPECIALS: [usize; 1] = [crate::specials::STRIKE_RAID];
+
+/// The list's most rows: the sleight abilities and [`SPECIALS`].
+pub const MAX: usize = ab::SLEIGHTS.end - ab::SLEIGHTS.start + SPECIALS.len();
+
+/// The Re:CoM sleight id a listed special stands under (Strike Raid 8): its ability's source.
+pub fn special_sleight(i: usize) -> Option<u16> {
+    if !SPECIALS.contains(&i) {
+        return None;
+    }
+    match ab::ALL.get(ab::special_ability(i)?)?.source {
+        ab::Source::Sleight(id) => Some(id),
+        _ => None,
+    }
+}
+
+/// The listed special of a Re:CoM sleight id.
+pub fn special_index(id: u16) -> Option<usize> {
+    SPECIALS.iter().copied().find(|&i| special_sleight(i) == Some(id))
+}
 
 /// Our first sleight command: `0x80 + id` (ids 0x1B..=0x43 → 0x9B..=0xC3). KH1's command table
 /// ends below 0x80 and our other commands sit elsewhere (Stagger 0xF0). Checked (code).
@@ -79,15 +109,18 @@ pub fn command(id: u16) -> u8 {
     COMMAND_BASE.wrapping_add(id as u8)
 }
 
-/// The sleight of a command (only the 27 sleight abilities).
+/// The sleight of a command (the 27 sleight abilities and the listed specials).
 pub fn of_command(c: u8) -> Option<u16> {
     let id = c.checked_sub(COMMAND_BASE)? as u16;
-    ability(id).map(|_| id)
+    (ability(id).is_some() || special_index(id).is_some()).then_some(id)
 }
 
-/// The word of sleight `id`.
+/// The word of sleight `id` (a listed special: KH1's own word of its command).
 pub fn word(id: u16) -> u16 {
-    WORD_BASE + id
+    match special_index(id).and_then(|i| crate::specials::cmd::name(crate::specials::TABLE[i].1)) {
+        Some(w) => w,
+        None => WORD_BASE + id,
+    }
 }
 
 /// Every sleight's word and name (the abilities' names), for the menu's word list.
@@ -147,6 +180,12 @@ pub fn usable(g: &crate::summons::Gate, id: u16) -> bool {
     g.battle && (g.ground || (g.air && air_start(id))) && !g.out && pay_points(id, g.mp).is_some()
 }
 
+/// A listed special's usable test (M12 step 7): battle, on the ground, nothing running, and its own
+/// prompt's offer (`offered`: the bit of its `crate::specials` index, `0x14028D0F0`'s score 2).
+pub fn special_usable(g: &crate::summons::Gate, id: u16, offered: u8) -> bool {
+    special_index(id).is_some_and(|i| g.battle && g.ground && !g.out && offered & (1 << i) != 0)
+}
+
 /// Re:CoM's hit kinds (the hurt body's `+0x80`) whose value isn't damage: Stop's ticks (8), Gravity's
 /// percent (0xD), the timed states 0x10 / 0x17 (Shock Impact's, Lethal Frame's) and Magnet's 0x14
 /// (their value goes to `+0x2D8` or is a share of HP, `0x14017DC50`). Re:CoM's own mask for them,
@@ -176,7 +215,7 @@ pub fn kh1_scaled(value: i16, kind: u32, kh1_max: i32, recom_max: i32) -> Option
 /// The list's ids from the equipped ones (Re:CoM's order; anything not a sleight ability dropped,
 /// at most [`MAX`]).
 pub fn list(equipped: &[u16]) -> Vec<u16> {
-    let mut v: Vec<u16> = equipped.iter().copied().filter(|&id| ability(id).is_some()).collect();
+    let mut v: Vec<u16> = equipped.iter().copied().filter(|&id| ability(id).is_some() || special_index(id).is_some()).collect();
     v.sort_unstable();
     v.dedup();
     v.truncate(MAX);
@@ -191,7 +230,7 @@ mod tests {
 
     #[test]
     fn commands_and_words_round_trip_for_the_27() {
-        assert_eq!(MAX, 27);
+        assert_eq!(MAX, 27 + SPECIALS.len());
         let ids: Vec<u16> = ab::SLEIGHTS.filter_map(ab::sleight_of).collect();
         for &id in &ids {
             assert_eq!(of_command(command(id)), Some(id));
@@ -200,7 +239,7 @@ mod tests {
             assert!(crate::summons::of_command(command(id)).is_none());
             assert!(crate::command_menu::cmd::spell_of(command(id)).is_none());
         }
-        // Not ours: the summons' and the KH1-twin sleights.
+        // Not ours: the summons' and Sonic Blade (the owner listed the other three).
         assert_eq!(of_command(command(s::SONIC_BLADE)), None);
         assert_eq!(of_command(0x7F), None);
         assert_eq!(of_command(0x35), None);
@@ -288,6 +327,28 @@ mod tests {
         assert_eq!(kh1_scaled(0, 1, 24, 160), None);
         assert_eq!(kh1_scaled(500, 1, 0, 160), None);
         assert_eq!(kh1_scaled(500, 1, 24, 0), None);
+    }
+
+    /// M12 step 7 (owner: "also show up in the sleights menu"): Strike Raid in the list under Re:CoM's
+    /// sleight 8 (before the magic sleights, Re:CoM's order), KH1's word 338, usable as its prompt.
+    #[test]
+    fn strike_raid_is_listed_as_its_prompt() {
+        assert_eq!(special_sleight(crate::specials::STRIKE_RAID), Some(s::STRIKE_RAID));
+        assert_eq!(special_sleight(crate::specials::SONIC_BLADE), None);
+        assert_eq!(special_index(s::STRIKE_RAID), Some(crate::specials::STRIKE_RAID));
+        assert_eq!(of_command(command(s::STRIKE_RAID)), Some(s::STRIKE_RAID));
+        assert_eq!(command(s::STRIKE_RAID), 0x88);
+        assert_eq!(word(s::STRIKE_RAID), 338);
+        assert_eq!(cost(s::STRIKE_RAID), None, "its MP is KH1's (the special's own)");
+        assert_eq!(list(&[s::HOLY, s::STRIKE_RAID, s::FIRE_RAID]), vec![s::STRIKE_RAID, s::FIRE_RAID, s::HOLY]);
+        let g = Gate { battle: true, ground: true, air: false, mp: 0, out: false };
+        let bit = 1 << crate::specials::STRIKE_RAID;
+        assert!(special_usable(&g, s::STRIKE_RAID, bit));
+        assert!(!special_usable(&g, s::STRIKE_RAID, 0), "its prompt wouldn't offer it");
+        assert!(!special_usable(&Gate { ground: false, air: true, ..g }, s::STRIKE_RAID, bit), "ground only (KH1's state 0)");
+        assert!(!special_usable(&Gate { out: true, ..g }, s::STRIKE_RAID, bit));
+        assert!(!special_usable(&Gate { battle: false, ..g }, s::STRIKE_RAID, bit));
+        assert!(!usable(&g, s::STRIKE_RAID), "not by the sleights' MP rule");
     }
 
     #[test]

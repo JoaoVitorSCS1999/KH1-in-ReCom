@@ -1457,6 +1457,31 @@ pub const SPECIAL_TINT_CHECKED: &[Site] = &[
     Site { name: "end action tint reset (0x1401F66D4)", rva: 0x001F_66D4, expect: &[0x8B, 0x83, 0x18, 0x04, 0x00, 0x00, 0x45, 0x33, 0xF6, 0x85, 0xC0, 0x79, 0x35] },
 ];
 
+/// M12 step 7 (`win::specials`, `docs/recom-m9-abilities.md` § Strike Raid): Re:CoM's Strike Raid
+/// bits the KH1 Strike Raid copies or calls (no hook, no patch). Checked at start; a mismatch leaves
+/// Strike Raid out.
+pub const SPECIAL_SR_CHECKED: &[Site] = &[
+    // exeStockSkill's start for a row without flag 0x20: sub ecx,0x82 (attack id 0xD × 10); je
+    // 0x140218F28.
+    Site { name: "Strike Raid start dispatch (0x140218E62)", rva: 0x0021_8E62, expect: &[0x81, 0xE9, 0x82, 0x00, 0x00, 0x00, 0x0F, 0x84, 0xBA, 0x00, 0x00, 0x00] },
+    // lea rdx,[0x1407C5D70]: its tint colour.
+    Site { name: "Strike Raid tint colour lea (0x140218F28)", rva: 0x0021_8F28, expect: &[0x48, 0x8D, 0x15, 0x41, 0xCE, 0x5A, 0x00] },
+    // xor r9d,r9d (flags 0); movaps xmm2,xmm6 (20.0, `0x140218CA9`); mov rcx,r14; call 0x1401F7D80.
+    Site { name: "Strike Raid tint call (0x140218F4A)", rva: 0x0021_8F4A, expect: &[0x45, 0x33, 0xC9, 0x0F, 0x28, 0xD6, 0x49, 0x8B, 0xCE, 0xE8, 0x28, 0xEE, 0xFD, 0xFF] },
+    // The colour (0.6, 0.5, 0.75, 1.0).
+    Site { name: "Strike Raid tint colour (0x1407C5D70)", rva: 0x007C_5D70, expect: &[0x9A, 0x99, 0x19, 0x3F, 0x00, 0x00, 0x00, 0x3F, 0x00, 0x00, 0x40, 0x3F, 0x00, 0x00, 0x80, 0x3F] },
+    // Re:CoM's attack row 0xD (Strike Raid): byte 0 = Sora's action row 0x3F (`p001_074`), byte 1 =
+    // its EET variant 1, byte 0xA = its StockSkillList column 0, byte 0xF = 0 (no flag 0x20: no
+    // resource wait; no 0x40: Sora's own motions).
+    Site { name: "Re:CoM row 0xD (0x1407C6D40)", rva: 0x007C_6D40, expect: &[0x3F, 0x01, 0x07, 0x28, 0x08, 0x4C, 0x0C, 0x28, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00] },
+    // Sora's own motion play (his vtable +0x70): its event part (`EET start(+0x108, slot, p6, 1)`,
+    // `SES start(+0x118, slot, p7, 1)`) is what `motion_events` does for Re:CoM's Strike Raid clips.
+    Site { name: "own motion play (0x1401A3470)", rva: 0x001A_3470, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x20] },
+    // The action-row play: movsxd rax,[rcx+0x398]; lea rcx,[0x1407C6300]: the slot of a row is
+    // `[0x1407C6300 + 8 × +0x398]` + row × 16 + 8 (`0x1401F71EC`: mov esi,[rax+rdx*8+8]).
+    Site { name: "action-row slot lookup (0x1401F71BB)", rva: 0x001F_71BB, expect: &[0x48, 0x63, 0x81, 0x98, 0x03, 0x00, 0x00, 0x48, 0x8D, 0x0D, 0x37, 0xF1, 0x5C, 0x00] },
+];
+
 /// CPlayerSora's exeStockSkill slot (vtable `+0x140`), which the Battle exe calls through.
 pub const SPECIAL_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x140 (0x1405A9A78)", rva: 0x005A_9A78, target: 0x0021_8950 }];
 
@@ -3600,6 +3625,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SPECIAL_HOOKS,
         SPECIAL_CHECKED,
         SPECIAL_TINT_CHECKED,
+        SPECIAL_SR_CHECKED,
         SUMMON_CHECKED,
         STORY_SKIP_HOOKS,
         STORY_SKIP_CALLEES,

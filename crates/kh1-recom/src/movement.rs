@@ -334,6 +334,10 @@ pub trait Host {
     /// A special row starts on Re:CoM's sleight action: the last row's volume ends, the KH1 row in
     /// the attack row pointer, Re:CoM's attack id of it.
     fn special_row(&mut self, _r: &crate::specials::RowStart) {}
+    /// M12 step 7: a special row's attack is over (Strike Raid's throw ended into its catch): the
+    /// weapon's volume ends and the attack row pointer holds no window, so the catch and the wait
+    /// hit nothing (KH1's attack object goes with the throw's motion).
+    fn special_row_end(&mut self) {}
     /// Re:CoM ends its sleight action (`0x1401F6660`). True as for [`Host::end_swing`].
     fn end_special(&mut self, _airborne: bool) -> bool {
         false
@@ -481,6 +485,9 @@ pub struct Kh1Sora {
     /// The KH1 special running on Re:CoM's sleight action (M9 stage 9c.1): KH1's state 0x20.
     pub special: Option<crate::specials::Special>,
     pub(crate) special_log: Vec<crate::specials::SpecialEvent>,
+    /// M12 step 7: this frame's Re:CoM attack target, for a special's callbacks (Strike Raid's
+    /// first throw aims from its wind-up's end).
+    pub(crate) special_target: Option<kh1_core::TargetPart>,
     /// Re:CoM's end action (from [`Kh1Sora::leave_swing`] / `leave_cast`) entered its own win
     /// action: this frame yields to it.
     pub(crate) recom_took: bool,
@@ -578,6 +585,7 @@ impl Kh1Sora {
             item_log: Vec::new(),
             special: None,
             special_log: Vec::new(),
+            special_target: None,
             recom_took: false,
             recom_roll: false,
             recom_roll_wanted: false,
@@ -800,7 +808,7 @@ impl Kh1Sora {
                 // A special's motion ended into its end callback (M9 stage 9c.1): after the
                 // wind-up the first dash takes the motion (the lock stays); after a row the special
                 // ends and its queued idle plays.
-                if kh1_core::data::xl::entry_of(ended_req).is_some() && self.special_motion_end(h) {
+                if kh1_core::data::xl::entry_of(ended_req).is_some() && self.special_motion_end(h, ended_req) {
                     self.rec.flags = 0;
                     return;
                 }
@@ -929,6 +937,7 @@ impl Kh1Sora {
         self.recom_tilt = input.recom_tilt;
         self.jump_down = input.jump.held;
         self.took_off = false;
+        self.special_target = input.target;
         if fresh {
             self.resync(h, airborne);
         } else {
@@ -1151,7 +1160,7 @@ impl Kh1Sora {
         self.cast = None;
         self.item = None;
         self.special = None;
-        if self.state == crate::specials::STATE {
+        if crate::specials::is_state(self.state) {
             self.state = state::GROUND;
         }
         self.lock = false;
@@ -1243,6 +1252,11 @@ impl Kh1Sora {
     /// the Counterattack during a kind-6 recoil (`0x140294220` reads request 0x6E). Checked (decomp +
     /// files: btltbl's globals).
     pub(crate) fn swing_clash(&mut self, h: &mut dyn Host, kind: u8, diff: i32, ev: &mut Vec<Event>) {
+        // M12 step 7: Strike Raid's thrown Keyblade (KH1's reaction in state 0x27 → `0x1403A00A0`).
+        if self.special_clash(h) {
+            ev.push(Event::SwingClashed { kind });
+            return;
+        }
         self.leave_swing(h);
         if self.recom_took {
             return;
@@ -1369,13 +1383,13 @@ impl Kh1Sora {
                 }
             }
             state::GLIDE => self.glide_next(h, airborne, pos, ev),
-            // M9 stage 9c.1, `0x14039EBA0`: in the air the special ends, Sora falls (state 2).
-            crate::specials::STATE => {
-                if airborne {
-                    self.special_fall(h);
+            // M9 stage 9c.1, `0x14039EBA0`: in the air the special ends, Sora falls (state 2); M12
+            // step 7: Strike Raid's air callback (`0x1402B1840`) keeps its state.
+            s if crate::specials::is_state(s) => {
+                if airborne && self.special_fall(h) {
                     state::AIR
                 } else {
-                    crate::specials::STATE
+                    s
                 }
             }
             s => s,

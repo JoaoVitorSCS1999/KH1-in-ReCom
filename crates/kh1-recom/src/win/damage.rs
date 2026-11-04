@@ -142,21 +142,22 @@ pub unsafe fn swing(pl: usize, kh1_row: usize) -> bool {
     true
 }
 
-/// Sonic Blade's row (`win::specials`): Re:CoM's Sonic Blade sleight at the column of Re:CoM's row
-/// for it (0xE start, 0xF dash, 0x10 finisher), as `initStockSkill` / `exeStockSkill` compute it.
+/// A special's row (`win::specials`): Re:CoM's sleight of the same name at the column of Re:CoM's
+/// row for it (Sonic Blade 0xE start, 0xF dash, 0x10 finisher; M12 step 7, Strike Raid 0xD), as
+/// `initStockSkill` / `exeStockSkill` compute it (`dm::special_source`).
 pub unsafe fn special(pl: usize, recom_id: u32) -> bool {
     if !recom_ready() || !in_battle(pl) {
         return false;
     }
-    let Some(col) = dm::sonic_blade::column(recom_id) else { return false };
-    let Some(r) = sleight_row(dm::sonic_blade::SLEIGHT) else {
-        note(|| "Sonic Blade: Re:CoM's StockSkillList isn't loaded: cardless AP".into());
+    let Some((sleight, col)) = dm::special_source(recom_id) else { return false };
+    let Some(r) = sleight_row(sleight) else {
+        note(|| format!("special {recom_id:#x}: Re:CoM's StockSkillList isn't loaded: cardless AP"));
         return false;
     };
     let stat: i32 = rd(pl + f::ATTACK_STAT);
     let a = dm::row_ap(Table::Sleight, &r, col, stat, Rule::Stat);
     let after = apply(pl, &a);
-    note(|| format!("Sonic Blade row {recom_id:#x}: Re:CoM sleight {:#x} column {col}: power {} x attack {stat} / 100 = AP {}{}", dm::sonic_blade::SLEIGHT, a.power, a.ap, if after != a.ap { format!(" -> {after} (rewrite)") } else { String::new() }));
+    note(|| format!("special row {recom_id:#x}: Re:CoM sleight {sleight:#x} column {col}: power {} x attack {stat} / 100 = AP {}{}", a.power, a.ap, if after != a.ap { format!(" -> {after} (rewrite)") } else { String::new() }));
     true
 }
 
@@ -257,6 +258,9 @@ pub fn swing_tag(kh1_row: usize, value: i32) -> String {
     use kh1_core::data::row;
     if let Some(col) = dm::swing_column(kh1_row, super::attack::moveset()) {
         return dm::trace_tag(value, col, Table::Card, super::stats::equipped_card());
+    }
+    if crate::specials::ROWS_OF[crate::specials::STRIKE_RAID].contains(&kh1_row) {
+        return dm::trace_tag(value, 0, Table::Sleight, crate::specials::recom::RAID_SLEIGHT);
     }
     let col = if kh1_row == row::SONIC_BLADE_FINISHER { dm::COL_FINISHER } else { dm::COL_NORMAL };
     dm::trace_tag(value, col, Table::Sleight, dm::sonic_blade::SLEIGHT)

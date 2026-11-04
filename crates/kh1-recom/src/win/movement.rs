@@ -765,6 +765,10 @@ impl Host for RecomHost {
         unsafe { super::specials::special_row(self.pl, r) }
     }
 
+    fn special_row_end(&mut self) {
+        unsafe { super::specials::special_row_end(self.pl) }
+    }
+
     fn end_special(&mut self, airborne: bool) -> bool {
         unsafe { super::specials::end_special(self.pl, airborne) }
     }

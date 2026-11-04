@@ -978,6 +978,133 @@ four Re:CoM calls at each of its eight motion starts.
   Blade card does at Combat = Re:CoM, and fades back when the special ends (the finisher's end, or
   stopping after a dash). Compare side by side with Re:CoM's own Sonic Blade sleight.
 
+## M12 step 7: KH1's Strike Raid (the triangle prompt, and in the Sleights list)
+
+Owner (2026-11-03, "M12 answers"): "Strike raid are arcanum and ragnarok in KH1FM are triangle
+prompts. Let them be triangle prompts and also show up in the sleights menu." Built natively as
+Sonic Blade (§ 9c.1): KH1's motions on new slots of Sora's pack, KH1's rows in our attack table,
+Re:CoM's sleight action `0x16`, collision and hit path. Combat = KH1 in Sora's story, battle rooms
+only (Sonic Blade's rule); Combat = Re:CoM and Re:CoM's own Strike Raid sleight card unchanged.
+
+### KH1 (Steam). Checked (decomp + files) unless tagged
+
+| what | value | where |
+|---|---|---|
+| command | 0x5E "Strike" (word 338), follow-ups 0x5F "Raid" (339), 0x60 "Judgment" (340) | `0x14028D3D0`, command records `+4` |
+| offer | range 900 (gap to the lock point minus its radius), no height rule; score 2 / 1 by MP, FM never draws a greyed one | `0x14028D0F0`, record `+0xE` |
+| MP | 200 = 2 whole MP, paid on the press | btltbl `+0x14C`, `0x14028D800` |
+| AP | 3, sort key 803; learned with Re:CoM's sleight 8 | btltbl ability row 13 (`0x33D8 + 12 × 12`) |
+| state | 0x27; flags `0x1200080` (no damage, no reaction); physics speed 0; the air callback `0x1402B1840` keeps the state (no falling out) | `0x14039FFD0`, `0x1403A01D0`, `0x1403A0170` |
+| wind-up | 0xE6 (xl 17), 30 frames, blend 0; the next entry 0xE7 carries the first throw's callback | `0x14039FFD0` |
+| throw n (1..=5) | toward the target (`0x1402A3B00`: lock point, else the facing kept), row `0x2E + n` (`0x1402A3980`: its motion, a new attack, the attacking bit); rows 0x2F..0x32 0xE7 (xl 18, 42 f, hit 10–end), 0x33 0xE8 (xl 19, 76 f, hit 32–end) | `0x1403A0290`, btltbl rows |
+| high throw | target lock point more than 200 above Sora: 0xEA (xl 21) / the fifth 0xEB (xl 22) instead, the catch 0xEC (xl 23) | `0x1403A0290` |
+| then | the catch 0xE9 (xl 20, 8 f; effect 2 at the Keyblade), the wait 0xEE (xl 25, 64 f, combo window 0–52; effect 3), the end (state 0) | `0x1403A0290`, `0x1403A0440`, `0x1403A0200`, `0x1403A0220` |
+| follow-up | 0x5F, 0x60 once n > 3; greyed from n = 5, outside the combo window (the wait's) or without the attacking bit; Triangle: the next throw | `0x1403A0230`, `0x14039FFC0` |
+| clash | the reaction `0x14029BBD0`, state 0x27 (only kinds 6 / 7 pass the flags): `0x1403A00A0`: the knocked-back catch 0xED (xl 24, 24 f), the wait, the end; no recoil | `0x14029BBD0`, `0x1403A00A0` |
+| records | 0x55F8 (throws): element 1, flinch, power 10, crit 200, no MP charge, radius 65, fractions 0.8 / −0.4, clash type 6; 0x5668 (fifth): launch (kind 5), power 12, radius 80 | btltbl |
+| the Keyblade | thrown **in the motion itself**: KH1's weapon bone goes about 8.9 m out over 0xE7 (no object; the attack is on bone 0x30) | `xl_limit.dat` (files), records' bone 0x30 |
+| tick | 60 Hz frames in both games, the xl clips at 60 fps (as § 9c.1) | earlier stages |
+
+### Re:CoM (Steam). Checked (decomp + exe)
+
+- `initStockSkill` `0x140220DF0` case 8: attack id **0xD**, no resource load (Re:CoM's Strike Raid
+  plays Sora's own motions), AP rule 1 (`StockSkillList[8]` at row 0xD's column 0 × attack ÷ 100).
+- `exeStockSkill` `0x140218950`: 0x82 (Sora's row 0x3F `p001_074`), 0x83 (row 0x40 `p001_075`,
+  the weapon thrown as an object `0x140226160` at row 0xD's frame 40, collision until it comes
+  back), 0x84 (row 0x41 `p001_076`, the catch). Its start (row 0xD `+0xF` = 0: no resource wait)
+  tints with `0x1407C5D70` (0.6, 0.5, 0.75, 1) over 20.0 (`0x140218E62` → `0x140218F28` /
+  `0x140218F4A`); no `limit` effect. Variants: the start (EET `row 0xD [1]` = 1, SES Sora's vtable
+  `+0x110(3)` = 0: `0x14021FEF0` lists no 0xD), the throw (1, 0), the catch (0, 0).
+- Sora's own motions' events: `0x1401F7180` resolves a row's slot (`[0x1407C6300 + 8 ×
+  player+0x398]` row × 16 + 8, set at `stateInitial`), Sora's motion play `0x1401A3470` starts
+  them on his own players (`EET start(+0x108, slot, eet, 1)`, `SES start(+0x118, slot, ses, 1)`).
+
+### What runs (Combat = KH1, Sora's story, battle rooms)
+
+- **Abilities page**: Strike Raid (3 AP) once Re:CoM's sleight 8 is learned (`Source::Sleight`).
+- **The prompt**: KH1's offer walk now has Sonic Blade and Strike Raid (each when equipped and its
+  clips are in): "Strike" in the context tab when the target is within 900.
+- **Start** (Triangle): KH1's MP on the press; `initStockSkill`'s case-8 writes, cardless (action
+  0x16, attack id 0xD, AP); Re:CoM's Strike Raid tint; the KH1 frame: state 0x27, the wind-up.
+- **Throws**: each on Re:CoM's id 0xD (its Strike Raid hit sounds / effects) with our KH1 row
+  (0x2F..0x33); Re:CoM's collision on the row (`procAttackCollision` from our `exeStockSkill`
+  wrapper) with KH1's spheres on the Keyblade's bones, which the converted weapon clip carries out
+  and back (the asset step's weapon clip of 0xE7: the grip 8.27 m out at its end, Checked
+  (files)). When a throw's motion ends (into the catch) or clashes, its attack ends: the weapon's
+  volume and Re:CoM's empty row 0xE in `+0x3C8` (`win::specials::special_row_end`), so the catch
+  and the wait hit nothing.
+- **Follow-ups**: "Raid" / "Judgment" in the Attack row, greyed outside the wait's window;
+  Triangle throws again.
+- **Clash**: the shared enemy-guard step's clash on the thrown Keyblade → KH1's knocked-back catch;
+  Sora stays in the special.
+- **Voices, sounds, effects**: base Re:CoM's (as Sonic Blade's): each KH1 motion starts the events
+  of the Re:CoM clip it stands for on Sora's own players: the wind-up `p001_074`, every throw (high
+  ones too) `p001_075`, the catches and the knocked-back catch `p001_076`; the wait none.
+- **Damage**: at Damage = Re:CoM each throw (the fifth too) Re:CoM's Strike Raid sleight 8, column
+  0 (`dm::special_source`; trace `:recom <ap> col 0 sleight 0x8`); at Damage = KH1 KH1's records.
+- **Invincible**: KH1's flags (as Sonic Blade's).
+- **The Sleights list** (owner: "also show up in the sleights menu"): `docs/recom-m12-sleights.md` § 8.5.3.
+
+### Sites (`sites::SPECIAL_SR_CHECKED`, bytes read from the Steam exe; a mismatch: no Strike Raid)
+
+`0x140218E62` (`81 E9 82 00 00 00 0F 84 BA 00 00 00`), `0x140218F28` (the colour's `lea`),
+`0x140218F4A` (the tint call), `0x1407C5D70` (the colour), `0x1407C6D40` (Re:CoM's row 0xD),
+`0x1401A3470` (20 first bytes; its event part copied), `0x1401F71BB` (the slot lookup). No hook,
+no patch. All 695 byte sites of `sites.rs` re-read with pefile: 0 mismatches.
+
+### Per frame
+
+Nothing new unless Strike Raid runs; then as Sonic Blade (the KH1 frame Sora runs anyway, Re:CoM's
+collision call); two Re:CoM calls at each KH1 motion start; the Sleights list's offer test only
+while the bottom row says Sleights.
+
+### Asset step: **re-run it** (`kh1-recom-build`)
+
+Strike Raid's nine `xl_limit.dat` entries (17..=25) on new slots after the held clip's (234..242
+with the owner's files; Sonic Blade's 230..232 and the held 233 unchanged), Sora's and the
+Keyblade's packs (Halloween Town's too); the manifest's `xl_limit` section lists twelve; the words
+338 / 339 / 340 in each language (English: "Strike", "Raid", "Judgment"). Without the re-run:
+`specials: Strike Raid's rows are not in the attack table … no Strike Raid` (Sonic Blade still works).
+
+### 1:1 checks
+
+- Checked (decomp + files, tests): the table above; the nine motions' lengths and flag windows
+  against the player's `xl_limit.dat` (`kh1-data::xl_motions_match_the_players_file`, every request
+  word of the set); rows 0x2F..0x33 and records 0x55F8 / 0x5668 against btltbl; a full run in the
+  movement fake (`strike_raid_runs_kh1s_throws_on_recoms_sleight_action`: throw 1 at frame 31, the
+  next window 48–53 frames later, five rows, the end 145–152 frames after the fifth, no travel;
+  `strike_raid_one_throw_high_and_aimed`; `strike_raid_clash_knocks_the_keyblade_back`); the
+  converted weapon clip's throw (`validate::h_specials_clips_from_xl_limit`).
+- Not checked: in game; against a KH1 trace of Strike Raid (none in this session); which voices /
+  effects Re:CoM's `p001_074..076` events hold.
+- Assumptions: KH1 starts a queued entry's callback when the entry becomes current (as Sonic
+  Blade's); Re:CoM's attack target stands for KH1's; Re:CoM's collision tests the weapon's volume
+  where the converted clip puts the Keyblade (8 m out); the knocked-back catch's events are the
+  catch's; Re:CoM's resolved slots of rows 0x3F..0x41 are Sora's own clips (set at his
+  `stateInitial`).
+
+### Not KH1's / not Re:CoM's
+
+- Re:CoM's own thrown-Keyblade object (`0x140226160`) and whatever effect it draws is not used (KH1
+  throws it in the motion); KH1's effects 0 / 2 / 3 / 5 and its 0x801 / 0x806 weapon effects are not
+  played (base Re:CoM's events instead, the owner's Sonic Blade rule).
+
+### What the owner should test (re-run the asset step first)
+
+1. `kh1-recom-build`: the specials line lists twelve slots (230–232, 234–242).
+2. Learn Strike Raid (Re:CoM's sleight, level 12), equip it on KH1 > Abilities (3 AP).
+3. In battle, an enemy within about 9 m and 2+ MP: the context tab shows "Strike"; Triangle: 2 MP
+   gone, the wind-up, the Keyblade thrown at the enemy and back; the screen tints as Re:CoM's
+   Strike Raid card does.
+4. After each catch, "Raid" in the Attack row lights while Sora waits; Triangle throws again; the
+   fifth is "Judgment" (the bigger throw, launches). Not pressing: Sora ends after the wait.
+5. A flying enemy well above Sora: the high throw. No damage taken during the whole special.
+6. Damage = Re:CoM: each throw's hit in the F9 trace carries `:recom <2 × attack> col 0 sleight 0x8`.
+7. Sounds / effects: compare with Re:CoM's Strike Raid card at Combat = Re:CoM. The log's `Re:CoM's
+   Strike Raid events: Sora's row 0x40 (slot …)` lines should say `effects started, sounds started`.
+8. Sleights row (D-pad Left): Strike Raid listed first when equipped; usable when the prompt would
+   show; choosing it plays the same special.
+
 ## M12 step 3: KH1's Rod-list support abilities
 
 Owner (2026-11-03, "M12 sleights and progression"): "As sora levels up in KH1, he receives abilities

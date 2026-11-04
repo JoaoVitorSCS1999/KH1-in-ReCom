@@ -111,7 +111,7 @@ pub struct Extension {
 
 /// KH1's specials' motions the asset step converts (`xl_limit.dat` entries; stage 9c.1: Sonic
 /// Blade's three), in the order their rows are appended.
-pub const XL_ENTRIES: [usize; 3] = kh1_core::data::xl::ENTRIES;
+pub const XL_ENTRIES: [usize; kh1_core::data::xl::ENTRIES.len()] = kh1_core::data::xl::ENTRIES;
 
 impl Extension {
     /// Row ids for the KH1 entries the pack holds, in `KH1_ONLY` order, from `RECOM_ROWS` on.
@@ -289,7 +289,7 @@ pub fn row_for(req: u16, s: &Stance, ext: &Extension) -> Option<(u32, bool)> {
         // root motion where the xl set's request map has the bit (the dash and the finisher).
         r if kh1_core::data::xl::entry_of(r).is_some() => {
             let e = kh1_core::data::xl::entry_of(r)?;
-            let root = kh1_core::data::xl::motions()[e].root_motion;
+            let root = kh1_core::data::xl::motion(e)?.root_motion;
             return ext.xl_row(e).map(|row| (row, root));
         }
         _ => return None,
@@ -471,7 +471,10 @@ mod tests {
         use kh1_core::data::xl;
         let e = Extension::plan(|e| e != 110).with_xl(|_| true);
         let first = RECOM_ROWS + KH1_ONLY.len() as u32 - 1;
-        assert_eq!(e.xl, [Some(first), Some(first + 1), Some(first + 2)]);
+        assert_eq!(e.xl[..3], [Some(first), Some(first + 1), Some(first + 2)]);
+        // M12 step 7: Strike Raid's nine after Sonic Blade's, in `xl::ENTRIES` order.
+        assert_eq!(e.xl_row(xl::SR_WINDUP), Some(first + 3));
+        assert_eq!(e.xl_row(xl::SR_WAIT), Some(first + 11));
         let s = Stance::default();
         assert_eq!(row_for(xl::request(xl::WINDUP), &s, &e), Some((first, false)));
         assert_eq!(row_for(xl::request(xl::DASH), &s, &e), Some((first + 1, true)));
@@ -479,9 +482,9 @@ mod tests {
         assert_eq!(row_for(xl::request(xl::DASH), &s, &Extension::default()), None);
         assert_eq!(row_for(0, &Stance { row: (first + 1) as i32, ..s }, &e), Some((row::STANCE_IDLE, false)));
         let names = appended_rows(&e, |_| Some("k".into()), |x| Some(format!("p001_{}", 230 + x)));
-        assert_eq!(names[names.len() - 3..], [(first, "p001_230".to_string()), (first + 1, "p001_231".to_string()), (first + 2, "p001_232".to_string())]);
+        assert_eq!(names[names.len() - 12..names.len() - 9], [(first, "p001_230".to_string()), (first + 1, "p001_231".to_string()), (first + 2, "p001_232".to_string())]);
         // Without the KH1-only rows the xl rows start right after Re:CoM's.
-        assert_eq!(Extension::default().with_xl(|x| x == xl::DASH).xl, [None, Some(RECOM_ROWS), None]);
+        assert_eq!(Extension::default().with_xl(|x| x == xl::DASH).xl[..3], [None, Some(RECOM_ROWS), None]);
     }
 
     /// M11 (the Neoshadow's grab): the held clip's row follows the KH1-only and xl rows; no clip, no row; no KH1
@@ -489,7 +492,7 @@ mod tests {
     #[test]
     fn the_held_row_follows_the_others() {
         let e = Extension::plan(|e| e != 110).with_xl(|_| true).with_held(true);
-        let last_xl = e.xl[2].unwrap();
+        let last_xl = e.xl.iter().flatten().copied().max().unwrap();
         assert_eq!(e.held, Some(last_xl + 1));
         assert_eq!(held_row(&e, Some("p001_233".into())), Some((last_xl + 1, "p001_233".to_string())));
         assert_eq!(held_row(&e, None), None);

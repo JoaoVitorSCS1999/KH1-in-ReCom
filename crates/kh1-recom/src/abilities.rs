@@ -207,8 +207,9 @@ pub const ALL: [Ability; 58] = [
     // KH1 learns Gravity Break from no level list; the owner chose Re:CoM level 30 (2026-11-01).
     a("Gravity Break", 58, 0x1000_0000, 2, 212, Source::Level(30)),
     // The specials (stage 9c): their state is kept; Sonic Blade (9c.1) is on the equip screen
-    // (KH1 id 11, 3 AP, sort key 801: btltbl `0x33D8 + 12 × 10`, Checked (files)); the others wait.
-    special("Strike Raid", sleight::STRIKE_RAID),
+    // (KH1 id 11, 3 AP, sort key 801: btltbl `0x33D8 + 12 × 10`, Checked (files)); M12 step 7, Strike
+    // Raid (KH1 id 13, 3 AP, key 803: `0x33D8 + 12 × 12`, Checked (files)); the others wait.
+    a("Strike Raid", 13, 0, 3, 803, Source::Sleight(sleight::STRIKE_RAID)),
     a("Sonic Blade", 11, 0, 3, 801, Source::Sleight(sleight::SONIC_BLADE)),
     special("Ars Arcanum", sleight::ARS_ARCANUM),
     special("Ragnarok", sleight::RAGNAROK),
@@ -330,8 +331,14 @@ pub const MODIFIERS: std::ops::Range<usize> = ix::SLIDING_DASH..ix::GRAVITY_BREA
 /// The specials (stage 9c): kept; Sonic Blade (9c.1) is on the screen and offered by the command
 /// menu, the others wait (not on the screen, nothing reads them).
 pub const SPECIALS: std::ops::Range<usize> = ix::STRIKE_RAID..ix::RAGNAROK + 1;
-/// The specials built so far (stage 9c.1: Sonic Blade).
-pub const SPECIALS_BUILT: Bits = 1 << ix::SONIC_BLADE;
+/// The specials built so far (stage 9c.1: Sonic Blade; M12 step 7: Strike Raid).
+pub const SPECIALS_BUILT: Bits = 1 << ix::SONIC_BLADE | 1 << ix::STRIKE_RAID;
+
+/// The ability of a KH1 special (`crate::specials` index: 0 Sonic Blade, 1 Ars Arcanum, 2 Strike
+/// Raid, 3 Ragnarok).
+pub fn special_ability(i: usize) -> Option<usize> {
+    [ix::SONIC_BLADE, ix::ARS_ARCANUM, ix::STRIKE_RAID, ix::RAGNAROK].get(i).copied()
+}
 /// Every bit of [`ALL`].
 pub const ALL_BITS: Bits = (1 << ALL.len()) - 1;
 /// The modifiers' bits.
@@ -969,6 +976,7 @@ pub mod page {
                 RIPPLE_DRIVE => b"A combo finisher that strikes all around. Uses Magic.\0",
                 GRAVITY_BREAK => b"A combo finisher that cuts an enemy's HP.\0",
                 SONIC_BLADE => b"A flurry of dashing strikes. Triangle at a nearby enemy.\0",
+                STRIKE_RAID => b"Hurl the Keyblade at an enemy, up to five times. Triangle.\0",
                 GUARD => b"Press Square to block an attack.\0",
                 COUNTERATTACK => b"After a block, press Triangle to strike back.\0",
                 DODGE_ROLL => b"Press Square while moving to roll.\0",
@@ -1537,9 +1545,9 @@ mod tests {
         let rows = sc.rows(&s);
         assert_eq!(rows.iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared)]);
         assert_eq!(sc.confirm(&mut s), Outcome::Opened);
-        // Sora's list in KH1's key order; Strike Raid (still waiting) isn't listed, Sonic Blade is.
+        // Sora's list in KH1's key order; Sonic Blade (801) and, since M12 step 7, Strike Raid (803).
         let l: Vec<Label> = sc.rows(&s).iter().map(|r| r.label).collect();
-        assert_eq!(l, vec![Label::Ability(ix::VORTEX), Label::Ability(ix::BLITZ), Label::Ability(ix::RIPPLE_DRIVE), Label::Ability(ix::SONIC_BLADE)]);
+        assert_eq!(l, vec![Label::Ability(ix::VORTEX), Label::Ability(ix::BLITZ), Label::Ability(ix::RIPPLE_DRIVE), Label::Ability(ix::SONIC_BLADE), Label::Ability(ix::STRIKE_RAID)]);
         // Equip Ripple Drive (3), then Blitz (2) = 5; Vortex (1) is greyed and refused.
         sc.set_cursor(2);
         assert_eq!(sc.confirm(&mut s), Outcome::Equipped(ix::RIPPLE_DRIVE));

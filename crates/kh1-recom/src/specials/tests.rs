@@ -69,9 +69,10 @@ fn special_rows_take_the_xl_windows() {
     use crate::attack::{add_special_rows, kh1_table, special_rows_ready, RECOM_ROWS_1_7, RECOM_STUN_KIND};
     let m = kh1_core::Moveset::kh1_defaults();
     let mut t = kh1_table(&RECOM_ROWS_1_7, &m, &|_| None);
-    assert!(!special_rows_ready(&t));
+    assert!(!special_rows_ready(&t, SONIC_BLADE) && !special_rows_ready(&t, STRIKE_RAID));
     add_special_rows(&mut t, &RECOM_ROWS_1_7, &m, &|e| Some(0x50 + e as u32));
-    assert!(special_rows_ready(&t));
+    assert!(special_rows_ready(&t, SONIC_BLADE) && special_rows_ready(&t, STRIKE_RAID));
+    assert!(!special_rows_ready(&t, ARS_ARCANUM), "not built");
     let d = t[0x1B];
     assert_eq!((d[0], d[1], d[3], d[4], d[5], d[0xB], d[0xF]), (0x51, 10, 40, 3, 21, RECOM_STUN_KIND, 0x80));
     let f = t[0x21];
@@ -80,5 +81,5 @@ fn special_rows_take_the_xl_windows() {
     // Without the clip, nothing.
     let mut u = kh1_table(&RECOM_ROWS_1_7, &m, &|_| None);
     add_special_rows(&mut u, &RECOM_ROWS_1_7, &m, &|e| (e != xl::FINISHER).then_some(0x50));
-    assert!(!special_rows_ready(&u));
+    assert!(!special_rows_ready(&u, SONIC_BLADE));
 }

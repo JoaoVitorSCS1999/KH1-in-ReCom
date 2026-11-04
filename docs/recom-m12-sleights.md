@@ -654,6 +654,7 @@ Owner test lines (8.5.2):
   through something else).
 - Damage = Re:CoM: no change.
 
+<<<<<<< HEAD
 #### 8.5.3 Bosses, Re:CoM-only enemies and summons (owner, 2026-11-03, "KH1 damage scaling")
 
 Owner: "at Damage = KH1, sleights also scale on enemies without a KH1 twin (bosses, Re:CoM-only
@@ -721,3 +722,16 @@ Owner test lines (8.6):
 - Combat = Re:CoM: no change.
 
 Not checked (8.6): anything in game.
+=======
+#### 8.5.3 KH1's specials in the Sleights list (owner, 2026-11-03, "M12 answers": "Strike raid are arcanum and ragnarok in KH1FM are triangle prompts. Let them be triangle prompts and also show up in the sleights menu")
+
+| what | where | tag |
+|---|---|---|
+| **Listed**: an equipped KH1 special of `sleights::SPECIALS` (M12 step 7: Strike Raid) joins the equipped sleights, under Re:CoM's sleight id of the same name (Strike Raid 8: command `0x88`), so Re:CoM's order puts it before the magic sleights. Sonic Blade is not listed (the owner named the other three). | `crate::sleights`, `win::command_menu::world` | Checked (code + tests) |
+| **Its name**: KH1's own word of its command (Strike Raid 338 "Strike"), each language's from the asset step. | `sleights::word` | Checked (files + tests) |
+| **Usable** when its own prompt would offer it (`0x14028D0F0`'s score 2 for that special alone: a live Re:CoM attack target in range, its KH1 MP), in a battle room, on the ground, no special or sleight running; greyed and locked otherwise (KH1's error sound). | `sleights::special_usable`, `win::command_menu::sleight_specials` | Checked (code + tests) |
+| **Performed** exactly as the prompt's Triangle: confirm issues its KH1 command (0x5E), taken by Sora's KH1 frame (`crate::specials`); not Re:CoM's sleight start; its MP is KH1's (2), not the tier rule. | `Menu::run_sleight` | Checked (code + tests) |
+
+Owner question: Sonic Blade in the list too?
+
+>>>>>>> ec6ca67

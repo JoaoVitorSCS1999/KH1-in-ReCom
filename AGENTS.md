@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 201: M12 step 7: Strike Raid (KH1 FM's triangle prompt; also in Sleights), version 0.101.0 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Strike raid are arcanum and ragnarok in KH1FM are triangle prompts. Let them be triangle prompts and also show up in the sleights menu."
+- Strike Raid (Checked (KH1 decomp + files)): wind-up 0xE6, then up to 5 throws on rows 0x2F..0x33 (high when the target is more than 200 above Sora), each with a catch and a wait; follow-ups 0x5F / 0x60; a clash knocks the Keyblade back; range 900, 2 MP, 3 AP. KH1 throws it inside the motion's weapon bone (not an object): no bullet. Re:CoM side: `initStockSkill` case 8 (id 0xD), tint `0x1407C5D70`.
+- Learned with Re:CoM's sleight of the same name, equipped with KH1's AP; a Triangle prompt as Sonic Blade; in the Sleights menu (command 0x88, KH1's name) sending the same command. Damage = Re:CoM: Re:CoM's sleight values; Damage = KH1: KH1's records. Combat = Re:CoM unchanged. `SPECIAL_SR_CHECKED`.
+- Asset step: re-run (motion slots 234..242, words). Checked: tests, Windows build. Not checked: in game; no KH1 trace.
+
+---
+
 ## Stage 200: Damage = KH1: sleights scale on bosses / Re:CoM-only enemies; summons scale too, version 0.100.6 (2026-11-01)
 
 - Ask (owner, 2026-11-03, on 0.100.4): "Scale them too"; summons "Same rule" (this replaces the earlier "Re:CoM's summon damage at both Damage settings" at Damage = KH1).
