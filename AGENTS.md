@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 206: Sonic Blade in the Sleights list, version 0.101.5 (2026-11-01)
+
+- Ask (owner, 2026-11-03): Sonic Blade "Add it" to the Sleights list.
+- Listed under Re:CoM's Sonic Blade sleight id 9 (after Strike Raid, before Ars Arcanum), named by KH1's word 319 "Sonic"; usable exactly when its prompt would offer it (within 6 m, not more than 1.6 m above, 2 MP, on the ground, in battle); choosing it sends its Triangle's command 0x4B. The Customize shortcut picker keeps only the 27 sleight abilities (specials can't be shortcuts).
+- Asset step: not needed (word 319 already there). Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 205: Ragnarok offered against any target, version 0.101.4 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Any target" (not KH1's: KH1 offers it only for a target at least 160 above Sora).
