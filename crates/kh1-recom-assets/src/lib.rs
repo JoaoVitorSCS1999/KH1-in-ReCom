@@ -42,6 +42,7 @@ pub mod build;
 pub mod camp_rows;
 pub mod command_menu;
 pub mod convert;
+pub mod effects;
 pub mod enemy;
 pub mod flip;
 pub mod install;

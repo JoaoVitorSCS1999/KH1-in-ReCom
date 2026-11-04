@@ -10,6 +10,7 @@ mod d2;
 mod damage;
 mod deck;
 mod drops;
+mod effects;
 mod gimmick;
 mod guard;
 mod held;
@@ -296,6 +297,8 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     let menu_file = recom_bases(dirs).into_iter().map(|b| b.join("kh1-command-menu.json")).find(|p| p.is_file());
     let hud_file = recom_bases(dirs).into_iter().map(|b| b.join("kh1-hud.json")).find(|p| p.is_file());
     let sound_file = recom_bases(dirs).into_iter().map(|b| b.join(crate::menu_sounds::MANIFEST)).find(|p| p.is_file());
+    // M13 stage 1: the KH1 effect sets the asset step added (checked at the first battle).
+    effects::install(base, recom_bases(dirs).into_iter().map(|b| b.join(crate::effects::MANIFEST)).find(|p| p.is_file()).as_deref());
     install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref(), hud_file.as_deref(), sound_file.as_deref());
     install_battles(base);
     install_enemies(base, &recom_bases(dirs));

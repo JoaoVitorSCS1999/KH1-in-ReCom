@@ -93,6 +93,29 @@ with `.ese` tables written by the asset step. Re:CoM loads, steps, draws and end
 - **Where Sora's effects load:** PLAYER 1's LINK `31000` = category 3 (EFFECT), group 1000 = `EF1000.EFF`
   (`ex_0010.dpx`, `ex_5010.dpx`, `ex_0010.ese`). Checked (files).
 
+## Stage 1 built (0.102.0)
+
+- **Asset step** (`kh1_recom_assets::effects`): `raw/EFFECT/1000/EF1000.EFF` is Re:CoM's container with its three
+  rows byte-identical (only their offsets move, 0x20 per new row). KH1's Sora set `xa_ex_0010.mdls` section 1 is
+  added as **`kh1_ex_0010.dpx`**: 126 592 bytes, effect ids 0–7. Its one PC texture, KH1's `-8fb40.dds`, becomes
+  `kh1_ex_0010_dpxbb40.dds`. Re:CoM's four PC assets are kept, and so is its date. `kh1-effects.json` lists the set.
+  Checked (files: the owner's install, 2026-11-03). The rows, bytes, assets and texture were compared with
+  Re:CoM's and KH1's originals.
+- **Container** (`0x1402A2A60`): 0x20-byte rows `{offset, name (21 characters), u8, u8, size | 0x80000000}`, read
+  until a zero offset. Checked (decomp).
+- **PC texture names:** `0x140477BB0` → `0x1402BBBC0` uses `sprintf("%s%x", set name, texture − set)` with
+  `.` → `_`, plus `.dds` (`0x1402BBC42`). Checked (decomp + exe). The tag is not used on this path, so the new
+  asset copies Square's `0x48…` pattern (Assumption: unused).
+- **DLL** (`win::effects`): at the first battle of a session, Re:CoM's effect-by-name `0x1402A4920` (16 bytes
+  checked) looks each set up once and writes one log line. Nothing per frame, no hook.
+- **Not yet:** nothing plays the KH1 set. Stage 3 writes the per-move events, and stage 2 writes the `.ese` sound rows.
+- **Keyblade sets** move to stage 4: each goes with its own Keyblade group, so only the equipped one is loaded.
+- **To check in game:**
+  - the log line says `kh1_ex_0010.dpx loaded by Re:CoM (8 entries …)`;
+  - Re:CoM's own Kingdom Key trail and Sora's sleight effects still look and sound the same, which checks the
+    moved rows;
+  - at Combat = Re:CoM nothing changes. The container is served at both settings, but Re:CoM's own rows are untouched.
+
 ## Open (ask at their stage)
 
 - No hit-stop at KH1 (none found in KH1: `recom-m13-kh1-fx.md` § 2; this corrects the clash "hit-stop" in

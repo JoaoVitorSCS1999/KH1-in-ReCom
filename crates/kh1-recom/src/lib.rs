@@ -75,6 +75,7 @@ pub mod customize;
 pub mod d2;
 pub mod dim;
 pub mod damage;
+pub mod effects;
 pub mod deck;
 pub mod drops;
 pub mod fliers;

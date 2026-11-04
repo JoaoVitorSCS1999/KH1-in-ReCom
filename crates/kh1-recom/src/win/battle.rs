@@ -599,6 +599,8 @@ pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: us
             boss::p5_part(kh1, p5)
         )
     });
+    // M13 stage 1: once per session, whether Re:CoM has the KH1 effect sets (a log line).
+    super::effects::battle_check();
     orig::<CtorFn>(&ORIG_MANAGER_CTOR)(this, a, c, d)
 }
 

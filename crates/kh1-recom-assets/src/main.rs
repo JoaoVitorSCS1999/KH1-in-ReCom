@@ -21,7 +21,9 @@
 //! files with KH1's Shadow motions, attack records and their sounds added) and `kh1-shadow.json`
 //! (`docs/recom-m10-shadow.md`). For each M11 enemy (`kh1_recom_assets::enemy::SPECS`, the Soldier
 //! first) it writes `ENEMY/NNNN/ENNNNN.ANN`, `.ASD`, `.SES` and `kh1-<enemy>.json`
-//! (`docs/recom-m11-enemies.md`).
+//! (`docs/recom-m11-enemies.md`). For M13's KH1 effects it writes `raw/EFFECT/1000/EF1000.EFF`
+//! (Re:CoM's effect container Sora's group loads, with KH1's Sora effect set added under a `kh1_`
+//! name and its PC textures) and `kh1-effects.json` (`docs/recom-m13-plan.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -254,6 +256,14 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // M13 stage 1: KH1's Sora effect set in the effect container Sora's group loads.
+    let effects = match effects_build(&game, keys.clone(), &arc) {
+        Ok(e) => Some(e),
+        Err(e) => {
+            println!("note: KH1 effects not added: {e} (Re:CoM's effect container is left as it is)");
+            None
+        }
+    };
     // KH1's Shadow (M10): its motions, attacks and the behaviour's numbers in Re:CoM's Shadow.
     let shadow = match shadow_build(&game, keys.clone(), &arc) {
         Ok(b) => {
@@ -415,6 +425,24 @@ fn run() -> Result<(), String> {
             if camp_manifest.is_file() {
                 std::fs::remove_file(&camp_manifest).map_err(|e| format!("{}: {e}", camp_manifest.display()))?;
                 println!("removed {} (no camp item row this run)", camp_manifest.display());
+            }
+        }
+    }
+    // M13: Re:CoM's EF1000.EFF with KH1's sets (a raw PKG entry) and its manifest; without them
+    // an older manifest and container are removed (Re:CoM's own container is served again).
+    let fx_manifest = root.join(kh1_recom_assets::effects::MANIFEST);
+    let fx_entry = root.join("raw").join(kh1_recom_assets::effects::EFF_PATH.replace('/', std::path::MAIN_SEPARATOR_STR));
+    match &effects {
+        Some(e) => {
+            write(&fx_entry, &e.entry)?;
+            write(&fx_manifest, e.manifest.as_bytes())?;
+        }
+        None => {
+            for f in [&fx_manifest, &fx_entry] {
+                if f.is_file() {
+                    std::fs::remove_file(f).map_err(|e| format!("{}: {e}", f.display()))?;
+                    println!("removed {} (no KH1 effects this run)", f.display());
+                }
             }
         }
     }
@@ -720,6 +748,43 @@ fn mp_bar_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats
         if kept.is_empty() { String::new() } else { format!("; kept as they are: {kept:?}") }
     );
     Ok(MpBar { spr: base, assets: out_assets, date, manifest })
+}
+
+/// M13 stage 1's files: the raw `EF1000.EFF` entry and `kh1-effects.json`.
+struct Effects {
+    entry: Vec<u8>,
+    manifest: String,
+}
+
+/// Adds KH1's Sora effect set (`xa_ex_0010.mdls` section 1, with its PC textures) to Re:CoM's
+/// `EF1000.EFF` after Re:CoM's own rows, as a plain PKG entry with Re:CoM's assets, the set's
+/// textures and Re:CoM's date (`kh1_recom_assets::effects`).
+fn effects_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive) -> Result<Effects, String> {
+    use kh1_recom_assets::effects as fx;
+    let inst = install::kh1(game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
+    let (mdls, mdls_hd, _) = inst.read_full(fx::SORA_MDLS).map_err(|e| format!("{}: {e}", fx::SORA_MDLS))?;
+    let sora = fx::kh1_set(fx::SORA_SET, fx::SORA_MDLS, &mdls, fx::SORA_SECTION, &mdls_hd).map_err(|e| format!("{}: {e}", fx::SORA_MDLS))?;
+    let e = arc.find(fx::EFF_PATH).ok_or_else(|| format!("{} not in Recom.hed", fx::EFF_PATH))?;
+    let raw = arc.read_raw_entry(e).map_err(|e| format!("{}: {e}", fx::EFF_PATH))?;
+    let date = i32::from_le_bytes(raw.get(12..16).ok_or("short entry")?.try_into().unwrap());
+    let (eff, assets) = kh1_formats::egs::decode_entry_full(&keys, &raw).map_err(|e| format!("{}: {e}", fx::EFF_PATH))?;
+    let own: Vec<String> = fx::parse_eff(&eff).map_err(|e| format!("{}: {e}", fx::EFF_PATH))?.into_iter().map(|r| r.name).collect();
+    let (out, all) = fx::add_sets(&eff, &assets, std::slice::from_ref(&sora)).map_err(|e| e.to_string())?;
+    let texture_names: Vec<&str> = sora.hd.iter().map(|a| a.name.as_str()).collect();
+    println!(
+        "KH1 effects: {} ({}, {} bytes, effect ids {:?}, PC textures {:?}) added to {} after Re:CoM's {:?} ({} PC assets kept)",
+        sora.name,
+        sora.source,
+        sora.data.len(),
+        sora.ids,
+        texture_names,
+        fx::EFF_PATH,
+        own,
+        assets.len()
+    );
+    let entry = kh1_formats::egs::build_plain_entry(&out, &all, date).map_err(|e| e.to_string())?;
+    let sources = [("EF1000.EFF sha256", kh1_formats::egs::sha256_hex(&eff)), ("xa_ex_0010.mdls sha256", kh1_formats::egs::sha256_hex(&mdls))];
+    Ok(Effects { entry, manifest: fx::manifest_json(std::slice::from_ref(&sora), &sources) })
 }
 
 /// The camp item row's files: the raw `FO0100.SPR` entry and `kh1-camp-rows.json`.

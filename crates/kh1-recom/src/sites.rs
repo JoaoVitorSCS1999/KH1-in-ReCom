@@ -1546,6 +1546,14 @@ pub const SPECIAL_RAG_CHECKED: &[Site] = &[
 /// CPlayerSora's exeStockSkill slot (vtable `+0x140`), which the Battle exe calls through.
 pub const SPECIAL_PTRS: &[PtrSite] = &[PtrSite { name: "CPlayerSora vtable +0x140 (0x1405A9A78)", rva: 0x005A_9A78, target: 0x0021_8950 }];
 
+/// M13 (`win::effects`): Re:CoM's effect-by-name, called once at the first battle to check that the
+/// KH1 sets the asset step added are loaded.
+pub const EFFECT_CHECKED: &[Site] = &[
+    // push rbx; sub rsp,0x40; mov rax,[rip+0x5BE19B] (the cookie, rip-relative); xor rax,rsp:
+    // `0x1402A43E0(5, name)`, then the name with `_` added or removed; returns the set (`+0x68`).
+    Site { name: "effect by name (0x1402A4920)", rva: 0x002A_4920, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x40, 0x48, 0x8B, 0x05, 0x9B, 0xE1, 0x5B, 0x00, 0x48, 0x33, 0xC4] },
+];
+
 /// M8b (`win::summons`, `docs/recom-summons.md`): Re:CoM code the summons call (no hook, no patch):
 /// each KH1 summon starts Re:CoM's LV3 sleight through Sora's own sleight start. Checked at start;
 /// a mismatch: no summons. They also call `initStockSkill` (through the start), the sleight
@@ -3690,6 +3698,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SPECIAL_AA_CHECKED,
         SPECIAL_RAG_CHECKED,
         SUMMON_CHECKED,
+        EFFECT_CHECKED,
         STORY_SKIP_HOOKS,
         STORY_SKIP_CALLEES,
         SHADOW_HOOKS,

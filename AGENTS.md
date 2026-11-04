@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 208: M13 stage 1: KH1's Sora effect set in Re:CoM's own effect container, version 0.102.0 (2026-11-03)
+
+Owner, 2026-11-03: "Let's work on m13", then "Go ahead" (stage 1 of `docs/recom-m13-plan.md`). Answers: three toggles (Effects / Sounds / Voices), KH1 voice lines on their own toggle, the specials switch to KH1's.
+
+- **Asset step** (`kh1_recom_assets::effects`, `main.rs` `effects_build`): writes `raw/EFFECT/1000/EF1000.EFF` = Re:CoM's container (PLAYER 1's LINK `31000`) with its rows `ex_0010.dpx`, `ex_5010.dpx` and `ex_0010.ese` byte-identical (moved 0x20), plus KH1's Sora set `xa_ex_0010.mdls` section 1 as **`kh1_ex_0010.dpx`** (ids 0–7, 126 592 bytes) with its PC texture `-8fb40.dds` → `kh1_ex_0010_dpxbb40.dds`; Re:CoM's 4 PC assets and date kept; `kh1-effects.json`. Checked (files: run on the owner's install, every row, asset and the texture compared byte for byte).
+- **Container** read by `0x1402A2A60` (0x20-byte rows, 21-character names, until a zero offset). Checked (decomp). Texture names `sprintf("%s%x", set, texture − set)` with `.` → `_` + `.dds` (`0x1402BBBC0`, format at `0x1402BBC42`). Checked (decomp + exe). Same format as KH1 (DPX `0x82`; Re:CoM's `ex_5010.dpx` = KH1's `xw_ex_5010.wpn` section 0). Checked (files).
+- **Effect clock** 30 Hz in both (Re:CoM `0x140474F60` steps `0x1404797F0` once per 2.0 of dt × 0.02; KH1 `0x1401ECB50`). Checked (decomp). Re:CoM never reads a program's `+0xFC` sound (only `.ese`). Checked (decomp: no reader).
+- **DLL** (`win::effects`, `crate::effects`): reads `kh1-effects.json`; at the first battle of a session (Re:CoM's battle manager ctor, already wrapped) calls Re:CoM's effect-by-name `0x1402A4920` (site `EFFECT_CHECKED`, 16 bytes) once per set and logs whether Re:CoM loaded it. No hook, no patch, nothing per frame.
+- **Not yet:** nothing plays the KH1 set (stage 3 writes the per-move events; stage 2 the `.ese` sounds). Keyblade sets move to stage 4 (with their own groups: only the equipped one loaded).
+- Assumption: the new texture's tag is unused (Square's `0x48…` pattern copied). Assumption: Re:CoM's own effects are unaffected by their rows moving (the container is read by offset; to check in game: the Kingdom Key trail and Sora's sleight effects).
+
+---
+
 ## Stage 207: KH1 specials: the prompt checks Ragnarok last, version 0.101.6 (2026-11-01)
 
 Owner, 2026-11-03, on 0.101.4, answering which special the Triangle prompt picks: "Ragnarok last". `specials::ORDER` is now Trinity, Ars Arcanum, Sonic Blade, Strike Raid, Ragnarok (indices [4, 1, 0, 2, 3]). KH1's walk (`0x14052834C`, [4, 3, 1, 0, 2]) is kept as `KH1_ORDER` for reference. The best score still wins, and the first among equals. Result: the prompt shows Ragnarok only when none of Ars Arcanum, Sonic Blade or Strike Raid is equipped and in range (Strike Raid's 900 covers Ragnarok's 600, and it costs 2 MP against 3). The Sleights list is unchanged. No new addresses. Checked (code + tests: `the_offer_is_kh1s`); Checked (exe) KH1's own order. Not KH1's: the owner's choice.
