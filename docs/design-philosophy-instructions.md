@@ -560,3 +560,7 @@ At KH1 setting:
   - **Removed at KH1**: Mega-Potion, Mega-Ether, Megalixir (shop, drops, Items list).
   - **Tent / Camping Set**: new items. Used from the KH1 camp Items page outside battle: Tent = full HP, Camping Set = full HP and MP (owner: "Camp-only full heal"). Descriptions say Sora, not the party.
   - **Drops**: Re:CoM-only enemies (no KH1 twin) take the drop table of a similar KH1 enemy (owner: "Nearest KH1 table"; the pairings to be listed for the owner).
+- **Camp menu at KH1** (owner, 2026-11-04, verbatim: "in the "KH1" menu, bring the "Combat" and "Movement" sections into the "Settings" menu. When combat is set to "KH1," Replace "Review Decks" with "Items" from the "KH1" Menu When KH1 combat is selected, the menu buttons should look like this: Items Abilities Customize World Map Map Cards World Cards Status Journal Settings. When ReCoM combat is selected, the menu buttons should be default. This should remove the "KH1" section on the camp menu, and if you need to make more space for the buttons, make it work"; answers):
+  - **Settings** opens a short list in Sora's story at both Combat settings: **Game Settings** (Re:CoM's own page, unchanged), **Combat** and **Movement** (our pages). Owner: "Settings opens a short list".
+  - **Riku's story**: Re:CoM's default menu, with no Combat or Movement.
+  - The "KH1" top entry goes. At Combat = KH1 the top list is the owner's nine entries; at Combat = Re:CoM it is Re:CoM's seven, with Settings opening the short list.
