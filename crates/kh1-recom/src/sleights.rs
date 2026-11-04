@@ -5,9 +5,10 @@
 //! tier"). The testable part; the menu's rules are in `crate::command_menu`, the start in
 //! `win/summons.rs`, notes `docs/recom-m12-sleights.md` § 8.5.
 //!
-//! - **The bottom row**: KH1 FM's 4th root row shows Summon (`crate::command_menu`); D-pad Left at
-//!   the root switches it to "Sleights" and back ([`Bottom`]). The choice is kept per save in the
-//!   summon block's spare byte ([`crate::summons::field::BOTTOM_ROW`]).
+//! - **The row**: the 4th root row on both of the command menu's pages (owner, 2026-11-04:
+//!   "Page 1 (the default) should be Attack, Magic, Items, Sleights. Page 2 should be Attack,
+//!   Summon, Party, Sleights"; `crate::command_menu::Page`). Until 0.111.0 D-pad Left switched
+//!   this row between Summon and Sleights; it now switches the pages.
 //! - **The list**: the equipped sleight abilities (`crate::abilities::equipped_sleights`), in
 //!   Re:CoM's id order, as commands [`command`] (ours: KH1's command table has none), named by our
 //!   words [`word`] (the abilities' names, English in every language, as Cloud's).
@@ -65,38 +66,6 @@ pub const WORD_BASE: u16 = 0x8100;
 pub const ROW_WORD: u16 = 902;
 pub const ROW_TEXT: &str = "Sleights";
 
-/// What the root's 4th row shows (owner: D-pad Left switches it).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Bottom {
-    /// KH1's Summon (the default, and every save before M12 step 5).
-    #[default]
-    Summon,
-    Sleights,
-}
-
-impl Bottom {
-    /// The save byte (0 Summon, 1 Sleights; anything else reads as Summon).
-    pub fn of_byte(b: u8) -> Bottom {
-        if b == 1 {
-            Bottom::Sleights
-        } else {
-            Bottom::Summon
-        }
-    }
-    pub fn byte(self) -> u8 {
-        match self {
-            Bottom::Summon => 0,
-            Bottom::Sleights => 1,
-        }
-    }
-    pub fn other(self) -> Bottom {
-        match self {
-            Bottom::Summon => Bottom::Sleights,
-            Bottom::Sleights => Bottom::Summon,
-        }
-    }
-}
-
 /// The sleight ability of a Re:CoM id (one of the 27).
 fn ability(id: u16) -> Option<usize> {
     ab::of_sleight(id)
@@ -107,10 +76,11 @@ pub fn command(id: u16) -> u8 {
     COMMAND_BASE.wrapping_add(id as u8)
 }
 
-/// The sleight of a command (the 27 sleight abilities and the listed specials).
+/// The sleight of a command (the 27 sleight abilities, the listed specials and (owner,
+/// 2026-11-04) the Party list's friend sleights, `crate::party`).
 pub fn of_command(c: u8) -> Option<u16> {
     let id = c.checked_sub(COMMAND_BASE)? as u16;
-    (ability(id).is_some() || special_index(id).is_some()).then_some(id)
+    (ability(id).is_some() || special_index(id).is_some() || crate::party::index(id).is_some()).then_some(id)
 }
 
 /// The word of sleight `id` (a listed special: KH1's own word of its command).
@@ -126,9 +96,12 @@ pub fn words() -> impl Iterator<Item = (u16, &'static str)> {
     ab::SLEIGHTS.filter_map(|i| ab::sleight_of(i).map(|id| (word(id), ab::ALL[i].name)))
 }
 
-/// The sleight's name (the Abilities page's).
+/// The sleight's name (the Abilities page's; a Party sleight's: the owner's).
 pub fn name(id: u16) -> &'static str {
-    ability(id).map_or("?", |i| ab::ALL[i].name)
+    match ability(id) {
+        Some(i) => ab::ALL[i].name,
+        None => crate::party::name(id).unwrap_or("?"),
+    }
 }
 
 /// What sleight `id` costs (the owner's MP by tier).
@@ -148,8 +121,12 @@ pub fn cost(id: u16) -> Option<Cost> {
     })
 }
 
-/// The whole MP points sleight `id` takes from `mp` (None: it can't pay).
+/// The whole MP points sleight `id` takes from `mp` (None: it can't pay). A Party sleight (owner,
+/// 2026-11-04: "Same MP as sleights"): its own tier's points (`crate::party::points`).
 pub fn pay_points(id: u16, mp: i32) -> Option<i32> {
+    if crate::party::index(id).is_some() {
+        return crate::party::points(id, mp);
+    }
     match cost(id)? {
         Cost::Points(n) if mp >= n => Some(n),
         Cost::All if mp >= 1 => Some(mp),
@@ -454,12 +431,18 @@ mod tests {
     }
 
     #[test]
-    fn list_and_bottom_byte() {
-        assert_eq!(list(&[s::HOLY, s::FIRE_RAID, s::FIRE_RAID, 0x35]), vec![s::FIRE_RAID, s::HOLY]);
-        assert_eq!(Bottom::of_byte(0), Bottom::Summon);
-        assert_eq!(Bottom::of_byte(1), Bottom::Sleights);
-        assert_eq!(Bottom::of_byte(7), Bottom::Summon);
-        assert_eq!(Bottom::Sleights.byte(), 1);
-        assert_eq!(Bottom::Summon.other(), Bottom::Sleights);
+    fn the_list_keeps_only_sleight_abilities_and_specials() {
+        // The Party sleights (0x45 Magic LV3) never enter the Sleights list.
+        assert_eq!(list(&[s::HOLY, s::FIRE_RAID, s::FIRE_RAID, 0x35, 0x45]), vec![s::FIRE_RAID, s::HOLY]);
+    }
+
+    #[test]
+    fn party_sleights_are_commands_named_and_paid_by_their_tier() {
+        assert_eq!(of_command(command(0x45)), Some(0x45));
+        assert_eq!(of_command(command(0x44)), None, "Magic LV2 is not a Party entry");
+        assert_eq!(name(0x4A), "Wild Crush");
+        assert_eq!(word(0x4E), WORD_BASE + 0x4E);
+        assert_eq!(pay_points(0x45, 2), Some(2));
+        assert_eq!(pay_points(0x4A, 2), None);
     }
 }

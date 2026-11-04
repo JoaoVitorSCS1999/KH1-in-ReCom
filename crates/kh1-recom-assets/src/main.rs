@@ -1285,13 +1285,21 @@ fn command_menu_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_f
             if !p.found {
                 println!("note: FO0002.SPR asset {}: Re:CoM's text plate is not where the base file has it; its menu rows have no plates", a.name);
             }
+            if !p.arrow {
+                println!("note: FO0002.SPR asset {}: Re:CoM's arrow triangle (UV 16, 49 - 32, 64 x the atlas scale) not found; no pointing arrow with this copy", a.name);
+            }
         }
     }
     for (lang, w) in &langs {
         let show: Vec<String> = w.iter().filter(|(id, _)| [1u16, 2, 3, 7, 343].contains(id)).map(|(id, t)| format!("{id} {t:?}")).collect();
         println!("command menu: {lang} words {} ({})", w.len(), show.join(", "));
     }
-    println!("command menu: plates {} (highlight vertex colour {:#010x}), groups after the MP bar's", if base.found { "from Re:CoM's text plate" } else { "NOT found (empty groups)" }, base.colour);
+    println!(
+        "command menu: plates {} (highlight vertex colour {:#010x}), pointing arrow {}, groups after the MP bar's",
+        if base.found { "from Re:CoM's text plate" } else { "NOT found (empty groups)" },
+        base.colour,
+        if base.arrow { "from Re:CoM's lock-on triangle" } else { "NOT found (an empty group)" }
+    );
     let sources = [("btltbl.bin sha256", kh1_formats::egs::sha256_hex(&btl)), ("FO0002.SPR sha256", kh1_formats::egs::sha256_hex(&spr))];
     Ok(cm::manifest_json(&langs, kh1_recom_assets::mp_bar::group::COUNT, base, &sources))
 }

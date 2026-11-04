@@ -101,6 +101,9 @@ falling off, a room change. Checked (decomp + exe) for the calls; what each call
 
 ### The menu (`crate::command_menu`)
 
+> **0.111.0:** Summon is page 2's row 1 (no spell needed; the Summon list opens beside it), no longer
+> row 3 (`recom-command-pages-party.md`).
+
 - **Row 3**: with a spell and a summon learned, Summon (KH1's word 6), 0xE6 / 0x73 by its grey bit;
   else KH1's blank dash, as before. The context command keeps entry 3 (the tab's); row 3 is not it.
 - **Greyed** when no summon is usable; **greyed and locked** while one is out (owner: no Dismiss).

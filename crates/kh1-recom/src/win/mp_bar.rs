@@ -388,6 +388,18 @@ pub fn menu_groups() -> Option<(*const u8, u32)> {
     (l.0.extra_groups >= 2 && f != 0).then(|| (l.1.as_ptr(), f + mb::group::COUNT))
 }
 
+/// 0.111.0: the command menu's pointing arrow (`crate::command_menu::arrow`): the third group the
+/// asset step adds after the bar's (`kh1-mp-bar.json` `extra_groups` ≥ 3; an older asset step
+/// built two: no arrow), and the set's NUL-terminated name.
+pub fn arrow_group() -> Option<(*const u8, u32)> {
+    let l = layout()?;
+    let f = FIRST.load(Ordering::Relaxed);
+    (l.0.extra_groups >= 3 && f != 0).then(|| (l.1.as_ptr(), f + mb::group::COUNT + ARROW_GROUP))
+}
+
+/// The arrow's group after the plates' first (the asset step's `command_menu::group::ARROW`).
+const ARROW_GROUP: u32 = 2;
+
 /// `CPlayerGauge` second-bar state (`0x14020C190(gauge, state)`): Re:CoM's (the Dark gauge),
 /// then ours follows the HUD: 7 hides, 1 shows and rescrubs.
 pub unsafe extern "win64" fn gauge_state(gauge: usize, state: u32) {

@@ -22,8 +22,9 @@
 //! - **Cursor** (`0x1402931B0`), on the fresh-press word compared for equality: Up / Down move and
 //!   wrap; Right opens the row's submenu (sound 6), a locked row sounds 4; Left or cancel closes a
 //!   submenu (sound 3; cancel also puts the root cursor on Attack); Left at the root puts the
-//!   cursor on Attack (sound 1). No auto-repeat. **M12 step 5** (owner): Left at the root, on any
-//!   row, switches the 4th row between Summon and Sleights instead (sound 1, the cursor stays).
+//!   cursor on Attack (sound 1). No auto-repeat. **0.111.0** (owner, 2026-11-04): Left at the root,
+//!   on any row, switches the menu's two pages instead (Re:CoM's cursor sound, the cursor stays on
+//!   its row; see **Pages**).
 //! - **Step** (`0x1402937F0`): at the root a fresh jump is the jump (no menu input that frame);
 //!   Triangle runs the context command when its tab is fully in (`0x140277CF0` state 2); Square
 //!   (without Triangle) is the roll / guard (no cursor that frame); then the cursor; then confirm
@@ -53,14 +54,13 @@
 //!   slot 1 / 2 / 3 through the same commit path as the menu (see [`shortcut`]). **M12 step 6**
 //!   (owner): a slot may also hold an equipped sleight, run as the Sleights list runs it
 //!   (`docs/recom-m12-sleights.md` § 8.6).
-//! - **Summons** (M8b, `crate::summons`, `docs/recom-summons.md`): with a spell learned and a summon
-//!   learned, Summon (command 6) is the Magic list's extra last entry (`0x1402944C0`), shown as the
-//!   root's 4th row (FM). Confirm or Right on row 3 opens KH1's Summon list (type 3, `0x1405289A8`):
+//! - **Summons** (M8b, `crate::summons`, `docs/recom-summons.md`): KH1 FM shows Summon (command 6,
+//!   the Magic list's extra last entry, `0x1402944C0`) as the root's 4th row; 0.111.0 moves it to
+//!   page 2's row 1 (see **Pages**), which opens KH1's Summon list (type 3, `0x1405289A8`):
 //!   Cloud first (owner), then the learned summons in learn order (`0x2F + summon`), grey = lock
-//!   = not usable (`0x140288F30`, without its once-per-battle test: owner). Row 3 is greyed when none is usable, greyed and locked while one is out
-//!   (KH1's in-progress flag; owner: no Dismiss). The list at x + 11, beside row 3 with one entry,
-//!   else bottom-anchored at 348 − 22 n (`0x14027B870` case 3, after the root set its row 3); with
-//!   the Summon entry the Magic list counts it for its "fewer than 3" test (case 1). Confirm on an
+//!   = not usable (`0x140288F30`, without its once-per-battle test: owner). The row is greyed when
+//!   none is usable, greyed and locked while one is out (KH1's in-progress flag; owner: no
+//!   Dismiss). The list at x + 11, beside its row (`0x14027B870` case 3's rule). Confirm on an
 //!   entry passes KH1's commit gate (free or a combo window, `0x140293480`) and issues it (no menu
 //!   sound); the stack unwinds to Attack.
 //! - **Items** (M8 stage 8a.1, `0x140294220`, `0x140293480`, `0x14027B870` case 2): row 2 Items
@@ -71,12 +71,26 @@
 //!   no entry for full HP. Confirm on an entry passes KH1's commit gate (free or a combo window)
 //!   and issues the item on Sora (no party list: as Cure; `crate::items`).
 //!
-//! - **Sleights** (M12 step 5, `crate::sleights`, `docs/recom-m12-sleights.md` § 8.5): in Sleights
-//!   mode the 4th row says "Sleights" (always shown; greyed when none is usable, greyed and locked
-//!   with none equipped or while a sleight runs); confirm or Right opens the Sleights list (the
-//!   equipped sleight abilities in Re:CoM's order, placed as the Summon list, grey = lock by the
-//!   summons' gate with the sleight's MP); confirm on an entry passes KH1's commit gate and issues
-//!   it (Re:CoM's own sleight start, `win/summons.rs`).
+//! - **Sleights** (M12 step 5, `crate::sleights`, `docs/recom-m12-sleights.md` § 8.5): the 4th row
+//!   says "Sleights" on both pages (greyed when none is usable, greyed and locked with none
+//!   equipped or while a sleight runs); confirm or Right opens the Sleights list (the equipped
+//!   sleight abilities in Re:CoM's order, grey = lock by the summons' gate with the sleight's MP);
+//!   confirm on an entry passes KH1's commit gate and issues it (Re:CoM's own sleight start,
+//!   `win/summons.rs`).
+//! - **Pages** (0.111.0, owner 2026-11-04: "Page 1 (the default) should be Attack, Magic, Items,
+//!   Sleights. Page 2 should be Attack, Summon, Party, Sleights"; [`Page`],
+//!   `docs/recom-command-pages-party.md`): D-pad Left at the root switches them (Re:CoM's cursor
+//!   sound, the cursor stays on its row), kept per save in the summon block's byte (2 = page 2;
+//!   older saves' 0 / 1 read page 1). Page 2's Summon row opens the Summon list (greyed and
+//!   locked until a summon is learned, greyed when none is usable, greyed and locked while one is
+//!   out); its Party row opens the Party list (`crate::party`: the friend sleights whose friend's
+//!   card can drop in this battle; greyed when none is usable, greyed and locked when none is
+//!   available or a sleight runs). Every list opens beside its own row, bottom-anchored at 348
+//!   when it wouldn't fit (KH1's rule for each list, `0x14027B870`).
+//! - **The pointing arrow** ([`Scene::arrow`]; owner: "it should have the pointing arrow that
+//!   follows your selection on the command menu so people know that you can press left on the D
+//!   Pad to switch between the two pages"): beside the root's cursor row while the root is on top;
+//!   Re:CoM's own arrow art and motion in `Cockpit:00` ([`arrow`]).
 //!
 //! Re:CoM side: `win/command_menu.rs`; notes `docs/recom-m7-command-menu.md`.
 
@@ -113,6 +127,10 @@ pub mod cmd {
     pub const COUNTER: u8 = 0x63;
     /// Treated as "no context command" by the tab (`0x140277CF0`).
     pub const NOT_CONTEXT: u8 = 0x7C;
+    /// 0.111.0: page 2's Party row (ours: KH1's command table has none; free, Checked (code)).
+    pub const PARTY: u8 = 0xF1;
+    /// Its word: "Party" (ours, the owner's word; [`super::OUR_WORDS`]).
+    pub const PARTY_WORD: u16 = 903;
 
     /// A spell's command: `level + (spell + 2) × 3` (spell 0..6, level 1..3).
     pub const fn spell(spell: u8, level: u8) -> u8 {
@@ -133,6 +151,7 @@ pub mod cmd {
             BLANK => 305,
             JUMP_ON => 313,
             COUNTER => 343,
+            PARTY => PARTY_WORD,
             // A held gimmick card's command (ours; `crate::gimmick`).
             crate::gimmick::STAGGER => crate::gimmick::STAGGER_WORD,
             // M8b: the summons (`0x2F + summon`: KH1's words 286..291, Cloud ours).
@@ -145,12 +164,14 @@ pub mod cmd {
     }
 
     /// The list a command opens (record `+8`): Magic 1, Items 2, Summon 3 (Cure / Aero open the
-    /// party list 4: with the casts, stage 7.4 / 7.7).
+    /// party list 4: with the casts, stage 7.4 / 7.7); ours: the Sleights list 4 (row 3), the
+    /// Party list 5 (0.111.0).
     pub fn submenu(c: u8) -> u8 {
         match c {
             MAGIC => 1,
             ITEMS => 2,
             SUMMON => 3,
+            PARTY => 5,
             _ => 0,
         }
     }
@@ -313,16 +334,53 @@ pub struct World {
     /// (`crate::summons::Gate::field`) and whether its packs load (`Gate::packs`).
     pub field: bool,
     pub packs: bool,
-    /// M12 step 5: what the root's 4th row shows (the save's choice, `crate::sleights::Bottom`).
-    pub bottom: crate::sleights::Bottom,
+    /// 0.111.0: the page shown (the save's choice, [`Page`]).
+    pub page: Page,
     /// M12 step 5: the equipped sleight abilities' Re:CoM ids (`crate::sleights::list`, Re:CoM's
-    /// order) and their count. Read for the list only while the bottom row is Sleights, and (M12
-    /// step 6) for the shortcut slots that hold a sleight.
+    /// order) and their count, for the Sleights list and (M12 step 6) the shortcut slots that hold
+    /// a sleight.
     pub sleights: [u8; crate::sleights::MAX],
     pub sleight_count: u8,
     /// M12 step 7: the listed KH1 specials (`crate::sleights::SPECIALS`) their prompt would offer
     /// now, by `crate::specials` index bit (`0x14028D0F0`'s score 2).
     pub sleight_specials: u8,
+    /// 0.111.0: the Party sleights Re:CoM has taught (`crate::party::Set`) and those available in
+    /// this battle (taught, and every card they need can drop here; 0 outside battle).
+    pub party_learned: crate::party::Set,
+    pub party_avail: crate::party::Set,
+}
+
+/// The command menu's page (owner, 2026-11-04): page 1 (the default) Attack, Magic, Items,
+/// Sleights; page 2 Attack, Summon, Party, Sleights. D-pad Left switches them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Page {
+    #[default]
+    One,
+    Two,
+}
+
+impl Page {
+    /// The save byte (`crate::summons::field::PAGE`): 2 = page 2. Everything else reads page 1, so
+    /// a save from before 0.111.0 (0 Summon, 1 Sleights: M12 step 5's 4th-row choice) opens on page 1.
+    pub fn of_byte(b: u8) -> Page {
+        if b == 2 {
+            Page::Two
+        } else {
+            Page::One
+        }
+    }
+    pub fn byte(self) -> u8 {
+        match self {
+            Page::One => 0,
+            Page::Two => 2,
+        }
+    }
+    pub fn other(self) -> Page {
+        match self {
+            Page::One => Page::Two,
+            Page::Two => Page::One,
+        }
+    }
 }
 
 /// The fresh presses of one frame (Re:CoM's pad, mapped to KH1's buttons).
@@ -369,8 +427,10 @@ pub enum Kind {
     Items,
     /// M8b: KH1's Summon list (type 3, `0x1405289A8`).
     Summon,
-    /// M12 step 5: the Sleights list (ours, in the Summon list's place).
+    /// M12 step 5: the Sleights list (ours).
     Sleight,
+    /// 0.111.0: the Party list (ours, `crate::party`).
+    Party,
 }
 
 /// One KH1 list.
@@ -409,6 +469,9 @@ pub enum Sound {
     Back,
     Error,
     Open,
+    /// 0.111.0: D-pad Left switched the page: Re:CoM's cursor sound in either look (the caller
+    /// plays [`Sound::recom_id`] for it).
+    Page,
 }
 
 impl Sound {
@@ -416,7 +479,7 @@ impl Sound {
     /// files (`menu_sounds`). Checked (decomp).
     pub fn kh1_id(self) -> u32 {
         match self {
-            Sound::Move => 1,
+            Sound::Move | Sound::Page => 1,
             Sound::Back => 3,
             Sound::Error => 4,
             Sound::Open => 6,
@@ -429,7 +492,7 @@ impl Sound {
     /// there (`menu_sounds`) or the menu has Re:CoM's look.
     pub fn recom_id(self) -> u32 {
         match self {
-            Sound::Move => 1,
+            Sound::Move | Sound::Page => 1,
             Sound::Back => 4,
             Sound::Error => 5,
             Sound::Open => 2,
@@ -464,8 +527,10 @@ pub enum Event {
     Summon(u8, ShortResult),
     /// M12 step 5: a Sleights list entry confirmed: (its command, what happened).
     Sleight(u8, ShortResult),
-    /// M12 step 5: D-pad Left at the root switched the 4th row (to this).
-    Bottom(crate::sleights::Bottom),
+    /// 0.111.0: a Party list entry confirmed: (its command, what happened).
+    Party(u8, ShortResult),
+    /// 0.111.0: D-pad Left at the root switched the page (to this).
+    Page(Page),
 }
 
 /// What a shortcut press did (`0x140293480` on the shortcut list).
@@ -503,10 +568,11 @@ pub struct Outcome {
     pub item: Option<crate::items::ItemCommand>,
     /// M8b: the summon issued this frame (`crate::summons` index).
     pub summon: Option<usize>,
-    /// M12 step 5: the sleight issued this frame (its Re:CoM id).
+    /// M12 step 5: the sleight issued this frame (its Re:CoM id; 0.111.0: a Party sleight's too,
+    /// `crate::party::index`).
     pub sleight: Option<u16>,
-    /// M12 step 5: the 4th row switched this frame (to keep in the save).
-    pub bottom: Option<crate::sleights::Bottom>,
+    /// 0.111.0: the page switched this frame (to keep in the save).
+    pub page: Option<Page>,
     /// M9 stage 9c.1: a special command run by Triangle this frame (Sonic Blade, Rave, Blast):
     /// ours to run, not Re:CoM's Triangle action.
     pub special: Option<u8>,
@@ -561,12 +627,17 @@ pub struct Menu {
     pub summon_on: bool,
     pub summon_grey: bool,
     pub summon_lock: bool,
-    /// M12 step 5: what the 4th row shows, the Sleights list (Re:CoM ids in `0x80 + id` commands)
-    /// and the Sleights row's grey / lock (it always shows in Sleights mode).
-    pub bottom: crate::sleights::Bottom,
+    /// 0.111.0: the page shown.
+    pub page: Page,
+    /// M12 step 5: the Sleights list (Re:CoM ids in `0x80 + id` commands) and the Sleights row's
+    /// grey / lock (row 3 on both pages).
     pub sleight: List,
     pub sleight_grey: bool,
     pub sleight_lock: bool,
+    /// 0.111.0: the Party list (`crate::party` commands) and page 2's Party row's grey / lock.
+    pub party: List,
+    pub party_grey: bool,
+    pub party_lock: bool,
     /// The fade (`0x14285280C`) and its speed.
     pub alpha: f32,
     pub alpha_speed: f32,
@@ -609,10 +680,13 @@ impl Menu {
             summon_on: false,
             summon_grey: true,
             summon_lock: true,
-            bottom: crate::sleights::Bottom::Summon,
+            page: Page::One,
             sleight: List::new(Kind::Sleight),
             sleight_grey: true,
             sleight_lock: true,
+            party: List::new(Kind::Party),
+            party_grey: true,
+            party_lock: true,
             alpha: 0.0,
             alpha_speed: 0.0,
             top: None,
@@ -714,6 +788,18 @@ impl Menu {
                         short_grey &= !(1 << k);
                     }
                 }
+                // 0.111.0: a Party sleight slot shows its name once Re:CoM taught it, usable as the
+                // Party list's entry where it is available in this battle (else greyed).
+                Some(shortcut::Slot::Sleight(id)) if crate::party::index(id).is_some() => {
+                    short_ok = true;
+                    let i = crate::party::index(id).unwrap_or(0);
+                    if w.party_learned >> i & 1 != 0 {
+                        short_cmds[k] = crate::party::command(i);
+                        if w.party_avail >> i & 1 != 0 && crate::party::usable(&gate, i) {
+                            short_grey &= !(1 << k);
+                        }
+                    }
+                }
                 Some(shortcut::Slot::Sleight(id)) => {
                     short_ok = true;
                     if equipped_sl.iter().any(|&e| e as u16 == id) {
@@ -763,17 +849,17 @@ impl Menu {
         if self.summon.cursor >= slen {
             self.summon.cursor = (slen - 1).max(0);
         }
-        // M12 step 5: in Sleights mode the 4th row is Sleights, not Summon (the Summon entry isn't
-        // there: the Magic list's "fewer than 3" test doesn't count it).
-        self.bottom = w.bottom;
-        let summon_mode = w.bottom == crate::sleights::Bottom::Summon;
-        self.summon_on = summon_mode && !learned.is_empty() && !list.is_empty();
+        // 0.111.0 (owner, 2026-11-04): Summon is page 2's row 1, no longer the Magic list's last entry
+        // (so no spell is needed): greyed and locked until a summon is learned.
+        self.page = w.page;
+        let page2 = w.page == Page::Two;
+        self.summon_on = page2 && !list.is_empty();
         self.summon_lock = !self.summon_on || w.summon_out;
         self.summon_grey = self.summon_lock || sgrey == !0;
         // M12 step 5: the Sleights list (the equipped sleight abilities), each greyed and locked
-        // when the summons' gate with its MP says no; the row greyed when none is usable, greyed and
-        // locked with none equipped or while a sleight runs (as the Summon row's).
-        let sl = if summon_mode { Vec::new() } else { crate::sleights::list(&equipped_sl.iter().map(|&b| b as u16).collect::<Vec<_>>()) };
+        // when the summons' gate with its MP says no; row 3 (both pages) greyed when none is usable,
+        // greyed and locked with none equipped or while a sleight runs (as the Summon row's).
+        let sl = crate::sleights::list(&equipped_sl.iter().map(|&b| b as u16).collect::<Vec<_>>());
         let mut lgrey = !0u32;
         for (k, &id) in sl.iter().enumerate() {
             let ok = match crate::sleights::special_index(id) {
@@ -792,8 +878,27 @@ impl Menu {
         if self.sleight.cursor >= llen {
             self.sleight.cursor = (llen - 1).max(0);
         }
-        self.sleight_lock = summon_mode || sl.is_empty() || w.summon_out;
+        self.sleight_lock = sl.is_empty() || w.summon_out;
         self.sleight_grey = self.sleight_lock || lgrey == !0;
+        // 0.111.0: the Party list (the friend sleights available in this battle), each greyed and
+        // locked when the Sleights list's gate with its MP says no; page 2's Party row greyed when
+        // none is usable, greyed and locked when none is available or while a sleight runs.
+        let pl = crate::party::list(w.party_avail & w.party_learned);
+        let mut pgrey = !0u32;
+        for (k, &i) in pl.iter().enumerate() {
+            if crate::party::usable(&gate, i) {
+                pgrey &= !(1 << k);
+            }
+        }
+        self.party.cmds = pl.iter().map(|&i| crate::party::command(i)).collect();
+        self.party.grey = pgrey;
+        self.party.lock = pgrey;
+        let plen = self.party.cmds.len() as i32;
+        if self.party.cursor >= plen {
+            self.party.cursor = (plen - 1).max(0);
+        }
+        self.party_lock = !page2 || pl.is_empty() || w.summon_out;
+        self.party_grey = self.party_lock || pgrey == !0;
         // Items (M8 stage 8a.1, `0x140294220`; KH1's save `+0x874` bits 0x10 / 2, items disabled /
         // sealed, are never set in Re:CoM): row 2 Items, unlocked; the list holds the filled slots
         // (command `item + 0x1E`, `0x142D53A90[k]` = the slot), each entry's bit cleared. With
@@ -824,6 +929,18 @@ impl Menu {
         }
         self.items.grey = igrey;
         self.items.lock = igrey;
+        // 0.111.0: page 2's rows 1 and 2 (the Magic and Items lists stay built for the shortcuts and
+        // the page switch back).
+        if page2 {
+            let row = |r: &mut List, i: usize, c: u8, grey: bool, lock: bool| {
+                r.cmds[i] = c;
+                let bit = 1u32 << i;
+                r.grey = if grey { r.grey | bit } else { r.grey & !bit };
+                r.lock = if lock { r.lock | bit } else { r.lock & !bit };
+            };
+            row(r, 1, cmd::SUMMON, self.summon_grey, self.summon_lock);
+            row(r, 2, cmd::PARTY, self.party_grey, self.party_lock);
+        }
         // The context command, entry 3 (`0x1402948F0` clears it, `0x140293000` sets it).
         r.cmds[3] = cmd::NONE;
         // An object's command, then a held gimmick card's "Stagger", then (M9 stage 9c.1) the
@@ -840,7 +957,7 @@ impl Menu {
                 r.lock &= !8;
             }
         }
-        for l in [&mut self.root, &mut self.magic, &mut self.items, &mut self.summon, &mut self.sleight] {
+        for l in [&mut self.root, &mut self.magic, &mut self.items, &mut self.summon, &mut self.sleight, &mut self.party] {
             l.bright.resize(l.cmds.len(), BRIGHT_GREY);
         }
     }
@@ -851,6 +968,7 @@ impl Menu {
             Kind::Items => &self.items,
             Kind::Summon => &self.summon,
             Kind::Sleight => &self.sleight,
+            Kind::Party => &self.party,
             _ => &self.magic,
         }
     }
@@ -860,6 +978,7 @@ impl Menu {
             Kind::Items => &mut self.items,
             Kind::Summon => &mut self.summon,
             Kind::Sleight => &mut self.sleight,
+            Kind::Party => &mut self.party,
             _ => &mut self.magic,
         }
     }
@@ -878,9 +997,10 @@ impl Menu {
         self.build(w);
         // The stack (`0x1402931B0`'s walk): a submenu stays open while its row can open it.
         let row_can_open = match self.sub {
-            Kind::Items => !self.root.locked(2) && !self.items.cmds.is_empty(),
+            Kind::Items => self.root.cmds[2] == cmd::ITEMS && !self.root.locked(2) && !self.items.cmds.is_empty(),
             Kind::Summon => self.summon_on && !self.summon_lock && !self.summon.cmds.is_empty(),
-            Kind::Sleight => self.bottom == crate::sleights::Bottom::Sleights && !self.sleight_lock && !self.sleight.cmds.is_empty(),
+            Kind::Sleight => !self.sleight_lock && !self.sleight.cmds.is_empty(),
+            Kind::Party => self.root.cmds[2] == cmd::PARTY && !self.party_lock && !self.party.cmds.is_empty(),
             _ => !self.root.locked(1) && self.root.cmds[1] == cmd::MAGIC && !self.magic.cmds.is_empty(),
         };
         if self.open && !row_can_open {
@@ -963,10 +1083,9 @@ impl Menu {
                     // Attack / Counter: Re:CoM's own Attack request, as before the menu.
                 }
                 3 => {
-                    // FM (`0x1402937F0`): row 3 shows Summon, opened through the Magic list's last
-                    // entry once summons are learned (M8b: `0x140293480` on it: locked → sound 4,
-                    // else the Summon list opens, sound 6); without it the blank row is the error
-                    // sound. The context command in entry 3 is Triangle's only.
+                    // FM (`0x1402937F0`): row 3 opens its list through `0x140293480` (locked → sound
+                    // 4, else the list opens, sound 6); 0.111.0: row 3 is Sleights on both pages.
+                    // The context command in entry 3 is Triangle's only.
                     out.attack = false;
                     self.run_row3(&mut out);
                 }
@@ -984,6 +1103,9 @@ impl Menu {
         } else if self.sub == Kind::Sleight {
             out.attack = false;
             self.run_sleight(w, &mut out);
+        } else if self.sub == Kind::Party {
+            out.attack = false;
+            self.run_party(w, &mut out);
         } else {
             out.attack = false;
             let row = self.magic.cursor;
@@ -1092,32 +1214,42 @@ impl Menu {
         out.events.push(Event::Item(c, slot, result));
     }
 
-    /// M8b: confirm (or Right) on the root's row 3 (`0x1402937F0` → `0x140293480` on the Magic
-    /// list's last entry).
+    /// Confirm (or Right) on the root's row 3 (`0x1402937F0` → `0x140293480`): 0.111.0, the Sleights
+    /// row on both pages (locked: the error sound).
     fn run_row3(&mut self, out: &mut Outcome) {
-        // M12 step 5: in Sleights mode the row opens the Sleights list (locked: the error sound).
-        if self.bottom == crate::sleights::Bottom::Sleights {
-            out.confirm_refused = true;
-            if self.sleight_lock {
-                out.sounds.push(Sound::Error);
-                out.events.push(Event::Refused(ROW3_CMD));
-            } else {
-                self.open_sub(4, out);
-            }
-            return;
-        }
-        if !self.summon_on {
+        out.confirm_refused = true;
+        if self.sleight_lock {
             out.sounds.push(Sound::Error);
             out.events.push(Event::Refused(ROW3_CMD));
-            return;
-        }
-        out.confirm_refused = true;
-        if self.summon_lock {
-            out.sounds.push(Sound::Error);
-            out.events.push(Event::Refused(cmd::SUMMON));
         } else {
-            self.open_sub(3, out);
+            self.open_sub(4, out);
         }
+    }
+
+    /// 0.111.0: confirm on a Party list entry, as on a Sleights list entry: locked (greyed) → the
+    /// error sound; KH1's commit gate (free or a combo window) may refuse it silently; else it is
+    /// issued (Re:CoM's own sleight start, no menu sound) and the stack unwinds to Attack.
+    fn run_party(&mut self, w: &World, out: &mut Outcome) {
+        let row = self.party.cursor;
+        let c = self.party.cmds.get(row as usize).copied().unwrap_or(0);
+        let result = match crate::party::of_command(c) {
+            Some(_) if !self.party.locked(row) && !w.gate_any => {
+                out.confirm_refused = true;
+                ShortResult::NotNow
+            }
+            Some(i) if !self.party.locked(row) => {
+                out.sleight = Some(crate::party::ALL[i].sleight);
+                self.open = false;
+                self.root.cursor = 0;
+                ShortResult::Cast
+            }
+            _ => {
+                out.sounds.push(Sound::Error);
+                out.confirm_refused = true;
+                ShortResult::Greyed
+            }
+        };
+        out.events.push(Event::Party(c, result));
     }
 
     /// M8b, `0x140293480` on a Summon list entry: locked (greyed) → the error sound; KH1's commit
@@ -1192,13 +1324,14 @@ impl Menu {
         }
     }
 
-    /// Opens the Magic list (1), the Items list (2), the Summon list (3) or (M12 step 5) the
-    /// Sleights list (4) (`0x140293480` / `0x1402931B0`: sound 6).
+    /// Opens the Magic list (1), the Items list (2), the Summon list (3), (M12 step 5) the
+    /// Sleights list (4) or (0.111.0) the Party list (5) (`0x140293480` / `0x1402931B0`: sound 6).
     fn open_sub(&mut self, which: u8, out: &mut Outcome) {
         self.sub = match which {
             2 => Kind::Items,
             3 => Kind::Summon,
             4 => Kind::Sleight,
+            5 => Kind::Party,
             _ => Kind::Magic,
         };
         self.open = true;
@@ -1242,13 +1375,14 @@ impl Menu {
                 return true;
             }
             if word & 0x80 != 0 {
-                // M12 step 5 (owner, 2026-11-03: "D-pad Left toggles Summon / Sleights anywhere on
-                // the command menu (drops KH1's Left → Attack)"): Left at the root, on any row,
-                // switches the 4th row; the cursor stays (KH1's `0x1402931B0` put it on Attack).
-                self.bottom = self.bottom.other();
-                out.bottom = Some(self.bottom);
-                out.sounds.push(Sound::Move);
-                out.events.push(Event::Bottom(self.bottom));
+                // 0.111.0 (owner, 2026-11-04: "you can press left on the D Pad to switch between the
+                // two pages"; M12 step 5 dropped KH1's Left → Attack): Left at the root, on any row,
+                // switches the page; the cursor stays on its row (KH1's `0x1402931B0` put it on
+                // Attack), Re:CoM's cursor sound.
+                self.page = self.page.other();
+                out.page = Some(self.page);
+                out.sounds.push(Sound::Page);
+                out.events.push(Event::Page(self.page));
                 return true;
             }
             return false;
@@ -1290,6 +1424,7 @@ impl Menu {
                 Kind::Items => (&mut self.items, Some(&mut self.root)),
                 Kind::Summon => (&mut self.summon, Some(&mut self.root)),
                 Kind::Sleight => (&mut self.sleight, Some(&mut self.root)),
+                Kind::Party => (&mut self.party, Some(&mut self.root)),
                 Kind::Root => (&mut self.root, None),
             };
             for (i, b) in t.bright.iter_mut().enumerate() {
@@ -1305,6 +1440,7 @@ impl Menu {
                 Kind::Items => &mut self.items,
                 Kind::Summon => &mut self.summon,
                 Kind::Sleight => &mut self.sleight,
+                Kind::Party => &mut self.party,
                 Kind::Root => &mut self.root,
             };
             for (i, b) in t.bright.iter_mut().enumerate() {
@@ -1392,22 +1528,17 @@ impl Menu {
                 let c = self.shortcut.cmds.get(k).copied().unwrap_or(cmd::BLANK);
                 SlotView { name: cmd::name(c), bright: if self.shortcut.grey_row(k) { BRIGHT_GREY as u8 } else { BRIGHT_ON as u8 } }
             });
-            return Scene { rows: Vec::new(), alpha: self.alpha, tab: None, shortcut: Some(slots) };
+            return Scene { rows: Vec::new(), alpha: self.alpha, tab: None, shortcut: Some(slots), arrow: None };
         }
         let mut rows = Vec::new();
         let top_root = !self.open;
         for i in 0..4 {
             let cursor_here = top_root && self.root.cursor == i as i32;
-            // FM's 4th row (`0x140278B40`): Summon (0x73 / 0xE6 by its grey bit) or the blank
-            // command (0xE6 under the cursor), never the context command (that is the tab's); its
-            // brightness is set, not eased.
-            let (name, bright) = if i == 3 && self.bottom == crate::sleights::Bottom::Sleights {
-                // M12 step 5: "Sleights", always shown in Sleights mode, set as Summon's.
+            // FM's 4th row (`0x140278B40`), never the context command (that is the tab's); its
+            // brightness is set, not eased. 0.111.0: "Sleights" on both pages (0x73 / 0xE6 by its
+            // grey bit, as FM's Summon there).
+            let (name, bright) = if i == 3 {
                 (crate::sleights::ROW_WORD, if self.sleight_grey { BRIGHT_GREY } else { BRIGHT_ON })
-            } else if i == 3 && self.summon_on {
-                (SUMMON_NAME, if self.summon_grey { BRIGHT_GREY } else { BRIGHT_ON })
-            } else if i == 3 {
-                (cmd::name(ROW3_CMD), if cursor_here { BRIGHT_ON } else { BRIGHT_GREY })
             } else {
                 (cmd::name(self.root.cmds[i]), self.root.bright.get(i).copied().unwrap_or(BRIGHT_GREY))
             };
@@ -1416,19 +1547,14 @@ impl Menu {
         if self.open {
             let l = self.sub_list();
             let n = l.cmds.len();
-            // `0x14027B870`: the Magic list at its row's y with fewer than 3 entries (the Summon
-            // entry counted: KH1's list holds it; its rows end at 348 either way); the Items list
-            // (case 2) at its row's y (root y + 0x2C) with fewer than 2; the Summon list (case 3)
-            // beside row 3 when y + 20 + (3 + n) × 22 < 369 (one entry), else 348 − 22 n.
-            let y0 = match self.sub {
-                Kind::Items if n < 2 => ROOT_Y + 2.0 * PITCH,
-                Kind::Items => BOTTOM - PITCH * n as f32,
-                // M12 step 5: the Sleights list where the Summon list goes.
-                Kind::Summon | Kind::Sleight if ROOT_Y + 20.0 + (3.0 + n as f32) * PITCH < 369.0 => ROOT_Y + 3.0 * PITCH,
-                Kind::Summon | Kind::Sleight => BOTTOM - PITCH * n as f32,
-                _ if n + (self.summon_on as usize) < 3 => ROOT_Y + PITCH,
-                _ => BOTTOM - PITCH * n as f32,
-            };
+            // `0x14027B870`: each list at its own row's y unless its rows would end below 348, then
+            // bottom-anchored at 348 − 22 n: the Magic list (case 1) at row 1 with fewer than 3
+            // entries, the Items list (case 2) at row 2 with fewer than 2, the Summon list (case 3)
+            // beside row 3 when y + 20 + (3 + n) × 22 < 369 (one entry): all `min(row y, 348 −
+            // 22 n)`. 0.111.0: the Summon list beside page 2's row 1 (it is no longer the Magic list's
+            // last entry, so the Magic list's test no longer counts it), the Party list beside row
+            // 2, the Sleights list beside row 3.
+            let y0 = (ROOT_Y + PITCH * list_row(self.sub) as f32).min(BOTTOM - PITCH * n as f32);
             for (i, &c) in l.cmds.iter().enumerate() {
                 rows.push(RowView {
                     list: self.sub,
@@ -1448,7 +1574,10 @@ impl Menu {
             let b = self.root.bright.get(3).copied().unwrap_or(BRIGHT_GREY);
             TabView { name: cmd::name(self.tab_cmd), x: self.tab.x, alpha: self.tab.alpha, bright: (if dim { b * 0.5 } else { b }) as u8, dim }
         });
-        Scene { rows, alpha: self.alpha, tab, shortcut: None }
+        // The pointing arrow: beside the root's cursor row while the root is on top (KH2 FM's; it
+        // tells the player D-pad Left switches the pages).
+        let arrow = (!self.open && (0..4).contains(&self.root.cursor)).then(|| ArrowView { row: self.root.cursor as u8, x: ROOT_X, y: ROOT_Y + PITCH * self.root.cursor as f32 });
+        Scene { rows, alpha: self.alpha, tab, shortcut: None, arrow }
     }
 
     /// The F9 trace token.
@@ -1465,6 +1594,7 @@ impl Menu {
             Kind::Items => ("i", "ig"),
             Kind::Summon => ("s", "sg"),
             Kind::Sleight => ("l", "lg"),
+            Kind::Party => ("p", "pg"),
             _ => ("m", "mg"),
         };
         let mut t = if self.open { format!("menu {tag}:{}", self.sub_list().cursor) } else { format!("menu r:{}", self.root.cursor) };
@@ -1479,17 +1609,28 @@ impl Menu {
         if self.root.cmds[0] == cmd::COUNTER {
             t.push_str(" counter");
         }
-        if self.summon_on {
+        if self.page == Page::Two {
+            t.push_str(" p2");
             t.push_str(if self.summon_lock { " sum:lock" } else if self.summon_grey { " sum:grey" } else { " sum" });
+            t.push_str(if self.party_lock { " pty:lock" } else if self.party_grey { " pty:grey" } else { " pty" });
         }
-        if self.bottom == crate::sleights::Bottom::Sleights {
-            t.push_str(if self.sleight_lock { " sl:lock" } else if self.sleight_grey { " sl:grey" } else { " sl" });
-        }
+        t.push_str(if self.sleight_lock { " sl:lock" } else if self.sleight_grey { " sl:grey" } else { " sl" });
         for e in events {
             t.push(' ');
             t.push_str(e);
         }
         t
+    }
+}
+
+/// The root row a list opens from (its place, `Menu::scene`): Magic 1, Items 2, Summon (page 2) 1,
+/// Party 2, Sleights 3.
+pub fn list_row(k: Kind) -> u8 {
+    match k {
+        Kind::Magic | Kind::Summon => 1,
+        Kind::Items | Kind::Party => 2,
+        Kind::Sleight => 3,
+        Kind::Root | Kind::Shortcut => 0,
     }
 }
 
@@ -1590,12 +1731,69 @@ pub struct Scene {
     /// Stage 7.12: the shortcut panel's three slots, while the shortcut list is on top (then
     /// `rows` is empty and `tab` None).
     pub shortcut: Option<[SlotView; 3]>,
+    /// 0.111.0: the pointing arrow, while the root is on top ([`arrow`]).
+    pub arrow: Option<ArrowView>,
 }
 
 impl Scene {
     pub fn same_rows(&self, o: &Scene) -> bool {
-        self.rows.len() == o.rows.len() && self.rows.iter().zip(&o.rows).all(|(a, b)| a.key() == b.key()) && self.shortcut.map(|s| s.map(|v| v.name)) == o.shortcut.map(|s| s.map(|v| v.name))
+        self.rows.len() == o.rows.len() && self.rows.iter().zip(&o.rows).all(|(a, b)| a.key() == b.key()) && self.shortcut.map(|s| s.map(|v| v.name)) == o.shortcut.map(|s| s.map(|v| v.name)) && self.arrow == o.arrow
     }
+}
+
+/// The pointing arrow beside the root's cursor row: the row and its KH1 top-left (as its
+/// [`RowView`]). The look's offset is [`arrow::at`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArrowView {
+    pub row: u8,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// The pointing arrow (owner, 2026-11-04, with a KH2 FM recording: "it should have the pointing arrow
+/// that follows your selection on the command menu"; "Re:CoM's own arrow").
+///
+/// - **Art**: Re:CoM's own white triangle of `Cockpit:00` (sprite UV (16, 49)–(32, 64), one of its
+///   lock-on cursor's three pointers, animation group 98; Checked (files: the owner's
+///   `FO0002.SPR` / `.RTM`)), turned to point left, in a group the asset step adds after the
+///   command menu's plates (`kh1_recom_assets::command_menu::group::ARROW`); Re:CoM loads, plays
+///   and draws it with the HUD's set, in the field and in battle.
+/// - **Motion** (KH2's, measured on the owner's recording `Recording_2026-11-04_125817.mp4`, 448 ×
+///   300 at 30 fps, every frame, the arrow's luminance centroid; one row = 37.7 px = KH1's 22 units,
+///   so 1 px = 0.584 unit): **it never blinks** (drawn in all 335 frames); it **sways** left and right
+///   about its rest place: ±1.5 units, a period of 31.5 frames (60 Hz) (troughs at 87 / 120 / 151 and
+///   peaks at 103 / 134 / 166 frames after a cursor move); after each cursor move it **swings in**
+///   from 6 units to the right of its rest, overshoots 4.8 left (frame 13), 2.7 right (30), 2.7 left
+///   (51), then sways. Baked into the group (integer translations, Re:CoM's format): keys
+///   [`INTRO`], then [`SWAY`] looped from [`LOOP_START`]. Measured (recording; ±1 recorded frame,
+///   ±0.5 unit); KH2's own numbers not read (no KH2 decomp in the session).
+/// - **Place** ([`at`]): its centre left of the selected row's plate, at the plate's height. KH2's
+///   gap (the arrow's right edge 4 units left of the plate) from the recording; the plates' places
+///   are ours (KH1's look: the selection plate at the row + (11, 18), the word's centre + 30;
+///   Re:CoM's look: the plate's left edge at the row's x, its centre 12 below). Assumption (to judge
+///   in game).
+pub mod arrow {
+    /// The arrow's width and height after the turn (units): KH2's arrow is 10.5 × 16.4 units on the
+    /// recording; Re:CoM's 16 × 15 triangle is drawn 16 × 10 before its turn.
+    pub const SIZE: (f32, f32) = (10.0, 16.0);
+    /// The gap from the arrow's right edge to the plate (recording: 7 px).
+    pub const GAP: f32 = 4.0;
+    /// The arrow's centre from a row's KH1 top-left: KH1's look (`hud = kh1`), Re:CoM's look.
+    pub fn at(kh1_look: bool) -> (f32, f32) {
+        if kh1_look {
+            (crate::kh1_hud::menu::SEL_AT.0 - GAP - SIZE.0 / 2.0, 30.0)
+        } else {
+            (-GAP - SIZE.0 / 2.0, 12.0)
+        }
+    }
+    /// The swing-in after a cursor move: (frame, x offset in units from the sway's base), linear
+    /// between keys. The base is the rest place − 0.5 (the sway runs −1 ↔ +2 about it: integers).
+    pub const INTRO: [(i32, i32); 6] = [(0, 6), (3, 7), (13, -4), (30, 3), (51, -2), (LOOP_START, 2)];
+    /// The sway's first frame (Re:CoM's animation group loop start).
+    pub const LOOP_START: i32 = 67;
+    /// One sway period from [`LOOP_START`] (32 frames: the measured 31.5 rounded), keyed where
+    /// a sine through −1 … +2 crosses each integer, so the linear segments follow it.
+    pub const SWAY: [(i32, i32); 7] = [(0, 2), (6, 1), (10, 0), (16, -1), (22, 0), (26, 1), (32, 2)];
 }
 
 /// One shortcut slot to draw: the KH1 message id of its word (the spell at its level, or the
@@ -1648,12 +1846,13 @@ pub mod shortcut {
     }
 
     /// The sleight of a slot byte: the byte **is** the Re:CoM sleight id (0x1B..=0x33, 0x3A, 0x43,
-    /// the sleight abilities'; all ≥ 8, so never a spell byte). Any other byte: none. Bytes 8.. were
+    /// the sleight abilities'; 0.111.0: the Party sleights' 0x45..=0x56, `crate::party`; all ≥ 8,
+    /// so never a spell byte). Any other byte: none. Bytes 8.. were
     /// "none" before step 6 (`slot_spell`), so an older build shows such a slot empty and keeps the
     /// byte unless the player sets that slot. Checked (code).
     pub fn slot_sleight(b: u8) -> Option<u16> {
         let id = b as u16;
-        (b >= 8 && crate::abilities::of_sleight(id).is_some()).then_some(id)
+        (b >= 8 && (crate::abilities::of_sleight(id).is_some() || crate::party::index(id).is_some())).then_some(id)
     }
 
     /// The slot byte of a sleight ability's Re:CoM id (None: not one of the 27).
@@ -1701,7 +1900,10 @@ pub fn text_colour(bright: u8, alpha: f32) -> u32 {
 
 /// Our own menu words (message ids above KH1's `Word.bin`), English in every language: the
 /// asset step's `command_menu::OUR_WORDS` holds the same.
-pub const OUR_WORDS: &[(u16, &str)] = &[(crate::gimmick::STAGGER_WORD, crate::gimmick::STAGGER_TEXT), (crate::sleights::ROW_WORD, crate::sleights::ROW_TEXT)];
+/// 0.111.0: 903 "Party", page 2's row 2 (the owner's word).
+pub const OUR_WORDS: &[(u16, &str)] = &[(crate::gimmick::STAGGER_WORD, crate::gimmick::STAGGER_TEXT), (crate::sleights::ROW_WORD, crate::sleights::ROW_TEXT), (cmd::PARTY_WORD, PARTY_TEXT)];
+/// Page 2's row 2.
+pub const PARTY_TEXT: &str = "Party";
 
 /// The words (`kh1-command-menu.json`) of one language, as Re:CoM's font bytes (NUL-terminated),
 /// by message id.
@@ -1796,7 +1998,7 @@ pub fn parse_words(text: &str, lang: &str) -> Result<Words, String> {
     }
     // Our own words (not KH1's): the asset step writes them; a manifest from before them gets the
     // built-in text (the Re:CoM look draws it; the KH1 look needs the asset step's glyphs).
-    for (id, text) in OUR_WORDS.iter().copied().chain(crate::sleights::words()) {
+    for (id, text) in OUR_WORDS.iter().copied().chain(crate::sleights::words()).chain(crate::party::words()) {
         if out.get(id).is_none() {
             out.by_id.push((id, font_bytes(text).0));
         }
@@ -1909,13 +2111,13 @@ mod tests {
         assert!(m.open);
         let o = m.step(&w, press(|p| p.cancel = true));
         assert!(!m.open && m.root.cursor == 0 && !o.jump);
-        // Left at the root (M12 step 5, owner: KH1's Left → Attack dropped): the 4th row switches
-        // to Sleights, the cursor stays.
+        // Left at the root (0.111.0, owner: KH1's Left → Attack dropped): the page switches, the
+        // cursor stays, Re:CoM's cursor sound.
         m.root.cursor = 2;
         let o = m.step(&w, press(|p| p.left = true));
-        assert!(m.root.cursor == 2 && o.sounds == vec![Sound::Move]);
-        assert_eq!(o.bottom, Some(crate::sleights::Bottom::Sleights));
-        m.bottom = crate::sleights::Bottom::Summon;
+        assert!(m.root.cursor == 2 && o.sounds == vec![Sound::Page]);
+        assert_eq!(o.page, Some(Page::Two));
+        m.page = Page::One;
         // The magic cursor is kept when the list opens again (KH1 keeps its list's cursor).
         m.magic.cursor = 4;
         m.root.cursor = 1;
@@ -2318,10 +2520,10 @@ mod tests {
         m.step(&w, Pad::default());
         m.tick(1.0);
         let s = m.scene();
-        // FM: four rows always (the 4th the blank command until summons, M8); the context
-        // command is not a row.
+        // FM: four rows always (0.111.0: the 4th is Sleights on both pages); the context command is
+        // not a row.
         assert_eq!(s.rows.iter().map(|r| (r.x, r.y)).collect::<Vec<_>>(), vec![(16.0, 260.0), (16.0, 282.0), (16.0, 304.0), (16.0, 326.0)]);
-        assert!(s.rows[0].highlight && s.rows[3].name == cmd::BLANK_NAME && !s.rows[3].highlight);
+        assert!(s.rows[0].highlight && s.rows[3].name == crate::sleights::ROW_WORD && !s.rows[3].highlight);
         assert!(s.rows.iter().all(|r| r.name != cmd::name(cmd::TALK)));
         // The tab: Talk, sliding in (the frame it starts, then x −10 + 10/7 × ½, opacity 1/14).
         let t = s.tab.expect("the tab shows");
@@ -2345,7 +2547,8 @@ mod tests {
         let s = m.scene();
         let mg: Vec<_> = s.rows.iter().filter(|r| r.list == Kind::Magic).collect();
         assert_eq!((mg[0].y, mg[1].y, mg[0].name, mg[1].name), (282.0, 304.0, 8, 16));
-        // No context: no tab; the 4th row stays, grey, and bright under the cursor.
+        // No context: no tab; the 4th row stays, grey by its grey bit (nothing equipped), under the
+        // cursor too.
         let mut m = Menu::new();
         m.show();
         m.step(&world(), Pad::default());
@@ -2355,7 +2558,7 @@ mod tests {
         assert_eq!(s.rows[3].bright, BRIGHT_GREY as u8);
         m.root.cursor = 3;
         let s = m.scene();
-        assert_eq!((s.rows[3].name, s.rows[3].highlight, s.rows[3].bright), (cmd::BLANK_NAME, true, BRIGHT_ON as u8));
+        assert_eq!((s.rows[3].name, s.rows[3].highlight, s.rows[3].bright), (crate::sleights::ROW_WORD, true, BRIGHT_GREY as u8));
     }
 
     #[test]
@@ -2391,67 +2594,84 @@ mod tests {
     }
 
     #[test]
-    fn summon_is_the_magic_lists_last_entry_on_row_3() {
-        // No spell: no Summon (KH1 appends it to the Magic list only), the blank row.
+    fn summon_is_page_2s_row_1() {
+        // Page 1: Magic on row 1, no Summon entry anywhere.
         let mut m = Menu::new();
-        m.build(&World { spells: [0; 7], ..summon_world() });
-        assert!(!m.summon_on);
-        // With spells: row 3 is Summon, not greyed (one usable), the list in learn order.
-        let w = summon_world();
+        m.build(&summon_world());
+        assert!(!m.summon_on && m.root.cmds[1] == cmd::MAGIC);
+        // Page 2: row 1 is Summon, not greyed (one usable), the list in learn order; no spell is
+        // needed any more (it is not the Magic list's entry).
+        let w = World { page: Page::Two, ..summon_world() };
         m.build(&w);
-        assert!(m.summon_on && !m.summon_grey && !m.summon_lock);
+        assert!(m.summon_on && !m.summon_grey && !m.summon_lock && m.root.cmds[1] == cmd::SUMMON);
+        m.build(&World { spells: [0; 7], ..w });
+        assert!(m.summon_on, "no spell needed on page 2");
+        m.build(&w);
         // Cloud first (owner), then Simba, Dumbo in learn order.
         assert_eq!(m.summon.cmds, vec![0x35, 0x34, 0x2F]);
         assert_eq!(m.summon.grey & 7, 0);
-        // The context command keeps entry 3 (the tab's); row 3's word is Summon.
+        // The context command keeps entry 3 (the tab's); row 3's word is Sleights, row 1's Summon.
         assert_eq!(m.root.cmds[3], cmd::NONE);
         m.show();
         let sc = m.scene();
-        assert_eq!((sc.rows[3].name, sc.rows[3].bright), (SUMMON_NAME, BRIGHT_ON as u8));
-        // Up to row 3, confirm: the Summon list opens (sound 6); Right does the same.
+        assert_eq!(sc.rows[1].name, SUMMON_NAME);
+        assert_eq!(sc.rows[3].name, crate::sleights::ROW_WORD);
+        // Down to row 1, confirm: the Summon list opens (sound 6); Right does the same.
         for pad in [press(|p| p.confirm = true), press(|p| p.right = true)] {
             let mut m = Menu::new();
-            m.step(&w, press(|p| p.up = true));
+            m.step(&w, press(|p| p.down = true));
             let o = m.step(&w, pad);
             assert!(m.open && m.sub == Kind::Summon, "{pad:?}");
             assert_eq!((o.sounds, o.events), (vec![Sound::Open], vec![Event::Opened(Kind::Summon)]));
             assert!(!o.attack);
         }
+        // None learned: Summon greyed and locked (the error sound).
+        let w0 = World { summon_count: 0, ..w };
+        let mut m = Menu::new();
+        m.step(&w0, press(|p| p.down = true));
+        assert!(!m.summon_on && m.summon_grey && m.summon_lock && m.root.cmds[1] == cmd::SUMMON);
+        let o = m.step(&w0, press(|p| p.confirm = true));
+        assert!(!m.open && o.sounds == vec![Sound::Error]);
     }
 
     #[test]
     fn summon_greying_is_kh1s() {
+        let p2 = |w: World| World { page: Page::Two, ..w };
         let mut m = Menu::new();
         // 2 MP: Cloud (3, first) not usable, Simba (2) and Dumbo (2) usable.
-        m.build(&World { mp: Some((2, 3, 0)), ..summon_world() });
+        m.build(&p2(World { mp: Some((2, 3, 0)), ..summon_world() }));
         assert_eq!(m.summon.grey & 7, 0b001);
         assert_eq!(m.summon.lock & 7, 0b001);
         // No once-per-battle rule (owner): with the MP, a summon stays usable after it was used;
         // only one out at a time (below).
-        // Not in battle (the field): all greyed; row 3 greyed but openable.
-        m.build(&World { battle: false, ..summon_world() });
+        // Not in battle (the field): all greyed; the row greyed but openable.
+        m.build(&p2(World { battle: false, ..summon_world() }));
         assert_eq!(m.summon.grey & 7, 0b111);
         assert!(m.summon_grey && !m.summon_lock);
         // In the air (KH1 state 2: no flag 0x80): all greyed.
-        m.build(&World { state: 2, ..summon_world() });
+        m.build(&p2(World { state: 2, ..summon_world() }));
         assert_eq!(m.summon.grey & 7, 0b111);
-        // One out: row 3 greyed and locked (owner: no Dismiss); confirm is the error sound.
-        let w = World { summon_out: true, ..summon_world() };
+        // One out: the row greyed and locked (owner: no Dismiss); confirm is the error sound.
+        let w = p2(World { summon_out: true, ..summon_world() });
         let mut m = Menu::new();
-        m.step(&w, press(|p| p.up = true));
+        m.step(&w, press(|p| p.down = true));
         assert!(m.summon_grey && m.summon_lock);
         let o = m.step(&w, press(|p| p.confirm = true));
         assert!(!m.open);
         assert_eq!((o.sounds, o.events), (vec![Sound::Error], vec![Event::Refused(cmd::SUMMON)]));
         m.show();
-        assert_eq!(m.scene().rows[3].bright, BRIGHT_GREY as u8);
+        m.tick(1.0);
+        m.tick(1.0);
+        m.tick(1.0);
+        m.tick(1.0);
+        assert_eq!(m.scene().rows[1].bright, BRIGHT_GREY as u8);
     }
 
     #[test]
     fn summon_list_issues_through_kh1s_gate() {
-        let w = summon_world();
+        let w = World { page: Page::Two, ..summon_world() };
         let mut m = Menu::new();
-        m.step(&w, press(|p| p.up = true));
+        m.step(&w, press(|p| p.down = true));
         m.step(&w, press(|p| p.confirm = true));
         // Down to Simba (Cloud is first); the cursor wraps over the three.
         m.step(&w, press(|p| p.down = true));
@@ -2466,7 +2686,7 @@ mod tests {
         assert!(!m.open && m.root.cursor == 0 && o.sounds.is_empty() && !o.attack);
         // A greyed entry (Cloud with 2 MP): the error sound.
         let w2 = World { mp: Some((2, 3, 0)), ..w };
-        m.step(&w2, press(|p| p.up = true));
+        m.step(&w2, press(|p| p.down = true));
         m.step(&w2, press(|p| p.confirm = true));
         // The list keeps its cursor (Simba, 1), as KH1's records do: Up to Cloud, Up again wraps.
         assert_eq!(m.summon.cursor, 1);
@@ -2479,38 +2699,38 @@ mod tests {
         assert!(!m.open && m.root.cursor == 0 && o.sounds == vec![Sound::Back]);
     }
 
-    /// M12 step 5: Sleights mode, Fire Raid (2 MP), Holy (3 MP), Idyll Romp (all MP) equipped, in
-    /// battle, the summons of [`summon_world`] learned too.
+    /// M12 step 5: Fire Raid (2 MP), Holy (3 MP), Idyll Romp (all MP) equipped, in battle, the
+    /// summons of [`summon_world`] learned too.
     fn sleight_world() -> World {
         use crate::abilities::sleight as s;
         let mut sleights = [0u8; crate::sleights::MAX];
         sleights[..3].copy_from_slice(&[s::HOLY as u8, s::IDYLL_ROMP as u8, s::FIRE_RAID as u8]);
-        World { bottom: crate::sleights::Bottom::Sleights, sleights, sleight_count: 3, ..summon_world() }
+        World { sleights, sleight_count: 3, ..summon_world() }
     }
 
     #[test]
-    fn left_at_the_root_switches_summon_and_sleights() {
-        use crate::sleights::Bottom;
-        // From any root row, Left switches the 4th row (sound 1) and keeps the cursor; the save
-        // keeps it (the next frame's world says Sleights).
+    fn left_at_the_root_switches_the_pages() {
+        // From any root row, Left switches the page (Re:CoM's cursor sound) and keeps the cursor;
+        // the save keeps it (the next frame's world says page 2).
         for row in 0..4 {
             let mut w = summon_world();
             let mut m = Menu::new();
             m.root.cursor = row;
             let o = m.step(&w, press(|p| p.left = true));
-            assert_eq!((o.bottom, o.sounds.clone(), o.events.clone(), m.root.cursor), (Some(Bottom::Sleights), vec![Sound::Move], vec![Event::Bottom(Bottom::Sleights)], row));
+            assert_eq!((o.page, o.sounds.clone(), o.events.clone(), m.root.cursor), (Some(Page::Two), vec![Sound::Page], vec![Event::Page(Page::Two)], row));
             assert!(!o.attack, "Left is no Attack");
-            w.bottom = Bottom::Sleights;
+            w.page = Page::Two;
             m.step(&w, Pad::default());
             m.show();
-            assert_eq!(m.scene().rows[3].name, crate::sleights::ROW_WORD);
-            assert!(!m.summon_on, "the Summon entry isn't there in Sleights mode");
+            let names: Vec<u16> = m.scene().rows.iter().map(|r| r.name).collect();
+            assert_eq!(names, [1, SUMMON_NAME, cmd::PARTY_WORD, crate::sleights::ROW_WORD]);
             // And back.
             let o = m.step(&w, press(|p| p.left = true));
-            assert_eq!(o.bottom, Some(Bottom::Summon));
-            w.bottom = Bottom::Summon;
+            assert_eq!(o.page, Some(Page::One));
+            w.page = Page::One;
             m.step(&w, Pad::default());
-            assert_eq!(m.scene().rows[3].name, SUMMON_NAME);
+            let names: Vec<u16> = m.scene().rows.iter().map(|r| r.name).collect();
+            assert_eq!(names, [1, 2, 3, crate::sleights::ROW_WORD]);
         }
         // In an open list Left still closes it (KH1), with no switch.
         let w = summon_world();
@@ -2519,7 +2739,7 @@ mod tests {
         m.step(&w, press(|p| p.confirm = true));
         assert!(m.open);
         let o = m.step(&w, press(|p| p.left = true));
-        assert!(!m.open && o.bottom.is_none() && o.sounds == vec![Sound::Back]);
+        assert!(!m.open && o.page.is_none() && o.sounds == vec![Sound::Back]);
         // The shortcut list (L1 held) has no cursor: no switch.
         let mut m = Menu::new();
         let ws = World { shortcuts: [1, 0, 0], ..w };
@@ -2527,7 +2747,25 @@ mod tests {
             p.l1 = true;
             p.left = true
         }));
-        assert!(m.short_on && o.bottom.is_none());
+        assert!(m.short_on && o.page.is_none());
+        // A page switch with the Magic list open on page 1 (another frame's world): it closes.
+        let mut m = Menu::new();
+        m.root.cursor = 1;
+        m.step(&w, press(|p| p.confirm = true));
+        assert!(m.open && m.sub == Kind::Magic);
+        m.step(&World { page: Page::Two, ..w }, Pad::default());
+        assert!(!m.open);
+    }
+
+    #[test]
+    fn the_page_byte() {
+        assert_eq!(Page::of_byte(0), Page::One, "a save from before 0.111.0 (its Summon choice)");
+        assert_eq!(Page::of_byte(1), Page::One, "its Sleights choice");
+        assert_eq!(Page::of_byte(2), Page::Two);
+        assert_eq!(Page::of_byte(7), Page::One);
+        assert_eq!(Page::of_byte(Page::Two.byte()), Page::Two);
+        assert_eq!(Page::of_byte(Page::One.byte()), Page::One);
+        assert_eq!(Page::One.other(), Page::Two);
     }
 
     #[test]
@@ -2622,7 +2860,7 @@ mod tests {
         let o = m.step(&w, press(|p| p.right = true));
         assert!(m.open && m.sub == Kind::Sleight);
         assert_eq!((o.sounds, o.events), (vec![Sound::Open], vec![Event::Opened(Kind::Sleight)]));
-        // Placed as the Summon list: three entries bottom-anchored at 348 − 66 = 282, x + 11.
+        // Beside row 3: three entries bottom-anchored at 348 − 66 = 282, x + 11.
         m.show();
         let ys: Vec<(f32, f32, u16)> = m.scene().rows.iter().filter(|r| r.list == Kind::Sleight).map(|r| (r.x, r.y, r.name)).collect();
         assert_eq!(ys, vec![(27.0, 282.0, crate::sleights::word(s::FIRE_RAID)), (27.0, 304.0, crate::sleights::word(s::HOLY)), (27.0, 326.0, crate::sleights::word(s::IDYLL_ROMP))]);
@@ -2652,8 +2890,8 @@ mod tests {
         m.show();
         let ys: Vec<f32> = m.scene().rows.iter().filter(|r| r.list == Kind::Sleight).map(|r| r.y).collect();
         assert_eq!(ys, vec![326.0]);
-        // Switched back to Summon while it is open (another frame's world): it closes.
-        m.step(&World { bottom: crate::sleights::Bottom::Summon, ..w1 }, Pad::default());
+        // Equipped no more while it is open (another frame's world): it closes.
+        m.step(&World { sleight_count: 0, ..w1 }, Pad::default());
         assert!(!m.open);
     }
 
@@ -2743,41 +2981,41 @@ mod tests {
             assert!(src.contains(&line), "the asset step lacks {line}");
         }
         assert!(src.contains(&format!("({}, \"{}\")", crate::sleights::ROW_WORD, crate::sleights::ROW_TEXT)));
+        // 0.111.0: the Party row and names, and the arrow's motion.
+        assert!(src.contains(&format!("({}, \"{}\")", cmd::PARTY_WORD, PARTY_TEXT)));
+        for (id, name) in crate::party::words() {
+            let line = format!("({id:#06X}, \"{name}\")");
+            assert!(src.contains(&line), "the asset step lacks {line}");
+        }
+        assert!(src.contains(&format!("pub const INTRO: [(i32, i32); 6] = {:?};", arrow::INTRO).replace("LOOP_START", "67").replace(&format!("({}, 2)", arrow::LOOP_START), "(LOOP_START, 2)")));
+        assert!(src.contains(&format!("pub const SWAY: [(i32, i32); 7] = {:?};", arrow::SWAY)));
+        assert!(src.contains(&format!("pub const LOOP_START: i32 = {};", arrow::LOOP_START)));
     }
 
     #[test]
-    fn summon_list_place_is_kh1s() {
-        // One summon: beside row 3 (260 + 3 × 22 = 326), x + 11.
-        let mut one = summon_world();
+    fn summon_list_place_is_beside_its_row() {
+        let p2 = |w: World| World { page: Page::Two, ..w };
+        // One summon: beside page 2's row 1 (260 + 22 = 282), x + 11.
+        let mut one = p2(summon_world());
         one.summon_count = 1;
         let mut m = Menu::new();
         m.show();
-        m.step(&one, press(|p| p.up = true));
+        m.step(&one, press(|p| p.down = true));
         m.step(&one, press(|p| p.confirm = true));
         let sc = m.scene();
         let sl: Vec<_> = sc.rows.iter().filter(|r| r.list == Kind::Summon).collect();
-        assert_eq!((sl[0].x, sl[0].y, sl.len(), sl[0].name), (27.0, 326.0, 1, 291));
-        // Three: bottom-anchored, 348 − 66 = 282; Cloud's word is ours.
+        assert_eq!((sl[0].x, sl[0].y, sl.len(), sl[0].name), (27.0, 282.0, 1, 291));
+        // Three: 282 (348 − 66 too); Cloud's word is ours.
         let mut m = Menu::new();
         m.show();
-        let w = summon_world();
-        m.step(&w, press(|p| p.up = true));
+        let w = p2(summon_world());
+        m.step(&w, press(|p| p.down = true));
         m.step(&w, press(|p| p.confirm = true));
         let sc = m.scene();
         let ys: Vec<(f32, u16)> = sc.rows.iter().filter(|r| r.list == Kind::Summon).map(|r| (r.y, r.name)).collect();
         assert_eq!(ys, vec![(282.0, crate::summons::CLOUD_NAME), (304.0, 291), (326.0, 286)]);
-        // Cloud alone (learned third, shown first): beside row 3.
-        let mut cloud = summon_world();
-        cloud.summons[0] = 6;
-        cloud.summon_count = 1;
-        let mut m = Menu::new();
-        m.show();
-        m.step(&cloud, press(|p| p.up = true));
-        m.step(&cloud, press(|p| p.confirm = true));
-        let ys: Vec<(f32, u16)> = m.scene().rows.iter().filter(|r| r.list == Kind::Summon).map(|r| (r.y, r.name)).collect();
-        assert_eq!(ys, vec![(326.0, crate::summons::CLOUD_NAME)]);
-        // The Magic list with two spells and Summon: KH1's list holds 3 entries, so it is
-        // bottom-anchored (348 − 44 = 304), not at the Magic row (282).
+        // The Magic list with two spells (summons learned): at the Magic row (282): the Summon entry
+        // is no longer in it (0.111.0).
         let mut two = [0; 7];
         two[0] = 2;
         two[3] = 1;
@@ -2787,7 +3025,95 @@ mod tests {
         m.step(&w, press(|p| p.down = true));
         m.step(&w, press(|p| p.confirm = true));
         let ys: Vec<f32> = m.scene().rows.iter().filter(|r| r.list == Kind::Magic).map(|r| r.y).collect();
-        assert_eq!(ys, vec![304.0, 326.0]);
+        assert_eq!(ys, vec![282.0, 304.0]);
+        // KH1's rule for each list: min(its row's y, 348 − 22 n).
+        assert_eq!([Kind::Magic, Kind::Items, Kind::Summon, Kind::Party, Kind::Sleight].map(list_row), [1, 2, 1, 2, 3]);
+    }
+
+    /// 0.111.0: the Party list: Donald Magic (2 MP), Wild Crush (3 MP), Lucky Bounty (1 MP)
+    /// learned; Donald Magic and Lucky Bounty available here (Wild Crush not: Goofy's card can't
+    /// drop, say); page 2, in battle, 2 MP.
+    fn party_world() -> World {
+        World { page: Page::Two, mp: Some((2, 3, 0)), party_learned: 0b11_0001, party_avail: 0b10_0001, ..summon_world() }
+    }
+
+    #[test]
+    fn party_is_page_2s_row_2_with_the_available_friend_sleights() {
+        let w = party_world();
+        let mut m = Menu::new();
+        m.build(&w);
+        assert_eq!(m.root.cmds[2], cmd::PARTY);
+        assert_eq!(m.party.cmds, vec![crate::party::command(0), crate::party::command(5)], "only the available ones, the owner's order");
+        assert!(!m.party_grey && !m.party_lock);
+        assert_eq!(cmd::name(m.party.cmds[0]), crate::sleights::WORD_BASE + 0x45);
+        // 1 MP: Donald Magic (2) greyed and locked, Lucky Bounty usable.
+        m.build(&World { mp: Some((1, 3, 0)), ..w });
+        assert_eq!((m.party.grey & 3, m.party.lock & 3), (0b01, 0b01));
+        // None available here: greyed and locked; confirm buzzes.
+        let w0 = World { party_avail: 0, ..w };
+        let mut m = Menu::new();
+        m.step(&w0, press(|p| p.down = true));
+        m.step(&w0, press(|p| p.down = true));
+        assert!(m.party_grey && m.party_lock && m.party.cmds.is_empty());
+        let o = m.step(&w0, press(|p| p.confirm = true));
+        assert!(!m.open && o.sounds == vec![Sound::Error]);
+        // A sleight running: locked.
+        m.build(&World { summon_out: true, ..w });
+        assert!(m.party_lock);
+        // Opens beside row 2 (two entries: 304 = 348 − 44), issues through KH1's gate.
+        let mut m = Menu::new();
+        m.show();
+        m.step(&w, press(|p| p.down = true));
+        m.step(&w, press(|p| p.down = true));
+        let o = m.step(&w, press(|p| p.right = true));
+        assert!(m.open && m.sub == Kind::Party);
+        assert_eq!((o.sounds, o.events), (vec![Sound::Open], vec![Event::Opened(Kind::Party)]));
+        let ys: Vec<(f32, f32)> = m.scene().rows.iter().filter(|r| r.list == Kind::Party).map(|r| (r.x, r.y)).collect();
+        assert_eq!(ys, vec![(27.0, 304.0), (27.0, 326.0)]);
+        let o = m.step(&World { gate_any: false, ..w }, press(|p| p.confirm = true));
+        assert_eq!(o.events, vec![Event::Party(crate::party::command(0), ShortResult::NotNow)]);
+        assert!(m.open && o.sleight.is_none());
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert_eq!((o.sleight, o.sounds.clone()), (Some(0x45), vec![]));
+        assert!(!m.open && m.root.cursor == 0 && !o.attack);
+        // Back on page 1 the Party list closes (another frame's world).
+        let mut m = Menu::new();
+        m.step(&w, press(|p| p.down = true));
+        m.step(&w, press(|p| p.down = true));
+        m.step(&w, press(|p| p.confirm = true));
+        assert!(m.open);
+        m.step(&World { page: Page::One, ..w }, Pad::default());
+        assert!(!m.open);
+    }
+
+    #[test]
+    fn the_arrow_follows_the_root_cursor() {
+        let w = summon_world();
+        let mut m = Menu::new();
+        m.show();
+        m.step(&w, Pad::default());
+        assert_eq!(m.scene().arrow, Some(ArrowView { row: 0, x: ROOT_X, y: ROOT_Y }));
+        m.step(&w, press(|p| p.down = true));
+        assert_eq!(m.scene().arrow.map(|a| (a.row, a.y)), Some((1, ROOT_Y + PITCH)));
+        // Both pages.
+        let o = m.step(&w, press(|p| p.left = true));
+        assert_eq!(o.page, Some(Page::Two));
+        assert_eq!(m.scene().arrow.map(|a| a.row), Some(1));
+        // Not while a list is open (the list's cursor is the plate), nor with the shortcut list.
+        m.step(&World { page: Page::Two, ..w }, press(|p| p.confirm = true));
+        assert!(m.open && m.scene().arrow.is_none());
+        let mut m = Menu::new();
+        m.step(&World { shortcuts: [1, 0, 0], ..w }, held(|_| {}));
+        assert!(m.short_on && m.scene().arrow.is_none());
+        // The motion: KH2's swing-in, then its sway, in integer keys.
+        assert_eq!(arrow::INTRO.last().copied(), Some((arrow::LOOP_START, arrow::SWAY[0].1)));
+        assert_eq!(arrow::SWAY.first().map(|k| k.1), arrow::SWAY.last().map(|k| k.1), "the loop closes");
+        assert!(arrow::SWAY.windows(2).all(|k| k[0].0 < k[1].0) && arrow::INTRO.windows(2).all(|k| k[0].0 < k[1].0));
+        let (lo, hi) = arrow::SWAY.iter().fold((i32::MAX, i32::MIN), |a, k| (a.0.min(k.1), a.1.max(k.1)));
+        assert_eq!(hi - lo, 3, "±1.5 units");
+        // Its place: left of the plate.
+        assert!(arrow::at(true).0 + arrow::SIZE.0 / 2.0 + arrow::GAP <= crate::kh1_hud::menu::SEL_AT.0);
+        assert!(arrow::at(false).0 + arrow::SIZE.0 / 2.0 <= 0.0);
     }
 
     #[test]
@@ -3039,8 +3365,8 @@ mod tests {
         m.build(&World { spells: [0; 7], ..w });
         assert!(m.short_ok);
         assert_eq!(m.shortcut.cmds[0], cmd::BLANK);
-        // In Summon mode as in Sleights mode (the shortcut doesn't need the bottom row).
-        assert_eq!(w.bottom, crate::sleights::Bottom::Summon);
+        // On either page (the shortcut doesn't need the Sleights row).
+        assert_eq!(w.page, Page::One);
 
         // Square: slot 2 (Fire Raid): Re:CoM's sleight start, no cast, no menu sound.
         m.step(&w, held(|_| {}));
@@ -3058,6 +3384,34 @@ mod tests {
         let o = m.step(&World { gate_any: false, ..w }, held(|p| p.square = true));
         assert_eq!((o.sleight, o.sounds.is_empty()), (None, true));
         assert_eq!(o.events, vec![Event::Shortcut(1, crate::sleights::command(s::FIRE_RAID), ShortResult::NotNow)]);
+    }
+
+    /// 0.111.0 (owner: "friend sleights should be able to be put in the shortcuts"): a slot holding a
+    /// Party sleight (its Re:CoM id) shows it once Re:CoM taught it, usable where the Party list
+    /// would offer it (greyed where its card can't drop), and starts it as the Party list does.
+    #[test]
+    fn party_shortcuts_follow_the_party_lists_availability() {
+        assert_eq!(shortcut::slot_of(0x45), Some(shortcut::Slot::Sleight(0x45)));
+        assert_eq!(shortcut::sleight_byte(0x4E), Some(0x4E));
+        assert_eq!(shortcut::slot_of(0x47), None, "Goofy Tornado LV2 is not listed");
+        let w = World { shortcuts: [0x45, 0x4C, 0], battle: true, party_learned: 0b100_0001, party_avail: 0b1, ..short_world() };
+        let mut m = Menu::new();
+        m.build(&w);
+        assert!(m.short_ok);
+        assert_eq!(m.shortcut.cmds[..2], [crate::party::command(0), crate::party::command(6)]);
+        assert_eq!(m.shortcut.grey & 3, 0b10, "Sandstorm taught but not available here: greyed");
+        // Not taught: the blank dash, greyed.
+        m.build(&World { party_learned: 0b1, ..w });
+        assert_eq!((m.shortcut.cmds[1], m.shortcut.grey & 2), (cmd::BLANK, 2));
+        // Out of battle: greyed.
+        m.build(&World { battle: false, party_avail: 0, ..w });
+        assert_eq!(m.shortcut.grey & 1, 1);
+        // Triangle: Donald Magic through Re:CoM's sleight start.
+        m.step(&w, held(|_| {}));
+        let o = m.step(&w, held(|p| p.triangle = true));
+        assert_eq!((o.sleight, o.cast), (Some(0x45), None));
+        let o = m.step(&w, held(|p| p.square = true));
+        assert_eq!((o.sleight, o.sounds), (None, vec![Sound::Error]));
     }
 
     #[test]

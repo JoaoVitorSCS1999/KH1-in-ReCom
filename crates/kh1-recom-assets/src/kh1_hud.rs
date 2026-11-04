@@ -3074,7 +3074,7 @@ mod tests {
                 com_battle: &com_battle,
                 mag: &mag,
                 font: [&fonts[0], &fonts[1]],
-                words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (4, "Talk".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into()), (8, "Fira".into()), (16, "Cure".into()), (13, "Thunder".into()), (31, "Potion".into()), (32, "Hi-Potion".into()), (38, "Megalixir".into())])],
+                words: vec![("us".into(), vec![(1, "Attack".into()), (2, "Magic".into()), (3, "Items".into()), (4, "Talk".into()), (6, "Summon".into()), (305, "-".into()), (294, "Open".into()), (313, "Jump On".into()), (8, "Fira".into()), (16, "Cure".into()), (13, "Thunder".into()), (31, "Potion".into()), (32, "Hi-Potion".into()), (38, "Megalixir".into()), (903, "Party".into())].into_iter().chain(crate::command_menu::PARTY_WORDS.iter().map(|&(id, t)| (id, t.to_string()))).collect())],
                 icon: Some([&icon[0], &icon[1]]),
                 cut: Some(&cut),
                 item: Some(&item),
@@ -3143,6 +3143,8 @@ mod tests {
         assert_eq!(mn.widths.len(), mn.words.len());
         assert!(width(32).is_some_and(|w| (600..760).contains(&w)), "Hi-Potion {:?}", width(32));
         assert!(width(1).is_some_and(|w| w < width(38).unwrap()), "Attack narrower than Megalixir");
+        // 0.111.0: "Party" and the Party names ("Surprise!" needs the font's '!').
+        assert!(width(903).is_some() && crate::command_menu::PARTY_WORDS.iter().all(|&(id, _)| width(id).is_some()));
         assert!(mn.tab_icon, "the PlayStation triangle from Icon.tm2");
         // M8 stage 8a.1: the Items list's six groups after the words, before the shortcut panel.
         let il = mn.items_list.expect("the Items list from UK_uibin_item.bin");

@@ -184,6 +184,8 @@ struct Ui {
     tab: Option<TabCtl>,
     /// Stage 7.12: the shortcut panel's controls while the shortcut list is on top.
     short: Option<ShortCtl>,
+    /// 0.111.0: the pointing arrow's control (0: none).
+    arrow: usize,
 }
 
 /// The shortcut panel (stage 7.12): the frame + title, the three glyphs, the three words (0: not
@@ -317,7 +319,7 @@ pub unsafe fn build(gauge: usize, list: i32) {
         let _ = super::mp::current();
     }
     let hidden = rd::<u16>(gauge + G_STATE) as u32 == STATE_HIDDEN;
-    let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None, look: None, tab: None, short: None };
+    let ui = Ui { gauge, list, xoff: -rd::<f32>(gauge + G_XOFF), hidden, rows: Vec::new(), shown: None, look: None, tab: None, short: None, arrow: 0 };
     // M8 stage 8a.1, debug (`kh1_test_items`): a room or battle starts with a test inventory when
     // Sora's slots are all empty.
     super::items::hud_built();
@@ -426,7 +428,47 @@ impl Ui {
             }
         }
         self.clear_tab();
+        if self.arrow != 0 {
+            super::d2::delete(self.arrow, self.list);
+            self.arrow = 0;
+        }
         self.shown = None;
+    }
+
+    /// 0.111.0: the pointing arrow (`cm::arrow`) beside the root's cursor row: Re:CoM's own arrow
+    /// group in `Cockpit:00` (`super::mp_bar::arrow_group`), made with the rows (so Re:CoM plays
+    /// its swing-in from frame 0 at each cursor move, then loops its sway), faded with the menu.
+    /// Without the group (an older asset step) nothing is drawn, logged once.
+    unsafe fn show_arrow(&mut self, a: Option<cm::ArrowView>, alpha: f32, kh1_look: bool) {
+        if self.arrow != 0 {
+            super::d2::delete(self.arrow, self.list);
+            self.arrow = 0;
+        }
+        let Some(a) = a else { return };
+        let Some((set, group)) = super::mp_bar::arrow_group() else {
+            static LOGGED: AtomicBool = AtomicBool::new(false);
+            if !LOGGED.swap(true, Ordering::Relaxed) {
+                log("command menu: kh1-mp-bar.json has no pointing-arrow group (run this version's asset step): no arrow drawn");
+            }
+            return;
+        };
+        let c = func::<NewFn>(NEW)(0x170);
+        if c == 0 {
+            return;
+        }
+        func::<CtorFn>(SEQ_CTOR)(c);
+        if rd::<usize>(c) != base() + SEQ_CTRL_VTABLE as usize {
+            return;
+        }
+        super::d2::made();
+        wr::<u8>(c + C_PRIORITY, PRIORITY_ROOT);
+        wr::<u8>(c + C_COLOUR_ON, 1);
+        let (dx, dy) = cm::arrow::at(kh1_look);
+        func::<VecFn>(LAYOUT_POS)(c, V4([a.x + dx, a.y + dy, 0.0, 1.0]).0.as_ptr());
+        let xoff = if kh1_look { -crate::kh1_hud::right_margin(-self.xoff) } else { self.xoff };
+        super::d2::add(c, self.list, set, group, xoff, 1);
+        func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, alpha]).0.as_ptr());
+        self.arrow = c;
     }
 
     unsafe fn clear_short(&mut self) {
@@ -672,6 +714,9 @@ impl Ui {
                         func::<VecFn>(COLOUR)(h, V4([d, d, d, sc.alpha]).0.as_ptr());
                     }
                 }
+                if self.arrow != 0 {
+                    func::<VecFn>(COLOUR)(self.arrow, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
+                }
             }
             self.shown = Some(sc.clone());
             self.show_tab_kh1(sc.tab, g, &lang);
@@ -696,7 +741,7 @@ impl Ui {
             // M8b: the Magic list's panels stand in for a missing Summon list: no "MAGIC" title.
             // M12 step 5: the Sleights list on the Summon list's panels (or the Magic list's), without
             // a title (KH1 has no "SLEIGHTS" art).
-            let stand_in = (m0.list == Kind::Summon && g.summon_list.is_none()) || m0.list == Kind::Sleight;
+            let stand_in = (m0.list == Kind::Summon && g.summon_list.is_none()) || m0.list == Kind::Sleight || m0.list == Kind::Party;
             let layers: &[(u32, Option<f32>)] = if stand_in { &[(sub + kh::menu::HEADER, None)] } else { &[(sub + kh::menu::HEADER, None), (sub + kh::menu::TITLE, None)] };
             if let Some(h) = self.kh1_ctrl(PRIORITY_SUB, m0.x, base_y, 1.0, layers) {
                 func::<VecFn>(COLOUR)(h, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
@@ -721,7 +766,7 @@ impl Ui {
                 // list's hat). Which row takes which: Assumption (by their pictures).
                 let icon = match (v.list, v.name) {
                     // The Magic list's hat; the Items list's potion (`ite_sel_ico_d`).
-                    (Kind::Magic | Kind::Items | Kind::Summon | Kind::Sleight, _) => Some(base_g + 5),
+                    (Kind::Magic | Kind::Items | Kind::Summon | Kind::Sleight | Kind::Party, _) => Some(base_g + 5),
                     (_, 1) | (_, 343) => Some(look + kh::menu::ICON),
                     (_, 2) => Some(look + kh::menu::ICON + 1),
                     (_, 3) => Some(look + kh::menu::ICON + 2),
@@ -741,7 +786,7 @@ impl Ui {
                 // Squeeze to fit (owner, 2026-11-04): in the Magic / Summon / Sleights lists a sleight
                 // name wider than its row's black box (the cursor row: up to the hat icon) is drawn
                 // narrower (`kh::fit`).
-                let bx = kh::fit::list_box(v.name, v.highlight).filter(|_| matches!(v.list, Kind::Magic | Kind::Summon | Kind::Sleight));
+                let bx = kh::fit::list_box(v.name, v.highlight).filter(|_| matches!(v.list, Kind::Magic | Kind::Summon | Kind::Sleight | Kind::Party));
                 let sx = bx.map_or(1.0, |b| kh::fit::scale(g.width(&lang, v.name), b));
                 if sx < 1.0 {
                     squeezed(|| format!("{:?} list{}: word {:#x} {:.1} units wide, box {}: x scale {sx:.3}", v.list, if v.highlight { " (cursor row)" } else { "" }, v.name, g.width(&lang, v.name).unwrap_or(0.0), bx.unwrap_or(0.0)));
@@ -751,7 +796,7 @@ impl Ui {
                     func::<VecFn>(COLOUR)(t, V4([b, b, b, sc.alpha]).0.as_ptr());
                     text = t;
                 }
-            } else if v.name == crate::sleights::ROW_WORD || v.name & 0xFF00 == crate::sleights::WORD_BASE {
+            } else if v.name == crate::sleights::ROW_WORD || v.name == cm::cmd::PARTY_WORD || v.name & 0xFF00 == crate::sleights::WORD_BASE {
                 // M12 step 5: an asset step from before the Sleights words: the row has no word.
                 static LOGGED: AtomicBool = AtomicBool::new(false);
                 if !LOGGED.swap(true, Ordering::Relaxed) {
@@ -761,6 +806,8 @@ impl Ui {
             self.rows.push(Row { ctrl: c, fnt: 0, view: *v, text });
         }
         self.shown = Some(sc.clone());
+        // 0.111.0: the pointing arrow beside the root's cursor row.
+        self.show_arrow(sc.arrow, sc.alpha, true);
         // The tab after the rows: drawn over the header (`0x140278B40` draws it after them).
         self.show_tab_kh1(sc.tab, g, &lang);
         let n = REBUILDS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -812,6 +859,7 @@ impl Ui {
                 }
             }
             self.shown = Some(sc.clone());
+            self.show_arrow(sc.arrow, sc.alpha, false);
             self.show_tab_recom(sc.tab, set, first, words);
             let n = REBUILDS.fetch_add(1, Ordering::Relaxed) + 1;
             if n.is_multiple_of(100) {
@@ -821,6 +869,9 @@ impl Ui {
         }
         let old = self.shown.as_ref().expect("same");
         let alpha_changed = old.alpha != sc.alpha;
+        if alpha_changed && self.arrow != 0 {
+            func::<VecFn>(COLOUR)(self.arrow, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
+        }
         for (r, v) in self.rows.iter_mut().zip(&sc.rows) {
             if alpha_changed {
                 func::<VecFn>(COLOUR)(r.ctrl, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
@@ -849,7 +900,7 @@ fn kh1_word_level(bright: u8) -> f32 {
 fn sub_groups(g: &kh::MenuGroups, list: Kind) -> u32 {
     static LOGGED: AtomicBool = AtomicBool::new(false);
     static LOGGED_SUMMON: AtomicBool = AtomicBool::new(false);
-    if list == Kind::Summon || list == Kind::Sleight {
+    if list == Kind::Summon || list == Kind::Sleight || list == Kind::Party {
         return match g.summon_list {
             Some(first) => first,
             None => {
@@ -1077,12 +1128,17 @@ unsafe fn world(pl: usize) -> World {
         // Owner (2026-11-04, "Sleights outside battle"): a field room where Re:CoM's sleights run,
         // and whether its packs load (two loads in a field room).
         (w.field, w.packs) = super::field_sleights::gate(pl);
-        // M12 step 5: the bottom row (one save byte), the equipped sleights only while it says
-        // Sleights (or, M12 step 6, a shortcut slot holds a sleight), and any Re:CoM sleight
-        // running locks both rows (one at a time).
+        // 0.111.0: the page (one save byte); the equipped sleights (row 3 on both pages, and M12
+        // step 6's shortcut slots); any Re:CoM sleight running locks the Summon, Party and Sleights
+        // rows (one at a time).
         w.summon_out |= super::summons::sleight_running(pl);
-        w.bottom = super::summons::bottom_row();
-        if w.bottom == crate::sleights::Bottom::Sleights || w.shortcuts.iter().any(|&b| cm::shortcut::slot_sleight(b).is_some()) {
+        w.page = super::summons::page();
+        // The Party list (page 2) and the shortcut slots holding a Party sleight: this battle's set
+        // (read once a battle, `super::party::sets`).
+        if super::party::installed() && (w.page == cm::Page::Two || w.shortcuts.iter().any(|&b| cm::shortcut::slot_sleight(b).is_some_and(|id| crate::party::index(id).is_some()))) {
+            (w.party_learned, w.party_avail) = super::party::sets(pl);
+        }
+        {
             // M12 step 7: the equipped KH1 specials listed too (Strike Raid, Sonic Blade, Ars Arcanum, Ragnarok; owner: "also
             // show up in the sleights menu"), each usable as its prompt would offer it.
             let mut equipped = super::abilities::equipped_sleights();
@@ -1246,8 +1302,12 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
             m.summon.cmds.get(m.summon.cursor.max(0) as usize).copied().and_then(cm::cmd::summon).and_then(|i| crate::summons::ALL.get(i)).map(|s| s.sleight)
         } else if m.open && m.sub == Kind::Sleight {
             m.sleight.cmds.get(m.sleight.cursor.max(0) as usize).copied().and_then(crate::sleights::of_command)
-        } else if !m.open && m.root.cursor == 3 && m.bottom == crate::sleights::Bottom::Sleights {
+        } else if m.open && m.sub == Kind::Party {
+            m.party.cmds.get(m.party.cursor.max(0) as usize).copied().and_then(crate::sleights::of_command)
+        } else if !m.open && m.root.cursor == 3 {
             m.sleight.cmds.first().copied().and_then(crate::sleights::of_command)
+        } else if !m.open && m.root.cursor == 2 && m.page == cm::Page::Two {
+            m.party.cmds.first().copied().and_then(crate::sleights::of_command)
         } else {
             None
         };
@@ -1255,10 +1315,12 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
         let short_sleights: [Option<u16>; 3] = std::array::from_fn(|k| m.shortcut.cmds.get(k).copied().and_then(crate::sleights::of_command));
         (out, ev, at, short_sleights)
     };
-    // KH1's own sounds with KH1's look (`menu_sounds`), else Re:CoM's.
+    // KH1's own sounds with KH1's look (`menu_sounds`), else Re:CoM's; the page switch Re:CoM's
+    // cursor sound in either look (0.111.0).
     let kh1_sounds = super::kh1_hud::menu_on();
     for snd in &out.sounds {
-        func::<SoundFn>(SOUND)(super::menu_sounds::id_for(*snd, kh1_sounds), -1);
+        let id = if *snd == cm::Sound::Page { snd.recom_id() } else { super::menu_sounds::id_for(*snd, kh1_sounds) };
+        func::<SoundFn>(SOUND)(id, -1);
     }
     for (e, d) in out.events.iter().zip(&token_events) {
         event(d.clone());
@@ -1269,7 +1331,7 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
             Event::Shortcut(_, c, _) => note(|| format!("{d} [{c:#x}]")),
             Event::Item(c, _, _) => note(|| format!("{d} [{c:#x}]")),
             Event::Summon(c, _) => note(|| format!("{d} [{c:#x}]")),
-            Event::Sleight(c, _) => note(|| format!("{d} [{c:#x}]")),
+            Event::Sleight(c, _) | Event::Party(c, _) => note(|| format!("{d} [{c:#x}]")),
             _ => note(|| d.clone()),
         }
     }
@@ -1288,11 +1350,16 @@ unsafe fn step_frame(pl: usize) -> Option<Keep> {
     }
     // M12 step 5: a Sleights list entry: Re:CoM's own sleight start for it (the summons' path);
     // D-pad Left's switch kept in the save.
+    // 0.111.0: a Party sleight (the Party list or a shortcut) through the same start, battle only.
     if let Some(id) = out.sleight {
-        super::summons::start_sleight(pl, id);
+        if crate::party::index(id).is_some() {
+            super::summons::start_party(pl, id);
+        } else {
+            super::summons::start_sleight(pl, id);
+        }
     }
-    if let Some(b) = out.bottom {
-        super::summons::set_bottom_row(b);
+    if let Some(pg) = out.page {
+        super::summons::set_page(pg);
     }
     if super::summons::installed() {
         super::summons::preload_sleight(pl, summon_at);
@@ -1325,7 +1392,17 @@ fn describe(e: &Event, m: &Menu) -> String {
         Event::Opened(Kind::Items) => format!("open items ({} filled slots {:?}, grey {:#x})", m.items.cmds.len(), m.item_slots, m.items.grey & 0xFF),
         Event::Opened(Kind::Summon) => format!("open summon ({} learned, grey {:#x})", m.summon.cmds.len(), m.summon.grey & 0x7F),
         Event::Opened(Kind::Sleight) => format!("open sleights ({} equipped, grey {:#x})", m.sleight.cmds.len(), m.sleight.grey & 0x7FF_FFFF),
-        Event::Bottom(b) => format!("bottom row {b:?}"),
+        Event::Opened(Kind::Party) => format!("open party ({} available, grey {:#x})", m.party.cmds.len(), m.party.grey & 0x7FF),
+        Event::Page(pg) => format!("page {}", if pg == cm::Page::Two { 2 } else { 1 }),
+        Event::Party(c, r) => format!(
+            "party {} {}",
+            name(c),
+            match r {
+                ShortResult::Cast => "issued",
+                ShortResult::Greyed => "greyed",
+                ShortResult::NotNow => "not-now",
+            }
+        ),
         Event::Sleight(c, r) => format!(
             "sleight {} {}",
             name(c),

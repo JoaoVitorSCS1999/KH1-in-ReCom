@@ -198,15 +198,16 @@ pub mod field {
     pub const VERSION: usize = 0;
     /// KH1's list `+0x7D0`: 7 bytes, summon index + 1 (0 = empty), in learn order.
     pub const ORDER: usize = 1;
-    /// M12 step 5: the command menu's bottom row (`crate::sleights::Bottom`: 0 Summon, 1 Sleights).
-    /// It was the block's zero reserve: every save before reads Summon; older builds' sync copies
-    /// it unchanged ([`sync`] starts from the old block).
-    pub const BOTTOM_ROW: usize = 8;
+    /// The command menu's page (0.111.0, `crate::command_menu::Page`: 2 = page 2, anything else
+    /// page 1). M12 step 5 kept its bottom row here (0 Summon, 1 Sleights): those saves read page 1.
+    /// It was the block's zero reserve; older builds' sync copies it unchanged ([`sync`] starts from
+    /// the old block).
+    pub const PAGE: usize = 8;
 }
 
 pub const BLOCK_V1: u8 = 1;
 
-const _: () = assert!(BLOCK_LAST <= crate::keyblades::SPARE_LAST && field::BOTTOM_ROW + 1 == BLOCK_LEN && field::ORDER + COUNT == field::BOTTOM_ROW);
+const _: () = assert!(BLOCK_LAST <= crate::keyblades::SPARE_LAST && field::PAGE + 1 == BLOCK_LEN && field::ORDER + COUNT == field::PAGE);
 
 /// The learned summons in learn order (KH1's list).
 pub fn order(block: &[u8; BLOCK_LEN]) -> Vec<usize> {
@@ -362,14 +363,14 @@ mod tests {
         let (b3, added) = sync(b2, |_| false);
         assert!(added.is_empty());
         assert_eq!(b3, b2);
-        assert_eq!(b3[field::BOTTOM_ROW], 0);
-        // M12 step 5: the bottom row's choice survives every sync (and a never-written block's).
+        assert_eq!(b3[field::PAGE], 0);
+        // The page byte survives every sync (and a never-written block's).
         let mut b4 = b3;
-        b4[field::BOTTOM_ROW] = 1;
-        assert_eq!(sync(b4, |_| true).0[field::BOTTOM_ROW], 1);
+        b4[field::PAGE] = 1;
+        assert_eq!(sync(b4, |_| true).0[field::PAGE], 1);
         let mut fresh = [0; BLOCK_LEN];
-        fresh[field::BOTTOM_ROW] = 1;
-        assert_eq!(sync(fresh, |_| false).0[field::BOTTOM_ROW], 1);
+        fresh[field::PAGE] = 1;
+        assert_eq!(sync(fresh, |_| false).0[field::PAGE], 1);
     }
 
     #[test]

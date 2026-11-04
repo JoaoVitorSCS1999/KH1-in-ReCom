@@ -46,9 +46,14 @@ pub type Pick = Option<sc::Slot>;
 /// step 6) the equipped sleight abilities in Re:CoM's order (`crate::sleights::list`), then "none".
 /// Only the 27 sleight abilities (a slot byte holds one of them, `sc::sleight_byte`); the KH1
 /// specials the Sleights list also holds (`crate::sleights::SPECIALS`) are never shortcuts.
+///
+/// 0.111.0 (owner, 2026-11-04: "friend sleights should be able to be put in the shortcuts"): then
+/// the Party sleights Re:CoM has taught (`equipped_sleights` holds their ids too: the caller adds
+/// them), in the Party list's order (`crate::party::ALL`), before "none".
 pub fn picks(levels: [u8; SPELLS], equipped_sleights: &[u16]) -> Vec<Pick> {
     let mut v: Vec<Pick> = (0..SPELLS as u8).filter(|&s| (1..=3).contains(&levels[s as usize])).map(|s| Some(sc::Slot::Spell(s))).collect();
     v.extend(crate::sleights::list(equipped_sleights).into_iter().filter(|&id| sc::sleight_byte(id).is_some()).map(|id| Some(sc::Slot::Sleight(id))));
+    v.extend(crate::party::ALL.iter().map(|f| f.sleight).filter(|id| equipped_sleights.contains(id)).map(|id| Some(sc::Slot::Sleight(id))));
     v.push(None);
     v
 }
@@ -147,6 +152,17 @@ pub mod text {
     pub const SLOT3_HELP_CIRCLE: &[u8] = b"Hold L1 and press Circle to use this shortcut.\0";
     /// M12 step 6: the slot list's help on a slot whose sleight is no longer equipped.
     pub const UNEQUIPPED_HELP: &[u8] = b"Not equipped: equip this sleight on the Abilities page.\0";
+    /// 0.111.0: the same for a Party sleight Re:CoM hasn't taught (yet).
+    pub const UNLEARNED_HELP: &[u8] = b"Not learned yet: Re:CoM teaches this friend sleight.\0";
+
+    /// The help line of a slot holding sleight `id` that isn't in the picker.
+    pub fn unequipped_help(id: u16) -> &'static [u8] {
+        if crate::party::index(id).is_some() {
+            UNLEARNED_HELP
+        } else {
+            UNEQUIPPED_HELP
+        }
+    }
     /// The picker's help.
     pub const PICK_HELP_GLYPHS: [&[u8]; 3] = [b"Choose the spell or sleight for \xF5\x68 + \xF5\x67.\0", b"Choose the spell or sleight for \xF5\x68 + \xF5\x66.\0", b"Choose the spell or sleight for \xF5\x68 + \xF5\x64.\0"];
     pub const PICK_HELP: [&[u8]; 3] = [b"Choose the spell or sleight for L1 + Triangle.\0", b"Choose the spell or sleight for L1 + Square.\0", b"Choose the spell or sleight for L1 + Cross.\0"];
@@ -236,6 +252,13 @@ mod tests {
         assert_eq!(unequipped(slots[2], &[sl::HOLY]), None);
         assert_eq!(unequipped(slots[0], &[]), None, "a spell slot");
         assert_eq!(unequipped(0, &[]), None);
+        // 0.111.0: the taught Party sleights after the sleights, in the Party list's order; one not
+        // taught is reported with its own help line.
+        let p = picks([0; 7], &[0x4C, sl::HOLY, 0x45, 0x47]);
+        assert_eq!(p, vec![Some(Sleight(sl::HOLY)), Some(Sleight(0x45)), Some(Sleight(0x4C)), None], "Goofy Tornado LV2 is not listed");
+        assert_eq!(unequipped(0x4E, &[0x45]), Some(0x4E));
+        assert_eq!(text::unequipped_help(0x4E), text::UNLEARNED_HELP);
+        assert_eq!(text::unequipped_help(sl::HOLY), text::UNEQUIPPED_HELP);
         // Every sleight row is the blue magic row.
         assert_eq!(row_look(true, Some(Sleight(sl::IDYLL_ROMP))), crate::keyblades::row_look::BLUE);
     }
@@ -304,7 +327,7 @@ mod tests {
 
     #[test]
     fn texts_fit_the_help_box() {
-        let all = [text::NONE, text::UNEQUIPPED_HELP, text::SLOT3_HELP_CIRCLE, text::SLOT3_WORD_CIRCLE, text::PICK3_HELP_CIRCLE]
+        let all = [text::NONE, text::UNEQUIPPED_HELP, text::UNLEARNED_HELP, text::SLOT3_HELP_CIRCLE, text::SLOT3_WORD_CIRCLE, text::PICK3_HELP_CIRCLE]
             .into_iter()
             .chain(text::SLOT_GLYPHS)
             .chain(text::SLOT_WORDS)

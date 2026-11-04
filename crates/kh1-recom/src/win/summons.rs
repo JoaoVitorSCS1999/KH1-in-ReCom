@@ -37,7 +37,9 @@
 //!   Cross-slash+). Re:CoM's air-start sleights (`crate::sleights::AIR_START`) also start mid-air:
 //!   Re:CoM's own start then takes their air version (owner, "Sleights menu follow-ups"). No invincibility of ours: Re:CoM's `exeStockSkill` sets its own protection bits
 //!   where its sleight has them. While any sleight runs ([`sleight_running`]) both rows lock. The
-//!   bottom row's choice ([`bottom_row`]) is the summon block's byte `save + 0x26B6`.
+//!   command menu's page ([`page`], 0.111.0; M12 step 5's bottom row before) is the summon block's
+//!   byte `save + 0x26B6`.
+//! - **0.111.0, the Party list** ([`start_party`]): the same start for a friend sleight, battle only.
 //!
 //! Nothing of ours runs per frame besides the menu's build (a save-block read and a few loads).
 
@@ -59,8 +61,8 @@ static PRELOADED: AtomicU32 = AtomicU32::new(0);
 /// start; no invincibility of ours), and which sleight; for the end's log line.
 static SLEIGHT_OUT: AtomicUsize = AtomicUsize::new(0);
 static SLEIGHT_ID: AtomicU32 = AtomicU32::new(0);
-/// M12 step 5: the bottom row's choice with no save to keep it in (0 Summon, 1 Sleights).
-static BOTTOM_SESSION: AtomicU8 = AtomicU8::new(0);
+/// 0.111.0: the command menu's page with no save to keep it in (`crate::command_menu::Page` byte).
+static PAGE_SESSION: AtomicU8 = AtomicU8::new(0);
 /// M12 follow-ups, Damage = KH1: the Sleights-list sleight or (owner, "KH1 damage scaling") the
 /// summon whose hits are scaled ([`scale_sleight_hit`]; its Re:CoM sleight id + 1, 0 none): from its
 /// start until the next one starts or the battle ends, so its shots still flying after Sora's
@@ -90,6 +92,8 @@ mod f {
     pub const WEAPON: usize = 0x3D0;
     /// The weapon's attack is live.
     pub const WEAPON_LIVE: usize = 0x23C;
+    /// The card battle (`CCardBattle`, the friend branch's `+0x3E8 → +0x1E8`).
+    pub const CARD_BATTLE: usize = 0x3E8;
     /// Sora's state bits (`+0x418`; [`super::AIR_VERSION`]).
     pub const FLAGS_418: usize = 0x418;
 }
@@ -367,31 +371,32 @@ pub fn forget_running() {
     SLEIGHT_OUT.store(0, Ordering::Relaxed);
 }
 
-// ---- M12 step 5: the Sleights row and list ----
+// ---- M12 step 5: the Sleights row and list; 0.111.0: the pages ----
 
-/// The command menu's bottom row (`crate::sleights::Bottom`): the save's choice (the summon block's
-/// byte `save + 0x26B6`), or this session's without a save. A one-byte read.
-pub unsafe fn bottom_row() -> crate::sleights::Bottom {
+/// The command menu's page (`crate::command_menu::Page`): the save's choice (the summon block's
+/// byte `save + 0x26B6`, which held M12 step 5's bottom row: those saves read page 1), or this
+/// session's without a save. A one-byte read.
+pub unsafe fn page() -> crate::command_menu::Page {
     let b = match block_at() {
-        Some(at) => rd::<u8>(at + sm::field::BOTTOM_ROW),
-        None => BOTTOM_SESSION.load(Ordering::Relaxed),
+        Some(at) => rd::<u8>(at + sm::field::PAGE),
+        None => PAGE_SESSION.load(Ordering::Relaxed),
     };
-    crate::sleights::Bottom::of_byte(b)
+    crate::command_menu::Page::of_byte(b)
 }
 
-/// D-pad Left switched the bottom row: kept in the save (read by every later frame; written only on
-/// the press), else for the session.
-pub unsafe fn set_bottom_row(b: crate::sleights::Bottom) {
-    BOTTOM_SESSION.store(b.byte(), Ordering::Relaxed);
+/// D-pad Left switched the page: kept in the save (read by every later frame; written only on the
+/// press), else for the session.
+pub unsafe fn set_page(pg: crate::command_menu::Page) {
+    PAGE_SESSION.store(pg.byte(), Ordering::Relaxed);
     let saved = match block_at() {
         Some(at) => {
             // SAFETY: inside the 0x2AD4-byte save block (BLOCK_LAST < 0x2818).
-            wr::<u8>(at + sm::field::BOTTOM_ROW, b.byte());
+            wr::<u8>(at + sm::field::PAGE, pg.byte());
             true
         }
         None => false,
     };
-    note(|| format!("bottom row -> {b:?} ({})", if saved { "kept in the save at save+0x26B6" } else { "no save: this session only" }));
+    note(|| format!("page -> {pg:?} ({})", if saved { "kept in the save at save+0x26B6" } else { "no save: this session only" }));
 }
 
 /// Any Re:CoM sleight is running for `pl` (its action `0x16`, any room: a summon, a
@@ -460,6 +465,33 @@ pub unsafe fn start_sleight(pl: usize, id: u16) -> bool {
     note(|| format!("sleight {name} -> Re:CoM's sleight {id:#x} through Sora's sleight start{}{}, {points} MP ({:?}), from action {before:#x}; Re:CoM's own protection only", if air { " (in the air: Re:CoM's air version)" } else { "" }, if field { " in the field (free; a hit on a field Heartless is Re:CoM's field strike)" } else { "" }, crate::sleights::cost(id).unwrap_or(crate::sleights::Cost::Points(0))));
     true
 }
+
+/// 0.111.0: a Party list entry (or a shortcut holding one): Re:CoM's own sleight start for its
+/// friend sleight, as [`start_sleight`] (its MP: `crate::sleights::pay_points` gives the Party
+/// tier's), **in a battle room only** whatever the Sleights list allows: Re:CoM's friend branch of
+/// `exeStockSkill` reads the card battle's active card (`player+0x3E8 → +0x1E8`) without a null
+/// test, and the friend's pack only finishes loading in battle (`docs/recom-field-sleights.md`).
+pub unsafe fn start_party(pl: usize, id: u16) -> bool {
+    if crate::party::index(id).is_none() || pl == 0 || rd::<i32>(pl + p::BATTLE) == 0 {
+        note(|| format!("party {}: not in battle (friend sleights are battle-only)", crate::sleights::name(id)));
+        return false;
+    }
+    if rd::<usize>(pl + f::CARD_BATTLE) == 0 {
+        note(|| format!("party {}: no card battle object (player+0x3E8): not started", crate::sleights::name(id)));
+        return false;
+    }
+    start_sleight(pl, id)
+}
+
+/// 0.111.0: a friend actor of the PLM (`player+0x3B8`; `0x14020E950` keeps the friend it made for
+/// the sleight at `+0x70`, Wild Crush's second at `+0x78`). Checked (decomp).
+unsafe fn is_our_friend(pl: usize, obj: usize) -> bool {
+    let plm: usize = rd(pl + f::SLEIGHTS);
+    obj != 0 && plm != 0 && (rd::<usize>(plm + PLM_FRIEND) == obj || rd::<usize>(plm + PLM_FRIEND + 8) == obj)
+}
+
+/// The PLM's friend actor slots (`0x14020E950`). Checked (decomp).
+const PLM_FRIEND: usize = 0x70;
 
 // ---- M12 follow-ups: a sleight's damage at Damage = KH1 ----
 
@@ -542,7 +574,8 @@ unsafe fn owner_of(pl: usize, owner: u32) -> Owner {
     if (obj == pl || (weapon != 0 && obj == weapon)) && running {
         return Owner::Sora;
     }
-    if is_our_summon(pl, obj) {
+    // 0.111.0: a Party sleight's friend (its hits are the sleight's, as a summon's).
+    if is_our_summon(pl, obj) || (SLEIGHT_OUT.load(Ordering::Relaxed) == pl && crate::party::index(SLEIGHT_ID.load(Ordering::Relaxed) as u16).is_some() && is_our_friend(pl, obj)) {
         return Owner::Summon;
     }
     let vt: usize = rd(obj);

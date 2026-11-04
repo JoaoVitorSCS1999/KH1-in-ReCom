@@ -1201,6 +1201,15 @@ mod tests {
         // The command menu's plates were found in Re:CoM's own records (not two empty groups).
         let g = &s.agroups[BASE_GROUPS + group::COUNT + crate::command_menu::group::PLATE_HIGHLIGHT];
         assert_eq!(i16::from_le_bytes([g[2], g[3]]), 3);
+        // 0.111.0: the pointing arrow on Re:CoM's own triangle (sprite 84 of the base file): 11
+        // segments, looping from frame 67.
+        let g = &s.agroups[BASE_GROUPS + group::COUNT + crate::command_menu::group::ARROW];
+        assert_eq!((i16::from_le_bytes([g[2], g[3]]), i16::from_le_bytes([g[4], g[5]]), i32::from_le_bytes(g[8..12].try_into().unwrap())), (11, 0, 67));
+        let a0 = i16::from_le_bytes([g[0], g[1]]) as usize;
+        let sg = i32::from_le_bytes(s.anims[a0][4..8].try_into().unwrap()) as usize;
+        let part = i16::from_le_bytes([s.sgroups[sg][0], s.sgroups[sg][1]]) as usize;
+        assert_eq!(i32::from_le_bytes(s.parts[part][16..20].try_into().unwrap()), 84, "Re:CoM's own sprite");
+        assert!(crate::command_menu::probe_plates(&spr).unwrap().arrow);
         if let Ok(o) = std::env::var("KH1_MP_BAR_OUT") {
             std::fs::write(o, &out).unwrap();
         }

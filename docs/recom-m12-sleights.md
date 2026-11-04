@@ -545,6 +545,9 @@ Owner test lines (8.4.1):
 
 ### 8.5 The Sleights row and list (step 5)
 
+> **0.111.0:** D-pad Left now switches the command menu's two pages; the Sleights row is row 3 on both
+> pages (`recom-command-pages-party.md`). The rest of this section stands.
+
 Owner ("M12 answers", 2026-11-03): "**D-pad Left toggles Summon / Sleights anywhere on the command
 menu** (drops KH1's Left → Attack)"; "In the sleights menu I only want ACTIVELY EQUIPPED sleights to
 show in the list"; "**Cost: MP by tier**: AP 2 → 1 MP, 3 → 2 MP, 4 → 2 MP, 5 → 3 MP; Idyll Romp /

@@ -1350,7 +1350,9 @@ impl Page {
         let (content, list) = match row {
             sub::Row::Customize => {
                 let (levels, slots) = super::command_menu::spell_view();
-                let sleights = super::abilities::equipped_sleights();
+                // 0.111.0: the Party sleights Re:CoM has taught can be shortcuts too.
+                let mut sleights = super::abilities::equipped_sleights();
+                sleights.extend(super::party::learned_ids());
                 let picks = customize::picks(levels, &sleights);
                 (Content::Customize { levels, slots, sleights, picks, picking: None }, list::open_on(customize::SLOTS as i32, 0))
             }
@@ -1565,7 +1567,9 @@ impl Page {
         let t: &[u8] = match &self.content {
             Content::Keyblades { .. } => text::PAGE_HELP,
             Content::Customize { picking: Some(k), .. } => customize::text::pick_help(*k, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
-            Content::Customize { slots, sleights, picking: None, .. } if slots.get(self.list.cursor.max(0) as usize).is_some_and(|&b| customize::unequipped(b, sleights).is_some()) => customize::text::UNEQUIPPED_HELP,
+            Content::Customize { slots, sleights, picking: None, .. } if slots.get(self.list.cursor.max(0) as usize).is_some_and(|&b| customize::unequipped(b, sleights).is_some()) => {
+                slots.get(self.list.cursor.max(0) as usize).and_then(|&b| customize::unequipped(b, sleights)).map_or(customize::text::UNEQUIPPED_HELP, customize::text::unequipped_help)
+            }
             Content::Customize { picking: None, .. } => customize::text::slot_help(self.list.cursor.max(0) as usize, help_glyphs(self.p()), super::command_menu::confirm_is_circle()),
             Content::Items { screen, rows, msg, .. } => screen.help(rows, self.list.cursor, *msg),
             Content::Abilities { msg: Some(m), .. } => m,

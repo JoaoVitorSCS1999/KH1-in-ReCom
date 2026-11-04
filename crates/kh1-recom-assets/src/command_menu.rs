@@ -60,14 +60,86 @@ pub const CLOUD_NAME: u16 = 0x8029;
 /// Cloud's text.
 pub const CLOUD_TEXT: &str = "Cloud";
 
-/// Our groups after the MP bar's (`mp_bar::group::COUNT`): the plate, the highlighted plate.
+/// Our groups after the MP bar's (`mp_bar::group::COUNT`): the plate, the highlighted plate, the
+/// pointing arrow (0.111.0).
 pub mod group {
     /// Re:CoM's text plate (cap + strip), no icon.
     pub const PLATE: usize = 0;
     /// The same plate with its strip in the highlight colour.
     pub const PLATE_HIGHLIGHT: usize = 1;
+    /// 0.111.0: the command menu's pointing arrow ([`super::arrow`]).
+    pub const ARROW: usize = 2;
     /// How many.
-    pub const COUNT: usize = 2;
+    pub const COUNT: usize = 3;
+}
+
+/// 0.111.0 (owner, 2026-11-04: "the pointing arrow that follows your selection on the command menu";
+/// "Re:CoM's own arrow"): the command menu's pointing arrow as a `Cockpit:00` group (the DLL's
+/// `crate::command_menu::arrow`, the same numbers; a DLL test compares them).
+///
+/// - **Art**: Re:CoM's own white triangle (`Cockpit:00`'s sprite at UV (16, 49)–(32, 64), × the
+///   copy's atlas scale; one of the three pointers of its group 98, which spin around a target;
+///   Checked (files: the owner's `FO0002.SPR` / `.RTM`, sprite 84 of the base file)), found by its
+///   UV in each copy, drawn 16 × 10 about the origin and turned a quarter clockwise (the file's z
+///   rotation −π/2: Re:CoM negates it on load, `kh1_hud::Step`'s note; Re:CoM's flags 0x20 clear
+///   for a turn, `ring::FLAGS_TURNED`), so its point faces left. Not found (another layout): an
+///   empty group, so the numbering stays the same in every copy.
+/// - **Motion** (KH2's, measured on the owner's recording): an X translation (integer units, the
+///   format's) over [`arrow::INTRO`] then [`arrow::SWAY`] looped from [`arrow::LOOP_START`] (the
+///   group's loop start `+8`, play-once word 0: Re:CoM's own looping groups, e.g. group 98: Checked
+///   (decomp `0x140248BB0` / `0x140248F40`)). Segments with exclusive ends (`kh1_hud::FLAGS_MOVE`).
+pub mod arrow {
+    /// The triangle's UV in the base file's atlas.
+    pub const UV: [i32; 4] = [16, 49, 32, 64];
+    /// Its part about the origin (before the turn: 16 wide, 10 high).
+    pub const RECT: [i32; 4] = [-8, -5, 8, 5];
+    /// The turn (the file's value).
+    pub const TURN: f32 = -std::f32::consts::FRAC_PI_2;
+    /// The DLL's `crate::command_menu::arrow::INTRO`.
+    pub const INTRO: [(i32, i32); 6] = [(0, 6), (3, 7), (13, -4), (30, 3), (51, -2), (LOOP_START, 2)];
+    /// The DLL's `crate::command_menu::arrow::LOOP_START`.
+    pub const LOOP_START: i32 = 67;
+    /// The DLL's `crate::command_menu::arrow::SWAY`.
+    pub const SWAY: [(i32, i32); 7] = [(0, 2), (6, 1), (10, 0), (16, -1), (22, 0), (26, 1), (32, 2)];
+}
+
+/// The animation group word of the arrow (`+6`, not read by Re:CoM; Re:CoM's group 98's).
+const ARROW_WORD: i16 = 995;
+
+/// Adds the arrow group (its index); false when the triangle wasn't found (an empty group).
+fn add_arrow(seq: &mut Seqd) -> bool {
+    use crate::mp_bar::{agroup, anim, part, sgroup};
+    let first = seq.agroups.len();
+    let want = scaled(arrow::UV, uv_scale(seq));
+    let Some(sp) = (0..seq.sprites.len()).find(|&i| sprite_uv(seq, i) == want) else {
+        let mut g = agroup(0, 0, true, ARROW_WORD);
+        g[8..12].copy_from_slice(&0i32.to_le_bytes());
+        seq.agroups.push(g);
+        debug_assert_eq!(seq.agroups.len(), first + 1);
+        return false;
+    };
+    let p = seq.parts.len();
+    seq.parts.push(part(arrow::RECT, sp));
+    let sg = seq.sgroups.len();
+    seq.sgroups.push(sgroup(p, 1));
+    let keys: Vec<(i32, i32)> = arrow::INTRO.iter().copied().chain(arrow::SWAY.iter().skip(1).map(|&(f, x)| (arrow::LOOP_START + f, x))).collect();
+    let flags = crate::kh1_hud::FLAGS_MOVE & !0x20;
+    let one = 0x8080_8080;
+    let a0 = seq.anims.len();
+    for w in keys.windows(2) {
+        let ((f0, x0), (f1, x1)) = (w[0], w[1]);
+        let mut a = anim(flags, sg, (f0, f1), 0, (1.0, 1.0), (one, one));
+        for (at, v) in [(0x10, x0), (0x14, x1), (0x18, 0), (0x1C, 0)] {
+            a[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        }
+        a[0x40..0x44].copy_from_slice(&arrow::TURN.to_le_bytes());
+        a[0x44..0x48].copy_from_slice(&arrow::TURN.to_le_bytes());
+        seq.anims.push(a);
+    }
+    let mut g = agroup(a0, keys.len() - 1, false, ARROW_WORD);
+    g[8..12].copy_from_slice(&arrow::LOOP_START.to_le_bytes());
+    seq.agroups.push(g);
+    true
 }
 
 /// Re:CoM's text plate, idle (looping, frames 0..120): 4 animations, the 2nd (cap, sprite UV
@@ -87,6 +159,8 @@ pub struct Plates {
     pub found: bool,
     /// The highlight's vertex colour (ABGR).
     pub colour: u32,
+    /// 0.111.0: Re:CoM's arrow triangle was found (else the arrow's group is empty).
+    pub arrow: bool,
 }
 
 fn i16_at(r: &[u8], at: usize) -> i16 {
@@ -158,6 +232,13 @@ pub fn highlight_colour(seq: &Seqd) -> Option<u32> {
 /// Adds the two plate groups to `Cockpit:00`; returns the first one's index and what was found.
 /// `colour` overrides the highlight colour (else the magic plate's, see [`highlight_colour`]).
 pub fn add_plates(seq: &mut Seqd, colour: Option<u32>) -> Result<(usize, Plates)> {
+    let r = add_plate_groups(seq, colour)?;
+    // 0.111.0: the pointing arrow after them.
+    let arrow = add_arrow(seq);
+    Ok((r.0, Plates { arrow, ..r.1 }))
+}
+
+fn add_plate_groups(seq: &mut Seqd, colour: Option<u32>) -> Result<(usize, Plates)> {
     let first = seq.agroups.len();
     let Some((plate, cap, strip)) = plate_anims(seq) else {
         // Two empty groups keep every language copy's numbering the same.
@@ -165,7 +246,7 @@ pub fn add_plates(seq: &mut Seqd, colour: Option<u32>) -> Result<(usize, Plates)
         g[0..4].copy_from_slice(&[0, 0, 0, 0]);
         seq.agroups.push(g);
         seq.agroups.push(g);
-        return Ok((first, Plates { found: false, colour: 0 }));
+        return Ok((first, Plates { found: false, colour: 0, arrow: false }));
     };
     let colour = match colour.or_else(|| highlight_colour(seq)) {
         Some(c) => c,
@@ -216,7 +297,7 @@ pub fn add_plates(seq: &mut Seqd, colour: Option<u32>) -> Result<(usize, Plates)
     if seq.anims.len() > i16::MAX as usize || seq.parts.len() > i16::MAX as usize {
         return bad("seqd: too many records for 16-bit indices");
     }
-    Ok((first, Plates { found: true, colour }))
+    Ok((first, Plates { found: true, colour, arrow: false }))
 }
 
 /// What [`add_plates`] would do to the `Cockpit:00` of a `Cockpit.lad` or of a container holding
@@ -301,7 +382,24 @@ pub fn decode(s: &[u8]) -> Option<String> {
 /// (owner's word, 2026-11-01; KH1 has no such word, Checked (files: the six `Word.bin`); English
 /// everywhere: no translation was asked for). The DLL's `command_menu::OUR_WORDS` holds the same.
 /// M12 step 5: 902 "Sleights", the command menu's 4th row in Sleights mode (owner's word, 2026-11-03).
-pub const OUR_WORDS: &[(u16, &str)] = &[(901, "Stagger"), (902, "Sleights")];
+/// 0.111.0: 903 "Party", the command menu's page 2 row 2 (owner's word).
+pub const OUR_WORDS: &[(u16, &str)] = &[(901, "Stagger"), (902, "Sleights"), (903, "Party")];
+
+/// 0.111.0: the Party list's names (the DLL's `crate::party::words`: our id `0x8100 +` the Re:CoM
+/// sleight id, the owner's names, in every language).
+pub const PARTY_WORDS: &[(u16, &str)] = &[
+    (0x8145, "Donald Magic"),
+    (0x8146, "Stardust Blitz"),
+    (0x8148, "Goofy Tornado"),
+    (0x8149, "Goofy Smash"),
+    (0x814A, "Wild Crush"),
+    (0x8156, "Lucky Bounty"),
+    (0x814C, "Sandstorm"),
+    (0x814E, "Surprise!"),
+    (0x8150, "Spiral Wave"),
+    (0x8152, "Hummingbird"),
+    (0x8154, "Furious Volley"),
+];
 
 /// M12 step 5: the Sleights list's names (the DLL's `crate::sleights::words`: our id `0x8100 +` the
 /// Re:CoM sleight id, the camp's Abilities page's English names, in every language as Cloud's; a
@@ -352,7 +450,7 @@ pub fn words(word_bin: &[u8]) -> (Vec<(u16, String)>, Vec<u16>) {
         ok.push((id, t.to_string()));
     }
     ok.push((CLOUD_NAME, CLOUD_TEXT.to_string()));
-    for &(id, t) in SLEIGHT_WORDS {
+    for &(id, t) in SLEIGHT_WORDS.iter().chain(PARTY_WORDS) {
         ok.push((id, t.to_string()));
     }
     (ok, missing)
@@ -378,7 +476,7 @@ pub fn manifest_json(langs: &[(&str, Vec<(u16, String)>)], plates_first_offset: 
     let mut s = String::new();
     let _ = writeln!(s, "{{");
     let _ = writeln!(s, "  \"format\": \"{FORMAT}\",");
-    let _ = writeln!(s, "  \"plates\": {{\"after_bar_groups\": {plates_first_offset}, \"count\": {}, \"found\": {}, \"highlight_vertex_colour\": \"{:#010x}\"}},", group::COUNT, plates.found, plates.colour);
+    let _ = writeln!(s, "  \"plates\": {{\"after_bar_groups\": {plates_first_offset}, \"count\": {}, \"found\": {}, \"highlight_vertex_colour\": \"{:#010x}\", \"arrow\": {}}},", group::COUNT, plates.found, plates.colour, plates.arrow);
     let _ = writeln!(s, "  \"words\": {{");
     for (i, (lang, w)) in langs.iter().enumerate() {
         let items: Vec<String> = w.iter().map(|(id, t)| format!("\"{id}\": {}", json_str(t))).collect();
@@ -443,7 +541,8 @@ mod tests {
         }
         let (ok, missing) = words(&d);
         assert!(missing.is_empty(), "{missing:?}");
-        assert_eq!(ok.len(), NAMES.len() + OUR_WORDS.len() + 1 + SLEIGHT_WORDS.len(), "and Cloud, and the sleights");
+        assert_eq!(ok.len(), NAMES.len() + OUR_WORDS.len() + 1 + SLEIGHT_WORDS.len() + PARTY_WORDS.len(), "and Cloud, the sleights, the Party sleights");
+        assert!(ok.contains(&(903, "Party".into())) && ok.contains(&(0x814E, "Surprise!".into())));
         assert_eq!(SLEIGHT_WORDS.len(), 27);
         assert!(ok.contains(&(902, "Sleights".into())));
         assert!(ok.contains(&(0x8143, "Cross-slash+".into())));
@@ -499,8 +598,33 @@ mod tests {
     }
 
     #[test]
+    fn the_arrow_is_recoms_triangle_turned_and_swaying() {
+        use crate::mp_bar::sprite;
+        let mut s = Seqd { version: 0x160, sprites: vec![sprite([0; 4], [0; 4]), sprite(arrow::UV, [0x8080_8080; 4])], parts: Vec::new(), sgroups: Vec::new(), anims: Vec::new(), agroups: Vec::new() };
+        assert!(add_arrow(&mut s));
+        assert_eq!(s.agroups.len(), 1);
+        let g = s.agroups[0];
+        assert_eq!((i16_at(&g, 2), i16_at(&g, 4), i32_at(&g, 8)), (11, 0, arrow::LOOP_START));
+        assert_eq!(i32_at(&s.parts[0], 0x10), 1, "Re:CoM's sprite, found by its UV");
+        // Segment by segment: the keys, a quarter turn clockwise, translation interpolated.
+        let keys: Vec<(i32, i32)> = arrow::INTRO.iter().copied().chain(arrow::SWAY.iter().skip(1).map(|&(f, x)| (arrow::LOOP_START + f, x))).collect();
+        for (k, a) in s.anims.iter().enumerate() {
+            assert_eq!((i32_at(a, 8), i32_at(a, 0xC), i32_at(a, 0x10), i32_at(a, 0x14)), (keys[k].0, keys[k + 1].0, keys[k].1, keys[k + 1].1));
+            assert_eq!(f32::from_le_bytes(a[0x40..0x44].try_into().unwrap()), -std::f32::consts::FRAC_PI_2);
+            assert_eq!(u32_at(a, 0) & 0x11020, 0, "translation and turn on");
+            assert_ne!(u32_at(a, 0) & 0x8000, 0, "exclusive ends");
+        }
+        assert_eq!(keys.last().unwrap().0, arrow::LOOP_START + 32);
+        // Not there: one empty group (the numbering stays).
+        let mut e = Seqd { sprites: vec![sprite([0; 4], [0; 4])], ..s.clone() };
+        e.agroups.clear();
+        assert!(!add_arrow(&mut e));
+        assert_eq!((e.agroups.len(), i16_at(&e.agroups[0], 2)), (1, 0));
+    }
+
+    #[test]
     fn manifest_escapes_non_ascii() {
-        let j = manifest_json(&[("fr", vec![(19, "Gravité".into())])], 8, Plates { found: true, colour: 0x80FF_A200 }, &[("a", "b".into())]);
+        let j = manifest_json(&[("fr", vec![(19, "Gravité".into())])], 8, Plates { found: true, colour: 0x80FF_A200, arrow: true }, &[("a", "b".into())]);
         assert!(j.contains("\"19\": \"Gravit\\u00e9\""));
         assert!(j.contains("\"highlight_vertex_colour\": \"0x80ffa200\""));
         assert!(j.contains(FORMAT));

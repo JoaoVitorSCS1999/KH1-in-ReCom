@@ -42,6 +42,7 @@ mod sounds;
 mod specials;
 mod stats;
 mod story_skip;
+mod party;
 mod summons;
 mod sys;
 mod trace;
@@ -604,6 +605,11 @@ fn install_summons(base: usize) {
         log(&summons::start_line());
         if !unlocks::installed() {
             log("summons: the unlocks wrapper is not in: summons learned only at a save's first read");
+        }
+        // 0.111.0: the Party list (page 2) starts its friend sleights through the same start.
+        // SAFETY: reads of the mapped exe.
+        if !unsafe { party::install(base) } {
+            log("party: not installed: page 2's Party row stays greyed");
         }
     }
 }

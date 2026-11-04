@@ -114,6 +114,7 @@ pub mod sleights;
 pub mod specials;
 pub mod sites;
 pub mod story_skip;
+pub mod party;
 pub mod summons;
 pub mod trace;
 pub mod units;
