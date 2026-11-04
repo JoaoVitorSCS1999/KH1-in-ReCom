@@ -613,3 +613,9 @@ At KH1 setting:
   - **Shown only where that friend's card can drop in this battle**, for the **whole battle** (owner: "Whole battle, if possible"); and only once any extra unlock Re:CoM requires is met.
   - **Cost**: the same MP as sleights (owner: "Same MP as sleights").
   - **Shortcuts**: Party sleights can be put in the shortcut slots.
+- **M13 and camp text answers** (owner, 2026-11-04):
+  - Stun Impact's effect 0 and Zantetsuken's effect 5 (placed at the struck enemy in KH1): **one small start call of ours at the target** when the move starts; Re:CoM plays and ends it (owner: "Start at the target").
+  - The six KH2 Keyblades swing with **Re:CoM's trail** at KH1 Effects.
+  - The Effects / Sounds (later Voices) toggles go on a **new Settings page** (e.g. "Effects & Sound").
+  - Camp-page long names (Customize, Abilities, Re:CoM's text): **(a) true squeeze**, an x-scale taught to Re:CoM's text drawing.
+  - Decided without asking (no change to play): each Keyblade's KH1 set loads with its own Keyblade group, only when equipped; trail length follows KH1's own trail data (1:1), not an approximation.
