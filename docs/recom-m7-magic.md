@@ -752,8 +752,8 @@ once, for KH1's % of their current HP.
   Re:CoM's "off", as 7.6's bolts): KH1 strikes at the impact, not on contact. Then KH1's MP.
 - **The fall** (`gravity_frame`, from the per-frame spell check that runs Thunder's strikes: one
   atomic load when nothing runs): KH1's clock (`magic::Fall`: the release run counts the first frame)
-  and KH1's growth on Re:CoM's sphere effect (the bullet's effect `+0x244` → `0x140257EF0`, scale
-  `+0x10`: KH1's 0.01 → S itself, Re:CoM's own growth off since 0.113.0, § The sphere's size below). At the impact: every alive enemy of Re:CoM's
+  (the sphere's growth is Re:CoM's own, flag bit 7, with a step that reaches KH1's hit radius at
+  the impact: § The sphere's size (0.121.0) below). At the impact: every alive enemy of Re:CoM's
   lock-on list whose live hurt bodies touch the sphere of 1.7 × S m (`magic::body_touches`, Re:CoM's
   shapes) is struck once with the sphere's attack through **Re:CoM's apply** (7.6's mechanism,
   `apply_to`). If Re:CoM already ended the sphere (a wall), a held bolt of the same set at the centre
@@ -818,6 +818,32 @@ Sites (7.8):
   KH1's sphere 1.7 / 1.5 = 1.13 times bigger: the alternative if it looks small against KH1's.
   Not carried: KH1's 20-frame fade growing × 1.02 a frame after the impact (Re:CoM's life end fades
   it at S). Combat = Re:CoM: Re:CoM's own Gravity (with bit 7) unchanged.
+- **The sphere's size (0.121.0): Re:CoM's Gravity size**, owner 2026-11-04 (on 0.115.0's
+  question): "make it the size of re:com gravity". The hit radius stays KH1's (1.7 / 2.55 / 2.72 m).
+  What was found:
+
+  | what | Re:CoM (Steam) | tag |
+  |---|---|---|
+  | **The sphere's look** | `grav_all` (`EF2040.EFF`, the owner's file): 14 entries over 8 programs. The bullet's effect is its set's `+0x48` slot: `grav_all` **3 / 4 / 5** (Gravity / Gravira / Graviga, programs 3 / 4 / 5, 300 / 315 / 315 ticks at 30 Hz, no loop); the floor-contact effect (`+0x30` slot, `0x1401577A0` case 2) 6 / 10 / 11 (60 ticks); the hand / charge / marker ids 0–2 of the same slot. | Checked (exe: sets 18–20 at `0x1405A1730`; files) |
+  | **Same sphere as KH1's** | programs 3 / 4 / 5 are KH1's `xm_gravity01..03.mag` section-1 program 3 (the sphere; same lengths 0x12A0 / 0xCF0 / 0x1940; the same values, e.g. 1.8 / 1.75 / −5.92, with some records laid out 8 bytes later). So at equal effect scale both games draw the same sphere: 7.8's Assumption (3) holds. | Checked (files); Assumption: the 8-byte layout shift changes no size |
+  | **Re:CoM's size rule** | `CHomingBullet`'s init `0x140158660` (flag bit 7): radius `desc+0x1C`, effect scale `g = desc+0x1C / desc+0x78`, then one growth `0x140156350`; each update in flight (`0x140156E20`, state 0, not fading) runs it again: radius += `desc+0x1C`, scale += `g` (no frame step). **Drawn scale = radius ÷ `desc+0x78`** at every frame. | Checked (decomp) |
+  | **Re:CoM's own numbers** | its Gravity case (`0x1402229E0..0x140222B92`): `desc+0x78` = row `+4` × 0.01 = **1.5 m** on all three rows; `desc+0x1C` = row `+5` × 0.01 = **0.04 / 0.06 / 0.08 m** an update (scale + 0.027 / 0.04 / 0.053); speed `+9` × 0.01 = 0.05 m a frame; range `+0xC` = 8; life `+0xE` × 100 = 5000 ticks (flags `0x41E1` have no bit 2: the life does not end it); its attack off in flight (bit 14), on only in its fade (`0x1401588D0`, `desc+0x94` = 1500 ticks); mover radius `+0xD` × 0.01. Start: the target's x / z at **Sora's floor point** (`player+0x500`, written by `0x1401E63C0` = the floor ray's hit + 0.0035), pitched π/2 (down: `0x1401D5740`, Re:CoM's matrices are row-vector, `0x1402ECEB0`). | Checked (disasm + decomp) |
+  | **Re:CoM's own final size** | its growth stops when the flight ends: at its mover's floor contact (`0x1401D58F0` sets `+0x120` bit 0 for a floor normal; the bullet then plays the floor effect and, flag bit 8, fades) or after 8 m. Starting at the floor and moving down, whether that contact comes on its first frame (scale ≈ 0.08 / 0.12 / 0.16, smaller than 0.112.0's "really small" sphere) or never (it would grow for 160 frames, under the floor) **could not be settled from the decomp**. Neither reading fits the owner's view of Re:CoM's Gravity, so **Re:CoM's own per-level final scale is not used**: owner question (a screenshot of Re:CoM's Gravity / Gravira / Graviga). | Not settled |
+
+  **Built** (`magic::gravity::sphere_flags` / `growth_step_m` / `recom_effect_scale` / `draw_factor`,
+  `win::magic::release_gravity`): the KH1 sphere keeps **Re:CoM's own growth** (flags `0x41E1`, bit 7
+  given back) with **Re:CoM's draw radius** `desc+0x78` = its row's 1.5 m, and the step `desc+0x1C`
+  = KH1's hit radius ÷ (N + 2) (the init's 2 steps + one an update over KH1's N fall frames): Re:CoM
+  grows and draws it, linear on KH1's frames, at **KH1's hit radius ÷ 1.5 m** at the impact =
+  KH1's scale × **1.133** (1.133 / 1.7 / 1.813 against KH1's 1.0 / 1.5 / 1.6). Our per-frame scale
+  write (`grow`, 0.115.0) is gone. KH1's timing kept (start 2.4 m up, the fall, the impact); the hit
+  radius and the strikes unchanged. Re:CoM's floor-contact effect (6 / 10 / 11), when the sphere
+  touches the floor at the end of its fall, takes the sphere's scale (bit 7, `0x140156E20`), as in
+  Re:CoM. Sizes: drawn radius = scale × 1.5 m = 1.7 / 2.55 / 2.72 m (the hit radius); KH1 draws its
+  sphere at 1.5 / 2.25 / 2.4 m (scale 1.0 / 1.5 / 1.6 × 1.5 m).
+  Assumptions: one bullet update per 60 Hz frame, the first on the frame after the release (±1 step,
+  ±1.6 %); the sphere grows about 2 more steps after the impact until its life ends (+3 %; KH1's own
+  fade grows it × 1.02 a frame, not carried). Not checked: in game; Re:CoM's own sphere in game.
 - **The flatten keeps its hurt bodies (0.117.0)**, owner 2026-11-04: "when the enemy is flattened
   from gravity, sora is unable to attack them, lets fix that". Cause (Checked (decomp + exe)): at
   Damage = Re:CoM (the default) our Gravity's kind is Re:CoM's 0xD, whose flatten state `+0xAC0`

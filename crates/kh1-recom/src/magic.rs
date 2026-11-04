@@ -576,26 +576,64 @@ pub mod gravity {
     }
 
     /// Re:CoM's bullet flag (descriptor `+0x60` bit 7, bullet `+0x230`) that makes its sphere grow
-    /// by itself: `CHomingBullet`'s init `0x140158660` sets the effect's scale `+0x10` to
-    /// `desc+0x1C / desc+0x78` (not `desc+0x90`), and every update (`0x140156E20` →
-    /// `0x140156350`) adds that again, with no cap. Re:CoM's own Gravity sphere (flags `0x41E1`)
-    /// uses it: effect scale = its hit radius / the row's 1.5 m. Checked (decomp).
+    /// by itself: `CHomingBullet`'s init `0x140158660` sets the collision radius to `desc+0x1C`
+    /// and the effect's scale `+0x10` to `g = desc+0x1C / desc+0x78` (not `desc+0x90`), then runs
+    /// one growth step `0x140156350`; every later update in flight (`0x140156E20`, until the fade
+    /// `+0x230 & 0x800000000000`) runs it again: radius += `desc+0x1C`, effect scale += `g`, not
+    /// scaled by the frame step. So in Re:CoM the drawn scale is always **the sphere's radius ÷
+    /// `desc+0x78`**. Checked (decomp).
     pub const RECOM_SELF_GROWTH: u64 = 0x80;
 
-    /// The KH1 sphere's flags: Re:CoM's Gravity case's without its own growth, so the effect
-    /// keeps the descriptor's `+0x90` at its spawn and only KH1's growth ([`effect_scale`]) moves it.
+    /// The KH1 sphere's flags: Re:CoM's Gravity case's as they are (owner, 2026-11-04: "make it
+    /// the size of re:com gravity"), its own growth (bit 7) included: Re:CoM grows and draws the
+    /// sphere by its own rule, with the step [`growth_step_m`] (0.115.0 .. 0.120.0 dropped bit 7 and
+    /// wrote KH1's scale each frame).
     pub fn sphere_flags(recom: u64) -> u64 {
-        recom & !RECOM_SELF_GROWTH
+        recom | RECOM_SELF_GROWTH
     }
 
-    /// Re:CoM `grav_all` effect scale per KH1 sphere scale. **Assumption** (as 7.8's): Re:CoM's
-    /// sphere drawn at scale 1 is the size of KH1's at scale 1 (the effect `grav_all.dpx`,
-    /// `EF2040.EFF`, is not in the session to compare with `xm_gravity01.mag`'s set).
-    pub const EFFECT_PER_SCALE: f32 = 1.0;
+    /// Re:CoM's sphere radius at effect scale 1: its Gravity case's `desc+0x78` = the row's `+4` ×
+    /// 0.01, 1.5 m on all three rows 0x26 / 0x38 / 0x39 (`0x140222B1F`). Checked (exe + disasm).
+    pub const RECOM_DRAW_RADIUS: f32 = 1.5;
 
-    /// The effect scale `t` frames into the fall: KH1's scale (0.01 → S over N frames).
-    pub fn effect_scale(level: u8, t: f32) -> f32 {
-        scale_at(level, t) * EFFECT_PER_SCALE
+    /// Re:CoM's own Gravity growth step per update (its case's `desc+0x1C` = the row's `+5` × 0.01,
+    /// 0.04 / 0.06 / 0.08 m; effect scale + 0.027 / 0.04 / 0.053 an update). Checked (exe +
+    /// disasm `0x140222B33`). Kept for the notes and tests: how long Re:CoM's own sphere grows (its
+    /// flight ends at its mover's floor contact or after 8 m) is not settled (`recom-m7-magic.md`
+    /// § 7.8, The sphere's size (0.121.0)).
+    pub const RECOM_STEP: [f32; 3] = [0.04, 0.06, 0.08];
+
+    /// Re:CoM's updates of growth the sphere has at the impact: its init's 2 steps (the init sets
+    /// `g`, then one growth) plus one per update for the N fall frames. **Assumption**: one bullet
+    /// update per 60 Hz frame, the first on the frame after the release (±1 step).
+    pub fn steps_at_impact(level: u8) -> f32 {
+        of(level).1 + 2.0
+    }
+
+    /// The KH1 sphere's growth step (its descriptor's `+0x1C`, metres an update): KH1's linear
+    /// growth (`xm_gravity01.mag` `0x44..`: 0.01 → S over the N fall frames) on Re:CoM's linear step,
+    /// ending at **KH1's hit radius** (1.7 × S m) at the impact. Re:CoM's rule then draws it at
+    /// that radius ÷ 1.5 m.
+    pub fn growth_step_m(level: u8) -> f32 {
+        impact_radius_m(level) / steps_at_impact(level)
+    }
+
+    /// The scale Re:CoM draws the KH1 sphere at after `updates` updates of its growth (`updates`
+    /// counts the init's two): `updates` × the step ÷ 1.5 m.
+    pub fn recom_effect_scale(level: u8, updates: f32) -> f32 {
+        updates * growth_step_m(level) / RECOM_DRAW_RADIUS
+    }
+
+    /// The drawn sphere against KH1's own scale (Re:CoM's rule on KH1's radius): 1.7 m / 1.5 m =
+    /// 1.133 on every level (the `grav_all` sphere programs 3 / 4 / 5 carry KH1's sphere programs:
+    /// Checked (files), so at equal scale both draw the same sphere).
+    pub fn draw_factor() -> f32 {
+        RADIUS / 100.0 / RECOM_DRAW_RADIUS
+    }
+
+    /// The effect scale at the impact: KH1's final scale S × [`draw_factor`] (1.133 / 1.7 / 1.813).
+    pub fn effect_scale_at_impact(level: u8) -> f32 {
+        recom_effect_scale(level, steps_at_impact(level))
     }
 
     /// What 0.103.0 .. 0.112.0 drew (the owner's "really small"): Re:CoM's self-growth step

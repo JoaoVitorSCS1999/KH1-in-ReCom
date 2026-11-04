@@ -443,26 +443,43 @@ fn a_cut_flatten_springs_back_at_kh1s_rate() {
     assert_eq!(s.y, 1.0);
 }
 
-/// The owner's "gravity's visual is really small" (2026-11-04): Re:CoM's sphere grew by itself
-/// (flag 0x80) from `+0x1C / +0x78` and our growth multiplied that tiny spawn scale. The KH1 sphere
-/// now drops the flag and draws KH1's scale itself: 0.01 at the release, S at the impact.
+/// The owner's "make it the size of re:com gravity" (2026-11-04, over KH1's size of 0.115.0): the KH1
+/// sphere keeps Re:CoM's own growth (flag 0x80) and Re:CoM's draw radius (1.5 m), with a step that
+/// ends at KH1's hit radius on KH1's frames: drawn at the radius ÷ 1.5 m, 1.133 × KH1's scale.
 #[test]
-fn gravity_sphere_draws_kh1s_scale_not_recoms_self_growth() {
-    // Re:CoM's Gravity case's flags (`0x140222AB7`) carry the self-growth bit; ours don't.
-    assert_eq!(gravity::sphere_flags(0x41E1), 0x4161);
-    assert_eq!(gravity::sphere_flags(0x41E1) & gravity::RECOM_SELF_GROWTH, 0);
-    for (lv, row5) in [(1u8, RECOM_GRAVITY_ROWS[0][5]), (2, RECOM_GRAVITY_ROWS[1][5]), (3, RECOM_GRAVITY_ROWS[2][5])] {
-        let (s, n) = gravity::of(lv);
-        assert_eq!(gravity::effect_scale(lv, 0.0), gravity::START_SCALE);
-        assert_eq!(gravity::effect_scale(lv, n), s);
-        assert!((gravity::effect_scale(lv, n / 2.0) - (0.01 + (s - 0.01) / 2.0)).abs() < 1e-6);
-        // The old drawing at the impact: 1/20 or less of KH1's.
-        let old = gravity::old_effect_scale(lv, row5, n);
-        assert!(old > 0.0 && s / old > 20.0, "LV{lv}: old {old}, KH1 {s}");
+fn gravity_sphere_draws_at_recoms_rule_on_kh1s_radius() {
+    // Re:CoM's Gravity case's flags (`0x140222AB7`) carry the self-growth bit; ours keep it.
+    assert_eq!(gravity::sphere_flags(0x41E1), 0x41E1);
+    assert_eq!(gravity::sphere_flags(0x4161), 0x41E1);
+    // Re:CoM's own numbers from its rows: draw radius `+4` × 0.01, step `+5` × 0.01.
+    for (i, r) in RECOM_GRAVITY_ROWS.iter().enumerate() {
+        assert_eq!(r[4] as f32 * 0.01, gravity::RECOM_DRAW_RADIUS, "row {i}");
+        assert!((r[5] as f32 * 0.01 - gravity::RECOM_STEP[i]).abs() < 1e-6, "row {i}");
     }
-    // The measured factors (row `+5` 4 / 6 / 8 over 1.7 / 2.55 / 2.72 m).
-    let f: Vec<f32> = [1u8, 2, 3].iter().map(|&lv| gravity::of(lv).0 / gravity::old_effect_scale(lv, RECOM_GRAVITY_ROWS[lv as usize - 1][5], gravity::of(lv).1)).collect();
-    assert!((f[0] - 21.25).abs() < 0.01 && (f[1] - 25.5).abs() < 0.01 && (f[2] - 20.92).abs() < 0.01, "{f:?}");
+    let f = gravity::draw_factor();
+    assert!((f - 1.7 / 1.5).abs() < 1e-6, "{f}");
+    for lv in 1u8..=3 {
+        let (s, n) = gravity::of(lv);
+        // The step reaches KH1's hit radius at the impact (the init's 2 steps + N updates).
+        assert_eq!(gravity::steps_at_impact(lv), n + 2.0);
+        assert!((gravity::growth_step_m(lv) * (n + 2.0) - gravity::impact_radius_m(lv)).abs() < 1e-5);
+        let at = gravity::effect_scale_at_impact(lv);
+        assert!((at - s * f).abs() < 1e-5, "LV{lv}: {at} vs {}", s * f);
+        // Linear on KH1's frames: half way through the fall, about half of it.
+        let half = gravity::recom_effect_scale(lv, n / 2.0 + 2.0);
+        assert!((half / at - (n / 2.0 + 2.0) / (n + 2.0)).abs() < 1e-5);
+        // The spawn (Re:CoM's 2 init steps) is near KH1's 0.01 × the factor: under 0.06.
+        assert!(gravity::recom_effect_scale(lv, 2.0) < 0.06, "LV{lv}");
+        // Against what 0.103.0 .. 0.112.0 drew ("really small"): over 20 times bigger.
+        let old = gravity::old_effect_scale(lv, RECOM_GRAVITY_ROWS[lv as usize - 1][5], n);
+        assert!(at / old > 20.0, "LV{lv}: old {old}");
+    }
+    let at: Vec<f32> = (1u8..=3).map(gravity::effect_scale_at_impact).collect();
+    assert!((at[0] - 1.1333).abs() < 1e-3 && (at[1] - 1.7).abs() < 1e-3 && (at[2] - 1.8133).abs() < 1e-3, "{at:?}");
+    // The hit radius stays KH1's.
+    for (lv, r) in [(1u8, 1.7f32), (2, 2.55), (3, 2.72)] {
+        assert!((gravity::impact_radius_m(lv) - r).abs() < 1e-5, "LV{lv}");
+    }
 }
 
 /// M7 f2 (decision 38): under the falling sphere KH1 squashes the enemy's height (`+0x480`, the y of

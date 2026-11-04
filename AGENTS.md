@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 233: KH1 Gravity's sphere drawn at Re:CoM's Gravity size (Re:CoM's own growth and draw rule on KH1's radius and frames), version 0.121.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Gravity and Lucky Bounty answers, verbatim "3 make it the size of re:com gravity"): the sphere is drawn at Re:CoM's Gravity size (over 0.115.0's KH1 size); the hit radius stays KH1's.
+
+- **Re:CoM** (Checked (decomp + disasm + exe; files: the owner's `EF2040.EFF`)): the sphere is `grav_all` 3 / 4 / 5 (set slot `+0x48` of sets 18–20), the same programs as KH1's `xm_gravity01..03.mag` sphere (program 3; same lengths and values, some records 8 bytes later). Re:CoM's size rule (`CHomingBullet` init `0x140158660` / growth `0x140156350`, flag bit 7): radius += `desc+0x1C` an update, **drawn scale = radius ÷ `desc+0x78`**; its Gravity case gives `+0x78` = 1.5 m (row `+4`) and `+0x1C` = 0.04 / 0.06 / 0.08 m (row `+5`), starts at Sora's floor point under the target, moving down 0.05 m a frame, attack off until its fade.
+- **Not settled**: how long Re:CoM's own sphere grows (until its mover's floor contact, or 8 m): first frame (≈ 0.08 / 0.12 / 0.16, smaller than 0.112.0's "really small") or never (160 frames). Its own per-level final scale is not used: owner question.
+- **Change** (`magic::gravity::sphere_flags` / `growth_step_m` / `recom_effect_scale` / `draw_factor`, `win::magic::release_gravity`): our sphere keeps Re:CoM's flags `0x41E1` (bit 7 given back), Re:CoM's `+0x78` (its row's 1.5 m) and a step `+0x1C` = KH1's hit radius ÷ (N + 2): Re:CoM grows and draws it, linear on KH1's fall frames, at **KH1's hit radius ÷ 1.5 m** at the impact = KH1's scale × 1.133 (1.133 / 1.7 / 1.813; drawn radius 1.7 / 2.55 / 2.72 m, KH1's own draw 1.5 / 2.25 / 2.4 m). Our per-frame scale write (`grow`) removed: less of ours per frame. KH1's timing (2.4 m up, the fall, the impact), the hit radius and the strikes unchanged. No new hook, site or patch. Combat = Re:CoM: Re:CoM's Gravity unchanged.
+- Assumptions: one bullet update per 60 Hz frame, the first after the release (±1 step, ±1.6 %); the 8-byte layout shift in Re:CoM's copy changes no size; about 2 more growth steps after the impact (+3 %; KH1's × 1.02 fade not carried).
+- Checked: tests (`magic::tests::gravity_sphere_draws_at_recoms_rule_on_kh1s_radius`: flags, Re:CoM's rows, the step, the factor, the sizes), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-m7-magic.md` § 7.8 (The sphere's size (0.121.0)).
+
+---
+
 ## Stage 232: While a sleight, special or summon runs in the field: the camp stays shut; no contact battle while it dims the room, version 0.120.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Party and field follow-ups): "While a sleight runs in the field: the camp is blocked, and a room-dimming sleight's i-frames apply in the field too".

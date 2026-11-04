@@ -949,12 +949,6 @@ pub unsafe fn held_hit_pace(enemy: usize) {
 const GRAVITY_DESC_B8: u64 = 0x1_407C_78D0;
 /// Re:CoM's Gravity sphere flags (`mov qword [rbp−0x50],0x41E1`). Checked (disasm `0x140222AB7`).
 const GRAVITY_FLAGS: u64 = 0x41E1;
-/// A bullet's effect handle (the bullet init's `0x1401A2D50` result, `+0x244`); the effect
-/// object's scale `+0x10..+0x18` (the init writes `desc+0x90` there; `CHomingBullet`'s init
-/// `0x140158660` overwrites it when the flags carry `magic::gravity::RECOM_SELF_GROWTH`).
-/// Checked (decomp `0x140157E60`, `0x140158660`).
-const BULLET_EFFECT: usize = 0x244;
-const EFFECT_SCALE: usize = 0x10;
 
 /// Sora's position (body `+0x30`) and facing direction (Re:CoM's yaw: (sin, 0, cos)).
 unsafe fn sora_pos_dir(pl: usize) -> ([f32; 3], [f32; 3]) {
@@ -1041,20 +1035,21 @@ unsafe fn release_gravity(pl: usize, c: &CastStart) -> Option<u32> {
     std::ptr::write_unaligned(w(0x6C) as *mut u32, attr);
     std::ptr::write_unaligned(w(0x70) as *mut i32, ap);
     std::ptr::write_unaligned(w(0x0C) as *mut u32, 0x8000_0000);
-    // Without Re:CoM's own growth (it set the effect to ~0.02 and grew it each update, under our
-    // writes): the effect spawns at KH1's start scale and grows only by KH1's numbers ([`grow`]).
+    // Re:CoM's own growth (flag 0x80, owner 2026-11-04: "make it the size of re:com gravity"):
+    // Re:CoM grows the sphere `+0x1C` an update and draws it at its radius ÷ `+0x78` (its 1.5 m);
+    // the step ends at KH1's hit radius on KH1's frames (`magic::gravity::growth_step_m`).
     std::ptr::write_unaligned(w(0x60) as *mut u64, mg::gravity::sphere_flags(GRAVITY_FLAGS) | 4 | COLLISION_HELD);
-    std::ptr::write_unaligned(w(0x90) as *mut f32, mg::gravity::effect_scale(c.level, 0.0));
     std::ptr::write_unaligned(w(0x8C) as *mut i32, HELD_TICKS);
     std::ptr::write_unaligned(w(0x30) as *mut f32, fall / n);
     std::ptr::write_unaligned(w(0x34) as *mut f32, r[0xC] as f32);
     std::ptr::write_unaligned(w(0x3C) as *mut i32, ((n + 2.0) * 50.0) as i32);
     std::ptr::write_unaligned(w(0x10) as *mut [f32; 4], start);
-    std::ptr::write_unaligned(w(0x1C) as *mut f32, r[5] as f32 * 0.01);
+    std::ptr::write_unaligned(w(0x1C) as *mut f32, mg::gravity::growth_step_m(c.level));
     std::ptr::write_unaligned(w(0x20) as *mut [f32; 4], [std::f32::consts::FRAC_PI_2, ang[1], ang[2], ang[3]]);
     std::ptr::write_unaligned(w(0xA8) as *mut usize, va(base(), EFFECT_SETS) + r[2] as usize * 0x60);
     std::ptr::write_unaligned(w(0xB8) as *mut usize, va(base(), GRAVITY_DESC_B8));
-    std::ptr::write_unaligned(w(0x78) as *mut f32, mg::gravity::impact_radius_m(c.level));
+    // Re:CoM's row `+4` × 0.01 (1.5 m), as its Gravity case: the divisor of its drawn scale.
+    std::ptr::write_unaligned(w(0x78) as *mut f32, r[4] as f32 * 0.01);
     let factory = func::<FactoryFn>(FACTORY)();
     if factory == 0 {
         return None;
@@ -1078,7 +1073,21 @@ unsafe fn release_gravity(pl: usize, c: &CastStart) -> Option<u32> {
     }
     // KH1 pays after the falling thread starts (sys 20, then sys 47).
     super::mp::pay(mg::gravity::COST, "Gravity release");
-    note(|| format!("release gravity{}: sphere {id} from ({:.2},{:.2},{:.2}) falls {fall} m over {n} f to ({:.2},{:.2},{:.2}), impact radius {:.2} m, target {h:#x}", c.level, start[0], start[1], start[2], centre[0], centre[1], centre[2], mg::gravity::impact_radius_m(c.level)));
+    note(|| {
+        format!(
+            "release gravity{}: sphere {id} from ({:.2},{:.2},{:.2}) falls {fall} m over {n} f to ({:.2},{:.2},{:.2}), impact radius {:.2} m, Re:CoM's growth {:.4} m an update, drawn at scale {:.3} at the impact (Re:CoM's rule: radius / 1.5 m), target {h:#x}",
+            c.level,
+            start[0],
+            start[1],
+            start[2],
+            centre[0],
+            centre[1],
+            centre[2],
+            mg::gravity::impact_radius_m(c.level),
+            mg::gravity::growth_step_m(c.level),
+            mg::gravity::effect_scale_at_impact(c.level)
+        )
+    });
     Some(id)
 }
 
@@ -1368,8 +1377,8 @@ fn squashing() -> bool {
     SQUASHED.lock().map(|g| !g.is_empty()).unwrap_or(false)
 }
 
-/// One run of Gravity's falling threads (Sora's frame start): the sphere's KH1 growth, and at the
-/// impact KH1's strikes (`L0044c`): every alive enemy whose bodies touch the 1.7 × S m sphere at the
+/// One run of Gravity's falling threads (Sora's frame start): KH1's clock (Re:CoM grows the sphere
+/// itself, flag 0x80), and at the impact KH1's strikes (`L0044c`): every alive enemy whose bodies touch the 1.7 × S m sphere at the
 /// centre, struck once with the sphere's attack through Re:CoM's contact and apply
 /// ([`strike_body`]). If the sphere is gone (Re:CoM ended it on a wall), a held bolt like 7.6's
 /// carries the strikes. Each fall frame before
@@ -1380,10 +1389,8 @@ unsafe fn gravity_frame(pl: usize, step: f32) {
     {
         let Ok(mut g) = FALLS.lock() else { return };
         for run in g.iter_mut() {
+            // The sphere's growth is Re:CoM's own (flag 0x80, `release_gravity`).
             let impact = run.fall.run(step);
-            if let Some(o) = shot_object(run.shot) {
-                grow(o, run);
-            }
             if impact {
                 due.push((run.shot, run.level, run.centre, run.kind, run.attr, run.ap));
             } else {
@@ -1412,22 +1419,6 @@ unsafe fn gravity_frame(pl: usize, step: f32) {
         }
         event(format!("impact gravity{level} shot {shot} n{n}"));
     }
-}
-
-/// KH1's growth (scale 0.01 → S over the fall) on Re:CoM's sphere effect (its own growth is off:
-/// `magic::gravity::sphere_flags`).
-unsafe fn grow(bullet: usize, run: &GravityRun) {
-    type ObjFn = unsafe extern "win64" fn(u32) -> usize;
-    let h: u32 = rd(bullet + BULLET_EFFECT);
-    if h == 0 {
-        return;
-    }
-    let o = func::<ObjFn>(EFFECT_OBJECT)(h);
-    if o == 0 {
-        return;
-    }
-    let s = mg::gravity::effect_scale(run.level, run.fall.fallen());
-    wr(o + EFFECT_SCALE, [s, s, s]);
 }
 
 /// A held strike carrier at the impact (when Re:CoM already ended the sphere): a `CBullet` of the
