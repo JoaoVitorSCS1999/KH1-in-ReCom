@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 202: M12 step 7: Ars Arcanum (KH1 FM's triangle prompt; also in Sleights), version 0.101.1 (2026-11-01)
+
+- Ars Arcanum (Checked (KH1 decomp + files)): wind-up 0xD2, 7 hits on their own (rows from 0x22), then 5 follow-ups (0x58 / 0x59) ending in the finisher; the first follow-up ends the invincibility; range 300, 3 MP, 4 AP. Re:CoM side: case 10 (ids 0x11..0x1E), tint `0x1407C5D60`, `limit2` (checked by its string), pack 11010. In the Sleights menu as command 0x8A.
+- Also: a clash now ends either special (Sonic Blade too) with the recoil, as KH1 does (before, Sonic Blade went on after a clash).
+- Asset step: re-run (slots 243..256). Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 201: M12 step 7: Strike Raid (KH1 FM's triangle prompt; also in Sleights), version 0.101.0 (2026-11-01)
 
 - Ask (owner, 2026-11-03): "Strike raid are arcanum and ragnarok in KH1FM are triangle prompts. Let them be triangle prompts and also show up in the sleights menu."
