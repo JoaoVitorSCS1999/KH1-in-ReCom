@@ -620,3 +620,8 @@ At KH1 setting:
   - The Effects / Sounds (later Voices) toggles go on a **new Settings page** (e.g. "Effects & Sound").
   - Camp-page long names (Customize, Abilities, Re:CoM's text): **(a) true squeeze**, an x-scale taught to Re:CoM's text drawing.
   - Decided without asking (no change to play): each Keyblade's KH1 set loads with its own Keyblade group, only when equipped; trail length follows KH1's own trail data (1:1), not an approximation.
+- **Party and field follow-ups** (owner, 2026-11-04):
+  - **Lucky Bounty** at KH1 brings a **random KH1 item** (Potion, Hi-Potion, Ether, Elixir by the floor's tier) instead of a deck card (the deck is empty at KH1).
+  - **Party MP**: keep 2 each, Wild Crush 3, Lucky Bounty 1.
+  - **KH1 Gravity in the field**: strikes field Heartless (Re:CoM's field strike: the battle starts with first strike).
+  - **While a sleight runs in the field**: the camp is blocked, and a room-dimming sleight's i-frames apply in the field too.
