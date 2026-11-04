@@ -91,15 +91,15 @@ unsafe fn install_pluto(b: usize) {
     }
     let hooks = [super::hook::Hook { site: &crate::sites::PLUTO_HOOKS[0], ours: pluto_find as *const () as usize, original: &ORIG_PLUTO_FIND }];
     if super::hook::install_all(b, &hooks) {
-        log("party: Lucky Bounty at KH1: Pluto's find 0x1401E2E60 wrapped; his card find (outcome 2, empty deck) brings one KH1 item of the floor's tier (Potion, Hi-Potion, Ether, Elixir) as a KH1 item prize; his other finds Re:CoM's");
+        log("party: Lucky Bounty at KH1: Pluto's find 0x1401E2E60 wrapped; his card find (outcome 2, empty deck) brings 1-2 KH1 items of the floor's tier (two at 50 %) (Potion, Hi-Potion, Ether, Elixir) as a KH1 item prize; his other finds Re:CoM's");
     }
 }
 
 #[repr(C, align(16))]
 struct V4([f32; 4]);
 
-/// Re:CoM's Pluto find; then, in a KH1 battle, his card find (the empty deck dealt nothing) brings a
-/// KH1 item: Re:CoM's "pluto" find effect at his point and one KH1 item prize from where Re:CoM
+/// Re:CoM's Pluto find; then, in a KH1 battle, his card find (the empty deck dealt nothing) brings 1–2
+/// KH1 items: Re:CoM's "pluto" find effect at his point and one KH1 item prize each from where Re:CoM
 /// throws his prizes (his bone 0, 0.5 m up), picked up by KH1's rule.
 pub unsafe extern "win64" fn pluto_find(pluto: usize) {
     super::movement::orig::<FindFn>(&ORIG_PLUTO_FIND)(pluto);
@@ -111,7 +111,11 @@ pub unsafe extern "win64" fn pluto_find(pluto: usize) {
         return;
     }
     let tier = super::shop::tier();
-    let Some(item) = pt::lucky_bounty::pick(tier, super::drops::random()) else { return };
+    // 1–2 items (owner, 2026-11-04): the count, then each item, from Re:CoM's random.
+    let items = pt::lucky_bounty::find(tier, super::drops::random(), || super::drops::random());
+    if items.is_empty() {
+        return;
+    }
     // Re:CoM's find effect (as its outcomes 1 / 2 play it), when the name is still "pluto".
     let name: usize = rd(super::base() + PLUTO_NAME_PTR as usize);
     if name != 0 && std::ffi::CStr::from_ptr(name as *const std::ffi::c_char).to_bytes() == b"pluto" {
@@ -128,15 +132,19 @@ pub unsafe extern "win64" fn pluto_find(pluto: usize) {
     }
     let v: [f32; 4] = rd(bone + 0xD0);
     let pos = [v[0], v[1] + 0.5, v[2], v[3]];
-    let how = match super::drops::spawn_item_prize(pos, item) {
-        Some(prize) => format!("a KH1 item prize {prize:#x}"),
-        None => {
-            let r = super::items::pick_up(item, "found by Pluto (Lucky Bounty)");
-            format!("picked up at once (no KH1 item prizes): {r:?}")
-        }
-    };
+    // Each a KH1 item prize of its own, thrown from his prize point (Re:CoM's own scatter for each).
+    let mut how = Vec::with_capacity(items.len());
+    for &item in &items {
+        how.push(match super::drops::spawn_item_prize(pos, item) {
+            Some(prize) => format!("{}: a KH1 item prize {prize:#x}", crate::items::name(item)),
+            None => {
+                let r = super::items::pick_up(item, "found by Pluto (Lucky Bounty)");
+                format!("{}: picked up at once (no KH1 item prizes): {r:?}", crate::items::name(item))
+            }
+        });
+    }
     if PLUTO_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
-        log(&format!("party: Lucky Bounty at KH1: Pluto's card find (empty deck) brings {} (floor tier {tier:?}): {how}", crate::items::name(item)));
+        log(&format!("party: Lucky Bounty at KH1: Pluto's card find (empty deck) brings {} item(s) (floor tier {tier:?}): {}", items.len(), how.join("; ")));
     }
 }
 

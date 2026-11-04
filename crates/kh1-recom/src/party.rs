@@ -228,8 +228,8 @@ pub fn usable(g: &crate::summons::Gate, i: usize) -> bool {
 /// (`0x1401E2B50` / `0x1401E2D90`, weights `0x1407C5960`: 20 / 60 / 20 %, or 5 / 5 / 90 % with fewer
 /// than 7 cards in the revolver): 0 a "nonos" shot, 1 HP and Moogle prizes (3 / 7 / 10 each), 2 cards
 /// dealt from the deck (`0x140166930`, then `0x140168650` each; 3 / 6 / 9 by level). At KH1 the deck is
-/// empty: outcome 2 (90 %) brings nothing. Ours: outcome 2 brings one KH1 item instead; 0 and 1 stay
-/// Re:CoM's.
+/// empty: outcome 2 (90 %) brings nothing. Ours: outcome 2 brings **1–2 KH1 items** instead (owner,
+/// 2026-11-04: "1-2 items"; two at 50 %, each picked on its own); 0 and 1 stay Re:CoM's.
 pub mod lucky_bounty {
     use crate::items::id;
     use crate::shop::{self, Tier};
@@ -243,6 +243,23 @@ pub mod lucky_bounty {
     /// tiers: 1F Potion, Ether; 2F+ Hi-Potion; 7F+ Elixir).
     pub fn items(t: Tier) -> Vec<u8> {
         shop::buy_list(t).into_iter().filter(|i| ITEMS.contains(i)).collect()
+    }
+
+    /// How many items one find brings: two when Re:CoM's random float `r` is under one half, else one
+    /// (the owner's 1–2 at even odds; the Party list plays only LV3, so Re:CoM's 3 / 6 / 9 cards by
+    /// level give no split of their own).
+    pub const MAX: usize = 2;
+    pub fn count(r: f32) -> usize {
+        if r < 0.5 {
+            MAX
+        } else {
+            1
+        }
+    }
+
+    /// The items of one find: `count(r)` of them, each picked on its own from the next floats.
+    pub fn find(t: Tier, r: f32, mut next: impl FnMut() -> f32) -> Vec<u8> {
+        (0..count(r)).filter_map(|_| pick(t, next())).collect()
     }
 
     /// One of them, equally likely, from Re:CoM's random float `r` in [0, 1).
@@ -275,6 +292,22 @@ mod tests {
         assert_eq!(pick(tier(1), 1.0), Some(ETHER), "clamped");
         assert_eq!(pick(tier(7), 0.75), Some(ELIXIR));
         assert_eq!(CARDS_OUTCOME, 2);
+        // 1–2 items: two under one half, each its own pick.
+        assert_eq!((count(0.0), count(0.499), count(0.5), count(0.999)), (2, 2, 1, 1));
+        let mut rs = [0.0f32, 0.75].into_iter();
+        assert_eq!(find(tier(7), 0.2, || rs.next().unwrap()), [POTION, ELIXIR]);
+        let mut rs = [0.6f32].into_iter();
+        assert_eq!(find(tier(1), 0.7, || rs.next().unwrap()), [ETHER]);
+        let mut calls = 0;
+        let one = find(tier(1), 0.9, || {
+            calls += 1;
+            0.0
+        });
+        assert_eq!((one.len(), calls), (1, 1), "one find, one more draw");
+        // Over many finds: about half bring two (Re:CoM's random is uniform: Assumption).
+        let n = 1000;
+        let two = (0..n).filter(|i| count(*i as f32 / n as f32) == 2).count();
+        assert_eq!(two, n / 2);
     }
 
     use super::*;

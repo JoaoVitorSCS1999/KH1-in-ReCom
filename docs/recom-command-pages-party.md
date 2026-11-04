@@ -276,8 +276,28 @@ card (the deck is empty at KH1)".
   weights unchanged: at KH1 the deck is always under 7 cards, so 90 % item, 5 % shot, 5 % HP / points).
 - Combat = Re:CoM and Riku's story: Re:CoM's find (the wrapper only calls it).
 - Per use: one wrapper call per Pluto find; nothing per frame.
-- **Decided without asking**: one item per find (the owner's "a random KH1 item"; Re:CoM deals 3 / 6 / 9
-  cards). Owner question: one item, or Re:CoM's count by level (3 / 6 / 9 at LV1 / 2 / 3; LV3 = 9).
+- ~~**Decided without asking**: one item per find (the owner's "a random KH1 item"; Re:CoM deals 3 / 6 / 9
+  cards). Owner question: one item, or Re:CoM's count by level (3 / 6 / 9 at LV1 / 2 / 3; LV3 = 9).~~
+  Answered (owner, 2026-11-04: "1-2 items"): 0.123.0 below.
 - Assumptions: a KH1 battle's deck deals 0 (cardless battles), so Re:CoM's own outcome 2 did nothing
   before ours; Re:CoM's `pluto` effect 1 is the "found something" sparkle.
 - Not checked: in game.
+
+### 1–2 items per find (0.123.0)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Gravity and Lucky Bounty answers, verbatim
+"1 1-2 items"): Lucky Bounty brings 1–2 KH1 items per find.
+
+- **The split**: two at 50 % (`party::lucky_bounty::count`: Re:CoM's random float under one half),
+  else one. Re:CoM's level count gives no split of its own: the Party list plays only Lucky Bounty LV3
+  (0x56), whose find deals 9 cards in Re:CoM (`0x140166930` by `+0x240`; Checked (decomp), § above).
+- **Each item** picked on its own as before (`pick`: equally among the floor tier's items, Re:CoM's
+  random float `0x14029CF00` each; two of the same item can come), each **a KH1 item prize of its own**
+  thrown from his prize point (bone 0, 0.5 m up), each with Re:CoM's own throw scatter (two random
+  floats each in `win::drops::spawn_item_prize`); Re:CoM's `pluto` find effect once. KH1's pickup for
+  each (first empty slot, else the stock; a full stock refuses: as any KH1 item prize).
+- Draw order: the count first, then one float per item (`find`). Combat = Re:CoM, Riku's story,
+  outcomes 0 / 1: unchanged. Nothing per frame; no new hook or site.
+- Assumption: Re:CoM's random float is uniform on [0, 1) (so 50 % exactly).
+- Checked: tests (`party::tests::lucky_bounty_brings_the_floors_items`: count, find, draws). Not
+  checked: in game.

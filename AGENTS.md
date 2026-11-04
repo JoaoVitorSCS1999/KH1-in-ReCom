@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 235: Lucky Bounty at KH1 brings 1–2 KH1 items per find (two at 50 %), version 0.123.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Gravity and Lucky Bounty answers, verbatim "1 1-2 items"), on 0.118.0's question (one item, or Re:CoM's 3 / 6 / 9 by level).
+
+- **Re:CoM** (Checked (decomp), 0.118.0): Pluto's card find deals 3 / 6 / 9 cards by level (`0x140166930`); the Party list plays only LV3 (0x56): no split of its own, so the owner's 1–2 at even odds.
+- **Change** (`party::lucky_bounty::count` / `find`, `win::party::pluto_find`): after Re:CoM's find, outcome 2 in a KH1 battle brings **two items when Re:CoM's random float is under 0.5, else one**; each picked on its own from the floor's tier (`pick`, Re:CoM's random float each), each a KH1 item prize of its own from his prize point (Re:CoM's own scatter for each), Re:CoM's `pluto` effect once. No new hook or site; nothing per frame. Combat = Re:CoM, Riku's story, outcomes 0 / 1: Re:CoM's.
+- Assumption: Re:CoM's random float is uniform on [0, 1).
+- Checked: tests (`party::tests::lucky_bounty_brings_the_floors_items`), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-command-pages-party.md` § 1–2 items per find.
+
+---
+
 ## Stage 234: KH1's own hit flatten at Damage = KH1 (KH1's numbers in Re:CoM's own flatten state), version 0.122.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Gravity and Lucky Bounty answers, verbatim "2 yes", on 0.117.0's open question: "KH1's own hit flatten at Damage = KH1"): a Gravity-hit enemy flattens as in KH1.
