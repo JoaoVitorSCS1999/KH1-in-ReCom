@@ -569,3 +569,4 @@ At KH1 setting:
   - Boss skills give the **skill only**, without the boss's elemental affinities.
   - **Wyvern (Reload Lock) is left out.**
   - **Softer numbers for the strongest permanent skills**: proposed to the owner before the stages that use them (2–4).
+- **Treasure Magnet** (owner, 2026-11-04: "Re:CoM's Bouncywild radius"): with either copy equipped (Bouncywild's skill or KH1's level-72 copy), prizes are pulled from 10 m (Re:CoM's Draw: `player+0x550` = 10, plus the scattered-card test `0x14022F23A`). Without it, Re:CoM's 5 m. Built with Enemy Skills stage 2 (Re:CoM's play-time setters).
