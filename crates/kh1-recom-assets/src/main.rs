@@ -23,7 +23,9 @@
 //! first) it writes `ENEMY/NNNN/ENNNNN.ANN`, `.ASD`, `.SES` and `kh1-<enemy>.json`
 //! (`docs/recom-m11-enemies.md`). For M13's KH1 effects it writes `raw/EFFECT/1000/EF1000.EFF`
 //! (Re:CoM's effect container Sora's group loads, with KH1's Sora effect set added under a `kh1_`
-//! name and its PC textures) and `kh1-effects.json` (`docs/recom-m13-plan.md`).
+//! name and its PC textures, and its `.ese` sound rows) and `kh1-effects.json`; for M13's KH1
+//! sounds `kh1-sounds.bin` (KH1's own SCDs, unchanged) and `kh1-sounds.json` (the KH1 → Re:CoM
+//! id map) (`docs/recom-m13-plan.md`).
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -256,8 +258,18 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // M13 stage 2: KH1's own sound banks (Sora's SCDs, the Kingdom Key's from the world packs).
+    let sounds = match sounds_build(&game, keys.clone()) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            println!("note: KH1 sound banks not built: {e} (Re:CoM's sounds stay)");
+            None
+        }
+    };
+    // KH1's system bank (ids under 1000: the effect programs' sounds) as the menu sounds give it.
+    let system_sounds = menu_sounds.as_ref().and_then(|(bin, _, _)| kh1_recom_assets::menu_sounds::scd_info(bin).ok()).map(|i| i.sounds as u32);
     // M13 stage 1: KH1's Sora effect set in the effect container Sora's group loads.
-    let effects = match effects_build(&game, keys.clone(), &arc) {
+    let effects = match effects_build(&game, keys.clone(), &arc, system_sounds) {
         Ok(e) => Some(e),
         Err(e) => {
             println!("note: KH1 effects not added: {e} (Re:CoM's effect container is left as it is)");
@@ -442,6 +454,24 @@ fn run() -> Result<(), String> {
                 if f.is_file() {
                     std::fs::remove_file(f).map_err(|e| format!("{}: {e}", f.display()))?;
                     println!("removed {} (no KH1 effects this run)", f.display());
+                }
+            }
+        }
+    }
+    // M13 stage 2: KH1's sound banks (the SCD pack and its manifest); without them older ones
+    // are removed (Re:CoM's sounds stay).
+    let sd_manifest = root.join(kh1_recom_assets::sounds::MANIFEST);
+    let sd_pack = root.join(kh1_recom_assets::sounds::PACK);
+    match &sounds {
+        Some(s) => {
+            write(&sd_pack, &s.pack)?;
+            write(&sd_manifest, s.manifest.as_bytes())?;
+        }
+        None => {
+            for p in [&sd_manifest, &sd_pack] {
+                if p.is_file() {
+                    std::fs::remove_file(p).map_err(|e| format!("{}: {e}", p.display()))?;
+                    println!("removed {} (no KH1 sound banks this run)", p.display());
                 }
             }
         }
@@ -759,11 +789,29 @@ struct Effects {
 /// Adds KH1's Sora effect set (`xa_ex_0010.mdls` section 1, with its PC textures) to Re:CoM's
 /// `EF1000.EFF` after Re:CoM's own rows, as a plain PKG entry with Re:CoM's assets, the set's
 /// textures and Re:CoM's date (`kh1_recom_assets::effects`).
-fn effects_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive) -> Result<Effects, String> {
+fn effects_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive, system_sounds: Option<u32>) -> Result<Effects, String> {
     use kh1_recom_assets::effects as fx;
     let inst = install::kh1(game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
     let (mdls, mdls_hd, _) = inst.read_full(fx::SORA_MDLS).map_err(|e| format!("{}: {e}", fx::SORA_MDLS))?;
-    let sora = fx::kh1_set(fx::SORA_SET, fx::SORA_MDLS, &mdls, fx::SORA_SECTION, &mdls_hd).map_err(|e| format!("{}: {e}", fx::SORA_MDLS))?;
+    let mut sora = fx::kh1_set(fx::SORA_SET, fx::SORA_MDLS, &mdls, fx::SORA_SECTION, &mdls_hd).map_err(|e| format!("{}: {e}", fx::SORA_MDLS))?;
+    // M13 stage 2: the set's own sounds (KH1's program `+0xFC`, ids under 1000 = system bank
+    // entries) as Re:CoM's `.ese` rows, on bank 9000 (the menu sounds' pack holds the bank).
+    let map = |id: u32| match system_sounds {
+        Some(n) if id < n => Some(kh1_recom_assets::sounds::SYSTEM_GROUP * 1000 + id),
+        _ => None,
+    };
+    if system_sounds.is_none() {
+        println!("note: KH1 effects: no KH1 system bank (amusic/se000.dat not taken): {} has no .ese (its effects play without sounds)", fx::SORA_SET);
+    } else {
+        let (rows, skipped) = fx::kh1_ese_rows(&sora.data, map).map_err(|e| format!("{}: {e}", fx::SORA_SET))?;
+        for (id, snd, why) in &skipped {
+            println!("note: KH1 effects: {} effect {id}'s sound {snd} not in its .ese: {why}", fx::SORA_SET);
+        }
+        if !rows.is_empty() {
+            println!("KH1 effects: {} with {} rows {:?} (effect id, Re:CoM id; bank 9000 = KH1's system bank)", sora.ese_name(), rows.len(), rows.iter().map(|r| (r.id, r.group as u32 * 1000 + r.number as u32)).collect::<Vec<_>>());
+            sora.ese = Some(fx::write_ese(&rows));
+        }
+    }
     let e = arc.find(fx::EFF_PATH).ok_or_else(|| format!("{} not in Recom.hed", fx::EFF_PATH))?;
     let raw = arc.read_raw_entry(e).map_err(|e| format!("{}: {e}", fx::EFF_PATH))?;
     let date = i32::from_le_bytes(raw.get(12..16).ok_or("short entry")?.try_into().unwrap());
@@ -785,6 +833,61 @@ fn effects_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
     let entry = kh1_formats::egs::build_plain_entry(&out, &all, date).map_err(|e| e.to_string())?;
     let sources = [("EF1000.EFF sha256", kh1_formats::egs::sha256_hex(&eff)), ("xa_ex_0010.mdls sha256", kh1_formats::egs::sha256_hex(&mdls))];
     Ok(Effects { entry, manifest: fx::manifest_json(std::slice::from_ref(&sora), &sources) })
+}
+
+/// M13 stage 2's files: the SCD pack and `kh1-sounds.json`.
+struct Sounds {
+    pack: Vec<u8>,
+    manifest: String,
+}
+
+/// KH1's own sounds for Re:CoM's banks (`kh1_recom_assets::sounds`): every SCD of Sora's
+/// `xa_ex_0010.mdls` and the Kingdom Key's 40 (its btltbl weapon row's `+0x34` base), looked up
+/// in Sora's file, then in the world packs `amusic/se<ww>.dat` in KH1's order. A pack that is
+/// not there or does not read is noted and skipped.
+fn sounds_build(game: &Path, keys: kh1_formats::egs::KeyTable) -> Result<Sounds, String> {
+    use kh1_recom_assets::sounds as sd;
+    let inst = install::kh1(game, keys).map_err(|e| format!("KH1 files: {e}"))?;
+    let (_, sora, _) = inst.read_full(sd::SORA_MDLS).map_err(|e| format!("{}: {e}", sd::SORA_MDLS))?;
+    let btl = inst.read("btltbl.bin").map_err(|e| format!("btltbl.bin: {e}"))?;
+    let table = kh1_formats::btltbl::Btltbl::parse(btl.clone()).map_err(|e| format!("btltbl.bin: {e}"))?;
+    let base = table.weapon_for_item(sd::KINGDOM_KEY_ITEM).map_err(|e| format!("Kingdom Key: {e}"))?.sound_base;
+    let wanted = sd::wanted(&sora, base);
+    let mut sources = vec![sd::Source { file: sd::SORA_MDLS.into(), assets: sora }];
+    let mut read = Vec::new();
+    for f in sd::WORLD_PACKS {
+        match inst.read_full(f) {
+            Ok((_, assets, _)) => {
+                let n = assets.iter().filter(|a| sd::sound_id(&a.name).is_some()).count();
+                read.push(format!("{f} ({n} SCDs)"));
+                sources.push(sd::Source { file: f.into(), assets });
+            }
+            Err(e) => println!("note: KH1 sounds: {f}: {e} (skipped)"),
+        }
+    }
+    let t = sd::take(&sources, &wanted).map_err(|e| e.to_string())?;
+    for n in &t.notes {
+        println!("note: {n}");
+    }
+    if t.sounds.is_empty() {
+        return Err("no KH1 sound found".into());
+    }
+    let from = |file: &str| t.sounds.iter().filter(|s| s.source == file).count();
+    println!(
+        "KH1 sounds: {} of {} wanted as Re:CoM banks {}..{} ({} from {}, {} from the world packs {:?}); Kingdom Key base {base} ({base:#x}){}",
+        t.sounds.len(),
+        wanted.len(),
+        sd::FIRST_BANK,
+        sd::FIRST_BANK + t.sounds.len() as u32 - 1,
+        from(sd::SORA_MDLS),
+        sd::SORA_MDLS,
+        t.sounds.len() - from(sd::SORA_MDLS),
+        read,
+        if t.missing.is_empty() { String::new() } else { format!("; NOT FOUND: {:?} (those play Re:CoM's sounds)", t.missing) }
+    );
+    let src = [("btltbl.bin sha256", kh1_formats::egs::sha256_hex(&btl))];
+    let (pack, manifest) = sd::build(&t, base, &src);
+    Ok(Sounds { pack, manifest })
 }
 
 /// The camp item row's files: the raw `FO0100.SPR` entry and `kh1-camp-rows.json`.

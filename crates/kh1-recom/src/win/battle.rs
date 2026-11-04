@@ -601,6 +601,8 @@ pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: us
     });
     // M13 stage 1: once per session, whether Re:CoM has the KH1 effect sets (a log line).
     super::effects::battle_check();
+    // M13 stage 2: KH1's sound banks in Re:CoM's list (registered when missing; combat = kh1).
+    super::sounds::battle_start();
     orig::<CtorFn>(&ORIG_MANAGER_CTOR)(this, a, c, d)
 }
 

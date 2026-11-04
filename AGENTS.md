@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 220: M13 stage 2: KH1's own sound banks in Re:CoM's (Sora's SCDs, the Kingdom Key's from the world packs) and the KH1 → Re:CoM id map; the KH1 effect set's sounds 81–88 as its `.ese`, version 0.108.0 (2026-11-04)
+
+Owner, 2026-11-04: "also, lets add all of soras effects for real this time. He doesn't have his keyblade trail, gravity break doesnt have it effects/sound, neither does ripple drive or stun impact,". Stage 2 of `docs/recom-m13-plan.md`.
+
+- **KH1** (Checked (decomp + files)): every sound id ≥ 1000 is its own one-sound SCD asset `se0<id>.win32.scd` (number `atoi(name + 2)`, `0x1400DB1F0`; made from entry 0, `0x1400DE460`); ids < 1000 are entries of the system bank 2 (`0x1404D5EB8` = 2, Checked (exe)) = `se000.win32.scd`. Sora's swings / finishers / Guard / Counterattack sounds are weapon sounds (op 0x19 = weapon `+0x34` + arg; Kingdom Key `0x2B10`). Sora's 21 SCDs hold one sound each.
+- **Re:CoM** (Checked (decomp)): `0x1402F3080` makes sound `id % 1000` of the first bank entry with the id's bank: one KH1 SCD = one Re:CoM bank (9001 …), id `bank × 1000`.
+- **Asset step** (`kh1_recom_assets::sounds`): Sora's `xa_ex_0010.mdls` SCDs + the Kingdom Key's 40, from Sora's file then the world packs `amusic/se<ww>.dat` (KH1's order) → `kh1-sounds.bin` (unchanged SCDs) + `kh1-sounds.json` (id → bank, offset, size, source; ids not found). `EF1000.EFF` gains `kh1_ex_0010.ese`: KH1's program sounds `+0xFC` 81..88 (volume offset 0) as rows on bank 9000 (`effects::kh1_ese_rows`), only when the system bank was taken.
+- **DLL** (`crate::sounds`, `win::sounds`; `win::menu_sounds` now shares its map hook, alloc check, SCD reader and registration): at each battle start at Combat = KH1, one walk of Re:CoM's bank list, missing SCDs (and bank 9000) to Re:CoM's `0x1402F5D70`; one log line. The menu sounds' bank is now read without the KH1 menu look too. No new hook or site; nothing per frame; at Combat = Re:CoM nothing registered. Nothing plays the new banks yet (stage 3).
+- Local run: 21 banks 9001..9021 from Sora's file; the Kingdom Key's 40 **not found** (no world pack data in the session); `.ese` 8 rows. Assumption: the Kingdom Key's SCDs are in the world packs (the owner's run says).
+- Checked: tests (manifests, id map, ESE layout = Re:CoM's `ex_0010.ese`, the step's real output through the DLL parser), the Windows build (no warnings). Not checked: in game. Asset step: re-run. Docs: `recom-m13-plan.md` § Stage 2 built.
+
+---
+
 ## Stage 219: Customize rows name their shortcut; long sleight names squeeze to fit in KH1's look; a "Sleights" section in the ability list, version 0.107.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Customize page and long names, § Sleights list and ability section): "when something is bound to a shortcut, they should also be listed by the button prompt, as well as the list on the right … we need a solution for certain sleights having too long of a name to fit within the black box."; "The same thing for the sleights menu. I think we should have also have "sleights" have its own menu in the ability list"; answer "Squeeze to fit". The Customize Summon / Sleights toggle was **dropped by the owner** ("disregard the toggle for sleights and summons"): not built. Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story unchanged.

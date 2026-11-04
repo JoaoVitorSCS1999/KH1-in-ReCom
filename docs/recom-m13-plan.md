@@ -116,6 +116,44 @@ with `.ese` tables written by the asset step. Re:CoM loads, steps, draws and end
     moved rows;
   - at Combat = Re:CoM nothing changes. The container is served at both settings, but Re:CoM's own rows are untouched.
 
+## Stage 2 built (0.108.0): KH1 sound banks and the id map
+
+Owner, 2026-11-04: "also, lets add all of soras effects for real this time. He doesn't have his keyblade trail,
+gravity break doesnt have it effects/sound, neither does ripple drive or stun impact,".
+
+- **How KH1 finds a sound** (Checked (decomp)): every id ≥ 1000 is **its own one-sound SCD**, a PC asset named
+  `se0<id>.win32.scd`. KH1 registers a file's SCD assets (`0x1400E0A50` / `0x1400DB910` → `0x1400E0F00`), numbers
+  each entry `atoi(name + 2)` (`0x1400DB1F0`), and makes id `n` from **entry 0** of the entry numbered `n`
+  (`0x1400DE460`, the branch for banks other than the system bank). Ids under 1000 are entries of the system bank 2
+  (`0x1404D5EB8` = 2: Checked (exe)), `se000.win32.scd`, entry = id. Checked (files): Sora's 21 SCDs
+  (`se011001` … `se011017`, `se011023`, `se011510`, `se011511`, `se014430`) hold one sound each.
+- **How Re:CoM plays one** (Checked (decomp)): `0x1402F3080` takes the first bank entry whose bank is the id's
+  (`0x1402A8560`) and makes sound `id % 1000` of it. So each KH1 SCD is **one Re:CoM bank** (9001 …), played as
+  `bank × 1000`; KH1's system bank stays the menu sounds' bank 9000 (entry = KH1 id).
+- **Asset step** (`kh1_recom_assets::sounds`, `main.rs` `sounds_build`): takes every SCD of Sora's
+  `xa_ex_0010.mdls` and the Kingdom Key's 40 weapon ids (btltbl weapon row of item 0x51, `+0x34` = `0x2B10`), from
+  Sora's file first, then the world packs `amusic/se<ww>.dat` in KH1's table order (`0x1404DCCA0`) plus
+  `seworldmap` / `sezz`; each SCD checked as both drivers read it and copied unchanged into **`kh1-sounds.bin`**;
+  **`kh1-sounds.json`** gives each KH1 id its bank, offset, size and source, and lists the ids not found. A copy of
+  the same id in a later file that differs is noted (the first kept).
+- **Effect sounds** (`kh1_recom_assets::effects`): KH1's Sora set's programs carry sounds 81–88 at `+0xFC` with
+  volume offset 0 (Checked (files)); the step writes **`kh1_ex_0010.ese`** into `EF1000.EFF` next to the set, rows
+  `{id k, group 9000, number 81 + k}` for k = 0..7 (Re:CoM looks the `.ese` up by the set's own name:
+  `0x140256A90` → `0x1402A4A10(name)`, Checked (decomp)). Only when the menu sounds' system bank was taken (it
+  holds the entries); a program with a non-zero volume offset would get no row (the `.ese` has no field for it).
+- **DLL** (`crate::sounds`, `win::sounds`; `win::menu_sounds` shares its map hook, `_aligned_malloc` check, SCD
+  reader and registration): reads the manifest at start; at each battle start with Combat = KH1 (the battle manager
+  ctor wrapper) one walk of Re:CoM's bank list, then each missing SCD goes to Re:CoM's `0x1402F5D70` (bank 9000
+  too). One log line. No new hook or site (the map hook `0x1402A8560` is the menu sounds'); nothing per frame. KH1's
+  system bank is now read even without the KH1 command menu look (it carries the effects' sounds).
+- **Nothing plays them yet**: stage 3's SES / `.ese` records use the map. At Combat = Re:CoM nothing is registered.
+- **Local run** (the session's files: Sora's `.mdls` with its 21 SCDs, a 1280-byte-short local copy of
+  `se000.win32.scd` padded for the run): 21 banks 9001..9021; **the Kingdom Key's 40 not found** (no world pack data
+  in the session); `kh1_ex_0010.ese` with 8 rows 9000081 … 9000088; the DLL parser reads the output
+  (`sounds::tests::the_steps_output_parses`, `KH1_SOUNDS_JSON`).
+- **Assumption**: the Kingdom Key's SCDs are in the world packs. The owner's run says which (the step prints the
+  source of each id and lists what it could not find).
+
 ## Open (ask at their stage)
 
 - No hit-stop at KH1 (none found in KH1: `recom-m13-kh1-fx.md` § 2; this corrects the clash "hit-stop" in

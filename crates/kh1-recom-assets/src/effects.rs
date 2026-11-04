@@ -158,6 +158,102 @@ pub fn set_ids(set: &[u8]) -> Result<Vec<u32>> {
     Ok(ids)
 }
 
+/// A PPP program blob's magic.
+pub const PPP_MAGIC: u32 = 0x96;
+
+/// Each entry's effect id and its program's sound (`+0xFC` u16) and volume offset (`+0xFE` u16)
+/// (KH1 plays the sound when the effect starts: `0x1401EC770` / `0x14031D2C0`, Checked (decomp)).
+/// The program is entry `+4` of its blob's offset table (blob `+8 + 4 × k`, from the blob).
+pub fn program_sounds(set: &[u8]) -> Result<Vec<(u32, u16, u16)>> {
+    let ids = set_ids(set)?;
+    let mut out = Vec::with_capacity(ids.len());
+    for (k, id) in ids.iter().enumerate() {
+        let e = 0x10 + 0x20 * k;
+        let blob = u32_at(set, e)? as usize;
+        let prog = u32_at(set, e + 4)? as usize;
+        if u32_at(set, blob)? != PPP_MAGIC || prog >= u32_at(set, blob + 4)? as usize {
+            return bad(format!("effect {id}: no program {prog} in its blob at {blob:#x}"));
+        }
+        let p = blob + u32_at(set, blob + 8 + 4 * prog)? as usize;
+        let w = |o: usize| set.get(p + o..p + o + 2).map(|b| u16::from_le_bytes([b[0], b[1]])).ok_or_else(|| Error::Format(format!("effect {id}: program header cut short")));
+        out.push((*id, w(0xFC)?, w(0xFE)?));
+    }
+    Ok(out)
+}
+
+/// One `.ese` row: when effect `id` starts, Re:CoM plays `group × 1000 + number` with it, follows
+/// its node 0 and stops it with the effect (`0x1402546E0` / `0x140254E20`, Checked (decomp)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EseRow {
+    /// The effect id.
+    pub id: u16,
+    /// The sound's group (Re:CoM id / 1000).
+    pub group: u16,
+    /// The sound's number (Re:CoM id % 1000).
+    pub number: u16,
+    /// Row `+6`: the stop fade (0 = Re:CoM's 30; every row of Re:CoM's `ex_0010.ese` has 0).
+    pub fade: u8,
+}
+
+/// Writes an `.ese`: `"ESE\0"`, two zero words, u16 1, u16 row count, then 8-byte rows
+/// `{u16 id, u16 group, u16 number, u8 fade, u8 0}` (Re:CoM's `ex_0010.ese`'s layout, Checked
+/// (files)).
+pub fn write_ese(rows: &[EseRow]) -> Vec<u8> {
+    let mut d = Vec::with_capacity(0x10 + 8 * rows.len());
+    d.extend_from_slice(b"ESE\0");
+    d.extend_from_slice(&[0u8; 8]);
+    d.extend_from_slice(&1u16.to_le_bytes());
+    d.extend_from_slice(&(rows.len() as u16).to_le_bytes());
+    for r in rows {
+        d.extend_from_slice(&r.id.to_le_bytes());
+        d.extend_from_slice(&r.group.to_le_bytes());
+        d.extend_from_slice(&r.number.to_le_bytes());
+        d.extend_from_slice(&[r.fade, 0]);
+    }
+    while d.len() % ALIGN != 0 {
+        d.push(0);
+    }
+    d
+}
+
+/// Reads an `.ese`'s rows.
+pub fn parse_ese(d: &[u8]) -> Result<Vec<EseRow>> {
+    if d.get(..4) != Some(b"ESE\0".as_slice()) || d.len() < 0x10 {
+        return bad("not an .ese");
+    }
+    let n = u16::from_le_bytes([d[0xE], d[0xF]]) as usize;
+    (0..n)
+        .map(|k| {
+            let r = d.get(0x10 + 8 * k..0x18 + 8 * k).ok_or_else(|| Error::Format(format!(".ese row {k} cut short")))?;
+            let w = |o: usize| u16::from_le_bytes([r[o], r[o + 1]]);
+            Ok(EseRow { id: w(0), group: w(2), number: w(4), fade: r[6] })
+        })
+        .collect()
+}
+
+/// The `.ese` rows of a KH1 set's own sounds (each program's `+0xFC`), through `map` (KH1 id →
+/// Re:CoM id, None when Re:CoM has no bank for it). Programs without a sound get no row. KH1's
+/// volume offset `+0xFE` has no `.ese` field: rows are only written for programs whose offset is 0
+/// (full, positional), and the others are returned as skipped.
+pub fn kh1_ese_rows(set: &[u8], map: impl Fn(u32) -> Option<u32>) -> Result<(Vec<EseRow>, Vec<(u32, u16, &'static str)>)> {
+    let mut rows = Vec::new();
+    let mut skipped = Vec::new();
+    for (id, snd, vol) in program_sounds(set)? {
+        if snd == 0 {
+            continue;
+        }
+        if vol != 0 {
+            skipped.push((id, snd, "a volume offset the .ese can't carry"));
+            continue;
+        }
+        match map(snd as u32) {
+            Some(r) if r / 1000 <= u16::MAX as u32 && id <= u16::MAX as u32 => rows.push(EseRow { id: id as u16, group: (r / 1000) as u16, number: (r % 1000) as u16, fade: 0 }),
+            _ => skipped.push((id, snd, "no Re:CoM bank holds it")),
+        }
+    }
+    Ok((rows, skipped))
+}
+
 /// The file offset a KH1 PC texture is tagged by (`-4310.dds` → 0x4310).
 pub fn kh1_texture_offset(name: &str) -> Option<usize> {
     let hex = name.strip_prefix('-')?.strip_suffix(".dds")?;
@@ -190,6 +286,15 @@ pub struct Set {
     pub ids: Vec<u32>,
     /// Its PC textures, renamed for Re:CoM.
     pub hd: Vec<HdAsset>,
+    /// Its sound table (`<stem>.ese`, M13 stage 2), when the step writes one.
+    pub ese: Option<Vec<u8>>,
+}
+
+impl Set {
+    /// The `.ese` row name for this set (`kh1_ex_0010.dpx` → `kh1_ex_0010.ese`).
+    pub fn ese_name(&self) -> String {
+        format!("{}.ese", self.name.split('.').next().unwrap_or(""))
+    }
 }
 
 /// Takes section `section` of a KH1 `.mdls` as set `name`, with the file's PC textures that lie
@@ -204,7 +309,7 @@ pub fn kh1_set(name: &str, source: &str, mdls: &[u8], section: usize, assets: &[
             hd.push(HdAsset { name: hd_name(name, off - start), orig_offset: hd_tag(off - start), data: a.data.clone() });
         }
     }
-    Ok(Set { name: name.to_string(), source: format!("{source} section {section}"), data: data.to_vec(), ids, hd })
+    Ok(Set { name: name.to_string(), source: format!("{source} section {section}"), data: data.to_vec(), ids, hd, ese: None })
 }
 
 /// Re:CoM's container with `sets` added after its own rows, and its PC assets with the sets'
@@ -217,6 +322,9 @@ pub fn add_sets(eff: &[u8], assets: &[HdAsset], sets: &[Set]) -> Result<(Vec<u8>
             return bad(format!("{} already holds {}", EFF_PATH, s.name));
         }
         entries.push(Entry { name: s.name.clone(), data: s.data.clone(), flags: [0, 0] });
+        if let Some(e) = &s.ese {
+            entries.push(Entry { name: s.ese_name(), data: e.clone(), flags: [0, 0] });
+        }
     }
     let out = write_eff(&entries)?;
     let mut all = assets.to_vec();
@@ -239,13 +347,17 @@ pub fn manifest_json(sets: &[Set], sources: &[(&str, String)]) -> String {
         let ids: Vec<String> = set.ids.iter().map(|v| v.to_string()).collect();
         let hd: Vec<String> = set.hd.iter().map(|a| format!("\"{}\"", a.name)).collect();
         s += &format!(
-            "{}\n    {{\"name\": \"{}\", \"source\": \"{}\", \"bytes\": {}, \"ids\": [{}], \"hd\": [{}]}}",
+            "{}\n    {{\"name\": \"{}\", \"source\": \"{}\", \"bytes\": {}, \"ids\": [{}], \"hd\": [{}], \"ese\": {}}}",
             if i > 0 { "," } else { "" },
             set.name,
             set.source,
             set.data.len(),
             ids.join(", "),
-            hd.join(", ")
+            hd.join(", "),
+            match &set.ese {
+                Some(e) => format!("[{}]", parse_ese(e).unwrap_or_default().iter().map(|r| format!("[{}, {}]", r.id, r.group as u32 * 1000 + r.number as u32)).collect::<Vec<_>>().join(", ")),
+                None => "null".into(),
+            }
         );
     }
     s += "\n  ],\n  \"sources\": {";
@@ -336,7 +448,7 @@ mod tests {
         ];
         let eff = write_eff(&own).unwrap();
         let recom_asset = HdAsset { name: "ex_5010_dpx4290.dds".into(), orig_offset: 0x48_4290, data: vec![1] };
-        let kh1 = Set { name: SORA_SET.into(), source: "t".into(), data: set(&[0, 1, 6, 7], 0x180), ids: vec![0, 1, 6, 7], hd: vec![HdAsset { name: "kh1_ex_0010_dpx80.dds".into(), orig_offset: hd_tag(0x80), data: vec![2] }] };
+        let kh1 = Set { name: SORA_SET.into(), source: "t".into(), data: set(&[0, 1, 6, 7], 0x180), ids: vec![0, 1, 6, 7], hd: vec![HdAsset { name: "kh1_ex_0010_dpx80.dds".into(), orig_offset: hd_tag(0x80), data: vec![2] }], ese: None };
         let (out, assets) = add_sets(&eff, std::slice::from_ref(&recom_asset), std::slice::from_ref(&kh1)).unwrap();
         let rows = parse_eff(&out).unwrap();
         assert_eq!(&rows[..3], &own[..], "Re:CoM's rows: same names, bytes and flags");
@@ -349,10 +461,59 @@ mod tests {
 
     #[test]
     fn the_manifest_lists_the_sets() {
-        let s = Set { name: SORA_SET.into(), source: "xa_ex_0010.mdls section 1".into(), data: vec![0; 16], ids: vec![0, 7], hd: vec![] };
+        let s = Set { name: SORA_SET.into(), source: "xa_ex_0010.mdls section 1".into(), data: vec![0; 16], ids: vec![0, 7], hd: vec![], ese: Some(write_ese(&[EseRow { id: 7, group: 9000, number: 88, fade: 0 }])) };
         let j = manifest_json(&[s], &[("EF1000.EFF sha256", "ab".into())]);
         assert!(j.contains("\"format\": \"kh1-recom-assets effects 1\""));
         assert!(j.contains("\"name\": \"kh1_ex_0010.dpx\""));
         assert!(j.contains("\"ids\": [0, 7]"));
+        assert!(j.contains("\"ese\": [[7, 9000088]]"));
+    }
+
+    /// A set whose entries each have their own program in one blob, with a sound and volume.
+    fn set_with_sounds(sounds: &[(u32, u16, u16)]) -> Vec<u8> {
+        let n = sounds.len();
+        let blob = 0x10 + 0x20 * n;
+        let progs = blob + 8 + 4 * n;
+        let mut d = vec![0u8; progs + 0x110 * n];
+        d[0..4].copy_from_slice(&DPX_MAGIC.to_le_bytes());
+        d[0xC..0x10].copy_from_slice(&(n as u32).to_le_bytes());
+        d[blob..blob + 4].copy_from_slice(&PPP_MAGIC.to_le_bytes());
+        d[blob + 4..blob + 8].copy_from_slice(&(n as u32).to_le_bytes());
+        for (k, (id, snd, vol)) in sounds.iter().enumerate() {
+            let e = 0x10 + 0x20 * k;
+            d[e..e + 4].copy_from_slice(&(blob as u32).to_le_bytes());
+            d[e + 4..e + 8].copy_from_slice(&(k as u32).to_le_bytes());
+            d[e + 8..e + 12].copy_from_slice(&id.to_le_bytes());
+            let p = progs + 0x110 * k;
+            d[blob + 8 + 4 * k..blob + 12 + 4 * k].copy_from_slice(&((p - blob) as u32).to_le_bytes());
+            d[p + 0xFC..p + 0xFE].copy_from_slice(&snd.to_le_bytes());
+            d[p + 0xFE..p + 0x100].copy_from_slice(&vol.to_le_bytes());
+        }
+        d
+    }
+
+    #[test]
+    fn ese_rows_from_kh1s_program_sounds() {
+        let d = set_with_sounds(&[(0, 81, 0), (1, 0, 0), (6, 87, 0), (7, 88, 0x100)]);
+        assert_eq!(program_sounds(&d).unwrap(), vec![(0, 81, 0), (1, 0, 0), (6, 87, 0), (7, 88, 0x100)]);
+        let (rows, skipped) = kh1_ese_rows(&d, |id| Some(9_000_000 + id)).unwrap();
+        assert_eq!(rows, vec![EseRow { id: 0, group: 9000, number: 81, fade: 0 }, EseRow { id: 6, group: 9000, number: 87, fade: 0 }]);
+        assert_eq!(skipped.len(), 1, "a volume offset is not carried");
+        let (rows, skipped) = kh1_ese_rows(&d, |_| None).unwrap();
+        assert!(rows.is_empty() && skipped.len() == 3);
+        let e = write_ese(&rows_of());
+        assert_eq!(&e[..0x10], &[0x45, 0x53, 0x45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 0]);
+        assert_eq!(parse_ese(&e).unwrap(), rows_of());
+    }
+
+    fn rows_of() -> Vec<EseRow> {
+        vec![EseRow { id: 0, group: 1, number: 56, fade: 0 }, EseRow { id: 1, group: 1, number: 57, fade: 0 }]
+    }
+
+    #[test]
+    fn recoms_own_ese_layout_round_trips() {
+        // Re:CoM's ex_0010.ese head (Checked (files)): "ESE\0", 0, 0, u16 1, u16 6.
+        let e = write_ese(&(0..6).map(|k| EseRow { id: k, group: 1, number: 56 + k, fade: 0 }).collect::<Vec<_>>());
+        assert_eq!(e.len(), 64, "Re:CoM's ex_0010.ese is 64 bytes for its 6 rows");
     }
 }

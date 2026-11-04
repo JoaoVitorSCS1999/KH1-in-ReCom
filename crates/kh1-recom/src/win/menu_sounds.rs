@@ -65,25 +65,7 @@ fn note_once(bit: u32, msg: impl FnOnce() -> String) {
 
 /// The pack read whole into a buffer from Re:CoM's `_aligned_malloc` (0 on failure).
 unsafe fn read_pack(path: &Path, size: usize) -> usize {
-    let alloc: AlignedMallocFn = std::mem::transmute(rd::<usize>(super::va(super::base(), IAT_ALIGNED_MALLOC)));
-    let buf = alloc(size, 0x40);
-    if buf.is_null() {
-        return 0;
-    }
-    let dst = std::slice::from_raw_parts_mut(buf, size);
-    let ok = std::fs::File::open(path).and_then(|mut f| f.read_exact(dst)).is_ok() && ms::scd_head_ok(dst, size);
-    if !ok {
-        // Not Re:CoM's yet: give it back the way Re:CoM would (`_aligned_free`, by name).
-        let name: Vec<u16> = "ucrtbase.dll\0".encode_utf16().collect();
-        let m = GetModuleHandleW(name.as_ptr());
-        let free = if m.is_null() { std::ptr::null_mut() } else { GetProcAddress(m, b"_aligned_free\0".as_ptr()) };
-        if !free.is_null() {
-            let f: unsafe extern "C" fn(*mut u8) = std::mem::transmute(free);
-            f(buf);
-        }
-        return 0;
-    }
-    buf as usize
+    read_scd(path, 0, size)
 }
 
 /// Checks the asset step's files, reads the SCD and hooks the map. False (and Re:CoM's sounds)
@@ -117,15 +99,7 @@ pub fn install(base: usize, manifest: Option<&Path>) -> bool {
             return false;
         }
     };
-    // SAFETY: a read of the mapped image's import table; ucrtbase is loaded (Re:CoM imports it).
-    let iat_ok = unsafe {
-        let have: usize = rd(super::va(base, IAT_ALIGNED_MALLOC));
-        let name: Vec<u16> = "ucrtbase.dll\0".encode_utf16().collect();
-        let m = GetModuleHandleW(name.as_ptr());
-        let want = if m.is_null() { 0 } else { GetProcAddress(m, b"_aligned_malloc\0".as_ptr()) as usize };
-        have != 0 && have == want
-    };
-    if !iat_ok {
+    if !alloc_ok(base) {
         log("menu sounds: Re:CoM's _aligned_malloc import is not ucrtbase's; Re:CoM's sounds");
         return false;
     }
@@ -135,10 +109,7 @@ pub fn install(base: usize, manifest: Option<&Path>) -> bool {
         log(&format!("menu sounds: {} could not be read into Re:CoM's memory; Re:CoM's sounds", pack.display()));
         return false;
     }
-    let site = |name: &str| crate::sites::MENU_SOUND_HOOKS.iter().find(|h| h.name == name).expect("site");
-    let hooks = [hook::Hook { site: site("sound id to bank (0x1402A8560)"), ours: sound_slot as *const () as usize, original: &ORIG_SLOT }];
-    // SAFETY: the target's bytes are checked again inside, before anything is written.
-    if !unsafe { hook::install_all(base, &hooks) } {
+    if !install_map(base) {
         log("menu sounds: the id → bank map is not hooked; Re:CoM's sounds");
         return false;
     }
@@ -159,6 +130,103 @@ pub fn install(base: usize, manifest: Option<&Path>) -> bool {
     true
 }
 
+/// The menu sounds' files were read (their bank can be registered).
+pub fn installed() -> bool {
+    INSTALLED.load(Ordering::Acquire)
+}
+
+static MAP: OnceLock<bool> = OnceLock::new();
+
+/// Hooks Re:CoM's id → bank map once (groups 9000..9999 their own banks): shared by the menu
+/// sounds and M13's KH1 sound banks (`win::sounds`). True when the map is ours.
+pub fn install_map(base: usize) -> bool {
+    *MAP.get_or_init(|| {
+        let site = |name: &str| crate::sites::MENU_SOUND_HOOKS.iter().find(|h| h.name == name).expect("site");
+        let hooks = [hook::Hook { site: site("sound id to bank (0x1402A8560)"), ours: sound_slot as *const () as usize, original: &ORIG_SLOT }];
+        // SAFETY: the target's bytes are checked again inside, before anything is written.
+        unsafe { hook::install_all(base, &hooks) }
+    })
+}
+
+/// Re:CoM's `_aligned_malloc` import is ucrtbase's (checked once): the buffers handed to
+/// Re:CoM's bank registration come from it, as Re:CoM frees them with `_aligned_free`.
+pub fn alloc_ok(base: usize) -> bool {
+    static OK: OnceLock<bool> = OnceLock::new();
+    // SAFETY: a read of the mapped image's import table; ucrtbase is loaded (Re:CoM imports it).
+    *OK.get_or_init(|| unsafe {
+        let have: usize = rd(super::va(base, IAT_ALIGNED_MALLOC));
+        let name: Vec<u16> = "ucrtbase.dll\0".encode_utf16().collect();
+        let m = GetModuleHandleW(name.as_ptr());
+        let want = if m.is_null() { 0 } else { GetProcAddress(m, b"_aligned_malloc\0".as_ptr()) as usize };
+        have != 0 && have == want
+    })
+}
+
+/// `size` bytes of `path` from `offset`, read into a buffer from Re:CoM's `_aligned_malloc` and
+/// checked as an SCD (0 on failure; the buffer is then given back).
+pub unsafe fn read_scd(path: &Path, offset: u64, size: usize) -> usize {
+    use std::io::{Seek, SeekFrom};
+    let alloc: AlignedMallocFn = std::mem::transmute(rd::<usize>(super::va(super::base(), IAT_ALIGNED_MALLOC)));
+    let buf = alloc(size, 0x40);
+    if buf.is_null() {
+        return 0;
+    }
+    let dst = std::slice::from_raw_parts_mut(buf, size);
+    let ok = std::fs::File::open(path).and_then(|mut f| f.seek(SeekFrom::Start(offset)).and_then(|_| f.read_exact(dst))).is_ok() && ms::scd_head_ok(dst, size);
+    if !ok {
+        free_buf(buf);
+        return 0;
+    }
+    buf as usize
+}
+
+/// Gives a buffer that Re:CoM did not take back the way Re:CoM would (`_aligned_free`, by name).
+unsafe fn free_buf(buf: *mut u8) {
+    let name: Vec<u16> = "ucrtbase.dll\0".encode_utf16().collect();
+    let m = GetModuleHandleW(name.as_ptr());
+    let free = if m.is_null() { std::ptr::null_mut() } else { GetProcAddress(m, b"_aligned_free\0".as_ptr()) };
+    if !free.is_null() {
+        let f: unsafe extern "C" fn(*mut u8) = std::mem::transmute(free);
+        f(buf);
+    }
+}
+
+/// Re:CoM's sound system is up (its bank registration does nothing before).
+pub unsafe fn sound_up() -> bool {
+    rd::<usize>(super::va(super::base(), SOUND_UP)) != 0
+}
+
+/// The banks in 9000..9999 Re:CoM's list holds, with whether each one's name is `name_of`'s.
+/// One walk of the list.
+pub unsafe fn our_banks(name_of: impl Fn(i32) -> Option<&'static [u8]>) -> Vec<(i32, bool)> {
+    let mut out = Vec::new();
+    let mut e: usize = rd(super::va(super::base(), BANK_LIST));
+    let mut n = 0;
+    while e != 0 && n < 100_000 {
+        let b: i32 = rd(e + E_BANK);
+        if (ms::GROUP_FIRST as i32..ms::GROUP_END as i32).contains(&b) && !out.iter().any(|x: &(i32, bool)| x.0 == b) {
+            let same = name_of(b).is_some_and(|name| std::slice::from_raw_parts((e + E_NAME) as *const u8, name.len()) == name);
+            out.push((b, same));
+        }
+        e = rd(e + E_NEXT);
+        n += 1;
+    }
+    out
+}
+
+/// Hands `buf` (`size` bytes, from [`read_scd`]) to Re:CoM's own bank registration as bank `bank`
+/// named `name` (NUL-terminated); Re:CoM's entry owns it from then. True when the bank is then in
+/// Re:CoM's list under that name; otherwise the buffer is given back.
+pub unsafe fn register(name: &[u8], bank: i32, buf: usize, size: usize) -> bool {
+    func::<RegisterFn>(BANK_REGISTER)(name.as_ptr(), bank, buf as *mut u8, size as i32);
+    let ok = find(super::base(), bank, name) == Some(true);
+    if !ok && find(super::base(), bank, name).is_none() {
+        // Not taken (no entry made): still ours to give back.
+        free_buf(buf as *mut u8);
+    }
+    ok
+}
+
 /// The Re:CoM id the command menu plays for `snd`: KH1's own entry when the KH1 look is on and
 /// KH1's bank is (or can now be) in Re:CoM's list, else Re:CoM's.
 pub fn id_for(snd: Sound, kh1_look: bool) -> u32 {
@@ -172,6 +240,19 @@ pub fn id_for(snd: Sound, kh1_look: bool) -> u32 {
         }
     }
     snd.recom_id()
+}
+
+/// KH1's system bank (bank 9000: the menu sounds' pack, also the KH1 effect programs' sounds,
+/// M13) is in Re:CoM's list, registered now if it wasn't. False without the menu sounds' files.
+pub fn ensure_system() -> bool {
+    if !INSTALLED.load(Ordering::Acquire) {
+        return false;
+    }
+    match BANK.get() {
+        // SAFETY: as `id_for`.
+        Some((b, pack)) => unsafe { ensure(b, pack) },
+        None => false,
+    }
 }
 
 /// Re:CoM's entry for bank `bank`: Some(true) ours, Some(false) another, None none.

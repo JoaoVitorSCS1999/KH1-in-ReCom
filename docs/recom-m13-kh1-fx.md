@@ -121,6 +121,7 @@ scripts never call sound sys 67 or voice sys 168 (Checked, `magdis` output).
 | Script sound | `sys0.67` = `0x1402BC290(id, owner, pos)` → `0x1402955E0`. | Checked (exe + decomp) |
 | **Where sounds live** | Model sounds: `.mdls` **section 6 = a "SeSep" list** (Sora: `0x2AF9`–`0x2B09`, `0x2CF6`, `0x2CF7`, `0x2B0F`, `0x385E`; enemies 1001+ and 5000+), registered by `0x140296480` / `0x140179DD0`; on PC their audio is the `.scd` HD assets of the `.mdls`. World pack **`amusic/se<ww>.dat`** (`0x140178E80`, codes at `0x1404DCCA0`: dh, di, dc, tw, aw, tz, po, xx, al, lm, nm, he, pi, pp, xx, pc, ew), registered to bank −1. System pack **`amusic/se000.dat`** (`0x1401791D0`). The PC loader maps names containing `se0000` → bank 0 and `se7777` → bank 7777 (`0x140120000.c` ~10998; `sound/se7777.win32.scd`). | Checked (decomp + files) for the paths and lists. Assumptions: the Keyblade ids `0x2B10`+ and the effect ids < 1000 are in the world and system packs (they are in no local `.mdls`, `.wpn` or `.mag`: Checked (files)), and bank 2 = `se000` |
 | Menu sounds | **Not traced.** They likely go to the system bank directly. | – |
+| **One-sound SCDs** (M13 stage 2) | Every id ≥ 1000 is its own SCD asset `se0<id>.win32.scd`: the bank entry's number is `atoi(name + 2)` (`0x1400DB1F0`), and `0x1400DE460` makes the sound from entry 0 of the entry with that number (banks other than 2). Sora's 21 have one sound each. | Checked (decomp + files) |
 
 ---
 

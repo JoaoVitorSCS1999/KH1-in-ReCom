@@ -95,6 +95,7 @@ pub mod kh1_hud;
 pub mod level_up;
 pub mod magic;
 pub mod menu_sounds;
+pub mod sounds;
 pub mod menu;
 pub mod motions;
 pub mod movement;
