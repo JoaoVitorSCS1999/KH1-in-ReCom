@@ -1563,6 +1563,35 @@ pub const EFFECT_CHECKED: &[Site] = &[
     Site { name: "effect by name (0x1402A4920)", rva: 0x002A_4920, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x40, 0x48, 0x8B, 0x05, 0x9B, 0xE1, 0x5B, 0x00, 0x48, 0x33, 0xC4] },
 ];
 
+/// M13 stage 3 (`win::fx`): KH1's trail end. Re:CoM's EET motion stop (CEffectMotion vtable
+/// slot `0x14052A338`, its only reference: Checked (exe scan)), wrapped: after it, the KH1 trails still
+/// lingering on that motion player are killed (KH1: a motion change kills the trail). Same rule as
+/// [`HOOKS`]: whole instructions, nothing rip-relative, no branch into them (exe scan).
+pub const FX_HOOKS: &[Site] = &[
+    // push rsi; push r14; push r15; sub rsp,0x30 (then xor r15d,r15d: not moved).
+    Site { name: "EET motion stop (0x14017A430)", rva: 0x0017_A430, expect: &[0x40, 0x56, 0x41, 0x56, 0x41, 0x57, 0x48, 0x83, 0xEC, 0x30] },
+];
+
+/// M13 stage 3: the list-B update's stop call at the end frame (`0x14017AB70`: `call 0x140254D60`
+/// with rcx = the effect, xmm1 = the event's fade `+0x60`), retargeted to `win::fx::trail_end`.
+pub const FX_CALLS: &[Site] = &[Site { name: "EET list-B end stop call (0x14017ABEF)", rva: 0x0017_ABEF, expect: &[0xE8, 0x6C, 0xA1, 0x0D, 0x00] }];
+
+/// M13 stage 3: the call's context and the Re:CoM functions `win::fx` calls (not patched).
+pub const FX_CHECKED: &[Site] = &[
+    // mov rcx,[r14+0x10] (the event); movss xmm1,[rcx+0x60] (its fade); mov rcx,rax (the effect).
+    Site { name: "EET list-B end: the fade read (0x14017ABE3)", rva: 0x0017_ABE3, expect: &[0x49, 0x8B, 0x4E, 0x10, 0xF3, 0x0F, 0x10, 0x49, 0x60, 0x48, 0x8B, 0xC8] },
+    // mov r9,[r14+0x10]; mov r8,[r14+8]; mov edx,[r14+0x18]; mov rcx,[r14+0x28]; call 0x14017A1A0 (to the linger list).
+    Site { name: "EET list-B end: the linger add (0x14017ABF4)", rva: 0x0017_ABF4, expect: &[0x4D, 0x8B, 0x4E, 0x10, 0x4D, 0x8B, 0x46, 0x08, 0x41, 0x8B, 0x56, 0x18, 0x49, 0x8B, 0x4E, 0x28, 0xE8, 0x97, 0xF5, 0xFF, 0xFF] },
+    // push rbx; sub rsp,0x20; mov eax,[rcx+0x4C]; xorps xmm0,xmm0: the effect's fade-out (≤ 0 kills).
+    Site { name: "effect fade out (0x140254D60)", rva: 0x0025_4D60, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x41, 0x4C, 0x0F, 0x57, 0xC0] },
+    // push rbx; sub rsp,0x20; mov rbx,rcx: the effect's stop emitting (its particle instance `+0x58`).
+    Site { name: "effect stop emitting (0x140255040)", rva: 0x0025_5040, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9] },
+    // (Handle → effect `0x140257EF0` is `MAGIC_CALLEES`' "effect object" site, checked at start.)
+];
+
+/// M13 stage 3: CEffectMotion's motion-stop slot (the hooked function's only reference). Checked (exe).
+pub const FX_PTRS: &[PtrSite] = &[PtrSite { name: "CEffectMotion vtable motion stop (0x14052A338)", rva: 0x0052_A338, target: 0x0017_A430 }];
+
 /// M8b (`win::summons`, `docs/recom-summons.md`): Re:CoM code the summons call (no hook, no patch):
 /// each KH1 summon starts Re:CoM's LV3 sleight through Sora's own sleight start. Checked at start;
 /// a mismatch: no summons. They also call `initStockSkill` (through the start), the sleight
@@ -3692,6 +3721,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SPECIAL_RAG_CHECKED,
         SUMMON_CHECKED,
         EFFECT_CHECKED,
+        FX_HOOKS,
+        FX_CALLS,
+        FX_CHECKED,
         STORY_SKIP_HOOKS,
         STORY_SKIP_CALLEES,
         SHADOW_HOOKS,

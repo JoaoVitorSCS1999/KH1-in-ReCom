@@ -76,6 +76,14 @@ pub fn kh2(game: &Path, keys: KeyTable) -> Result<Install> {
 
 /// Sora's per-motion sound events in `Recom.pkg`.
 pub const SORA_SES: &str = "PLAYER/0001/PL0001.SES";
+/// Sora's per-motion effect events (M13 stage 3).
+pub const SORA_EET: &str = "PLAYER/0001/PL0001.EET";
+/// The Keyblade's per-motion effect events (its trails; M13 stage 3).
+pub const KEYBLADE_EET: &str = "PLAYER/0002/PL0002.EET";
+/// Sora's per-motion effect events in Halloween Town (group 11).
+pub const HALLOWEEN_EET: &str = "PLAYER/0011/PL0011.EET";
+/// The Halloween Town Keyblade's (group 12, its own `PL0012.EET`: `recom-keyblade-models.md` § 10).
+pub const HALLOWEEN_KEYBLADE_EET: &str = "PLAYER/0012/PL0012.EET";
 
 /// The KH1 stats file the runtime reads, next to [`MANIFEST`].
 pub const STATS: &str = "kh1-stats.json";

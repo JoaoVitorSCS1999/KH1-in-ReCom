@@ -76,6 +76,7 @@ pub mod d2;
 pub mod dim;
 pub mod damage;
 pub mod effects;
+pub mod fx;
 pub mod enemy_skills;
 pub mod deck;
 pub mod drops;

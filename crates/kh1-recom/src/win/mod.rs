@@ -11,6 +11,7 @@ mod damage;
 mod deck;
 mod drops;
 mod effects;
+mod fx;
 mod gimmick;
 mod guard;
 mod held;
@@ -307,6 +308,10 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
         menu_sounds::install(base, sound_file.as_deref());
     }
     sounds::install(base, recom_bases(dirs).into_iter().map(|b| b.join(crate::sounds::MANIFEST)).find(|p| p.is_file()).as_deref());
+    // M13 stage 3: KH1's effect / sound events of Sora's moves (variants) and KH1's trail end.
+    if movement::installed() {
+        fx::install(base, recom_bases(dirs).into_iter().map(|b| b.join(crate::fx::MANIFEST)).find(|p| p.is_file()).as_deref());
+    }
     install_battles(base);
     install_enemies(base, &recom_bases(dirs));
     install_revenge(base, s);

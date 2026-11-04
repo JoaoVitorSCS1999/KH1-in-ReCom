@@ -154,6 +154,54 @@ gravity break doesnt have it effects/sound, neither does ripple drive or stun im
 - **Assumption**: the Kingdom Key's SCDs are in the world packs. The owner's run says which (the step prints the
   source of each id and lists what it could not find).
 
+## Stage 3 built (0.109.0): Sora's combos and finishers
+
+Owner, 2026-11-04: "He doesn't have his keyblade trail, gravity break doesnt have it effects/sound, neither does
+ripple drive or stun impact,".
+
+- **How it plays** (Checked (decomp)): Re:CoM's motion start keeps the `.EET` / `.SES` events of the variant the motion
+  request passes (`0x1401A3470` → `0x14017A240` walks every record bound to the motion; `0x140239260`); the Keyblade
+  plays the same index with the same variants (`0x1401F7180`). So KH1's version of each move is a set of Re:CoM events
+  at **variant 1301**, written by the asset step (`kh1_recom_assets::kh1_fx`, `eet`); the DLL passes 1301 in the
+  motion request it already makes for the move (`win::fx::variants` in `Kh1Sora::play`), per toggle, only for the moves
+  `kh1-fx.json` lists. Re:CoM's own events (variant 0) stay byte-identical (Checked (files): the step rebuilds Re:CoM's
+  `PL0001.EET` / `PL0002.EET` byte for byte; its layout puts every list A before every list B).
+- **Trail** (`PL0002.EET`, list B): every KH1 row with a trail (`+2` ≥ 0: combo rows, finishers, KH1-only moves, Guard,
+  Counterattack), on its Keyblade clip: Re:CoM's own effect 5 of `ex_5010.dpx` (= KH1's Kingdom Key set, Checked
+  (files)) on Re:CoM's own three nodes (its `w001_055` record's), from the first whole frame ≥ 1 with the motion's
+  type-7 flag on to the first frame it is off (`0x1402C1F20`). Windows from the player's mset: 200 4–24, 201 12–32,
+  202 18–30, 203 8–38, 204 2–20, 205 4–20, 206 6–38, 207 2–20, 209 2–54, 210 22–38, 211 14–42, 213 4–24, 214 2–28,
+  215 26–36, 217 28–38, 218 30–50; none on 208, 212, 216 (Checked (files): matches `recom-m13-kh1-fx.md` § 1).
+- **KH1's trail end** (`win::fx`): Re:CoM's list B can only fade or kill at its end, and leaves ended effects past a
+  motion change; KH1 stops the emission at the window's end and kills the trail at a motion change. The KH1 events
+  carry the fade −1301 (Re:CoM's are 10–15): the end-frame call `0x14017ABEF` (`call 0x140254D60`) is retargeted to
+  `trail_end`, which stops the emission (`0x140255040`) for that fade and fades as before otherwise; the EET motion stop
+  `0x14017A430` (vtable slot `0x14052A338`) is wrapped: after Re:CoM's, the KH1 trails in that player's linger list
+  (`+0x28` / `+0x30`) are killed (`0x140254D60(e, 0)`); a live one is killed by Re:CoM's own stop (fade ≤ 0). 10 bytes
+  moved (whole instructions, nothing rip-relative, no branch into them: exe scan). Once per trail end / motion change.
+- **Sounds** (`PL0001.SES`, `PL0011.SES`): at variant 1301, each KH1 sound key (op 0x19 = Kingdom Key `0x2B10` + arg,
+  op 0 absolute) at its frame through the stage 2 map; the clip's own Re:CoM steps and voices copied to the variant;
+  Re:CoM's whoosh kept for a KH1 id with no bank. The Kingdom Key's SCDs are the PC assets of **`xw_ex_5010.se`**
+  (Checked (files): the owner's install, 40 SCDs `se011018`..`se011022` and `se011024`..); the step reads every SCD of
+  the Keyblade's `.se` and no longer reads the world packs (they hold none: the owner's 0.108.0 run).
+- **Finisher effects** (`PL0001.EET`, `PL0002.EET`, list A, `kh1_ex_0010.dpx`, frame 0 = KH1's row start,
+  `0x1402A68F0`): Stun Impact 1; Gravity Break 3, and 2 on the blade (code 0x30 at fraction 0.8: t = −2.96 on Re:CoM's
+  `wep0` → `k9`, from `PL0002.MDL`; motion-locked); Zantetsuken 4; Ripple Drive 6 (KH1 bone 8 = Re:CoM `belt1`) and 7.
+  `0x18001` = Sora's position and facing, once: detached from Root's matrix (EET flags 0x29); 0x800 = EET's linger bit.
+  Their sounds come from `kh1_ex_0010.ese` (stage 2).
+- **Not built, native gap** (stop-and-ask): Stun Impact's **0** and Zantetsuken's **5** go to `0x8003` = **the target's
+  contact point** (`0x14029EB20` → `0x1402B5E50`; Sora's `+0x50` without a target). No EET event places an effect at
+  another actor. Options in the questions below.
+- **Toggles**: ini `effects` / `sounds` (kh1 | recom, default kh1), read at each motion start; at Re:CoM nothing changes
+  (variant 0). Not yet on a camp page: the Combat page holds Re:CoM's 5 rows already (`menu::MAX_ROWS`): owner question.
+- **Voices: not in this stage.** No KH1 voice file is in the session, and KH1's groups (up to 5 clips, an equal-chance
+  pool, the name call 0xFD, priorities) don't fit one SES random event of 4 weighted numbers without a design choice.
+- Halloween Town: the step adds the same events to `PL0011.EET` / `PL0012.EET` / `PL0011.SES` when Recom.hed has them.
+- Assumptions: Re:CoM's particle runtime applies a program's start delay `+0x108` as KH1's (the effects start at frame 0;
+  KH1's ids 1, 3, 4, 5, 7 have 34 / 36 / 10 / 28 / 34) and starts the `.ese` sound at the spawn, not after the delay;
+  Re:CoM's `0x140474EB0` is KH1's stop byte (the particles finish); KH1's frame and Re:CoM's motion time agree within a
+  frame; a detached event outlives the motion's end.
+
 ## Open (ask at their stage)
 
 - No hit-stop at KH1 (none found in KH1: `recom-m13-kh1-fx.md` § 2; this corrects the clash "hit-stop" in

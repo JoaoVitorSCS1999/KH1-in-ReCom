@@ -14,9 +14,9 @@
 //!   trigger op 0x19 = the weapon row's `+0x34` + arg (`0x140295420`), and the row's hit sounds
 //!   the same base + row `+0xC..+0xE`. The Kingdom Key's base is `0x2B10` (btltbl, item 0x51);
 //!   each Keyblade owns 40 ids. Checked (decomp + files). They are in no `.mdls`, `.wpn` or `.mag`
-//!   (Checked (files)); the world packs `amusic/se<ww>.dat` (KH1 loads its world's at room set-up,
-//!   `0x140178E80`) carry 30–120 MB of PC assets each (Checked (files: the hed sizes)), so the step
-//!   looks for them there. That they are there is an **Assumption** until the owner's run says so.
+//!   (Checked (files)), nor in the world packs `amusic/se<ww>.dat` (the owner's run of 0.108.0, 2026-11-04:
+//!   0 of 40). They are the PC assets of the Keyblade's own `<model>.se` ([`weapon_file`]; Checked
+//!   (files: the owner's install)), which the step reads after Sora's file.
 //!
 //! Re:CoM (Steam; Checked (decomp)): a sound id is `group × 1000 + n`; the bank is the id → bank
 //! map's (`0x1402A8560`, which the DLL extends with groups 9000..9999, each its own bank) and the
@@ -45,6 +45,7 @@ pub const BANK_END: u32 = 10_000;
 pub const ALIGN: usize = 16;
 /// Sora's KH1 model file (his own sounds are its SCD assets).
 pub const SORA_MDLS: &str = "xa_ex_0010.mdls";
+/// (Not searched since stage 3: they hold none of Sora's or the Kingdom Key's sounds, the owner's run.)
 /// KH1's world codes for `amusic/se<ww>.dat` (`0x1404DCCA0`, Checked (decomp): the table the
 /// world pack loader `0x140178E80` reads, with its two `xx` slots left out), then the world map's
 /// pack and `sezz` (both in the player's hed: Checked (files)).
@@ -72,6 +73,17 @@ pub const WORLD_PACKS: [&str; 17] = [
 pub const WEAPON_IDS: u32 = 40;
 /// The Kingdom Key's item id (its weapon row's `+0x34` is the base the step takes).
 pub const KINGDOM_KEY_ITEM: u16 = 0x51;
+
+/// The Keyblade's own sound file: its model name (btltbl weapon row `+0`) with `.se` (KH1's file list
+/// has one per Keyblade, `xw_ex_5010.se` …; the player's hed stores `xw_ex_5010.se` as 32 768 bytes of
+/// data with 939 520 bytes in all, so about 0.9 MB of PC assets: Checked (files)). That its PC assets
+/// are the Keyblade's one-sound SCDs is Checked (files, the owner's install, 2026-11-04):
+/// `xw_ex_5010.se` holds 40 SCDs, `se011018`..`se011022` (also in `xw_ex_5020.se`: shared) and
+/// `se011024` onward (the Kingdom Key's own block; `xw_ex_5020.se` has 11424.., its base 0x2CA0).
+/// The step takes every SCD of the file.
+pub fn weapon_file(model: &str) -> String {
+    format!("{model}.se")
+}
 
 /// KH1's id for a PC asset that is one sound's SCD (`se0<id>.win32.scd`, numbered ≥ 1000 by
 /// KH1's own rule), or None (textures, meshes, the system bank `se000`).

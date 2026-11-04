@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 221: M13 stage 3: KH1's Keyblade trail, swing sounds and finisher effects for Sora's combos as Re:CoM's own EET / SES events at a KH1 variant; KH1's trail end; the Kingdom Key's sounds from `xw_ex_5010.se`, version 0.109.0 (2026-11-04)
+
+Owner, 2026-11-04: "also, lets add all of soras effects for real this time. He doesn't have his keyblade trail, gravity break doesnt have it effects/sound, neither does ripple drive or stun impact,". Stage 3 of `docs/recom-m13-plan.md`.
+
+- **Native route** (Checked (decomp)): Re:CoM's motion start keeps the EET / SES events whose variant the request passes (`0x14017A240` walks every record of the motion; `0x140239260`); the Keyblade plays Sora's index with the same variants (`0x1401F7180`). The asset step (`kh1_recom_assets::kh1_fx`, new `eet` reader / writer: Re:CoM's `PL0001.EET` / `PL0002.EET` rebuilt byte for byte) writes KH1's events at **variant 1301**; the DLL passes it in `Kh1Sora::play`'s existing motion request (`win::fx::variants`) for the moves in `kh1-fx.json`, by ini `effects` / `sounds` (kh1 | recom, default kh1). Combat = Re:CoM or the toggle at Re:CoM: variant 0, nothing changes.
+- **Trails** (`PL0002.EET` list B, 16 moves): Re:CoM's own `ex_5010.dpx` 5 (= KH1's Kingdom Key set) on Re:CoM's `w001_055` nodes, at KH1's type-7 windows (first whole frame ≥ 1 on → first off; `0x1402C1F20`): 200 4–24 … 215 26–36, 217 28–38, 218 30–50 (Checked (files)).
+- **KH1's trail end** (`win::fx`; sites `FX_HOOKS` / `FX_CALLS` / `FX_CHECKED` / `FX_PTRS`, 1263 sites 0 mismatches): KH1 stops the emission at the window's end and kills the trail at a motion change; Re:CoM's list B can only fade / kill and leaves ended ones lingering. KH1 events carry fade −1301: the end call `0x14017ABEF` → `trail_end` (stop emitting `0x140255040` for that fade, else Re:CoM's `0x140254D60`); the EET motion stop `0x14017A430` wrapped (10 bytes, exe scan: no branch in): after Re:CoM's, the KH1 trails in the linger list are killed. Not per frame.
+- **Sounds** (`PL0001.SES` / `PL0011.SES` at 1301): KH1's op 0x19 / op 0 keys at their frames through stage 2's map; Re:CoM's steps and voices copied; Re:CoM's whoosh kept for a KH1 id with no bank. The Kingdom Key's SCDs: every SCD of the Keyblade's **`xw_ex_5010.se`** (Checked (files: the owner's install): 40, `se011018`..`22` shared, `se011024`..); the world packs are no longer read (none there, the owner's 0.108.0 run). Banks made sure of at a KH1 sound play after each battle start.
+- **Finisher effects** (`kh1_ex_0010.dpx` at frame 0, `0x1402A68F0`'s table): Stun Impact 1, Gravity Break 3 + 2 (on the blade at KH1's fraction 0.8, Keyblade clip), Zantetsuken 4, Ripple Drive 6 (KH1 bone 8 = `belt1`) + 7; `0x18001` = detached at Root (flags 0x29). **Not built**: Stun Impact 0 and Zantetsuken 5, placed at the **target's contact point** (`0x8003`): no EET event places at another actor (owner question).
+- Halloween Town: `PL0011.EET` / `PL0012.EET` get the same events when Recom.hed has them. Voices: a later stage (no KH1 voice files in the session; KH1's groups need a design choice).
+- Assumptions: Re:CoM's runtime applies a program's start delay `+0x108` (KH1 34 / 36 / 10 / 28 / 34 ticks); the `.ese` sound starts at the spawn; `0x140474EB0` = KH1's stop byte; ±1 frame.
+- Checked: tests (variants, manifests, windows, SES / EET builders, Re:CoM's EETs byte for byte, the step's output through the DLL parser), the Windows build (no warnings), sites against the exe. Not checked: in game; the SES path on the real `.se` (not in the session). Asset step: re-run (new outputs `PLAYER/0001/PL0001.EET`, `PLAYER/0002/PL0002.EET`, `PLAYER/0011/PL0011.EET`, `PLAYER/0012/PL0012.EET`, `kh1-fx.json`). Docs: `recom-m13-plan.md` § Stage 3 built.
+
+---
+
 ## Stage 220: M13 stage 2: KH1's own sound banks in Re:CoM's (Sora's SCDs, the Kingdom Key's from the world packs) and the KH1 → Re:CoM id map; the KH1 effect set's sounds 81–88 as its `.ese`, version 0.108.0 (2026-11-04)
 
 Owner, 2026-11-04: "also, lets add all of soras effects for real this time. He doesn't have his keyblade trail, gravity break doesnt have it effects/sound, neither does ripple drive or stun impact,". Stage 2 of `docs/recom-m13-plan.md`.

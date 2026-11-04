@@ -105,6 +105,13 @@ pub struct Settings {
     /// Boss revenge at `combat = kh1` (owner, 2026-11-01; `crate::revenge`): KH2's revenge value on
     /// Re:CoM's humanoid bosses. The KH1 entry's Combat page row "Revenge Value".
     pub boss_revenge: bool,
+    /// M13 (owner, 2026-11-03: Effects / Sounds / Voices, each KH1 / Re:CoM): at `combat = kh1`,
+    /// `Kh1` (the default) plays KH1's trail and finisher effects for Sora's KH1 moves (the asset
+    /// step's events, `crate::fx`); `Recom` plays Re:CoM's. Read at each motion start.
+    pub effects: Mode,
+    /// M13: at `combat = kh1`, `Kh1` (the default) plays KH1's swing and finisher sounds for Sora's
+    /// KH1 moves; `Recom` Re:CoM's. Read at each motion start.
+    pub sounds: Mode,
     /// The camp menu's "KH1" entry (and the Config input wrapper it runs through). `off` leaves
     /// Re:CoM's camp menu untouched (a safety switch; the settings then come from this file only).
     /// The key keeps its old name (it once added rows to Re:CoM's Config menu).
@@ -272,7 +279,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, config_menu: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, config_menu: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
     }
 }
 
@@ -318,6 +325,16 @@ damage = recom
 ;        then 50, the rest 100) and, past it, break out of their flinch with an attack of their own.
 ;   off: bosses keep Re:CoM's rules.
 boss_revenge = on
+;
+; effects = kh1 | recom (only at combat = kh1; read at each of Sora's motions)
+;   kh1:   KH1's Keyblade trail (KH1's frames) and finisher effects on Sora's KH1 moves.
+;   recom: Re:CoM's.
+effects = kh1
+;
+; sounds = kh1 | recom (only at combat = kh1; read at each of Sora's motions)
+;   kh1:   KH1's swing and finisher sounds on Sora's KH1 moves (Re:CoM's steps and voices stay).
+;   recom: Re:CoM's.
+sounds = kh1
 ;
 ; config_menu = on | off
 ;   off: no KH1 entry in the camp menu: Re:CoM's camp menu untouched (use this file instead).
@@ -454,6 +471,14 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(b) => s.boss_revenge = b,
                 None => warnings.push(bad("boss_revenge must be on or off")),
             },
+            "effects" => match Mode::parse(v) {
+                Some(m) => s.effects = m,
+                None => warnings.push(bad("effects must be kh1 or recom")),
+            },
+            "sounds" => match Mode::parse(v) {
+                Some(m) => s.sounds = m,
+                None => warnings.push(bad("sounds must be kh1 or recom")),
+            },
             "config_menu" => match parse_switch(v) {
                 Some(b) => s.config_menu = b,
                 None => warnings.push(bad("config_menu must be on or off")),
@@ -587,6 +612,8 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "enemy_ai", s.enemy_ai.as_str());
     let t = set_key(&t, "damage", s.damage.as_str());
     let t = set_key(&t, "boss_revenge", switch_str(s.boss_revenge));
+    let t = set_key(&t, "effects", s.effects.as_str());
+    let t = set_key(&t, "sounds", s.sounds.as_str());
     let mut t = set_key(&t, "config_menu", switch_str(s.config_menu));
     let a = s.abilities;
     for (k, v) in [("high_jump", a.high_jump), ("glide", a.glide), ("superglide", a.superglide), ("guard", a.guard), ("counterattack", a.counterattack)] {
@@ -719,7 +746,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
