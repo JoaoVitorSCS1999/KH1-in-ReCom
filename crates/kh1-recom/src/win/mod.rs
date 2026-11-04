@@ -646,6 +646,9 @@ fn install_field_sleights(base: usize) {
     // bytes are checked again inside, before anything is written.
     if unsafe { field_sleights::install(base) } {
         log(&field_sleights::start_line());
+        // The camp shut and no contact battle while a (dimming) field sleight runs.
+        // SAFETY: call patches with checked old bytes and checked context.
+        unsafe { field_sleights::install_field_rules(base) };
     }
 }
 

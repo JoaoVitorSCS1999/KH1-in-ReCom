@@ -354,6 +354,40 @@ field, and without its hook the pack sleights simply stay greyed.
   a battle. Not carried to field Heartless: KH1's squash under the falling sphere (it reads battle
   enemy state fields; the field ones are gone at the battle start anyway). Not checked: in game.
 
+### While a sleight runs in the field (0.120.0)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Party and field follow-ups): "While a sleight
+runs in the field: the camp is blocked, and a room-dimming sleight's i-frames apply in the field too".
+
+- **Busy** (`sleights::busy`): Sora's action is Re:CoM's sleight action 0x16 (field sleights, the
+  LV3 summons: they run on it) or a KH1 special (its own action, `win::specials::kh1_special`).
+- **The camp** (`sleights::camp_blocked`, `win::field_sleights::camp_menu_gate`): Re:CoM's camp gate
+  step `0x1401A96C0` opens the camp (Start, field state 9; or its state 5 path) only after its
+  field menu gate `0x1401AAA90` says yes, and that call `0x1401A9759` is its only caller (Checked
+  (decomp + disasm)). The call goes to ours: shut (0) while busy in a field room at Combat = KH1 in
+  Sora's story, else Re:CoM's gate. Our field notices' gate (`win::notices`) follows the same rule.
+- **Untouchable in the field** (`sleights::field_contact_shield`, `win::field_sleights::field_contact`):
+  field Heartless never damage Sora in the field; their only touch is the **contact encounter**:
+  `0x14019E020` (each field Heartless's update), outside pause mode 4, runs the bodies' touch test
+  with Sora (`0x140154970(bodies, 1, 0, 0)`), then `0x14019BED0` (the encounter type from its flags,
+  then `0x14019C210`: the battle request) and turns its bodies off only if that answered. Sora's
+  protection bits don't stop it (§ 4). **Decided** (the battle's rule carried over natively):
+  "untouchable" = **no contact battle** while the battle's dim rule holds (`+0x418` bit 31 set and
+  busy; `dim_shield` without the battle-room term): that call `0x14019E262` goes to ours, which
+  answers 0 (no battle; the enemy keeps its bodies and roams on) under the rule, else Re:CoM's
+  encounter. The struck state's own call of `0x14019BED0` (`0x14019E8F0`: a sleight's field strike,
+  the battle with first strike, option (a)) is not changed. When the dim ends, a Heartless still
+  touching Sora starts Re:CoM's plain battle at once.
+- Sites: `FIELD_RULE_CALLS` (the two calls, each through a stub near it), `FIELD_RULE_CHECKED` (their
+  context and `0x14019BED0`); `check_sites_rs.py`: 1310 sites, 0 mismatches. Per frame: the camp
+  gate's call (once per field frame, after Re:CoM's cheaper tests) and each touching Heartless's
+  contact: a few loads each; nothing else.
+- Combat = Re:CoM, Riku's story, battle rooms: Re:CoM's calls (the rules need KH1, Sora's story, a
+  field room).
+- Assumptions: Re:CoM's camp gate step is the only way the camp opens in the field (the map camp
+  opens from the same step's state 5 path, also shut); a KH1 special's dim is Re:CoM's bit 31 as in
+  battle. Not checked: in game.
+
 ### The battle start cutting a sleight
 
 - **The room dim is cleared by Re:CoM itself.** The encounter sends the field Sora to its Wait state
@@ -420,11 +454,11 @@ Bell's own targets): **Assumption** that they run in a field room as in battle. 
   queued file load and the ring then follow Re:CoM's teardown. Re:CoM's battles end the same way with
   a stock's preload in flight. **Assumption**: the scene change waits for the loader (the field
   states poll its idle test `0x14023CA80`).
-- **The camp opened mid-sleight**: Re:CoM's camp gate (`0x1401A96C0` → `0x1401AAA90`) reads no player
-  action (Checked (decomp)), so Start opens the camp during a field sleight, as during a field swing
-  or a KH1 cast. Not tried.
+- ~~**The camp opened mid-sleight**~~: fixed 0.120.0 (§ While a sleight runs in the field).
 - **Dashing sleights and specials touching first**: a field Heartless's contact starts a plain battle
-  (type 0, no first-strike bonus) whenever pause mode 4 is off (§ 4).
+  (type 0, no first-strike bonus) whenever pause mode 4 is off (§ 4). Since 0.120.0 not while the
+  sleight dims the room (§ While a sleight runs in the field); an undimmed one (no flag 0x20 row)
+  still can.
 - The sleight use counter (`0x14020E590`) counts field uses; Re:CoM's field-strike counter (trophy
   0x28) counts sleight strikes.
 - A Combat switch in the camp applies to the packs at the next room build (the PLM is built with the

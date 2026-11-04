@@ -220,7 +220,8 @@ unsafe fn field_gate() -> bool {
     if flag(1, 0x33) != 0 && flag(1, 0x34) != 0 {
         return false;
     }
-    func::<GateFn>(MENU_GATE)(g) & 0xFF != 0 && rd::<i32>(g + 0x580) == 9
+    // Not while a field sleight / special / summon runs (the camp gate's rule, `super::field_sleights`).
+    !super::field_sleights::camp_shut() && func::<GateFn>(MENU_GATE)(g) & 0xFF != 0 && rd::<i32>(g + 0x580) == 9
 }
 
 /// Each KH1 frame of Sora (the request-bits wrapper): one atomic load, unless a notice waits; then

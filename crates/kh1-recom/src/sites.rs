@@ -1635,6 +1635,37 @@ pub const PARTY_CHECKED: &[Site] = &[
 /// resource load, the weapon's attack end).
 pub const SUMMON_ALSO: [u32; 3] = [0x0022_0DF0, 0x0021_1790, 0x0022_4FB0];
 
+/// While a sleight, special or summon runs in the field (owner, 2026-11-04; `crate::sleights::camp_blocked`
+/// / `field_contact_shield`, `win::field_sleights::camp_menu_gate` / `field_contact`): two calls
+/// retargeted (each to a stub jumping to ours, which calls Re:CoM's callee unless the rule holds).
+pub const FIELD_RULE_CALLS: &[Site] = &[
+    // The camp gate step `0x1401A96C0`: call 0x1401AAA90 (the field's menu gate), its only caller.
+    Site { name: "camp gate's menu-gate call (0x1401A9759)", rva: 0x001A_9759, expect: &[0xE8, 0x32, 0x13, 0x00, 0x00] },
+    // The field Heartless update `0x14019E020`: call 0x14019BED0 (the contact encounter). Its other
+    // caller, the struck state's exe `0x14019E8F0` (the field strike's battle), is not changed.
+    Site { name: "field contact's encounter call (0x14019E262)", rva: 0x0019_E262, expect: &[0xE8, 0x69, 0xDC, 0xFF, 0xFF] },
+];
+
+/// The calls' context and the contact encounter (not patched).
+pub const FIELD_RULE_CHECKED: &[Site] = &[
+    // mov rcx,[0x14087B0B0] (the game state) before the call.
+    Site { name: "camp gate: the game state for the menu gate (0x1401A9752)", rva: 0x001A_9752, expect: &[0x48, 0x8B, 0x0D, 0x57, 0x19, 0x6D, 0x00] },
+    // test eax,eax; je 0x1401A985E (no camp) after it.
+    Site { name: "camp gate: no camp when the menu gate says 0 (0x1401A975E)", rva: 0x001A_975E, expect: &[0x85, 0xC0, 0x0F, 0x84, 0xF8, 0x00, 0x00, 0x00] },
+    // xor edi,edi; xor r9d,r9d; mov [rsp+0x20],rdi; xor r8d,r8d; lea edx,[rdi+1]; call 0x140154970
+    // (the bodies' touch test with Sora); test eax,eax; je; mov rcx,rbx (the enemy).
+    Site {
+        name: "field contact: Sora's touch test (0x14019E246)",
+        rva: 0x0019_E246,
+        expect: &[0x33, 0xFF, 0x45, 0x33, 0xC9, 0x48, 0x89, 0x7C, 0x24, 0x20, 0x45, 0x33, 0xC0, 0x8D, 0x57, 0x01, 0xE8, 0x15, 0x67, 0xFB, 0xFF, 0x85, 0xC0, 0x74, 0x2A, 0x48, 0x8B, 0xCB],
+    },
+    // test eax,eax; je (no encounter: the bodies stay on) after it; mov rcx,[rbx+0xF8] (then its bodies off).
+    Site { name: "field contact: bodies off only after an encounter (0x14019E267)", rva: 0x0019_E267, expect: &[0x85, 0xC0, 0x74, 0x1E, 0x48, 0x8B, 0x8B, 0xF8, 0x00, 0x00, 0x00] },
+    // mov edx,[rcx+0x25C]; mov eax,edx; and eax,0x40; test dl,0x10; je: the encounter type from the
+    // enemy's flags, then `0x14019C210` (the battle request). Called.
+    Site { name: "contact encounter (0x14019BED0)", rva: 0x0019_BED0, expect: &[0x8B, 0x91, 0x5C, 0x02, 0x00, 0x00, 0x8B, 0xC2, 0x83, 0xE0, 0x40, 0xF6, 0xC2, 0x10, 0x74, 0x12] },
+];
+
 /// Lucky Bounty at Combat = KH1 brings a KH1 item (owner, 2026-11-04; `crate::party::lucky_bounty`,
 /// `win::party::pluto_find`): Pluto's find (`CFriendPluto`, called only from `0x1401E338E` and
 /// `0x1401E36A9`; no other reference, no branch into the 9 moved bytes: exe scan).
@@ -3926,6 +3957,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         FLATTEN_CHECKED,
         PLUTO_HOOKS,
         PLUTO_CHECKED,
+        FIELD_RULE_CALLS,
+        FIELD_RULE_CHECKED,
         FIELD_SLEIGHT_HOOKS,
         FIELD_SLEIGHT_DATA,
         FIELD_SLEIGHT_CHECKED,
@@ -4886,6 +4919,24 @@ mod tests {
         assert_eq!(&init.expect[init.expect.len() - 3..], &[0xBA, crate::specials::RECOM_ACTION as u8, 0x00]);
         let case = SPECIAL_CHECKED.iter().find(|s| s.name.starts_with("Battle exe case 0x16")).unwrap();
         assert_eq!(u32::from_le_bytes(case.expect[8..12].try_into().unwrap()), 0x140);
+    }
+
+    /// The field rules' two call sites reach the Re:CoM callees our stubs call.
+    #[test]
+    fn field_rule_sites() {
+        for s in FIELD_RULE_CALLS.iter().chain(FIELD_RULE_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        let to = |s: &Site| (s.rva as i64 + 5 + i32::from_le_bytes(s.expect[1..5].try_into().unwrap()) as i64) as u32;
+        assert_eq!(to(&FIELD_RULE_CALLS[0]), 0x001A_AA90, "the menu gate");
+        assert_eq!(to(&FIELD_RULE_CALLS[1]), 0x0019_BED0, "the contact encounter");
+        assert!(all_sites().any(|c| c.rva == 0x001A_AA90), "the menu gate is checked");
+        // Each call sits between its checked context.
+        assert_eq!(FIELD_RULE_CHECKED[0].rva + 7, FIELD_RULE_CALLS[0].rva);
+        assert_eq!(FIELD_RULE_CALLS[0].rva + 5, FIELD_RULE_CHECKED[1].rva);
+        assert_eq!(FIELD_RULE_CHECKED[2].rva + FIELD_RULE_CHECKED[2].expect.len() as u32, FIELD_RULE_CALLS[1].rva);
+        assert_eq!(FIELD_RULE_CALLS[1].rva + 5, FIELD_RULE_CHECKED[3].rva);
+        assert_eq!(FIELD_RULE_CHECKED[4].rva, to(&FIELD_RULE_CALLS[1]));
     }
 
     /// Lucky Bounty at KH1: Pluto's find, its outcome switch and the calls it makes.

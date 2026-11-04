@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 232: While a sleight, special or summon runs in the field: the camp stays shut; no contact battle while it dims the room, version 0.120.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Party and field follow-ups): "While a sleight runs in the field: the camp is blocked, and a room-dimming sleight's i-frames apply in the field too".
+
+- **Re:CoM** (Checked (decomp + disasm)): the camp gate step `0x1401A96C0` opens the camp only after the field menu gate `0x1401AAA90` (its only caller, the call `0x1401A9759`); a field Heartless's update `0x14019E020` runs, outside pause mode 4, its touch test with Sora and then the contact encounter `0x14019BED0` (the call `0x14019E262`; its other caller is the struck state `0x14019E8F0`, the field strike's battle). Field Heartless never damage Sora in the field.
+- **Change** (`sleights::busy` / `camp_blocked` / `field_contact_shield`, `win::field_sleights::camp_menu_gate` / `field_contact` / `install_field_rules`; `sites::FIELD_RULE_CALLS` (2 calls, stubs) / `FIELD_RULE_CHECKED`): at Combat = KH1 in Sora's story in a field room, while Sora's action is 0x16 (sleights, summons) or a KH1 special runs, the camp gate's menu gate answers 0 (our field notices wait too); while that sleight also has the room dimmed (`+0x418` bit 31: the battle's i-frame rule), a field Heartless's contact starts no battle (**decided**: "untouchable" in the field = no contact battle-start; the enemy keeps roaming, its bodies on). A sleight's own field strike still starts its first-strike battle. Combat = Re:CoM, Riku's story, battles: Re:CoM's.
+- Per frame: the camp gate's call (after Re:CoM's cheaper tests) and touching Heartless's contacts, a few loads each.
+- Assumptions: the camp opens in the field only through that gate; a KH1 special's dim is Re:CoM's bit 31 as in battle.
+- Checked: tests (`sleights::tests::field_rules_while_a_sleight_runs`, `sites::tests::field_rule_sites`), `check_sites_rs.py` (1310 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-field-sleights.md` § While a sleight runs in the field.
+
+---
+
 ## Stage 231: KH1 Gravity in the field strikes field Heartless (Re:CoM's plain field strike: the battle with first strike), version 0.119.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Party and field follow-ups): "KH1 Gravity in the field: strikes field Heartless (Re:CoM's field strike: the battle starts with first strike)".

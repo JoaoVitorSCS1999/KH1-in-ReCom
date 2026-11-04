@@ -221,9 +221,47 @@ pub fn dim_shield(flags_418: u32, action: u32, kh1_special: bool, in_battle: boo
     in_battle && flags_418 & DIM_BIT != 0 && (action == STOCK_ACTION || kh1_special)
 }
 
+/// Owner, 2026-11-04 (§ Party and field follow-ups, "While a sleight runs in the field"): Sora's
+/// sleight, KH1 special or summon is running (Re:CoM's sleight action 0x16, which the summons and
+/// field sleights also run on, or a KH1 special on its own action), in any room.
+pub fn busy(action: u32, kh1_special: bool) -> bool {
+    action == STOCK_ACTION || kh1_special
+}
+
+/// The camp doesn't open while [`busy`] in a field room (Combat = KH1, Sora's story: the caller
+/// checks those; Re:CoM's field never runs action 0x16 itself).
+pub fn camp_blocked(kh1: bool, field: bool, action: u32, kh1_special: bool) -> bool {
+    kh1 && field && busy(action, kh1_special)
+}
+
+/// The field's form of [`dim_shield`]: "untouchable" against a field Heartless's **contact** means
+/// no contact battle while the dimming sleight runs (field Heartless never damage Sora in the field:
+/// their contact only starts the battle, `0x14019E020` → `0x14019BED0`). A field strike of Sora's
+/// own sleight still starts its first-strike battle (the struck state's call `0x14019E8F0`, not this).
+pub fn field_contact_shield(kh1: bool, field: bool, flags_418: u32, action: u32, kh1_special: bool) -> bool {
+    kh1 && field && flags_418 & DIM_BIT != 0 && busy(action, kh1_special)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn field_rules_while_a_sleight_runs() {
+        // The camp: blocked by a field sleight / summon (0x16) or a KH1 special, at KH1, in the field.
+        assert!(camp_blocked(true, true, STOCK_ACTION, false));
+        assert!(camp_blocked(true, true, 0x2E, true));
+        assert!(!camp_blocked(true, true, 0xA, false), "a swing");
+        assert!(!camp_blocked(false, true, STOCK_ACTION, false), "Combat = Re:CoM");
+        assert!(!camp_blocked(true, false, STOCK_ACTION, false), "the battle room has no camp");
+        // Contact: only while the running sleight dims the room.
+        assert!(field_contact_shield(true, true, DIM_BIT, STOCK_ACTION, false));
+        assert!(field_contact_shield(true, true, DIM_BIT | 0x1101, 0x2E, true));
+        assert!(!field_contact_shield(true, true, 0, STOCK_ACTION, false), "no dim");
+        assert!(!field_contact_shield(true, true, DIM_BIT, 0xA, false), "dim left over, no sleight");
+        assert!(!field_contact_shield(false, true, DIM_BIT, STOCK_ACTION, false));
+        assert!(!field_contact_shield(true, false, DIM_BIT, STOCK_ACTION, false), "battle: dim_shield's");
+    }
 
     #[test]
     fn untouchable_while_the_sleight_dims_the_room() {

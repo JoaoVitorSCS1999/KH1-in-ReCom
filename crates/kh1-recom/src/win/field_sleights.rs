@@ -87,6 +87,90 @@ pub fn installed() -> bool {
     INSTALLED.load(Ordering::Acquire)
 }
 
+/// The field's menu gate `0x1401AAA90` and the field Heartless's contact encounter `0x14019BED0`,
+/// the two callees whose calls [`install_field_rules`] retargets (`sites::FIELD_RULE_CALLS`).
+const MENU_GATE: u32 = 0x001A_AA90;
+const CONTACT_ENCOUNTER: u32 = 0x0019_BED0;
+static RULE_LINES: AtomicU32 = AtomicU32::new(40);
+type GateFn = unsafe extern "win64" fn(usize) -> u64;
+
+fn rule_note(line: impl FnOnce() -> String) {
+    if RULE_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("field sleights: {}", line()));
+    }
+}
+
+/// The main player if it is Sora's (`sites::data::MAIN_PLAYER`), else 0.
+unsafe fn main_sora() -> usize {
+    let pl: usize = rd(va(base(), crate::sites::data::MAIN_PLAYER));
+    if pl != 0 && mv::is_main_sora(pl) {
+        pl
+    } else {
+        0
+    }
+}
+
+/// (Combat = KH1 in Sora's story, a field room, `+0x418`, the action, a KH1 special) for the rules.
+unsafe fn rule_inputs(pl: usize) -> (bool, bool, u32, u32, bool) {
+    (mv::kh1_on() && mv::kh1_sora(pl), rd::<i32>(pl + p::BATTLE) == 0, rd(pl + 0x418), rd(pl + p::ACTION), super::specials::kh1_special(pl))
+}
+
+/// The camp gate's call of the field's menu gate: shut while Sora's sleight, KH1 special or summon
+/// runs in the field (`crate::sleights::camp_blocked`), else Re:CoM's. Once per field frame (the
+/// gate's own rate), after Re:CoM's cheaper tests.
+pub unsafe extern "win64" fn camp_menu_gate(game: usize) -> u64 {
+    if camp_shut() {
+        rule_note(|| "the camp stays shut: Sora's sleight / special / summon runs in the field".into());
+        return 0;
+    }
+    func::<GateFn>(MENU_GATE)(game)
+}
+
+/// [`camp_menu_gate`]'s rule (also our field notices' gate: they open where the camp would).
+pub unsafe fn camp_shut() -> bool {
+    let pl = main_sora();
+    if pl == 0 {
+        return false;
+    }
+    let (kh1, field, _, action, special) = rule_inputs(pl);
+    crate::sleights::camp_blocked(kh1, field, action, special)
+}
+
+/// A field Heartless's contact with Sora: no battle while his dimming sleight runs
+/// (`crate::sleights::field_contact_shield`: the battle's i-frames, in the field), else Re:CoM's
+/// encounter. Only the contact's call; a field strike's battle (the struck state's) is Re:CoM's.
+pub unsafe extern "win64" fn field_contact(enemy: usize) -> u64 {
+    let pl = main_sora();
+    if pl != 0 {
+        let (kh1, field, flags, action, special) = rule_inputs(pl);
+        if crate::sleights::field_contact_shield(kh1, field, flags, action, special) {
+            rule_note(|| format!("field Heartless {enemy:#x} touched Sora while his sleight dims the room: no battle (untouchable)"));
+            return 0;
+        }
+    }
+    func::<GateFn>(CONTACT_ENCOUNTER)(enemy)
+}
+
+/// Retargets the two calls (each through a stub near it), their context checked first. Each on its
+/// own: a failure only loses that rule (logged).
+pub unsafe fn install_field_rules(b: usize) {
+    for c in crate::sites::FIELD_RULE_CHECKED {
+        if std::slice::from_raw_parts((b + c.rva as usize) as *const u8, c.expect.len()) != c.expect {
+            log(&format!("field sleights: {} is not as expected; the camp and contact rules are off", c.name));
+            return;
+        }
+    }
+    let ours: [(usize, &str); 2] = [(camp_menu_gate as *const () as usize, "the camp shut while a field sleight runs"), (field_contact as *const () as usize, "no contact battle while a field sleight dims the room")];
+    for (s, (f, what)) in crate::sites::FIELD_RULE_CALLS.iter().zip(ours) {
+        let at = b + s.rva as usize;
+        let call = super::hook::place_near(at, &crate::hookplan::abs_jmp(f as u64)).and_then(|stub| crate::hookplan::call_rel32(at as u64, stub as u64));
+        match call {
+            Some(c) if super::hook::patch(at, s.expect, &c, s.name) => log(&format!("field sleights: {what} ({})", s.name)),
+            _ => log(&format!("field sleights: {} not retargeted; {what}: off", s.name)),
+        }
+    }
+}
+
 pub fn start_line() -> String {
     format!(
         "field sleights: at combat = kh1 in Sora's story Re:CoM's sleights run in field rooms (owner, 2026-11-04, option (a)): Field exe case 0x16 {:#x} -> stub {:#x} (exeStockSkill, then {:#x}); BattleCardList / StockSkillList by Re:CoM's lookup 0x1402A43E0 at each field start; sleight packs in field rooms {} (PLM init 0x140210100: the battle branch's +0x88 |= 1 and ring fields where the field allocated the ring: not world 10, not rooms 2000-2999); free in the field (no MP); a hit on a field Heartless is Re:CoM's (its kind: strike and battle, paralyse, freeze, stun)",
