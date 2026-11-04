@@ -2001,6 +2001,10 @@ pub mod menu {
         pub first: usize,
         /// (language, [(message id, group)]).
         pub words: Vec<(String, Vec<(u16, usize)>)>,
+        /// Each word's width (tenths of a unit: the pen's place after its last glyph, as the word's
+        /// pieces are laid out from x 0), by language as [`Built::words`]: the DLL squeezes a word
+        /// wider than its box (owner, 2026-11-04: "Squeeze to fit").
+        pub widths: Vec<(String, Vec<(u16, u32)>)>,
         /// Glyphs found / characters missing from the font.
         pub glyphs: usize,
         /// Characters without a glyph.
@@ -2352,8 +2356,10 @@ pub mod menu {
         let mut glyph_item: std::collections::BTreeMap<u32, usize> = Default::default();
         let mut missing = Vec::new();
         let mut words = Vec::new();
+        let mut widths = Vec::new();
         for (lang, ws) in &ms.words {
             let mut list = Vec::new();
+            let mut wlist = Vec::new();
             for (id, text) in ws {
                 let mut pieces = Vec::new();
                 let mut x = 0.0f32;
@@ -2376,9 +2382,11 @@ pub mod menu {
                     x += w as f32 * FONT_UNITS;
                 }
                 list.push((*id, groups.len()));
+                wlist.push((*id, (x * 10.0).round() as u32));
                 groups.push(held1(pieces));
             }
             words.push((lang.clone(), list));
+            widths.push((lang.clone(), wlist));
         }
         let items_list = item.map(|u| {
             let at = groups.len();
@@ -2392,7 +2400,7 @@ pub mod menu {
             sub_list(&u.objs, groups);
             at
         });
-        Ok(Built { first, words, glyphs: glyph_item.len(), missing, tab_icon, items_list, summon_list, summon_note })
+        Ok(Built { first, words, widths, glyphs: glyph_item.len(), missing, tab_icon, items_list, summon_list, summon_note })
     }
 }
 
@@ -2875,7 +2883,10 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)], re
         let words = mn.words.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, g)| format!("[{id}, {g}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
         let items = mn.items_list.map(|g| format!("\"items_list\": {g}, ")).unwrap_or_default();
         let summons = mn.summon_list.map(|g| format!("\"summon_list\": {g}, ")).unwrap_or_default();
-        let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"tab_icon\": {}, {items}{summons}\"words\": {{{words}}}}},", mn.first, mn.tab_icon);
+        // Squeeze to fit (owner, 2026-11-04): each word's width in tenths of a unit; a key older
+        // DLLs don't read.
+        let widths = mn.widths.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, x)| format!("[{id}, {x}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
+        let _ = writeln!(s, "  \"menu\": {{\"first\": {}, \"tab_icon\": {}, {items}{summons}\"words\": {{{words}}}, \"word_widths\": {{{widths}}}}},", mn.first, mn.tab_icon);
     }
     let _ = writeln!(s, "  \"languages\": [{}],", langs.iter().map(|l| format!("\"{l}\"")).collect::<Vec<_>>().join(", "));
     let _ = writeln!(s, "  \"atlas\": [{}, {}, {}, {}],", b.atlas.0, b.atlas.1, b.atlas.2, b.atlas.3);
@@ -3126,6 +3137,12 @@ mod tests {
         assert!(b.refit > 0);
         eprintln!("menu: first group {}, {} glyphs, missing {:?}, words {:?}", mn.first, mn.glyphs, mn.missing, mn.words);
         assert!(mn.missing.is_empty());
+        // Squeeze to fit: each word's width (tenths of a unit), the pen after its last glyph.
+        let width = |id: u16| mn.widths[0].1.iter().find(|w| w.0 == id).map(|w| w.1);
+        eprintln!("word widths: {:?}", mn.widths[0].1);
+        assert_eq!(mn.widths.len(), mn.words.len());
+        assert!(width(32).is_some_and(|w| (600..760).contains(&w)), "Hi-Potion {:?}", width(32));
+        assert!(width(1).is_some_and(|w| w < width(38).unwrap()), "Attack narrower than Megalixir");
         assert!(mn.tab_icon, "the PlayStation triangle from Icon.tm2");
         // M8 stage 8a.1: the Items list's six groups after the words, before the shortcut panel.
         let il = mn.items_list.expect("the Items list from UK_uibin_item.bin");

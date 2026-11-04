@@ -229,6 +229,9 @@ our wrappers' trampolines (Re:CoM's originals). All 354 site byte lists re-read 
 
 ### Customize (KH1's shortcut page)
 
+0.107.0: each slot row names what it holds beside its button glyph (as KH1's slot list does),
+and long names in KH1's look squeeze to fit: `docs/recom-m12-sleights.md` § 8.7.
+
 KH1 (Steam, Checked (decomp + exe)):
 
 | what | where |

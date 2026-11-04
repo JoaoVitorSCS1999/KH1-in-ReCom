@@ -722,6 +722,129 @@ Owner test lines (8.6):
 
 Not checked (8.6): anything in game.
 
+### 8.7 Names beside the shortcut buttons, squeeze to fit, the Sleights section (0.107.0)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Customize page and long names, § Sleights
+list and ability section): "when something is bound to a shortcut, they should also be listed by
+the button prompt, as well as the list on the right … we need a solution for certain sleights having
+too long of a name to fit within the black box."; "The same thing for the sleights menu. I think we
+should have also have "sleights" have its own menu in the ability list". Answer: "Squeeze to fit".
+The Customize toggle for Summon / Sleights was asked, then **dropped by the owner** ("disregard the
+toggle for sleights and summons"): not built; D-pad Left switches the 4th row as before. Combat =
+KH1 in Sora's story (where these pages exist); Combat = Re:CoM and Riku's story unchanged.
+
+#### 8.7.1 The Customize rows name what they hold
+
+| what | where | tag |
+|---|---|---|
+| Each of the three slot rows is the button glyph, a space, then the bound spell's (at its level) or sleight's name: the same words as the status panel on the right (the command menu's word, else the English name). With Re:CoM's font without a button sheet: "Square: Fire Raid". One text in the row's own `C2DFnt` (Re:CoM's camp row set-up `CBUTTON_SETUP`, the page's font and colour). | `customize::text::slot_row`, `win::keyblades::Page::row_text` | Checked (code + tests) |
+| An empty slot shows the glyph alone (no name, no dash: Re:CoM's camp rows have no dash look; the right panel keeps "None"). A slot whose sleight is no longer equipped still names it, greyed (8.6). | same | Checked (code + tests) |
+
+#### 8.7.2 Squeeze to fit
+
+**Re:CoM's text has no x-scale** (Checked (decomp + disasm)):
+
+| what | where |
+|---|---|
+| `C2DFnt` (0xB0, ctor `0x140243F10` → `CFntM2` `0x140258BC0`): `+0x28 / +0x2C` x, y (×16), `+0x34` colour, `+0x3C` size (×16), `+0x40` flags, `+0x44` letter spacing (added to every advance), `+0x48` line spacing, `+0x58` text, `+0xA8` the size given (C2DFnt). | `0x140258BC0`, `0x140243F10` |
+| The draw (`C2DFnt` vtable `+0x18` → `0x140289450` → `0x14025AA20`): the size is read once (`0x14025AC3B mov eax, [r15+0x3C]`) and stored as the glyph's width, its height and the line height; each glyph's quad (`0x14025A0A0`, width and height arguments) and its advance (glyph advance × size / the font's base size, `+0x44` added) use it. Flag `0x8000` halves single-byte glyphs (a fixed 50 %). | `0x14025AA20`, `0x14025A0A0` |
+| **Re:CoM's text-width routine**: `0x14025A380(int out[2], fnt, int* lines, int* count)` (also `C2DFnt` vtable `+0x28`, `0x140289440`): width and height in 1/16 units, the same advances as the draw; the draw calls it only to right / centre align (flags & 3). | `0x14025A380` |
+| `C2DFntObj` update `0x140244230`: when the parent sprite's `+0x12A` is set, the size = `+0xA8` × the parent's matrix x: a uniform size, never a width alone. | `0x140244230` |
+
+**Built: KH1's look** (the command menu's lists and the SHORT CUT panel). Their words are not
+text: the asset step lays each one out in KH1's menu font as a group of the `kh1hud` set, from x 0.
+Each word's control gets **Re:CoM's own control X scale** (`0x1402486D0`: `+0x110..` then the
+matrix `0x1402485D0`; the call our controls already make with 1.0, a checked callee) =
+`min(1, box / width)`. The widths come from the asset step (`kh1-hud.json` `menu.word_widths`: the
+pen after the word's last glyph, tenths of a unit; an older manifest has none and nothing is
+squeezed). Assumption: the layer's screen offset is outside the scale (as for the MP bar's
+segments): the word's left edge stays; to see in game.
+
+The boxes (`kh1_hud::fit`, measured on KH1's own art: Checked (files: the owner's `uitex.bin`
+pictures 0, 1, 3; `UK_uibin_sum.bin` / `_mag.bin` / `_cut.bin` rects)), 2-unit margin:
+
+| box | measured | box |
+|---|---|---|
+| a Magic / Summon / Sleights row | the frame's black inside ends at x 106 over the glyphs' rows, the word at 16 | 88 |
+| the cursor row | the hat icon (`*_sel_ico_d`, x 87..103 of the selection) after the word at 18 | 67 |
+| the SHORT CUT panel | each name box black from x 6 to 85 over the glyphs' rows, the word at 16 | 68 |
+
+In the lists only **our sleight names** (`0x8100 + id`) are squeezed: KH1's own words keep KH1's
+look (KH1 draws "Tinker Bell", 73.9, over its hat icon too). Every KH1 spell fits the SHORT CUT box
+("Thundaga" 61.4). Widths (units; KH1's menu font, `US_font_data_tbl.bin`: Checked (files), the
+asset test on the owner's dump agrees: Hi-Potion 67.7, Megalixir 65.3):
+
+| name | width | row (88) | cursor row (67) | SHORT CUT (68) |
+|---|---|---|---|---|
+| Homing Blizzara | 110.4 | × 0.797 | × 0.607 | × 0.616 |
+| Gifted Miracle | 98.8 | × 0.891 | × 0.678 | × 0.688 |
+| Magnet Spiral | 94.1 | × 0.935 | × 0.712 | × 0.723 |
+| Cross-slash+ | 94.1 | × 0.935 | × 0.712 | × 0.723 |
+| Blizzard Raid | 92.6 | × 0.950 | × 0.724 | × 0.734 |
+| Raging Storm | 91.0 | × 0.967 | × 0.736 | × 0.747 |
+| Lethal Frame | 89.4 | × 0.984 | × 0.749 | × 0.761 |
+| Thunder Raid | 87.9 | fits | × 0.762 | × 0.774 |
+| Firaga Burst | 87.1 | fits | × 0.769 | × 0.781 |
+| Shock Impact | 87.1 | fits | × 0.769 | × 0.781 |
+| Reflect Raid | 85.6 | fits | × 0.783 | × 0.794 |
+| Aqua Splash | 80.1 | fits | × 0.836 | × 0.849 |
+| Warpinator | 78.6 | fits | × 0.852 | × 0.865 |
+| Mega Flare | 73.9 | fits | × 0.907 | × 0.920 |
+| Idyll Romp | 73.1 | fits | × 0.917 | × 0.930 |
+| Judgment and shorter (64.6 ..) | | fits | fits | fits |
+
+The KH1 specials in the Sleights list use KH1's own short words ("Strike", "Sonic", "Arcanum",
+"Ragnarok"): never squeezed. A name squeezes on the cursor row and widens again when the cursor
+leaves (each row's own box; the other choice: one width per name, the cursor row's, on every row).
+
+**Not built: the boxes drawn as Re:CoM text** (`C2DFnt`): the command menu's rows in Re:CoM's look
+(`hud = recom`), the camp's Customize rows and the right-hand panel, the Abilities list. Re:CoM's
+text has no x-scale (above). The most native levers, for the owner:
+- (a) **Give Re:CoM's text an x-scale**: patch the draw at `0x14025AC56` (the width store, and the
+  advance test `[rbp−0xC]`) and the width routine `0x14025A380` so the glyph width and advance use
+  size × a per-text scale; the scale needs a home in the text object (`C2DFnt +0xAC` is padding in
+  Re:CoM's 0xB0 allocation but not cleared by its ctor: a marker word is needed). A true squeeze;
+  touches every text Re:CoM draws (a few instructions each draw, every frame).
+- (b) **Re:CoM's own letter spacing** `+0x44` (no patch; the draw and the width routine both read
+  it): set once per text to −(excess ÷ letters). The name ends inside the box, the letters close up,
+  the glyphs keep their width.
+- (c) **Re:CoM's own size** `+0xA8` / `+0x3C`: the whole name smaller (both ways).
+
+Re:CoM's width routine `0x14025A380` would measure these names for (a) or (b) (Re:CoM's font tables
+are not in the session, so their widths aren't listed here).
+
+#### 8.7.3 The "Sleights" section of the ability list
+
+| what | where | tag |
+|---|---|---|
+| A fourth owner row **"Sleights"** after Sora, Shared, Enemy Skills (last, so the rows before it keep their places; one line to move it). Help: "Sleights to use from the command menu. Equipping one uses AP." | `abilities::page::{Owner::Sleights, OWNERS}`, `win::keyblades` | Checked (code + tests) |
+| It lists the 27 sleight abilities (`abilities::SLEIGHTS`) in Re:CoM's order (their sort key, as before); they leave Sora's row. KH1's specials (Sonic Blade, Strike Raid, Ars Arcanum, Ragnarok) stay Sora's. Equip rules, AP, the save bits, learning and notices unchanged; greyed when none is learned. | `page::owner_of`, `page::list` | Checked (code + tests) |
+
+Per frame (8.7): nothing new. The X scale is set once when a word's control is made (at a row
+rebuild); the width is a manifest lookup then. No new hook, call site or patch.
+
+Asset step: **re-run** (`kh1-hud.json` gains `word_widths`; nothing else changes). Without it, the
+DLL squeezes nothing.
+
+Logs: `command menu: squeezed to fit: Sleight list (cursor row): word 0x8124 110.4 units wide, box
+67: x scale 0.607`, once per word and box; `shortcut 2: word …` for the SHORT CUT panel.
+
+Owner test lines (8.7):
+- Customize: bind Curaga to Triangle and Homing Blizzara to Cross: the rows read "△ Curaga",
+  "□" (empty) and "✕ Homing Blizzara"; the right panel as before. Watch whether "Homing Blizzara"
+  fits the row plate (Re:CoM text: not squeezed; see the levers).
+- Re-run the asset step, then in battle with Homing Blizzara, Firaga Burst, Mega Flare and Shock
+  Impact equipped, the bottom row on Sleights: open the list: Homing Blizzara is narrower and ends
+  inside its black box; Firaga Burst, Mega Flare and Shock Impact unchanged; move the cursor onto
+  each: on the cursor row they end before the hat icon. The log shows each squeeze once.
+- Hold L1 with Homing Blizzara on a shortcut: its name ends inside the SHORT CUT box.
+- Camp > Abilities: four rows, Sora, Shared, Enemy Skills, Sleights; the sleights under Sleights
+  (same order, AP and equipped marks), none under Sora; Sonic Blade / Strike Raid still under Sora.
+- Combat = Re:CoM: nothing changes.
+
+Not checked (8.7): anything in game; the scale's anchor (left edge kept); Re:CoM-text overflow on
+the Customize rows (needs the owner's screenshot).
+
 #### 8.5.4 KH1's specials in the Sleights list (owner, 2026-11-03, "M12 answers": "Strike raid are arcanum and ragnarok in KH1FM are triangle prompts. Let them be triangle prompts and also show up in the sleights menu")
 
 | what | where | tag |

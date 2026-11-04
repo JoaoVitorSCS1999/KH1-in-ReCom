@@ -1439,12 +1439,20 @@ impl Page {
             // SAFETY: Re:CoM's card-name call (reads its message tables).
             Content::Keyblades { cards, .. } => unsafe { card_name(cards[idx]) },
             Content::Customize { levels, picks, picking: Some(_), .. } => pick_word(picks.get(idx).copied().flatten(), levels),
-            Content::Customize { picking: None, .. } => customize::text::slot_label(idx, button_glyphs(ROW_FONT), super::command_menu::confirm_is_circle()).to_vec(),
+            // Owner, 2026-11-04: the bound spell's or sleight's name beside the button prompt
+            // (the status panel's words); an empty slot shows the button alone.
+            Content::Customize { levels, slots, picking: None, .. } => {
+                let glyphs = button_glyphs(ROW_FONT);
+                let label = customize::text::slot_label(idx, glyphs, super::command_menu::confirm_is_circle());
+                let name = slots.get(idx).and_then(|&b| cm::shortcut::slot_of(b)).map(|p| pick_word(Some(p), levels));
+                customize::text::slot_row(label, name.as_deref(), glyphs)
+            }
             Content::Items { rows, .. } => rows.get(idx).map_or_else(|| ip::text::NONE.to_vec(), |r| item_label(r.label)),
             Content::Abilities { rows, .. } => match rows.get(idx).map(|r| r.label) {
                 Some(ap::Label::Owner(ap::Owner::Sora)) => ap::text::SORA.to_vec(),
                 Some(ap::Label::Owner(ap::Owner::Shared)) => ap::text::SHARED.to_vec(),
                 Some(ap::Label::Owner(ap::Owner::EnemySkills)) => ap::text::ENEMY_SKILLS.to_vec(),
+                Some(ap::Label::Owner(ap::Owner::Sleights)) => ap::text::SLEIGHTS.to_vec(),
                 // Enemy Skills: the card's own name as Re:CoM shows it (its card-name call, localized).
                 Some(ap::Label::Ability(i)) => match crate::abilities::ALL[i].source {
                     // SAFETY: Re:CoM's card-name call (reads its message tables), as the Keyblade list's rows.
@@ -1566,6 +1574,7 @@ impl Page {
                 Some(ap::Row { label: ap::Label::Owner(ap::Owner::Sora), .. }) => ap::text::OWNER_HELP[0],
                 Some(ap::Row { label: ap::Label::Owner(ap::Owner::Shared), .. }) => ap::text::OWNER_HELP[1],
                 Some(ap::Row { label: ap::Label::Owner(ap::Owner::EnemySkills), .. }) => ap::text::OWNER_HELP[2],
+                Some(ap::Row { label: ap::Label::Owner(ap::Owner::Sleights), .. }) => ap::text::OWNER_HELP[3],
                 Some(ap::Row { label: ap::Label::Ability(i), .. }) => ap::text::help(*i),
             },
         };

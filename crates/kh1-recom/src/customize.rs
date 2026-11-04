@@ -29,6 +29,10 @@
 //! (`crate::command_menu::shortcut::slot_sleight`). A slot whose sleight is no longer equipped keeps
 //! its byte: the page shows it greyed with a help line saying so ([`unequipped`]), and the L1 list
 //! shows the blank command, greyed (as a slot whose spell isn't learned).
+//!
+//! **0.107.0** (owner, 2026-11-04: "when something is bound to a shortcut, they should also be
+//! listed by the button prompt"; `docs/recom-m12-sleights.md` § 8.7): each slot row reads its button
+//! glyph and the bound name ([`text::slot_row`]); an empty slot shows the glyph alone.
 
 use crate::command_menu::{cmd, shortcut as sc};
 
@@ -155,6 +159,21 @@ pub mod text {
             2 if confirm_is_circle => SLOT3_WORD_CIRCLE,
             k => SLOT_WORDS[k],
         }
+    }
+
+    /// A slot row's text (owner, 2026-11-04: "when something is bound to a shortcut, they should
+    /// also be listed by the button prompt"): the slot's label (its button glyph, or the button's
+    /// name), then the bound spell's or sleight's name (`name`, NUL-terminated or not) after a space
+    /// (after ": " beside a button's name). An empty slot (`None`) shows the label alone, as before.
+    pub fn slot_row(label: &[u8], name: Option<&[u8]>, glyphs: bool) -> Vec<u8> {
+        let strip = |t: &[u8]| -> Vec<u8> { t.iter().copied().take_while(|&b| b != 0).collect() };
+        let mut v = strip(label);
+        if let Some(n) = name.map(strip).filter(|n| !n.is_empty()) {
+            v.extend_from_slice(if glyphs { b" " } else { b": " });
+            v.extend(n);
+        }
+        v.push(0);
+        v
     }
 
     /// The three labels (the status panel's).
@@ -301,6 +320,19 @@ mod tests {
         assert_eq!(text::slot_help(0, false, true), text::SLOT_HELP[0]);
         assert_eq!(text::pick_help(2, false, true), text::PICK3_HELP_CIRCLE);
         assert_eq!(text::pick_help(9, false, false), text::PICK_HELP[2]);
+    }
+
+    /// Owner, 2026-11-04: the bound name beside the button prompt; an empty slot keeps the glyph
+    /// alone.
+    #[test]
+    fn slot_rows_show_the_bound_name_beside_the_button() {
+        let tri = text::slot_label(0, true, false);
+        assert_eq!(text::slot_row(tri, Some(b"Curaga\0"), true), b"\xF5\x67 Curaga\0".to_vec());
+        assert_eq!(text::slot_row(tri, None, true), tri.to_vec(), "empty: the glyph alone");
+        assert_eq!(text::slot_row(tri, Some(b"\0"), true), tri.to_vec());
+        assert_eq!(text::slot_row(text::slot_label(2, false, true), Some(b"Homing Blizzara"), false), b"Circle: Homing Blizzara\0".to_vec());
+        // Re:CoM's C2DFnt takes it: ASCII and the escape, NUL-terminated.
+        shown_len(&text::slot_row(tri, Some(b"Homing Blizzara\0"), true));
     }
 
     #[test]

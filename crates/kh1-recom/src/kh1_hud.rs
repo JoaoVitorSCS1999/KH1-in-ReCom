@@ -159,6 +159,52 @@ pub mod menu {
     pub const SEL_WORD_AT: (f32, f32) = (29.0, 22.0);
 }
 
+/// Squeeze to fit (owner, 2026-11-04: "we need a solution for certain sleights having too long of a
+/// name to fit within the black box"; answer "Squeeze to fit"): a KH1-look word wider than its box
+/// is drawn narrower with Re:CoM's own control X scale (`0x1402486D0`, the MP bar's partial
+/// segment's), so it ends inside the box; a word that fits is unchanged. The word's pieces start at
+/// its control's place (x 0), so the scale keeps its left edge (Assumption: the layer's screen
+/// offset is outside the scale, as for the MP bar's segments; to see in game).
+///
+/// The boxes, from the word's left edge, measured on KH1's own art (Checked (files: the owner's
+/// `uitex.bin` pictures 0, 1 and 3, `UK_uibin_sum.bin` / `_mag.bin` / `_cut.bin` rects)), less a
+/// 2-unit margin:
+/// - a Magic / Summon / Sleights list row: the row frame's (`*_fra_c` + `*_fra_2_c`, 0..112) black
+///   inside ends at x 106 over the glyphs' rows (frame rows 2..17; 108..110 mid-row); the word at
+///   x 16 → 90: box 88;
+/// - the cursor row: the selection plate (`*_sel_act_d` + `_2_d`, the word at its x 18) carries
+///   the list's hat icon (`*_sel_ico_d`, x 87..103, every texel column drawn): 87 − 18 = 69, box 67;
+/// - the shortcut panel (`cut_fra_a`): each name box is black from x 6 to x 85 over the glyphs'
+///   rows (87 mid-row), the word at x 16 → 70: box 68.
+///
+/// In the lists only our sleight names (`crate::sleights::WORD_BASE` words) are squeezed: KH1's own
+/// words keep KH1's look (KH1 draws "Tinker Bell", 73.9 units, over its hat icon too). Every KH1
+/// spell fits the shortcut box (the longest, "Thundaga", 61.4). Widths: KH1's menu font table
+/// (`US_font_data_tbl.bin`, the asset step's layout; Checked (files)).
+pub mod fit {
+    /// A Magic / Summon / Sleights list row's box (units from the word's left edge).
+    pub const LIST_BOX: f32 = 88.0;
+    /// The cursor row's box (up to the hat icon).
+    pub const CURSOR_BOX: f32 = 67.0;
+    /// A shortcut panel name's box.
+    pub const SHORTCUT_BOX: f32 = 68.0;
+
+    /// The X scale of a word `width` units wide in a `box_w` box: `min(1, box / width)`; 1 when
+    /// the width isn't known (an older asset step).
+    pub fn scale(width: Option<f32>, box_w: f32) -> f32 {
+        match width {
+            Some(w) if w > box_w && box_w > 0.0 => box_w / w,
+            _ => 1.0,
+        }
+    }
+
+    /// A list row's box for word `id` (the cursor row's or another row's), or None for a word the
+    /// lists never squeeze (KH1's own).
+    pub fn list_box(id: u16, cursor_row: bool) -> Option<f32> {
+        (id & 0xFF00 == crate::sleights::WORD_BASE).then_some(if cursor_row { CURSOR_BOX } else { LIST_BOX })
+    }
+}
+
 /// Stage 7.12: KH1's shortcut panel (`kh1_recom_assets::kh1_hud::shortcut`), groups from its first
 /// (`kh1-hud.json` `"shortcut": {"first", "icons"}`). The words are the menu's
 /// ([`MenuGroups::word`]); KH1's places are `crate::command_menu::shortcut`.
@@ -266,9 +312,19 @@ pub struct MenuGroups {
     /// M8b: KH1's Summon list (`exchange/<L>_uibin_sum.bin`), its first group (the same six), when
     /// the asset step built it.
     pub summon_list: Option<u32>,
+    /// Squeeze to fit (owner, 2026-11-04): each word's width (tenths of a unit), by language as
+    /// [`MenuGroups::words`]; empty from an asset step before 0.107.0 (no word is squeezed).
+    pub widths: Vec<(String, Vec<(u16, u32)>)>,
 }
 
 impl MenuGroups {
+    /// The width (units) of word `id` in `lang` (else in "us", as [`MenuGroups::word`]).
+    pub fn width(&self, lang: &str, id: u16) -> Option<f32> {
+        let in_lang = |l: &str| self.words.iter().any(|w| w.0 == l && w.1.iter().any(|x| x.0 == id));
+        let l = if in_lang(lang) { lang } else { "us" };
+        self.widths.iter().find(|w| w.0 == l).and_then(|w| w.1.iter().find(|x| x.0 == id)).map(|x| x.1 as f32 / 10.0)
+    }
+
     /// The group of word `id` in `lang`, else in "us".
     pub fn word(&self, lang: &str, id: u16) -> Option<u32> {
         let find = |l: &str| self.words.iter().find(|w| w.0 == l).and_then(|w| w.1.iter().find(|x| x.0 == id)).map(|x| x.1);
@@ -383,7 +439,21 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
                 Some(Some(g)) if g + menu::LIST_GROUPS <= groups => Some(g),
                 Some(_) => return Err("a bad summon_list entry".into()),
             };
-            Some(MenuGroups { first, tab_icon, words, items_list, summon_list })
+            // Squeeze to fit (0.107.0), optional: [id, width in tenths of a unit] per language.
+            let mut widths = Vec::new();
+            for lang in ["us", "uk", "fr", "gr", "it", "sp"] {
+                if let Some(a) = m.get("word_widths").and_then(|w| w.get(lang)).and_then(|x| x.as_array()) {
+                    let mut list = Vec::new();
+                    for e in a {
+                        match nums(e).as_deref() {
+                            Some(&[id, w]) if id <= u16::MAX as u32 => list.push((id as u16, w)),
+                            _ => return Err("a bad word width".into()),
+                        }
+                    }
+                    widths.push((lang.to_string(), list));
+                }
+            }
+            Some(MenuGroups { first, tab_icon, words, items_list, summon_list, widths })
         }
     };
     let shortcut = match v.get("shortcut") {
@@ -829,6 +899,13 @@ mod tests {
         let su = with.replace("\"tab_icon\": true", "\"tab_icon\": true, \"summon_list\": 694");
         assert_eq!(parse_manifest(&su).unwrap().menu.unwrap().summon_list, Some(694));
         assert!(parse_manifest(&it.replace("690", "695")).is_err(), "six groups past the set");
+        // Squeeze to fit (0.107.0): word widths optional, tenths of a unit; "fr" falls back to
+        // "us" as the word does.
+        assert!(mm.widths.is_empty() && mm.width("us", 1).is_none(), "an older asset step: nothing squeezed");
+        let wi = with.replace("\"fr\": [[1, 641]]}}", "\"fr\": [[1, 641]]}, \"word_widths\": {\"us\": [[1, 520], [6, 1104]], \"fr\": [[1, 600]]}}");
+        let mw = parse_manifest(&wi).unwrap().menu.unwrap();
+        assert_eq!((mw.width("us", 6), mw.width("fr", 1), mw.width("fr", 6), mw.width("us", 2)), (Some(110.4), Some(60.0), Some(110.4), None));
+        assert!(parse_manifest(&wi.replace("[6, 1104]", "[6]")).is_err());
         assert!(parse_manifest(&ok.replace("kh1hud:00", "Cockpit:00")).is_err());
         // Stage 7.12: the shortcut panel, optional (older manifests have none).
         assert_eq!(m.shortcut, None);
@@ -846,6 +923,30 @@ mod tests {
         assert_eq!(parse_manifest(&with).unwrap().mp_ring, Some(644));
         assert!(parse_manifest(&with.replace("\"count\": 562", "\"count\": 561")).is_err());
         assert!(parse_manifest(&with.replace("\"groups\": 1206", "\"groups\": 1205")).is_err(), "past the set");
+    }
+
+    /// Owner, 2026-11-04 ("Squeeze to fit"): only a word wider than its box is squeezed, to end at
+    /// the box's edge. The widths are KH1's menu font's (`US_font_data_tbl.bin`, the asset step's
+    /// layout: Checked (files)).
+    #[test]
+    fn long_words_squeeze_to_their_box() {
+        use fit::*;
+        assert_eq!(scale(None, LIST_BOX), 1.0, "width unknown");
+        assert_eq!(scale(Some(73.9), LIST_BOX), 1.0, "KH1's Tinker Bell fits");
+        assert_eq!(scale(Some(LIST_BOX), LIST_BOX), 1.0);
+        let s = scale(Some(110.4), LIST_BOX);
+        assert!((s * 110.4 - LIST_BOX).abs() < 1e-3 && s < 1.0, "Homing Blizzara ends at the box's edge");
+        assert!((scale(Some(110.4), SHORTCUT_BOX) * 110.4 - SHORTCUT_BOX).abs() < 1e-3);
+        assert_eq!(scale(Some(61.4), SHORTCUT_BOX), 1.0, "KH1's Thundaga fits the shortcut box");
+        assert_eq!(scale(Some(10.0), 0.0), 1.0);
+        // The lists squeeze only our sleight names; on the cursor row they end before the hat.
+        let hb = crate::sleights::word(0x24);
+        assert_eq!((list_box(hb, false), list_box(hb, true)), (Some(LIST_BOX), Some(CURSOR_BOX)));
+        assert_eq!(list_box(8, true), None, "KH1's Fira");
+        assert_eq!(list_box(0x8029, true), None, "Cloud");
+        assert_eq!(list_box(crate::sleights::word(crate::abilities::sleight::STRIKE_RAID), true), None, "a special: KH1's own word");
+        assert_eq!(scale(Some(87.1), LIST_BOX), 1.0, "Firaga Burst fits a row");
+        assert!(scale(Some(87.1), CURSOR_BOX) < 1.0, "but not the cursor row before the hat");
     }
 
     #[test]

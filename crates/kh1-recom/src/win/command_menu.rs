@@ -207,6 +207,18 @@ fn note(line: impl FnOnce() -> String) {
     }
 }
 
+/// Squeeze to fit: a squeezed word logged once per word and box (when it is first drawn).
+fn squeezed(line: impl FnOnce() -> String) {
+    static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    let l = line();
+    if let Ok(mut g) = SEEN.lock() {
+        if g.len() < 64 && !g.contains(&l) {
+            log(&format!("command menu: squeezed to fit: {l}"));
+            g.push(l);
+        }
+    }
+}
+
 fn event(e: String) {
     if let Ok(mut g) = EVENTS.lock() {
         if g.len() < 16 {
@@ -492,7 +504,12 @@ impl Ui {
         let mut words = [0; 3];
         for (k, v) in slots.iter().enumerate() {
             let Some(wg) = mg.word(&lang, v.name) else { continue };
-            words[k] = self.kh1_ctrl(PRIORITY_ROOT, o.0 + at::WORD_AT.0, o.1 + at::WORD_AT.1 + at::PITCH * k as f32, 1.0, &[(wg, None)]).unwrap_or(0);
+            // Squeeze to fit (owner, 2026-11-04): a name wider than its black box drawn narrower.
+            let sx = kh::fit::scale(mg.width(&lang, v.name), kh::fit::SHORTCUT_BOX);
+            if sx < 1.0 {
+                squeezed(|| format!("shortcut {}: word {:#x} {:.1} units wide, box {}: x scale {sx:.3}", k + 1, v.name, mg.width(&lang, v.name).unwrap_or(0.0), kh::fit::SHORTCUT_BOX));
+            }
+            words[k] = self.kh1_ctrl(PRIORITY_ROOT, o.0 + at::WORD_AT.0, o.1 + at::WORD_AT.1 + at::PITCH * k as f32, sx, &[(wg, None)]).unwrap_or(0);
             let b = kh1_word_level(v.bright);
             colour(words[k], [b, b, b, alpha]);
         }
@@ -721,7 +738,15 @@ impl Ui {
             let mut text = 0;
             if let Some(wg) = (v.name != 0).then(|| g.word(&lang, v.name)).flatten() {
                 let at = kh1_at(v, true);
-                if let Some(t) = self.kh1_ctrl(prio, at.0, at.1, 1.0, &[(wg, None)]) {
+                // Squeeze to fit (owner, 2026-11-04): in the Magic / Summon / Sleights lists a sleight
+                // name wider than its row's black box (the cursor row: up to the hat icon) is drawn
+                // narrower (`kh::fit`).
+                let bx = kh::fit::list_box(v.name, v.highlight).filter(|_| matches!(v.list, Kind::Magic | Kind::Summon | Kind::Sleight));
+                let sx = bx.map_or(1.0, |b| kh::fit::scale(g.width(&lang, v.name), b));
+                if sx < 1.0 {
+                    squeezed(|| format!("{:?} list{}: word {:#x} {:.1} units wide, box {}: x scale {sx:.3}", v.list, if v.highlight { " (cursor row)" } else { "" }, v.name, g.width(&lang, v.name).unwrap_or(0.0), bx.unwrap_or(0.0)));
+                }
+                if let Some(t) = self.kh1_ctrl(prio, at.0, at.1, sx, &[(wg, None)]) {
                     let b = kh1_word_level(v.bright);
                     func::<VecFn>(COLOUR)(t, V4([b, b, b, sc.alpha]).0.as_ptr());
                     text = t;

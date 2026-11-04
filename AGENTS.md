@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 219: Customize rows name their shortcut; long sleight names squeeze to fit in KH1's look; a "Sleights" section in the ability list, version 0.107.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Customize page and long names, § Sleights list and ability section): "when something is bound to a shortcut, they should also be listed by the button prompt, as well as the list on the right … we need a solution for certain sleights having too long of a name to fit within the black box."; "The same thing for the sleights menu. I think we should have also have "sleights" have its own menu in the ability list"; answer "Squeeze to fit". The Customize Summon / Sleights toggle was **dropped by the owner** ("disregard the toggle for sleights and summons"): not built. Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story unchanged.
+
+- **Customize rows** (`customize::text::slot_row`, `win::keyblades`): each slot row = its button glyph, a space, the bound spell's (at its level) or sleight's name, in the row's own Re:CoM text (`CBUTTON_SETUP`); an empty slot shows the glyph alone; the right panel unchanged.
+- **Re:CoM's text has no x-scale** (Checked (decomp + disasm)): `C2DFnt` / `CFntM2` (`0x140243F10` / `0x140258BC0`) draws (`0x14025AA20`) every glyph's width, height and advance from one size `+0x3C` (read at `0x14025AC3B`); flag 0x8000 halves single-byte glyphs (fixed); `+0x44` letter spacing; Re:CoM's text-width routine `0x14025A380(out[2], fnt, lines, count)` (vtable `+0x28`); `C2DFntObj` `0x140244230` scales the size uniformly from its parent.
+- **Squeeze to fit, built in KH1's look** (`kh1_hud::fit`, `win::command_menu`): KH1-look words are `kh1hud` groups laid out from x 0, so each word's control gets Re:CoM's control X scale (`0x1402486D0`, an existing checked callee) = min(1, box / width). Boxes measured on KH1's art (Checked (files: `uitex.bin` pictures 0 / 1 / 3, `UK_uibin_sum / mag / cut` rects)): a Magic / Summon / Sleights row 88 (black inside to x 106, word at 16), the cursor row 67 (the hat icon at 87, word at 18), the SHORT CUT name box 68 (black to 85, word at 16). Lists: only our sleight names (`0x8100 + id`); KH1's own words keep KH1's look. Widths: the asset step's layout in KH1's menu font (`menu.word_widths`, tenths of a unit; Checked (files: `US_font_data_tbl.bin`; the dump test: Hi-Potion 67.7)): e.g. Homing Blizzara 110.4 (× 0.797 row, × 0.607 cursor row, × 0.616 SHORT CUT); the table is in the doc.
+- **Not built** (report before any fallback): the boxes drawn as Re:CoM text (Re:CoM look's command menu, the camp's Customize rows and right panel, the Abilities list). Levers for the owner: (a) an x-scale added to Re:CoM's text draw / width routine (`0x14025AC56`, `0x14025A380`; a per-text scale needs a home; every text draw runs it); (b) Re:CoM's own letter spacing `+0x44` (no patch); (c) Re:CoM's own size `+0xA8` (both ways).
+- **Ability list** (`abilities::page`): a fourth owner row **"Sleights"** (after Enemy Skills) with the 27 sleight abilities in Re:CoM's order; they leave Sora's row; KH1's specials stay Sora's; equip rules, AP, saves, learning unchanged.
+- No new hook, call site or patch; nothing new per frame (the scale is set when a word's control is made). Asset step: re-run (`kh1-hud.json` `word_widths`; older manifests: nothing squeezed; older DLLs ignore the key).
+- Assumptions: the control's X scale keeps the word's left edge (the layer's screen offset outside the scale); the 2-unit margins; the Sleights row's place (last).
+- Checked: tests (slot rows, widths parsing / fallback, the fit rule and boxes, the Sleights section; the asset dump test on the owner's files), the Windows build (no warnings). Not checked: in game. Docs: `recom-m12-sleights.md` § 8.7, `recom-keyblade-equip.md` § Customize.
+
+---
+
 ## Stage 218: The KH1 camp list moved down 10 (Items no longer under the header), version 0.106.1 (2026-11-03)
 
 Owner, 2026-11-04 (screenshot): "you'll notice, items is kind of clipping through the top, there's enough space at the bottom to bring everything down a little bit".

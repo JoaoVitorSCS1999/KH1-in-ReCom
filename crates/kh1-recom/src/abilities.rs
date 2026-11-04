@@ -956,13 +956,21 @@ pub mod page {
         /// Enemy Skills (owner, 2026-11-03: "let the enemy cards have their own separate section
         /// in the ability tabs called "Enemy Skills""): every [`Source::Card`] ability.
         EnemySkills,
+        /// Sleights (owner, 2026-11-04: "I think we should have also have "sleights" have its own
+        /// menu in the ability list"): the 27 sleight abilities ([`super::SLEIGHTS`]); KH1's
+        /// specials (Sonic Blade, Strike Raid, Ars Arcanum, Ragnarok) stay Sora's.
+        Sleights,
     }
 
-    /// The owner rows: Sora, Shared, then Enemy Skills.
-    pub const OWNERS: [Owner; 3] = [Owner::Sora, Owner::Shared, Owner::EnemySkills];
+    /// The owner rows: Sora, Shared, Enemy Skills, then Sleights (last, so the rows before it keep
+    /// their places).
+    pub const OWNERS: [Owner; 4] = [Owner::Sora, Owner::Shared, Owner::EnemySkills, Owner::Sleights];
 
     /// The owner row ability `i` is listed under.
     pub fn owner_of(i: usize) -> Owner {
+        if super::SLEIGHTS.contains(&i) {
+            return Owner::Sleights;
+        }
         match ALL[i] {
             super::Ability { source: Source::Card(_), .. } => Owner::EnemySkills,
             super::Ability { shared: true, .. } => Owner::Shared,
@@ -1125,9 +1133,11 @@ pub mod page {
         pub const SHARED: &[u8] = b"Shared\0";
         /// Enemy Skills (owner's words).
         pub const ENEMY_SKILLS: &[u8] = b"Enemy Skills\0";
+        /// Sleights (the owner's word, the command menu's "Sleights").
+        pub const SLEIGHTS: &[u8] = b"Sleights\0";
         pub const STATUS: [&[u8]; 3] = [b"AP\0", b"Cost\0", b"AP used\0"];
         /// By [`super::OWNERS`].
-        pub const OWNER_HELP: [&[u8]; 3] = [b"Sora's abilities. Equipping one uses AP.\0", b"Abilities for movement. They use no AP.\0", b"Skills from enemy cards. Equipping one uses AP.\0"];
+        pub const OWNER_HELP: [&[u8]; 4] = [b"Sora's abilities. Equipping one uses AP.\0", b"Abilities for movement. They use no AP.\0", b"Skills from enemy cards. Equipping one uses AP.\0", b"Sleights to use from the command menu. Equipping one uses AP.\0"];
         pub const EMPTY_HELP: &[u8] = b"No abilities learned yet.\0";
         /// KH1's message 0xCA (not read).
         pub const NO_AP: &[u8] = b"Not enough AP to equip this ability.\0";
@@ -1502,7 +1512,7 @@ mod tests {
         assert_eq!(skill(0x60), ix::LEAF_BRACER);
         // The page: a third owner row; Enemy Skills by card kind; Zexion greyed (not built).
         let mut sc = Screen::default();
-        assert_eq!(sc.rows(&s).iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared), Label::Owner(Owner::EnemySkills)]);
+        assert_eq!(sc.rows(&s).iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared), Label::Owner(Owner::EnemySkills), Label::Owner(Owner::Sleights)]);
         sc.set_cursor(2);
         assert_eq!(sc.confirm(&mut s), Outcome::Opened);
         let rows = sc.rows(&s);
@@ -1811,6 +1821,10 @@ mod tests {
         // 5 AP: Holy (5) fits alone; then Freeze (3) is refused; the page greys it.
         assert!(can_equip(0, i(sleight::HOLY), s.max_ap()));
         let mut sc = Screen::default();
+        // Owner, 2026-11-04: the sleights on their own "Sleights" owner row (the fourth).
+        assert!(sc.rows(&s)[0].grey && !sc.rows(&s)[3].grey, "Sora's row has none; Sleights has two");
+        assert_eq!(sc.confirm(&mut s), Outcome::Empty);
+        sc.set_cursor(3);
         assert_eq!(sc.confirm(&mut s), Outcome::Opened);
         let l: Vec<Label> = sc.rows(&s).iter().map(|r| r.label).collect();
         assert_eq!(l, vec![Label::Ability(i(sleight::FREEZE)), Label::Ability(i(sleight::HOLY))], "Re:CoM's order");
@@ -1825,13 +1839,18 @@ mod tests {
         let e = 1 << i(sleight::CROSS_SLASH_PLUS) | 1 << i(sleight::FIRE_RAID) | 1 << i(sleight::LETHAL_FRAME) | 1 << ix::SONIC_BLADE | 1 << ix::BLITZ;
         assert_eq!(equipped_sleights(e), vec![0x1B, 0x27, 0x43]);
         assert!(equipped_sleights(0).is_empty());
-        // On Sora's page after every KH1 ability.
+        // Owner, 2026-11-04: all 27 on the Sleights row, in Re:CoM's order, none on any other row;
+        // KH1's specials (Sonic Blade, Strike Raid, Ars Arcanum, Ragnarok) stay Sora's.
         let all = State { unlocked: ALL_BITS & !KIT_BITS & !SPECIALS_WAITING, equipped: 0, ap_ups: 0 };
-        let l = page::list(page::Owner::Sora, &all);
-        let first = l.iter().position(|&k| SLEIGHTS.contains(&k)).unwrap();
-        assert!(l[first..].iter().all(|k| SLEIGHTS.contains(k)) && l.len() - first == 27);
-        assert!(l[first..].windows(2).all(|w| sleight_of(w[0]) < sleight_of(w[1])));
-        assert!(page::list(page::Owner::Shared, &all).iter().all(|k| !SLEIGHTS.contains(k)));
+        let l = page::list(page::Owner::Sleights, &all);
+        assert_eq!(l, SLEIGHTS.collect::<Vec<_>>());
+        assert!(l.windows(2).all(|w| sleight_of(w[0]) < sleight_of(w[1])));
+        for o in [page::Owner::Sora, page::Owner::Shared, page::Owner::EnemySkills] {
+            assert!(page::list(o, &all).iter().all(|k| !SLEIGHTS.contains(k)), "{o:?}");
+        }
+        let sora = page::list(page::Owner::Sora, &all);
+        assert!([ix::SONIC_BLADE, ix::STRIKE_RAID].iter().all(|k| sora.contains(k)));
+        assert!(SLEIGHTS.clone().all(|k| page::owner_of(k) == page::Owner::Sleights));
     }
 
     /// Layout v6 (M12 step 4): the words' bits 32.. in the extension, read only from a v6 block; a
@@ -1898,7 +1917,7 @@ mod tests {
         let mut s = State { unlocked: 1 << ix::RIPPLE_DRIVE | 1 << ix::BLITZ | 1 << ix::VORTEX | 1 << ix::GLIDE | 1 << ix::STRIKE_RAID | 1 << ix::SONIC_BLADE, equipped: 1 << ix::GLIDE, ap_ups: 1 };
         let mut sc = Screen::default();
         let rows = sc.rows(&s);
-        assert_eq!(rows.iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared), Label::Owner(Owner::EnemySkills)]);
+        assert_eq!(rows.iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared), Label::Owner(Owner::EnemySkills), Label::Owner(Owner::Sleights)]);
         assert!(rows[2].grey, "no Enemy Skill yet");
         assert_eq!(sc.confirm(&mut s), Outcome::Opened);
         // Sora's list in KH1's key order; Sonic Blade (801) and, since M12 step 7, Strike Raid (803).
