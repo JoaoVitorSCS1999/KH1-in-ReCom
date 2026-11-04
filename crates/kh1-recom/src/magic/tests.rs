@@ -411,6 +411,22 @@ fn gravity_rows_numbers_and_fall_are_kh1s() {
     assert_eq!(gravity::scale_at(3, 99.0), 1.6);
 }
 
+/// A flatten a hit cut short springs back KH1's way (+0.05 a frame): from Re:CoM's 0.1, 18 frames.
+#[test]
+fn a_cut_flatten_springs_back_at_kh1s_rate() {
+    assert!(flatten::spring_back(1.0).is_none(), "Re:CoM's own end stood it up");
+    assert!(flatten::spring_back(0.9995).is_none());
+    assert!(flatten::spring_back(f32::NAN).is_none() && flatten::spring_back(0.0).is_none());
+    let mut s = flatten::spring_back(0.1).unwrap();
+    let mut frames = 0;
+    while !s.done() {
+        s.step(false);
+        frames += 1;
+    }
+    assert_eq!(frames, 18);
+    assert_eq!(s.y, 1.0);
+}
+
 /// The owner's "gravity's visual is really small" (2026-11-04): Re:CoM's sphere grew by itself
 /// (flag 0x80) from `+0x1C / +0x78` and our growth multiplied that tiny spawn scale. The KH1 sphere
 /// now drops the flag and draws KH1's scale itself: 0.01 at the release, S at the impact.

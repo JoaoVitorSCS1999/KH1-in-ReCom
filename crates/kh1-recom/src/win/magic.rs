@@ -1310,6 +1310,57 @@ unsafe fn squash_frame(falling: &[(u8, [f32; 3], f32)]) {
     }
 }
 
+/// Re:CoM's flatten state's begin / end (`sites::FLATTEN_HOOKS`; `crate::magic::flatten`).
+pub static ORIG_FLATTEN_BEGIN: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_FLATTEN_END: AtomicUsize = AtomicUsize::new(0);
+static FLATTEN_LINES: AtomicU32 = AtomicU32::new(20);
+type StateFn = unsafe extern "win64" fn(usize);
+
+fn flatten_note(line: impl FnOnce() -> String) {
+    if FLATTEN_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("magic: {}", line()));
+    }
+}
+
+/// Re:CoM's flatten begin (hurt and attack bodies off, its squash), then in a KH1 battle the hurt
+/// bodies back on with Re:CoM's own switch: a flattened enemy stays hittable, as in KH1.
+pub unsafe extern "win64" fn flatten_begin(enemy: usize) {
+    orig::<StateFn>(&ORIG_FLATTEN_BEGIN)(enemy);
+    if !super::battle::kh1_battle() {
+        return;
+    }
+    type BodiesFn = unsafe extern "win64" fn(usize, i32);
+    func::<BodiesFn>(mg::flatten::HURT_ON_RVA)(enemy, -1);
+    flatten_note(|| format!("flatten on {enemy:#x}: Re:CoM's Gravity flatten, its hurt bodies kept on (KH1: a flattened enemy stays hittable)"));
+}
+
+/// Re:CoM's flatten end; in a KH1 battle, a flatten cut short (a hit's reaction took over before
+/// Re:CoM stood it up) springs back KH1's way from where it is.
+pub unsafe extern "win64" fn flatten_end(enemy: usize) {
+    orig::<StateFn>(&ORIG_FLATTEN_END)(enemy);
+    if !super::battle::kh1_battle() {
+        return;
+    }
+    type GetFn = unsafe extern "win64" fn(usize) -> *const [f32; 4];
+    let v = func::<GetFn>(SCALE_GET)(enemy);
+    if v.is_null() {
+        return;
+    }
+    let y = std::ptr::read_unaligned(v)[1];
+    let Some(s) = mg::flatten::spring_back(y) else { return };
+    let h: u32 = rd(enemy + 0x20);
+    let Ok(mut g) = SQUASHED.lock() else { return };
+    if let Some(e) = g.iter_mut().find(|e| e.h == h) {
+        *e = Squashed { h, base: mg::flatten::RECOM_HEIGHT, s, under: false };
+    } else if g.len() < 32 {
+        g.push(Squashed { h, base: mg::flatten::RECOM_HEIGHT, s, under: false });
+    } else {
+        return;
+    }
+    STRIKING.store(true, Ordering::Release);
+    flatten_note(|| format!("flatten on {enemy:#x} cut short at height {y:.2}: KH1's spring-back (+0.05 a frame)"));
+}
+
 /// Enemies being squashed (the per-frame spell check runs while any are).
 fn squashing() -> bool {
     SQUASHED.lock().map(|g| !g.is_empty()).unwrap_or(false)

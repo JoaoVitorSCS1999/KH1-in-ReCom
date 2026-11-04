@@ -452,6 +452,18 @@ fn install_magic(base: usize) {
     if unsafe { hook::install_all(base, &hooks) } {
         magic::mark_installed();
         log(&magic::start_line());
+        // A Gravity-flattened enemy stays hittable in KH1 battles (`crate::magic::flatten`).
+        let fl = crate::sites::FLATTEN_HOOKS;
+        let flatten = [
+            hook::Hook { site: &fl[0], ours: magic::flatten_begin as *const () as usize, original: &magic::ORIG_FLATTEN_BEGIN },
+            hook::Hook { site: &fl[1], ours: magic::flatten_end as *const () as usize, original: &magic::ORIG_FLATTEN_END },
+        ];
+        // SAFETY: the targets' bytes are checked again inside, before anything is written.
+        if unsafe { hook::install_all(base, &flatten) } {
+            log("magic: Re:CoM's Gravity flatten (0x14017C350 / 0x14017EB80) keeps the enemy's hurt bodies on in KH1 battles; a flatten cut short by a hit springs back at KH1's 0.05 a frame");
+        } else {
+            log("magic: the flatten state's begin / end not hooked; a flattened enemy can't be hit (Re:CoM's rule)");
+        }
         // SAFETY: branch patches with checked old bytes (code of the mapped exe).
         if unsafe { magic_fx::install(base) } {
             log("magic fx: Re:CoM's battle set (spell effects) in the field at combat = kh1 in Sora's story: field state 1 0x1401AF933 -> 0x140211AA0 then 0x140211960; camp unloads 0x1401A95BD / 0x1401A99F9 keep it");

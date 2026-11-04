@@ -818,6 +818,28 @@ Sites (7.8):
   KH1's sphere 1.7 / 1.5 = 1.13 times bigger: the alternative if it looks small against KH1's.
   Not carried: KH1's 20-frame fade growing × 1.02 a frame after the impact (Re:CoM's life end fades
   it at S). Combat = Re:CoM: Re:CoM's own Gravity (with bit 7) unchanged.
+- **The flatten keeps its hurt bodies (0.117.0)**, owner 2026-11-04: "when the enemy is flattened
+  from gravity, sora is unable to attack them, lets fix that". Cause (Checked (decomp + exe)): at
+  Damage = Re:CoM (the default) our Gravity's kind is Re:CoM's 0xD, whose flatten state `+0xAC0`
+  (picker `0x14017D260` case 0xD) begins with `0x14017C350`: **every hurt body off**
+  (`0x1401A2D70(e, −1)`) and every attack body off, for the whole squash and its 9000-tick hold;
+  its end `0x14017EB80` turns them on. Both are that state's begin / end in 78 class tables, no
+  other reference (exe scan). KH1 (Checked (decomp)): the hit pass `0x1402B7260` runs the flatten
+  (movement 0x16 / 0x17, request 0x66) and then the can-be-hit test `0x140292070` (flags
+  `& 0x8048 == 0x8000`, a body not masked; the mask `+0x3A8` only by AI-script syscalls
+  `0x1402BAA00` / `0x1402BAA40`): a crushed actor stays hittable. A flinch on it
+  (`0x1402B8E10` kind 3 → `0x1402B1B10` true for movement 0x16 → `0x1402B8B90`) knocks it out of
+  the flatten (request 0x4E / 0x4F, movement 6), and its update springs `+0x480` back +0.05 a frame.
+  Built (`magic::flatten`, `win::magic::flatten_begin` / `flatten_end`, sites `FLATTEN_HOOKS` (11
+  bytes each, no branch in: exe scan) / `FLATTEN_CHECKED`): in a KH1 battle, after Re:CoM's begin,
+  Re:CoM's own hurt-bodies-on `0x1401A2DB0(e, −1)` (attack bodies stay off); swings, spells, shots
+  and sleights then hit it through Re:CoM's hit handler (its damage; its reaction ends the
+  flatten, as KH1's knock does). When the flatten ends before Re:CoM stood it up (height < 1), the
+  squash list springs it back +0.05 a frame from there (18 frames from 0.1; the per-frame spell
+  check runs only while it does). Combat = Re:CoM / Riku's story: Re:CoM's rule (untouchable).
+  Assumptions: Re:CoM's flinch for KH1's knock 0x4E / 0x4F (Re:CoM owns the reaction); Re:CoM's
+  base height 1.0 (its own flatten writes 1.0). At Damage = KH1 no flatten happens (the KH1 row's
+  kind is a flinch; KH1's own hit flatten is open question 2 below).
 - **Not built in 7.8: the slow under the falling sphere** (M7 f2 below: it is a squash, not a
   slow; KH1: `+0x88 |= 4` each frame, the actor's time scale eased to 0.8 with a wobble and back at
   +0.05 a frame). Re:CoM's enemies have a per-actor

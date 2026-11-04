@@ -1635,6 +1635,43 @@ pub const PARTY_CHECKED: &[Site] = &[
 /// resource load, the weapon's attack end).
 pub const SUMMON_ALSO: [u32; 3] = [0x0022_0DF0, 0x0021_1790, 0x0022_4FB0];
 
+/// A Gravity-flattened enemy stays hittable at Combat = KH1 (owner, 2026-11-04; `crate::magic::flatten`,
+/// `win::magic::flatten_begin` / `flatten_end`, `docs/recom-m7-magic.md` § The flatten keeps its hurt
+/// bodies): Re:CoM's flatten state's begin and end (state `+0xAC0`, the reaction picker's case 0xD
+/// `0x14017D626`; each the begin / end of that state in 78 class tables, no other reference: exe scan;
+/// no branch into the 11 moved bytes: exe scan).
+pub const FLATTEN_HOOKS: &[Site] = &[
+    // push rbx; sub rsp,0x20; mov edx,-1 (then the hurt bodies off: `FLATTEN_CHECKED`).
+    Site { name: "flatten state begin (0x14017C350)", rva: 0x0017_C350, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xBA, 0xFF, 0xFF, 0xFF, 0xFF] },
+    // push rbx; sub rsp,0x20; mov edx,-1 (then the hurt bodies on).
+    Site { name: "flatten state end (0x14017EB80)", rva: 0x0017_EB80, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xBA, 0xFF, 0xFF, 0xFF, 0xFF] },
+];
+
+/// The rest of both functions after the moved bytes (not patched).
+pub const FLATTEN_CHECKED: &[Site] = &[
+    // mov [rcx+0x270],0; mov rbx,rcx; mov [rcx+0x160],250; call 0x1401A2D70 (every hurt body off);
+    // mov edx,-1; mov rcx,rbx; call 0x1401A2D90 (every attack body off); the mover's 0x1401D67B0(1);
+    // mover +0x124 = 5.0; ret.
+    Site {
+        name: "flatten state begin: bodies off (0x14017C35B)",
+        rva: 0x0017_C35B,
+        expect: &[
+            0xC7, 0x81, 0x70, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9, 0xC7, 0x81, 0x60, 0x01, 0x00, 0x00, 0xFA, 0x00, 0x00, 0x00, 0xE8, 0xF9, 0x69, 0x02, 0x00, 0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x48, 0x8B, 0xCB, 0xE8, 0x0C, 0x6A, 0x02, 0x00, 0x48, 0x8B,
+            0x8B, 0xF0, 0x00, 0x00, 0x00, 0xBA, 0x01, 0x00, 0x00, 0x00, 0xE8, 0x1B, 0xA4, 0x05, 0x00, 0x48, 0x8B, 0x83, 0xF0, 0x00, 0x00, 0x00, 0xC7, 0x80, 0x24, 0x01, 0x00, 0x00, 0x00, 0x00, 0xA0, 0x40, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3,
+        ],
+    },
+    // mov rbx,rcx; call 0x1401A2DB0 (every hurt body on); mov edx,-1; mov rcx,rbx; call 0x1401A2DD0
+    // (every attack body on); the mover's 0x1401D67B0(0) when `+0x260` bit 8; mover +0x124 = 1.0; ret.
+    Site {
+        name: "flatten state end: bodies on (0x14017EB8B)",
+        rva: 0x0017_EB8B,
+        expect: &[
+            0x48, 0x8B, 0xD9, 0xE8, 0x1D, 0x42, 0x02, 0x00, 0xBA, 0xFF, 0xFF, 0xFF, 0xFF, 0x48, 0x8B, 0xCB, 0xE8, 0x30, 0x42, 0x02, 0x00, 0x8B, 0x83, 0x60, 0x02, 0x00, 0x00, 0x48, 0x0F, 0xBA, 0xE0, 0x08, 0x73, 0x0E, 0x48, 0x8B, 0x8B, 0xF0, 0x00, 0x00, 0x00, 0x33,
+            0xD2, 0xE8, 0xF5, 0x7B, 0x05, 0x00, 0x48, 0x8B, 0x83, 0xF0, 0x00, 0x00, 0x00, 0xC7, 0x80, 0x24, 0x01, 0x00, 0x00, 0x00, 0x00, 0x80, 0x3F, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3,
+        ],
+    },
+];
+
 /// Sleights outside battle (owner, 2026-11-04; `crate::field_sleights`, `win::field_sleights`,
 /// `docs/recom-field-sleights.md` § Built): the PLM init wrapper (field sleight packs).
 pub const FIELD_SLEIGHT_HOOKS: &[Site] = &[
@@ -3857,6 +3894,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SPECIAL_AA_CHECKED,
         SPECIAL_RAG_CHECKED,
         SUMMON_CHECKED,
+        FLATTEN_HOOKS,
+        FLATTEN_CHECKED,
         FIELD_SLEIGHT_HOOKS,
         FIELD_SLEIGHT_DATA,
         FIELD_SLEIGHT_CHECKED,
@@ -4817,6 +4856,24 @@ mod tests {
         assert_eq!(&init.expect[init.expect.len() - 3..], &[0xBA, crate::specials::RECOM_ACTION as u8, 0x00]);
         let case = SPECIAL_CHECKED.iter().find(|s| s.name.starts_with("Battle exe case 0x16")).unwrap();
         assert_eq!(u32::from_le_bytes(case.expect[8..12].try_into().unwrap()), 0x140);
+    }
+
+    /// A Gravity-flattened enemy stays hittable: the two wrappers' sites and the calls they rely on.
+    #[test]
+    fn flatten_sites() {
+        for s in FLATTEN_HOOKS.iter().chain(FLATTEN_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        // The checked rest starts right after the moved bytes; the calls go to Re:CoM's body switches.
+        for (h, c) in FLATTEN_HOOKS.iter().zip(FLATTEN_CHECKED) {
+            assert_eq!(h.rva + h.expect.len() as u32, c.rva, "{}", h.name);
+        }
+        let call = |s: &Site, at: usize| (s.rva as i64 + at as i64 + 5 + i32::from_le_bytes(s.expect[at + 1..at + 5].try_into().unwrap()) as i64) as u32;
+        assert_eq!(call(&FLATTEN_CHECKED[0], 23), 0x001A_2D70, "hurt bodies off");
+        assert_eq!(call(&FLATTEN_CHECKED[0], 36), 0x001A_2D90, "attack bodies off");
+        assert_eq!(call(&FLATTEN_CHECKED[1], 3), 0x001A_2DB0, "hurt bodies on");
+        assert_eq!(call(&FLATTEN_CHECKED[1], 16), 0x001A_2DD0, "attack bodies on");
+        assert_eq!(crate::magic::flatten::HURT_ON_RVA, 0x001A_2DB0);
     }
 
     /// Sleights outside battle (owner, 2026-11-04): the field case's entry and stub agree with

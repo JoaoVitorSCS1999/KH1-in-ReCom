@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 229: A Gravity-flattened enemy stays hittable in KH1 battles (Re:CoM's flatten keeps its hurt bodies; KH1's spring-back when a hit cuts it), version 0.117.0 (2026-11-04)
+
+Owner, 2026-11-04: "Also when the enemy is flattened from gravity, sora is unable to attack them, lets fix that".
+
+- **Cause** (Checked (decomp + exe)): at Damage = Re:CoM (default) KH1 Gravity carries Re:CoM's kind 0xD → Re:CoM's flatten state `+0xAC0` (`0x14017D260` case 0xD). Its begin `0x14017C350` turns every hurt body off (`0x1401A2D70`) and every attack body off until its end `0x14017EB80` (about 3 s): nothing can hit it, in Re:CoM too.
+- **KH1** (Checked (decomp)): the flatten (`0x1402B7260`, movement 0x16 / 0x17, request 0x66) never makes the actor unhittable (its test `0x140292070`: flags and the body mask, set only by AI-script syscalls); a flinch on it knocks it out (`0x1402B8E10` → `0x1402B8B90`, request 0x4E / 0x4F) and its height springs back +0.05 a frame (`0x140297FE0`).
+- **Change** (`magic::flatten`, `win::magic::flatten_begin` / `flatten_end`; hooks on both, `sites::FLATTEN_HOOKS` 11 bytes each + `FLATTEN_CHECKED` the rest of both functions; no branch into the moved bytes, 78 table references each: exe scan): in a KH1 battle, after Re:CoM's begin, Re:CoM's own hurt-bodies-on `0x1401A2DB0(e, −1)` (attack bodies stay off): swings, spells, shots and sleights land through Re:CoM's hit handler; its reaction ends the flatten. A flatten ended before Re:CoM stood it up springs back at KH1's 0.05 a frame (the existing squash list). Per frame: nothing new outside a spring-back (≤ 18 frames). Combat = Re:CoM, Riku's story: Re:CoM's rule.
+- Assumptions: Re:CoM's flinch stands for KH1's knock out of the flatten; Re:CoM's base height 1.0. At Damage = KH1 there is no flatten (KH1's own hit flatten not built: open question).
+- Checked: tests (`a_cut_flatten_springs_back_at_kh1s_rate`, `sites::tests::flatten_sites`), `check_sites_rs.py` (1299 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-m7-magic.md` § 7.8 (The flatten keeps its hurt bodies).
+
+---
+
 ## Stage 228: The camp's Settings list gets "Effects & Sound" (Effects, Sounds: KH1 / Re:CoM), version 0.116.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § M13 and camp text answers): "The Effects / Sounds (later Voices) toggles go on a **new Settings page** (e.g. "Effects & Sound")". Sora's story; Riku's story unchanged.

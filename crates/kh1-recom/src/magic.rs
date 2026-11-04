@@ -685,6 +685,42 @@ pub mod squash {
     }
 }
 
+/// A Gravity-flattened enemy stays hittable at Combat = KH1 (owner, 2026-11-04: "when the enemy is
+/// flattened from gravity, sora is unable to attack them"; `win::magic::flatten_begin` / `flatten_end`).
+///
+/// - **Re:CoM** (Checked (decomp + exe)): Re:CoM's Gravity (kind 0xD: our KH1 Gravity at Damage =
+///   Re:CoM, Re:CoM's Gravity sleights) sends the enemy to its flatten state `+0xAC0` (the reaction
+///   picker `0x14017D260` case 0xD). Its begin `0x14017C350` turns **every hurt body off**
+///   (`0x1401A2D70(enemy, −1)`) and every attack body off; its exe `0x140183BA0` squashes the height
+///   to the timer ÷ 250 (≥ 0.1), holds 9000 ticks (3 s), then sets 1.0; its end `0x14017EB80` turns
+///   the bodies back on. So in Re:CoM nothing can hit a flattened enemy for about 3 s.
+/// - **KH1** (Checked (decomp)): its hit pass `0x1402B7260` runs the flatten (movement states 0x16 /
+///   0x17, request 0x66: `+0x480` held at 0.1, eased back over 15 frames, then request 0x67) and then
+///   its can-be-hit test `0x140292070` (actor flags `& 0x8048 == 0x8000` and an unmasked body; the
+///   mask `+0x3A8` is set only by the AI scripts' syscalls `0x1402BAA00` / `0x1402BAA40`): nothing in
+///   the flatten makes the actor unhittable. A flinch on a flattened actor (`0x1402B8E10` kind 3:
+///   `0x1402B1B10` is true for movement 0x16) plays `0x1402B8B90`'s knock (request 0x4E / 0x4F,
+///   movement 6), out of the flatten, and the actor's update `0x140297FE0` springs `+0x480` back
+///   **+0.05 a frame** (outside requests 0x66..0x68).
+/// - **Ours**: after Re:CoM's begin, Re:CoM's own hurt-bodies-on [`HURT_ON_RVA`] (the attack bodies
+///   stay off: Re:CoM's); a hit then goes through Re:CoM's hit handler as on any enemy (damage, its
+///   reaction ends the flatten). When the flatten ends before its hold (a hit's reaction took over),
+///   Re:CoM leaves the height squashed: KH1's spring-back from there ([`spring_back`]). At Combat =
+///   Re:CoM, or outside a KH1 battle, Re:CoM's rule.
+pub mod flatten {
+    /// `0x1401A2DB0(enemy, −1)`: every hurt body on (Re:CoM's flatten end calls it). Checked (exe).
+    pub const HURT_ON_RVA: u32 = 0x001A_2DB0;
+    /// Re:CoM's height after its own flatten (`0x140183BA0` phase 1: y = 1.0). Checked (decomp).
+    pub const RECOM_HEIGHT: f32 = 1.0;
+
+    /// The squash to run when Re:CoM's flatten ends with the height at `y` (Re:CoM's scale y): KH1's
+    /// spring-back (+0.05 a frame, `super::squash::Squash::step(false)`) from `y`, or none when
+    /// Re:CoM's own end already stood it up.
+    pub fn spring_back(y: f32) -> Option<super::squash::Squash> {
+        (y.is_finite() && y > 0.0 && y < RECOM_HEIGHT - 1e-3).then_some(super::squash::Squash { y: y / RECOM_HEIGHT, phase: 0.0 })
+    }
+}
+
 /// The falling thread's clock (`xm_gravity01.mag` `0x44..`): the release's run counts the first
 /// frame; each later run counts one more until the N-th; the run after it is the impact.
 #[derive(Clone, Copy, Debug, PartialEq)]
