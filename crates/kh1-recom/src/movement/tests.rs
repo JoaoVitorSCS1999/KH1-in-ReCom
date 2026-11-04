@@ -98,6 +98,8 @@ struct FakeRecom {
     special_ends: usize,
     /// M12 step 7: special rows whose attack ended (Strike Raid's throws).
     special_row_ends: usize,
+    /// M12 step 7: Ragnarok's releases.
+    ragnarok_fires: Vec<crate::specials::ragnarok::FireStart>,
     /// `dodge_roll = recom`: Re:CoM's own avoid init runs (its roll), the order of Re:CoM's calls
     /// around it, and how often our frame wrote Re:CoM's untouchable bit.
     recom_rolls: usize,
@@ -153,6 +155,7 @@ impl FakeRecom {
             special_rows: Vec::new(),
             special_ends: 0,
             special_row_ends: 0,
+            ragnarok_fires: Vec::new(),
             recom_rolls: 0,
             order: Vec::new(),
             untouchable_writes: 0,
@@ -360,6 +363,10 @@ impl Host for FakeRecom {
     }
     fn special_row_end(&mut self) {
         self.special_row_ends += 1;
+    }
+
+    fn ragnarok_fire(&mut self, f: &crate::specials::ragnarok::FireStart) {
+        self.ragnarok_fires.push(*f);
     }
 
     fn special_row(&mut self, r: &crate::specials::RowStart) {
@@ -2103,6 +2110,59 @@ fn a_clash_ends_ars_arcanum_with_the_recoil() {
     assert!(p.ours.special.is_none() && p.ours.state == state::GROUND);
     assert_eq!(p.recom.special_ends, 1);
     assert_eq!(p.ours.rec.head(), crate::rows::RECOIL);
+}
+
+/// M12 step 7, Ragnarok (`0x14039F250`, `0x14039F7A0`, `0x14039F330`): the wind-up, five rising
+/// hits by themselves (rows 0x36..=0x3A, Sora rising), the charge (hovering, no longer invincible,
+/// "Impact" lit from charge time 10), Triangle at t ≥ 40: 17 shots, then the fall and the landing.
+#[test]
+fn ragnarok_runs_kh1s_hits_charge_and_shots() {
+    use crate::specials::{cmd, Phase, STATE_OF, RAGNAROK};
+    use kh1_core::data::{row, xl};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    p.target = Some(kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, -300.0, 300.0), radius: 30.0 });
+    step_special(&mut p, None);
+    let y0 = p.recom.pos.y;
+    step_special(&mut p, Some(cmd::RAGNAROK));
+    assert_eq!(p.ours.state, STATE_OF[RAGNAROK]);
+    assert_eq!(p.ours.rec.head(), xl::request(xl::RAG_WINDUP));
+    assert!(p.recom.untouchable);
+    assert_eq!(p.ours.follow_up(), Some((cmd::IMPACT, true)), "Impact shown, greyed");
+    until(&mut p, 120, |p| p.ours.special.is_some_and(|s| s.phase == Phase::Charge));
+    let rows: Vec<usize> = p.recom.special_rows.iter().map(|r| r.kh1_row).collect();
+    assert_eq!(rows, (row::RAGNAROK_HIT..=row::RAGNAROK_LAST).collect::<Vec<_>>());
+    assert!(p.recom.special_rows.iter().all(|r| r.recom_id == crate::specials::recom::ID_RAGNAROK));
+    assert!(p.recom.pos.y < y0 - 100.0, "risen: {}", y0 - p.recom.pos.y);
+    assert!(!p.recom.untouchable, "the charge can be hit");
+    assert_eq!(p.ours.rec.head(), xl::request(xl::RAG_CHARGE));
+    let hover = p.recom.pos.y;
+    until(&mut p, 20, |p| p.ours.follow_up() == Some((cmd::IMPACT, false)));
+    let t = p.ours.special.unwrap().charge;
+    assert!((10.0..11.5).contains(&t), "lit at {t}");
+    assert!((p.recom.pos.y - hover).abs() < 1e-3, "hovering");
+    until(&mut p, 40, |p| p.ours.special.is_some_and(|s| s.charge >= 42.0));
+    step_special(&mut p, Some(cmd::IMPACT));
+    assert_eq!(p.recom.ragnarok_fires.len(), 1);
+    assert_eq!(p.recom.ragnarok_fires[0].shots, 17);
+    assert_eq!(p.ours.rec.head(), xl::request(xl::RAG_FIRE));
+    until(&mut p, 200, |p| p.ours.special.is_none());
+    until(&mut p, 200, |p| p.ours.state == state::GROUND);
+    assert_eq!(p.recom.ragnarok_fires.len(), 1);
+}
+
+/// Without Triangle the charge (76 frames) ends into the fall: the special ends, Sora falls.
+#[test]
+fn ragnarok_without_impact_falls_after_the_charge() {
+    use crate::specials::{cmd, Phase};
+    let mut p = Pair::new(Abilities::default(), Floor::flat());
+    p.target = Some(kh1_core::TargetPart { owner: 1, centre: Vec3::new(0.0, -300.0, 300.0), radius: 30.0 });
+    step_special(&mut p, None);
+    step_special(&mut p, Some(cmd::RAGNAROK));
+    until(&mut p, 120, |p| p.ours.special.is_some_and(|s| s.phase == Phase::Charge));
+    let k = until(&mut p, 120, |p| p.ours.special.is_none());
+    assert!((70..=80).contains(&k), "{k}");
+    assert!(p.recom.ragnarok_fires.is_empty());
+    until(&mut p, 200, |p| p.ours.state == state::GROUND);
 }
 
 // ---- `dodge_roll = recom`: Re:CoM's own roll (owner, 2026-11-02, "The whole roll") ----

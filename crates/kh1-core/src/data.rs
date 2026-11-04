@@ -170,6 +170,9 @@ pub mod row {
     /// twelve hits and the finisher. The picker never names them.
     pub const ARS_ARCANUM_HIT: usize = 0x22;
     pub const ARS_ARCANUM_FINISHER: usize = 0x2E;
+    /// M12 step 7, Ragnarok (`0x14039F7A0`: row `0x36 + n` for hit n = 0..=4, each with its hop).
+    pub const RAGNAROK_HIT: usize = 0x36;
+    pub const RAGNAROK_LAST: usize = 0x3A;
     /// Rows the ground picker walks (0..=0x41).
     pub const GROUND_COUNT: usize = 0x42;
 }
@@ -208,9 +211,17 @@ pub mod xl {
     pub const AA_WINDUP: usize = 3;
     pub const AA_HIT: usize = 4;
     pub const AA_FINISHER: usize = 16;
+    /// M12 step 7, Ragnarok (`0x14039F250` / `0x14039F7A0` / `0x14039F330`): the wind-up 0xF0, the
+    /// five rising hits 0xF1..=0xF5 (rows 0x36..=0x3A), the charge 0xF6 (root travel 150 back), the
+    /// release 0xF7 and the full release 0xF8.
+    pub const RAG_WINDUP: usize = 26;
+    pub const RAG_HIT: usize = 27;
+    pub const RAG_CHARGE: usize = 32;
+    pub const RAG_FIRE: usize = 33;
+    pub const RAG_FIRE_BIG: usize = 34;
     /// The entries built so far, in the order the asset step gives them slots and the DLL rows
     /// (later specials append theirs, so earlier slots never move).
-    pub const ENTRIES: [usize; 26] = [WINDUP, DASH, FINISHER, SR_WINDUP, SR_THROW, SR_FINISHER, SR_CATCH, SR_THROW_HIGH, SR_FINISHER_HIGH, SR_CATCH_HIGH, SR_CLASH, SR_WAIT, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    pub const ENTRIES: [usize; 35] = [WINDUP, DASH, FINISHER, SR_WINDUP, SR_THROW, SR_FINISHER, SR_CATCH, SR_THROW_HIGH, SR_FINISHER_HIGH, SR_CATCH_HIGH, SR_CLASH, SR_WAIT, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 26, 27, 28, 29, 30, 31, 32, 33, 34];
     /// The xl set's request map for its 36 entries (`xl_limit.dat` `+0x80`, the request words with
     /// an entry): 0xC8..=0xCA → 0..=2, 0xD2..=0xDF → 3..=16, 0xE6..=0xEE → 17..=25, 0xF0..=0xF8 →
     /// 26..=34, 0xFA → 35. Checked (files).
@@ -310,6 +321,16 @@ pub mod xl {
             13 => MotionInfo::new(64.0).with_flag(FlagKind::Hit(0), 10.0, 18.0).with_flag(FlagKind::Trail, 0.0, 32.0).with_flag(FlagKind::ComboWindow, 14.0, 32.0).with_forward_keys(&[(0.0, 0.0), (10.0, 100.00), (32.0, 100.00), (64.0, 180.00)]),
             14 => MotionInfo::new(64.0).with_flag(FlagKind::Hit(0), 12.0, 22.0).with_flag(FlagKind::ComboWindow, 18.0, 34.0).with_flag(FlagKind::Trail, 0.0, 34.0).with_forward_keys(&[(0.0, 0.0), (18.0, 135.00), (64.0, 135.00)]),
             15 => MotionInfo::new(64.0).with_flag(FlagKind::Hit(0), 22.0, 30.0).with_flag(FlagKind::ComboWindow, 28.0, 52.0).with_flag(FlagKind::Trail, 0.0, 44.0).with_forward_keys(&[(0.0, 0.0), (18.0, 0.0), (26.0, 120.00), (32.0, 120.00), (64.0, 210.00)]),
+            // Ragnarok: no root travel but the charge's (150 back over frames 2..24).
+            RAG_WINDUP => MotionInfo::new(24.0),
+            27 => MotionInfo::new(14.0).with_flag(FlagKind::Hit(0), 2.0, 10.0).with_flag(FlagKind::Trail, 0.0, inf),
+            28 => MotionInfo::new(12.0).with_flag(FlagKind::Hit(0), 6.0, 14.0).with_flag(FlagKind::Trail, 0.0, inf),
+            29 => MotionInfo::new(14.0).with_flag(FlagKind::Hit(0), 6.0, 14.0).with_flag(FlagKind::Trail, 0.0, inf),
+            30 => MotionInfo::new(18.0).with_flag(FlagKind::Hit(0), 4.0, 12.0).with_flag(FlagKind::Trail, 0.0, inf),
+            31 => MotionInfo::new(22.0).with_flag(FlagKind::Hit(0), 4.0, 20.0).with_flag(FlagKind::Trail, 0.0, 20.0),
+            RAG_CHARGE => MotionInfo::new(76.0).with_forward_keys(&[(0.0, 0.0), (2.0, 0.0), (24.0, -150.00), (76.0, -150.00)]),
+            RAG_FIRE => MotionInfo::new(80.0),
+            RAG_FIRE_BIG => MotionInfo::new(50.0),
             AA_FINISHER => MotionInfo::new(88.0).with_flag(FlagKind::Hit(0), 30.0, 36.0).with_flag(FlagKind::Trail, 0.0, 48.0).with_forward_keys(&[(0.0, 0.0), (14.0, 0.0), (22.0, 117.93), (32.0, 143.06), (44.0, 180.00), (88.0, 180.00)]),
             _ => return None,
         })
@@ -475,6 +496,17 @@ impl Moveset {
             }
             rows[row::ARS_ARCANUM_HIT + k] = r;
         }
+        // Ragnarok (M12 step 7): five rising hits on the xl set's 0xF1..=0xF5 with their hops (60,
+        // then 40), the first with the trail 5. Checked (files).
+        let ragnarok: [(u32, f32, [u8; 3], i8); 5] = [(0x5A58, 60.0, [4, 5, 6], -1), (0x5A58, 40.0, [0, 5, 6], 4), (0x5A58, 40.0, [1, 5, 6], -1), (0x5A58, 40.0, [1, 5, 6], 4), (0x5AC8, 40.0, [23, 5, 23], 5)];
+        for (k, (attack, hop, sounds, voice)) in ragnarok.into_iter().enumerate() {
+            let mut r = special(0xF1 + k as i16, attack, sounds, voice);
+            r.hop = hop;
+            if k == 0 {
+                r.trail = 5;
+            }
+            rows[row::RAGNAROK_HIT + k] = r;
+        }
 
         let rec = |kind: u8, power: i32, crit: i32, crit_bonus: i32, mp: i32, clash: u32, frac_b: f32, radius: f32| AttackData {
             stat_source: 0,
@@ -534,6 +566,8 @@ impl Moveset {
         attacks.insert(0x5B38, arc(3, 10, 200));
         attacks.insert(0x52E8, arc(3, 6, 200));
         attacks.insert(0x5BA8, arc(5, 10, 200));
+        // Ragnarok's last hit (M12 step 7): a launch, power 8, crit 200 (Checked (files)).
+        attacks.insert(0x5AC8, arc(5, 8, 200));
         Moveset { motions: m, rows, attacks }
     }
 }

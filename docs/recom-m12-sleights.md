@@ -727,10 +727,10 @@ Not checked (8.6): anything in game.
 
 | what | where | tag |
 |---|---|---|
-| **Listed**: an equipped KH1 special of `sleights::SPECIALS` (M12 step 7: Strike Raid, Ars Arcanum) joins the equipped sleights, under Re:CoM's sleight id of the same name (Strike Raid 8: command `0x88`; Ars Arcanum 10: `0x8A`), so Re:CoM's order puts it before the magic sleights. Sonic Blade is not listed (the owner named the other three). | `crate::sleights`, `win::command_menu::world` | Checked (code + tests) |
-| **Its name**: KH1's own word of its command (Strike Raid 338 "Strike", Ars Arcanum 331 "Arcanum"), each language's from the asset step. | `sleights::word` | Checked (files + tests) |
+| **Listed**: an equipped KH1 special of `sleights::SPECIALS` (M12 step 7: Strike Raid, Ars Arcanum, Ragnarok) joins the equipped sleights, under Re:CoM's sleight id of the same name (Strike Raid 8: command `0x88`; Ars Arcanum 10: `0x8A`; Ragnarok 11: `0x8B`), so Re:CoM's order puts it before the magic sleights. Sonic Blade is not listed (the owner named the other three). | `crate::sleights`, `win::command_menu::world` | Checked (code + tests) |
+| **Its name**: KH1's own word of its command (Strike Raid 338 "Strike", Ars Arcanum 331 "Arcanum", Ragnarok 334 "Ragnarok"), each language's from the asset step. | `sleights::word` | Checked (files + tests) |
 | **Usable** when its own prompt would offer it (`0x14028D0F0`'s score 2 for that special alone: a live Re:CoM attack target in range, its KH1 MP), in a battle room, on the ground, no special or sleight running; greyed and locked otherwise (KH1's error sound). | `sleights::special_usable`, `win::command_menu::sleight_specials` | Checked (code + tests) |
-| **Performed** exactly as the prompt's Triangle: confirm issues its KH1 command (0x5E / 0x57), taken by Sora's KH1 frame (`crate::specials`); not Re:CoM's sleight start; its MP is KH1's (Strike Raid 2, Ars Arcanum 3), not the tier rule. | `Menu::run_sleight` | Checked (code + tests) |
+| **Performed** exactly as the prompt's Triangle: confirm issues its KH1 command (0x5E / 0x57 / 0x5A), taken by Sora's KH1 frame (`crate::specials`); not Re:CoM's sleight start; its MP is KH1's (Strike Raid 2, Ars Arcanum 3, Ragnarok 3), not the tier rule. | `Menu::run_sleight` | Checked (code + tests) |
 
 Owner question: Sonic Blade in the list too?
 

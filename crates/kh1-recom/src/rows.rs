@@ -98,7 +98,7 @@ pub const AIR_RECOIL: u16 = 0x70;
 /// to one of Re:CoM's clips; `xl[e]` (stage 9c.1) the row of KH1's specials' motion `e` of
 /// `xl_limit.dat` (`kh1_core::data::xl`: Sonic Blade's wind-up, dash, finisher), appended after
 /// the others when the asset step converted it (the manifest's `xl_limit` section).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Extension {
     pub rows: [Option<u32>; KH1_ONLY.len()],
     pub recom: [Option<u32>; KH1_ONLY.len()],
@@ -107,6 +107,12 @@ pub struct Extension {
     /// set, the manifest's `held` section), appended after the xl rows; Sora's held reaction plays it
     /// (`crate::held`).
     pub held: Option<u32>,
+}
+
+impl Default for Extension {
+    fn default() -> Extension {
+        Extension { rows: [None; KH1_ONLY.len()], recom: [None; KH1_ONLY.len()], xl: [None; XL_ENTRIES.len()], held: None }
+    }
 }
 
 /// KH1's specials' motions the asset step converts (`xl_limit.dat` entries; stage 9c.1: Sonic

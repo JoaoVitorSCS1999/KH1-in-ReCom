@@ -48,8 +48,9 @@ pub const LANGUAGES: &[(&str, &str)] = &[("us", "US_"), ("uk", "UK_"), ("fr", "F
 /// empty row); M9 stage 9c.1: 319 Sonic Blade (0x4B), 321 Rave (0x4D), 322 Blast (0x4E); M8b:
 /// 286..291 the summons (commands 0x2F..0x34: Dumbo, Bambi, Genie, Tinker Bell, Mushu, Simba); M12
 /// step 7: 338 Strike Raid (0x5E, "Strike"), 339 / 340 its follow-ups (0x5F "Raid", 0x60 "Judgment");
-/// 331 Ars Arcanum (0x57, "Arcanum"), 332 / 333 its follow-ups (0x58 "Bash", 0x59 "Finis").
-pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 286, 287, 288, 289, 290, 291, 293, 294, 305, 313, 319, 321, 322, 331, 332, 333, 338, 339, 340, 343];
+/// 331 Ars Arcanum (0x57, "Arcanum"), 332 / 333 its follow-ups (0x58 "Bash", 0x59 "Finis"); 334
+/// Ragnarok (0x5A), 335 its follow-up (0x5B "Impact").
+pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 286, 287, 288, 289, 290, 291, 293, 294, 305, 313, 319, 321, 322, 331, 332, 333, 334, 335, 338, 339, 340, 343];
 
 /// M8b: Cloud's word (the DLL's `crate::summons::CLOUD_NAME`, the same value). KH1's `Word.bin` has
 /// no "Cloud" (Checked (files)) and Re:CoM's card-name text is not in our word system: "Cloud" in
@@ -282,6 +283,9 @@ pub fn kh1_char(c: u8) -> Option<char> {
         0xE9 => 'é',
         0xED => 'í',
         0xF2 => 'ó',
+        // M12 step 7: German "Ragnar?k" (Ragnarok 334). Checked (files: the owner's GR_Word.bin; its
+        // only word with the byte, read as KH1's German spelling "Ragnarök").
+        0xF4 => 'ö',
         _ => return None,
     })
 }
@@ -470,6 +474,7 @@ mod tests {
                 assert_eq!([get(319), get(321), get(322)], ["Sonic", "Rave", "Blast"]);
                 assert_eq!([get(338), get(339), get(340)], ["Strike", "Raid", "Judgment"]);
                 assert_eq!([get(331), get(332)], ["Arcanum", "Bash"]);
+                assert_eq!([get(334), get(335)], ["Ragnarok", "Impact"]);
                 assert_eq!([get(286), get(287), get(288), get(289), get(290), get(291)], ["Dumbo", "Bambi", "Genie", "Tinker Bell", "Mushu", "Simba"]);
                 assert_eq!(get(CLOUD_NAME), "Cloud");
             }
