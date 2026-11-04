@@ -729,9 +729,10 @@ fn install_story_skip(base: usize) {
     }
 }
 
-/// The camp menu's "KH1" entry (`keyblades`, decision 25; stage 7.13: its submenu; 2026-11-03: always
-/// there, with the Combat and Movement settings pages): four camp wrappers, all or nothing. Needs the Config input hook (the page runs through it), so it is installed only
-/// after that one. Whether the entry shows is decided each time Re:CoM builds the list.
+/// The camp's top list (`keyblades`, owner 2026-11-04): KH1's nine entries at Combat = KH1 in Sora's
+/// story, and the Settings list (Game Settings, Combat, Movement) in Sora's story: four camp
+/// wrappers, all or nothing. Needs the Config input hook (the pages run through it), so it is
+/// installed only after that one. Which list shows is decided each time Re:CoM builds the list.
 fn install_keyblades(base: usize, bases: &[PathBuf]) {
     let site = |name: &str| crate::sites::KEYBLADE_HOOKS.iter().find(|h| h.name == name).expect("site");
     let hooks = [
@@ -742,10 +743,10 @@ fn install_keyblades(base: usize, bases: &[PathBuf]) {
     ];
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
     if unsafe { hook::install_all(base, &hooks) } {
-        log("keyblades: camp wrappers in; the 8th entry \"KH1\" shows in both stories: Combat and Movement settings, and at Combat = KH1 in Sora's story Items, Customize and Abilities");
+        log("keyblades: camp wrappers in; Sora's story: at Combat = KH1 the top list is Items, Abilities, Customize, World Map .. Settings; Settings opens Game Settings, Combat, Movement (Riku's story: Re:CoM's)");
         keyblades::load_item_row(bases.iter().map(|b| b.join(crate::camp_rows::MANIFEST)).find(|p| p.is_file()).as_deref());
     } else {
-        log("keyblades: not hooked; no KH1 entry (the Kingdom Key's numbers stand; shortcuts keep KH1's learn order)");
+        log("keyblades: not hooked; Re:CoM's camp list (no Items / Abilities / Customize / Combat / Movement pages; the Kingdom Key's numbers stand; shortcuts keep KH1's learn order)");
     }
 }
 

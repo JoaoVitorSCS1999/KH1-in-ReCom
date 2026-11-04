@@ -1,11 +1,12 @@
-//! Re:CoM's Config screen code, run for the "KH1" camp entry's settings pages (Combat, Movement;
-//! owner, 2026-11-03).
+//! Re:CoM's Config screen code, run for the Settings list's settings pages (Combat, Movement;
+//! owner, 2026-11-03 / 2026-11-04).
 //!
 //! - `cfg_input` wraps the Config screen's input/state function `0x1400D3EB0`. The camp runs it in
-//!   its states 0x4A..0x4C; when our "KH1" entry was the one confirmed it runs our submenu and its
-//!   pages (`keyblades::page`) instead. Re:CoM's own Config screen always goes to the original,
-//!   untouched: its five rows, layout, panel and input are exactly Re:CoM's (the rows we used to add
-//!   there moved to the settings pages, and the draw wrapper that added them is gone).
+//!   its states 0x4A..0x4C; in Sora's story Settings opens our short list (Game Settings, Combat,
+//!   Movement), and the KH1 list's Items / Abilities / Customize pages run there too
+//!   (`keyblades::page`). Re:CoM's own Config screen (the Game Settings row, and Settings in Riku's
+//!   story) always goes to the original, untouched: its five rows, layout, panel and input are
+//!   exactly Re:CoM's.
 //! - [`SettingsPage`]: a settings page is Re:CoM's Config screen run with our rows. Re:CoM's own
 //!   Config draw `0x1400DF1B0` (called, not hooked) makes the window panel and the cursor sprite
 //!   (mode 0), opens them (mode 1), glides the cursor (mode 3), closes (modes 4 / 5) and deletes
@@ -15,7 +16,8 @@
 //!   (its pad reads, its order, its sound 1 / 4). Nothing of ours runs outside the camp menu.
 //!
 //! The Config fields used (`camp+0xB30` panel, `+0xB38` slots, `+0xBE0` cursor sprite) are
-//! free while our submenu is open: Re:CoM's Config screen runs only from its own top entry 6.
+//! free while one of our settings pages is open: Re:CoM's Config screen runs only from its own
+//! top entry 6 (Riku's story) or the Settings list's Game Settings row, never at the same time.
 //! Our page keeps its cursor itself; Re:CoM's cursor `+0xBE8` and value bytes `+0xBED..0xBF1` are
 //! never touched.
 //!
@@ -100,11 +102,18 @@ struct Vec4([f32; 4]);
 
 /// Hook on `0x1400D3EB0` (the Config screen's input/state function).
 pub unsafe extern "win64" fn cfg_input(camp: *mut u8) -> u64 {
-    // The camp's Config states 0x4A..0x4C run the "KH1" entry's submenu and pages when our 8th
-    // entry was the one confirmed (`keyblades`); Re:CoM's Config screen is never touched then.
+    // The camp's Config states 0x4A..0x4C run the Settings list (Settings confirmed in Sora's
+    // story) or one of our KH1 list entries' pages (`keyblades`); Re:CoM's Config screen runs from
+    // the list's Game Settings row (`recom_config`), and directly in Riku's story.
     if super::keyblades::page_active(camp) {
         return super::keyblades::page(camp);
     }
+    recom_config(camp)
+}
+
+/// Re:CoM's own Config input function (the original, past our hook), as its states 0x4A / 0x4B
+/// call it: `camp+0xA8` 0 opens it, then ≥ 0 each frame while it runs, < 0 when it has closed.
+pub unsafe fn recom_config(camp: *mut u8) -> u64 {
     let orig: InputFn = std::mem::transmute(ORIG_INPUT.load(Ordering::Acquire));
     orig(camp)
 }
@@ -117,7 +126,7 @@ unsafe fn sound(id: i32) {
     f::<SoundFn>(SOUND_FN)(id, -1);
 }
 
-/// A settings page open in the KH1 entry's submenu: Re:CoM's Config screen with our rows.
+/// A settings page open in the Settings list: Re:CoM's Config screen with our rows.
 pub struct SettingsPage {
     camp: usize,
     page: Page,

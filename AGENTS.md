@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 215: The camp menu at KH1: Items, Abilities, Customize … Settings; Settings opens Game Settings / Combat / Movement; the "KH1" entry gone, version 0.104.0 (2026-11-04)
+
+Owner, 2026-11-04: "in the "KH1" menu, bring the "Combat" and "Movement" sections into the "Settings" menu. When combat is set to "KH1," Replace "Review Decks" with "Items" from the "KH1" Menu When KH1 combat is selected, the menu buttons should look like this: Items Abilities Customize World Map Map Cards World Cards Status Journal Settings. When ReCoM combat is selected, the menu buttons should be default. This should remove the "KH1" section on the camp menu, and if you need to make more space for the buttons, make it work". Answers: Settings opens a short list (Game Settings, Combat, Movement) in Sora's story at both settings; Riku's story Re:CoM's default menu.
+
+- **Lists** (`keyblades::top::layout`): Sora's story + Combat = KH1 (+ Keyblade numbers): nine; Sora's story + Combat = Re:CoM: Re:CoM's seven where Re:CoM puts them, Settings opens the short list; Riku's story and the map camp (`camp+0x20A4`): untouched. Decided at each top-list build (`0x1400E3DE0` mode 0, level 0), so a Combat switch on the Combat page switches the list on the way back.
+- **Index map** (`top::KH1_ORDER` = [0, 7, 8, 1, 2, 3, 4, 5, 6]): Re:CoM's entries keep camp indices 0..6 (its entry 1 / 3 checks, state-0x11 table, header titles, help ids, `0x1400D40D0` all still mean the same; Checked (decomp)); entry 0 relabelled "Items"; Abilities / Customize are two more Re:CoM entry buttons at indices 7 / 8 (made as `0x1400E3DE0` makes its own). Count `camp+0x21C4` stays 7.
+- **Positions** (measured, Checked (files: `camp.lad` of `FO0100.SPR`) + exe): y = 78 + 24 × slot (78..270), x 86; bar (48, y − 8), glove (150, y − 6), Re:CoM's offsets (`0x140509294`, `0x1405092C0`, `0x1405092F4`, new data sites). Plates 26 high (overlap 2); first plate top 64 below the header's 63 (layout (78 / 196, 51)); last entry where the 8th entry was (270, seen in game since 0.8.0).
+- **Wrappers** (the four existing ones; no new hook): entry build: our buttons made / deleted, "Items" put on (and Re:CoM's `0xA80001` label put back), places; cursor set: Re:CoM's work for the nine at their places (`0x1400E07D0` / `0x1400E3D30`'s work replicated, Checked (disasm)); update state 0xF: moves in screen order (Re:CoM's own move with the cursor set redirected; ours where its 7-entry rule refuses), confirm on Items / Abilities / Customize with an index past 6 for Re:CoM's call (`0x1400DAABD`: no deck submenu) then Re:CoM's page-entry confirm sequence; Settings' step 9 undone the same frame (the list keeps the main panel's layer 2, as the Deck submenu); state 0x11 → 0x4A for ours; teardown deletes ours.
+- **Settings list**: Re:CoM's Deck-submenu mechanics (as the old "KH1" submenu): Game Settings runs Re:CoM's Config input `0x1400D3EB0` itself (`menu::recom_config`, `camp+0xA8` = 0 first; its draw reads no level / cursor: Checked (decomp)); Combat / Movement our settings pages. Back: cursor on Settings.
+- Pages, sounds, help lines and logs of Items (Keyblade slot), Abilities, Customize, Combat, Movement unchanged. Per frame: the pad read in state 0xF while the camp is open; nothing in field / battle.
+- Data sites added (4, pefile: 1251 sites, 0 mismatches). Assumptions: the 2-unit plate overlap and the glove's spot read well (no screenshot yet); our labels go with Re:CoM's buttons (as since 0.8.0); "Items" / "Abilities" / "Customize" / "Game Settings" are ASCII. Riku's story loses the old entry (owner's answer).
+- Checked: tests (pure rules: lists, index map, positions, moves, fix, sub rows), Windows build, site bytes. Not checked: in game. Docs: `recom-keyblade-equip.md` § The KH1 camp list, `recom-config-menu.md`.
+
+---
+
 ## Stage 214: M8c stage 1: KH1's Moogle shop list (Buy / Sell / Card Packs) as Re:CoM's shop mode 3, version 0.103.0 (2026-11-04)
 
 Owner, 2026-11-04: "When Combat is set to KH1. I want the moogle shops to change. When buying from them, they should sell items. no other tabs should appear, it should just be a list like KH1 is"; on the plan: "A 'Card Packs' row" (`design-philosophy-instructions.md` § KH1 Moogle shop). Stage 1: the list, stock by floor, buy and sell.

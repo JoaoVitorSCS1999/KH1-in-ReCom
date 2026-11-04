@@ -5,6 +5,12 @@ Built in `crates/kh1-recom` (`src/menu.rs`, `src/win/menu.rs`). Since 2026-11-03
 longer in Re:CoM's Config screen: they are the KH1 camp entry's settings pages, drawn with this
 screen's code (§ The KH1 entry's settings pages).
 
+> **Since 0.104.0 (owner, 2026-11-04)** the "KH1" entry is gone. In Sora's story (both Combat
+> settings) Re:CoM's **Settings** entry opens a short list: **Game Settings** (this Config screen,
+> Re:CoM's own input `0x1400D3EB0` called unchanged through `win::menu::recom_config`), **Combat**
+> and **Movement** (the pages below). In Riku's story Settings opens this screen directly, as
+> unmodded. `docs/recom-keyblade-equip.md` § The KH1 camp list.
+
 ## Where it is
 
 - Re:CoM has two option menus:

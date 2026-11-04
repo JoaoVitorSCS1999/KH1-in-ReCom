@@ -1,5 +1,12 @@
 # Equipping Keyblades: the camp menu's 8th entry (decision 25)
 
+> **Since 0.104.0 (owner, 2026-11-04)** the "KH1" entry is gone: at Combat = KH1 in Sora's story
+> the top list is **Items, Abilities, Customize, World Map, Map Cards, World Cards, Status,
+> Journal, Settings**, and Settings opens a short list **Game Settings / Combat / Movement** in
+> Sora's story at both Combat settings. See [The KH1 camp list](#the-kh1-camp-list-owner-2026-11-04)
+> at the end; it replaces every "8th entry" / "KH1 entry" rule below (the wrappers, the pages and
+> their objects are the same).
+
 > Since M7 stage 7.13 the entry is **"KH1"** and opens a submenu: see
 > [Stage 7.13](#stage-713-the-kh1-entry-its-submenu-and-customize). Since the owner's ask of
 > 2026-11-01 the submenu is **Items / Customize** and the Keyblade list below opens from the
@@ -537,3 +544,164 @@ entry empty, so the entry itself would go)?
    Abilities, Combat, Movement with the cursor on Combat (and the reverse).
 6. Change Run speed and close the camp: Sora runs at the new speed at once (Combat = KH1).
 7. Send `kh1-recom.log` (the `kh1 entry:` lines) and a screenshot of each page.
+
+## The KH1 camp list (owner, 2026-11-04)
+
+Ask (verbatim in `design-philosophy-instructions.md` § "Camp menu at KH1"): Combat and Movement
+into Settings; at Combat = KH1 "Items Abilities Customize World Map Map Cards World Cards Status
+Journal Settings", Items replacing Review Decks; at Combat = Re:CoM the default buttons; the "KH1"
+entry removed; "if you need to make more space for the buttons, make it work". Answers: Settings
+opens a short list (Game Settings, Combat, Movement) in Sora's story at both settings; Riku's story
+Re:CoM's default menu.
+
+Code: `crates/kh1-recom/src/keyblades.rs` (`top`, `sub`: the rules, tested), `src/win/keyblades.rs`
+(the four wrappers, the Settings list, the pages), `src/win/menu.rs` (`cfg_input`, `recom_config`).
+
+### Which list (`top::layout`)
+
+| camp | list | Settings |
+|---|---|---|
+| Sora's story, Combat = KH1, `kh1-stats.json` lists Keyblades | **KH1's nine** | the short list |
+| Sora's story, Combat = Re:CoM (or no Keyblade numbers) | Re:CoM's seven, where Re:CoM puts them | the short list |
+| Riku's story (`camp+0x21BC`), the camp that opens on the map (`camp+0x20A4`) | Re:CoM's, untouched | Re:CoM's Config page |
+
+Decided each time Re:CoM builds the top list (`0x1400E3DE0` mode 0 at level 0): camp open, and the
+return from every page (state 0x4C, 0x49, ...). So switching Combat on the Combat page switches the
+list when the Settings list closes. The wrappers are a load and Re:CoM's own function for Re:CoM's
+list.
+
+### The index map
+
+Re:CoM's entries keep their camp indices (`camp+0xB8`), so everything of Re:CoM's that reads the
+cursor keeps its meaning: the confirm's entry 1 / 3 checks, the `(i − 3) & ~2` header skip, the
+state table of state 0x11 (`1D 16 41 1A 44 47 4A`), the header titles `0x1400D3890`, the help ids,
+`0x1400D40D0`'s `+0xB8 == 3`. Checked (decomp). Only their order on screen changes.
+
+| slot on screen | entry | camp index | button |
+|---|---|---|---|
+| 0 | Items | 0 | Re:CoM's Review Decks button, relabelled "Items" |
+| 1 | Abilities | 7 | ours (`EXTRA_BTN[0]`) |
+| 2 | Customize | 8 | ours (`EXTRA_BTN[1]`) |
+| 3..8 | World Map, Map Cards, World Cards, Status, Journal, Settings | 1..6 | Re:CoM's |
+
+`top::KH1_ORDER = [0, 7, 8, 1, 2, 3, 4, 5, 6]`. `camp+0x21C4` stays 7 (Re:CoM's loops cover its own
+7 buttons; ours are handled beside them).
+
+### Positions (measured)
+
+Re:CoM: buttons at (86, 88 + 26 i) (`0x140509430`, step `0x140509270`), highlight bar (48, 80 + 26 i)
+(`0x1400E07D0`: `0x140509294`, `0x1405092C0`), glove target (150, 82 + 26 i) (`0x1400E3D30`:
+`0x1405092F4`, `0x1405092C4`). Checked (decomp + exe; the constants are `sites::KEYBLADE_DATA`).
+`camp.lad` in the owner's `FO0100.SPR`, Checked (files): an entry's plate (sprite group 18) is 26
+high, −14 .. +12 around the button, so Re:CoM's step 26 makes the plates touch; its highlight glow
+(17) is 30 high; the header items (layout group 0 elements 11 / 12) sit at (78, 51) / (196, 51),
+plate 37 .. 63, shown by Re:CoM on a confirm while the entries fade; the 8th entry ("KH1") sat at
+y 270 and was seen in game (0.8.0: clear of the bottom HUD).
+
+KH1's list: **y = 78 + 24 × slot** (78 .. 270), x 86; bar and glove keep Re:CoM's offsets (y − 8,
+y − 6). The first plate's top (64) stays below the header's bottom (63), the last entry is where the
+8th entry was; neighbouring plates overlap by 2 (step 24 against a 26-high plate). Re:CoM's list
+keeps Re:CoM's places. The help line (`camp+0x9D0`) does not move.
+
+### The four wrappers (the same hooks as before; no new hook)
+
+- **Entry build `0x1400E3DE0`** (after Re:CoM's, level 0, mode 0): the list for now; KH1's: our two
+  buttons made as Re:CoM makes its own (`C2DSeqCtrl` kind 0xC, sequence 4, a `C2DFnt` 0x80404040 font
+  0xF at (0, 6)) or given animation 4; button 0 relabelled "Items" with Re:CoM's relabel calls
+  whenever Re:CoM (re)made its labels (first build, or a level change: Re:CoM relabels on 1 → 0 and
+  2 → 0); every button moved to its slot (`0x140248660`). Re:CoM's list: ours deleted, button 0 given
+  Re:CoM's own label back (message `0xA80001` from `0x1407C1000`) if it carried ours, the buttons back
+  at Re:CoM's places if moved, a cursor past 6 put on Settings. Mode 1 / 2: animation 5 / 6 for ours.
+- **Cursor set `0x1400DEA10`** (KH1's list, level 0): Re:CoM's work for any of the nine (old entry
+  animation 5 / 0x80404040 / priority 0xC / help cleared; new entry animation 3 / 0x80C0C0C0 / 0xD),
+  the bar (`0x1400E07D0`'s work: `0x140248660` + `0x140247DC0`) and the glove (`0x1400E3D30`'s: `+0xF50`,
+  `+0xF40` when already the cursor, `+0xF60`, `+0xCC` = 1, shown) at the slot's place, `+0xB8`, the help:
+  ours for Items / Abilities / Customize, Re:CoM's message for its entries (Settings: 0x500406). During
+  Re:CoM's state-0xF move it takes the index our order gives (below). Elsewhere: Re:CoM's.
+- **Camp update `0x1400D9C80`**:
+  - state 0xF, moves: Re:CoM's rule over the nine slots (held stops at the ends, fresh wraps). Re:CoM's
+    own up / down runs (its sound 1 and glide); its cursor-set call is given our target. Where Re:CoM's
+    7-entry rule refuses (a held down on 7 / 8) we move with its calls (cursor set, sound 1,
+    `0x1400DE100`). `top::kh1_fix`, tested: Re:CoM never moves where the nine don't.
+  - state 0xF, confirm on Items / Abilities / Customize: Re:CoM's update runs with an index past 6
+    (for Items, `+0xB8` 0 → 7 for the call and back), so its confirm is skipped (`0x1400DAABD`: no deck
+    submenu); then Re:CoM's confirm sequence for a page entry, our header title, step 9 (main panel
+    layer 2 hidden), `+0xBC` = the index, state 0x11.
+  - state 0xF, Re:CoM's own confirms: ours get animation 6; on Settings (Sora's story) Re:CoM's step 9 is
+    undone the same frame (`0x140247E50(camp+0x130, 2, 1)`): the Settings list keeps the layer, as
+    Re:CoM's Deck submenu does.
+  - state 0x11 for our entry: after Re:CoM's (the table gives 0x1D for 0, 0x2E for 7 and 8; Checked
+    (decomp: the table's 8th / 9th bytes are the deck table's, on the stack)) the state becomes 0x4A:
+    the page runs in Re:CoM's Config states 0x4A..0x4C.
+  - states 7 / 0xD: animation 5 for ours when Re:CoM gives its own (not the highlighted one in 0xD).
+- **Teardown `0x1400D7C20`**: the open page's objects and our two buttons, then Re:CoM's.
+- **Config input `0x1400D3EB0`** (hooked since 0.4.0): our code when one of our entries was confirmed
+  (`+0xBC` = its index, and our own record of the confirm) or Settings was (`+0xBC` = 6) in Sora's
+  story; else Re:CoM's Config page (`menu::recom_config`, the original).
+
+### The pages
+
+Items, Abilities and Customize are the same pages as before (Items with the Keyblade slot and the
+Keyblade list, KH1's ability screen, KH1's Customize), opened straight from the top list: the page
+opens on state 0x4A's first call, as Re:CoM's entry-4 page does, and Re:CoM's 0x4B / 0x4C close the
+header and rebuild the list; 0xD highlights the entry again. Their sounds, help lines and logs are
+unchanged; the log line "camp: Items opened from the top list" is new.
+
+### The Settings list
+
+Re:CoM's Deck submenu, run as the "KH1" entry's submenu was (same calls, Checked (decomp)): Re:CoM's
+buttons 0..2 relabelled **Game Settings, Combat, Movement**, count 3, level 1, at Re:CoM's places (at
+KH1's list they are moved back while faded; the KH1 places return when the list is rebuilt), Re:CoM's
+input rule, cursor set, sounds, header item 1 as the breadcrumb under Re:CoM's own "Settings" title.
+
+- **Game Settings**: Re:CoM's Config page itself: `camp+0xA8` = 0 (as state 0x4A writes), then its input
+  function `0x1400D3EB0` every frame until it returns < 0, exactly as states 0x4A / 0x4B call it. Its
+  draw `0x1400DF1B0` reads nothing of the camp's level / cursor (`+0xB4 / +0xB8 / +0xBC`; Checked
+  (decomp)), so it runs at the list's level 1 unchanged. Help line: Re:CoM's 0x500406.
+- **Combat**, **Movement**: our settings pages (`menu::SettingsPage`), unchanged.
+- Cancel: back to the top list with the cursor on Settings (camp index 6 in both of Sora's lists);
+  Re:CoM's 0x4C rebuild picks the list for the Combat setting now (nine ↔ seven).
+
+### Per frame
+
+The camp exists only while the pause menu is open. In the top list the update reads the pad (pure
+reads) once in state 0xF; nothing else per frame. Riku's story / the map camp: one load per wrapper.
+
+### Assumptions and risks
+
+1. **Room**: the nine at y 78 .. 270 with plates overlapping by 2. Measured from `camp.lad`, not seen.
+   The header (y 51) and the KH1 list's first plate don't overlap; whether 2 overlapping pixels read
+   well, and whether the glove (150, y − 6) sits right on a 24 step, are for the screenshot.
+2. **Our labels**: deleted only as Re:CoM deletes its own (relabels; the buttons' teardown takes their
+   items). Inferred, as the 8th entry's since 0.8.0 (no leak or crash reported).
+3. **Items' label after Re:CoM relabels**: detected from Re:CoM's own rule (first build or a level
+   change), not from the label pointer (Re:CoM may reuse the address).
+4. **Game Settings at level 1**: Re:CoM's Config page sees level 1 instead of 2; nothing in it reads the
+   level (Checked (decomp)). Its saving is Re:CoM's own.
+5. **Texts**: "Items", "Abilities", "Customize", "Game Settings" are ASCII (not localized); Re:CoM's
+   seven labels and their help lines stay Re:CoM's localized messages.
+6. Riku's story loses the old "KH1" entry (Combat / Movement there): the owner's answer.
+
+### What the owner should test
+
+1. Sora's story, Combat = KH1: the top list reads Items, Abilities, Customize, World Map, Map Cards,
+   World Cards, Status, Journal, Settings; all nine on screen, none on the help line or the HUD; the
+   highlight bar and the glove on each entry as the cursor moves. Screenshot please.
+2. Cursor: held down from Items walks all nine and stops on Settings; held up walks back and stops on
+   Items; a fresh press wraps at both ends; each entry's help line (Items: "Sora's Keyblade and
+   items...", Settings: Re:CoM's own line).
+3. Confirm Items / Abilities / Customize: sound, the entries fade, the header reads the entry's name,
+   the page opens and works as before (Items' Keyblade slot, equipping, Customize's picker, AP); cancel
+   brings the list back with the entry highlighted. Items must not open the deck editor.
+4. World Map, Map Cards, World Cards, Status, Journal: each opens and returns as unmodded (World Map /
+   World Cards still buzz when not available).
+5. Settings: a list of Game Settings, Combat, Movement under the "Settings" title. Game Settings opens
+   Re:CoM's own Config page; change something there, close it, close the camp, open it again: the
+   change kept. Combat and Movement as before.
+6. On the Combat page switch Combat to Re:CoM, back out twice: the top list is Re:CoM's seven (Review
+   Decks first, Re:CoM's places), cursor on Settings; switch back to KH1: the nine again.
+7. Combat = Re:CoM from the start: Re:CoM's seven exactly as unmodded; only Settings opens the short
+   list; Review Decks opens the deck editor.
+8. Riku's story: Re:CoM's menu; Settings opens Re:CoM's Config page directly.
+9. Close the camp with Start from Abilities / Customize, and quit to title with a page open: no crash.
+10. Send `kh1-recom.log` (the `camp:` lines) and the screenshots.

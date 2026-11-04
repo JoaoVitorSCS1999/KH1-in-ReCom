@@ -112,13 +112,173 @@ impl Story {
     }
 }
 
-/// The camp's top list: Re:CoM's 7 entries (0..6) and ours (7).
+/// The camp's top list (owner, 2026-11-04, "Camp menu at KH1" in
+/// `docs/design-philosophy-instructions.md`).
+///
+/// - **KH1 list** (Combat = KH1, Sora's story, the list camp): nine entries, top to bottom Items,
+///   Abilities, Customize, World Map, Map Cards, World Cards, Status, Journal, Settings. Items is
+///   Re:CoM's entry 0 (Review Decks) relabelled; Abilities and Customize are two more instances of
+///   Re:CoM's entry button at camp indices 7 and 8; Re:CoM's entries 1..6 keep their indices (so
+///   every Re:CoM read of the cursor still means what it meant: the entry 1 / 3 checks, the state
+///   table, the header titles, the help ids). Only the order on screen and the positions change.
+/// - **Settings list** (Combat = Re:CoM, Sora's story): Re:CoM's seven, where they are; only
+///   Settings (entry 6) opens the short list ([`super::sub`]) instead of Re:CoM's page.
+/// - **Re:CoM** (Riku's story, the camp that opens straight onto the map): untouched.
 pub mod top {
+    use super::Story;
+
     /// Re:CoM's entry count at the top level (camp ctor `0x1400D2730`). Checked (decomp).
     pub const RECOM_ENTRIES: i32 = 7;
-    /// Our entry's index.
-    pub const OURS: i32 = 7;
-    pub const ENTRIES: i32 = 8;
+    /// Re:CoM's Review Decks entry (state table byte 0x1D); at the KH1 list, our Items.
+    pub const DECKS: i32 = 0;
+    /// Re:CoM's Settings entry (Config, state table byte 0x4A).
+    pub const SETTINGS: i32 = 6;
+    /// Our two entries' camp indices (past Re:CoM's 7: Re:CoM's confirm skips them,
+    /// `cmp [camp+0xB8],6; jg` at `0x1400DAABD`, Checked (disasm)).
+    pub const ABILITIES: i32 = 7;
+    pub const CUSTOMIZE: i32 = 8;
+    /// Our extra buttons, in camp index order.
+    pub const EXTRA: [i32; 2] = [ABILITIES, CUSTOMIZE];
+    pub const KH1_ENTRIES: i32 = 9;
+    /// The KH1 list on screen, top to bottom: the camp index in each slot.
+    pub const KH1_ORDER: [i32; KH1_ENTRIES as usize] = [DECKS, ABILITIES, CUSTOMIZE, 1, 2, 3, 4, 5, SETTINGS];
+
+    /// Which top list the camp shows.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Layout {
+        /// Re:CoM's own, untouched (Riku's story, the direct-map camp).
+        Recom,
+        /// Re:CoM's seven where they are; Settings opens the short list.
+        Settings,
+        /// The owner's nine.
+        Kh1,
+    }
+
+    /// The list for this camp. `direct_map` = `camp+0x20A4` (the camp never shows the list);
+    /// `kh1_pages` = Combat = KH1 and the stats file lists Keyblades (the KH1 pages' condition
+    /// since 0.8.0: without the asset step's numbers they have nothing to show).
+    pub fn layout(story: Story, direct_map: bool, combat_kh1: bool, kh1_pages: bool) -> Layout {
+        if direct_map || story == Story::Riku {
+            Layout::Recom
+        } else if combat_kh1 && kh1_pages {
+            Layout::Kh1
+        } else {
+            Layout::Settings
+        }
+    }
+
+    /// What a top entry is.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Entry {
+        /// Our pages (`super::sub::Row` names the page).
+        Items,
+        Abilities,
+        Customize,
+        /// Re:CoM's entry `i` (0..6), run by Re:CoM (Settings: see [`settings_list`]).
+        Recom(i32),
+    }
+
+    impl Entry {
+        /// The page our entry opens.
+        pub fn page(self) -> Option<super::sub::Row> {
+            match self {
+                Entry::Items => Some(super::sub::Row::Items),
+                Entry::Abilities => Some(super::sub::Row::Abilities),
+                Entry::Customize => Some(super::sub::Row::Customize),
+                Entry::Recom(_) => None,
+            }
+        }
+    }
+
+    /// The entry at camp index `idx` in this list.
+    pub fn entry(l: Layout, idx: i32) -> Option<Entry> {
+        match (l, idx) {
+            (Layout::Kh1, DECKS) => Some(Entry::Items),
+            (Layout::Kh1, ABILITIES) => Some(Entry::Abilities),
+            (Layout::Kh1, CUSTOMIZE) => Some(Entry::Customize),
+            (_, i) if (0..RECOM_ENTRIES).contains(&i) => Some(Entry::Recom(i)),
+            _ => None,
+        }
+    }
+
+    /// Settings opens the short list (Game Settings, Combat, Movement) in Sora's story at both
+    /// Combat settings; Re:CoM's page directly otherwise.
+    pub fn settings_list(l: Layout) -> bool {
+        l != Layout::Recom
+    }
+
+    /// Entries in the list.
+    pub fn count(l: Layout) -> i32 {
+        if l == Layout::Kh1 {
+            KH1_ENTRIES
+        } else {
+            RECOM_ENTRIES
+        }
+    }
+
+    /// The slot on screen (0 = top) of camp index `idx`.
+    pub fn slot(l: Layout, idx: i32) -> Option<i32> {
+        if l == Layout::Kh1 {
+            KH1_ORDER.iter().position(|&i| i == idx).map(|s| s as i32)
+        } else {
+            (0..RECOM_ENTRIES).contains(&idx).then_some(idx)
+        }
+    }
+
+    /// The camp index in slot `s`.
+    pub fn at_slot(l: Layout, s: i32) -> Option<i32> {
+        if l == Layout::Kh1 {
+            usize::try_from(s).ok().and_then(|s| KH1_ORDER.get(s)).copied()
+        } else {
+            (0..RECOM_ENTRIES).contains(&s).then_some(s)
+        }
+    }
+
+    // Positions (Re:CoM's 2D units, 512 × 384 with (0, 0) top left; `0x140248660` subtracts
+    // (256, 192)). Re:CoM's: entry build `0x1400E3DE0` places button i at (86, 88 + 26 i)
+    // (`0x140509430`, step `0x140509270`); the highlight bar `0x1400E07D0` at (48, 80 + 26 i)
+    // (`0x140509294`, `0x1405092C0`); the glove `0x1400E3D30` glides to (150, 82 + 26 i)
+    // (`0x1405092F4`, `0x1405092C4`). Checked (decomp + exe).
+    pub const ENTRY_X: f32 = 86.0;
+    pub const RECOM_Y0: f32 = 88.0;
+    pub const RECOM_STEP: f32 = 26.0;
+    pub const BAR_X: f32 = 48.0;
+    pub const RECOM_BAR_Y0: f32 = 80.0;
+    pub const GLOVE_X: f32 = 150.0;
+    pub const RECOM_GLOVE_Y0: f32 = 82.0;
+    /// The KH1 list: nine entries at y 78 .. 270, in the room Re:CoM's seven and the 8th entry
+    /// ("KH1", at y 270, seen in game since 0.8.0) took. Measured (Checked (files: `camp.lad` of the
+    /// owner's `FO0100.SPR`)): an entry's plate (sprite group 18) is 26 high (−14 .. +12 around
+    /// the button), its highlight glow (17) 30 (−16 .. +14); Re:CoM's step 26 makes the plates
+    /// touch. Step 24 overlaps neighbouring plates by 2. The first entry's plate top (64) stays
+    /// below the header (layout group 0 elements 11 / 12 at y 51, plate 37 .. 63), which Re:CoM
+    /// shows on a confirm while the entries fade; the last's bottom (282) where the 8th entry's was.
+    pub const KH1_Y0: f32 = 78.0;
+    pub const KH1_STEP: f32 = 24.0;
+
+    fn y0_step(l: Layout) -> (f32, f32) {
+        if l == Layout::Kh1 {
+            (KH1_Y0, KH1_STEP)
+        } else {
+            (RECOM_Y0, RECOM_STEP)
+        }
+    }
+
+    /// Entry button position of slot `s`.
+    pub fn entry_pos(l: Layout, s: i32) -> (f32, f32) {
+        let (y0, step) = y0_step(l);
+        (ENTRY_X, y0 + step * s as f32)
+    }
+
+    /// The highlight bar's position for slot `s` (Re:CoM's: 8 above the entry).
+    pub fn bar_pos(l: Layout, s: i32) -> (f32, f32) {
+        (BAR_X, entry_pos(l, s).1 - (RECOM_Y0 - RECOM_BAR_Y0))
+    }
+
+    /// The glove's glide target for slot `s` (Re:CoM's: 6 above the entry).
+    pub fn glove_pos(l: Layout, s: i32) -> (f32, f32) {
+        (GLOVE_X, entry_pos(l, s).1 - (RECOM_Y0 - RECOM_GLOVE_Y0))
+    }
 
     /// One frame of the pad as the top list's input (update `0x1400D9C80`, state 0xF) reads it.
     /// Checked (disasm `0x1400DAA8B..0x1400DAD84`): Start (mask 0x800, fresh) or cancel first,
@@ -136,7 +296,7 @@ pub mod top {
     }
 
     /// What Re:CoM's own state 0xF does with `count` entries: the index it passes to the cursor
-    /// set `0x1400DEA10`, or None when nothing moves. (Confirm / close are not moves.)
+    /// set `0x1400DEA10` (before its wrap), or None when nothing moves.
     pub fn recom_move(cursor: i32, count: i32, p: Pad) -> Option<i32> {
         if p.start || p.cancel || p.confirm {
             return None;
@@ -156,55 +316,53 @@ pub mod top {
         None
     }
 
-    /// Re:CoM's cursor set wraps an index below 0 to the last entry and one past the last to 0;
-    /// with our entry the list has 8 entries. Checked (decomp `0x1400DEA10`).
-    pub fn wrap(idx: i32) -> i32 {
-        if idx < 0 {
-            ENTRIES - 1
-        } else if idx >= ENTRIES {
-            0
-        } else {
-            idx
-        }
+    /// The KH1 list's move: Re:CoM's rule over the nine slots on screen (held stops at the ends,
+    /// fresh wraps, as the cursor set wraps), as a camp index.
+    pub fn kh1_move(cursor: i32, p: Pad) -> Option<i32> {
+        let s = slot(Layout::Kh1, cursor)?;
+        let t = recom_move(s, KH1_ENTRIES, p)?;
+        at_slot(Layout::Kh1, t.rem_euclid(KH1_ENTRIES))
     }
 
-    /// What our update wrapper adds after Re:CoM's state 0xF has run (it always runs).
+    /// What our update wrapper does around Re:CoM's state 0xF at the KH1 list.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Fix {
-        /// Re:CoM's own code (with the cursor-set wrapper) already did the right thing.
+        /// Re:CoM's own code does it: its close / its confirm of entries 1..6 / no input / a move
+        /// it makes itself (the cursor set then puts the cursor on `kh1_move`'s entry).
         None,
-        /// A held "down" on entry 6: Re:CoM stops there (its last entry); with 8 entries it moves
-        /// to ours, with Re:CoM's cursor set, sound 1 and glide.
-        MoveToOurs,
-        /// Confirm on our entry: Re:CoM skips index 7 (`cmp [camp+0xB8],6; jg` at `0x1400DAABD`);
-        /// we run its confirm sequence for us.
-        ConfirmOurs,
+        /// A move Re:CoM's 7-entry rule refuses (a held "down" on index 7 or 8, which it takes
+        /// for its last entries): ours, with Re:CoM's cursor set, sound 1 and glide.
+        Move(i32),
+        /// Confirm on one of our entries: Re:CoM must not run its own (entry 0 would open the
+        /// deck submenu; 7 / 8 it skips); we run its confirm sequence for a page entry.
+        Confirm(Entry),
     }
 
-    pub fn fix(cursor: i32, p: Pad) -> Fix {
+    pub fn kh1_fix(cursor: i32, p: Pad) -> Fix {
         if p.start || p.cancel {
             return Fix::None;
         }
         if p.confirm {
-            return if cursor == OURS { Fix::ConfirmOurs } else { Fix::None };
+            return match entry(Layout::Kh1, cursor) {
+                Some(e @ (Entry::Items | Entry::Abilities | Entry::Customize)) => Fix::Confirm(e),
+                _ => Fix::None,
+            };
         }
-        if p.up {
-            return Fix::None;
+        match (kh1_move(cursor, p), recom_move(cursor, RECOM_ENTRIES, p)) {
+            (Some(t), None) if t != cursor => Fix::Move(t),
+            _ => Fix::None,
         }
-        if p.down && cursor == RECOM_ENTRIES - 1 && !p.down_fresh {
-            return Fix::MoveToOurs;
-        }
-        Fix::None
     }
 
-    /// The whole 8-entry rule as the game runs it: Re:CoM's state 0xF with its 7-entry count,
-    /// the cursor set's wrap (ours) and our fix. Used by the tests.
-    pub fn step(cursor: i32, p: Pad) -> Option<i32> {
-        if let Some(i) = recom_move(cursor, RECOM_ENTRIES, p) {
-            return Some(wrap(i));
+    /// The whole KH1-list rule as the game runs it: Re:CoM's state 0xF with its 7-entry count,
+    /// the cursor set redirected to `kh1_move`'s entry when Re:CoM moves, and our fix when it
+    /// doesn't. Used by the tests.
+    pub fn kh1_step(cursor: i32, p: Pad) -> Option<i32> {
+        if recom_move(cursor, RECOM_ENTRIES, p).is_some() {
+            return kh1_move(cursor, p);
         }
-        match fix(cursor, p) {
-            Fix::MoveToOurs => Some(OURS),
+        match kh1_fix(cursor, p) {
+            Fix::Move(t) => Some(t),
             _ => None,
         }
     }
@@ -220,10 +378,15 @@ pub mod top {
     ];
 
     /// The help id Re:CoM shows with the cursor on its top entry `i` in this story.
-    pub fn recom_help(story: super::Story, i: i32) -> Option<u32> {
-        let row = &RECOM_HELP[(story == super::Story::Riku) as usize];
+    pub fn recom_help(story: Story, i: i32) -> Option<u32> {
+        let row = &RECOM_HELP[(story == Story::Riku) as usize];
         usize::try_from(i).ok().and_then(|i| row.get(i)).copied()
     }
+
+    /// The label message ids of Re:CoM's top entries in Sora's story (`0x1407C1000`, read by the
+    /// entry build `0x1400E3DE0` at `((level + story × 2) × 7 + i) × 4`; Checked (exe)): Review
+    /// Decks is `0xA80001`. Used to give entry 0 its own label back when the list leaves KH1's.
+    pub const RECOM_LABELS: [u32; RECOM_ENTRIES as usize] = [0xA8_0001, 0xA8_0002, 0xA8_0003, 0xA8_0004, 0xA8_0005, 0xA8_0006, 0xA8_0007];
 }
 
 /// The Keyblade page's list: Re:CoM's entry-4 list rules (`0x1400EB7E0` sub-state 2 and draw
@@ -369,105 +532,58 @@ pub mod row_look {
 /// Texts: NUL-terminated ASCII handed to Re:CoM's text items (as the Config row's are; seen in
 /// game there). No `%`: the help line's formatter `0x1402402B0` treats it as a code.
 pub mod text {
-    /// The camp entry (M7 stage 7.13, decision 34: "one "KH1" camp entry (our entry renamed) with a
-    /// submenu"), its header title and help line.
-    pub const ENTRY_LABEL: &[u8] = b"KH1\0";
-    pub const TITLE: &[u8] = b"KH1\0";
-    /// At Combat = KH1 (Items, Customize, Abilities, Combat, Movement).
-    pub const ENTRY_HELP: &[u8] = b"Items, shortcuts and abilities; combat and movement settings.\0";
-    /// At Combat = Re:CoM (Combat, Movement).
-    pub const ENTRY_HELP_SETTINGS: &[u8] = b"Combat and movement settings.\0";
-    /// In Riku's story (Combat, Movement): none of their rows acts there (our KH1 battles,
-    /// movement and Guard are Sora's; `docs/recom-config-menu.md` § Riku's story).
-    pub const ENTRY_HELP_RIKU: &[u8] = b"Combat and movement settings for Sora's story; no effect for Riku.\0";
-
-    /// The entry's help line for the rows its submenu will show.
-    pub fn entry_help(story: super::Story, kh1_pages: bool) -> &'static [u8] {
-        if story == super::Story::Riku {
-            ENTRY_HELP_RIKU
-        } else if kh1_pages {
-            ENTRY_HELP
-        } else {
-            ENTRY_HELP_SETTINGS
-        }
-    }
-    /// The submenu's Combat and Movement rows in Riku's story.
-    pub const COMBAT_HELP_RIKU: &[u8] = b"For Sora's story: Combat, Guard reactions, enemies, Revenge Value.\0";
-    pub const MOVEMENT_HELP_RIKU: &[u8] = b"For Sora's story: run speed, jump height, air speed, Dodge roll.\0";
     /// The Keyblade list's help (opened from the Items page's Keyblade slot).
     pub const PAGE_HELP: &[u8] = b"Choose the Keyblade Sora fights with.\0";
     pub const STAT_LABELS: [&[u8]; 3] = [b"Strength\0", b"Magic\0", b"Reach\0"];
-    /// The Customize row (KH1's pause-menu word) and its help.
+    /// The Customize entry (KH1's pause-menu word) and its help.
     pub const CUSTOMIZE_LABEL: &[u8] = b"Customize\0";
     pub const CUSTOMIZE_HELP: &[u8] = b"Set the spells and sleights of the three shortcuts.\0";
+    /// The Settings list's first row: Re:CoM's own Config page (its help line is Re:CoM's
+    /// message for its Settings entry, `top::recom_help(Sora, 6)`).
+    pub const GAME_SETTINGS_LABEL: &[u8] = b"Game Settings\0";
 }
 
-/// The "KH1" entry's submenu (M7 stage 7.13): Re:CoM's own entry buttons relabelled with these
-/// rows, as Re:CoM's Deck submenu relabels them (`0x1400E3DE0` mode 0 at level 1), run with
-/// Re:CoM's Deck-submenu input rule (update state 0x22, `0x1400D9C80`). Checked (decomp).
+/// The Settings list (owner, 2026-11-04: "Settings opens a short list"): Re:CoM's own entry
+/// buttons relabelled with these rows, as Re:CoM's Deck submenu relabels them (`0x1400E3DE0` mode 0
+/// at level 1), run with Re:CoM's Deck-submenu input rule (update state 0x22, `0x1400D9C80`).
+/// Checked (decomp). In Sora's story at both Combat settings; Riku's story keeps Re:CoM's page.
 ///
-/// Adding a row is one more [`Row`] with its label, help and page (M8 stage 8a.2 added Items this
-/// way, M9 stage 9b Abilities). Since the owner's ask of 2026-11-01 the Keyblades row is gone: the
-/// Keyblade is the first slot of the Items page's Sora list (`crate::items_page::SORA_KINDS`).
-/// Since 2026-11-03 (owner) the entry is always there and has two settings rows, Combat and
-/// Movement (`crate::menu`); Items, Customize and Abilities are there only at Combat = KH1.
+/// [`Row`] also names the KH1 pages (Items, Customize, Abilities) the KH1 list's own entries open.
 pub mod sub {
     use super::text;
     use super::top::Pad;
 
-    /// A row of the submenu: the page it opens.
+    /// A page: a Settings-list row, or a KH1 list entry's page.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Row {
+        /// Re:CoM's Config page, unchanged (its input `0x1400D3EB0` and draw `0x1400DF1B0`).
+        GameSettings,
+        /// The Combat settings page (`crate::menu::Page::Combat`).
+        Combat,
+        /// The Movement settings page (`crate::menu::Page::Movement`).
+        Movement,
         /// M8 stage 8a.2: KH1's pause-menu Items screen (`crate::items_page`); Sora's list holds
         /// his Keyblade slot, then his item slots.
         Items,
         Customize,
         /// M9 stage 9b: KH1's ability screen with AP (`crate::abilities::page`).
         Abilities,
-        /// The Combat settings page (`crate::menu::Page::Combat`).
-        Combat,
-        /// The Movement settings page (`crate::menu::Page::Movement`).
-        Movement,
     }
 
-    /// The rows at Combat = KH1 (with Keyblade numbers to list), top to bottom.
-    pub const KH1_ROWS: &[Row] = &[Row::Items, Row::Customize, Row::Abilities, Row::Combat, Row::Movement];
-    /// The rows at Combat = Re:CoM, and in Riku's story at any setting (owner, 2026-11-03: "only
-    /// Combat and Movement", both times).
-    pub const RECOM_ROWS: &[Row] = &[Row::Combat, Row::Movement];
+    /// The Settings list's rows, top to bottom.
+    pub const SETTINGS_ROWS: &[Row] = &[Row::GameSettings, Row::Combat, Row::Movement];
 
-    /// Whether the submenu shows KH1's pages (Items, Customize, Abilities): Combat = KH1, the stats
-    /// file lists Keyblades (the entry's condition before 2026-11-03) and Sora's story (Riku's
-    /// story: only Combat and Movement, owner 2026-11-03).
-    pub fn kh1_pages(story: super::Story, combat_kh1: bool, keyblades_listed: bool) -> bool {
-        story == super::Story::Sora && combat_kh1 && keyblades_listed
-    }
-
-    /// The rows the submenu shows: KH1's pages only at Combat = KH1 (`kh1_pages`: Combat = KH1 and
-    /// the stats file lists Keyblades, the entry's old condition).
-    pub fn rows(kh1_pages: bool) -> &'static [Row] {
-        if kh1_pages {
-            KH1_ROWS
-        } else {
-            RECOM_ROWS
-        }
-    }
-
-    /// Re:CoM's camp has 7 entry buttons (`camp+0x1B8[7]`); the submenu reuses them. Checked
+    /// Re:CoM's camp has 7 entry buttons (`camp+0x1B8[7]`); the list reuses them. Checked
     /// (decomp).
     pub const MAX_ROWS: usize = 7;
-    const _: () = assert!(KH1_ROWS.len() <= MAX_ROWS && !RECOM_ROWS.is_empty());
-
-    /// Where the cursor goes when the row list changes (Combat flipped on the Combat page): the
-    /// same row in the new list, else the first.
-    pub fn row_in(rows: &[Row], row: Row) -> i32 {
-        rows.iter().position(|&r| r == row).unwrap_or(0) as i32
-    }
+    const _: () = assert!(SETTINGS_ROWS.len() <= MAX_ROWS);
 
     impl Row {
-        /// The button's label, also the page's header title (header item 1, the breadcrumb).
+        /// The button's label, also the page's header title (header item 1 in the Settings
+        /// list, item 0 for a KH1 list entry).
         pub fn label(self) -> &'static [u8] {
             match self {
+                Row::GameSettings => text::GAME_SETTINGS_LABEL,
                 Row::Items => crate::items_page::text::LABEL,
                 Row::Customize => text::CUSTOMIZE_LABEL,
                 Row::Abilities => crate::abilities::page::text::LABEL,
@@ -476,28 +592,25 @@ pub mod sub {
             }
         }
 
-        /// The help line while the row is highlighted.
-        pub fn help(self) -> &'static [u8] {
+        /// The help line while the row (or entry) is highlighted; None: Re:CoM's message
+        /// ([`Row::recom_help`]).
+        pub fn help(self) -> Option<&'static [u8]> {
             match self {
-                Row::Items => crate::items_page::text::HELP,
-                Row::Customize => text::CUSTOMIZE_HELP,
-                Row::Abilities => crate::abilities::page::text::HELP,
-                Row::Combat => crate::menu::Page::Combat.help(),
-                Row::Movement => crate::menu::Page::Movement.help(),
+                Row::GameSettings => None,
+                Row::Items => Some(crate::items_page::text::HELP),
+                Row::Customize => Some(text::CUSTOMIZE_HELP),
+                Row::Abilities => Some(crate::abilities::page::text::HELP),
+                Row::Combat => Some(crate::menu::Page::Combat.help()),
+                Row::Movement => Some(crate::menu::Page::Movement.help()),
             }
         }
 
-        /// The help line in this story: in Riku's story the settings rows say they are Sora's
-        /// story's (none of their settings acts for Riku).
-        pub fn help_in(self, story: super::Story) -> &'static [u8] {
-            match (story, self) {
-                (super::Story::Riku, Row::Combat) => text::COMBAT_HELP_RIKU,
-                (super::Story::Riku, Row::Movement) => text::MOVEMENT_HELP_RIKU,
-                _ => self.help(),
-            }
+        /// Re:CoM's help message for the row (Game Settings: its Settings entry's).
+        pub fn recom_help(self) -> Option<u32> {
+            (self == Row::GameSettings).then(|| super::top::recom_help(super::Story::Sora, super::top::SETTINGS)).flatten()
         }
 
-        /// The settings page the row opens, if it is one.
+        /// The settings page the row opens, if it is one of ours.
         pub fn settings_page(self) -> Option<crate::menu::Page> {
             match self {
                 Row::Combat => Some(crate::menu::Page::Combat),
@@ -507,7 +620,7 @@ pub mod sub {
         }
     }
 
-    /// What one frame of input does in the submenu.
+    /// What one frame of input does in the list.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Act {
         None,
@@ -636,7 +749,7 @@ mod tests {
         assert_eq!(unlocked([3], |_| false), Vec::<u16>::new());
     }
 
-    use top::{Fix, Pad};
+    use top::{Entry, Fix, Layout, Pad};
     const NONE: Pad = Pad { start: false, cancel: false, confirm: false, up: false, up_fresh: false, down: false, down_fresh: false };
     const DOWN_HELD: Pad = Pad { down: true, ..NONE };
     const DOWN_FRESH: Pad = Pad { down: true, down_fresh: true, ..NONE };
@@ -644,43 +757,152 @@ mod tests {
     const UP_FRESH: Pad = Pad { up: true, up_fresh: true, ..NONE };
 
     #[test]
-    fn recom_rule_unchanged_inside_the_list() {
+    fn the_list_per_story_and_setting() {
+        // Owner, 2026-11-04: nine at KH1 in Sora's story; Re:CoM's seven at Re:CoM (Settings opens
+        // the short list); Riku's story and the direct-map camp untouched.
+        assert_eq!(top::layout(Story::Sora, false, true, true), Layout::Kh1);
+        assert_eq!(top::layout(Story::Sora, false, false, true), Layout::Settings);
+        assert_eq!(top::layout(Story::Sora, false, true, false), Layout::Settings, "no Keyblade numbers: no KH1 pages");
+        for (c, k) in [(true, true), (true, false), (false, true), (false, false)] {
+            assert_eq!(top::layout(Story::Riku, false, c, k), Layout::Recom);
+            assert_eq!(top::layout(Story::Sora, true, c, k), Layout::Recom, "direct map");
+            assert_eq!(top::layout(Story::Riku, true, c, k), Layout::Recom);
+        }
+        assert!(top::settings_list(Layout::Kh1) && top::settings_list(Layout::Settings) && !top::settings_list(Layout::Recom));
+        assert_eq!((top::count(Layout::Kh1), top::count(Layout::Settings), top::count(Layout::Recom)), (9, 7, 7));
+        assert_eq!((Story::from_camp(0), Story::from_camp(1)), (Story::Sora, Story::Riku));
+    }
+
+    #[test]
+    fn kh1_list_is_the_owners_nine() {
+        // Items Abilities Customize World Map Map Cards World Cards Status Journal Settings.
+        let on_screen: Vec<Entry> = (0..9).map(|s| top::entry(Layout::Kh1, top::at_slot(Layout::Kh1, s).unwrap()).unwrap()).collect();
+        let r = Entry::Recom;
+        assert_eq!(on_screen, vec![Entry::Items, Entry::Abilities, Entry::Customize, r(1), r(2), r(3), r(4), r(5), r(6)]);
+        // Every camp index once; slot and index are inverses.
+        let mut seen = top::KH1_ORDER.to_vec();
+        seen.sort_unstable();
+        assert_eq!(seen, (0..9).collect::<Vec<i32>>());
+        for i in 0..9 {
+            assert_eq!(top::at_slot(Layout::Kh1, top::slot(Layout::Kh1, i).unwrap()), Some(i));
+        }
+        assert_eq!((top::slot(Layout::Kh1, 9), top::at_slot(Layout::Kh1, 9), top::at_slot(Layout::Kh1, -1)), (None, None, None));
+        // Re:CoM's lists: its seven, where they are; no entry 7 / 8.
+        for l in [Layout::Settings, Layout::Recom] {
+            for i in 0..7 {
+                assert_eq!((top::slot(l, i), top::at_slot(l, i), top::entry(l, i)), (Some(i), Some(i), Some(r(i))));
+            }
+            assert_eq!((top::entry(l, 7), top::entry(l, 8), top::slot(l, 7)), (None, None, None));
+        }
+        // Our entries open our pages; Re:CoM's keep theirs.
+        assert_eq!(Entry::Items.page(), Some(sub::Row::Items));
+        assert_eq!(Entry::Abilities.page(), Some(sub::Row::Abilities));
+        assert_eq!(Entry::Customize.page(), Some(sub::Row::Customize));
+        assert_eq!(r(6).page(), None);
+        // Settings is Re:CoM's entry 6 in both of Sora's lists (the cursor goes back to it).
+        assert_eq!(top::entry(Layout::Kh1, top::SETTINGS), top::entry(Layout::Settings, top::SETTINGS));
+    }
+
+    #[test]
+    fn positions_fit_the_room() {
+        // Re:CoM's own, unchanged (the constants read from the exe: `sites::KEYBLADE_DATA`).
+        for s in 0..7 {
+            let y = 88.0 + 26.0 * s as f32;
+            assert_eq!(top::entry_pos(Layout::Settings, s), (86.0, y));
+            assert_eq!(top::bar_pos(Layout::Settings, s), (48.0, 80.0 + 26.0 * s as f32));
+            assert_eq!(top::glove_pos(Layout::Recom, s), (150.0, 82.0 + 26.0 * s as f32));
+        }
+        // KH1's nine: 78 .. 270 in steps of 24; the bar and glove keep Re:CoM's offsets.
+        let ys: Vec<f32> = (0..9).map(|s| top::entry_pos(Layout::Kh1, s).1).collect();
+        assert_eq!(ys, vec![78.0, 102.0, 126.0, 150.0, 174.0, 198.0, 222.0, 246.0, 270.0]);
+        for s in 0..9 {
+            let (x, y) = top::entry_pos(Layout::Kh1, s);
+            assert_eq!(x, 86.0);
+            assert_eq!(top::bar_pos(Layout::Kh1, s), (48.0, y - 8.0));
+            assert_eq!(top::glove_pos(Layout::Kh1, s), (150.0, y - 6.0));
+        }
+        // The last entry where the 8th entry was (Re:CoM's index 7 at 26 per step), the first's
+        // plate (−14) below the header's (y 51, +12), the plates (26 high) overlapping by 2.
+        assert_eq!(top::entry_pos(Layout::Kh1, 8).1, 88.0 + 26.0 * 7.0);
+        assert!(top::entry_pos(Layout::Kh1, 0).1 - 14.0 > 51.0 + 12.0);
+        assert_eq!(26.0 - top::KH1_STEP, 2.0);
+    }
+
+    #[test]
+    fn kh1_list_moves_in_screen_order() {
+        let down = |c| top::kh1_step(c, DOWN_HELD);
+        let up = |c| top::kh1_step(c, UP_HELD);
+        // Held down from the top walks the nine in order and stops on Settings.
+        let mut c = top::DECKS;
+        let mut walk = vec![c];
+        while let Some(n) = down(c) {
+            walk.push(n);
+            c = n;
+        }
+        assert_eq!(walk, top::KH1_ORDER.to_vec());
+        // Held up walks back and stops on Items.
+        let mut back = vec![c];
+        while let Some(n) = up(c) {
+            back.push(n);
+            c = n;
+        }
+        back.reverse();
+        assert_eq!(back, top::KH1_ORDER.to_vec());
+        // A fresh press wraps at both ends.
+        assert_eq!(top::kh1_step(top::SETTINGS, DOWN_FRESH), Some(top::DECKS));
+        assert_eq!(top::kh1_step(top::DECKS, UP_FRESH), Some(top::SETTINGS));
+        // Inside, fresh moves one like held.
+        assert_eq!(top::kh1_step(top::CUSTOMIZE, DOWN_FRESH), Some(1));
+        assert_eq!(top::kh1_step(1, UP_FRESH), Some(top::CUSTOMIZE));
+        // Confirm, cancel and Start are not moves.
+        for i in 0..9 {
+            for p in [Pad { confirm: true, ..NONE }, Pad { cancel: true, down: true, ..NONE }, Pad { start: true, up: true, ..NONE }, NONE] {
+                assert_eq!(top::kh1_step(i, p), None);
+            }
+        }
+    }
+
+    #[test]
+    fn kh1_fix_only_where_recoms_rule_differs() {
+        // Re:CoM moves (its cursor set then takes our target) wherever the nine move, except a
+        // held down on 7 / 8 (Re:CoM's end rule over its 7); never where the nine don't.
+        for i in 0..9 {
+            for p in [DOWN_HELD, DOWN_FRESH, UP_HELD, UP_FRESH] {
+                let recom = top::recom_move(i, top::RECOM_ENTRIES, p).is_some();
+                let ours = top::kh1_move(i, p);
+                if !recom {
+                    let expect = if ours.is_some() { Fix::Move(ours.unwrap()) } else { Fix::None };
+                    assert_eq!(top::kh1_fix(i, p), expect, "{i} {p:?}");
+                } else {
+                    assert!(ours.is_some(), "Re:CoM moves from {i} on {p:?} but the nine don't");
+                    assert_eq!(top::kh1_fix(i, p), Fix::None);
+                }
+            }
+        }
+        assert_eq!(top::kh1_fix(top::ABILITIES, DOWN_HELD), Fix::Move(top::CUSTOMIZE));
+        assert_eq!(top::kh1_fix(top::CUSTOMIZE, DOWN_HELD), Fix::Move(1));
+        // Confirm: ours on Items / Abilities / Customize, Re:CoM's on its own; cancel wins.
+        let ok = Pad { confirm: true, ..NONE };
+        assert_eq!(top::kh1_fix(top::DECKS, ok), Fix::Confirm(Entry::Items));
+        assert_eq!(top::kh1_fix(top::ABILITIES, ok), Fix::Confirm(Entry::Abilities));
+        assert_eq!(top::kh1_fix(top::CUSTOMIZE, ok), Fix::Confirm(Entry::Customize));
+        for i in 1..7 {
+            assert_eq!(top::kh1_fix(i, ok), Fix::None);
+        }
+        assert_eq!(top::kh1_fix(top::DECKS, Pad { confirm: true, cancel: true, ..NONE }), Fix::None, "cancel wins");
+        assert_eq!(top::kh1_fix(top::DECKS, Pad { confirm: true, start: true, ..NONE }), Fix::None, "Start wins");
+    }
+
+    #[test]
+    fn recom_rule_is_recoms() {
         for c in 0..6 {
-            assert_eq!(top::step(c, DOWN_HELD), Some(c + 1));
-            assert_eq!(top::step(c, DOWN_FRESH), Some(c + 1));
+            assert_eq!(top::recom_move(c, 7, DOWN_HELD), Some(c + 1));
         }
-        for c in 1..8 {
-            assert_eq!(top::step(c, UP_HELD), Some(c - 1));
-            assert_eq!(top::step(c, UP_FRESH), Some(c - 1));
-        }
-    }
-
-    #[test]
-    fn eight_entries_with_recoms_end_rule() {
-        // Down reaches our entry held or fresh.
-        assert_eq!(top::step(6, DOWN_HELD), Some(7));
-        assert_eq!(top::step(6, DOWN_FRESH), Some(7));
-        // At the end: held stops, fresh wraps.
-        assert_eq!(top::step(7, DOWN_HELD), None);
-        assert_eq!(top::step(7, DOWN_FRESH), Some(0));
-        assert_eq!(top::step(0, UP_HELD), None);
-        assert_eq!(top::step(0, UP_FRESH), Some(7));
-        // Confirm, cancel and Start are not moves; confirm on ours needs the fix.
-        assert_eq!(top::step(7, Pad { confirm: true, ..NONE }), None);
-        assert_eq!(top::fix(7, Pad { confirm: true, ..NONE }), Fix::ConfirmOurs);
-        assert_eq!(top::fix(6, Pad { confirm: true, ..NONE }), Fix::None);
-        assert_eq!(top::fix(7, Pad { confirm: true, cancel: true, ..NONE }), Fix::None, "cancel wins");
-        assert_eq!(top::fix(6, Pad { down: true, up: true, ..NONE }), Fix::None, "up wins");
-        assert_eq!(top::fix(6, DOWN_HELD), Fix::MoveToOurs);
-        assert_eq!(top::fix(6, DOWN_FRESH), Fix::None, "Re:CoM's own code moves to 7 (wrapper)");
-    }
-
-    #[test]
-    fn cursor_set_wraps_over_eight() {
-        assert_eq!(top::wrap(-1), 7);
-        assert_eq!(top::wrap(7), 7);
-        assert_eq!(top::wrap(8), 0);
-        assert_eq!(top::wrap(3), 3);
+        assert_eq!(top::recom_move(6, 7, DOWN_HELD), None);
+        assert_eq!(top::recom_move(6, 7, DOWN_FRESH), Some(7), "the cursor set wraps it to 0");
+        assert_eq!(top::recom_move(0, 7, UP_HELD), None);
+        assert_eq!(top::recom_move(0, 7, UP_FRESH), Some(-1));
+        assert_eq!(top::recom_move(3, 7, Pad { up: true, down: true, ..NONE }), Some(2), "up first");
     }
 
     use list::{List, Pad as LPad};
@@ -750,21 +972,11 @@ mod tests {
 
     #[test]
     fn texts_are_terminated_ascii_without_codes() {
-        let all = [
-            text::ENTRY_LABEL,
-            text::TITLE,
-            text::ENTRY_HELP,
-            text::PAGE_HELP,
-            text::STAT_LABELS[0],
-            text::STAT_LABELS[1],
-            text::STAT_LABELS[2],
-            text::CUSTOMIZE_LABEL,
-            text::CUSTOMIZE_HELP,
-            text::ENTRY_HELP_SETTINGS,
-            text::ENTRY_HELP_RIKU,
-            text::COMBAT_HELP_RIKU,
-            text::MOVEMENT_HELP_RIKU,
-        ];
+        let mut all = vec![text::PAGE_HELP, text::STAT_LABELS[0], text::STAT_LABELS[1], text::STAT_LABELS[2], text::CUSTOMIZE_LABEL, text::CUSTOMIZE_HELP, text::GAME_SETTINGS_LABEL];
+        for r in [sub::Row::GameSettings, sub::Row::Combat, sub::Row::Movement, sub::Row::Items, sub::Row::Customize, sub::Row::Abilities] {
+            all.push(r.label());
+            all.extend(r.help());
+        }
         for s in all {
             assert_eq!(s.last(), Some(&0));
             assert!(s[..s.len() - 1].iter().all(|&b| (0x20..0x7F).contains(&b) && b != b'%'));
@@ -775,68 +987,33 @@ mod tests {
     }
 
     #[test]
-    fn submenu_rows_and_moves_follow_recoms_deck_submenu() {
+    fn settings_list_rows_and_moves_follow_recoms_deck_submenu() {
         use sub::{Act, Row};
-        // The owner's asks: Items (the Keyblade slot and the item slots), Customize; M9 9b:
-        // Abilities; 2026-11-03: Combat and Movement, the only two at Combat = Re:CoM.
-        assert_eq!(sub::rows(true), &[Row::Items, Row::Customize, Row::Abilities, Row::Combat, Row::Movement]);
-        assert_eq!(sub::rows(false), &[Row::Combat, Row::Movement]);
-        assert_eq!((Row::Items.label(), Row::Customize.label(), Row::Abilities.label()), (&b"Items\0"[..], &b"Customize\0"[..], &b"Abilities\0"[..]));
+        // Owner, 2026-11-04: Game Settings (Re:CoM's page), Combat, Movement.
+        assert_eq!(sub::SETTINGS_ROWS, &[Row::GameSettings, Row::Combat, Row::Movement]);
+        assert_eq!(Row::GameSettings.label(), &b"Game Settings\0"[..]);
         assert_eq!((Row::Combat.label(), Row::Movement.label()), (&b"Combat\0"[..], &b"Movement\0"[..]));
+        assert_eq!((Row::Items.label(), Row::Customize.label(), Row::Abilities.label()), (&b"Items\0"[..], &b"Customize\0"[..], &b"Abilities\0"[..]));
         assert_eq!(Row::Combat.settings_page(), Some(crate::menu::Page::Combat));
         assert_eq!(Row::Movement.settings_page(), Some(crate::menu::Page::Movement));
-        assert_eq!(Row::Items.settings_page(), None);
-        // Combat flipped on the Combat page: the cursor stays on Combat in the new list.
-        assert_eq!(sub::row_in(sub::rows(false), Row::Combat), 0);
-        assert_eq!(sub::row_in(sub::rows(true), Row::Combat), 3);
-        assert_eq!(sub::row_in(sub::rows(true), Row::Movement), 4);
-        assert_eq!(sub::row_in(sub::rows(false), Row::Items), 0);
+        assert_eq!((Row::GameSettings.settings_page(), Row::Items.settings_page()), (None, None));
+        // Game Settings' help is Re:CoM's own line for its Settings entry.
+        assert_eq!((Row::GameSettings.help(), Row::GameSettings.recom_help()), (None, Some(0x50_0406)));
+        assert_eq!(Row::Combat.recom_help(), None);
         for n in [2usize, 3, 5] {
             let last = n as i32 - 1;
-            // Inside: held or fresh moves.
             assert_eq!(sub::step(0, n, DOWN_HELD), Act::Move(1));
             assert_eq!(sub::step(last, n, UP_HELD), Act::Move(last - 1));
-            // Ends: held stops, fresh wraps (Re:CoM's cursor set wraps over the count).
             assert_eq!(sub::step(last, n, DOWN_HELD), Act::None);
             assert_eq!(sub::step(last, n, DOWN_FRESH), Act::Move(0));
             assert_eq!(sub::step(0, n, UP_HELD), Act::None);
             assert_eq!(sub::step(0, n, UP_FRESH), Act::Move(last));
             assert_eq!(sub::step(n as i32, n, Pad { confirm: true, ..NONE }), Act::None);
         }
-        // Cancel first, then confirm; Start is nothing here.
-        assert_eq!(sub::step(1, 5, Pad { confirm: true, ..NONE }), Act::Open(1));
-        assert_eq!(sub::step(1, 5, Pad { confirm: true, cancel: true, ..NONE }), Act::Close);
-        assert_eq!(sub::step(0, 5, Pad { start: true, ..NONE }), Act::None);
-        assert_eq!(sub::step(0, 5, Pad { confirm: true, down: true, ..NONE }), Act::Open(0), "confirm before moves");
-        for story in [Story::Sora, Story::Riku] {
-            for k in [true, false] {
-                assert!(text::entry_help(story, k).len() - 1 <= crate::menu::HELP_MAX);
-            }
-        }
-    }
-
-    #[test]
-    fn rikus_story_shows_only_the_settings_rows() {
-        use sub::Row;
-        // Owner, 2026-11-03: "show the KH1 tab in Riku's story too, with only Combat and Movement".
-        assert!(sub::kh1_pages(Story::Sora, true, true));
-        assert!(!sub::kh1_pages(Story::Sora, false, true));
-        assert!(!sub::kh1_pages(Story::Sora, true, false));
-        for (combat, listed) in [(true, true), (true, false), (false, true), (false, false)] {
-            assert!(!sub::kh1_pages(Story::Riku, combat, listed));
-            assert_eq!(sub::rows(sub::kh1_pages(Story::Riku, combat, listed)), &[Row::Combat, Row::Movement]);
-        }
-        assert_eq!((Story::from_camp(0), Story::from_camp(1)), (Story::Sora, Story::Riku));
-        // Help: Riku's own lines for the entry and the two rows; Sora's story unchanged.
-        assert_eq!(text::entry_help(Story::Riku, false), text::ENTRY_HELP_RIKU);
-        assert_eq!(text::entry_help(Story::Riku, true), text::ENTRY_HELP_RIKU);
-        assert_eq!(text::entry_help(Story::Sora, true), text::ENTRY_HELP);
-        assert_eq!(text::entry_help(Story::Sora, false), text::ENTRY_HELP_SETTINGS);
-        assert_eq!(Row::Combat.help_in(Story::Riku), text::COMBAT_HELP_RIKU);
-        assert_eq!(Row::Movement.help_in(Story::Riku), text::MOVEMENT_HELP_RIKU);
-        for r in sub::KH1_ROWS {
-            assert_eq!(r.help_in(Story::Sora), r.help());
-        }
+        assert_eq!(sub::step(1, 3, Pad { confirm: true, ..NONE }), Act::Open(1));
+        assert_eq!(sub::step(1, 3, Pad { confirm: true, cancel: true, ..NONE }), Act::Close);
+        assert_eq!(sub::step(0, 3, Pad { start: true, ..NONE }), Act::None);
+        assert_eq!(sub::step(0, 3, Pad { confirm: true, down: true, ..NONE }), Act::Open(0), "confirm before moves");
     }
 
     /// The `mov dword [rbp+d], imm32` immediates (`C7 45 d imm32`) in a checked byte run.
@@ -863,7 +1040,23 @@ mod tests {
         assert_eq!(top::recom_help(Story::Riku, 0), Some(0x50_042A));
         assert_eq!(top::recom_help(Story::Riku, 5), Some(0x50_042C));
         assert_eq!(top::recom_help(Story::Riku, 6), Some(0x50_0406));
-        assert_eq!(top::recom_help(Story::Riku, top::OURS), None);
+        assert_eq!(top::recom_help(Story::Riku, top::ABILITIES), None);
         assert_eq!(top::recom_help(Story::Sora, -1), None);
+    }
+
+    #[test]
+    fn positions_and_labels_are_recoms_own() {
+        let site = |rva: u32| crate::sites::KEYBLADE_DATA.iter().find(|s| s.rva == rva).expect("site").expect;
+        let f = |b: &[u8], i: usize| f32::from_le_bytes(b[4 * i..4 * i + 4].try_into().unwrap());
+        let entry = site(0x0050_9430);
+        assert_eq!((f(entry, 0), f(entry, 1)), (top::ENTRY_X, top::RECOM_Y0));
+        assert_eq!(f(site(0x0050_9270), 0), top::RECOM_STEP);
+        assert_eq!(f(site(0x0050_9294), 0), top::BAR_X);
+        let y0 = site(0x0050_92C0);
+        assert_eq!((f(y0, 0), f(y0, 1)), (top::RECOM_BAR_Y0, top::RECOM_GLOVE_Y0));
+        assert_eq!(f(site(0x0050_92F4), 0), top::GLOVE_X);
+        let labels = site(0x007C_1000);
+        let ids: Vec<u32> = labels.chunks(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
+        assert_eq!(ids, top::RECOM_LABELS.to_vec());
     }
 }
