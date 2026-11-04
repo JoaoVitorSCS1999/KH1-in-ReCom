@@ -574,6 +574,38 @@ pub mod gravity {
         let (s, n) = of(level);
         START_SCALE + (s - START_SCALE) * (t / n).clamp(0.0, 1.0)
     }
+
+    /// Re:CoM's bullet flag (descriptor `+0x60` bit 7, bullet `+0x230`) that makes its sphere grow
+    /// by itself: `CHomingBullet`'s init `0x140158660` sets the effect's scale `+0x10` to
+    /// `desc+0x1C / desc+0x78` (not `desc+0x90`), and every update (`0x140156E20` →
+    /// `0x140156350`) adds that again, with no cap. Re:CoM's own Gravity sphere (flags `0x41E1`)
+    /// uses it: effect scale = its hit radius / the row's 1.5 m. Checked (decomp).
+    pub const RECOM_SELF_GROWTH: u64 = 0x80;
+
+    /// The KH1 sphere's flags: Re:CoM's Gravity case's without its own growth, so the effect
+    /// keeps the descriptor's `+0x90` at its spawn and only KH1's growth ([`effect_scale`]) moves it.
+    pub fn sphere_flags(recom: u64) -> u64 {
+        recom & !RECOM_SELF_GROWTH
+    }
+
+    /// Re:CoM `grav_all` effect scale per KH1 sphere scale. **Assumption** (as 7.8's): Re:CoM's
+    /// sphere drawn at scale 1 is the size of KH1's at scale 1 (the effect `grav_all.dpx`,
+    /// `EF2040.EFF`, is not in the session to compare with `xm_gravity01.mag`'s set).
+    pub const EFFECT_PER_SCALE: f32 = 1.0;
+
+    /// The effect scale `t` frames into the fall: KH1's scale (0.01 → S over N frames).
+    pub fn effect_scale(level: u8, t: f32) -> f32 {
+        scale_at(level, t) * EFFECT_PER_SCALE
+    }
+
+    /// What 0.103.0 .. 0.112.0 drew (the owner's "really small"): Re:CoM's self-growth step
+    /// (`desc+0x1C` = the row's `+5` × 0.01 over `desc+0x78` = KH1's impact radius) taken as the
+    /// spawn scale, × KH1's scale, plus one more Re:CoM step after our write. `row5` is Re:CoM's
+    /// row byte `+5` (4 / 6 / 8).
+    pub fn old_effect_scale(level: u8, row5: u8, t: f32) -> f32 {
+        let g = row5 as f32 * 0.01 / impact_radius_m(level);
+        g * scale_at(level, t) + g
+    }
 }
 
 /// What KH1 does to an enemy under the **falling** Gravity sphere (decision 38's "slow"; research

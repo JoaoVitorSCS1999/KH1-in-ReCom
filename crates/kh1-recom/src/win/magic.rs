@@ -68,8 +68,6 @@ struct GravityRun {
     /// Re:CoM's sphere (its handle / shot id), and the impact's centre (the marker point + 0.1 m).
     shot: u32,
     centre: [f32; 3],
-    /// The sphere's effect scale at its spawn (Re:CoM's), the base of KH1's growth.
-    base_scale: Option<f32>,
     kind: u32,
     attr: u32,
     ap: i32,
@@ -952,8 +950,9 @@ const GRAVITY_DESC_B8: u64 = 0x1_407C_78D0;
 /// Re:CoM's Gravity sphere flags (`mov qword [rbp−0x50],0x41E1`). Checked (disasm `0x140222AB7`).
 const GRAVITY_FLAGS: u64 = 0x41E1;
 /// A bullet's effect handle (the bullet init's `0x1401A2D50` result, `+0x244`); the effect
-/// object's scale `+0x10..+0x18` (the init writes `desc+0x90` there). Checked (decomp
-/// `0x140157E60`).
+/// object's scale `+0x10..+0x18` (the init writes `desc+0x90` there; `CHomingBullet`'s init
+/// `0x140158660` overwrites it when the flags carry `magic::gravity::RECOM_SELF_GROWTH`).
+/// Checked (decomp `0x140157E60`, `0x140158660`).
 const BULLET_EFFECT: usize = 0x244;
 const EFFECT_SCALE: usize = 0x10;
 
@@ -1040,7 +1039,10 @@ unsafe fn release_gravity(pl: usize, c: &CastStart) -> Option<u32> {
     std::ptr::write_unaligned(w(0x6C) as *mut u32, attr);
     std::ptr::write_unaligned(w(0x70) as *mut i32, ap);
     std::ptr::write_unaligned(w(0x0C) as *mut u32, 0x8000_0000);
-    std::ptr::write_unaligned(w(0x60) as *mut u64, GRAVITY_FLAGS | 4 | COLLISION_HELD);
+    // Without Re:CoM's own growth (it set the effect to ~0.02 and grew it each update, under our
+    // writes): the effect spawns at KH1's start scale and grows only by KH1's numbers ([`grow`]).
+    std::ptr::write_unaligned(w(0x60) as *mut u64, mg::gravity::sphere_flags(GRAVITY_FLAGS) | 4 | COLLISION_HELD);
+    std::ptr::write_unaligned(w(0x90) as *mut f32, mg::gravity::effect_scale(c.level, 0.0));
     std::ptr::write_unaligned(w(0x8C) as *mut i32, HELD_TICKS);
     std::ptr::write_unaligned(w(0x30) as *mut f32, fall / n);
     std::ptr::write_unaligned(w(0x34) as *mut f32, r[0xC] as f32);
@@ -1064,7 +1066,7 @@ unsafe fn release_gravity(pl: usize, c: &CastStart) -> Option<u32> {
     hold_off(bullet);
     let id: u32 = rd(bullet + 0x20);
     remember_shot(id, c.spell, c.level, 0);
-    let run = GravityRun { fall: mg::Fall::new(c.level), level: c.level, shot: id, centre, base_scale: None, kind, attr, ap };
+    let run = GravityRun { fall: mg::Fall::new(c.level), level: c.level, shot: id, centre, kind, attr, ap };
     if let Ok(mut g) = FALLS.lock() {
         if g.len() >= 8 {
             g.remove(0);
@@ -1355,8 +1357,9 @@ unsafe fn gravity_frame(pl: usize, step: f32) {
     }
 }
 
-/// KH1's growth (scale 0.01 → S over the fall) on Re:CoM's sphere effect, from its own spawn scale.
-unsafe fn grow(bullet: usize, run: &mut GravityRun) {
+/// KH1's growth (scale 0.01 → S over the fall) on Re:CoM's sphere effect (its own growth is off:
+/// `magic::gravity::sphere_flags`).
+unsafe fn grow(bullet: usize, run: &GravityRun) {
     type ObjFn = unsafe extern "win64" fn(u32) -> usize;
     let h: u32 = rd(bullet + BULLET_EFFECT);
     if h == 0 {
@@ -1366,15 +1369,7 @@ unsafe fn grow(bullet: usize, run: &mut GravityRun) {
     if o == 0 {
         return;
     }
-    let base = *run.base_scale.get_or_insert_with(|| {
-        let s: f32 = rd(o + EFFECT_SCALE);
-        if s > 0.0 && s < 100.0 {
-            s
-        } else {
-            1.0
-        }
-    });
-    let s = base * mg::gravity::scale_at(run.level, run.fall.fallen());
+    let s = mg::gravity::effect_scale(run.level, run.fall.fallen());
     wr(o + EFFECT_SCALE, [s, s, s]);
 }
 

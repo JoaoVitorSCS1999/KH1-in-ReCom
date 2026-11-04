@@ -189,6 +189,16 @@ ripple drive or stun impact,".
   `wep0` → `k9`, from `PL0002.MDL`; motion-locked); Zantetsuken 4; Ripple Drive 6 (KH1 bone 8 = Re:CoM `belt1`) and 7.
   `0x18001` = Sora's position and facing, once: detached from Root's matrix (EET flags 0x29); 0x800 = EET's linger bit.
   Their sounds come from `kh1_ex_0010.ese` (stage 2).
+- **Their size (checked 0.113.0, owner: "gravity's visual is really small")**: not off by KH1's cm ↔ Re:CoM's m.
+  Re:CoM's own `ex_0010.dpx` is KH1's Sora set edited (Checked (files: `EF1000.EFF`)): its program 2 differs from
+  KH1's program 2 in 12 words, none a size; program 3's bounds are 183 / 3.6 against KH1's 207 / 10 (Re:CoM's edit,
+  the same order of magnitude), so Re:CoM draws program data in KH1's units. Re:CoM's own `ex_0010` events in
+  `PL0001.EET` (`p001_101`, `p001_104`) have scale 1.0, as ours. KH1 starts Gravity Break's 3 / 2 with no scale
+  (`0x1402AE160`; `0x1402ADC20`'s last argument is the blade fraction 0.8, link `+0xC`) (Checked (decomp)). So the
+  finisher effects, the trail (byte-identical) and Stun Impact / Ripple Drive are KH1's size relative to Sora: no
+  change. Assumption: both runtimes draw a program unit at the same size relative to the model (Re:CoM ships KH1's
+  numbers for its own Sora set). The small visual was the KH1 Gravity spell's sphere (`recom-m7-magic.md` § 7.8,
+  The sphere's size).
 - ~~**Not built, native gap**: Stun Impact's **0** and Zantetsuken's **5** go to `0x8003` = the target's contact point.~~
   **Wrong** (corrected 0.112.0): `0x8003` is Sora's own body point; built as EET events (§ 0.112.0 built).
 - **Toggles**: ini `effects` / `sounds` (kh1 | recom, default kh1), read at each motion start; at Re:CoM nothing changes

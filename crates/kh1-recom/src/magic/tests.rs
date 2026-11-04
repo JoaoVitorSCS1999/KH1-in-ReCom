@@ -411,6 +411,28 @@ fn gravity_rows_numbers_and_fall_are_kh1s() {
     assert_eq!(gravity::scale_at(3, 99.0), 1.6);
 }
 
+/// The owner's "gravity's visual is really small" (2026-11-04): Re:CoM's sphere grew by itself
+/// (flag 0x80) from `+0x1C / +0x78` and our growth multiplied that tiny spawn scale. The KH1 sphere
+/// now drops the flag and draws KH1's scale itself: 0.01 at the release, S at the impact.
+#[test]
+fn gravity_sphere_draws_kh1s_scale_not_recoms_self_growth() {
+    // Re:CoM's Gravity case's flags (`0x140222AB7`) carry the self-growth bit; ours don't.
+    assert_eq!(gravity::sphere_flags(0x41E1), 0x4161);
+    assert_eq!(gravity::sphere_flags(0x41E1) & gravity::RECOM_SELF_GROWTH, 0);
+    for (lv, row5) in [(1u8, RECOM_GRAVITY_ROWS[0][5]), (2, RECOM_GRAVITY_ROWS[1][5]), (3, RECOM_GRAVITY_ROWS[2][5])] {
+        let (s, n) = gravity::of(lv);
+        assert_eq!(gravity::effect_scale(lv, 0.0), gravity::START_SCALE);
+        assert_eq!(gravity::effect_scale(lv, n), s);
+        assert!((gravity::effect_scale(lv, n / 2.0) - (0.01 + (s - 0.01) / 2.0)).abs() < 1e-6);
+        // The old drawing at the impact: 1/20 or less of KH1's.
+        let old = gravity::old_effect_scale(lv, row5, n);
+        assert!(old > 0.0 && s / old > 20.0, "LV{lv}: old {old}, KH1 {s}");
+    }
+    // The measured factors (row `+5` 4 / 6 / 8 over 1.7 / 2.55 / 2.72 m).
+    let f: Vec<f32> = [1u8, 2, 3].iter().map(|&lv| gravity::of(lv).0 / gravity::old_effect_scale(lv, RECOM_GRAVITY_ROWS[lv as usize - 1][5], gravity::of(lv).1)).collect();
+    assert!((f[0] - 21.25).abs() < 0.01 && (f[1] - 25.5).abs() < 0.01 && (f[2] - 20.92).abs() < 0.01, "{f:?}");
+}
+
 /// M7 f2 (decision 38): under the falling sphere KH1 squashes the enemy's height (`+0x480`, the y of
 /// its matrix scale) toward 0.8 with a wobble, and springs it back 0.05 a frame after.
 #[test]

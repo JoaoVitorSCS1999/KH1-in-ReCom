@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 227: KH1 Gravity's sphere drawn at KH1's size (Re:CoM's own sphere growth off), version 0.115.0 (2026-11-04)
+
+Owner, 2026-11-04: "gravity's visual is really small for some reason".
+
+- **Which visual** (Checked (files + decomp)): the KH1 Gravity spell's sphere, not Gravity Break's effects. Re:CoM's own `ex_0010.dpx` is KH1's Sora set with Re:CoM's edits in KH1's units (program 2: 12 words differ, none a size; program 3's bounds 183 against KH1's 207), Re:CoM's own `ex_0010` EET events have scale 1.0 as ours, and KH1 starts Gravity Break's 3 / 2 with no scale (`0x1402ADC20`'s last argument is the blade fraction): Gravity Break, the trail, Stun Impact and Ripple Drive are KH1's size relative to Sora, unchanged.
+- **Cause** (Checked (decomp)): Re:CoM's Gravity flags `0x41E1` carry bit 7, Re:CoM's own sphere growth: `CHomingBullet`'s init `0x140158660` sets the effect scale to `desc+0x1C / desc+0x78` (not `desc+0x90`) and every update `0x140156350` adds it again. 7.8's growth read that ~0.024 as the "spawn scale" and multiplied KH1's 0.01 → S by it: at the impact 0.047 / 0.059 / 0.076 instead of 1.0 / 1.5 / 1.6, **21 / 25.5 / 21 times too small** (up to 42 / 42 / 34 by update order).
+- **Change** (`magic::gravity::sphere_flags` / `effect_scale`, `win::magic::release_gravity` / `grow`): the KH1 sphere's descriptor drops bit 7 (`0x4161`) and sets `desc+0x90` = KH1's 0.01; the existing per-frame growth (only while a sphere falls) writes KH1's scale itself. No new hook, site or patch. Combat = Re:CoM: Re:CoM's Gravity unchanged.
+- Assumption (7.8's (3), kept): Re:CoM's `grav_all` at scale 1 = KH1's sphere at scale 1 (`EF2040.EFF` not in the session). Re:CoM's own rule (scale = hit radius / 1.5 m) would draw it 1.13 times bigger. Not carried: KH1's 20-frame fade growing × 1.02 after the impact.
+- Checked: tests (`gravity_sphere_draws_kh1s_scale_not_recoms_self_growth`: flags, 0.01 → S, the old factors), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-m7-magic.md` § 7.8 (The sphere's size), `recom-m13-plan.md` § Stage 3 built (their size).
+
+---
+
 ## Stage 226: M13 stage 4: each KH1 Keyblade's own trail (its `.wpn` set at its KH1 reach) and swing sounds (its `.se`), loaded with its own group, version 0.114.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § M13 and camp text answers): "The six KH2 Keyblades swing with Re:CoM's trail at KH1 Effects"; decided: each Keyblade's KH1 set loads with its own Keyblade group, only when equipped; trail length and look follow KH1's own trail data (1:1). Stage 4 of `docs/recom-m13-plan.md`.

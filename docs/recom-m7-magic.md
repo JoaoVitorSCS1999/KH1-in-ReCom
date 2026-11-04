@@ -753,7 +753,7 @@ once, for KH1's % of their current HP.
 - **The fall** (`gravity_frame`, from the per-frame spell check that runs Thunder's strikes: one
   atomic load when nothing runs): KH1's clock (`magic::Fall`: the release run counts the first frame)
   and KH1's growth on Re:CoM's sphere effect (the bullet's effect `+0x244` → `0x140257EF0`, scale
-  `+0x10`: Re:CoM's spawn scale × KH1's 0.01 → S). At the impact: every alive enemy of Re:CoM's
+  `+0x10`: KH1's 0.01 → S itself, Re:CoM's own growth off since 0.113.0, § The sphere's size below). At the impact: every alive enemy of Re:CoM's
   lock-on list whose live hurt bodies touch the sphere of 1.7 × S m (`magic::body_touches`, Re:CoM's
   shapes) is struck once with the sphere's attack through **Re:CoM's apply** (7.6's mechanism,
   `apply_to`). If Re:CoM already ended the sphere (a wall), a held bolt of the same set at the centre
@@ -801,6 +801,23 @@ Sites (7.8):
   owners the same way); if not, the held bolt carries the strikes and the growth is skipped;
   (5) Re:CoM's `0x41E1` flags don't end the sphere before its life with the attack held (if a wall
   ends it, the strikes still come, from the bolt).
+- **The sphere's size (0.113.0)**, owner 2026-11-04: "gravity's visual is really small for some
+  reason". Cause (Checked (decomp)): Re:CoM's Gravity flags `0x41E1` carry bit 7, Re:CoM's own
+  growth: `CHomingBullet`'s init `0x140158660` sets the effect's scale to `desc+0x1C / desc+0x78`
+  (not `desc+0x90`) and each update (`0x140156E20` → `0x140156350`) adds that again, so in Re:CoM
+  the effect scale = the hit radius / the row's 1.5 m. 7.8's growth took that first value as the
+  "spawn scale" (≈ 0.024 / 0.024 / 0.029 with KH1's radius in `+0x78`) and multiplied KH1's 0.01 → S
+  by it, with one Re:CoM step on top: at the impact 0.047 / 0.059 / 0.076 instead of 1.0 / 1.5 /
+  1.6, **about 21 / 25.5 / 21 times too small** (up to 42 / 42 / 34 if Re:CoM's step ran first;
+  `magic::gravity::old_effect_scale`, test `gravity_sphere_draws_kh1s_scale_not_recoms_self_growth`).
+  Fix: the KH1 sphere's flags drop bit 7 (`magic::gravity::sphere_flags`: `0x4161`), `desc+0x90` =
+  KH1's start 0.01 (the init writes it to the effect), and the growth writes KH1's scale itself
+  (`effect_scale`). Assumption (3) above still stands: `grav_all` at scale 1 = KH1's sphere at
+  scale 1 (`EF2040.EFF` is not in the session; if the owner sends it with KH1's `xm_gravity01.mag`
+  the two programs can be compared). Re:CoM's own rule (scale = hit radius / 1.5 m) would draw
+  KH1's sphere 1.7 / 1.5 = 1.13 times bigger: the alternative if it looks small against KH1's.
+  Not carried: KH1's 20-frame fade growing × 1.02 a frame after the impact (Re:CoM's life end fades
+  it at S). Combat = Re:CoM: Re:CoM's own Gravity (with bit 7) unchanged.
 - **Not built in 7.8: the slow under the falling sphere** (M7 f2 below: it is a squash, not a
   slow; KH1: `+0x88 |= 4` each frame, the actor's time scale eased to 0.8 with a wobble and back at
   +0.05 a frame). Re:CoM's enemies have a per-actor
