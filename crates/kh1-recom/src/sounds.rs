@@ -39,9 +39,17 @@ pub struct Bank {
     pub offset: usize,
     /// Its size.
     pub size: usize,
+    /// M13 stage 4: the Keyblade cards whose `.se` holds it (registered while one is equipped); empty
+    /// for Sora's own (always registered; also an older manifest's rows).
+    pub cards: Vec<u16>,
 }
 
 impl Bank {
+    /// Whether it is wanted with Keyblade card `card` equipped.
+    pub fn wanted_with(&self, card: u16) -> bool {
+        self.cards.is_empty() || self.cards.contains(&card)
+    }
+
     /// The name without its NUL.
     pub fn name_str(&self) -> String {
         String::from_utf8_lossy(&self.name[..self.name.len() - 1]).into_owned()
@@ -102,7 +110,8 @@ pub fn parse(text: &str, pack_size: u64) -> Result<Manifest, String> {
         }
         let mut cname = name.as_bytes().to_vec();
         cname.push(0);
-        banks.push(Bank { kh1_id, bank, name: cname, offset, size: sz });
+        let cards = r.get("cards").and_then(|c| c.as_array()).map(|a| a.iter().filter_map(|x| x.as_u32()).filter(|&x| x <= u16::MAX as u32).map(|x| x as u16).collect()).unwrap_or_default();
+        banks.push(Bank { kh1_id, bank, name: cname, offset, size: sz, cards });
     }
     let missing = v.get("missing").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|x| x.as_u32()).collect()).unwrap_or_default();
     let weapon_base = v.get("weapon_base").and_then(|x| x.as_u32()).unwrap_or(0);
@@ -147,7 +156,20 @@ mod tests {
         for b in &m.banks {
             assert!(crate::menu_sounds::scd_head_ok(&pack[b.offset..b.offset + b.size], b.size), "{}", b.name_str());
         }
-        eprintln!("{} banks {}..{}, {} missing", m.banks.len(), m.banks[0].bank, m.banks.last().unwrap().bank, m.missing.len());
+        eprintln!("{} banks {}..{}, {} missing; cards {:?}", m.banks.len(), m.banks[0].bank, m.banks.last().unwrap().bank, m.missing.len(), m.banks.iter().map(|b| (b.kh1_id, b.cards.clone())).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn keyblade_banks_are_wanted_only_with_their_keyblade() {
+        let j = manifest(&[(11001, 9001, "se011001.win32.scd", 0, 0x100), (11018, 9002, "se011018.win32.scd", 0x100, 0x100), (11424, 9003, "se011424.win32.scd", 0x200, 0x100)], 0x300)
+            .replacen("\"source\": \"xa_ex_0010.mdls\"}", "\"source\": \"xa_ex_0010.mdls\", \"cards\": []}", 1)
+            .replacen("\"source\": \"xa_ex_0010.mdls\"}", "\"source\": \"xw_ex_5010.se\", \"cards\": [1, 2]}", 1)
+            .replacen("\"source\": \"xa_ex_0010.mdls\"}", "\"source\": \"xw_ex_5030.se\", \"cards\": [2]}", 1);
+        let m = parse(&j, 0x300).unwrap();
+        let with = |c: u16| m.banks.iter().filter(|b| b.wanted_with(c)).map(|b| b.kh1_id).collect::<Vec<_>>();
+        assert_eq!(with(1), vec![11001, 11018]);
+        assert_eq!(with(2), vec![11001, 11018, 11424]);
+        assert_eq!(with(0x13), vec![11001], "card 0x13 alone: Sora's (a KH2 Keyblade plays the Kingdom Key's sounds: the DLL asks for card 1's)");
     }
 
     #[test]

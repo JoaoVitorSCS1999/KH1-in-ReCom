@@ -16,6 +16,9 @@
 //!   Re:CoM's, the KH1 trails in that player's linger list are killed (`0x140254D60(e, 0)`). A KH1 trail
 //!   still live at a motion change is killed by Re:CoM's own stop (its fade ≤ 0). Each runs once per
 //!   trail end / motion change of an effect player; nothing per frame.
+//! - M13 stage 4: the manifest is read before the Keyblade model table ([`preload`]), which names each
+//!   KH1 Keyblade group's own `PL00GG.EET` / `PL00GG.EFF` when they are on disk ([`own_files`]); the SES
+//!   variant follows the equipped Keyblade (`stats::equipped_card`, one pointer read per motion).
 
 use super::hook;
 use super::log;
@@ -27,6 +30,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 static FX: OnceLock<fx::Manifest> = OnceLock::new();
+/// The KH1 Keyblade groups whose own files were found next to the manifest.
+static OWN: OnceLock<Vec<(u16, crate::keyblade_models::OwnFiles)>> = OnceLock::new();
 /// The motion stop's trampoline.
 pub static ORIG_MOTION_STOP: AtomicUsize = AtomicUsize::new(0);
 /// The trail end is ours (the call was retargeted).
@@ -55,18 +60,52 @@ fn note(bit: usize, msg: impl FnOnce() -> String) {
     }
 }
 
-/// Reads `kh1-fx.json` and puts KH1's trail end in. Without the manifest, Re:CoM's events only.
-pub fn install(base: usize, manifest: Option<&Path>) {
-    let Some(path) = manifest else {
-        log("fx (M13): no kh1-fx.json (asset step not run?): Sora's KH1 moves play Re:CoM's effects and sounds");
-        return;
-    };
+/// Reads `kh1-fx.json` (before the Keyblade model table: stage 4's group files) and checks which
+/// group files are on disk next to it (`PLAYER/00GG/PL00GG.EET` loose, `raw/PLAYER/00GG/PL00GG.EFF`).
+pub fn preload(manifest: Option<&Path>) {
+    let Some(path) = manifest else { return };
     let m = match std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display())).and_then(|t| fx::parse(&t)) {
         Ok(m) => m,
         Err(e) => {
             log(&format!("fx (M13): {e}; Re:CoM's effects and sounds"));
             return;
         }
+    };
+    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let at = |rel: &str| rel.split('/').fold(dir.clone(), |p, s| p.join(s));
+    let mut own = Vec::new();
+    let mut missing = Vec::new();
+    for k in &m.keyblades {
+        let o = crate::keyblade_models::OwnFiles { eet: at(&k.eet).is_file(), eff: at(&format!("raw/{}", k.eff)).is_file() };
+        // Both or neither: a trail event naming a set that isn't loaded draws nothing (Re:CoM: handle 0).
+        if o.eet && o.eff {
+            own.push((k.group, o));
+        } else {
+            missing.push(k.group);
+        }
+    }
+    if !m.keyblades.is_empty() {
+        log(&format!(
+            "fx (M13 stage 4): {} KH1 Keyblade groups with their own trail and set {:?}{}",
+            own.len(),
+            own.iter().map(|o| o.0).collect::<Vec<_>>(),
+            if missing.is_empty() { String::new() } else { format!("; files not found for {missing:?} (installed? they keep the Kingdom Key's trail)") }
+        ));
+    }
+    let _ = OWN.set(own);
+    let _ = FX.set(m);
+}
+
+/// Group `g`'s own files for the PLAYER table (none without the manifest or the files).
+pub fn own_files(g: u16) -> crate::keyblade_models::OwnFiles {
+    OWN.get().and_then(|v| v.iter().find(|o| o.0 == g)).map(|o| o.1).unwrap_or_default()
+}
+
+/// Puts KH1's trail end in (the manifest read by [`preload`]). Without the manifest, Re:CoM's events only.
+pub fn install(base: usize) {
+    let Some(m) = FX.get() else {
+        log("fx (M13): no kh1-fx.json (asset step not run?): Sora's KH1 moves play Re:CoM's effects and sounds");
+        return;
     };
     let s = super::settings();
     log(&format!(
@@ -79,7 +118,6 @@ pub fn install(base: usize, manifest: Option<&Path>) {
         s.effects.as_str(),
         s.sounds.as_str()
     ));
-    let _ = FX.set(m);
     // SAFETY: reads of the mapped exe; the patches check their bytes first.
     unsafe { install_trail_end(base) };
 }
@@ -120,10 +158,14 @@ unsafe fn install_trail_end(base: usize) {
 pub fn variants(request: u16, ses_other: i32) -> (i32, i32) {
     let Some(m) = FX.get() else { return (0, ses_other) };
     let s = super::settings();
-    let (eet, ses) = fx::variants(Some(m), request, s.effects, s.sounds, ses_other);
-    if ses == m.variant && s.sounds == Mode::Kh1 {
+    let card = super::stats::equipped_card();
+    let (eet, ses) = fx::variants(Some(m), request, s.effects, s.sounds, ses_other, card);
+    if s.sounds == Mode::Kh1 && fx::is_kh1_sound_variant(m, ses) {
+        // The banks of the Keyblade whose sounds play: the Kingdom Key's at its variant (the KH2
+        // Keyblades, a Keyblade without its own), else the equipped one's.
+        let owner = if ses == m.variant { crate::keyblades::KINGDOM_KEY } else { card };
         // SAFETY: on Re:CoM's update thread (the motion request's).
-        unsafe { super::sounds::ensure() };
+        unsafe { super::sounds::ensure(owner) };
     }
     (eet, ses)
 }

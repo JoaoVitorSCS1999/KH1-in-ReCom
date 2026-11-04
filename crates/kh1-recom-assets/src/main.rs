@@ -390,8 +390,16 @@ fn run() -> Result<(), String> {
         sounds.as_ref().and_then(|s| s.map.iter().find(|m| m.0 == id).map(|m| m.1))
     };
     let weapon_base = sounds.as_ref().map_or(0, |s| s.weapon_base);
-    if let (Some(mv), true) = (&fx_moves, weapon_base != 0) {
-        kh1_recom_assets::kh1_fx::sora_ses(&mut sound, mv, weapon_base, sound_map, &mut fx_added).map_err(|e| e.to_string())?;
+    // M13 stage 4: each Keyblade's sounds at its own variant (the Kingdom Key's at stage 3's 1301).
+    let weapon_bases: Vec<(u16, u32)> = match sounds.as_ref() {
+        Some(s) if !s.weapon_bases.is_empty() => s.weapon_bases.clone(),
+        _ if weapon_base != 0 => vec![(1, weapon_base)],
+        _ => Vec::new(),
+    };
+    if let Some(mv) = &fx_moves {
+        for &(card, base) in &weapon_bases {
+            kh1_recom_assets::kh1_fx::sora_ses(&mut sound, mv, base, kh1_recom_assets::kh1_fx::sound_variant(card), sound_map, &mut fx_added).map_err(|e| e.to_string())?;
+        }
     }
     let ses_path = ann_path.with_file_name("PL0001.SES");
     write(&ses_path, &kh1_recom_assets::ses::write(&sound))?;
@@ -409,8 +417,10 @@ fn run() -> Result<(), String> {
         let mut hsound = kh1_recom_assets::ses::parse(hs).map_err(|e| format!("{}: {e}", install::HALLOWEEN_SES))?;
         kh1_recom_assets::ses::add_kh1(&mut hsound, guard.as_deref(), counter.as_deref()).map_err(|e| e.to_string())?;
         kh1_recom_assets::ses::add_clips(&mut hsound, &modifier_clips).map_err(|e| e.to_string())?;
-        if let (Some(mv), true) = (&fx_moves, weapon_base != 0) {
-            kh1_recom_assets::kh1_fx::sora_ses(&mut hsound, mv, weapon_base, sound_map, &mut kh1_recom_assets::kh1_fx::Added::default()).map_err(|e| e.to_string())?;
+        if let Some(mv) = &fx_moves {
+            for &(card, base) in &weapon_bases {
+                kh1_recom_assets::kh1_fx::sora_ses(&mut hsound, mv, base, kh1_recom_assets::kh1_fx::sound_variant(card), sound_map, &mut kh1_recom_assets::kh1_fx::Added::default()).map_err(|e| e.to_string())?;
+            }
         }
         write(&hw_dir.with_file_name("PL0011.SES"), &kh1_recom_assets::ses::write(&hsound))?;
     }
@@ -426,12 +436,17 @@ fn run() -> Result<(), String> {
     // M13 stage 3: KH1's trails and finisher effects as Re:CoM's EET events at the KH1 variant
     // (Sora's PL0001.EET, the Keyblade's PL0002.EET) and kh1-fx.json, the moves the DLL switches.
     let fx_manifest_path = root.join(kh1_recom_assets::kh1_fx::MANIFEST);
-    match fx_eets(&arc, &keys, fx_moves.as_deref(), &mut fx_added, &game) {
-        Ok(Some(files)) => {
+    let kh1_groups: Vec<(u16, u16, String)> = keyblades.iter().filter_map(|(m, c)| Some((m.card as u16, m.group, c.as_ref()?.report.model.clone()))).filter(|k| k.0 <= 17).collect();
+    match fx_eets(&arc, &keys, fx_moves.as_deref(), &mut fx_added, &game, &kh1_groups, &sound_map) {
+        Ok(Some((files, group_files))) => {
             for (name, bytes) in &files {
                 // Next to the pack of the same group (as the step writes PL0001 / PL0002 / PL0011).
                 let at = if name.starts_with("PL0002") { wep_path.with_file_name(name) } else if name.starts_with("PL0001") { ann_path.with_file_name(name) } else { hw_dir.with_file_name(name) };
                 write(&at, bytes)?;
+            }
+            // M13 stage 4: each KH1 Keyblade group's own EET (loose) and EFF (raw, with its PC textures).
+            for (rel, bytes) in &group_files {
+                write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
             }
             let src = [("PL0001.SES sha256", kh1_formats::egs::sha256_hex(&ses))];
             write(&fx_manifest_path, kh1_recom_assets::kh1_fx::manifest_json(&fx_added, &src).as_bytes())?;
@@ -442,7 +457,7 @@ fn run() -> Result<(), String> {
                 fx_added.trails.iter().map(|t| (t.0, t.2, t.3)).collect::<Vec<_>>(),
                 fx_added.effects.iter().map(|e| (e.0, e.2.clone())).collect::<Vec<_>>(),
                 if fx_added.effects_out.is_empty() { String::new() } else { format!("; NOT placed: {:?}", fx_added.effects_out.iter().map(|e| (e.0, e.1, e.2)).collect::<Vec<_>>()) },
-                fx_added.sounds.len(),
+                fx_added.sounds.iter().filter(|s| s.4 == kh1_recom_assets::kh1_fx::VARIANT).count(),
                 {
                     let miss: Vec<u32> = fx_added.sounds.iter().flat_map(|s| s.3.clone()).collect();
                     if miss.is_empty() { String::new() } else { format!(" (Re:CoM's whoosh kept for KH1 ids not in a bank: {miss:?})") }
@@ -450,7 +465,13 @@ fn run() -> Result<(), String> {
             );
         }
         Ok(None) => {
-            for p in [&fx_manifest_path, &ann_path.with_file_name("PL0001.EET"), &wep_path.with_file_name("PL0002.EET"), &hw_dir.with_file_name("PL0011.EET"), &hw_dir.with_file_name("PL0012.EET")] {
+            let mut stale = vec![fx_manifest_path.clone(), ann_path.with_file_name("PL0001.EET"), wep_path.with_file_name("PL0002.EET"), hw_dir.with_file_name("PL0011.EET"), hw_dir.with_file_name("PL0012.EET")];
+            for (_, g, _) in &kh1_groups {
+                for rel in [kh1_recom_assets::keyblade::resource_path(*g, "EET"), format!("raw/{}", kh1_recom_assets::keyblade::resource_path(*g, "EFF"))] {
+                    stale.push(rel.split('/').fold(root.clone(), |p, s| p.join(s)));
+                }
+            }
+            for p in &stale {
                 if p.is_file() {
                     std::fs::remove_file(p).map_err(|e| format!("{}: {e}", p.display()))?;
                     println!("removed {} (no KH1 fx this run)", p.display());
@@ -901,8 +922,22 @@ fn fx_moves(game: &Path, keys: kh1_formats::egs::KeyTable, set: &kh1_formats::ms
 /// Halloween Town's `PL0011.EET` (Sora) / `PL0012.EET` (its Keyblade) when Recom.hed has them (the DLL
 /// passes KH1's variant there too, so they need the same events). None when there are no moves or
 /// one of the first two files is not in Recom.hed.
-#[allow(clippy::type_complexity)]
-fn fx_eets(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, moves: Option<&[kh1_recom_assets::kh1_fx::Move]>, added: &mut kh1_recom_assets::kh1_fx::Added, game: &Path) -> Result<Option<Vec<(String, Vec<u8>)>>, String> {
+///
+/// M13 stage 4: also each KH1 Keyblade group's own files (`groups`: card, group, KH1 model), as paths under
+/// the recom root: `PLAYER/00GG/PL00GG.EET` (Re:CoM's `PL0002.EET` with KH1's trail on the Keyblade's own
+/// `.wpn` set at its reach, and Gravity Break's blade point at its reach) and `raw/PLAYER/00GG/PL00GG.EFF`
+/// (the set and its PC textures). A Keyblade whose files don't read is noted and keeps the shared
+/// `PL0002.EET` (the Kingdom Key's trail).
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn fx_eets(
+    arc: &kh1_formats::egs::Archive,
+    keys: &kh1_formats::egs::KeyTable,
+    moves: Option<&[kh1_recom_assets::kh1_fx::Move]>,
+    added: &mut kh1_recom_assets::kh1_fx::Added,
+    game: &Path,
+    groups: &[(u16, u16, String)],
+    sound_map: &dyn Fn(u32) -> Option<u32>,
+) -> Result<Option<(Vec<(String, Vec<u8>)>, Vec<(String, Vec<u8>)>)>, String> {
     use kh1_recom_assets::kh1_fx as fx;
     let Some(moves) = moves else {
         println!("note: KH1 fx not built: no KH1 rows (btltbl.bin)");
@@ -916,17 +951,14 @@ fn fx_eets(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, m
     let (sora, weapon, mdl) = (rd(install::SORA_EET)?, rd(install::KEYBLADE_EET)?, rd(install::KEYBLADE_MDL)?);
     // Gravity Break's effect 2 on the blade at KH1's fraction 0.8 (code 0x30: t = W+0x28 + (W+0x24 −
     // W+0x28) × 0.8, `0x14029EB20`), as an offset from Re:CoM's `wep0` toward `k9` (KH1's 282 → 283).
-    let blade = (|| -> Option<[f32; 3]> {
-        let inst = install::kh1(game, keys.clone()).ok()?;
-        let w = kh1_formats::btltbl::Btltbl::parse(inst.read("btltbl.bin").ok()?).ok()?.weapon_for_item(kh1_recom_assets::sounds::KINGDOM_KEY_ITEM).ok()?;
+    let table = install::kh1(game, keys.clone()).ok().and_then(|inst| inst.read("btltbl.bin").ok()).and_then(|b| kh1_formats::btltbl::Btltbl::parse(b).ok());
+    let segment: Option<[f32; 3]> = (|| {
         let sk = kh1_recom_assets::mdl::RecomSkeleton::parse(&mdl).ok()?;
         let b = sk.bones.get(fx::BLADE_BONES.1)?;
-        if b.parent as usize != fx::BLADE_BONES.0 {
-            return None;
-        }
-        let t = w.blade_near + (w.blade_far - w.blade_near) * 0.8;
-        Some(b.local.t.map(|v| (v * t as f64) as f32))
+        (b.parent as usize == fx::BLADE_BONES.0).then(|| b.local.t.map(|v| v as f32))
     })();
+    let blade_at = |w: &kh1_formats::btltbl::Weapon| segment.map(|seg| seg.map(|v| v * (w.blade_near + (w.blade_far - w.blade_near) * 0.8)));
+    let blade = table.as_ref().and_then(|t| t.weapon_for_item(kh1_recom_assets::sounds::KINGDOM_KEY_ITEM).ok()).and_then(|w| blade_at(&w));
     if blade.is_none() {
         println!("note: KH1 fx: Gravity Break's blade effect not placed (PL0002.MDL bone 3 is not wep0's child, or no Kingdom Key row)");
     }
@@ -942,7 +974,7 @@ fn fx_eets(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, m
             None
         }
     };
-    let weapon_eet = fx::weapon_eet(&weapon, moves, blade, added).map_err(|e| format!("{}: {e}", install::KEYBLADE_EET))?;
+    let weapon_eet = fx::weapon_eet(&weapon, moves, blade, None, added).map_err(|e| format!("{}: {e}", install::KEYBLADE_EET))?;
     let sora_eet = fx::sora_eet(&sora, moves, body, added).map_err(|e| format!("{}: {e}", install::SORA_EET))?;
     let mut out = vec![("PL0001.EET".to_string(), sora_eet), ("PL0002.EET".to_string(), weapon_eet)];
     for (path, weapon_file) in [(install::HALLOWEEN_EET, false), (install::HALLOWEEN_KEYBLADE_EET, true)] {
@@ -950,13 +982,72 @@ fn fx_eets(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, m
             println!("note: KH1 fx: {path} not in Recom.hed (Halloween Town keeps none of KH1's events there)");
             continue;
         }
-        let r = rd(path).and_then(|d| if weapon_file { fx::weapon_eet(&d, moves, blade, &mut fx::Added::default()) } else { fx::sora_eet(&d, moves, body, &mut fx::Added::default()) }.map_err(|e| format!("{path}: {e}")));
+        let r = rd(path).and_then(|d| if weapon_file { fx::weapon_eet(&d, moves, blade, None, &mut fx::Added::default()) } else { fx::sora_eet(&d, moves, body, &mut fx::Added::default()) }.map_err(|e| format!("{path}: {e}")));
         match r {
             Ok(b) => out.push((path.rsplit('/').next().unwrap_or(path).to_string(), b)),
             Err(e) => println!("note: KH1 fx: {e} (Halloween Town keeps none of KH1's events there)"),
         }
     }
-    Ok(Some(out))
+    // M13 stage 4: each KH1 Keyblade group's own trail and set.
+    let mut group_files = Vec::new();
+    let (Some(table), Some(seg)) = (table.as_ref(), segment) else {
+        println!("note: KH1 fx: no btltbl.bin or PL0002.MDL's wep0 → k9: every Keyblade keeps the Kingdom Key's trail");
+        return Ok(Some((out, group_files)));
+    };
+    let inst = install::kh1(game, keys.clone()).map_err(|e| format!("KH1 files: {e}"))?;
+    for (card, group, model) in groups {
+        let r = (|| -> Result<(fx::KeybladeOut, Vec<(String, Vec<u8>)>), String> {
+            let item = kh1_recom_assets::stats::KH1_KEYBLADES.iter().find(|k| k.0 as u16 == *card).map(|k| k.2).ok_or("not a KH1 Keyblade")?;
+            let w = table.weapon_for_item(item).map_err(|e| e.to_string())?;
+            let file = format!("{model}.wpn");
+            let (wpn, assets, _) = inst.read_full(&file).map_err(|e| format!("{file}: {e}"))?;
+            let name = kh1_recom_assets::effects::keyblade_set_name(model);
+            let mut set = kh1_recom_assets::effects::kh1_set(&name, &file, &wpn, kh1_recom_assets::effects::WPN_SECTION, &assets).map_err(|e| format!("{file}: {e}"))?;
+            if !set.ids.contains(&(fx::TRAIL_ID as u32)) {
+                return Err(format!("{file}: its set has no trail id {}", fx::TRAIL_ID));
+            }
+            // The set's own program sounds (none on the trail: Checked (files)), as its `.ese` when any map.
+            let (rows, _) = kh1_recom_assets::effects::kh1_ese_rows(&set.data, sound_map).map_err(|e| e.to_string())?;
+            if !rows.is_empty() {
+                set.ese = Some(kh1_recom_assets::effects::write_ese(&rows));
+            }
+            let attach = kh1_recom_assets::effects::program_attach(&set.data, fx::TRAIL_ID as u32).map_err(|e| e.to_string())?.unwrap_or(0);
+            if attach != 0 && attach != fx::ATTACH_BLADE {
+                return Err(format!("{file}: its trail's attach code {attach:#x} is not read (only 0 and 0x30)"));
+            }
+            let trail = fx::KeybladeTrail { dpx: name.clone(), far: w.blade_far, near: w.blade_near, segment: seg, attach };
+            let eet = fx::weapon_eet(&weapon, moves, blade_at(&w), Some(&trail), &mut fx::Added::default()).map_err(|e| e.to_string())?;
+            let (eff, hd) = kh1_recom_assets::effects::group_eff(&set).map_err(|e| e.to_string())?;
+            let entry = kh1_formats::egs::build_plain_entry(&eff, &hd, 0).map_err(|e| e.to_string())?;
+            let eet_path = kh1_recom_assets::keyblade::resource_path(*group, "EET");
+            let eff_path = kh1_recom_assets::keyblade::resource_path(*group, "EFF");
+            let sv = fx::sound_variant(*card);
+            let sound_variant = added.sounds.iter().any(|s| s.4 == sv).then_some(sv);
+            let reach = [seg[0] * w.blade_far, seg[0] * w.blade_near];
+            println!(
+                "KH1 fx (M13 stage 4): card {card} → group {group}: {name} ({} bytes, ids {:?}, PC textures {:?}{}), trail attach {attach:#x}, nodes B {:.4} / C {:.4} m on wep0 (KH1 far {} / near {}), sounds {}",
+                set.data.len(),
+                set.ids,
+                set.hd.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(),
+                if set.ese.is_some() { ", with its .ese" } else { "" },
+                reach[0],
+                reach[1],
+                w.blade_far,
+                w.blade_near,
+                sound_variant.map_or("the Kingdom Key's (no KH1 sound of its own found)".to_string(), |v| format!("at variant {v}"))
+            );
+            let out = fx::KeybladeOut { card: *card, group: *group, set: name, eet: eet_path.clone(), eff: eff_path.clone(), reach, sound_variant };
+            Ok((out, vec![(eet_path, eet), (format!("raw/{eff_path}"), entry)]))
+        })();
+        match r {
+            Ok((k, files)) => {
+                added.keyblades.push(k);
+                group_files.extend(files);
+            }
+            Err(e) => println!("note: KH1 fx: card {card} (group {group}): {e}: it keeps the Kingdom Key's trail (the shared PL0002.EET)"),
+        }
+    }
+    Ok(Some((out, group_files)))
 }
 
 /// M13 stage 2's files: the SCD pack and `kh1-sounds.json`.
@@ -966,6 +1057,8 @@ struct Sounds {
     /// KH1 id → Re:CoM id of every SCD taken (stage 3's events use it).
     map: Vec<(u32, u32)>,
     weapon_base: u32,
+    /// Each KH1 Keyblade card's weapon sound base whose `.se` was read (stage 4).
+    weapon_bases: Vec<(u16, u32)>,
 }
 
 /// KH1's own sounds for Re:CoM's banks (`kh1_recom_assets::sounds`): every SCD of Sora's
@@ -981,29 +1074,37 @@ fn sounds_build(game: &Path, keys: kh1_formats::egs::KeyTable) -> Result<Sounds,
     let kk = table.weapon_for_item(sd::KINGDOM_KEY_ITEM).map_err(|e| format!("Kingdom Key: {e}"))?;
     let base = kk.sound_base;
     let mut wanted = sd::wanted(&sora, base);
-    let mut sources = vec![sd::Source { file: sd::SORA_MDLS.into(), assets: sora }];
+    let mut sources = vec![sd::Source { file: sd::SORA_MDLS.into(), assets: sora, card: None }];
     let mut read = Vec::new();
-    // The Keyblade's own sound file (`<model>.se`, `xw_ex_5010.se`: its 40 SCDs). The world packs
-    // hold none of them (the owner's run of 0.108.0): not read any more (about 600 MB).
-    let se = sd::weapon_file(&kk.model);
-    let files: Vec<String> = vec![se.clone()];
-    for f in &files {
-        let f = f.as_str();
-        match inst.read_full(f) {
+    let mut weapon_bases = Vec::new();
+    // Each KH1 Keyblade's own sound file (`<model>.se`, `xw_ex_5010.se`: its 40 SCDs and the few the
+    // Keyblades share, 11018..; M13 stage 4: all 17, each tagged with its card). The world packs hold
+    // none of them (the owner's run of 0.108.0): not read any more (about 600 MB).
+    for (card, name, item) in kh1_recom_assets::stats::KH1_KEYBLADES {
+        let w = match table.weapon_for_item(*item) {
+            Ok(w) => w,
+            Err(e) => {
+                println!("note: KH1 sounds: {name}: {e} (skipped)");
+                continue;
+            }
+        };
+        let f = sd::weapon_file(&w.model);
+        match inst.read_full(&f) {
             Ok((_, assets, _)) => {
                 let n = assets.iter().filter(|a| sd::sound_id(&a.name).is_some()).count();
                 read.push(format!("{f} ({n} SCDs)"));
-                if f == se {
+                if *card == 1 {
                     let names: Vec<&str> = assets.iter().map(|a| a.name.as_str()).collect();
                     println!("KH1 sounds: {f}'s PC assets: {names:?}");
-                    // Every SCD of the Keyblade's own file (its 40 and the ones Keyblades share, 11018..).
-                    wanted.extend(assets.iter().filter_map(|a| sd::sound_id(&a.name)));
-                    wanted.sort_unstable();
-                    wanted.dedup();
                 }
-                sources.push(sd::Source { file: f.into(), assets });
+                // Every SCD of the Keyblade's own file.
+                wanted.extend(assets.iter().filter_map(|a| sd::sound_id(&a.name)));
+                wanted.sort_unstable();
+                wanted.dedup();
+                weapon_bases.push((*card as u16, w.sound_base));
+                sources.push(sd::Source { file: f, assets, card: Some(*card as u16) });
             }
-            Err(e) => println!("note: KH1 sounds: {f}: {e} (skipped)"),
+            Err(e) => println!("note: KH1 sounds: {name}: {f}: {e} (skipped: its swings keep the Kingdom Key's KH1 sounds)"),
         }
     }
     let t = sd::take(&sources, &wanted).map_err(|e| e.to_string())?;
@@ -1027,9 +1128,9 @@ fn sounds_build(game: &Path, keys: kh1_formats::egs::KeyTable) -> Result<Sounds,
         if t.missing.is_empty() { String::new() } else { format!("; NOT FOUND: {:?} (those play Re:CoM's sounds)", t.missing) }
     );
     let src = [("btltbl.bin sha256", kh1_formats::egs::sha256_hex(&btl))];
-    let (pack, manifest) = sd::build(&t, base, &src);
+    let (pack, manifest) = sd::build(&t, base, &weapon_bases, &src);
     let map = t.sounds.iter().map(|s| (s.kh1_id, s.recom_id())).collect();
-    Ok(Sounds { pack, manifest, map, weapon_base: base })
+    Ok(Sounds { pack, manifest, map, weapon_base: base, weapon_bases })
 }
 
 /// The camp item row's files: the raw `FO0100.SPR` entry and `kh1-camp-rows.json`.

@@ -11,6 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 226: M13 stage 4: each KH1 Keyblade's own trail (its `.wpn` set at its KH1 reach) and swing sounds (its `.se`), loaded with its own group, version 0.114.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § M13 and camp text answers): "The six KH2 Keyblades swing with Re:CoM's trail at KH1 Effects"; decided: each Keyblade's KH1 set loads with its own Keyblade group, only when equipped; trail length and look follow KH1's own trail data (1:1). Stage 4 of `docs/recom-m13-plan.md`.
+
+- **The blade's reach is KH1's row** (Checked (decomp + files)): KH1's code-`0x30` point is `parent + t × (bone − parent)` on Sora's blade bone (`0x14029EB20` → `0x1401D6320`), with t from the weapon row's `+0x28` near / `+0x24` far. Re:CoM's own Kingdom Key trail nodes B / C (−0.78 / 0 m on `wep0`) are exactly KK's far −3.7 / near 0 × `k9`'s 0.2111 m. So each Keyblade's B / C = its own far / near on that segment (Ultima −1.18 m, One-Winged Angel −1.10 m …).
+- **Its trail program** = its own `.wpn` section 0 id 5, run by Re:CoM unchanged (lifetime, look, emission: KH1's). Attach code 0 in 15 sets; `0x30` in Diamond Dust and One-Winged Angel (node A then KH1's blade-bone matrix: `k9` at 0). Checked (files: all 18 `.wpn`).
+- **Correction** (Checked (files: btltbl)): `xw_ex_5200` (lifetime 9, attach 0x30) is One-Winged Angel (item 0x66), not Ultima; Ultima is `xw_ex_5160` (lifetime 12, attach 0). Oathkeeper's base is 0x380E (0x3887 is One-Winged Angel's).
+- **Asset step**, per KH1 Keyblade group 21–36: `PLAYER/00GG/PL00GG.EET` (Re:CoM's `PL0002.EET` + KH1's events at 1301 with its own set and reach; Gravity Break's blade effect at its reach) and `raw/PLAYER/00GG/PL00GG.EFF` (`kh1_ex_5xxx.dpx` + its PC textures). Every Keyblade's `<model>.se` SCDs in `kh1-sounds.bin`, each tagged with its cards. Each Keyblade's KH1 sound events in `PL0001.SES` / `PL0011.SES` at variant 1301 + card − 1 from its own weapon base. `kh1-fx.json` `keyblades` lists the groups.
+- **DLL**: `win::fx::preload` reads `kh1-fx.json` before the Keyblade model table and checks both files next to it. `keyblade_models::plan_table` gives such a group its own EET row and a sixth row, type 0xE `PL00GG.EFF`: Re:CoM's row loader takes any type (`0x14023B7A0` / `0x14023B9D0`, Checked (decomp)), so the set loads and unloads with the group. `fx::variants` picks the equipped Keyblade's (`stats::equipped_card`) sound variant where it has events, else KK's 1301, else 0. `win::sounds::ensure(card)` registers Sora's banks and the playing Keyblade's.
+- **KH2 Keyblades** (38–43): unchanged: `PL0002.EET`'s Re:CoM trail at KH1's windows, and the Kingdom Key's KH1 sounds.
+- No hook, call site or byte site; nothing per frame (per KH1 motion: one pointer read and small list lookups).
+- Assumptions: the code-0 programs read the blade from nodes B / C (as KK's identical program does in Re:CoM); Re:CoM's `.EFF` handler from a PLAYER row as from an EFFECT row; the weapon's EET lookup by our group id finds its own `PL00GG.EET`; banks registered earlier in a session stay (≤ ~0.9 MB per Keyblade).
+- Asset step: **re-run**. New outputs: 16 × `PLAYER/00GG/PL00GG.EET` + `raw/PLAYER/00GG/PL00GG.EFF` (GG = 21..36; **32 new `mod.yml` entries**, `recom-keyblade-models.md` § 11), and the changed `PL0001.SES`, `PL0011.SES`, `kh1-sounds.bin`, `kh1-sounds.json` and `kh1-fx.json`. Without the new files a group keeps the shared EET (logged).
+- Checked: tests (nodes from reach, blade attach, sound variants, per-card banks, the plan's own rows, both manifests through the DLL parsers, every `.wpn` set in the session), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings), the Linux `kh1-recom-build`. Not checked: in game; the `.se` files (not in the session); a trail against KH1's look. Docs: `recom-m13-plan.md` § Stage 4 built; `recom-m13-kh1-fx.md` § 1 corrected; `recom-keyblade-models.md` § 10.2 / § 11.
+
+---
+
 ## Stage 225: True squeeze for our names in Re:CoM's text: an x-scale carried by the text's own vtable copy, version 0.113.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § M13 and camp text answers): "Camp-page long names (Customize, Abilities, Re:CoM's text): **(a) true squeeze**, an x-scale taught to Re:CoM's text drawing". Scope: our names drawn in Re:CoM's own text that overflow their boxes (camp Customize rows and right-hand panel, the Abilities list with its Sleights / Enemy Skills rows, the command menu in Re:CoM's look, Party list, Items page; anything else of ours). Combat = KH1 in Sora's story (where these exist); Combat = Re:CoM and Riku's story unchanged.

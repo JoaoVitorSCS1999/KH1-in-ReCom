@@ -44,6 +44,28 @@ pub const SORA_SECTION: usize = 1;
 /// Sora's KH1 set's name in Re:CoM.
 pub const SORA_SET: &str = "kh1_ex_0010.dpx";
 
+/// The `.wpn` section holding a Keyblade's effect set (Checked (files): magic `0x82` in all 17; Re:CoM's
+/// `ex_5010.dpx` is the Kingdom Key's, byte for byte).
+pub const WPN_SECTION: usize = 0;
+
+/// A KH1 Keyblade's set's name in Re:CoM (`xw_ex_5030` → `kh1_ex_5030.dpx`): unique among Re:CoM's
+/// effect names (they never start `kh1_`), at most 21 characters.
+pub fn keyblade_set_name(model: &str) -> String {
+    format!("kh1_{}.dpx", model.strip_prefix("xw_").unwrap_or(model))
+}
+
+/// A Keyblade group's own effect container (M13 stage 4, `PLAYER/00GG/PL00GG.EFF`): the set (and its
+/// `.ese` when it has one) and the set's PC textures. The group's own PLAYER row of type 0xE loads it
+/// with the group (Re:CoM's row loader `0x14023B9D0` takes any type: Checked (decomp)), so only the
+/// equipped Keyblade's set is in memory.
+pub fn group_eff(set: &Set) -> Result<(Vec<u8>, Vec<HdAsset>)> {
+    let mut entries = vec![Entry { name: set.name.clone(), data: set.data.clone(), flags: [0, 0] }];
+    if let Some(e) = &set.ese {
+        entries.push(Entry { name: set.ese_name(), data: e.clone(), flags: [0, 0] });
+    }
+    Ok((write_eff(&entries)?, set.hd.clone()))
+}
+
 /// One container row.
 pub const ROW: usize = 0x20;
 /// Longest name Re:CoM reads from a row (`strncpy(…, 0x15)`).
@@ -179,6 +201,21 @@ pub fn program_sounds(set: &[u8]) -> Result<Vec<(u32, u16, u16)>> {
         out.push((*id, w(0xFC)?, w(0xFE)?));
     }
     Ok(out)
+}
+
+/// Effect `id`'s program attach code (header `+0x104`: where KH1 places it, `0x14029EA00` /
+/// `0x14029EB20`; Checked (decomp)). None when the set has no effect `id`.
+pub fn program_attach(set: &[u8], id: u32) -> Result<Option<u32>> {
+    let ids = set_ids(set)?;
+    let Some(k) = ids.iter().position(|&x| x == id) else { return Ok(None) };
+    let e = 0x10 + 0x20 * k;
+    let blob = u32_at(set, e)? as usize;
+    let prog = u32_at(set, e + 4)? as usize;
+    if u32_at(set, blob)? != PPP_MAGIC || prog >= u32_at(set, blob + 4)? as usize {
+        return bad(format!("effect {id}: no program {prog} in its blob at {blob:#x}"));
+    }
+    let p = blob + u32_at(set, blob + 8 + 4 * prog)? as usize;
+    Ok(Some(u32_at(set, p + 0x104)?))
 }
 
 /// One `.ese` row: when effect `id` starts, Re:CoM plays `group × 1000 + number` with it, follows
@@ -457,6 +494,17 @@ mod tests {
         assert_eq!(assets[0], recom_asset, "Re:CoM's PC assets kept as they are");
         assert_eq!(assets[1].name, "kh1_ex_0010_dpx80.dds");
         assert!(add_sets(&out, &assets, &[kh1]).is_err(), "never added twice");
+    }
+
+    #[test]
+    fn keyblade_sets_get_their_own_names_and_container() {
+        assert_eq!(keyblade_set_name("xw_ex_5030"), "kh1_ex_5030.dpx");
+        assert!(keyblade_set_name("xw_ex_5200").len() <= NAME_MAX);
+        let s = Set { name: keyblade_set_name("xw_ex_5030"), source: "xw_ex_5030.wpn section 0".into(), data: set(&[0, 1, 2, 5], 0x100), ids: vec![0, 1, 2, 5], hd: vec![HdAsset { name: "kh1_ex_5030_dpx80.dds".into(), orig_offset: hd_tag(0x80), data: vec![1] }], ese: None };
+        let (eff, hd) = group_eff(&s).unwrap();
+        let rows = parse_eff(&eff).unwrap();
+        assert_eq!((rows.len(), rows[0].name.as_str(), rows[0].data.len()), (1, "kh1_ex_5030.dpx", 0x100));
+        assert_eq!(hd, s.hd);
     }
 
     #[test]

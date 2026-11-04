@@ -201,6 +201,56 @@ pub fn moves(set: &MotionSet, rows: &[ActionRow], clip_of: impl Fn(u16) -> Optio
     out
 }
 
+/// The SES variant of KH1's sounds for the Keyblade of Re:CoM card `card` (1 Kingdom Key … 17 One-Winged
+/// Angel): [`VARIANT`] for the Kingdom Key (stage 3's), then one each (M13 stage 4). Every Keyblade's sounds
+/// are its own weapon ids (op 0x19 = its row's `+0x34` + arg, `0x140295420`), so each needs its own events.
+pub fn sound_variant(card: u16) -> i32 {
+    VARIANT + card.saturating_sub(1) as i32
+}
+
+/// One KH1 Keyblade's trail (M13 stage 4): its own `.wpn` set's effect [`TRAIL_ID`] on Re:CoM's three
+/// nodes, with nodes B and C at its own KH1 reach.
+///
+/// KH1 (Checked (decomp)): the blade point of code `0x30` (`0x14029EB20`) is
+/// `parent + t × (bone − parent)` on Sora's blade bone (`0x1401D6320`), with t = `near + (far − near) ×
+/// fraction` from the equipped weapon row (`+0x28` near, `+0x24` far). Re:CoM's own Kingdom Key trail
+/// (`w001_055`) has node B at −0.78 m and node C at 0 on `wep0`: exactly the Kingdom Key's KH1 far −3.7 and
+/// near 0 times `k9`'s 0.2111 m on `wep0` (−0.781): Checked (files: Re:CoM's `PL0002.EET` and `.MDL`,
+/// KH1's btltbl). So each Keyblade's B and C are its own far and near on that segment (every converted
+/// model keeps Re:CoM's `PL0002` skeleton: `docs/recom-keyblade-models.md` § 5). Node A is the effect's own
+/// matrix (Re:CoM's mode-3 spawn, `0x1402573F0`), KH1's attach: a program with attach code 0 (15 of the 17)
+/// keeps Re:CoM's node A (−0.11 m on `wep0`, Square's choice for the Kingdom Key's identical code-0 program);
+/// code `0x30` (Diamond Dust's and One-Winged Angel's; Checked (files)) is the blade bone's own matrix in KH1 (`0x14029EA00`), which is the
+/// segment's t = 1 end: Re:CoM's `k9` at offset 0. Assumption: the code-0 programs read the blade from B and C.
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeybladeTrail {
+    /// The Keyblade's KH1 set's name in Re:CoM (`kh1_ex_5030.dpx`).
+    pub dpx: String,
+    /// KH1's weapon row `+0x24` (far) and `+0x28` (near).
+    pub far: f32,
+    /// See `far`.
+    pub near: f32,
+    /// The blade segment on Re:CoM's `wep0` (`k9`'s local offset: (0.2111, 0, 0)).
+    pub segment: [f32; 3],
+    /// The trail program's KH1 attach code (0 or [`ATTACH_BLADE`]).
+    pub attach: u32,
+}
+
+/// KH1's attach code of the blade bone (`0x14029EB20`).
+pub const ATTACH_BLADE: u32 = 0x30;
+
+/// The effect id of a Keyblade's trail in its set (KH1 row `+2` = 5 on every combo row; Checked (files)).
+pub const TRAIL_ID: i32 = 5;
+
+impl KeybladeTrail {
+    /// Nodes A, B, C from Re:CoM's template's (A kept; B at far, C at near, on node B's bone).
+    pub fn nodes(&self, template: &[(i32, [f32; 3]); 3]) -> [(i32, [f32; 3]); 3] {
+        let at = |t: f32| self.segment.map(|v| v * t);
+        let a = if self.attach == ATTACH_BLADE { (BLADE_BONES.1 as i32, [0.0; 3]) } else { template[0] };
+        [a, (template[1].0, at(self.far)), (template[2].0, at(self.near))]
+    }
+}
+
 /// What the step added.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Added {
@@ -211,14 +261,36 @@ pub struct Added {
     /// Effects left out (request, id, why).
     pub effects_out: Vec<(u16, u32, &'static str)>,
     /// Requests whose clip got KH1 sounds: KH1 ids played, KH1 ids not in a Re:CoM bank (Re:CoM's
-    /// whoosh kept for those).
-    pub sounds: Vec<(u16, String, Vec<u32>, Vec<u32>)>,
+    /// whoosh kept for those), and the SES variant ([`sound_variant`]).
+    pub sounds: Vec<(u16, String, Vec<u32>, Vec<u32>, i32)>,
+    /// M13 stage 4: the Keyblade groups given their own files.
+    pub keyblades: Vec<KeybladeOut>,
+}
+
+/// One Keyblade group's own files (M13 stage 4), as the manifest lists them for the DLL.
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeybladeOut {
+    /// Re:CoM card kind.
+    pub card: u16,
+    /// Its PLAYER group.
+    pub group: u16,
+    /// Its set's name.
+    pub set: String,
+    /// Its `.EET` (`PLAYER/00GG/PL00GG.EET`), a loose file.
+    pub eet: String,
+    /// Its `.EFF` (`PLAYER/00GG/PL00GG.EFF`), written under `raw/` with its PC textures.
+    pub eff: String,
+    /// The trail's nodes B and C (metres on `wep0`).
+    pub reach: [f32; 2],
+    /// Its sounds' SES variant (None: no KH1 sound events for it).
+    pub sound_variant: Option<i32>,
 }
 
 /// The Keyblade's `.EET` with KH1's trail at [`VARIANT`] for each move with a trail window: one record
 /// per Keyblade clip, Re:CoM's own records kept as they are. The nodes are Re:CoM's own trail's
 /// ([`TRAIL_TEMPLATE`]).
-pub fn weapon_eet(recom: &[u8], moves: &[Move], blade_point: Option<[f32; 3]>, added: &mut Added) -> Result<Vec<u8>> {
+/// `keyblade`: a KH1 Keyblade's own trail (stage 4), else Re:CoM's (the Kingdom Key's set and nodes).
+pub fn weapon_eet(recom: &[u8], moves: &[Move], blade_point: Option<[f32; 3]>, keyblade: Option<&KeybladeTrail>, added: &mut Added) -> Result<Vec<u8>> {
     let mut recs = eet::parse(recom)?;
     let template_ev = recs.iter().find(|r| r.name == TRAIL_TEMPLATE).and_then(|r| r.b.first()).copied().ok_or_else(|| Error::Format(format!("EET: no {TRAIL_TEMPLATE} trail to take the nodes from")))?;
     let template = Trail::read(&template_ev);
@@ -229,7 +301,13 @@ pub fn weapon_eet(recom: &[u8], moves: &[Move], blade_point: Option<[f32; 3]>, a
         let Some(w) = &m.weapon else { continue };
         let mut rec = Record { name: w.clone(), a: Vec::new(), b: Vec::new(), raw_name: None };
         if let Some((start, end)) = m.trail {
-            rec.b.push(Trail { start, end, variant: VARIANT, fade: TRAIL_FADE, ..template.clone() }.write(&template_ev)?);
+            let mut t = Trail { start, end, variant: VARIANT, fade: TRAIL_FADE, ..template.clone() };
+            if let Some(k) = keyblade {
+                t.dpx = k.dpx.clone();
+                t.id = TRAIL_ID;
+                t.nodes = k.nodes(&template.nodes);
+            }
+            rec.b.push(t.write(&template_ev)?);
             added.trails.push((m.request, w.clone(), start, end));
         }
         // Gravity Break's effect 2 on the blade (row 4).
@@ -295,7 +373,8 @@ fn u32_of(e: &[u8], o: usize) -> u32 {
 /// 1), then each KH1 key as an event at its frame (Re:CoM's whoosh event as the template: its bone,
 /// offset and fade). A KH1 sound with no Re:CoM bank (`map` None) keeps Re:CoM's whoosh for it
 /// (`ses::whoosh_index`). Moves where no KH1 sound maps get nothing (Re:CoM's events play).
-pub fn sora_ses(entries: &mut Vec<ses::Entry>, moves: &[Move], weapon_base: u32, map: impl Fn(u32) -> Option<u32>, added: &mut Added) -> Result<()> {
+/// `variant`: the Keyblade's ([`sound_variant`]); its events replace an earlier run's at that variant only.
+pub fn sora_ses(entries: &mut Vec<ses::Entry>, moves: &[Move], weapon_base: u32, variant: i32, map: impl Fn(u32) -> Option<u32>, added: &mut Added) -> Result<()> {
     let whoosh = entries.iter().find(|e| e.name() == "p001_060").and_then(|e| e.events.iter().find(|x| u32_of(&x[..], 0) == 1).copied()).ok_or_else(|| Error::Format("SES: p001_060 has no whoosh to copy".into()))?;
     for m in moves {
         if m.sounds.is_empty() {
@@ -324,7 +403,7 @@ pub fn sora_ses(entries: &mut Vec<ses::Entry>, moves: &[Move], weapon_base: u32,
         let mut new = Vec::new();
         for e in entry.events.iter().filter(|x| u32_of(&x[..], 0x20) == 0 && u32_of(&x[..], 0) != 1) {
             let mut c = *e;
-            c[0x20..0x24].copy_from_slice(&VARIANT.to_le_bytes());
+            c[0x20..0x24].copy_from_slice(&variant.to_le_bytes());
             new.push(c);
         }
         let (mut played, mut missing) = (Vec::new(), Vec::new());
@@ -348,12 +427,12 @@ pub fn sora_ses(entries: &mut Vec<ses::Entry>, moves: &[Move], weapon_base: u32,
             e[4..8].copy_from_slice(&index.to_le_bytes());
             e[0x18..0x1C].copy_from_slice(&f.to_le_bytes());
             e[0x1C..0x20].copy_from_slice(&(-1i32).to_le_bytes());
-            e[0x20..0x24].copy_from_slice(&VARIANT.to_le_bytes());
+            e[0x20..0x24].copy_from_slice(&variant.to_le_bytes());
             new.push(e);
         }
-        entry.events.retain(|x| u32_of(&x[..], 0x20) as i32 != VARIANT);
+        entry.events.retain(|x| u32_of(&x[..], 0x20) as i32 != variant);
         entry.events.extend(new);
-        added.sounds.push((m.request, m.clip.clone(), played, missing));
+        added.sounds.push((m.request, m.clip.clone(), played, missing, variant));
     }
     Ok(())
 }
@@ -370,7 +449,27 @@ pub fn manifest_json(a: &Added, sources: &[(&str, String)]) -> String {
     let _ = writeln!(j, "  \"trails\": [\n{}\n  ],", rows(a.trails.iter().map(|(r, w, s, e)| format!("    {{\"request\": {r}, \"clip\": {w:?}, \"start\": {s}, \"end\": {e}}}")).collect()));
     let _ = writeln!(j, "  \"effects\": [\n{}\n  ],", rows(a.effects.iter().map(|(r, c, ids)| format!("    {{\"request\": {r}, \"clip\": {c:?}, \"ids\": {ids:?}}}")).collect()));
     let _ = writeln!(j, "  \"effects_left_out\": [\n{}\n  ],", rows(a.effects_out.iter().map(|(r, id, why)| format!("    {{\"request\": {r}, \"id\": {id}, \"why\": {why:?}}}")).collect()));
-    let _ = writeln!(j, "  \"sounds\": [\n{}\n  ],", rows(a.sounds.iter().map(|(r, c, p, m)| format!("    {{\"request\": {r}, \"clip\": {c:?}, \"kh1\": {p:?}, \"recom_whoosh_for\": {m:?}}}")).collect()));
+    let _ = writeln!(j, "  \"sounds\": [\n{}\n  ],", rows(a.sounds.iter().map(|(r, c, p, m, v)| format!("    {{\"request\": {r}, \"variant\": {v}, \"clip\": {c:?}, \"kh1\": {p:?}, \"recom_whoosh_for\": {m:?}}}")).collect()));
+    let _ = writeln!(
+        j,
+        "  \"keyblades\": [\n{}\n  ],",
+        rows(
+            a.keyblades
+                .iter()
+                .map(|k| format!(
+                    "    {{\"card\": {}, \"group\": {}, \"set\": {:?}, \"eet\": {:?}, \"eff\": {:?}, \"reach\": [{:.4}, {:.4}], \"sound_variant\": {}}}",
+                    k.card,
+                    k.group,
+                    k.set,
+                    k.eet,
+                    k.eff,
+                    k.reach[0],
+                    k.reach[1],
+                    k.sound_variant.map_or("null".to_string(), |v| v.to_string())
+                ))
+                .collect()
+        )
+    );
     let src: Vec<String> = sources.iter().map(|(k, v)| format!("{k:?}: {v:?}")).collect();
     let _ = writeln!(j, "  \"sources\": {{{}}}", src.join(", "));
     let _ = writeln!(j, "}}");
@@ -417,20 +516,20 @@ mod tests {
         let mv = Move { request: 200, row: 13, clip: "p001_055".into(), weapon: Some("w001_055".into()), trail: Some((4, 24)), sounds: vec![(0, Kh1Sound::Weapon(7)), (3, Kh1Sound::Weapon(9))], finisher: false };
         let mut a = Added::default();
         // Only weapon + 7 has a bank.
-        sora_ses(&mut es, std::slice::from_ref(&mv), 0x2B10, |id| (id == 0x2B17).then_some(9_030_000), &mut a).unwrap();
+        sora_ses(&mut es, std::slice::from_ref(&mv), 0x2B10, VARIANT, |id| (id == 0x2B17).then_some(9_030_000), &mut a).unwrap();
         let evs: Vec<(u32, u32, i32, i32)> = es[0].events.iter().map(|e| (u32_of(e, 0), u32_of(e, 4), i32::from_le_bytes(e[0x18..0x1C].try_into().unwrap()), u32_of(e, 0x20) as i32)).collect();
         assert_eq!(
             evs,
             vec![(601, 1, 19, 0), (1, 232, 1, 0), (2, 0, 5, 0), (601, 1, 19, VARIANT), (2, 0, 5, VARIANT), (9030, 0, 0, VARIANT), (1, 234, 3, VARIANT)],
             "Re:CoM's own events untouched; at the KH1 variant: Re:CoM's step and voice, KH1's sound, Re:CoM's whoosh where KH1's has no bank"
         );
-        assert_eq!(a.sounds, vec![(200, "p001_055".into(), vec![0x2B17], vec![0x2B19])]);
+        assert_eq!(a.sounds, vec![(200, "p001_055".into(), vec![0x2B17], vec![0x2B19], VARIANT)]);
         // Run again: the KH1 events are replaced, not added twice.
-        sora_ses(&mut es, std::slice::from_ref(&mv), 0x2B10, |id| (id == 0x2B17).then_some(9_030_000), &mut a).unwrap();
+        sora_ses(&mut es, std::slice::from_ref(&mv), 0x2B10, VARIANT, |id| (id == 0x2B17).then_some(9_030_000), &mut a).unwrap();
         assert_eq!(es[0].events.len(), 7);
         // No bank for any of its sounds: nothing at the variant (Re:CoM's events play).
         let mut es2 = vec![entry("p001_055", vec![whoosh_ev(1, 232, 1, 0)]), entry("p001_060", vec![whoosh_ev(1, 237, 2, 0)])];
-        sora_ses(&mut es2, &[mv], 0x2B10, |_| None, &mut Added::default()).unwrap();
+        sora_ses(&mut es2, &[mv], 0x2B10, VARIANT, |_| None, &mut Added::default()).unwrap();
         assert_eq!(es2[0].events.len(), 1);
     }
 
@@ -446,13 +545,87 @@ mod tests {
             Move { request: 217, row: 4, clip: "p001_229".into(), weapon: Some("w001_229".into()), trail: Some((30, 56)), sounds: vec![], finisher: true },
         ];
         let mut a = Added::default();
-        let out = eet::parse(&weapon_eet(&recom_weapon_eet(), &moves, Some([-0.78, 0.0, 0.0]), &mut a).unwrap()).unwrap();
+        let out = eet::parse(&weapon_eet(&recom_weapon_eet(), &moves, Some([-0.78, 0.0, 0.0]), None, &mut a).unwrap()).unwrap();
         assert_eq!(out.len(), 3, "Re:CoM's record, then one per Keyblade clip");
         assert_eq!(Trail::read(&out[0].b[0]).variant, 0, "Re:CoM's own trail untouched");
         let t = Trail::read(&out[1].b[0]);
         assert_eq!((t.start, t.end, t.variant, t.fade, t.nodes[1].1[0]), (4, 24, VARIANT, TRAIL_FADE, -0.78));
         assert_eq!(out[2].a.len(), 1, "Gravity Break's effect 2 on the blade");
         assert_eq!(a.effects, vec![(217, "w001_229".into(), vec![2])]);
+    }
+
+    #[test]
+    fn a_kh1_keyblade_gets_its_own_set_and_reach() {
+        // Re:CoM's own Kingdom Key nodes are KH1's reach on k9: −3.7 × 0.2111 = −0.781 (Checked (files)).
+        let kk = KeybladeTrail { dpx: TRAIL_SET.into(), far: -3.7, near: 0.0, segment: [0.2111, 0.0, 0.0], attach: 0 };
+        let tmpl = [(2, [-0.11, 0.0, 0.0]), (2, [-0.78, 0.0, 0.0]), (2, [0.0; 3])];
+        let n = kk.nodes(&tmpl);
+        assert!((n[1].1[0] - -0.78).abs() < 0.002 && n[2].1 == [0.0; 3] && n[0] == tmpl[0]);
+        // One-Winged Angel's program attaches to the blade (0x30): node A on k9 (Checked (files): xw_ex_5200).
+        let owa = KeybladeTrail { dpx: "kh1_ex_5200.dpx".into(), far: -5.2, near: 0.0, segment: [0.2111, 0.0, 0.0], attach: ATTACH_BLADE };
+        assert_eq!(owa.nodes(&tmpl)[0], (BLADE_BONES.1 as i32, [0.0; 3]));
+        // Ultima (xw_ex_5160, item 0x64): its own set, far −5.6 → −1.18 m.
+        let ultima = KeybladeTrail { dpx: "kh1_ex_5160.dpx".into(), far: -5.6, near: 0.0, segment: [0.2111, 0.0, 0.0], attach: 0 };
+        let moves = vec![Move { request: 200, row: 13, clip: "p001_055".into(), weapon: Some("w001_055".into()), trail: Some((4, 24)), sounds: vec![], finisher: false }];
+        let out = eet::parse(&weapon_eet(&recom_weapon_eet(), &moves, None, Some(&ultima), &mut Added::default()).unwrap()).unwrap();
+        assert_eq!(Trail::read(&out[0].b[0]).dpx, TRAIL_SET, "Re:CoM's own record keeps Re:CoM's set");
+        let t = Trail::read(&out[1].b[0]);
+        assert_eq!((t.dpx.as_str(), t.id, t.variant, t.fade), ("kh1_ex_5160.dpx", TRAIL_ID, VARIANT, TRAIL_FADE));
+        assert!((t.nodes[1].1[0] - -1.18216).abs() < 1e-4 && t.nodes[0].1[0] == -0.11);
+    }
+
+    /// The player's own `.wpn` files, when `KH1_WPN_DIR` names a folder of them: every Keyblade's set
+    /// reads, has its trail id 5, and its programs' sounds (`+0xFC`) are listed.
+    #[test]
+    fn every_keyblades_set_from_the_players_files() {
+        let Some(dir) = std::env::var_os("KH1_WPN_DIR") else { return };
+        let mut n = 0;
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            let Some(stem) = p.file_name().and_then(|f| f.to_str()).and_then(|f| f.strip_suffix(".wpn")) else { continue };
+            let wpn = std::fs::read(&p).unwrap();
+            let name = crate::effects::keyblade_set_name(stem);
+            let set = crate::effects::kh1_set(&name, stem, &wpn, crate::effects::WPN_SECTION, &[]).unwrap();
+            assert!(set.ids.contains(&(TRAIL_ID as u32)), "{stem}: ids {:?}", set.ids);
+            let attach = crate::effects::program_attach(&set.data, TRAIL_ID as u32).unwrap().unwrap();
+            assert!(attach == 0 || attach == ATTACH_BLADE, "{stem}: trail attach {attach:#x}");
+            let sounds: Vec<(u32, u16, u16)> = crate::effects::program_sounds(&set.data).unwrap().into_iter().filter(|s| s.1 != 0).collect();
+            eprintln!("{stem}: {name} {} bytes, ids {:?}, program sounds {sounds:?}, trail attach {attach:#x}", set.data.len(), set.ids);
+            n += 1;
+        }
+        assert!(n > 0);
+    }
+
+    #[test]
+    fn the_manifest_lists_each_keyblades_files_and_variants() {
+        let mut a = Added::default();
+        a.trails.push((200, "w001_055".into(), 4, 24));
+        a.sounds.push((200, "p001_055".into(), vec![0x2B17], vec![], VARIANT));
+        a.sounds.push((200, "p001_055".into(), vec![0x2CCF], vec![], sound_variant(2)));
+        a.keyblades.push(KeybladeOut { card: 2, group: 21, set: "kh1_ex_5030.dpx".into(), eet: "PLAYER/0021/PL0021.EET".into(), eff: "PLAYER/0021/PL0021.EFF".into(), reach: [-0.8022, 0.0], sound_variant: Some(sound_variant(2)) });
+        a.keyblades.push(KeybladeOut { card: 3, group: 22, set: "kh1_ex_5060.dpx".into(), eet: "PLAYER/0022/PL0022.EET".into(), eff: "PLAYER/0022/PL0022.EFF".into(), reach: [-0.8233, 0.0], sound_variant: None });
+        let j = manifest_json(&a, &[]);
+        assert!(j.contains("\"variant\": 1302, \"clip\": \"p001_055\""));
+        assert!(j.contains("\"group\": 21, \"set\": \"kh1_ex_5030.dpx\", \"eet\": \"PLAYER/0021/PL0021.EET\""));
+        assert!(j.contains("\"sound_variant\": null"));
+        // The DLL's parser reads it (`kh1-recom` `fx::tests::the_steps_output_parses`, `KH1_FX_JSON`).
+        if let Some(out) = std::env::var_os("KH1_FX_JSON_OUT") {
+            std::fs::write(out, &j).unwrap();
+        }
+    }
+
+    #[test]
+    fn each_keyblade_has_its_own_sound_variant() {
+        assert_eq!((sound_variant(1), sound_variant(2), sound_variant(17)), (VARIANT, VARIANT + 1, VARIANT + 16));
+        let mut es = vec![entry("p001_055", vec![whoosh_ev(1, 232, 1, 0)]), entry("p001_060", vec![whoosh_ev(1, 237, 2, 0)])];
+        let mv = Move { request: 200, row: 13, clip: "p001_055".into(), weapon: None, trail: None, sounds: vec![(0, Kh1Sound::Weapon(7))], finisher: false };
+        let mut a = Added::default();
+        sora_ses(&mut es, std::slice::from_ref(&mv), 0x2B10, sound_variant(1), |id| (id == 0x2B17).then_some(9_030_000), &mut a).unwrap();
+        // Oathkeeper's base: its own id at its own variant; the Kingdom Key's events stay.
+        sora_ses(&mut es, std::slice::from_ref(&mv), 0x3887, sound_variant(13), |id| (id == 0x3887 + 7).then_some(9_500_000), &mut a).unwrap();
+        let at = |v: i32| es[0].events.iter().filter(|e| u32_of(&e[..], 0x20) as i32 == v).map(|e| u32_of(&e[..], 0)).collect::<Vec<_>>();
+        assert_eq!((at(0), at(VARIANT), at(VARIANT + 12)), (vec![1], vec![9030], vec![9500]));
+        assert_eq!(a.sounds.iter().map(|s| s.4).collect::<Vec<_>>(), vec![VARIANT, VARIANT + 12]);
     }
 
     #[test]

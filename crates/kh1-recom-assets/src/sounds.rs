@@ -99,6 +99,8 @@ pub struct Source {
     pub file: String,
     /// Its PC assets.
     pub assets: Vec<HdAsset>,
+    /// The Re:CoM Keyblade card whose `.se` it is (M13 stage 4), or None (Sora's own file).
+    pub card: Option<u16>,
 }
 
 /// One KH1 sound taken.
@@ -114,6 +116,9 @@ pub struct Sound {
     pub source: String,
     /// The SCD, unchanged.
     pub data: Vec<u8>,
+    /// The Keyblade cards whose `.se` holds it (M13 stage 4: the DLL registers it while one of them is
+    /// equipped); empty when a file of Sora's own has it (always registered).
+    pub cards: Vec<u16>,
 }
 
 impl Sound {
@@ -150,11 +155,20 @@ pub fn wanted(sora: &[HdAsset], weapon_base: u32) -> Vec<u32> {
 pub fn take(sources: &[Source], wanted: &[u32]) -> Result<Taken> {
     let mut t = Taken::default();
     let mut found: Vec<(u32, &HdAsset, &str)> = Vec::new();
+    let mut cards: Vec<(u32, u16)> = Vec::new();
+    let mut always: Vec<u32> = Vec::new();
     for src in sources {
         for a in &src.assets {
             let Some(id) = sound_id(&a.name) else { continue };
             if !wanted.contains(&id) {
                 continue;
+            }
+            if let Some(c) = src.card {
+                if !cards.iter().any(|x: &(u32, u16)| *x == (id, c)) {
+                    cards.push((id, c));
+                }
+            } else if !always.contains(&id) {
+                always.push(id);
             }
             match found.iter().find(|f| f.0 == id) {
                 Some(f) => {
@@ -177,7 +191,9 @@ pub fn take(sources: &[Source], wanted: &[u32]) -> Result<Taken> {
         return Err(Error::Format(format!("{} KH1 sounds: more than the {} banks 9001..9999", found.len(), BANK_END - FIRST_BANK)));
     }
     for (k, (id, a, file)) in found.iter().enumerate() {
-        t.sounds.push(Sound { kh1_id: *id, bank: FIRST_BANK + k as u32, name: a.name.clone(), source: file.to_string(), data: a.data.clone() });
+        let mut of: Vec<u16> = if always.contains(id) { Vec::new() } else { cards.iter().filter(|c| c.0 == *id).map(|c| c.1).collect() };
+        of.sort_unstable();
+        t.sounds.push(Sound { kh1_id: *id, bank: FIRST_BANK + k as u32, name: a.name.clone(), source: file.to_string(), data: a.data.clone(), cards: of });
     }
     t.missing = wanted.iter().copied().filter(|id| !found.iter().any(|f| f.0 == *id)).collect();
     Ok(t)
@@ -193,7 +209,8 @@ pub fn recom_id(t: &Taken, kh1_id: u32) -> Option<u32> {
 }
 
 /// The pack (the SCDs back to back, each at a multiple of [`ALIGN`]) and its manifest.
-pub fn build(t: &Taken, weapon_base: u32, sources: &[(&str, String)]) -> (Vec<u8>, String) {
+/// `weapon_bases`: each Keyblade card's KH1 weapon sound base (M13 stage 4), listed for reference.
+pub fn build(t: &Taken, weapon_base: u32, weapon_bases: &[(u16, u32)], sources: &[(&str, String)]) -> (Vec<u8>, String) {
     use std::fmt::Write;
     let mut pack = Vec::new();
     let mut rows = Vec::new();
@@ -202,14 +219,15 @@ pub fn build(t: &Taken, weapon_base: u32, sources: &[(&str, String)]) -> (Vec<u8
             pack.push(0);
         }
         rows.push(format!(
-            "    {{\"kh1_id\": {}, \"bank\": {}, \"recom_id\": {}, \"name\": {:?}, \"offset\": {}, \"size\": {}, \"source\": {:?}}}",
+            "    {{\"kh1_id\": {}, \"bank\": {}, \"recom_id\": {}, \"name\": {:?}, \"offset\": {}, \"size\": {}, \"source\": {:?}, \"cards\": {:?}}}",
             s.kh1_id,
             s.bank,
             s.recom_id(),
             s.name,
             pack.len(),
             s.data.len(),
-            s.source
+            s.source,
+            s.cards
         ));
         pack.extend_from_slice(&s.data);
     }
@@ -220,6 +238,7 @@ pub fn build(t: &Taken, weapon_base: u32, sources: &[(&str, String)]) -> (Vec<u8
     let _ = writeln!(j, "  \"pack_size\": {},", pack.len());
     let _ = writeln!(j, "  \"system_group\": {SYSTEM_GROUP},");
     let _ = writeln!(j, "  \"weapon_base\": {weapon_base},");
+    let _ = writeln!(j, "  \"weapon_bases\": [{}],", weapon_bases.iter().map(|(c, b)| format!("{{\"card\": {c}, \"base\": {b}}}")).collect::<Vec<_>>().join(", "));
     let _ = writeln!(j, "  \"sounds\": [\n{}\n  ],", rows.join(",\n"));
     let _ = writeln!(j, "  \"missing\": {:?},", t.missing);
     let src: Vec<String> = sources.iter().map(|(k, v)| format!("{k:?}: {v:?}")).collect();
@@ -280,8 +299,8 @@ pub(crate) mod tests {
 
     #[test]
     fn first_file_wins_banks_in_id_order_and_differences_are_noted() {
-        let sora = Source { file: SORA_MDLS.into(), assets: vec![asset("se011005.win32.scd", scd(8, 5)), asset("se011001.win32.scd", scd(8, 1))] };
-        let tw = Source { file: "amusic/setw.dat".into(), assets: vec![asset("se011031.win32.scd", scd(8, 31)), asset("se011001.win32.scd", scd(8, 9)), asset("se099999.win32.scd", scd(8, 0))] };
+        let sora = Source { file: SORA_MDLS.into(), assets: vec![asset("se011005.win32.scd", scd(8, 5)), asset("se011001.win32.scd", scd(8, 1))], card: None };
+        let tw = Source { file: "amusic/setw.dat".into(), assets: vec![asset("se011031.win32.scd", scd(8, 31)), asset("se011001.win32.scd", scd(8, 9)), asset("se099999.win32.scd", scd(8, 0))], card: None };
         let t = take(&[sora, tw], &[11001, 11005, 11031, 11032]).unwrap();
         let got: Vec<(u32, u32, &str)> = t.sounds.iter().map(|s| (s.kh1_id, s.bank, s.source.as_str())).collect();
         assert_eq!(got, vec![(11001, 9001, SORA_MDLS), (11005, 9002, SORA_MDLS), (11031, 9003, "amusic/setw.dat")]);
@@ -293,16 +312,36 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn keyblade_sounds_name_the_cards_that_have_them() {
+        // Sora's file; the Kingdom Key's .se (card 1) and Three Wishes' (card 2) share 11018 (Checked
+        // (files): xw_ex_5010.se and xw_ex_5020.se both hold se011018..22).
+        let sora = Source { file: SORA_MDLS.into(), assets: vec![asset("se011001.win32.scd", scd(4, 1))], card: None };
+        let kk = Source { file: "xw_ex_5010.se".into(), assets: vec![asset("se011018.win32.scd", scd(4, 2)), asset("se011024.win32.scd", scd(4, 3))], card: Some(1) };
+        let tw = Source { file: "xw_ex_5030.se".into(), assets: vec![asset("se011018.win32.scd", scd(4, 2)), asset("se011424.win32.scd", scd(4, 4))], card: Some(2) };
+        let t = take(&[sora, kk, tw], &[11001, 11018, 11024, 11424]).unwrap();
+        let got: Vec<(u32, Vec<u16>)> = t.sounds.iter().map(|s| (s.kh1_id, s.cards.clone())).collect();
+        assert_eq!(got, vec![(11001, vec![]), (11018, vec![1, 2]), (11024, vec![1]), (11424, vec![2])]);
+        let (pack, j) = build(&t, 0x2B10, &[(1, 0x2B10), (2, 0x2CA0)], &[]);
+        assert!(j.contains("\"cards\": [1, 2]") && j.contains("{\"card\": 2, \"base\": 11424}"));
+        // The DLL's parser reads it (`kh1-recom` `sounds::tests::the_steps_output_parses`, `KH1_SOUNDS_JSON`).
+        if let Some(out) = std::env::var_os("KH1_SOUNDS_JSON_OUT") {
+            let out = std::path::PathBuf::from(out);
+            std::fs::write(&out, &j).unwrap();
+            std::fs::write(out.with_file_name(PACK), &pack).unwrap();
+        }
+    }
+
+    #[test]
     fn a_bad_scd_is_refused() {
-        let s = Source { file: "x".into(), assets: vec![asset("se011001.win32.scd", b"not an scd".to_vec())] };
+        let s = Source { file: "x".into(), assets: vec![asset("se011001.win32.scd", b"not an scd".to_vec())], card: None };
         assert!(take(&[s], &[11001]).is_err());
     }
 
     #[test]
     fn the_pack_holds_each_scd_aligned_as_the_manifest_says() {
-        let s = Source { file: SORA_MDLS.into(), assets: vec![asset("se011001.win32.scd", scd(5, 1)), asset("se011002.win32.scd", scd(7, 2))] };
+        let s = Source { file: SORA_MDLS.into(), assets: vec![asset("se011001.win32.scd", scd(5, 1)), asset("se011002.win32.scd", scd(7, 2))], card: None };
         let t = take(&[s], &[11001, 11002]).unwrap();
-        let (pack, j) = build(&t, 0x2B10, &[("x sha256", "ab".into())]);
+        let (pack, j) = build(&t, 0x2B10, &[(1, 0x2B10)], &[("x sha256", "ab".into())]);
         let a = &t.sounds[0].data;
         let b = &t.sounds[1].data;
         let off_b = a.len().div_ceil(ALIGN) * ALIGN;

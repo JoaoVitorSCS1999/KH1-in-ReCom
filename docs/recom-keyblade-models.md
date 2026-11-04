@@ -354,7 +354,12 @@ format 4, `group` per row; nothing in the DLL counts them). At
   sub-requests go right after it). Checked (decomp) / never seen in game: **Assumption** that this
   ordering always holds. The other native layout (own `PL00GG.ANN` / `.EET` copies per group, as
   Re:CoM's Halloween group 12 has its own `PL0012.ANN` / `.EET`) needs 16 copies from the asset
-  step; not done.
+  step; not done for the ANN.
+- **M13 stage 4 (0.114.0): own EET and EFF.** A KH1 Keyblade group whose `PLAYER/00GG/PL00GG.EET` and
+  `raw/PLAYER/00GG/PL00GG.EFF` the asset step wrote (listed in `kh1-fx.json`, both found next to it) names
+  its own EET (KH1's trail on its own set) and gets a sixth row, type 0xE, `PLAYER/00GG/PL00GG.EFF` (its
+  KH1 effect set). Re:CoM's row loader takes any type (`0x14023B7A0` / `0x14023B9D0`, Checked (decomp)).
+  The ANN stays shared. The KH2 groups 38–43 keep group 2's EET (`recom-m13-plan.md` § Stage 4 built).
 
 ### 10.3 Which group is built (the pick)
 
@@ -498,6 +503,14 @@ with `method: copy`), put the files in the mod folder under the same relative pa
 # … the same two lines for 0022, 0023, …, 0036 (16 groups, 32 entries)
 # step 3 (KH2 Keyblades): the same two lines for 0038, 0039, …, 0043 (6 groups, 12 entries;
 # there is no 0037)
+```
+
+M13 stage 4 (0.114.0) adds two files per KH1 Keyblade group (21..36, 32 entries):
+
+```yaml
+- {name: PLAYER/0021/PL0021.EET, method: copy, source: [{name: PLAYER/0021/PL0021.EET}]}
+- {name: raw/PLAYER/0021/PL0021.EFF, method: copy, source: [{name: raw/PLAYER/0021/PL0021.EFF}]}
+# … the same two lines for 0022, 0023, …, 0036
 ```
 
 The new `kh1-stats.json` (with the six KH2 rows) replaces the old one; without it the DLL never

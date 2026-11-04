@@ -243,7 +243,7 @@ files)). KH1 places these two on **Sora himself**, not on the struck enemy, so t
   - their sounds play (81 / 86);
   - at Effects = Re:CoM nothing changes.
 
-## Stage 4 plan (not built yet): per-Keyblade trails and sounds
+## Stage 4 plan: per-Keyblade trails and sounds (built 0.114.0, see § Stage 4 built)
 
 Research for the stage (2026-11-04); the open choices below go to the owner first.
 
@@ -272,6 +272,65 @@ Research for the stage (2026-11-04); the open choices below go to the owner firs
      - (b) nodes scaled by each Keyblade's KH1 blade reach (W `+0x24`; Ultima −5.6 against −3.7);
      - (c) decode the PPP point ops first (research before building).
   3. The six KH2 Keyblades have no KH1 set: (a) the Kingdom Key's trail; (b) Re:CoM's.
+
+## Stage 4 built (0.114.0): per-Keyblade trails and sounds
+
+Owner's answers (2026-11-04): each Keyblade's KH1 set loads with its own Keyblade group, only when equipped; trail length
+and look follow KH1's own trail data (1:1); the six KH2 Keyblades swing with Re:CoM's trail at KH1 Effects.
+
+- **Where the trail's blade comes from** (Checked (decomp + files)):
+  - KH1's blade point for code `0x30` (`0x14029EB20`) is `parent + t × (bone − parent)` on Sora's blade bone
+    (`0x1401D6320`), with `t = near + (far − near) × fraction` from the equipped weapon row (`+0x28` near, `+0x24` far).
+  - Re:CoM's own Kingdom Key trail (`w001_055`) has node B at −0.78 m and node C at 0 on `wep0`. That is the Kingdom Key's
+    KH1 far −3.7 and near 0 times `k9`'s 0.2111 m (−0.781), so Square made its nodes from KH1's own row.
+  - So each Keyblade's nodes B / C are its own far / near on that segment. Every converted model keeps `PL0002`'s
+    skeleton, and KH1 uses Sora's bone for every Keyblade.
+- **Each trail program** is the Keyblade's own (`.wpn` section 0, id 5), run by Re:CoM unchanged: its lifetime, look and
+  emission are KH1's data.
+  - Attach code 0 in 15 sets; `0x30` in Diamond Dust (`xw_ex_5190`) and One-Winged Angel (`xw_ex_5200`, lifetime 9).
+    Checked (files: all 18 `.wpn` in the session).
+  - For a `0x30` program, node A (the effect's own matrix in Re:CoM's mode-3 spawn) is KH1's blade-bone matrix, the
+    segment's t = 1 end: `k9` at offset 0.
+  - Code 0 keeps Re:CoM's node A (−0.11 m on `wep0`): Square's choice for the Kingdom Key's identical code-0 program.
+- **Correction** (Checked (files: btltbl)): § Stage 4 plan and `recom-m13-kh1-fx.md` § 1 called `xw_ex_5200` "Ultima".
+  It is **One-Winged Angel** (item 0x66, far −5.2, sound base 0x3887). Ultima is `xw_ex_5160` (item 0x64, far −5.6, base
+  0x2C00), and its trail is like the Kingdom Key's (lifetime 12, attach 0). Oathkeeper's base is 0x380E.
+- **Asset step** (`kh1_fx::KeybladeTrail`, `effects::keyblade_set_name` / `group_eff` / `program_attach`, `main.rs`
+  `fx_eets`), for each KH1 Keyblade group 21–36:
+  - `PLAYER/00GG/PL00GG.EET` (loose): Re:CoM's `PL0002.EET` (variant 0 untouched) plus KH1's events at variant 1301,
+    with the trail on its own set `kh1_ex_5xxx.dpx` id 5 at its reach, and Gravity Break's effect 2 at its own blade
+    point (fraction 0.8 of its reach);
+  - `raw/PLAYER/00GG/PL00GG.EFF`: a container holding the set and its PC textures (`kh1_ex_5xxx_dpx<off>.dds`); the
+    sets have no program sounds, so no `.ese` (Checked (files));
+  - `kh1-fx.json` `keyblades`: card, group, set, both paths, reach, sound variant.
+  - A Keyblade whose files don't read is logged and keeps the shared `PL0002.EET` (the Kingdom Key's trail).
+- **Sounds:**
+  - every KH1 Keyblade's `<model>.se` SCDs go into the pack, each tagged with the cards whose `.se` holds it (`cards`;
+    Sora's own untagged);
+  - `PL0001.SES` / `PL0011.SES` get each Keyblade's KH1 sound events at its own variant (`kh1_fx::sound_variant`:
+    1301 + card − 1; the Kingdom Key's stays 1301), from its own weapon base (btltbl `+0x34`: KK 0x2B10, Three Wishes
+    0x2CC8, …, OWA 0x3887);
+  - Re:CoM's whoosh is kept for an id with no SCD, as stage 3 did.
+- **DLL:**
+  - `win::fx::preload` reads `kh1-fx.json` before the model table, and checks each group's two files next to it;
+  - `keyblade_models::plan_table` gives such a group its own EET row and a sixth row, type 0xE `PLAYER/00GG/PL00GG.EFF`.
+    Re:CoM's row loader `0x14023B7A0` / `0x14023B9D0` takes any type (Checked (decomp)), so the set loads and unloads
+    with the group: only the equipped one is in memory;
+  - `fx::variants` passes the equipped Keyblade's (`stats::equipped_card`) own SES variant where it has events for the
+    move, else the Kingdom Key's 1301 (the KH2 Keyblades; a Keyblade whose `.se` wasn't found), else 0;
+  - `win::sounds::ensure(card)` registers Sora's banks and those of the Keyblade whose sounds play.
+- **The six KH2 Keyblades** (38–43): unchanged. They share `PL0002.EET`, with Re:CoM's own trail (`ex_5010` 5 on
+  Re:CoM's nodes) at KH1's windows, and play the Kingdom Key's KH1 sounds (stage 3's behaviour; no KH1 `.se` exists for
+  them).
+- **Per frame: nothing.** Per KH1 motion: one pointer read (the equipped byte) and a few small list lookups. No hook, no
+  call site, no byte site.
+- **Assumptions:**
+  - the code-0 programs read the blade from nodes B and C, as the Kingdom Key's identical program does in Re:CoM;
+  - Re:CoM's `.EFF` handler works the same from a PLAYER row as from an EFFECT row (sub-files tagged with the group,
+    unloaded with it);
+  - the weapon's EET lookup by our group's id finds the group's own `PL00GG.EET`;
+  - banks registered earlier in a session stay registered (Re:CoM owns them; at most about 0.9 MB per Keyblade).
+- **Not checked:** in game; the real `.se` files (not in the session); a trail's look against KH1's (no KH1 capture).
 
 ## Open (ask at their stage)
 

@@ -304,6 +304,10 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     let sound_file = recom_bases(dirs).into_iter().map(|b| b.join(crate::menu_sounds::MANIFEST)).find(|p| p.is_file());
     // M13 stage 1: the KH1 effect sets the asset step added (checked at the first battle).
     effects::install(base, recom_bases(dirs).into_iter().map(|b| b.join(crate::effects::MANIFEST)).find(|p| p.is_file()).as_deref());
+    // M13 stage 4: the fx manifest first (the Keyblade model table names each group's own EET / EFF).
+    if movement::installed() {
+        fx::preload(recom_bases(dirs).into_iter().map(|b| b.join(crate::fx::MANIFEST)).find(|p| p.is_file()).as_deref());
+    }
     install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref(), hud_file.as_deref(), sound_file.as_deref());
     // M13 stage 2: KH1's system bank also carries the KH1 effects' sounds, so it is read even
     // without the KH1 command menu look; then KH1's own SCD banks.
@@ -313,7 +317,7 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     sounds::install(base, recom_bases(dirs).into_iter().map(|b| b.join(crate::sounds::MANIFEST)).find(|p| p.is_file()).as_deref());
     // M13 stage 3: KH1's effect / sound events of Sora's moves (variants) and KH1's trail end.
     if movement::installed() {
-        fx::install(base, recom_bases(dirs).into_iter().map(|b| b.join(crate::fx::MANIFEST)).find(|p| p.is_file()).as_deref());
+        fx::install(base);
     }
     install_battles(base);
     install_enemies(base, &recom_bases(dirs));

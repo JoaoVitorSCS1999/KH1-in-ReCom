@@ -8,17 +8,21 @@
 //! lacks to Re:CoM's own registration `0x1402F5D70` (a buffer from Re:CoM's `_aligned_malloc`,
 //! owned by Re:CoM's entry from then), with KH1's system bank 9000 (the menu sounds' pack, the
 //! effect programs' sounds). Re:CoM plays them by id through its own path. Nothing per frame.
+//! M13 stage 4: a Keyblade's own SCDs (`Bank::cards`) are registered only for the Keyblade whose sounds
+//! play; Sora's always. Banks registered earlier in the session stay (Re:CoM owns them; at most each
+//! Keyblade's `.se`, about 0.9 MB, once).
 
 use super::log;
 use super::menu_sounds as msw;
 use crate::sounds as sd;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::OnceLock;
 
 static FILES: OnceLock<(sd::Manifest, PathBuf)> = OnceLock::new();
-/// The banks were all found in Re:CoM's list since the last battle start (no walk needed).
-static CONFIRMED: AtomicBool = AtomicBool::new(false);
+/// The Keyblade card (+ 1) whose banks were all found in Re:CoM's list since the last battle start
+/// (0: none; no walk needed while it stays the same).
+static CONFIRMED: AtomicU32 = AtomicU32::new(0);
 /// Re:CoM refused one: not tried again this session.
 static REFUSED: AtomicBool = AtomicBool::new(false);
 static LOGGED: AtomicBool = AtomicBool::new(false);
@@ -66,19 +70,23 @@ pub fn install(base: usize, manifest: Option<&Path>) {
 
 /// A battle starts (Re:CoM's battle manager ctor): at Combat = KH1, the banks are checked again.
 pub fn battle_start() {
-    CONFIRMED.store(false, Ordering::Release);
+    CONFIRMED.store(0, Ordering::Release);
     if super::movement::kh1_on() {
+        // The equipped Keyblade's own banks, or the Kingdom Key's (whose sounds the KH2 Keyblades play).
+        let card = super::stats::equipped_card();
+        let own = FILES.get().is_some_and(|(m, _)| m.banks.iter().any(|b| b.cards.contains(&card)));
         // SAFETY: on Re:CoM's update thread, as its own loaders register banks.
-        unsafe { ensure() };
+        unsafe { ensure(if own { card } else { crate::keyblades::KINGDOM_KEY }) };
     }
 }
 
-/// Every KH1 bank is in Re:CoM's list (registered now if not). True when all are.
+/// Every KH1 bank wanted with Keyblade card `card` (Sora's and that Keyblade's) is in Re:CoM's list
+/// (registered now if not). True when all are.
 ///
 /// # Safety
 /// On Re:CoM's update thread (its bank list is not locked).
-pub unsafe fn ensure() -> bool {
-    if CONFIRMED.load(Ordering::Acquire) {
+pub unsafe fn ensure(card: u16) -> bool {
+    if CONFIRMED.load(Ordering::Acquire) == card as u32 + 1 {
         return true;
     }
     let Some((m, pack)) = FILES.get() else { return false };
@@ -89,7 +97,9 @@ pub unsafe fn ensure() -> bool {
     let present = msw::our_banks(|b| m.banks.iter().find(|x| x.bank as i32 == b).map(|x| x.name.as_slice()));
     let mut added = 0;
     let mut failed = Vec::new();
-    for b in &m.banks {
+    let mut wanted = 0;
+    for b in m.banks.iter().filter(|b| b.wanted_with(card)) {
+        wanted += 1;
         match present.iter().find(|p| p.0 == b.bank as i32) {
             Some((_, true)) => continue,
             Some((_, false)) => {
@@ -113,13 +123,14 @@ pub unsafe fn ensure() -> bool {
     if !ok {
         REFUSED.store(true, Ordering::Relaxed);
     }
-    CONFIRMED.store(ok, Ordering::Release);
+    CONFIRMED.store(if ok { card as u32 + 1 } else { 0 }, Ordering::Release);
     if added > 0 || !ok || !LOGGED.swap(true, Ordering::Relaxed) {
         log(&format!(
-            "sounds (M13): {} of {} KH1 banks registered now ({} already there); KH1's system bank 9000 {}{}",
+            "sounds (M13): {} of {} KH1 banks for Keyblade card {card:#x} registered now ({} already there; {} in the pack); KH1's system bank 9000 {}{}",
             added,
+            wanted,
+            wanted - added - failed.len(),
             m.banks.len(),
-            m.banks.len() - added - failed.len(),
             if system { "there" } else { "NOT there (no menu sounds' pack: the KH1 effects' sounds don't play)" },
             if ok { String::new() } else { format!("; FAILED: {} (not tried again this session)", failed.join(", ")) }
         ));

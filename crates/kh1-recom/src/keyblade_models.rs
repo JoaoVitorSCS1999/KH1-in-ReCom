@@ -31,6 +31,9 @@ pub mod kind {
     pub const MDL: u16 = 0xB;
     pub const RTM: u16 = 0xC;
     pub const EET: u16 = 0x1A;
+    /// An effect container (`.EFF`): EFFECT rows use it (Checked (exe): 363 rows); the row loader
+    /// `0x14023B9D0` takes any type in any category (M13 stage 4).
+    pub const EFF: u16 = 0xE;
     pub const ANN: u16 = 0x1D;
     pub const LINK: u16 = 0x27;
 }
@@ -194,14 +197,24 @@ const GROUP2: [(u16, &str); 5] = [
     (kind::LINK, "30509"),
 ];
 
+/// What of its own a group's rows name besides its RTM and MDL (M13 stage 4: the asset step wrote them).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OwnFiles {
+    /// Its own `PL00GG.EET` (KH1's trail on its own set) instead of group 2's.
+    pub eet: bool,
+    /// Its own `PL00GG.EFF` (its KH1 set), one more row after the LINK.
+    pub eff: bool,
+}
+
 /// The extended PLAYER table: Re:CoM's rows as they are, then one group per entry of `groups`
 /// laid out as Re:CoM's group 2 (same row order and types; its own RTM and MDL paths; group 2's
-/// ANN, EET and LINK `"30509"` name pointers), then Re:CoM's end row.
+/// ANN, EET and LINK `"30509"` name pointers), then Re:CoM's end row. `own(g)`: group `g`'s own EET
+/// (named instead of group 2's) and EFF (a sixth row, type 0xE, after the LINK).
 ///
 /// The loader (`0x14023BF70`) finds a group's first row by a linear scan and reads its rows while
 /// the group stays the same, so a group's rows must be contiguous and the end row last. Checked
 /// (decomp). `recom` is the table up to and including its end row; `name` reads a name pointer.
-pub fn plan_table(recom: &[RawRow], name: impl Fn(u64) -> Option<String>, groups: &[u16]) -> Result<Vec<PlannedRow>, String> {
+pub fn plan_table(recom: &[RawRow], name: impl Fn(u64) -> Option<String>, groups: &[u16], own: impl Fn(u16) -> OwnFiles) -> Result<Vec<PlannedRow>, String> {
     let end = recom.iter().position(|r| r.group == END).ok_or("Re:CoM's table has no end row")?;
     if end + 1 != recom.len() {
         return Err("rows after Re:CoM's end row".into());
@@ -231,13 +244,18 @@ pub fn plan_table(recom: &[RawRow], name: impl Fn(u64) -> Option<String>, groups
     }
     let mut out: Vec<PlannedRow> = body.iter().map(|r| PlannedRow { group: r.group, kind: r.kind, name: RowName::Recom(r.name) }).collect();
     for &g in groups {
+        let o = own(g);
         for r in &g2 {
             let n = match r.kind {
                 kind::RTM => RowName::Own(resource_path(g, "RTM")),
                 kind::MDL => RowName::Own(resource_path(g, "MDL")),
+                kind::EET if o.eet => RowName::Own(resource_path(g, "EET")),
                 _ => RowName::Recom(r.name),
             };
             out.push(PlannedRow { group: g, kind: r.kind, name: n });
+        }
+        if o.eff {
+            out.push(PlannedRow { group: g, kind: kind::EFF, name: RowName::Own(resource_path(g, "EFF")) });
         }
     }
     out.push(PlannedRow { group: END, kind: recom[end].kind, name: RowName::Recom(recom[end].name) });
@@ -334,7 +352,7 @@ mod tests {
         // The table gets them after Re:CoM's rows, each laid out as group 2.
         let (rows, names) = recom_rows();
         let name = |p: u64| names.iter().find(|(q, _)| *q == p).map(|(_, s)| s.to_string());
-        let t = plan_table(&rows, name, &m.our_groups()).unwrap();
+        let t = plan_table(&rows, name, &m.our_groups(), |_| OwnFiles::default()).unwrap();
         assert_eq!(t.len(), rows.len() + 5 * 22);
         let g43: Vec<&PlannedRow> = t.iter().filter(|r| r.group == 43).collect();
         assert_eq!(g43[0].name, RowName::Own("PLAYER/0043/PL0043.RTM".into()));
@@ -413,7 +431,7 @@ mod tests {
     fn the_table_gets_our_groups_laid_out_as_group_2() {
         let (rows, names) = recom_rows();
         let name = |p: u64| names.iter().find(|(q, _)| *q == p).map(|(_, s)| s.to_string());
-        let t = plan_table(&rows, name, &[21, 22]).unwrap();
+        let t = plan_table(&rows, name, &[21, 22], |_| OwnFiles::default()).unwrap();
         assert_eq!(t.len(), rows.len() + 10);
         // Re:CoM's rows unchanged and first.
         for (a, b) in rows[..rows.len() - 1].iter().zip(&t) {
@@ -438,18 +456,35 @@ mod tests {
     }
 
     #[test]
+    fn a_group_with_its_own_trail_names_its_eet_and_its_eff() {
+        let (rows, names) = recom_rows();
+        let name = |p: u64| names.iter().find(|(q, _)| *q == p).map(|(_, s)| s.to_string());
+        let own = |g: u16| if g == 21 { OwnFiles { eet: true, eff: true } } else { OwnFiles::default() };
+        let t = plan_table(&rows, name, &[21, 22], own).unwrap();
+        let g21: Vec<&PlannedRow> = t.iter().filter(|r| r.group == 21).collect();
+        assert_eq!(g21.iter().map(|r| r.kind).collect::<Vec<_>>(), vec![kind::RTM, kind::MDL, kind::ANN, kind::EET, kind::LINK, kind::EFF]);
+        assert_eq!(g21[3].name, RowName::Own("PLAYER/0021/PL0021.EET".into()));
+        assert_eq!(g21[2].name, RowName::Recom(0x220), "the ANN stays group 2's");
+        assert_eq!(g21[5].name, RowName::Own("PLAYER/0021/PL0021.EFF".into()));
+        // Group 22 (no own files, a KH2 Keyblade's case) keeps group 2's EET and no EFF.
+        let g22: Vec<&PlannedRow> = t.iter().filter(|r| r.group == 22).collect();
+        assert_eq!((g22.len(), g22[3].name.clone()), (5, RowName::Recom(0x230)));
+        assert_eq!(t.last().unwrap().group, END);
+    }
+
+    #[test]
     fn the_table_is_refused_when_recom_differs() {
         let (rows, names) = recom_rows();
         let name = |p: u64| names.iter().find(|(q, _)| *q == p).map(|(_, s)| s.to_string());
-        assert!(plan_table(&rows, &name, &[11]).is_err(), "Re:CoM's own group");
-        assert!(plan_table(&rows, &name, &[21, 21]).is_err());
-        assert!(plan_table(&rows[..rows.len() - 1], &name, &[21]).is_err(), "no end row");
+        assert!(plan_table(&rows, &name, &[11], |_| OwnFiles::default()).is_err(), "Re:CoM's own group");
+        assert!(plan_table(&rows, &name, &[21, 21], |_| OwnFiles::default()).is_err());
+        assert!(plan_table(&rows[..rows.len() - 1], &name, &[21], |_| OwnFiles::default()).is_err(), "no end row");
         let mut odd = rows.clone();
         odd[4].kind = 0x17;
-        assert!(plan_table(&odd, &name, &[21]).is_err());
+        assert!(plan_table(&odd, &name, &[21], |_| OwnFiles::default()).is_err());
         let wrong_name = |p: u64| if p == 0x240 { Some("30510".into()) } else { name(p) };
-        assert!(plan_table(&rows, wrong_name, &[21]).is_err());
-        assert_eq!(plan_table(&rows, &name, &[]).unwrap().len(), rows.len());
+        assert!(plan_table(&rows, wrong_name, &[21], |_| OwnFiles::default()).is_err());
+        assert_eq!(plan_table(&rows, &name, &[], |_| OwnFiles::default()).unwrap().len(), rows.len());
     }
 
     #[test]

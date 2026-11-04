@@ -182,7 +182,7 @@ pub fn install(b: usize) {
             return;
         };
         let groups = m.our_groups();
-        let planned = match km::plan_table(&recom, |p| name_at(b, p), &groups) {
+        let planned = match km::plan_table(&recom, |p| name_at(b, p), &groups, super::fx::own_files) {
             Ok(t) => t,
             Err(e) => {
                 log(&format!("keyblades: PLAYER table: {e}; no model swap"));
@@ -216,11 +216,12 @@ pub fn install(b: usize) {
         let _ = MODELS.set(m);
         INSTALLED.store(true, Ordering::Release);
         log(&format!(
-            "keyblades: models in: PLAYER table {} rows ({} Re:CoM's + {} for groups {:?}) at {table:#x}; weapon group picked at CPlayerWeapon +0x30; rebuilt at camp close",
+            "keyblades: models in: PLAYER table {} rows ({} Re:CoM's + {} for groups {:?}) at {table:#x}; weapon group picked at CPlayerWeapon +0x30; rebuilt at camp close; own EET + EFF (M13 stage 4) for {:?}",
             planned.len(),
             recom.len(),
             planned.len() - recom.len(),
-            groups
+            groups,
+            groups.iter().copied().filter(|&g| super::fx::own_files(g).eet).collect::<Vec<_>>()
         ));
     }
 }
