@@ -25,7 +25,11 @@
 //!   motion-locked); row 5 Zantetsuken 4, 5; row 7 Ripple Drive 6, 7; all but 2 with 0x800 (they
 //!   outlive the motion). Where each goes is its program's attach code (`+0x104`, `0x14029EA00` /
 //!   `0x14029EB20`): `0x18001` = Sora's position and facing, placed once (1, 3, 4, 7); bone code 8
-//!   (6); `0x8003` = **the target's contact point** (0, 5).
+//!   (6); `0x8003` = **Sora's own body point**, following him (0, 5): his CLS body record (`.mdls`
+//!   section 4, actor `+0x134` → `+0x14`) evaluated on Sora: code `0x8002` = his `+0x50`, then the
+//!   record's `+8` up (85 units). The effects are started on Sora (`0x1402AE160(Sora, id | 0x800)`)
+//!   and the link (`0x1402AE7F0`, mode 2) re-places them each frame (`0x1402AE910`). Checked (decomp +
+//!   files). Stage 3's note that `0x8003` is the target's point was wrong (corrected 0.112.0).
 
 use crate::eet::{self, Point, Record, Trail};
 use crate::ses;
@@ -71,23 +75,62 @@ pub enum Place {
     Bone8,
     /// Code 0x30 at fraction 0.8: on the blade (the Keyblade's clip), following it.
     Blade(f32),
-    /// `0x8003`: the target's contact point. No EET event can place an effect at another actor.
-    Target,
+    /// `0x8003`: Sora's own body point (his CLS body record), following him: Re:CoM's `Root` with
+    /// the record's lift ([`sora_body_point`]).
+    SoraBody,
 }
 
 /// The finisher rows' effects: row, effect id, place, outlives the motion (0x800). Checked (decomp:
 /// `0x1402A68F0`'s table `03 00 01 04 03 FF 05 04 05 07 06 07`, the extra id 2 call with r9d 0x30 and
 /// 0.8 at `0x1402A6BDA`; files: the programs' `+0x104`).
 pub const FINISHER_FX: [(usize, u32, Place, bool); 8] = [
-    (3, 0, Place::Target, true),
+    (3, 0, Place::SoraBody, true),
     (3, 1, Place::SoraOnce, true),
     (4, 3, Place::SoraOnce, true),
     (4, 2, Place::Blade(0.8), false),
     (5, 4, Place::SoraOnce, true),
-    (5, 5, Place::Target, true),
+    (5, 5, Place::SoraBody, true),
     (7, 6, Place::Bone8, true),
     (7, 7, Place::SoraOnce, true),
 ];
+
+/// KH1's CLS magic (`.mdls` section 4: actor `+0x134`, bound by `0x140287E40`).
+pub const CLS_MAGIC: &[u8; 3] = b"CLS";
+/// Sora's `.mdls` section holding his CLS table (`[+0x14]` of the file: the loader's fifth offset).
+pub const CLS_SECTION: usize = 4;
+/// KH1's code for "the actor's `+0x50`" (`0x14029EB20`'s `0x8002` branch).
+pub const CODE_ACTOR_POINT: u16 = 0x8002;
+/// Re:CoM Sora's `Root` (bone 0: identity rest at the feet, Y up; Checked (files: `PL0001.MDL`)).
+pub const RECOM_ROOT: i32 = 0;
+
+/// Where KH1's code `0x8003` puts an effect on Sora, as an offset from Re:CoM's `Root` (metres, Y up):
+/// his CLS table's body record (header counts at `+4..+7`, 0x14-byte records from `+0x20` in group
+/// order; the body record is group 1's first, `[+0x14]` at run time) `{u8, u8, u16 code, f32 fraction,
+/// f32 lift, f32 radius, f32 height}`, its code evaluated on Sora (`0x1402B5E50` → `0x14029EB20`), then
+/// the lift taken off KH1's (downward) y. Group 1 empty: KH1's fallback, his `+0x50` (no lift).
+/// Only the code `0x8002` with fraction 0 is read (Sora's; any other is refused: not decoded).
+/// Checked (decomp: `0x14029EB20`, `0x1402B5E50`, `0x140287E40`; files: Sora's record is
+/// `{0, 1, 0x8002, 0.0, 85.0, 30.0, 55.0}`). Assumptions: KH1's `+0x50` is Sora's position (the warp
+/// `0x140290CA0` copies `+0x10` into it) and Re:CoM's `Root` is it; Sora's `+0x374 & 0x2000` (scaled
+/// records) is clear.
+pub fn sora_body_point(mdls: &[u8]) -> Result<[f32; 3]> {
+    let (_, cls) = crate::effects::mdls_section(mdls, CLS_SECTION)?;
+    if cls.get(..3) != Some(CLS_MAGIC.as_slice()) || cls.len() < 0x20 {
+        return Err(Error::Format("xa_ex_0010.mdls section 4 is not a CLS table".into()));
+    }
+    if cls[5] == 0 {
+        return Ok([0.0; 3]);
+    }
+    let at = 0x20 + 0x14 * cls[4] as usize;
+    let r = cls.get(at..at + 0x14).ok_or_else(|| Error::Format(format!("CLS: body record at {at:#x} outside the table")))?;
+    let f = |o: usize| f32::from_le_bytes(r[o..o + 4].try_into().unwrap());
+    let code = u16::from_le_bytes([r[2], r[3]]);
+    if code != CODE_ACTOR_POINT || f(4) != 0.0 {
+        return Err(Error::Format(format!("CLS: Sora's body record has code {code:#x} fraction {} (only 0x8002 at 0 is read)", f(4))));
+    }
+    // KH1's y runs down (`kh1-recom` `units`: 0.01 m a unit, y negated): `y − lift` is `lift` up.
+    Ok([0.0, f(8) / 100.0, 0.0])
+}
 
 /// A KH1 sound key of a motion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -208,8 +251,8 @@ pub fn weapon_eet(recom: &[u8], moves: &[Move], blade_point: Option<[f32; 3]>, a
 }
 
 /// Sora's `.EET` with KH1's finisher effects at [`VARIANT`] (one record per clip; Re:CoM's own kept).
-/// The effects placed at the target are left out (no EET event places at another actor: noted).
-pub fn sora_eet(recom: &[u8], moves: &[Move], added: &mut Added) -> Result<Vec<u8>> {
+/// `body`: [`sora_body_point`] (None: the two `0x8003` effects are left out, noted).
+pub fn sora_eet(recom: &[u8], moves: &[Move], body: Option<[f32; 3]>, added: &mut Added) -> Result<Vec<u8>> {
     let mut recs = eet::parse(recom)?;
     for m in moves {
         let mut rec = Record { name: m.clip.clone(), a: Vec::new(), b: Vec::new(), raw_name: None };
@@ -219,16 +262,20 @@ pub fn sora_eet(recom: &[u8], moves: &[Move], added: &mut Added) -> Result<Vec<u
                 continue;
             }
             let keep = if linger { LINGER } else { 0 };
-            let (bone, flags) = match place {
-                Place::SoraOnce => (0, DETACHED | FLAG_3 | keep),
-                Place::Bone8 => (RECOM_BONE_FOR_KH1_8, FLAG_3 | keep),
+            let (bone, offset, flags) = match place {
+                Place::SoraOnce => (RECOM_ROOT, [0.0; 3], DETACHED | FLAG_3 | keep),
+                Place::Bone8 => (RECOM_BONE_FOR_KH1_8, [0.0; 3], FLAG_3 | keep),
                 Place::Blade(_) => continue,
-                Place::Target => {
-                    added.effects_out.push((m.request, id, "placed at the target's contact point (0x8003): no EET event places an effect at another actor"));
-                    continue;
-                }
+                Place::SoraBody => match body {
+                    // Attached to Root (followed every frame, KH1's link mode 2), lifted to his body point.
+                    Some(p) => (RECOM_ROOT, p, FLAG_3 | keep),
+                    None => {
+                        added.effects_out.push((m.request, id, "Sora's body point (0x8003): his CLS record was not read"));
+                        continue;
+                    }
+                },
             };
-            rec.a.push(Point { dpx: SORA_SET.into(), id: id as i32, bone, offset: [0.0; 3], start: 0, end: -1, rot: [0.0; 3], scale: [1.0; 3], flags, fade: 0.0, variant: VARIANT }.write()?);
+            rec.a.push(Point { dpx: SORA_SET.into(), id: id as i32, bone, offset, start: 0, end: -1, rot: [0.0; 3], scale: [1.0; 3], flags, fade: 0.0, variant: VARIANT }.write()?);
             ids.push(id);
         }
         if !rec.a.is_empty() {
@@ -412,13 +459,55 @@ mod tests {
     fn soras_finisher_effects_by_kh1s_attach_codes() {
         let moves: Vec<Move> = [(216u16, 3usize), (217, 4), (218, 5), (215, 7)].iter().map(|&(r, row)| Move { request: r, row, clip: format!("p001_{r}"), weapon: None, trail: None, sounds: vec![], finisher: true }).collect();
         let mut a = Added::default();
-        let out = eet::parse(&sora_eet(&eet::write(&[]).unwrap(), &moves, &mut a).unwrap()).unwrap();
+        let out = eet::parse(&sora_eet(&eet::write(&[]).unwrap(), &moves, Some([0.0, 0.85, 0.0]), &mut a).unwrap()).unwrap();
         let ids: Vec<(u16, Vec<u32>)> = a.effects.iter().map(|e| (e.0, e.2.clone())).collect();
-        assert_eq!(ids, vec![(216, vec![1]), (217, vec![3]), (218, vec![4]), (215, vec![6, 7])]);
-        assert_eq!(a.effects_out.iter().map(|e| (e.0, e.1)).collect::<Vec<_>>(), vec![(216, 0), (218, 5)], "the target-placed ones");
+        assert_eq!(ids, vec![(216, vec![0, 1]), (217, vec![3]), (218, vec![4, 5]), (215, vec![6, 7])]);
+        assert!(a.effects_out.is_empty());
         let flags = |rec: &Record, k: usize| u32_of(&rec.a[k], 0x54);
         let bone = |rec: &Record, k: usize| i32::from_le_bytes(rec.a[k][0x24..0x28].try_into().unwrap());
-        assert_eq!((bone(&out[0], 0), flags(&out[0], 0)), (0, DETACHED | FLAG_3 | LINGER));
+        let lift = |rec: &Record, k: usize| f32::from_le_bytes(rec.a[k][0x2C..0x30].try_into().unwrap());
+        assert_eq!((bone(&out[0], 0), flags(&out[0], 0), lift(&out[0], 0)), (0, FLAG_3 | LINGER, 0.85), "Stun Impact's 0 on Sora's body point, following him");
+        assert_eq!((bone(&out[0], 1), flags(&out[0], 1)), (0, DETACHED | FLAG_3 | LINGER));
+        assert_eq!((bone(&out[2], 1), flags(&out[2], 1), lift(&out[2], 1)), (0, FLAG_3 | LINGER, 0.85), "Zantetsuken's 5 likewise");
         assert_eq!((bone(&out[3], 0), flags(&out[3], 0)), (RECOM_BONE_FOR_KH1_8, FLAG_3 | LINGER), "Ripple Drive's 6 on KH1's bone 8");
+        // Without Sora's CLS record the two are left out and noted.
+        let mut b = Added::default();
+        sora_eet(&eet::write(&[]).unwrap(), &moves, None, &mut b).unwrap();
+        assert_eq!(b.effects_out.iter().map(|e| (e.0, e.1)).collect::<Vec<_>>(), vec![(216, 0), (218, 5)]);
+    }
+
+    fn cls_mdls(counts: [u8; 4], body: (u16, f32, f32)) -> Vec<u8> {
+        let mut cls = vec![0u8; 0x100];
+        cls[..4].copy_from_slice(b"CLS\x03");
+        cls[4..8].copy_from_slice(&counts);
+        let at = 0x20 + 0x14 * counts[0] as usize;
+        cls[at + 1] = 1;
+        cls[at + 2..at + 4].copy_from_slice(&body.0.to_le_bytes());
+        cls[at + 4..at + 8].copy_from_slice(&body.1.to_le_bytes());
+        cls[at + 8..at + 12].copy_from_slice(&body.2.to_le_bytes());
+        // An mdls of 6 sections, section 4 the table.
+        let mut m = vec![0u8; 0x40];
+        m[0..4].copy_from_slice(&6u32.to_le_bytes());
+        for (i, o) in [0x40u32, 0x40, 0x40, 0x40, 0x40, 0x140, 0x140].iter().enumerate() {
+            m[4 + 4 * i..8 + 4 * i].copy_from_slice(&o.to_le_bytes());
+        }
+        m.extend_from_slice(&cls);
+        m
+    }
+
+    #[test]
+    fn soras_body_point_is_his_cls_records_lift() {
+        // Sora's own (Checked (files)): counts 1 1 5 2, the body record {0x8002, 0.0, 85.0}.
+        assert_eq!(sora_body_point(&cls_mdls([1, 1, 5, 2], (0x8002, 0.0, 85.0))).unwrap(), [0.0, 0.85, 0.0]);
+        assert_eq!(sora_body_point(&cls_mdls([1, 0, 5, 2], (0x8002, 0.0, 85.0))).unwrap(), [0.0; 3], "no body record: KH1's +0x50");
+        assert!(sora_body_point(&cls_mdls([1, 1, 5, 2], (0x8001, 0.0, 85.0))).is_err(), "another code: not decoded");
+        assert!(sora_body_point(&cls_mdls([1, 1, 5, 2], (0x8002, 0.5, 85.0))).is_err(), "a forward fraction: not decoded");
+    }
+
+    /// The player's own `xa_ex_0010.mdls`, when `KH1_SORA_MDLS` names it.
+    #[test]
+    fn soras_body_point_from_the_players_file() {
+        let Some(p) = std::env::var_os("KH1_SORA_MDLS") else { return };
+        assert_eq!(sora_body_point(&std::fs::read(p).unwrap()).unwrap(), [0.0, 0.85, 0.0]);
     }
 }

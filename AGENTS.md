@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 224: M13: Stun Impact's effect 0 and Zantetsuken's effect 5 on Sora's body point, as KH1 places them (Re:CoM EET events), version 0.112.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § M13 and camp text answers): "Start at the target". **Corrected from the question's wrong premise** (Checked: KH1 decomp + files): KH1 places both on Sora, not on the struck enemy, so they are built as KH1 does it.
+
+- **KH1** (Checked (decomp)): `0x1402A68F0` starts them with `0x1402AE160(Sora, id | 0x800)`. The link is on Sora (`0x1402AE7F0`, mode 2) and is re-placed every frame (`0x1402AE910`). Code `0x8003` (`0x14029EA00` / `0x14029EB20`) is resolved on that actor: his `+0x134` = `.mdls` section 4 `CLS` (`0x140287E40`), body record `[+0x14]` through `0x1402B5E50`. Sora's record (Checked (files)) is `{code 0x8002, fraction 0, lift 85}`: his `+0x50`, 0.85 m up, with his facing. Stage 3's "the target's contact point" note was wrong (`recom-m13-kh1-fx.md` § 3 corrected).
+- **Built (asset step only)**: `kh1_fx::sora_body_point` reads the record from the player's `xa_ex_0010.mdls`. `Place::SoraBody` writes one list-A event per effect on Re:CoM's `Root` (bone 0: identity rest at the feet, Y up; Checked (files: `PL0001.MDL`)): offset (0, 0.85, 0), flags 0x28 (attached = follows, linger = KH1's 0x800, bit 3), frame 0, variant 1301, in `PL0001.EET` / `PL0011.EET` (Stun Impact 216, Zantetsuken 218). Sounds 81 / 86 come from `kh1_ex_0010.ese` (Re:CoM's spawn looks it up by the set's name, `0x1402A4A10`).
+- **DLL unchanged**: 216 / 218 were already in `kh1-fx.json`'s effects. Per move: nothing of ours (Re:CoM binds and spawns one more list-A event). No hook, call or site.
+- Assumptions: KH1's `+0x50` is Sora's position and Re:CoM's `Root` follows it; Sora's scaled-record flag `+0x374 & 0x2000` is clear; the start delay of effect 5 (28 ticks) as stage 3. The step decodes only a code-`0x8002` / fraction-0 record (Sora's) and refuses others (logged).
+- Asset step: **re-run** (`PLAYER/0001/PL0001.EET`, `PLAYER/0011/PL0011.EET`, `kh1-fx.json`). No `mod.yml` change.
+- Checked: tests (the body point on the player's own file: `[0, 0.85, 0]`; the events, flags and lift; refusals), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings), the Linux `kh1-recom-build`. Not checked: in game. Docs: `recom-m13-plan.md` § 0.112.0 built.
+
+---
+
 ## Stage 223: Command menu pages (page 2: Summon, Party), Re:CoM's pointing arrow with KH2's sway, the Party list of friend sleights, version 0.111.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Command menu pages and Party), with a KH2 FM recording: "I like our command menu, but I think it should have the pointing arrow that follows your selection on the command menu so people know that you can press left on the D Pad to switch between the two pages. Also, Page 1 (the default) should be Attack, Magic, Items, Sleights. Page 2 should be Attack, Summon, Party, Sleights The "Party" section should have "Magic LV3" stylized as "Donald Magic" … These friend sleights should ONLY appear if the friend cards drop in their respective battles. … if any of these sleights require an additional unlock requirement, they shouldn't show up until that requirement is met. Lastly, friend sleights should be able to be put in the shortcuts."; answers "Re:CoM's own arrow", "Whole battle, if possible", "Same MP as sleights". Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story unchanged.

@@ -930,15 +930,27 @@ fn fx_eets(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, m
     if blade.is_none() {
         println!("note: KH1 fx: Gravity Break's blade effect not placed (PL0002.MDL bone 3 is not wep0's child, or no Kingdom Key row)");
     }
+    // Stun Impact's 0 and Zantetsuken's 5 (KH1 code 0x8003): Sora's own body point, from his CLS record.
+    let body = install::kh1(game, keys.clone()).map_err(|e| e.to_string()).and_then(|inst| inst.read_full(kh1_recom_assets::effects::SORA_MDLS).map_err(|e| e.to_string())).and_then(|(m, _, _)| fx::sora_body_point(&m).map_err(|e| e.to_string()));
+    let body = match body {
+        Ok(p) => {
+            println!("KH1 fx: Sora's body point (KH1 code 0x8003, his CLS record) {p:?} m above Root");
+            Some(p)
+        }
+        Err(e) => {
+            println!("note: KH1 fx: Stun Impact's effect 0 and Zantetsuken's 5 not placed: {}: {e}", kh1_recom_assets::effects::SORA_MDLS);
+            None
+        }
+    };
     let weapon_eet = fx::weapon_eet(&weapon, moves, blade, added).map_err(|e| format!("{}: {e}", install::KEYBLADE_EET))?;
-    let sora_eet = fx::sora_eet(&sora, moves, added).map_err(|e| format!("{}: {e}", install::SORA_EET))?;
+    let sora_eet = fx::sora_eet(&sora, moves, body, added).map_err(|e| format!("{}: {e}", install::SORA_EET))?;
     let mut out = vec![("PL0001.EET".to_string(), sora_eet), ("PL0002.EET".to_string(), weapon_eet)];
     for (path, weapon_file) in [(install::HALLOWEEN_EET, false), (install::HALLOWEEN_KEYBLADE_EET, true)] {
         if arc.find(path).is_none() {
             println!("note: KH1 fx: {path} not in Recom.hed (Halloween Town keeps none of KH1's events there)");
             continue;
         }
-        let r = rd(path).and_then(|d| if weapon_file { fx::weapon_eet(&d, moves, blade, &mut fx::Added::default()) } else { fx::sora_eet(&d, moves, &mut fx::Added::default()) }.map_err(|e| format!("{path}: {e}")));
+        let r = rd(path).and_then(|d| if weapon_file { fx::weapon_eet(&d, moves, blade, &mut fx::Added::default()) } else { fx::sora_eet(&d, moves, body, &mut fx::Added::default()) }.map_err(|e| format!("{path}: {e}")));
         match r {
             Ok(b) => out.push((path.rsplit('/').next().unwrap_or(path).to_string(), b)),
             Err(e) => println!("note: KH1 fx: {e} (Halloween Town keeps none of KH1's events there)"),

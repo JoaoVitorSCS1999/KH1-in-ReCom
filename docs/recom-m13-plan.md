@@ -189,9 +189,8 @@ ripple drive or stun impact,".
   `wep0` → `k9`, from `PL0002.MDL`; motion-locked); Zantetsuken 4; Ripple Drive 6 (KH1 bone 8 = Re:CoM `belt1`) and 7.
   `0x18001` = Sora's position and facing, once: detached from Root's matrix (EET flags 0x29); 0x800 = EET's linger bit.
   Their sounds come from `kh1_ex_0010.ese` (stage 2).
-- **Not built, native gap** (stop-and-ask): Stun Impact's **0** and Zantetsuken's **5** go to `0x8003` = **the target's
-  contact point** (`0x14029EB20` → `0x1402B5E50`; Sora's `+0x50` without a target). No EET event places an effect at
-  another actor. Options in the questions below.
+- ~~**Not built, native gap**: Stun Impact's **0** and Zantetsuken's **5** go to `0x8003` = the target's contact point.~~
+  **Wrong** (corrected 0.112.0): `0x8003` is Sora's own body point; built as EET events (§ 0.112.0 built).
 - **Toggles**: ini `effects` / `sounds` (kh1 | recom, default kh1), read at each motion start; at Re:CoM nothing changes
   (variant 0). Not yet on a camp page: the Combat page holds Re:CoM's 5 rows already (`menu::MAX_ROWS`): owner question.
 - **Voices: not in this stage.** No KH1 voice file is in the session, and KH1's groups (up to 5 clips, an equal-chance
@@ -201,6 +200,48 @@ ripple drive or stun impact,".
   KH1's ids 1, 3, 4, 5, 7 have 34 / 36 / 10 / 28 / 34) and starts the `.ese` sound at the spawn, not after the delay;
   Re:CoM's `0x140474EB0` is KH1's stop byte (the particles finish); KH1's frame and Re:CoM's motion time agree within a
   frame; a detached event outlives the motion's end.
+
+## 0.112.0 built: Stun Impact's effect 0 and Zantetsuken's effect 5 (KH1 code `0x8003`)
+
+Owner, 2026-11-04: "Start at the target". This is **corrected from the question's wrong premise** (Checked (KH1 decomp +
+files)). KH1 places these two on **Sora himself**, not on the struck enemy, so they are built as KH1 does it.
+
+- **KH1** (Checked (decomp)):
+  - the row exec `0x1402A68F0` starts both from Sora's own set with `0x1402AE160(Sora, id | 0x800)`;
+  - that links the effect **to Sora** (`0x1402AE7F0` → `0x1402AE880`, link mode 2, the program's attach code `+0x104` =
+    `0x8003`, no bit 16), and the link task `0x1402AE910` re-places it every frame: it **follows him**;
+  - its lock is 0xFFFF (flag 0x800): it outlives the motion.
+- **Where `0x8003` is** (`0x14029EA00` / `0x14029EB20`):
+  - on the effect's own actor, Sora, it takes his `+0x134` table;
+  - that is his **CLS** table: `.mdls` section 4, bound by `0x140287E40` from the file's fifth offset;
+  - the table's body record (`[+0x14]`; group 1's first record) goes through `0x1402B5E50`: its code is evaluated on
+    Sora, then the record's `+8` is taken off y (KH1's y runs down, so this is a lift);
+  - the rotation is Sora's facing (`+0xD0..+0xF0`).
+- **Sora's record** (Checked (files): the player's `xa_ex_0010.mdls`): `{0, 1, code 0x8002, fraction 0.0, lift 85.0,
+  r 30.0, h 55.0}`. Code `0x8002` = his `+0x50` plus (0, 0, fraction × 100) turned by his facing. So the point is
+  **Sora's position, 0.85 m up**, facing his way.
+- **Built** (asset step only: `kh1_fx::sora_body_point`, `Place::SoraBody`):
+  - the step reads the record from the player's file;
+  - Sora's `PL0001.EET` (and Halloween's `PL0011.EET`) gets a list-A event on Re:CoM's `Root` (bone 0: identity rest at
+    the feet, Y up; Checked (files: `PL0001.MDL`)), with offset (0, 0.85, 0);
+  - flags 0x28: attached, so it follows (`0x1401A2D50`); linger 0x20, KH1's 0x800; bit 3 as Re:CoM's;
+  - frame 0 (KH1's row start), variant 1301, at Stun Impact's 216 (`p001` clip) and Zantetsuken's 218;
+  - their sounds 81 / 86 come from `kh1_ex_0010.ese` (stage 2), which Re:CoM's spawn looks up by the set's name
+    (`0x1402588B0` / `0x1402577D0` → `0x1402A4A10`, Checked (decomp)).
+- **DLL: unchanged.** Requests 216 and 218 were already in `kh1-fx.json`'s effect list (ids 1 and 4).
+  - **Per-move cost: nothing of ours.** Re:CoM's motion start binds one more list-A event per move (its 32-slot list),
+    and its EET step spawns it.
+  - No hook, no call, no site.
+- **Limit of the step**: it decodes only a code-`0x8002` record with fraction 0, which is Sora's. Any other code or
+  fraction is refused: the two effects are left out and the step logs it.
+- **Assumptions:**
+  - KH1's `+0x50` is Sora's position (the warp `0x140290CA0` copies `+0x10` into it) and Re:CoM's `Root` follows it;
+  - Sora's `+0x374 & 0x2000` (scaled records) is clear;
+  - Re:CoM's runtime applies effect 5's start delay (28 ticks) as stage 3 assumes.
+- **To check in game** (Combat = KH1, Effects = KH1):
+  - Stun Impact's ring and Zantetsuken's flash appear on Sora, at his waist, and move with him;
+  - their sounds play (81 / 86);
+  - at Effects = Re:CoM nothing changes.
 
 ## Stage 4 plan (not built yet): per-Keyblade trails and sounds
 
