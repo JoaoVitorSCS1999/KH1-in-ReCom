@@ -46,7 +46,7 @@ pub struct Skill {
     /// AP to equip: the owner's table (2026-11-04), KH1's own for the five matches (btltbl `0x33D8`).
     pub ap: u8,
     /// The help line (NUL-terminated ASCII): what it does at KH1. A skill whose effect isn't built
-    /// yet ends "(effect coming)"; Treasure Magnet "(not built yet)".
+    /// yet ends "(effect coming)"; Treasure Magnet and Gold Card "(not built yet)".
     pub help: &'static [u8],
     pub kind: Kind,
     /// Its effect is built (the page lets it be equipped). False: shown greyed, never equipped.
@@ -55,6 +55,11 @@ pub struct Skill {
 
 const fn own(card: u16, name: &'static str, effect: &'static str, ap: u8, help: &'static [u8]) -> Skill {
     Skill { card, name, effect, ap, help, kind: Kind::Own, built: false }
+}
+
+/// A skill of its own whose effect is built (plan stages 2..5).
+const fn built(card: u16, name: &'static str, effect: &'static str, ap: u8, help: &'static [u8]) -> Skill {
+    Skill { card, name, effect, ap, help, kind: Kind::Own, built: true }
 }
 
 const fn kh1(card: u16, name: &'static str, effect: &'static str, ap: u8, ix: usize, built: bool, help: &'static [u8]) -> Skill {
@@ -98,12 +103,12 @@ pub const SKILLS: [Skill; 48] = [
     kh1(0x6C, "Hook", "Second Chance", 5, ix::SECOND_CHANCE, true, b"Second Chance: survive a knockout blow with 1 HP.\0"),
     own(0x6D, "Dragon Maleficent", "Overdrive", 3, b"Overdrive: raises the damage of Sora's swings. (effect coming)\0"),
     own(0x6E, "Riku", "Sleight Lock", 3, b"Sleight Lock: sleights cost less MP. (effect coming)\0"),
-    own(0x6F, "Axel", "Quick Recovery", 3, b"Quick Recovery: Sora recovers from hits sooner. (effect coming)\0"),
-    own(0x70, "Larxene", "Dash", 2, b"Dash: Sora runs faster. (effect coming)\0"),
-    own(0x71, "Vexen", "Auto-Life", 4, b"Auto-Life: revive once a battle after a knockout. (effect coming)\0"),
+    built(0x6F, "Axel", "Quick Recovery", 3, b"Quick Recovery: Sora can act at once when an attack hits him.\0"),
+    built(0x70, "Larxene", "Dash", 2, b"Dash: Sora runs a quarter faster in battle.\0"),
+    built(0x71, "Vexen", "Auto-Life", 4, b"Auto-Life: once a battle, revive with 1/4 HP after a knockout.\0"),
     own(0x72, "Marluxia", "Double Sleight", 5, b"Double Sleight: a sleight plays twice. (effect coming)\0"),
     own(0x73, "Lexaeus", "Warp Break", 5, b"Warp Break: sleights may warp enemies away. (effect coming)\0"),
-    own(0x74, "Ansem", "Sleightblind", 3, b"Sleightblind: hides sleights from the enemy. (effect coming)\0"),
+    built(0x74, "Ansem", "Sleightblind", 3, b"Sleightblind: halves damage from Fire, Blizzard and Thunder.\0"),
     own(0x75, "Zexion", "Confu-Strike", 3, b"Confu-Strike: Sora's swings may confuse enemies. (effect coming)\0"),
     own(0x76, "Xemnas", "Quick Barrier", 4, b"Quick Barrier: a short barrier after taking a hit. (effect coming)\0"),
     own(0x77, "Xigbar", "Shot Charge", 3, b"Shot Charge: raises the damage of shots. (effect coming)\0"),
@@ -112,8 +117,8 @@ pub const SKILLS: [Skill; 48] = [
     own(0x7A, "Demyx", "Water Charge", 3, b"Water Charge: raises the damage of water attacks. (effect coming)\0"),
     own(0x7B, "Luxord", "Omni Break", 4, b"Omni Break: Sora's swings always win clashes. (effect coming)\0"),
     own(0x7C, "Roxas", "Double Strike", 7, b"Double Strike: each swing strikes twice. (effect coming)\0"),
-    own(0x7D, "Gold Card", "Premium Guard", 5, b"Premium Guard: sleights keep their premium cards. (effect coming)\0"),
-    own(0x7E, "Platinum Card", "Invincible", 5, b"Invincible: Sora takes no damage. (effect coming)\0"),
+    own(0x7D, "Gold Card", "Premium Guard", 5, b"Premium Guard: no meaning without a deck yet. (not built yet)\0"),
+    built(0x7E, "Platinum Card", "Invincible", 5, b"Invincible: the first 5 hits each battle do Sora no damage.\0"),
 ];
 
 /// The enemy cards with no skill (owner, 2026-11-03 "1. C" and 2026-11-04): Shadow, Powerwild, Sea
@@ -292,11 +297,19 @@ mod tests {
         assert_eq!(ALL[ix::TREASURE_MAGNET[1]].source, Source::Level(72));
         // The four built matches act; Treasure Magnet and every own skill wait.
         let built: Vec<&str> = SKILLS.iter().filter(|s| s.built).map(|s| s.name).collect();
-        assert_eq!(built, vec!["Soldier", "Creeper Plant", "Hades", "Hook"]);
+        for n in ["Soldier", "Creeper Plant", "Hades", "Hook"] {
+            assert!(built.contains(&n), "{n}");
+        }
+        // Stage 4 (route 3, the direct compares): Axel, Larxene, Vexen, Ansem, Platinum Card; Gold
+        // Card stays greyed (no meaning at KH1: owner question).
+        for n in ["Axel", "Larxene", "Vexen", "Ansem", "Platinum Card"] {
+            assert!(built.contains(&n), "{n}");
+        }
+        assert!(!of_card(0x7D).unwrap().built, "Gold Card");
     }
 
     /// Help lines: ASCII, within the help box, unique; an unbuilt skill says "(effect coming)",
-    /// Treasure Magnet "(not built yet)"; each names its effect first.
+    /// Treasure Magnet and Gold Card "(not built yet)"; each names its effect first.
     #[test]
     fn help_lines() {
         let mut seen = std::collections::HashSet::new();
@@ -309,7 +322,7 @@ mod tests {
             assert!(seen.insert(t), "{t}");
             if s.built {
                 assert!(!t.contains("(effect coming)") && !t.contains("(not built yet)"), "{t}");
-            } else if s.card == 0x4C {
+            } else if s.card == 0x4C || s.card == 0x7D {
                 assert!(t.ends_with(" (not built yet)"), "{t}");
             } else {
                 assert!(t.ends_with(" (effect coming)"), "{t}");

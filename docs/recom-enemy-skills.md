@@ -154,6 +154,57 @@ card's name, Re:CoM's effect name, the AP, the help line, and whether its effect
   notices); whether every enemy card's first pickup reaches `0x14015C7F0` (the doc's rule: types
   1–4 and 7, Checked (decomp) in `recom-m7-unlocks.md`).
 
+## Stage 4 (built): route 3, the direct compares
+
+Ask (manager brief, 2026-11-04, on the owner's "Enemy Skills numbers": "Larxene - Dash: run ×1.25",
+"Vexen - Auto-Life: once per battle, ¼ HP", "platinum - (first 5 hits)", "build everything"): Axel,
+Larxene, Vexen, Platinum Card, Ansem and Gold Card. Combat = KH1 in Sora's story; Combat = Re:CoM
+and Riku's story: Re:CoM's compares untouched (nothing armed).
+
+Code: `crates/kh1-recom/src/enemy_skills_cmp.rs` (the sites, the stubs, the rules, tested),
+`win/enemy_skills_cmp.rs` (install, arming, the revive callback); one call each in
+`win::battle::manager_ctor` (arming), `win::mod` (install after Second Chance), the run factor in
+`movement::speeds::RecomNumbers::run_factor` (`win::movement`).
+
+### How (native)
+
+- Each Re:CoM compare `slot == id` (§ 2.3) also answers true while the skill is armed, through a
+  byte-checked patch per site, as Second Chance's stub: the site's instructions move into a stub
+  next to the exe, which runs them and then Re:CoM's own outcome for the card. Re:CoM runs the
+  effect. Where the site is the slot read (`movzx R, byte [rax+0x1E8]`), the stub puts the skill's
+  id in R when the real slot holds no enemy card (≤ 0x43), so Re:CoM's own compares take the card's
+  branch; where the compare's join is patched, the stub does the card's write.
+- The stubs read one byte per skill and Platinum's hits left (`enemy_skills_cmp::Armed`, an
+  absolute address) and compare the player with Re:CoM's main player `*0x14087B380` (rip-relative),
+  so only Sora's own checks take it. Armed once per battle at the battle manager's ctor from the
+  equipped skills. Nothing of ours per frame; the stubs run only where Re:CoM reaches the compare.
+- Sites (`PATCH`, `CALLS`, `CHECKED`: 22, `check_sites_rs.py`: 0 mismatches). Exe scan (rel8 /
+  rel32 / jcc, 8-byte pointers, 4-byte RVAs, 2026-11-04): no branch or pointer into any moved
+  bytes after their first (one hit, `0x1401E71A9`, is inside a `mov eax, imm32`). Installed after
+  Second Chance (Invincible's first site is inside its checked context `0x1401E71A2`).
+
+### Per skill
+
+| skill | Re:CoM (Checked (decomp + exe)) | patched (moved bytes) | at KH1 |
+|---|---|---|---|
+| Axel, Quick Recovery | the damage check `0x1401E6DE0` sets `player+0x420` bit 0x4000 when the slot is 0x6F (`0x1401E73A8 cmp edx,0x2C; cmovne`); the hit-reaction exe `0x1401EBD80` then calls `0x1401E93A0(pl, 1, 0)` every frame of the reaction: move (stick ≥ 0.3), roll, jump, commands (attack / magic / item) cut it short | slot read `0x1401E7381` (`0F B6 88 E8 01 00 00`) → 0x6F (player `rdi`) | Re:CoM's rule: Sora can act at once out of a hit reaction (Re:CoM's reaction runs at KH1) |
+| Larxene, Dash | stick class `0x1401E9630`: walk / run × `xmm2` = 1.0 (`0x1406C10C0`), 1.7 (`0x1405A08BC`) with the slot 0x70; battle only (`player+0x3E8` set) | the join `0x1401E967F` (`movss xmm0,[0.9]`, re-aimed): `xmm2 × 1.25` (player `rcx`, card battle set) | **run × 1.25** (owner), walk too in Re:CoM's class. KH1's run in the move exe is ours: `RecomNumbers::run_factor` (1.25 in battle) multiplies `Kh1Sora::run_speed` at both `run_speed` settings, and `win::movement::stick_class`'s speed |
+| Vexen, Auto-Life | KO init `0x1401F17F0` (`0x1401F1A85`: with 0x71 no death clear `0x140162250`), the death sequence `0x140210F10` (`0x140211032`: flag 0x10, music fade instead of the game over; its case 10 calls `0x1401F48A0(pl, 1)` → KO sub 3), the game-over controller `0x1401A16E0` (`0x1401A1A13`: `+0x88` = 1); the KO exe `0x1401EC250` sub 3 heals max HP ÷ 4 (`0x1401E59A0(pl, max/4, 6000, 1)`), sound 0x5C, motion 0x28, then 3000 dt (1 s) untouchable `+0x7BC`, and counts `0x14015E010(1, 0x28, 0x2E)` | slot reads `0x1401F1A7A` (player `rbx`), `0x140211027`, `0x1401A1A07` → 0x71; the count call `0x1401EC369` → ours | **once per battle** (owner): armed at the battle start, disarmed by Re:CoM's revive (our count callback, then Re:CoM's count); **¼ HP** = Re:CoM's own max ÷ 4 |
+| Platinum Card, Invincible | the damage check `0x1401E71F3` (`cmp cl,0x7E; cmove ebx,r8d`: HP kept) and the HP loss `0x1401F90B0` (`0x1401F9129`; its only caller Zexion's `0x14041E630`, 10 a tick) | the damage check's join `0x1401E71FA` (`mov rax,[rdi+0x3E8]`) and the HP loss's store `0x1401F9163` (11 bytes): HP kept while hits are left (`lock dec`) | **the first 5 hits each battle** that would take HP do none (owner); a hit that takes no HP isn't counted; Re:CoM's reaction still plays |
+| Ansem, Sleightblind | the card hides sleights from a deck (`0x140153F48`, `0x14016DEAA`): no meaning at KH1. Its play also writes Ansem's affinity record `0x1407C5C50` (100 / 100 / **50 / 50 / 50** / 100 %, attributes 0..5; 2 Fire, 3 Blizzard, 4 Thunder) into `player+0x7C4..0x7D8` (`0x140163C00` case 0x74 → `0x1401F8810`), which the damage check reads (`0x1401E7150`): the khwiki's fire / ice / thunder resistance | the read's join `0x1401E7163` (`cvttss2si r14d, xmm0`): 50 for attributes 2..4 where Re:CoM's value is its default 100 (`0x1407C5B90`) | **Fire, Blizzard and Thunder hits do half damage** (Re:CoM's Ansem record). The owner's "boss skills give the skill only" is lifted for Ansem (brief: "build that meaning") |
+| Gold Card, Premium Guard | `0x14016D0B9 cmp cl,0x7D` in the play path `0x14016CEE0`: premium cards play as normal cards | — | **left greyed**: no deck, no premium cards at KH1. Owner question |
+
+### Tags
+
+- Checked (decomp + exe): every site, the compares' outcomes, the revive flow and its numbers,
+  Ansem's record (data site), the exe scan.
+- Assumption: Re:CoM's KO / revive flow runs as in Re:CoM for KH1 Sora (the KH1 frame yields to
+  actions 0x1D and takes Sora back at the revive's stand `0x1401F3180`); KH1 enemies' fire / ice /
+  thunder hits carry Re:CoM's attribute 2..4 in `player+0x714` (our ported enemies use Re:CoM's
+  attack powers); Quick Recovery's `0x1401E93A0` commands go through our KH1 handlers (the roll /
+  move / attack inits are hooked).
+- Not checked: in game. KH1 has none of these skills (no 1:1 to check).
+
 ## Left out (owner's choice 1. C, or no meaning at KH1)
 
 - Card values: Shadow, Screwdiver, Powerwild, Sea Neon, Pirate.

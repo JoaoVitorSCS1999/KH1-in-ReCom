@@ -4065,6 +4065,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SLIP_SCATTER_CHECKED,
         SECOND_CHANCE_PATCH,
         SECOND_CHANCE_CHECKED,
+        crate::enemy_skills_cmp::PATCH,
+        crate::enemy_skills_cmp::CALLS,
+        crate::enemy_skills_cmp::CHECKED,
         TEXT_FIT_CHECKED,
     ];
     LISTS

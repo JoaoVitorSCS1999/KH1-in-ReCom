@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 237: Enemy Skills stage 4: Re:CoM's direct compares answer for the equipped skills (Quick Recovery, Dash ×1.25, Auto-Life once, Invincible 5 hits, Sleightblind's resistance); Gold Card greyed, version 0.125.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Enemy Skills numbers): "platinum - (first 5 hits) build everything"; the proposal's Larxene "Dash: run ×1.25", Vexen "Auto-Life: once per battle, ¼ HP". Plan stage 4 (route 3, research § 2.3). Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story unchanged.
+
+- **How** (`crate::enemy_skills_cmp`, `win::enemy_skills_cmp`): each compare `slot == id` also answers true while the skill is armed: a byte-checked patch per site jumps to a stub next to the exe that runs the moved bytes and Re:CoM's own outcome (a slot read gets the skill's id when no enemy card is there; a join gets the card's write). Stubs read one byte per skill and Platinum's hits left (absolute address) and compare the player with `*0x14087B380`. Armed once per battle in the battle manager's ctor wrapper from the equipped skills. Nothing per frame.
+- **Axel, Quick Recovery**: the damage check's slot read `0x1401E7381` → 0x6F: Re:CoM sets `player+0x420` bit 0x4000 (`0x1401E73A8`) and its hit-reaction exe `0x1401EBD80` lets Sora act out of the reaction at once (`0x1401E93A0(pl, 1, 0)`). Checked (decomp + exe).
+- **Larxene, Dash**: Re:CoM's stick class join `0x1401E967F`: its factor × 1.25 in battle (Re:CoM's card: × 1.7, `0x1405A08BC`); KH1's run (both `run_speed` settings) × the same through `movement::speeds::RecomNumbers::run_factor` and `win::movement::stick_class`. Owner's number.
+- **Vexen, Auto-Life**: the slot reads of the KO init `0x1401F1A7A`, the death sequence `0x140211027` and the game-over controller `0x1401A1A07` → 0x71 while available: Re:CoM's own revive (KO exe `0x1401EC250` sub 3: max HP ÷ 4 = the owner's ¼, 1 s untouchable). Its count call `0x1401EC369` (`0x14015E010(1, 0x28, 0x2E)`) → ours: used for the battle. Once per battle (owner).
+- **Platinum Card, Invincible**: the damage check's join `0x1401E71FA` and the HP loss's store `0x1401F9163` (`0x1401F90B0`, Zexion's drain): HP kept for the first 5 hits each battle that would take HP (owner), `lock dec` in the stub; reactions still play.
+- **Ansem, Sleightblind** (no deck meaning at KH1): Re:CoM's Ansem affinity record `0x1407C5C50` = 100 / 100 / 50 / 50 / 50 / 100 % (the khwiki's fire / ice / thunder resistance; written by the card's play `0x140163C00` → `0x1401F8810`, read by the damage check `0x1401E7150`). The read's join `0x1401E7163` gives 50 for attributes 2..4 where Re:CoM's value is the default 100. The owner's "boss skills give the skill only" lifted for Ansem alone (brief).
+- **Gold Card, Premium Guard**: left greyed ("no meaning without a deck yet"): owner question.
+- Sites: `enemy_skills_cmp::PATCH` (8), `CALLS` (1), `CHECKED` (13; in `sites::all_sites`); `check_sites_rs.py` 0 mismatches. Exe scan: no branch or pointer into any moved bytes after their first. Installed after Second Chance (Invincible's first site is in its checked context).
+- Abilities page: the five un-greyed with new help lines; Gold Card "(not built yet)".
+- Assumptions: Re:CoM's KO / revive flow as in Re:CoM for KH1 Sora; KH1 enemies' fire / ice / thunder hits carry Re:CoM's attributes 2..4; Quick Recovery's commands reach our KH1 handlers.
+- Checked: tests (`enemy_skills_cmp::tests`: every stub's layout, jumps and reach, the rules, Ansem's record, sites apart), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-enemy-skills.md` § Stage 4 (built).
+
+---
+
 ## Stage 236: M8d step 1: the Tent and the Camping Set removed from the game (saves converted once to Elixirs), version 0.124.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Moogle shop redesign at KH1), verbatim: "just remove tents and camping sets from the game". Shipped first, on its own, before the shop screens (M8d). Combat = KH1 in Sora's story (the only time the store is read); Combat = Re:CoM and Riku's story unchanged.

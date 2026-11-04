@@ -78,6 +78,7 @@ pub mod damage;
 pub mod effects;
 pub mod fx;
 pub mod enemy_skills;
+pub mod enemy_skills_cmp;
 pub mod deck;
 pub mod drops;
 pub mod field_sleights;

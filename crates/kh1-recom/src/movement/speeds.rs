@@ -63,12 +63,16 @@ pub struct RecomNumbers {
     pub gravity: f32,
     /// The crouch, Re:CoM time units (`params+0x24`, an int).
     pub crouch: i32,
+    /// The stick class's speed factor on walk / run (`0x1401E9630`'s `xmm2`: 1.0 (`0x1406C10C0`),
+    /// Larxene's Dash card 1.7 (`0x1405A08BC`)); at Combat = KH1 Larxene's Enemy Skill gives 1.25 in
+    /// battle (owner, `crate::enemy_skills_cmp::DASH`). KH1's run takes it too.
+    pub run_factor: f32,
 }
 
 impl RecomNumbers {
     /// The Steam exe's values. Checked (exe: `0x1407C5B74` 6.2, `0x1407C5B7C` 28.0, `0x1407C5B80`
     /// 32.5, `0x1407C5B84` 100, `0x1407C5B38` 0.6; decomp `0x1401FAB40`).
-    pub const EXE: RecomNumbers = RecomNumbers { run_mps: 6.2, jump: 28.0, high_jump: 32.5, rise_scale: 0.6 * 0.008_166_667, gravity: -0.6 * 0.008_166_667, crouch: 100 };
+    pub const EXE: RecomNumbers = RecomNumbers { run_mps: 6.2, jump: 28.0, high_jump: 32.5, rise_scale: 0.6 * 0.008_166_667, gravity: -0.6 * 0.008_166_667, crouch: 100, run_factor: 1.0 };
 }
 
 impl Default for RecomNumbers {

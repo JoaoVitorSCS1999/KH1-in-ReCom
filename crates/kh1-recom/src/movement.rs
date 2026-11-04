@@ -908,11 +908,13 @@ impl Kh1Sora {
 
     /// Sora's run, KH1 units a frame: KH1's 8, or at `run_speed = recom` Re:CoM's `magnitude × 6.2`
     /// m/s (`0x1401E9630`), always above KH1's 8 where KH1's snap runs ([`speeds`]' tests).
+    /// Enemy Skills (Larxene's Dash): × Re:CoM's stick-class factor (`speeds::RecomNumbers::run_factor`).
     pub fn run_speed(&self) -> f32 {
-        match self.speeds.run {
+        let run = match self.speeds.run {
             Mode::Recom => speeds::recom_run(&self.recom, self.recom_tilt),
             Mode::Kh1 => self.params.run_speed,
-        }
+        };
+        run * self.recom.run_factor
     }
 
     /// The air at `air_speed = recom` while Sora is free in it (not in an attack or another action).

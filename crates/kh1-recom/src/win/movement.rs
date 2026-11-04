@@ -686,6 +686,8 @@ impl Host for RecomHost {
                 n.high_jump = rd(block + params::HIGH_JUMP);
                 n.crouch = rd(block + params::CROUCH);
             }
+            // Enemy Skills stage 4: Larxene's Dash (battle only), Re:CoM's stick-class factor × 1.25.
+            n.run_factor = crate::enemy_skills_cmp::dash_run(1.0, super::enemy_skills_cmp::dash_on(self.pl));
             let bs = base();
             let (k, g): (f32, f32) = (rd(va(bs, RISE_SCALE)), rd(va(bs, GRAVITY)));
             // Set by Re:CoM's player set-up (`0x1401FAB40`); the exe's until then.
@@ -889,6 +891,8 @@ pub unsafe extern "win64" fn stick_class(pl: usize) -> u64 {
     } else {
         params.run_speed
     };
+    // Enemy Skills stage 4: Larxene's Dash, run × 1.25 in battle (owner), as Re:CoM's stick class.
+    let run = crate::enemy_skills_cmp::dash_run(run, super::enemy_skills_cmp::dash_on(pl));
     let (class, mps) = crate::movement::speed_class_run(params, tilt, run);
     wr(pl + p::SPEED, mps);
     class as u64

@@ -1541,7 +1541,10 @@ mod tests {
         // Treasure Magnet (both copies) and every own skill: unbuilt; the four other matches built.
         assert!(!built(ix::TREASURE_MAGNET[0]) && !built(ix::TREASURE_MAGNET[1]));
         assert!([ix::COMBO_PLUS[0], ix::LEAF_BRACER, ix::BERSERK, ix::SECOND_CHANCE].iter().all(|&i| built(i)));
-        assert_eq!(UNBUILT_BITS.count_ones(), 2 + 43);
+        // Treasure Magnet's two copies and every own skill not built yet (stage 1: all 43; later stages build them).
+        let own_unbuilt = crate::enemy_skills::SKILLS.iter().filter(|k| k.kind == crate::enemy_skills::Kind::Own && !k.built).count() as u32;
+        assert_eq!(UNBUILT_BITS.count_ones(), 2 + own_unbuilt);
+        assert!(own_unbuilt < 43, "stage 4 built some");
         assert_eq!(CARD_BITS.count_ones(), 48);
         assert_eq!(page::owner_of(ix::TREASURE_MAGNET[1]), Owner::Sora);
         assert_eq!(kh1_bits(CARD_BITS), kh1_bits(0), "no KH1 0x142D5EC10 bit");

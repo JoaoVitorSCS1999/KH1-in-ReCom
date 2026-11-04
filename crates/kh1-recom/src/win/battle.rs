@@ -605,6 +605,8 @@ pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: us
     super::sounds::battle_start();
     // Sleights outside battle (owner, 2026-11-04): a field sleight its first strike cut is over.
     super::field_sleights::battle_start();
+    // Enemy Skills stage 4: the direct compares' bytes for this battle.
+    super::enemy_skills_cmp::battle_start(kh1);
     orig::<CtorFn>(&ORIG_MANAGER_CTOR)(this, a, c, d)
 }
 

@@ -11,6 +11,7 @@ mod damage;
 mod deck;
 mod drops;
 mod effects;
+mod enemy_skills_cmp;
 mod fx;
 mod field_sleights;
 mod gimmick;
@@ -424,6 +425,10 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         // M12 step 3: Second Chance's rule in Re:CoM's damage check (armed by its wrapper above).
         // SAFETY: the patch site's and its context's bytes are checked inside, before anything is written.
         unsafe { kh1_support::install_second_chance(base) };
+        // Enemy Skills stage 4: Re:CoM's direct compares (Quick Recovery, Dash, Auto-Life, Invincible,
+        // Sleightblind's resistance), after Second Chance (Invincible's first site is in its checked context).
+        // SAFETY: every site's and its context's bytes are checked inside, before anything is written.
+        unsafe { enemy_skills_cmp::install(base) };
     } else {
         log("attack: not hooked; Sora attacks as in Re:CoM (the Battle case and row-pick slot stay patched but are not reached)");
     }
