@@ -164,6 +164,24 @@ pub unsafe fn spawn_reward_prize(pos: [f32; 4], kind: u32) -> usize {
     func::<SpawnFn>(SPAWN)(func::<FactoryFn>(FACTORY)(), &desc, 0)
 }
 
+/// A KH1 item prize at `pos`, launched as the enemy drops' (Re:CoM's look row, Re:CoM's pickup →
+/// KH1's rule): Lucky Bounty at KH1 (`super::party::pluto_find`). None when the drops' hooks (the
+/// prize add that gives the item) are not in.
+pub unsafe fn spawn_item_prize(pos: [f32; 4], item: u8) -> Option<usize> {
+    if !ON.load(Ordering::Acquire) {
+        return None;
+    }
+    let (r1, r2) = (rand(), rand());
+    let mut desc = dr::item_prize(pos, item, r1, r2);
+    func::<AnglesFn>(ANGLES)(desc.angles.as_mut_ptr());
+    Some(func::<SpawnFn>(SPAWN)(func::<FactoryFn>(FACTORY)(), &desc, 0))
+}
+
+/// Re:CoM's random float in [0, 1) (`0x14029CF00`).
+pub unsafe fn random() -> f32 {
+    rand()
+}
+
 /// Re:CoM's prize add (`0x1401F4AB0(kind, arg, mode)`): a gimmick card at Combat = KH1 is held
 /// (`super::gimmick`); a KH1 item prize is KH1's pickup; every other kind is Re:CoM's. Installed
 /// by the drops, or by the gimmick cards alone.

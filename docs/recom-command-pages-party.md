@@ -107,8 +107,9 @@ All Checked (decomp) unless tagged:
 5. **Lucky Bounty with no cards**: Pluto's find (`0x1401E2B50` / `0x1401E2D90` / `0x1401E2E60`) uses
    its "fewer than 7 cards" weights (5 / 5 / 90) when the revolver is nearly empty; outcome 2 (90 %)
    deals cards from the revolver's deck (`0x140166930`): **at KH1 the deck is empty, so 9 times in 10
-   Pluto finds nothing**. Checked (decomp + exe: weights at `0x1407C5960`); in game: not seen. Owner
-   question.
+   Pluto finds nothing**. Checked (decomp + exe: weights at `0x1407C5960`); in game: not seen.
+   **Answered and built (0.118.0, owner: "a random KH1 item (Potion, Hi-Potion, Ether, Elixir by the
+   floor's tier) instead of a deck card")**: § Lucky Bounty at KH1 below.
 
 **So the native route works with no card and no special loading**: Re:CoM's own start plays any
 friend sleight in a battle room, as the Sleights list does. Battle only (point 2's null read, point
@@ -245,3 +246,38 @@ must not follow (they would read a null card battle).
    also beside the open list's cursor row?
 4. **Row 3 with nothing equipped** now reads "Sleights" greyed on both pages (KH1 FM showed a dash
    before summons): fine?
+
+## Lucky Bounty at KH1 (0.118.0)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Party and field follow-ups): "Lucky Bounty at
+KH1 brings a random KH1 item (Potion, Hi-Potion, Ether, Elixir by the floor's tier) instead of a deck
+card (the deck is empty at KH1)".
+
+- **Re:CoM** (Checked (decomp + exe)): Pluto's action begin (`0x1401E2B50`, also `0x1401E2D90`) rolls
+  the outcome into `+0x472` with Re:CoM's random `0x14029CDC0` (weights `0x1407C5960`: 20 / 60 / 20,
+  or 5 / 5 / 90 with fewer than 7 cards in the revolver, `0x14016A200`); his find `0x1401E2E60`
+  (called only from `0x1401E338E` / `0x1401E36A9`; no other reference: exe scan) acts on it:
+  - 0: a "nonos" shot (`CHomingBullet`, `pluto` effect set);
+  - 1: Re:CoM's `pluto` effect 1 and HP + Moogle-point prizes (kinds 0xD3 / 0xD5), 3 / 7 / 10 each by level;
+  - 2: cards dealt from the deck: `0x140166930(player+0x248 → +0x3F0)` gives the count (3 / 6 / 9 by
+    level `+0x240`), 0 → nothing, else the `pluto` effect and `0x140168650` per card. **At KH1 the
+    deck is empty: nothing.**
+- **Built** (`party::lucky_bounty`, `win::party::pluto_find`; sites `PLUTO_HOOKS` (9 bytes, no branch
+  in: exe scan), `PLUTO_CHECKED` (the outcome switch, outcome 2's deal call, the friend effect point
+  `0x1401D9DB0`)): a wrapper on the find runs Re:CoM's; then, in a KH1 battle (Combat = KH1, Sora's
+  story), when the outcome was 2: one KH1 item, picked with Re:CoM's random float (`0x14029CF00`)
+  equally among the floor tier's items (the shop's `STOCK` tiers through Re:CoM's floor `0x1402337C0`:
+  1F Potion, Ether; 2F+ Hi-Potion; 7F+ Elixir; never a Tent or Camping Set); Re:CoM's `pluto` find
+  effect 1 at his effect point (as outcomes 1 / 2 play it; the name pointer `0x1405A2F90` read and
+  checked to be "pluto"); the item as a **KH1 item prize** (kind 0xD8, Re:CoM's prize look row,
+  `win::drops::spawn_item_prize`) thrown from where Re:CoM throws his prizes (bone 0 `+0xD0`, 0.5 m
+  up); Re:CoM collects it and its prize add gives it by KH1's pickup (first empty slot, else the
+  stock). Without the drops' hooks: picked up at once (logged). Outcomes 0 and 1 stay Re:CoM's (its
+  weights unchanged: at KH1 the deck is always under 7 cards, so 90 % item, 5 % shot, 5 % HP / points).
+- Combat = Re:CoM and Riku's story: Re:CoM's find (the wrapper only calls it).
+- Per use: one wrapper call per Pluto find; nothing per frame.
+- **Decided without asking**: one item per find (the owner's "a random KH1 item"; Re:CoM deals 3 / 6 / 9
+  cards). Owner question: one item, or Re:CoM's count by level (3 / 6 / 9 at LV1 / 2 / 3; LV3 = 9).
+- Assumptions: a KH1 battle's deck deals 0 (cardless battles), so Re:CoM's own outcome 2 did nothing
+  before ours; Re:CoM's `pluto` effect 1 is the "found something" sparkle.
+- Not checked: in game.

@@ -1635,6 +1635,34 @@ pub const PARTY_CHECKED: &[Site] = &[
 /// resource load, the weapon's attack end).
 pub const SUMMON_ALSO: [u32; 3] = [0x0022_0DF0, 0x0021_1790, 0x0022_4FB0];
 
+/// Lucky Bounty at Combat = KH1 brings a KH1 item (owner, 2026-11-04; `crate::party::lucky_bounty`,
+/// `win::party::pluto_find`): Pluto's find (`CFriendPluto`, called only from `0x1401E338E` and
+/// `0x1401E36A9`; no other reference, no branch into the 9 moved bytes: exe scan).
+pub const PLUTO_HOOKS: &[Site] = &[
+    // mov [rsp+0x20],rsi; push rbp; push rdi; push r15 (then lea rbp,[rsp−0xA0]: not moved).
+    Site { name: "Pluto's find (0x1401E2E60)", rva: 0x001E_2E60, expect: &[0x48, 0x89, 0x74, 0x24, 0x20, 0x55, 0x57, 0x41, 0x57] },
+];
+
+/// What the wrapper relies on in Re:CoM's find and calls (not patched).
+pub const PLUTO_CHECKED: &[Site] = &[
+    // movzx r8d,word [rsi+0x472] (the outcome); …; je outcome 0; sub ecx,1; je outcome 1; cmp ecx,1;
+    // lea ecx,[r15+3]; je outcome 2 (the cards).
+    Site {
+        name: "Pluto's find: the outcome switch (0x1401E2EE3)",
+        rva: 0x001E_2EE3,
+        expect: &[
+            0x44, 0x0F, 0xB7, 0x86, 0x72, 0x04, 0x00, 0x00, 0xC7, 0x45, 0x38, 0x00, 0x00, 0x80, 0x3E, 0x41, 0x8B, 0xC8, 0x45, 0x85, 0xC0, 0x0F, 0x84, 0x24, 0x03, 0x00, 0x00, 0x48, 0x89, 0x9C, 0x24, 0xC8, 0x01, 0x00, 0x00, 0x83, 0xE9, 0x01, 0x0F, 0x84, 0x10, 0x01, 0x00,
+            0x00, 0x83, 0xF9, 0x01, 0x41, 0x8D, 0x4F, 0x03, 0x74, 0x11,
+        ],
+    },
+    // Outcome 2: mov rax,[rsi+0x248] (the player); mov r14,[rax+0x3F0] (the card battle's deck);
+    // test; je (none); mov rcx,r14; call 0x140166930 (cards to deal: 0 at KH1).
+    Site { name: "Pluto's find: outcome 2 deals from the deck (0x1401E2F69)", rva: 0x001E_2F69, expect: &[0x48, 0x8B, 0x86, 0x48, 0x02, 0x00, 0x00, 0x4C, 0x8B, 0xB0, 0xF0, 0x03, 0x00, 0x00, 0x4D, 0x85, 0xF6, 0x0F, 0x84, 0x92, 0x00, 0x00, 0x00, 0x49, 0x8B, 0xCE, 0xE8, 0xA8, 0x39, 0xF8, 0xFF] },
+    // mov [rsp+0x18],rbx; push rdi; sub rsp,0x70; the cookie; mov rdi,rdx; mov rbx,rcx;
+    // mov edx,[rcx+0x2A0]; call 0x1402ABB20: a friend's effect point (the find's first call). Called.
+    Site { name: "friend effect point (0x1401D9DB0)", rva: 0x001D_9DB0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x70, 0x48, 0x8B, 0x05, 0x07, 0x8D, 0x68, 0x00, 0x48, 0x33, 0xC4, 0x48, 0x89, 0x44, 0x24, 0x60, 0x48, 0x8B, 0xFA, 0x48, 0x8B, 0xD9, 0x8B, 0x91, 0xA0, 0x02, 0x00, 0x00, 0xE8, 0x46, 0x1D, 0x0D, 0x00] },
+];
+
 /// A Gravity-flattened enemy stays hittable at Combat = KH1 (owner, 2026-11-04; `crate::magic::flatten`,
 /// `win::magic::flatten_begin` / `flatten_end`, `docs/recom-m7-magic.md` § The flatten keeps its hurt
 /// bodies): Re:CoM's flatten state's begin and end (state `+0xAC0`, the reaction picker's case 0xD
@@ -3896,6 +3924,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SUMMON_CHECKED,
         FLATTEN_HOOKS,
         FLATTEN_CHECKED,
+        PLUTO_HOOKS,
+        PLUTO_CHECKED,
         FIELD_SLEIGHT_HOOKS,
         FIELD_SLEIGHT_DATA,
         FIELD_SLEIGHT_CHECKED,
@@ -4856,6 +4886,26 @@ mod tests {
         assert_eq!(&init.expect[init.expect.len() - 3..], &[0xBA, crate::specials::RECOM_ACTION as u8, 0x00]);
         let case = SPECIAL_CHECKED.iter().find(|s| s.name.starts_with("Battle exe case 0x16")).unwrap();
         assert_eq!(u32::from_le_bytes(case.expect[8..12].try_into().unwrap()), 0x140);
+    }
+
+    /// Lucky Bounty at KH1: Pluto's find, its outcome switch and the calls it makes.
+    #[test]
+    fn pluto_sites() {
+        for s in PLUTO_HOOKS.iter().chain(PLUTO_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        // The outcome read is the field `crate::party::lucky_bounty` tests, at `+0x472`.
+        assert_eq!(&PLUTO_CHECKED[0].expect[4..6], &[0x72, 0x04]);
+        let d = &PLUTO_CHECKED[1];
+        let call = (d.rva as i64 + 26 + 5 + i32::from_le_bytes(d.expect[27..31].try_into().unwrap()) as i64) as u32;
+        assert_eq!(call, 0x0016_6930, "the deck's deal count");
+        let e = &PLUTO_CHECKED[2];
+        let bone = (e.rva as i64 + 37 + 5 + i32::from_le_bytes(e.expect[38..42].try_into().unwrap()) as i64) as u32;
+        assert_eq!(bone, 0x002A_BB20);
+        // The callees the wrapper uses are checked elsewhere.
+        for rva in [0x002A_BB20u32, 0x001A_6B20, 0x001A_89C0, 0x0029_CF00, 0x0023_37C0] {
+            assert!(all_sites().any(|c| c.rva == rva), "{rva:#x}");
+        }
     }
 
     /// A Gravity-flattened enemy stays hittable: the two wrappers' sites and the calls they rely on.

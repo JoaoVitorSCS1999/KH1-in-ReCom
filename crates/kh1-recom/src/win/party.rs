@@ -59,6 +59,7 @@ pub unsafe fn install(b: usize) -> bool {
         }
     }
     INSTALLED.store(true, Ordering::Release);
+    install_pluto(b);
     log(&format!(
         "party: the command menu's Party list (page 2): {}; each in a battle where its Friend card can drop (Re:CoM's table 0x1407C1F10) once Re:CoM taught it, through Re:CoM's sleight start",
         pt::ALL.iter().map(|f| format!("{} {:#x} ({} MP)", f.name, f.sleight, f.mp)).collect::<Vec<_>>().join(", ")
@@ -68,6 +69,75 @@ pub unsafe fn install(b: usize) -> bool {
 
 pub fn installed() -> bool {
     INSTALLED.load(Ordering::Acquire)
+}
+
+/// Lucky Bounty at Combat = KH1 (`crate::party::lucky_bounty`): Re:CoM's Pluto find
+/// (`sites::PLUTO_HOOKS`), wrapped.
+pub static ORIG_PLUTO_FIND: AtomicUsize = AtomicUsize::new(0);
+static PLUTO_LINES: AtomicU32 = AtomicU32::new(40);
+/// The find's effect name (`mov rdx,[0x1405A2F90]`: a pointer to "pluto"). Checked (exe).
+const PLUTO_NAME_PTR: u32 = 0x005A_2F90;
+const EFFECT_POINT: u32 = 0x001D_9DB0;
+const EFFECT_AT: u32 = 0x001A_6B20;
+const BONE: u32 = 0x002A_BB20;
+type FindFn = unsafe extern "win64" fn(usize);
+
+unsafe fn install_pluto(b: usize) {
+    for s in crate::sites::PLUTO_CHECKED {
+        if std::slice::from_raw_parts((b + s.rva as usize) as *const u8, s.expect.len()) != s.expect {
+            log(&format!("party: {} is not as expected; Lucky Bounty keeps Re:CoM's find at KH1", s.name));
+            return;
+        }
+    }
+    let hooks = [super::hook::Hook { site: &crate::sites::PLUTO_HOOKS[0], ours: pluto_find as *const () as usize, original: &ORIG_PLUTO_FIND }];
+    if super::hook::install_all(b, &hooks) {
+        log("party: Lucky Bounty at KH1: Pluto's find 0x1401E2E60 wrapped; his card find (outcome 2, empty deck) brings one KH1 item of the floor's tier (Potion, Hi-Potion, Ether, Elixir) as a KH1 item prize; his other finds Re:CoM's");
+    }
+}
+
+#[repr(C, align(16))]
+struct V4([f32; 4]);
+
+/// Re:CoM's Pluto find; then, in a KH1 battle, his card find (the empty deck dealt nothing) brings a
+/// KH1 item: Re:CoM's "pluto" find effect at his point and one KH1 item prize from where Re:CoM
+/// throws his prizes (his bone 0, 0.5 m up), picked up by KH1's rule.
+pub unsafe extern "win64" fn pluto_find(pluto: usize) {
+    super::movement::orig::<FindFn>(&ORIG_PLUTO_FIND)(pluto);
+    if pluto == 0 || !super::battle::kh1_battle() {
+        return;
+    }
+    let outcome: u16 = rd(pluto + 0x472);
+    if outcome != pt::lucky_bounty::CARDS_OUTCOME {
+        return;
+    }
+    let tier = super::shop::tier();
+    let Some(item) = pt::lucky_bounty::pick(tier, super::drops::random()) else { return };
+    // Re:CoM's find effect (as its outcomes 1 / 2 play it), when the name is still "pluto".
+    let name: usize = rd(super::base() + PLUTO_NAME_PTR as usize);
+    if name != 0 && std::ffi::CStr::from_ptr(name as *const std::ffi::c_char).to_bytes() == b"pluto" {
+        type PointFn = unsafe extern "win64" fn(usize, *mut V4) -> usize;
+        type EffectFn = unsafe extern "win64" fn(usize, usize, u32, *const V4, u64, f32) -> i32;
+        let mut at = V4([0.0; 4]);
+        func::<PointFn>(EFFECT_POINT)(pluto, &mut at);
+        func::<EffectFn>(EFFECT_AT)(pluto, name, 1, &at, 0, 0.0);
+    }
+    type BoneFn = unsafe extern "win64" fn(usize, u32) -> usize;
+    let bone = func::<BoneFn>(BONE)(pluto, 0);
+    if bone == 0 {
+        return;
+    }
+    let v: [f32; 4] = rd(bone + 0xD0);
+    let pos = [v[0], v[1] + 0.5, v[2], v[3]];
+    let how = match super::drops::spawn_item_prize(pos, item) {
+        Some(prize) => format!("a KH1 item prize {prize:#x}"),
+        None => {
+            let r = super::items::pick_up(item, "found by Pluto (Lucky Bounty)");
+            format!("picked up at once (no KH1 item prizes): {r:?}")
+        }
+    };
+    if PLUTO_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("party: Lucky Bounty at KH1: Pluto's card find (empty deck) brings {} (floor tier {tier:?}): {how}", crate::items::name(item)));
+    }
 }
 
 /// The Party sleights Re:CoM has taught (Re:CoM's own test, a pure read of its save).

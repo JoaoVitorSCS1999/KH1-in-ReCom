@@ -263,7 +263,8 @@ unsafe fn free_pack_given() -> bool {
     func::<NoArgFn>(SHOP_FLAGS)() >> 16 & 1 != 0
 }
 
-unsafe fn tier() -> sh::Tier {
+/// Re:CoM's floor tier now (`0x1402337C0`): the shop's stock, and Lucky Bounty at KH1.
+pub(super) unsafe fn tier() -> sh::Tier {
     let byte = func::<NoArgFn>(FLOOR)() as u8;
     sh::tier(sh::floor_of(byte))
 }

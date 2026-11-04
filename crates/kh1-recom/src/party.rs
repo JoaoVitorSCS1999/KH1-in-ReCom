@@ -219,8 +219,64 @@ pub fn usable(g: &crate::summons::Gate, i: usize) -> bool {
     g.battle && g.ground && !g.out && g.mp >= ALL[i].mp
 }
 
+/// Lucky Bounty at Combat = KH1 (owner, 2026-11-04, `design-philosophy-instructions.md` § Party and
+/// field follow-ups: "a random KH1 item (Potion, Hi-Potion, Ether, Elixir by the floor's tier) instead
+/// of a deck card (the deck is empty at KH1)"; `win::party::pluto_find`).
+///
+/// Re:CoM (Checked (decomp + exe)): Pluto's find `0x1401E2E60` (called only from his two action
+/// states `0x1401E3350` / `0x1401E35C0`) acts on the outcome his action's begin rolled into `+0x472`
+/// (`0x1401E2B50` / `0x1401E2D90`, weights `0x1407C5960`: 20 / 60 / 20 %, or 5 / 5 / 90 % with fewer
+/// than 7 cards in the revolver): 0 a "nonos" shot, 1 HP and Moogle prizes (3 / 7 / 10 each), 2 cards
+/// dealt from the deck (`0x140166930`, then `0x140168650` each; 3 / 6 / 9 by level). At KH1 the deck is
+/// empty: outcome 2 (90 %) brings nothing. Ours: outcome 2 brings one KH1 item instead; 0 and 1 stay
+/// Re:CoM's.
+pub mod lucky_bounty {
+    use crate::items::id;
+    use crate::shop::{self, Tier};
+
+    /// Pluto's outcome (`+0x472`) that deals cards.
+    pub const CARDS_OUTCOME: u16 = 2;
+    /// The items he can bring (the owner's four).
+    pub const ITEMS: [u8; 4] = [id::POTION, id::HI_POTION, id::ETHER, id::ELIXIR];
+
+    /// The items on a floor tier: the four, as far as the shop sells them there (`shop::STOCK`'s
+    /// tiers: 1F Potion, Ether; 2F+ Hi-Potion; 7F+ Elixir).
+    pub fn items(t: Tier) -> Vec<u8> {
+        shop::buy_list(t).into_iter().filter(|i| ITEMS.contains(i)).collect()
+    }
+
+    /// One of them, equally likely, from Re:CoM's random float `r` in [0, 1).
+    pub fn pick(t: Tier, r: f32) -> Option<u8> {
+        let l = items(t);
+        if l.is_empty() {
+            return None;
+        }
+        let k = ((r.clamp(0.0, 1.0) * l.len() as f32) as usize).min(l.len() - 1);
+        Some(l[k])
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lucky_bounty_brings_the_floors_items() {
+        use super::lucky_bounty::*;
+        use crate::items::id::*;
+        use crate::shop::{tier, Tier};
+        assert_eq!(items(tier(1)), [POTION, ETHER]);
+        assert_eq!(items(tier(2)), [POTION, HI_POTION, ETHER]);
+        assert_eq!(items(tier(7)), [POTION, HI_POTION, ETHER, ELIXIR]);
+        assert_eq!(items(tier(13)), [POTION, HI_POTION, ETHER, ELIXIR]);
+        assert!(items(Tier::Late).iter().all(|i| ITEMS.contains(i)), "never a Tent or Camping Set");
+        assert_eq!(pick(tier(1), 0.0), Some(POTION));
+        assert_eq!(pick(tier(1), 0.49), Some(POTION));
+        assert_eq!(pick(tier(1), 0.5), Some(ETHER));
+        assert_eq!(pick(tier(1), 0.999_999), Some(ETHER));
+        assert_eq!(pick(tier(1), 1.0), Some(ETHER), "clamped");
+        assert_eq!(pick(tier(7), 0.75), Some(ELIXIR));
+        assert_eq!(CARDS_OUTCOME, 2);
+    }
+
     use super::*;
 
     fn at(world: i32, met: u32) -> Place {

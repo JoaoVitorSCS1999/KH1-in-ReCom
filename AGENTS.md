@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 230: Lucky Bounty at KH1: Pluto's card find brings a KH1 item of the floor's tier (a KH1 item prize, KH1's pickup), version 0.118.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Party and field follow-ups): "Lucky Bounty at KH1 brings a random KH1 item (Potion, Hi-Potion, Ether, Elixir by the floor's tier) instead of a deck card (the deck is empty at KH1)".
+
+- **Re:CoM** (Checked (decomp + exe)): Pluto's find `0x1401E2E60` acts on the outcome his action's begin rolled into `+0x472` (`0x1401E2B50`, weights `0x1407C5960`: 5 / 5 / 90 % with fewer than 7 cards): 0 a shot, 1 HP / Moogle prizes, 2 cards from the deck (`0x140166930`: 0 at KH1, nothing).
+- **Change** (`party::lucky_bounty`, `win::party::pluto_find`, `win::drops::spawn_item_prize`; hook `sites::PLUTO_HOOKS` (9 bytes; only two direct callers, no branch in: exe scan), `PLUTO_CHECKED` (outcome switch, outcome 2's deal call, `0x1401D9DB0`)): after Re:CoM's find, in a KH1 battle, outcome 2 brings one KH1 item, equally likely among the floor tier's (shop `STOCK` tiers via `0x1402337C0`: 1F Potion / Ether, 2F+ Hi-Potion, 7F+ Elixir; never Tent / Camping Set), by Re:CoM's random float; Re:CoM's `pluto` find effect 1; a KH1 item prize (kind 0xD8, Re:CoM's look) thrown from his prize point; Re:CoM's pickup → KH1's rule (first empty slot, else the stock). Outcomes 0 / 1 Re:CoM's. Combat = Re:CoM, Riku's story: Re:CoM's. Nothing per frame.
+- Decided without asking: one item per find (Re:CoM deals 3 / 6 / 9 cards by level): owner question.
+- Assumptions: a KH1 battle's deck deals 0; `pluto` effect 1 reads as the find.
+- Checked: tests (`party::tests::lucky_bounty_brings_the_floors_items`, `sites::tests::pluto_sites`), `check_sites_rs.py` (1303 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-command-pages-party.md` § Lucky Bounty at KH1.
+
+---
+
 ## Stage 229: A Gravity-flattened enemy stays hittable in KH1 battles (Re:CoM's flatten keeps its hurt bodies; KH1's spring-back when a hit cuts it), version 0.117.0 (2026-11-04)
 
 Owner, 2026-11-04: "Also when the enemy is flattened from gravity, sora is unable to attack them, lets fix that".
