@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 228: The camp's Settings list gets "Effects & Sound" (Effects, Sounds: KH1 / Re:CoM), version 0.116.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § M13 and camp text answers): "The Effects / Sounds (later Voices) toggles go on a **new Settings page** (e.g. "Effects & Sound")". Sora's story; Riku's story unchanged.
+
+- **Settings list** (`keyblades::sub::SETTINGS_ROWS`): Game Settings, Combat, Movement, **Effects & Sound** (Re:CoM's Deck-submenu buttons, 4 of its 7). The page (`menu::Page::EffectsSound`) is our settings pages' own: Re:CoM's Config screen with our rows (`win::menu::SettingsPage`), pair rows **Effects** and **Sounds**, Re:CoM / KH1, written by `settings::store` to the same ini keys `effects` / `sounds` (the ini template's comments name the page). Voices: left out until voices exist.
+- **When**: at once: `win::fx::variants` reads both at each of Sora's KH1 motions (`set_item` needs no call); only at Combat = KH1.
+- **Kept and documented** (owner question): an effect's sound rides on the effect (Re:CoM's `.ese`, `0x1402546E0`). At Effects = KH1, Sounds = Re:CoM, KH1's finisher effects keep KH1's own effect sounds (81–88, bank 9000 registered at every KH1 battle start); at Effects = Re:CoM, Sounds = KH1, Re:CoM's effects keep Re:CoM's. The KH1 Keyblade trails have no sound (Checked (files)).
+- The label's `&` passes Re:CoM's escape expander as is (`0x1403480C0` copies bytes under 0x81; Checked (decomp)); Assumption: Re:CoM's font has the glyph.
+- No hook, call site or byte site; nothing per frame. Asset step: not needed.
+- Checked: tests (page rows, labels, keys, ini round trip, cycling, help lengths, the Settings list), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Docs: `recom-config-menu.md`, `recom-m13-plan.md` § The Effects & Sound page built.
+
+---
+
 ## Stage 227: KH1 Gravity's sphere drawn at KH1's size (Re:CoM's own sphere growth off), version 0.115.0 (2026-11-04)
 
 Owner, 2026-11-04: "gravity's visual is really small for some reason".

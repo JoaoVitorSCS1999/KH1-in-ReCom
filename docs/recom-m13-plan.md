@@ -342,6 +342,20 @@ and look follow KH1's own trail data (1:1); the six KH2 Keyblades swing with Re:
   - banks registered earlier in a session stay registered (Re:CoM owns them; at most about 0.9 MB per Keyblade).
 - **Not checked:** in game; the real `.se` files (not in the session); a trail's look against KH1's (no KH1 capture).
 
+## The Effects & Sound page built (0.116.0)
+
+Owner, 2026-11-04: "The Effects / Sounds (later Voices) toggles go on a new Settings page".
+
+- The camp's Settings list (Sora's story) has a fourth row, **Effects & Sound** (`keyblades::sub::Row::EffectsSound`).
+  It opens a page in our settings pages' own style: Re:CoM's Config screen with our rows (`menu::Page::EffectsSound`).
+- The page has two rows, **Effects** and **Sounds**, each Re:CoM / KH1, written to the same ini keys `effects` /
+  `sounds`. Voices is left out until voices exist.
+- They take effect at once: `win::fx::variants` reads both at each of Sora's KH1 motions.
+- Current behaviour, kept: an effect's sound rides on the effect. At Effects = KH1, Sounds = Re:CoM, KH1's finisher
+  effects keep their own KH1 effect sounds; at Effects = Re:CoM, Sounds = KH1, Re:CoM's effects keep theirs
+  (`recom-config-menu.md` § When each change takes effect). Owner question, below.
+- No hook, site or per-frame work. Assumption: Re:CoM's font has an `&` glyph.
+
 ## Open (ask at their stage)
 
 - No hit-stop at KH1 (none found in KH1: `recom-m13-kh1-fx.md` § 2; this corrects the clash "hit-stop" in
@@ -349,3 +363,5 @@ and look follow KH1's own trail data (1:1); the six KH2 Keyblades swing with Re:
 - KH1's room dust and splashes.
 - Clash EXP.
 - Effects without flag 0x800 end on a motion change (KH1's rule): part of stage 3's 1:1 check.
+- With Effects = KH1 and Sounds = Re:CoM, should KH1's effects play Re:CoM's effect sounds (today they keep KH1's own,
+  which ride on the effect)? And the reverse? Owner question.

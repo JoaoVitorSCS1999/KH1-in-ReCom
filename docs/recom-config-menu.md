@@ -145,6 +145,8 @@ and **Movement** (`docs/recom-keyblade-equip.md` § Settings pages).
 | Movement | Jump height | Re:CoM / KH1 | pair | `jump_height` | at once |
 | Movement | Air speed | Re:CoM / KH1 | pair | `air_speed` | at once |
 | Movement | Dodge roll | Re:CoM / KH1 / Off | single | `dodge_roll` | at once |
+| Effects & Sound | Effects | Re:CoM / KH1 | pair | `effects` | at once (Sora's next KH1 motion) |
+| Effects & Sound | Sounds | Re:CoM / KH1 | pair | `sounds` | at once (Sora's next KH1 motion) |
 
 Damage stays ini-only (owner). The row "Revenge Value" is the owner's name (2026-11-03) for
 `boss_revenge`.
@@ -219,6 +221,22 @@ Damage stays ini-only (owner). The row "Revenge Value" is the owner's name (2026
   roll is not in progress while the camp is open (the camp opens from the field's idle states).
 - The movement rows only act at Combat = KH1 (Re:CoM's own movement otherwise); their help lines
   say "KH1 only".
+- **Effects / Sounds** (M13, 0.116.0; owner, 2026-11-04: "The Effects / Sounds (later Voices) toggles
+  go on a new Settings page"): the fourth row of the Settings list, **Effects & Sound**, opens a
+  page with these two rows (Voices is added once voices exist). At once: `win::fx::variants` reads
+  both at each of Sora's KH1 motions, so the next swing follows; a trail already playing finishes as
+  it started. They act only at Combat = KH1. The label's `&` passes Re:CoM's escape expander
+  unchanged (`0x1403480C0`: bytes under 0x81 are copied as they are; Checked (decomp)). That
+  Re:CoM's font has an `&` glyph is an Assumption, to check in game.
+- **Effects and Sounds are separate** (current behaviour, kept; owner question): an effect's sound
+  rides on the effect (Re:CoM plays it from the effect set's `.ese`, `0x1402546E0`). So:
+  - Effects = KH1, Sounds = Re:CoM: KH1's finisher effects keep **KH1's own effect sounds** (81–88,
+    `kh1_ex_0010.ese` on bank 9000, which is registered at every KH1 battle start whatever Sounds
+    says); the swings, finishers' motion sounds and whooshes are Re:CoM's (SES variant 0).
+  - Effects = Re:CoM, Sounds = KH1: Re:CoM's effects with **Re:CoM's effect sounds** (their own
+    `.ese`), and KH1's swing / finisher motion sounds (SES variant 1301 and up).
+  - The KH1 Keyblade trails have no sound of their own (Checked (files)), so the trails don't
+    differ.
 
 ### Riku's story
 

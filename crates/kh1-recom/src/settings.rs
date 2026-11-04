@@ -326,12 +326,14 @@ damage = recom
 ;   off: bosses keep Re:CoM's rules.
 boss_revenge = on
 ;
-; effects = kh1 | recom (only at combat = kh1; read at each of Sora's motions)
+; effects = kh1 | recom (only at combat = kh1; read at each of Sora's motions; also the camp's
+;   Settings > Effects & Sound page)
 ;   kh1:   KH1's Keyblade trail (KH1's frames) and finisher effects on Sora's KH1 moves.
 ;   recom: Re:CoM's.
 effects = kh1
 ;
-; sounds = kh1 | recom (only at combat = kh1; read at each of Sora's motions)
+; sounds = kh1 | recom (only at combat = kh1; read at each of Sora's motions; also the camp's
+;   Settings > Effects & Sound page)
 ;   kh1:   KH1's swing and finisher sounds on Sora's KH1 moves (Re:CoM's steps and voices stay).
 ;   recom: Re:CoM's.
 sounds = kh1

@@ -570,6 +570,8 @@ pub mod sub {
         Combat,
         /// The Movement settings page (`crate::menu::Page::Movement`).
         Movement,
+        /// M13: the Effects & Sound settings page (`crate::menu::Page::EffectsSound`).
+        EffectsSound,
         /// M8 stage 8a.2: KH1's pause-menu Items screen (`crate::items_page`); Sora's list holds
         /// his Keyblade slot, then his item slots.
         Items,
@@ -579,7 +581,7 @@ pub mod sub {
     }
 
     /// The Settings list's rows, top to bottom.
-    pub const SETTINGS_ROWS: &[Row] = &[Row::GameSettings, Row::Combat, Row::Movement];
+    pub const SETTINGS_ROWS: &[Row] = &[Row::GameSettings, Row::Combat, Row::Movement, Row::EffectsSound];
 
     /// Re:CoM's camp has 7 entry buttons (`camp+0x1B8[7]`); the list reuses them. Checked
     /// (decomp).
@@ -597,6 +599,7 @@ pub mod sub {
                 Row::Abilities => crate::abilities::page::text::LABEL,
                 Row::Combat => crate::menu::Page::Combat.label(),
                 Row::Movement => crate::menu::Page::Movement.label(),
+                Row::EffectsSound => crate::menu::Page::EffectsSound.label(),
             }
         }
 
@@ -610,6 +613,7 @@ pub mod sub {
                 Row::Abilities => Some(crate::abilities::page::text::HELP),
                 Row::Combat => Some(crate::menu::Page::Combat.help()),
                 Row::Movement => Some(crate::menu::Page::Movement.help()),
+                Row::EffectsSound => Some(crate::menu::Page::EffectsSound.help()),
             }
         }
 
@@ -623,6 +627,7 @@ pub mod sub {
             match self {
                 Row::Combat => Some(crate::menu::Page::Combat),
                 Row::Movement => Some(crate::menu::Page::Movement),
+                Row::EffectsSound => Some(crate::menu::Page::EffectsSound),
                 _ => None,
             }
         }
@@ -986,7 +991,7 @@ mod tests {
     #[test]
     fn texts_are_terminated_ascii_without_codes() {
         let mut all = vec![text::PAGE_HELP, text::STAT_LABELS[0], text::STAT_LABELS[1], text::STAT_LABELS[2], text::CUSTOMIZE_LABEL, text::CUSTOMIZE_HELP, text::GAME_SETTINGS_LABEL];
-        for r in [sub::Row::GameSettings, sub::Row::Combat, sub::Row::Movement, sub::Row::Items, sub::Row::Customize, sub::Row::Abilities] {
+        for r in [sub::Row::GameSettings, sub::Row::Combat, sub::Row::Movement, sub::Row::EffectsSound, sub::Row::Items, sub::Row::Customize, sub::Row::Abilities] {
             all.push(r.label());
             all.extend(r.help());
         }
@@ -1003,7 +1008,8 @@ mod tests {
     fn settings_list_rows_and_moves_follow_recoms_deck_submenu() {
         use sub::{Act, Row};
         // Owner, 2026-11-04: Game Settings (Re:CoM's page), Combat, Movement.
-        assert_eq!(sub::SETTINGS_ROWS, &[Row::GameSettings, Row::Combat, Row::Movement]);
+        assert_eq!(sub::SETTINGS_ROWS, &[Row::GameSettings, Row::Combat, Row::Movement, Row::EffectsSound]);
+        assert_eq!((Row::EffectsSound.label(), Row::EffectsSound.settings_page()), (&b"Effects & Sound\0"[..], Some(crate::menu::Page::EffectsSound)));
         assert_eq!(Row::GameSettings.label(), &b"Game Settings\0"[..]);
         assert_eq!((Row::Combat.label(), Row::Movement.label()), (&b"Combat\0"[..], &b"Movement\0"[..]));
         assert_eq!((Row::Items.label(), Row::Customize.label(), Row::Abilities.label()), (&b"Items\0"[..], &b"Customize\0"[..], &b"Abilities\0"[..]));

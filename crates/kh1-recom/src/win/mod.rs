@@ -118,6 +118,9 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
     match item {
         // Read at each battle start (`battle::manager_ctor`, each enemy's ctor).
         Item::EnemyPace | Item::EnemyAi => {}
+        // M13: read at each of Sora's KH1 motions (`fx::variants`: the next swing; KH1's banks are
+        // made sure of there when Sounds turns KH1).
+        Item::Effects | Item::Sounds => {}
         Item::GuardReactions => attack::set_guard_reactions(s.guard_reactions),
         Item::RevengeValue => revenge::set_enabled(s.boss_revenge),
         // Read by each KH1 frame (`movement::run_frame`, `stick_class`).
@@ -783,7 +786,7 @@ fn install_keyblades(base: usize, bases: &[PathBuf]) {
     ];
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
     if unsafe { hook::install_all(base, &hooks) } {
-        log("keyblades: camp wrappers in; Sora's story: at Combat = KH1 the top list is Items, Abilities, Customize, World Map .. Settings; Settings opens Game Settings, Combat, Movement (Riku's story: Re:CoM's)");
+        log("keyblades: camp wrappers in; Sora's story: at Combat = KH1 the top list is Items, Abilities, Customize, World Map .. Settings; Settings opens Game Settings, Combat, Movement, Effects & Sound (Riku's story: Re:CoM's)");
         keyblades::load_item_row(bases.iter().map(|b| b.join(crate::camp_rows::MANIFEST)).find(|p| p.is_file()).as_deref());
     } else {
         log("keyblades: not hooked; Re:CoM's camp list (no Items / Abilities / Customize / Combat / Movement pages; the Kingdom Key's numbers stand; shortcuts keep KH1's learn order)");

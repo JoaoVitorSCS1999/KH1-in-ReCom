@@ -653,7 +653,7 @@ unchanged; the log line "camp: Items opened from the top list" is new.
 ### The Settings list
 
 Re:CoM's Deck submenu, run as the "KH1" entry's submenu was (same calls, Checked (decomp)): Re:CoM's
-buttons 0..2 relabelled **Game Settings, Combat, Movement**, count 3, level 1, at Re:CoM's places (at
+buttons 0..3 relabelled **Game Settings, Combat, Movement, Effects & Sound** (the fourth since 0.116.0), count 4, level 1, at Re:CoM's places (at
 KH1's list they are moved back while faded; the KH1 places return when the list is rebuilt), Re:CoM's
 input rule, cursor set, sounds, header item 1 as the breadcrumb under Re:CoM's own "Settings" title.
 
@@ -698,7 +698,7 @@ reads) once in state 0xF; nothing else per frame. Riku's story / the map camp: o
    brings the list back with the entry highlighted. Items must not open the deck editor.
 4. World Map, Map Cards, World Cards, Status, Journal: each opens and returns as unmodded (World Map /
    World Cards still buzz when not available).
-5. Settings: a list of Game Settings, Combat, Movement under the "Settings" title. Game Settings opens
+5. Settings: a list of Game Settings, Combat, Movement, Effects & Sound (0.116.0) under the "Settings" title. Game Settings opens
    Re:CoM's own Config page; change something there, close it, close the camp, open it again: the
    change kept. Combat and Movement as before.
 6. On the Combat page switch Combat to Re:CoM, back out twice: the top list is Re:CoM's seven (Review

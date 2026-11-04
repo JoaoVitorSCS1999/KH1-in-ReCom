@@ -451,7 +451,7 @@ unsafe fn story(camp: *mut u8) -> kb::Story {
 fn kh1_pages_listed() -> bool {
     let listed = !super::stats::keyblade_cards().is_empty();
     if !listed && !NO_NUMBERS_LOGGED.swap(true, Ordering::Relaxed) {
-        log("camp: kh1-stats.json has no Keyblades (format 3, kh1-recom-build): Re:CoM's seven entries at Combat = KH1 too (Settings opens Game Settings, Combat, Movement)");
+        log("camp: kh1-stats.json has no Keyblades (format 3, kh1-recom-build): Re:CoM's seven entries at Combat = KH1 too (Settings opens Game Settings, Combat, Movement, Effects & Sound)");
     }
     listed
 }
@@ -631,8 +631,8 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
     let code = layout_code(l);
     if LAYOUT_LOGGED.swap(code, Ordering::Relaxed) != code {
         log(match l {
-            top::Layout::Kh1 => "camp: KH1's list: Items, Abilities, Customize, then Re:CoM's World Map .. Settings (9 entries, y 78 + 24 each); Settings opens Game Settings, Combat, Movement",
-            top::Layout::Settings => "camp: Re:CoM's list (Combat = Re:CoM); Settings opens Game Settings, Combat, Movement",
+            top::Layout::Kh1 => "camp: KH1's list: Items, Abilities, Customize, then Re:CoM's World Map .. Settings (9 entries, y 78 + 24 each); Settings opens Game Settings, Combat, Movement, Effects & Sound",
+            top::Layout::Settings => "camp: Re:CoM's list (Combat = Re:CoM); Settings opens Game Settings, Combat, Movement, Effects & Sound",
             top::Layout::Recom => "camp: Re:CoM's list, untouched (Riku's story or the map-only camp)",
         });
     }
@@ -1360,7 +1360,7 @@ impl Page {
                 let content = Content::Items { screen: ip::Screen::new(), msg: None, inv: Default::default(), ctx: Default::default(), rows: Vec::new() };
                 (content, list::open_on(2, 0))
             }
-            sub::Row::Abilities | sub::Row::GameSettings | sub::Row::Combat | sub::Row::Movement => {
+            sub::Row::Abilities | sub::Row::GameSettings | sub::Row::Combat | sub::Row::Movement | sub::Row::EffectsSound => {
                 // The settings rows open a settings page (`Open`), never a list page.
                 let content = Content::Abilities { screen: ap::Screen::default(), state: Default::default(), level: 1, rows: Vec::new(), msg: None, live: false };
                 (content, list::open_on(2, 0))

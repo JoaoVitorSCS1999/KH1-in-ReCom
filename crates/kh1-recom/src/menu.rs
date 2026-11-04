@@ -1,6 +1,7 @@
 //! The "KH1" camp entry's settings pages (owner, 2026-11-03): **Combat** (Combat, Guard reactions,
 //! Enemy pace, Enemy AI, Revenge Value) and **Movement** (Run speed, Jump height, Air speed, Dodge
-//! roll). The testable part.
+//! roll); M13 (owner, 2026-11-04: "The Effects / Sounds (later Voices) toggles go on a new Settings
+//! page"): **Effects & Sound** (Effects, Sounds; Voices once voices exist). The testable part.
 //!
 //! Each page is Re:CoM's own Config screen machinery (`CCamp`'s Config draw `0x1400DF1B0`, its
 //! window panel, its `CButton` label and value items at its `camp.lad` positions, its cursor sprite,
@@ -45,6 +46,8 @@ pub enum Style {
 pub enum Page {
     Combat,
     Movement,
+    /// M13: KH1's or Re:CoM's effects and sounds on Sora's KH1 moves (ini `effects` / `sounds`).
+    EffectsSound,
 }
 
 /// A row of a settings page: one `kh1-recom.ini` key.
@@ -68,6 +71,10 @@ pub enum Item {
     AirSpeed,
     /// `dodge_roll`
     DodgeRoll,
+    /// `effects` (M13)
+    Effects,
+    /// `sounds` (M13)
+    Sounds,
 }
 
 /// When a change takes effect (from what reads the setting; `docs/recom-config-menu.md`).
@@ -80,13 +87,14 @@ pub enum Effect {
 }
 
 impl Page {
-    pub const ALL: [Page; 2] = [Page::Combat, Page::Movement];
+    pub const ALL: [Page; 3] = [Page::Combat, Page::Movement, Page::EffectsSound];
 
     /// Its rows, top to bottom (owner, 2026-11-03).
     pub fn items(self) -> &'static [Item] {
         match self {
             Page::Combat => &[Item::Combat, Item::GuardReactions, Item::EnemyPace, Item::EnemyAi, Item::RevengeValue],
             Page::Movement => &[Item::RunSpeed, Item::JumpHeight, Item::AirSpeed, Item::DodgeRoll],
+            Page::EffectsSound => &[Item::Effects, Item::Sounds],
         }
     }
 
@@ -95,6 +103,9 @@ impl Page {
         match self {
             Page::Combat => b"Combat\0",
             Page::Movement => b"Movement\0",
+            // The owner's name. Re:CoM's escape expander copies bytes under 0x81 as they are
+            // (`0x1403480C0`, Checked (decomp)); that its font has a `&` glyph is an Assumption.
+            Page::EffectsSound => b"Effects & Sound\0",
         }
     }
 
@@ -103,6 +114,7 @@ impl Page {
         match self {
             Page::Combat => b"Combat, Guard reactions, enemy pace and AI, Revenge Value.\0",
             Page::Movement => b"Run speed, jump height, air speed and Dodge roll.\0",
+            Page::EffectsSound => b"KH1's or Re:CoM's effects and sounds on Sora's KH1 moves.\0",
         }
     }
 }
@@ -139,6 +151,8 @@ impl Item {
             Item::JumpHeight => b"Jump height\0",
             Item::AirSpeed => b"Air speed\0",
             Item::DodgeRoll => b"Dodge roll\0",
+            Item::Effects => b"Effects\0",
+            Item::Sounds => b"Sounds\0",
         }
     }
 
@@ -172,6 +186,8 @@ impl Item {
             Item::JumpHeight => b"Re:CoM: Re:CoM's jump (2.0 m). KH1: KH1's jump (1.9 m). KH1 only.\0",
             Item::AirSpeed => b"Speed and steering in the air: Re:CoM's or KH1's. KH1 only.\0",
             Item::DodgeRoll => b"Re:CoM's roll, KH1's roll, or Off (Square guards). KH1 only.\0",
+            Item::Effects => b"KH1: KH1's Keyblade trails and finisher effects. KH1 only.\0",
+            Item::Sounds => b"KH1: KH1's swing and finisher sounds. KH1 only.\0",
         }
     }
 
@@ -195,6 +211,8 @@ impl Item {
             Item::JumpHeight => "jump_height",
             Item::AirSpeed => "air_speed",
             Item::DodgeRoll => "dodge_roll",
+            Item::Effects => "effects",
+            Item::Sounds => "sounds",
         }
     }
 
@@ -214,6 +232,8 @@ impl Item {
                 RollMode::Kh1 => 1,
                 RollMode::Off => 2,
             },
+            Item::Effects => mode_index(s.effects),
+            Item::Sounds => mode_index(s.sounds),
         }
     }
 
@@ -237,6 +257,8 @@ impl Item {
                 };
                 s.abilities.dodge_roll = s.dodge_roll.on();
             }
+            Item::Effects => s.effects = mode_of(v),
+            Item::Sounds => s.sounds = mode_of(v),
         }
     }
 }
@@ -378,9 +400,10 @@ mod tests {
         let labels = |p: Page| p.items().iter().map(|i| std::str::from_utf8(i.label()).unwrap().trim_end_matches('\0').to_string()).collect::<Vec<_>>();
         assert_eq!(labels(Page::Combat), ["Combat", "Guard reactions", "Enemy pace", "Enemy AI", "Revenge Value"]);
         assert_eq!(labels(Page::Movement), ["Run speed", "Jump height", "Air speed", "Dodge roll"]);
-        assert_eq!((Page::Combat.label(), Page::Movement.label()), (&b"Combat\0"[..], &b"Movement\0"[..]));
+        assert_eq!(labels(Page::EffectsSound), ["Effects", "Sounds"], "M13; Voices once voices exist");
+        assert_eq!((Page::Combat.label(), Page::Movement.label(), Page::EffectsSound.label()), (&b"Combat\0"[..], &b"Movement\0"[..], &b"Effects & Sound\0"[..]));
         let keys: Vec<&str> = Page::ALL.iter().flat_map(|p| p.items().iter().map(|i| i.key())).collect();
-        assert_eq!(keys, ["combat", "guard_reactions", "enemy_pace", "enemy_ai", "boss_revenge", "run_speed", "jump_height", "air_speed", "dodge_roll"]);
+        assert_eq!(keys, ["combat", "guard_reactions", "enemy_pace", "enemy_ai", "boss_revenge", "run_speed", "jump_height", "air_speed", "dodge_roll", "effects", "sounds"]);
         // Damage stays ini-only (owner).
         assert!(!keys.contains(&"damage"));
     }
@@ -393,6 +416,8 @@ mod tests {
         }
         assert_eq!(slots_used(Page::Combat), 15);
         assert_eq!(slots_used(Page::Movement), 11);
+        assert_eq!(slots_used(Page::EffectsSound), 6);
+        assert!(Page::EffectsSound.items().iter().all(|i| i.style() == Style::Pair && i.options() == RECOM_KH1));
         assert_eq!(Item::DodgeRoll.style(), Style::Single);
         assert!(Page::Combat.items().iter().all(|i| i.style() == Style::Pair));
     }
