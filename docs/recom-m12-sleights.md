@@ -763,3 +763,30 @@ ahead, specials included".
     attacking Heartless: Sora takes no damage and doesn't flinch until the room brightens. Hits land again
     afterwards.
   - A sleight that doesn't dim stays hittable.
+
+## Sleight and summon hits on attacking enemies (0.102.2)
+
+Owner, 2026-11-04: "for some reason using mega flare doesnt really do much damage", then "check the traces, some
+hits from the lethal frame also arent hitting, same goes for the summons at times".
+
+- **Traces 21 (Lethal Frame) and 22 (Mega Flare)**, Checked (trace):
+  - The enemies that took the sleight's hits were the ones **not** in an attack: the Creeper Plants 342 and 354
+    were defeated (state 30); 237 and the Darkball 309 were blown away (state 12); 311 flinched once (state 11).
+  - Every enemy in its attack (`P` in the trace: `+0x260` bit 0) took none: 236, 311 and 390 during Mega Flare,
+    and 237 and 309 through Lethal Frame.
+  - The KH1 Darkballs' unhittable warps (`h0`) are KH1's own rule.
+  - The trace's `hits` column records KH1 swings only, so the sleight's damage values aren't in it.
+- **Cause** (Checked (decomp), `recom-kh1-attack.md` § Card priority): Re:CoM's enemy hit handler `0x14017F7E0`
+  drops a hit on an enemy in an attack unless the hit carries the card-interrupt bit `0x2000000`. In Re:CoM the
+  sleight's cards break the enemy's card first. At KH1 the enemies attack without a card (M6 P1) and the sleight
+  has none either, so the hit was dropped. Only KH1 swings (decision 14) and turned-back shots (decision 28) carried
+  the bit.
+- **Fix** (`win::attack::kh1_enemy_hit`, `win::summons::soras_sleight_hit`): while a Sleights-list sleight or a
+  summon runs, a hit whose owner is Sora, a Re:CoM shot he or his summon fired, or his summon actor gets the bit
+  for that call, as a KH1 swing's hit does. Re:CoM's handler then ends the enemy's attack and applies the hit.
+  - This uses the same owner test the KH1 damage scaling uses.
+  - One log line each (at most 40): `sleight <name>: a hit on <enemy> during its attack lands …`.
+  - Nothing per frame: the check runs only when a hit reaches the wrapper.
+- **Not changed:** the bosses' dim and revenge moves (their hurt bodies are off, so no hit arrives), the KH1
+  Darkball's warps, and Combat = Re:CoM.
+- **Not checked:** in game.

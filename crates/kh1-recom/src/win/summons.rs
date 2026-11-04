@@ -463,6 +463,36 @@ unsafe fn is_our_summon(pl: usize, obj: usize) -> bool {
     sm::ACTOR_VTABLES.iter().any(|&(_, v, _)| v as usize == vt) && rd::<usize>(obj + sm::ACTOR_PLAYER) == pl
 }
 
+/// Owner, 2026-11-04 ("some hits from the lethal frame also arent hitting, same goes for the summons at
+/// times"; trace 21 / 22: the enemies in an attack, `+0x260` bit 0, took none of the sleight's hits):
+/// the hit waiting on `enemy` is the running Sleights-list sleight's or summon's (Sora's own collision
+/// while it runs, a Re:CoM shot he or his summon fired, his summon actor), as [`scale_sleight_hit`]
+/// counts them. Re:CoM's hit handler `0x14017F7E0` drops a hit on an enemy in an attack unless the
+/// hit carries the card-interrupt bit `0x2000000` (in Re:CoM the sleight's cards break the enemy's
+/// card first; at KH1 neither side has one). The caller gives that hit the bit, as a KH1 swing's.
+pub unsafe fn soras_sleight_hit(enemy: usize) -> bool {
+    if SLEIGHT_OUT.load(Ordering::Relaxed) == 0 && OUT.load(Ordering::Relaxed) == 0 {
+        return false;
+    }
+    let Some(body) = super::attack::waiting_body(enemy) else { return false };
+    let pl: usize = rd(va(base(), crate::sites::data::MAIN_PLAYER));
+    if pl == 0 {
+        return false;
+    }
+    matches!(owner_of(pl, rd(body + BODY_OWNER)), Owner::Sora | Owner::Shot | Owner::Summon)
+}
+
+/// A sleight's or summon's hit given the card-interrupt bit: one log line each, at most 40 a session.
+pub fn interrupt_note(enemy: usize) {
+    static LEFT: AtomicU32 = AtomicU32::new(40);
+    if LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        let id = SLEIGHT_ID.load(Ordering::Relaxed) as u16;
+        let who = super::stats::class_label(enemy);
+        let what = if OUT.load(Ordering::Relaxed) != 0 { "summon".to_string() } else { format!("sleight {}", crate::sleights::name(id)) };
+        log(&format!("{what}: a hit on {who} during its attack lands (card-interrupt bit, as a KH1 swing's)"));
+    }
+}
+
 unsafe fn owner_of(pl: usize, owner: u32) -> Owner {
     let b = base();
     let me: u32 = rd(pl + ACTOR_ID);

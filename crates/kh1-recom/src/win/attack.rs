@@ -867,7 +867,14 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
         let hp: i32 = rd(enemy + 0x274);
         // Decision 28: a shot Sora's Guard turned back breaks into the card like a KH1 swing.
         let flags: u64 = rd(enemy + 0x260);
-        let force = flags & 1 != 0 && flags & 0x200_0000 == 0 && super::guard::turned_hit_pending(enemy);
+        // Owner, 2026-11-04: a Sleights-list sleight's or summon's hit breaks into the enemy's attack
+        // too (Re:CoM's handler drops it otherwise: at KH1 there's no card to break first).
+        let in_attack = flags & 1 != 0 && flags & 0x200_0000 == 0;
+        let sleight = in_attack && super::summons::soras_sleight_hit(enemy);
+        if sleight {
+            super::summons::interrupt_note(enemy);
+        }
+        let force = in_attack && (sleight || super::guard::turned_hit_pending(enemy));
         if force {
             wr(enemy + 0x260, flags | 0x200_0000);
         }

@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 210: Sleight and summon hits break into attacking enemies (Combat = KH1), version 0.102.2 (2026-11-03)
+
+Owner, 2026-11-04: "for some reason using mega flare doesnt really do much damage", then "check the traces, some hits from the lethal frame also arent hitting, same goes for the summons at times".
+
+- **Traces 21 / 22** (Checked (trace)): during Lethal Frame and Mega Flare only enemies not in an attack took the hits (defeats, blow-aways, a flinch); every enemy in its attack (`+0x260` bit 0, trace `P`) took none. The trace's `hits` column records KH1 swings only.
+- **Cause** (Checked (decomp)): Re:CoM's enemy hit handler `0x14017F7E0` drops a hit on an enemy in an attack unless it carries the card-interrupt bit `0x2000000`; in Re:CoM the sleight's cards break the enemy card first, at KH1 neither has a card. Only KH1 swings (decision 14) and turned shots (decision 28) carried it.
+- **Change** (`win::attack::kh1_enemy_hit`, `win::summons::soras_sleight_hit` / `interrupt_note`): while a Sleights-list sleight or a summon runs, a hit whose owner is Sora, a Re:CoM shot he or his summon fired, or his summon actor gets the bit for that call (the KH1 damage scaling's owner test). No new hook or site; nothing per frame. Combat = Re:CoM unchanged.
+- Not checked: in game. Docs: `recom-m12-sleights.md` § Sleight and summon hits on attacking enemies.
+
+---
+
 ## Stage 209: Sora untouchable while his sleight dims the room (Combat = KH1), version 0.102.1 (2026-11-03)
 
 Owner, 2026-11-03: "any sleight that sora does that dims the room should give him i-frames"; on the plan: "Go ahead, specials included".

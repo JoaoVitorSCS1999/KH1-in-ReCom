@@ -551,3 +551,4 @@ At KH1 setting:
   - **Card Soldier's Attack Haste** (4. A): included, as the one deliberate change to KH1's swing timing.
   - **Enemy Skills**: a section of its own on the Abilities page. Each skill is named after its card, with a description of what it does.
   - Plan before code: `docs/recom-enemy-skills.md`.
+- **Sleight / summon hits on attacking enemies** (owner, 2026-11-04: "some hits from the lethal frame also arent hitting, same goes for the summons at times"; fixed 0.102.2): at KH1 they break into an enemy's attack as a KH1 swing does (decisions 14 / 26 extended to Sora's sleights and summons).
