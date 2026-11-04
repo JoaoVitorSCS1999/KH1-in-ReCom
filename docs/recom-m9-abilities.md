@@ -978,6 +978,32 @@ four Re:CoM calls at each of its eight motion starts.
   Blade card does at Combat = Re:CoM, and fades back when the special ends (the finisher's end, or
   stopping after a dash). Compare side by side with Re:CoM's own Sonic Blade sleight.
 
+### In the Sleights list (owner, 2026-11-03, "KH1 specials follow-ups": "Sonic Blade also in the Sleights list")
+
+- **Listed** when equipped (and its clips are in), as Strike Raid / Ars Arcanum / Ragnarok
+  (`docs/recom-m12-sleights.md` § 8.5.4): `sleights::SPECIALS` now holds every built special. It
+  stands under **Re:CoM's Sonic Blade sleight id 9** (command `0x89`), so Re:CoM's order puts it
+  after Strike Raid (8) and before Ars Arcanum (10) and the magic sleights. Checked (code + tests).
+- **Its name**: KH1's own word of its command 0x4B, **319 "Sonic"** (each language's: German
+  "Sonicsto?", French "Aquilon", …). Already in the asset step's words since 9c.1
+  (`kh1-recom-assets::command_menu::NAMES`, the prompt's tab uses it): **no asset re-run needed**.
+  Checked (code + files tests).
+- **Usable** exactly when its prompt would offer it: `0x14028D0F0`'s score 2 for Sonic Blade alone
+  (a live Re:CoM attack target with a gap under 600, not more than 160 above Sora, 2 MP), in a battle
+  room, on the ground (KH1's state 0), no special or sleight running; greyed and locked otherwise.
+- **Confirm** issues its KH1 command 0x4B, the same `Outcome::special` the prompt's Triangle gives
+  (Sora's KH1 frame takes it, `Kh1Sora::command_special`): the same start, MP (KH1's 2, not the
+  tier rule), rows, Rave / Blast follow-ups and end. Not Re:CoM's Sonic Blade sleight start.
+- Not a shortcut (Customize): the picker keeps only the 27 sleight abilities (as for the other three
+  specials; a slot byte can't hold a special).
+- Combat = Re:CoM: no change (the list is the KH1 setting's).
+- Not checked: in game.
+- **Test:** equip Sonic Blade, D-pad Left to Sleights, open it: "Sonic" listed (after "Strike" when
+  Strike Raid is equipped too, before the magic sleights); lit next to an enemy within 6 m with 2+
+  MP, greyed farther away, under 2 MP, against an enemy high above, or in the air; choosing it plays
+  the same Sonic Blade as Triangle (2 MP, wind-up, dashes, "Rave" / "Blast" in the Attack row). It
+  is not offered in Customize's shortcut picker.
+
 ## M12 step 7: KH1's Strike Raid (the triangle prompt, and in the Sleights list)
 
 Owner (2026-11-03, "M12 answers"): "Strike raid are arcanum and ragnarok in KH1FM are triangle

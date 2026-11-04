@@ -40,9 +40,11 @@ pub type Pick = Option<sc::Slot>;
 
 /// KH1's picker list (`0x1403041A0`): the learned spells (level 1..3) in KH1's order, then (M12
 /// step 6) the equipped sleight abilities in Re:CoM's order (`crate::sleights::list`), then "none".
+/// Only the 27 sleight abilities (a slot byte holds one of them, `sc::sleight_byte`); the KH1
+/// specials the Sleights list also holds (`crate::sleights::SPECIALS`) are never shortcuts.
 pub fn picks(levels: [u8; SPELLS], equipped_sleights: &[u16]) -> Vec<Pick> {
     let mut v: Vec<Pick> = (0..SPELLS as u8).filter(|&s| (1..=3).contains(&levels[s as usize])).map(|s| Some(sc::Slot::Spell(s))).collect();
-    v.extend(crate::sleights::list(equipped_sleights).into_iter().map(|id| Some(sc::Slot::Sleight(id))));
+    v.extend(crate::sleights::list(equipped_sleights).into_iter().filter(|&id| sc::sleight_byte(id).is_some()).map(|id| Some(sc::Slot::Sleight(id))));
     v.push(None);
     v
 }
@@ -201,6 +203,8 @@ mod tests {
         use crate::abilities::sleight as sl;
         let p = picks([1, 0, 0, 0, 0, 0, 0], &[sl::HOLY, sl::FIRE_RAID, sl::SONIC_BLADE]);
         assert_eq!(p, vec![Some(Spell(0)), Some(Sleight(sl::FIRE_RAID)), Some(Sleight(sl::HOLY)), None]);
+        // The KH1 specials of the Sleights list are never shortcuts (no slot byte).
+        assert_eq!(picks([0; 7], &[sl::STRIKE_RAID, sl::SONIC_BLADE, sl::ARS_ARCANUM, sl::RAGNAROK]), vec![None]);
         // Written as the sleight's Re:CoM id; read back to its picker row.
         let slots = set([1, 0, 0], 2, p[2]);
         assert_eq!(slots, [1, 0, sl::HOLY as u8]);

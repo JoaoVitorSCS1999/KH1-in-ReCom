@@ -26,13 +26,15 @@
 //!   [`SPECIALS`] when equipped, under Re:CoM's sleight id of the same name (Strike Raid 8), named by
 //!   KH1's own command word (338), usable when the special's own prompt would offer it (its
 //!   `0x14028D0F0` score 2: a live target in range, its MP); confirm issues the special's command
-//!   exactly as its prompt's Triangle does (`crate::specials`), not Re:CoM's sleight.
+//!   exactly as its prompt's Triangle does (`crate::specials`), not Re:CoM's sleight. Sonic Blade
+//!   too (owner, 2026-11-03, "KH1 specials follow-ups": "Sonic Blade also in the Sleights list").
 
 use crate::abilities::{self as ab, SleightMp};
 
 /// The KH1 specials (by `crate::specials` index) the list also holds when equipped (M12 step 7):
-/// Strike Raid, Ars Arcanum. Sonic Blade isn't (the owner named the other three).
-pub const SPECIALS: [usize; 3] = [crate::specials::ARS_ARCANUM, crate::specials::STRIKE_RAID, crate::specials::RAGNAROK];
+/// Strike Raid, Ars Arcanum, Ragnarok, and (owner, 2026-11-03, "KH1 specials follow-ups") Sonic
+/// Blade: every built special.
+pub const SPECIALS: [usize; 4] = [crate::specials::SONIC_BLADE, crate::specials::ARS_ARCANUM, crate::specials::STRIKE_RAID, crate::specials::RAGNAROK];
 
 /// The list's most rows: the sleight abilities and [`SPECIALS`].
 pub const MAX: usize = ab::SLEIGHTS.end - ab::SLEIGHTS.start + SPECIALS.len();
@@ -235,8 +237,8 @@ mod tests {
             assert!(crate::summons::of_command(command(id)).is_none());
             assert!(crate::command_menu::cmd::spell_of(command(id)).is_none());
         }
-        // Not ours: the summons' and Sonic Blade (the owner listed the other three).
-        assert_eq!(of_command(command(s::SONIC_BLADE)), None);
+        // Not the 27: the summons'. Sonic Blade is a listed special (its own test below).
+        assert_eq!(of_command(command(s::SONIC_BLADE)), Some(s::SONIC_BLADE));
         assert_eq!(of_command(0x7F), None);
         assert_eq!(of_command(0x35), None);
         assert_eq!(words().count(), 27);
@@ -330,7 +332,6 @@ mod tests {
     #[test]
     fn strike_raid_is_listed_as_its_prompt() {
         assert_eq!(special_sleight(crate::specials::STRIKE_RAID), Some(s::STRIKE_RAID));
-        assert_eq!(special_sleight(crate::specials::SONIC_BLADE), None);
         assert_eq!(special_index(s::STRIKE_RAID), Some(crate::specials::STRIKE_RAID));
         assert_eq!(of_command(command(s::STRIKE_RAID)), Some(s::STRIKE_RAID));
         assert_eq!(command(s::STRIKE_RAID), 0x88);
@@ -355,9 +356,49 @@ mod tests {
         assert!(special_usable(&g, s::ARS_ARCANUM, 1 << crate::specials::ARS_ARCANUM) && !special_usable(&g, s::ARS_ARCANUM, bit));
     }
 
+    /// Owner (2026-11-03, "KH1 specials follow-ups": "Sonic Blade also in the Sleights list"): under
+    /// Re:CoM's Sonic Blade sleight 9 (between Strike Raid 8 and Ars Arcanum 10, Re:CoM's order),
+    /// KH1's own word 319 "Sonic" (its command 0x4B's), usable exactly when its prompt would offer it,
+    /// its MP KH1's (2), not the tier rule.
+    #[test]
+    fn sonic_blade_is_listed_as_its_prompt() {
+        use crate::specials::{self as sp, SONIC_BLADE};
+        assert_eq!(SPECIALS.len(), sp::BUILT.len());
+        assert!(sp::BUILT.iter().all(|i| SPECIALS.contains(i)), "every built special is listed");
+        assert_eq!(special_sleight(SONIC_BLADE), Some(s::SONIC_BLADE));
+        assert_eq!(s::SONIC_BLADE, sp::recom::SLEIGHT, "Re:CoM's Sonic Blade sleight 9");
+        assert_eq!(special_index(s::SONIC_BLADE), Some(SONIC_BLADE));
+        assert_eq!(command(s::SONIC_BLADE), 0x89);
+        assert_eq!(sp::TABLE[SONIC_BLADE].1, sp::cmd::SONIC_BLADE);
+        assert_eq!(word(s::SONIC_BLADE), 319, "KH1's \"Sonic\"");
+        assert_eq!(cost(s::SONIC_BLADE), None, "its MP is KH1's (the special's own)");
+        assert!(crate::summons::of_command(command(s::SONIC_BLADE)).is_none());
+        assert!(crate::command_menu::cmd::spell_of(command(s::SONIC_BLADE)).is_none());
+        assert_ne!(command(s::SONIC_BLADE), crate::gimmick::STAGGER);
+        assert_eq!(
+            list(&[s::RAGNAROK, s::HOLY, s::SONIC_BLADE, s::ARS_ARCANUM, s::STRIKE_RAID]),
+            vec![s::STRIKE_RAID, s::SONIC_BLADE, s::ARS_ARCANUM, s::RAGNAROK, s::HOLY]
+        );
+        let g = Gate { battle: true, ground: true, air: false, mp: 0, out: false };
+        let bit = 1 << SONIC_BLADE;
+        assert!(special_usable(&g, s::SONIC_BLADE, bit));
+        assert!(!special_usable(&g, s::SONIC_BLADE, 0), "its prompt wouldn't offer it");
+        assert!(!special_usable(&g, s::SONIC_BLADE, 1 << crate::specials::STRIKE_RAID), "another special's bit");
+        assert!(!special_usable(&Gate { ground: false, air: true, ..g }, s::SONIC_BLADE, bit), "ground only (KH1's state 0)");
+        assert!(!special_usable(&Gate { out: true, ..g }, s::SONIC_BLADE, bit));
+        assert!(!special_usable(&Gate { battle: false, ..g }, s::SONIC_BLADE, bit));
+        assert!(!usable(&g, s::SONIC_BLADE), "not by the sleights' MP rule");
+        // Its prompt's own score is what lights it: range 600, not more than 160 above, 2 MP.
+        let near = sp::OfferTarget { gap: 100.0, above: 0.0 };
+        assert_eq!(sp::score(SONIC_BLADE, &near, &mut |c| c <= 200), 2);
+        assert_eq!(sp::score(SONIC_BLADE, &near, &mut |c| c < 200), 1, "MP short: not usable");
+        assert_eq!(sp::score(SONIC_BLADE, &sp::OfferTarget { gap: 600.0, above: 0.0 }, &mut |_| true), 0);
+        assert_eq!(sp::score(SONIC_BLADE, &sp::OfferTarget { gap: 100.0, above: 160.5 }, &mut |_| true), 0);
+    }
+
     #[test]
     fn list_and_bottom_byte() {
-        assert_eq!(list(&[s::HOLY, s::FIRE_RAID, s::SONIC_BLADE, s::FIRE_RAID]), vec![s::FIRE_RAID, s::HOLY]);
+        assert_eq!(list(&[s::HOLY, s::FIRE_RAID, s::FIRE_RAID, 0x35]), vec![s::FIRE_RAID, s::HOLY]);
         assert_eq!(Bottom::of_byte(0), Bottom::Summon);
         assert_eq!(Bottom::of_byte(1), Bottom::Sleights);
         assert_eq!(Bottom::of_byte(7), Bottom::Summon);
