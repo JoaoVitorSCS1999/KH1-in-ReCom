@@ -630,3 +630,4 @@ At KH1 setting:
   - **Lucky Bounty** brings **1–2 KH1 items** per find.
   - **KH1's own hit flatten at Damage = KH1**: build it (a Gravity-hit enemy flattens as in KH1).
   - **Gravity's sphere is drawn at Re:CoM's Gravity size** (owner's choice over KH1's; the hit radius stays KH1's unless the owner says otherwise).
+- **Process** (owner, 2026-11-04, verbatim: "Don't stop anything unless I explicitly say so"): never stop running work (agents, builds) unless the owner explicitly says so. "Re start the shop and enemy skills": restarted from testing at 0.122.0.
