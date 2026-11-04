@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 209: Sora untouchable while his sleight dims the room (Combat = KH1), version 0.102.1 (2026-11-03)
+
+Owner, 2026-11-03: "any sleight that sora does that dims the room should give him i-frames"; on the plan: "Go ahead, specials included".
+
+- **The dim** = Re:CoM's sleight tint `0x1401F7D80`: `player+0x418` bit 31 set for any colour but white (`exeStockSkill` `0x140218950` at a sleight's first update when its start row has flag 0x20: 118 of 188 rows, Checked (exe); our KH1 specials with Re:CoM's colours); cleared by the sleight's end `0x1401F6660` (fade back to white) or `0x1401E7C20`. Checked (decomp).
+- **Rule** (`crate::sleights::dim_shield`): Combat = KH1, Sora's story, battle room, bit 31 set, Sora's action Re:CoM's sleight action 0x16 or a KH1 special.
+- **Change** (`win::attack::damage_check`, the wrapper already on `0x1401E6DE0`; `win::summons::sleight_dimmed`): when a hit arrives under the rule, Re:CoM's own protection bit `+0x418 & 1` for that check (the summon i-frames' and Leaf Bracer's path: the check's exit zeroes the hit, no damage, no reaction), put back after. One capped log line per skipped hit. No new hook or site; nothing per frame.
+- Combat = Re:CoM unchanged. Not checked: in game; whether KH1 itself makes Sora untouchable during its specials (the owner's rule covers them). Docs: `recom-m12-sleights.md` § Sora untouchable while his sleight dims the room.
+
+---
+
 ## Stage 208: M13 stage 1: KH1's Sora effect set in Re:CoM's own effect container, version 0.102.0 (2026-11-03)
 
 Owner, 2026-11-03: "Let's work on m13", then "Go ahead" (stage 1 of `docs/recom-m13-plan.md`). Answers: three toggles (Effects / Sounds / Voices), KH1 voice lines on their own toggle, the specials switch to KH1's.

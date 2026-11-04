@@ -1311,12 +1311,18 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // through his own Cure's cast): the same protection bit for this check while Sora's KH1 Cure
     // casts with it equipped (`super::kh1_support::leaf_bracer`; only when a hit arrived).
     let bracer = arrived && !summon && super::kh1_support::leaf_bracer(pl);
-    let shield = summon || bracer;
+    // Owner, 2026-11-03: "any sleight that sora does that dims the room should give him i-frames":
+    // while his sleight (Re:CoM's, or a KH1 special) has the room dimmed (Re:CoM's own flag
+    // `+0x418` bit 31, `crate::sleights::dim_shield`), the same protection bit for this check.
+    let dimmed = arrived && !summon && !bracer && super::summons::sleight_dimmed(pl);
+    let shield = summon || bracer || dimmed;
     let f418: u32 = if shield { rd(pl + p::FLAGS_418) } else { 0 };
     if shield {
         if rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0 && rd::<i16>(pl + HIT_VALUE) != 0 {
             if summon {
                 super::summons::hit_skipped(rd(pl + HIT_VALUE));
+            } else if dimmed {
+                super::summons::dim_hit_skipped(rd(pl + HIT_VALUE), pl);
             } else {
                 super::kh1_support::bracer_hit(rd(pl + HIT_VALUE));
             }

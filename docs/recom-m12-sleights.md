@@ -734,3 +734,32 @@ Not checked (8.6): anything in game.
 
 Owner question: Sonic Blade in the list too? Answered (owner, 2026-11-03, "KH1 specials follow-ups"): yes, built (`docs/recom-m9-abilities.md` § 9c.1, "In the Sleights list").
 
+
+## Sora untouchable while his sleight dims the room (0.102.1)
+
+Owner, 2026-11-03: "any sleight that sora does that dims the room should give him i-frames"; on the plan, "Go
+ahead, specials included".
+
+- **The dim** is Re:CoM's own sleight tint `0x1401F7D80(player, colour, time, flags)`. It sets `player+0x418`
+  bit 31 for any colour but white and fades the map and sky layers (`0x140232170`, mask 0x1808).
+  - `exeStockSkill` `0x140218950` calls it at a sleight's first update when the start row has flag 0x20
+    (`+0xF`), with the colour picked by attack id × 10 (`0x1407C5D40`…`0x1407C5D90`). 118 of Re:CoM's 188
+    attack rows carry that flag. Checked (exe).
+  - Our KH1 specials call it with Re:CoM's colours (`win::specials`).
+  - The sleight's end `0x1401F6660` fades back to white and clears the bit; so does `0x1401E7C20`.
+  - Checked (decomp).
+- **The rule** (`crate::sleights::dim_shield`): Combat = KH1, Sora's story, in the battle room, bit 31 set, and
+  Sora's action is Re:CoM's sleight action 0x16 or a KH1 special.
+- **What it does** (`win::attack::damage_check`, the wrapper already on Re:CoM's damage check `0x1401E6DE0`):
+  when a hit arrives, it sets Re:CoM's own protection bit `+0x418 & 1` for that check, as the summon i-frames
+  and Leaf Bracer do. The check's own exit zeroes the hit: no damage, no reaction. The bit is put back afterwards.
+  - One log line per skipped hit (at most 40): `sleight dim: a hit of N on Sora skipped …`.
+  - Nothing per frame.
+- **Combat = Re:CoM:** unchanged. Re:CoM's card breaks protect its sleights there.
+- **Not checked:** in game; whether KH1 makes Sora untouchable during Sonic Blade, Strike Raid, Ars Arcanum
+  and Ragnarok (the owner's rule covers them either way).
+- **Test:**
+  - At Combat = KH1, start a dimming sleight (Sonic Blade, or a Re:CoM sleight such as Fire Raid or Judgment) next to
+    attacking Heartless: Sora takes no damage and doesn't flinch until the room brightens. Hits land again
+    afterwards.
+  - A sleight that doesn't dim stays hittable.

@@ -381,6 +381,22 @@ pub unsafe fn sleight_running(pl: usize) -> bool {
     running
 }
 
+/// Owner, 2026-11-03 (`crate::sleights::dim_shield`): Sora's sleight has the room dimmed. Three
+/// loads, only when a hit arrives (the damage check's wrapper).
+pub unsafe fn sleight_dimmed(pl: usize) -> bool {
+    pl != 0 && crate::sleights::dim_shield(rd(pl + f::FLAGS_418), rd(pl + p::ACTION), super::specials::kh1_special(pl), rd::<i32>(pl + p::BATTLE) != 0)
+}
+
+/// A hit on Sora skipped by [`sleight_dimmed`]: one log line each, at most 40 a session.
+pub fn dim_hit_skipped(value: i16, pl: usize) {
+    static LEFT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(40);
+    if LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        // SAFETY: the player the damage check runs for.
+        let action = unsafe { rd::<u32>(pl + p::ACTION) };
+        log(&format!("sleight dim: a hit of {value} on Sora skipped (his sleight has the room dimmed; action {action:#x})"));
+    }
+}
+
 /// M12 step 5: a Sleights list entry (the menu's command, the usable test passed): Re:CoM's own
 /// sleight start for `id` (as a summon's, [`begin`]), then the owner's MP (KH1's whole-point
 /// payment `0x1402A5B60`: the tier's points, or all of Sora's whole MP). Re:CoM runs the rest: its

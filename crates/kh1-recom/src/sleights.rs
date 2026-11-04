@@ -220,9 +220,34 @@ pub fn list(equipped: &[u16]) -> Vec<u16> {
     v
 }
 
+/// Re:CoM's sleight dim (owner, 2026-11-03: "any sleight that sora does that dims the room should
+/// give him i-frames"): the player's `+0x418` bit 31. Re:CoM's tint `0x1401F7D80` sets it for any
+/// colour but white (`exeStockSkill` `0x140218950` calls it at a sleight's first update when its
+/// start row has flag 0x20 (`+0xF`; 118 of the 188 rows, Checked (exe)), colour by attack id; our
+/// KH1 specials call it with Re:CoM's colours); the sleight's end `0x1401F6660` fades back to white
+/// and clears it, as `0x1401E7C20` does. Checked (decomp).
+pub const DIM_BIT: u32 = 0x8000_0000;
+/// Re:CoM's sleight action (`exeStockSkill`).
+pub const STOCK_ACTION: u32 = 0x16;
+
+/// Sora is untouchable for this hit (Combat = KH1, Sora's story; the caller checks those): his
+/// sleight (Re:CoM's action 0x16, or a KH1 special) has the room dimmed, in the battle room.
+pub fn dim_shield(flags_418: u32, action: u32, kh1_special: bool, in_battle: bool) -> bool {
+    in_battle && flags_418 & DIM_BIT != 0 && (action == STOCK_ACTION || kh1_special)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn untouchable_while_the_sleight_dims_the_room() {
+        assert!(dim_shield(DIM_BIT, STOCK_ACTION, false, true), "a Re:CoM sleight with its dim on");
+        assert!(dim_shield(DIM_BIT | 1, 0x2E, true, true), "a KH1 special (its own action) with Re:CoM's dim");
+        assert!(!dim_shield(0, STOCK_ACTION, false, true), "a sleight whose row has no dim (flag 0x20 clear)");
+        assert!(!dim_shield(DIM_BIT, 0xA, false, true), "the dim alone (not a sleight)");
+        assert!(!dim_shield(DIM_BIT, STOCK_ACTION, false, false), "outside the battle room");
+    }
     use crate::abilities::sleight as s;
     use crate::summons::Gate;
 
