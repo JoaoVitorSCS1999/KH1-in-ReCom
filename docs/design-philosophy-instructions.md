@@ -536,3 +536,4 @@ At KH1 setting:
 - **KH1 damage scaling** (owner, 2026-11-03, on 0.100.4): at Damage = KH1, sleights also scale on enemies without a KH1 twin (bosses, Re:CoM-only enemies) by their KH1-scale HP / Re:CoM HP; summons get the same rule.
 - **Sleight shortcuts** (owner, 2026-11-03, on 0.100.6): a sleight shortcut opens the L1 list even before any spell is learned (as built).
 - **KH1 specials follow-ups** (owner, 2026-11-03, on M12 step 7): Ragnarok's shots ship with the wrapper on Re:CoM's homing step (as Fire's re-target); **Ragnarok offered against any target** at KH1 (not KH1's 1.6 m-above rule; built 0.101.4); **Sonic Blade also in the Sleights list** (built 0.101.5).
+- **Prompt order** (owner, 2026-11-03, on 0.101.4, asked which special the Triangle prompt picks now that Ragnarok shows against any target): **Ragnarok last**: the prompt checks Ars Arcanum, Sonic Blade and Strike Raid first (built 0.101.6). KH1's own order stays in the code for reference.

@@ -1277,11 +1277,14 @@ stays as built: range 600 (gap to the lock point minus its radius), its 3 MP (gr
 state 0 on the ground (KH1's state-0 rule; the Sleights list's ground test), battle rooms, the move
 itself. Sonic Blade's own rule (no target more than 160 above) stays KH1's.
 
-A consequence of KH1's walk order (`0x14052834C`: Trinity, Ragnarok, Ars Arcanum, Sonic Blade,
-Strike Raid; the first best score wins), kept: with Ragnarok equipped and 3+ MP, the prompt shows
-"Ragnarok" for any target within 6 m, ahead of Ars Arcanum / Sonic Blade (and Strike Raid within
-6 m); in KH1 the height rule let them show against ground enemies. They stay reachable from the
-Sleights list (each by its own score). Checked (code + tests: `the_offer_is_kh1s`).
+The prompt's walk order: **Ragnarok last** (owner, 2026-11-03, on 0.101.4; built 0.101.6):
+Trinity, Ars Arcanum, Sonic Blade, Strike Raid, Ragnarok (`specials::ORDER`; the best score wins,
+the first among equals). KH1's own walk (`0x14052834C`: Trinity, Ragnarok, Ars Arcanum, Sonic Blade,
+Strike Raid) is kept as `specials::KH1_ORDER`; with KH1's height rule off it would have let Ragnarok
+take every prompt within 6 m. Consequence: the prompt shows "Ragnarok" only when none of Ars Arcanum,
+Sonic Blade and Strike Raid is equipped and in range (Strike Raid's 9 m range covers Ragnarok's 6 m,
+and it costs less MP: 2 against 3). Every special stays reachable from the Sleights list (each by its
+own score). Not KH1's. Checked (code + tests: `the_offer_is_kh1s`).
 
 ### Sites (`sites::SPECIAL_RAG_CHECKED`; a mismatch: no Ragnarok)
 
@@ -1320,8 +1323,9 @@ it: `specials: Ragnarok's rows are not in the attack table`.
    0.7 s: 17 and a hop back; after about 0.85 s: 25, the big release. The shots curl and home.
 4. Not pressing: Sora drops after the charge. Hit during the charge: he takes it.
 5. Damage = KH1 vs Re:CoM: the hits log `:recom … sleight 0xb` at Re:CoM, the shots `:ragnarok`.
-6. Any height (owner's choice): a ground enemy within 6 m shows "Ragnarok" (with Ars Arcanum / Sonic
-   Blade also equipped, Ragnarok takes the prompt: KH1's order; they stay in the Sleights list);
+6. Any height (owner's choice): a ground enemy within 6 m shows "Ragnarok" (with Ars Arcanum, Sonic
+   Blade or Strike Raid also equipped and in range, they take the prompt: Ragnarok last, the owner's
+   order; Ragnarok stays in the Sleights list);
    more than 6 m away: no Ragnarok; under 3 MP: no tab (FM draws no greyed one); in the Sleights
    list Ragnarok lights against the same targets, greyed in the air.
 - Combat = Re:CoM: no change.

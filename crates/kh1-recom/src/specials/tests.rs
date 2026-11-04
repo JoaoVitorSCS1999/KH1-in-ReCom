@@ -23,7 +23,7 @@ fn the_offer_is_kh1s() {
     let all = [true; 5];
     assert_eq!(offer(&all, t(100.0, 0.0), &mut |_| true).map(|o| o.0), Some(cmd::TRINITY));
     assert_eq!(offer(&all, t(700.0, 0.0), &mut |_| true).map(|o| o.0), Some(cmd::TRINITY), "Trinity 1200");
-    assert_eq!(offer(&[true, true, true, true, false], t(400.0, 200.0), &mut |_| true).map(|o| o.0), Some(cmd::RAGNAROK));
+    assert_eq!(offer(&[true, true, true, true, false], t(400.0, 200.0), &mut |_| true).map(|o| o.0), Some(cmd::STRIKE_RAID), "Ragnarok last: Strike Raid first");
     // M12 step 7: KH1's 'Z' (only a target 160 or more above Sora) is off: the owner's choice
     // (2026-11-03, "Ragnarok offered against any target"). Range 600 and the MP stay KH1's.
     assert!(!RAGNAROK_HEIGHT_RULE);
@@ -34,10 +34,16 @@ fn the_offer_is_kh1s() {
     assert_eq!(offer(&rag, t(400.0, -300.0), &mut |_| true), Some((cmd::RAGNAROK, false)), "below Sora: offered");
     assert_eq!(offer(&rag, t(400.0, 0.0), &mut |c| c < 300), Some((cmd::RAGNAROK, true)), "MP short (3): greyed");
     assert_eq!(offer(&rag, t(600.0, 0.0), &mut |_| true), None, "range 600 strict");
-    // KH1's walk order is kept, so Ragnarok (before Ars Arcanum, Sonic Blade and Strike Raid) now
-    // takes the prompt within 600 whatever the height; the others stay in the Sleights list.
-    assert_eq!(offer(&[true, true, true, true, false], t(100.0, 0.0), &mut |_| true).map(|o| o.0), Some(cmd::RAGNAROK));
-    assert_eq!(offer(&[true, true, true, true, false], t(700.0, 0.0), &mut |_| true).map(|o| o.0), Some(cmd::STRIKE_RAID), "beyond 600: Strike Raid");
+    // The owner's order ("Ragnarok last"): Ars Arcanum, Sonic Blade and Strike Raid before Ragnarok.
+    assert_eq!(ORDER, [4, 1, 0, 2, 3]);
+    assert_eq!(KH1_ORDER, [4, 3, 1, 0, 2]);
+    let no_tri = [true, true, true, true, false];
+    assert_eq!(offer(&no_tri, t(100.0, 0.0), &mut |_| true).map(|o| o.0), Some(cmd::ARS_ARCANUM), "Ars Arcanum before Ragnarok");
+    assert_eq!(offer(&no_tri, t(400.0, 0.0), &mut |_| true).map(|o| o.0), Some(cmd::SONIC_BLADE), "Ars Arcanum out of range (300): Sonic Blade");
+    assert_eq!(offer(&[false, true, true, true, false], t(400.0, 0.0), &mut |_| true).map(|o| o.0), Some(cmd::STRIKE_RAID), "Strike Raid before Ragnarok");
+    assert_eq!(offer(&[false, true, false, true, false], t(400.0, 0.0), &mut |_| true).map(|o| o.0), Some(cmd::RAGNAROK), "none of the others offered: Ragnarok");
+    assert_eq!(offer(&[false, false, true, true, false], t(400.0, 0.0), &mut |c| c < 300).map(|o| o.0), Some(cmd::STRIKE_RAID), "both greyed: Strike Raid, Ragnarok last among equals");
+    assert_eq!(offer(&no_tri, t(700.0, 0.0), &mut |_| true).map(|o| o.0), Some(cmd::STRIKE_RAID), "beyond 600: Strike Raid");
     // Sonic Blade's own height rule stays KH1's.
     assert_eq!(score(SONIC_BLADE, &OfferTarget { gap: 100.0, above: 200.0 }, &mut |_| true), 0);
     assert_eq!(offer(&[true, false, true, false, false], t(100.0, 0.0), &mut |c| c < 200).map(|o| o.0), Some(cmd::SONIC_BLADE), "both greyed: the first in KH1's order");

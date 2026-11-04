@@ -158,9 +158,15 @@ pub const ENGLISH_WORDS: &[(u16, &str)] = &[(338, "Strike"), (339, "Raid"), (340
 /// KH1's specials by index (`0x140528340`: (ability id, command) pairs): 0 Sonic Blade, 1 Ars
 /// Arcanum, 2 Strike Raid, 3 Ragnarok, 4 Trinity. Checked (exe).
 pub const TABLE: [(u8, u8); 5] = [(11, cmd::SONIC_BLADE), (12, cmd::ARS_ARCANUM), (13, cmd::STRIKE_RAID), (14, cmd::RAGNAROK), (15, cmd::TRINITY)];
-/// The offer's walk (`0x14052834C`): Trinity, Ragnarok, Ars Arcanum, Sonic Blade, Strike Raid.
+/// KH1's offer walk (`0x14052834C`): Trinity, Ragnarok, Ars Arcanum, Sonic Blade, Strike Raid.
 /// Checked (exe).
-pub const ORDER: [usize; 5] = [4, 3, 1, 0, 2];
+pub const KH1_ORDER: [usize; 5] = [4, 3, 1, 0, 2];
+/// The walk used: KH1's with **Ragnarok last** (owner, 2026-11-03, on 0.101.4, answering the prompt-order
+/// question: "Ragnarok last": the prompt checks Ars Arcanum, Sonic Blade and Strike Raid first, and
+/// Ragnarok only when none of them scores higher). Not KH1's (KH1's height rule kept Ragnarok out of the
+/// others' way). Consequence: with Strike Raid equipped and paid for, Strike Raid (900)
+/// takes every prompt Ragnarok (600) could.
+pub const ORDER: [usize; 5] = [4, 1, 0, 2, 3];
 /// MP costs (btltbl `+0x14C + 2 × index`, read by `0x14028D0F0` and paid by `0x14028D800`):
 /// 200 / 300 / 200 / 300 / 300 = 2 / 3 / 2 / 3 / 3 MP (`crate::mp`: ≥ 100 = whole points).
 /// Checked (files).

@@ -11,6 +11,12 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 207: KH1 specials: the prompt checks Ragnarok last, version 0.101.6 (2026-11-01)
+
+Owner, 2026-11-03, on 0.101.4, answering which special the Triangle prompt picks: "Ragnarok last". `specials::ORDER` is now Trinity, Ars Arcanum, Sonic Blade, Strike Raid, Ragnarok (indices [4, 1, 0, 2, 3]). KH1's walk (`0x14052834C`, [4, 3, 1, 0, 2]) is kept as `KH1_ORDER` for reference. The best score still wins, and the first among equals. Result: the prompt shows Ragnarok only when none of Ars Arcanum, Sonic Blade or Strike Raid is equipped and in range (Strike Raid's 900 covers Ragnarok's 600, and it costs 2 MP against 3). The Sleights list is unchanged. No new addresses. Checked (code + tests: `the_offer_is_kh1s`); Checked (exe) KH1's own order. Not KH1's: the owner's choice.
+
+---
+
 ## Stage 206: Sonic Blade in the Sleights list, version 0.101.5 (2026-11-01)
 
 - Ask (owner, 2026-11-03): Sonic Blade "Add it" to the Sleights list.
