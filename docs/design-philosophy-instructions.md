@@ -615,6 +615,7 @@ At KH1 setting:
   - **Shortcuts**: Party sleights can be put in the shortcut slots.
 - **M13 and camp text answers** (owner, 2026-11-04):
   - Stun Impact's effect 0 and Zantetsuken's effect 5 (placed at the struck enemy in KH1): **one small start call of ours at the target** when the move starts; Re:CoM plays and ends it (owner: "Start at the target").
+    - **Correction (2026-11-04, Checked: KH1 decomp + files):** the question's premise was wrong. KH1 links both effects to **Sora** (`0x1402AE160(Sora, id | 0x800)`, code 0x8003 resolved on Sora's own body record: 0.85 m up, following him), not to the enemy. So 1:1 is a plain EET list-A event on Sora (0.85 m up), with no run-time code of ours; built that way, and the owner was told.
   - The six KH2 Keyblades swing with **Re:CoM's trail** at KH1 Effects.
   - The Effects / Sounds (later Voices) toggles go on a **new Settings page** (e.g. "Effects & Sound").
   - Camp-page long names (Customize, Abilities, Re:CoM's text): **(a) true squeeze**, an x-scale taught to Re:CoM's text drawing.
