@@ -382,6 +382,10 @@ pub unsafe fn gauge_made(gauge: usize, list: i32) {
         s.gauges.retain(|g| g.0 != gauge);
         s.gauges.push((gauge, list));
     }
+    // A fresh init is Re:CoM's layout (a gauge at a reused address is not still "placed").
+    if let Ok(mut p) = PLACED.lock() {
+        p.retain(|e| e.0 != gauge);
+    }
     place_recom_hp(gauge, list);
     build(gauge, list);
     UP.store(active(), Ordering::Relaxed);
@@ -968,7 +972,41 @@ unsafe fn build_ring(gauge: usize, list: i32) {
 /// Layer 0 (the disc) and 4 (the face) stay Re:CoM's, upright. From then on Re:CoM's own code sets
 /// the frames (HP setters, the drain in its update), swaps the disc and face (hurt, low HP), hides
 /// and shows the layers, and draws them; nothing of ours runs for it.
+/// Gauges [`place_recom_hp`] turned, with Re:CoM's layout position to give back.
+static PLACED: Mutex<Vec<(usize, f32, f32)>> = Mutex::new(Vec::new());
+/// A control's layout position (`0x140248660`: x − 256 at `+0xF0`, y − 192 at `+0xF4`). Checked (decomp).
+const C_LAYOUT_X: usize = 0xF0;
+
+/// Owner, 2026-11-04 ("when switching combat from recom to KH1, everything changes except the HP bar, and vice
+/// versa"): a turned gauge back to Re:CoM's: layers 1..3 Re:CoM's own groups 7, 8, 9 again through the same
+/// replace, their frames as now (max HP; HP for the drain and HP layers), and Re:CoM's layout position.
+unsafe fn unplace_recom_hp(gauge: usize, list: i32) {
+    let Some(at) = PLACED.lock().ok().and_then(|p| p.iter().position(|e| e.0 == gauge)) else { return };
+    let (_, x, y) = PLACED.lock().map(|mut p| p.remove(at)).unwrap_or((gauge, 60.0, 60.0));
+    let hp: usize = rd(gauge + G_HP_CTRL);
+    if hp == 0 || rd::<usize>(hp) != base() + SEQ_CTRL_VTABLE as usize {
+        return;
+    }
+    let gx = rd::<f32>(gauge + G_XOFF);
+    let fmax = recom_hp::frame(rd::<u16>(gauge + G_MAX_HP) as u32);
+    let fh = recom_hp::frame(rd::<u16>(gauge + G_HP) as u32);
+    for (k, &g) in recom_hp::TURNED.iter().enumerate() {
+        let layer = recom_hp::FIRST_LAYER + k as u32;
+        if !super::d2::replace(hp, list, layer, recom_hp::SET.as_ptr(), g, -gx, 1) {
+            note(|| format!("Re:CoM's HP gauge {gauge:#x}: group {g} not made back; left as it is"));
+            return;
+        }
+        func::<FrameFn>(FRAME)(hp, layer, if k == 0 { fmax } else { fh });
+    }
+    func::<VecFn>(LAYOUT_POS)(hp, V4([x, y, 0.0, 1.0]).0.as_ptr());
+    note(|| format!("Re:CoM's HP gauge {gauge:#x} back at Re:CoM's place ({x}, {y}), upright"));
+}
+
 unsafe fn place_recom_hp(gauge: usize, list: i32) {
+    place_recom_hp_at(gauge, list, false)
+}
+
+unsafe fn place_recom_hp_at(gauge: usize, list: i32, live: bool) {
     if !place_wanted() {
         return;
     }
@@ -985,6 +1023,12 @@ unsafe fn place_recom_hp(gauge: usize, list: i32) {
     if hp == 0 || rd::<usize>(hp) != base() + SEQ_CTRL_VTABLE as usize || (rd::<u8>(hp + C_LAYERS) as u32) < recom_hp::FIRST_LAYER + recom_hp::TURNED.len() as u32 {
         return;
     }
+    if PLACED.lock().is_ok_and(|p| p.iter().any(|e| e.0 == gauge)) {
+        return;
+    }
+    // Re:CoM's layout position (`0x140248660` keeps it at `+0xF0 / +0xF4` as x − 256, y − 192), for
+    // [`unplace_recom_hp`].
+    let back = (rd::<f32>(hp + C_LAYOUT_X) + 256.0, rd::<f32>(hp + C_LAYOUT_X + 4) + 192.0);
     let gx = rd::<f32>(gauge + G_XOFF);
     let f = recom_hp::frame(rd::<u16>(gauge + G_MAX_HP) as u32);
     for k in 0..recom_hp::TURNED.len() as u32 {
@@ -1000,8 +1044,19 @@ unsafe fn place_recom_hp(gauge: usize, list: i32) {
         }
         func::<FrameFn>(FRAME)(hp, layer, f);
     }
+    // At a live switch (Combat or the camp, [`refresh`]) the HP and drain layers show the HP now,
+    // as Re:CoM's setters left them; at the init they are all the max (what Re:CoM's init just set).
+    if live {
+        let fh = recom_hp::frame(rd::<u16>(gauge + G_HP) as u32);
+        for layer in recom_hp::FIRST_LAYER + 1..recom_hp::FIRST_LAYER + recom_hp::TURNED.len() as u32 {
+            func::<FrameFn>(FRAME)(hp, layer, fh);
+        }
+    }
     let (x, y) = recom_hp::origin(gx);
     func::<VecFn>(LAYOUT_POS)(hp, V4([x, y, 0.0, 1.0]).0.as_ptr());
+    if let Ok(mut p) = PLACED.lock() {
+        p.push((gauge, back.0, back.1));
+    }
     note(|| format!("Re:CoM's HP gauge {gauge:#x} at KH1's place, turned 180° (gauge:01 groups {first}..{} on layers 1..3, frame {f}), origin ({x}, {y}), Re:CoM's x offset {gx}", want - 1));
 }
 
@@ -1483,6 +1538,9 @@ pub unsafe fn destroy(gauge: usize) {
     if let Ok(mut t) = TINTED.lock() {
         t.retain(|e| e.0 != gauge);
     }
+    if let Ok(mut p) = PLACED.lock() {
+        p.retain(|e| e.0 != gauge);
+    }
     let Ok(mut s) = STATE.lock() else { return };
     s.gauges.retain(|g| g.0 != gauge);
     for mut c in s.clusters.extract_if(.., |c| c.gauge == gauge) {
@@ -1498,9 +1556,18 @@ pub fn refresh() {
     UP.store(active(), Ordering::Relaxed);
     let bits = hidden_bits();
     MINIMAP_UP.store(bits & 8 != 0, Ordering::Relaxed);
-    for (g, _) in STATE.lock().map(|s| s.gauges.clone()).unwrap_or_default() {
+    let place = place_wanted();
+    for (g, list) in STATE.lock().map(|s| s.gauges.clone()).unwrap_or_default() {
         // SAFETY: a live gauge.
-        unsafe { recom_hud(g, bits) };
+        unsafe {
+            // Re:CoM's HP gauge follows the setting at once (Combat, `hud`, `hud_recom_hp_kh1_place`).
+            if place {
+                place_recom_hp_at(g, list, true);
+            } else {
+                unplace_recom_hp(g, list);
+            }
+            recom_hud(g, bits)
+        };
     }
     if gauge_on() || ring_on() {
         let missing: Vec<(usize, i32)> = STATE.lock().map(|s| s.gauges.iter().copied().filter(|g| !s.clusters.iter().any(|c| c.gauge == g.0)).collect()).unwrap_or_default();

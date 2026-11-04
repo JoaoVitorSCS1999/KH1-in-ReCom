@@ -1021,3 +1021,23 @@ thickness of the bar very slightly increases".
   gaps was not seen in a KH1 screenshot).
 - Assumption: the charge's 30° gaps fade like the MP cells' (the dividers use the MP cells'
   profile over the charge line too, as KH1's ticks cover it).
+
+## Re:CoM's HP gauge follows a live switch (0.102.5)
+
+Owner, 2026-11-04: "when switching combat from recom to KH1, everything changes except the HP bar, and vice
+versa" (screenshot: Combat = KH1, KH1's MP ring bottom right, Re:CoM's HP gauge still top left).
+
+- **Cause:** the gauge was turned and moved only at its init (`place_recom_hp`, from `gauge_made`). A switch in the
+  camp ran `mp_bar::refresh` → `kh1_hud::refresh`, which rebuilt the ring and hides but not the gauge. Checked (code).
+- **Change** (`win::kh1_hud`):
+  - `refresh` now places or unplaces each live gauge at once.
+  - Placing records Re:CoM's layout position (`0x140248660` keeps it at `+0xF0 / +0xF4` as x − 256, y − 192;
+    Checked (decomp)).
+  - Unplacing (`unplace_recom_hp`) puts Re:CoM's own groups 7, 8, 9 back on layers 1..3 through the same layer
+    replace. Their frames are the max-HP frame on layer 1 and the current HP on layers 2 and 3. Then it restores
+    the recorded position.
+  - A live place sets layers 2 and 3 to the current HP, not the max, as the init does.
+  - A gauge's init or dtor forgets its entry.
+  - Nothing per frame.
+- The room plate still moves at its next set-up (it isn't re-placed live).
+- Not checked: in game.

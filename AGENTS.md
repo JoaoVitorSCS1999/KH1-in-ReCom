@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 213: Re:CoM's HP gauge follows a live Combat / HUD switch, version 0.102.5 (2026-11-03)
+
+Owner, 2026-11-04: "when switching combat from recom to KH1, everything changes except the HP bar, and vice versa" (screenshot: KH1's MP ring bottom right, Re:CoM's HP gauge still top left).
+
+- **Cause** (Checked (code)): the gauge was turned and moved to KH1's place only at its init (`place_recom_hp` from `gauge_made`); the camp's switch ran `kh1_hud::refresh` (ring, hides) but not the gauge.
+- **Change** (`win::kh1_hud`): `refresh` places or unplaces each live gauge; placing records Re:CoM's layout position (`0x140248660`: `+0xF0 / +0xF4` = x − 256, y − 192; Checked (decomp)); `unplace_recom_hp` gives layers 1..3 Re:CoM's own groups 7, 8, 9 back through the same layer replace (frames: max HP on layer 1, the HP now on 2 / 3) and the recorded position; a live place sets layers 2 / 3 to the HP now (the init keeps Re:CoM's max). Init / dtor forget the entry. No new hook or site; nothing per frame.
+- The room plate still moves at its next set-up. Not checked: in game. Docs: `recom-kh1-hud.md` § 0.102.5.
+
+---
+
 ## Stage 212: The MP ring's 90° / 180° dividers drawn as KH1's gaps; its straight part lined up with the arc, version 0.102.4 (2026-11-04)
 
 Owner, 2026-11-04 (KH1 MP ring around Re:CoM's HP ring): "there is a segment line at the top of the MP bar that is too narrow, differently drawn, and extends past the bar"; "once the curve of the MP bar flattens, the thickness of the bar very slightly increases".
