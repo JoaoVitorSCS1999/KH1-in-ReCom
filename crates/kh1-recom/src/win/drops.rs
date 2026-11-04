@@ -148,6 +148,7 @@ unsafe fn drop_items(enemy: usize, point: usize) {
                 note(|| format!("{class} (world {world}; {}): {} dropped at ({:.2}, {:.2}, {:.2}): prize {prize:#x}", dr::describe(table), crate::items::name(item), pos[0], pos[1], pos[2]));
             }
             Dropped::NotAnItemHere(item) => note(|| format!("{class} (world {world}): KH1 item #{item} dropped; not one of the mod's items: no prize")),
+            Dropped::Removed(item) => note(|| format!("{class} (world {world}): KH1's {} dropped; removed at Combat = KH1 (M8c stage 3): no prize", crate::items::name(item))),
         }
     }
 }
@@ -188,7 +189,7 @@ pub unsafe extern "win64" fn prize_add(kind: u32, arg: u32, mode: i32) {
 /// The start line.
 pub fn start_line() -> String {
     format!(
-        "drops: KH1's item drops (M8 stage 8a.4) at combat = kh1 in Sora's story: {} twin classes with KH1 defeat tables; rolled after Re:CoM's defeat prizes (0x140180D20), KH1's chances x Lucky Strike {} (no ability yet); battle items only; Re:CoM prize kind {:#x} (look: kind {:#x}'s rec_prise row, table at {:#x}); pickup through the prize add 0x1401F4AB0 by KH1's rule",
+        "drops: KH1's item drops (M8 stage 8a.4) at combat = kh1 in Sora's story: {} twin classes with KH1 defeat tables; rolled after Re:CoM's defeat prizes (0x140180D20), KH1's chances x Lucky Strike {} (no ability yet); the items in play only (battle items, Tent, Camping Set; Mega items give nothing); Re:CoM prize kind {:#x} (look: kind {:#x}'s rec_prise row, table at {:#x}); pickup through the prize add 0x1401F4AB0 by KH1's rule",
         super::stats::drop_classes(),
         dr::lucky_factor(dr::LUCKY_STRIKES),
         dr::KH1_ITEM_KIND,

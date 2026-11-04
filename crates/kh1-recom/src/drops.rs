@@ -62,11 +62,13 @@ pub fn roll(table: &[Drop], lucky: f32, mut rand: impl FnMut() -> f32) -> Vec<u8
     out
 }
 
-/// Whether a dropped KH1 item becomes a prize here: KH1's battle items only (the items the mod
-/// has: `crate::items`). KH1's other drops (synthesis materials, accessories, Tents, …) have no
-/// place yet: not spawned.
+/// Whether a dropped KH1 item becomes a prize here: the items in play (`crate::items::id::IN_PLAY`:
+/// the battle items and, M8c stage 2, the Tent and the Camping Set, which KH1's Barrel Spider
+/// drops at 1 % / 0.5 %). M8c stage 3: a Mega item (removed at Combat = KH1) gives nothing, not
+/// its plain item ([`Dropped::Removed`]). KH1's other drops (synthesis materials, accessories, …)
+/// have no place yet: not spawned.
 pub fn spawnable(item: u8) -> bool {
-    crate::items::is_battle_item(item)
+    crate::items::id::IN_PLAY.contains(&item)
 }
 
 /// Re:CoM's prize descriptor (`0x1401A89C0`'s second argument, read by the prize init
@@ -164,11 +166,20 @@ pub enum Dropped {
     Spawned(u8),
     /// It dropped in KH1 but the mod has no such item: not made.
     NotAnItemHere(u8),
+    /// A Mega item (M8c stage 3: removed at Combat = KH1): not made, nothing instead.
+    Removed(u8),
 }
 
 /// The roll's outcome for an enemy: each dropped item, spawnable or not.
 pub fn outcome(table: &[Drop], lucky: f32, rand: impl FnMut() -> f32) -> Vec<Dropped> {
-    roll(table, lucky, rand).into_iter().map(|i| if spawnable(i) { Dropped::Spawned(i) } else { Dropped::NotAnItemHere(i) }).collect()
+    roll(table, lucky, rand)
+        .into_iter()
+        .map(|i| match i {
+            _ if spawnable(i) => Dropped::Spawned(i),
+            _ if crate::items::removed(i) => Dropped::Removed(i),
+            _ => Dropped::NotAnItemHere(i),
+        })
+        .collect()
 }
 
 /// A table for the log: `potion 1%, #233 3%`.
@@ -231,15 +242,22 @@ mod tests {
     }
 
     #[test]
-    fn only_battle_items_become_prizes() {
+    fn only_the_items_in_play_become_prizes() {
         let o = outcome(&AIR_SOLDIER, 1.0, seq(&[0.0, 0.0, 0.0]));
         assert_eq!(o, vec![Dropped::Spawned(1), Dropped::Spawned(2), Dropped::NotAnItemHere(237)]);
-        for i in [1, 2, 3, 4, 6, 7, 8] {
-            assert!(spawnable(i));
+        for i in [1, 2, 3, 4, 142, 143] {
+            assert!(spawnable(i), "{i}");
         }
-        for i in [0, 5, 16, 17, 142, 233] {
+        for i in [0, 5, 6, 7, 8, 16, 17, 144, 233] {
             assert!(!spawnable(i), "{i}");
         }
+        // The Barrel Spider (Checked (files): #142 1 %, #143 0.5 %, #253 1 %): its Tents drop now.
+        let spider = [Drop { chance: 0.01, item: 142 }, Drop { chance: 0.005, item: 143 }, Drop { chance: 0.01, item: 253 }];
+        assert_eq!(outcome(&spider, 1.0, seq(&[0.0])), vec![Dropped::Spawned(142), Dropped::Spawned(143), Dropped::NotAnItemHere(253)]);
+        // The Search Ghost's Mega-Potion (1 %) gives nothing, not a Hi-Potion.
+        let ghost = [Drop { chance: 0.02, item: 2 }, Drop { chance: 0.01, item: 6 }, Drop { chance: 0.04, item: 249 }];
+        assert_eq!(outcome(&ghost, 1.0, seq(&[0.0])), vec![Dropped::Spawned(2), Dropped::Removed(6), Dropped::NotAnItemHere(249)]);
+        assert_eq!(describe(&spider), "tent 1%, camping set 0.5%, #253 1%");
         assert_eq!(describe(&AIR_SOLDIER), "potion 2%, hi-potion 1%, #237 4%");
         assert_eq!(describe(&[Drop { chance: 0.0, item: 0 }]), "none");
     }

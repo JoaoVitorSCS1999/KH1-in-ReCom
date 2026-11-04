@@ -49,8 +49,9 @@ pub const LANGUAGES: &[(&str, &str)] = &[("us", "US_"), ("uk", "UK_"), ("fr", "F
 /// 286..291 the summons (commands 0x2F..0x34: Dumbo, Bambi, Genie, Tinker Bell, Mushu, Simba); M12
 /// step 7: 338 Strike Raid (0x5E, "Strike"), 339 / 340 its follow-ups (0x5F "Raid", 0x60 "Judgment");
 /// 331 Ars Arcanum (0x57, "Arcanum"), 332 / 333 its follow-ups (0x58 "Bash", 0x59 "Finis"); 334
-/// Ragnarok (0x5A), 335 its follow-up (0x5B "Impact").
-pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 286, 287, 288, 289, 290, 291, 293, 294, 305, 313, 319, 321, 322, 331, 332, 333, 334, 335, 338, 339, 340, 343];
+/// Ragnarok (0x5A), 335 its follow-up (0x5B "Impact"); M8c stage 2: 172 Tent, 173 Camping Set
+/// (item rows 142 / 143 `+0`: names only, for the camp Items page and the shop; no command).
+pub const NAMES: &[u16] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 31, 32, 33, 34, 36, 37, 38, 172, 173, 286, 287, 288, 289, 290, 291, 293, 294, 305, 313, 319, 321, 322, 331, 332, 333, 334, 335, 338, 339, 340, 343];
 
 /// M8b: Cloud's word (the DLL's `crate::summons::CLOUD_NAME`, the same value). KH1's `Word.bin` has
 /// no "Cloud" (Checked (files)) and Re:CoM's card-name text is not in our word system: "Cloud" in

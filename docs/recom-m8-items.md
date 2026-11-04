@@ -1067,7 +1067,8 @@ Owner (2026-11-04, `design-philosophy-instructions.md` § KH1 Moogle shop): at C
 Moogle shop becomes a list like KH1's (Re:CoM assets allowed): rows **Buy**, **Sell** and **Card
 Packs** ("A 'Card Packs' row": Re:CoM's pack screen as before); the 8a.3 Items tab goes. Stage 1
 (0.103.0): the list, stock by floor, buy and sell. Tent / Camping Set, their camp use and the
-drops of Re:CoM-only enemies are later stages.
+drops of Re:CoM-only enemies are later stages (Tent / Camping Set and the Mega items' removal:
+[stages 2–3](#m8c-stages-23-tent-and-camping-set-the-mega-items-removed), 0.105.0).
 
 Code: `crates/kh1-recom/src/shop.rs` (stock, prices, the sell list, buy / sell rules, the list's
 cursor and texts; tested), `src/win/shop.rs` (Re:CoM's side), sites `sites::SHOP_HOOKS`,
@@ -1187,9 +1188,9 @@ window's text (the pack screen's help line `0x1404573A0` does it). Lines split a
 | Ether | 1F | 40 | 8 | ″ |
 | Hi-Potion | 2F | 30 | 6 | ″ |
 | Elixir | 7F | 200 | 40 | ″ (KH1 never sells it: buy 0) |
-| Tent | 1F | 100 | (20) | in the table, not built: never listed |
-| Camping Set | 2F | 150 | (30) | ″ |
-| Mega-Potion / Mega-Ether / Megalixir | never | – | 40 / 60 / 100 | KH1 has no buy price (0), so **KH1's own sell price** (`btltbl.bin` `+0xA`, Checked (files)) |
+| Tent | 1F | 100 | 20 | owner's price; built in 0.105.0 ([M8c stages 2–3](#m8c-stages-23-tent-and-camping-set-the-mega-items-removed)) |
+| Camping Set | 2F | 150 | 30 | ″ |
+| Mega-Potion / Mega-Ether / Megalixir | never | – | 40 / 60 / 100 | KH1 has no buy price (0), so **KH1's own sell price** (`btltbl.bin` `+0xA`, Checked (files)). Since 0.105.0 a save's are converted (stage 3), so they never show |
 
 Rows read "Potion / 10" (Buy) and "Potion x3 / 2" (Sell); names are KH1's words when plain ASCII,
 else English. The help line: "Restores HP. 10 Moogle Points. Sora has 2." / "Restores HP. Sells for
@@ -1275,3 +1276,163 @@ Combat = KH1, Sora's story, a Moogle room (`kh1_test_items = on` puts items in s
 7. First visit to a Moogle: Re:CoM's free pack first, then the list.
 8. Combat = Re:CoM or Riku's story: Re:CoM's shop (packs / card trade), unchanged.
 9. Report where the rows and the finger sit, and whether the Moogle's line fits.
+
+## M8c stages 2–3: Tent and Camping Set; the Mega items removed
+
+Owner (2026-11-04, `design-philosophy-instructions.md` § KH1 Moogle shop): "The very early game
+shops should only sell potions, ethers, and tents. Tents and camping sets should have their
+descriptions changed to say sora instead of "to the party" and should have their cost reduced";
+"Lets remove mega potions, mega ethers, and mega elixirs"; answers to the plan: Tent = full HP,
+Camping Set = full HP and MP, used from the KH1 camp Items page outside battle ("Camp-only full
+heal"). Version 0.105.0. Combat = KH1, Sora's story only (the store is read only then); Combat =
+Re:CoM and Riku's story unchanged.
+
+Code: `crates/kh1-recom/src/items.rs` (`id::TENT` / `CAMPING_SET` / `CAMP` / `HELD` / `REMOVED` /
+`IN_PLAY`, the two `DATA` rows, `effect`, `camp_only`, `stock_index`, `convert_removed`, the test
+inventory), `items_page.rs` (stock list, `can_use`, English names), `shop.rs` (the wares built,
+the Sell list order, the help lines), `drops.rs` (`spawnable`, `Dropped::Removed`),
+`win/items.rs` (the conversion at the store's read, the log lines), `win/drops.rs` (the log line).
+Asset step: `kh1-recom-assets` `command_menu::NAMES` + 172, 173.
+
+### KH1 (Steam)
+
+| what | where | tag |
+|---|---|---|
+| **Rows 142 / 143** (`btltbl.bin` `0x255C` / `0x2570`): `+0` name message 172 / 173, `+2` kind **12**, `+4` party 1, `+6` 255 / 3, `+8` buy 250 / 500, `+0xA` sell 50 / 100, `+0x10` sort 101 / 102. Row 144 (message 174, kind 12, 255, sell 150) is a third Tent-like item, never sold (buy 0; a Cottage: Assumption from its numbers). | `0x14028F970` | Checked (files) |
+| **Kind 12** is a menu item: the pause menu's can-use `0x1402CD3A0` accepts kinds 0 and 12 only; the slots and the battle menu hold kind 0 only (`0x140284E60`, `0x1402E8F50`), so the pickup puts a Tent in the stock; Move (`0x1402E8A00`) is kind 0 only; Discard (`0x1402E8AA0`) any kind but 13. | `0x1402CD3A0`, `0x140284E60` | Checked (decomp) |
+| **Effect** `0x1402CD780`: case 0x8E (Tent) HP + 9999 (full); case **0x8F (Camping Set) HP + 9999 and MP + the row's `+6` = 3 points** (not full MP); case 0x90 (row 144) both + 9999. On the whole party (the row's party bit). | `0x1402CD780` | Checked (decomp + files) |
+| **Can-use** (`0x1402CD3A0` bit 0): 0x8E while HP is below max; 0x8F (and 0x90) while HP or MP is below max. | `0x1402CD3A0` | Checked (decomp) |
+| **Drops**: the Barrel Spider's defeat table drops #142 at 1 % and #143 at 0.5 % (8a.4's table); no other twin drops them. | 8a.4 | Checked (files) |
+| **Mega items in drops**: the Search Ghost, Pirate, Air Pirate (Mega-Potion 1 %), Wight Knight (0.5 %), Screwdiver (4 %), Gargoyle (Mega-Ether 0.5 %). | 8a.4 | Checked (files) |
+
+KH1's help texts (the item descriptions) are not in the session or the asset step: the lines below
+are ours.
+
+### What runs (Combat = KH1, Sora's story)
+
+**Stage 2, the Tents.**
+
+- **Items**: our ids are KH1's (142, 143), KH1's rows as `DATA` (kind 12). Not battle items: no
+  slot, no command (`item_of_command` takes battle items only: command 0xAC / 0xAD is never an
+  item), not in the command menu's Items list, never in the battle use task. `items::camp_only`.
+- **Storage**: the stock only (KH1's rule for kind 12), up to 99. The stock bytes (16, unchanged
+  save layout): bytes 0..7 items 1..8 as before, **byte 8 the Tent, byte 9 the Camping Set**
+  (`stock_index`), 10..15 spare. Before 0.105.0 bytes 8..15 meant items 9..16, which nothing could
+  store (the pickup was only given built items: shop wares, battle-item drops, a returned use;
+  Checked (code)): every save has them at 0.
+- **Camp Items page** (8a.2's page): they show in the Stock list after the battle items (KH1's sort
+  keys 101 / 102), with Use, Move greyed (KH1), Equip / Remove greyed (stock), Discard. Use while
+  Sora's HP is below max (Tent) or his HP or MP (Camping Set), as KH1's `0x1402CD3A0`; at full the
+  Use row is greyed and its confirm is sound 5, nothing used (the page's rule for every item; that
+  KH1 refuses at this window rather than at its target list: Assumption). A use: Re:CoM's camp
+  sound 2, the item leaves the stock, the heal through `win::items::use_in_menu`: HP through
+  Re:CoM's heal `0x1401E59A0(player, max, 0, 0, 0)` and its stats sync `0x1401F0120` (the Potion /
+  Elixir path), MP through our MP block (`mp::add_points(MP_FULL)`, as the Elixir). The camp opens
+  only in the field (Re:CoM's own rule), so they are never used in battle.
+- **Effect**: Tent HP to full (KH1's); Camping Set HP and MP to full (**the owner's design**;
+  KH1's own adds 3 MP points: `items::CAMPING_SET_FULL_MP`, owner question 1).
+- **Shop**: `Ware::Tent` / `CampingSet` built: Buy on 1F Potion, Ether, Tent; 2F–6F + Hi-Potion,
+  Camping Set; 7F+ + Elixir (`Tent / 100`, `Camping Set / 150`). A buy goes to the stock (KH1's
+  pickup); refused at 99 ("Sora can't carry any more of this."). Sell: `Tent xN / 20`,
+  `Camping Set xN / 30` (the owner's buy ÷ 5; KH1's own ratio 250 / 50, 500 / 100 too), after the
+  battle items.
+- **Help lines** (the shop's Moogle line, ours): Tent "Fully restores Sora's HP.", Camping Set
+  "Fully restores Sora's HP and MP." (each within `menu::HELP_MAX`), e.g. "Fully restores Sora's HP.
+  100 Moogle Points. Sora has 2." The camp page shows no item descriptions (none of its items has
+  one: unchanged).
+- **Names**: the other items' source: KH1's words (`kh1-command-menu.json`, the asset step's
+  `NAMES` now with 172 / 173), else English "Tent" / "Camping Set" (`items_page::text::english`)
+  until the asset step is re-run. That message 172 / 173 is "Tent" / "Camping Set" in `Word.bin`:
+  Assumption (rows 1..8's `+0` are their `Word.bin` ids, Checked (files); `Word.bin` not in the
+  session).
+- **Drops**: `drops::spawnable` = the items in play (`id::IN_PLAY`): the Barrel Spider's KH1 Tent
+  (1 %) and Camping Set (0.5 %) now drop (KH1's table), picked up into the stock.
+- **Test inventory** (`kh1_test_items`): 9 of each item in play in stock, the Tents included.
+
+**Stage 3, the Mega items.**
+
+- **Drops**: a roll that gives a Mega item gives **nothing** (`Dropped::Removed`, logged "removed
+  at Combat = KH1 (M8c stage 3): no prize"), not its plain item: nothing is closest to "removed",
+  and the plain item would raise those enemies' plain-item rates above KH1's.
+- **A save's Mega items: converted once** (`items::convert_removed`): Mega-Potion → Hi-Potion,
+  Mega-Ether → Ether, Megalixir → Elixir, in their slot (a battle item stays a battle item) or in
+  the stock (added to the plain item's, up to 99; any past 99 is lost and logged). Run at the
+  store's first read at Combat = KH1 of a block at version 1; the block becomes **version 2**
+  (`ext::VERSION`; every write is now v2, a never-written v0 block stays v0 = KH1's new game). One
+  log line: `items: save block v1 -> v2: Mega items removed at Combat = KH1 (…): n slot(s), n from
+  the stock, n past 99 lost`. Older DLLs read a v2 block as before (they test only for 0).
+  - Chosen over hiding them (sellable, not on the Items page or the command menu): a hidden Mega
+    item in a slot would hold that slot while the page and the command menu showed it empty (the
+    pickup skips a filled slot), and the page, the command menu, the Move / Equip lists and the
+    shop would each need their own filter. The conversion is one pure rule at one place, and none
+    of them ever meets a Mega item. Cost: it changes the save (the conversion can't be undone),
+    and a Megalixir is worth an Elixir (sell 40, not 100).
+- **Shop**: never sold (as before); their KH1 sell prices stay in `shop::sell_price` (unreachable
+  after the conversion).
+- **Test inventory**: never hands them out (`id::IN_PLAY`); `TEST_SLOTS` Potion, Hi-Potion, Ether.
+
+### Sites, hooks, per frame
+
+No new hook, site or patch. Per frame: nothing new (the conversion is one byte compare inside the
+store's read, which runs only when something reads the items).
+
+### Logs
+
+`items: save block v1 -> v2: …` (once per save), `drops: … KH1's mega-potion dropped; removed at
+Combat = KH1 (M8c stage 3): no prize`, `items: tent picked up (enemy drop): stock (1)`, `items
+page: Used { item: 142, … }: HP 300 -> 560 (+560, max 560)`, the shop's `bought tent for 100: …`.
+
+### 1:1 checks
+
+- **Checked (decomp + files)**, by tests (`items::tests::the_tents_*`,
+  `a_saves_mega_items_are_converted_once`, `items_page::tests::the_tents_are_used_*`,
+  `shop::tests::the_tents_*`, `drops::tests::only_the_items_in_play_*`): KH1's rows 142 / 143,
+  kind 12's rules (stock only, no Move, Discard), the can-use rule, the Tent's full HP, the
+  Barrel Spider's rates, the sort order.
+- **Not KH1's (the owner's)**: the prices; Sora only (KH1 heals the party); the Camping Set's full
+  MP (KH1: + 3 points); the Mega items gone; English help lines.
+- **Not checked**: in game; KH1's own help texts and its `Word.bin` 172 / 173; where exactly
+  KH1's pause menu refuses a Tent at full HP (the Use command or its target list).
+
+### Assumptions
+
+1. `Word.bin` 172 / 173 are "Tent" / "Camping Set" (the rows' name pattern).
+2. The camp never opens in battle (Re:CoM's own rule), so "outside battle" needs no test of ours.
+3. The longest Sell help line ("Fully restores Sora's HP and MP. Sells for 30 Moogle Points. Sora
+   has 99.", 73 characters) fits the Moogle's text window (the stage-1 lines were up to 64; the
+   window's width is not read).
+
+### Open questions (owner)
+
+1. **The Camping Set's MP**: built as the design says, MP to full. KH1's own Camping Set adds 3 MP
+   points (case 0x8F, its row's amount). (a) keep full; (b) KH1's 3 points (one constant,
+   `items::CAMPING_SET_FULL_MP`; the help line would then read "Fully restores Sora's HP and
+   restores 3 MP.").
+2. **The Barrel Spider's Tent drops** (KH1's 1 % / 0.5 %): built (they follow "drop items how they
+   do in KH1" now that the Tents exist). (a) keep; (b) shop only.
+3. **Item descriptions on the camp Items page** (KH1's item screen shows the highlighted item's):
+   none of the page's items has one now. (a) leave; (b) the shop's lines on the Stock list.
+
+### What the owner should test
+
+Combat = KH1, Sora's story.
+
+1. A save with Mega items (an older `kh1_test_items` save has 9 of each): load it, open the camp
+   Items page: no Mega items; the Hi-Potion / Ether / Elixir counts rose by the Mega counts (to 99
+   at most); a Mega item in a slot is its plain item. Log: `items: save block v1 -> v2: …` once;
+   save, reload: no second line.
+2. Moogle shop on 1F: Buy lists Potion / 10, Ether / 40, **Tent / 100**; on 2F–6F also Hi-Potion /
+   30 and **Camping Set / 150**; 7F+ also Elixir. The Moogle's line on the Tent: "Fully restores
+   Sora's HP. 100 Moogle Points. Sora has N." Buy a few: they go to the stock (the slots stay as
+   they were). Sell: `Tent xN / 20`, `Camping Set xN / 30`, after the battle items; no Mega rows.
+3. Camp Items page → Stock: Tent and Camping Set after the battle items. With full HP the Tent's
+   Use is greyed and confirming it buzzes (sound 5); Move and Equip greyed. Take damage, open the
+   camp, Use a Tent: the confirm sound, HP to full on the status panel and after closing the camp,
+   one Tent less. Camping Set with full HP but MP spent: usable, MP to full. Discard works.
+4. The command menu's Items list never shows a Tent; nothing in battle uses one.
+5. Barrel Spiders (KH1's 1 % / 0.5 %) may drop a Tent or a Camping Set (rare; a log line
+   per drop). Enemies whose KH1 table has a Mega item (Search Ghost, Pirate, Air Pirate, Wight
+   Knight, Screwdiver, Gargoyle) never drop one: the log says "removed … no prize".
+6. With the asset step re-run, the names come from KH1's words (same text in English; the other
+   languages KH1's).
+7. Combat = Re:CoM, or Riku's story: nothing of this; Re:CoM's shop and item cards as before.
