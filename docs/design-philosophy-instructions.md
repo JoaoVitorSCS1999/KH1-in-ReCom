@@ -537,3 +537,9 @@ At KH1 setting:
 - **Sleight shortcuts** (owner, 2026-11-03, on 0.100.6): a sleight shortcut opens the L1 list even before any spell is learned (as built).
 - **KH1 specials follow-ups** (owner, 2026-11-03, on M12 step 7): Ragnarok's shots ship with the wrapper on Re:CoM's homing step (as Fire's re-target); **Ragnarok offered against any target** at KH1 (not KH1's 1.6 m-above rule; built 0.101.4); **Sonic Blade also in the Sleights list** (built 0.101.5).
 - **Prompt order** (owner, 2026-11-03, on 0.101.4, asked which special the Triangle prompt picks now that Ragnarok shows against any target): **Ragnarok last**: the prompt checks Ars Arcanum, Sonic Blade and Strike Raid first (built 0.101.6). KH1's own order stays in the code for reference.
+
+- **M13 effects, sounds and voices** (owner, 2026-11-03: "Let's work on m13"; answers to the plan in `recom-m13-plan.md`):
+  - **Three toggles** in KH1 > Combat: **Effects**, **Sounds** and **Voices**, each KH1 / Re:CoM, beside the spell-effects toggle (decision 34, 2026-11-01).
+  - **Sora's voice:** "Separate toggle for KH1 voice lines": the Voices toggle picks KH1's battle voice clips or Re:CoM's. Cutscenes keep Re:CoM's.
+  - **KH1 specials** (Sonic Blade, Strike Raid, Ars Arcanum, Ragnarok): switch to KH1's effects and voices under those toggles. This replaces "however it works in base ReCoM" for the specials.
+  - **Found while researching** (no hit-stop at KH1, room dust and splashes, clash EXP): no preference given, so **not added**; to be asked again when their stage comes up.

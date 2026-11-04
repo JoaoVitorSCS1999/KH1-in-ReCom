@@ -305,9 +305,12 @@ the resource table (the DLL's job).
 4. **Facing / culling and list B**: cut-out parts (keychains, crowns, Ultima's crystal) draw with
    transparent edges and from both sides.
 5. Part 1's role (untextured copy) and whether it shows (e.g. as a shadow).
-6. Trail length: CPlayerWeapon `+0x2C0` takes its trail from the model (`0x140235270`,
-   `model+0x158`). Longer Keyblades may keep the Kingdom Key's trail. Not traced. KH1's own trail
-   data is in `.wpn` section 0.
+6. Trail length: **corrected 2026-11-03 (M13 research, `recom-m13-recom-fx.md` § 5)**: CPlayerWeapon
+   `+0x2C0` is not the trail but the blade's wall / ground probe (a spark and a recoil on a steep
+   surface). The trail is the three-node event list of `PL0002.EET` (`ex_5010.dpx` effect 5 on `wep0`,
+   −0.11 to −0.78 along the blade), shared by every converted Keyblade, so all of them get the Kingdom
+   Key's trail. Per-Keyblade trails: one EET per Keyblade group (M13 stage 4). KH1's own trail is each
+   `.wpn`'s section 0 (effect id 5). Checked (decomp + files).
 7. Memory: only the equipped group is loaded (decision 25); each RTM entry is 0.13–0.66 MB.
 
 ## 10. Runtime (DLL): `crates/kh1-recom/src/keyblade_models.rs` (rules, tested) and `src/win/models.rs`
