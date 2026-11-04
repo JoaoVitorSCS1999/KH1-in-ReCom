@@ -491,17 +491,17 @@ fn install_specials(base: usize) {
     }
 }
 
-/// M8 stage 8a.3 (`shop`): the Items tab in Re:CoM's Moogle shop, a wrapper on its pack screen's
-/// update. Needs KH1's items (their store and pickup rule).
+/// M8c (`shop`): KH1's Moogle shop list as Re:CoM's shop mode 3, a wrapper on its init. Needs
+/// KH1's items (their store and pickup rule).
 fn install_shop(base: usize) {
     let site = |name: &str| crate::sites::SHOP_HOOKS.iter().find(|h| h.name == name).expect("site");
-    let hooks = [hook::Hook { site: site("pack screen update (0x1403A6930)"), ours: shop::pack_screen as *const () as usize, original: &shop::ORIG_PACK_SCREEN }];
+    let hooks = [hook::Hook { site: site("shop mode 3 init (0x1403A53F0)"), ours: shop::mode3_init as *const () as usize, original: &shop::ORIG_MODE3_INIT }];
     // SAFETY: the target's bytes are checked again inside, before anything is written.
     if unsafe { hook::install_all(base, &hooks) } {
         shop::mark_installed();
         log(&shop::start_line());
     } else {
-        log("shop: pack screen not hooked; the Moogle shop is Re:CoM's (no Items tab)");
+        log("shop: mode 3 init not hooked; the Moogle shop is Re:CoM's (no KH1 list)");
     }
 }
 

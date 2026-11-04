@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 214: M8c stage 1: KH1's Moogle shop list (Buy / Sell / Card Packs) as Re:CoM's shop mode 3, version 0.103.0 (2026-11-04)
+
+Owner, 2026-11-04: "When Combat is set to KH1. I want the moogle shops to change. When buying from them, they should sell items. no other tabs should appear, it should just be a list like KH1 is"; on the plan: "A 'Card Packs' row" (`design-philosophy-instructions.md` § KH1 Moogle shop). Stage 1: the list, stock by floor, buy and sell.
+
+- **Research** (Checked (decomp + disasm + exe), `recom-m8-items.md` § M8c): `CMoogleShopCore` (ctor `0x1403A4220`, made by event-script command 0x38 in `0x140145C50`) is a `CFSM` (step `0x140242F50`) over 7 mode records at `+0x98 + 0x40·mode` (`+0x10` init, `+0x20` update, `+0x30` end): 0 load, 1 the first visit's free pack, 2 no room for 5 cards (offers the card trade), 3 the two-choice menu (card packs / card trade), 4 the pack screen, 5 the card trade (sell cards for points), 6 leave (the dtor gives the field back). Camp list page outside the camp: not workable (needs a `CCamp`, whose life cycle the field object owns). Mode 3 with a third choice: needs `m_shop.lad` art (not in the session). Built: the shop's own list pattern (mode 2's: a `CTextWnd`'s lines and the shop's finger) as mode 3.
+- **Change** (`crate::shop`, `win::shop`): a wrapper on mode 3's init `0x1403A53F0` (10 bytes); at Combat = KH1 in Sora's story (after Re:CoM's first-visit mode 1) it points the shop object's mode-3 update slot `+0x178` at our update and sets the windows up as Re:CoM's mode-3 init does. Our update keeps Re:CoM's mode-3 states (0 / 1 / 2 / 3 / 4 / 100 / 0x65): the rows in a `CTextWnd` opened by Re:CoM's `0x1402B1420`, the shop's finger `+0x3D0`, the highlighted row's line in the Moogle's text window (`0x1402B0EF0`), Re:CoM's sounds. Card Packs → Re:CoM's mode 4 (mode 2 without room: Re:CoM's rule), unpatched. The 8a.3 Items tab and its pack-screen hook `0x1403A6930` are removed.
+- **Data** (owner): stock by Re:CoM's floor tiers (`0x1402337C0`, `0x1403A5B10`): 1F Potion, Ether (Tent: table placeholder, not built); 2F+ Hi-Potion (Camping Set: placeholder); 7F+ Elixir. Buy 10 / 30 / 40 / 200 Moogle Points; sell = buy ÷ 5 (KH1's ratio, Checked (files)); Mega-Potion / Mega-Ether / Megalixir never sold, sold back at **KH1's own sell price** 40 / 60 / 100 (KH1 has no buy price for them).
+- **Buy**: one per confirm, KH1's pickup rule, refused (sound 5, nothing paid) without room or points; Re:CoM's payment (8a.3: tally, trophy, setter `0x14023A1D0`, point window). **Sell**: one per confirm (stock first, then the last slot holding it: our rule), sound 6 (the card trade's), points through the setter; a row at 0 leaves the list.
+- Sites: 1 hook, 29 callees, 7 checked byte sets (37 compared with `recomsteam.exe`: 0 mismatches). Nothing per frame outside the shop's mode 3. Combat = Re:CoM and Riku's story: Re:CoM's init and update.
+- Checked: tests (stock, prices, sell list, buy / sell, the list's moves, texts; the shop sites against the decomp), the Windows type-check (`cargo check --target x86_64-pc-windows-gnu -Zbuild-std`, no warnings). Assumptions: the rows' place and the finger's line-up (to judge in game); the help line's fit; Re:CoM's mode-3 text visible during the window's opening frames. Not checked: in game; KH1's own sell source. Owner questions: Card Packs without room; a Trade Cards row; selling slot items.
+
+---
+
 ## Stage 213: Re:CoM's HP gauge follows a live Combat / HUD switch, version 0.102.5 (2026-11-03)
 
 Owner, 2026-11-04: "when switching combat from recom to KH1, everything changes except the HP bar, and vice versa" (screenshot: KH1's MP ring bottom right, Re:CoM's HP gauge still top left).

@@ -1,168 +1,219 @@
-//! M8 stage 8a.3: the Items tab in Re:CoM's Moogle shop pack screen (`crate::shop`,
-//! `docs/recom-m8-items.md` § Stage 8a.3).
+//! M8c: KH1's Moogle shop as a list, in Re:CoM's own `CMoogleShopCore` (`crate::shop`,
+//! `docs/recom-m8-items.md` § "M8c: KH1 Moogle shop list").
 //!
-//! A wrapper on the pack screen's update (`CMoogleShopCore` mode 4, `0x1403A6930`). Re:CoM runs
-//! the screen; the wrapper only acts in its input state (2) on the tab row's edges (Left on tab 0,
-//! Right on tab 3) and while the Items tab (index 4) is up, and when the screen is left with it up:
+//! Re:CoM's shop is a state machine of 7 modes, each a record (init / update / end) in the shop
+//! object at `+0x98 + 0x40 · mode` that Re:CoM's own `CFSM` step (`0x140242F50`) runs. At Combat =
+//! KH1 in Sora's story mode 3 (Re:CoM's two-choice menu: card packs or the card trade) becomes our
+//! list:
 //!
-//! - **Entering** the Items tab: Re:CoM's packs are released as its own state 0x65 releases them
-//!   (`+0x6C` = 1: each plays its own closing and deletes itself), three new packs are made with
-//!   Re:CoM's own constructor (`0x14045A9E0`, as state 0 makes them: cells 0..2, the item's price,
-//!   not sold out), the pack count `+0x348` becomes 3 (the fourth cell empty: Re:CoM's own move rule
-//!   stops there), each pack's picture layer is hidden and Re:CoM's own card picture (`C2DCard`) of
-//!   the item's card (Potion 0x2A, Hi-Potion 0x2B, Ether 0x2D) is attached to it.
-//! - **On the Items tab**: Re:CoM's input state, run for the tab's cells (`crate::shop::items_step`:
-//!   Re:CoM's reads in Re:CoM's order, its sounds, help lines, cursors and button messages); a buy
-//!   pays through Re:CoM's own payment (state 4's tally and trophy, the Moogle Point setter
-//!   `0x14023A1D0`, the Moogle Point window) and gives the item by KH1's pickup rule.
-//! - **Leaving** for Re:CoM's tab: the cards go, our packs are released, Re:CoM's packs for that
-//!   tab are made again as state 0 makes them, then Re:CoM's own refresh (`0x1403A92F0`) sets their
-//!   pictures, prices and sold-out marks, the tab art and the cursors.
-//! - **Leaving the screen** with the Items tab up (cancel, Square): Re:CoM's states 100 / 0x65 close
-//!   and release our packs as theirs (the cards are deleted first, at state 100); after 0x65 the
-//!   count is Re:CoM's again.
+//! - **The init** (`0x1403A53F0`, wrapped): Re:CoM's own first-visit rule first (with room for 5
+//!   cards and the free pack not yet given, Re:CoM's init sends the shop to mode 1, unchanged);
+//!   then the shop's own mode-3 update slot (`+0x178`, this shop object's data) is pointed at
+//!   [`list_update`] and the windows are set up as Re:CoM's mode-3 init sets them for its first
+//!   choice (frame 2, the Moogle Point window, help bar 2, the Moogle models, text window message
+//!   2, the cursors hidden). Without room for 5 cards the list still opens (items need no card
+//!   room); Re:CoM's init would go to mode 2.
+//! - **The update** ([`list_update`], run by Re:CoM's state machine as mode 3's update): Re:CoM's
+//!   mode-3 states 0 (wait for the windows, open the rows window), 2 (input), 3 / 4 (close, then
+//!   switch to the next mode as Re:CoM does: `+0x258` and the pending state `+0x68`), 100 / 0x65
+//!   (leave the shop: mode 6). The rows are a `CTextWnd` (Re:CoM's text window class) opened with
+//!   Re:CoM's explicit open `0x1402B1420`; the cursor is the shop's own finger (`+0x3D0`); the
+//!   highlighted row's line goes into the shop's text window (`+0x3E8`) as Re:CoM's own help line
+//!   call does (`0x1404573A0`: `0x1402B0EF0` on its `CTextWnd`).
+//! - **Card Packs** goes to Re:CoM's mode 4 (its pack screen, unpatched), or to its mode 2 when
+//!   there's no room for 5 cards (Re:CoM's rule). Both come back to mode 3: our list again.
+//! - **Buy** pays through Re:CoM's own payment (8a.3: the spent tally and its trophy, the setter
+//!   `0x14023A1D0`, the Moogle Point window); **Sell** adds through the setter.
 //!
-//! Only at Combat = KH1 in Sora's story (KH1's items live: `super::mp::active`). Nothing of ours
-//! runs outside the pack screen.
+//! At Combat = Re:CoM or in Riku's story the wrapper calls Re:CoM's init and puts Re:CoM's update
+//! back if a KH1 shop left ours there: Re:CoM's shop as it is. Nothing of ours runs outside the
+//! shop's mode 3.
 
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
-use crate::shop::{self as sh, Buy, Pad, Step};
+use crate::shop::{self as sh, Act, Buy, Ctx, Menu, Note, Pad, Sell};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-pub static ORIG_PACK_SCREEN: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_MODE3_INIT: AtomicUsize = AtomicUsize::new(0);
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
-static LOG_LEFT: AtomicU32 = AtomicU32::new(60);
-/// The Items tab, while it is up (one shop at a time).
-static TAB: Mutex<Option<ItemsTab>> = Mutex::new(None);
+static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
+/// The list of the shop that is open (one shop at a time).
+static LIST: Mutex<Option<List>> = Mutex::new(None);
 
-struct ItemsTab {
+struct List {
     shop: usize,
-    /// Re:CoM's pack count, given back when the tab goes.
-    count: i32,
-    /// Our card pictures (deleted before their packs are released).
-    cards: [usize; 3],
+    menu: Menu,
+    /// Our rows window (a `CTextWnd`), 0 when none.
+    rows: usize,
+    /// The texts Re:CoM's windows point at now, and the ones before (Re:CoM's text set keeps the
+    /// pointer, `0x140259000`; the old ones go once a newer one is set).
+    rows_text: Vec<u8>,
+    help_text: Vec<u8>,
+    old: Vec<Vec<u8>>,
+    note: Option<Note>,
+    /// The mode Card Packs goes to.
+    next: i32,
+    finger_row: Option<usize>,
 }
 
-// Re:CoM functions (RVAs; first bytes checked: `sites::SHOP_CALLEES`, and `CALLEES`,
-// `COMMAND_MENU_CALLEES`, `M6_DECK_CALLEES`, `KH1_HUD_CALLEES` for the shared ones).
+impl List {
+    fn new(shop: usize, root: usize) -> List {
+        List { shop, menu: Menu::new(root), rows: 0, rows_text: Vec::new(), help_text: Vec::new(), old: Vec::new(), note: None, next: sh::mode::PACKS, finger_row: None }
+    }
+
+    fn retire(&mut self, v: Vec<u8>) {
+        if !v.is_empty() {
+            self.old.push(v);
+        }
+        // Keep one generation back of each text.
+        while self.old.len() > 2 {
+            self.old.remove(0);
+        }
+    }
+}
+
+// Re:CoM functions (RVAs; first bytes checked: `sites::SHOP_CALLEES`, and `CALLEES` etc. for the
+// shared ones).
 const NEW: u32 = 0x004A_CE54;
 const SOUND: u32 = 0x002A_A360;
 const PAD_REPEAT: u32 = 0x0029_B2E0;
-const PAD_FRESH: u32 = 0x0029_B2F0;
 const PAD_CANCEL: u32 = 0x0029_B410;
 const PAD_CONFIRM: u32 = 0x0029_B490;
-const REFRESH: u32 = 0x003A_92F0;
-const PACK_CTOR: u32 = 0x0045_A9E0;
-const PACK_PRICE: u32 = 0x0045_D120;
-const PACK_SOLD_OUT: u32 = 0x0045_D3F0;
-const HELP_LINE: u32 = 0x0045_73A0;
-const MESSAGE_PLACE: u32 = 0x0045_9AF0;
+const OPENED: u32 = 0x003A_60F0;
+const CLOSED: u32 = 0x003A_61F0;
+const CLOSE: u32 = 0x003A_6640;
+const SHOP_FLAGS: u32 = 0x0011_4180;
+const FLOOR: u32 = 0x0023_37C0;
+const FRAME_SET: u32 = 0x0045_98C0;
+const HELP_BAR: u32 = 0x0045_9CC0;
+const MODEL_MODE: u32 = 0x0045_F3A0;
+const MOOGLE_POSE: u32 = 0x0045_F1E0;
+const BOTTLE_POSE: u32 = 0x0045_F130;
+const TEXT_MESSAGE: u32 = 0x0045_95A0;
+const BG_CLOSE: u32 = 0x0045_9C30;
+const BG_CLOSED: u32 = 0x0045_82B0;
+const LEAVE_FADE: u32 = 0x002A_A9B0;
+const CURSOR_LOOK: u32 = 0x0045_9D60;
+const CURSOR_PRIORITY: u32 = 0x0045_9890;
 const CURSOR_PLACE: u32 = 0x0045_9A00;
 const CURSOR_VISIBLE: u32 = 0x0045_97D0;
 const POINT_WINDOW: u32 = 0x0045_98A0;
+const SHOW_STATE: u32 = 0x0045_98D0;
+const TEXTWND_CTOR: u32 = 0x002A_FF30;
+const TEXTWND_OPEN: u32 = 0x002B_1420;
+const TEXTWND_START: u32 = 0x002B_2C80;
+const TEXTWND_SPEED: u32 = 0x002B_1980;
+const TEXTWND_TEXT: u32 = 0x002B_0EF0;
+const TEXTWND_CLOSE: u32 = 0x002B_1310;
 const POINTS_SET: u32 = 0x0023_A1D0;
 const VAR_GET: u32 = 0x001B_08C0;
 const VAR_SET: u32 = 0x001B_16C0;
 const TROPHY: u32 = 0x002B_A6F0;
-const CARD_CTOR: u32 = 0x0024_32A0;
-const CARD_SET: u32 = 0x0024_3560;
-const CARD_PRIORITY: u32 = 0x0024_3380;
-const CARD_ATTACH: u32 = 0x0024_3DD0;
-const CARD_VISIBLE: u32 = 0x0024_3A60;
-const SLOT_VISIBLE: u32 = 0x0024_7E50;
-const SPRITE_POS: u32 = 0x0024_85B0;
-/// `C2DCard`'s vtable (`0x1402432A0` writes it); its slot 0 is the deleting dtor `0x1402073D0`.
-/// Checked (disasm `0x1402432AE`; exe).
-const CARD_VTABLE: usize = 0x0060_6BF8;
-const CARD_DTOR: usize = 0x0020_73D0;
+/// Re:CoM's mode-3 update (the ctor writes it at `+0x178`, `0x1403A4440`). Checked (exe).
+const RECOM_MODE3_UPDATE: usize = 0x003A_8EF0;
 
-// Re:CoM data (RVAs). Checked (exe: the rip operands in `sites::SHOP_CHECKED`'s payment and
-// confirm bytes; the class rows).
+// Re:CoM data (RVAs). Checked (exe: the rip operands in `sites::SHOP_CHECKED`).
 /// `*0x14087CBF8` = the save's stats; Moogle Points at `+0x20`.
 const STATS_PTR: usize = 0x0087_CBF8;
 const POINTS: usize = 0x20;
+/// `*0x14087A7E8 + 6` (u16): the card limit mode 3's room rule compares with.
+const CARD_LIMIT_PTR: usize = 0x0087_A7E8;
+const CARD_LIMIT: usize = 6;
 /// The trophy bit `& 0x10` (set once the 20000-points trophy is given) and the trophy object.
 const TROPHY_FLAGS: usize = 0x00AF_7389;
 const TROPHY_OBJ: usize = 0x00AF_7468;
-/// Card class rows (`0x14068E0B0 + kind × 16`, byte 0).
-const CARD_CLASS: usize = 0x0068_E0B0;
 
-/// `CMoogleShopCore` fields (Checked (decomp + disasm: `0x1403A4220`, `0x1403A6930`,
-/// `0x1403A92F0`, `0x1403A5B10`)).
+/// `CMoogleShopCore` fields (Checked (decomp + disasm: `0x1403A4220`, `0x1403A53F0`,
+/// `0x1403A8EF0`, `0x140242F50`)).
 mod f {
+    /// The `CFSM`'s pending state (a record; the step runs its init next frame).
+    pub const PENDING: usize = 0x68;
+    /// The mode records: `+0x98 + 0x40 · mode`; mode 3's update slot.
+    pub const RECORDS: usize = 0x98;
+    pub const RECORD: usize = 0x40;
+    pub const MODE3_UPDATE: usize = RECORDS + 3 * RECORD + 0x20;
+    pub const MODE: usize = 0x258;
     pub const NEXT_MODE: usize = 0x25C;
     pub const STATE: usize = 0x260;
-    /// The packs' task parent (the constructor's second argument).
+    /// The modes' task parent (`CMShopModeTaskParent`); `+0x50` its live children.
     pub const TASKS: usize = 0x268;
+    pub const TASKS_LIVE: usize = 0x50;
     /// Input lock: no reads while above 0.
     pub const LOCK: usize = 0x274;
-    pub const TAB: usize = 0x280;
-    pub const CELL: usize = 0x284;
-    /// 4 × 4 arrays `[tab × 4 + cell]`: prices, sold-out.
-    pub const PRICES: usize = 0x2C8;
-    pub const SOLD_OUT: usize = 0x308;
-    /// Packs per tab (the same for every tab).
-    pub const COUNT: usize = 0x348;
-    /// 0 = the tab row, 1 = the grid.
-    pub const IN_GRID: usize = 0x34C;
+    /// `CMShopChargeCardData`; `+0x44` Sora's card count for the room rule.
+    pub const CARD_DATA: usize = 0x350;
+    pub const CARD_COUNT: usize = 0x44;
+    pub const MOOGLE: usize = 0x3A0;
+    pub const BOTTLE: usize = 0x3A8;
+    pub const BG: usize = 0x3B0;
+    pub const FRAME: usize = 0x3B8;
     pub const POINT_WINDOW: usize = 0x3C0;
-    /// The finger cursor, and the second cursor marking the tab while in the grid.
-    pub const CURSOR: usize = 0x3D0;
-    pub const TAB_MARK: usize = 0x3D8;
-    pub const HELP: usize = 0x3E8;
-    /// The button messages by the tab and by the cell (`CMShopButtonMessage`; `+0x60` its show
-    /// state, `0x1404598D0`).
-    pub const TAB_MESSAGE: usize = 0x410;
-    pub const CELL_MESSAGE: usize = 0x420;
-    pub const PACKS: usize = 0x428;
+    pub const HELP_BAR: usize = 0x3C8;
+    /// The finger cursor and the shop's other two cursors.
+    pub const CURSORS: [usize; 3] = [0x3D0, 0x3D8, 0x3E0];
+    /// `CMShopTextWindow` (the Moogle's text).
+    pub const TEXT: usize = 0x3E8;
 }
-/// `CMShopButtonMessage +0x60`: 0 show, −1 hide (`0x1404598D0` writes it).
-const MESSAGE_SHOW: usize = 0x60;
-/// `CMShopCardPack`: its picture control (layer 0 the frame, layer 1 the pack's art,
-/// `0x14045A9E0`), its release flag (`+0x6C`: closes and deletes itself, `0x14045C910`), its size.
-const PACK_PICTURE: usize = 0x78;
-const PACK_RELEASE: usize = 0x6C;
-const PACK_SIZE: usize = 0xB8;
-const PICTURE_ART_LAYER: i32 = 1;
-/// `C2DCard`: its size (`0x14045BF50` allocates 400), the shop's card priority (0x12, one over the
-/// packs' 0x11), "use the colour" `+0x138`.
-const CARD_SIZE: usize = 400;
-const CARD_PRIORITY_SHOP: u32 = 0x12;
-const C_COLOUR_ON: usize = 0x138;
+/// `CMShopTextWindow`: `+0x58` 1 open, −1 closed; `+0x60` its main `CTextWnd`.
+const TW_STATE: usize = 0x58;
+const TW_MAIN: usize = 0x60;
+/// `CTextWnd`: its size (`0x1404595A0` allocates 0x148) and state `+0x88` (5 shown, 6.. closing,
+/// over 8 closed; `0x1402B1310`, `0x140459440`).
+const TEXTWND_SIZE: usize = 0x148;
+const TEXTWND_STATE: usize = 0x88;
+const SHOWN: i32 = 5;
+const GONE: i32 = 8;
+/// The explicit open's arguments as Re:CoM's own caller `0x1402995A0` passes them (frame 0 = no
+/// `CWnd` box drawn, colour 0x80808080, offset (0, 0), 0, flags 0x300B; Checked (disasm)), but
+/// placement 0: `0x1402B1F70` keeps the given x for placement 0 and replaces it for 1 (x 32), 2
+/// (centred: 256 − w / 2, `0x1402995A0`'s) and 3 (right: 480 − w). Checked (decomp).
+const ROWS_FRAME: u32 = 0;
+const ROWS_COLOUR: u32 = 0x8080_8080;
+const ROWS_PLACEMENT: u32 = 0;
+const ROWS_FLAGS: u32 = 0x300B;
+/// Mode 3's frame and help-bar ids and text message for its first choice (`0x1403A53F0`), the
+/// finger's look and priority as mode 2's list sets them (`0x1403A51C0`). Checked (disasm).
+const FRAME_MENU: i32 = 2;
+const HELP_MENU: i32 = 2;
+const MODELS_MENU: i32 = 2;
+const MESSAGE_MENU: i32 = 2;
+const FINGER_LOOK: i32 = 0;
+const FINGER_PRIORITY: u32 = 0x16;
 
-/// The pack screen's states (`0x1403A6930`).
-const STATE_FIRST: i32 = 0;
-const STATE_INPUT: i32 = 2;
-const STATE_CLOSE: i32 = 100;
-const STATE_RELEASE: i32 = 0x65;
+/// The states (`+0x260`) of Re:CoM's mode 3, which ours keeps.
+const S_OPEN: i32 = 0;
+const S_SHOWN: i32 = 1;
+const S_INPUT: i32 = 2;
+const S_CLOSE: i32 = 3;
+const S_SWITCH: i32 = 4;
+const S_LEAVE: i32 = 100;
+const S_LEFT: i32 = 0x65;
 
-type ScreenFn = unsafe extern "win64" fn(usize);
+type ShopFn = unsafe extern "win64" fn(usize);
+type ShopIntFn = unsafe extern "win64" fn(usize, i32);
+type ShopTestFn = unsafe extern "win64" fn(usize, i32) -> i32;
+type ShopClosedFn = unsafe extern "win64" fn(usize) -> i32;
+type NoArgFn = unsafe extern "win64" fn() -> u32;
 type NewFn = unsafe extern "win64" fn(usize) -> usize;
 type SoundFn = unsafe extern "win64" fn(u32, i32) -> u64;
+type FadeFn = unsafe extern "win64" fn(i32, i32);
 type PadMaskFn = unsafe extern "win64" fn(u32, u32) -> u32;
 type PadBtnFn = unsafe extern "win64" fn(u32) -> u32;
-type PackCtorFn = unsafe extern "win64" fn(usize, usize, i32, i32, i32) -> usize;
-type PackIntFn = unsafe extern "win64" fn(usize, i32) -> u64;
-type PackSoldFn = unsafe extern "win64" fn(usize, i32, i32) -> u64;
-type PlaceFn = unsafe extern "win64" fn(usize, f32, f32);
-type CursorPlaceFn = unsafe extern "win64" fn(usize, f32, f32, i32);
+type PlaceFn = unsafe extern "win64" fn(usize, f32, f32, i32);
 type VisibleFn = unsafe extern "win64" fn(usize, u32);
+type PriorityFn = unsafe extern "win64" fn(usize, u32);
+type CtorFn = unsafe extern "win64" fn(usize, usize, u32) -> usize;
+#[allow(clippy::type_complexity)]
+type OpenFn = unsafe extern "win64" fn(usize, *const i32, *const i32, u32, *const u8, u32, u32, u32, *const i32, u32, u32);
+type TextFn = unsafe extern "win64" fn(usize, *const u8, usize);
+type WndFn = unsafe extern "win64" fn(usize);
+type DeleteFn = unsafe extern "win64" fn(usize, u32) -> usize;
 type PointsSetFn = unsafe extern "win64" fn(i32) -> u64;
 type VarGetFn = unsafe extern "win64" fn(u32, u32) -> u64;
 type VarSetFn = unsafe extern "win64" fn(u32, u32, i32);
 type TrophyFn = unsafe extern "win64" fn(usize, u32);
-type CtorFn = unsafe extern "win64" fn(usize) -> usize;
-type CardSetFn = unsafe extern "win64" fn(usize, u32);
-type AttachFn = unsafe extern "win64" fn(usize, usize);
-type SlotVisibleFn = unsafe extern "win64" fn(usize, i32, u32);
-type PosFn = unsafe extern "win64" fn(usize, *const f32);
-type DeleteFn = unsafe extern "win64" fn(usize, u32) -> usize;
-
-#[repr(C, align(16))]
-struct V4([f32; 4]);
 
 fn note(line: impl FnOnce() -> String) {
     if LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
@@ -174,14 +225,14 @@ pub fn mark_installed() {
     INSTALLED.store(true, Ordering::Release);
 }
 
-/// The Items tab is offered: the wrapper is in and KH1's items are live (Combat = KH1, Sora's
+/// The KH1 list is offered: the wrapper is in and KH1's items are live (Combat = KH1, Sora's
 /// story, a save).
 fn live() -> bool {
     INSTALLED.load(Ordering::Acquire) && super::items::installed() && super::mp::active()
 }
 
-fn tab_up(shop: usize) -> bool {
-    TAB.lock().map(|g| g.as_ref().is_some_and(|t| t.shop == shop)).unwrap_or(false)
+fn lock() -> std::sync::MutexGuard<'static, Option<List>> {
+    LIST.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 unsafe fn sound(id: u32) {
@@ -196,179 +247,206 @@ unsafe fn points() -> i32 {
     rd(s + POINTS)
 }
 
-/// This frame's presses, Re:CoM's reads (pure).
+/// Re:CoM's room rule (mode 3's init, `0x1403A53F0`). No card data or limit: no room (Re:CoM
+/// would read through them; not seen null in the shop).
+unsafe fn room(shop: usize) -> bool {
+    let limit: usize = rd(base() + CARD_LIMIT_PTR);
+    let data: usize = rd(shop + f::CARD_DATA);
+    if limit == 0 || data == 0 {
+        return false;
+    }
+    sh::room_for_pack(rd::<u16>(limit + CARD_LIMIT), rd::<i32>(data + f::CARD_COUNT))
+}
+
+/// The free pack was given (`0x140114180()` bit 16, which Re:CoM's mode 1 sets).
+unsafe fn free_pack_given() -> bool {
+    func::<NoArgFn>(SHOP_FLAGS)() >> 16 & 1 != 0
+}
+
+unsafe fn tier() -> sh::Tier {
+    let byte = func::<NoArgFn>(FLOOR)() as u8;
+    sh::tier(sh::floor_of(byte))
+}
+
+/// An item's name: KH1's word as the command menu's Items list shows it, when it is plain ASCII;
+/// else our English name.
+fn item_name(item: u8) -> String {
+    let english = || String::from_utf8_lossy(crate::items_page::text::english(item)).trim_end_matches('\0').to_string();
+    let Some(w) = crate::items::data(item).and_then(|d| super::command_menu::word(d.name)) else { return english() };
+    let w: Vec<u8> = w.into_iter().take_while(|&b| b != 0).collect();
+    if !w.is_empty() && w.iter().all(|b| (0x20..0x7F).contains(b)) {
+        String::from_utf8_lossy(&w).into_owned()
+    } else {
+        english()
+    }
+}
+
 unsafe fn read_pad() -> Pad {
     let dir = |mask: u32| func::<PadMaskFn>(PAD_REPEAT)(mask, 0) != 0;
     Pad {
-        other: func::<PadMaskFn>(PAD_FRESH)(0x80, 0) != 0,
         cancel: func::<PadBtnFn>(PAD_CANCEL)(0) != 0,
         confirm: func::<PadBtnFn>(PAD_CONFIRM)(0) != 0,
-        down: dir(0x0020_4000),
-        right: dir(0x0080_2000),
         up: dir(0x0010_1000),
-        left: dir(0x0040_8000),
+        down: dir(0x0020_4000),
     }
 }
 
-unsafe fn pack(shop: usize, i: usize) -> usize {
-    rd(shop + f::PACKS + i * 8)
+unsafe fn ctx() -> (Ctx, crate::items::Inventory) {
+    let inv = super::items::inventory().unwrap_or_default();
+    (Ctx { buy: sh::buy_list(tier()), sell: sh::sell_list(&inv) }, inv)
 }
 
-/// Releases the packs in the array (as state 0x65: `+0x6C` = 1, the entry cleared).
-unsafe fn release_packs(shop: usize, n: usize) {
-    for i in 0..n.min(4) {
-        let p = pack(shop, i);
-        if p != 0 {
-            wr::<u32>(p + PACK_RELEASE, 1);
-            wr::<usize>(shop + f::PACKS + i * 8, 0);
+unsafe fn finger(shop: usize, row: Option<usize>) {
+    let c: usize = rd(shop + f::CURSORS[0]);
+    if c == 0 {
+        return;
+    }
+    if let Some(i) = row {
+        func::<PlaceFn>(CURSOR_PLACE)(c, sh::FINGER_X, sh::row_y(i), 0);
+    }
+    func::<VisibleFn>(CURSOR_VISIBLE)(c, row.is_some() as u32);
+}
+
+/// The window set-up of Re:CoM's mode-3 init for its first choice (`0x1403A5468..0x1403A5565`),
+/// then the finger as mode 2's list prepares it (`0x1403A51C0`).
+unsafe fn set_up_windows(shop: usize) {
+    wr::<i32>(shop + f::LOCK, 0);
+    wr::<i32>(shop + f::STATE, S_OPEN);
+    let p = |o: usize| -> usize { rd(shop + o) };
+    func::<ShopIntFn>(FRAME_SET)(p(f::FRAME), FRAME_MENU);
+    func::<ShopIntFn>(SHOW_STATE)(p(f::POINT_WINDOW), 0);
+    func::<ShopIntFn>(HELP_BAR)(p(f::HELP_BAR), HELP_MENU);
+    func::<ShopIntFn>(SHOW_STATE)(p(f::HELP_BAR), 0);
+    func::<ShopIntFn>(MODEL_MODE)(p(f::MOOGLE), MODELS_MENU);
+    func::<ShopIntFn>(MODEL_MODE)(p(f::BOTTLE), MODELS_MENU);
+    func::<ShopIntFn>(TEXT_MESSAGE)(p(f::TEXT), MESSAGE_MENU);
+    func::<ShopIntFn>(MOOGLE_POSE)(p(f::MOOGLE), 0);
+    func::<ShopIntFn>(BOTTLE_POSE)(p(f::BOTTLE), 1);
+    for c in f::CURSORS {
+        func::<VisibleFn>(CURSOR_VISIBLE)(p(c), 0);
+    }
+    let c = p(f::CURSORS[0]);
+    if c != 0 {
+        func::<ShopIntFn>(CURSOR_LOOK)(c, FINGER_LOOK);
+        func::<PriorityFn>(CURSOR_PRIORITY)(c, FINGER_PRIORITY);
+    }
+}
+
+/// The wrapper on mode 3's init (`0x1403A53F0`).
+///
+/// # Safety
+/// Called by Re:CoM's state machine with its `CMoogleShopCore`.
+pub unsafe extern "win64" fn mode3_init(shop: usize) {
+    let run = orig::<ShopFn>(&ORIG_MODE3_INIT);
+    let slot = shop + f::MODE3_UPDATE;
+    let recom = base() + RECOM_MODE3_UPDATE;
+    let ours = list_update as *const () as usize;
+    let have: usize = rd(slot);
+    if !live() {
+        if have == ours {
+            wr::<usize>(slot, recom);
         }
+        return run(shop);
     }
+    if have != recom && have != ours {
+        note(|| format!("mode 3's update slot holds {have:#x}, not Re:CoM's 0x1403A8EF0: Re:CoM's menu"));
+        return run(shop);
+    }
+    let room = room(shop);
+    if room && !free_pack_given() {
+        // Re:CoM's first visit: its init sends the shop to mode 1 (the free pack), which comes
+        // back to mode 3 (this init again).
+        if have == ours {
+            wr::<usize>(slot, recom);
+        }
+        note(|| "first visit: Re:CoM's free pack (mode 1) before the list".into());
+        return run(shop);
+    }
+    wr::<usize>(slot, ours);
+    set_up_windows(shop);
+    let mut g = lock();
+    // Back from the pack screen or the card trade: the root cursor where it was.
+    let root = g.as_ref().filter(|l| l.shop == shop).map_or(0, |l| l.menu.root);
+    *g = Some(List::new(shop, root));
+    drop(g);
+    note(|| format!("KH1 list (mode 3): floor tier {:?}, {} Moogle Points, room for a pack: {room}", tier(), points()));
 }
 
-/// A pack as state 0 makes it (`0x1403A6AD0`): 0xB8 bytes, (task parent, cell, price, sold out).
-unsafe fn make_pack(shop: usize, cell: i32, price: i32, sold_out: i32) -> usize {
-    let mem = func::<NewFn>(NEW)(PACK_SIZE);
+/// Opens our rows window with `text` (Re:CoM's text window class, its explicit open).
+unsafe fn open_rows(shop: usize, text: &[u8]) -> usize {
+    let parent: usize = rd(shop + f::TEXT);
+    if parent == 0 {
+        return 0;
+    }
+    let mem = func::<NewFn>(NEW)(TEXTWND_SIZE);
     if mem == 0 {
         return 0;
     }
-    func::<PackCtorFn>(PACK_CTOR)(mem, rd(shop + f::TASKS), cell, price, sold_out)
-}
-
-/// Re:CoM's card picture of an item card on `pack`'s picture control: as the shop's own card in
-/// `0x14045BF50` (priority 0x12, attached to its window's control, colour on), without its base
-/// group, as the "cards got" screen makes its cards (`0x1404589B0`).
-unsafe fn make_card(pack: usize, kind: u8) -> usize {
-    let ctrl: usize = rd(pack + PACK_PICTURE);
-    if ctrl == 0 {
+    let w = func::<CtorFn>(TEXTWND_CTOR)(mem, parent, 0);
+    if w == 0 {
         return 0;
     }
-    let mem = func::<NewFn>(NEW)(CARD_SIZE);
-    if mem == 0 {
-        return 0;
-    }
-    let card = func::<CtorFn>(CARD_CTOR)(mem);
-    if card == 0 || rd::<usize>(card) != base() + CARD_VTABLE {
-        note(|| "a card picture's vtable is not C2DCard's; no picture".into());
-        return 0;
-    }
-    let class: u8 = rd(base() + CARD_CLASS + kind as usize * 16);
-    func::<CardSetFn>(CARD_SET)(card, sh::card_value(kind, class));
-    func::<CardSetFn>(CARD_PRIORITY)(card, CARD_PRIORITY_SHOP);
-    func::<AttachFn>(CARD_ATTACH)(card, ctrl);
-    func::<PosFn>(SPRITE_POS)(card, V4([0.0, 0.0, 0.0, 1.0]).0.as_ptr());
-    wr::<u8>(card + C_COLOUR_ON, 1);
-    func::<VisibleFn>(CARD_VISIBLE)(card, 1);
-    card
+    let (pos, size) = sh::rows_window(sh::MAX_ROWS);
+    let offset = [0i32; 2];
+    func::<OpenFn>(TEXTWND_OPEN)(w, pos.as_ptr(), size.as_ptr(), ROWS_FRAME, text.as_ptr(), ROWS_COLOUR, sh::ROW_LINE, ROWS_PLACEMENT, offset.as_ptr(), 0, ROWS_FLAGS);
+    // As the shop's own text windows after their open (`0x1404595A0`: `0x1402B1980(w, 0)` for
+    // every message but 0; Assumption: 0 = the text shown at once, not typed out), then started.
+    func::<ShopIntFn>(TEXTWND_SPEED)(w, 0);
+    func::<WndFn>(TEXTWND_START)(w);
+    w
 }
 
-/// Deletes a card picture (its own deleting dtor, `C2DCard` vtable slot 0, flag 1).
-unsafe fn delete_card(card: usize) {
-    if card == 0 {
-        return;
+/// Closes our rows window; true once it is gone (deleted, as `CMShopTextWindow` deletes its own:
+/// vtable slot 0, flag 1, past state 8).
+unsafe fn rows_gone(l: &mut List) -> bool {
+    if l.rows == 0 {
+        return true;
     }
-    let dtor: usize = rd(rd::<usize>(card));
-    if dtor != base() + CARD_DTOR {
-        note(|| format!("a card picture's dtor is {dtor:#x}, not 0x1402073D0; left in place"));
-        return;
+    let state: i32 = rd(l.rows + TEXTWND_STATE);
+    if state > GONE {
+        let del: DeleteFn = std::mem::transmute::<usize, DeleteFn>(rd::<usize>(rd::<usize>(l.rows)));
+        del(l.rows, 1);
+        l.rows = 0;
+        return true;
     }
-    let delete: DeleteFn = std::mem::transmute::<usize, DeleteFn>(dtor);
-    delete(card, 1);
+    if state < 6 {
+        func::<WndFn>(TEXTWND_CLOSE)(l.rows);
+    }
+    false
 }
 
-/// Into the Items tab from Re:CoM's tab `from` (sound 1 played by the caller).
-unsafe fn enter(shop: usize, from: i32) {
-    let count: i32 = rd(shop + f::COUNT);
-    release_packs(shop, count.clamp(0, 4) as usize);
-    let mut cards = [0usize; 3];
-    let mut made = 0;
-    for (i, &item) in sh::ITEMS.iter().enumerate() {
-        let p = make_pack(shop, i as i32, sh::price(item), 0);
-        wr::<usize>(shop + f::PACKS + i * 8, p);
-        if p == 0 {
-            break;
-        }
-        made += 1;
-        func::<SlotVisibleFn>(SLOT_VISIBLE)(rd(p + PACK_PICTURE), PICTURE_ART_LAYER, 0);
-        cards[i] = make_card(p, sh::CARD_KINDS[i]);
+/// Puts `text` into a shown `CTextWnd` (`0x1402B0EF0`, only in state 5, as Re:CoM's own help line
+/// call). True when set.
+unsafe fn set_text(w: usize, text: &[u8]) -> bool {
+    if w == 0 || rd::<i32>(w + TEXTWND_STATE) != SHOWN {
+        return false;
     }
-    wr::<usize>(shop + f::PACKS + 3 * 8, 0);
-    if let Ok(mut g) = TAB.lock() {
-        *g = Some(ItemsTab { shop, count, cards });
-    }
-    if made < sh::ITEMS.len() {
-        note(|| format!("Items tab: only {made} of 3 packs made (no memory); back to tab {from}"));
-        leave_to(shop, from);
-        return;
-    }
-    wr::<i32>(shop + f::COUNT, sh::COUNT);
-    wr::<i32>(shop + f::TAB, sh::ITEMS_TAB);
-    refresh(shop);
-    note(|| format!("Items tab from tab {from}: Re:CoM's {count} packs released, Potion 60 / Hi-Potion 150 / Ether 200; cards {cards:#x?}; {} Moogle Points", points()));
+    func::<TextFn>(TEXTWND_TEXT)(w, text.as_ptr(), 0);
+    true
 }
 
-/// Takes the Items tab's state, deletes its cards; None when it isn't up for `shop`.
-unsafe fn take_tab(shop: usize) -> Option<i32> {
-    let t = {
-        let mut g = TAB.lock().ok()?;
-        g.take_if(|t| t.shop == shop)?
-    };
-    for c in t.cards {
-        delete_card(c);
+/// The rows, the help line and the finger after a frame.
+unsafe fn refresh(l: &mut List, c: &Ctx, inv: &crate::items::Inventory) {
+    let rows = sh::rows_text(&l.menu, c, item_name);
+    if rows != l.rows_text && set_text(l.rows, &rows) {
+        let old = std::mem::replace(&mut l.rows_text, rows);
+        l.retire(old);
     }
-    Some(t.count)
-}
-
-/// From the Items tab to Re:CoM's tab `to`: Re:CoM's packs for it as state 0 makes them, then
-/// Re:CoM's refresh.
-unsafe fn leave_to(shop: usize, to: i32) {
-    let Some(count) = take_tab(shop) else { return };
-    release_packs(shop, sh::ITEMS.len());
-    let n = count.clamp(0, 4);
-    for i in 0..n {
-        let k = (to * 4 + i) as usize * 4;
-        let p = make_pack(shop, i, rd(shop + f::PRICES + k), rd(shop + f::SOLD_OUT + k));
-        wr::<usize>(shop + f::PACKS + i as usize * 8, p);
+    let help = sh::help_text(&l.menu, c, l.note, inv);
+    let tw: usize = rd(l.shop + f::TEXT);
+    if help != l.help_text && tw != 0 && rd::<i32>(tw + TW_STATE) == 1 && set_text(rd(tw + TW_MAIN), &help) {
+        let old = std::mem::replace(&mut l.help_text, help);
+        l.retire(old);
     }
-    wr::<i32>(shop + f::COUNT, count);
-    wr::<i32>(shop + f::TAB, to);
-    func::<ScreenFn>(REFRESH)(shop);
-    note(|| format!("Items tab -> tab {to}: Re:CoM's {count} packs made again"));
-}
-
-/// Re:CoM's refresh (`0x1403A92F0`) for the Items tab: the button messages at the tab and the cell,
-/// the packs' prices (never sold out), the cursors. The tab art stays as it was (no Items tab art
-/// yet: `docs/recom-m8-items.md` § 8a.3).
-unsafe fn refresh(shop: usize) {
-    let x = sh::TAB_X[sh::ITEMS_TAB as usize];
-    let cell = (rd::<i32>(shop + f::CELL)).clamp(0, 3) as usize;
-    let place = func::<PlaceFn>(MESSAGE_PLACE);
-    place(rd(shop + f::TAB_MESSAGE), x, sh::TAB_MESSAGE_Y);
-    place(rd(shop + f::CELL_MESSAGE), sh::CELL_X[cell], sh::CELL_Y[cell]);
-    for (i, &item) in sh::ITEMS.iter().enumerate() {
-        let p = pack(shop, i);
-        if p != 0 {
-            func::<PackIntFn>(PACK_PRICE)(p, sh::price(item));
-            func::<PackSoldFn>(PACK_SOLD_OUT)(p, 0, 0);
-        }
-    }
-    let cursor: usize = rd(shop + f::CURSOR);
-    let mark: usize = rd(shop + f::TAB_MARK);
-    let show = func::<VisibleFn>(CURSOR_VISIBLE);
-    let put = func::<CursorPlaceFn>(CURSOR_PLACE);
-    if rd::<i32>(shop + f::IN_GRID) != 0 {
-        show(mark, 1);
-        put(mark, x - sh::CURSOR_DX, sh::TAB_CURSOR_Y, 0);
-        show(cursor, 1);
-        put(cursor, sh::CELL_X[cell] - sh::CURSOR_DX, sh::CELL_Y[cell] - sh::CURSOR_DY, 0);
-    } else {
-        show(cursor, 1);
-        put(cursor, x - sh::CURSOR_DX, sh::TAB_CURSOR_Y, 0);
-        show(mark, 0);
+    let row = Some(l.menu.cursor());
+    if row != l.finger_row {
+        finger(l.shop, row);
+        l.finger_row = row;
     }
 }
 
-/// Re:CoM's payment for `price` (state 4, `0x1403A7041`): the spent tally and its trophy, the
-/// points, the Moogle Point window.
+/// Re:CoM's payment for `price` (the pack screen's state 4, `0x1403A7041`): the spent tally and
+/// its trophy, the points, the Moogle Point window.
 unsafe fn pay(shop: usize, price: i32, after: i32) {
     let flags = base() + TROPHY_FLAGS;
     if rd::<u8>(flags) & 0x10 == 0 {
@@ -384,140 +462,183 @@ unsafe fn pay(shop: usize, price: i32, after: i32) {
             wr::<u8>(flags, rd::<u8>(flags) | 0x10);
         }
     }
+    set_points(shop, after);
+}
+
+/// Re:CoM's setter `0x14023A1D0` (it clamps) and the Moogle Point window.
+unsafe fn set_points(shop: usize, after: i32) {
     func::<PointsSetFn>(POINTS_SET)(after);
     let w: usize = rd(shop + f::POINT_WINDOW);
     if w != 0 {
-        func::<PackIntFn>(POINT_WINDOW)(w, after);
+        func::<ShopIntFn>(POINT_WINDOW)(w, points());
     }
 }
 
-unsafe fn buy(shop: usize, cell: i32) {
+unsafe fn buy(l: &mut List, item: u8) {
     let have = points();
-    match super::items::edit(|inv| sh::buy(cell, have, inv)) {
-        Some(Buy::Bought { item, price, points: after, to }) => {
-            sound(sh::sound::BUY);
+    match super::items::edit(|inv| sh::buy(item, have, inv)) {
+        Some(Buy::Bought { price, points: after, to, .. }) => {
+            sound(sh::sound::CONFIRM);
             sound(sh::sound::BUY_TOO);
-            pay(shop, price, after);
-            note(|| format!("bought {} for {price}: {have} -> {after} Moogle Points, {to:?}", crate::items::name(item)));
+            pay(l.shop, price, after);
+            l.note = None;
+            note(|| format!("bought {} for {price}: {have} -> {} Moogle Points, {to:?}", crate::items::name(item), points()));
         }
         r => {
             sound(sh::sound::ERROR);
-            note(|| format!("refused on cell {cell} with {have} Moogle Points: {r:?}"));
+            l.note = match r {
+                Some(Buy::Poor { .. }) => Some(Note::Poor),
+                Some(Buy::NoRoom { .. }) => Some(Note::NoRoom),
+                _ => None,
+            };
+            note(|| format!("refused {} with {have} Moogle Points: {r:?}", crate::items::name(item)));
         }
     }
 }
 
-/// One frame of the Items tab's input state.
-unsafe fn items_frame(shop: usize) {
-    let in_grid = rd::<i32>(shop + f::IN_GRID) != 0;
-    let cell: i32 = rd(shop + f::CELL);
+unsafe fn sell(l: &mut List, item: u8) {
+    let have = points();
+    match super::items::edit(|inv| sh::sell(item, have, inv)) {
+        Some(Sell::Sold { price, points: after, from, left, .. }) => {
+            sound(sh::sound::SALE);
+            set_points(l.shop, after);
+            l.note = None;
+            note(|| format!("sold {} for {price}: {have} -> {} Moogle Points, from {from:?}, {left} left", crate::items::name(item), points()));
+        }
+        r => {
+            sound(sh::sound::ERROR);
+            note(|| format!("sale of {} refused: {r:?}", crate::items::name(item)));
+        }
+    }
+}
+
+/// One frame of the input state.
+unsafe fn input(l: &mut List) {
+    let shop = l.shop;
     let locked = rd::<i32>(shop + f::LOCK) > 0;
-    let help: usize = rd(shop + f::HELP);
-    if help != 0 {
-        func::<PackIntFn>(HELP_LINE)(help, sh::help_line(in_grid, cell, points()));
-    }
     let pad = if locked { Pad::default() } else { read_pad() };
-    match sh::items_step(in_grid, cell, &pad, locked) {
-        Step::Leave { sound: s, mode } => {
-            sound(s);
-            wr::<i32>(shop + f::NEXT_MODE, mode);
-            wr::<i32>(shop + f::STATE, STATE_CLOSE);
+    let (c, _) = ctx();
+    let act = l.menu.step(&pad, &c);
+    match act {
+        Act::Nothing => {}
+        Act::Moved => {
+            sound(sh::sound::MOVE);
+            l.note = None;
+        }
+        Act::Opened(_) => {
+            sound(sh::sound::CONFIRM);
+            l.note = None;
+        }
+        Act::Back => {
+            sound(sh::sound::BACK);
+            l.note = None;
+        }
+        Act::Refused => {
+            sound(sh::sound::ERROR);
+            l.note = Some(Note::NothingToSell);
+        }
+        Act::CardPacks => {
+            sound(sh::sound::CONFIRM);
+            l.next = sh::card_packs_mode(room(shop));
+            wr::<i32>(shop + f::NEXT_MODE, l.next);
+            wr::<i32>(shop + f::STATE, S_CLOSE);
+            note(|| format!("Card Packs: on to Re:CoM's mode {}", l.next));
             return;
         }
-        Step::ToTab(t) => {
-            sound(sh::sound::MOVE);
-            leave_to(shop, t);
+        Act::Leave => {
+            sound(sh::sound::BACK);
+            wr::<i32>(shop + f::STATE, S_LEAVE);
             return;
         }
-        Step::IntoGrid => {
-            sound(sh::sound::MOVE);
-            wr::<i32>(shop + f::IN_GRID, 1);
-            wr::<i32>(shop + f::CELL, 0);
-            message_show(shop, 0);
-        }
-        Step::OutOfGrid => {
-            sound(sh::sound::MOVE);
-            wr::<i32>(shop + f::IN_GRID, 0);
-            message_show(shop, -1);
-        }
-        Step::Move(c) => {
-            sound(sh::sound::MOVE);
-            wr::<i32>(shop + f::CELL, c);
-        }
-        Step::Confirm(c) => buy(shop, c),
-        Step::Nothing => {}
+        Act::Buy(i) => buy(l, i),
+        Act::Sell(i) => sell(l, i),
     }
-    refresh(shop);
+    let (c, inv) = ctx();
+    l.menu.settle(&c);
+    refresh(l, &c, &inv);
 }
 
-/// The cell's button message's show state (`0x1404598D0`: one field write).
-unsafe fn message_show(shop: usize, v: i32) {
-    let m: usize = rd(shop + f::CELL_MESSAGE);
-    if m != 0 {
-        wr::<i32>(m + MESSAGE_SHOW, v);
-    }
-}
-
-/// The wrapper on the pack screen's update (`0x1403A6930`).
+/// Mode 3's update at KH1 (Re:CoM's state machine calls it through the shop's own mode-3 record,
+/// which our init points here).
 ///
 /// # Safety
-/// Called by Re:CoM with its `CMoogleShopCore`.
-pub unsafe extern "win64" fn pack_screen(shop: usize) {
-    let run = orig::<ScreenFn>(&ORIG_PACK_SCREEN);
-    let state: i32 = rd(shop + f::STATE);
-    let up = tab_up(shop);
-    match state {
-        STATE_FIRST if up => {
-            // A new screen on the same object with our tab still recorded: it never passed
-            // state 0x65 (not seen in Re:CoM's code). Its cards went with the old screen.
-            if let Ok(mut g) = TAB.lock() {
+/// Called by Re:CoM's state machine with its `CMoogleShopCore`.
+pub unsafe extern "win64" fn list_update(shop: usize) {
+    if rd::<i32>(shop + f::MODE) != sh::mode::MENU {
+        return;
+    }
+    let mut g = lock();
+    let Some(l) = g.as_mut().filter(|l| l.shop == shop) else {
+        // Not seen: no list for this shop. Re:CoM's own update from its state 0 (its windows are
+        // set up as its init sets them for its first choice).
+        drop(g);
+        wr::<usize>(shop + f::MODE3_UPDATE, base() + RECOM_MODE3_UPDATE);
+        wr::<i32>(shop + f::STATE, S_OPEN);
+        note(|| "mode 3 update without a list: Re:CoM's menu".into());
+        return;
+    };
+    let p = |o: usize| -> usize { rd(shop + o) };
+    let idle = || rd::<i32>(p(f::TASKS) + f::TASKS_LIVE) < 1;
+    match rd::<i32>(shop + f::STATE) {
+        S_OPEN => {
+            if func::<ShopTestFn>(OPENED)(shop, 1) != 0 {
+                let (c, _) = ctx();
+                l.menu.settle(&c);
+                let rows = sh::rows_text(&l.menu, &c, item_name);
+                l.rows = open_rows(shop, &rows);
+                let old = std::mem::replace(&mut l.rows_text, rows);
+                l.retire(old);
+                wr::<i32>(shop + f::STATE, S_SHOWN);
+                if l.rows == 0 {
+                    note(|| "the rows window couldn't be made: leaving the shop".into());
+                    wr::<i32>(shop + f::STATE, S_LEAVE);
+                }
+            }
+        }
+        S_SHOWN => {
+            if rd::<i32>(l.rows + TEXTWND_STATE) >= SHOWN {
+                wr::<i32>(shop + f::STATE, S_INPUT);
+                let (c, inv) = ctx();
+                l.finger_row = None;
+                refresh(l, &c, &inv);
+            }
+        }
+        S_INPUT => input(l),
+        S_CLOSE => {
+            finger(shop, None);
+            func::<ShopIntFn>(CLOSE)(shop, 0);
+            rows_gone(l);
+            wr::<i32>(shop + f::STATE, S_SWITCH);
+        }
+        S_SWITCH => {
+            if func::<ShopClosedFn>(CLOSED)(shop) != 0 && idle() && rows_gone(l) {
+                let next: i32 = rd(shop + f::NEXT_MODE);
+                wr::<i32>(shop + f::MODE, next);
+                wr::<usize>(shop + f::PENDING, shop + f::RECORDS + next as usize * f::RECORD);
+                l.finger_row = None;
+            }
+        }
+        S_LEAVE => {
+            finger(shop, None);
+            func::<ShopIntFn>(CLOSE)(shop, 1);
+            func::<ShopIntFn>(BG_CLOSE)(p(f::BG), -1);
+            func::<FadeFn>(LEAVE_FADE)(-1, -1);
+            rows_gone(l);
+            wr::<i32>(shop + f::STATE, S_LEFT);
+        }
+        S_LEFT => {
+            if func::<ShopClosedFn>(CLOSED)(shop) != 0 && idle() && func::<ShopClosedFn>(BG_CLOSED)(p(f::BG)) != 0 && rows_gone(l) {
+                wr::<i32>(shop + f::MODE, sh::mode::LEAVE);
+                wr::<usize>(shop + f::PENDING, shop + f::RECORDS + sh::mode::LEAVE as usize * f::RECORD);
+                // The shop ends: its texts were Re:CoM's windows' last; they go with the list.
                 *g = None;
-            }
-            note(|| "a new pack screen with the Items tab still recorded: forgotten".into());
-            run(shop)
-        }
-        STATE_INPUT if up => items_frame(shop),
-        STATE_INPUT if live() => {
-            let tab: i32 = rd(shop + f::TAB);
-            let in_grid = rd::<i32>(shop + f::IN_GRID) != 0;
-            let locked = rd::<i32>(shop + f::LOCK) > 0;
-            if (0..sh::RECOM_TABS).contains(&tab) && !in_grid && !locked && sh::enters_items(tab, in_grid, &read_pad(), locked) {
-                // Re:CoM's state 2 sets the help line before its reads; the tab row's is the usual one.
-                let help: usize = rd(shop + f::HELP);
-                if help != 0 {
-                    func::<PackIntFn>(HELP_LINE)(help, sh::help::USUAL);
-                }
-                sound(sh::sound::MOVE);
-                enter(shop, tab);
-            } else {
-                run(shop)
+                note(|| "shop left from the KH1 list".into());
             }
         }
-        STATE_CLOSE if up => {
-            // Our cards go before Re:CoM starts closing the packs they hang from.
-            if let Ok(mut g) = TAB.lock() {
-                if let Some(t) = g.as_mut().filter(|t| t.shop == shop) {
-                    for c in std::mem::take(&mut t.cards) {
-                        delete_card(c);
-                    }
-                }
-            }
-            run(shop)
-        }
-        STATE_RELEASE if up => {
-            run(shop);
-            if rd::<i32>(shop + f::STATE) != STATE_RELEASE {
-                // Re:CoM released our packs (the count was ours): its count back.
-                if let Some(count) = take_tab(shop) {
-                    wr::<i32>(shop + f::COUNT, count);
-                    note(|| format!("pack screen left from the Items tab: Re:CoM's count {count} back"));
-                }
-            }
-        }
-        _ => run(shop),
+        _ => {}
     }
 }
 
 pub fn start_line() -> String {
-    "shop: KH1's items in the Moogle shop (M8 stage 8a.3): a fifth tab \"Items\" after Re:CoM's four (Right from the last, Left from the first) with Potion 60 / Hi-Potion 150 / Ether 200 Moogle Points, Re:CoM's item card pictures, KH1's pickup rule; at Combat = KH1 in Sora's story".into()
+    "shop: KH1's Moogle shop list (M8c): at Combat = KH1 in Sora's story Re:CoM's shop mode 3 is a list Buy / Sell / Card Packs (Re:CoM's text window, finger cursor, sounds and payment); stock by Re:CoM's floor tier (1F Potion, Ether; 2F+ Hi-Potion; 7F+ Elixir), Potion 10 / Hi-Potion 30 / Ether 40 / Elixir 200 Moogle Points, sell = buy / 5; Card Packs opens Re:CoM's pack screen".into()
 }

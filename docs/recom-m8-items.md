@@ -503,6 +503,12 @@ What the owner should test (`kh1_test_items = on` for items in stock):
 
 ## Stage 8a.3: KH1's items in Re:CoM's Moogle shop: a fifth "Items" tab
 
+> **Replaced in 0.103.0 by [M8c: KH1 Moogle shop list](#m8c-kh1-moogle-shop-list).** The Items
+> tab and its wrapper on the pack screen's update (`0x1403A6930`) are gone: at Combat = KH1 the
+> shop opens on a Buy / Sell / Card Packs list, and Card Packs shows Re:CoM's pack screen
+> unpatched. The findings below stay true of Re:CoM; the payment (state 4) is still the one the
+> list's Buy uses.
+
 Owner (2026-11-01), after the findings below: **a fifth "Items" tab in Re:CoM's pack screen** with
 Potion / Hi-Potion / Ether, **one item per purchase**, priced **1 Moogle Point per KH1 munny**
 (Potion 60, Hi-Potion 150, Ether 200). Only at Combat = KH1 in Sora's story; the Re:CoM setting and
@@ -1052,3 +1058,220 @@ the items also be green and have the items symbol". Every stock item row (`items
 in the Stock list and in the pick from it) now takes the same look as Sora's item slots: the asset
 step's green row with the item symbol (variant 7), else Re:CoM's green row 0x131. The Keyblade slot,
 the Sora row, the commands and Yes / No stay red. No new address. Checked: tests. Not checked: in game.
+
+---
+
+## M8c: KH1 Moogle shop list
+
+Owner (2026-11-04, `design-philosophy-instructions.md` § KH1 Moogle shop): at Combat = KH1 the
+Moogle shop becomes a list like KH1's (Re:CoM assets allowed): rows **Buy**, **Sell** and **Card
+Packs** ("A 'Card Packs' row": Re:CoM's pack screen as before); the 8a.3 Items tab goes. Stage 1
+(0.103.0): the list, stock by floor, buy and sell. Tent / Camping Set, their camp use and the
+drops of Re:CoM-only enemies are later stages.
+
+Code: `crates/kh1-recom/src/shop.rs` (stock, prices, the sell list, buy / sell rules, the list's
+cursor and texts; tested), `src/win/shop.rs` (Re:CoM's side), sites `sites::SHOP_HOOKS`,
+`SHOP_CALLEES`, `SHOP_CHECKED` (test `sites::tests::shop_sites`). No asset step change.
+
+### Research: Re:CoM's Moogle shop flow (Steam)
+
+**Start.** The event script's command 0x38 (the script interpreter `0x140145C50`) allocates 0x470
+bytes and calls `CMoogleShopCore`'s ctor `0x1403A4220(mem, 0x1402AD300(1))` (a task under the
+script's task parent). The ctor runs only when no shop is up (`0x14087A450` = 0, then the shop's
+task id): it copies the player's stats to the save (`0x1401F0120`), pauses the field
+(`0x1402919B0`, `0x1401A9CC0(0)`, `0x140232260(0xFFFEBFFF)`, `0x140232270(1)`, `0x1402A9E50`),
+fills the 7 mode records and makes `CMShopModeTaskParent` (`+0x268`), and points the state
+machine's pending state (`+0x68`) at mode 0. Checked (decomp).
+
+**The state machine.** `CMoogleShopCore` is a `CFSM` at `+0x58` (current state `+0x60`, pending
+`+0x68`); its step `0x140242F50` ends the current record (vtable `+0x18` → the record's `+0x30`
+function), inits the pending one (`+8` → `+0x10`) and runs the current one's update (`+0x10` →
+`+0x20`) every frame. The 7 modes are records at `+0x98 + 0x40·mode` (`+8` owner, `+0x10` init,
+`+0x20` update, `+0x30` end; record vtable `0x14065BC50`); `+0x258` the mode, `+0x25C` the next
+mode, `+0x260` the mode's state. A mode switches by writing `+0x258` and `+0x68`. Checked (decomp
++ disasm `0x1403A4431..0x1403A4486`).
+
+| mode | init / update / end | what it is | tag |
+|---|---|---|---|
+| 0 | `0x1403A52E0` / `0x1403A8AA0` / `0x1403A59F0` | Loading: asks for file 0x6D, waits (`0x14023CA80`), sound 0x49, makes the card data `CMShopChargeCardData` (`+0x350`), reads `MogFloor` (`0x1403A5B10`), makes the background `CMShopBG` (`+0x3B0`), frame `CMShopFrame` (`+0x3B8`), Moogle Point window (`+0x3C0`), help bar `CMShopHelpMessage` (`+0x3C8`), the two Moogle models (`+0x3A0`, `+0x3A8` the bottle Moogle), three `CMShopFingerCursor`s (`+0x3D0`, `+0x3D8`, `+0x3E0`) and the Moogle's text window `CMShopTextWindow` (`+0x3E8`); then mode 3. | Checked (decomp) |
+| 1 | `0x1403A5320` / `0x1403A8DA0` / `0x1403A5A00` | The first visit's free pack: on confirm draws pack type `+0x278` (`0x1403A66F0`), sets the shop flag bit 16 (`0x1401141D0`), shows the cards; then mode 3. | Checked (decomp) |
+| 2 | `0x1403A51C0` / `0x1403A8770` / `0x1403A59E0` | No room for 5 more cards: the text window's message 1 (a question and a two-line choice), the finger at x 126, y 210 / 233 (`0x14065BA30`); Up / Down (no wrap), confirm on row 0 → mode 5; row 1 or cancel → state 100 → mode 6 (leaves the shop). | Checked (decomp + exe) |
+| 3 | `0x1403A53F0` / `0x1403A8EF0` / `0x1403A5A10` | **The two-choice menu.** Init: without room for 5 cards (`u16 [*0x14087A7E8 + 6] < [+0x350]+0x44 + 5`) → mode 2; first visit (`0x140114180()` bit 16 clear) → mode 1; else frame 2, help bar 2 + choice, Moogle models' mode 2, text window message 2 + choice, the Moogle or the bottle Moogle posed by the choice. Update: state 0 makes `CMShopSelectCursor` (`+0x3F8`, two `m_shop.lad` buttons, groups `0x14068EEB8`, places layout element 0x11 entries 0 / 1); 2 the input: cancel → sound 4, state 100; confirm → sound 2, `+0x25C` = 4 + choice; Left / Right set the choice `+0x27C` (sound 1); 3 / 4 close and switch; 100 / 0x65 close and go to mode 6. | Checked (decomp + disasm) |
+| 4 | `0x1403A4A90` / `0x1403A6930` / `0x1403A59B0` | The pack screen (8a.3's findings); cancel → mode 3, Square → mode 5. | Checked (decomp) |
+| 5 | `0x1403A4D90` / `0x1403A73E0` / `0x1403A59C0` | **The card trade** (Re:CoM's "Charge", sell cards for points): `CMShopChargePointWnd`, `ChargeCardRankWnd`, `StockCardWnd`, `CardInfoWnd`, `CardCountWnd` (`+0x448..0x468`); 5 card-category tabs (`+0x35C`, Left / Right, wrap), a scrolling 3-wide card grid (`+0x360` / `+0x364`), a count, then a yes / no in the text window (message 7, the finger at x 232, y 214 / 237); a sale: sound 6, points added by Re:CoM's `0x140239FA0`, the card leaves (`0x140159B20`); cancel → mode 3, Square (with room) → mode 4. | Checked (decomp) |
+| 6 | `0x1403A5180` / `0x1403A8760` / `0x1403A59D0` | Leaving: `0x1401F0BC0`, `0x1402AB410`, then the task ends itself (vtable `+0x20`). | Checked (decomp) |
+
+**Mode 3's two choices** are card packs (choice 0, mode 4) and the card trade (choice 1, mode 5).
+
+**End.** Mode 6 ends the task; the dtor (`0x1403A47A0` / `0x1403A4950`) undoes the ctor's pause
+(`0x1402AC0F0`, deletes `+0x350`, `0x140245710(0)`, `0x140291A30`, `0x1401A9CC0(1)`,
+`0x1402A5790(2)`, `0x140232260(0)`, `0x140232270(0)`, `0x14027FE40(0)`, `0x14087A450` = 0,
+`0x1401B15D0(1, 0x140)`): the field and the event script carry on. Checked (decomp). How the
+script command waits for the shop task: Assumption (not read).
+
+**Floor.** `0x1403A5B10` reads `0x1402337C0()` (`*[0x14087B110]`, the save's first byte), 0xFF →
+10, + 1; tiers 1, 2..6, 7..10, 11+. Checked (decomp + exe).
+
+**Text.** The shop's text windows are Re:CoM's `CTextWnd` (ctor `0x1402AFF30`, 0x148 bytes,
+state `+0x88`: 5 shown, 6.. closing, past 8 closed; close `0x1402B1310`; delete vtable slot 0).
+`CMShopTextWindow::0x1404595A0(win, id)` opens one from a message record (`0x1402B1520`, ids at
+`0x14068EF58`), a second one for choices (`0x14068EF78`: ids 1 and 7); its `+0x58` is 1 when both
+are open, −1 when closed. Re:CoM's own explicit open `0x1402B1420(w, &pos, &size, frame, string,
+colour, line pitch, placement, &offset, 0, flags)` (callers `0x1402995A0`, `0x14013F040`,
+`0x1402997F0`) takes any string; placement 0 keeps the x given, 1 / 2 / 3 replace it (x 32, centred
+on 256, right at 480); frame 0 hides its `CWnd` box. `0x1402B0EF0(w, string, 0)` replaces a shown
+window's text (the pack screen's help line `0x1404573A0` does it). Lines split at `\n`
+(`0x1402B1520`). The text goes through Re:CoM's text set `0x140259000`, which keeps the pointer
+(no copy) on a plain font: the string must live while shown. Checked (decomp).
+
+### Which Re:CoM list UI holds the list
+
+- **(a) The camp list page our KH1 pages use: not workable without a large risk.** The page's
+  pieces are the camp's: our pages call Re:CoM's camp functions on the `CCamp` object (panels
+  `0x1400E6700`, highlight bar `0x1400E07D0`, header `0x1400E4220`, side panel `0x1400E46D0`), the
+  camp's input reads (`0x140111A70` / `0x140111C30` read camp fields) and the camp's layout
+  `camp.lad` loaded by the camp's own state 3 (`0x140245940(camp+0x78, 8)`). A `CCamp` exists only
+  as the field's camp task: made by the field game object (`0x1401A9990`, `0x1401A9590`,
+  `0x1401AD4C0`: 0x2250 bytes, ctor `0x1400D2730`, the singleton `0x14087A300`), its id at field
+  `+0x5A8`, and its end noticed by the field's own state (`0x1401AAFB0`: the id's task gone →
+  `0x1401A9590(field, 0)` resumes the field's tasks). Opening one from the shop would need a second
+  owner for that life cycle, and the camp's loads and pause on top of the shop's. Checked (decomp).
+- **(b) Mode 3's own menu given a third choice: needs art not in the session.** Its two buttons are
+  `m_shop.lad` art (`0x14068EEB8` groups) at `m_shop.lad`'s layout element 0x11 entries 0 / 1; a
+  third needs a new button and a third layout entry (`FORM/0109`, not dumped), and Buy / Sell would
+  still need a list. Checked (decomp + exe).
+- **(c) Built: the shop's own list pattern, as mode 3.** Mode 2 (and mode 5's yes / no) show a list
+  as a `CTextWnd`'s lines with the shop's finger cursor stepping over them; the list runs as mode 3
+  of Re:CoM's own state machine. Every piece is Re:CoM's: its text window class opened with its
+  explicit open, the shop's finger, text window, frame, help bar, Moogle Point window, sounds and
+  payment; Re:CoM draws, steps and closes them. The rules are ours (the feature).
+
+### What runs (Combat = KH1, Sora's story)
+
+1. **Mode 3's init** (`0x1403A53F0`, wrapped; 10 bytes moved, nothing branches into them): with
+   room for 5 cards and the free pack not given, Re:CoM's init runs (mode 1, then mode 3 again).
+   Else the shop's own mode-3 update slot (`+0x178`, the object's data, checked to hold Re:CoM's
+   `0x1403A8EF0` first) gets our update, and the windows are set up as Re:CoM's mode-3 init sets
+   them for choice 0 (frame 2, point window shown, help bar 2, models' mode 2, text window message
+   2, the Moogle posed, cursors hidden), the finger as mode 2 prepares it (look 0, priority 0x16).
+   Without room for 5 cards the list opens anyway (items need no card room). At Combat = Re:CoM or
+   in Riku's story: Re:CoM's init, and Re:CoM's update put back if a KH1 shop left ours.
+2. **Our update** keeps Re:CoM's mode-3 states: 0 waits for the windows (`0x1403A60F0(shop, 1)`)
+   and opens the rows window (`0x1402AFF30` under the shop's text window, `0x1402B1420` at (142, 84),
+   240 × 207, pitch 23, frame 0, placement 0, Re:CoM's colour and flags, `0x1402B1980(w, 0)`,
+   `0x1402B2C80`); 1 waits for it; 2 the input; 3 / 4 close (`0x1403A6640(shop, 0)`, ours closed and
+   deleted) and switch to `+0x25C` once Re:CoM's windows are closed (`0x1403A61F0`) and the task
+   parent is idle; 100 / 0x65 leave (`0x1403A6640(shop, 1)`, `0x140459C30(bg, −1)`,
+   `0x1402AA9B0(−1, −1)`, then mode 6), as Re:CoM's states 3 / 4 / 100 / 0x65.
+3. **Input** (Re:CoM's mode 2 list's order: cancel, confirm, Up, Down; no wrap; the lock `+0x274`):
+   - Root: **Buy** / **Sell** open their page (sound 2); Sell with nothing owned: sound 5 and "Sora
+     has nothing to sell."; **Card Packs**: sound 2, `+0x25C` = 4 (mode 2 without room for 5 cards:
+     Re:CoM's own rule), the windows close; cancel: sound 4, the shop closes (Re:CoM's mode 3).
+   - Pages: cancel → the root (sound 4), the root cursor kept (also across the pack screen).
+   - The finger at (126, 96 + 23·row); the highlighted row's line in the Moogle's text window
+     (`0x1402B0EF0` on its main window while `+0x58` = 1).
+4. **Buy** (one per confirm): price ≤ Moogle Points, else sound 5 and "Not enough Moogle Points.";
+   KH1's pickup (`Inventory::pick_up`: the first empty slot, else the stock to 99), else sound 5 and
+   "Sora can't carry any more of this." (nothing paid); then sounds 2 + 0x58 and Re:CoM's payment
+   (8a.3: the spent tally and its 20000 trophy, the setter `0x14023A1D0`, the Moogle Point window).
+5. **Sell** (one per confirm): from the stock first, else the last slot holding it; sound 6 (the
+   card trade's sale sound); the points + price through the setter `0x14023A1D0` (it clamps to
+   99999) and the Moogle Point window. A row at 0 leaves the list; an empty list goes back to the
+   root.
+
+### Data (owner, 2026-11-04)
+
+| item | from | buy | sell | tag |
+|---|---|---|---|---|
+| Potion | 1F | 10 | 2 | owner's prices; sell = buy ÷ 5 (KH1's ratio, Checked (files)) |
+| Ether | 1F | 40 | 8 | ″ |
+| Hi-Potion | 2F | 30 | 6 | ″ |
+| Elixir | 7F | 200 | 40 | ″ (KH1 never sells it: buy 0) |
+| Tent | 1F | 100 | (20) | in the table, not built: never listed |
+| Camping Set | 2F | 150 | (30) | ″ |
+| Mega-Potion / Mega-Ether / Megalixir | never | – | 40 / 60 / 100 | KH1 has no buy price (0), so **KH1's own sell price** (`btltbl.bin` `+0xA`, Checked (files)) |
+
+Rows read "Potion / 10" (Buy) and "Potion x3 / 2" (Sell); names are KH1's words when plain ASCII,
+else English. The help line: "Restores HP. 10 Moogle Points. Sora has 2." / "Restores HP. Sells for
+2 Moogle Points. Sora has 3."
+
+### Sites
+
+| address | bytes | use |
+|---|---|---|
+| `0x1403A53F0` mode 3 init | `48 89 5C 24 18 57 48 83 EC 20` (10) | **hooked** |
+| `0x1403A60F0`, `0x1403A61F0`, `0x1403A6640`, `0x140114180`, `0x1402337C0`, `0x1404598C0`, `0x140459CC0`, `0x14045F3A0`, `0x14045F1E0`, `0x14045F130`, `0x1404595A0`, `0x140459C30`, `0x1404582B0`, `0x1402AA9B0`, `0x140459D60`, `0x140459890`, `0x140459A00`, `0x1404597D0`, `0x1404598A0`, `0x1404598D0`, `0x1402AFF30`, `0x1402B1420`, `0x1402B1980`, `0x1402B2C80`, `0x1402B0EF0`, `0x1402B1310`, `0x14023A1D0`, `0x1401B16C0`, `0x1402BA6F0` | 7..18 bytes each | called (`SHOP_CALLEES`) |
+| `0x1403A4431` (85), `0x1403A53FA` (363), `0x1403A9152` (277), `0x1403A6D74` (224), `0x1403A7041` (197), `0x1403A8095` (13), `0x14065BA30` (8) | | checked only: the mode-3 record, mode 3's init after the hook and its leaving states, the pack buy's sounds and payment, the sale sound, mode 2's rows |
+
+Removed with the Items tab: the pack-screen hook `0x1403A6930` and its callees / checked sites
+(the refresh, the pack class, the `C2DCard` calls, the tab and grid code, the tables). All 37 shop
+site byte sets (and every one of the 714 byte sites a script parsed from `sites.rs`) compared with
+`recomsteam.exe` (pefile): 0 mismatches. Checked (exe).
+
+### Per frame
+
+Nothing outside the shop's mode 3. In it: Re:CoM's state machine calls our update instead of its
+own; in the input state four pad reads, the inventory read, and the texts set only when they change.
+
+### Logs
+
+`shop: KH1's Moogle shop list (M8c): …` and `hooked shop mode 3 init …` at start; then (80 lines at
+most) `KH1 list (mode 3): floor tier Early, 500 Moogle Points, room for a pack: true`, `bought
+potion for 10: 500 -> 490 Moogle Points, Slot(0)`, `refused …`, `sold ether for 8: … from Stock(2),
+2 left`, `Card Packs: on to Re:CoM's mode 4`, `shop left from the KH1 list`, `first visit: Re:CoM's
+free pack (mode 1) before the list`.
+
+### 1:1 checks
+
+- **Checked (decomp + disasm + exe)**, by tests (`shop::tests`, `sites::tests::shop_sites`): the
+  floor tiers; the mode-3 record slots; mode 3's room rule, first-visit rule and window set-up (call
+  by call); its leaving states; the list's read order and no-wrap (mode 2's); the sounds (1, 2,
+  2 + 0x58, 4, 5, 6); the payment (clamp, tally, trophy); KH1's pickup; KH1's sell ratio and the
+  Mega items' KH1 sell prices.
+- **Not KH1's by the owner's choice**: the prices, the stock by Re:CoM's floor tiers, the list's
+  look (Re:CoM's assets).
+- **Not checked**: in game. The rows window's place and the finger's line-up with the text
+  (Assumption: the first line at the window's top, pitch 23 as mode 2's rows); the help line's fit
+  in the Moogle's text window (its message record is in a file not in the session); KH1's own sell
+  source (stock or slots: not read; ours stock first).
+
+### Assumptions
+
+1. The rows' place (142, 84) and the finger at (126, 96 + 23·row) line up; the CTextWnd's type 0
+   and `0x1402B1980(w, 0)` show the text at once.
+2. The text window's main `CTextWnd` shows Re:CoM's mode-3 message 2 for its opening frames
+   before our line replaces it (`0x1402B0EF0` needs state 5).
+3. The shop is always left through Re:CoM's states (mode 6); a torn-down shop takes our rows
+   window with its text window (its task parent).
+4. KH1's words for item names are plain ASCII (else English).
+
+### Open questions (owner)
+
+1. **Card Packs without room for 5 cards**: Re:CoM's mode 2 (offers the card trade; "No" leaves
+   the shop). (a) keep (built: Re:CoM's rule); (b) refuse with sound 5 and a line; (c) straight to
+   the card trade.
+2. **The card trade** (Re:CoM's "Charge", mode 5) has no row: it stays reachable from the pack
+   screen (Square) and the no-room screen. (a) keep; (b) a fourth row "Trade Cards".
+3. **Selling equipped items**: built: the stock first, then the item slots. (a) keep; (b) the stock
+   only (slot items not sellable).
+
+### What the owner should test
+
+Combat = KH1, Sora's story, a Moogle room (`kh1_test_items = on` puts items in stock to sell).
+
+1. Log: `shop: KH1's Moogle shop list (M8c)` and `hooked shop mode 3 init (0x1403A53F0)`.
+2. Talk to the Moogle (not the first visit): three rows **Buy / Sell / Card Packs**, the finger on
+   Buy, the Moogle's line "Buy items with Moogle Points." Up / Down move (sound 1, no wrap).
+3. Buy on 1F: Potion / 10, Ether / 40; on 2F–6F also Hi-Potion / 30; 7F and up also Elixir / 200.
+   Confirm: buy sounds, the Moogle Points drop at once; the line counts up "Sora has N". Too few
+   points or nothing more fits: the error sound and the line says why, nothing paid.
+4. Sell: every item Sora has with "xN / price" (Mega items too: 40 / 60 / 100); confirm: sound 6,
+   points up, the count drops; a row at 0 goes; selling everything returns to the root. Sell with
+   nothing: the error sound.
+5. Card Packs: Re:CoM's pack screen with its four tabs, no Items tab; buy a pack as usual. Cancel:
+   back to the list with the finger on Card Packs. Square in the pack screen: the card trade, its
+   cancel back to the list.
+6. Cancel on the root: the shop closes as before. Save, reload: bought items and points kept.
+7. First visit to a Moogle: Re:CoM's free pack first, then the list.
+8. Combat = Re:CoM or Riku's story: Re:CoM's shop (packs / card trade), unchanged.
+9. Report where the rows and the finger sit, and whether the Moogle's line fits.
