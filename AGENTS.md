@@ -11,6 +11,14 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 205: Ragnarok offered against any target, version 0.101.4 (2026-11-01)
+
+- Ask (owner, 2026-11-03): "Any target" (not KH1's: KH1 offers it only for a target at least 160 above Sora).
+- `specials::RAGNAROK_HEIGHT_RULE = false`: the prompt and the Sleights list share the check; range 600, 3 MP, the ground rule and the move unchanged; Sonic Blade keeps its KH1 height rule; Ragnarok's help line updated. Side effect: KH1's prompt checks Ragnarok before Ars Arcanum and Sonic Blade, so with Ragnarok equipped and 3+ MP the prompt shows Ragnarok for any enemy within 6 m (the other two still in the Sleights list; owner question).
+- Checked: tests, Windows build. Not checked: in game.
+
+---
+
 ## Stage 204: Fix: the KH1 specials' merge (0.101.0–0.101.2 didn't build), version 0.101.3 (2026-11-01)
 
 - The merge of M12 step 7 into testing hit three conflicts with 0.100.5 / 0.100.6 (`sleights.rs` doc lines, `win/command_menu.rs`'s Sleights-list fill, `docs/recom-m12-sleights.md` § 8.5.3), and 0.101.0–0.101.2 were committed with the conflict markers in them: those three versions didn't compile and were never built or installed.
