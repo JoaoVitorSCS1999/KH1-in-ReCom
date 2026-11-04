@@ -601,3 +601,8 @@ At KH1 setting:
 - **Sleights list and ability section** (owner, 2026-11-04, verbatim: "The same thing for the sleights menu. I think we should have also have "sleights" have its own menu in the ability list"):
   - Squeeze to fit also covers the command menu's Sleights list (e.g. "Firaga Burst", "Homing Blizzara").
   - The sleight abilities get their own **"Sleights"** section in the KH1 ability list, like "Enemy Skills", with the same equip rules, AP and order.
+- **Sleights outside battle** (owner, 2026-11-04, on `recom-field-sleights.md`):
+  - **(a) Plain field strike**: Re:CoM's own sleight code runs in the field; a hit on a field Heartless is Re:CoM's field strike (the battle starts with first strike; the sleight is cut short).
+  - **Free in the field**: no MP for a sleight used outside battle.
+  - **Re:CoM's special field reactions kept, for sleights and spells**: Thunder Raid paralyses, Teleport freezes (and the others Re:CoM has); KH1 Thunder and Stop in the field get Re:CoM's paralyse / freeze too, instead of starting the battle at once.
+  - **Which**: all sleights, the KH1 specials (Sonic Blade, Strike Raid, Ars Arcanum, Ragnarok; this lifts "only in battle") and the LV3 summons.
