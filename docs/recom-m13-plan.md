@@ -76,6 +76,23 @@ with `.ese` tables written by the asset step. Re:CoM loads, steps, draws and end
 - Stand-ins: Guard and Counterattack sounds; guard and clash sparks; the Bandit's scimitar; the Fat Bandit's
   flame; the Gargoyle's ball; the Yellow Opera warning; the Aero barrier.
 
+## Stage 1 checks (2026-11-03)
+
+- **Re:CoM's effect clock = KH1's: 30 Hz.** Checked (decomp):
+  - `0x140258660` sets `0x14087CF40` = task dt × 0.02, which is 1.0 per 60 Hz frame (`recom-timing.md`);
+  - `0x140258B00` → `0x140255780` → `0x140475820` stores it at `0x140C42584`;
+  - `0x140474F60` adds it to the instance's `+0xD4` and steps the program (`0x1404797F0`, +0x1000 per tick)
+    once per 2.0.
+  This is the same as KH1's `0x1401ECB50`. In Re:CoM's 30 fps rooms dt is 100, so the step is 2.0: one program
+  step per update, still 30 Hz. **KH1's effect lifetimes carry over unconverted.**
+- **Re:CoM never reads a program's `+0xFC` sound.** Checked (decomp: KH1 reads it in its instance pool,
+  `0x1401E*` around `0x1401EC470`; Re:CoM's decomp has no reader). Re:CoM's sound comes only from the
+  `.ese` passed into `0x140255F00` (looked up by `0x1402A4A10`). So the asset step writes one `.ese` row per
+  KH1 program with a sound: `{id, group, index, volume}`. The KH1 volume `+0xFE` → `.ese` volume mapping is
+  still open.
+- **Where Sora's effects load:** PLAYER 1's LINK `31000` = category 3 (EFFECT), group 1000 = `EF1000.EFF`
+  (`ex_0010.dpx`, `ex_5010.dpx`, `ex_0010.ese`). Checked (files).
+
 ## Open (ask at their stage)
 
 - No hit-stop at KH1 (none found in KH1: `recom-m13-kh1-fx.md` § 2; this corrects the clash "hit-stop" in
