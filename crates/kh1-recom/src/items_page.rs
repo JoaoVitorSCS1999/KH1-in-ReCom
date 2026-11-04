@@ -222,20 +222,20 @@ pub enum Outcome {
     Done(Effect),
 }
 
-/// KH1's item kinds the stock list shows (`0x140545320`: 0, 12, 13). Our store holds the battle
-/// items (kind 0) and (M8c stage 2) the Tent and the Camping Set (kind 12). Checked (exe).
+/// KH1's item kinds the stock list shows (`0x140545320`: 0, 12, 13). Our list: the items in play
+/// (`id::IN_PLAY`, the four battle items; the removed Mega items, Tent and Camping Set never show,
+/// M8d). Checked (exe).
 pub fn stock_list(inv: &Inventory) -> Vec<u8> {
-    sorted(it::id::HELD.into_iter().filter(|&i| inv.stock_of(i) > 0))
+    sorted(it::id::IN_PLAY.into_iter().filter(|&i| inv.stock_of(i) > 0))
 }
 
-/// The list to equip from (`0x1402E8F50`): kind 0 with a count (never a Tent).
+/// The list to equip from (`0x1402E8F50`): kind 0 with a count.
 pub fn equippable(inv: &Inventory) -> Vec<u8> {
-    sorted(it::id::HELD.into_iter().filter(|&i| inv.stock_of(i) > 0 && it::is_battle_item(i)))
+    sorted(it::id::IN_PLAY.into_iter().filter(|&i| inv.stock_of(i) > 0 && it::is_battle_item(i)))
 }
 
 /// KH1's sort (`0x14030EEB0`: the row's `+0x10` key, then the id). The battle items' keys are their
-/// ids (1, 2, 3, 4, 6, 7, 8), the Tent's 101, the Camping Set's 102. Checked (files: the owner's
-/// `btltbl.bin`).
+/// ids (1, 2, 3, 4, 6, 7, 8). Checked (files: the owner's `btltbl.bin`).
 fn sorted(ids: impl Iterator<Item = u8>) -> Vec<u8> {
     let mut v: Vec<u8> = ids.collect();
     v.sort_by_key(|&i| (it::data(i).map_or(u16::MAX, |d| d.sort), i));
@@ -243,14 +243,14 @@ fn sorted(ids: impl Iterator<Item = u8>) -> Vec<u8> {
 }
 
 /// KH1's `0x1402CD3A0` (the pause menu's can-use, its bit 0): HP items while HP is below max,
-/// Ethers while MP is below max, Elixirs while either is; the Tent (case 0x8E) while HP is, the
-/// Camping Set (0x8F) while HP or MP is. Checked (decomp). At full the Use row greys and its
-/// confirm is the error sound (the page's rule for every item).
+/// Ethers while MP is below max, Elixirs while either is. Checked (decomp). At full the Use row
+/// greys and its confirm is the error sound (the page's rule for every item). A removed item
+/// (M8d: the Tent, the Camping Set) is never usable.
 pub fn can_use(item: u8, ctx: Ctx) -> bool {
     match item {
-        it::id::POTION | it::id::HI_POTION | it::id::MEGA_POTION | it::id::TENT => ctx.hp_low,
+        it::id::POTION | it::id::HI_POTION | it::id::MEGA_POTION => ctx.hp_low,
         it::id::ETHER | it::id::MEGA_ETHER => ctx.mp_low,
-        it::id::ELIXIR | it::id::MEGALIXIR | it::id::CAMPING_SET => ctx.hp_low || ctx.mp_low,
+        it::id::ELIXIR | it::id::MEGALIXIR => ctx.hp_low || ctx.mp_low,
         _ => false,
     }
 }
@@ -270,8 +270,7 @@ fn add(inv: &mut Inventory, item: u8, n: i8) {
     }
 }
 
-/// KH1's discard test (`0x1402E8AA0`: kind isn't 13); all battle items and the Tents can be
-/// discarded.
+/// KH1's discard test (`0x1402E8AA0`: kind isn't 13); all battle items can be discarded.
 fn discardable(item: u8) -> bool {
     it::data(item).is_some_and(|d| d.kind != 13)
 }
@@ -754,12 +753,12 @@ mod tests {
 
     #[test]
     fn the_stock_list_is_sorted_with_counts() {
-        let v = inv(&[], &[(MEGALIXIR, 1), (ETHER, 12), (POTION, 3)]);
-        assert_eq!(stock_list(&v), vec![POTION, ETHER, MEGALIXIR]);
+        let v = inv(&[], &[(ELIXIR, 1), (ETHER, 12), (POTION, 3)]);
+        assert_eq!(stock_list(&v), vec![POTION, ETHER, ELIXIR]);
         let mut s = Screen::new();
         s.stack.push((Mode::List(Owner::Stock), 0));
         assert_eq!(labels(&s, &v, LOW)[1], (Label::Stocked(ETHER, 12), false));
-        assert_eq!(equippable(&v), vec![POTION, ETHER, MEGALIXIR]);
+        assert_eq!(equippable(&v), vec![POTION, ETHER, ELIXIR]);
     }
 
     #[test]
@@ -961,38 +960,13 @@ mod tests {
     }
 
     #[test]
-    fn the_tents_are_used_from_the_stock_and_refused_at_full() {
-        let mut v = inv(&[POTION, 0, 0], &[(CAMPING_SET, 1), (TENT, 2), (ETHER, 1)]);
-        // KH1's order: the battle items, then the Tent (101), the Camping Set (102).
-        assert_eq!(stock_list(&v), vec![ETHER, TENT, CAMPING_SET]);
-        assert_eq!(equippable(&v), vec![ETHER], "a Tent never goes in a slot");
-        let mut s = Screen::new();
-        pick(&mut s, &mut v, LOW, 1);
-        assert_eq!(labels(&s, &v, LOW)[1], (Label::Stocked(TENT, 2), false));
-        assert_eq!(pick(&mut s, &mut v, LOW, 1), Outcome::Opened);
-        assert_eq!(s.mode(), Mode::Commands(Source::Stock(TENT)));
-        // Use, no Move (not a battle item: `0x1402E8A00`), no Equip / Remove (the stock), Discard.
-        assert_eq!(s.rows(&v, LOW).iter().map(|r| r.grey).collect::<Vec<_>>(), vec![false, true, true, false]);
-        // At full HP the Tent's Use is greyed: the error sound, nothing used.
-        let hp_full_mp_low = Ctx { hp_low: false, mp_low: true };
-        assert!(s.rows(&v, hp_full_mp_low)[0].grey);
-        let before = v;
-        assert_eq!(pick(&mut s, &mut v, hp_full_mp_low, 0), Outcome::Refused);
-        assert_eq!(v, before);
-        assert_eq!(pick(&mut s, &mut v, LOW, 0), Outcome::Done(Effect::Used { item: TENT, from: Source::Stock(TENT) }));
-        assert_eq!(v.stock_of(TENT), 1);
-        assert_eq!(s.mode(), Mode::List(Owner::Stock));
-        // The Camping Set: usable while HP or MP is below max.
-        assert!(can_use(CAMPING_SET, hp_full_mp_low) && can_use(CAMPING_SET, Ctx { hp_low: true, mp_low: false }) && !can_use(CAMPING_SET, FULL));
-        assert!(can_use(TENT, Ctx { hp_low: true, mp_low: false }) && !can_use(TENT, hp_full_mp_low));
-        // Discarded like any item.
-        s.set_cursor(2);
-        pick(&mut s, &mut v, LOW, 2);
-        pick(&mut s, &mut v, LOW, 3);
-        assert_eq!(pick(&mut s, &mut v, LOW, 0), Outcome::Done(Effect::Discarded { item: CAMPING_SET, from: Source::Stock(CAMPING_SET) }));
-        assert_eq!(v.stock_of(CAMPING_SET), 0);
-        assert_eq!(text::english(TENT), b"Tent\0");
-        assert_eq!(text::english(CAMPING_SET), b"Camping Set\0");
+    fn the_removed_items_never_show_or_work() {
+        // A stock holding removed items (a save before its conversion: the store converts it at
+        // its first read, so the page never meets one): the lists show only the items in play.
+        let v = inv(&[POTION, 0, 0], &[(CAMPING_SET, 1), (TENT, 2), (ETHER, 1), (MEGA_ETHER, 3)]);
+        assert_eq!(stock_list(&v), vec![ETHER]);
+        assert_eq!(equippable(&v), vec![ETHER]);
+        assert!(!can_use(TENT, LOW) && !can_use(CAMPING_SET, LOW));
     }
 
     #[test]

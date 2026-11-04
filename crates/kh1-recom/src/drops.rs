@@ -63,9 +63,9 @@ pub fn roll(table: &[Drop], lucky: f32, mut rand: impl FnMut() -> f32) -> Vec<u8
 }
 
 /// Whether a dropped KH1 item becomes a prize here: the items in play (`crate::items::id::IN_PLAY`:
-/// the battle items and, M8c stage 2, the Tent and the Camping Set, which KH1's Barrel Spider
-/// drops at 1 % / 0.5 %). M8c stage 3: a Mega item (removed at Combat = KH1) gives nothing, not
-/// its plain item ([`Dropped::Removed`]). KH1's other drops (synthesis materials, accessories, …)
+/// Potion, Hi-Potion, Ether, Elixir). A removed item (M8c stage 3: the Mega items; M8d: the Tent
+/// and the Camping Set, which KH1's Barrel Spider drops at 1 % / 0.5 %) gives nothing, not its
+/// plain item ([`Dropped::Removed`]). KH1's other drops (synthesis materials, accessories, …)
 /// have no place yet: not spawned.
 pub fn spawnable(item: u8) -> bool {
     crate::items::id::IN_PLAY.contains(&item)
@@ -166,7 +166,8 @@ pub enum Dropped {
     Spawned(u8),
     /// It dropped in KH1 but the mod has no such item: not made.
     NotAnItemHere(u8),
-    /// A Mega item (M8c stage 3: removed at Combat = KH1): not made, nothing instead.
+    /// A removed item (the Mega items, M8c stage 3; the Tent and the Camping Set, M8d): not made,
+    /// nothing instead.
     Removed(u8),
 }
 
@@ -245,15 +246,16 @@ mod tests {
     fn only_the_items_in_play_become_prizes() {
         let o = outcome(&AIR_SOLDIER, 1.0, seq(&[0.0, 0.0, 0.0]));
         assert_eq!(o, vec![Dropped::Spawned(1), Dropped::Spawned(2), Dropped::NotAnItemHere(237)]);
-        for i in [1, 2, 3, 4, 142, 143] {
+        for i in [1, 2, 3, 4] {
             assert!(spawnable(i), "{i}");
         }
-        for i in [0, 5, 6, 7, 8, 16, 17, 144, 233] {
+        for i in [0, 5, 6, 7, 8, 16, 17, 142, 143, 144, 233] {
             assert!(!spawnable(i), "{i}");
         }
-        // The Barrel Spider (Checked (files): #142 1 %, #143 0.5 %, #253 1 %): its Tents drop now.
+        // The Barrel Spider (Checked (files): #142 1 %, #143 0.5 %, #253 1 %): its Tents are removed
+        // (M8d): nothing drops in their place.
         let spider = [Drop { chance: 0.01, item: 142 }, Drop { chance: 0.005, item: 143 }, Drop { chance: 0.01, item: 253 }];
-        assert_eq!(outcome(&spider, 1.0, seq(&[0.0])), vec![Dropped::Spawned(142), Dropped::Spawned(143), Dropped::NotAnItemHere(253)]);
+        assert_eq!(outcome(&spider, 1.0, seq(&[0.0])), vec![Dropped::Removed(142), Dropped::Removed(143), Dropped::NotAnItemHere(253)]);
         // The Search Ghost's Mega-Potion (1 %) gives nothing, not a Hi-Potion.
         let ghost = [Drop { chance: 0.02, item: 2 }, Drop { chance: 0.01, item: 6 }, Drop { chance: 0.04, item: 249 }];
         assert_eq!(outcome(&ghost, 1.0, seq(&[0.0])), vec![Dropped::Spawned(2), Dropped::Removed(6), Dropped::NotAnItemHere(249)]);

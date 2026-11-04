@@ -50,18 +50,14 @@ pub fn tier(floor: u32) -> Tier {
     }
 }
 
-/// What the shop can sell (owner, 2026-11-04). M8c stage 2: the Tent and the Camping Set are built
-/// (KH1's items 142 / 143, `crate::items`).
+/// What the shop can sell (owner, 2026-11-04). The Tent and the Camping Set (M8c stage 2) were
+/// removed from the game in M8d (owner: "just remove tents and camping sets from the game").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Ware {
     Potion,
     HiPotion,
     Ether,
     Elixir,
-    /// KH1 item 142.
-    Tent,
-    /// KH1 item 143.
-    CampingSet,
 }
 
 impl Ware {
@@ -72,8 +68,6 @@ impl Ware {
             Ware::HiPotion => Some(id::HI_POTION),
             Ware::Ether => Some(id::ETHER),
             Ware::Elixir => Some(id::ELIXIR),
-            Ware::Tent => Some(id::TENT),
-            Ware::CampingSet => Some(id::CAMPING_SET),
         }
     }
 
@@ -84,8 +78,6 @@ impl Ware {
             Ware::HiPotion => 30,
             Ware::Ether => 40,
             Ware::Elixir => 200,
-            Ware::Tent => 100,
-            Ware::CampingSet => 150,
         }
     }
 
@@ -96,15 +88,13 @@ impl Ware {
 }
 
 /// The stock, in list order, with the first tier each ware is sold at (owner, 2026-11-04): 1F
-/// Potion, Ether, Tent; from 2F also Hi-Potion and Camping Set; from 7F also Elixir. The list keeps
-/// KH1's item order (Potion, Hi-Potion, Ether, Elixir; then Tent, Camping Set).
-pub const STOCK: [(Ware, Tier); 6] = [
+/// Potion, Ether; from 2F also Hi-Potion; from 7F also Elixir. KH1's item order. Lucky Bounty at
+/// KH1 uses these tiers too (`crate::party::lucky_bounty`).
+pub const STOCK: [(Ware, Tier); 4] = [
     (Ware::Potion, Tier::First),
     (Ware::HiPotion, Tier::Early),
     (Ware::Ether, Tier::First),
     (Ware::Elixir, Tier::Mid),
-    (Ware::Tent, Tier::First),
-    (Ware::CampingSet, Tier::Early),
 ];
 
 /// The items the Buy list shows on a tier: the built wares sold there, in [`STOCK`]'s order.
@@ -140,11 +130,11 @@ pub fn owned(inv: &it::Inventory, item: u8) -> u32 {
     inv.stock_of(item) as u32 + inv.filled().iter().filter(|s| s.1 == item).count() as u32
 }
 
-/// The Sell list: every item Sora has, with its count, in KH1's item order (`id::HELD`: the battle
-/// items, then the Tent and the Camping Set). A save's Mega items are converted before the shop
-/// reads the store (`crate::items::convert_removed`): their rows never show at Combat = KH1.
+/// The Sell list: every item in play Sora has (`id::IN_PLAY`), with its count, in KH1's item order.
+/// A save's removed items (the Mega items, the Tent, the Camping Set) are converted before the shop
+/// reads the store (`crate::items::convert_removed`): they never show at Combat = KH1.
 pub fn sell_list(inv: &it::Inventory) -> Vec<(u8, u32)> {
-    id::HELD.iter().map(|&i| (i, owned(inv, i))).filter(|s| s.1 > 0 && sell_price(s.0).is_some()).collect()
+    id::IN_PLAY.iter().map(|&i| (i, owned(inv, i))).filter(|s| s.1 > 0 && sell_price(s.0).is_some()).collect()
 }
 
 // ---- Buying and selling ----
@@ -404,10 +394,8 @@ pub mod text {
     pub const POOR: &str = "Not enough Moogle Points.";
     pub const NO_ROOM: &str = "Sora can't carry any more of this.";
 
-    /// What an item does (Sora only: our items heal Sora). M8c stage 2: the Tents say Sora where
-    /// KH1's say the party (owner, 2026-11-04: "Tents and camping sets should have their
-    /// descriptions changed to say sora instead of "to the party""); ours in English, as the
-    /// others (KH1's help texts are not in the asset step).
+    /// What an item does (Sora only: our items heal Sora); ours in English (KH1's help texts are
+    /// not in the asset step).
     pub fn what(item: u8) -> &'static str {
         use crate::items::id::*;
         match item {
@@ -415,14 +403,9 @@ pub mod text {
             HI_POTION => "Restores more HP.",
             ETHER | MEGA_ETHER => "Restores MP.",
             ELIXIR | MEGALIXIR => "Restores all HP and MP.",
-            TENT => TENT_HELP,
-            CAMPING_SET => CAMPING_SET_HELP,
             _ => "",
         }
     }
-
-    pub const TENT_HELP: &str = "Fully restores Sora's HP.";
-    pub const CAMPING_SET_HELP: &str = "Fully restores Sora's HP and MP.";
 }
 
 /// A refusal shown on the help line until the next move.
@@ -535,8 +518,7 @@ pub const FIRST_ROW_Y: f32 = 96.0;
 pub const ROWS_X: i32 = 142;
 pub const ROWS_WIDTH: i32 = 240;
 pub const ROW_LINE: u32 = ROW_PITCH as u32;
-/// Most rows any page has: the 7 battle items + the Tent and the Camping Set (the Sell list's most;
-/// the Mega items never show at Combat = KH1, but the list's room keeps them).
+/// Most rows any page has (room kept for the 7 battle items + 2; the four items in play use 4).
 pub const MAX_ROWS: usize = 9;
 
 /// The finger's y on row `i`.
@@ -572,18 +554,16 @@ mod tests {
     #[test]
     fn stock_by_floor() {
         use id::*;
-        // The owner's: 1F Potion, Ether, Tent; 2F+ Hi-Potion, Camping Set; 7F+ Elixir.
-        assert_eq!(buy_list(tier(1)), [POTION, ETHER, TENT]);
-        assert_eq!(buy_list(tier(2)), [POTION, HI_POTION, ETHER, TENT, CAMPING_SET]);
-        assert_eq!(buy_list(tier(6)), [POTION, HI_POTION, ETHER, TENT, CAMPING_SET]);
-        assert_eq!(buy_list(tier(7)), [POTION, HI_POTION, ETHER, ELIXIR, TENT, CAMPING_SET]);
-        assert_eq!(buy_list(tier(13)), [POTION, HI_POTION, ETHER, ELIXIR, TENT, CAMPING_SET]);
-        assert_eq!(Ware::Tent.item(), Some(TENT));
-        assert_eq!(Ware::CampingSet.item(), Some(CAMPING_SET));
+        // The owner's: 1F Potion, Ether; 2F+ Hi-Potion; 7F+ Elixir.
+        assert_eq!(buy_list(tier(1)), [POTION, ETHER]);
+        assert_eq!(buy_list(tier(2)), [POTION, HI_POTION, ETHER]);
+        assert_eq!(buy_list(tier(6)), [POTION, HI_POTION, ETHER]);
+        assert_eq!(buy_list(tier(7)), [POTION, HI_POTION, ETHER, ELIXIR]);
+        assert_eq!(buy_list(tier(13)), [POTION, HI_POTION, ETHER, ELIXIR]);
         assert!(STOCK.iter().all(|s| s.0.item().is_some()), "every ware is built");
-        // The Mega items are never in the shop.
+        // The removed items (Mega, Tent, Camping Set) are never in the shop.
         for t in [Tier::First, Tier::Early, Tier::Mid, Tier::Late] {
-            for m in [MEGA_POTION, MEGA_ETHER, MEGALIXIR] {
+            for m in id::REMOVED {
                 assert!(!buy_list(t).contains(&m));
             }
         }
@@ -593,14 +573,12 @@ mod tests {
     fn prices() {
         use id::*;
         assert_eq!([POTION, HI_POTION, ETHER, ELIXIR].map(buy_price), [Some(10), Some(30), Some(40), Some(200)]);
-        assert_eq!([Ware::Tent.price(), Ware::CampingSet.price()], [100, 150]);
-        assert_eq!([TENT, CAMPING_SET].map(buy_price), [Some(100), Some(150)]);
-        assert_eq!([TENT, CAMPING_SET].map(sell_price), [Some(20), Some(30)]);
+        assert_eq!([TENT, CAMPING_SET].map(buy_price), [None, None]);
         assert_eq!([POTION, HI_POTION, ETHER, ELIXIR].map(sell_price), [Some(2), Some(6), Some(8), Some(40)]);
         // The Mega items: KH1 has no buy price, so KH1's sell price.
         assert_eq!([MEGA_POTION, MEGA_ETHER, MEGALIXIR].map(buy_price), [None, None, None]);
         assert_eq!([MEGA_POTION, MEGA_ETHER, MEGALIXIR].map(sell_price), [Some(40), Some(60), Some(100)]);
-        // KH1's own ratio, which the owner's prices keep (the Tents' too: 250 / 50, 500 / 100).
+        // KH1's own ratio, which the owner's prices keep.
         for d in it::DATA.iter().filter(|d| d.buy != 0) {
             assert_eq!(d.buy as i32 / d.sell as i32, SELL_DIVISOR, "{}", d.id);
         }
@@ -626,26 +604,16 @@ mod tests {
     }
 
     #[test]
-    fn the_tents_are_bought_into_the_stock_and_sold_from_it() {
+    fn the_tents_are_neither_bought_nor_sold() {
         let mut inv = Inventory::new_game();
-        assert_eq!(buy(id::TENT, 99, &mut inv), Buy::Poor { item: id::TENT, price: 100 });
-        assert_eq!(buy(id::TENT, 250, &mut inv), Buy::Bought { item: id::TENT, price: 100, points: 150, to: Picked::Stock(1) });
-        assert_eq!(buy(id::CAMPING_SET, 150, &mut inv), Buy::Bought { item: id::CAMPING_SET, price: 150, points: 0, to: Picked::Stock(1) });
-        assert!(inv.filled().is_empty(), "the slots stay empty");
-        inv.set_stock(id::TENT, 99);
-        let before = inv;
-        assert_eq!(buy(id::TENT, 500, &mut inv), Buy::NoRoom { item: id::TENT });
-        assert_eq!(inv, before);
+        assert_eq!(buy(id::TENT, 500, &mut inv), Buy::NotSold);
+        assert_eq!(buy(id::CAMPING_SET, 500, &mut inv), Buy::NotSold);
+        // A stock holding them (before the store's conversion): no Sell rows.
+        inv.set_stock(id::TENT, 2);
+        inv.set_stock(id::CAMPING_SET, 1);
         inv.set_stock(id::ETHER, 1);
-        assert_eq!(sell_list(&inv), [(id::ETHER, 1), (id::TENT, 99), (id::CAMPING_SET, 1)]);
-        assert_eq!(sell(id::CAMPING_SET, 0, &mut inv), Sell::Sold { item: id::CAMPING_SET, price: 30, points: 30, from: SoldFrom::Stock(0), left: 0 });
-        assert_eq!(sell(id::TENT, 30, &mut inv), Sell::Sold { item: id::TENT, price: 20, points: 50, from: SoldFrom::Stock(98), left: 98 });
-        assert_eq!(sell_list(&inv), [(id::ETHER, 1), (id::TENT, 98)]);
-        // Their help lines say Sora and fit the help box.
-        for (i, t) in [(id::TENT, "Fully restores Sora's HP."), (id::CAMPING_SET, "Fully restores Sora's HP and MP.")] {
-            assert_eq!(text::what(i), t);
-            assert!(t.len() <= crate::menu::HELP_MAX && t.is_ascii() && !t.contains('%'));
-        }
+        assert_eq!(sell_list(&inv), [(id::ETHER, 1)]);
+        assert_eq!(text::what(id::TENT), "");
     }
 
     #[test]
@@ -654,16 +622,16 @@ mod tests {
         inv.slots[0] = id::POTION;
         inv.slots[2] = id::POTION;
         inv.set_stock(id::POTION, 1);
-        inv.set_stock(id::MEGALIXIR, 1);
-        assert_eq!(sell_list(&inv), [(id::POTION, 3), (id::MEGALIXIR, 1)]);
+        inv.set_stock(id::ELIXIR, 1);
+        assert_eq!(sell_list(&inv), [(id::POTION, 3), (id::ELIXIR, 1)]);
         // The stock first, then the last slot holding it.
         assert_eq!(sell(id::POTION, 100, &mut inv), Sell::Sold { item: id::POTION, price: 2, points: 102, from: SoldFrom::Stock(0), left: 2 });
         assert_eq!(sell(id::POTION, 102, &mut inv), Sell::Sold { item: id::POTION, price: 2, points: 104, from: SoldFrom::Slot(2), left: 1 });
         assert_eq!(sell(id::POTION, 104, &mut inv), Sell::Sold { item: id::POTION, price: 2, points: 106, from: SoldFrom::Slot(0), left: 0 });
         assert_eq!(sell(id::POTION, 106, &mut inv), Sell::None);
         // The row left the list.
-        assert_eq!(sell_list(&inv), [(id::MEGALIXIR, 1)]);
-        assert_eq!(sell(id::MEGALIXIR, MAX_POINTS - 10, &mut inv), Sell::Sold { item: id::MEGALIXIR, price: 100, points: MAX_POINTS, from: SoldFrom::Stock(0), left: 0 });
+        assert_eq!(sell_list(&inv), [(id::ELIXIR, 1)]);
+        assert_eq!(sell(id::ELIXIR, MAX_POINTS - 10, &mut inv), Sell::Sold { item: id::ELIXIR, price: 40, points: MAX_POINTS, from: SoldFrom::Stock(0), left: 0 });
         assert!(sell_list(&inv).is_empty());
     }
 
@@ -733,7 +701,7 @@ mod tests {
         let mut m = Menu::new(0);
         assert_eq!(rows_text(&m, &c, name), b"Buy\nSell\nCard Packs\0");
         m.page = Page::Buy;
-        assert_eq!(rows_text(&m, &c, name), b"Potion / 10\nHi-Potion / 30\nEther / 40\nTent / 100\nCamping Set / 150\0");
+        assert_eq!(rows_text(&m, &c, name), b"Potion / 10\nHi-Potion / 30\nEther / 40\0");
         m.page = Page::Sell;
         assert_eq!(rows_text(&m, &c, name), b"Potion x2 / 2\nEther x1 / 8\0");
         let inv = Inventory::new_game();

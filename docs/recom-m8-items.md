@@ -1279,6 +1279,10 @@ Combat = KH1, Sora's story, a Moogle room (`kh1_test_items = on` puts items in s
 
 ## M8c stages 2–3: Tent and Camping Set; the Mega items removed
 
+> **The Tent and the Camping Set were removed again in 0.124.0** ([M8d step 1](#m8d-step-1-the-tent-and-the-camping-set-removed)):
+> not sold, dropped, picked up, used or listed; a save's become Elixirs. The Mega items' removal
+> below stands. The KH1 findings below stay true of KH1.
+
 Owner (2026-11-04, `design-philosophy-instructions.md` § KH1 Moogle shop): "The very early game
 shops should only sell potions, ethers, and tents. Tents and camping sets should have their
 descriptions changed to say sora instead of "to the party" and should have their cost reduced";
@@ -1436,3 +1440,57 @@ Combat = KH1, Sora's story.
 6. With the asset step re-run, the names come from KH1's words (same text in English; the other
    languages KH1's).
 7. Combat = Re:CoM, or Riku's story: nothing of this; Re:CoM's shop and item cards as before.
+
+## M8d: the shop on Re:CoM's own screens
+
+Owner (2026-11-04, `design-philosophy-instructions.md` § Moogle shop redesign at KH1): "the item
+shop looks REALLY bad. … you can keep how the original menu looks, without the "buy, sell, card
+packs" Ideally, selecting the left side (usually to buy card packs) it should bring up a menu
+similar to screenshot 4, with all "card packs" replaced with the item card graphics of each item
+sold. I'm not sure how to re organize screenshot 5 (the sell page,) but Ideally i would like to
+keep the feel of the page, with the functionality to sell items of course"; answers: "Items tab,
+then packs", "Count window, stock then slots", "just remove tents and camping sets from the game".
+Combat = KH1 in Sora's story only; Combat = Re:CoM and Riku's story keep Re:CoM's shop unchanged.
+Step 1 (0.124.0) removes the Tent and the Camping Set; the screens follow.
+
+### M8d step 1: the Tent and the Camping Set removed
+
+Version 0.124.0. The way the Mega items were removed in 0.105.0 (§ M8c stages 2–3, stage 3).
+
+| what | where | tag |
+|---|---|---|
+| `id::REMOVED` = Mega-Potion, Mega-Ether, Megalixir, **Tent (142), Camping Set (143)**; `id::IN_PLAY` = Potion, Hi-Potion, Ether, Elixir. | `crate::items` | Checked (code) |
+| **Not sold**: `shop::STOCK` = the four (1F Potion, Ether; 2F+ Hi-Potion; 7F+ Elixir). Lucky Bounty (`party::lucky_bounty`) reads the same tiers: unchanged (it never gave them). | `crate::shop` | Checked (code + tests) |
+| **Not dropped**: `drops::spawnable` = `IN_PLAY`; the Barrel Spider's KH1 Tent (1 %) and Camping Set (0.5 %) give `Dropped::Removed`: nothing, logged. | `crate::drops` | Checked (code + tests) |
+| **Never added**: `Inventory::pick_up` refuses any removed item (the shop, drops, Lucky Bounty and a returned use all go through it). | `crate::items` | Checked (code + tests) |
+| **Not usable**: `items::effect` gives none; the Items page's `can_use` is false for them (the camp-only use path `camp_only` / `CAMPING_SET_FULL_MP` is gone). | `crate::items`, `crate::items_page` | Checked (code + tests) |
+| **Not listed**: the Items page's Stock and Equip lists and the shop's Sell list read `IN_PLAY`. | `crate::items_page`, `crate::shop` | Checked (code + tests) |
+
+**Owned ones.** The Mega conversion (`items::convert_removed`, checked) turns each removed item
+into its replacement in its slot, or adds it to the replacement's stock up to 99 (the rest is lost
+and logged), once, at the store's first read, and raises the block's version. It now runs on a v1
+**or v2** block and writes **v3** (`EXT_V3`; v0, never written, stays KH1's new game; a v3 block
+is left alone; older DLLs test the version only for 0). **Tent → Elixir, Camping Set → Elixir**:
+the Mega rule (the item in play that does at least what it did for Sora): the Tent filled his HP,
+the Camping Set his HP and MP (as built in 0.105.0), and only the Elixir fills HP. The Tents only
+ever sat in the stock (kind 12), so they go to the Elixir stock. Log: `items: save block v2 -> v3:
+removed items converted at Combat = KH1 (…): 0 slot(s), n from the stock, n past 99 lost`.
+
+Kept: KH1's rows 142 / 143 in `items::DATA`, their stock bytes 8 / 9 (read by the conversion),
+their English names, and the asset step's words 172 / 173 (unused now; no re-run needed).
+
+No hook, site or patch; nothing per frame.
+
+**Assumption**: a save opened in an older DLL (0.105.0..0.123.0) after this one could buy Tents
+into a v3 block, which is never converted again (they would sit unlisted in the stock bytes).
+
+**Owner question**: the replacement (built: both to Elixir). Other choices: (a) Tent → Hi-Potion,
+Camping Set → Elixir; (b) refund their sell price (20 / 30 Moogle Points) instead.
+
+**What to test** (Combat = KH1, Sora's story): load a save that has Tents / Camping Sets (an
+`kh1_test_items` save from 0.105.0+ has 9 of each): the log line `save block v2 -> v3` once; the
+camp Items page shows no Tent or Camping Set and the Elixir count rose by their number (to 99 at
+most); the Moogle shop's Buy has no Tent / Camping Set (1F Potion / Ether; 2F+ Hi-Potion; 7F+
+Elixir); Sell lists none; Barrel Spiders never drop them (log "removed … no prize"). Save, reload:
+no second conversion line.
+

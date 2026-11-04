@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 236: M8d step 1: the Tent and the Camping Set removed from the game (saves converted once to Elixirs), version 0.124.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Moogle shop redesign at KH1), verbatim: "just remove tents and camping sets from the game". Shipped first, on its own, before the shop screens (M8d). Combat = KH1 in Sora's story (the only time the store is read); Combat = Re:CoM and Riku's story unchanged.
+
+- **Removed as the Mega items were in 0.105.0** (`crate::items`): `id::REMOVED` now holds the Mega items, the Tent (142) and the Camping Set (143); `id::IN_PLAY` = Potion, Hi-Potion, Ether, Elixir. Not sold (`shop::STOCK` = the four: 1F Potion / Ether, 2F+ Hi-Potion, 7F+ Elixir; Lucky Bounty's tiers unchanged), not dropped (the Barrel Spider's KH1 1 % / 0.5 % give `Dropped::Removed`: nothing), never picked up (`Inventory::pick_up` refuses a removed item: nothing can add one), not usable (`items::effect` none; `can_use` false; `camp_only` / `CAMPING_SET_FULL_MP` gone), not listed (the Items page's Stock / Equip lists and the shop's Sell list read `IN_PLAY`).
+- **Owned ones** (checked: the Mega conversion `items::convert_removed` turned each into its plain item, in its slot or added to that item's stock up to 99, the rest lost and logged): the same function now runs on a **v1 or v2** block, and the block becomes **v3** (`ext::VERSION`, `EXT_V3`; every write v3; v0 stays KH1's new game; older DLLs read it as before). **Tent → Elixir, Camping Set → Elixir** (decided: the Mega rule, the item in play that does at least what it did for Sora: only the Elixir fills HP; the Camping Set was built as full HP and MP, the Elixir's effect). The Tents only ever sat in the stock, so they go to the Elixir stock (to 99; the rest lost, logged: `items: save block v2 -> v3: …`). A v1 block gets the Mega and Tent conversions at once.
+- Kept: KH1's rows 142 / 143 (`DATA`), their stock bytes 8 / 9 (read for the conversion), their English names and the asset step's words 172 / 173 (unused; no asset re-run).
+- No new hook, site or patch; nothing per frame (one byte compare in the store's read, as before).
+- Assumption: a save opened in an older DLL (0.105.0..0.123.0) after this one could buy Tents into a v3 block, which is never converted again (they would stay in the stock bytes, unlisted).
+- Checked: tests (`items::tests::the_tents_are_kh1s_rows_142_and_143_and_removed`, `a_saves_removed_items_are_converted_once` (v1 and v2), `items_page::tests::the_removed_items_never_show_or_work`, `shop::tests::stock_by_floor` / `the_tents_are_neither_bought_nor_sold`, `drops::tests::only_the_items_in_play_become_prizes`, `party::tests::lucky_bounty_brings_the_floors_items`), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-m8-items.md` § M8d step 1.
+
+---
+
 ## Stage 235: Lucky Bounty at KH1 brings 1–2 KH1 items per find (two at 50 %), version 0.123.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Gravity and Lucky Bounty answers, verbatim "1 1-2 items"), on 0.118.0's question (one item, or Re:CoM's 3 / 6 / 9 by level).

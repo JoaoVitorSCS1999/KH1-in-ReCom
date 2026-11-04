@@ -127,13 +127,13 @@ fn with_inventory<R>(f: impl FnOnce(&mut Inventory) -> R) -> Option<R> {
     let at = save()? + it::EXT_FIRST;
     // SAFETY: inside the 0x2AD4-byte save block (EXT_LAST < 0x2818).
     let mut block: [u8; it::EXT_LEN] = unsafe { rd(at) };
-    // M8c stage 3: a save's Mega items become their plain items, once (a v1 block).
+    // M8c stage 3 / M8d: a save's removed items become items in play, once (a v1 / v2 block).
     if let Some(c) = it::convert_removed(&mut block) {
         // SAFETY: as above.
         unsafe { wr(at, block) };
         log(&format!(
-            "items: save block v1 -> v2: Mega items removed at Combat = KH1 (Mega-Potion -> Hi-Potion, Mega-Ether -> Ether, Megalixir -> Elixir): {} slot(s), {} from the stock, {} past 99 lost",
-            c.slots, c.stock, c.lost
+            "items: save block v{} -> v3: removed items converted at Combat = KH1 (Mega-Potion -> Hi-Potion, Mega-Ether -> Ether, Megalixir -> Elixir, Tent -> Elixir, Camping Set -> Elixir): {} slot(s), {} from the stock, {} past 99 lost",
+            c.from, c.slots, c.stock, c.lost
         ));
     }
     let before = it::read(&block);
@@ -170,9 +170,8 @@ pub fn menu_ctx() -> crate::items_page::Ctx {
 /// KH1's pause-menu use (`0x14030F160` → `0x1402CD590`): the item's effect on Sora at once, no
 /// motion. HP through Re:CoM's heal `0x1401E59A0(player, amount, 0, 0, 0)` (no effect, no popup;
 /// only below max, KH1's `0x1402CD5E0`), then Re:CoM's own player → save stats copy (the camp
-/// copied them as it opened); MP through KH1's MP. The item already left the inventory. M8c
-/// stage 2: the Tent (HP to full) and the Camping Set (HP and MP to full) go the same way; the
-/// camp is their only place of use. Returns a line for the log.
+/// copied them as it opened); MP through KH1's MP. The item already left the inventory. Returns a
+/// line for the log.
 pub fn use_in_menu(item: u8) -> String {
     let Some(e) = it::effect(item) else { return "no effect".into() };
     let mut what = Vec::new();
@@ -448,7 +447,7 @@ pub fn hud_built() {
     }
     if with_inventory(it::test_inventory) == Some(true) {
         let (slots, n) = slots();
-        log(&format!("items: kh1_test_items: slots {:?} (of {n}), stock 9 of each item in play (Potion, Hi-Potion, Ether, Elixir, Tent, Camping Set; written to the save)", &slots[..n as usize]));
+        log(&format!("items: kh1_test_items: slots {:?} (of {n}), stock 9 of each item in play (Potion, Hi-Potion, Ether, Elixir; written to the save)", &slots[..n as usize]));
     }
 }
 
