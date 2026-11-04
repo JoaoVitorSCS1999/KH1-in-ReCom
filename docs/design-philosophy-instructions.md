@@ -626,3 +626,7 @@ At KH1 setting:
   - **KH1 Gravity in the field**: strikes field Heartless (Re:CoM's field strike: the battle starts with first strike).
   - **While a sleight runs in the field**: the camp is blocked, and a room-dimming sleight's i-frames apply in the field too.
 - **Gravity** (owner, 2026-11-04, verbatim: "Gravity spell is too small. Also when the enemy is flattened from gravity, sora is unable to attack them, lets fix that"): the KH1 Gravity spell's visual is sized to KH1's; a flattened enemy stays hittable by Sora, as in KH1.
+- **Gravity and Lucky Bounty answers** (owner, 2026-11-04, verbatim: "1 1-2 items 2 yes 3 make it the size of re:com gravity"):
+  - **Lucky Bounty** brings **1–2 KH1 items** per find.
+  - **KH1's own hit flatten at Damage = KH1**: build it (a Gravity-hit enemy flattens as in KH1).
+  - **Gravity's sphere is drawn at Re:CoM's Gravity size** (owner's choice over KH1's; the hit radius stays KH1's unless the owner says otherwise).
