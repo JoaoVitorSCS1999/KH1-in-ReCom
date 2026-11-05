@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 260: the KH1 playground is removed from the repo (2026-11-05, version 0.142.1)
+
+Owner, 2026-11-05, verbatim: "remove the playground from the github also, as its not necessary to the mod"
+
+- `crates/kh1-playground` (the 1:1 Rust demo with the mannequin Sora) is deleted, with its workspace entry, the README section and the build bot's `--exclude kh1-playground`. `Cargo.lock` drops its dependencies. The mod does not use it: no other crate depended on it (only a comment in `kh1-trace`, updated). The KH1 rewrite the mod checks against (`kh1-core`, `kh1-anim`, `kh1-data`, `kh1-formats`) stays.
+- Older docs still mention the playground as history.
+- Checked: `cargo test --workspace` passes. No DLL change.
+
+---
+
 ## Stage 259: the first-launch build shows its progress on Re:CoM's title (Re:CoM's own text) and the title waits for it; no console window, version 0.142.0 (2026-11-05)
 
 Owner, 2026-11-05, verbatim: "I definitely want a progress screen in the game window while everything loads" (0.141.0's build ran in a `rundll32` helper with a console window, inside Panacea's `OnInit`, before the game window existed).
