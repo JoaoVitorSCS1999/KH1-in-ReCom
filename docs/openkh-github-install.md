@@ -329,3 +329,4 @@ the failed marker and the start without the KH1 files when they are missing.
 - An install cloned from `testing` keeps updating from `testing` (OpenKH fetches and resets the branch it cloned: Assumption, from § 1's source reading).
 - `main` is written only when the owner says so (`design-philosophy-instructions.md`, "Release build"): a new commit on top (never a force-push) replacing the five files with the chosen `testing` version's. The build bot does not run on `main`.
 - Releases: 0.142.0 (from `testing` 1d82190).
+- The release also lives in its own repository, `PM2CRAZY/KH1-Combat-in-ReCoM` (`main`), with the same five files; `PM2CRAZY/KH1-Combat-in-ReCoM` is the name players install. The DLL finds its mod folder by its own size first (`asset_build::find_mod_folder`), so the other folder name works.

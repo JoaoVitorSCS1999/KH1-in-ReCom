@@ -16,9 +16,9 @@ the design rules are in `docs/`.
 
 1. Open the OpenKH Mods Manager and select **Kingdom Hearts Re:Chain of Memories** in its game list
    (the mod is installed for the game selected at that moment).
-2. Mods → **Install a new mod** → type `PM2CRAZY/KH1-in-ReCom` → Install. That installs the
-   **release** (the `main` branch, updated only when the owner says so). For the latest test
-   builds, install `PM2CRAZY/KH1-in-ReCom/testing` instead.
+2. Mods → **Install a new mod** → type `PM2CRAZY/KH1-Combat-in-ReCoM` → Install. That installs the
+   **release** (its own repository, updated only when the owner says so). For the latest test
+   builds, install `PM2CRAZY/KH1-in-ReCom/testing` instead; don't enable both at once.
 3. Tick the mod and press **Build** (or **Build and Run**).
 4. Start Re:CoM. **On the first start the mod builds the KH1 files** from your games: the title
    screen shows "KH1 in Re:CoM: building files from your games... N %" and the step it is on, and
