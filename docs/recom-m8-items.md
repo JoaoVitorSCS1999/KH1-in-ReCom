@@ -1629,46 +1629,142 @@ text (Re:CoM's, not read).
    them (also after a KH1 visit in the same session).
 8. Report: the cards on the packs (size, place), the art (notches, icons) and the bottom help bar.
 
-### M8d step 3 (researched, not built): the sell screen (mode 5) — a question first
+### M8d step 3 (0.130.0): the sell screen — an Items tab first in Re:CoM's card trade
 
-The owner's answer for selling was "Count window, stock then slots" (Re:CoM's count window picks
-how many). **Re:CoM's card trade has no count window** (Checked (decomp)): its windows are, by
-their RTTI and ctors in mode 5's init `0x1403A4D90`:
+Owner, 2026-11-04 (answers to the step-3 question): (1) "our own Up/Down count step on Re:CoM's
+yes/no, 1..owned, the points box shows the total, Re:CoM's yes/no sells them, stock first then
+slots"; (2) the Items tab "uses the same green bottle icon, placed **first** in the trade's strip"
+(new strip groups from the asset step, as step 2), help line "Sell items"; (3) Re:CoM's green item
+icon kept, no texture edit; (4) the Tent / Camping Set conversion: unanswered, Elixir kept. Combat
+= KH1 in Sora's story; Combat = Re:CoM and Riku's story: Re:CoM's card trade untouched.
 
-| field | class | what it is |
-|---|---|---|
-| `+0x450` | `CMShopChargePointWnd` (`0x14045AF00`) | the points the selected card sells for (`0x14045D2C0`) |
-| `+0x458` | `CMShopChargeCardRankWnd` (`0x14045AE50`) | **the 0–9 box: the card's ten values** (cells by category and value, art `0x140690430[cat × 20 + v (+10 when none)]`, the count of each under it; `0x14045D9C0` fills it, `0x14045CD40` moves over the values held, two rows of five), with a small card picture (group 0xF0) |
-| `+0x460` | `CMShopCardInfoWnd` (`0x140455D10`) | the big card (`0x14045A260(card value)`) |
-| `+0x468` | `CMShopStockCardWnd` (`0x14045AF40`) | the 3 × 3 card grid (`C2DCard`s), its scroll bar, the tab strip (group `0x1406904D0[tab]`: 182 / 185 / 184 / 183 / 181), the "cards in" counts |
-| `+0x448` | `CMShopButtonMessage` | the Square hint (only with room for 5 cards) |
+**Re:CoM's card trade** (mode 5: init `0x1403A4D90`, update `0x1403A73E0`), Checked (decomp +
+disasm + exe). Its windows (by RTTI and ctor): `+0x450` `CMShopChargePointWnd` (the points a sale
+gives, `0x14045D2C0`), `+0x458` `CMShopChargeCardRankWnd` (the 0–9 box and a small card,
+`0x14045D9C0`), `+0x460` `CMShopCardInfoWnd` (the big card, `0x14045A260(kind)`), `+0x468`
+`CMShopStockCardWnd` (the 3 × 3 grid, the scroll bar, the tab strip from `0x1406904D0[tab]` on its
+control `+0x80`, the "cards in" counts; filled by `0x14045DA80(window, data, tab, scroll, 0)`),
+`+0x448` the Square hint. Its data `+0x350` (`CMShopChargeCardData`, built by `0x14045D510`): `+8`
+298 records of 16 bytes (u16 kind, u16 count, category byte, the count per value 0..9), `+0x10 +
+tab × 4` the cards per tab (4 = ALL), `+0x24..+0x30` per category, `+0x44` the cards for the room
+rule. Fields: `+0x358` grid, `+0x35C` tab (opens on 4 = ALL), `+0x360` scroll, `+0x364` cell,
+`+0x368` value, `+0x270` yes / no, `+0x274` the input lock; cursors `+0x3D0` (the finger),
+`+0x3D8` (the grid finger), `+0x3E0` (the value finger); `+0x3C8` the help bar; `+0x3E8` the text
+window. States: 1 the tab row / the grid (cancel leaves the trade from both; on the tab row Left
+`0x408000` / Right `0x802000` repeats, sound 1, wrap 0..4; a fresh Up / Down `0x305000` enters the
+grid, sound 0xE: Down at cell 0 (`0x1403A76D8` clears scroll and cell as one qword), Up at the last
+(`0x14045BAE0`); in the grid confirm (sound 2, state 2), Up / Down / Left / Right repeats with
+wraps on fresh presses, `0x14045BB90` / `0x14045C890`); 2 the 0–9 box (confirm: sound 2, the text
+window's message 7, the finger at 232 / `0x14065BA38` (214, 237), state 3); 3 Re:CoM's yes / no
+(Yes: sound 6, state 5; No / cancel: state 4 → 2); 5 the sale once the text window is closed
+(`+0x58` = −1): its price `0x14015A6B0`, the points `0x140239FA0` (adds, caps at 99999, its 9999
+check), the point window `0x1404598A0`, the card taken `0x140159B20`, the data rebuilt. Its tab
+finger `0x14045B950`: the layout point − 62 for ALL (`subss xmm1, [0x1405092A8]` at `0x14045B9D7`),
+− 14 + 24 t for tab t.
 
-`CMShopCardCountWnd` (the name the question used) is the **pack screen's** card-count panel (made
-by mode 4's init `0x1403A4A90`, `+0x400`), not a quantity picker. The trade's data
-(`CMShopChargeCardData` at `+0x350`, built by `0x14045D510` from the cards not in a deck): 298
-records of 16 bytes (card kind, total, category 0 attack / 1 magic / 2 item / 3 enemy, the count
-of each value 0–9), the kinds per tab at `+0x10..+0x20` (tab 4 = ALL), the cards per category at
-`+0x24..+0x34`. Tabs `+0x35C` 0..4 (opens on 4, ALL; wrap). Its flow: state 1 the tab row / the
-grid (`+0x358`, scroll `+0x360`, cell `+0x364`); state 2 the 0–9 box (value `+0x368`); confirm →
-the text window's message 7 (yes / no, the finger at x 232, y 214 / 237, `0x14065BA38`); state 5
-the sale of **one card**: its price `0x14015A6B0(card value)`, the points `0x140239FA0`, the card
-taken `0x140159B20(kind, value)`, the data rebuilt `0x14045D510`. Re:CoM's own fifth tab is
-already its **item cards** (Potion … Megalixir cards, category 2).
+**Built** (`crate::shop::sell`, `win::shop`; the hook `0x1403A73E0` of step 2):
 
-**Owner question** (the quantity), native options:
+- **The Items tab**, first in the strip, before ALL; the trade **opens on it** (as the pack
+  screen's): in the grid when Sora has items (Re:CoM opens in the grid when ALL has cards). It holds
+  Sora's items (`shop::sell_list`: Potion, Hi-Potion, Ether, Elixir that Sora has) as Re:CoM's item
+  cards: a card list of ours in Re:CoM's data layout (records kind 0x2A / 0x2B / 0x2D / 0x2F, the
+  count, category 2; the per-category counts copied from Re:CoM's, so the window's "cards in"
+  numbers stay Re:CoM's), handed to **Re:CoM's own fill** `0x14045DA80` as tab 4 (every record);
+  Re:CoM's big card (`0x14045A260`) and small-card box (`0x14045D9C0`, the record's kind, the value
+  cells blank: items have no values) for the cell; with the art, the Items-lit strip played on the
+  window's strip control after the fill.
+- **Entering / leaving**: Left on ALL or Right on tab 3 (the row wraps through it) → the Items tab;
+  from it Left → tab 3, Right → ALL (Re:CoM's tab move: its fill, its blank box, its finger, the
+  help bar's id 5 back). Re:CoM's earlier reads win (cancel, the 0x80 button), Left over Right.
+- **On the Items tab** Re:CoM's state 1 replayed for our list (`shop::sell::tab_row` / `grid`:
+  Re:CoM's order, sounds 1 / 0xE / 2 / 4 / 3 / 5, wraps, the step back onto a card in a shorter
+  row, the lock), Re:CoM's cursors (`0x140459960`, `0x140459D60`, `0x1404597D0`, the cell finger
+  `0x14045B8B0`, the box's spin `0x14045B810`), the charge point window blank; the help bar's line
+  "Sell items" (owner) through Re:CoM's text set `0x140258DE0` on its text (`+0x78`). Cancel leaves
+  the trade (as Re:CoM's), Square opens the pack screen (with or without room at KH1).
+- **The count step** (Re:CoM's state 2 replaced while the tab is up; `shop::sell::count`): Up one
+  more, Down one less (held: stops at 1 / the count owned; fresh at an end: wraps), sound 0xE; the
+  charge point window shows the total (sell price × count); the grid finger stays in Re:CoM's
+  chosen look (4). Cancel: back to the grid (sound 4). Confirm (sound 2): **Re:CoM's yes / no** as
+  Re:CoM opens it (message 7, the finger at 232 / 214, state 3), its main line ours once shown
+  (Re:CoM's text call `0x1402B0EF0`): "Sell Potion x3 for 6 Moogle Points?". Re:CoM's states 3 / 4
+  run as Re:CoM's (Yes: its sound 6 and the Moogle's animation; No: back to the count).
+- **The sale** (Re:CoM's state 5 replaced while the tab is up, once its text window is closed):
+  the count sold one by one by `shop::sell` (the stock first, then the last slot holding it),
+  the total through **Re:CoM's own add** `0x140239FA0` and its Moogle Point window; the list and
+  Re:CoM's windows refreshed; back to the grid at the same cell (one back when the last item sold
+  out), or to the tab row with nothing left. Re:CoM's own sale returns to its 0–9 box while the
+  card has copies; ours returns to the grid (KH1's shop goes back to its list after a sale).
+- **The art** (asset step `shop_tabs` § `strip`, 6 more groups: `m_shop:01` 254..259): Re:CoM's
+  five strips with ALL's place split in two, the Items cell (−82..−58, Re:CoM's bottle at −70, tab
+  0's fill) and ALL (−58..−26, its fill's middle shortened, its text at −42 narrowed to 28 wide);
+  Re:CoM's four tabs untouched; the outline per layout style (the PS2 layout: Re:CoM's outline and
+  a separator at −58; the PC layouts: the Items and ALL pieces cut from Re:CoM's own pieces as new
+  sprite records over the same atlas rectangles, the bar line stretched as Re:CoM stretches it);
+  plus the Items-lit strip. At each trade start (state 0) the DLL writes Re:CoM's strip table
+  `0x1406904D0` to the art's groups 254..258 and points Re:CoM's ALL finger instruction
+  `0x14045B9D7` at Re:CoM's own float 50.0 (`0x140509298`, beside the 62.0) — Re:CoM's ALL finger
+  in the new ALL cell — and draws the stock window again when the table changed; Re:CoM's values
+  at Combat = Re:CoM. The Items finger: Re:CoM's ALL place − 20 (the bottle). Without the art:
+  Re:CoM's strip (ALL lit while on the Items tab), the Items finger one tab step right of tab 3
+  (Assumption).
 
-- (a) Re:CoM's own rhythm: **one item per sale**, as Re:CoM sells one card: the Items tab's grid
-  shows Sora's items as Re:CoM's item card pictures, the big card the selected item, the 0–9 box
-  with one lit cell carrying the owned count, the point window the sell price; confirm → Re:CoM's
-  yes / no → one sold (stock first, then slots). No count step.
-- (b) The 0–9 box as the count: its ten cells as 1..10 (the cells' art shows Re:CoM's card
-  numbers 0–9, so the digit and the count would differ by one), Re:CoM's moves over them, the point
-  window the total; at most 10 a sale.
-- (c) A count step of ours on Re:CoM's yes / no: Up / Down change how many (1..owned), the point
-  window shows the total and the line "Sell 3 Potions for 6 Moogle Points?"; Re:CoM's windows and
-  sounds, our step.
+**Sites**: no new hook. Callees: the stock window fill, the box, the big card, the charge point
+window, the tab and cell finger places, the box spin, the cursor move and look, the text window's
+message, the help bar, the Moogle Point add (the text set is checked by the HUD's). Checked: the
+tab row `0x1403A75A5`, the grid confirm `0x1403A7857`, the yes / no open `0x1403A7D5E`, the sale's
+points `0x1403A8295`, the ALL finger instruction `0x14045B9D7` and its two floats, the strip table
+`0x1406904D0`, the yes / no finger's y `0x14065BA38` and x `0x14065BCEC`. `check_sites_rs.py`:
+1370 sites, 0 mismatches.
 
-Also open: the Items tab's place in the strip (a sixth tab: new strip groups from the asset step,
-as step 2's; Re:CoM's strip has five tabs drawn as one group per lit tab) and its name beside
-Re:CoM's own item-card tab.
+**Per frame**: nothing outside the card trade; in it at Combat = KH1 one mutex read; at Re:CoM's
+tab row the pad read once more (ALL / tab 3); on the Items tab Re:CoM's state 1 / 2 replayed (a few
+calls of Re:CoM's).
+
+**Logs** (80 lines at most): `card trade: Items tab (opened on), ["potion x3", …], in the grid
+true; 120 Moogle Points`, `card trade: sell Potion x3 for 6? (…)`, `card trade: sold potion x3 of 3
+for 6: 120 -> 126 Moogle Points`, `card trade: Items tab -> Re:CoM's tab 4`, `card trade left from
+its Items tab`.
+
+**1:1 checks**: Checked (decomp + disasm + exe), by tests (`shop::tests` incl. `entering_the_sell_tab`,
+`sell_tab_row`, `sell_grid_moves_as_recoms`, `the_count_step`, `sale_totals_and_lines`;
+`sites::tests::shop_sites`; `shop_tabs::tests` incl. the owner's files): Re:CoM's input order,
+sounds, grid moves, wraps, the yes / no's opening and places, the points add, the strip's groups
+and finger constant. KH1's: the sale prices (step 1: buy ÷ 5; KH1's for the Mega items, not in
+play). Not KH1's (the owner's): the screen is Re:CoM's, the count step ours. **Not checked**: in
+game (the card list in Re:CoM's window, the cut pieces in Re:CoM's draw, the finger places, the
+text on the yes / no, the help bar's text object).
+
+**Assumptions**: the stock window's fill and the box read nothing of the data beyond what
+`0x14045D510` writes (Re:CoM's fields copied for `+0x24..+0x4C`); the strip control plays with
+Re:CoM's arguments (as step 2's window); the finger's x is in the strip's coordinates (Re:CoM's tab
+fingers sit at their icons); the help bar's `+0x78` text object takes our line as Re:CoM's message
+text (ASCII); the PC layouts of every language have the UK pieces' rectangles (the asset step
+refuses otherwise); the trade is always left through state 100.
+
+**mod.yml**: no new entries (the step-2 outputs `raw/FORM/0109/FO0109.SPR` and
+`kh1-shop-tabs.json` now carry the strips; their format is `shop-tabs 2`: **re-run the asset
+step**, an older manifest turns both Items tabs' art off).
+
+**What to test** (Combat = KH1, Sora's story, a Moogle room, a few Potions / Ethers):
+
+1. Log: `shop: tab art from … m_shop:01 groups 241..259` (after the asset step).
+2. Right Moogle (the card trade): it opens on the **first cell, the green bottle**, the cursor on
+   the first item card in the grid, the big card and small card showing it; the help bar "Sell
+   items". The strip: six cells (bottle, ALL, Re:CoM's four).
+3. Move in the grid (Re:CoM's moves and sounds). Up from the top row: the finger on the bottle.
+   Left: tab 3 (the heart); Right from the heart: the bottle; Right from the bottle: ALL; Left from
+   ALL: the bottle. Re:CoM's tabs show their cards as before.
+4. On an item: confirm; Up / Down change the count (1..owned, wraps); the points box shows the
+   total. Confirm: Re:CoM's yes / no with "Sell Potion x3 for 6 Moogle Points?". Yes: the sale
+   sound, the points rise by the total, the count drops (stock first, then slots: the item menu's
+   slots keep their items until the stock is gone). No: back to the count.
+5. Sell an item out: the grid closes up; sell everything: the tab row.
+6. Square → the pack screen; cancel → the two-Moogle menu.
+7. Combat = Re:CoM or Riku's story: Re:CoM's five-cell strip, Re:CoM's ALL finger place, cards
+   sell as before (also after a KH1 visit in the same session).
+8. Report: the strip's look (cells, separator, ALL text), the finger places (bottle, ALL), the
+   card pictures in the grid, the box / big card on an item, the yes / no line.
+
+**Open (owner)**: the Tent / Camping Set conversion (question 4).
 

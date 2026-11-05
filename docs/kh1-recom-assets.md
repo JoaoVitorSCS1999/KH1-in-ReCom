@@ -797,7 +797,7 @@ Icon.tm2`, or a `note:` when the layout is missing. No new file: `FO0002.SPR` / 
 6352; picture 0's PC art used as it is, no rect redrawn from the PS2 picture) and an offline
 render of the groups. Not run on the owner's PC yet.
 
-## The Moogle shop's fifth tab (`FORM/0109/FO0109.SPR`, M8d, 0.128.0)
+## The Moogle shop's fifth tab and the card trade's sixth cell (`FORM/0109/FO0109.SPR`, M8d, 0.128.0 / 0.130.0)
 
 Owner: "Items tab, then packs". Module `shop_tabs`; design, addresses and checks:
 `docs/recom-m8-items.md` § M8d step 2.
@@ -805,16 +805,22 @@ Owner: "Items tab, then packs". Module `shop_tabs`; design, addresses and checks
 - **Reads:** Re:CoM `FORM/0109/FO0109.SPR`: the whole PKG entry with its PC assets.
 - **Adds:** to `m_shop:01` (SEQD 1 of `m_shop.lad`), after Re:CoM's 241 groups: 13 groups (5 tab
   windows and their closes, 52 apart, from tab 0's window with the notch moved; the icons' appear /
-  loop / close with Re:CoM's item icon first). Sprites already in the atlas only (`FO0109.RTM` is
-  not touched). In the file itself and in every PC asset that is an `m_shop.lad` (any language
+  loop / close with Re:CoM's item icon first); since 0.130.0 (M8d step 3) 6 more: the card
+  trade's strips with an Items cell first (Re:CoM's tab t lit for t = 0..4, then the Items cell
+  lit; `recom-m8-items.md` § M8d step 3). Sprites already in the atlas only (`FO0109.RTM` is not
+  touched; the PC layouts' strip pieces are cut as new sprite records over Re:CoM's atlas
+  rectangles). In the file itself and in every PC asset that is an `m_shop.lad` (any language
   prefix) or a whole container with one; each copy must have Re:CoM's 241 groups.
 - **Writes**, under the manifest's root: `raw/FORM/0109/FO0109.SPR` (plain PKG entry, same asset
-  names, tags, date) and `kh1-shop-tabs.json` (format `kh1-recom-assets shop-tabs 1`). When it
+  names, tags, date) and `kh1-shop-tabs.json` (format `kh1-recom-assets shop-tabs 2` since 0.130.0: also `strip`, `strip_all_finger`,
+  `strip_items_finger`). When it
   can't be built, an older `kh1-shop-tabs.json` there is removed (the DLL keeps Re:CoM's art).
-- **Prints** `shop tabs: m_shop:01 groups 241..253 (5-tab windows, closes, icons) added to [...]`.
+- **Prints** `shop tabs: m_shop:01 groups 241..259 (5-tab windows, closes, icons; the card trade's
+  6-cell strips) added to [...]`.
 - Checked (files): the owner's `FO0109.SPR` reads back byte for byte and patches; its HD
   `UK_m_shop.lad` patches with the same first group (`shop_tabs::tests::owner_shop_files`,
-  `KH1_FO0109` = the dump folder); both rendered offline (not in the repo).
+  `KH1_FO0109` = the dump folder; `KH1_FO0109_OUT` writes both patched layouts for a look); both
+  rendered offline (not in the repo).
 
 `mod.yml` entries:
 

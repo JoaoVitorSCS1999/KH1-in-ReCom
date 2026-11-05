@@ -17,7 +17,14 @@
 //!   icons' sequence plays the art's icons.
 //! - **The card trade** (mode 5's update `0x1403A73E0`): its Square goes to the pack screen also
 //!   without room for 5 cards (Re:CoM's needs room), so items can be bought with a full deck; its
-//!   Square button hint is made then too, as Re:CoM makes it.
+//!   Square button hint is made then too, as Re:CoM makes it. And it gets an **Items tab** (the
+//!   sell screen, M8d step 3: `crate::shop::sell`), first in its strip, which it opens on: Re:CoM's
+//!   own stock window fill draws Sora's items from a card list of ours (Re:CoM's item card
+//!   pictures, its big card, its small card box), Re:CoM's cursors and sounds, a count step of
+//!   ours on the charge point window, Re:CoM's own yes / no (its states 3 / 4) with our line, and
+//!   the sale through Re:CoM's own Moogle Point add. With the art the strip table (`0x1406904D0`)
+//!   is pointed at the six-cell strips and Re:CoM's ALL finger constant (`0x14045B9D7`: 62.0) at
+//!   Re:CoM's own 50.0 for the screen (Re:CoM's values at Combat = Re:CoM).
 //!
 //! Nothing of ours runs outside those two screens.
 
@@ -36,6 +43,40 @@ static LOG_LEFT: AtomicU32 = AtomicU32::new(80);
 static ART: AtomicU32 = AtomicU32::new(0);
 /// The Items tab, while it is up (one shop at a time).
 static TAB: Mutex<Option<ItemsTab>> = Mutex::new(None);
+/// The card trade's Items tab, while it is up.
+static SELL: Mutex<Option<SellTab>> = Mutex::new(None);
+
+/// Re:CoM's `CMShopChargeCardData` as the stock window reads it (`0x14045DA80`, `0x14045BBF0`):
+/// `+8` the records (298 of 16 bytes: u16 card kind, u16 count (0: none), the category byte, the
+/// count of each value 0..9), `+0x10 + tab × 4` the cards per tab (tab 4 = all), `+0x24..+0x30`
+/// the cards per category (the window's "cards in" counts). Checked (decomp `0x14045D510`).
+const DATA_HEAD: usize = 0x50;
+const RECORDS: usize = 298;
+const RECORD: usize = 16;
+const DATA_RECORDS: usize = 8;
+const DATA_PER_TAB: usize = 0x10;
+const DATA_PER_CATEGORY: usize = 0x24;
+/// Re:CoM's fields copied into ours: `+0x24..+0x4C` (the per-category counts, their sum, the deck
+/// counts; the last field Re:CoM writes is `+0x48`).
+const DATA_COPY: usize = 0x28;
+/// Re:CoM's item-card category (records' `+4`).
+const ITEM_CATEGORY: u8 = 2;
+
+struct SellTab {
+    shop: usize,
+    /// Sora's items and counts (`crate::shop::sell_list`).
+    items: Vec<(u8, u32)>,
+    in_grid: bool,
+    cell: i32,
+    qty: u32,
+    /// Our card list for Re:CoM's stock window (its head points at the records).
+    head: Box<[u8; DATA_HEAD]>,
+    records: Box<[u8; RECORDS * RECORD]>,
+    /// The yes / no line (Re:CoM's text set keeps the pointer), set once the window is up.
+    line: Vec<u8>,
+    old: Vec<Vec<u8>>,
+    asked: bool,
+}
 
 struct ItemsTab {
     shop: usize,
@@ -85,6 +126,19 @@ const CARD_ATTACH: u32 = 0x0024_3DD0;
 const CARD_VISIBLE: u32 = 0x0024_3A60;
 const SLOT_VISIBLE: u32 = 0x0024_7E50;
 const SPRITE_POS: u32 = 0x0024_85B0;
+const STOCK_FILL: u32 = 0x0045_DA80;
+const RANK_SET: u32 = 0x0045_D9C0;
+const INFO_SET: u32 = 0x0045_A260;
+const CHARGE_SET: u32 = 0x0045_D2C0;
+const TAB_FINGER: u32 = 0x0045_B950;
+const CELL_FINGER: u32 = 0x0045_B8B0;
+const RANK_SPIN: u32 = 0x0045_B810;
+const CURSOR_MOVE: u32 = 0x0045_9960;
+const CURSOR_LOOK: u32 = 0x0045_9D60;
+const TEXT_MESSAGE: u32 = 0x0045_95A0;
+const TEXT_SET: u32 = 0x0025_8DE0;
+const HELP_BAR: u32 = 0x0045_9CC0;
+const POINTS_ADD: u32 = 0x0023_9FA0;
 /// `C2DCard`'s vtable (`0x1402432A0` writes it); its slot 0 is the deleting dtor `0x1402073D0`.
 /// Checked (disasm `0x1402432AE`; exe).
 const CARD_VTABLE: usize = 0x0060_6BF8;
@@ -108,6 +162,16 @@ const TAB_X_TABLE: usize = 0x0065_BA40;
 const WINDOW_TABLE: usize = 0x0069_0420;
 /// The pointer to `"m_shop.lad"` the shop's sequences play from (`0x14045D250`). Checked (decomp).
 const SHOP_LAD: usize = 0x0085_9C48;
+/// The card trade's strip groups by tab (5 i16, `0x14045DB92` its only reader). Checked (exe scan).
+const STRIP_TABLE: usize = 0x0069_04D0;
+/// Re:CoM's ALL finger: `subss xmm1, [rip → 0x1405092A8 (62.0)]` at `0x14045B9D7`; ours points the
+/// same instruction at `0x140509298` (50.0, Re:CoM's float pool). Checked (disasm + exe).
+const ALL_FINGER_AT: usize = 0x0045_B9D7;
+const ALL_FINGER_RECOM: [u8; 8] = [0xF3, 0x0F, 0x5C, 0x0D, 0xC9, 0xD8, 0x0A, 0x00];
+const ALL_FINGER_OURS: [u8; 8] = [0xF3, 0x0F, 0x5C, 0x0D, 0xB9, 0xD8, 0x0A, 0x00];
+/// The yes / no finger's y (2 floats, 214 / 237) and its x (232.0) (`0x1403A73E0` case 2).
+const YES_NO_Y: usize = 0x0065_BA38;
+const YES_NO_X: f32 = 232.0;
 
 /// `CMoogleShopCore` fields (Checked (decomp + disasm: `0x1403A4220`, `0x1403A4A90`,
 /// `0x1403A6930`, `0x1403A73E0`, `0x1403A92F0`, `0x1403A5B10`)).
@@ -140,7 +204,37 @@ mod f {
     pub const PACKS: usize = 0x428;
     /// The card trade's Square button hint (`CMShopButtonMessage`, made only with room).
     pub const TRADE_BUTTON: usize = 0x448;
+    /// The card trade (`0x1403A4D90`, `0x1403A73E0`): the yes / no choice, the grid flag, the tab,
+    /// the scroll; the help bar, the grid finger, the value finger, its
+    /// windows (the charge points, the 0–9 box, the big card, the stock window).
+    pub const YES_NO: usize = 0x270;
+    pub const T_IN_GRID: usize = 0x358;
+    pub const T_TAB: usize = 0x35C;
+    pub const T_SCROLL: usize = 0x360;
+    pub const HELP_BAR: usize = 0x3C8;
+    pub const GRID_FINGER: usize = 0x3D8;
+    pub const VALUE_FINGER: usize = 0x3E0;
+    pub const CHARGE: usize = 0x450;
+    pub const RANK: usize = 0x458;
+    pub const INFO: usize = 0x460;
+    pub const STOCK: usize = 0x468;
 }
+/// `CMShopStockCardWnd +0x80`: the strip's control. A shop cursor's `+0x60`: place at once next.
+const STOCK_STRIP: usize = 0x80;
+const SNAP: usize = 0x60;
+/// The help bar's text (`0x140459CC0`).
+const BAR_TEXT: usize = 0x78;
+/// The card trade's help bar id (its init `0x1403A4D90`).
+const BAR_TRADE: i32 = 5;
+/// Cursor looks (`0x140459D60`): the finger, the grid finger, the grid finger on a chosen card.
+const LOOK_FINGER: i32 = 0;
+const LOOK_GRID: i32 = 3;
+const LOOK_CHOSEN: i32 = 4;
+const LOOK_YES_NO: i32 = 6;
+/// The text window's yes / no message (`0x1404595A0`).
+const MESSAGE_YES_NO: i32 = 7;
+/// The text window closed (`+0x58`, the sale waits for it).
+const TW_CLOSED: i32 = -1;
 /// `CMShopButtonMessage +0x60` / any shop window's show state (`0x1404598D0`).
 const SHOW: usize = 0x60;
 /// `CMShopCardPack`: its picture control (layer 1 the pack's art), its release flag (`+0x6C`).
@@ -184,6 +278,8 @@ const STATE_CLOSE: i32 = 100;
 const STATE_RELEASE: i32 = 0x65;
 const TRADE_TABS: i32 = 1;
 const TRADE_GRID: i32 = 2;
+const TRADE_ASK: i32 = 3;
+const TRADE_SALE: i32 = 5;
 
 type ScreenFn = unsafe extern "win64" fn(usize);
 type NoArgFn = unsafe extern "win64" fn() -> u32;
@@ -211,6 +307,14 @@ type AttachFn = unsafe extern "win64" fn(usize, usize);
 type SlotVisibleFn = unsafe extern "win64" fn(usize, i32, u32);
 type PosFn = unsafe extern "win64" fn(usize, *const f32);
 type DeleteFn = unsafe extern "win64" fn(usize, u32) -> usize;
+type FillFn = unsafe extern "win64" fn(usize, usize, i32, i32, i32);
+type RankFn = unsafe extern "win64" fn(usize, usize, i32);
+type InfoFn = unsafe extern "win64" fn(usize, u64);
+type FingerFn = unsafe extern "win64" fn(usize, *mut f32, i32);
+type MoveFn = unsafe extern "win64" fn(usize, *const f32, i32);
+type LookFn = unsafe extern "win64" fn(usize, i32);
+type ObjFn = unsafe extern "win64" fn(usize);
+type SetTextFn = unsafe extern "win64" fn(usize, *const u8);
 
 #[repr(C, align(16))]
 struct V4([f32; 4]);
@@ -225,19 +329,20 @@ pub fn mark_installed() {
     INSTALLED.store(true, Ordering::Release);
 }
 
-/// Reads `kh1-shop-tabs.json` (the asset step's five-tab art, `crate::shop::tabs`). Without it the
-/// pack screen keeps Re:CoM's four-tab window and the Items tab's cursor sits right of the tabs.
+/// Reads `kh1-shop-tabs.json` (the asset step's five-tab art and six-cell trade strips,
+/// `crate::shop::tabs`). Without it the pack screen keeps Re:CoM's four-tab window and the card
+/// trade Re:CoM's strip, and the Items tabs' cursors sit right of the tabs.
 pub fn load_tabs(file: Option<&std::path::Path>) {
     let Some(path) = file else {
-        log("shop: no kh1-shop-tabs.json: the pack screen keeps Re:CoM's four-tab art (the Items tab's cursor at x 320)");
+        log("shop: no kh1-shop-tabs.json: the pack screen and the card trade keep Re:CoM's tab art (the Items tabs' cursors right of Re:CoM's tabs)");
         return;
     };
     match std::fs::read_to_string(path).map_err(|e| e.to_string()).and_then(|t| sh::tabs::parse(&t)) {
         Ok(first) => {
             ART.store(first, Ordering::Release);
-            log(&format!("shop: five-tab art from {}: m_shop:01 groups {first}..{}", path.display(), first + sh::tabs::COUNT - 1));
+            log(&format!("shop: tab art from {}: m_shop:01 groups {first}..{} (the pack screen's five tabs, the card trade's six-cell strips)", path.display(), first + sh::tabs::COUNT - 1));
         }
-        Err(e) => log(&format!("shop: {}: {e}: the pack screen keeps Re:CoM's four-tab art", path.display())),
+        Err(e) => log(&format!("shop: {}: {e}: the pack screen and the card trade keep Re:CoM's tab art", path.display())),
     }
 }
 
@@ -820,43 +925,618 @@ unsafe fn trade_button(shop: usize) {
     func::<PackIntFn>(SHOW_STATE)(b, 0);
 }
 
-/// The wrapper on the card trade's update (`0x1403A73E0`): at Combat = KH1 its Square opens the
-/// pack screen also without room for 5 cards (`crate::shop::trade_square_opens_packs`).
+// ---- The card trade's Items tab (the sell screen) ----
+
+fn sell_lock() -> std::sync::MutexGuard<'static, Option<SellTab>> {
+    SELL.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn sell_up(shop: usize) -> bool {
+    sell_lock().as_ref().is_some_and(|t| t.shop == shop)
+}
+
+/// The trade's strip table and Re:CoM's ALL finger constant as Re:CoM has them, or for the art
+/// (written over one of the two only); with the table changed, Re:CoM's stock window drawn again
+/// with it (its init drew it before this first update).
+unsafe fn trade_tables(shop: usize, kh1: Option<u32>) {
+    let mut recom = [0u8; 10];
+    for (i, g) in sh::tabs::RECOM_STRIP.iter().enumerate() {
+        recom[2 * i..2 * i + 2].copy_from_slice(&g.to_le_bytes());
+    }
+    let ours = kh1.map(|first| {
+        let mut o = [0u8; 10];
+        for (i, g) in sh::tabs::kh1_strip(first).iter().enumerate() {
+            o[2 * i..2 * i + 2].copy_from_slice(&g.to_le_bytes());
+        }
+        o
+    });
+    let want = ours.unwrap_or(recom);
+    let at = base() + STRIP_TABLE;
+    let have: [u8; 10] = rd(at);
+    if have != want {
+        if have == recom || Some(have) == ours {
+            if super::hook::patch(at, &have, &want, "card trade strip table") {
+                let stock: usize = rd(shop + f::STOCK);
+                let data: usize = rd(shop + f::CARD_DATA);
+                if stock != 0 && data != 0 {
+                    func::<FillFn>(STOCK_FILL)(stock, data, rd(shop + f::T_TAB), rd(shop + f::T_SCROLL), 0);
+                }
+            }
+        } else {
+            note(|| format!("card trade strip table holds {have:02x?}: left alone"));
+        }
+    }
+    let at = base() + ALL_FINGER_AT;
+    let want = if kh1.is_some() { ALL_FINGER_OURS } else { ALL_FINGER_RECOM };
+    let have: [u8; 8] = rd(at);
+    if have != want {
+        if have == ALL_FINGER_RECOM || have == ALL_FINGER_OURS {
+            super::hook::patch(at, &have, &want, "card trade ALL finger");
+        } else {
+            note(|| format!("card trade ALL finger code holds {have:02x?}: left alone"));
+        }
+    }
+}
+
+/// Our card list: Sora's items as Re:CoM's item cards (category 2, values unknown: no value
+/// counts), the per-category counts Re:CoM's own (the window's "cards in" numbers unchanged).
+unsafe fn card_list(shop: usize, items: &[(u8, u32)], head: &mut [u8; DATA_HEAD], records: &mut [u8; RECORDS * RECORD]) {
+    head.fill(0);
+    records.fill(0);
+    let real: usize = rd(shop + f::CARD_DATA);
+    if real != 0 {
+        let same: [u8; DATA_COPY] = rd(real + DATA_PER_CATEGORY);
+        head[DATA_PER_CATEGORY..DATA_PER_CATEGORY + DATA_COPY].copy_from_slice(&same);
+    }
+    let mut n = 0u32;
+    for &(item, count) in items.iter().take(sh::sell::CELLS as usize) {
+        let Some(kind) = sh::card_kind(item) else { continue };
+        let r = &mut records[n as usize * RECORD..(n as usize + 1) * RECORD];
+        r[0..2].copy_from_slice(&(kind as u16).to_le_bytes());
+        r[2..4].copy_from_slice(&(count.clamp(1, 0xFFFF) as u16).to_le_bytes());
+        r[4] = ITEM_CATEGORY;
+        n += 1;
+    }
+    let ptr = records.as_ptr() as usize;
+    head[DATA_RECORDS..DATA_RECORDS + 8].copy_from_slice(&ptr.to_le_bytes());
+    let all = DATA_PER_TAB + 4 * sh::sell::ALL as usize;
+    head[all..all + 4].copy_from_slice(&n.to_le_bytes());
+}
+
+/// Sora's items to sell now, with the card list rebuilt.
+unsafe fn refresh_list(shop: usize, t: &mut SellTab) {
+    let inv = super::items::inventory().unwrap_or_default();
+    t.items = sh::sell_list(&inv).into_iter().filter(|s| sh::card_kind(s.0).is_some()).take(sh::sell::CELLS as usize).collect();
+    card_list(shop, &t.items, &mut t.head, &mut t.records);
+}
+
+/// Re:CoM's stock window from our list (its own fill, as ALL: every record), then the art's
+/// Items-lit strip on its strip control.
+unsafe fn fill(shop: usize, head: usize) {
+    let stock: usize = rd(shop + f::STOCK);
+    if stock == 0 {
+        return;
+    }
+    func::<FillFn>(STOCK_FILL)(stock, head, sh::sell::ALL, 0, 0);
+    if let Some(first) = art() {
+        let ctrl: usize = rd(stock + STOCK_STRIP);
+        let lad: usize = rd(base() + SHOP_LAD);
+        if ctrl != 0 && lad != 0 {
+            let play: PlayFn = std::mem::transmute::<usize, PlayFn>(rd::<usize>(rd::<usize>(ctrl) + 0x18));
+            play(ctrl, 0, lad, 1, (first + sh::tabs::STRIP_ITEMS) as i32, 0.0, 0);
+        }
+    }
+}
+
+/// The 0–9 box and the big card for the item at `cell` (None: the item category's blank box, no
+/// card), as Re:CoM's `0x14045D9C0` / `0x14045A260` show a card.
+unsafe fn show_card(shop: usize, records: usize, cell: Option<(i32, u8)>) {
+    let rank: usize = rd(shop + f::RANK);
+    let info: usize = rd(shop + f::INFO);
+    match cell {
+        Some((c, kind)) => {
+            if rank != 0 {
+                func::<RankFn>(RANK_SET)(rank, records + c as usize * RECORD, ITEM_CATEGORY as i32);
+            }
+            if info != 0 {
+                func::<InfoFn>(INFO_SET)(info, kind as u64);
+            }
+        }
+        None => {
+            if rank != 0 {
+                func::<RankFn>(RANK_SET)(rank, 0, ITEM_CATEGORY as i32);
+            }
+            if info != 0 {
+                func::<InfoFn>(INFO_SET)(info, 0);
+            }
+        }
+    }
+}
+
+unsafe fn cell_card(t: &SellTab, c: i32) -> Option<(i32, u8)> {
+    let (item, _) = *t.items.get(usize::try_from(c).ok()?)?;
+    Some((c, sh::card_kind(item)?))
+}
+
+unsafe fn charge(shop: usize, v: i32) {
+    let w: usize = rd(shop + f::CHARGE);
+    if w != 0 {
+        func::<PackIntFn>(CHARGE_SET)(w, v);
+    }
+}
+
+/// The help bar's line: ours on the Items tab, Re:CoM's (id 5) back.
+unsafe fn help_bar(shop: usize, ours: bool) {
+    let bar: usize = rd(shop + f::HELP_BAR);
+    if bar == 0 {
+        return;
+    }
+    if ours {
+        let obj: usize = rd(bar + BAR_TEXT);
+        if obj != 0 {
+            // Re:CoM's text set copies the line.
+            let line = sh::c_text(sh::sell::HELP);
+            func::<SetTextFn>(TEXT_SET)(obj, line.as_ptr());
+        }
+    } else {
+        func::<LookFn>(HELP_BAR)(bar, BAR_TRADE);
+    }
+}
+
+unsafe fn look(cursor: usize, l: i32) {
+    if cursor != 0 {
+        func::<LookFn>(CURSOR_LOOK)(cursor, l);
+    }
+}
+
+unsafe fn snap(cursor: usize) {
+    if cursor != 0 {
+        wr::<i32>(cursor + SNAP, 1);
+    }
+}
+
+unsafe fn show(cursor: usize, on: bool) {
+    if cursor != 0 {
+        func::<VisibleFn>(CURSOR_VISIBLE)(cursor, on as u32);
+    }
+}
+
+/// The tab row's finger on the Items tab (Re:CoM's state 1 tail): with the art at its cell (Re:CoM's
+/// ALL place, now at the art's ALL, less 20); without, one tab step right of tab 3 (**Assumption**:
+/// no art to place it by).
+unsafe fn tab_finger(shop: usize, items: bool, tab: i32) {
+    let stock: usize = rd(shop + f::STOCK);
+    let finger: usize = rd(shop + f::CURSOR);
+    if stock == 0 || finger == 0 {
+        return;
+    }
+    let mut pos = V4([0.0, 0.0, 0.0, 1.0]);
+    let place = func::<FingerFn>(TAB_FINGER);
+    if items {
+        match art() {
+            Some(_) => {
+                place(stock, pos.0.as_mut_ptr(), sh::sell::ALL);
+                pos.0[0] += (sh::tabs::ITEMS_FINGER - sh::tabs::ALL_FINGER) as f32;
+            }
+            None => {
+                place(stock, pos.0.as_mut_ptr(), sh::sell::ALL - 1);
+                pos.0[0] += sh::tabs::FINGER_STEP;
+            }
+        }
+    } else {
+        place(stock, pos.0.as_mut_ptr(), tab);
+    }
+    func::<MoveFn>(CURSOR_MOVE)(finger, pos.0.as_ptr(), 1);
+    look(finger, LOOK_FINGER);
+    show(finger, true);
+}
+
+/// The grid finger at `cell` (Re:CoM's state 1 grid tail), in look `l`.
+unsafe fn grid_finger(shop: usize, cell: i32, l: i32) {
+    let stock: usize = rd(shop + f::STOCK);
+    let finger: usize = rd(shop + f::GRID_FINGER);
+    if stock == 0 || finger == 0 {
+        return;
+    }
+    let rank: usize = rd(shop + f::RANK);
+    if rank != 0 {
+        func::<ObjFn>(RANK_SPIN)(rank);
+    }
+    let mut pos = V4([0.0, 0.0, 0.0, 1.0]);
+    func::<FingerFn>(CELL_FINGER)(stock, pos.0.as_mut_ptr(), cell);
+    func::<MoveFn>(CURSOR_MOVE)(finger, pos.0.as_ptr(), 0);
+    self::look(finger, l);
+    show(finger, true);
+}
+
+/// Onto the Items tab: our list, Re:CoM's windows showing it, the help bar's line. `open`: the
+/// screen's start (Re:CoM's init put it in the grid when ALL has cards: ours in the grid when
+/// Sora has items).
+unsafe fn enter_sell(shop: usize, open: bool) {
+    let mut t = SellTab {
+        shop,
+        items: Vec::new(),
+        in_grid: false,
+        cell: 0,
+        qty: 1,
+        head: Box::new([0; DATA_HEAD]),
+        records: Box::new([0; RECORDS * RECORD]),
+        line: Vec::new(),
+        old: Vec::new(),
+        asked: false,
+    };
+    refresh_list(shop, &mut t);
+    t.in_grid = open && !t.items.is_empty();
+    let (head, records) = (t.head.as_ptr() as usize, t.records.as_ptr() as usize);
+    let card = if t.in_grid { cell_card(&t, 0) } else { None };
+    let names: Vec<String> = t.items.iter().map(|&(i, n)| format!("{} x{n}", crate::items::name(i))).collect();
+    let in_grid = t.in_grid;
+    *sell_lock() = Some(t);
+    fill(shop, head);
+    show_card(shop, records, card);
+    charge(shop, -1);
+    help_bar(shop, true);
+    note(|| format!("card trade: Items tab ({}), {names:?}, in the grid {in_grid}; {} Moogle Points", if open { "opened on" } else { "from the tab row" }, points()));
+}
+
+/// Off the Items tab to Re:CoM's tab `to` (Re:CoM's tab move: its stock window, its blank box, its
+/// finger), Re:CoM's help bar line back.
+unsafe fn leave_sell(shop: usize, to: i32) {
+    if sell_lock().take_if(|t| t.shop == shop).is_none() {
+        return;
+    }
+    wr::<i32>(shop + f::T_TAB, to);
+    wr::<i32>(shop + f::T_IN_GRID, 0);
+    let stock: usize = rd(shop + f::STOCK);
+    let data: usize = rd(shop + f::CARD_DATA);
+    if stock != 0 && data != 0 {
+        func::<FillFn>(STOCK_FILL)(stock, data, to, 0, 0);
+    }
+    let rank: usize = rd(shop + f::RANK);
+    if rank != 0 {
+        func::<RankFn>(RANK_SET)(rank, 0, to);
+    }
+    help_bar(shop, false);
+    tab_finger(shop, false, to);
+    note(|| format!("card trade: Items tab -> Re:CoM's tab {to}"));
+}
+
+unsafe fn read_keys() -> sh::sell::Keys {
+    let fresh = |mask: u32| func::<PadMaskFn>(PAD_FRESH)(mask, 0) != 0;
+    sh::sell::Keys { pad: read_pad(), up_fresh: fresh(0x0010_1000), down_fresh: fresh(0x0020_4000), left_fresh: fresh(0x0040_8000), right_fresh: fresh(0x0080_2000) }
+}
+
+/// Re:CoM's lock step at the update's head (`+0x274`: −1 while > 0); locked after it.
+unsafe fn lock_step(shop: usize) -> bool {
+    let l: i32 = rd(shop + f::LOCK);
+    if l > 0 {
+        wr::<i32>(shop + f::LOCK, l - 1);
+    }
+    l - 1 > 0
+}
+
+unsafe fn leave_trade(shop: usize, sound_id: u32, mode: i32) {
+    sound(sound_id);
+    wr::<i32>(shop + f::NEXT_MODE, mode);
+    wr::<i32>(shop + f::STATE, STATE_CLOSE);
+}
+
+/// One frame of the Items tab in Re:CoM's state 1 (the tab row or the grid).
+unsafe fn sell_frame(shop: usize) {
+    use sh::sell::Step;
+    let locked = lock_step(shop);
+    let keys = if locked { sh::sell::Keys::default() } else { read_keys() };
+    let (in_grid, cell, n) = match sell_lock().as_ref().filter(|t| t.shop == shop) {
+        Some(t) => (t.in_grid, t.cell, t.items.len() as i32),
+        None => return,
+    };
+    let step = if in_grid { sh::sell::grid(&keys, n, cell, locked) } else { sh::sell::tab_row(&keys, n, locked) };
+    if let Step::Leave { sound: s, mode } = step {
+        return leave_trade(shop, s, mode);
+    }
+    charge(shop, -1);
+    let records = |t: &SellTab| t.records.as_ptr() as usize;
+    match step {
+        Step::ToTab(to) => {
+            sound(sh::sound::MOVE);
+            return leave_sell(shop, to);
+        }
+        Step::Refused => sound(sh::sound::ERROR),
+        Step::IntoGrid(c) => {
+            sound(sh::sell::CARD_MOVE);
+            let (r, card) = {
+                let mut g = sell_lock();
+                let Some(t) = g.as_mut().filter(|t| t.shop == shop) else { return };
+                t.in_grid = true;
+                t.cell = c;
+                (records(t), cell_card(t, c))
+            };
+            show_card(shop, r, card);
+            show(rd(shop + f::CURSOR), false);
+            snap(rd(shop + f::GRID_FINGER));
+            wr::<i32>(shop + f::LOCK, 2);
+            return;
+        }
+        Step::OutOfGrid => {
+            sound(sh::sound::MOVE);
+            let r = {
+                let mut g = sell_lock();
+                let Some(t) = g.as_mut().filter(|t| t.shop == shop) else { return };
+                t.in_grid = false;
+                records(t)
+            };
+            show_card(shop, r, None);
+            show(rd(shop + f::GRID_FINGER), false);
+            snap(rd(shop + f::CURSOR));
+            wr::<i32>(shop + f::LOCK, 2);
+            return;
+        }
+        Step::Move(c) => {
+            sound(sh::sell::CARD_MOVE);
+            let (r, card) = {
+                let mut g = sell_lock();
+                let Some(t) = g.as_mut().filter(|t| t.shop == shop) else { return };
+                t.cell = c;
+                (records(t), cell_card(t, c))
+            };
+            show_card(shop, r, card);
+        }
+        Step::Confirm(c) => {
+            sound(sh::sound::BUY);
+            let price = {
+                let mut g = sell_lock();
+                let Some(t) = g.as_mut().filter(|t| t.shop == shop) else { return };
+                t.qty = 1;
+                t.items.get(c.max(0) as usize).map(|&(i, _)| sh::sell::total(i, 1)).unwrap_or(0)
+            };
+            look(rd(shop + f::GRID_FINGER), LOOK_CHOSEN);
+            snap(rd(shop + f::VALUE_FINGER));
+            wr::<i32>(shop + f::LOCK, 2);
+            wr::<i32>(shop + f::STATE, TRADE_GRID);
+            charge(shop, price);
+            return;
+        }
+        _ => {}
+    }
+    let (in_grid, cell) = match sell_lock().as_ref().filter(|t| t.shop == shop) {
+        Some(t) => (t.in_grid, t.cell),
+        None => return,
+    };
+    if in_grid {
+        grid_finger(shop, cell, LOOK_GRID);
+    } else {
+        tab_finger(shop, true, 0);
+    }
+}
+
+/// One frame of the count step (in Re:CoM's state 2).
+unsafe fn count_frame(shop: usize) {
+    use sh::sell::Count;
+    let locked = lock_step(shop);
+    let keys = if locked { sh::sell::Keys::default() } else { read_keys() };
+    let Some((item, owned, qty)) = sell_lock().as_ref().filter(|t| t.shop == shop).and_then(|t| t.items.get(t.cell.max(0) as usize).map(|&(i, n)| (i, n, t.qty))) else {
+        return;
+    };
+    match sh::sell::count(&keys, qty, owned, locked) {
+        Count::Back => {
+            sound(sh::sound::BACK);
+            show(rd(shop + f::VALUE_FINGER), false);
+            wr::<i32>(shop + f::STATE, TRADE_TABS);
+            wr::<i32>(shop + f::LOCK, 2);
+            return;
+        }
+        Count::Leave => return leave_trade(shop, sh::sound::OTHER, sh::mode::PACKS),
+        Count::Ask => {
+            sound(sh::sound::BUY);
+            if let Some(t) = sell_lock().as_mut().filter(|t| t.shop == shop) {
+                let line = sh::sell::ask_text(item, qty, sh::sell::total(item, qty));
+                let old = std::mem::replace(&mut t.line, line);
+                if !old.is_empty() {
+                    t.old.push(old);
+                }
+                while t.old.len() > 2 {
+                    t.old.remove(0);
+                }
+                t.asked = false;
+            }
+            wr::<i32>(shop + f::YES_NO, 0);
+            let tw: usize = rd(shop + f::TEXT);
+            if tw != 0 {
+                func::<LookFn>(TEXT_MESSAGE)(tw, MESSAGE_YES_NO);
+            }
+            look(rd(shop + f::VALUE_FINGER), LOOK_YES_NO);
+            let y: f32 = rd(base() + YES_NO_Y);
+            let finger: usize = rd(shop + f::CURSOR);
+            if finger != 0 {
+                func::<CursorPlaceFn>(CURSOR_PLACE)(finger, YES_NO_X, y, 0);
+            }
+            show(finger, false);
+            wr::<i32>(shop + f::STATE, TRADE_ASK);
+            note(|| format!("card trade: sell {} x{qty} for {}? ({} Moogle Points)", crate::items::name(item), sh::sell::total(item, qty), points()));
+            return;
+        }
+        Count::Set(q) => {
+            sound(sh::sell::CARD_MOVE);
+            if let Some(t) = sell_lock().as_mut().filter(|t| t.shop == shop) {
+                t.qty = q;
+            }
+        }
+        Count::Nothing => {}
+    }
+    let qty = sell_lock().as_ref().filter(|t| t.shop == shop).map(|t| t.qty).unwrap_or(1);
+    charge(shop, sh::sell::total(item, qty));
+}
+
+/// Our line on Re:CoM's yes / no, once its text window is up (Re:CoM's state 3 runs as Re:CoM's).
+unsafe fn ask_line(shop: usize) {
+    let mut g = sell_lock();
+    let Some(t) = g.as_mut().filter(|t| t.shop == shop && !t.asked && !t.line.is_empty()) else { return };
+    let tw: usize = rd(shop + f::TEXT);
+    if tw == 0 || rd::<i32>(tw + TW_STATE) != 1 {
+        return;
+    }
+    let main: usize = rd(tw + TW_MAIN);
+    if main == 0 || rd::<i32>(main + TEXTWND_STATE) != SHOWN {
+        return;
+    }
+    func::<TextFn>(TEXTWND_TEXT)(main, t.line.as_ptr(), 0);
+    t.asked = true;
+}
+
+/// The sale (in Re:CoM's state 5, once the yes / no has closed): the items from the stock first,
+/// then the slots (`crate::shop::sell`), the points through Re:CoM's own add (`0x140239FA0`: its
+/// cap and its trophy check) and its Moogle Point window; then the grid (or the tab row with
+/// nothing left), as Re:CoM goes back after a card sale.
+unsafe fn sale_frame(shop: usize) {
+    let tw: usize = rd(shop + f::TEXT);
+    if tw != 0 && rd::<i32>(tw + TW_STATE) != TW_CLOSED {
+        return;
+    }
+    wr::<i32>(shop + f::LOCK, 2);
+    let Some((item, qty, cell)) = sell_lock().as_ref().filter(|t| t.shop == shop).and_then(|t| t.items.get(t.cell.max(0) as usize).map(|&(i, n)| (i, t.qty.clamp(1, n), t.cell))) else {
+        return;
+    };
+    let before = points();
+    let (sold, total) = super::items::edit(|inv| {
+        let (mut sold, mut total) = (0u32, 0i32);
+        for _ in 0..qty {
+            match sh::sell(item, 0, inv) {
+                sh::Sell::Sold { price, .. } => {
+                    sold += 1;
+                    total += price;
+                }
+                sh::Sell::None => break,
+            }
+        }
+        (sold, total)
+    })
+    .unwrap_or((0, 0));
+    if total > 0 {
+        func::<PointsSetFn>(POINTS_ADD)(total);
+    }
+    let w: usize = rd(shop + f::POINT_WINDOW);
+    if w != 0 {
+        func::<PackIntFn>(POINT_WINDOW)(w, points());
+    }
+    let (head, records, card, in_grid) = {
+        let mut g = sell_lock();
+        let Some(t) = g.as_mut().filter(|t| t.shop == shop) else { return };
+        refresh_list(shop, t);
+        t.qty = 1;
+        match sh::sell::after_sale(cell, t.items.len() as i32) {
+            Some(c) => {
+                t.in_grid = true;
+                t.cell = c;
+            }
+            None => {
+                t.in_grid = false;
+                t.cell = 0;
+            }
+        }
+        (t.head.as_ptr() as usize, t.records.as_ptr() as usize, if t.in_grid { cell_card(t, t.cell) } else { None }, t.in_grid)
+    };
+    fill(shop, head);
+    show_card(shop, records, card);
+    show(rd(shop + f::VALUE_FINGER), false);
+    if in_grid {
+        snap(rd(shop + f::GRID_FINGER));
+    } else {
+        snap(rd(shop + f::CURSOR));
+        show(rd(shop + f::GRID_FINGER), false);
+    }
+    wr::<i32>(shop + f::STATE, TRADE_TABS);
+    note(|| format!("card trade: sold {} x{sold} of {qty} for {total}: {before} -> {} Moogle Points", crate::items::name(item), points()));
+}
+
+/// The card trade's Square to the pack screen without room for 5 cards, at Combat = KH1
+/// (`crate::shop::trade_square_opens_packs`; Re:CoM's own with room). Re:CoM's reads before the
+/// Square (`0x1403A752A`): its lock decrement runs at the function's head, so the lock is read as
+/// Re:CoM's Square test reads it (≤ 0 after). True when it took the frame.
+unsafe fn trade_square(shop: usize) -> bool {
+    let lock_now = rd::<i32>(shop + f::LOCK);
+    let cancel_first = lock_now < 2 && func::<PadBtnFn>(PAD_CANCEL)(0) != 0;
+    if !cancel_first && lock_now < 2 && func::<PadMaskFn>(PAD_FRESH)(0x80, 0) != 0 {
+        if lock_now > 0 {
+            wr::<i32>(shop + f::LOCK, lock_now - 1);
+        }
+        leave_trade(shop, sh::sound::OTHER, sh::mode::PACKS);
+        note(|| "card trade: Square to the pack screen without room for 5 cards (its Items tab)".into());
+        return true;
+    }
+    false
+}
+
+/// The wrapper on the card trade's update (`0x1403A73E0`), at Combat = KH1: its Square opens the
+/// pack screen also without room for 5 cards (`crate::shop::trade_square_opens_packs`), and its
+/// Items tab (`crate::shop::sell`).
 ///
 /// # Safety
 /// Called by Re:CoM with its `CMoogleShopCore`.
 pub unsafe extern "win64" fn trade(shop: usize) {
     let run = orig::<ScreenFn>(&ORIG_TRADE);
-    if !sh::trade_square_opens_packs(live(), room(shop)) || room(shop) {
+    let state: i32 = rd(shop + f::STATE);
+    let kh1 = live();
+    let up = sell_up(shop);
+    if state == STATE_FIRST {
+        if !up {
+            trade_tables(shop, art().filter(|_| kh1));
+        }
+        if !kh1 {
+            return run(shop);
+        }
+        if !room(shop) {
+            trade_button(shop);
+        }
+        run(shop);
+        if !up {
+            enter_sell(shop, true);
+        }
+        return;
+    }
+    if !kh1 {
+        if up {
+            *sell_lock() = None;
+        }
         return run(shop);
     }
-    let state: i32 = rd(shop + f::STATE);
-    match state {
-        STATE_FIRST => {
-            trade_button(shop);
-            run(shop)
-        }
-        TRADE_TABS | TRADE_GRID => {
-            // Re:CoM's own reads before the Square (`0x1403A752A`): its lock decrement ran at the
-            // function's head, so the lock is read as Re:CoM's Square test reads it (≤ 0 after).
-            let lock_now = rd::<i32>(shop + f::LOCK);
-            let cancel_first = lock_now < 2 && func::<PadBtnFn>(PAD_CANCEL)(0) != 0;
-            if !cancel_first && lock_now < 2 && func::<PadMaskFn>(PAD_FRESH)(0x80, 0) != 0 {
-                if lock_now > 0 {
-                    wr::<i32>(shop + f::LOCK, lock_now - 1);
-                }
-                sound(sh::sound::OTHER);
-                wr::<i32>(shop + f::NEXT_MODE, sh::mode::PACKS);
-                wr::<i32>(shop + f::STATE, STATE_CLOSE);
-                note(|| "card trade: Square to the pack screen without room for 5 cards (its Items tab)".into());
-                return;
+    if up {
+        match state {
+            TRADE_TABS => sell_frame(shop),
+            TRADE_GRID => count_frame(shop),
+            TRADE_ASK => {
+                ask_line(shop);
+                run(shop)
             }
-            run(shop)
+            TRADE_SALE => sale_frame(shop),
+            STATE_CLOSE => {
+                *sell_lock() = None;
+                note(|| "card trade left from its Items tab".into());
+                run(shop)
+            }
+            _ => run(shop),
         }
-        _ => run(shop),
+        return;
     }
+    if (state == TRADE_TABS || state == TRADE_GRID) && !room(shop) && sh::trade_square_opens_packs(kh1, false) && trade_square(shop) {
+        return;
+    }
+    if state == TRADE_TABS {
+        let lock_now = rd::<i32>(shop + f::LOCK);
+        let tab: i32 = rd(shop + f::T_TAB);
+        let in_grid = rd::<i32>(shop + f::T_IN_GRID) != 0;
+        if lock_now < 2 && !in_grid && sh::sell::enters(tab, in_grid, &read_pad(), false) {
+            if lock_now > 0 {
+                wr::<i32>(shop + f::LOCK, lock_now - 1);
+            }
+            sound(sh::sound::MOVE);
+            enter_sell(shop, false);
+            tab_finger(shop, true, 0);
+            return;
+        }
+    }
+    run(shop)
 }
 
 pub fn start_line() -> String {
-    "shop: KH1's items in Re:CoM's own Moogle shop screens (M8d): at Combat = KH1 in Sora's story the pack screen opens on an Items tab drawn before Re:CoM's four (Re:CoM's packs with Re:CoM's item cards and price plates; 1F Potion 10 / Ether 40, 2F+ Hi-Potion 30, 7F+ Elixir 200 Moogle Points; KH1's pickup); the card trade's Square opens it also without room for 5 cards".into()
+    "shop: KH1's items in Re:CoM's own Moogle shop screens (M8d): at Combat = KH1 in Sora's story the pack screen opens on an Items tab drawn before Re:CoM's four (Re:CoM's packs with Re:CoM's item cards and price plates; 1F Potion 10 / Ether 40, 2F+ Hi-Potion 30, 7F+ Elixir 200 Moogle Points; KH1's pickup); the card trade opens on an Items tab first in its strip (Sora's items as Re:CoM's item cards, a count step, Re:CoM's yes / no; sold stock first, then slots, at the buy price / 5); its Square opens the pack screen also without room for 5 cards".into()
 }

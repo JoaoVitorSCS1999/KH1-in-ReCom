@@ -407,6 +407,21 @@ pub mod text {
     pub const POOR: &str = "Not enough Moogle Points.";
     pub const NO_ROOM: &str = "Sora can't carry any more of this.";
 
+    /// An item's name as KH1's English menus write it.
+    pub fn title(item: u8) -> &'static str {
+        use crate::items::id::*;
+        match item {
+            POTION => "Potion",
+            HI_POTION => "Hi-Potion",
+            ETHER => "Ether",
+            ELIXIR => "Elixir",
+            MEGA_POTION => "Mega-Potion",
+            MEGA_ETHER => "Mega-Ether",
+            MEGALIXIR => "Megalixir",
+            _ => "?",
+        }
+    }
+
     /// What an item does (Sora only: our items heal Sora); ours in English (KH1's help texts are
     /// not in the asset step).
     pub fn what(item: u8) -> &'static str {
@@ -460,11 +475,11 @@ pub fn tab_x(tab: i32, five: bool) -> f32 {
 pub mod tabs {
     use crate::json;
     pub const MANIFEST: &str = "kh1-shop-tabs.json";
-    pub const FORMAT: &str = "kh1-recom-assets shop-tabs 1";
+    pub const FORMAT: &str = "kh1-recom-assets shop-tabs 2";
     pub const SET: &str = "m_shop:01";
     /// Re:CoM Steam's groups in `m_shop:01` (Checked (files)).
     pub const BASE_GROUPS: u32 = 241;
-    pub const COUNT: u32 = 13;
+    pub const COUNT: u32 = 19;
     pub const TABS: u32 = 5;
     pub const STEP: i32 = 52;
     /// Our groups' offsets from the first: the window with place p raised (0..5), its close
@@ -474,6 +489,20 @@ pub mod tabs {
     pub const ICONS_IN: u32 = 10;
     pub const ICONS: u32 = 11;
     pub const ICONS_OUT: u32 = 12;
+    /// The card trade's six-cell strips: Re:CoM's tab t lit (STRIP + t, t = 0..4 as
+    /// `0x1406904D0`'s index, 4 = ALL), then the Items cell lit.
+    pub const STRIP: u32 = 13;
+    pub const STRIP_ITEMS: u32 = 18;
+    /// Re:CoM's strips (`0x1406904D0`, read only by the stock window's fill `0x14045DB92`).
+    /// Checked (exe).
+    pub const RECOM_STRIP: [i16; 5] = [182, 185, 184, 183, 181];
+    /// The strip's finger places (x from the trade's layout point): Re:CoM's ALL − 62
+    /// (`0x14045B950`), the art's ALL − 50 and Items cell − 70 (the asset step's `strip`).
+    pub const RECOM_ALL_FINGER: i32 = -62;
+    pub const ALL_FINGER: i32 = -50;
+    pub const ITEMS_FINGER: i32 = -70;
+    /// Re:CoM's tab finger step (tab t at − 14 + 24 t; the Items tab without the art one more).
+    pub const FINGER_STEP: f32 = 24.0;
     /// Re:CoM's own: the windows by tab (`0x140690420`), their closes (`0x140690428`), the icons
     /// (mode 4's init `0x1403A4A90`: 0x38 / 0x39 / 0x3A). Checked (exe + decomp).
     pub const RECOM_WINDOW: [i16; 4] = [66, 68, 70, 72];
@@ -494,7 +523,17 @@ pub mod tabs {
         if base != BASE_GROUPS || first != BASE_GROUPS || count != COUNT || tabs != TABS || step != STEP as u32 {
             return Err(format!("groups {first}+{count} ({tabs} tabs, step {step}, base {base}); this DLL expects {BASE_GROUPS}+{COUNT} ({TABS} tabs, step {STEP})"));
         }
+        let i = |k: &str| v.get(k).and_then(|x| x.as_f64()).ok_or_else(|| format!("no \"{k}\""));
+        let (strip, all, items) = (i("strip")?, i("strip_all_finger")?, i("strip_items_finger")?);
+        if strip != STRIP as f64 || all != ALL_FINGER as f64 || items != ITEMS_FINGER as f64 {
+            return Err(format!("strip at {strip}, fingers ALL {all} / Items {items}; this DLL expects {STRIP}, {ALL_FINGER} / {ITEMS_FINGER}"));
+        }
         Ok(first)
+    }
+
+    /// The trade's strip table (`0x1406904D0`) at Combat = KH1 with the art.
+    pub fn kh1_strip(first: u32) -> [i16; 5] {
+        std::array::from_fn(|t| (first + STRIP + t as u32) as i16)
     }
 
     /// Re:CoM's tab tables at Combat = KH1 with the art: tab t's x, window and close at place t + 1.
@@ -503,6 +542,265 @@ pub mod tabs {
         let w = std::array::from_fn(|t| (first + WINDOW + t as u32 + 1) as i16);
         let c = std::array::from_fn(|t| (first + CLOSE + t as u32 + 1) as i16);
         (x, w, c)
+    }
+}
+
+// ---- The card trade's Items tab (the sell screen, M8d step 3) ----
+
+/// The card trade's Items tab (owner, 2026-11-04): first in the trade's strip, before ALL; Sora's
+/// items as Re:CoM's item card pictures in the stock window's 3 × 3 grid (Re:CoM's own fill of the
+/// window, from a card list of ours); on confirm a count step of ours (Up / Down, 1..owned, the
+/// charge point window showing the total), then Re:CoM's own yes / no (its text window's message
+/// 7, our line), then the sale: stock first, then slots, the points through Re:CoM's own add.
+///
+/// Re:CoM's reads and their order are Re:CoM's (`0x1403A73E0` states 1 and 2, Checked (decomp +
+/// disasm)): the cancel first (it leaves the trade, from the tab row and from the grid), the 0x80
+/// button, then on the tab row Left, Right, Up / Down (fresh: into the grid), in the grid confirm,
+/// Up, Down, Left, Right (repeats; the wraps on fresh presses).
+pub mod sell {
+    use super::{sound, Pad};
+
+    /// Re:CoM's tab count (`+0x35C` 0..4, 4 = ALL, drawn first; Left from 0 wraps to ALL).
+    pub const ALL: i32 = 4;
+    /// Cells a row.
+    pub const ROW: i32 = 3;
+    /// The grid's cells (3 × 3; our list is at most 4: no scrolling).
+    pub const CELLS: i32 = 9;
+    /// Re:CoM's card-move sound (`0x1402AA360(0xE)`: a new cell, a new value).
+    pub const CARD_MOVE: u32 = 0xE;
+    /// The help bar's line on the Items tab (owner: "Sell items").
+    pub const HELP: &str = "Sell items";
+
+    /// One frame's reads, fresh and repeating (`0x14029B2F0` / `0x14029B2E0`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Keys {
+        pub pad: Pad,
+        pub up_fresh: bool,
+        pub down_fresh: bool,
+        pub left_fresh: bool,
+        pub right_fresh: bool,
+    }
+
+    /// From Re:CoM's tab row (`+0x358` = 0): does this frame go to the Items tab? Left on ALL (the
+    /// Items tab is drawn before it) or Right on tab 3 (the row wraps through it). Re:CoM's earlier
+    /// reads win (cancel, the 0x80 button), and Left over Right.
+    pub fn enters(tab: i32, in_grid: bool, pad: &Pad, locked: bool) -> bool {
+        if locked || in_grid || pad.other || pad.cancel {
+            return false;
+        }
+        if pad.left {
+            return tab == ALL;
+        }
+        pad.right && tab == ALL - 1
+    }
+
+    /// What one frame on the Items tab does.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Step {
+        Nothing,
+        /// Leave the trade (sound, then `+0x25C` = mode, state 100).
+        Leave { sound: u32, mode: i32 },
+        /// To Re:CoM's tab (sound 1).
+        ToTab(i32),
+        /// Into the grid at a cell (sound 0xE), or refused (no items: sound 5).
+        IntoGrid(i32),
+        Refused,
+        /// Back to the tab row (sound 1).
+        OutOfGrid,
+        /// To another cell (sound 0xE).
+        Move(i32),
+        /// Confirm on a cell: the count step (sound 2).
+        Confirm(i32),
+    }
+
+    /// The cells in `cell`'s row (Re:CoM's `0x14045BB90` with no scroll).
+    pub fn row_cells(cell: i32, n: i32) -> i32 {
+        let r = n % ROW;
+        let last = if r > 0 { n / ROW * ROW } else { n - ROW };
+        if cell < last || r < 1 {
+            ROW
+        } else {
+            r
+        }
+    }
+
+    /// `cell` is on the last row (`0x14045C890`).
+    pub fn on_last_row(cell: i32, n: i32) -> bool {
+        let r = n % ROW;
+        let last = if r > 0 { n / ROW * ROW } else { n - ROW };
+        last <= cell
+    }
+
+    /// The tab row's frame: a fresh Down enters the grid at its first cell (`0x1403A76D8` clears
+    /// the scroll and the cell together), a fresh Up at its last (`0x14045BAE0`).
+    pub fn tab_row(k: &Keys, n: i32, locked: bool) -> Step {
+        let p = &k.pad;
+        if locked {
+            return Step::Nothing;
+        }
+        if p.cancel {
+            return Step::Leave { sound: sound::BACK, mode: super::mode::MENU };
+        }
+        if p.other {
+            return Step::Leave { sound: sound::OTHER, mode: super::mode::PACKS };
+        }
+        if p.left {
+            return Step::ToTab(ALL - 1);
+        }
+        if p.right {
+            return Step::ToTab(ALL);
+        }
+        if k.up_fresh || k.down_fresh {
+            if n < 1 {
+                return Step::Refused;
+            }
+            return Step::IntoGrid(if k.down_fresh { 0 } else { n - 1 });
+        }
+        Step::Nothing
+    }
+
+    /// The grid's frame (Re:CoM's state 1 with `+0x358` = 1, no scroll: our list fits the grid).
+    pub fn grid(k: &Keys, n: i32, cell: i32, locked: bool) -> Step {
+        let p = &k.pad;
+        if locked {
+            return Step::Nothing;
+        }
+        if p.cancel {
+            return Step::Leave { sound: sound::BACK, mode: super::mode::MENU };
+        }
+        if p.other {
+            return Step::Leave { sound: sound::OTHER, mode: super::mode::PACKS };
+        }
+        if p.confirm {
+            return Step::Confirm(cell);
+        }
+        let row = cell / ROW * ROW;
+        let to = if p.up {
+            if cell < ROW {
+                return if k.up_fresh { Step::OutOfGrid } else { Step::Nothing };
+            }
+            cell - ROW
+        } else if p.down {
+            if on_last_row(cell, n) {
+                if k.down_fresh && cell >= ROW {
+                    cell % ROW
+                } else {
+                    cell
+                }
+            } else {
+                cell + ROW
+            }
+        } else if p.left {
+            let rc = row_cells(cell, n);
+            if rc < 2 {
+                cell
+            } else if cell == row {
+                if k.left_fresh {
+                    row + rc - 1
+                } else {
+                    cell
+                }
+            } else {
+                cell - 1
+            }
+        } else if p.right {
+            let rc = row_cells(cell, n);
+            if rc < 2 {
+                cell
+            } else if cell == row + rc - 1 {
+                if k.right_fresh {
+                    row
+                } else {
+                    cell
+                }
+            } else {
+                cell + 1
+            }
+        } else {
+            cell
+        };
+        // Re:CoM's step back onto a card (a shorter last row: up to 2 cells left).
+        let to = if to >= n { (to - 2).max(n - 1).min(to) } else { to };
+        let to = to.min(n - 1).max(0);
+        if to != cell {
+            Step::Move(to)
+        } else {
+            Step::Nothing
+        }
+    }
+
+    /// What one frame of the count step does.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Count {
+        Nothing,
+        /// Back to the grid (sound 4).
+        Back,
+        /// Leave the trade for the pack screen (sound 3).
+        Leave,
+        /// Ask Re:CoM's yes / no (sound 2).
+        Ask,
+        /// A new count (sound 0xE).
+        Set(u32),
+    }
+
+    /// The count step's frame (Re:CoM's state 2 order: cancel, the 0x80 button, confirm, then Up,
+    /// Down; ours: Up one more, Down one less, a fresh press at an end wraps).
+    pub fn count(k: &Keys, qty: u32, owned: u32, locked: bool) -> Count {
+        let p = &k.pad;
+        if locked {
+            return Count::Nothing;
+        }
+        if p.cancel {
+            return Count::Back;
+        }
+        if p.other {
+            return Count::Leave;
+        }
+        if p.confirm {
+            return Count::Ask;
+        }
+        let owned = owned.max(1);
+        let q = qty.clamp(1, owned);
+        let to = if p.up {
+            if q < owned {
+                q + 1
+            } else if k.up_fresh {
+                1
+            } else {
+                q
+            }
+        } else if p.down {
+            if q > 1 {
+                q - 1
+            } else if k.down_fresh {
+                owned
+            } else {
+                q
+            }
+        } else {
+            q
+        };
+        if to != qty {
+            Count::Set(to)
+        } else {
+            Count::Nothing
+        }
+    }
+
+    /// The yes / no line: what is sold and for how much.
+    pub fn ask_text(item: u8, qty: u32, total: i32) -> Vec<u8> {
+        super::c_text(&format!("Sell {} x{qty} for {total} Moogle Points?", super::text::title(item)))
+    }
+
+    /// The total of a sale (each item at its sell price).
+    pub fn total(item: u8, qty: u32) -> i32 {
+        super::sell_price(item).unwrap_or(0).saturating_mul(qty as i32)
+    }
+
+    /// After a sale: the cell (the list kept in KH1's item order, a sold-out item gone) or the tab
+    /// row (nothing left to sell).
+    pub fn after_sale(cell: i32, n_after: i32) -> Option<i32> {
+        (n_after > 0).then(|| cell.clamp(0, n_after - 1))
     }
 }
 
@@ -780,11 +1078,118 @@ mod tests {
 
     #[test]
     fn the_tabs_manifest() {
-        let ok = r#"{"format": "kh1-recom-assets shop-tabs 1", "set": "m_shop:01", "base_groups": 241, "first": 241, "count": 13, "tabs": 5, "step": 52, "files": [], "sources": {}}"#;
+        let ok = r#"{"format": "kh1-recom-assets shop-tabs 2", "set": "m_shop:01", "base_groups": 241, "first": 241, "count": 19, "tabs": 5, "step": 52, "strip": 13, "strip_all_finger": -50, "strip_items_finger": -70, "files": [], "sources": {}}"#;
         assert_eq!(tabs::parse(ok), Ok(241));
         assert!(tabs::parse(&ok.replace("\"step\": 52", "\"step\": 64")).is_err());
-        assert!(tabs::parse(&ok.replace("shop-tabs 1", "shop-tabs 0")).is_err());
+        assert!(tabs::parse(&ok.replace("shop-tabs 2", "shop-tabs 1")).is_err(), "step 2's manifest: run the asset step again");
         assert!(tabs::parse(&ok.replace("\"first\": 241", "\"first\": 250")).is_err());
+        assert!(tabs::parse(&ok.replace("\"strip_all_finger\": -50", "\"strip_all_finger\": -62")).is_err());
+        assert!(tabs::parse(&ok.replace("\"strip\": 13, ", "")).is_err());
+        assert_eq!(tabs::kh1_strip(241), [254, 255, 256, 257, 258]);
+        assert_eq!(tabs::STRIP_ITEMS, tabs::STRIP + 5);
+        assert_eq!(tabs::STRIP_ITEMS + 1, tabs::COUNT);
+    }
+
+    fn keys(f: impl FnOnce(&mut sell::Keys)) -> sell::Keys {
+        let mut k = sell::Keys::default();
+        f(&mut k);
+        k
+    }
+
+    #[test]
+    fn entering_the_sell_tab() {
+        let left = pad(|p| p.left = true);
+        let right = pad(|p| p.right = true);
+        assert!(sell::enters(sell::ALL, false, &left, false), "Left on ALL");
+        assert!(sell::enters(3, false, &right, false), "Right on tab 3 (the row wraps)");
+        assert!(!sell::enters(0, false, &left, false));
+        assert!(!sell::enters(sell::ALL, false, &right, false));
+        assert!(!sell::enters(sell::ALL, true, &left, false), "not from the grid");
+        assert!(!sell::enters(sell::ALL, false, &left, true), "locked");
+        assert!(!sell::enters(sell::ALL, false, &pad(|p| (p.left, p.cancel) = (true, true)), false), "cancel first");
+        assert!(!sell::enters(sell::ALL, false, &pad(|p| (p.left, p.other) = (true, true)), false), "the 0x80 button first");
+        assert!(!sell::enters(3, false, &pad(|p| (p.left, p.right) = (true, true)), false), "Left over Right");
+    }
+
+    #[test]
+    fn sell_tab_row() {
+        use sell::Step;
+        let k = |f: fn(&mut sell::Keys)| keys(f);
+        assert_eq!(sell::tab_row(&k(|k| k.pad.cancel = true), 2, false), Step::Leave { sound: sound::BACK, mode: mode::MENU });
+        assert_eq!(sell::tab_row(&k(|k| k.pad.other = true), 2, false), Step::Leave { sound: sound::OTHER, mode: mode::PACKS });
+        assert_eq!(sell::tab_row(&k(|k| k.pad.left = true), 2, false), Step::ToTab(3));
+        assert_eq!(sell::tab_row(&k(|k| k.pad.right = true), 2, false), Step::ToTab(sell::ALL));
+        assert_eq!(sell::tab_row(&k(|k| k.down_fresh = true), 4, false), Step::IntoGrid(0), "Down: the first cell");
+        assert_eq!(sell::tab_row(&k(|k| (k.down_fresh, k.up_fresh) = (true, true)), 4, false), Step::IntoGrid(0), "Down over Up");
+        assert_eq!(sell::tab_row(&k(|k| k.up_fresh = true), 4, false), Step::IntoGrid(3), "Up: the last cell");
+        assert_eq!(sell::tab_row(&k(|k| k.down_fresh = true), 0, false), Step::Refused);
+        assert_eq!(sell::tab_row(&k(|k| k.pad.down = true), 4, false), Step::Nothing, "a held Down does not enter");
+        assert_eq!(sell::tab_row(&k(|k| k.pad.cancel = true), 2, true), Step::Nothing);
+    }
+
+    #[test]
+    fn sell_grid_moves_as_recoms() {
+        use sell::Step;
+        let g = |f: fn(&mut sell::Keys), n, c| sell::grid(&keys(f), n, c, false);
+        // 4 items: 0 1 2 / 3.
+        assert_eq!(g(|k| k.pad.right = true, 4, 0), Step::Move(1));
+        assert_eq!(g(|k| k.pad.right = true, 4, 2), Step::Nothing, "a held Right stops at the row's end");
+        assert_eq!(g(|k| (k.pad.right, k.right_fresh) = (true, true), 4, 2), Step::Move(0), "a fresh one wraps");
+        assert_eq!(g(|k| (k.pad.left, k.left_fresh) = (true, true), 4, 0), Step::Move(2));
+        assert_eq!(g(|k| k.pad.left = true, 4, 3), Step::Nothing, "one card in the row");
+        assert_eq!(g(|k| k.pad.down = true, 4, 0), Step::Move(3));
+        assert_eq!(g(|k| k.pad.down = true, 4, 2), Step::Move(3), "onto the shorter row: back to its card");
+        assert_eq!(g(|k| k.pad.down = true, 4, 3), Step::Nothing);
+        assert_eq!(g(|k| (k.pad.down, k.down_fresh) = (true, true), 4, 3), Step::Move(0), "the last row wraps to the top");
+        assert_eq!(g(|k| (k.pad.down, k.down_fresh) = (true, true), 2, 1), Step::Nothing, "one row: no wrap");
+        assert_eq!(g(|k| k.pad.up = true, 4, 3), Step::Move(0));
+        assert_eq!(g(|k| k.pad.up = true, 4, 1), Step::Nothing, "a held Up stays in the grid");
+        assert_eq!(g(|k| (k.pad.up, k.up_fresh) = (true, true), 4, 1), Step::OutOfGrid);
+        assert_eq!(g(|k| k.pad.confirm = true, 4, 3), Step::Confirm(3));
+        assert_eq!(g(|k| (k.pad.confirm, k.pad.cancel) = (true, true), 4, 3), Step::Leave { sound: sound::BACK, mode: mode::MENU }, "cancel leaves the trade, as Re:CoM's");
+        assert_eq!(sell::row_cells(0, 4), 3);
+        assert_eq!(sell::row_cells(3, 4), 1);
+        assert_eq!(sell::row_cells(3, 6), 3);
+        assert!(sell::on_last_row(3, 4) && !sell::on_last_row(2, 4) && sell::on_last_row(0, 3));
+    }
+
+    #[test]
+    fn the_count_step() {
+        use sell::Count;
+        let c = |f: fn(&mut sell::Keys), q, n| sell::count(&keys(f), q, n, false);
+        assert_eq!(c(|k| k.pad.up = true, 1, 5), Count::Set(2));
+        assert_eq!(c(|k| k.pad.up = true, 5, 5), Count::Nothing, "a held Up stops at the count owned");
+        assert_eq!(c(|k| (k.pad.up, k.up_fresh) = (true, true), 5, 5), Count::Set(1), "a fresh one wraps");
+        assert_eq!(c(|k| k.pad.down = true, 3, 5), Count::Set(2));
+        assert_eq!(c(|k| k.pad.down = true, 1, 5), Count::Nothing);
+        assert_eq!(c(|k| (k.pad.down, k.down_fresh) = (true, true), 1, 5), Count::Set(5));
+        assert_eq!(c(|k| (k.pad.up, k.up_fresh) = (true, true), 1, 1), Count::Nothing, "one owned: always 1");
+        assert_eq!(c(|k| k.pad.confirm = true, 3, 5), Count::Ask);
+        assert_eq!(c(|k| (k.pad.confirm, k.pad.cancel) = (true, true), 3, 5), Count::Back);
+        assert_eq!(c(|k| (k.pad.confirm, k.pad.other) = (true, true), 3, 5), Count::Leave);
+        assert_eq!(sell::count(&keys(|k| k.pad.confirm = true), 3, 5, true), Count::Nothing);
+    }
+
+    #[test]
+    fn sale_totals_and_lines() {
+        use id::*;
+        assert_eq!(sell::total(POTION, 3), 6);
+        assert_eq!(sell::total(ELIXIR, 2), 80);
+        assert_eq!(sell::ask_text(HI_POTION, 2, 12), c_text("Sell Hi-Potion x2 for 12 Moogle Points?"));
+        assert_eq!(sell::after_sale(3, 3), Some(2), "the last item sold out: back one");
+        assert_eq!(sell::after_sale(1, 3), Some(1));
+        assert_eq!(sell::after_sale(0, 0), None, "nothing left: the tab row");
+        // Selling 3 of 4 Potions: the stock first, then the slots.
+        let mut inv = Inventory::default();
+        for _ in 0..4 {
+            inv.pick_up(POTION);
+        }
+        let (stock0, slots0) = (inv.stock_of(POTION), inv.filled().iter().filter(|s| s.1 == POTION).count());
+        for _ in 0..3 {
+            assert!(matches!(sell(POTION, 0, &mut inv), Sell::Sold { price: 2, .. }));
+        }
+        assert_eq!(owned(&inv, POTION), 1);
+        assert_eq!(stock0 as usize + slots0, 4);
     }
 
     #[test]

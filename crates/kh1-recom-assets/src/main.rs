@@ -1207,7 +1207,7 @@ fn shop_tabs_build(keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Arc
     let mut out = spr;
     let (first, files) = st::patch_spr(&mut out, &mut assets).map_err(|e| e.to_string())?;
     let all: Vec<&str> = assets.iter().map(|a| a.name.as_str()).collect();
-    println!("shop tabs: {} groups {first}..{} (5-tab windows, closes, icons) added to {files:?} (PC assets of the entry: {all:?})", st::SET, first + st::group::COUNT - 1);
+    println!("shop tabs: {} groups {first}..{} (5-tab windows, closes, icons; the card trade's 6-cell strips) added to {files:?} (PC assets of the entry: {all:?})", st::SET, first + st::group::COUNT - 1);
     let entry = kh1_formats::egs::build_plain_entry(&out, &assets, date).map_err(|e| e.to_string())?;
     let manifest = st::manifest_json(first, &files, &[("FO0109.SPR sha256", sha)]);
     Ok(ShopTabs { entry, manifest })

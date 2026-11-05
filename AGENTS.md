@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 242: M8d step 3: the sell screen as an Items tab first in Re:CoM's own card trade (Re:CoM's stock window fill from our card list, a count step, Re:CoM's yes / no; a six-cell strip from the asset step), version 0.130.0 (2026-11-04)
+
+Owner, 2026-11-04 (answers to the step-3 question, relayed): "our own Up/Down count step on Re:CoM's yes/no, 1..owned, the points box shows the total, Re:CoM's yes/no sells them, stock first then slots"; the Items tab "uses the same green bottle icon, placed first in the trade's strip", help line "Sell items"; Re:CoM's green item icon, no texture edit; the Tent / Camping Set conversion unanswered (Elixir kept). Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story: Re:CoM's card trade.
+
+- **Card trade** (step 2's hook `0x1403A73E0`; Re:CoM's mode 5, Checked (decomp + disasm + exe), `recom-m8-items.md` § M8d step 3): opens on an **Items tab first in the strip** (before ALL; in the grid when Sora has items). Sora's items as Re:CoM's item cards: a card list of ours in Re:CoM's `CMShopChargeCardData` layout handed to **Re:CoM's own stock window fill** `0x14045DA80` (as tab 4), Re:CoM's big card `0x14045A260` and small-card box `0x14045D9C0`. Left on ALL / Right on tab 3 → Items; from it Left → tab 3, Right → ALL (Re:CoM's tab move). Re:CoM's state 1 replayed for the list (`shop::sell`: its order, sounds, wraps, cursors); help bar "Sell items" (Re:CoM's text set `0x140258DE0`).
+- **Count step** (Re:CoM's state 2 while the tab is up): Up / Down 1..owned (fresh press at an end wraps), the charge point window the total; confirm → **Re:CoM's yes / no** (message 7, Re:CoM's finger place; our line "Sell Potion x3 for 6 Moogle Points?"); Re:CoM's states 3 / 4 unchanged. **Sale** (state 5 while up): stock first, then slots (`shop::sell`), the total through **Re:CoM's own add** `0x140239FA0` and its point window; back to the grid (or the tab row with nothing left).
+- **Six-cell strip** (asset step `shop_tabs::strip`): 6 groups after step 2's 13 (`m_shop:01` 254..259; Re:CoM's 241 kept): ALL's place split into the Items cell (Re:CoM's bottle) and a narrower ALL; Re:CoM's four tabs untouched; PS2 layout: a separator; PC layouts: pieces cut from Re:CoM's own as new sprite records (no texture edit). The DLL writes Re:CoM's strip table `0x1406904D0` to them and points Re:CoM's ALL finger instruction `0x14045B9D7` (62.0) at Re:CoM's own 50.0 (`0x140509298`) at each trade start (Re:CoM's at Combat = Re:CoM). Manifest format `shop-tabs 2`.
+- Per frame: nothing outside the card trade; in it one mutex read, the pad read once more at ALL / tab 3, Re:CoM's state replayed on the Items tab.
+- Asset step: **re-run** (no new `mod.yml` entries; an older manifest turns the shop art off).
+- Assumptions: the fill / box read only Re:CoM's data fields (copied); the strip control's play arguments; the finger's x in strip coordinates; the help bar takes ASCII; every language's PC layout has the UK pieces (the step refuses otherwise). Sale returns to the grid (Re:CoM's returns to its value box).
+- Checked: tests (`shop::tests` 21, `sites::tests::shop_sites`, `shop_tabs::tests` 4 incl. the owner's FO0109.SPR / UK_m_shop.lad, both rendered offline), `check_sites_rs.py` (1370 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings), the Linux `kh1-recom-build` (built; not run: no Re:CoM PKG in the session). Not checked: in game. Docs: `recom-m8-items.md` § M8d step 3, `kh1-recom-assets.md`.
+
+---
+
 ## Stage 241: Enemy Skills stage 3: route 2, Re:CoM's hit rewrite run once per equipped skill (14 skills), version 0.129.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Enemy Skills plan answers; § Enemy Skills numbers: "Defender / Ursula −25 %", "Lexaeus 15 %, never bosses", "Zexion 10 %", "Demyx ×1.75", "build everything"). Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story: Re:CoM's rewrite as is.
