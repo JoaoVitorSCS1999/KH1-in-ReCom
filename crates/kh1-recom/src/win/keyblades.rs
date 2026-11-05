@@ -1255,9 +1255,12 @@ struct Page {
     rows: [usize; 8],
     stat_rows: [usize; 3],
     list: list::List,
+    /// Each open window's scroll (owner, 2026-11-05: a confirm keeps the list where it was).
+    scroll: list::Scroll,
     content: Content,
-    /// The Items screen while its Keyblade list is shown; cancel there brings it back.
-    under: Option<Content>,
+    /// The Items screen (and its list as shown) while its Keyblade list is shown; cancel there
+    /// brings it back.
+    under: Option<(Content, list::List)>,
 }
 
 /// An item's name: KH1's word as the command menu's Items list shows it (`kh1-command-menu.json`),
@@ -1366,7 +1369,7 @@ impl Page {
                 (content, list::open_on(2, 0))
             }
         };
-        let mut p = Page { camp: camp as usize, sub: 1, stats_panel: 0, list_panel: 0, cursor: 0, bar: 0, rows: [0; 8], stat_rows: [0; 3], list, content, under: None };
+        let mut p = Page { camp: camp as usize, sub: 1, stats_panel: 0, list_panel: 0, cursor: 0, bar: 0, rows: [0; 8], stat_rows: [0; 3], list, scroll: list::Scroll::default(), content, under: None };
         p.items_read();
         p.abilities_read();
         p.stats_panel = p.panel(0x10, 3, 0x125);
@@ -1407,9 +1410,9 @@ impl Page {
         let cards = kb::unlocked(super::stats::keyblade_cards(), |k| ever_obtained(k));
         let equipped = super::stats::equipped_card();
         let at_eq = cards.iter().position(|&c| c == equipped).unwrap_or(0) as i32;
-        self.list = list::open_on(cards.len() as i32, at_eq);
+        let items_list = std::mem::replace(&mut self.list, list::open_on(cards.len() as i32, at_eq));
         log(&format!("keyblades: list opened from the Items page: {} Keyblades listed {:x?}, equipped {:#x}", cards.len(), cards, equipped));
-        self.under = Some(std::mem::replace(&mut self.content, Content::Keyblades { cards, equipped }));
+        self.under = Some((std::mem::replace(&mut self.content, Content::Keyblades { cards, equipped }), items_list));
         // The entry-4 page's scroll bar (`0x140112AB0` / `0x1401130C0`) on the list panel, as the
         // Keyblades page made it.
         let b = func::<NewFn>(NEW)(0x28);
@@ -1426,8 +1429,10 @@ impl Page {
     /// Cancel in the Keyblade list: back to the Items screen (Sora's list, on the Keyblade slot,
     /// now naming the equipped one); the scroll bar deleted as the page's close deletes it.
     unsafe fn back_from_keyblades(&mut self) {
-        let Some(under) = self.under.take() else { return };
+        let Some((under, items_list)) = self.under.take() else { return };
         self.content = under;
+        // Sora's list as it was shown, so its re-read keeps its scroll.
+        self.list = items_list;
         delete(self.bar as *mut u8);
         self.bar = 0;
         self.items_read();
@@ -1502,7 +1507,8 @@ impl Page {
     }
 
     /// Abilities: reads the ability state again (a sync: new unlocks from Re:CoM), the
-    /// window's rows, and the list from the screen's cursor. Nothing for the other pages.
+    /// window's rows, and the list from the screen's cursor, scrolled where the window was
+    /// ([`list::Scroll`]). Nothing for the other pages.
     fn abilities_read(&mut self) {
         let Content::Abilities { screen, state, level, rows, live, .. } = &mut self.content else { return };
         match super::abilities::page_state() {
@@ -1515,11 +1521,12 @@ impl Page {
         let n = rows.len() as i32;
         let c = screen.cursor().clamp(0, (n - 1).max(0));
         screen.set_cursor(c);
-        self.list = list::open_on(n, c);
+        self.list = self.scroll.reread(self.list, screen.depth(), n, c);
     }
 
     /// Items: reads the inventory and Sora's state again, the window's rows, and the list from the
-    /// screen's cursor. Nothing for the other pages.
+    /// screen's cursor, scrolled where the window was ([`list::Scroll`]). Nothing for the other
+    /// pages.
     fn items_read(&mut self) {
         let Content::Items { screen, inv, ctx, rows, .. } = &mut self.content else { return };
         *inv = super::items::inventory().unwrap_or_default();
@@ -1528,7 +1535,7 @@ impl Page {
         let c = screen.cursor(inv, *ctx);
         screen.set_cursor(c);
         let n = rows.len() as i32;
-        self.list = list::open_on(n, c);
+        self.list = self.scroll.reread(self.list, screen.depth(), n, c);
     }
 
     /// Whether row `idx` has Re:CoM's row mark: the equipped Keyblade, the picker's row holding the

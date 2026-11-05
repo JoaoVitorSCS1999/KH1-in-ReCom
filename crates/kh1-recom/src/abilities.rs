@@ -1059,6 +1059,12 @@ pub mod page {
             }
         }
 
+        /// The window's depth: 0 the owner list, 1 an owner's abilities (the page keeps each
+        /// window's scroll by it, `crate::keyblades::list::Scroll`).
+        pub fn depth(&self) -> usize {
+            usize::from(self.owner.is_some())
+        }
+
         /// The list's cursor (the owner list's or the ability list's).
         pub fn cursor(&self) -> i32 {
             if self.owner.is_some() { self.cursor } else { self.owner_cursor }

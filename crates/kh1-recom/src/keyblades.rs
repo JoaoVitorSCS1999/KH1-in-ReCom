@@ -511,6 +511,45 @@ pub mod list {
         let l = List { cursor: cursor.clamp(0, (count - 1).max(0)), top: 0, count };
         List { top: top_for(l), ..l }
     }
+
+    /// The list re-read with the window scrolled where it was: `top` kept (clamped so no blank rows
+    /// show past the end, as Re:CoM's page down clamps it), then moved only as far as the cursor
+    /// needs (draw mode 9's rule, [`top_for`]).
+    pub fn keep(count: i32, cursor: i32, top: i32) -> List {
+        let l = List { cursor: cursor.clamp(0, (count - 1).max(0)), top: top.clamp(0, (count - VISIBLE).max(0)), count };
+        List { top: top_for(l), ..l }
+    }
+
+    /// Each open window's top row, by its depth in the page's window stack (Abilities: 0 the owner
+    /// list, 1 an owner's abilities; Items: KH1's window stack). Owner, 2026-11-05: "When
+    /// activating an ability it automatically puts it all the way at the bottom of the list": the
+    /// order never changed, but every re-read opened the list afresh at top 0, so the cursor's row
+    /// was drawn on the last visible line. A re-read of the same window keeps its scroll; going
+    /// back to a window restores the scroll it had; a newly opened window starts afresh.
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    pub struct Scroll {
+        tops: Vec<i32>,
+        depth: usize,
+    }
+
+    impl Scroll {
+        /// The list for the window at `depth` (`count` rows, cursor `cursor`), `shown` being the
+        /// list on screen before the re-read (the window at the last depth read).
+        pub fn reread(&mut self, shown: List, depth: usize, count: i32, cursor: i32) -> List {
+            let from = self.depth;
+            if self.tops.len() <= from {
+                self.tops.resize(from + 1, 0);
+            }
+            self.tops[from] = shown.top;
+            self.depth = depth;
+            if depth > from {
+                self.tops.truncate(from + 1);
+                return open_on(count, cursor);
+            }
+            self.tops.truncate(depth + 1);
+            keep(count, cursor, self.tops[depth])
+        }
+    }
 }
 
 /// The look of a camp list row: the variant Re:CoM's `CButton` set-up `0x140112F10` takes (its
@@ -977,6 +1016,38 @@ mod tests {
         assert_eq!(list::bar(List { cursor: 0, top: 0, count: 4 }), (0.0, 1.0));
         assert_eq!(list::bar(List { cursor: 16, top: 8, count: 16 }), (0.5, 0.5));
         assert_eq!(list::bar(List { cursor: 0, top: 0, count: 0 }), (0.0, 1.0));
+    }
+
+    /// Owner, 2026-11-05 (recording: equipping Aquatank, row 7 of 11 with rows 3..10 shown): the
+    /// re-read after a confirm keeps the window where it was, so the row stays on its line.
+    #[test]
+    fn a_reread_keeps_the_window_where_it_was() {
+        // The recording's case: Enemy Skills, 11 rows, top 3, cursor 7 (Aquatank).
+        let shown = List { cursor: 7, top: 3, count: 11 };
+        assert_eq!(list::open_on(11, 7).top, 0, "before: opened afresh, Aquatank drawn on the last line");
+        let mut s = list::Scroll::default();
+        // The owner list (depth 0) was read when the page opened, then the abilities (depth 1).
+        assert_eq!(s.reread(List { cursor: 2, top: 0, count: 4 }, 0, 4, 2), List { cursor: 2, top: 0, count: 4 });
+        assert_eq!(s.reread(List { cursor: 2, top: 0, count: 4 }, 1, 11, 0), List { cursor: 0, top: 0, count: 11 }, "a new window starts at its top");
+        assert_eq!(s.reread(shown, 1, 11, 7), shown, "equip: same window, same scroll");
+        // Fewer rows than before (an Items slot list shrinking): no blank rows past the end.
+        assert_eq!(s.reread(List { cursor: 10, top: 3, count: 11 }, 1, 9, 8), List { cursor: 8, top: 1, count: 9 });
+        assert_eq!(list::keep(4, 3, 6), List { cursor: 3, top: 0, count: 4 });
+        // The cursor out of the kept window: moved only as far as it needs.
+        assert_eq!(list::keep(17, 15, 3), List { cursor: 15, top: 8, count: 17 });
+    }
+
+    /// Back to a window restores its scroll; a deeper window opened again starts afresh.
+    #[test]
+    fn going_back_restores_the_windows_scroll() {
+        let mut s = list::Scroll::default();
+        s.reread(List::default(), 0, 2, 0);
+        s.reread(List { cursor: 0, top: 0, count: 2 }, 1, 9, 8); // Items: Sora's list (9 rows), last slot
+        let sora = List { cursor: 4, top: 1, count: 9 };
+        assert_eq!(s.reread(sora, 2, 4, 0), List { cursor: 0, top: 0, count: 4 }, "the commands window");
+        assert_eq!(s.reread(List { cursor: 1, top: 0, count: 4 }, 1, 9, 4), sora, "done / back: Sora's list as it was");
+        assert_eq!(s.reread(sora, 0, 2, 0), List { cursor: 0, top: 0, count: 2 });
+        assert_eq!(s.reread(List { cursor: 0, top: 0, count: 2 }, 1, 9, 0), List { cursor: 0, top: 0, count: 9 }, "opened again: afresh");
     }
 
     #[test]

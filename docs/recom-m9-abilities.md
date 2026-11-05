@@ -1525,3 +1525,30 @@ step 4**: the words are 64 bits, their bits 32.. in an 8-byte extension (layout 
 2. **Berserk at Damage = Re:CoM** reads the share per hit against the enemy's KH1 record (built: ×2
    on most hits, KH1's curve; ×4 against high Defence, ×1 at the curve's cap). Or one share per level
    (e.g. KH1's ×2 for every hit)?
+
+## The list keeps its scroll on equip (0.139.3, owner 2026-11-05)
+
+> "When activating an ability it automatically puts it all the way at the bottom of the list."
+
+- **What it was** (Checked (the owner's recording + code)): the order never changed. In the
+  recording (Enemy Skills, 11 rows, rows 3..10 shown, cursor on Aquatank, row 7), after Equip the
+  rows shown are 0..7: Aquatank is still between Search Ghost and Wight Knight, the cursor still on
+  it, but drawn on the last visible line. Every confirm re-reads the page (`Page::abilities_read`),
+  and the re-read rebuilt the list with `list::open_on(n, cursor)`, which starts at top 0 and moves
+  the window only until the cursor is on screen. Neither our order (`abilities::page::list`: KH1's
+  sort key, fixed) nor Re:CoM's list (it has no sort; the rows are ours) was involved.
+- **Fix** (`crate::keyblades::list::{keep, Scroll}`, `Page::{abilities_read, items_read}`): a re-read
+  of the same window keeps its top row (clamped so no blank rows show past the end, as Re:CoM's
+  page down clamps it; then moved only as far as the cursor needs, draw mode 9's rule). Going back
+  to a window (an owner list, or Items' Sora list after a Use / Move / Equip) restores the scroll it
+  had; a newly opened window starts at its top, as before. Depth: `abilities::page::Screen::depth`
+  (0 owners, 1 an owner's abilities), `items_page::Screen::depth` (KH1's window stack).
+- **Items page**: the same re-read (`items_read`), so the same jump on Sora's list (Keyblade slot +
+  up to 8 item slots = 9 rows) and a long stock list: fixed with it. The Keyblade list (from the
+  Keyblade slot) never re-read on equip (only redrawn): it never moved; cancel back to Sora's list
+  now gives back the list as it was shown, so its scroll is kept too.
+- Checked (tests): `keyblades::tests::a_reread_keeps_the_window_where_it_was` (the recording's
+  case), `going_back_restores_the_windows_scroll`. Not checked: in game.
+- **Test:** Abilities > Enemy Skills (or any list longer than 8): scroll down, equip and remove a
+  row: the rows stay where they are and the cursor stays on that row. Items > Sora with 8 slots:
+  scroll to the last slot, Use / Move an item, the list comes back as it was.

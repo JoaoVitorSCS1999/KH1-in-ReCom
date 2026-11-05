@@ -297,6 +297,12 @@ impl Screen {
         self.stack.last().map_or(Mode::Owners, |s| s.0)
     }
 
+    /// The window's depth in the stack (0 the owner list): the page keeps each window's scroll by
+    /// it (`crate::keyblades::list::Scroll`).
+    pub fn depth(&self) -> usize {
+        self.stack.len().saturating_sub(1)
+    }
+
     /// The cursor, clamped to the window's rows.
     pub fn cursor(&self, inv: &Inventory, ctx: Ctx) -> i32 {
         let n = self.rows(inv, ctx).len() as i32;

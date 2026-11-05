@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 254: the Abilities and Items lists keep their scroll on a confirm (equipping no longer drops the row to the bottom line), version 0.139.3 (2026-11-05)
+
+Owner, 2026-11-05 (recording, Abilities > Enemy Skills), verbatim: "When activating an ability it automatically puts it all the way at the bottom of the list."
+
+- **Cause** (Checked (the recording + code)): the order never changed (Aquatank stays between Search Ghost and Wight Knight; the cursor stays on it). Every confirm re-reads the page, and the re-read (`win::keyblades::Page::abilities_read` / `items_read`) rebuilt the list with `list::open_on`, which starts at top 0: with rows 3..10 shown and the cursor on row 7, the window jumped to rows 0..7, the cursor's row on the last line. Not our order (`abilities::page::list`, KH1's fixed sort key) and not Re:CoM's list widget (no sort; the rows are ours).
+- **Fix** (`crate::keyblades::list::{keep, Scroll}`; `abilities::page::Screen::depth`, `items_page::Screen::depth`): each window's top row is kept by its depth: a re-read of the same window keeps it (clamped to the rows there, then moved only as far as the cursor needs, draw mode 9's rule); going back to a window restores it; a new window starts at its top. The Items page (Sora's 9-row list, the stock list) had the same jump: fixed with it. The Keyblade list never re-read on equip (it did not move); cancel from it now hands back Sora's list as it was shown.
+- No hook, patch or site; nothing per frame.
+- Checked: tests (`keyblades::tests::a_reread_keeps_the_window_where_it_was`, `going_back_restores_the_windows_scroll`), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-m9-abilities.md` § The list keeps its scroll on equip.
+
+---
+
 ## Stage 253: no crash on a field swing after a battle (KH1 enemies' attack rows read only in a running battle) (2026-11-05, version 0.139.2)
 
 Owner, 2026-11-05 (0.139.1), verbatim: "game crashed"
