@@ -1,7 +1,10 @@
 //! M13 stage 1 (`crate::effects`): checks once, at the first battle, that Re:CoM has the KH1 effect
 //! sets the asset step added to `EF1000.EFF`, through Re:CoM's own effect-by-name `0x1402A4920`
-//! (`0x1402A43E0(5, name)`, then with `_`; it returns the set, resource `+0x68`). One log line per
-//! set: found with its entry count (set `+0xC`), or not found. No hook, no patch, nothing per frame.
+//! (`0x1402A43E0(5, name)`, then with `_`; it returns resource `+0x68`: an 8-byte wrapper whose first
+//! word is the set, `0x14029F9C0` / `0x140255100`, read so by `0x1402553B0`). One log line per set:
+//! found with its entry count (set `+0xC`), or not found. Before 0.131.0 the count was read at the
+//! wrapper's `+0xC` (past its 8 bytes: the log's 2282216960). Checked (decomp). No hook, no patch,
+//! nothing per frame.
 
 use super::log;
 use std::path::Path;
@@ -54,7 +57,12 @@ pub unsafe fn battle_check() {
         if set == 0 {
             log(&format!("effects (M13): {} is NOT loaded (Re:CoM serves its own EF1000.EFF? the mod's raw/EFFECT/1000/EF1000.EFF missing)", s.name));
         } else {
-            let n = std::ptr::read_unaligned((set + 0xC) as *const u32);
+            let data = std::ptr::read_unaligned(set as *const usize);
+            if data == 0 {
+                log(&format!("effects (M13): {} has a resource but no set data", s.name));
+                continue;
+            }
+            let n = std::ptr::read_unaligned((data + 0xC) as *const u32);
             log(&format!("effects (M13): {} loaded by Re:CoM ({} entries; the manifest lists {})", s.name, n, s.ids.len()));
         }
     }

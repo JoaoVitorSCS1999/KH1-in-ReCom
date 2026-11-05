@@ -3,9 +3,10 @@
 //!
 //! The asset step's events are Re:CoM's own `.EET` / `.SES` events at KH1's variant; Re:CoM starts,
 //! steps, draws and ends them. Ours:
-//! - [`variants`]: the two variant arguments of the motion request Sora's KH1 controller already makes
-//!   (`win::movement` `play`), by the Effects / Sounds settings and the manifest's moves. Once per
-//!   motion, not per frame.
+//! - [`variants`]: the two variant arguments of the motion requests Sora's KH1 controller already makes
+//!   (`win::movement` `play`, and every swing's in `win::attack::apply_row` since 0.131.0: before, swings
+//!   passed 0 and played Re:CoM's events), by the Effects / Sounds settings and the manifest's moves. Once
+//!   per motion, not per frame. [`swing_started`] logs, once per battle per finisher, what Re:CoM bound.
 //! - KH1's trail end. Re:CoM's list-B event (`0x14017AB70`) can only fade or kill its effect at its end
 //!   frame (`0x140254D60(e, fade)`), and its motion stop (`0x14017A430`) fades or kills the live ones
 //!   and leaves the ended ones in the linger list. KH1 stops the trail's emission at the end of its
@@ -26,7 +27,7 @@ use super::movement::{func, rd};
 use crate::fx;
 use crate::settings::Mode;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 static FX: OnceLock<fx::Manifest> = OnceLock::new();
@@ -48,6 +49,29 @@ const LINGER: usize = 0x30;
 const LINGER_ENTRY: usize = 0x20;
 const LINGER_MAX: i32 = 64;
 const EVENT_FADE: usize = 0x60;
+
+/// The per-battle swing lines (0.131.0): the battle's number and the swings already logged in it.
+static BATTLE: AtomicU32 = AtomicU32::new(0);
+static LOGGED: AtomicU64 = AtomicU64::new(0);
+/// An entity's EET player (`CEffectMotion`, `0x1401A3470` starts it from `+0x108`); in it the group the
+/// EET was found by (`+0x10`, `0x140179A30`), the bound events' count (`+0x24`) and the 32 slots
+/// (`+0x830`; a slot's `+8` = list-A event, `+0x10` = list-B event, `0x14017A240`). Checked (decomp).
+const ENT_EET: usize = 0x108;
+const CEM_GROUP: usize = 0x10;
+const CEM_COUNT: usize = 0x24;
+const CEM_SLOTS: usize = 0x830;
+const CEM_MAX: i32 = 32;
+/// An event's effect id and variant (lists A and B alike).
+const EVENT_ID: usize = 0x20;
+const EVENT_VARIANT: usize = 0x5C;
+/// Re:CoM's resource lookup (type, name, case) and its data (`sites::FIELD_SLEIGHT_CHECKED`); the ESE type.
+const RES_LOOKUP: u32 = 0x002A_43E0;
+const RES_DATA: u32 = 0x002A_49C0;
+const TYPE_ESE: u32 = 0x3E;
+
+type ByNameFn = unsafe extern "win64" fn(*const u8) -> usize;
+type LookupFn = unsafe extern "win64" fn(u32, *const u8, i32) -> usize;
+type DataFn = unsafe extern "win64" fn(usize) -> usize;
 
 type FadeFn = unsafe extern "win64" fn(usize, f32);
 type StopFn = unsafe extern "win64" fn(usize);
@@ -207,4 +231,89 @@ pub unsafe extern "win64" fn motion_stop(cem: usize) {
 
 unsafe fn func_at<T: Copy>(a: &AtomicUsize) -> T {
     std::mem::transmute_copy(&a.load(Ordering::Acquire))
+}
+
+/// A battle starts (the battle manager's ctor wrapper): its swing lines start again.
+pub fn battle_start() {
+    BATTLE.fetch_add(1, Ordering::Relaxed);
+    LOGGED.store(0, Ordering::Relaxed);
+}
+
+/// The lookups the swing line calls, their bytes checked once.
+fn lookups_ok() -> bool {
+    static OK: OnceLock<bool> = OnceLock::new();
+    *OK.get_or_init(|| {
+        let b = super::base();
+        let all = crate::sites::EFFECT_CHECKED.iter().chain(crate::sites::FIELD_SLEIGHT_CHECKED);
+        [crate::sites::EFFECT_CHECKED[0].rva, RES_LOOKUP, RES_DATA].iter().all(|&rva| {
+            all.clone().find(|c| c.rva == rva).is_some_and(|c| {
+                // SAFETY: a read of the mapped exe.
+                unsafe { std::slice::from_raw_parts((b + c.rva as usize) as *const u8, c.expect.len()) == c.expect }
+            })
+        })
+    })
+}
+
+/// The events an entity's EET player bound at its last motion start.
+unsafe fn bound(ent: usize) -> Option<(u32, Vec<fx::Bound>)> {
+    let cem: usize = rd(ent + ENT_EET);
+    if cem == 0 {
+        return None;
+    }
+    let mut out = Vec::new();
+    for k in 0..rd::<i32>(cem + CEM_COUNT).clamp(0, CEM_MAX) as usize {
+        let slot: usize = rd(cem + CEM_SLOTS + 8 * k);
+        if slot == 0 {
+            continue;
+        }
+        let (a, b): (usize, usize) = (rd(slot + 8), rd(slot + 0x10));
+        let (list, ev) = if a != 0 { ('A', a) } else if b != 0 { ('B', b) } else { continue };
+        let name: [u8; 0x20] = rd(ev);
+        let n = name.iter().position(|&c| c == 0).unwrap_or(name.len());
+        out.push(fx::Bound { list, dpx: String::from_utf8_lossy(&name[..n]).into_owned(), id: rd(ev + EVENT_ID), variant: rd(ev + EVENT_VARIANT), set: None });
+    }
+    Some((rd(cem + CEM_GROUP), out))
+}
+
+/// What Re:CoM has under a set's name: Re:CoM's own effect-by-name (`0x1402A4920` → the set's
+/// wrapper, whose first word is the set: `0x14029F9C0` / `0x140255100`, read by `0x1402553B0`) and the
+/// `.ese` of the same name (type 0x3E, as `0x1402A4A10`). Checked (decomp).
+unsafe fn set_info(dpx: &str, id: i32) -> fx::SetInfo {
+    let name = crate::effects::lookup_name(dpx);
+    let wrapper = func::<ByNameFn>(crate::sites::EFFECT_CHECKED[0].rva)(name.as_ptr());
+    let data: usize = if wrapper != 0 { rd(wrapper) } else { 0 };
+    let ids: Vec<u32> = if data != 0 { (0..rd::<i32>(data + 0xC).clamp(0, 256) as usize).map(|k| rd::<u32>(data + 0x10 + 0x20 * k + 8)).collect() } else { Vec::new() };
+    let res = func::<LookupFn>(RES_LOOKUP)(TYPE_ESE, name.as_ptr(), 0);
+    let ese = if res != 0 { func::<DataFn>(RES_DATA)(res) } else { 0 };
+    let sound = (ese != 0)
+        .then(|| (0..rd::<u16>(ese + 0xE).min(256) as usize).map(|k| ese + 0x10 + 8 * k).find(|&r| rd::<u16>(r) as i32 == id).map(|r| rd::<u16>(r + 2) as u32 * 1000 + rd::<u16>(r + 4) as u32));
+    fx::SetInfo { loaded: data != 0, entries: ids, ese: ese != 0, sound: sound.flatten() }
+}
+
+/// After a KH1 swing's motion request (`win::attack::apply_row`): once per battle for each finisher with
+/// KH1 effects and for the battle's first swing, one line with the variants passed and the events
+/// Re:CoM bound for Sora and the Keyblade (their sets and `.ese` looked up). Not per frame.
+pub unsafe fn swing_started(pl: usize, request: u16, row: u8, eet: i32, ses: i32) {
+    let Some(m) = FX.get() else { return };
+    let finisher = m.finishers.iter().find(|f| f.0 == request);
+    let bit = 1u64 << if finisher.is_some() { 1 + request as u32 % 63 } else { 0 };
+    if LOGGED.fetch_or(bit, Ordering::Relaxed) & bit != 0 {
+        return;
+    }
+    let ok = lookups_ok();
+    let look = |b: Option<(u32, Vec<fx::Bound>)>| {
+        b.map(|(g, mut evs)| {
+            if ok {
+                for e in &mut evs {
+                    e.set = Some(set_info(&e.dpx, e.id));
+                }
+            }
+            (g, evs)
+        })
+    };
+    let sora = look(bound(pl));
+    let w: usize = rd(pl + crate::attack::field::WEAPON);
+    let weapon = look(if w != 0 { bound(w) } else { None });
+    let card = super::stats::equipped_card();
+    log(&fx::swing_line(BATTLE.load(Ordering::Relaxed), request, row, finisher.map(|f| f.1.as_slice()), eet, ses, card, sora.as_ref(), weapon.as_ref()));
 }

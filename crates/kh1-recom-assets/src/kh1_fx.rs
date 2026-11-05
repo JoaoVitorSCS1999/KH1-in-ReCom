@@ -683,4 +683,66 @@ mod tests {
         let Some(p) = std::env::var_os("KH1_SORA_MDLS") else { return };
         assert_eq!(sora_body_point(&std::fs::read(p).unwrap()).unwrap(), [0.0, 0.85, 0.0]);
     }
+
+    /// The local files (`KH1_FX_LOCAL` = a folder with `recomdata/` (Re:CoM's `PL0001.EET`, `PL0002.EET`,
+    /// `PL0002.MDL`), `kh1data/` (`xa_ex_0010.mset`, `.mdls`, `btltbl.bin`), `kbm/xw_ex_5160.wpn`) and the
+    /// owner's `kh1-fx.json` (`KH1_FX_JSON`, for the clip names the motion build gave each request):
+    /// Sora's `PL0001.EET` and Ultima's own group EET (card 15, group 34) as the step writes them, then what
+    /// Re:CoM's motion start keeps for each finisher at variant 0 (what 0.130.0's swing request passed) and
+    /// at 1301 (0.131.0: the EET variant of every Keyblade).
+    #[test]
+    fn finisher_events_per_group_from_local_files() {
+        let (Some(dir), Some(json)) = (std::env::var_os("KH1_FX_LOCAL"), std::env::var_os("KH1_FX_JSON")) else { return };
+        let dir = std::path::PathBuf::from(dir);
+        let rd = |p: &str| std::fs::read(dir.join(p)).unwrap();
+        let manifest = std::fs::read_to_string(json).unwrap();
+        // request → Sora's clip, from the owner's manifest's sound rows ("request": r, "variant": 1301, "clip": c).
+        let clip_of = |r: u16| {
+            let key = format!("{{\"request\": {r}, \"variant\": 1301, \"clip\": \"");
+            let at = manifest.find(&key)? + key.len();
+            let p = manifest[at..].split('"').next()?.to_string();
+            let w = format!("w{}", &p[1..]);
+            Some((p, Some(w)))
+        };
+        let set = MotionSet::parse(&rd("kh1data/xa_ex_0010.mset")).unwrap();
+        let table = kh1_formats::btltbl::Btltbl::parse(rd("kh1data/btltbl.bin")).unwrap();
+        let moves = moves(&set, &table.sora_rows().unwrap(), clip_of);
+        assert!(moves.len() >= 19, "{} moves", moves.len());
+        let sk = crate::mdl::RecomSkeleton::parse(&rd("recomdata/PL0002.MDL")).unwrap();
+        let seg = sk.bones[BLADE_BONES.1].local.t.map(|v| v as f32);
+        let ultima = table.weapon_for_item(0x64).unwrap();
+        let wpn = rd("kbm/xw_ex_5160.wpn");
+        let name = crate::effects::keyblade_set_name("xw_ex_5160");
+        let kset = crate::effects::kh1_set(&name, "xw_ex_5160.wpn", &wpn, crate::effects::WPN_SECTION, &[]).unwrap();
+        let attach = crate::effects::program_attach(&kset.data, TRAIL_ID as u32).unwrap().unwrap_or(0);
+        let trail = KeybladeTrail { dpx: name.clone(), far: ultima.blade_far, near: ultima.blade_near, segment: seg, attach };
+        let blade = Some(seg.map(|v| v * (ultima.blade_near + (ultima.blade_far - ultima.blade_near) * 0.8)));
+        let body = sora_body_point(&rd("kh1data/xa_ex_0010.mdls")).ok();
+        let sora = eet::parse(&sora_eet(&rd("recomdata/PL0001.EET"), &moves, body, &mut Added::default()).unwrap()).unwrap();
+        let group = eet::parse(&weapon_eet(&rd("recomdata/PL0002.EET"), &moves, blade, Some(&trail), &mut Added::default()).unwrap()).unwrap();
+        let shared = eet::parse(&weapon_eet(&rd("recomdata/PL0002.EET"), &moves, blade, None, &mut Added::default()).unwrap()).unwrap();
+        for (req, what) in [(216u16, "Stun Impact"), (217, "Gravity Break"), (218, "Zantetsuken"), (215, "Ripple Drive"), (200, "combo 1")] {
+            let m = moves.iter().find(|m| m.request == req).unwrap();
+            let w = m.weapon.as_deref().unwrap();
+            for v in [0, VARIANT] {
+                eprintln!(
+                    "{what} ({req}) at variant {v}: Sora {} {:?}; Ultima's PL0034.EET {w} {:?}; shared PL0002.EET {:?}",
+                    m.clip,
+                    eet::picked(&sora, &m.clip, v),
+                    eet::picked(&group, w, v),
+                    eet::picked(&shared, w, v)
+                );
+            }
+            let kh1 = |evs: Vec<(char, String, i32)>| evs.into_iter().filter(|e| e.1.starts_with("kh1_")).map(|e| e.2).collect::<Vec<_>>();
+            assert!(kh1(eet::picked(&sora, &m.clip, 0)).is_empty() && kh1(eet::picked(&group, w, 0)).is_empty(), "variant 0 keeps none of KH1's");
+            let mut s = kh1(eet::picked(&sora, &m.clip, VARIANT));
+            s.sort_unstable();
+            let want: Vec<i32> = FINISHER_FX.iter().filter(|f| f.0 == m.row && !matches!(f.2, Place::Blade(_))).map(|f| f.1 as i32).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+            assert_eq!(s, want, "{what}: Sora's KH1 effects at 1301");
+        }
+        let gb = eet::picked(&group, "w001_229", VARIANT);
+        assert!(gb.contains(&('B', name.clone(), TRAIL_ID)) && gb.contains(&('A', SORA_SET.to_string(), 2)), "Gravity Break on Ultima's blade: {gb:?}");
+        let gb2 = eet::picked(&shared, "w001_229", VARIANT);
+        assert!(gb2.contains(&('B', TRAIL_SET.to_string(), TRAIL_ID)) && gb2.contains(&('A', SORA_SET.to_string(), 2)), "and on the shared EET (KH2 Keyblades): {gb2:?}");
+    }
 }

@@ -206,6 +206,20 @@ impl Point {
     }
 }
 
+/// The events Re:CoM's motion start keeps for clip `clip` at `variant` (`0x14017A240`: every record bound
+/// to the motion, list A then list B, each event whose `+0x5C` is the variant the request passes).
+/// Checked (decomp). Returns (list, set, id) for each.
+pub fn picked(records: &[Record], clip: &str, variant: i32) -> Vec<(char, String, i32)> {
+    let name = |e: &[u8; EVENT]| String::from_utf8_lossy(&e[..e[..0x20].iter().position(|&c| c == 0).unwrap_or(0x20)]).into_owned();
+    let i = |e: &[u8; EVENT], o: usize| i32::from_le_bytes(e[o..o + 4].try_into().unwrap());
+    let mut out = Vec::new();
+    for r in records.iter().filter(|r| r.name == clip) {
+        out.extend(r.a.iter().filter(|e| i(e, 0x5C) == variant).map(|e| ('A', name(e), i(e, 0x20))));
+        out.extend(r.b.iter().filter(|e| i(e, 0x5C) == variant).map(|e| ('B', name(e), i(e, 0x20))));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

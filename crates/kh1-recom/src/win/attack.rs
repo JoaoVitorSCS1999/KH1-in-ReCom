@@ -337,7 +337,13 @@ unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     wr(pl + field::SITUATION, s.recom_id);
     wr(pl + field::ATTACK_ID, s.recom_id);
     wr(pl + field::ROW_PTR, row.as_ptr() as usize);
-    func::<mv::MotionFn>(mv::MOTION_REQUEST)(pl, row[0] as i32, 0, s.root as u64, 0, 0, 0);
+    // M13 (0.131.0): KH1's effects / sounds of the swing (the asset step's events at KH1's variants,
+    // Sora's and the Keyblade's: `0x1401F7180` plays the weapon with the same variants), by the Effects /
+    // Sounds settings. Before 0.131.0 this request passed 0 / 0: every swing, combo and finisher played
+    // Re:CoM's own events (Checked (code)).
+    let (eet, ses) = super::fx::variants(s.request, 0);
+    func::<mv::MotionFn>(mv::MOTION_REQUEST)(pl, row[0] as i32, 0, s.root as u64, eet, ses, 0);
+    super::fx::swing_started(pl, s.request, row[0], eet, ses);
     // Enemy Skills: Card Soldier's haste (Re:CoM's motion speed after the request, as its row pick),
     // Saïx's bonus per combo (`super::enemy_skills`).
     super::enemy_skills::swing_started(pl, s.counter);

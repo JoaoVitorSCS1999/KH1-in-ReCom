@@ -164,7 +164,10 @@ ripple drive or stun impact,".
   plays the same index with the same variants (`0x1401F7180`). So KH1's version of each move is a set of Re:CoM events
   at **variant 1301**, written by the asset step (`kh1_recom_assets::kh1_fx`, `eet`); the DLL passes 1301 in the
   motion request it already makes for the move (`win::fx::variants` in `Kh1Sora::play`), per toggle, only for the moves
-  `kh1-fx.json` lists. Re:CoM's own events (variant 0) stay byte-identical (Checked (files): the step rebuilds Re:CoM's
+  `kh1-fx.json` lists. **Correction (0.131.0):** only the motions requested through `Kh1Sora::play` got it; every swing
+  (combos, finishers, air rows, Counterattack) is requested by the row pick `win::attack::apply_row`, which passed
+  0 / 0 until 0.131.0, so no KH1 event of this stage ever played on a swing (§ 0.131.0 fix).
+  Re:CoM's own events (variant 0) stay byte-identical (Checked (files): the step rebuilds Re:CoM's
   `PL0001.EET` / `PL0002.EET` byte for byte; its layout puts every list A before every list B).
 - **Trail** (`PL0002.EET`, list B): every KH1 row with a trail (`+2` ≥ 0: combo rows, finishers, KH1-only moves, Guard,
   Counterattack), on its Keyblade clip: Re:CoM's own effect 5 of `ex_5010.dpx` (= KH1's Kingdom Key set, Checked
@@ -341,6 +344,64 @@ and look follow KH1's own trail data (1:1); the six KH2 Keyblades swing with Re:
   - the weapon's EET lookup by our group's id finds the group's own `PL00GG.EET`;
   - banks registered earlier in a session stay registered (Re:CoM owns them; at most about 0.9 MB per Keyblade).
 - **Not checked:** in game; the real `.se` files (not in the session); a trail's look against KH1's (no KH1 capture).
+
+## 0.131.0 fix: KH1's swing events never played (the swing's motion request passed variant 0)
+
+Owner, 2026-11-04 (0.130.0, after Build): "sora's gravity break finisher still doesn't have the proper sound effects or
+visual effects. Stun Impact also doesn't have its finished visual effects. Ripple drive doesn't have it's visual or sound
+effects at all."
+
+- **Cause** (Checked (code + files)): a KH1 swing's motion is requested once, by our row pick `win::attack::apply_row`
+  (Sora's vtable `+0x128`, after Re:CoM's field-swing init): `0x1401F7180(pl, row, 0, root, 0, 0, 0)`. The KH1
+  controller marks the row's request issued (`attack::row_exec`), so `Kh1Sora::play`, the only caller of
+  `win::fx::variants`, never requests it. So since 0.109.0 every swing, combo and finisher played Re:CoM's
+  **variant 0** events, for every Keyblade. Re:CoM's motion start keeps only the events whose `+0x5C` is the variant
+  passed (`0x14017A240`, Checked (decomp)). What variant 0 holds (Checked (files): `eet::picked` on Re:CoM's
+  `PL0001.EET` / `PL0002.EET` with the step's records, test `finisher_events_per_group_from_local_files`):
+  - Gravity Break `p001_229` / `w001_229`: nothing; Ripple Drive `p001_228` / `w001_228`: nothing (new clips);
+  - Stun Impact `p001_101`: Re:CoM's own `ex_0010.dpx` 0 only (KH1's 0 + 1 at 1301); Zantetsuken `p001_104`:
+    Re:CoM's `ex_0010.dpx` 4 / 5;
+  - the combo clips `w001_055..061`: Re:CoM's `ex_5010.dpx` 5 (the Kingdom Key's trail on every Keyblade: the trail
+    the owner saw); the KH1-only clips: no trail;
+  - request 208 (`p001_103`, a Re:CoM clip): Re:CoM's Sonic Rave effects (`limit1`, `sonicrave`, `start`);
+  - sounds: Re:CoM's variant-0 SES events of each clip.
+- **Not the cause** (Checked):
+  - the equipped Keyblade: the EET variant is 1301 for every Keyblade (`fx::variants`); each KH1 group's own
+    `PL00GG.EET` carries its trail and Gravity Break's blade effect 2 at 1301, the shared `PL0002.EET` (KH2 Keyblades)
+    too (the local run: Ultima's `PL0034.EET` `w001_229` = `kh1_ex_5160.dpx` 5 (B) + `kh1_ex_0010.dpx` 2 (A));
+  - where the sets are: an EET event names its set, and Re:CoM looks it up **by name among every loaded type-5
+    resource** (`0x1402577D0` / `0x1402587D0` / `0x1402588B0` → `0x1402A4920` → `0x1402A43E0(5, name)`: one list per
+    type, `0x140AC6730[type]`, no group scope), then the effect id inside that set (`0x1402553B0`: entry `+8` == id).
+    So Sora's finisher events and the blade's effect 2 find `kh1_ex_0010.dpx` in `EF1000.EFF` (Sora's LINK 31000)
+    with any Keyblade group loaded, and a group's trail finds its own `kh1_ex_5xxx.dpx` (its `PL00GG.EFF` row). The
+    `.ese` is looked up the same way by the event's set name, type 0x3E (`0x1402A4A10`), so `kh1_ex_0010.ese` (also in
+    `EF1000.EFF`) gives ids 0..7 their sounds 9000081..88. Checked (decomp).
+  - the log's `kh1_ex_0010.dpx loaded by Re:CoM (2282216960 entries …)`: our check read the count at `+0xC` of what
+    `0x1402A4920` returns, which is resource `+0x68`: an 8-byte wrapper whose first word is the set (`0x14029F9C0` →
+    `0x140255100`; `0x1402553B0` reads `*wrapper + 0xC`). The set was loaded; the number was ours. Checked (decomp).
+- **Fix** (`win::attack::apply_row`): the swing's motion request passes `win::fx::variants(request, 0)`: at
+  Effects = KH1 the EET variant 1301, at Sounds = KH1 the equipped Keyblade's SES variant (1301 + card − 1 where it
+  has events, else the Kingdom Key's 1301); the Keyblade plays the same variants (`0x1401F7180`). Re:CoM then binds,
+  spawns, steps and ends KH1's events itself. At Effects / Sounds = Re:CoM, and at Combat = Re:CoM: 0, unchanged.
+- **Also** (`fx::Manifest::moves`): at Effects = KH1 the EET variant goes to **every** request the step wrote KH1
+  events for (trails, effects or sounds), not only those with effects: request 208 (`p001_103`) and 212 now show
+  none of Re:CoM's effects (KH1 has none on them: no type-7 window, no row effect). Before, `play`-requested moves
+  outside the effect list kept Re:CoM's variant-0 events.
+- **The entry count** (`win::effects`): read from the set (`*wrapper + 0xC`); the log now says 8.
+- **Per battle, a log line** (`win::fx::swing_started`, `fx::swing_line`): after the swing's request, for the battle's
+  first swing and each finisher with KH1 effects (Stun Impact, Gravity Break, Zantetsuken, Ripple Drive) on its first
+  play in the battle: the EET / SES variants passed, the equipped card, and the events Re:CoM bound for Sora and the
+  Keyblade (read from each entity's EET player `+0x108`: group `+0x10`, count `+0x24`, slots `+0x830` (`+8` list A,
+  `+0x10` list B), Checked (decomp `0x140179A30`, `0x140179B10`, `0x14017A240`)), each with its set as Re:CoM has it
+  (loaded, entries, the id in it, its `.ese` and the effect's sound). Lookups: `0x1402A4920`, `0x1402A43E0`,
+  `0x1402A49C0` (existing checked sites, bytes compared once). Not per frame.
+- **Per frame: nothing.** Per swing: the variants (one pointer read, small list lookups), as `play` already did.
+  No new hook, call site or byte site.
+- **Asset step: unchanged** (no re-run, no `mod.yml` change). Its outputs already carry the events per group (the
+  owner's 0.130.0 manifest: all 16 groups, SES variants 1302..1317; the local run above).
+- **Assumptions:** the KH1 events play as stage 3 / 0.112.0 / 0.114.0 assumed (program start delays, `.ese` at the
+  spawn, attach codes); the row pick runs once per swing (a re-request in the same frame would rebind, as before).
+- **Not checked:** in game.
 
 ## The Effects & Sound page built (0.116.0)
 
