@@ -55,6 +55,8 @@ static ITEM_SET_LOGGED: AtomicBool = AtomicBool::new(false);
 static SPARE_LOGGED: AtomicBool = AtomicBool::new(false);
 static NO_NUMBERS_LOGGED: AtomicBool = AtomicBool::new(false);
 static ODD_STATE_LOGGED: AtomicBool = AtomicBool::new(false);
+/// The "Equipped" word's first draw logged (`Page::equipped_word`).
+static WORD_LOGGED: AtomicBool = AtomicBool::new(false);
 
 /// `CCamp` fields (Checked, decomp `0x1400D9C80` and the functions named).
 mod camp {
@@ -103,8 +105,6 @@ mod camp {
     /// `0x1401AAAE0()` at ctor: Riku's story (Re:CoM's index for its per-story tables).
     pub const RIKU: usize = 0x21BC;
     pub const COUNT: usize = 0x21C4;
-    /// Copied each update from a frame counter (`% 7000`); the list rows' marker sprites get it.
-    pub const BLINK: usize = 0x21D8;
 }
 
 // Re:CoM functions (RVAs; first bytes checked in `sites`).
@@ -170,12 +170,8 @@ const VALUE_COLOUR: u32 = 0x8004_6060;
 /// The list cursor's second sprite: + (284, 168) from the row (`0x140509530`, `0x140509520`).
 const CURSOR_DX: f32 = 284.0;
 const CURSOR_DY: f32 = 168.0;
-/// The list rows' marker sprite (`0x1400E6DF0` mode 9: Re:CoM's "seen" 0x1D / "new" 0x1E mark,
-/// at (170, −13)). We mark the equipped Keyblade's row with 0x1D. Assumption: it reads as a mark
-/// on this list (to check in game; 0x1E is the other choice).
-const EQUIPPED_MARK: u32 = 0x1D;
-const MARK_X: f32 = 170.0;
-const MARK_Y: f32 = -13.0;
+// A marked row's "Equipped" word (owner, 2026-11-05; before 0.140.0 Re:CoM's "NEW!" badge, its
+// sequence 0x1D at (170, −13)): `crate::keyblades::badge`, drawn by [`Page::equipped_word`].
 
 type VoidFn = unsafe extern "win64" fn(*mut u8);
 type BuildFn = unsafe extern "win64" fn(*mut u8, i32, u64) -> u64;
@@ -194,10 +190,6 @@ type SeqAnimFn = unsafe extern "win64" fn(*mut u8, u32, *const u8, u32, f32, u32
 type AttachFn = unsafe extern "win64" fn(*mut u8, *const u8, *mut u8, f32, f32, f32) -> u64;
 /// `+0x68` (`0x1402481A0`): replace slot `n`'s item with a new text item.
 type ReplaceFn = unsafe extern "win64" fn(*mut u8, u32, *const u8, *mut u8) -> u64;
-/// `+0x40` (`0x140247A50`): add a sequence at an offset; returns the new sequence object.
-type MarkFn = unsafe extern "win64" fn(*mut u8, *const u8, u32, f32, f32, f32, u32) -> *mut u8;
-/// Sequence object vtable `+0x30`, as `0x1400E6DF0` calls it with `camp+0x21D8`.
-type ObjIntFn = unsafe extern "win64" fn(*mut u8, u32) -> u64;
 type FntCtorFn = unsafe extern "win64" fn(*mut u8, i32, i32, *const u32, i32, *const u8, i32) -> *mut u8;
 #[allow(clippy::type_complexity)]
 type SetupFn = unsafe extern "win64" fn(*mut u8, *const u8, u32, *const u16, *const f32, *mut u8, *const u8, i32, f32, f32, i32, *const u32, i32);
@@ -1619,7 +1611,6 @@ impl Page {
             (0xF, 1.0, 2.0)
         };
         let colour: u32 = at(camp, camp::TEXT_COLOUR);
-        let blink: u32 = at(camp, camp::BLINK);
         let setup = func::<SetupFn>(CBUTTON_SETUP);
         // The item row needs our table (Re:CoM's + the new group) and a loaded set that has it.
         let item_table = ITEM_TABLE.get().zip(ITEM_ROWS.get()).and_then(|(t, rows)| {
@@ -1646,17 +1637,16 @@ impl Page {
             let name = self.row_text(idx as usize);
             let c = if self.row_grey(idx as usize) { ip::grey_colour(colour) } else { colour };
             setup(btn, set, 0x11, seqs, pos.0.as_ptr(), self.list_panel as *mut u8, name.as_ptr(), font, f9, f10, 0x40, &c, self.row_look(idx as usize, item_row));
+            // 0.140.0 (owner, 2026-11-05): an equipped row says "Equipped" where Re:CoM's "NEW!"
+            // badge was.
+            let spr: *mut u8 = at(btn, 0x18);
+            let word = if self.marked(idx as usize) && !spr.is_null() { self.equipped_word(spr, set, idx) } else { None };
             // 0.113.0, true squeeze (owner, 2026-11-04): a name wider than the row's plate is drawn
             // narrower (`CButton +0x20` = the row's `C2DFnt`, `0x140112F10`). One box on every row
-            // (Re:CoM's cursor frame hugs the plate), so a name keeps one width.
-            super::text_fit::fit(at::<usize>(btn, crate::text_fit::recom::BUTTON_TEXT), crate::text_fit::boxes::CAMP_ROW, || format!("{} list row {idx}", self.kind()));
-            let spr: *mut u8 = at(btn, 0x18);
-            if self.marked(idx as usize) && !spr.is_null() {
-                let m = vfn::<MarkFn>(spr, 0x40)(spr, set, EQUIPPED_MARK, MARK_X, MARK_Y, 0.0, 0);
-                if !m.is_null() {
-                    vfn::<ObjIntFn>(m, 0x30)(m, blink);
-                }
-            }
+            // (Re:CoM's cursor frame hugs the plate), so a name keeps one width; a marked row's name
+            // ends before its word (0.140.0).
+            let name_box = word.map_or(crate::text_fit::boxes::CAMP_ROW, kb::badge::name_box);
+            super::text_fit::fit(at::<usize>(btn, crate::text_fit::recom::BUTTON_TEXT), name_box, || format!("{} list row {idx}", self.kind()));
         }
         self.place_cursor();
         if self.bar != 0 {
@@ -1664,6 +1654,40 @@ impl Page {
             func::<BarUpdateFn>(BAR_UPDATE)(self.bar as *mut u8, t, s);
         }
         self.stats();
+    }
+
+    /// The "Equipped" word on a marked row's sprite (`crate::keyblades::badge`): Re:CoM's `C2DFnt`
+    /// (`0x140243F10`, the status panel's font 0xE, right-aligned 0x41, the text copied in with
+    /// `0x140258DE0`) attached with the sprite's `+0x60` as the status values are; the sprite owns
+    /// it (deleted with the row, as the values are). Squeezed past [`kb::badge::MAX_WIDTH`]. Returns
+    /// its drawn width (units), `None` when nothing was made.
+    unsafe fn equipped_word(&self, spr: *mut u8, set: *const u8, idx: i32) -> Option<f32> {
+        let mut w = func::<NewFn>(NEW)(0xB0);
+        if w.is_null() {
+            return None;
+        }
+        let colour = kb::badge::COLOUR;
+        w = func::<FntCtorFn>(FNT_CTOR)(w, 0, 0, &colour, kb::badge::FONT, std::ptr::null(), kb::badge::FLAGS);
+        if w.is_null() {
+            return None;
+        }
+        func::<TextFn>(TEXT_COPY)(w, kb::badge::TEXT.as_ptr());
+        let level = super::text_fit::fit(w as usize, kb::badge::MAX_WIDTH, || format!("{} list row {idx} \"Equipped\"", self.kind()));
+        let width = super::text_fit::width(w as usize).map(|w16| crate::text_fit::scaled(w16 as i64, level) as f32 / 16.0);
+        vfn::<AttachFn>(spr, 0x60)(spr, set, w, kb::badge::X, kb::badge::Y, 0.0);
+        if !WORD_LOGGED.swap(true, Ordering::Relaxed) {
+            log(&format!(
+                "{}: equipped rows say \"Equipped\" (Re:CoM's text, font {:#x}, right edge x {} y {} of the row, colour {:#x}); drawn {} units wide (squeeze {:.3})",
+                self.kind(),
+                kb::badge::FONT,
+                kb::badge::RIGHT,
+                kb::badge::Y,
+                kb::badge::COLOUR,
+                width.map_or_else(|| "?".to_string(), |w| format!("{w:.1}")),
+                crate::text_fit::factor(level)
+            ));
+        }
+        Some(width.unwrap_or(kb::badge::MAX_WIDTH))
     }
 
     /// The cursor onto the highlighted row (draw mode 9's tail, `0x1400E7ABF..0x1400E7B6F`).

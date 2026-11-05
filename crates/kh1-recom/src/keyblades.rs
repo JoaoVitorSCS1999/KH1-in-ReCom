@@ -552,6 +552,63 @@ pub mod list {
     }
 }
 
+/// The "Equipped" word on a camp list row, where Re:CoM's "NEW!" badge was (owner, 2026-11-05:
+/// "instead of equipped items/abilities saying "new" when they're equipped, can they just say
+/// "equipped""). Notes: `docs/recom-keyblade-equip.md` § "Equipped" instead of "NEW".
+///
+/// Re:CoM's badge (Checked (decomp + disasm + files)): its Sleights page (`0x1400E6DF0` mode 9) adds
+/// sequence `0x1D + (byte > 0)` of `camp:00` to a row's sprite through the sprite's `+0x40` at
+/// (170, −13) (`0x140509308`, `0x140509340`): 0x1E (never highlighted) pulses alpha 0x40 ↔ 0x80,
+/// 0x1D (seen) is static at alpha 0x20. Both draw sprite 31, the "NEW!" picture (39 × 12 units),
+/// at translate (−23, 13): with the row's anchor (22, 14, the group's first piece) the box is x
+/// 149..188, y 8..20, the plate's lower right (plate 0..197 × −5..21). Our pages drew 0x1D on every
+/// equipped row (the faint "NEW!" in the owner's recording: glyphs at x 152.5..186.7, y 9.7..19.0).
+///
+/// Ours: Re:CoM's own text, a `C2DFnt` attached to the row's sprite with its `+0x60` as Re:CoM's
+/// status values are (`0x1400E6DF0` rows 0..4), right-aligned at the badge's right edge, in the
+/// status panel's font 0xE (cap height 34 px against the badge's 33 px and the row names' 37 px at
+/// 2560 × 1440, measured in the recording). No asset, no new Re:CoM call. None of our pages draws
+/// Re:CoM's badge any more: on them it never meant "new" (only "equipped" / "set").
+pub mod badge {
+    /// The word (NUL-terminated ASCII, no `%`).
+    pub const TEXT: &[u8] = b"Equipped\0";
+    /// Re:CoM's status-panel font (the badge's height).
+    pub const FONT: i32 = 0xE;
+    /// Right-aligned at its x (Re:CoM's status values, `0x1400E6DF0`).
+    pub const FLAGS: i32 = 0x41;
+    /// The row's text anchor (the group's first piece, `crate::text_fit::boxes::CAMP_TEXT_LEFT` − 1).
+    /// Checked (recording): the name at offset 1 starts 23.2 units from the plate's left.
+    pub const ANCHOR_X: f32 = 22.0;
+    /// The right edge, in the plate's units: the badge picture's right (188) less one (its glyphs end
+    /// at 186.7).
+    pub const RIGHT: f32 = 187.0;
+    /// The offset given to `+0x60` (x relative to the anchor).
+    pub const X: f32 = RIGHT - ANCHOR_X;
+    /// The vertical offset: the word's glyphs on the badge's (y 9.7..19.0), where the name at
+    /// offset 2 has its capitals at 2.9..13.4 (recording). Assumption: font 0xE sits on its offset
+    /// as font 0xF does (top-aligned that gives 8.9, bottom-aligned 7.4; Re:CoM itself puts both
+    /// fonts' rows at (1, 2)); 8 is within a unit of either.
+    pub const Y: f32 = 8.0;
+    /// The widest the word may be drawn (squeezed to fit beyond, `crate::text_fit`): from the plate's
+    /// x 120 (past the longest names' usual end) to [`RIGHT`].
+    pub const MAX_WIDTH: f32 = RIGHT - 120.0;
+    /// Room kept between a name and the word.
+    pub const GAP: f32 = 4.0;
+    /// The text colour (ABGR, 0x80 = ×1), a lit version of the badge's yellow-green: the picture is
+    /// about (247, 255, 120) drawn at alpha 0x20 (seen as (64, 108, 45) on the plate (3, 57, 20)).
+    /// Shown as about (128, 180, 64): readable, the badge's hue, calmer than a white name.
+    /// Assumption: Re:CoM's text colour maps as about 13 + 2.49 × value per channel (fitted to the
+    /// status value 0x80046060 drawn (252, 255, 23)).
+    pub const COLOUR: u32 = 0x8014_432E;
+
+    /// A marked row's name box (`crate::text_fit` units): from the name's left to the word's left
+    /// less [`GAP`], the word `word` units wide as drawn; never more than an unmarked row's.
+    pub fn name_box(word: f32) -> f32 {
+        let left = RIGHT - word.clamp(0.0, MAX_WIDTH) - GAP;
+        (left - crate::text_fit::boxes::CAMP_TEXT_LEFT).min(crate::text_fit::boxes::CAMP_ROW)
+    }
+}
+
 /// The look of a camp list row: the variant Re:CoM's `CButton` set-up `0x140112F10` takes (its
 /// last argument) to pick the row's sequence from the list's table `0x1407C11F0`
 /// (`seqs[variant]`, Checked (decomp)). Re:CoM's Sleights page passes each row's category
@@ -1035,6 +1092,35 @@ mod tests {
         assert_eq!(list::keep(4, 3, 6), List { cursor: 3, top: 0, count: 4 });
         // The cursor out of the kept window: moved only as far as it needs.
         assert_eq!(list::keep(17, 15, 3), List { cursor: 15, top: 8, count: 17 });
+    }
+
+    /// The word sits where Re:CoM's badge is and stays inside the plate; a marked row's name ends
+    /// before it.
+    #[test]
+    fn the_equipped_word_takes_the_badges_place() {
+        use crate::text_fit::boxes::{CAMP_PLATE_RIGHT, CAMP_ROW, CAMP_TEXT_LEFT};
+        // Re:CoM's badge box: anchor (22, 14) + (170, −13) + translate (−23, 13) + part (−20..19, −6..6).
+        let (bx0, bx1, by0, by1) = (22.0 + 170.0 - 23.0 - 20.0, 22.0 + 170.0 - 23.0 + 19.0, 14.0 - 13.0 + 13.0 - 6.0, 14.0 - 13.0 + 13.0 + 6.0);
+        assert_eq!((bx0, bx1, by0, by1), (149.0, 188.0, 8.0, 20.0));
+        assert!(badge::RIGHT <= bx1 && badge::RIGHT >= 186.7, "ends where the badge's glyphs end");
+        assert!(badge::RIGHT < CAMP_PLATE_RIGHT);
+        assert_eq!(badge::ANCHOR_X + badge::X, badge::RIGHT);
+        // Its glyphs (9.6 units tall at font 0xE) from the offset + 0.9 (top-aligned) or ending at
+        // the offset + 11.0 (bottom-aligned) both fall on the badge's 8..20.
+        assert!(badge::Y + 0.9 >= by0 && badge::Y + 0.9 + 9.6 <= by1);
+        assert!(badge::Y + 11.4 <= by1 && badge::Y + 11.4 - 9.6 >= by0);
+        // The name's box: from 23 to the word's left − 4.
+        assert_eq!(badge::name_box(58.0), 187.0 - 58.0 - 4.0 - CAMP_TEXT_LEFT);
+        assert_eq!(badge::name_box(500.0), 187.0 - badge::MAX_WIDTH - 4.0 - CAMP_TEXT_LEFT, "the word is squeezed past its widest");
+        assert_eq!(badge::name_box(0.0), CAMP_ROW.min(187.0 - 4.0 - CAMP_TEXT_LEFT));
+        assert!(badge::name_box(badge::MAX_WIDTH) >= 90.0, "names as long as \"Search Ghost\" (95 units) keep most of their width");
+        // Re:CoM's text bytes: NUL-terminated ASCII, no `%`.
+        assert_eq!(badge::TEXT.last(), Some(&0));
+        assert!(badge::TEXT[..badge::TEXT.len() - 1].iter().all(|&c| c.is_ascii_graphic() && c != b'%'));
+        // The colour's channels (ABGR) on the fitted map: about (128, 180, 64).
+        let ch = |s: u32| 13.0 + 2.49 * ((badge::COLOUR >> s) & 0xFF) as f32;
+        assert!((ch(0) - 128.0).abs() < 3.0 && (ch(8) - 180.0).abs() < 3.0 && (ch(16) - 64.0).abs() < 3.0);
+        assert_eq!(badge::COLOUR >> 24, 0x80);
     }
 
     /// Back to a window restores its scroll; a deeper window opened again starts afresh.

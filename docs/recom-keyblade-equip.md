@@ -99,7 +99,7 @@ writes no camp field Re:CoM's pages use. It follows the entry-4 page (`0x1400EB7
 | cursor | `CButtonCursor` (0x1C0 bytes, ctor `0x1400D25F0(obj, 0x12, list panel, 0x12D)`), shown when the opening ends, glides by `0x1400DE010(cursor, dt × 0.02)`, hidden on close by `0x1400E5CF0` |
 | scroll bar | `CScrollBar` (0x28, ctor `0x140112AB0`, setup `0x1401130C0(bar, set, 0x14, seqs 0x1407C1228, (133, −56), 157.0, list panel)`, update `0x140112CB0(bar, min(1, top/n), min(1, 8/n))`) |
 | list rows | 8 visible `CButton`s (`0x140112A90`, setup `0x140112F10`, kind 0x11, seqs `0x1407C11F0`, layout group 0x12 element 2+i, font 0xF (0xE for languages 3..5 or `camp+0x9C`), offsets 1.0 / 2.0, colour `camp+0x98`, variant 0), rebuilt on each move (draw mode 9). Top row: the cursor stays in the 8 visible rows. |
-| equipped mark | the row sprite's marker, vtable `+0x40(sprite, set, 0x1D, 170.0, −13.0, 0.0, 0)` then the new object's `+0x30(obj, camp+0x21D8)`, as Re:CoM marks its rows ("seen" 0x1D / "new" 0x1E). **Assumption**: 0x1D reads as a mark here. |
+| equipped mark | the row sprite's marker, vtable `+0x40(sprite, set, 0x1D, 170.0, −13.0, 0.0, 0)` then the new object's `+0x30(obj, camp+0x21D8)`, as Re:CoM marks its rows ("seen" 0x1D / "new" 0x1E). **Replaced in 0.140.0** by the word "Equipped" (§ "Equipped" instead of "NEW" below): in game 0x1D drew a faint "NEW!". |
 | status rows | 3 `CButton`s, kind 0x10, seqs `0x1407C11D0` (variant 0..2 = sequence 0x12C), layout group 0x11 elements 4..6, y + 8.0, font 0xE; a value `C2DFnt` (colour 0x80046060, font 0xE, 0x41), text copied with `0x140258DE0`, attached at (220.0, 1.0). Labels "Strength", "Magic", "Reach". Rebuilt for the highlighted Keyblade on each move (Re:CoM builds its status rows once). |
 | help line | ours while the page is open; on close the message `*(u32*)0x1407C106C`, as the entry-4 page restores. |
 
@@ -250,7 +250,7 @@ Ours, on Re:CoM's camp list (the Keyblades page's pieces: both panels, `CButton`
   panel shows the three slots (the same glyph, spell name or "None"), rebuilt after every write.
   Help: "Hold [L1] and press [button] to cast this spell." (7.12's buttons, glyphs too).
 - **Picker** (confirm on a slot, sound 2): list rows = the learned spells at their level, then
-  "None"; Re:CoM's row mark (0x1D, as the equipped Keyblade's) on the row holding the slot's
+  "None"; Re:CoM's row mark (0x1D, as the equipped Keyblade's) (since 0.140.0 the word "Equipped") on the row holding the slot's
   spell; opens on KH1's last picker row (kept for the session). Confirm (sound 2) writes the slot
   in our save block (`save + 0x2681..0x2683`, 0 = none, else spell + 1) and returns to the slot
   list on that slot; cancel (sound 4) returns without writing; cancel on the slot list closes the
@@ -329,7 +329,7 @@ closed`, `keyblades: page opened …`, `customize: page opened: spell levels [�
    to judge in game.
 3. **Header item 1** (the breadcrumb) titled "Keyblades" / "Customize" through the same
    replace path as item 0's "KH1".
-4. The row mark (0x1D) on the picker's current spell: as on the Keyblades page (seen there).
+4. The row mark (0x1D) on the picker's current spell (since 0.140.0 the word "Equipped"): as on the Keyblades page (seen there).
 
 ### What the owner should test in game
 
@@ -381,7 +381,7 @@ accessories as well we will have slots for them there but dont worry about that 
   "Sora's Keyblade and items, spell shortcuts and abilities." The Abilities page runs on the same
   page type (`win::keyblades::Content::Abilities`): KH1's ability screen with AP, rules in
   `crate::abilities::page`, notes in `docs/recom-m9-abilities.md` § Stage 9b. Re:CoM's row mark
-  (0x1D) now marks **every** equipped row there (`Page::marked(idx)`), as one row before.
+  (0x1D) now marks **every** equipped row there (since 0.140.0 the word "Equipped") (`Page::marked(idx)`), as one row before.
 - **A row's look is Re:CoM's**: the last argument of its `CButton` set-up `0x140112F10` is the row's
   variant, which picks the sequence `seqs[variant]` from the list's table `0x1407C11F0` (Checked
   (decomp)): Re:CoM's Sleights page passes each sleight's category there (`0x1400E6DF0` mode 9,
@@ -708,3 +708,53 @@ reads) once in state 0xF; nothing else per frame. Riku's story / the map camp: o
 8. Riku's story: Re:CoM's menu; Settings opens Re:CoM's Config page directly.
 9. Close the camp with Start from Abilities / Customize, and quit to title with a page open: no crash.
 10. Send `kh1-recom.log` (the `camp:` lines) and the screenshots.
+
+## "Equipped" instead of "NEW" (0.140.0, owner 2026-11-05)
+
+> "instead of equipped items/abilities saying "new" when they're equipped, can they just say
+> "equipped""
+
+- **What the badge was** (Checked (decomp + disasm + files + the owner's recording)): Re:CoM's
+  Sleights page (`0x1400E6DF0` mode 9, `0x1400E7A4C..0x1400E7A97`) adds sequence
+  `0x1D + (byte camp+0x21DC+id > 0)` of `camp:00` with the row sprite's `+0x40` at (170, −13)
+  (`0x140509308` = 170.0, `0x140509340` = −13.0), then its `+0x30` with `camp+0x21D8`. In
+  `camp.lad` (`FO0100.SPR`): 0x1E = sprite 31 pulsing alpha 0x40 ↔ 0x80 over 60 frames (a sleight
+  never highlighted); 0x1D = the same sprite static at alpha 0x20 (one highlighted once: Re:CoM sets
+  the byte to 0xFF). Sprite 31 is the "NEW!" picture (uv 0, 128 .. 39, 140; part −20..19 × −6..6 at
+  translate (−23, 13)). With the row's anchor (22, 14) its box is x 149..188, y 8..20 of the plate
+  (0..197 × −5..21). It is a picture in the camp texture, not a flag on Re:CoM's row; Re:CoM's list
+  draws no badge of its own.
+- **Where ours showed it**: every row `Page::marked` names: the Keyblade list's equipped Keyblade,
+  the Customize picker's row holding the slot's spell or sleight, the Abilities page's equipped
+  rows. The Items page never had it. On none of our pages did it mean "new": there is no "really
+  new" row to keep "NEW" on. Re:CoM's own Sleights page (Riku's story, Combat = Re:CoM) keeps its
+  badge unchanged.
+- **Built** (`crate::keyblades::badge`, `Page::equipped_word`): the word **"Equipped"** in Re:CoM's
+  own text, a `C2DFnt` (`0x140243F10`, font 0xE, right-aligned 0x41, text copied with `0x140258DE0`)
+  attached with the row sprite's `+0x60`, as the status values are. Right edge x 187 (the badge's
+  right), offset y 8; the status panel's font 0xE (cap height 34 px against the badge's 33 px and
+  the names' 37 px at 2560 × 1440: measured in the recording). Colour `0x8014432E`: the badge
+  picture's yellow-green (about (247, 255, 120), drawn by 0x1D at alpha 0x20) as an opaque, calmer
+  text, about (128, 180, 64) on screen. Static, as 0x1D is. Wider than 67 units (from x 120): the
+  true squeeze (0.113.0). A marked row's name is squeezed to end 4 units before the word (only
+  when it would reach it); an unmarked row's box is as before.
+- **Why this one** (the three options in the ask): Re:CoM's own text in the badge's place needs no
+  asset and no game file, and draws through Re:CoM's text code. An asset-step sprite cannot be made
+  from Re:CoM's font: a `camp:00` sprite reads only the camp texture, and the font lives in another
+  texture, so it would need a texture edit (PS2 and HD copies; `FO0100.RTM` is not in the session).
+  Swapping the "NEW!" picture is the same texture edit. Neither is cleaner.
+- No new Re:CoM call, hook, patch or site (the text ctor, text copy and `+0x60` were already used
+  and checked). Nothing per frame: the word is made with the row (draw mode 9's rebuild).
+- **Assumptions**: font 0xE sits on its offset as font 0xF does (top-aligned the word's glyphs
+  would start at 8.9, bottom-aligned at 7.4; 8 is within a unit of either); Re:CoM's text colour maps
+  as about 13 + 2.49 × value per channel (fitted to the status value 0x80046060 drawn
+  (252, 255, 23)); English only, as our other camp texts.
+- Log (once): `<page>: equipped rows say "Equipped" (Re:CoM's text, font 0xe, right edge x 187 y 8
+  of the row, colour 0x8014432e); drawn N units wide (squeeze F)`.
+- Checked (tests): `keyblades::tests::the_equipped_word_takes_the_badges_place`. Not checked: in
+  game.
+- **Test:** Abilities: equip an ability: its row says "Equipped" at the lower right, where "NEW!"
+  was, and the name ends before it; remove it: the word goes. Items > the Keyblade slot: the
+  equipped Keyblade says "Equipped". Customize > a slot: the spell already in it says "Equipped".
+  Look at a long name equipped (e.g. "Treasure Magnet", a long sleight): it is narrowed, not
+  overlapped. Riku's story / Combat = Re:CoM, Re:CoM's Sleights page: its own "NEW!" as before.

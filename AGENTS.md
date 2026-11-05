@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 256: equipped rows say "Equipped" where Re:CoM's "NEW!" badge was (Abilities, the Keyblade list, the Customize picker), in Re:CoM's own text, version 0.140.0 (2026-11-05)
+
+Owner, 2026-11-05 (recording, Abilities > Enemy Skills), verbatim: "also, instead of equipped items/abilities saying "new" when they're equipped, can they just say "equipped""
+
+- **The badge** (Checked (decomp + disasm + files + recording)): Re:CoM's Sleights page (`0x1400E6DF0` mode 9) adds `camp:00` sequence `0x1D + (byte camp+0x21DC+id > 0)` with the row sprite's `+0x40` at (170, −13) (`0x140509308`, `0x140509340`). 0x1E: sprite 31 pulsing alpha 0x40 ↔ 0x80; 0x1D: the same sprite static at alpha 0x20. Sprite 31 is the "NEW!" picture; with the anchor (22, 14) its box is x 149..188, y 8..20 of the plate (glyphs in the recording: 152.5..186.7, 9.7..19.0). A picture in the camp texture, not a flag of Re:CoM's row. Our pages drew 0x1D on every `Page::marked` row (the equipped Keyblade, the Customize picker's current pick, equipped abilities); the Items page never did. Nowhere on our pages did it mean "new", so no "NEW" is kept; Re:CoM's own Sleights page is unchanged.
+- **Change** (`crate::keyblades::badge`, `win::keyblades::Page::equipped_word`): those rows get Re:CoM's own text "Equipped" instead of the sequence: a `C2DFnt` (`0x140243F10`, font 0xE, right-aligned 0x41, text by `0x140258DE0`) attached with the sprite's `+0x60` as the status values are, right edge at plate x 187, offset y 8, colour `0x8014432E` (the badge's yellow-green, opaque and calmer: about (128, 180, 64)); static, as 0x1D. Wider than 67 units: the true squeeze. A marked row's name is squeezed to end 4 units before the word. Chosen over an asset-step sprite or a swapped "NEW!" picture: both need a camp texture edit (a `camp:00` sprite cannot read Re:CoM's font texture; `FO0100.RTM` not in the session), this needs no asset.
+- No new call, hook, patch or site; nothing per frame (made with the row). Removed: the 0x1D mark call and `camp+0x21D8` read.
+- Assumptions: font 0xE sits on its offset as font 0xF (top-aligned 8.9, bottom-aligned 7.4; 8 within a unit of either); the text colour map 13 + 2.49 × value (fitted to one Re:CoM colour); English only.
+- Checked: tests (`keyblades::tests::the_equipped_word_takes_the_badges_place`), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-keyblade-equip.md` § "Equipped" instead of "NEW".
+
+---
+
 ## Stage 255: the KH1 camera keeps Sora near the centre (KH1's look point 0.5 m ahead of him, not behind), version 0.139.4 (2026-11-05)
 
 Owner, 2026-11-05 (0.139.2, Camera = KH1, Auto on), verbatim: "the KH1 camera isn't right. The camera itself is good but sora isn't the center of it if that make sense" (an 8.6 s recording).
