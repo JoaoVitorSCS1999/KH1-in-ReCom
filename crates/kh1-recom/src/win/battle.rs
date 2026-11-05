@@ -104,6 +104,12 @@ unsafe fn task(id: u32) -> usize {
     func::<TaskFn>(TASK_BY_ID)(id)
 }
 
+/// Whether a card battle is running now (Re:CoM's CBTL task is there): false in field rooms and
+/// after a battle's end, while the battle number still names the last battle (0.139.2).
+pub(super) unsafe fn cbtl_live() -> bool {
+    task(b::TASK_CBTL) != 0
+}
+
 /// Boss revenge (`super::revenge`): whether this battle is a KH1 battle (Combat = KH1, Sora's
 /// story), and its number.
 pub(super) fn kh1_battle() -> bool {

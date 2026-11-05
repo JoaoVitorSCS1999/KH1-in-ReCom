@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 253: no crash on a field swing after a battle (KH1 enemies' attack rows read only in a running battle) (2026-11-05, version 0.139.2)
+
+Owner, 2026-11-05 (0.139.1), verbatim: "game crashed"
+
+- **Cause** (Checked: the owner's log + this build's symbols): `CRASH: exception 0xc0000005 at kh1-recom.dll+0x13197f (reading 0x40a00018)`, in `win::kh1_enemy::swing_meets_attacks` (from `win::attack::pair_dispatch`), inside the inlined `live_rows`: it read an enemy's attack set `[enemy+0x100]` = `0x40A00000` (a float, 5.0) from an enemy that was already freed. The log shows a room change in the field, then a swing. `live_rows` kept every runtime of the last battle number, and that number still names the last battle after it ends, so in the field it walked the freed enemies of the last battle.
+- **Fix:** `live_rows` returns nothing unless a card battle is running (`win::battle::cbtl_live`: Re:CoM's CBTL task is there), and skips a runtime whose enemy is no longer ours (`ours(en) == Some(class)`: our vtable copy and tail magic).
+- The second `CRASH` line (a null read in a system DLL) came after the first, from the same failing frame.
+- Checked: workspace tests; Windows build with no warnings. Not checked: in game.
+
+---
+
 ## Stage 252: the game no longer aborts at start (camera block rebased); Enemy Skills' rewrite stubs and the KH1 lock rules' stub block fixed (2026-11-05, version 0.139.1)
 
 Owner, 2026-11-05 (0.139.0), verbatim: "my game wont launch now"

@@ -2845,6 +2845,12 @@ unsafe fn row_front(en: usize, r: &ce::ClashRow) -> bool {
 /// The live rows of this battle's KH1 enemies: each Re:CoM attack entry on (window state 1, collision on) whose
 /// record the asset step made from a KH1 row (the manifest's `clash`), with a sphere or line shape (types 2 / 7).
 unsafe fn live_rows() -> Vec<Candidate> {
+    // 0.139.2 (the owner's crash, 2026-11-05: a field swing after a room change read a freed
+    // enemy's attack set): the last battle's runtimes keep its number after the battle ends, so
+    // only a running card battle's enemies are read, and only while each is still ours.
+    if !super::battle::cbtl_live() {
+        return Vec::new();
+    }
     let Ok(v) = RT.try_lock() else { return Vec::new() };
     let battle = super::battle::battle_number();
     let mut out = Vec::new();
@@ -2854,6 +2860,9 @@ unsafe fn live_rows() -> Vec<Candidate> {
             continue;
         }
         let en = rt.enemy;
+        if ours(en) != Some(rt.class) {
+            continue;
+        }
         let s: usize = rd(en + e::ATTACKS);
         if s == 0 {
             continue;
