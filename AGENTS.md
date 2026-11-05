@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 248: M12 camera stage 3: KH1's lock-on camera as mode 7 (60 / 45-frame blends, re-lock blend, field and battle), version 0.136.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Camera answers: "KH1 / KH2 lock camera in field rooms too"; § Lock-on rules and camera walls: KH1's lock rules on R1, L2 steps through targets). Stage 3 of `docs/recom-m12-camera-plan.md`. Camera = KH1 only.
+
+- **KH1** (Checked (KH1 Steam decomp + exe + disasm)): the lock camera mode 3 `0x1401E2650` (anchor (0, −100, 350) `0x140506DF0` with a height assist; a look-past point radius + 100 beyond the lock point; the eye 90 % past a 75 dead zone, clamped by a ray from Sora's body point; the yaw half the error outside ±5°, at most 10°; the keep-Sora pull to 80 % over 40 frames; the re-lock look blend of 60); the switch blends `0x1401E5360` / the task `0x1401E5D90` (60 in `0x1401E41A0`, 45 out `0x1401E4110`, weight cos(left / total · π/2)).
+- **Change** (`camera::dispatch`, `camera::kh1::Follow::{lock_step, lock_on, unlock, switch_blend, view}`, `win::camera`): mode 6 ↔ 7 on Re:CoM's lock handle `player+0x850` through Re:CoM's `0x1401FBE60` (not with a subject object `+0x2B8`, Re:CoM's rule), in field rooms too; the lock point Re:CoM's own `0x1401FC400` (`player+0x870`, the target's `CamTrgOfs` point); KH1's lock radius from the twin (`win::stats::lock_radius`, else 0); a handle change while locked runs KH1's re-lock blend. New callee site `0x1401FC400` (`sites::CAMERA_CALLEES`).
+- Per frame in mode 7: 2 Re:CoM sweeps (Re:CoM's lock step: 1); not measured in game.
+- Assumptions: Re:CoM's `CamTrgOfs` point for KH1's bone lock points; radius 0 without a twin. Not carried: Select's first person.
+- Checked: tests (`camera::tests` 17 + the cost test; the lock's rest pose, close, turn cap; the blends, the re-lock, the unlock; dispatch 6 ↔ 7), `check_sites_rs.py` (1407 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game; no KH1 camera trace. Asset step: not needed. Docs: `recom-m12-camera-plan.md` § 15.
+
+---
+
 ## Stage 247: M12 camera stage 2: KH1's Auto camera behind an "Auto camera" row (swing-behind, wall-avoid, pitch assist, eye walk, visibility re-place, auto recenter), version 0.135.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Camera answers: "An "Auto camera: On / Off" row for KH1 and KH2"; § Lock-on rules and camera walls: the near-wall ramp "(a) 8 + 8 flat 2.5 m rays"). Stage 2 of `docs/recom-m12-camera-plan.md`. Camera = KH1 only; Camera = Re:CoM unchanged.

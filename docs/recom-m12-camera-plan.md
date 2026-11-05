@@ -7,7 +7,7 @@ plan with the owner before building.") Lock-on on R1 at Combat = KH1 is another 
 this plan only covers what the camera does while a lock is on.
 
 **Status:** the owner answered § 10 (`design-philosophy-instructions.md` § Camera answers) and
-asked for the five stages. Built: stage 1 (0.134.0, § 13), stage 2 (0.135.0, § 14).
+asked for the five stages. Built: stage 1 (0.134.0, § 13), stage 2 (0.135.0, § 14), stage 3 (0.136.0, § 15).
 
 Steam addresses for all three games. Tags: **Checked (exe / decomp / files)** = read;
 **Assumption** = inferred, to check. KH1 roles marked "(Epic notes)" come from
@@ -605,3 +605,48 @@ camera walls: the near-wall ramp "(a) 8 + 8 flat 2.5 m rays").
 - L2 / R2: KH1's camera module reads only R3, Select, the right stick's x held and (first person)
   0x10 / 0x40, never L2 / R2 (Checked (decomp + the pad table `0x140528290`)): no clash with KH1's
   L2 target step.
+
+---
+
+## 15. Stage 3 built (0.136.0): KH1's lock-on camera (mode 7)
+
+Owner's answers: KH1's lock camera in field rooms too (Q12 (a)); the lock button and KH1's lock
+rules are the R1 lock-on work's (Re:CoM's lock state is what the camera reads).
+
+- **Switch** (`camera::dispatch`): mode 6 ↔ 7 on Re:CoM's lock handle `player+0x850`, as Re:CoM's
+  battle exec switches 3 ↔ 4, in field and battle rooms, not while a subject object holds the camera
+  (`+0x2B8`, Re:CoM's own rule), through Re:CoM's `0x1401FBE60`. Our battle step also writes
+  `+0x2A4` = the handle as Re:CoM's exec does.
+- **Blends** (KH1's mode switch `0x1401E5360` and the camera task `0x1401E5D90`, Checked
+  (decomp)): to the lock camera 60 frames (`0x1401E41A0`), back to the follow 45 (`0x1401E4110`),
+  the drawn eye / look = old × (1 − f) + new × f with f = cos(left / total · π/2); during a blend
+  the follow's look point snaps to Sora's target and its stick is off. The follow's entry after
+  the lock takes the drawn view's yaw (KH1's entry from the public view). A new target while locked
+  (Re:CoM's handle changes: KH1's L2 step, or Re:CoM's switch): KH1's re-lock blend of the look
+  point over 60 frames (`0x142537F08` / `F10`).
+- **The lock step** (`camera::kh1::Follow::lock_step`, KH1's mode 3 `0x1401E2650`; Checked (decomp,
+  the eye close's scale `(len − 75) × 0.9` read in the disasm at `0x1401E2838..0x1401E2864`)):
+
+| Piece | KH1 |
+|---|---|
+| Anchor | Sora + Ry(yaw) · (0, −100 + height assist, 350) (`0x140506DF0`, Checked (exe)) |
+| Look-past point | the lock point + (radius + 100) horizontally away from the anchor, half the anchor's height gap back; the anchor raised by half the gap when it is steep |
+| Eye | 90 % of the horizontal gap to the anchor past a 75 dead zone, 90 % vertically; a ray from Sora's body point (0.85 m up, code `0x8003`) clamps it |
+| Yaw | half the error outside ±5° of the line to a point 100 ahead of Sora (`0x140506E00`), at most 10° a frame |
+| Look | from the eye toward the yaw, the look-past point's distance and height |
+| Keep Sora | his feet outside half of the 53° FOV: a counter to 40 (+1 a frame; −2 inside 80 %) pulls the look point up to 80 % to his body point |
+| Height assist | the floor under the eye (`0x1401E5A20`): Sora > 30 below it → the anchor up to 170 higher; a target > 200 above the eye → up to 20 lower |
+
+- **In Re:CoM**: the lock point is Re:CoM's own lock-on point (`0x1401FC400`: the look-target
+  override's, else `player+0x870`, the target's root + its `CamTrgOfs`, `0x14017F770`) where KH1
+  uses its lock table's bone point (`0x1402B02D0`): Assumption, the plan's flagged risk. The
+  radius is the KH1 twin's lock radius (`kh1-stats.json`, `win::stats::lock_radius`), 0 for an
+  enemy without a twin (Assumption). The rays are Re:CoM's camera sweep; the floor probe one sweep
+  of 100 m.
+- **Not carried**: Select's first person (scope § 11).
+- **Per frame** (mode 7): 2 Re:CoM sweeps (the body ray, the floor probe) against 1 in Re:CoM's
+  lock step; not measured in game.
+- Tests: `camera::tests::the_lock_camera_frames_sora_and_the_target` (the rest pose: the eye at the
+  75 dead zone of the anchor 3.5 m behind, the look 1 m past the target; the 90 % close; the 10°
+  cap), `mode_blends_and_relock` (the 60 blend's weights, the re-lock blend, the unlock's 45 blend
+  and entry), the dispatcher's 6 ↔ 7 rows.

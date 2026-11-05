@@ -102,12 +102,19 @@ pub enum Dispatch {
 }
 
 /// The dispatcher's rule. `external`: a sleight's request holds the mode (`+0x188 & 0x2000`);
-/// `subject`: a subject override is set (`+0x2B4 > 0`). Re:CoM's modes are only replaced from its
-/// base follows (1 / 3 / 4), never during a sleight's request or its timed view 2.
-pub fn dispatch(m: i32, want: Family, battle: bool, external: bool, subject: bool) -> Dispatch {
+/// `subject`: a subject override is set (`+0x2B4 > 0`); `locked`: Re:CoM's lock-on handle
+/// (`player+0x850 > 0`), None while a subject object holds the camera (`+0x2B8`, where Re:CoM's
+/// battle exec skips its 3 ↔ 4 switch too). Re:CoM's modes are only replaced from its base follows
+/// (1 / 3 / 4), never during a sleight's request or its timed view 2. Our follow and lock modes
+/// switch on the lock as Re:CoM's 3 ↔ 4 do, in field rooms too (owner Q12 (a)).
+pub fn dispatch(m: i32, want: Family, battle: bool, external: bool, subject: bool, locked: Option<bool>) -> Dispatch {
     if mode::ours(m) {
         if Family::of(m) == want {
-            Dispatch::Ours
+            match (m, locked) {
+                (mode::KH1_FOLLOW, Some(true)) => Dispatch::Switch(mode::KH1_LOCK),
+                (mode::KH1_LOCK, Some(false)) => Dispatch::Switch(mode::KH1_FOLLOW),
+                _ => Dispatch::Ours,
+            }
         } else {
             Dispatch::Switch(want.base(battle))
         }
@@ -364,11 +371,69 @@ pub mod kh1 {
         pub prev: Option<Vec3>,
         pub speed: f32,
         pub speed_h: f32,
+        /// The lock camera's state (mode 3).
+        pub lock: Lock,
+        /// The camera task's mode-switch blend of the drawn view.
+        pub blend: Blend,
+    }
+
+    /// KH1's mode-switch blend (`0x1401E5360`, the task `0x1401E5D90`): the drawn eye / look go
+    /// from where they were to the new mode's with weight `cos(left / total · π/2)` on the old.
+    /// Checked (decomp; `0x140386B70` = `a·t + b·(1 − t)`, `0x1400E7CB0`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Blend {
+        pub from_eye: Vec3,
+        pub from_look: Vec3,
+        pub left: f32,
+        pub total: f32,
+    }
+
+    /// The lock camera's own globals: the anchor's height assist (`0x14253810C`), the keep-Sora
+    /// counter (`0x142538108`), the re-lock blend (`0x142537F08`, from `0x142537F10`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Lock {
+        pub height: f32,
+        pub screen: f32,
+        pub relock: f32,
+        pub old_look: Vec3,
+    }
+
+    /// The lock target as Re:CoM gives it: its point (Re:CoM's lock-on point `player+0x870`, its
+    /// `CamTrgOfs` point) and KH1's lock radius for it (the twin's, `win::stats::lock_radius`).
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct Target {
+        pub point: Vec3,
+        pub radius: f32,
+    }
+
+    /// The lock camera's numbers (`0x1401E2650`; Checked (decomp + exe)): the anchor
+    /// (0, −100, 350) in Sora's frame turned by the camera's yaw (`0x140506DF0`), the look-past
+    /// (radius + 100), the eye's 75 dead zone and 90 % close, the ±5° yaw band at half the error
+    /// up to 10° a frame, the point 100 ahead (`0x140506E00`), the keep-Sora counter (to 40, −2 a
+    /// frame inside 80 % of the half FOV, 80 % pull), the re-lock blend of 60, the height assist
+    /// (floor under the eye: 30 / 150 → up to −170; a target over 200 above the eye → up to 20).
+    pub mod lockcam {
+        use kh1_core::Vec3;
+        pub const ANCHOR: Vec3 = Vec3::new(0.0, -100.0, 350.0);
+        pub const AHEAD: Vec3 = Vec3::new(0.0, 0.0, -100.0);
+        pub const PAST: f32 = 100.0;
+        pub const DEAD: f32 = 75.0;
+        pub const CLOSE: f32 = 0.9;
+        pub const BAND: f32 = 0.087_266_47;
+        pub const TURN_MAX: f32 = 0.174_532_94;
+        pub const SCREEN_MAX: f32 = 40.0;
+        pub const SCREEN_PULL: f32 = 0.8;
+        pub const RELOCK: f32 = 60.0;
+        /// Sora's body point (code `0x8003`: his record {0x8002, 0, 85}; `recom-m13-kh1-fx.md`).
+        pub const BODY: f32 = 85.0;
+        pub const ENTER_BLEND: f32 = 60.0;
+        pub const EXIT_BLEND: f32 = 45.0;
+        pub const FLOOR_PROBE: f32 = 10000.0;
     }
 
     impl Default for Follow {
         fn default() -> Self {
-            Follow { look: Vec3::ZERO, eye: Vec3::ZERO, pitch: PITCH_DEFAULT, yaw: 0.0, dist: DIST_DEFAULT, vel: [0.0; 2], rc: Recenter::default(), swing: Swing::default(), avoid: Avoid::default(), assist: Assist::default(), prev: None, speed: 0.0, speed_h: 0.0 }
+            Follow { look: Vec3::ZERO, eye: Vec3::ZERO, pitch: PITCH_DEFAULT, yaw: 0.0, dist: DIST_DEFAULT, vel: [0.0; 2], rc: Recenter::default(), swing: Swing::default(), avoid: Avoid::default(), assist: Assist::default(), prev: None, speed: 0.0, speed_h: 0.0, lock: Lock::default(), blend: Blend::default() }
         }
     }
 
@@ -461,8 +526,12 @@ pub mod kh1 {
             self.replace(wrap_angle(inp.facing + PI), inp, w);
         }
 
-        /// The look point's spring (no mode blend runs: our modes switch through Re:CoM's setters).
+        /// The look point's spring; during a mode blend it snaps to the target.
         fn spring_look(&mut self, inp: &Input, w: &mut dyn World) {
+            if 0.0 < self.blend.left {
+                self.look = inp.target();
+                return;
+            }
             let above = inp.above();
             let mut goal = inp.target();
             if w.sweep(above, goal, RAY).is_some() {
@@ -482,7 +551,7 @@ pub mod kh1 {
 
         /// KH1's stick `0x1401E7320`.
         fn stick(&mut self, inp: &Input) {
-            if !inp.can_act || self.rc.left > 0.0 {
+            if !inp.can_act || self.blend.left > 0.0 || self.rc.left > 0.0 {
                 return;
             }
             let half = if inp.step < 2.0 { 0.5 } else { 1.0 };
@@ -844,6 +913,182 @@ pub mod kh1 {
         }
     }
 
+    impl Follow {
+        /// KH1's mode switch `0x1401E5360` with a blend of `frames`: from the drawn view (the
+        /// current blend's if one runs, else the mode's own eye / look).
+        pub fn switch_blend(&mut self, frames: f32) {
+            if self.blend.left <= 0.0 {
+                self.blend.from_eye = self.eye;
+                self.blend.from_look = self.look;
+            } else {
+                let (e, l) = self.view_now();
+                self.blend.from_eye = e;
+                self.blend.from_look = l;
+            }
+            self.blend.left = frames;
+            self.blend.total = frames;
+        }
+
+        fn view_now(&self) -> (Vec3, Vec3) {
+            let b = &self.blend;
+            if b.left <= 0.0 || b.total <= 0.0 {
+                return (self.eye, self.look);
+            }
+            let f = ((b.left / b.total) * PI * 0.5).cos();
+            let mix = |from: Vec3, to: Vec3| from * (1.0 - f) + to * f;
+            (mix(b.from_eye, self.eye), mix(b.from_look, self.look))
+        }
+
+        /// The task's end of frame (`0x1401E5D90`): the blend steps and the drawn eye / look.
+        pub fn view(&mut self, step: f32) -> (Vec3, Vec3) {
+            if 0.0 < self.blend.left {
+                self.blend.left -= step;
+                if 0.0 < self.blend.left {
+                    return self.view_now();
+                }
+                self.blend.left = 0.0;
+            }
+            (self.eye, self.look)
+        }
+
+        /// KH1's lock-on start `0x1401E41A0`: in the lock camera already, the look point blends from
+        /// where it was over 60 frames (a new target); else the switch to it with a 60 blend.
+        pub fn lock_on(&mut self, already: bool) {
+            self.lock.old_look = self.look;
+            if already {
+                self.lock.relock = lockcam::RELOCK;
+            } else {
+                self.switch_blend(lockcam::ENTER_BLEND);
+            }
+        }
+
+        /// KH1's unlock `0x1401E4110`: the follow with a 45 blend, its entry at the drawn view's yaw.
+        pub fn unlock(&mut self, inp: &Input, w: &mut dyn World) {
+            self.switch_blend(lockcam::EXIT_BLEND);
+            let (e, l) = self.view_now();
+            self.enter(yaw_of(e, l), inp, w);
+        }
+
+        /// One frame of KH1's lock camera, mode 3 (`0x1401E2650`).
+        pub fn lock_step(&mut self, inp: &Input, t: &Target, w: &mut dyn World) {
+            use lockcam::*;
+            let mut anchor = inp.pos + (ANCHOR + Vec3::new(0.0, self.lock.height, 0.0)).rotate_yaw(self.yaw);
+            let mut v = t.point - anchor;
+            let dy = v.y;
+            v.y = 0.0;
+            let (n, _) = v.normalize_len();
+            let mut v = n * (t.radius + PAST);
+            v.y = dy * -0.5;
+            let past = t.point + v;
+            let wv = past - anchor;
+            let hh = wv.horizontal_length();
+            let a = wv.y.abs();
+            if hh < a + a {
+                let mut y = wv.y;
+                if a < hh {
+                    y *= ((a + a) - hh) / a;
+                }
+                anchor.y += y * 0.5;
+            }
+            // The eye closes on the anchor: 90 % of the horizontal gap past 75, 90 % vertically.
+            let mut d = anchor - self.eye;
+            let dyy = d.y;
+            d.y = 0.0;
+            let (n, len) = d.normalize_len();
+            let len = len - DEAD;
+            if 0.0 < len {
+                self.eye += n * (len * CLOSE);
+            }
+            self.eye.y += dyy * CLOSE;
+            // A ray from Sora's body point to the eye.
+            let body = inp.pos + Vec3::new(0.0, -BODY, 0.0);
+            let blocked = w.sweep(body, self.eye, RAY);
+            if let Some(h) = blocked {
+                self.eye = h;
+            }
+            // The yaw: half the error outside a ±5° band about the line to a point ahead of
+            // Sora, at most 10° a frame.
+            let ahead = inp.pos + AHEAD.rotate_yaw(self.yaw);
+            let a1 = wrap_angle(self.yaw - yaw_of(self.eye, ahead));
+            let mut a2 = wrap_angle(yaw_of(self.eye, past) - self.yaw);
+            if a1 + BAND < a2 {
+                a2 -= a1 + BAND;
+            } else if a2 < a1 - BAND {
+                a2 += BAND - a1;
+            } else {
+                a2 = 0.0;
+            }
+            let turn = (a2 * 0.5).max(-TURN_MAX).min(TURN_MAX);
+            self.yaw = wrap_angle(turn + self.yaw);
+            let to = past - self.eye;
+            self.look = self.eye + Vec3::new(0.0, to.y, -to.horizontal_length()).rotate_yaw(self.yaw);
+            self.yaw = yaw_of(self.eye, self.look);
+            // Keep Sora on screen: his feet outside the half FOV raise a counter (to 40) that pulls
+            // the look point up to 80 % toward his body point; it falls 2 a frame inside 80 %.
+            let half = FOV * PI / 180.0 * 0.5;
+            let ang = angle_between(self.look - self.eye, inp.pos - self.eye);
+            let pull = if ang.abs() <= half {
+                if ang.abs() < half * 0.8 {
+                    self.lock.screen -= inp.step * 2.0;
+                    if self.lock.screen < 0.0 {
+                        self.lock.screen = 0.0;
+                    }
+                }
+                0.0 < self.lock.screen
+            } else {
+                self.lock.screen = (self.lock.screen + inp.step).min(SCREEN_MAX);
+                true
+            };
+            if pull && 0.0 < self.lock.screen {
+                let k = (self.lock.screen / SCREEN_MAX) * SCREEN_PULL;
+                self.look = body * k + self.look * (1.0 - k);
+            }
+            if 0.0 < self.lock.relock {
+                self.lock.relock -= inp.step;
+                if 0.0 <= self.lock.relock {
+                    let c = ((self.lock.relock / RELOCK) * PI * 0.5).cos();
+                    self.look = self.look * c + self.lock.old_look * (1.0 - c);
+                } else {
+                    self.lock.relock = 0.0;
+                }
+            }
+            let skip = matches!(inp.state, 4 | 5 | 8 | 0x15 | 0x18 | 0x1A);
+            if !skip && blocked.is_none() {
+                // `0x1401E5A20`: the floor under the eye (a ray from 10 above it, 10000 down).
+                let from = self.eye + Vec3::new(0.0, -10.0, 0.0);
+                let floor = w.sweep(from, self.eye + Vec3::new(0.0, FLOOR_PROBE, 0.0), RAY).unwrap_or(self.eye + Vec3::new(0.0, FLOOR_PROBE, 0.0));
+                let over = inp.pos.y - floor.y;
+                self.lock.height = if over <= 30.0 {
+                    let up = t.point.y - self.eye.y;
+                    if -200.0 <= up {
+                        0.0
+                    } else {
+                        ((up.max(-400.0) + 200.0).abs() / 200.0) * 20.0
+                    }
+                } else {
+                    -((over.min(150.0) - 30.0).abs() / 120.0) * 170.0
+                };
+            }
+            self.prev = Some(inp.pos);
+        }
+    }
+
+    /// The angle between two vectors (`0x1402A91F0`: acos of the normalized dot, 0 / π past ±1).
+    pub fn angle_between(a: Vec3, b: Vec3) -> f32 {
+        let (la, lb) = (a.length(), b.length());
+        if la == 0.0 || lb == 0.0 {
+            return 0.0;
+        }
+        let c = a.dot(b) / (la * lb);
+        if 1.0 < c {
+            0.0
+        } else if c < -1.0 {
+            PI
+        } else {
+            c.acos()
+        }
+    }
+
     /// Re:CoM's right stick ints (±4096, `0x14029B280` / `0x14029B290`) as KH1's camera stick: the
     /// raw bytes rebuilt (`units::byte_from_recom_axis`), then KH1's radial dead zone.
     pub fn stick_from_recom(x: i32, y: i32, mouse: bool) -> [f32; 2] {
@@ -990,16 +1235,22 @@ mod tests {
         assert!((r.aim[1] + SUBJECT_LIFT_M - 1.0).abs() < 1e-6);
         assert_eq!(&r.bytes()[0..4], &53f32.to_le_bytes());
         // Dispatch: Re:CoM's camera untouched at Re:CoM; ours replaces 1 / 3 / 4 only.
-        assert_eq!(dispatch(1, Family::Recom, false, false, false), Dispatch::Recom);
-        assert_eq!(dispatch(1, Family::Kh1, false, false, false), Dispatch::Switch(6));
-        assert_eq!(dispatch(4, Family::Kh1, true, false, false), Dispatch::Switch(6));
-        assert_eq!(dispatch(3, Family::Kh1, true, true, false), Dispatch::Recom, "a sleight's mode stays");
-        assert_eq!(dispatch(5, Family::Kh1, true, false, false), Dispatch::Recom);
-        assert_eq!(dispatch(2, Family::Kh1, false, false, false), Dispatch::Recom, "Re:CoM's timed view");
-        assert_eq!(dispatch(3, Family::Kh1, true, false, true), Dispatch::Recom, "a subject override");
-        assert_eq!(dispatch(6, Family::Kh1, true, false, false), Dispatch::Ours);
-        assert_eq!(dispatch(6, Family::Recom, true, false, false), Dispatch::Switch(3));
-        assert_eq!(dispatch(6, Family::Recom, false, false, false), Dispatch::Switch(1));
+        assert_eq!(dispatch(1, Family::Recom, false, false, false, Some(false)), Dispatch::Recom);
+        assert_eq!(dispatch(1, Family::Kh1, false, false, false, Some(false)), Dispatch::Switch(6));
+        assert_eq!(dispatch(4, Family::Kh1, true, false, false, Some(false)), Dispatch::Switch(6));
+        assert_eq!(dispatch(3, Family::Kh1, true, true, false, Some(false)), Dispatch::Recom, "a sleight's mode stays");
+        assert_eq!(dispatch(5, Family::Kh1, true, false, false, Some(false)), Dispatch::Recom);
+        assert_eq!(dispatch(2, Family::Kh1, false, false, false, Some(false)), Dispatch::Recom, "Re:CoM's timed view");
+        assert_eq!(dispatch(3, Family::Kh1, true, false, true, Some(false)), Dispatch::Recom, "a subject override");
+        assert_eq!(dispatch(6, Family::Kh1, true, false, false, Some(false)), Dispatch::Ours);
+        assert_eq!(dispatch(6, Family::Recom, true, false, false, Some(false)), Dispatch::Switch(3));
+        assert_eq!(dispatch(6, Family::Recom, false, false, false, Some(false)), Dispatch::Switch(1));
+        // The lock switches 6 ↔ 7 (field too); a subject object holds the mode.
+        assert_eq!(dispatch(6, Family::Kh1, false, false, false, Some(true)), Dispatch::Switch(7));
+        assert_eq!(dispatch(7, Family::Kh1, true, false, false, Some(false)), Dispatch::Switch(6));
+        assert_eq!(dispatch(7, Family::Kh1, true, false, false, Some(true)), Dispatch::Ours);
+        assert_eq!(dispatch(6, Family::Kh1, true, false, false, None), Dispatch::Ours);
+        assert_eq!(dispatch(7, Family::Recom, true, false, false, Some(true)), Dispatch::Switch(3));
         assert_eq!(wanted(Family::Kh1, true, false), Family::Recom);
         assert_eq!(wanted(Family::Kh1, false, true), Family::Recom);
         assert_eq!(wanted(Family::Kh1, false, false), Family::Kh1);
@@ -1276,6 +1527,72 @@ mod tests {
         let p1 = f.pitch;
         f.step(&i, &mut Floor);
         assert!((f.pitch - (p1 + (1.0 - 30.0 / 55.0) * (1.0 / 30.0) * auto::ASSIST_STEP)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_lock_camera_frames_sora_and_the_target() {
+        let i = inp();
+        let mut f = Follow::default();
+        f.behind(&i, &mut Open);
+        // A target 5 m ahead, 1 m up, radius 0: the anchor 3.5 m behind Sora, the look 1 m past it.
+        let t = Target { point: Vec3::new(0.0, -100.0, 500.0), radius: 0.0 };
+        f.lock_on(false);
+        for _ in 0..200 {
+            f.lock_step(&i, &t, &mut Open);
+            f.view(1.0);
+        }
+        // The eye rests within KH1's 75 dead zone of the anchor (here at its edge, from behind).
+        assert!((f.eye.x).abs() < 1e-2 && ((f.eye.z + 350.0).abs() - 75.0).abs() < 1e-2, "{:?}", f.eye);
+        assert!((f.eye.y + 100.0).abs() < 1e-2, "{:?}", f.eye);
+        assert!((f.look - Vec3::new(0.0, -100.0, 600.0)).length() < 1e-1, "{:?}", f.look);
+        assert!(wrap_angle(f.yaw - PI).abs() < 1e-4);
+        // The eye closes 90 % of the gap past 75 a frame.
+        let mut g = Follow::default();
+        g.behind(&i, &mut Open);
+        g.eye = Vec3::new(0.0, -100.0, -350.0 - 175.0);
+        g.yaw = PI;
+        g.lock_step(&i, &t, &mut Open);
+        assert!((g.eye.z - (-525.0 + 0.9 * 100.0)).abs() < 1e-2, "{:?}", g.eye);
+        // A target to the side: the yaw turns half the error past the ±5° band, at most 10°.
+        let mut h = f;
+        let side = Target { point: Vec3::new(600.0, -100.0, 0.0), radius: 0.0 };
+        let y0 = h.yaw;
+        h.lock_step(&i, &side, &mut Open);
+        let turn = wrap_angle(h.yaw - y0);
+        assert!(turn.abs() <= lockcam::TURN_MAX + 1e-4 && turn.abs() > 0.1, "{}", turn.to_degrees());
+    }
+
+    #[test]
+    fn mode_blends_and_relock() {
+        let i = inp();
+        let mut f = Follow::default();
+        f.behind(&i, &mut Open);
+        let (e0, l0) = (f.eye, f.look);
+        f.lock_on(false);
+        assert_eq!((f.blend.left, f.blend.total), (60.0, 60.0));
+        // Move the internal eye; the drawn one follows with weight cos(left / 60 · π/2).
+        f.eye = e0 + Vec3::new(100.0, 0.0, 0.0);
+        let (e, _) = f.view(1.0);
+        let w = ((59.0f32 / 60.0) * PI * 0.5).cos();
+        assert!((e.x - (e0.x + 100.0 * w)).abs() < 1e-3, "{:?}", e);
+        for _ in 0..59 {
+            f.view(1.0);
+        }
+        assert_eq!(f.view(1.0).0, f.eye);
+        // A new target while locked: the look point blends from the old one over 60 frames.
+        let t = Target { point: Vec3::new(0.0, -100.0, 500.0), radius: 0.0 };
+        f.lock_step(&i, &t, &mut Open);
+        f.lock_on(true);
+        assert_eq!(f.lock.relock, 60.0);
+        let old = f.lock.old_look;
+        let t2 = Target { point: Vec3::new(300.0, -100.0, 500.0), radius: 0.0 };
+        f.lock_step(&i, &t2, &mut Open);
+        assert!((f.look - old).length() < 30.0, "first frame near the old look: {:?} {:?}", f.look, old);
+        // Unlock: KH1's follow entry with a 45 blend.
+        f.unlock(&i, &mut Open);
+        assert_eq!(f.blend.total, 45.0);
+        assert!((f.pitch - PITCH_DEFAULT).abs() < 1e-6 && (f.dist - DIST_DEFAULT).abs() < 1e-6);
+        let _ = l0;
     }
 
     #[test]

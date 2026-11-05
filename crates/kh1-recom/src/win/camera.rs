@@ -52,6 +52,11 @@ mod f {
     pub const YAW: usize = 0x264;
     pub const ANGLES: usize = 0x270;
     pub const SUBJECT: usize = 0x2B4;
+    /// The subject override's object this frame (`0x1401FCCF0`); Re:CoM's battle exec switches
+    /// 3 ↔ 4 only without one.
+    pub const SUBJECT_OBJ: usize = 0x2B8;
+    /// The lock handle Re:CoM's battle exec copies each frame.
+    pub const LOCK: usize = 0x2A4;
     pub const INV_H: usize = 0x2F0;
     pub const INV_V: usize = 0x2F4;
     pub const KBM: usize = 0x308;
@@ -68,6 +73,11 @@ mod f {
 /// velocity `+0x80` in metres a frame, contact flags `+0x120`). Checked (decomp `0x1401FD750`,
 /// `0x1401F3C00`; `win::movement`).
 const FACING: usize = 0x4D4;
+/// Re:CoM's lock-on handle (`player+0x850`, the battle exec's 3 ↔ 4 switch). Checked (decomp).
+const LOCK_HANDLE: usize = 0x850;
+/// Re:CoM's lock target point for the camera (`0x1401FC400`: the look-target override's, else
+/// `player+0x870`, the target's `CamTrgOfs` point `0x14017F770`). Checked (decomp).
+const LOCK_POINT: u32 = 0x001F_C400;
 const ACTION: usize = 0x40C;
 const GROUND_CACHED: usize = 0x538;
 const GROUND_AIR: usize = 0x53C;
@@ -112,6 +122,7 @@ type IntFn = unsafe extern "win64" fn() -> i32;
 type OverrideFn = unsafe extern "win64" fn(i32, usize);
 type HandleFn = unsafe extern "win64" fn(u32) -> usize;
 type NodeFn = unsafe extern "win64" fn(usize, i32) -> usize;
+type PointFn = unsafe extern "win64" fn(usize) -> usize;
 
 /// Our step's state for the live camera.
 struct Live {
@@ -123,6 +134,9 @@ struct Live {
     drawn: bool,
     /// Placed behind Sora at its next step (a new camera).
     behind: bool,
+    /// The mode our step ran last frame, and the lock handle then.
+    mode: i32,
+    handle: i32,
 }
 
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
@@ -245,7 +259,7 @@ unsafe extern "win64" fn init(cam: usize) {
     let battle = rd::<usize>(cam + f::STATE) == cam + f::BATTLE_STATE;
     let want = camera::wanted(choice(), riku, battle && boss_camera());
     if let Ok(mut g) = LIVE.lock() {
-        *g = Some(Live { cam, follow: kh1::Follow::default(), seen: entries(), drawn: false, behind: true });
+        *g = Some(Live { cam, follow: kh1::Follow::default(), seen: entries(), drawn: false, behind: true, mode: 0, handle: 0 });
     }
     if want != Family::Recom {
         let m = want.base(battle);
@@ -278,7 +292,10 @@ unsafe fn exec(cam: usize, battle: bool) {
     }
     let want = camera::wanted(choice(), RIKU.load(Ordering::Relaxed), battle && boss_camera());
     let flags: u32 = rd(cam + f::FLAGS);
-    match camera::dispatch(m, want, battle, flags & f::EXTERNAL != 0, rd::<i32>(cam + f::SUBJECT) > 0) {
+    let player: usize = rd(cam + f::PLAYER);
+    let handle: i32 = if player != 0 { rd(player + LOCK_HANDLE) } else { 0 };
+    let locked = (rd::<usize>(cam + f::SUBJECT_OBJ) == 0).then_some(handle > 0);
+    match camera::dispatch(m, want, battle, flags & f::EXTERNAL != 0, rd::<i32>(cam + f::SUBJECT) > 0, locked) {
         Dispatch::Recom => recom_exec(cam, battle),
         Dispatch::Ours => step(cam, battle),
         Dispatch::Switch(to) => {
@@ -424,9 +441,16 @@ unsafe fn step(cam: usize, battle: bool) {
     let drawn = rd::<usize>(super::va(super::base(), CAMERA_STACK)) == cam;
     let Ok(mut g) = LIVE.lock() else { return };
     if g.as_ref().map(|l| l.cam) != Some(cam) {
-        *g = Some(Live { cam, follow: kh1::Follow::default(), seen: count, drawn, behind: true });
+        *g = Some(Live { cam, follow: kh1::Follow::default(), seen: count, drawn, behind: true, mode: 0, handle: 0 });
     }
     let Some(l) = g.as_mut() else { return };
+    let m: i32 = rd(cam + f::MODE);
+    let handle: i32 = rd(player + LOCK_HANDLE);
+    if battle && rd::<usize>(cam + f::SUBJECT_OBJ) == 0 {
+        wr::<i32>(cam + f::LOCK, handle);
+    }
+    let drawn_eye = crate::units::to_kh1(rd_vec(cam + f::EYE));
+    let drawn_aim = crate::units::to_kh1(rd_vec(cam + f::AIM));
     if l.behind {
         l.follow.behind(&inp, &mut world);
         l.behind = false;
@@ -434,15 +458,44 @@ unsafe fn step(cam: usize, battle: bool) {
     } else if drawn && !l.drawn {
         l.follow.behind(&inp, &mut world);
         note("camera: KH1 follow placed behind Sora (back from another camera)");
+    } else if mode::ours(l.mode) && l.mode != m && count != l.seen {
+        // Our own 6 ↔ 7 switch: KH1's lock start (60 blend) or unlock (45 blend, the follow's
+        // entry at the drawn view's yaw).
+        if m == mode::KH1_LOCK {
+            l.follow.lock_on(false);
+        } else {
+            l.follow.unlock(&inp, &mut world);
+        }
     } else if count != l.seen {
-        let eye = crate::units::to_kh1(rd_vec(cam + f::EYE));
-        let aim = crate::units::to_kh1(rd_vec(cam + f::AIM));
-        l.follow.enter(kh1::yaw_of(eye, aim), &inp, &mut world);
+        // Re:CoM's setter gave us the mode (a sleight's restore, a switch from Re:CoM's modes):
+        // the follow's entry; the lock camera carries on from the drawn view.
+        if m == mode::KH1_LOCK {
+            l.follow.eye = drawn_eye;
+            l.follow.look = drawn_aim;
+            l.follow.yaw = kh1::yaw_of(drawn_eye, drawn_aim);
+            l.follow.blend.left = 0.0;
+        } else {
+            l.follow.enter(kh1::yaw_of(drawn_eye, drawn_aim), &inp, &mut world);
+        }
+    } else if m == mode::KH1_LOCK && l.mode == m && handle > 0 && l.handle > 0 && handle != l.handle {
+        // A new target while locked: KH1's re-lock blend of the look point.
+        l.follow.lock_on(true);
     }
     l.seen = count;
     l.drawn = drawn;
-    l.follow.step(&inp, &mut world);
-    let (look, eye) = (camera::to_recom4(l.follow.look), camera::to_recom4(l.follow.eye));
+    l.mode = m;
+    l.handle = handle;
+    if m == mode::KH1_LOCK {
+        let p = func::<PointFn>(LOCK_POINT)(cam);
+        let point = crate::units::to_kh1(rd_vec(p));
+        let target = func::<HandleFn>(HANDLE)(handle as u32);
+        let radius = if target != 0 { super::stats::lock_radius(target).unwrap_or(0.0) } else { 0.0 };
+        l.follow.lock_step(&inp, &kh1::Target { point, radius }, &mut world);
+    } else {
+        l.follow.step(&inp, &mut world);
+    }
+    let (e, k) = l.follow.view(inp.step);
+    let (look, eye) = (camera::to_recom4(k), camera::to_recom4(e));
     drop(g);
     wr4(cam + f::AIM, look);
     wr4(cam + f::AIM_GOAL, look);
