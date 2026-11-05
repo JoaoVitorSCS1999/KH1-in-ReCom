@@ -195,7 +195,8 @@ pub fn records() -> [Record; mode::COUNT] {
 pub mod kh1 {
     use super::*;
 
-    /// Built-in defaults (`0x140506CA0`: look offset (0, −100, −50) in Sora's frame; `0x140506CB0`
+    /// Built-in defaults (`0x140506CA0`: look offset (0, −100, −50) in Sora's frame, 1 m up and
+    /// 0.5 m **ahead** of him through his matrix ([`actor_point`]); `0x140506CB0`
     /// pitch 10° (bits 0x3E32B8C3); `0x140506CBC` distance 400). Checked (exe). Owner's answer Q8 (a):
     /// these everywhere (Re:CoM's rooms have none of KH1's room camera blocks).
     pub const OFFSET: Vec3 = Vec3::new(0.0, -100.0, -50.0);
@@ -302,15 +303,32 @@ pub mod kh1 {
     }
 
     impl Input {
-        /// KH1's look target: Sora's matrix × the offset (0.5 m behind him, 1 m up), and the point
-        /// above him (the offset with x and z zeroed). Assumption: KH1's actor matrix maps local
-        /// +z to his facing (`Vec3::rotate_yaw`).
+        /// KH1's look target (`0x1401E1920`: `0x140386A40(target, Sora + 0xD0, offset)`): Sora's
+        /// matrix × the offset, **1 m up and 0.5 m ahead of him** (his matrix's local +z is his
+        /// back, [`actor_point`]); and the point above him (the offset with x and z zeroed).
+        /// Checked (decomp + disasm); 0.134.0–0.139.2 put it 0.5 m behind (`docs/recom-m12-camera-plan.md`
+        /// § 18).
         pub fn target(&self) -> Vec3 {
-            self.pos + OFFSET.rotate_yaw(self.facing)
+            actor_point(self.pos, self.facing, OFFSET)
         }
         pub fn above(&self) -> Vec3 {
-            self.pos + Vec3::new(0.0, OFFSET.y, 0.0)
+            actor_point(self.pos, self.facing, Vec3::new(0.0, OFFSET.y, 0.0))
         }
+    }
+
+    /// A point in Sora's local frame through KH1's actor matrix (`+0xD0`, built by `0x1402A0A40`
+    /// with `+0x374 & 0x1000` clear): row 0 = facing × up (`0x1400E82F0`, a × b), row 1 = row 2 × row 0
+    /// = up (0, 1, 0), **row 2 = (0, 0, 0, 1) − facing** (`0x140386D10` from `0x140527FF0`), row 3 = his
+    /// position; facing = `+0x30` = (sin ψ, 0, cos ψ) (`0x140297E10`); `0x1400E5AD0` gives
+    /// Σ vᵢ · rowᵢ. So local +z points behind him and +x to (−cos ψ, 0, sin ψ). Checked (decomp +
+    /// disasm, KH1 Steam). The slope branch (`0x140292010`, two floor points along ±facing) only
+    /// tilts row 2 along the floor: not carried (Assumption: Sora on flat floors, or level enough).
+    pub fn actor_point(pos: Vec3, facing: f32, local: Vec3) -> Vec3 {
+        let f = Vec3::from_yaw(facing);
+        let row0 = Vec3::new(-f.z, 0.0, f.x);
+        let row1 = Vec3::new(0.0, 1.0, 0.0);
+        let row2 = f * -1.0;
+        pos + row0 * local.x + row1 * local.y + row2 * local.z
     }
 
     /// KH1's eye offset for a pitch, yaw and distance: `Rx(pitch) · Ry(yaw) · (0, 0, d)` with
@@ -1844,9 +1862,9 @@ mod tests {
         // In Re:CoM: the eye above (+y) and 4 m away.
         let r = to_recom4(offset(400.0, PITCH_DEFAULT, 0.7));
         assert!(r[1] > 0.0 && ((r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt() - 4.0).abs() < 1e-4);
-        // The target: 1 m up, 0.5 m behind Sora (facing +z).
+        // The target: 1 m up, 0.5 m ahead of Sora (facing +z), through KH1's actor matrix.
         let t = inp().target();
-        assert_eq!((t.x, t.y, t.z), (0.0, -100.0, -50.0));
+        assert_eq!((t.x, t.y, t.z), (0.0, -100.0, 50.0));
         // Inversion: Re:CoM's Normal (h −1, v +1) is KH1's Normal (+1, −1).
         assert_eq!(inversion(-1.0, 1.0), [1.0, -1.0]);
         assert_eq!(inversion(1.0, -1.0), [-1.0, 1.0]);
@@ -1855,6 +1873,84 @@ mod tests {
         assert_eq!(stick_from_recom(1000, 0, false)[0], 0.0);
         assert!(stick_from_recom(1000, 0, true)[0] > 0.0);
         assert!(stick_from_recom(0, 4096, false)[1] > 0.99);
+    }
+
+    /// KH1's actor matrix (`0x1402A0A40`): local +z is Sora's back, +x (−cos ψ, 0, sin ψ), y as is.
+    #[test]
+    fn the_look_target_is_half_a_metre_ahead_of_sora() {
+        for facing in [0.0f32, 0.5, PI / 2.0, -2.0, PI] {
+            let i = Input { pos: Vec3::new(30.0, -5.0, 70.0), facing, ..inp() };
+            let ahead = i.target() - i.pos;
+            let f = Vec3::from_yaw(facing);
+            assert!((ahead - Vec3::new(f.x * 50.0, -100.0, f.z * 50.0)).length() < 1e-3, "{facing}: {ahead:?}");
+            assert!((i.above() - (i.pos + Vec3::new(0.0, -100.0, 0.0))).length() < 1e-3);
+            // Row 0 = facing × up (KH1's a × b `0x1400E82F0`): (−cos ψ, 0, sin ψ).
+            let x = actor_point(Vec3::ZERO, facing, Vec3::new(1.0, 0.0, 0.0));
+            assert!((x - Vec3::new(-facing.cos(), 0.0, facing.sin())).length() < 1e-5);
+            assert!((actor_point(Vec3::ZERO, facing, Vec3::new(0.0, 0.0, 1.0)) + f).length() < 1e-5, "local +z is his back");
+        }
+    }
+
+    /// Screen place (0..1 across, 0..1 down) and depth of a KH1 point in the drawn view: Re:CoM's
+    /// focal for 53° (`256 · cot 26.5°` on its 640 × 480 frame, plan § 16: half-height tan 25.06°),
+    /// widened to 16:9 (Assumption, plan § 5: the PC port keeps the height).
+    fn screen(eye: Vec3, look: Vec3, p: Vec3) -> (f32, f32, f32) {
+        let f = (look - eye).normalized();
+        let r = Vec3::new(f.z, 0.0, -f.x).normalized();
+        let u = Vec3::new(r.y * f.z - r.z * f.y, r.z * f.x - r.x * f.z, r.x * f.y - r.y * f.x);
+        let d = p - eye;
+        let z = d.x * f.x + d.y * f.y + d.z * f.z;
+        let (x, y) = (d.x * r.x + d.y * r.y + d.z * r.z, d.x * u.x + d.y * u.y + d.z * u.z);
+        let tv = 240.0 / (256.0 / 26.5f32.to_radians().tan());
+        (0.5 + x / z / (2.0 * tv * 16.0 / 9.0), 0.5 - y / z / (2.0 * tv), z)
+    }
+
+    /// The owner's 0.139.2 report ("Sora isn't the center of it"): a model of Sora running at
+    /// Re:CoM's 6.2 m/s (10.33 units a frame, `run_speed = recom`) right, toward the camera, away
+    /// and left, Auto on, open room; his hips' (0.7 m up) place on screen once each leg settles.
+    /// KH1's look point 0.5 m ahead takes up most of the 10 % spring's lag (9 × 10.33 = 93): he
+    /// settles at 0.56 / 0.51 / 0.49 / 0.44 across, 0.55..0.61 down, 3.6..4.5 m away. With 0.5 m
+    /// behind (0.134.0–0.139.2) the same run settled at 0.70 / 0.56 / 0.47 / 0.29 across and, running
+    /// at the camera, 0.72 down at 2.67 m, as the owner's video shows (0.65–0.70 across running
+    /// right, 0.72 down running at the camera, 0.57 at rest).
+    #[test]
+    fn a_running_sora_stays_near_the_centre() {
+        let mut f = Follow::default();
+        let mut i = Input { auto: true, ..inp() };
+        f.behind(&i, &mut Open);
+        let legs: [(f32, usize); 4] = [(PI / 2.0, 90), (PI, 90), (0.0, 60), (-PI / 2.0, 90)];
+        for (dir, frames) in legs {
+            let mut seen = Vec::new();
+            for k in 0..frames {
+                i.facing = dir;
+                i.pos += Vec3::from_yaw(dir) * 10.33;
+                f.step(&i, &mut Open);
+                let (e, l) = f.view(1.0);
+                if k >= frames - 20 {
+                    seen.push(screen(e, l, i.pos + Vec3::new(0.0, -70.0, 0.0)));
+                }
+            }
+            for (sx, sy, z) in seen {
+                assert!((0.42..=0.58).contains(&sx), "{}°: across {sx}", dir.to_degrees());
+                assert!((0.54..=0.62).contains(&sy), "{}°: down {sy}", dir.to_degrees());
+                assert!((355.0..=450.0).contains(&z), "{}°: {z} away", dir.to_degrees());
+            }
+        }
+        // At rest after running away (the camera behind him): centred across, a little below the
+        // middle, his hips 3.6 m away (Manual: the open model has no floor for Auto's standing
+        // ledge look).
+        i.auto = false;
+        for _ in 0..120 {
+            i.facing = 0.0;
+            i.pos += Vec3::from_yaw(0.0) * 10.33;
+            f.step(&i, &mut Open);
+        }
+        for _ in 0..240 {
+            f.step(&i, &mut Open);
+        }
+        let (e, l) = f.view(1.0);
+        let (sx, sy, z) = screen(e, l, i.pos + Vec3::new(0.0, -70.0, 0.0));
+        assert!((sx - 0.5).abs() < 0.01 && (0.59..0.63).contains(&sy) && (345.0..365.0).contains(&z), "{sx} {sy} {z}");
     }
 
     #[test]
@@ -2118,8 +2214,9 @@ mod tests {
             f.lock_step(&i, &t, &mut Open);
             f.view(1.0);
         }
-        // The eye rests within KH1's 75 dead zone of the anchor (here at its edge, from behind).
-        assert!((f.eye.x).abs() < 1e-2 && ((f.eye.z + 350.0).abs() - 75.0).abs() < 1e-2, "{:?}", f.eye);
+        // The eye rests within KH1's 75 dead zone of the anchor (the follow's eye, 3.44 m behind
+        // Sora with its look point 0.5 m ahead, is already inside it).
+        assert!((f.eye.x).abs() < 1e-2 && (f.eye.z + 350.0).abs() <= 75.0 + 1e-2, "{:?}", f.eye);
         assert!((f.eye.y + 100.0).abs() < 1e-2, "{:?}", f.eye);
         assert!((f.look - Vec3::new(0.0, -100.0, 600.0)).length() < 1e-1, "{:?}", f.look);
         assert!(wrap_angle(f.yaw - PI).abs() < 1e-4);
@@ -2561,3 +2658,4 @@ mod tests {
         assert!(c.yaw.is_finite());
     }
 }
+

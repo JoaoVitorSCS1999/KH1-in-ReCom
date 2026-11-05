@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 255: the KH1 camera keeps Sora near the centre (KH1's look point 0.5 m ahead of him, not behind), version 0.139.4 (2026-11-05)
+
+Owner, 2026-11-05 (0.139.2, Camera = KH1, Auto on), verbatim: "the KH1 camera isn't right. The camera itself is good but sora isn't the center of it if that make sense" (an 8.6 s recording).
+
+- **Video** (measured per frame, kept outside the repo): Sora's hips at rest 0.49 / 0.57 of the screen; running right 0.65–0.70 across; running at the camera 0.72 down, 1.15–1.25 times his rest size. He runs ahead of the camera.
+- **Cause** (Checked (KH1 Steam decomp + disasm)): KH1's follow `0x1401E1920` takes its look target as Sora's matrix `+0xD0` × (0, −100, −50) (`0x140386A40` → `0x1400E5AD0`: Σ vᵢ · rowᵢ). That matrix (`0x1402A0A40`, `+0x374 & 0x1000` clear) has row 2 = (0, 0, 0, 1) − facing (`0x140386D10` from `0x140527FF0`), row 0 = facing × up (`0x1400E82F0`, a × b), row 1 = up; facing `+0x30` = (sin ψ, 0, cos ψ) (`0x140297E10`). So the look target is 1 m up and **0.5 m ahead** of Sora. Stage 1 (0.134.0) took "local +z = facing" as an Assumption and put it 0.5 m **behind**. With the 10 % spring's lag (9 × Re:CoM's 10.33 units a frame), the look point trailed him by 1.43 m instead of 0.43 m.
+- **Offline model** (`camera::tests::a_running_sora_stays_near_the_centre`: Re:CoM's run, four directions, Auto, open room): 0.139.2's code settles at 0.70 across running right, 0.72 down and 2.67 m running at the camera, 0.55 down at rest. That matches the video. KH1's offset settles at 0.56 / 0.44 across, 0.61 down and 3.63 m at the camera, 0.49 / 4.46 m away, 0.61 down / 3.56 m at rest.
+- **Not the cause** (Checked (decomp)): the springs (KH1's 20 % / 10 % up / 50 % down, halved at step 1.0, on the look point as KH1); Sora's position (Re:CoM's node 0 `+0xD0`, the read of Re:CoM's own subject point `0x1401F0510`); Re:CoM's tail `0x1401FC0D0` / view `0x14024FA40` (no re-smoothing); the sweep `0x1401FBC60` (writes `to` only on contact); the lock camera's anchor and point ahead (Ry(camera yaw) from identity, not Sora's matrix); the pitch assist (his `+0x30` directly). **KH2 (modes 8 / 9)**: its look goal has no actor-local offset (straight above the feet / 30 % to the target); the same path keeps Sora within 0.40..0.60: not affected, nothing changed.
+- **Fix** (`camera::kh1::actor_point`, `Input::target` / `above`): KH1's actor matrix rows. No hook, patch, site or record change; nothing new per frame.
+- Assumptions: Re:CoM's camera exec once a 60 Hz frame; KH1's slope branch of the matrix (`0x140292010`) not carried; the model's projection (Re:CoM's 53° focal on 640 × 480, 16:9 keeping the height).
+- Checked: tests (`camera::tests::the_look_target_is_half_a_metre_ahead_of_sora`, `a_running_sora_stays_near_the_centre`; `offsets_and_conversions` and the lock test's rest updated: the follow's eye now starts inside the lock anchor's 75 dead zone), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game; no KH1 camera trace. Asset step: not needed. Docs: `recom-m12-camera-plan.md` § 18 (§ 3.2 and § 13 corrected).
+
+---
+
 ## Stage 254: the Abilities and Items lists keep their scroll on a confirm (equipping no longer drops the row to the bottom line), version 0.139.3 (2026-11-05)
 
 Owner, 2026-11-05 (recording, Abilities > Enemy Skills), verbatim: "When activating an ability it automatically puts it all the way at the bottom of the list."

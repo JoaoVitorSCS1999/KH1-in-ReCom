@@ -198,8 +198,8 @@ as `recom-timing.md`). All rates below are per 60 Hz frame.
 
 - **Entry:** pitch, distance from the room's defaults, yaw from the current view, FOV 53°,
   eye re-placed behind that yaw with a wall check.
-- **Look point** = Sora's matrix × target offset (1.0 m up, 0.5 m on his local −z: which side
-  that is in Re:CoM's frame: Assumption, to settle at build). It eases to that point by
+- **Look point** = Sora's matrix × target offset (1.0 m up, 0.5 m on his local −z, which is
+  **ahead** of him: his matrix's row 2 is −facing; corrected in § 18). It eases to that point by
   **10 % of the horizontal gap per frame**, and vertically **25 % per frame going down, 5 %
   going up** (the 20 % / 50 % / 10 % of the code, halved because the frame step is 1.0 < 2.0).
   It snaps while a mode blend runs.
@@ -525,7 +525,8 @@ summons / specials and boss cameras Re:CoM's, the rest as recommended.
 
 - **The look target's side** (§ 3.2's Assumption): KH1's offset z −50 is on Sora's local −z, and
   his matrix maps local +z to his facing (`kh1_core::Vec3::rotate_yaw`, same Assumption as the
-  movement code): the look point is **0.5 m behind** Sora.
+  movement code): the look point is **0.5 m behind** Sora. **Wrong** (§ 18, 0.139.4): KH1's matrix
+  maps local +z to his back; the look point is 0.5 m **ahead**.
 - **The eye's pitch sign**: `0x1400E6AC0`'s rows give `(0, 0, d)` → `(0, −d sin p, d cos p)`: a
   positive pitch puts the eye above (y down). Checked (decomp).
 - **Re:CoM's angle convention** (`0x1401FB890`): yaw of the eye from the aim, pitch positive with
@@ -781,3 +782,93 @@ Re:CoM's own (`player+0x850`), with 0.137.0's KH1 lock rules at Combat = KH1.
   behind, the 32-pixel margins), `kh2_lock_camera_frames_sora_and_the_target` (the 30 % look goal,
   the eye from the chest, no turn on screen, 380 at 1 a frame, + 20° off the left side, the reset,
   the far-and-steep chest, the 8 ↔ 9 rows), `kh2_lock_shrinks_the_distance_at_the_bottom_edge`.
+
+---
+
+## 18. Fix (0.139.4): KH1's look point is 0.5 m ahead of Sora, not behind
+
+Owner, 2026-11-05 (0.139.2, Camera = KH1, Auto on, `run_speed = recom`), verbatim: "the KH1 camera
+isn't right. The camera itself is good but sora isn't the center of it if that make sense" (an 8.6 s
+recording in Castle Oblivion's 13F Entrance Hall).
+
+### What the video shows (measured per frame, 30 fps, outside the repo)
+
+Sora's hips on screen (0..1 across, 0..1 down): at rest 0.49 / 0.57; running right 0.65–0.70 across
+(ahead of the centre on the side he runs to); running at the camera 0.72 down and 1.15–1.25 times his
+rest size; running left the same on the other side. The camera follows, but Sora runs ahead of it.
+
+### Cause (Checked (KH1 Steam decomp + disasm))
+
+KH1's follow (`0x1401E1920`) builds its look target as `0x140386A40(target, Sora + 0xD0, offset)` with
+the offset (0, −100, −50) (`0x140506CA0`, Checked (exe)). `0x1400E5AD0` gives Σ vᵢ · rowᵢ. Sora's
+matrix `+0xD0` is written by `0x1402A0A40` (with `+0x374 & 0x1000` clear):
+
+| Row | Value | Code |
+|---|---|---|
+| 0 (`+0xD0`) | facing × (0, 1, 0), normalised = (−cos ψ, 0, sin ψ) | `0x140386C70` → `0x1400E82F0` (a × b, Checked (disasm)), `0x140528B10` = (0, 1, 0, 1) |
+| 1 (`+0xE0`) | row 2 × row 0 = (0, 1, 0) | `0x140386C70` |
+| 2 (`+0xF0`) | (0, 0, 0, 1) − facing = (−sin ψ, 0, −cos ψ) | `0x140386D10` (a − b, `0x1400E5EF0`) from `0x140527FF0` |
+| 3 (`+0x100`) | Sora's position `+0x10` | — |
+
+Facing = `+0x30` = (sin ψ, 0, cos ψ) (`0x140297E10`), the way he runs. So local −z is **ahead**: KH1's
+look target is 1 m up and **0.5 m ahead** of Sora. Stages 1–3 (0.134.0–0.139.2) took the Assumption
+"local +z = facing" (§ 13, Found at build) and put it 0.5 m **behind**.
+
+Why it shows so much: the look point springs 10 % of the horizontal gap a frame (§ 3.2), so it lags a
+running Sora by 9 × his speed (Re:CoM's 6.2 m/s run: 10.33 units a frame, 93 units). KH1's 0.5 m lead
+takes most of that up; our 0.5 m behind added to it (143 units instead of 43). Running at the camera,
+the eye (look + 4 m) sat 2.67 m from him instead of 3.63 m.
+
+A model of the follow (`camera::tests::a_running_sora_stays_near_the_centre`: Re:CoM's run speed, the
+four directions, Auto, an open room, Re:CoM's 53° focal on 640 × 480 widened to 16:9 (Assumption)):
+
+| Leg (settled) | 0.139.2 (behind) | Video | 0.139.4 (ahead, KH1's) |
+|---|---|---|---|
+| Running right | 0.70 across | 0.65–0.70 | 0.56 |
+| Running at the camera | 0.72 down, 2.67 m | 0.72 down | 0.61 down, 3.63 m |
+| Running away | 0.47, 5.43 m | — | 0.49, 4.46 m |
+| Running left | 0.29 across | (as right, mirrored) | 0.44 |
+| At rest behind him | 0.55 down, 4.54 m | 0.57 | 0.61 down, 3.56 m |
+
+The 0.139.2 column matches the video, so this is the cause.
+
+### Checked and not the cause
+
+- **Springs** (`0x1401E1920`, Checked (decomp)): 20 % of the horizontal gap, vertically 10 % up / 50 %
+  down (the gap's y, KH1's y down), × 0.5 when the step is under 2.0 (`0x14233FBDC` = 1.0 a 60 Hz frame
+  on PC, `kh1-tick.md`): applied to KH1's look point, as ours. The eye has no spring of its own: in
+  Auto it walks to its goal (look + the offset at the distance, which eases back to 400 at 10 % a
+  frame) in 20-unit steps with the 40 sphere, stopping only at contact; in Manual it is the goal.
+- **Sora's position**: Re:CoM's player node 0 `+0xD0` (`0x1402ABB20(player, 0)`; the node's matrix is at
+  `+0xA0`, its translation `+0xD0`), the same read as Re:CoM's own subject point `0x1401F0510`
+  (Checked (decomp)); KH1 reads its actor matrix's row 3 = `+0x10`. Whether Re:CoM's node is updated
+  before the camera in a frame (a frame's lag, 10 units at a run): not checked (Re:CoM's camera
+  has the same).
+- **Re:CoM's ending**: its tail `0x1401FC0D0` only hands the aim / eye to the collision object
+  (`+0x1A8` `+0x10` / `+0x20`, radius `rec+4 × 0.1`); the node takes the eye; `0x14024FA40` builds the
+  view from the aim. Nothing re-smooths or re-offsets (Checked (decomp)).
+- **The sweep** (`0x1401FBC60(cam, to, from, radius m, close)`): writes `to` only on a contact (shape
+  `+0x50`); our eye walk sweeps from the eye to its goal as KH1's (Checked (decomp)).
+- **The other KH1 offsets**: the lock camera's anchor and its point 100 ahead are turned by Ry(the
+  camera's yaw) from identity (`0x1400E6C80` on `0x1428672D0`), not Sora's matrix; the pitch assist reads
+  his facing `+0x30` directly (× 100 / × 30 ahead): unchanged and right (Checked (decomp)).
+- **KH2 (modes 8 / 9)**: KH2's look goal is straight above the feet (170) or 30 % toward the target,
+  no actor-local offset; the same path keeps Sora within 0.40..0.60 across: not affected. Its position
+  read and Re:CoM's tail are the same plumbing as KH1's (above).
+
+### Fix
+
+`camera::kh1::actor_point` is KH1's actor matrix (the four rows above); `Input::target` /
+`Input::above` go through it. Nothing else changes: no hook, patch, site or record (the records hold
+only the aim height for Re:CoM's setters' first view; our step places the camera that frame). The
+lock camera's rest follows: after a lock from the follow, its eye now starts inside the 75 dead zone of
+the anchor (3.44 m behind Sora) and stays there, as KH1's rule allows.
+
+### Not checked, Assumptions
+
+- In game (no KH1 camera trace; the recorder has no camera columns). KH1 itself not recorded.
+- That Re:CoM's camera exec runs once a 60 Hz frame (`+0x14` = 50; plan § 5's Assumption).
+- KH1's slope branch of the matrix (`0x140292010`: two floor points along ±facing, for actors with 3 or
+  more body records and flags `& 0x8010` = 0x8000) only tilts row 2 along the floor: not carried.
+- The model's projection (Re:CoM's 53° focal on 640 × 480, 16:9 keeping the height).
+
