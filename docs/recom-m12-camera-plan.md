@@ -7,7 +7,7 @@ plan with the owner before building.") Lock-on on R1 at Combat = KH1 is another 
 this plan only covers what the camera does while a lock is on.
 
 **Status:** the owner answered § 10 (`design-philosophy-instructions.md` § Camera answers) and
-asked for the five stages. Built: stage 1 (0.134.0, § 13).
+asked for the five stages. Built: stage 1 (0.134.0, § 13), stage 2 (0.135.0, § 14).
 
 Steam addresses for all three games. Tags: **Checked (exe / decomp / files)** = read;
 **Assumption** = inferred, to check. KH1 roles marked "(Epic notes)" come from
@@ -560,3 +560,48 @@ summons / specials and boss cameras Re:CoM's, the rest as recommended.
 rates, the stick's acceleration / maximum / decay / clamp, the mouse rule, R3's 60-frame swing, the
 Manual ray against a wall, the stubs and the block), `sites::tests::camera_sites`, `menu` /
 `keyblades` / `settings` tests for the page; `check_sites_rs.py`.
+
+---
+
+## 14. Stage 2 built (0.135.0): KH1's Auto camera behind the Auto camera row
+
+Owner, 2026-11-04 (§ Camera answers Q6 (b): an "Auto camera: On / Off" row; § Lock-on rules and
+camera walls: the near-wall ramp "(a) 8 + 8 flat 2.5 m rays").
+
+- **Row**: the Camera page's second row **Auto camera: Off / On** (ini `auto_camera`, default on:
+  KH1's Config field camera 0 = Auto, its reset value `0x1402FA295` case 7, Checked (decomp); the
+  label "Auto": Assumption, Epic notes). At once.
+- **Order** (`0x1401E1920`, Checked (decomp)): Sora's speeds (`0x1401E5D90`: 3D and horizontal,
+  units a frame, from his position last frame), the look spring, the stick, the recenter's blend;
+  **Auto** (Config Auto and not KH1's push state 0x1B): the swing-behind, the wall-avoid, the pitch
+  assist, the eye walk, the visibility re-place, the auto recenter; **Manual**: the pitch assist,
+  the eye's wall ray; then R3, the distance (Auto: back toward 400 at 10 % a frame; Manual: 400),
+  the yaw.
+- **Fix from stage 1**: KH1 runs the pitch assist in **Manual too** (the Manual branch calls
+  `0x1401E6670`), so the pitch returns to 10° at 3 % a frame whenever no floor is within 55 under the
+  eye. Stage 1 lacked it (the stick's pitch stayed). Now with a stick held down KH1 rests at 48.8°
+  (the clamp, then 3 % back the same frame), as KH1.
+
+| Piece | KH1 (Checked (decomp)) | In Re:CoM |
+|---|---|---|
+| Swing-behind `0x1401E6FF0` | ramps: 60 frames, then a second to 90 (mouse 0 / 40); a wall ramp to 60 (mouse 20), −0.3 a frame away from walls; near a wall the second ramp jumps to its top; gain (wall / 60 × 2 % + second / 90 × 2 %) × the angle to Sora's back, faded past 120°; reset when his facing moves 30° in a frame or he slows to his threshold (1.0 a frame on the ground, 0.1 in the air) | as KH1; the wall probe `0x140196300` (a flat 250 circle at the look point and at the eye) is the owner's (a): 8 flat 2.5 m rays from each with Re:CoM's sweep, only while the swing runs (walls within 2.31 m always caught) |
+| Wall-avoid `0x1401E6C10` | a ray 50 to either side of the look→eye line; then the ±30° rays of 300 from the eye; exactly one blocked and Sora moving: a 40-frame sin swing to run along the wall (from the side ray's polygon normal ± 90°); the right stick's x held cancels it | Re:CoM's sweep; the normal from the sweep's shape `cam+0x1A8 → +0x40` (Re:CoM's solver writes it with the contact, its stuck default (0, 1, 0): Assumption that it is the surface normal) |
+| Pitch assist `0x1401E6670` | standing over 60 frames (Auto): no wall 100 ahead and no floor within 500 under a point 30 ahead 100 up → the pitch rises 3° × ramp/30 a frame (to 85°); in the air: no floor 1000 under the look point, or falling faster than 5 with nothing 250 along the fall → the same; the eye 55 over a floor (< 49.5): + (1 − d/55) × ramp/30 × 3°; else back to 10° at 3 % once its ramp has decayed (0.3 a frame while moving); none of it in states 4 / 5 / 8 / 0x15 / 0x18 / 0x1A | Re:CoM's sweep; Sora's state: 0x15 in Re:CoM's glide (action 8), 2 in the air (Re:CoM's ground test `0x1401F3C00` read from its cache, or its rule, without running it), else 0; his air velocity = his mover's `+0x80` |
+| Eye walk | to the goal as a 40 sphere in 20-unit steps stopping at contact; re-placed (`0x1401E4820`) when the distance passed 400 + 300; a jump from 1000 | one Re:CoM sweep of the 40 sphere from the eye to the goal (same stop, Assumption: no tunnelling in Re:CoM's sweep) |
+| Visibility `0x1401E7780` | 5 segments from the eye: above Sora, it turned ±15° about the eye, it ±50 up / down; all blocked → re-place at the yaw | Re:CoM's sweep, stopping at the first clear one |
+| Auto recenter | eye within 40 horizontally of the look point, pitch under 60°, Sora moving → `0x1401E62A0` | as KH1 |
+
+- Not carried: KH1's global flag `0x142867368 & 0x10` (skips the wall-avoid / pitch assist; taken
+  as clear); KH1's states other than 0 / 2 / 0x15 (hit, flight, ladders) are not told apart
+  (Assumption).
+- **Per frame** (Camera = KH1, Auto on; not measured in game): standing, about 5 Re:CoM sweeps
+  (look check, a side ray, the eye's floor ray, the eye walk, one visibility segment), + 2 in the
+  ledge look after 60 still frames; running straight, + 16 for the wall probe; a wall-avoid start
+  + 2. Re:CoM's own follow: 1. Auto off: stage 1's 2 + the eye's floor ray.
+- Tests: `camera::tests::the_swing_behind_ramps_as_kh1s` (the 60-frame ramp, the second ramp's
+  first gain, the wall ramp), `auto_eye_distance_and_visibility`,
+  `the_pitch_assist_lifts_an_eye_near_the_floor`, the stick test with the pitch assist (48.8°,
+  the return to 10°).
+- L2 / R2: KH1's camera module reads only R3, Select, the right stick's x held and (first person)
+  0x10 / 0x40, never L2 / R2 (Checked (decomp + the pad table `0x140528290`)): no clash with KH1's
+  L2 target step.

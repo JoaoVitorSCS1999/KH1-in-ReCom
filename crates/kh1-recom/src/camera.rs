@@ -227,6 +227,16 @@ pub mod kh1 {
         /// None when the way is clear. A `radius` of [`RAY`] stands for KH1's ray and segment tests
         /// (`0x140193790`, `0x140193180`).
         fn sweep(&mut self, from: Vec3, to: Vec3, radius: f32) -> Option<Vec3>;
+        /// The surface normal of the last contact (KH1's polygon normal `0x140191DD0`; KH1 units,
+        /// y down). Default: up.
+        fn normal(&mut self) -> Vec3 {
+            Vec3::new(0.0, -1.0, 0.0)
+        }
+        /// KH1's `0x140196300` with a flat circle of `radius` at `at` (the swing-behind's wall
+        /// probe): a wall within `radius` horizontally.
+        fn near_wall(&mut self, _at: Vec3, _radius: f32) -> bool {
+            false
+        }
     }
 
     /// The sphere radius that stands for KH1's ray (Re:CoM's own smallest camera sweep, its tail's
@@ -259,6 +269,13 @@ pub mod kh1 {
         pub inv: [f32; 2],
         /// The frame step (1.0 a 60 Hz frame).
         pub step: f32,
+        /// KH1's Auto camera (its Config `+0x8` = 0; owner: the Auto camera row).
+        pub auto: bool,
+        /// Sora's KH1 movement state (`+0x70`: 0 ground, 2 air, 0x15 glide …), for the speed
+        /// thresholds and the pitch assist's skips.
+        pub state: u32,
+        /// Sora's air velocity (`+0x3C0`, units a frame, y down).
+        pub vel: Vec3,
     }
 
     impl Input {
@@ -301,7 +318,34 @@ pub mod kh1 {
         pub pitch: f32,
     }
 
-    /// KH1's follow camera state (its globals `0x142537E60..`, `0x1425380EC` / `F0`).
+    /// The swing-behind's ramps (`0x1425380DC..0x1425380E8`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Swing {
+        /// The wall ramp (`0x1425380E0`), the second time ramp (`E4`), the first (`E8`).
+        pub wall: f32,
+        pub second: f32,
+        pub first: f32,
+        /// Sora's facing last frame (`0x1425380DC`).
+        pub facing: f32,
+    }
+
+    /// The wall-avoid's swing (`0x142537ED0..ED8`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Avoid {
+        pub from: f32,
+        pub delta: f32,
+        pub left: f32,
+    }
+
+    /// The pitch assist's timers (`0x1425380D0` drop, `D4` floor under the eye, `D8` standing).
+    #[derive(Clone, Copy, Debug, Default, PartialEq)]
+    pub struct Assist {
+        pub drop: f32,
+        pub floor: f32,
+        pub still: f32,
+    }
+
+    /// KH1's follow camera state (its globals `0x142537E60..`, `0x1425380C0..0x1425380F0`).
     #[derive(Clone, Copy, Debug, PartialEq)]
     pub struct Follow {
         pub look: Vec3,
@@ -312,12 +356,80 @@ pub mod kh1 {
         /// Stick velocities (pitch, yaw), per frame.
         pub vel: [f32; 2],
         pub rc: Recenter,
+        pub swing: Swing,
+        pub avoid: Avoid,
+        pub assist: Assist,
+        /// Sora's position last frame (KH1's `+0x490`) and his speeds this frame: 3D (`0x142537E50`)
+        /// and horizontal (`E54`), units a frame (`0x1401E5D90`).
+        pub prev: Option<Vec3>,
+        pub speed: f32,
+        pub speed_h: f32,
     }
 
     impl Default for Follow {
         fn default() -> Self {
-            Follow { look: Vec3::ZERO, eye: Vec3::ZERO, pitch: PITCH_DEFAULT, yaw: 0.0, dist: DIST_DEFAULT, vel: [0.0; 2], rc: Recenter::default() }
+            Follow { look: Vec3::ZERO, eye: Vec3::ZERO, pitch: PITCH_DEFAULT, yaw: 0.0, dist: DIST_DEFAULT, vel: [0.0; 2], rc: Recenter::default(), swing: Swing::default(), avoid: Avoid::default(), assist: Assist::default(), prev: None, speed: 0.0, speed_h: 0.0 }
         }
+    }
+
+    /// Sora "moves" for the camera: faster than his state's threshold (1.0 a frame on the
+    /// ground, 7.0 in states 8 / 0x18, else 0.1; `0x1401E6080`). Checked (decomp).
+    pub fn moving(state: u32, speed: f32) -> bool {
+        let t = match state {
+            0 => 1.0,
+            8 | 0x18 => 7.0,
+            _ => 0.1,
+        };
+        t < speed
+    }
+
+    /// The Auto pieces' numbers (Checked (decomp)): the swing-behind `0x1401E6FF0` (ramps of 60
+    /// then 90 frames, a wall ramp of 60, with the mouse 0 / 40 / 20; gains 2 % + 2 % of the angle
+    /// to Sora's back, faded past 120°, none at 180°; a facing change of 30° resets); its wall
+    /// probe radius 250; the wall-avoid `0x1401E6C10` (side rays 50 off, ±30° rays of 300, a
+    /// 40-frame sin swing); the pitch assist `0x1401E6670` (3° a frame × its ramp of 30, at most
+    /// 85°, the eye's floor ray 55 with 49.5, back to the default pitch 3 % a frame; the standing
+    /// ledge look after 60 frames: 100 ahead, then 500 down from 30 ahead 100 up; in the air 1000
+    /// down, or along a fall faster than 5 for 250); the eye walk (a 40 sphere, re-placed past
+    /// default + 300, a jump at 1000); the visibility re-place `0x1401E7780` (5 segments from the
+    /// eye: above Sora, ±15° of it, ±50 up and down); the auto recenter (eye within 40
+    /// horizontally, pitch under 60°, Sora moving); the distance back 10 % a frame.
+    pub mod auto {
+        pub const RAMP1: f32 = 60.0;
+        pub const RAMP2: f32 = 90.0;
+        pub const WALL_RAMP: f32 = 60.0;
+        pub const MOUSE_RAMP1: f32 = 0.0;
+        pub const MOUSE_RAMP2: f32 = 40.0;
+        pub const MOUSE_WALL_RAMP: f32 = 20.0;
+        pub const GAIN: f32 = 0.02;
+        pub const FACING_RESET: f32 = 0.523_598_8;
+        pub const FADE_FROM: f32 = 2.094_395_2;
+        pub const FADE_OVER: f32 = 1.047_197_6;
+        pub const PROBE: f32 = 250.0;
+        pub const SIDE: f32 = 50.0;
+        pub const FAN: f32 = 300.0;
+        pub const FAN_ANGLE: f32 = 0.523_598_8;
+        pub const AVOID_FRAMES: f32 = 40.0;
+        pub const ASSIST_STEP: f32 = 0.052_359_88;
+        pub const ASSIST_RAMP: f32 = 30.0;
+        pub const PITCH_TOP: f32 = 1.483_529_8;
+        pub const EYE_FLOOR: f32 = 55.0;
+        pub const EYE_FLOOR_NEAR: f32 = 49.5;
+        pub const PITCH_BACK: f32 = 0.03;
+        pub const STILL_FRAMES: f32 = 60.0;
+        pub const LEDGE_AHEAD: f32 = 100.0;
+        pub const LEDGE_FROM: f32 = 30.0;
+        pub const LEDGE_DOWN: f32 = 500.0;
+        pub const AIR_DOWN: f32 = 1000.0;
+        pub const FALL_FAST: f32 = 5.0;
+        pub const FALL_AHEAD: f32 = 250.0;
+        pub const REPLACE_PAST: f32 = 300.0;
+        pub const JUMP: f32 = 1000.0;
+        pub const SEE_TURN: f32 = 0.261_799_4;
+        pub const SEE_UP: f32 = 50.0;
+        pub const SQUEEZE: f32 = 40.0;
+        pub const SQUEEZE_PITCH: f32 = 1.047_197_6;
+        pub const DIST_BACK: f32 = 0.1;
     }
 
     impl Follow {
@@ -510,20 +622,225 @@ pub mod kh1 {
             }
         }
 
-        /// One frame of KH1's mode 1 (Manual branch; the Auto pieces come with their stage), after
-        /// any entry: the look point's spring, the stick, the recenter's blend, the eye and its wall
-        /// ray, R3, the distance, the yaw from the result.
+        /// One frame of KH1's mode 1, after any entry (`0x1401E1920`): Sora's speeds
+        /// (`0x1401E5D90`), the look point's spring, the stick, the recenter's blend; then Auto
+        /// (the swing-behind, the wall-avoid, the pitch assist, the eye walk, the visibility
+        /// re-place, the auto recenter) or Manual (the pitch assist, the eye's wall ray); R3, the
+        /// distance, the yaw from the result.
         pub fn step(&mut self, inp: &Input, w: &mut dyn World) {
+            let d = inp.pos - self.prev.unwrap_or(inp.pos);
+            self.speed = d.length() / inp.step;
+            self.speed_h = d.flat().length() / inp.step;
             self.spring_look(inp, w);
             self.stick(inp);
             self.blend(inp.step);
-            self.manual_eye(w);
+            let auto = inp.auto && inp.state != 0x1B;
+            if auto {
+                self.swing_behind(inp, w);
+                self.wall_avoid(inp, w);
+                self.pitch_assist(inp, w);
+                self.auto_eye(inp, w);
+                let h = (self.eye - self.look).horizontal_length();
+                if h < auto::SQUEEZE && self.pitch < auto::SQUEEZE_PITCH && moving(inp.state, self.speed_h) {
+                    self.start_recenter(inp.facing, w);
+                }
+            } else {
+                self.pitch_assist(inp, w);
+                self.manual_eye(w);
+            }
             if inp.recenter && inp.can_act {
                 self.start_recenter(inp.facing, w);
             }
-            // Manual: the distance stays the default (Auto springs it back 10 % a frame).
-            self.dist = DIST_DEFAULT;
+            // Auto: the distance springs back 10 % a frame toward the default; Manual: the default.
+            self.dist = if auto {
+                let now = (self.eye - self.look).length();
+                now + (DIST_DEFAULT - now) * auto::DIST_BACK
+            } else {
+                DIST_DEFAULT
+            };
             self.yaw = yaw_of(self.eye, self.look);
+            self.prev = Some(inp.pos);
+        }
+
+        /// The swing-behind `0x1401E6FF0`.
+        fn swing_behind(&mut self, inp: &Input, w: &mut dyn World) {
+            let (r1, r2, rw) = if inp.mouse { (auto::MOUSE_RAMP1, auto::MOUSE_RAMP2, auto::MOUSE_WALL_RAMP) } else { (auto::RAMP1, auto::RAMP2, auto::WALL_RAMP) };
+            let sw = &mut self.swing;
+            if auto::FACING_RESET <= (sw.facing - inp.facing).abs() || !moving(inp.state, self.speed_h) {
+                sw.first = 0.0;
+                sw.second = 0.0;
+            } else {
+                sw.first += inp.step;
+                if r1 < sw.first {
+                    sw.second += inp.step;
+                    sw.first = r1;
+                    if r2 < sw.second {
+                        sw.second = r2;
+                    }
+                }
+            }
+            if 0.0 < self.avoid.left || sw.first <= 0.0 {
+                sw.facing = inp.facing;
+                return;
+            }
+            if w.near_wall(self.look, auto::PROBE) || w.near_wall(self.eye, auto::PROBE) {
+                let sw = &mut self.swing;
+                sw.wall = (sw.wall + inp.step).min(rw);
+                if sw.second != 0.0 {
+                    sw.second = r2;
+                }
+            } else {
+                let sw = &mut self.swing;
+                sw.wall = (sw.wall - inp.step * 0.3).max(0.0);
+            }
+            let sw = &mut self.swing;
+            let delta = wrap_angle(inp.facing + PI - self.yaw);
+            let mut g = ((sw.wall / rw) * auto::GAIN + (sw.second / r2) * auto::GAIN) * delta;
+            if auto::FADE_FROM <= delta.abs() {
+                g *= 1.0 - (delta.abs() - auto::FADE_FROM) / auto::FADE_OVER;
+            }
+            sw.facing = inp.facing;
+            self.yaw += g;
+        }
+
+        /// The wall-avoid `0x1401E6C10`: a wall beside the line from the look point to the eye,
+        /// and one of two ±30° rays from the eye blocked: swing (40 frames) to run along the wall.
+        fn wall_avoid(&mut self, inp: &Input, w: &mut dyn World) {
+            let a = &mut self.avoid;
+            if 0.0 < a.left {
+                self.yaw = ((1.0 - a.left / auto::AVOID_FRAMES) * PI * 0.5).sin() * a.delta + a.from;
+                a.left -= inp.step;
+                return;
+            }
+            a.left = 0.0;
+            let to_look = self.look - self.eye;
+            let back = self.eye - self.look;
+            let mut s = back.normalized();
+            s.y = 0.0;
+            let mut side = s.rotate_yaw(PI / 2.0) * auto::SIDE;
+            let mut hit = w.sweep(self.look + side, self.look + side + back, RAY);
+            if hit.is_none() {
+                side = side * -1.0;
+                hit = w.sweep(self.look + side, self.look + side + back, RAY);
+            }
+            if let Some(at) = hit {
+                let normal = w.normal();
+                let c = to_look.normalized() * auto::FAN;
+                let t1 = w.sweep(self.eye, self.eye + c.rotate_yaw(auto::FAN_ANGLE), RAY).is_some();
+                let t2 = w.sweep(self.eye, self.eye + c.rotate_yaw(-auto::FAN_ANGLE), RAY).is_some();
+                if t1 && t2 {
+                    return;
+                }
+                if t1 != t2 && moving(inp.state, self.speed_h) {
+                    let b = (at - self.eye).flat().normalized();
+                    let n = normal.flat().normalized();
+                    let mut ang = n.x.atan2(n.z);
+                    let cross_y = b.z * n.x - b.x * n.z;
+                    ang += if cross_y < 0.0 { -PI / 2.0 } else { PI / 2.0 };
+                    let mut d = wrap_angle(ang) - wrap_angle(self.yaw);
+                    if PI < d.abs() {
+                        d += if 0.0 <= d { -2.0 * PI } else { 2.0 * PI };
+                    }
+                    self.avoid = Avoid { from: wrap_angle(self.yaw), delta: d, left: auto::AVOID_FRAMES };
+                }
+            }
+            // The right stick turning the camera (KH1's logical 0x1000 / 0x2000 held) cancels it.
+            if inp.stick[0] != 0.0 {
+                self.avoid.left = 0.0;
+            }
+        }
+
+        /// The pitch assist `0x1401E6670` (Auto and Manual alike).
+        fn pitch_assist(&mut self, inp: &Input, w: &mut dyn World) {
+            let slow = !moving(inp.state, self.speed);
+            let mut raise = false;
+            if slow {
+                if inp.auto && inp.state != 0x1B {
+                    if self.assist.still <= auto::STILL_FRAMES {
+                        self.assist.still += inp.step;
+                    } else {
+                        let fwd = Vec3::from_yaw(inp.facing);
+                        if w.sweep(inp.pos, inp.pos + fwd * auto::LEDGE_AHEAD, RAY).is_none() {
+                            let mut from = fwd * auto::LEDGE_FROM + inp.pos;
+                            from.y -= 100.0;
+                            raise = w.sweep(from, from + Vec3::new(0.0, auto::LEDGE_DOWN, 0.0), RAY).is_none();
+                        }
+                    }
+                }
+            } else {
+                if inp.state == 2 {
+                    if w.sweep(self.look, self.look + Vec3::new(0.0, auto::AIR_DOWN, 0.0), RAY).is_none() {
+                        raise = true;
+                    } else if auto::FALL_FAST < inp.vel.y {
+                        raise = w.sweep(inp.pos, inp.pos + inp.vel.normalized() * auto::FALL_AHEAD, RAY).is_none();
+                    }
+                }
+                self.assist.still = 0.0;
+            }
+            let skip = matches!(inp.state, 4 | 5 | 8 | 0x15 | 0x18 | 0x1A);
+            let a = &mut self.assist;
+            if !raise || skip {
+                a.drop = 0.0;
+            } else {
+                self.pitch = wrap_angle(self.pitch + (a.drop / auto::ASSIST_RAMP) * auto::ASSIST_STEP).min(auto::PITCH_TOP);
+                a.drop = (a.drop + inp.step).min(auto::ASSIST_RAMP);
+            }
+            let floor = w.sweep(self.eye, self.eye + Vec3::new(0.0, auto::EYE_FLOOR, 0.0), RAY);
+            match floor {
+                Some(at) if !skip => {
+                    let len = (at - self.eye).length();
+                    if len < auto::EYE_FLOOR_NEAR {
+                        let a = &mut self.assist;
+                        self.pitch = wrap_angle(self.pitch + (1.0 - len / auto::EYE_FLOOR) * (a.floor / auto::ASSIST_RAMP) * auto::ASSIST_STEP).min(auto::PITCH_TOP);
+                        a.floor = (a.floor + inp.step).min(auto::ASSIST_RAMP);
+                    }
+                }
+                _ => {
+                    let a = &mut self.assist;
+                    if !slow {
+                        a.floor -= inp.step * 0.3;
+                    }
+                    if a.floor < 0.0 {
+                        a.floor = 0.0;
+                    }
+                    if a.floor <= 0.0 {
+                        self.pitch += wrap_angle(PITCH_DEFAULT - self.pitch) * auto::PITCH_BACK;
+                    }
+                }
+            }
+        }
+
+        /// The Auto branch's eye: the goal at the pitch, yaw and distance; re-placed when the
+        /// distance has grown past the default + 300; walked there as a 40-unit sphere stopping at
+        /// contact (KH1's 20-unit steps as one Re:CoM sweep), or jumped there from 1000 away; then
+        /// re-placed when no segment from it reaches Sora (`0x1401E7780`).
+        fn auto_eye(&mut self, inp: &Input, w: &mut dyn World) {
+            let mut goal = self.look + offset(self.dist, self.pitch, wrap_angle(self.yaw));
+            if DIST_DEFAULT + auto::REPLACE_PAST < (goal - self.look).length() {
+                // `0x1401E4820` into the goal (the look point and the defaults reset); the walk
+                // still starts from the eye.
+                let eye = self.eye;
+                self.replace(self.yaw, inp, w);
+                goal = self.eye;
+                self.eye = eye;
+            }
+            if (goal - self.eye).length() < auto::JUMP {
+                self.eye = w.sweep(self.eye, goal, SPHERE).unwrap_or(goal);
+            } else {
+                self.eye = goal;
+            }
+            if !self.sees(inp, w) {
+                self.replace(self.yaw, inp, w);
+            }
+        }
+
+        /// `0x1401E7780`: a clear segment from the eye to the point above Sora, to it turned ±15°
+        /// about the eye, or to it 50 up or down.
+        fn sees(&self, inp: &Input, w: &mut dyn World) -> bool {
+            let above = inp.above();
+            let v = above - self.eye;
+            let targets = [above, self.eye + v.rotate_yaw(auto::SEE_TURN), self.eye + v.rotate_yaw(-auto::SEE_TURN), above + Vec3::new(0.0, auto::SEE_UP, 0.0), above - Vec3::new(0.0, auto::SEE_UP, 0.0)];
+            targets.iter().any(|&t| w.sweep(self.eye, t, RAY).is_none())
         }
     }
 
@@ -657,7 +974,7 @@ mod tests {
     use super::*;
 
     fn inp() -> Input {
-        Input { pos: Vec3::ZERO, facing: 0.0, stick: [0.0; 2], mouse: false, can_act: true, recenter: false, inv: [1.0, -1.0], step: 1.0 }
+        Input { pos: Vec3::ZERO, facing: 0.0, stick: [0.0; 2], mouse: false, can_act: true, recenter: false, inv: [1.0, -1.0], step: 1.0, auto: false, state: 0, vel: Vec3::ZERO }
     }
 
     #[test]
@@ -776,11 +1093,20 @@ mod tests {
         for _ in 0..200 {
             g.step(&Input { stick: [0.0, 1.0], ..i }, &mut Open);
         }
-        assert!((g.pitch - PITCH_MAX).abs() < 1e-5, "{}", g.pitch);
+        // The stick's clamp, then the pitch assist's 3 % back toward 10° the same frame
+        // (`0x1401E6670`, Manual too): KH1 rests at 48.8° holding the stick down.
+        let back = |p: f32| p + (PITCH_DEFAULT - p) * auto::PITCH_BACK;
+        assert!((g.pitch - back(PITCH_MAX)).abs() < 1e-5, "{}", g.pitch.to_degrees());
         for _ in 0..400 {
             g.step(&Input { stick: [0.0, -1.0], ..i }, &mut Open);
         }
-        assert!((g.pitch - PITCH_MIN).abs() < 1e-5);
+        assert!((g.pitch - back(PITCH_MIN)).abs() < 1e-5);
+        // Released: back toward 10° at 3 % a frame.
+        let p0 = g.pitch;
+        for _ in 0..100 {
+            g.step(&i, &mut Open);
+        }
+        assert!((g.pitch - PITCH_DEFAULT).abs() < (p0 - PITCH_DEFAULT).abs() * 0.1);
         // No turning while Sora can't act.
         let y = g.yaw;
         g.step(&Input { stick: [1.0, 0.0], can_act: false, ..i }, &mut Open);
@@ -857,6 +1183,99 @@ mod tests {
         g.behind(&i, &mut Open);
         g.step(&i, &mut Open);
         assert!(((g.eye - g.look).length() - 400.0).abs() < 1e-2);
+    }
+
+    /// Sora running along +x at KH1's run speed (8 a frame), the camera 90° off his back.
+    fn running(f: &mut Follow, w: &mut dyn World, frames: usize, x0: f32) -> Vec<f32> {
+        let mut yaws = Vec::new();
+        for k in 0..frames {
+            let i = Input { pos: Vec3::new(x0 + 8.0 * (k + 1) as f32, 0.0, 0.0), facing: PI / 2.0, auto: true, ..inp() };
+            f.step(&i, w);
+            yaws.push(f.yaw);
+        }
+        yaws
+    }
+
+    #[test]
+    fn the_swing_behind_ramps_as_kh1s() {
+        let mut f = Follow::default();
+        // Camera behind facing 0 (yaw π); Sora turns to face +x (π/2) and runs: his back is −π/2.
+        f.behind(&Input { auto: true, ..inp() }, &mut Open);
+        f.prev = Some(Vec3::ZERO);
+        let yaws = running(&mut f, &mut Open, 62, 0.0);
+        // Frame 1: his facing changed by 90° (a reset); then the first ramp's 60 frames, no swing.
+        for y in &yaws[..61] {
+            assert!(wrap_angle(*y - PI).abs() < 1e-4, "{y}");
+        }
+        assert!((f.swing.first - 60.0).abs() < 1e-6 && (f.swing.second - 1.0).abs() < 1e-6, "{:?}", f.swing);
+        // Frame 62: 2 % × 1/90 of the angle to his back (−90°).
+        let want = PI + (0.02 / 90.0) * wrap_angle(PI / 2.0 + PI - PI);
+        assert!(wrap_angle(yaws[61] - want).abs() < 1e-5, "{} {}", yaws[61], want);
+        // A wall near: the wall ramp, and the second ramp at its 90 at once.
+        struct Walled;
+        impl World for Walled {
+            fn sweep(&mut self, _: Vec3, _: Vec3, _: f32) -> Option<Vec3> {
+                None
+            }
+            fn near_wall(&mut self, _: Vec3, _: f32) -> bool {
+                true
+            }
+        }
+        let y = f.yaw;
+        running(&mut f, &mut Walled, 1, 8.0 * 62.0);
+        assert_eq!((f.swing.wall, f.swing.second), (1.0, 90.0));
+        let delta = wrap_angle(PI / 2.0 + PI - y);
+        assert!(wrap_angle(f.yaw - (y + (0.02 / 60.0 + 0.02) * delta)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn auto_eye_distance_and_visibility() {
+        let i = Input { auto: true, ..inp() };
+        // A wall 200 behind the look point stops the eye's 40 sphere; the distance then springs
+        // 10 % back toward 400.
+        let mut f = Follow::default();
+        f.behind(&i, &mut Open);
+        let mut w = Wall(f.look.z - 200.0);
+        f.step(&i, &mut w);
+        let d = (f.eye - f.look).length();
+        assert!(d < 300.0, "{d}");
+        assert!((f.dist - (d + (400.0 - d) * 0.1)).abs() < 1e-3);
+        // Nothing reaches Sora from the eye: re-placed at the same yaw with the defaults.
+        struct Blind(u32);
+        impl World for Blind {
+            fn sweep(&mut self, from: Vec3, to: Vec3, _: f32) -> Option<Vec3> {
+                self.0 += 1;
+                Some(from + (to - from) * 0.999)
+            }
+        }
+        let mut g = Follow::default();
+        g.behind(&i, &mut Open);
+        g.pitch = 0.5;
+        g.step(&i, &mut Blind(0));
+        assert!((g.pitch - PITCH_DEFAULT).abs() < 1e-3, "{}", g.pitch);
+    }
+
+    #[test]
+    fn the_pitch_assist_lifts_an_eye_near_the_floor() {
+        // A floor 30 below the eye (KH1 y down: +30): the ramp grows 1 a frame to 30 and lifts the
+        // pitch by (1 − 30/55) × ramp/30 × 3°.
+        struct Floor;
+        impl World for Floor {
+            fn sweep(&mut self, from: Vec3, to: Vec3, _: f32) -> Option<Vec3> {
+                // Only the eye's 55 ray down meets it.
+                (to.y - from.y == 55.0).then(|| from + Vec3::new(0.0, 30.0, 0.0))
+            }
+        }
+        let i = inp();
+        let mut f = Follow::default();
+        f.behind(&i, &mut Open);
+        let p0 = f.pitch;
+        f.step(&i, &mut Floor);
+        assert!((f.pitch - p0).abs() < 1e-6, "the ramp starts at 0");
+        assert_eq!(f.assist.floor, 1.0);
+        let p1 = f.pitch;
+        f.step(&i, &mut Floor);
+        assert!((f.pitch - (p1 + (1.0 - 30.0 / 55.0) * (1.0 / 30.0) * auto::ASSIST_STEP)).abs() < 1e-6);
     }
 
     #[test]

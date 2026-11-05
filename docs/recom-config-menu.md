@@ -148,6 +148,7 @@ and **Movement** (`docs/recom-keyblade-equip.md` § Settings pages).
 | Effects & Sound | Effects | Re:CoM / KH1 | pair | `effects` | at once (Sora's next KH1 motion) |
 | Effects & Sound | Sounds | Re:CoM / KH1 | pair | `sounds` | at once (Sora's next KH1 motion) |
 | Camera | Camera | Re:CoM / KH1 | pair | `camera` | at once (the camera's next frame) |
+| Camera | Auto camera | Off / On | pair | `auto_camera` | at once (the camera's next frame) |
 
 Damage stays ini-only (owner). The row "Revenge Value" is the owner's name (2026-11-03) for
 `boss_revenge`.
@@ -230,8 +231,8 @@ Damage stays ini-only (owner). The row "Revenge Value" is the owner's name (2026
   unchanged (`0x1403480C0`: bytes under 0x81 are copied as they are; Checked (decomp)). That
   Re:CoM's font has an `&` glyph is an Assumption, to check in game.
 - **Camera** (M12 camera, 0.134.0; owner, 2026-11-04: "a new Settings > Camera page", the fifth
-  Settings entry, independent of Combat): one row, Camera Re:CoM / KH1 (KH2 joins at its stage;
-  the Auto camera row at stage 2). At once: the camera's dispatcher reads the setting every frame
+  Settings entry, independent of Combat): one row, Camera Re:CoM / KH1 (KH2 joins at its stage);
+  Auto camera Off / On (0.135.0, KH1's Auto pieces). At once: the camera's dispatcher reads the setting every frame
   (`win::camera`) and switches the live camera with Re:CoM's own mode setter `0x1401FBE60`; it acts
   at both Combat settings, in Sora's story only (`docs/recom-m12-camera-plan.md` § Stage 1 built).
 - **Effects and Sounds are separate** (current behaviour, kept; owner question): an effect's sound

@@ -128,6 +128,7 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
         Item::Effects | Item::Sounds => {}
         // M12 camera: the dispatcher switches the live camera at its next frame.
         Item::Camera => camera::set_choice(s.camera),
+        Item::AutoCamera => camera::set_auto(s.auto_camera),
         Item::GuardReactions => attack::set_guard_reactions(s.guard_reactions),
         Item::RevengeValue => revenge::set_enabled(s.boss_revenge),
         // Read by each KH1 frame (`movement::run_frame`, `stick_class`).

@@ -24,6 +24,8 @@ use std::sync::Mutex;
 
 /// The setting (0 Re:CoM, 1 KH1), read by the dispatcher each frame.
 static CHOICE: AtomicU32 = AtomicU32::new(0);
+/// The Auto camera row (stage 2).
+static AUTO: AtomicBool = AtomicBool::new(true);
 /// Riku's story, read at each camera init (`0x1401AAAE0`).
 static RIKU: AtomicBool = AtomicBool::new(false);
 /// The block near the exe (`camera::stub::layout`); 0 not installed.
@@ -61,8 +63,17 @@ mod f {
     pub const TILT: u32 = 0x80;
 }
 
-/// The player: his facing (`+0x4D4`, the follow's). Checked (decomp `0x1401FD750`).
+/// The player: his facing (`+0x4D4`, the follow's), action `+0x40C` (8 his glide), the ground
+/// test's cache `+0x538` / `+0x53C` and floor height `+0x5F8`, his mover `+0xF0` (position `+0x30`,
+/// velocity `+0x80` in metres a frame, contact flags `+0x120`). Checked (decomp `0x1401FD750`,
+/// `0x1401F3C00`; `win::movement`).
 const FACING: usize = 0x4D4;
+const ACTION: usize = 0x40C;
+const GROUND_CACHED: usize = 0x538;
+const GROUND_AIR: usize = 0x53C;
+const FLOOR_Y: usize = 0x5F8;
+const BODY: usize = 0xF0;
+const ACTION_GLIDE: i32 = 8;
 /// The boss-camera count (`0x1401FEC50` sets it only when the boss's pack holds `BCam0000`; the
 /// camera's dtor clears it). Checked (decomp).
 const BOSS_CAMERA: u64 = 0x1_4087_B468;
@@ -131,6 +142,11 @@ pub(super) fn set_choice(c: crate::settings::Camera) {
     CHOICE.store(v, Ordering::Release);
 }
 
+/// The Auto camera row (live).
+pub(super) fn set_auto(on: bool) {
+    AUTO.store(on, Ordering::Release);
+}
+
 fn choice() -> Family {
     match CHOICE.load(Ordering::Acquire) {
         1 => Family::Kh1,
@@ -142,6 +158,7 @@ fn choice() -> Family {
 pub(super) fn install(base: usize, s: &crate::settings::Settings) {
     use crate::sites::{CAMERA_CALLEES, CAMERA_HOOKS, CAMERA_PATCHES};
     set_choice(s.camera);
+    set_auto(s.auto_camera);
     // SAFETY: reads of the mapped image's code.
     let ok = |site: &crate::sites::Site| unsafe { std::slice::from_raw_parts((base + site.rva as usize) as *const u8, site.expect.len()) == site.expect };
     if let Some(bad) = CAMERA_PATCHES.iter().chain(CAMERA_CALLEES).find(|s| !ok(s)) {
@@ -286,7 +303,37 @@ struct RecomWorld {
     cam: usize,
 }
 
+/// Rays of the wall probe (option (a)).
+const PROBE_RAYS: usize = 8;
+
+/// The sweep's shape object (`cam+0x1A8`, Re:CoM's sphere collision): the contact normal at
+/// `+0x40` (Re:CoM's solver `0x1401731E0` writes it with the contact; its stuck default (0, 1, 0)).
+/// Assumption: it is the surface normal (KH1's polygon normal for the wall-avoid).
+const SHAPE: usize = 0x1A8;
+const SHAPE_NORMAL: usize = 0x40;
+
 impl kh1::World for RecomWorld {
+    fn normal(&mut self) -> Vec3 {
+        // SAFETY: the camera's own shape object, read after its sweep.
+        unsafe {
+            let sh: usize = rd(self.cam + SHAPE);
+            if sh == 0 {
+                return Vec3::new(0.0, -1.0, 0.0);
+            }
+            let n = rd_vec(sh + SHAPE_NORMAL);
+            Vec3::new(n.x, -n.y, -n.z)
+        }
+    }
+
+    /// Stage 2: pending the owner's choice for KH1's flat 250 probe (`0x140196300`). Option (a):
+    /// 8 flat rays of the radius from the point.
+    fn near_wall(&mut self, at: Vec3, radius: f32) -> bool {
+        (0..PROBE_RAYS).any(|k| {
+            let yaw = k as f32 * std::f32::consts::TAU / PROBE_RAYS as f32;
+            self.sweep(at, at + Vec3::from_yaw(yaw) * radius, kh1::RAY).is_some()
+        })
+    }
+
     fn sweep(&mut self, from: Vec3, to: Vec3, radius: f32) -> Option<Vec3> {
         let a = camera::to_recom4(from);
         let mut b = camera::to_recom4(to);
@@ -298,6 +345,27 @@ impl kh1::World for RecomWorld {
             wr(self.cam + f::FLAGS, (now & !(f::CONTACT | f::TILT)) | keep);
             hit.then(|| crate::units::to_kh1(Vec3::new(b[0], b[1], b[2])))
         }
+    }
+}
+
+/// Sora's KH1 movement state for the camera's thresholds: 0x15 in his glide (Re:CoM's action 8),
+/// 2 in the air, else 0 (ground). Re:CoM's ground test `0x1401F3C00` read without running it
+/// (its cache, else its rule: no floor contact and above the floor). Assumption: those map KH1's
+/// states 0 / 2 / 0x15; KH1's others (hit 4, flight 8, ladders …) are not told apart.
+unsafe fn kh1_state(player: usize) -> u32 {
+    if rd::<i32>(player + ACTION) == ACTION_GLIDE {
+        return 0x15;
+    }
+    let air = if rd::<i32>(player + GROUND_CACHED) != 0 {
+        rd::<i32>(player + GROUND_AIR) != 0
+    } else {
+        let b: usize = rd(player + BODY);
+        b != 0 && rd::<u8>(b + 0x120) & 5 == 0 && rd::<f32>(player + FLOOR_Y) < rd::<f32>(b + 0x34)
+    };
+    if air {
+        2
+    } else {
+        0
     }
 }
 
@@ -340,6 +408,16 @@ unsafe fn step(cam: usize, battle: bool) {
         recenter: can_act && func::<PressedFn>(PRESSED)(RESET_BIT, 0) != 0,
         inv: kh1::inversion(rd(cam + f::INV_H), rd(cam + f::INV_V)),
         step: crate::units::step_from_dt(rd(cam + f::DT)),
+        auto: AUTO.load(Ordering::Relaxed),
+        state: kh1_state(player),
+        vel: {
+            let b: usize = rd(player + BODY);
+            if b == 0 {
+                Vec3::ZERO
+            } else {
+                crate::units::to_kh1(rd_vec(b + 0x80))
+            }
+        },
     };
     let mut world = RecomWorld { cam };
     let count = entries();
