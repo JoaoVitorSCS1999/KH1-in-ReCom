@@ -195,7 +195,7 @@ pub(super) fn install(base: usize, s: &crate::settings::Settings) {
     let near = at(&CAMERA_PATCHES[2]);
     let len = camera::stub::layout::LEN;
     // SAFETY: a fresh block, built for its own address.
-    let Some(block) = (unsafe { hook::place_built_near(near, len, |b| camera::stub::block(b as u64, field_exec as *const () as u64, battle_exec as *const () as u64)) }) else {
+    let Some(block) = (unsafe { hook::place_built_near(near, len, |b| camera::stub::block(b as u64, base as u64, field_exec as *const () as u64, battle_exec as *const () as u64)) }) else {
         log("camera: no memory near the exe; Re:CoM's camera only");
         return;
     };

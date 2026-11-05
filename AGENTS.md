@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 252: the game no longer aborts at start (camera block rebased); Enemy Skills' rewrite stubs and the KH1 lock rules' stub block fixed (2026-11-05, version 0.139.1)
+
+Owner, 2026-11-05 (0.139.0), verbatim: "my game wont launch now"
+
+- **Cause** (Checked: the owner's log + code): the log ends at `trace: press F9 …`, the line before `camera::install`, and no `camera:` line follows. The camera's stub block (0.134.0, `camera::stub::block`) formed rel32s to Re:CoM's record table `0x14087B660` and return points `0x1401FC521` / `0x1401FBE90` as **Steam VAs**, but the block sits near the **running** image (ASLR: the owner's exe at `0x7FF77ED50000`), so `rel32` asserted ("rel32 out of reach") and the DLL aborted (panic = abort) during start-up. Tests passed because they used the Steam base.
+- **Fix:** `stub::block(at, image, …)` moves those VAs to the running image first (`table_read_in`); `win::camera` passes the base. New test: the block near an ASLR base lands on the moved table.
+- **Same class, latent** (Checked: code): Enemy Skills stage 3's rewrite stubs (0.129.0, `skill_effects::rewrite_block`) were built from running addresses against Steam VAs and truncated with `as i32`: with Zexion, Lexaeus, Demyx, Defender or Ursula equipped, their jumps back into Re:CoM's rewrite went outside the exe. `win::enemy_skills::install_rewrite` now builds the block in the Steam image's address space (`img`); the block holds no absolute pointer, so the bytes are right wherever ASLR puts the exe.
+- **KH1 lock rules** (0.137.0): the owner's log said "no stub block within reach of Re:CoM's lock-on". Not memory: the five 14-byte jumps are 70 bytes, past `hook::place_near`'s 64-byte limit, so the rules never went in (R1 kept Re:CoM's rules). Now placed with `place_built_near`.
+- Checked: workspace tests; Windows build with no warnings. Not checked: in game.
+
+---
+
 ## Stage 251: M12 camera stage 5: KH2's lock-on camera as mode 9 (look 30 % to the target, turns only when Sora or the target leaves the screen, 380 at 1 a frame; field and battle), version 0.139.0 (2026-11-05)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Camera answers: "KH1 / KH2 lock camera in field rooms too", "KH2's numbers scaled ×0.89"). Stage 5 of `docs/recom-m12-camera-plan.md`. Camera = KH2 only.

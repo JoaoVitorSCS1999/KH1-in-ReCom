@@ -258,7 +258,9 @@ pub unsafe fn install_rules(b: usize) -> bool {
         code.extend_from_slice(&crate::hookplan::abs_jmp(f as u64));
     }
     let first = b + LOCK_ON_CALLS[0].rva as usize;
-    let Some(block) = hook::place_near(first, &code) else {
+    // Five 14-byte jumps are 70 bytes, past `place_near`'s 64-byte block (0.139.1: that refusal
+    // was logged as "no stub block within reach"); placed as one built block instead.
+    let Some(block) = hook::place_built_near(first, code.len(), |_| code.clone()) else {
         log("lock-on: no stub block within reach of Re:CoM's lock-on: Re:CoM's lock rules stay on R1");
         return false;
     };

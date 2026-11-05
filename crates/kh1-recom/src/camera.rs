@@ -1704,6 +1704,11 @@ pub mod stub {
     /// inc dword [counter]; lea rdx,[ours − 0x30]; mov rdx,[rdx+rax*8]; jmp back;
     /// recom: lea rdx,[table]; mov rdx,[rdx+rax*8]; jmp back`.
     pub fn table_read(at: u64, back: u64, ours: u64, counter: u64, mov_rsi: bool) -> Vec<u8> {
+        table_read_in(at, back, ours, counter, mov_rsi, RECOM_TABLE)
+    }
+
+    /// [`table_read`] with Re:CoM's record table at `table` (the running image's address).
+    pub fn table_read_in(at: u64, back: u64, ours: u64, counter: u64, mov_rsi: bool, table: u64) -> Vec<u8> {
         let mut c: Vec<u8> = Vec::new();
         if mov_rsi {
             c.extend([0x48, 0x8B, 0xF1]);
@@ -1726,7 +1731,7 @@ pub mod stub {
         c[jae] = (recom - (jae + 1)) as u8;
         c.extend([0x48, 0x8D, 0x15]);
         let e = at + c.len() as u64 + 4;
-        c.extend(rel32(e, RECOM_TABLE));
+        c.extend(rel32(e, table));
         c.extend([0x48, 0x8B, 0x14, 0xC2, 0xE9]);
         let e = at + c.len() as u64 + 4;
         c.extend(rel32(e, back));
@@ -1761,12 +1766,17 @@ pub mod stub {
     }
 
     /// The whole block for an address.
-    pub fn block(at: u64, field_exec: u64, battle_exec: u64) -> Vec<u8> {
+    ///
+    /// `image` is the running exe's base: Re:CoM's addresses here are Steam VAs (image base
+    /// 0x140000000) and are moved to the running image before any rel32 is formed (0.139.1: the
+    /// unmoved VAs could not be reached from a block near a relocated exe, and the build aborted).
+    pub fn block(at: u64, image: u64, field_exec: u64, battle_exec: u64) -> Vec<u8> {
         use layout::*;
+        let rb = |va: u64| image + (va - 0x1_4000_0000);
         let mut b = vec![0xCCu8; LEN];
-        let a = table_read(at + STUB_PLACE as u64, SET_PLACE_BACK, at + TABLE as u64, at + COUNTER as u64, true);
+        let a = table_read_in(at + STUB_PLACE as u64, rb(SET_PLACE_BACK), at + TABLE as u64, at + COUNTER as u64, true, rb(RECOM_TABLE));
         b[STUB_PLACE..STUB_PLACE + a.len()].copy_from_slice(&a);
-        let k = table_read(at + STUB_KEEP as u64, SET_KEEP_BACK, at + TABLE as u64, at + COUNTER as u64, false);
+        let k = table_read_in(at + STUB_KEEP as u64, rb(SET_KEEP_BACK), at + TABLE as u64, at + COUNTER as u64, false, rb(RECOM_TABLE));
         b[STUB_KEEP..STUB_KEEP + k.len()].copy_from_slice(&k);
         b[JUMP_FIELD..JUMP_FIELD + 14].copy_from_slice(&crate::hookplan::abs_jmp(field_exec));
         b[JUMP_BATTLE..JUMP_BATTLE + 14].copy_from_slice(&crate::hookplan::abs_jmp(battle_exec));
@@ -2183,8 +2193,18 @@ mod tests {
         assert_eq!(&s[ours..ours + 3], &[0x48, 0x8D, 0x15]);
         let disp = i32::from_le_bytes(s[ours + 3..ours + 7].try_into().unwrap()) as i64;
         assert_eq!((at as i64 + ours as i64 + 7 + disp) as u64, at + 0x100 - 0x30);
-        let b = block(at, 0x7FF0_0000_1000, 0x7FF0_0000_2000);
+        let b = block(at, 0x1_4000_0000, 0x7FF0_0000_1000, 0x7FF0_0000_2000);
         assert_eq!(b.len(), layout::LEN);
+        // 0.139.1: an exe relocated by ASLR (the owner's ran at 0x7FF77ED50000) with the block
+        // just below it: Re:CoM's addresses are moved to the running image, so every rel32 is in
+        // reach and lands on the moved table and return points.
+        let image: u64 = 0x7FF7_7ED5_0000;
+        let at2 = image - 0x1000_0000;
+        let b2 = block(at2, image, 0x7FF0_0000_1000, 0x7FF0_0000_2000);
+        let s2 = &b2[layout::STUB_PLACE..];
+        let jl2 = s2[7] as usize + 8;
+        let disp2 = i32::from_le_bytes(s2[jl2 + 3..jl2 + 7].try_into().unwrap()) as i64;
+        assert_eq!((at2 as i64 + jl2 as i64 + 7 + disp2) as u64, image + (RECOM_TABLE - 0x1_4000_0000));
         let rec0 = u64::from_le_bytes(b[layout::TABLE..layout::TABLE + 8].try_into().unwrap());
         assert_eq!(rec0, at + layout::RECORDS as u64);
         assert_eq!(&b[layout::RECORDS..layout::RECORDS + 0x30], &records()[0].bytes());

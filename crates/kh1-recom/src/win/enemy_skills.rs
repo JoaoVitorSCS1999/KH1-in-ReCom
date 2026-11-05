@@ -158,12 +158,17 @@ unsafe fn install_rewrite(b: usize) {
     }
     let near = b + sites::ENEMY_SKILL_REWRITE_HOOK[0].rva as usize;
     // The block's code depends on where it lands: placed once with a guess, then rebuilt in place.
-    let (guess, _) = se::rewrite_block(near as u64);
+    // The block's bytes are built in the Steam image's address space (`se::rewrite` holds Steam
+    // VAs; nothing in the block is an absolute pointer), so a rel32 between the block and Re:CoM's
+    // code is the same wherever ASLR put the exe (0.139.1: built from the running addresses, the
+    // jumps back into the rewrite were truncated and landed outside the exe).
+    let img = |a: usize| (a as i64 - b as i64 + 0x1_4000_0000) as u64;
+    let (guess, _) = se::rewrite_block(img(near));
     let Some(at) = super::hook::place_data_near(near, &guess) else {
         log("enemy skills: no memory for the rewrite's stubs; route 2 is off");
         return;
     };
-    let (code, offs) = se::rewrite_block(at as u64);
+    let (code, offs) = se::rewrite_block(img(at));
     let placed = std::slice::from_raw_parts(at as *const u8, code.len()).to_vec();
     if !super::hook::patch(at, &placed, &code, "the rewrite's stubs") {
         return;
