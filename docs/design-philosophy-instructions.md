@@ -640,3 +640,9 @@ At KH1 setting:
   - The Moogle's speech-bubble lines must fit the bubble (e.g. "Restores HP. 10 Moogle Points. Sora has 11" overflows). Decided: wrap onto the bubble's lines as Re:CoM's own two-line lines do; squeeze only if a line still can't fit.
   - **Lock-on on R1** at Combat = KH1 on a controller; keyboard and mouse keep Re:CoM's binding.
   - **A Config option: Re:CoM / KH1 / KH2 camera.** Research both KH1's and KH2's cameras (decomps) and Re:CoM's camera system first; plan with the owner before building.
+- **Camera answers** (owner, 2026-11-04, on `recom-m12-camera-plan.md` § 10):
+  - **Independent** of Combat: a new Settings > **Camera** page, row Re:CoM / KH1 / KH2, default Re:CoM (Q1 (a), Q2 (a)).
+  - **Sleights, summons and specials keep Re:CoM's camera moves**, then hand back (Q3 (a)); **boss fights keep Re:CoM's boss cameras** (Q10 (b)).
+  - **An "Auto camera: On / Off" row** for KH1 and KH2 (Q6 (b)).
+  - **KH2's numbers scaled ×0.89** for KH1's Sora (Q9 (b)).
+  - Taken as recommended or 1:1 without asking (owner may change): after an event the KH1 / KH2 camera re-places behind Sora as those games do (Q4 (b)); Re:CoM's inversion rows drive KH1 / KH2 with each game's own "Normal" (Q5 (a)); KH1's / KH2's own speeds, no sensitivity row (Q7 (a)); KH1's built-in default numbers everywhere (Q8 (a)); Riku's story keeps Re:CoM's camera (Q11 (a)); KH1 / KH2 lock camera in field rooms too (Q12 (a)); KH1's mouse rule on keyboard and mouse (Q13 (a)).
