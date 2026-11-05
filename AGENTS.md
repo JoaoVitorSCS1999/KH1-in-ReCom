@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 244: The Moogle's speech-bubble lines fit the bubble (wrapped onto its lines with Re:CoM's width routine; the true squeeze only when no wrap fits), version 0.132.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Shop text, lock-on and camera), verbatim: "The moogle shop text is over extending past the text bubbles." (screenshot: "Restores HP. 10 Moogle Points. Sora has 11" past both sides of the orange bubble). Decided: wrap onto the bubble's lines as Re:CoM's own two-line lines do; squeeze only if a line still can't fit. Combat = KH1 in Sora's story; Re:CoM's own lines untouched.
+
+- **Cause** (Checked (decomp + disasm + exe)): the bubble is a `CTextWnd` sized from its message's record at its open (`0x1402B1520`: size `+0xB8` / `+0xBC`, text margins `+0xB0` / `+0xB4`); Re:CoM's text call `0x1402B0EF0` sets a new line on its `CText` (`+0xD0`, a `CStrPrim` at `+0x38`) and never resizes it. A new line is byte 10 (`0x14025A380`); nothing wraps on its own.
+- **Change** (`crate::text_fit::wrap`, `win::shop::bubble_line`, `win::text_fit::{width_of, set_level, unsqueeze}`): our lines carry a `\n` where we prefer a break ("Restores HP." / "10 points. Sora has 11."; "Sell Potion x3" / "for 6 Moogle Points?"; Elixir "Restores HP and MP."); each is laid out for the bubble it goes in, measured with Re:CoM's width routine on that bubble's own text: our lines wrapped at the box, else the whole line wrapped, else the true squeeze (0.113.0) on the narrowest wrap. Box = the bubble's width − both margins − 2 units a side; lines = what its height − both margins holds at its size and gap, or Re:CoM's own line count there if more. The squeeze uses a copy of `CStrPrim`'s vtable `0x140508FD0` (same draw / measure as C2DFnt's); Re:CoM's vtable goes back when the bubble is handed back or Re:CoM sets another text on it (our measure sees it).
+- Sites: `TEXT_FIT_STR_PTRS` (8, checked lazily), `BUBBLE_CHECKED` (4 byte sets). No hook or patch. Per frame: nothing new (the layout runs when a line changes).
+- Assumptions: the margins equal on both sides; the bubble's drawn edge is its size; Re:CoM keeps our pointer for a line without `%` (our lines have none: test).
+- Checked: tests (`text_fit::tests` wrap 5, `shop::tests::every_line_fits_a_two_line_bubble_at_the_longest_numbers` (107 owned, 200, a 4280 sale; a model bubble as narrow as Re:CoM's own two-line line: ≥ 0.72), `help_lines`, `sale_totals_and_lines`, `sites::tests::bubble_sites`), `check_sites_rs.py` (1382 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game (Re:CoM's fonts and the shop messages' records are not in the session: the log gives each bubble's box and each line's layout). Asset step: not needed. Docs: `recom-m8-items.md` § M8d: the bubble's lines fit; `recom-m12-sleights.md` § 8.8.
+
+---
+
 ## Stage 243: KH1's swing effects and sounds really play (the swing's motion request passed variant 0): Gravity Break, Stun Impact, Zantetsuken, Ripple Drive and every KH1 swing with every Keyblade; the set check's entry count; a per-battle finisher log line, version 0.131.0 (2026-11-04)
 
 Owner, 2026-11-04 (0.130.0, after Build), verbatim: "sora's gravity break finisher still doesn't have the proper sound effects or visual effects. Stun Impact also doesn't have its finished visual effects. Ripple drive doesn't have it's visual or sound effects at all." (ini `combat = kh1`, `effects = kh1`, `sounds = kh1`; Keyblade card 0xc.)

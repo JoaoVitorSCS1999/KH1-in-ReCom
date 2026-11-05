@@ -953,6 +953,9 @@ is unchanged (a sleight name still squeezes more on the cursor row, up to the ha
 **Not covered, and why:**
 - The shop's rows: a `CTextWnd`'s own CFntM2 objects (not C2DFnt); the four item names ("Hi-Potion"
   at most) are shorter than Re:CoM's pack names in the same window. Not needed (Assumption: fits).
+  **The Moogle's speech-bubble lines** (0.132.0): wrapped onto the bubble's lines and, only when no
+  wrap fits, squeezed with a copy of the bubble text's own class vtable (`CStrPrim` `0x140508FD0`,
+  same draw and measure): `recom-m8-items.md` § M8d: the bubble's lines fit.
 - The L1 shortcut panel: KH1's look in both menu looks (0.107.0 squeezes it).
 - The Settings pages' rows (Re:CoM's Config draw; our words as short as Re:CoM's own), the camp's
   top list and header titles, the help line (our lines are cut to its 66 characters), the learned

@@ -1768,3 +1768,83 @@ step**, an older manifest turns both Items tabs' art off).
 
 **Open (owner)**: the Tent / Camping Set conversion (question 4).
 
+
+### M8d: the bubble's lines fit (0.132.0)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Shop text, lock-on and camera), verbatim:
+"The moogle shop text is over extending past the text bubbles." (screenshot: the buy screen's
+Items-tab line "Restores HP. 10 Moogle Points. Sora has 11" past both sides of the orange bubble).
+Decided: wrap onto the bubble's lines as Re:CoM's own two-line lines do; squeeze only if a line
+still can't fit. Combat = KH1 in Sora's story (where our lines exist); Re:CoM's own lines untouched.
+
+**How Re:CoM's bubble works** (Checked (decomp + disasm + exe); `sites::BUBBLE_CHECKED`):
+
+| what | where |
+|---|---|
+| The Moogle's text (`CMShopTextWindow`, `+0x60` / `+0x68` two `CTextWnd`s) opens a `CTextWnd` per message id (`0x1404595A0(n)`: ids `0x14068EF58[n]` = 0x580200, 0x580300, 0x580000, 0x580100, 0x580500, 0x581000, 0x581100, 0x580600; a second window `0x14068EF78[n]` for 1 (0x580400) and 7 (0x580700, the yes / no); style 0x11, 0x15 for 7). A help id change on the same window only sets a new line on it (`0x1404573A0` → `0x1402B0EF0`). | `0x1404595A0`, `0x1404573A0` |
+| `CTextWnd`'s open `0x1402B1520` reads its message's record (`0x140240080`): **the bubble's size** = record `+0x1A` / `+0x1C` (rounded up to even) → `+0xB8` / `+0xBC`, the bubble `CWnd` (`message.sqd`) drawn at that size (`0x1402B1F70`); **the text margins** `+0xB0` / `+0xB4` (record `+0x28` / `+0x2A`); font size (record `+0x22`), spacing and line gap (`+0x24` / `+0x26`). | `0x1402B1520`, `0x1402B1F70` |
+| Its `CText` (`+0xD0`, `0x1402B3AD0` → `0x1402B1D50`) sits at the window + the margins with the window's size; its text is a `CStrPrim` (`+0x38`; a CFntM2 with vtable `0x140508FD0`): size × 16 at `+0x3C`, spacing `+0x44`, gap `+0x48`; it measures the text (vtable `+0x28`) and keeps the line count (`+0x54`). It places the text each frame (`0x1402B0820`): x = the CText's x, + its width for right-aligned, + half for centred (`+0x40 & 3`); the owner's screenshot (past both sides) fits centred. | `0x1402B1D50`, `0x1402B0820` |
+| **Re:CoM's text call `0x1402B0EF0` sets a new line on the same `CText` and never resizes the bubble**: a line longer than the message's own runs past it. That is the overflow. | `0x1402B0EF0` → `0x1402B11D0` |
+| **A new line is byte 10** (`\n`): Re:CoM's width routine `0x14025A380` starts a new line on it (height = n × size + (n − 1) × gap) and the draw follows its line table. Re:CoM's messages are authored with their breaks (the owner's two-line "Which one do you want to buy, kupo?"). Nothing wraps on its own. | `0x14025A380` |
+| `%` in a line is expanded by the message format (`0x1402402B0`); without `%` Re:CoM keeps **our pointer** (the line stays alive in our state, as before). Our lines have no `%` (test). | `0x140259000`, `0x1402402B0` |
+
+**Built** (`crate::text_fit::wrap`, `win::shop::bubble_line`, `win::text_fit::{width_of, set_level, unsqueeze}`):
+
+- **Our lines** (`crate::shop`), a `\n` where we prefer a new line (as Re:CoM's two-line lines):
+  - pack screen, Items tab: "Buy items with Moogle Points."; on an item **"Restores HP." / "10 points.
+    Sora has 11."** (Hi-Potion "Restores more HP.", Ether "Restores MP.", Elixir "Restores HP and
+    MP." (was "Restores all HP and MP.")); refusals "Not enough Moogle Points.", "Sora can't carry
+    any more of this.";
+  - card trade, yes / no: **"Sell Potion x3" / "for 6 Moogle Points?"**.
+- **The box**, read from the bubble the line goes in (when it is shown): width = the bubble's width
+  − both text margins − 2 units each side; lines = as many as its height − both margins holds at
+  its size and gap, or the lines Re:CoM's own text in that bubble had, if more (read before our
+  first line there). Assumption: the margins are the same on both sides; logged once per bubble
+  size so a screenshot can check it: `shop: bubble (pack screen, Items tab): W x H, text margins
+  mx / my, font s / gap g: box B units, N lines (by its height n, Re:CoM's own text there k)`.
+- **The layout** (Re:CoM's width routine `0x14025A380` on the bubble's own `CStrPrim`, the text
+  expanded as the draw does; one call per candidate line, only when the line changes, never per
+  frame): (1) our lines, each wrapped at the box at spaces; (2) else the whole line wrapped at the
+  box (our breaks dropped); (3) else the **true squeeze** (0.113.0's): the narrowest wrap that takes
+  the bubble's lines (ours kept when there are no more of them than it holds), drawn at box /
+  its widest line. Logged: `shop: bubble (…): "…" -> "…", n line(s), widest w units of B[,
+  squeezed x s]`.
+- **The squeeze on the bubble's text**: a copy of `CStrPrim`'s vtable (`0x140508FD0`: COL and 7 slots
+  kept, draw `+0x18` and measure `+0x28` ours, as C2DFnt's copies; both classes share Re:CoM's
+  draw `0x140289450` and measure `0x140289440`; `sites::TEXT_FIT_STR_PTRS`, checked lazily: a
+  mismatch turns only this squeeze off), set before Re:CoM's text call so its measure sees the
+  drawn width. **Re:CoM's own lines are never squeezed**: Re:CoM's vtable goes back when we hand the
+  bubble back (`forget_help`), and our measure puts it back itself when Re:CoM sets any other text
+  on that object (its text call measures right after setting). Every code reference to the
+  vtable is a store (13; no absolute pointer: Checked (exe scan)), so no Re:CoM code tells the class
+  by it.
+- Not changed: the bottom help bar's "Sell items" (short; Re:CoM's own help-bar lines are longer).
+
+**Longest numbers** (test `shop::tests::every_line_fits_a_two_line_bubble_at_the_longest_numbers`):
+107 owned (99 in the stock + 8 slots), Elixir's 200, a 107-item sale (Elixir 4280). In a model
+bubble only as wide as the narrower two-line split of Re:CoM's own "Which one do you want to buy,
+kupo?" (10 units a glyph, 5 a space: Re:CoM's fonts are not in the session), every line takes two
+lines; the longest ("200 points. Sora has 107.", "for 4280 Moogle Points?") squeeze to about 0.72
+there. The real widths are Re:CoM's, measured in game (the log lines above).
+
+**Sites**: `TEXT_FIT_STR_PTRS` (8 vtable words), `BUBBLE_CHECKED` (4 byte sets: the margins, the size,
+the CText's font fields and line count, the text call's CText and shown state). No hook, no patch.
+`check_sites_rs.py`: 1382 sites, 0 mismatches.
+
+**Per frame**: nothing new (the layout runs when a line changes; a squeezed bubble draws through
+our draw: about 40 instructions a glyph, as 0.113.0's).
+
+**1:1 checks**: Checked (decomp + disasm + exe): the bubble's fields, the newline code, the class
+and its vtable's users; tests (`text_fit::tests` wrap / lines, `shop::tests`, `sites::tests::bubble_sites`).
+Not KH1's (KH1's shop has no bubble): Re:CoM's own look. **Not checked**: in game (the bubble's real
+width, the margins' symmetry, Re:CoM's font widths, the lines each line wraps to).
+
+**What to test** (Combat = KH1, Sora's story, a Moogle room):
+
+1. Pack screen (left Moogle), Items tab: the tab-row line, then each item (Down): the line in two
+   lines inside the orange bubble ("Restores HP." / "10 points. Sora has n."); the refusals.
+2. Card trade (right Moogle), Items tab: an item, a count, confirm: "Sell Potion x3" / "for 6 Moogle
+   Points?" inside the bubble.
+3. With 99 + full slots of an item (e.g. the test inventory) the longest lines still inside.
+4. Re:CoM's own lines (other tabs, card packs, Combat = Re:CoM) as before, never narrowed.
+5. Report: the log's `bubble (…)` lines (box and lines) and a screenshot of each bubble.

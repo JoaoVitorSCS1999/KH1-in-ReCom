@@ -31,6 +31,7 @@
 use super::movement::{func, orig, rd, wr};
 use super::{base, log};
 use crate::shop::{self as sh, Buy, Note, Pad, Step};
+use crate::text_fit::recom as tr;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
@@ -72,8 +73,11 @@ struct SellTab {
     /// Our card list for Re:CoM's stock window (its head points at the records).
     head: Box<[u8; DATA_HEAD]>,
     records: Box<[u8; RECORDS * RECORD]>,
-    /// The yes / no line (Re:CoM's text set keeps the pointer), set once the window is up.
-    line: Vec<u8>,
+    /// The yes / no line (ours, `\n` where we prefer a new line), set once the window is up.
+    line: String,
+    /// The line as laid out in the bubble, which Re:CoM's text window points at now, and the ones
+    /// before (Re:CoM's text set keeps the pointer: `0x140259000`).
+    shown: Vec<u8>,
     old: Vec<Vec<u8>>,
     asked: bool,
 }
@@ -87,9 +91,11 @@ struct ItemsTab {
     /// Our card pictures (deleted before their packs are released).
     cards: [usize; sh::CELLS],
     note: Option<Note>,
-    /// The line Re:CoM's text window points at now, and the ones before (Re:CoM's text set keeps
-    /// the pointer).
-    help: Vec<u8>,
+    /// Our line shown now (`\n` where we prefer a new line).
+    help: String,
+    /// The line as laid out in the bubble, which Re:CoM's text window points at now, and the ones
+    /// before (Re:CoM's text set keeps the pointer: `0x140259000`).
+    shown: Vec<u8>,
     old: Vec<Vec<u8>>,
     /// The art's window was played for the Items tab.
     window: bool,
@@ -598,7 +604,7 @@ unsafe fn enter(shop: usize, from: i32, count: i32, released: usize) {
         wr::<usize>(shop + f::PACKS + i * 8, 0);
     }
     let n = items.len().min(sh::CELLS);
-    *lock() = Some(ItemsTab { shop, count, items: items.clone(), cards, note: None, help: Vec::new(), old: Vec::new(), window: false });
+    *lock() = Some(ItemsTab { shop, count, items: items.clone(), cards, note: None, help: String::new(), shown: Vec::new(), old: Vec::new(), window: false });
     if made < n {
         note(|| format!("Items tab: only {made} of {n} packs made (no memory); back to tab {from}"));
         wr::<i32>(shop + f::COUNT, made as i32);
@@ -647,6 +653,8 @@ unsafe fn forget_help(shop: usize) {
     let tw: usize = rd(shop + f::TEXT);
     if tw != 0 {
         wr::<i32>(tw + TW_HELP, -1);
+        // Re:CoM's own line goes on the same text: never squeezed.
+        super::text_fit::unsqueeze(bubble_fnt(rd(tw + TW_MAIN)));
     }
 }
 
@@ -699,7 +707,7 @@ unsafe fn help(shop: usize) {
     let mut g = lock();
     let Some(t) = g.as_mut().filter(|t| t.shop == shop) else { return };
     let line = sh::help_text(in_grid, t.items.get(cell).copied(), t.note, &inv);
-    if line == t.help {
+    if line == t.help && !t.shown.is_empty() {
         return;
     }
     let tw: usize = rd(shop + f::TEXT);
@@ -710,9 +718,11 @@ unsafe fn help(shop: usize) {
     if main == 0 || rd::<i32>(main + TEXTWND_STATE) != SHOWN {
         return;
     }
-    func::<TextFn>(TEXTWND_TEXT)(main, line.as_ptr(), 0);
+    let shown = bubble_line(main, &line, "pack screen, Items tab");
+    func::<TextFn>(TEXTWND_TEXT)(main, shown.as_ptr(), 0);
     wr::<i32>(tw + TW_HELP, -1);
-    let old = std::mem::replace(&mut t.help, line);
+    t.help = line;
+    let old = std::mem::replace(&mut t.shown, shown);
     if !old.is_empty() {
         t.old.push(old);
     }
@@ -1161,7 +1171,8 @@ unsafe fn enter_sell(shop: usize, open: bool) {
         qty: 1,
         head: Box::new([0; DATA_HEAD]),
         records: Box::new([0; RECORDS * RECORD]),
-        line: Vec::new(),
+        line: String::new(),
+        shown: Vec::new(),
         old: Vec::new(),
         asked: false,
     };
@@ -1329,14 +1340,7 @@ unsafe fn count_frame(shop: usize) {
         Count::Ask => {
             sound(sh::sound::BUY);
             if let Some(t) = sell_lock().as_mut().filter(|t| t.shop == shop) {
-                let line = sh::sell::ask_text(item, qty, sh::sell::total(item, qty));
-                let old = std::mem::replace(&mut t.line, line);
-                if !old.is_empty() {
-                    t.old.push(old);
-                }
-                while t.old.len() > 2 {
-                    t.old.remove(0);
-                }
+                t.line = sh::sell::ask_text(item, qty, sh::sell::total(item, qty));
                 t.asked = false;
             }
             wr::<i32>(shop + f::YES_NO, 0);
@@ -1379,8 +1383,84 @@ unsafe fn ask_line(shop: usize) {
     if main == 0 || rd::<i32>(main + TEXTWND_STATE) != SHOWN {
         return;
     }
-    func::<TextFn>(TEXTWND_TEXT)(main, t.line.as_ptr(), 0);
+    let shown = bubble_line(main, &t.line, "card trade, yes / no");
+    func::<TextFn>(TEXTWND_TEXT)(main, shown.as_ptr(), 0);
+    let old = std::mem::replace(&mut t.shown, shown);
+    if !old.is_empty() {
+        t.old.push(old);
+    }
+    while t.old.len() > 2 {
+        t.old.remove(0);
+    }
     t.asked = true;
+}
+
+/// A shown `CTextWnd`'s text (`+0xD0` its `CText`, `+0x38` its `CStrPrim`), or 0.
+unsafe fn bubble_fnt(main: usize) -> usize {
+    if main == 0 {
+        return 0;
+    }
+    let ctext: usize = rd(main + tr::WND_TEXT);
+    if ctext == 0 {
+        return 0;
+    }
+    rd(ctext + tr::CTEXT_FNT)
+}
+
+/// The bubble last written to and the lines Re:CoM's own text had in it (its `CText +0x54`, read
+/// before our first line there), and the box lines already logged.
+static BUBBLE: Mutex<(usize, usize, Vec<(i32, i32, i32, i32, i32, i32)>)> = Mutex::new((0, 0, Vec::new()));
+
+/// Our line `raw` (`\n` where we prefer a new line) laid out for the Moogle's bubble `main` (a
+/// shown `CTextWnd`), as the bytes to hand to Re:CoM's text call: wrapped onto the bubble's lines
+/// as Re:CoM's own two-line lines are, measured with Re:CoM's width routine on the bubble's own
+/// text (`crate::text_fit::wrap`); squeezed (the true squeeze, set on the bubble's text before
+/// the call) only when no wrap fits. The box: the bubble's width less its text margins on both
+/// sides and 2 units each side (`text_fit::boxes::MARGIN`); its lines: as many as its height less
+/// both margins holds at the text's size and gap, or the lines Re:CoM's own text there had if more.
+/// Assumption: the margins are the same on both sides (the text is placed at the window + the
+/// margin, `0x1402B1D50`, and centred or left-aligned in the window's width, `0x1402B0820`).
+/// Without Re:CoM's font (no width): `raw` as it is.
+unsafe fn bubble_line(main: usize, raw: &str, what: &str) -> Vec<u8> {
+    let fnt = bubble_fnt(main);
+    if fnt == 0 {
+        return sh::c_text(raw);
+    }
+    let (w, h): (i32, i32) = (rd(main + tr::WND_SIZE), rd(main + tr::WND_SIZE + 4));
+    let (mx, my): (i32, i32) = (rd(main + tr::WND_MARGINS), rd(main + tr::WND_MARGINS + 4));
+    let (size16, gap16): (i32, i32) = (rd(fnt + tr::SIZE), rd(fnt + tr::GAP));
+    let box16 = (((w - 2 * mx) as f32 - 2.0 * crate::text_fit::boxes::MARGIN) * 16.0) as i64;
+    let geometry = crate::text_fit::wrap::lines_in(((h - 2 * my) as i64) * 16, size16 as i64, gap16 as i64);
+    let (recom_lines, first_box) = {
+        let mut b = BUBBLE.lock().unwrap_or_else(|e| e.into_inner());
+        if b.0 != main {
+            let ctext: usize = rd(main + tr::WND_TEXT);
+            b.0 = main;
+            b.1 = rd::<i32>(ctext + tr::CTEXT_LINES).clamp(0, 8) as usize;
+        }
+        let key = (w, h, mx, my, size16, gap16);
+        let first = !b.2.contains(&key) && b.2.len() < 32;
+        if first {
+            b.2.push(key);
+        }
+        (b.1, first)
+    };
+    let lines = geometry.max(recom_lines).max(1);
+    if first_box {
+        note(|| format!("bubble ({what}): {w} x {h}, text margins {mx} / {my}, font {} / gap {}: box {:.0} units, {lines} lines (by its height {geometry}, Re:CoM's own text there {recom_lines})", size16 / 16, gap16 / 16, box16 as f32 / 16.0));
+    }
+    if box16 <= 0 {
+        return sh::c_text(raw);
+    }
+    let laid = crate::text_fit::wrap::layout(raw, box16, lines, &mut |s| super::text_fit::width_of(fnt, s.as_bytes()).map(i64::from));
+    let Some(laid) = laid else {
+        super::text_fit::unsqueeze(fnt);
+        return sh::c_text(raw);
+    };
+    let bytes = sh::c_text(&laid.text);
+    super::text_fit::set_level(fnt, laid.level, &bytes[..bytes.len() - 1], laid.widest, box16, || format!("Moogle's bubble ({what})"));
+    note(|| format!("bubble ({what}): {:?} -> {:?}, {} line(s), widest {:.1} units of {:.0}{}", raw, laid.text, laid.lines, laid.widest as f32 / 16.0, box16 as f32 / 16.0, if laid.level < crate::text_fit::ONE { format!(", squeezed x {:.3}", crate::text_fit::factor(laid.level)) } else { String::new() }));
+    bytes
 }
 
 /// The sale (in Re:CoM's state 5, once the yes / no has closed): the items from the stock first,

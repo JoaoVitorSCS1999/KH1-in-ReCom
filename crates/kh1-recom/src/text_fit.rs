@@ -55,6 +55,37 @@ pub mod recom {
     pub const FNT_SIZE: usize = 0xB0;
     /// `CButton +0x20`: the row's `C2DFnt` (`0x140112F10` makes it, 0xB0 bytes).
     pub const BUTTON_TEXT: usize = 0x20;
+
+    /// `CStrPrim` (0.132.0): the text of a `CTextWnd` (the Moogle's speech bubble), a `CFntM2`
+    /// (0xA8, made by `0x140258CB0` in `0x1402B1D50`) with its own vtable `0x140508FD0` (COL at
+    /// −8 `0x14070B5E8`): the same draw `+0x18` and measure `+0x28` as C2DFnt's, its own dtor
+    /// `+0` `0x14029A080` and `+0x30` `0x140258E80`. Every code reference to the vtable is a store
+    /// (13 `lea` + `mov [reg], rax`: its ctors and the dtors of it and its subclasses); no absolute
+    /// pointer to it in the image (Checked (exe scan)).
+    pub const STR_VTABLE: u32 = 0x0050_8FD0;
+    pub const STR_COL: u32 = 0x0070_B5E8;
+    /// C2DFnt's COL.
+    pub const COL: u32 = 0x0071_8CF8;
+    /// `CFntM2`'s size (both classes start with it; the width routine reads `+0x3C`, `+0x40`,
+    /// `+0x44`, `+0x58` only).
+    pub const FNTM2_SIZE: usize = 0xA8;
+    /// `CFntM2`: the font size and the line gap (×16; `0x1402B1E8C` / `0x1402B1EAA`).
+    pub const SIZE: usize = 0x3C;
+    pub const GAP: usize = 0x48;
+
+    /// `CTextWnd` (`0x1402AFF30`, 0x148 bytes) as its open `0x1402B1520` sets it from its message's
+    /// record (`0x140240080`): `+0xB0` / `+0xB4` the text's margins (record `+0x28` / `+0x2A`,
+    /// `0x1402B15B5`), `+0xB8` / `+0xBC` the bubble's size (record `+0x1A` / `+0x1C` rounded up to
+    /// even, `0x1402B1FAF`; the bubble `CWnd` drawn at that size), `+0xD0` its `CText` (`0x1402B3AD0`:
+    /// placed at the window + the margins, its size the window's). Re:CoM's text call `0x1402B0EF0`
+    /// sets a new line on the same `CText` and never resizes the bubble.
+    pub const WND_MARGINS: usize = 0xB0;
+    pub const WND_SIZE: usize = 0xB8;
+    pub const WND_TEXT: usize = 0xD0;
+    /// `CText`: `+0x38` its `CStrPrim`, `+0x54` the line count of its text (the measure's return,
+    /// `0x1402B1EC1`).
+    pub const CTEXT_FNT: usize = 0x38;
+    pub const CTEXT_LINES: usize = 0x54;
 }
 
 /// Scale 1.0 in the scale's 1/1024 steps.
@@ -168,6 +199,144 @@ pub mod vtable {
     pub fn level_of(before: [u64; 2]) -> Option<u32> {
         (before[0] == MARKER && (super::MIN as u64..super::ONE as u64).contains(&before[1])).then_some(before[1] as u32)
     }
+}
+
+/// The level of a text `width16` wide in a box `box16` wide (both Re:CoM's 1/16 units): as
+/// [`level`].
+pub fn level16(width16: i64, box16: i64) -> u32 {
+    if width16 <= 0 || box16 <= 0 || width16 <= box16 {
+        return ONE;
+    }
+    ((box16 * ONE as i64 / width16) as u32).clamp(MIN, ONE - 1)
+}
+
+/// Our lines in a box of a few lines (the Moogle's speech bubble, `win::shop`): wrapped onto the
+/// box's lines the way Re:CoM's own messages are (a `\n` between lines: Re:CoM's width routine
+/// `0x14025A380` and draw start a new line at byte 10; Checked (decomp)), squeezed (the true
+/// squeeze, [`level`]) only when no wrap fits.
+pub mod wrap {
+    use super::level16;
+
+    /// A text laid out for a box.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct Laid {
+        /// The lines, `\n` between them.
+        pub text: String,
+        pub lines: usize,
+        /// The x scale (1/1024): [`super::ONE`] when every line fits as it is.
+        pub level: u32,
+        /// The widest line at scale 1 (1/16 units).
+        pub widest: i64,
+    }
+
+    /// Greedy word wrap of `para` (single spaces between words) at `w16`: a word goes on the line
+    /// while the line stays within `w16`; a word wider than `w16` gets a line of its own. The
+    /// lines and the widest's width; None when a width is unknown.
+    fn para(para: &str, w16: i64, m: &mut dyn FnMut(&str) -> Option<i64>) -> Option<(Vec<String>, i64)> {
+        let mut lines: Vec<String> = Vec::new();
+        let mut widest = 0;
+        let mut cur = String::new();
+        let mut cur_w = 0;
+        for word in para.split(' ').filter(|w| !w.is_empty()) {
+            if cur.is_empty() {
+                cur = word.to_string();
+                cur_w = m(&cur)?;
+                continue;
+            }
+            let try_line = format!("{cur} {word}");
+            let w = m(&try_line)?;
+            if w <= w16 {
+                cur = try_line;
+                cur_w = w;
+            } else {
+                widest = widest.max(cur_w);
+                lines.push(std::mem::replace(&mut cur, word.to_string()));
+                cur_w = m(&cur)?;
+            }
+        }
+        widest = widest.max(cur_w);
+        lines.push(cur);
+        Some((lines, widest))
+    }
+
+    /// `paras` wrapped at `w16`, one after the other.
+    fn paras(paras: &[&str], w16: i64, m: &mut dyn FnMut(&str) -> Option<i64>) -> Option<(Vec<String>, i64)> {
+        let mut all = Vec::new();
+        let mut widest = 0;
+        for p in paras {
+            let (l, w) = para(p, w16, m)?;
+            all.extend(l);
+            widest = widest.max(w);
+        }
+        Some((all, widest))
+    }
+
+    /// The narrowest wrap width (≥ `box16`) at which `ps` takes at most `max` lines, and that wrap.
+    /// Re:CoM's widths only grow as words are added, so the line count only falls as the width
+    /// grows (a binary search on the width, 1/16 units).
+    fn narrowest(ps: &[&str], box16: i64, max: usize, m: &mut dyn FnMut(&str) -> Option<i64>) -> Option<(Vec<String>, i64)> {
+        let mut hi = ps.iter().map(|p| m(p)).collect::<Option<Vec<i64>>>()?.into_iter().max().unwrap_or(0).max(box16);
+        let mut best = paras(ps, hi, m)?;
+        if best.0.len() > max {
+            return None;
+        }
+        let mut lo = box16;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let got = paras(ps, mid, m)?;
+            if got.0.len() <= max {
+                hi = mid;
+                best = got;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        Some(best)
+    }
+
+    fn laid(lines: Vec<String>, widest: i64, box16: i64) -> Laid {
+        Laid { lines: lines.len(), text: lines.join("\n"), level: level16(widest, box16), widest }
+    }
+
+    /// `text` (our line; a `\n` marks where we prefer a new line) for a box `box16` wide (1/16
+    /// units) holding `max_lines` lines, `m` Re:CoM's width of a line:
+    ///
+    /// 1. our lines, each wrapped at the box (the way Re:CoM's own two-line lines read);
+    /// 2. else the whole text wrapped at the box (our breaks dropped);
+    /// 3. else squeezed: the narrowest wrap that takes `max_lines` lines, our breaks kept when
+    ///    there are no more of our lines than the box holds (they read as Re:CoM's: what the item
+    ///    does, then its price), drawn at box / its widest line (the true squeeze).
+    ///
+    /// None when a width is unknown (Re:CoM's font not loaded): the caller keeps the text as is.
+    pub fn layout(text: &str, box16: i64, max_lines: usize, m: &mut dyn FnMut(&str) -> Option<i64>) -> Option<Laid> {
+        let max = max_lines.max(1);
+        let ours: Vec<&str> = text.split('\n').collect();
+        let joined = ours.join(" ");
+        let (l, w) = paras(&ours, box16, m)?;
+        if l.len() <= max && w <= box16 {
+            return Some(laid(l, w, box16));
+        }
+        let (l, w) = para(&joined, box16, m)?;
+        if l.len() <= max && w <= box16 {
+            return Some(laid(l, w, box16));
+        }
+        let kept = if ours.len() <= max { narrowest(&ours, box16, max, m) } else { None };
+        let best = match kept {
+            Some(k) => k,
+            None => narrowest(&[joined.as_str()], box16, max, m)?,
+        };
+        Some(laid(best.0, best.1, box16))
+    }
+
+    /// The lines a box holds: `n` lines of a `size16` font with `gap16` between them take
+    /// `n × size + (n − 1) × gap` (Re:CoM's width routine's height, `0x14025A380`); at least 1.
+    pub fn lines_in(height16: i64, size16: i64, gap16: i64) -> usize {
+        if size16 <= 0 || height16 <= 0 {
+            return 1;
+        }
+        (((height16 + gap16.max(0)) / (size16 + gap16.max(0))).max(1)) as usize
+    }
+
 }
 
 /// The boxes (units, from the text's left edge) of our texts drawn in Re:CoM's text.
@@ -335,6 +504,82 @@ mod tests {
         assert_eq!(vtable::level_of([0, 800]), None);
         assert_eq!(vtable::level_of([vtable::MARKER, ONE as u64]), None, "scale 1 is never a copy");
         assert_eq!((vtable::DRAW * 8, vtable::MEASURE * 8), (0x18, 0x28));
+    }
+
+    /// A model of Re:CoM's width routine: 10 units a glyph, 5 a space (1/16 units).
+    fn mono(s: &str) -> Option<i64> {
+        Some(s.chars().map(|c| if c == ' ' { 80 } else { 160 }).sum())
+    }
+
+    #[test]
+    fn wrap_keeps_our_lines_when_they_fit() {
+        let m = &mut mono;
+        // Fits on one line: as it is.
+        let l = wrap::layout("Not enough Moogle Points.", 400 * 16, 2, m).unwrap();
+        assert_eq!((l.text.as_str(), l.lines, l.level), ("Not enough Moogle Points.", 1, ONE));
+        // Our two lines, each fitting.
+        let l = wrap::layout("Restores HP.\n10 points. Sora has 11.", 220 * 16, 2, m).unwrap();
+        assert_eq!((l.text.as_str(), l.lines, l.level), ("Restores HP.\n10 points. Sora has 11.", 2, ONE));
+        // A line wider than the box wraps at a space.
+        let l = wrap::layout("Sora can't carry any more of this.", 200 * 16, 2, m).unwrap();
+        assert_eq!(l.text, "Sora can't carry any\nmore of this.");
+        assert_eq!(l.level, ONE);
+        for line in l.text.split('\n') {
+            assert!(mono(line).unwrap() <= 200 * 16);
+        }
+    }
+
+    #[test]
+    fn wrap_drops_our_breaks_before_squeezing() {
+        let m = &mut mono;
+        // Three of our lines in a one-line box that holds them all on one line: joined.
+        let l = wrap::layout("a\nb\nc", 100 * 16, 1, m).unwrap();
+        assert_eq!((l.text.as_str(), l.level), ("a b c", ONE));
+    }
+
+    #[test]
+    fn wrap_squeezes_only_when_no_wrap_fits() {
+        let m = &mut mono;
+        // Two lines allowed, line 2 too wide, and wrapping it would make three: squeezed, our
+        // lines kept, the widest line drawn at the box.
+        let l = wrap::layout("Restores HP.\n200 points. Sora has 107.", 160 * 16, 2, m).unwrap();
+        assert_eq!(l.lines, 2);
+        assert!(l.level < ONE);
+        assert!(scaled(l.widest, l.level) <= 160 * 16);
+        assert_eq!(l.text, "Restores HP.\n200 points. Sora has 107.");
+        // A single word wider than the box: squeezed to it.
+        let l = wrap::layout("Supercalifragilistic", 100 * 16, 2, m).unwrap();
+        assert_eq!(l.lines, 1);
+        assert!(scaled(l.widest, l.level) <= 100 * 16 && l.level < ONE);
+        // Unknown widths: no layout.
+        assert_eq!(wrap::layout("x y", 100, 2, &mut |_| None), None);
+    }
+
+    #[test]
+    fn wrap_squeeze_takes_the_narrowest_wrap() {
+        let m = &mut mono;
+        // One line allowed: the whole text on it, squeezed to the box.
+        let l = wrap::layout("Sell Hi-Potion x107\nfor 642 Moogle Points?", 150 * 16, 1, m).unwrap();
+        assert_eq!(l.text, "Sell Hi-Potion x107 for 642 Moogle Points?");
+        assert_eq!(l.widest, mono(&l.text).unwrap());
+        // Two allowed, both of ours too wide: the narrowest two-line wrap (here ours).
+        let l = wrap::layout("Sell Hi-Potion x107\nfor 642 Moogle Points?", 150 * 16, 2, m).unwrap();
+        assert_eq!(l.lines, 2);
+        assert!(l.widest <= mono("for 642 Moogle Points?").unwrap());
+        assert!(scaled(l.widest, l.level) <= 150 * 16);
+    }
+
+    #[test]
+    fn lines_in_a_box() {
+        // n × size + (n − 1) × gap.
+        assert_eq!(wrap::lines_in(16 * 16, 16 * 16, 4 * 16), 1);
+        assert_eq!(wrap::lines_in(36 * 16, 16 * 16, 4 * 16), 2);
+        assert_eq!(wrap::lines_in(55 * 16, 16 * 16, 4 * 16), 2);
+        assert_eq!(wrap::lines_in(56 * 16, 16 * 16, 4 * 16), 3);
+        assert_eq!(wrap::lines_in(0, 16, 4), 1);
+        assert_eq!(wrap::lines_in(100, 0, 4), 1);
+        assert_eq!(level16(100, 200), ONE);
+        assert_eq!(level16(200, 100), 512);
     }
 
     #[test]

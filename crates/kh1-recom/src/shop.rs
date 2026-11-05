@@ -383,15 +383,16 @@ pub fn items_step(in_grid: bool, cell: i32, count: i32, pad: &Pad, locked: bool)
 
 /// The Items tab's line in the Moogle's text window (in place of Re:CoM's card-pack lines,
 /// messages 4 / 6: `0x1403A5AA0`). On the tab row the tab's line; on a cell what the item does,
-/// its price and how many Sora has, or why the last confirm was refused.
-pub fn help_text(in_grid: bool, item: Option<u8>, note: Option<Note>, inv: &it::Inventory) -> Vec<u8> {
-    let s = match (note, in_grid, item) {
+/// then its price and how many Sora has, or why the last confirm was refused. A `\n` marks where
+/// we prefer a new line: `win::shop` wraps the line onto the bubble's lines (Re:CoM's own two-line
+/// lines) and squeezes only when no wrap fits (`crate::text_fit::wrap`).
+pub fn help_text(in_grid: bool, item: Option<u8>, note: Option<Note>, inv: &it::Inventory) -> String {
+    match (note, in_grid, item) {
         (Some(Note::Poor), ..) => text::POOR.to_string(),
         (Some(Note::NoRoom), ..) => text::NO_ROOM.to_string(),
-        (_, true, Some(i)) => format!("{} {} Moogle Points. Sora has {}.", text::what(i), buy_price(i).unwrap_or(0), owned(inv, i)),
+        (_, true, Some(i)) => format!("{}\n{} points. Sora has {}.", text::what(i), buy_price(i).unwrap_or(0), owned(inv, i)),
         _ => text::TAB.to_string(),
-    };
-    c_text(&s)
+    }
 }
 
 /// A refusal shown on the line until the next move.
@@ -430,7 +431,7 @@ pub mod text {
             POTION | MEGA_POTION => "Restores HP.",
             HI_POTION => "Restores more HP.",
             ETHER | MEGA_ETHER => "Restores MP.",
-            ELIXIR | MEGALIXIR => "Restores all HP and MP.",
+            ELIXIR | MEGALIXIR => "Restores HP and MP.",
             _ => "",
         }
     }
@@ -787,9 +788,10 @@ pub mod sell {
         }
     }
 
-    /// The yes / no line: what is sold and for how much.
-    pub fn ask_text(item: u8, qty: u32, total: i32) -> Vec<u8> {
-        super::c_text(&format!("Sell {} x{qty} for {total} Moogle Points?", super::text::title(item)))
+    /// The yes / no line: what is sold, then for how much (a `\n` where we prefer a new line, as
+    /// [`super::help_text`]).
+    pub fn ask_text(item: u8, qty: u32, total: i32) -> String {
+        format!("Sell {} x{qty}\nfor {total} Moogle Points?", super::text::title(item))
     }
 
     /// The total of a sale (each item at its sell price).
@@ -1052,13 +1054,13 @@ mod tests {
     fn help_lines() {
         let mut inv = Inventory::new_game();
         inv.set_stock(id::ETHER, 2);
-        assert_eq!(help_text(false, None, None, &inv), b"Buy items with Moogle Points.\0");
-        assert_eq!(help_text(true, Some(id::ETHER), None, &inv), b"Restores MP. 40 Moogle Points. Sora has 2.\0");
-        assert_eq!(help_text(true, Some(id::ETHER), Some(Note::Poor), &inv), b"Not enough Moogle Points.\0");
-        assert_eq!(help_text(true, Some(id::ETHER), Some(Note::NoRoom), &inv), b"Sora can't carry any more of this.\0");
+        assert_eq!(help_text(false, None, None, &inv), "Buy items with Moogle Points.");
+        assert_eq!(help_text(true, Some(id::ETHER), None, &inv), "Restores MP.\n40 points. Sora has 2.");
+        assert_eq!(help_text(true, Some(id::ETHER), Some(Note::Poor), &inv), "Not enough Moogle Points.");
+        assert_eq!(help_text(true, Some(id::ETHER), Some(Note::NoRoom), &inv), "Sora can't carry any more of this.");
         for i in [id::POTION, id::HI_POTION, id::ETHER, id::ELIXIR] {
             let t = help_text(true, Some(i), None, &Inventory { stock: [99; crate::items::STOCK_IDS], ..Inventory::new_game() });
-            assert!(t.len() - 1 <= crate::menu::HELP_MAX, "{i}");
+            assert!(t.len() <= crate::menu::HELP_MAX, "{i}");
         }
         assert_eq!(c_text("a\u{e9}b"), b"a??b\0");
     }
@@ -1175,7 +1177,7 @@ mod tests {
         use id::*;
         assert_eq!(sell::total(POTION, 3), 6);
         assert_eq!(sell::total(ELIXIR, 2), 80);
-        assert_eq!(sell::ask_text(HI_POTION, 2, 12), c_text("Sell Hi-Potion x2 for 12 Moogle Points?"));
+        assert_eq!(sell::ask_text(HI_POTION, 2, 12), "Sell Hi-Potion x2\nfor 12 Moogle Points?");
         assert_eq!(sell::after_sale(3, 3), Some(2), "the last item sold out: back one");
         assert_eq!(sell::after_sale(1, 3), Some(1));
         assert_eq!(sell::after_sale(0, 0), None, "nothing left: the tab row");
@@ -1199,5 +1201,36 @@ mod tests {
         assert!(trade_square_opens_packs(true, false), "KH1: items need no card room");
         assert!(trade_square_opens_packs(false, true));
         assert!(!trade_square_opens_packs(false, false), "Re:CoM's rule at Combat = Re:CoM");
+    }
+
+    /// Every Moogle line of ours at the longest numbers (99 in the stock + 8 slots = 107 owned,
+    /// Elixir's 200, a 107-item sale) in a bubble modelled on Re:CoM's own two-line line "Which one
+    /// do you want to buy, kupo?": the bubble at least as wide as that line's narrower two-line
+    /// split, two lines, a glyph 10 units and a space 5 (Re:CoM's fonts aren't in the session: the
+    /// real widths are measured in game). Every line takes two lines or fewer, squeezed by no more
+    /// than to 0.7 in that narrowest model (the longest, "200 points. Sora has 107.", to about 0.72).
+    #[test]
+    fn every_line_fits_a_two_line_bubble_at_the_longest_numbers() {
+        use crate::text_fit::{wrap, ONE};
+        let mut m = |s: &str| Some(s.chars().map(|c| if c == ' ' { 80i64 } else { 160 }).sum::<i64>());
+        let recom = "Which one do you want to buy, kupo?";
+        let words: Vec<&str> = recom.split(' ').collect();
+        let bubble = (1..words.len()).map(|k| m(&words[..k].join(" ")).unwrap().max(m(&words[k..].join(" ")).unwrap())).min().unwrap();
+        let mut lines: Vec<String> = vec![text::TAB.into(), text::POOR.into(), text::NO_ROOM.into()];
+        for i in [id::POTION, id::HI_POTION, id::ETHER, id::ELIXIR] {
+            let mut inv = Inventory::new_game();
+            inv.slot_count = crate::items::MAX_SLOTS as u8;
+            inv.slots = [i; crate::items::MAX_SLOTS];
+            inv.set_stock(i, crate::items::MAX_STOCK);
+            assert_eq!(owned(&inv, i), 107);
+            lines.push(help_text(true, Some(i), None, &inv));
+            lines.push(sell::ask_text(i, 107, sell::total(i, 107)));
+        }
+        for t in &lines {
+            assert!(!t.contains('%'), "Re:CoM's text call expands % codes: {t}");
+            let l = wrap::layout(t, bubble, 2, &mut m).unwrap();
+            assert!(l.lines <= 2, "{t}");
+            assert!(l.level == ONE || l.level >= 717, "{t}: {:?}", l);
+        }
     }
 }

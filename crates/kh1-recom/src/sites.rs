@@ -4150,6 +4150,37 @@ pub const TEXT_FIT_PTRS: &[PtrSite] = &[
     PtrSite { name: "C2DFnt vtable +0x30 (0x140606CC8)", rva: 0x0060_6CC8, target: 0x0024_3FF0 },
 ];
 
+/// 0.132.0, the Moogle's speech bubble (`win::shop::bubble_line`, `crate::text_fit::wrap`,
+/// `docs/recom-m8-items.md` § M8d text fit): Re:CoM's `CStrPrim` vtable (`0x140508FD0`, a
+/// `CTextWnd`'s text; every code reference a store, no absolute pointer: Checked (exe scan)), copied
+/// for a squeezed bubble line as C2DFnt's is. Checked lazily (a mismatch turns only the bubble's
+/// squeeze off; the wrap stays).
+pub const TEXT_FIT_STR_PTRS: &[PtrSite] = &[
+    PtrSite { name: "CStrPrim vtable −8: its COL (0x140508FC8)", rva: 0x0050_8FC8, target: 0x0070_B5E8 },
+    PtrSite { name: "CStrPrim vtable +0: deleting dtor (0x140508FD0)", rva: 0x0050_8FD0, target: 0x0029_A080 },
+    PtrSite { name: "CStrPrim vtable +8: register (0x140508FD8)", rva: 0x0050_8FD8, target: 0x0026_1D70 },
+    PtrSite { name: "CStrPrim vtable +0x10: packet size (0x140508FE0)", rva: 0x0050_8FE0, target: 0x0028_9430 },
+    PtrSite { name: "CStrPrim vtable +0x18: draw (0x140508FE8)", rva: 0x0050_8FE8, target: 0x0028_9450 },
+    PtrSite { name: "CStrPrim vtable +0x20: depth (0x140508FF0)", rva: 0x0050_8FF0, target: 0x000D_3D00 },
+    PtrSite { name: "CStrPrim vtable +0x28: measure (0x140508FF8)", rva: 0x0050_8FF8, target: 0x0028_9440 },
+    PtrSite { name: "CStrPrim vtable +0x30 (0x140509000)", rva: 0x0050_9000, target: 0x0025_8E80 },
+];
+
+/// 0.132.0: the `CTextWnd` fields the bubble's box is read from (`crate::text_fit::recom::WND_*`,
+/// `CTEXT_*`, `SIZE`, `GAP`). Checked only.
+pub const BUBBLE_CHECKED: &[Site] = &[
+    // The open 0x1402B1520: movzx eax,[rsi+0x28]; movzx ecx,[rsi+0x2A] (the record's margins);
+    // mov [rbp+0xB0],eax; mov [rbp+0xB4],ecx.
+    Site { name: "CTextWnd open: the text margins (0x1402B15AD)", rva: 0x002B_15AD, expect: &[0x0F, 0xB7, 0x46, 0x28, 0x0F, 0xB7, 0x4E, 0x2A, 0x89, 0x85, 0xB0, 0x00, 0x00, 0x00, 0x89, 0x8D, 0xB4, 0x00, 0x00, 0x00] },
+    // 0x1402B1F70: mov rax,[rdx]; mov [rsi+0xA8],rax (place); mov rax,[r8]; mov [rsi+0xB8],rax (size).
+    Site { name: "CTextWnd set-up: place and size (0x1402B1FA2)", rva: 0x002B_1FA2, expect: &[0x48, 0x8B, 0x02, 0x48, 0x89, 0x86, 0xA8, 0x00, 0x00, 0x00, 0x49, 0x8B, 0x00, 0x48, 0x89, 0x86, 0xB8, 0x00, 0x00, 0x00] },
+    // CText set-up 0x1402B1D50: its CStrPrim (+0x38) gets size << 4 at +0x3C, spacing << 4 at +0x44,
+    // line gap << 4 at +0x48; then its measure (vtable +0x28) on +0x28, the line count to +0x54.
+    Site { name: "CText set-up: font size, gap and line count (0x1402B1E7E)", rva: 0x002B_1E7E, expect: &[0x48, 0x8B, 0x4E, 0x38, 0x8B, 0x84, 0x24, 0x80, 0x00, 0x00, 0x00, 0xC1, 0xE0, 0x04, 0x89, 0x41, 0x3C, 0x48, 0x8B, 0x4E, 0x38, 0x8B, 0x84, 0x24, 0x98, 0x00, 0x00, 0x00, 0xC1, 0xE0, 0x04, 0x89, 0x41, 0x44, 0x8B, 0x84, 0x24, 0x9C, 0x00, 0x00, 0x00, 0xC1, 0xE0, 0x04, 0x89, 0x41, 0x48, 0x48, 0x8B, 0x4E, 0x38, 0x48, 0x8B, 0x01, 0x45, 0x33, 0xC9, 0x45, 0x33, 0xC0, 0x48, 0x8D, 0x56, 0x28, 0xFF, 0x50, 0x28, 0x89, 0x46, 0x54] },
+    // The text call 0x1402B0EF0: rbx = [rcx+0xD0] (its CText); shown = [rcx+0x88] == 5.
+    Site { name: "CTextWnd text: its CText and shown state (0x1402B0EFF)", rva: 0x002B_0EFF, expect: &[0x48, 0x8B, 0x99, 0xD0, 0x00, 0x00, 0x00, 0x4D, 0x8B, 0xD0, 0x48, 0x8B, 0xFA, 0x48, 0x8B, 0xF1, 0x48, 0x85, 0xDB, 0x75, 0x05, 0x48, 0x85, 0xD2, 0x74, 0x46, 0x83, 0xB9, 0x88, 0x00, 0x00, 0x00, 0x05] },
+];
+
 /// Every site the startup check reads: checked-only, hooked, called.
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
@@ -4342,6 +4373,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         crate::enemy_skills_cmp::CALLS,
         crate::enemy_skills_cmp::CHECKED,
         TEXT_FIT_CHECKED,
+        BUBBLE_CHECKED,
     ];
     LISTS
         .iter()
@@ -4548,6 +4580,41 @@ mod tests {
         assert_eq!(TEXT_FIT_PTRS[1 + vtable::DRAW].target, recom::DRAW);
         assert_eq!(TEXT_FIT_PTRS[1 + vtable::MEASURE].target, recom::MEASURE);
         for p in TEXT_FIT_PTRS {
+            assert!(!all_sites().any(|s| s.rva == p.rva), "{}", p.name);
+        }
+    }
+
+    /// 0.132.0: the bubble's text class and fields, as the exe's bytes say them.
+    #[test]
+    fn bubble_sites() {
+        use crate::text_fit::{recom, vtable};
+        assert_eq!(TEXT_FIT_STR_PTRS.len(), 1 + vtable::SLOTS);
+        assert_eq!(TEXT_FIT_STR_PTRS[0].rva, recom::STR_VTABLE - 8);
+        assert_eq!(TEXT_FIT_STR_PTRS[0].target, recom::STR_COL);
+        assert_eq!(TEXT_FIT_PTRS[0].target, recom::COL);
+        for (i, p) in TEXT_FIT_STR_PTRS[1..].iter().enumerate() {
+            assert_eq!(p.rva, recom::STR_VTABLE + 8 * i as u32, "{}", p.name);
+            // Both classes share every slot but the dtor and +0x30: the same draw and measure.
+            if i != 0 && i != 6 {
+                assert_eq!(p.target, TEXT_FIT_PTRS[1 + i].target, "{}", p.name);
+            }
+        }
+        assert_eq!(TEXT_FIT_STR_PTRS[1 + vtable::DRAW].target, recom::DRAW);
+        assert_eq!(TEXT_FIT_STR_PTRS[1 + vtable::MEASURE].target, recom::MEASURE);
+        let find = |n: &str| BUBBLE_CHECKED.iter().find(|s| s.name.starts_with(n)).unwrap();
+        let m = find("CTextWnd open: the text margins");
+        assert_eq!(&m.expect[10..12], &(recom::WND_MARGINS as u16).to_le_bytes());
+        assert_eq!(&m.expect[16..18], &(recom::WND_MARGINS as u16 + 4).to_le_bytes());
+        let z = find("CTextWnd set-up: place and size");
+        assert_eq!(&z.expect[16..18], &(recom::WND_SIZE as u16).to_le_bytes());
+        let c = find("CText set-up: font size");
+        assert_eq!(c.expect[3], recom::CTEXT_FNT as u8);
+        assert_eq!(c.expect[16], recom::SIZE as u8);
+        assert_eq!(c.expect[46], recom::GAP as u8);
+        assert_eq!(*c.expect.last().unwrap(), recom::CTEXT_LINES as u8);
+        let t = find("CTextWnd text: its CText");
+        assert_eq!(&t.expect[3..5], &(recom::WND_TEXT as u16).to_le_bytes());
+        for p in TEXT_FIT_STR_PTRS {
             assert!(!all_sites().any(|s| s.rva == p.rva), "{}", p.name);
         }
     }
