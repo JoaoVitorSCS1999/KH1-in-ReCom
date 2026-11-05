@@ -1340,6 +1340,84 @@ pub const ITEM_PAGE_CALLEES: &[Site] = &[
     Site { name: "player -> save stats (0x1401F0120)", rva: 0x001F_0120, expect: &[0x48, 0x83, 0xEC, 0x28, 0x48, 0x8B, 0x05, 0x65, 0xB2, 0x68, 0x00, 0x48, 0x85, 0xC0, 0x75, 0x05] },
 ];
 
+/// Enemy Skills stage 2 (`win::enemy_skills`, `crate::skill_effects`, `docs/recom-enemy-skills.md`
+/// § Stage 2 (built)): the Sora-side clear `CBTL::resetNowEnchant` `0x140161E10(CBTL, side)`, wrapped
+/// to put the equipped skills back after Re:CoM resets Sora's fields. Same rule as [`HOOKS`]: `mov
+/// [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x20` (15 bytes). Checked (exe): only direct
+/// calls (10), no branch into the moved bytes.
+pub const ENEMY_SKILL_HOOKS: &[Site] = &[Site {
+    name: "CBTL clear resetNowEnchant (0x140161E10)",
+    rva: 0x0016_1E10,
+    expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20],
+}];
+
+/// Enemy Skills stage 2: the Re:CoM functions the skills call (only called, never hooked).
+pub const ENEMY_SKILL_CALLEES: &[Site] = &[
+    // Gargoyle's Vanish setter (player, on): `+0x420 |= 0x40`, the pulse from 0.
+    Site { name: "Vanish setter (0x1401F7EC0)", rva: 0x001F_7EC0, expect: &[0x48, 0x83, 0xEC, 0x58, 0x48, 0x8B, 0x05, 0xFD, 0xAB, 0x66, 0x00, 0x48, 0x33, 0xC4, 0x48, 0x89] },
+    // Xaldin's Aero Guard setter (player, on): the wind object, `+0x420 |= 0x80000000`.
+    Site { name: "Aero Guard setter (0x1401F6FB0)", rva: 0x001F_6FB0, expect: &[0x40, 0x57, 0x48, 0x81, 0xEC, 0x20, 0x01, 0x00, 0x00, 0x48, 0x8B, 0x05, 0x08, 0xBB, 0x66, 0x00] },
+    // Re:CoM's player motion speed (player, speed): `+0x47C`, its motion and the weapon's.
+    Site { name: "player motion speed (0x1401F74D0)", rva: 0x001F_74D0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0xF3, 0x0F, 0x10, 0x81, 0x7C, 0x04, 0x00, 0x00, 0x48, 0x8B] },
+    // The barrier test (attack, body): the front test of Large Body's Guard.
+    Site { name: "barrier test (0x14016EED0)", rva: 0x0016_EED0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x18, 0x57, 0x48, 0x83, 0xEC, 0x70, 0x48, 0x8B, 0x05, 0xE7, 0x3B, 0x6F] },
+    // Large Body's Guard setter (player, on), whole: `+0x420 |= 0x200`, `+0x72C |= 2`, `+0x718 |= 1`,
+    // `+0x73C` = π/2 (0x3FC90FDB).
+    Site {
+        name: "Large Body barrier setter (0x1401F8FF0)",
+        rva: 0x001F_8FF0,
+        expect: &[
+            0x8B, 0x81, 0x20, 0x04, 0x00, 0x00, 0x85, 0xD2, 0x75, 0x18, 0x0F, 0xBA, 0xF0, 0x09, 0x89, 0x81, 0x20, 0x04, 0x00, 0x00, 0x83, 0xA1, 0x2C, 0x07, 0x00, 0x00, 0xFD, 0x89, 0x91, 0x18, 0x07, 0x00, 0x00, 0xC3, 0x0F, 0xBA, 0xE8, 0x09, 0x89, 0x81,
+            0x20, 0x04, 0x00, 0x00, 0x83, 0x89, 0x2C, 0x07, 0x00, 0x00, 0x02, 0x83, 0x89, 0x18, 0x07, 0x00, 0x00, 0x01, 0xC7, 0x81, 0x3C, 0x07, 0x00, 0x00, 0xDB, 0x0F, 0xC9, 0x3F, 0xC3,
+        ],
+    },
+];
+
+/// Enemy Skills stage 2: Re:CoM's player-side apply `0x140163C00`, the writes the skills repeat
+/// (read only): Fat Bandit / Guard Armor / Card Soldier's `+0x420` bits, Bouncywild's Draw (`+0x54C` =
+/// 30.0, `+0x550` = 10.0), Xemnas', Saïx's and Roxas' bits after their affinity calls.
+pub const ENEMY_SKILL_CHECKED: &[Site] = &[
+    Site {
+        name: "apply: Fat Bandit, Guard Armor, Card Soldier bits (0x140163CED)",
+        rva: 0x0016_3CED,
+        expect: &[
+            0x81, 0x89, 0x20, 0x04, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x48, 0x83, 0xC4, 0x28, 0xC3, 0x81, 0x89, 0x20, 0x04, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x48, 0x83, 0xC4, 0x28, 0xC3, 0x81, 0x89, 0x20, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00,
+            0x00, 0x48, 0x83, 0xC4, 0x28, 0xC3,
+        ],
+    },
+    Site { name: "apply: Bouncywild's Draw (0x140163D44)", rva: 0x0016_3D44, expect: &[0xC7, 0x81, 0x4C, 0x05, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x41, 0xC7, 0x81, 0x50, 0x05, 0x00, 0x00, 0x00, 0x00, 0x20, 0x41, 0x48, 0x83, 0xC4, 0x28, 0xC3] },
+    Site { name: "apply: Xemnas' bit (0x140163D9C)", rva: 0x0016_3D9C, expect: &[0x81, 0x88, 0x20, 0x04, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00] },
+    Site { name: "apply: Saix's bit (0x140163DEF)", rva: 0x0016_3DEF, expect: &[0x81, 0x88, 0x20, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40] },
+    Site { name: "apply: Roxas' bit (0x140163E31)", rva: 0x0016_3E31, expect: &[0x81, 0x88, 0x20, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20] },
+    // A 0.75f in Re:CoM's float pool (beside its 0.5 at 0x1406C108C and 1.0 at 0x1406C10C0; then
+    // √3/2): Guard Armor's scale at KH1 points here.
+    Site { name: "float pool 0.75 (0x1406C10A8)", rva: 0x006C_10A8, expect: &[0x00, 0x00, 0x40, 0x3F, 0xD7, 0xB3, 0x5D, 0x3F] },
+];
+
+/// Enemy Skills stage 2: Re:CoM's constants the owner's numbers replace, switched at each battle start
+/// (`win::enemy_skills::battle_start`, as M6's): ours in a KH1 battle (Combat = KH1, Sora's story),
+/// Re:CoM's otherwise. Each touches Sora's side only (the enemy side has its own sites).
+pub const ENEMY_SKILL_PATCHES: &[Patch] = &[
+    // Oogie Boogie: Sora's Regen tick in the CBTL update `0x1401617F0` (`cmp dword [rbx+0x1F8],
+    // 6000`): 18000 (6 s).
+    Patch { site: Site { name: "Regen tick, CBTL update (0x14016189D)", rva: 0x0016_189D, expect: &[0x81, 0xBB, 0xF8, 0x01, 0x00, 0x00, 0x70, 0x17, 0x00, 0x00] }, new: &[0x81, 0xBB, 0xF8, 0x01, 0x00, 0x00, 0x50, 0x46, 0x00, 0x00] },
+    // The same in `0x1401600D0` (`cmp dword [rcx+0x1F8], 6000`).
+    Patch { site: Site { name: "Regen tick (0x1401600F2)", rva: 0x0016_00F2, expect: &[0x81, 0xB9, 0xF8, 0x01, 0x00, 0x00, 0x70, 0x17, 0x00, 0x00] }, new: &[0x81, 0xB9, 0xF8, 0x01, 0x00, 0x00, 0x50, 0x46, 0x00, 0x00] },
+    // Neoshadow: Sora's Bio tick (`+0x208 & 0x2000`; `cmp dword [rbx+0x1FC], 1000`): 3000 (1 s).
+    Patch { site: Site { name: "Bio tick (0x140161991)", rva: 0x0016_1991, expect: &[0x81, 0xBB, 0xFC, 0x01, 0x00, 0x00, 0xE8, 0x03, 0x00, 0x00] }, new: &[0x81, 0xBB, 0xFC, 0x01, 0x00, 0x00, 0xB8, 0x0B, 0x00, 0x00] },
+    // Xemnas: the barrier timer Sora's damage check sets (`mov dword [rdi+0x7E4], 6000`): 3000 (1 s).
+    Patch { site: Site { name: "Quick Barrier timer (0x1401E73F3)", rva: 0x001E_73F3, expect: &[0xC7, 0x87, 0xE4, 0x07, 0x00, 0x00, 0x70, 0x17, 0x00, 0x00] }, new: &[0xC7, 0x87, 0xE4, 0x07, 0x00, 0x00, 0xB8, 0x0B, 0x00, 0x00] },
+    // Guard Armor: `setWideAttack`'s scale (`movss xmm1,[rip+disp]`: 1.0 at 0x1406C10C0) → the pool's
+    // 0.75 at 0x1406C10A8 (disp 0x49B89E from the next instruction 0x14022580A).
+    Patch { site: Site { name: "Wide Attack scale (0x140225802)", rva: 0x0022_5802, expect: &[0xF3, 0x0F, 0x10, 0x0D, 0xB6, 0xB8, 0x49, 0x00] }, new: &[0xF3, 0x0F, 0x10, 0x0D, 0x9E, 0xB8, 0x49, 0x00] },
+];
+
+/// Enemy Skills stage 2, Roxas: the second strike's power read in the weapon update `0x140225840`
+/// (`movsx eax, word [rbx+0x288]; mov [rbp-0x60], eax`, 10 bytes): in a KH1 battle a jump to a stub
+/// of ours that halves it (`cdq; sub eax,edx; sar eax,1`, Re:CoM's ÷ 2) and comes back at
+/// `0x140225D86`. Checked (exe): no branch into the 10 bytes.
+pub const ENEMY_SKILL_STUB_SITES: &[Site] = &[Site { name: "Double Strike power read (0x140225D7C)", rva: 0x0022_5D7C, expect: &[0x0F, 0xBF, 0x83, 0x88, 0x02, 0x00, 0x00, 0x89, 0x45, 0xA0] }];
+
 /// M9 stage 9a (`win::abilities`, `docs/recom-m9-abilities.md`): Re:CoM's "this sleight is
 /// learned" test, called for the abilities that unlock with Re:CoM's sleights. Only called, never
 /// hooked.
@@ -3979,6 +4057,10 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         MAGIC_FX_CHECKED,
         CUSTOMIZE_GLYPHS_CHECKED,
         ABILITY_CALLEES,
+        ENEMY_SKILL_HOOKS,
+        ENEMY_SKILL_CALLEES,
+        ENEMY_SKILL_CHECKED,
+        ENEMY_SKILL_STUB_SITES,
         M12_CALLEES,
         M12_CHECKED,
         SPECIAL_HOOKS,
@@ -4075,6 +4157,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         .flat_map(|l| l.iter())
         .chain(M6_PATCHES.iter().map(|p| &p.site))
         .chain(M6_BOSS_PATCHES.iter().map(|p| &p.site))
+        .chain(ENEMY_SKILL_PATCHES.iter().map(|p| &p.site))
         .chain(std::iter::once(&MP_CHECKPOINT_CALL))
 }
 
@@ -4977,6 +5060,60 @@ mod tests {
         assert_eq!(FIELD_RULE_CHECKED[2].rva + FIELD_RULE_CHECKED[2].expect.len() as u32, FIELD_RULE_CALLS[1].rva);
         assert_eq!(FIELD_RULE_CALLS[1].rva + 5, FIELD_RULE_CHECKED[3].rva);
         assert_eq!(FIELD_RULE_CHECKED[4].rva, to(&FIELD_RULE_CALLS[1]));
+    }
+
+    /// Enemy Skills stage 2: the clear's hook, the callees, Re:CoM's apply bytes and the switched
+    /// sites (ours differ only in their constant; no other site's bytes overlap one, since they are
+    /// rewritten at run time).
+    #[test]
+    fn enemy_skill_sites() {
+        use crate::skill_effects::{imm32, numbers};
+        for s in ENEMY_SKILL_HOOKS.iter().chain(ENEMY_SKILL_CALLEES).chain(ENEMY_SKILL_CHECKED).chain(ENEMY_SKILL_STUB_SITES) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        // The clear's 15 bytes: whole instructions ending in `sub rsp,0x20`.
+        assert!(ENEMY_SKILL_HOOKS[0].expect.ends_with(&[0x57, 0x48, 0x83, 0xEC, 0x20]));
+        // Re:CoM's apply: the bits and Draw's floats route 1 writes.
+        let a = &ENEMY_SKILL_CHECKED[0].expect;
+        assert_eq!(u32::from_le_bytes(a[6..10].try_into().unwrap()), crate::skill_effects::flag420::BACK_ATTACK);
+        assert_eq!(u32::from_le_bytes(a[21..25].try_into().unwrap()), crate::skill_effects::flag420::WIDE);
+        assert_eq!(u32::from_le_bytes(a[36..40].try_into().unwrap()), crate::skill_effects::flag420::HASTE);
+        let d = &ENEMY_SKILL_CHECKED[1].expect;
+        assert_eq!(u16::from_le_bytes(d[2..4].try_into().unwrap()) as usize, crate::skill_effects::draw::FIELD_54C);
+        assert_eq!(f32::from_le_bytes(d[6..10].try_into().unwrap()), crate::skill_effects::draw::ON_54C);
+        assert_eq!(u16::from_le_bytes(d[12..14].try_into().unwrap()) as usize, crate::skill_effects::draw::RADIUS);
+        assert_eq!(f32::from_le_bytes(d[16..20].try_into().unwrap()), crate::skill_effects::draw::ON);
+        for (i, bit) in [(2, crate::skill_effects::flag420::QUICK_BARRIER), (3, crate::skill_effects::flag420::COMBO_BOOST), (4, crate::skill_effects::flag420::DOUBLE_STRIKE)] {
+            assert_eq!(u32::from_le_bytes(ENEMY_SKILL_CHECKED[i].expect[6..10].try_into().unwrap()), bit);
+        }
+        // The Large Body setter writes π/2 into the barrier's half-angle.
+        assert!(ENEMY_SKILL_CALLEES[4].expect.ends_with(&[0xC7, 0x81, 0x3C, 0x07, 0x00, 0x00, 0xDB, 0x0F, 0xC9, 0x3F, 0xC3]));
+        // The switched sites: Re:CoM's constant → the owner's.
+        let p = ENEMY_SKILL_PATCHES;
+        assert_eq!((&p[0].site.expect[6..], &p[0].new[6..]), (&imm32(6000)[..], &imm32(numbers::REGEN_TICKS)[..]));
+        assert_eq!((&p[1].site.expect[6..], &p[1].new[6..]), (&imm32(6000)[..], &imm32(numbers::REGEN_TICKS)[..]));
+        assert_eq!((&p[2].site.expect[6..], &p[2].new[6..]), (&imm32(1000)[..], &imm32(numbers::BIO_TICKS)[..]));
+        assert_eq!((&p[3].site.expect[6..], &p[3].new[6..]), (&imm32(6000)[..], &imm32(numbers::BARRIER_TICKS)[..]));
+        for q in p {
+            assert_eq!(q.site.expect.len(), q.new.len(), "{}", q.site.name);
+            assert_eq!(q.site.expect[..q.site.expect.len() - 4], q.new[..q.new.len() - 4], "{}: only the constant changes", q.site.name);
+        }
+        // Guard Armor's scale: Re:CoM's 1.0 at 0x1406C10C0 → the pool's 0.75 (a checked site).
+        let w = &p[4];
+        let next = 0x1_4000_0000i64 + w.site.rva as i64 + 8;
+        assert_eq!(next + i32::from_le_bytes(w.site.expect[4..8].try_into().unwrap()) as i64, 0x1_406C_10C0);
+        let ours = next + i32::from_le_bytes(w.new[4..8].try_into().unwrap()) as i64;
+        assert_eq!(ours, 0x1_4000_0000 + ENEMY_SKILL_CHECKED[5].rva as i64);
+        assert_eq!(f32::from_le_bytes(ENEMY_SKILL_CHECKED[5].expect[..4].try_into().unwrap()), numbers::WIDE_SCALE);
+        // No other site's bytes overlap a site rewritten at run time.
+        let switched: Vec<&Site> = p.iter().map(|q| &q.site).chain(ENEMY_SKILL_STUB_SITES).collect();
+        for x in &switched {
+            let (a0, a1) = (x.rva, x.rva + x.expect.len() as u32);
+            for s in all_sites().filter(|s| s.rva != x.rva) {
+                let (b0, b1) = (s.rva, s.rva + s.expect.len() as u32);
+                assert!(a1 <= b0 || b1 <= a0, "{} overlaps {}", x.name, s.name);
+            }
+        }
     }
 
     /// Lucky Bounty at KH1: Pluto's find, its outcome switch and the calls it makes.

@@ -13,6 +13,7 @@ mod drops;
 mod effects;
 mod enemy_skills_cmp;
 mod enemy_skills_deck;
+mod enemy_skills;
 mod fx;
 mod field_sleights;
 mod gimmick;
@@ -139,6 +140,9 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
             models::prefetch();
             // KH1 casts' effects: Re:CoM's battle set starts loading now in the field (`magic_fx`).
             magic_fx::setting_changed();
+            // Enemy Skills: applied at KH1, taken off at Re:CoM, on the player now.
+            // SAFETY: Re:CoM's main player's fields, written as Re:CoM's own apply does.
+            unsafe { enemy_skills::refresh("Combat switched") };
         }
     }
 }
@@ -419,6 +423,11 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         install_gimmick(base);
         install_unlocks(base);
         install_summons(base);
+        // Enemy Skills stage 2: the play-time setters (`enemy_skills`).
+        // SAFETY: reads of the mapped exe; the hook's target bytes are checked again inside.
+        if !unsafe { enemy_skills::install(base) } {
+            log("enemy skills: route 1 not installed: the skills it builds do nothing");
+        }
         install_field_sleights(base);
         // M11 (the Neoshadow's grab): Sora's held reaction, in the damage-check wrapper above.
         // SAFETY: reads of the mapped exe; the data patch's old bytes are checked inside.

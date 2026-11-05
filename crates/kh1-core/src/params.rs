@@ -219,10 +219,16 @@ impl Params {
 
     /// Ground combo length (stats +0xD4) and air combo length (+0xD5).
     pub fn ground_length(&self, a: &Abilities) -> u8 {
+        if a.combo_finish {
+            return 1;
+        }
         self.combo.base_length.saturating_add(a.combo_plus)
     }
 
     pub fn air_length(&self, a: &Abilities) -> u8 {
+        if a.combo_finish {
+            return 1;
+        }
         self.combo.base_length.saturating_add(a.air_combo_plus)
     }
 }
@@ -278,6 +284,9 @@ pub struct Abilities {
     pub gravity_break: bool,
     /// bit 0x20000000 (59).
     pub zantetsuken: bool,
+    /// Not KH1's: Re:CoM's Bandit card as an ability (the KH1-in-Re:CoM mod's Enemy Skills,
+    /// "Combo Finish"): every swing is the combo's last (length 1, ground and air).
+    pub combo_finish: bool,
 }
 
 /// One stick axis byte pair → a stick vector (`0x14028B4F0`). Per axis: c = raw − 127.5; inside

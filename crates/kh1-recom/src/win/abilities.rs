@@ -314,5 +314,8 @@ pub fn set_equipped(equipped: ab::Bits) -> bool {
     // An unbuilt ability is never equipped (the page greys and refuses it).
     s.equipped = equipped & s.unlocked & !ab::UNBUILT_BITS;
     store(save, &s);
+    // Enemy Skills: the equipped set's effects on Sora now (`super::enemy_skills`).
+    // SAFETY: Re:CoM's main player's fields, written as Re:CoM's own apply does.
+    unsafe { super::enemy_skills::refresh("ability set changed") };
     true
 }

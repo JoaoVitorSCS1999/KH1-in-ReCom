@@ -143,6 +143,7 @@ card's name, Re:CoM's effect name, the AP, the help line, and whether its effect
       carried);
   (b) KH1's ratio on Re:CoM's base: 5 m × 2.5 = 12.5 m / × 5 = 25 m;
   (c) Re:CoM's own Draw: 10 m with either copy.
+  **Owner (2026-11-04): (c), "Re:CoM's Bouncywild radius". Built in stage 2 (below).**
 
 ### Checked / not checked
 
@@ -154,6 +155,82 @@ card's name, Re:CoM's effect name, the AP, the help line, and whether its effect
   notices); whether every enemy card's first pickup reaches `0x14015C7F0` (the doc's rule: types
   1–4 and 7, Checked (decomp) in `recom-m7-unlocks.md`).
 
+## Stage 2 (built, 0.127.0): route 1, the play-time setters
+
+Ask (owner, 2026-11-04, "Go ahead" on the plan; "Enemy Skills numbers"; "Treasure Magnet": "Re:CoM's
+Bouncywild radius"): the skills that act through Re:CoM's play-time writes. Combat = KH1 in Sora's story
+only; Combat = Re:CoM and Riku's story: nothing applied, every switched site Re:CoM's.
+
+Code: `crates/kh1-recom/src/skill_effects.rs` (pure, tested: which skills are built, their help lines,
+the rules and numbers), `win/enemy_skills.rs` (the runtime), `sites::ENEMY_SKILL_HOOKS` / `_CALLEES` /
+`_CHECKED` / `_PATCHES` / `_STUB_SITES`. One line each in `win::attack` (swing start, damage check, pair
+dispatch, KH1 hit), `win::movement` (the KH1 frame, Re:CoM's gravity read), `win::battle` (battle start),
+`win::abilities` (the page's equip), `win::mod` (Combat switched), `abilities::to_core`; kh1-core's
+`Abilities::combo_finish`.
+
+### When (one wrapper, no per-frame hook)
+
+- **Re:CoM's writes repeated, not its switch called**: `0x140163C00` reads only `*0x14087B380` and would
+  run the bosses' affinity call `0x1401F8810` (owner: "skill only"); its cases are plain `or
+  [player+0x420], imm` / two float stores / tail calls to the setters (Checked (exe):
+  `sites::ENEMY_SKILL_CHECKED` holds those bytes, the tests read the bits and floats from them). So
+  the writes are repeated on the player at hand, the setters (`0x1401F7EC0` Vanish, `0x1401F6FB0` Aero
+  Guard) called as Re:CoM's cases call them, each once (Aero Guard's makes its wind object at every
+  call: Checked (decomp)).
+- **A KH1 battle's start / the field**: the first KH1 frame of each player object, or after a change
+  (`win::enemy_skills::kh1_frame`, one atomic compare a frame; a generation bumped by each battle
+  manager ctor, the battle's end, the page's equip and a Combat switch). In a field room only Draw.
+- **After every Sora-side clear** `0x140161E10` (hook, 15 bytes; Checked (exe): 10 direct calls, no
+  branch into the bytes): Re:CoM's clear, then the skills back. Not at the battle's end
+  (`0x140162250` sets CBTL `+0x208 |= 0xC0000004` before its clears: then only the generation moves,
+  so Re:CoM's 50 m end-of-battle pull `0x1401F9C5E` is never shrunk). Reasons it runs at KH1: an
+  enemy's Parasite Cage (Dispel) clears Sora's side (`0x140163170` case 0x64), the battle's end.
+- **The page / Combat switched** (`refresh`): applied, and what is no longer equipped taken off
+  (only ever ours: Sora plays no card at KH1).
+
+### Per skill (Re:CoM's reader, the number)
+
+| skill | how | number | tag |
+|---|---|---|---|
+| Bouncywild, KH1's level-72 Treasure Magnet | `+0x54C` = 30.0, `+0x550` = 10.0 (Re:CoM's Draw, `0x140163D44`); field and battle | prizes pulled from 10 m (5 m without) | Checked (exe + decomp) |
+| Large Body | **not** Re:CoM's barrier (it blocks): in the damage-check wrapper, before Re:CoM's check, Re:CoM's own Large Body barrier values for one call (its setter `0x1401F8FF0(p, 1)`: class mask 1, half-angle π/2), its barrier test `0x14016EED0` on the hit Re:CoM's apply recorded (body `+0x30` the attack's point, `+0x84` its class), the four fields put back at once | a front hit's value × 90 / 100 (ours: Re:CoM has no cut) | Checked (decomp); "class 0 = physical": Assumption |
+| Bandit | Re:CoM's `+0x640` = 1 is overwritten by the KH1 swing's own length; so KH1's combo length 1 (kh1-core `Abilities::combo_finish`, ground and air): KH1's picker makes every swing the finisher | — | Checked (tests: KH1's controller as the oracle) |
+| Fat Bandit | `+0x420 \|= 0x100000` → Re:CoM's `procAttackCollision` `0x1401F5DC0` → `setBackAttack` (weapon `+0x28C` = collision `+0x4C` = 1); Re:CoM's apply `0x14016F1C0` then doubles a hit from behind (`+0x4C` = `+0x48`). At Damage = KH1 KH1's number replaces the part's value: the doubling is carried over (`back_attack_kh1`) | × 2 from behind | Checked (decomp) |
+| Wight Knight | not Re:CoM's CBTL `0x4000` (every actor's gravity, `0x1401A59A0`): Sora's own gravity, the KH1 controller's (`params.gravity`, KH1's `0x1402AF960` arc) and at `jump_height = recom` Re:CoM's read of `0x14087B398` | × 0.75, field and battle | Checked (code); Assumption: KH1 defines its jump by height, so the jump keeps its height and lasts 1 / √0.75 = 1.155 times as long (Re:CoM's Float, fixed take-off speed, jumps higher); Re:CoM-run airborne states (hit reactions, sleights) keep Re:CoM's gravity |
+| Gargoyle | Re:CoM's Vanish setter `0x1401F7EC0(p, 1)`; Re:CoM's per-frame pulse | Re:CoM's | Checked (decomp) |
+| Neoshadow | CBTL `+0x208 \|= 0x2000`, `+0x1FC` = 0 (Sora's Bio, `0x1401632B6`); Re:CoM's tick `0x1401617F0`: every enemy object (type 0x1004) `vt+0xD8(…, 1)` = HP − 1, never below 1 (`0x1401814C0`, Checked (exe)) | every 1 s: the tick's `cmp [+0x1FC], 1000` → 3000 (switched) | Checked (exe) |
+| Guard Armor | `+0x420 \|= 0x80` → `setWideAttack` `0x1402257C0`: the weapon collider's scale; its `movss xmm1, [1.0]` points at the pool's 0.75 (`0x1406C10A8`) in a KH1 battle (switched); our KH1 sphere radii × Re:CoM's live scale ÷ its base 0.5 while its flag (weapon `+0x2CC & 1`) is on (`0x140172690`'s field: type 2 `+0x74`, types 4/5/7/8/0xB `+0x70`) | × 1.5 | Checked (decomp + exe); the collider's type for Sora's weapon not read (both fields handled) |
+| Card Soldier | `+0x420 \|= 0x100`; Re:CoM's reader is its row pick (`0x1401F7A27`), which KH1 swings replace: our row pick calls Re:CoM's own motion speed `0x1401F74D0` after the motion request (which resets it to 1.0, `0x1401F7180`), as Re:CoM's does | × 1.25 (Re:CoM 2.0: the setter's parameter) | Checked (decomp); Assumption: every KH1 swing window follows Re:CoM's motion clock (the KH1 frame reads it) |
+| Oogie Boogie | CBTL `+0x208 \|= 0x400`, `+0x1F8` = 0; Re:CoM's tick heals max(1, missing ÷ 8) (`0x1401E59A0`) | every 6 s: `cmp [+0x1F8], 6000` → 18000 at `0x14016189D` and `0x1401600F2` (switched) | Checked (exe) |
+| Xemnas | `+0x420 \|= 0x1000` → Sora's damage check `0x1401E73C3`: the barrier on all classes, all round | 1 s: `mov [+0x7E4], 6000` → 3000 at `0x1401E73F3` (switched) | Checked (exe) |
+| Xaldin | Re:CoM's Aero Guard setter `0x1401F6FB0(p, 1)` (its wind, power Sora's `+0x43C`) | Re:CoM's | Checked (decomp) |
+| Saïx | `+0x420 \|= 0x40000000`; our swing start already repeats `initAttack`'s bonus (`+0x664 + 20`) at Damage = Re:CoM; now from 0 at a combo's first swing | + 20 power a combo step | Checked (code); decided: per combo (a permanent skill would grow without end); **Damage = KH1: no effect** (the bonus is card power) |
+| Roxas | `+0x420 \|= 0x20000000` → `procAttackCollision` → `setDoubleHit`; the weapon update `0x140225840` spawns the second strike with power weapon `+0x288`; in a KH1 battle its read `0x140225D7C` jumps to a stub that halves it (Re:CoM's ÷ 2) | half power | Checked (exe: no branch into the 10 bytes); **Damage = KH1**: the strike carries half of Re:CoM's cardless swing AP (the attack stat) through Re:CoM's hit path, not KH1's formula: owner question |
+| Dragon Maleficent | its play-time part is the reload charge (revolver `+0x8C` = 67): no meaning at KH1, not applied; its attack × 1.5 is stage 3's | — | — |
+
+### Switched sites (`sites::ENEMY_SKILL_PATCHES`, `ENEMY_SKILL_STUB_SITES`)
+
+At each battle start (`battle::manager_ctor`, as M6's P2–P5): ours in a KH1 battle, Re:CoM's
+otherwise. Each touches Sora's side only (the enemy side's Regen `0x800` / Bio `0x1000` have their own
+compares; `setWideAttack` / `setDoubleHit` are `CPlayerWeapon`'s; the barrier write is the player's
+damage check). Only the constant changes (tests); no other checked site overlaps one. A test checks
+every site; `check_sites_rs.py`: 1330 sites, 0 mismatches.
+
+### Not built here
+
+- Bouncywild's scattered-card test `0x14022F23A` (Re:CoM's 1.5 m pull of the cards its revolver
+  scatters when Sora is hit, `0x1401682D0` from the damage check through `0x14016CD80`): at KH1 the
+  revolver is empty, so no card is scattered (Checked (decomp)); every prize that exists uses `+0x550`.
+- Damage = KH1: Xaldin's wind, Neoshadow's Bio and Roxas' second strike carry Re:CoM's numbers.
+
+### Checked / not checked
+
+- Checked: tests (`skill_effects` 6, `sites::tests::enemy_skill_sites`,
+  `movement::tests::combo_finish_makes_every_swing_a_finisher`, the stage-1 tests updated),
+  `check_sites_rs.py`, `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings).
+- Not checked: in game (none of it); the second strike's bullet taking `+0x288` as its damage
+  (Assumption); Sora's weapon collider type; KH1 swings reaching the weapon update's hit result
+  (`+0x2C8`) that spawns the second strike (Assumption: our pair dispatch returns Re:CoM's results).
 ## Stage 4 (built): route 3, the direct compares
 
 Ask (manager brief, 2026-11-04, on the owner's "Enemy Skills numbers": "Larxene - Dash: run ×1.25",

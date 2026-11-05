@@ -610,6 +610,8 @@ pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: us
     super::enemy_skills_deck::battle_start(kh1);
     // Enemy Skills stage 4: the direct compares' bytes for this battle.
     super::enemy_skills_cmp::battle_start(kh1);
+    // Enemy Skills: Re:CoM's enemy-card numbers the owner changed, per battle (`enemy_skills`).
+    super::enemy_skills::battle_start(kh1);
     orig::<CtorFn>(&ORIG_MANAGER_CTOR)(this, a, c, d)
 }
 

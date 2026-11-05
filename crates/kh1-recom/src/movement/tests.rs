@@ -814,6 +814,17 @@ fn ground_combo_matches_the_oracle() {
     assert!(p.recom.swing_ends >= 1);
 }
 
+/// Enemy Skills (Bandit's Combo Finish): length 1, so every swing is the combo's finisher, with KH1's
+/// own picker (the oracle runs KH1's controller on the same abilities).
+#[test]
+fn combo_finish_makes_every_swing_a_finisher() {
+    let mut p = Pair::new(Abilities { combo_master: true, combo_finish: true, ..all() }, Floor::flat());
+    let started = run_attack(&mut p, 260, mash, false);
+    assert!(started.len() >= 2, "{started:?}");
+    assert!(started.iter().all(|&(_, _, c, f)| c == 1 && f), "{started:?}");
+    assert_eq!(started[0].1, 8, "KH1's ground finisher row");
+}
+
 #[test]
 fn a_missed_swing_ends_the_combo_like_kh1() {
     // No Combo Master and nothing hit: the press in the window is refused (KH1's rule), and the

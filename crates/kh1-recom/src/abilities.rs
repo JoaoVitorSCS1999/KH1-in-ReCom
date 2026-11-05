@@ -351,10 +351,11 @@ pub const CARD_BITS: Bits = {
     b
 };
 
-/// The abilities whose effect isn't built yet: shown greyed, never equipped (stage 1: Treasure
-/// Magnet, both copies; every Enemy Skill of its own until stages 2..5).
+/// The abilities whose effect isn't built yet: shown greyed, never equipped (every Enemy Skill of
+/// its own until its stage of 2..5 builds it, `crate::skill_effects::BUILT`; Treasure Magnet's
+/// level-72 copy with Bouncywild's, stage 2).
 pub const UNBUILT_BITS: Bits = {
-    let mut b: Bits = 1 << ix::TREASURE_MAGNET[0] | 1 << ix::TREASURE_MAGNET[1];
+    let mut b: Bits = if crate::skill_effects::built_help(0x4C).is_some() { 0 } else { 1 << ix::TREASURE_MAGNET[0] | 1 << ix::TREASURE_MAGNET[1] };
     let mut k = 0;
     while k < crate::enemy_skills::SKILLS.len() {
         let s = &crate::enemy_skills::SKILLS[k];
@@ -887,6 +888,8 @@ pub fn to_core(equipped: Bits) -> kh1_core::Abilities {
         combo_master: on(ix::COMBO_MASTER),
         combo_plus: count(&ix::COMBO_PLUS),
         air_combo_plus: count(&ix::AIR_COMBO_PLUS),
+        // Enemy Skills stage 2: Bandit's Combo Finish (`crate::skill_effects`).
+        combo_finish: crate::skill_effects::play(equipped).combo_finish,
         ..Default::default()
     };
     apply(equipped, &mut a);
@@ -1222,7 +1225,7 @@ pub mod page {
                 BERSERK => b"Raises Strength while Sora's HP is low.\0",
                 SECOND_CHANCE => b"Survive a blow that would knock you out, with 1 HP.\0",
                 // KH1's level-72 copy (the level-9 one is Bouncywild's card).
-                i if i == TREASURE_MAGNET[1] => b"Draws prizes in from afar. (not built yet)\0",
+                i if i == TREASURE_MAGNET[1] => crate::skill_effects::TREASURE_MAGNET_HELP,
                 // M12 step 4: the sleight abilities (Re:CoM's sleights; the owner's MP costs).
                 i if super::super::SLEIGHTS.contains(&i) => super::super::sleight_of(i).and_then(sleight_help).unwrap_or(b"\0"),
                 _ => b"\0",
@@ -1538,13 +1541,14 @@ mod tests {
         assert_eq!(to_core(all_cp).combo_plus, 3);
         assert_eq!(page::owner_of(ix::COMBO_PLUS[0]), Owner::EnemySkills);
         assert_eq!(page::owner_of(ix::COMBO_PLUS[1]), Owner::Sora);
-        // Treasure Magnet (both copies) and every own skill: unbuilt; the four other matches built.
-        assert!(!built(ix::TREASURE_MAGNET[0]) && !built(ix::TREASURE_MAGNET[1]));
+        // Treasure Magnet (both copies, stage 2) and the four other matches built; every own skill
+        // a stage built (`crate::skill_effects::BUILT`) too, the rest not yet.
+        assert!(built(ix::TREASURE_MAGNET[0]) && built(ix::TREASURE_MAGNET[1]));
         assert!([ix::COMBO_PLUS[0], ix::LEAF_BRACER, ix::BERSERK, ix::SECOND_CHANCE].iter().all(|&i| built(i)));
-        // Treasure Magnet's two copies and every own skill not built yet (stage 1: all 43; later stages build them).
+        // Every own skill a stage built is equippable; the rest (and nothing else) greyed.
         let own_unbuilt = crate::enemy_skills::SKILLS.iter().filter(|k| k.kind == crate::enemy_skills::Kind::Own && !k.built).count() as u32;
-        assert_eq!(UNBUILT_BITS.count_ones(), 2 + own_unbuilt);
-        assert!(own_unbuilt < 43, "stage 4 built some");
+        assert_eq!(UNBUILT_BITS.count_ones(), own_unbuilt);
+        assert!(own_unbuilt < 43, "stages 2 and 4 built some");
         assert_eq!(CARD_BITS.count_ones(), 48);
         assert_eq!(page::owner_of(ix::TREASURE_MAGNET[1]), Owner::Sora);
         assert_eq!(kh1_bits(CARD_BITS), kh1_bits(0), "no KH1 0x142D5EC10 bit");

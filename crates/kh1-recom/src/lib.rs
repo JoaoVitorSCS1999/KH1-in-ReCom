@@ -80,6 +80,7 @@ pub mod fx;
 pub mod enemy_skills;
 pub mod enemy_skills_cmp;
 pub mod enemy_skills_deck;
+pub mod skill_effects;
 pub mod deck;
 pub mod drops;
 pub mod field_sleights;

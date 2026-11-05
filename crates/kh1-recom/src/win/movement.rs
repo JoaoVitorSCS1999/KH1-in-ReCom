@@ -693,7 +693,8 @@ impl Host for RecomHost {
             // Set by Re:CoM's player set-up (`0x1401FAB40`); the exe's until then.
             if k.is_finite() && k > 0.0 && g.is_finite() && g < 0.0 {
                 n.rise_scale = k;
-                n.gravity = g;
+                // Wight Knight's Float (Enemy Skills): Sora's gravity × 0.75 (his own only).
+                n.gravity = g * super::enemy_skills::gravity_factor();
             }
         }
         n
@@ -796,7 +797,11 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
         *g = Some(Slot { player: pl, sora: Kh1Sora::new(Params::kh1_defaults(), abilities()), sync: None, last: FrameOut::default() });
     }
     let Some(slot) = g.as_mut() else { return };
+    // Enemy Skills: the first KH1 frame of this player applies them (one compare otherwise).
+    super::enemy_skills::kh1_frame(pl);
     slot.sora.abilities = abilities();
+    // Wight Knight's Float (Enemy Skills): KH1's gravity for Sora × 0.75.
+    slot.sora.params.gravity = kh1_core::params::GRAVITY * super::enemy_skills::gravity_factor();
     slot.sora.recom_roll = roll_mode() == RollMode::Recom;
     slot.sora.speeds = speeds();
     let mut input = trace::frame_input(&read_pad(pl));

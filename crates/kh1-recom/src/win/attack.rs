@@ -338,6 +338,9 @@ unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     wr(pl + field::ATTACK_ID, s.recom_id);
     wr(pl + field::ROW_PTR, row.as_ptr() as usize);
     func::<mv::MotionFn>(mv::MOTION_REQUEST)(pl, row[0] as i32, 0, s.root as u64, 0, 0, 0);
+    // Enemy Skills: Card Soldier's haste (Re:CoM's motion speed after the request, as its row pick),
+    // Saïx's bonus per combo (`super::enemy_skills`).
+    super::enemy_skills::swing_started(pl, s.counter);
     wr(pl + field::CARD_7B4, 0i32);
     // M12 step 3: KH1 tests Berserk when the swing's attack object is made (`0x1402B2DC0`).
     super::kh1_support::swing_started(pl, s.kh1_row);
@@ -594,7 +597,9 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     // Assumption: Sora's centre for the first frame's sweep is `player+0x4B0` (the attack origin
     // `onAttack` copies).
     let owner = rd_vec(pl + 0x4B0);
-    let spheres = atk::blade_shapes(a, bp, live.radius * crate::units::METRES_PER_UNIT, live.data.sweeps(), prev, owner);
+    // Enemy Skills: Guard Armor's Wide Attack, Re:CoM's own scale on the weapon (`super::enemy_skills`).
+    let wide = super::enemy_skills::wide_factor(weapon, shape);
+    let spheres = atk::blade_shapes(a, bp, live.radius * crate::units::METRES_PER_UNIT * wide, live.data.sweeps(), prev, owner);
     let ctx: usize = rd(va(b, COLL_CONTEXT));
     let owner_id: i32 = rd(coll + 0x20);
     let vt: usize = rd(coll);
@@ -924,6 +929,8 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
     if berserk != 0 && !recom {
         super::kh1_support::berserk_kh1_line(enemy, row.unwrap_or(0), kh1);
     }
+    // Enemy Skills: Fat Bandit's Back Attack, Re:CoM's doubling from behind on KH1's number.
+    let kh1 = if pl != 0 { kh1.map(|d| super::enemy_skills::back_attack_kh1(pl, carried as i32, d)) } else { kh1 };
     if let Some(d) = kh1 {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
     }
@@ -1322,6 +1329,8 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     if kh1 {
         no_card_duel(pl);
         aero_halve(pl);
+        // Enemy Skills: Large Body's Guard, a 10 % cut to the front (`super::enemy_skills`).
+        super::enemy_skills::large_body(pl);
     }
     // M12 step 3 (KH1's support abilities, `super::kh1_support`): only when a hit arrived (the
     // check's own gate `+0x41C & 0x200`), Sora's HP before the check.

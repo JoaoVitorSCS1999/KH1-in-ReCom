@@ -54,7 +54,11 @@ pub struct Skill {
 }
 
 const fn own(card: u16, name: &'static str, effect: &'static str, ap: u8, help: &'static [u8]) -> Skill {
-    Skill { card, name, effect, ap, help, kind: Kind::Own, built: false }
+    // A skill whose effect a later stage built takes that stage's help line (`crate::skill_effects`).
+    match crate::skill_effects::built_help(card) {
+        Some(h) => Skill { card, name, effect, ap, help: h, kind: Kind::Own, built: true },
+        None => Skill { card, name, effect, ap, help, kind: Kind::Own, built: false },
+    }
 }
 
 /// A skill of its own whose effect is built (plan stages 2..5).
@@ -63,7 +67,10 @@ const fn built(card: u16, name: &'static str, effect: &'static str, ap: u8, help
 }
 
 const fn kh1(card: u16, name: &'static str, effect: &'static str, ap: u8, ix: usize, built: bool, help: &'static [u8]) -> Skill {
-    Skill { card, name, effect, ap, help, kind: Kind::Kh1(ix), built }
+    match crate::skill_effects::built_help(card) {
+        Some(h) => Skill { card, name, effect, ap, help: h, kind: Kind::Kh1(ix), built: true },
+        None => Skill { card, name, effect, ap, help, kind: Kind::Kh1(ix), built },
+    }
 }
 
 use crate::abilities::ix;
@@ -309,6 +316,10 @@ mod tests {
         // Stage 5 (the deck-to-KH1 meanings): all ten.
         for c in crate::enemy_skills_deck::card::ALL {
             assert!(of_card(c).unwrap().built, "{c:#x}");
+        }
+        // Stage 2 (route 1, the play-time setters, `crate::skill_effects`): its own lines.
+        for (c, _) in crate::skill_effects::BUILT {
+            assert!(of_card(*c).unwrap().built, "{c:#x}");
         }
     }
 
