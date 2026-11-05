@@ -962,14 +962,14 @@ fn run(mod_dir: Option<PathBuf>) {
     if let Ok(mut g) = LOG_PATH.lock() {
         *g = Some(log_path);
     }
+    if !migrated.is_empty() {
+        log(&format!("settings: {} updated: {}", ini_path.display(), migrated.join("; ")));
+    }
     if let Ok(mut g) = INI_PATH.lock() {
         *g = Some(ini_path);
     }
     if let Ok(mut g) = SETTINGS.lock() {
         *g = Some(s.clone());
-    }
-    if !migrated.is_empty() {
-        log(&format!("settings: {} updated: {}", ini_path.display(), migrated.join("; ")));
     }
     log(&format!("dll: {}", dll.display()));
     log(&format!("mod folder: {}", mod_dir.display()));
