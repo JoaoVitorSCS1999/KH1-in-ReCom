@@ -485,6 +485,10 @@ Per frame: nothing. The wrappers run per room / battle build, per weapon build, 
 
 ## 11. Install layout (Panacea, OpenKH mod folder)
 
+Since 0.141.0 a GitHub install needs none of the `mod.yml` lines below: the DLL builds these files
+on first launch and copies them into `<mod_path>/recom` (`docs/openkh-github-install.md`). The
+lines stay right for a hand-made mod folder with `asset_build = off`.
+
 The asset step writes, under `<mod_path>/recom/` (or next to `--out`):
 
 | file | where Panacea must find it | how |

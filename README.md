@@ -4,19 +4,38 @@ A mod that brings Kingdom Hearts Final Mix's combat to Sora in Kingdom Hearts Re
 (PC, Steam, KH 1.5+2.5), built into Re:CoM's own systems. Work happens on the `testing` branch;
 the design rules are in `docs/`.
 
-**Status: version 0.1.0.** The mod loads, checks the game and writes a log. It doesn't change
-anything in play yet.
+## Requirements
 
-## Install (OpenKH + Panacea)
+- **KINGDOM HEARTS HD 1.5+2.5 ReMIX on Steam (PC)**, with **Kingdom Hearts Final Mix** and
+  **Re:Chain of Memories** both installed (the same collection folder). The mod builds its KH1
+  files from your own KH1 and Re:CoM files; no game files are shipped.
+- **OpenKH Mods Manager** set up for the PC version, with **Panacea** installed (the Mods
+  Manager's setup wizard does both).
 
-1. You need OpenKH's Mods Manager with Panacea set up for KH 1.5+2.5 (Steam).
-2. Make a mod folder holding `openkh/mod.yml` and `openkh/kh1-recom.dll`. The build bot commits
-   the DLL on `testing`. Install it for **Kingdom Hearts Re:Chain of Memories** in the Mods
-   Manager, then tick it and build.
-3. Start Re:CoM. Next to the game exe you'll find:
-   - `kh1-recom.log`: what the mod found. The last line should be
-     `result: all checks passed.`
-   - `kh1-recom.ini`: settings, written with the defaults on first launch.
+## Install (OpenKH, from GitHub)
+
+1. Open the OpenKH Mods Manager and select **Kingdom Hearts Re:Chain of Memories** in its game list
+   (the mod is installed for the game selected at that moment).
+2. Mods → **Install a new mod** → type `PM2CRAZY/KH1-in-ReCom` → Install. (It installs the default
+   branch, `testing`; `PM2CRAZY/KH1-in-ReCom/testing` names it outright.)
+3. Tick the mod and press **Build** (or **Build and Run**).
+4. Start Re:CoM. **On the first start a window opens and builds the KH1 files** from your games
+   (a minute or two; please don't close it). The game starts by itself when it is done. Nothing
+   else is needed: no second Build, no restart.
+5. Next to the game exe you'll find `kh1-recom.log` (what the mod did), `kh1-recom-build.log` (the
+   build's details) and `kh1-recom.ini` (settings, also in the camp menu's KH1 entry).
+
+What the first start does: it reads KH1 Final Mix's and Re:CoM's archives (`Image/dt`) and makes
+the files the mod plays with (Sora's KH1 motions, the KH1 Keyblades, enemies, effects, sounds, HUD
+pieces). It keeps them in the mod's folder (`generated/`) and copies them into OpenKH's mod folder.
+A later Build removes that copy; the next start puts it back in a moment. The window comes back
+only when an update of the mod changes how the files are made, or when the game itself is updated.
+
+If KH1 Final Mix is not installed, a message says so and the game starts without the KH1 files.
+
+**Updating:** in the Mods Manager, check for updates and update the mod, then Build.
+
+Details for developers: `docs/openkh-github-install.md`.
 
 ## KH1 playground (demo)
 
@@ -33,7 +52,10 @@ KH 1.5+2.5 install. It finds the install by itself, or you can pass `--game-dir 
 ## Build
 
 - Tests: `cargo test`
-- Windows DLL from Linux: `tools/build-win.sh` (MinGW; writes `openkh/kh1-recom.dll`).
+- Windows DLL from Linux: `tools/build-win.sh` (MinGW; writes `openkh/kh1-recom.dll`, which the
+  root `mod.yml` installs; the build bot commits it on `testing`).
+- The asset step by hand: `kh1-recom-build --game <game folder>` (`docs/kh1-recom-assets.md`). Set
+  `asset_build = off` in `kh1-recom.ini` so the DLL leaves its files alone.
 - Playground: `cargo run --release -p kh1-playground`.
 
 This repository contains no game files, no extracted data and no decompiled code.

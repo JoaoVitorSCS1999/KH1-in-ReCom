@@ -66,6 +66,7 @@
 //! KH1-only clips the movement plays (High Jump, Guard).
 
 pub mod abilities;
+pub mod asset_build;
 pub mod attack;
 pub mod battle;
 pub mod boss;

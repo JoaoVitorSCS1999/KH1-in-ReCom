@@ -18,8 +18,12 @@ Tags: Checked (decomp / exe / files / source) or Assumption.
 ## Use
 
 ```
-kh1-recom-build [--game <KH 1.5+2.5 folder>] [--mod-dir <mod_path>] [--out <file>] [--loop E,..] [--once E,..] [--dry-run]
+kh1-recom-build [--game <KH 1.5+2.5 folder>] [--mod-dir <mod_path>] [--out <file>] [--root <folder>] [--loop E,..] [--once E,..] [--dry-run]
 ```
+
+Since 0.141.0 the step is the library's `kh1_recom_assets::step::run`, and the DLL runs it on first
+launch (`docs/openkh-github-install.md`). `--root <folder>` writes everything under `<folder>` as
+`<mod_path>/recom` would hold it; the DLL's build uses that layout in the mod's `generated/` folder.
 
 - `--game` defaults to `.`. It reads:
   - `Image/dt/Recom.hed/.pkg`: `PLAYER/0001/PL0001.ANN` and `.MDL`;
@@ -427,8 +431,10 @@ bones): local rotation (geodesic angle), translation and scale.
   KH1 motion; using Re:CoM's own different-looking motions for them would need a mapping by role.
 - PL0011 / PL0012: Sora's second model and its Keyblade (see above). Not extended.
 - Keyblade entry 4's `k9` residual (1.58°): an oracle question for `kh1-anim`.
-- Assumption: OpenKH Mods Manager rebuilds the mod folder on "Build" and may delete files it did
-  not place. Run the step after a build, or ship it as the mod's install step (M14).
+- OpenKH Mods Manager's Build deletes `<openkh>/mod/Recom` before it copies the mods' assets
+  (Checked (source, 0.141.0): `ModsService.RunPatcherAsync`). Since 0.141.0 the DLL builds into the
+  mod's own `generated/` folder and copies the files back at each start
+  (`docs/openkh-github-install.md`).
 - Pose capture in game (the M2 "done when") is not done.
 - Version / `AGENTS.md` stage entry for this crate: left to the lead (this task was limited to
   the crate and this note).

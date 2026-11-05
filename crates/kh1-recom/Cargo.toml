@@ -1,6 +1,6 @@
 [package]
 name = "kh1-recom"
-version = "0.140.0"
+version = "0.141.0"
 edition = "2021"
 description = "KH1 combat in Kingdom Hearts Re:Chain of Memories (PC, Steam): the DLL Panacea loads."
 license = "MIT OR Apache-2.0"
@@ -10,3 +10,5 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 kh1-core = { path = "../kh1-core" }
+# The asset step, run by the DLL on first launch (asset_build.rs, docs/openkh-github-install.md).
+kh1-recom-assets = { path = "../kh1-recom-assets" }

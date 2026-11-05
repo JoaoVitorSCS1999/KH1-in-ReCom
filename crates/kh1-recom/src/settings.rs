@@ -156,6 +156,11 @@ pub struct Settings {
     /// Re:CoM's camp menu untouched (a safety switch; the settings then come from this file only).
     /// The key keeps its old name (it once added rows to Re:CoM's Config menu).
     pub config_menu: bool,
+    /// The first-launch build of the game-made files (`asset_build = auto | off`;
+    /// `docs/openkh-github-install.md`): `auto` builds them from the player's KH1 and Re:CoM files
+    /// when they are missing or out of date, and copies them into Panacea's folder; `off` leaves
+    /// that folder as Build made it (the owner's manual asset step). Default auto.
+    pub asset_build: bool,
     /// KH1 abilities from the ini (M9 stage 9b, `crate::abilities`): the story abilities' unlock
     /// (High Jump, Glide, Superglide, Dodge Roll, Combo Master), the movement abilities a save
     /// keeps equipped at its migration to the ability state (Guard, Counterattack, Combo Plus, Air
@@ -319,7 +324,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
     }
 }
 
@@ -396,6 +401,14 @@ auto_camera = on
 ; config_menu = on | off
 ;   off: no KH1 entry in the camp menu: Re:CoM's camp menu untouched (use this file instead).
 config_menu = on
+;
+; asset_build = auto | off
+;   auto: at start, when the KH1 files the mod makes from your own KH1 and Re:CoM files are
+;         missing or out of date (first launch, an update of the mod, a game update), the mod
+;         builds them (a window shows the progress; the game starts when it is done) and puts
+;         them into OpenKH's mod folder.
+;   off:  never: the files are the ones OpenKH's Build put there.
+asset_build = auto
 ;
 ; KH1 abilities at combat = kh1 (on | off). Since M9 9b they live in the save and are equipped
 ; in the camp's KH1 > Abilities page with KH1's AP. Sora learns them in the game: Guard and
@@ -544,6 +557,13 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(m) => s.sounds = m,
                 None => warnings.push(bad("sounds must be kh1 or recom")),
             },
+            "asset_build" => match v.trim().to_ascii_lowercase().as_str() {
+                "auto" => s.asset_build = true,
+                x => match parse_switch(x) {
+                    Some(b) => s.asset_build = b,
+                    None => warnings.push(bad("asset_build must be auto or off")),
+                },
+            },
             "config_menu" => match parse_switch(v) {
                 Some(b) => s.config_menu = b,
                 None => warnings.push(bad("config_menu must be on or off")),
@@ -681,7 +701,8 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "sounds", s.sounds.as_str());
     let t = set_key(&t, "camera", s.camera.as_str());
     let t = set_key(&t, "auto_camera", switch_str(s.auto_camera));
-    let mut t = set_key(&t, "config_menu", switch_str(s.config_menu));
+    let t = set_key(&t, "config_menu", switch_str(s.config_menu));
+    let mut t = set_key(&t, "asset_build", if s.asset_build { "auto" } else { "off" });
     let a = s.abilities;
     for (k, v) in [("high_jump", a.high_jump), ("glide", a.glide), ("superglide", a.superglide), ("guard", a.guard), ("counterattack", a.counterattack)] {
         t = set_key(&t, k, switch_str(v));
@@ -813,7 +834,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
@@ -963,5 +984,19 @@ mod combo_tests {
         assert_eq!(s.hud, Mode::Kh1);
         assert_eq!(parse(&store(DEFAULT_FILE, &s)).0.hud, Mode::Kh1);
         assert_eq!(parse("hud = maybe\n").1.len(), 1);
+    }
+
+    #[test]
+    fn asset_build_switch() {
+        assert!(Settings::default().asset_build);
+        assert!(DEFAULT_FILE.contains("\nasset_build = auto\n"));
+        let (s, w) = parse("asset_build = off\n");
+        assert!(!s.asset_build && w.is_empty());
+        let (s, w) = parse("asset_build = Auto\n");
+        assert!(s.asset_build && w.is_empty());
+        let (s, w) = parse("asset_build = sometimes\n");
+        assert!(s.asset_build && w.len() == 1, "{w:?}");
+        let t = store("combat = kh1\n", &Settings { asset_build: false, ..Default::default() });
+        assert!(t.contains("asset_build = off") && !parse(&t).0.asset_build);
     }
 }

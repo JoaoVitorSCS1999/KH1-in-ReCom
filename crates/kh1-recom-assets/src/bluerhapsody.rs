@@ -146,6 +146,7 @@ pub const REQUESTS: &[(u32, usize)] = &[
 /// serial) on Re:CoM's only body attack, id 1 (`e004_051`'s record: decision M10's "power of the Re:CoM attack of the same
 /// kind"); its body row on the same.
 pub const MELEE: RowSpec = RowSpec { at: 0xEC, recom_id: 1 };
+/// Melee 215's body row (`0x15C`), on the same Re:CoM attack.
 pub const MELEE_BODY: RowSpec = RowSpec { at: 0x15C, recom_id: 1 };
 
 /// Its one attack, in the behaviour's order (`kh1_core::bluerhapsody::Attack`).

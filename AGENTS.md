@@ -11,6 +11,46 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 257: install from GitHub through OpenKH; the DLL builds the game-made files on first launch, version 0.141.0 (2026-11-05)
+
+Owner, 2026-11-05, verbatim: "I also want people to be able to install the mod from openKH by using the GitHub". Answers (`design-philosophy-instructions.md`, last entry): OpenKH's GitHub install of `PM2CRAZY/KH1-in-ReCom` from the default branch `testing`; "DLL builds on first launch", and again after an update changes the asset step.
+
+- **Research** (Checked (source): OpenKH `b67a743`; GitHub API; details and tags in `docs/openkh-github-install.md` §§ 1–4):
+  - The install clones the default branch when `main/mod.yml` is missing (`testing` here: the only branch). `mod.yml` must be at the root. The clone goes to `<openkh>/mods/<selected game>/<owner>/<repo>`, with full history (76 MB).
+  - Update is `git fetch` + a hard reset (ignored files stay: Assumption, libgit2's rules).
+  - Build deletes `<openkh>/mod/Recom` first. A `copy` asset with a missing source is skipped with a warning.
+  - Panacea runs `LoadDLLs` / `OnInit` inside its `DllMain` (loader lock held). It lists `<mod_path>/recom` once, in the game's `SetReplacePath`. A new name written later is never seen; a later `raw/` one dereferences a null file-info.
+  - So the files must be in place before `OnInit` returns: no worker thread. Done that way, they are used in the same run.
+- **Repository root:**
+  - `mod.yml` (`game: Recom`; one asset: `dll/kh1-recom.dll` from the bot's `openkh/kh1-recom.dll`; `build.yml` unchanged). `openkh/mod.yml` (0.1.0 text) removed.
+  - `.gitignore` covers `/generated/` and the step's outputs in a mod folder.
+  - `README.md`: the player's install steps and requirements.
+  - The game-made files are not listed in `mod.yml`: ~180 warnings on the first Build, and a list kept by hand, for nothing the DLL doesn't do anyway.
+- **The asset step as a library:**
+  - `kh1_recom_assets::step::run` (the old `main.rs` body). Output goes through `say` / `set_sink`, and every written file is recorded.
+  - `Dest::Root` (CLI `--root`); `previews` off for the DLL. `main.rs` is now only the argument parser.
+  - The build script `step_hash.rs` hashes the step's sources (`KH1_ASSET_STEP_HASH`). `stamp.rs` holds the stamp (step hash, the inputs' names / sizes / times, the files and sizes), the failed marker, and `place` (copy what is missing or differs).
+- **The DLL at start** (`asset_build.rs` rules, tested; `win/assets.rs`; called from `win::run` after the exe check, before anything reads the files):
+  - It finds the mod's own folder: `mods-manager.yml`'s paths, else `<openkh>/mods/Recom`; the folder whose DLL source has the running DLL's size, else `PM2CRAZY/KH1-in-ReCom`.
+  - The cache is `<mod>/generated/` (else `<game>/kh1-recom-generated/`).
+  - It builds when the cache has no stamp for this step and these inputs. A failed marker for the same pair stops repeats.
+  - The build runs in `rundll32.exe "<dll>",BuildAssets <job>` (export `BuildAssetsW`, this same DLL): a console window with progress, `kh1-recom-build.log`, and a message box on failure (no KH1: it says so; the game then runs without the KH1 files). A crash ends only the helper.
+  - If the helper can't start, the step runs in the game under a guard marker.
+  - Then the stamped files are copied into `<mod_path>/recom`, and only where missing or different (after a Build).
+  - `asset_build = auto | off` in the ini (default auto).
+- No hook, patch, site or address; nothing per frame.
+- **Size:** about +2.1 MB of DLL (same toolchain: 0.139.4 4,447,217 bytes; 0.141.0 6,583,300).
+- Assumptions:
+  - the game's `SetReplacePath` runs after every `DllMain` / `OnInit`;
+  - `CreateProcess` and the process wait work from inside Panacea's `DllMain`;
+  - rundll32 calls the `W` export and accepts the quoted DLL path;
+  - a hard reset keeps ignored files.
+- Checked: tests (`stamp::tests::*`, `asset_build::tests::*` including `the_repo_root_is_an_openkh_mod`, `settings::…::asset_build_switch`), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings; three old missing-docs warnings in the asset crate fixed, as the DLL now builds it).
+- Not checked: in game; a real OpenKH install; the step end to end (this session's game folder is a sparse copy without `PL0001.SES`); a full build's time.
+- Asset step: unchanged in what it writes. Docs: `openkh-github-install.md` (new), `kh1-recom-assets.md` (Use, Open), `recom-keyblade-models.md` § 11.
+
+---
+
 ## Stage 256: equipped rows say "Equipped" where Re:CoM's "NEW!" badge was (Abilities, the Keyblade list, the Customize picker), in Re:CoM's own text, version 0.140.0 (2026-11-05)
 
 Owner, 2026-11-05 (recording, Abilities > Enemy Skills), verbatim: "also, instead of equipped items/abilities saying "new" when they're equipped, can they just say "equipped""

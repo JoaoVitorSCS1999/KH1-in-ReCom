@@ -15,6 +15,9 @@
 //! - [`kh2_keyblades`]: the six KH2 Keyblades' items, stats, models and reach (decision 25);
 //! - [`convert`]: KH1 pose (via `kh1-anim`) → Re:CoM bones → clip;
 //! - [`build`]: the whole pack + manifest from the four input files;
+//! - [`step`]: the whole step (the command line's and the DLL's first-launch build);
+//! - [`stamp`]: the build stamp (the step's source hash, the inputs' sizes and times, the files
+//!   written);
 //! - [`install`]: finding the files in the player's install and the Panacea mod folder;
 //! - [`ses`]: Re:CoM's per-motion sound events for the KH1-only clips (`PL0001.SES`);
 //! - [`stats`]: KH1 enemy twins' records and Sora's KH1 Strength (`kh1-stats.json`);
@@ -85,6 +88,8 @@ pub mod rednocturne;
 pub mod bluerhapsody;
 pub mod yellowopera;
 pub mod stats;
+pub mod stamp;
+pub mod step;
 pub mod texture;
 pub mod uibin;
 

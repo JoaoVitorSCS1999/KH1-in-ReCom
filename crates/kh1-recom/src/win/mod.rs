@@ -2,6 +2,7 @@
 //! between the KH1 camp entry's settings pages and `kh1-recom.ini`.
 
 mod abilities;
+mod assets;
 mod attack;
 mod battle;
 mod camera;
@@ -963,6 +964,11 @@ fn run(mod_dir: Option<PathBuf>) {
     BASE.store(base, Ordering::Relaxed);
     crash::install(MODULE.load(Ordering::Relaxed));
 
+    // The game-made files (owner, 2026-11-05: "DLL builds on first launch"): built from the
+    // player's KH1 and Re:CoM files when missing or out of date, and copied into Panacea's folder
+    // before anything below reads them and before the game lists that folder.
+    assets::ensure(&game_dir, &mod_dir, &dll, s.asset_build);
+
     // The camp menu's "KH1" entry: its submenu and pages run in the camp's Config states through
     // the Config input wrapper (Re:CoM's own Config screen goes to the original, unchanged).
     if s.config_menu {
@@ -1013,6 +1019,11 @@ pub unsafe extern "system" fn DllMain(module: *mut c_void, reason: u32, _reserve
     const DLL_PROCESS_ATTACH: u32 = 1;
     if reason == DLL_PROCESS_ATTACH {
         MODULE.store(module as usize, Ordering::Relaxed);
+        // The first-launch build's helper (`rundll32 … BuildAssets`): never the game's start-up.
+        let host = module_path(std::ptr::null_mut());
+        if host.file_name().is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("rundll32.exe")) {
+            return 1;
+        }
         // If nothing calls OnInit (loaded some other way), start anyway after a moment.
         std::thread::spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(3));

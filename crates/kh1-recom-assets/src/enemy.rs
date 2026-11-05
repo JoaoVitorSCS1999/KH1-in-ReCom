@@ -1417,7 +1417,9 @@ fn child_consts(name: &str, mdls: &[u8]) -> Result<Vec<(String, f32)>> {
 /// Where a [`T_POINTS`] point's t comes from: a constant already read (a child's push), or a number of KH1's exe.
 #[derive(Clone, Copy, Debug)]
 pub enum TFrom {
+    /// A constant already read, by name.
     Const(&'static str),
+    /// A number of KH1's exe.
     Value(f32),
 }
 

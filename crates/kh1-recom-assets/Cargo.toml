@@ -4,6 +4,8 @@ description = "The asset build step: converts KH1 FM Sora's motions (the player'
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
+# KH1_ASSET_STEP_HASH: the step's source hash, for the DLL's build stamp (src/stamp.rs).
+build = "step_hash.rs"
 
 [lib]
 path = "src/lib.rs"
