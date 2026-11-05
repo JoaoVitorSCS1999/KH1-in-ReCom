@@ -662,3 +662,9 @@ At KH1 setting:
   - **This is the owner's one exception to "only `testing`"**: `main` is written **only when the owner says so**, only with release files (no source, no game files), never force-pushed. All work still happens on `testing`.
   - First release: 0.142.0.
 - **Sora's damage cap** (owner, 2026-11-05, verbatim: "lets add a damage cap to sora"; answers): a cap on the **damage Sora deals** per hit, by **KH1's own rule** (research it and tell the owner the numbers before building), at **Combat = KH1 only**.
+- **Damage cap answers** (owner, 2026-11-05; research in `/home/claude/scratch-dmgcap/notes.md`, to be written up in the docs with the build):
+  - KH1's cap is the **enemy's per-hit cap** (its stat record `+0xC2`; floor `+0xC0`), applied after power and the damage table, before resistance (Checked: KH1 `0x1402BFA80`). Re:CoM has none.
+  - **(b) Same share of HP:** at Damage = Re:CoM, cap = KH1 cap × Re:CoM max HP ÷ KH1 max HP (twin, proxy or boss-twin record); at Damage = KH1, KH1's raw cap. % of HP hits (Gravity, Gravity Break, Zantetsuken) are never capped, as in KH1; resistance still applies after the cap, so weaknesses can go past it, as in KH1.
+  - **Covers:** swings, specials, spells, Sleights-list sleights, LV3 summons and Party (friend) sleights.
+  - **Re:CoM's extras stay under the cap** (weak parts, the frozen +100, Back Attack, Enemy Skills multipliers), as KH1 puts every bonus before its cap.
+  - Combat = KH1 only.
