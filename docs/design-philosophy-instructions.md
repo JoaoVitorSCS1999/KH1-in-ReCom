@@ -650,3 +650,6 @@ At KH1 setting:
   - **KH1's lock rules on R1** at Combat = KH1 (controller): R1 again unlocks at once; L2 steps through targets (KH1's). No hold-style Config row.
   - Button prompts: leave as they are.
   - KH1 Auto camera's near-wall ramp: **(a) 8 + 8 flat 2.5 m rays** with Re:CoM's sweep, only while the swing runs.
+- **Ability list order and "Equipped" label** (owner, 2026-11-05, with a recording, verbatim: "When activating an ability it automatically puts it all the way at the bottom of the list. also, instead of equipped items/abilities saying "new" when they're equipped, can they just say "equipped""):
+  - Equipping (or removing) an ability keeps the list's order; the cursor stays on the row.
+  - Equipped abilities and items show **"Equipped"** where they now show Re:CoM's "NEW" badge.
