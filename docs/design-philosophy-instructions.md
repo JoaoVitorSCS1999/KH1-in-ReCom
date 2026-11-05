@@ -636,3 +636,7 @@ At KH1 setting:
   - **The sell screen's Items tab**: the same green bottle icon as the buy screen's, placed first; help line "Sell items".
   - **Ansem (Sleightblind)**: keep Re:CoM's half damage from Fire, Blizzard and Thunder (an exception to "boss skills give no affinities").
   - **Black Fungus**: picks from every built skill, learned or not (Re:CoM's way).
+- **Shop text, lock-on and camera** (owner, 2026-11-04, verbatim: "The moogle shop text is over extending past the text bubbles. Let's have the lock on button be mapped to R1 if combat is set to KH1. If on mouse and keyboard it stays the same. Lets also have an option in the config to switch between Re:CoM camera, KH1 Camera, And KH2 camera."):
+  - The Moogle's speech-bubble lines must fit the bubble (e.g. "Restores HP. 10 Moogle Points. Sora has 11" overflows). Decided: wrap onto the bubble's lines as Re:CoM's own two-line lines do; squeeze only if a line still can't fit.
+  - **Lock-on on R1** at Combat = KH1 on a controller; keyboard and mouse keep Re:CoM's binding.
+  - **A Config option: Re:CoM / KH1 / KH2 camera.** Research both KH1's and KH2's cameras (decomps) and Re:CoM's camera system first; plan with the owner before building.
