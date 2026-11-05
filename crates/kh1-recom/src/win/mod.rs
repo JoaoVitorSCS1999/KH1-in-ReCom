@@ -24,6 +24,7 @@ mod items;
 mod keyblades;
 mod kh1_hud;
 mod level_up;
+mod lock_on;
 mod magic;
 mod magic_fx;
 mod menu;
@@ -418,6 +419,18 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         }
         install_magic(base);
         install_items(base, s);
+        // Lock-on on R1 at combat = kh1 on a controller (`crate::lock_on`).
+        let lk = [hook::Hook { site: &crate::sites::LOCK_ON_HOOK[0], ours: lock_on::lock_on as *const () as usize, original: &lock_on::ORIG_LOCK_ON }];
+        let checked = crate::sites::LOCK_ON_CHECKED.iter().all(|s| {
+            // SAFETY: a read of the mapped exe's code.
+            unsafe { std::slice::from_raw_parts((base + s.rva as usize) as *const u8, s.expect.len()) == s.expect }
+        });
+        // SAFETY: the target's bytes are checked again inside, before anything is written.
+        if checked && unsafe { hook::install_all(base, &lk) } {
+            lock_on::mark_installed();
+        } else {
+            log("lock-on: Re:CoM's lock-on not hooked; the lock-on stays on Re:CoM's button (R2)");
+        }
         install_specials(base);
         install_drops(base);
         install_gimmick(base);

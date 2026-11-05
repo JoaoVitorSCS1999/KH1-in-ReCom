@@ -98,6 +98,7 @@ pub mod keyblade_models;
 pub mod keyblades;
 pub mod kh1_hud;
 pub mod level_up;
+pub mod lock_on;
 pub mod magic;
 pub mod menu_sounds;
 pub mod sounds;

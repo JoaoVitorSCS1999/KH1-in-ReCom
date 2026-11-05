@@ -4150,6 +4150,33 @@ pub const TEXT_FIT_PTRS: &[PtrSite] = &[
     PtrSite { name: "C2DFnt vtable +0x30 (0x140606CC8)", rva: 0x0060_6CC8, target: 0x0024_3FF0 },
 ];
 
+/// Lock-on on R1 at Combat = KH1 on a controller (`crate::lock_on`, `win::lock_on`,
+/// `docs/recom-lock-on.md`): Re:CoM's lock-on `0x1401E8DA0` (its two callers are the player's Field
+/// and Battle exes, `0x1401F994B` / `0x1401FA1A2`; no branch into the 6 moved bytes: exe scan).
+pub const LOCK_ON_HOOK: &[Site] = &[
+    // push rbx; sub rsp,0x20 (then mov rax,[rcx+0x3F8]).
+    Site { name: "lock-on (0x1401E8DA0)", rva: 0x001E_8DA0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// What the lock-on remap relies on. Checked only.
+pub const LOCK_ON_CHECKED: &[Site] = &[
+    // The rest of the lock-on's head: mov rax,[rcx+0x3F8]; mov rbx,rcx.
+    Site { name: "lock-on: its head (0x1401E8DA6)", rva: 0x001E_8DA6, expect: &[0x48, 0x8B, 0x81, 0xF8, 0x03, 0x00, 0x00, 0x48, 0x8B, 0xD9] },
+    // The pad object's update 0x1401FF150 writes its buttons each frame: +0x38 = 4 (L1), +0x3C = 8 (R1),
+    // +0x40 = edi (1, L2), +0x44 = 2 (R2: the lock-on).
+    Site { name: "player pad update: the action buttons (0x1401FF19D)", rva: 0x001F_F19D, expect: &[0xC7, 0x41, 0x38, 0x04, 0x00, 0x00, 0x00, 0xC7, 0x41, 0x3C, 0x08, 0x00, 0x00, 0x00, 0x89, 0x79, 0x40, 0xC7, 0x41, 0x44, 0x02, 0x00, 0x00, 0x00] },
+    // The three readers of +0x44 (each mov ecx,[rcx+0x44]; call the pad held / released / pressed test),
+    // all called only from the lock-on.
+    Site { name: "lock button held (0x1401FF4F0)", rva: 0x001F_F4F0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x19, 0x33, 0xD2, 0x8B, 0x49, 0x44, 0x83, 0xE3, 0x01, 0xE8, 0xBB, 0xBD, 0x09, 0x00, 0x0F, 0xAF, 0xC3, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3] },
+    Site { name: "lock button released (0x1401FF600)", rva: 0x001F_F600, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x19, 0x33, 0xD2, 0x8B, 0x49, 0x44, 0x83, 0xE3, 0x01, 0xE8, 0xBB, 0xBC, 0x09, 0x00, 0x83, 0xF3, 0x01, 0x0B, 0xC3, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3] },
+    Site { name: "lock button pressed (0x1401FF740)", rva: 0x001F_F740, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x8B, 0x19, 0x33, 0xD2, 0x8B, 0x49, 0x44, 0x83, 0xE3, 0x01, 0xE8, 0x9B, 0xBB, 0x09, 0x00, 0x0F, 0xAF, 0xC3, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3] },
+    // The device in use: any key or mouse input -> [0x140C2FF64] = 1 (then the key glyphs), any pad
+    // input -> 0 (0x140347EF0).
+    Site { name: "device in use (0x140347EF0)", rva: 0x0034_7EF0, expect: &[0x48, 0x83, 0xEC, 0x28, 0xE8, 0x27, 0xF5, 0xFF, 0xFF, 0x85, 0xC0, 0x74, 0x20, 0x83, 0x3D, 0x60, 0x80, 0x8E, 0x00, 0x00, 0x0F, 0x85, 0xE3, 0x00, 0x00, 0x00, 0xC7, 0x05, 0x50, 0x80, 0x8E, 0x00, 0x01, 0x00, 0x00, 0x00] },
+    // Its getter: mov eax,[0x140C2FF64]; ret.
+    Site { name: "keyboard / mouse in use getter (0x1403471C0)", rva: 0x0034_71C0, expect: &[0x8B, 0x05, 0x9E, 0x8D, 0x8E, 0x00, 0xC3] },
+];
+
 /// 0.132.0, the Moogle's speech bubble (`win::shop::bubble_line`, `crate::text_fit::wrap`,
 /// `docs/recom-m8-items.md` § M8d text fit): Re:CoM's `CStrPrim` vtable (`0x140508FD0`, a
 /// `CTextWnd`'s text; every code reference a store, no absolute pointer: Checked (exe scan)), copied
@@ -4374,6 +4401,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         crate::enemy_skills_cmp::CHECKED,
         TEXT_FIT_CHECKED,
         BUBBLE_CHECKED,
+        LOCK_ON_HOOK,
+        LOCK_ON_CHECKED,
     ];
     LISTS
         .iter()
@@ -4584,6 +4613,32 @@ mod tests {
         }
     }
 
+    /// Lock-on on R1: Re:CoM's lock-on, its button field and the device flag, as the exe says them.
+    #[test]
+    fn lock_on_sites() {
+        use crate::lock_on::{bits, recom};
+        assert_eq!(LOCK_ON_HOOK[0].rva, recom::LOCK_ON);
+        let find = |n: &str| LOCK_ON_CHECKED.iter().find(|s| s.name.starts_with(n)).unwrap();
+        let rel = |s: &Site, at: usize| s.rva as i64 + at as i64 + 4 + i32::from_le_bytes(s.expect[at..at + 4].try_into().unwrap()) as i64;
+        let up = find("player pad update");
+        // mov dword [rcx+0x44], 2: Re:CoM's lock-on button is R2; R1 is +0x3C's 8.
+        assert_eq!(&up.expect[17..21], &[0xC7, 0x41, recom::LOCK_BUTTON as u8, bits::R2 as u8]);
+        assert_eq!(&up.expect[7..11], &[0xC7, 0x41, 0x3C, bits::R1 as u8]);
+        assert_eq!(&up.expect[0..4], &[0xC7, 0x41, 0x38, bits::L1 as u8]);
+        // The readers: +0x44, then the pad's held / released / pressed tests.
+        for (n, target) in [("lock button held", 0x0029_B2C0i64), ("lock button released", 0x0029_B2D0), ("lock button pressed", 0x0029_B2F0)] {
+            let r = find(n);
+            assert_eq!(&r.expect[10..13], &[0x8B, 0x49, recom::LOCK_BUTTON as u8], "{n}");
+            assert_eq!(r.expect[16], 0xE8);
+            assert_eq!(rel(r, 17), target, "{n}");
+        }
+        // The device flag: the detection writes it (1 on keys / mouse), the getter reads it.
+        let d = find("device in use");
+        assert_eq!(rel(d, 15) + 1, recom::KBM_IN_USE as i64, "cmp dword [rip+..], 0 (an imm8 after the disp)");
+        assert_eq!(rel(d, 28) + 4, recom::KBM_IN_USE as i64, "mov dword [rip+..], 1 (an imm32 after the disp)");
+        assert_eq!(rel(find("keyboard / mouse in use getter"), 2), recom::KBM_IN_USE as i64);
+    }
+
     /// 0.132.0: the bubble's text class and fields, as the exe's bytes say them.
     #[test]
     fn bubble_sites() {
@@ -4636,7 +4691,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS, BOUNCYWILD_HOOKS, REDNOCTURNE_HOOKS, BLUERHAPSODY_HOOKS, GREENREQUIEM_HOOKS, YELLOWOPERA_HOOKS];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS, BOUNCYWILD_HOOKS, REDNOCTURNE_HOOKS, BLUERHAPSODY_HOOKS, GREENREQUIEM_HOOKS, YELLOWOPERA_HOOKS, LOCK_ON_HOOK];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

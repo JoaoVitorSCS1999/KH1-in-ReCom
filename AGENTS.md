@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 245: Lock-on on R1 at Combat = KH1 on a controller (Re:CoM's own lock-on reading R1; keyboard / mouse keep Re:CoM's binding), version 0.133.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Shop text, lock-on and camera), verbatim: "Let's have the lock on button be mapped to R1 if combat is set to KH1. If on mouse and keyboard it stays the same." Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story: Re:CoM's.
+
+- **Re:CoM** (Checked (decomp + disasm + exe)): its lock-on `0x1401E8DA0` (once a frame from the Field / Battle exes) reads its button from the player's pad object `+0x230 + 0x44`, through its three readers only (`0x1401FF740` pressed, `0x1401FF600` released, `0x1401FF4F0` held); the pad update writes `+0x44` = 2 every frame (`0x1401FF19D`; L2 1, **R2 2**, L1 4, R1 8 in Re:CoM's PS2 order): **Re:CoM's lock-on is R2**. R1 is card scroll right / sleight with L1, both off in a KH1 battle (`win::attack::request_bits`). Pad or keyboard: `0x140C2FF64` (1 keyboard / mouse), set each frame by `0x140347EF0`.
+- **KH1** (Checked (KH1 Steam decomp + exe)): pad table `0x140528290` R1 `0x800` → logical `0x400`, the lock-on of `0x1402B0610` (R1 again unlocks; L2 steps through the targets).
+- **Change** (`crate::lock_on`, `win::lock_on`): a wrapper on Re:CoM's lock-on (`sites::LOCK_ON_HOOK`, 6 bytes; no branch in: rel32 scan) writes `+0x44` = **8 (R1)** for KH1 Sora when the pad is in use (Re:CoM's 2 with the keyboard / mouse) before Re:CoM's own runs: Re:CoM locks, unlocks (press and release) and switches targets (held + right stick) on R1. R2 then does nothing at Combat = KH1 (KH1 gives it no lock-on or battle action).
+- Not changed: Re:CoM's text prompts naming the lock-on button (message files not in the session; escape `F5 6B` → `0x14083F522` = R2's glyph: Assumption); KH1's unlock / target-switch rules (owner question).
+- Sites: `LOCK_ON_HOOK`, `LOCK_ON_CHECKED` (7). Per frame: one atomic load and a compare in Re:CoM's lock-on; at KH1 one flag read and one store.
+- Assumptions: Re:CoM's R1 / R2 are the default-bound shoulder buttons; the device flag is set before the lock-on in a frame.
+- Checked: tests (`lock_on::tests`, `sites::tests::lock_on_sites`), `check_sites_rs.py` (1390 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game. Asset step: not needed. Docs: `recom-lock-on.md`.
+
+---
+
 ## Stage 244: The Moogle's speech-bubble lines fit the bubble (wrapped onto its lines with Re:CoM's width routine; the true squeeze only when no wrap fits), version 0.132.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Shop text, lock-on and camera), verbatim: "The moogle shop text is over extending past the text bubbles." (screenshot: "Restores HP. 10 Moogle Points. Sora has 11" past both sides of the orange bubble). Decided: wrap onto the bubble's lines as Re:CoM's own two-line lines do; squeeze only if a line still can't fit. Combat = KH1 in Sora's story; Re:CoM's own lines untouched.
