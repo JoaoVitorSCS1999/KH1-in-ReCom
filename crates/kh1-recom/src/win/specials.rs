@@ -853,18 +853,19 @@ pub unsafe fn take_shot_hit(enemy: usize) -> Option<usize> {
 
 /// A Ragnarok shot's hit: KH1's damage of its record (`0x5748`: Magic × 2, power 20) on the enemy's
 /// twin or proxy as the hit part's value at Damage = KH1 (Re:CoM's resistance not on top, as a KH1
-/// spell's); at Damage = Re:CoM the part keeps row 0x20's AP. Returns the KH1 damage written.
-pub unsafe fn shot_damage(enemy: usize, part: usize) -> Option<i32> {
+/// spell's); at Damage = Re:CoM the part keeps row 0x20's AP. Returns the KH1 damage written (made
+/// without the enemy's per-hit cap) and that cap for Re:CoM's join (Sora's damage cap).
+pub unsafe fn shot_damage(enemy: usize, part: usize) -> Option<(i32, super::stats::CapLater)> {
     if !super::damage::kh1() {
         return None;
     }
     let max_mp = super::mp::current().map(|v| v.1)?;
     let hp: i32 = rd(enemy + 0x274);
-    let d = super::stats::kh1_spell_hit(enemy, &sp::ragnarok::shot_record(), max_mp, hp)?;
+    let (d, cap) = super::stats::kh1_spell_hit(enemy, &sp::ragnarok::shot_record(), max_mp, hp)?;
     wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
     wr(part + super::magic::PART_ATTR, super::magic::NEUTRAL_ATTR);
     shot_line(|| format!("Ragnarok shot hit {:#x}: KH1 {d} (max MP {max_mp})", enemy & 0x00FF_FFFF));
-    Some(d)
+    Some((d, cap))
 }
 
 /// The F9 trace's special token: the running special (the recorder holds Sora's lock) and this

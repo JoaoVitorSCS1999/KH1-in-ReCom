@@ -605,6 +605,8 @@ pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: us
             boss::p5_part(kh1, p5)
         )
     });
+    // Sora's damage cap: no slot carries over from the last battle.
+    super::damage_cap::battle_start();
     // M13 stage 1: once per session, whether Re:CoM has the KH1 effect sets (a log line).
     super::effects::battle_check();
     // M13 (0.131.0): the per-battle finisher lines start again.

@@ -608,6 +608,27 @@ unsafe fn owner_of(pl: usize, owner: u32) -> Owner {
     Owner::Other(vt.wrapping_sub(b))
 }
 
+/// Sora's damage cap (owner, 2026-11-05: "Sleights-list sleights, LV3 summons and Party (friend)
+/// sleights"): the hurt body holding the hit waiting on `enemy` and the sleight's name, when that hit
+/// is the current Sleights-list sleight's, Party sleight's or summon's by [`scale_sleight_hit`]'s own
+/// rule (Sora's collision while it runs, his summon or friend actor, a Re:CoM shot he or his summon
+/// fired), at either Damage setting. One atomic load while none was used this battle.
+pub unsafe fn counted_hit(enemy: usize) -> Option<(usize, &'static str)> {
+    let cur = SLEIGHT_HITS.load(Ordering::Relaxed);
+    if cur == 0 {
+        return None;
+    }
+    let body = super::attack::waiting_body(enemy)?;
+    let pl: usize = rd(va(base(), crate::sites::data::MAIN_PLAYER));
+    if pl == 0 {
+        return None;
+    }
+    match owner_of(pl, rd(body + BODY_OWNER)) {
+        Owner::Sora | Owner::Shot | Owner::Summon => Some((body, sm::hit_name((cur - 1) as u16))),
+        Owner::Other(_) => None,
+    }
+}
+
 fn scale_note(line: impl FnOnce() -> String) {
     if SCALE_LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
         log(&format!("summons: {}", line()));

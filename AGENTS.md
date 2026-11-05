@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 261: Sora's damage cap: each hit of Sora's side capped at the enemy's KH1 per-hit cap, at Re:CoM's damage join, version 0.143.0 (2026-11-05)
+
+Owner, 2026-11-05, verbatim: "lets add a damage cap to sora". Answers (`design-philosophy-instructions.md`, "Damage cap answers"): KH1's per-hit cap (`+0xC2`) after power and the table, before resistance; (b) at Damage = Re:CoM the same share of HP; % of HP hits never capped; covers swings, specials, spells, Sleights-list sleights, LV3 summons and Party sleights; Re:CoM's extras stay under the cap; Combat = KH1 only.
+
+- **Research** (details, tags and the caps by record in `docs/recom-kh1-attack.md` § Damage cap):
+  - KH1 `0x1402BFA80` (single caller `0x1402BF630`): curve → the attack's bounds → floor `+0xC0` / cap `+0xC2` → × `resist[element]` → Aero / 2 → cannot-die → at least 1; element 8 (% of HP) and 9 / 11 / 12 never capped. Checked (KH1 decomp). The floor / cap are the record's r3 / r4 as they are; only r1 / r2 index the 21-row table (§ Damage and reactions corrected). No record has a floor above its cap. Checked (files: 236 records).
+  - Re:CoM has no cap: the hit handler `0x14017F7E0` (gather `0x140154EB0` with the weak part, the frozen bonus `0x14015D940`) → `0x14017DC50` → its join `0x14017DF6A` (11 branches land there, none inside) → `0x14017DAB0` `(int)(value × resistance × falloff / 100)`. `+0x2DC` stored there is re-applied by the flatten exe (`0x140184DCB`); `0x140182C50` applies a kind 9 / 0x12 hit on landing through the same join; the stop exe `0x1401843A0` records held hits from the gathered `+0x34` (`0x1401844BD`), not from the join. Checked (decomp + disasm + exe).
+  - The Damage = KH1 leaks: our KH1 number was capped, then the weak part, the frozen +100, Back Attack × 2 and the Enemy Skills rewrite went on top; the sleights' / summons' / Party sleights' scaled numbers had no cap; held hits under Stop. Checked (code + decomp).
+- **Change** (`crate::damage_cap`, `win::damage_cap`; `kh1_core::damage::compute_damage_cap_later`; `attack::kh1_damage_cap_later`, `magic::spell_damage_cap_later`; `win::stats::{kh1_hit_with, kh1_spell_hit, record_from, recom_max_hp}`; `win::specials::shot_damage`; `win::summons::counted_hit`; `win::attack::kh1_enemy_hit` / `spell_hit` / `ragnarok_shot_hit`; `win::battle::manager_ctor`):
+  - New patch `sites::DAMAGE_CAP_PATCH` (`0x14017DF6A`, 23 bytes) + `DAMAGE_CAP_CHECKED` (`0x14017DAB0`, `0x14017DAED`, `0x14017F917`, `0x140184DC0`, `0x1401844BD`): the join jumps to a 99-byte stub near the exe that finds the enemy (`rbx`) in a 16-slot `{enemy, cap}` table and takes `min(xmm6, cap)`, then runs Re:CoM's own instructions and call. Addresses rebased to the running image; nothing per frame (once per damaging hit).
+  - The enemy-hit wrapper sets the enemy's slot per hit of Sora's side (and clears it for any other hit; every battle start and Combat = Re:CoM clear the table): Damage = KH1, KH1's number (swings, specials, spells, Ragnarok's shots) is now made **without** the cap and the cap is KH1's cap × the element's resistance (a capped hit truncates exactly as KH1's); Re:CoM's numbers on KH1's HP (sleights, summons, Party sleights) take the raw cap; Damage = Re:CoM: cap × Re:CoM max HP ÷ KH1 max HP, rounded to nearest (halves up), at least 1. Gravity Break, Zantetsuken, Gravity, Stop (and Re:CoM's kinds 8 / 0xD): never. A stopped enemy's gathered value is capped too. No KH1 record (or cap 0): no cap.
+  - Log: each enemy's first capped hit a battle (`damage cap: <class> (<twin / proxy / boss twin>), <hit>: 48 -> 30 (KH1 cap 30 of 700 HP; …)`); the F9 trace adds `:cap <before>><after>`; `:kh1 <n>` is now the number before the cap.
+- Not capped (outside the owner's list): shots Sora's Guard turned back; any other hit on an enemy.
+- Assumptions: no other Re:CoM path applies a Sora-side hit to an enemy's HP outside the join and the stop exe; a deferred landing / flatten re-apply uses the enemy's slot at that time (another hit first replaces it).
+- Checked: tests (`kh1_core::damage::tests::{the_cap_later_is_kh1s_cap, a_bonus_before_the_cap_stays_under_it}`, `damage_cap::tests::{the_share_of_hp, the_join_takes_the_smaller, the_stub_replays_recoms_join, log_lines}`, `sites::tests::damage_cap_sites`), `check_sites_rs.py` (1429 sites, 0 mismatches), `cargo test --workspace`, the Windows build (no warnings). 1:1: KH1's rule and order Checked (KH1 decomp); a capped hit equals KH1's number (test). Not checked: in game; no tester trace. Asset step: not needed. Docs: `recom-kh1-attack.md` § Damage cap (new; § Damage and reactions corrected).
+
+---
+
 ## Stage 260: the KH1 playground is removed from the repo (2026-11-05, version 0.142.1)
 
 Owner, 2026-11-05, verbatim: "remove the playground from the github also, as its not necessary to the mod"

@@ -77,6 +77,7 @@ pub mod customize;
 pub mod d2;
 pub mod dim;
 pub mod damage;
+pub mod damage_cap;
 pub mod effects;
 pub mod fx;
 pub mod enemy_skills;

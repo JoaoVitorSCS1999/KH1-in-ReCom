@@ -3823,6 +3823,26 @@ pub const SECOND_CHANCE_CHECKED: &[Site] = &[
     Site { name: "damage check: call after the HP store (0x1401E7248)", rva: 0x001E_7248, expect: &[0xE8, 0xB3, 0x38, 0xFC, 0xFF] },
 ];
 
+/// Sora's damage cap (owner, 2026-11-05; `crate::damage_cap`, `win::damage_cap`): Re:CoM's enemy damage
+/// apply `0x14017DC50`'s join `0x14017DF6A` (`movaps xmm2,xmm9; movss [rbx+0x2DC],xmm6; movaps xmm1,xmm6;
+/// mov rcx,rbx; call 0x14017DAB0`), moved into our stub and replaced by a jump to it. Eleven branches of
+/// the function land on its first byte, none inside (Checked (exe: disasm of `0x14017DC50..0x14017DFC0`,
+/// rel32 scan of `.text`; the jump table `0x14017DFC0` has no entry inside)).
+pub const DAMAGE_CAP_PATCH: &[Site] = &[Site { name: "enemy damage apply: the join (0x14017DF6A)", rva: 0x0017_DF6A, expect: &[0x41, 0x0F, 0x28, 0xD1, 0xF3, 0x0F, 0x11, 0xB3, 0xDC, 0x02, 0x00, 0x00, 0x0F, 0x28, 0xCE, 0x48, 0x8B, 0xCB, 0xE8, 0x2F, 0xFB, 0xFF, 0xFF] }];
+
+/// Its context, checked only: the call's target `0x14017DAB0` (its only callers the join and
+/// `0x140184DCB`) and its `(int)(value × resistance × [+0x290] / 100)`; the hit handler's frozen bonus
+/// (`call 0x14015D940`) before its `call 0x14017DC50` (so the bonus is in the join's value); the flatten
+/// exe `0x140184D20` applying `+0x2DC` again; the stop exe `0x1401843A0` reading the held hit's gathered
+/// value `+0xF8 → +0x34` (not the join's), which the wrapper caps while the enemy is stopped.
+pub const DAMAGE_CAP_CHECKED: &[Site] = &[
+    Site { name: "enemy damage apply: HP store (0x14017DAB0)", rva: 0x0017_DAB0, expect: &[0x48, 0x89, 0x74, 0x24, 0x20, 0x57, 0x48, 0x83, 0xEC, 0x20] },
+    Site { name: "enemy damage apply: value x resistance x falloff (0x14017DAED)", rva: 0x0017_DAED, expect: &[0xF2, 0x0F, 0x2C, 0xF3, 0x48, 0x0F, 0xBA, 0xE0, 0x0A] },
+    Site { name: "enemy hit handler: frozen bonus, then the apply (0x14017F917)", rva: 0x0017_F917, expect: &[0xE8, 0x24, 0xE0, 0xFD, 0xFF, 0x66, 0x0F, 0x6E, 0x4C, 0x24, 0x40, 0x0F, 0x5B, 0xC9, 0x45, 0x8B, 0x8E, 0x80, 0x00, 0x00, 0x00, 0x0F, 0x28, 0xD6, 0x48, 0x8B, 0xCE, 0xE8, 0x19, 0xE3, 0xFF, 0xFF] },
+    Site { name: "enemy flatten exe: +0x2DC applied again (0x140184DC0)", rva: 0x0018_4DC0, expect: &[0xF3, 0x0F, 0x10, 0x8B, 0xDC, 0x02, 0x00, 0x00, 0x48, 0x8B, 0xCB, 0xE8, 0xE0, 0x8C, 0xFF, 0xFF] },
+    Site { name: "enemy stop exe: the held hit's gathered value (0x1401844BD)", rva: 0x0018_44BD, expect: &[0x66, 0x0F, 0x6E, 0x4B, 0x34, 0x48, 0x0F, 0xBF, 0xC5] },
+];
+
 /// M11, the KH1 Bouncywild's slip without its Moogle points (owner 2026-11-03, "a slip loses nothing"): the player damage
 /// check `0x1401E6DE0`'s case 0x18 (Re:CoM's slip; case 0x27 falls into it) runs `mov rcx,rdi` and its writes (`+0x414` = 6,
 /// `+0x5CC` = 0, `+0x7B8` = 0), then `call 0x1401F6190` (a tenth of Sora's Moogle points scattered as prizes), then `jmp
@@ -4502,6 +4522,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SLIP_SCATTER_CHECKED,
         SECOND_CHANCE_PATCH,
         SECOND_CHANCE_CHECKED,
+        DAMAGE_CAP_PATCH,
+        DAMAGE_CAP_CHECKED,
         crate::enemy_skills_cmp::PATCH,
         crate::enemy_skills_cmp::CALLS,
         crate::enemy_skills_cmp::CHECKED,
@@ -4858,6 +4880,26 @@ mod tests {
         for p in TEXT_FIT_STR_PTRS {
             assert!(!all_sites().any(|s| s.rva == p.rva), "{}", p.name);
         }
+    }
+
+    #[test]
+    fn damage_cap_sites() {
+        use crate::damage_cap::{APPLY, BACK, JOIN};
+        let p = &DAMAGE_CAP_PATCH[0];
+        assert_eq!(p.expect, &crate::damage_cap::JOIN_BYTES[..], "the stub replays the site's bytes");
+        assert_eq!(0x1_4000_0000 + p.rva as u64, JOIN);
+        assert_eq!(0x1_4000_0000 + p.rva as u64 + p.expect.len() as u64, BACK);
+        assert_eq!(crate::hookplan::call_target(JOIN + 18, &p.expect[18..]), Some(APPLY));
+        assert_eq!(0x1_4000_0000 + DAMAGE_CAP_CHECKED[0].rva as u64, APPLY);
+        // The handler's two calls: the frozen bonus, then the apply.
+        let h = &DAMAGE_CAP_CHECKED[2];
+        let at = 0x1_4000_0000 + h.rva as u64;
+        assert_eq!(crate::hookplan::call_target(at, &h.expect[..5]), Some(0x1_4015_D940));
+        assert_eq!(crate::hookplan::call_target(at + 27, &h.expect[27..]), Some(0x1_4017_DC50));
+        // The flatten exe's call to the same HP store.
+        let f = &DAMAGE_CAP_CHECKED[3];
+        assert_eq!(crate::hookplan::call_target(0x1_4000_0000 + f.rva as u64 + 11, &f.expect[11..]), Some(APPLY));
+        assert_eq!(crate::damage_cap::stub(0x7FF0_0000_0000, JOIN - 0x100_0000, APPLY, BACK).map(|s| s.len()), Some(crate::damage_cap::STUB_LEN));
     }
 
     #[test]

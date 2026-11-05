@@ -610,6 +610,15 @@ pub fn kh1_damage_with(m: &Moveset, kh1_row: usize, sora: Sora, bonus: i32, weap
     Some(kh1_core::damage::compute_damage(&live, &kh1_core::DamageCurve::kh1_defaults(), &stats, rng))
 }
 
+/// [`kh1_damage_with`] with the enemy's per-hit cap left for Re:CoM's join (`crate::damage_cap`):
+/// the number before the cap, and the cap in its units (after KH1's resistance), None for the % of
+/// HP rows and an enemy without a cap (`kh1_core::damage::compute_damage_cap_later`).
+#[allow(clippy::too_many_arguments)]
+pub fn kh1_damage_cap_later(m: &Moveset, kh1_row: usize, sora: Sora, bonus: i32, weapon: &WeaponData, twin: &EnemyStats, hp_now: i32, rng: &mut kh1_core::Kh1Rand) -> Option<(kh1_core::DamageResult, Option<f32>)> {
+    let (live, stats) = kh1_attack_on(m, kh1_row, sora, bonus, weapon, twin, hp_now)?;
+    Some(kh1_core::damage::compute_damage_cap_later(&live, &kh1_core::DamageCurve::kh1_defaults(), &stats, rng))
+}
+
 /// The attack object (`0x1402B2DC0` + `0x1402B3270`) and the defender's block that
 /// [`kh1_damage_with`] hands to KH1's damage (`0x1402BFA80`).
 pub fn kh1_attack_on(m: &Moveset, kh1_row: usize, sora: Sora, bonus: i32, weapon: &WeaponData, twin: &EnemyStats, hp_now: i32) -> Option<(LiveAttack, kh1_core::DefenderStats)> {

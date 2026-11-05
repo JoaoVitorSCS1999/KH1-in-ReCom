@@ -10,6 +10,7 @@ mod command_menu;
 mod crash;
 mod d2;
 mod damage;
+mod damage_cap;
 mod deck;
 mod drops;
 mod effects;
@@ -456,6 +457,10 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         // M12 step 3: Second Chance's rule in Re:CoM's damage check (armed by its wrapper above).
         // SAFETY: the patch site's and its context's bytes are checked inside, before anything is written.
         unsafe { kh1_support::install_second_chance(base) };
+        // Sora's damage cap (owner, 2026-11-05): KH1's per-hit cap at Re:CoM's damage join, armed per hit by
+        // the enemy-hit wrapper above.
+        // SAFETY: the patch site's and its context's bytes are checked inside, before anything is written.
+        unsafe { damage_cap::install(base) };
         // Enemy Skills stage 4: Re:CoM's direct compares (Quick Recovery, Dash, Auto-Life, Invincible,
         // Sleightblind's resistance), after Second Chance (Invincible's first site is in its checked context).
         // SAFETY: every site's and its context's bytes are checked inside, before anything is written.

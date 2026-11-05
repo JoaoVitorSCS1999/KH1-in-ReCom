@@ -846,6 +846,7 @@ unsafe fn incoming(enemy: usize) -> Option<(Option<u8>, u32)> {
 /// take the hit) runs for a KH1 hit.
 pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     if !mv::kh1_on() {
+        super::damage_cap::off();
         return orig::<PlRetFn>(&ORIG_ENEMY_HIT)(enemy);
     }
     // Enemy Skills (Lexaeus, "never bosses"): Warp Break's kind taken back on a boss.
@@ -905,7 +906,21 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
         // M12 follow-ups: a Sleights-list sleight's hit at Damage = KH1 takes the enemy's KH1 / Re:CoM
         // max HP ratio (one load while no such sleight was used this battle).
         super::summons::scale_sleight_hit(enemy);
+        // Sora's damage cap (owner, 2026-11-05): a Sleights-list or Party sleight's or a summon's hit takes the
+        // enemy's KH1 cap at Re:CoM's join (the raw cap on KH1's HP at Damage = KH1, the share of Re:CoM's HP at
+        // Damage = Re:CoM); any other hit on it clears its slot.
+        let armed = match super::summons::counted_hit(enemy) {
+            Some((body, name)) => {
+                let src = if super::damage::kh1() { super::damage_cap::Source::Raw } else { super::damage_cap::Source::Recom };
+                super::damage_cap::arm(enemy, rd(body + 0x80), super::damage_cap::What::Sleight(name), src)
+            }
+            None => {
+                super::damage_cap::forget(enemy, || waiting_body(enemy).is_some());
+                None
+            }
+        };
         let r = o(enemy);
+        let _ = super::damage_cap::after(armed);
         if force {
             let now: u64 = rd(enemy + 0x260);
             wr(enemy + 0x260, now & !0x200_0000);
@@ -933,7 +948,11 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
         Some(r) if pl != 0 => super::kh1_support::berserk_bonus(pl, r),
         _ => 0,
     };
+    // Sora's damage cap: KH1's number is made without the enemy's per-hit cap, which Re:CoM's join puts on
+    // after every bonus below and Re:CoM's own (KH1's order; `super::damage_cap`).
     let kh1 = if recom { None } else { row.and_then(|r| super::stats::kh1_hit_with(enemy, r, super::stats::sora_level(), hp, max_mp, berserk)) };
+    let cap_later = kh1.and_then(|(_, c)| c);
+    let kh1 = kh1.map(|(d, _)| d);
     if berserk != 0 && !recom {
         super::kh1_support::berserk_kh1_line(enemy, row.unwrap_or(0), kh1);
     }
@@ -962,6 +981,17 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
     if falloff.is_some() {
         super::revenge::Falloff::neutral(enemy);
     }
+    // Sora's damage cap (owner, 2026-11-05): the enemy's KH1 per-hit cap for Re:CoM's join, never on the % of HP
+    // rows (Gravity Break, Zantetsuken).
+    let percent = row.is_some_and(|r| crate::damage::percent_of_hp_row(r, moveset()));
+    let source = if recom { Some(super::damage_cap::Source::Recom) } else { kh1.map(|_| super::damage_cap::Source::Kh1(cap_later)) };
+    let armed = match (percent, source, row) {
+        (false, Some(src), Some(r)) => super::damage_cap::arm(enemy, rd(part + 0x80), super::damage_cap::What::Swing(r), src),
+        _ => {
+            super::damage_cap::uncapped(enemy);
+            None
+        }
+    };
     let flags: u64 = rd(enemy + 0x260);
     let force = flags & 1 != 0 && flags & 0x200_0000 == 0;
     if force {
@@ -972,6 +1002,7 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
         let now: u64 = rd(enemy + 0x260);
         wr(enemy + 0x260, now & !0x200_0000);
     }
+    let capped = super::damage_cap::after(armed);
     if let Some(f) = falloff {
         f.restore(enemy);
         if f.mult() < 1.0 {
@@ -995,7 +1026,7 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
                 (true, Some(r)) => super::damage::swing_tag(r, carried as i32),
                 _ => kh1.map_or(String::new(), |d| format!(":kh1 {d}")),
             };
-            g.push(format!("e{:x}:dmg {}:hp {}{}{}", enemy & 0x00FF_FFFF, hp - after, after, if force { ":card" } else { "" }, tag));
+            g.push(format!("e{:x}:dmg {}:hp {}{}{}{}", enemy & 0x00FF_FFFF, hp - after, after, if force { ":card" } else { "" }, tag, super::damage_cap::tag(capped)));
         }
     }
     r
@@ -1077,14 +1108,23 @@ pub(super) unsafe fn untouchable_hit(enemy: usize) -> (u64, Option<crate::reveng
 unsafe fn ragnarok_shot_hit(enemy: usize, part: usize, o: PlRetFn) -> u64 {
     let attr: u32 = rd(part + super::magic::PART_ATTR);
     let carried: i16 = rd(part + 0x92);
-    let kh1 = super::specials::shot_damage(enemy, part);
+    let shot = super::specials::shot_damage(enemy, part);
+    let kh1 = shot.map(|(d, _)| d);
     let flags: u64 = rd(enemy + 0x260);
     let force = crate::damage::interrupts(flags, None);
     if force {
         wr(enemy + 0x260, flags | 0x200_0000);
     }
     let hp: i32 = rd(enemy + 0x274);
+    // Sora's damage cap: the enemy's KH1 cap at Re:CoM's join.
+    let src = match shot {
+        Some((_, c)) => super::damage_cap::Source::Kh1(c),
+        None if super::damage::kh1() => super::damage_cap::Source::Raw,
+        None => super::damage_cap::Source::Recom,
+    };
+    let armed = super::damage_cap::arm(enemy, rd(part + 0x80), super::damage_cap::What::RagnarokShot, src);
     let r = o(enemy);
+    let capped = super::damage_cap::after(armed);
     if force {
         let now: u64 = rd(enemy + 0x260);
         wr(enemy + 0x260, now & !0x200_0000);
@@ -1097,7 +1137,7 @@ unsafe fn ragnarok_shot_hit(enemy: usize, part: usize, o: PlRetFn) -> u64 {
     if let Ok(mut g) = HIT_LOG.lock() {
         if g.len() < 16 {
             let tag = kh1.map_or(format!(":recom {carried}"), |d| format!(":kh1 {d}"));
-            g.push(format!("e{:x}:dmg {}:hp {after}{}:ragnarok{}", enemy & 0x00FF_FFFF, hp - after, if force { ":card" } else { "" }, tag));
+            g.push(format!("e{:x}:dmg {}:hp {after}{}:ragnarok{}{}", enemy & 0x00FF_FFFF, hp - after, if force { ":card" } else { "" }, tag, super::damage_cap::tag(capped)));
         }
     }
     r
@@ -1113,6 +1153,8 @@ unsafe fn ragnarok_shot_hit(enemy: usize, part: usize, o: PlRetFn) -> u64 {
 unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64 {
     super::revenge::note_spell(s);
     if s == crate::magic::spell::STOP {
+        // Sora's damage cap: never on Stop (its value is a duration; kind 8 never reaches Re:CoM's join).
+        super::damage_cap::uncapped(enemy);
         return stop_hit(enemy, part, lv, o);
     }
     let max_mp = super::mp::current().map(|v| v.1);
@@ -1123,7 +1165,11 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
     // its 3-second flatten); Re:CoM's path applies them (its resistance included).
     let recom = super::damage::recom_spell_hits(s);
     let carried: i16 = rd(part + 0x92);
-    let mut kh1 = if recom { None } else { crate::magic::spell_attack(s, lv).and_then(|data| max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m, hp_now))) };
+    // Sora's damage cap: KH1's number made without the enemy's per-hit cap, which Re:CoM's join puts on after
+    // every bonus (`super::damage_cap`).
+    let made = if recom { None } else { crate::magic::spell_attack(s, lv).and_then(|data| max_mp.and_then(|m| super::stats::kh1_spell_hit(enemy, &data, m, hp_now))) };
+    let cap_later = made.and_then(|(_, c)| c);
+    let mut kh1 = made.map(|(d, _)| d);
     // Gravity on an enemy without KH1 numbers (7.8): KH1's % of its current HP at 100 % (KH1's
     // ordinary Heartless), at least 1. Re:CoM's own AP is no Gravity number at KH1's rules.
     if !recom && kh1.is_none() && s == crate::magic::spell::GRAVITY {
@@ -1149,7 +1195,22 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
         wr(enemy + 0x260, flags | 0x200_0000);
     }
     let hp: i32 = rd(enemy + 0x274);
+    // Sora's damage cap (never on Gravity: KH1's % of HP, Re:CoM's kind 0xD).
+    let armed = if s == crate::magic::spell::GRAVITY {
+        super::damage_cap::uncapped(enemy);
+        None
+    } else {
+        let src = if recom {
+            super::damage_cap::Source::Recom
+        } else if made.is_some() {
+            super::damage_cap::Source::Kh1(cap_later)
+        } else {
+            super::damage_cap::Source::Raw
+        };
+        super::damage_cap::arm(enemy, rd(part + 0x80), super::damage_cap::What::Spell(s, lv), src)
+    };
     let r = o(enemy);
+    let capped = super::damage_cap::after(armed);
     if force {
         let now: u64 = rd(enemy + 0x260);
         wr(enemy + 0x260, now & !0x200_0000);
@@ -1187,6 +1248,7 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
             if kh1_flat.is_some() {
                 tag.push_str(":flat");
             }
+            tag.push_str(&super::damage_cap::tag(capped));
             g.push(format!("e{:x}:dmg {}:hp {after}{}:{name}{lv}{}", enemy & 0x00FF_FFFF, hp - after, if force { ":card" } else { "" }, tag));
         }
     }

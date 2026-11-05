@@ -144,11 +144,29 @@ pub struct DamageResult {
 
 /// `0x1402BFA80` for a hit on the enemy side. Draws the crit roll only when the power is non-zero.
 pub fn compute_damage(atk: &LiveAttack, curve: &DamageCurve, def: &DefenderStats, rng: &mut Kh1Rand) -> DamageResult {
+    compute(atk, curve, def, rng, false).0
+}
+
+/// [`compute_damage`] with the defender's per-hit cap (`+0xC2`) **left for later**: the damage as
+/// KH1 makes it without that one step, and the cap in the same units (after the element's
+/// resistance and the Aero halving, at least 1: KH1's last step), for a caller that puts bonuses
+/// on the number first and then caps it (KH1 caps after every bonus it has; Re:CoM's extras go on
+/// before the cap the same way, `docs/recom-kh1-attack.md` § Damage cap). None: no cap (0), or an
+/// element KH1 never caps (8, the % of HP; 9 / 11 / 12, the power as is).
+///
+/// With nothing put on the number, `min(damage, cap)` truncated is [`compute_damage`]'s result
+/// (tested for every record with a floor no higher than its cap, which every KH1 record is:
+/// Checked (files)). The crit roll is drawn exactly as there.
+pub fn compute_damage_cap_later(atk: &LiveAttack, curve: &DamageCurve, def: &DefenderStats, rng: &mut Kh1Rand) -> (DamageResult, Option<f32>) {
+    compute(atk, curve, def, rng, true)
+}
+
+fn compute(atk: &LiveAttack, curve: &DamageCurve, def: &DefenderStats, rng: &mut Kh1Rand, cap_later: bool) -> (DamageResult, Option<f32>) {
     let mut power = atk.data.power + atk.stat;
     let (min, max) = (atk.data.min, atk.data.max);
     let mut out = DamageResult::default();
     if power == 0 {
-        return out;
+        return (out, None);
     }
     if rng.next_f32() < atk.crit_chance {
         power += atk.crit_bonus;
@@ -160,11 +178,11 @@ pub fn compute_damage(atk: &LiveAttack, curve: &DamageCurve, def: &DefenderStats
             let floor = if def.min_damage < 2 { 1 } else { def.min_damage as i32 };
             let v = (def.hp as f32 * (power as f32 / 100.0) * def.hp_percent_scale) as i32;
             out.damage = if v < floor { floor } else { v };
-            return out;
+            return (out, None);
         }
         9 | 11 | 12 => {
             out.damage = power;
-            return out;
+            return (out, None);
         }
         _ => {}
     }
@@ -189,7 +207,7 @@ pub fn compute_damage(atk: &LiveAttack, curve: &DamageCurve, def: &DefenderStats
         }
     }
     if def.min_damage == 0 || def.min_damage as i32 <= d {
-        if def.max_damage != 0 && (def.max_damage as i32) < d {
+        if !cap_later && def.max_damage != 0 && (def.max_damage as i32) < d {
             d = def.max_damage as i32;
         }
     } else {
@@ -201,7 +219,14 @@ pub fn compute_damage(atk: &LiveAttack, curve: &DamageCurve, def: &DefenderStats
         d = def.hp - 1;
     }
     out.damage = if d != 0 { d } else { 1 };
-    out
+    let cap = (cap_later && def.max_damage != 0).then(|| {
+        // The same f32 product KH1 truncates (`(int)((float)d × resist)`), so a capped hit
+        // truncates to KH1's number; halved as KH1's Aero; KH1's "at least 1".
+        let c = def.max_damage as f32 * def.resist[element];
+        let c = if def.aero { ((c as i32) / 2) as f32 } else { c };
+        c.max(1.0)
+    });
+    (out, cap)
 }
 
 /// The btltbl G numbers the MP charge reads.
@@ -299,6 +324,45 @@ mod tests {
         assert_eq!(compute_damage(&a, &c, &d, &mut r).damage, 1, "an immune enemy still takes 1");
         let z = live(0x4B78, 0);
         assert_eq!(compute_damage(&z, &c, &DefenderStats::default(), &mut r).damage, 0, "power 0 deals nothing");
+    }
+
+    /// The cap left for later, then applied as Re:CoM's join does (`min`, then truncated), is
+    /// `0x1402BFA80`'s own number for every power, Defence, floor ≤ cap, resistance and Aero.
+    #[test]
+    fn the_cap_later_is_kh1s_cap() {
+        let c = DamageCurve::kh1_defaults();
+        for str_ in [0, 3, 8, 17, 27, 51, 70] {
+            for (de, floor, cap) in [(2, 2, 30), (8, 2, 10), (15, 2, 15), (27, 10, 270), (30, 10, 10), (15, 2, 2), (2, 0, 0), (9, 2, 100)] {
+                for res in [0.0f32, 0.5, 0.8, 0.9, 1.0, 1.5, 2.0] {
+                    for aero in [false, true] {
+                        let mut d = DefenderStats { defence: de, min_damage: floor, max_damage: cap, aero, ..Default::default() };
+                        d.resist[1] = res;
+                        let a = live(0x4C58, str_);
+                        let (mut r1, mut r2) = (Kh1Rand::new(7), Kh1Rand::new(7));
+                        let want = compute_damage(&a, &c, &d, &mut r1);
+                        let (got, later) = compute_damage_cap_later(&a, &c, &d, &mut r2);
+                        assert_eq!(got.critical, want.critical, "the same crit roll");
+                        let joined = match later {
+                            Some(k) => (got.damage as f32).min(k) as i32,
+                            None => got.damage,
+                        };
+                        assert_eq!(joined, want.damage, "Str {str_} Def {de} f/c {floor}/{cap} res {res} aero {aero}");
+                        assert_eq!(later.is_some(), cap != 0);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Bonuses put on before the cap stay under it (KH1's order: every bonus, then the cap).
+    #[test]
+    fn a_bonus_before_the_cap_stays_under_it() {
+        let c = DamageCurve::kh1_defaults();
+        let d = DefenderStats { defence: 8, min_damage: 2, max_damage: 30, ..Default::default() };
+        let (got, cap) = compute_damage_cap_later(&live(0x4B78, 51), &c, &d, &mut Kh1Rand::new(1));
+        assert_eq!(got.damage, 300, "51 − 8 = 43 → index 41 → the curve's 300, the cap not yet on");
+        assert_eq!(cap, Some(30.0));
+        assert_eq!(((got.damage * 2) as f32).min(cap.unwrap()) as i32, 30, "doubled, then capped");
     }
 
     #[test]

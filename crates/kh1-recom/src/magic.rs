@@ -1600,6 +1600,15 @@ pub fn spell_damage(data: &AttackData, max_mp: i32, def: &DefenderStats, rng: &m
     compute_damage(&live, &DamageCurve::kh1_defaults(), def, rng).damage
 }
 
+/// [`spell_damage`] with the enemy's per-hit cap left for Re:CoM's join (`crate::damage_cap`): the
+/// number before the cap and the cap in its units (None: no cap, or an element KH1 never caps).
+pub fn spell_damage_cap_later(data: &AttackData, max_mp: i32, def: &DefenderStats, rng: &mut Kh1Rand) -> (i32, Option<f32>) {
+    let attacker = AttackerStats { max_mp, ..Default::default() };
+    let live = LiveAttack::new(data, &WeaponData::kingdom_key(), &attacker, 1.0);
+    let (d, cap) = kh1_core::damage::compute_damage_cap_later(&live, &DamageCurve::kh1_defaults(), def, rng);
+    (d.damage, cap)
+}
+
 /// KH1's cast motions (Sora's mset, read with `kh1-data` from the player's
 /// `xa_ex_0010.mset`; Checked (files)): Fire's wind-up `0x36` (entry 54, 28 frames, no flags),
 /// release `0x3D` (entry 57, 60 frames, free from 46, root −15 cm over frames 0–10, then 5 cm

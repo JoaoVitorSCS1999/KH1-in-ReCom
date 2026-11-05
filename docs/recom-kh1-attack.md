@@ -206,9 +206,9 @@ Steam bytes) that plays the same KH1 motion, with:
 - **KH1 enemy stats (0.7.0, decisions 12 and 21).** Research notes: `kh1-enemy-stats.md` (kept
   with the decomp tools). Checked (decomp + files) unless tagged.
   - KH1 fills an enemy's stats block in `0x1402A58E0` from a 0x6C-byte record its AI script
-    hands to AI syscall 45 (`0x1402BBDF0`, entry 45 of `0x140529180`): r0 HP, r1 / r2 Strength /
-    Defence index into btltbl `0xC8A8` (21 rows), r3 / r4 damage floor / cap per hit
-    (`+0xC0` / `+0xC2`, read by `0x1402BFA80`), r5 level, r6 knockback factor, r7 EXP, r9 the
+    hands to AI syscall 45 (`0x1402BBDF0`, entry 45 of `0x140529180`): r0 HP; r1 / r2 Strength /
+    Defence, **the only two fields that index** btltbl `0xC8A8` (21 rows); r3 / r4 the damage floor /
+    cap per hit **as they are** (no table: `+0xC0` / `+0xC2`, read by `0x1402BFA80`; § Damage cap), r5 level, r6 knockback factor, r7 EXP, r9 the
     actor's own damage scale, r10..r25 resistances %.
   - An ordinary Heartless's AI is part 5 of its own `.mdls` (`0x140290D60`, binder
     `0x140287E40`); bosses and a few scripted fights use their room's script. The record is
@@ -231,7 +231,8 @@ Steam bytes) that plays the same KH1 motion, with:
     returns it for that enemy (both at KH1 only).
   - **Damage:** in the enemy hit handler, a KH1 hit's part value (`part+0x92`, read through
     `0x14016FDB0`) becomes KH1's damage (kh1-core's `0x1402BFA80`: curve[power − Defence],
-    the row's bounds, the twin's floor / cap and resistance, a crit roll), with Sora's KH1
+    the row's bounds, the twin's floor and resistance, a crit roll; **the cap since 0.143.0 at
+    Re:CoM's damage join**, after every bonus: § Damage cap), with Sora's KH1
     Strength at his Re:CoM level (`*0x14087CBF8 + 0x1C`, the menu's level). The trace's hits
     column adds `:kh1 <damage>`.
 - **Decision 13 (keep Re:CoM's extras).** Re:CoM's damage path is untouched. Once the KH1 numbers
@@ -495,6 +496,291 @@ only**, `damage = recom | kh1` in `kh1-recom.ini`, read at start (default `recom
    floor, and **no** Re:CoM falloff: on a boss, hit it 6+ times quickly with swings (the log's
    `falloff skipped (its multiplier was …)`), then Gravity Break / Zantetsuken: full KH1 %.
    With `damage = kh1`: as before.
+
+## Damage cap (owner, 2026-11-05; built in 0.143.0)
+
+> "lets add a damage cap to sora" (answers: `design-philosophy-instructions.md`, "Damage cap
+> answers")
+
+Each hit on an enemy from Sora's side is capped at that enemy's **KH1 per-hit cap**, at Combat =
+KH1 in Sora's story. Combat = Re:CoM and Riku's story: unchanged. Code: `crate::damage_cap`
+(rules, stub bytes, log text; tested), `win::damage_cap` (the patch and its slots), the enemy-hit
+wrapper `win::attack::kh1_enemy_hit` (sets the cap per hit).
+
+### KH1's rule. Checked (KH1 Steam decomp + files)
+
+- `0x1402BFA80` (single caller `0x1402BF630`): power (+ the crit bonus) → `curve[clamp(power −
+  Defence, 0, 41)]` (btltbl file 0, 42 u16, 300 from index 29 on) → the attack's min / max (`+0x4C` /
+  `+0x50` × obj `+0xAC`; no Sora record has them) → the defender's **floor `+0xC0`** (a hit under it
+  becomes it) **or cap `+0xC2`** (a hit over it becomes it; 0 = none) → × `resist[element]`
+  (`+0x78 + element × 4`) → / 2 with Aero (`+0x88 & 8`) → × 2 on a party-side defender while
+  `0x1402FAFE0() == 2` → cannot-die (`+0x184 & 0x10`: HP − 1) → at least 1.
+- So the cap comes **after every bonus** KH1 has and **before the resistance**: a weakness can go
+  past it (Oogie LV1, physical 150 %: cap 15 → 22).
+- Element 8 (% of HP: Gravity, Gravity Break, Zantetsuken): `max(1, +0xC0)` floor, **no cap**.
+  Elements 9 / 11 / 12: the power as it is (not HP damage, `0x1402BEEE0`), no cap.
+- The HP store (`0x1402BEEE0` → `0x1402A4920(actor, −damage)`) clamps HP to 0..max; no other cap.
+- The floor / cap are the record's r3 / r4 as they are (§ Damage and reactions: only r1 / r2 index
+  the 21-row table). No KH1 record has a floor above its cap (Checked (files): all 236 records).
+
+### Re:CoM has none. Checked (Re:CoM Steam decomp + disasm)
+
+- The hit handler `0x14017F7E0` gathers the hit (`0x140154EB0`: the part's value `+0x92`, × the weak
+  part's factor when the part is weak, written back to `+0x92`; into `+0xF8 → +0x34`), adds the
+  frozen bonus (`0x14015D940`, while `+0x2B0`), then calls the apply `0x14017DC50(enemy, value,
+  resistance %, kind)`.
+- The apply's kinds all meet at the **join `0x14017DF6A`** (11 branches land there, none inside;
+  kind 0xD, Gravity, has made its % of the current HP by then; kind 8, Stop, never gets there):
+  `movaps xmm2,xmm9; movss [rbx+0x2DC],xmm6; movaps xmm1,xmm6; mov rcx,rbx; call 0x14017DAB0`.
+- `0x14017DAB0`: `(int)(value × resistance × falloff [+0x290] / 100)` (`0x14017DAED`), then the HP
+  (`0x14017DBE7`) or the part's HP (`0x14017DB35`). No cap anywhere (only the i16 of `+0x92`).
+- `0x14017DAB0`'s second caller `0x140184DCB` (the flatten state's exe `0x140184D20`) applies the
+  stored `+0x2DC` again; `0x140182C50` (a state's exe) applies a kind 9 / 0x12 hit's part value when
+  the airborne enemy lands, through the same apply.
+- The stop exe `0x1401843A0` records a held hit from the gathered `+0x34` (`0x1401844BD`) × its
+  resistance, not from the join.
+
+### What we apply
+
+- **One patch:** the join's 23 bytes jump to a stub (99 bytes, near the exe): it finds the enemy
+  (`rbx`) in a 16-slot table (`{enemy, cap}`), and when its value `xmm6` is over the cap takes the cap
+  (and records the before / after for the log); then Re:CoM's own instructions and its call. So the
+  stored `+0x2DC` is capped too, and Re:CoM's later applies of the same hit (the flatten exe, the
+  landing) take it. Every exe address is rebased to the running image; the join and its context are
+  byte-checked (`sites::DAMAGE_CAP_PATCH`, `DAMAGE_CAP_CHECKED`, `check_sites_rs.py`).
+- **The enemy-hit wrapper sets the slot per hit** (no new hook; nothing per frame): a hit of Sora's
+  side puts the enemy's cap in; any other hit arriving on that enemy takes it out; every battle start
+  clears the table, and Combat = Re:CoM clears it.
+- **The cap, in the join's units** (the enemy's KH1 record: its twin, proxy or boss twin, as every
+  other KH1 number; § KH1 numbers for enemies without a twin):
+
+  | hit | Damage = KH1 | Damage = Re:CoM |
+  |---|---|---|
+  | swings, specials (Sonic Blade, Ars Arcanum, Strike Raid, Ragnarok's swings) | KH1's number made **without** the cap; the cap × KH1's resistance for the row's element (which our number already carries), at least 1 | cap × Re:CoM max HP ÷ KH1 max HP |
+  | spells (Fire, Blizzard, Thunder, Aero's hits …), Ragnarok's shots | the same (the spell's / shot record's element) | the same share |
+  | Sleights-list sleights, Party (friend) sleights, LV3 summons (Sora's collision while one runs, his summon / friend actor, a shot either fired) | Re:CoM's number on KH1's HP (scaled by KH1 / Re:CoM max HP): KH1's raw cap | the same share |
+  | Gravity Break, Zantetsuken, Gravity (any % of HP; Re:CoM's kind 0xD), Stop | never capped | never capped |
+
+  - The share is rounded to the nearest whole point (halves up), at least 1. Re:CoM max HP: its own
+    getter `0x14017F5A0` (the `@ENP` row × difficulty); KH1 max HP: the record's HP (a twin's KH1 HP, a
+    proxy's KH1-scale HP, a boss twin's own). Example: Guard Armor, cap 30 of 700 HP, Re:CoM 1200 HP →
+    51.43 → 51.
+  - At Damage = KH1 a capped number truncates exactly as KH1's (the same f32 product `cap ×
+    resist`), with Aero and "at least 1" as KH1 (test `the_cap_later_is_kh1s_cap`, every power /
+    Defence / floor / cap / resistance).
+- **Re:CoM's extras stay under the cap**, as KH1 puts every bonus before its own: the weak part (in
+  the gathered value), the frozen +100, Fat Bandit's Back Attack and the Enemy Skills rewrite (both on
+  our number before it is written), Re:CoM's own back bonus and enemy-card rewrite (in its AP). Then
+  Re:CoM's resistance % and its boss falloff come **after** the cap.
+- **The Damage = KH1 leaks this closes** (before 0.143.0 our KH1 number was capped, then these went
+  on top): the weak part's factor, the frozen +100, Back Attack's × 2, the Enemy Skills multipliers
+  (swings and spells), the sleights' / summons' / Party sleights' scaled numbers (never capped), and
+  a stopped enemy's held hits (the wrapper caps the gathered `+0x34` the stop exe records).
+- **Enemies with no KH1 record** (no twin, no proxy cell: 100 Acre Wood's minigame Beehive / Bee, ids
+  37 / 38; anything the proxy table has no cell for; Riku's story) and records with cap 0: **no cap**,
+  as KH1 has no rule for them. Every other Re:CoM enemy and boss in Sora's story has a record through
+  the proxy rule.
+- **Not capped (not in the owner's list):** a shot Sora's Guard turned back (decision 28), and hits
+  of anything else on an enemy. Assumption: Re:CoM's hits on enemies at Combat = KH1 are Sora's,
+  his sleights' / summons' / friends' and the turned shots only.
+
+### Logs and trace
+
+- Start: `damage cap: enemy damage apply: the join (0x14017DF6A) through the stub at …`; a byte
+  mismatch: `damage cap: … is not as expected: Sora's hits are not capped`.
+- Each enemy's first capped hit of a battle: `damage cap: CEnemyShadow (twin), swing row 0xd: 48 -> 30
+  (KH1 cap 30 of 700 HP; Damage = KH1); Re:CoM's resistance and boss falloff come after` (Damage =
+  Re:CoM: `… (KH1 cap 30 of 700 HP = 51 of Re:CoM's 1200 HP (the same share); Damage = Re:CoM)`;
+  a weakness: `× KH1's resistance 150 %, which comes after the cap`; a stopped enemy: `(held by
+  Stop)`).
+- The F9 trace's hits column adds `:cap <before>><after>` to a capped hit. At Damage = KH1 the
+  `:kh1 <n>` it already shows is now the number **before** the cap.
+
+### Caps by record (Checked (files): KH1's `.mdls` / room scripts, the records `0x1402BBDF0` reads)
+
+The research (2026-11-05) read every record the scripts load; the mod reads the same records
+through `kh1-stats.json` (the asset step) for twins and proxies. Caps over all 236 records: 300 on
+73 (most ordinary Heartless: the curve's own top, so never reached), 20 on 63 (most bosses), 30 on 23,
+10 on 16, 15 on 9, 100 on 7, none (0) on 10; the rest single values (Large Body 144 / 270, Fat Bandit
+220 / 270, Black Fungus / Rare Truffle 2, …).
+
+Examples (`curve` above; swing / finisher / crit finisher, KH1 Strength by level 7 / 13 / 17 / 19 /
+27 / 33 / 51 at 1 / 10 / 20 / 30 / 50 / 70 / 99):
+
+| enemy | Def | floor / cap | HP | L1 | L30 | L50 | L99 |
+|---|---|---|---|---|---|---|---|
+| Guard Armor | 8 | 2 / 30 | 700 | 2 / 3 / 7 | 14 / 28 / **30** | **30** / **30** / **30** | **30** |
+| Leon (Traverse Town) | 8 | 2 / 10 | 120 | 2 / 3 / 7 | **10** | **10** | **10** |
+| Cloud LV1 | 10 | 2 / 20 | 300 | 2 / 2 / 5 | 10 / **20** / **20** | **20** | **20** |
+| Parasite Cage (pi05) | 17 | 2 / 15 | 450 | 2 | 2 / 6 / 12 | 12 / **15** / **15** | **15** |
+| Oogie LV1 (physical 150 %) | 20 | 2 / 15 | 450 | 3 | 3 / 4 / 10 | 10 / 21 / **22** | **22** |
+| Dragon Maleficent | 24 | 2 / 20 | 1200 | 2 | 2 / 2 / 3 | 3 / 7 / 14 | **20** |
+| Ansem (final) | 30 | 4 / 20 | 1500 | 4 | 4 | 4 / 4 / 5 | **20** |
+| Large Body LV1 | 10 | 6 / 144 | 160 | 6 | 10 / 20 / 40 | 40 / 80 / **144** | **144** |
+
+Every record:
+
+| KH1 record (file) | HP / Defence / floor / **cap** (record offset, when the script picks it) |
+|---|---|
+| tiger (Rajah?) in Agrabah al02 (`xa_al_3060.mdls`) | 380 / 15 / 2 / **15** |
+| Fat Bandit (`xa_ex_2060.mdls`) | 300 / 27 / 10 / **270** (`0x80`, LV2); 240 / 15 / 8 / **220** (`0x14`, LV1) |
+| Bandit (`xa_ex_2090.mdls`) | 120 / 27 / 8 / **300** (`0x80`, LV2); 39 / 15 / 5 / **300** (`0x14`, LV1) |
+| Air Soldier (`xa_ex_2160.mdls`) | 120 / 27 / 5 / **300** (`0x80`, LV2); 33 / 13 / 4 / **300** (`0x14`, LV1) |
+| Pot Centipede (main body) (`xa_ex_2190.mdls`) | 240 / 27 / 7 / **24** (`0x80`, LV2); 200 / 15 / 6 / **20** (`0x14`, LV1) |
+| Pot Centipede (segments) (`xa_ex_2191.mdls`) | 1 / 2 / 0 / **0** |
+| Jafar (`xa_al_3010.mdls`) | 500 / 15 / 2 / **15** |
+| Genie Jafar (`xa_al_3020.mdls`) | 750 / 15 / 2 / **20** |
+| unidentified (R_SHADOW; Neoshadow?) (`xa_ex_2420.mdls`) | 150 / 30 / 10 / **40** |
+| Ansem (End of the World) (`xa_ex_1630.mdls`) | 1500 / 30 / 2 / **15** (`0x14`); 1200 / 30 / 2 / **15** (`0x80`) |
+| Guard Armor foot (Traverse Town; Coliseum rem (`xa_tw_3020.mdls`) | 240 / 14 / 2 / **30** (`0xf0`); 450 / 30 / 2 / **30** (`0x1c8`); 450 / 27 / 2 / **30** (`0x15c`) |
+| Opposite Armor parts (`xa_tw_3010.mdls`) | 900 / 13 / 2 / **20** (`0x18`, LV1); 900 / 30 / 2 / **25** (`0x84`, LV2) |
+| pot object in Ursula's lair (`lm_2030.moa`) | 100 / 19 / 2 / **100** |
+| Ursula (first fight) (`xa_lm_1050.mdls`) | 1200 / 27 / 2 / **30** (`0x80`, LV2); 450 / 19 / 2 / **20** (`0x14`, LV1) |
+| Flotsam / Jetsam (`xa_lm_3020.mdls`) | 120 / 27 / 2 / **30** (`0x80`, LV2); 60 / 19 / 2 / **20** (`0x14`, LV1) |
+| Wight Knight (Halloween Town model xa_ex_2201 (`xa_ex_2201.mdls`) | 120 / 27 / 8 / **300** (`0x80`, LV2); 60 / 20 / 7 / **300** (`0x14`, LV1) |
+| Gargoyle (Halloween Town model xa_ex_2221) (`xa_ex_2221.mdls`) | 135 / 27 / 8 / **300** (`0x80`, LV2); 70 / 20 / 7 / **300** (`0x14`, LV1) |
+| Search Ghost (Halloween Town model xa_ex_2231 (`xa_ex_2231.mdls`) | 120 / 27 / 7 / **300** (`0x80`, LV2); 45 / 17 / 4 / **300** (`0x14`, LV1) |
+| Oogie Boogie (`xa_nm_3000.mdls`) | 800 / 27 / 2 / **20** (`0x80`, LV2); 450 / 20 / 2 / **15** (`0x14`, LV1) |
+| Oogie's Manor (body) (`xa_nm_3010.mdls`) | 150 / 27 / 2 / **30** (`0x80`, LV2); 90 / 20 / 2 / **20** (`0x14`, LV1) |
+| Lock (`xa_nm_1030.mdls`) | 400 / 27 / 2 / **30** (`0x80`, LV2); 150 / 20 / 2 / **20** (`0x14`, LV1) |
+| Shock (`xa_nm_1040.mdls`) | 300 / 27 / 2 / **20** (`0x80`, LV2); 120 / 20 / 2 / **20** (`0x14`, LV1) |
+| Barrel (`xa_nm_1050.mdls`) | 500 / 27 / 2 / **20** (`0x80`, LV2); 180 / 20 / 2 / **20** (`0x14`, LV1) |
+| Maleficent's shadow copy (`xa_ex_1090.mdls`) | 900 / 24 / 2 / **20** |
+| Maleficent (battle) (`xa_ex_1090.mdls`) | 900 / 24 / 2 / **20** |
+| Parasite Cage (`xa_pi_3000.mdls`) | 1500 / 27 / 2 / **20** (`0x158`); 900 / 17 / 2 / **20** (`0x80`); 750 / 27 / 2 / **20** (`0xec`); 450 / 17 / 2 / **15** (`0x14`) |
+| Riku (Monstro) (`xa_ex_1560.mdls`) | 50 / 17 / 2 / **10** |
+| Opposite Armor (main) (`xa_tw_3010.mdls`) | 900 / 13 / 2 / **20** (`0x14`, LV1); 900 / 30 / 2 / **25** (`0x80`, LV2) |
+| Guard Armor foot (Traverse Town; Coliseum rem (`xa_tw_3000.mdls`) | 700 / 8 / 2 / **30** |
+| Pot Centipede head? (MUKADE_H) (`xa_al_3030.mdls`) | 500 / 15 / 2 / **20** |
+| Aladdin boss? (ALADIN_BOSS) (`xa_al_3050.mdls`) | 1500 / 34 / 4 / **20** |
+| ? (`xa_aw_1010.mdls`) | 10 / 9 / 2 / **20** |
+| Card Soldier (Spade) (`xa_aw_1030.mdls`) | 45 / 9 / 2 / **100** |
+| Card Soldier (Heart) (`xa_aw_1060.mdls`) | 60 / 9 / 2 / **100** |
+| Trickmaster (`xa_aw_3000.mdls`) | 600 / 9 / 2 / **20** |
+| ? (`xa_di_1010.mdls`) | 60 / 5 / 2 / **10** |
+| ? (`xa_di_1020.mdls`) | 45 / 5 / 2 / **10** |
+| ? (`xa_di_1030.mdls`) | 75 / 5 / 2 / **10** |
+| Darkside (`xa_di_3000.mdls`) | 240 / 2 / 2 / **20** (`0x14`); 300 / 6 / 3 / **20** (`0x80`); 900 / 30 / 2 / **20** (`0xec`) |
+| LASTZAKO (final-area Heartless) (`xa_ew_2010.mdls`) | 120 / 30 / 2 / **300** |
+| STBAZOOKA (`xa_ew_2020.mdls`) | 240 / 30 / 5 / **100** |
+| STBAZOOKA_B (`xa_ew_2030.mdls`) | 240 / 30 / 5 / **100** |
+| World of Chaos face (LASTFACE) (`xa_ew_2040.mdls`) | 1200 / 30 / 3 / **20** |
+| World of Chaos core (`xa_ew_2050.mdls`) | 300 / 30 / 10 / **10** |
+| World of Chaos core (small) (`xa_ew_2060.mdls`) | 30 / 30 / 10 / **10** |
+| Ansem (final, LASTBOSS) (`xa_ew_3020.mdls`) | 1500 / 30 / 4 / **20** |
+| Riku (`xa_ex_1010.mdls`) | 90 / 5 / 2 / **10** |
+| Leon (`xa_ex_1030.mdls`) | 600 / 18 / 2 / **20** (`0x80`, LV1); 750 / 27 / 2 / **20** (`0x158`, LV2); 750 / 34 / 2 / **20** (`0x230`, LV2); 120 / 8 / 2 / **10** (`0x14`) |
+| Yuffie (`xa_ex_1040.mdls`) | 300 / 18 / 2 / **20** (`0x14`, LV1); 450 / 27 / 2 / **20** (`0xec`, LV2); 450 / 30 / 2 / **20** (`0x1c4`, LV2) |
+| Cloud (`xa_ex_1150.mdls`) | 300 / 10 / 2 / **20** (`0x14`, LV1); 600 / 27 / 2 / **20** (`0x80`, LV2); 450 / 23 / 2 / **20** (`0xec`, LV1); 600 / 34 / 2 / **20** (`0x29c`, LV2) |
+| Riku (dark) (`xa_ex_1160.mdls`) | 500 / 24 / 8 / **15** |
+| Riku (dark) (`xa_ex_1580.mdls`) | 500 / 24 / 8 / **15** |
+| Soldier (`xa_ex_2010.mdls`) | 24 / 8 / 3 / **300** (`0x14`, LV1); 120 / 27 / 10 / **300** (`0x80`, LV2) |
+| Shadow (`xa_ex_2020.mdls`) | 21 / 15 / 4 / **300** (`0x3e0`); 60 / 27 / 10 / **300** (`0x740`); 12 / 9 / 2 / **300** (`0x1c4`); 10 / 2 / 2 / **300** (`0x14`); 12 / 6 / 2 / **300** (`0xec`); 60 / 30 / 10 / **300** (`0x7ac`); 12 / 10 / 2 / **300** (`0x230`); 54 / 24 / 9 / **300** (`0x6d4`); 36 / 17 / 6 / **300** (`0x44c`); 42 / 21 / 7 / **300** (`0x5fc`); 12 / 8 / 2 / **300** (`0x158`); 18 / 11 / 3 / **300** (`0x29c`) |
+| Shadow (Halloween Town model) (`xa_ex_2021.mdls`) | 39 / 20 / 7 / **300** (`0x590`); 60 / 27 / 10 / **300** (`0x740`) |
+| Shadow (End of the World model) (`xa_ex_2022.mdls`) | 60 / 27 / 10 / **50** |
+| Powerwild (`xa_ex_2030.mdls`) | 30 / 11 / 3 / **300** (`0x14`, LV1); 120 / 27 / 8 / **300** (`0x80`, LV2) |
+| Bouncywild (`xa_ex_2040.mdls`) | 18 / 11 / 3 / **300** (`0x14`, LV1); 90 / 27 / 10 / **300** (`0x80`, LV2) |
+| Large Body (`xa_ex_2050.mdls`) | 160 / 10 / 6 / **144** (`0x14`, LV1); 300 / 27 / 10 / **270** (`0x80`, LV2) |
+| Sea Neon (`xa_ex_2070.mdls`) | 30 / 19 / 4 / **300** (`0x14`, LV1); 60 / 27 / 5 / **300** (`0x80`, LV2) |
+| Aquatank? (B_JERRY) (`xa_ex_2080.mdls`) | 90 / 19 / 3 / **54** (`0x14`, LV1); 240 / 27 / 6 / **220** (`0x80`, LV2) |
+| Pirate (`xa_ex_2100.mdls`) | 105 / 21 / 8 / **300** (`0x14`, LV1); 120 / 27 / 9 / **300** (`0x80`, LV2) |
+| Red Nocturne (`xa_ex_2110.mdls`) | 24 / 9 / 3 / **300** (`0x14`, LV1); 60 / 27 / 6 / **300** (`0x80`, LV2) |
+| Blue Rhapsody (`xa_ex_2120.mdls`) | 24 / 10 / 3 / **300** (`0x14`, LV1); 60 / 27 / 6 / **300** (`0x80`, LV2) |
+| Yellow Opera (`xa_ex_2130.mdls`) | 24 / 13 / 3 / **300** (`0x14`, LV1); 60 / 27 / 6 / **300** (`0x80`, LV2) |
+| Green Requiem (`xa_ex_2140.mdls`) | 15 / 13 / 3 / **300** (`0x14`, LV1); 45 / 27 / 6 / **300** (`0x80`, LV2) |
+| Wizard (`xa_ex_2150.mdls`) | 75 / 24 / 10 / **300** (`0x14`, LV1); 90 / 27 / 8 / **80** (`0x80`, LV2) |
+| Wizard (Halloween Town model) (`xa_ex_2151.mdls`) | 75 / 24 / 10 / **300** (`0x14`, LV1); 90 / 27 / 8 / **80** (`0x80`, LV2) |
+| Barrel Spider? (MIMIC_B) (`xa_ex_2170.mdls`) | 21 / 15 / 6 / **300** (`0x14`, LV1); 60 / 27 / 8 / **300** (`0x80`, LV2) |
+| Barrel/Pot Spider (MIMIC_B / MIMIC_T, Agrabah (`xa_ex_2172.mdls`) | 21 / 15 / 6 / **300** (`0x14`, LV1); 60 / 27 / 8 / **300** (`0x80`, LV2) |
+| Pot Spider? (MIMIC_T) (`xa_ex_2180.mdls`) | 24 / 17 / 7 / **300** (`0x14`, LV1); 60 / 27 / 10 / **300** (`0x80`, LV2) |
+| Pot Spider? (MIMIC_T, Monstro) (`xa_ex_2182.mdls`) | 24 / 17 / 7 / **300** (`0x14`, LV1); 60 / 27 / 10 / **300** (`0x80`, LV2) |
+| Pot Spider? (MIMIC_T) (`xa_ex_2184.mdls`) | 24 / 17 / 7 / **300** (`0x14`, LV1); 60 / 27 / 10 / **300** (`0x80`, LV2) |
+| Wight Knight (`xa_ex_2200.mdls`) | 60 / 20 / 7 / **300** (`0x14`, LV1); 120 / 27 / 8 / **300** (`0x80`, LV2) |
+| Air Pirate (`xa_ex_2210.mdls`) | 120 / 21 / 8 / **300** (`0x14`, LV1); 135 / 27 / 9 / **300** (`0x80`, LV2) |
+| Gargoyle (`xa_ex_2220.mdls`) | 70 / 20 / 7 / **300** (`0x14`, LV1); 135 / 27 / 8 / **300** (`0x80`, LV2) |
+| Search Ghost (`xa_ex_2230.mdls`) | 45 / 17 / 4 / **300** (`0x14`, LV1); 120 / 27 / 7 / **300** (`0x80`, LV2) |
+| Screwdiver? (SAKANA, fish) (`xa_ex_2240.mdls`) | 120 / 19 / 5 / **110** (`0x14`, LV1); 300 / 27 / 7 / **270** (`0x80`, LV2) |
+| Screwdiver? (GYORAI, torpedo) (`xa_ex_2250.mdls`) | 48 / 19 / 6 / **300** (`0x14`, LV1); 120 / 27 / 8 / **300** (`0x80`, LV2) |
+| B_HORROR (Halloween Town, unidentified) (`xa_ex_2260.mdls`) | 200 / 20 / 6 / **30** (`0x14`, LV1); 200 / 27 / 6 / **30** (`0x80`, LV2) |
+| Battleship (FUNE) (`xa_ex_2270.mdls`) | 300 / 21 / 6 / **30** (`0x14`, LV1); 450 / 27 / 10 / **75** (`0x80`, LV2) |
+| Darkball (`xa_ex_2280.mdls`) | 60 / 24 / 9 / **300** (`0x14`); 90 / 27 / 10 / **300** (`0x80`) |
+| Darkball (Halloween Town model) (`xa_ex_2281.mdls`) | 60 / 24 / 9 / **300** (`0x14`); 90 / 27 / 10 / **300** (`0x80`) |
+| Darkball (End of the World model) (`xa_ex_2282.mdls`) | 60 / 24 / 9 / **300** (`0x14`); 90 / 27 / 10 / **75** (`0xec`) |
+| Creeper Plant? (GENSHI) (`xa_ex_2290.mdls`) | 300 / 30 / 10 / **140** |
+| Creeper Plant? (GENSHI, End of the World) (`xa_ex_2292.mdls`) | 300 / 27 / 10 / **140** |
+| Behemoth (`xa_ex_2310.mdls`) | 1350 / 27 / 2 / **20** |
+| Behemoth (`xa_ex_2311.mdls`) | 1500 / 34 / 2 / **20** |
+| Behemoth (`xa_ex_2312.mdls`) | 1050 / 30 / 2 / **30** |
+| Wyvern (B_FLY) (`xa_ex_2320.mdls`) | 135 / 24 / 15 / **300** (`0x14`, LV1); 150 / 27 / 8 / **135** (`0x80`, LV2) |
+| Angel Star (`xa_ex_2330.mdls`) | 220 / 30 / 9 / **200** |
+| Defender (`xa_ex_2340.mdls`) | 240 / 24 / 8 / **80** (`0x14`, LV1); 300 / 27 / 9 / **200** (`0x80`, LV2) |
+| White Mushroom (`xa_ex_2350.mdls`) | 30 / 8 / 10 / **10** |
+| White Mushroom (`xa_ex_2351.mdls`) | 30 / 8 / 10 / **10** |
+| White Mushroom (`xa_ex_2352.mdls`) | 30 / 8 / 10 / **10** |
+| Black Fungus (`xa_ex_2380.mdls`) | 18 / 15 / 2 / **2** |
+| Black Fungus (`xa_ex_2381.mdls`) | 18 / 15 / 2 / **2** |
+| Rare Truffle? (KINOKO_H) (`xa_ex_2390.mdls`) | 200 / 17 / 2 / **2** |
+| Rare Truffle? (KINOKO_H) (`xa_ex_2391.mdls`) | 200 / 17 / 2 / **2** |
+| KINOKO_J (unidentified mushroom) (`xa_ex_2410.mdls`) | 200 / 8 / 2 / **2** |
+| S_NORMAL (unidentified, Hollow Bastion) (`xa_ex_2430.mdls`) | 180 / 24 / 3 / **18** (`0x14`, LV1); 240 / 27 / 4 / **24** (`0x80`, LV2) |
+| B_KAGE (unidentified, Wonderland) (`xa_ex_2440.mdls`) | 150 / 9 / 10 / **30** (`0x14`, LV1); 300 / 27 / 20 / **60** (`0x80`, LV2) |
+| S_MESU (unidentified, Traverse Town) (`xa_ex_2450.mdls`) | 28 / 13 / 5 / **12** (`0x14`, LV1); 90 / 27 / 10 / **40** (`0x80`, LV2) |
+| MAHO_N (unidentified Nocturne type, Deep Jung (`xa_ex_2460.mdls`) | 80 / 11 / 20 / **20** |
+| B_HORROR (Monstro, unidentified) (`xa_ex_2470.mdls`) | 300 / 17 / 2 / **100** (`0x14`, LV1); 300 / 27 / 2 / **100** (`0x80`, LV2) |
+| F_SAKANA (unidentified) (`xa_ex_2480.mdls`) | 240 / 21 / 2 / **30** (`0x14`, LV1); 240 / 27 / 2 / **30** (`0x80`, LV2) |
+| F_GYORAI (unidentified) (`xa_ex_2490.mdls`) | 10 / 21 / 2 / **300** (`0x14`, LV1); 10 / 27 / 2 / **300** (`0x80`, LV2) |
+| Sephiroth (`xa_ex_3000.mdls`) | 1800 / 46 / 4 / **25** |
+| Unknown (NOBODY) (`xa_ex_3010.mdls`) | 1500 / 46 / 4 / **25** |
+| Hercules (`xa_ex_4010.mdls`) | 450 / 23 / 2 / **20** (`0x14`, LV1); 750 / 27 / 2 / **30** (`0xec`, LV2) |
+| Hades (`xa_he_1010.mdls`) | 1800 / 34 / 2 / **20** |
+| Rock Titan (`xa_he_3000.mdls`) | 2100 / 34 / 2 / **20** |
+| Ice Titan (`xa_he_3010.mdls`) | 1500 / 46 / 2 / **20** |
+| Cerberus (`xa_he_3020.mdls`) | 600 / 10 / 2 / **20** (`0x14`, LV1); 900 / 27 / 2 / **20** (`0x80`, LV2); 1200 / 34 / 2 / **20** (`0xec`, LV2) |
+| Ursula (giant) (`xa_lm_3000.mdls`) | 900 / 19 / 2 / **20** (`0x14`, LV1); 1200 / 27 / 2 / **30** (`0x80`, LV2) |
+| Glut (SHARK) (`xa_lm_3030.mdls`) | 200 / 19 / 2 / **20** (`0x14`, LV1); 300 / 27 / 2 / **20** (`0x80`, LV2) |
+| Dragon Maleficent (`xa_pc_3000.mdls`) | 1200 / 24 / 2 / **20** |
+| Chernabog (`xa_pc_3020.mdls`) | 1500 / 30 / 2 / **20** |
+| Captain Hook (`xa_pp_3000.mdls`) | 900 / 21 / 2 / **20** |
+| Phantom? (PPBOSS) (`xa_pp_3010.mdls`) | 1200 / 34 / 2 / **20** |
+| Shadow Sora? (S_KAGE) (`xa_pp_3020.mdls`) | 120 / 21 / 2 / **10** |
+| S_KAGEH (`xa_pp_3030.mdls`) | 750 / 21 / 2 / **20** |
+| ? (`xa_tw_2010.mdls`) | 20 / 8 / 10 / **10** |
+| ? (`xa_tw_2020.mdls`) | 30 / 8 / 10 / **10** |
+| ? (`xa_tw_2030.mdls`) | 40 / 8 / 10 / **10** |
+| ? (`xa_tw_2040.mdls`) | 10 / 8 / 10 / **10** |
+| Guard Armor (torso) (`xa_tw_3000.mdls`) | 700 / 8 / 2 / **30** |
+| Guard Armor (Coliseum model) (`xa_tw_3020.mdls`) | 240 / 14 / 2 / **30** (`0xec`, LV1); 450 / 30 / 2 / **30** (`0x1c4`, LV2); 450 / 27 / 2 / **30** (`0x158`, LV2) |
+| Sabor (`xa_tz_3000.mdls`) | 90 / 11 / 2 / **20** |
+| Clayton (`xa_tz_3010.mdls`) | 250 / 11 / 2 / **15** |
+| Stealth Sneak (`xa_tz_3020.mdls`) | 750 / 11 / 2 / **20** (`0x14`, LV1); 600 / 30 / 2 / **20** (`0x80`, LV2) |
+| Stealth Sneak (`xa_tz_3040.mdls`) | 750 / 11 / 2 / **20** (`0x14`, LV1); 600 / 30 / 2 / **20** (`0x80`, LV2) |
+
+### Checked / not checked
+
+- Checked (KH1 decomp): the rule's order (floor / cap, then resistance, Aero, cannot-die, at least 1),
+  element 8's and 9 / 11 / 12's exits. Checked (Re:CoM decomp + disasm + exe): the join and its 11
+  branches, nothing branching inside (disasm of the function, rel32 scan of `.text`, the jump table),
+  `0x14017DAB0`'s two callers, the gather's weak part and the frozen bonus before the apply, the stop
+  exe's record from `+0x34`, the flatten exe's `+0x2DC`; all six sites byte-checked (pefile, 1429 sites,
+  0 mismatches). Tests: `damage::tests::the_cap_later_is_kh1s_cap`, `a_bonus_before_the_cap_stays_under_it`
+  (kh1-core), `damage_cap::tests::*`, `sites::tests::damage_cap_sites`.
+- Not checked: in game (no trace yet); that no Re:CoM path outside these applies a Sora-side hit's value
+  to an enemy's HP without the join (Assumption: the stop exe is the only one found, and is covered).
+- The cap of a deferred landing (kind 9 / 0x12) or flatten re-apply is the enemy's slot at that time:
+  another hit on the enemy before it lands replaces it (Assumption: rare).
+
+### What the owner should test
+
+1. Damage = KH1, Guard Armor (Traverse Town) at a high level: no hit over 30 (the log's `damage cap:`
+   line, the trace's `:cap`); Gravity Break / Zantetsuken / Gravity still take their full %.
+2. A weakness past the cap: Oogie LV1 with physical swings at level 50+: 22, not 15.
+3. Fat Bandit's Back Attack (equipped), a frozen enemy (Blizzard), a weak part: still at most the cap.
+4. A Sleights-list sleight, a LV3 summon and a Party sleight on a boss: capped (the log names the
+   sleight).
+5. Damage = Re:CoM: Guard Armor's hits stop at its share (the log prints it); the boss falloff still
+   cuts after.
+6. Stop an enemy, hit it hard, let Stop end: each landing at most the cap.
+7. Combat = Re:CoM and Riku's story: no `damage cap:` line in a battle.
 
 ## Sora's KH1 Strength (decision 18: keep the Rod, give up the Shield)
 

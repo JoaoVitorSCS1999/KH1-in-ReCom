@@ -9,8 +9,9 @@
 //!   read them as usual.
 //! - Damage: a KH1 hit's value on the hit part (`part+0x92`, which Re:CoM's hit handler reads
 //!   through `0x14016FDB0`) becomes KH1's damage for Sora's swing row, his KH1 Strength and the
-//!   twin's Defence / floor / cap / resistance. Re:CoM's own path then applies its extras (weak
-//!   part, resistance %, boss falloff; decision 13).
+//!   twin's Defence / floor / resistance. Re:CoM's own path then applies its extras (weak part,
+//!   resistance %, boss falloff; decision 13); the twin's per-hit cap goes on at Re:CoM's damage
+//!   join after them (Sora's damage cap, `super::damage_cap`).
 //! - Damage = Re:CoM (owner, 2026-11-01; `super::damage`): no KH1 HP is written and no KH1 damage
 //!   replaces Re:CoM's; the twins' / proxies' records still give the non-damage numbers.
 //! - Proxies (`docs/recom-kh1-attack.md` § KH1 numbers for enemies without a twin): an enemy
@@ -472,10 +473,21 @@ pub fn equipped_weapon() -> WeaponData {
     keyblade(equipped_card()).map(|k| k.weapon.clone()).unwrap_or_else(WeaponData::kingdom_key)
 }
 
+/// A KH1 number's cap left for Re:CoM's join (Sora's damage cap, `crate::damage_cap`): (the cap in the
+/// number's units, KH1's resistance for its element, which the cap carries). None: not capped.
+pub type CapLater = Option<(f32, f32)>;
+
+/// KH1's resistance (`+0x78 + element × 4`, the record's %) for an attack's element.
+fn resist_of(t: &EnemyStats, data: &kh1_core::AttackData) -> f32 {
+    t.resist.get((data.element & 0xF) as usize).copied().unwrap_or(100) as f32 / 100.0
+}
+
 /// KH1's damage for a spell (M7 stage 7.4: `crate::magic::spell_damage`, power + max MP) on this
 /// enemy's twin or proxy, or None (Re:CoM's number stands). `hp`: the enemy's current HP (KH1's
 /// for twins and proxies, `+0x274`), which Gravity's % reads (7.8; `resist[8]` is its scale).
-pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32, hp: i32) -> Option<i32> {
+/// Sora's damage cap: the number is made **without** the enemy's per-hit cap, which comes back
+/// with it for Re:CoM's join (after every bonus, KH1's order).
+pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32, hp: i32) -> Option<(i32, CapLater)> {
     let t = match twin(enemy) {
         Some((_, t)) => t.clone(),
         None if !riku_story() => proxied(enemy)?,
@@ -488,15 +500,17 @@ pub fn kh1_spell_hit(enemy: usize, data: &kh1_core::AttackData, max_mp: i32, hp:
     let def = kh1_core::DefenderStats { hp: hp.max(0), max_hp: t.hp, defence: t.defence, level: t.level, min_damage: t.min_damage, max_damage: t.max_damage, resist, hp_percent_scale: resist[8], ..Default::default() };
     let mut g = RNG.lock().ok()?;
     let rng = g.get_or_insert_with(|| kh1_core::Kh1Rand::new(1));
-    Some(crate::magic::spell_damage(data, max_mp, &def, rng))
+    let (d, cap) = crate::magic::spell_damage_cap_later(data, max_mp, &def, rng);
+    Some((d, cap.map(|c| (c, resist_of(&t, data)))))
 }
 
 /// KH1's damage for Sora's swing row on this enemy's twin, or None (Re:CoM's number stands).
 /// `hp_now`: the enemy's current HP (KH1's for twins and proxies, `+0x274`), which the % of HP
 /// rows read (Gravity Break, Zantetsuken); `max_mp`: Sora's KH1 max MP (Ripple Drive's Magic × 3).
 /// `bonus`: Strength added to Strength-source records (M12 step 3, Berserk's 4, else 0;
-/// `crate::attack::kh1_damage_with`).
-pub fn kh1_hit_with(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32, bonus: i32) -> Option<i32> {
+/// `crate::attack::kh1_damage_with`). Sora's damage cap: made without the enemy's per-hit cap,
+/// which comes back with it for Re:CoM's join ([`kh1_spell_hit`]).
+pub fn kh1_hit_with(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, max_mp: i32, bonus: i32) -> Option<(i32, CapLater)> {
     // Damage = Re:CoM: Re:CoM's AP stands (`super::damage`).
     if !super::damage::kh1() {
         return None;
@@ -511,8 +525,10 @@ pub fn kh1_hit_with(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32, 
     let strength = STATS.get()?.strength_with(sora_level, &w)?;
     let mut g = RNG.lock().ok()?;
     let rng = g.get_or_insert_with(|| kh1_core::Kh1Rand::new(1));
-    let d = crate::attack::kh1_damage_with(super::attack::moveset(), kh1_row, crate::attack::Sora { strength, max_mp }, bonus, &w, &t, hp_now, rng)?;
-    Some(d.damage)
+    let m = super::attack::moveset();
+    let (d, cap) = crate::attack::kh1_damage_cap_later(m, kh1_row, crate::attack::Sora { strength, max_mp }, bonus, &w, &t, hp_now, rng)?;
+    let resist = m.row(kh1_row).and_then(|r| m.attack(r.attack)).map_or(1.0, |a| resist_of(&t, a));
+    Some((d.damage, cap.map(|c| (c, resist))))
 }
 
 /// Damage = Re:CoM (owner, 2026-11-01): Gravity Break's and Zantetsuken's KH1 percentage of the
@@ -548,6 +564,26 @@ pub fn berserk_share(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32,
     let w = equipped_weapon();
     let strength = STATS.get()?.strength_with(sora_level, &w)?;
     crate::kh1_support::berserk::share(super::attack::moveset(), kh1_row, crate::attack::Sora { strength, max_mp }, &w, &record, hp_now)
+}
+
+/// Sora's damage cap: the enemy's KH1 record (twin, else proxy / boss twin, as [`kh1_record`]) and what
+/// it is ("twin", "proxy", "proxy boss", "boss twin").
+pub fn record_from(enemy: usize) -> Option<(EnemyStats, &'static str)> {
+    match twin(enemy) {
+        Some((_, t)) => Some((t.clone(), "twin")),
+        None if !riku_story() => PROXIED.lock().ok()?.iter().find(|(e, _, _)| *e == enemy).map(|(_, s, w)| (s.clone(), *w)),
+        None => None,
+    }
+}
+
+/// Re:CoM's own max HP of an enemy (its getter `0x14017F5A0` under our wrapper: its `@ENP` row HP × the
+/// difficulty %), None before the hook is in.
+pub fn recom_max_hp(enemy: usize) -> Option<i32> {
+    if ORIG_MAX_HP.load(std::sync::atomic::Ordering::Acquire) == 0 {
+        return None;
+    }
+    // SAFETY: Re:CoM's own getter (its hook installed), on a live enemy.
+    Some(unsafe { orig::<MaxHpFn>(&ORIG_MAX_HP)(enemy) })
 }
 
 /// The KH1 record (twin, else proxy / boss twin) of an enemy at the KH1 setting in Sora's story,
