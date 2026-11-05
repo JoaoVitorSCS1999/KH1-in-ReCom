@@ -661,3 +661,4 @@ At KH1 setting:
   - The release lives on this repo's **`main`** branch, holding only the release files: `mod.yml`, `openkh/kh1-recom.dll`, `README.md`, `.gitignore`, `VERSION`. OpenKH's GitHub install takes `main` first when it has a `mod.yml` (Checked: OpenKH source, `docs/openkh-github-install.md`), so `PM2CRAZY/KH1-in-ReCom` installs the release; existing installs cloned from `testing` keep updating from `testing`.
   - **This is the owner's one exception to "only `testing`"**: `main` is written **only when the owner says so**, only with release files (no source, no game files), never force-pushed. All work still happens on `testing`.
   - First release: 0.142.0.
+- **Sora's damage cap** (owner, 2026-11-05, verbatim: "lets add a damage cap to sora"; answers): a cap on the **damage Sora deals** per hit, by **KH1's own rule** (research it and tell the owner the numbers before building), at **Combat = KH1 only**.
