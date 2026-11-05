@@ -1,4 +1,4 @@
-# Lock-on on R1 at Combat = KH1 (0.133.0)
+# Lock-on on R1 at Combat = KH1 (0.133.0), with KH1's lock rules (0.137.0)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Shop text, lock-on and camera), verbatim:
 "Let's have the lock on button be mapped to R1 if combat is set to KH1. If on mouse and keyboard it
@@ -54,7 +54,7 @@ compare; at KH1 one flag read and one store.
 Checked (KH1 decomp + exe): KH1's lock-on button is R1 (raw `0x800` → `0x400`). Checked (Re:CoM
 decomp + disasm + exe): Re:CoM's lock-on is R2 and reads only `+0x44`. Tests:
 `lock_on::tests::r1_only_on_the_pad_at_combat_kh1`, `sites::tests::lock_on_sites`.
-**Not KH1's** (Re:CoM's kept, owner question): how the lock ends and switches (KH1: R1 again
+**Not KH1's in 0.133.0** (KH1's built in 0.137.0, below): how the lock ends and switches (KH1: R1 again
 unlocks, L2 steps through the targets; Re:CoM: press and release unlocks, held + right stick
 switches). **Not checked**: in game; the device flag's timing against the lock-on in the same frame
 (Assumption: the input poll runs first); a controller remapped in Re:CoM's own settings (R1 is
@@ -72,8 +72,102 @@ whatever Re:CoM's R1 is).
 
 ## Owner questions
 
-1. **KH1's lock behaviour too?** (a) keep Re:CoM's (built: press and release unlocks, hold R1 + right
-   stick switches); (b) KH1's: R1 again unlocks at once, L2 steps through the targets (KH1's list
-   order); (c) KH1's, with KH1's hold option as a Config row.
-2. **Prompts**: does any Re:CoM text (tutorials, help) show the lock-on button? A screenshot tells
-   which escape it uses, so it can follow R1 on a controller at Combat = KH1.
+1. ~~KH1's lock behaviour too?~~ Answered 2026-11-04: "1. B": KH1's rules, no hold-style row
+   (built 0.137.0, below).
+2. ~~Prompts~~: "dont worry about it": left as they are.
+
+---
+
+# 0.137.0: KH1's lock rules on R1
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Lock-on rules and camera walls), verbatim:
+"1. B 2. dont worry about iit": **KH1's lock rules on R1** at Combat = KH1 on a controller: R1
+again unlocks at once; L2 steps through targets. No hold-style Config row. Prompts as they are.
+
+## KH1's lock-on, in full (Checked (KH1 Steam decomp + exe))
+
+| what | where |
+|---|---|
+| Pad table (19 pairs, read from the exe): R1 `0x800` → `0x400`; L2 `0x100` → `0x800` **and** `0x400000`; R2 `0x200` → `0x400000` only; L1 `0x400` → `0x40000`. So **R2 steps nothing**. | `0x140528290`, `0x14028B0B0` |
+| Edges: `0x14028B430` keeps held at `+4`, **pressed** (new this frame) at `+8`, released at `+0xC`. The lock-on reads `+8`. | `0x14028B430` |
+| The lock-on (state `0x142DB3510`: 0 none, 2 soft target, 3 locked, 1 / 4 other locks). **Not locked**: R1 pressed locks its pick (`0x1402B1540`), or the soft target in state 1 / 2 / 4; **no target: nothing**. **Locked (3)**: R1 pressed **unlocks at once** (sound 0x45, `0x1402B0970`); the release instead only when KH1's config `*(0x142E1F4D8)+4` = 1 (`0x1402FAFA0`: KH1's hold option, not built: owner). Else **L2 pressed steps** (below). L2 unlocked: nothing (state 0 reads only `0x400`). | `0x1402B0610` |
+| **The lock list**: entries `0x142DB3520` (8 bytes: entity, lock point; room for 97 up to the count `0x142DB382C`), cursor `0x142DB3830`; a lock with no list starts it with its target; every unlock empties it. **L2**: cursor not at the last entry → the next entry; at the last → KH1's pick among the targets **not in the list**, appended and locked; none → **back to the first entry** (if not already on it); else nothing. Each step plays the lock sound (0x44). | `0x1402B0610` |
+| **KH1's pick**: each target's lock points (`0x1402B0110`), not Sora, alive / targetable (`0x1402B0030`); score `(int)max(0, |point − Sora's point (0x8003)| − the point's radius)` (`0x1402B04C0`), the room's priority class in the top byte (`0x142D539E8` + 9 / 10 / 11 by kind), targets flagged `+0x130 → +4 & 0x1000` only to 12 m, a clear line from the camera / Sora (`0x140193B60`); the lowest score wins, the first on a tie. **Nearest first** (by the lock sphere's surface), no angle. | `0x1402B1540`, `0x1402B0F90` |
+| **Each frame** (`0x1402B11B0`, a task): Sora gone / in a state without the lock flag → unlock. Locked: the target gone or out of range (flagged targets: 15 m across or 10 m up) → **unlock** (no step to another target; then the soft target). The list drops the entries gone or out of range (the cursor stays on its entry). | `0x1402B11B0`, `0x1402B13F0` |
+
+## Re:CoM's lock-on, the parts KH1's rules use (Checked (decomp + disasm + exe))
+
+| what | where |
+|---|---|
+| The lock-on: its nearest lockable target to `+0x84C` (`0x1401CDB90`: Re:CoM's `LockOnManager` list `0x14087B1E0 + 0x88`, `+0x154 & 0x10000`, vtable `+0x50` points, plain distance). Unlocked: `call 0x1401FF740` (pressed) at **`0x1401E8E44`** → lock (cursor `+0xE0` ^= 1, `+0xD4` = 0, `+0xF4` = 1, its update `0x140208EC0`, sound 7). Locked: `call 0x1401FF600` (released) at **`0x1401E8E9C`** with `+0x424 & 0x1000` → unlock (sound 8); else `call 0x1401FF4F0` (held) at **`0x1401E8EFF`**, then the pressed reader (sets `0x1000`), `call 0x1401FF4A0` (stick flick) at **`0x1401E8F2D`**, `call 0x1401CD4B0(+0x850)` (the target that way) at **`0x1401E8F3C`** → switch (cursor `+0xE0` = 1, `+0xD4` = 0, `+0xF4` = 1, update, sound 7); held also sets `+0x424 & 0x800` (Re:CoM's camera step `0x1401FCF90` then ignores the right stick that frame; the request bits `0x1401F8150` clear it every frame). | `0x1401E8DA0` |
+| The cursor update: a new target (a lock, a switch: `+0xF4` set) only within **14 m** in a battle room (`+0xF8 & 4`, set by the cursor init `0x140208120` with the enemy gauge), **3 m** elsewhere; holds to 30 m / 3 m; the target gone or not lockable → full unlock (`+0xF8 & 2`, a sleight's forced lock `0x14020B6A0`: re-take the nearest instead). Measured from `0x1401F0AB0(out, 0)` (the main player's mover `+0x30`) to the target's vtable `+0x50`. Pressing with no target at all **arms** the lock (locked on nothing; takes the next target that comes). | `0x140208EC0` (`0x14020919B`; data `0x140509248` 3.0, `0x140509258` 14.0) |
+| The pad's pressed test `(mask, pad)`: `0x14029B2F0` → `0x14029C240` (pad 0's pressed word `+0x14`). L2 (`+0x40` = 1) is read only by the battle branch of the request bits (`0x1401FF6C0`), which Combat = KH1 does not run (`win::attack::request_bits`). | |
+
+## Built
+
+Combat = KH1, Sora's story, **the controller in use**: the lock-on wrapper (0.133.0) marks Re:CoM's
+lock-on call as KH1's, and the lock-on's five calls (`sites::LOCK_ON_CALLS`, each `call rel32`
+retargeted at install to one stub block near the exe; all or none) answer KH1's way. Outside such a
+call (keyboard / mouse, Combat = Re:CoM, Riku's story) each answers with Re:CoM's own callee.
+
+| call | KH1's answer |
+|---|---|
+| pressed, unlocked (`0x1401E8E44`) | R1 pressed **and** Re:CoM's pick (`+0x84C`) is a target its cursor takes (lockable, within 14 m / 3 m): **R1 with no target does nothing** (no armed lock, no lock sound). |
+| released, locked (`0x1401E8E9C`) | R1 **pressed** (and `+0x424 \|= 0x1000`): **R1 again unlocks at once**, by Re:CoM's unlock and its sound 8. |
+| held, locked (`0x1401E8EFF`) | **L2 pressed** (pad enabled). R1 held does nothing (Re:CoM's camera keeps the right stick). |
+| flick (`0x1401E8F2D`) | yes (reached only on L2's press). |
+| switch (`0x1401E8F3C`) | **KH1's next target** (`lock_on::History::step` with `lock_on::nearest`), or none (no switch, nothing happens). Re:CoM then switches: its cursor, `+0x84C` / `+0x850`, sound 7. |
+
+**KH1's lock list** (`lock_on::History`, ours: Re:CoM has none): after each lock-on call its cursor
+syncs it (a new lock → `[target]`; unlocked → empty; a target Re:CoM changed otherwise → restarted);
+while locked, each frame drops the entries no longer lockable or past Re:CoM's take reach (the
+current one stays); room 97 as KH1's. **KH1's pick**: Re:CoM's `LockOnManager` list walked as its
+own picks do (lockable, not Sora), each at its vtable `+0x50` point; score `(int)max(0, distance ×
+100 − the KH1 twin's lock-point radius)` (`stats::lock_radius`, 0 without a twin), the lowest, the
+first on a tie, only within Re:CoM's take reach (a farther one would make Re:CoM drop the lock).
+
+Not changed: the lock press's target (Re:CoM's pick, what its cursor shows), the target dying or
+leaving range (Re:CoM's full unlock = KH1's; reaches below), sounds (Re:CoM's 7 / 8), prompts,
+keyboard / mouse (Re:CoM's rules on its key), Combat = Re:CoM, Riku's story.
+
+Sites: `LOCK_ON_CALLS` (5), `LOCK_ON_RULES_CHECKED` (8: the pick store, the pressed-again test, the
+cursor test, the switch and flick heads, the pad pressed test, the cursor's reach test and
+constants); `0x1401F0AB0` and `0x14029B2F0` are checked where they already were (`GIMMICK_HP_CALLEES`
+"Sora's point", "pad fresh"). Test `sites::tests::lock_on_rules_sites` (each call's target, inside
+the hooked function, no overlap; fields and reaches). `check_sites_rs.py`: 1420 sites, 0 mismatches.
+
+Per frame: Re:CoM's lock-on once; at KH1 on the pad two atomic stores more; unlocked one load;
+locked a lookup and a point read per listed target (KH1's drop). Each retargeted call adds an
+atomic load. An L2 press walks Re:CoM's target list once.
+
+## 1:1 checks (0.137.0)
+
+- **Checked (KH1 decomp + exe)**: the buttons (R1 lock / unlock, L2 step, R2 none); press edges, not
+  releases; R1 locked unlocks at once; no target, nothing; L2 unlocked nothing; the list's order
+  (next entry / new pick appended / back to the first / nothing), its reset at unlock, its per-frame
+  drop; the pick's score (nearest by the lock sphere's surface, whole units, first on a tie); the
+  target dying → unlock, no auto-step. Tests: `lock_on::tests` (6).
+- **Not 1:1 (Re:CoM's kept)**: (1) the lock press's target is Re:CoM's nearest (plain distance, what
+  its cursor shows), not KH1's pick (KH1: its soft target when there is one, else its pick); (2) KH1's
+  lock points (a boss's several parts are separate entries in KH1; Re:CoM has one point an actor);
+  (3) KH1's pick's priority class per room, its line-of-sight test and its 12 m limit for flagged
+  targets: none (Re:CoM's 14 m take reach instead); (4) ranges: Re:CoM's (holds to 30 m in battle,
+  14 m to take), KH1's 15 m / 10 m only for flagged targets; (5) the measure: Re:CoM's points (its
+  player's mover, the target's vtable `+0x50`) and the KH1 twin's radius, against KH1's Sora point
+  0x8003 and its lock points (Assumption: close enough to order the same); (6) sounds Re:CoM's.
+- **Not checked**: in game; KH1's hold option's default (Assumption: press, the owner's choice).
+
+## What to test (0.137.0: Combat = KH1, Sora's story, a battle, a controller)
+
+1. Several enemies. R1: locks (Re:CoM's sound and cursor). **R1 again: unlocks at once** on the
+   press (sound 8), no wait for the release.
+2. Locked, **L2**: the next nearest enemy not yet visited; keep pressing: each enemy once, nearest
+   first, then back to the first one and round again. Log: `lock-on: L2 on 0x…: next 0x…; list […]`.
+3. One enemy, locked, L2: nothing. Not locked, L2: nothing.
+4. No enemy near (or all past 14 m), R1: nothing (no lock sound, no lock waiting for a target).
+5. Locked, hold R1 and move the right stick: the camera turns, no target switch. R2: nothing.
+6. The locked enemy dies: the lock ends (as before); R1 locks the next.
+7. Keyboard / mouse: Re:CoM's key and rules (press, press and release, hold + stick) as before.
+   Combat = Re:CoM or Riku's story: R2 and Re:CoM's rules as before.
+8. Log at start: `lock-on: KH1's lock rules on R1 …`; on a device change `… KH1's rules (R1 again
+   unlocks, L2 steps)`.

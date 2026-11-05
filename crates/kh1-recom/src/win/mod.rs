@@ -432,6 +432,9 @@ fn install_attack(base: usize, s: &Settings, stats_file: Option<&Path>, bar_file
         // SAFETY: the target's bytes are checked again inside, before anything is written.
         if checked && unsafe { hook::install_all(base, &lk) } {
             lock_on::mark_installed();
+            // KH1's lock rules (0.137.0): the lock-on's input calls get KH1's answers.
+            // SAFETY: reads of the mapped exe; each call's bytes are checked again before it is written.
+            unsafe { lock_on::install_rules(base) };
         } else {
             log("lock-on: Re:CoM's lock-on not hooked; the lock-on stays on Re:CoM's button (R2)");
         }

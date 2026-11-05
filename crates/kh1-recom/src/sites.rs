@@ -4177,6 +4177,46 @@ pub const LOCK_ON_CHECKED: &[Site] = &[
     Site { name: "keyboard / mouse in use getter (0x1403471C0)", rva: 0x0034_71C0, expect: &[0x8B, 0x05, 0x9E, 0x8D, 0x8E, 0x00, 0xC3] },
 ];
 
+/// 0.137.0, KH1's lock rules (`crate::lock_on`, `win::lock_on::install_rules`): the lock-on's five
+/// input calls, retargeted through a stub block near the exe to KH1's answers (Re:CoM's own callee
+/// otherwise). Each `call rel32`, Checked (exe + disasm `0x1401E8DA0`).
+pub const LOCK_ON_CALLS: &[Site] = &[
+    // Unlocked: call 0x1401FF740 (the lock button pressed).
+    Site { name: "lock-on: lock pressed call (0x1401E8E44)", rva: 0x001E_8E44, expect: &[0xE8, 0xF7, 0x68, 0x01, 0x00] },
+    // Locked: call 0x1401FF600 (released), then test [rbx+0x424], 0x1000 (pressed again).
+    Site { name: "lock-on: lock released call (0x1401E8E9C)", rva: 0x001E_8E9C, expect: &[0xE8, 0x5F, 0x67, 0x01, 0x00] },
+    // Locked: call 0x1401FF4F0 (held).
+    Site { name: "lock-on: lock held call (0x1401E8EFF)", rva: 0x001E_8EFF, expect: &[0xE8, 0xEC, 0x65, 0x01, 0x00] },
+    // Held: call 0x1401FF4A0 (the right stick's direction changed).
+    Site { name: "lock-on: stick flick call (0x1401E8F2D)", rva: 0x001E_8F2D, expect: &[0xE8, 0x6E, 0x65, 0x01, 0x00] },
+    // Flicked: call 0x1401CD4B0 (the target that way), with ecx = [rbx+0x850].
+    Site { name: "lock-on: target switch call (0x1401E8F3C)", rva: 0x001E_8F3C, expect: &[0xE8, 0x6F, 0x45, 0xFE, 0xFF] },
+];
+
+/// What KH1's lock rules rely on. Checked only.
+pub const LOCK_ON_RULES_CHECKED: &[Site] = &[
+    // cmp eax,-1; lea rdi,[rbx+0x84C]; cmove eax,ebp; mov [rdi],eax: Re:CoM's pick to +0x84C.
+    Site { name: "lock-on: its pick to +0x84C (0x1401E8DF3)", rva: 0x001E_8DF3, expect: &[0x83, 0xF8, 0xFF, 0x48, 0x8D, 0xBB, 0x4C, 0x08, 0x00, 0x00, 0x0F, 0x44, 0xC5, 0x89, 0x07] },
+    // After the released call: test eax,eax; je; test dword [rbx+0x424], 0x1000; je.
+    Site { name: "lock-on: pressed again test (0x1401E8EA1)", rva: 0x001E_8EA1, expect: &[0x85, 0xC0, 0x74, 0x53, 0xF7, 0x83, 0x24, 0x04, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x74, 0x47] },
+    // mov rax,[rbx+0x3F8]; lea rcx,[rbx+0x230]; cmp [rax+0xE0],ebp: the cursor's locked flag.
+    Site { name: "lock-on: cursor locked test (0x1401E8E2E)", rva: 0x001E_8E2E, expect: &[0x48, 0x8B, 0x83, 0xF8, 0x03, 0x00, 0x00, 0x48, 0x8D, 0x8B, 0x30, 0x02, 0x00, 0x00, 0x39, 0xA8, 0xE0, 0x00, 0x00, 0x00] },
+    // The switch: push rbx; sub rsp,0x30; mov qword [rsp+0x20],-2; mov ebx,ecx.
+    Site { name: "lock-on target switch (0x1401CD4B0)", rva: 0x001C_D4B0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF, 0x8B] },
+    // The flick: enabled, stick past 0, its direction sector changed (+0x2C != +0x30).
+    Site { name: "lock-on stick flick (0x1401FF4A0)", rva: 0x001F_F4A0, expect: &[0xF6, 0x01, 0x01, 0x74, 0x1B, 0xF3, 0x0F, 0x10, 0x49, 0x20, 0x0F, 0x57, 0xC0, 0x0F, 0x2F, 0xC8, 0x76, 0x0E, 0x8B, 0x41, 0x30, 0x39, 0x41, 0x2C, 0x74, 0x06, 0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3, 0x33, 0xC0, 0xC3] },
+    // The pad's pressed test `(mask, pad)` `0x14029B2F0` (jmp 0x14029C240) is checked as "pad fresh".
+    // cmp edx,2; jae; … mov eax,[rax+0x14]; and eax,ecx; ret: pad edx's pressed word & mask.
+    Site { name: "pad pressed (0x14029C240)", rva: 0x0029_C240, expect: &[0x83, 0xFA, 0x02, 0x73, 0x13, 0x8B, 0xC2, 0x48, 0x8D, 0x15, 0xF2, 0x9A, 0x82, 0x00, 0x48, 0x8B, 0x04, 0xC2, 0x8B, 0x40, 0x14, 0x23, 0xC1, 0xC3, 0x33, 0xC0, 0xC3] },
+    // The cursor's measure point `0x1401F0AB0` (the main player's mover +0x30) is checked in
+    // `GIMMICK_HP_CALLEES` ("Sora's point").
+    // The cursor update's reach while locked: battle (+0xF8 & 4) 30 m else 3 m; and 14 m while
+    // +0xF4 (a lock or a switch this frame).
+    Site { name: "cursor locked reach (0x14020919B)", rva: 0x0020_919B, expect: &[0x41, 0xF6, 0x06, 0x04, 0xF3, 0x0F, 0x11, 0x87, 0x00, 0x01, 0x00, 0x00, 0x74, 0x0A, 0xF3, 0x0F, 0x10, 0x0D, 0x5B, 0x80, 0x4B, 0x00, 0xEB, 0x08, 0xF3, 0x0F, 0x10, 0x0D, 0x8D, 0x00, 0x30, 0x00, 0x0F, 0x2F, 0xC1, 0x0F, 0x87, 0xA0, 0xFD, 0xFF, 0xFF, 0x0F, 0x2F, 0x05, 0x8D, 0x00, 0x30, 0x00, 0x76, 0x0C, 0x39, 0xAF, 0xF4, 0x00, 0x00, 0x00, 0x0F, 0x85, 0x8B, 0xFD, 0xFF, 0xFF] },
+    // Its constants: 3.0, 3.5, 7.0, 9.0, 14.0 (the take reach: 3.0 at +0, 14.0 at +0x10).
+    Site { name: "cursor reach constants (0x140509248)", rva: 0x0050_9248, expect: &[0x00, 0x00, 0x40, 0x40, 0x00, 0x00, 0x60, 0x40, 0x00, 0x00, 0xE0, 0x40, 0x00, 0x00, 0x10, 0x41, 0x00, 0x00, 0x60, 0x41] },
+];
+
 /// 0.132.0, the Moogle's speech bubble (`win::shop::bubble_line`, `crate::text_fit::wrap`,
 /// `docs/recom-m8-items.md` § M8d text fit): Re:CoM's `CStrPrim` vtable (`0x140508FD0`, a
 /// `CTextWnd`'s text; every code reference a store, no absolute pointer: Checked (exe scan)), copied
@@ -4446,6 +4486,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         BUBBLE_CHECKED,
         LOCK_ON_HOOK,
         LOCK_ON_CHECKED,
+        LOCK_ON_CALLS,
+        LOCK_ON_RULES_CHECKED,
         CAMERA_HOOKS,
         CAMERA_PATCHES,
         CAMERA_CALLEES,
@@ -4683,6 +4725,61 @@ mod tests {
         assert_eq!(rel(d, 15) + 1, recom::KBM_IN_USE as i64, "cmp dword [rip+..], 0 (an imm8 after the disp)");
         assert_eq!(rel(d, 28) + 4, recom::KBM_IN_USE as i64, "mov dword [rip+..], 1 (an imm32 after the disp)");
         assert_eq!(rel(find("keyboard / mouse in use getter"), 2), recom::KBM_IN_USE as i64);
+    }
+
+    /// 0.137.0, KH1's lock rules: the five calls go where `crate::lock_on::recom` says, inside the
+    /// hooked lock-on; the fields and reaches as the exe's bytes say them.
+    #[test]
+    fn lock_on_rules_sites() {
+        use crate::hookplan::call_target;
+        use crate::lock_on::{recom, take_reach};
+        let calls = [
+            (recom::CALL_PRESSED, recom::PRESSED),
+            (recom::CALL_RELEASED, recom::RELEASED),
+            (recom::CALL_HELD, recom::HELD),
+            (recom::CALL_FLICK, recom::FLICK),
+            (recom::CALL_SWITCH, recom::SWITCH),
+        ];
+        assert_eq!(LOCK_ON_CALLS.len(), calls.len());
+        for (s, (at, to)) in LOCK_ON_CALLS.iter().zip(calls) {
+            assert_eq!(s.rva, at, "{}", s.name);
+            assert_eq!(call_target(s.rva as u64, s.expect), Some(to as u64), "{}", s.name);
+            // Inside Re:CoM's lock-on (0x24D bytes), past the hook's moved bytes.
+            assert!(s.rva >= recom::LOCK_ON + LOCK_ON_HOOK[0].expect.len() as u32 && s.rva + 5 <= recom::LOCK_ON + 0x24D, "{}", s.name);
+            assert_eq!(all_sites().filter(|x| x.rva < s.rva + 5 && s.rva < x.rva + x.expect.len() as u32).count(), 1, "{}: no other site overlaps", s.name);
+        }
+        // The callees are the ones `LOCK_ON_CHECKED` / here check.
+        let find = |n: &str| LOCK_ON_RULES_CHECKED.iter().chain(LOCK_ON_CHECKED).find(|s| s.name.starts_with(n)).unwrap();
+        assert_eq!(find("lock button pressed").rva, recom::PRESSED);
+        assert_eq!(find("lock button released").rva, recom::RELEASED);
+        assert_eq!(find("lock button held").rva, recom::HELD);
+        assert_eq!(find("lock-on stick flick").rva, recom::FLICK);
+        assert_eq!(find("lock-on target switch").rva, recom::SWITCH);
+        assert!(GIMMICK_HP_CALLEES.iter().any(|s| s.rva == recom::PLAYER_POINT && s.name.starts_with("Sora's point")));
+        let thunk = all_sites().find(|s| s.rva == recom::PAD_PRESSED).unwrap();
+        assert_eq!(thunk.rva, recom::PAD_PRESSED);
+        assert_eq!(thunk.rva as i64 + 5 + i32::from_le_bytes(thunk.expect[1..5].try_into().unwrap()) as i64, find("pad pressed (").rva as i64);
+        // The lock button's pressed reader goes through the same thunk.
+        let p = find("lock button pressed");
+        assert_eq!(p.rva as i64 + 21 + i32::from_le_bytes(p.expect[17..21].try_into().unwrap()) as i64, recom::PAD_PRESSED as i64);
+        // The pick store (+0x84C), the pressed-again bit, the cursor's locked flag.
+        assert_eq!(&find("lock-on: its pick").expect[6..8], &(recom::PICK as u16).to_le_bytes());
+        assert_eq!(&find("lock-on: pressed again").expect[6..12], &[(recom::REQUEST & 0xFF) as u8, (recom::REQUEST >> 8) as u8, 0, 0, 0, 0x10]);
+        assert_eq!(recom::SECOND_PRESS, 0x1000);
+        let lk = find("lock-on: cursor locked");
+        assert_eq!(&lk.expect[3..5], &(recom::CURSOR as u16).to_le_bytes());
+        assert_eq!(&lk.expect[10..12], &(recom::PAD as u16).to_le_bytes());
+        assert_eq!(&lk.expect[16..18], &(recom::CURSOR_LOCKED as u16).to_le_bytes());
+        // The reach: test byte [r14 = cursor+0xF8], 4; the take reach's 14.0 / 3.0 as data.
+        let r = find("cursor locked reach");
+        assert_eq!(&r.expect[0..4], &[0x41, 0xF6, 0x06, recom::CURSOR_BATTLE as u8]);
+        let k = find("cursor reach constants");
+        let data = |rva: u32| f32::from_le_bytes(k.expect[(rva - k.rva) as usize..][..4].try_into().unwrap());
+        // movss xmm1,[rip+..] → 3.0 (no battle flag); comiss xmm0,[rip+..] → 14.0.
+        assert_eq!(r.rva as i64 + 32 + i32::from_le_bytes(r.expect[28..32].try_into().unwrap()) as i64, 0x0050_9248);
+        assert_eq!(r.rva as i64 + 48 + i32::from_le_bytes(r.expect[44..48].try_into().unwrap()) as i64, 0x0050_9258);
+        assert_eq!(data(0x0050_9248), take_reach(false));
+        assert_eq!(data(0x0050_9258), take_reach(true));
     }
 
     /// 0.132.0: the bubble's text class and fields, as the exe's bytes say them.
