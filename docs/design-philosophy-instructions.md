@@ -653,3 +653,6 @@ At KH1 setting:
 - **Ability list order and "Equipped" label** (owner, 2026-11-05, with a recording, verbatim: "When activating an ability it automatically puts it all the way at the bottom of the list. also, instead of equipped items/abilities saying "new" when they're equipped, can they just say "equipped""):
   - Equipping (or removing) an ability keeps the list's order; the cursor stays on the row.
   - Equipped abilities and items show **"Equipped"** where they now show Re:CoM's "NEW" badge.
+- **GitHub install through OpenKH** (owner, 2026-11-05, verbatim: "I also want people to be able to install the mod from openKH by using the GitHub"; answers):
+  - Players install with OpenKH Mods Manager's GitHub install (`PM2CRAZY/KH1-in-ReCom`), from the default branch **`testing`** (owner: "Yes, from testing"); updates come with OpenKH's update.
+  - The game-made files are never in the repo: **the DLL builds them on first launch** from the player's own KH1 and Re:CoM files (owner: "DLL builds on first launch"), and again after an update changes the asset step.
