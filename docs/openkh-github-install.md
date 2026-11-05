@@ -322,3 +322,10 @@ the failed marker and the start without the KH1 files when they are missing.
 - A stale file of an older build in Panacea's folder is never opened before the title ends (§ 8.1),
   so a rebuild after an update is safe as well; an output a future step writes under a new name
   outside `new_resource_names` would not be in the listing until the next start.
+
+## 9. The release branch (`main`, 2026-11-05)
+
+- `main` holds only the release files (`mod.yml`, `openkh/kh1-recom.dll`, `README.md`, `.gitignore`, `VERSION`), with no history shared with `testing`. OpenKH's GitHub install looks for `main/mod.yml` first (§ 1), so `PM2CRAZY/KH1-in-ReCom` installs the release; `PM2CRAZY/KH1-in-ReCom/testing` installs the test builds.
+- An install cloned from `testing` keeps updating from `testing` (OpenKH fetches and resets the branch it cloned: Assumption, from § 1's source reading).
+- `main` is written only when the owner says so (`design-philosophy-instructions.md`, "Release build"): a new commit on top (never a force-push) replacing the five files with the chosen `testing` version's. The build bot does not run on `main`.
+- Releases: 0.142.0 (from `testing` 1d82190).
