@@ -219,8 +219,14 @@ pub struct Placed {
 /// copy is missing or differs in size or modified time (a Build's copy of an older file, say).
 /// The copy gets the cache file's time, so the next start keeps it.
 pub fn place(cache: &Path, live: &Path, st: &Stamp) -> io::Result<Placed> {
+    place_with(cache, live, st, |_, _| {})
+}
+
+/// [`place`], calling `on(k, n)` before file `k` of the stamp's `n`.
+pub fn place_with(cache: &Path, live: &Path, st: &Stamp, mut on: impl FnMut(usize, usize)) -> io::Result<Placed> {
     let mut done = Placed::default();
-    for (rel, _) in &st.files {
+    for (k, (rel, _)) in st.files.iter().enumerate() {
+        on(k, st.files.len());
         let src = under(cache, rel);
         let dst = under(live, rel);
         let sm = std::fs::metadata(&src)?;
@@ -311,7 +317,9 @@ mod tests {
         assert_eq!(place(&cache, &live, &st).unwrap(), Placed { copied: 3, kept: 0, bytes: 9 });
         assert_eq!(std::fs::read_to_string(under(&live, "raw/FORM/0002/FO0002.SPR")).unwrap(), "spr");
         // A second start keeps them.
-        assert_eq!(place(&cache, &live, &st).unwrap(), Placed { copied: 0, kept: 3, bytes: 0 });
+        let mut seen = Vec::new();
+        assert_eq!(place_with(&cache, &live, &st, |k, n| seen.push((k, n))).unwrap(), Placed { copied: 0, kept: 3, bytes: 0 });
+        assert_eq!(seen, [(0, 3), (1, 3), (2, 3)], "one report before each file");
         // A Build's other copy (same size, other time) and a wiped file are copied again.
         std::fs::write(under(&live, "kh1-stats.json"), "[]").unwrap();
         std::fs::OpenOptions::new().write(true).open(under(&live, "kh1-stats.json")).unwrap().set_modified(UNIX_EPOCH).unwrap();

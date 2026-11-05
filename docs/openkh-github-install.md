@@ -82,10 +82,13 @@ here and nothing was tried in game.
   time. Checked (source). For a `raw/` name that is not in the listing, `LoadFile` dereferences a
   null file-info (`fileinfo->CurrentFileName`). Checked (source). So a file written while the game
   runs is not safe to use.
-- **Conclusion.** The files must be in `<mod_path>/recom` **before `OnInit` returns**. A worker
+- **Conclusion (0.141.0).** The files must be in `<mod_path>/recom` **before `OnInit` returns**. A worker
   thread can't do that: it would race the listing, and waiting for a thread under the loader lock
   deadlocks (the thread can't start until the lock is free). Written there during `OnInit`, they
   are used in the **same run**: no restart, no Build.
+- **Corrected (0.142.0, § 8):** only the **names** must be there at the listing. Panacea reads a
+  listed file's content and size from disk at each open, so empty files made in `OnInit` and filled
+  in later work, as long as the game opens none of them before. The build now runs after `OnInit`.
 - `dev_path=` / `extract_path=` (Panacea settings, also listed and looked up) are global folders the
   player sets, not per mod. Not used.
 
@@ -173,7 +176,7 @@ anything reads the files):
    folder as before. With no files (no KH1, a failed build, `off`) they keep their existing
    fallbacks (Re:CoM's own models, motions, sounds).
 
-**What the player sees:**
+**What the player sees** (0.141.0; since 0.142.0 the build shows on the title instead, § 8):
 - First launch: a console window for a minute or two, then the game. No restart, no Build.
 - After a Build: nothing (a quick copy).
 - After an update that changed the step, or a game update: the console window again.
@@ -199,8 +202,8 @@ Checked (builds here).
 3. Select **Kingdom Hearts Re:Chain of Memories** in the Mods Manager's game list.
 4. Mods → "Install a new mod" → `PM2CRAZY/KH1-in-ReCom` → Install.
 5. Tick the mod, **Build** (or "Build and Run").
-6. Start Re:CoM. On the first start a window builds the KH1 files (a minute or two) and the game
-   then starts by itself.
+6. Start Re:CoM. On the first start the title shows "KH1 in Re:CoM: building files from your
+   games... N %" and waits (a minute or two), then says "done" and goes on by itself.
 7. Updates: the Mods Manager's update for the mod, then Build. The next start rebuilds only when the
    update changed the asset step.
 
@@ -216,3 +219,106 @@ Checked (builds here).
   `asset_build = off` in `kh1-recom.ini`.
 - A fresh GitHub install to test: move that folder out of `mods/Recom/PM2CRAZY/` (or rename it), then
   follow § 6.
+
+## 8. The build's progress in the game window (0.142.0)
+
+Owner, 2026-11-05, verbatim: "I definitely want a progress screen in the game window while
+everything loads". Tags: Checked (source / decomp / exe / files / code) or Assumption. Nothing was
+run in game (no Windows here).
+
+### 8.1 What Panacea needs, and when
+
+- **Content and size are read at each open.** Panacea's `LoadFile` / `LoadFileWithSize` /
+  `LoadFileWithMalloc` / `GetFileSize` look for `<mod_path>/recom/raw/<name>` (`GetRawFile`) and
+  `<mod_path>/recom/<name>` (`TransformFilePath`) with `GetFileAttributes` at every call and read the
+  file then: a loose file's size by `ftell`, a raw entry's from its own header. The listing
+  (`FakePackageFile`) is used only for `GetFileInfo` (that the name exists, and the raw route's
+  `fileinfo->CurrentFileName` with HD assets). Checked (source, `Panacea.cpp` at `b67a743`).
+- **Re:CoM sizes a file through the hooked call.** Its loader `0x1402427D0` (from `0x14023BBD0`)
+  calls `GetFileSize` `0x1402C4530`, allocates that, then `LoadFileWithSize` `0x1402C48F0`. The only
+  unhooked caller of `GetFileInfo` `0x1402C4AA0` is a seek (`0x1402C4990`). So a name listed with
+  size 0 loads with its size at the open. Checked (decomp; Panacea's patterns found at those
+  addresses in the Steam exe).
+- **The new names** (those `Recom.hed` lacks): only the Keyblade groups' files,
+  `PLAYER/00GG/PL00GG.MDL` + `raw/…/PL00GG.RTM` for GG = 21..36 and 38..43, and `PL00GG.EET` +
+  `raw/…/PL00GG.EFF` for 21..36: 76 names (`keyblade::new_resource_names`). Every other output
+  replaces a file `Recom.hed` has. Checked (files: test `new_names_are_not_in_recom_hed` on the
+  owner's `Recom.hed`).
+- **None of our outputs opens before the title ends.** Of the resource groups (`0x1407EBF20`
+  tables, category × 10000 + group), FORM 2 (`FO0002`, the HUD) is linked only from the world groups
+  (category 14, groups 100..113); EFFECT 1000 from the player groups 1 / 11 and effect groups 1106 /
+  1108; FORM 100 / 109 (camp, shop) and the PLAYER / ENEMY groups are asked for by the camp, the shop,
+  rooms and battles. The title asks for (0, 0xD / 0xE) only (`0x1403A1940`), which link FORM 505 /
+  507 / 111. Checked (exe: every link row of every table; decomp: the request sites
+  `0x14023CD10(…)`). Assumption: no computed request (room / event data) runs before the title.
+
+### 8.2 Where the game waits: Re:CoM's title
+
+- `CTitle` (ctor `0x14039F770`, made by `0x14012DB80`) is a `CFSM` of 14 states. State 0's update
+  `0x1403A3770` waits for the loader's queue to empty (`0x14023CA80(0, 0)`), plays `title.lad`
+  and goes to state 1. State 1's update `0x1403A3820`: sub-state `+0xAC` 0 plays the title's
+  sequence and `Title.VSV`, 10 waits for the sequence's end or a confirm / cancel / Start press
+  (`0x14029B490`, `0x14029B410`, `0x14029C240`), 0x14 fades, then state 2 (the menu). Checked
+  (decomp + disasm). The title makes its own text as `C2DFnt`s (size 0xF, 0x10 with the language
+  global `[0x140AF73B0]+0x274`, centred flags 2, default colour) on `aleart.lad` set 0
+  (`0x1403A23D0`; `C2DSeqCtrl` `+0x30` names it `aleart:00` with `%s:%02d` at `0x140606EC8`).
+  Checked (decomp + disasm).
+- **The hold**: a wrapper on state 1's update (`sites::TITLE_HOLD_HOOK`, 6 bytes; its only
+  reference is the ctor's `lea` `0x14039F858`; no branch into the moved bytes: exe scan;
+  `TITLE_HOLD_CHECKED` the sub-states). While a build runs, in sub-state 10 Re:CoM's update is not
+  run: the title stays on screen, its music plays, and no press is taken (Start / New Game /
+  Continue are never reached). Sub-state 0 runs as Re:CoM's, so the title is up first.
+- **The lines**: one `C2DSeqCtrl` (priority 0xC, at (256, 330) of the 512 × 384 2D space) with two
+  `C2DFnt` text layers made as the title's alert text (attached to `aleart:00`, else `title:00`;
+  20 units apart; squeezed to 480 units with the true squeeze). Re:CoM's 2D manager draws them.
+  Updated only when a line changes; deleted before the title goes on.
+  - Running: "KH1 in Re:CoM: building files from your games... N %" / "Step k of 10: <stage>. The
+    title waits until it is done."
+  - Done (2.5 s): "KH1 in Re:CoM: done. The KH1 files are ready." / "N files in S s."
+  - No KH1: "KH1 FM not found: playing without KH1 files" / "It tries again when the mod or the
+    game is updated." (7 s). Other failures: "KH1 in Re:CoM: the build failed: playing without KH1
+    files" / "Details: kh1-recom-build.log in the game folder." (7 s).
+  - Assumptions: `aleart` (FORM 111, linked from the title's groups) is loaded in sub-state 10;
+    priority 0xC draws over the title; the place reads well (no screenshot yet); Re:CoM's text
+    draws `%` as is (its expander handles bytes from 0x81).
+- **Progress** is counted in the step's stages (`step::STAGES`: reading, motions, Keyblades, the
+  HUD and menus, sounds, effects, enemies (one part each), writing, enemy stats) and the copy into
+  Panacea's folder (one part per file): `asset_build::percent`, not time.
+
+### 8.3 The flow
+
+1. **`OnInit`** (`win::assets::ensure`): the decision as before (§ 5). `Off` / `Failed` / `Place`
+   as 0.141.0, and the rest of the start runs at once. On `Build`:
+   - every new name the build may write (§ 8.1, plus the last stamp's names `Recom.hed` lacks) that
+     is not in Panacea's folder is made as an empty file;
+   - the title's wrapper goes in, and the rest of the DLL's start (everything that reads the built
+     files: the camp, movement, attack, HUD, camera …) waits (`win::install_deferred`);
+   - a thread starts the build once `OnInit` has returned: no process is made under the loader lock,
+     nothing is waited for.
+2. **The build**: `rundll32.exe "<dll>",BuildAssets <job>` (no window), in a job object that ends it
+   with the game (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`): the step into `generated/`, the stamp, then
+   the copy into Panacea's folder; its progress whole into `kh1-recom-build.progress` (a temporary
+   file, then a rename); its lines into `kh1-recom-build.log`. A crash ends only the helper (the
+   failed marker, so not repeated). If the helper cannot start, the step runs on that thread inside
+   the game, guarded by the failed marker.
+3. **The title** reads the progress file every 6 frames. At the build's end, on the game's thread:
+   the log line, the check that the cache is complete (and a copy of anything missing), the empty
+   names the build did not fill removed, the rest of the DLL's start, then the end line, then the
+   title goes on.
+4. If the title cannot be hooked, the build runs before the game starts, as 0.141.0 (without the
+   console; nothing shows until it is done).
+
+Kept from 0.141.0: the stamp, `generated/`, the copy back after a Build, `asset_build = auto | off`,
+the failed marker and the start without the KH1 files when they are missing.
+
+### 8.4 Not checked / risks
+
+- In game: all of it (the hold, the lines' look and place, the job object, the helper without a
+  console). The log says each step (`assets:` lines).
+- Assumption: the rest of the DLL's start is as safe at the title as before the game ran: it
+  hooks and patches gameplay code (field, battle, camp, HUD, camera), none of which runs on the
+  title, on the game's own thread. Another of Re:CoM's threads (the loader's, whose queue the title
+  emptied; sound) running one of those functions at that moment would meet a half-written jump.
+- A stale file of an older build in Panacea's folder is never opened before the title ends (§ 8.1),
+  so a rebuild after an update is safe as well; an output a future step writes under a new name
+  outside `new_resource_names` would not be in the listing until the next start.

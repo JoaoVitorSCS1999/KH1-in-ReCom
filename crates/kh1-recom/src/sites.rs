@@ -4150,6 +4150,29 @@ pub const TEXT_FIT_PTRS: &[PtrSite] = &[
     PtrSite { name: "C2DFnt vtable +0x30 (0x140606CC8)", rva: 0x0060_6CC8, target: 0x0024_3FF0 },
 ];
 
+/// The first-launch build's progress screen (`win::assets`, `docs/openkh-github-install.md` § 8):
+/// `CTitle`'s state-1 update `0x1403A3820` (the title with its "press" wait). Its only reference is
+/// the `lea` in `CTitle`'s ctor `0x14039F770` (`TITLE_HOLD_CHECKED`); no branch into the 6 moved
+/// bytes (exe scan: the rel32 / rel8 hits inside them are inside other instructions). Checked (exe +
+/// decomp).
+pub const TITLE_HOLD_HOOK: &[Site] = &[
+    // push rbx; sub rsp,0x20 (then mov eax,[rcx+0xAC]).
+    Site { name: "CTitle state 1 update (0x1403A3820)", rva: 0x003A_3820, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] },
+];
+
+/// What the hold relies on. Checked only.
+pub const TITLE_HOLD_CHECKED: &[Site] = &[
+    // mov eax,[rcx+0xAC]; mov rbx,rcx; test eax,eax; je (sub 0: start the title); cmp eax,0xA; je
+    // (sub 10: wait for the title's sequence or a press); cmp eax,0x14 (sub 20: the fade).
+    Site {
+        name: "CTitle state 1 update: its sub-states (0x1403A3826)",
+        rva: 0x003A_3826,
+        expect: &[0x8B, 0x81, 0xAC, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9, 0x85, 0xC0, 0x0F, 0x84, 0xF1, 0x00, 0x00, 0x00, 0x83, 0xF8, 0x0A, 0x74, 0x47, 0x83, 0xF8, 0x14],
+    },
+    // CTitle's ctor stores the state-1 update in its state record: lea rax,[rip+0x3FC1] (0x1403A3820).
+    Site { name: "CTitle ctor: state 1's update (0x14039F858)", rva: 0x0039_F858, expect: &[0x48, 0x8D, 0x05, 0xC1, 0x3F, 0x00, 0x00, 0x48, 0x89, 0x45, 0xD8] },
+];
+
 /// Lock-on on R1 at Combat = KH1 on a controller (`crate::lock_on`, `win::lock_on`,
 /// `docs/recom-lock-on.md`): Re:CoM's lock-on `0x1401E8DA0` (its two callers are the player's Field
 /// and Battle exes, `0x1401F994B` / `0x1401FA1A2`; no branch into the 6 moved bytes: exe scan).
@@ -4484,6 +4507,8 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         crate::enemy_skills_cmp::CHECKED,
         TEXT_FIT_CHECKED,
         BUBBLE_CHECKED,
+        TITLE_HOLD_HOOK,
+        TITLE_HOLD_CHECKED,
         LOCK_ON_HOOK,
         LOCK_ON_CHECKED,
         LOCK_ON_CALLS,
@@ -4699,6 +4724,24 @@ mod tests {
         for p in TEXT_FIT_PTRS {
             assert!(!all_sites().any(|s| s.rva == p.rva), "{}", p.name);
         }
+    }
+
+    /// The first-launch build's hold: the hooked function is CTitle's state-1 update, its
+    /// sub-state field and values as `crate::asset_build::title` says them.
+    #[test]
+    fn title_hold_sites() {
+        use crate::asset_build::title;
+        assert_eq!(TITLE_HOLD_HOOK[0].rva, title::STATE1_UPDATE);
+        let find = |n: &str| TITLE_HOLD_CHECKED.iter().find(|s| s.name.starts_with(n)).unwrap();
+        let lea = find("CTitle ctor");
+        assert_eq!(&lea.expect[..3], &[0x48, 0x8D, 0x05]);
+        let target = lea.rva as i64 + 7 + i32::from_le_bytes(lea.expect[3..7].try_into().unwrap()) as i64;
+        assert_eq!(target, title::STATE1_UPDATE as i64, "the ctor's lea names the hooked update");
+        let sub = find("CTitle state 1 update: its sub-states");
+        assert_eq!(sub.rva, title::STATE1_UPDATE + TITLE_HOLD_HOOK[0].expect.len() as u32, "right after the moved bytes");
+        assert_eq!(&sub.expect[..6], &[0x8B, 0x81, title::SUB as u8, (title::SUB >> 8) as u8, 0, 0]);
+        assert_eq!(&sub.expect[17..20], &[0x83, 0xF8, title::WAIT as u8]);
+        assert_eq!(&sub.expect[22..25], &[0x83, 0xF8, 0x14]);
     }
 
     /// Lock-on on R1: Re:CoM's lock-on, its button field and the device flag, as the exe says them.

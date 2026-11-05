@@ -964,11 +964,46 @@ fn run(mod_dir: Option<PathBuf>) {
     BASE.store(base, Ordering::Relaxed);
     crash::install(MODULE.load(Ordering::Relaxed));
 
-    // The game-made files (owner, 2026-11-05: "DLL builds on first launch"): built from the
-    // player's KH1 and Re:CoM files when missing or out of date, and copied into Panacea's folder
-    // before anything below reads them and before the game lists that folder.
-    assets::ensure(&game_dir, &mod_dir, &dll, s.asset_build);
+    // The game-made files (owner, 2026-11-05: "DLL builds on first launch"): copied into Panacea's
+    // folder before anything below reads them and before the game lists that folder; when they
+    // must be built, the rest of the start waits for the build at Re:CoM's title, which shows its
+    // progress (owner, 2026-11-05: "a progress screen in the game window while everything loads").
+    let rest = Rest { mod_dir: mod_dir.clone(), dll: dll.clone(), game_dir: game_dir.clone(), settings: s.clone() };
+    match assets::ensure(&game_dir, &mod_dir, &dll, s.asset_build) {
+        assets::Ready::Now => install_rest(&rest),
+        assets::Ready::AtTitle => {
+            if let Ok(mut g) = REST.lock() {
+                *g = Some(rest);
+            }
+            log("start: the rest waits for the KH1 files' build (at the title)");
+        }
+    }
+}
 
+/// What the start's second half needs (`install_rest`).
+struct Rest {
+    mod_dir: PathBuf,
+    dll: PathBuf,
+    game_dir: PathBuf,
+    settings: Settings,
+}
+
+/// The start's second half, when it waits for the build (`assets`).
+static REST: Mutex<Option<Rest>> = Mutex::new(None);
+
+/// The start's second half after the build (at Re:CoM's title, on the game's thread; once).
+pub(super) fn install_deferred() {
+    let rest = REST.lock().ok().and_then(|mut g| g.take());
+    if let Some(r) = rest {
+        log("start: the KH1 files' build ended: the rest of the start runs now (at the title)");
+        install_rest(&r);
+    }
+}
+
+/// The start's second half: everything that reads the built files.
+fn install_rest(r: &Rest) {
+    let (mod_dir, dll, game_dir, s) = (&r.mod_dir, &r.dll, &r.game_dir, &r.settings);
+    let base = BASE.load(Ordering::Relaxed);
     // The camp menu's "KH1" entry: its submenu and pages run in the camp's Config states through
     // the Config input wrapper (Re:CoM's own Config screen goes to the original, unchanged).
     if s.config_menu {
@@ -976,7 +1011,7 @@ fn run(mod_dir: Option<PathBuf>) {
         // SAFETY: the target's bytes are checked again inside, before anything is written.
         if unsafe { hook::install_all(base, &hooks) } {
             log("camp menu: Config input wrapped for the KH1 entry's pages (Re:CoM's Config screen and its rows as unmodded)");
-            install_keyblades(base, &recom_bases(&manifest_dirs(&mod_dir, &dll, &game_dir)));
+            install_keyblades(base, &recom_bases(&manifest_dirs(mod_dir, dll, game_dir)));
         } else {
             log("camp menu: Config input not hooked; no KH1 entry (settings from kh1-recom.ini only)");
         }
@@ -984,12 +1019,12 @@ fn run(mod_dir: Option<PathBuf>) {
         log("camp menu: config_menu = off in the ini; Re:CoM's camp menu untouched (no KH1 entry; settings from kh1-recom.ini only)");
     }
 
-    let dirs = manifest_dirs(&mod_dir, &dll, &game_dir);
+    let dirs = manifest_dirs(mod_dir, dll, game_dir);
     // M8d: the shop's five-tab art (read before the shop's wrappers can run).
     shop::load_tabs(recom_bases(&dirs).iter().map(|d| d.join(crate::shop::tabs::MANIFEST)).find(|p| p.is_file()).as_deref());
-    install_movement(base, &s, &dirs, &game_dir);
+    install_movement(base, s, &dirs, game_dir);
     // M12 camera: independent of Combat (owner); Re:CoM's camera untouched at Camera = Re:CoM.
-    camera::install(base, &s);
+    camera::install(base, s);
 }
 
 /// Where the asset step's files are looked for: the mod folder, the DLL's folder and its parent,

@@ -92,8 +92,60 @@ pub struct Report {
 type Sink = Box<dyn Fn(&str) + Send + Sync>;
 static SINK: Mutex<Option<Sink>> = Mutex::new(None);
 
+/// The step's stages in the order it runs them, as the DLL's first-launch build shows them in the
+/// game window (`docs/openkh-github-install.md` § 8). The progress is counted in these stages (and
+/// the enemies one by one), not in time.
+pub const STAGES: &[&str] = &["reading your game files", "motions", "Keyblades", "the HUD and menus", "sounds", "effects", "enemies", "writing the files", "enemy stats"];
+
+/// Indices into [`STAGES`].
+pub mod stage {
+    /// Reading the archives and the exe's key table.
+    pub const READ: usize = 0;
+    /// Matching and converting KH1's motions.
+    pub const MOTIONS: usize = 1;
+    /// KH1's and KH2's Keyblade models.
+    pub const KEYBLADES: usize = 2;
+    /// The MP bar, the command menu, the KH1 HUD, the menu sounds, the camp row, the shop tabs.
+    pub const HUD: usize = 3;
+    /// KH1's sound banks.
+    pub const SOUNDS: usize = 4;
+    /// KH1's effect sets.
+    pub const EFFECTS: usize = 5;
+    /// KH1's Shadow and the M11 enemies (one part each).
+    pub const ENEMIES: usize = 6;
+    /// The files written.
+    pub const WRITE: usize = 7;
+    /// `kh1-stats.json`.
+    pub const STATS: usize = 8;
+}
+
+/// One progress report: stage `stage` of [`STAGES`] began, or part `k` of `n` of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Progress {
+    /// Index into [`STAGES`].
+    pub stage: usize,
+    /// `(k, n)`: part `k` (from 0) of `n` of the stage.
+    pub part: Option<(usize, usize)>,
+}
+
+type ProgressSink = Box<dyn Fn(Progress)>;
+
 thread_local! {
     static WRITTEN: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+    static PROGRESS: RefCell<Option<ProgressSink>> = const { RefCell::new(None) };
+}
+
+/// Sends this thread's [`run`]'s progress reports to `sink` (`None`: no reports).
+pub fn set_progress(sink: Option<ProgressSink>) {
+    PROGRESS.with(|p| *p.borrow_mut() = sink);
+}
+
+fn progress(stage: usize, part: Option<(usize, usize)>) {
+    PROGRESS.with(|p| {
+        if let Some(f) = p.borrow().as_ref() {
+            f(Progress { stage, part });
+        }
+    });
 }
 
 /// Sends the step's report lines to `sink` instead of stdout (`None`: stdout again).
@@ -128,6 +180,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     let dry = opt.dry_run;
     let opt_build = &opt.build;
     let t0 = Instant::now();
+    progress(stage::READ, None);
     let keys = install::keys(&game).map_err(|e| format!("key table: {e}"))?;
     let arc = install::recom_archive(&game).map_err(|e| e.to_string())?;
     let ann = install::read_recom(&arc, &keys, install::SORA_ANN).map_err(|e| format!("{}: {e}", install::SORA_ANN))?;
@@ -196,6 +249,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
         sources.push(("PL0002.MDL sha256", kh1_formats::egs::sha256_hex(m)));
     }
     let t1 = Instant::now();
+    progress(stage::MOTIONS, None);
     // M9 9a: the KH1 sound cues of the combo modifiers' motions (their SES entries, below).
     let kh1_set = kh1_formats::mset::MotionSet::parse(&mset).map_err(|e| format!("xa_ex_0010.mset: {e}"))?;
     let built = build_with_held(&Inputs { mset, mdls, ann, mdl, weapon, xl }, held_in.as_ref(), opt_build).map_err(|e| e.to_string())?;
@@ -228,6 +282,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     }
     // KH1's Keyblades as Re:CoM weapon models (decision 25).
     let t2 = Instant::now();
+    progress(stage::KEYBLADES, None);
     let mut keyblades = convert_keyblades(&game, keys.clone(), pl0002_mdl.as_deref())?;
     // The six from KH2 (decision 25): KH2's models, Strength and Magic, reach from the blade.
     let (kh2_rows, kh2_models) = kh2_keyblades_step(&game, keys.clone(), pl0002_mdl.as_deref())?;
@@ -247,6 +302,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     }
     println!("Keyblades: {} converted in {:.2}s", keyblades.iter().filter(|k| k.1.is_some()).count(), t2.elapsed().as_secs_f64());
     // The MP bar (M7 stage 7.2): built here, written with the other files below.
+    progress(stage::HUD, None);
     let mp_bar = match mp_bar_build(&game, keys.clone(), &arc) {
         Ok(b) => Some(b),
         Err(e) => {
@@ -307,6 +363,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
         }
     };
     // M13 stage 2: KH1's own sound banks (Sora's SCDs, the Kingdom Key's from the world packs).
+    progress(stage::SOUNDS, None);
     let sounds = match sounds_build(&game, keys.clone()) {
         Ok(s) => Some(s),
         Err(e) => {
@@ -317,6 +374,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     // KH1's system bank (ids under 1000: the effect programs' sounds) as the menu sounds give it.
     let system_sounds = menu_sounds.as_ref().and_then(|(bin, _, _)| kh1_recom_assets::menu_sounds::scd_info(bin).ok()).map(|i| i.sounds as u32);
     // M13 stage 1: KH1's Sora effect set in the effect container Sora's group loads.
+    progress(stage::EFFECTS, None);
     let effects = match effects_build(&game, keys.clone(), &arc, system_sounds) {
         Ok(e) => Some(e),
         Err(e) => {
@@ -325,6 +383,8 @@ fn run_inner(opt: &Options) -> Result<(), String> {
         }
     };
     // KH1's Shadow (M10): its motions, attacks and the behaviour's numbers in Re:CoM's Shadow.
+    let enemy_parts = kh1_recom_assets::enemy::SPECS.len() + 1;
+    progress(stage::ENEMIES, Some((0, enemy_parts)));
     let shadow = match shadow_build(&game, keys.clone(), &arc) {
         Ok(b) => {
             println!(
@@ -350,6 +410,11 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     // KH1's other enemies (M11): each spec's files and manifest.
     let enemies: Vec<(&kh1_recom_assets::enemy::Spec, Option<kh1_recom_assets::enemy::Built>)> = kh1_recom_assets::enemy::SPECS
         .iter()
+        .enumerate()
+        .map(|(i, spec)| {
+            progress(stage::ENEMIES, Some((i + 1, enemy_parts)));
+            spec
+        })
         .map(|spec| match enemy_build(spec, keys.clone(), &game, &arc) {
             Ok(b) => {
                 let slots = {
@@ -370,6 +435,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     if dry {
         return Ok(());
     }
+    progress(stage::WRITE, None);
     // The runtime (crates/kh1-recom, win/motion.rs) looks for the manifest at the recom root.
     let (ann_path, wep_path, man, hw_dir) = match &opt.dest {
         Dest::Out(p) => {
@@ -484,7 +550,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     // M13 stage 3: KH1's trails and finisher effects as Re:CoM's EET events at the KH1 variant
     // (Sora's PL0001.EET, the Keyblade's PL0002.EET) and kh1-fx.json, the moves the DLL switches.
     let fx_manifest_path = root.join(kh1_recom_assets::kh1_fx::MANIFEST);
-    let kh1_groups: Vec<(u16, u16, String)> = keyblades.iter().filter_map(|(m, c)| Some((m.card as u16, m.group, c.as_ref()?.report.model.clone()))).filter(|k| k.0 <= 17).collect();
+    let kh1_groups: Vec<(u16, u16, String)> = keyblades.iter().filter_map(|(m, c)| Some((m.card as u16, m.group, c.as_ref()?.report.model.clone()))).filter(|k| k.0 <= kh1_recom_assets::keyblade::LAST_KH1_CARD as u16).collect();
     match fx_eets(&arc, &keys, fx_moves.as_deref(), &mut fx_added, &game, &kh1_groups, &sound_map) {
         Ok(Some((files, group_files))) => {
             for (name, bytes) in &files {
@@ -727,6 +793,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     // KH1 stats (decisions 12, 18, 21, 25): the enemy twins' records, Sora's Strength, the
     // Keyblades (with their model groups).
     let models: Vec<KeybladeModel> = keyblades.iter().map(|k| k.0.clone()).collect();
+    progress(stage::STATS, None);
     let stats = kh1_stats(&game, keys, &arc, &models, &kh2_rows)?;
     for n in &stats.notes {
         println!("{n}");
@@ -1584,4 +1651,28 @@ fn remove_stale(path: &Path) -> Result<(), String> {
         println!("note: {} exists and was not written by this step; left as it is", path.display());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_starts_with_reading_and_stops_with_the_run() {
+        assert_eq!(STAGES.len(), stage::STATS + 1);
+        assert!(STAGES.iter().all(|s| !s.is_empty() && s.is_ascii()));
+        let seen = std::rc::Rc::new(RefCell::new(Vec::new()));
+        let s2 = seen.clone();
+        set_progress(Some(Box::new(move |p| s2.borrow_mut().push(p))));
+        let dir = std::env::temp_dir().join(format!("kh1-step-progress-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        set_sink(Some(Box::new(|_| {})));
+        // No game here: the run stops at its first read, after its first report.
+        assert!(run(&Options::new(dir.clone(), Dest::Root(dir.join("out")))).is_err());
+        set_sink(None);
+        set_progress(None);
+        assert_eq!(seen.borrow().first(), Some(&Progress { stage: stage::READ, part: None }));
+        assert_eq!(seen.borrow().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

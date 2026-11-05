@@ -604,6 +604,30 @@ pub fn resource_path(group: u16, ext: &str) -> String {
     format!("PLAYER/{group:04}/PL{group:04}.{ext}")
 }
 
+/// The last KH1 Keyblade card (One-Winged Angel, 0x11): the Keyblades up to it get their own KH1
+/// effect set and events (`PL00GG.EET`, `PL00GG.EFF`, M13 stage 4); the KH2 ones (0x13..) do not.
+pub const LAST_KH1_CARD: u8 = 0x11;
+
+/// Every file name the step may write that `Recom.hed` does not have (paths under Panacea's
+/// `<mod_path>/recom`, `raw/` for raw PKG entries): each Keyblade group's model and textures, and
+/// the KH1 Keyblades' own EET / EFF. Panacea sees a new name only if it is there when it lists the
+/// folder (`docs/openkh-github-install.md` § 3), so the DLL's first-launch build makes these
+/// before that listing. Checked (files: none of them is in the owner's `Recom.hed`, test
+/// `new_names_are_not_in_recom_hed`). Every other output replaces a file of `Recom.hed`.
+pub fn new_resource_names() -> Vec<String> {
+    let mut out = Vec::new();
+    for card in (2..=LAST_KH1_CARD).chain(0x13..=0x18) {
+        let Some(g) = group_for_card(card) else { continue };
+        out.push(resource_path(g, "MDL"));
+        out.push(format!("raw/{}", resource_path(g, "RTM")));
+        if card <= LAST_KH1_CARD {
+            out.push(resource_path(g, "EET"));
+            out.push(format!("raw/{}", resource_path(g, "EFF")));
+        }
+    }
+    out
+}
+
 /// A Keyblade's model as the runtime finds it (`kh1-stats.json`, `keyblades` rows).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeybladeModel {
@@ -654,6 +678,26 @@ mod tests {
         assert_eq!(kh2_facing(0x20), 0x20);
         assert_eq!(kh2_facing(0x30), 0);
         assert_eq!(hd_name("w_ex010_01"), "w_ex010_01_tm2.dds");
+    }
+
+    #[test]
+    fn new_names_are_not_in_recom_hed() {
+        let names = new_resource_names();
+        // 16 KH1 groups (21..=36) with four files, 6 KH2 groups (38..=43) with two.
+        assert_eq!(names.len(), 16 * 4 + 6 * 2);
+        assert!(names.contains(&"PLAYER/0021/PL0021.MDL".to_string()) && names.contains(&"raw/PLAYER/0036/PL0036.EFF".to_string()));
+        assert!(names.contains(&"raw/PLAYER/0043/PL0043.RTM".to_string()) && !names.contains(&"PLAYER/0043/PL0043.EET".to_string()));
+        assert!(!names.iter().any(|n| n.contains("/0037/") || n.contains("/0002/")));
+        // With the player's Recom.hed: none of them is in it (they are new names for Panacea).
+        let Ok(hed) = std::env::var("RECOM_HED") else { return };
+        let arc = kh1_formats::egs::Archive::open(hed).unwrap();
+        for n in &names {
+            assert!(arc.find(n.trim_start_matches("raw/")).is_none(), "{n} is in Recom.hed");
+        }
+        // And the files the step replaces are (a few of them).
+        for n in ["PLAYER/0001/PL0001.ANN", "PLAYER/0002/PL0002.EET", "FORM/0002/FO0002.SPR", "FORM/0100/FO0100.SPR", "FORM/0109/FO0109.SPR", "EFFECT/1000/EF1000.EFF", "ENEMY/0001/EN0001.ANN"] {
+            assert!(arc.find(n).is_some(), "{n} not in Recom.hed");
+        }
     }
 
     #[test]

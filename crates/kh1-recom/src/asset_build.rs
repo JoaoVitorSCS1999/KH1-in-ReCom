@@ -1,6 +1,6 @@
 //! The first-launch build of the game-made files (owner, 2026-11-05: "DLL builds on first
 //! launch"; `docs/openkh-github-install.md`). The rules here are plain Rust (tested on Linux);
-//! the Windows side (the helper process, the console, the message box) is `win::assets`.
+//! the Windows side (the helper process, the title's hold and its progress lines) is `win::assets`.
 //!
 //! - **Where the files are used:** Panacea's live folder `<mod_path>/recom` (the folder
 //!   Panacea's `OnInit` names). Panacea lists that folder once, when the game sets its replace
@@ -161,22 +161,190 @@ pub struct Job {
     pub inputs: String,
     /// Why it builds.
     pub reason: String,
+    /// Panacea's live folder the built files are copied into after the build (empty: none).
+    pub live: PathBuf,
+    /// The progress file the game reads ([`Shown`]; empty: none).
+    pub progress: PathBuf,
 }
 
 impl Job {
     /// The job file's text (`key=value` lines).
     pub fn to_text(&self) -> String {
-        format!("game={}\ncache={}\nlog={}\ninputs={}\nreason={}\n", self.game.display(), self.cache.display(), self.log.display(), self.inputs, self.reason.replace('\n', " "))
+        format!(
+            "game={}\ncache={}\nlog={}\ninputs={}\nreason={}\nlive={}\nprogress={}\n",
+            self.game.display(),
+            self.cache.display(),
+            self.log.display(),
+            self.inputs,
+            self.reason.replace('\n', " "),
+            self.live.display(),
+            self.progress.display()
+        )
     }
 
     /// Reads a job file's text.
     pub fn parse(text: &str) -> Option<Job> {
         let get = |k: &str| text.lines().map(|l| l.trim_end_matches('\r')).find_map(|l| l.strip_prefix(k)?.strip_prefix('=')).map(str::to_string);
-        Some(Job { game: get("game")?.into(), cache: get("cache")?.into(), log: get("log")?.into(), inputs: get("inputs")?, reason: get("reason").unwrap_or_default() })
+        Some(Job {
+            game: get("game")?.into(),
+            cache: get("cache")?.into(),
+            log: get("log")?.into(),
+            inputs: get("inputs")?,
+            reason: get("reason").unwrap_or_default(),
+            live: get("live").unwrap_or_default().into(),
+            progress: get("progress").unwrap_or_default().into(),
+        })
     }
 }
 
-/// The line sink: the console and the build log (`win::assets`).
+/// Re:CoM's title, where the game waits for the build (`win::assets`; `sites::TITLE_HOLD_HOOK`).
+/// Checked (decomp + disasm): `CTitle` (ctor `0x14039F770`) is a `CFSM` of 14 states; state 0's
+/// update `0x1403A3770` waits for the loader's queue to empty (`0x14023CA80(0, 0)`), then state 1's
+/// `0x1403A3820` plays the title (sub-state `+0xAC` 0), waits for its sequence's end or a confirm /
+/// cancel / Start press (10), fades (0x14) and goes to the menu (state 2, `+0x168`).
+pub mod title {
+    /// `CTitle`'s state-1 update (RVA).
+    pub const STATE1_UPDATE: u32 = 0x003A_3820;
+    /// Its sub-state (`i32`).
+    pub const SUB: usize = 0xAC;
+    /// The sub-state that waits for a press (the title shown).
+    pub const WAIT: i32 = 10;
+}
+
+/// The progress file the build writes for the game window (in the game folder, next to the job).
+pub const PROGRESS_FILE: &str = "kh1-recom-build.progress";
+const PROGRESS_MAGIC: &str = "kh1-recom-build progress 1";
+
+/// The build's stages as the game window counts them: the step's ([`step::STAGES`]), then the copy
+/// into Panacea's folder.
+pub fn stage_count() -> usize {
+    step::STAGES.len() + 1
+}
+
+/// The last stage's label (the copy into Panacea's folder).
+pub const PLACE_STAGE: &str = "copying the files into the mod folder";
+
+/// A stage's label (`stage_count() - 1` is [`PLACE_STAGE`]).
+pub fn stage_label(stage: usize) -> &'static str {
+    step::STAGES.get(stage).copied().unwrap_or(PLACE_STAGE)
+}
+
+/// The percentage shown for stage `stage` of `of` begun (part `k` of `n` of it done): stages count
+/// alike, parts split their stage; under 100 until the build is done.
+pub fn percent(stage: usize, of: usize, part: Option<(usize, usize)>) -> u32 {
+    if of == 0 {
+        return 0;
+    }
+    let frac = part.filter(|&(_, n)| n > 0).map_or(0.0, |(k, n)| k.min(n) as f64 / n as f64);
+    (((stage.min(of) as f64 + frac) / of as f64 * 100.0).floor() as u32).min(99)
+}
+
+/// What the game window shows of the build.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Shown {
+    /// Building: stage `stage` (from 0) of `of`, the label, the percentage.
+    Running { stage: usize, of: usize, label: String, percent: u32 },
+    /// Built and copied: the files, the seconds.
+    Done { files: usize, secs: u32 },
+    /// Not built: the reason (the failed marker's).
+    Failed { reason: String },
+}
+
+impl Shown {
+    /// The state at stage `stage` (part `k` of `n`).
+    pub fn at(stage: usize, part: Option<(usize, usize)>) -> Shown {
+        let of = stage_count();
+        Shown::Running { stage, of, label: stage_label(stage).to_string(), percent: percent(stage, of, part) }
+    }
+
+    /// Before the first report.
+    pub fn starting() -> Shown {
+        Shown::Running { stage: 0, of: stage_count(), label: "starting".into(), percent: 0 }
+    }
+
+    /// The progress file's text.
+    pub fn to_text(&self) -> String {
+        let one = |s: &str| s.replace(['\r', '\n'], " ");
+        match self {
+            Shown::Running { stage, of, label, percent } => format!("{PROGRESS_MAGIC}\nrunning {stage} {of} {percent} {}\n", one(label)),
+            Shown::Done { files, secs } => format!("{PROGRESS_MAGIC}\ndone {files} {secs}\n"),
+            Shown::Failed { reason } => format!("{PROGRESS_MAGIC}\nfailed {}\n", one(reason)),
+        }
+    }
+
+    /// Reads a progress file's text.
+    pub fn parse(text: &str) -> Option<Shown> {
+        let mut lines = text.lines().map(|l| l.trim_end_matches('\r'));
+        if lines.next()? != PROGRESS_MAGIC {
+            return None;
+        }
+        let l = lines.next()?;
+        let (kind, rest) = l.split_once(' ')?;
+        match kind {
+            "running" => {
+                let mut f = rest.splitn(4, ' ');
+                let stage = f.next()?.parse().ok()?;
+                let of = f.next()?.parse().ok()?;
+                let percent = f.next()?.parse().ok()?;
+                Some(Shown::Running { stage, of, label: f.next().unwrap_or_default().to_string(), percent })
+            }
+            "done" => {
+                let (a, b) = rest.split_once(' ')?;
+                Some(Shown::Done { files: a.parse().ok()?, secs: b.parse().ok()? })
+            }
+            "failed" => Some(Shown::Failed { reason: rest.to_string() }),
+            _ => None,
+        }
+    }
+
+    /// The two lines the game window shows (ASCII: Re:CoM's text expands bytes from 0x81 as its
+    /// own escapes, `0x1403480C0`).
+    pub fn lines(&self) -> (String, String) {
+        let ascii = |s: String| s.chars().map(|c| if c.is_ascii() && !c.is_ascii_control() { c } else { '?' }).collect::<String>();
+        let (a, b) = match self {
+            Shown::Running { stage, of, label, percent } => {
+                (format!("KH1 in Re:CoM: building files from your games... {percent} %"), format!("Step {} of {of}: {label}. The title waits until it is done.", (stage + 1).min(*of)))
+            }
+            Shown::Done { files, secs } => ("KH1 in Re:CoM: done. The KH1 files are ready.".to_string(), format!("{files} files in {secs} s.")),
+            Shown::Failed { reason } if lacks_kh1(reason) => ("KH1 FM not found: playing without KH1 files".to_string(), "It tries again when the mod or the game is updated.".to_string()),
+            Shown::Failed { .. } => ("KH1 in Re:CoM: the build failed: playing without KH1 files".to_string(), "Details: kh1-recom-build.log in the game folder.".to_string()),
+        };
+        (ascii(a), ascii(b))
+    }
+}
+
+/// Whether a failed build's reason is that KH1 Final Mix's files are missing.
+pub fn lacks_kh1(reason: &str) -> bool {
+    reason.contains("KH1 Final Mix")
+}
+
+/// A stamp path under Panacea's folder as the game names it (`raw/` dropped): Re:CoM's archive
+/// path, or None for our own files at the root (`kh1-*.json`, `kh1-*.bin`: the DLL reads them,
+/// the game never opens them) and anything else that is not an upper-case archive folder.
+pub fn game_name(rel: &str) -> Option<&str> {
+    let n = rel.strip_prefix("raw/").unwrap_or(rel);
+    let (top, rest) = n.split_once('/')?;
+    (!rest.is_empty() && !top.is_empty() && top.bytes().all(|b| b.is_ascii_uppercase())).then_some(n)
+}
+
+/// The empty files to make in Panacea's folder before it is listed: every name the build may
+/// write (`expected`: the step's new names; `previous`: the last build's stamp) that is a game
+/// file `Recom.hed` lacks and is not there yet. Panacea reads a file's content at each open
+/// (`docs/openkh-github-install.md` § 8), so the build fills them in later.
+pub fn placeholders(expected: &[String], previous: &[String], in_recom: impl Fn(&str) -> bool, exists: impl Fn(&str) -> bool) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for rel in expected.iter().chain(previous) {
+        let Some(name) = game_name(rel) else { continue };
+        if in_recom(name) || exists(rel) || out.iter().any(|o| o.eq_ignore_ascii_case(rel)) {
+            continue;
+        }
+        out.push(rel.clone());
+    }
+    out.sort();
+    out
+}
+
+/// The line sink: the build log (`win::assets`).
 pub type Say = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Runs a job: checks the inputs, empties the cache, runs the whole asset step into it and
@@ -184,8 +352,15 @@ pub type Say = Arc<dyn Fn(&str) + Send + Sync>;
 /// `guard`: a failed marker written before the step runs and removed when it succeeds, for a run
 /// inside the game, where a crash of the step would end the game (the next start then skips it).
 pub fn run_job(job: &Job, say: &Say, guard: Option<&str>) -> Result<Stamp, String> {
+    run_job_with(job, say, guard, Box::new(|_| {}))
+}
+
+/// [`run_job`], with the step's progress ([`Shown::at`]) to `on` (from this thread).
+pub fn run_job_with(job: &Job, say: &Say, guard: Option<&str>, on: Box<dyn Fn(Shown)>) -> Result<Stamp, String> {
+    step::set_progress(Some(Box::new(move |p: step::Progress| on(Shown::at(p.stage, p.part)))));
     let inputs = stamp::inputs(&job.game);
     let r = run_job_inner(job, &inputs, say, guard);
+    step::set_progress(None);
     if let Err(e) = &r {
         let _ = std::fs::create_dir_all(&job.cache);
         let _ = std::fs::write(job.cache.join(FAILED_FILE), stamp::failed_text(stamp::STEP_HASH, &job.inputs, e));
@@ -219,6 +394,26 @@ fn run_job_inner(job: &Job, inputs: &[Input], say: &Say, guard: Option<&str>) ->
     std::fs::rename(&tmp, job.cache.join(STAMP_FILE)).map_err(|e| format!("{}: {e}", job.cache.display()))?;
     let _ = std::fs::remove_file(job.cache.join(FAILED_FILE));
     Ok(st)
+}
+
+/// Copies a finished build's files into the job's live folder (none when it has no live folder),
+/// with the copy's progress to `on` (the last stage, one part per file).
+pub fn place_job(job: &Job, st: &Stamp, on: &dyn Fn(Shown)) -> Result<stamp::Placed, String> {
+    if job.live.as_os_str().is_empty() {
+        return Ok(stamp::Placed::default());
+    }
+    let last = stage_count() - 1;
+    let mut shown = u32::MAX;
+    stamp::place_with(&job.cache, &job.live, st, |k, n| {
+        let s = Shown::at(last, Some((k, n)));
+        if let Shown::Running { percent, .. } = &s {
+            if *percent != shown {
+                shown = *percent;
+                on(s);
+            }
+        }
+    })
+    .map_err(|e| format!("could not copy the built files into {}: {e}", job.live.display()))
 }
 
 /// The text the player sees when a build failed.
@@ -314,7 +509,7 @@ mod tests {
     #[test]
     fn a_job_reads_back_and_fails_cleanly_without_the_games() {
         let d = tmp("job");
-        let job = Job { game: d.join("game"), cache: d.join("generated"), log: d.join(BUILD_LOG), inputs: "00".into(), reason: "first\nlaunch".into() };
+        let job = Job { game: d.join("game"), cache: d.join("generated"), log: d.join(BUILD_LOG), inputs: "00".into(), reason: "first\nlaunch".into(), live: d.join("live"), progress: d.join(PROGRESS_FILE) };
         let back = Job::parse(&job.to_text()).unwrap();
         assert_eq!(back.reason, "first launch");
         assert_eq!(Job { reason: "first launch".into(), ..job.clone() }, back);
@@ -328,7 +523,79 @@ mod tests {
         let t = std::fs::read_to_string(job.cache.join(FAILED_FILE)).unwrap();
         assert!(Stamp::parse(&t).is_some_and(|s| s.is_for(stamp::STEP_HASH, "00")));
         assert!(failure_notice(&stamp::failed_reason(&t), &job.game, &job.log).contains("KINGDOM HEARTS FINAL MIX's files were not found"));
+        // The window's failure line for it is the owner's.
+        assert_eq!(Shown::Failed { reason: stamp::failed_reason(&t) }.lines().0, "KH1 FM not found: playing without KH1 files");
+        // A job file of 0.141.0 (no live / progress lines) still reads.
+        let old = Job::parse("game=g\ncache=c\nlog=l\ninputs=00\nreason=r\n").unwrap();
+        assert!(old.live.as_os_str().is_empty() && old.progress.as_os_str().is_empty());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn progress_reads_back_and_counts_stages() {
+        let of = stage_count();
+        assert_eq!(of, step::STAGES.len() + 1);
+        assert_eq!(stage_label(of - 1), PLACE_STAGE);
+        assert_eq!(stage_label(step::stage::MOTIONS), "motions");
+        assert_eq!(percent(0, of, None), 0);
+        assert_eq!(percent(5, 10, None), 50);
+        assert_eq!(percent(5, 10, Some((1, 2))), 55);
+        assert_eq!(percent(9, 10, Some((9, 9))), 99, "under 100 until done");
+        assert_eq!(percent(3, 0, None), 0);
+        for s in [Shown::at(step::stage::ENEMIES, Some((3, 21))), Shown::Done { files: 184, secs: 95 }, Shown::Failed { reason: "not found: KH1 Final Mix's Image/dt/kh1_*.hed".into() }, Shown::starting()] {
+            assert_eq!(Shown::parse(&s.to_text()), Some(s.clone()), "{s:?}");
+            let (a, b) = s.lines();
+            assert!(a.is_ascii() && b.is_ascii() && !a.is_empty());
+        }
+        assert_eq!(Shown::parse("something\nrunning 1 2 3 x"), None);
+        assert_eq!(Shown::parse("kh1-recom-build progress 1\nfailed two\nlines"), Some(Shown::Failed { reason: "two".into() }));
+        let (a, b) = Shown::at(step::stage::KEYBLADES, None).lines();
+        assert_eq!(a, format!("KH1 in Re:CoM: building files from your games... {} %", percent(2, of, None)));
+        assert_eq!(b, format!("Step 3 of {of}: Keyblades. The title waits until it is done."));
+        assert_eq!(Shown::Failed { reason: "disk full".into() }.lines().0, "KH1 in Re:CoM: the build failed: playing without KH1 files");
+        assert!(Shown::Done { files: 3, secs: 1 }.lines().0.contains("done"));
+    }
+
+    #[test]
+    fn place_job_copies_with_progress() {
+        let d = tmp("placejob");
+        let cache = d.join("generated");
+        std::fs::create_dir_all(cache.join("PLAYER/0021")).unwrap();
+        std::fs::write(cache.join("PLAYER/0021/PL0021.MDL"), b"model").unwrap();
+        std::fs::write(cache.join("kh1-stats.json"), b"{}").unwrap();
+        let st = Stamp::of_build("s", "i", &cache, &[cache.join("PLAYER/0021/PL0021.MDL"), cache.join("kh1-stats.json")]);
+        let mut job = Job { game: d.join("game"), cache: cache.clone(), log: d.join(BUILD_LOG), inputs: "i".into(), reason: String::new(), live: PathBuf::new(), progress: PathBuf::new() };
+        assert_eq!(place_job(&job, &st, &|_| {}).unwrap(), stamp::Placed::default(), "no live folder: nothing");
+        job.live = d.join("live");
+        // An empty file made before Panacea's listing is replaced by the built one.
+        std::fs::create_dir_all(job.live.join("PLAYER/0021")).unwrap();
+        std::fs::write(job.live.join("PLAYER/0021/PL0021.MDL"), b"").unwrap();
+        let seen = std::sync::Mutex::new(Vec::new());
+        let p = place_job(&job, &st, &|s| seen.lock().unwrap().push(s)).unwrap();
+        assert_eq!((p.copied, p.kept), (2, 0));
+        assert_eq!(std::fs::read(job.live.join("PLAYER/0021/PL0021.MDL")).unwrap(), b"model");
+        let seen = seen.into_inner().unwrap();
+        assert!(matches!(&seen[0], Shown::Running { stage, label, .. } if *stage == stage_count() - 1 && label == PLACE_STAGE));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn placeholders_are_the_new_game_names_only() {
+        assert_eq!(game_name("raw/PLAYER/0021/PL0021.RTM"), Some("PLAYER/0021/PL0021.RTM"));
+        assert_eq!(game_name("PLAYER/0021/PL0021.MDL"), Some("PLAYER/0021/PL0021.MDL"));
+        assert_eq!(game_name("kh1-stats.json"), None, "the DLL's own files");
+        assert_eq!(game_name("kh1-menu-sounds-preview/a.wav"), None);
+        assert_eq!(game_name("raw/kh1-x.bin"), None);
+        let expected = kh1_recom_assets::keyblade::new_resource_names();
+        let previous: Vec<String> = ["PLAYER/0001/PL0001.ANN", "raw/FORM/0002/FO0002.SPR", "kh1-stats.json", "PLAYER/0021/PL0021.MDL", "PLAYER/0099/PL0099.MDL"].iter().map(|s| s.to_string()).collect();
+        // Re:CoM's names: what the step replaces (here: everything not in a group past 20).
+        let in_recom = |n: &str| !(n.starts_with("PLAYER/00") && n[9..11].parse::<u32>().is_ok_and(|g| g > 20));
+        let have = |rel: &str| rel == "raw/PLAYER/0022/PL0022.RTM";
+        let p = placeholders(&expected, &previous, in_recom, have);
+        assert_eq!(p.len(), expected.len() - 1 + 1, "every new name but the one there, and the last build's own new one");
+        assert!(p.contains(&"PLAYER/0099/PL0099.MDL".to_string()) && p.contains(&"raw/PLAYER/0036/PL0036.EFF".to_string()));
+        assert!(!p.iter().any(|n| n.contains("FO0002") || n.contains("PL0001") || n.contains("json") || n == "raw/PLAYER/0022/PL0022.RTM"));
+        assert_eq!(p.iter().filter(|n| n.as_str() == "PLAYER/0021/PL0021.MDL").count(), 1, "once");
     }
 
     #[test]

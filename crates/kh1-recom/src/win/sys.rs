@@ -86,19 +86,19 @@ extern "system" {
     pub fn CloseHandle(handle: *mut c_void) -> i32;
     pub fn GetLastError() -> u32;
     pub fn GetSystemDirectoryW(buf: *mut u16, size: u32) -> u32;
-    pub fn AllocConsole() -> i32;
-    pub fn FreeConsole() -> i32;
-    pub fn SetConsoleOutputCP(cp: u32) -> i32;
-    pub fn SetConsoleTitleW(title: *const u16) -> i32;
     pub fn ExitProcess(code: u32) -> !;
+    pub fn ResumeThread(thread: *mut c_void) -> u32;
+    pub fn CreateJobObjectW(attr: *mut c_void, name: *const u16) -> *mut c_void;
+    pub fn SetInformationJobObject(job: *mut c_void, class: u32, info: *const c_void, len: u32) -> i32;
+    pub fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
 }
 
-#[link(name = "user32")]
-extern "system" {
-    pub fn MessageBoxW(window: *mut c_void, text: *const u16, caption: *const u16, kind: u32) -> i32;
-}
-
-pub const MB_OK: u32 = 0;
-pub const MB_ICONWARNING: u32 = 0x30;
-pub const MB_SETFOREGROUND: u32 = 0x1_0000;
-pub const MB_TOPMOST: u32 = 0x4_0000;
+/// `CreateProcessW`: the helper starts suspended (put in our job first).
+pub const CREATE_SUSPENDED: u32 = 0x4;
+/// `JobObjectExtendedLimitInformation`.
+pub const JOB_EXTENDED_LIMITS: u32 = 9;
+/// `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: the job's processes end with its last handle (the game).
+pub const JOB_KILL_ON_CLOSE: u32 = 0x2000;
+/// `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` (x64): 144 bytes, `LimitFlags` at byte 16.
+pub const JOB_LIMITS_LEN: usize = 144;
+pub const JOB_LIMIT_FLAGS_AT: usize = 16;

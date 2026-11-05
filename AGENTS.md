@@ -11,6 +11,28 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 259: the first-launch build shows its progress on Re:CoM's title (Re:CoM's own text) and the title waits for it; no console window, version 0.142.0 (2026-11-05)
+
+Owner, 2026-11-05, verbatim: "I definitely want a progress screen in the game window while everything loads" (0.141.0's build ran in a `rundll32` helper with a console window, inside Panacea's `OnInit`, before the game window existed).
+
+- **Research** (details and tags in `docs/openkh-github-install.md` § 8):
+  - Panacea reads a listed file's content and size from disk at each open; its listing (`FakePackageFile`) only says a name exists. Re:CoM's loader `0x1402427D0` sizes through the hooked `GetFileSize` `0x1402C4530`, then `LoadFileWithSize` `0x1402C48F0`; the only unhooked `GetFileInfo` caller `0x1402C4990` seeks. Checked (OpenKH source `b67a743`; decomp; Panacea's patterns at those addresses in the Steam exe).
+  - The step's only names `Recom.hed` lacks are the Keyblade groups' 76 files (`PLAYER/00GG/PL00GG.MDL`, `raw/…RTM` for 21..36 / 38..43; `.EET`, `raw/…EFF` for 21..36). Checked (files: the owner's `Recom.hed`, test).
+  - None of our outputs opens before the title ends: FORM 2 is linked only from the world groups (category 14), EFFECT 1000 from the player / effect groups, FORM 100 / 109 and PLAYER / ENEMY are asked for by the camp, the shop, rooms and battles; the title asks for (0, 0xD / 0xE) only (FORM 505 / 507 / 111). Checked (exe: every link row; decomp: the request sites). Assumption: no computed request runs before the title.
+  - `CTitle` (`0x14039F770`): state 0 `0x1403A3770` waits for the loader's queue, state 1 `0x1403A3820` plays the title (sub-state `+0xAC` 0), waits for a press (10), fades (0x14). Its alert text: `C2DFnt` size 0xF (0x10 with `[0x140AF73B0]+0x274`), centred, on `aleart:00` (`0x1403A23D0`, `%s:%02d` at `0x140606EC8`). Checked (decomp + disasm).
+- **Change** (`win::assets`, `win::install_deferred`, `asset_build::{Shown, percent, placeholders, game_name, place_job, run_job_with, title}`, `kh1_recom_assets::step::{STAGES, stage, Progress, set_progress}`, `stamp::place_with`, `keyblade::{new_resource_names, LAST_KH1_CARD}`):
+  - At `OnInit`, when a build is needed: the new names (and the last stamp's names `Recom.hed` lacks) not in Panacea's folder are made empty for its listing; the title's wrapper goes in; the rest of the DLL's start waits; a thread starts the build after `OnInit` returns (no process made under the loader lock).
+  - The helper (`rundll32 … BuildAssets`, no window, in a job object that ends it with the game) builds, stamps, copies into Panacea's folder, and writes `kh1-recom-build.progress` (stage, percentage; the end) and `kh1-recom-build.log`. In-game fallback on its thread if the helper cannot start (failed-marker guard).
+  - New hook `sites::TITLE_HOLD_HOOK` (`0x1403A3820`, 6 bytes; only reference the ctor's `lea` `0x14039F858`; no branch in: exe scan) + `TITLE_HOLD_CHECKED`: while the build runs, sub-state 10 does not run Re:CoM's update (the title stays, no press is taken) and shows two lines of Re:CoM's text (a `C2DSeqCtrl`, priority 0xC, two `C2DFnt`s as the title's alert text, squeezed to 480): "KH1 in Re:CoM: building files from your games... N %" / "Step k of 10: <stage>. …"; then on the game's thread: the cache checked, unfilled empty names removed, the deferred start, "done" (2.5 s) or "KH1 FM not found: playing without KH1 files" / the failure line (7 s); then the title goes on.
+  - Progress is the step's stages (enemies one part each) and the copy (one part per file), not time.
+  - Kept: the stamp, `generated/`, the copy back after a Build, `asset_build = auto | off`, the failed marker, the start without KH1 files. Without the title hook: the 0.141.0 order (built before the game starts), without the console. Normal starts (nothing to build) unchanged.
+- Per frame: nothing outside the build; on the held title one atomic load, the progress file read every 6 frames.
+- The step's sources changed (progress reports), so its hash changes: every install rebuilds once after this update.
+- Assumptions: the rest of the start is safe at the title (gameplay hooks only, on the game's thread; no other thread runs those functions then); `aleart` loaded at sub-state 10; priority 0xC over the title; the lines' place; `%` drawn as is; the game's `SetReplacePath` after every `OnInit` (0.141.0's).
+- Checked: tests (`asset_build::tests::{progress_reads_back_and_counts_stages, placeholders_are_the_new_game_names_only, place_job_copies_with_progress}` + the job round trip, `sites::tests::title_hold_sites`, `keyblade::tests::new_names_are_not_in_recom_hed` (with the owner's `Recom.hed`), `step::tests::progress_starts_with_reading_and_stops_with_the_run`, `stamp::tests::place_copies_only_what_differs`), `check_sites_rs.py` (1423 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game; a full build's time. Asset step: its output unchanged (re-run automatically: the hash). Docs: `openkh-github-install.md` § 8 (§ 3 corrected), `README.md`.
+
+---
+
 ## Stage 258: the turned HP ring's start closes on its black line (no gap at partial HP), version 0.141.1 (2026-11-05)
 
 Owner, 2026-11-05 (screenshot, KH1 HUD bottom right), verbatim: "there's a little gap in the green hp bar where the bar starts, lets fix that".

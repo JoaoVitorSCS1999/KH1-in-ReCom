@@ -405,8 +405,8 @@ config_menu = on
 ; asset_build = auto | off
 ;   auto: at start, when the KH1 files the mod makes from your own KH1 and Re:CoM files are
 ;         missing or out of date (first launch, an update of the mod, a game update), the mod
-;         builds them (a window shows the progress; the game starts when it is done) and puts
-;         them into OpenKH's mod folder.
+;         builds them and puts them into OpenKH's mod folder; Re:CoM's title shows the
+;         progress and waits until it is done.
 ;   off:  never: the files are the ones OpenKH's Build put there.
 asset_build = auto
 ;

@@ -19,19 +19,22 @@ the design rules are in `docs/`.
 2. Mods → **Install a new mod** → type `PM2CRAZY/KH1-in-ReCom` → Install. (It installs the default
    branch, `testing`; `PM2CRAZY/KH1-in-ReCom/testing` names it outright.)
 3. Tick the mod and press **Build** (or **Build and Run**).
-4. Start Re:CoM. **On the first start a window opens and builds the KH1 files** from your games
-   (a minute or two; please don't close it). The game starts by itself when it is done. Nothing
-   else is needed: no second Build, no restart.
+4. Start Re:CoM. **On the first start the mod builds the KH1 files** from your games: the title
+   screen shows "KH1 in Re:CoM: building files from your games... N %" and the step it is on, and
+   waits (a minute or two). When it says "done", the title goes on by itself. Nothing else is
+   needed: no second Build, no restart.
 5. Next to the game exe you'll find `kh1-recom.log` (what the mod did), `kh1-recom-build.log` (the
    build's details) and `kh1-recom.ini` (settings, also in the camp menu's KH1 entry).
 
 What the first start does: it reads KH1 Final Mix's and Re:CoM's archives (`Image/dt`) and makes
 the files the mod plays with (Sora's KH1 motions, the KH1 Keyblades, enemies, effects, sounds, HUD
 pieces). It keeps them in the mod's folder (`generated/`) and copies them into OpenKH's mod folder.
-A later Build removes that copy; the next start puts it back in a moment. The window comes back
-only when an update of the mod changes how the files are made, or when the game itself is updated.
+A later Build removes that copy; the next start puts it back in a moment. The build (and its line
+on the title) comes back only when an update of the mod changes how the files are made, or when the
+game itself is updated.
 
-If KH1 Final Mix is not installed, a message says so and the game starts without the KH1 files.
+If KH1 Final Mix is not installed, the title says "KH1 FM not found: playing without KH1 files" and
+the game goes on without them.
 
 **Updating:** in the Mods Manager, check for updates and update the mod, then Build.
 
