@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 251: M12 camera stage 5: KH2's lock-on camera as mode 9 (look 30 % to the target, turns only when Sora or the target leaves the screen, 380 at 1 a frame; field and battle), version 0.139.0 (2026-11-05)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Camera answers: "KH1 / KH2 lock camera in field rooms too", "KH2's numbers scaled ×0.89"). Stage 5 of `docs/recom-m12-camera-plan.md`. Camera = KH2 only.
+
+- **KH2** (Checked (KH2 Steam decomp + exe)): lock mode 2 `0x140176C70` with `0x140176EC0(cam, point, 0.3)`: look goal 30 % from the chest (170) to the target; the screen test `0x140176710` (512 × 416, margins 32 / 480 / 8 / 408 `0x14071A478`) on the target and Sora's point (100); off screen → goal yaw on the line from the last look goal through Sora (`0x140176A70`) ± 20°; bottom edge − 2 a frame each, else to 380 at 1 (`0x140164290`); far (> 300) and steep → the chest; stick 3° (`0x14071A470`), zoom `0x140176BC0`, R3 to the line and 380; the eye from the chest, its wall rays (`0x140164910`, `0x140176E40`). Its lock start / end `0x140176910` / `0x140176A00` only set the mode.
+- **Change** (`camera::kh2::{Cam::lock, screen, Target}`, `camera::dispatch` 8 ↔ 9, `win::camera::kh2_step`): mode 9 on Re:CoM's lock handle `player+0x850` through Re:CoM's `0x1401FBE60` (not with a subject object), field and battle; the target point Re:CoM's own `0x1401FC400`; the screen test with Re:CoM's look-at axes on last frame's view. No new hook, patch or site.
+- Per frame (mode 9): KH2's lock math 134 ns (Linux release); 2 Re:CoM sweeps (Re:CoM's lock step: 1). Not measured in game.
+- Assumptions: Re:CoM's `CamTrgOfs` point for KH2's camera shape; KH2's handedness is KH1's (screen left / right); the behind bit at a depth under 1.
+- Checked: tests (`camera::tests` 3 new + the cost test), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game; no KH2 camera trace. Asset step: not needed. Docs: `recom-m12-camera-plan.md` § 17.
+
+---
+
 ## Stage 250: M12 camera stage 4: KH2's follow camera as mode 8 (Camera row Re:CoM / KH1 / KH2; KH2's Auto behind the Auto camera row; lengths × 0.89), version 0.138.0 (2026-11-05)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Camera answers: "KH2's numbers scaled ×0.89", "An "Auto camera: On / Off" row for KH1 and KH2", each game's own Normal, re-place after an event). Stage 4 of `docs/recom-m12-camera-plan.md`. Camera = KH2 only; Camera = Re:CoM / KH1 unchanged.

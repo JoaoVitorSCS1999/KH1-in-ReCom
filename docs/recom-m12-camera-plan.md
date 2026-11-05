@@ -8,7 +8,7 @@ this plan only covers what the camera does while a lock is on.
 
 **Status:** the owner answered § 10 (`design-philosophy-instructions.md` § Camera answers) and
 asked for the five stages. Built: stage 1 (0.134.0, § 13), stage 2 (0.135.0, § 14), stage 3 (0.136.0, § 15),
-stage 4 (0.138.0, § 16).
+stage 4 (0.138.0, § 16), stage 5 (0.139.0, § 17).
 
 Steam addresses for all three games. Tags: **Checked (exe / decomp / files)** = read;
 **Assumption** = inferred, to check. KH1 roles marked "(Epic notes)" come from
@@ -739,3 +739,45 @@ eye is 150 under the look point, 500, the swapped row), `kh2_reset_turns_at_most
 `kh2_swings_behind_a_running_sora` (1° a frame, 0.5 back, not with the right stick / pulled back /
 Auto off / standing), `kh2_springs_close_the_gap_at_its_rates` (8.75 % / 16.25 %, rest 1, the moving
 goal's term), `kh2_wall_puts_the_eye_5_off_the_wall`; `menu` (the 3-value row) / `settings` tests.
+
+---
+
+## 17. Stage 5 built (0.139.0): KH2's lock-on camera (mode 9)
+
+Owner's answers: the lock camera in field rooms too (Q12 (a)); × 0.89 (Q9 (b)). The lock state is
+Re:CoM's own (`player+0x850`), with 0.137.0's KH1 lock rules at Combat = KH1.
+
+- **Switch** (`camera::dispatch`): 8 ↔ 9 on Re:CoM's lock handle, in field and battle rooms, not
+  while a subject object holds the camera, through Re:CoM's `0x1401FBE60`, as stage 3's 6 ↔ 7. KH2's
+  own lock start `0x140176910` / end `0x140176A00` only set its mode (2 / 0; the start also cancels
+  first person): no blend, no distance or yaw change; its springs carry the view. Our 8 ↔ 9 switch
+  is not an entry (the view carries on); a new target needs nothing either.
+- **The lock step** (`camera::kh2::Cam::lock`, KH2's `0x140176C70` with `0x140176EC0(cam, point,
+  0.3)`; Checked (decomp + exe)):
+
+| Piece | KH2 | × 0.89 |
+|---|---|---|
+| Look goal | Sora's chest (feet − 170) + 30 % of the way to the target's camera point (`0x1403BDBE0`) | chest 1.513 m |
+| Far and steep | Sora's point (feet − 100) more than 300 from that look goal and the look above it (the unit vector's y > 0.5): the look goal at the chest, no screen turn, no drift | 0.89 m / 2.67 m |
+| Screen test `0x140176710` | the target and Sora's point projected with last frame's view (`0x140166A20`) on the 512 × 416 frame, margins `0x14071A478` = (32, 480, 8, 408) (Checked (exe)): bits 4 left, 8 right, 1 top, 2 bottom, 0x10 behind | margins as they are |
+| Bottom edge | each of the two at the bottom only (bits & 3 = 2): d − 2 · step | 1.78 a frame |
+| Distance | neither at the bottom: to 380 at 1 · step (`0x140164290`, only when 1 or more away); clamped 250..500 | 0.89 a frame to 3.382 m |
+| Turn | the target off screen (else Sora's point): the goal yaw on the line from last frame's look goal through Sora's feet (`0x140176A70`) + 20° (left), − 20° (right), 0 (top / bottom / behind); none while both are on screen | as KH2 |
+| Stick, zoom, reset | turn 3° (`0x14071A470`, Checked (exe)) · tilt; zoom 8 · tilt (`0x140176BC0`, clamped); R3: the goal on that line, d = 380 | 7.12 a frame |
+| Eye | from the chest (`0x140164520(cam, chest, 0)`): ≤ 10° a frame to the goal, d on the height curve; the wall ray from the chest (`0x140164910`) | as § 16 |
+| View | the same springs (§ 16); then the wall ray from the chest to the drawn eye (`0x140176E40`), the drawn eye only | as § 16 |
+
+- **In Re:CoM**: the target point is Re:CoM's own lock-on point (`0x1401FC400`: `player+0x870`, the
+  target's `CamTrgOfs` point) where KH2 uses its target's camera shape (type 7, else its lock shape):
+  Assumption, as stage 3.
+- **Screen axes**: Re:CoM's look-at (`0x14024FA40`: x = up × forward, its cross `0x1402EF6D0`,
+  Checked (decomp)) on KH2's points turned into Re:CoM's frame; that KH2's world has KH1's
+  handedness (so "left" is the same side): Assumption. The behind bit for a depth under 1:
+  Assumption (KH2's projected z < 1; its near plane is 1).
+- **Per frame** (mode 9): KH2's lock math **134 ns** (Linux release, 10⁶ frames,
+  `cost_of_a_kh2_step`); 2 Re:CoM sweeps (the goal's wall ray, the drawn eye's) against 1 in Re:CoM's
+  lock step. Not measured in game.
+- **Tests**: `camera::tests::kh2_screen_test_on_its_512_by_416_frame` (centre, sides, top / bottom,
+  behind, the 32-pixel margins), `kh2_lock_camera_frames_sora_and_the_target` (the 30 % look goal,
+  the eye from the chest, no turn on screen, 380 at 1 a frame, + 20° off the left side, the reset,
+  the far-and-steep chest, the 8 ↔ 9 rows), `kh2_lock_shrinks_the_distance_at_the_bottom_edge`.

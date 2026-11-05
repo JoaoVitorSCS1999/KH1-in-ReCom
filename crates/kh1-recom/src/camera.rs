@@ -110,14 +110,17 @@ pub enum Dispatch {
 /// (`player+0x850 > 0`), None while a subject object holds the camera (`+0x2B8`, where Re:CoM's
 /// battle exec skips its 3 ↔ 4 switch too). Re:CoM's modes are only replaced from its base follows
 /// (1 / 3 / 4), never during a sleight's request or its timed view 2. Our follow and lock modes
-/// switch on the lock as Re:CoM's 3 ↔ 4 do, in field rooms too (owner Q12 (a)): KH1's 6 ↔ 7.
-/// KH2's follow (8) stays on while locked until its lock camera's stage.
+/// switch on the lock as Re:CoM's 3 ↔ 4 do, in field rooms too (owner Q12 (a)): KH1's 6 ↔ 7,
+/// KH2's 8 ↔ 9 (KH2's own lock start `0x140176910` / end `0x140176A00` set its mode 2 / 0 and
+/// nothing else).
 pub fn dispatch(m: i32, want: Family, battle: bool, external: bool, subject: bool, locked: Option<bool>) -> Dispatch {
     if mode::ours(m) {
         if Family::of(m) == want {
             match (m, locked) {
                 (mode::KH1_FOLLOW, Some(true)) => Dispatch::Switch(mode::KH1_LOCK),
                 (mode::KH1_LOCK, Some(false)) => Dispatch::Switch(mode::KH1_FOLLOW),
+                (mode::KH2_FOLLOW, Some(true)) => Dispatch::Switch(mode::KH2_LOCK),
+                (mode::KH2_LOCK, Some(false)) => Dispatch::Switch(mode::KH2_FOLLOW),
                 _ => Dispatch::Ours,
             }
         } else {
@@ -1155,6 +1158,7 @@ pub mod kh2 {
     /// `0x140166100`; the lock's `0x14071A470` is also 3°), zoom 8 a frame × its tilt × `cam+4`
     /// (1 on the pad) (`0x1401654D0`, `0x140176BC0`). Checked (exe + decomp). × 0.89: zoom 7.12.
     pub const STICK_TURN: f32 = 0.052_359_88;
+    pub const LOCK_TURN: f32 = 0.052_359_88;
     pub const ZOOM: f32 = 8.0;
     /// The swing-behind (`0x140165110`): turns toward Sora's back by at most
     /// `2 (|lx| + 1)(|ly| + 1) · tilt · ((run − 8) · 0.00017453 + 0.0043633) · step` a frame
@@ -1182,6 +1186,23 @@ pub mod kh2 {
     /// The wall test `0x140164940`: a ray from the look point to the eye; the eye at the hit + 5
     /// along the polygon's normal. Checked (decomp). × 0.89: 4.45.
     pub const WALL_PUSH: f32 = 5.0;
+    /// The lock camera (`0x140176EC0` with 0.3 from `0x140176C70`): the look point 30 % of the
+    /// way from Sora's chest to the target; Sora's screen point 100 above his feet; the look stays
+    /// at the chest when Sora's point is over 300 from it and the look is steeply above (> 0.5 of
+    /// the unit vector); the distance to 380 at 1 a frame, − 2 a frame for each of the two at the
+    /// bottom edge; ±20° (`0.34906584`) when one leaves the screen sideways. Checked (decomp + exe).
+    /// × 0.89: 89 / 267 / 0.89 / 1.78.
+    pub const LOCK_FRACTION: f32 = 0.3;
+    pub const LOCK_SORA: f32 = 100.0;
+    pub const LOCK_FAR: f32 = 300.0;
+    pub const LOCK_STEEP: f32 = 0.5;
+    pub const LOCK_DRIFT: f32 = 1.0;
+    pub const LOCK_SHRINK: f32 = 2.0;
+    pub const OVERSHOOT: f32 = 0.349_065_84;
+    /// The screen test `0x140176710` on KH2's 512 × 416 frame (`0x140166A20`: GS offsets 1792 /
+    /// 1840) with the margins `0x14071A478` = (32, 480, 8, 408) (ints). Checked (exe + decomp).
+    pub const SCREEN: [f32; 4] = [32.0, 480.0, 8.0, 408.0];
+    pub const FRAME: [f32; 2] = [512.0, 416.0];
     /// KH2's sticks (`0x14039C180`): each axis's byte − 127.5 less a dead zone of 60
     /// (`0x140BF3338` = 60.0, set by `0x14039B8B0`), over 127.5 − 60; a direction bit while past
     /// it; the tilt the length of the two, at most 1. The mouse: a dead zone of 1. Checked (decomp).
@@ -1343,6 +1364,13 @@ pub mod kh2 {
         wrap_angle(from + kh1_core::math::clamp_sym(wrap_angle(to - from), max))
     }
 
+    /// The lock target: Re:CoM's lock-on point (KH2's `0x1403BDBE0`, the target's camera shape),
+    /// in KH1 units.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct Target {
+        pub point: Vec3,
+    }
+
     /// KH2's camera state (`cam+0x08` drawn look, `+0x18` drawn eye, `+0x58` distance, `+0x5C`
     /// yaw, `+0x60` goal yaw, `+0x64` eye goal, `+0x74` last eye goal, `+0x84` look goal, `+0x94`
     /// last look goal; `+0x42` auto), in KH2 units.
@@ -1499,9 +1527,68 @@ pub mod kh2 {
             self.eye_goal = eye;
         }
 
+        /// KH2's lock-on, mode 2 (`0x140176C70` with `0x140176EC0(cam, point, 0.3)`).
+        fn lock(&mut self, inp: &Input, t: &Target, w: &mut Scaled) {
+            let feet = inp.feet();
+            let chest = inp.look_goal();
+            let point = t.point * (1.0 / SCALE);
+            let mut look = chest + (point - chest) * LOCK_FRACTION;
+            let line_from = self.look_goal;
+            let sora = feet + Vec3::new(0.0, -LOCK_SORA, 0.0);
+            let u1 = screen(self.eye, self.look, point);
+            let u2 = screen(self.eye, self.look, sora);
+            let b1 = u1 & 3 == 2;
+            let b2 = u2 & 3 == 2;
+            if b1 {
+                self.dist -= inp.step * LOCK_SHRINK;
+            }
+            if b2 {
+                self.dist -= inp.step * LOCK_SHRINK;
+            }
+            self.dist = self.dist.max(DIST_MIN).min(DIST_MAX);
+            let v = sora - look;
+            let n = v.normalized();
+            if v.length() <= LOCK_FAR || n.y <= LOCK_STEEP {
+                if !b1 && !b2 {
+                    self.drift(DIST_LOCK, inp.step * LOCK_DRIFT);
+                }
+                for u in [u1, u2] {
+                    if u != 0 {
+                        let o = if u & 4 != 0 {
+                            OVERSHOOT
+                        } else if u & 8 != 0 {
+                            -OVERSHOOT
+                        } else {
+                            0.0
+                        };
+                        self.goal = wrap_angle(line_yaw(line_from, feet) + o);
+                        break;
+                    }
+                }
+            } else {
+                look = chest;
+            }
+            self.look_goal = look;
+            if inp.can_act {
+                self.stick_turn(inp, LOCK_TURN);
+                // The lock's zoom `0x140176BC0` (the follow's with no `cam+4`, 1 here), clamped.
+                self.zoom(inp);
+                if inp.reset {
+                    self.goal = line_yaw(line_from, feet);
+                    self.dist = DIST_LOCK;
+                }
+            }
+            // The eye from the chest (`0x140164520(cam, chest, 0)`), its wall test from the chest.
+            self.place(chest, false, inp.step);
+            let mut eye = self.eye_goal;
+            Self::wall(chest, &mut eye, w);
+            self.eye_goal = eye;
+        }
+
         /// The view step `0x140165700`: the springs, then mode 0's wall test on the drawn pair
-        /// (a hit also becomes the eye goal).
-        fn view(&mut self, inp: &Input, w: &mut Scaled) {
+        /// (a hit also becomes the eye goal) or mode 2's from Sora's chest (`0x140176E40`: the
+        /// drawn eye only).
+        fn view(&mut self, inp: &Input, lock: bool, w: &mut Scaled) {
             let (mut rate, k) = if inp.mouse { (RATE_MOUSE, RATE_RUN_MOUSE) } else { (RATE, RATE_RUN) };
             rate += (RUN_SPEED - 8.0) * k;
             if inp.step < 2.0 {
@@ -1510,23 +1597,71 @@ pub mod kh2 {
             self.look = spring(self.look, self.look_goal, self.last_look_goal, rate + RATE_LOOK, SPRING_REST);
             self.eye = spring(self.eye, self.eye_goal, self.last_eye_goal, rate, SPRING_REST);
             let mut eye = self.eye;
-            if Self::wall(self.look, &mut eye, w) {
+            if lock {
+                Self::wall(inp.look_goal(), &mut eye, w);
+                self.eye = eye;
+            } else if Self::wall(self.look, &mut eye, w) {
                 self.eye = eye;
                 self.eye_goal = eye;
             }
         }
 
-        /// One frame (`0x140166100`): the last goals, the follow, the view. Returns the drawn eye
-        /// and look in KH1 units.
-        pub fn step(&mut self, inp: &Input, w: &mut dyn World) -> (Vec3, Vec3) {
+        /// One frame (`0x140166100`): the last goals, the mode's step (mode 2, the lock, with a
+        /// target; mode 0 the follow), the view. Returns the drawn eye and look in KH1 units.
+        pub fn step(&mut self, inp: &Input, target: Option<&Target>, w: &mut dyn World) -> (Vec3, Vec3) {
             let mut w = Scaled(w);
             self.last_look_goal = self.look_goal;
             self.last_eye_goal = self.eye_goal;
-            self.follow(inp, &mut w);
-            self.view(inp, &mut w);
+            match target {
+                Some(t) => self.lock(inp, t, &mut w),
+                None => self.follow(inp, &mut w),
+            }
+            self.view(inp, target.is_some(), &mut w);
             self.prev = Some(inp.feet());
             (self.eye * SCALE, self.look * SCALE)
         }
+    }
+
+    /// `0x140176A70`: the yaw of the line from the last look goal through Sora's feet.
+    fn line_yaw(from: Vec3, feet: Vec3) -> f32 {
+        let v = feet - from;
+        v.x.atan2(v.z)
+    }
+
+    /// `0x140176710`: where `p` falls on KH2's 512 × 416 frame seen from `eye` toward `look`:
+    /// bit 4 left of 32, 8 right of 480, 1 above 8, 2 below 408, 0x10 at or behind the eye.
+    /// The axes are Re:CoM's look-at (`0x14024FA40`: x = up × forward, Checked (decomp)) on the
+    /// points turned into Re:CoM's frame (KH2's handedness is KH1's: Assumption); the depth bit
+    /// for a depth under 1 (KH2's near plane, Assumption: its projected z < 1).
+    pub fn screen(eye: Vec3, look: Vec3, p: Vec3) -> u32 {
+        let r = |v: Vec3| Vec3::new(v.x, -v.y, -v.z);
+        let f = r(look - eye).normalized();
+        let up = Vec3::new(0.0, 1.0, 0.0);
+        let x = Vec3::new(up.y * f.z - up.z * f.y, up.z * f.x - up.x * f.z, up.x * f.y - up.y * f.x).normalized();
+        let y = Vec3::new(f.y * x.z - f.z * x.y, f.z * x.x - f.x * x.z, f.x * x.y - f.y * x.x);
+        let d = r(p - eye);
+        let (xc, yc, zc) = (d.dot(x), d.dot(y), d.dot(f));
+        let (px, py) = if zc != 0.0 { (xc / zc, yc / zc) } else { (xc, yc) };
+        let t = (FOV * 0.5).tan();
+        let sx = FRAME[0] * 0.5 + FRAME[0] * 0.5 * px / t;
+        let sy = FRAME[1] * 0.5 - FRAME[1] * 0.5 * py / (t * 0.75);
+        let mut u = 0;
+        if sx < SCREEN[0] {
+            u |= 4;
+        }
+        if SCREEN[1] < sx {
+            u |= 8;
+        }
+        if sy < SCREEN[2] {
+            u |= 1;
+        }
+        if SCREEN[3] < sy {
+            u |= 2;
+        }
+        if zc < 1.0 {
+            u |= 0x10;
+        }
+        u
     }
 
     /// KH2's option swaps from Re:CoM's camera inversion fields (`+0x2F0` / `+0x2F4`): KH2's
@@ -2084,7 +2219,7 @@ mod tests {
         assert!(((l.y - e.y) - 72.268).abs() < 1e-2, "{} {}", l.y, e.y);
         assert!(wrap_angle(kh1::yaw_of(e, l) - (0.5 + PI)).abs() < 1e-5);
         // A step with no input keeps it (the springs at rest, no wall).
-        let (e1, l1) = c.step(&i, &mut Open);
+        let (e1, l1) = c.step(&i, None, &mut Open);
         assert!((e1 - e).length() < 1e-3 && (l1 - l).length() < 1e-3);
         assert_eq!((Family::of(8), Family::of(9), Family::Kh2.base(true)), (Family::Kh2, Family::Kh2, 8));
         assert_eq!(dispatch(1, Family::Kh2, false, false, false, Some(false)), Dispatch::Switch(8));
@@ -2123,33 +2258,33 @@ mod tests {
         c.behind(&i, true);
         let y0 = c.yaw;
         let right = Input { right: Stick::from_bytes(255, 128, DEAD_ZONE), ..i };
-        c.step(&right, &mut Open);
+        c.step(&right, None, &mut Open);
         assert!((wrap_angle(c.yaw - y0) - 3f32.to_radians()).abs() < 1e-5);
         assert_eq!(c.yaw, c.goal);
         // Half tilt past the dead zone: half the speed.
         let half = Input { right: Stick::from_bytes(128 + 60 + 33, 128, DEAD_ZONE), ..i };
         let y1 = c.yaw;
-        c.step(&half, &mut Open);
+        c.step(&half, None, &mut Open);
         assert!((wrap_angle(c.yaw - y1) - 3f32.to_radians() * 33.5 / 67.5).abs() < 1e-5);
         // Up: 8 a frame closer, to 250; there the eye is 150 below the look point (KH2 units).
         let up = Input { right: Stick::from_bytes(128, 0, DEAD_ZONE), ..i };
         let d0 = c.dist;
-        c.step(&up, &mut Open);
+        c.step(&up, None, &mut Open);
         assert!((c.dist - (d0 - 8.0)).abs() < 1e-4);
         for _ in 0..40 {
-            c.step(&up, &mut Open);
+            c.step(&up, None, &mut Open);
         }
         assert_eq!(c.dist, DIST_MIN);
         assert!((c.eye_goal.y - c.look_goal.y - 150.0).abs() < 1e-3);
         let down = Input { right: Stick::from_bytes(128, 255, DEAD_ZONE), ..i };
         for _ in 0..80 {
-            c.step(&down, &mut Open);
+            c.step(&down, None, &mut Open);
         }
         assert_eq!(c.dist, DIST_MAX);
         // Swapped up / down (Re:CoM's vertical row reversed): up zooms out.
         let mut d = Cam::default();
         d.behind(&i, true);
-        d.step(&Input { swap_v: true, ..up }, &mut Open);
+        d.step(&Input { swap_v: true, ..up }, None, &mut Open);
         assert!((d.dist - 428.0).abs() < 1e-4);
     }
 
@@ -2161,19 +2296,19 @@ mod tests {
         let i = Input { facing: PI / 2.0, ..k2() };
         let y0 = c.yaw;
         c.dist = 300.0;
-        c.step(&Input { reset: true, ..i }, &mut Open);
+        c.step(&Input { reset: true, ..i }, None, &mut Open);
         assert_eq!(c.dist, DIST_DEFAULT);
         assert!((wrap_angle(c.goal - (PI / 2.0 + PI))).abs() < 1e-5);
         assert!((wrap_angle(c.yaw - y0).abs() - 10f32.to_radians()).abs() < 1e-5);
         for _ in 0..8 {
-            c.step(&i, &mut Open);
+            c.step(&i, None, &mut Open);
         }
         assert!(wrap_angle(c.yaw - c.goal).abs() < 1e-5, "90° in 9 frames");
         // With the left stick held: a cut, the view snapped.
         let mut d = Cam::default();
         d.behind(&k2(), true);
         let held = Input { reset: true, left: Stick::from_bytes(128, 0, DEAD_ZONE), ..i };
-        d.step(&held, &mut Open);
+        d.step(&held, None, &mut Open);
         assert!(wrap_angle(d.yaw - d.goal).abs() < 1e-5);
     }
 
@@ -2188,7 +2323,7 @@ mod tests {
         let fwd = Stick::from_bytes(128, 0, DEAD_ZONE);
         let run = |k: usize| Input { pos: Vec3::new(8.0 * k as f32, 0.0, 0.0), facing: PI / 2.0, left: fwd, ..k2() };
         let y0 = c.yaw;
-        c.step(&run(1), &mut Open);
+        c.step(&run(1), None, &mut Open);
         let want = (2.0 * 1.0 * 2.0 * 1.0 * SWING_K0) * wrap_angle(PI / 2.0 + PI - y0).signum();
         assert!((wrap_angle(c.yaw - y0) - want).abs() < 1e-6, "{} {}", c.yaw, want);
         assert!((c.dist - 300.5).abs() < 1e-5);
@@ -2197,12 +2332,12 @@ mod tests {
             let mut d = c;
             d.prev = Some(Vec3::new(8.0, 0.0, 0.0) * (1.0 / SCALE));
             let y = d.yaw;
-            d.step(&i, &mut Open);
+            d.step(&i, None, &mut Open);
             assert_eq!(d.yaw, y, "{i:?}");
         }
         let mut d = c;
         let y = d.yaw;
-        d.step(&run(1), &mut Open);
+        d.step(&run(1), None, &mut Open);
         assert_eq!(d.yaw, y, "Sora didn't move");
     }
 
@@ -2229,7 +2364,7 @@ mod tests {
         c.behind(&k2(), true);
         let before = c.eye;
         let i = Input { pos: Vec3::new(89.0, 0.0, 0.0), ..k2() };
-        c.step(&i, &mut Open);
+        c.step(&i, None, &mut Open);
         let want = -((6.5 * 0.5 + (1.0 - 100.0) * 2.5) * 0.065);
         assert!((c.look.x - want).abs() < 1e-3, "{:?} {want}", c.look);
         assert!(c.eye.x - before.x > 0.0 && c.eye.x - before.x < 100.0 * 0.0875, "{:?}", c.eye);
@@ -2256,11 +2391,107 @@ mod tests {
         let i = k2();
         c.behind(&i, true);
         let mut w = WallN(-200.0);
-        let (e, _) = c.step(&i, &mut w);
+        let (e, _) = c.step(&i, None, &mut w);
         // The eye goal at the wall (+ the ray's radius) + 5 × 0.89 along the normal; the drawn eye
         // tested again on its way there.
         assert!((c.eye_goal.z * SCALE - (-200.0 + kh1::RAY + WALL_PUSH * SCALE)).abs() < 1e-2, "{:?}", c.eye_goal);
         assert!(e.z >= -200.0, "{e:?}");
+    }
+
+    #[test]
+    fn kh2_screen_test_on_its_512_by_416_frame() {
+        use kh2::*;
+        // The eye 420 behind and above a look point 170 up, looking +z (KH2 units).
+        let (eye, look) = (Vec3::new(0.0, -251.2, -420.0), Vec3::new(0.0, -170.0, 0.0));
+        assert_eq!(screen(eye, look, look), 0, "the look point is the frame's centre");
+        assert_eq!(screen(eye, look, Vec3::new(0.0, -170.0, -500.0)) & 0x10, 0x10, "behind the eye");
+        // Re:CoM's look-at (x = up × forward) puts KH2's +x on the left looking +z.
+        assert_eq!(screen(eye, look, Vec3::new(2000.0, -170.0, 0.0)), 4);
+        assert_eq!(screen(eye, look, Vec3::new(-2000.0, -170.0, 0.0)), 8);
+        assert_eq!(screen(eye, look, Vec3::new(0.0, 400.0, 0.0)) & 3, 2, "below the frame");
+        assert_eq!(screen(eye, look, Vec3::new(0.0, -1500.0, 0.0)) & 3, 1, "above it");
+        // The margins: 32 of 512 at the sides (the FOV edge is 256 from the centre).
+        let t = (FOV * 0.5).tan();
+        // A point on the look point's depth plane: x on screen = 256 + 256 · (x / z) / tan.
+        let z = (look - eye).length();
+        let px = |sx: f32| Vec3::new(-(sx - 256.0) / 256.0 * t * z, -170.0, 0.0);
+        assert_eq!(screen(eye, look, px(470.0)) & 0xC, 0);
+        assert_eq!(screen(eye, look, px(490.0)) & 0xC, 8);
+        assert_eq!(screen(eye, look, px(40.0)) & 0xC, 0);
+        assert_eq!(screen(eye, look, px(20.0)) & 0xC, 4);
+    }
+
+    #[test]
+    fn kh2_lock_camera_frames_sora_and_the_target() {
+        use kh2::*;
+        let i = k2();
+        let mut c = Cam::default();
+        c.behind(&i, true);
+        // A target 5 m ahead, 1 m up (KH1 units): the look goal 30 % of the way from Sora's chest
+        // (170 × 0.89 up) to it; the eye from the chest on the height curve; nothing turns while
+        // both are on screen; the distance to 380 at 1 a frame (× 0.89 out).
+        let t = Target { point: Vec3::new(0.0, -100.0, 500.0) };
+        let y0 = c.yaw;
+        c.step(&i, Some(&t), &mut Open);
+        let chest = Vec3::new(0.0, -LOOK_UP, 0.0);
+        let p = t.point * (1.0 / SCALE);
+        assert!((c.look_goal - (chest + (p - chest) * 0.3)).length() < 1e-3, "{:?}", c.look_goal);
+        assert_eq!((c.yaw, c.goal), (y0, y0), "both on screen: no turn");
+        assert!((c.dist - 419.0).abs() < 1e-4);
+        let cc = c.dist - DIST_MIN;
+        assert!((c.eye_goal.y - (chest.y + EYE_BASE - cc * cc * HEIGHT_K)).abs() < 1e-3);
+        assert!(((c.eye_goal - chest).horizontal_length() - c.dist).abs() < 1e-3);
+        for _ in 0..60 {
+            c.step(&i, Some(&t), &mut Open);
+        }
+        assert!((c.dist - DIST_LOCK).abs() < 1.0, "{}", c.dist);
+        // The target off the screen's left side: the goal yaw on the line from the last look goal
+        // through Sora + 20°; the yaw turns 10° a frame toward it.
+        let side = Target { point: Vec3::new(2500.0, -100.0, 100.0) };
+        let from = c.look_goal;
+        let y1 = c.yaw;
+        assert_eq!(screen(c.eye, c.look, side.point * (1.0 / SCALE)) & 4, 4);
+        c.step(&i, Some(&side), &mut Open);
+        let line = { let v = Vec3::ZERO - from; v.x.atan2(v.z) };
+        assert!(wrap_angle(c.goal - (line + OVERSHOOT)).abs() < 1e-4, "{} {}", c.goal, line);
+        assert!((wrap_angle(c.yaw - y1).abs() - 10f32.to_radians()).abs() < 1e-4 || wrap_angle(c.yaw - c.goal).abs() < 1e-4);
+        // The reset: the goal on the line, the lock distance.
+        let mut d = c;
+        d.dist = 300.0;
+        let from = d.look_goal;
+        d.step(&Input { reset: true, ..i }, Some(&t), &mut Open);
+        let line = { let v = Vec3::ZERO - from; v.x.atan2(v.z) };
+        assert!(wrap_angle(d.goal - line).abs() < 1e-4);
+        assert_eq!(d.dist, DIST_LOCK);
+        // A target high above and far: the look stays at the chest.
+        let mut e = Cam::default();
+        e.behind(&i, true);
+        let high = Target { point: Vec3::new(0.0, -3000.0, 300.0) };
+        e.step(&i, Some(&high), &mut Open);
+        assert!((e.look_goal - chest).length() < 1e-3, "{:?}", e.look_goal);
+        // Dispatch: 8 ↔ 9 on Re:CoM's lock, a subject object holds the mode.
+        assert_eq!(dispatch(8, Family::Kh2, false, false, false, Some(true)), Dispatch::Switch(9));
+        assert_eq!(dispatch(9, Family::Kh2, true, false, false, Some(false)), Dispatch::Switch(8));
+        assert_eq!(dispatch(9, Family::Kh2, true, false, false, Some(true)), Dispatch::Ours);
+        assert_eq!(dispatch(8, Family::Kh2, true, false, false, None), Dispatch::Ours);
+        assert_eq!(dispatch(9, Family::Kh1, true, false, false, Some(true)), Dispatch::Switch(6));
+    }
+
+    #[test]
+    fn kh2_lock_shrinks_the_distance_at_the_bottom_edge() {
+        use kh2::*;
+        let i = k2();
+        let mut c = Cam::default();
+        c.behind(&i, true);
+        // A target low under the frame's bottom (close below the eye's view): − 2 a frame, no drift.
+        let low = Target { point: Vec3::new(0.0, 300.0, 120.0) };
+        let u = screen(c.eye, c.look, low.point * (1.0 / SCALE));
+        assert_eq!(u & 3, 2, "{u:#x}");
+        let d0 = c.dist;
+        let sora = screen(c.eye, c.look, Vec3::new(0.0, -LOCK_SORA, 0.0)) & 3 == 2;
+        c.step(&i, Some(&low), &mut Open);
+        let want = d0 - 2.0 - if sora { 2.0 } else { 0.0 };
+        assert!((c.dist - want).abs() < 1e-3, "{} {want}", c.dist);
     }
 
     /// Stage 1's per-frame cost of the KH1 step's own arithmetic (Re:CoM's sweeps excluded: two a
@@ -2294,10 +2525,19 @@ mod tests {
         let t = std::time::Instant::now();
         for k in 0..n {
             let j = kh2::Input { pos: Vec3::new((k % 100) as f32, 0.0, 0.0), right: kh2::Stick::from_recom((((k / 50) % 3) as i32 - 1) * 4096, 0, false), left: kh2::Stick::from_recom(0, -4096, false), ..i };
-            c.step(&j, &mut Open);
+            c.step(&j, None, &mut Open);
         }
         let ns = t.elapsed().as_nanos() as f64 / n as f64;
         println!("KH2 follow step: {ns:.1} ns a frame (math only)");
+        // Stage 5: the lock step (two screen tests more).
+        let t2 = kh2::Target { point: Vec3::new(0.0, -100.0, 500.0) };
+        let t = std::time::Instant::now();
+        for k in 0..n {
+            let j = kh2::Input { pos: Vec3::new((k % 100) as f32, 0.0, 0.0), ..i };
+            c.step(&j, Some(&t2), &mut Open);
+        }
+        let ns = t.elapsed().as_nanos() as f64 / n as f64;
+        println!("KH2 lock step: {ns:.1} ns a frame (math only)");
         assert!(c.yaw.is_finite());
     }
 }

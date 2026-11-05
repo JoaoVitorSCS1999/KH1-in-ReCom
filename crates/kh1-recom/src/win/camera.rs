@@ -554,7 +554,11 @@ unsafe fn kh2_step(l: &mut Live, cam: usize, m: i32, count: u32, drawn: bool, ey
     l.seen = count;
     l.drawn = drawn;
     l.mode = m;
-    l.kh2.step(&inp, world)
+    // Mode 9: KH2's lock camera on Re:CoM's own lock-on point (`0x1401FC400`: `player+0x870`, the
+    // target's `CamTrgOfs` point) where KH2 takes its target's camera shape (`0x1403BDBE0`).
+    // A new target needs nothing more: KH2's springs carry the view (`0x140176910`).
+    let target = (m == mode::KH2_LOCK).then(|| kh2::Target { point: crate::units::to_kh1(rd_vec(func::<PointFn>(LOCK_POINT)(cam))) });
+    l.kh2.step(&inp, target.as_ref(), world)
 }
 
 /// The step's eye and look (KH1 units) into Re:CoM's camera, then Re:CoM's tail.
