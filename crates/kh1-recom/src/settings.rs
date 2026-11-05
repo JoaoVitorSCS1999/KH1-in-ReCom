@@ -324,12 +324,14 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
     }
 }
 
 pub const DEFAULT_FILE: &str = "\
 ; KH1 combat in Re:Chain of Memories -- settings
+; ini_version: the file's layout (the mod updates older files once; leave it as it is).
+ini_version = 2
 ; The camp menu's KH1 entry changes these and rewrites this file: its Combat page (combat,
 ; guard_reactions, enemy_pace, enemy_ai, boss_revenge) and its Movement page (run_speed,
 ; jump_height, air_speed, dodge_roll). The rest are set here only.
@@ -471,8 +473,9 @@ menu_language = us
 ;
 ; hud = recom | kh1 (needs the asset step's kh1-hud.json)
 ;   recom: Re:CoM's HUD.
-;   kh1:   KH1's HUD elements, drawn by Re:CoM (stage by stage; the rest stays Re:CoM's).
-hud = recom
+;   kh1:   KH1's HUD elements, drawn by Re:CoM (stage by stage; the rest stays Re:CoM's), only at
+;          combat = kh1 (combat = recom always shows Re:CoM's HUD).
+hud = kh1
 ;
 ; At hud = kh1, each piece on or off:
 ;   hud_kh1_gauge: KH1's own HP / MP rings and face (off: Re:CoM's HP gauge, see the next two)
@@ -557,6 +560,7 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(m) => s.sounds = m,
                 None => warnings.push(bad("sounds must be kh1 or recom")),
             },
+            "ini_version" => {}
             "asset_build" => match v.trim().to_ascii_lowercase().as_str() {
                 "auto" => s.asset_build = true,
                 x => match parse_switch(x) {
@@ -649,6 +653,34 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
         }
     }
     (s, warnings)
+}
+
+/// The ini layout this DLL writes (`ini_version`).
+pub const INI_VERSION: u32 = 2;
+
+/// Brings an older settings file up to [`INI_VERSION`], once: the new text and what changed, or
+/// `None` when it is current. Version 2 (0.143.1, owner 2026-11-05: testers saw Re:CoM's HUD at
+/// combat = kh1): `hud` defaulted to `recom` before and no menu shows it, so an older file's
+/// `hud = recom` (or a missing `hud`) becomes `kh1`, the HUD the mod is meant to show.
+pub fn migrate(text: &str) -> Option<(String, Vec<String>)> {
+    let version = text
+        .lines()
+        .filter_map(|l| l.split(';').next()?.split_once('='))
+        .find(|(k, _)| k.trim().eq_ignore_ascii_case("ini_version"))
+        .and_then(|(_, v)| v.trim().parse::<u32>().ok())
+        .unwrap_or(1);
+    if version >= INI_VERSION {
+        return None;
+    }
+    let mut notes = Vec::new();
+    let mut t = text.to_string();
+    if parse(text).0.hud != Mode::Kh1 {
+        t = set_key(&t, "hud", "kh1");
+        notes.push("hud = recom -> kh1 (the KH1 HUD at combat = kh1)".to_string());
+    }
+    t = set_key(&t, "ini_version", &INI_VERSION.to_string());
+    notes.push(format!("ini_version {version} -> {INI_VERSION}"));
+    Some((t, notes))
 }
 
 /// Sets `key = value` in the file text, keeping every other line (and the comment after the
@@ -823,6 +855,21 @@ mod tests {
     }
 
     #[test]
+    fn an_old_file_gets_the_kh1_hud_once() {
+        let old = "combat = kh1\nhud = recom\n";
+        let (t, notes) = migrate(old).expect("an old file is updated");
+        assert_eq!(parse(&t).0.hud, Mode::Kh1);
+        assert!(notes.iter().any(|n| n.contains("hud")));
+        assert!(migrate(&t).is_none(), "only once");
+        // A current file that chose recom keeps it.
+        assert!(migrate("ini_version = 2\nhud = recom\n").is_none());
+        // The default file is current and shows the KH1 HUD.
+        assert!(migrate(DEFAULT_FILE).is_none());
+        assert_eq!(parse(DEFAULT_FILE).0.hud, Mode::Kh1);
+        assert!(parse(DEFAULT_FILE).1.is_empty());
+    }
+
+    #[test]
     fn set_key_keeps_the_rest() {
         let t = set_key("; head\ncombat = kh1 ; why\nother = 1\n", "combat", "recom");
         assert_eq!(t, "; head\ncombat = recom ; why\nother = 1\n");
@@ -977,12 +1024,13 @@ mod combo_tests {
     }
 
     #[test]
-    fn hud_default_recom_and_round_trip() {
-        assert_eq!(parse(DEFAULT_FILE).0.hud, Mode::Recom);
-        let (s, w) = parse("hud = kh1\n");
+    fn hud_default_kh1_and_round_trip() {
+        // 0.143.1: the KH1 HUD is the default (owner, 2026-11-05).
+        assert_eq!(parse(DEFAULT_FILE).0.hud, Mode::Kh1);
+        let (s, w) = parse("hud = recom\n");
         assert!(w.is_empty());
-        assert_eq!(s.hud, Mode::Kh1);
-        assert_eq!(parse(&store(DEFAULT_FILE, &s)).0.hud, Mode::Kh1);
+        assert_eq!(s.hud, Mode::Recom);
+        assert_eq!(parse(&store(DEFAULT_FILE, &s)).0.hud, Mode::Recom);
         assert_eq!(parse("hud = maybe\n").1.len(), 1);
     }
 

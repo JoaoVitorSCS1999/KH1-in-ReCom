@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 262: the KH1 HUD is the default, and older settings files switch to it once (2026-11-05, version 0.143.1)
+
+Owner, 2026-11-05 (a tester's screenshot: Re:CoM's HP gauge and FRIENDS row top left, the room plate bottom right, the command menu in its Re:CoM look, at combat = kh1), verbatim: "people that are trying the mod are seeing this. Lets fix that to be how the hud is supposed to look"
+
+- **Cause** (Checked: code, the owner's own ini): `hud` defaulted to `recom` (`Settings::default`, `DEFAULT_FILE`), and no menu shows it, so a new install wrote `hud = recom` on first launch and showed Re:CoM's HUD; the owner's ini says `hud = kh1`.
+- **Fix:** the default is `hud = kh1` (the KH1 HUD pieces at combat = kh1 only, as 0.102.3 made it follow Combat). The file gets `ini_version = 2`; `settings::migrate` updates an older file once at start (`hud = recom` or missing becomes `kh1`, then `ini_version = 2`), logged as `settings: … updated: …`. A version-2 file that says `hud = recom` keeps it.
+- The HUD parts' defaults are unchanged (they match the owner's ini, but for `hud_kh1_party`, which only shows with `hud_kh1_gauge`, off by default).
+- Checked: workspace tests (new `an_old_file_gets_the_kh1_hud_once`); Windows build. Not checked: in game.
+
+---
+
 ## Stage 261: Sora's damage cap: each hit of Sora's side capped at the enemy's KH1 per-hit cap, at Re:CoM's damage join, version 0.143.0 (2026-11-05)
 
 Owner, 2026-11-05, verbatim: "lets add a damage cap to sora". Answers (`design-philosophy-instructions.md`, "Damage cap answers"): KH1's per-hit cap (`+0xC2`) after power and the table, before resistance; (b) at Damage = Re:CoM the same share of HP; % of HP hits never capped; covers swings, specials, spells, Sleights-list sleights, LV3 summons and Party sleights; Re:CoM's extras stay under the cap; Combat = KH1 only.

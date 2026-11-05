@@ -937,8 +937,16 @@ fn run(mod_dir: Option<PathBuf>) {
     // The DLL sits in mod_path\Recom\dll: its parent's parent is the mod folder.
     let mod_dir = mod_dir.or_else(|| dll.parent().and_then(Path::parent).map(Path::to_path_buf)).unwrap_or_else(|| game_dir.clone());
     let ini_path = game_dir.join("kh1-recom.ini");
+    let mut migrated: Vec<String> = Vec::new();
     let ini = match std::fs::read_to_string(&ini_path) {
-        Ok(t) => Ok(t),
+        Ok(t) => match settings::migrate(&t) {
+            Some((n, notes)) => {
+                let _ = std::fs::write(&ini_path, &n);
+                migrated = notes;
+                Ok(n)
+            }
+            None => Ok(t),
+        },
         Err(_) => {
             let _ = std::fs::write(&ini_path, settings::DEFAULT_FILE);
             Err(format!("{} was missing and has been written with the defaults", ini_path.display()))
@@ -959,6 +967,9 @@ fn run(mod_dir: Option<PathBuf>) {
     }
     if let Ok(mut g) = SETTINGS.lock() {
         *g = Some(s.clone());
+    }
+    if !migrated.is_empty() {
+        log(&format!("settings: {} updated: {}", ini_path.display(), migrated.join("; ")));
     }
     log(&format!("dll: {}", dll.display()));
     log(&format!("mod folder: {}", mod_dir.display()));
