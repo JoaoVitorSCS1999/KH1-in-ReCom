@@ -631,3 +631,8 @@ At KH1 setting:
   - **KH1's own hit flatten at Damage = KH1**: build it (a Gravity-hit enemy flattens as in KH1).
   - **Gravity's sphere is drawn at Re:CoM's Gravity size** (owner's choice over KH1's; the hit radius stays KH1's unless the owner says otherwise).
 - **Process** (owner, 2026-11-04, verbatim: "Don't stop anything unless I explicitly say so"): never stop running work (agents, builds) unless the owner explicitly says so. "Re start the shop and enemy skills": restarted from testing at 0.122.0.
+- **Shop sell screen and Enemy Skills answers** (owner, 2026-11-04):
+  - **Selling quantity: (c) our own Up/Down count step** on Re:CoM's yes / no (1..owned; the points box shows the total). Re:CoM's card trade has no count window (its 0–9 box is the card's ten values: Checked, decomp).
+  - **The sell screen's Items tab**: the same green bottle icon as the buy screen's, placed first; help line "Sell items".
+  - **Ansem (Sleightblind)**: keep Re:CoM's half damage from Fire, Blizzard and Thunder (an exception to "boss skills give no affinities").
+  - **Black Fungus**: picks from every built skill, learned or not (Re:CoM's way).
