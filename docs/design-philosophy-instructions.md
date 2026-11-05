@@ -646,3 +646,7 @@ At KH1 setting:
   - **An "Auto camera: On / Off" row** for KH1 and KH2 (Q6 (b)).
   - **KH2's numbers scaled ×0.89** for KH1's Sora (Q9 (b)).
   - Taken as recommended or 1:1 without asking (owner may change): after an event the KH1 / KH2 camera re-places behind Sora as those games do (Q4 (b)); Re:CoM's inversion rows drive KH1 / KH2 with each game's own "Normal" (Q5 (a)); KH1's / KH2's own speeds, no sensitivity row (Q7 (a)); KH1's built-in default numbers everywhere (Q8 (a)); Riku's story keeps Re:CoM's camera (Q11 (a)); KH1 / KH2 lock camera in field rooms too (Q12 (a)); KH1's mouse rule on keyboard and mouse (Q13 (a)).
+- **Lock-on rules and camera walls** (owner, 2026-11-04, verbatim: "1. B 2. dont worry about iit"):
+  - **KH1's lock rules on R1** at Combat = KH1 (controller): R1 again unlocks at once; L2 steps through targets (KH1's). No hold-style Config row.
+  - Button prompts: leave as they are.
+  - KH1 Auto camera's near-wall ramp: **(a) 8 + 8 flat 2.5 m rays** with Re:CoM's sweep, only while the swing runs.
