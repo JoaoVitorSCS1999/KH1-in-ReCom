@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 258: the turned HP ring's start closes on its black line (no gap at partial HP), version 0.141.1 (2026-11-05)
+
+Owner, 2026-11-05 (screenshot, KH1 HUD bottom right), verbatim: "there's a little gap in the green hp bar where the bar starts, lets fix that".
+
+- **Cause** (Checked (files + decomp + screenshots)): Re:CoM's HP gauge (`gauge:01` groups 7 / 8 / 9, turned as 47..49 at KH1's place) draws 0..270° of the ring (frames 0..270) under quadrant scissors whose start edge is one unit off the start line ((0, 1)..: turned ..(0, −1)); a scissor's rows are its corners + 0.25 floored, inclusive (`0x14024A3F0`, `0x1402643D0`; the PC rect `0x1402EC4E0` → `0x1402EAC30`). The start line (the art's centre) is 0.25 off whole units, so Re:CoM's way round the ring starts 0.75 below its black line, and turned it stops 0.25 above it. On the owner's 720p screenshot that is 2 pixel rows (about 1 unit) of background across the band, track included; the PC's sprite / scissor rounding adds to it (Assumption, measured). At full HP (frames 271.., the ring unclipped) no gap (the owner's 1440p recording).
+- **Not the cause**: the MP ring and its outline (they reach the line), the 0.102.4 dividers / lifted straights, a UV seam, the ring's start angle.
+- **Fix** (asset step `recom_hp::start_filler`): each turned group gets one animation first (before any scissor): the ring's own start-quadrant picture from its unrotated full-ring animation, cut to its first 2 units (a new sprite, same texels and colours), turned with the group, frames 4..=270. Its edge is the picture's straight edge on the start line, as the full ring draws it. From frame 4 (29 · sin 4° ≥ 2: never past the ring's moving end). Re:CoM's groups 7..9 untouched (Combat = Re:CoM); DLL unchanged.
+- No hook, patch, site or address; nothing per frame (one more sprite a layer while the ring is partial).
+- Checked: tests (`recom_hp::tests::the_start_filler_closes_the_gap`, `the_start_scissor_misses_the_start_line_either_way`, `owner_gauge_files` on the owner's `FO0002.SPR` and five `<LANG>_gauge.lad`), offline render with Re:CoM's rules and placeholder art (before: the gap at frames ≤ 270 with sprite / scissor offsets 0..1 unit; after: none at frames 4..470), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings), the Linux `kh1-recom-build` (built; not run: no Re:CoM PKG in the session).
+- Not checked: in game; Re:CoM's real ring art over the 2 filler units (`gauge.imz` not in the session).
+- Asset step: **re-run** (the DLL does it at first launch: the step's hash changed). Output `raw/FORM/0002/FO0002.SPR` changes; no `mod.yml` change. Docs: `recom-kh1-hud.md` § The turned HP ring's start.
+
+---
+
 ## Stage 257: install from GitHub through OpenKH; the DLL builds the game-made files on first launch, version 0.141.0 (2026-11-05)
 
 Owner, 2026-11-05, verbatim: "I also want people to be able to install the mod from openKH by using the GitHub". Answers (`design-philosophy-instructions.md`, last entry): OpenKH's GitHub install of `PM2CRAZY/KH1-in-ReCom` from the default branch `testing`; "DLL builds on first launch", and again after an update changes the asset step.

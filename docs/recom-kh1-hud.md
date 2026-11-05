@@ -1041,3 +1041,53 @@ versa" (screenshot: Combat = KH1, KH1's MP ring bottom right, Re:CoM's HP gauge 
   - Nothing per frame.
 - The room plate still moves at its next set-up (it isn't re-placed live).
 - Not checked: in game.
+
+## The turned HP ring's start: no gap above the black line (0.141.1)
+
+Owner, 2026-11-05 (screenshot, 720p, `hud = kh1`, Re:CoM's HP gauge at KH1's place, HP in the first
+quarter of the ring): "there's a little gap in the green hp bar where the bar starts, lets fix that".
+On the screenshot the green stops two pixels (about one unit) above the black start line at 9 o'clock,
+and the background shows through across the whole band (r 29..43), dark track included. At full HP (the
+owner's 1440p camera recording, the ring and the bar) there is no gap.
+
+### Cause (Checked (files + decomp + screenshots); the PC rounding: Assumption)
+
+| what | where | tag |
+|---|---|---|
+| `gauge:01` groups 7 / 8 / 9 (track, drain, HP): frames 0..270 draw 0..270° of the ring (one degree a frame) as rotating pictures under quadrant scissors; 271..470 the whole ring unclipped and the bar. The start's black line is group 7's first animation, part (0, −2, 43, 0) of sprite 16, drawn before any scissor: on Re:CoM's way round above the 3 o'clock line, turned (−43, 0)..(0, 2) under the 9 o'clock line | `UK_gauge.lad` (all five copies the same), `gauge.lad` | Checked (files) |
+| The scissors' edge at the start is one unit off the line: (0, 1)..(43, 44) and (−43, 1)..(43, 44) in Re:CoM's groups; turned (−43, −44)..(0, −1) and (−43, −44)..(43, −1) | same | Checked (files) |
+| A scissor's rows are its corners plus the translation (+ 0.25) floored, inclusive (`0x14024A3F0` `>> 4`; SCISSOR_2 by `0x1402643D0`); the PC port makes the rect (x0, y0, x1 − x0 + 1, y1 − y0 + 1) (`0x1402EC4E0`) and scales it to pixels with `ceil(v · s + o − 0.5)` (`0x1402EAC30`) | as listed | Checked (decomp) |
+| So the art's centre (the start line) is 0.25 off whole units: on Re:CoM's way round the ring starts 0.75 unit below its line (seamless on the PS2's integer sampling), turned it stops 0.25 unit above it | `recom_hp::tests::the_start_scissor_misses_the_start_line_either_way` | Checked (arithmetic on the files' numbers) |
+| On the owner's 720p screenshot the gap is 2 pixel rows (≈ 1.07 units), and on the 1440p recording the sprites sit about 0.6 unit lower than `c · 3.75` would put them: the PC port's sprite and scissor rounding adds to the 0.25 | the screenshot; `kh1-camera.mp4` frame 30 | Assumption (measured, the code path not traced) |
+
+Not the cause: the MP ring (its art and closing outline reach the line; Checked (screenshot)); the
+0.102.4 dividers / lifted straights (elsewhere on the ring); a UV seam (the full ring has none); the
+ring's start angle (the picture covers the start at every frame ≥ 1; Checked (files)).
+
+### Built (asset step only, `recom_hp::start_filler`)
+
+- Each turned group (47, 48, 49) gets one more animation, **first in the group** (before any scissor, so
+  unclipped): the ring's own start-quadrant picture from the group's unrotated full-ring animation (part
+  (0, 0, q, q), q = 43 on PC, 41 / 43 in the PS2 copy), cut to its first 2 units (a new sprite: the same
+  texels and colours, the UV rows of those units: PC v 10..14 of 10..96) and turned with the group:
+  part (0, 0, −q, −2), frames 4..=270, the full ring's record (flags 0x77FF1, no rotation).
+- Its bottom edge is the picture's own straight edge at the start line, where the black line and KH1's
+  MP ring outline start: what the full ring (frames 271..) draws there. Above, it lies under the
+  scissored ring (the same art).
+- From frame 4: the first degree whose arc covers 2 units at the inner edge (29 · sin 4° = 2.02), so it
+  never shows past the ring's moving end. Frames 1..3 (under 0.7 % of 560 HP) keep the old start.
+- 2 units, not 1: covers the measured ≈ 1.07-unit gap with room for the PC rounding.
+- Re:CoM's own groups 7..9 are unchanged (Combat = Re:CoM draws them); the DLL is unchanged (same
+  groups 47..49, same frames).
+
+### Checked / not checked
+
+- Checked: tests (`recom_hp::tests::the_start_filler_closes_the_gap`,
+  `the_start_scissor_misses_the_start_line_either_way`, `owner_gauge_files` on the owner's
+  `FO0002.SPR` and its five `<LANG>_gauge.lad`); offline render of the turned groups with Re:CoM's
+  rules (whole-unit inclusive scissors, + 0.25, z angles negated) and placeholder art (no `gauge.imz` in
+  the session), with the sprites shifted 0 / 0.5 / 1.0 unit against the scissors: before, a gap of 0.25
+  / 0.75 / 1.25 unit at frames ≤ 270, none at 271+ (as the screenshot and the recording); after, none at
+  frames 4..470, with every offset.
+- Not checked: in game; Re:CoM's real ring art over the 2 filler units (assumed radially uniform, as the
+  screenshots show it).
