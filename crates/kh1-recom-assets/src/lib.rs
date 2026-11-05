@@ -26,6 +26,8 @@
 //! - [`recom_hp`]: Re:CoM's HP ring and bar turned 180° (`gauge:01`) for KH1's place;
 //! - [`camp_rows`]: the camp list's green row with Re:CoM's item symbol (`camp:00` in
 //!   `FORM/0100/FO0100.SPR`) and `kh1-camp-rows.json`;
+//! - [`shop_tabs`]: the Moogle shop's pack screen with a fifth tab (`m_shop:01` in
+//!   `FORM/0109/FO0109.SPR`; M8d).
 //! - [`flip`]: the "Re:CoM's content in KH1" model-writer test (`kh1-flip-test`);
 //! - [`shadow`]: M10, KH1's Shadow: its motions, attack records and sounds in Re:CoM's
 //!   `ENEMY/0001` files and the behaviour's numbers (`kh1-shadow.json`).
@@ -40,6 +42,7 @@
 pub mod ann;
 pub mod build;
 pub mod camp_rows;
+pub mod shop_tabs;
 pub mod command_menu;
 pub mod convert;
 pub mod eet;

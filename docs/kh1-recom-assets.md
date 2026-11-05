@@ -796,3 +796,30 @@ Icon.tm2`, or a `note:` when the layout is missing. No new file: `FO0002.SPR` / 
 `kh1-hud.json` carry it. Checked: the owner's dump (`builds_from_a_dump`, panel at group 5774 of
 6352; picture 0's PC art used as it is, no rect redrawn from the PS2 picture) and an offline
 render of the groups. Not run on the owner's PC yet.
+
+## The Moogle shop's fifth tab (`FORM/0109/FO0109.SPR`, M8d, 0.128.0)
+
+Owner: "Items tab, then packs". Module `shop_tabs`; design, addresses and checks:
+`docs/recom-m8-items.md` § M8d step 2.
+
+- **Reads:** Re:CoM `FORM/0109/FO0109.SPR`: the whole PKG entry with its PC assets.
+- **Adds:** to `m_shop:01` (SEQD 1 of `m_shop.lad`), after Re:CoM's 241 groups: 13 groups (5 tab
+  windows and their closes, 52 apart, from tab 0's window with the notch moved; the icons' appear /
+  loop / close with Re:CoM's item icon first). Sprites already in the atlas only (`FO0109.RTM` is
+  not touched). In the file itself and in every PC asset that is an `m_shop.lad` (any language
+  prefix) or a whole container with one; each copy must have Re:CoM's 241 groups.
+- **Writes**, under the manifest's root: `raw/FORM/0109/FO0109.SPR` (plain PKG entry, same asset
+  names, tags, date) and `kh1-shop-tabs.json` (format `kh1-recom-assets shop-tabs 1`). When it
+  can't be built, an older `kh1-shop-tabs.json` there is removed (the DLL keeps Re:CoM's art).
+- **Prints** `shop tabs: m_shop:01 groups 241..253 (5-tab windows, closes, icons) added to [...]`.
+- Checked (files): the owner's `FO0109.SPR` reads back byte for byte and patches; its HD
+  `UK_m_shop.lad` patches with the same first group (`shop_tabs::tests::owner_shop_files`,
+  `KH1_FO0109` = the dump folder); both rendered offline (not in the repo).
+
+`mod.yml` entries:
+
+```yaml
+- {name: raw/FORM/0109/FO0109.SPR, method: copy, source: [{name: raw/FORM/0109/FO0109.SPR}]}
+- {name: kh1-shop-tabs.json, method: copy, source: [{name: kh1-shop-tabs.json}]}
+```
+

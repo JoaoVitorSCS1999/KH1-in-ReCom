@@ -258,6 +258,14 @@ fn run() -> Result<(), String> {
             None
         }
     };
+    // M8d: the Moogle shop's pack screen with a fifth tab (the Items tab): 13 groups of m_shop:01.
+    let shop_tabs = match shop_tabs_build(keys.clone(), &arc) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            println!("note: shop tabs not built: {e} (the shop keeps Re:CoM's four-tab window; the Items tab's cursor sits right of them)");
+            None
+        }
+    };
     // M13 stage 2: KH1's own sound banks (Sora's SCDs, the Kingdom Key's from the world packs).
     let sounds = match sounds_build(&game, keys.clone()) {
         Ok(s) => Some(s),
@@ -510,6 +518,22 @@ fn run() -> Result<(), String> {
             if camp_manifest.is_file() {
                 std::fs::remove_file(&camp_manifest).map_err(|e| format!("{}: {e}", camp_manifest.display()))?;
                 println!("removed {} (no camp item row this run)", camp_manifest.display());
+            }
+        }
+    }
+    // M8d: Re:CoM's FO0109.SPR with the five-tab groups (a raw PKG entry, every language's copy
+    // inside) and its manifest; without them an older manifest is removed (the DLL then keeps
+    // Re:CoM's four-tab window).
+    let shop_manifest = root.join(kh1_recom_assets::shop_tabs::MANIFEST);
+    match &shop_tabs {
+        Some(c) => {
+            write(&root.join("raw").join(kh1_recom_assets::shop_tabs::SPR_PATH.replace('/', std::path::MAIN_SEPARATOR_STR)), &c.entry)?;
+            write(&shop_manifest, c.manifest.as_bytes())?;
+        }
+        None => {
+            if shop_manifest.is_file() {
+                std::fs::remove_file(&shop_manifest).map_err(|e| format!("{}: {e}", shop_manifest.display()))?;
+                println!("removed {} (no shop tabs this run)", shop_manifest.display());
             }
         }
     }
@@ -1162,6 +1186,31 @@ fn camp_rows_build(keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Arc
     let entry = kh1_formats::egs::build_plain_entry(&out, &assets, date).map_err(|e| e.to_string())?;
     let manifest = cr::manifest_json(group, &files, &[("FO0100.SPR sha256", sha)]);
     Ok(CampRows { entry, manifest })
+}
+
+/// The shop tabs' files (M8d): the raw `FO0109.SPR` entry and `kh1-shop-tabs.json`.
+struct ShopTabs {
+    entry: Vec<u8>,
+    manifest: String,
+}
+
+/// Adds the five-tab window and icon groups to `m_shop:01` in Re:CoM's `FO0109.SPR` and in each of
+/// its PC assets that is an `m_shop.lad` (any language prefix) or a whole container with one, as a
+/// plain PKG entry with the same asset names, tags and date (`kh1_recom_assets::shop_tabs`).
+fn shop_tabs_build(keys: kh1_formats::egs::KeyTable, arc: &kh1_formats::egs::Archive) -> Result<ShopTabs, String> {
+    use kh1_recom_assets::shop_tabs as st;
+    let e = arc.find(st::SPR_PATH).ok_or_else(|| format!("{} not in Recom.hed", st::SPR_PATH))?;
+    let raw = arc.read_raw_entry(e).map_err(|e| format!("{}: {e}", st::SPR_PATH))?;
+    let date = i32::from_le_bytes(raw.get(12..16).ok_or("short entry")?.try_into().unwrap());
+    let (spr, mut assets) = kh1_formats::egs::decode_entry_full(&keys, &raw).map_err(|e| format!("{}: {e}", st::SPR_PATH))?;
+    let sha = kh1_formats::egs::sha256_hex(&spr);
+    let mut out = spr;
+    let (first, files) = st::patch_spr(&mut out, &mut assets).map_err(|e| e.to_string())?;
+    let all: Vec<&str> = assets.iter().map(|a| a.name.as_str()).collect();
+    println!("shop tabs: {} groups {first}..{} (5-tab windows, closes, icons) added to {files:?} (PC assets of the entry: {all:?})", st::SET, first + st::group::COUNT - 1);
+    let entry = kh1_formats::egs::build_plain_entry(&out, &assets, date).map_err(|e| e.to_string())?;
+    let manifest = st::manifest_json(first, &files, &[("FO0109.SPR sha256", sha)]);
+    Ok(ShopTabs { entry, manifest })
 }
 
 /// The KH1 HUD's files (stage H1): the raw `FO0002.RTM` entry and `kh1-hud.json`.

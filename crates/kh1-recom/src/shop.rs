@@ -1,16 +1,16 @@
-//! M8c: KH1's Moogle shop as a list (`docs/recom-m8-items.md` § "M8c: KH1 Moogle shop list").
-//! The pure rules; Re:CoM's side is `win::shop`.
+//! M8d: KH1's items in Re:CoM's own Moogle shop screens (`docs/recom-m8-items.md` § M8d). The
+//! pure rules; Re:CoM's side is `win::shop`.
 //!
-//! At Combat = KH1 in Sora's story, Re:CoM's `CMoogleShopCore` mode 3 (its two-choice menu, card
-//! packs or the card trade) runs our list instead: rows **Buy**, **Sell** and **Card Packs**,
-//! drawn by Re:CoM's own shop pieces (a `CTextWnd` for the rows, the shop's finger cursor, its
-//! text window, Moogle Point window and sounds). Card Packs goes on to Re:CoM's own mode 4 (the
-//! pack screen) exactly as Re:CoM's mode 3 does, or to its mode 2 when Sora has no room for 5
-//! more cards (Re:CoM's own rule, `0x1403A53F0`).
+//! At Combat = KH1 in Sora's story Re:CoM's shop runs as Re:CoM's: its two-Moogle menu (mode 3)
+//! unpatched, the left Moogle its pack screen (mode 4), the right one its card trade (mode 5). The
+//! pack screen gets an **Items tab first**, then Re:CoM's four pack tabs (owner, 2026-11-04: "Items
+//! tab, then packs"), and opens on it: its cells are Re:CoM's own packs (Re:CoM's constructor,
+//! price plates) with the pack art hidden and Re:CoM's own item card picture (`C2DCard`) on them;
+//! one item per confirm by KH1's pickup rule, paid through Re:CoM's payment. Stock by Re:CoM's floor
+//! tiers, prices in Moogle Points (owner).
 //!
-//! The owner's shop (2026-11-04, `docs/design-philosophy-instructions.md` § KH1 Moogle shop):
-//! stock by Re:CoM's floor tiers, prices in Moogle Points, one item per confirm with KH1's pickup
-//! rule, sell price = buy ÷ 5.
+//! Re:CoM's input order, sounds, moves and places are Re:CoM's (`0x1403A6930`, Checked (decomp +
+//! disasm + exe)); the Items tab replays them for its cells (8a.3's design, M8d's tab place).
 
 use crate::items::{self as it, id};
 
@@ -208,8 +208,8 @@ pub enum Sell {
     None,
 }
 
-/// One item: from the stock first, else from the last slot holding it (so the battle slots stay
-/// filled longest; **our rule**: KH1's sell source not read). The points go up by the sell price.
+/// One item: from the stock first, else from the last slot holding it (owner, 2026-11-04: "stock
+/// then slots"; KH1's sell source not read). The points go up by the sell price.
 pub fn sell(item: u8, points: i32, inv: &mut it::Inventory) -> Sell {
     let Some(price) = sell_price(item) else { return Sell::None };
     let from = if inv.stock_of(item) > 0 {
@@ -225,172 +225,185 @@ pub fn sell(item: u8, points: i32, inv: &mut it::Inventory) -> Sell {
     Sell::Sold { item, price, points: earn(points, price), from, left: owned(inv, item) }
 }
 
-// ---- The list ----
+// ---- The pack screen's Items tab ----
 
-/// The list's pages.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Page {
-    Root,
-    Buy,
-    Sell,
+/// The Items tab's index in the pack screen's tab field `+0x280` (Re:CoM's are 0..3; drawn first).
+pub const ITEMS_TAB: i32 = 4;
+/// Re:CoM's tab count (`0x1403A6930`: wrap at > 3 and < 0). Checked (disasm `0x1403A6D3A`).
+pub const RECOM_TABS: i32 = 4;
+/// Cells in the grid (2 × 2).
+pub const CELLS: usize = 4;
+
+/// Re:CoM's item card of an item, drawn as its picture (`BattleCardList`: 0x2A Potion, 0x2B
+/// Hi-Potion, 0x2D Ether, 0x2F Elixir; the card-info table `0x1405256D0` names them). Checked
+/// (exe + files).
+pub fn card_kind(item: u8) -> Option<u8> {
+    Some(match item {
+        id::POTION => 0x2A,
+        id::HI_POTION => 0x2B,
+        id::ETHER => 0x2D,
+        id::ELIXIR => 0x2F,
+        _ => return None,
+    })
 }
 
-/// The root rows, in order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Root {
-    Buy,
-    Sell,
-    CardPacks,
+/// Re:CoM's card value for a card picture (`C2DCard`, `0x140243560`): the kind in byte 0, byte 1 0
+/// (not premium), byte 2 0xFF (negative: no number drawn; as the shop's own number-less card
+/// `0x11FF0001` in `0x14045BF50`), byte 3 the kind's class from Re:CoM's table (`0x14068E0B0 +
+/// kind × 16`; 0x44 for the item cards). Checked (decomp + exe).
+pub fn card_value(kind: u8, class: u8) -> u32 {
+    kind as u32 | 0xFF << 16 | (class as u32) << 24
 }
 
-pub const ROOT: [Root; 3] = [Root::Buy, Root::Sell, Root::CardPacks];
+/// Re:CoM's cell moves (`0x14065BA70`, `[dir + cell × 4]`; 0x40 = leave the grid upwards).
+/// Checked (exe).
+pub const MOVES: [i8; 16] = [2, 1, 64, 0, 2, 0, 64, -1, 0, 1, -2, 0, 0, 0, -2, -1];
 
-/// One frame's presses: Re:CoM's reads in its mode 2 list's order (`0x1403A8770` case 1: cancel
-/// `0x14029B410`, confirm `0x14029B490`, Up `0x101000`, Down `0x204000` through the repeat read).
+/// Re:CoM's direction order and indices in the grid (`0x1403A6E54`: Down 0x204000, Right 0x802000,
+/// Up 0x101000, Left 0x408000).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dir {
+    Down = 0,
+    Right = 1,
+    Up = 2,
+    Left = 3,
+}
+
+/// Where a direction takes the grid cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GridMove {
+    /// No move (no sound).
+    Stay,
+    To(i32),
+    /// Back to the tab row.
+    Leave,
+}
+
+/// Re:CoM's move rule (`0x1403A6F0D..0x1403A6F60`): the table's step; ≥ 0x40 leaves; a step of 0
+/// or onto a cell at or past the count stays.
+pub fn grid_move(cell: i32, dir: Dir, count: i32) -> GridMove {
+    let Some(&step) = usize::try_from(dir as i32 + cell * 4).ok().and_then(|i| MOVES.get(i)) else { return GridMove::Stay };
+    let step = step as i32;
+    if step >= 0x40 {
+        GridMove::Leave
+    } else if step != 0 && cell + step < count {
+        GridMove::To(cell + step)
+    } else {
+        GridMove::Stay
+    }
+}
+
+/// One frame's presses, Re:CoM's reads (the 0x80 button `0x14029B2F0(0x80, 0)`, cancel
+/// `0x14029B410`, confirm `0x14029B490`, the directions `0x14029B2E0(mask, 0)`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Pad {
+    pub other: bool,
     pub cancel: bool,
     pub confirm: bool,
-    pub up: bool,
     pub down: bool,
+    pub right: bool,
+    pub up: bool,
+    pub left: bool,
 }
 
-/// What the list knows of Sora this frame.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Ctx {
-    pub buy: Vec<u8>,
-    pub sell: Vec<(u8, u32)>,
+impl Pad {
+    /// Re:CoM's grid order: the first pressed of Down, Right, Up, Left.
+    fn grid_dir(&self) -> Option<Dir> {
+        [(self.down, Dir::Down), (self.right, Dir::Right), (self.up, Dir::Up), (self.left, Dir::Left)].into_iter().find(|p| p.0).map(|p| p.1)
+    }
 }
 
-/// What a frame of the list does (the caller plays the sound and acts).
+/// From one of Re:CoM's tabs: does this frame's input go to the Items tab (Left on tab 0: the Items
+/// tab is drawn before it; Right on tab 3: the row wraps)? Re:CoM's earlier reads win: the 0x80
+/// button and cancel, and Left over Right. `locked` = Re:CoM's input lock `+0x274 > 0`.
+pub fn enters_items(tab: i32, in_grid: bool, pad: &Pad, locked: bool) -> bool {
+    if locked || in_grid || pad.other || pad.cancel {
+        return false;
+    }
+    if pad.left {
+        return tab == 0;
+    }
+    pad.right && tab == RECOM_TABS - 1
+}
+
+/// What one frame of the Items tab does (Re:CoM's case 2 with the Items tab's cells).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Act {
+pub enum Step {
     Nothing,
-    /// The cursor moved (sound 1).
-    Moved,
-    /// A page opened (sound 2).
-    Opened(Page),
-    /// Back to the root (sound 4).
-    Back,
-    /// Refused (sound 5): Sell with nothing to sell.
-    Refused,
-    /// Card Packs (sound 2): on to Re:CoM's mode 4 (or 2).
-    CardPacks,
-    /// Cancel on the root (sound 4): leave the shop as Re:CoM's mode 3 does.
-    Leave,
-    /// Confirm on a Buy row: this item.
-    Buy(u8),
-    /// Confirm on a Sell row: this item.
-    Sell(u8),
+    /// Leave the pack screen (sound, then `+0x25C` = mode, state 100).
+    Leave { sound: u32, mode: i32 },
+    /// To Re:CoM's tab (sound 1).
+    ToTab(i32),
+    /// Into the grid at cell 0 (sound 1).
+    IntoGrid,
+    /// Back to the tab row (sound 1).
+    OutOfGrid,
+    /// To another cell (sound 1).
+    Move(i32),
+    /// Confirm on a cell: the buy (or its refusal).
+    Confirm(i32),
 }
 
-/// The list's cursor state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Menu {
-    pub page: Page,
-    /// The root's cursor (kept while a page is open, and across the pack screen).
-    pub root: usize,
-    /// The open page's cursor.
-    pub row: usize,
-}
-
-impl Menu {
-    pub fn new(root: usize) -> Menu {
-        Menu { page: Page::Root, root: root.min(ROOT.len() - 1), row: 0 }
+/// The Items tab's frame, in Re:CoM's order; `count` = the cells shown. Left goes to Re:CoM's tab
+/// 3 (the row wraps), Right to tab 0 (the next one drawn).
+pub fn items_step(in_grid: bool, cell: i32, count: i32, pad: &Pad, locked: bool) -> Step {
+    if locked {
+        return Step::Nothing;
     }
-
-    /// The rows the page shows.
-    pub fn len(&self, c: &Ctx) -> usize {
-        match self.page {
-            Page::Root => ROOT.len(),
-            Page::Buy => c.buy.len(),
-            Page::Sell => c.sell.len(),
-        }
+    if pad.other {
+        return Step::Leave { sound: sound::OTHER, mode: mode::TRADE };
     }
-
-    /// The highlighted row's index.
-    pub fn cursor(&self) -> usize {
-        match self.page {
-            Page::Root => self.root,
-            _ => self.row,
-        }
-    }
-
-    fn set_cursor(&mut self, i: usize) {
-        match self.page {
-            Page::Root => self.root = i,
-            _ => self.row = i,
-        }
-    }
-
-    /// Keeps the cursor on a row after the list changed (a sale emptied a row); an emptied Sell
-    /// list goes back to the root, on Sell.
-    pub fn settle(&mut self, c: &Ctx) {
-        let n = self.len(c);
-        if n == 0 && self.page != Page::Root {
-            self.page = Page::Root;
-            self.row = 0;
-            return;
-        }
-        if self.cursor() >= n {
-            self.set_cursor(n.saturating_sub(1));
-        }
-    }
-
-    /// One frame in Re:CoM's order: cancel, confirm, Up, Down (the first pressed); moves stop at
-    /// the ends (Re:CoM's mode 2 list never wraps, `0x1403A8770`).
-    pub fn step(&mut self, pad: &Pad, c: &Ctx) -> Act {
-        self.settle(c);
-        let n = self.len(c);
+    if !in_grid {
         if pad.cancel {
-            return match self.page {
-                Page::Root => Act::Leave,
-                _ => {
-                    self.page = Page::Root;
-                    self.row = 0;
-                    Act::Back
-                }
-            };
+            return Step::Leave { sound: sound::BACK, mode: mode::MENU };
         }
-        if pad.confirm {
-            return match self.page {
-                Page::Root => match ROOT[self.root] {
-                    Root::Buy => {
-                        self.page = Page::Buy;
-                        self.row = 0;
-                        Act::Opened(Page::Buy)
-                    }
-                    Root::Sell if c.sell.is_empty() => Act::Refused,
-                    Root::Sell => {
-                        self.page = Page::Sell;
-                        self.row = 0;
-                        Act::Opened(Page::Sell)
-                    }
-                    Root::CardPacks => Act::CardPacks,
-                },
-                Page::Buy => c.buy.get(self.row).map_or(Act::Nothing, |&i| Act::Buy(i)),
-                Page::Sell => c.sell.get(self.row).map_or(Act::Nothing, |s| Act::Sell(s.0)),
-            };
+        if pad.left {
+            return Step::ToTab(RECOM_TABS - 1);
         }
-        let i = self.cursor();
-        if pad.up && i > 0 {
-            self.set_cursor(i - 1);
-            return Act::Moved;
+        if pad.right {
+            return Step::ToTab(0);
         }
-        if pad.down && i + 1 < n {
-            self.set_cursor(i + 1);
-            return Act::Moved;
+        if pad.down || pad.confirm {
+            return Step::IntoGrid;
         }
-        Act::Nothing
+        return Step::Nothing;
+    }
+    if pad.confirm {
+        return Step::Confirm(cell);
+    }
+    if pad.cancel {
+        return Step::OutOfGrid;
+    }
+    match pad.grid_dir().map(|d| grid_move(cell, d, count)) {
+        Some(GridMove::Leave) => Step::OutOfGrid,
+        Some(GridMove::To(c)) => Step::Move(c),
+        _ => Step::Nothing,
     }
 }
 
-// ---- Texts (ASCII, NUL-terminated: Re:CoM's text set `0x140259000` draws them) ----
+/// The Items tab's line in the Moogle's text window (in place of Re:CoM's card-pack lines,
+/// messages 4 / 6: `0x1403A5AA0`). On the tab row the tab's line; on a cell what the item does,
+/// its price and how many Sora has, or why the last confirm was refused.
+pub fn help_text(in_grid: bool, item: Option<u8>, note: Option<Note>, inv: &it::Inventory) -> Vec<u8> {
+    let s = match (note, in_grid, item) {
+        (Some(Note::Poor), ..) => text::POOR.to_string(),
+        (Some(Note::NoRoom), ..) => text::NO_ROOM.to_string(),
+        (_, true, Some(i)) => format!("{} {} Moogle Points. Sora has {}.", text::what(i), buy_price(i).unwrap_or(0), owned(inv, i)),
+        _ => text::TAB.to_string(),
+    };
+    c_text(&s)
+}
+
+/// A refusal shown on the line until the next move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Note {
+    Poor,
+    NoRoom,
+}
 
 pub mod text {
-    pub const ROOT: [&str; 3] = ["Buy", "Sell", "Card Packs"];
-    pub const ROOT_HELP: [&str; 3] = ["Buy items with Moogle Points.", "Sell items for Moogle Points.", "Buy card packs."];
-    pub const NOTHING_TO_SELL: &str = "Sora has nothing to sell.";
+    /// The Items tab's line (the owner's example: "Buy items with Moogle Points.").
+    pub const TAB: &str = "Buy items with Moogle Points.";
     pub const POOR: &str = "Not enough Moogle Points.";
     pub const NO_ROOM: &str = "Sora can't carry any more of this.";
 
@@ -408,46 +421,6 @@ pub mod text {
     }
 }
 
-/// A refusal shown on the help line until the next move.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Note {
-    Poor,
-    NoRoom,
-    NothingToSell,
-}
-
-/// The rows' text: one line per row (`\n` between them; Re:CoM's text window splits lines at
-/// `\n`, `0x1402B1520`), NUL-terminated. `name` gives an item's name (KH1's word or English).
-/// Buy rows read "name / price", Sell rows "name xN / price" (the owner's list: names, counts and
-/// prices).
-pub fn rows_text(m: &Menu, c: &Ctx, name: impl Fn(u8) -> String) -> Vec<u8> {
-    let lines: Vec<String> = match m.page {
-        Page::Root => text::ROOT.iter().map(|s| s.to_string()).collect(),
-        Page::Buy => c.buy.iter().map(|&i| format!("{} / {}", name(i), buy_price(i).unwrap_or(0))).collect(),
-        Page::Sell => c.sell.iter().map(|&(i, n)| format!("{} x{n} / {}", name(i), sell_price(i).unwrap_or(0))).collect(),
-    };
-    c_text(&lines.join("\n"))
-}
-
-/// The help line (the Moogle's text window): the highlighted row's, or the refusal.
-pub fn help_text(m: &Menu, c: &Ctx, note: Option<Note>, inv: &it::Inventory) -> Vec<u8> {
-    let s = match note {
-        Some(Note::Poor) => text::POOR.to_string(),
-        Some(Note::NoRoom) => text::NO_ROOM.to_string(),
-        Some(Note::NothingToSell) => text::NOTHING_TO_SELL.to_string(),
-        None => match m.page {
-            Page::Root => text::ROOT_HELP[m.root.min(2)].to_string(),
-            Page::Buy => c.buy.get(m.row).map_or(String::new(), |&i| {
-                format!("{} {} Moogle Points. Sora has {}.", text::what(i), buy_price(i).unwrap_or(0), owned(inv, i))
-            }),
-            Page::Sell => c.sell.get(m.row).map_or(String::new(), |&(i, n)| {
-                format!("{} Sells for {} Moogle Points. Sora has {n}.", text::what(i), sell_price(i).unwrap_or(0))
-            }),
-        },
-    };
-    c_text(&s)
-}
-
 /// ASCII bytes + NUL (anything outside printable ASCII and `\n` becomes `?`).
 pub fn c_text(s: &str) -> Vec<u8> {
     let mut v: Vec<u8> = s.bytes().map(|b| if b == b'\n' || (0x20..0x7F).contains(&b) { b } else { b'?' }).collect();
@@ -455,7 +428,85 @@ pub fn c_text(s: &str) -> Vec<u8> {
     v
 }
 
-// ---- Re:CoM's shop: modes, sounds, places ----
+// ---- Places ----
+
+/// Re:CoM's tab x (`0x14065BA40`: 64, 128, 192, 256), the tab cursor's y (`0x14065BCE0`), the tab
+/// button message's y (`0x14065BCE4`), the cursor's offsets (`0x1406C1204` 16, `0x14050DCA4` 32),
+/// the grid cells' places (`0x14065BA50` x, `0x14065BA60` y). Checked (exe).
+pub const RECOM_TAB_X: [f32; 4] = [64.0, 128.0, 192.0, 256.0];
+pub const TAB_CURSOR_Y: f32 = 53.0;
+pub const TAB_MESSAGE_Y: f32 = 69.0;
+pub const CURSOR_DX: f32 = 16.0;
+pub const CURSOR_DY: f32 = 32.0;
+pub const CELL_X: [f32; 4] = [74.0, 224.0, 74.0, 224.0];
+pub const CELL_Y: [f32; 4] = [167.0, 167.0, 252.0, 252.0];
+
+/// The tab row's places: with the asset step's five-tab art, the Items tab at place 0 and Re:CoM's
+/// tab t at place t + 1, 52 apart from Re:CoM's first x (64, 116, 168, 220, 272: the art's
+/// notches); without it Re:CoM's places and the Items tab after them at 320 (Re:CoM's step of 64
+/// continued: **Assumption**, no art to place it by).
+pub fn tab_x(tab: i32, five: bool) -> f32 {
+    let place = |p: i32| RECOM_TAB_X[0] + tabs::STEP as f32 * p as f32;
+    match (tab, five) {
+        (ITEMS_TAB, true) => place(0),
+        (ITEMS_TAB, false) => RECOM_TAB_X[3] + 64.0,
+        (t, true) => place(t.clamp(0, 3) + 1),
+        (t, false) => RECOM_TAB_X[t.clamp(0, 3) as usize],
+    }
+}
+
+/// The asset step's five-tab groups in `m_shop:01` (`kh1-recom-assets` `shop_tabs`,
+/// `kh1-shop-tabs.json`).
+pub mod tabs {
+    use crate::json;
+    pub const MANIFEST: &str = "kh1-shop-tabs.json";
+    pub const FORMAT: &str = "kh1-recom-assets shop-tabs 1";
+    pub const SET: &str = "m_shop:01";
+    /// Re:CoM Steam's groups in `m_shop:01` (Checked (files)).
+    pub const BASE_GROUPS: u32 = 241;
+    pub const COUNT: u32 = 13;
+    pub const TABS: u32 = 5;
+    pub const STEP: i32 = 52;
+    /// Our groups' offsets from the first: the window with place p raised (0..5), its close
+    /// (5..10), the icons' appear / loop / close.
+    pub const WINDOW: u32 = 0;
+    pub const CLOSE: u32 = 5;
+    pub const ICONS_IN: u32 = 10;
+    pub const ICONS: u32 = 11;
+    pub const ICONS_OUT: u32 = 12;
+    /// Re:CoM's own: the windows by tab (`0x140690420`), their closes (`0x140690428`), the icons
+    /// (mode 4's init `0x1403A4A90`: 0x38 / 0x39 / 0x3A). Checked (exe + decomp).
+    pub const RECOM_WINDOW: [i16; 4] = [66, 68, 70, 72];
+    pub const RECOM_CLOSE: [i16; 4] = [67, 69, 71, 73];
+    pub const RECOM_ICONS: [i16; 3] = [0x38, 0x39, 0x3A];
+
+    /// Reads the manifest: our first group, after checking it is this DLL's layout.
+    pub fn parse(text: &str) -> Result<u32, String> {
+        let v = json::parse(text)?;
+        if v.get("format").and_then(|f| f.as_str()) != Some(FORMAT) {
+            return Err(format!("not a \"{FORMAT}\" manifest (an older asset step? run it again)"));
+        }
+        if v.get("set").and_then(|s| s.as_str()) != Some(SET) {
+            return Err(format!("not the set {SET}"));
+        }
+        let n = |k: &str| v.get(k).and_then(|x| x.as_u32()).ok_or_else(|| format!("no \"{k}\""));
+        let (base, first, count, tabs, step) = (n("base_groups")?, n("first")?, n("count")?, n("tabs")?, n("step")?);
+        if base != BASE_GROUPS || first != BASE_GROUPS || count != COUNT || tabs != TABS || step != STEP as u32 {
+            return Err(format!("groups {first}+{count} ({tabs} tabs, step {step}, base {base}); this DLL expects {BASE_GROUPS}+{COUNT} ({TABS} tabs, step {STEP})"));
+        }
+        Ok(first)
+    }
+
+    /// Re:CoM's tab tables at Combat = KH1 with the art: tab t's x, window and close at place t + 1.
+    pub fn kh1_tables(first: u32) -> ([f32; 4], [i16; 4], [i16; 4]) {
+        let x = std::array::from_fn(|t| super::tab_x(t as i32, true));
+        let w = std::array::from_fn(|t| (first + WINDOW + t as u32 + 1) as i16);
+        let c = std::array::from_fn(|t| (first + CLOSE + t as u32 + 1) as i16);
+        (x, w, c)
+    }
+}
+
+// ---- Re:CoM's shop: modes, sounds, help ids ----
 
 /// `CMoogleShopCore`'s modes (`+0x258`; records at `+0x98 + 0x40 · mode`, Checked (decomp
 /// `0x1403A4220`)).
@@ -466,7 +517,7 @@ pub mod mode {
     pub const FREE_PACK: i32 = 1;
     /// No room for 5 cards: offers the card trade only.
     pub const NO_ROOM: i32 = 2;
-    /// The two-choice menu (ours at KH1).
+    /// The two-Moogle menu.
     pub const MENU: i32 = 3;
     /// The pack screen.
     pub const PACKS: i32 = 4;
@@ -476,60 +527,40 @@ pub mod mode {
     pub const LEAVE: i32 = 6;
 }
 
-/// Where Card Packs goes: Re:CoM's pack screen, or its no-room screen when Sora's cards have no
-/// room for 5 more (Re:CoM's mode 3 init's rule, `0x1403A53F0`).
-pub fn card_packs_mode(room: bool) -> i32 {
-    if room {
-        mode::PACKS
-    } else {
-        mode::NO_ROOM
-    }
-}
-
-/// Re:CoM's room rule (`0x1403A53F0`: `u16 [*0x14087A7E8 + 6] ≥ [shop+0x350]+0x44 + 5`).
+/// Re:CoM's room rule (`0x1403A53F0`, `0x1403A752A`: `u16 [*0x14087A7E8 + 6] ≥ [shop+0x350]+0x44 + 5`).
 pub fn room_for_pack(limit: u16, cards: i32) -> bool {
     limit as i32 >= cards + 5
 }
 
-/// Re:CoM's sounds here (`0x1402AA360(id, −1)`; Checked (disasm `0x1403A8770`, `0x1403A8EF0`,
-/// `0x1403A6D74`, `0x1403A8095`)).
+/// The card trade's Square at Combat = KH1: the pack screen (its Items tab) also without room for
+/// 5 cards (Re:CoM's needs room, `0x1403A752A`: there the pack screen would be out of reach and
+/// items could not be bought with a full deck). The packs keep Re:CoM's own refusal there (help
+/// line 5, sound 5). Re:CoM's mode-2 rule (no room: the two-Moogle menu is replaced by the card
+/// trade offer) is unchanged.
+pub fn trade_square_opens_packs(kh1: bool, room: bool) -> bool {
+    kh1 || room
+}
+
+/// Re:CoM's sounds here (`0x1402AA360(id, −1)`; Checked (disasm `0x1403A6930`, `0x1403A73E0`)).
 pub mod sound {
     pub const MOVE: u32 = 1;
-    pub const CONFIRM: u32 = 2;
+    pub const BUY: u32 = 2;
+    /// The 0x80 button's (to the other screen).
+    pub const OTHER: u32 = 3;
     pub const BACK: u32 = 4;
     pub const ERROR: u32 = 5;
     /// The card trade's sale (mode 5, `0x1403A809A`).
     pub const SALE: u32 = 6;
-    /// Played right after `CONFIRM` on a pack buy (`0x1403A6DFE`).
+    /// Played right after `BUY` on a pack buy (`0x1403A6DFE`).
     pub const BUY_TOO: u32 = 0x58;
 }
 
-/// The finger cursor's x and Re:CoM's row pitch in its mode 2 list (`0x1403A51C0`: x 126.0;
-/// `0x14065BA30`: y 210.0, 233.0). Checked (decomp + exe).
-pub const FINGER_X: f32 = 126.0;
-pub const RECOM_ROW_Y: [f32; 2] = [210.0, 233.0];
-pub const ROW_PITCH: f32 = RECOM_ROW_Y[1] - RECOM_ROW_Y[0];
-/// Our first row's y: above Re:CoM's mode 2 rows so nine rows fit on the 512 × 384 screen
-/// (**Assumption**: the place; to judge in game).
-pub const FIRST_ROW_Y: f32 = 96.0;
-/// The rows' text window (a `CTextWnd` opened by `0x1402B1420`): left edge just right of the
-/// finger, the top half a row above the first row's y, the width, the line pitch (**Assumption**:
-/// the text's first line sits at the window's top; to judge in game).
-pub const ROWS_X: i32 = 142;
-pub const ROWS_WIDTH: i32 = 240;
-pub const ROW_LINE: u32 = ROW_PITCH as u32;
-/// Most rows any page has (room kept for the 7 battle items + 2; the four items in play use 4).
-pub const MAX_ROWS: usize = 9;
-
-/// The finger's y on row `i`.
-pub fn row_y(i: usize) -> f32 {
-    FIRST_ROW_Y + ROW_PITCH * i.min(MAX_ROWS - 1) as f32
-}
-
-/// The rows' window: (x, y) and (w, h) for `n` rows.
-pub fn rows_window(n: usize) -> ([i32; 2], [i32; 2]) {
-    let n = n.clamp(1, MAX_ROWS) as i32;
-    ([ROWS_X, (FIRST_ROW_Y - ROW_PITCH / 2.0) as i32], [ROWS_WIDTH, n * ROW_PITCH as i32])
+/// Re:CoM's help message ids (`0x1403A5AA0` → `0x1404573A0`): 4 the usual line, 5 no room for 5
+/// cards, 6 not enough Moogle Points.
+pub mod help {
+    pub const USUAL: i32 = 4;
+    pub const NO_ROOM: i32 = 5;
+    pub const POOR: i32 = 6;
 }
 
 #[cfg(test)]
@@ -644,88 +675,124 @@ mod tests {
         assert_eq!(spent(20_010, 10), (20_020, false));
     }
 
-    fn ctx() -> Ctx {
-        Ctx { buy: buy_list(Tier::Early), sell: vec![(id::POTION, 2), (id::ETHER, 1)] }
+    #[test]
+    fn item_cards_and_values() {
+        assert_eq!([id::POTION, id::HI_POTION, id::ETHER, id::ELIXIR].map(card_kind), [Some(0x2A), Some(0x2B), Some(0x2D), Some(0x2F)]);
+        assert_eq!(card_kind(id::TENT), None);
+        assert!(STOCK.iter().all(|s| s.0.item().and_then(card_kind).is_some()), "every ware has its card");
+        assert_eq!(card_value(0x2A, 0x44), 0x44FF_002A);
+        // The shop's own number-less card.
+        assert_eq!(card_value(1, 0x11), 0x11FF_0001);
+        assert!(STOCK.len() <= CELLS, "one page of cells");
     }
 
     #[test]
-    fn root_rows_and_moves() {
-        let c = ctx();
-        let mut m = Menu::new(0);
-        let up = pad(|p| p.up = true);
-        let down = pad(|p| p.down = true);
-        assert_eq!(m.step(&up, &c), Act::Nothing);
-        assert_eq!(m.step(&down, &c), Act::Moved);
-        assert_eq!(m.step(&down, &c), Act::Moved);
-        assert_eq!(m.root, 2);
-        // No wrap at the end (Re:CoM's list).
-        assert_eq!(m.step(&down, &c), Act::Nothing);
-        assert_eq!(m.step(&pad(|p| p.confirm = true), &c), Act::CardPacks);
-        assert_eq!(m.step(&pad(|p| p.cancel = true), &c), Act::Leave);
-        // Cancel before confirm, confirm before a direction.
-        assert_eq!(m.step(&pad(|p| { p.cancel = true; p.confirm = true }), &c), Act::Leave);
-        assert_eq!(m.step(&pad(|p| { p.confirm = true; p.up = true }), &c), Act::CardPacks);
-        assert_eq!(Menu::new(7).root, 2);
+    fn recom_grid_moves() {
+        assert_eq!(grid_move(0, Dir::Down, 4), GridMove::To(2));
+        assert_eq!(grid_move(0, Dir::Right, 4), GridMove::To(1));
+        assert_eq!(grid_move(0, Dir::Up, 4), GridMove::Leave);
+        assert_eq!(grid_move(0, Dir::Left, 4), GridMove::Stay);
+        assert_eq!(grid_move(1, Dir::Up, 4), GridMove::Leave);
+        assert_eq!(grid_move(1, Dir::Left, 4), GridMove::To(0));
+        assert_eq!(grid_move(3, Dir::Up, 4), GridMove::To(1));
+        assert_eq!(grid_move(3, Dir::Left, 4), GridMove::To(2));
+        assert_eq!(grid_move(2, Dir::Down, 4), GridMove::Stay);
+        // 1F's two items: Ether's cell 1 is the last.
+        assert_eq!(grid_move(0, Dir::Down, 2), GridMove::Stay);
+        assert_eq!(grid_move(1, Dir::Down, 2), GridMove::Stay);
+        assert_eq!(grid_move(0, Dir::Right, 2), GridMove::To(1));
+        // 2F's three.
+        assert_eq!(grid_move(0, Dir::Down, 3), GridMove::To(2));
+        assert_eq!(grid_move(2, Dir::Right, 3), GridMove::Stay);
     }
 
     #[test]
-    fn buy_and_sell_pages() {
-        let mut c = ctx();
-        let mut m = Menu::new(0);
-        assert_eq!(m.step(&pad(|p| p.confirm = true), &c), Act::Opened(Page::Buy));
-        assert_eq!(m.step(&pad(|p| p.down = true), &c), Act::Moved);
-        assert_eq!(m.step(&pad(|p| p.confirm = true), &c), Act::Buy(id::HI_POTION));
-        assert_eq!(m.step(&pad(|p| p.cancel = true), &c), Act::Back);
-        assert_eq!((m.page, m.root), (Page::Root, 0));
-        m.step(&pad(|p| p.down = true), &c);
-        assert_eq!(m.step(&pad(|p| p.confirm = true), &c), Act::Opened(Page::Sell));
-        m.step(&pad(|p| p.down = true), &c);
-        assert_eq!(m.step(&pad(|p| p.confirm = true), &c), Act::Sell(id::ETHER));
-        // The Ether row left: the cursor settles on the last row.
-        c.sell.pop();
-        assert_eq!(m.step(&Pad::default(), &c), Act::Nothing);
-        assert_eq!(m.row, 0);
-        // The list emptied: back to the root on Sell.
-        c.sell.clear();
-        m.settle(&c);
-        assert_eq!((m.page, m.root), (Page::Root, 1));
-        // Nothing to sell: refused.
-        assert_eq!(m.step(&pad(|p| p.confirm = true), &c), Act::Refused);
-        assert_eq!(m.page, Page::Root);
+    fn entering_the_items_tab() {
+        let right = pad(|p| p.right = true);
+        let left = pad(|p| p.left = true);
+        // The Items tab is drawn first: Left from tab 0; the row wraps: Right from tab 3.
+        assert!(enters_items(0, false, &left, false));
+        assert!(enters_items(3, false, &right, false));
+        assert!(!enters_items(2, false, &right, false));
+        assert!(!enters_items(3, false, &left, false));
+        assert!(!enters_items(0, false, &right, false));
+        assert!(!enters_items(3, true, &right, false));
+        assert!(!enters_items(3, false, &right, true));
+        assert!(!enters_items(3, false, &pad(|p| { p.right = true; p.cancel = true }), false));
+        assert!(!enters_items(3, false, &pad(|p| { p.right = true; p.other = true }), false));
+        // Left is read before Right.
+        assert!(!enters_items(3, false, &pad(|p| { p.right = true; p.left = true }), false));
+        assert!(enters_items(0, false, &pad(|p| { p.right = true; p.left = true }), false));
     }
 
     #[test]
-    fn texts() {
-        let c = ctx();
-        let name = |i: u8| String::from_utf8_lossy(crate::items_page::text::english(i)).trim_end_matches('\0').to_string();
-        let mut m = Menu::new(0);
-        assert_eq!(rows_text(&m, &c, name), b"Buy\nSell\nCard Packs\0");
-        m.page = Page::Buy;
-        assert_eq!(rows_text(&m, &c, name), b"Potion / 10\nHi-Potion / 30\nEther / 40\0");
-        m.page = Page::Sell;
-        assert_eq!(rows_text(&m, &c, name), b"Potion x2 / 2\nEther x1 / 8\0");
-        let inv = Inventory::new_game();
-        assert_eq!(help_text(&m, &c, None, &inv), b"Restores HP. Sells for 2 Moogle Points. Sora has 2.\0");
-        m.page = Page::Buy;
-        assert_eq!(help_text(&m, &c, None, &inv), b"Restores HP. 10 Moogle Points. Sora has 0.\0");
-        assert_eq!(help_text(&m, &c, Some(Note::Poor), &inv), b"Not enough Moogle Points.\0");
+    fn tab_row() {
+        assert_eq!(items_step(false, 0, 4, &pad(|p| p.left = true), false), Step::ToTab(3));
+        assert_eq!(items_step(false, 0, 4, &pad(|p| p.right = true), false), Step::ToTab(0));
+        assert_eq!(items_step(false, 0, 4, &pad(|p| p.down = true), false), Step::IntoGrid);
+        assert_eq!(items_step(false, 0, 4, &pad(|p| p.confirm = true), false), Step::IntoGrid);
+        assert_eq!(items_step(false, 0, 4, &pad(|p| p.up = true), false), Step::Nothing);
+        assert_eq!(items_step(false, 0, 4, &pad(|p| p.cancel = true), false), Step::Leave { sound: sound::BACK, mode: mode::MENU });
+        assert_eq!(items_step(false, 0, 4, &pad(|p| { p.other = true; p.cancel = true }), false), Step::Leave { sound: sound::OTHER, mode: mode::TRADE });
+        assert_eq!(items_step(false, 0, 4, &pad(|p| p.left = true), true), Step::Nothing);
+    }
+
+    #[test]
+    fn grid() {
+        assert_eq!(items_step(true, 1, 4, &pad(|p| p.confirm = true), false), Step::Confirm(1));
+        assert_eq!(items_step(true, 1, 4, &pad(|p| { p.confirm = true; p.cancel = true }), false), Step::Confirm(1));
+        assert_eq!(items_step(true, 1, 4, &pad(|p| { p.confirm = true; p.other = true }), false), Step::Leave { sound: sound::OTHER, mode: mode::TRADE });
+        assert_eq!(items_step(true, 2, 4, &pad(|p| { p.up = true; p.cancel = true }), false), Step::OutOfGrid);
+        assert_eq!(items_step(true, 0, 4, &pad(|p| p.up = true), false), Step::OutOfGrid);
+        assert_eq!(items_step(true, 0, 4, &pad(|p| p.right = true), false), Step::Move(1));
+        assert_eq!(items_step(true, 2, 4, &pad(|p| p.up = true), false), Step::Move(0));
+        assert_eq!(items_step(true, 2, 3, &pad(|p| p.right = true), false), Step::Nothing);
+        assert_eq!(items_step(true, 0, 4, &pad(|p| { p.right = true; p.down = true }), false), Step::Move(2));
+    }
+
+    #[test]
+    fn help_lines() {
+        let mut inv = Inventory::new_game();
+        inv.set_stock(id::ETHER, 2);
+        assert_eq!(help_text(false, None, None, &inv), b"Buy items with Moogle Points.\0");
+        assert_eq!(help_text(true, Some(id::ETHER), None, &inv), b"Restores MP. 40 Moogle Points. Sora has 2.\0");
+        assert_eq!(help_text(true, Some(id::ETHER), Some(Note::Poor), &inv), b"Not enough Moogle Points.\0");
+        assert_eq!(help_text(true, Some(id::ETHER), Some(Note::NoRoom), &inv), b"Sora can't carry any more of this.\0");
+        for i in [id::POTION, id::HI_POTION, id::ETHER, id::ELIXIR] {
+            let t = help_text(true, Some(i), None, &Inventory { stock: [99; crate::items::STOCK_IDS], ..Inventory::new_game() });
+            assert!(t.len() - 1 <= crate::menu::HELP_MAX, "{i}");
+        }
         assert_eq!(c_text("a\u{e9}b"), b"a??b\0");
     }
 
     #[test]
-    fn modes_and_places() {
-        assert_eq!(card_packs_mode(true), mode::PACKS);
-        assert_eq!(card_packs_mode(false), mode::NO_ROOM);
+    fn tab_places() {
+        // With the five-tab art: Items first, then Re:CoM's four, 52 apart.
+        assert_eq!([ITEMS_TAB, 0, 1, 2, 3].map(|t| tab_x(t, true)), [64.0, 116.0, 168.0, 220.0, 272.0]);
+        // Without: Re:CoM's places, the Items tab's cursor after them.
+        assert_eq!([0, 1, 2, 3, ITEMS_TAB].map(|t| tab_x(t, false)), [64.0, 128.0, 192.0, 256.0, 320.0]);
+        let (x, w, c) = tabs::kh1_tables(241);
+        assert_eq!(x, [116.0, 168.0, 220.0, 272.0]);
+        assert_eq!(w, [242, 243, 244, 245]);
+        assert_eq!(c, [247, 248, 249, 250]);
+        assert_eq!(tabs::CLOSE - tabs::WINDOW, tabs::TABS);
+    }
+
+    #[test]
+    fn the_tabs_manifest() {
+        let ok = r#"{"format": "kh1-recom-assets shop-tabs 1", "set": "m_shop:01", "base_groups": 241, "first": 241, "count": 13, "tabs": 5, "step": 52, "files": [], "sources": {}}"#;
+        assert_eq!(tabs::parse(ok), Ok(241));
+        assert!(tabs::parse(&ok.replace("\"step\": 52", "\"step\": 64")).is_err());
+        assert!(tabs::parse(&ok.replace("shop-tabs 1", "shop-tabs 0")).is_err());
+        assert!(tabs::parse(&ok.replace("\"first\": 241", "\"first\": 250")).is_err());
+    }
+
+    #[test]
+    fn rooms_and_the_trade_square() {
         assert!(room_for_pack(100, 95));
         assert!(!room_for_pack(100, 96));
-        assert_eq!(ROW_PITCH, 23.0);
-        assert_eq!(row_y(0), FIRST_ROW_Y);
-        assert_eq!(row_y(8), FIRST_ROW_Y + 8.0 * 23.0);
-        // Nine rows stay on the 384-high screen.
-        assert!(row_y(MAX_ROWS - 1) < 384.0);
-        assert_eq!(rows_window(3), ([ROWS_X, 84], [ROWS_WIDTH, 69]));
-        // Every page fits: 7 items to sell + the two placeholders.
-        assert!(id::HELD.len() <= MAX_ROWS);
-        assert!(STOCK.len() <= MAX_ROWS);
+        assert!(trade_square_opens_packs(true, false), "KH1: items need no card room");
+        assert!(trade_square_opens_packs(false, true));
+        assert!(!trade_square_opens_packs(false, false), "Re:CoM's rule at Combat = Re:CoM");
     }
 }

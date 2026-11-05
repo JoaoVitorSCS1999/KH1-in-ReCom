@@ -11,6 +11,22 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 240: M8d step 2: the shop's buy screen on Re:CoM's own pack screen with an Items tab first (Re:CoM's two-Moogle menu unpatched; the M8c list gone; a five-tab art from the asset step), version 0.128.0 (2026-11-04)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Moogle shop redesign at KH1), verbatim: "the item shop looks REALLY bad. … you can keep how the original menu looks, without the "buy, sell, card packs" Ideally, selecting the left side (usually to buy card packs) it should bring up a menu similar to screenshot 4, with all "card packs" replaced with the item card graphics of each item sold."; answers "Items tab, then packs". Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story: Re:CoM's shop.
+
+- **Removed**: M8c's Buy / Sell / Card Packs list and its mode-3 init hook (`0x1403A53F0`): Re:CoM's two-Moogle menu (mode 3) runs unpatched.
+- **Pack screen** (hook `0x1403A6930`, 15 bytes; 8a.3's design): opens on an **Items tab drawn first** (state 0 run with no packs, then ours). Cells = Re:CoM's own packs (ctor `0x14045A9E0`, price plates, never sold out), the pack art hidden, Re:CoM's `C2DCard` of the item card (0x2A / 0x2B / 0x2D / 0x2F) on each; the floor's items (`shop::STOCK`: 1F Potion 10 / Ether 40, 2F+ Hi-Potion 30, 7F+ Elixir 200; one page). Re:CoM's input order, moves, sounds; one item per confirm by KH1's pickup; Re:CoM's payment. Left on tab 0 / Right on tab 3 → Items; from it Left → tab 3, Right → tab 0. The Moogle's line on the Items tab through Re:CoM's text call: "Buy items with Moogle Points." / the item, price and count / the refusal. Checked (decomp + disasm + exe).
+- **A full deck**: Re:CoM's mode-2 rule kept; at Combat = KH1 the card trade's Square (hook `0x1403A73E0`, 12 bytes, no branch in: exe scan) opens the pack screen also without room for 5 cards, with its button hint made as Re:CoM's case 5 does (`0x1403A8561`); the packs refuse as Re:CoM's.
+- **Five-tab art** (asset step `kh1-recom-assets` `shop_tabs`): 13 groups appended to `m_shop:01` of `FO0109.SPR` and every `<LANG>_m_shop.lad` (Re:CoM's 241 kept): 5 windows / closes 52 apart (tab 0's notch moved), the icons with **Re:CoM's own green item icon** first (the card trade's item tab sprite, × 2.5); no texture edit. The DLL (`kh1-shop-tabs.json`) writes Re:CoM's tab x table `0x14065BA40` and window table `0x140690420` to the art's places at each pack screen (Re:CoM's values at Combat = Re:CoM; their only readers are the shop: exe scan), sets the icon sequence's groups and plays the place-0 window on the Items tab. Without the art: Re:CoM's four tabs, the Items cursor at x 320. Checked (files: the owner's FO0109.SPR / UK_m_shop.lad parsed, patched, rendered offline).
+- Not built: a Potion card face as the tab picture (needs an `m_shop.imz` texture edit, PS2 + HD: owner question); the bottom help bar's text (message 0x580B00, file not in the session).
+- Per frame: nothing outside the pack screen and the card trade.
+- Asset step: **re-run**. New outputs `raw/FORM/0109/FO0109.SPR` and `kh1-shop-tabs.json`: **2 new `mod.yml` entries** (`recom-m8-items.md` § M8d step 2).
+- Assumptions: the window control's play arguments (Re:CoM's own); the icons' groups read after their set-up; the help bar holds no card-pack words.
+- Checked: tests (`shop::tests` 16, `sites::tests::shop_sites`, `shop_tabs::tests` incl. the owner's files), `check_sites_rs.py` (1318 sites, 0 mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings), the Linux `kh1-recom-build` (built; not run: no Re:CoM PKG in the session). Not checked: in game. Docs: `recom-m8-items.md` § M8d step 2 (M8c marked replaced), `kh1-recom-assets.md`.
+
+---
+
 ## Stage 239: Enemy Skills stage 2: route 1, the play-time setters (14 skills through Re:CoM's own enemy-card writes and readers), version 0.127.0 (2026-11-04)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Enemy Skills plan answers: "Go ahead", stage 2; § Treasure Magnet: "Re:CoM's Bouncywild radius"; § Enemy Skills numbers: "oogie- (every 6s) large body - (reduce damage from front half by 10%) … build everything"). Combat = KH1 in Sora's story; Combat = Re:CoM and Riku's story: Re:CoM's enemy cards untouched (nothing applied, every switched site Re:CoM's).
