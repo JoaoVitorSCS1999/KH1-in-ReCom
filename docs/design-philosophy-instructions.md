@@ -656,3 +656,4 @@ At KH1 setting:
 - **GitHub install through OpenKH** (owner, 2026-11-05, verbatim: "I also want people to be able to install the mod from openKH by using the GitHub"; answers):
   - Players install with OpenKH Mods Manager's GitHub install (`PM2CRAZY/KH1-in-ReCom`), from the default branch **`testing`** (owner: "Yes, from testing"); updates come with OpenKH's update.
   - The game-made files are never in the repo: **the DLL builds them on first launch** from the player's own KH1 and Re:CoM files (owner: "DLL builds on first launch"), and again after an update changes the asset step.
+- **First-launch build progress** (owner, 2026-11-05, verbatim: "I definitely want a progress screen in the game window while everything loads"): the first-launch asset build shows its progress **in the game window**, drawn by Re:CoM's own 2D / text, not a console window; the game waits until the files are ready.
