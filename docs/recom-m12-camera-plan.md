@@ -6,8 +6,8 @@ and camera: "Research both KH1's and KH2's cameras (decomps) and Re:CoM's camera
 plan with the owner before building.") Lock-on on R1 at Combat = KH1 is another agent's work;
 this plan only covers what the camera does while a lock is on.
 
-**Status: research and plan only. No code.** Every stage below waits for the owner's answers
-(§ 10) and a go-ahead.
+**Status:** the owner answered § 10 (`design-philosophy-instructions.md` § Camera answers) and
+asked for the five stages. Built: stage 1 (0.134.0, § 13).
 
 Steam addresses for all three games. Tags: **Checked (exe / decomp / files)** = read;
 **Assumption** = inferred, to check. KH1 roles marked "(Epic notes)" come from
@@ -455,3 +455,108 @@ recenter / KH2's reset in those modes); KH1's halved PC gains (the 60 Hz values)
   springs, wall ray, reset and the lock-on's 30 % / screen tests in the KH2 decomp; which button
   Re:CoM's camera reset is; how Re:CoM's PC port feeds the mouse; whether Re:CoM's player camera
   keeps updating under an event camera; KH1's map camera blocks (no KH1 map files in the session).
+
+---
+
+## 13. Stage 1 built (0.134.0): the Camera page and the KH1 follow camera (mode 6)
+
+Owner, 2026-11-04 (§ Camera answers): independent of Combat, a Settings > Camera page, sleights /
+summons / specials and boss cameras Re:CoM's, the rest as recommended.
+
+### What runs
+
+- **Page** (`menu::Page::Camera`, `keyblades::sub::Row::Camera`): the fifth Settings entry, one
+  row **Camera: Re:CoM / KH1** (ini `camera`, default `recom`; `kh2` warns and reads as Re:CoM's
+  until stage 4). At once.
+- **Records** (`camera::records`): modes 6..9 in Re:CoM's format, in a block near the exe. Mode 6:
+  FOV 53, radius 0.05 (Re:CoM's follow value, so its tail's sweep is Re:CoM's), aim 0.5 m above
+  Re:CoM's subject point (= KH1's 1.0 m above the feet: the subject point is the root node + 0.5 m,
+  `0x1401F0510`, Checked (decomp)), eye 4.0 m at 10° from it. Modes 7..9 carry mode 6's until
+  their stages.
+- **Record reads** (`sites::CAMERA_PATCHES`): `0x1401FC513` (14 bytes, in `0x1401FC4D0`) and
+  `0x1401FBE85` (11 bytes, in `0x1401FBE60`), the only indexed readers of `0x14087B660` (Checked
+  (decomp: every reference)), jump to stubs (`camera::stub::table_read`) that replay the replaced
+  bytes for modes < 6 or ≥ 10 and read our table for 6..9, counting each such mode set (the step's
+  "entry").
+- **Dispatcher**: the init's `lea`s `0x1401FB556` / `0x1401FB587` point at two jumps in the block
+  to `win::camera::field_exec` / `battle_exec`. Camera = Re:CoM and a Re:CoM mode: Re:CoM's exec
+  (one atomic load, one compare). Otherwise `camera::dispatch`: Re:CoM's 1 / 3 / 4 switch to 6
+  with Re:CoM's `0x1401FBE60` (never during a sleight's request `+0x188 & 0x2000`, a subject
+  override `+0x2B4`, or Re:CoM's mode 2), and `+0x17C` takes 6 so a sleight's −1 gives it back;
+  mode 6 at Re:CoM / Riku / a boss camera switches back to 1 / 3.
+- **Init** (`sites::CAMERA_HOOKS`, `0x1401FB530`, 7 bytes): after Re:CoM's init, Riku's story is
+  read (`0x1401AAAE0`) and, when wanted, `0x1401FC4D0(cam, 6, 0, 0)` and `+0x17C` = 6; the first
+  step places the camera behind Sora.
+- **Boss cameras**: Re:CoM's count `0x14087B468` (> 0 only when the boss's pack holds `BCam0000`,
+  `0x1401FEC50`; cleared by the camera's dtor; Checked (decomp)) keeps Re:CoM's camera in that
+  battle. A boss without `BCam0000` gets the KH1 camera (Assumption: no camera of its own then).
+- **The step** (`camera::kh1::Follow::step`, KH1 units, converted at the edges): in the battle
+  exec first Re:CoM's own record restore (`+0xD0` actor gone → `0x1401FEB50(0, 0)`, what its battle
+  exec does), then KH1's mode 1 in KH1's order: the look point's spring, the stick, the recenter's
+  blend, the Manual-branch eye and its wall ray, R3, the distance, the yaw from the result. Then
+  aim / eye (and their goals) into `+0x220` / `+0x230`, Re:CoM's own angles of them
+  (`0x1401FB890` into `+0x270`, yaw `+0x264` = its result, pitch `+0x260` = 0: what Re:CoM's follow
+  eases toward, so a hand-over to Re:CoM's modes starts where we are), and Re:CoM's tail as its
+  execs end (`0x1401FC0D0`, the node's eye, `0x14024FA40`).
+- **Entries**: a new camera → behind Sora (facing + π, KH1's re-place `0x1401E4820`); a mode set of
+  ours by Re:CoM's setters (a sleight's restore, our switch) → KH1's entry, the yaw of the current
+  view; the camera drawn again after another camera was (`0x140AC4370` slot 0: events, `.cam`
+  paths, battle intros) → behind Sora (Q4 (b)).
+
+### KH1 numbers (KH1 Steam; Checked (decomp) unless tagged)
+
+| What | Value | Where |
+|---|---|---|
+| Look offset, pitch, distance | (0, −100, −50), 10° (bits `0x3E32B8C3`), 400 | `0x140506CA0` / `CB0` / `CBC` (Checked (exe)) |
+| FOV | 53 | `0x1403E9E44` (Checked (exe)) |
+| Look spring | 20 % horizontal, 10 % up / 50 % down, × 0.5 at step < 2 (so 10 / 5 / 25 %) | `0x1401E1920`; the look point falls back to above Sora when a segment to it is blocked (`0x140193180`) |
+| Stick, pad | +0.15° × tilt × 0.5 a frame, at most 2.5°, −0.24° × 0.5 on release | `0x1401E7320` |
+| Stick, mouse | +0.3° × 0.5, at most 2.5 + 0.0875 × 20 = 4.25°, −4° × 0.5; stops at once on release; reversing zeroes | `0x1401E7320` |
+| Pitch clamp | −15°..+50° | `0x1401E7320` |
+| Stick input | KH1's radial dead zone 60 of 127.5 (mouse 1.0), on the bytes rebuilt from Re:CoM's ints | `0x14028B4F0` |
+| Inversion | KH1 Normal: left / right +1, up / down −1 (its Config reset `0x1402FA295` case 7; setters `0x1402FAF40` / `F70`); Re:CoM's Normal is (−1, +1) (`0x1401FB530`): KH1's = −Re:CoM's | Checked (decomp both) |
+| Recenter | facing + π in 60 frames, sin-eased; 30° wall steps, the long way, else the swap (snap at half, distance × (0.3..1), pitch + up to 42°) | `0x1401E62A0`, `0x1401E1920` |
+| Manual eye | ray to 60 past the eye; eye at the hit or 60 back from it; look ≥ 20 from the eye; distance = default | `0x1401E1920` |
+| Re-place | look to Sora's target, defaults, eye at the yaw; a 40-unit sphere walked to a ray's hit | `0x1401E4820`, `0x1401E4700` |
+| Frame step | 1.0 a 60 Hz frame both (`0x14233FBDC`; Re:CoM's camera `+0x14` × 0.02) | `kh1-tick.md`, `recom-timing.md` |
+
+### Found at build
+
+- **The look target's side** (§ 3.2's Assumption): KH1's offset z −50 is on Sora's local −z, and
+  his matrix maps local +z to his facing (`kh1_core::Vec3::rotate_yaw`, same Assumption as the
+  movement code): the look point is **0.5 m behind** Sora.
+- **The eye's pitch sign**: `0x1400E6AC0`'s rows give `(0, 0, d)` → `(0, −d sin p, d cos p)`: a
+  positive pitch puts the eye above (y down). Checked (decomp).
+- **Re:CoM's angle convention** (`0x1401FB890`): yaw of the eye from the aim, pitch positive with
+  the eye above. Re:CoM's follow eases `+0x264` toward `+0x274` and `+0x260` to 0 with no input
+  (`0x1401FDD0A` / `0x1401FDD4E`, Checked (disasm)).
+- **§ 3.3's anchor** (stage 3): `0x140506E10` reads (0, −100, **300**), not 350 (Checked (exe)):
+  to settle at stage 3.
+
+### Not carried, Assumptions
+
+- KH1's mouse multiplier `|dx × 10|` (`0x140138B30`): no Re:CoM source; 1. Re:CoM's axes are taken
+  as KH1's mouse stick at keyboard / mouse (Assumption: Re:CoM's PC port feeds the mouse there).
+- KH1's ray (`0x140193790`) and segment test (`0x140193180`) as Re:CoM's camera sweep
+  (`0x1401FBC60`) with a 0.005 m sphere; the re-place's second test `0x140193650` not carried.
+- R3 = Re:CoM's reset bit `0x400` (plan § 2.4); "Sora can act" = the camera's input lock
+  `+0x188 & 1` clear (KH1 `0x140297950`: `+0x444 & 1`).
+- The camera keeps updating under another camera; slot 0 is the drawn one.
+- At stage 1 the KH1 follow stays on while locked on (KH1's lock camera is stage 3); Re:CoM's
+  3 ↔ 4 lock switch does not run in mode 6.
+
+### Per frame
+
+- Camera = Re:CoM: one atomic load and one compare in the dispatcher, then Re:CoM's exec.
+- Camera = KH1: our step replaces Re:CoM's step; Re:CoM's tail runs once as before. The KH1 math
+  measured at **76 ns a frame** (Linux, release, `camera::tests::cost_of_a_step`, 10⁶ frames);
+  Re:CoM's camera sweep runs **2 times a frame** (the look point's segment test and the eye's ray)
+  against **1** in Re:CoM's follow, plus a mutex lock and Re:CoM's angle function. An R3 press adds
+  up to 13 sweeps on that frame. Not measured in game.
+
+### Tests
+
+`camera::tests` (modes, records, dispatch, offsets and conversions, the re-place, the look spring's
+rates, the stick's acceleration / maximum / decay / clamp, the mouse rule, R3's 60-frame swing, the
+Manual ray against a wall, the stubs and the block), `sites::tests::camera_sites`, `menu` /
+`keyblades` / `settings` tests for the page; `check_sites_rs.py`.

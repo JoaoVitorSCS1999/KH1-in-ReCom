@@ -4209,6 +4209,48 @@ pub const BUBBLE_CHECKED: &[Site] = &[
 ];
 
 /// Every site the startup check reads: checked-only, hooked, called.
+/// M12 camera (`crate::camera`, `win::camera`, `docs/recom-m12-camera-plan.md`): Re:CoM's player
+/// camera `PlayerCamera::CPlayerCamera`. Its init `0x1401FB530` (only caller the ctor `0x1401FB140`)
+/// is wrapped: after Re:CoM's base mode (field 1, battle 3) the KH1 camera's mode when the Camera
+/// setting asks for it. Same rule as [`HOOKS`]. Checked (exe + decomp).
+pub const CAMERA_HOOKS: &[Site] = &[
+    // mov r11,rsp; mov [r11+8],rbx
+    Site { name: "CPlayerCamera init (0x1401FB530)", rva: 0x001F_B530, expect: &[0x4C, 0x8B, 0xDC, 0x49, 0x89, 0x5B, 0x08] },
+];
+
+/// The camera's patched bytes. The init's two `lea rax,[rip+…]` are the only references to the field
+/// and battle execs `0x1401FEEB0` / `0x1401FECE0` (exe xref scan, plan § 2.2): pointed at our
+/// dispatcher's jumps. The two record-table reads (`0x14087B660`, 6 slots; its only indexed readers,
+/// Checked (decomp)) in the mode setters `0x1401FC4D0` / `0x1401FBE60`: a jump to a stub that reads
+/// our records for modes 6..9 and Re:CoM's table otherwise (`camera::stub`). Checked (exe).
+pub const CAMERA_PATCHES: &[Site] = &[
+    // lea rax,[rip+0x3953] (0x1401FEEB0)
+    Site { name: "camera init: field exec lea (0x1401FB556)", rva: 0x001F_B556, expect: &[0x48, 0x8D, 0x05, 0x53, 0x39, 0x00, 0x00] },
+    // lea rax,[rip+0x3752] (0x1401FECE0)
+    Site { name: "camera init: battle exec lea (0x1401FB587)", rva: 0x001F_B587, expect: &[0x48, 0x8D, 0x05, 0x52, 0x37, 0x00, 0x00] },
+    // lea rdx,[rip+0x67F146] (0x14087B660); mov rsi,rcx; mov rdx,[rdx+rax*8]
+    Site { name: "camera mode set: record read (0x1401FC513)", rva: 0x001F_C513, expect: &[0x48, 0x8D, 0x15, 0x46, 0xF1, 0x67, 0x00, 0x48, 0x8B, 0xF1, 0x48, 0x8B, 0x14, 0xC2] },
+    // lea rdx,[rip+0x67F7D4] (0x14087B660); mov rdx,[rdx+rax*8]
+    Site { name: "camera mode keep: record read (0x1401FBE85)", rva: 0x001F_BE85, expect: &[0x48, 0x8D, 0x15, 0xD4, 0xF7, 0x67, 0x00, 0x48, 0x8B, 0x14, 0xC2] },
+];
+
+/// Re:CoM's camera functions the dispatcher and the KH1 step call. Checked (exe + decomp).
+pub const CAMERA_CALLEES: &[Site] = &[
+    Site { name: "camera mode set, re-place (0x1401FC4D0)", rva: 0x001F_C4D0, expect: &[0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56] },
+    Site { name: "camera mode set, keep (0x1401FBE60)", rva: 0x001F_BE60, expect: &[0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x50] },
+    Site { name: "camera field exec (0x1401FEEB0)", rva: 0x001F_EEB0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0xF6] },
+    Site { name: "camera battle exec (0x1401FECE0)", rva: 0x001F_ECE0, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48] },
+    Site { name: "camera collision tail (0x1401FC0D0)", rva: 0x001F_C0D0, expect: &[0x48, 0x83, 0xEC, 0x28, 0xF6, 0x81, 0x88, 0x01, 0x00, 0x00, 0x20, 0x0F, 0x85, 0x87, 0x00, 0x00] },
+    Site { name: "camera view write (0x14024FA40)", rva: 0x0024_FA40, expect: &[0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x56, 0x48, 0x8B, 0xEC, 0x48, 0x83, 0xEC, 0x60] },
+    Site { name: "camera sweep (0x1401FBC60)", rva: 0x001F_BC60, expect: &[0x40, 0x53, 0x55, 0x56, 0x48, 0x83, 0xEC, 0x60, 0x0F, 0x29, 0x7C, 0x24, 0x40] },
+    Site { name: "camera angles (0x1401FB890)", rva: 0x001F_B890, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x60, 0x0F, 0x29, 0x74, 0x24, 0x50] },
+    // jmp 0x14029BFA0 / jmp 0x14029BFC0 (the pad's +0x6C / +0x70)
+    Site { name: "pad right stick x (0x14029B280)", rva: 0x0029_B280, expect: &[0xE9, 0x1B, 0x0D, 0x00, 0x00] },
+    Site { name: "pad right stick y (0x14029B290)", rva: 0x0029_B290, expect: &[0xE9, 0x2B, 0x0D, 0x00, 0x00] },
+    // The keyboard / mouse getter `0x1403471C0` is checked in `LOCK_ON_CHECKED`.
+    Site { name: "camera record override (0x1401FEB50)", rva: 0x001F_EB50, expect: &[0x48, 0x83, 0xEC, 0x28, 0x4C, 0x8B, 0x05, 0x05, 0xC9, 0x67, 0x00, 0x4D, 0x85, 0xC0] },
+];
+
 pub fn all_sites() -> impl Iterator<Item = &'static Site> {
     // One flat list (a long `chain` of iterators overflows the type checker).
     const LISTS: &[&[Site]] = &[
@@ -4403,6 +4445,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         BUBBLE_CHECKED,
         LOCK_ON_HOOK,
         LOCK_ON_CHECKED,
+        CAMERA_HOOKS,
+        CAMERA_PATCHES,
+        CAMERA_CALLEES,
     ];
     LISTS
         .iter()
@@ -4675,6 +4720,31 @@ mod tests {
     }
 
     #[test]
+    fn camera_sites() {
+        let rel = |s: &Site, at: usize| (0x1_4000_0000u64 + s.rva as u64 + at as u64 + 4).wrapping_add(i32::from_le_bytes(s.expect[at..at + 4].try_into().unwrap()) as i64 as u64);
+        // The init's leas reach the two execs; the record reads reach Re:CoM's table.
+        assert_eq!(rel(&CAMERA_PATCHES[0], 3), 0x1_401F_EEB0);
+        assert_eq!(rel(&CAMERA_PATCHES[1], 3), 0x1_401F_ECE0);
+        assert_eq!(rel(&CAMERA_PATCHES[2], 3), crate::camera::stub::RECOM_TABLE);
+        assert_eq!(rel(&CAMERA_PATCHES[3], 3), crate::camera::stub::RECOM_TABLE);
+        assert_eq!(0x1_4000_0000 + CAMERA_PATCHES[2].rva as u64 + CAMERA_PATCHES[2].expect.len() as u64, crate::camera::stub::SET_PLACE_BACK);
+        assert_eq!(0x1_4000_0000 + CAMERA_PATCHES[3].rva as u64 + CAMERA_PATCHES[3].expect.len() as u64, crate::camera::stub::SET_KEEP_BACK);
+        assert_eq!(0x1_4000_0000 + CAMERA_PATCHES[2].rva as u64, crate::camera::stub::SET_PLACE_READ);
+        assert_eq!(0x1_4000_0000 + CAMERA_PATCHES[3].rva as u64, crate::camera::stub::SET_KEEP_READ);
+        // The stub replays the replaced bytes: its own Re:CoM path is the same lea + mov.
+        for (p, at) in [(&CAMERA_PATCHES[0], 0x1_401F_EEB0u64), (&CAMERA_PATCHES[1], 0x1_401F_ECE0)] {
+            assert_eq!(crate::camera::stub::lea_rax(0x1_4000_0000 + p.rva as u64, at).as_slice(), p.expect);
+        }
+        // Each table read starts after the setter's own first bytes (no overlap with the callee sites).
+        let set = CAMERA_CALLEES.iter().find(|c| c.rva == 0x001F_C4D0).unwrap();
+        assert!(set.rva + set.expect.len() as u32 <= CAMERA_PATCHES[2].rva);
+        let keep = CAMERA_CALLEES.iter().find(|c| c.rva == 0x001F_BE60).unwrap();
+        assert!(keep.rva + keep.expect.len() as u32 <= CAMERA_PATCHES[3].rva);
+        let init = &CAMERA_HOOKS[0];
+        assert!(init.rva + init.expect.len() as u32 <= CAMERA_PATCHES[0].rva);
+    }
+
+    #[test]
     fn sites_have_enough_bytes_and_are_unique() {
         for s in all_sites() {
             assert!(s.expect.len() >= 5, "{}", s.name);
@@ -4691,7 +4761,7 @@ mod tests {
         // The hooked prologues hold no rip-relative operand or branch, so they can run from the
         // trampoline (whole instructions, decoded in the comments above each site). The
         // trampoline (moved bytes + a 14-byte jump) must fit before the stub.
-        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS, BOUNCYWILD_HOOKS, REDNOCTURNE_HOOKS, BLUERHAPSODY_HOOKS, GREENREQUIEM_HOOKS, YELLOWOPERA_HOOKS, LOCK_ON_HOOK];
+        let hooks: &[&[Site]] = &[HOOKS, MOVE_HOOKS, TRACE_HOOKS, ATTACK_HOOKS, STATS_HOOKS, KEYBLADE_HOOKS, MODEL_HOOKS, M6_HOOKS, M6_PACE_HOOKS, M6_DECK_HOOKS, M6_DECK_READERS, M6_BOSS_HOOKS, MP_HOOKS, MP_BAR_HOOKS, KH1_HUD_HOOKS, KH1_HUD_PARTY_HOOKS, KH1_HUD_CURSOR_HOOKS, KH1_HUD_POPUP_HOOKS, KH1_HUD_PLATE_HOOKS, MAGIC_HOOKS, UNLOCK_HOOKS, MENU_SOUND_HOOKS, ITEM_HOOKS, DROP_HOOKS, GIMMICK_HOOKS, SHOP_HOOKS, SPECIAL_HOOKS, STORY_SKIP_HOOKS, REVENGE_HOOKS, SHADOW_HOOKS, SOLDIER_HOOKS, AIRSOLDIER_HOOKS, POWERWILD_HOOKS, DARKBALL_HOOKS, BANDIT_HOOKS, AIRPIRATE_HOOKS, WYVERN_HOOKS, SEARCHGHOST_HOOKS, PIRATE_HOOKS, LARGEBODY_HOOKS, NEOSHADOW_HOOKS, WIGHTKNIGHT_HOOKS, FATBANDIT_HOOKS, GARGOYLE_HOOKS, KH1_ENEMY_RING_HOOKS, DEFENDER_HOOKS, BOUNCYWILD_HOOKS, REDNOCTURNE_HOOKS, BLUERHAPSODY_HOOKS, GREENREQUIEM_HOOKS, YELLOWOPERA_HOOKS, CAMERA_HOOKS, LOCK_ON_HOOK];
         for h in hooks.iter().flat_map(|l| l.iter()) {
             assert!(h.expect.len() >= 5 && h.expect.len() + 14 <= crate::hookplan::STUB_AT, "{}", h.name);
             assert!(!h.expect.windows(2).any(|w| w == [0x8B, 0x05] || w == [0x8D, 0x05] || w == [0x8B, 0x0D] || w == [0x10, 0x05]), "{}", h.name);

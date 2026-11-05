@@ -15,7 +15,7 @@
 //! we used to add there (Combat, Guard reactions, Enemy pace) moved here.
 //! See `docs/recom-config-menu.md`.
 
-use crate::settings::{Mode, RollMode, Settings};
+use crate::settings::{Camera, Mode, RollMode, Settings};
 
 /// Item slots in `camp+0xB38` (21 pointers, cleared and deleted by Re:CoM's own code in draw
 /// modes 6 and 9 and in the camp's teardown `0x1400D7C20`). Checked (decomp: every reference to
@@ -48,6 +48,9 @@ pub enum Page {
     Movement,
     /// M13: KH1's or Re:CoM's effects and sounds on Sora's KH1 moves (ini `effects` / `sounds`).
     EffectsSound,
+    /// M12 camera: Re:CoM's or KH1's player camera (ini `camera`; owner, 2026-11-04: "a new
+    /// Settings > Camera page", independent of Combat).
+    Camera,
 }
 
 /// A row of a settings page: one `kh1-recom.ini` key.
@@ -75,6 +78,8 @@ pub enum Item {
     Effects,
     /// `sounds` (M13)
     Sounds,
+    /// `camera` (M12 camera)
+    Camera,
 }
 
 /// When a change takes effect (from what reads the setting; `docs/recom-config-menu.md`).
@@ -87,7 +92,7 @@ pub enum Effect {
 }
 
 impl Page {
-    pub const ALL: [Page; 3] = [Page::Combat, Page::Movement, Page::EffectsSound];
+    pub const ALL: [Page; 4] = [Page::Combat, Page::Movement, Page::EffectsSound, Page::Camera];
 
     /// Its rows, top to bottom (owner, 2026-11-03).
     pub fn items(self) -> &'static [Item] {
@@ -95,6 +100,7 @@ impl Page {
             Page::Combat => &[Item::Combat, Item::GuardReactions, Item::EnemyPace, Item::EnemyAi, Item::RevengeValue],
             Page::Movement => &[Item::RunSpeed, Item::JumpHeight, Item::AirSpeed, Item::DodgeRoll],
             Page::EffectsSound => &[Item::Effects, Item::Sounds],
+            Page::Camera => &[Item::Camera],
         }
     }
 
@@ -106,6 +112,7 @@ impl Page {
             // The owner's name. Re:CoM's escape expander copies bytes under 0x81 as they are
             // (`0x1403480C0`, Checked (decomp)); that its font has a `&` glyph is an Assumption.
             Page::EffectsSound => b"Effects & Sound\0",
+            Page::Camera => b"Camera\0",
         }
     }
 
@@ -115,6 +122,7 @@ impl Page {
             Page::Combat => b"Combat, Guard reactions, enemy pace and AI, Revenge Value.\0",
             Page::Movement => b"Run speed, jump height, air speed and Dodge roll.\0",
             Page::EffectsSound => b"KH1's or Re:CoM's effects and sounds on Sora's KH1 moves.\0",
+            Page::Camera => b"Re:CoM's camera or KH1's.\0",
         }
     }
 }
@@ -153,6 +161,7 @@ impl Item {
             Item::DodgeRoll => b"Dodge roll\0",
             Item::Effects => b"Effects\0",
             Item::Sounds => b"Sounds\0",
+            Item::Camera => b"Camera\0",
         }
     }
 
@@ -188,6 +197,7 @@ impl Item {
             Item::DodgeRoll => b"Re:CoM's roll, KH1's roll, or Off (Square guards). KH1 only.\0",
             Item::Effects => b"KH1: KH1's Keyblade trails and finisher effects. KH1 only.\0",
             Item::Sounds => b"KH1: KH1's swing and finisher sounds. KH1 only.\0",
+            Item::Camera => b"KH1: KH1's follow camera, right stick and R3 recenter.\0",
         }
     }
 
@@ -213,6 +223,7 @@ impl Item {
             Item::DodgeRoll => "dodge_roll",
             Item::Effects => "effects",
             Item::Sounds => "sounds",
+            Item::Camera => "camera",
         }
     }
 
@@ -234,6 +245,10 @@ impl Item {
             },
             Item::Effects => mode_index(s.effects),
             Item::Sounds => mode_index(s.sounds),
+            Item::Camera => match s.camera {
+                Camera::Recom => 0,
+                Camera::Kh1 => 1,
+            },
         }
     }
 
@@ -259,6 +274,7 @@ impl Item {
             }
             Item::Effects => s.effects = mode_of(v),
             Item::Sounds => s.sounds = mode_of(v),
+            Item::Camera => s.camera = if v == 1 { Camera::Kh1 } else { Camera::Recom },
         }
     }
 }
@@ -403,7 +419,8 @@ mod tests {
         assert_eq!(labels(Page::EffectsSound), ["Effects", "Sounds"], "M13; Voices once voices exist");
         assert_eq!((Page::Combat.label(), Page::Movement.label(), Page::EffectsSound.label()), (&b"Combat\0"[..], &b"Movement\0"[..], &b"Effects & Sound\0"[..]));
         let keys: Vec<&str> = Page::ALL.iter().flat_map(|p| p.items().iter().map(|i| i.key())).collect();
-        assert_eq!(keys, ["combat", "guard_reactions", "enemy_pace", "enemy_ai", "boss_revenge", "run_speed", "jump_height", "air_speed", "dodge_roll", "effects", "sounds"]);
+        assert_eq!(keys, ["combat", "guard_reactions", "enemy_pace", "enemy_ai", "boss_revenge", "run_speed", "jump_height", "air_speed", "dodge_roll", "effects", "sounds", "camera"]);
+        assert_eq!(labels(Page::Camera), ["Camera"], "M12 camera stage 1");
         // Damage stays ini-only (owner).
         assert!(!keys.contains(&"damage"));
     }
@@ -417,6 +434,8 @@ mod tests {
         assert_eq!(slots_used(Page::Combat), 15);
         assert_eq!(slots_used(Page::Movement), 11);
         assert_eq!(slots_used(Page::EffectsSound), 6);
+        assert_eq!(slots_used(Page::Camera), 3);
+        assert_eq!(Item::Camera.options(), RECOM_KH1);
         assert!(Page::EffectsSound.items().iter().all(|i| i.style() == Style::Pair && i.options() == RECOM_KH1));
         assert_eq!(Item::DodgeRoll.style(), Style::Single);
         assert!(Page::Combat.items().iter().all(|i| i.style() == Style::Pair));

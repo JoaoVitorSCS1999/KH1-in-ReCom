@@ -69,6 +69,7 @@ pub mod abilities;
 pub mod attack;
 pub mod battle;
 pub mod boss;
+pub mod camera;
 pub mod camp_rows;
 pub mod command_menu;
 pub mod customize;

@@ -65,6 +65,37 @@ impl RollMode {
     }
 }
 
+/// The camera (M12 camera, owner, 2026-11-04: "Lets also have an option in the config to switch
+/// between Re:CoM camera, KH1 Camera, And KH2 camera"; answers: a Settings > Camera page,
+/// independent of Combat, default Re:CoM). `crate::camera`, `docs/recom-m12-camera-plan.md`.
+/// - `Recom` (the default): Re:CoM's player camera, untouched;
+/// - `Kh1`: KH1's follow camera as Re:CoM camera modes (`crate::camera::kh1`);
+/// KH2's camera comes at its own stage (`camera = kh2` is read as Re:CoM's until then, with a
+/// warning).
+///
+/// Riku's story and boss fights with Re:CoM's boss camera keep Re:CoM's camera at any value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Camera {
+    Recom,
+    Kh1,
+}
+
+impl Camera {
+    pub fn parse(v: &str) -> Option<Camera> {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "recom" => Some(Camera::Recom),
+            "kh1" => Some(Camera::Kh1),
+            _ => None,
+        }
+    }
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Camera::Recom => "recom",
+            Camera::Kh1 => "kh1",
+        }
+    }
+}
+
 fn parse_switch(v: &str) -> Option<bool> {
     match v.trim().to_ascii_lowercase().as_str() {
         "on" | "1" | "true" | "yes" => Some(true),
@@ -112,6 +143,9 @@ pub struct Settings {
     /// M13: at `combat = kh1`, `Kh1` (the default) plays KH1's swing and finisher sounds for Sora's
     /// KH1 moves; `Recom` Re:CoM's. Read at each motion start.
     pub sounds: Mode,
+    /// M12 camera: the player camera ([`Camera`]); the camp's Settings > Camera page. Read every
+    /// frame by the camera's dispatcher (`crate::camera`), at any Combat setting.
+    pub camera: Camera,
     /// The camp menu's "KH1" entry (and the Config input wrapper it runs through). `off` leaves
     /// Re:CoM's camp menu untouched (a safety switch; the settings then come from this file only).
     /// The key keeps its old name (it once added rows to Re:CoM's Config menu).
@@ -279,7 +313,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, config_menu: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, config_menu: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Recom, hud_parts: HudParts::default() }
     }
 }
 
@@ -337,6 +371,12 @@ effects = kh1
 ;   kh1:   KH1's swing and finisher sounds on Sora's KH1 moves (Re:CoM's steps and voices stay).
 ;   recom: Re:CoM's.
 sounds = kh1
+;
+; camera = recom | kh1 (any combat setting, Sora's story; also the camp's Settings > Camera page)
+;   recom: Re:CoM's camera.
+;   kh1:   KH1's camera: its follow (look point, distance 4 m, pitch 10 degrees, FOV 53), its
+;          right-stick turning and R3 recenter. Sleights, summons and boss cameras stay Re:CoM's.
+camera = recom
 ;
 ; config_menu = on | off
 ;   off: no KH1 entry in the camp menu: Re:CoM's camp menu untouched (use this file instead).
@@ -477,6 +517,11 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(m) => s.effects = m,
                 None => warnings.push(bad("effects must be kh1 or recom")),
             },
+            "camera" => match Camera::parse(v) {
+                Some(c) => s.camera = c,
+                None if v.trim().eq_ignore_ascii_case("kh2") => warnings.push(bad("camera = kh2 is not built yet: Re:CoM's camera")),
+                None => warnings.push(bad("camera must be recom or kh1")),
+            },
             "sounds" => match Mode::parse(v) {
                 Some(m) => s.sounds = m,
                 None => warnings.push(bad("sounds must be kh1 or recom")),
@@ -616,6 +661,7 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "boss_revenge", switch_str(s.boss_revenge));
     let t = set_key(&t, "effects", s.effects.as_str());
     let t = set_key(&t, "sounds", s.sounds.as_str());
+    let t = set_key(&t, "camera", s.camera.as_str());
     let mut t = set_key(&t, "config_menu", switch_str(s.config_menu));
     let a = s.abilities;
     for (k, v) in [("high_jump", a.high_jump), ("glide", a.glide), ("superglide", a.superglide), ("guard", a.guard), ("counterattack", a.counterattack)] {
@@ -748,7 +794,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, config_menu: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);

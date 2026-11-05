@@ -50,6 +50,23 @@ pub unsafe fn place_data_near(near: usize, data: &[u8]) -> Option<usize> {
     Some(block)
 }
 
+/// `code` (at most 0x1000 bytes, built for the address it gets) placed in executable memory within
+/// rel32 reach of `near`; its address. Never freed (Re:CoM may run or read it at any time).
+pub unsafe fn place_built_near(near: usize, len: usize, build: impl FnOnce(usize) -> Vec<u8>) -> Option<usize> {
+    if len == 0 || len > 0x1000 {
+        return None;
+    }
+    let block = alloc_near_len(near, len)?;
+    let code = build(block);
+    if code.len() != len {
+        VirtualFree(block as *mut c_void, 0, MEM_RELEASE);
+        return None;
+    }
+    std::ptr::copy_nonoverlapping(code.as_ptr(), block as *mut u8, len);
+    FlushInstructionCache(GetCurrentProcess(), block as *const c_void, len);
+    Some(block)
+}
+
 /// Writes `new` over `at` if the bytes there are `expect` (code or data; same length).
 pub unsafe fn patch(at: usize, expect: &[u8], new: &[u8], what: &str) -> bool {
     if expect.len() != new.len() || expect.is_empty() {
