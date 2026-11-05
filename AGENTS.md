@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 250: M12 camera stage 4: KH2's follow camera as mode 8 (Camera row Re:CoM / KH1 / KH2; KH2's Auto behind the Auto camera row; lengths × 0.89), version 0.138.0 (2026-11-05)
+
+Owner, 2026-11-04 (`design-philosophy-instructions.md` § Camera answers: "KH2's numbers scaled ×0.89", "An "Auto camera: On / Off" row for KH1 and KH2", each game's own Normal, re-place after an event). Stage 4 of `docs/recom-m12-camera-plan.md`. Camera = KH2 only; Camera = Re:CoM / KH1 unchanged.
+
+- **KH2** (Checked (KH2 Steam decomp + exe)): frame `0x140166100`; follow `0x140165110` (look 170 above the feet; eye `0x140164520` at d on the height curve eye.y = look.y + 150 − (d − 250)² · 0.008, yaw ≤ 10° a frame `0x140718BE4`); row 0 `0x140718C00` (FOV 1.5 rad, 420 / 380 / 250..500); right stick `0x14039C180` (60 dead zone per axis, bits, tilt), turn 3° `0x140718BF0`, zoom 8 `0x1401654D0`, option swaps bits 7 / 8; R3 reset (logical 0x20000: behind, 420, a cut with the left stick held); swing-behind (`0x140718BE8` / `BEC`, distance back 0.5); wall `0x140164940` (+5 along the normal); springs `0x140165BD0` from the view `0x140165700` (eye 8.75 %, look 16.25 % a frame, mouse 50 %); re-place `0x140164FA0`. FOV: KH2's focal 320 / tan(0.75) = Re:CoM's 256 · cot(73.39° / 2) (`0x14019DDE0`, `0x14024FCB0`, `0x14023E720`, `0x140821ADC` = 384).
+- **Change** (`camera::kh2`, `camera::{Family::Kh2, dispatch, records}`, `win::camera::kh2_step`, `settings::Camera::Kh2`, `menu` Camera row 3 values): mode 8 with its record (FOV 73.39, look 1.513 m, eye 3.738 m back 0.723 m up) in the existing block's slot 2; Re:CoM's 1 / 3 / 4 and our 6 / 7 switch to 8 at Camera = KH2 through Re:CoM's `0x1401FBE60`; KH2's step in its own numbers on a world ÷ 0.89 (every length × 0.89), Re:CoM's sweep for its rays; entries: new camera = KH2's room start, back from another camera = its re-place, Re:CoM's setter = carry on from the drawn view. Left stick from Re:CoM's pad device `+0x74` / `+0x78`. No new hook, patch or site. KH2's follow stays on while locked (stage 5).
+- Not carried (owner questions): R2 held swapping Auto / Manual (R2 is Re:CoM's lock-on at Combat = Re:CoM); Select's first person; KH2's map data (no-zoom areas, camera volumes, attribute-5 walls); the mouse's |d · 10| multipliers (1).
+- Per frame (Camera = KH2): KH2's math 62 ns (Linux release, 10⁶ frames); 2 Re:CoM sweeps (Re:CoM's follow: 1). Not measured in game.
+- Assumptions: KH2 Sora's run value `+0x12C` = 8 (the run terms 0); Re:CoM's keyboard / mouse flag for KH2's mouse mode; the sweep's normal (stage 2's); both PC ports widen the frame alike; KH2's handedness is KH1's; R3 = Re:CoM's 0x400.
+- Corrected: the stage 1–3 KH2 notes' "R3 → mode 1" is Select → first person; R3 is the reset.
+- Checked: tests (`camera::tests` 7 new + `cost_of_a_kh2_step`; `menu` / `settings`), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings). Not checked: in game; no KH2 camera trace. Asset step: not needed. Docs: `recom-m12-camera-plan.md` § 16.
+
+---
+
 ## Stage 249: KH1's lock rules on R1 at Combat = KH1 on a controller (R1 again unlocks at once; L2 steps through KH1's lock list; R1 with no target does nothing) through Re:CoM's own lock-on, version 0.137.0 (2026-11-05)
 
 Owner, 2026-11-04 (`design-philosophy-instructions.md` § Lock-on rules and camera walls), verbatim: "1. B 2. dont worry about iit": KH1's lock rules on R1 at Combat = KH1 (controller): R1 again unlocks at once; L2 steps through targets (KH1's); no hold-style Config row; button prompts as they are. Keyboard / mouse, Combat = Re:CoM and Riku's story: Re:CoM's.

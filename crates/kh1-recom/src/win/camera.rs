@@ -1,4 +1,4 @@
-//! M12 camera: KH1's follow camera as modes of Re:CoM's own `CPlayerCamera` (`crate::camera`,
+//! M12 camera: KH1's and KH2's cameras as modes of Re:CoM's own `CPlayerCamera` (`crate::camera`,
 //! `docs/recom-m12-camera-plan.md`).
 //!
 //! - **Records:** a block near the exe holds two stubs at Re:CoM's record-table reads (its mode
@@ -6,7 +6,7 @@
 //!   other mode Re:CoM's table, and each of our mode sets is counted (an entry for our step).
 //! - **Dispatch:** the camera init's two `lea`s (the only references to its field / battle execs)
 //!   point at our dispatcher. Camera = Re:CoM with a Re:CoM mode: Re:CoM's exec (one atomic load and
-//!   one compare). Our mode: Re:CoM's battle-exec record restore, our KH1 step, then Re:CoM's own
+//!   one compare). Our mode: Re:CoM's battle-exec record restore, our KH1 / KH2 step, then Re:CoM's own
 //!   tail (collision object `0x1401FC0D0`, the eye node, the view `0x14024FA40`), as its execs end.
 //!   Re:CoM's base follows (1 / 3 / 4) switch to ours with Re:CoM's own `0x1401FBE60`; a sleight's
 //!   request (`+0x188 & 0x2000`) and Re:CoM's timed view 2 are never replaced; sleights give our mode
@@ -17,12 +17,12 @@
 use super::hook;
 use super::log;
 use super::movement::{func, rd, rd_vec, wr};
-use crate::camera::{self, kh1, mode, Dispatch, Family};
+use crate::camera::{self, kh1, kh2, mode, Dispatch, Family};
 use kh1_core::Vec3;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-/// The setting (0 Re:CoM, 1 KH1), read by the dispatcher each frame.
+/// The setting (0 Re:CoM, 1 KH1, 2 KH2), read by the dispatcher each frame.
 static CHOICE: AtomicU32 = AtomicU32::new(0);
 /// The Auto camera row (stage 2).
 static AUTO: AtomicBool = AtomicBool::new(true);
@@ -137,6 +137,8 @@ struct Live {
     /// The mode our step ran last frame, and the lock handle then.
     mode: i32,
     handle: i32,
+    /// KH2's camera (modes 8 / 9).
+    kh2: kh2::Cam,
 }
 
 static LIVE: Mutex<Option<Live>> = Mutex::new(None);
@@ -152,6 +154,7 @@ pub(super) fn set_choice(c: crate::settings::Camera) {
     let v = match Family::from_setting(c) {
         Family::Recom => 0,
         Family::Kh1 => 1,
+        Family::Kh2 => 2,
     };
     CHOICE.store(v, Ordering::Release);
 }
@@ -164,7 +167,16 @@ pub(super) fn set_auto(on: bool) {
 fn choice() -> Family {
     match CHOICE.load(Ordering::Acquire) {
         1 => Family::Kh1,
+        2 => Family::Kh2,
         _ => Family::Recom,
+    }
+}
+
+fn family_name(f: Family) -> &'static str {
+    match f {
+        Family::Recom => "Re:CoM's",
+        Family::Kh1 => "KH1",
+        Family::Kh2 => "KH2",
     }
 }
 
@@ -259,13 +271,13 @@ unsafe extern "win64" fn init(cam: usize) {
     let battle = rd::<usize>(cam + f::STATE) == cam + f::BATTLE_STATE;
     let want = camera::wanted(choice(), riku, battle && boss_camera());
     if let Ok(mut g) = LIVE.lock() {
-        *g = Some(Live { cam, follow: kh1::Follow::default(), seen: entries(), drawn: false, behind: true, mode: 0, handle: 0 });
+        *g = Some(Live { cam, follow: kh1::Follow::default(), seen: entries(), drawn: false, behind: true, mode: 0, handle: 0, kh2: kh2::Cam::default() });
     }
     if want != Family::Recom {
         let m = want.base(battle);
         func::<SetPlaceFn>(SET_PLACE)(cam, m, 0, 0);
         wr::<i32>(cam + f::SAVED_MODE, m);
-        note(&format!("camera: {} camera made in mode {m} ({})", if battle { "battle" } else { "field" }, "KH1 follow"));
+        note(&format!("camera: {} camera made in mode {m} ({} follow)", if battle { "battle" } else { "field" }, family_name(want)));
     }
 }
 
@@ -303,7 +315,7 @@ unsafe fn exec(cam: usize, battle: bool) {
             if flags & f::EXTERNAL == 0 {
                 wr::<i32>(cam + f::SAVED_MODE, to);
             }
-            note(&format!("camera: mode {m} -> {to} ({})", if mode::ours(to) { "KH1 follow" } else { "Re:CoM's" }));
+            note(&format!("camera: mode {m} -> {to} ({})", family_name(Family::of(to))));
             if mode::ours(to) {
                 step(cam, battle);
             } else {
@@ -393,7 +405,7 @@ unsafe fn wr4(at: usize, v: [f32; 4]) {
 }
 
 /// One frame of our mode: what Re:CoM's battle exec does before its step (the sleight records'
-/// restore), the KH1 step, then Re:CoM's tail.
+/// restore), the KH1 or KH2 step, then Re:CoM's tail.
 unsafe fn step(cam: usize, battle: bool) {
     let player: usize = rd(cam + f::PLAYER);
     if player == 0 {
@@ -441,7 +453,7 @@ unsafe fn step(cam: usize, battle: bool) {
     let drawn = rd::<usize>(super::va(super::base(), CAMERA_STACK)) == cam;
     let Ok(mut g) = LIVE.lock() else { return };
     if g.as_ref().map(|l| l.cam) != Some(cam) {
-        *g = Some(Live { cam, follow: kh1::Follow::default(), seen: count, drawn, behind: true, mode: 0, handle: 0 });
+        *g = Some(Live { cam, follow: kh1::Follow::default(), seen: count, drawn, behind: true, mode: 0, handle: 0, kh2: kh2::Cam::default() });
     }
     let Some(l) = g.as_mut() else { return };
     let m: i32 = rd(cam + f::MODE);
@@ -451,6 +463,11 @@ unsafe fn step(cam: usize, battle: bool) {
     }
     let drawn_eye = crate::units::to_kh1(rd_vec(cam + f::EYE));
     let drawn_aim = crate::units::to_kh1(rd_vec(cam + f::AIM));
+    if Family::of(m) == Family::Kh2 {
+        let (e, k) = kh2_step(l, cam, m, count, drawn, drawn_eye, drawn_aim, &inp, &mut world);
+        drop(g);
+        return finish(cam, e, k);
+    }
     if l.behind {
         l.follow.behind(&inp, &mut world);
         l.behind = false;
@@ -495,8 +512,54 @@ unsafe fn step(cam: usize, battle: bool) {
         l.follow.step(&inp, &mut world);
     }
     let (e, k) = l.follow.view(inp.step);
-    let (look, eye) = (camera::to_recom4(k), camera::to_recom4(e));
     drop(g);
+    finish(cam, e, k);
+}
+
+/// KH2's frame (modes 8 / 9): its entries, then its step. `eye` / `aim`: the view Re:CoM drew last.
+#[allow(clippy::too_many_arguments)]
+unsafe fn kh2_step(l: &mut Live, cam: usize, m: i32, count: u32, drawn: bool, eye: Vec3, aim: Vec3, k1: &kh1::Input, world: &mut RecomWorld) -> (Vec3, Vec3) {
+    let mouse = k1.mouse;
+    let dev: usize = rd(super::va(super::base(), crate::sites::data::PAD_DEVICES));
+    let (lx, ly) = if dev != 0 { (rd::<i32>(dev + 0x74), rd::<i32>(dev + 0x78)) } else { (0, 0) };
+    let (swap_h, swap_v) = kh2::swaps(rd(cam + f::INV_H), rd(cam + f::INV_V));
+    let inp = kh2::Input {
+        pos: k1.pos,
+        facing: k1.facing,
+        right: kh2::Stick::from_recom(func::<AxisFn>(STICK_X)(0), func::<AxisFn>(STICK_Y)(0), mouse),
+        // KH2's left stick is the pad's own (`pad+0x30..0x3C`), never the mouse.
+        left: kh2::Stick::from_recom(lx, ly, false),
+        mouse,
+        can_act: k1.can_act,
+        reset: k1.recenter,
+        swap_h,
+        swap_v,
+        step: k1.step,
+        auto: k1.auto,
+    };
+    if l.behind {
+        // A new camera: KH2's room start (the loader's 420, then its re-place).
+        l.kh2.behind(&inp, true);
+        l.behind = false;
+        note("camera: KH2 camera placed behind Sora (new camera)");
+    } else if drawn && !l.drawn {
+        // Back from another camera (events, `.cam` paths): KH2's re-place `0x140164FA0` (owner Q4 (b)).
+        l.kh2.behind(&inp, false);
+        note("camera: KH2 camera placed behind Sora (back from another camera)");
+    } else if count != l.seen && !(Family::of(l.mode) == Family::Kh2 && l.mode != m) {
+        // Re:CoM's setter gave us the mode (a sleight's restore, a switch from Re:CoM's camera):
+        // KH2 carries on from the view drawn.
+        l.kh2.carry_on(eye, aim);
+    }
+    l.seen = count;
+    l.drawn = drawn;
+    l.mode = m;
+    l.kh2.step(&inp, world)
+}
+
+/// The step's eye and look (KH1 units) into Re:CoM's camera, then Re:CoM's tail.
+unsafe fn finish(cam: usize, e: Vec3, k: Vec3) {
+    let (look, eye) = (camera::to_recom4(k), camera::to_recom4(e));
     wr4(cam + f::AIM, look);
     wr4(cam + f::AIM_GOAL, look);
     wr4(cam + f::EYE, eye);

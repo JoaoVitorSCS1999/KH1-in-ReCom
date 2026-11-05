@@ -7,7 +7,8 @@ plan with the owner before building.") Lock-on on R1 at Combat = KH1 is another 
 this plan only covers what the camera does while a lock is on.
 
 **Status:** the owner answered § 10 (`design-philosophy-instructions.md` § Camera answers) and
-asked for the five stages. Built: stage 1 (0.134.0, § 13), stage 2 (0.135.0, § 14), stage 3 (0.136.0, § 15).
+asked for the five stages. Built: stage 1 (0.134.0, § 13), stage 2 (0.135.0, § 14), stage 3 (0.136.0, § 15),
+stage 4 (0.138.0, § 16).
 
 Steam addresses for all three games. Tags: **Checked (exe / decomp / files)** = read;
 **Assumption** = inferred, to check. KH1 roles marked "(Epic notes)" come from
@@ -650,3 +651,91 @@ rules are the R1 lock-on work's (Re:CoM's lock state is what the camera reads).
   75 dead zone of the anchor 3.5 m behind, the look 1 m past the target; the 90 % close; the 10°
   cap), `mode_blends_and_relock` (the 60 blend's weights, the re-lock blend, the unlock's 45 blend
   and entry), the dispatcher's 6 ↔ 7 rows.
+
+---
+
+## 16. Stage 4 built (0.138.0): KH2's follow camera (mode 8), its Auto behind the Auto camera row
+
+Owner's answers: KH2's lengths × 0.89 for KH1's Sora (Q9 (b)); the Auto camera row for KH1 and KH2
+(Q6 (b)); each game's own Normal on Re:CoM's inversion rows (Q5 (a)); KH2's re-place after an event
+(Q4 (b)). KH2 Steam exe: the owner's `KINGDOM HEARTS II FINAL MIX.exe`; decomp `kh2decomp`.
+
+- **Row**: Camera is a three-value row **Re:CoM / KH1 / KH2** (Re:CoM's single-value row, as Dodge
+  roll); ini `camera = kh2` (no longer a warning). Auto camera row: KH1's or KH2's Auto.
+- **Native shape**: as stages 1–3. Mode 8 has a record in the block (`camera::records` slot 2; slot
+  3 for mode 9 the same until stage 5): Re:CoM's setters set its FOV and rest. `camera::dispatch`
+  switches Re:CoM's 1 / 3 / 4 (and our 6 / 7) to 8 at Camera = KH2 with Re:CoM's `0x1401FBE60`; the
+  step (`camera::kh2::Cam::step`) replaces Re:CoM's step, Re:CoM's tail runs. No new hook, patch or
+  site. At stage 4 the KH2 follow stays on while locked (stage 5 brings mode 9).
+- **Units**: KH2's step runs in KH2's own numbers on a world shrunk by 1 / 0.89 (positions in ÷ 0.89,
+  out × 0.89, Re:CoM's sweeps in KH1 units): every length below is applied × 0.89, angles, rates
+  and screen margins as they are.
+
+### KH2's camera (KH2 Steam; Checked (decomp) unless tagged)
+
+| What | KH2 | × 0.89 in Re:CoM |
+|---|---|---|
+| Frame (`0x140166100`) | last goals ← goals; mode 0 the follow `0x140165110`; the view `0x140165700` | — |
+| Row 0 `0x140718C00` (Checked (exe)), loader `0x140165A70` | FOV 1.5 rad, default 420, lock 380, range 250..500, k 0.008 | 373.8 / 338.2 / 222.5..445 units; k ÷ 0.89 |
+| Look goal | Sora's feet − 170 (y down) | 1.513 m above the feet |
+| Eye goal `0x140164520` | yaw to its goal ≤ 10° a frame (`0x140718BE4`, Checked (exe)) unless a cut; eye = look + Ry(yaw)·(0, 0, d); eye.y = look.y + 150 − (d − 250)² · k | at 420: 3.738 m back, 0.723 m over the look point |
+| Right stick (`0x14039C180`, table `0x1405C34F0`) | per axis: byte − 127.5 less 60 (`0x140BF3338`), over 67.5; a direction bit once past 60; tilt = |(x, y)| ≤ 1; the mouse 1 | Re:CoM's ints → bytes (`units::byte_from_recom_axis`) |
+| Turn | right / left bit: yaw and goal ± tilt · 3° (`0x140718BF0`, Checked (exe)) · step | as KH2 |
+| Zoom `0x1401654D0` | up / down bit: d ∓ tilt · 8 · step, clamped 250..500 (no pitch: the height curve) | 7.12 a frame |
+| Options | bit 7 (`0x1402E5330`) swaps left / right, bit 8 (`0x1402E5350`) up / down: KH2's Normal turns + with the stick right and zooms in with it up, as KH1's Normal | `kh2::swaps` from Re:CoM's `+0x2F0` / `+0x2F4` |
+| Reset (logical `0x20000` = raw `0x4`, R3 in the PS2 order) | goal = behind Sora (`0x140164E90`: facing + π), d = 420, the drawn eye to the eye goal; a cut (yaw at once, view snapped `0x140164D70`) when the left stick is held | Re:CoM's reset bit 0x400 (Assumption R3, § 2.4) |
+| Swing-behind (auto `cam+0x42`, Sora moved in x / z `0x1403B8940`, left tilt ≠ 0, right tilt 0, left y < 0.9, no cut) | yaw and goal toward behind by ≤ 2 (|lx| + 1)(|ly| + 1) · tilt · ((run − 8) · 0.00017453 + 0.0043633) · step (`0x140718BEC` / `BE8`, Checked (exe)); d back toward 420 at 0.5 · step (only 1 or more away), clamped | 0.445 a frame; run = 8 (Assumption: KH2 Sora's `+0x12C` in his base form, KH2-Combat-in-KH1's notes; writer not found): about 1° a frame pushing straight on |
+| Wall `0x140164940` (ray `0x140171210`) | look goal → eye goal: the eye at the hit + 5 along the polygon normal | Re:CoM's sweep (stage 2's normal, Assumption) + 4.45 units |
+| Springs `0x140165BD0` | cur += n · ((v·w)/|v| · 0.5 + (1 − |v|) · 2.5) · rate, v = cur − goal, w = (last goal − goal) · rate; rate 0.07 + (run − 8) · 0.0006 (mouse mode `0x142B44A88`: 0.4 / 0.0018), halved at step < 2; the look point rate + 0.03: **eye 8.75 %, look 16.25 % of (gap − 1) a frame**, resting 1 away; mouse 50 % / 57.5 % | rest gap 0.89 units; Re:CoM's keyboard / mouse flag for KH2's mouse mode (Assumption) |
+| View wall (mode 0) | drawn look → drawn eye: a hit moves the drawn eye and becomes the eye goal | as KH2 |
+| Re-place `0x140164FA0` (room start `0x140164C60` → the loader's 420, `0x140164CB0`) | yaw = goal = behind, look goal, eye goal, snapped; no wall test | a new camera: room start; back from another camera: the re-place, distance kept |
+| Frame step `0x140717480` | 1.0 (Checked (exe)) | Re:CoM's `+0x14` × 0.02 = 1.0 |
+
+**FOV** (Checked (decomp + exe), both games): KH2's `0x14019DDE0` (param 0) gives focal
+(512 / 0.8) / 2 / tan(fov / 2) = 320 / tan(0.75) on its 640 × 480 frame (its view `0x14019D050`:
+0.8 / 0.8667 → 640 × 480; vertical 69.87°); Re:CoM's `0x14024FCB0` gives focal 256 · cot(fov / 2)
+on its own 640 × 480 (`0x14023E720` with 512 / 0.8 and `0x140821ADC` = 384 / 0.8). The same focal
+in Re:CoM's record: **2 atan(0.8 · tan 0.75) = 73.39°** (69.87° vertical in both). That both PC
+ports widen 16:9 the same way: Assumption (as KH1's 53).
+
+**Corrected from the stage 1–3 notes** (`/home/claude/kh2-cam-findings.md`): the pad bit with
+`0x1403BA300` is **logical 0x400000 = raw Select (0x1)**: KH2's first person (mode 1, the ±70°
+`0x140718BF8` / `BFC` state), not R3; R3 is the reset (logical 0x20000). KH2's stick bits come
+past a **60 dead zone per axis** (47 % of a half tilt), the speed is the stick's tilt.
+
+### Not carried (each an owner question or Re:CoM has no data)
+
+- Select's first person (mode 1, `0x140165E30`): scope, as KH1's.
+- KH2's R2 held (logical `0x100000000`, raw `0x200`) swapping Auto / Manual for as long as it is
+  held (`0x140178AE0`), and letting the zoom work in areas that forbid it: R2 is Re:CoM's lock-on at
+  Combat = Re:CoM; not carried (question).
+- KH2's no-zoom areas (`0x1403BABF0`, an actor flag from the map), its camera volumes
+  (`0x140167A50`), its attribute-5 polygons in the wall test, the mouse's speed multipliers
+  (`cam+0` / `+4` = |d · 10|: no Re:CoM mouse delta; 1, as stage 1).
+
+### In Re:CoM
+
+- Entries (`win::camera::kh2_step`): a new camera → KH2's room start; the camera drawn again after
+  another camera → KH2's re-place; a mode set by Re:CoM's setters (a sleight's restore, a switch
+  from Re:CoM's or KH1's camera) → KH2 carries on from the view Re:CoM drew (KH2 has no entry: its
+  mode changes, its springs carry the view).
+- The left stick: Re:CoM's pad device `+0x74` / `+0x78` (`sites::data::PAD_DEVICES`, what Sora
+  moves by), through KH2's dead zone.
+- Riku's story, Camera = Re:CoM, boss cameras, sleights / summons / specials: as stages 1–3.
+
+### Per frame (Camera = KH2)
+
+KH2's math **62 ns a frame** (Linux release, 10⁶ frames, `camera::tests::cost_of_a_kh2_step`;
+KH1's measured 152 ns in the same run); Re:CoM's camera sweep **2 times a frame** (the goal's wall
+ray, the drawn eye's) against 1 in Re:CoM's follow; Re:CoM's tail once. Not measured in game.
+Camera = Re:CoM: unchanged (one load, one compare).
+
+### Tests
+
+`camera::tests::kh2_records_and_rest_pose` (FOV 73.39°, the rest pose 1.513 / 3.738 / 0.723 m, the
+dispatch rows, the swaps), `kh2_sticks_are_per_axis_past_60`,
+`kh2_turns_3_degrees_and_zooms_8_on_its_height_curve` (3° and half tilt, 8 a frame to 250 where the
+eye is 150 under the look point, 500, the swapped row), `kh2_reset_turns_at_most_10_degrees_or_cuts`,
+`kh2_swings_behind_a_running_sora` (1° a frame, 0.5 back, not with the right stick / pulled back /
+Auto off / standing), `kh2_springs_close_the_gap_at_its_rates` (8.75 % / 16.25 %, rest 1, the moving
+goal's term), `kh2_wall_puts_the_eye_5_off_the_wall`; `menu` (the 3-value row) / `settings` tests.

@@ -48,8 +48,8 @@ pub enum Page {
     Movement,
     /// M13: KH1's or Re:CoM's effects and sounds on Sora's KH1 moves (ini `effects` / `sounds`).
     EffectsSound,
-    /// M12 camera: Re:CoM's or KH1's player camera (ini `camera`; owner, 2026-11-04: "a new
-    /// Settings > Camera page", independent of Combat).
+    /// M12 camera: Re:CoM's, KH1's or KH2's player camera (ini `camera`; owner, 2026-11-04: "a
+    /// new Settings > Camera page", independent of Combat).
     Camera,
 }
 
@@ -124,7 +124,7 @@ impl Page {
             Page::Combat => b"Combat, Guard reactions, enemy pace and AI, Revenge Value.\0",
             Page::Movement => b"Run speed, jump height, air speed and Dodge roll.\0",
             Page::EffectsSound => b"KH1's or Re:CoM's effects and sounds on Sora's KH1 moves.\0",
-            Page::Camera => b"Re:CoM's camera or KH1's, and KH1's Auto camera.\0",
+            Page::Camera => b"Re:CoM's, KH1's or KH2's camera, and their Auto camera.\0",
         }
     }
 }
@@ -132,6 +132,7 @@ impl Page {
 const RECOM_KH1: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0"];
 const OFF_ON: &[&[u8]] = &[b"Off\0", b"On\0"];
 const ROLL: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"Off\0"];
+const CAMERAS: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"KH2\0"];
 
 fn mode_index(m: Mode) -> usize {
     match m {
@@ -173,6 +174,7 @@ impl Item {
         match self {
             Item::GuardReactions | Item::RevengeValue | Item::AutoCamera => OFF_ON,
             Item::DodgeRoll => ROLL,
+            Item::Camera => CAMERAS,
             _ => RECOM_KH1,
         }
     }
@@ -200,8 +202,8 @@ impl Item {
             Item::DodgeRoll => b"Re:CoM's roll, KH1's roll, or Off (Square guards). KH1 only.\0",
             Item::Effects => b"KH1: KH1's Keyblade trails and finisher effects. KH1 only.\0",
             Item::Sounds => b"KH1: KH1's swing and finisher sounds. KH1 only.\0",
-            Item::Camera => b"KH1: KH1's follow camera, right stick and R3 recenter.\0",
-            Item::AutoCamera => b"On: the KH1 camera swings behind Sora and turns along walls.\0",
+            Item::Camera => b"Re:CoM's camera, KH1's, or KH2's (its distances x 0.89).\0",
+            Item::AutoCamera => b"On: the KH1 / KH2 camera swings behind Sora as he runs.\0",
         }
     }
 
@@ -253,6 +255,7 @@ impl Item {
             Item::Camera => match s.camera {
                 Camera::Recom => 0,
                 Camera::Kh1 => 1,
+                Camera::Kh2 => 2,
             },
             Item::AutoCamera => s.auto_camera as usize,
         }
@@ -280,7 +283,13 @@ impl Item {
             }
             Item::Effects => s.effects = mode_of(v),
             Item::Sounds => s.sounds = mode_of(v),
-            Item::Camera => s.camera = if v == 1 { Camera::Kh1 } else { Camera::Recom },
+            Item::Camera => {
+                s.camera = match v {
+                    1 => Camera::Kh1,
+                    2 => Camera::Kh2,
+                    _ => Camera::Recom,
+                }
+            }
             Item::AutoCamera => s.auto_camera = v == 1,
         }
     }
@@ -441,9 +450,10 @@ mod tests {
         assert_eq!(slots_used(Page::Combat), 15);
         assert_eq!(slots_used(Page::Movement), 11);
         assert_eq!(slots_used(Page::EffectsSound), 6);
-        assert_eq!(slots_used(Page::Camera), 6);
+        assert_eq!(slots_used(Page::Camera), 5);
         assert_eq!(Item::AutoCamera.options(), OFF_ON);
-        assert_eq!(Item::Camera.options(), RECOM_KH1);
+        assert_eq!(Item::Camera.options(), CAMERAS, "M12 camera stage 4: Re:CoM / KH1 / KH2");
+        assert_eq!(Item::Camera.style(), Style::Single, "a single row like Dodge roll");
         assert!(Page::EffectsSound.items().iter().all(|i| i.style() == Style::Pair && i.options() == RECOM_KH1));
         assert_eq!(Item::DodgeRoll.style(), Style::Single);
         assert!(Page::Combat.items().iter().all(|i| i.style() == Style::Pair));

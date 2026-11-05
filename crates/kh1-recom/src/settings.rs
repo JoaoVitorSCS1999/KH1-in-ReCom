@@ -70,14 +70,14 @@ impl RollMode {
 /// independent of Combat, default Re:CoM). `crate::camera`, `docs/recom-m12-camera-plan.md`.
 /// - `Recom` (the default): Re:CoM's player camera, untouched;
 /// - `Kh1`: KH1's follow camera as Re:CoM camera modes (`crate::camera::kh1`);
-/// KH2's camera comes at its own stage (`camera = kh2` is read as Re:CoM's until then, with a
-/// warning).
+/// - `Kh2`: KH2's camera as Re:CoM camera modes (`crate::camera::kh2`), its lengths × 0.89.
 ///
 /// Riku's story and boss fights with Re:CoM's boss camera keep Re:CoM's camera at any value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Camera {
     Recom,
     Kh1,
+    Kh2,
 }
 
 impl Camera {
@@ -85,6 +85,7 @@ impl Camera {
         match v.trim().to_ascii_lowercase().as_str() {
             "recom" => Some(Camera::Recom),
             "kh1" => Some(Camera::Kh1),
+            "kh2" => Some(Camera::Kh2),
             _ => None,
         }
     }
@@ -92,6 +93,7 @@ impl Camera {
         match self {
             Camera::Recom => "recom",
             Camera::Kh1 => "kh1",
+            Camera::Kh2 => "kh2",
         }
     }
 }
@@ -376,16 +378,19 @@ effects = kh1
 ;   recom: Re:CoM's.
 sounds = kh1
 ;
-; camera = recom | kh1 (any combat setting, Sora's story; also the camp's Settings > Camera page)
+; camera = recom | kh1 | kh2 (any combat setting, Sora's story; also the camp's Settings > Camera
+;   page)
 ;   recom: Re:CoM's camera.
 ;   kh1:   KH1's camera: its follow (look point, distance 4 m, pitch 10 degrees, FOV 53), its
 ;          right-stick turning and R3 recenter. Sleights, summons and boss cameras stay Re:CoM's.
+;   kh2:   KH2's camera (its distances x 0.89 for KH1's Sora): distance 3.7 m on its height
+;          curve, right stick turns (left / right) and zooms (up / down), R3 resets behind Sora.
 camera = recom
 ;
-; auto_camera = on | off (camera = kh1; the Camera page's Auto camera row)
+; auto_camera = on | off (camera = kh1 or kh2; the Camera page's Auto camera row)
 ;   on:  KH1's Auto camera: it swings behind Sora while he runs, turns along walls, keeps him in
-;        sight and recenters when squeezed.
-;   off: KH1's Manual camera (the stick and R3 only).
+;        sight and recenters when squeezed. KH2's: it swings behind Sora while he runs.
+;   off: KH1's / KH2's Manual camera (the stick and R3 only).
 auto_camera = on
 ;
 ; config_menu = on | off
@@ -529,8 +534,7 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
             },
             "camera" => match Camera::parse(v) {
                 Some(c) => s.camera = c,
-                None if v.trim().eq_ignore_ascii_case("kh2") => warnings.push(bad("camera = kh2 is not built yet: Re:CoM's camera")),
-                None => warnings.push(bad("camera must be recom or kh1")),
+                None => warnings.push(bad("camera must be recom, kh1 or kh2")),
             },
             "auto_camera" => match parse_switch(v) {
                 Some(b) => s.auto_camera = b,
