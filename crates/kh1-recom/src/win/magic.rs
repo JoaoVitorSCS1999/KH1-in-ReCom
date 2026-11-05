@@ -473,6 +473,11 @@ pub unsafe fn start_cast(pl: usize, c: &CastStart) -> bool {
         _ => rd::<i32>(pl + f::ATTACK_STAT),
     };
     wr(pl + f::AP, ap);
+    // Enemy Skills route 2: Cure's heal through Re:CoM's hit rewrite, as `initMagic` runs it for
+    // Re:CoM's Cure (Green Requiem, Wizard; battle only).
+    if c.spell == mg::spell::CURE {
+        wr(pl + f::AP, super::enemy_skills::spell_rewrite(pl, c.spell, c.level, ap));
+    }
     wr(pl + f::KIND, r[0xB] as u32);
     wr(pl + f::ATTR, RECOM_ATTR[c.spell as usize % 7]);
     // Damage = Re:CoM (owner, 2026-11-01), in battle: Fire / Blizzard / Thunder take their Re:CoM

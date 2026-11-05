@@ -1418,6 +1418,44 @@ pub const ENEMY_SKILL_PATCHES: &[Patch] = &[
 /// `0x140225D86`. Checked (exe): no branch into the 10 bytes.
 pub const ENEMY_SKILL_STUB_SITES: &[Site] = &[Site { name: "Double Strike power read (0x140225D7C)", rva: 0x0022_5D7C, expect: &[0x0F, 0xBF, 0x83, 0x88, 0x02, 0x00, 0x00, 0x89, 0x45, 0xA0] }];
 
+/// Enemy Skills stage 3 (`win::enemy_skills`, `docs/recom-enemy-skills.md` § Stage 3 (built)): Re:CoM's
+/// hit rewrite `0x14015D5F0(CBTL, record)`, wrapped to run once per equipped skill of route 2 with its id
+/// in Sora's slot. `push rbx; sub rsp,0x20` (6 bytes). Checked (exe): 6 direct calls, no branch into the
+/// moved bytes.
+pub const ENEMY_SKILL_REWRITE_HOOK: &[Site] = &[Site { name: "enemy-card hit rewrite (0x14015D5F0)", rva: 0x0015_D5F0, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20] }];
+
+/// Enemy Skills stage 3: the rewrite's constants the owner's numbers replace, each switched at a battle
+/// start to a jump to a stub of ours reading its constant from a cell (Re:CoM's value but while our
+/// wrapper runs Sora's skills): Zexion's 25 %, Lexaeus' 67 %, Demyx's × 2, Defender's and Ursula's ÷ 2.
+/// Checked (exe): no branch or jump-table entry into any of them.
+pub const ENEMY_SKILL_REWRITE_SITES: &[Site] = &[
+    // cmp r8d,0x19; jge 0x14015D83C (Zexion's roll).
+    Site { name: "rewrite: Zexion's chance (0x14015D70A)", rva: 0x0015_D70A, expect: &[0x41, 0x83, 0xF8, 0x19, 0x0F, 0x8D, 0x28, 0x01, 0x00, 0x00] },
+    // cmp r8d,0x43; jge 0x14015D83C (Lexaeus' roll).
+    Site { name: "rewrite: Lexaeus' chance (0x14015D74C)", rva: 0x0015_D74C, expect: &[0x41, 0x83, 0xF8, 0x43, 0x0F, 0x8D, 0xE6, 0x00, 0x00, 0x00] },
+    // movzx eax,word [rbx+0x14]; add ax,ax; mov [rbx+0x14],ax (Demyx's × 2).
+    Site { name: "rewrite: Demyx's factor (0x14015D831)", rva: 0x0015_D831, expect: &[0x0F, 0xB7, 0x43, 0x14, 0x66, 0x03, 0xC0, 0x66, 0x89, 0x43, 0x14] },
+    // movsx eax,word [rbx+0x14]; cdq; sub eax,edx; sar eax,1 (Defender's ÷ 2).
+    Site { name: "rewrite: Defender's cut (0x14015D66A)", rva: 0x0015_D66A, expect: &[0x0F, 0xBF, 0x43, 0x14, 0x99, 0x2B, 0xC2, 0xD1, 0xF8] },
+    // The same for Ursula.
+    Site { name: "rewrite: Ursula's cut (0x14015D64D)", rva: 0x0015_D64D, expect: &[0x0F, 0xBF, 0x43, 0x14, 0x99, 0x2B, 0xC2, 0xD1, 0xF8] },
+];
+
+/// Enemy Skills stage 3: where the stubs go back to (read only).
+pub const ENEMY_SKILL_REWRITE_CHECKED: &[Site] = &[
+    Site { name: "rewrite: Zexion's confuse (0x14015D714)", rva: 0x0015_D714, expect: &[0xC7, 0x43, 0x08, 0x0A, 0x00, 0x00, 0x00] },
+    Site { name: "rewrite: Lexaeus' warp (0x14015D756)", rva: 0x0015_D756, expect: &[0xC7, 0x43, 0x08, 0x1F, 0x00, 0x00, 0x00] },
+    Site { name: "rewrite: Defender's store (0x14015D673)", rva: 0x0015_D673, expect: &[0x66, 0x89, 0x43, 0x14, 0xB8, 0x01, 0x00, 0x00, 0x00] },
+    Site { name: "rewrite: Ursula's store (0x14015D656)", rva: 0x0015_D656, expect: &[0x66, 0x89, 0x43, 0x14, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3] },
+    // mov eax,0x51EB851F; imul ecx; sar edx,5; mov eax,edx; shr eax,0x1F; add edx,eax; mov [rbx+0x14],dx; ret.
+    Site {
+        name: "rewrite: the ÷ 100 tail (0x14015D7D6)",
+        rva: 0x0015_D7D6,
+        expect: &[0xB8, 0x1F, 0x85, 0xEB, 0x51, 0xF7, 0xE9, 0xC1, 0xFA, 0x05, 0x8B, 0xC2, 0xC1, 0xE8, 0x1F, 0x03, 0xD0, 0x66, 0x89, 0x53, 0x14, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3],
+    },
+    Site { name: "rewrite: its return (0x14015D83C)", rva: 0x0015_D83C, expect: &[0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3] },
+];
+
 /// M9 stage 9a (`win::abilities`, `docs/recom-m9-abilities.md`): Re:CoM's "this sleight is
 /// learned" test, called for the abilities that unlock with Re:CoM's sleights. Only called, never
 /// hooked.
@@ -4134,6 +4172,9 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         ENEMY_SKILL_CALLEES,
         ENEMY_SKILL_CHECKED,
         ENEMY_SKILL_STUB_SITES,
+        ENEMY_SKILL_REWRITE_HOOK,
+        ENEMY_SKILL_REWRITE_SITES,
+        ENEMY_SKILL_REWRITE_CHECKED,
         M12_CALLEES,
         M12_CHECKED,
         SPECIAL_HOOKS,
@@ -5179,7 +5220,7 @@ mod tests {
         assert_eq!(ours, 0x1_4000_0000 + ENEMY_SKILL_CHECKED[5].rva as i64);
         assert_eq!(f32::from_le_bytes(ENEMY_SKILL_CHECKED[5].expect[..4].try_into().unwrap()), numbers::WIDE_SCALE);
         // No other site's bytes overlap a site rewritten at run time.
-        let switched: Vec<&Site> = p.iter().map(|q| &q.site).chain(ENEMY_SKILL_STUB_SITES).collect();
+        let switched: Vec<&Site> = p.iter().map(|q| &q.site).chain(ENEMY_SKILL_STUB_SITES).chain(ENEMY_SKILL_REWRITE_SITES).chain(ENEMY_SKILL_REWRITE_HOOK).collect();
         for x in &switched {
             let (a0, a1) = (x.rva, x.rva + x.expect.len() as u32);
             for s in all_sites().filter(|s| s.rva != x.rva) {
@@ -5187,6 +5228,34 @@ mod tests {
                 assert!(a1 <= b0 || b1 <= a0, "{} overlaps {}", x.name, s.name);
             }
         }
+    }
+
+    /// Enemy Skills stage 3: the rewrite's hook, its stub sites and where the stubs go back; the stubs'
+    /// targets are those sites (`crate::skill_effects::rewrite`).
+    #[test]
+    fn enemy_skill_rewrite_sites() {
+        use crate::skill_effects::rewrite as rw;
+        for s in ENEMY_SKILL_REWRITE_HOOK.iter().chain(ENEMY_SKILL_REWRITE_SITES).chain(ENEMY_SKILL_REWRITE_CHECKED) {
+            assert_eq!(all_sites().filter(|x| x.rva == s.rva).count(), 1, "{}", s.name);
+        }
+        let va = |s: &Site| 0x1_4000_0000u64 + s.rva as u64;
+        let (z, l, dm, df, du) = (&ENEMY_SKILL_REWRITE_SITES[0], &ENEMY_SKILL_REWRITE_SITES[1], &ENEMY_SKILL_REWRITE_SITES[2], &ENEMY_SKILL_REWRITE_SITES[3], &ENEMY_SKILL_REWRITE_SITES[4]);
+        // The rolls' constants are Re:CoM's cells; their jge goes to the return; the stubs come back
+        // right after each site.
+        assert_eq!(z.expect[3] as i32, rw::RECOM_CELLS[0]);
+        assert_eq!(l.expect[3] as i32, rw::RECOM_CELLS[1]);
+        for s in [z, l] {
+            assert_eq!(va(s) + 10 + i32::from_le_bytes(s.expect[6..10].try_into().unwrap()) as u64, rw::SKIP);
+        }
+        assert_eq!(va(z) + 10, rw::RET_ZEXION);
+        assert_eq!(va(l) + 10, rw::RET_LEXAEUS);
+        assert_eq!(va(dm) + 11, rw::SKIP, "Demyx falls through to the return");
+        assert_eq!(va(df) + 9, rw::RET_DEFENDER);
+        assert_eq!(va(du) + 9, rw::RET_URSULA);
+        let c = ENEMY_SKILL_REWRITE_CHECKED;
+        assert_eq!((va(&c[0]), va(&c[1]), va(&c[2]), va(&c[3]), va(&c[4]), va(&c[5])), (rw::RET_ZEXION, rw::RET_LEXAEUS, rw::RET_DEFENDER, rw::RET_URSULA, rw::DIV100_TAIL, rw::SKIP));
+        assert_eq!(c[0].expect[3] as u32, rw::CONFUSE);
+        assert_eq!(c[1].expect[3] as u32, rw::WARP);
     }
 
     /// Lucky Bounty at KH1: Pluto's find, its outcome switch and the calls it makes.

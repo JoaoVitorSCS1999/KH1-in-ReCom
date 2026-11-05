@@ -58,6 +58,25 @@ pub const BUILT: &[(u16, &[u8])] = &[
     (card::ROXAS, b"Double Strike: each swing strikes again at half power.\0"),
 ];
 
+/// Stage 3, route 2 (the hit rewrite `0x14015D5F0`): the skills Re:CoM's rewrite tests, in card
+/// order (Hades is KH1's Berserk, built in stage 1, and stays out).
+pub const BUILT_3: &[(u16, &[u8])] = &[
+    (0x47, b"Fire Boost: Fire magic does 1.5 times the damage.\0"),
+    (0x48, b"Blizzard Boost: Blizzard magic does 1.5 times the damage.\0"),
+    (0x49, b"Thunder Boost: Thunder magic does 1.5 times the damage.\0"),
+    (0x4A, b"Cure Boost: Cure restores 1.5 times the HP.\0"),
+    (0x51, b"Drain: Sora's swings drain HP from the foes they hit.\0"),
+    (0x5A, b"Protect: physical attacks do a quarter less damage to Sora.\0"),
+    (0x5C, b"Magic Boost: magic does 1.3 times the damage.\0"),
+    (0x62, b"Summon Boost: summons do 1.3 times the damage.\0"),
+    (0x6B, b"Shell: Fire, Blizzard and Thunder do a quarter less to Sora.\0"),
+    (0x6D, b"Overdrive: Sora's swings do 1.5 times the damage.\0"),
+    (0x73, b"Warp Break: a combo finisher may warp a foe away (not bosses).\0"),
+    (0x75, b"Confu-Strike: Sora's swings may confuse the foes they hit.\0"),
+    (0x77, b"Shot Charge: Fire, Blizzard and Gravity do 1.5 times the damage.\0"),
+    (0x7A, b"Water Charge: Blizzard and water attacks do 1.75 times the damage.\0"),
+];
+
 /// The help line of a built skill (None: not built here).
 pub const fn built_help(card: u16) -> Option<&'static [u8]> {
     let mut k = 0;
@@ -67,7 +86,153 @@ pub const fn built_help(card: u16) -> Option<&'static [u8]> {
         }
         k += 1;
     }
+    let mut k = 0;
+    while k < BUILT_3.len() {
+        if BUILT_3[k].0 == card {
+            return Some(BUILT_3[k].1);
+        }
+        k += 1;
+    }
     None
+}
+
+/// The equipped route-2 skills (bit k = `BUILT_3[k]`).
+pub fn rewrite_mask(equipped: Bits) -> u32 {
+    BUILT_3.iter().enumerate().filter(|(_, (c, _))| on(equipped, *c)).fold(0, |m, (k, _)| m | 1 << k)
+}
+
+/// The card ids of a route-2 mask, in card order (the order Re:CoM's rewrite runs them).
+pub fn rewrite_ids(mask: u32) -> impl Iterator<Item = u8> {
+    BUILT_3.iter().enumerate().filter(move |(k, _)| mask & (1 << k) != 0).map(|(_, (c, _))| *c as u8)
+}
+
+/// Stage 3: Re:CoM's hit rewrite `0x14015D5F0(CBTL, record)` and the owner's numbers in it.
+pub mod rewrite {
+    /// The 0x20-byte record (`0x140160F90` + its callers `0x1401E66A0` / `0x1401E67B0`).
+    pub const SIDE: usize = 0;
+    pub const HANDLE: usize = 4;
+    pub const KIND: usize = 8;
+    pub const ATTR: usize = 0xC;
+    pub const MODE: usize = 0x10;
+    pub const STATUS: usize = 0x12;
+    pub const AP: usize = 0x14;
+    pub const HP: usize = 0x16;
+    pub const MAX_HP: usize = 0x18;
+    pub const FINISHER: usize = 0x1A;
+    pub const ATTACK_CARD: usize = 0x1E;
+    /// Sora's slot `CBTL+0x1E8` (byte; < 0x44: none).
+    pub const SLOT: usize = 0x1E8;
+    /// Re:CoM's reaction kinds the rewrite writes: Drain, Warp Break, Confu-Strike.
+    pub const DRAIN: u32 = 0x15;
+    pub const WARP: u32 = 0x1F;
+    pub const CONFUSE: u32 = 10;
+
+    /// The owner's numbers in the cells our stubs read: Zexion's chance (Re:CoM 25 %, `cmp r8d,
+    /// 0x19` at `0x14015D70A`), Lexaeus' (67 %, `0x14015D74C`), Demyx's factor (× 2, `add ax,ax` at
+    /// `0x14015D831`), Defender's and Ursula's (÷ 2, `0x14015D66A` / `0x14015D64D`), in %.
+    pub const RECOM_CELLS: [i32; 5] = [25, 67, 200, 50, 50];
+    pub const OWNER_CELLS: [i32; 5] = [10, 15, 175, 75, 75];
+    /// Where each stub goes back (or jumps) in Re:CoM's rewrite.
+    pub const RET_ZEXION: u64 = 0x1_4015_D714;
+    pub const RET_LEXAEUS: u64 = 0x1_4015_D756;
+    pub const SKIP: u64 = 0x1_4015_D83C;
+    /// Re:CoM's ÷ 100 tail (`ecx` = the product; stores `[rbx+0x14]`, returns).
+    pub const DIV100_TAIL: u64 = 0x1_4015_D7D6;
+    pub const RET_DEFENDER: u64 = 0x1_4015_D673;
+    pub const RET_URSULA: u64 = 0x1_4015_D656;
+}
+
+/// A mode-1 record as `0x1401E66A0` builds it for Sora (side 1): `+0x1E` "attack card" for
+/// situations 1..7 (`player+0x630`), `+0x1A` too for 4 / 7 (the finishers). Checked (decomp).
+#[allow(clippy::too_many_arguments)]
+pub fn hit_record(handle: u32, kind: u32, attr: u32, status: u16, ap: i32, hp: i32, max_hp: i32, situation: u32) -> [u8; 0x20] {
+    use rewrite::*;
+    let mut r = [0u8; 0x20];
+    r[SIDE..SIDE + 4].copy_from_slice(&1u32.to_le_bytes());
+    r[HANDLE..HANDLE + 4].copy_from_slice(&handle.to_le_bytes());
+    r[KIND..KIND + 4].copy_from_slice(&kind.to_le_bytes());
+    r[ATTR..ATTR + 4].copy_from_slice(&attr.to_le_bytes());
+    r[MODE..MODE + 2].copy_from_slice(&1u16.to_le_bytes());
+    r[STATUS..STATUS + 2].copy_from_slice(&status.to_le_bytes());
+    r[AP..AP + 2].copy_from_slice(&(ap.clamp(i16::MIN as i32, i16::MAX as i32) as i16).to_le_bytes());
+    r[HP..HP + 2].copy_from_slice(&(hp as i16).to_le_bytes());
+    r[MAX_HP..MAX_HP + 2].copy_from_slice(&(max_hp as i16).to_le_bytes());
+    if matches!(situation, 4 | 7) {
+        r[FINISHER] = 1;
+    }
+    if matches!(situation, 1..=7) {
+        r[ATTACK_CARD] = 1;
+    }
+    r
+}
+
+/// Re:CoM's ÷ 100 (`mov eax,0x51EB851F; imul ecx; sar edx,5; shr; add`): C's truncating division.
+pub fn recom_div100(x: i32) -> i32 {
+    let q = ((x as i64 * 0x51EB_851F) >> 32) as i32 >> 5;
+    q + ((q as u32) >> 31) as i32
+}
+
+/// The stub block (`win::enemy_skills`, placed near the rewrite): the five cells, then the five
+/// stubs, each Re:CoM's instructions with its constant read from its cell. Returns the bytes and
+/// each stub's offset (Zexion, Lexaeus, Demyx, Defender, Ursula).
+pub fn rewrite_block(at: u64) -> (Vec<u8>, [usize; 5]) {
+    use rewrite::*;
+    let mut b = vec![0u8; 0x20];
+    for (k, v) in RECOM_CELLS.iter().enumerate() {
+        b[k * 4..k * 4 + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    let rel = |from_end: usize, to: u64| -> [u8; 4] { ((to as i64 - (at as i64 + from_end as i64)) as i32).to_le_bytes() };
+    let cell = |k: usize| at + k as u64 * 4;
+    let mut offs = [0usize; 5];
+    // Zexion / Lexaeus: cmp r8d,[cell]; jge skip; jmp back.
+    for (k, back) in [(0usize, RET_ZEXION), (1, RET_LEXAEUS)] {
+        offs[k] = b.len();
+        b.extend([0x44, 0x3B, 0x05]);
+        let e = b.len() + 4;
+        b.extend(rel(e, cell(k)));
+        b.extend([0x0F, 0x8D]);
+        let e = b.len() + 4;
+        b.extend(rel(e, SKIP));
+        b.push(0xE9);
+        let e = b.len() + 4;
+        b.extend(rel(e, back));
+    }
+    // Demyx: movsx eax,[rbx+0x14]; imul eax,[cell]; mov ecx,eax; jmp Re:CoM's ÷ 100 tail.
+    offs[2] = b.len();
+    b.extend([0x0F, 0xBF, 0x43, 0x14, 0x0F, 0xAF, 0x05]);
+    let e = b.len() + 4;
+    b.extend(rel(e, cell(2)));
+    b.extend([0x8B, 0xC8, 0xE9]);
+    let e = b.len() + 4;
+    b.extend(rel(e, DIV100_TAIL));
+    // Defender / Ursula: movsx eax,[rbx+0x14]; imul eax,[cell]; Re:CoM's ÷ 100 into eax; jmp back.
+    for (k, back) in [(3usize, RET_DEFENDER), (4, RET_URSULA)] {
+        offs[k] = b.len();
+        b.extend([0x0F, 0xBF, 0x43, 0x14, 0x0F, 0xAF, 0x05]);
+        let e = b.len() + 4;
+        b.extend(rel(e, cell(k)));
+        b.extend([0x8B, 0xC8, 0xB8, 0x1F, 0x85, 0xEB, 0x51, 0xF7, 0xE9, 0xC1, 0xFA, 0x05, 0x8B, 0xC2, 0xC1, 0xE8, 0x1F, 0x03, 0xC2, 0xE9]);
+        let e = b.len() + 4;
+        b.extend(rel(e, back));
+    }
+    (b, offs)
+}
+
+/// A rewrite site's bytes in a KH1 battle: `jmp stub`, then nops to its length.
+pub fn jump_to(at: u64, stub: u64, len: usize) -> Vec<u8> {
+    let mut v = vec![0xE9];
+    v.extend(((stub as i64 - (at as i64 + 5)) as i32).to_le_bytes());
+    v.resize(len, 0x90);
+    v
+}
+
+/// Lexaeus "never bosses": a hit whose kind Warp Break made 0x1F takes its kind from before on a
+/// boss (Re:CoM's class name `CBoss…`).
+pub fn warp_kind(kind: u32, from: Option<u32>, rtti: &str) -> u32 {
+    match from {
+        Some(k) if kind == rewrite::WARP && rtti.starts_with(".?AVCBoss") => k,
+        _ => kind,
+    }
 }
 
 /// KH1's level-72 Treasure Magnet copy (Sora's list): the same effect as Bouncywild's.
@@ -310,9 +475,16 @@ mod tests {
         }
         // Treasure Magnet's level-72 copy is built with Bouncywild's.
         assert!(crate::abilities::built(ix::TREASURE_MAGNET[1]));
-        // Stage 2's fifteen (Dragon Maleficent's ×1.5 is the hit rewrite's, stage 3).
+        // Stage 2's fourteen; stage 3's fourteen (Dragon Maleficent's ×1.5 the hit rewrite's).
         assert_eq!(BUILT.len(), 14);
-        assert!(built_help(0x6D).is_none());
+        assert_eq!(BUILT_3.len(), 14);
+        for (c, h) in BUILT_3 {
+            let s = of_card(*c).unwrap_or_else(|| panic!("{c:#x}"));
+            assert!(s.built && s.help == *h, "{}", s.name);
+        }
+        assert!(BUILT_3.windows(2).all(|w| w[0].0 < w[1].0));
+        assert!(built_help(0x68).is_none() && of_card(0x68).unwrap().built, "Hades: stage 1's Berserk");
+        assert!(!BUILT_3.iter().any(|(c, _)| *c == 0x68));
         assert!(SKILLS.iter().filter(|s| s.built).count() >= 4 + 14);
     }
 
@@ -362,6 +534,77 @@ mod tests {
         assert_eq!(crate::damage::attack_bonus(f, combo_boost_before(3, f, 40)), 60);
         // Without the flag: 0 (Re:CoM's own rule).
         assert_eq!(combo_boost_before(3, 0, 40), 0);
+    }
+
+    #[test]
+    fn route_2_masks_and_records() {
+        let m = rewrite_mask(bit(0x47) | bit(0x7A) | bit(card::ROXAS));
+        assert_eq!(rewrite_ids(m).collect::<Vec<_>>(), vec![0x47, 0x7A]);
+        assert_eq!(rewrite_mask(0), 0);
+        // 0x1401E66A0's rule: situations 1..7 attack cards, 4 / 7 also finishers.
+        let r = hit_record(0x1234, 1, 0, 0x4, 300, 50, 100, 4);
+        assert_eq!(u32::from_le_bytes(r[0..4].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(r[0x10..0x12].try_into().unwrap()), 1);
+        assert_eq!(i16::from_le_bytes(r[0x14..0x16].try_into().unwrap()), 300);
+        assert_eq!((r[0x1A], r[0x1E]), (1, 1));
+        let r = hit_record(0, 1, 0, 0, 40000, 0, 0, 0);
+        assert_eq!((r[0x1A], r[0x1E]), (0, 0), "a spell: situation 0");
+        assert_eq!(i16::from_le_bytes(r[0x14..0x16].try_into().unwrap()), i16::MAX);
+        assert_eq!(hit_record(0, 1, 0, 0, 1, 0, 0, 2)[0x1A], 0);
+        assert_eq!(warp_kind(0x1F, Some(1), ".?AVCBossLexaeus@@"), 1);
+        assert_eq!(warp_kind(0x1F, Some(1), ".?AVCEnemyShadow@@"), 0x1F);
+        assert_eq!(warp_kind(0x1F, None, ".?AVCBossLexaeus@@"), 0x1F);
+    }
+
+    /// The rewrite's stubs: at Re:CoM's cells every result is Re:CoM's own; at the owner's, the
+    /// owner's numbers.
+    #[test]
+    fn the_rewrite_stubs() {
+        use rewrite::*;
+        // Re:CoM's ÷ 100 is C's truncating division.
+        for x in [-32768 * 200, -1999, -150, -1, 0, 1, 99, 150, 1999, 32767 * 200] {
+            assert_eq!(recom_div100(x), x / 100, "{x}");
+        }
+        for x in i16::MIN as i32..=i16::MAX as i32 {
+            // Demyx: Re:CoM's `add ax,ax` (16 bits) = the stub's x × 200 ÷ 100 (16 bits stored).
+            assert_eq!((x as i16).wrapping_add(x as i16), recom_div100(x * RECOM_CELLS[2]) as i16, "{x}");
+            // Defender / Ursula: Re:CoM's `cdq; sub; sar 1` = x × 50 ÷ 100.
+            assert_eq!((x - (x >> 31)) >> 1, recom_div100(x * RECOM_CELLS[3]), "{x}");
+        }
+        assert_eq!(recom_div100(100 * OWNER_CELLS[2]) as i16, 175);
+        assert_eq!(recom_div100(100 * OWNER_CELLS[3]), 75);
+        // `cmp r8d, cell; jge skip`: hit when the roll (0..99) is below the cell.
+        assert_eq!(RECOM_CELLS[0], 0x19);
+        assert_eq!(RECOM_CELLS[1], 0x43);
+        let at = 0x1_4000_0000u64 - 0x2_0000;
+        let (b, offs) = rewrite_block(at);
+        let rel = |o: usize| at as i64 + o as i64 + 4 + i32::from_le_bytes(b[o..o + 4].try_into().unwrap()) as i64;
+        for k in 0..5 {
+            assert_eq!(i32::from_le_bytes(b[k * 4..k * 4 + 4].try_into().unwrap()), RECOM_CELLS[k]);
+        }
+        for (k, back) in [(0usize, RET_ZEXION), (1, RET_LEXAEUS)] {
+            let o = offs[k];
+            assert_eq!(&b[o..o + 3], &[0x44, 0x3B, 0x05]);
+            assert_eq!(rel(o + 3), (at + k as u64 * 4) as i64);
+            assert_eq!(&b[o + 7..o + 9], &[0x0F, 0x8D]);
+            assert_eq!(rel(o + 9), SKIP as i64);
+            assert_eq!(b[o + 13], 0xE9);
+            assert_eq!(rel(o + 14), back as i64);
+        }
+        let o = offs[2];
+        assert_eq!(rel(o + 7), (at + 8) as i64);
+        assert_eq!(rel(o + 14), DIV100_TAIL as i64);
+        for (k, back) in [(3usize, RET_DEFENDER), (4, RET_URSULA)] {
+            let o = offs[k];
+            assert_eq!(rel(o + 7), (at + k as u64 * 4) as i64);
+            assert_eq!(b[o + 30], 0xE9);
+            assert_eq!(rel(o + 31), back as i64);
+            assert_eq!(o + 35, if k == 3 { offs[4] } else { b.len() });
+        }
+        let j = jump_to(0x1_4015_D70A, at + offs[0] as u64, 10);
+        assert_eq!(j.len(), 10);
+        assert_eq!(0x1_4015_D70Fi64 + i32::from_le_bytes(j[1..5].try_into().unwrap()) as i64, (at + offs[0] as u64) as i64);
+        assert!(j[5..].iter().all(|&x| x == 0x90));
     }
 
     #[test]

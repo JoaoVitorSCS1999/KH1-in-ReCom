@@ -1501,28 +1501,28 @@ mod tests {
         sync(&mut s, 99, NO_RECOM, &mut |_| false);
         assert_eq!(s.unlocked & CARD_BITS, 0);
         assert_eq!(to_core(s.unlocked).combo_plus, 2, "only the level copies (93, 99)");
-        // The cards Sora has: Hook, Zexion, Creeper Plant (and Shadow, which has no skill).
+        // The cards Sora has: Hook, Gold Card, Creeper Plant (and Shadow, which has no skill).
         let mut asked = Vec::new();
         let r = sync_with(&mut s, 99, NO_RECOM, &mut |_| false, &mut |c| {
             asked.push(c);
-            [0x6C, 0x75, 0x60, 0x44].contains(&c)
+            [0x6C, 0x7D, 0x60, 0x44].contains(&c)
         });
-        assert_eq!(names(r.new), vec!["Creeper Plant", "Hook", "Zexion"]);
+        assert_eq!(names(r.new), vec!["Creeper Plant", "Hook", "Gold Card"]);
         assert!(!asked.contains(&0x44), "a left-out card is never asked");
         assert_eq!(s.equipped, 0, "KH1's rule: unequipped");
         // Hook's skill is Second Chance, Creeper Plant's Leaf Bracer: their effects.
         assert_eq!(skill(0x6C), ix::SECOND_CHANCE);
         assert_eq!(skill(0x60), ix::LEAF_BRACER);
-        // The page: a third owner row; Enemy Skills by card kind; Zexion greyed (not built).
+        // The page: a third owner row; Enemy Skills by card kind; Gold Card greyed (not built).
         let mut sc = Screen::default();
         assert_eq!(sc.rows(&s).iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Owner(Owner::Sora), Label::Owner(Owner::Shared), Label::Owner(Owner::EnemySkills), Label::Owner(Owner::Sleights)]);
         sc.set_cursor(2);
         assert_eq!(sc.confirm(&mut s), Outcome::Opened);
         let rows = sc.rows(&s);
-        assert_eq!(rows.iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Ability(ix::LEAF_BRACER), Label::Ability(ix::SECOND_CHANCE), Label::Ability(skill(0x75))]);
+        assert_eq!(rows.iter().map(|r| r.label).collect::<Vec<_>>(), vec![Label::Ability(ix::LEAF_BRACER), Label::Ability(ix::SECOND_CHANCE), Label::Ability(skill(0x7D))]);
         assert!(!rows[0].grey && !rows[1].grey && rows[2].grey);
         sc.set_cursor(2);
-        assert_eq!(sc.confirm(&mut s), Outcome::NotBuilt(skill(0x75)));
+        assert_eq!(sc.confirm(&mut s), Outcome::NotBuilt(skill(0x7D)));
         assert_eq!(s.equipped, 0);
         // Equip Hook (5 AP) and Creeper Plant (5): 10 of 23; their status panel cost.
         sc.set_cursor(1);

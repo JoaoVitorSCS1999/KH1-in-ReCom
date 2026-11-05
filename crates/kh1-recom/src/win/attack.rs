@@ -842,6 +842,8 @@ pub unsafe extern "win64" fn enemy_hit(enemy: usize) -> u64 {
     if !mv::kh1_on() {
         return orig::<PlRetFn>(&ORIG_ENEMY_HIT)(enemy);
     }
+    // Enemy Skills (Lexaeus, "never bosses"): Warp Break's kind taken back on a boss.
+    super::enemy_skills::warp_guard(enemy);
     let hp: i32 = rd(enemy + 0x274);
     // M11 (the Red Nocturne, owner 2026-11-03): its own fire sent back takes Re:CoM's stun (the hit as Re:CoM's stun
     // kind for its handler), then the hit to its script.
@@ -931,6 +933,8 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
     }
     // Enemy Skills: Fat Bandit's Back Attack, Re:CoM's doubling from behind on KH1's number.
     let kh1 = if pl != 0 { kh1.map(|d| super::enemy_skills::back_attack_kh1(pl, carried as i32, d)) } else { kh1 };
+    // Enemy Skills route 2 at Damage = KH1: KH1's number through Re:CoM's hit rewrite, as Re:CoM's swing AP.
+    let kh1 = if pl != 0 { kh1.map(|d| super::enemy_skills::kh1_swing_hit(pl, enemy, part, d)) } else { kh1 };
     if let Some(d) = kh1 {
         wr(part + 0x92, d.clamp(0, i16::MAX as i32) as i16);
     }
@@ -1118,6 +1122,12 @@ unsafe fn spell_hit(enemy: usize, part: usize, s: u8, lv: u8, o: PlRetFn) -> u64
     // ordinary Heartless), at least 1. Re:CoM's own AP is no Gravity number at KH1's rules.
     if !recom && kh1.is_none() && s == crate::magic::spell::GRAVITY {
         kh1 = max_mp.map(|m| crate::magic::gravity_damage(lv, m, hp_now, 1.0, 0));
+    }
+    // Enemy Skills route 2 at Damage = KH1: KH1's number through Re:CoM's hit rewrite, as Re:CoM's
+    // card / sleight AP for this spell (its status bits).
+    if let Some(d) = kh1 {
+        let pl: usize = rd(va(base(), data::MAIN_PLAYER));
+        kh1 = Some(super::enemy_skills::spell_rewrite(pl, s, lv, d));
     }
     let attr: u32 = rd(part + super::magic::PART_ATTR);
     if let Some(d) = kh1 {

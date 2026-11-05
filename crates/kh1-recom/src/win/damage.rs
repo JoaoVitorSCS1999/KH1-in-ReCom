@@ -181,6 +181,15 @@ pub unsafe fn spell(pl: usize, s: u8, level: u8) -> bool {
     done
 }
 
+/// The status bits of the Re:CoM card / sleight a KH1 spell stands for (`+9` / `+0xB` nibbles,
+/// `dm::status_bits`), from the live table (Enemy Skills route 2: the rewrite's category tests).
+/// None outside a card battle's tables.
+pub unsafe fn spell_status(s: u8, level: u8) -> Option<u16> {
+    let src = dm::spell_source(s, level)?;
+    let r = table_row(src.table, src.id)?;
+    Some(dm::status_bits(r[src.table.status_at()]))
+}
+
 /// The spells (bit = spell id) whose last cast took Re:CoM's AP (and kind: Gravity, Stop; Aero).
 static RECOM_CAST: AtomicU8 = AtomicU8::new(0);
 

@@ -231,6 +231,79 @@ every site; `check_sites_rs.py`: 1330 sites, 0 mismatches.
 - Not checked: in game (none of it); the second strike's bullet taking `+0x288` as its damage
   (Assumption); Sora's weapon collider type; KH1 swings reaching the weapon update's hit result
   (`+0x2C8`) that spawns the second strike (Assumption: our pair dispatch returns Re:CoM's results).
+## Stage 3 (built, 0.129.0): route 2, the hit rewrite `0x14015D5F0`
+
+Ask (owner, 2026-11-04, "build everything"; the Enemy Skills numbers): the skills Re:CoM's hit rewrite
+tests. Combat = KH1 in Sora's story only; Combat = Re:CoM and Riku's story: Re:CoM's rewrite as is.
+
+Code: `skill_effects::BUILT_3` / `rewrite_mask` / `hit_record` / `rewrite_block` (pure, tested),
+`win::enemy_skills::rewrite` / `kh1_swing_hit` / `spell_rewrite` / `warp_guard`;
+`sites::ENEMY_SKILL_REWRITE_HOOK` / `_SITES` / `_CHECKED`. One line each in `win::attack` (`enemy_hit`,
+`kh1_enemy_hit`, `spell_hit`), `win::magic` (Cure's cast), `win::damage::spell_status`.
+
+### The wrapper (Checked (decomp + exe))
+
+- Re:CoM's rewrite reads Sora's slot from the global CBTL (`*0x14087A818 + 0x1E8`, `0x14015D60A`), once
+  per record, and handles one card. Our wrapper (hook, 6 bytes `push rbx; sub rsp,0x20`; 6 direct
+  callers, no branch in): for a **side-1 record in a KH1 battle with Sora's slot empty** (Sora plays
+  no card at KH1), Re:CoM's rewrite once per equipped route-2 skill, in card order, each with its id
+  in the slot; the slot put back after. Every other record (the enemy side's `0x14017F0E0`, a real
+  card in the slot, Combat = Re:CoM): Re:CoM's, once. Several skills stack (each run on the last
+  run's result, Re:CoM's truncation each time; Re:CoM itself can't hold two).
+- **The owner's numbers**: Re:CoM's constants in the rewrite (Zexion `cmp r8d,25` `0x14015D70A`,
+  Lexaeus `cmp r8d,67` `0x14015D74C`, Demyx `add ax,ax` `0x14015D831`, Defender / Ursula `÷ 2`
+  `0x14015D66A` / `0x14015D64D`) are switched at each battle start (KH1 battle: a jump to a stub of
+  ours; else Re:CoM's bytes). Each stub is Re:CoM's instruction with its constant read from a cell:
+  Re:CoM's value (25, 67, 200 %, 50 %, 50 %) except while our wrapper runs Sora's skills (10, 15,
+  175 %, 75 %, 75 %). At Re:CoM's cells every result is Re:CoM's own for every i16 input (tests), so
+  enemy cards in a KH1 battle keep Re:CoM's numbers. Demyx and Defender / Ursula use Re:CoM's ÷ 100
+  (`0x14015D7D6`'s magic division).
+
+### How KH1's attacks reach it
+
+| attack | Damage = Re:CoM | Damage = KH1 |
+|---|---|---|
+| KH1 swing | at its start, the card AP through `0x1401E66A0` (existing): situation `+0x630` = the swing's Re:CoM row 1..7 → **attack card** (`+0x1E`), finishers (rows 4 / 7) also `+0x1A` | per hit (`kh1_swing_hit`): KH1's number in the same record (`0x1401E66A0`'s rule on `+0x630`), the kind it writes on the hit's body (`+0x80`) |
+| KH1 Fire / Blizzard / Thunder / Gravity / Stop / Aero | at the cast, Re:CoM's card / sleight AP and status bits through `0x1401E66A0` (existing; situation 0: not an attack card) | per hit (`spell_rewrite`): KH1's number with the Re:CoM card's / sleight's status bits (`+9` / `+0xB`; e.g. Fire 0xC = magic 4 + fire 8, Gravity 0x104, Cure 0x44: Checked (files `SY0002.BIN`)); Stop keeps KH1's ticks (not run) |
+| KH1 Cure | at the cast, the heal through the rewrite (as `initMagic` runs it for Re:CoM's Cure), both settings | the same |
+| Re:CoM's sleights, KH1 summons (LV3 sleights), friend sleights | Re:CoM's own calls (`0x1401E66A0`, `0x14015D8A0`) | the same (then the existing KH1-HP scaling) |
+| Hits on Sora (mode 2) | Sora's damage check `0x1401E6DE0` (attribute `+0x714`) | the same |
+
+So the "attack-card hit" skills fire on **KH1 swings** (Search Ghost's Drain, Zexion's confuse,
+Dragon Maleficent's × 1.5), and Lexaeus' Warp Break on **KH1 combo finishers** (Re:CoM's "sleight"
+flag is set for its finisher rows 4 / 7). The category skills fire on spells, Cure, sleights and
+summons (not on swings: Re:CoM's attack-card branch returns before its category switch).
+
+### Per skill
+
+| skill | Re:CoM's test | number | at KH1 |
+|---|---|---|---|
+| Red Nocturne / Blue Rhapsody / Yellow Opera / Green Requiem | category 8 / 0x10 / 0x20 / 0x40 | × 1.5 | Fire / Blizzard / Thunder spells (and their sleights); Cure's heal |
+| Search Ghost | attack card → kind 0x15 | Re:CoM's Drain (`0x14017DC50` case 0x15: Sora + max(1, min(20, enemy HP ÷ 8)), the enemy's EXP × ¾) | KH1 swings |
+| Defender | mode 2, attribute 0 | damage × 0.75 (Re:CoM ÷ 2) | hits on Sora |
+| Wizard | category 4 | × 1.3 | magic cards' status (spells, Cure, magic sleights). Re:CoM's card dimming (`0x14016D200`) is its play-time part: no cards at KH1, not applied; only its × 1.3 |
+| Crescendo | category 0x80 | × 1.3 | summons (summon cards' status 0x80). Its card dimming: as Wizard's |
+| Ursula | mode 2, attribute 2..4 | damage × 0.75 | Fire / Blizzard / Thunder hits on Sora |
+| Dragon Maleficent | attack card | × 1.5 | KH1 swings (its reload part: none, stage 2) |
+| Lexaeus | attack card with `+0x1A` → kind 0x1F (Re:CoM's gate: param `+0x30`) | 15 % (Re:CoM 67), never bosses | KH1 finishers; a boss (class `CBoss…`) keeps the swing's own kind (`warp_guard` at Damage = Re:CoM, `kh1_swing_hit` at Damage = KH1) |
+| Zexion | attack card → kind 10 | 10 % (Re:CoM 25) | KH1 swings |
+| Xigbar | categories 0x118 (Fire, Blizzard, Gravity) | × 1.5 | those spells and sleights |
+| Demyx | categories 0x210 (Blizzard, water) | × 1.75 (Re:CoM × 2) | Blizzard spells, water sleights |
+| Hades | (KH1's Berserk, stage 1) | — | left out of the loop |
+
+### Assumptions / not checked
+
+- Not checked: in game (none of it).
+- Assumptions: Re:CoM's reaction kinds 0x15 / 0x1F / 10 on Re:CoM's handler for KH1 enemies (Re:CoM's
+  AI enemies: Re:CoM's own; our KH1-AI enemies take their KH1 reaction from the swing's KH1 kind, so a
+  confuse or warp may not show on them); "boss" = Re:CoM's class name `CBoss…`; category 0x200 =
+  water; Cure's boost only in battle (the record needs Re:CoM's card battle); at Damage = KH1 a KH1
+  spell's category bits are its Re:CoM card's / sleight's.
+- Checked: tests (`skill_effects::tests::route_2_masks_and_records`, `the_rewrite_stubs` (every i16 at
+  Re:CoM's cells against Re:CoM's own arithmetic), `sites::tests::enemy_skill_rewrite_sites`,
+  `enemy_skill_sites` (no other site overlaps a switched one)), `check_sites_rs.py` (1342 sites, 0
+  mismatches), `cargo test --workspace --exclude kh1-playground`, the Windows build (no warnings).
+
 ## Stage 4 (built): route 3, the direct compares
 
 Ask (manager brief, 2026-11-04, on the owner's "Enemy Skills numbers": "Larxene - Dash: run ×1.25",
