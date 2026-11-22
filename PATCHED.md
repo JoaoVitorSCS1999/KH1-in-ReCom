@@ -18,18 +18,14 @@ fix is also offered to the author as a pull request from its own `fix/...` branc
 All credit for the mod goes to its author (PM2CRAZY). Everything else (requirements, settings,
 first-launch build) is as in [README.md](README.md).
 
-## Install
-
-**OpenKH (recommended, gets updates):**
+## Install (OpenKH)
 
 1. In the Mods Manager, select **Kingdom Hearts Re:Chain of Memories**.
 2. Mods → **Install a new mod** → `JoaoVitorSCS1999/KH1-in-ReCom`.
 3. Tick it, and untick the original `PM2CRAZY/...` if you have it. Press **Build**.
 4. Start Re:CoM. The title builds the KH1 files by itself.
 
-**Manual:** download the latest [release](https://github.com/JoaoVitorSCS1999/KH1-in-ReCom/releases/latest).
-Either replace the original mod's `openkh/kh1-recom.dll` with the release's `kh1-recom.dll`, or
-unzip the zip over the mod's folder. Then Build.
+Already installed: Mods → check for updates → update the mod, then **Build**.
 
 ## Releases
 
@@ -37,7 +33,7 @@ unzip the zip over the mod's folder. Then Build.
 
 1. runs `cargo test --workspace` and builds the Windows DLL (`tools/build-win.sh`);
 2. commits the DLL to `main`, so OpenKH's "Check for updates" sees it;
-3. publishes a release `v<VERSION>-patched-<commit>` with a ready-to-install zip and the DLL.
+3. publishes a release `v<VERSION>-patched-<commit>` with the OpenKH install steps.
 
 If the tests or the build fail, nothing is published, and GitHub emails the fork's owner.
 
