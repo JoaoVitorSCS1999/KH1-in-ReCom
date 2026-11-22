@@ -1108,7 +1108,7 @@ pub fn confirm_is_circle() -> bool {
 /// Party or specials. His shortcut slots are filled with his first sleights once, while all three
 /// are empty and never set up; his Customize page (0.149.0, his Settings list) sets them after.
 unsafe fn riku_world(pl: usize) -> World {
-    let ids: Vec<u16> = crate::riku::SLEIGHTS.iter().map(|s| s.id).collect();
+    let ids: Vec<u16> = crate::riku::list(mv::is_main_dark_riku(pl)).iter().map(|s| s.id).collect();
     let mut shortcuts = super::mp::riku_shortcuts().unwrap_or([0; 3]);
     if let Some(f) = crate::riku::fill_shortcuts(shortcuts, &ids).filter(|_| !super::mp::riku_shortcuts_set()) {
         if super::mp::set_riku_shortcuts(f) {

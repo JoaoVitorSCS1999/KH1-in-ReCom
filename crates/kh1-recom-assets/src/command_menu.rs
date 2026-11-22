@@ -406,6 +406,9 @@ pub const PARTY_WORDS: &[(u16, &str)] = &[
 /// Riku's Sleights list's names (fork branch Re-Re-Reverse/Rebirth, 0.149.0: his menu in KH1's look;
 /// the DLL's `crate::riku::words`: our id `0x8100 +` his Re:CoM sleight id, `SY0002.CTD`'s names).
 pub const RIKU_WORDS: &[(u16, &str)] = &[
+    (0x815F, "Dark Break"),
+    (0x8160, "Dark Firaga"),
+    (0x8161, "Dark Aura"),
     (0x8166, "Impulse"),
     (0x8167, "Maelstrom"),
     (0x8168, "Barrage"),

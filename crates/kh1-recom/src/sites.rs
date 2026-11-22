@@ -2947,6 +2947,9 @@ pub mod data {
     /// `CPlayerRiku` vtable (RTTI; `docs/recom-player.md`). Its Battle exe slot `+0xB8` is a
     /// `jmp` to the shared Battle exe `0x1401F9840`. Checked (exe).
     pub const RIKU_VTABLE: u64 = 0x1_405A_8868;
+    /// `CPlayerDRiku` vtable (RTTI; Dark Mode's player, `docs/recom-riku-kh1.md`). Its Battle exe
+    /// `+0xB8` is `jmp 0x1401F9840` too; its Field exe is `ret`. Checked (exe).
+    pub const DRIKU_VTABLE: u64 = 0x1_405A_50E8;
     /// Pad devices, one pointer per port (`0x14029BF60` reads `[port]+0x74`).
     pub const PAD_DEVICES: u64 = 0x1_40AC_5D40;
     /// Sora's action table and the per-character table pointers (`docs/recom-motion-switch.md`).

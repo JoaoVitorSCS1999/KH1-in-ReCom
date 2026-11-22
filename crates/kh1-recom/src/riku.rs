@@ -31,16 +31,39 @@ pub fn row_ok(row: u32) -> bool {
     row < ROW_END && !NO_CLIP.contains(&row)
 }
 
+/// Dark Riku's action-table rows with no clip (`0x1407C67F0`: `p003_000`; his pack `PL0201.ANN`
+/// starts at `p003_001`): 0, 8..=0xD, 0x17..=0x1A, 0x1C..=0x1E, 0x39.. Row 0x1B (Sora's glide row)
+/// has a clip of his, never played (no glide). Checked (exe).
+pub const DARK_NO_CLIP: &[u32] = &[0x00, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E];
+
+/// [`row_ok`] for Riku (`dark` false) or Dark Riku (0.152.0).
+pub fn row_ok_for(dark: bool, row: u32) -> bool {
+    if dark {
+        row < ROW_END && !DARK_NO_CLIP.contains(&row)
+    } else {
+        row_ok(row)
+    }
+}
+
 /// Riku's ability word bit for Re:CoM's higher jump (`+0x41C & 0x200000`: the jump init
 /// `0x1401F29F0` reads it; `crate::abilities::recom`).
 pub const HIGH_JUMP_BIT: u32 = 0x20_0000;
 
 /// The KH1 movement abilities Riku has: Dodge Roll (always Re:CoM's own roll, his roll exe), and
-/// High Jump when Re:CoM gave him its higher jump. No Glide (Riku has none in Re:CoM), no Guard
-/// or Counterattack (no clips), no combo abilities (KH1's plain combo on his own swings).
+/// High Jump when Re:CoM gave him its higher jump. No Glide (Riku has none in Re:CoM), no
+/// Counterattack (no clip), no combo abilities (KH1's plain combo on his own swings).
+///
+/// Guard (0.152.0; fork owner, 2026-11-22: "falta a defesa"): KH1's Guard rule (Square below run
+/// speed, the guard object live on KH1's frames 10..36, the kind-6 recoil) on his own block-recoil
+/// clip, action row 0x24 ([`GUARD_ROW`]). KH1's Riku (`xa_ex_1010.mset`) has no Guard request (212):
+/// his request 110 / 111 (entry 13) is the clash recoil Re:CoM baked as row 0x24 for him too.
+/// Checked (files: both motion sets' request tables).
 pub fn abilities(ability_word: u32) -> kh1_core::Abilities {
-    kh1_core::Abilities { high_jump: ability_word & HIGH_JUMP_BIT != 0, dodge_roll: true, ..Default::default() }
+    kh1_core::Abilities { high_jump: ability_word & HIGH_JUMP_BIT != 0, dodge_roll: true, guard: true, ..Default::default() }
 }
+
+/// Riku's / Dark Riku's row for KH1's Guard request: their recoil row (`p002_043` / `p003_033`).
+pub const GUARD_ROW: u32 = 0x24;
 
 /// Re:CoM's attack row id for Riku's own swing that plays the same clip as Sora's row `sora_id`.
 /// Sora's rows 1..7 (`0x1407C6C70`, action rows 0x30..0x36) have Riku's twins at 0x97..0x9D: the same
@@ -59,6 +82,17 @@ pub fn attack_id(sora_id: u32) -> u32 {
 
 /// Riku's twin of Sora's attack row 1 (`0x1407C6C70` row 0x97). Checked (exe).
 pub const RIKU_ROW_1: u32 = 0x97;
+/// Dark Riku's (rows 0x9E..=0xA4: action rows 0x30..=0x36, his effects 0x15 / 0x16). Checked (exe).
+pub const DARK_ROW_1: u32 = 0x9E;
+
+/// [`attack_id`] for Riku or Dark Riku.
+pub fn attack_id_for(dark: bool, sora_id: u32) -> u32 {
+    if dark && (1..=7).contains(&sora_id) {
+        DARK_ROW_1 - 1 + sora_id
+    } else {
+        attack_id(sora_id)
+    }
+}
 
 /// One of Riku's sleights in his command menu's Sleights list (fork owner, 2026-11-22: option (b),
 /// "a list of his sleights paid with KH1 MP, and shortcuts").
@@ -84,14 +118,36 @@ pub const SLEIGHTS: [Sleight; 6] = [
     Sleight { id: 0x6B, name: "Dark Barrage", mp: 4 },
 ];
 
-/// Riku's sleight `id`.
+/// Dark Riku's Sleights list (0.152.0): his own sleight start (`CPlayerDRiku +0x130` =
+/// `0x140206830`) takes 0x5F..=0x63 and 0x65..=0x6B (its jump table at `0x140206894`; 0x64 refused).
+/// Checked (exe). The Dark ones, with Dark Break / Dark Firaga / Dark Aura (`SY0002.CTD`'s names);
+/// MP ours, as Riku's tiers.
+pub const DARK_SLEIGHTS: [Sleight; 6] = [
+    Sleight { id: 0x5F, name: "Dark Break", mp: 3 },
+    Sleight { id: 0x60, name: "Dark Firaga", mp: 3 },
+    Sleight { id: 0x61, name: "Dark Aura", mp: 4 },
+    Sleight { id: 0x69, name: "Dark Impulse", mp: 3 },
+    Sleight { id: 0x6A, name: "Dark Maelstrom", mp: 3 },
+    Sleight { id: 0x6B, name: "Dark Barrage", mp: 4 },
+];
+
+/// Riku's or Dark Riku's sleight `id`.
 pub fn sleight(id: u16) -> Option<&'static Sleight> {
-    SLEIGHTS.iter().find(|s| s.id == id)
+    SLEIGHTS.iter().chain(DARK_SLEIGHTS.iter()).find(|s| s.id == id)
 }
 
-/// Their words in the command menu (`crate::sleights::WORD_BASE + id`), for Re:CoM's look's text.
+/// The list of one of them.
+pub fn list(dark: bool) -> &'static [Sleight; 6] {
+    if dark {
+        &DARK_SLEIGHTS
+    } else {
+        &SLEIGHTS
+    }
+}
+
+/// Their words in the command menu (`crate::sleights::WORD_BASE + id`), each id once.
 pub fn words() -> impl Iterator<Item = (u16, &'static str)> {
-    SLEIGHTS.iter().map(|s| (crate::sleights::WORD_BASE + s.id, s.name))
+    SLEIGHTS.iter().chain(DARK_SLEIGHTS.iter().filter(|d| !SLEIGHTS.iter().any(|s| s.id == d.id))).map(|s| (crate::sleights::WORD_BASE + s.id, s.name))
 }
 
 /// The shortcut slots Riku gets when all three are empty (and were never set up: the caller's
@@ -133,8 +189,14 @@ mod tests {
     #[test]
     fn rikus_sleights() {
         assert!(SLEIGHTS.iter().all(|s| (0x66..=0x6B).contains(&s.id)));
+        assert!(DARK_SLEIGHTS.iter().all(|s| (0x5F..=0x63).contains(&s.id) || (0x65..=0x6B).contains(&s.id)));
+        assert_eq!(words().count(), 9);
+        assert_eq!(attack_id_for(true, 4), 0xA1);
+        assert_eq!(attack_id_for(false, 4), 0x9A);
+        assert!(row_ok_for(true, 0x30) && !row_ok_for(true, 0x08) && row_ok_for(false, 0x08));
         assert_eq!(sleight(0x67).map(|s| s.name), Some("Maelstrom"));
-        assert!(sleight(0x5F).is_none());
+        assert_eq!(sleight(0x5F).map(|s| s.name), Some("Dark Break"));
+        assert!(sleight(0x64).is_none(), "Holy Burst is the King's");
         assert_eq!(fill_shortcuts([0; 3], &[0x66, 0x67]), Some([0x66, 0x67, 0]));
         assert_eq!(fill_shortcuts([0x66, 0, 0], &[0x67]), None);
         assert_eq!(fill_shortcuts([0; 3], &[]), None);
@@ -151,7 +213,7 @@ mod tests {
     #[test]
     fn rikus_abilities() {
         let a = abilities(0);
-        assert!(a.dodge_roll && !a.high_jump && !a.glide && !a.superglide && !a.guard && !a.counterattack && a.combo_plus == 0);
+        assert!(a.dodge_roll && !a.high_jump && !a.glide && !a.superglide && a.guard && !a.counterattack && a.combo_plus == 0);
         assert!(abilities(HIGH_JUMP_BIT).high_jump);
     }
 }
