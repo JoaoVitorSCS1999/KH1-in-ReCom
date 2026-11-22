@@ -40,6 +40,8 @@ pub static ORIG_JUMP_INIT: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_AVOID_INIT: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_JUMP_EXE: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_AVOID_EXE: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_RIKU_AVOID_EXE: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_DRIKU_AVOID_EXE: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_GLIDE_EXE: AtomicUsize = AtomicUsize::new(0);
 
 /// `combat = kh1`, and the hooks are in.
@@ -1148,6 +1150,41 @@ pub unsafe extern "win64" fn avoid_exe(pl: usize) {
     if !kh1_sora(pl) {
         return o(pl);
     }
+    avoid_kh1(pl, o)
+}
+
+/// 0.153.0 (fork owner, 2026-11-22: "still the guard is not effective"): KH1's Guard / its recoil put
+/// Riku in Re:CoM's action 6, whose exe is **his own** (`CPlayerRiku +0x1C8` = `0x140212350`; Dark
+/// Riku's `0x1401FFC30`), not Sora's `0x140217310` we wrap: so the KH1 frame (the guard object, the
+/// block, the recoil) never ran while he guarded. Checked (exe: both vtables' slot, the first bytes).
+/// Now his own exes wrap the same way: his Re:CoM roll (handed over by KH1's rule) runs his exe whole,
+/// anything else of ours in action 6 runs the KH1 frame.
+pub unsafe extern "win64" fn riku_avoid_exe(pl: usize) {
+    let o: PlayerFn = orig(&ORIG_RIKU_AVOID_EXE);
+    if !kh1_riku(pl) {
+        return o(pl);
+    }
+    log_once_riku_avoid();
+    avoid_kh1(pl, o)
+}
+
+/// Dark Riku's own avoid exe ([`riku_avoid_exe`]).
+pub unsafe extern "win64" fn driku_avoid_exe(pl: usize) {
+    let o: PlayerFn = orig(&ORIG_DRIKU_AVOID_EXE);
+    if !kh1_riku(pl) {
+        return o(pl);
+    }
+    log_once_riku_avoid();
+    avoid_kh1(pl, o)
+}
+
+fn log_once_riku_avoid() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| log("riku guard: his own avoid exe (action 6) runs KH1's frame for the Guard and its recoil (his Re:CoM roll stays his exe)"));
+}
+
+/// Action 6 for a KH1 player: Re:CoM's own roll when KH1's rule handed it over, else the KH1 frame.
+unsafe fn avoid_kh1(pl: usize, o: PlayerFn) {
     if recom_roll_owns(pl) {
         // `dodge_roll = recom`: Re:CoM's own roll, its exe whole (owner, 2026-11-02, "The whole
         // roll"). Only read around it, for the start / end log lines.

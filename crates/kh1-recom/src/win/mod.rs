@@ -287,6 +287,8 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
         hook::Hook { site: site("avoid init (0x1401F10C0)"), ours: movement::avoid_init as *const () as usize, original: &movement::ORIG_AVOID_INIT },
         hook::Hook { site: site("jump exe (action 7)"), ours: movement::jump_exe as *const () as usize, original: &movement::ORIG_JUMP_EXE },
         hook::Hook { site: site("CPlayerSora avoid exe (action 6)"), ours: movement::avoid_exe as *const () as usize, original: &movement::ORIG_AVOID_EXE },
+        hook::Hook { site: site("CPlayerRiku avoid exe (action 6)"), ours: movement::riku_avoid_exe as *const () as usize, original: &movement::ORIG_RIKU_AVOID_EXE },
+        hook::Hook { site: site("CPlayerDRiku avoid exe (action 6)"), ours: movement::driku_avoid_exe as *const () as usize, original: &movement::ORIG_DRIKU_AVOID_EXE },
         hook::Hook { site: site("CPlayerSora glide exe (action 8)"), ours: movement::glide_exe as *const () as usize, original: &movement::ORIG_GLIDE_EXE },
     ];
     // SAFETY: the targets' bytes are checked again inside, before anything is written.
