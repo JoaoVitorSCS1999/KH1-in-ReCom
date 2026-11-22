@@ -226,3 +226,33 @@ the first Dark Mode.
   Sora's jump init / exe; Dark Riku does not: KH1's movement needs his own handlers wrapped.
 - Dark Riku's swing rows in `0x1407C6C70`: 0x9E..0xA4 (action rows 0x30..0x36, effect 0x15 / 0x16,
   column byte 3), after Riku's 0x97..0x9D. Checked (exe); which class reads them: Assumption.
+
+## 0.153.0: Riku's Guard blocks (our front test after Re:CoM's) and cancels magic shots
+
+Fork owner, 2026-11-22: "a defes do Riku deve poder fazer parry e cancelar o ataque do oponente
+caso for uma magia!"; "percebi que a defesa dele não está sendo efetiva contra nada, precisa ser
+efetiva tal qual o KH1 é".
+
+- **Found** (Checked (the owner's 0.152.0 log)): Riku's Guards started (two `ParryMiss` lines) but
+  no block ever happened: no `guard reactions: block` line, no guard success. Re:CoM's body guard
+  (`0x14016F1C0`) never returned 2 for him. Its test (Checked (exe: disasm)): `body+0x9C & 1`, the
+  attack's element bit in `body+0x8C` (the body ctor `0x14016F886` sets all), the body owner's
+  actor `+8` set, its bone 0 (`0x1402ABB20(actor, 0)`) `+0x50` clear, then
+  `|wrap(atan2f(d.x, d.z) − yaw)| ≤ body+0xB0` with d = attack point (`coll+0x60`) − bone 0
+  `+0xD0` (`0x14023E6E0`), yaw = mover `+0x54` (`0x1401A4A00`), wrap `0x14016EAA0`. Which of these
+  refuses on Riku is **not known** (no decomp in the session; Riku's clip `p002_043` is 28 frames at
+  30 fps = 56 game frames, so KH1's live frames 10..36 do run: Checked (files)). The first 40 hits
+  while he guards now log those fields (`riku guard:` lines).
+- **Change** (`win::attack::riku_guard_block`, `crate::riku::guard_faces`, `win::guard::{riku_block,
+  cancel_shot}`): in the damage-check wrapper, a hit that arrived on the main Riku / Dark Riku while
+  his KH1 guard object is live, not blocked by Re:CoM, is KH1's block when the attacker (the owner
+  the apply wrote to `body+0x98`: an enemy or its shot) is within ±100° of his facing by Re:CoM's
+  own angle rule. Then Re:CoM's protection bit for that check (no damage, no reaction), KH1's
+  kind-6 success on his next frame (recoil, clink, `GuardSucceeded`: perfect parry / no missed
+  parry), and the attacker's reaction: melee as Sora's (Re:CoM's flinch / KH1's clash recoil, with
+  Guard reactions on, one frame later than Sora's).
+- **Magic**: a blocked shot (`CBullet` / `CHomingBullet`) is **cancelled** for Riku (attack off
+  `0x14014DE80`, life `+0x160` = 0): KH1's generic code makes a blocked shot inert. Sora's Guard
+  still turns shots back (decision 28). Same when Re:CoM's own block fires for him.
+- Assumptions: the attacker's position stands for KH1's hit point in the cone; a plain `CBullet`'s
+  life is at `+0x160` (its attack is off either way); the caster itself isn't interrupted.

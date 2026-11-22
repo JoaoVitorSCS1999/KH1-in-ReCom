@@ -631,9 +631,11 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     // M11, the Yellow Opera's Thunder (`super::kh1_thrown::strike`): KH1 applies it with no clash pass (`sys 60` →
     // `0x1402BF330`), so Sora's Guard never meets it: his body guard (`+0x9C` bit 0) is off for Re:CoM's apply of this
     // attack and put back after (one load while no bolt lives).
+    // 0.153.0 (fork owner, 2026-11-22: "se um inimigo lançar um thunder, então deve ser efetivo"): Riku's
+    // Guard meets it (not KH1's rule: the owner's).
     if super::kh1_thrown::unguarded(coll) {
         let pl: usize = rd(va(base(), data::MAIN_PLAYER));
-        if pl != 0 && rd::<u32>(pl + BODY_GUARD) & 1 != 0 {
+        if pl != 0 && !mv::is_main_riku(pl) && rd::<u32>(pl + BODY_GUARD) & 1 != 0 {
             wr(pl + BODY_GUARD, rd::<u32>(pl + BODY_GUARD) & !1);
             let r = recom_pair(coll, list);
             wr(pl + BODY_GUARD, rd::<u32>(pl + BODY_GUARD) | 1);
@@ -1491,6 +1493,9 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
             *g = rd(pl + BODY_HIT_POINT);
         }
     }
+    // 0.153.0: Riku's Guard when Re:CoM's own block didn't fire (`riku_guard_block`): this check
+    // runs with Re:CoM's protection bit (no damage, no reaction) and KH1's guard success follows.
+    let riku_block = riku_guard_block(pl);
     let kh1 = mv::kh1_sora(pl);
     if kh1 {
         no_card_duel(pl);
@@ -1519,11 +1524,13 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // while his sleight (Re:CoM's, or a KH1 special) has the room dimmed (Re:CoM's own flag
     // `+0x418` bit 31, `crate::sleights::dim_shield`), the same protection bit for this check.
     let dimmed = arrived && !summon && !bracer && super::summons::sleight_dimmed(pl);
-    let shield = summon || bracer || dimmed;
+    let shield = summon || bracer || dimmed || riku_block;
     let f418: u32 = if shield { rd(pl + p::FLAGS_418) } else { 0 };
     if shield {
         if rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0 && rd::<i16>(pl + HIT_VALUE) != 0 {
-            if summon {
+            if riku_block {
+                // logged by `riku_guard_block`
+            } else if summon {
                 super::summons::hit_skipped(rd(pl + HIT_VALUE));
             } else if dimmed {
                 super::summons::dim_hit_skipped(rd(pl + HIT_VALUE), pl);
@@ -1571,6 +1578,72 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     }
     post_hit(pl, kh1);
     r
+}
+
+static RIKU_GUARD_LINES: AtomicU32 = AtomicU32::new(40);
+
+fn riku_guard_log(line: impl FnOnce() -> String) {
+    if RIKU_GUARD_LINES.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
+        log(&format!("riku guard: {}", line()));
+    }
+}
+
+/// 0.153.0 (fork owner, 2026-11-22: "a defesa dele não está sendo efetiva contra nada, precisa ser
+/// efetiva tal qual o KH1 é"; "deve poder fazer parry e cancelar o ataque do oponente caso for uma
+/// magia"). The owner's 0.152.0 log: Riku's Guards started (two missed parries) and Re:CoM's body
+/// guard never blocked (no `guard reactions: block` line, no guard success). Why Re:CoM's own test
+/// (`0x14016F1C0`: `body+0x9C & 1`, the element in `+0x8C`, the owner actor's `+8` set, its bone 0's
+/// `+0x50` clear, the angle within `+0xB0`) refuses on Riku isn't known (no decomp here): the
+/// first hits are logged with those fields.
+///
+/// So, a hit that arrived (`+0x41C & 0x200`) on the main Riku / Dark Riku while his KH1 guard
+/// object is live, and that Re:CoM didn't block itself, is KH1's block when its attacker (the
+/// collision's owner the apply wrote to `body+0x98`: an enemy, or a shot) stands within KH1's
+/// ±100° of his facing, by Re:CoM's own angle rule ([`crate::riku::guard_faces`]). Then: Re:CoM's
+/// protection bit for this check (no damage, no reaction), KH1's kind-6 guard success on his next
+/// KH1 frame (the recoil, the clink, `GuardSucceeded`: the parries), and the attacker's reaction
+/// (`super::guard::riku_block`: a shot cancelled, a melee attacker's flinch).
+unsafe fn riku_guard_block(pl: usize) -> bool {
+    if !mv::riku_on() || !mv::is_main_riku(pl) || !guard_live(pl) || rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED == 0 {
+        return false;
+    }
+    if rd::<u32>(pl + BODY_GUARD) & 0x20 != 0 {
+        return false; // Re:CoM's own block (kept above as GUARD_HIT)
+    }
+    let body = pl + 0x690;
+    let id: u32 = rd(body + crate::guard::body::ATTACKER);
+    let obj = if id != 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(id) } else { 0 };
+    let mover: usize = rd(pl + 0xF0);
+    let om: usize = if obj != 0 { rd(obj + 0xF0) } else { 0 };
+    if obj == 0 || mover == 0 || om == 0 {
+        riku_guard_log(|| format!("a hit while guarding, attacker {id:#x} not found (object {obj:#x}): not blocked"));
+        return false;
+    }
+    let me: [f32; 4] = rd(mover + mv::body::POS);
+    let it: [f32; 4] = rd(om + mv::body::POS);
+    let yaw: f32 = rd(mover + mv::body::YAW);
+    let faces = crate::riku::guard_faces([me[0], me[1], me[2]], yaw, [it[0], it[1], it[2]], KH1_GUARD_ANGLE);
+    let node = func::<BoneFn>(ACTOR_BONE)(pl, 0);
+    riku_guard_log(|| {
+        format!(
+            "hit while guarding from {id:#x}: body +0x9C {:#x} +0x8C {:#x} +0xB0 {:.3}, actor +8 {:#x}, bone 0 +0x50 {:#x}, value {}; in front: {faces}",
+            rd::<u32>(body + 0x9C),
+            rd::<u32>(body + 0x8C),
+            rd::<f32>(body + 0xB0),
+            rd::<usize>(pl + 8),
+            if node != 0 { rd::<usize>(node + 0x50) } else { 0 },
+            rd::<i16>(pl + HIT_VALUE)
+        )
+    });
+    if !faces {
+        return false;
+    }
+    GUARD_HIT.store(pl, Ordering::Relaxed);
+    if let Ok(mut g) = GUARD_POINT.lock() {
+        *g = it;
+    }
+    super::guard::riku_block(obj, id);
+    true
 }
 
 /// KH1's Aero barrier (M7 stage 7.10): while it is on, the pending hit's value on Sora's body
