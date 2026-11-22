@@ -79,6 +79,15 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: OpenKH zip
+        run: |
+          set -euo pipefail
+          # What OpenKH's "Install a new mod" → zip wants: mod.yml at the zip's root and the files
+          # its assets name (only the DLL). A fixed name, so an update replaces the same mod folder.
+          rm -f KH1-in-ReCom.zip
+          zip -X -q KH1-in-ReCom.zip mod.yml "$DLL" README.md PATCHED.md
+          unzip -l KH1-in-ReCom.zip
+
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,6 +107,10 @@ jobs:
             echo
             echo "Already installed: Mods → check for updates → update the mod, then **Build**."
             echo
+            echo "### Or from the zip"
+            echo
+            echo "Download **KH1-in-ReCom.zip** below. In the Mods Manager (Re:CoM selected): Mods → **Install a new mod** → **Select and install Mod Archive** → the zip. Tick it and press **Build**. To update, install the newer zip the same way (the mod keeps its folder; check for updates only works for the GitHub install)."
+            echo
             echo "Requirements as the original: KH 1.5+2.5 on Steam with KH1 FM and Re:CoM, OpenKH Mods Manager with Panacea."
           } > notes.md
-          gh release create "$tag" --target "$(git rev-parse HEAD)" --title "$version (patched, ${{ steps.commit.outputs.sha }})" --notes-file notes.md --latest
+          gh release create "$tag" --target "$(git rev-parse HEAD)" --title "$version (patched, ${{ steps.commit.outputs.sha }})" --notes-file notes.md --latest KH1-in-ReCom.zip

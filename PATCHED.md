@@ -27,13 +27,17 @@ first-launch build) is as in [README.md](README.md).
 
 Already installed: Mods → check for updates → update the mod, then **Build**.
 
+Or from a release's **KH1-in-ReCom.zip** (`mod.yml` and the DLL): Mods → **Install a new mod** →
+**Select and install Mod Archive** → the zip; tick it, **Build**. Update by installing the newer zip.
+
 ## Releases
 
 `.github/workflows/patched-release.yml` runs on every push to `main`. It:
 
 1. runs `cargo test --workspace` and builds the Windows DLL (`tools/build-win.sh`);
 2. commits the DLL to `main`, so OpenKH's "Check for updates" sees it;
-3. publishes a release `v<VERSION>-patched-<commit>` with the OpenKH install steps.
+3. publishes a release `v<VERSION>-patched-<commit>` with the OpenKH install steps and
+   `KH1-in-ReCom.zip` (`mod.yml`, the DLL, README, PATCHED) for OpenKH's zip install.
 
 If the tests or the build fail, nothing is published, and GitHub emails the fork's owner.
 
