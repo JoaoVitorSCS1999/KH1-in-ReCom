@@ -11,6 +11,7 @@ mod crash;
 mod d2;
 mod damage;
 mod damage_cap;
+mod dark_points;
 mod deck;
 mod drops;
 mod effects;
@@ -296,6 +297,10 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
         movement::set_abilities(s.abilities);
         abilities::set_ini(&s.abilities);
         movement::set_mode(s.combat == settings::Mode::Kh1);
+        movement::set_riku(s.riku_kh1_movement);
+        if s.riku_kh1_movement {
+            log("riku: riku_kh1_movement = on: at combat = kh1, Riku in Reverse/Rebirth moves with KH1's movement (testing)");
+        }
         log(&format!(
             "movement: KH1 handlers in Re:CoM's actions 2/3/4, 6, 7, 8 ({}); abilities {:?}; dodge_roll = {} ({}); run_speed = {}, jump_height = {}, air_speed = {}",
             if s.combat == settings::Mode::Kh1 { "on: combat = kh1" } else { "pass-through: combat = recom" },

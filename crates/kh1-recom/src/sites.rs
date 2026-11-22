@@ -2944,6 +2944,9 @@ pub mod data {
     pub const MAIN_PLAYER: u64 = 0x1_4087_B380;
     /// `CPlayerSora` vtable (RTTI). Riku's are `0x1405A8868` / `0x1405A50E8`.
     pub const SORA_VTABLE: u64 = 0x1_405A_9938;
+    /// `CPlayerRiku` vtable (RTTI; `docs/recom-player.md`). Its Battle exe slot `+0xB8` is a
+    /// `jmp` to the shared Battle exe `0x1401F9840`. Checked (exe).
+    pub const RIKU_VTABLE: u64 = 0x1_405A_8868;
     /// Pad devices, one pointer per port (`0x14029BF60` reads `[port]+0x74`).
     pub const PAD_DEVICES: u64 = 0x1_40AC_5D40;
     /// Sora's action table and the per-character table pointers (`docs/recom-motion-switch.md`).
