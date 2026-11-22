@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 274 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard runs KH1's frame (his own action-6 exes wrapped), version 0.153.1 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "BRO, still not effective!!! … i tried rikus guard against Heartless Wizard thunder and ice magic"; "also parry should be effective just like KH1 Sora with this mod bro!".
+
+- **Cause** (Checked (the owner's 0.153.0 log: no `riku guard:` line, no guard success; exe: `CPlayerRiku` / `CPlayerDRiku` vtable `+0x1C8`)): KH1's Guard and its recoil put Riku in Re:CoM's action 6, whose exe is his own (`0x140212350`, Dark Riku `0x1401FFC30`), not Sora's `0x140217310`, the only one wrapped. So the KH1 frame never ran while he guarded: no guard object, no block, no parry.
+- **Fix**: two new hooks (`sites::MOVE_HOOKS` "CPlayerRiku / CPlayerDRiku avoid exe (action 6)", first 16 bytes = Sora's, Checked (exe)) with Sora's rule: his Re:CoM roll keeps his exe whole; the Guard / recoil run the KH1 frame (`win::movement::avoid_kh1`). His parry is Sora's kind-6 guard success (recoil, clink, the attacker's reaction, a shot cancelled, the DP parries); no Counterattack (no clip of his).
+- A shot within 1 m of him (the Wizard's spells appear near the player, a thunder from above): the front test uses its caster's position.
+- Checked: tests, the Windows build, the DLL copied into the owner's OpenKH folders. Not checked: in game.
+
+---
+
 ## Stage 273 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard really blocks (KH1's front test after Re:CoM's) and cancels magic shots, version 0.153.0 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "a defes do Riku deve poder fazer parry e cancelar o ataque do oponente caso for uma magia!"; "percebi que a defesa dele não está sendo efetiva contra nada, precisa ser efetiva tal qual o KH1 é".

@@ -256,3 +256,12 @@ efetiva tal qual o KH1 é".
   still turns shots back (decision 28). Same when Re:CoM's own block fires for him.
 - Assumptions: the attacker's position stands for KH1's hit point in the cone; a plain `CBullet`'s
   life is at `+0x160` (its attack is off either way); the caster itself isn't interrupted.
+
+## 0.153.1: his own action-6 exes run KH1's frame
+
+- Cause of "not effective" (Checked (the owner's 0.153.0 log + exe)): the Guard / recoil are
+  Re:CoM's action 6; for Riku its exe is `CPlayerRiku +0x1C8` = `0x140212350` (Dark Riku
+  `0x1401FFC30`), never wrapped, so no KH1 frame (guard object, block, parry) ran while he guarded.
+- Fix: both wrapped as Sora's `0x140217310` is (same first 16 bytes): his Re:CoM roll keeps his exe,
+  everything else in action 6 runs the KH1 frame.
+- A shot within 1 m of him is judged by its caster's position for the front test.

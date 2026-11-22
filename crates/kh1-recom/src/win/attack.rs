@@ -1620,7 +1620,19 @@ unsafe fn riku_guard_block(pl: usize) -> bool {
         return false;
     }
     let me: [f32; 4] = rd(mover + mv::body::POS);
-    let it: [f32; 4] = rd(om + mv::body::POS);
+    let mut it: [f32; 4] = rd(om + mv::body::POS);
+    // A shot made on top of him (the Wizard's `_ex_2150` spells appear near the player; a thunder
+    // falls from above): its caster's side decides, as KH1's Guard faces the one casting.
+    let b0 = base();
+    let vt: usize = rd(obj);
+    if (vt == va(b0, crate::guard::bullet::VTABLE) || vt == va(b0, crate::guard::bullet::HOMING_VTABLE)) && (it[0] - me[0]).hypot(it[2] - me[2]) < 1.0 {
+        let shooter: i32 = rd(obj + crate::guard::bullet::SHOOTER);
+        let so = if shooter > 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(shooter as u32) } else { 0 };
+        let sm: usize = if so != 0 { rd(so + 0xF0) } else { 0 };
+        if sm != 0 {
+            it = rd(sm + mv::body::POS);
+        }
+    }
     let yaw: f32 = rd(mover + mv::body::YAW);
     let faces = crate::riku::guard_faces([me[0], me[1], me[2]], yaw, [it[0], it[1], it[2]], KH1_GUARD_ANGLE);
     let node = func::<BoneFn>(ACTOR_BONE)(pl, 0);
