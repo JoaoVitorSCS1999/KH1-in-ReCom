@@ -118,7 +118,8 @@ pub(super) unsafe fn on_result(c: usize, list: usize, r: i32) -> i32 {
         return r;
     }
     let pl: usize = rd(va(b, data::MAIN_PLAYER));
-    if !mv::is_main_sora(pl) || !super::attack::guard_live(pl) {
+    // 0.152.0: Riku's (and Dark Riku's) Guard too.
+    if !(mv::is_main_sora(pl) || (mv::riku_on() && mv::is_main_riku(pl))) || !super::attack::guard_live(pl) {
         return r;
     }
     let owner: u32 = rd(c + coll::OWNER);

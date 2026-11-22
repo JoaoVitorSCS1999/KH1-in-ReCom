@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 272 (fork branch Re-Re-Reverse/Rebirth): Dark Riku with KH1 combat, DP on Re:CoM's Dark gauge, Riku's Guard and parries, version 0.152.0 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "implementa tudo pra eu testar de uma vez e faz push no final".
+
+- **Dark Riku** (`CPlayerDRiku`, `docs/recom-riku-kh1.md` § Research): `win::movement::is_main_riku` covers him (`is_main_dark_riku` tells them apart). His Battle exe is the shared one, and actions 2..4 / 7 call the shared move / jump exes (Checked (exe: the jump table at `0x1401FA050`)), so KH1's movement runs on him as on Riku. His data: rows with clips (`riku::DARK_NO_CLIP`), swing ids 0x9E..0xA4 (`attack_id_for`), his row-pick slot `0x1405A5210` (old `0x140204F80`) → `win::attack::dark_picker` (falls back to his own), his sleight start `0x140206830` (takes 0x5F..0x63, 0x65..0x6B: its jump table `0x140206894`, Checked (exe)) and his Sleights list `riku::DARK_SLEIGHTS` (Dark Break, Dark Firaga, Dark Aura, Dark Impulse / Maelstrom / Barrage; MP ours). His roll is Re:CoM's own (his roll exe).
+- **DP on Re:CoM's gauge** (Checked (exe: disasm)): Re:CoM's DP are the player's `+0x44C` (cap 30, `0x1401F57A4`), the gauge `+0x3E0`, its setter `0x14020BFA0(gauge, dp, max)` (first 10 bytes checked). Ours are written there and shown. Re:CoM's own DP rules in its damage check (`0x1401E7255`: +1 on a hit, −5 in Dark Mode, the way-back flags `+0x424 & 0x100000`, card battle `+0x208 & 0x400000`) are undone around the check: only the owner's tables move them.
+- **Riku's Guard** (owner: "falta a defesa"): KH1's Guard rule for Riku and Dark Riku on their block-recoil row 0x24 (`riku::GUARD_ROW`): KH1's Riku has no Guard request (212); his request 110 is that recoil (Checked (files: `xa_ex_1010.mset`'s request table)). Enemies react to his blocks (`win::guard`, as Sora's). **Parries**: a block within 20 frames of the Guard's start = perfect (+5 / +3 in Dark Mode), a Guard that blocks nothing in 60 frames = missed (−3).
+- Customize: his picker lists Riku's and Dark Riku's sleights.
+- **Not built**: the Dark Form skin. `PL0201.MDL`'s mesh packets are a format our MDL reader refuses (header at `0x2A50`: a vertex count 45 for 49 vertices and 2 quadwords a vertex in a textured packet: multi-bone vertices, Assumption); without it the mesh can't be rebound to Riku's skeleton. Its unlock is recorded (save spare bit 4).
+- Asset step: **re-run** (Dark Riku's three new sleight names). Checked: tests, the asset step on the local install, the Windows build. Not checked: in game.
+
+---
+
 ## Stage 271 (fork branch Re-Re-Reverse/Rebirth): Riku's Dark Points (the owner's tables) start and end Re:CoM's own Dark Mode, version 0.151.0 (2026-11-22)
 
 Fork owner, 2026-11-22: the DP gain / loss tables (outside and in Dark Mode), "go", "faz ai".

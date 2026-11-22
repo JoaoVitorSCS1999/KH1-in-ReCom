@@ -1382,7 +1382,11 @@ impl Page {
                 // Riku's (0.149.0): no spells; his sleights; his slots (the same save bytes).
                 let levels = [0u8; 7];
                 let slots = super::mp::riku_shortcuts().unwrap_or([0; 3]);
-                let mut sleights: Vec<u16> = crate::riku::SLEIGHTS.iter().map(|s| s.id).collect();
+                // His six and (0.152.0) Dark Riku's, each once (a slot starts what the one in play takes).
+                let mut sleights: Vec<u16> = crate::riku::SLEIGHTS.iter().chain(crate::riku::DARK_SLEIGHTS.iter()).map(|s| s.id).collect();
+                sleights.dedup();
+                sleights.sort_unstable();
+                sleights.dedup();
                 // 0.150.0: the King's Party sleights too (taught in his story).
                 sleights.extend(super::party::learned_ids().into_iter().filter(|&id| crate::party::index(id).is_some_and(|i| crate::party::ALL[i].cards.contains(&crate::party::card::KING))));
                 let picks = customize::picks(levels, &sleights);

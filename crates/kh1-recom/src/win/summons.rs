@@ -80,6 +80,8 @@ const SLEIGHT_START: u32 = 0x0022_47A0;
 /// the same writes as Sora's after its id test: `initStockSkill` through `+0x138`, `+0x838` = 10).
 /// Checked (exe: disasm). `crate::riku`.
 const RIKU_SLEIGHT_START: u32 = 0x0021_6AB0;
+/// Dark Riku's sleight start (`CPlayerDRiku +0x130`). Checked (exe).
+const DRIKU_SLEIGHT_START: u32 = 0x0020_6830;
 const SLEIGHT_LOAD: u32 = 0x0021_1790;
 const WEAPON_END: u32 = 0x0022_4FB0;
 /// Re:CoM's sleight action (`initStockSkill` `0x1401F8D70(player, 0x16)`).
@@ -305,7 +307,13 @@ unsafe fn begin(pl: usize, sleight: u16, name: &str) -> Option<u32> {
     let slot: usize = if vt != 0 { rd(vt + f::VT_START) } else { 0 };
     // Riku's own start for every sleight of his (his six, and the King's in his Party list).
     let riku = super::movement::is_main_riku(pl);
-    let want = if riku { RIKU_SLEIGHT_START } else { SLEIGHT_START };
+    let want = if super::movement::is_main_dark_riku(pl) {
+        DRIKU_SLEIGHT_START
+    } else if riku {
+        RIKU_SLEIGHT_START
+    } else {
+        SLEIGHT_START
+    };
     if slot != base() + want as usize {
         note(|| format!("{name}: the player's vtable +0x130 is {slot:#x}, not Re:CoM's sleight start"));
         return None;

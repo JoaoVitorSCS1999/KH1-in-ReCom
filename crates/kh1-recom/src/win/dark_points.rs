@@ -50,6 +50,21 @@ const SWITCHING: u32 = 0x20;
 /// `crate::unlocks`'): the Dark Form skin's unlock (0.152.0).
 pub const DARK_SEEN: u8 = 4;
 
+/// Re:CoM's own DP (Checked (exe: disasm)): the player's `+0x44C` (at most 30: `0x1401F57A4`, the
+/// card values' add) and its gauge's max `+0x450`; its Dark gauge `+0x3E0`, set by
+/// `0x14020BFA0(gauge, dp, max)` (u16s at gauge `+0xAC` / `+0xAE`, the control `+0x80` at
+/// dp × 100 / max). Re:CoM's damage check (`0x1401E7255`, Dark Mode unlocked) adds 1 per hit taken,
+/// in Dark Mode takes 5 and at 0 sets the way-back flag `+0x424 & 0x100000`: undone around the
+/// check, the owner's tables stand alone.
+const RECOM_DP: usize = 0x44C;
+const RECOM_DP_MAX: usize = 0x450;
+const DARK_GAUGE: usize = 0x3E0;
+const FLAGS_424: usize = 0x424;
+const DP_EXIT: u32 = 0x10_0000;
+const GAUGE_SET: u32 = 0x0020_BFA0;
+const GAUGE_SET_BYTES: [u8; 10] = [0x48, 0x89, 0x5C, 0x24, 0x10, 0x56, 0x48, 0x83, 0xEC, 0x30];
+type GaugeSetFn = unsafe extern "win64" fn(usize, u32, u32);
+
 type SwitchFn = unsafe extern "win64" fn(usize, u32) -> u64;
 type HandleFn = unsafe extern "win64" fn(u32) -> usize;
 
@@ -64,9 +79,11 @@ struct State {
     last_swing: (u32, u32),
     /// A switch asked of Re:CoM and not seen yet (frames left to wait).
     pending: u32,
+    /// The frame his Guard started (0 none waiting).
+    guard_at: u32,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { dp: Dp { dp: 0, dark: false, idle: 0, streak: 0 }, frame: 0, roll_end: 0, was_rolling: false, last_swing: (0, 0), pending: 0 });
+static STATE: Mutex<State> = Mutex::new(State { dp: Dp { dp: 0, dark: false, idle: 0, streak: 0 }, frame: 0, roll_end: 0, was_rolling: false, last_swing: (0, 0), pending: 0, guard_at: 0 });
 static CHECKED: AtomicU32 = AtomicU32::new(0);
 static NO_DARK_LOGGED: AtomicBool = AtomicBool::new(false);
 static LINES: AtomicU32 = AtomicU32::new(200);
@@ -100,9 +117,9 @@ unsafe fn switches_ok() -> bool {
         _ => {}
     }
     let b = base();
-    let ok = rd::<[u8; 10]>(b + RIKU_SWITCH as usize) == RIKU_SWITCH_BYTES && rd::<[u8; 10]>(b + DRIKU_SWITCH as usize) == DRIKU_SWITCH_BYTES;
+    let ok = rd::<[u8; 10]>(b + RIKU_SWITCH as usize) == RIKU_SWITCH_BYTES && rd::<[u8; 10]>(b + DRIKU_SWITCH as usize) == DRIKU_SWITCH_BYTES && rd::<[u8; 10]>(b + GAUGE_SET as usize) == GAUGE_SET_BYTES;
     CHECKED.store(if ok { 1 } else { 2 }, Ordering::Relaxed);
-    log(&format!("dark points: Re:CoM's Dark Mode switches (0x140215FB0, 0x1402046D0) {}", if ok { "checked" } else { "NOT Re:CoM Steam's: DP count, Dark Mode never starts" }));
+    log(&format!("dark points: Re:CoM's Dark Mode switches (0x140215FB0, 0x1402046D0) and Dark gauge setter (0x14020BFA0) {}", if ok { "checked" } else { "NOT Re:CoM Steam's: DP count, Dark Mode never starts, no gauge" }));
     ok
 }
 
@@ -110,7 +127,7 @@ unsafe fn switches_ok() -> bool {
 pub fn battle_start() {
     if let Ok(mut g) = STATE.lock() {
         let was = g.dp.dp;
-        *g = State { dp: Dp::default(), frame: 0, roll_end: 0, was_rolling: false, last_swing: (0, 0), pending: 0 };
+        *g = State { dp: Dp::default(), frame: 0, roll_end: 0, was_rolling: false, last_swing: (0, 0), pending: 0, guard_at: 0 };
         if was != 0 && on() {
             note(|| format!("battle start: DP {was} -> 0"));
         }
@@ -160,8 +177,38 @@ pub unsafe fn frame(pl: usize) {
     if action == SWITCHING {
         return;
     }
-    let ch = g.dp.frame(action == ATTACK || action == CARD_ATTACK);
+    // A Guard that blocked nothing by its end (KH1's live frames end at 36, the motion at 60): a
+    // missed parry.
+    let mut ch = Change::None;
+    if g.guard_at != 0 && g.frame.wrapping_sub(g.guard_at) > GUARD_SPAN {
+        g.guard_at = 0;
+        let before = g.dp.dp;
+        ch = g.dp.event(Event::ParryMiss);
+        let after = g.dp.dp;
+        if before != after {
+            note(|| format!("ParryMiss: DP {before} -> {after}"));
+        }
+    }
+    if ch == Change::None {
+        ch = g.dp.frame(action == ATTACK || action == CARD_ATTACK);
+    }
+    show(pl, g.dp.dp);
     apply(&mut g, pl, ch);
+}
+
+/// Our DP in Re:CoM's own field and Dark gauge (when they differ).
+unsafe fn show(pl: usize, dp: i32) {
+    if !switches_ok() {
+        return;
+    }
+    if rd::<i32>(pl + RECOM_DP) != dp || rd::<i32>(pl + RECOM_DP_MAX) != dp::MAX {
+        wr(pl + RECOM_DP, dp);
+        wr(pl + RECOM_DP_MAX, dp::MAX);
+        let g: usize = rd(pl + DARK_GAUGE);
+        if g != 0 {
+            func::<GaugeSetFn>(GAUGE_SET)(g, dp as u32, dp::MAX as u32);
+        }
+    }
 }
 
 /// What a change asks, when the player is free (one try a frame; Re:CoM's own action 0x20 takes it
@@ -203,7 +250,10 @@ fn event(pl: usize, e: Event) {
         note(|| format!("{e:?}{}: DP {before} -> {after}", if g.dp.dark { " (Dark Mode)" } else { "" }));
     }
     // SAFETY: the main player, as `frame` reads it.
-    unsafe { apply(&mut g, pl, ch) };
+    unsafe {
+        show(pl, after);
+        apply(&mut g, pl, ch)
+    };
 }
 
 /// A hit on an enemy from the main player's own attack (Re:CoM's hit handler, `win::attack`): once
@@ -244,8 +294,30 @@ unsafe fn is_boss(obj: usize) -> bool {
     vt != 0 && super::stats::rtti_name(base(), vt).is_some_and(|n| n.starts_with(".?AVCBoss"))
 }
 
-/// Before Re:CoM's damage check on the main player (`win::attack::damage_check`): what the hit is.
-pub unsafe fn before_damage(pl: usize) -> Option<(i32, u16, bool, u32)> {
+/// What [`before_damage`] saw.
+pub struct Before {
+    hp: i32,
+    kind: u16,
+    boss: bool,
+    action: u32,
+    recom_dp: i32,
+    exit_flag: bool,
+    cb_flag: bool,
+}
+
+/// The card battle's flag Re:CoM's check sets with its way back (`+0x3E8 → +0x208 & 0x400000`).
+const CARD_BATTLE: usize = 0x3E8;
+const CB_FLAGS: usize = 0x208;
+const CB_DARK_END: u32 = 0x40_0000;
+
+unsafe fn cb_flag(pl: usize) -> bool {
+    let cb: usize = rd(pl + CARD_BATTLE);
+    cb != 0 && rd::<u32>(cb + CB_FLAGS) & CB_DARK_END != 0
+}
+
+/// Before Re:CoM's damage check on the main player (`win::attack::damage_check`): what the hit is,
+/// and Re:CoM's own DP (its check moves them: undone after).
+pub unsafe fn before_damage(pl: usize) -> Option<Before> {
     if !ours(pl) {
         return None;
     }
@@ -253,17 +325,63 @@ pub unsafe fn before_damage(pl: usize) -> Option<(i32, u16, bool, u32)> {
         0 => 0,
         id => func::<HandleFn>(mv::HANDLE_OBJ)(id),
     };
-    Some((rd(pl + HP), rd(pl + HIT_KIND), attacker != 0 && is_boss(attacker), rd(pl + p::ACTION)))
+    Some(Before { hp: rd(pl + HP), kind: rd(pl + HIT_KIND), boss: attacker != 0 && is_boss(attacker), action: rd(pl + p::ACTION), recom_dp: rd(pl + RECOM_DP), exit_flag: rd::<u32>(pl + FLAGS_424) & DP_EXIT != 0, cb_flag: cb_flag(pl) })
 }
 
-/// After it: a hit that took HP moves the DP once.
-pub unsafe fn after_damage(pl: usize, before: Option<(i32, u16, bool, u32)>) {
-    let Some((hp, kind, boss, action)) = before else { return };
+/// After it: Re:CoM's own DP change undone (its +1 / −5 and its way-back flag); a hit that took HP
+/// moves ours once.
+pub unsafe fn after_damage(pl: usize, before: Option<Before>) {
+    let Some(Before { hp, kind, boss, action, recom_dp, exit_flag, cb_flag: cb_was }) = before else { return };
+    if !cb_was && cb_flag(pl) {
+        let cb: usize = rd(pl + CARD_BATTLE);
+        wr(cb + CB_FLAGS, rd::<u32>(cb + CB_FLAGS) & !CB_DARK_END);
+    }
+    if rd::<i32>(pl + RECOM_DP) != recom_dp {
+        wr(pl + RECOM_DP, recom_dp);
+    }
+    if !exit_flag && rd::<u32>(pl + FLAGS_424) & DP_EXIT != 0 {
+        wr(pl + FLAGS_424, rd::<u32>(pl + FLAGS_424) & !DP_EXIT);
+    }
     if rd::<i32>(pl + HP) >= hp {
         return;
     }
     let after_roll = STATE.lock().is_ok_and(|g| g.roll_end != 0 && g.frame.wrapping_sub(g.roll_end) <= dp::DODGE_WINDOW);
     event(pl, Event::Hurt { hit: dp::hit_of(kind, boss), in_combo: action == ATTACK || action == CARD_ATTACK, after_roll });
+}
+
+/// Frames of the Guard after which an unblocked one is a missed parry (KH1's guard motion: 60).
+const GUARD_SPAN: u32 = 60;
+/// A block within this many frames of the Guard's start is perfect (the first 10 of its live
+/// frames 10..36: the owner's "parry perfeito", our definition).
+const PERFECT_BY: u32 = 20;
+
+/// His KH1 frame's events (`win::movement::run_frame`): a Guard started, a Guard that blocked.
+pub unsafe fn guard_events(pl: usize, events: &[kh1_core::controller::Event]) {
+    use kh1_core::controller::Event as E;
+    if !ours(pl) {
+        return;
+    }
+    for e in events {
+        match e {
+            E::Guarded => {
+                if let Ok(mut g) = STATE.lock() {
+                    g.guard_at = g.frame.max(1);
+                }
+            }
+            E::GuardSucceeded => {
+                let perfect = STATE.lock().ok().and_then(|mut g| {
+                    let at = std::mem::replace(&mut g.guard_at, 0);
+                    (at != 0).then(|| g.frame.wrapping_sub(at) <= PERFECT_BY)
+                });
+                if perfect == Some(true) {
+                    event(pl, Event::PerfectParry);
+                } else {
+                    note(|| "a block, not perfect: no DP".into());
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Riku's save block's spare byte gets [`DARK_SEEN`] (the first Dark Mode).

@@ -135,6 +135,9 @@ const COLL_CONTEXT: u64 = 0x1_4087_A870;
 const SORA_PICKER_SLOT: u64 = 0x1_405A_9938 + 0x128;
 /// `CPlayerRiku`'s row pick slot (`0x1405A8868 + 0x128`), also Re:CoM's `0x1401F7520`. Checked (exe).
 const RIKU_PICKER_SLOT: u64 = 0x1_405A_8868 + 0x128;
+/// `CPlayerDRiku`'s (`0x1405A50E8 + 0x128`): his own row pick `0x140204F80`. Checked (exe).
+const DRIKU_PICKER_SLOT: u64 = 0x1_405A_50E8 + 0x128;
+const DRIKU_PICKER: u64 = 0x1_4020_4F80;
 
 type PlFn = unsafe extern "win64" fn(usize);
 type PlRetFn = unsafe extern "win64" fn(usize) -> u64;
@@ -301,7 +304,7 @@ pub(super) unsafe fn start_swing(pl: usize, s: &SwingStart) -> bool {
         return false;
     }
     // Riku (`crate::riku`): only a row whose action row has a clip of his (else no swing).
-    if mv::is_main_riku(pl) && t.get(s.kh1_row).is_some_and(|r| !crate::riku::row_ok(r[0] as u32)) {
+    if mv::is_main_riku(pl) && t.get(s.kh1_row).is_some_and(|r| !crate::riku::row_ok_for(mv::is_main_dark_riku(pl), r[0] as u32)) {
         debug(|| format!("riku: KH1 row {} plays action row {:#x}, which has no clip of his: no swing", s.kh1_row, t[s.kh1_row][0]));
         return false;
     }
@@ -342,7 +345,7 @@ unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     wr(pl + field::HOMING_TARGET, 0i32);
     wr(pl + field::VSPEED, 0f32);
     // Riku (`crate::riku::attack_id`): his own row of the same clip, for his hit effect.
-    let recom_id = if mv::is_main_riku(pl) { crate::riku::attack_id(s.recom_id) } else { s.recom_id };
+    let recom_id = if mv::is_main_riku(pl) { crate::riku::attack_id_for(mv::is_main_dark_riku(pl), s.recom_id) } else { s.recom_id };
     wr(pl + field::SITUATION, recom_id);
     wr(pl + field::ATTACK_ID, recom_id);
     wr(pl + field::ROW_PTR, row.as_ptr() as usize);
@@ -395,11 +398,6 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     let o: PlFn = orig(&ORIG_REQUEST_BITS);
     if mv::kh1_riku(pl) {
         return riku_request_bits(pl, o);
-    }
-    // Dark Riku (0.151.0): the DP's frame (Re:CoM's own gameplay for him until his KH1 stage).
-    if super::dark_points::is_dark(pl) {
-        super::dark_points::frame(pl);
-        return o(pl);
     }
     if !mv::kh1_sora(pl) {
         return o(pl);
@@ -581,6 +579,20 @@ pub unsafe extern "win64" fn picker(pl: usize) {
         }
     }
     let f: PlFn = std::mem::transmute_copy(&va(base(), RECOM_PICKER));
+    f(pl)
+}
+
+/// Dark Riku's vtable slot `+0x128` (0.152.0): a KH1 row when his KH1 frame chose one, else his own
+/// row pick `0x140204F80`.
+pub unsafe extern "win64" fn dark_picker(pl: usize) {
+    if mv::kh1_fighter(pl) {
+        if let Some(s) = take_pending() {
+            if apply_row(pl, &s) {
+                return;
+            }
+        }
+    }
+    let f: PlFn = std::mem::transmute_copy(&va(base(), DRIKU_PICKER));
     f(pl)
 }
 
@@ -1749,6 +1761,14 @@ pub unsafe fn patch_data(b: usize) -> bool {
         patch(rslot, &old, &new, "attack: Riku's row pick slot");
     } else {
         log("attack: Riku's row-pick slot is not Re:CoM's; Riku keeps Re:CoM's row pick");
+    }
+    // Dark Riku's (0.152.0): our wrapper falls back to his own row pick.
+    let dslot = va(b, DRIKU_PICKER_SLOT);
+    let dold = (va(b, DRIKU_PICKER) as u64).to_le_bytes();
+    if have(dslot, 8) == dold {
+        patch(dslot, &dold, &(dark_picker as *const () as usize as u64).to_le_bytes(), "attack: Dark Riku's row pick slot");
+    } else {
+        log("attack: Dark Riku's row-pick slot is not Re:CoM's; Dark Riku keeps Re:CoM's row pick");
     }
     true
 }

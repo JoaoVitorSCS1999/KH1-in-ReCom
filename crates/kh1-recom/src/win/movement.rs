@@ -376,9 +376,18 @@ pub fn set_riku(on: bool) {
 }
 
 /// The main player, if it is Riku (`CPlayerRiku`, vtable `0x1405A8868`).
+/// 0.152.0: Dark Riku (`CPlayerDRiku`, Dark Mode's player) counts as Riku for every KH1 rule
+/// (owner, 2026-11-22: "a mesma adequação que fizemos ao Riku, precisa ser feita ao Riku Dark");
+/// [`is_main_dark_riku`] tells them apart where their data differ (rows, attack ids, sleights).
 pub unsafe fn is_main_riku(pl: usize) -> bool {
     let b = base();
-    pl != 0 && pl == rd::<usize>(va(b, data::MAIN_PLAYER)) && rd::<usize>(pl) == va(b, data::RIKU_VTABLE)
+    pl != 0 && pl == rd::<usize>(va(b, data::MAIN_PLAYER)) && (rd::<usize>(pl) == va(b, data::RIKU_VTABLE) || rd::<usize>(pl) == va(b, data::DRIKU_VTABLE))
+}
+
+/// The main player is Dark Riku.
+pub unsafe fn is_main_dark_riku(pl: usize) -> bool {
+    let b = base();
+    pl != 0 && pl == rd::<usize>(va(b, data::MAIN_PLAYER)) && rd::<usize>(pl) == va(b, data::DRIKU_VTABLE)
 }
 
 /// `riku_kh1_movement` is on (read at start): Riku's story gets KH1's movement and Attack, the
@@ -635,10 +644,12 @@ impl Host for RecomHost {
             let stance = Stance { battle: rd::<u32>(pl + p::CARD) & 1 != 0, flag_418_2: rd::<u32>(pl + p::FLAGS_418) & 2 != 0, prev_row: rd(pl + p::ROW_PREV), row: rd(pl + p::ROW) };
             let ext = EXT.get().copied().unwrap_or_default();
             let Some((row, root)) = rows::row_for(request, &stance, &ext) else { return false };
+            // 0.152.0: Riku's Guard plays his block-recoil row (`crate::riku::GUARD_ROW`).
+            let row = if is_main_riku(pl) && request & 0x3FF == rows::GUARD { crate::riku::GUARD_ROW } else { row };
             if is_main_riku(pl) {
                 // Only rows Riku's own action table plays (`crate::riku::row_ok`); Re:CoM's own
                 // effects and sounds of his clips (variant 0).
-                if !crate::riku::row_ok(row) {
+                if !crate::riku::row_ok_for(is_main_dark_riku(pl), row) {
                     log_riku_row(request, row);
                     return false;
                 }
@@ -872,6 +883,8 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
         let mut host = RecomHost::new(pl);
         slot.last = slot.sora.frame(&mut host, &input, fresh);
         slot.sync = if slot.last.handed_to_recom() { None } else { Some(read_sync(pl)) };
+        // 0.152.0: his Guard's start and success move his DP (perfect / missed parries).
+        super::dark_points::guard_events(pl, &slot.last.events);
         log_once_riku();
         return;
     }
