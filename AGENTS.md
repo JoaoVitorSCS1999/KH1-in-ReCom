@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 273 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard really blocks (KH1's front test after Re:CoM's) and cancels magic shots, version 0.153.0 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "a defes do Riku deve poder fazer parry e cancelar o ataque do oponente caso for uma magia!"; "percebi que a defesa dele não está sendo efetiva contra nada, precisa ser efetiva tal qual o KH1 é".
+
+- **Found** (Checked (the owner's 0.152.0 log)): his Guards started, Re:CoM's body guard (`0x14016F1C0`) never blocked (no block line, no guard success, only missed parries). Its rule read from the exe (Checked (exe: disasm)); which part refuses on Riku: not known (no decomp here); the first 40 guarded hits log its fields (`riku guard:`). His Guard clip `p002_043` is 56 game frames, so KH1's live frames 10..36 run (Checked (files)).
+- **Change** (`win::attack::riku_guard_block`, `crate::riku::guard_faces`, `win::guard::{riku_block, cancel_shot}`): in the damage-check wrapper, a hit on Riku / Dark Riku while his KH1 guard is live that Re:CoM didn't block is KH1's block when its attacker is within ±100° of his facing (Re:CoM's own angle rule): Re:CoM's protection bit for the check, KH1's guard success (recoil, clink, parries), the melee attacker's block reaction.
+- **Magic**: a shot his Guard blocks is cancelled (attack off `0x14014DE80`, life `+0x160` = 0), KH1's inert blocked shot; Sora's still turn back.
+- **Thunder** (owner, verbatim: "remebering, that it should be like the kh1 guard, if an enemy cast like thunder, then it should be effective"): the KH1 Yellow Opera's bolt, which skips Sora's Guard (KH1's Thunder has no clash pass, Stage 178), meets Riku's Guard (the owner's rule, not KH1's). Re:CoM's own thunder shots are bullets: blocked and cancelled as above; one straight down counts as in front.
+- No new hook or site; per hit only. Assumptions: the attacker's position for KH1's hit point; a plain `CBullet`'s life at `+0x160`; the caster isn't interrupted. Checked: tests (`riku::tests::rikus_guard_faces_the_front`), the Windows build. Not checked: in game. Details: `docs/recom-riku-kh1.md` § 0.153.0.
+
+---
+
 ## Stage 272 (fork branch Re-Re-Reverse/Rebirth): Dark Riku with KH1 combat, DP on Re:CoM's Dark gauge, Riku's Guard and parries, version 0.152.0 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "implementa tudo pra eu testar de uma vez e faz push no final".

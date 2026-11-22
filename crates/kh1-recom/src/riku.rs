@@ -62,6 +62,27 @@ pub fn abilities(ability_word: u32) -> kh1_core::Abilities {
     kh1_core::Abilities { high_jump: ability_word & HIGH_JUMP_BIT != 0, dodge_roll: true, guard: true, ..Default::default() }
 }
 
+/// Re:CoM's body-guard angle rule (`0x14016F1C0`'s guard branch; Checked (exe: disasm)): the
+/// attack point minus the guarder's bone 0 (`0x14023E6E0`), `atan2f(d.x, d.z)` minus the guarder's
+/// yaw (its mover `+0x54`, `0x1401A4A00`), wrapped to ±π (`0x14016EAA0`), within `half` (KH1's
+/// Guard: ±100°, `KH1_GUARD_ANGLE`). Used for Riku's Guard when Re:CoM's own block didn't fire
+/// (0.153.0).
+pub fn guard_faces(guarder: [f32; 3], yaw: f32, point: [f32; 3], half: f32) -> bool {
+    let (dx, dz) = (point[0] - guarder[0], point[2] - guarder[2]);
+    if dx == 0.0 && dz == 0.0 {
+        return true;
+    }
+    let pi = std::f32::consts::PI;
+    let mut a = dx.atan2(dz) - yaw;
+    while a > pi {
+        a -= 2.0 * pi;
+    }
+    while a < -pi {
+        a += 2.0 * pi;
+    }
+    a.abs() <= half
+}
+
 /// Riku's / Dark Riku's row for KH1's Guard request: their recoil row (`p002_043` / `p003_033`).
 pub const GUARD_ROW: u32 = 0x24;
 
@@ -208,6 +229,19 @@ mod tests {
         assert_eq!(crate::sleights::name(0x69), "Dark Impulse");
         assert_eq!(crate::sleights::list(&[0x67, 0x66]), vec![0x66, 0x67]);
         assert_eq!(crate::command_menu::shortcut::slot_sleight(0x66), Some(0x66));
+    }
+
+    #[test]
+    fn rikus_guard_faces_the_front() {
+        let half = 1.745_329_3;
+        // Yaw 0 faces +z (atan2(x, z) = 0).
+        assert!(guard_faces([0.0; 3], 0.0, [0.0, 0.0, 2.0], half));
+        assert!(guard_faces([0.0; 3], 0.0, [2.0, 0.0, 0.1], half));
+        assert!(!guard_faces([0.0; 3], 0.0, [0.0, 0.0, -2.0], half));
+        assert!(!guard_faces([0.0; 3], 0.0, [0.5, 0.0, -2.0], half));
+        // Facing −z (yaw π): behind is +z.
+        assert!(guard_faces([1.0, 0.0, 1.0], std::f32::consts::PI, [1.0, 0.0, -3.0], half));
+        assert!(!guard_faces([1.0, 0.0, 1.0], std::f32::consts::PI, [1.0, 0.0, 4.0], half));
     }
 
     #[test]
