@@ -59,7 +59,22 @@ pub const HIGH_JUMP_BIT: u32 = 0x20_0000;
 /// his request 110 / 111 (entry 13) is the clash recoil Re:CoM baked as row 0x24 for him too.
 /// Checked (files: both motion sets' request tables).
 pub fn abilities(ability_word: u32) -> kh1_core::Abilities {
-    kh1_core::Abilities { high_jump: ability_word & HIGH_JUMP_BIT != 0, dodge_roll: true, guard: true, ..Default::default() }
+    kh1_core::Abilities { high_jump: ability_word & HIGH_JUMP_BIT != 0, dodge_roll: true, guard: true, counterattack: true, ..Default::default() }
+}
+
+/// 0.159.0 (fork owner: "Falta o contra-ataque"): KH1's Counterattack (row 0x3E, after a guard
+/// success) for Riku, who has no clip of it: the row it plays is his ground finisher's (KH1 row 8,
+/// his own finisher clip); KH1's offer, input and timing are Sora's. Assumption: his finisher clip
+/// reads as the counter.
+pub const COUNTER_AS_ROW: usize = 8;
+
+/// The KH1 row whose Re:CoM row Riku plays for `kh1_row`.
+pub fn swing_row(kh1_row: usize) -> usize {
+    if kh1_row == crate::attack::COUNTERATTACK_ROW {
+        COUNTER_AS_ROW
+    } else {
+        kh1_row
+    }
 }
 
 /// Re:CoM's body-guard angle rule (`0x14016F1C0`'s guard branch; Checked (exe: disasm)): the
@@ -260,7 +275,7 @@ mod tests {
     #[test]
     fn rikus_abilities() {
         let a = abilities(0);
-        assert!(a.dodge_roll && !a.high_jump && !a.glide && !a.superglide && a.guard && !a.counterattack && a.combo_plus == 0);
+        assert!(a.dodge_roll && !a.high_jump && !a.glide && !a.superglide && a.guard && a.counterattack && a.combo_plus == 0);
         assert!(abilities(HIGH_JUMP_BIT).high_jump);
     }
 }

@@ -152,12 +152,8 @@ pub(super) unsafe fn on_result(c: usize, list: usize, r: i32) -> i32 {
             other(obj, c, "a KH1 banana peel: blocked, not turned back");
             return r;
         }
-        // 0.153.0: Riku's Guard cancels a blocked shot (magic), as KH1's generic code makes a
-        // blocked shot inert; Re:CoM's result 2 stands (its bullet ends on it).
-        if mv::is_main_riku(pl) && rd::<usize>(obj + bullet::COLL) == c {
-            cancel_shot(obj, s);
-            return r;
-        }
+        // 0.159.0 (fork owner: "Magias deveriam voltar"): Riku's Guard turns a shot back as
+        // Sora's does (0.153.0 cancelled it).
         if rd::<usize>(obj + bullet::COLL) == c && turn_back(obj, c, s) {
             return 0;
         }

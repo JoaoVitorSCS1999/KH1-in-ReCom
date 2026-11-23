@@ -370,7 +370,9 @@ pub const RIKU_GUARD_REQUESTS: (u16, u16) = (240, 241);
 /// The clip's length: Sora's KH1 Guard (54 frames), whose timing the KH1 frame uses.
 pub const RIKU_GUARD_FRAMES: usize = 54;
 /// Frames of the held part after the way in (0.158.1: 7, then the way out).
-pub const RIKU_GUARD_HOLD: u32 = 7;
+pub const RIKU_GUARD_HOLD: u32 = 27;
+/// Frames 240 (the way into the guard) is played in: KH1's guard object's first live frame.
+pub const RIKU_GUARD_UP: usize = 10;
 
 /// KH1 Riku's own guard on a Riku skeleton of Re:CoM's (named [`RIKU_GUARD`]).
 pub fn riku_kh1_guard(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<Clip> {
@@ -388,6 +390,14 @@ pub fn riku_kh1_guard(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<
         rows.push(l);
     }
     let into: Vec<Vec<[f64; 9]>> = rows.clone();
+    // 0.159.0 (fork owner: "Tempo/duração estranhos"): the guard is up when KH1's guard object goes
+    // live (frame 10 of the Guard's 54, live 10..36): 240 is played in its first 10 frames, 241
+    // held over the live window, then the way out.
+    rows.clear();
+    let last_in = into.len().saturating_sub(1);
+    for k in 0..RIKU_GUARD_UP {
+        rows.push(into[((k + 1) * last_in + RIKU_GUARD_UP / 2) / RIKU_GUARD_UP].clone());
+    }
     rig.start_motion(m_hold);
     for f in 0..RIKU_GUARD_HOLD.min(m_hold.frames) {
         let tg = conv.targets(&mut rig, m_hold, f as f32, false);

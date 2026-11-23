@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 292 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard works as Sora's KH1 Guard (blocks at the pair test, turns shots back, Counterattack, the guard up on the live frames), version 0.159.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "a mecânica de guarda precisa funcionar igual a do Kingdom Hearts 1"; "o mod com a campanha do Sora já deve ter essas implementações não? não da para se basear?" (chose: hits get through, magic should come back, timing odd, no Counterattack).
+
+- **Block** (`win::attack::riku_pair_block`): Re:CoM's body guard never answers 2 for Riku (why: not known; the log showed every hit falling to the damage-check fallback). Now a hit on him at the pair test while his KH1 guard is live, from in front (±100°; a shot within 1 m judged by its caster), becomes Re:CoM's block as Sora gets it: result 2 + the guarded bit. Sora's path does the rest. Not for the real Dark Riku.
+- **Shots**: turned back as Sora's (0.153.0's cancel removed).
+- **Counterattack**: Riku has KH1's Counterattack (Sora's offer and input); it plays his ground finisher's row (`riku::swing_row`, Assumption: it reads as the counter).
+- **Timing**: the guard clip is 240 in 10 frames, 241 held over KH1's live window 10..36, the way out in 17 (54 total). Asset step: **re-run** (automatic).
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 291 (fork branch Re-Re-Reverse/Rebirth): no melee block reaction on a far attacker; KH1 Riku's own guard recoil, version 0.158.2 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "eu apertei a defesa bem longe desse oponente, e parece que deu block naquela distância … prefiro que use a versão do KH1 da animação de quando toma impacto".

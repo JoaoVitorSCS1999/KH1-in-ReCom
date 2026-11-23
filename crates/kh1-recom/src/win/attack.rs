@@ -300,12 +300,13 @@ pub(super) unsafe fn attack_target(pl: usize) -> Option<TargetPart> {
 /// slot) takes the row from `PENDING`.
 pub(super) unsafe fn start_swing(pl: usize, s: &SwingStart) -> bool {
     let Some(t) = TABLE.get() else { return false };
-    if t.get(s.kh1_row).is_none_or(|r| r[0] == 0) {
+    let tr = if mv::is_main_riku(pl) { crate::riku::swing_row(s.kh1_row) } else { s.kh1_row };
+    if t.get(tr).is_none_or(|r| r[0] == 0) {
         return false;
     }
     // Riku (`crate::riku`): only a row whose action row has a clip of his (else no swing).
-    if mv::is_main_riku(pl) && t.get(s.kh1_row).is_some_and(|r| !crate::riku::row_ok_for(mv::is_main_dark_riku(pl), r[0] as u32)) {
-        debug(|| format!("riku: KH1 row {} plays action row {:#x}, which has no clip of his: no swing", s.kh1_row, t[s.kh1_row][0]));
+    if mv::is_main_riku(pl) && t.get(tr).is_some_and(|r| !crate::riku::row_ok_for(mv::is_main_dark_riku(pl), r[0] as u32)) {
+        debug(|| format!("riku: KH1 row {} plays action row {:#x}, which has no clip of his: no swing", s.kh1_row, t[tr][0]));
         return false;
     }
     // A chain: end the last swing's volume first, as Re:CoM's own chain does (`0x1401EAFC2`).
@@ -341,7 +342,8 @@ pub(super) unsafe fn end_swing(pl: usize, airborne: bool) -> bool {
 /// Re:CoM's row pick for a KH1 row (`0x1401F7520`'s writes, cardless).
 unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     let Some(t) = TABLE.get() else { return false };
-    let Some(row) = t.get(s.kh1_row).filter(|r| r[0] != 0) else { return false };
+    let tr = if mv::is_main_riku(pl) { crate::riku::swing_row(s.kh1_row) } else { s.kh1_row };
+    let Some(row) = t.get(tr).filter(|r| r[0] != 0) else { return false };
     wr(pl + field::HOMING_TARGET, 0i32);
     wr(pl + field::VSPEED, 0f32);
     // Riku (`crate::riku::attack_id`): his own row of the same clip, for his hit effect.
@@ -609,7 +611,69 @@ unsafe fn recom_pair(coll: usize, list: usize) -> i32 {
     if r == 0 {
         return r;
     }
+    let r = riku_pair_block(coll, list, r);
     super::guard::on_result(coll, list, r)
+}
+
+/// 0.159.0 (fork owner, 2026-11-23: "a mecânica de guarda precisa funcionar igual a do Kingdom
+/// Hearts 1"; "o mod com a campanha do Sora já deve ter essas implementações … não da para se
+/// basear?"): Riku's Guard blocks where Re:CoM blocks Sora's, at the pair test. Re:CoM's body guard
+/// never answers 2 for Riku (`0x14016F1C0`; why: not known), so a hit (1) on him while his KH1 guard
+/// is live, from an attacker in front (`crate::riku::guard_faces`, ±100°: a shot's own place, or
+/// its caster's within 1 m), becomes the block Re:CoM gives Sora: result 2 and his body's guarded
+/// bit (`+0x9C | 0x20`, the attacker at `+0x98` as the apply wrote it). Then everything is Sora's:
+/// the shot turned back, the melee attacker's reaction (`super::guard::on_result`), the KH1 guard
+/// success (recoil, the Counterattack window, parries). The hit the apply left on his body is
+/// shielded by the damage check (`riku_guard_block`). A non-shot attacker past a melee reach is
+/// left to that check (blocked there, no reaction: 0.158.2).
+unsafe fn riku_pair_block(coll: usize, list: usize, r: i32) -> i32 {
+    if r != 1 {
+        return r;
+    }
+    let b = base();
+    if list == 0 || list != rd::<usize>(va(b, crate::guard::PLAYER_LIST)) {
+        return r;
+    }
+    let pl: usize = rd(va(b, data::MAIN_PLAYER));
+    if !mv::riku_on() || !mv::is_main_riku(pl) || mv::is_main_dark_riku(pl) || !guard_live(pl) {
+        return r;
+    }
+    let owner: u32 = rd(coll + crate::guard::coll::OWNER);
+    let obj = if owner != 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(owner) } else { 0 };
+    let Some((faces, shot, dist)) = riku_faces(pl, obj) else { return r };
+    if !faces || (!shot && dist > RIKU_MELEE_REACH) {
+        return r;
+    }
+    wr(pl + BODY_GUARD, rd::<u32>(pl + BODY_GUARD) | 0x20);
+    wr(pl + 0x690 + crate::guard::body::ATTACKER, owner);
+    riku_guard_log(|| format!("blocked at the pair test: {owner:#x} ({}, {dist:.1} m)", if shot { "shot" } else { "melee" }));
+    2
+}
+
+/// Riku and `obj`: (in front, a shot, flat distance), by `crate::riku::guard_faces`; a shot
+/// within 1 m of him is judged by its caster's place.
+unsafe fn riku_faces(pl: usize, obj: usize) -> Option<(bool, bool, f32)> {
+    let mover: usize = rd(pl + 0xF0);
+    let om: usize = if obj != 0 { rd(obj + 0xF0) } else { 0 };
+    if obj == 0 || mover == 0 || om == 0 {
+        return None;
+    }
+    let b0 = base();
+    let me: [f32; 4] = rd(mover + mv::body::POS);
+    let mut it: [f32; 4] = rd(om + mv::body::POS);
+    let vt: usize = rd(obj);
+    let shot = vt == va(b0, crate::guard::bullet::VTABLE) || vt == va(b0, crate::guard::bullet::HOMING_VTABLE);
+    if shot && (it[0] - me[0]).hypot(it[2] - me[2]) < 1.0 {
+        let shooter: i32 = rd(obj + crate::guard::bullet::SHOOTER);
+        let so = if shooter > 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(shooter as u32) } else { 0 };
+        let sm: usize = if so != 0 { rd(so + 0xF0) } else { 0 };
+        if sm != 0 {
+            it = rd(sm + mv::body::POS);
+        }
+    }
+    let yaw: f32 = rd(mover + mv::body::YAW);
+    let faces = crate::riku::guard_faces([me[0], me[1], me[2]], yaw, [it[0], it[1], it[2]], KH1_GUARD_ANGLE);
+    Some((faces, shot, (it[0] - me[0]).hypot(it[2] - me[2])))
 }
 
 pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
@@ -1611,7 +1675,8 @@ unsafe fn riku_guard_block(pl: usize) -> bool {
         return false;
     }
     if rd::<u32>(pl + BODY_GUARD) & 0x20 != 0 {
-        return false; // Re:CoM's own block (kept above as GUARD_HIT)
+        // 0.159.0: blocked at the pair test (`riku_pair_block`): the hit the apply left is shielded.
+        return true;
     }
     let body = pl + 0x690;
     let id: u32 = rd(body + crate::guard::body::ATTACKER);

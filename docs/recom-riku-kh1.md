@@ -743,3 +743,38 @@ de quando toma impacto a do recom é estranha".
     Dark Mode keeps his own.
 - Asset step: **re-run** (automatic). **Checked**: tests, the asset step (both clips in all four
   packs), the Windows build. **Not checked**: in game.
+
+## 0.159.0: Riku's Guard as Sora's KH1 Guard
+
+Fork owner, 2026-11-23, verbatim: "a mecânica de guarda precisa funcionar igual a do Kingdom
+Hearts 1"; "o mod com a campanha do Sora já deve ter essas implementações não? não da para se
+basear?". The owner listed four things: hits get through, magic should come back, the timing is
+odd, there is no Counterattack.
+
+- **Why hits got through** (Checked (the owner's 0.158.2 log)):
+  - Re:CoM's apply `0x14016F1C0` never blocked for Riku: no guarded bit on his body. The cause is
+    not known (Assumption: some field of his body or class).
+  - Every guarded hit fell to 0.153.0's damage-check fallback. Many showed attacker 0: "not
+    blocked".
+- **Change** (`win::attack::riku_pair_block`, in `recom_pair` before the Guard reactions):
+  - Hit result 1 on the player list.
+  - The main Riku, not the real Dark Riku, with his KH1 guard live.
+  - The attacker in front (±100°; a shot within 1 m judged by its caster), and not a non-shot
+    past 4 m.
+  - Then: result 2 plus Riku's body `+0x9C | 0x20` with the attacker `+0x98`, as Re:CoM's block
+    gives Sora. From there every step is Sora's: the shot turned back (`super::guard::turn_back`;
+    0.153.0's cancel removed), the melee attacker's reaction, the KH1 guard success (recoil, the
+    Counterattack offer, the parries). The damage check sees the guarded bit and shields the hit.
+- **Counterattack**:
+  - `riku::abilities` gives it (KH1's offer from frame 12 of the recoil, Attack).
+  - KH1 row 0x3E plays Riku's ground finisher row (`riku::swing_row`: KH1 row 8's Re:CoM row).
+  - KH1's damage and windows come from the Counterattack's own row. Assumption: his finisher clip
+    reads as the counter.
+- **Timing**: KH1's guard object is live on frames 10..36 of the 54-frame Guard. Riku's clip is now:
+  - 240 in 10 frames;
+  - 241 held 27 frames (10..36);
+  - 240 backwards in 17 (`RIKU_GUARD_UP`, `RIKU_GUARD_HOLD`).
+
+  The guard is up the whole time it blocks.
+- Asset step: **re-run** (automatic). **Checked**: tests, the asset step, the Windows build.
+  **Not checked**: in game.
