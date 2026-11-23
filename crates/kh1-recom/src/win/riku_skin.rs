@@ -108,7 +108,20 @@ pub unsafe fn sync_menu(b: usize) {
 /// block's spare bit [`super::dark_points::DARK_SEEN`], 0.151.0; fork owner, 2026-11-22: "depois a
 /// gente bota o requisito do jogo pra liberar ela").
 pub unsafe fn unlocked() -> bool {
-    super::dark_points::dark_seen()
+    // Debug (0.156.1): `riku_dark_skin_unlocked = on` in the ini.
+    super::settings().riku_dark_skin_unlocked || super::dark_points::dark_seen()
+}
+
+/// Riku's mover's ground speed stopped (0.156.1; fork owner: "quando vc está andando e troca a
+/// skin a animação fica tocando enquanto o personagem está se movimentando"): his move exe is
+/// held, but Re:CoM's mover step keeps the last velocity (`mover+0x80`). The vertical part stays
+/// Re:CoM's (gravity).
+unsafe fn stop(e: usize) {
+    let m: usize = rd(e + super::movement::p::BODY);
+    if m != 0 {
+        let v: [f32; 4] = rd(m + super::movement::body::VEL);
+        wr::<[f32; 4]>(m + super::movement::body::VEL, [0.0, v[1], 0.0, v[3]]);
+    }
 }
 
 /// The costume as it should be now: the setting, if unlocked. Called when Re:CoM queues the
@@ -467,6 +480,7 @@ unsafe fn try_swap(b: usize) -> bool {
         TRANS_PL.store(e, Ordering::Relaxed);
         TRANS_FRAMES.store(0, Ordering::Relaxed);
         TRANS_PHASE.store(0, Ordering::Relaxed);
+        stop(e);
         log(&format!("riku skin: costume change: Riku's transformation (row {TRANSFORM_ROW:#x}) plays, the model changes at its end"));
     }
     false
@@ -592,6 +606,7 @@ unsafe fn transition(b: usize, e: usize) -> bool {
         return false;
     }
     let n = TRANS_FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
+    stop(e);
     // The motion's end: its first frames may still read the previous clip's end bits.
     let ended = n > 4 && func::<EndFn>(0x001A_57D0)(e) & 3 != 0;
     if !ended && n < TRANSFORM_MAX {

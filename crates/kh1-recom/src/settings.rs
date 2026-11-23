@@ -188,6 +188,8 @@ pub struct Settings {
     /// outside Dark Mode too (`crate::riku_skin`). 0.156.0: only once Riku has reached Dark Mode in
     /// the save (else Default Attire); default off (Default Attire).
     pub riku_dark_skin: bool,
+    /// Debug (fork, 0.156.1): the Dark Mode costume unlocked without Riku's first Dark Mode.
+    pub riku_dark_skin_unlocked: bool,
     /// Debug (M7, until stage 7.11 earns spells): Sora has all 7 spells at level 3.
     pub kh1_all_spells: bool,
     /// Debug (M9): every ability of the equip screen is equipped, AP ignored (not written to the
@@ -332,7 +334,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_dark_skin: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_dark_skin: false, riku_dark_skin_unlocked: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
     }
 }
 
@@ -471,6 +473,10 @@ riku_kh1_movement = off
 ;   look, Riku's own moves), off = Default Attire. Dark Mode only once Riku has reached Dark Mode
 ;   in the save. Needs the asset step's files (kh1-riku-skin.json).
 riku_dark_skin = off
+;
+; riku_dark_skin_unlocked = on | off (debug, for tests): the Dark Mode costume unlocked from the
+;   start, without Riku's first Dark Mode.
+riku_dark_skin_unlocked = off
 ;
 ; kh1_all_spells = on | off (debug, until spells are earned in the game): Sora has all 7 KH1
 ;   spells at level 3 in the command menu's Magic list.
@@ -634,6 +640,10 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(b) => s.riku_kh1_movement = b,
                 None => warnings.push(bad("riku_kh1_movement must be on or off")),
             },
+            "riku_dark_skin_unlocked" => match parse_switch(v) {
+                Some(b) => s.riku_dark_skin_unlocked = b,
+                None => warnings.push(bad("riku_dark_skin_unlocked must be on or off")),
+            },
             "riku_dark_skin" => match parse_switch(v) {
                 Some(b) => s.riku_dark_skin = b,
                 None => warnings.push(bad("riku_dark_skin must be on or off")),
@@ -774,6 +784,7 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "combo_master", switch_str(a.combo_master));
     let t = set_key(&t, "debug_attack", switch_str(s.debug_attack));
     let t = set_key(&t, "riku_dark_skin", switch_str(s.riku_dark_skin));
+    let t = set_key(&t, "riku_dark_skin_unlocked", switch_str(s.riku_dark_skin_unlocked));
     let t = set_key(&t, "kh1_all_spells", switch_str(s.kh1_all_spells));
     let t = set_key(&t, "kh1_all_abilities", switch_str(s.kh1_all_abilities));
     let t = set_key(&t, "kh1_test_items", switch_str(s.kh1_test_items));
@@ -908,7 +919,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: false, riku_dark_skin: false, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: false, riku_dark_skin: false, riku_dark_skin_unlocked: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);

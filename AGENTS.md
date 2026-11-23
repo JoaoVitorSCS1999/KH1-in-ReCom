@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 285 (fork branch Re-Re-Reverse/Rebirth): debug unlock for the Dark Mode costume; Riku stops while the transformation plays, version 0.156.1 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "deixa no ini do mod uma opção de debug pra deixar desbloqueado o modo desde o início para testes, além disso peguei um bug, quando vc está andando e troca a skin a animação fica tocando enquanto o personagem está se movimentando".
+
+- Ini `riku_dark_skin_unlocked = on | off` (debug, default off): the costume unlocked from the start.
+- The transformation zeroes Riku's horizontal velocity (`mover+0x80`) at its start and on every held frame (the held move exe left Re:CoM's mover sliding him).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 284 (fork branch Re-Re-Reverse/Rebirth): the Dark Mode costume unlocks at Riku's first Dark Mode, version 0.156.0 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "beleza já implementa essa pendência".

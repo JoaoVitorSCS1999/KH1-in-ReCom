@@ -592,3 +592,17 @@ the costume: "depois a gente bota o requisito do jogo pra liberar ela").
   the help line says "Riku must reach Dark Mode once to wear this attire."
 - **Default**: `riku_dark_skin = off` (Default Attire).
 - **Checked**: tests, the Windows build. **Not checked**: in game.
+
+## 0.156.1: a debug unlock; Riku stops while the transformation plays
+
+Fork owner, 2026-11-22, verbatim: "deixa no ini do mod uma opção de debug pra deixar desbloqueado o
+modo desde o início para testes, além disso peguei um bug, quando vc está andando e troca a skin a
+animação fica tocando enquanto o personagem está se movimentando".
+
+- **Debug**: `riku_dark_skin_unlocked = on` (ini, default off) unlocks the Dark Mode costume without
+  Riku's first Dark Mode (`win::riku_skin::unlocked`).
+- **The slide** (Checked (code)): during the transformation Riku's move exe is held, but Re:CoM's
+  mover step keeps applying the velocity he had when it started (`mover+0x80`). His horizontal
+  velocity is now 0 at the start and on every held frame; the vertical part (gravity) stays
+  Re:CoM's.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
