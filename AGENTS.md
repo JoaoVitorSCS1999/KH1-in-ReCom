@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 301 (fork branch Re-Re-Reverse/Rebirth): Riku's DP only once the story gives him Dark Mode; the Keyblade of Heart unlocks with the Dark Mode costume, version 0.167.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "o Dark Mode precisa começar de acordo com o jogo normal mesmo liberando a partir da história, me equivoquei falando que o dark mode começava com 30 pq vi que era dentro do combate para ativalo!, a keyblade cosmética dele pode liberar junto com o Dark Mode também".
+
+- **DP** (`win::dark_points::ours`): only with Riku's ability word `+0x41C & 0x4000000` (the story's Dark Mode, the bit Re:CoM's own DP rules and its Dark Riku test read; Checked (disasm `0x1401E7255`, `0x14021223D`)) or as Dark Riku. Before it, no DP and the gauge untouched, as Re:CoM. Kept from 0.166.0: the gauge fills to 30 to start it, Dark Mode starts at his DP stat.
+- **Keyblade of Heart**: unlocked with the Dark Mode costume (Riku's first Dark Mode, `riku_skin::unlocked`), the 15-DP bit dropped.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 300 (fork branch Re-Re-Reverse/Rebirth): Dark Mode starts at Riku's DP stat again; his DP row is "Dark Up" (DP +2 and Ability Points +2), version 0.166.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "mas sumiu o DP"; "certo mas o DP enchendo e esvaziando tbm liga com o DP maximo oq aconteceu com ele"; chose "DP e Ability juntos".

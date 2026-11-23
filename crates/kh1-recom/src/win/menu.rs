@@ -190,7 +190,7 @@ impl SettingsPage {
                         let it = items[self.cursor.min(items.len() - 1)];
                         let v = menu::cycle(it.value(&super::settings()), it.options().len(), right);
                         // 0.156.0: the Dark Mode costume only once Riku has reached Dark Mode.
-                        // 0.160.0: the Keyblade of Heart only once Riku has reached 15 DP.
+                        // 0.160.0 / 0.167.0: the Keyblade of Heart only once Riku has reached Dark Mode.
                         let locked = match it {
                             menu::Item::Costume => (v == 1 && !super::riku_skin::unlocked()).then_some(crate::menu::COSTUME_LOCKED),
                             menu::Item::Blade => (v == 1 && !super::riku_skin::blade_unlocked()).then_some(crate::menu::BLADE_LOCKED),

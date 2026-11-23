@@ -191,10 +191,10 @@ pub struct Settings {
     /// Debug (fork, 0.156.1): the Dark Mode costume unlocked without Riku's first Dark Mode.
     pub riku_dark_skin_unlocked: bool,
     /// Fork (0.160.0): Riku's Keyblade (camp menu > Costumes): false the Soul Eater, true the
-    /// Keyblade of People's Hearts ("Keyblade of Heart"); only once Riku has reached 15 DP in the
+    /// Keyblade of People's Hearts ("Keyblade of Heart"); only once Riku has reached Dark Mode in the
     /// save. Cosmetic.
     pub riku_heart_blade: bool,
-    /// Debug (fork, 0.160.0): the Keyblade of Heart unlocked without the 15 DP.
+    /// Debug (fork, 0.160.0): the Keyblade of Heart unlocked without Riku's first Dark Mode.
     pub riku_heart_blade_unlocked: bool,
     /// Debug (M7, until stage 7.11 earns spells): Sora has all 7 spells at level 3.
     pub kh1_all_spells: bool,
@@ -486,11 +486,12 @@ riku_dark_skin_unlocked = off
 ;
 ; riku_keyblade = soul_eater | heart: Riku's Keyblade (camp menu > Costumes), cosmetic: the Soul
 ;   Eater or the Keyblade of Heart (KH1's Keyblade of People's Hearts). The Keyblade of Heart only
-;   once Riku has reached 15 DP in the save. Needs the asset step's files (kh1-riku-skin.json).
+;   once Riku has reached Dark Mode in the save (with the Dark Mode costume). Needs the asset step's
+;   files (kh1-riku-skin.json).
 riku_keyblade = soul_eater
 ;
 ; riku_keyblade_unlocked = on | off (debug, for tests): the Keyblade of Heart unlocked from the
-;   start, without the 15 DP.
+;   start, without Riku's first Dark Mode.
 riku_keyblade_unlocked = off
 ;
 ; kh1_all_spells = on | off (debug, until spells are earned in the game): Sora has all 7 KH1

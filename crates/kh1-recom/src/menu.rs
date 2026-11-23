@@ -150,7 +150,7 @@ const COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Dark Mode\0"];
 /// The help line when Dark Mode is asked for before Riku has reached it (0.156.0).
 pub const COSTUME_LOCKED: &[u8] = b"Riku must reach Dark Mode once to wear this attire.\0";
 const BLADES: &[&[u8]] = &[b"Soul Eater\0", b"Keyblade of Heart\0"];
-pub const BLADE_LOCKED: &[u8] = b"Riku must reach 15 DP once to hold this Keyblade.\0";
+pub const BLADE_LOCKED: &[u8] = b"Riku must reach Dark Mode once to hold this Keyblade.\0";
 
 fn mode_index(m: Mode) -> usize {
     match m {
@@ -228,7 +228,7 @@ impl Item {
             Item::Camera => b"Re:CoM's camera, KH1's, or KH2's (its distances x 0.89).\0",
             Item::AutoCamera => b"On: the KH1 / KH2 camera swings behind Sora as he runs.\0",
             Item::Costume => b"Dark Mode: Dark Riku's look. Unlocked by Riku's first Dark Mode.\0",
-            Item::Blade => b"Keyblade of Heart: Riku-Ansem's. Unlocked by reaching 15 DP.\0",
+            Item::Blade => b"Keyblade of Heart: Riku-Ansem's. Unlocked by Riku's first Dark Mode.\0",
         }
     }
 

@@ -1536,7 +1536,7 @@ impl Page {
     /// A greyed row (Items, Abilities: KH1's greyed rows).
     fn row_grey(&self, idx: usize) -> bool {
         match &self.content {
-            // 0.163.0: the Keyblade of Heart before Riku's 15 DP.
+            // 0.163.0 / 0.167.0: the Keyblade of Heart before Riku's first Dark Mode.
             // SAFETY: reads the save (the camp, main thread).
             Content::Keyblades { cards, .. } => cards.get(idx) == Some(&RIKU_HEART) && unsafe { !super::riku_skin::blade_unlocked() },
             Content::Items { rows, .. } => rows.get(idx).is_some_and(|r| r.grey),

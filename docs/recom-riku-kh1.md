@@ -937,3 +937,11 @@ dele".
     stays as it is.
   - Assumption: an early Dark Mode (DP stat 8) is short under the owner's in-Dark losses (−3 a hit),
     as Re:CoM's own was.
+
+## 0.167.0: DP after the story's Dark Mode; the Keyblade of Heart with it
+
+- `win::dark_points::ours` needs Riku's `+0x41C & 0x4000000` (the story gives it; Re:CoM's DP rules
+  `0x1401E7255` and its Dark Riku creation `0x14021223D` read it) or Dark Riku as the main player.
+  Before it, nothing moves the DP or the gauge.
+- `riku_skin::blade_unlocked` = the debug key or the costume's unlock (first Dark Mode, save bit 4).
+  The 15-DP bit (0.160.0) is dropped.

@@ -40,10 +40,11 @@ pub unsafe fn chosen(s: &crate::settings::Settings) -> Look {
     Look { dark: s.riku_dark_skin && unlocked(), blade: (s.riku_heart_blade && blade_unlocked()) as u8 }
 }
 
-/// The Keyblade of Heart is unlocked: Riku has reached 15 DP once in this save (the save block's
-/// spare bit [`super::dark_points::HEART_SEEN`], 0.160.0), or the debug key.
+/// The Keyblade of Heart is unlocked with the Dark Mode costume (0.167.0; fork owner, 2026-11-23: "a
+/// keyblade cosmética dele pode liberar junto com o Dark Mode também"): Riku's first Dark Mode in
+/// this save, or the debug keys.
 pub unsafe fn blade_unlocked() -> bool {
-    super::settings().riku_heart_blade_unlocked || super::dark_points::heart_seen()
+    super::settings().riku_heart_blade_unlocked || unlocked()
 }
 
 /// Reads the manifest and checks the skin groups' files.
@@ -224,7 +225,7 @@ pub unsafe fn refresh(b: usize) {
         let _ = super::store_item(crate::menu::Item::Costume, 0);
     }
     if s.riku_heart_blade && !blade_unlocked() {
-        log("riku skin: the Keyblade of Heart chosen, but this save hasn't reached 15 DP yet: the Soul Eater");
+        log("riku skin: the Keyblade of Heart chosen, but this save hasn't reached Dark Mode yet: the Soul Eater");
         let _ = super::store_item(crate::menu::Item::Blade, 0);
     }
     apply(b, chosen(&super::settings()));
