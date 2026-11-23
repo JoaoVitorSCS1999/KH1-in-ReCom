@@ -11,6 +11,12 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 288 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard row named once per action table, version 0.157.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "não percebi alteração...". Chars 3 and 4 share one action table. 0.157.0 renamed row 0x39 for char 3, then refused for char 4, as the owner's log shows. Now each distinct table is named once. **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 287 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard plays Sora's KH1 Guard retargeted onto his skeleton, version 0.157.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "a animação escolhida de defesa pro Riku ficou estranha, tem alguma melhor?" (chose "Guard do KH1 adaptada").

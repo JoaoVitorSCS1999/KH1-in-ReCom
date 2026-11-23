@@ -78,24 +78,25 @@ pub unsafe fn guard_rows(b: usize) {
         return;
     }
     static NAME: &[u8] = crate::riku::KH1_GUARD_CLIP;
+    // Chars 3 and 4 share one table (Riku's and his Halloween Town form: 0.157.0 named its row,
+    // then refused it as "not p002_000" for char 4): each table once.
+    let mut tables: Vec<usize> = [3usize, 4].iter().map(|ch| rd::<usize>(va(b, rs::ACTION_TABLES_PTR) + 8 * ch)).filter(|&t| t != 0).collect();
+    tables.dedup();
+    let want = tables.len();
     let mut done = 0;
-    for ch in [3usize, 4] {
-        let table: usize = rd(va(b, rs::ACTION_TABLES_PTR) + 8 * ch);
-        if table == 0 {
-            continue;
-        }
+    for (ch, table) in tables.into_iter().enumerate() {
         let at = table + 16 * crate::riku::KH1_GUARD_ROW as usize;
         let old: usize = rd(at);
         let s = if old == 0 { &[][..] } else { std::slice::from_raw_parts(old as *const u8, 9) };
         if s != b"p002_000\0" {
-            log(&format!("riku guard: char {ch}'s row 0x39 is not p002_000; Riku's Guard keeps his clash recoil"));
+            log(&format!("riku guard: table {ch}'s row 0x39 is not p002_000; Riku's Guard keeps his clash recoil"));
             return;
         }
         if super::hook::patch(at, &old.to_le_bytes(), &(NAME.as_ptr() as usize).to_le_bytes(), "Riku's row 0x39 name") {
             done += 1;
         }
     }
-    if done == 2 {
+    if done == want && want > 0 {
         GUARD.store(true, Ordering::Relaxed);
         log("riku guard: Riku's Guard plays Sora's KH1 Guard on his skeleton (row 0x39, p002_225)");
     }

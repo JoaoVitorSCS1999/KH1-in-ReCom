@@ -662,3 +662,14 @@ alguma melhor?". Asked to choose, the owner picked "Guard do KH1 adaptada".
   files.
 - **Checked**: tests, the asset step on the local install (`p002_225` in all four packs), the
   Windows build. **Not checked**: in game.
+
+## 0.157.1: Riku's Guard row named once per action table
+
+Fork owner, 2026-11-23, verbatim: "não percebi alteração...".
+
+- **Cause** (Checked (the owner's 0.157.0 log: `riku guard: char 4's row 0x39 is not p002_000`)):
+  Riku's two characters (3, and 4 in Halloween Town) share one action table. 0.157.0 renamed its
+  row 0x39 for char 3, then found the new name for char 4 and refused the whole change, so the
+  Guard kept row 0x24.
+- **Fix**: each distinct table is named once (`win::riku_skin::guard_rows`).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
