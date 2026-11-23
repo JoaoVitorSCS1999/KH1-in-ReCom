@@ -11,6 +11,15 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 286 (fork branch Re-Re-Reverse/Rebirth): Costumes on Riku's list at every Combat setting, version 0.156.2 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "notei que, quando troca o combat de KH1 para Re:CoM a opção de Costume some... essa opção poderia manter no menu sempre".
+
+- Riku's story at Combat = Re:CoM: Re:CoM's seven where they are (Review Decks Re:CoM's own) plus Costumes before Settings. With `riku_kh1_movement` (`Layout::RikuDecks`), Settings opens the short list; without it (`Layout::RikuPlain`), Settings is Re:CoM's page. Combat = KH1 is unchanged.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 285 (fork branch Re-Re-Reverse/Rebirth): debug unlock for the Dark Mode costume; Riku stops while the transformation plays, version 0.156.1 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "deixa no ini do mod uma opção de debug pra deixar desbloqueado o modo desde o início para testes, além disso peguei um bug, quando vc está andando e troca a skin a animação fica tocando enquanto o personagem está se movimentando".

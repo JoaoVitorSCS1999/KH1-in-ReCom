@@ -157,7 +157,7 @@ pub mod top {
     pub fn order(l: Layout) -> Option<&'static [i32]> {
         match l {
             Layout::Kh1 => Some(&KH1_ORDER),
-            Layout::Riku => Some(&RIKU_ORDER),
+            Layout::Riku | Layout::RikuDecks | Layout::RikuPlain => Some(&RIKU_ORDER),
             _ => None,
         }
     }
@@ -166,7 +166,7 @@ pub mod top {
     pub fn extras(l: Layout) -> &'static [i32] {
         match l {
             Layout::Kh1 => &EXTRA,
-            Layout::Riku => &RIKU_EXTRA,
+            Layout::Riku | Layout::RikuDecks | Layout::RikuPlain => &RIKU_EXTRA,
             _ => &[],
         }
     }
@@ -185,6 +185,12 @@ pub mod top {
         /// IGUAL a do Sora"): Re:CoM's seven where they are, entry 0 (Review Decks) relabelled
         /// Customize (his L1 shortcuts), Settings opening the short list.
         Riku,
+        /// Riku's story at Combat = Re:CoM (fork, 0.156.2; owner 2026-11-22: "essa opção poderia
+        /// manter no menu sempre"): Re:CoM's seven where they are (Review Decks Re:CoM's), Costumes
+        /// before Settings; Settings opens the short list (`riku_kh1_movement` on).
+        RikuDecks,
+        /// The same with `riku_kh1_movement` off: Settings is Re:CoM's own page.
+        RikuPlain,
     }
 
     /// The list for this camp. `direct_map` = `camp+0x20A4` (the camp never shows the list);
@@ -200,9 +206,9 @@ pub mod top {
             if riku_settings && combat_kh1 {
                 Layout::Riku
             } else if riku_settings {
-                Layout::Settings
+                Layout::RikuDecks
             } else {
-                Layout::Recom
+                Layout::RikuPlain
             }
         } else if combat_kh1 && kh1_pages {
             Layout::Kh1
@@ -244,7 +250,7 @@ pub mod top {
             (Layout::Kh1, ABILITIES) => Some(Entry::Abilities),
             (Layout::Kh1, CUSTOMIZE) => Some(Entry::Customize),
             (Layout::Riku, DECKS) => Some(Entry::Customize),
-            (Layout::Riku, COSTUMES) => Some(Entry::Costumes),
+            (Layout::Riku | Layout::RikuDecks | Layout::RikuPlain, COSTUMES) => Some(Entry::Costumes),
             (_, i) if (0..RECOM_ENTRIES).contains(&i) => Some(Entry::Recom(i)),
             _ => None,
         }
@@ -253,7 +259,7 @@ pub mod top {
     /// Settings opens the short list (Game Settings, Combat, Movement) in Sora's story at both
     /// Combat settings; Re:CoM's page directly otherwise.
     pub fn settings_list(l: Layout) -> bool {
-        l != Layout::Recom
+        l != Layout::Recom && l != Layout::RikuPlain
     }
 
     /// Entries in the list.
@@ -967,15 +973,23 @@ mod tests {
         assert_eq!(top::layout(Story::Sora, false, false, true, false), Layout::Settings);
         assert_eq!(top::layout(Story::Sora, false, true, false, false), Layout::Settings, "no Keyblade numbers: no KH1 pages");
         for (c, k) in [(true, true), (true, false), (false, true), (false, false)] {
-            assert_eq!(top::layout(Story::Riku, false, c, k, false), Layout::Recom);
+            // 0.156.2: Costumes always in Riku's story (Re:CoM's seven + Costumes, its Settings).
+            assert_eq!(top::layout(Story::Riku, false, c, k, false), Layout::RikuPlain);
             assert_eq!(top::layout(Story::Sora, true, c, k, false), Layout::Recom, "direct map");
             assert_eq!(top::layout(Story::Riku, true, c, k, false), Layout::Recom);
             // Fork testing: `riku_kh1_movement` gives Riku's story the Settings list (not the map camp).
-            assert_eq!(top::layout(Story::Riku, false, c, k, true), if c { Layout::Riku } else { Layout::Settings });
+            assert_eq!(top::layout(Story::Riku, false, c, k, true), if c { Layout::Riku } else { Layout::RikuDecks });
             assert_eq!(top::layout(Story::Riku, true, c, k, true), Layout::Recom);
             assert_eq!(top::layout(Story::Sora, false, true, true, true), Layout::Kh1);
         }
         assert!(top::settings_list(Layout::Kh1) && top::settings_list(Layout::Settings) && top::settings_list(Layout::Riku) && !top::settings_list(Layout::Recom));
+        assert!(top::settings_list(Layout::RikuDecks) && !top::settings_list(Layout::RikuPlain));
+        for l in [Layout::RikuDecks, Layout::RikuPlain] {
+            assert_eq!(top::entry(l, top::DECKS), Some(Entry::Recom(0)), "Review Decks stays Re:CoM's");
+            assert_eq!(top::entry(l, top::COSTUMES), Some(Entry::Costumes));
+            assert_eq!((top::count(l), top::slot(l, top::COSTUMES), top::slot(l, top::SETTINGS)), (8, Some(6), Some(7)));
+            assert_eq!(top::list_fix(l, top::DECKS, top::Pad { confirm: true, ..Default::default() }), top::Fix::None, "Re:CoM's own confirm");
+        }
         // Riku's list: Review Decks' place is Customize; the rest Re:CoM's, where they are.
         assert_eq!(top::entry(Layout::Riku, top::DECKS), Some(Entry::Customize));
         assert_eq!(top::entry(Layout::Riku, 3), Some(Entry::Recom(3)));

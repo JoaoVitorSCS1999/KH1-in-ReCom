@@ -606,3 +606,26 @@ animação fica tocando enquanto o personagem está se movimentando".
   velocity is now 0 at the start and on every held frame; the vertical part (gravity) stays
   Re:CoM's.
 - **Checked**: tests, the Windows build. **Not checked**: in game.
+
+## 0.156.2: Costumes on Riku's list at every Combat setting
+
+Fork owner, 2026-11-22, verbatim: "notei que, quando troca o combat de KH1 para Re:CoM a opção de
+Costume some... essa opção poderia manter no menu sempre, é uma feature secundária que agrega
+bastante ao mod".
+
+- **Riku's story lists** (`keyblades::top::Layout`):
+  - **Combat = KH1 with `riku_kh1_movement`**: unchanged (`Riku`: Customize in Review Decks'
+    place).
+  - **Combat = Re:CoM with `riku_kh1_movement`**: `RikuDecks`, Re:CoM's seven where they are plus
+    Costumes before Settings. Settings opens the short list.
+  - **Without `riku_kh1_movement`**: `RikuPlain`, the same eight, but Settings is Re:CoM's own
+    page.
+  - All three use the same reordered-list code (`top::order` / `extras`, eight at the KH1 list's
+    spacing).
+  - Review Decks and every other entry of Re:CoM's is confirmed by Re:CoM's own code
+    (`top::list_fix` gives `None` for them).
+  - The direct-map camp stays Re:CoM's.
+- Entry 0's label: Re:CoM's own `0xA80001` is given back when the list leaves Riku's KH1 one. It
+  is the same id in both stories (Checked (exe): `0x1407C1000` row 14 for Riku's story).
+- **Checked**: tests (`keyblades::tests::the_list_per_story_and_setting`: the two new lists), the
+  Windows build. **Not checked**: in game.

@@ -392,12 +392,16 @@ fn layout_code(l: top::Layout) -> u8 {
         top::Layout::Settings => 1,
         top::Layout::Kh1 => 2,
         top::Layout::Riku => 3,
+        top::Layout::RikuDecks => 4,
+        top::Layout::RikuPlain => 5,
     }
 }
 
 /// The list last built (any camp).
 fn list_now() -> top::Layout {
     match LIST.load(Ordering::Relaxed) {
+        5 => top::Layout::RikuPlain,
+        4 => top::Layout::RikuDecks,
         3 => top::Layout::Riku,
         2 => top::Layout::Kh1,
         1 => top::Layout::Settings,
@@ -617,9 +621,19 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
                 anim(btn, set_of(camp), 4);
             }
         }
-        let first = if l == top::Layout::Riku { sub::Row::Customize } else { sub::Row::Items };
-        if !ITEMS_ON.swap(true, Ordering::Relaxed) {
-            relabel_one(camp, top::DECKS as usize, first.label().as_ptr());
+        match l {
+            // Riku's at Combat = Re:CoM: Review Decks stays Re:CoM's (its own label back if ours).
+            top::Layout::RikuDecks | top::Layout::RikuPlain => {
+                if ITEMS_ON.swap(false, Ordering::Relaxed) {
+                    relabel_one(camp, top::DECKS as usize, message(top::RECOM_LABELS[0]));
+                }
+            }
+            _ => {
+                let first = if l == top::Layout::Riku { sub::Row::Customize } else { sub::Row::Items };
+                if !ITEMS_ON.swap(true, Ordering::Relaxed) {
+                    relabel_one(camp, top::DECKS as usize, first.label().as_ptr());
+                }
+            }
         }
         place_recoms(camp, l);
     } else {
@@ -642,6 +656,8 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
             top::Layout::Kh1 => "camp: KH1's list: Items, Abilities, Customize, then Re:CoM's World Map .. Settings (9 entries, y 78 + 24 each); Settings opens Game Settings, Combat, Movement, Effects & Sound, Camera",
             top::Layout::Settings => "camp: Re:CoM's list (Combat = Re:CoM); Settings opens Game Settings, Combat, Movement, Effects & Sound, Camera",
             top::Layout::Recom => "camp: Re:CoM's list, untouched (Riku's story or the map-only camp)",
+            top::Layout::RikuDecks => "camp: Riku's list at Combat = Re:CoM: Re:CoM's Review Decks .. D Report, Costumes, Settings (8 entries); Settings opens Game Settings, Combat, Movement, Camera",
+            top::Layout::RikuPlain => "camp: Riku's list (riku_kh1_movement off): Re:CoM's seven and Costumes before Settings (8 entries); Settings is Re:CoM's page",
             top::Layout::Riku => "camp: Riku's list at Combat = KH1: Customize in Review Decks' place, Re:CoM's World Map .. D Report, Costumes, Settings (8 entries, y 88 + 24 each); Settings opens Game Settings, Combat, Movement, Camera",
         });
     }
