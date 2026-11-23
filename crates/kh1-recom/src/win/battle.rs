@@ -130,13 +130,7 @@ pub(super) unsafe fn may_start_attack(e: usize) -> bool {
     !Gate { lock: rd(c + cbtl::LOCK), gimmick: rd(c + cbtl::GIMMICK), duel: rd(c + cbtl::DUEL) }.locked()
 }
 
-unsafe fn class_name(obj: usize) -> String {
-    if obj == 0 {
-        return "none".into();
-    }
-    let vt: usize = rd(obj);
-    super::stats::rtti_name(base(), vt).map(|n| n.trim_start_matches(".?AV").trim_end_matches("@@").to_string()).unwrap_or_else(|| format!("vt {vt:#x}"))
-}
+use super::stats::object_class as class_name;
 
 /// Logs a class's path once.
 unsafe fn class_once(obj: usize, path: u8, what: impl FnOnce(&str) -> String) {

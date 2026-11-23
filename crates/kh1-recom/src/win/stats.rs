@@ -115,6 +115,17 @@ pub(super) unsafe fn rtti_name(b: usize, vt: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&name[..end]).into_owned())
 }
 
+/// An object's class name for the log (its vtable's RTTI, `.?AV` / `@@` trimmed): "none" for a null
+/// object, `vt 0x…` when the vtable has no RTTI. Shared by `battle` and `guard` (0.178.4; each had a
+/// copy).
+pub(super) unsafe fn object_class(obj: usize) -> String {
+    if obj == 0 {
+        return "none".into();
+    }
+    let vt: usize = rd(obj);
+    rtti_name(base(), vt).map(|n| n.trim_start_matches(".?AV").trim_end_matches("@@").to_string()).unwrap_or_else(|| format!("vt {vt:#x}"))
+}
+
 /// Loads `kh1-stats.json` and checks the class vtables. False when either is missing.
 pub fn load(path: Option<&std::path::Path>) -> bool {
     let Some(p) = path else {

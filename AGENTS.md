@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 318 (fork branch Re-Re-Reverse/Rebirth): dead helpers removed, duplicated helpers shared (no behaviour change), version 0.178.4 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "busque outras redundância inúteis no mod para eliminar"; then "remova somente redundâncias que não vão quebrar o mod".
+
+- **Removed** (referenced nowhere in the workspace): `attack::attack_events`, `kh1_core::enemy::script::current_motion`, `kh1_anim` `Mat::to_array`, `kh1_formats::mset` `helper_positions`, `kh1-recom-assets` `ann` `default_blend` and `matching` `body_pos_mm`, `kh2_formats_lite::mdlx` `Model::triangle_count`; the now-unused `FrameOut` import in `attack.rs`.
+- **Shared**: the 20 enemy modules' test helper `inputs()` (and `enemy::clash_tests`'s) now call one `enemy::test_inputs(spec, ses_required)` (tests only, not in the DLL or the step's output); `win::battle` and `win::guard`'s identical `class_name` are one `win::stats::object_class`. `win::stats`'s own `class_name` / `class_label` differ (no null check, empty name without RTTI) and stay.
+- **Kept on purpose**: unused `pub` constants that record Checked addresses or format fields (e.g. `btltbl` `GROUND_2`, `mset` `TYPE2`, `kh2_formats_lite::system` item kinds) and format readers (`objentry::parse_sklt` / `parse_wmst`, `mset` flag getters): documentation of the files, not redundancy. Per-enemy behaviour code that repeats between enemies (`frame`, `new`, `wander` in `kh1-core`): merging it is a refactor of running code, not a cleanup. `patch_container` in `camp_rows` / `shop_tabs`: same text, each on its own module's constants.
+- The asset step's sources changed (test helpers, two dead getters), so its hash changes and the first start builds the files again; the output is the same.
+- **Checked**: tests, the Windows build. **Not checked**: in game (nothing in it should change).
+
+---
+
 ## Stage 317 (fork branch Re-Re-Reverse/Rebirth): Talk next to NPCs as KH1 (row 0, a dimmed Attack that buzzes), version 0.178.3 (2026-11-23)
 
 Fork owner, 2026-11-23, answering "Perto de NPCs: (a) Attack continua normal, e o Talk aparece só na aba (como está); (b) 1:1 com o KH1: o Talk vai para a linha 0 e o Attack fica apagado, com o som de erro", verbatim: "8b".
