@@ -380,6 +380,11 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
     true
 }
 
+/// The draw list a live player gauge was made on (Riku's costume face, `win::riku_skin`).
+pub fn gauge_list(gauge: usize) -> Option<i32> {
+    STATE.lock().ok()?.gauges.iter().find(|g| g.0 == gauge).map(|g| g.1)
+}
+
 /// A player gauge was made (its init has run; Re:CoM has loaded FO0002): checks once that
 /// Re:CoM registered our set with the manifest's group count.
 pub unsafe fn gauge_made(gauge: usize, list: i32) {

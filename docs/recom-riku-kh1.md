@@ -430,3 +430,60 @@ invertida, mas o modelo na gameplay ficou perfeito agora".
   - Test: every frame where Riku's `wep0` is scaled, Dark's has the same scale (54 frames hidden).
 - **Checked**: tests, the Windows build. **Not checked**: in game. Asset step: **re-run**
   (automatic): `PL0121.ANN` / `PL0131.ANN`.
+
+## 0.155.0: the costume changed in place (no door); the HUD face; Halloween Town
+
+Fork owner, 2026-11-22, verbatim: "importante que quando essa skin estiver ativa na halloween town,
+assim como a versão transformada essa skin fica com a variação da halloween town, além disso...
+seria possível trocar a skin sem ter que passar por uma porta?" (asked to choose, the owner picked
+"Trocar no lugar"); "quando trocar a skin para a darkmode também deve alterar a foto no hud".
+
+- **Halloween Town**: already so since 0.154.0 (Checked (files)).
+  - Riku's group in Halloween Town is 111 (char 4), and Dark Riku's is 211 (char 6). Both add
+    their own Halloween textures (`n_zz110_11/12`, `n_zz120_11/12/13`, `weapon_11`).
+  - Skin group 131 is `PL0211`'s model, and the menu bytes cover 111 too.
+- **In place** (`win::riku_skin::{release, rebuild, try_swap}`): Re:CoM never rebuilds a live
+  player's model; each step is one Re:CoM runs when it builds an entity's model or a player's
+  state, in the same order (Checked (exe: disasm)).
+  1. **Release**, as the entity's dtor `0x1401A2440` does:
+     - the parts `+0xB0` (one 0x170-byte model per MDL part; count `+0xC0`);
+     - the matrices `+0xB8`, the sub-models `+0xC8` / `+0xD0`;
+     - the motion controller `+0xD8`;
+     - the materials `+0xE0` (array dtor `0x1402894E0`, 0x40 each);
+     - the texture animation `+0x1A0`;
+     - the EET / SES players `+0x108` / `+0x118`.
+  2. **Rebuild**, as `0x1401A4E70` does:
+     - `0x1401A5110(e, 10000 + group, 1)`;
+     - `0x1402A4D70` → `0x140178620` → `0x140178F00` → vtable `+0x10`;
+     - `0x140179420` / `0x140179A30`;
+     - `0x140238460` / `0x140238710`.
+     - The parts bind to the entity's transform node `e+8` (created once, `0x1402AC000`), and the
+       motion controller takes its bone count from that node (`0x14024E09C`).
+  3. **The player state init's model steps** (`0x1401FA6E0`):
+     - `0x1401A3990(e, −1, −1)`, `0x1401A6B40(e, "asiato", 0)`, `0x1401A6B70(e, 1)`;
+     - the group `+0x39C`;
+     - the action rows' clips bound again by name, `0x1401F4240(e, char)` (the motion pack name
+       table already points at the costume);
+     - the bones by name, `0x1401A4450`: `wep0`, `ex_1010_sk`, `chest1`, `head`, `l_toes`,
+       `r_toes` at `+0x3A0..0x3B4`.
+  4. **Riku's weapon object** (`+0x3D0`): its bone `+0x238`, and `0x1402ABD20(w, 1, bone
+     matrix)`, which reuses its node and only re-points it.
+  5. **The idle row's motion.**
+  - **When**: at the camp's close (`win::models::camp_field`), else at Riku's first frame once the
+    group is loaded (queued when the costume is chosen). Only for `CPlayerRiku` as the main player,
+    in the field (`+0x390` = 0), in actions 1..4. Never in Dark Mode or battle.
+  - **Checks**: 21 callees' first 8 bytes are checked before the first change; any mismatch keeps
+    the next-room change. The log gives the transform node's matrix count before and after.
+- **HUD face** (`win::riku_skin::face`): Re:CoM's own Dark Mode gauge switch (`0x14020BC60`,
+  Checked (exe: disasm)) sets the gauge's face set `+0x88` to `"gauge:02"` (`0x1407C7AB0`;
+  Riku's is `"gauge:00"`, `0x1407C7AA0`) and replaces its control's (`+0x78`) face layer 4 with
+  group 3, or group 0 at ≤ 25 % HP. Later face changes read `+0x88`.
+  - With Dark Mode chosen, the same two steps run on Riku's gauge (`player+0x3E0`), checked in his
+    move exe (one pointer compare a frame). Only from Riku's own set or ours; never while the
+    gauge's Dark state (`+0x90 & 8`) is set.
+- **Assumptions**:
+  - Nothing else keeps a pointer into the old model (bone-attached effects alive at the change: none
+    expected at the camp's close).
+  - The parts' bind resizes the transform node (the log shows it).
+  - `gauge:02` group 3 is Dark Riku's face in Riku's `FO0071` (Re:CoM's own switch uses it).
+- **Checked**: tests, the Windows build. **Not checked**: in game. Asset step: unchanged.
