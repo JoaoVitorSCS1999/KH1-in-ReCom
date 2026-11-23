@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 304 (fork branch Re-Re-Reverse/Rebirth): Sora's Halloween Town costume in every world (Costumes on his lists, unlocked by reaching Halloween Town), version 0.170.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "para o Sora quero que ele também tenha trajes desbloqueáveis de acordo como a história, então se o sora for para a halloween town por exemplo, o jogador pode livremente alterar para este traje a qualquer momento"; of KH1's world costumes "Só Halloween"; "esqueci completamente que kh1 e rechain of memories o sora só troca de aparencia na halloween town... então pode usar o modelo do próprio jogo".
+
+- **KH1** (Checked (files)): Sora's models are `xa_ex_0010` (/ `0012` / `0019` lower-resolution copies), `xa_nm_0010` (Halloween Town), `xa_lm_0010` (Atlantica, merman; not made: no legs, the owner's choice). `xa_ex_0040` / `0050` are Donald / Goofy.
+- **Re:CoM** (Checked (exe + files)): Sora is char 1 (group 1, `PL0001`), char 2 in Halloween Town (group 11, `PL0011`), one action table (`0x1407C5E80`), the same 69 clip names in both packs.
+- **Ours** (`win::sora_costume`): with `sora_costume = halloween` (ini; Costumes page, "Default Attire / Halloween Town") char 1 → group 11 and pack name `PL0011` (char 2's pointer), the camp's menu-model byte `0x1400E4705` 1 → 11; from the next room or battle (Re:CoM's group queue refresh). Unlocked when Sora is char 2 once (save spare bit 0x10); debug `sora_costume_unlocked`.
+- **Camp**: Costumes before Settings on Sora's KH1 list (10 entries, step 21.3) and on his Combat = Re:CoM list (Re:CoM's seven, Costumes, Settings: 8).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 303 (fork branch Re-Re-Reverse/Rebirth): Sora's combat rules for Riku, part 2: Dark Riku's Guard, KH1's attack-meets-attack, the twins' lock radius / level, the damage cap, version 0.169.0 (2026-11-23)
 
 Fork owner, 2026-11-23: "certo mas esse é só um ponto, tem algo que ficou faltando?"; the plan (4, then 1 + 3, then 2): "sim".

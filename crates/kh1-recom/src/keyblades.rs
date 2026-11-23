@@ -139,11 +139,19 @@ pub mod top {
     /// `cmp [camp+0xB8],6; jg` at `0x1400DAABD`, Checked (disasm)).
     pub const ABILITIES: i32 = 7;
     pub const CUSTOMIZE: i32 = 8;
+    /// Sora's Costumes (fork, 0.170.0; fork owner, 2026-11-23: "para o Sora quero que ele também
+    /// tenha trajes desbloqueáveis de acordo como a história"): camp index 9 on his KH1 list, 7 on
+    /// his Combat = Re:CoM list.
+    pub const SORA_COSTUMES: i32 = 9;
     /// Our extra buttons, in camp index order.
-    pub const EXTRA: [i32; 2] = [ABILITIES, CUSTOMIZE];
+    pub const EXTRA: [i32; 3] = [ABILITIES, CUSTOMIZE, SORA_COSTUMES];
+    /// The nine's room (y 88 .. 280); a longer list takes [`TEN_STEP`].
     pub const KH1_ENTRIES: i32 = 9;
     /// The KH1 list on screen, top to bottom: the camp index in each slot.
-    pub const KH1_ORDER: [i32; KH1_ENTRIES as usize] = [DECKS, ABILITIES, CUSTOMIZE, 1, 2, 3, 4, 5, SETTINGS];
+    pub const KH1_ORDER: [i32; 10] = [DECKS, ABILITIES, CUSTOMIZE, 1, 2, 3, 4, 5, SORA_COSTUMES, SETTINGS];
+    /// Sora's list at Combat = Re:CoM: Re:CoM's seven, Costumes before Settings (as Riku's).
+    pub const SORA_EXTRA: [i32; 1] = [COSTUMES_RECOM];
+    pub const COSTUMES_RECOM: i32 = 7;
     /// Riku's list (fork, 0.154.1; owner 2026-11-22: "colocar uma nova opção no menu chamada
     /// Costumes"): his Customize in Review Decks' place, Re:CoM's World Map .. D Report, Costumes
     /// (one more of Re:CoM's entry buttons at camp index 7), Settings.
@@ -171,6 +179,7 @@ pub mod top {
     pub fn order(l: Layout) -> Option<&'static [i32]> {
         match l {
             Layout::Kh1 => Some(&KH1_ORDER),
+            Layout::Settings => Some(&RIKU_ORDER),
             Layout::Riku => Some(&RIKU_KH1_ORDER),
             Layout::RikuDecks | Layout::RikuPlain => Some(&RIKU_ORDER),
             _ => None,
@@ -181,6 +190,7 @@ pub mod top {
     pub fn extras(l: Layout) -> &'static [i32] {
         match l {
             Layout::Kh1 => &EXTRA,
+            Layout::Settings => &SORA_EXTRA,
             Layout::Riku => &RIKU_KH1_EXTRA,
             Layout::RikuDecks | Layout::RikuPlain => &RIKU_EXTRA,
             _ => &[],
@@ -242,6 +252,8 @@ pub mod top {
         Customize,
         /// Riku's Costumes page (fork).
         Costumes,
+        /// Sora's Costumes page (fork, 0.170.0).
+        SoraCostumes,
         /// Re:CoM's entry `i` (0..6), run by Re:CoM (Settings: see [`settings_list`]).
         Recom(i32),
     }
@@ -254,6 +266,7 @@ pub mod top {
                 Entry::Abilities => Some(super::sub::Row::Abilities),
                 Entry::Customize => Some(super::sub::Row::Customize),
                 Entry::Costumes => Some(super::sub::Row::Costumes),
+                Entry::SoraCostumes => Some(super::sub::Row::SoraCostumes),
                 Entry::Recom(_) => None,
             }
         }
@@ -265,6 +278,7 @@ pub mod top {
             (Layout::Kh1, DECKS) => Some(Entry::Items),
             (Layout::Kh1, ABILITIES) => Some(Entry::Abilities),
             (Layout::Kh1, CUSTOMIZE) => Some(Entry::Customize),
+            (Layout::Kh1, SORA_COSTUMES) | (Layout::Settings, COSTUMES_RECOM) => Some(Entry::SoraCostumes),
             (Layout::Riku, DECKS) => Some(Entry::Items),
             (Layout::Riku, CUSTOMIZE) => Some(Entry::Customize),
             (Layout::Riku, RIKU_ABILITIES) => Some(Entry::Abilities),
@@ -768,6 +782,8 @@ pub mod sub {
         Abilities,
         /// Fork: Riku's Costumes page (`crate::menu::Page::Costumes`).
         Costumes,
+        /// Fork (0.170.0): Sora's Costumes page (`crate::menu::Page::SoraCostumes`).
+        SoraCostumes,
     }
 
     /// The Settings list's rows, top to bottom.
@@ -808,6 +824,7 @@ pub mod sub {
                 Row::EffectsSound => crate::menu::Page::EffectsSound.label(),
                 Row::Camera => crate::menu::Page::Camera.label(),
                 Row::Costumes => crate::menu::Page::Costumes.label(),
+                Row::SoraCostumes => crate::menu::Page::SoraCostumes.label(),
             }
         }
 
@@ -824,6 +841,7 @@ pub mod sub {
                 Row::EffectsSound => Some(crate::menu::Page::EffectsSound.help()),
                 Row::Camera => Some(crate::menu::Page::Camera.help()),
                 Row::Costumes => Some(crate::menu::Page::Costumes.help()),
+                Row::SoraCostumes => Some(crate::menu::Page::SoraCostumes.help()),
             }
         }
 
@@ -840,6 +858,7 @@ pub mod sub {
                 Row::EffectsSound => Some(crate::menu::Page::EffectsSound),
                 Row::Camera => Some(crate::menu::Page::Camera),
                 Row::Costumes => Some(crate::menu::Page::Costumes),
+                Row::SoraCostumes => Some(crate::menu::Page::SoraCostumes),
                 _ => None,
             }
         }
@@ -1034,31 +1053,31 @@ mod tests {
         assert_eq!(top::riku_fix(top::CUSTOMIZE, confirm), top::Fix::Confirm(Entry::Customize));
         assert_eq!(top::riku_fix(1, confirm), top::Fix::None);
         assert_eq!(top::riku_fix(0, top::Pad::default()), top::Fix::None);
-        assert_eq!((top::count(Layout::Kh1), top::count(Layout::Settings), top::count(Layout::Recom)), (9, 7, 7));
+        assert_eq!((top::count(Layout::Kh1), top::count(Layout::Settings), top::count(Layout::Recom)), (10, 8, 7));
         assert_eq!((Story::from_camp(0), Story::from_camp(1)), (Story::Sora, Story::Riku));
     }
 
     #[test]
     fn kh1_list_is_the_owners_nine() {
-        // Items Abilities Customize World Map Map Cards World Cards Status Journal Settings.
-        let on_screen: Vec<Entry> = (0..9).map(|s| top::entry(Layout::Kh1, top::at_slot(Layout::Kh1, s).unwrap()).unwrap()).collect();
+        // Items Abilities Customize World Map Map Cards World Cards Status Journal Costumes (0.170.0) Settings.
+        let on_screen: Vec<Entry> = (0..10).map(|s| top::entry(Layout::Kh1, top::at_slot(Layout::Kh1, s).unwrap()).unwrap()).collect();
         let r = Entry::Recom;
-        assert_eq!(on_screen, vec![Entry::Items, Entry::Abilities, Entry::Customize, r(1), r(2), r(3), r(4), r(5), r(6)]);
+        assert_eq!(on_screen, vec![Entry::Items, Entry::Abilities, Entry::Customize, r(1), r(2), r(3), r(4), r(5), Entry::SoraCostumes, r(6)]);
         // Every camp index once; slot and index are inverses.
         let mut seen = top::KH1_ORDER.to_vec();
         seen.sort_unstable();
-        assert_eq!(seen, (0..9).collect::<Vec<i32>>());
-        for i in 0..9 {
+        assert_eq!(seen, (0..10).collect::<Vec<i32>>());
+        for i in 0..10 {
             assert_eq!(top::at_slot(Layout::Kh1, top::slot(Layout::Kh1, i).unwrap()), Some(i));
         }
-        assert_eq!((top::slot(Layout::Kh1, 9), top::at_slot(Layout::Kh1, 9), top::at_slot(Layout::Kh1, -1)), (None, None, None));
-        // Re:CoM's lists: its seven, where they are; no entry 7 / 8.
-        for l in [Layout::Settings, Layout::Recom] {
-            for i in 0..7 {
-                assert_eq!((top::slot(l, i), top::at_slot(l, i), top::entry(l, i)), (Some(i), Some(i), Some(r(i))));
-            }
-            assert_eq!((top::entry(l, 7), top::entry(l, 8), top::slot(l, 7)), (None, None, None));
+        assert_eq!((top::slot(Layout::Kh1, 10), top::at_slot(Layout::Kh1, 10), top::at_slot(Layout::Kh1, -1)), (None, None, None));
+        // Re:CoM's list: its seven, where they are; no entry 7 / 8.
+        for i in 0..7 {
+            assert_eq!((top::slot(Layout::Recom, i), top::at_slot(Layout::Recom, i), top::entry(Layout::Recom, i)), (Some(i), Some(i), Some(r(i))));
         }
+        assert_eq!((top::entry(Layout::Recom, 7), top::slot(Layout::Recom, 7)), (None, None));
+        // Sora's at Combat = Re:CoM (0.170.0): Re:CoM's seven where they are, Costumes before Settings.
+        assert_eq!((top::entry(Layout::Settings, 7), top::slot(Layout::Settings, 7), top::slot(Layout::Settings, top::SETTINGS)), (Some(Entry::SoraCostumes), Some(6), Some(7)));
         // Our entries open our pages; Re:CoM's keep theirs.
         assert_eq!(Entry::Items.page(), Some(sub::Row::Items));
         assert_eq!(Entry::Abilities.page(), Some(sub::Row::Abilities));
@@ -1073,24 +1092,23 @@ mod tests {
         // Re:CoM's own, unchanged (the constants read from the exe: `sites::KEYBLADE_DATA`).
         for s in 0..7 {
             let y = 88.0 + 26.0 * s as f32;
-            assert_eq!(top::entry_pos(Layout::Settings, s), (86.0, y));
-            assert_eq!(top::bar_pos(Layout::Settings, s), (48.0, 80.0 + 26.0 * s as f32));
+            assert_eq!(top::entry_pos(Layout::Recom, s), (86.0, y));
+            assert_eq!(top::bar_pos(Layout::Recom, s), (48.0, 80.0 + 26.0 * s as f32));
             assert_eq!(top::glove_pos(Layout::Recom, s), (150.0, 82.0 + 26.0 * s as f32));
         }
-        // KH1's nine: 78 .. 270 in steps of 24; the bar and glove keep Re:CoM's offsets.
-        let ys: Vec<f32> = (0..9).map(|s| top::entry_pos(Layout::Kh1, s).1).collect();
-        assert_eq!(ys, vec![88.0, 112.0, 136.0, 160.0, 184.0, 208.0, 232.0, 256.0, 280.0]);
-        for s in 0..9 {
+        // KH1's ten (0.170.0): 88 .. 280 in steps of 21.33; the bar and glove keep Re:CoM's offsets.
+        for s in 0..10 {
             let (x, y) = top::entry_pos(Layout::Kh1, s);
             assert_eq!(x, 86.0);
+            assert!((y - (88.0 + top::TEN_STEP * s as f32)).abs() < 0.01);
             assert_eq!(top::bar_pos(Layout::Kh1, s), (48.0, y - 8.0));
             assert_eq!(top::glove_pos(Layout::Kh1, s), (150.0, y - 6.0));
         }
         // The first plate (−14) clear of the header frame's lower border (≈ 69.3 on screen), the last
-        // plate (+12) and glow (+14) above the bottom panel (≈ 297), the plates (26 high) overlapping by 2.
+        // plate (+12) and glow (+14) above the bottom panel (≈ 297).
         assert_eq!(top::entry_pos(Layout::Kh1, 0).1, top::RECOM_Y0);
         assert!(top::entry_pos(Layout::Kh1, 0).1 - 14.0 > 70.0);
-        assert!(top::entry_pos(Layout::Kh1, 8).1 + 14.0 < 297.0);
+        assert!(top::entry_pos(Layout::Kh1, 9).1 + 14.0 < 297.0);
         assert_eq!(26.0 - top::KH1_STEP, 2.0);
     }
 

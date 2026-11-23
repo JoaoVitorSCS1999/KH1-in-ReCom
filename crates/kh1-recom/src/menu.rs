@@ -54,6 +54,9 @@ pub enum Page {
     /// Fork (0.154.1, owner 2026-11-22: "uma nova opção no menu chamada Costumes"): Riku's look,
     /// Default Attire or Dark Mode (`crate::riku_skin`), from Riku's top list.
     Costumes,
+    /// Fork (0.170.0): Sora's look, Default Attire or Halloween Town (Re:CoM's own Halloween model,
+    /// group 11; `win::sora_costume`), from Sora's top list.
+    SoraCostumes,
 }
 
 /// A row of a settings page: one `kh1-recom.ini` key.
@@ -89,6 +92,8 @@ pub enum Item {
     Costume,
     /// `riku_keyblade` (fork, 0.160.0): Soul Eater / Keyblade of Heart.
     Blade,
+    /// `sora_costume` (fork, 0.170.0): Default Attire / Halloween Town.
+    SoraCostume,
 }
 
 /// When a change takes effect (from what reads the setting; `docs/recom-config-menu.md`).
@@ -114,6 +119,7 @@ impl Page {
             Page::Camera => &[Item::Camera, Item::AutoCamera],
             // 0.163.0: the Keyblade is chosen on the Items page's Keyblade slot, as Sora's.
             Page::Costumes => &[Item::Costume],
+            Page::SoraCostumes => &[Item::SoraCostume],
         }
     }
 
@@ -126,7 +132,7 @@ impl Page {
             // (`0x1403480C0`, Checked (decomp)); that its font has a `&` glyph is an Assumption.
             Page::EffectsSound => b"Effects & Sound\0",
             Page::Camera => b"Camera\0",
-            Page::Costumes => b"Costumes\0",
+            Page::Costumes | Page::SoraCostumes => b"Costumes\0",
         }
     }
 
@@ -138,6 +144,7 @@ impl Page {
             Page::EffectsSound => b"KH1's or Re:CoM's effects and sounds on Sora's KH1 moves.\0",
             Page::Camera => b"Re:CoM's, KH1's or KH2's camera, and their Auto camera.\0",
             Page::Costumes => b"Change Riku's attire.\0",
+            Page::SoraCostumes => b"Change Sora's attire.\0",
         }
     }
 }
@@ -150,6 +157,8 @@ const COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Dark Mode\0"];
 /// The help line when Dark Mode is asked for before Riku has reached it (0.156.0).
 pub const COSTUME_LOCKED: &[u8] = b"Riku must reach Dark Mode once to wear this attire.\0";
 const BLADES: &[&[u8]] = &[b"Soul Eater\0", b"Keyblade of Heart\0"];
+const SORA_COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Halloween Town\0"];
+pub const SORA_COSTUME_LOCKED: &[u8] = b"Sora must reach Halloween Town once to wear this attire.\0";
 pub const BLADE_LOCKED: &[u8] = b"Riku must reach Dark Mode once to hold this Keyblade.\0";
 
 fn mode_index(m: Mode) -> usize {
@@ -186,6 +195,7 @@ impl Item {
             Item::AutoCamera => b"Auto camera\0",
             Item::Costume => b"Costume\0",
             Item::Blade => b"Keyblade\0",
+            Item::SoraCostume => b"Costume\0",
         }
     }
 
@@ -197,6 +207,7 @@ impl Item {
             Item::Camera => CAMERAS,
             Item::Costume => COSTUMES,
             Item::Blade => BLADES,
+            Item::SoraCostume => SORA_COSTUMES,
             _ => RECOM_KH1,
         }
     }
@@ -204,7 +215,7 @@ impl Item {
     /// Two options: Re:CoM's pair row; more: Re:CoM's single-value row.
     pub fn style(self) -> Style {
         // "Default Attire" is too wide for a pair row's value: one value showing the current one.
-        if self.options().len() == 2 && self != Item::Costume && self != Item::Blade {
+        if self.options().len() == 2 && !matches!(self, Item::Costume | Item::Blade | Item::SoraCostume) {
             Style::Pair
         } else {
             Style::Single
@@ -229,6 +240,7 @@ impl Item {
             Item::AutoCamera => b"On: the KH1 / KH2 camera swings behind Sora as he runs.\0",
             Item::Costume => b"Dark Mode: Dark Riku's look. Unlocked by Riku's first Dark Mode.\0",
             Item::Blade => b"Keyblade of Heart: Riku-Ansem's. Unlocked by Riku's first Dark Mode.\0",
+            Item::SoraCostume => b"Halloween Town: Sora's costume there. Unlocked by visiting it.\0",
         }
     }
 
@@ -236,7 +248,7 @@ impl Item {
     pub fn effect(self) -> Effect {
         match self {
             Item::EnemyPace | Item::EnemyAi => Effect::NextBattle,
-            Item::Costume | Item::Blade => Effect::NextRoom,
+            Item::Costume | Item::Blade | Item::SoraCostume => Effect::NextRoom,
             _ => Effect::Now,
         }
     }
@@ -259,6 +271,7 @@ impl Item {
             Item::AutoCamera => "auto_camera",
             Item::Costume => "riku_dark_skin",
             Item::Blade => "riku_keyblade",
+            Item::SoraCostume => "sora_costume",
         }
     }
 
@@ -288,6 +301,7 @@ impl Item {
             Item::AutoCamera => s.auto_camera as usize,
             Item::Costume => s.riku_dark_skin as usize,
             Item::Blade => s.riku_heart_blade as usize,
+            Item::SoraCostume => s.sora_halloween as usize,
         }
     }
 
@@ -323,6 +337,7 @@ impl Item {
             Item::AutoCamera => s.auto_camera = v == 1,
             Item::Costume => s.riku_dark_skin = v == 1,
             Item::Blade => s.riku_heart_blade = v == 1,
+            Item::SoraCostume => s.sora_halloween = v == 1,
         }
     }
 }

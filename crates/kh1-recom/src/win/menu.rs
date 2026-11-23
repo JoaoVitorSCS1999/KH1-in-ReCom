@@ -194,6 +194,7 @@ impl SettingsPage {
                         let locked = match it {
                             menu::Item::Costume => (v == 1 && !super::riku_skin::unlocked()).then_some(crate::menu::COSTUME_LOCKED),
                             menu::Item::Blade => (v == 1 && !super::riku_skin::blade_unlocked()).then_some(crate::menu::BLADE_LOCKED),
+                            menu::Item::SoraCostume => (v == 1 && !super::sora_costume::unlocked()).then_some(crate::menu::SORA_COSTUME_LOCKED),
                             _ => None,
                         };
                         if let Some(text) = locked {

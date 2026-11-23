@@ -343,6 +343,7 @@ pub unsafe extern "win64" fn group_load(ch: u32) {
     // Riku's costume (its unlock read from the save loaded by now) before Re:CoM's queue reads
     // the char -> group table.
     super::riku_skin::refresh(base());
+    super::sora_costume::refresh(base());
     orig::<GroupLoadFn>(&ORIG_GROUP_LOAD)(ch);
     // Riku's costume: the menu's model now follows the group just queued.
     super::riku_skin::sync_menu(base());

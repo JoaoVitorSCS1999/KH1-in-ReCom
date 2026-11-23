@@ -399,6 +399,10 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     if mv::kh1_riku(pl) {
         return riku_request_bits(pl, o);
     }
+    // Fork (0.170.0): Halloween Town reached (Sora as char 2) unlocks his costume, any Combat.
+    if mv::is_main_sora(pl) {
+        super::sora_costume::frame(pl);
+    }
     if !mv::kh1_sora(pl) {
         return o(pl);
     }

@@ -40,6 +40,7 @@ mod mp_bar;
 mod notices;
 mod revenge;
 mod riku_skin;
+mod sora_costume;
 mod kh1_enemy;
 mod kh1_thrown;
 mod kh1_cure;
@@ -144,6 +145,9 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
         Item::RevengeValue => revenge::set_enabled(s.boss_revenge),
         // Fork: Riku's Costume: Re:CoM's char -> group entries now; the next player build shows it.
         // SAFETY: two checked writes of Re:CoM's static tables (the camp: no player is being built).
+        // Fork (0.170.0): Sora's costume, from the next room or battle.
+        // SAFETY: checked writes of Re:CoM's static tables (the camp: no player is being built).
+        Item::SoraCostume => unsafe { sora_costume::apply(base(), s.sora_halloween && sora_costume::unlocked()) },
         Item::Costume | Item::Blade => unsafe {
             riku_skin::apply(base(), riku_skin::chosen(&s));
             riku_skin::costume_chosen(base());

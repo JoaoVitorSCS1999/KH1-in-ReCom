@@ -622,8 +622,9 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
             }
         }
         match l {
-            // Riku's at Combat = Re:CoM: Review Decks stays Re:CoM's (its own label back if ours).
-            top::Layout::RikuDecks | top::Layout::RikuPlain => {
+            // Riku's at Combat = Re:CoM and Sora's (0.170.0, Costumes before Settings): Review Decks
+            // stays Re:CoM's (its own label back if ours).
+            top::Layout::RikuDecks | top::Layout::RikuPlain | top::Layout::Settings => {
                 if ITEMS_ON.swap(false, Ordering::Relaxed) {
                     relabel_one(camp, top::DECKS as usize, message(top::RECOM_LABELS[0]));
                 }
@@ -653,8 +654,8 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
     let code = layout_code(l);
     if LAYOUT_LOGGED.swap(code, Ordering::Relaxed) != code {
         log(match l {
-            top::Layout::Kh1 => "camp: KH1's list: Items, Abilities, Customize, then Re:CoM's World Map .. Settings (9 entries, y 78 + 24 each); Settings opens Game Settings, Combat, Movement, Effects & Sound, Camera",
-            top::Layout::Settings => "camp: Re:CoM's list (Combat = Re:CoM); Settings opens Game Settings, Combat, Movement, Effects & Sound, Camera",
+            top::Layout::Kh1 => "camp: KH1's list: Items, Abilities, Customize, Re:CoM's World Map .. Journal, Costumes, Settings (10 entries, y 88 + 21.3 each); Settings opens Game Settings, Combat, Movement, Effects & Sound, Camera",
+            top::Layout::Settings => "camp: Sora's list at Combat = Re:CoM: Re:CoM's seven and Costumes before Settings (8 entries); Settings opens Game Settings, Combat, Movement, Effects & Sound, Camera",
             top::Layout::Recom => "camp: Re:CoM's list, untouched (Riku's story or the map-only camp)",
             top::Layout::RikuDecks => "camp: Riku's list at Combat = Re:CoM: Re:CoM's Review Decks .. D Report, Costumes, Settings (8 entries); Settings opens Game Settings, Combat, Movement, Camera",
             top::Layout::RikuPlain => "camp: Riku's list (riku_kh1_movement off): Re:CoM's seven and Costumes before Settings (8 entries); Settings is Re:CoM's page",
@@ -1413,7 +1414,7 @@ impl Page {
                 let content = Content::Items { screen: ip::Screen::new(), msg: None, inv: Default::default(), ctx: Default::default(), rows: Vec::new() };
                 (content, list::open_on(2, 0))
             }
-            sub::Row::Abilities | sub::Row::GameSettings | sub::Row::Combat | sub::Row::Movement | sub::Row::EffectsSound | sub::Row::Camera | sub::Row::Costumes => {
+            sub::Row::Abilities | sub::Row::GameSettings | sub::Row::Combat | sub::Row::Movement | sub::Row::EffectsSound | sub::Row::Camera | sub::Row::Costumes | sub::Row::SoraCostumes => {
                 // The settings rows open a settings page (`Open`), never a list page.
                 let content = Content::Abilities { screen: ap::Screen::default(), state: Default::default(), level: 1, rows: Vec::new(), msg: None, live: false };
                 (content, list::open_on(2, 0))
