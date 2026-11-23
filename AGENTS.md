@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 277 (fork branch Re-Re-Reverse/Rebirth): Dark Mode skin's Soul Eater held the right way round, version 0.154.2 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "por algum motivo a keyblade do Riku ficou invertida mas o modelo e a gameplay ficaram perfeitas"; "mas ela só inverteu na Skin Dark Mode".
+
+- **Cause** (Checked (files)): Riku's `k11` / `k10` and Dark Riku's `wep2` / `wep1` are different hand → blade chains (17 cm along −z against 22 cm along +z); mapped bone to bone, they turned the blade over. `wep0` sits the same in both hands at rest.
+- **Fix** (`kh1_recom_assets::riku_skin::Grip`): Dark's `wep0` takes Riku's pose in the hand; `wep2` / `wep1` follow it as in Dark's rest; the blade segments follow `wep0`.
+- **Checked**: test (every frame of the 51 clips: blade root and tip in the hand within 2 cm of Riku's), the Windows build. **Not checked**: in game. Asset step: **re-run** (automatic).
+
+---
+
 ## Stage 276 (fork branch Re-Re-Reverse/Rebirth): the skin's T-pose fixed, Costumes on Riku's top list (Default Attire / Dark Mode), version 0.154.1 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "a skin foi implementada mas ficou um Tpose, lembrando que é não é pra trocar as animações... além disso … é pra colocar uma nova opção no menu chamada Costumes onde ativa essa skin, chame ela de Dark Mode, e a normal se chamará Default Attire".
