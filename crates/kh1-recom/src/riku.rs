@@ -93,6 +93,11 @@ pub const GUARD_ROW: u32 = 0x24;
 pub const KH1_GUARD_ROW: u32 = 0x39;
 /// The guard clip's name, as the asset step writes it.
 pub const KH1_GUARD_CLIP: &[u8] = b"p002_225\0";
+/// 0.158.2: KH1 Riku's own guard recoil (request 110, entry 13; fork owner: "prefiro que use a
+/// versão do KH1 da animação de quando toma impacto"), his next row with no clip (0x3A), renamed
+/// like 0x39; played for KH1's guard recoils 0x6E / 0x6F.
+pub const KH1_RECOIL_ROW: u32 = 0x3A;
+pub const KH1_RECOIL_CLIP: &[u8] = b"p002_226\0";
 
 /// Re:CoM's attack row id for Riku's own swing that plays the same clip as Sora's row `sora_id`.
 /// Sora's rows 1..7 (`0x1407C6C70`, action rows 0x30..0x36) have Riku's twins at 0x97..0x9D: the same

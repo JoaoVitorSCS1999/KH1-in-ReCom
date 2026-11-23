@@ -408,6 +408,17 @@ pub fn riku_kh1_guard(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<
     Ok(crate::convert::encode_clip(&spec, &rows))
 }
 
+/// KH1 Riku's guard recoil (request 110, entry 13, 56 frames; 0.158.2), named `p002_226`.
+pub const RIKU_RECOIL: &str = "p002_226";
+
+/// KH1 Riku's own guard recoil on a Riku skeleton of Re:CoM's (named [`RIKU_RECOIL`]).
+pub fn riku_kh1_recoil(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<Clip> {
+    let ms = kh1_formats::mset::MotionSet::parse(mset)?;
+    let (_, m) = ms.motion_for(110).ok_or_else(|| crate::Error::Format("xa_ex_1010.mset: no request 110".into()))?;
+    let conv = crate::convert::Converter::new(mdls, riku.clone())?;
+    conv.convert(m, &crate::convert::ClipSpec { name: RIKU_RECOIL.into(), looped: false, root_motion: false, blend: 8 })
+}
+
 /// The guard's sources for every Riku skeleton: KH1 Riku's motion set and model.
 pub struct GuardSource<'a> {
     /// `xa_ex_1010.mset`.
@@ -510,6 +521,7 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     if let Some(src) = guard {
         let guard = riku_kh1_guard(src.mset, src.mdls, &rs)?;
         ann = with_clip(ann, guard);
+        ann = with_clip(ann, riku_kh1_recoil(src.mset, src.mdls, &rs)?);
         riku_pack = Some((path(riku, "ANN"), ann.to_bytes()));
     }
     let mut out_ann = retarget_ann(&ann, &rs, &ds)?;

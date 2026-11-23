@@ -650,10 +650,17 @@ impl Host for RecomHost {
             // 0.157.0: Sora's KH1 Guard on his skeleton (row 0x39) when the asset step made it.
             let guard = is_main_riku(pl) && request & 0x3FF == rows::GUARD;
             let row = if guard { super::riku_skin::guard_row(is_main_dark_riku(pl)) } else { row };
+            // 0.158.2: KH1 Riku's own guard recoil for KH1's guard recoils.
+            let recoil = is_main_riku(pl) && matches!(request & 0x3FF, rows::RECOIL | rows::STRONG_RECOIL);
+            let row = match super::riku_skin::recoil_row(is_main_dark_riku(pl)) {
+                Some(r) if recoil => r,
+                _ => row,
+            };
+            let guard = guard || (recoil && row == crate::riku::KH1_RECOIL_ROW);
             if is_main_riku(pl) {
                 // Only rows Riku's own action table plays (`crate::riku::row_ok`); Re:CoM's own
                 // effects and sounds of his clips (variant 0).
-                if !(guard && row == crate::riku::KH1_GUARD_ROW) && !crate::riku::row_ok_for(is_main_dark_riku(pl), row) {
+                if !(guard && (row == crate::riku::KH1_GUARD_ROW || row == crate::riku::KH1_RECOIL_ROW)) && !crate::riku::row_ok_for(is_main_dark_riku(pl), row) {
                     log_riku_row(request, row);
                     return false;
                 }

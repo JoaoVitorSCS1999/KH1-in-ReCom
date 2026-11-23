@@ -77,7 +77,7 @@ pub unsafe fn guard_rows(b: usize) {
     if !GUARD_FILES.load(Ordering::Relaxed) || GUARD.load(Ordering::Relaxed) {
         return;
     }
-    static NAME: &[u8] = crate::riku::KH1_GUARD_CLIP;
+    let names: [(u32, &'static [u8]); 2] = [(crate::riku::KH1_GUARD_ROW, crate::riku::KH1_GUARD_CLIP), (crate::riku::KH1_RECOIL_ROW, crate::riku::KH1_RECOIL_CLIP)];
     // Chars 3 and 4 share one table (Riku's and his Halloween Town form: 0.157.0 named its row,
     // then refused it as "not p002_000" for char 4): each table once.
     let mut tables: Vec<usize> = [3usize, 4].iter().map(|ch| rd::<usize>(va(b, rs::ACTION_TABLES_PTR) + 8 * ch)).filter(|&t| t != 0).collect();
@@ -85,21 +85,29 @@ pub unsafe fn guard_rows(b: usize) {
     let want = tables.len();
     let mut done = 0;
     for (ch, table) in tables.into_iter().enumerate() {
-        let at = table + 16 * crate::riku::KH1_GUARD_ROW as usize;
+      for &(row, name) in &names {
+        let at = table + 16 * row as usize;
         let old: usize = rd(at);
         let s = if old == 0 { &[][..] } else { std::slice::from_raw_parts(old as *const u8, 9) };
         if s != b"p002_000\0" {
-            log(&format!("riku guard: table {ch}'s row 0x39 is not p002_000; Riku's Guard keeps his clash recoil"));
+            log(&format!("riku guard: table {ch}'s row {row:#x} is not p002_000; Riku's Guard keeps his clash recoil"));
             return;
         }
-        if super::hook::patch(at, &old.to_le_bytes(), &(NAME.as_ptr() as usize).to_le_bytes(), "Riku's row 0x39 name") {
+        if super::hook::patch(at, &old.to_le_bytes(), &(name.as_ptr() as usize).to_le_bytes(), "Riku's guard row name") {
             done += 1;
         }
+      }
     }
-    if done == want && want > 0 {
+    if done == 2 * want && want > 0 {
         GUARD.store(true, Ordering::Relaxed);
-        log("riku guard: Riku's Guard plays Sora's KH1 Guard on his skeleton (row 0x39, p002_225)");
+        log("riku guard: Riku's Guard plays KH1 Riku's own guard (row 0x39, p002_225) and his KH1 guard recoil (row 0x3A, p002_226)");
     }
+}
+
+/// Riku's row for KH1's guard recoils (0x6E / 0x6F): his KH1 recoil (0x3A) once named, else None
+/// (the rows' own rule: his clash recoil 0x24).
+pub fn recoil_row(dark: bool) -> Option<u32> {
+    (!dark && GUARD.load(Ordering::Relaxed)).then_some(crate::riku::KH1_RECOIL_ROW)
 }
 
 /// The skins whose rows go in the PLAYER table.

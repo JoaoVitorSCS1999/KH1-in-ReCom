@@ -1603,6 +1603,9 @@ fn riku_guard_log(line: impl FnOnce() -> String) {
 /// protection bit for this check (no damage, no reaction), KH1's kind-6 guard success on his next
 /// KH1 frame (the recoil, the clink, `GuardSucceeded`: the parries), and the attacker's reaction
 /// (`super::guard::riku_block`: a shot cancelled, a melee attacker's flinch).
+/// Past this (metres, flat), an attacker that isn't a shot didn't hit Riku with its body.
+const RIKU_MELEE_REACH: f32 = 4.0;
+
 unsafe fn riku_guard_block(pl: usize) -> bool {
     if !mv::riku_on() || !mv::is_main_riku(pl) || !guard_live(pl) || rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED == 0 {
         return false;
@@ -1653,6 +1656,15 @@ unsafe fn riku_guard_block(pl: usize) -> bool {
     GUARD_HIT.store(pl, Ordering::Relaxed);
     if let Ok(mut g) = GUARD_POINT.lock() {
         *g = it;
+    }
+    // 0.158.2 (fork owner: a Guard far from the Defender blocked and flinched it): an attacker that
+    // is no shot but stands past a melee reach hit through something of its own (its KH1 fireball
+    // or flame, Re:CoM bullets whose attack names it): blocked, but no melee reaction on it.
+    let shot = vt == va(b0, crate::guard::bullet::VTABLE) || vt == va(b0, crate::guard::bullet::HOMING_VTABLE);
+    let dist = (it[0] - me[0]).hypot(it[2] - me[2]);
+    if !shot && dist > RIKU_MELEE_REACH {
+        riku_guard_log(|| format!("blocked a hit from {id:#x} {dist:.1} m away (its shot or area): no melee reaction on it"));
+        return true;
     }
     super::guard::riku_block(obj, id);
     true

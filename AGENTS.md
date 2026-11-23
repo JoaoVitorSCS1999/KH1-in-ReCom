@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 291 (fork branch Re-Re-Reverse/Rebirth): no melee block reaction on a far attacker; KH1 Riku's own guard recoil, version 0.158.2 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "eu apertei a defesa bem longe desse oponente, e parece que deu block naquela distância … prefiro que use a versão do KH1 da animação de quando toma impacto".
+
+- The owner's log: the far Defender's fireball / flame (Re:CoM bullets naming it) was blocked as "melee", flinching it each time. An attacker that is no shot and is past 4 m is now blocked without a reaction on it.
+- KH1 Riku's request 110 (his guard recoil) is converted as `p002_226` on row 0x3A (renamed like 0x39); KH1's guard recoils 0x6E / 0x6F play it. Asset step: **re-run** (automatic).
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 290 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard ends by leaving the guard (the way in backwards), version 0.158.1 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "quando passa um tempo e ele desativa a guarda ficou estranha, sera que nn tem como colocar a mesma animação mas ao contrário?". Riku's 54-frame guard clip is now 240 (30 frames), 241 held (7), then 240 backwards in 17 frames, ending on his pre-guard stance. Asset step: **re-run** (automatic). **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.

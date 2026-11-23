@@ -717,3 +717,29 @@ a guarda ficou estranha, sera que nn tem como colocar a mesma animação mas ao 
   forearm −36.3° at frames 0 and 53, −71.8° held).
 - Asset step: **re-run** (automatic). **Checked**: tests, the Windows build. **Not checked**: in
   game.
+
+## 0.158.2: no melee block reaction on a far attacker; KH1 Riku's own guard recoil
+
+Fork owner, 2026-11-23 (screenshot: Riku guarding far from a Defender, his block recoil playing),
+verbatim: "eu apertei a defesa bem longe desse oponente, e parece que deu block naquela distância pq
+engatilhou a animação de impacto na defesa, outra coisa prefiro que use a versão do KH1 da animação
+de quando toma impacto a do recom é estranha".
+
+- **The far block** (Checked (the owner's log)):
+  - Every block was `block melee CEnemyDefender … (Riku's Guard, our front test)`, with the
+    Defender in its state 1 (moving) or 11 (flinching).
+  - The hit came from its KH1 fireball or flame. Those are Re:CoM bullets whose attack names the
+    Defender, so `riku_guard_block` found the Defender (no shot) as the attacker.
+  - The block was right (KH1's Guard stops a shot in front). Its melee reaction flinched the far
+    Defender each time.
+  - Now an attacker that is no shot and stands past 4 m (flat) is blocked without any reaction on
+    it.
+- **KH1 recoil**:
+  - KH1 Riku's request 110 (entry 13, 56 frames: the guard row `0x550`'s recoil, his impact while
+    guarding) is converted onto his skeleton as `p002_226` (`riku_skin::riku_kh1_recoil`). It goes
+    into his two packs and both skins'.
+  - His row 0x3A (`p002_000`, no clip) is renamed to it, like 0x39.
+  - KH1's guard recoils 0x6E / 0x6F play it instead of row 0x24 (Re:CoM's `p002_043`). The real
+    Dark Mode keeps his own.
+- Asset step: **re-run** (automatic). **Checked**: tests, the asset step (both clips in all four
+  packs), the Windows build. **Not checked**: in game.
