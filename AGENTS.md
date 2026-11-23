@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 312 (fork branch Re-Re-Reverse/Rebirth): the Ansem costume's limbs posed from Riku's T-pose, version 0.176.2 (2026-11-23)
+
+Fork owner, 2026-11-23 (three screenshots: arms out, hands at the waist, the head bent into the hair), verbatim: "ficou bem bizarro".
+
+- **Cause** (Checked (files)): Riku's rest pose is a T-pose (hands at shoulder height, 0.61 m out); Ansem's an A-pose (hands 1.20 m up, 0.40 m out: arms about 50° down, 70° at worst). The retarget carries each bone's turn from its rest, so every Ansem limb stayed as far off as its rest differs.
+- **Fix** (`riku_skin::{rest_like, align, LIMBS}`): before the retarget, each limb's rest rotation (collar, upper arm, forearm, thigh, shin, foot; the hand takes its forearm's, `wep0` its hand's) is turned by the smallest rotation to Riku's rest direction, only when a limb is 20° or more off (Dark Riku's worst is 9.9°: the Dark Mode groups 121..171 byte for byte as before, Checked (files)). Groups 181 / 191 / 221 / 231 change. **Re-run** (automatic).
+- Test: in Riku's idle, Ansem's upper arm / thigh 0.0° and forearm 3.4° off Riku's directions.
+- Assumptions: the twist about each limb kept as Ansem's rest has it; the head bent in a pose is Riku's own clip (Ansem's taller neck chain: 1 bone against Riku's 3).
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 311 (fork branch Re-Re-Reverse/Rebirth): the Ansem costume is Ansem's model (0.176.0 took Axel's), version 0.176.1 (2026-11-23)
 
 Fork owner, 2026-11-23 (screenshot: Riku as Axel), verbatim: "você colocou a skin do Axel cara!, é a do Ansem Seeker of Darkness!".

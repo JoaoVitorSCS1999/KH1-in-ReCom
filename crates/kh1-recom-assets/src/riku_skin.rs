@@ -74,6 +74,89 @@ fn world_rot(skel: &RecomSkeleton) -> Vec<M3> {
     skel.rest_world().iter().map(|w| unscale(&w.r).0).collect()
 }
 
+/// The limbs whose rest direction is compared (bone, the bone its direction points to). A hand
+/// takes its forearm's correction, `wep0` its hand's.
+const LIMBS: [(&str, &str); 15] = [
+    ("l_collar", "l_uparm"),
+    ("l_uparm", "l_foarm"),
+    ("l_foarm", "l_hand"),
+    ("r_collar", "r_uparm"),
+    ("r_uparm", "r_foarm"),
+    ("r_foarm", "r_hand"),
+    ("l_femur", "l_tibia"),
+    ("l_tibia", "l_foot"),
+    ("l_foot", "l_toes"),
+    ("r_femur", "r_tibia"),
+    ("r_tibia", "r_foot"),
+    ("r_foot", "r_toes"),
+    ("l_hand", "l_foarm"),
+    ("r_hand", "r_foarm"),
+    ("wep0", "r_hand"),
+];
+
+/// The target's rest rotations turned, limb by limb, so each limb points where Riku's does at rest
+/// (0.176.2): Riku stands in a T-pose, Ansem in an A-pose (arms about 50° down; Checked (files)),
+/// and the retarget carries each bone's turn from rest, so a target limb off Riku's rest pose stays
+/// that far off in every clip (the owner's screenshots: arms out, hands at the waist). The
+/// smallest rotation from the target's limb direction to Riku's, applied in world space; under 3°
+/// nothing changes (Dark Riku's skeleton is Riku's own pose).
+fn rest_like(riku: &RecomSkeleton, dark: &RecomSkeleton, mut rb: Vec<M3>) -> Vec<M3> {
+    let (wa, wb) = (riku.rest_world(), dark.rest_world());
+    let dir = |w: &[crate::math::Aff], sk: &RecomSkeleton, a: &str, b: &str| -> Option<[f64; 3]> {
+        let (i, j) = (sk.find(a)?, sk.find(b)?);
+        let d = [w[j].t[0] - w[i].t[0], w[j].t[1] - w[i].t[1], w[j].t[2] - w[i].t[2]];
+        let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        (n > 1e-4).then(|| [d[0] / n, d[1] / n, d[2] / n])
+    };
+    let mut turned: Vec<(String, M3)> = Vec::new();
+    for (bone, to) in LIMBS {
+        let Some(j) = dark.find(bone) else { continue };
+        let a = if bone.ends_with("_hand") || bone == "wep0" {
+            match turned.iter().find(|t| t.0 == to) {
+                Some(t) => t.1,
+                None => continue,
+            }
+        } else {
+            let (Some(x), Some(y)) = (dir(&wb, dark, bone, to), dir(&wa, riku, bone, to)) else { continue };
+            align(x, y)
+        };
+        if crate::math::angle_deg(&a) < 3.0 {
+            continue;
+        }
+        turned.push((bone.to_string(), a));
+    }
+    // A skeleton in Riku's own pose (Dark Riku: his limbs within a few degrees) is left as it is,
+    // so the Dark Mode skin's clips stay byte for byte as before; only a different rest pose (an
+    // arm 20° or more off) is turned.
+    let worst = turned.iter().map(|t| crate::math::angle_deg(&t.1)).fold(0.0, f64::max);
+    if worst < 20.0 {
+        return rb;
+    }
+    for (bone, a) in &turned {
+        if let Some(j) = dark.find(bone) {
+            rb[j] = m3(&rb[j], a);
+        }
+    }
+    rb
+}
+
+/// The smallest rotation taking unit `x` to unit `y`, for row vectors (`x · A = y`).
+fn align(x: [f64; 3], y: [f64; 3]) -> M3 {
+    let c = x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+    let v = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+    if c < -0.9999 {
+        return crate::math::I3;
+    }
+    let k = 1.0 / (1.0 + c);
+    // Column form R = I + [v]x + [v]x² / (1 + c); row form is its transpose.
+    let r = [
+        [c + v[0] * v[0] * k, v[0] * v[1] * k - v[2], v[0] * v[2] * k + v[1]],
+        [v[1] * v[0] * k + v[2], c + v[1] * v[1] * k, v[1] * v[2] * k - v[0]],
+        [v[2] * v[0] * k - v[1], v[2] * v[1] * k + v[0], c + v[2] * v[2] * k],
+    ];
+    tr(&r)
+}
+
 /// Retargets one of Riku's clips onto Dark Riku's skeleton. Frame count, fps, loop and blend are
 /// the clip's own.
 pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[Option<usize>]) -> Result<Clip> {
@@ -89,7 +172,7 @@ pub fn retarget_with(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map
         return bad(format!("{}: {} bones, Riku's skeleton has {na}", src.name_str(), src.bones));
     }
     let ra = world_rot(riku);
-    let rb = world_rot(dark);
+    let rb = rest_like(riku, dark, world_rot(dark));
     let nb = dark.bones.len();
     let grip = Grip::new(riku, dark);
     let mut rows: Vec<Vec<[f64; 9]>> = Vec::with_capacity(src.frames as usize);
@@ -1016,6 +1099,19 @@ mod tests {
             let rb = ansem.rest_world()[j].t[1];
             eprintln!("{bone}: riku {:.3} (rest {ra:.3}) ansem {:.3} (rest {rb:.3})", pa[i][1], pb[j][1]);
             assert!(((pa[i][1] - ra) - (pb[j][1] - rb)).abs() < 0.05, "{bone}");
+        }
+        // The limbs point where Riku's do (Ansem's rest is an A-pose, Riku's a T-pose).
+        for (x, y) in [("l_uparm", "l_foarm"), ("r_foarm", "r_hand"), ("l_femur", "l_tibia")] {
+            let dir = |p: &Vec<[f64; 3]>, sk: &RecomSkeleton| {
+                let (i, j) = (sk.find(x).unwrap(), sk.find(y).unwrap());
+                let d = [p[j][0] - p[i][0], p[j][1] - p[i][1], p[j][2] - p[i][2]];
+                let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+                [d[0] / n, d[1] / n, d[2] / n]
+            };
+            let (u, v) = (dir(&pa, &riku), dir(&pb, &ansem));
+            let deg = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]).clamp(-1.0, 1.0).acos().to_degrees();
+            eprintln!("{x}: {deg:.1} deg off Riku's");
+            assert!(deg < 8.0, "{x}");
         }
         let h = ansem.find("r_hand").unwrap();
         let d = crate::math::dist(pb[w0], pb[h]);

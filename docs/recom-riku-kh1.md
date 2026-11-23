@@ -998,3 +998,7 @@ dele".
   - textures `ex_1630_01..05`, KH1's `xa_ex_1630`;
   - skeleton `e122_sk`, 157 bones.
 - His bones under other names (`lf_*` / `rf_*` legs, `chest2`, `neck`) are renamed to Riku's (`ANSEM_RENAMES`). The rest is as 0.176.0.
+
+## 0.176.2: Ansem stands in an A-pose
+
+Riku rests in a T-pose, Ansem in an A-pose (70° at the worst limb). `rest_like` turns the target's limb rest rotations to Riku's directions before the retarget (only past 20°: Dark Riku, 9.9°, unchanged).
