@@ -643,7 +643,8 @@ unsafe fn riku_pair_block(coll: usize, list: usize, r: i32) -> i32 {
         return r;
     }
     let pl: usize = rd(va(b, data::MAIN_PLAYER));
-    if !mv::riku_on() || !mv::is_main_riku(pl) || mv::is_main_dark_riku(pl) || !guard_live(pl) {
+    // 0.169.0: Dark Riku (the real Dark Mode) too.
+    if !mv::riku_on() || !mv::is_main_riku(pl) || !guard_live(pl) {
         return r;
     }
     let owner: u32 = rd(coll + crate::guard::coll::OWNER);
@@ -716,6 +717,10 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     }
     let b = base();
     let pl: usize = rd(va(b, data::MAIN_PLAYER));
+    // 0.169.0 (fork owner, 2026-11-23: Sora's rules for Riku): KH1's attack-meets-attack for his swing.
+    if mv::kh1_riku(pl) {
+        return riku_pair(pl, coll, list);
+    }
     if !mv::is_main_sora(pl) {
         return recom_pair(coll, list);
     }
@@ -820,6 +825,52 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     // M11, the Gargoyle's ball: a swing sends it back (KH1's `0x748`).
     super::kh1_thrown::swing_at_balls(|bshape| spheres_meet(ctx, fp, bshape, &spheres));
     result
+}
+
+/// Riku's swing (0.169.0): his hits stay Re:CoM's weapon volume (his weapon has no blade bones of
+/// its own: the Soul Eater is part of his body model), but KH1's attack-vs-attack pass runs first, as
+/// for Sora's swing: the volume's sphere (its swept centres `+0x10` / `+0x20`, radius `+0x70`, the
+/// shape kind 2 Re:CoM's weapons use; others: no clash test, logged once) against the KH1 enemies'
+/// live attack rows. A clash plays his KH1 recoil (`SWING_CLASH`, his KH1 frame) and the enemy's; a
+/// swing it marks meets no hurt body that frame. Assumption: the KH1 row's clash type / priority with
+/// the equipped Keyblade's numbers stand for the Soul Eater's (KH1 Riku's weapon numbers not read).
+unsafe fn riku_pair(pl: usize, coll: usize, list: usize) -> i32 {
+    let weapon: usize = rd(pl + field::WEAPON);
+    let shape: usize = if coll != 0 { rd(coll + 0x18) } else { 0 };
+    let Some(kh1_row) = kh1_row_of(pl) else { return recom_pair(coll, list) };
+    if weapon == 0 || coll != weapon + 0x240 || shape == 0 || rd::<u32>(pl + p::ACTION) != ATTACK_ACTION {
+        return recom_pair(coll, list);
+    }
+    if rd::<u32>(shape + 0x60) != 2 {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| log(&format!("riku: his weapon volume is shape kind {}: no KH1 clash test for his swings", rd::<u32>(shape + 0x60))));
+        return recom_pair(coll, list);
+    }
+    let kh1_weapon = super::stats::equipped_weapon();
+    let Some(live) = atk::live_attack(moveset(), kh1_row, &kh1_weapon) else { return recom_pair(coll, list) };
+    let c0: [f32; 4] = rd(shape + 0x10);
+    let c1: [f32; 4] = rd(shape + 0x20);
+    let r: f32 = rd(shape + 0x70);
+    let spheres = [(Vec3::new(c0[0], c0[1], c0[2]), r), (Vec3::new(c1[0], c1[1], c1[2]), r)];
+    let ctx: usize = rd(va(base(), COLL_CONTEXT));
+    let mut fake = FakeSphere([0; 0x90]);
+    let fp = fake.0.as_mut_ptr() as usize;
+    wr(fp + 0x60, 2u32);
+    let gen = SWING_GEN.load(Ordering::Relaxed);
+    let tick = TICK.load(Ordering::Relaxed);
+    let (clash, marked) = super::kh1_enemy::swing_meets_attacks((live.data.clash_type(), live.priority), gen, &mut |eshape| attack_meets(ctx, fp, eshape, &spheres));
+    if let Some((kind, diff)) = clash {
+        SWING_CLASH_KIND.store((kind as u32) << 16 | (diff as i16 as u16 as u32), Ordering::Relaxed);
+        SWING_CLASH.store(pl, Ordering::Relaxed);
+    }
+    let key = marked_key(gen, tick);
+    if marked {
+        SWING_MARKED.store(key, Ordering::Relaxed);
+    }
+    if SWING_MARKED.load(Ordering::Relaxed) == key {
+        return 0;
+    }
+    recom_pair(coll, list)
 }
 
 /// M11, attack meets attack: the swing and Sora frame ([`marked_key`]) in which a clash marked his swing (it meets
@@ -1075,6 +1126,18 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
             Some((body, name)) => {
                 let src = if super::damage::kh1() { super::damage_cap::Source::Raw } else { super::damage_cap::Source::Recom };
                 super::damage_cap::arm(enemy, rd(body + 0x80), super::damage_cap::What::Sleight(name), src)
+            }
+            // 0.169.0: Riku's swing takes the enemy's KH1 per-hit cap as Sora's (his number is Re:CoM's
+            // card AP on Re:CoM's HP at both Damage settings: the share of Re:CoM's max HP).
+            None if riku_hit => {
+                let pl: usize = rd(va(base(), data::MAIN_PLAYER));
+                match (waiting_body(enemy), kh1_row_of(pl)) {
+                    (Some(body), Some(r)) if !crate::damage::percent_of_hp_row(r, moveset()) => super::damage_cap::arm(enemy, rd(body + 0x80), super::damage_cap::What::Swing(r), super::damage_cap::Source::Recom),
+                    _ => {
+                        super::damage_cap::uncapped(enemy);
+                        None
+                    }
+                }
             }
             None => {
                 super::damage_cap::forget(enemy, || waiting_body(enemy).is_some());

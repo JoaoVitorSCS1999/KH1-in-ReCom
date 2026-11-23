@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 303 (fork branch Re-Re-Reverse/Rebirth): Sora's combat rules for Riku, part 2: Dark Riku's Guard, KH1's attack-meets-attack, the twins' lock radius / level, the damage cap, version 0.169.0 (2026-11-23)
+
+Fork owner, 2026-11-23: "certo mas esse é só um ponto, tem algo que ficou faltando?"; the plan (4, then 1 + 3, then 2): "sim".
+
+- **Dark Riku's Guard**: the pair-test block (0.159.0) for the real Dark Mode too.
+- **Attack meets attack** (`win::attack::riku_pair`): his swing's Re:CoM weapon volume (sphere: swept centres, radius) against the KH1 enemies' live attack rows, as Sora's blade spheres (M11, 0.82.0): KH1's clash outcome (his KH1 recoil, the enemy's), a marked swing meets no hurt body that frame. Assumption: the KH1 row's clash type / priority with the equipped Keyblade's numbers for the Soul Eater's; a non-sphere volume logs and skips.
+- **Twins** (`stats::twin_any`): in his story, the KH1 twin's lock radius (KH1's lunge distance) and level (his MP charge), as Sora's; his enemies' HP and damage stay Re:CoM's.
+- **Damage cap**: his swings take the enemy's KH1 per-hit cap as the share of Re:CoM's max HP (`damage_cap::Source::Recom`), at both Damage settings (his numbers are Re:CoM's card AP on Re:CoM's HP).
+- Left his own: his damage numbers at Damage = KH1 (Re:CoM's), the Neoshadow's held grab (no clip).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 302 (fork branch Re-Re-Reverse/Rebirth): the Wizard and the Aquatank stay hittable in their dimming moves (only bosses' are untouchable), version 0.168.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "eu acertar uma porrada no wizard enquanto ele casta thunder ainda não interrompe o ataque dele"; "troque essa implementação porque a jogabilidade quando estiver no KH1 deve usar as mesmas regras, com exceção a bosses de fato, um wizard não é um boss...".

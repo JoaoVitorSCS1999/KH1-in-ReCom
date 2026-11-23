@@ -945,3 +945,15 @@ dele".
   Before it, nothing moves the DP or the gauge.
 - `riku_skin::blade_unlocked` = the debug key or the costume's unlock (first Dark Mode, save bit 4).
   The 15-DP bit (0.160.0) is dropped.
+
+## 0.169.0: Sora's rules for Riku, part 2
+
+- **Dark Riku's Guard**: `riku_pair_block` no longer leaves out `is_main_dark_riku`.
+- **Attack meets attack**:
+  - `riku_pair`: his weapon's collision `weapon + 0x240`, shape kind 2, centres `+0x10` / `+0x20`,
+    radius `+0x70`. These go to `kh1_enemy::swing_meets_attacks` with Re:CoM's overlap tests
+    (`attack_meets`).
+  - `SWING_CLASH` carries his recoil, which his KH1 frame plays.
+- **Twins**: `twin_any` (both stories with `riku_kh1_movement`) for `lock_radius`, `twin_level` and
+  `record_from`. `twin` (HP, KH1 damage, proxies) stays Sora's only.
+- **Damage cap**: his swing arms `damage_cap` with `Source::Recom` (the % of HP rows never).

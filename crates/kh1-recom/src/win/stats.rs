@@ -212,10 +212,19 @@ pub fn sora_level() -> u32 {
 }
 
 fn twin(enemy: usize) -> Option<(&'static str, &'static EnemyStats)> {
-    let class = class_of(enemy)?;
     if riku_story() {
         return None;
     }
+    twin_any(enemy)
+}
+
+/// [`twin`] in either story (0.169.0, Riku's KH1 combat: the twin's lock radius and level for his
+/// lunge and his MP charge, as Sora's; his enemies' HP and damage stay Re:CoM's through [`twin`]).
+fn twin_any(enemy: usize) -> Option<(&'static str, &'static EnemyStats)> {
+    if riku_story() && !super::movement::riku_on() {
+        return None;
+    }
+    let class = class_of(enemy)?;
     let w = world();
     let t = STATS.get()?.twin(class, w)?;
     if let Ok(mut g) = LOGGED.lock() {
@@ -250,7 +259,7 @@ pub fn drop_classes() -> usize {
 /// ground picker subtracts it from the distance, `0x1402A7320`). Assumption: the twin's actor
 /// scale (KH1 actor `+0x40`) is 1.0.
 pub fn lock_radius(enemy: usize) -> Option<f32> {
-    let (class, _) = twin(enemy)?;
+    let (class, _) = twin_any(enemy)?;
     STATS.get()?.lock_radius(class)
 }
 
@@ -258,7 +267,7 @@ pub fn lock_radius(enemy: usize) -> Option<f32> {
 /// its proxy's / boss twin's record set at its stats init. The level KH1's MP charge reads
 /// (`0x1402BF330`, `super::mp`).
 pub fn twin_level(enemy: usize) -> Option<i32> {
-    twin(enemy).map(|(_, t)| t.level).or_else(|| proxied(enemy).map(|t| t.level))
+    twin_any(enemy).map(|(_, t)| t.level).or_else(|| proxied(enemy).map(|t| t.level))
 }
 
 /// Re:CoM's enemy stats init (`0x14017FF50(enemy, category, id, …)`; category 0xC for enemies,
@@ -582,7 +591,8 @@ pub fn berserk_share(enemy: usize, kh1_row: usize, sora_level: u32, hp_now: i32,
 /// Sora's damage cap: the enemy's KH1 record (twin, else proxy / boss twin, as [`kh1_record`]) and what
 /// it is ("twin", "proxy", "proxy boss", "boss twin").
 pub fn record_from(enemy: usize) -> Option<(EnemyStats, &'static str)> {
-    match twin(enemy) {
+    // 0.169.0: the twin in Riku's story too (his hits' damage cap, as Sora's).
+    match twin_any(enemy) {
         Some((_, t)) => Some((t.clone(), "twin")),
         None if !riku_story() => PROXIED.lock().ok()?.iter().find(|(e, _, _)| *e == enemy).map(|(_, s, w)| (s.clone(), *w)),
         None => None,
