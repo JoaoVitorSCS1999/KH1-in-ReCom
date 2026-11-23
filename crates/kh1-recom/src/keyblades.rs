@@ -155,8 +155,16 @@ pub mod top {
     /// his Keyblade chosen "da mesma forma" as Sora's): Items in Review Decks' place (his Keyblade
     /// slot and item slots), Customize (camp index 8, as Sora's), Re:CoM's World Map .. D Report,
     /// Costumes, Settings.
-    pub const RIKU_KH1_EXTRA: [i32; 2] = [COSTUMES, CUSTOMIZE];
-    pub const RIKU_KH1_ORDER: [i32; KH1_ENTRIES as usize] = [DECKS, CUSTOMIZE, 1, 2, 3, 4, 5, COSTUMES, SETTINGS];
+    /// 0.164.0: his Abilities (the Enemy Skills) at camp index 9, after Items, as Sora's.
+    pub const RIKU_ABILITIES: i32 = 9;
+    pub const RIKU_KH1_EXTRA: [i32; 3] = [COSTUMES, CUSTOMIZE, RIKU_ABILITIES];
+    pub const RIKU_KH1_ENTRIES: i32 = 10;
+    pub const RIKU_KH1_ORDER: [i32; RIKU_KH1_ENTRIES as usize] = [DECKS, RIKU_ABILITIES, CUSTOMIZE, 1, 2, 3, 4, 5, COSTUMES, SETTINGS];
+    /// The most extra buttons a list has.
+    pub const MAX_EXTRA: usize = 3;
+    /// Ten entries in the nine's room (y 88 .. 280): step 21.3 (plates 26 high overlap by 4.7).
+    /// Assumption: reads well (no screenshot yet).
+    pub const TEN_STEP: f32 = 21.33;
 
     /// The order on screen of a list with entries of ours (camp index per slot), None for
     /// Re:CoM's seven where they are.
@@ -259,6 +267,7 @@ pub mod top {
             (Layout::Kh1, CUSTOMIZE) => Some(Entry::Customize),
             (Layout::Riku, DECKS) => Some(Entry::Items),
             (Layout::Riku, CUSTOMIZE) => Some(Entry::Customize),
+            (Layout::Riku, RIKU_ABILITIES) => Some(Entry::Abilities),
             (Layout::Riku | Layout::RikuDecks | Layout::RikuPlain, COSTUMES) => Some(Entry::Costumes),
             (_, i) if (0..RECOM_ENTRIES).contains(&i) => Some(Entry::Recom(i)),
             _ => None,
@@ -323,7 +332,9 @@ pub mod top {
     pub const KH1_STEP: f32 = 24.0;
 
     fn y0_step(l: Layout) -> (f32, f32) {
-        if order(l).is_some() {
+        if count(l) > KH1_ENTRIES {
+            (KH1_Y0, TEN_STEP)
+        } else if order(l).is_some() {
             (KH1_Y0, KH1_STEP)
         } else {
             (RECOM_Y0, RECOM_STEP)
@@ -1005,10 +1016,13 @@ mod tests {
         assert_eq!(top::entry(Layout::Riku, 3), Some(Entry::Recom(3)));
         assert_eq!(top::entry(Layout::Riku, top::CUSTOMIZE), Some(Entry::Customize));
         assert_eq!(top::entry(Layout::Riku, top::COSTUMES), Some(Entry::Costumes));
-        assert_eq!((top::count(Layout::Riku), top::slot(Layout::Riku, 0), top::slot(Layout::Riku, top::CUSTOMIZE), top::entry_pos(Layout::Riku, 2)), (9, Some(0), Some(1), top::entry_pos(Layout::Kh1, 2)));
-        assert_eq!((top::slot(Layout::Riku, top::COSTUMES), top::slot(Layout::Riku, top::SETTINGS)), (Some(7), Some(8)));
+        assert_eq!((top::count(Layout::Riku), top::slot(Layout::Riku, 0), top::slot(Layout::Riku, top::RIKU_ABILITIES), top::slot(Layout::Riku, top::CUSTOMIZE)), (10, Some(0), Some(1), Some(2)));
+        assert_eq!(top::entry(Layout::Riku, top::RIKU_ABILITIES), Some(Entry::Abilities));
+        assert!(top::entry_pos(Layout::Riku, 9).1 <= 280.0 + 0.01);
+        assert_eq!((top::slot(Layout::Riku, top::COSTUMES), top::slot(Layout::Riku, top::SETTINGS)), (Some(8), Some(9)));
         let down = top::Pad { down: true, down_fresh: true, ..Default::default() };
-        assert_eq!(top::list_step(Layout::Riku, top::DECKS, down), Some(top::CUSTOMIZE));
+        assert_eq!(top::list_step(Layout::Riku, top::DECKS, down), Some(top::RIKU_ABILITIES));
+        assert_eq!(top::list_step(Layout::Riku, top::RIKU_ABILITIES, down), Some(top::CUSTOMIZE));
         assert_eq!(top::list_step(Layout::Riku, top::CUSTOMIZE, down), Some(1));
         assert_eq!(top::list_step(Layout::Riku, 5, down), Some(top::COSTUMES));
         assert_eq!(top::list_step(Layout::Riku, top::COSTUMES, down), Some(top::SETTINGS));

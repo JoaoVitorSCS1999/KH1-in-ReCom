@@ -188,6 +188,27 @@ pub fn set_sora_cp(cp: i32) {
     }
 }
 
+/// Riku's DP stat (his story's stats `+0x14`: the level-up's DP row adds 2, cap 99;
+/// `0x14010F70F`, Checked (disasm)), or None without the stats.
+pub fn riku_dp() -> Option<i32> {
+    // SAFETY: as [`sora_cp`].
+    unsafe {
+        let p: usize = rd(va(base(), STATS_PTR));
+        (p != 0).then(|| rd::<i32>(p + 0x14))
+    }
+}
+
+/// Writes Riku's DP stat (0.164.0: his AP Up pick undoes Re:CoM's +2 where Re:CoM wouldn't offer it).
+pub fn set_riku_dp(dp: i32) {
+    // SAFETY: as above.
+    unsafe {
+        let p: usize = rd(va(base(), STATS_PTR));
+        if p != 0 {
+            wr(p + 0x14, dp);
+        }
+    }
+}
+
 /// Sora's Re:CoM level (the menu's), 1 when the save isn't there.
 pub fn sora_level() -> u32 {
     // SAFETY: a static pointer of the image, then the save block it points at.

@@ -18,7 +18,7 @@
 
 use super::movement::{func, rd, wr};
 use super::log;
-use crate::level_up::{off, state, text, CP_ROW};
+use crate::level_up::{off, state, text, CP_ROW, SLEIGHT_ROW};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 const TEXT_COPY: u32 = 0x0025_8DE0;
@@ -35,19 +35,46 @@ fn note(line: impl FnOnce() -> String) {
 /// What the wrapper keeps across Re:CoM's update.
 pub(super) struct Before {
     state: i32,
-    /// Sora's CP before a confirm on the AP Up row (Re:CoM's +25 is kept only below its cap).
+    /// Sora's CP (Riku's DP) before a confirm on the AP Up row (Re:CoM's add is kept only where
+    /// Re:CoM itself offers its row).
     cp: Option<i32>,
+    /// Riku: Re:CoM would have offered his DP row (Dark Mode learned, 0x6D, and DP < 99:
+    /// `0x14010F2D2..0x14010F2ED`, Checked (disasm)).
+    recom_dp_row: bool,
 }
 
-/// A level-up (not the sleight-learned mode) of Sora at Combat = KH1 in Sora's story.
+/// The screen is Riku's (`+0x230` ≠ 0; fork, 0.164.0: his DP row is his AP Up).
+unsafe fn riku_screen(this: usize) -> bool {
+    rd::<u32>(this + off::CHARACTER) != 0
+}
+
+/// The AP Up row: Sora's CP row, Riku's DP row (0.164.0; fork owner: "concordo").
+unsafe fn ap_row(this: usize) -> usize {
+    if riku_screen(this) {
+        SLEIGHT_ROW
+    } else {
+        CP_ROW
+    }
+}
+
+/// A level-up (not the sleight-learned mode) at Combat = KH1: Sora's in his story, Riku's in his
+/// (0.164.0).
 unsafe fn ap_up_screen(this: usize) -> bool {
-    rd::<u32>(this + off::SLEIGHT) == 0 && rd::<u32>(this + off::CHARACTER) == 0 && super::mp::active()
+    rd::<u32>(this + off::SLEIGHT) == 0 && if riku_screen(this) { super::mp::riku_live() } else { super::mp::active() }
 }
 
 pub(super) unsafe fn before(this: usize) -> Before {
     let st: i32 = rd(this + off::STATE);
-    let cp = if st == state::PICK && rd::<i32>(this + off::CURSOR) == CP_ROW as i32 && ap_up_screen(this) { super::stats::sora_cp() } else { None };
-    Before { state: st, cp }
+    let on_row = st == state::PICK && ap_up_screen(this) && rd::<i32>(this + off::CURSOR) == ap_row(this) as i32;
+    let cp = if !on_row {
+        None
+    } else if riku_screen(this) {
+        super::stats::riku_dp()
+    } else {
+        super::stats::sora_cp()
+    };
+    let recom_dp_row = on_row && riku_screen(this) && super::abilities::sleight_learned_fn()(0x6D) & 0xFF != 0 && cp.is_some_and(|d| d < 99);
+    Before { state: st, cp, recom_dp_row }
 }
 
 /// The C string a text item shows (at most 64 bytes read).
@@ -70,8 +97,9 @@ unsafe fn set_text(this: usize, at: usize, want: &[u8]) {
 
 unsafe fn panel(this: usize) {
     let Some(max) = super::abilities::max_ap_now() else { return };
-    let on = rd::<i32>(this + off::CURSOR) == CP_ROW as i32;
-    set_text(this, off::PANEL_VALUE + off::PANEL_STEP * CP_ROW, &crate::level_up::panel_value(max, on));
+    let row = ap_row(this);
+    let on = rd::<i32>(this + off::CURSOR) == row as i32;
+    set_text(this, off::PANEL_VALUE + off::PANEL_STEP * row, &crate::level_up::panel_value(max, on));
 }
 
 pub(super) unsafe fn after(this: usize, b: Before) {
@@ -81,7 +109,7 @@ pub(super) unsafe fn after(this: usize, b: Before) {
     }
     // The last level's screen ended: the ability state follows the new level now (KH1's level
     // abilities are queued as notices by the sync), before the notices' step looks.
-    if b.state == state::NEXT && st == state::END && rd::<u32>(this + off::SLEIGHT) == 0 && super::mp::active() {
+    if b.state == state::NEXT && st == state::END && rd::<u32>(this + off::SLEIGHT) == 0 && super::mp::live() {
         super::abilities::sync();
     }
     super::notices::after_step(this, b.state, st);
@@ -91,14 +119,15 @@ unsafe fn step(this: usize, b: &Before, st: i32) {
     if !ap_up_screen(this) {
         return;
     }
-    let offer = this + off::OFFER + 4 * CP_ROW;
+    let row = ap_row(this);
+    let offer = this + off::OFFER + 4 * row;
     // The offers were just made: AP Up is always offered (no cap).
     if (b.state == state::RESOURCES || b.state == state::INIT) && st == state::BUILD {
         let was: i32 = rd(offer);
         if was < 0 {
             wr(offer, 0i32);
-            if rd::<i32>(this + off::OFFER) < 0 {
-                wr(this + off::CURSOR, CP_ROW as i32);
+            if rd::<i32>(this + off::OFFER) < 0 && (row == CP_ROW || rd::<i32>(this + off::OFFER + 4 * CP_ROW) < 0) {
+                wr(this + off::CURSOR, row as i32);
             }
         }
         note(|| {
@@ -112,9 +141,9 @@ unsafe fn step(this: usize, b: &Before, st: i32) {
     }
     // The rows were just built: our words on row 1 and the panel.
     if b.state == state::BUILD && st == state::OPENING {
-        set_text(this, off::ROW_LABEL + off::ROW_STEP * CP_ROW, text::ROW_LABEL);
-        set_text(this, off::ROW_VALUE + off::ROW_STEP * CP_ROW, text::ROW_VALUE);
-        set_text(this, off::PANEL_LABEL + off::PANEL_STEP * CP_ROW, text::PANEL_LABEL);
+        set_text(this, off::ROW_LABEL + off::ROW_STEP * row, text::ROW_LABEL);
+        set_text(this, off::ROW_VALUE + off::ROW_STEP * row, text::ROW_VALUE);
+        set_text(this, off::PANEL_LABEL + off::PANEL_STEP * row, text::PANEL_LABEL);
         panel(this);
     }
     // Re:CoM re-prints the panel's values on cursor moves and when the rows have opened.
@@ -122,7 +151,27 @@ unsafe fn step(this: usize, b: &Before, st: i32) {
         panel(this);
     }
     // The pick: AP Up, not CP.
-    if let (Some(cp), state::PICKED) = (b.cp, st) {
+    if let (Some(dp), state::PICKED) = (b.cp, st) {
+        if riku_screen(this) {
+            if rd::<i32>(this + off::CURSOR) != row as i32 {
+                return;
+            }
+            // Re:CoM's +2 DP kept only where Re:CoM itself offers its DP row.
+            let raised = super::stats::riku_dp();
+            if !b.recom_dp_row {
+                super::stats::set_riku_dp(dp);
+            }
+            let r = super::abilities::add_ap_up();
+            set_text(this, off::RESULT, text::RESULT);
+            log(&format!(
+                "level-up: Riku's AP Up (his DP row) picked at Re:CoM level {}: {}; DP {dp} -> {raised:?} {}",
+                super::stats::sora_level(),
+                r.map_or_else(|| "the ability state isn't live: nothing added".to_string(), |(n, max)| format!("{n} AP Up pick(s), max AP {max}")),
+                if b.recom_dp_row { "kept (Re:CoM offers its DP row)" } else { "undone (Re:CoM wouldn't offer it: Dark Mode not learned or DP 99)" }
+            ));
+            return;
+        }
+        let cp = dp;
         if rd::<i32>(this + off::CURSOR) != CP_ROW as i32 {
             return;
         }

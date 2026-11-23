@@ -421,6 +421,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     // 8a.1: one atomic load unless a use is going).
     super::items::new_frame();
     super::items::task_frame(pl);
+    // 0.164.0: his "learned" notices (Enemy Skills) at Re:CoM's field camp gate, as Sora's.
+    super::notices::frame(pl);
     // A special command no KH1 frame took last frame is gone (M9 stage 9c.1).
     super::specials::new_frame();
     // Re:CoM's battle end, logged (two loads unless its win is pending; `crate::battle::end`).
@@ -510,6 +512,9 @@ unsafe fn riku_request_bits(pl: usize, o: PlFn) {
     let r: u32 = rd(pl + p::REQUEST);
     if r & 1 != 0 && r & 4 != 0 {
         wr(pl + p::REQUEST, r & !4);
+    } else if r & 4 != 0 {
+        // 0.164.0: his Enemy Skills follow his cards (only on presses).
+        super::abilities::sync();
     }
 }
 

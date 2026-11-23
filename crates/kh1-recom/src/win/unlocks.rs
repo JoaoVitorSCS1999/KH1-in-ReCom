@@ -77,7 +77,8 @@ pub unsafe extern "win64" fn first_obtained(id: u64) {
     // once. The ability sync does nothing unless KH1's state is live (Combat = KH1, Sora's story, a
     // save); otherwise the next KH1 read learns it from Re:CoM's discovery state.
     if let Some(s) = crate::enemy_skills::of_card(id) {
-        if !super::stats::riku_story() {
+        // 0.164.0: Riku's too (his story's own cards, his save's state).
+        if !super::stats::riku_story() || super::movement::riku_on() {
             let live = super::abilities::sync().is_some();
             note(|| format!("{} card {id:#x} obtained for the first time: Enemy Skill {} ({}){}", s.name, s.name, s.effect, if live { "" } else { " (KH1's ability state not live: learned at the next KH1 read)" }));
         }

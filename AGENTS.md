@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 297 (fork branch Re-Re-Reverse/Rebirth): Riku's AP Up (his DP row), his Enemy Skills from his own cards, his Abilities page, version 0.164.0 (2026-11-23)
+
+Fork owner, 2026-11-23: Enemy Skills for Riku from "as cartas que o Riku ganha durante a play dele"; the DP row as his AP Up ("concordo").
+
+- **Re:CoM** (Checked (disasm + files)): Riku's level-up rows are HP, AP (`stats+0x10` + 1) and DP (`stats+0x14` + 2, cap 99, `0x14010F70F`), DP offered only once sleight 0x6D is learned and DP < 99 (`0x14010F2D2`). His new game is `CardInit` record 15: level 1, HP 80, DP 8, AP 10. Our DP is the owner's tables (cap 30): Re:CoM's DP stat had no use at KH1.
+- **Level-up**: at Combat = KH1 in his story the DP row is "AP Up / Max AP +2", always offered; Re:CoM's +2 DP kept only where Re:CoM offers its row. Old saves: (DP − 8) ÷ 2 past picks (at most level − 1) count as AP Ups, once.
+- **Abilities**: his state in his story's save (`abilities::sync` on `mp::live`), only the Enemy Skills (card sources; no KH1 level grants, Re:CoM movement or sleight abilities); learned from his cards' first pickup / Re:CoM's discovery state, with the learned notices at his field camp gate.
+- **Camp**: his list is Items, Abilities, Customize, World Map .. D Report, Costumes, Settings (10, step 21.3; Assumption: reads well); the Abilities page is Sora's, owner "Riku".
+- Not yet: the skills' effects on Riku (next).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 296 (fork branch Re-Re-Reverse/Rebirth): KH1's items for Riku (drops, Items list, use, camp Items page with his Keyblade slot, Moogle shop), version 0.163.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "inclusive as features implementadas para o Sora até então, - Fully working MP system, item drops, and moogle shops …"; "vi agora que com o Sora já tem a feature de escolher a keyblade, para não ficar redundante aplique a mesma forma de implementação para o Riku e pode iniciar o fluxo proposto"; item motion: "Uma animação dele".

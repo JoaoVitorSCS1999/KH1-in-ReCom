@@ -888,3 +888,21 @@ dele".
     `riku_keyblade`, as the Costumes row did.
 - Not known: whether Riku's story has Moogle shop rooms (Assumption: no; the shop code is ready if
   it has).
+
+## 0.164.0: Riku's AP Up, Enemy Skills, Abilities page
+
+- **Riku's level-up** (Checked (disasm `0x14010F1ED..0x14010F330`, `0x14010F696..0x14010F726`)):
+  - HP row: max HP + 15.
+  - AP row (`+0x23C`): `stats+0x10` + 1. Offered while (level + 1) / 3 > AP − 10 and AP < 30.
+  - DP row (`+0x240`): `stats+0x14` + 2, cap 99. Offered only with sleight 0x6D learned and DP < 99.
+- **New game** (Checked (files: `SYS/0001/SY0001.BIN` entry `CardInit.BIN`, records at
+  `0x50 + 2 × index`)): record 15 = level 1, HP 80, DP 8, AP 10; `0x14023A250`'s non-Sora branch
+  writes DP / AP.
+- **Ours**:
+  - His DP row becomes AP Up (+2 max AP), always offered. Re:CoM's DP add is undone where it
+    wouldn't offer the row.
+  - Old saves: `abilities::ap_ups_from_dp`.
+  - The ability state in his save keeps only `CARD_BITS`.
+  - The list is 10 entries (`top::RIKU_KH1_ORDER`, Abilities at camp index 9, `MAX_EXTRA` 3).
+- Assumptions: his floors' decks load no `CardInit` record (else DP would rise without picks);
+  Re:CoM's "ability" learned wording appears in his story too (its test reads Sora's story).

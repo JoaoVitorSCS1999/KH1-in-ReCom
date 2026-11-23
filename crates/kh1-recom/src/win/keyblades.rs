@@ -373,8 +373,8 @@ static LIST_CAMP: AtomicUsize = AtomicUsize::new(0);
 /// Its list (`top::Layout`, as [`layout_code`]), decided at each build of the top list.
 static LIST: AtomicU8 = AtomicU8::new(0);
 /// Our two entry buttons (`C2DSeqCtrl`, camp indices 7 / 8) and their labels (`C2DFnt`).
-static EXTRA_BTN: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
-static EXTRA_FNT: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
+static EXTRA_BTN: [AtomicUsize; top::MAX_EXTRA] = [AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0)];
+static EXTRA_FNT: [AtomicUsize; top::MAX_EXTRA] = [AtomicUsize::new(0), AtomicUsize::new(0), AtomicUsize::new(0)];
 /// Re:CoM's button 0 carries our "Items" label (Re:CoM's relabels replace it).
 static ITEMS_ON: AtomicBool = AtomicBool::new(false);
 /// Re:CoM's 7 buttons stand at the KH1 list's places.
@@ -530,7 +530,7 @@ unsafe fn create_extra(camp: *mut u8, l: top::Layout, k: usize) {
 /// releasing it, `0x140246E90`). Assumption (inferred, not traced; the 8th entry did the same
 /// since 0.8.0 without a report): the same holds for ours.
 unsafe fn delete_extras() {
-    for k in 0..2 {
+    for k in 0..top::MAX_EXTRA {
         let btn = EXTRA_BTN[k].swap(0, Ordering::Relaxed) as *mut u8;
         EXTRA_FNT[k].store(0, Ordering::Relaxed);
         delete(btn);
@@ -590,7 +590,7 @@ unsafe fn relabel_one(camp: *mut u8, i: usize, text: *const u8) {
 unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
     if LIST_CAMP.load(Ordering::Relaxed) != camp as usize {
         // A camp we never saw torn down: forget its buttons (not ours to delete).
-        for k in 0..2 {
+        for k in 0..top::MAX_EXTRA {
             EXTRA_BTN[k].store(0, Ordering::Relaxed);
             EXTRA_FNT[k].store(0, Ordering::Relaxed);
         }
@@ -607,7 +607,7 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
         // The KH1 list (Sora) or Riku's (fork: Customize in entry 0's place, Costumes before
         // Settings): our buttons made (or shown again), entry 0 relabelled, every button placed.
         let n = top::extras(l).len();
-        if prev_list != layout_code(l) || (0..2).any(|k| (k >= n) != EXTRA_BTN[k].load(Ordering::Relaxed).eq(&0)) {
+        if prev_list != layout_code(l) || (0..top::MAX_EXTRA).any(|k| (k >= n) != EXTRA_BTN[k].load(Ordering::Relaxed).eq(&0)) {
             // Another reordered list's buttons (or a missing one): made again for this one.
             delete_extras();
             ITEMS_ON.store(false, Ordering::Relaxed);
@@ -658,7 +658,7 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
             top::Layout::Recom => "camp: Re:CoM's list, untouched (Riku's story or the map-only camp)",
             top::Layout::RikuDecks => "camp: Riku's list at Combat = Re:CoM: Re:CoM's Review Decks .. D Report, Costumes, Settings (8 entries); Settings opens Game Settings, Combat, Movement, Camera",
             top::Layout::RikuPlain => "camp: Riku's list (riku_kh1_movement off): Re:CoM's seven and Costumes before Settings (8 entries); Settings is Re:CoM's page",
-            top::Layout::Riku => "camp: Riku's list at Combat = KH1: Items in Review Decks' place, Customize, Re:CoM's World Map .. D Report, Costumes, Settings (9 entries, y 88 + 24 each); Settings opens Game Settings, Combat, Movement, Camera",
+            top::Layout::Riku => "camp: Riku's list at Combat = KH1: Items in Review Decks' place, Abilities, Customize, Re:CoM's World Map .. D Report, Costumes, Settings (10 entries, y 88 + 21.3 each); Settings opens Game Settings, Combat, Movement, Camera",
         });
     }
 }
@@ -681,7 +681,7 @@ pub unsafe extern "win64" fn entry_build(camp: *mut u8, mode: i32, level: u64) -
     match mode {
         0 => apply_layout(camp, layout_now(camp), relabels),
         1 | 2 if top::order(layout_of(camp)).is_some() => {
-            for k in 0..2 {
+            for k in 0..top::MAX_EXTRA {
                 anim(EXTRA_BTN[k].load(Ordering::Relaxed) as *mut u8, set_of(camp), if mode == 1 { 5 } else { 6 });
             }
         }
@@ -853,7 +853,7 @@ unsafe fn confirm_page(camp: *mut u8, idx: i32, row: sub::Row) {
     for i in 0..n {
         anim(at(camp, camp::BUTTONS + 8 * i as usize), set, 6);
     }
-    for k in 0..2 {
+    for k in 0..top::MAX_EXTRA {
         anim(EXTRA_BTN[k].load(Ordering::Relaxed) as *mut u8, set, 6);
     }
     header_title(camp, 0, row.label());
@@ -935,7 +935,7 @@ pub unsafe extern "win64" fn camp_update(camp: *mut u8) {
                 // Re:CoM confirmed one of its entries: step 5 (every button animation 6) for ours.
                 CONFIRMED.store(-1, Ordering::Relaxed);
                 if kh1 {
-                    for k in 0..2 {
+                    for k in 0..top::MAX_EXTRA {
                         anim(EXTRA_BTN[k].load(Ordering::Relaxed) as *mut u8, set_of(camp), 6);
                     }
                 }
@@ -1517,6 +1517,7 @@ impl Page {
             }
             Content::Items { rows, .. } => rows.get(idx).map_or_else(|| ip::text::NONE.to_vec(), |r| item_label(r.label)),
             Content::Abilities { rows, .. } => match rows.get(idx).map(|r| r.label) {
+                Some(ap::Label::Owner(ap::Owner::Sora)) if riku_page() => b"Riku\0".to_vec(),
                 Some(ap::Label::Owner(ap::Owner::Sora)) => ap::text::SORA.to_vec(),
                 Some(ap::Label::Owner(ap::Owner::Shared)) => ap::text::SHARED.to_vec(),
                 Some(ap::Label::Owner(ap::Owner::EnemySkills)) => ap::text::ENEMY_SKILLS.to_vec(),
