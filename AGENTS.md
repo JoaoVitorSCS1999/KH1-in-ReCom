@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 309 (fork branch Re-Re-Reverse/Rebirth): KH1's Auto Lock as its soft target; Re:CoM's enemy pace one attacker at a time again, version 0.175.0 (2026-11-23)
+
+Fork owner, 2026-11-23, passing on two testers' reports, verbatim: "Sora doesn't seem to automatically lock on to an enemy when doing a combo, leading to a lot of missed swings…"; "I switched to the kh1 enemy ai where they all attack at once… I moved back to Re:Com's enemy ai but they were still attacking all at once"; and "o teu Auto Lock está diferente da implementação do KH1 lá o auto lock funciona sem lock on ao chegar proximo do oponente os ataques são direcionados a ele".
+
+- **Auto Lock** (`win::lock_on::soft_target`, `win::attack::attack_target`): with no lock, the KH1 swing / spell target is the nearest lockable enemy by KH1's pick (distance less its lock radius) within 6 m (Assumption: KH1's reach not read), when `auto_lock` is on, Sora or Riku. 0.173.0's arming of Re:CoM's lock is removed (KH1's Auto Lock is lock state 2, a soft target; Checked (KH1 exe: `0x14029365F`)).
+- **Enemy pace = Re:CoM** (`battle::wanted`, `battle::one_at_a_time`): Re:CoM's three serialisers (P2 think gate, P3 one grant a frame, P4 crowd pace) stay Re:CoM's, and the cardless play (P1) refuses an ordinary enemy while another is attacking (Re:CoM's CBTL enemy slot's rule without cards). Bosses as before. Enemy pace = KH1: all ours as before. Since M6 (0.12.0) P2 / P3 were ours whatever the pace.
+- Not changed: KH1-AI enemies (their own scripts) attack as KH1's do.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 308 (fork branch Re-Re-Reverse/Rebirth): Riku's Keyblade change shows his weapon's own appear effect, version 0.174.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "no Riku na transição quando troca de keyblade deve ser o mesmo efeito quando ele está sem e vc aperta o botão de ataque e ela aparece na mão".

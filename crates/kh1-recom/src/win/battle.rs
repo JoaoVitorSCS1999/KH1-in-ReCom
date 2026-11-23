@@ -185,6 +185,9 @@ unsafe fn state_of(e: usize) -> Option<usize> {
     crate::guard::state_index(e, rd(e + enemy::STATE))
 }
 
+/// This battle's `enemy_pace = kh1` (each enemy attacks as if alone).
+static PACE_KH1: AtomicBool = AtomicBool::new(false);
+
 unsafe fn attacking_now() -> usize {
     enemies(256).into_iter().filter(|&e| b::attacking(rd(e + enemy::FLAGS), state_of(e))).count()
 }
@@ -222,6 +225,11 @@ pub unsafe extern "win64" fn card_play(e: usize) -> u64 {
     };
     match b::decide(&p) {
         Path::Cardless { flags, state } => {
+            // 0.175.0: Re:CoM's pace without cards: one ordinary enemy attacking at a time.
+            if b::one_at_a_time(PACE_KH1.load(Ordering::Relaxed), boss::is_boss_class(&class_name(e)), attacking_now().saturating_sub(usize::from(b::attacking(p.flags, state_of(e))))) {
+                capped(&REFUSAL_LINES, b::REFUSAL_LOG_LINES, || format!("Re:CoM's pace: {} id={} waits (another enemy is attacking)", class_name(e), rd::<u32>(e + enemy::ID)));
+                return 0;
+            }
             wr(e + enemy::FLAGS, flags);
             wr(e + enemy::NEXT_STATE, b::state_address(e, state));
             class_once(e, 0, |_| "attacks without a card (P1)".into());
@@ -576,6 +584,7 @@ pub unsafe extern "win64" fn manager_ctor(this: usize, a: usize, c: usize, d: us
     // Riku with `riku_kh1_movement` (`crate::riku`): his battles are KH1 battles too (cardless enemies).
     let kh1 = mv::kh1_on() && (!super::stats::riku_story() || mv::riku_on());
     let pace_kh1 = super::settings().enemy_pace == crate::settings::Mode::Kh1;
+    PACE_KH1.store(pace_kh1, Ordering::Relaxed);
     let want = b::wanted(kh1, pace_kh1);
     let switched = switch_patches(M6_PATCHES, &want);
     // Stage 3, P5: "Sora is attacking" for the bosses, on its own (a foreign getter leaves P2-P4).

@@ -37,11 +37,6 @@ static LISTED: AtomicBool = AtomicBool::new(false);
 static STEP_LOG: AtomicUsize = AtomicUsize::new(24);
 /// 0.172.0: the target our L2 step chose this lock-on call (0: none).
 static STEPPED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-/// 0.173.0 (KH1 FM's Auto Lock): this lock-on call locks Re:CoM's pick without R1 (the player).
-static AUTO_LOCK: AtomicUsize = AtomicUsize::new(0);
-/// Last call's lock (the player locked), and whether the player's own input ended it.
-static WAS_LOCKED: AtomicUsize = AtomicUsize::new(0);
-static PLAYER_UNLOCK: AtomicUsize = AtomicUsize::new(0);
 /// The player's locked handle (`+0x850`, the switch's argument).
 const LOCK_HANDLE: usize = 0x850;
 
@@ -88,18 +83,12 @@ pub unsafe extern "win64" fn lock_on(pl: usize) -> u64 {
     // an attack with no lock locks its target (`0x14029365F` → `0x1402B08A0(…, 4)`), and a lock
     // whose target is gone (not the player's unlock) moves to the next one (`0x1402B1348` →
     // `0x1402B0A00`). Here: Re:CoM's own lock of its pick (`+0x84C`) without R1, on those frames.
-    let locked_before = locked_target(pl).is_some();
-    let attack = rd::<u32>(pl + mv::p::REQUEST) & 4 != 0;
-    let lost = WAS_LOCKED.load(Ordering::Relaxed) == pl && !locked_before && PLAYER_UNLOCK.load(Ordering::Relaxed) != pl;
-    let auto = super::settings().auto_lock && !locked_before && (attack || lost);
-    AUTO_LOCK.store(if auto { pl } else { 0 }, Ordering::Relaxed);
-    PLAYER_UNLOCK.store(0, Ordering::Relaxed);
+    // 0.175.0: KH1's Auto Lock is its soft target (no lock: `soft_target`), not a lock of Re:CoM's
+    // cursor (0.173.0's arming removed).
     let r = o(pl);
-    AUTO_LOCK.store(0, Ordering::Relaxed);
     KH1_RULES.store(0, Ordering::Release);
     stepped(pl);
     after(pl);
-    WAS_LOCKED.store(if locked_target(pl).is_some() { pl } else { 0 }, Ordering::Relaxed);
     r
 }
 
@@ -169,6 +158,28 @@ unsafe fn stepped(pl: usize) {
     }
 }
 
+/// KH1's soft target's reach (metres). Assumption: KH1's own isn't read (its Auto Lock picks
+/// `0x1402B0A00` from its lock list); 6 m keeps swings aimed at what is near.
+const SOFT_REACH: f32 = 6.0;
+
+/// 0.175.0 (fork owner, 2026-11-23: "o teu Auto Lock está diferente da implementação do KH1 lá o
+/// auto lock funciona sem lock on ao chegar proximo do oponente os ataques são direcionados a ele";
+/// a tester's report: "Sora doesn't seem to automatically lock on to an enemy when doing a combo"):
+/// KH1's soft target (Auto Lock On, `*(0x142E1F4D8)+0` = 0; lock state 2): with no lock, the
+/// nearest lockable enemy by KH1's pick (`lo::nearest`: distance less its lock radius) within
+/// [`SOFT_REACH`], for the swing's aim and lunge. Off: none. Any story, Combat = KH1.
+pub(super) unsafe fn soft_target(pl: usize) -> Option<u32> {
+    if !super::settings().auto_lock || !mv::kh1_fighter(pl) {
+        return None;
+    }
+    let all = targets(pl);
+    if all.is_empty() {
+        return None;
+    }
+    let origin = player_point();
+    lo::nearest(origin, &all, SOFT_REACH.min(lo::take_reach(battle_room(pl))), &[])
+}
+
 /// The point Re:CoM's cursor measures from (`0x1401F0AB0(out, 0)`).
 unsafe fn player_point() -> [f32; 3] {
     let mut v = V4::default();
@@ -226,8 +237,6 @@ fn rules_for(pad: usize) -> bool {
 /// arm its lock on nothing, or play its lock sound and drop a target past its reach).
 pub unsafe extern "win64" fn lock_pressed(pad: usize) -> u32 {
     let r = func::<PadFn>(recom::PRESSED)(pad);
-    let auto = rules_for(pad) && AUTO_LOCK.load(Ordering::Relaxed) == pad - recom::PAD;
-    let r = if auto && r == 0 { 1 } else { r };
     if r == 0 || !rules_for(pad) {
         return r;
     }
@@ -250,7 +259,6 @@ pub unsafe extern "win64" fn lock_released(pad: usize) -> u32 {
     if r != 0 {
         let pl = pad - recom::PAD;
         wr(pl + recom::REQUEST, rd::<u32>(pl + recom::REQUEST) | recom::SECOND_PRESS);
-        PLAYER_UNLOCK.store(pl, Ordering::Relaxed);
     }
     r
 }

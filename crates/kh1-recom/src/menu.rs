@@ -246,7 +246,7 @@ impl Item {
             Item::Sounds => b"KH1: KH1's swing and finisher sounds. KH1 only.\0",
             Item::Camera => b"Re:CoM's camera, KH1's, or KH2's (its distances x 0.89).\0",
             Item::AutoCamera => b"On: the KH1 / KH2 camera swings behind Sora as he runs.\0",
-            Item::AutoLock => b"Automatically lock on to the nearest target. KH1 only.\0",
+            Item::AutoLock => b"On: swings aim at the nearest enemy without a lock. KH1 only.\0",
             Item::TargetLock => b"Manual: the lock lasts while R1 is held. KH1 only.\0",
             Item::Costume => b"Dark Mode: Dark Riku's look. Unlocked by Riku's first Dark Mode.\0",
             Item::Blade => b"Keyblade of Heart: Riku-Ansem's. Unlocked by Riku's first Dark Mode.\0",

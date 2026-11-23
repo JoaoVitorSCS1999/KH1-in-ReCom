@@ -278,7 +278,11 @@ static TICK_LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 /// which KH1's picker subtracts (`0x1402A7320`); 0 for enemies without a twin. Assumption: Re:CoM's
 /// aim point stands for KH1's lock point.
 pub(super) unsafe fn attack_target(pl: usize) -> Option<TargetPart> {
-    let h: i32 = rd(pl + p::LOCK_TARGET);
+    let mut h: i32 = rd(pl + p::LOCK_TARGET);
+    // 0.175.0: no lock: KH1's Auto Lock soft target (`super::lock_on::soft_target`).
+    if h <= 0 {
+        h = super::lock_on::soft_target(pl).map_or(0, |s| s as i32);
+    }
     if h <= 0 {
         return None;
     }

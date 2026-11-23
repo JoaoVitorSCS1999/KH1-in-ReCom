@@ -427,8 +427,8 @@ camera = recom
 ;   off: KH1's / KH2's Manual camera (the stick and R3 only).
 auto_camera = on
 ;
-; auto_lock = on | off (KH1 FM's Auto Lock; Combat = KH1 on a controller): on = attacking with no
-;   lock locks onto its target, and a lock whose target is gone moves to the next one.
+; auto_lock = on | off (KH1 FM's Auto Lock; Combat = KH1): on = with no lock, swings and spells aim
+;   at the nearest enemy within 6 m (KH1's soft target); off = only the locked target.
 auto_lock = on
 ;
 ; target_lock = auto | manual (KH1 FM's Target Lock; Combat = KH1 on a controller): auto = R1
