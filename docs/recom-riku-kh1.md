@@ -991,3 +991,10 @@ dele".
   Riku's rest one.
 - **Game**: `riku_skin::Look { costume, blade }`; `ansem_unlocked` = the debug key or card 0x74 had
   (his defeat).
+
+## 0.176.1: Ansem's real model
+
+- `EN0118` (`b_ex110`) is **Axel** (the owner's screenshot). Ansem, Seeker of Darkness is `ENEMY/0122/EN0122`:
+  - textures `ex_1630_01..05`, KH1's `xa_ex_1630`;
+  - skeleton `e122_sk`, 157 bones.
+- His bones under other names (`lf_*` / `rf_*` legs, `chest2`, `neck`) are renamed to Riku's (`ANSEM_RENAMES`). The rest is as 0.176.0.

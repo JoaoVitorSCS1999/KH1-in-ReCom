@@ -11,11 +11,23 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 311 (fork branch Re-Re-Reverse/Rebirth): the Ansem costume is Ansem's model (0.176.0 took Axel's), version 0.176.1 (2026-11-23)
+
+Fork owner, 2026-11-23 (screenshot: Riku as Axel), verbatim: "você colocou a skin do Axel cara!, é a do Ansem Seeker of Darkness!".
+
+- **Cause**: 0.176.0 picked `ENEMY/0118` (`b_ex110`) by its names, never looking at its textures: it is Axel. Ansem, Seeker of Darkness is `ENEMY/0122` (textures `ex_1630_0x` = KH1's `xa_ex_1630`; silver hair, dark skin, orange eyes in `ex_1630_01`), Checked (files: the texture rendered).
+- **Change** (`riku_skin::{ANSEM_ENEMY, ANSEM_RENAMES, ansem_mdl}`): `EN0122`, skeleton `e122_sk` (157 bones); its bones renamed to Riku's where the role is the same (`e122_sk` → `ex_1010_sk`, `lf_*` / `rf_*` → `l_*` / `r_*` legs, `chest2` → `chest1`, `neck` → `neck1`), so Riku's code finds them and the retarget maps them. Riku's `wep0` and weapon added as in 0.176.0. Groups unchanged (181 / 191 / 221 / 231). **Re-run** (automatic).
+- Test: the idle's feet within 2.4 cm of Riku's (relative to rest), the blade root 11 cm from the hand as Riku's.
+- Assumptions: Ansem's hand rest frame close to Riku's; his coat tails and hair at rest; his `chest2` stands in for Riku's `chest1`.
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 310 (fork branch Re-Re-Reverse/Rebirth): Riku's Ansem costume (Ansem, Seeker of Darkness's model with Riku's own moves), version 0.176.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "implementa a skin do Ansem para o Riku".
 
-- **Re:CoM** (Checked (files)): Ansem is `ENEMY/0118/EN0118` (textures `b_ex110_0x`, skeleton `b_ex110_sk`, 138 bones, 52 named as Riku's), read whole by our MDL reader (2 parts); no `wep0` (his `WeaponR` in the right hand). His card is 0x74.
+- **Re:CoM** (Checked (files); wrong, see Stage 311: `EN0118` is Axel): Ansem taken as `ENEMY/0118/EN0118` (textures `b_ex110_0x`, skeleton `b_ex110_sk`, 138 bones, 52 named as Riku's), read whole by our MDL reader (2 parts); no `wep0` (his `WeaponR` in the right hand). His card is 0x74.
 - **Asset step** (`riku_skin::{ansem_mdl, build_ansem}`): his model + a `wep0` under his `r_hand` at Riku's rest `wep0` relative to Riku's `r_hand`, Riku's weapon parts (PL0101 / PL0111 parts 0 / 1) moved onto it, parts ordered as Riku's, bone 1 renamed `ex_1010_sk`; Riku's clips (with his KH1 guard clips) retargeted by name, events remapped; Ansem's RTM + Riku's `weapon_0x` texture (or the Keyblade of Heart's), Ansem's TXA. Groups 181 / 191 (Soul Eater), 221 / 231 (Keyblade of Heart). **Re-run** (automatic; new outputs). Test: the idle's feet within 2.2 cm of Riku's (relative to rest), the blade root 11 cm from the hand as Riku's.
 - **Game**: costumes are now 0 Default Attire / 1 Dark Mode / 2 Ansem (`Look::costume`; manifest rows carry `costume`, older rows read `dark`); ini `riku_costume = default | dark | ansem` (the old `riku_dark_skin = on` reads as Dark Mode); Costumes' Costume row cycles the three, skipping a locked one. Ansem unlocked by his card (Re:CoM's obtained-at-least-once, given at his defeat) or `riku_ansem_unlocked` (debug, on in the owner's ini). A change to or from Ansem plays the crouch and the way-back effect (Dark Mode keeps its flip).
 - Assumptions: Ansem's hand rest frame close to Riku's (the blade's angle); his robe / hood / chains / hair held at rest.

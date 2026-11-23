@@ -505,10 +505,13 @@ fn rename_bone(mdl: &[u8], from: &[u8]) -> Result<Vec<u8>> {
 // The Ansem costume (fork 0.176.0; fork owner, 2026-11-23: "implementa a skin do Ansem para o
 // Riku").
 //
-// - Re:CoM (Checked (files)): Ansem, Seeker of Darkness is `ENEMY/0118/EN0118` (textures
-//   `b_ex110_0x`, skeleton `b_ex110_sk`, 138 bones, 52 of them named as Riku's: the body; his robe,
-//   hood, chains and hair are his own). His model reads whole (parts 0 textured, 1 untextured).
-//   He holds no weapon: no `wep0` (his `WeaponR` is in the right hand).
+// - Re:CoM (Checked (files + the owner's screenshot, 0.176.1)): Ansem, Seeker of Darkness is
+//   `ENEMY/0122/EN0122` (textures `ex_1630_0x`, KH1's `xa_ex_1630`, voices `an00`; skeleton `e122_sk`,
+//   157 bones). 0.176.0 took `EN0118` (`b_ex110`), which is Axel. His model reads whole (parts 0
+//   textured, 1 untextured). His legs are `lf_*` / `rf_*`, his chest `chest2` (no `chest1`), his
+//   neck `neck`: renamed to Riku's (`ANSEM_RENAMES`), as Riku's code looks bones up by name
+//   (`chest1`, `l_toes`, `r_toes`, `head`) and the retarget maps by name. He holds no weapon: no
+//   `wep0`.
 // - The skin: his model with a `wep0` added under his `r_hand` at Riku's rest `wep0` relative to
 //   Riku's `r_hand`, and Riku's own weapon parts (the Soul Eater on `wep0`, PL0101's parts 0 / 1)
 //   moved onto it; bone 1 renamed `ex_1010_sk` (Riku's code looks his bones up by name); Riku's
@@ -516,8 +519,23 @@ fn rename_bone(mdl: &[u8], from: &[u8]) -> Result<Vec<u8>> {
 //   world rotation, its offset in the hand Riku's); his events remapped; his RTM with Riku's weapon
 //   texture added. Assumption: the hands' rest frames are close enough for the blade's angle.
 
-/// Ansem's model (`ENEMY/0118`).
-pub const ANSEM_ENEMY: u16 = 118;
+/// Ansem's model (`ENEMY/0122`).
+pub const ANSEM_ENEMY: u16 = 122;
+/// Ansem's bones renamed to Riku's (the same roles).
+pub const ANSEM_RENAMES: [(&str, &str); 12] = [
+    ("e122_sk", "ex_1010_sk"),
+    ("lf_femur", "l_femur"),
+    ("lf_tibia", "l_tibia"),
+    ("lf_foot", "l_foot"),
+    ("lf_toes", "l_toes"),
+    ("rf_femur", "r_femur"),
+    ("rf_tibia", "r_tibia"),
+    ("rf_foot", "r_foot"),
+    ("rf_toes", "r_toes"),
+    ("chest2", "chest1"),
+    ("neck", "neck1"),
+    ("waist", "waist"),
+];
 /// (Riku's group, the Ansem group with the Soul Eater, the Ansem group with the Keyblade of Heart).
 pub const ANSEM_GROUPS: [(u16, u16, u16); 2] = [(101, 181, 221), (111, 191, 231)];
 
@@ -551,6 +569,15 @@ pub fn ansem_mdl(riku_mdl: &[u8], ansem: &[u8]) -> Result<Vec<u8>> {
         return Err(crate::Error::Format(format!("Ansem's model: {} parts, not 2", aparts.len())));
     }
     let mut a: Vec<MdlPart> = aparts.iter().map(|b| MdlPart::parse_bytes(b)).collect::<Result<_>>()?;
+    for p in a.iter_mut() {
+        for b in p.bones.iter_mut() {
+            let n = crate::ann::cstr(&b.name);
+            if let Some(&(_, to)) = ANSEM_RENAMES.iter().find(|r| r.0 == n) {
+                b.name = [0; 16];
+                b.name[..to.len()].copy_from_slice(to.as_bytes());
+            }
+        }
+    }
     let hand = a[0].bones.iter().position(|b| crate::ann::cstr(&b.name) == "r_hand").ok_or_else(|| crate::Error::Format("Ansem: no r_hand".into()))?;
     let nb = a[0].bones.len();
     let mut name = [0u8; 16];
@@ -581,8 +608,9 @@ pub fn ansem_mdl(riku_mdl: &[u8], ansem: &[u8]) -> Result<Vec<u8>> {
     }
     let plain_first = a[0].list_a.first().is_some_and(|k| k.fmt == FMT_PLAIN);
     let (ap, at) = if plain_first { (0, 1) } else { (1, 0) };
+    // The weapon parts carry Ansem's bone list as renamed.
     let parts = vec![w[0].clone(), w[1].clone(), a[ap].write_bytes()?, a[at].write_bytes()?];
-    rename_bone(&join_parts(&parts), b"b_ex110_sk\0")
+    Ok(join_parts(&parts))
 }
 
 /// One Ansem group: Ansem's model with Riku's weapon (or, with `blade`, the Keyblade of Heart),
