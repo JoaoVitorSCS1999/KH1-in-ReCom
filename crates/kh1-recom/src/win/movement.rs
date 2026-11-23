@@ -417,7 +417,15 @@ unsafe fn kh1_mover(pl: usize) -> bool {
 /// The KH1 abilities of this player's frame: Sora's, or Riku's ([`crate::riku::abilities`]).
 unsafe fn player_abilities(pl: usize) -> kh1_core::Abilities {
     if is_main_riku(pl) {
-        crate::riku::abilities(rd(pl + p::ABILITY))
+        // 0.164.0: his equipped Enemy Skills' combo effects (Soldier's Combo Plus, Bandit's Combo
+        // Finish), as Sora's.
+        let mut a = crate::riku::abilities(rd(pl + p::ABILITY));
+        if let Some(e) = super::abilities::equipped_live() {
+            let c = crate::abilities::to_core(e & crate::abilities::CARD_BITS);
+            a.combo_plus = c.combo_plus;
+            a.combo_finish = c.combo_finish;
+        }
+        a
     } else {
         abilities()
     }
@@ -885,15 +893,22 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     if is_main_riku(pl) {
         // Riku (`crate::riku`): KH1's movement and KH1's Attack (the same picker and rows as
         // Sora's, on his own swing clips: his action table's rows 0x30..). His roll is Re:CoM's own
-        // (his roll exe `0x140212350`); no Enemy Skills, menus, magic, items or specials.
+        // (his roll exe `0x140212350`); no magic or specials. 0.164.0: his items and Enemy Skills.
+        super::enemy_skills::kh1_frame(pl);
         slot.sora.abilities = player_abilities(pl);
-        slot.sora.params.gravity = kh1_core::params::GRAVITY;
+        // Wight Knight's Float (Enemy Skills): KH1's gravity × 0.75, as Sora's.
+        slot.sora.params.gravity = kh1_core::params::GRAVITY * super::enemy_skills::gravity_factor();
         slot.sora.recom_roll = true;
         slot.sora.speeds = speeds();
-        let input = trace::frame_input(&read_pad(pl));
+        let mut input = trace::frame_input(&read_pad(pl));
+        // 0.164.0: an item from his command menu's Items list this frame (0.163.0 never passed it).
+        input.item = super::items::take_command();
         let mut host = RecomHost::new(pl);
         slot.last = slot.sora.frame(&mut host, &input, fresh);
         slot.sync = if slot.last.handed_to_recom() { None } else { Some(read_sync(pl)) };
+        if !slot.last.items.is_empty() {
+            super::items::on_events(&slot.last.items);
+        }
         // 0.152.0: his Guard's start and success move his DP (perfect / missed parries).
         super::dark_points::guard_events(pl, &slot.last.events);
         log_once_riku();

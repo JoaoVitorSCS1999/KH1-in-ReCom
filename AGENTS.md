@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 298 (fork branch Re-Re-Reverse/Rebirth): the Enemy Skills act on Riku; his items reach his KH1 frame, version 0.165.0 (2026-11-23)
+
+Fork owner, 2026-11-23: "concordo" (the plan's step 4: the skills' effects on Riku).
+
+- **Fix**: 0.163.0's item use never reached Riku's KH1 frame (his branch of `run_frame` read no item command): now it does, with the item events.
+- **Route 1** (`win::enemy_skills::live` / `refresh`, his frame's `kh1_frame`): Re:CoM's own player writes for his equipped skills; Wight Knight's Float on his gravity; Soldier's Combo Plus and Bandit's Combo Finish in his abilities.
+- **Per hit / swing / frame**: Second Chance, Jafar / Air Pirate's no-flinch (the damage check's `arrived` for `kh1_fighter`); Card Soldier's haste, Saïx's boost, the Berserk test at his swing's start; Air Soldier / Marluxia's frame step; the support rules on `mp::live`.
+- Already his (per battle, his save's skills): the compare stubs (Quick Recovery, Dash, Auto-Life, Invincible, Sleightblind), the deck skills' arming, the route-2 hit rewrite.
+- Not acting for Riku (no part of his): the spell / summon boosts (Red Nocturne, Blue Rhapsody, Yellow Opera, Green Requiem, Wizard, Crescendo), Luxord (Sora's blade clash), Marluxia's replay (Sora's Sleights list), Berserk's bonus on his hits (his hits are Re:CoM's weapon hits).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 297 (fork branch Re-Re-Reverse/Rebirth): Riku's AP Up (his DP row), his Enemy Skills from his own cards, his Abilities page, version 0.164.0 (2026-11-23)
 
 Fork owner, 2026-11-23: Enemy Skills for Riku from "as cartas que o Riku ganha durante a play dele"; the DP row as his AP Up ("concordo").

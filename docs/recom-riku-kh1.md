@@ -906,3 +906,20 @@ dele".
   - The list is 10 entries (`top::RIKU_KH1_ORDER`, Abilities at camp index 9, `MAX_EXTRA` 3).
 - Assumptions: his floors' decks load no `CardInit` record (else DP would rise without picks);
   Re:CoM's "ability" learned wording appears in his story too (its test reads Sora's story).
+
+## 0.165.0: the Enemy Skills on Riku
+
+- **Acting** (`kh1_fighter` / `mp::live` gates):
+  - route 1 (Re:CoM's player writes);
+  - Float;
+  - Combo Plus (Soldier) and Combo Finish (Bandit) in his core abilities (`movement::player_abilities`);
+  - Second Chance and the no-flinch skills in the damage check;
+  - haste / Saïx / Berserk's test at his swing start;
+  - the deck skills' frame;
+  - the per-battle stubs and rewrite (armed from his save's equipped set; the battle's KH1 flag
+    already covers him).
+- **Not acting**:
+  - skills of things he doesn't have: spells, summons, Sora's Sleights list, Sora's blade clash;
+  - Berserk's bonus on his hits (Re:CoM's weapon path, not KH1's damage).
+- **Fixed**: his KH1 frame took no item command (0.163.0): `input.item` and the item events in his
+  branch of `run_frame`.

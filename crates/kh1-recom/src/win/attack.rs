@@ -361,15 +361,13 @@ unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     func::<mv::MotionFn>(mv::MOTION_REQUEST)(pl, row[0] as i32, 0, s.root as u64, eet, ses, 0);
     if !riku {
         super::fx::swing_started(pl, s.request, row[0], eet, ses);
-        // Enemy Skills: Card Soldier's haste (Re:CoM's motion speed after the request, as its row
-        // pick), Saïx's bonus per combo (`super::enemy_skills`).
-        super::enemy_skills::swing_started(pl, s.counter);
     }
+    // Enemy Skills: Card Soldier's haste (Re:CoM's motion speed after the request, as its row
+    // pick), Saïx's bonus per combo (`super::enemy_skills`). 0.164.0: Riku's too.
+    super::enemy_skills::swing_started(pl, s.counter);
     wr(pl + field::CARD_7B4, 0i32);
-    if !riku {
-        // M12 step 3: KH1 tests Berserk when the swing's attack object is made (`0x1402B2DC0`).
-        super::kh1_support::swing_started(pl, s.kh1_row);
-    }
+    // M12 step 3: KH1 tests Berserk when the swing's attack object is made (`0x1402B2DC0`).
+    super::kh1_support::swing_started(pl, s.kh1_row);
     // Re:CoM's cardless AP (the attack stat): at Damage = KH1 the KH1 numbers replace it per hit
     // (`enemy_hit`); in the field it is Re:CoM's own field-swing AP.
     wr(pl + field::AP, rd::<i32>(pl + field::ATTACK_STAT));
@@ -423,6 +421,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     super::items::task_frame(pl);
     // 0.164.0: his "learned" notices (Enemy Skills) at Re:CoM's field camp gate, as Sora's.
     super::notices::frame(pl);
+    // Enemy Skills stage 5: Air Soldier's running charge, Marluxia's second play (one atomic load).
+    super::enemy_skills_deck::frame(pl);
     // A special command no KH1 frame took last frame is gone (M9 stage 9c.1).
     super::specials::new_frame();
     // Re:CoM's battle end, logged (two loads unless its win is pending; `crate::battle::end`).
@@ -1583,7 +1583,8 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     }
     // M12 step 3 (KH1's support abilities, `super::kh1_support`): only when a hit arrived (the
     // check's own gate `+0x41C & 0x200`), Sora's HP before the check.
-    let arrived = kh1 && rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0;
+    // 0.164.0: Riku's too (his Enemy Skills: Second Chance from Hook's card, Jafar / Air Pirate).
+    let arrived = fighter && rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0;
     let hp_before = if arrived { super::kh1_support::hp(pl) } else { 0 };
     if arrived {
         // M12 step 3: Second Chance's stub in Re:CoM's HP store, armed for this check.
