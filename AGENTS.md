@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 281 (fork branch Re-Re-Reverse/Rebirth): the in-place costume change sizes the transform node again, version 0.155.1 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "é bugou mesmo, mas no próprio jogo em teoria já existe uma transição... quando o personagem usa a transformação o próprio jogo recarrega a forma não seria possível utilar essa mesma transição?"
+
+- **Cause** (Checked (the owner's log + exe)): the entity's transform node is sized once (`0x14023EBE0` allocates only at count 0), and the motion controller takes its bone count from it. The log showed 102 kept for Dark Riku's 128 bones and 128 kept for Riku's 102: the T-pose and the garbled model.
+- **Fix**: before the rebuild, the node's array is released as the node's dtor does (`0x14023DE20`: deferred free `0x14028F800` through a deleter, vtable `0x140605B38`), so the bind allocates it at the new count. The weapon's node gets the same before its attach.
+- **The transformation** (Checked (exe)): a second, battle-only player (`CPlayerDRiku`) swapped in by the main player pointer. Nothing is reloaded, so it can't serve a field costume.
+- **HUD face**: diagnostic log of the face layer (layer count, set).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 280 (fork branch Re-Re-Reverse/Rebirth): the costume changed in place (no door), the HUD face follows it; Halloween Town confirmed, version 0.155.0 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "importante que quando essa skin estiver ativa na halloween town … essa skin fica com a variação da halloween town, além disso... seria possível trocar a skin sem ter que passar por uma porta?" (chose "Trocar no lugar"); "quando trocar a skin para a darkmode também deve alterar a foto no hud".

@@ -204,7 +204,41 @@ const CALLEE_BYTES: &[(u32, [u8; 8])] = &[
     (0x004A_D478, [0xE9, 0xF3, 0xFF, 0xFF, 0xFF, 0xCC, 0xCC, 0xCC]),
     (0x0028_94E0, [0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B]),
     (0x001F_7180, [0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C]),
+    (0x0028_F800, [0x40, 0x53, 0x48, 0x83, 0xEC, 0x50, 0x48, 0x8B]),
 ];
+/// The deferred array deleter's vtable (the node dtor's, `0x14023DEA1`). Checked (exe).
+const ARRAY_DELETER_VT: u64 = 0x1_4060_5B38;
+
+type DeferFn = unsafe extern "win64" fn(usize);
+
+/// A transform node's matrix array released as the node's dtor releases it (`0x14023DE20`: each
+/// element's `+0x9C` cleared, the array handed to a 0x20-byte deleter (vtable `0x140605B38`, flag
+/// 1) for Re:CoM's deferred free `0x14028F800`, the draw thread may still read it this frame),
+/// then pointer and count 0. The next bind (`0x140270030`) or attach (`0x1402ABD20`) allocates it
+/// again at the right size (`0x14023EBE0` allocates only at count 0, and never resizes: 0.155.0's
+/// bug, the node kept Riku's 102 for Dark Riku's 128 bones and the other way round).
+unsafe fn clear_node(n: usize) {
+    if n == 0 {
+        return;
+    }
+    let arr: usize = rd(n + 8);
+    if arr != 0 {
+        let count: u32 = rd(n + 0x10);
+        for i in 0..count as usize {
+            wr::<u32>(arr + i * 0xE0 + 0x9C, 0);
+        }
+        let d = func::<NewFn>(0x004A_CE54)(0x20);
+        if d != 0 {
+            wr::<usize>(d, va(super::base(), ARRAY_DELETER_VT));
+            wr::<usize>(d + 8, 0);
+            wr::<usize>(d + 0x10, arr);
+            wr::<u32>(d + 0x18, 1);
+            func::<DeferFn>(0x0028_F800)(d);
+        }
+    }
+    wr::<usize>(n + 8, 0);
+    wr::<u32>(n + 0x10, 0);
+}
 /// The step-effect name pointer the state init passes (`"asiato"`). Checked (exe).
 const ASIATO_PTR: u64 = 0x1_407C_5DB0;
 /// Riku's player fields (entity offsets) for his bones by name, in the state init's order.
@@ -346,6 +380,8 @@ unsafe fn rebuild(e: usize, g: u16) -> bool {
     let bone: i32 = rd(e + 0x3A0);
     if w != 0 && bone >= 0 {
         wr::<i32>(w + WEAPON_BONE, bone);
+        // Its node's one matrix still names the old array: made again by the attach.
+        clear_node(rd(w + 8));
         let m = func::<MtxFn>(0x002A_BB20)(e, bone as u32);
         func::<AttachFn>(0x002A_BD20)(w, 1, m);
     }
@@ -394,6 +430,7 @@ unsafe fn try_swap(b: usize) -> bool {
     }
     let node_before = node_count(e);
     release(e);
+    clear_node(rd(e + 8));
     let ok = rebuild(e, g);
     log(&format!(
         "riku skin: costume changed in place: group {now} -> {g} ({}); transform node {node_before} -> {} matrices; wep0 bone {}",
@@ -490,7 +527,13 @@ unsafe fn face(b: usize, e: usize) {
     let group = if hp > max * 25 / 100 { 3 } else { 0 };
     wr::<usize>(g + 0x88, want);
     let ok = super::d2::replace(ctrl, list, 4, want as *const u8, group, -rd::<f32>(g + 0xA0), 1);
-    log(&format!("riku skin: HUD face {} (group {group}{})", if on { "Dark Mode" } else { "Default Attire" }, if ok { "" } else { "; NOT made: left as it is" }));
+    log(&format!(
+        "riku skin: HUD face {} (layer 4 of {} on control {ctrl:#x}, set {:?} group {group}{})",
+        if on { "Dark Mode" } else { "Default Attire" },
+        super::d2::layers(ctrl),
+        std::ffi::CStr::from_ptr(want as *const std::ffi::c_char),
+        if ok { "" } else { "; NOT made: left as it is" }
+    ));
     if !ok {
         wr::<usize>(g + 0x88, now);
         FACE_FAILED.store(true, Ordering::Relaxed);
