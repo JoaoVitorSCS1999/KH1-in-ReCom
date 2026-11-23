@@ -11,6 +11,36 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 324 (fork branch Re-Re-Reverse/Rebirth): KH1's Auto Lock: the yellow ring's enemy is the attacks' target, KH1's pick, its hold and its menu rule, version 0.181.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "para ambos o anel amarelo não faz lock no oponente ainda igual faz no KH1". Then "no kh tem o anel amarelo e o azul, o azul é quando tu aperta RB e ele locka no oponente, o amarelo ele aparece no oponente usando a regra do jogo, e se vc tiver com o auto lock ativo, os teus ataques sempre serão na direção daquele oponente independente de onde tu esteja olhando, se o anel amarelo estiver ativo ele se comporta assim". The plan was approved with the menu rule ("Tudo, com o menu").
+
+- **KH1** (Checked (decomp + exe + files); the workspace's `knowledge/KH1/kh1-lock-on.md`, researched with the new `searcher` agent):
+  - **The command target.** The command run `0x140293480` makes the lock pair the command target whenever the lock state is not 0. So the soft target (state 2) aims a swing as a lock does: the ground and air pickers (`0x1402A6EE0` / `0x1402A6C70`) replace the stick with the direction to it, and the lunge rows follow from the gap.
+  - **The pick** `0x1402B0A00`: 3 m flat less the lock radius, ±3.5 m, score `((1 − cos) × 0.25 + 1) × gap + |dy| × 0.2`, plus a line of sight test.
+  - **The auto lock.** A command with flag 4 turns state 2 into the auto lock (state 4, `0x1402B08A0(…, 4)`). Its enemy holds until 90 of frame delta after the last such command, L2 / R2, or 15 m / 10 m (`0x1402B11B0`, `0x1402B13F0`).
+  - **The menu rule.** A soft target is picked only while the highlighted command (`0x1402931B0` → `0x142D539E8`) has flag 4 (`btltbl.bin` `+0xA58`).
+- **Mod before**: `attack::command_attack` aimed only with Re:CoM's lock (`locked`), so with the ring alone Sora swung along the stick. The swing took Re:CoM's pick `+0x84C` while the ring took the soft target, which could be another enemy. The pick was the nearest within 6 m, with no hold and no menu rule.
+- **Change**:
+  - Pure code:
+    - `lock_on::soft::{pick, holds, Held}`: KH1's pick, without the line of sight test (Assumption: no Re:CoM twin), and the hold.
+    - `command_menu::cmd::{TARGETED, targets}`: flag 4 of commands 0..0x7F from the owner's file. The sleights count as having it (Assumption).
+    - `Menu::highlighted_targets`: the Items, Summon and Party lists' rows have no flag.
+    - `trace::PadView::auto_target`: it makes `FrameInput::locked`.
+  - DLL:
+    - `win::attack::{take_target, target_of, part_of}`: Re:CoM's lock, else the soft target, else Re:CoM's pick (the picker's part only).
+    - `win::lock_on::{soft_target, hold, hold_tick, locked, facing}`: the hold, ticked in the lock-on wrapper with `+0x460`. It ends at 90 frames or on an L2 / R2 press (Assumption: a press), and R1's lock replaces it.
+    - `win::command_menu::highlighted_targets`.
+    - `win::movement::read_pad` and the magic / special commands take their target through `take_target`.
+  - The ring uses the same `soft_target`, so the ring and the swing are on one enemy.
+- **Not 1:1**:
+  - No line of sight test.
+  - The facing is the mover's yaw (`+0x54`).
+  - Assumption: KH1's delta is in 60 Hz frames (1.5 s).
+- **Checked**: tests (`kh1_soft_target_pick_and_hold`, `kh1_flag_4_commands`, `auto_target_aims_like_a_lock`), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 323 (fork branch Re-Re-Reverse/Rebirth): Riku lowers his guard as the defence ends, version 0.180.1 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "no Riku a janela de defesa não está com a mesma duração da animação"; then "a defesa acaba antes dele baixar a guada". Answering "(a) the animation follows the defence; (b) the defence follows the animation", they chose (a).

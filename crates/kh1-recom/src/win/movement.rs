@@ -447,6 +447,9 @@ pub unsafe fn read_pad(pl: usize) -> PadView {
         y = -y;
     }
     let req: u32 = rd(pl + p::REQUEST);
+    // 0.181.0: an Attack press takes its target (KH1's command target, and a soft target becomes
+    // the auto lock).
+    let (target, auto_target) = if req & 4 != 0 { super::attack::take_target(pl, crate::command_menu::cmd::ATTACK) } else { (None, false) };
     let jump_held: PadHeldFn = func(JUMP_HELD);
     let held: HeldFn = func(BUTTONS_HELD);
     PadView {
@@ -458,7 +461,8 @@ pub unsafe fn read_pad(pl: usize) -> PadView {
         square: Button { pressed: req & 2 != 0, held: enabled && held(0x80, 0) != 0 },
         confirm: Button { pressed: req & 4 != 0, held: false },
         lock: lock_target(pl),
-        target: if req & 4 != 0 { super::attack::attack_target(pl) } else { None },
+        target,
+        auto_target,
     }
 }
 
@@ -929,15 +933,19 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     let mut input = trace::frame_input(&read_pad(pl));
     // A magic command from the command menu this frame (M7 stage 7.4), aimed at Re:CoM's target.
     input.magic = super::magic::take_command();
-    if input.magic.is_some() && input.target.is_none() {
-        input.target = super::attack::attack_target(pl);
+    if let Some(m) = input.magic.filter(|_| input.target.is_none()) {
+        let (t, auto) = super::attack::take_target(pl, crate::command_menu::cmd::spell(m.spell, m.level));
+        input.target = t;
+        input.locked |= auto;
     }
     // An item from the command menu's Items list this frame (M8 stage 8a.1), on Sora.
     input.item = super::items::take_command();
     // A special from the command menu this frame (M9 stage 9c.1), aimed at Re:CoM's target.
     input.special = super::specials::take_command();
-    if input.special.is_some() && input.target.is_none() {
-        input.target = super::attack::attack_target(pl);
+    if let Some(c) = input.special.filter(|_| input.target.is_none()) {
+        let (t, auto) = super::attack::take_target(pl, c);
+        input.target = t;
+        input.locked |= auto;
     }
     let mut host = RecomHost::new(pl);
     slot.last = slot.sora.frame(&mut host, &input, fresh);
