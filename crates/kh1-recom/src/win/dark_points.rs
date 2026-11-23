@@ -384,8 +384,9 @@ pub unsafe fn guard_events(pl: usize, events: &[kh1_core::controller::Event]) {
     }
 }
 
-/// Riku's save block's spare byte gets [`DARK_SEEN`] (the first Dark Mode).
-unsafe fn mark_seen() {
+/// Riku's save block's spare byte gets [`DARK_SEEN`] (the first Dark Mode). Also from any frame
+/// of Dark Riku as the main player (`win::riku_skin::frame`), at either Combat setting.
+pub(super) unsafe fn mark_seen() {
     let save: usize = rd(va(base(), crate::keyblades::SAVE_PTR));
     if save == 0 {
         return;
@@ -398,8 +399,7 @@ unsafe fn mark_seen() {
     }
 }
 
-/// Riku has reached Dark Mode once (his save). For the Dark Form skin (next stage).
-#[allow(dead_code)]
+/// Riku has reached Dark Mode once (his save): the Dark Form costume's unlock (0.156.0).
 pub unsafe fn dark_seen() -> bool {
     let save: usize = rd(va(base(), crate::keyblades::SAVE_PTR));
     save != 0 && super::stats::riku_story() && rd::<u8>(save + crate::mp::BLOCK_FIRST + crate::mp::off::SPARE) & DARK_SEEN != 0

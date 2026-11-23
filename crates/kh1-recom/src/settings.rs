@@ -185,7 +185,8 @@ pub struct Settings {
     /// Riku's story stays Re:CoM's.
     pub riku_kh1_movement: bool,
     /// Fork (0.154.0): Riku shows Dark Riku's model (his Dark Form skin) with his own motions,
-    /// outside Dark Mode too (`crate::riku_skin`). Unlocked from the start while it is tested.
+    /// outside Dark Mode too (`crate::riku_skin`). 0.156.0: only once Riku has reached Dark Mode in
+    /// the save (else Default Attire); default off (Default Attire).
     pub riku_dark_skin: bool,
     /// Debug (M7, until stage 7.11 earns spells): Sora has all 7 spells at level 3.
     pub kh1_all_spells: bool,
@@ -331,7 +332,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_dark_skin: true, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_dark_skin: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
     }
 }
 
@@ -466,9 +467,10 @@ debug_attack = off
 ;   cards, Dark Mode and roll stay Re:CoM's. Off: Riku's story is Re:CoM's.
 riku_kh1_movement = off
 ;
-; riku_dark_skin = on | off (testing): Riku shows his Dark Form (Dark Riku's model) with his own
-;   moves, outside Dark Mode too. Needs the asset step's files (kh1-riku-skin.json); read at start.
-riku_dark_skin = on
+; riku_dark_skin = on | off: Riku's costume (camp menu > Costumes): on = Dark Mode (Dark Riku's
+;   look, Riku's own moves), off = Default Attire. Dark Mode only once Riku has reached Dark Mode
+;   in the save. Needs the asset step's files (kh1-riku-skin.json).
+riku_dark_skin = off
 ;
 ; kh1_all_spells = on | off (debug, until spells are earned in the game): Sora has all 7 KH1
 ;   spells at level 3 in the command menu's Magic list.

@@ -144,6 +144,8 @@ const OFF_ON: &[&[u8]] = &[b"Off\0", b"On\0"];
 const ROLL: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"Off\0"];
 const CAMERAS: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"KH2\0"];
 const COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Dark Mode\0"];
+/// The help line when Dark Mode is asked for before Riku has reached it (0.156.0).
+pub const COSTUME_LOCKED: &[u8] = b"Riku must reach Dark Mode once to wear this attire.\0";
 
 fn mode_index(m: Mode) -> usize {
     match m {
@@ -218,7 +220,7 @@ impl Item {
             Item::Sounds => b"KH1: KH1's swing and finisher sounds. KH1 only.\0",
             Item::Camera => b"Re:CoM's camera, KH1's, or KH2's (its distances x 0.89).\0",
             Item::AutoCamera => b"On: the KH1 / KH2 camera swings behind Sora as he runs.\0",
-            Item::Costume => b"Dark Mode: Dark Riku's look, Riku's own moves. From the next room.\0",
+            Item::Costume => b"Dark Mode: Dark Riku's look. Unlocked by Riku's first Dark Mode.\0",
         }
     }
 

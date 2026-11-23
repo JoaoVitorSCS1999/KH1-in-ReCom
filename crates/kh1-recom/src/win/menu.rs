@@ -189,6 +189,15 @@ impl SettingsPage {
                     Step::Change(right) => {
                         let it = items[self.cursor.min(items.len() - 1)];
                         let v = menu::cycle(it.value(&super::settings()), it.options().len(), right);
+                        // 0.156.0: the Dark Mode costume only once Riku has reached Dark Mode.
+                        if it == menu::Item::Costume && v == 1 && !super::riku_skin::unlocked() {
+                            sound(5);
+                            let help: *mut u8 = rd(camp, HELP);
+                            if !help.is_null() {
+                                f::<SetTextFn>(SET_TEXT_FN)(help, crate::menu::COSTUME_LOCKED.as_ptr());
+                            }
+                            return 0;
+                        }
                         super::set_item(it, v);
                     }
                     Step::Idle => return 0,

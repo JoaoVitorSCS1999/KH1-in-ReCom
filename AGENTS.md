@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 284 (fork branch Re-Re-Reverse/Rebirth): the Dark Mode costume unlocks at Riku's first Dark Mode, version 0.156.0 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "beleza já implementa essa pendência".
+
+- **Unlock**: the save's spare bit `DARK_SEEN` (0.151.0), now also set from any frame of Dark Riku as the main player, at either Combat setting (`win::riku_skin::frame`).
+- **Costume**: decided at each room / battle build, before Re:CoM's group queue (`win::riku_skin::refresh` from `win::models::group_load`). Without the unlock it is Default Attire (the setting goes back to off, logged).
+- **Costumes page**: Dark Mode is refused before the unlock (sound 5, its own help line). Default `riku_dark_skin = off`.
+- **Checked**: tests, the Windows build. **Not checked**: in game. Details: `docs/recom-riku-kh1.md` § 0.156.0.
+
+---
+
 ## Stage 283 (fork branch Re-Re-Reverse/Rebirth): the costume change plays Dark Riku's entry flip and its effects; Riku's way-back effect, version 0.155.3 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "funcionou!, mas a animação ficou incompleta, não deu tempo dele dar aquele mortal, também pode ter aquele efeito de tela junto, igual a transição do combate".

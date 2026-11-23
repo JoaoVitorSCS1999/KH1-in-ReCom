@@ -570,3 +570,25 @@ aquele mortal, também pode ter aquele efeito de tela junto, igual a transição
   Dark gauge's own switch. The effects on screen are the clips' events, as in battle.
 - **Checked**: tests (the flip and its events in both skin groups' files), the Windows build.
   **Not checked**: in game.
+
+## 0.156.0: the Dark Mode costume unlocks at Riku's first Dark Mode
+
+Fork owner, 2026-11-22, verbatim: "beleza já implementa essa pendência" (the game's requirement for
+the costume: "depois a gente bota o requisito do jogo pra liberar ela").
+
+- **The unlock**: the save block's spare bit `DARK_SEEN` (`win::dark_points`, since 0.151.0), set
+  at Riku's first Dark Mode.
+  - It is now also set from any frame of Dark Riku as the main player, at either Combat setting:
+    his move exe, which is the shared one, runs `win::riku_skin::frame`.
+  - So a Dark Mode reached at Combat = Re:CoM counts too.
+- **The costume** (`win::riku_skin::{unlocked, refresh}`):
+  - It is decided at each room or battle build, when Re:CoM queues the player's group (the save is
+    loaded by then), before that queue reads the char → group table.
+  - Dark Mode without the unlock is Default Attire: the setting goes back to off (the ini is
+    rewritten and the change logged, with no live change, since the old player may be gone during
+    a build).
+  - At start nothing is switched until a room is built.
+- **Costumes page**: asking for Dark Mode before the unlock plays Re:CoM's refusal sound (5), and
+  the help line says "Riku must reach Dark Mode once to wear this attire."
+- **Default**: `riku_dark_skin = off` (Default Attire).
+- **Checked**: tests, the Windows build. **Not checked**: in game.

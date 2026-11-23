@@ -97,17 +97,13 @@ pub(crate) fn settings() -> Settings {
     SETTINGS.lock().ok().and_then(|g| g.clone()).unwrap_or_default()
 }
 
-/// A row of the KH1 entry's settings pages (`crate::menu`) set to option `v`: the setting changes,
-/// `kh1-recom.ini` is rewritten (other lines and comments kept), and whatever reads the setting
-/// live is told now. When each change takes effect: `menu::Item::effect` and
-/// `docs/recom-config-menu.md`.
-pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
-    use crate::menu::Item;
+/// The setting changed and `kh1-recom.ini` rewritten, nothing else told (None: unchanged).
+pub(crate) fn store_item(item: crate::menu::Item, v: usize) -> Option<Settings> {
     let mut s = settings();
     let was = s.clone();
     item.set(&mut s, v);
     if s == was {
-        return;
+        return None;
     }
     if let Ok(mut g) = SETTINGS.lock() {
         *g = Some(s.clone());
@@ -118,6 +114,16 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
             log(&format!("kh1 entry: could not write {}: {e}", p.display()));
         }
     }
+    Some(s)
+}
+
+/// A row of the KH1 entry's settings pages (`crate::menu`) set to option `v`: the setting changes,
+/// `kh1-recom.ini` is rewritten (other lines and comments kept), and whatever reads the setting
+/// live is told now. When each change takes effect: `menu::Item::effect` and
+/// `docs/recom-config-menu.md`.
+pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
+    use crate::menu::Item;
+    let Some(s) = store_item(item, v) else { return };
     let shown = String::from_utf8_lossy(item.options()[v.min(item.options().len() - 1)]).trim_end_matches('\0').to_string();
     let when = match item.effect() {
         crate::menu::Effect::Now => "now",
@@ -139,7 +145,7 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
         // Fork: Riku's Costume: Re:CoM's char -> group entries now; the next player build shows it.
         // SAFETY: two checked writes of Re:CoM's static tables (the camp: no player is being built).
         Item::Costume => unsafe {
-            riku_skin::apply(base(), s.riku_dark_skin);
+            riku_skin::apply(base(), s.riku_dark_skin && riku_skin::unlocked());
             riku_skin::costume_chosen(base());
         },
         // Read by each KH1 frame (`movement::run_frame`, `stick_class`).

@@ -104,6 +104,35 @@ pub unsafe fn sync_menu(b: usize) {
     log(&format!("riku skin: the menu's model (camp, level-up) shows {}", if on { "Dark Mode" } else { "Default Attire" }));
 }
 
+/// The Dark Mode costume is unlocked: Riku has reached Dark Mode once in this save (the save
+/// block's spare bit [`super::dark_points::DARK_SEEN`], 0.151.0; fork owner, 2026-11-22: "depois a
+/// gente bota o requisito do jogo pra liberar ela").
+pub unsafe fn unlocked() -> bool {
+    super::dark_points::dark_seen()
+}
+
+/// The costume as it should be now: the setting, if unlocked. Called when Re:CoM queues the
+/// player's group (each room / battle build, a save loaded by then), before its queue reads the
+/// table. A Dark Mode setting on a save that hasn't reached Dark Mode goes back to Default Attire
+/// (the ini rewritten, logged).
+///
+/// # Safety
+/// `b` is the running image's base; Re:CoM's room / battle build (main thread).
+pub unsafe fn refresh(b: usize) {
+    if skins().is_empty() || !ROWS.load(Ordering::Acquire) || !super::stats::riku_story() {
+        return;
+    }
+    let want = super::settings().riku_dark_skin;
+    if want && !unlocked() {
+        log("riku skin: Dark Mode chosen, but this save hasn't reached Dark Mode yet: Default Attire (the costume unlocks at Riku's first Dark Mode)");
+        // Only the setting (no live change: the old player may be gone during a room build).
+        let _ = super::store_item(crate::menu::Item::Costume, 0);
+        apply(b, false);
+        return;
+    }
+    apply(b, want);
+}
+
 /// Points chars 3 / 4 at the skin groups (`on`, Dark Mode) or back at Riku's own.
 ///
 /// # Safety
@@ -498,6 +527,11 @@ pub unsafe fn camp_closed(b: usize) {
 /// The game's thread, in a player's move exe (`e` that player).
 pub unsafe fn frame(e: usize) -> bool {
     let b = super::base();
+    // 0.156.0: Dark Mode reached (Dark Riku the main player, any Combat setting): the costume's
+    // unlock kept in Riku's save. One compare a frame.
+    if e != 0 && rd::<usize>(e) == va(b, crate::sites::data::DRIKU_VTABLE) && e == rd::<usize>(va(b, crate::sites::data::MAIN_PLAYER)) {
+        super::dark_points::mark_seen();
+    }
     if TRANS_PL.load(Ordering::Relaxed) != 0 {
         return transition(b, e);
     }
