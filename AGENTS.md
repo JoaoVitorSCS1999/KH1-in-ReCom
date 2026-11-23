@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 293 (fork branch Re-Re-Reverse/Rebirth): Riku's Keyblade on the Costumes page (Soul Eater / Keyblade of Heart, cosmetic), unlocked at 15 DP, version 0.160.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "quero implementar para o Riku a troca de Keyblade, vai ser simplesmente cosmética, quero que inicialmente ele possa trocar entre a Soul Eater e a Keyblade of Heart, vai ser uma nova entrada no menu dentro de Costumes, a Keyblade of Heart você pode pegar no KH1 acho, e ela é liberada com 15 de DP, mas inicialmente deixa ela desbloqueada para eu testar"; "no Kingdom Hearts 1 essa é a única keyblade que ele utiliza, numa bossfight inclusive com o mesmo traje do DarkMode".
+
+- **KH1** (Checked (files)): Riku-Ansem's `xa_ex_1580` (voices `rk04`) holds the Keyblade of People's Hearts as its HD mesh `-c0.cvbl` mesh 0 on joint 211, texture `-1c0.dds`.
+- **Re:CoM** (Checked (files)): Riku's weapon is parts 0 / 1 of his model on `wep0` (77; Dark Riku's 105), in KH1 joint space × 0.01. Joint 211 → 191: (4.54, −0.52, −0.02) cm, from the Soul Eater held by `xa_ex_1160` (same skeleton as 1580) against `xa_ex_1560`'s (Assumption: the same grip).
+- **Asset step** (`riku_skin::{with_blade, build_blade}`, `keyblade::blade_parts`, `mdl::split_parts`): groups 141 / 151 (Default Attire, from 101 / 111) and 161 / 171 (Dark Mode, from 121 / 131, the blade turned over as `BLADE_FLIP`) with the weapon parts replaced (the body kept byte for byte) and the texture added to the RTM. **Re-run** (automatic; new outputs).
+- **Game**: the Costumes page gets a second row, **Keyblade: Soul Eater / Keyblade of Heart** (ini `riku_keyblade = soul_eater | heart`). The group comes from the attire × Keyblade; a Keyblade-only change swaps the model at once with Riku's way-back effect. Unlock: Riku's DP reaching 15 once (save spare bit 8); debug `riku_keyblade_unlocked` (on in the owner's ini for the test).
+- **Checked**: tests (`riku_skin::tests::the_keyblade_replaces_rikus_weapon_parts`, the look selection), the asset step, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 292 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard works as Sora's KH1 Guard (blocks at the pair test, turns shots back, Counterattack, the guard up on the live frames), version 0.159.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "a mecânica de guarda precisa funcionar igual a do Kingdom Hearts 1"; "o mod com a campanha do Sora já deve ter essas implementações não? não da para se basear?" (chose: hits get through, magic should come back, timing odd, no Counterattack).

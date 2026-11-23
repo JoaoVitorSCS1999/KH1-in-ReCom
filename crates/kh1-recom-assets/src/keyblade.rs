@@ -166,9 +166,24 @@ fn find<'a>(assets: &'a [HdAsset], name: &str) -> Result<&'a HdAsset> {
 
 /// Reads the cvbl's triangles (KH1 joints, KH1 slots) in source order.
 fn read_triangles(cv: &Cvbl, slot_to_tex: &dyn Fn(u32) -> u32, rep: &mut Report) -> Result<Vec<Tri>> {
+    read_triangles_with(cv, slot_to_tex, rep, &|_| true, &|mi, joint, p| {
+        if !JOINTS.contains(&joint) {
+            return bad(format!("mesh {mi}: vertex on KH1 joint {joint}, outside 2..11 (no Re:CoM bone; not remapped)"));
+        }
+        Ok((joint, [p[0] * 0.01, p[1] * 0.01, p[2] * 0.01]))
+    })
+}
+
+/// [`read_triangles`] over the meshes `keep` takes, each vertex's KH1 joint and position (KH1
+/// units) mapped by `map` to a Re:CoM bone and a position in its space (metres).
+#[allow(clippy::type_complexity)]
+fn read_triangles_with(cv: &Cvbl, slot_to_tex: &dyn Fn(u32) -> u32, rep: &mut Report, keep: &dyn Fn(usize) -> bool, map: &dyn Fn(usize, u32, [f32; 3]) -> Result<(u32, [f32; 3])>) -> Result<Vec<Tri>> {
     let mut tris = Vec::new();
     let mut strip = 0usize;
     for (mi, mesh) in cv.meshes.iter().enumerate() {
+        if !keep(mi) {
+            continue;
+        }
         let mut slots = [u32::MAX; 256];
         let translucent = mesh.flags & 1 != 0;
         for ch in &mesh.chunks {
@@ -192,12 +207,10 @@ fn read_triangles(cv: &Cvbl, slot_to_tex: &dyn Fn(u32) -> u32, rep: &mut Report)
                             return bad(format!("mesh {mi}: vertex on unset matrix slot {}", fl & 0xFF));
                         }
                         rep.joints.insert(joint);
-                        if !JOINTS.contains(&joint) {
-                            return bad(format!("mesh {mi}: vertex on KH1 joint {joint}, outside 2..11 (no Re:CoM bone; not remapped)"));
-                        }
                         rep.cvbl_vertices += 1;
                         let f = |k: usize| f32::from_bits(w[k]);
-                        let v = Vtx { pos: [f(8) * 0.01, f(9) * 0.01, f(10) * 0.01], uv: [f(4), f(5)], bone: joint };
+                        let (bone, at) = map(mi, joint, [f(8), f(9), f(10)])?;
+                        let v = Vtx { pos: at, uv: [f(4), f(5)], bone };
                         match fl & 0xFFFF_0000 {
                             START => {
                                 if last_drew {
@@ -464,6 +477,57 @@ fn assemble(template: &Mdl, mut rep: Report, tris: Vec<Tri>, textures_in: Vec<(S
     Ok(Converted { mdl, rtm: rtm.write(), textures, hd, report: rep })
 }
 
+/// A KH1 character's weapon mesh as Re:CoM packets on one bone (fork 0.160.0: Riku's Keyblade of
+/// People's Hearts from KH1's `xa_ex_1580`, on Riku's `wep0`): the cvbl mesh `mesh` (one joint,
+/// `joint`), each position (KH1 units, the joint's space) put in the bone's space by `place`
+/// (metres), its one texture `tex`. Lists as [`convert`]'s (list B: translucent or a texel with
+/// alpha < 255), the untextured copy of every triangle as Re:CoM's weapon parts have it.
+pub struct BladeParts {
+    /// Textured, list A / B.
+    pub textured_a: Vec<MeshPacket>,
+    /// See `textured_a`.
+    pub textured_b: Option<Vec<MeshPacket>>,
+    /// Untextured (positions only).
+    pub plain: Vec<MeshPacket>,
+    /// Triangles.
+    pub triangles: usize,
+}
+
+/// See [`BladeParts`]. `textured` / `plain`: the GIF words of the model's own packets.
+pub fn blade_parts(cv: &Cvbl, mesh: usize, joint: u32, bone: u32, place: &dyn Fn([f32; 3]) -> [f32; 3], tex: &Image, textured: (u32, u32), plain: (u32, u32)) -> Result<BladeParts> {
+    let mut rep = Report::default();
+    let tris = read_triangles_with(cv, &|_| 0, &mut rep, &|mi| mi == mesh, &|mi, j, p| {
+        if j != joint {
+            return bad(format!("mesh {mi}: vertex on KH1 joint {j}, not the weapon's {joint}"));
+        }
+        Ok((bone, place(p)))
+    })?;
+    if tris.is_empty() {
+        return bad(format!("cvbl mesh {mesh}: no triangles"));
+    }
+    let (a, b): (Vec<&Tri>, Vec<&Tri>) = tris.iter().partition(|t| !(t.translucent || min_alpha(tex, t) < 255));
+    let textured_a = packets(&segments(&a), FMT_TEXTURED, textured.0, textured.1);
+    let lb = packets(&segments(&b), FMT_TEXTURED, textured.0, textured.1);
+    let all: Vec<&Tri> = tris.iter().collect();
+    Ok(BladeParts { textured_a, textured_b: (!lb.is_empty()).then_some(lb), plain: packets(&segments(&all), FMT_PLAIN, plain.0, plain.1), triangles: tris.len() })
+}
+
+/// Per-bone bounds of `lists` for `nb` bones, as Re:CoM's parts hold them.
+pub fn part_bounds(nb: usize, lists: &[&[MeshPacket]]) -> Vec<[u32; 6]> {
+    bounds(nb, lists)
+}
+
+/// A texture for an RTM: its TIM2 entry (halved to ≤ 256, PS2 alpha, 256 colours) and the HD
+/// asset (`<name>_tm2.dds`, the DDS unchanged), as [`convert`] makes them; and the decoded image.
+pub fn texture_entry(name: &str, dds: &[u8]) -> Result<(RtmEntry, HdAsset, Image)> {
+    let img = decode_dds(dds).map_err(|e| crate::Error::Format(format!("{name}: {e}")))?;
+    let small = downscale_to(&img, TIM2_MAX);
+    let ps2 = Image { w: small.w, h: small.h, px: small.px.iter().map(|c| [c[0], c[1], c[2], ps2_alpha(c[3])]).collect() };
+    let (pal, idx) = quantise(&ps2);
+    let e = RtmEntry::new(name, tim2_indexed8(ps2.w as u16, ps2.h as u16, &idx, &pal)?)?;
+    Ok((e, HdAsset { name: hd_name(name), orig_offset: HD_TAG, data: dds.to_vec() }, img))
+}
+
 /// KH2 Keyblades (decision 25): a KH2 FM `obj/W_EX010_*.mdlx` → the same Re:CoM layout.
 /// Notes: `docs/recom-keyblade-models.md` § 12.
 ///
@@ -626,7 +690,7 @@ pub fn new_resource_names() -> Vec<String> {
         }
     }
     // Riku's Dark Form skin groups (fork, `riku_skin`).
-    for &(_, _, g) in &crate::riku_skin::SKIN_GROUPS {
+    for g in crate::riku_skin::SKIN_GROUPS.iter().map(|x| x.2).chain(crate::riku_skin::BLADE_GROUPS.iter().map(|x| x.2)) {
         for ext in ["MDL", "ANN", "EET", "SES"] {
             out.push(resource_path(g, ext));
         }
@@ -692,10 +756,10 @@ mod tests {
     #[test]
     fn new_names_are_not_in_recom_hed() {
         let names = new_resource_names();
-        // 16 KH1 groups (21..=36) with four files, 6 KH2 groups (38..=43) with two.
         // 16 KH1 groups (21..=36) with four files, 6 KH2 groups (38..=43) with two, Riku's two
-        // skin groups (121, 131) with six.
-        assert_eq!(names.len(), 16 * 4 + 6 * 2 + 2 * 6);
+        // skin groups (121, 131) and four Keyblade groups (141..=171) with six.
+        assert_eq!(names.len(), 16 * 4 + 6 * 2 + 6 * 6);
+        assert!(names.contains(&"PLAYER/0171/PL0171.MDL".to_string()) && names.contains(&"raw/PLAYER/0141/PL0141.RTM".to_string()));
         assert!(names.contains(&"PLAYER/0021/PL0021.MDL".to_string()) && names.contains(&"raw/PLAYER/0036/PL0036.EFF".to_string()));
         assert!(names.contains(&"raw/PLAYER/0043/PL0043.RTM".to_string()) && !names.contains(&"PLAYER/0043/PL0043.EET".to_string()));
         assert!(!names.iter().any(|n| n.contains("/0037/") || n.contains("/0002/")));

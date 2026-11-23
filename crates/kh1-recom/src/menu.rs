@@ -87,6 +87,8 @@ pub enum Item {
     AutoCamera,
     /// `riku_dark_skin` (fork): Default Attire / Dark Mode.
     Costume,
+    /// `riku_keyblade` (fork, 0.160.0): Soul Eater / Keyblade of Heart.
+    Blade,
 }
 
 /// When a change takes effect (from what reads the setting; `docs/recom-config-menu.md`).
@@ -110,7 +112,7 @@ impl Page {
             Page::Movement => &[Item::RunSpeed, Item::JumpHeight, Item::AirSpeed, Item::DodgeRoll],
             Page::EffectsSound => &[Item::Effects, Item::Sounds],
             Page::Camera => &[Item::Camera, Item::AutoCamera],
-            Page::Costumes => &[Item::Costume],
+            Page::Costumes => &[Item::Costume, Item::Blade],
         }
     }
 
@@ -146,6 +148,8 @@ const CAMERAS: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"KH2\0"];
 const COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Dark Mode\0"];
 /// The help line when Dark Mode is asked for before Riku has reached it (0.156.0).
 pub const COSTUME_LOCKED: &[u8] = b"Riku must reach Dark Mode once to wear this attire.\0";
+const BLADES: &[&[u8]] = &[b"Soul Eater\0", b"Keyblade of Heart\0"];
+pub const BLADE_LOCKED: &[u8] = b"Riku must reach 15 DP once to hold this Keyblade.\0";
 
 fn mode_index(m: Mode) -> usize {
     match m {
@@ -180,6 +184,7 @@ impl Item {
             Item::Camera => b"Camera\0",
             Item::AutoCamera => b"Auto camera\0",
             Item::Costume => b"Costume\0",
+            Item::Blade => b"Keyblade\0",
         }
     }
 
@@ -190,6 +195,7 @@ impl Item {
             Item::DodgeRoll => ROLL,
             Item::Camera => CAMERAS,
             Item::Costume => COSTUMES,
+            Item::Blade => BLADES,
             _ => RECOM_KH1,
         }
     }
@@ -197,7 +203,7 @@ impl Item {
     /// Two options: Re:CoM's pair row; more: Re:CoM's single-value row.
     pub fn style(self) -> Style {
         // "Default Attire" is too wide for a pair row's value: one value showing the current one.
-        if self.options().len() == 2 && self != Item::Costume {
+        if self.options().len() == 2 && self != Item::Costume && self != Item::Blade {
             Style::Pair
         } else {
             Style::Single
@@ -221,6 +227,7 @@ impl Item {
             Item::Camera => b"Re:CoM's camera, KH1's, or KH2's (its distances x 0.89).\0",
             Item::AutoCamera => b"On: the KH1 / KH2 camera swings behind Sora as he runs.\0",
             Item::Costume => b"Dark Mode: Dark Riku's look. Unlocked by Riku's first Dark Mode.\0",
+            Item::Blade => b"Keyblade of Heart: Riku-Ansem's. Unlocked by reaching 15 DP.\0",
         }
     }
 
@@ -228,7 +235,7 @@ impl Item {
     pub fn effect(self) -> Effect {
         match self {
             Item::EnemyPace | Item::EnemyAi => Effect::NextBattle,
-            Item::Costume => Effect::NextRoom,
+            Item::Costume | Item::Blade => Effect::NextRoom,
             _ => Effect::Now,
         }
     }
@@ -250,6 +257,7 @@ impl Item {
             Item::Camera => "camera",
             Item::AutoCamera => "auto_camera",
             Item::Costume => "riku_dark_skin",
+            Item::Blade => "riku_keyblade",
         }
     }
 
@@ -278,6 +286,7 @@ impl Item {
             },
             Item::AutoCamera => s.auto_camera as usize,
             Item::Costume => s.riku_dark_skin as usize,
+            Item::Blade => s.riku_heart_blade as usize,
         }
     }
 
@@ -312,6 +321,7 @@ impl Item {
             }
             Item::AutoCamera => s.auto_camera = v == 1,
             Item::Costume => s.riku_dark_skin = v == 1,
+            Item::Blade => s.riku_heart_blade = v == 1,
         }
     }
 }

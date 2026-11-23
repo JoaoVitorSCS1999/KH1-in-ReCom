@@ -10,7 +10,7 @@
 //!   there. Re:CoM reads them when it builds a player or loads its group: the next room or battle.
 
 use super::{log, va};
-use crate::riku_skin::{self as rs, Skin};
+use crate::riku_skin::{self as rs, Look, Skin};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
@@ -21,12 +21,30 @@ static GUARD: AtomicBool = AtomicBool::new(false);
 static GUARD_FILES: AtomicBool = AtomicBool::new(false);
 /// The PLAYER table copy holds the skin groups' rows.
 static ROWS: AtomicBool = AtomicBool::new(false);
-/// The tables point at the skin groups now.
-static ON: AtomicBool = AtomicBool::new(false);
-/// The menu's model bytes point at the skin groups now.
-static MENU_ON: AtomicBool = AtomicBool::new(false);
-/// Our motion pack names, per Riku group (kept for the process: Re:CoM reads the pointers).
+/// The look the tables point at now (`Look::bits`; 0 Riku's own).
+static ON: AtomicU8 = AtomicU8::new(0);
+/// The look the menu's model bytes point at now.
+static MENU_ON: AtomicU8 = AtomicU8::new(0);
+/// Our motion pack names, per skin group (kept for the process: Re:CoM reads the pointers).
 static NAMES: OnceLock<Vec<(u16, usize)>> = OnceLock::new();
+
+fn look() -> Look {
+    Look::from_bits(ON.load(Ordering::Relaxed))
+}
+
+/// The look the settings ask for, each part only once unlocked.
+///
+/// # Safety
+/// Reads the save (main thread).
+pub unsafe fn chosen(s: &crate::settings::Settings) -> Look {
+    Look { dark: s.riku_dark_skin && unlocked(), blade: (s.riku_heart_blade && blade_unlocked()) as u8 }
+}
+
+/// The Keyblade of Heart is unlocked: Riku has reached 15 DP once in this save (the save block's
+/// spare bit [`super::dark_points::HEART_SEEN`], 0.160.0), or the debug key.
+pub unsafe fn blade_unlocked() -> bool {
+    super::settings().riku_heart_blade_unlocked || super::dark_points::heart_seen()
+}
 
 /// Reads the manifest and checks the skin groups' files.
 pub fn preload(manifest: Option<&Path>) {
@@ -121,21 +139,26 @@ pub fn rows_in() {
 }
 
 /// The motion pack name pointers for chars 3 / 4 (Riku's or the skins').
-unsafe fn name_ptrs(b: usize, sk: &[Skin], on: bool) -> [u64; 2] {
+unsafe fn name_ptrs(b: usize, sk: &[Skin], look: Look) -> [u64; 2] {
     let names = NAMES.get_or_init(|| {
         sk.iter()
             .map(|s| {
                 let c = std::ffi::CString::new(rs::ann_name(s.skin)).unwrap_or_default();
-                (s.riku, Box::leak(c.into_boxed_c_str()).as_ptr() as usize)
+                (s.skin, Box::leak(c.into_boxed_c_str()).as_ptr() as usize)
             })
             .collect()
     });
     let mut out = [0u64; 2];
     for (k, g) in rs::RIKU_GROUPS.iter().enumerate() {
         let recom = va(b, rs::RIKU_ANN_NAMES[k]) as u64;
-        out[k] = if on { names.iter().find(|n| n.0 == *g).map_or(recom, |n| n.1 as u64) } else { recom };
+        let want = rs::group_for(sk, *g, look);
+        out[k] = names.iter().find(|n| n.0 == want).map_or(recom, |n| n.1 as u64);
     }
     out
+}
+
+fn look_name(l: Look) -> String {
+    format!("{} with the {}", if l.dark { "Dark Mode" } else { "Default Attire" }, rs::BLADES[l.blade as usize % rs::BLADES.len()])
 }
 
 /// The menu's model (camp and level-up screen) follows the group the player loads: called when
@@ -147,20 +170,20 @@ unsafe fn name_ptrs(b: usize, sk: &[Skin], on: bool) -> [u64; 2] {
 /// `b` is the running image's base.
 pub unsafe fn sync_menu(b: usize) {
     let on = ON.load(Ordering::Relaxed);
-    if MENU_ON.load(Ordering::Relaxed) == on || !ROWS.load(Ordering::Acquire) {
+    let menu = MENU_ON.load(Ordering::Relaxed);
+    if menu == on || !ROWS.load(Ordering::Acquire) {
         return;
     }
     let sk = skins();
-    let skin_of = |g: u16| sk.iter().find(|s| s.riku == g).map_or(g, |s| s.skin);
     for &(at, riku) in &rs::MENU_BYTES {
-        let (from, to) = if on { (riku, skin_of(riku)) } else { (skin_of(riku), riku) };
+        let (from, to) = (rs::group_for(&sk, riku, Look::from_bits(menu)), rs::group_for(&sk, riku, Look::from_bits(on)));
         if !super::hook::patch(va(b, at), &[from as u8], &[to as u8], "menu model group (Riku)") {
-            log("riku skin: the menu model's group bytes are not Re:CoM's 101 / 111; the menu keeps Riku's model");
+            log("riku skin: the menu model's group bytes are not what we wrote; the menu keeps its model");
             return;
         }
     }
     MENU_ON.store(on, Ordering::Relaxed);
-    log(&format!("riku skin: the menu's model (camp, level-up) shows {}", if on { "Dark Mode" } else { "Default Attire" }));
+    log(&format!("riku skin: the menu's model (camp, level-up) shows {}", look_name(Look::from_bits(on))));
 }
 
 /// The Dark Mode costume is unlocked: Riku has reached Dark Mode once in this save (the save
@@ -194,35 +217,38 @@ pub unsafe fn refresh(b: usize) {
     if skins().is_empty() || !ROWS.load(Ordering::Acquire) || !super::stats::riku_story() {
         return;
     }
-    let want = super::settings().riku_dark_skin;
-    if want && !unlocked() {
+    let s = super::settings();
+    if s.riku_dark_skin && !unlocked() {
         log("riku skin: Dark Mode chosen, but this save hasn't reached Dark Mode yet: Default Attire (the costume unlocks at Riku's first Dark Mode)");
         // Only the setting (no live change: the old player may be gone during a room build).
         let _ = super::store_item(crate::menu::Item::Costume, 0);
-        apply(b, false);
-        return;
     }
-    apply(b, want);
+    if s.riku_heart_blade && !blade_unlocked() {
+        log("riku skin: the Keyblade of Heart chosen, but this save hasn't reached 15 DP yet: the Soul Eater");
+        let _ = super::store_item(crate::menu::Item::Blade, 0);
+    }
+    apply(b, chosen(&super::settings()));
 }
 
-/// Points chars 3 / 4 at the skin groups (`on`, Dark Mode) or back at Riku's own.
+/// Points chars 3 / 4 at the groups of a look (Riku's own for the Default Attire with the Soul
+/// Eater).
 ///
 /// # Safety
 /// `b` is the running image's base; called on start-up or from the camp (no player being built).
-pub unsafe fn apply(b: usize, on: bool) {
+pub unsafe fn apply(b: usize, on: Look) {
     let sk = skins();
     if sk.is_empty() || !ROWS.load(Ordering::Acquire) {
-        if on {
-            log("riku skin: Dark Mode asked, but the skin's files or rows are not in; Riku keeps his model");
+        if on != Look::default() {
+            log("riku skin: a costume / Keyblade asked, but the skin's files or rows are not in; Riku keeps his model");
         }
         return;
     }
-    let now = ON.load(Ordering::Relaxed);
+    let now = look();
     if now == on {
         return;
     }
-    let groups = |o: bool| -> Vec<u8> { rs::entries(&sk, o).iter().flat_map(|x| x.to_le_bytes()).collect() };
-    let names = |o: bool| -> Vec<u8> { name_ptrs(b, &sk, o).iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let groups = |o: Look| -> Vec<u8> { rs::entries(&sk, o).iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let names = |o: Look| -> Vec<u8> { name_ptrs(b, &sk, o).iter().flat_map(|x| x.to_le_bytes()).collect() };
     let g_at = va(b, rs::GROUP_TABLE) + 12;
     let n_at = va(b, rs::ANN_NAME_TABLE) + 24;
     // Both or neither: the names first (checked), then the groups; a failed group write puts the
@@ -236,10 +262,10 @@ pub unsafe fn apply(b: usize, on: bool) {
         log("riku skin: Re:CoM's char -> group table is not 101 / 111 there; Riku keeps his model");
         return;
     }
-    ON.store(on, Ordering::Relaxed);
+    ON.store(on.bits(), Ordering::Relaxed);
     log(&format!(
         "riku skin: {} (chars 3 / 4 -> groups {:?}, motion packs {:?}); shown from the next room or battle",
-        if on { "Dark Mode (Dark Riku's model, Riku's own moves)" } else { "Default Attire" },
+        look_name(on),
         rs::entries(&sk, on),
         rs::entries(&sk, on).map(|g| rs::ann_name(g as u16))
     ));
@@ -503,7 +529,7 @@ unsafe fn wanted(e: usize) -> Option<u16> {
     }
     let ch: u32 = rd(e + CHAR);
     let k = ch.checked_sub(3).filter(|k| *k < 2)? as usize;
-    Some(rs::entries(&sk, ON.load(Ordering::Relaxed))[k] as u16)
+    Some(rs::entries(&sk, look())[k] as u16)
 }
 
 /// The main player is (plain) Riku in the field, standing, walking or running.
@@ -532,6 +558,15 @@ unsafe fn try_swap(b: usize) -> bool {
     }
     if !swappable(b, e) || !callees_ok(b) {
         return !callees_ok(b);
+    }
+    // 0.160.0: only the Keyblade changes (same attire): no transformation; the model changes now,
+    // with Riku's way-back effect.
+    let sk = skins();
+    if TRANS_PL.load(Ordering::Relaxed) == 0 && rs::look_of(&sk, now as u16).dark == rs::look_of(&sk, g).dark {
+        swap_now(b, e, g);
+        transform_fx(b, e);
+        func::<super::movement::MotionFn>(super::movement::MOTION_REQUEST)(e, 1, 0, 0, 0, 0, 0);
+        return true;
     }
     // 0.155.2: Riku's own transformation first; the model changes at its end (`transition`).
     if TRANS_PL.load(Ordering::Relaxed) == 0 {
@@ -683,7 +718,7 @@ unsafe fn transition(b: usize, e: usize) -> bool {
         return finish(e);
     }
     swap_now(b, e, g);
-    let to_dark = skins().iter().any(|s| s.skin == g);
+    let to_dark = rs::look_of(&skins(), g).dark;
     if to_dark {
         // Dark Riku's entry flip, as his switch-in plays it (`0x140204841..0x14020485B`: his row
         // 0x37, blend −1): the skin's pack holds his own clip; row 0x37 points at it for the play.
@@ -699,15 +734,19 @@ unsafe fn transition(b: usize, e: usize) -> bool {
         }
         log("riku skin: the skin's pack has no p003_067 (asset step older than 0.155.3?): no flip");
     } else {
-        // Riku's way back effect.
-        let m = func::<MtxFn>(0x002A_BB20)(e, TRANSFORM_FX_BONE);
-        let h = func::<FxFn>(0x001A_2D50)(e, rd::<usize>(va(b, TRANSFORM_FX_NAME)), 2, m, 0, 0, 0.0);
-        let fx = func::<FxObjFn>(0x0025_7EF0)(h);
-        if fx != 0 {
-            wr::<u32>(fx + 0x4C, rd::<u32>(fx + 0x4C) | 4);
-        }
+        transform_fx(b, e);
     }
     finish(e)
+}
+
+/// Riku's way back effect.
+unsafe fn transform_fx(b: usize, e: usize) {
+    let m = func::<MtxFn>(0x002A_BB20)(e, TRANSFORM_FX_BONE);
+    let h = func::<FxFn>(0x001A_2D50)(e, rd::<usize>(va(b, TRANSFORM_FX_NAME)), 2, m, 0, 0, 0.0);
+    let fx = func::<FxObjFn>(0x0025_7EF0)(h);
+    if fx != 0 {
+        wr::<u32>(fx + 0x4C, rd::<u32>(fx + 0x4C) | 4);
+    }
 }
 
 /// The transformation's end: Riku's idle, the move exe his again.
@@ -741,7 +780,7 @@ unsafe fn face(b: usize, e: usize) {
         return;
     }
     let (riku, dark) = (rd::<usize>(va(b, FACE_SET_RIKU)), rd::<usize>(va(b, FACE_SET_DARK)));
-    let on = ON.load(Ordering::Relaxed);
+    let on = look().dark;
     let now: usize = rd(g + 0x88);
     let want = if on { dark } else { riku };
     // Only Riku's own face or ours: any other set is Re:CoM's state, left alone.

@@ -49,6 +49,10 @@ const SWITCHING: u32 = 0x20;
 /// The spare byte's bit for "Dark Mode reached once" (`crate::mp::off::SPARE`; bits 1 / 2 are
 /// `crate::unlocks`'): the Dark Form skin's unlock (0.152.0).
 pub const DARK_SEEN: u8 = 4;
+/// Bit 3: Riku's DP reached [`HEART_DP`] once: the Keyblade of Heart's unlock (0.160.0; fork owner,
+/// 2026-11-23: "ela é liberada com 15 de DP").
+pub const HEART_SEEN: u8 = 8;
+pub const HEART_DP: i32 = 15;
 
 /// Re:CoM's own DP (Checked (exe: disasm)): the player's `+0x44C` (at most 30: `0x1401F57A4`, the
 /// card values' add) and its gauge's max `+0x450`; its Dark gauge `+0x3E0`, set by
@@ -246,6 +250,10 @@ fn event(pl: usize, e: Event) {
     let before = g.dp.dp;
     let ch = g.dp.event(e);
     let after = g.dp.dp;
+    if after >= HEART_DP {
+        // SAFETY: the save pointer, as `mark_seen` reads it (main thread).
+        unsafe { mark_bit(HEART_SEEN, "first 15 DP: kept in Riku's save (the Keyblade of Heart unlocks)") };
+    }
     if before != after {
         note(|| format!("{e:?}{}: DP {before} -> {after}", if g.dp.dark { " (Dark Mode)" } else { "" }));
     }
@@ -387,16 +395,26 @@ pub unsafe fn guard_events(pl: usize, events: &[kh1_core::controller::Event]) {
 /// Riku's save block's spare byte gets [`DARK_SEEN`] (the first Dark Mode). Also from any frame
 /// of Dark Riku as the main player (`win::riku_skin::frame`), at either Combat setting.
 pub(super) unsafe fn mark_seen() {
+    mark_bit(DARK_SEEN, "first Dark Mode: kept in Riku's save (the Dark Form skin unlocks)");
+}
+
+unsafe fn mark_bit(bit: u8, line: &str) {
     let save: usize = rd(va(base(), crate::keyblades::SAVE_PTR));
-    if save == 0 {
+    if save == 0 || !super::stats::riku_story() {
         return;
     }
     let at = save + crate::mp::BLOCK_FIRST + crate::mp::off::SPARE;
     let b: u8 = rd(at);
-    if b & DARK_SEEN == 0 {
-        wr(at, b | DARK_SEEN);
-        log("dark points: first Dark Mode: kept in Riku's save (the Dark Form skin unlocks)");
+    if b & bit == 0 {
+        wr(at, b | bit);
+        log(&format!("dark points: {line}"));
     }
+}
+
+/// Riku's DP have reached 15 once (his save): the Keyblade of Heart's unlock (0.160.0).
+pub unsafe fn heart_seen() -> bool {
+    let save: usize = rd(va(base(), crate::keyblades::SAVE_PTR));
+    save != 0 && super::stats::riku_story() && rd::<u8>(save + crate::mp::BLOCK_FIRST + crate::mp::off::SPARE) & HEART_SEEN != 0
 }
 
 /// Riku has reached Dark Mode once (his save): the Dark Form costume's unlock (0.156.0).

@@ -564,16 +564,212 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     Ok(Built { files, clips })
 }
 
-/// The manifest: which Riku group each skin group stands for.
-pub fn manifest_json(skins: &[(u16, u16)], riku_guard: bool) -> String {
-    let rows: Vec<String> = skins.iter().map(|(r, s)| format!("{{\"riku\": {r}, \"skin\": {s}}}")).collect();
+/// The manifest: which Riku group each skin group stands for, with its look (Dark Mode attire,
+/// blade 0 Soul Eater / 1 the Keyblade of People's Hearts).
+pub fn manifest_json(skins: &[Made], riku_guard: bool) -> String {
+    let rows: Vec<String> = skins.iter().map(|m| format!("{{\"riku\": {}, \"skin\": {}, \"dark\": {}, \"blade\": {}}}", m.riku, m.skin, m.dark, m.blade)).collect();
     format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}}}\n", rows.join(", "))
+}
+
+/// One group made: the Riku group it stands for, and its look.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Made {
+    /// Riku's own group (101 / 111).
+    pub riku: u16,
+    /// The group made.
+    pub skin: u16,
+    /// The Dark Mode attire.
+    pub dark: bool,
+    /// 0 the Soul Eater, 1 the Keyblade of People's Hearts.
+    pub blade: u8,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Riku's Keyblade (fork 0.160.0; fork owner, 2026-11-23: "quero implementar para o Riku a troca de
+// Keyblade, vai ser simplesmente cosmética … entre a Soul Eater e a Keyblade of Heart"; "no Kingdom
+// Hearts 1 essa é a única keyblade que ele utiliza, numa bossfight inclusive com o mesmo traje do
+// DarkMode").
+//
+// - KH1 (Checked (files)): Riku-Ansem's battle model `xa_ex_1580` (voices `rk04`, the Dark Mode
+//   attire) holds it as its HD mesh `-c0.cvbl` mesh 0, on joint 211 alone, texture slot 0
+//   (`-1c0.dds`, 512 × 512: the dark blade, the red heart, the crown teeth).
+// - Re:CoM (Checked (files)): Riku's weapon is two parts of his own model (`PL0101` / `PL0111`
+//   parts 0 untextured and 1 textured, Dark Riku's `PL0201` / `PL0211` the same), every vertex on
+//   `wep0` (77; Dark's 105). Re:CoM's Soul Eater on `wep0` = KH1 `xa_ex_1560`'s on its joint 191
+//   × 0.01, same axes (the same bounds to the centimetre).
+// - The Keyblade's joint 211 (Riku-Ansem's 247-joint skeleton) sits [`BLADE_SHIFT`] from joint
+//   191's: KH1 `xa_ex_1160` (Riku in Hollow Bastion, the same skeleton) holds the Soul Eater on
+//   joint 211; matched to `xa_ex_1560`'s, a shift of (4.54, −0.52, −0.02) cm (mean miss 1.2 cm:
+//   the two meshes differ a little). Assumption: Riku-Ansem's grip is that Riku's.
+// - Dark Riku's `wep0` is Riku's turned half a turn about its x (`BLADE_FLIP`, 0.154.3): the blade
+//   is turned the same way there, so it shows as on Riku.
+// - The new groups ([`BLADE_GROUPS`]) are the four looks' own copies; only their `.MDL` (the two
+//   weapon parts replaced, the rest kept byte for byte) and `.RTM` (+ the Keyblade's texture)
+//   differ.
+
+/// KH1's model holding the Keyblade.
+pub const BLADE_MODEL: &str = "xa_ex_1580.mdls";
+/// Its HD mesh.
+pub const BLADE_CVBL: &str = "-c0.cvbl";
+/// The Keyblade's mesh in it.
+pub const BLADE_MESH: usize = 0;
+/// The joint it is on.
+pub const BLADE_JOINT: u32 = 211;
+/// Its texture (cvbl slot 0).
+pub const BLADE_DDS: &str = "-1c0.dds";
+/// Its texture's name in Re:CoM (looked up globally: one name for the four groups).
+pub const BLADE_TEXTURE: &str = "rk_kophearts";
+/// Joint 211 → joint 191 (KH1 units).
+pub const BLADE_SHIFT: [f32; 3] = [4.54, -0.52, -0.02];
+
+/// (base group, the group whose raw `.RTM` / `.TXA` it uses, new group, Dark Mode attire).
+pub const BLADE_GROUPS: [(u16, u16, u16, bool); 4] = [(101, 101, 141, false), (111, 111, 151, false), (121, 201, 161, true), (131, 211, 171, true)];
+
+/// The Keyblade's sources: KH1's HD mesh and texture.
+pub struct BladeSource {
+    /// The HD mesh file.
+    pub cvbl: Vec<u8>,
+    /// The texture (DXT).
+    pub dds: Vec<u8>,
+}
+
+impl BladeSource {
+    /// From `xa_ex_1580.mdls`'s HD assets.
+    pub fn from_assets(assets: &[kh1_formats::egs::HdAsset]) -> Result<BladeSource> {
+        let get = |n: &str| assets.iter().find(|a| a.name == n).map(|a| a.data.clone()).ok_or_else(|| crate::Error::Format(format!("{BLADE_MODEL}: no {n}")));
+        Ok(BladeSource { cvbl: get(BLADE_CVBL)?, dds: get(BLADE_DDS)? })
+    }
+}
+
+/// `mdl` (Riku's or Dark Riku's, parts 0 / 1 his weapon on `wep0`) with the Keyblade as its weapon.
+pub fn with_blade(mdl: &[u8], src: &BladeSource, flip: bool) -> Result<Vec<u8>> {
+    use crate::mdl::{join_parts, split_parts, MdlPart, FMT_PLAIN, FMT_TEXTURED};
+    let mut parts = split_parts(mdl)?;
+    if parts.len() < 3 {
+        return Err(crate::Error::Format("Riku's model: fewer than 3 parts".into()));
+    }
+    let p1 = MdlPart::parse_bytes(&parts[1])?;
+    let p2 = MdlPart::parse_bytes(&parts[2])?;
+    let wep0 = p1.bones.iter().position(|b| crate::ann::cstr(&b.name) == "wep0").ok_or_else(|| crate::Error::Format("Riku's model: no wep0".into()))?;
+    let only_wep0 = |p: &MdlPart| p.list_a.iter().chain(p.list_b.iter().flatten()).all(|k| k.verts.iter().all(|v| v.bone() == wep0));
+    let tx = p1.list_a.first().filter(|k| k.fmt == FMT_TEXTURED).ok_or_else(|| crate::Error::Format("Riku's model: part 1 is not textured".into()))?;
+    let pl = p2.list_a.first().filter(|k| k.fmt == FMT_PLAIN).ok_or_else(|| crate::Error::Format("Riku's model: part 2 is not untextured".into()))?;
+    if !only_wep0(&p1) || parts[0].len() < 0x30 || u16::from_le_bytes([parts[0][0], parts[0][1]]) as usize != p1.bones.len() {
+        return Err(crate::Error::Format("Riku's model: parts 0 / 1 are not his weapon alone".into()));
+    }
+    let cv = kh1_formats::cvbl::Cvbl::parse(&src.cvbl)?;
+    let (_, _, img) = crate::keyblade::texture_entry(BLADE_TEXTURE, &src.dds)?;
+    let place = |p: [f32; 3]| {
+        let q = [(p[0] + BLADE_SHIFT[0]) * 0.01, (p[1] + BLADE_SHIFT[1]) * 0.01, (p[2] + BLADE_SHIFT[2]) * 0.01];
+        if flip {
+            [q[0], -q[1], -q[2]]
+        } else {
+            q
+        }
+    };
+    let bp = crate::keyblade::blade_parts(&cv, BLADE_MESH, BLADE_JOINT, wep0 as u32, &place, &img, (tx.gif, tx.regs), (pl.gif, pl.regs))?;
+    let nb = p1.bones.len();
+    let mut name = [0u8; 32];
+    name[..BLADE_TEXTURE.len()].copy_from_slice(BLADE_TEXTURE.as_bytes());
+    let textured = MdlPart {
+        bounds: crate::keyblade::part_bounds(nb, &[&bp.textured_a, bp.textured_b.as_deref().unwrap_or(&[])]),
+        textures: vec![name],
+        list_a: bp.textured_a,
+        list_b: bp.textured_b,
+        ..p1.clone()
+    };
+    let plain = MdlPart {
+        flags: [parts[0][2], parts[0][3]],
+        filler: parts[0][0x20..0x30].try_into().unwrap(),
+        bones: p1.bones.clone(),
+        rest: p1.rest.clone(),
+        textures: vec![],
+        bounds: crate::keyblade::part_bounds(nb, &[&bp.plain]),
+        list_a: bp.plain,
+        list_b: None,
+    };
+    parts[0] = plain.write_bytes()?;
+    parts[1] = textured.write_bytes()?;
+    Ok(join_parts(&parts))
+}
+
+/// A raw `.RTM` entry (`(data, HD assets, date)` as the archive holds it) with the Keyblade's
+/// texture added (TIM2 + HD), as a plain entry for Panacea's raw route.
+pub fn rtm_with_blade(d: &[u8], assets: &[kh1_formats::egs::HdAsset], date: i32, src: &BladeSource) -> Result<Vec<u8>> {
+    let mut rtm = crate::rtm::Rtm::parse(d)?;
+    let (e, hd, _) = crate::keyblade::texture_entry(BLADE_TEXTURE, &src.dds)?;
+    rtm.entries.retain(|x| x.name_str() != BLADE_TEXTURE);
+    rtm.entries.push(e);
+    let mut a = assets.to_vec();
+    a.retain(|x| x.name != hd.name);
+    a.push(hd);
+    Ok(kh1_formats::egs::build_plain_entry(&rtm.write(), &a, date)?)
+}
+
+/// One Keyblade group: `base`'s files (`have`: what the step wrote this run, else Re:CoM's) under
+/// `target`'s names, its model with the Keyblade, its raw `.RTM` / `.TXA` from `raw_src`.
+pub fn build_blade(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, base: u16, raw_src: u16, target: u16, dark: bool, src: &BladeSource) -> Result<Built> {
+    let get = |ext: &str| -> Result<Vec<u8>> {
+        let n = path(base, ext);
+        match have.get(&n) {
+            Some(b) => Ok(b.clone()),
+            None => crate::install::read_recom(arc, keys, &n),
+        }
+    };
+    let raw = |ext: &str| -> Result<(Vec<u8>, Vec<kh1_formats::egs::HdAsset>, i32)> {
+        let n = path(raw_src, ext);
+        let e = arc.find(&n).ok_or_else(|| crate::Error::Format(format!("{n} not in Recom.hed")))?;
+        let raw = arc.read_raw_entry(e)?;
+        let date = raw.get(12..16).map_or(0, |b| i32::from_le_bytes(b.try_into().unwrap()));
+        let (d, a) = kh1_formats::egs::decode_entry_full(keys, &raw)?;
+        Ok((d, a, date))
+    };
+    let mut files = vec![(path(target, "MDL"), with_blade(&get("MDL")?, src, dark)?)];
+    for ext in ["ANN", "EET", "SES"] {
+        files.push((path(target, ext), get(ext)?));
+    }
+    let (d, a, date) = raw("RTM")?;
+    files.push((format!("raw/{}", path(target, "RTM")), rtm_with_blade(&d, &a, date, src)?));
+    let (d, a, date) = raw("TXA")?;
+    files.push((format!("raw/{}", path(target, "TXA")), kh1_formats::egs::build_plain_entry(&d, &a, date)?));
+    let clips = Ann::parse(&files[1].1)?.slots.iter().filter(|s| s.clip.is_some()).count();
+    Ok(Built { files, clips })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::install;
+
+    /// With the owner's installs (`RECOM_GAME`): the Keyblade replaces Riku's weapon parts alone
+    /// (the other parts byte for byte), on `wep0`, its grip where the Soul Eater's is (the
+    /// Keyblade spans the Soul Eater's grip region), turned over on Dark Riku's model.
+    #[test]
+    fn the_keyblade_replaces_rikus_weapon_parts() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { return };
+        let src = BladeSource::from_assets(&assets).unwrap();
+        for (name, flip, wep0) in [("PLAYER/0101/PL0101.MDL", false, 77usize), ("PLAYER/0201/PL0201.MDL", true, 105)] {
+            let old = install::read_recom(&arc, &keys, name).unwrap();
+            let new = with_blade(&old, &src, flip).unwrap();
+            let (a, b) = (crate::mdl::split_parts(&old).unwrap(), crate::mdl::split_parts(&new).unwrap());
+            assert_eq!(a.len(), b.len());
+            assert_eq!(a[2..], b[2..], "{name}: the body kept byte for byte");
+            let p = crate::mdl::MdlPart::parse_bytes(&b[1]).unwrap();
+            assert_eq!(p.texture_names(), [BLADE_TEXTURE]);
+            let vs: Vec<_> = p.list_a.iter().chain(p.list_b.iter().flatten()).flat_map(|k| k.verts.iter()).collect();
+            assert!(vs.iter().all(|v| v.bone() == wep0));
+            let xs: Vec<f32> = vs.iter().map(|v| v.pos()[0]).collect();
+            let (lo, hi) = (xs.iter().cloned().fold(f32::MAX, f32::min), xs.iter().cloned().fold(f32::MIN, f32::max));
+            assert!(lo < -1.0 && hi > 0.2 && hi < 0.3, "{name}: {lo}..{hi} m along the blade");
+            let ys: Vec<f32> = vs.iter().map(|v| v.pos()[1]).collect();
+            let ymax = ys.iter().cloned().fold(f32::MIN, f32::max);
+            assert!(if flip { ymax < 0.18 } else { ymax > 0.18 }, "{name}: turned over on Dark's model ({ymax})");
+            assert!(crate::mdl::MdlPart::parse_bytes(&b[0]).is_ok());
+        }
+    }
 
     fn game() -> Option<std::path::PathBuf> {
         std::env::var_os("RECOM_GAME").map(Into::into)

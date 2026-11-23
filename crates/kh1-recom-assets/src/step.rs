@@ -558,17 +558,44 @@ fn run_inner(opt: &Options) -> Result<(), String> {
         if sora_guard.is_none() {
             println!("note: KH1's xa_ex_1010.mset / .mdls not read: Riku's Guard keeps his clash recoil");
         }
-        for &(riku, dark, skin) in &kh1_recom_assets::riku_skin::SKIN_GROUPS {
-            match kh1_recom_assets::riku_skin::build_with(&arc, &keys, riku, dark, skin, sora_guard.as_ref()) {
+        use kh1_recom_assets::riku_skin::{self as rsk, Made};
+        let mut have: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+        for &(riku, dark, skin) in &rsk::SKIN_GROUPS {
+            match rsk::build_with(&arc, &keys, riku, dark, skin, sora_guard.as_ref()) {
                 Ok(b) => {
                     for (rel, bytes) in &b.files {
                         write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
+                        have.insert(rel.clone(), bytes.clone());
                     }
                     println!("Riku's Dark Form skin: group {skin} = PL{dark:04}'s model with PL{riku:04}'s {} clips", b.clips);
-                    done.push((riku, skin));
+                    done.push(Made { riku, skin, dark: true, blade: 0 });
                 }
                 Err(e) => println!("note: Riku's Dark Form skin (group {skin}) not built: {e}"),
             }
+        }
+        // 0.160.0: Riku's Keyblade (the Keyblade of People's Hearts, KH1's Riku-Ansem's) for each look.
+        let blade = install::kh1(&game, keys.clone()).ok().and_then(|i| i.read_full(rsk::BLADE_MODEL).ok()).map(|(_, a, _)| rsk::BladeSource::from_assets(&a));
+        match blade {
+            Some(Ok(src)) => {
+                for &(base, raw_src, target, dark) in &rsk::BLADE_GROUPS {
+                    let Some(riku) = (if dark { done.iter().find(|m| m.skin == base).map(|m| m.riku) } else { Some(base) }) else {
+                        println!("note: Riku's Keyblade (group {target}) not built: no group {base}");
+                        continue;
+                    };
+                    match rsk::build_blade(&arc, &keys, &have, base, raw_src, target, dark, &src) {
+                        Ok(b) => {
+                            for (rel, bytes) in &b.files {
+                                write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
+                            }
+                            println!("Riku's Keyblade: group {target} = group {base} with the Keyblade of People's Hearts ({} clips)", b.clips);
+                            done.push(Made { riku, skin: target, dark, blade: 1 });
+                        }
+                        Err(e) => println!("note: Riku's Keyblade (group {target}) not built: {e}"),
+                    }
+                }
+            }
+            Some(Err(e)) => println!("note: Riku's Keyblade not built: {e}"),
+            None => println!("note: KH1's {} not read: Riku's Keyblade not built", rsk::BLADE_MODEL),
         }
         if done.is_empty() {
             if manifest.is_file() {

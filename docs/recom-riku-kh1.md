@@ -778,3 +778,47 @@ odd, there is no Counterattack.
   The guard is up the whole time it blocks.
 - Asset step: **re-run** (automatic). **Checked**: tests, the asset step, the Windows build.
   **Not checked**: in game.
+
+## 0.160.0: Riku's Keyblade (Soul Eater / Keyblade of Heart)
+
+Fork owner, 2026-11-23, verbatim: "quero implementar para o Riku a troca de Keyblade, vai ser
+simplesmente cosmética … entre a Soul Eater e a Keyblade of Heart, vai ser uma nova entrada no menu
+dentro de Costumes … ela é liberada com 15 de DP, mas inicialmente deixa ela desbloqueada para eu
+testar"; "no Kingdom Hearts 1 essa é a única keyblade que ele utiliza, numa bossfight inclusive com
+o mesmo traje do DarkMode".
+
+- **KH1's Riku models** (Checked (files): voices in each `.mdls`'s HD assets):
+  - `xa_ex_1010` `rk01`: the Destiny Islands duel, mesh 6 the wooden sword on joint 191.
+  - `xa_ex_1560` `rk01`: the Soul Eater on joint 191, 640 vertices.
+  - `xa_ex_1160` `rk03`: Hollow Bastion, 247 joints, the Soul Eater on joint 211.
+  - `xa_ex_1580` `rk04`: Riku-Ansem, the Dark Mode attire. PS2 mesh 7 and HD `-c0.cvbl` mesh 0 are
+    the Keyblade of People's Hearts on joint 211, texture slot 0 = `-1c0.dds` (512 × 512).
+  - (`xa_ex_1030` is Leon, `le00`; `1090` Maleficent, `ma00`.)
+- **Re:CoM's Riku weapon** (Checked (files)):
+  - `PL0101` / `PL0111` parts 0 (untextured, 100 vertices) and 1 (textured `weapon_01` / `_11`,
+    508), every vertex on `wep0` (77).
+  - `PL0201` / `PL0211` parts 0 / 1 likewise on `wep0` (105), plus a few on 106. Part 0 is a packet
+    form our reader refuses; it is replaced whole.
+  - Re:CoM's Soul Eater = `xa_ex_1560`'s × 0.01, same axes: the bounds match to the millimetre.
+- **Placement**:
+  - Joint 211 → 191 is a shift of (4.54, −0.52, −0.02) cm, found by matching `xa_ex_1160`'s Soul
+    Eater to `xa_ex_1560`'s (mean miss 1.2 cm).
+  - On Dark Riku's model the blade is turned half a turn about x (`BLADE_FLIP`, 0.154.3).
+  - Assumption: Riku-Ansem grips it as Riku grips the Soul Eater.
+- **Groups**:
+  - 141 / 151 (Default Attire, from 101 / 111) and 161 / 171 (Dark Mode, from 121 / 131).
+  - Not in `Recom.hed` (Checked (files)).
+  - Their `.MDL` has parts 0 / 1 rebuilt (`riku_skin::with_blade`; parts are position independent:
+    `mdl::split_parts` / `join_parts`); the rest is byte for byte.
+  - `raw/.RTM` = the base's RTM + `rk_kophearts` (TIM2 + HD DXT). `.ANN` / `.EET` / `.SES` / `raw/.TXA`
+    are the base group's under the new names.
+  - Manifest rows carry `dark` / `blade`; older rows read Dark Mode with the Soul Eater.
+- **Game** (`crate::riku_skin::Look`, `win::riku_skin`):
+  - Chars 3 / 4 take the group of the attire × Keyblade.
+  - The Costumes page's second row is "Keyblade" (`riku_keyblade`).
+  - Locked until Riku's DP reach 15 once (save spare bit 8, `dark_points::HEART_SEEN`); debug
+    `riku_keyblade_unlocked`.
+  - A Keyblade-only change in the field swaps the model at once with Riku's way-back effect; an
+    attire change keeps its transformation.
+- Asset step: **re-run** (automatic). **Checked**: tests, the asset step, the Windows build. **Not
+  checked**: in game.
