@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 280 (fork branch Re-Re-Reverse/Rebirth): the costume changed in place (no door), the HUD face follows it; Halloween Town confirmed, version 0.155.0 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "importante que quando essa skin estiver ativa na halloween town … essa skin fica com a variação da halloween town, além disso... seria possível trocar a skin sem ter que passar por uma porta?" (chose "Trocar no lugar"); "quando trocar a skin para a darkmode também deve alterar a foto no hud".
+
+- **Halloween Town**: skin group 131 is `PL0211` (Dark Riku's Halloween textures), Riku's group 111 there (Checked (files)). Already so.
+- **In place** (`win::riku_skin`): the model part is released as the entity dtor `0x1401A2440` does and rebuilt as the model init `0x1401A4E70` and the player state init `0x1401FA6E0` build it. That covers parts, matrices, sub-models, motion controller, materials, texture animation, EET / SES players, step-effect defaults, the clips bound by name, the bones by name, the weapon re-attached, and the idle row. Each step and address: Checked (exe: disasm). It runs at the camp's close, or at Riku's frame once the group is loaded; only plain Riku in the field, standing / walking / running. 21 callees' first bytes are checked.
+- **HUD face**: Re:CoM's own Dark Mode gauge switch's two face steps (`0x14020BC60`): set `+0x88` to `"gauge:02"`, then the face layer 4 replaced with group 3 / 0. They run when the costume is Dark Mode, never in the Dark gauge state.
+- **Assumptions**: no live pointer into the old model at the change; the node resized by the parts' bind (logged).
+- **Checked**: tests, the Windows build. **Not checked**: in game. Asset step: unchanged. Details: `docs/recom-riku-kh1.md` § 0.155.0.
+
+---
+
 ## Stage 279 (fork branch Re-Re-Reverse/Rebirth): Dark Mode skin hides the Soul Eater where Riku does (the menu), version 0.154.4 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "ficou bom mas no menu não precisa ele segurar a espada na mão, além disso no menu ela ficou invertida, mas o modelo na gameplay ficou perfeito agora".

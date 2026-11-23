@@ -261,6 +261,18 @@ unsafe fn loaded(g: u16) -> bool {
     !queued(g) && found(kind::RTM, g) && found(kind::MDL, g) && found(kind::ANN, g)
 }
 
+/// Group `g`'s files are loaded (Riku's costume, `win::riku_skin`).
+pub(super) unsafe fn group_ready(g: u16) -> bool {
+    loaded(g)
+}
+
+/// Queues group `g` if it is neither loaded nor queued (Riku's costume).
+pub(super) unsafe fn queue_group(g: u16) {
+    if queue_if_missing(g) {
+        log(&format!("riku skin: group {g} queued for the costume"));
+    }
+}
+
 /// Queues group `g` with Re:CoM's own call when its RTM is not loaded and it is not queued (as
 /// `0x140211AA0` does for the player's group).
 unsafe fn queue_if_missing(g: u16) -> bool {
@@ -386,6 +398,8 @@ pub unsafe extern "win64" fn camp_field(field: usize, open: i32, a3: usize, a4: 
         camp_closed();
     }
     if open == 0 {
+        // Riku's costume chosen in the camp: changed in place now (0.155.0).
+        super::riku_skin::camp_closed(base());
         // The MP bar shows a Keyblade's max MP (or the setting) changed in the camp.
         super::mp_bar::refresh();
     }

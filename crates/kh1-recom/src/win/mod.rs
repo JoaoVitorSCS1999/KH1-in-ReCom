@@ -138,7 +138,10 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
         Item::RevengeValue => revenge::set_enabled(s.boss_revenge),
         // Fork: Riku's Costume: Re:CoM's char -> group entries now; the next player build shows it.
         // SAFETY: two checked writes of Re:CoM's static tables (the camp: no player is being built).
-        Item::Costume => unsafe { riku_skin::apply(base(), s.riku_dark_skin) },
+        Item::Costume => unsafe {
+            riku_skin::apply(base(), s.riku_dark_skin);
+            riku_skin::costume_chosen(base());
+        },
         // Read by each KH1 frame (`movement::run_frame`, `stick_class`).
         Item::RunSpeed | Item::JumpHeight | Item::AirSpeed => movement::set_speeds(crate::movement::speeds::Speeds { run: s.run_speed, jump: s.jump_height, air: s.air_speed }),
         Item::DodgeRoll => {
