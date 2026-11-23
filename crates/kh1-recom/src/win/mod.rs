@@ -39,6 +39,7 @@ mod mp;
 mod mp_bar;
 mod notices;
 mod revenge;
+mod riku_skin;
 mod kh1_enemy;
 mod kh1_thrown;
 mod kh1_cure;
@@ -331,6 +332,8 @@ fn install_movement(base: usize, s: &Settings, dirs: &[PathBuf], game_dir: &Path
     if movement::installed() {
         fx::preload(recom_bases(dirs).into_iter().map(|b| b.join(crate::fx::MANIFEST)).find(|p| p.is_file()).as_deref());
     }
+    // Riku's Dark Form skin (fork): its groups' rows go in the same table.
+    riku_skin::preload(recom_bases(dirs).into_iter().map(|b| b.join(kh1_recom_assets::riku_skin::MANIFEST)).find(|p| p.is_file()).as_deref());
     install_attack(base, s, stats_file.as_deref(), bar_file.as_deref(), menu_file.as_deref(), hud_file.as_deref(), sound_file.as_deref());
     // M13 stage 2: KH1's system bank also carries the KH1 effects' sounds, so it is read even
     // without the KH1 command menu look; then KH1's own SCD banks.

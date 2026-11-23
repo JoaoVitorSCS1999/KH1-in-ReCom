@@ -189,6 +189,16 @@ pub fn install(b: usize) {
                 return;
             }
         };
+        // Riku's Dark Form skin groups (fork): their rows copy Riku's (`crate::riku_skin`).
+        let skins = super::riku_skin::skins();
+        let planned = match crate::riku_skin::add_rows(planned.clone(), &skins) {
+            Ok(t) => t,
+            Err(e) => {
+                log(&format!("riku skin: PLAYER table: {e}; Riku keeps his model"));
+                planned
+            }
+        };
+        let skin_rows = planned.iter().any(|r| skins.iter().any(|s| s.skin == r.group));
         let Some(table) = build_rows(&planned) else {
             log("keyblades: PLAYER table copy failed; no model swap");
             return;
@@ -215,6 +225,9 @@ pub fn install(b: usize) {
         }
         let _ = MODELS.set(m);
         INSTALLED.store(true, Ordering::Release);
+        if skin_rows {
+            super::riku_skin::apply(b, super::settings().riku_dark_skin);
+        }
         log(&format!(
             "keyblades: models in: PLAYER table {} rows ({} Re:CoM's + {} for groups {:?}) at {table:#x}; weapon group picked at CPlayerWeapon +0x30; rebuilt at camp close; own EET + EFF (M13 stage 4) for {:?}",
             planned.len(),
