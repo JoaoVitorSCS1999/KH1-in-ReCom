@@ -459,8 +459,19 @@ pub unsafe fn start_sleight(pl: usize, id: u16) -> bool {
     }
     // Owner (2026-11-04, "Sleights outside battle"): a field room too, free.
     let Some(field) = super::field_sleights::start_room(pl, id, name) else { return false };
+    // 0.179.0: Dark Riku's own sleights pay Dark Mode's DP (checked here, paid once Re:CoM's start
+    // took it).
+    let dp = crate::dark_points::pays_dp(id);
+    if dp && !field {
+        let view = super::dark_points::sleight_view(pl);
+        let ok = view.is_some_and(|(now, cap)| crate::dark_points::sleight_cost(id, cap).is_some_and(|c| crate::dark_points::can_pay(now, c)));
+        if !ok {
+            note(|| format!("sleight {name}: DP short (DP {view:?}; {:?})", crate::sleights::cost(id)));
+            return false;
+        }
+    }
     let mp = super::mp::current().map_or(0, |m| m.0);
-    let points = if field {
+    let points = if field || dp {
         0
     } else {
         let Some(points) = crate::sleights::pay_points(id, mp) else {
@@ -470,7 +481,11 @@ pub unsafe fn start_sleight(pl: usize, id: u16) -> bool {
         points
     };
     let Some(before) = begin(pl, id, name) else { return false };
-    if !field {
+    if dp && !field {
+        if super::dark_points::pay_sleight(pl, id).is_none() {
+            note(|| format!("sleight {name}: started, but its DP could not be paid (DP changed in between)"));
+        }
+    } else if !field {
         super::mp::pay(points * 100, name);
     }
     SLEIGHT_ID.store(id as u32, Ordering::Relaxed);

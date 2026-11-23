@@ -152,6 +152,7 @@ pub struct Sleight {
     /// `SY0002.CTD`'s name (its row id + 1; Checked (files)).
     pub name: &'static str,
     /// Whole MP points (ours: KH1 has no Riku; the Sleights list's tiers, the Dark ones a point more).
+    /// 0 for the DP sleights (`crate::dark_points::DP_SLEIGHTS`, 0.179.0).
     pub mp: i32,
 }
 
@@ -171,10 +172,13 @@ pub const SLEIGHTS: [Sleight; 6] = [
 /// `0x140206830`) takes 0x5F..=0x63 and 0x65..=0x6B (its jump table at `0x140206894`; 0x64 refused).
 /// Checked (exe). The Dark ones, with Dark Break / Dark Firaga / Dark Aura (`SY0002.CTD`'s names);
 /// MP ours, as Riku's tiers.
-pub const DARK_SLEIGHTS: [Sleight; 6] = [
-    Sleight { id: 0x5F, name: "Dark Break", mp: 3 },
-    Sleight { id: 0x60, name: "Dark Firaga", mp: 3 },
-    Sleight { id: 0x61, name: "Dark Aura", mp: 4 },
+/// 0.179.0: Dark Break, Dark Firaga, Dark Aura and Inverse Burst (0x65: the same start path as the
+/// first three, `0x14020E590` then `+0x138`; Checked (decomp)) pay DP (`crate::dark_points`).
+pub const DARK_SLEIGHTS: [Sleight; 7] = [
+    Sleight { id: 0x5F, name: "Dark Break", mp: 0 },
+    Sleight { id: 0x60, name: "Dark Firaga", mp: 0 },
+    Sleight { id: 0x61, name: "Dark Aura", mp: 0 },
+    Sleight { id: 0x65, name: "Inverse Burst", mp: 0 },
     Sleight { id: 0x69, name: "Dark Impulse", mp: 3 },
     Sleight { id: 0x6A, name: "Dark Maelstrom", mp: 3 },
     Sleight { id: 0x6B, name: "Dark Barrage", mp: 4 },
@@ -186,7 +190,7 @@ pub fn sleight(id: u16) -> Option<&'static Sleight> {
 }
 
 /// The list of one of them.
-pub fn list(dark: bool) -> &'static [Sleight; 6] {
+pub fn list(dark: bool) -> &'static [Sleight] {
     if dark {
         &DARK_SLEIGHTS
     } else {
@@ -239,7 +243,10 @@ mod tests {
     fn rikus_sleights() {
         assert!(SLEIGHTS.iter().all(|s| (0x66..=0x6B).contains(&s.id)));
         assert!(DARK_SLEIGHTS.iter().all(|s| (0x5F..=0x63).contains(&s.id) || (0x65..=0x6B).contains(&s.id)));
-        assert_eq!(words().count(), 9);
+        assert_eq!(words().count(), 10, "0.179.0: Inverse Burst");
+        // 0.179.0: Dark Riku's own four pay DP, never MP.
+        assert!([0x5F, 0x60, 0x61, 0x65].iter().all(|&id| crate::sleights::pay_points(id, 99).is_none() && crate::sleights::cost(id).is_some_and(|c| matches!(c, crate::sleights::Cost::Dp(_)))));
+        assert_eq!(sleight(0x65).map(|s| s.name), Some("Inverse Burst"));
         assert_eq!(attack_id_for(true, 4), 0xA1);
         assert_eq!(attack_id_for(false, 4), 0x9A);
         assert!(row_ok_for(true, 0x30) && !row_ok_for(true, 0x08) && row_ok_for(false, 0x08));

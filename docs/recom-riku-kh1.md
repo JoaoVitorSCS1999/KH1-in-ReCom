@@ -1010,3 +1010,27 @@ The owner's call after 0.176.2. Reverted to 0.175.0's costumes; Re:CoM has no ot
 ## 0.178.0: the Halloween Town costume
 
 `Look::halloween`: char 3 on Riku's Halloween group 111 (and its skins), unlocked by his first frame as char 4 (spare bit 0x20) or `riku_halloween_unlocked`.
+
+## 0.179.0: Dark Riku's own sleights pay DP
+
+Fork owner, 2026-11-23, verbatim: "o MP contina, mas os Sleights que só o Dark Riku Executa,
+consomem DP"; answers 1a (Inverse Burst joins his list), 2a (light 20 %, heavy 30 %).
+
+- **Which** (Checked (exe + decomp)): Riku's sleight start `0x140216AB0` refuses 0x5F..=0x61 and
+  0x65; Dark Riku's `0x140206830` takes them: 0x5F / 0x60 / 0x61 / 0x62 / 0x65 (and 0x63, made 0x62
+  first) call `0x14020E590`, then every id of 0x5F..=0x6B but 0x64 runs `+0x138` with `+0x838` = 10;
+  0x64 is refused.
+  So Dark Break, Dark Firaga, Dark Aura and Inverse Burst are Dark Riku's alone; Holy Burst is
+  Riku's alone (King Mickey's); every other sleight both start.
+- **Cost** (`crate::dark_points::{DP_SLEIGHTS, sleight_cost, can_pay}`, `Dp::pay_sleight`): a share
+  of Dark Mode's max (his DP stat, 8..99): Dark Break and Dark Firaga 20 %, Dark Aura and Inverse
+  Burst 30 %, at least 2, rounded; only with 1 DP left after it (answer 3a of the earlier round: a
+  sleight never ends Dark Mode). E.g. DP stat 30: 6 / 9; 99: 20 / 30; 8: 2 / 2.
+- **Menu** (`crate::sleights::usable_with_dp`, `command_menu::World::dp`,
+  `win::dark_points::sleight_view`): his Sleights list and shortcuts grey a DP sleight he can't pay;
+  the others keep their MP (Dark Impulse / Maelstrom / Barrage too). The start
+  (`win::summons::start_sleight`) checks the DP, lets Re:CoM's start take the sleight, then pays it
+  and writes Re:CoM's Dark gauge at once (`win::dark_points::pay_sleight`).
+- **Inverse Burst** added to Dark Riku's list (the asset step's name `0x8165`): its start path is
+  the three others'. Assumption: its pack loads in his battles as theirs do.
+- Not yet: the Heartless icon on the DP sleights (next).

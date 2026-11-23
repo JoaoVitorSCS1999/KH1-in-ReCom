@@ -293,6 +293,8 @@ pub struct World {
     pub spells: [u8; spell::COUNT],
     /// KH1's MP (MP, max, charge), None when MP isn't live.
     pub mp: Option<(i32, i32, u16)>,
+    /// 0.179.0: Dark Riku's DP (now, Dark Mode's max) while he is out, for his DP sleights.
+    pub dp: Option<(i32, i32)>,
     /// Distance to the target (KH1 cm), when there is one.
     pub target_dist: Option<f32>,
     /// The context command (entry 3, shown in the tab; 0: none).
@@ -804,7 +806,7 @@ impl Menu {
                     short_ok = true;
                     if equipped_sl.iter().any(|&e| e as u16 == id) {
                         short_cmds[k] = crate::sleights::command(id);
-                        if crate::sleights::usable(&gate, id) {
+                        if crate::sleights::usable_with_dp(&gate, id, w.dp) {
                             short_grey &= !(1 << k);
                         }
                     }
@@ -865,7 +867,7 @@ impl Menu {
             let ok = match crate::sleights::special_index(id) {
                 // M12 step 7: a KH1 special as its prompt (`crate::sleights::special_usable`).
                 Some(_) => crate::sleights::special_usable(&gate, id, w.sleight_specials),
-                None => crate::sleights::usable(&gate, id),
+                None => crate::sleights::usable_with_dp(&gate, id, w.dp),
             };
             if ok {
                 lgrey &= !(1 << k);

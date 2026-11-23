@@ -425,6 +425,29 @@ pub unsafe fn dark_seen() -> bool {
     save != 0 && super::stats::riku_story() && rd::<u8>(save + crate::mp::BLOCK_FIRST + crate::mp::off::SPARE) & DARK_SEEN != 0
 }
 
+/// 0.179.0: Dark Riku's DP for his Sleights list and shortcuts: (DP now, Dark Mode's max) while he
+/// is the main player in a battle, else None.
+pub unsafe fn sleight_view(pl: usize) -> Option<(i32, i32)> {
+    if !(ours(pl) && is_dark(pl)) {
+        return None;
+    }
+    STATE.lock().ok().filter(|g| g.dp.dark).map(|g| (g.dp.dp, g.dp.cap()))
+}
+
+/// 0.179.0: Dark Riku pays DP sleight `id` (`crate::dark_points::Dp::pay_sleight`, Re:CoM's Dark
+/// gauge updated at once); the DP paid, or None (nothing changed).
+pub unsafe fn pay_sleight(pl: usize, id: u16) -> Option<i32> {
+    if !(ours(pl) && is_dark(pl)) {
+        return None;
+    }
+    let Ok(mut g) = STATE.lock() else { return None };
+    let before = g.dp.dp;
+    let paid = g.dp.pay_sleight(id)?;
+    show(pl, g.dp.dp, g.dp.cap());
+    note(|| format!("sleight {:#x}: {paid} DP (DP {before} -> {}, max {})", id, g.dp.dp, g.dp.cap()));
+    Some(paid)
+}
+
 /// The DP now (for the Dark gauge, next stage; 0 outside a battle).
 #[allow(dead_code)]
 pub fn current() -> i32 {

@@ -10,6 +10,23 @@ Every setting has a Config-menu toggle between **Re:CoM** and **KH1**.
 
 These rules override any habit of the assistant.
 
+## Fork branch `Re-Re-Reverse/Rebirth`: the fork owner's intent (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "minha intenção com este mod que fique bem claro não é refazer o
+KH1 de 1:1 no Recom mas sim reimplementar o Combate, mantendo a originalidade do Kingdom Hearts
+Recom".
+
+On this branch that intent leads, ahead of § 1:1 target below:
+
+- The goal is Re:CoM with a reimplemented, cardless combat, not KH1 rebuilt inside Re:CoM. KH1 is
+  the main reference for how the combat works (its numbers stay where they serve), not a target to
+  match frame for frame.
+- Re:CoM's own identity is kept and preferred: its characters' resources and rules (Riku's DP and
+  Dark Mode, his sleights, Re:CoM's sleight ideas), its look, its progression. When KH1 1:1 and
+  Re:CoM's originality pull apart, propose the Re:CoM-faithful option first and ask.
+- Systems already built 1:1 stay as they are unless the fork owner asks for a change.
+- The author's rules for `testing` (`PM2CRAZY/KH1-in-ReCom`) are unchanged: this section is the fork's.
+
 ## Native always
 
 Re:CoM's own systems own Sora. Native means giving Re:CoM's engine more abilities so it can do

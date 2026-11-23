@@ -1119,7 +1119,7 @@ unsafe fn riku_world(pl: usize) -> World {
     }
     // 0.150.0: page 2 (Left) as Sora's, its Party list holding the King's sleights (Riku's only
     // friend; the Summon row stays greyed: he has none).
-    let mut w = World { mp: mp_view(), shortcuts, page: super::summons::page(), ..Default::default() };
+    let mut w = World { mp: mp_view(), dp: super::dark_points::sleight_view(pl), shortcuts, page: super::summons::page(), ..Default::default() };
     // 0.163.0: his KH1 item slots (the Items row), as Sora's.
     if super::items::installed() {
         (w.slots, w.slot_count) = super::items::slots();

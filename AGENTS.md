@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 320 (fork branch Re-Re-Reverse/Rebirth): Dark Riku's own sleights pay DP (Inverse Burst added); the fork's design intent recorded, version 0.179.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "o MP contina, mas os Sleights que só o Dark Riku Executa, consomem DP"; answers "1 a,2a" (Inverse Burst in his list; Dark Break / Dark Firaga 20 %, Dark Aura / Inverse Burst 30 %); and the intent "não é refazer o KH1 de 1:1 no Recom mas sim reimplementar o Combate, mantendo a originalidade do Kingdom Hearts Recom" (answer 5a: record it).
+
+- **Re:CoM** (Checked (exe + decomp)): Riku's start `0x140216AB0` refuses 0x5F..=0x61 and 0x65; Dark Riku's `0x140206830` (switch on `+0x82C`) takes them, 0x5F..=0x62 / 0x65 through `0x14020E590` then `+0x138`, `+0x838` = 10. Dark Mode's DP: the player's `+0x44C`, max `+0x450` (his DP stat), the gauge setter `0x14020BFA0` (as 0.152.0 / 0.166.0).
+- **Change**: `crate::dark_points::{DP_SLEIGHTS, sleight_cost, can_pay}`, `Dp::{sleight_cost, pay_sleight}`; `crate::sleights::{Cost::Dp, usable_with_dp}`; `command_menu::World::dp`; `win::dark_points::{sleight_view, pay_sleight}`; `win::summons::start_sleight` checks the DP before Re:CoM's start and pays after it (Re:CoM's Dark gauge written at once). Cost = 20 % / 30 % of Dark Mode's max, at least 2, only with 1 DP left after (a sleight never ends Dark Mode). His other sleights keep MP. `riku::DARK_SLEIGHTS` gains Inverse Burst (0x65; the asset step's name word `0x8165`); `riku::list` returns a slice.
+- **Docs**: `docs/design-philosophy-instructions.md` § Fork branch: the fork owner's intent (Re:CoM's originality ahead of KH1 1:1 on this branch); `docs/recom-riku-kh1.md` § 0.179.0.
+- **Assumption**: Inverse Burst's pack loads in his battles as the other three's.
+- Asset step: its sources changed (the name), so the first start builds again.
+- **Checked**: tests (`dark_rikus_own_sleights_pay_a_share_of_dark_modes_dp`, `rikus_sleights`), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 319 (fork branch Re-Re-Reverse/Rebirth): one debug key, `all_unlock`, for every costume and cosmetic Keyblade, version 0.178.5 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "pode deixar as condições do INI em OFF e unifique elas para all_unlock=off informando que é só para propósitos de debug!".

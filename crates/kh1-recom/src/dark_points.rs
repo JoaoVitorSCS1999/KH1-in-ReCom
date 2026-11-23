@@ -20,6 +20,33 @@
 
 /// The DP that start Dark Mode (and the most Riku holds).
 pub const MAX: i32 = 30;
+
+/// 0.179.0 (fork owner, 2026-11-23, verbatim: "o MP continua, mas os Sleights que só o Dark Riku
+/// Executa, consomem DP"; answers 1a / 2a): the sleights Re:CoM's Riku can't start and Dark Riku can
+/// (Riku's start `0x140216AB0` refuses 0x5F..=0x61 and 0x65, Dark Riku's `0x140206830` takes them;
+/// Checked (exe + decomp)) pay Dark Mode's DP instead of MP, as a share (%) of Dark Mode's max (his DP
+/// stat, [`Dp::cap`]): Dark Break and Dark Firaga 20 %, Dark Aura and Inverse Burst 30 %; at least
+/// [`SLEIGHT_MIN`]. Every other sleight of his keeps its MP.
+pub const DP_SLEIGHTS: [(u16, i32); 4] = [(0x5F, 20), (0x60, 20), (0x61, 30), (0x65, 30)];
+/// The least DP a DP sleight costs (a low DP stat: 8 at a new game).
+pub const SLEIGHT_MIN: i32 = 2;
+
+/// Sleight `id` pays DP ([`DP_SLEIGHTS`]).
+pub fn pays_dp(id: u16) -> bool {
+    DP_SLEIGHTS.iter().any(|&(i, _)| i == id)
+}
+
+/// The DP sleight `id` costs with Dark Mode's max `cap` (rounded to the nearest point).
+pub fn sleight_cost(id: u16, cap: i32) -> Option<i32> {
+    let pct = DP_SLEIGHTS.iter().find(|&&(i, _)| i == id)?.1;
+    Some(((cap.max(1) * pct + 50) / 100).max(SLEIGHT_MIN))
+}
+
+/// A DP sleight may start with `dp` held: at least 1 DP must be left after it (fork owner's answer
+/// 3a: a sleight never ends Dark Mode).
+pub fn can_pay(dp: i32, cost: i32) -> bool {
+    dp - cost >= 1
+}
 /// Frames without an attack before the first idle loss (outside Dark Mode): 5 s.
 pub const IDLE_FIRST: u32 = 300;
 /// Then one loss every 3 s (outside Dark Mode).
@@ -92,6 +119,20 @@ impl Dp {
         } else {
             MAX
         }
+    }
+
+    /// The DP sleight `id` costs now: None outside Dark Mode or for an MP sleight.
+    pub fn sleight_cost(&self, id: u16) -> Option<i32> {
+        self.dark.then(|| sleight_cost(id, self.cap())).flatten()
+    }
+
+    /// Pays DP sleight `id` ([`can_pay`]); the points paid, or None (nothing changed).
+    pub fn pay_sleight(&mut self, id: u16) -> Option<i32> {
+        let c = self.sleight_cost(id)?;
+        can_pay(self.dp, c).then(|| {
+            self.dp -= c;
+            c
+        })
     }
 
     /// Dark Mode begins (Re:CoM's Dark Riku switched in): DP = his DP stat, as Re:CoM's switch-in.
@@ -310,4 +351,26 @@ mod tests {
         assert_eq!(hit_of(2, true), Hit::Special { heavy: true });
         assert!(is_finisher(0x9D) && is_finisher(0xA1) && !is_finisher(0x97));
     }
+
+    #[test]
+    fn dark_rikus_own_sleights_pay_a_share_of_dark_modes_dp() {
+        // 0.179.0: 20 % / 30 % of Dark Mode's max, at least 2, and 1 DP must be left.
+        assert!(pays_dp(0x5F) && pays_dp(0x60) && pays_dp(0x61) && pays_dp(0x65));
+        assert!(!pays_dp(0x69) && !pays_dp(0x66), "the sleights Riku can start too keep MP");
+        assert_eq!([sleight_cost(0x5F, 8), sleight_cost(0x61, 8)], [Some(2), Some(2)], "a new game's DP stat");
+        assert_eq!([sleight_cost(0x60, 30), sleight_cost(0x65, 30)], [Some(6), Some(9)]);
+        assert_eq!([sleight_cost(0x5F, 99), sleight_cost(0x61, 99)], [Some(20), Some(30)]);
+        let mut d = Dp::default();
+        assert_eq!(d.pay_sleight(0x5F), None, "outside Dark Mode: none");
+        d.enter_dark(30);
+        assert_eq!(d.pay_sleight(0x61), Some(9));
+        assert_eq!(d.dp, 21);
+        d.dp = 9;
+        assert_eq!(d.pay_sleight(0x61), None, "it would end Dark Mode");
+        assert_eq!(d.dp, 9);
+        d.dp = 10;
+        assert_eq!(d.pay_sleight(0x61), Some(9));
+        assert_eq!(d.dp, 1);
+    }
 }
+
