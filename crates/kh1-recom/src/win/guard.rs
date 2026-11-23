@@ -77,13 +77,7 @@ fn active() -> bool {
     READY.load(Ordering::Acquire) && ON.load(Ordering::Relaxed) && mv::kh1_on()
 }
 
-unsafe fn class_name(obj: usize) -> String {
-    if obj == 0 {
-        return "none".into();
-    }
-    let vt: usize = rd(obj);
-    super::stats::rtti_name(base(), vt).map(|n| n.trim_start_matches(".?AV").trim_end_matches("@@").to_string()).unwrap_or_else(|| format!("vt {vt:#x}"))
-}
+use super::stats::object_class as class_name;
 
 fn block_log(line: impl FnOnce() -> String) {
     if BLOCKS.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| (n < g::BLOCK_LOG_LINES).then_some(n + 1)).is_ok() {
@@ -152,12 +146,8 @@ pub(super) unsafe fn on_result(c: usize, list: usize, r: i32) -> i32 {
             other(obj, c, "a KH1 banana peel: blocked, not turned back");
             return r;
         }
-        // 0.153.0: Riku's Guard cancels a blocked shot (magic), as KH1's generic code makes a
-        // blocked shot inert; Re:CoM's result 2 stands (its bullet ends on it).
-        if mv::is_main_riku(pl) && rd::<usize>(obj + bullet::COLL) == c {
-            cancel_shot(obj, s);
-            return r;
-        }
+        // 0.159.0 (fork owner: "Magias deveriam voltar"): Riku's Guard turns a shot back as
+        // Sora's does (0.153.0 cancelled it).
         if rd::<usize>(obj + bullet::COLL) == c && turn_back(obj, c, s) {
             return 0;
         }
@@ -172,48 +162,7 @@ pub(super) unsafe fn on_result(c: usize, list: usize, r: i32) -> i32 {
     r
 }
 
-/// 0.153.0: a shot Riku's Guard blocked is cancelled: its attack off (Re:CoM's `CCollAttack` off,
-/// `0x14014DE80`, through `super::magic::hold_off`) and its life over (`+0x160` = 0), so Re:CoM's
-/// own step ends it (as `super::kh1_thrown` ends a shot at a clash). Assumption: a plain
-/// `CBullet` counts its life at `+0x160` as the homing one does (its attack is off either way).
-unsafe fn cancel_shot(obj: usize, s: Shot) {
-    let shooter: i32 = rd(obj + bullet::SHOOTER);
-    super::magic::hold_off(obj);
-    wr(obj + super::magic::rt::LIFE, 0i32);
-    block_log(|| {
-        format!(
-            "Riku's Guard cancelled a shot {} of {} (shooter {shooter})",
-            if s == Shot::Homing { "CHomingBullet" } else { "CBullet" },
-            class_name(func::<mv::HandleFn>(mv::HANDLE_OBJ)(shooter.max(0) as u32))
-        )
-    });
-}
 
-/// 0.153.0: Riku's Guard blocked `obj`'s attack through our own front test
-/// (`super::attack::riku_guard_block`, Re:CoM's apply had already taken the hit): a shot is
-/// cancelled (magic: the owner's ask), any other attacker gets the block's reaction on its next
-/// hit-handler call (Re:CoM's flinch / KH1's clash recoil, as for Sora), with Guard reactions on.
-pub(super) unsafe fn riku_block(obj: usize, id: u32) {
-    let b = base();
-    let vt: usize = rd(obj);
-    let shot = if vt == va(b, bullet::VTABLE) {
-        Some(Shot::Plain)
-    } else if vt == va(b, bullet::HOMING_VTABLE) {
-        Some(Shot::Homing)
-    } else {
-        None
-    };
-    if let Some(s) = shot {
-        if !super::kh1_peel::is_peel(rd(obj + 0x20)) {
-            cancel_shot(obj, s);
-        }
-        return;
-    }
-    if !ON.load(Ordering::Relaxed) || !READY.load(Ordering::Acquire) {
-        return;
-    }
-    remember(obj, 0, id);
-}
 
 /// Whether `c` is one of the actor's `CAttackMotion` entries (its melee attack collisions).
 unsafe fn is_melee(b: usize, obj: usize, c: usize) -> bool {
@@ -468,19 +417,17 @@ pub(super) unsafe fn after_enemy_hit(e: usize, r: u64, hp: i32) {
 /// gives it the same card-interrupt bit as a KH1 swing (`+0x260 & 0x2000000`; Re:CoM's own
 /// "end the card, then take the hit" path). Owner's log on 0.11.0 (Checked): every turned-back
 /// shot met its shooter with 0 damage, "card playing: Re:CoM's hit handler took no hit".
-pub(super) unsafe fn turned_hit_pending(e: usize) -> bool {
+///
+/// 0.161.0 (fork owner's 0.160.0 log: every turned-back shot met its Wizard with "damage 0 … card
+/// playing", the card-interrupt bit never set): the hit info `+0xF8` is filled by Re:CoM's gather
+/// `0x140154EB0`, which the handler itself calls first (`0x14017F81F`, Checked (disasm)); before
+/// the handler it holds the last hit. The attacker is read from the waiting hurt body (`by`, the
+/// apply's `+0x98`, as Riku's swings are), as the caller passes it.
+pub(super) fn turned_hit_pending(by: Option<u32>) -> bool {
+    let Some(by) = by.filter(|&b| b != 0) else { return false };
     if TURNED_N.load(Ordering::Relaxed) == 0 || !active() {
         return false;
     }
-    let info: usize = rd(e + enemy::INFO);
-    if info == 0 || rd::<u32>(info + enemy::INFO_FLAGS) & enemy::INFO_HIT == 0 {
-        return false;
-    }
-    let hit_body: usize = rd(info + enemy::INFO_BODY);
-    if hit_body == 0 {
-        return false;
-    }
-    let by: u32 = rd(hit_body + body::ATTACKER);
     TURNED.lock().map(|t| t.iter().any(|&(_, i)| i == by)).unwrap_or(false)
 }
 

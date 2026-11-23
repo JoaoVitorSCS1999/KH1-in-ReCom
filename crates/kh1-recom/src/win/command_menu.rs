@@ -150,6 +150,17 @@ struct Row {
     view: RowView,
     /// H4 (KH1's look): the word's control (KH1's menu font, a group of the `kh1hud` set).
     text: usize,
+    /// 0.179.1 (KH1's look): a DP sleight's mark right of its word (0: none).
+    icon: usize,
+}
+
+/// 0.179.1: the gap (units) between a DP sleight's name and its mark.
+const DP_ICON_GAP: f32 = 3.0;
+
+/// Word `name` is a DP sleight's (`crate::dark_points::DP_SLEIGHTS`; a sleight's word is
+/// `crate::sleights::WORD_BASE` + its id).
+fn dp_word(name: u16) -> bool {
+    name & 0xFF00 == crate::sleights::WORD_BASE && crate::dark_points::pays_dp(name - crate::sleights::WORD_BASE)
 }
 
 /// The context tab's controls: KH1's look (plate, Triangle, word), or Re:CoM's (one plate with its
@@ -203,6 +214,8 @@ struct ShortCtl {
     panel: usize,
     glyphs: [usize; 3],
     words: [usize; 3],
+    /// 0.179.1: a DP sleight's mark right of its word (0: none).
+    icons: [usize; 3],
     view: [SlotView; 3],
     alpha: f32,
 }
@@ -430,6 +443,9 @@ impl Ui {
             if r.text != 0 {
                 super::d2::delete(r.text, self.list);
             }
+            if r.icon != 0 {
+                super::d2::delete(r.icon, self.list);
+            }
         }
         if let Some(l) = self.look.take() {
             for h in l.headers {
@@ -482,7 +498,7 @@ impl Ui {
 
     unsafe fn clear_short(&mut self) {
         if let Some(p) = self.short.take() {
-            for c in [p.panel].into_iter().chain(p.glyphs).chain(p.words).filter(|&c| c != 0) {
+            for c in [p.panel].into_iter().chain(p.glyphs).chain(p.words).chain(p.icons).filter(|&c| c != 0) {
                 super::d2::delete(c, self.list);
             }
         }
@@ -509,7 +525,9 @@ impl Ui {
                 for k in 0..3 {
                     if p.words[k] != 0 && (p.alpha != alpha || p.view[k].bright != slots[k].bright) {
                         let b = kh1_word_level(slots[k].bright);
-                        func::<VecFn>(COLOUR)(p.words[k], V4([b, b, b, alpha]).0.as_ptr());
+                        for c in [p.words[k], p.icons[k]].into_iter().filter(|&c| c != 0) {
+                            func::<VecFn>(COLOUR)(c, V4([b, b, b, alpha]).0.as_ptr());
+                        }
                     }
                 }
                 p.view = *slots;
@@ -554,6 +572,7 @@ impl Ui {
             }
         }
         let mut words = [0; 3];
+        let mut icons = [0; 3];
         for (k, v) in slots.iter().enumerate() {
             let Some(wg) = mg.word(&lang, v.name) else { continue };
             // Squeeze to fit (owner, 2026-11-04): a name wider than its black box drawn narrower.
@@ -564,8 +583,14 @@ impl Ui {
             words[k] = self.kh1_ctrl(PRIORITY_ROOT, o.0 + at::WORD_AT.0, o.1 + at::WORD_AT.1 + at::PITCH * k as f32, sx, &[(wg, None)]).unwrap_or(0);
             let b = kh1_word_level(v.bright);
             colour(words[k], [b, b, b, alpha]);
+            // 0.179.1: a DP sleight's mark right of its (squeezed) name.
+            if let Some(ig) = mg.dp_icon.filter(|_| dp_word(v.name)) {
+                let x = o.0 + at::WORD_AT.0 + mg.width(&lang, v.name).unwrap_or(0.0) * sx + DP_ICON_GAP;
+                icons[k] = self.kh1_ctrl(PRIORITY_ROOT, x, o.1 + at::WORD_AT.1 + at::PITCH * k as f32, 1.0, &[(ig, None)]).unwrap_or(0);
+                colour(icons[k], [b, b, b, alpha]);
+            }
         }
-        self.short = Some(ShortCtl { panel, glyphs, words, view: *slots, alpha });
+        self.short = Some(ShortCtl { panel, glyphs, words, icons, view: *slots, alpha });
     }
 
     unsafe fn clear_tab(&mut self) {
@@ -718,7 +743,9 @@ impl Ui {
                 }
                 if r.text != 0 && (alpha_changed || r.view.bright != v.bright) {
                     let b = kh1_word_level(v.bright);
-                    func::<VecFn>(COLOUR)(r.text, V4([b, b, b, sc.alpha]).0.as_ptr());
+                    for c in [r.text, r.icon].into_iter().filter(|&c| c != 0) {
+                        func::<VecFn>(COLOUR)(c, V4([b, b, b, sc.alpha]).0.as_ptr());
+                    }
                 }
                 r.view = *v;
             }
@@ -796,6 +823,7 @@ impl Ui {
             func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
             // The word (FM's 4th row: the blank dash until summons, M8; `cm::ROW3_CMD`).
             let mut text = 0;
+            let mut icon = 0;
             if let Some(wg) = (v.name != 0).then(|| g.word(&lang, v.name)).flatten() {
                 let at = kh1_at(v, true);
                 // Squeeze to fit (owner, 2026-11-04): in the Magic / Summon / Sleights lists a sleight
@@ -810,6 +838,14 @@ impl Ui {
                     let b = kh1_word_level(v.bright);
                     func::<VecFn>(COLOUR)(t, V4([b, b, b, sc.alpha]).0.as_ptr());
                     text = t;
+                    // 0.179.1: a DP sleight's mark right of its (squeezed) name, at its brightness.
+                    if let Some(ig) = g.dp_icon.filter(|_| dp_word(v.name)) {
+                        let x = at.0 + g.width(&lang, v.name).unwrap_or(0.0) * sx + DP_ICON_GAP;
+                        if let Some(c) = self.kh1_ctrl(prio, x, at.1, 1.0, &[(ig, None)]) {
+                            func::<VecFn>(COLOUR)(c, V4([b, b, b, sc.alpha]).0.as_ptr());
+                            icon = c;
+                        }
+                    }
                 }
             } else if v.name == crate::sleights::ROW_WORD || v.name == cm::cmd::PARTY_WORD || v.name & 0xFF00 == crate::sleights::WORD_BASE {
                 // M12 step 5: an asset step from before the Sleights words: the row has no word.
@@ -818,7 +854,7 @@ impl Ui {
                     log(&format!("command menu: kh1-hud.json has no KH1-font word {:#x} (\"Sleights\" / a sleight's name): run this version's asset step; drawn without it", v.name));
                 }
             }
-            self.rows.push(Row { ctrl: c, fnt: 0, view: *v, text });
+            self.rows.push(Row { ctrl: c, fnt: 0, view: *v, text, icon });
         }
         self.shown = Some(sc.clone());
         // 0.111.0: the pointing arrow beside the root's cursor row.
@@ -859,7 +895,7 @@ impl Ui {
             }
         }
         func::<VecFn>(COLOUR)(c, V4([1.0, 1.0, 1.0, sc.alpha]).0.as_ptr());
-        Some(Row { ctrl: c, fnt, view: *v, text: 0 })
+        Some(Row { ctrl: c, fnt, view: *v, text: 0, icon: 0 })
     }
 
     /// Shows `sc`: rebuilds the rows when what they show changed, else writes colours and the
@@ -1119,7 +1155,11 @@ unsafe fn riku_world(pl: usize) -> World {
     }
     // 0.150.0: page 2 (Left) as Sora's, its Party list holding the King's sleights (Riku's only
     // friend; the Summon row stays greyed: he has none).
-    let mut w = World { mp: mp_view(), shortcuts, page: super::summons::page(), ..Default::default() };
+    let mut w = World { mp: mp_view(), dp: super::dark_points::sleight_view(pl), shortcuts, page: super::summons::page(), ..Default::default() };
+    // 0.163.0: his KH1 item slots (the Items row), as Sora's.
+    if super::items::installed() {
+        (w.slots, w.slot_count) = super::items::slots();
+    }
     if let Ok(g) = mv::SORA.try_lock() {
         if let Some(s) = g.as_ref().filter(|s| s.player == pl) {
             w.state = s.sora.state;
@@ -1130,6 +1170,10 @@ unsafe fn riku_world(pl: usize) -> World {
         }
     }
     w.context = context(pl);
+    // 0.162.0: a held gimmick card's "Stagger", as Sora's.
+    if w.context == 0 {
+        w.gimmick = super::gimmick::offer(pl);
+    }
     if super::summons::installed() {
         (w.battle, w.summon_out) = super::summons::gate_state(pl);
         w.summon_out |= super::summons::sleight_running(pl);

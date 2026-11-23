@@ -35,6 +35,10 @@ static LIST: Mutex<History> = Mutex::new(History::EMPTY);
 static LISTED: AtomicBool = AtomicBool::new(false);
 /// Log lines left for the L2 steps.
 static STEP_LOG: AtomicUsize = AtomicUsize::new(24);
+/// 0.172.0: the target our L2 step chose this lock-on call (0: none).
+static STEPPED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The player's locked handle (`+0x850`, the switch's argument).
+const LOCK_HANDLE: usize = 0x850;
 
 type PlFn = unsafe extern "win64" fn(usize) -> u64;
 type PadFn = unsafe extern "win64" fn(usize) -> u32;
@@ -55,7 +59,7 @@ pub fn mark_installed() {
 /// Re:CoM's lock-on, wrapped.
 pub unsafe extern "win64" fn lock_on(pl: usize) -> u64 {
     let o: PlFn = orig(&ORIG_LOCK_ON);
-    if pl == 0 || !mv::kh1_sora(pl) {
+    if pl == 0 || !mv::kh1_fighter(pl) {
         return o(pl);
     }
     let kbm = rd::<u32>(base() + recom::KBM_IN_USE as usize) != 0;
@@ -73,8 +77,17 @@ pub unsafe extern "win64" fn lock_on(pl: usize) -> u64 {
         return o(pl);
     }
     KH1_RULES.store(pl, Ordering::Release);
+    STEPPED.store(0, Ordering::Relaxed);
+    // 0.173.0 (fork owner, 2026-11-23, KH1 FM's Config screenshot: "precisa implementar essas duas
+    // configs e features"): KH1's Auto Lock (`*(0x142E1F4D8)+0` = 0, Checked (KH1 exe: disasm)):
+    // an attack with no lock locks its target (`0x14029365F` → `0x1402B08A0(…, 4)`), and a lock
+    // whose target is gone (not the player's unlock) moves to the next one (`0x1402B1348` →
+    // `0x1402B0A00`). Here: Re:CoM's own lock of its pick (`+0x84C`) without R1, on those frames.
+    // 0.175.0: KH1's Auto Lock is its soft target (no lock: `soft_target`), not a lock of Re:CoM's
+    // cursor (0.173.0's arming removed).
     let r = o(pl);
     KH1_RULES.store(0, Ordering::Release);
+    stepped(pl);
     after(pl);
     r
 }
@@ -116,6 +129,70 @@ unsafe fn after(pl: usize) {
             l.prune(|h| target_point(pl, h).is_some_and(|p| lo::distance(origin, p) <= reach));
         }
     });
+}
+
+/// 0.172.0 (fork owner, 2026-11-23: "L2/trigger esquerdo não está alternando oponentes no modo
+/// Kh1"; the owner's 0.171.0 log: every L2 stepped from the same target, the cursor never took the
+/// next): after Re:CoM's lock-on, a target our L2 step chose that its cursor (`+0x3F8 → +0xD4`) or
+/// the player's handle (`+0x850`) didn't take is written to both, the lock kept (`+0xE0`). Logged
+/// (what Re:CoM left), so the next trace says why it refused. Assumption: Re:CoM's cursor follows a
+/// written `+0xD4` (its locked branch `0x140209038` re-reads it each frame).
+unsafe fn stepped(pl: usize) {
+    let next = STEPPED.swap(0, Ordering::Relaxed);
+    if next == 0 {
+        return;
+    }
+    let cur: usize = rd(pl + recom::CURSOR);
+    if cur == 0 {
+        return;
+    }
+    let (d4, handle, locked): (i32, i32, i32) = (rd(cur + recom::CURSOR_TARGET), rd(pl + LOCK_HANDLE), rd(cur + recom::CURSOR_LOCKED));
+    let took = d4 == next as i32 && handle == next as i32;
+    if STEP_LOG.load(Ordering::Relaxed) > 0 {
+        log(&format!("lock-on: L2 step to {next:#x}: Re:CoM left cursor +0xD4 {d4:#x}, +0x850 {handle:#x}, locked {locked}{}", if took { "" } else { "; written ours" }));
+    }
+    if !took {
+        wr::<i32>(cur + recom::CURSOR_TARGET, next as i32);
+        wr::<i32>(cur + recom::CURSOR_LOCKED, 1);
+        wr::<i32>(pl + LOCK_HANDLE, next as i32);
+    }
+}
+
+/// KH1's soft target's reach (metres). Assumption: KH1's own isn't read (its Auto Lock picks
+/// `0x1402B0A00` from its lock list); 6 m keeps swings aimed at what is near.
+const SOFT_REACH: f32 = 6.0;
+
+/// 0.175.0 (fork owner, 2026-11-23: "o teu Auto Lock está diferente da implementação do KH1 lá o
+/// auto lock funciona sem lock on ao chegar proximo do oponente os ataques são direcionados a ele";
+/// a tester's report: "Sora doesn't seem to automatically lock on to an enemy when doing a combo"):
+/// KH1's soft target (Auto Lock On, `*(0x142E1F4D8)+0` = 0; lock state 2): with no lock, the
+/// nearest lockable enemy by KH1's pick (`lo::nearest`: distance less its lock radius) within
+/// [`SOFT_REACH`], for the swing's aim and lunge. Off: none. Any story, Combat = KH1.
+pub(super) unsafe fn soft_target(pl: usize) -> Option<u32> {
+    if !super::settings().auto_lock || !mv::kh1_fighter(pl) {
+        return None;
+    }
+    let all = targets(pl);
+    if all.is_empty() {
+        return None;
+    }
+    let origin = player_point();
+    lo::nearest(origin, &all, SOFT_REACH.min(lo::take_reach(battle_room(pl))), &[])
+}
+
+/// 0.180.0: the target of KH1's orange auto-target ring and its lock point. KH1 draws `lockon_d`
+/// for lock states 1, 2 and 4 (`0x140274B20`): its soft target while nothing is locked (state 2,
+/// set each frame by `0x1402B11B0` only with Auto Lock On) and an attack's auto lock (state 4),
+/// on one target; a lock (state 3) draws the lock cursor instead. Checked (decomp, this
+/// machine's KH1 project). Here: [`soft_target`] while Re:CoM's cursor holds no lock (its own
+/// cursor shows a lock), None otherwise.
+pub(super) unsafe fn ring_target(pl: usize) -> Option<(u32, [f32; 3])> {
+    let cur: usize = rd(pl + recom::CURSOR);
+    if cur != 0 && rd::<i32>(cur + recom::CURSOR_LOCKED) != 0 {
+        return None;
+    }
+    let h = soft_target(pl)?;
+    target_point(pl, h).map(|p| (h, p))
 }
 
 /// The point Re:CoM's cursor measures from (`0x1401F0AB0(out, 0)`).
@@ -191,7 +268,9 @@ pub unsafe extern "win64" fn lock_released(pad: usize) -> u32 {
     if !rules_for(pad) {
         return func::<PadFn>(recom::RELEASED)(pad);
     }
-    let r = func::<PadFn>(recom::PRESSED)(pad);
+    // 0.173.0, KH1 FM's Target Lock: Manual (`*(0x142E1F4D8)+4` = 1, `0x1402B069C`): the lock ends
+    // when R1 is released; Auto: R1 pressed again ends it.
+    let r = if super::settings().target_lock_manual { func::<PadFn>(recom::RELEASED)(pad) } else { func::<PadFn>(recom::PRESSED)(pad) };
     if r != 0 {
         let pl = pad - recom::PAD;
         wr(pl + recom::REQUEST, rd::<u32>(pl + recom::REQUEST) | recom::SECOND_PRESS);
@@ -238,6 +317,9 @@ pub unsafe extern "win64" fn lock_switch(current: u32) -> i32 {
     });
     if STEP_LOG.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
         log(&format!("lock-on: L2 on {current:#x}: next {}; list {list:x?}; {} lockable within {reach} m", next.map_or("none".into(), |h| format!("{h:#x}")), all.iter().filter(|c| lo::distance(origin, c.point) <= reach).count()));
+    }
+    if let Some(h) = next {
+        STEPPED.store(h, Ordering::Relaxed);
     }
     next.map_or(0, |h| h as i32)
 }

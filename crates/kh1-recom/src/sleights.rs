@@ -112,10 +112,16 @@ pub enum Cost {
     /// All of Sora's whole MP; usable with at least 1 (owner: "cost all MP like KH1 summons", and the
     /// summons are "usable as long as you have MP").
     All,
+    /// 0.179.0: Dark Riku's own sleights: Dark Mode's DP, this share (%) of its max
+    /// (`crate::dark_points::sleight_cost`); no MP.
+    Dp(i32),
 }
 
 pub fn cost(id: u16) -> Option<Cost> {
     // Riku's (`crate::riku::SLEIGHTS`): his own points.
+    if let Some(&(_, pct)) = crate::dark_points::DP_SLEIGHTS.iter().find(|&&(i, _)| i == id) {
+        return Some(Cost::Dp(pct));
+    }
     if let Some(s) = crate::riku::sleight(id) {
         return Some(Cost::Points(s.mp));
     }
@@ -168,10 +174,18 @@ pub fn air_start(id: u16) -> bool {
 /// Outside battle (owner, 2026-11-04, "Sleights outside battle"): a field room too
 /// (`crate::field_sleights::room_ok`: the pack ones only where Re:CoM's packs load), and free there.
 pub fn usable(g: &crate::summons::Gate, id: u16) -> bool {
-    crate::field_sleights::room_ok(g, id)
-        && (g.ground || (g.air && air_start(id)))
-        && !g.out
-        && (crate::field_sleights::free(g) || pay_points(id, g.mp).is_some())
+    usable_with_dp(g, id, None)
+}
+
+/// [`usable`] with Dark Riku's DP (`dp`: Some((DP now, Dark Mode's max)) while he is out, 0.179.0):
+/// a DP sleight needs its cost and 1 DP left (`crate::dark_points::can_pay`), the others their MP.
+pub fn usable_with_dp(g: &crate::summons::Gate, id: u16, dp: Option<(i32, i32)>) -> bool {
+    let pays = if crate::dark_points::pays_dp(id) {
+        dp.is_some_and(|(now, cap)| crate::dark_points::sleight_cost(id, cap).is_some_and(|c| crate::dark_points::can_pay(now, c)))
+    } else {
+        pay_points(id, g.mp).is_some()
+    };
+    crate::field_sleights::room_ok(g, id) && (g.ground || (g.air && air_start(id))) && !g.out && (crate::field_sleights::free(g) || pays)
 }
 
 /// A listed special's usable test (M12 step 7): battle (or, owner 2026-11-04, a field room:

@@ -18,7 +18,7 @@
 //! Units: the logic is in KH1 units (cm, y down), like [`crate::movement`]; the blade is computed in
 //! Re:CoM metres from Re:CoM's own weapon bones (the line is the same at any scale).
 
-use crate::movement::{action, FrameOut, Host, Kh1Sora, SwingStart};
+use crate::movement::{action, Host, Kh1Sora, SwingStart};
 use kh1_core::combo::{pick_air, pick_ground, AirCtx, GroundCtx, TargetPart};
 use kh1_core::controller::{state, Event, Refused};
 use kh1_core::damage::{AttackerStats, LiveAttack};
@@ -546,18 +546,6 @@ pub mod battle_case {
     pub fn entry() -> [u8; 4] {
         CAVE_RVA.to_le_bytes()
     }
-}
-
-/// What a frame did with the attack, for the trace.
-pub fn attack_events(out: &FrameOut) -> Vec<String> {
-    out.events
-        .iter()
-        .filter_map(|e| match e {
-            Event::AttackStarted { row, request, counter, finisher } => Some(format!("attack(row={row} req={request} n={counter}{})", if *finisher { " fin" } else { "" })),
-            Event::AttackRefused(r) => Some(format!("refused({r:?})")),
-            _ => None,
-        })
-        .collect()
 }
 
 // ---- KH1 enemy stats (decisions 12, 21) ----

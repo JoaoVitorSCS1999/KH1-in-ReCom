@@ -226,10 +226,11 @@ pub fn install(b: usize) {
         let _ = MODELS.set(m);
         INSTALLED.store(true, Ordering::Release);
         if skin_rows {
+            // 0.156.0: the costume is decided at each room build (the save's unlock).
             super::riku_skin::rows_in();
-            super::riku_skin::apply(b, super::settings().riku_dark_skin);
-            super::riku_skin::sync_menu(b);
         }
+        // 0.157.0: Riku's Guard clip (Sora's KH1 Guard on his skeleton).
+        super::riku_skin::guard_rows(b);
         log(&format!(
             "keyblades: models in: PLAYER table {} rows ({} Re:CoM's + {} for groups {:?}) at {table:#x}; weapon group picked at CPlayerWeapon +0x30; rebuilt at camp close; own EET + EFF (M13 stage 4) for {:?}",
             planned.len(),
@@ -339,6 +340,10 @@ pub fn prefetch() {
 /// Re:CoM's "queue the player's group if missing" (`0x140211AA0(char)`): then the equipped
 /// Keyblade's group, before the builder waits for the queue.
 pub unsafe extern "win64" fn group_load(ch: u32) {
+    // Riku's costume (its unlock read from the save loaded by now) before Re:CoM's queue reads
+    // the char -> group table.
+    super::riku_skin::refresh(base());
+    super::sora_costume::refresh(base());
     orig::<GroupLoadFn>(&ORIG_GROUP_LOAD)(ch);
     // Riku's costume: the menu's model now follows the group just queued.
     super::riku_skin::sync_menu(base());

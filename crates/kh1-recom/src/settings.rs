@@ -152,6 +152,12 @@ pub struct Settings {
     /// swing behind Sora, the wall-avoid, the eye walk, the visibility re-place, the auto recenter).
     /// The Camera page's Auto camera row; default on (KH1's default, Assumption).
     pub auto_camera: bool,
+    /// KH1 FM's Config "Auto Lock" (fork, 0.173.0): on = an attack with no lock locks its target, and
+    /// a lock whose target is gone moves to the next (KH1 `*(0x142E1F4D8)+0`, 0 = On).
+    pub auto_lock: bool,
+    /// KH1 FM's Config "Target Lock" (fork, 0.173.0): false Auto (R1 toggles the lock), true Manual
+    /// (the lock lasts while R1 is held: KH1 `*(0x142E1F4D8)+4` = 1, `0x1402B069C`).
+    pub target_lock_manual: bool,
     /// The camp menu's "KH1" entry (and the Config input wrapper it runs through). `off` leaves
     /// Re:CoM's camp menu untouched (a safety switch; the settings then come from this file only).
     /// The key keeps its old name (it once added rows to Re:CoM's Config menu).
@@ -185,8 +191,22 @@ pub struct Settings {
     /// Riku's story stays Re:CoM's.
     pub riku_kh1_movement: bool,
     /// Fork (0.154.0): Riku shows Dark Riku's model (his Dark Form skin) with his own motions,
-    /// outside Dark Mode too (`crate::riku_skin`). Unlocked from the start while it is tested.
-    pub riku_dark_skin: bool,
+    /// outside Dark Mode too (`crate::riku_skin`). 0.156.0: only once Riku has reached Dark Mode in
+    /// the save (else Default Attire); default off (Default Attire).
+    /// Riku's costume (0.178.0): 0 Default Attire, 1 Dark Mode, 2 Halloween Town (ini
+    /// `riku_costume`; the old `riku_dark_skin = on` reads as 1).
+    pub riku_costume: u8,
+    /// Debug only (fork, 0.178.5; replaces 0.156.1..0.178.0's four `*_unlocked` keys): every costume
+    /// and cosmetic Keyblade unlocked from the start, without its story requirement (Riku's Dark Mode
+    /// and Halloween Town costumes, his Keyblade of Heart, Sora's Halloween Town costume).
+    pub all_unlock: bool,
+    /// Fork (0.160.0): Riku's Keyblade (camp menu > Costumes): false the Soul Eater, true the
+    /// Keyblade of People's Hearts ("Keyblade of Heart"); only once Riku has reached Dark Mode in the
+    /// save. Cosmetic.
+    pub riku_heart_blade: bool,
+    /// Fork (0.170.0): Sora's costume (camp menu > Costumes): false Default Attire, true Halloween
+    /// Town (Re:CoM's Halloween model in every world); only once Sora has reached Halloween Town.
+    pub sora_halloween: bool,
     /// Debug (M7, until stage 7.11 earns spells): Sora has all 7 spells at level 3.
     pub kh1_all_spells: bool,
     /// Debug (M9): every ability of the equip screen is equipped, AP ignored (not written to the
@@ -331,7 +351,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_dark_skin: true, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, auto_lock: true, target_lock_manual: false, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_costume: 0, all_unlock: false, riku_heart_blade: false, sora_halloween: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
     }
 }
 
@@ -407,6 +427,14 @@ camera = recom
 ;   off: KH1's / KH2's Manual camera (the stick and R3 only).
 auto_camera = on
 ;
+; auto_lock = on | off (KH1 FM's Auto Lock; Combat = KH1): on = with no lock, swings and spells aim
+;   at the nearest enemy within 6 m (KH1's soft target); off = only the locked target.
+auto_lock = on
+;
+; target_lock = auto | manual (KH1 FM's Target Lock; Combat = KH1 on a controller): auto = R1
+;   toggles the lock; manual = the lock lasts while R1 is held.
+target_lock = auto
+;
 ; config_menu = on | off
 ;   off: no KH1 entry in the camp menu: Re:CoM's camp menu untouched (use this file instead).
 config_menu = on
@@ -466,9 +494,29 @@ debug_attack = off
 ;   cards, Dark Mode and roll stay Re:CoM's. Off: Riku's story is Re:CoM's.
 riku_kh1_movement = off
 ;
-; riku_dark_skin = on | off (testing): Riku shows his Dark Form (Dark Riku's model) with his own
-;   moves, outside Dark Mode too. Needs the asset step's files (kh1-riku-skin.json); read at start.
-riku_dark_skin = on
+; riku_costume = default | dark | halloween: Riku's costume (camp menu > Costumes), his own moves:
+;   Default Attire, Dark Mode (Dark Riku's look; once Riku has reached Dark Mode in the save) or
+;   Halloween Town (his look there, in every world; once Riku has reached Halloween Town). Needs
+;   the asset step's files (kh1-riku-skin.json) for Dark Mode.
+riku_costume = default
+;
+; riku_keyblade = soul_eater | heart: Riku's Keyblade (camp menu > Costumes), cosmetic: the Soul
+;   Eater or the Keyblade of Heart (KH1's Keyblade of People's Hearts). The Keyblade of Heart only
+;   once Riku has reached Dark Mode in the save (with the Dark Mode costume). Needs the asset step's
+;   files (kh1-riku-skin.json).
+riku_keyblade = soul_eater
+;
+; sora_costume = default | halloween: Sora's costume (camp menu > Costumes): Re:CoM's Halloween
+;   Town model in every world. Only once Sora has reached Halloween Town in the save.
+sora_costume = default
+;
+; all_unlock = on | off: FOR DEBUG PURPOSES ONLY (tests). On, every costume and cosmetic Keyblade is
+;   unlocked from the start, skipping its story requirement: Riku's Dark Mode costume and Keyblade
+;   of Heart (normally: his first Dark Mode), his Halloween Town costume (normally: reaching
+;   Halloween Town), Sora's Halloween Town costume (normally: reaching Halloween Town). Leave it off
+;   to play. (Replaces the old riku_halloween_unlocked, riku_dark_skin_unlocked,
+;   riku_keyblade_unlocked and sora_costume_unlocked keys, which are now ignored.)
+all_unlock = off
 ;
 ; kh1_all_spells = on | off (debug, until spells are earned in the game): Sora has all 7 KH1
 ;   spells at level 3 in the command menu's Magic list.
@@ -568,6 +616,15 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(c) => s.camera = c,
                 None => warnings.push(bad("camera must be recom, kh1 or kh2")),
             },
+            "auto_lock" => match parse_switch(v) {
+                Some(b) => s.auto_lock = b,
+                None => warnings.push(bad("auto_lock must be on or off")),
+            },
+            "target_lock" => match v.trim().to_ascii_lowercase().as_str() {
+                "auto" => s.target_lock_manual = false,
+                "manual" => s.target_lock_manual = true,
+                _ => warnings.push(bad("target_lock must be auto or manual")),
+            },
             "auto_camera" => match parse_switch(v) {
                 Some(b) => s.auto_camera = b,
                 None => warnings.push(bad("auto_camera must be on or off")),
@@ -632,9 +689,33 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(b) => s.riku_kh1_movement = b,
                 None => warnings.push(bad("riku_kh1_movement must be on or off")),
             },
+            "all_unlock" => match parse_switch(v) {
+                Some(b) => s.all_unlock = b,
+                None => warnings.push(bad("all_unlock must be on or off")),
+            },
+            // 0.178.5: the four debug unlock keys became `all_unlock`; an old line is ignored
+            // without a warning.
+            "riku_halloween_unlocked" | "riku_dark_skin_unlocked" | "riku_keyblade_unlocked" | "sora_costume_unlocked" => {}
+            "riku_keyblade" => match v.trim().to_ascii_lowercase().as_str() {
+                "soul_eater" => s.riku_heart_blade = false,
+                "heart" => s.riku_heart_blade = true,
+                _ => warnings.push(bad("riku_keyblade must be soul_eater or heart")),
+            },
+            "sora_costume" => match v.trim().to_ascii_lowercase().as_str() {
+                "default" => s.sora_halloween = false,
+                "halloween" => s.sora_halloween = true,
+                _ => warnings.push(bad("sora_costume must be default or halloween")),
+            },
+            // Older files (0.154..0.177): on = Dark Mode.
             "riku_dark_skin" => match parse_switch(v) {
-                Some(b) => s.riku_dark_skin = b,
+                Some(b) => s.riku_costume = b as u8,
                 None => warnings.push(bad("riku_dark_skin must be on or off")),
+            },
+            "riku_costume" => match v.trim().to_ascii_lowercase().as_str() {
+                "default" => s.riku_costume = 0,
+                "dark" => s.riku_costume = 1,
+                "halloween" => s.riku_costume = 2,
+                _ => warnings.push(bad("riku_costume must be default, dark or halloween")),
             },
             "debug_attack" => match parse_switch(v) {
                 Some(b) => s.debug_attack = b,
@@ -757,6 +838,8 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "sounds", s.sounds.as_str());
     let t = set_key(&t, "camera", s.camera.as_str());
     let t = set_key(&t, "auto_camera", switch_str(s.auto_camera));
+    let t = set_key(&t, "auto_lock", switch_str(s.auto_lock));
+    let t = set_key(&t, "target_lock", if s.target_lock_manual { "manual" } else { "auto" });
     let t = set_key(&t, "config_menu", switch_str(s.config_menu));
     let mut t = set_key(&t, "asset_build", if s.asset_build { "auto" } else { "off" });
     let a = s.abilities;
@@ -771,7 +854,10 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "air_combo_plus", &a.air_combo_plus.to_string());
     let t = set_key(&t, "combo_master", switch_str(a.combo_master));
     let t = set_key(&t, "debug_attack", switch_str(s.debug_attack));
-    let t = set_key(&t, "riku_dark_skin", switch_str(s.riku_dark_skin));
+    let t = set_key(&t, "riku_costume", ["default", "dark", "halloween"][s.riku_costume.min(2) as usize]);
+    let t = set_key(&t, "all_unlock", switch_str(s.all_unlock));
+    let t = set_key(&t, "riku_keyblade", if s.riku_heart_blade { "heart" } else { "soul_eater" });
+    let t = set_key(&t, "sora_costume", if s.sora_halloween { "halloween" } else { "default" });
     let t = set_key(&t, "kh1_all_spells", switch_str(s.kh1_all_spells));
     let t = set_key(&t, "kh1_all_abilities", switch_str(s.kh1_all_abilities));
     let t = set_key(&t, "kh1_test_items", switch_str(s.kh1_test_items));
@@ -895,6 +981,17 @@ mod tests {
     }
 
     #[test]
+    fn all_unlock_replaces_the_four_debug_keys() {
+        // 0.178.5: the old keys (an old file with them on) are ignored without a warning.
+        let (s, w) = parse("riku_halloween_unlocked = on\nriku_dark_skin_unlocked = on\nriku_keyblade_unlocked = on\nsora_costume_unlocked = on\n");
+        assert!(!s.all_unlock && w.is_empty(), "{w:?}");
+        let (s, w) = parse("all_unlock = on\n");
+        assert!(s.all_unlock && w.is_empty());
+        assert!(DEFAULT_FILE.contains("all_unlock = off") && DEFAULT_FILE.contains("FOR DEBUG PURPOSES ONLY"));
+        assert!(!DEFAULT_FILE.contains("\nriku_dark_skin_unlocked ="));
+    }
+
+    #[test]
     fn set_key_keeps_the_rest() {
         let t = set_key("; head\ncombat = kh1 ; why\nother = 1\n", "combat", "recom");
         assert_eq!(t, "; head\ncombat = recom ; why\nother = 1\n");
@@ -906,7 +1003,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: false, riku_dark_skin: false, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, auto_lock: false, target_lock_manual: true, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: false, riku_costume: 2, all_unlock: true, riku_heart_blade: true, sora_halloween: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);

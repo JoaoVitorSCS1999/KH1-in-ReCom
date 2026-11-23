@@ -580,11 +580,6 @@ impl Motion {
         out
     }
 
-    /// Model-space position of every helper at `t` (helper 0 at the origin).
-    pub fn helper_positions(&self, t: f32) -> Vec<[f32; 3]> {
-        self.helper_chain(t).into_iter().map(|m| m.1).collect()
-    }
-
     /// Root position at `t`: the last helper's position through the helper chain (motion space,
     /// +z forward). `[0; 3]` when there are fewer than two helpers.
     pub fn root_position(&self, t: f32) -> [f32; 3] {

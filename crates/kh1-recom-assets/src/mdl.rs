@@ -370,6 +370,62 @@ impl MdlPart {
     }
 }
 
+/// A `.MDL`'s parts as their own bytes (each from its header offset to the next, or the file's
+/// end). A part's offsets are relative to its start and its packets hold no address (Checked
+/// (files): `write(parse(f)) == f` moves parts freely), so a part can be replaced alone and the
+/// rest kept byte for byte, even where [`Mdl::parse`] refuses one (Dark Riku's `PL0201`).
+pub fn split_parts(d: &[u8]) -> Result<Vec<Vec<u8>>> {
+    let r = Rd(d);
+    let mut offs = Vec::new();
+    loop {
+        let o = r.u32(4 * offs.len())?;
+        if o == 0 {
+            break;
+        }
+        offs.push(o as usize);
+        if offs.len() > 64 {
+            return bad("mdl: too many parts");
+        }
+    }
+    let mut out = Vec::with_capacity(offs.len());
+    for (k, &o) in offs.iter().enumerate() {
+        let end = offs.get(k + 1).copied().unwrap_or(d.len());
+        if o >= end || end > d.len() {
+            return bad(format!("mdl: part {k} at {o:#x}..{end:#x}"));
+        }
+        out.push(d[o..end].to_vec());
+    }
+    Ok(out)
+}
+
+/// The file of `parts` (each padded to 16 bytes), as [`Mdl::write`] lays it out.
+pub fn join_parts(parts: &[Vec<u8>]) -> Vec<u8> {
+    let hdr = align16(4 * (parts.len() + 1));
+    let mut out = Vec::new();
+    let mut o = hdr;
+    for b in parts {
+        out.extend_from_slice(&(o as u32).to_le_bytes());
+        o += align16(b.len());
+    }
+    out.resize(hdr, 0);
+    for b in parts {
+        out.extend_from_slice(b);
+        out.resize(align16(out.len()), 0);
+    }
+    out
+}
+
+impl MdlPart {
+    /// One part from its own bytes ([`split_parts`]).
+    pub fn parse_bytes(b: &[u8]) -> Result<MdlPart> {
+        Ok(MdlPart::parse(b, 0)?.0)
+    }
+    /// One part's bytes.
+    pub fn write_bytes(&self) -> Result<Vec<u8>> {
+        self.write()
+    }
+}
+
 impl Mdl {
     /// Parses a whole `.MDL`.
     pub fn parse(d: &[u8]) -> Result<Mdl> {

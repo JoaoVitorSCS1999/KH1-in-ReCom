@@ -95,8 +95,28 @@ jobs:
           set -euo pipefail
           version="${{ steps.commit.outputs.version }}"
           tag="v$version-patched-${{ steps.commit.outputs.sha }}"
+          # The changes since the previous release: every commit's subject (the version commits read
+          # "0.180.0: what changed"), without the bot's DLL commits and merges.
+          git fetch --tags --force -q origin
+          prev=$(git tag -l 'v*-patched-*' --sort=-creatordate | head -n 1)
+          if [ -n "$prev" ] && git merge-base --is-ancestor "$prev" HEAD; then
+            range="$prev..HEAD"
+          else
+            range="HEAD~20..HEAD"
+          fi
+          git log --no-merges --format='- %s' "$range" | grep -vE '^- build: kh1-recom\.dll' | sed 's/ \[skip ci\]//' > changes.md || true
           {
             echo "KH1 Combat in Re:CoM **$version** with this fork's fixes (commit \`${{ steps.commit.outputs.sha }}\`; see [PATCHED.md](https://github.com/${{ github.repository }}/blob/main/PATCHED.md))."
+            echo
+            echo "## Changes"
+            echo
+            if [ -s changes.md ]; then
+              cat changes.md
+            else
+              echo "- No code change since ${prev:-the last release} (the build only)."
+            fi
+            echo
+            echo "Details of each version (the request, the addresses, what was checked): [AGENTS.md](https://github.com/${{ github.repository }}/blob/main/AGENTS.md)."
             echo
             echo "## Install with OpenKH"
             echo

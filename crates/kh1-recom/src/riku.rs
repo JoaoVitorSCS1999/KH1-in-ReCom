@@ -59,7 +59,22 @@ pub const HIGH_JUMP_BIT: u32 = 0x20_0000;
 /// his request 110 / 111 (entry 13) is the clash recoil Re:CoM baked as row 0x24 for him too.
 /// Checked (files: both motion sets' request tables).
 pub fn abilities(ability_word: u32) -> kh1_core::Abilities {
-    kh1_core::Abilities { high_jump: ability_word & HIGH_JUMP_BIT != 0, dodge_roll: true, guard: true, ..Default::default() }
+    kh1_core::Abilities { high_jump: ability_word & HIGH_JUMP_BIT != 0, dodge_roll: true, guard: true, counterattack: true, ..Default::default() }
+}
+
+/// 0.159.0 (fork owner: "Falta o contra-ataque"): KH1's Counterattack (row 0x3E, after a guard
+/// success) for Riku, who has no clip of it: the row it plays is his ground finisher's (KH1 row 8,
+/// his own finisher clip); KH1's offer, input and timing are Sora's. Assumption: his finisher clip
+/// reads as the counter.
+pub const COUNTER_AS_ROW: usize = 8;
+
+/// The KH1 row whose Re:CoM row Riku plays for `kh1_row`.
+pub fn swing_row(kh1_row: usize) -> usize {
+    if kh1_row == crate::attack::COUNTERATTACK_ROW {
+        COUNTER_AS_ROW
+    } else {
+        kh1_row
+    }
 }
 
 /// Re:CoM's body-guard angle rule (`0x14016F1C0`'s guard branch; Checked (exe: disasm)): the
@@ -85,6 +100,19 @@ pub fn guard_faces(guarder: [f32; 3], yaw: f32, point: [f32; 3], half: f32) -> b
 
 /// Riku's / Dark Riku's row for KH1's Guard request: their recoil row (`p002_043` / `p003_033`).
 pub const GUARD_ROW: u32 = 0x24;
+
+/// 0.157.0: the row Riku's Guard plays when the asset step gave his pack Sora's KH1 Guard
+/// (`p002_225`, `kh1_recom_assets::riku_skin::RIKU_GUARD`): his first row with no clip
+/// (`p002_000`, 0x39; Re:CoM never plays it for him), renamed to the guard clip in his action
+/// tables (`win::riku_skin::guard_rows`). The guard's recoil stays row 0x24 (his clash recoil).
+pub const KH1_GUARD_ROW: u32 = 0x39;
+/// The guard clip's name, as the asset step writes it.
+pub const KH1_GUARD_CLIP: &[u8] = b"p002_225\0";
+/// 0.158.2: KH1 Riku's own guard recoil (request 110, entry 13; fork owner: "prefiro que use a
+/// versão do KH1 da animação de quando toma impacto"), his next row with no clip (0x3A), renamed
+/// like 0x39; played for KH1's guard recoils 0x6E / 0x6F.
+pub const KH1_RECOIL_ROW: u32 = 0x3A;
+pub const KH1_RECOIL_CLIP: &[u8] = b"p002_226\0";
 
 /// Re:CoM's attack row id for Riku's own swing that plays the same clip as Sora's row `sora_id`.
 /// Sora's rows 1..7 (`0x1407C6C70`, action rows 0x30..0x36) have Riku's twins at 0x97..0x9D: the same
@@ -124,6 +152,7 @@ pub struct Sleight {
     /// `SY0002.CTD`'s name (its row id + 1; Checked (files)).
     pub name: &'static str,
     /// Whole MP points (ours: KH1 has no Riku; the Sleights list's tiers, the Dark ones a point more).
+    /// 0 for the DP sleights (`crate::dark_points::DP_SLEIGHTS`, 0.179.0).
     pub mp: i32,
 }
 
@@ -143,10 +172,13 @@ pub const SLEIGHTS: [Sleight; 6] = [
 /// `0x140206830`) takes 0x5F..=0x63 and 0x65..=0x6B (its jump table at `0x140206894`; 0x64 refused).
 /// Checked (exe). The Dark ones, with Dark Break / Dark Firaga / Dark Aura (`SY0002.CTD`'s names);
 /// MP ours, as Riku's tiers.
-pub const DARK_SLEIGHTS: [Sleight; 6] = [
-    Sleight { id: 0x5F, name: "Dark Break", mp: 3 },
-    Sleight { id: 0x60, name: "Dark Firaga", mp: 3 },
-    Sleight { id: 0x61, name: "Dark Aura", mp: 4 },
+/// 0.179.0: Dark Break, Dark Firaga, Dark Aura and Inverse Burst (0x65: the same start path as the
+/// first three, `0x14020E590` then `+0x138`; Checked (decomp)) pay DP (`crate::dark_points`).
+pub const DARK_SLEIGHTS: [Sleight; 7] = [
+    Sleight { id: 0x5F, name: "Dark Break", mp: 0 },
+    Sleight { id: 0x60, name: "Dark Firaga", mp: 0 },
+    Sleight { id: 0x61, name: "Dark Aura", mp: 0 },
+    Sleight { id: 0x65, name: "Inverse Burst", mp: 0 },
     Sleight { id: 0x69, name: "Dark Impulse", mp: 3 },
     Sleight { id: 0x6A, name: "Dark Maelstrom", mp: 3 },
     Sleight { id: 0x6B, name: "Dark Barrage", mp: 4 },
@@ -158,7 +190,7 @@ pub fn sleight(id: u16) -> Option<&'static Sleight> {
 }
 
 /// The list of one of them.
-pub fn list(dark: bool) -> &'static [Sleight; 6] {
+pub fn list(dark: bool) -> &'static [Sleight] {
     if dark {
         &DARK_SLEIGHTS
     } else {
@@ -211,7 +243,10 @@ mod tests {
     fn rikus_sleights() {
         assert!(SLEIGHTS.iter().all(|s| (0x66..=0x6B).contains(&s.id)));
         assert!(DARK_SLEIGHTS.iter().all(|s| (0x5F..=0x63).contains(&s.id) || (0x65..=0x6B).contains(&s.id)));
-        assert_eq!(words().count(), 9);
+        assert_eq!(words().count(), 10, "0.179.0: Inverse Burst");
+        // 0.179.0: Dark Riku's own four pay DP, never MP.
+        assert!([0x5F, 0x60, 0x61, 0x65].iter().all(|&id| crate::sleights::pay_points(id, 99).is_none() && crate::sleights::cost(id).is_some_and(|c| matches!(c, crate::sleights::Cost::Dp(_)))));
+        assert_eq!(sleight(0x65).map(|s| s.name), Some("Inverse Burst"));
         assert_eq!(attack_id_for(true, 4), 0xA1);
         assert_eq!(attack_id_for(false, 4), 0x9A);
         assert!(row_ok_for(true, 0x30) && !row_ok_for(true, 0x08) && row_ok_for(false, 0x08));
@@ -247,7 +282,7 @@ mod tests {
     #[test]
     fn rikus_abilities() {
         let a = abilities(0);
-        assert!(a.dodge_roll && !a.high_jump && !a.glide && !a.superglide && a.guard && !a.counterattack && a.combo_plus == 0);
+        assert!(a.dodge_roll && !a.high_jump && !a.glide && !a.superglide && a.guard && a.counterattack && a.combo_plus == 0);
         assert!(abilities(HIGH_JUMP_BIT).high_jump);
     }
 }

@@ -360,6 +360,11 @@ pub fn mark_installed() {
     INSTALLED.store(true, Ordering::Release);
 }
 
+/// The main player (Sora or Riku), 0 before one is made.
+pub(super) unsafe fn main_player() -> usize {
+    rd::<usize>(va(base(), data::MAIN_PLAYER))
+}
+
 /// The main player, if it is Sora (`CPlayerSora`; Riku keeps Re:CoM's handlers).
 pub unsafe fn is_main_sora(pl: usize) -> bool {
     let b = base();
@@ -417,7 +422,15 @@ unsafe fn kh1_mover(pl: usize) -> bool {
 /// The KH1 abilities of this player's frame: Sora's, or Riku's ([`crate::riku::abilities`]).
 unsafe fn player_abilities(pl: usize) -> kh1_core::Abilities {
     if is_main_riku(pl) {
-        crate::riku::abilities(rd(pl + p::ABILITY))
+        // 0.164.0: his equipped Enemy Skills' combo effects (Soldier's Combo Plus, Bandit's Combo
+        // Finish), as Sora's.
+        let mut a = crate::riku::abilities(rd(pl + p::ABILITY));
+        if let Some(e) = super::abilities::equipped_live() {
+            let c = crate::abilities::to_core(e & crate::abilities::CARD_BITS);
+            a.combo_plus = c.combo_plus;
+            a.combo_finish = c.combo_finish;
+        }
+        a
     } else {
         abilities()
     }
@@ -647,11 +660,20 @@ impl Host for RecomHost {
             let ext = EXT.get().copied().unwrap_or_default();
             let Some((row, root)) = rows::row_for(request, &stance, &ext) else { return false };
             // 0.152.0: Riku's Guard plays his block-recoil row (`crate::riku::GUARD_ROW`).
-            let row = if is_main_riku(pl) && request & 0x3FF == rows::GUARD { crate::riku::GUARD_ROW } else { row };
+            // 0.157.0: Sora's KH1 Guard on his skeleton (row 0x39) when the asset step made it.
+            let guard = is_main_riku(pl) && request & 0x3FF == rows::GUARD;
+            let row = if guard { super::riku_skin::guard_row(is_main_dark_riku(pl)) } else { row };
+            // 0.158.2: KH1 Riku's own guard recoil for KH1's guard recoils.
+            let recoil = is_main_riku(pl) && matches!(request & 0x3FF, rows::RECOIL | rows::STRONG_RECOIL);
+            let row = match super::riku_skin::recoil_row(is_main_dark_riku(pl)) {
+                Some(r) if recoil => r,
+                _ => row,
+            };
+            let guard = guard || (recoil && row == crate::riku::KH1_RECOIL_ROW);
             if is_main_riku(pl) {
                 // Only rows Riku's own action table plays (`crate::riku::row_ok`); Re:CoM's own
                 // effects and sounds of his clips (variant 0).
-                if !crate::riku::row_ok_for(is_main_dark_riku(pl), row) {
+                if !(guard && (row == crate::riku::KH1_GUARD_ROW || row == crate::riku::KH1_RECOIL_ROW)) && !crate::riku::row_ok_for(is_main_dark_riku(pl), row) {
                     log_riku_row(request, row);
                     return false;
                 }
@@ -876,15 +898,22 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     if is_main_riku(pl) {
         // Riku (`crate::riku`): KH1's movement and KH1's Attack (the same picker and rows as
         // Sora's, on his own swing clips: his action table's rows 0x30..). His roll is Re:CoM's own
-        // (his roll exe `0x140212350`); no Enemy Skills, menus, magic, items or specials.
+        // (his roll exe `0x140212350`); no magic or specials. 0.164.0: his items and Enemy Skills.
+        super::enemy_skills::kh1_frame(pl);
         slot.sora.abilities = player_abilities(pl);
-        slot.sora.params.gravity = kh1_core::params::GRAVITY;
+        // Wight Knight's Float (Enemy Skills): KH1's gravity × 0.75, as Sora's.
+        slot.sora.params.gravity = kh1_core::params::GRAVITY * super::enemy_skills::gravity_factor();
         slot.sora.recom_roll = true;
         slot.sora.speeds = speeds();
-        let input = trace::frame_input(&read_pad(pl));
+        let mut input = trace::frame_input(&read_pad(pl));
+        // 0.164.0: an item from his command menu's Items list this frame (0.163.0 never passed it).
+        input.item = super::items::take_command();
         let mut host = RecomHost::new(pl);
         slot.last = slot.sora.frame(&mut host, &input, fresh);
         slot.sync = if slot.last.handed_to_recom() { None } else { Some(read_sync(pl)) };
+        if !slot.last.items.is_empty() {
+            super::items::on_events(&slot.last.items);
+        }
         // 0.152.0: his Guard's start and success move his DP (perfect / missed parries).
         super::dark_points::guard_events(pl, &slot.last.events);
         log_once_riku();

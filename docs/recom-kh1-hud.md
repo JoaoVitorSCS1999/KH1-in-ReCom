@@ -209,8 +209,9 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 - **DLL (events only):** a hit with no motion running → the held back / front controls hide and
   the units of what they show play `vibe_<strength>` (from frame 1: KH1 draws key time 0.5 first),
   with the shaken hurt face; a size-class change → the slide at the old class's place (the held
-  controls already at the new one); Re:CoM's HUD hide / show (state 7 / 1) → `fade_out` /
-  `fade_in` on the units (face included). A view change while a motion runs rebuilds its units at
+  controls already at the new one); Re:CoM's HUD hide (state 7) → hidden at once (0.178.1, fork
+  owner's answer 3b; `fade_out` is built but no longer played), show (state 1) → `fade_in` on the
+  units (face included). A view change while a motion runs rebuilds its units at
   the same time (`0x140248000` on the first unit layer); a view change after it ended gives the
   screen back to the held layers. Nothing per frame.
 
@@ -223,8 +224,10 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
    moves them too): visible only when MP or the flash changes during the 10–38 frames.
 3. A slide for a change that isn't KH1's (class 0 → 2 or downwards) ends at the slide's last
    offset and snaps to the new class at the next HP / MP event (KH1 snaps at once).
-4. The fade-in runs on every Re:CoM show (events, menus); KH1 hides at once for its events
-   (world flag 8) and fades for its menus: owner question.
+4. Answered (fork owner, 2026-11-23, 3b): every Re:CoM hide (events and menus alike) is at once;
+   the fade-in still runs on every Re:CoM show. KH1 hides at once for its events (world flag 8) and
+   fades for its menus; telling Re:CoM's event hides from its menu hides (the request comes through
+   the gauge's `+0xAA`, written elsewhere) is not researched.
 5. Assumptions: Re:CoM's 2D time step is 50 units a 60 Hz frame (as the MP bar's fades); a played
    layer added after the held ones at the same priority draws over them (creation order).
 
@@ -233,7 +236,8 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 1. Take a hit: the whole cluster (rings, segments, labels, face) shakes up and down for 10 / 22 /
    38 frames (by how much HP the hit took), the face grimaces; a second hit during the shake
    neither restarts it nor the grimace.
-2. Open the camp / start an event: the cluster fades out over 1/6 s; closing it fades it back in.
+2. Open the camp / start an event: the cluster goes at once (0.178.1); closing it fades it back in
+   over 1/6 s.
 3. Low HP (under 54 HP): the green arc's end is soft over its last 0.7°.
 4. Log: `kh1 hud: … built …` as before; no `no slide units` line in normal play.
 
@@ -364,30 +368,31 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
 
 ### Native build
 
-- **Data:** two held groups (Donald, Goofy): face frame, disc, HP back, MP back, MP ring, HP ring
-  (the three full quarters each), face. `kh1-hud.json` `"party": [donald, goofy]`.
+- **Data:** two held groups (Donald, Goofy): face frame, disc, face. `kh1-hud.json` `"party":
+  [donald, goofy]`. Until 0.178.1 they also held the HP and MP backs and full rings; 0.178.2 drops
+  them (fork owner, 2026-11-23, answer 4b: Re:CoM's friends have no HP / MP).
 - **DLL:** per player gauge two controls at the slot offsets (right margin +86), hidden; four
   wrappers (`sites::KH1_HUD_PARTY_HOOKS`, first bytes checked): a friend's appear shows its gauge,
   `CFriend`'s exit or dtor hides it; Re:CoM's HUD hide hides them. Nothing per frame.
 
 ### Owner questions (H6)
 
-1. **What the gauges show** (Re:CoM's friends have no HP / MP): built full rings (HP 54 / MP 9:
-   the whole ring, no straight part). (a) keep; (b) KH1's party stats for Sora's level; (c) the
-   friend card's value as HP.
+1. **What the gauges show** (Re:CoM's friends have no HP / MP): answered (fork owner,
+   2026-11-23, 4b): **no rings**, only the face in its frame and disc (0.178.2).
 2. Only while the friend is out (decision 39); with Combat = KH1 there are no friend cards
    (decision 4), so they show only at Combat = Re:CoM with `hud = kh1`.
 
 ### Not done / to check
 
-1. KH1's partial rings and straight parts for the party (not needed while they are full).
+1. KH1's partial rings and straight parts for the party (not drawn: no rings since 0.178.2).
 2. Draw order of the party's pieces: Sora's (Assumption).
 3. KH1's `g_help` / `g_lose` circles (a member called / down) are not used.
 
 ### What the in-game test must check (H6)
 
 1. `hud = kh1`, Combat = Re:CoM, a battle with a Donald card: his gauge appears top-right at
-   KH1's place when he appears, and goes when he leaves. The same for Goofy (68, 20 further).
+   KH1's place when he appears (his face in its frame and disc, no rings since 0.178.2), and goes
+   when he leaves. The same for Goofy (68, 20 further).
 2. Log: `kh1 hud: Donald out: KH1 gauge shown (H6)` / `gone: gauge hidden`.
 
 ## H7: KH1's lock-on cursor in place of Re:CoM's
@@ -428,6 +433,16 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
    is read.
 2. Per frame while a battle runs: the wrapper copies the lock point (Re:CoM projects and draws).
 3. Assumption: Re:CoM's marker layer-add flag 1 and priority 2 suit a projected layer of ours.
+
+### 0.180.0: KH1's orange auto-target ring (`lockon_d`)
+
+The fork owner's 5a ("shown") is now built: `lock` object 3 as its own group (`"auto_ring"`) is drawn
+by the same `0x140209D30` wrapper on the soft target while nothing is locked, at `hud = kh1` with Auto
+Lock on. H7's lock cursor stays off (`LOCKON_KH1`). KH1's side is in the KH modding workspace's
+`knowledge/KH1/kh1-lock-on.md`, and the change is AGENTS.md Stage 322. In game: walk up to an enemy in
+battle without R1. The orange ring pops in (38 → 26 → 30, fading to alpha 112) and stays as long as
+the swings aim there. It jumps to the next enemy without replaying. It goes away on R1 (Re:CoM's
+cursor) and is gone with `auto_lock = off` or `hud = recom`.
 
 ### What the in-game test must check (H7)
 

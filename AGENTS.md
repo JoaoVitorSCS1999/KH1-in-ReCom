@@ -11,6 +11,435 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 322 (fork branch Re-Re-Reverse/Rebirth): KH1's orange auto-target ring on the soft target, version 0.180.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "preciso que vc implemente o anel laranja/amarelo igual funciona no KH 1 inclusive já tem nas configs dentro do jogo das ultimas implementações sobre o auto-lock"; answering "(1) HUD: com qualquer HUD ou só com `hud = kh1`? (2) aprova o plano (projeto Ghidra do KH1)?", verbatim: "1 só com o modo do kh1 ligado, 2 sim".
+
+- **KH1** (Checked (decomp, this machine's new `KH1` Ghidra project; files); the KH modding workspace's `knowledge/KH1/kh1-lock-on.md`): the draw `0x140274B20` shows `lock` object 3 (`lockon_d`, `0x14284F9F8`, set by `0x140274290`) for lock states 1, 2 and 4. State 2 is the soft target, picked each frame by `0x1402B11B0` → `0x1402B0A00` only with Auto Lock On (`0x1402FAFB0` ≠ 1). State 4 is an attack's auto lock (`0x140293480` → `0x1402B08A0(…, 4)`). The ring is centred on the target's projected lock point and not scaled with the distance. Its keys restart only when the cursor kind changes, not when the soft target moves to another enemy. The owner's `UK_uibin_lock.bin`: 30 × 30, colour (112, 80, 12), alpha 0 → 250 → 112. Its texels are in `uitex.bin` picture 10, with `lockon_c`'s.
+- **Change**:
+  - Asset step: `kh1_hud::cursor::{RING, build_ring}`, a group after the cursor's (manifest `"auto_ring"`).
+  - DLL: `kh1_hud::Manifest::auto_ring`, `win::lock_on::ring_target`, `win::movement::main_player`. `win::kh1_hud::marker_update` (Re:CoM's `CLockonMarker` update `0x140209D30`, the H7 site, prologue already checked) is now installed for the ring as well and calls `auto_ring` (and H7's `kh1_cursor` only with `LOCKON_KH1`). At `hud = kh1`, with Auto Lock on and Combat = KH1 (Sora or Riku), our projected control draws the ring on `soft_target`'s lock point while Re:CoM's cursor holds no lock. Re:CoM's own cursor still shows a lock.
+  - Off (`auto_lock = off`, `hud = recom`, Combat = Re:CoM): no ring, as Re:CoM.
+- **Asset step**: re-run (a new group). An older `kh1-hud.json` logs "no auto_ring" and draws no ring.
+- **Not 1:1**:
+  - The ring is on our soft target (`SOFT_REACH` 6 m, Assumption since 0.175.0). KH1's pick is 3 m across (less the point's radius) and ±3.5 m up, scored by facing and height, with a line-of-sight test (now Checked, the knowledge note). Not changed here: it is the swing's aim, another system.
+  - The ring is drawn wherever Re:CoM's marker update runs. H7 read that it runs each battle frame; whether it runs locked or not, and in the field, is an Assumption. The ring is deleted with the player's HUD (the gauge's dtor, as H7's cursor).
+  - KH1 hides the ring when the target is off screen. Here Re:CoM's projected control draws it (Assumption: as its own marker).
+- **Checked**: tests (new `auto_ring_from_the_players_file` on the owner's `UK_uibin_lock.bin` and `uitex.bin`; manifest parse), the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 321 (fork branch Re-Re-Reverse/Rebirth): the DP sleights' mark, Re:CoM's Heartless emblem right of their names, version 0.179.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "preciso que no shorcut e no menu de commands tenha algo identificando que consomem DP, pode ser o ícone de um heartless"; on its place: "a direita fica perfeito".
+
+- **Re:CoM** (Checked (files)): the Heartless emblem in `FORM/0104/FO0104.RTM`'s PC asset `UK_levelup.imz` (IMGZ of one 32-bit IMGD, PS2 alpha), about (136, 55)–(215, 172). Assumption: it is Riku's level-up DP icon. KH1's `Icon.tm2` and `uitex.bin` have no such art.
+- **Change**: asset step `kh1_hud::menu::{dp_emblem, DP_EMBLEM_*}` (one group after the Summon list's, manifest `"dp_icon"`; `MenuSources::dp_emblem` read in `step::kh1_hud_build`); DLL `kh1_hud::MenuGroups::dp_icon`, `win::command_menu` (`dp_word`, `Row::icon`, `ShortCtl::icons`): the mark 3 units right of a DP sleight's (squeezed) name in the Sleights list and the shortcut panel, KH1's menu look, at the name's brightness. Re:CoM's menu look: not drawn (its words are `C2DFnt` text).
+- Asset step: re-run (a new group).
+- **Checked**: tests (`dp_emblem_from_the_players_file` on the owner's `FO0104` texture: 36 × 48; manifest parse), the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 320 (fork branch Re-Re-Reverse/Rebirth): Dark Riku's own sleights pay DP (Inverse Burst added); the fork's design intent recorded, version 0.179.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "o MP contina, mas os Sleights que só o Dark Riku Executa, consomem DP"; answers "1 a,2a" (Inverse Burst in his list; Dark Break / Dark Firaga 20 %, Dark Aura / Inverse Burst 30 %); and the intent "não é refazer o KH1 de 1:1 no Recom mas sim reimplementar o Combate, mantendo a originalidade do Kingdom Hearts Recom" (answer 5a: record it).
+
+- **Re:CoM** (Checked (exe + decomp)): Riku's start `0x140216AB0` refuses 0x5F..=0x61 and 0x65; Dark Riku's `0x140206830` (switch on `+0x82C`) takes them, 0x5F..=0x62 / 0x65 through `0x14020E590` then `+0x138`, `+0x838` = 10. Dark Mode's DP: the player's `+0x44C`, max `+0x450` (his DP stat), the gauge setter `0x14020BFA0` (as 0.152.0 / 0.166.0).
+- **Change**: `crate::dark_points::{DP_SLEIGHTS, sleight_cost, can_pay}`, `Dp::{sleight_cost, pay_sleight}`; `crate::sleights::{Cost::Dp, usable_with_dp}`; `command_menu::World::dp`; `win::dark_points::{sleight_view, pay_sleight}`; `win::summons::start_sleight` checks the DP before Re:CoM's start and pays after it (Re:CoM's Dark gauge written at once). Cost = 20 % / 30 % of Dark Mode's max, at least 2, only with 1 DP left after (a sleight never ends Dark Mode). His other sleights keep MP. `riku::DARK_SLEIGHTS` gains Inverse Burst (0x65; the asset step's name word `0x8165`); `riku::list` returns a slice.
+- **Docs**: `docs/design-philosophy-instructions.md` § Fork branch: the fork owner's intent (Re:CoM's originality ahead of KH1 1:1 on this branch); `docs/recom-riku-kh1.md` § 0.179.0.
+- **Assumption**: Inverse Burst's pack loads in his battles as the other three's.
+- Asset step: its sources changed (the name), so the first start builds again.
+- **Checked**: tests (`dark_rikus_own_sleights_pay_a_share_of_dark_modes_dp`, `rikus_sleights`), the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 319 (fork branch Re-Re-Reverse/Rebirth): one debug key, `all_unlock`, for every costume and cosmetic Keyblade, version 0.178.5 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "pode deixar as condições do INI em OFF e unifique elas para all_unlock=off informando que é só para propósitos de debug!".
+
+- **Change** (`settings`, `win::riku_skin`, `win::sora_costume`): `riku_halloween_unlocked`, `riku_dark_skin_unlocked`, `riku_keyblade_unlocked` and `sora_costume_unlocked` (`Settings`' four debug fields) are one `all_unlock` (default off), its ini comment "FOR DEBUG PURPOSES ONLY". The story requirements are unchanged: Riku's Dark Mode costume and Keyblade of Heart at his first Dark Mode, his and Sora's Halloween Town costumes at reaching Halloween Town. An old file's four keys are ignored without a warning (as `kh1_motions`), so an old `on` no longer unlocks anything.
+- The fork owner's own `kh1-recom.ini`: the four keys replaced by `all_unlock = off` (backup `kh1-recom.ini.bak-0.178.4`).
+- **Checked**: tests (new `all_unlock_replaces_the_four_debug_keys`), the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 318 (fork branch Re-Re-Reverse/Rebirth): dead helpers removed, duplicated helpers shared (no behaviour change), version 0.178.4 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "busque outras redundância inúteis no mod para eliminar"; then "remova somente redundâncias que não vão quebrar o mod".
+
+- **Removed** (referenced nowhere in the workspace): `attack::attack_events`, `kh1_core::enemy::script::current_motion`, `kh1_anim` `Mat::to_array`, `kh1_formats::mset` `helper_positions`, `kh1-recom-assets` `ann` `default_blend` and `matching` `body_pos_mm`, `kh2_formats_lite::mdlx` `Model::triangle_count`; the now-unused `FrameOut` import in `attack.rs`.
+- **Shared**: the 20 enemy modules' test helper `inputs()` (and `enemy::clash_tests`'s) now call one `enemy::test_inputs(spec, ses_required)` (tests only, not in the DLL or the step's output); `win::battle` and `win::guard`'s identical `class_name` are one `win::stats::object_class`. `win::stats`'s own `class_name` / `class_label` differ (no null check, empty name without RTTI) and stay.
+- **Kept on purpose**: unused `pub` constants that record Checked addresses or format fields (e.g. `btltbl` `GROUND_2`, `mset` `TYPE2`, `kh2_formats_lite::system` item kinds) and format readers (`objentry::parse_sklt` / `parse_wmst`, `mset` flag getters): documentation of the files, not redundancy. Per-enemy behaviour code that repeats between enemies (`frame`, `new`, `wander` in `kh1-core`): merging it is a refactor of running code, not a cleanup. `patch_container` in `camp_rows` / `shop_tabs`: same text, each on its own module's constants.
+- The asset step's sources changed (test helpers, two dead getters), so its hash changes and the first start builds the files again; the output is the same.
+- **Checked**: tests, the Windows build. **Not checked**: in game (nothing in it should change).
+
+---
+
+## Stage 317 (fork branch Re-Re-Reverse/Rebirth): Talk next to NPCs as KH1 (row 0, a dimmed Attack that buzzes), version 0.178.3 (2026-11-23)
+
+Fork owner, 2026-11-23, answering "Perto de NPCs: (a) Attack continua normal, e o Talk aparece só na aba (como está); (b) 1:1 com o KH1: o Talk vai para a linha 0 e o Attack fica apagado, com o som de erro", verbatim: "8b".
+
+- **KH1** (Checked (decomp), `docs/recom-m7-command-menu.md`): NPCs (kind 1) put Talk in row 0 through `0x140293000(0, Talk)`, which ungreys it; FM draws row 0 as a dimmed "Attack", its confirm gives sound 4, the context tab shows Talk.
+- **Change** (`command_menu::Menu::build`, `Menu::scene`): with Talk as the context command (`recom::field_action` on an `ATEL::CAvatar`, kind 0x4000) and no special follow-up running, Talk takes row 0 (ungreyed, unlocked) instead of entry 3; the scene names row 0 "Attack" at the grey brightness; confirm on it buzzes and sends no Attack (the existing `row0_special` path); Triangle, once the tab is in, sends `Context(Talk)` as before. No new hook.
+- **Assumption**: a running special's follow-up keeps row 0 over Talk (KH1's order between the two not read).
+- **Checked**: tests (new `talk_takes_row_0_as_a_dimmed_attack_that_buzzes`), the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 316 (fork branch Re-Re-Reverse/Rebirth): Donald's and Goofy's KH1 gauges without rings, version 0.178.2 (2026-11-23)
+
+Fork owner, 2026-11-23, answering "Anéis do Donald e do Pateta (os amigos do Re:CoM não têm HP nem MP): (a) ficam sempre cheios; (b) os anéis são escondidos", verbatim: "4b".
+
+- **KH1 / Re:CoM**: unchanged from H6 (`docs/recom-kh1-hud.md` § H6): KH1's party slots draw `g_c` objects; Re:CoM's friends have no HP or MP (Checked (decomp + strings)).
+- **Change** (asset step, `kh1_hud::party::build`): the two party groups hold the face frame (`g_c_fra_a_w`), the disc (`g_c_fra_a_a`) and the face only; the HP / MP ring backs (`g_c_fra_b/c/d_*`) and the full rings (`g_c_bar_*`) are no longer built. The DLL is unchanged (it shows and hides the same two groups). The step's source hash changes, so the first start after the update builds the files again.
+- **Assumption**: "os anéis" means the rings and their dark backs; the frame, disc and face stay. Picture 5 is still added to the atlas (now unused by the party).
+- **Checked**: tests, the Windows build. **Not checked**: in game; the real-file HUD test (`builds_from_a_dump`) was not run (no `hud-h0` dump on this machine).
+
+---
+
+## Stage 315 (fork branch Re-Re-Reverse/Rebirth): the KH1 HUD hides at once when Re:CoM hides its HUD, version 0.178.1 (2026-11-23)
+
+Fork owner, 2026-11-23, answering "Quando um evento esconde o HUD: (a) fade de 10 frames, como no KH1 (é o que está construído); (b) some na hora, como no Re:CoM", verbatim: "3b" (`docs/design-philosophy-instructions.md` § Open questions round).
+
+- **Re:CoM** (Checked (decomp)): the gauge's HUD state setter `0x14020C190` (`40 55 57 48 83 EC 48`) is called by `0x140208360` and `0x14020A0E0` with the request at the gauge's `+0xAA`, by `0x140209440` / `0x14020A0E0` with 2 and by `0x14020BC60` with 8 / 9. Who writes 7 to `+0xAA` (an event or a menu) is not researched, so events and menus are not told apart.
+- **Change** (`win::kh1_hud::Cluster::hide`): state 7 hides the KH1 cluster at once (the units dropped, the held controls hidden), no longer through `fade_out`; state 1 still plays KH1's 10-frame `fade_in`. The command menu already hid at once (`command_menu::Menu::hide`). No new hook, no asset change (`fade_out` stays in the data, unplayed).
+- **Assumption**: the fork owner's "as Re:CoM" also covers menu hides (KH1 fades for its menus). Ask if a menu should still fade.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 314 (fork branch Re-Re-Reverse/Rebirth): Riku's Halloween Town costume in every world, version 0.178.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "certo faz o da Halloween town então".
+
+- **Re:CoM** (Checked (exe + files)): Riku is char 3 (group 101, pack `PL0101`), char 4 in Halloween Town (group 111, `PL0111`); one action table for both (`0x1407C6370`); the camp / level-up menu model bytes `MENU_BYTES` (101 / 111).
+- **Ours** (`riku_skin::{Look::halloween, group_for_char}`, `win::riku_skin::{halloween_unlocked, costume_open, mark_halloween}`): costume Halloween Town puts char 3 on 111 (Re:CoM's own `PL0111` name) or its skins (the Keyblade of Heart: 151; Dark Mode keeps Riku's 131 only in Halloween Town as before). Costumes' Costume row: Default Attire / Dark Mode / Halloween Town, skipping a locked one; ini `riku_costume = default | dark | halloween` (the old `riku_dark_skin = on` reads as Dark Mode). Changed in place with the crouch and the way-back effect.
+- **Unlock**: Riku as char 4 once (Riku's save spare bit 0x20); debug `riku_halloween_unlocked` (on in the owner's ini).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 313 (fork branch Re-Re-Reverse/Rebirth): the Ansem costume removed, version 0.177.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "pode tirar o ANsem das skins ficou ridículo, no recom tem algum outro modelo do Riku?".
+
+- 0.176.0..0.176.2 reverted: Riku's costumes are Default Attire / Dark Mode again (`riku_dark_skin`), the asset step builds no Ansem groups (181 / 191 / 221 / 231), the Keyblade of Heart groups as before. Stages 310..312 stay as history.
+- Re:CoM's other Riku models (Checked (files: every `PLAYER` / `ENEMY` RTM and skeleton)): only Riku (`PL0101`), his Halloween Town look (`PL0111`) and Riku-Ansem (`PL0201` / `PL0211`, `EN0116`: the Dark Mode costume). No other Riku.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 312 (fork branch Re-Re-Reverse/Rebirth): the Ansem costume's limbs posed from Riku's T-pose, version 0.176.2 (2026-11-23)
+
+Fork owner, 2026-11-23 (three screenshots: arms out, hands at the waist, the head bent into the hair), verbatim: "ficou bem bizarro".
+
+- **Cause** (Checked (files)): Riku's rest pose is a T-pose (hands at shoulder height, 0.61 m out); Ansem's an A-pose (hands 1.20 m up, 0.40 m out: arms about 50° down, 70° at worst). The retarget carries each bone's turn from its rest, so every Ansem limb stayed as far off as its rest differs.
+- **Fix** (`riku_skin::{rest_like, align, LIMBS}`): before the retarget, each limb's rest rotation (collar, upper arm, forearm, thigh, shin, foot; the hand takes its forearm's, `wep0` its hand's) is turned by the smallest rotation to Riku's rest direction, only when a limb is 20° or more off (Dark Riku's worst is 9.9°: the Dark Mode groups 121..171 byte for byte as before, Checked (files)). Groups 181 / 191 / 221 / 231 change. **Re-run** (automatic).
+- Test: in Riku's idle, Ansem's upper arm / thigh 0.0° and forearm 3.4° off Riku's directions.
+- Assumptions: the twist about each limb kept as Ansem's rest has it; the head bent in a pose is Riku's own clip (Ansem's taller neck chain: 1 bone against Riku's 3).
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 311 (fork branch Re-Re-Reverse/Rebirth): the Ansem costume is Ansem's model (0.176.0 took Axel's), version 0.176.1 (2026-11-23)
+
+Fork owner, 2026-11-23 (screenshot: Riku as Axel), verbatim: "você colocou a skin do Axel cara!, é a do Ansem Seeker of Darkness!".
+
+- **Cause**: 0.176.0 picked `ENEMY/0118` (`b_ex110`) by its names, never looking at its textures: it is Axel. Ansem, Seeker of Darkness is `ENEMY/0122` (textures `ex_1630_0x` = KH1's `xa_ex_1630`; silver hair, dark skin, orange eyes in `ex_1630_01`), Checked (files: the texture rendered).
+- **Change** (`riku_skin::{ANSEM_ENEMY, ANSEM_RENAMES, ansem_mdl}`): `EN0122`, skeleton `e122_sk` (157 bones); its bones renamed to Riku's where the role is the same (`e122_sk` → `ex_1010_sk`, `lf_*` / `rf_*` → `l_*` / `r_*` legs, `chest2` → `chest1`, `neck` → `neck1`), so Riku's code finds them and the retarget maps them. Riku's `wep0` and weapon added as in 0.176.0. Groups unchanged (181 / 191 / 221 / 231). **Re-run** (automatic).
+- Test: the idle's feet within 2.4 cm of Riku's (relative to rest), the blade root 11 cm from the hand as Riku's.
+- Assumptions: Ansem's hand rest frame close to Riku's; his coat tails and hair at rest; his `chest2` stands in for Riku's `chest1`.
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 310 (fork branch Re-Re-Reverse/Rebirth): Riku's Ansem costume (Ansem, Seeker of Darkness's model with Riku's own moves), version 0.176.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "implementa a skin do Ansem para o Riku".
+
+- **Re:CoM** (Checked (files); wrong, see Stage 311: `EN0118` is Axel): Ansem taken as `ENEMY/0118/EN0118` (textures `b_ex110_0x`, skeleton `b_ex110_sk`, 138 bones, 52 named as Riku's), read whole by our MDL reader (2 parts); no `wep0` (his `WeaponR` in the right hand). His card is 0x74.
+- **Asset step** (`riku_skin::{ansem_mdl, build_ansem}`): his model + a `wep0` under his `r_hand` at Riku's rest `wep0` relative to Riku's `r_hand`, Riku's weapon parts (PL0101 / PL0111 parts 0 / 1) moved onto it, parts ordered as Riku's, bone 1 renamed `ex_1010_sk`; Riku's clips (with his KH1 guard clips) retargeted by name, events remapped; Ansem's RTM + Riku's `weapon_0x` texture (or the Keyblade of Heart's), Ansem's TXA. Groups 181 / 191 (Soul Eater), 221 / 231 (Keyblade of Heart). **Re-run** (automatic; new outputs). Test: the idle's feet within 2.2 cm of Riku's (relative to rest), the blade root 11 cm from the hand as Riku's.
+- **Game**: costumes are now 0 Default Attire / 1 Dark Mode / 2 Ansem (`Look::costume`; manifest rows carry `costume`, older rows read `dark`); ini `riku_costume = default | dark | ansem` (the old `riku_dark_skin = on` reads as Dark Mode); Costumes' Costume row cycles the three, skipping a locked one. Ansem unlocked by his card (Re:CoM's obtained-at-least-once, given at his defeat) or `riku_ansem_unlocked` (debug, on in the owner's ini). A change to or from Ansem plays the crouch and the way-back effect (Dark Mode keeps its flip).
+- Assumptions: Ansem's hand rest frame close to Riku's (the blade's angle); his robe / hood / chains / hair held at rest.
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 309 (fork branch Re-Re-Reverse/Rebirth): KH1's Auto Lock as its soft target; Re:CoM's enemy pace one attacker at a time again, version 0.175.0 (2026-11-23)
+
+Fork owner, 2026-11-23, passing on two testers' reports, verbatim: "Sora doesn't seem to automatically lock on to an enemy when doing a combo, leading to a lot of missed swings…"; "I switched to the kh1 enemy ai where they all attack at once… I moved back to Re:Com's enemy ai but they were still attacking all at once"; and "o teu Auto Lock está diferente da implementação do KH1 lá o auto lock funciona sem lock on ao chegar proximo do oponente os ataques são direcionados a ele".
+
+- **Auto Lock** (`win::lock_on::soft_target`, `win::attack::attack_target`): with no lock, the KH1 swing / spell target is the nearest lockable enemy by KH1's pick (distance less its lock radius) within 6 m (Assumption: KH1's reach not read), when `auto_lock` is on, Sora or Riku. 0.173.0's arming of Re:CoM's lock is removed (KH1's Auto Lock is lock state 2, a soft target; Checked (KH1 exe: `0x14029365F`)).
+- **Enemy pace = Re:CoM** (`battle::wanted`, `battle::one_at_a_time`): Re:CoM's three serialisers (P2 think gate, P3 one grant a frame, P4 crowd pace) stay Re:CoM's, and the cardless play (P1) refuses an ordinary enemy while another is attacking (Re:CoM's CBTL enemy slot's rule without cards). Bosses as before. Enemy pace = KH1: all ours as before. Since M6 (0.12.0) P2 / P3 were ours whatever the pace.
+- Not changed: KH1-AI enemies (their own scripts) attack as KH1's do.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 308 (fork branch Re-Re-Reverse/Rebirth): Riku's Keyblade change shows his weapon's own appear effect, version 0.174.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "no Riku na transição quando troca de keyblade deve ser o mesmo efeito quando ele está sem e vc aperta o botão de ataque e ela aparece na mão".
+
+- **Re:CoM** (Checked (exe: disasm)): Riku's "draw the weapon" is his vtable `+0xF8` = `0x1402160A0(riku, show)`: with `+0x418 & 2` (weapon put away) it clears it and, with `show`, plays the effect `[0x1407C7C98]` on his weapon bone `+0x3A0` (`0x1401A2D50`) and fades the weapon in (`+0x154 | 0x40000000`, `+0x17C` 0, `+0x180` 1.0, `+0x188` / `+0x18C` 2000, `+0x190` 2).
+- **Ours** (`win::riku_skin::weapon_appear`): a Keyblade-only change in place (0.160.0) sets `+0x418 | 2` after the model change and calls that function (was: the transformation's way-back effect).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 307 (fork branch Re-Re-Reverse/Rebirth): KH1 FM's Auto Lock and Target Lock on the Camera page, version 0.173.0 (2026-11-23)
+
+Fork owner, 2026-11-23 (screenshot: KH1 FM's Config, Auto Lock On / Off and Target Lock Auto / Manual framed), verbatim: "precisa implementar essas duas configs e features".
+
+- **KH1** (Checked (KH1 exe: disasm; no decomp here)): the Config block `*(0x142E1F4D8)`: `+0` Auto Lock (getter `0x1402FAFB0`, 0 = On), `+4` Target Lock (`0x1402FAFA0`, 1 = Manual), `+8` the camera (`0x1402FAFD0`). Auto Lock On: an attack command with no lock locks its target (`0x14029365F` → `0x1402B08A0(…, 4)`); a lock whose target is gone picks the next (`0x1402B1348` → `0x1402B0A00`). Target Lock Manual: locked, R1's release unlocks (`0x1402B069C`); Auto: R1's press.
+- **Ours** (`win::lock_on`, Combat = KH1 on a controller, Sora and Riku): Auto Lock (ini `auto_lock`, default on): on a frame with the Attack request and no lock, or after a lock ended without the player's unlock, Re:CoM's lock-on locks its pick (`+0x84C`) as if R1 were pressed; Target Lock (ini `target_lock = auto | manual`, default auto): Manual unlocks on R1's release. Rows on Settings > Camera.
+- Assumption: Re:CoM's pick (its nearest, the cursor's) for KH1's attack target / KH1's pick.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 306 (fork branch Re-Re-Reverse/Rebirth): L2's target step written when Re:CoM's cursor doesn't take it, version 0.172.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "L2/trigger esquerdo não está alternando oponentes no modo Kh1".
+
+- The owner's 0.171.0 log: `lock-on: L2 on 0xa3: next 0xa5` again and again: our step chose the next target, the lock stayed on 0xa3 (the history synced from Re:CoM's cursor never moved).
+- Re:CoM (Checked (disasm)): its switch writes the new handle to `+0x84C`, zeroes the cursor's `+0xD4` and runs the cursor update `0x140208EC0`, whose locked branch (`0x140209038`) takes `+0x84C` only when `+0xD4` ≤ 0. Why it didn't take ours: not known.
+- **Change** (`win::lock_on::stepped`): after Re:CoM's lock-on, a chosen target the cursor (`+0xD4`) or the player's handle (`+0x850`) didn't take is written to both (lock kept); each step logs what Re:CoM left. Assumption: the locked branch follows a written `+0xD4`.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 305 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard blocks only real contacts, as Sora's (0.153.0's fallback removed), version 0.171.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "porra testei denovo a defesa do Riku de longe mirando no inimigo, bizarro precisa corrigir isso definitivamente! veja como está implementada a defesa no Sora como já disse a única diferença é a animação!".
+
+- **Cause** (Checked (the owner's 0.170.0 log)): every far block came from 0.153.0's damage-check fallback (`riku_guard_block`): a hit flagged as arrived (`+0x41C & 0x200`) with value 0, from enemies 4..14 m away, the attacker id the last real hit left on his body; with that attacker in front it blocked and played the guard success each time. None came from the pair test (`riku_pair_block`, 0.159.0). What sets the flag with no hit: not known.
+- **Fix**: the fallback is gone (`riku_guard_block` always false; `guard::riku_block` / `cancel_shot` removed). Riku's Guard is Sora's: Re:CoM's own block or the pair-test block of a real contact from in front; the damage check keeps the guarded hit for his KH1 frame as Sora's.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 304 (fork branch Re-Re-Reverse/Rebirth): Sora's Halloween Town costume in every world (Costumes on his lists, unlocked by reaching Halloween Town), version 0.170.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "para o Sora quero que ele também tenha trajes desbloqueáveis de acordo como a história, então se o sora for para a halloween town por exemplo, o jogador pode livremente alterar para este traje a qualquer momento"; of KH1's world costumes "Só Halloween"; "esqueci completamente que kh1 e rechain of memories o sora só troca de aparencia na halloween town... então pode usar o modelo do próprio jogo".
+
+- **KH1** (Checked (files)): Sora's models are `xa_ex_0010` (/ `0012` / `0019` lower-resolution copies), `xa_nm_0010` (Halloween Town), `xa_lm_0010` (Atlantica, merman; not made: no legs, the owner's choice). `xa_ex_0040` / `0050` are Donald / Goofy.
+- **Re:CoM** (Checked (exe + files)): Sora is char 1 (group 1, `PL0001`), char 2 in Halloween Town (group 11, `PL0011`), one action table (`0x1407C5E80`), the same 69 clip names in both packs.
+- **Ours** (`win::sora_costume`): with `sora_costume = halloween` (ini; Costumes page, "Default Attire / Halloween Town") char 1 → group 11 and pack name `PL0011` (char 2's pointer), the camp's menu-model byte `0x1400E4705` 1 → 11; from the next room or battle (Re:CoM's group queue refresh). Unlocked when Sora is char 2 once (save spare bit 0x10); debug `sora_costume_unlocked`.
+- **Camp**: Costumes before Settings on Sora's KH1 list (10 entries, step 21.3) and on his Combat = Re:CoM list (Re:CoM's seven, Costumes, Settings: 8).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 303 (fork branch Re-Re-Reverse/Rebirth): Sora's combat rules for Riku, part 2: Dark Riku's Guard, KH1's attack-meets-attack, the twins' lock radius / level, the damage cap, version 0.169.0 (2026-11-23)
+
+Fork owner, 2026-11-23: "certo mas esse é só um ponto, tem algo que ficou faltando?"; the plan (4, then 1 + 3, then 2): "sim".
+
+- **Dark Riku's Guard**: the pair-test block (0.159.0) for the real Dark Mode too.
+- **Attack meets attack** (`win::attack::riku_pair`): his swing's Re:CoM weapon volume (sphere: swept centres, radius) against the KH1 enemies' live attack rows, as Sora's blade spheres (M11, 0.82.0): KH1's clash outcome (his KH1 recoil, the enemy's), a marked swing meets no hurt body that frame. Assumption: the KH1 row's clash type / priority with the equipped Keyblade's numbers for the Soul Eater's; a non-sphere volume logs and skips.
+- **Twins** (`stats::twin_any`): in his story, the KH1 twin's lock radius (KH1's lunge distance) and level (his MP charge), as Sora's; his enemies' HP and damage stay Re:CoM's.
+- **Damage cap**: his swings take the enemy's KH1 per-hit cap as the share of Re:CoM's max HP (`damage_cap::Source::Recom`), at both Damage settings (his numbers are Re:CoM's card AP on Re:CoM's HP).
+- Left his own: his damage numbers at Damage = KH1 (Re:CoM's), the Neoshadow's held grab (no clip).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 302 (fork branch Re-Re-Reverse/Rebirth): the Wizard and the Aquatank stay hittable in their dimming moves (only bosses' are untouchable), version 0.168.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "eu acertar uma porrada no wizard enquanto ele casta thunder ainda não interrompe o ataque dele"; "troque essa implementação porque a jogabilidade quando estiver no KH1 deve usar as mesmas regras, com exceção a bosses de fato, um wizard não é um boss...".
+
+- The owner's log: the Thunder was the Wizard's state 4 (the room dims, `_ex_2150` shots for 180 frames), untouchable by 0.100.1's rule ("Same rule" as the bosses), for Sora and Riku. Its other casts (states 2 / 3) were already interrupted.
+- Now `revenge::install` no longer arms the Wizard's / Aquatank's windows (`install_normal` kept, not called): their dimming moves are ordinary attacks at Combat = KH1 (hittable, the card interrupt ends them). The bosses' dimming moves and revenge moves stay untouchable.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 301 (fork branch Re-Re-Reverse/Rebirth): Riku's DP only once the story gives him Dark Mode; the Keyblade of Heart unlocks with the Dark Mode costume, version 0.167.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "o Dark Mode precisa começar de acordo com o jogo normal mesmo liberando a partir da história, me equivoquei falando que o dark mode começava com 30 pq vi que era dentro do combate para ativalo!, a keyblade cosmética dele pode liberar junto com o Dark Mode também".
+
+- **DP** (`win::dark_points::ours`): only with Riku's ability word `+0x41C & 0x4000000` (the story's Dark Mode, the bit Re:CoM's own DP rules and its Dark Riku test read; Checked (disasm `0x1401E7255`, `0x14021223D`)) or as Dark Riku. Before it, no DP and the gauge untouched, as Re:CoM. Kept from 0.166.0: the gauge fills to 30 to start it, Dark Mode starts at his DP stat.
+- **Keyblade of Heart**: unlocked with the Dark Mode costume (Riku's first Dark Mode, `riku_skin::unlocked`), the 15-DP bit dropped.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 300 (fork branch Re-Re-Reverse/Rebirth): Dark Mode starts at Riku's DP stat again; his DP row is "Dark Up" (DP +2 and Ability Points +2), version 0.166.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "mas sumiu o DP"; "certo mas o DP enchendo e esvaziando tbm liga com o DP maximo oq aconteceu com ele"; chose "DP e Ability juntos".
+
+- **Re:CoM** (Checked (disasm)): outside Dark Mode the gauge fills to a fixed 30 (`0x1401F57A4`, `0x1401E7284`); Dark Riku's switch-in sets DP = max = Riku's DP stat (`+0x450` from `stats+0x14`, `0x1401F0C38`, `0x1402048BD..0x1402048CE`): 8 at a new game, +2 a DP pick, at most 99; it drains to 0. 0.151.0's tables had dropped it (30 in Dark Mode too); 0.164.0 then took the pick for the ability points, wrongly calling it unused.
+- **Now**: Dark Mode starts at his DP stat, its gauge's max (`dark_points::Dp::enter_dark`), the owner's tables drain it. His third level-up row is "Dark Up / DP +2, Ability Pts +2" (always offered; Re:CoM's +2 DP kept; the panel shows Re:CoM's DP); the result "DP and Ability Points increased by 2."
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 299 (fork branch Re-Re-Reverse/Rebirth): Riku's level-up names his ability points in full, version 0.165.1 (2026-11-23)
+
+Fork owner, 2026-11-23 (screenshot: Riku's level-up with "AP 10" and "Max AP 3 → 5"), verbatim: "parece que ficou duplicado esse lance de AP". Not a duplicate: "AP" is Re:CoM's attack stat (his Attack Boost row), ours the ability points. On his screen ours now read "Ability Up" / "Ability Points +2", panel "Ability Pts", result "Ability Points increased by 2."; Sora's unchanged. **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 298 (fork branch Re-Re-Reverse/Rebirth): the Enemy Skills act on Riku; his items reach his KH1 frame, version 0.165.0 (2026-11-23)
+
+Fork owner, 2026-11-23: "concordo" (the plan's step 4: the skills' effects on Riku).
+
+- **Fix**: 0.163.0's item use never reached Riku's KH1 frame (his branch of `run_frame` read no item command): now it does, with the item events.
+- **Route 1** (`win::enemy_skills::live` / `refresh`, his frame's `kh1_frame`): Re:CoM's own player writes for his equipped skills; Wight Knight's Float on his gravity; Soldier's Combo Plus and Bandit's Combo Finish in his abilities.
+- **Per hit / swing / frame**: Second Chance, Jafar / Air Pirate's no-flinch (the damage check's `arrived` for `kh1_fighter`); Card Soldier's haste, Saïx's boost, the Berserk test at his swing's start; Air Soldier / Marluxia's frame step; the support rules on `mp::live`.
+- Already his (per battle, his save's skills): the compare stubs (Quick Recovery, Dash, Auto-Life, Invincible, Sleightblind), the deck skills' arming, the route-2 hit rewrite.
+- Not acting for Riku (no part of his): the spell / summon boosts (Red Nocturne, Blue Rhapsody, Yellow Opera, Green Requiem, Wizard, Crescendo), Luxord (Sora's blade clash), Marluxia's replay (Sora's Sleights list), Berserk's bonus on his hits (his hits are Re:CoM's weapon hits).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 297 (fork branch Re-Re-Reverse/Rebirth): Riku's AP Up (his DP row), his Enemy Skills from his own cards, his Abilities page, version 0.164.0 (2026-11-23)
+
+Fork owner, 2026-11-23: Enemy Skills for Riku from "as cartas que o Riku ganha durante a play dele"; the DP row as his AP Up ("concordo").
+
+- **Re:CoM** (Checked (disasm + files)): Riku's level-up rows are HP, AP (`stats+0x10` + 1) and DP (`stats+0x14` + 2, cap 99, `0x14010F70F`), DP offered only once sleight 0x6D is learned and DP < 99 (`0x14010F2D2`). His new game is `CardInit` record 15: level 1, HP 80, DP 8, AP 10. Our DP is the owner's tables (cap 30): Re:CoM's DP stat had no use at KH1.
+- **Level-up**: at Combat = KH1 in his story the DP row is "AP Up / Max AP +2", always offered; Re:CoM's +2 DP kept only where Re:CoM offers its row. Old saves: (DP − 8) ÷ 2 past picks (at most level − 1) count as AP Ups, once.
+- **Abilities**: his state in his story's save (`abilities::sync` on `mp::live`), only the Enemy Skills (card sources; no KH1 level grants, Re:CoM movement or sleight abilities); learned from his cards' first pickup / Re:CoM's discovery state, with the learned notices at his field camp gate.
+- **Camp**: his list is Items, Abilities, Customize, World Map .. D Report, Costumes, Settings (10, step 21.3; Assumption: reads well); the Abilities page is Sora's, owner "Riku".
+- Not yet: the skills' effects on Riku (next).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 296 (fork branch Re-Re-Reverse/Rebirth): KH1's items for Riku (drops, Items list, use, camp Items page with his Keyblade slot, Moogle shop), version 0.163.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "inclusive as features implementadas para o Sora até então, - Fully working MP system, item drops, and moogle shops …"; "vi agora que com o Sora já tem a feature de escolher a keyblade, para não ficar redundante aplique a mesma forma de implementação para o Riku e pode iniciar o fluxo proposto"; item motion: "Uma animação dele".
+
+- **Store**: Sora's item block in Riku's story's save, as his MP (`items::with_inventory` on `mp::live`).
+- **Drops**: KH1's tables in Riku's story too (`stats::drops`; his enemies keep Re:CoM's HP / damage).
+- **Battle**: his command menu's Items row with his slots; a use runs Sora's KH1 path (the use task in `riku_request_bits`, `exe_item` for `kh1_fighter`). KH1's item motion 0x3E plays his row 0x2D (`p002_034`, 56 frames at 30 fps; Re:CoM's Riku never uses it; Assumption: his own "use" motion, the owner's choice). The heal at KH1's frame.
+- **Camp** (Combat = KH1): his list is Items (Review Decks' place), Customize, World Map .. D Report, Costumes, Settings. The Items page is Sora's, owner row "Riku"; his Keyblade slot opens his Keyblade list (Soul Eater / Keyblade of Heart, greyed until 15 DP), as Sora's Keyblade list. The Costumes page's Keyblade row (0.160.0) is gone.
+- **Moogle shop**: Sora's KH1 shop where Riku's story has one, lines naming Riku.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 295 (fork branch Re-Re-Reverse/Rebirth): Sora's combat rules for Riku (post-hit invulnerability, KH1's no-flinch, no card duel, the dimming sleight's shield, gimmick cards, R1 lock-on), version 0.162.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "precisa valer, alias fora as específicidades do Riku todas as regras de combate precisam ser iguais as do Sora, porque na verdade não muda mesmo, são os mesmos inimigos, o criador do mod só quis desabilitar a parte do Riku para implementar depois".
+
+- Audit of every Sora-only gate in the combat code (Checked (code)); `mv::kh1_fighter` (Sora or Riku with KH1 movement) now for:
+  - the damage check: KH1's post-hit invulnerability (30 frames, decision 31), KH1's no-flinch frames, no card duel (decision 33), a dimming sleight's shield;
+  - gimmick cards (drop held, "Stagger" in his context tab, Guard break, finisher break, 50 % HP drop);
+  - KH1's lock-on rules on R1 (controller).
+- Already shared before (Checked (code)): KH1 battles (M6, cardless enemies, pace), KH1 enemy AI, enemies hittable while attacking, the swing's card interrupt, revenge value, the dim rules, Guard reactions, cooldowns.
+- Left Riku's own (his specifics): his damage (Soul Eater's card AP at both Damage settings, Re:CoM HP), Sora's abilities / spells / items / summons / Enemy Skills, the Neoshadow's held grab (no clip of his).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 294 (fork branch Re-Re-Reverse/Rebirth): a shot the Guard turned back interrupts its caster (Sora and Riku), version 0.161.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "preciso de uma revisão e balanceamento do combate com o riku, quando alguns oponentes estão castando magia o ataque não interrompe, verifique se esse tipo de coisa já é tratado na gameplay com o Sora nesse mod".
+
+- **Found** (Checked (the owner's 0.160.0 log + disasm)): every turned-back shot met its Wizard with "damage 0 … card playing". Decision 28's card-interrupt test read the enemy's hit info `+0xF8`, which Re:CoM's gather `0x140154EB0` fills inside the handler (`0x14017F81F`), so before the handler it never named the shot. Since 0.11.2, for Sora too.
+- **Fix**: the attacker is read from the waiting hurt body (`+0x98`), as Riku's swings are.
+- **Review** (Checked (code + log)): Riku's swings get Sora's rules already (enemies stay hittable while attacking, `hurt_off` with `riku_on`; his hits carry the card-interrupt bit, `riku_swing_hit`). The deliberate exceptions stand for both: the Wizard's state 4 / the Aquatank's state 3 (the room dims: untouchable, 0.100.1), the bosses' dimming moves, revenge moves, KH1 enemies' own no-reaction hits.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 293 (fork branch Re-Re-Reverse/Rebirth): Riku's Keyblade on the Costumes page (Soul Eater / Keyblade of Heart, cosmetic), unlocked at 15 DP, version 0.160.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "quero implementar para o Riku a troca de Keyblade, vai ser simplesmente cosmética, quero que inicialmente ele possa trocar entre a Soul Eater e a Keyblade of Heart, vai ser uma nova entrada no menu dentro de Costumes, a Keyblade of Heart você pode pegar no KH1 acho, e ela é liberada com 15 de DP, mas inicialmente deixa ela desbloqueada para eu testar"; "no Kingdom Hearts 1 essa é a única keyblade que ele utiliza, numa bossfight inclusive com o mesmo traje do DarkMode".
+
+- **KH1** (Checked (files)): Riku-Ansem's `xa_ex_1580` (voices `rk04`) holds the Keyblade of People's Hearts as its HD mesh `-c0.cvbl` mesh 0 on joint 211, texture `-1c0.dds`.
+- **Re:CoM** (Checked (files)): Riku's weapon is parts 0 / 1 of his model on `wep0` (77; Dark Riku's 105), in KH1 joint space × 0.01. Joint 211 → 191: (4.54, −0.52, −0.02) cm, from the Soul Eater held by `xa_ex_1160` (same skeleton as 1580) against `xa_ex_1560`'s (Assumption: the same grip).
+- **Asset step** (`riku_skin::{with_blade, build_blade}`, `keyblade::blade_parts`, `mdl::split_parts`): groups 141 / 151 (Default Attire, from 101 / 111) and 161 / 171 (Dark Mode, from 121 / 131, the blade turned over as `BLADE_FLIP`) with the weapon parts replaced (the body kept byte for byte) and the texture added to the RTM. **Re-run** (automatic; new outputs).
+- **Game**: the Costumes page gets a second row, **Keyblade: Soul Eater / Keyblade of Heart** (ini `riku_keyblade = soul_eater | heart`). The group comes from the attire × Keyblade; a Keyblade-only change swaps the model at once with Riku's way-back effect. Unlock: Riku's DP reaching 15 once (save spare bit 8); debug `riku_keyblade_unlocked` (on in the owner's ini for the test).
+- **Checked**: tests (`riku_skin::tests::the_keyblade_replaces_rikus_weapon_parts`, the look selection), the asset step, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 292 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard works as Sora's KH1 Guard (blocks at the pair test, turns shots back, Counterattack, the guard up on the live frames), version 0.159.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "a mecânica de guarda precisa funcionar igual a do Kingdom Hearts 1"; "o mod com a campanha do Sora já deve ter essas implementações não? não da para se basear?" (chose: hits get through, magic should come back, timing odd, no Counterattack).
+
+- **Block** (`win::attack::riku_pair_block`): Re:CoM's body guard never answers 2 for Riku (why: not known; the log showed every hit falling to the damage-check fallback). Now a hit on him at the pair test while his KH1 guard is live, from in front (±100°; a shot within 1 m judged by its caster), becomes Re:CoM's block as Sora gets it: result 2 + the guarded bit. Sora's path does the rest. Not for the real Dark Riku.
+- **Shots**: turned back as Sora's (0.153.0's cancel removed).
+- **Counterattack**: Riku has KH1's Counterattack (Sora's offer and input); it plays his ground finisher's row (`riku::swing_row`, Assumption: it reads as the counter).
+- **Timing**: the guard clip is 240 in 10 frames, 241 held over KH1's live window 10..36, the way out in 17 (54 total). Asset step: **re-run** (automatic).
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 291 (fork branch Re-Re-Reverse/Rebirth): no melee block reaction on a far attacker; KH1 Riku's own guard recoil, version 0.158.2 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "eu apertei a defesa bem longe desse oponente, e parece que deu block naquela distância … prefiro que use a versão do KH1 da animação de quando toma impacto".
+
+- The owner's log: the far Defender's fireball / flame (Re:CoM bullets naming it) was blocked as "melee", flinching it each time. An attacker that is no shot and is past 4 m is now blocked without a reaction on it.
+- KH1 Riku's request 110 (his guard recoil) is converted as `p002_226` on row 0x3A (renamed like 0x39); KH1's guard recoils 0x6E / 0x6F play it. Asset step: **re-run** (automatic).
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 290 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard ends by leaving the guard (the way in backwards), version 0.158.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "quando passa um tempo e ele desativa a guarda ficou estranha, sera que nn tem como colocar a mesma animação mas ao contrário?". Riku's 54-frame guard clip is now 240 (30 frames), 241 held (7), then 240 backwards in 17 frames, ending on his pre-guard stance. Asset step: **re-run** (automatic). **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 289 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard is KH1 Riku's own guard (Destiny Islands duel), version 0.158.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "no KH1 tem uma animação do Riku defendendo, ela acontece na Destiny Island … é possível usar essa animação? inclusive tem a variação de quando em defesa ele toma impacto".
+
+- KH1's `xa_ex_1010` script guards with request 240 (into the guard) then 241 (held), with guard row `0x550`. Its recoil, the impact while guarding, is request 110 = Re:CoM's `p002_043`, already his block recoil (Checked (files)).
+- The asset step converts 240 + 241's first 24 frames (54) onto Riku's skeleton (KH1's own) as `p002_225` (replacing 0.157.0's retargeted Sora Guard). **Re-run**, automatic.
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 288 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard row named once per action table, version 0.157.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "não percebi alteração...". Chars 3 and 4 share one action table. 0.157.0 renamed row 0x39 for char 3, then refused for char 4, as the owner's log shows. Now each distinct table is named once. **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 287 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard plays Sora's KH1 Guard retargeted onto his skeleton, version 0.157.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "a animação escolhida de defesa pro Riku ficou estranha, tem alguma melhor?" (chose "Guard do KH1 adaptada").
+
+- Riku has no guard clip in Re:CoM: rows 0x24 / 0x25 are both `p002_043`, the clash recoil (Checked (exe)).
+- **Asset step**: Sora's KH1 Guard clip (`p001_225`) is retargeted onto Riku's skeleton by bone name; his extra bones (blade chain, belts, hair) hold his stance `p002_031`. It is added as `p002_225` to `PL0101.ANN` / `PL0111.ANN` and the skin packs (**re-run**, automatic; 2 new outputs).
+- **Game**: row 0x39 of Riku's action tables (`p002_000`, checked) is renamed `p002_225`; his Guard plays it. The recoil stays 0x24; the real Dark Mode is unchanged.
+- **Checked**: tests, the asset step (the clip in all four packs), the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 286 (fork branch Re-Re-Reverse/Rebirth): Costumes on Riku's list at every Combat setting, version 0.156.2 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "notei que, quando troca o combat de KH1 para Re:CoM a opção de Costume some... essa opção poderia manter no menu sempre".
+
+- Riku's story at Combat = Re:CoM: Re:CoM's seven where they are (Review Decks Re:CoM's own) plus Costumes before Settings. With `riku_kh1_movement` (`Layout::RikuDecks`), Settings opens the short list; without it (`Layout::RikuPlain`), Settings is Re:CoM's page. Combat = KH1 is unchanged.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 285 (fork branch Re-Re-Reverse/Rebirth): debug unlock for the Dark Mode costume; Riku stops while the transformation plays, version 0.156.1 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "deixa no ini do mod uma opção de debug pra deixar desbloqueado o modo desde o início para testes, além disso peguei um bug, quando vc está andando e troca a skin a animação fica tocando enquanto o personagem está se movimentando".
+
+- Ini `riku_dark_skin_unlocked = on | off` (debug, default off): the costume unlocked from the start.
+- The transformation zeroes Riku's horizontal velocity (`mover+0x80`) at its start and on every held frame (the held move exe left Re:CoM's mover sliding him).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 284 (fork branch Re-Re-Reverse/Rebirth): the Dark Mode costume unlocks at Riku's first Dark Mode, version 0.156.0 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "beleza já implementa essa pendência".
+
+- **Unlock**: the save's spare bit `DARK_SEEN` (0.151.0), now also set from any frame of Dark Riku as the main player, at either Combat setting (`win::riku_skin::frame`).
+- **Costume**: decided at each room / battle build, before Re:CoM's group queue (`win::riku_skin::refresh` from `win::models::group_load`). Without the unlock it is Default Attire (the setting goes back to off, logged).
+- **Costumes page**: Dark Mode is refused before the unlock (sound 5, its own help line). Default `riku_dark_skin = off`.
+- **Checked**: tests, the Windows build. **Not checked**: in game. Details: `docs/recom-riku-kh1.md` § 0.156.0.
+
+---
+
 ## Stage 283 (fork branch Re-Re-Reverse/Rebirth): the costume change plays Dark Riku's entry flip and its effects; Riku's way-back effect, version 0.155.3 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "funcionou!, mas a animação ficou incompleta, não deu tempo dele dar aquele mortal, também pode ter aquele efeito de tela junto, igual a transição do combate".
@@ -4133,7 +4562,7 @@ Owner, 2026-11-03, on 0.101.4, answering which special the Triangle prompt picks
 - `kh1-anim` matches Square Enix's own Re:CoM bakes of the same KH1 motions to ≤0.019° local
   rotation and ≤0.051 mm world position on swing / roll / run / jump. Checked (files, tests).
 - `kh1-core` corrections to the notes (cone 22°, air row 17 above, combo 13→14→8 with a close
-  target, …) are in `docs/kh1-sora.md`. Checked (decomp).
+  target, …) are in `knowledge/KH1/kh1-sora.md`. Checked (decomp).
 - Assumptions are marked in the code and the HUD: root travel subtraction, MSVC `rand`, task order,
   dummy stats (Strength 5, Defence 2, 300 HP), and the camera (an orbit camera, not KH1's).
 - Headless check: a scripted combo runs rows 13 → 14 → 8 and hits the close dummy for 3, 3 and 7.
@@ -4182,21 +4611,21 @@ Owner, 2026-11-03, on 0.101.4, answering which special the Triangle prompt picks
 
 No code. `VERSION` not created yet; the first change under `crates/` starts it.
 
-- Repo seeded: these rules files, `docs/sources.md`.
-- Re:CoM Steam decomp made (see `docs/sources.md`). Checked (exe): SHA-256 `acf42e96…6bbf`.
+- Repo seeded: these rules files, `docs/sources.md` (now `knowledge/sources.md`).
+- Re:CoM Steam decomp made (see `knowledge/sources.md`). Checked (exe): SHA-256 `acf42e96…6bbf`.
 - Finding: Re:CoM's exe is mixed-mode C++/CLI; the .NET part is only the shell. Checked (exe).
 - Finding: the KH1 notes in KH2-Combat-in-KH1 use Epic addresses; convert to Steam before use.
   Checked (files).
 
 Step 0 mapping (2026-10-29, notes only):
 
-- `docs/recom-timing.md`: both games step by a variable delta in 60 Hz frames. Re:CoM uses 50
+- `knowledge/ReCoM/recom-timing.md`: both games step by a variable delta in 60 Hz frames. Re:CoM uses 50
   units per frame, so KH1 frames × 50 = Re:CoM time. Checked (decomp + exe, both games).
-- `docs/recom-player.md`: player state machine (table-driven, 4 states: Field / Battle / Wait /
+- `knowledge/ReCoM/recom-player.md`: player state machine (table-driven, 4 states: Field / Battle / Wait /
   Hide), the action switch, and the card path from button to `initAttack`. Checked (decomp).
-- `docs/recom-combat.md`: motion request and advance, Sora's attack-row table `0x1407C6C70`, the
+- `knowledge/ReCoM/recom-combat.md`: motion request and advance, Sora's attack-row table `0x1407C6C70`, the
   hit path and the damage formula. Checked (decomp; rows read from the exe).
-- `docs/recom-battle-entry.md`: field-to-battle handover (separate battle room) and the native
+- `knowledge/ReCoM/recom-battle-entry.md`: field-to-battle handover (separate battle room) and the native
   cardless field swing (action `0xA`, card id 0) that shares battle collision. Checked (decomp).
 - Assumption, well supported: Re:CoM's motion system is not KH2's mset system.
 
@@ -4204,7 +4633,7 @@ Step 0 still to do:
 
 1. Plan the trace tool with the tester: the same fields from both games (tick, state, motion,
    frame, position, velocity, hit events).
-2. KH1's side mapped in `docs/kh1-sora.md` (states, movement, jump, glide, roll, guard, motion
+2. KH1's side mapped in `knowledge/KH1/kh1-sora.md` (states, movement, jump, glide, roll, guard, motion
    requests, the Attack combo). Still needed: the numbers in KH1's data files (`btltbl.bin`,
    `xa_ex_0010.mset`) and Re:CoM's (`stockskilllist.bin`, `PL0001.ANN`), from the player's
    extracted files.

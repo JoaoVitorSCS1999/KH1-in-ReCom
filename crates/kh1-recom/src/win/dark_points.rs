@@ -50,6 +50,7 @@ const SWITCHING: u32 = 0x20;
 /// `crate::unlocks`'): the Dark Form skin's unlock (0.152.0).
 pub const DARK_SEEN: u8 = 4;
 
+
 /// Re:CoM's own DP (Checked (exe: disasm)): the player's `+0x44C` (at most 30: `0x1401F57A4`, the
 /// card values' add) and its gauge's max `+0x450`; its Dark gauge `+0x3E0`, set by
 /// `0x14020BFA0(gauge, dp, max)` (u16s at gauge `+0xAC` / `+0xAE`, the control `+0x80` at
@@ -83,7 +84,7 @@ struct State {
     guard_at: u32,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { dp: Dp { dp: 0, dark: false, idle: 0, streak: 0 }, frame: 0, roll_end: 0, was_rolling: false, last_swing: (0, 0), pending: 0, guard_at: 0 });
+static STATE: Mutex<State> = Mutex::new(State { dp: Dp { dp: 0, dark: false, idle: 0, streak: 0, dark_max: 0 }, frame: 0, roll_end: 0, was_rolling: false, last_swing: (0, 0), pending: 0, guard_at: 0 });
 static CHECKED: AtomicU32 = AtomicU32::new(0);
 static NO_DARK_LOGGED: AtomicBool = AtomicBool::new(false);
 static LINES: AtomicU32 = AtomicU32::new(200);
@@ -105,8 +106,16 @@ pub unsafe fn is_dark(pl: usize) -> bool {
 }
 
 /// `pl` is the main player and Riku or Dark Riku, DP on, in a battle room.
+/// 0.167.0 (fork owner, 2026-11-23: "o Dark Mode precisa começar de acordo com o jogo normal mesmo
+/// liberando a partir da história"): Riku's DP only once the story gave him Dark Mode (his ability
+/// word `+0x41C & 0x4000000`, the bit Re:CoM's own DP rules and its Dark Riku test read:
+/// `0x1401E7255`, `0x14021223D`; Checked (disasm)). Before it, no DP and the gauge untouched, as in
+/// Re:CoM.
 unsafe fn ours(pl: usize) -> bool {
-    on() && pl != 0 && pl == rd::<usize>(va(base(), data::MAIN_PLAYER)) && (mv::is_main_riku(pl) || is_dark(pl)) && rd::<i32>(pl + p::BATTLE) != 0
+    on() && pl != 0
+        && pl == rd::<usize>(va(base(), data::MAIN_PLAYER))
+        && (is_dark(pl) || (mv::is_main_riku(pl) && rd::<u32>(pl + p::ABILITY) & 0x400_0000 != 0))
+        && rd::<i32>(pl + p::BATTLE) != 0
 }
 
 /// Both switch functions are Re:CoM Steam's (checked once; a mismatch turns the switches off).
@@ -162,7 +171,13 @@ pub unsafe fn frame(pl: usize) {
     let Ok(mut g) = STATE.lock() else { return };
     g.frame = g.frame.wrapping_add(1);
     if g.dp.dark != dark {
-        g.dp.dark = dark;
+        if dark {
+            // 0.166.0: Dark Mode starts at Riku's DP stat (Re:CoM's switch-in), its gauge's max.
+            g.dp.enter_dark(super::stats::riku_dp().unwrap_or(crate::abilities::RIKU_START_DP));
+        } else {
+            g.dp.dark = false;
+            g.dp.dp = g.dp.dp.min(dp::MAX);
+        }
         g.pending = 0;
         note(|| format!("Dark Mode {} (DP {})", if dark { "on" } else { "off" }, g.dp.dp));
         if dark {
@@ -192,21 +207,21 @@ pub unsafe fn frame(pl: usize) {
     if ch == Change::None {
         ch = g.dp.frame(action == ATTACK || action == CARD_ATTACK);
     }
-    show(pl, g.dp.dp);
+    show(pl, g.dp.dp, g.dp.cap());
     apply(&mut g, pl, ch);
 }
 
 /// Our DP in Re:CoM's own field and Dark gauge (when they differ).
-unsafe fn show(pl: usize, dp: i32) {
+unsafe fn show(pl: usize, dp: i32, max: i32) {
     if !switches_ok() {
         return;
     }
-    if rd::<i32>(pl + RECOM_DP) != dp || rd::<i32>(pl + RECOM_DP_MAX) != dp::MAX {
+    if rd::<i32>(pl + RECOM_DP) != dp || rd::<i32>(pl + RECOM_DP_MAX) != max {
         wr(pl + RECOM_DP, dp);
-        wr(pl + RECOM_DP_MAX, dp::MAX);
+        wr(pl + RECOM_DP_MAX, max);
         let g: usize = rd(pl + DARK_GAUGE);
         if g != 0 {
-            func::<GaugeSetFn>(GAUGE_SET)(g, dp as u32, dp::MAX as u32);
+            func::<GaugeSetFn>(GAUGE_SET)(g, dp as u32, max as u32);
         }
     }
 }
@@ -251,7 +266,7 @@ fn event(pl: usize, e: Event) {
     }
     // SAFETY: the main player, as `frame` reads it.
     unsafe {
-        show(pl, after);
+        show(pl, after, g.dp.cap());
         apply(&mut g, pl, ch)
     };
 }
@@ -384,25 +399,53 @@ pub unsafe fn guard_events(pl: usize, events: &[kh1_core::controller::Event]) {
     }
 }
 
-/// Riku's save block's spare byte gets [`DARK_SEEN`] (the first Dark Mode).
-unsafe fn mark_seen() {
+/// Riku's save block's spare byte gets [`DARK_SEEN`] (the first Dark Mode). Also from any frame
+/// of Dark Riku as the main player (`win::riku_skin::frame`), at either Combat setting.
+pub(super) unsafe fn mark_seen() {
+    mark_bit(DARK_SEEN, "first Dark Mode: kept in Riku's save (the Dark Form skin unlocks)");
+}
+
+unsafe fn mark_bit(bit: u8, line: &str) {
     let save: usize = rd(va(base(), crate::keyblades::SAVE_PTR));
-    if save == 0 {
+    if save == 0 || !super::stats::riku_story() {
         return;
     }
     let at = save + crate::mp::BLOCK_FIRST + crate::mp::off::SPARE;
     let b: u8 = rd(at);
-    if b & DARK_SEEN == 0 {
-        wr(at, b | DARK_SEEN);
-        log("dark points: first Dark Mode: kept in Riku's save (the Dark Form skin unlocks)");
+    if b & bit == 0 {
+        wr(at, b | bit);
+        log(&format!("dark points: {line}"));
     }
 }
 
-/// Riku has reached Dark Mode once (his save). For the Dark Form skin (next stage).
-#[allow(dead_code)]
+
+/// Riku has reached Dark Mode once (his save): the Dark Form costume's unlock (0.156.0).
 pub unsafe fn dark_seen() -> bool {
     let save: usize = rd(va(base(), crate::keyblades::SAVE_PTR));
     save != 0 && super::stats::riku_story() && rd::<u8>(save + crate::mp::BLOCK_FIRST + crate::mp::off::SPARE) & DARK_SEEN != 0
+}
+
+/// 0.179.0: Dark Riku's DP for his Sleights list and shortcuts: (DP now, Dark Mode's max) while he
+/// is the main player in a battle, else None.
+pub unsafe fn sleight_view(pl: usize) -> Option<(i32, i32)> {
+    if !(ours(pl) && is_dark(pl)) {
+        return None;
+    }
+    STATE.lock().ok().filter(|g| g.dp.dark).map(|g| (g.dp.dp, g.dp.cap()))
+}
+
+/// 0.179.0: Dark Riku pays DP sleight `id` (`crate::dark_points::Dp::pay_sleight`, Re:CoM's Dark
+/// gauge updated at once); the DP paid, or None (nothing changed).
+pub unsafe fn pay_sleight(pl: usize, id: u16) -> Option<i32> {
+    if !(ours(pl) && is_dark(pl)) {
+        return None;
+    }
+    let Ok(mut g) = STATE.lock() else { return None };
+    let before = g.dp.dp;
+    let paid = g.dp.pay_sleight(id)?;
+    show(pl, g.dp.dp, g.dp.cap());
+    note(|| format!("sleight {:#x}: {paid} DP (DP {before} -> {}, max {})", id, g.dp.dp, g.dp.cap()));
+    Some(paid)
 }
 
 /// The DP now (for the Dark gauge, next stage; 0 outside a battle).

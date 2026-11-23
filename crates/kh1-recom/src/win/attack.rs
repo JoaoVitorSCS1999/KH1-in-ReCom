@@ -278,7 +278,11 @@ static TICK_LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 /// which KH1's picker subtracts (`0x1402A7320`); 0 for enemies without a twin. Assumption: Re:CoM's
 /// aim point stands for KH1's lock point.
 pub(super) unsafe fn attack_target(pl: usize) -> Option<TargetPart> {
-    let h: i32 = rd(pl + p::LOCK_TARGET);
+    let mut h: i32 = rd(pl + p::LOCK_TARGET);
+    // 0.175.0: no lock: KH1's Auto Lock soft target (`super::lock_on::soft_target`).
+    if h <= 0 {
+        h = super::lock_on::soft_target(pl).map_or(0, |s| s as i32);
+    }
     if h <= 0 {
         return None;
     }
@@ -300,12 +304,13 @@ pub(super) unsafe fn attack_target(pl: usize) -> Option<TargetPart> {
 /// slot) takes the row from `PENDING`.
 pub(super) unsafe fn start_swing(pl: usize, s: &SwingStart) -> bool {
     let Some(t) = TABLE.get() else { return false };
-    if t.get(s.kh1_row).is_none_or(|r| r[0] == 0) {
+    let tr = if mv::is_main_riku(pl) { crate::riku::swing_row(s.kh1_row) } else { s.kh1_row };
+    if t.get(tr).is_none_or(|r| r[0] == 0) {
         return false;
     }
     // Riku (`crate::riku`): only a row whose action row has a clip of his (else no swing).
-    if mv::is_main_riku(pl) && t.get(s.kh1_row).is_some_and(|r| !crate::riku::row_ok_for(mv::is_main_dark_riku(pl), r[0] as u32)) {
-        debug(|| format!("riku: KH1 row {} plays action row {:#x}, which has no clip of his: no swing", s.kh1_row, t[s.kh1_row][0]));
+    if mv::is_main_riku(pl) && t.get(tr).is_some_and(|r| !crate::riku::row_ok_for(mv::is_main_dark_riku(pl), r[0] as u32)) {
+        debug(|| format!("riku: KH1 row {} plays action row {:#x}, which has no clip of his: no swing", s.kh1_row, t[tr][0]));
         return false;
     }
     // A chain: end the last swing's volume first, as Re:CoM's own chain does (`0x1401EAFC2`).
@@ -341,7 +346,8 @@ pub(super) unsafe fn end_swing(pl: usize, airborne: bool) -> bool {
 /// Re:CoM's row pick for a KH1 row (`0x1401F7520`'s writes, cardless).
 unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     let Some(t) = TABLE.get() else { return false };
-    let Some(row) = t.get(s.kh1_row).filter(|r| r[0] != 0) else { return false };
+    let tr = if mv::is_main_riku(pl) { crate::riku::swing_row(s.kh1_row) } else { s.kh1_row };
+    let Some(row) = t.get(tr).filter(|r| r[0] != 0) else { return false };
     wr(pl + field::HOMING_TARGET, 0i32);
     wr(pl + field::VSPEED, 0f32);
     // Riku (`crate::riku::attack_id`): his own row of the same clip, for his hit effect.
@@ -359,15 +365,13 @@ unsafe fn apply_row(pl: usize, s: &SwingStart) -> bool {
     func::<mv::MotionFn>(mv::MOTION_REQUEST)(pl, row[0] as i32, 0, s.root as u64, eet, ses, 0);
     if !riku {
         super::fx::swing_started(pl, s.request, row[0], eet, ses);
-        // Enemy Skills: Card Soldier's haste (Re:CoM's motion speed after the request, as its row
-        // pick), Saïx's bonus per combo (`super::enemy_skills`).
-        super::enemy_skills::swing_started(pl, s.counter);
     }
+    // Enemy Skills: Card Soldier's haste (Re:CoM's motion speed after the request, as its row
+    // pick), Saïx's bonus per combo (`super::enemy_skills`). 0.164.0: Riku's too.
+    super::enemy_skills::swing_started(pl, s.counter);
     wr(pl + field::CARD_7B4, 0i32);
-    if !riku {
-        // M12 step 3: KH1 tests Berserk when the swing's attack object is made (`0x1402B2DC0`).
-        super::kh1_support::swing_started(pl, s.kh1_row);
-    }
+    // M12 step 3: KH1 tests Berserk when the swing's attack object is made (`0x1402B2DC0`).
+    super::kh1_support::swing_started(pl, s.kh1_row);
     // Re:CoM's cardless AP (the attack stat): at Damage = KH1 the KH1 numbers replace it per hit
     // (`enemy_hit`); in the field it is Re:CoM's own field-swing AP.
     wr(pl + field::AP, rd::<i32>(pl + field::ATTACK_STAT));
@@ -399,6 +403,10 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     if mv::kh1_riku(pl) {
         return riku_request_bits(pl, o);
     }
+    // Fork (0.170.0): Halloween Town reached (Sora as char 2) unlocks his costume, any Combat.
+    if mv::is_main_sora(pl) {
+        super::sora_costume::frame(pl);
+    }
     if !mv::kh1_sora(pl) {
         return o(pl);
     }
@@ -419,6 +427,10 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
     // 8a.1: one atomic load unless a use is going).
     super::items::new_frame();
     super::items::task_frame(pl);
+    // 0.164.0: his "learned" notices (Enemy Skills) at Re:CoM's field camp gate, as Sora's.
+    super::notices::frame(pl);
+    // Enemy Skills stage 5: Air Soldier's running charge, Marluxia's second play (one atomic load).
+    super::enemy_skills_deck::frame(pl);
     // A special command no KH1 frame took last frame is gone (M9 stage 9c.1).
     super::specials::new_frame();
     // Re:CoM's battle end, logged (two loads unless its win is pending; `crate::battle::end`).
@@ -474,6 +486,9 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
 unsafe fn riku_request_bits(pl: usize, o: PlFn) {
     // KH1's MP refill step (one atomic load unless a point waits), as Sora's.
     super::mp::frame();
+    // 0.163.0: KH1's items, as Sora's (a command no KH1 frame took is gone; the use tasks).
+    super::items::new_frame();
+    super::items::task_frame(pl);
     // 0.151.0: his Dark Points (`crate::dark_points`): idle losses, Dark Mode in / out.
     super::dark_points::frame(pl);
     let battle: i32 = rd(pl + p::BATTLE);
@@ -505,6 +520,9 @@ unsafe fn riku_request_bits(pl: usize, o: PlFn) {
     let r: u32 = rd(pl + p::REQUEST);
     if r & 1 != 0 && r & 4 != 0 {
         wr(pl + p::REQUEST, r & !4);
+    } else if r & 4 != 0 {
+        // 0.164.0: his Enemy Skills follow his cards (only on presses).
+        super::abilities::sync();
     }
 }
 
@@ -609,7 +627,70 @@ unsafe fn recom_pair(coll: usize, list: usize) -> i32 {
     if r == 0 {
         return r;
     }
+    let r = riku_pair_block(coll, list, r);
     super::guard::on_result(coll, list, r)
+}
+
+/// 0.159.0 (fork owner, 2026-11-23: "a mecânica de guarda precisa funcionar igual a do Kingdom
+/// Hearts 1"; "o mod com a campanha do Sora já deve ter essas implementações … não da para se
+/// basear?"): Riku's Guard blocks where Re:CoM blocks Sora's, at the pair test. Re:CoM's body guard
+/// never answers 2 for Riku (`0x14016F1C0`; why: not known), so a hit (1) on him while his KH1 guard
+/// is live, from an attacker in front (`crate::riku::guard_faces`, ±100°: a shot's own place, or
+/// its caster's within 1 m), becomes the block Re:CoM gives Sora: result 2 and his body's guarded
+/// bit (`+0x9C | 0x20`, the attacker at `+0x98` as the apply wrote it). Then everything is Sora's:
+/// the shot turned back, the melee attacker's reaction (`super::guard::on_result`), the KH1 guard
+/// success (recoil, the Counterattack window, parries). The hit the apply left on his body is
+/// shielded by the damage check (`riku_guard_block`). A non-shot attacker past a melee reach is
+/// left to that check (blocked there, no reaction: 0.158.2).
+unsafe fn riku_pair_block(coll: usize, list: usize, r: i32) -> i32 {
+    if r != 1 {
+        return r;
+    }
+    let b = base();
+    if list == 0 || list != rd::<usize>(va(b, crate::guard::PLAYER_LIST)) {
+        return r;
+    }
+    let pl: usize = rd(va(b, data::MAIN_PLAYER));
+    // 0.169.0: Dark Riku (the real Dark Mode) too.
+    if !mv::riku_on() || !mv::is_main_riku(pl) || !guard_live(pl) {
+        return r;
+    }
+    let owner: u32 = rd(coll + crate::guard::coll::OWNER);
+    let obj = if owner != 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(owner) } else { 0 };
+    let Some((faces, shot, dist)) = riku_faces(pl, obj) else { return r };
+    if !faces || (!shot && dist > RIKU_MELEE_REACH) {
+        return r;
+    }
+    wr(pl + BODY_GUARD, rd::<u32>(pl + BODY_GUARD) | 0x20);
+    wr(pl + 0x690 + crate::guard::body::ATTACKER, owner);
+    riku_guard_log(|| format!("blocked at the pair test: {owner:#x} ({}, {dist:.1} m)", if shot { "shot" } else { "melee" }));
+    2
+}
+
+/// Riku and `obj`: (in front, a shot, flat distance), by `crate::riku::guard_faces`; a shot
+/// within 1 m of him is judged by its caster's place.
+unsafe fn riku_faces(pl: usize, obj: usize) -> Option<(bool, bool, f32)> {
+    let mover: usize = rd(pl + 0xF0);
+    let om: usize = if obj != 0 { rd(obj + 0xF0) } else { 0 };
+    if obj == 0 || mover == 0 || om == 0 {
+        return None;
+    }
+    let b0 = base();
+    let me: [f32; 4] = rd(mover + mv::body::POS);
+    let mut it: [f32; 4] = rd(om + mv::body::POS);
+    let vt: usize = rd(obj);
+    let shot = vt == va(b0, crate::guard::bullet::VTABLE) || vt == va(b0, crate::guard::bullet::HOMING_VTABLE);
+    if shot && (it[0] - me[0]).hypot(it[2] - me[2]) < 1.0 {
+        let shooter: i32 = rd(obj + crate::guard::bullet::SHOOTER);
+        let so = if shooter > 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(shooter as u32) } else { 0 };
+        let sm: usize = if so != 0 { rd(so + 0xF0) } else { 0 };
+        if sm != 0 {
+            it = rd(sm + mv::body::POS);
+        }
+    }
+    let yaw: f32 = rd(mover + mv::body::YAW);
+    let faces = crate::riku::guard_faces([me[0], me[1], me[2]], yaw, [it[0], it[1], it[2]], KH1_GUARD_ANGLE);
+    Some((faces, shot, (it[0] - me[0]).hypot(it[2] - me[2])))
 }
 
 pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
@@ -644,6 +725,10 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     }
     let b = base();
     let pl: usize = rd(va(b, data::MAIN_PLAYER));
+    // 0.169.0 (fork owner, 2026-11-23: Sora's rules for Riku): KH1's attack-meets-attack for his swing.
+    if mv::kh1_riku(pl) {
+        return riku_pair(pl, coll, list);
+    }
     if !mv::is_main_sora(pl) {
         return recom_pair(coll, list);
     }
@@ -748,6 +833,52 @@ pub unsafe extern "win64" fn pair_dispatch(coll: usize, list: usize) -> i32 {
     // M11, the Gargoyle's ball: a swing sends it back (KH1's `0x748`).
     super::kh1_thrown::swing_at_balls(|bshape| spheres_meet(ctx, fp, bshape, &spheres));
     result
+}
+
+/// Riku's swing (0.169.0): his hits stay Re:CoM's weapon volume (his weapon has no blade bones of
+/// its own: the Soul Eater is part of his body model), but KH1's attack-vs-attack pass runs first, as
+/// for Sora's swing: the volume's sphere (its swept centres `+0x10` / `+0x20`, radius `+0x70`, the
+/// shape kind 2 Re:CoM's weapons use; others: no clash test, logged once) against the KH1 enemies'
+/// live attack rows. A clash plays his KH1 recoil (`SWING_CLASH`, his KH1 frame) and the enemy's; a
+/// swing it marks meets no hurt body that frame. Assumption: the KH1 row's clash type / priority with
+/// the equipped Keyblade's numbers stand for the Soul Eater's (KH1 Riku's weapon numbers not read).
+unsafe fn riku_pair(pl: usize, coll: usize, list: usize) -> i32 {
+    let weapon: usize = rd(pl + field::WEAPON);
+    let shape: usize = if coll != 0 { rd(coll + 0x18) } else { 0 };
+    let Some(kh1_row) = kh1_row_of(pl) else { return recom_pair(coll, list) };
+    if weapon == 0 || coll != weapon + 0x240 || shape == 0 || rd::<u32>(pl + p::ACTION) != ATTACK_ACTION {
+        return recom_pair(coll, list);
+    }
+    if rd::<u32>(shape + 0x60) != 2 {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| log(&format!("riku: his weapon volume is shape kind {}: no KH1 clash test for his swings", rd::<u32>(shape + 0x60))));
+        return recom_pair(coll, list);
+    }
+    let kh1_weapon = super::stats::equipped_weapon();
+    let Some(live) = atk::live_attack(moveset(), kh1_row, &kh1_weapon) else { return recom_pair(coll, list) };
+    let c0: [f32; 4] = rd(shape + 0x10);
+    let c1: [f32; 4] = rd(shape + 0x20);
+    let r: f32 = rd(shape + 0x70);
+    let spheres = [(Vec3::new(c0[0], c0[1], c0[2]), r), (Vec3::new(c1[0], c1[1], c1[2]), r)];
+    let ctx: usize = rd(va(base(), COLL_CONTEXT));
+    let mut fake = FakeSphere([0; 0x90]);
+    let fp = fake.0.as_mut_ptr() as usize;
+    wr(fp + 0x60, 2u32);
+    let gen = SWING_GEN.load(Ordering::Relaxed);
+    let tick = TICK.load(Ordering::Relaxed);
+    let (clash, marked) = super::kh1_enemy::swing_meets_attacks((live.data.clash_type(), live.priority), gen, &mut |eshape| attack_meets(ctx, fp, eshape, &spheres));
+    if let Some((kind, diff)) = clash {
+        SWING_CLASH_KIND.store((kind as u32) << 16 | (diff as i16 as u16 as u32), Ordering::Relaxed);
+        SWING_CLASH.store(pl, Ordering::Relaxed);
+    }
+    let key = marked_key(gen, tick);
+    if marked {
+        SWING_MARKED.store(key, Ordering::Relaxed);
+    }
+    if SWING_MARKED.load(Ordering::Relaxed) == key {
+        return 0;
+    }
+    recom_pair(coll, list)
 }
 
 /// M11, attack meets attack: the swing and Sora frame ([`marked_key`]) in which a clash marked his swing (it meets
@@ -989,7 +1120,7 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
             super::mp::on_kh1_hit(enemy, kh1_row_of(pl));
         }
         let riku = in_attack && riku_hit;
-        let force = in_attack && (sleight || riku || super::guard::turned_hit_pending(enemy));
+        let force = in_attack && (sleight || riku || super::guard::turned_hit_pending(waiting_body(enemy).map(|b| rd::<u32>(b + 0x98))));
         if force {
             wr(enemy + 0x260, flags | 0x200_0000);
         }
@@ -1003,6 +1134,18 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
             Some((body, name)) => {
                 let src = if super::damage::kh1() { super::damage_cap::Source::Raw } else { super::damage_cap::Source::Recom };
                 super::damage_cap::arm(enemy, rd(body + 0x80), super::damage_cap::What::Sleight(name), src)
+            }
+            // 0.169.0: Riku's swing takes the enemy's KH1 per-hit cap as Sora's (his number is Re:CoM's
+            // card AP on Re:CoM's HP at both Damage settings: the share of Re:CoM's max HP).
+            None if riku_hit => {
+                let pl: usize = rd(va(base(), data::MAIN_PLAYER));
+                match (waiting_body(enemy), kh1_row_of(pl)) {
+                    (Some(body), Some(r)) if !crate::damage::percent_of_hp_row(r, moveset()) => super::damage_cap::arm(enemy, rd(body + 0x80), super::damage_cap::What::Swing(r), super::damage_cap::Source::Recom),
+                    _ => {
+                        super::damage_cap::uncapped(enemy);
+                        None
+                    }
+                }
             }
             None => {
                 super::damage_cap::forget(enemy, || waiting_body(enemy).is_some());
@@ -1497,15 +1640,22 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // runs with Re:CoM's protection bit (no damage, no reaction) and KH1's guard success follows.
     let riku_block = riku_guard_block(pl);
     let kh1 = mv::kh1_sora(pl);
-    if kh1 {
+    // 0.162.0 (fork owner, 2026-11-23: "fora as específicidades do Riku todas as regras de combate
+    // precisam ser iguais as do Sora"): the KH1 rules of the hit itself (no card duel, KH1's
+    // no-flinch frames, the post-hit invulnerability, a dimming sleight's shield) for Riku too.
+    let fighter = kh1 || mv::kh1_riku(pl);
+    if fighter {
         no_card_duel(pl);
+    }
+    if kh1 {
         aero_halve(pl);
         // Enemy Skills: Large Body's Guard, a 10 % cut to the front (`super::enemy_skills`).
         super::enemy_skills::large_body(pl);
     }
     // M12 step 3 (KH1's support abilities, `super::kh1_support`): only when a hit arrived (the
     // check's own gate `+0x41C & 0x200`), Sora's HP before the check.
-    let arrived = kh1 && rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0;
+    // 0.164.0: Riku's too (his Enemy Skills: Second Chance from Hook's card, Jafar / Air Pirate).
+    let arrived = fighter && rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0;
     let hp_before = if arrived { super::kh1_support::hp(pl) } else { 0 };
     if arrived {
         // M12 step 3: Second Chance's stub in Re:CoM's HP store, armed for this check.
@@ -1523,7 +1673,8 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // Owner, 2026-11-03: "any sleight that sora does that dims the room should give him i-frames":
     // while his sleight (Re:CoM's, or a KH1 special) has the room dimmed (Re:CoM's own flag
     // `+0x418` bit 31, `crate::sleights::dim_shield`), the same protection bit for this check.
-    let dimmed = arrived && !summon && !bracer && super::summons::sleight_dimmed(pl);
+    let arrived_any = fighter && rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0;
+    let dimmed = arrived_any && !summon && !bracer && super::summons::sleight_dimmed(pl);
     let shield = summon || bracer || dimmed || riku_block;
     let f418: u32 = if shield { rd(pl + p::FLAGS_418) } else { 0 };
     if shield {
@@ -1544,7 +1695,7 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // no-flinch path; only when a hit arrived).
     let bracer_skill = arrived && super::enemy_skills_deck::no_flinch(pl);
     let run = |pl: usize| -> u64 {
-        if (NO_FLINCH.load(Ordering::Relaxed) != pl && !bracer_skill) || !kh1 {
+        if (NO_FLINCH.load(Ordering::Relaxed) != pl && !bracer_skill) || !fighter {
             o(pl)
         } else {
             let f: u32 = rd(pl + p::FLAGS_420);
@@ -1576,7 +1727,7 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     if shield && f418 & 1 == 0 {
         wr(pl + p::FLAGS_418, rd::<u32>(pl + p::FLAGS_418) & !1);
     }
-    post_hit(pl, kh1);
+    post_hit(pl, fighter);
     r
 }
 
@@ -1603,59 +1754,20 @@ fn riku_guard_log(line: impl FnOnce() -> String) {
 /// protection bit for this check (no damage, no reaction), KH1's kind-6 guard success on his next
 /// KH1 frame (the recoil, the clink, `GuardSucceeded`: the parries), and the attacker's reaction
 /// (`super::guard::riku_block`: a shot cancelled, a melee attacker's flinch).
-unsafe fn riku_guard_block(pl: usize) -> bool {
-    if !mv::riku_on() || !mv::is_main_riku(pl) || !guard_live(pl) || rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED == 0 {
-        return false;
-    }
-    if rd::<u32>(pl + BODY_GUARD) & 0x20 != 0 {
-        return false; // Re:CoM's own block (kept above as GUARD_HIT)
-    }
-    let body = pl + 0x690;
-    let id: u32 = rd(body + crate::guard::body::ATTACKER);
-    let obj = if id != 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(id) } else { 0 };
-    let mover: usize = rd(pl + 0xF0);
-    let om: usize = if obj != 0 { rd(obj + 0xF0) } else { 0 };
-    if obj == 0 || mover == 0 || om == 0 {
-        riku_guard_log(|| format!("a hit while guarding, attacker {id:#x} not found (object {obj:#x}): not blocked"));
-        return false;
-    }
-    let me: [f32; 4] = rd(mover + mv::body::POS);
-    let mut it: [f32; 4] = rd(om + mv::body::POS);
-    // A shot made on top of him (the Wizard's `_ex_2150` spells appear near the player; a thunder
-    // falls from above): its caster's side decides, as KH1's Guard faces the one casting.
-    let b0 = base();
-    let vt: usize = rd(obj);
-    if (vt == va(b0, crate::guard::bullet::VTABLE) || vt == va(b0, crate::guard::bullet::HOMING_VTABLE)) && (it[0] - me[0]).hypot(it[2] - me[2]) < 1.0 {
-        let shooter: i32 = rd(obj + crate::guard::bullet::SHOOTER);
-        let so = if shooter > 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(shooter as u32) } else { 0 };
-        let sm: usize = if so != 0 { rd(so + 0xF0) } else { 0 };
-        if sm != 0 {
-            it = rd(sm + mv::body::POS);
-        }
-    }
-    let yaw: f32 = rd(mover + mv::body::YAW);
-    let faces = crate::riku::guard_faces([me[0], me[1], me[2]], yaw, [it[0], it[1], it[2]], KH1_GUARD_ANGLE);
-    let node = func::<BoneFn>(ACTOR_BONE)(pl, 0);
-    riku_guard_log(|| {
-        format!(
-            "hit while guarding from {id:#x}: body +0x9C {:#x} +0x8C {:#x} +0xB0 {:.3}, actor +8 {:#x}, bone 0 +0x50 {:#x}, value {}; in front: {faces}",
-            rd::<u32>(body + 0x9C),
-            rd::<u32>(body + 0x8C),
-            rd::<f32>(body + 0xB0),
-            rd::<usize>(pl + 8),
-            if node != 0 { rd::<usize>(node + 0x50) } else { 0 },
-            rd::<i16>(pl + HIT_VALUE)
-        )
-    });
-    if !faces {
-        return false;
-    }
-    GUARD_HIT.store(pl, Ordering::Relaxed);
-    if let Ok(mut g) = GUARD_POINT.lock() {
-        *g = it;
-    }
-    super::guard::riku_block(obj, id);
-    true
+/// Past this (metres, flat), an attacker that isn't a shot didn't hit Riku with its body.
+const RIKU_MELEE_REACH: f32 = 4.0;
+
+/// 0.171.0 (fork owner, 2026-11-23: "testei denovo a defesa do Riku de longe mirando no inimigo,
+/// bizarro precisa corrigir isso definitivamente! veja como está implementada a defesa no Sora"):
+/// 0.153.0's fallback (any hit "arriving" while guarding, its attacker in front) is gone. Checked
+/// (the owner's 0.170.0 log): every block it made had a hit value of 0, from enemies 4..14 m away:
+/// the hit flag `player+0x41C & 0x200` with no damage, and the attacker id the last real hit left
+/// on his body (`+0x690 + 0x98`). What sets that flag with no hit: not known. Riku's Guard is now
+/// Sora's: only a real contact blocks, Re:CoM's own block (his body's guarded bit) or the pair-test
+/// block (`riku_pair_block`, a hit on him from in front); the damage check only keeps the guarded
+/// hit for the KH1 frame, as Sora's.
+unsafe fn riku_guard_block(_pl: usize) -> bool {
+    false
 }
 
 /// KH1's Aero barrier (M7 stage 7.10): while it is on, the pending hit's value on Sora's body

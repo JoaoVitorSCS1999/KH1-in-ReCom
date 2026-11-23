@@ -409,6 +409,7 @@ pub const RIKU_WORDS: &[(u16, &str)] = &[
     (0x815F, "Dark Break"),
     (0x8160, "Dark Firaga"),
     (0x8161, "Dark Aura"),
+    (0x8165, "Inverse Burst"),
     (0x8166, "Impulse"),
     (0x8167, "Maelstrom"),
     (0x8168, "Barrage"),

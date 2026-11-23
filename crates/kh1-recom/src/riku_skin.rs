@@ -17,6 +17,10 @@
 
 use crate::keyblade_models::{kind, resource_path, PlannedRow, RowName, END};
 
+/// Re:CoM's char → action table pointers (`0x1407C6300[char]`, 16-byte rows: name pointer, clip
+/// index `+8`). Checked (exe: `0x1401FA7FE`).
+pub const ACTION_TABLES_PTR: u64 = 0x1_407C_6300;
+
 /// Re:CoM's char → group table and the entries of chars 3 and 4. Checked (exe).
 pub const GROUP_TABLE: u64 = 0x1_405A_6910;
 /// Re:CoM's char → motion pack name table (`0x1407C6338[char]`: "PL0001" … "PL0211"): the player's
@@ -48,12 +52,39 @@ pub const RIKU_GROUPS: [u16; 2] = [101, 111];
 /// the table's rows)).
 const OWN_KINDS: [(u16, &str); 6] = [(kind::RTM, "RTM"), (0x13, "TXA"), (kind::MDL, "MDL"), (kind::ANN, "ANN"), (kind::EET, "EET"), (0x30, "SES")];
 
-/// One skin: Riku's group and the group that stands for it.
+/// One skin: Riku's group and the group that stands for it, with its look: the Dark Mode attire
+/// and the blade (0.160.0: 0 the Soul Eater, 1 the Keyblade of People's Hearts). Older manifests
+/// (no `dark` / `blade`): Dark Mode with the Soul Eater.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Skin {
     pub riku: u16,
     pub skin: u16,
+    pub dark: bool,
+    pub blade: u8,
 }
+
+/// Riku's look: the attire and the blade.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Look {
+    pub dark: bool,
+    pub blade: u8,
+    /// 0.178.0: Riku's Halloween Town look in every world (char 3 on his Halloween group 111 and
+    /// its skins, as char 4 is there).
+    pub halloween: bool,
+}
+
+impl Look {
+    /// As one byte (bit 0 Dark Mode, bits 1..2 the blade, bit 3 Halloween Town).
+    pub fn bits(self) -> u8 {
+        self.dark as u8 | (self.blade & 3) << 1 | (self.halloween as u8) << 3
+    }
+    pub fn from_bits(b: u8) -> Look {
+        Look { dark: b & 1 != 0, blade: (b >> 1) & 3, halloween: b & 8 != 0 }
+    }
+}
+
+/// The Keyblades Riku can hold (the Costumes page's names).
+pub const BLADES: [&str; 2] = ["Soul Eater", "Keyblade of Heart"];
 
 /// Parses `kh1-riku-skin.json` (`{"format": 1, "skins": [{"riku": 101, "skin": 121}, …]}`).
 pub fn parse(text: &str) -> Result<Vec<Skin>, String> {
@@ -65,12 +96,23 @@ pub fn parse(text: &str) -> Result<Vec<Skin>, String> {
     for s in v.get("skins").and_then(|s| s.as_array()).ok_or("kh1-riku-skin.json: no skins")? {
         let g = |k: &str| s.get(k).and_then(|x| x.as_u32()).filter(|&x| x > 0 && x < END as u32).map(|x| x as u16);
         let (Some(riku), Some(skin)) = (g("riku"), g("skin")) else { return Err("kh1-riku-skin.json: a skin without riku / skin".into()) };
-        if !RIKU_GROUPS.contains(&riku) || out.iter().any(|o: &Skin| o.riku == riku || o.skin == skin) {
+        let dark = s.get("dark").map_or(true, |d| matches!(d, crate::json::Value::Bool(true)));
+        let blade = s.get("blade").and_then(|b| b.as_u32()).unwrap_or(0);
+        if blade as usize >= BLADES.len() {
+            return Err(format!("kh1-riku-skin.json: skin {skin}: blade {blade}"));
+        }
+        let blade = blade as u8;
+        if !RIKU_GROUPS.contains(&riku) || (!dark && blade == 0) || out.iter().any(|o: &Skin| (o.riku == riku && o.dark == dark && o.blade == blade) || o.skin == skin) {
             return Err(format!("kh1-riku-skin.json: skin {skin} for group {riku}"));
         }
-        out.push(Skin { riku, skin });
+        out.push(Skin { riku, skin, dark, blade });
     }
     Ok(out)
+}
+
+/// The manifest says Riku's own packs carry Sora's KH1 Guard (`"riku_guard": true`, 0.157.0).
+pub fn riku_guard(text: &str) -> bool {
+    crate::json::parse(text).ok().and_then(|v| v.get("riku_guard").map(|g| matches!(g, crate::json::Value::Bool(true)))).unwrap_or(false)
 }
 
 /// The files of a skin group the DLL checks are on disk (relative to the manifest's folder).
@@ -115,9 +157,28 @@ pub fn add_rows(mut planned: Vec<PlannedRow>, skins: &[Skin]) -> Result<Vec<Plan
     Ok(planned)
 }
 
-/// The table's entries for chars 3 and 4 with or without the skin.
-pub fn entries(skins: &[Skin], on: bool) -> [u32; 2] {
-    RIKU_GROUPS.map(|g| if on { skins.iter().find(|s| s.riku == g).map_or(g, |s| s.skin) as u32 } else { g as u32 })
+/// The table's entries for chars 3 and 4 for a look (Riku's own group where no skin has it).
+pub fn entries(skins: &[Skin], look: Look) -> [u32; 2] {
+    RIKU_GROUPS.map(|g| group_for_char(skins, g, look) as u32)
+}
+
+/// The group for Riku's char whose own group is `riku` (101 / 111): with the Halloween Town look,
+/// char 3 takes Halloween Town's (111) and its skins.
+pub fn group_for_char(skins: &[Skin], riku: u16, look: Look) -> u16 {
+    group_for(skins, if look.halloween { RIKU_GROUPS[1] } else { riku }, look)
+}
+
+/// Riku's group `riku` in a look.
+pub fn group_for(skins: &[Skin], riku: u16, look: Look) -> u16 {
+    skins.iter().find(|s| s.riku == riku && s.dark == look.dark && s.blade == look.blade).map_or(riku, |s| s.skin)
+}
+
+/// The look a group shows (Riku's own: the Default Attire with the Soul Eater).
+pub fn look_of(skins: &[Skin], group: u16) -> Look {
+    match skins.iter().find(|s| s.skin == group) {
+        Some(s) => Look { dark: s.dark, blade: s.blade, halloween: s.riku == RIKU_GROUPS[1] },
+        None => Look { halloween: group == RIKU_GROUPS[1], ..Look::default() },
+    }
 }
 
 #[cfg(test)]
@@ -149,10 +210,27 @@ mod tests {
         assert_eq!(name(0x17), "PLAYER/0101/PL0101.BIN", "Riku's camera data");
         assert_eq!(name(0x2C), "PLAYER/0101/PL0101.SND", "Riku's sound bank");
         assert!(add_rows(out, &skins).is_err(), "twice");
-        assert_eq!(entries(&skins, true), [121, 111]);
-        assert_eq!(entries(&skins, false), [101, 111]);
+        assert_eq!(entries(&skins, Look { dark: true, blade: 0, halloween: false }), [121, 111]);
+        assert_eq!(entries(&skins, Look::default()), [101, 111]);
+        assert_eq!(skins[0], Skin { riku: 101, skin: 121, dark: true, blade: 0 }, "an older manifest: Dark Mode, Soul Eater");
+        let all = parse(r#"{"format": 1, "skins": [{"riku": 101, "skin": 121, "dark": true, "blade": 0}, {"riku": 101, "skin": 141, "dark": false, "blade": 1}, {"riku": 101, "skin": 161, "dark": true, "blade": 1}, {"riku": 111, "skin": 151, "dark": false, "blade": 1}]}"#).unwrap();
+        assert_eq!(entries(&all, Look { dark: false, blade: 1, halloween: false }), [141, 151]);
+        assert_eq!(entries(&all, Look { dark: true, blade: 1, halloween: false }), [161, 111], "no Halloween group for that look: Riku's own");
+        assert_eq!(look_of(&all, 161), Look { dark: true, blade: 1, halloween: false });
+        // 0.178.0: the Halloween Town look puts char 3 on 111 and its skins.
+        let hw = |dark, blade| Look { dark, blade, halloween: true };
+        assert_eq!(entries(&all, hw(false, 0)), [111, 111]);
+        assert_eq!(entries(&all, hw(false, 1)), [151, 151]);
+        assert_eq!(entries(&all, hw(true, 1)), [111, 111], "no Halloween Dark group in this manifest: Riku's own Halloween look");
+        assert_eq!(look_of(&all, 111), hw(false, 0));
+        assert_eq!(look_of(&all, 101), Look::default());
+        assert_eq!(Look::from_bits(hw(true, 1).bits()), hw(true, 1));
+        assert_eq!(Look::from_bits(Look { dark: true, blade: 1, halloween: false }.bits()), Look { dark: true, blade: 1, halloween: false });
+        assert!(parse(r#"{"format": 1, "skins": [{"riku": 101, "skin": 141, "dark": false, "blade": 0}]}"#).is_err(), "Riku's own look");
         assert_eq!(ann_name(121), "PL0121");
         assert!(files(121).contains(&"raw/PLAYER/0121/PL0121.RTM".to_string()));
         assert!(parse(r#"{"format": 1, "skins": [{"riku": 3, "skin": 121}]}"#).is_err());
+        assert!(riku_guard(r#"{"format": 1, "skins": [], "riku_guard": true}"#));
+        assert!(!riku_guard(r#"{"format": 1, "skins": [{"riku": 101, "skin": 121}]}"#), "older manifests: no guard");
     }
 }

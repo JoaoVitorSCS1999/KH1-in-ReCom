@@ -77,6 +77,13 @@ fn world_rot(skel: &RecomSkeleton) -> Vec<M3> {
 /// Retargets one of Riku's clips onto Dark Riku's skeleton. Frame count, fps, loop and blend are
 /// the clip's own.
 pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[Option<usize>]) -> Result<Clip> {
+    retarget_with(src, riku, dark, map, None)
+}
+
+/// [`retarget`] with the target's bones that have no source bone posed from `fill` at its frame 0
+/// (their local rotation and translation), else from their rest pose. Used for Sora's KH1 Guard on
+/// Riku (0.157.0): his blade chain, belts and hair from his own battle stance.
+pub fn retarget_with(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[Option<usize>], fill: Option<&Clip>) -> Result<Clip> {
     let na = riku.bones.len();
     if src.bones as usize != na {
         return bad(format!("{}: {} bones, Riku's skeleton has {na}", src.name_str(), src.bones));
@@ -133,7 +140,16 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
                 }
                 Some(i) => m3(&m3(&rb[j], &tr(&ra[i])), &ua[i]),
                 None if b.parent < 0 => rb[j],
-                None => m3(&unscale(&b.local.r).0, &tg[b.parent as usize].u),
+                None => {
+                    let r = match fill {
+                        Some(c) => {
+                            let s = c.sample(j, 0.0);
+                            rot_xyz(s.r[0], s.r[1], s.r[2])
+                        }
+                        None => unscale(&b.local.r).0,
+                    };
+                    m3(&r, &tg[b.parent as usize].u)
+                }
             };
             let p = if b.parent < 0 {
                 map[j].map_or([0.0; 3], |i| pa[i])
@@ -145,6 +161,7 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
                         let d = [loc_t[i][0] - rt[0], loc_t[i][1] - rt[1], loc_t[i][2] - rt[2]];
                         [b.local.t[0] + d[0], b.local.t[1] + d[1], b.local.t[2] + d[2]]
                     }
+                    (_, None) if fill.is_some() => fill.unwrap().sample(j, 0.0).t,
                     _ => b.local.t,
                 };
                 let w = crate::math::vm(lt, &par.u);
@@ -334,6 +351,122 @@ pub fn path(g: u16, ext: &str) -> String {
 /// The costume change plays it after Riku's own transformation crouch (`win::riku_skin`).
 pub const DARK_FLIP: &str = "p003_067";
 
+/// Riku's Guard clip (0.157.0 Sora's KH1 Guard retargeted; 0.158.0 his own KH1 guard).
+///
+/// 0.158.0 (fork owner, 2026-11-23: "no KH1 tem uma animação do Riku defendendo, ela acontece na
+/// Destiny Island … quando ele duela com o Sora usando uma espada de madeira … inclusive tem a
+/// variação de quando em defesa ele toma impacto"): KH1's Riku (`xa_ex_1010`, the Destiny Islands
+/// duel set) guards in his AI script's `func_1e62` (`ex_1010.bd`, Checked (files: the script listed
+/// with `tools/kh1-ai-script.py`)): request **240** (entry 28, 30 frames: into the guard), then
+/// **241** (entry 29, 60 frames, played looping: the guard held), with his guard row `0x550` (type
+/// 2, priority 10) on; the row's recoil is request **110** (entry 13), the same clip Re:CoM baked as
+/// his `p002_043` (row 0x24), which his Guard already plays on a block. The clip here is 240's 30
+/// frames then 241's first 24 (54 frames, the length of Sora's KH1 Guard, whose numbers the KH1
+/// frame uses), converted from KH1's motions onto Riku's Re:CoM skeleton (`ex_1010_sk`, KH1's own:
+/// `crate::convert::Converter`).
+pub const RIKU_GUARD: &str = "p002_225";
+/// KH1 Riku's guard requests: into the guard, the guard held.
+pub const RIKU_GUARD_REQUESTS: (u16, u16) = (240, 241);
+/// The clip's length: Sora's KH1 Guard (54 frames), whose timing the KH1 frame uses.
+pub const RIKU_GUARD_FRAMES: usize = 54;
+/// Frames of the held part after the way in (0.158.1: 7, then the way out).
+pub const RIKU_GUARD_HOLD: u32 = 27;
+/// Frames 240 (the way into the guard) is played in: KH1's guard object's first live frame.
+pub const RIKU_GUARD_UP: usize = 10;
+
+/// KH1 Riku's own guard on a Riku skeleton of Re:CoM's (named [`RIKU_GUARD`]).
+pub fn riku_kh1_guard(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<Clip> {
+    let ms = kh1_formats::mset::MotionSet::parse(mset)?;
+    let (into, held) = RIKU_GUARD_REQUESTS;
+    let (_, m_in) = ms.motion_for(into).ok_or_else(|| crate::Error::Format(format!("xa_ex_1010.mset: no request {into}")))?;
+    let (_, m_hold) = ms.motion_for(held).ok_or_else(|| crate::Error::Format(format!("xa_ex_1010.mset: no request {held}")))?;
+    let conv = crate::convert::Converter::new(mdls, riku.clone())?;
+    let mut rig = conv.rig();
+    let mut rows: Vec<Vec<[f64; 9]>> = Vec::new();
+    rig.start_motion(m_in);
+    for f in 0..m_in.frames {
+        let tg = conv.targets(&mut rig, m_in, f as f32, false);
+        let l = conv.locals(&tg, rows.last().map(|v| v.as_slice()));
+        rows.push(l);
+    }
+    let into: Vec<Vec<[f64; 9]>> = rows.clone();
+    // 0.159.0 (fork owner: "Tempo/duração estranhos"): the guard is up when KH1's guard object goes
+    // live (frame 10 of the Guard's 54, live 10..36): 240 is played in its first 10 frames, 241
+    // held over the live window, then the way out.
+    rows.clear();
+    let last_in = into.len().saturating_sub(1);
+    for k in 0..RIKU_GUARD_UP {
+        rows.push(into[((k + 1) * last_in + RIKU_GUARD_UP / 2) / RIKU_GUARD_UP].clone());
+    }
+    rig.start_motion(m_hold);
+    for f in 0..RIKU_GUARD_HOLD.min(m_hold.frames) {
+        let tg = conv.targets(&mut rig, m_hold, f as f32, false);
+        let l = conv.locals(&tg, rows.last().map(|v| v.as_slice()));
+        rows.push(l);
+    }
+    // 0.158.1 (fork owner: "quando passa um tempo e ele desativa a guarda ficou estranha, sera que
+    // nn tem como colocar a mesma animação mas ao contrário?"): the way out is the way in played
+    // backwards, faster, to fill the clip: it ends on 240's first frame (his stance before the
+    // guard), so the next motion starts from there instead of the held guard.
+    let out = RIKU_GUARD_FRAMES.saturating_sub(rows.len()).max(1);
+    let last = into.len().saturating_sub(1);
+    for k in 0..out {
+        let src = last - ((k + 1) * last + out / 2) / out;
+        rows.push(into[src].clone());
+    }
+    let spec = crate::convert::ClipSpec { name: RIKU_GUARD.into(), looped: false, root_motion: false, blend: 8 };
+    Ok(crate::convert::encode_clip(&spec, &rows))
+}
+
+/// KH1 Riku's guard recoil (request 110, entry 13, 56 frames; 0.158.2), named `p002_226`.
+pub const RIKU_RECOIL: &str = "p002_226";
+
+/// KH1 Riku's own guard recoil on a Riku skeleton of Re:CoM's (named [`RIKU_RECOIL`]).
+pub fn riku_kh1_recoil(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<Clip> {
+    let ms = kh1_formats::mset::MotionSet::parse(mset)?;
+    let (_, m) = ms.motion_for(110).ok_or_else(|| crate::Error::Format("xa_ex_1010.mset: no request 110".into()))?;
+    let conv = crate::convert::Converter::new(mdls, riku.clone())?;
+    conv.convert(m, &crate::convert::ClipSpec { name: RIKU_RECOIL.into(), looped: false, root_motion: false, blend: 8 })
+}
+
+/// The guard's sources for every Riku skeleton: KH1 Riku's motion set and model.
+pub struct GuardSource<'a> {
+    /// `xa_ex_1010.mset`.
+    pub mset: &'a [u8],
+    /// `xa_ex_1010.mdls`.
+    pub mdls: &'a [u8],
+}
+
+/// Sora's KH1 Guard on Riku (0.157.0; replaced by [`riku_kh1_guard`] in 0.158.0, kept for tests).
+/// Riku's battle stance (his action row 0x2A). Checked (exe: `0x1407C6370`).
+pub const RIKU_STANCE: &str = "p002_031";
+
+/// Sora's bone of the same role as Riku's.
+fn sora_alias(riku: &str) -> &str {
+    match riku {
+        "ex_1010_sk" => "ex_0010_sk",
+        x => x,
+    }
+}
+
+/// Sora's guard clip on Riku's skeleton, named [`RIKU_GUARD`].
+pub fn riku_guard(sora_guard: &Clip, sora: &RecomSkeleton, riku: &RecomSkeleton, riku_ann: &Ann) -> Result<Clip> {
+    let map: Vec<Option<usize>> = riku.bones.iter().map(|b| sora.find(sora_alias(&b.name))).collect();
+    let stance = riku_ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE));
+    let mut c = retarget_with(sora_guard, sora, riku, &map, stance)?;
+    c.name = crate::ann::name16(RIKU_GUARD);
+    Ok(c)
+}
+
+/// `ann` with `clip` added as its last slot (named as the clip), unless a slot already has it.
+pub fn with_clip(mut ann: Ann, clip: Clip) -> Ann {
+    if ann.find(&clip.name_str()).is_none() {
+        ann.slots.push(Slot { name: clip.name, clip: Some(clip) });
+        ann.pad_tail_like_recom();
+    }
+    ann
+}
+
 /// The skin manifest's file name (next to the other manifests).
 pub const MANIFEST: &str = "kh1-riku-skin.json";
 
@@ -373,6 +506,13 @@ pub struct Built {
 /// Reads Riku's group `riku` and Dark Riku's group `dark` from Recom.pkg and builds skin group
 /// `skin`.
 pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, riku: u16, dark: u16, skin: u16) -> Result<Built> {
+    build_with(arc, keys, riku, dark, skin, None)
+}
+
+/// [`build`], Riku's pack first given Sora's KH1 Guard (`sora`: his guard clip and skeleton;
+/// 0.157.0). Riku's own pack is then one of the files (`PLAYER/01x1/PL01x1.ANN`), and the skin's
+/// pack gets the guard too.
+pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, riku: u16, dark: u16, skin: u16, guard: Option<&GuardSource>) -> Result<Built> {
     let rd = |g: u16, ext: &str| crate::install::read_recom(arc, keys, &path(g, ext));
     let raw = |g: u16, ext: &str| -> Result<(Vec<u8>, Vec<kh1_formats::egs::HdAsset>, i32)> {
         let n = path(g, ext);
@@ -386,7 +526,14 @@ pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable,
     let dmdl = rd(dark, "MDL")?;
     let rs = RecomSkeleton::parse(&rmdl)?;
     let ds = RecomSkeleton::parse(&dmdl)?;
-    let ann = Ann::parse(&rd(riku, "ANN")?)?;
+    let mut ann = Ann::parse(&rd(riku, "ANN")?)?;
+    let mut riku_pack = None;
+    if let Some(src) = guard {
+        let guard = riku_kh1_guard(src.mset, src.mdls, &rs)?;
+        ann = with_clip(ann, guard);
+        ann = with_clip(ann, riku_kh1_recoil(src.mset, src.mdls, &rs)?);
+        riku_pack = Some((path(riku, "ANN"), ann.to_bytes()));
+    }
     let mut out_ann = retarget_ann(&ann, &rs, &ds)?;
     let em = event_map(&rs, &ds);
     let mut eet = crate::eet::parse(&remap_eet(&rd(riku, "EET")?, &em)?)?;
@@ -409,6 +556,7 @@ pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable,
         (path(skin, "EET"), crate::eet::write(&eet)?),
         (path(skin, "SES"), crate::ses::write(&ses)),
     ];
+    files.extend(riku_pack);
     for ext in ["RTM", "TXA"] {
         let (d, a, date) = raw(dark, ext)?;
         files.push((format!("raw/{}", path(skin, ext)), kh1_formats::egs::build_plain_entry(&d, &a, date)?));
@@ -416,16 +564,212 @@ pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable,
     Ok(Built { files, clips })
 }
 
-/// The manifest: which Riku group each skin group stands for.
-pub fn manifest_json(skins: &[(u16, u16)]) -> String {
-    let rows: Vec<String> = skins.iter().map(|(r, s)| format!("{{\"riku\": {r}, \"skin\": {s}}}")).collect();
-    format!("{{\"format\": 1, \"skins\": [{}]}}\n", rows.join(", "))
+/// The manifest: which Riku group each skin group stands for, with its look (Dark Mode attire,
+/// blade 0 Soul Eater / 1 the Keyblade of People's Hearts).
+pub fn manifest_json(skins: &[Made], riku_guard: bool) -> String {
+    let rows: Vec<String> = skins.iter().map(|m| format!("{{\"riku\": {}, \"skin\": {}, \"dark\": {}, \"blade\": {}}}", m.riku, m.skin, m.dark, m.blade)).collect();
+    format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}}}\n", rows.join(", "))
+}
+
+/// One group made: the Riku group it stands for, and its look.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Made {
+    /// Riku's own group (101 / 111).
+    pub riku: u16,
+    /// The group made.
+    pub skin: u16,
+    /// The Dark Mode attire.
+    pub dark: bool,
+    /// 0 the Soul Eater, 1 the Keyblade of People's Hearts.
+    pub blade: u8,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Riku's Keyblade (fork 0.160.0; fork owner, 2026-11-23: "quero implementar para o Riku a troca de
+// Keyblade, vai ser simplesmente cosmética … entre a Soul Eater e a Keyblade of Heart"; "no Kingdom
+// Hearts 1 essa é a única keyblade que ele utiliza, numa bossfight inclusive com o mesmo traje do
+// DarkMode").
+//
+// - KH1 (Checked (files)): Riku-Ansem's battle model `xa_ex_1580` (voices `rk04`, the Dark Mode
+//   attire) holds it as its HD mesh `-c0.cvbl` mesh 0, on joint 211 alone, texture slot 0
+//   (`-1c0.dds`, 512 × 512: the dark blade, the red heart, the crown teeth).
+// - Re:CoM (Checked (files)): Riku's weapon is two parts of his own model (`PL0101` / `PL0111`
+//   parts 0 untextured and 1 textured, Dark Riku's `PL0201` / `PL0211` the same), every vertex on
+//   `wep0` (77; Dark's 105). Re:CoM's Soul Eater on `wep0` = KH1 `xa_ex_1560`'s on its joint 191
+//   × 0.01, same axes (the same bounds to the centimetre).
+// - The Keyblade's joint 211 (Riku-Ansem's 247-joint skeleton) sits [`BLADE_SHIFT`] from joint
+//   191's: KH1 `xa_ex_1160` (Riku in Hollow Bastion, the same skeleton) holds the Soul Eater on
+//   joint 211; matched to `xa_ex_1560`'s, a shift of (4.54, −0.52, −0.02) cm (mean miss 1.2 cm:
+//   the two meshes differ a little). Assumption: Riku-Ansem's grip is that Riku's.
+// - Dark Riku's `wep0` is Riku's turned half a turn about its x (`BLADE_FLIP`, 0.154.3): the blade
+//   is turned the same way there, so it shows as on Riku.
+// - The new groups ([`BLADE_GROUPS`]) are the four looks' own copies; only their `.MDL` (the two
+//   weapon parts replaced, the rest kept byte for byte) and `.RTM` (+ the Keyblade's texture)
+//   differ.
+
+/// KH1's model holding the Keyblade.
+pub const BLADE_MODEL: &str = "xa_ex_1580.mdls";
+/// Its HD mesh.
+pub const BLADE_CVBL: &str = "-c0.cvbl";
+/// The Keyblade's mesh in it.
+pub const BLADE_MESH: usize = 0;
+/// The joint it is on.
+pub const BLADE_JOINT: u32 = 211;
+/// Its texture (cvbl slot 0).
+pub const BLADE_DDS: &str = "-1c0.dds";
+/// Its texture's name in Re:CoM (looked up globally: one name for the four groups).
+pub const BLADE_TEXTURE: &str = "rk_kophearts";
+/// Joint 211 → joint 191 (KH1 units).
+pub const BLADE_SHIFT: [f32; 3] = [4.54, -0.52, -0.02];
+
+/// (base group, the group whose raw `.RTM` / `.TXA` it uses, new group, Dark Mode attire).
+pub const BLADE_GROUPS: [(u16, u16, u16, bool); 4] = [(101, 101, 141, false), (111, 111, 151, false), (121, 201, 161, true), (131, 211, 171, true)];
+
+/// The Keyblade's sources: KH1's HD mesh and texture.
+pub struct BladeSource {
+    /// The HD mesh file.
+    pub cvbl: Vec<u8>,
+    /// The texture (DXT).
+    pub dds: Vec<u8>,
+}
+
+impl BladeSource {
+    /// From `xa_ex_1580.mdls`'s HD assets.
+    pub fn from_assets(assets: &[kh1_formats::egs::HdAsset]) -> Result<BladeSource> {
+        let get = |n: &str| assets.iter().find(|a| a.name == n).map(|a| a.data.clone()).ok_or_else(|| crate::Error::Format(format!("{BLADE_MODEL}: no {n}")));
+        Ok(BladeSource { cvbl: get(BLADE_CVBL)?, dds: get(BLADE_DDS)? })
+    }
+}
+
+/// `mdl` (Riku's or Dark Riku's, parts 0 / 1 his weapon on `wep0`) with the Keyblade as its weapon.
+pub fn with_blade(mdl: &[u8], src: &BladeSource, flip: bool) -> Result<Vec<u8>> {
+    use crate::mdl::{join_parts, split_parts, MdlPart, FMT_PLAIN, FMT_TEXTURED};
+    let mut parts = split_parts(mdl)?;
+    if parts.len() < 3 {
+        return Err(crate::Error::Format("Riku's model: fewer than 3 parts".into()));
+    }
+    let p1 = MdlPart::parse_bytes(&parts[1])?;
+    let p2 = MdlPart::parse_bytes(&parts[2])?;
+    let wep0 = p1.bones.iter().position(|b| crate::ann::cstr(&b.name) == "wep0").ok_or_else(|| crate::Error::Format("Riku's model: no wep0".into()))?;
+    let only_wep0 = |p: &MdlPart| p.list_a.iter().chain(p.list_b.iter().flatten()).all(|k| k.verts.iter().all(|v| v.bone() == wep0));
+    let tx = p1.list_a.first().filter(|k| k.fmt == FMT_TEXTURED).ok_or_else(|| crate::Error::Format("Riku's model: part 1 is not textured".into()))?;
+    let pl = p2.list_a.first().filter(|k| k.fmt == FMT_PLAIN).ok_or_else(|| crate::Error::Format("Riku's model: part 2 is not untextured".into()))?;
+    if !only_wep0(&p1) || parts[0].len() < 0x30 || u16::from_le_bytes([parts[0][0], parts[0][1]]) as usize != p1.bones.len() {
+        return Err(crate::Error::Format("Riku's model: parts 0 / 1 are not his weapon alone".into()));
+    }
+    let cv = kh1_formats::cvbl::Cvbl::parse(&src.cvbl)?;
+    let (_, _, img) = crate::keyblade::texture_entry(BLADE_TEXTURE, &src.dds)?;
+    let place = |p: [f32; 3]| {
+        let q = [(p[0] + BLADE_SHIFT[0]) * 0.01, (p[1] + BLADE_SHIFT[1]) * 0.01, (p[2] + BLADE_SHIFT[2]) * 0.01];
+        if flip {
+            [q[0], -q[1], -q[2]]
+        } else {
+            q
+        }
+    };
+    let bp = crate::keyblade::blade_parts(&cv, BLADE_MESH, BLADE_JOINT, wep0 as u32, &place, &img, (tx.gif, tx.regs), (pl.gif, pl.regs))?;
+    let nb = p1.bones.len();
+    let mut name = [0u8; 32];
+    name[..BLADE_TEXTURE.len()].copy_from_slice(BLADE_TEXTURE.as_bytes());
+    let textured = MdlPart {
+        bounds: crate::keyblade::part_bounds(nb, &[&bp.textured_a, bp.textured_b.as_deref().unwrap_or(&[])]),
+        textures: vec![name],
+        list_a: bp.textured_a,
+        list_b: bp.textured_b,
+        ..p1.clone()
+    };
+    let plain = MdlPart {
+        flags: [parts[0][2], parts[0][3]],
+        filler: parts[0][0x20..0x30].try_into().unwrap(),
+        bones: p1.bones.clone(),
+        rest: p1.rest.clone(),
+        textures: vec![],
+        bounds: crate::keyblade::part_bounds(nb, &[&bp.plain]),
+        list_a: bp.plain,
+        list_b: None,
+    };
+    parts[0] = plain.write_bytes()?;
+    parts[1] = textured.write_bytes()?;
+    Ok(join_parts(&parts))
+}
+
+/// A raw `.RTM` entry (`(data, HD assets, date)` as the archive holds it) with the Keyblade's
+/// texture added (TIM2 + HD), as a plain entry for Panacea's raw route.
+pub fn rtm_with_blade(d: &[u8], assets: &[kh1_formats::egs::HdAsset], date: i32, src: &BladeSource) -> Result<Vec<u8>> {
+    let mut rtm = crate::rtm::Rtm::parse(d)?;
+    let (e, hd, _) = crate::keyblade::texture_entry(BLADE_TEXTURE, &src.dds)?;
+    rtm.entries.retain(|x| x.name_str() != BLADE_TEXTURE);
+    rtm.entries.push(e);
+    let mut a = assets.to_vec();
+    a.retain(|x| x.name != hd.name);
+    a.push(hd);
+    Ok(kh1_formats::egs::build_plain_entry(&rtm.write(), &a, date)?)
+}
+
+/// One Keyblade group: `base`'s files (`have`: what the step wrote this run, else Re:CoM's) under
+/// `target`'s names, its model with the Keyblade, its raw `.RTM` / `.TXA` from `raw_src`.
+pub fn build_blade(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, base: u16, raw_src: u16, target: u16, dark: bool, src: &BladeSource) -> Result<Built> {
+    let get = |ext: &str| -> Result<Vec<u8>> {
+        let n = path(base, ext);
+        match have.get(&n) {
+            Some(b) => Ok(b.clone()),
+            None => crate::install::read_recom(arc, keys, &n),
+        }
+    };
+    let raw = |ext: &str| -> Result<(Vec<u8>, Vec<kh1_formats::egs::HdAsset>, i32)> {
+        let n = path(raw_src, ext);
+        let e = arc.find(&n).ok_or_else(|| crate::Error::Format(format!("{n} not in Recom.hed")))?;
+        let raw = arc.read_raw_entry(e)?;
+        let date = raw.get(12..16).map_or(0, |b| i32::from_le_bytes(b.try_into().unwrap()));
+        let (d, a) = kh1_formats::egs::decode_entry_full(keys, &raw)?;
+        Ok((d, a, date))
+    };
+    let mut files = vec![(path(target, "MDL"), with_blade(&get("MDL")?, src, dark)?)];
+    for ext in ["ANN", "EET", "SES"] {
+        files.push((path(target, ext), get(ext)?));
+    }
+    let (d, a, date) = raw("RTM")?;
+    files.push((format!("raw/{}", path(target, "RTM")), rtm_with_blade(&d, &a, date, src)?));
+    let (d, a, date) = raw("TXA")?;
+    files.push((format!("raw/{}", path(target, "TXA")), kh1_formats::egs::build_plain_entry(&d, &a, date)?));
+    let clips = Ann::parse(&files[1].1)?.slots.iter().filter(|s| s.clip.is_some()).count();
+    Ok(Built { files, clips })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::install;
+
+    /// With the owner's installs (`RECOM_GAME`): the Keyblade replaces Riku's weapon parts alone
+    /// (the other parts byte for byte), on `wep0`, its grip where the Soul Eater's is (the
+    /// Keyblade spans the Soul Eater's grip region), turned over on Dark Riku's model.
+    #[test]
+    fn the_keyblade_replaces_rikus_weapon_parts() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { return };
+        let src = BladeSource::from_assets(&assets).unwrap();
+        for (name, flip, wep0) in [("PLAYER/0101/PL0101.MDL", false, 77usize), ("PLAYER/0201/PL0201.MDL", true, 105)] {
+            let old = install::read_recom(&arc, &keys, name).unwrap();
+            let new = with_blade(&old, &src, flip).unwrap();
+            let (a, b) = (crate::mdl::split_parts(&old).unwrap(), crate::mdl::split_parts(&new).unwrap());
+            assert_eq!(a.len(), b.len());
+            assert_eq!(a[2..], b[2..], "{name}: the body kept byte for byte");
+            let p = crate::mdl::MdlPart::parse_bytes(&b[1]).unwrap();
+            assert_eq!(p.texture_names(), [BLADE_TEXTURE]);
+            let vs: Vec<_> = p.list_a.iter().chain(p.list_b.iter().flatten()).flat_map(|k| k.verts.iter()).collect();
+            assert!(vs.iter().all(|v| v.bone() == wep0));
+            let xs: Vec<f32> = vs.iter().map(|v| v.pos()[0]).collect();
+            let (lo, hi) = (xs.iter().cloned().fold(f32::MAX, f32::min), xs.iter().cloned().fold(f32::MIN, f32::max));
+            assert!(lo < -1.0 && hi > 0.2 && hi < 0.3, "{name}: {lo}..{hi} m along the blade");
+            let ys: Vec<f32> = vs.iter().map(|v| v.pos()[1]).collect();
+            let ymax = ys.iter().cloned().fold(f32::MIN, f32::max);
+            assert!(if flip { ymax < 0.18 } else { ymax > 0.18 }, "{name}: turned over on Dark's model ({ymax})");
+            assert!(crate::mdl::MdlPart::parse_bytes(&b[0]).is_ok());
+        }
+    }
 
     fn game() -> Option<std::path::PathBuf> {
         std::env::var_os("RECOM_GAME").map(Into::into)
