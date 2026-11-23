@@ -127,7 +127,9 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
                     let qa = m3(&ua[i], &tr(&ua[g.wep0_a]));
                     let qa0 = m3(&ra[i], &tr(&ra[g.wep0_a]));
                     let qb0 = m3(&rb[j], &tr(&rb[g.wep0_b]));
-                    m3(&m3(&m3(&qb0, &tr(&qa0)), &qa), &tg[g.wep0_b].u)
+                    // Under the un-turned `wep0`: the chain (trails, hits) stays where Riku's is;
+                    // only the blade mesh on `wep0` is turned over.
+                    m3(&m3(&m3(&qb0, &tr(&qa0)), &qa), &m3(&BLADE_FLIP, &tg[g.wep0_b].u))
                 }
                 Some(i) => m3(&m3(&rb[j], &tr(&ra[i])), &ua[i]),
                 None if b.parent < 0 => rb[j],
@@ -163,6 +165,9 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
 /// 0.154.1). At rest `wep0` sits the same in both hands (rotation identical, position 1.6 cm
 /// apart). So: Dark's `wep0` takes Riku's `wep0` relative to the hand (in the hand's own axes, plus
 /// the rest difference), and `wep2` / `wep1` follow `wep0` rigidly as in Dark's rest pose.
+/// Half a turn about `wep0`'s x (the blade's axis), in its own frame (row vectors: on the left).
+const BLADE_FLIP: M3 = [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
+
 struct Grip {
     /// Dark's first chain bone (`wep2`): from here the three are placed together.
     first: usize,
@@ -208,8 +213,12 @@ impl Grip {
         let c = [c[0] + self.d[0], c[1] + self.d[1], c[2] + self.d[2]];
         let w = crate::math::vm(c, &hb.u);
         let p0 = [hb.p[0] + w[0], hb.p[1] + w[1], hb.p[2] + w[2]];
-        // Riku's blade's rotation in his hand, in Dark's hand (the rest rotations match).
-        let u0 = m3(&m3(&ua[self.wep0_a], &tr(&ua[self.hand_a])), &hb.u);
+        // Riku's blade's rotation in his hand, in Dark's hand (the rest rotations match), turned
+        // half a turn about the blade's own axis: Dark Riku's blade mesh is Riku's turned over
+        // (its bounds on `wep0`: y −0.12..0.13 against Riku's −0.14..0.10), and Dark Riku's own
+        // clips hold it so (his grip against Riku's: 137..178° about `wep0`'s x in 12 clips,
+        // Checked (files)).
+        let u0 = m3(&BLADE_FLIP, &m3(&m3(&ua[self.wep0_a], &tr(&ua[self.hand_a])), &hb.u));
         for &(k, rel, off) in &self.chain {
             let o = crate::math::vm(off, &u0);
             out[k] = Some(Target { u: m3(&rel, &u0), s: [1.0; 3], p: [p0[0] + o[0], p0[1] + o[1], p0[2] + o[2]] });
@@ -453,18 +462,38 @@ mod tests {
             crate::math::vm([p[k][0] - p[h][0], p[k][1] - p[h][1], p[k][2] - p[h][2]], &tr(&u[h]))
         };
         let mut worst: f64 = 0.0;
+        let mut worst_rot: f64 = 0.0;
+        let rot_in_hand = |c: &Clip, sk: &RecomSkeleton, f: f64| -> M3 {
+            let mut u = vec![crate::math::I3; sk.bones.len()];
+            for (i, b) in sk.bones.iter().enumerate() {
+                let s = c.sample(i, f);
+                let r = rot_xyz(s.r[0], s.r[1], s.r[2]);
+                u[i] = if b.parent < 0 { r } else { m3(&r, &u[b.parent as usize]) };
+            }
+            m3(&u[sk.find("wep0").unwrap()], &tr(&u[sk.find("r_hand").unwrap()]))
+        };
         for c in ann.slots.iter().filter_map(|s| s.clip.as_ref()) {
             let o = retarget(c, &riku, &dark, &map).unwrap();
             for f in 0..c.frames as usize {
-                for bone in ["wep0", "k1"] {
-                    let a = in_hand(c, &riku, f as f64, bone);
-                    let b = in_hand(&o, &dark, f as f64, bone);
-                    worst = worst.max(crate::math::dist(a, b));
-                }
+                let (ra_, rb_) = (rot_in_hand(c, &riku, f as f64), rot_in_hand(&o, &dark, f as f64));
+                let want = m3(&BLADE_FLIP, &ra_);
+                worst_rot = worst_rot.max(crate::math::angle_deg(&m3(&rb_, &tr(&want))));
+                // The root where Riku's is in the hand; the tip where Riku's is from the root (in
+                // Dark's turned-over `wep0` axes).
+                worst = worst.max(crate::math::dist(in_hand(c, &riku, f as f64, "wep0"), in_hand(&o, &dark, f as f64, "wep0")));
+                let tip = |cl: &Clip, sk: &RecomSkeleton, r: &M3| {
+                    let (k, w) = (in_hand(cl, sk, f as f64, "k1"), in_hand(cl, sk, f as f64, "wep0"));
+                    crate::math::vm([k[0] - w[0], k[1] - w[1], k[2] - w[2]], &tr(r))
+                };
+                let ta = crate::math::vm(tip(c, &riku, &ra_), &BLADE_FLIP);
+                let tb = tip(&o, &dark, &rb_);
+                worst = worst.max(crate::math::dist(ta, tb));
             }
         }
         eprintln!("Soul Eater in the hand: worst {worst:.4} m");
         assert!(worst < 0.03, "the blade moved in the hand by {worst} m");
+        eprintln!("Soul Eater's turn in the hand against Riku's turned over: worst {worst_rot:.2} deg");
+        assert!(worst_rot < 0.5);
         for &(r, d, k) in &SKIN_GROUPS {
             let b = build(&arc, &keys, r, d, k).unwrap();
             let get = |ext: &str| &b.files.iter().find(|f| f.0.ends_with(ext)).unwrap().1;
