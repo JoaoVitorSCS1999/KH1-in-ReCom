@@ -328,6 +328,12 @@ pub fn path(g: u16, ext: &str) -> String {
 }
 
 
+/// Dark Riku's own entry flip (his action row 0x37, played by his Dark Mode switch-in
+/// `0x14020485B`; Checked (exe)), added to the skin's pack on his own skeleton (the skin's), with
+/// its EET / SES events (`ex_1580.dpx` 18 at bone 0, `transform.dpx` 1 at bone 51; Checked (files)).
+/// The costume change plays it after Riku's own transformation crouch (`win::riku_skin`).
+pub const DARK_FLIP: &str = "p003_067";
+
 /// The skin manifest's file name (next to the other manifests).
 pub const MANIFEST: &str = "kh1-riku-skin.json";
 
@@ -381,14 +387,27 @@ pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable,
     let rs = RecomSkeleton::parse(&rmdl)?;
     let ds = RecomSkeleton::parse(&dmdl)?;
     let ann = Ann::parse(&rd(riku, "ANN")?)?;
-    let out_ann = retarget_ann(&ann, &rs, &ds)?;
-    let clips = out_ann.slots.iter().filter(|s| s.clip.is_some()).count();
+    let mut out_ann = retarget_ann(&ann, &rs, &ds)?;
     let em = event_map(&rs, &ds);
+    let mut eet = crate::eet::parse(&remap_eet(&rd(riku, "EET")?, &em)?)?;
+    let mut ses = crate::ses::parse(&remap_ses(&rd(riku, "SES")?, &em)?)?;
+    // Dark Riku's entry flip with its own events (his skeleton is the skin's).
+    let dann = Ann::parse(&rd(dark, "ANN")?)?;
+    let flip = dann.slots.iter().find(|s| s.clip.as_ref().is_some_and(|c| c.name_str() == DARK_FLIP)).ok_or_else(|| crate::Error::Format(format!("{}: no {DARK_FLIP}", path(dark, "ANN"))))?;
+    if out_ann.find(DARK_FLIP).is_none() {
+        let tail = std::mem::take(&mut out_ann.tail);
+        out_ann.slots.push(flip.clone());
+        out_ann.tail = tail;
+        out_ann.pad_tail_like_recom();
+    }
+    eet.extend(crate::eet::parse(&rd(dark, "EET")?)?.into_iter().filter(|r| r.name == DARK_FLIP));
+    ses.extend(crate::ses::parse(&rd(dark, "SES")?)?.into_iter().filter(|e| e.name() == DARK_FLIP));
+    let clips = out_ann.slots.iter().filter(|s| s.clip.is_some()).count();
     let mut files = vec![
         (path(skin, "MDL"), rename_root(&dmdl)?),
         (path(skin, "ANN"), out_ann.to_bytes()),
-        (path(skin, "EET"), remap_eet(&rd(riku, "EET")?, &em)?),
-        (path(skin, "SES"), remap_ses(&rd(riku, "SES")?, &em)?),
+        (path(skin, "EET"), crate::eet::write(&eet)?),
+        (path(skin, "SES"), crate::ses::write(&ses)),
     ];
     for ext in ["RTM", "TXA"] {
         let (d, a, date) = raw(dark, ext)?;
@@ -528,8 +547,9 @@ mod tests {
             assert_eq!(sk.bones[1].name, "ex_1010_sk");
             let a = Ann::parse(get(".ANN")).unwrap();
             assert!(a.slots.iter().flatten_clips().all(|c| c.bones as usize == sk.bones.len()));
-            crate::eet::parse(get(".EET")).unwrap();
-            crate::ses::parse(get(".SES")).unwrap();
+            assert!(a.find(DARK_FLIP).is_some(), "the flip in the pack");
+            assert!(crate::eet::parse(get(".EET")).unwrap().iter().any(|r| r.name == DARK_FLIP));
+            assert!(crate::ses::parse(get(".SES")).unwrap().iter().any(|e| e.name() == DARK_FLIP));
             eprintln!("group {k}: {} clips, files {:?}", b.clips, b.files.iter().map(|f| (f.0.clone(), f.1.len())).collect::<Vec<_>>());
         }
     }

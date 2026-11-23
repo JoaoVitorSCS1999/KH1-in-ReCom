@@ -541,3 +541,32 @@ quando altera-se a skin de uma para outra, a animação e o efeito".
 - The same as 0.155.0: only plain Riku as the main player, in the field, in actions 1..4. A room
   rebuilt mid-way drops the transition, and the next room's player has the costume anyway.
 - **Checked**: tests, the Windows build. **Not checked**: in game.
+
+## 0.155.3: Dark Riku's entry flip and its effects; Riku's way-back effect
+
+Fork owner, 2026-11-22, verbatim: "funcionou!, mas a animação ficou incompleta, não deu tempo dele dar
+aquele mortal, também pode ter aquele efeito de tela junto, igual a transição do combate".
+
+- **Re:CoM's transformation is two clips** (Checked (exe: disasm + files)):
+  1. Riku's row 0x37 `p002_057`: the crouch, 32 frames at 30 fps. Its events: `ex_1580.dpx` 18
+     on bone 0, `transform.dpx` 0 on bone 25.
+  2. Then Dark Riku's switch-in (`0x1402047B8..0x14020485B`) plays **his** row 0x37 `p003_067`,
+     the flip, 38 frames at 30 fps. Its events: `ex_1580.dpx` 18 on bone 0, `transform.dpx` 1 on
+     bone 51.
+  - 0.155.2 played only the first.
+  - The way back: Riku's `"transform"` effect 2 on his bone 0x1B (`0x1402157CD..0x140215811`,
+    through `0x1401A2D50`, the effect `+0x4C |= 4`).
+- **Asset step** (`riku_skin::DARK_FLIP`): the skin's pack gets Dark Riku's own `p003_067` (his
+  skeleton is the skin's) as one more slot. Re:CoM's lookup by name falls back to a linear search
+  when the trailing digits' slot holds another clip (`0x1401A47E0`). The skin's `.EET` / `.SES`
+  get his records for it. **Re-run** (automatic: the step's hash changed).
+- **Game** (`win::riku_skin::transition`):
+  - **To Dark Mode**: Riku's crouch → the model changes → row 0x37 points at the flip's slot
+    (looked up by `0x1402A42B0`, as the rebind does) and plays with blend −1, as Dark Riku's
+    switch-in plays it → at its end, Re:CoM's rebind gives row 0x37 its own clip back → idle.
+  - **To Default Attire**: the crouch → the model changes → Riku's `"transform"` effect 2 on bone
+    0x1B → idle.
+- **Not carried**: the switch-in's camera mode 4 (`0x1401FBDE0`, the sleights' close camera) and the
+  Dark gauge's own switch. The effects on screen are the clips' events, as in battle.
+- **Checked**: tests (the flip and its events in both skin groups' files), the Windows build.
+  **Not checked**: in game.
