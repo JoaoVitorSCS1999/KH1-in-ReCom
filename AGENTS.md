@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 279 (fork branch Re-Re-Reverse/Rebirth): Dark Mode skin hides the Soul Eater where Riku does (the menu), version 0.154.4 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "ficou bom mas no menu não precisa ele segurar a espada na mão, além disso no menu ela ficou invertida, mas o modelo na gameplay ficou perfeito agora".
+
+- **Cause** (Checked (files)): Riku's 4 scaled clips hide the blade (`wep0`, `k1`..`k9` scale 0; 54 frames). The retarget dropped scale channels.
+- **Fix**: Riku's local scale is copied bone for bone (`riku_skin::retarget`, 9-channel clips where he has them).
+- **Checked**: test (Dark's `wep0` scale = Riku's on every frame), the Windows build. **Not checked**: in game. Asset step: **re-run** (automatic).
+
+---
+
 ## Stage 278 (fork branch Re-Re-Reverse/Rebirth): the Dark blade turned over to Riku's grip; the menu's model shows the costume, version 0.154.3 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "estranho, ainda etá invertida … ao entrar no Menu quero que a skin também seja alterada".
