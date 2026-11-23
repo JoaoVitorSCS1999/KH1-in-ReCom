@@ -18,7 +18,7 @@ Fork owner, 2026-11-23, verbatim: "funcionou perfeitamente,mas ficou duplicado o
 - **Cause**: the owner's log shows our `lockon_d` made once per appearance. The second ring is Re:CoM's own `CLockonMarker` layer, which it draws on its pick `+0x84C` without a lock too. KH1 shows only the orange ring then, and the lock cursor only with a lock (`0x140274B20`, Checked (decomp)).
 - **Change** (`win::kh1_hud::recom_marker`, called from `auto_ring` in the `0x140209D30` wrapper): at `hud = kh1` with Auto Lock on, Combat = KH1 (Sora or Riku) and no lock, Re:CoM's marker layer is set not drawn (`0x140247E50(ctrl, 0, 0)`, as H7 did). With an R1 lock, `auto_lock = off`, or the HUD off or Re:CoM's, it is shown again (`0x140247E50(ctrl, 0, 1)`; Assumption: 1 shows, as `win::keyblades` uses it).
 - **Version**: `crates/kh1-recom/Cargo.toml` (and `Cargo.lock`) are at 0.181.1. The log's first line and the Combat row's "mod v" read it. Since 0.180.0 only `VERSION` had moved, so the log said 0.179.1.
-- **Checked**: tests, the Windows build. **Not checked**: in game.
+- **Checked**: tests, the Windows build. **Checked (in game, fork owner, 2026-11-23)**: "ficou perfeita a implementação do anel amarelo e autolock".
 
 ---
 
@@ -48,7 +48,7 @@ Fork owner, 2026-11-23, verbatim: "para ambos o anel amarelo não faz lock no op
   - No line of sight test.
   - The facing is the mover's yaw (`+0x54`).
   - Assumption: KH1's delta is in 60 Hz frames (1.5 s).
-- **Checked**: tests (`kh1_soft_target_pick_and_hold`, `kh1_flag_4_commands`, `auto_target_aims_like_a_lock`), the Windows build. **Not checked**: in game.
+- **Checked**: tests (`kh1_soft_target_pick_and_hold`, `kh1_flag_4_commands`, `auto_target_aims_like_a_lock`), the Windows build. **Checked (in game, fork owner, 2026-11-23)**: "ficou perfeita a implementação do anel amarelo e autolock".
 
 ---
 
@@ -77,7 +77,7 @@ Fork owner, 2026-11-23, verbatim: "preciso que vc implemente o anel laranja/amar
   - The ring is on our soft target (`SOFT_REACH` 6 m, Assumption since 0.175.0). KH1's pick is 3 m across (less the point's radius) and ±3.5 m up, scored by facing and height, with a line-of-sight test (now Checked, the knowledge note). Not changed here: it is the swing's aim, another system.
   - The ring is drawn wherever Re:CoM's marker update runs. H7 read that it runs each battle frame; whether it runs locked or not, and in the field, is an Assumption. The ring is deleted with the player's HUD (the gauge's dtor, as H7's cursor).
   - KH1 hides the ring when the target is off screen. Here Re:CoM's projected control draws it (Assumption: as its own marker).
-- **Checked**: tests (new `auto_ring_from_the_players_file` on the owner's `UK_uibin_lock.bin` and `uitex.bin`; manifest parse), the Windows build. **Not checked**: in game.
+- **Checked**: tests (new `auto_ring_from_the_players_file` on the owner's `UK_uibin_lock.bin` and `uitex.bin`; manifest parse), the Windows build. **Checked (in game, fork owner, 2026-11-23)**: "ficou perfeita a implementação do anel amarelo e autolock".
 
 ---
 
