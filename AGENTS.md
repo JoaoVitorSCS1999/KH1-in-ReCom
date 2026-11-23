@@ -11,6 +11,58 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 325 (fork branch Re-Re-Reverse/Rebirth): one ring: Re:CoM's target marker hidden while KH1's Auto Lock runs unlocked; the crate's version, version 0.181.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "funcionou perfeitamente,mas ficou duplicado o anel". Answering what the two rings look like, they chose "Um laranja e outro diferente".
+
+- **Cause**: the owner's log shows our `lockon_d` made once per appearance. The second ring is Re:CoM's own `CLockonMarker` layer, which it draws on its pick `+0x84C` without a lock too. KH1 shows only the orange ring then, and the lock cursor only with a lock (`0x140274B20`, Checked (decomp)).
+- **Change** (`win::kh1_hud::recom_marker`, called from `auto_ring` in the `0x140209D30` wrapper): at `hud = kh1` with Auto Lock on, Combat = KH1 (Sora or Riku) and no lock, Re:CoM's marker layer is set not drawn (`0x140247E50(ctrl, 0, 0)`, as H7 did). With an R1 lock, `auto_lock = off`, or the HUD off or Re:CoM's, it is shown again (`0x140247E50(ctrl, 0, 1)`; Assumption: 1 shows, as `win::keyblades` uses it).
+- **Version**: `crates/kh1-recom/Cargo.toml` (and `Cargo.lock`) are at 0.181.1. The log's first line and the Combat row's "mod v" read it. Since 0.180.0 only `VERSION` had moved, so the log said 0.179.1.
+- **Checked**: tests, the Windows build. **Checked (in game, fork owner, 2026-11-23)**: "ficou perfeita a implementação do anel amarelo e autolock".
+
+---
+
+## Stage 324 (fork branch Re-Re-Reverse/Rebirth): KH1's Auto Lock: the yellow ring's enemy is the attacks' target, KH1's pick, its hold and its menu rule, version 0.181.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "para ambos o anel amarelo não faz lock no oponente ainda igual faz no KH1". Then "no kh tem o anel amarelo e o azul, o azul é quando tu aperta RB e ele locka no oponente, o amarelo ele aparece no oponente usando a regra do jogo, e se vc tiver com o auto lock ativo, os teus ataques sempre serão na direção daquele oponente independente de onde tu esteja olhando, se o anel amarelo estiver ativo ele se comporta assim". The plan was approved with the menu rule ("Tudo, com o menu").
+
+- **KH1** (Checked (decomp + exe + files); the workspace's `knowledge/KH1/kh1-lock-on.md`, researched with the new `searcher` agent):
+  - **The command target.** The command run `0x140293480` makes the lock pair the command target whenever the lock state is not 0. So the soft target (state 2) aims a swing as a lock does: the ground and air pickers (`0x1402A6EE0` / `0x1402A6C70`) replace the stick with the direction to it, and the lunge rows follow from the gap.
+  - **The pick** `0x1402B0A00`: 3 m flat less the lock radius, ±3.5 m, score `((1 − cos) × 0.25 + 1) × gap + |dy| × 0.2`, plus a line of sight test.
+  - **The auto lock.** A command with flag 4 turns state 2 into the auto lock (state 4, `0x1402B08A0(…, 4)`). Its enemy holds until 90 of frame delta after the last such command, L2 / R2, or 15 m / 10 m (`0x1402B11B0`, `0x1402B13F0`).
+  - **The menu rule.** A soft target is picked only while the highlighted command (`0x1402931B0` → `0x142D539E8`) has flag 4 (`btltbl.bin` `+0xA58`).
+- **Mod before**: `attack::command_attack` aimed only with Re:CoM's lock (`locked`), so with the ring alone Sora swung along the stick. The swing took Re:CoM's pick `+0x84C` while the ring took the soft target, which could be another enemy. The pick was the nearest within 6 m, with no hold and no menu rule.
+- **Change**:
+  - Pure code:
+    - `lock_on::soft::{pick, holds, Held}`: KH1's pick, without the line of sight test (Assumption: no Re:CoM twin), and the hold.
+    - `command_menu::cmd::{TARGETED, targets}`: flag 4 of commands 0..0x7F from the owner's file. The sleights count as having it (Assumption).
+    - `Menu::highlighted_targets`: the Items, Summon and Party lists' rows have no flag.
+    - `trace::PadView::auto_target`: it makes `FrameInput::locked`.
+  - DLL:
+    - `win::attack::{take_target, target_of, part_of}`: Re:CoM's lock, else the soft target, else Re:CoM's pick (the picker's part only).
+    - `win::lock_on::{soft_target, hold, hold_tick, locked, facing}`: the hold, ticked in the lock-on wrapper with `+0x460`. It ends at 90 frames or on an L2 / R2 press (Assumption: a press), and R1's lock replaces it.
+    - `win::command_menu::highlighted_targets`.
+    - `win::movement::read_pad` and the magic / special commands take their target through `take_target`.
+  - The ring uses the same `soft_target`, so the ring and the swing are on one enemy.
+- **Not 1:1**:
+  - No line of sight test.
+  - The facing is the mover's yaw (`+0x54`).
+  - Assumption: KH1's delta is in 60 Hz frames (1.5 s).
+- **Checked**: tests (`kh1_soft_target_pick_and_hold`, `kh1_flag_4_commands`, `auto_target_aims_like_a_lock`), the Windows build. **Checked (in game, fork owner, 2026-11-23)**: "ficou perfeita a implementação do anel amarelo e autolock".
+
+---
+
+## Stage 323 (fork branch Re-Re-Reverse/Rebirth): Riku lowers his guard as the defence ends, version 0.180.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "no Riku a janela de defesa não está com a mesma duração da animação"; then "a defesa acaba antes dele baixar a guada". Answering "(a) the animation follows the defence; (b) the defence follows the animation", they chose (a).
+
+- **Measured** (Checked (files), new `riku_guard_motion_profile` on the owner's install): in the built clip (54 frames), the defence is KH1's Guard window 10..36 (as Sora's), and the weapon hand is held forward through frame 38. It started down only at 39–40 and was lowered by 46, because the way out played 240's tail backwards, and 240 (into the guard) has its arm up for its last frames.
+- **Change** (asset step, `riku_skin::riku_kh1_guard`, `settled_from`, `GUARD_ARM`): the way out starts from the 240 frame where the weapon arm (`r_collar`, `r_uparm`, `r_foarm`, `rx_rot`, `r_hand`) reaches the guard (within 5 % of its change). The hand now comes down from frame 37 (0.36 → 0.33 → 0.31 m forward) and is down about 2 frames earlier. The defence window is unchanged.
+- **Asset step**: re-run (automatic; its source changed).
+- **Checked**: tests (the profile test asserts the hand is lower by frame 38 and ends lowered), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 322 (fork branch Re-Re-Reverse/Rebirth): KH1's orange auto-target ring on the soft target, version 0.180.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "preciso que vc implemente o anel laranja/amarelo igual funciona no KH 1 inclusive já tem nas configs dentro do jogo das ultimas implementações sobre o auto-lock"; answering "(1) HUD: com qualquer HUD ou só com `hud = kh1`? (2) aprova o plano (projeto Ghidra do KH1)?", verbatim: "1 só com o modo do kh1 ligado, 2 sim".
@@ -25,7 +77,7 @@ Fork owner, 2026-11-23, verbatim: "preciso que vc implemente o anel laranja/amar
   - The ring is on our soft target (`SOFT_REACH` 6 m, Assumption since 0.175.0). KH1's pick is 3 m across (less the point's radius) and ±3.5 m up, scored by facing and height, with a line-of-sight test (now Checked, the knowledge note). Not changed here: it is the swing's aim, another system.
   - The ring is drawn wherever Re:CoM's marker update runs. H7 read that it runs each battle frame; whether it runs locked or not, and in the field, is an Assumption. The ring is deleted with the player's HUD (the gauge's dtor, as H7's cursor).
   - KH1 hides the ring when the target is off screen. Here Re:CoM's projected control draws it (Assumption: as its own marker).
-- **Checked**: tests (new `auto_ring_from_the_players_file` on the owner's `UK_uibin_lock.bin` and `uitex.bin`; manifest parse), the Windows build. **Not checked**: in game.
+- **Checked**: tests (new `auto_ring_from_the_players_file` on the owner's `UK_uibin_lock.bin` and `uitex.bin`; manifest parse), the Windows build. **Checked (in game, fork owner, 2026-11-23)**: "ficou perfeita a implementação do anel amarelo e autolock".
 
 ---
 

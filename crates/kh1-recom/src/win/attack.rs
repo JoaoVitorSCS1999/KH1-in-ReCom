@@ -278,14 +278,45 @@ static TICK_LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 /// which KH1's picker subtracts (`0x1402A7320`); 0 for enemies without a twin. Assumption: Re:CoM's
 /// aim point stands for KH1's lock point.
 pub(super) unsafe fn attack_target(pl: usize) -> Option<TargetPart> {
+    target_of(pl).0
+}
+
+/// 0.181.0: a command takes its target (KH1's `0x140293480`: the lock pair becomes the command
+/// target whenever the lock state is not 0, and a command with flag 4 turns a soft target into an
+/// auto lock, `0x1402B08A0(…, 4)`; Checked (decomp)). `cmd`: the KH1 command. The second value:
+/// the target is KH1's Auto Lock target (the swing aims and closes on it as on a lock).
+pub(super) unsafe fn take_target(pl: usize, cmd: u8) -> (Option<TargetPart>, bool) {
+    let (t, auto) = target_of(pl);
+    if auto && crate::command_menu::cmd::targets(cmd) {
+        if let Some(t) = t {
+            super::lock_on::hold(t.owner);
+        }
+    }
+    (t, auto)
+}
+
+/// The target and whether it is the Auto Lock's: Re:CoM's lock (`+0x84C` with its cursor locked);
+/// else KH1's soft target (held or picked, `super::lock_on::soft_target`); else Re:CoM's pick
+/// (`+0x84C`, the picker's part only, not aimed at).
+unsafe fn target_of(pl: usize) -> (Option<TargetPart>, bool) {
     let mut h: i32 = rd(pl + p::LOCK_TARGET);
-    // 0.175.0: no lock: KH1's Auto Lock soft target (`super::lock_on::soft_target`).
-    if h <= 0 {
-        h = super::lock_on::soft_target(pl).map_or(0, |s| s as i32);
+    let mut auto = false;
+    // 0.175.0: no lock: KH1's Auto Lock soft target. 0.181.0: it comes before Re:CoM's pick, so the
+    // swing, the spell and the ring use one enemy.
+    if !super::lock_on::locked(pl) {
+        if let Some(s) = super::lock_on::soft_target(pl) {
+            h = s as i32;
+            auto = true;
+        }
     }
     if h <= 0 {
-        return None;
+        return (None, false);
     }
+    (part_of(h), auto)
+}
+
+/// Handle `h` as a KH1 body part.
+unsafe fn part_of(h: i32) -> Option<TargetPart> {
     let obj = func::<mv::HandleFn>(mv::HANDLE_OBJ)(h as u32);
     if obj == 0 {
         return None;

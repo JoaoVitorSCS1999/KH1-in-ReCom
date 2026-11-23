@@ -1129,6 +1129,12 @@ pub fn spell_view() -> ([u8; 7], [u8; 3]) {
 
 /// A KH1 word of the menu's language (`kh1-command-menu.json`, Re:CoM font bytes, NUL-terminated)
 /// by message id, when the command menu's words are loaded.
+/// 0.181.0: the highlighted command has KH1's flag 4 (`Menu::highlighted_targets`), so KH1 would
+/// pick a soft target. No menu, or the menu busy this instant: KH1's default entry 0x43 (flag 4).
+pub fn highlighted_targets() -> bool {
+    STATE.try_lock().ok().and_then(|s| s.menu.as_ref().map(|m| m.highlighted_targets())).unwrap_or(true)
+}
+
 pub fn word(id: u16) -> Option<Vec<u8>> {
     WORDS.get().and_then(|w| w.get(id)).map(|b| b.to_vec())
 }

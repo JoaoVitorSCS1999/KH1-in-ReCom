@@ -408,8 +408,14 @@ pub fn riku_kh1_guard(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<
     // nn tem como colocar a mesma animação mas ao contrário?"): the way out is the way in played
     // backwards, faster, to fill the clip: it ends on 240's first frame (his stance before the
     // guard), so the next motion starts from there instead of the held guard.
+    // 0.180.1 (fork owner: "a defesa acaba antes dele baixar a guarda"; answer: the animation follows
+    // the defence): 240 settles into the guard well before its last frame, so its tail played
+    // backwards still showed the guard up for 3 frames past the live window (10..36) and the
+    // weapon hand only came down by frame 46. The way out now starts at the frame where 240
+    // reaches the guard ([`settled_from`]), so the guard comes down as the defence ends.
     let out = RIKU_GUARD_FRAMES.saturating_sub(rows.len()).max(1);
-    let last = into.len().saturating_sub(1);
+    let arm: Vec<usize> = GUARD_ARM.iter().filter_map(|b| riku.find(b)).collect();
+    let last = settled_from(&into, &arm);
     for k in 0..out {
         let src = last - ((k + 1) * last + out / 2) / out;
         rows.push(into[src].clone());
@@ -417,6 +423,33 @@ pub fn riku_kh1_guard(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<
     let spec = crate::convert::ClipSpec { name: RIKU_GUARD.into(), looped: false, root_motion: false, blend: 8 };
     Ok(crate::convert::encode_clip(&spec, &rows))
 }
+
+/// The bones that raise the guard: the weapon arm (Riku's skeleton names; Checked (files)).
+const GUARD_ARM: [&str; 5] = ["r_collar", "r_uparm", "r_foarm", "rx_rot", "r_hand"];
+
+/// The first frame of a motion's rows from which `bones` no longer move much: within [`SETTLED`] of
+/// the whole motion's change of those bones (the summed absolute difference of their local values
+/// from the last frame; all bones when `bones` is empty). For 240 (into the guard) and the weapon
+/// arm, the frame the guard is up.
+fn settled_from(rows: &[Vec<[f64; 9]>], bones: &[usize]) -> usize {
+    let last = rows.len().saturating_sub(1);
+    let pick = |f: usize| -> Vec<(&[f64; 9], &[f64; 9])> {
+        if bones.is_empty() {
+            rows[f].iter().zip(&rows[last]).collect()
+        } else {
+            bones.iter().filter_map(|&b| Some((rows[f].get(b)?, rows[last].get(b)?))).collect()
+        }
+    };
+    let dist = |f: usize| -> f64 { pick(f).iter().map(|(a, b)| a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum::<f64>()).sum() };
+    let total = dist(0);
+    if total <= 0.0 {
+        return last;
+    }
+    (0..=last).find(|&f| dist(f) <= SETTLED * total).unwrap_or(last).max(1)
+}
+
+/// The share of 240's change still left where it counts as settled into the guard.
+const SETTLED: f64 = 0.05;
 
 /// KH1 Riku's guard recoil (request 110, entry 13, 56 frames; 0.158.2), named `p002_226`.
 pub const RIKU_RECOIL: &str = "p002_226";
@@ -773,6 +806,53 @@ mod tests {
 
     fn game() -> Option<std::path::PathBuf> {
         std::env::var_os("RECOM_GAME").map(Into::into)
+    }
+
+    /// With the owner's install (`RECOM_GAME`): Riku's guard clip lowers the guard as the defence
+    /// ends (0.180.1); prints the pose's distance from the held guard and the hands per frame.
+    #[test]
+    fn riku_guard_motion_profile() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let k1 = install::kh1(&g, keys.clone()).unwrap();
+        let (mset, mdls) = (k1.read("xa_ex_1010.mset").unwrap(), k1.read("xa_ex_1010.mdls").unwrap());
+        let arc = install::recom_archive(&g).unwrap();
+        let riku = RecomSkeleton::parse(&install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap()).unwrap();
+        let c = riku_kh1_guard(&mset, &mdls, &riku).unwrap();
+        let n = c.frames as usize;
+        let pose = |f: usize| -> Vec<[f64; 3]> { (0..riku.bones.len()).map(|b| c.sample(b, f as f64).r).collect() };
+        let base = pose(RIKU_GUARD_UP + 5);
+        let line: Vec<String> = (0..n).map(|f| {
+            let p = pose(f);
+            let d: f64 = p.iter().zip(&base).map(|(a, b)| (0..3).map(|i| (a[i] - b[i]).abs()).sum::<f64>()).sum::<f64>().to_degrees();
+            format!("{f}:{d:.0}")
+        }).collect();
+        eprintln!("guard clip ({n} frames), distance from the held pose: {}", line.join(" "));
+        // The weapon hand's height and the blade tip's, in metres, per frame (world, from the clip).
+        let world = |f: usize, bone: &str| -> [f64; 3] {
+            let k = riku.find(bone).unwrap();
+            let mut chain = vec![k];
+            while riku.bones[*chain.last().unwrap()].parent >= 0 {
+                chain.push(riku.bones[*chain.last().unwrap()].parent as usize);
+            }
+            let mut u = crate::math::I3;
+            let mut p = [0.0; 3];
+            for &b in chain.iter().rev() {
+                let s = c.sample(b, f as f64);
+                let w = crate::math::vm(s.t, &u);
+                p = [p[0] + w[0], p[1] + w[1], p[2] + w[2]];
+                u = m3(&rot_xyz(s.r[0], s.r[1], s.r[2]), &u);
+            }
+            p
+        };
+        for bone in ["r_hand", "l_hand"] {
+            let ys: Vec<String> = (0..n).map(|f| { let p = world(f, bone); format!("{f}:{:.2}/{:.2}", p[1], p[2]) }).collect();
+            eprintln!("{bone} y/z: {}", ys.join(" "));
+        }
+        // 0.180.1: the weapon hand (held forward, z) starts down right after the live window (10..36).
+        let z = |f: usize| world(f, "r_hand")[2];
+        assert!(z(38) < z(36) - 0.04, "the guard comes down at once: z {:.2} at 36, {:.2} at 38", z(36), z(38));
+        assert!(z(n - 1) < z(36) - 0.3, "and ends lowered");
     }
 
     /// With the owner's install (`RECOM_GAME`): Riku's idle on the Dark skeleton keeps its feet

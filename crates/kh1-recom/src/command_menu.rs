@@ -163,6 +163,23 @@ pub mod cmd {
         }
     }
 
+    /// 0.181.0: KH1's command table flag 4 (byte `+0`, `btltbl.bin` `+0xA58`, the owner's file,
+    /// SHA-256 `b70db229…`; Checked (files)) for commands 0..0x7F: the commands with a target.
+    /// While the highlighted command has it, KH1 picks the soft target (`0x1402B11B0`; Checked
+    /// (decomp)). Set: Attack, Magic, Items, Fire / Blizzard / Gravity, the specials, Counterattack,
+    /// the default 0x43; not: Talk, Examine, Summon, Thunder, Cure, Stop, Aero, Lift, Open, Save.
+    pub const TARGETED: [u64; 2] = [0x0000_0000_4038_1F8F, 0x0000_000D_CF86_6888];
+
+    /// The command has KH1's flag 4 ([`TARGETED`]). Ours past 0x7F: the sleights (Assumption: as
+    /// the specials, they attack a target); the Party row and the gimmick card's, no.
+    pub fn targets(c: u8) -> bool {
+        if c < 0x80 {
+            TARGETED[(c >> 6) as usize] >> (c & 63) & 1 != 0
+        } else {
+            crate::sleights::of_command(c).is_some_and(|id| crate::party::index(id).is_none())
+        }
+    }
+
     /// The list a command opens (record `+8`): Magic 1, Items 2, Summon 3 (Cure / Aero open the
     /// party list 4: with the casts, stage 7.4 / 7.7); ours: the Sleights list 4 (row 3), the
     /// Party list 5 (0.111.0).
@@ -969,6 +986,23 @@ impl Menu {
         }
         for l in [&mut self.root, &mut self.magic, &mut self.items, &mut self.summon, &mut self.sleight, &mut self.party] {
             l.bright.resize(l.cmds.len(), BRIGHT_GREY);
+        }
+    }
+
+    /// 0.181.0: the highlighted command has KH1's flag 4 ([`cmd::targets`]), as `0x1402931B0`
+    /// writes the highlighted slot's entry to `0x142D539E8` (Checked (decomp)): the root's row, or
+    /// the open list's. The Items, Summon and Party lists' rows are items, summons and friends (no
+    /// flag); the Sleights list's are attacks (Assumption). The shortcut list and no cursor: KH1's
+    /// default entry 0x43 (flag 4).
+    pub fn highlighted_targets(&self) -> bool {
+        if self.short_on {
+            return true;
+        }
+        let l = if self.open { self.sub_list() } else { &self.root };
+        match l.kind {
+            Kind::Items | Kind::Summon | Kind::Party => false,
+            Kind::Sleight => true,
+            _ => usize::try_from(l.cursor).ok().and_then(|i| l.cmds.get(i)).is_none_or(|&c| cmd::targets(c)),
         }
     }
 
@@ -2021,6 +2055,18 @@ pub fn parse_words(text: &str, lang: &str) -> Result<Words, String> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn kh1_flag_4_commands() {
+        use cmd::*;
+        for c in [ATTACK, MAGIC, ITEMS, spell(0, 1), spell(1, 3), spell(4, 2), COUNTER, 0x43, crate::specials::cmd::SONIC_BLADE, crate::specials::cmd::STRIKE_RAID] {
+            assert!(targets(c), "{c:#x}");
+        }
+        for c in [TALK, EXAMINE, SUMMON, spell(2, 1), spell(3, 1), spell(5, 1), spell(6, 1), LIFT, OPEN, SAVE, BLANK, PARTY] {
+            assert!(!targets(c), "{c:#x}");
+        }
+    }
+
     use super::*;
 
     fn world() -> World {
