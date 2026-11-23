@@ -19,6 +19,19 @@ use crate::keyblade_models::{kind, resource_path, PlannedRow, RowName, END};
 
 /// Re:CoM's char → group table and the entries of chars 3 and 4. Checked (exe).
 pub const GROUP_TABLE: u64 = 0x1_405A_6910;
+/// Re:CoM's char → motion pack name table (`0x1407C6338[char]`: "PL0001" … "PL0211"): the player's
+/// action rows' clips are looked up in the `.ANN` of that resource name (`0x1401FA7F6`,
+/// `0x1401F425C` → `0x1402A42B0`). Only these two readers and one pointer per name (Checked
+/// (exe)). 0.154.0 changed the group but not this name: no clip was found (the owner's T-pose).
+pub const ANN_NAME_TABLE: u64 = 0x1_407C_6338;
+/// Riku's two names ("PL0101", "PL0111") the table points at. Checked (exe).
+pub const RIKU_ANN_NAMES: [u64; 2] = [0x1_405A_145C, 0x1_405A_1464];
+
+/// The motion pack name of a group (`PL0121`).
+pub fn ann_name(group: u16) -> String {
+    format!("PL{group:04}")
+}
+
 /// Riku's two groups (chars 3, 4), as the table holds them.
 pub const RIKU_GROUPS: [u16; 2] = [101, 111];
 
@@ -129,6 +142,7 @@ mod tests {
         assert!(add_rows(out, &skins).is_err(), "twice");
         assert_eq!(entries(&skins, true), [121, 111]);
         assert_eq!(entries(&skins, false), [101, 111]);
+        assert_eq!(ann_name(121), "PL0121");
         assert!(files(121).contains(&"raw/PLAYER/0121/PL0121.RTM".to_string()));
         assert!(parse(r#"{"format": 1, "skins": [{"riku": 3, "skin": 121}]}"#).is_err());
     }

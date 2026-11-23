@@ -226,6 +226,7 @@ pub fn install(b: usize) {
         let _ = MODELS.set(m);
         INSTALLED.store(true, Ordering::Release);
         if skin_rows {
+            super::riku_skin::rows_in();
             super::riku_skin::apply(b, super::settings().riku_dark_skin);
         }
         log(&format!(
