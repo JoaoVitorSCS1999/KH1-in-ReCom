@@ -92,7 +92,7 @@ pub enum Item {
     AutoLock,
     /// `target_lock` (fork, 0.173.0: KH1 FM's Target Lock, Auto / Manual)
     TargetLock,
-    /// `riku_costume` (fork): Default Attire / Dark Mode / Ansem (0.176.0).
+    /// `riku_dark_skin` (fork): Default Attire / Dark Mode.
     Costume,
     /// `riku_keyblade` (fork, 0.160.0): Soul Eater / Keyblade of Heart.
     Blade,
@@ -158,10 +158,9 @@ const AUTO_MANUAL: &[&[u8]] = &[b"Auto\0", b"Manual\0"];
 const OFF_ON: &[&[u8]] = &[b"Off\0", b"On\0"];
 const ROLL: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"Off\0"];
 const CAMERAS: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"KH2\0"];
-const COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Dark Mode\0", b"Ansem\0"];
+const COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Dark Mode\0"];
 /// The help line when Dark Mode is asked for before Riku has reached it (0.156.0).
 pub const COSTUME_LOCKED: &[u8] = b"Riku must reach Dark Mode once to wear this attire.\0";
-pub const ANSEM_LOCKED: &[u8] = b"Riku must defeat Ansem to wear this attire.\0";
 const BLADES: &[&[u8]] = &[b"Soul Eater\0", b"Keyblade of Heart\0"];
 const SORA_COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Halloween Town\0"];
 pub const SORA_COSTUME_LOCKED: &[u8] = b"Sora must reach Halloween Town once to wear this attire.\0";
@@ -249,7 +248,7 @@ impl Item {
             Item::AutoCamera => b"On: the KH1 / KH2 camera swings behind Sora as he runs.\0",
             Item::AutoLock => b"On: swings aim at the nearest enemy without a lock. KH1 only.\0",
             Item::TargetLock => b"Manual: the lock lasts while R1 is held. KH1 only.\0",
-            Item::Costume => b"Dark Mode: his first Dark Mode. Ansem: beating Ansem.\0",
+            Item::Costume => b"Dark Mode: Dark Riku's look. Unlocked by Riku's first Dark Mode.\0",
             Item::Blade => b"Keyblade of Heart: Riku-Ansem's. Unlocked by Riku's first Dark Mode.\0",
             Item::SoraCostume => b"Halloween Town: Sora's costume there. Unlocked by visiting it.\0",
         }
@@ -282,7 +281,7 @@ impl Item {
             Item::AutoCamera => "auto_camera",
             Item::AutoLock => "auto_lock",
             Item::TargetLock => "target_lock",
-            Item::Costume => "riku_costume",
+            Item::Costume => "riku_dark_skin",
             Item::Blade => "riku_keyblade",
             Item::SoraCostume => "sora_costume",
         }
@@ -314,7 +313,7 @@ impl Item {
             Item::AutoCamera => s.auto_camera as usize,
             Item::AutoLock => s.auto_lock as usize,
             Item::TargetLock => s.target_lock_manual as usize,
-            Item::Costume => s.riku_costume as usize,
+            Item::Costume => s.riku_dark_skin as usize,
             Item::Blade => s.riku_heart_blade as usize,
             Item::SoraCostume => s.sora_halloween as usize,
         }
@@ -352,7 +351,7 @@ impl Item {
             Item::AutoCamera => s.auto_camera = v == 1,
             Item::AutoLock => s.auto_lock = v == 1,
             Item::TargetLock => s.target_lock_manual = v == 1,
-            Item::Costume => s.riku_costume = v.min(2) as u8,
+            Item::Costume => s.riku_dark_skin = v == 1,
             Item::Blade => s.riku_heart_blade = v == 1,
             Item::SoraCostume => s.sora_halloween = v == 1,
         }

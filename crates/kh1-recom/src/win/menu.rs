@@ -188,26 +188,11 @@ impl SettingsPage {
                     Step::Move(c) => self.cursor = c,
                     Step::Change(right) => {
                         let it = items[self.cursor.min(items.len() - 1)];
-                        let mut v = menu::cycle(it.value(&super::settings()), it.options().len(), right);
-                        // 0.176.0: Riku's costumes skip a locked one (Dark Mode locked, Ansem not).
-                        if it == menu::Item::Costume {
-                            for _ in 0..it.options().len() {
-                                let locked = match v {
-                                    1 => !super::riku_skin::unlocked(),
-                                    2 => !super::riku_skin::ansem_unlocked(),
-                                    _ => false,
-                                };
-                                if !locked {
-                                    break;
-                                }
-                                v = menu::cycle(v, it.options().len(), right);
-                            }
-                        }
+                        let v = menu::cycle(it.value(&super::settings()), it.options().len(), right);
                         // 0.156.0: the Dark Mode costume only once Riku has reached Dark Mode.
                         // 0.160.0 / 0.167.0: the Keyblade of Heart only once Riku has reached Dark Mode.
                         let locked = match it {
-                            menu::Item::Costume if v == 1 => (!super::riku_skin::unlocked()).then_some(crate::menu::COSTUME_LOCKED),
-                            menu::Item::Costume if v == 2 => (!super::riku_skin::ansem_unlocked()).then_some(crate::menu::ANSEM_LOCKED),
+                            menu::Item::Costume => (v == 1 && !super::riku_skin::unlocked()).then_some(crate::menu::COSTUME_LOCKED),
                             menu::Item::Blade => (v == 1 && !super::riku_skin::blade_unlocked()).then_some(crate::menu::BLADE_LOCKED),
                             menu::Item::SoraCostume => (v == 1 && !super::sora_costume::unlocked()).then_some(crate::menu::SORA_COSTUME_LOCKED),
                             _ => None,

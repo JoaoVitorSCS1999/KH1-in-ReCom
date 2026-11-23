@@ -32,7 +32,7 @@ pub const SKIN_GROUPS: [(u16, u16, u16); 2] = [(101, 201, 121), (111, 211, 131)]
 /// Dark bone name → Riku bone name, where they differ.
 fn alias(dark: &str) -> &str {
     match dark {
-        "ex_1580_sk" | "b_ex110_sk" => "ex_1010_sk",
+        "ex_1580_sk" => "ex_1010_sk",
         "wep1" => "k10",
         "wep2" => "k11",
         x => x,
@@ -54,7 +54,7 @@ pub fn event_map(riku: &RecomSkeleton, dark: &RecomSkeleton) -> Vec<usize> {
             "k11" => "wep2",
             x => x,
         };
-        dark.find(n).or_else(|| dark.find(&b.name))
+        dark.find(n)
     }).collect();
     (0..riku.bones.len())
         .map(|mut i| loop {
@@ -74,89 +74,6 @@ fn world_rot(skel: &RecomSkeleton) -> Vec<M3> {
     skel.rest_world().iter().map(|w| unscale(&w.r).0).collect()
 }
 
-/// The limbs whose rest direction is compared (bone, the bone its direction points to). A hand
-/// takes its forearm's correction, `wep0` its hand's.
-const LIMBS: [(&str, &str); 15] = [
-    ("l_collar", "l_uparm"),
-    ("l_uparm", "l_foarm"),
-    ("l_foarm", "l_hand"),
-    ("r_collar", "r_uparm"),
-    ("r_uparm", "r_foarm"),
-    ("r_foarm", "r_hand"),
-    ("l_femur", "l_tibia"),
-    ("l_tibia", "l_foot"),
-    ("l_foot", "l_toes"),
-    ("r_femur", "r_tibia"),
-    ("r_tibia", "r_foot"),
-    ("r_foot", "r_toes"),
-    ("l_hand", "l_foarm"),
-    ("r_hand", "r_foarm"),
-    ("wep0", "r_hand"),
-];
-
-/// The target's rest rotations turned, limb by limb, so each limb points where Riku's does at rest
-/// (0.176.2): Riku stands in a T-pose, Ansem in an A-pose (arms about 50° down; Checked (files)),
-/// and the retarget carries each bone's turn from rest, so a target limb off Riku's rest pose stays
-/// that far off in every clip (the owner's screenshots: arms out, hands at the waist). The
-/// smallest rotation from the target's limb direction to Riku's, applied in world space; under 3°
-/// nothing changes (Dark Riku's skeleton is Riku's own pose).
-fn rest_like(riku: &RecomSkeleton, dark: &RecomSkeleton, mut rb: Vec<M3>) -> Vec<M3> {
-    let (wa, wb) = (riku.rest_world(), dark.rest_world());
-    let dir = |w: &[crate::math::Aff], sk: &RecomSkeleton, a: &str, b: &str| -> Option<[f64; 3]> {
-        let (i, j) = (sk.find(a)?, sk.find(b)?);
-        let d = [w[j].t[0] - w[i].t[0], w[j].t[1] - w[i].t[1], w[j].t[2] - w[i].t[2]];
-        let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-        (n > 1e-4).then(|| [d[0] / n, d[1] / n, d[2] / n])
-    };
-    let mut turned: Vec<(String, M3)> = Vec::new();
-    for (bone, to) in LIMBS {
-        let Some(j) = dark.find(bone) else { continue };
-        let a = if bone.ends_with("_hand") || bone == "wep0" {
-            match turned.iter().find(|t| t.0 == to) {
-                Some(t) => t.1,
-                None => continue,
-            }
-        } else {
-            let (Some(x), Some(y)) = (dir(&wb, dark, bone, to), dir(&wa, riku, bone, to)) else { continue };
-            align(x, y)
-        };
-        if crate::math::angle_deg(&a) < 3.0 {
-            continue;
-        }
-        turned.push((bone.to_string(), a));
-    }
-    // A skeleton in Riku's own pose (Dark Riku: his limbs within a few degrees) is left as it is,
-    // so the Dark Mode skin's clips stay byte for byte as before; only a different rest pose (an
-    // arm 20° or more off) is turned.
-    let worst = turned.iter().map(|t| crate::math::angle_deg(&t.1)).fold(0.0, f64::max);
-    if worst < 20.0 {
-        return rb;
-    }
-    for (bone, a) in &turned {
-        if let Some(j) = dark.find(bone) {
-            rb[j] = m3(&rb[j], a);
-        }
-    }
-    rb
-}
-
-/// The smallest rotation taking unit `x` to unit `y`, for row vectors (`x · A = y`).
-fn align(x: [f64; 3], y: [f64; 3]) -> M3 {
-    let c = x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
-    let v = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
-    if c < -0.9999 {
-        return crate::math::I3;
-    }
-    let k = 1.0 / (1.0 + c);
-    // Column form R = I + [v]x + [v]x² / (1 + c); row form is its transpose.
-    let r = [
-        [c + v[0] * v[0] * k, v[0] * v[1] * k - v[2], v[0] * v[2] * k + v[1]],
-        [v[1] * v[0] * k + v[2], c + v[1] * v[1] * k, v[1] * v[2] * k - v[0]],
-        [v[2] * v[0] * k - v[1], v[2] * v[1] * k + v[0], c + v[2] * v[2] * k],
-    ];
-    tr(&r)
-}
-
 /// Retargets one of Riku's clips onto Dark Riku's skeleton. Frame count, fps, loop and blend are
 /// the clip's own.
 pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[Option<usize>]) -> Result<Clip> {
@@ -172,7 +89,7 @@ pub fn retarget_with(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map
         return bad(format!("{}: {} bones, Riku's skeleton has {na}", src.name_str(), src.bones));
     }
     let ra = world_rot(riku);
-    let rb = rest_like(riku, dark, world_rot(dark));
+    let rb = world_rot(dark);
     let nb = dark.bones.len();
     let grip = Grip::new(riku, dark);
     let mut rows: Vec<Vec<[f64; 9]>> = Vec::with_capacity(src.frames as usize);
@@ -557,15 +474,8 @@ pub const MANIFEST: &str = "kh1-riku-skin.json";
 /// `ex_1010_sk`, `wep0`, `chest1`, `head`, `l_toes`, `r_toes`, from the strings at
 /// `0x1407C5E10..0x1407C5E50`; Checked (exe)) find it. Same length; every part's name table.
 pub fn rename_root(mdl: &[u8]) -> Result<Vec<u8>> {
-    rename_bone(mdl, b"ex_1580_sk\0")
-}
-
-/// `mdl` with its bone named `from` (as long as Riku's `ex_1010_sk`) renamed `ex_1010_sk`.
-fn rename_bone(mdl: &[u8], from: &[u8]) -> Result<Vec<u8>> {
+    let from = b"ex_1580_sk\0";
     let to = b"ex_1010_sk\0";
-    if from.len() != to.len() {
-        return bad("rename_bone: names of different lengths");
-    }
     let mut out = mdl.to_vec();
     let mut n = 0;
     let mut i = 0;
@@ -579,176 +489,9 @@ fn rename_bone(mdl: &[u8], from: &[u8]) -> Result<Vec<u8>> {
         }
     }
     if n == 0 {
-        return bad(format!("the model has no {} bone", String::from_utf8_lossy(&from[..from.len() - 1])));
+        return bad("Dark Riku's model has no ex_1580_sk bone");
     }
     Ok(out)
-}
-
-// ---------------------------------------------------------------------------------------------
-// The Ansem costume (fork 0.176.0; fork owner, 2026-11-23: "implementa a skin do Ansem para o
-// Riku").
-//
-// - Re:CoM (Checked (files + the owner's screenshot, 0.176.1)): Ansem, Seeker of Darkness is
-//   `ENEMY/0122/EN0122` (textures `ex_1630_0x`, KH1's `xa_ex_1630`, voices `an00`; skeleton `e122_sk`,
-//   157 bones). 0.176.0 took `EN0118` (`b_ex110`), which is Axel. His model reads whole (parts 0
-//   textured, 1 untextured). His legs are `lf_*` / `rf_*`, his chest `chest2` (no `chest1`), his
-//   neck `neck`: renamed to Riku's (`ANSEM_RENAMES`), as Riku's code looks bones up by name
-//   (`chest1`, `l_toes`, `r_toes`, `head`) and the retarget maps by name. He holds no weapon: no
-//   `wep0`.
-// - The skin: his model with a `wep0` added under his `r_hand` at Riku's rest `wep0` relative to
-//   Riku's `r_hand`, and Riku's own weapon parts (the Soul Eater on `wep0`, PL0101's parts 0 / 1)
-//   moved onto it; bone 1 renamed `ex_1010_sk` (Riku's code looks his bones up by name); Riku's
-//   clips retargeted by name ([`retarget_ann`]: the body; the robe and hair at rest; `wep0` by its
-//   world rotation, its offset in the hand Riku's); his events remapped; his RTM with Riku's weapon
-//   texture added. Assumption: the hands' rest frames are close enough for the blade's angle.
-
-/// Ansem's model (`ENEMY/0122`).
-pub const ANSEM_ENEMY: u16 = 122;
-/// Ansem's bones renamed to Riku's (the same roles).
-pub const ANSEM_RENAMES: [(&str, &str); 12] = [
-    ("e122_sk", "ex_1010_sk"),
-    ("lf_femur", "l_femur"),
-    ("lf_tibia", "l_tibia"),
-    ("lf_foot", "l_foot"),
-    ("lf_toes", "l_toes"),
-    ("rf_femur", "r_femur"),
-    ("rf_tibia", "r_tibia"),
-    ("rf_foot", "r_foot"),
-    ("rf_toes", "r_toes"),
-    ("chest2", "chest1"),
-    ("neck", "neck1"),
-    ("waist", "waist"),
-];
-/// (Riku's group, the Ansem group with the Soul Eater, the Ansem group with the Keyblade of Heart).
-pub const ANSEM_GROUPS: [(u16, u16, u16); 2] = [(101, 181, 221), (111, 191, 231)];
-
-fn enemy_path(n: u16, ext: &str) -> String {
-    format!("ENEMY/{n:04}/EN{n:04}.{ext}")
-}
-
-/// Ansem's model with Riku's weapon on a `wep0` of its own, parts ordered as Riku's (weapon
-/// untextured, weapon textured, body untextured, body textured).
-pub fn ansem_mdl(riku_mdl: &[u8], ansem: &[u8]) -> Result<Vec<u8>> {
-    use crate::mdl::{join_parts, split_parts, MdlBone, MdlPart, FMT_PLAIN};
-    let rs = RecomSkeleton::parse(riku_mdl)?;
-    let (rh, rw) = (rs.find("r_hand").ok_or_else(|| crate::Error::Format("Riku: no r_hand".into()))?, rs.find("wep0").ok_or_else(|| crate::Error::Format("Riku: no wep0".into()))?);
-    let wr = rs.rest_world();
-    let (rot_h, _) = unscale(&wr[rh].r);
-    let rel_r = m3(&wr[rw].r, &tr(&rot_h));
-    let rel_t = crate::math::vm([wr[rw].t[0] - wr[rh].t[0], wr[rw].t[1] - wr[rh].t[1], wr[rw].t[2] - wr[rh].t[2]], &tr(&rot_h));
-    let mut rest = [0u32; 16];
-    for r in 0..3 {
-        for c in 0..3 {
-            rest[r * 4 + c] = (rel_r[r][c] as f32).to_bits();
-        }
-    }
-    for c in 0..3 {
-        rest[12 + c] = (rel_t[c] as f32).to_bits();
-    }
-    rest[15] = 1f32.to_bits();
-    let rparts = split_parts(riku_mdl)?;
-    let aparts = split_parts(ansem)?;
-    if aparts.len() != 2 {
-        return Err(crate::Error::Format(format!("Ansem's model: {} parts, not 2", aparts.len())));
-    }
-    let mut a: Vec<MdlPart> = aparts.iter().map(|b| MdlPart::parse_bytes(b)).collect::<Result<_>>()?;
-    for p in a.iter_mut() {
-        for b in p.bones.iter_mut() {
-            let n = crate::ann::cstr(&b.name);
-            if let Some(&(_, to)) = ANSEM_RENAMES.iter().find(|r| r.0 == n) {
-                b.name = [0; 16];
-                b.name[..to.len()].copy_from_slice(to.as_bytes());
-            }
-        }
-    }
-    let hand = a[0].bones.iter().position(|b| crate::ann::cstr(&b.name) == "r_hand").ok_or_else(|| crate::Error::Format("Ansem: no r_hand".into()))?;
-    let nb = a[0].bones.len();
-    let mut name = [0u8; 16];
-    name[..4].copy_from_slice(b"wep0");
-    for p in a.iter_mut() {
-        if p.bones.len() != nb {
-            return Err(crate::Error::Format("Ansem's parts disagree on the bones".into()));
-        }
-        p.bones.push(MdlBone { name, parent: hand as i16, index: nb as i16 });
-        p.rest.push(rest);
-        p.bounds.push(crate::keyblade::part_bounds(nb + 1, &[])[nb]);
-    }
-    let mut w = Vec::new();
-    for k in 0..2 {
-        let mut p = MdlPart::parse_bytes(&rparts[k])?;
-        for pk in p.list_a.iter_mut().chain(p.list_b.iter_mut().flatten()) {
-            for v in pk.verts.iter_mut() {
-                if v.bone() != rw {
-                    return Err(crate::Error::Format("Riku's weapon parts: a vertex off wep0".into()));
-                }
-                v.q1[3] = ((nb as u32) << 16) | (nb as u32 * 4);
-            }
-        }
-        p.bones = a[0].bones.clone();
-        p.rest = a[0].rest.clone();
-        p.bounds = crate::keyblade::part_bounds(nb + 1, &[&p.list_a, p.list_b.as_deref().unwrap_or(&[])]);
-        w.push(p.write_bytes()?);
-    }
-    let plain_first = a[0].list_a.first().is_some_and(|k| k.fmt == FMT_PLAIN);
-    let (ap, at) = if plain_first { (0, 1) } else { (1, 0) };
-    // The weapon parts carry Ansem's bone list as renamed.
-    let parts = vec![w[0].clone(), w[1].clone(), a[ap].write_bytes()?, a[at].write_bytes()?];
-    Ok(join_parts(&parts))
-}
-
-/// One Ansem group: Ansem's model with Riku's weapon (or, with `blade`, the Keyblade of Heart),
-/// Riku's clips of `riku` (`have`: the step's own, else Re:CoM's) retargeted, his events remapped,
-/// Ansem's raw RTM (+ the weapon texture) and TXA, under `target`'s names.
-pub fn build_ansem(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, riku: u16, target: u16, blade: Option<&BladeSource>) -> Result<Built> {
-    let get = |n: String| -> Result<Vec<u8>> {
-        match have.get(&n) {
-            Some(b) => Ok(b.clone()),
-            None => crate::install::read_recom(arc, keys, &n),
-        }
-    };
-    let raw = |n: String| -> Result<(Vec<u8>, Vec<kh1_formats::egs::HdAsset>, i32)> {
-        let e = arc.find(&n).ok_or_else(|| crate::Error::Format(format!("{n} not in Recom.hed")))?;
-        let raw = arc.read_raw_entry(e)?;
-        let date = raw.get(12..16).map_or(0, |b| i32::from_le_bytes(b.try_into().unwrap()));
-        let (d, a) = kh1_formats::egs::decode_entry_full(keys, &raw)?;
-        Ok((d, a, date))
-    };
-    let rmdl = crate::install::read_recom(arc, keys, &path(riku, "MDL"))?;
-    let rs = RecomSkeleton::parse(&rmdl)?;
-    let mut mdl = ansem_mdl(&rmdl, &crate::install::read_recom(arc, keys, &enemy_path(ANSEM_ENEMY, "MDL"))?)?;
-    if let Some(src) = blade {
-        mdl = with_blade(&mdl, src, false)?;
-    }
-    let ask = RecomSkeleton::parse(&mdl)?;
-    let ann = Ann::parse(&get(path(riku, "ANN"))?)?;
-    let out_ann = retarget_ann(&ann, &rs, &ask)?;
-    let em = event_map(&rs, &ask);
-    let eet = remap_eet(&get(path(riku, "EET"))?, &em)?;
-    let ses = remap_ses(&get(path(riku, "SES"))?, &em)?;
-    let clips = out_ann.slots.iter().filter(|s| s.clip.is_some()).count();
-    let mut files = vec![(path(target, "MDL"), mdl), (path(target, "ANN"), out_ann.to_bytes()), (path(target, "EET"), eet), (path(target, "SES"), ses)];
-    // Ansem's textures + Riku's weapon texture (or the Keyblade of Heart's).
-    let (d, mut a, date) = raw(enemy_path(ANSEM_ENEMY, "RTM"))?;
-    let entry = match blade {
-        Some(src) => rtm_with_blade(&d, &a, date, src)?,
-        None => {
-            let (rd_, ra, _) = raw(path(riku, "RTM"))?;
-            let rr = crate::rtm::Rtm::parse(&rd_)?;
-            let mut rtm = crate::rtm::Rtm::parse(&d)?;
-            for e in rr.entries.iter().filter(|e| e.name_str().starts_with("weapon_")) {
-                let hd = format!("{}_tm2.dds", e.name_str().trim_end_matches(".tm2"));
-                rtm.entries.push(e.clone());
-                if let Some(x) = ra.iter().find(|x| x.name == hd) {
-                    a.push(x.clone());
-                }
-            }
-            kh1_formats::egs::build_plain_entry(&rtm.write(), &a, date)?
-        }
-    };
-    files.push((format!("raw/{}", path(target, "RTM")), entry));
-    let (d, a, date) = raw(enemy_path(ANSEM_ENEMY, "TXA"))?;
-    files.push((format!("raw/{}", path(target, "TXA")), kh1_formats::egs::build_plain_entry(&d, &a, date)?));
-    Ok(Built { files, clips })
 }
 
 /// The files of one skin group, relative to the mod's `recom` root: the MDL / ANN / EET / SES
@@ -824,7 +567,7 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
 /// The manifest: which Riku group each skin group stands for, with its look (Dark Mode attire,
 /// blade 0 Soul Eater / 1 the Keyblade of People's Hearts).
 pub fn manifest_json(skins: &[Made], riku_guard: bool) -> String {
-    let rows: Vec<String> = skins.iter().map(|m| format!("{{\"riku\": {}, \"skin\": {}, \"dark\": {}, \"costume\": {}, \"blade\": {}}}", m.riku, m.skin, m.dark, m.costume(), m.blade)).collect();
+    let rows: Vec<String> = skins.iter().map(|m| format!("{{\"riku\": {}, \"skin\": {}, \"dark\": {}, \"blade\": {}}}", m.riku, m.skin, m.dark, m.blade)).collect();
     format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}}}\n", rows.join(", "))
 }
 
@@ -839,19 +582,6 @@ pub struct Made {
     pub dark: bool,
     /// 0 the Soul Eater, 1 the Keyblade of People's Hearts.
     pub blade: u8,
-    /// 0.176.0: Ansem's model (costume 2).
-    pub ansem: bool,
-}
-
-impl Made {
-    /// The costume: 0 Default Attire, 1 Dark Mode, 2 Ansem.
-    pub fn costume(&self) -> u8 {
-        if self.ansem {
-            2
-        } else {
-            self.dark as u8
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -920,7 +650,6 @@ pub fn with_blade(mdl: &[u8], src: &BladeSource, flip: bool) -> Result<Vec<u8>> 
     }
     let p1 = MdlPart::parse_bytes(&parts[1])?;
     let p2 = MdlPart::parse_bytes(&parts[2])?;
-    let p2 = if p2.list_a.first().is_some_and(|k| k.fmt == FMT_PLAIN) { p2 } else { MdlPart::parse_bytes(&parts[3.min(parts.len() - 1)])? };
     let wep0 = p1.bones.iter().position(|b| crate::ann::cstr(&b.name) == "wep0").ok_or_else(|| crate::Error::Format("Riku's model: no wep0".into()))?;
     let only_wep0 = |p: &MdlPart| p.list_a.iter().chain(p.list_b.iter().flatten()).all(|k| k.verts.iter().all(|v| v.bone() == wep0));
     let tx = p1.list_a.first().filter(|k| k.fmt == FMT_TEXTURED).ok_or_else(|| crate::Error::Format("Riku's model: part 1 is not textured".into()))?;
@@ -1049,77 +778,6 @@ mod tests {
     /// With the owner's install (`RECOM_GAME`): Riku's idle on the Dark skeleton keeps its feet
     /// where Riku's are (within Dark's longer legs' difference), and an idle pose's bones
     /// stay near Dark's own rest.
-    /// With the owner's install: the Ansem costume's model holds Riku's weapon on a `wep0` of its
-    /// own under its `r_hand`; Riku's idle retargeted keeps the feet and head where Riku's are
-    /// (relative to rest), and the blade root stays in the hand.
-    #[test]
-    fn riku_idle_on_ansem() {
-        let Some(g) = game() else { return };
-        let keys = install::keys(&g).unwrap();
-        let arc = install::recom_archive(&g).unwrap();
-        let rd = |n: &str| install::read_recom(&arc, &keys, n).unwrap();
-        let rmdl = rd("PLAYER/0101/PL0101.MDL");
-        let riku = RecomSkeleton::parse(&rmdl).unwrap();
-        let mdl = ansem_mdl(&rmdl, &rd(&enemy_path(ANSEM_ENEMY, "MDL"))).unwrap();
-        let ansem = RecomSkeleton::parse(&mdl).unwrap();
-        assert_eq!(ansem.bones[1].name, "ex_1010_sk");
-        let w0 = ansem.find("wep0").unwrap();
-        assert_eq!(ansem.bones[w0].parent as usize, ansem.find("r_hand").unwrap());
-        let parts = crate::mdl::split_parts(&mdl).unwrap();
-        assert_eq!(parts.len(), 4);
-        for pb in &parts {
-            crate::mdl::MdlPart::parse_bytes(pb).unwrap();
-        }
-        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
-        let map = bone_map(&riku, &ansem);
-        let idle = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == "p002_001")).unwrap();
-        let out = retarget(idle, &riku, &ansem, &map).unwrap();
-        let world = |c: &Clip, sk: &RecomSkeleton| {
-            let mut u = vec![crate::math::I3; sk.bones.len()];
-            let mut p = vec![[0.0; 3]; sk.bones.len()];
-            for (i, b) in sk.bones.iter().enumerate() {
-                let s = c.sample(i, 0.0);
-                let r = rot_xyz(s.r[0], s.r[1], s.r[2]);
-                if b.parent < 0 {
-                    u[i] = r;
-                    p[i] = s.t;
-                } else {
-                    let q = b.parent as usize;
-                    let w = crate::math::vm(s.t, &u[q]);
-                    p[i] = [p[q][0] + w[0], p[q][1] + w[1], p[q][2] + w[2]];
-                    u[i] = m3(&r, &u[q]);
-                }
-            }
-            p
-        };
-        let (pa, pb) = (world(idle, &riku), world(&out, &ansem));
-        for bone in ["l_foot", "r_foot", "head"] {
-            let (i, j) = (riku.find(bone).unwrap(), ansem.find(bone).unwrap());
-            let ra = riku.rest_world()[i].t[1];
-            let rb = ansem.rest_world()[j].t[1];
-            eprintln!("{bone}: riku {:.3} (rest {ra:.3}) ansem {:.3} (rest {rb:.3})", pa[i][1], pb[j][1]);
-            assert!(((pa[i][1] - ra) - (pb[j][1] - rb)).abs() < 0.05, "{bone}");
-        }
-        // The limbs point where Riku's do (Ansem's rest is an A-pose, Riku's a T-pose).
-        for (x, y) in [("l_uparm", "l_foarm"), ("r_foarm", "r_hand"), ("l_femur", "l_tibia")] {
-            let dir = |p: &Vec<[f64; 3]>, sk: &RecomSkeleton| {
-                let (i, j) = (sk.find(x).unwrap(), sk.find(y).unwrap());
-                let d = [p[j][0] - p[i][0], p[j][1] - p[i][1], p[j][2] - p[i][2]];
-                let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-                [d[0] / n, d[1] / n, d[2] / n]
-            };
-            let (u, v) = (dir(&pa, &riku), dir(&pb, &ansem));
-            let deg = (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]).clamp(-1.0, 1.0).acos().to_degrees();
-            eprintln!("{x}: {deg:.1} deg off Riku's");
-            assert!(deg < 8.0, "{x}");
-        }
-        let h = ansem.find("r_hand").unwrap();
-        let d = crate::math::dist(pb[w0], pb[h]);
-        let dr = crate::math::dist(pa[riku.find("wep0").unwrap()], pa[riku.find("r_hand").unwrap()]);
-        eprintln!("wep0 to hand: ansem {d:.3} riku {dr:.3}");
-        assert!((d - dr).abs() < 0.05);
-    }
-
     #[test]
     fn riku_idle_on_the_dark_skeleton() {
         let Some(g) = game() else { return };

@@ -1002,3 +1002,7 @@ dele".
 ## 0.176.2: Ansem stands in an A-pose
 
 Riku rests in a T-pose, Ansem in an A-pose (70° at the worst limb). `rest_like` turns the target's limb rest rotations to Riku's directions before the retarget (only past 20°: Dark Riku, 9.9°, unchanged).
+
+## 0.177.0: the Ansem costume removed
+
+The owner's call after 0.176.2. Reverted to 0.175.0's costumes; Re:CoM has no other Riku model besides PL0101 / PL0111 and Riku-Ansem (Dark Mode).

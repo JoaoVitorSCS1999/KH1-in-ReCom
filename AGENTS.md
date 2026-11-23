@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 313 (fork branch Re-Re-Reverse/Rebirth): the Ansem costume removed, version 0.177.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "pode tirar o ANsem das skins ficou ridículo, no recom tem algum outro modelo do Riku?".
+
+- 0.176.0..0.176.2 reverted: Riku's costumes are Default Attire / Dark Mode again (`riku_dark_skin`), the asset step builds no Ansem groups (181 / 191 / 221 / 231), the Keyblade of Heart groups as before. Stages 310..312 stay as history.
+- Re:CoM's other Riku models (Checked (files: every `PLAYER` / `ENEMY` RTM and skeleton)): only Riku (`PL0101`), his Halloween Town look (`PL0111`) and Riku-Ansem (`PL0201` / `PL0211`, `EN0116`: the Dark Mode costume). No other Riku.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 312 (fork branch Re-Re-Reverse/Rebirth): the Ansem costume's limbs posed from Riku's T-pose, version 0.176.2 (2026-11-23)
 
 Fork owner, 2026-11-23 (three screenshots: arms out, hands at the waist, the head bent into the hair), verbatim: "ficou bem bizarro".

@@ -37,21 +37,7 @@ fn look() -> Look {
 /// # Safety
 /// Reads the save (main thread).
 pub unsafe fn chosen(s: &crate::settings::Settings) -> Look {
-    let costume = match s.riku_costume {
-        1 if unlocked() => 1,
-        2 if ansem_unlocked() => 2,
-        _ => 0,
-    };
-    Look { costume, blade: (s.riku_heart_blade && blade_unlocked()) as u8 }
-}
-
-/// Ansem's card (`0x74`, his enemy card: Re:CoM gives it at his defeat).
-const ANSEM_CARD: u16 = 0x74;
-
-/// The Ansem costume is unlocked: Riku has Ansem's card in this save (Re:CoM's "obtained at least
-/// once", `0x14015B3F0`: the card Re:CoM gives when he is beaten), or the debug key.
-pub unsafe fn ansem_unlocked() -> bool {
-    super::settings().riku_ansem_unlocked || (super::stats::riku_story() && super::keyblades::ever_obtained(ANSEM_CARD))
+    Look { dark: s.riku_dark_skin && unlocked(), blade: (s.riku_heart_blade && blade_unlocked()) as u8 }
 }
 
 /// The Keyblade of Heart is unlocked with the Dark Mode costume (0.167.0; fork owner, 2026-11-23: "a
@@ -173,7 +159,7 @@ unsafe fn name_ptrs(b: usize, sk: &[Skin], look: Look) -> [u64; 2] {
 }
 
 fn look_name(l: Look) -> String {
-    format!("{} with the {}", rs::COSTUMES[(l.costume as usize).min(2)], rs::BLADES[l.blade as usize % rs::BLADES.len()])
+    format!("{} with the {}", if l.dark { "Dark Mode" } else { "Default Attire" }, rs::BLADES[l.blade as usize % rs::BLADES.len()])
 }
 
 /// The menu's model (camp and level-up screen) follows the group the player loads: called when
@@ -233,8 +219,8 @@ pub unsafe fn refresh(b: usize) {
         return;
     }
     let s = super::settings();
-    if (s.riku_costume == 1 && !unlocked()) || (s.riku_costume == 2 && !ansem_unlocked()) {
-        log("riku skin: a costume not unlocked in this save (Dark Mode: his first Dark Mode; Ansem: beating Ansem): Default Attire");
+    if s.riku_dark_skin && !unlocked() {
+        log("riku skin: Dark Mode chosen, but this save hasn't reached Dark Mode yet: Default Attire (the costume unlocks at Riku's first Dark Mode)");
         // Only the setting (no live change: the old player may be gone during a room build).
         let _ = super::store_item(crate::menu::Item::Costume, 0);
     }
@@ -577,7 +563,7 @@ unsafe fn try_swap(b: usize) -> bool {
     // 0.160.0: only the Keyblade changes (same attire): no transformation; the model changes now,
     // with Riku's way-back effect.
     let sk = skins();
-    if TRANS_PL.load(Ordering::Relaxed) == 0 && rs::look_of(&sk, now as u16).costume == rs::look_of(&sk, g).costume {
+    if TRANS_PL.load(Ordering::Relaxed) == 0 && rs::look_of(&sk, now as u16).dark == rs::look_of(&sk, g).dark {
         swap_now(b, e, g);
         weapon_appear(e);
         func::<super::movement::MotionFn>(super::movement::MOTION_REQUEST)(e, 1, 0, 0, 0, 0, 0);
@@ -733,7 +719,7 @@ unsafe fn transition(b: usize, e: usize) -> bool {
         return finish(e);
     }
     swap_now(b, e, g);
-    let to_dark = rs::look_of(&skins(), g).dark();
+    let to_dark = rs::look_of(&skins(), g).dark;
     if to_dark {
         // Dark Riku's entry flip, as his switch-in plays it (`0x140204841..0x14020485B`: his row
         // 0x37, blend −1): the skin's pack holds his own clip; row 0x37 points at it for the play.
@@ -811,7 +797,7 @@ unsafe fn face(b: usize, e: usize) {
         return;
     }
     let (riku, dark) = (rd::<usize>(va(b, FACE_SET_RIKU)), rd::<usize>(va(b, FACE_SET_DARK)));
-    let on = look().dark();
+    let on = look().dark;
     let now: usize = rd(g + 0x88);
     let want = if on { dark } else { riku };
     // Only Riku's own face or ours: any other set is Re:CoM's state, left alone.
