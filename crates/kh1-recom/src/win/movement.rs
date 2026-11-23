@@ -959,8 +959,11 @@ fn init_fresh(pl: usize) -> bool {
 
 pub unsafe extern "win64" fn move_exe(pl: usize) {
     let o: PlayerFn = orig(&ORIG_MOVE_EXE);
-    // Riku's costume waiting for its group (0.155.0): one atomic load otherwise.
-    super::riku_skin::frame(pl);
+    // Riku's costume waiting for its group (0.155.0): one atomic load otherwise. While his
+    // transformation plays for a costume change (0.155.2), his move exe is held.
+    if super::riku_skin::frame(pl) {
+        return;
+    }
     if !kh1_mover(pl) {
         return o(pl);
     }

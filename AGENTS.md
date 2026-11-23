@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 282 (fork branch Re-Re-Reverse/Rebirth): the costume change plays Riku's transformation, version 0.155.2 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "funcionou perfeitamente!, só que eu realmente queria a transição quando altera-se a skin de uma para outra, a animação e o efeito".
+
+- Re:CoM's transformation (Checked (exe: disasm)): action 0x20 (`0x140215380`) plays row 0x37 (`p002_057`, blend −1) with its EET / SES events and switches at the motion's end (`0x1401A57D0`).
+- Ours: the costume change plays the same row and events, holds Riku's move exe while it plays, and changes the model in place at its end (≤ 240 frames). Re:CoM's action 0x20 is not entered (its end switches to the battle-only Dark Riku).
+- **Checked**: tests, the Windows build. **Not checked**: in game. Details: `docs/recom-riku-kh1.md` § 0.155.2.
+
+---
+
 ## Stage 281 (fork branch Re-Re-Reverse/Rebirth): the in-place costume change sizes the transform node again, version 0.155.1 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "é bugou mesmo, mas no próprio jogo em teoria já existe uma transição... quando o personagem usa a transformação o próprio jogo recarrega a forma não seria possível utilar essa mesma transição?"
