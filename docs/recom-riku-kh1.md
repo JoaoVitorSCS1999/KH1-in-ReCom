@@ -487,3 +487,34 @@ seria possível trocar a skin sem ter que passar por uma porta?" (asked to choos
   - The parts' bind resizes the transform node (the log shows it).
   - `gauge:02` group 3 is Dark Riku's face in Riku's `FO0071` (Re:CoM's own switch uses it).
 - **Checked**: tests, the Windows build. **Not checked**: in game. Asset step: unchanged.
+
+## 0.155.1: the in-place change's transform node sized again
+
+Fork owner, 2026-11-22 (screenshots: Dark model in a T-pose after the change; Riku's own model
+garbled after changing back), verbatim: "é bugou mesmo, mas no próprio jogo em teoria já existe uma
+transição... quando o personagem usa a transformação o próprio jogo recarrega a forma não seria
+possível utilar essa mesma transição?"
+
+- **Cause** (Checked (the owner's log + exe: disasm)):
+  - The log shows `transform node 102 -> 102` going to Dark Riku's 128 bones, and `128 -> 128`
+    going back to Riku's 102.
+  - The parts' bind `0x140270030` grows the entity's node only through `0x14023EBE0`, which
+    allocates only at count 0 (`0x14023EC10`) and never resizes.
+  - The motion controller takes its bone count from the node (`0x14024E09C`), so it posed the
+    wrong count: the T-pose, and the garbled model.
+- **Fix** (`riku_skin::clear_node`): before the rebuild, the node's matrix array is released as
+  the node's dtor does (`0x14023DE20`):
+  - each element's `+0x9C` is cleared;
+  - the array goes to a 0x20-byte deleter (vtable `0x140605B38`) for Re:CoM's deferred free
+    `0x14028F800`, since the draw thread may still read it this frame;
+  - pointer and count are set to 0.
+  - The bind then allocates it at the new skeleton's count. The weapon object's node gets the same
+    treatment before its attach, which allocates it again on the new `wep0` matrix.
+- **The transformation**: Re:CoM's Dark Mode doesn't reload a model. Riku's battle player builds a
+  second player, `CPlayerDRiku`, at the battle's start (`0x14021223D`), and the switch only changes
+  the main player pointer (`0x1402046D0`, `0x14087B380`). Dark Riku exists only in battle (his Field
+  exe is `ret`), so it can't change a costume in the field.
+- **HUD face**: the 0.155.0 log says the face layer was replaced, but the owner's screenshot shows
+  Riku's face. The log now names the control's layer count and the set, so we can tell which layer
+  holds the face on Riku's gauge.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
