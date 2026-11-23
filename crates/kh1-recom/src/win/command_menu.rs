@@ -1130,6 +1130,10 @@ unsafe fn riku_world(pl: usize) -> World {
         }
     }
     w.context = context(pl);
+    // 0.162.0: a held gimmick card's "Stagger", as Sora's.
+    if w.context == 0 {
+        w.gimmick = super::gimmick::offer(pl);
+    }
     if super::summons::installed() {
         (w.battle, w.summon_out) = super::summons::gate_state(pl);
         w.summon_out |= super::summons::sleight_running(pl);

@@ -55,7 +55,7 @@ pub fn mark_installed() {
 /// Re:CoM's lock-on, wrapped.
 pub unsafe extern "win64" fn lock_on(pl: usize) -> u64 {
     let o: PlFn = orig(&ORIG_LOCK_ON);
-    if pl == 0 || !mv::kh1_sora(pl) {
+    if pl == 0 || !mv::kh1_fighter(pl) {
         return o(pl);
     }
     let kbm = rd::<u32>(base() + recom::KBM_IN_USE as usize) != 0;

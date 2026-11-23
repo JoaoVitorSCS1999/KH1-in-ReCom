@@ -11,6 +11,20 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 295 (fork branch Re-Re-Reverse/Rebirth): Sora's combat rules for Riku (post-hit invulnerability, KH1's no-flinch, no card duel, the dimming sleight's shield, gimmick cards, R1 lock-on), version 0.162.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "precisa valer, alias fora as específicidades do Riku todas as regras de combate precisam ser iguais as do Sora, porque na verdade não muda mesmo, são os mesmos inimigos, o criador do mod só quis desabilitar a parte do Riku para implementar depois".
+
+- Audit of every Sora-only gate in the combat code (Checked (code)); `mv::kh1_fighter` (Sora or Riku with KH1 movement) now for:
+  - the damage check: KH1's post-hit invulnerability (30 frames, decision 31), KH1's no-flinch frames, no card duel (decision 33), a dimming sleight's shield;
+  - gimmick cards (drop held, "Stagger" in his context tab, Guard break, finisher break, 50 % HP drop);
+  - KH1's lock-on rules on R1 (controller).
+- Already shared before (Checked (code)): KH1 battles (M6, cardless enemies, pace), KH1 enemy AI, enemies hittable while attacking, the swing's card interrupt, revenge value, the dim rules, Guard reactions, cooldowns.
+- Left Riku's own (his specifics): his damage (Soul Eater's card AP at both Damage settings, Re:CoM HP), Sora's abilities / spells / items / summons / Enemy Skills, the Neoshadow's held grab (no clip of his).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 294 (fork branch Re-Re-Reverse/Rebirth): a shot the Guard turned back interrupts its caster (Sora and Riku), version 0.161.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "preciso de uma revisão e balanceamento do combate com o riku, quando alguns oponentes estão castando magia o ataque não interrompe, verifique se esse tipo de coisa já é tratado na gameplay com o Sora nesse mod".

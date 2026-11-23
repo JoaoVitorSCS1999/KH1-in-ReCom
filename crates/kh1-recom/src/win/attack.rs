@@ -1561,8 +1561,14 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // runs with Re:CoM's protection bit (no damage, no reaction) and KH1's guard success follows.
     let riku_block = riku_guard_block(pl);
     let kh1 = mv::kh1_sora(pl);
-    if kh1 {
+    // 0.162.0 (fork owner, 2026-11-23: "fora as específicidades do Riku todas as regras de combate
+    // precisam ser iguais as do Sora"): the KH1 rules of the hit itself (no card duel, KH1's
+    // no-flinch frames, the post-hit invulnerability, a dimming sleight's shield) for Riku too.
+    let fighter = kh1 || mv::kh1_riku(pl);
+    if fighter {
         no_card_duel(pl);
+    }
+    if kh1 {
         aero_halve(pl);
         // Enemy Skills: Large Body's Guard, a 10 % cut to the front (`super::enemy_skills`).
         super::enemy_skills::large_body(pl);
@@ -1587,7 +1593,8 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // Owner, 2026-11-03: "any sleight that sora does that dims the room should give him i-frames":
     // while his sleight (Re:CoM's, or a KH1 special) has the room dimmed (Re:CoM's own flag
     // `+0x418` bit 31, `crate::sleights::dim_shield`), the same protection bit for this check.
-    let dimmed = arrived && !summon && !bracer && super::summons::sleight_dimmed(pl);
+    let arrived_any = fighter && rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED != 0;
+    let dimmed = arrived_any && !summon && !bracer && super::summons::sleight_dimmed(pl);
     let shield = summon || bracer || dimmed || riku_block;
     let f418: u32 = if shield { rd(pl + p::FLAGS_418) } else { 0 };
     if shield {
@@ -1608,7 +1615,7 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // no-flinch path; only when a hit arrived).
     let bracer_skill = arrived && super::enemy_skills_deck::no_flinch(pl);
     let run = |pl: usize| -> u64 {
-        if (NO_FLINCH.load(Ordering::Relaxed) != pl && !bracer_skill) || !kh1 {
+        if (NO_FLINCH.load(Ordering::Relaxed) != pl && !bracer_skill) || !fighter {
             o(pl)
         } else {
             let f: u32 = rd(pl + p::FLAGS_420);
@@ -1640,7 +1647,7 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     if shield && f418 & 1 == 0 {
         wr(pl + p::FLAGS_418, rd::<u32>(pl + p::FLAGS_418) & !1);
     }
-    post_hit(pl, kh1);
+    post_hit(pl, fighter);
     r
 }
 

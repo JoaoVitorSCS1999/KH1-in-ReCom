@@ -842,3 +842,23 @@ interrompe, verifique se esse tipo de coisa já é tratado na gameplay com o Sor
     with 0 damage while it cast. The test read the enemy's hit info, which Re:CoM's gather fills
     inside the handler, so the interrupt bit was never set.
   - Now the attacker comes from the waiting hurt body (`+0x98`).
+
+## 0.162.0: Sora's combat rules for Riku
+
+Fork owner, 2026-11-23, verbatim: "fora as específicidades do Riku todas as regras de combate
+precisam ser iguais as do Sora".
+
+- **Now also Riku's** (`mv::kh1_fighter`):
+  - The damage check's KH1 rules: the post-hit invulnerability (decision 31), KH1's no-flinch
+    frames (`NO_FLINCH`), no card duel (decision 33), and a dimming sleight's shield.
+  - Gimmick cards (`win::gimmick`): the drop is held, "Stagger" shows in his context tab
+    (`riku_world`), and the Guard break, finisher break and 50 % HP drop apply. Assumption: his
+    gimmick card play runs as Sora's (action 0x19).
+  - KH1's lock-on rules on R1 (`win::lock_on`).
+- **Shared already**: KH1 battles, KH1 enemy AI, hittable attackers, the card interrupt, revenge,
+  the dim rules, Guard reactions, cooldowns.
+- **Riku's own** (not changed):
+  - his damage: the Soul Eater's card AP, enemies on Re:CoM HP even at Damage = KH1 (`win::stats`
+    `riku_story()` gates); no damage cap on his hits;
+  - Sora's abilities, spells, items, summons and Enemy Skills;
+  - the Neoshadow's held grab (no clip of his).

@@ -113,7 +113,7 @@ dependencies = [
 
 [[package]]
 name = "kh1-recom"
-version = "0.161.0"
+version = "0.162.0"
 dependencies = [
  "kh1-core",
  "kh1-recom-assets",
