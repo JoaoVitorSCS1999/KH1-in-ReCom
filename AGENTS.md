@@ -4544,7 +4544,7 @@ Owner, 2026-11-03, on 0.101.4, answering which special the Triangle prompt picks
 - `kh1-anim` matches Square Enix's own Re:CoM bakes of the same KH1 motions to ≤0.019° local
   rotation and ≤0.051 mm world position on swing / roll / run / jump. Checked (files, tests).
 - `kh1-core` corrections to the notes (cone 22°, air row 17 above, combo 13→14→8 with a close
-  target, …) are in `docs/kh1-sora.md`. Checked (decomp).
+  target, …) are in `knowledge/KH1/kh1-sora.md`. Checked (decomp).
 - Assumptions are marked in the code and the HUD: root travel subtraction, MSVC `rand`, task order,
   dummy stats (Strength 5, Defence 2, 300 HP), and the camera (an orbit camera, not KH1's).
 - Headless check: a scripted combo runs rows 13 → 14 → 8 and hits the close dummy for 3, 3 and 7.
@@ -4593,21 +4593,21 @@ Owner, 2026-11-03, on 0.101.4, answering which special the Triangle prompt picks
 
 No code. `VERSION` not created yet; the first change under `crates/` starts it.
 
-- Repo seeded: these rules files, `docs/sources.md`.
-- Re:CoM Steam decomp made (see `docs/sources.md`). Checked (exe): SHA-256 `acf42e96…6bbf`.
+- Repo seeded: these rules files, `docs/sources.md` (now `knowledge/sources.md`).
+- Re:CoM Steam decomp made (see `knowledge/sources.md`). Checked (exe): SHA-256 `acf42e96…6bbf`.
 - Finding: Re:CoM's exe is mixed-mode C++/CLI; the .NET part is only the shell. Checked (exe).
 - Finding: the KH1 notes in KH2-Combat-in-KH1 use Epic addresses; convert to Steam before use.
   Checked (files).
 
 Step 0 mapping (2026-10-29, notes only):
 
-- `docs/recom-timing.md`: both games step by a variable delta in 60 Hz frames. Re:CoM uses 50
+- `knowledge/ReCoM/recom-timing.md`: both games step by a variable delta in 60 Hz frames. Re:CoM uses 50
   units per frame, so KH1 frames × 50 = Re:CoM time. Checked (decomp + exe, both games).
-- `docs/recom-player.md`: player state machine (table-driven, 4 states: Field / Battle / Wait /
+- `knowledge/ReCoM/recom-player.md`: player state machine (table-driven, 4 states: Field / Battle / Wait /
   Hide), the action switch, and the card path from button to `initAttack`. Checked (decomp).
-- `docs/recom-combat.md`: motion request and advance, Sora's attack-row table `0x1407C6C70`, the
+- `knowledge/ReCoM/recom-combat.md`: motion request and advance, Sora's attack-row table `0x1407C6C70`, the
   hit path and the damage formula. Checked (decomp; rows read from the exe).
-- `docs/recom-battle-entry.md`: field-to-battle handover (separate battle room) and the native
+- `knowledge/ReCoM/recom-battle-entry.md`: field-to-battle handover (separate battle room) and the native
   cardless field swing (action `0xA`, card id 0) that shares battle collision. Checked (decomp).
 - Assumption, well supported: Re:CoM's motion system is not KH2's mset system.
 
@@ -4615,7 +4615,7 @@ Step 0 still to do:
 
 1. Plan the trace tool with the tester: the same fields from both games (tick, state, motion,
    frame, position, velocity, hit events).
-2. KH1's side mapped in `docs/kh1-sora.md` (states, movement, jump, glide, roll, guard, motion
+2. KH1's side mapped in `knowledge/KH1/kh1-sora.md` (states, movement, jump, glide, roll, guard, motion
    requests, the Attack combo). Still needed: the numbers in KH1's data files (`btltbl.bin`,
    `xa_ex_0010.mset`) and Re:CoM's (`stockskilllist.bin`, `PL0001.ANN`), from the player's
    extracted files.
