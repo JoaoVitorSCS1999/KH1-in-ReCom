@@ -669,3 +669,25 @@ At KH1 setting:
   - **Re:CoM's extras stay under the cap** (weak parts, the frozen +100, Back Attack, Enemy Skills multipliers), as KH1 puts every bonus before its cap.
   - Combat = KH1 only.
 - **Release repository** (owner, 2026-11-05, verbatim: "Can you actually just put the release version of the mod into a seperate github repository?"; answers): the release also lives in its own repository, **`PM2CRAZY/KH1-Combat-in-ReCoM`** (branch `main`; the owner created it), and **`main` in this repo is kept as well** (owner: "Keep main as well"). Both get the same release files, updated **only when the owner says so**, never force-pushed. Releases: 0.142.0; 0.143.0; 0.143.1 (2026-11-05, both copies).
+- **Open questions round** (fork owner, 2026-11-23, fork branch `Re-Re-Reverse/Rebirth`; the questions were gathered from
+  `ROADMAP.md` § Owner questions waiting, `recom-kh1-hud.md`, `recom-m7-command-menu.md`, `recom-m13-plan.md` § Open and
+  `recom-m6-battles.md` § Marluxia 3's card duel; answers verbatim in Portuguese, then what they mean):
+  - **Marluxia 3's card duel at Combat = KH1** (verbatim: "pode ser um duelo usando padrões do Marluxia dos outros jogos
+    caso necessário, e de forma balanceada!"): a duel Sora can win without cards, built from Marluxia's patterns in his
+    other games where needed, balanced. **Research and a design spec first** (which games, which patterns, Checked from
+    their files / decomps where available); no code before the fork owner approves the spec.
+  - **Re:CoM's HUD extras** (minimap, room plate, EXP popup) at HUD = KH1: **stay hidden** (2a).
+  - **Donald's and Goofy's rings** (Re:CoM's friends have no HP / MP): **hidden** (4b; changes what is built).
+  - **KH1's orange auto-target ring**: **shown** (5a).
+  - **EXP / munny popups and the level-up box**: **build KH1's popups** (6b; Re:CoM counts EXP at the battle end, so this
+    needs research first).
+  - **Command menu row 3 before the first summon**: KH1's greyed **"–"** (7a, as built).
+  - **Near NPCs**: **KH1 1:1**, Talk in row 0 and Attack dimmed with the error buzz (8b; changes what is built).
+  - **Context tab in Re:CoM's look**: the **teal-green tint** (9a, as built).
+  - **Effects = KH1 with Sounds = Re:CoM**: KH1's effects **keep their own sounds** (10a, as built).
+  - **KH1's room dust and splashes**: **add them** (11b; M13, research first).
+  - **KH1's clash EXP**: **add it** (12b; M13, research first).
+  - **Re:CoM's event hides at HUD = KH1**: the HUD goes **at once, as Re:CoM does** (3b; replaces the built 10-frame
+    KH1 fade).
+  - **KH1's hand effect when an item is used** (34 frames in): **none**; Re:CoM's own item effect stays at the heal
+    (13a, as built).
