@@ -141,6 +141,8 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
         // M12 camera: the dispatcher switches the live camera at its next frame.
         Item::Camera => camera::set_choice(s.camera),
         Item::AutoCamera => camera::set_auto(s.auto_camera),
+        // Read by the lock-on wrapper each frame (`lock_on`).
+        Item::AutoLock | Item::TargetLock => {}
         Item::GuardReactions => attack::set_guard_reactions(s.guard_reactions),
         Item::RevengeValue => revenge::set_enabled(s.boss_revenge),
         // Fork: Riku's Costume: Re:CoM's char -> group entries now; the next player build shows it.

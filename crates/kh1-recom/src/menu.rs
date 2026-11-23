@@ -88,6 +88,10 @@ pub enum Item {
     Camera,
     /// `auto_camera` (M12 camera stage 2)
     AutoCamera,
+    /// `auto_lock` (fork, 0.173.0: KH1 FM's Auto Lock)
+    AutoLock,
+    /// `target_lock` (fork, 0.173.0: KH1 FM's Target Lock, Auto / Manual)
+    TargetLock,
     /// `riku_dark_skin` (fork): Default Attire / Dark Mode.
     Costume,
     /// `riku_keyblade` (fork, 0.160.0): Soul Eater / Keyblade of Heart.
@@ -116,7 +120,7 @@ impl Page {
             Page::Combat => &[Item::Combat, Item::GuardReactions, Item::EnemyPace, Item::EnemyAi, Item::RevengeValue],
             Page::Movement => &[Item::RunSpeed, Item::JumpHeight, Item::AirSpeed, Item::DodgeRoll],
             Page::EffectsSound => &[Item::Effects, Item::Sounds],
-            Page::Camera => &[Item::Camera, Item::AutoCamera],
+            Page::Camera => &[Item::Camera, Item::AutoCamera, Item::AutoLock, Item::TargetLock],
             // 0.163.0: the Keyblade is chosen on the Items page's Keyblade slot, as Sora's.
             Page::Costumes => &[Item::Costume],
             Page::SoraCostumes => &[Item::SoraCostume],
@@ -142,7 +146,7 @@ impl Page {
             Page::Combat => b"Combat, Guard reactions, enemy pace and AI, Revenge Value.\0",
             Page::Movement => b"Run speed, jump height, air speed and Dodge roll.\0",
             Page::EffectsSound => b"KH1's or Re:CoM's effects and sounds on Sora's KH1 moves.\0",
-            Page::Camera => b"Re:CoM's, KH1's or KH2's camera, and their Auto camera.\0",
+            Page::Camera => b"Camera, Auto camera, and KH1's Auto Lock and Target Lock.\0",
             Page::Costumes => b"Change Riku's attire.\0",
             Page::SoraCostumes => b"Change Sora's attire.\0",
         }
@@ -150,6 +154,7 @@ impl Page {
 }
 
 const RECOM_KH1: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0"];
+const AUTO_MANUAL: &[&[u8]] = &[b"Auto\0", b"Manual\0"];
 const OFF_ON: &[&[u8]] = &[b"Off\0", b"On\0"];
 const ROLL: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"Off\0"];
 const CAMERAS: &[&[u8]] = &[b"Re:CoM\0", b"KH1\0", b"KH2\0"];
@@ -193,6 +198,8 @@ impl Item {
             Item::Sounds => b"Sounds\0",
             Item::Camera => b"Camera\0",
             Item::AutoCamera => b"Auto camera\0",
+            Item::AutoLock => b"Auto Lock\0",
+            Item::TargetLock => b"Target Lock\0",
             Item::Costume => b"Costume\0",
             Item::Blade => b"Keyblade\0",
             Item::SoraCostume => b"Costume\0",
@@ -202,7 +209,8 @@ impl Item {
     /// Its options, in the order left / right cycle through them.
     pub fn options(self) -> &'static [&'static [u8]] {
         match self {
-            Item::GuardReactions | Item::RevengeValue | Item::AutoCamera => OFF_ON,
+            Item::GuardReactions | Item::RevengeValue | Item::AutoCamera | Item::AutoLock => OFF_ON,
+            Item::TargetLock => AUTO_MANUAL,
             Item::DodgeRoll => ROLL,
             Item::Camera => CAMERAS,
             Item::Costume => COSTUMES,
@@ -238,6 +246,8 @@ impl Item {
             Item::Sounds => b"KH1: KH1's swing and finisher sounds. KH1 only.\0",
             Item::Camera => b"Re:CoM's camera, KH1's, or KH2's (its distances x 0.89).\0",
             Item::AutoCamera => b"On: the KH1 / KH2 camera swings behind Sora as he runs.\0",
+            Item::AutoLock => b"Automatically lock on to the nearest target. KH1 only.\0",
+            Item::TargetLock => b"Manual: the lock lasts while R1 is held. KH1 only.\0",
             Item::Costume => b"Dark Mode: Dark Riku's look. Unlocked by Riku's first Dark Mode.\0",
             Item::Blade => b"Keyblade of Heart: Riku-Ansem's. Unlocked by Riku's first Dark Mode.\0",
             Item::SoraCostume => b"Halloween Town: Sora's costume there. Unlocked by visiting it.\0",
@@ -269,6 +279,8 @@ impl Item {
             Item::Sounds => "sounds",
             Item::Camera => "camera",
             Item::AutoCamera => "auto_camera",
+            Item::AutoLock => "auto_lock",
+            Item::TargetLock => "target_lock",
             Item::Costume => "riku_dark_skin",
             Item::Blade => "riku_keyblade",
             Item::SoraCostume => "sora_costume",
@@ -299,6 +311,8 @@ impl Item {
                 Camera::Kh2 => 2,
             },
             Item::AutoCamera => s.auto_camera as usize,
+            Item::AutoLock => s.auto_lock as usize,
+            Item::TargetLock => s.target_lock_manual as usize,
             Item::Costume => s.riku_dark_skin as usize,
             Item::Blade => s.riku_heart_blade as usize,
             Item::SoraCostume => s.sora_halloween as usize,
@@ -335,6 +349,8 @@ impl Item {
                 }
             }
             Item::AutoCamera => s.auto_camera = v == 1,
+            Item::AutoLock => s.auto_lock = v == 1,
+            Item::TargetLock => s.target_lock_manual = v == 1,
             Item::Costume => s.riku_dark_skin = v == 1,
             Item::Blade => s.riku_heart_blade = v == 1,
             Item::SoraCostume => s.sora_halloween = v == 1,
@@ -482,8 +498,8 @@ mod tests {
         assert_eq!(labels(Page::EffectsSound), ["Effects", "Sounds"], "M13; Voices once voices exist");
         assert_eq!((Page::Combat.label(), Page::Movement.label(), Page::EffectsSound.label()), (&b"Combat\0"[..], &b"Movement\0"[..], &b"Effects & Sound\0"[..]));
         let keys: Vec<&str> = Page::ALL.iter().flat_map(|p| p.items().iter().map(|i| i.key())).collect();
-        assert_eq!(keys, ["combat", "guard_reactions", "enemy_pace", "enemy_ai", "boss_revenge", "run_speed", "jump_height", "air_speed", "dodge_roll", "effects", "sounds", "camera", "auto_camera"]);
-        assert_eq!(labels(Page::Camera), ["Camera", "Auto camera"], "M12 camera stages 1 and 2");
+        assert_eq!(keys, ["combat", "guard_reactions", "enemy_pace", "enemy_ai", "boss_revenge", "run_speed", "jump_height", "air_speed", "dodge_roll", "effects", "sounds", "camera", "auto_camera", "auto_lock", "target_lock"]);
+        assert_eq!(labels(Page::Camera), ["Camera", "Auto camera", "Auto Lock", "Target Lock"], "M12 camera stages 1 and 2; KH1 FM's lock options (0.173.0)");
         // Damage stays ini-only (owner).
         assert!(!keys.contains(&"damage"));
     }
@@ -497,7 +513,7 @@ mod tests {
         assert_eq!(slots_used(Page::Combat), 15);
         assert_eq!(slots_used(Page::Movement), 11);
         assert_eq!(slots_used(Page::EffectsSound), 6);
-        assert_eq!(slots_used(Page::Camera), 5);
+        assert_eq!(slots_used(Page::Camera), 11);
         assert_eq!(Item::AutoCamera.options(), OFF_ON);
         assert_eq!(Item::Camera.options(), CAMERAS, "M12 camera stage 4: Re:CoM / KH1 / KH2");
         assert_eq!(Item::Camera.style(), Style::Single, "a single row like Dodge roll");

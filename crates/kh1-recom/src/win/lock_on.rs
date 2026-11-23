@@ -37,6 +37,11 @@ static LISTED: AtomicBool = AtomicBool::new(false);
 static STEP_LOG: AtomicUsize = AtomicUsize::new(24);
 /// 0.172.0: the target our L2 step chose this lock-on call (0: none).
 static STEPPED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// 0.173.0 (KH1 FM's Auto Lock): this lock-on call locks Re:CoM's pick without R1 (the player).
+static AUTO_LOCK: AtomicUsize = AtomicUsize::new(0);
+/// Last call's lock (the player locked), and whether the player's own input ended it.
+static WAS_LOCKED: AtomicUsize = AtomicUsize::new(0);
+static PLAYER_UNLOCK: AtomicUsize = AtomicUsize::new(0);
 /// The player's locked handle (`+0x850`, the switch's argument).
 const LOCK_HANDLE: usize = 0x850;
 
@@ -78,10 +83,23 @@ pub unsafe extern "win64" fn lock_on(pl: usize) -> u64 {
     }
     KH1_RULES.store(pl, Ordering::Release);
     STEPPED.store(0, Ordering::Relaxed);
+    // 0.173.0 (fork owner, 2026-11-23, KH1 FM's Config screenshot: "precisa implementar essas duas
+    // configs e features"): KH1's Auto Lock (`*(0x142E1F4D8)+0` = 0, Checked (KH1 exe: disasm)):
+    // an attack with no lock locks its target (`0x14029365F` → `0x1402B08A0(…, 4)`), and a lock
+    // whose target is gone (not the player's unlock) moves to the next one (`0x1402B1348` →
+    // `0x1402B0A00`). Here: Re:CoM's own lock of its pick (`+0x84C`) without R1, on those frames.
+    let locked_before = locked_target(pl).is_some();
+    let attack = rd::<u32>(pl + mv::p::REQUEST) & 4 != 0;
+    let lost = WAS_LOCKED.load(Ordering::Relaxed) == pl && !locked_before && PLAYER_UNLOCK.load(Ordering::Relaxed) != pl;
+    let auto = super::settings().auto_lock && !locked_before && (attack || lost);
+    AUTO_LOCK.store(if auto { pl } else { 0 }, Ordering::Relaxed);
+    PLAYER_UNLOCK.store(0, Ordering::Relaxed);
     let r = o(pl);
+    AUTO_LOCK.store(0, Ordering::Relaxed);
     KH1_RULES.store(0, Ordering::Release);
     stepped(pl);
     after(pl);
+    WAS_LOCKED.store(if locked_target(pl).is_some() { pl } else { 0 }, Ordering::Relaxed);
     r
 }
 
@@ -208,6 +226,8 @@ fn rules_for(pad: usize) -> bool {
 /// arm its lock on nothing, or play its lock sound and drop a target past its reach).
 pub unsafe extern "win64" fn lock_pressed(pad: usize) -> u32 {
     let r = func::<PadFn>(recom::PRESSED)(pad);
+    let auto = rules_for(pad) && AUTO_LOCK.load(Ordering::Relaxed) == pad - recom::PAD;
+    let r = if auto && r == 0 { 1 } else { r };
     if r == 0 || !rules_for(pad) {
         return r;
     }
@@ -224,10 +244,13 @@ pub unsafe extern "win64" fn lock_released(pad: usize) -> u32 {
     if !rules_for(pad) {
         return func::<PadFn>(recom::RELEASED)(pad);
     }
-    let r = func::<PadFn>(recom::PRESSED)(pad);
+    // 0.173.0, KH1 FM's Target Lock: Manual (`*(0x142E1F4D8)+4` = 1, `0x1402B069C`): the lock ends
+    // when R1 is released; Auto: R1 pressed again ends it.
+    let r = if super::settings().target_lock_manual { func::<PadFn>(recom::RELEASED)(pad) } else { func::<PadFn>(recom::PRESSED)(pad) };
     if r != 0 {
         let pl = pad - recom::PAD;
         wr(pl + recom::REQUEST, rd::<u32>(pl + recom::REQUEST) | recom::SECOND_PRESS);
+        PLAYER_UNLOCK.store(pl, Ordering::Relaxed);
     }
     r
 }

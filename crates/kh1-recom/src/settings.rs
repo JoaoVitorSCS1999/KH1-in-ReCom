@@ -152,6 +152,12 @@ pub struct Settings {
     /// swing behind Sora, the wall-avoid, the eye walk, the visibility re-place, the auto recenter).
     /// The Camera page's Auto camera row; default on (KH1's default, Assumption).
     pub auto_camera: bool,
+    /// KH1 FM's Config "Auto Lock" (fork, 0.173.0): on = an attack with no lock locks its target, and
+    /// a lock whose target is gone moves to the next (KH1 `*(0x142E1F4D8)+0`, 0 = On).
+    pub auto_lock: bool,
+    /// KH1 FM's Config "Target Lock" (fork, 0.173.0): false Auto (R1 toggles the lock), true Manual
+    /// (the lock lasts while R1 is held: KH1 `*(0x142E1F4D8)+4` = 1, `0x1402B069C`).
+    pub target_lock_manual: bool,
     /// The camp menu's "KH1" entry (and the Config input wrapper it runs through). `off` leaves
     /// Re:CoM's camp menu untouched (a safety switch; the settings then come from this file only).
     /// The key keeps its old name (it once added rows to Re:CoM's Config menu).
@@ -345,7 +351,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_dark_skin: false, riku_dark_skin_unlocked: false, riku_heart_blade: false, riku_heart_blade_unlocked: false, sora_halloween: false, sora_halloween_unlocked: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, auto_lock: true, target_lock_manual: false, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_dark_skin: false, riku_dark_skin_unlocked: false, riku_heart_blade: false, riku_heart_blade_unlocked: false, sora_halloween: false, sora_halloween_unlocked: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
     }
 }
 
@@ -420,6 +426,14 @@ camera = recom
 ;        sight and recenters when squeezed. KH2's: it swings behind Sora while he runs.
 ;   off: KH1's / KH2's Manual camera (the stick and R3 only).
 auto_camera = on
+;
+; auto_lock = on | off (KH1 FM's Auto Lock; Combat = KH1 on a controller): on = attacking with no
+;   lock locks onto its target, and a lock whose target is gone moves to the next one.
+auto_lock = on
+;
+; target_lock = auto | manual (KH1 FM's Target Lock; Combat = KH1 on a controller): auto = R1
+;   toggles the lock; manual = the lock lasts while R1 is held.
+target_lock = auto
 ;
 ; config_menu = on | off
 ;   off: no KH1 entry in the camp menu: Re:CoM's camp menu untouched (use this file instead).
@@ -604,6 +618,15 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
             "camera" => match Camera::parse(v) {
                 Some(c) => s.camera = c,
                 None => warnings.push(bad("camera must be recom, kh1 or kh2")),
+            },
+            "auto_lock" => match parse_switch(v) {
+                Some(b) => s.auto_lock = b,
+                None => warnings.push(bad("auto_lock must be on or off")),
+            },
+            "target_lock" => match v.trim().to_ascii_lowercase().as_str() {
+                "auto" => s.target_lock_manual = false,
+                "manual" => s.target_lock_manual = true,
+                _ => warnings.push(bad("target_lock must be auto or manual")),
             },
             "auto_camera" => match parse_switch(v) {
                 Some(b) => s.auto_camera = b,
@@ -816,6 +839,8 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "sounds", s.sounds.as_str());
     let t = set_key(&t, "camera", s.camera.as_str());
     let t = set_key(&t, "auto_camera", switch_str(s.auto_camera));
+    let t = set_key(&t, "auto_lock", switch_str(s.auto_lock));
+    let t = set_key(&t, "target_lock", if s.target_lock_manual { "manual" } else { "auto" });
     let t = set_key(&t, "config_menu", switch_str(s.config_menu));
     let mut t = set_key(&t, "asset_build", if s.asset_build { "auto" } else { "off" });
     let a = s.abilities;
@@ -970,7 +995,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: false, riku_dark_skin: false, riku_dark_skin_unlocked: true, riku_heart_blade: true, riku_heart_blade_unlocked: true, sora_halloween: true, sora_halloween_unlocked: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, auto_lock: false, target_lock_manual: true, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: false, riku_dark_skin: false, riku_dark_skin_unlocked: true, riku_heart_blade: true, riku_heart_blade_unlocked: true, sora_halloween: true, sora_halloween_unlocked: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);

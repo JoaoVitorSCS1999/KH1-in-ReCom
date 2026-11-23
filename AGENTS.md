@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 307 (fork branch Re-Re-Reverse/Rebirth): KH1 FM's Auto Lock and Target Lock on the Camera page, version 0.173.0 (2026-11-23)
+
+Fork owner, 2026-11-23 (screenshot: KH1 FM's Config, Auto Lock On / Off and Target Lock Auto / Manual framed), verbatim: "precisa implementar essas duas configs e features".
+
+- **KH1** (Checked (KH1 exe: disasm; no decomp here)): the Config block `*(0x142E1F4D8)`: `+0` Auto Lock (getter `0x1402FAFB0`, 0 = On), `+4` Target Lock (`0x1402FAFA0`, 1 = Manual), `+8` the camera (`0x1402FAFD0`). Auto Lock On: an attack command with no lock locks its target (`0x14029365F` → `0x1402B08A0(…, 4)`); a lock whose target is gone picks the next (`0x1402B1348` → `0x1402B0A00`). Target Lock Manual: locked, R1's release unlocks (`0x1402B069C`); Auto: R1's press.
+- **Ours** (`win::lock_on`, Combat = KH1 on a controller, Sora and Riku): Auto Lock (ini `auto_lock`, default on): on a frame with the Attack request and no lock, or after a lock ended without the player's unlock, Re:CoM's lock-on locks its pick (`+0x84C`) as if R1 were pressed; Target Lock (ini `target_lock = auto | manual`, default auto): Manual unlocks on R1's release. Rows on Settings > Camera.
+- Assumption: Re:CoM's pick (its nearest, the cursor's) for KH1's attack target / KH1's pick.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 306 (fork branch Re-Re-Reverse/Rebirth): L2's target step written when Re:CoM's cursor doesn't take it, version 0.172.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "L2/trigger esquerdo não está alternando oponentes no modo Kh1".
