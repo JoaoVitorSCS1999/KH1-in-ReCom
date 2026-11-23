@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 294 (fork branch Re-Re-Reverse/Rebirth): a shot the Guard turned back interrupts its caster (Sora and Riku), version 0.161.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "preciso de uma revisão e balanceamento do combate com o riku, quando alguns oponentes estão castando magia o ataque não interrompe, verifique se esse tipo de coisa já é tratado na gameplay com o Sora nesse mod".
+
+- **Found** (Checked (the owner's 0.160.0 log + disasm)): every turned-back shot met its Wizard with "damage 0 … card playing". Decision 28's card-interrupt test read the enemy's hit info `+0xF8`, which Re:CoM's gather `0x140154EB0` fills inside the handler (`0x14017F81F`), so before the handler it never named the shot. Since 0.11.2, for Sora too.
+- **Fix**: the attacker is read from the waiting hurt body (`+0x98`), as Riku's swings are.
+- **Review** (Checked (code + log)): Riku's swings get Sora's rules already (enemies stay hittable while attacking, `hurt_off` with `riku_on`; his hits carry the card-interrupt bit, `riku_swing_hit`). The deliberate exceptions stand for both: the Wizard's state 4 / the Aquatank's state 3 (the room dims: untouchable, 0.100.1), the bosses' dimming moves, revenge moves, KH1 enemies' own no-reaction hits.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 293 (fork branch Re-Re-Reverse/Rebirth): Riku's Keyblade on the Costumes page (Soul Eater / Keyblade of Heart, cosmetic), unlocked at 15 DP, version 0.160.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "quero implementar para o Riku a troca de Keyblade, vai ser simplesmente cosmética, quero que inicialmente ele possa trocar entre a Soul Eater e a Keyblade of Heart, vai ser uma nova entrada no menu dentro de Costumes, a Keyblade of Heart você pode pegar no KH1 acho, e ela é liberada com 15 de DP, mas inicialmente deixa ela desbloqueada para eu testar"; "no Kingdom Hearts 1 essa é a única keyblade que ele utiliza, numa bossfight inclusive com o mesmo traje do DarkMode".

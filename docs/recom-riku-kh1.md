@@ -822,3 +822,23 @@ o mesmo traje do DarkMode".
     attire change keeps its transformation.
 - Asset step: **re-run** (automatic). **Checked**: tests, the asset step, the Windows build. **Not
   checked**: in game.
+
+## 0.161.0: combat review: casters and the turned-back shot
+
+Fork owner, 2026-11-23, verbatim: "quando alguns oponentes estão castando magia o ataque não
+interrompe, verifique se esse tipo de coisa já é tratado na gameplay com o Sora nesse mod".
+
+- **Riku's swings already follow Sora's rules** (Checked (code)):
+  - enemies keep their hurt bodies while attacking (`win::attack::hurt_off`, with `riku_on`);
+  - a swing of his landing on an attacking enemy carries Re:CoM's card-interrupt bit
+    (`riku_swing_hit`), which ends the attack (cast) and takes the hit (`0x14017F8A4..0x14017F8BC`).
+- **Exceptions** (the same for Sora; deliberate):
+  - the Wizard's state 4 (the big cast that dims the room, `_ex_2150` shots for 180 frames) and the
+    Aquatank's state 3: untouchable (0.100.1, "Same rule");
+  - bosses' dimming moves and revenge moves;
+  - KH1-AI enemies' own no-reaction hits (e.g. the Yellow Opera's Thunder after its mark).
+- **Bug** (Checked (the owner's log + disasm)):
+  - A shot turned back by the Guard (Sora's since 0.11.2, Riku's since 0.159.0) met its caster
+    with 0 damage while it cast. The test read the enemy's hit info, which Re:CoM's gather fills
+    inside the handler, so the interrupt bit was never set.
+  - Now the attacker comes from the waiting hurt body (`+0x98`).

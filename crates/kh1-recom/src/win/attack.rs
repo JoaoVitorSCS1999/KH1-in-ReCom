@@ -1053,7 +1053,7 @@ unsafe fn kh1_enemy_hit(enemy: usize) -> u64 {
             super::mp::on_kh1_hit(enemy, kh1_row_of(pl));
         }
         let riku = in_attack && riku_hit;
-        let force = in_attack && (sleight || riku || super::guard::turned_hit_pending(enemy));
+        let force = in_attack && (sleight || riku || super::guard::turned_hit_pending(waiting_body(enemy).map(|b| rd::<u32>(b + 0x98))));
         if force {
             wr(enemy + 0x260, flags | 0x200_0000);
         }
