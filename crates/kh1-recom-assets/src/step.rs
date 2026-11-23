@@ -547,6 +547,31 @@ fn run_inner(opt: &Options) -> Result<(), String> {
             }
         }
     }
+    // Riku's Dark Form skin (fork, 0.154.0): Dark Riku's model with Riku's motions retargeted,
+    // as player groups 121 / 131 (`riku_skin`). Not fatal: without it Riku keeps his own model.
+    {
+        let manifest = root.join(kh1_recom_assets::riku_skin::MANIFEST);
+        let mut done = Vec::new();
+        for &(riku, dark, skin) in &kh1_recom_assets::riku_skin::SKIN_GROUPS {
+            match kh1_recom_assets::riku_skin::build(&arc, &keys, riku, dark, skin) {
+                Ok(b) => {
+                    for (rel, bytes) in &b.files {
+                        write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
+                    }
+                    println!("Riku's Dark Form skin: group {skin} = PL{dark:04}'s model with PL{riku:04}'s {} clips", b.clips);
+                    done.push((riku, skin));
+                }
+                Err(e) => println!("note: Riku's Dark Form skin (group {skin}) not built: {e}"),
+            }
+        }
+        if done.is_empty() {
+            if manifest.is_file() {
+                std::fs::remove_file(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
+            }
+        } else {
+            write(&manifest, kh1_recom_assets::riku_skin::manifest_json(&done).as_bytes())?;
+        }
+    }
     // M13 stage 3: KH1's trails and finisher effects as Re:CoM's EET events at the KH1 variant
     // (Sora's PL0001.EET, the Keyblade's PL0002.EET) and kh1-fx.json, the moves the DLL switches.
     let fx_manifest_path = root.join(kh1_recom_assets::kh1_fx::MANIFEST);

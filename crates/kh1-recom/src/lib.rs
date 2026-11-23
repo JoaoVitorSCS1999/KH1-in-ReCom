@@ -114,6 +114,7 @@ pub mod mp_bar;
 pub mod notices;
 pub mod revenge;
 pub mod riku;
+pub mod riku_skin;
 pub mod rows;
 pub mod settings;
 pub mod kh1_enemy;

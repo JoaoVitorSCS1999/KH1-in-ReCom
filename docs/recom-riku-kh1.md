@@ -265,3 +265,62 @@ efetiva tal qual o KH1 é".
 - Fix: both wrapped as Sora's `0x140217310` is (same first 16 bytes): his Re:CoM roll keeps his exe,
   everything else in action 6 runs the KH1 frame.
 - A shot within 1 m of him is judged by its caster's position for the front test.
+
+## 0.154.0: Riku's Dark Form skin (Dark Riku's model, Riku's own moves)
+
+Fork owner, 2026-11-22: "ele vai desbloquear a skin do Dark Mode e vai poder jogar com ela no modo
+sem estar com darkmode ativado, testa com ela liberada já de começo"; "pode colocar a skin mas os
+movimentos ser o normal mesmo".
+
+- **0.152.0's blocker avoided**: the Dark mesh (`PL0201.MDL`, multi-bone packets our MDL reader
+  refuses) is not rebound. The skin is Dark Riku's model and textures as they are, and Riku's
+  motions are moved onto Dark Riku's skeleton instead.
+- **Skeletons** (Checked (files)):
+  - Riku `ex_1010_sk` has 102 bones; Dark Riku `ex_1580_sk` has 128.
+  - Every body bone has the same name in both. Rest positions differ by up to 8 cm, and the
+    bones' rest axes differ (bone 1, `hip`, `waist`, the Soul Eater chain), so channels can't be
+    copied.
+  - Dark-only bones: the coat tails `*_skt*`, `l_uparm2` / `r_uparm2`, and `wep1` / `wep2`, which
+    stand for Riku's `k10` / `k11`.
+  - Riku-only bones: the belts, cuffs and pants.
+- **Retarget** (`kh1_recom_assets::riku_skin`):
+  - Rotation, per frame: `U_dark = R_dark · R_rikuᵀ · U_riku`, where `U` is a bone's world
+    rotation in the frame and `R` its rest world rotation.
+  - Translation: Dark's rest translations; `Root`'s from Riku (root motion); bone 1 is Dark's
+    rest plus Riku's offset from his own rest.
+  - Dark-only bones keep their rest pose relative to their parent.
+  - Result on Riku's idle (Checked (files, test)): feet and head move by the same amount as on
+    Riku, within 3 cm.
+- **Events**: `.SES` (bone `+0x08`) and `.EET` (bones `+0x24`, `+0x34`, `+0x44`) name bones by
+  index. They are remapped by name, and a Riku-only bone goes to its nearest mapped ancestor.
+- **Bone lookups by name** (Checked (exe)): `0x1401A4450` with `wep0`, `ex_1010_sk` /
+  `ex_1580_sk` (by char), `chest1`, `WeaponR`, `head`, `l_toes`, `r_toes` (strings
+  `0x1407C5E10..0x1407C5E50`). The skin's bone 1 is renamed `ex_1010_sk`.
+- **Riku's weapon** has no model group: `0x140224BA0` attaches chars 3..6 to a body bone
+  (`0x140224C58`). Checked (exe).
+- **Files**: player groups 121 (from 101 / 201) and 131 (from 111 / 211), new names not in
+  `Recom.hed` (Checked (files)):
+  - loose: `PL01x1.MDL` (Dark's, bone renamed), `.ANN` (Riku's 51 clips retargeted), `.EET`,
+    `.SES`;
+  - raw (with the PC textures): `.RTM` and `.TXA` (Dark's eye blink).
+  - The manifest is `kh1-riku-skin.json`. The names also get placeholders before the first
+    launch's build.
+- **Table rows** (`crate::riku_skin::add_rows`): each skin group copies its Riku group's 11 rows
+  in Re:CoM's PLAYER table (same types and order). The skin's own files replace RTM, TXA, MDL,
+  ANN, EET and SES; the camera data `.BIN` (identical in 101 and 201), the sound bank `.SND` and
+  the effect links stay Riku's.
+- **Switch**:
+  - Re:CoM's char → group table `0x1405A6910` (`.rdata`: 0, 1, 11, 101, 111, 201, 211) is read by
+    the player ctor (`0x1401E4CDA`, kept at `+0x39C`), the group load (`0x140211A5B`,
+    `0x140211AE4`) and the unload (`0x1402115EE`, `0x14021161F`). Checked (exe).
+  - With `riku_dark_skin = on` (ini, default on while testing; unlocked from the start), chars 3
+    and 4 point at 121 / 131. One checked write at start; nothing per frame.
+  - Dark Mode (char 5 → 201) is unchanged.
+- **Assumptions**:
+  - Dark Mode's Dark Riku (group 201) and the skin (121) share texture names (`n_zz120_*`): both
+    loaded together in Dark Mode.
+  - The coat tails hang at rest (Riku's clips have no tail motion).
+  - Nothing else in Re:CoM's Riku code reads a bone by index.
+- **Not yet**: the unlock rule (first Dark Mode, save spare bit 4) and a menu switch.
+- **Checked**: tests (`riku_skin::tests` in both crates, the asset step run on the local
+  install), the Windows build. **Not checked**: in game.

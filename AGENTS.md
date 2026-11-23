@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 275 (fork branch Re-Re-Reverse/Rebirth): Riku's Dark Form skin, Dark Riku's model with Riku's own moves, version 0.154.0 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "ele vai desbloquear a skin do Dark Mode e vai poder jogar com ela no modo sem estar com darkmode ativado, testa com ela liberada já de começo e depois a gente bota o requisito do jogo pra liberar ela"; "pode colocar a skin mas os movimentos ser o normal mesmo".
+
+- **Way round 0.152.0's blocker**: the Dark mesh is not rebound. Riku's 51 clips are retargeted onto Dark Riku's 128-bone skeleton by world rotation (`kh1_recom_assets::riku_skin`). Bone names match; rest axes differ. Checked (files).
+- **Events**: Riku's `.SES` / `.EET` bone indices are remapped by name.
+- **Bone 1**: renamed `ex_1010_sk`, because Riku's code looks his bones up by name (`0x1401A4450`, strings `0x1407C5E10..`). Checked (exe).
+- **Asset step** (**re-run**: automatic, the step's hash changed): new player groups 121 / 131 (`PLAYER/01x1/PL01x1.{MDL,ANN,EET,SES}`, `raw/…{RTM,TXA}`), plus `kh1-riku-skin.json`. Placeholders are made for the new names.
+- **DLL** (`crate::riku_skin`, `win::riku_skin`):
+  - the skin groups' rows copy Riku's in the PLAYER table copy (`win::models`);
+  - with `riku_dark_skin = on` (ini, default on; unlocked from the start, as the owner asked for the test), Re:CoM's char → group entries for chars 3 / 4 (`0x1405A6910 + 12`, checked 101 / 111) become 121 / 131. Checked (exe: every reader of the table).
+  - Riku's weapon takes no group. Dark Mode is unchanged.
+- **Not yet**: the unlock rule and a menu switch.
+- **Assumptions**: Dark Riku and the skin share texture names in Dark Mode; no Re:CoM Riku code reads a bone by index; the coat tails at rest.
+- **Checked**: tests, the asset step on the local install, the Windows build. **Not checked**: in game. Details: `docs/recom-riku-kh1.md` § 0.154.0.
+
+---
+
 ## Stage 274 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard runs KH1's frame (his own action-6 exes wrapped), version 0.153.1 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "BRO, still not effective!!! … i tried rikus guard against Heartless Wizard thunder and ice magic"; "also parry should be effective just like KH1 Sora with this mod bro!".
