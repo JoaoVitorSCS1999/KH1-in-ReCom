@@ -673,3 +673,31 @@ Fork owner, 2026-11-23, verbatim: "não percebi alteração...".
   Guard kept row 0x24.
 - **Fix**: each distinct table is named once (`win::riku_skin::guard_rows`).
 - **Checked**: tests, the Windows build. **Not checked**: in game.
+
+## 0.158.0: Riku's Guard is KH1 Riku's own guard from the Destiny Islands duel
+
+Fork owner, 2026-11-23, verbatim: "ainda ficou estranha a animação do Sora nele... precisamos ser
+criativos, no KH1 tem uma animação do Riku defendendo, ela acontece na Destiny Island no começo do
+jogo quando ele duela com o Sora usando uma espada de madeira, é possível usar essa animação?
+inclusive tem a variação de quando em defesa ele toma impacto".
+
+- **Found** (Checked (files): KH1's `xa_ex_1010.mdls` script `ex_1010.bd` listed with
+  `tools/kh1-ai-script.py`, its attack rows read at `+0x34` / `+0x38` / `+0x3C` / `+0x40`):
+  - KH1's Riku battle set `xa_ex_1010` guards in `func_1e62`. Request 240 (entry 28, 30 frames)
+    goes into the guard, then 241 (entry 29, 60 frames) is played looping as the guard held, both
+    with his guard row `0x550` on (type 2, priority 10).
+  - The other guard rows: `0xF0`, type 2 / priority 20, beside a swing's row `0x80`; `0x630`, type
+    2 / priority 10, at the guard's way out 244.
+  - **The impact while guarding** is the row's recoil: request 110 (entry 13). That is the clip
+    Re:CoM baked as his `p002_043` (row 0x24), which his Guard has played on a block since
+    0.152.0.
+- **The clip** (`kh1_recom_assets::riku_skin::riku_kh1_guard`):
+  - 240's 30 frames, then 241's first 24 (54 frames, the length of Sora's KH1 Guard whose timing
+    the KH1 frame uses).
+  - Converted from KH1's motions onto Riku's Re:CoM skeleton, which is KH1's `ex_1010_sk`, with the
+    converter that makes Sora's KH1 clips.
+  - Still `p002_225` in Riku's packs and the skins'. 0.157.0's retargeted Sora Guard is replaced.
+- Asset step: **re-run** (automatic: the step's hash changed). It reads KH1's `xa_ex_1010.mset` /
+  `.mdls`.
+- **Checked**: tests, the asset step on the local install (the clip in Riku's two packs and both
+  skin packs), the Windows build. **Not checked**: in game.

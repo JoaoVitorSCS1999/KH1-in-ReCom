@@ -552,21 +552,14 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     {
         let manifest = root.join(kh1_recom_assets::riku_skin::MANIFEST);
         let mut done = Vec::new();
-        // 0.157.0: Sora's KH1 Guard (KH1 entry 110, the pack just built) for Riku's own pack.
-        let sora_guard = {
-            let name = built.entries.iter().find(|e| e.kh1_entry == 110 && e.source.as_str() == "kh1").map(|e| e.name.clone());
-            let pack = kh1_recom_assets::ann::Ann::parse(&built.bytes).ok();
-            let skel = install::read_recom(&arc, &keys, install::SORA_MDL).ok().and_then(|d| kh1_recom_assets::mdl::RecomSkeleton::parse(&d).ok());
-            match (name, pack, skel) {
-                (Some(n), Some(p), Some(k)) => p.slots.iter().find_map(|s| s.clip.clone().filter(|c| c.name_str() == n)).map(|c| (c, k)),
-                _ => None,
-            }
-        };
+        // 0.158.0: KH1 Riku's own guard (the Destiny Islands duel set) for Riku's own pack.
+        let guard_files = install::kh1(&game, keys.clone()).ok().and_then(|i| Some((i.read("xa_ex_1010.mset").ok()?, i.read("xa_ex_1010.mdls").ok()?)));
+        let sora_guard = guard_files.as_ref().map(|(m, d)| kh1_recom_assets::riku_skin::GuardSource { mset: m, mdls: d });
         if sora_guard.is_none() {
-            println!("note: Sora's KH1 Guard clip not found: Riku's Guard keeps his clash recoil");
+            println!("note: KH1's xa_ex_1010.mset / .mdls not read: Riku's Guard keeps his clash recoil");
         }
         for &(riku, dark, skin) in &kh1_recom_assets::riku_skin::SKIN_GROUPS {
-            match kh1_recom_assets::riku_skin::build_with(&arc, &keys, riku, dark, skin, sora_guard.as_ref().map(|(c, k)| (c, k))) {
+            match kh1_recom_assets::riku_skin::build_with(&arc, &keys, riku, dark, skin, sora_guard.as_ref()) {
                 Ok(b) => {
                     for (rel, bytes) in &b.files {
                         write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;

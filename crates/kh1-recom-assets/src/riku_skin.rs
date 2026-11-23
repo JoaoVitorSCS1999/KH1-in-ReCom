@@ -351,14 +351,59 @@ pub fn path(g: u16, ext: &str) -> String {
 /// The costume change plays it after Riku's own transformation crouch (`win::riku_skin`).
 pub const DARK_FLIP: &str = "p003_067";
 
-/// Sora's KH1 Guard on Riku (0.157.0; fork owner, 2026-11-23: "a animação escolhida de defesa pro
-/// Riku ficou estranha, tem alguma melhor?", chose "Guard do KH1 adaptada"): Riku has no guard clip
-/// in Re:CoM (his rows 0x24 / 0x25 are both `p002_043`, the clash recoil). The asset step's own
-/// KH1 Guard clip for Sora (KH1 entry 110, `p001_225`) is retargeted onto Riku's skeleton by bone
-/// name (the body bones match: Checked (files: `PL0001.MDL` / `PL0101.MDL`)); his bones Sora has
-/// none of (the Soul Eater chain `k11`..`k1`, belts, pants, hair ends) hold his battle stance's
-/// first frame (`p002_031`, his row 0x2A).
+/// Riku's Guard clip (0.157.0 Sora's KH1 Guard retargeted; 0.158.0 his own KH1 guard).
+///
+/// 0.158.0 (fork owner, 2026-11-23: "no KH1 tem uma animação do Riku defendendo, ela acontece na
+/// Destiny Island … quando ele duela com o Sora usando uma espada de madeira … inclusive tem a
+/// variação de quando em defesa ele toma impacto"): KH1's Riku (`xa_ex_1010`, the Destiny Islands
+/// duel set) guards in his AI script's `func_1e62` (`ex_1010.bd`, Checked (files: the script listed
+/// with `tools/kh1-ai-script.py`)): request **240** (entry 28, 30 frames: into the guard), then
+/// **241** (entry 29, 60 frames, played looping: the guard held), with his guard row `0x550` (type
+/// 2, priority 10) on; the row's recoil is request **110** (entry 13), the same clip Re:CoM baked as
+/// his `p002_043` (row 0x24), which his Guard already plays on a block. The clip here is 240's 30
+/// frames then 241's first 24 (54 frames, the length of Sora's KH1 Guard, whose numbers the KH1
+/// frame uses), converted from KH1's motions onto Riku's Re:CoM skeleton (`ex_1010_sk`, KH1's own:
+/// `crate::convert::Converter`).
 pub const RIKU_GUARD: &str = "p002_225";
+/// KH1 Riku's guard requests: into the guard, the guard held.
+pub const RIKU_GUARD_REQUESTS: (u16, u16) = (240, 241);
+/// Frames of the held part after the way in (240's 30 + 24 = 54, Sora's KH1 Guard length).
+pub const RIKU_GUARD_HOLD: u32 = 24;
+
+/// KH1 Riku's own guard on a Riku skeleton of Re:CoM's (named [`RIKU_GUARD`]).
+pub fn riku_kh1_guard(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<Clip> {
+    let ms = kh1_formats::mset::MotionSet::parse(mset)?;
+    let (into, held) = RIKU_GUARD_REQUESTS;
+    let (_, m_in) = ms.motion_for(into).ok_or_else(|| crate::Error::Format(format!("xa_ex_1010.mset: no request {into}")))?;
+    let (_, m_hold) = ms.motion_for(held).ok_or_else(|| crate::Error::Format(format!("xa_ex_1010.mset: no request {held}")))?;
+    let conv = crate::convert::Converter::new(mdls, riku.clone())?;
+    let mut rig = conv.rig();
+    let mut rows: Vec<Vec<[f64; 9]>> = Vec::new();
+    rig.start_motion(m_in);
+    for f in 0..m_in.frames {
+        let tg = conv.targets(&mut rig, m_in, f as f32, false);
+        let l = conv.locals(&tg, rows.last().map(|v| v.as_slice()));
+        rows.push(l);
+    }
+    rig.start_motion(m_hold);
+    for f in 0..RIKU_GUARD_HOLD.min(m_hold.frames) {
+        let tg = conv.targets(&mut rig, m_hold, f as f32, false);
+        let l = conv.locals(&tg, rows.last().map(|v| v.as_slice()));
+        rows.push(l);
+    }
+    let spec = crate::convert::ClipSpec { name: RIKU_GUARD.into(), looped: false, root_motion: false, blend: 8 };
+    Ok(crate::convert::encode_clip(&spec, &rows))
+}
+
+/// The guard's sources for every Riku skeleton: KH1 Riku's motion set and model.
+pub struct GuardSource<'a> {
+    /// `xa_ex_1010.mset`.
+    pub mset: &'a [u8],
+    /// `xa_ex_1010.mdls`.
+    pub mdls: &'a [u8],
+}
+
+/// Sora's KH1 Guard on Riku (0.157.0; replaced by [`riku_kh1_guard`] in 0.158.0, kept for tests).
 /// Riku's battle stance (his action row 0x2A). Checked (exe: `0x1407C6370`).
 pub const RIKU_STANCE: &str = "p002_031";
 
@@ -433,7 +478,7 @@ pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable,
 /// [`build`], Riku's pack first given Sora's KH1 Guard (`sora`: his guard clip and skeleton;
 /// 0.157.0). Riku's own pack is then one of the files (`PLAYER/01x1/PL01x1.ANN`), and the skin's
 /// pack gets the guard too.
-pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, riku: u16, dark: u16, skin: u16, sora: Option<(&Clip, &RecomSkeleton)>) -> Result<Built> {
+pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, riku: u16, dark: u16, skin: u16, guard: Option<&GuardSource>) -> Result<Built> {
     let rd = |g: u16, ext: &str| crate::install::read_recom(arc, keys, &path(g, ext));
     let raw = |g: u16, ext: &str| -> Result<(Vec<u8>, Vec<kh1_formats::egs::HdAsset>, i32)> {
         let n = path(g, ext);
@@ -449,8 +494,8 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     let ds = RecomSkeleton::parse(&dmdl)?;
     let mut ann = Ann::parse(&rd(riku, "ANN")?)?;
     let mut riku_pack = None;
-    if let Some((g, sk)) = sora {
-        let guard = riku_guard(g, sk, &rs, &ann)?;
+    if let Some(src) = guard {
+        let guard = riku_kh1_guard(src.mset, src.mdls, &rs)?;
         ann = with_clip(ann, guard);
         riku_pack = Some((path(riku, "ANN"), ann.to_bytes()));
     }

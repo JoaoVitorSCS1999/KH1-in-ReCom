@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 289 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard is KH1 Riku's own guard (Destiny Islands duel), version 0.158.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "no KH1 tem uma animação do Riku defendendo, ela acontece na Destiny Island … é possível usar essa animação? inclusive tem a variação de quando em defesa ele toma impacto".
+
+- KH1's `xa_ex_1010` script guards with request 240 (into the guard) then 241 (held), with guard row `0x550`. Its recoil, the impact while guarding, is request 110 = Re:CoM's `p002_043`, already his block recoil (Checked (files)).
+- The asset step converts 240 + 241's first 24 frames (54) onto Riku's skeleton (KH1's own) as `p002_225` (replacing 0.157.0's retargeted Sora Guard). **Re-run**, automatic.
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 288 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard row named once per action table, version 0.157.1 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "não percebi alteração...". Chars 3 and 4 share one action table. 0.157.0 renamed row 0x39 for char 3, then refused for char 4, as the owner's log shows. Now each distinct table is named once. **Checked**: tests, the Windows build. **Not checked**: in game.
