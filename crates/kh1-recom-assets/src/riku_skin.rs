@@ -367,8 +367,10 @@ pub const DARK_FLIP: &str = "p003_067";
 pub const RIKU_GUARD: &str = "p002_225";
 /// KH1 Riku's guard requests: into the guard, the guard held.
 pub const RIKU_GUARD_REQUESTS: (u16, u16) = (240, 241);
-/// Frames of the held part after the way in (240's 30 + 24 = 54, Sora's KH1 Guard length).
-pub const RIKU_GUARD_HOLD: u32 = 24;
+/// The clip's length: Sora's KH1 Guard (54 frames), whose timing the KH1 frame uses.
+pub const RIKU_GUARD_FRAMES: usize = 54;
+/// Frames of the held part after the way in (0.158.1: 7, then the way out).
+pub const RIKU_GUARD_HOLD: u32 = 7;
 
 /// KH1 Riku's own guard on a Riku skeleton of Re:CoM's (named [`RIKU_GUARD`]).
 pub fn riku_kh1_guard(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<Clip> {
@@ -385,11 +387,22 @@ pub fn riku_kh1_guard(mset: &[u8], mdls: &[u8], riku: &RecomSkeleton) -> Result<
         let l = conv.locals(&tg, rows.last().map(|v| v.as_slice()));
         rows.push(l);
     }
+    let into: Vec<Vec<[f64; 9]>> = rows.clone();
     rig.start_motion(m_hold);
     for f in 0..RIKU_GUARD_HOLD.min(m_hold.frames) {
         let tg = conv.targets(&mut rig, m_hold, f as f32, false);
         let l = conv.locals(&tg, rows.last().map(|v| v.as_slice()));
         rows.push(l);
+    }
+    // 0.158.1 (fork owner: "quando passa um tempo e ele desativa a guarda ficou estranha, sera que
+    // nn tem como colocar a mesma animação mas ao contrário?"): the way out is the way in played
+    // backwards, faster, to fill the clip: it ends on 240's first frame (his stance before the
+    // guard), so the next motion starts from there instead of the held guard.
+    let out = RIKU_GUARD_FRAMES.saturating_sub(rows.len()).max(1);
+    let last = into.len().saturating_sub(1);
+    for k in 0..out {
+        let src = last - ((k + 1) * last + out / 2) / out;
+        rows.push(into[src].clone());
     }
     let spec = crate::convert::ClipSpec { name: RIKU_GUARD.into(), looped: false, root_motion: false, blend: 8 };
     Ok(crate::convert::encode_clip(&spec, &rows))

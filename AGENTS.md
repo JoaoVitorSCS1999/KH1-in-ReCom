@@ -11,6 +11,12 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 290 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard ends by leaving the guard (the way in backwards), version 0.158.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "quando passa um tempo e ele desativa a guarda ficou estranha, sera que nn tem como colocar a mesma animação mas ao contrário?". Riku's 54-frame guard clip is now 240 (30 frames), 241 held (7), then 240 backwards in 17 frames, ending on his pre-guard stance. Asset step: **re-run** (automatic). **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 289 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard is KH1 Riku's own guard (Destiny Islands duel), version 0.158.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "no KH1 tem uma animação do Riku defendendo, ela acontece na Destiny Island … é possível usar essa animação? inclusive tem a variação de quando em defesa ele toma impacto".

@@ -701,3 +701,19 @@ inclusive tem a variação de quando em defesa ele toma impacto".
   `.mdls`.
 - **Checked**: tests, the asset step on the local install (the clip in Riku's two packs and both
   skin packs), the Windows build. **Not checked**: in game.
+
+## 0.158.1: Riku's Guard ends by leaving the guard (the way in backwards)
+
+Fork owner, 2026-11-23, verbatim: "ficou bem melhor o problema é quando passa um tempo e ele desativa
+a guarda ficou estranha, sera que nn tem como colocar a mesma animação mas ao contrário?".
+
+- 0.158.0's clip ended in the held guard (241), so the next motion started from it.
+- The clip is still 54 frames, the length of Sora's KH1 Guard (its live frames 10..36 drive the
+  block). It now plays:
+  - frames 0..29: 240, into the guard;
+  - frames 30..36: 241, the guard held;
+  - frames 37..53: 240 backwards, its 30 frames in 17.
+- It ends on 240's first frame, his stance before the guard. Checked (asset step: the right
+  forearm −36.3° at frames 0 and 53, −71.8° held).
+- Asset step: **re-run** (automatic). **Checked**: tests, the Windows build. **Not checked**: in
+  game.
