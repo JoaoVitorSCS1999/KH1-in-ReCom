@@ -381,3 +381,36 @@ ela só inverteu na Skin Dark Mode".
   build. **Not checked**: in game.
 - Asset step: **re-run** (automatic: the step's hash changed). Only `PL0121.ANN` / `PL0131.ANN`
   change.
+
+## 0.154.3: the Dark blade turned over; the menu's model shows the costume
+
+Fork owner, 2026-11-22 (screenshots: the Dark skin's Soul Eater still the other way; the camp showing
+Riku's own model), verbatim: "estranho, ainda etá invertida … ao entrar no Menu quero que a skin
+também seja alterada".
+
+- **0.154.2's premise was wrong**: the blade already sat as Riku's in the hand. The rest pose is the
+  same in both skeletons (Checked (files): `r_hand` and `wep0` world rest rotations 0.1° / 0.0°
+  apart), so the 0.154.2 file drew the same as 0.154.0.
+- **Real cause** (Checked (files)):
+  - The blade mesh hangs on `wep0` in both models (per-bone bounds: Riku x −0.95..0.16, y
+    −0.14..0.10; Dark x −0.96..0.16, y −0.12..0.13). Dark Riku's is modelled turned over about
+    the blade's axis (`wep0` x).
+  - Dark Riku's own clips hold it so. His grip against Riku's idle grip is 137..178° about
+    `wep0`'s x in 12 of his clips; for example, `wep1` turns 180° about z in his idle.
+  - Riku's clips don't, so his pose on the Dark mesh shows the blade the other way.
+- **Fix** (`riku_skin::BLADE_FLIP`): Dark's `wep0` takes Riku's hand-relative rotation turned half a
+  turn about its x. The blade segments `k9`..`k1` (trail and hit nodes) stay where Riku's are in
+  the world.
+  - Test: every frame of the 51 clips; root position within 2.0 cm, rotation exactly Riku's
+    turned over (0.00°), tip within 2.0 cm.
+- **The menu's model** (Checked (exe)):
+  - `CMenuModel` (vtable `0x140513CB0`, ctor `0x140111F10`, resource id = group + 10000) takes
+    its group from immediate bytes, not the char table: the camp's
+    `mov dword [rsp+0x30], 0x6F650B01` at `0x1400E4701` (1, 11, 101, 111) and the level-up
+    screen's `0x14010EF68` (101, 0, 111, 0).
+  - Riku's two bytes in each become 121 / 131 when the player's group is queued (`win::models`'
+    group-load wrapper, `riku_skin::sync_menu`), so the menu shows the group that is loaded. A
+    costume changed in the camp shows at the next room, in the field and in the menu.
+  - No branch lands inside those bytes (Checked (exe)).
+- **Checked**: tests, the Windows build. **Not checked**: in game. Asset step: **re-run**
+  (automatic): `PL0121.ANN` / `PL0131.ANN`.

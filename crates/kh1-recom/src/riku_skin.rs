@@ -27,6 +27,15 @@ pub const ANN_NAME_TABLE: u64 = 0x1_407C_6338;
 /// Riku's two names ("PL0101", "PL0111") the table points at. Checked (exe).
 pub const RIKU_ANN_NAMES: [u64; 2] = [0x1_405A_145C, 0x1_405A_1464];
 
+/// The menu's own model (`CMenuModel`, ctor `0x140111F10`, resource id = group + 10000) takes its
+/// group from bytes in two instructions, not from the char table (Checked (exe)): the camp's
+/// `mov dword [rsp+0x30], 0x6F650B01` at `0x1400E4701` (groups 1, 11, 101, 111 by story × 2 +
+/// Halloween Town, read at `0x1400E47EF`) and the level-up screen's `mov dword [rbp-0x15],
+/// 0x006F0065` at `0x14010EF68` (model / weapon pairs: 101, 0, 111, 0; read at `0x14010F084`,
+/// `0x14010F0E9`). No branch lands inside them (Checked (exe)). Each entry: the byte's address
+/// and Riku's group (101 or 111).
+pub const MENU_BYTES: [(u64, u16); 4] = [(0x1_400E_4707, 101), (0x1_400E_4708, 111), (0x1_4010_EF6B, 101), (0x1_4010_EF6D, 111)];
+
 /// The motion pack name of a group (`PL0121`).
 pub fn ann_name(group: u16) -> String {
     format!("PL{group:04}")

@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 278 (fork branch Re-Re-Reverse/Rebirth): the Dark blade turned over to Riku's grip; the menu's model shows the costume, version 0.154.3 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "estranho, ainda etá invertida … ao entrar no Menu quero que a skin também seja alterada".
+
+- **Blade** (Checked (files)): both blade meshes hang on `wep0` with the same rest pose. Dark Riku's mesh is modelled turned over about the blade axis, and his own clips turn it back (137..178° in 12 clips); 0.154.2's chain fix drew the same as before. Now Dark's `wep0` = Riku's grip turned half a turn about its x (`riku_skin::BLADE_FLIP`), and the chain `k9`..`k1` stays where Riku's is.
+  - Test: every frame of the 51 clips; 0.00° from Riku's grip turned over, 2 cm.
+- **Menu**: `CMenuModel`'s group comes from immediates (camp `0x1400E4701`, level-up `0x14010EF68`; Checked (exe)). Riku's 101 / 111 there follow the loaded group (`riku_skin::sync_menu` from the group-load wrapper).
+- **Checked**: tests, the Windows build. **Not checked**: in game. Asset step: **re-run** (automatic). Details: `docs/recom-riku-kh1.md` § 0.154.3.
+
+---
+
 ## Stage 277 (fork branch Re-Re-Reverse/Rebirth): Dark Mode skin's Soul Eater held the right way round, version 0.154.2 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "por algum motivo a keyblade do Riku ficou invertida mas o modelo e a gameplay ficaram perfeitas"; "mas ela só inverteu na Skin Dark Mode".

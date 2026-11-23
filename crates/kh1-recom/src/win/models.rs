@@ -228,6 +228,7 @@ pub fn install(b: usize) {
         if skin_rows {
             super::riku_skin::rows_in();
             super::riku_skin::apply(b, super::settings().riku_dark_skin);
+            super::riku_skin::sync_menu(b);
         }
         log(&format!(
             "keyblades: models in: PLAYER table {} rows ({} Re:CoM's + {} for groups {:?}) at {table:#x}; weapon group picked at CPlayerWeapon +0x30; rebuilt at camp close; own EET + EFF (M13 stage 4) for {:?}",
@@ -327,6 +328,8 @@ pub fn prefetch() {
 /// Keyblade's group, before the builder waits for the queue.
 pub unsafe extern "win64" fn group_load(ch: u32) {
     orig::<GroupLoadFn>(&ORIG_GROUP_LOAD)(ch);
+    // Riku's costume: the menu's model now follows the group just queued.
+    super::riku_skin::sync_menu(base());
     if !INSTALLED.load(Ordering::Acquire) {
         return;
     }

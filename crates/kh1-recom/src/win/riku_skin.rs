@@ -20,6 +20,8 @@ static SKINS: OnceLock<Vec<Skin>> = OnceLock::new();
 static ROWS: AtomicBool = AtomicBool::new(false);
 /// The tables point at the skin groups now.
 static ON: AtomicBool = AtomicBool::new(false);
+/// The menu's model bytes point at the skin groups now.
+static MENU_ON: AtomicBool = AtomicBool::new(false);
 /// Our motion pack names, per Riku group (kept for the process: Re:CoM reads the pointers).
 static NAMES: OnceLock<Vec<(u16, usize)>> = OnceLock::new();
 
@@ -75,6 +77,31 @@ unsafe fn name_ptrs(b: usize, sk: &[Skin], on: bool) -> [u64; 2] {
         out[k] = if on { names.iter().find(|n| n.0 == *g).map_or(recom, |n| n.1 as u64) } else { recom };
     }
     out
+}
+
+/// The menu's model (camp and level-up screen) follows the group the player loads: called when
+/// Re:CoM queues the player's group (room and battle builds), so the menu never asks for a group
+/// that isn't loaded (a costume changed in the camp shows at the next room, in the field and in
+/// the menu alike).
+///
+/// # Safety
+/// `b` is the running image's base.
+pub unsafe fn sync_menu(b: usize) {
+    let on = ON.load(Ordering::Relaxed);
+    if MENU_ON.load(Ordering::Relaxed) == on || !ROWS.load(Ordering::Acquire) {
+        return;
+    }
+    let sk = skins();
+    let skin_of = |g: u16| sk.iter().find(|s| s.riku == g).map_or(g, |s| s.skin);
+    for &(at, riku) in &rs::MENU_BYTES {
+        let (from, to) = if on { (riku, skin_of(riku)) } else { (skin_of(riku), riku) };
+        if !super::hook::patch(va(b, at), &[from as u8], &[to as u8], "menu model group (Riku)") {
+            log("riku skin: the menu model's group bytes are not Re:CoM's 101 / 111; the menu keeps Riku's model");
+            return;
+        }
+    }
+    MENU_ON.store(on, Ordering::Relaxed);
+    log(&format!("riku skin: the menu's model (camp, level-up) shows {}", if on { "Dark Mode" } else { "Default Attire" }));
 }
 
 /// Points chars 3 / 4 at the skin groups (`on`, Dark Mode) or back at Riku's own.
