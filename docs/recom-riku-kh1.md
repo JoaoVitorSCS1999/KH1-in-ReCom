@@ -923,3 +923,17 @@ dele".
   - Berserk's bonus on his hits (Re:CoM's weapon path, not KH1's damage).
 - **Fixed**: his KH1 frame took no item command (0.163.0): `input.item` and the item events in his
   branch of `run_frame`.
+
+## 0.166.0: Dark Mode's DP is his DP stat again; "Dark Up"
+
+- **Re:CoM** (Checked (disasm)):
+  - The DP gauge fills to 30 outside Dark Mode; the cap is fixed (`0x1401F57A4`, `0x1401E7284`).
+  - The player's `+0x450` is copied from `stats+0x14` (`0x1401F0C38`). Dark Riku's switch-in sets
+    `+0x44C` = `+0x450` (`0x1402048CE`), and the gauge's max there is `+0x450` (`0x1401E72F1`,
+    `0x1401F5BB3`). So the DP stat is how long Dark Mode can last.
+- **Ours**:
+  - `Dp::enter_dark(stat)`: dp = cap = the stat (1..99). `show` writes the cap as the gauge's max.
+  - Riku's DP row gives Re:CoM's +2 DP and our +2 ability points ("Dark Up"). Re:CoM's DP panel row
+    stays as it is.
+  - Assumption: an early Dark Mode (DP stat 8) is short under the owner's in-Dark losses (−3 a hit),
+    as Re:CoM's own was.

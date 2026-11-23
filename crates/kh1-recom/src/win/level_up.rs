@@ -96,6 +96,10 @@ unsafe fn set_text(this: usize, at: usize, want: &[u8]) {
 }
 
 unsafe fn panel(this: usize) {
+    // 0.166.0: Riku's panel keeps Re:CoM's DP row (his pick raises it).
+    if riku_screen(this) {
+        return;
+    }
     let Some(max) = super::abilities::max_ap_now() else { return };
     let row = ap_row(this);
     let on = rd::<i32>(this + off::CURSOR) == row as i32;
@@ -144,7 +148,9 @@ unsafe fn step(this: usize, b: &Before, st: i32) {
         let riku = riku_screen(this);
         set_text(this, off::ROW_LABEL + off::ROW_STEP * row, if riku { text::RIKU_ROW_LABEL } else { text::ROW_LABEL });
         set_text(this, off::ROW_VALUE + off::ROW_STEP * row, if riku { text::RIKU_ROW_VALUE } else { text::ROW_VALUE });
-        set_text(this, off::PANEL_LABEL + off::PANEL_STEP * row, if riku { text::RIKU_PANEL_LABEL } else { text::PANEL_LABEL });
+        if !riku {
+            set_text(this, off::PANEL_LABEL + off::PANEL_STEP * row, text::PANEL_LABEL);
+        }
         panel(this);
     }
     // Re:CoM re-prints the panel's values on cursor moves and when the rows have opened.
@@ -157,18 +163,15 @@ unsafe fn step(this: usize, b: &Before, st: i32) {
             if rd::<i32>(this + off::CURSOR) != row as i32 {
                 return;
             }
-            // Re:CoM's +2 DP kept only where Re:CoM itself offers its DP row.
+            // 0.166.0: Re:CoM's +2 DP stays (Dark Mode's DP; Re:CoM's own cap 99), with the AP Up.
             let raised = super::stats::riku_dp();
-            if !b.recom_dp_row {
-                super::stats::set_riku_dp(dp);
-            }
             let r = super::abilities::add_ap_up();
             set_text(this, off::RESULT, text::RIKU_RESULT);
             log(&format!(
                 "level-up: Riku's AP Up (his DP row) picked at Re:CoM level {}: {}; DP {dp} -> {raised:?} {}",
                 super::stats::sora_level(),
                 r.map_or_else(|| "the ability state isn't live: nothing added".to_string(), |(n, max)| format!("{n} AP Up pick(s), max AP {max}")),
-                if b.recom_dp_row { "kept (Re:CoM offers its DP row)" } else { "undone (Re:CoM wouldn't offer it: Dark Mode not learned or DP 99)" }
+                if b.recom_dp_row { "(Re:CoM's own DP pick)" } else { "(Re:CoM wouldn't offer its DP row: Dark Mode not learned yet or DP 99)" }
             ));
             return;
         }

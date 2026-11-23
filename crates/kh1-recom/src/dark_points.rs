@@ -76,11 +76,33 @@ pub struct Dp {
     pub idle: u32,
     /// Landed swings since he was last hit.
     pub streak: u32,
+    /// Dark Mode's DP (0.166.0; fork owner, 2026-11-23: "o DP enchendo e esvaziando tbm liga com o
+    /// DP maximo oq aconteceu com ele"): Re:CoM's Dark Riku starts with Riku's DP stat (`+0x450`,
+    /// his save's `stats+0x14`: 8 at a new game, + 2 a DP pick, at most 99) and holds no more
+    /// (`0x1402048BD..0x1402048CE`, the gauge's max there: `0x1401E72F1`, `0x1401F5BB3`; Checked
+    /// (disasm)). Outside Dark Mode the gauge fills to Re:CoM's fixed 30 ([`MAX`]). 0: [`MAX`].
+    pub dark_max: i32,
 }
 
 impl Dp {
+    /// The most DP held now: [`MAX`] outside Dark Mode, his DP stat in it.
+    pub fn cap(&self) -> i32 {
+        if self.dark && self.dark_max > 0 {
+            self.dark_max
+        } else {
+            MAX
+        }
+    }
+
+    /// Dark Mode begins (Re:CoM's Dark Riku switched in): DP = his DP stat, as Re:CoM's switch-in.
+    pub fn enter_dark(&mut self, dp_stat: i32) {
+        self.dark = true;
+        self.dark_max = dp_stat.clamp(1, 99);
+        self.dp = self.dark_max;
+    }
+
     fn add(&mut self, n: i32) {
-        self.dp = (self.dp + n).clamp(0, MAX);
+        self.dp = (self.dp + n).clamp(0, self.cap());
     }
 
     fn change(&self) -> Change {
@@ -221,6 +243,13 @@ mod tests {
             d.event(Event::Swing { finisher: true });
         }
         assert_eq!(d.dp, MAX, "capped");
+        let mut e = Dp::default();
+        e.enter_dark(8);
+        assert_eq!((e.dp, e.cap()), (8, 8), "Dark Mode starts at his DP stat (a new game: 8)");
+        e.event(Event::Defeat { boss: false });
+        assert_eq!(e.dp, 8, "never past it");
+        e.enter_dark(150);
+        assert_eq!(e.cap(), 99);
         assert_eq!(d.change(), Change::Enter);
     }
 

@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 300 (fork branch Re-Re-Reverse/Rebirth): Dark Mode starts at Riku's DP stat again; his DP row is "Dark Up" (DP +2 and Ability Points +2), version 0.166.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "mas sumiu o DP"; "certo mas o DP enchendo e esvaziando tbm liga com o DP maximo oq aconteceu com ele"; chose "DP e Ability juntos".
+
+- **Re:CoM** (Checked (disasm)): outside Dark Mode the gauge fills to a fixed 30 (`0x1401F57A4`, `0x1401E7284`); Dark Riku's switch-in sets DP = max = Riku's DP stat (`+0x450` from `stats+0x14`, `0x1401F0C38`, `0x1402048BD..0x1402048CE`): 8 at a new game, +2 a DP pick, at most 99; it drains to 0. 0.151.0's tables had dropped it (30 in Dark Mode too); 0.164.0 then took the pick for the ability points, wrongly calling it unused.
+- **Now**: Dark Mode starts at his DP stat, its gauge's max (`dark_points::Dp::enter_dark`), the owner's tables drain it. His third level-up row is "Dark Up / DP +2, Ability Pts +2" (always offered; Re:CoM's +2 DP kept; the panel shows Re:CoM's DP); the result "DP and Ability Points increased by 2."
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 299 (fork branch Re-Re-Reverse/Rebirth): Riku's level-up names his ability points in full, version 0.165.1 (2026-11-23)
 
 Fork owner, 2026-11-23 (screenshot: Riku's level-up with "AP 10" and "Max AP 3 → 5"), verbatim: "parece que ficou duplicado esse lance de AP". Not a duplicate: "AP" is Re:CoM's attack stat (his Attack Boost row), ours the ability points. On his screen ours now read "Ability Up" / "Ability Points +2", panel "Ability Pts", result "Ability Points increased by 2."; Sora's unchanged. **Checked**: tests, the Windows build. **Not checked**: in game.

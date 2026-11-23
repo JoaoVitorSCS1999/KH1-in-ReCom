@@ -87,7 +87,7 @@ struct State {
     guard_at: u32,
 }
 
-static STATE: Mutex<State> = Mutex::new(State { dp: Dp { dp: 0, dark: false, idle: 0, streak: 0 }, frame: 0, roll_end: 0, was_rolling: false, last_swing: (0, 0), pending: 0, guard_at: 0 });
+static STATE: Mutex<State> = Mutex::new(State { dp: Dp { dp: 0, dark: false, idle: 0, streak: 0, dark_max: 0 }, frame: 0, roll_end: 0, was_rolling: false, last_swing: (0, 0), pending: 0, guard_at: 0 });
 static CHECKED: AtomicU32 = AtomicU32::new(0);
 static NO_DARK_LOGGED: AtomicBool = AtomicBool::new(false);
 static LINES: AtomicU32 = AtomicU32::new(200);
@@ -166,7 +166,13 @@ pub unsafe fn frame(pl: usize) {
     let Ok(mut g) = STATE.lock() else { return };
     g.frame = g.frame.wrapping_add(1);
     if g.dp.dark != dark {
-        g.dp.dark = dark;
+        if dark {
+            // 0.166.0: Dark Mode starts at Riku's DP stat (Re:CoM's switch-in), its gauge's max.
+            g.dp.enter_dark(super::stats::riku_dp().unwrap_or(crate::abilities::RIKU_START_DP));
+        } else {
+            g.dp.dark = false;
+            g.dp.dp = g.dp.dp.min(dp::MAX);
+        }
         g.pending = 0;
         note(|| format!("Dark Mode {} (DP {})", if dark { "on" } else { "off" }, g.dp.dp));
         if dark {
@@ -196,21 +202,21 @@ pub unsafe fn frame(pl: usize) {
     if ch == Change::None {
         ch = g.dp.frame(action == ATTACK || action == CARD_ATTACK);
     }
-    show(pl, g.dp.dp);
+    show(pl, g.dp.dp, g.dp.cap());
     apply(&mut g, pl, ch);
 }
 
 /// Our DP in Re:CoM's own field and Dark gauge (when they differ).
-unsafe fn show(pl: usize, dp: i32) {
+unsafe fn show(pl: usize, dp: i32, max: i32) {
     if !switches_ok() {
         return;
     }
-    if rd::<i32>(pl + RECOM_DP) != dp || rd::<i32>(pl + RECOM_DP_MAX) != dp::MAX {
+    if rd::<i32>(pl + RECOM_DP) != dp || rd::<i32>(pl + RECOM_DP_MAX) != max {
         wr(pl + RECOM_DP, dp);
-        wr(pl + RECOM_DP_MAX, dp::MAX);
+        wr(pl + RECOM_DP_MAX, max);
         let g: usize = rd(pl + DARK_GAUGE);
         if g != 0 {
-            func::<GaugeSetFn>(GAUGE_SET)(g, dp as u32, dp::MAX as u32);
+            func::<GaugeSetFn>(GAUGE_SET)(g, dp as u32, max as u32);
         }
     }
 }
@@ -259,7 +265,7 @@ fn event(pl: usize, e: Event) {
     }
     // SAFETY: the main player, as `frame` reads it.
     unsafe {
-        show(pl, after);
+        show(pl, after, g.dp.cap());
         apply(&mut g, pl, ch)
     };
 }
