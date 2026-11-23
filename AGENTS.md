@@ -11,6 +11,12 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 299 (fork branch Re-Re-Reverse/Rebirth): Riku's level-up names his ability points in full, version 0.165.1 (2026-11-23)
+
+Fork owner, 2026-11-23 (screenshot: Riku's level-up with "AP 10" and "Max AP 3 → 5"), verbatim: "parece que ficou duplicado esse lance de AP". Not a duplicate: "AP" is Re:CoM's attack stat (his Attack Boost row), ours the ability points. On his screen ours now read "Ability Up" / "Ability Points +2", panel "Ability Pts", result "Ability Points increased by 2."; Sora's unchanged. **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 298 (fork branch Re-Re-Reverse/Rebirth): the Enemy Skills act on Riku; his items reach his KH1 frame, version 0.165.0 (2026-11-23)
 
 Fork owner, 2026-11-23: "concordo" (the plan's step 4: the skills' effects on Riku).

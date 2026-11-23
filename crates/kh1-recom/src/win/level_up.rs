@@ -141,9 +141,10 @@ unsafe fn step(this: usize, b: &Before, st: i32) {
     }
     // The rows were just built: our words on row 1 and the panel.
     if b.state == state::BUILD && st == state::OPENING {
-        set_text(this, off::ROW_LABEL + off::ROW_STEP * row, text::ROW_LABEL);
-        set_text(this, off::ROW_VALUE + off::ROW_STEP * row, text::ROW_VALUE);
-        set_text(this, off::PANEL_LABEL + off::PANEL_STEP * row, text::PANEL_LABEL);
+        let riku = riku_screen(this);
+        set_text(this, off::ROW_LABEL + off::ROW_STEP * row, if riku { text::RIKU_ROW_LABEL } else { text::ROW_LABEL });
+        set_text(this, off::ROW_VALUE + off::ROW_STEP * row, if riku { text::RIKU_ROW_VALUE } else { text::ROW_VALUE });
+        set_text(this, off::PANEL_LABEL + off::PANEL_STEP * row, if riku { text::RIKU_PANEL_LABEL } else { text::PANEL_LABEL });
         panel(this);
     }
     // Re:CoM re-prints the panel's values on cursor moves and when the rows have opened.
@@ -162,7 +163,7 @@ unsafe fn step(this: usize, b: &Before, st: i32) {
                 super::stats::set_riku_dp(dp);
             }
             let r = super::abilities::add_ap_up();
-            set_text(this, off::RESULT, text::RESULT);
+            set_text(this, off::RESULT, text::RIKU_RESULT);
             log(&format!(
                 "level-up: Riku's AP Up (his DP row) picked at Re:CoM level {}: {}; DP {dp} -> {raised:?} {}",
                 super::stats::sora_level(),

@@ -129,6 +129,13 @@ pub mod text {
     /// The status panel's label (Re:CoM's "Max CP" there).
     pub const PANEL_LABEL: &[u8] = b"Max AP\0";
     pub const RESULT: &[u8] = b"Max AP increased by 2.\0";
+    /// Riku's (0.165.1; fork owner, 2026-11-23, screenshot: "parece que ficou duplicado esse lance de
+    /// AP"): his screen already shows Re:CoM's "AP" (his attack stat, the Attack Boost row), so his
+    /// ability points are named in full.
+    pub const RIKU_ROW_LABEL: &[u8] = b"Ability Up\0";
+    pub const RIKU_ROW_VALUE: &[u8] = b"Ability Points +2\0";
+    pub const RIKU_PANEL_LABEL: &[u8] = b"Ability Pts\0";
+    pub const RIKU_RESULT: &[u8] = b"Ability Points increased by 2.\0";
 }
 
 /// The status panel's AP value as Re:CoM prints its CP: `"%4d"`, and on the highlighted row its
