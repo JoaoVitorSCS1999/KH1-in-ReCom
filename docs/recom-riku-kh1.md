@@ -324,3 +324,37 @@ movimentos ser o normal mesmo".
 - **Not yet**: the unlock rule (first Dark Mode, save spare bit 4) and a menu switch.
 - **Checked**: tests (`riku_skin::tests` in both crates, the asset step run on the local
   install), the Windows build. **Not checked**: in game.
+
+## 0.154.1: the T-pose fixed (Riku's motion pack name); Costumes on Riku's top list
+
+Fork owner, 2026-11-22 (screenshots: Riku in the Dark model in a T-pose in the field and the camp;
+Riku's top list), verbatim: "a skin foi implementada mas ficou um Tpose, lembrando que é não é pra
+trocar as animações... além disso … é pra colocar uma nova opção no menu chamada Costumes onde ativa
+essa skin, chame ela de Dark Mode, e a normal se chamará Default Attire".
+
+- **Cause of the T-pose** (Checked (exe + the owner's 0.154.0 log: `chars 3 / 4 -> groups [121, 131]`,
+  the files served)):
+  - A player's action rows find their clips by name in the `.ANN` resource named by a second
+    per-char table, `0x1407C6338[char]` (strings "PL0001" … "PL0211").
+  - Its readers: the player's state init `0x1401FA7F6` and `0x1401F425C`, both calling
+    `0x1402A42B0`, the lookup by resource name of type 0x1D.
+  - 0.154.0 moved Riku to group 121 but left the name `PL0101`. No clip was found, and the model
+    stood in its bind pose.
+- **Fix**: the name pointers of chars 3 / 4 (`0x1407C6350` / `0x1407C6358`, the only pointers to
+  `0x1405A145C` / `0x1405A1464` in the image; Checked (exe)) are switched with the groups, to our
+  `"PL0121"` / `"PL0131"`. Both writes are checked; a failed group write puts the names back.
+- **The moves**: Riku's own clips, unchanged in timing, retargeted onto the Dark skeleton
+  (0.154.0). No Dark Riku motion is used.
+- **Costumes** (`keyblades::top::RIKU_ORDER`, `menu::Page::Costumes`):
+  - Riku's top list is now eight entries at the KH1 list's spacing: Customize, World Map, Map
+    Cards, World Cards, Status, D Report, **Costumes**, Settings.
+  - Costumes is one more of Re:CoM's entry buttons at camp index 7, run by the same code as Sora's
+    KH1 list. The list's order and extra buttons per list are `top::order` / `top::extras`.
+  - It opens a settings page (Re:CoM's Config screen with our row) with one row, **Costume:
+    Default Attire / Dark Mode** (single-value style; ini `riku_dark_skin`).
+  - A change switches both tables at once. It shows from the next room or battle (Re:CoM reads
+    them when it builds the player).
+- **Assumption**: switching back and forth leaves the other group loaded until Re:CoM unloads it
+  (its unload reads the table's group now).
+- **Checked**: tests (`keyblades::tests` Riku's eight, `riku_skin::tests`), the Windows build.
+  **Not checked**: in game.

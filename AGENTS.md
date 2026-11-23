@@ -11,6 +11,21 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 276 (fork branch Re-Re-Reverse/Rebirth): the skin's T-pose fixed, Costumes on Riku's top list (Default Attire / Dark Mode), version 0.154.1 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "a skin foi implementada mas ficou um Tpose, lembrando que é não é pra trocar as animações... além disso … é pra colocar uma nova opção no menu chamada Costumes onde ativa essa skin, chame ela de Dark Mode, e a normal se chamará Default Attire".
+
+- **T-pose cause** (Checked (exe + the owner's log)): the player's clips are found by name in the `.ANN` resource named by `0x1407C6338[char]` ("PL0101" for Riku; readers `0x1401FA7F6`, `0x1401F425C` → `0x1402A42B0`). 0.154.0 changed the group, not this name.
+- **Fix**: the names of chars 3 / 4 (`0x1407C6350` / `58`, the only pointers to them; Checked (exe)) are switched with the groups, to `PL0121` / `PL0131`. Both writes are checked.
+- **Moves**: Riku's own clips (retargeted), as the owner asked.
+- **Costumes**:
+  - Riku's top list is now eight: Customize, World Map … D Report, **Costumes**, Settings (`top::RIKU_ORDER`). It runs on the same reordered-list code as Sora's KH1 list (`top::order` / `extras` / `list_fix`).
+  - Costumes opens a settings page with one row, **Costume: Default Attire / Dark Mode** (ini `riku_dark_skin`), switched live (`win::riku_skin::apply`) and shown from the next room or battle.
+- **Assumption**: the other group stays loaded after a switch until Re:CoM unloads it.
+- **Checked**: tests, the Windows build. **Not checked**: in game. Asset step: unchanged. Details: `docs/recom-riku-kh1.md` § 0.154.1.
+
+---
+
 ## Stage 275 (fork branch Re-Re-Reverse/Rebirth): Riku's Dark Form skin, Dark Riku's model with Riku's own moves, version 0.154.0 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "ele vai desbloquear a skin do Dark Mode e vai poder jogar com ela no modo sem estar com darkmode ativado, testa com ela liberada já de começo e depois a gente bota o requisito do jogo pra liberar ela"; "pode colocar a skin mas os movimentos ser o normal mesmo".

@@ -122,6 +122,7 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
     let when = match item.effect() {
         crate::menu::Effect::Now => "now",
         crate::menu::Effect::NextBattle => "from the next battle",
+        crate::menu::Effect::NextRoom => "from the next room",
     };
     log(&format!("kh1 entry: {} = {shown} ({when})", item.key()));
     match item {
@@ -135,6 +136,9 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
         Item::AutoCamera => camera::set_auto(s.auto_camera),
         Item::GuardReactions => attack::set_guard_reactions(s.guard_reactions),
         Item::RevengeValue => revenge::set_enabled(s.boss_revenge),
+        // Fork: Riku's Costume: Re:CoM's char -> group entries now; the next player build shows it.
+        // SAFETY: two checked writes of Re:CoM's static tables (the camp: no player is being built).
+        Item::Costume => unsafe { riku_skin::apply(base(), s.riku_dark_skin) },
         // Read by each KH1 frame (`movement::run_frame`, `stick_class`).
         Item::RunSpeed | Item::JumpHeight | Item::AirSpeed => movement::set_speeds(crate::movement::speeds::Speeds { run: s.run_speed, jump: s.jump_height, air: s.air_speed }),
         Item::DodgeRoll => {

@@ -498,9 +498,9 @@ unsafe fn spare_check() {
 /// One of our entry buttons, made as `0x1400E3DE0` makes Re:CoM's (mode 0, first time:
 /// `C2DSeqCtrl`, kind 0xC, `+0x138 = 1`, sequence 4, its place, a `C2DFnt` label colour 0x80404040
 /// font 0xF flags 0x40 attached at (0, 6)). Checked (disasm `0x1400E3E80..0x1400E3F8A`).
-unsafe fn create_extra(camp: *mut u8, k: usize) {
-    let idx = top::EXTRA[k];
-    let Some(row) = top::entry(top::Layout::Kh1, idx).and_then(|e| e.page()) else { return };
+unsafe fn create_extra(camp: *mut u8, l: top::Layout, k: usize) {
+    let Some(&idx) = top::extras(l).get(k) else { return };
+    let Some(row) = top::entry(l, idx).and_then(|e| e.page()) else { return };
     let set = set_of(camp);
     let btn = func::<NewFn>(NEW)(0x170);
     if btn.is_null() {
@@ -510,7 +510,7 @@ unsafe fn create_extra(camp: *mut u8, k: usize) {
     put::<u8>(btn, 0x16E, 0xC);
     put::<u8>(btn, 0x138, 1);
     vfn::<SeqInitFn>(btn, 0x8)(btn, set, 4, 0.0, 0);
-    place(btn, top::Layout::Kh1, idx);
+    place(btn, l, idx);
     let mut fnt = func::<NewFn>(NEW)(0xB0);
     if !fnt.is_null() {
         let colour = LABEL_NORMAL;
@@ -534,7 +534,7 @@ unsafe fn delete_extras() {
 }
 
 fn extra(idx: i32) -> (*mut u8, *mut u8) {
-    match top::EXTRA.iter().position(|&i| i == idx) {
+    match top::extras(list_now()).iter().position(|&i| i == idx) {
         Some(k) => (EXTRA_BTN[k].load(Ordering::Relaxed) as *mut u8, EXTRA_FNT[k].load(Ordering::Relaxed) as *mut u8),
         None => (std::ptr::null_mut(), std::ptr::null_mut()),
     }
@@ -557,7 +557,7 @@ unsafe fn place_recoms(camp: *mut u8, l: top::Layout) {
     for i in 0..top::RECOM_ENTRIES {
         place(at(camp, camp::BUTTONS + 8 * i as usize), l, i);
     }
-    MOVED.store(l == top::Layout::Kh1, Ordering::Relaxed);
+    MOVED.store(top::order(l).is_some(), Ordering::Relaxed);
 }
 
 /// Re:CoM's relabel of one entry button (`0x1400E3DE0` mode 0 with a new level,
@@ -598,30 +598,30 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
     if relabelled {
         ITEMS_ON.store(false, Ordering::Relaxed);
     }
-    LIST.store(layout_code(l), Ordering::Relaxed);
-    if l == top::Layout::Kh1 {
-        for k in 0..2 {
+    let prev_list = LIST.swap(layout_code(l), Ordering::Relaxed);
+    if top::order(l).is_some() {
+        // The KH1 list (Sora) or Riku's (fork: Customize in entry 0's place, Costumes before
+        // Settings): our buttons made (or shown again), entry 0 relabelled, every button placed.
+        let n = top::extras(l).len();
+        if prev_list != layout_code(l) || (0..2).any(|k| (k >= n) != EXTRA_BTN[k].load(Ordering::Relaxed).eq(&0)) {
+            // Another reordered list's buttons (or a missing one): made again for this one.
+            delete_extras();
+            ITEMS_ON.store(false, Ordering::Relaxed);
+        }
+        for k in 0..n {
             let btn = EXTRA_BTN[k].load(Ordering::Relaxed) as *mut u8;
             if btn.is_null() {
-                create_extra(camp, k);
+                create_extra(camp, l, k);
             } else {
                 // Re:CoM's mode 0 on a built list: animation 4 (appear) for every button.
                 anim(btn, set_of(camp), 4);
             }
         }
+        let first = if l == top::Layout::Riku { sub::Row::Customize } else { sub::Row::Items };
         if !ITEMS_ON.swap(true, Ordering::Relaxed) {
-            relabel_one(camp, top::DECKS as usize, sub::Row::Items.label().as_ptr());
+            relabel_one(camp, top::DECKS as usize, first.label().as_ptr());
         }
         place_recoms(camp, l);
-    } else if l == top::Layout::Riku {
-        // Riku's (0.150.0): Re:CoM's seven where they are, entry 0 relabelled Customize.
-        delete_extras();
-        if !ITEMS_ON.swap(true, Ordering::Relaxed) {
-            relabel_one(camp, top::DECKS as usize, sub::Row::Customize.label().as_ptr());
-        }
-        if MOVED.load(Ordering::Relaxed) {
-            place_recoms(camp, l);
-        }
     } else {
         delete_extras();
         if ITEMS_ON.swap(false, Ordering::Relaxed) {
@@ -642,7 +642,7 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
             top::Layout::Kh1 => "camp: KH1's list: Items, Abilities, Customize, then Re:CoM's World Map .. Settings (9 entries, y 78 + 24 each); Settings opens Game Settings, Combat, Movement, Effects & Sound, Camera",
             top::Layout::Settings => "camp: Re:CoM's list (Combat = Re:CoM); Settings opens Game Settings, Combat, Movement, Effects & Sound, Camera",
             top::Layout::Recom => "camp: Re:CoM's list, untouched (Riku's story or the map-only camp)",
-            top::Layout::Riku => "camp: Riku's list at Combat = KH1: Customize in Review Decks' place, then Re:CoM's six; Settings opens Game Settings, Combat, Movement, Camera",
+            top::Layout::Riku => "camp: Riku's list at Combat = KH1: Customize in Review Decks' place, Re:CoM's World Map .. D Report, Costumes, Settings (8 entries, y 88 + 24 each); Settings opens Game Settings, Combat, Movement, Camera",
         });
     }
 }
@@ -664,7 +664,7 @@ pub unsafe extern "win64" fn entry_build(camp: *mut u8, mode: i32, level: u64) -
     }
     match mode {
         0 => apply_layout(camp, layout_now(camp), relabels),
-        1 | 2 if layout_of(camp) == top::Layout::Kh1 => {
+        1 | 2 if top::order(layout_of(camp)).is_some() => {
             for k in 0..2 {
                 anim(EXTRA_BTN[k].load(Ordering::Relaxed) as *mut u8, set_of(camp), if mode == 1 { 5 } else { 6 });
             }
@@ -676,7 +676,7 @@ pub unsafe extern "win64" fn entry_build(camp: *mut u8, mode: i32, level: u64) -
 
 /// The button and label of camp index `i` (ours at 7 / 8).
 unsafe fn entry_parts(camp: *mut u8, i: i32) -> (*mut u8, *mut u8) {
-    if top::EXTRA.contains(&i) {
+    if top::extras(list_now()).contains(&i) {
         return extra(i);
     }
     if !(0..top::RECOM_ENTRIES).contains(&i) {
@@ -687,7 +687,7 @@ unsafe fn entry_parts(camp: *mut u8, i: i32) -> (*mut u8, *mut u8) {
 
 /// The help line of camp index `i` at the KH1 list: ours for our entries, Re:CoM's message for its.
 unsafe fn kh1_help(camp: *mut u8, i: i32) -> *const u8 {
-    match top::entry(top::Layout::Kh1, i) {
+    match top::entry(list_now(), i) {
         Some(top::Entry::Recom(r)) => top::recom_help(story(camp), r).map_or(std::ptr::null(), |id| message(id)),
         Some(e) => e.page().and_then(|r| r.help()).map_or(std::ptr::null(), |t| t.as_ptr()),
         None => std::ptr::null(),
@@ -718,7 +718,7 @@ unsafe fn cursor_set_kh1(camp: *mut u8, old: i32, new: i32, show: bool) -> u64 {
             }
             func::<SprIntFn>(PRIORITY)(b, 0xD);
         }
-        let s = top::slot(top::Layout::Kh1, new).unwrap_or(0);
+        let s = top::slot(list_now(), new).unwrap_or(0);
         highlight_bar(camp, s);
         glove_target(camp, new, s);
         put::<i32>(camp, camp::CURSOR, new);
@@ -734,7 +734,7 @@ unsafe fn highlight_bar(camp: *mut u8, s: i32) {
     if bar.is_null() {
         return;
     }
-    let (x, y) = top::bar_pos(top::Layout::Kh1, s);
+    let (x, y) = top::bar_pos(list_now(), s);
     let pos = Vec4([x, y, 0.0, 1.0]);
     func::<PosFn>(LAYOUT_POS)(bar, pos.0.as_ptr());
     func::<SprIntFn>(VISIBLE)(bar, 1);
@@ -745,7 +745,7 @@ unsafe fn highlight_bar(camp: *mut u8, s: i32) {
 /// `+0xF40`; `+0xCC` (8 bytes) = 1 (gliding, time 0); the glove (`camp+0x260`) shown. Checked
 /// (disasm `0x1400E3D30..0x1400E3DC5`).
 unsafe fn glove_target(camp: *mut u8, i: i32, s: i32) {
-    let (x, y) = top::glove_pos(top::Layout::Kh1, s);
+    let (x, y) = top::glove_pos(list_now(), s);
     let t = [x, y, 0.0, 1.0];
     put::<[f32; 4]>(camp, camp::GLIDE_TARGET, t);
     if i == at::<i32>(camp, camp::CURSOR) {
@@ -763,24 +763,15 @@ unsafe fn glove_target(camp: *mut u8, i: i32, s: i32) {
 /// does Re:CoM's work for nine entries at their places; elsewhere it is Re:CoM's.
 pub unsafe extern "win64" fn cursor_set(camp: *mut u8, idx: i32, show: i32) -> u64 {
     let o: CursorSetFn = orig(&ORIG_CURSOR);
-    if layout_of(camp) == top::Layout::Riku && at::<i32>(camp, camp::LEVEL) == 0 {
-        // Re:CoM's work, then our help line for our Customize in entry 0's place.
-        let r = o(camp, idx, show);
-        if show != 0 && at::<i32>(camp, camp::CURSOR) == top::DECKS {
-            if let Some(t) = sub::Row::Customize.help() {
-                set_help(camp, t.as_ptr());
-            }
-        }
-        return r;
-    }
-    if layout_of(camp) != top::Layout::Kh1 || at::<i32>(camp, camp::LEVEL) != 0 {
+    let l = layout_of(camp);
+    if top::order(l).is_none() || at::<i32>(camp, camp::LEVEL) != 0 {
         return o(camp, idx, show);
     }
     let redirect = REDIRECT.load(Ordering::Relaxed);
     let mut new = if show != 0 && redirect >= 0 { redirect } else { idx };
-    if top::slot(top::Layout::Kh1, new).is_none() {
+    if top::slot(l, new).is_none() {
         // Re:CoM's wrap over the list (below 0: the last on screen; past the end: the first).
-        new = top::at_slot(top::Layout::Kh1, if new < 0 { top::KH1_ENTRIES - 1 } else { 0 }).unwrap_or(0);
+        new = top::at_slot(l, if new < 0 { top::count(l) - 1 } else { 0 }).unwrap_or(0);
     }
     let old = at::<i32>(camp, camp::CURSOR);
     cursor_set_kh1(camp, old, new, show != 0)
@@ -875,7 +866,8 @@ pub unsafe extern "win64" fn camp_update(camp: *mut u8) {
     }
     let state = at::<i32>(camp, camp::STATE);
     let cursor = at::<i32>(camp, camp::CURSOR);
-    let kh1 = l == top::Layout::Kh1;
+    // A list with an order of its own: Sora's KH1 list, Riku's (fork).
+    let kh1 = top::order(l).is_some();
     match state {
         // Re:CoM gives every entry animation 5 once button 0's animation has ended (then, in 0xD,
         // re-highlights the cursor's entry).
@@ -884,7 +876,7 @@ pub unsafe extern "win64" fn camp_update(camp: *mut u8) {
             let was_ended = ended(b0);
             o(camp);
             if was_ended {
-                for (k, &i) in top::EXTRA.iter().enumerate() {
+                for (k, &i) in top::extras(l).iter().enumerate() {
                     if !(state == 0xD && at::<i32>(camp, camp::CURSOR) == i) {
                         anim(EXTRA_BTN[k].load(Ordering::Relaxed) as *mut u8, set_of(camp), 5);
                     }
@@ -893,13 +885,7 @@ pub unsafe extern "win64" fn camp_update(camp: *mut u8) {
         }
         0xF => {
             let pad = top_pad();
-            let fix = if kh1 {
-                top::kh1_fix(cursor, pad)
-            } else if l == top::Layout::Riku {
-                top::riku_fix(cursor, pad)
-            } else {
-                top::Fix::None
-            };
+            let fix = if kh1 { top::list_fix(l, cursor, pad) } else { top::Fix::None };
             if let top::Fix::Confirm(e) = fix {
                 // Re:CoM's confirm must not run for ours (entry 0 would open its deck submenu):
                 // an index past 6 makes it skip (`0x1400DAABD`), the frame's other work stays.
@@ -918,7 +904,7 @@ pub unsafe extern "win64" fn camp_update(camp: *mut u8) {
                 return;
             }
             if kh1 {
-                REDIRECT.store(top::kh1_move(cursor, pad).unwrap_or(-1), Ordering::Relaxed);
+                REDIRECT.store(top::list_move(l, cursor, pad).unwrap_or(-1), Ordering::Relaxed);
             }
             o(camp);
             REDIRECT.store(-1, Ordering::Relaxed);
@@ -946,7 +932,7 @@ pub unsafe extern "win64" fn camp_update(camp: *mut u8) {
         }
         // State 0x11 reads a 7-byte table (`1D 16 41 1A 44 47 4A`): index 0 gives the deck
         // submenu 0x1D, 7 / 8 read past it. Our pages open through the Config states 0x4A..0x4C.
-        0x11 if (kh1 || l == top::Layout::Riku) && ours_confirmed(cursor) => {
+        0x11 if kh1 && ours_confirmed(cursor) => {
             o(camp);
             let now = at::<i32>(camp, camp::STATE);
             if now != 0x11 {
@@ -1203,6 +1189,8 @@ impl Sub {
 enum Session {
     List(Sub),
     Page(Page),
+    /// A top entry that opens one of our settings pages (Riku's Costumes, fork).
+    Settings(super::menu::SettingsPage),
 }
 
 impl Session {
@@ -1210,6 +1198,7 @@ impl Session {
         match self {
             Session::List(s) => s.camp,
             Session::Page(p) => p.camp,
+            Session::Settings(p) => p.camp(),
         }
     }
 
@@ -1217,6 +1206,8 @@ impl Session {
         match self {
             Session::List(s) => s.delete_all(),
             Session::Page(p) => p.delete_all(),
+            // Its items are in Re:CoM's Config slots: Re:CoM's teardown deletes them.
+            Session::Settings(_) => {}
         }
     }
 }
@@ -1404,7 +1395,7 @@ impl Page {
                 let content = Content::Items { screen: ip::Screen::new(), msg: None, inv: Default::default(), ctx: Default::default(), rows: Vec::new() };
                 (content, list::open_on(2, 0))
             }
-            sub::Row::Abilities | sub::Row::GameSettings | sub::Row::Combat | sub::Row::Movement | sub::Row::EffectsSound | sub::Row::Camera => {
+            sub::Row::Abilities | sub::Row::GameSettings | sub::Row::Combat | sub::Row::Movement | sub::Row::EffectsSound | sub::Row::Camera | sub::Row::Costumes => {
                 // The settings rows open a settings page (`Open`), never a list page.
                 let content = Content::Abilities { screen: ap::Screen::default(), state: Default::default(), level: 1, rows: Vec::new(), msg: None, live: false };
                 (content, list::open_on(2, 0))
@@ -2185,6 +2176,10 @@ pub unsafe fn page(camp: *mut u8) -> u64 {
             let saved = at::<i32>(camp, camp::SAVED);
             let row = if ours_confirmed(saved) { top::entry(list_now(), saved).and_then(|e| e.page()) } else { None };
             *g = Some(match row {
+                Some(row) if row.settings_page().is_some() => {
+                    log(&format!("camp: {row:?} opened from the top list (a settings page)"));
+                    Session::Settings(super::menu::SettingsPage::open(camp, row.settings_page().unwrap()))
+                }
                 Some(row) => {
                     log(&format!("camp: {row:?} opened from the top list"));
                     Session::Page(Page::open(camp, row))
@@ -2195,6 +2190,7 @@ pub unsafe fn page(camp: *mut u8) -> u64 {
         }
         Some(Session::List(s)) => s.step(),
         Some(Session::Page(p)) => p.step(),
+        Some(Session::Settings(p)) => p.step(),
     };
     if r < 0 {
         *g = None;
