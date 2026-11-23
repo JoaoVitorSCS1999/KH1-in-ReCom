@@ -84,6 +84,7 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
     let ra = world_rot(riku);
     let rb = world_rot(dark);
     let nb = dark.bones.len();
+    let grip = Grip::new(riku, dark);
     let mut rows: Vec<Vec<[f64; 9]>> = Vec::with_capacity(src.frames as usize);
     for f in 0..src.frames.max(1) as usize {
         // Riku's world rotations and positions at this frame.
@@ -107,8 +108,27 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
         }
         // Dark's targets.
         let mut tg: Vec<Target> = Vec::with_capacity(nb);
+        let mut gripped: Vec<Option<Target>> = vec![None; nb];
         for (j, b) in dark.bones.iter().enumerate() {
+            if let Some(g) = &grip {
+                if j == g.first {
+                    g.place(&tg, &ua, &pa, &mut gripped);
+                }
+                if let Some(t) = gripped[j] {
+                    tg.push(t);
+                    continue;
+                }
+            }
             let u = match map[j] {
+                // The blade past `wep0`: relative to `wep0`, as Riku's is to his (the rest frames
+                // relative to `wep0` corrected), so it never twists against the grip.
+                Some(i) if grip.as_ref().is_some_and(|g| g.below[j]) => {
+                    let g = grip.as_ref().unwrap();
+                    let qa = m3(&ua[i], &tr(&ua[g.wep0_a]));
+                    let qa0 = m3(&ra[i], &tr(&ra[g.wep0_a]));
+                    let qb0 = m3(&rb[j], &tr(&rb[g.wep0_b]));
+                    m3(&m3(&m3(&qb0, &tr(&qa0)), &qa), &tg[g.wep0_b].u)
+                }
                 Some(i) => m3(&m3(&rb[j], &tr(&ra[i])), &ua[i]),
                 None if b.parent < 0 => rb[j],
                 None => m3(&unscale(&b.local.r).0, &tg[b.parent as usize].u),
@@ -134,6 +154,67 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
         rows.push(l);
     }
     Ok(encode(src, &rows))
+}
+
+/// The Soul Eater's hold. Riku's `k11` / `k10` and Dark Riku's `wep2` / `wep1` both join the hand
+/// to the blade root `wep0`, but they are not the same chain: Riku's goes 17 cm down the hand's
+/// −z and back, Dark's 22 cm up its +z and back (Checked (files): rest positions in the hand's
+/// frame). Mapped bone to bone they turn the blade the other way round (the owner's screenshot,
+/// 0.154.1). At rest `wep0` sits the same in both hands (rotation identical, position 1.6 cm
+/// apart). So: Dark's `wep0` takes Riku's `wep0` relative to the hand (in the hand's own axes, plus
+/// the rest difference), and `wep2` / `wep1` follow `wep0` rigidly as in Dark's rest pose.
+struct Grip {
+    /// Dark's first chain bone (`wep2`): from here the three are placed together.
+    first: usize,
+    hand_b: usize,
+    hand_a: usize,
+    wep0_a: usize,
+    wep0_b: usize,
+    /// Dark's bones below `wep0` (the blade segments).
+    below: Vec<bool>,
+    /// Dark's chain bones with their rest rotation and offset relative to Dark's `wep0` (wep0 itself:
+    /// identity, 0).
+    chain: Vec<(usize, M3, [f64; 3])>,
+    /// Dark's rest `wep0` position in Dark's hand minus Riku's in Riku's (hand axes).
+    d: [f64; 3],
+}
+
+impl Grip {
+    fn new(riku: &RecomSkeleton, dark: &RecomSkeleton) -> Option<Grip> {
+        let (hand_a, wep0_a) = (riku.find("r_hand")?, riku.find("wep0")?);
+        let (hand_b, w0, w1, w2) = (dark.find("r_hand")?, dark.find("wep0")?, dark.find("wep1")?, dark.find("wep2")?);
+        let (wa, wb) = (riku.rest_world(), dark.rest_world());
+        let rot = |w: &crate::math::Aff| unscale(&w.r).0;
+        let in_frame = |p: [f64; 3], o: &crate::math::Aff| crate::math::vm([p[0] - o.t[0], p[1] - o.t[1], p[2] - o.t[2]], &tr(&rot(o)));
+        let pa = in_frame(wa[wep0_a].t, &wa[hand_a]);
+        let pb = in_frame(wb[w0].t, &wb[hand_b]);
+        let u0 = rot(&wb[w0]);
+        let chain = [w0, w1, w2].iter().map(|&k| (k, m3(&rot(&wb[k]), &tr(&u0)), in_frame(wb[k].t, &wb[w0]))).collect();
+        let mut below = vec![false; dark.bones.len()];
+        for (j, b) in dark.bones.iter().enumerate() {
+            below[j] = b.parent >= 0 && (b.parent as usize == w0 || below[b.parent as usize]);
+        }
+        Some(Grip { first: w2.min(w1).min(w0), hand_b, hand_a, wep0_a, wep0_b: w0, below, chain, d: [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]] })
+    }
+
+    /// The three chain bones' targets, from Dark's hand target (already placed) and Riku's pose.
+    fn place(&self, tg: &[Target], ua: &[M3], pa: &[[f64; 3]], out: &mut [Option<Target>]) {
+        let hb = &tg[self.hand_b];
+        // Riku's blade root in his hand's axes, then in Dark's hand.
+        let c = crate::math::vm(
+            [pa[self.wep0_a][0] - pa[self.hand_a][0], pa[self.wep0_a][1] - pa[self.hand_a][1], pa[self.wep0_a][2] - pa[self.hand_a][2]],
+            &tr(&ua[self.hand_a]),
+        );
+        let c = [c[0] + self.d[0], c[1] + self.d[1], c[2] + self.d[2]];
+        let w = crate::math::vm(c, &hb.u);
+        let p0 = [hb.p[0] + w[0], hb.p[1] + w[1], hb.p[2] + w[2]];
+        // Riku's blade's rotation in his hand, in Dark's hand (the rest rotations match).
+        let u0 = m3(&m3(&ua[self.wep0_a], &tr(&ua[self.hand_a])), &hb.u);
+        for &(k, rel, off) in &self.chain {
+            let o = crate::math::vm(off, &u0);
+            out[k] = Some(Target { u: m3(&rel, &u0), s: [1.0; 3], p: [p0[0] + o[0], p0[1] + o[1], p0[2] + o[2]] });
+        }
+    }
 }
 
 /// The clip from per-frame locals, keeping the source clip's header fields (no scale channels).
@@ -349,6 +430,41 @@ mod tests {
             let rb = dark.rest_world()[dark.find(foot).unwrap()].t[1];
             assert!(((a - ra) - (b - rb)).abs() < 0.03, "{foot}: Riku {a} (rest {ra}), Dark {b} (rest {rb})");
         }
+        // The Soul Eater: on every frame of every clip, the blade root and tip in the hand's axes
+        // match Riku's (within the rest difference, 2 cm).
+        let in_hand = |c: &Clip, sk: &RecomSkeleton, f: f64, bone: &str| -> [f64; 3] {
+            let mut u = vec![crate::math::I3; sk.bones.len()];
+            let mut p = vec![[0.0; 3]; sk.bones.len()];
+            for (i, b) in sk.bones.iter().enumerate() {
+                let s = c.sample(i, f);
+                let r = rot_xyz(s.r[0], s.r[1], s.r[2]);
+                if b.parent < 0 {
+                    u[i] = r;
+                    p[i] = s.t;
+                } else {
+                    let q = b.parent as usize;
+                    let w = crate::math::vm(s.t, &u[q]);
+                    p[i] = [p[q][0] + w[0], p[q][1] + w[1], p[q][2] + w[2]];
+                    u[i] = m3(&r, &u[q]);
+                }
+            }
+            let h = sk.find("r_hand").unwrap();
+            let k = sk.find(bone).unwrap();
+            crate::math::vm([p[k][0] - p[h][0], p[k][1] - p[h][1], p[k][2] - p[h][2]], &tr(&u[h]))
+        };
+        let mut worst: f64 = 0.0;
+        for c in ann.slots.iter().filter_map(|s| s.clip.as_ref()) {
+            let o = retarget(c, &riku, &dark, &map).unwrap();
+            for f in 0..c.frames as usize {
+                for bone in ["wep0", "k1"] {
+                    let a = in_hand(c, &riku, f as f64, bone);
+                    let b = in_hand(&o, &dark, f as f64, bone);
+                    worst = worst.max(crate::math::dist(a, b));
+                }
+            }
+        }
+        eprintln!("Soul Eater in the hand: worst {worst:.4} m");
+        assert!(worst < 0.03, "the blade moved in the hand by {worst} m");
         for &(r, d, k) in &SKIN_GROUPS {
             let b = build(&arc, &keys, r, d, k).unwrap();
             let get = |ext: &str| &b.files.iter().find(|f| f.0.ends_with(ext)).unwrap().1;

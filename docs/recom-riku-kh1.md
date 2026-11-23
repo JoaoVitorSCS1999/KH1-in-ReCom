@@ -358,3 +358,26 @@ essa skin, chame ela de Dark Mode, e a normal se chamará Default Attire".
   (its unload reads the table's group now).
 - **Checked**: tests (`keyblades::tests` Riku's eight, `riku_skin::tests`), the Windows build.
   **Not checked**: in game.
+
+## 0.154.2: the Soul Eater held the right way round in Dark Mode
+
+Fork owner, 2026-11-22 (screenshot: Dark Mode skin, the blade turned the other way), verbatim: "por
+algum motivo a keyblade do Riku ficou invertida mas o modelo e a gameplay ficaram perfeitas"; "mas
+ela só inverteu na Skin Dark Mode".
+
+- **Cause** (Checked (files: rest positions and rotations in the hand's frame)):
+  - Riku's `k11` / `k10` and Dark Riku's `wep2` / `wep1` both join `r_hand` to the blade root
+    `wep0`, but they are different chains. Riku's goes 17 cm along the hand's −z and back; Dark's
+    goes 22 cm along +z and back.
+  - Mapped bone to bone (0.154.0), Riku's grip turns pushed Dark's chain the other way.
+  - At rest, `wep0` in the hand is the same in both: the same rotation, 1.6 cm apart.
+- **Fix** (`riku_skin::Grip`):
+  - Dark's `wep0` takes Riku's `wep0` pose relative to the hand: his rotation in the hand, his
+    position in the hand's axes plus the rest difference.
+  - `wep2` / `wep1` follow `wep0` rigidly, as in Dark's rest pose.
+  - The blade segments `k9`..`k1` follow `wep0` as Riku's follow his.
+- **Checked**: test `riku_idle_on_the_dark_skeleton` covers every frame of the 51 clips. The blade
+  root and tip stay where Riku's are in the hand, worst 2.0 cm (the rest difference). The Windows
+  build. **Not checked**: in game.
+- Asset step: **re-run** (automatic: the step's hash changed). Only `PL0121.ANN` / `PL0131.ANN`
+  change.
