@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 323 (fork branch Re-Re-Reverse/Rebirth): Riku lowers his guard as the defence ends, version 0.180.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "no Riku a janela de defesa não está com a mesma duração da animação"; then "a defesa acaba antes dele baixar a guada". Answering "(a) the animation follows the defence; (b) the defence follows the animation", they chose (a).
+
+- **Measured** (Checked (files), new `riku_guard_motion_profile` on the owner's install): in the built clip (54 frames), the defence is KH1's Guard window 10..36 (as Sora's), and the weapon hand is held forward through frame 38. It started down only at 39–40 and was lowered by 46, because the way out played 240's tail backwards, and 240 (into the guard) has its arm up for its last frames.
+- **Change** (asset step, `riku_skin::riku_kh1_guard`, `settled_from`, `GUARD_ARM`): the way out starts from the 240 frame where the weapon arm (`r_collar`, `r_uparm`, `r_foarm`, `rx_rot`, `r_hand`) reaches the guard (within 5 % of its change). The hand now comes down from frame 37 (0.36 → 0.33 → 0.31 m forward) and is down about 2 frames earlier. The defence window is unchanged.
+- **Asset step**: re-run (automatic; its source changed).
+- **Checked**: tests (the profile test asserts the hand is lower by frame 38 and ends lowered), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 322 (fork branch Re-Re-Reverse/Rebirth): KH1's orange auto-target ring on the soft target, version 0.180.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "preciso que vc implemente o anel laranja/amarelo igual funciona no KH 1 inclusive já tem nas configs dentro do jogo das ultimas implementações sobre o auto-lock"; answering "(1) HUD: com qualquer HUD ou só com `hud = kh1`? (2) aprova o plano (projeto Ghidra do KH1)?", verbatim: "1 só com o modo do kh1 ligado, 2 sim".
