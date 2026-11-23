@@ -206,6 +206,9 @@ const CALLEE_BYTES: &[(u32, [u8; 8])] = &[
     (0x001F_7180, [0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C]),
     (0x0028_F800, [0x40, 0x53, 0x48, 0x83, 0xEC, 0x50, 0x48, 0x8B]),
     (0x001A_57D0, [0x48, 0x8B, 0x81, 0xD8, 0x00, 0x00, 0x00, 0x48]),
+    (0x001A_2D50, [0x45, 0x8B, 0xD0, 0x4C, 0x8B, 0xDA, 0x44, 0x8B]),
+    (0x0025_7EF0, [0x48, 0x83, 0xEC, 0x28, 0x8B, 0xD1, 0x48, 0x8B]),
+    (0x002A_42B0, [0x40, 0x56, 0x41, 0x56, 0x41, 0x57, 0x48, 0x83]),
 ];
 /// The deferred array deleter's vtable (the node dtor's, `0x14023DEA1`). Checked (exe).
 const ARRAY_DELETER_VT: u64 = 0x1_4060_5B38;
@@ -434,6 +437,7 @@ unsafe fn try_swap(b: usize) -> bool {
         func::<super::movement::MotionFn>(super::movement::MOTION_REQUEST)(e, TRANSFORM_ROW, -1, 0, 0, 0, 0);
         TRANS_PL.store(e, Ordering::Relaxed);
         TRANS_FRAMES.store(0, Ordering::Relaxed);
+        TRANS_PHASE.store(0, Ordering::Relaxed);
         log(&format!("riku skin: costume change: Riku's transformation (row {TRANSFORM_ROW:#x}) plays, the model changes at its end"));
     }
     false
@@ -522,11 +526,25 @@ pub unsafe fn frame(e: usize) -> bool {
 /// Riku's transformation row (`0x140215411`: `lea edx, [rdi+0x37]`). Checked (exe).
 const TRANSFORM_ROW: i32 = 0x37;
 /// At most this many frames for the motion (its clip is shorter; a safety end).
-const TRANSFORM_MAX: u32 = 240;
+const TRANSFORM_MAX: u32 = 300;
 /// The player playing the transformation (0: none).
 static TRANS_PL: AtomicUsize = AtomicUsize::new(0);
 static TRANS_FRAMES: AtomicU32 = AtomicU32::new(0);
 type EndFn = unsafe extern "win64" fn(usize) -> u32;
+
+/// Phase of the transformation: 0 Riku's crouch (row 0x37), 1 Dark Riku's flip (0.155.3).
+static TRANS_PHASE: AtomicU8 = AtomicU8::new(0);
+/// Re:CoM's char → action table (`0x1407C6300[char]`, 16-byte rows: name, clip index `+8`) and
+/// the char → motion pack name table. Checked (exe: `0x1401FA7F6..0x1401FA81E`).
+const ACTION_TABLES: u64 = 0x1_407C_6300;
+const PACK_NAMES: u64 = 0x1_407C_6338;
+/// The way back's effect (Riku's own: `0x1402157CD..0x140215811`): `"transform"` effect 2 on his
+/// bone 0x1B, through `0x1401A2D50`, the effect flagged `+0x4C |= 4`. Checked (exe).
+const TRANSFORM_FX_NAME: u64 = 0x1_407C_7C80;
+const TRANSFORM_FX_BONE: u32 = 0x1B;
+type FxFn = unsafe extern "win64" fn(usize, usize, u32, usize, u64, u64, f32) -> u32;
+type FxObjFn = unsafe extern "win64" fn(u32) -> usize;
+type ClipFn = unsafe extern "win64" fn(usize, *const u8, u32) -> i32;
 
 /// One frame of the transformation; true while Riku's move exe is held.
 unsafe fn transition(b: usize, e: usize) -> bool {
@@ -535,6 +553,7 @@ unsafe fn transition(b: usize, e: usize) -> bool {
         // Another player's move exe (or the room was rebuilt): only ours is held.
         if rd::<usize>(va(b, crate::sites::data::MAIN_PLAYER)) != pl {
             TRANS_PL.store(0, Ordering::Relaxed);
+            TRANS_PHASE.store(0, Ordering::Relaxed);
         }
         return false;
     }
@@ -544,12 +563,49 @@ unsafe fn transition(b: usize, e: usize) -> bool {
     if !ended && n < TRANSFORM_MAX {
         return true;
     }
-    TRANS_PL.store(0, Ordering::Relaxed);
-    if let Some(g) = wanted(e) {
-        if rd::<u32>(e + GROUP) != g as u32 && super::models::group_ready(g) {
-            swap_now(b, e, g);
+    let ch: u32 = rd(e + CHAR);
+    let row = rd::<usize>(va(b, ACTION_TABLES) + 8 * ch as usize) + 16 * TRANSFORM_ROW as usize;
+    if TRANS_PHASE.load(Ordering::Relaxed) == 1 {
+        // The flip ended: row 0x37 bound back to its own clip (Re:CoM's rebind by name).
+        func::<RebindFn>(0x001F_4240)(e, ch);
+        return finish(e);
+    }
+    let Some(g) = wanted(e) else { return finish(e) };
+    if rd::<u32>(e + GROUP) == g as u32 || !super::models::group_ready(g) {
+        return finish(e);
+    }
+    swap_now(b, e, g);
+    let to_dark = skins().iter().any(|s| s.skin == g);
+    if to_dark {
+        // Dark Riku's entry flip, as his switch-in plays it (`0x140204841..0x14020485B`: his row
+        // 0x37, blend −1): the skin's pack holds his own clip; row 0x37 points at it for the play.
+        let pack: usize = rd(va(b, PACK_NAMES) + 8 * ch as usize);
+        let clip = func::<ClipFn>(0x002A_42B0)(pack, b"p003_067\0".as_ptr(), 0);
+        if clip >= 0 {
+            wr::<i32>(row + 8, clip);
+            func::<super::movement::MotionFn>(super::movement::MOTION_REQUEST)(e, TRANSFORM_ROW, -1, 0, 0, 0, 0);
+            TRANS_PHASE.store(1, Ordering::Relaxed);
+            TRANS_FRAMES.store(0, Ordering::Relaxed);
+            log(&format!("riku skin: Dark Riku's entry flip (clip {clip}) plays"));
+            return true;
+        }
+        log("riku skin: the skin's pack has no p003_067 (asset step older than 0.155.3?): no flip");
+    } else {
+        // Riku's way back effect.
+        let m = func::<MtxFn>(0x002A_BB20)(e, TRANSFORM_FX_BONE);
+        let h = func::<FxFn>(0x001A_2D50)(e, rd::<usize>(va(b, TRANSFORM_FX_NAME)), 2, m, 0, 0, 0.0);
+        let fx = func::<FxObjFn>(0x0025_7EF0)(h);
+        if fx != 0 {
+            wr::<u32>(fx + 0x4C, rd::<u32>(fx + 0x4C) | 4);
         }
     }
+    finish(e)
+}
+
+/// The transformation's end: Riku's idle, the move exe his again.
+unsafe fn finish(e: usize) -> bool {
+    TRANS_PL.store(0, Ordering::Relaxed);
+    TRANS_PHASE.store(0, Ordering::Relaxed);
     PENDING.store(false, Ordering::Relaxed);
     func::<super::movement::MotionFn>(super::movement::MOTION_REQUEST)(e, 1, 0, 0, 0, 0, 0);
     true

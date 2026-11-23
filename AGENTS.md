@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 283 (fork branch Re-Re-Reverse/Rebirth): the costume change plays Dark Riku's entry flip and its effects; Riku's way-back effect, version 0.155.3 (2026-11-22)
+
+Fork owner, 2026-11-22, verbatim: "funcionou!, mas a animação ficou incompleta, não deu tempo dele dar aquele mortal, também pode ter aquele efeito de tela junto, igual a transição do combate".
+
+- **Re:CoM** (Checked (exe + files)): the transformation is Riku's row 0x37 `p002_057` (crouch), then Dark Riku's own row 0x37 `p003_067` (the flip, `ex_1580` / `transform` effects). The way back spawns `"transform"` effect 2 on Riku's bone 0x1B.
+- **Asset step**: the skin's pack and events get Dark Riku's `p003_067` (**re-run**, automatic).
+- **Game**: to Dark Mode, crouch → model change → the flip (row 0x37 pointed at its slot, rebound after); to Default Attire, crouch → model change → the `"transform"` effect. The switch-in's camera mode 4 is not carried.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 282 (fork branch Re-Re-Reverse/Rebirth): the costume change plays Riku's transformation, version 0.155.2 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "funcionou perfeitamente!, só que eu realmente queria a transição quando altera-se a skin de uma para outra, a animação e o efeito".
