@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 308 (fork branch Re-Re-Reverse/Rebirth): Riku's Keyblade change shows his weapon's own appear effect, version 0.174.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "no Riku na transição quando troca de keyblade deve ser o mesmo efeito quando ele está sem e vc aperta o botão de ataque e ela aparece na mão".
+
+- **Re:CoM** (Checked (exe: disasm)): Riku's "draw the weapon" is his vtable `+0xF8` = `0x1402160A0(riku, show)`: with `+0x418 & 2` (weapon put away) it clears it and, with `show`, plays the effect `[0x1407C7C98]` on his weapon bone `+0x3A0` (`0x1401A2D50`) and fades the weapon in (`+0x154 | 0x40000000`, `+0x17C` 0, `+0x180` 1.0, `+0x188` / `+0x18C` 2000, `+0x190` 2).
+- **Ours** (`win::riku_skin::weapon_appear`): a Keyblade-only change in place (0.160.0) sets `+0x418 | 2` after the model change and calls that function (was: the transformation's way-back effect).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 307 (fork branch Re-Re-Reverse/Rebirth): KH1 FM's Auto Lock and Target Lock on the Camera page, version 0.173.0 (2026-11-23)
 
 Fork owner, 2026-11-23 (screenshot: KH1 FM's Config, Auto Lock On / Off and Target Lock Auto / Manual framed), verbatim: "precisa implementar essas duas configs e features".

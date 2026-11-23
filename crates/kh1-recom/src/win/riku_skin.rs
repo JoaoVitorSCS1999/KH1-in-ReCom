@@ -565,7 +565,7 @@ unsafe fn try_swap(b: usize) -> bool {
     let sk = skins();
     if TRANS_PL.load(Ordering::Relaxed) == 0 && rs::look_of(&sk, now as u16).dark == rs::look_of(&sk, g).dark {
         swap_now(b, e, g);
-        transform_fx(b, e);
+        weapon_appear(e);
         func::<super::movement::MotionFn>(super::movement::MOTION_REQUEST)(e, 1, 0, 0, 0, 0, 0);
         return true;
     }
@@ -738,6 +738,22 @@ unsafe fn transition(b: usize, e: usize) -> bool {
         transform_fx(b, e);
     }
     finish(e)
+}
+
+/// 0.174.0 (fork owner, 2026-11-23: "na transição quando troca de keyblade deve ser o mesmo efeito
+/// quando ele está sem e vc aperta o botão de ataque e ela aparece na mão"): Riku's own "draw the
+/// weapon" (his vtable `+0xF8` = `0x1402160A0(riku, 1)`, Checked (exe: disasm)): with the weapon put
+/// away (`+0x418 & 2`) it clears that, plays its appear effect (`0x1401A2D50` with the effect name
+/// `[0x1407C7C98]` on his weapon bone `+0x3A0`) and fades the weapon in (`+0x154 | 0x40000000`,
+/// `+0x17C..+0x190`: 2000 ticks). The bit is set first, so the new blade appears as from his hand.
+unsafe fn weapon_appear(e: usize) {
+    wr::<u32>(e + 0x418, rd::<u32>(e + 0x418) | 2);
+    let vt: usize = rd(e);
+    let draw: usize = rd(vt + 0xF8);
+    if draw != 0 {
+        let f: unsafe extern "win64" fn(usize, i32) = std::mem::transmute(draw);
+        f(e, 1);
+    }
 }
 
 /// Riku's way back effect.
