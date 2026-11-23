@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 305 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard blocks only real contacts, as Sora's (0.153.0's fallback removed), version 0.171.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "porra testei denovo a defesa do Riku de longe mirando no inimigo, bizarro precisa corrigir isso definitivamente! veja como está implementada a defesa no Sora como já disse a única diferença é a animação!".
+
+- **Cause** (Checked (the owner's 0.170.0 log)): every far block came from 0.153.0's damage-check fallback (`riku_guard_block`): a hit flagged as arrived (`+0x41C & 0x200`) with value 0, from enemies 4..14 m away, the attacker id the last real hit left on his body; with that attacker in front it blocked and played the guard success each time. None came from the pair test (`riku_pair_block`, 0.159.0). What sets the flag with no hit: not known.
+- **Fix**: the fallback is gone (`riku_guard_block` always false; `guard::riku_block` / `cancel_shot` removed). Riku's Guard is Sora's: Re:CoM's own block or the pair-test block of a real contact from in front; the damage check keeps the guarded hit for his KH1 frame as Sora's.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 304 (fork branch Re-Re-Reverse/Rebirth): Sora's Halloween Town costume in every world (Costumes on his lists, unlocked by reaching Halloween Town), version 0.170.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "para o Sora quero que ele também tenha trajes desbloqueáveis de acordo como a história, então se o sora for para a halloween town por exemplo, o jogador pode livremente alterar para este traje a qualquer momento"; of KH1's world costumes "Só Halloween"; "esqueci completamente que kh1 e rechain of memories o sora só troca de aparencia na halloween town... então pode usar o modelo do próprio jogo".

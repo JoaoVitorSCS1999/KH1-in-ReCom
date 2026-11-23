@@ -168,48 +168,7 @@ pub(super) unsafe fn on_result(c: usize, list: usize, r: i32) -> i32 {
     r
 }
 
-/// 0.153.0: a shot Riku's Guard blocked is cancelled: its attack off (Re:CoM's `CCollAttack` off,
-/// `0x14014DE80`, through `super::magic::hold_off`) and its life over (`+0x160` = 0), so Re:CoM's
-/// own step ends it (as `super::kh1_thrown` ends a shot at a clash). Assumption: a plain
-/// `CBullet` counts its life at `+0x160` as the homing one does (its attack is off either way).
-unsafe fn cancel_shot(obj: usize, s: Shot) {
-    let shooter: i32 = rd(obj + bullet::SHOOTER);
-    super::magic::hold_off(obj);
-    wr(obj + super::magic::rt::LIFE, 0i32);
-    block_log(|| {
-        format!(
-            "Riku's Guard cancelled a shot {} of {} (shooter {shooter})",
-            if s == Shot::Homing { "CHomingBullet" } else { "CBullet" },
-            class_name(func::<mv::HandleFn>(mv::HANDLE_OBJ)(shooter.max(0) as u32))
-        )
-    });
-}
 
-/// 0.153.0: Riku's Guard blocked `obj`'s attack through our own front test
-/// (`super::attack::riku_guard_block`, Re:CoM's apply had already taken the hit): a shot is
-/// cancelled (magic: the owner's ask), any other attacker gets the block's reaction on its next
-/// hit-handler call (Re:CoM's flinch / KH1's clash recoil, as for Sora), with Guard reactions on.
-pub(super) unsafe fn riku_block(obj: usize, id: u32) {
-    let b = base();
-    let vt: usize = rd(obj);
-    let shot = if vt == va(b, bullet::VTABLE) {
-        Some(Shot::Plain)
-    } else if vt == va(b, bullet::HOMING_VTABLE) {
-        Some(Shot::Homing)
-    } else {
-        None
-    };
-    if let Some(s) = shot {
-        if !super::kh1_peel::is_peel(rd(obj + 0x20)) {
-            cancel_shot(obj, s);
-        }
-        return;
-    }
-    if !ON.load(Ordering::Relaxed) || !READY.load(Ordering::Acquire) {
-        return;
-    }
-    remember(obj, 0, id);
-}
 
 /// Whether `c` is one of the actor's `CAttackMotion` entries (its melee attack collisions).
 unsafe fn is_melee(b: usize, obj: usize, c: usize) -> bool {

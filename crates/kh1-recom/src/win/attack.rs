@@ -1753,69 +1753,17 @@ fn riku_guard_log(line: impl FnOnce() -> String) {
 /// Past this (metres, flat), an attacker that isn't a shot didn't hit Riku with its body.
 const RIKU_MELEE_REACH: f32 = 4.0;
 
-unsafe fn riku_guard_block(pl: usize) -> bool {
-    if !mv::riku_on() || !mv::is_main_riku(pl) || !guard_live(pl) || rd::<u32>(pl + HIT_FLAGS) & HIT_ARRIVED == 0 {
-        return false;
-    }
-    if rd::<u32>(pl + BODY_GUARD) & 0x20 != 0 {
-        // 0.159.0: blocked at the pair test (`riku_pair_block`): the hit the apply left is shielded.
-        return true;
-    }
-    let body = pl + 0x690;
-    let id: u32 = rd(body + crate::guard::body::ATTACKER);
-    let obj = if id != 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(id) } else { 0 };
-    let mover: usize = rd(pl + 0xF0);
-    let om: usize = if obj != 0 { rd(obj + 0xF0) } else { 0 };
-    if obj == 0 || mover == 0 || om == 0 {
-        riku_guard_log(|| format!("a hit while guarding, attacker {id:#x} not found (object {obj:#x}): not blocked"));
-        return false;
-    }
-    let me: [f32; 4] = rd(mover + mv::body::POS);
-    let mut it: [f32; 4] = rd(om + mv::body::POS);
-    // A shot made on top of him (the Wizard's `_ex_2150` spells appear near the player; a thunder
-    // falls from above): its caster's side decides, as KH1's Guard faces the one casting.
-    let b0 = base();
-    let vt: usize = rd(obj);
-    if (vt == va(b0, crate::guard::bullet::VTABLE) || vt == va(b0, crate::guard::bullet::HOMING_VTABLE)) && (it[0] - me[0]).hypot(it[2] - me[2]) < 1.0 {
-        let shooter: i32 = rd(obj + crate::guard::bullet::SHOOTER);
-        let so = if shooter > 0 { func::<mv::HandleFn>(mv::HANDLE_OBJ)(shooter as u32) } else { 0 };
-        let sm: usize = if so != 0 { rd(so + 0xF0) } else { 0 };
-        if sm != 0 {
-            it = rd(sm + mv::body::POS);
-        }
-    }
-    let yaw: f32 = rd(mover + mv::body::YAW);
-    let faces = crate::riku::guard_faces([me[0], me[1], me[2]], yaw, [it[0], it[1], it[2]], KH1_GUARD_ANGLE);
-    let node = func::<BoneFn>(ACTOR_BONE)(pl, 0);
-    riku_guard_log(|| {
-        format!(
-            "hit while guarding from {id:#x}: body +0x9C {:#x} +0x8C {:#x} +0xB0 {:.3}, actor +8 {:#x}, bone 0 +0x50 {:#x}, value {}; in front: {faces}",
-            rd::<u32>(body + 0x9C),
-            rd::<u32>(body + 0x8C),
-            rd::<f32>(body + 0xB0),
-            rd::<usize>(pl + 8),
-            if node != 0 { rd::<usize>(node + 0x50) } else { 0 },
-            rd::<i16>(pl + HIT_VALUE)
-        )
-    });
-    if !faces {
-        return false;
-    }
-    GUARD_HIT.store(pl, Ordering::Relaxed);
-    if let Ok(mut g) = GUARD_POINT.lock() {
-        *g = it;
-    }
-    // 0.158.2 (fork owner: a Guard far from the Defender blocked and flinched it): an attacker that
-    // is no shot but stands past a melee reach hit through something of its own (its KH1 fireball
-    // or flame, Re:CoM bullets whose attack names it): blocked, but no melee reaction on it.
-    let shot = vt == va(b0, crate::guard::bullet::VTABLE) || vt == va(b0, crate::guard::bullet::HOMING_VTABLE);
-    let dist = (it[0] - me[0]).hypot(it[2] - me[2]);
-    if !shot && dist > RIKU_MELEE_REACH {
-        riku_guard_log(|| format!("blocked a hit from {id:#x} {dist:.1} m away (its shot or area): no melee reaction on it"));
-        return true;
-    }
-    super::guard::riku_block(obj, id);
-    true
+/// 0.171.0 (fork owner, 2026-11-23: "testei denovo a defesa do Riku de longe mirando no inimigo,
+/// bizarro precisa corrigir isso definitivamente! veja como está implementada a defesa no Sora"):
+/// 0.153.0's fallback (any hit "arriving" while guarding, its attacker in front) is gone. Checked
+/// (the owner's 0.170.0 log): every block it made had a hit value of 0, from enemies 4..14 m away:
+/// the hit flag `player+0x41C & 0x200` with no damage, and the attacker id the last real hit left
+/// on his body (`+0x690 + 0x98`). What sets that flag with no hit: not known. Riku's Guard is now
+/// Sora's: only a real contact blocks, Re:CoM's own block (his body's guarded bit) or the pair-test
+/// block (`riku_pair_block`, a hit on him from in front); the damage check only keeps the guarded
+/// hit for the KH1 frame, as Sora's.
+unsafe fn riku_guard_block(_pl: usize) -> bool {
+    false
 }
 
 /// KH1's Aero barrier (M7 stage 7.10): while it is on, the pending hit's value on Sora's body

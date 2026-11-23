@@ -957,3 +957,18 @@ dele".
 - **Twins**: `twin_any` (both stories with `riku_kh1_movement`) for `lock_radius`, `twin_level` and
   `record_from`. `twin` (HP, KH1 damage, proxies) stays Sora's only.
 - **Damage cap**: his swing arms `damage_cap` with `Source::Recom` (the % of HP rows never).
+
+## 0.171.0: Riku's Guard blocks only real contacts
+
+- **The owner's 0.170.0 log**:
+  - Every `riku guard: hit while guarding` had value 0, from enemies 4..14 m away, the same
+    attacker id each time (the last real hit's, left on his body `+0x690 + 0x98`).
+  - The fallback took them as blocks (`blocked a hit … m away`, or a "melee" block of a near
+    Shadow / Defender).
+  - No `blocked at the pair test` line.
+- **Removed**: 0.153.0's damage-check fallback, with its shot cancel and melee reaction helpers.
+- **Left**:
+  - Re:CoM's own block, the guarded bit, as Sora's;
+  - 0.159.0's pair-test block: a hit result 1 on him from in front, a real collision.
+- Not known: what sets `+0x41C & 0x200` with a hit value of 0 on Riku. Not used for blocks any
+  more.
