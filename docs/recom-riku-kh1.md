@@ -518,3 +518,26 @@ possível utilar essa mesma transição?"
   Riku's face. The log now names the control's layer count and the set, so we can tell which layer
   holds the face on Riku's gauge.
 - **Checked**: tests, the Windows build. **Not checked**: in game.
+
+## 0.155.2: the costume change plays Riku's transformation
+
+Fork owner, 2026-11-22, verbatim: "funcionou perfeitamente!, só que eu realmente queria a transição
+quando altera-se a skin de uma para outra, a animação e o efeito".
+
+- **Re:CoM's transformation** (Checked (exe: disasm)):
+  - Riku's Dark Mode start `0x140215FB0(riku, 1)` enters action 0x20 (exe `0x140215380`).
+  - Its sub-state 1, on the ground, requests his action row 0x37 (`p002_057`, blend −1:
+    `0x140215402..0x140215415`). The effects and sounds are that clip's EET / SES events.
+  - Sub-state 2 waits for the motion's end (`0x1401A57D0`: controller `+0x50 & 3`), then switches
+    to Dark Riku (`0x140206810`).
+- **Ours** (`win::riku_skin::transition`):
+  - A costume change requests the same row with the same blend; the costume's own EET / SES events
+    of `p002_057` play.
+  - Riku's move exe is held while it plays: no KH1 frame and no Re:CoM move step replace the
+    motion.
+  - At its end (or after 240 frames), the model changes in place (0.155.1), then the idle row
+    plays.
+  - Riku's action 0x20 itself is not entered: its end switches to the battle-only Dark Riku.
+- The same as 0.155.0: only plain Riku as the main player, in the field, in actions 1..4. A room
+  rebuilt mid-way drops the transition, and the next room's player has the costume anyway.
+- **Checked**: tests, the Windows build. **Not checked**: in game.

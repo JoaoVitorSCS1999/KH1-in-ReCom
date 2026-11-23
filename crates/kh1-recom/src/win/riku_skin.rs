@@ -175,7 +175,7 @@ pub unsafe fn apply(b: usize, on: bool) {
 // Dark Mode; at the camp's close, else at his next frame once the group is loaded.
 
 use super::movement::{func, rd, wr};
-use std::sync::atomic::AtomicU8;
+use std::sync::atomic::{AtomicU32, AtomicU8, AtomicUsize};
 
 /// 0 unknown, 1 the callees match, 2 they don't (no live change).
 static CALLEES: AtomicU8 = AtomicU8::new(0);
@@ -205,6 +205,7 @@ const CALLEE_BYTES: &[(u32, [u8; 8])] = &[
     (0x0028_94E0, [0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B]),
     (0x001F_7180, [0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C]),
     (0x0028_F800, [0x40, 0x53, 0x48, 0x83, 0xEC, 0x50, 0x48, 0x8B]),
+    (0x001A_57D0, [0x48, 0x8B, 0x81, 0xD8, 0x00, 0x00, 0x00, 0x48]),
 ];
 /// The deferred array deleter's vtable (the node dtor's, `0x14023DEA1`). Checked (exe).
 const ARRAY_DELETER_VT: u64 = 0x1_4060_5B38;
@@ -428,6 +429,19 @@ unsafe fn try_swap(b: usize) -> bool {
     if !swappable(b, e) || !callees_ok(b) {
         return !callees_ok(b);
     }
+    // 0.155.2: Riku's own transformation first; the model changes at its end (`transition`).
+    if TRANS_PL.load(Ordering::Relaxed) == 0 {
+        func::<super::movement::MotionFn>(super::movement::MOTION_REQUEST)(e, TRANSFORM_ROW, -1, 0, 0, 0, 0);
+        TRANS_PL.store(e, Ordering::Relaxed);
+        TRANS_FRAMES.store(0, Ordering::Relaxed);
+        log(&format!("riku skin: costume change: Riku's transformation (row {TRANSFORM_ROW:#x}) plays, the model changes at its end"));
+    }
+    false
+}
+
+/// The model change itself (after the transformation's motion).
+unsafe fn swap_now(b: usize, e: usize, g: u16) {
+    let now: u32 = rd(e + GROUP);
     let node_before = node_count(e);
     release(e);
     clear_node(rd(e + 8));
@@ -439,7 +453,6 @@ unsafe fn try_swap(b: usize) -> bool {
         rd::<i32>(e + 0x3A0)
     ));
     sync_menu(b);
-    true
 }
 
 unsafe fn node_count(e: usize) -> u32 {
@@ -479,14 +492,67 @@ pub unsafe fn camp_closed(b: usize) {
 ///
 /// # Safety
 /// The game's thread, in a player's move exe (`e` that player).
-pub unsafe fn frame(e: usize) {
+pub unsafe fn frame(e: usize) -> bool {
     let b = super::base();
+    if TRANS_PL.load(Ordering::Relaxed) != 0 {
+        return transition(b, e);
+    }
     if PENDING.load(Ordering::Relaxed) && try_swap(b) {
         PENDING.store(false, Ordering::Relaxed);
+    }
+    if TRANS_PL.load(Ordering::Relaxed) != 0 {
+        return true;
     }
     if ROWS.load(Ordering::Relaxed) && e != 0 && rd::<usize>(e) == va(b, crate::sites::data::RIKU_VTABLE) && e == rd::<usize>(va(b, crate::sites::data::MAIN_PLAYER)) {
         face(b, e);
     }
+    false
+}
+
+// The transformation (0.155.2; fork owner, 2026-11-22: "só que eu realmente queria a transição
+// quando altera-se a skin de uma para outra, a animação e o efeito"). Riku's own Dark Mode start
+// (`0x140215FB0(riku, 1)` → action 0x20, exe `0x140215380`, Checked (exe: disasm)) plays his action
+// row 0x37 (`p002_057`, blend −1: `0x140215402..0x140215415`) on the ground, its effects and sounds
+// being that clip's EET / SES events; at the motion's end (`0x1401A57D0`: controller `+0x50 & 3`,
+// `0x140215428`) it switches to Dark Riku. Here the same row plays (the costume's own `PL01x1.EET`
+// / `.SES` events, remapped to its bones), Riku's move exe is held while it plays (no KH1 frame, no
+// Re:CoM move: nothing replaces the motion), and at its end the model changes in place. Riku's
+// Dark Mode action itself is not entered: its end switches to the battle-only Dark Riku.
+
+/// Riku's transformation row (`0x140215411`: `lea edx, [rdi+0x37]`). Checked (exe).
+const TRANSFORM_ROW: i32 = 0x37;
+/// At most this many frames for the motion (its clip is shorter; a safety end).
+const TRANSFORM_MAX: u32 = 240;
+/// The player playing the transformation (0: none).
+static TRANS_PL: AtomicUsize = AtomicUsize::new(0);
+static TRANS_FRAMES: AtomicU32 = AtomicU32::new(0);
+type EndFn = unsafe extern "win64" fn(usize) -> u32;
+
+/// One frame of the transformation; true while Riku's move exe is held.
+unsafe fn transition(b: usize, e: usize) -> bool {
+    let pl = TRANS_PL.load(Ordering::Relaxed);
+    if e != pl {
+        // Another player's move exe (or the room was rebuilt): only ours is held.
+        if rd::<usize>(va(b, crate::sites::data::MAIN_PLAYER)) != pl {
+            TRANS_PL.store(0, Ordering::Relaxed);
+        }
+        return false;
+    }
+    let n = TRANS_FRAMES.fetch_add(1, Ordering::Relaxed) + 1;
+    // The motion's end: its first frames may still read the previous clip's end bits.
+    let ended = n > 4 && func::<EndFn>(0x001A_57D0)(e) & 3 != 0;
+    if !ended && n < TRANSFORM_MAX {
+        return true;
+    }
+    TRANS_PL.store(0, Ordering::Relaxed);
+    if let Some(g) = wanted(e) {
+        if rd::<u32>(e + GROUP) != g as u32 && super::models::group_ready(g) {
+            swap_now(b, e, g);
+        }
+    }
+    PENDING.store(false, Ordering::Relaxed);
+    func::<super::movement::MotionFn>(super::movement::MOTION_REQUEST)(e, 1, 0, 0, 0, 0, 0);
+    true
 }
 
 // The HUD face (fork owner, 2026-11-22: "quando trocar a skin para a darkmode também deve alterar
