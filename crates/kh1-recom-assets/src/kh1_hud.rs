@@ -1330,6 +1330,8 @@ pub struct Built {
     pub party: Option<[usize; 2]>,
     /// H7: the lock-on cursor's group.
     pub cursor: Option<usize>,
+    /// KH1's orange auto-target ring's group (`lockon_d`, 0.180.0).
+    pub auto_ring: Option<usize>,
     /// H8: the LEVEL UP!! box's group.
     pub level_up: Option<usize>,
     /// PC texture rects redrawn from the PS2 pictures (repacked on PC, see [`fit_layouts`]).
@@ -1704,10 +1706,11 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
             let scale = hd_scale(&ps2, &hd)?;
             let item = atlas.add(ps2, vec![hd.crop(0, 0, 128 * scale, 128 * scale)], scale);
             cursor_item = Some(item);
-            Some(cursor::build(l, item, &mut groups)?)
+            Some((cursor::build(l, item, &mut groups)?, cursor::build_ring(l, item, &mut groups)?))
         }
         None => None,
     };
+    let (cursor_built, auto_ring_built) = (cursor_built.map(|c| c.0), cursor_built.map(|c| c.1));
     let mut party5 = None;
     // H6: Donald's and Goofy's gauges, full (Re:CoM's friends have no HP or MP).
     let party_built = match src.g_c {
@@ -1777,6 +1780,7 @@ pub fn build(src: &Sources, langs: &[&str]) -> Result<Built> {
         target: target_built,
         party: party_built,
         cursor: cursor_built,
+        auto_ring: auto_ring_built,
         level_up: level_built,
         refit,
         ring: (ring_first, ring_stats),
@@ -2850,6 +2854,12 @@ pub mod cursor {
 
     /// KH1's cursor of a lock (`DAT_14284F9E0` = object 2).
     pub const OBJECT: &str = "lockon_c";
+    /// KH1's auto-target ring (`DAT_14284F9F8` = object 3; drawn for lock states 1, 2 and 4, so
+    /// the soft target of Auto Lock On). The owner's `UK_uibin_lock.bin`: 30 × 30 at uv (33, 1) of
+    /// the same picture's layout, colour (112, 80, 12), alpha keys 0 → 250 → 112, position keys
+    /// (−4, −4, 38, 38) → (2, 2, 26, 26) → (0, 0, 30, 30), 2 + 2 key units. Checked (decomp
+    /// `0x140274290` / `0x140274B20`, this machine's KH1 project; files).
+    pub const RING: &str = "lockon_d";
 
     fn lerp(keys: &[crate::uibin::Key], t: f32) -> Vec<f32> {
         let mut at = 0.0;
@@ -2869,9 +2879,19 @@ pub mod cursor {
 
     /// Builds the cursor's group (appended); returns it.
     pub(crate) fn build(lock: &[u8], item: usize, groups: &mut Vec<Group>) -> Result<usize> {
+        build_object(lock, 2, OBJECT, item, groups)
+    }
+
+    /// Builds the auto-target ring's group (appended), as the cursor's; returns it.
+    pub(crate) fn build_ring(lock: &[u8], item: usize, groups: &mut Vec<Group>) -> Result<usize> {
+        build_object(lock, 3, RING, item, groups)
+    }
+
+    /// Object `index` (`name`) of `lock` played from its keys' start, baked per frame, then held.
+    fn build_object(lock: &[u8], index: usize, name: &str, item: usize, groups: &mut Vec<Group>) -> Result<usize> {
         let u = Uibin::parse(lock)?;
-        let o = u.objs.get(2).filter(|o| o.name == OBJECT).ok_or_else(|| crate::Error::Format(format!("{LOCK}: object 2 is not {OBJECT}")))?;
-        let ck = u.c_keys(o).ok_or_else(|| crate::Error::Format(format!("{LOCK}: {OBJECT} has no position keys")))?;
+        let o = u.objs.get(index).filter(|o| o.name == name).ok_or_else(|| crate::Error::Format(format!("{LOCK}: object {index} is not {name}")))?;
+        let ck = u.c_keys(o).ok_or_else(|| crate::Error::Format(format!("{LOCK}: {name} has no position keys")))?;
         let (f0, n) = o.keys_a;
         let ak = u.keys_a.get(f0.max(0) as usize..(f0 + n).max(0) as usize).unwrap_or(&[]);
         let len = |k: &[crate::uibin::Key]| k.iter().take_while(|k| k.dur > 0).map(|k| k.dur).sum::<i32>();
@@ -3054,6 +3074,9 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)], re
     let _ = writeln!(s, "  \"mp_ring\": {{\"first\": {}, \"count\": {}}},", b.ring.0, ring_group::COUNT);
     if let Some(c) = b.cursor {
         let _ = writeln!(s, "  \"cursor\": {c},");
+    }
+    if let Some(c) = b.auto_ring {
+        let _ = writeln!(s, "  \"auto_ring\": {c},");
     }
     if let Some([d, g]) = b.party {
         let _ = writeln!(s, "  \"party\": [{d}, {g}],");
@@ -3238,6 +3261,34 @@ mod tests {
     /// 0.179.1: with `KH1_DP_EMBLEM_IMZ` set to the player's `FO0104.RTM` `UK_levelup.imz` (outside
     /// the repository): the emblem is found, at the font's height, mostly opaque in its middle;
     /// `KH1_DP_EMBLEM_OUT` set: its raw RGBA (PS2 alpha) is written there for a look.
+    /// 0.180.0: KH1's auto-target ring from the player's `UK_uibin_lock.bin` (`KH1_LOCK_BIN`)
+    /// and, with `KH1_UITEX`, its texels covered in `uitex.bin`'s picture 10.
+    #[test]
+    fn auto_ring_from_the_players_file() {
+        let Ok(p) = std::env::var("KH1_LOCK_BIN") else { return };
+        let lock = std::fs::read(p).unwrap();
+        let mut groups = Vec::new();
+        let c = cursor::build(&lock, 0, &mut groups).unwrap();
+        let r = cursor::build_ring(&lock, 0, &mut groups).unwrap();
+        assert_eq!((c, r), (0, 1));
+        let ring = &groups[r];
+        let last = ring.steps.last().unwrap().pieces[0];
+        // Settles at 30 × 30 centred, alpha 112 of KH1's orange (112, 80, 12).
+        assert_eq!(last.rect, [-15, -15, 15, 15]);
+        assert_eq!(last.colour, 112 | 80 << 8 | 12 << 16 | 112 << 24);
+        assert_eq!(last.uv, [33, 1, 63, 31]);
+        // The first frame is the larger, faint one; the cursor's own group is unchanged.
+        assert!(ring.steps[0].pieces[0].rect[2] > 15 && ring.steps[0].pieces[0].colour >> 24 < 112);
+        assert_eq!(groups[c].steps.last().unwrap().pieces[0].rect, [-19, -19, 19, 19]);
+        if let Ok(u) = std::env::var("KH1_UITEX") {
+            let tims = mb::tim2_pictures(&std::fs::read(u).unwrap()).unwrap();
+            let t = &tims[CURSOR_PICTURE.0];
+            let covered = (1..31).flat_map(|y| (33..63).map(move |x| (x, y))).filter(|&(x, y)| t.pixels[y * t.width + x][3] > 0x10).count();
+            eprintln!("lockon_d texels covered: {covered} of 900");
+            assert!(covered > 100, "the ring's texels are drawn in picture {}", CURSOR_PICTURE.0);
+        }
+    }
+
     #[test]
     fn dp_emblem_from_the_players_file() {
         let Ok(p) = std::env::var("KH1_DP_EMBLEM_IMZ") else { return };
@@ -3374,6 +3425,7 @@ mod tests {
         assert!(b.target.is_some());
         assert!(b.party.is_some());
         assert!(b.cursor.is_some());
+        assert_eq!(b.auto_ring, b.cursor.map(|c| c + 1));
         assert!(b.level_up.is_some());
         // KH1's g_act tracks at 2 frames a key unit: vibe_s 5 units, vibe_ss 11, vibe_sss 19,
         // the slides 10.

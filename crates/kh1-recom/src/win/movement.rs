@@ -360,6 +360,11 @@ pub fn mark_installed() {
     INSTALLED.store(true, Ordering::Release);
 }
 
+/// The main player (Sora or Riku), 0 before one is made.
+pub(super) unsafe fn main_player() -> usize {
+    rd::<usize>(va(base(), data::MAIN_PLAYER))
+}
+
 /// The main player, if it is Sora (`CPlayerSora`; Riku keeps Re:CoM's handlers).
 pub unsafe fn is_main_sora(pl: usize) -> bool {
     let b = base();

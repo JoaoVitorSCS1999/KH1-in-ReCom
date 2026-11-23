@@ -180,6 +180,21 @@ pub(super) unsafe fn soft_target(pl: usize) -> Option<u32> {
     lo::nearest(origin, &all, SOFT_REACH.min(lo::take_reach(battle_room(pl))), &[])
 }
 
+/// 0.180.0: the target of KH1's orange auto-target ring and its lock point. KH1 draws `lockon_d`
+/// for lock states 1, 2 and 4 (`0x140274B20`): its soft target while nothing is locked (state 2,
+/// set each frame by `0x1402B11B0` only with Auto Lock On) and an attack's auto lock (state 4),
+/// on one target; a lock (state 3) draws the lock cursor instead. Checked (decomp, this
+/// machine's KH1 project). Here: [`soft_target`] while Re:CoM's cursor holds no lock (its own
+/// cursor shows a lock), None otherwise.
+pub(super) unsafe fn ring_target(pl: usize) -> Option<(u32, [f32; 3])> {
+    let cur: usize = rd(pl + recom::CURSOR);
+    if cur != 0 && rd::<i32>(cur + recom::CURSOR_LOCKED) != 0 {
+        return None;
+    }
+    let h = soft_target(pl)?;
+    target_point(pl, h).map(|p| (h, p))
+}
+
 /// The point Re:CoM's cursor measures from (`0x1401F0AB0(out, 0)`).
 unsafe fn player_point() -> [f32; 3] {
     let mut v = V4::default();

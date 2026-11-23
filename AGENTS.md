@@ -11,6 +11,24 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 322 (fork branch Re-Re-Reverse/Rebirth): KH1's orange auto-target ring on the soft target, version 0.180.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "preciso que vc implemente o anel laranja/amarelo igual funciona no KH 1 inclusive já tem nas configs dentro do jogo das ultimas implementações sobre o auto-lock"; answering "(1) HUD: com qualquer HUD ou só com `hud = kh1`? (2) aprova o plano (projeto Ghidra do KH1)?", verbatim: "1 só com o modo do kh1 ligado, 2 sim".
+
+- **KH1** (Checked (decomp, this machine's new `KH1` Ghidra project; files); the KH modding workspace's `knowledge/KH1/kh1-lock-on.md`): the draw `0x140274B20` shows `lock` object 3 (`lockon_d`, `0x14284F9F8`, set by `0x140274290`) for lock states 1, 2 and 4. State 2 is the soft target, picked each frame by `0x1402B11B0` → `0x1402B0A00` only with Auto Lock On (`0x1402FAFB0` ≠ 1). State 4 is an attack's auto lock (`0x140293480` → `0x1402B08A0(…, 4)`). The ring is centred on the target's projected lock point and not scaled with the distance. Its keys restart only when the cursor kind changes, not when the soft target moves to another enemy. The owner's `UK_uibin_lock.bin`: 30 × 30, colour (112, 80, 12), alpha 0 → 250 → 112. Its texels are in `uitex.bin` picture 10, with `lockon_c`'s.
+- **Change**:
+  - Asset step: `kh1_hud::cursor::{RING, build_ring}`, a group after the cursor's (manifest `"auto_ring"`).
+  - DLL: `kh1_hud::Manifest::auto_ring`, `win::lock_on::ring_target`, `win::movement::main_player`. `win::kh1_hud::marker_update` (Re:CoM's `CLockonMarker` update `0x140209D30`, the H7 site, prologue already checked) is now installed for the ring as well and calls `auto_ring` (and H7's `kh1_cursor` only with `LOCKON_KH1`). At `hud = kh1`, with Auto Lock on and Combat = KH1 (Sora or Riku), our projected control draws the ring on `soft_target`'s lock point while Re:CoM's cursor holds no lock. Re:CoM's own cursor still shows a lock.
+  - Off (`auto_lock = off`, `hud = recom`, Combat = Re:CoM): no ring, as Re:CoM.
+- **Asset step**: re-run (a new group). An older `kh1-hud.json` logs "no auto_ring" and draws no ring.
+- **Not 1:1**:
+  - The ring is on our soft target (`SOFT_REACH` 6 m, Assumption since 0.175.0). KH1's pick is 3 m across (less the point's radius) and ±3.5 m up, scored by facing and height, with a line-of-sight test (now Checked, the knowledge note). Not changed here: it is the swing's aim, another system.
+  - The ring is drawn wherever Re:CoM's marker update runs. H7 read that it runs each battle frame; whether it runs locked or not, and in the field, is an Assumption. The ring is deleted with the player's HUD (the gauge's dtor, as H7's cursor).
+  - KH1 hides the ring when the target is off screen. Here Re:CoM's projected control draws it (Assumption: as its own marker).
+- **Checked**: tests (new `auto_ring_from_the_players_file` on the owner's `UK_uibin_lock.bin` and `uitex.bin`; manifest parse), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 321 (fork branch Re-Re-Reverse/Rebirth): the DP sleights' mark, Re:CoM's Heartless emblem right of their names, version 0.179.1 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "preciso que no shorcut e no menu de commands tenha algo identificando que consomem DP, pode ser o ícone de um heartless"; on its place: "a direita fica perfeito".

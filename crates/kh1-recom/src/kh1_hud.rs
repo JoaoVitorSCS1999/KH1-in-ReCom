@@ -374,6 +374,8 @@ pub struct Manifest {
     pub party: Option<[u32; 2]>,
     /// KH1's lock-on cursor group (H7), when built.
     pub cursor: Option<u32>,
+    /// KH1's orange auto-target ring group (`lockon_d`, 0.180.0), when built.
+    pub auto_ring: Option<u32>,
     /// KH1's LEVEL UP!! box group (H8), when built.
     pub level_up: Option<u32>,
     /// The first of Re:CoM's HP ring groups turned 180° in `gauge:01` ([`recom_hp`]), when the
@@ -526,6 +528,11 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
         Some(Some(c)) if c < groups => Some(c),
         Some(_) => return Err("a bad cursor entry".into()),
     };
+    let auto_ring = match v.get("auto_ring").map(|c| c.as_u32()) {
+        None => None,
+        Some(Some(c)) if c < groups => Some(c),
+        Some(_) => return Err("a bad auto_ring entry".into()),
+    };
     let level_up = match v.get("level_up").map(|c| c.as_u32()) {
         None => None,
         Some(Some(c)) if c < groups => Some(c),
@@ -554,7 +561,7 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
             Some(first)
         }
     };
-    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, shortcut, target, party, cursor, level_up, recom_hp, mp_ring })
+    Ok(Manifest { groups, languages, motion: Motion { programs, units, runs }, menu, shortcut, target, party, cursor, auto_ring, level_up, recom_hp, mp_ring })
 }
 
 /// Re:CoM's HP gauge at KH1's place, its ring and bar turned 180° (owner, 2026-11-01; asset step
@@ -937,6 +944,10 @@ mod tests {
         assert_eq!(m.motion.group(1, program::FADE_IN), Some(643));
         assert_eq!(m.motion.group(1, program::SLIDE_H), None);
         assert_eq!(m.motion.group(0, program::SLIDE_V), Some(638));
+        assert_eq!((m.cursor, m.auto_ring), (None, None), "an older step: no ring");
+        let ring = parse_manifest(&ok.replace("\"sources\": {}", "\"sources\": {}, \"cursor\": 642, \"auto_ring\": 643")).unwrap();
+        assert_eq!((ring.cursor, ring.auto_ring), (Some(642), Some(643)));
+        assert!(parse_manifest(&ok.replace("\"sources\": {}", "\"sources\": {}, \"auto_ring\": 644")).is_err(), "past the last group");
         assert!(parse_manifest(&ok.replace("\"base_groups\": 632", "\"base_groups\": 631")).is_err());
         assert!(parse_manifest(&ok.replace("[639, 5]", "[639, 6]")).is_err());
         assert!(parse_manifest(&ok.replace("vibe_ss", "vibe_xx")).is_err());

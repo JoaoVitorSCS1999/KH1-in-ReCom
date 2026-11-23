@@ -434,6 +434,16 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
 2. Per frame while a battle runs: the wrapper copies the lock point (Re:CoM projects and draws).
 3. Assumption: Re:CoM's marker layer-add flag 1 and priority 2 suit a projected layer of ours.
 
+### 0.180.0: KH1's orange auto-target ring (`lockon_d`)
+
+The fork owner's 5a ("shown") is now built: `lock` object 3 as its own group (`"auto_ring"`) is drawn
+by the same `0x140209D30` wrapper on the soft target while nothing is locked, at `hud = kh1` with Auto
+Lock on. H7's lock cursor stays off (`LOCKON_KH1`). KH1's side is in the KH modding workspace's
+`knowledge/KH1/kh1-lock-on.md`, and the change is AGENTS.md Stage 322. In game: walk up to an enemy in
+battle without R1. The orange ring pops in (38 → 26 → 30, fading to alpha 112) and stays as long as
+the swings aim there. It jumps to the next enemy without replaying. It goes away on R1 (Re:CoM's
+cursor) and is gone with `auto_lock = off` or `hud = recom`.
+
 ### What the in-game test must check (H7)
 
 1. Lock on: KH1's white ring pops in (shrinks from 46 to 34, settles at 38 over 8 frames) on the

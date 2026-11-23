@@ -48,7 +48,7 @@
 //! goes to the top left at `hud_room_plate_top_left`. `docs/recom-kh1-hud.md` § The MP ring
 //! built as Re:CoM's HP ring.
 
-use super::movement::{func, orig, rd, wr};
+use super::movement::{self as mv, func, orig, rd, wr};
 use super::{base, log};
 use crate::kh1_hud::{self as kh, group, mp_ring, program, recom_hp, Manifest, View};
 use crate::settings::Mode;
@@ -330,14 +330,26 @@ pub fn install(b: usize, manifest: Option<&std::path::Path>) -> bool {
         }
         // H7 (KH1's lock-on cursor) is off: the owner chose Re:CoM's lock-on visuals (cursor,
         // enemy HP gauges, no LOCK ON! plate), 2026-11-01. The wrapper stays in the code.
-        if LOCKON_KH1 && MANIFEST.get().is_some_and(|m| m.cursor.is_some()) {
+        // 0.180.0: the same wrapper draws KH1's orange auto-target ring (`auto_ring`), with
+        // Re:CoM's cursor left as it is.
+        let cursor = LOCKON_KH1 && MANIFEST.get().is_some_and(|m| m.cursor.is_some());
+        let ring = MANIFEST.get().is_some_and(|m| m.auto_ring.is_some());
+        if !ring {
+            log("kh1 hud: kh1-hud.json has no auto_ring (an older asset step): no KH1 auto-target ring; run this version's asset step");
+        }
+        if cursor || ring {
             let site = crate::sites::KH1_HUD_CURSOR_HOOKS.iter().find(|h| h.name == "CLockonMarker update (0x140209D30)").expect("site");
             let h = [super::hook::Hook { site, ours: marker_update as *const () as usize, original: &ORIG_MARKER }];
             // SAFETY: as above.
             if unsafe { super::hook::install_all(b, &h) } {
-                log("kh1 hud: KH1's lock-on cursor at hud = kh1 (H7): CLockonMarker update 0x140209D30 wrapped");
+                if cursor {
+                    log("kh1 hud: KH1's lock-on cursor at hud = kh1 (H7): CLockonMarker update 0x140209D30 wrapped");
+                }
+                if ring {
+                    log("kh1 hud: KH1's orange auto-target ring at hud = kh1 with Auto Lock on (lockon_d): CLockonMarker update 0x140209D30 wrapped");
+                }
             } else {
-                log("kh1 hud: lock-on marker not hooked; Re:CoM's cursor stays");
+                log("kh1 hud: lock-on marker not hooked; Re:CoM's cursor stays, no auto-target ring");
             }
         }
         // Re:CoM's room plate top left (`hud_room_plate_top_left`).
@@ -1239,15 +1251,92 @@ struct Cursor {
 
 static CURSOR: Mutex<Option<Cursor>> = Mutex::new(None);
 
+/// KH1's auto-target ring (0.180.0): our projected control and the target it was last on (0:
+/// not drawn).
+struct Ring {
+    marker: usize,
+    ctrl: usize,
+    list: i32,
+    target: u32,
+}
+
+static RING: Mutex<Option<Ring>> = Mutex::new(None);
+
 /// `CLockonMarker` update (`0x140209D30(marker)`), each frame of a battle: Re:CoM's, then at
 /// `hud = kh1` its cursor layer is hidden and KH1's (`lockon_c`, played from its keys' start when
 /// the lock begins or moves to another target) is drawn on a control of ours at the same lock
 /// point (Re:CoM projects it; KH1's cursor is not scaled with the distance as Re:CoM's is).
 pub unsafe extern "win64" fn marker_update(m: usize) {
     orig::<MarkerFn>(&ORIG_MARKER)(m);
+    let up = UP.load(Ordering::Relaxed) && STATE.lock().map(|s| s.clusters.iter().any(|c| !c.hidden)).unwrap_or(false);
+    if LOCKON_KH1 {
+        kh1_cursor(m, up);
+    }
+    auto_ring(m, up);
+}
+
+/// A projected control of ours as Re:CoM makes its marker's: `0x1402471D0(ctrl, 2)`, priority 2.
+unsafe fn projected_ctrl() -> Option<usize> {
+    let c = func::<NewFn>(NEW)(0x170);
+    if c == 0 {
+        return None;
+    }
+    func::<CtorModeFn>(SEQ_CTOR_MODE)(c, 2);
+    if rd::<usize>(c) != base() + SEQ_CTRL_VTABLE as usize {
+        return None;
+    }
+    super::d2::made();
+    Some(c)
+}
+
+/// 0.180.0 (fork owner, 2026-11-23: "preciso que vc implemente o anel laranja/amarelo igual
+/// funciona no KH 1"; HUD: "só com o modo do kh1 ligado"): KH1's `lockon_d` on the soft target
+/// while nothing is locked (`lock_on::ring_target`: Auto Lock on, Combat = KH1, Sora or Riku),
+/// at `hud = kh1`. As KH1 (`0x140274B20`, Checked (decomp)): its keys play from the start when it
+/// appears (kind 0 → 4), not when it moves to another target (the kind stays), and it is not
+/// scaled with the distance. Re:CoM's own cursor shows a lock, as before.
+unsafe fn auto_ring(m: usize, up: bool) {
+    let Some(group) = manifest().and_then(|x| x.auto_ring) else { return };
+    let Ok(mut ring) = RING.lock() else { return };
+    if ring.as_ref().is_some_and(|r| r.marker != m) || !up {
+        if let Some(r) = ring.take() {
+            super::d2::delete(r.ctrl, r.list);
+        }
+        if !up {
+            return;
+        }
+    }
+    let pl = mv::main_player();
+    let want = if pl != 0 { super::lock_on::ring_target(pl) } else { None };
+    if ring.is_none() {
+        if want.is_none() {
+            return;
+        }
+        let Some(c) = projected_ctrl() else { return };
+        *ring = Some(Ring { marker: m, ctrl: c, list: super::d2::current_list(), target: 0 });
+    }
+    let Some(r) = ring.as_mut() else { return };
+    match want {
+        Some((h, p)) => {
+            func::<VecFn>(ANCHOR)(r.ctrl, V4([p[0], p[1], p[2], 1.0]).0.as_ptr());
+            if r.target == 0 {
+                add(r.ctrl, r.list, PRIORITY_BACK, group, 0.0, 1);
+                note(|| format!("auto-target ring: KH1's lockon_d on target {h:#x}"));
+            }
+            r.target = h;
+        }
+        None if r.target != 0 => {
+            super::d2::clear(r.ctrl, r.list);
+            r.target = 0;
+        }
+        None => {}
+    }
+}
+
+/// H7's cursor (off: [`LOCKON_KH1`]).
+unsafe fn kh1_cursor(m: usize, up: bool) {
     let Some(group) = manifest().and_then(|x| x.cursor) else { return };
     let Ok(mut cur) = CURSOR.lock() else { return };
-    let up = UP.load(Ordering::Relaxed) && STATE.lock().map(|s| s.clusters.iter().any(|c| !c.hidden)).unwrap_or(false);
     if cur.as_ref().is_some_and(|c| c.marker != m) || !up {
         if let Some(c) = cur.take() {
             super::d2::delete(c.ctrl, c.list);
@@ -1267,16 +1356,7 @@ pub unsafe extern "win64" fn marker_update(m: usize) {
     let target: i32 = rd(m + M_TARGET);
     let locked = target > 0 && rd::<i32>(m + M_FOUND) != 0;
     if cur.is_none() {
-        // As Re:CoM makes its marker's control: `0x1402471D0(ctrl, 2)` (projected), priority 2.
-        let c = func::<NewFn>(NEW)(0x170);
-        if c == 0 {
-            return;
-        }
-        func::<CtorModeFn>(SEQ_CTOR_MODE)(c, 2);
-        if rd::<usize>(c) != base() + SEQ_CTRL_VTABLE as usize {
-            return;
-        }
-        super::d2::made();
+        let Some(c) = projected_ctrl() else { return };
         *cur = Some(Cursor { marker: m, ctrl: c, list: super::d2::current_list(), target: 0 });
     }
     let Some(c) = cur.as_mut() else { return };
@@ -1538,6 +1618,11 @@ pub unsafe fn destroy(gauge: usize) {
     // our cursor goes with any player gauge.
     if let Ok(mut c) = CURSOR.lock() {
         if let Some(x) = c.take() {
+            super::d2::delete(x.ctrl, x.list);
+        }
+    }
+    if let Ok(mut r) = RING.lock() {
+        if let Some(x) = r.take() {
             super::d2::delete(x.ctrl, x.list);
         }
     }
