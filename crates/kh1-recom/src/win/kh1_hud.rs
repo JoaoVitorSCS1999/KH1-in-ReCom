@@ -805,9 +805,10 @@ impl Cluster {
         }
     }
 
-    /// Re:CoM's HUD hides (state 7) or shows (1) the gauge: KH1's 10-frame gauge fade
-    /// (`0x140268E30`: alpha ±0.1 a frame) on the units; at once when `now` (the build) or without
-    /// motion data.
+    /// Re:CoM's HUD hides (state 7) or shows (1) the gauge. A hide is at once, as Re:CoM's own HUD
+    /// goes (fork owner, 2026-11-23, answer 3b); a show plays KH1's 10-frame gauge fade in
+    /// (`0x140268E30`: alpha +0.1 a frame) on the units. At once also when `now` (the build) or
+    /// without motion data.
     unsafe fn hide(&mut self, hidden: bool, now: bool) {
         if hidden {
             self.release(0);
@@ -816,7 +817,7 @@ impl Cluster {
         }
         self.hidden = hidden;
         // The MP ring hides and shows at once, with Re:CoM's HP gauge (state 7 / 1).
-        let faded = !now && !self.mp_only && self.start(if hidden { program::FADE_OUT } else { program::FADE_IN }, self.class);
+        let faded = !now && !hidden && !self.mp_only && self.start(program::FADE_IN, self.class);
         if !faded {
             self.drop_units();
             for &c in self.ctrls.iter().filter(|&&c| c != 0) {

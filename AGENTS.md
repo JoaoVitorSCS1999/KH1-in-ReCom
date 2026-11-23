@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 315 (fork branch Re-Re-Reverse/Rebirth): the KH1 HUD hides at once when Re:CoM hides its HUD, version 0.178.1 (2026-11-23)
+
+Fork owner, 2026-11-23, answering "Quando um evento esconde o HUD: (a) fade de 10 frames, como no KH1 (é o que está construído); (b) some na hora, como no Re:CoM", verbatim: "3b" (`docs/design-philosophy-instructions.md` § Open questions round).
+
+- **Re:CoM** (Checked (decomp)): the gauge's HUD state setter `0x14020C190` (`40 55 57 48 83 EC 48`) is called by `0x140208360` and `0x14020A0E0` with the request at the gauge's `+0xAA`, by `0x140209440` / `0x14020A0E0` with 2 and by `0x14020BC60` with 8 / 9. Who writes 7 to `+0xAA` (an event or a menu) is not researched, so events and menus are not told apart.
+- **Change** (`win::kh1_hud::Cluster::hide`): state 7 hides the KH1 cluster at once (the units dropped, the held controls hidden), no longer through `fade_out`; state 1 still plays KH1's 10-frame `fade_in`. The command menu already hid at once (`command_menu::Menu::hide`). No new hook, no asset change (`fade_out` stays in the data, unplayed).
+- **Assumption**: the fork owner's "as Re:CoM" also covers menu hides (KH1 fades for its menus). Ask if a menu should still fade.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 314 (fork branch Re-Re-Reverse/Rebirth): Riku's Halloween Town costume in every world, version 0.178.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "certo faz o da Halloween town então".

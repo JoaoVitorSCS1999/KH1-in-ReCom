@@ -209,8 +209,9 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 - **DLL (events only):** a hit with no motion running → the held back / front controls hide and
   the units of what they show play `vibe_<strength>` (from frame 1: KH1 draws key time 0.5 first),
   with the shaken hurt face; a size-class change → the slide at the old class's place (the held
-  controls already at the new one); Re:CoM's HUD hide / show (state 7 / 1) → `fade_out` /
-  `fade_in` on the units (face included). A view change while a motion runs rebuilds its units at
+  controls already at the new one); Re:CoM's HUD hide (state 7) → hidden at once (0.178.1, fork
+  owner's answer 3b; `fade_out` is built but no longer played), show (state 1) → `fade_in` on the
+  units (face included). A view change while a motion runs rebuilds its units at
   the same time (`0x140248000` on the first unit layer); a view change after it ended gives the
   screen back to the held layers. Nothing per frame.
 
@@ -223,8 +224,10 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
    moves them too): visible only when MP or the flash changes during the 10–38 frames.
 3. A slide for a change that isn't KH1's (class 0 → 2 or downwards) ends at the slide's last
    offset and snaps to the new class at the next HP / MP event (KH1 snaps at once).
-4. The fade-in runs on every Re:CoM show (events, menus); KH1 hides at once for its events
-   (world flag 8) and fades for its menus: owner question.
+4. Answered (fork owner, 2026-11-23, 3b): every Re:CoM hide (events and menus alike) is at once;
+   the fade-in still runs on every Re:CoM show. KH1 hides at once for its events (world flag 8) and
+   fades for its menus; telling Re:CoM's event hides from its menu hides (the request comes through
+   the gauge's `+0xAA`, written elsewhere) is not researched.
 5. Assumptions: Re:CoM's 2D time step is 50 units a 60 Hz frame (as the MP bar's fades); a played
    layer added after the held ones at the same priority draws over them (creation order).
 
@@ -233,7 +236,8 @@ Steam addresses (image base 0x140000000), both exes. Tags: **Checked (decomp)**,
 1. Take a hit: the whole cluster (rings, segments, labels, face) shakes up and down for 10 / 22 /
    38 frames (by how much HP the hit took), the face grimaces; a second hit during the shake
    neither restarts it nor the grimace.
-2. Open the camp / start an event: the cluster fades out over 1/6 s; closing it fades it back in.
+2. Open the camp / start an event: the cluster goes at once (0.178.1); closing it fades it back in
+   over 1/6 s.
 3. Low HP (under 54 HP): the green arc's end is soft over its last 0.7°.
 4. Log: `kh1 hud: … built …` as before; no `no slide units` line in normal play.
 
