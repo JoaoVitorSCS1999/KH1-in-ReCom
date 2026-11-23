@@ -152,7 +152,18 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
             };
             tg.push(Target { u, s: [1.0; 3], p });
         }
-        let l = locals_for(dark, &tg, None, rows.last().map(|v| v.as_slice()));
+        let mut l = locals_for(dark, &tg, None, rows.last().map(|v| v.as_slice()));
+        // Riku's own scale channels, bone for bone (0.154.4): his menu / draw clips hide the
+        // Soul Eater by scaling `wep0` and `k1`..`k9` to 0 (Checked (files): 4 clips, 117 frames).
+        // The translations above stay unscaled; the local scale is Riku's as his clip has it.
+        if src.chans() == 9 {
+            for (j, m) in map.iter().enumerate() {
+                if let Some(i) = m {
+                    let sc = src.sample(*i, f as f64).s;
+                    l[j][6..9].copy_from_slice(&sc);
+                }
+            }
+        }
         rows.push(l);
     }
     Ok(encode(src, &rows))
@@ -228,14 +239,16 @@ impl Grip {
 
 /// The clip from per-frame locals, keeping the source clip's header fields (no scale channels).
 fn encode(src: &Clip, rows: &[Vec<[f64; 9]>]) -> Clip {
-    const EPS: [f64; 2] = [1e-7, 1e-5];
+    const EPS: [f64; 3] = [1e-7, 1e-5, 1e-6];
     let nb = rows[0].len();
-    let mut channels = Vec::with_capacity(nb * 6);
+    let scale = rows.iter().any(|r| r.iter().any(|b| (6..9).any(|c| (b[c] - 1.0).abs() > EPS[2])));
+    let chans = if scale { 9 } else { 6 };
+    let mut channels = Vec::with_capacity(nb * chans);
     for b in 0..nb {
-        for c in 0..6 {
-            let rot = c >= 3;
-            let vals: Vec<f64> = rows.iter().map(|r| if rot { r[b][c].to_degrees() } else { r[b][c] }).collect();
-            channels.push(encode_channel(&vals, EPS[rot as usize]));
+        for c in 0..chans {
+            let kind = c / 3;
+            let vals: Vec<f64> = rows.iter().map(|r| if kind == 1 { r[b][c].to_degrees() } else { r[b][c] }).collect();
+            channels.push(encode_channel(&vals, EPS[kind]));
         }
     }
     Clip {
@@ -243,11 +256,11 @@ fn encode(src: &Clip, rows: &[Vec<[f64; 9]>]) -> Clip {
         bones: nb as i16,
         frames: rows.len() as i16,
         loop_start: src.loop_start,
-        flags: src.flags & !2,
+        flags: if scale { src.flags | 2 } else { src.flags & !2 },
         has_blend: src.has_blend,
         blend: src.blend,
         blend_pad: src.blend_pad,
-        mask_pad: vec![0; (((nb * 6 + 7) >> 3) + 3) & !3],
+        mask_pad: vec![0; (((nb * chans + 7) >> 3) + 3) & !3],
         channels,
         trailer: vec![0; 4],
     }
@@ -491,6 +504,20 @@ mod tests {
             }
         }
         eprintln!("Soul Eater in the hand: worst {worst:.4} m");
+        // Riku's hidden blade stays hidden: every frame where his `wep0` is scaled, Dark's is too.
+        let (wa, wb) = (riku.find("wep0").unwrap(), dark.find("wep0").unwrap());
+        let mut scaled = 0;
+        for c in ann.slots.iter().filter_map(|s| s.clip.as_ref()).filter(|c| c.chans() == 9) {
+            let o = retarget(c, &riku, &dark, &map).unwrap();
+            assert_eq!(o.chans(), 9, "{}", c.name_str());
+            for f in 0..c.frames as usize {
+                let (a, b) = (c.sample(wa, f as f64).s, o.sample(wb, f as f64).s);
+                assert!((0..3).all(|k| (a[k] - b[k]).abs() < 1e-3), "{} frame {f}: {a:?} {b:?}", c.name_str());
+                scaled += (a[0] < 0.5) as usize;
+            }
+        }
+        eprintln!("frames with Riku's blade hidden, kept hidden: {scaled}");
+        assert!(scaled > 0);
         assert!(worst < 0.03, "the blade moved in the hand by {worst} m");
         eprintln!("Soul Eater's turn in the hand against Riku's turned over: worst {worst_rot:.2} deg");
         assert!(worst_rot < 0.5);

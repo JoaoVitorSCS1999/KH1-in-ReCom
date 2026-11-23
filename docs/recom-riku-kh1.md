@@ -414,3 +414,19 @@ também seja alterada".
   - No branch lands inside those bytes (Checked (exe)).
 - **Checked**: tests, the Windows build. **Not checked**: in game. Asset step: **re-run**
   (automatic): `PL0121.ANN` / `PL0131.ANN`.
+
+## 0.154.4: the Soul Eater hidden where Riku hides it (the menu)
+
+Fork owner, 2026-11-22 (screenshot: the camp's Dark model holding the blade, turned over), verbatim:
+"ficou bom mas no menu não precisa ele segurar a espada na mão, além disso no menu ela ficou
+invertida, mas o modelo na gameplay ficou perfeito agora".
+
+- **Cause** (Checked (files)): 4 of Riku's clips have scale channels. They scale `wep0` and
+  `k1`..`k9` to 0 to hide the Soul Eater (the menu's pose among them; 54 hidden frames), and
+  `l_hair3`. The retarget wrote no scale channels, so the hidden blade showed, in a grip Riku
+  never shows.
+- **Fix**: Riku's local scale is copied bone for bone into the Dark clip (9 channels, flag 2 set,
+  only for those clips). Translations stay unscaled.
+  - Test: every frame where Riku's `wep0` is scaled, Dark's has the same scale (54 frames hidden).
+- **Checked**: tests, the Windows build. **Not checked**: in game. Asset step: **re-run**
+  (automatic): `PL0121.ANN` / `PL0131.ANN`.
