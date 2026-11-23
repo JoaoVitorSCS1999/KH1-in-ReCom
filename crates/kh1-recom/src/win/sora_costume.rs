@@ -33,7 +33,7 @@ static OWN_NAME: AtomicU64 = AtomicU64::new(0);
 
 /// Sora has reached Halloween Town in this save, or the debug key.
 pub unsafe fn unlocked() -> bool {
-    if super::settings().sora_halloween_unlocked {
+    if super::settings().all_unlock {
         return true;
     }
     let save: usize = rd(va(super::base(), crate::keyblades::SAVE_PTR));

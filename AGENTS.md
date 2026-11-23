@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 319 (fork branch Re-Re-Reverse/Rebirth): one debug key, `all_unlock`, for every costume and cosmetic Keyblade, version 0.178.5 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "pode deixar as condições do INI em OFF e unifique elas para all_unlock=off informando que é só para propósitos de debug!".
+
+- **Change** (`settings`, `win::riku_skin`, `win::sora_costume`): `riku_halloween_unlocked`, `riku_dark_skin_unlocked`, `riku_keyblade_unlocked` and `sora_costume_unlocked` (`Settings`' four debug fields) are one `all_unlock` (default off), its ini comment "FOR DEBUG PURPOSES ONLY". The story requirements are unchanged: Riku's Dark Mode costume and Keyblade of Heart at his first Dark Mode, his and Sora's Halloween Town costumes at reaching Halloween Town. An old file's four keys are ignored without a warning (as `kh1_motions`), so an old `on` no longer unlocks anything.
+- The fork owner's own `kh1-recom.ini`: the four keys replaced by `all_unlock = off` (backup `kh1-recom.ini.bak-0.178.4`).
+- **Checked**: tests (new `all_unlock_replaces_the_four_debug_keys`), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 318 (fork branch Re-Re-Reverse/Rebirth): dead helpers removed, duplicated helpers shared (no behaviour change), version 0.178.4 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "busque outras redundância inúteis no mod para eliminar"; then "remova somente redundâncias que não vão quebrar o mod".

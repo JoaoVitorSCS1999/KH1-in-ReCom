@@ -49,9 +49,9 @@ pub unsafe fn chosen(s: &crate::settings::Settings) -> Look {
 pub const HALLOWEEN_SEEN: u8 = 0x20;
 
 /// The Halloween Town costume is unlocked: Riku has been there (char 4) in this save, or the debug
-/// key.
+/// `all_unlock`.
 pub unsafe fn halloween_unlocked() -> bool {
-    if super::settings().riku_halloween_unlocked {
+    if super::settings().all_unlock {
         return true;
     }
     let save: usize = rd(va(super::base(), crate::keyblades::SAVE_PTR));
@@ -85,7 +85,7 @@ unsafe fn mark_halloween(e: usize) {
 /// keyblade cosmética dele pode liberar junto com o Dark Mode também"): Riku's first Dark Mode in
 /// this save, or the debug keys.
 pub unsafe fn blade_unlocked() -> bool {
-    super::settings().riku_heart_blade_unlocked || unlocked()
+    super::settings().all_unlock || unlocked()
 }
 
 /// Reads the manifest and checks the skin groups' files.
@@ -236,8 +236,8 @@ pub unsafe fn sync_menu(b: usize) {
 /// block's spare bit [`super::dark_points::DARK_SEEN`], 0.151.0; fork owner, 2026-11-22: "depois a
 /// gente bota o requisito do jogo pra liberar ela").
 pub unsafe fn unlocked() -> bool {
-    // Debug (0.156.1): `riku_dark_skin_unlocked = on` in the ini.
-    super::settings().riku_dark_skin_unlocked || super::dark_points::dark_seen()
+    // Debug only: `all_unlock = on` in the ini (0.178.5; was `riku_dark_skin_unlocked`).
+    super::settings().all_unlock || super::dark_points::dark_seen()
 }
 
 /// Riku's mover's ground speed stopped (0.156.1; fork owner: "quando vc está andando e troca a
