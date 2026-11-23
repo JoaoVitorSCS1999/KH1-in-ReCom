@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 314 (fork branch Re-Re-Reverse/Rebirth): Riku's Halloween Town costume in every world, version 0.178.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "certo faz o da Halloween town então".
+
+- **Re:CoM** (Checked (exe + files)): Riku is char 3 (group 101, pack `PL0101`), char 4 in Halloween Town (group 111, `PL0111`); one action table for both (`0x1407C6370`); the camp / level-up menu model bytes `MENU_BYTES` (101 / 111).
+- **Ours** (`riku_skin::{Look::halloween, group_for_char}`, `win::riku_skin::{halloween_unlocked, costume_open, mark_halloween}`): costume Halloween Town puts char 3 on 111 (Re:CoM's own `PL0111` name) or its skins (the Keyblade of Heart: 151; Dark Mode keeps Riku's 131 only in Halloween Town as before). Costumes' Costume row: Default Attire / Dark Mode / Halloween Town, skipping a locked one; ini `riku_costume = default | dark | halloween` (the old `riku_dark_skin = on` reads as Dark Mode). Changed in place with the crouch and the way-back effect.
+- **Unlock**: Riku as char 4 once (Riku's save spare bit 0x20); debug `riku_halloween_unlocked` (on in the owner's ini).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 313 (fork branch Re-Re-Reverse/Rebirth): the Ansem costume removed, version 0.177.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "pode tirar o ANsem das skins ficou ridículo, no recom tem algum outro modelo do Riku?".

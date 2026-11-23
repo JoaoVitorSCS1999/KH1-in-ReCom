@@ -1006,3 +1006,7 @@ Riku rests in a T-pose, Ansem in an A-pose (70° at the worst limb). `rest_like`
 ## 0.177.0: the Ansem costume removed
 
 The owner's call after 0.176.2. Reverted to 0.175.0's costumes; Re:CoM has no other Riku model besides PL0101 / PL0111 and Riku-Ansem (Dark Mode).
+
+## 0.178.0: the Halloween Town costume
+
+`Look::halloween`: char 3 on Riku's Halloween group 111 (and its skins), unlocked by his first frame as char 4 (spare bit 0x20) or `riku_halloween_unlocked`.

@@ -37,7 +37,48 @@ fn look() -> Look {
 /// # Safety
 /// Reads the save (main thread).
 pub unsafe fn chosen(s: &crate::settings::Settings) -> Look {
-    Look { dark: s.riku_dark_skin && unlocked(), blade: (s.riku_heart_blade && blade_unlocked()) as u8 }
+    Look {
+        dark: s.riku_costume == 1 && unlocked(),
+        blade: (s.riku_heart_blade && blade_unlocked()) as u8,
+        halloween: s.riku_costume == 2 && halloween_unlocked(),
+    }
+}
+
+/// The save block's spare bit for "Riku reached Halloween Town" (0.178.0; Riku's own save: bits 1 /
+/// 2 / 4 taken, Sora's 0x10 in his).
+pub const HALLOWEEN_SEEN: u8 = 0x20;
+
+/// The Halloween Town costume is unlocked: Riku has been there (char 4) in this save, or the debug
+/// key.
+pub unsafe fn halloween_unlocked() -> bool {
+    if super::settings().riku_halloween_unlocked {
+        return true;
+    }
+    let save: usize = rd(va(super::base(), crate::keyblades::SAVE_PTR));
+    save != 0 && super::stats::riku_story() && rd::<u8>(save + crate::mp::BLOCK_FIRST + crate::mp::off::SPARE) & HALLOWEEN_SEEN != 0
+}
+
+/// A costume of the Costume row can be chosen now.
+pub unsafe fn costume_open(v: usize) -> bool {
+    match v {
+        1 => unlocked(),
+        2 => halloween_unlocked(),
+        _ => true,
+    }
+}
+
+/// Riku as char 4 (Halloween Town): kept in his save.
+unsafe fn mark_halloween(e: usize) {
+    let save: usize = rd(va(super::base(), crate::keyblades::SAVE_PTR));
+    if save == 0 || !super::stats::riku_story() || rd::<u32>(e + CHAR) != 4 {
+        return;
+    }
+    let at = save + crate::mp::BLOCK_FIRST + crate::mp::off::SPARE;
+    let b: u8 = rd(at);
+    if b & HALLOWEEN_SEEN == 0 {
+        wr(at, b | HALLOWEEN_SEEN);
+        log("riku skin: Halloween Town reached: kept in Riku's save (the Halloween Town costume unlocks)");
+    }
 }
 
 /// The Keyblade of Heart is unlocked with the Dark Mode costume (0.167.0; fork owner, 2026-11-23: "a
@@ -152,14 +193,18 @@ unsafe fn name_ptrs(b: usize, sk: &[Skin], look: Look) -> [u64; 2] {
     let mut out = [0u64; 2];
     for (k, g) in rs::RIKU_GROUPS.iter().enumerate() {
         let recom = va(b, rs::RIKU_ANN_NAMES[k]) as u64;
-        let want = rs::group_for(sk, *g, look);
-        out[k] = names.iter().find(|n| n.0 == want).map_or(recom, |n| n.1 as u64);
+        let want = rs::group_for_char(sk, *g, look);
+        // Riku's own groups take Re:CoM's own names (char 3 on 111: "PL0111").
+        out[k] = match rs::RIKU_GROUPS.iter().position(|r| *r == want) {
+            Some(i) => va(b, rs::RIKU_ANN_NAMES[i]) as u64,
+            None => names.iter().find(|n| n.0 == want).map_or(recom, |n| n.1 as u64),
+        };
     }
     out
 }
 
 fn look_name(l: Look) -> String {
-    format!("{} with the {}", if l.dark { "Dark Mode" } else { "Default Attire" }, rs::BLADES[l.blade as usize % rs::BLADES.len()])
+    format!("{}{} with the {}", if l.dark { "Dark Mode" } else { "Default Attire" }, if l.halloween { " (Halloween Town)" } else { "" }, rs::BLADES[l.blade as usize % rs::BLADES.len()])
 }
 
 /// The menu's model (camp and level-up screen) follows the group the player loads: called when
@@ -177,7 +222,7 @@ pub unsafe fn sync_menu(b: usize) {
     }
     let sk = skins();
     for &(at, riku) in &rs::MENU_BYTES {
-        let (from, to) = (rs::group_for(&sk, riku, Look::from_bits(menu)), rs::group_for(&sk, riku, Look::from_bits(on)));
+        let (from, to) = (rs::group_for_char(&sk, riku, Look::from_bits(menu)), rs::group_for_char(&sk, riku, Look::from_bits(on)));
         if !super::hook::patch(va(b, at), &[from as u8], &[to as u8], "menu model group (Riku)") {
             log("riku skin: the menu model's group bytes are not what we wrote; the menu keeps its model");
             return;
@@ -219,8 +264,8 @@ pub unsafe fn refresh(b: usize) {
         return;
     }
     let s = super::settings();
-    if s.riku_dark_skin && !unlocked() {
-        log("riku skin: Dark Mode chosen, but this save hasn't reached Dark Mode yet: Default Attire (the costume unlocks at Riku's first Dark Mode)");
+    if (s.riku_costume == 1 && !unlocked()) || (s.riku_costume == 2 && !halloween_unlocked()) {
+        log("riku skin: a costume not unlocked in this save (Dark Mode: his first Dark Mode; Halloween Town: reaching it): Default Attire");
         // Only the setting (no live change: the old player may be gone during a room build).
         let _ = super::store_item(crate::menu::Item::Costume, 0);
     }
@@ -563,7 +608,8 @@ unsafe fn try_swap(b: usize) -> bool {
     // 0.160.0: only the Keyblade changes (same attire): no transformation; the model changes now,
     // with Riku's way-back effect.
     let sk = skins();
-    if TRANS_PL.load(Ordering::Relaxed) == 0 && rs::look_of(&sk, now as u16).dark == rs::look_of(&sk, g).dark {
+    let (lnow, lg) = (rs::look_of(&sk, now as u16), rs::look_of(&sk, g));
+    if TRANS_PL.load(Ordering::Relaxed) == 0 && lnow.dark == lg.dark && lnow.halloween == lg.halloween {
         swap_now(b, e, g);
         weapon_appear(e);
         func::<super::movement::MotionFn>(super::movement::MOTION_REQUEST)(e, 1, 0, 0, 0, 0, 0);
@@ -640,6 +686,9 @@ pub unsafe fn frame(e: usize) -> bool {
     // unlock kept in Riku's save. One compare a frame.
     if e != 0 && rd::<usize>(e) == va(b, crate::sites::data::DRIKU_VTABLE) && e == rd::<usize>(va(b, crate::sites::data::MAIN_PLAYER)) {
         super::dark_points::mark_seen();
+    }
+    if e != 0 && rd::<usize>(e) == va(b, crate::sites::data::RIKU_VTABLE) && e == rd::<usize>(va(b, crate::sites::data::MAIN_PLAYER)) {
+        mark_halloween(e);
     }
     if TRANS_PL.load(Ordering::Relaxed) != 0 {
         return transition(b, e);
