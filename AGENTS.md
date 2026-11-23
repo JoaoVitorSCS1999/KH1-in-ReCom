@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 325 (fork branch Re-Re-Reverse/Rebirth): one ring: Re:CoM's target marker hidden while KH1's Auto Lock runs unlocked; the crate's version, version 0.181.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "funcionou perfeitamente,mas ficou duplicado o anel". Answering what the two rings look like, they chose "Um laranja e outro diferente".
+
+- **Cause**: the owner's log shows our `lockon_d` made once per appearance. The second ring is Re:CoM's own `CLockonMarker` layer, which it draws on its pick `+0x84C` without a lock too. KH1 shows only the orange ring then, and the lock cursor only with a lock (`0x140274B20`, Checked (decomp)).
+- **Change** (`win::kh1_hud::recom_marker`, called from `auto_ring` in the `0x140209D30` wrapper): at `hud = kh1` with Auto Lock on, Combat = KH1 (Sora or Riku) and no lock, Re:CoM's marker layer is set not drawn (`0x140247E50(ctrl, 0, 0)`, as H7 did). With an R1 lock, `auto_lock = off`, or the HUD off or Re:CoM's, it is shown again (`0x140247E50(ctrl, 0, 1)`; Assumption: 1 shows, as `win::keyblades` uses it).
+- **Version**: `crates/kh1-recom/Cargo.toml` (and `Cargo.lock`) are at 0.181.1. The log's first line and the Combat row's "mod v" read it. Since 0.180.0 only `VERSION` had moved, so the log said 0.179.1.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 324 (fork branch Re-Re-Reverse/Rebirth): KH1's Auto Lock: the yellow ring's enemy is the attacks' target, KH1's pick, its hold and its menu rule, version 0.181.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "para ambos o anel amarelo não faz lock no oponente ainda igual faz no KH1". Then "no kh tem o anel amarelo e o azul, o azul é quando tu aperta RB e ele locka no oponente, o amarelo ele aparece no oponente usando a regra do jogo, e se vc tiver com o auto lock ativo, os teus ataques sempre serão na direção daquele oponente independente de onde tu esteja olhando, se o anel amarelo estiver ativo ele se comporta assim". The plan was approved with the menu rule ("Tudo, com o menu").

@@ -1261,6 +1261,8 @@ struct Ring {
 }
 
 static RING: Mutex<Option<Ring>> = Mutex::new(None);
+/// 0.181.1: Re:CoM's marker layer we hid while nothing is locked (its control).
+static RECOM_HIDDEN: AtomicUsize = AtomicUsize::new(0);
 
 /// `CLockonMarker` update (`0x140209D30(marker)`), each frame of a battle: Re:CoM's, then at
 /// `hud = kh1` its cursor layer is hidden and KH1's (`lockon_c`, played from its keys' start when
@@ -1297,6 +1299,8 @@ unsafe fn projected_ctrl() -> Option<usize> {
 /// scaled with the distance. Re:CoM's own cursor shows a lock, as before.
 unsafe fn auto_ring(m: usize, up: bool) {
     let Some(group) = manifest().and_then(|x| x.auto_ring) else { return };
+    let pl = mv::main_player();
+    recom_marker(m, pl, up);
     let Ok(mut ring) = RING.lock() else { return };
     if ring.as_ref().is_some_and(|r| r.marker != m) || !up {
         if let Some(r) = ring.take() {
@@ -1306,7 +1310,6 @@ unsafe fn auto_ring(m: usize, up: bool) {
             return;
         }
     }
-    let pl = mv::main_player();
     let want = if pl != 0 { super::lock_on::ring_target(pl) } else { None };
     if ring.is_none() {
         if want.is_none() {
@@ -1330,6 +1333,28 @@ unsafe fn auto_ring(m: usize, up: bool) {
             r.target = 0;
         }
         None => {}
+    }
+}
+
+/// 0.181.1 (fork owner, 2026-11-23: "ficou duplicado o anel", answering that the second one is not
+/// orange): Re:CoM's own target marker (its `CLockonMarker` layer, on its pick `+0x84C` even
+/// without a lock) is hidden while KH1's Auto Lock runs at `hud = kh1` and nothing is locked. KH1
+/// shows only the orange ring then, and the lock cursor only with a lock (`0x140274B20`, Checked
+/// (decomp)). A lock (R1) shows Re:CoM's marker again, as before.
+unsafe fn recom_marker(m: usize, pl: usize, up: bool) {
+    let ctrl: usize = rd(m + M_CTRL);
+    if ctrl == 0 || rd::<u8>(ctrl + C_LAYERS) == 0 {
+        return;
+    }
+    let auto = up && pl != 0 && super::settings().auto_lock && mv::kh1_fighter(pl) && !super::lock_on::locked(pl);
+    let shown = func::<IsVisFn>(LAYER_VISIBLE)(ctrl, 0) != 0;
+    if auto {
+        if shown {
+            func::<SlotVisFn>(SLOT_VISIBLE)(ctrl, 0, 0);
+        }
+        RECOM_HIDDEN.store(ctrl, Ordering::Relaxed);
+    } else if RECOM_HIDDEN.swap(0, Ordering::Relaxed) == ctrl && !shown {
+        func::<SlotVisFn>(SLOT_VISIBLE)(ctrl, 0, 1);
     }
 }
 
