@@ -491,6 +491,25 @@ pub fn riku_guard(sora_guard: &Clip, sora: &RecomSkeleton, riku: &RecomSkeleton,
     Ok(c)
 }
 
+/// 0.183.2: Dark Riku's (the real Dark Mode's) guard and guard recoil: [`RIKU_GUARD`] / [`RIKU_RECOIL`]
+/// retargeted from Riku's skeleton onto his (as the Dark Form skin does, [`retarget`]), named for his own
+/// pack's prefix.
+pub const DARK_GUARD: &str = "p003_225";
+/// Dark Riku's guard recoil (see [`DARK_GUARD`]).
+pub const DARK_RECOIL: &str = "p003_226";
+
+/// Dark Riku's own pack (`dark_ann`, `PLAYER/02x1/PL02x1.ANN`) with KH1 Riku's guard and its recoil on his
+/// skeleton ([`DARK_GUARD`], [`DARK_RECOIL`]). The DLL names two of his action table's clipless rows
+/// (`0x1407C67F0`, 0x39 / 0x3A: `p003_000`, Checked (exe)) after them.
+pub fn dark_guard_pack(dark_ann: Ann, guard: &Clip, recoil: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton) -> Result<Ann> {
+    let map = bone_map(riku, dark);
+    let mut g = retarget(guard, riku, dark, &map)?;
+    g.name = crate::ann::name16(DARK_GUARD);
+    let mut r = retarget(recoil, riku, dark, &map)?;
+    r.name = crate::ann::name16(DARK_RECOIL);
+    Ok(with_clip(with_clip(dark_ann, g), r))
+}
+
 /// `ann` with `clip` added as its last slot (named as the clip), unless a slot already has it.
 pub fn with_clip(mut ann: Ann, clip: Clip) -> Ann {
     if ann.find(&clip.name_str()).is_none() {
@@ -561,10 +580,15 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     let ds = RecomSkeleton::parse(&dmdl)?;
     let mut ann = Ann::parse(&rd(riku, "ANN")?)?;
     let mut riku_pack = None;
+    let mut dark_pack = None;
     if let Some(src) = guard {
         let guard = riku_kh1_guard(src.mset, src.mdls, &rs)?;
+        let recoil = riku_kh1_recoil(src.mset, src.mdls, &rs)?;
+        // 0.183.2: the real Dark Mode's Dark Riku guards with the same clips on his own skeleton, in his
+        // own pack ([`dark_guard_pack`]).
+        dark_pack = Some((path(dark, "ANN"), dark_guard_pack(Ann::parse(&rd(dark, "ANN")?)?, &guard, &recoil, &rs, &ds)?.to_bytes()));
         ann = with_clip(ann, guard);
-        ann = with_clip(ann, riku_kh1_recoil(src.mset, src.mdls, &rs)?);
+        ann = with_clip(ann, recoil);
         riku_pack = Some((path(riku, "ANN"), ann.to_bytes()));
     }
     let mut out_ann = retarget_ann(&ann, &rs, &ds)?;
@@ -590,6 +614,7 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
         (path(skin, "SES"), crate::ses::write(&ses)),
     ];
     files.extend(riku_pack);
+    files.extend(dark_pack);
     for ext in ["RTM", "TXA"] {
         let (d, a, date) = raw(dark, ext)?;
         files.push((format!("raw/{}", path(skin, ext)), kh1_formats::egs::build_plain_entry(&d, &a, date)?));
@@ -806,6 +831,28 @@ mod tests {
 
     fn game() -> Option<std::path::PathBuf> {
         std::env::var_os("RECOM_GAME").map(Into::into)
+    }
+
+    /// 0.183.2: with KH1 Riku's guard, Dark Riku's own packs (201 / 211) get it and its recoil on his skeleton.
+    #[test]
+    fn dark_rikus_own_pack_gets_the_guard() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let k1 = install::kh1(&g, keys.clone()).unwrap();
+        let (mset, mdls) = (k1.read("xa_ex_1010.mset").unwrap(), k1.read("xa_ex_1010.mdls").unwrap());
+        let arc = install::recom_archive(&g).unwrap();
+        let src = GuardSource { mset: &mset, mdls: &mdls };
+        for &(riku, dark, skin) in &SKIN_GROUPS {
+            let b = build_with(&arc, &keys, riku, dark, skin, Some(&src)).unwrap();
+            let (_, bytes) = b.files.iter().find(|(p, _)| *p == path(dark, "ANN")).expect("Dark Riku's own pack");
+            let ann = Ann::parse(bytes).unwrap();
+            let own = Ann::parse(&install::read_recom(&arc, &keys, &path(dark, "ANN")).unwrap()).unwrap();
+            assert_eq!(ann.slots.len(), own.slots.len() + 2, "group {dark}: his own slots, then the two");
+            for name in [DARK_GUARD, DARK_RECOIL] {
+                let c = ann.find(name).and_then(|i| ann.slots[i].clip.as_ref()).unwrap_or_else(|| panic!("group {dark}: {name}"));
+                assert!(c.frames > 30, "{name}: {} frames", c.frames);
+            }
+        }
     }
 
     /// With the owner's install (`RECOM_GAME`): Riku's guard clip lowers the guard as the defence

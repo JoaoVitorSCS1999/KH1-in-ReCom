@@ -11,6 +11,118 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 333 (fork branch Re-Re-Reverse/Rebirth): the Guard's start measured (simulation against the Neoshadow) and every Square press logged, version 0.183.4 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "o timing da defesa segue horrível preciso de uma correção se possível faça o teste do neoshadow com o RIku tbm"; asked what feels wrong they chose "Demora para começar", and for the Neoshadow test "Simulação nos testes".
+
+- **The owner's 0.183.3 log** (Checked (trace)): every guard window lasted 433 ms (26 frames, KH1's); no melee hit was blocked by the blade (the Wyvern's bite, priority 100 in every row, got through "not on the blade" twice and once "on the blade" by its priority); two Wizard shots were blocked. The press itself was not logged, so the delay from the button could not be read.
+- **Simulation** (`movement::tests::rikus_guard_against_the_neoshadows_windows`, Riku's abilities on the shared port): the guard object is live on frames 11..=36 after the press. KH1's motion 212 has it on frames 10..36 (Checked (files)): the port is one frame (16 ms) later, because a frame's motion update runs at the next handler call (the oracle's order), the same 26 frames. Against the Neoshadow's windows (Checked (files), the asset step's test): its claw (202, hits 40..=67, priority 40) is blocked when Square is pressed on its frames 4..=29; its rising slash (207) and dive (205) have priority 100, which KH1's Guard never stops (`kh1_core::enemy::guard::meeting`: the attack is not marked).
+- **Log** (`win::movement::square_log`, `win::attack::guard_line`): each Square press a KH1 frame sees, in Sora's / Riku's guard timeline: "Guard started", "a roll", or "dropped" with KH1's state, action lock and request (KH1 drops a Square while the lock holds or off the ground: `0x140297870`, `0x1402A7B30`, Checked (decomp)).
+- **Not changed**: KH1's start (10 frames) and window. Seen, not changed: after a hit gets through, the guard object stays live while Re:CoM's damage reaction plays (the KH1 frame doesn't run in it): about 680 ms in the log.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 332 (fork branch Re-Re-Reverse/Rebirth): Sora's Guard by the blade too: one KH1 Guard for Sora and Riku, version 0.183.3 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "a mecânica do RIKU precisa ficar igual a do Sora...,  isso é para agora!"; asked which of the two becomes the rule they first chose "Os dois pelo corpo", then: "n~ao mas o do Sora no KH 1 também é pelo corpo não?"; told KH1's guard is the Keyblade's volume (the workspace's `knowledge/KH1/kh1-sora.md` § Guard in detail, Checked (decomp + files)): "então mudança de rota, alternativa a" (both by the blade, as KH1).
+
+- **Before**: Sora's Guard was Re:CoM's body guard (any hit from within ±100°, `set_guard`; the 2026-11-03 Assumption of `docs/recom-m11-enemies.md`), Riku's the blade test (0.182.0 / 0.182.1). KH1 blocks only what touches the Keyblade.
+- **Change** (`win::attack::{blade_guard_pair, guard_blade_of, guard_faces_of}`, was `riku_guard_pair` / `riku_blade` / `riku_faces`; `crate::riku::{guard_faces, guard_blade, BLADE_END}` shared): Sora's Guard runs the same path as Riku's: his blade (Re:CoM's weapon line on his weapon bone, the Guard record's radius on the equipped weapon), the facing ±100°, then KH1's types and priorities (0.183.1). A hit off the blade, or from outside the front, gets through (his body guard off for the test). `sora_guard_pair` (0.183.1's body-guard version for Sora) is gone.
+- **Kept**: the Yellow Opera's Thunder is never blocked by Sora (KH1: no clash pass), still blocked by Riku (the owner's 0.153.0 rule).
+- **Log**: Sora's lines are `sora guard: <ms> ms: …` (300 lines) with the same timeline as Riku's (guard object on / off, blocked by the blade, hit got through, guard success, post-block protection).
+- **Assumption**: Re:CoM's weapon line (−0.8 m on the weapon bone) stands for the Keyblade's length, as for his Re:CoM swing volume, whatever KH1 Keyblade model is shown.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 331 (fork branch Re-Re-Reverse/Rebirth): Dark Riku guards in KH1 Riku's guard pose, version 0.183.2 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "certo novamente quero que revalide a mecanica de guard do Riku explorando se ficou alguma coisa fora"; on the findings and the plan (0.183.0 / 0.183.1 / 0.183.2), "vou pela tua recomendação mas quero testar todos de uma vez", then "sim". Item (c) of the plan: Dark Riku's pose.
+
+- **Cause**: the real Dark Mode's Dark Riku guarded with his clash recoil (row 0x24, `p003_033`). Since 0.182.0 the block is decided by where the blade is, so his Guard was judged on a pose that is not KH1's.
+- **Asset step** (`kh1_recom_assets::riku_skin::{dark_guard_pack, DARK_GUARD, DARK_RECOIL}`): with KH1 Riku's guard (`xa_ex_1010`), his own packs `PLAYER/0201/PL0201.ANN` and `PLAYER/0211/PL0211.ANN` get the guard (`p002_225`) and its recoil (`p002_226`) retargeted onto his skeleton (`ex_1580_sk`, the Dark Form skin's retarget), named `p003_225` / `p003_226`. Checked (tests: `dark_rikus_own_pack_gets_the_guard` on the owner's install).
+- **DLL** (`win::riku_skin::{guard_rows, name_rows, guard_row, recoil_row}`): rows 0x39 / 0x3A of his action table (`0x1407C6300[5]` / `[6]` = `0x1407C67F0`, both `"p003_000"`: Checked (exe)) are named after them, checked first; then his Guard and its recoils play them, as Riku's. Assumption: his player build rebinds rows by name as Riku's does (`0x1401F4240`). Without the files (an asset step before 0.183.2): his clash recoil as before, logged once.
+- **Assumption**: Re:CoM's loader takes his pack with two more slots at the end (Sora's `PL0001.ANN` with 161+ slots is the precedent), and nothing but the player loads `PLAYER/0201` / `0211`. Every row is checked before any is renamed (`name_rows`).
+- **On the owner's side**: the step's code changed, so the DLL's first-launch build runs again at the next start (its console window; `docs/openkh-github-install.md`) and writes the two packs.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 330 (fork branch Re-Re-Reverse/Rebirth): the Guard against KH1 enemies by KH1's attack types and priorities (Sora and Riku), version 0.183.1 (2026-11-23)
+
+Fork owner, 2026-11-23: the asks of Stage 331 (item (a) of the plan they approved: block only what KH1 blocks).
+
+- **KH1** (Checked (exe + decomp), the workspace's `knowledge/KH1/kh1-sora.md` § Guard in detail): the guard object (Guard row: clash type 2, priority 0 + the weapon's) is tested against an enemy attack only when the types meet (`0x1402B3BE0`, `0x140528CB8`: type 2 meets types 0 and 3). Then `0x1402B4A20` / `0x1402B4BC0` give each side its outcome by priority (`kh1_core::enemy::guard::meeting`): the guard side's record kind 6, or 7 when more than 40 under (request 0x6F, no Counterattack), nothing against priority 0; kind 6 pushes back by `−diff × 2.5` when `diff` < 0 (`0x14029D720`); the enemy side a clash record, nothing at 98–100, a repel for a stronger type 1 / 3 / 4; an attack meets no body only when it is stopped.
+- **Change** (`win::attack::{kh1_guard, kh1_block, sora_guard_pair, pair_unguarded}`, `win::kh1_enemy::attack_row`, `Host::guard_clash`, `movement::guard_success`): for a KH1 enemy's attack (the asset step's clash records) while the KH1 guard is live:
+  - types that don't meet, or not stopped: the hit gets through (Sora: his body guard off for the test; Riku: also when it is on the blade);
+  - stopped, the guard side with a record: the block, and the guard success takes its kind and push (0x6F for kind 7);
+  - stopped with no record (priority 0): the attack stops, no recoil, the guard goes on (Riku: no test, no hit recorded);
+  - the enemy's reaction (`super::guard::on_result`: its KH1 clash recoil, a shot turned back) only when it gets a clash record.
+  - Re:CoM's own attacks have no KH1 type or priority: as before (kind 6, no push).
+  - a priority-0 attack lying on Riku's blade for several frames is stopped every frame, its reaction and log line once per attack (collision + serial) per guard; a block with no record leaves an earlier block's guarded bit of the same frame in place.
+- **Protection after kind 7**: KH1's flag 0x80 now holds while the strong recoil 0x6F holds the lock, as during 0x6E (`movement::untouchable_step`; it ran out ~8 frames into 0x6F, `swing_clash`'s kind 7 too).
+- **Left** (the mechanic review, 2026-11-23):
+  - a type 0 attack of priority 98, 99 or 100 (the Neoshadow's dive, the Wyvern's bite) gives the guard side kind 7 in KH1 *and* still hits (not stopped); here it only gets through. A KH1 projectile turned to the other side (`+0x30 & 0x400`) is not modelled (`kh1_core`).
+  - KH1 enemies' thrown objects, rings and held attacks that are Re:CoM bullets or records with no clash row (the Bandit's scimitar, priority 0) keep Re:CoM's block: a recoil and the Counterattack, where KH1 gives the guard no record.
+  - KH1 meets a pair once while both live (the `+0x9C` mask); not modelled beyond the once-per-attack memo below.
+  - Riku's kind 7 plays his one KH1 recoil clip (row 0x3A) for 0x6F. (Sora's guard volume: the blade since 0.183.3.)
+  - Riku: when Re:CoM's answer was a hit turned into the block, whether the pending hit still costs HP is not shown; logged (`pending hit … value …`).
+- **Log**: `sora guard: …` (60 lines) and `riku guard: … KH1 clash kind …` / `… stopped … with no recoil …` / `hit got through (on the blade, but KH1's Guard doesn't stop it: its type or priority)`.
+- **Checked**: tests (new `guard_success_takes_kh1s_clash_kind_and_push`), the Windows build. **Not checked**: in game; the enemies' real types and priorities (their manifests weren't on this machine).
+
+---
+
+## Stage 329 (fork branch Re-Re-Reverse/Rebirth): the Guard turns to Auto Lock's target and restarts the combo (Sora and Riku), version 0.183.0 (2026-11-23)
+
+Fork owner, 2026-11-23: the asks of Stage 331 (item (b) of the plan they approved: turn to the right enemy and restart the combo).
+
+- **KH1** (Checked (decomp), the workspace's `knowledge/KH1/kh1-sora.md` § Guard in detail and `kh1-lock-on.md`): `0x1402A3B00` turns the Guard to the lock pair `0x142DB3518`, which holds the soft target in lock states 1–4 (Auto Lock's orange ring, no R1), and sets the combo counter `CB + 0x41` to 1.
+- **Change** (`movement::pad_handler`, `win::movement::read_pad`, `win::attack::soft_target_centre`): on a Square press the frame's `lock_target` is R1's lock, else Auto Lock's soft target (nothing held: the Guard is no command), and the Guard faces it; it sets `combo_counter` to 1. Before, it faced R1's lock only (the soft target was read on Attack presses only) and kept the counter, so a combo went on through a Guard.
+- **Checked**: tests (new `guard_faces_the_soft_target_and_restarts_the_combo`), the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 328 (fork branch Re-Re-Reverse/Rebirth): Riku's guard timeline in the log, version 0.182.2 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "TUDO ela não bloqueou, mas eu acho que está ligado ao tempo da defesa que está zoado ainda, além disso até onde eu sei quando vc da um block com o sora, e vem um logo em seguida o block pega o proximo ataque tbm confere ai no KH1".
+
+- **The owner's log** was still 0.182.0's (the OpenKH build's DLL dated before 0.182.1 was copied), so 0.182.1 is not yet tried.
+- **KH1** (Checked (files + decomp), `kh1-core` data and `crate::movement::guard_success`, the shared port): after a block, the recoil `0x6E` (60 frames) is free from frame 28 (Guard again from there), and flag 0x80 (no damage, no reaction) holds while the recoil holds the lock, then 8 more frames. So a hit that comes right after a block, in about the first 36 frames, does nothing. Riku has the same rule through the port (Re:CoM's `+0x418 & 1`, which his damage check skips too).
+- **Change** (log only, `win::attack::{riku_ms, riku_untouchable_log}`): Riku's lines get a millisecond time, and the guard object on / off, the guard success and the post-block protection on / off are logged (300 lines).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 327 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard: a hit off the blade gets through (Re:CoM's body guard no longer blocks it), version 0.182.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "está um pouco melhor mas está longe de perfeito, se a defesa é no CORPO ainda está pegando a espada, como disse precisa estar igual no KH1".
+
+- **Cause** (Checked (the owner's 0.182.0 log)): no `riku guard: blocked by the blade` line; every block was Re:CoM's own result 2 (`guard reactions: block …`, Wizard shots, a Shadow). Re:CoM's body guard, which `set_guard` turns on (±100°) while his KH1 guard is live as for Sora, does block for Riku, against 0.159.0's note. So a hit off the blade was still blocked by his body, and 0.182.0's blade test only decided the hits Re:CoM had not blocked.
+- **Change** (`win::attack::riku_guard_pair`): an attack that doesn't touch his blade, or whose owner is not in front, is tested by Re:CoM with his body's guard bit (`+0x9C & 1`) off for that test, so it hits him, as in KH1. On the blade and in front: Re:CoM's block (2) is kept, a hit (1) becomes the block, as in 0.182.0.
+- **Log**: `riku guard: blocked by the blade` (also "(Re:CoM's block)") and `riku guard: hit got through (not on the blade[, not in front])`, 40 lines.
+- **Left**: an attack shape that is neither a sphere nor a line, or no weapon bone, keeps Re:CoM's body guard (logged once).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 326 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard blocks by KH1's rule: an attack that touches his blade from in front, version 0.182.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "a defesa ainda está meio esquisita, mas é mais o uso geral dela mesmo tem como verificar como ela é implementada tanto no Sora quanto no jogo original e ajustar no Riku?"; on what feels odd they chose all four (when it can be used, what it blocks, direction / target, length / rhythm); then "o ponto é usar o KH1 como referência … a adaptação deve ser precisa se não vai ficar nesse vale da estranhesa"; on the plan (1 the blade, 2 the made-up rules), verbatim: "1 e 2 fica IGUAL KH1".
+
+- **KH1** (Checked (decomp + files); the workspace's `knowledge/KH1/kh1-sora.md` § Guard in detail): the guard object is the Guard record `0x4DA8` on the weapon (`bone 0x30`, the blade line, radius 0 + the weapon's: Kingdom Key 40), live on motion 212's hit frames 10–36. It blocks an enemy attack that touches that blade (`0x1402B4A20`) from an owner within ±100° of the facing (`0x1402B4640`, record `+0x64` = cos 100°). The blocked attack meets no body (`+4 & 0x30`). A hit on the body that misses the blade is not blocked.
+- **Compared**: when the Guard starts, its turn to the target, its length and its recoil / Counterattack are the shared KH1 port (`crate::movement`), as Sora's (checked against `0x1402A7B30`, `0x1402A3B00`, `0x14029D720`, `0x140294220`): no change. What was not KH1: Riku blocked any hit on his body from in front (0.159.0), a shot within 1 m was judged by its caster, and a melee attacker past 4 m was blocked without a reaction (0.158.2).
+- **Change** (`win::attack::{riku_guard_pair, riku_blade, attack_contact}`, `crate::riku::{guard_blade, BLADE_END}`): before Re:CoM's pair test of an enemy attack against the player list, while his KH1 guard is live:
+  - his blade is Re:CoM's own weapon line (`0x140225840`, Checked (decomp)): the owner's bone `weapon + 0x238` (weapon `+0x2CC & 4`) or the weapon's bone 2, from its origin (Assumption: the hilt) to (−0.8, 0, 0) in its frame (`0x1407C7E50`, Checked (exe)), as spheres of the Guard record's radius on the equipped weapon (Assumption, as his swing's clash since 0.169.0);
+  - the attack's shape (sphere or line) against them, by Re:CoM's overlap tests; its owner within ±100° (a shot by its own place, Assumption);
+  - on a block: Re:CoM's test, else its apply on his body with the blade's contact, then the result is Sora's block (2, the guarded bit, the attacker), so the shot turns back, the attacker reacts and the KH1 guard success follows. Not touching the blade: the hit gets through.
+  - `riku_pair_block`, the 1 m caster rule and `RIKU_MELEE_REACH` are gone.
+- **Left as before**: the Yellow Opera's Thunder is still blocked by Riku (0.153.0, the owner's rule; KH1 doesn't).
+- **Not settled**: which enemy attacks KH1 can't guard (priority rule, the knowledge note's open question).
+- **Checked**: tests (new `rikus_guard_blade_is_recoms_weapon_line`), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 325 (fork branch Re-Re-Reverse/Rebirth): one ring: Re:CoM's target marker hidden while KH1's Auto Lock runs unlocked; the crate's version, version 0.181.1 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "funcionou perfeitamente,mas ficou duplicado o anel". Answering what the two rings look like, they chose "Um laranja e outro diferente".

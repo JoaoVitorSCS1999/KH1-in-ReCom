@@ -460,7 +460,9 @@ pub unsafe fn read_pad(pl: usize) -> PadView {
         jump: Button { pressed: req & 1 != 0, held: jump_held(pad) != 0 },
         square: Button { pressed: req & 2 != 0, held: enabled && held(0x80, 0) != 0 },
         confirm: Button { pressed: req & 4 != 0, held: false },
-        lock: lock_target(pl),
+        // 0.183.0: a Square press also takes Auto Lock's soft target, for the Guard's turn (KH1's lock
+        // pair `0x142DB3518` holds it in lock states 1–4; `0x1402A3B00`). No hold: the Guard is no command.
+        lock: lock_target(pl).or_else(|| if req & 2 != 0 { super::attack::soft_target_centre(pl) } else { None }),
         target,
         auto_target,
     }
@@ -811,10 +813,15 @@ impl Host for RecomHost {
         super::attack::take_swing_clash(self.pl)
     }
 
+    fn guard_clash(&mut self) -> Option<(u8, i32)> {
+        super::attack::take_guard_clash()
+    }
+
     fn set_untouchable(&mut self, on: bool) {
         // KH1's flag 0x80 after a guard success: Re:CoM's `+0x418 & 1`, which makes the damage
         // check `0x1401E6DE0` skip hits (Checked (decomp)).
         unsafe {
+            super::attack::riku_untouchable_log(self.pl, on);
             let f: u32 = rd(self.pl + p::FLAGS_418);
             wr(self.pl + p::FLAGS_418, if on { f | 1 } else { f & !1 });
         }
@@ -913,7 +920,9 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
         // 0.164.0: an item from his command menu's Items list this frame (0.163.0 never passed it).
         input.item = super::items::take_command();
         let mut host = RecomHost::new(pl);
+        let before = (slot.sora.state, slot.sora.lock, slot.sora.rec.head());
         slot.last = slot.sora.frame(&mut host, &input, fresh);
+        square_log(pl, &input, before, &slot.last);
         slot.sync = if slot.last.handed_to_recom() { None } else { Some(read_sync(pl)) };
         if !slot.last.items.is_empty() {
             super::items::on_events(&slot.last.items);
@@ -948,7 +957,9 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
         input.locked |= auto;
     }
     let mut host = RecomHost::new(pl);
+    let before = (slot.sora.state, slot.sora.lock, slot.sora.rec.head());
     slot.last = slot.sora.frame(&mut host, &input, fresh);
+    square_log(pl, &input, before, &slot.last);
     // Re:CoM's end action entered its win action, or Re:CoM's own roll started: it owns Sora; a
     // later KH1 frame takes over afresh.
     slot.sync = if slot.last.handed_to_recom() { None } else { Some(read_sync(pl)) };
@@ -964,6 +975,26 @@ pub(super) unsafe fn run_frame(pl: usize, fresh: bool) {
     if !slot.last.specials.is_empty() {
         super::specials::on_events(&slot.last.specials);
     }
+}
+
+/// 0.183.4 (fork owner, 2026-11-23: the Guard is slow to start): each Square press a KH1 frame saw, in the guard
+/// timeline (`win::attack::kh1_guard_log`): the Guard started, a roll, or the press dropped and why (KH1 drops a
+/// Square while the action lock holds or off the ground: `0x140297870`, `0x1402A7B30`). `before`: the KH1 state,
+/// lock and request at the frame's start.
+unsafe fn square_log(pl: usize, input: &crate::movement::FrameInput, before: (u32, bool, u16), out: &crate::movement::FrameOut) {
+    use kh1_core::controller::Event;
+    if !input.square.pressed {
+        return;
+    }
+    let what = if out.events.contains(&Event::Guarded) {
+        "Guard started".to_string()
+    } else if out.events.contains(&Event::Rolled) || out.recom_roll {
+        "a roll (moving at run speed or more)".to_string()
+    } else {
+        let (state, lock, head) = before;
+        format!("dropped (KH1 state {state}, action lock {lock}, request {head:#x})")
+    };
+    super::attack::guard_line(pl, &format!("Square pressed: {what}"));
 }
 
 /// Whether our last frame left this player's actions as they are now.

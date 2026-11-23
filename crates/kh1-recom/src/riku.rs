@@ -80,8 +80,8 @@ pub fn swing_row(kh1_row: usize) -> usize {
 /// Re:CoM's body-guard angle rule (`0x14016F1C0`'s guard branch; Checked (exe: disasm)): the
 /// attack point minus the guarder's bone 0 (`0x14023E6E0`), `atan2f(d.x, d.z)` minus the guarder's
 /// yaw (its mover `+0x54`, `0x1401A4A00`), wrapped to ±π (`0x14016EAA0`), within `half` (KH1's
-/// Guard: ±100°, `KH1_GUARD_ANGLE`). Used for Riku's Guard when Re:CoM's own block didn't fire
-/// (0.153.0).
+/// Guard: ±100°, `KH1_GUARD_ANGLE`). The facing test of the KH1 Guard's blade (0.182.0 Riku's,
+/// 0.183.3 Sora's too).
 pub fn guard_faces(guarder: [f32; 3], yaw: f32, point: [f32; 3], half: f32) -> bool {
     let (dx, dz) = (point[0] - guarder[0], point[2] - guarder[2]);
     if dx == 0.0 && dz == 0.0 {
@@ -96,6 +96,20 @@ pub fn guard_faces(guarder: [f32; 3], yaw: f32, point: [f32; 3], half: f32) -> b
         a += 2.0 * pi;
     }
     a.abs() <= half
+}
+
+/// The point Re:CoM's weapon volume puts at the blade's end, in the weapon bone's frame
+/// (`0x140225840`: `0x1407C7E50` = (−0.8, 0, 0, 1); Checked (exe + decomp)). The Wide modifier's
+/// −1.2 is left out: KH1's Guard has no Wide.
+pub const BLADE_END: [f32; 3] = [-0.8, 0.0, 0.0];
+
+/// The player's blade for the KH1 Guard (0.182.0 Riku's, 0.183.3 Sora's too): (end, grip) in world
+/// metres, from the rows of the bone Re:CoM puts its weapon volume on (`bone + 0xA0`, row 3 its origin).
+/// The end is [`BLADE_END`] in that bone's frame, as Re:CoM places it (`0x1402B4A30`: x·row0 + y·row1 +
+/// z·row2 + row3; Checked (decomp)). The grip is the bone's origin (Assumption: the bone sits at the hilt).
+pub fn guard_blade(rows: [kh1_core::Vec3; 4]) -> (kh1_core::Vec3, kh1_core::Vec3) {
+    let end = rows[0] * BLADE_END[0] + rows[1] * BLADE_END[1] + rows[2] * BLADE_END[2] + rows[3];
+    (end, rows[3])
 }
 
 /// Riku's / Dark Riku's row for KH1's Guard request: their recoil row (`p002_043` / `p003_033`).
@@ -113,6 +127,11 @@ pub const KH1_GUARD_CLIP: &[u8] = b"p002_225\0";
 /// like 0x39; played for KH1's guard recoils 0x6E / 0x6F.
 pub const KH1_RECOIL_ROW: u32 = 0x3A;
 pub const KH1_RECOIL_CLIP: &[u8] = b"p002_226\0";
+/// 0.183.2: Dark Riku's (the real Dark Mode's) guard and its recoil, the same clips on his skeleton in his
+/// own pack (`kh1_recom_assets::riku_skin::{DARK_GUARD, DARK_RECOIL}`), on the same rows of his table.
+pub const DARK_GUARD_CLIP: &[u8] = b"p003_225\0";
+/// Dark Riku's guard recoil clip (see [`DARK_GUARD_CLIP`]).
+pub const DARK_RECOIL_CLIP: &[u8] = b"p003_226\0";
 
 /// Re:CoM's attack row id for Riku's own swing that plays the same clip as Sora's row `sora_id`.
 /// Sora's rows 1..7 (`0x1407C6C70`, action rows 0x30..0x36) have Riku's twins at 0x97..0x9D: the same
@@ -277,6 +296,16 @@ mod tests {
         // Facing −z (yaw π): behind is +z.
         assert!(guard_faces([1.0, 0.0, 1.0], std::f32::consts::PI, [1.0, 0.0, -3.0], half));
         assert!(!guard_faces([1.0, 0.0, 1.0], std::f32::consts::PI, [1.0, 0.0, 4.0], half));
+    }
+
+    #[test]
+    fn rikus_guard_blade_is_recoms_weapon_line() {
+        use kh1_core::Vec3;
+        // A bone at (1, 2, 3) whose x axis points along world −z: the end is 0.8 m along +z.
+        let rows = [Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(1.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0)];
+        let (end, grip) = guard_blade(rows);
+        assert_eq!(grip, Vec3::new(1.0, 2.0, 3.0));
+        assert!((end - Vec3::new(1.0, 2.0, 3.8)).length() < 1e-6, "{end:?}");
     }
 
     #[test]

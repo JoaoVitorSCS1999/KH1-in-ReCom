@@ -19,6 +19,9 @@ static SKINS: OnceLock<Vec<Skin>> = OnceLock::new();
 /// Riku's packs carry Sora's KH1 Guard (manifest + files), and his action tables name it.
 static GUARD: AtomicBool = AtomicBool::new(false);
 static GUARD_FILES: AtomicBool = AtomicBool::new(false);
+/// 0.183.2: Dark Riku's own packs (`PL0201` / `PL0211.ANN`) carry the guard too, and his action table names it.
+static DARK_GUARD: AtomicBool = AtomicBool::new(false);
+static DARK_GUARD_FILES: AtomicBool = AtomicBool::new(false);
 /// The PLAYER table copy holds the skin groups' rows.
 static ROWS: AtomicBool = AtomicBool::new(false);
 /// The look the tables point at now (`Look::bits`; 0 Riku's own).
@@ -105,6 +108,12 @@ pub fn preload(manifest: Option<&Path>) {
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let guard_files = rs::riku_guard(&text) && ["PLAYER/0101/PL0101.ANN", "PLAYER/0111/PL0111.ANN"].iter().all(|f| f.split('/').fold(dir.clone(), |p, x| p.join(x)).is_file());
     GUARD_FILES.store(guard_files, Ordering::Relaxed);
+    // 0.183.2: the asset step writes Dark Riku's own packs with the guard (`kh1_recom_assets::riku_skin::dark_guard_pack`).
+    let dark_files = guard_files && ["PLAYER/0201/PL0201.ANN", "PLAYER/0211/PL0211.ANN"].iter().all(|f| f.split('/').fold(dir.clone(), |p, x| p.join(x)).is_file());
+    DARK_GUARD_FILES.store(dark_files, Ordering::Relaxed);
+    if guard_files && !dark_files {
+        log("riku guard: no PL0201 / PL0211.ANN of the asset step (older than 0.183.2?): Dark Riku's Guard keeps his clash recoil; run Build again");
+    }
     let mut ok = Vec::new();
     for s in skins {
         let missing: Vec<String> = rs::files(s.skin).into_iter().filter(|f| !f.split('/').fold(dir.clone(), |p, x| p.join(x)).is_file()).collect();
@@ -118,9 +127,10 @@ pub fn preload(manifest: Option<&Path>) {
 }
 
 /// Riku's Guard row: his row 0x39 (Sora's KH1 Guard on his skeleton) once [`guard_rows`] named it,
-/// else his clash recoil 0x24; Dark Riku's (the real Dark Mode) his own 0x24.
+/// else his clash recoil 0x24; Dark Riku's (the real Dark Mode) his row 0x39 (`p003_225`, 0.183.2) the same
+/// way, else his own 0x24.
 pub fn guard_row(dark: bool) -> u32 {
-    if !dark && GUARD.load(Ordering::Relaxed) {
+    if (if dark { &DARK_GUARD } else { &GUARD }).load(Ordering::Relaxed) {
         crate::riku::KH1_GUARD_ROW
     } else {
         crate::riku::GUARD_ROW
@@ -130,44 +140,67 @@ pub fn guard_row(dark: bool) -> u32 {
 /// Row 0x39 of Riku's two action tables (`0x1407C6300[3]`, `[4]`) named `p002_225` (its name
 /// pointer, checked to be Re:CoM's `"p002_000"` first); Re:CoM's rebind by name (`0x1401F4240`,
 /// at every player build) binds it to the clip. Only with the asset step's guard files.
+/// 0.183.2: Dark Riku's table (`[5]`, `[6]` = `0x1407C67F0`, rows 0x39 / 0x3A `"p003_000"`; Checked (exe))
+/// the same with `p003_225` / `p003_226` (Assumption: his player build rebinds by name as Riku's does).
 ///
 /// # Safety
 /// `b` is the running image's base; at start, before any player is built.
 pub unsafe fn guard_rows(b: usize) {
-    if !GUARD_FILES.load(Ordering::Relaxed) || GUARD.load(Ordering::Relaxed) {
-        return;
+    if GUARD_FILES.load(Ordering::Relaxed) && !GUARD.load(Ordering::Relaxed) {
+        let names: [(u32, &'static [u8]); 2] = [(crate::riku::KH1_GUARD_ROW, crate::riku::KH1_GUARD_CLIP), (crate::riku::KH1_RECOIL_ROW, crate::riku::KH1_RECOIL_CLIP)];
+        if name_rows(b, &[3, 4], b"p002_000\0", &names, "Riku") {
+            GUARD.store(true, Ordering::Relaxed);
+            log("riku guard: Riku's Guard plays KH1 Riku's own guard (row 0x39, p002_225) and his KH1 guard recoil (row 0x3A, p002_226)");
+        }
     }
-    let names: [(u32, &'static [u8]); 2] = [(crate::riku::KH1_GUARD_ROW, crate::riku::KH1_GUARD_CLIP), (crate::riku::KH1_RECOIL_ROW, crate::riku::KH1_RECOIL_CLIP)];
+    if DARK_GUARD_FILES.load(Ordering::Relaxed) && !DARK_GUARD.load(Ordering::Relaxed) {
+        let names: [(u32, &'static [u8]); 2] = [(crate::riku::KH1_GUARD_ROW, crate::riku::DARK_GUARD_CLIP), (crate::riku::KH1_RECOIL_ROW, crate::riku::DARK_RECOIL_CLIP)];
+        if name_rows(b, &[5, 6], b"p003_000\0", &names, "Dark Riku") {
+            DARK_GUARD.store(true, Ordering::Relaxed);
+            log("riku guard: Dark Riku's Guard plays KH1 Riku's guard on his skeleton (row 0x39, p003_225) and its recoil (row 0x3A, p003_226)");
+        }
+    }
+}
+
+/// The rows of the chars' action tables (each table once: chars that share one) renamed to the clips, each
+/// checked to be `empty` first. True when every row of every table was named.
+unsafe fn name_rows(b: usize, chars: &[usize], empty: &[u8; 9], names: &[(u32, &'static [u8])], who: &str) -> bool {
     // Chars 3 and 4 share one table (Riku's and his Halloween Town form: 0.157.0 named its row,
     // then refused it as "not p002_000" for char 4): each table once.
-    let mut tables: Vec<usize> = [3usize, 4].iter().map(|ch| rd::<usize>(va(b, rs::ACTION_TABLES_PTR) + 8 * ch)).filter(|&t| t != 0).collect();
+    let mut tables: Vec<usize> = chars.iter().map(|ch| rd::<usize>(va(b, rs::ACTION_TABLES_PTR) + 8 * ch)).filter(|&t| t != 0).collect();
     tables.dedup();
     let want = tables.len();
     let mut done = 0;
-    for (ch, table) in tables.into_iter().enumerate() {
-      for &(row, name) in &names {
-        let at = table + 16 * row as usize;
-        let old: usize = rd(at);
-        let s = if old == 0 { &[][..] } else { std::slice::from_raw_parts(old as *const u8, 9) };
-        if s != b"p002_000\0" {
-            log(&format!("riku guard: table {ch}'s row {row:#x} is not p002_000; Riku's Guard keeps his clash recoil"));
-            return;
+    // Every row is checked before any is renamed, so a refusal leaves the tables as Re:CoM's.
+    for &table in &tables {
+        for &(row, _) in names {
+            let old: usize = rd(table + 16 * row as usize);
+            let s = if old == 0 { &[][..] } else { std::slice::from_raw_parts(old as *const u8, 9) };
+            if s != empty {
+                log(&format!("riku guard: {who}'s action table (chars {chars:?}) row {row:#x} is not {}; {who}'s Guard keeps the clash recoil", String::from_utf8_lossy(&empty[..8])));
+                return false;
+            }
         }
-        if super::hook::patch(at, &old.to_le_bytes(), &(name.as_ptr() as usize).to_le_bytes(), "Riku's guard row name") {
-            done += 1;
+    }
+    for table in tables {
+        for &(row, name) in names {
+            let at = table + 16 * row as usize;
+            let old: usize = rd(at);
+            if super::hook::patch(at, &old.to_le_bytes(), &(name.as_ptr() as usize).to_le_bytes(), "Riku's guard row name") {
+                done += 1;
+            }
         }
-      }
     }
-    if done == 2 * want && want > 0 {
-        GUARD.store(true, Ordering::Relaxed);
-        log("riku guard: Riku's Guard plays KH1 Riku's own guard (row 0x39, p002_225) and his KH1 guard recoil (row 0x3A, p002_226)");
+    if done != names.len() * want {
+        log(&format!("riku guard: {who}'s rows: {done} of {} renamed (a patch failed); {who}'s Guard keeps the clash recoil", names.len() * want));
     }
+    done == names.len() * want && want > 0
 }
 
 /// Riku's row for KH1's guard recoils (0x6E / 0x6F): his KH1 recoil (0x3A) once named, else None
 /// (the rows' own rule: his clash recoil 0x24).
 pub fn recoil_row(dark: bool) -> Option<u32> {
-    (!dark && GUARD.load(Ordering::Relaxed)).then_some(crate::riku::KH1_RECOIL_ROW)
+    (if dark { &DARK_GUARD } else { &GUARD }).load(Ordering::Relaxed).then_some(crate::riku::KH1_RECOIL_ROW)
 }
 
 /// The skins whose rows go in the PLAYER table.
