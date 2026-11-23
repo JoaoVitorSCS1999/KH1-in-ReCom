@@ -947,7 +947,15 @@ impl Menu {
         // special offer, which KH1 runs last (`0x14028D0F0`) and only into an entry nothing took;
         // greyed when it scored 1 (MP short).
         let (c, special) = crate::gimmick::context_entry(w.context, w.gimmick, w.special);
-        if c != cmd::NONE {
+        if c == cmd::TALK && !special && w.follow == cmd::NONE {
+            // KH1 puts Talk in row 0, not entry 3 (`0x140293000(0, Talk)`, which ungreys it): FM
+            // draws the row as a dimmed "Attack" ([`Menu::scene`]), its confirm buzzes (sound 4,
+            // `row0_special`), the tab shows Talk and Triangle talks. Fork owner, 2026-11-23,
+            // answer 8b (until 0.178.2 Talk was entry 3's, with a normal Attack in row 0).
+            r.cmds[0] = cmd::TALK;
+            r.grey &= !1;
+            r.lock &= !1;
+        } else if c != cmd::NONE {
             r.cmds[3] = c;
             if special && w.special_grey {
                 r.grey |= 8;
@@ -1539,6 +1547,9 @@ impl Menu {
             // grey bit, as FM's Summon there).
             let (name, bright) = if i == 3 {
                 (crate::sleights::ROW_WORD, if self.sleight_grey { BRIGHT_GREY } else { BRIGHT_ON })
+            } else if i == 0 && self.root.cmds[0] == cmd::TALK {
+                // FM draws Talk's row 0 as a dimmed "Attack" (the tab carries Talk).
+                (cmd::name(cmd::ATTACK), BRIGHT_GREY)
             } else {
                 (cmd::name(self.root.cmds[i]), self.root.bright.get(i).copied().unwrap_or(BRIGHT_GREY))
             };
@@ -2338,6 +2349,36 @@ mod tests {
         assert_eq!(m.alpha, 1.0);
         assert_eq!(text_colour(0xE6, 1.0), 0x80E6_E6E6);
         assert_eq!(text_colour(0x73, 0.5), 0x4073_7373);
+    }
+
+    #[test]
+    fn talk_takes_row_0_as_a_dimmed_attack_that_buzzes() {
+        // 0.178.3 (fork owner's answer 8b): KH1's rule next to an NPC.
+        let w = World { context: cmd::TALK, ..world() };
+        let mut m = Menu::new();
+        m.show();
+        m.build(&w);
+        assert_eq!((m.root.cmds[0], m.root.cmds[3], m.root.grey & 1), (cmd::TALK, cmd::NONE, 0));
+        // Drawn as a dimmed "Attack"; the tab carries Talk.
+        let s = m.scene();
+        assert_eq!((s.rows[0].name, s.rows[0].bright), (cmd::name(cmd::ATTACK), BRIGHT_GREY as u8));
+        // Confirm on row 0: the error sound, no Attack.
+        let o = m.step(&w, press(|p| p.confirm = true));
+        assert!(o.sounds == vec![Sound::Error] && !o.attack);
+        // Triangle once the tab is in: Talk.
+        let mut frames = 0;
+        while m.tab.state != 2 {
+            m.step(&w, Pad::default());
+            m.tick(1.0);
+            frames += 1;
+            assert!(frames < 30);
+        }
+        assert_eq!(m.tab_cmd, cmd::TALK);
+        let o = m.step(&w, press(|p| p.triangle = true));
+        assert!(o.triangle && o.events == vec![Event::Context(cmd::TALK)]);
+        // Away from the NPC: Attack again.
+        m.build(&world());
+        assert_eq!(m.root.cmds[0], cmd::ATTACK);
     }
 
     #[test]

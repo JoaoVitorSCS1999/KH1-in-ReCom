@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 317 (fork branch Re-Re-Reverse/Rebirth): Talk next to NPCs as KH1 (row 0, a dimmed Attack that buzzes), version 0.178.3 (2026-11-23)
+
+Fork owner, 2026-11-23, answering "Perto de NPCs: (a) Attack continua normal, e o Talk aparece só na aba (como está); (b) 1:1 com o KH1: o Talk vai para a linha 0 e o Attack fica apagado, com o som de erro", verbatim: "8b".
+
+- **KH1** (Checked (decomp), `docs/recom-m7-command-menu.md`): NPCs (kind 1) put Talk in row 0 through `0x140293000(0, Talk)`, which ungreys it; FM draws row 0 as a dimmed "Attack", its confirm gives sound 4, the context tab shows Talk.
+- **Change** (`command_menu::Menu::build`, `Menu::scene`): with Talk as the context command (`recom::field_action` on an `ATEL::CAvatar`, kind 0x4000) and no special follow-up running, Talk takes row 0 (ungreyed, unlocked) instead of entry 3; the scene names row 0 "Attack" at the grey brightness; confirm on it buzzes and sends no Attack (the existing `row0_special` path); Triangle, once the tab is in, sends `Context(Talk)` as before. No new hook.
+- **Assumption**: a running special's follow-up keeps row 0 over Talk (KH1's order between the two not read).
+- **Checked**: tests (new `talk_takes_row_0_as_a_dimmed_attack_that_buzzes`), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 316 (fork branch Re-Re-Reverse/Rebirth): Donald's and Goofy's KH1 gauges without rings, version 0.178.2 (2026-11-23)
 
 Fork owner, 2026-11-23, answering "Anéis do Donald e do Pateta (os amigos do Re:CoM não têm HP nem MP): (a) ficam sempre cheios; (b) os anéis são escondidos", verbatim: "4b".
