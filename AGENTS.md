@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 287 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard plays Sora's KH1 Guard retargeted onto his skeleton, version 0.157.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "a animação escolhida de defesa pro Riku ficou estranha, tem alguma melhor?" (chose "Guard do KH1 adaptada").
+
+- Riku has no guard clip in Re:CoM: rows 0x24 / 0x25 are both `p002_043`, the clash recoil (Checked (exe)).
+- **Asset step**: Sora's KH1 Guard clip (`p001_225`) is retargeted onto Riku's skeleton by bone name; his extra bones (blade chain, belts, hair) hold his stance `p002_031`. It is added as `p002_225` to `PL0101.ANN` / `PL0111.ANN` and the skin packs (**re-run**, automatic; 2 new outputs).
+- **Game**: row 0x39 of Riku's action tables (`p002_000`, checked) is renamed `p002_225`; his Guard plays it. The recoil stays 0x24; the real Dark Mode is unchanged.
+- **Checked**: tests, the asset step (the clip in all four packs), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 286 (fork branch Re-Re-Reverse/Rebirth): Costumes on Riku's list at every Combat setting, version 0.156.2 (2026-11-22)
 
 Fork owner, 2026-11-22, verbatim: "notei que, quando troca o combat de KH1 para Re:CoM a opção de Costume some... essa opção poderia manter no menu sempre".

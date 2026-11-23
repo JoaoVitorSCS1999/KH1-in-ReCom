@@ -552,8 +552,21 @@ fn run_inner(opt: &Options) -> Result<(), String> {
     {
         let manifest = root.join(kh1_recom_assets::riku_skin::MANIFEST);
         let mut done = Vec::new();
+        // 0.157.0: Sora's KH1 Guard (KH1 entry 110, the pack just built) for Riku's own pack.
+        let sora_guard = {
+            let name = built.entries.iter().find(|e| e.kh1_entry == 110 && e.source.as_str() == "kh1").map(|e| e.name.clone());
+            let pack = kh1_recom_assets::ann::Ann::parse(&built.bytes).ok();
+            let skel = install::read_recom(&arc, &keys, install::SORA_MDL).ok().and_then(|d| kh1_recom_assets::mdl::RecomSkeleton::parse(&d).ok());
+            match (name, pack, skel) {
+                (Some(n), Some(p), Some(k)) => p.slots.iter().find_map(|s| s.clip.clone().filter(|c| c.name_str() == n)).map(|c| (c, k)),
+                _ => None,
+            }
+        };
+        if sora_guard.is_none() {
+            println!("note: Sora's KH1 Guard clip not found: Riku's Guard keeps his clash recoil");
+        }
         for &(riku, dark, skin) in &kh1_recom_assets::riku_skin::SKIN_GROUPS {
-            match kh1_recom_assets::riku_skin::build(&arc, &keys, riku, dark, skin) {
+            match kh1_recom_assets::riku_skin::build_with(&arc, &keys, riku, dark, skin, sora_guard.as_ref().map(|(c, k)| (c, k))) {
                 Ok(b) => {
                     for (rel, bytes) in &b.files {
                         write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
@@ -569,7 +582,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                 std::fs::remove_file(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
             }
         } else {
-            write(&manifest, kh1_recom_assets::riku_skin::manifest_json(&done).as_bytes())?;
+            write(&manifest, kh1_recom_assets::riku_skin::manifest_json(&done, sora_guard.is_some()).as_bytes())?;
         }
     }
     // M13 stage 3: KH1's trails and finisher effects as Re:CoM's EET events at the KH1 variant

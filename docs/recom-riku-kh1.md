@@ -629,3 +629,36 @@ bastante ao mod".
   is the same id in both stories (Checked (exe): `0x1407C1000` row 14 for Riku's story).
 - **Checked**: tests (`keyblades::tests::the_list_per_story_and_setting`: the two new lists), the
   Windows build. **Not checked**: in game.
+
+## 0.157.0: Riku's Guard plays Sora's KH1 Guard on his skeleton
+
+Fork owner, 2026-11-23, verbatim: "a animação escolhida de defesa pro Riku ficou estranha, tem
+alguma melhor?". Asked to choose, the owner picked "Guard do KH1 adaptada".
+
+- **Why the old one looked off** (Checked (exe + files)): Riku has no guard clip in Re:CoM. His
+  action rows 0x24 and 0x25 are both `p002_043`, the recoil of a blocked swing, which 0.152.0
+  played as the Guard.
+- **The new clip** (`kh1_recom_assets::riku_skin::{riku_guard, RIKU_GUARD}`):
+  - The asset step's own KH1 Guard clip for Sora (KH1 entry 110, `p001_225`, 54 frames at
+    60 fps) is retargeted onto Riku's skeleton by bone name, with the same world-rotation rule as
+    the Dark Form skin (Sora's `ex_0010_sk` ↔ Riku's `ex_1010_sk`; every body bone has the same
+    name: Checked (files)).
+  - Riku's bones Sora has none of (the Soul Eater chain `k11`..`k1`, belts, pants, hair ends) hold
+    the first frame of his battle stance (`p002_031`, row 0x2A).
+  - Checked (files): the hands, head and feet relative to the hip follow Sora's pose at frames 0,
+    27 and 53 (scaled by Riku's height).
+  - It is written as `p002_225`, added to Riku's own packs `PLAYER/0101/PL0101.ANN` and
+    `PLAYER/0111/PL0111.ANN` (now asset-step outputs), and through them to the skin packs
+    (121 / 131). The manifest notes `"riku_guard": true`.
+- **Game** (`win::riku_skin::{guard_rows, guard_row}`):
+  - Row 0x39 of Riku's two action tables (`p002_000`: no clip, never played for him; the pointer
+    is checked first) is renamed `p002_225`. Re:CoM's rebind by name binds it at every player
+    build.
+  - His Guard plays that row. The guard's recoil stays row 0x24 (his clash recoil), and Dark
+    Riku in the real Dark Mode keeps his own 0x24.
+  - Without the asset step's files, everything stays as before.
+- No sounds on the new clip: Sora's guard sounds are his voice.
+- Asset step: **re-run** (automatic: the step's hash changed). New outputs: Riku's two `.ANN`
+  files.
+- **Checked**: tests, the asset step on the local install (`p002_225` in all four packs), the
+  Windows build. **Not checked**: in game.

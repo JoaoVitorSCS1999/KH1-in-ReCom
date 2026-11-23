@@ -647,11 +647,13 @@ impl Host for RecomHost {
             let ext = EXT.get().copied().unwrap_or_default();
             let Some((row, root)) = rows::row_for(request, &stance, &ext) else { return false };
             // 0.152.0: Riku's Guard plays his block-recoil row (`crate::riku::GUARD_ROW`).
-            let row = if is_main_riku(pl) && request & 0x3FF == rows::GUARD { crate::riku::GUARD_ROW } else { row };
+            // 0.157.0: Sora's KH1 Guard on his skeleton (row 0x39) when the asset step made it.
+            let guard = is_main_riku(pl) && request & 0x3FF == rows::GUARD;
+            let row = if guard { super::riku_skin::guard_row(is_main_dark_riku(pl)) } else { row };
             if is_main_riku(pl) {
                 // Only rows Riku's own action table plays (`crate::riku::row_ok`); Re:CoM's own
                 // effects and sounds of his clips (variant 0).
-                if !crate::riku::row_ok_for(is_main_dark_riku(pl), row) {
+                if !(guard && row == crate::riku::KH1_GUARD_ROW) && !crate::riku::row_ok_for(is_main_dark_riku(pl), row) {
                     log_riku_row(request, row);
                     return false;
                 }

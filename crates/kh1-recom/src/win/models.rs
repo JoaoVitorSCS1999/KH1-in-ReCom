@@ -229,6 +229,8 @@ pub fn install(b: usize) {
             // 0.156.0: the costume is decided at each room build (the save's unlock).
             super::riku_skin::rows_in();
         }
+        // 0.157.0: Riku's Guard clip (Sora's KH1 Guard on his skeleton).
+        super::riku_skin::guard_rows(b);
         log(&format!(
             "keyblades: models in: PLAYER table {} rows ({} Re:CoM's + {} for groups {:?}) at {table:#x}; weapon group picked at CPlayerWeapon +0x30; rebuilt at camp close; own EET + EFF (M13 stage 4) for {:?}",
             planned.len(),

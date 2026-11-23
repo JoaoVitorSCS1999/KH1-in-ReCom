@@ -77,6 +77,13 @@ fn world_rot(skel: &RecomSkeleton) -> Vec<M3> {
 /// Retargets one of Riku's clips onto Dark Riku's skeleton. Frame count, fps, loop and blend are
 /// the clip's own.
 pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[Option<usize>]) -> Result<Clip> {
+    retarget_with(src, riku, dark, map, None)
+}
+
+/// [`retarget`] with the target's bones that have no source bone posed from `fill` at its frame 0
+/// (their local rotation and translation), else from their rest pose. Used for Sora's KH1 Guard on
+/// Riku (0.157.0): his blade chain, belts and hair from his own battle stance.
+pub fn retarget_with(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[Option<usize>], fill: Option<&Clip>) -> Result<Clip> {
     let na = riku.bones.len();
     if src.bones as usize != na {
         return bad(format!("{}: {} bones, Riku's skeleton has {na}", src.name_str(), src.bones));
@@ -133,7 +140,16 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
                 }
                 Some(i) => m3(&m3(&rb[j], &tr(&ra[i])), &ua[i]),
                 None if b.parent < 0 => rb[j],
-                None => m3(&unscale(&b.local.r).0, &tg[b.parent as usize].u),
+                None => {
+                    let r = match fill {
+                        Some(c) => {
+                            let s = c.sample(j, 0.0);
+                            rot_xyz(s.r[0], s.r[1], s.r[2])
+                        }
+                        None => unscale(&b.local.r).0,
+                    };
+                    m3(&r, &tg[b.parent as usize].u)
+                }
             };
             let p = if b.parent < 0 {
                 map[j].map_or([0.0; 3], |i| pa[i])
@@ -145,6 +161,7 @@ pub fn retarget(src: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton, map: &[O
                         let d = [loc_t[i][0] - rt[0], loc_t[i][1] - rt[1], loc_t[i][2] - rt[2]];
                         [b.local.t[0] + d[0], b.local.t[1] + d[1], b.local.t[2] + d[2]]
                     }
+                    (_, None) if fill.is_some() => fill.unwrap().sample(j, 0.0).t,
                     _ => b.local.t,
                 };
                 let w = crate::math::vm(lt, &par.u);
@@ -334,6 +351,43 @@ pub fn path(g: u16, ext: &str) -> String {
 /// The costume change plays it after Riku's own transformation crouch (`win::riku_skin`).
 pub const DARK_FLIP: &str = "p003_067";
 
+/// Sora's KH1 Guard on Riku (0.157.0; fork owner, 2026-11-23: "a animação escolhida de defesa pro
+/// Riku ficou estranha, tem alguma melhor?", chose "Guard do KH1 adaptada"): Riku has no guard clip
+/// in Re:CoM (his rows 0x24 / 0x25 are both `p002_043`, the clash recoil). The asset step's own
+/// KH1 Guard clip for Sora (KH1 entry 110, `p001_225`) is retargeted onto Riku's skeleton by bone
+/// name (the body bones match: Checked (files: `PL0001.MDL` / `PL0101.MDL`)); his bones Sora has
+/// none of (the Soul Eater chain `k11`..`k1`, belts, pants, hair ends) hold his battle stance's
+/// first frame (`p002_031`, his row 0x2A).
+pub const RIKU_GUARD: &str = "p002_225";
+/// Riku's battle stance (his action row 0x2A). Checked (exe: `0x1407C6370`).
+pub const RIKU_STANCE: &str = "p002_031";
+
+/// Sora's bone of the same role as Riku's.
+fn sora_alias(riku: &str) -> &str {
+    match riku {
+        "ex_1010_sk" => "ex_0010_sk",
+        x => x,
+    }
+}
+
+/// Sora's guard clip on Riku's skeleton, named [`RIKU_GUARD`].
+pub fn riku_guard(sora_guard: &Clip, sora: &RecomSkeleton, riku: &RecomSkeleton, riku_ann: &Ann) -> Result<Clip> {
+    let map: Vec<Option<usize>> = riku.bones.iter().map(|b| sora.find(sora_alias(&b.name))).collect();
+    let stance = riku_ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE));
+    let mut c = retarget_with(sora_guard, sora, riku, &map, stance)?;
+    c.name = crate::ann::name16(RIKU_GUARD);
+    Ok(c)
+}
+
+/// `ann` with `clip` added as its last slot (named as the clip), unless a slot already has it.
+pub fn with_clip(mut ann: Ann, clip: Clip) -> Ann {
+    if ann.find(&clip.name_str()).is_none() {
+        ann.slots.push(Slot { name: clip.name, clip: Some(clip) });
+        ann.pad_tail_like_recom();
+    }
+    ann
+}
+
 /// The skin manifest's file name (next to the other manifests).
 pub const MANIFEST: &str = "kh1-riku-skin.json";
 
@@ -373,6 +427,13 @@ pub struct Built {
 /// Reads Riku's group `riku` and Dark Riku's group `dark` from Recom.pkg and builds skin group
 /// `skin`.
 pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, riku: u16, dark: u16, skin: u16) -> Result<Built> {
+    build_with(arc, keys, riku, dark, skin, None)
+}
+
+/// [`build`], Riku's pack first given Sora's KH1 Guard (`sora`: his guard clip and skeleton;
+/// 0.157.0). Riku's own pack is then one of the files (`PLAYER/01x1/PL01x1.ANN`), and the skin's
+/// pack gets the guard too.
+pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, riku: u16, dark: u16, skin: u16, sora: Option<(&Clip, &RecomSkeleton)>) -> Result<Built> {
     let rd = |g: u16, ext: &str| crate::install::read_recom(arc, keys, &path(g, ext));
     let raw = |g: u16, ext: &str| -> Result<(Vec<u8>, Vec<kh1_formats::egs::HdAsset>, i32)> {
         let n = path(g, ext);
@@ -386,7 +447,13 @@ pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable,
     let dmdl = rd(dark, "MDL")?;
     let rs = RecomSkeleton::parse(&rmdl)?;
     let ds = RecomSkeleton::parse(&dmdl)?;
-    let ann = Ann::parse(&rd(riku, "ANN")?)?;
+    let mut ann = Ann::parse(&rd(riku, "ANN")?)?;
+    let mut riku_pack = None;
+    if let Some((g, sk)) = sora {
+        let guard = riku_guard(g, sk, &rs, &ann)?;
+        ann = with_clip(ann, guard);
+        riku_pack = Some((path(riku, "ANN"), ann.to_bytes()));
+    }
     let mut out_ann = retarget_ann(&ann, &rs, &ds)?;
     let em = event_map(&rs, &ds);
     let mut eet = crate::eet::parse(&remap_eet(&rd(riku, "EET")?, &em)?)?;
@@ -409,6 +476,7 @@ pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable,
         (path(skin, "EET"), crate::eet::write(&eet)?),
         (path(skin, "SES"), crate::ses::write(&ses)),
     ];
+    files.extend(riku_pack);
     for ext in ["RTM", "TXA"] {
         let (d, a, date) = raw(dark, ext)?;
         files.push((format!("raw/{}", path(skin, ext)), kh1_formats::egs::build_plain_entry(&d, &a, date)?));
@@ -417,9 +485,9 @@ pub fn build(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable,
 }
 
 /// The manifest: which Riku group each skin group stands for.
-pub fn manifest_json(skins: &[(u16, u16)]) -> String {
+pub fn manifest_json(skins: &[(u16, u16)], riku_guard: bool) -> String {
     let rows: Vec<String> = skins.iter().map(|(r, s)| format!("{{\"riku\": {r}, \"skin\": {s}}}")).collect();
-    format!("{{\"format\": 1, \"skins\": [{}]}}\n", rows.join(", "))
+    format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}}}\n", rows.join(", "))
 }
 
 #[cfg(test)]

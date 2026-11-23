@@ -16,6 +16,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 static SKINS: OnceLock<Vec<Skin>> = OnceLock::new();
+/// Riku's packs carry Sora's KH1 Guard (manifest + files), and his action tables name it.
+static GUARD: AtomicBool = AtomicBool::new(false);
+static GUARD_FILES: AtomicBool = AtomicBool::new(false);
 /// The PLAYER table copy holds the skin groups' rows.
 static ROWS: AtomicBool = AtomicBool::new(false);
 /// The tables point at the skin groups now.
@@ -39,6 +42,9 @@ pub fn preload(manifest: Option<&Path>) {
         }
     };
     let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let guard_files = rs::riku_guard(&text) && ["PLAYER/0101/PL0101.ANN", "PLAYER/0111/PL0111.ANN"].iter().all(|f| f.split('/').fold(dir.clone(), |p, x| p.join(x)).is_file());
+    GUARD_FILES.store(guard_files, Ordering::Relaxed);
     let mut ok = Vec::new();
     for s in skins {
         let missing: Vec<String> = rs::files(s.skin).into_iter().filter(|f| !f.split('/').fold(dir.clone(), |p, x| p.join(x)).is_file()).collect();
@@ -49,6 +55,50 @@ pub fn preload(manifest: Option<&Path>) {
         }
     }
     let _ = SKINS.set(ok);
+}
+
+/// Riku's Guard row: his row 0x39 (Sora's KH1 Guard on his skeleton) once [`guard_rows`] named it,
+/// else his clash recoil 0x24; Dark Riku's (the real Dark Mode) his own 0x24.
+pub fn guard_row(dark: bool) -> u32 {
+    if !dark && GUARD.load(Ordering::Relaxed) {
+        crate::riku::KH1_GUARD_ROW
+    } else {
+        crate::riku::GUARD_ROW
+    }
+}
+
+/// Row 0x39 of Riku's two action tables (`0x1407C6300[3]`, `[4]`) named `p002_225` (its name
+/// pointer, checked to be Re:CoM's `"p002_000"` first); Re:CoM's rebind by name (`0x1401F4240`,
+/// at every player build) binds it to the clip. Only with the asset step's guard files.
+///
+/// # Safety
+/// `b` is the running image's base; at start, before any player is built.
+pub unsafe fn guard_rows(b: usize) {
+    if !GUARD_FILES.load(Ordering::Relaxed) || GUARD.load(Ordering::Relaxed) {
+        return;
+    }
+    static NAME: &[u8] = crate::riku::KH1_GUARD_CLIP;
+    let mut done = 0;
+    for ch in [3usize, 4] {
+        let table: usize = rd(va(b, rs::ACTION_TABLES_PTR) + 8 * ch);
+        if table == 0 {
+            continue;
+        }
+        let at = table + 16 * crate::riku::KH1_GUARD_ROW as usize;
+        let old: usize = rd(at);
+        let s = if old == 0 { &[][..] } else { std::slice::from_raw_parts(old as *const u8, 9) };
+        if s != b"p002_000\0" {
+            log(&format!("riku guard: char {ch}'s row 0x39 is not p002_000; Riku's Guard keeps his clash recoil"));
+            return;
+        }
+        if super::hook::patch(at, &old.to_le_bytes(), &(NAME.as_ptr() as usize).to_le_bytes(), "Riku's row 0x39 name") {
+            done += 1;
+        }
+    }
+    if done == 2 {
+        GUARD.store(true, Ordering::Relaxed);
+        log("riku guard: Riku's Guard plays Sora's KH1 Guard on his skeleton (row 0x39, p002_225)");
+    }
 }
 
 /// The skins whose rows go in the PLAYER table.

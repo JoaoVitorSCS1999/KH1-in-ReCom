@@ -17,6 +17,10 @@
 
 use crate::keyblade_models::{kind, resource_path, PlannedRow, RowName, END};
 
+/// Re:CoM's char → action table pointers (`0x1407C6300[char]`, 16-byte rows: name pointer, clip
+/// index `+8`). Checked (exe: `0x1401FA7FE`).
+pub const ACTION_TABLES_PTR: u64 = 0x1_407C_6300;
+
 /// Re:CoM's char → group table and the entries of chars 3 and 4. Checked (exe).
 pub const GROUP_TABLE: u64 = 0x1_405A_6910;
 /// Re:CoM's char → motion pack name table (`0x1407C6338[char]`: "PL0001" … "PL0211"): the player's
@@ -71,6 +75,11 @@ pub fn parse(text: &str) -> Result<Vec<Skin>, String> {
         out.push(Skin { riku, skin });
     }
     Ok(out)
+}
+
+/// The manifest says Riku's own packs carry Sora's KH1 Guard (`"riku_guard": true`, 0.157.0).
+pub fn riku_guard(text: &str) -> bool {
+    crate::json::parse(text).ok().and_then(|v| v.get("riku_guard").map(|g| matches!(g, crate::json::Value::Bool(true)))).unwrap_or(false)
 }
 
 /// The files of a skin group the DLL checks are on disk (relative to the manifest's folder).
@@ -154,5 +163,7 @@ mod tests {
         assert_eq!(ann_name(121), "PL0121");
         assert!(files(121).contains(&"raw/PLAYER/0121/PL0121.RTM".to_string()));
         assert!(parse(r#"{"format": 1, "skins": [{"riku": 3, "skin": 121}]}"#).is_err());
+        assert!(riku_guard(r#"{"format": 1, "skins": [], "riku_guard": true}"#));
+        assert!(!riku_guard(r#"{"format": 1, "skins": [{"riku": 101, "skin": 121}]}"#), "older manifests: no guard");
     }
 }

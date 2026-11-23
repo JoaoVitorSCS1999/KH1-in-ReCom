@@ -86,6 +86,14 @@ pub fn guard_faces(guarder: [f32; 3], yaw: f32, point: [f32; 3], half: f32) -> b
 /// Riku's / Dark Riku's row for KH1's Guard request: their recoil row (`p002_043` / `p003_033`).
 pub const GUARD_ROW: u32 = 0x24;
 
+/// 0.157.0: the row Riku's Guard plays when the asset step gave his pack Sora's KH1 Guard
+/// (`p002_225`, `kh1_recom_assets::riku_skin::RIKU_GUARD`): his first row with no clip
+/// (`p002_000`, 0x39; Re:CoM never plays it for him), renamed to the guard clip in his action
+/// tables (`win::riku_skin::guard_rows`). The guard's recoil stays row 0x24 (his clash recoil).
+pub const KH1_GUARD_ROW: u32 = 0x39;
+/// The guard clip's name, as the asset step writes it.
+pub const KH1_GUARD_CLIP: &[u8] = b"p002_225\0";
+
 /// Re:CoM's attack row id for Riku's own swing that plays the same clip as Sora's row `sora_id`.
 /// Sora's rows 1..7 (`0x1407C6C70`, action rows 0x30..0x36) have Riku's twins at 0x97..0x9D: the same
 /// action rows and card columns, but their hit effect (row `+2`, by id: `CPlayerWeapon::onAttack`
