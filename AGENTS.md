@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 316 (fork branch Re-Re-Reverse/Rebirth): Donald's and Goofy's KH1 gauges without rings, version 0.178.2 (2026-11-23)
+
+Fork owner, 2026-11-23, answering "Anéis do Donald e do Pateta (os amigos do Re:CoM não têm HP nem MP): (a) ficam sempre cheios; (b) os anéis são escondidos", verbatim: "4b".
+
+- **KH1 / Re:CoM**: unchanged from H6 (`docs/recom-kh1-hud.md` § H6): KH1's party slots draw `g_c` objects; Re:CoM's friends have no HP or MP (Checked (decomp + strings)).
+- **Change** (asset step, `kh1_hud::party::build`): the two party groups hold the face frame (`g_c_fra_a_w`), the disc (`g_c_fra_a_a`) and the face only; the HP / MP ring backs (`g_c_fra_b/c/d_*`) and the full rings (`g_c_bar_*`) are no longer built. The DLL is unchanged (it shows and hides the same two groups). The step's source hash changes, so the first start after the update builds the files again.
+- **Assumption**: "os anéis" means the rings and their dark backs; the frame, disc and face stay. Picture 5 is still added to the atlas (now unused by the party).
+- **Checked**: tests, the Windows build. **Not checked**: in game; the real-file HUD test (`builds_from_a_dump`) was not run (no `hud-h0` dump on this machine).
+
+---
+
 ## Stage 315 (fork branch Re-Re-Reverse/Rebirth): the KH1 HUD hides at once when Re:CoM hides its HUD, version 0.178.1 (2026-11-23)
 
 Fork owner, 2026-11-23, answering "Quando um evento esconde o HUD: (a) fade de 10 frames, como no KH1 (é o que está construído); (b) some na hora, como no Re:CoM", verbatim: "3b" (`docs/design-philosophy-instructions.md` § Open questions round).

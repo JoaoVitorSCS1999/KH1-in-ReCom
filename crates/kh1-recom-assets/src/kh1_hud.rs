@@ -2737,11 +2737,11 @@ pub mod target {
 /// H6: Donald's and Goofy's gauges (slots 1 and 2; KH1 Checked (decomp + exe + files) unless
 /// tagged): `g_c` objects at their places, the slot's offset (Donald (0, 0), Goofy (68, 20):
 /// `0x140527330`, `0x140527370`) + the right margin; the face (48 × 48, `xa_ex_0040` / `0050`)
-/// centred on (399, 44) (`0x1405272C0`, `0x14027F470`). Drawn full: the HP ring's three quarters
-/// (`g_c_bar_b/c/d_hp`, picture 5, the texels KH1's fan samples for r26) and the MP ring's
-/// (`_mp`, r32), over their dark backs (`g_c_fra_b/c/d_*`, picture 6), the face frame
-/// (`g_c_fra_a_w`) and disc (`g_c_fra_a_a`). Order as Sora's (`0x14026CF90`): frame, disc, HP
-/// back, MP back, MP, HP, face. Assumption: the party's draw order is Sora's.
+/// centred on (399, 44) (`0x1405272C0`, `0x14027F470`). Drawn: the face frame (`g_c_fra_a_w`),
+/// the disc (`g_c_fra_a_a`) and the face, in Sora's order (`0x14026CF90`). No HP / MP rings and
+/// no ring backs (`g_c_bar_*`, `g_c_fra_b/c/d_*`): Re:CoM's friends have no HP or MP (fork owner,
+/// 2026-11-23, answer 4b; until 0.178.1 the rings were drawn full). Assumption: the party's draw
+/// order is Sora's.
 pub mod party {
     use super::*;
 
@@ -2749,15 +2749,9 @@ pub mod party {
     pub const CENTRE: (i32, i32) = (399, 44);
 
     /// Builds Donald's and Goofy's groups; returns them.
-    pub(crate) fn build(g_c: &[u8], [p6, p5]: [usize; 2], faces: [usize; 2], face_h: [i32; 2], groups: &mut Vec<Group>) -> Result<[usize; 2]> {
+    pub(crate) fn build(g_c: &[u8], [p6, _p5]: [usize; 2], faces: [usize; 2], face_h: [i32; 2], groups: &mut Vec<Group>) -> Result<[usize; 2]> {
         let u = Uibin::parse(g_c)?;
-        let names = ["g_c_fra_a_w", "g_c_fra_a_a", "g_c_fra_b_hp", "g_c_fra_b_mp", "g_c_fra_c_hp", "g_c_fra_c_mp", "g_c_fra_d_hp", "g_c_fra_d_mp"];
-        for (k, n) in names.iter().enumerate() {
-            if u.objs.get(k).map(|o| o.name.as_str()) != Some(n) {
-                return bad(format!("{G_C}: object {k} is not {n}"));
-            }
-        }
-        for (k, n) in [(14, "g_c_bar_b_hp"), (15, "g_c_bar_b_mp"), (16, "g_c_bar_c_hp"), (17, "g_c_bar_c_mp"), (18, "g_c_bar_d_hp"), (19, "g_c_bar_d_mp")] {
+        for (k, n) in ["g_c_fra_a_w", "g_c_fra_a_a"].iter().enumerate() {
             if u.objs.get(k).map(|o| o.name.as_str()) != Some(n) {
                 return bad(format!("{G_C}: object {k} is not {n}"));
             }
@@ -2767,10 +2761,6 @@ pub mod party {
         let mut out = [0usize; 2];
         for m in 0..2 {
             let mut v = vec![obj_piece(&o[0], p6, 0, 0, 0, None), obj_piece(&o[1], p6, 0, 0, 0, None)];
-            v.extend([2, 4, 6].map(|k| obj_piece(&o[k], p6, 0, 0, 0, None)));
-            v.extend([3, 5, 7].map(|k| obj_piece(&o[k], p6, 0, 0, 0, None)));
-            v.extend([15, 17, 19].map(|k| obj_piece(&o[k], p5, 0, 0, 0, None)));
-            v.extend([14, 16, 18].map(|k| obj_piece(&o[k], p5, 0, 0, 0, None)));
             let h = face_h[m];
             let (cx, cy) = CENTRE;
             v.push(Piece { item: faces[m], uv: [0, 0, h, h], rect: [cx - h / 2, cy - h / 2, cx + h / 2, cy + h / 2], colour: one, grad: 0 });

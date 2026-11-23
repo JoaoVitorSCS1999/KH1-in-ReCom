@@ -368,30 +368,31 @@ drawn with KH1's own pieces instead of Re:CoM's plates. `hud = recom` keeps 7.3'
 
 ### Native build
 
-- **Data:** two held groups (Donald, Goofy): face frame, disc, HP back, MP back, MP ring, HP ring
-  (the three full quarters each), face. `kh1-hud.json` `"party": [donald, goofy]`.
+- **Data:** two held groups (Donald, Goofy): face frame, disc, face. `kh1-hud.json` `"party":
+  [donald, goofy]`. Until 0.178.1 they also held the HP and MP backs and full rings; 0.178.2 drops
+  them (fork owner, 2026-11-23, answer 4b: Re:CoM's friends have no HP / MP).
 - **DLL:** per player gauge two controls at the slot offsets (right margin +86), hidden; four
   wrappers (`sites::KH1_HUD_PARTY_HOOKS`, first bytes checked): a friend's appear shows its gauge,
   `CFriend`'s exit or dtor hides it; Re:CoM's HUD hide hides them. Nothing per frame.
 
 ### Owner questions (H6)
 
-1. **What the gauges show** (Re:CoM's friends have no HP / MP): built full rings (HP 54 / MP 9:
-   the whole ring, no straight part). (a) keep; (b) KH1's party stats for Sora's level; (c) the
-   friend card's value as HP.
+1. **What the gauges show** (Re:CoM's friends have no HP / MP): answered (fork owner,
+   2026-11-23, 4b): **no rings**, only the face in its frame and disc (0.178.2).
 2. Only while the friend is out (decision 39); with Combat = KH1 there are no friend cards
    (decision 4), so they show only at Combat = Re:CoM with `hud = kh1`.
 
 ### Not done / to check
 
-1. KH1's partial rings and straight parts for the party (not needed while they are full).
+1. KH1's partial rings and straight parts for the party (not drawn: no rings since 0.178.2).
 2. Draw order of the party's pieces: Sora's (Assumption).
 3. KH1's `g_help` / `g_lose` circles (a member called / down) are not used.
 
 ### What the in-game test must check (H6)
 
 1. `hud = kh1`, Combat = Re:CoM, a battle with a Donald card: his gauge appears top-right at
-   KH1's place when he appears, and goes when he leaves. The same for Goofy (68, 20 further).
+   KH1's place when he appears (his face in its frame and disc, no rings since 0.178.2), and goes
+   when he leaves. The same for Goofy (68, 20 further).
 2. Log: `kh1 hud: Donald out: KH1 gauge shown (H6)` / `gone: gauge hidden`.
 
 ## H7: KH1's lock-on cursor in place of Re:CoM's
