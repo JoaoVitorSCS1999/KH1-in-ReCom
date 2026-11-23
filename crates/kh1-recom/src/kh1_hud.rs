@@ -335,6 +335,9 @@ pub struct MenuGroups {
     /// Squeeze to fit (owner, 2026-11-04): each word's width (tenths of a unit), by language as
     /// [`MenuGroups::words`]; empty from an asset step before 0.107.0 (no word is squeezed).
     pub widths: Vec<(String, Vec<(u16, u32)>)>,
+    /// 0.179.1: the DP sleights' mark (Re:CoM's Heartless emblem), drawn right of their names; None
+    /// from an older asset step or without Re:CoM's `FO0104.RTM` art.
+    pub dp_icon: Option<u32>,
 }
 
 impl MenuGroups {
@@ -459,6 +462,12 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
                 Some(Some(g)) if g + menu::LIST_GROUPS <= groups => Some(g),
                 Some(_) => return Err("a bad summon_list entry".into()),
             };
+            // 0.179.1, optional.
+            let dp_icon = match m.get("dp_icon").map(|x| x.as_u32()) {
+                None => None,
+                Some(Some(g)) if g < groups => Some(g),
+                Some(_) => return Err("a bad dp_icon entry".into()),
+            };
             // Squeeze to fit (0.107.0), optional: [id, width in tenths of a unit] per language.
             let mut widths = Vec::new();
             for lang in ["us", "uk", "fr", "gr", "it", "sp"] {
@@ -473,7 +482,7 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, String> {
                     widths.push((lang.to_string(), list));
                 }
             }
-            Some(MenuGroups { first, tab_icon, words, items_list, summon_list, widths })
+            Some(MenuGroups { first, tab_icon, words, items_list, summon_list, widths, dp_icon })
         }
     };
     let shortcut = match v.get("shortcut") {
@@ -945,6 +954,11 @@ mod tests {
         assert_eq!(mm.summon_list, None, "M8b: optional");
         let su = with.replace("\"tab_icon\": true", "\"tab_icon\": true, \"summon_list\": 694");
         assert_eq!(parse_manifest(&su).unwrap().menu.unwrap().summon_list, Some(694));
+        // 0.179.1: the DP sleights' mark, optional.
+        assert_eq!(mm.dp_icon, None);
+        let dp = with.replace("\"tab_icon\": true", "\"tab_icon\": true, \"dp_icon\": 699");
+        assert_eq!(parse_manifest(&dp).unwrap().menu.unwrap().dp_icon, Some(699));
+        assert!(parse_manifest(&with.replace("\"tab_icon\": true", "\"tab_icon\": true, \"dp_icon\": 700")).is_err(), "past the last group");
         assert!(parse_manifest(&it.replace("690", "695")).is_err(), "six groups past the set");
         // Squeeze to fit (0.107.0): word widths optional, tenths of a unit; "fr" falls back to
         // "us" as the word does.

@@ -1514,6 +1514,16 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         return Err("FO0002.SPR has no <LANG>_Cockpit.lad PC layouts (no language to build for)".into());
     }
     let lrefs: Vec<&str> = langs.iter().map(String::as_str).collect();
+    // 0.179.1: Re:CoM's Heartless emblem (Riku's level-up texture) for the DP sleights' mark.
+    let dp_emblem = (|| -> Result<Vec<u8>, String> {
+        let e = arc.find(kh::menu::DP_EMBLEM_FILE).ok_or("not in Recom.hed")?;
+        let raw = arc.read_raw_entry(e).map_err(|e| e.to_string())?;
+        let (_, assets) = kh1_formats::egs::decode_entry_full(&keys, &raw).map_err(|e| e.to_string())?;
+        assets.into_iter().find(|a| a.name == kh::menu::DP_EMBLEM_ASSET).map(|a| a.data).ok_or_else(|| format!("no {}", kh::menu::DP_EMBLEM_ASSET))
+    })();
+    if let Err(e) = &dp_emblem {
+        println!("note: KH1 HUD: no DP sleight mark ({}: {e})", kh::menu::DP_EMBLEM_FILE);
+    }
     let menu = match &menu_files {
         Ok(m) => Some(kh::MenuSources {
             com: &m.com,
@@ -1525,6 +1535,7 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
             cut: m.cut.as_deref(),
             item: m.item.as_deref(),
             sum: m.sum.as_deref(),
+            dp_emblem: dp_emblem.as_deref().ok(),
         }),
         Err(e) => {
             println!("note: KH1 HUD: no KH1 command menu look: {e}");
@@ -1583,6 +1594,11 @@ fn kh1_hud_build(game: &Path, keys: kh1_formats::egs::KeyTable, arc: &kh1_format
         match m.items_list {
             Some(g) => println!("KH1 HUD: Items list (M8 stage 8a.1) from group {g}: {}", kh::ITEM),
             None => println!("note: KH1 HUD: no Items list panels (no {}): the DLL draws the Items list with the Magic list's", kh::ITEM),
+        }
+        match (m.dp_icon, &m.dp_note) {
+            (Some(g), _) => println!("KH1 HUD: DP sleight mark (Re:CoM's Heartless emblem, {}) as group {g}", kh::menu::DP_EMBLEM_FILE),
+            (None, Some(n)) => println!("note: KH1 HUD: no DP sleight mark ({n})"),
+            (None, None) => {}
         }
         match (m.summon_list, &m.summon_note) {
             (Some(g), _) => println!("KH1 HUD: Summon list (M8b) from group {g}: {}", kh::SUM),

@@ -1034,3 +1034,22 @@ consomem DP"; answers 1a (Inverse Burst joins his list), 2a (light 20 %, heavy 3
 - **Inverse Burst** added to Dark Riku's list (the asset step's name `0x8165`): its start path is
   the three others'. Assumption: its pack loads in his battles as theirs do.
 - Not yet: the Heartless icon on the DP sleights (next).
+
+## 0.179.1: the DP sleights' mark (Re:CoM's Heartless emblem)
+
+Fork owner, 2026-11-23, verbatim: "preciso que no shorcut e no menu de commands tenha algo
+identificando que consomem DP, pode ser o ícone de um heartless"; "a direita fica perfeito".
+
+- **Art** (Checked (files); the KH modding workspace's `knowledge/ReCoM/recom-ui-textures.md`):
+  Re:CoM's own Heartless emblem in `FORM/0104/FO0104.RTM`'s PC texture `UK_levelup.imz` (IMGZ, 1024 ×
+  1024, PS2 alpha), between the Soul Eater and a fist (Assumption: Riku's level-up HP / AP / DP icons,
+  the emblem being DP). Not in KH1's `Icon.tm2` or `uitex.bin`.
+- **Asset step** (`kh1_hud::menu::dp_emblem`): the covered texels of (128, 40, 104 × 140), resampled
+  to the menu font's PC height (48 texels; 36 × 48 on the owner's files), its half as the PS2 copy;
+  one group after the Summon list's, `kh1-hud.json` `"menu": {"dp_icon": <group>}`. Without the file
+  the step notes it and builds no mark.
+- **DLL** (`win::command_menu`, KH1's menu look): a DP sleight's row in the Sleights list and its
+  shortcut slot get the mark 3 units right of the name (after any squeeze), at the name's brightness
+  (dark when it can't be paid), removed with the row.
+- **Not drawn in Re:CoM's menu look** (its words are Re:CoM `C2DFnt` text, not `kh1hud` groups); the
+  fork owner plays with the KH1 look (`hud_kh1_menu = on`).

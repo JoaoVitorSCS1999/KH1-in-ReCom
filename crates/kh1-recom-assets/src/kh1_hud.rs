@@ -1295,6 +1295,9 @@ pub struct MenuSources<'a> {
     pub item: Option<&'a [u8]>,
     /// M8b: `UK_uibin_sum.bin`, the Summon list ([`SUM`]); same rule.
     pub sum: Option<&'a [u8]>,
+    /// 0.179.1: Re:CoM's `FO0104.RTM` level-up texture ([`menu::DP_EMBLEM_ASSET`]), for the DP
+    /// sleights' mark. Without it no mark is built.
+    pub dp_emblem: Option<&'a [u8]>,
 }
 
 /// The built files.
@@ -2110,6 +2113,57 @@ pub mod menu {
         pub summon_list: Option<usize>,
         /// M8b: why `uibin_sum.bin` was not used (for the step's note).
         pub summon_note: Option<String>,
+        /// 0.179.1: the DP sleights' mark (Re:CoM's Heartless emblem, [`dp_emblem`]), one group after
+        /// the Summon list's; None without [`MenuSources::dp_emblem`] or when it can't be read.
+        pub dp_icon: Option<usize>,
+        /// 0.179.1: why there is no mark (for the step's note).
+        pub dp_note: Option<String>,
+    }
+
+    /// 0.179.1 (fork owner, 2026-11-23, verbatim: "preciso que no shorcut e no menu de commands tenha
+    /// algo identificando que consomem DP, pode ser o ícone de um heartless"; "a direita fica
+    /// perfeito"): Re:CoM's own Heartless emblem, the DP icon of Riku's level-up screen, drawn right
+    /// of a DP sleight's name. Checked (files: `knowledge/ReCoM/recom-ui-textures.md` in the KH
+    /// modding workspace): black with a red outline and a purple glow, between the Soul Eater and a
+    /// fist in `FO0104.RTM`'s PC texture.
+    pub const DP_EMBLEM_FILE: &str = "FORM/0104/FO0104.RTM";
+    /// Its PC asset (any language's holds the same art; UK is read).
+    pub const DP_EMBLEM_ASSET: &str = "UK_levelup.imz";
+    /// The part of the 1024 × 1024 texture searched (x, y, w, h): right of the Soul Eater (it ends at
+    /// x 120), left of the fist (from x 239).
+    pub const DP_EMBLEM_AREA: [usize; 4] = [128, 40, 104, 140];
+
+    /// The emblem at the menu font's PC height ([`CELL`]`.1`, the width kept in proportion, even),
+    /// from `FO0104.RTM`'s `UK_levelup.imz` (an `IMGZ` of one 32-bit `IMGD`, PS2 alpha, as the atlas
+    /// keeps it): the covered texels of [`DP_EMBLEM_AREA`], area-averaged.
+    pub fn dp_emblem(imz: &[u8]) -> Result<Pic> {
+        if imz.len() < 0x60 || &imz[0..4] != b"IMGZ" || &imz[0x20..0x24] != b"IMGD" {
+            return bad(format!("{DP_EMBLEM_ASSET}: not an IMGZ of one IMGD"));
+        }
+        let rd32 = |o: usize| u32::from_le_bytes([imz[o], imz[o + 1], imz[o + 2], imz[o + 3]]) as usize;
+        let rd16 = |o: usize| u16::from_le_bytes([imz[o], imz[o + 1]]) as usize;
+        let (off, size, w, h) = (0x20 + rd32(0x28), rd32(0x2C), rd16(0x3C), rd16(0x3E));
+        let [ax, ay, aw, ah] = DP_EMBLEM_AREA;
+        if size != w * h * 4 || imz.len() < off + size || w < ax + aw || h < ay + ah {
+            return bad(format!("{DP_EMBLEM_ASSET}: {w}×{h}, {size} bytes (a 1024 × 1024 32-bit picture expected)"));
+        }
+        let pic = Pic { w, h, px: imz[off..off + size].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect() };
+        let area = pic.crop(ax, ay, aw, ah);
+        let (mut x0, mut y0, mut x1, mut y1) = (aw, ah, 0, 0);
+        for j in 0..ah {
+            for i in 0..aw {
+                if area.px[j * aw + i][3] > 2 {
+                    (x0, y0, x1, y1) = (x0.min(i), y0.min(j), x1.max(i + 1), y1.max(j + 1));
+                }
+            }
+        }
+        if x1 <= x0 + 8 || y1 <= y0 + 8 {
+            return bad(format!("{DP_EMBLEM_ASSET}: no emblem in {DP_EMBLEM_AREA:?}"));
+        }
+        let (bw, bh) = (x1 - x0, y1 - y0);
+        let th = CELL.1;
+        let tw = ((th * bw + bh / 2) / bh + 1) & !1;
+        Ok(area.crop(x0, y0, bw, bh).resampled(tw, th))
     }
 
     /// The menu font: its PC picture and glyphs (character → x, y, advance in PC texels).
@@ -2500,7 +2554,21 @@ pub mod menu {
             sub_list(&u.objs, groups);
             at
         });
-        Ok(Built { first, words, widths, glyphs: glyph_item.len(), missing, tab_icon, items_list, summon_list, summon_note })
+        // 0.179.1: the DP sleights' mark, after the Summon list's (every group the DLL knows keeps
+        // its number): one piece at the font's height, from the pen's place (x 0, as a word).
+        let (dp_icon, dp_note) = match ms.dp_emblem.map(dp_emblem) {
+            Some(Ok(hd)) => {
+                let ps2 = half(&hd);
+                let item = atlas.add(ps2.clone(), vec![hd.clone()], 2);
+                let (w, h) = ((hd.w as f32 * FONT_UNITS).round() as i32, (hd.h as f32 * FONT_UNITS).round() as i32);
+                let at = groups.len();
+                groups.push(held1(vec![Piece { item, uv: [0, 0, ps2.w as i32, ps2.h as i32], rect: [0, CELL_DY, w, CELL_DY + h], colour: 0x8080_8080, grad: 0 }]));
+                (Some(at), None)
+            }
+            Some(Err(e)) => (None, Some(e.to_string())),
+            None => (None, None),
+        };
+        Ok(Built { first, words, widths, glyphs: glyph_item.len(), missing, tab_icon, items_list, summon_list, summon_note, dp_icon, dp_note })
     }
 }
 
@@ -3007,6 +3075,8 @@ pub fn manifest_json(b: &Built, langs: &[String], sources: &[(&str, String)], re
         let words = mn.words.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, g)| format!("[{id}, {g}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
         let items = mn.items_list.map(|g| format!("\"items_list\": {g}, ")).unwrap_or_default();
         let summons = mn.summon_list.map(|g| format!("\"summon_list\": {g}, ")).unwrap_or_default();
+        // 0.179.1, optional (older DLLs don't read it).
+        let summons = summons + &mn.dp_icon.map(|g| format!("\"dp_icon\": {g}, ")).unwrap_or_default();
         // Squeeze to fit (owner, 2026-11-04): each word's width in tenths of a unit; a key older
         // DLLs don't read.
         let widths = mn.widths.iter().map(|(l, w)| format!("\"{l}\": [{}]", w.iter().map(|(id, x)| format!("[{id}, {x}]")).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(", ");
@@ -3165,6 +3235,22 @@ mod tests {
 
     /// With `KH1_HUD_DUMP` set to a `hud-h0` dump folder (the player's own files, outside the
     /// repository): builds the set from it and writes the atlases and layouts to `KH1_HUD_OUT`.
+    /// 0.179.1: with `KH1_DP_EMBLEM_IMZ` set to the player's `FO0104.RTM` `UK_levelup.imz` (outside
+    /// the repository): the emblem is found, at the font's height, mostly opaque in its middle;
+    /// `KH1_DP_EMBLEM_OUT` set: its raw RGBA (PS2 alpha) is written there for a look.
+    #[test]
+    fn dp_emblem_from_the_players_file() {
+        let Ok(p) = std::env::var("KH1_DP_EMBLEM_IMZ") else { return };
+        let e = menu::dp_emblem(&std::fs::read(p).unwrap()).unwrap();
+        assert_eq!(e.h, menu::CELL.1);
+        assert!(e.w % 2 == 0 && e.w > e.h / 2 && e.w < e.h, "{}×{}", e.w, e.h);
+        assert!(e.px[(e.h / 2) * e.w + e.w / 2][3] > 0x40, "the middle is covered");
+        if let Ok(out) = std::env::var("KH1_DP_EMBLEM_OUT") {
+            std::fs::write(out, e.px.iter().flatten().copied().collect::<Vec<u8>>()).unwrap();
+        }
+        eprintln!("dp emblem {}×{}", e.w, e.h);
+    }
+
     #[test]
     fn builds_from_a_dump() {
         let Ok(dir) = std::env::var("KH1_HUD_DUMP") else { return };
@@ -3203,6 +3289,7 @@ mod tests {
                 cut: Some(&cut),
                 item: Some(&item),
                 sum: sum.as_deref(),
+                dp_emblem: None,
             }),
             faces: [face("xa_ex_0010.mdls", 0xA2E80), face("xa_ex_0040.mdls", 0x75600), face("xa_ex_0050.mdls", 0x8D400)],
         };

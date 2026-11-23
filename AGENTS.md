@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 321 (fork branch Re-Re-Reverse/Rebirth): the DP sleights' mark, Re:CoM's Heartless emblem right of their names, version 0.179.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "preciso que no shorcut e no menu de commands tenha algo identificando que consomem DP, pode ser o ícone de um heartless"; on its place: "a direita fica perfeito".
+
+- **Re:CoM** (Checked (files)): the Heartless emblem in `FORM/0104/FO0104.RTM`'s PC asset `UK_levelup.imz` (IMGZ of one 32-bit IMGD, PS2 alpha), about (136, 55)–(215, 172). Assumption: it is Riku's level-up DP icon. KH1's `Icon.tm2` and `uitex.bin` have no such art.
+- **Change**: asset step `kh1_hud::menu::{dp_emblem, DP_EMBLEM_*}` (one group after the Summon list's, manifest `"dp_icon"`; `MenuSources::dp_emblem` read in `step::kh1_hud_build`); DLL `kh1_hud::MenuGroups::dp_icon`, `win::command_menu` (`dp_word`, `Row::icon`, `ShortCtl::icons`): the mark 3 units right of a DP sleight's (squeezed) name in the Sleights list and the shortcut panel, KH1's menu look, at the name's brightness. Re:CoM's menu look: not drawn (its words are `C2DFnt` text).
+- Asset step: re-run (a new group).
+- **Checked**: tests (`dp_emblem_from_the_players_file` on the owner's `FO0104` texture: 36 × 48; manifest parse), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 320 (fork branch Re-Re-Reverse/Rebirth): Dark Riku's own sleights pay DP (Inverse Burst added); the fork's design intent recorded, version 0.179.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "o MP contina, mas os Sleights que só o Dark Riku Executa, consomem DP"; answers "1 a,2a" (Inverse Burst in his list; Dark Break / Dark Firaga 20 %, Dark Aura / Inverse Burst 30 %); and the intent "não é refazer o KH1 de 1:1 no Recom mas sim reimplementar o Combate, mantendo a originalidade do Kingdom Hearts Recom" (answer 5a: record it).
