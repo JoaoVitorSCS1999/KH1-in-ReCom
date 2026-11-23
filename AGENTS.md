@@ -11,6 +11,16 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 302 (fork branch Re-Re-Reverse/Rebirth): the Wizard and the Aquatank stay hittable in their dimming moves (only bosses' are untouchable), version 0.168.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "eu acertar uma porrada no wizard enquanto ele casta thunder ainda não interrompe o ataque dele"; "troque essa implementação porque a jogabilidade quando estiver no KH1 deve usar as mesmas regras, com exceção a bosses de fato, um wizard não é um boss...".
+
+- The owner's log: the Thunder was the Wizard's state 4 (the room dims, `_ex_2150` shots for 180 frames), untouchable by 0.100.1's rule ("Same rule" as the bosses), for Sora and Riku. Its other casts (states 2 / 3) were already interrupted.
+- Now `revenge::install` no longer arms the Wizard's / Aquatank's windows (`install_normal` kept, not called): their dimming moves are ordinary attacks at Combat = KH1 (hittable, the card interrupt ends them). The bosses' dimming moves and revenge moves stay untouchable.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 301 (fork branch Re-Re-Reverse/Rebirth): Riku's DP only once the story gives him Dark Mode; the Keyblade of Heart unlocks with the Dark Mode costume, version 0.167.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "o Dark Mode precisa começar de acordo com o jogo normal mesmo liberando a partir da história, me equivoquei falando que o dark mode começava com 30 pq vi que era dentro do combate para ativalo!, a keyblade cosmética dele pode liberar junto com o Dark Mode também".

@@ -299,10 +299,6 @@ pub fn page_state() -> Option<(State, u32)> {
     Some((s, super::stats::sora_level()))
 }
 
-/// The page is Riku's (his story: only the Enemy Skills).
-pub fn riku_page() -> bool {
-    super::mp::riku_live()
-}
 
 /// M12: one AP Up pick on Re:CoM's level-up screen at Combat = KH1 (+2 max AP). The state is
 /// synced first (an older block is migrated with its past CP picks before this one is added).
