@@ -972,3 +972,22 @@ dele".
   - 0.159.0's pair-test block: a hit result 1 on him from in front, a real collision.
 - Not known: what sets `+0x41C & 0x200` with a hit value of 0 on Riku. Not used for blocks any
   more.
+
+## 0.176.0: the Ansem costume
+
+- **Ansem's model** `ENEMY/0118/EN0118.MDL`:
+  - bones: `Root`, `b_ex110_sk`, `hip`, …, `chest1`, `head`, `l_toes`, `r_toes`, `r_hand`, `WeaponR`
+    (138);
+  - parts: 0 textured (`b_ex110_03/02/01`), 1 untextured;
+  - the RTM holds the three textures with their HD DDS; there is a TXA.
+- **Built**:
+  - `wep0` appended to both parts (parent `r_hand`, rest = Riku's rest `wep0` in his `r_hand`'s frame,
+    unscaled).
+  - Riku's two weapon parts get Ansem's bone list, their vertices on the new index.
+  - Parts: weapon untextured, weapon textured, body untextured, body textured (Riku's order: the
+    Keyblade of Heart's `with_blade` takes its GIF words from the body's untextured part).
+- **Retarget**: `bone_map` by name (`b_ex110_sk` aliased to `ex_1010_sk`). Ansem's own bones (robe,
+  hood, chains, hair) stay at rest. `wep0` takes Riku's world rotation, its offset from the hand
+  Riku's rest one.
+- **Game**: `riku_skin::Look { costume, blade }`; `ansem_unlocked` = the debug key or card 0x74 had
+  (his defeat).

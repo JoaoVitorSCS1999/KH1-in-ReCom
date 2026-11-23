@@ -11,6 +11,18 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 310 (fork branch Re-Re-Reverse/Rebirth): Riku's Ansem costume (Ansem, Seeker of Darkness's model with Riku's own moves), version 0.176.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "implementa a skin do Ansem para o Riku".
+
+- **Re:CoM** (Checked (files)): Ansem is `ENEMY/0118/EN0118` (textures `b_ex110_0x`, skeleton `b_ex110_sk`, 138 bones, 52 named as Riku's), read whole by our MDL reader (2 parts); no `wep0` (his `WeaponR` in the right hand). His card is 0x74.
+- **Asset step** (`riku_skin::{ansem_mdl, build_ansem}`): his model + a `wep0` under his `r_hand` at Riku's rest `wep0` relative to Riku's `r_hand`, Riku's weapon parts (PL0101 / PL0111 parts 0 / 1) moved onto it, parts ordered as Riku's, bone 1 renamed `ex_1010_sk`; Riku's clips (with his KH1 guard clips) retargeted by name, events remapped; Ansem's RTM + Riku's `weapon_0x` texture (or the Keyblade of Heart's), Ansem's TXA. Groups 181 / 191 (Soul Eater), 221 / 231 (Keyblade of Heart). **Re-run** (automatic; new outputs). Test: the idle's feet within 2.2 cm of Riku's (relative to rest), the blade root 11 cm from the hand as Riku's.
+- **Game**: costumes are now 0 Default Attire / 1 Dark Mode / 2 Ansem (`Look::costume`; manifest rows carry `costume`, older rows read `dark`); ini `riku_costume = default | dark | ansem` (the old `riku_dark_skin = on` reads as Dark Mode); Costumes' Costume row cycles the three, skipping a locked one. Ansem unlocked by his card (Re:CoM's obtained-at-least-once, given at his defeat) or `riku_ansem_unlocked` (debug, on in the owner's ini). A change to or from Ansem plays the crouch and the way-back effect (Dark Mode keeps its flip).
+- Assumptions: Ansem's hand rest frame close to Riku's (the blade's angle); his robe / hood / chains / hair held at rest.
+- **Checked**: tests, the asset step, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 309 (fork branch Re-Re-Reverse/Rebirth): KH1's Auto Lock as its soft target; Re:CoM's enemy pace one attacker at a time again, version 0.175.0 (2026-11-23)
 
 Fork owner, 2026-11-23, passing on two testers' reports, verbatim: "Sora doesn't seem to automatically lock on to an enemy when doing a combo, leading to a lot of missed swings…"; "I switched to the kh1 enemy ai where they all attack at once… I moved back to Re:Com's enemy ai but they were still attacking all at once"; and "o teu Auto Lock está diferente da implementação do KH1 lá o auto lock funciona sem lock on ao chegar proximo do oponente os ataques são direcionados a ele".

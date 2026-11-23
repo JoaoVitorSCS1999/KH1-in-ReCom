@@ -568,7 +568,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                         have.insert(rel.clone(), bytes.clone());
                     }
                     println!("Riku's Dark Form skin: group {skin} = PL{dark:04}'s model with PL{riku:04}'s {} clips", b.clips);
-                    done.push(Made { riku, skin, dark: true, blade: 0 });
+                    done.push(Made { riku, skin, dark: true, blade: 0, ansem: false });
                 }
                 Err(e) => println!("note: Riku's Dark Form skin (group {skin}) not built: {e}"),
             }
@@ -588,7 +588,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                                 write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
                             }
                             println!("Riku's Keyblade: group {target} = group {base} with the Keyblade of People's Hearts ({} clips)", b.clips);
-                            done.push(Made { riku, skin: target, dark, blade: 1 });
+                            done.push(Made { riku, skin: target, dark, blade: 1, ansem: false });
                         }
                         Err(e) => println!("note: Riku's Keyblade (group {target}) not built: {e}"),
                     }
@@ -596,6 +596,25 @@ fn run_inner(opt: &Options) -> Result<(), String> {
             }
             Some(Err(e)) => println!("note: Riku's Keyblade not built: {e}"),
             None => println!("note: KH1's {} not read: Riku's Keyblade not built", rsk::BLADE_MODEL),
+        }
+        // 0.176.0: the Ansem costume (Re:CoM's Ansem model with Riku's moves), with each Keyblade.
+        let heart = install::kh1(&game, keys.clone()).ok().and_then(|i| i.read_full(rsk::BLADE_MODEL).ok()).and_then(|(_, a, _)| rsk::BladeSource::from_assets(&a).ok());
+        for &(riku, se, koh) in &rsk::ANSEM_GROUPS {
+            for (target, blade) in [(se, None), (koh, heart.as_ref())] {
+                if target == koh && blade.is_none() {
+                    continue;
+                }
+                match rsk::build_ansem(&arc, &keys, &have, riku, target, blade) {
+                    Ok(b) => {
+                        for (rel, bytes) in &b.files {
+                            write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
+                        }
+                        println!("Riku's Ansem costume: group {target} = Ansem's model with PL{riku:04}'s {} clips{}", b.clips, if blade.is_some() { ", the Keyblade of People's Hearts" } else { "" });
+                        done.push(Made { riku, skin: target, dark: false, blade: blade.is_some() as u8, ansem: true });
+                    }
+                    Err(e) => println!("note: Riku's Ansem costume (group {target}) not built: {e}"),
+                }
+            }
         }
         if done.is_empty() {
             if manifest.is_file() {
