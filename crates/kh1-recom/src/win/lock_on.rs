@@ -35,6 +35,10 @@ static LIST: Mutex<History> = Mutex::new(History::EMPTY);
 static LISTED: AtomicBool = AtomicBool::new(false);
 /// Log lines left for the L2 steps.
 static STEP_LOG: AtomicUsize = AtomicUsize::new(24);
+/// 0.172.0: the target our L2 step chose this lock-on call (0: none).
+static STEPPED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The player's locked handle (`+0x850`, the switch's argument).
+const LOCK_HANDLE: usize = 0x850;
 
 type PlFn = unsafe extern "win64" fn(usize) -> u64;
 type PadFn = unsafe extern "win64" fn(usize) -> u32;
@@ -73,8 +77,10 @@ pub unsafe extern "win64" fn lock_on(pl: usize) -> u64 {
         return o(pl);
     }
     KH1_RULES.store(pl, Ordering::Release);
+    STEPPED.store(0, Ordering::Relaxed);
     let r = o(pl);
     KH1_RULES.store(0, Ordering::Release);
+    stepped(pl);
     after(pl);
     r
 }
@@ -116,6 +122,33 @@ unsafe fn after(pl: usize) {
             l.prune(|h| target_point(pl, h).is_some_and(|p| lo::distance(origin, p) <= reach));
         }
     });
+}
+
+/// 0.172.0 (fork owner, 2026-11-23: "L2/trigger esquerdo não está alternando oponentes no modo
+/// Kh1"; the owner's 0.171.0 log: every L2 stepped from the same target, the cursor never took the
+/// next): after Re:CoM's lock-on, a target our L2 step chose that its cursor (`+0x3F8 → +0xD4`) or
+/// the player's handle (`+0x850`) didn't take is written to both, the lock kept (`+0xE0`). Logged
+/// (what Re:CoM left), so the next trace says why it refused. Assumption: Re:CoM's cursor follows a
+/// written `+0xD4` (its locked branch `0x140209038` re-reads it each frame).
+unsafe fn stepped(pl: usize) {
+    let next = STEPPED.swap(0, Ordering::Relaxed);
+    if next == 0 {
+        return;
+    }
+    let cur: usize = rd(pl + recom::CURSOR);
+    if cur == 0 {
+        return;
+    }
+    let (d4, handle, locked): (i32, i32, i32) = (rd(cur + recom::CURSOR_TARGET), rd(pl + LOCK_HANDLE), rd(cur + recom::CURSOR_LOCKED));
+    let took = d4 == next as i32 && handle == next as i32;
+    if STEP_LOG.load(Ordering::Relaxed) > 0 {
+        log(&format!("lock-on: L2 step to {next:#x}: Re:CoM left cursor +0xD4 {d4:#x}, +0x850 {handle:#x}, locked {locked}{}", if took { "" } else { "; written ours" }));
+    }
+    if !took {
+        wr::<i32>(cur + recom::CURSOR_TARGET, next as i32);
+        wr::<i32>(cur + recom::CURSOR_LOCKED, 1);
+        wr::<i32>(pl + LOCK_HANDLE, next as i32);
+    }
 }
 
 /// The point Re:CoM's cursor measures from (`0x1401F0AB0(out, 0)`).
@@ -238,6 +271,9 @@ pub unsafe extern "win64" fn lock_switch(current: u32) -> i32 {
     });
     if STEP_LOG.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
         log(&format!("lock-on: L2 on {current:#x}: next {}; list {list:x?}; {} lockable within {reach} m", next.map_or("none".into(), |h| format!("{h:#x}")), all.iter().filter(|c| lo::distance(origin, c.point) <= reach).count()));
+    }
+    if let Some(h) = next {
+        STEPPED.store(h, Ordering::Relaxed);
     }
     next.map_or(0, |h| h as i32)
 }

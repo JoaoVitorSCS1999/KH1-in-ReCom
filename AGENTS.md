@@ -11,6 +11,17 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 306 (fork branch Re-Re-Reverse/Rebirth): L2's target step written when Re:CoM's cursor doesn't take it, version 0.172.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "L2/trigger esquerdo não está alternando oponentes no modo Kh1".
+
+- The owner's 0.171.0 log: `lock-on: L2 on 0xa3: next 0xa5` again and again: our step chose the next target, the lock stayed on 0xa3 (the history synced from Re:CoM's cursor never moved).
+- Re:CoM (Checked (disasm)): its switch writes the new handle to `+0x84C`, zeroes the cursor's `+0xD4` and runs the cursor update `0x140208EC0`, whose locked branch (`0x140209038`) takes `+0x84C` only when `+0xD4` ≤ 0. Why it didn't take ours: not known.
+- **Change** (`win::lock_on::stepped`): after Re:CoM's lock-on, a chosen target the cursor (`+0xD4`) or the player's handle (`+0x850`) didn't take is written to both (lock kept); each step logs what Re:CoM left. Assumption: the locked branch follows a written `+0xD4`.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 305 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard blocks only real contacts, as Sora's (0.153.0's fallback removed), version 0.171.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "porra testei denovo a defesa do Riku de longe mirando no inimigo, bizarro precisa corrigir isso definitivamente! veja como está implementada a defesa no Sora como já disse a única diferença é a animação!".
