@@ -476,6 +476,9 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
 unsafe fn riku_request_bits(pl: usize, o: PlFn) {
     // KH1's MP refill step (one atomic load unless a point waits), as Sora's.
     super::mp::frame();
+    // 0.163.0: KH1's items, as Sora's (a command no KH1 frame took is gone; the use tasks).
+    super::items::new_frame();
+    super::items::task_frame(pl);
     // 0.151.0: his Dark Points (`crate::dark_points`): idle losses, Dark Mode in / out.
     super::dark_points::frame(pl);
     let battle: i32 = rd(pl + p::BATTLE);

@@ -11,6 +11,19 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 296 (fork branch Re-Re-Reverse/Rebirth): KH1's items for Riku (drops, Items list, use, camp Items page with his Keyblade slot, Moogle shop), version 0.163.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "inclusive as features implementadas para o Sora até então, - Fully working MP system, item drops, and moogle shops …"; "vi agora que com o Sora já tem a feature de escolher a keyblade, para não ficar redundante aplique a mesma forma de implementação para o Riku e pode iniciar o fluxo proposto"; item motion: "Uma animação dele".
+
+- **Store**: Sora's item block in Riku's story's save, as his MP (`items::with_inventory` on `mp::live`).
+- **Drops**: KH1's tables in Riku's story too (`stats::drops`; his enemies keep Re:CoM's HP / damage).
+- **Battle**: his command menu's Items row with his slots; a use runs Sora's KH1 path (the use task in `riku_request_bits`, `exe_item` for `kh1_fighter`). KH1's item motion 0x3E plays his row 0x2D (`p002_034`, 56 frames at 30 fps; Re:CoM's Riku never uses it; Assumption: his own "use" motion, the owner's choice). The heal at KH1's frame.
+- **Camp** (Combat = KH1): his list is Items (Review Decks' place), Customize, World Map .. D Report, Costumes, Settings. The Items page is Sora's, owner row "Riku"; his Keyblade slot opens his Keyblade list (Soul Eater / Keyblade of Heart, greyed until 15 DP), as Sora's Keyblade list. The Costumes page's Keyblade row (0.160.0) is gone.
+- **Moogle shop**: Sora's KH1 shop where Riku's story has one, lines naming Riku.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 295 (fork branch Re-Re-Reverse/Rebirth): Sora's combat rules for Riku (post-hit invulnerability, KH1's no-flinch, no card duel, the dimming sleight's shield, gimmick cards, R1 lock-on), version 0.162.0 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "precisa valer, alias fora as específicidades do Riku todas as regras de combate precisam ser iguais as do Sora, porque na verdade não muda mesmo, são os mesmos inimigos, o criador do mod só quis desabilitar a parte do Riku para implementar depois".

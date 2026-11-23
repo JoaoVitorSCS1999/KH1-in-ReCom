@@ -112,7 +112,8 @@ impl Page {
             Page::Movement => &[Item::RunSpeed, Item::JumpHeight, Item::AirSpeed, Item::DodgeRoll],
             Page::EffectsSound => &[Item::Effects, Item::Sounds],
             Page::Camera => &[Item::Camera, Item::AutoCamera],
-            Page::Costumes => &[Item::Costume, Item::Blade],
+            // 0.163.0: the Keyblade is chosen on the Items page's Keyblade slot, as Sora's.
+            Page::Costumes => &[Item::Costume],
         }
     }
 

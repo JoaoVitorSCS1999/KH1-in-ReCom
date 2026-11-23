@@ -629,7 +629,7 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
                 }
             }
             _ => {
-                let first = if l == top::Layout::Riku { sub::Row::Customize } else { sub::Row::Items };
+                let first = sub::Row::Items;
                 if !ITEMS_ON.swap(true, Ordering::Relaxed) {
                     relabel_one(camp, top::DECKS as usize, first.label().as_ptr());
                 }
@@ -658,7 +658,7 @@ unsafe fn apply_layout(camp: *mut u8, l: top::Layout, relabelled: bool) {
             top::Layout::Recom => "camp: Re:CoM's list, untouched (Riku's story or the map-only camp)",
             top::Layout::RikuDecks => "camp: Riku's list at Combat = Re:CoM: Re:CoM's Review Decks .. D Report, Costumes, Settings (8 entries); Settings opens Game Settings, Combat, Movement, Camera",
             top::Layout::RikuPlain => "camp: Riku's list (riku_kh1_movement off): Re:CoM's seven and Costumes before Settings (8 entries); Settings is Re:CoM's page",
-            top::Layout::Riku => "camp: Riku's list at Combat = KH1: Customize in Review Decks' place, Re:CoM's World Map .. D Report, Costumes, Settings (8 entries, y 88 + 24 each); Settings opens Game Settings, Combat, Movement, Camera",
+            top::Layout::Riku => "camp: Riku's list at Combat = KH1: Items in Review Decks' place, Customize, Re:CoM's World Map .. D Report, Costumes, Settings (9 entries, y 88 + 24 each); Settings opens Game Settings, Combat, Movement, Camera",
         });
     }
 }
@@ -1311,7 +1311,9 @@ fn item_label(l: ip::Label) -> Vec<u8> {
     use ip::{Command as C, Label as L, Owner as O};
     let t: &[u8] = match l {
         // SAFETY: Re:CoM's card-name call (reads its message tables), as the Keyblade list's rows.
+        L::Keyblade if riku_page() => return unsafe { blade_name(riku_blade()) },
         L::Keyblade => return unsafe { card_name(super::stats::equipped_card()) },
+        L::Owner(O::Sora) if riku_page() => b"Riku\0",
         L::Owner(O::Sora) => ip::text::SORA,
         L::Owner(O::Stock) => ip::text::STOCK,
         L::Slot(i) => return item_word(i),
@@ -1455,8 +1457,8 @@ impl Page {
     /// page of before: the earned Keyblades, the equipped one marked, its numbers, the scroll bar),
     /// on the equipped one; the Items screen waits in `under`.
     unsafe fn open_keyblades(&mut self) {
-        let cards = kb::unlocked(super::stats::keyblade_cards(), |k| ever_obtained(k));
-        let equipped = super::stats::equipped_card();
+        // 0.163.0: Riku's Keyblades (cosmetic: the Soul Eater, the Keyblade of Heart).
+        let (cards, equipped) = if riku_page() { (vec![SOUL_EATER, RIKU_HEART], riku_blade()) } else { (kb::unlocked(super::stats::keyblade_cards(), |k| ever_obtained(k)), super::stats::equipped_card()) };
         let at_eq = cards.iter().position(|&c| c == equipped).unwrap_or(0) as i32;
         let items_list = std::mem::replace(&mut self.list, list::open_on(cards.len() as i32, at_eq));
         log(&format!("keyblades: list opened from the Items page: {} Keyblades listed {:x?}, equipped {:#x}", cards.len(), cards, equipped));
@@ -1503,7 +1505,7 @@ impl Page {
     fn row_text(&self, idx: usize) -> Vec<u8> {
         match &self.content {
             // SAFETY: Re:CoM's card-name call (reads its message tables).
-            Content::Keyblades { cards, .. } => unsafe { card_name(cards[idx]) },
+            Content::Keyblades { cards, .. } => unsafe { blade_name(cards[idx]) },
             Content::Customize { levels, picks, picking: Some(_), .. } => pick_word(picks.get(idx).copied().flatten(), levels),
             // Owner, 2026-11-04: the bound spell's or sleight's name beside the button prompt
             // (the status panel's words); an empty slot shows the button alone.
@@ -1533,6 +1535,9 @@ impl Page {
     /// A greyed row (Items, Abilities: KH1's greyed rows).
     fn row_grey(&self, idx: usize) -> bool {
         match &self.content {
+            // 0.163.0: the Keyblade of Heart before Riku's 15 DP.
+            // SAFETY: reads the save (the camp, main thread).
+            Content::Keyblades { cards, .. } => cards.get(idx) == Some(&RIKU_HEART) && unsafe { !super::riku_skin::blade_unlocked() },
             Content::Items { rows, .. } => rows.get(idx).is_some_and(|r| r.grey),
             Content::Abilities { rows, .. } => rows.get(idx).is_some_and(|r| r.grey),
             // M12 step 6: a slot whose sleight is no longer equipped.
@@ -1601,6 +1606,8 @@ impl Page {
     /// The status panel's three rows: labels and values.
     fn status(&self) -> ([&'static [u8]; 3], [Vec<u8>; 3]) {
         match &self.content {
+            Content::Keyblades { .. } if riku_page() => (text::STAT_LABELS, [0u8; 3].map(|_| kb::c_text("-"))),
+            Content::Items { screen, inv, ctx, .. } if riku_page() && screen.slot(inv, *ctx) == Some(ip::Slot::Keyblade) => (text::STAT_LABELS, [0; 3].map(|_| kb::c_text("-"))),
             Content::Keyblades { cards, .. } => {
                 let values = cards
                     .get(self.list.cursor as usize)
@@ -1866,6 +1873,21 @@ impl Page {
     unsafe fn confirm(&mut self) {
         let cursor = self.list.cursor;
         match &self.content {
+            Content::Keyblades { cards, .. } if riku_page() => {
+                let Some(card) = cards.get(cursor as usize).copied() else { return };
+                if card == RIKU_HEART && !super::riku_skin::blade_unlocked() {
+                    sound(5);
+                    set_help(self.p(), crate::menu::BLADE_LOCKED.as_ptr());
+                    return;
+                }
+                super::set_item(crate::menu::Item::Blade, (card == RIKU_HEART) as usize);
+                if let Content::Keyblades { equipped, .. } = &mut self.content {
+                    *equipped = card;
+                }
+                sound(2);
+                self.redraw();
+                log(&format!("keyblades: Riku holds the {}", if card == RIKU_HEART { "Keyblade of Heart" } else { "Soul Eater" }));
+            }
             Content::Keyblades { cards, .. } => {
                 let Some(card) = cards.get(cursor as usize).copied() else { return };
                 super::stats::set_equipped(card);
@@ -2143,6 +2165,32 @@ impl Page {
 
 /// The Keyblade's localized card name (`0x140164CA0`, message `[0x140528560 + kind × 4]`), or the
 /// stats file's name when that message isn't loaded.
+/// Riku's Soul Eater (Re:CoM's card 0x12) and the Keyblade of Heart (ours: no card).
+const SOUL_EATER: u16 = 0x12;
+const RIKU_HEART: u16 = 0x100;
+
+/// The page belongs to Riku's story (his items, his Keyblades).
+fn riku_page() -> bool {
+    super::stats::riku_story()
+}
+
+/// The Keyblade Riku holds now (the setting, once unlocked).
+unsafe fn riku_blade() -> u16 {
+    if super::settings().riku_heart_blade && super::riku_skin::blade_unlocked() {
+        RIKU_HEART
+    } else {
+        SOUL_EATER
+    }
+}
+
+/// A Keyblade list row's name: Re:CoM's card name, or the Keyblade of Heart's.
+unsafe fn blade_name(card: u16) -> Vec<u8> {
+    if card == RIKU_HEART {
+        return b"Keyblade of Heart\0".to_vec();
+    }
+    card_name(card)
+}
+
 unsafe fn card_name(card: u16) -> Vec<u8> {
     let id = [card as u8, 0, 0, 0];
     let p = func::<NameFn>(CARD_NAME)(id.as_ptr());

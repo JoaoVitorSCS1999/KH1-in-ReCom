@@ -862,3 +862,29 @@ precisam ser iguais as do Sora".
     `riku_story()` gates); no damage cap on his hits;
   - Sora's abilities, spells, items, summons and Enemy Skills;
   - the Neoshadow's held grab (no clip of his).
+
+## 0.163.0: KH1's items for Riku; his Keyblade on the Items page
+
+Fork owner, 2026-11-23: Sora's features for Riku ("Fully working MP system, item drops, and moogle
+shops", Enemy Skills next); "vi agora que com o Sora já tem a feature de escolher a keyblade, para
+não ficar redundante aplique a mesma forma de implementação para o Riku"; item motion "Uma animação
+dele".
+
+- **Item motion** (Checked (exe: action tables `0x1407C6300[1]` / `[3]`)):
+  - Sora's row 0x2D is `p001_032` (KH1 motion 0x3E's bake, 41 frames at 30 fps).
+  - Riku's row 0x2D is `p002_034` (56 frames). His rows 0..0x38 mean Sora's (0.144.0), and Re:CoM's
+    Riku never uses items, so it is his own "use" motion. Assumption: not seen.
+  - KH1's use rule (heal 65 frames in, free from 74) stands.
+- **What changed**:
+  - The item store goes through `mp::live` (his story's save; v0 = KH1's new game: 3 empty slots).
+  - `riku_request_bits` runs the item frame and the use task; `exe_item` takes `kh1_fighter`.
+  - `riku_world` has his slots.
+  - `stats::drops` works in his story.
+  - Shop `live()` goes through `mp::live`; the bubble's lines name Riku.
+- **Camp**:
+  - `top::RIKU_KH1_ORDER` = Items (0), Customize (8), Re:CoM's 1..5, Costumes (7), Settings (6).
+  - The Items page's Keyblade slot / list in his story: Soul Eater (card 0x12) and the Keyblade of
+    Heart (ours, 0x100), greyed until `riku_skin::blade_unlocked`. The confirm sets
+    `riku_keyblade`, as the Costumes row did.
+- Not known: whether Riku's story has Moogle shop rooms (Assumption: no; the shop code is ready if
+  it has).

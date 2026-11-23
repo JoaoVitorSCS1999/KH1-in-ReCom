@@ -218,10 +218,12 @@ fn twin(enemy: usize) -> Option<(&'static str, &'static EnemyStats)> {
 }
 
 /// The KH1 twin's defeat drops for this enemy (M8 stage 8a.4): its class's table for Re:CoM's
-/// current world (format 6), with the class for the log. None: Riku's story, no twin, no table.
+/// current world (format 6), with the class for the log. None: no twin, no table. 0.163.0 (fork
+/// owner, 2026-11-23: Sora's features for Riku): in Riku's story too (only the drops: his enemies
+/// keep Re:CoM's HP and damage).
 pub fn drops(enemy: usize) -> Option<(&'static str, i32, &'static [crate::drops::Drop])> {
     let class = class_of(enemy)?;
-    if riku_story() {
+    if riku_story() && !super::movement::riku_on() {
         return None;
     }
     let w = world();

@@ -151,13 +151,20 @@ pub mod top {
     pub const RIKU_EXTRA: [i32; 1] = [COSTUMES];
     pub const RIKU_ENTRIES: i32 = 8;
     pub const RIKU_ORDER: [i32; RIKU_ENTRIES as usize] = [DECKS, 1, 2, 3, 4, 5, COSTUMES, SETTINGS];
+    /// Riku's list at Combat = KH1 (fork, 0.163.0; fork owner, 2026-11-23: Sora's features for Riku,
+    /// his Keyblade chosen "da mesma forma" as Sora's): Items in Review Decks' place (his Keyblade
+    /// slot and item slots), Customize (camp index 8, as Sora's), Re:CoM's World Map .. D Report,
+    /// Costumes, Settings.
+    pub const RIKU_KH1_EXTRA: [i32; 2] = [COSTUMES, CUSTOMIZE];
+    pub const RIKU_KH1_ORDER: [i32; KH1_ENTRIES as usize] = [DECKS, CUSTOMIZE, 1, 2, 3, 4, 5, COSTUMES, SETTINGS];
 
     /// The order on screen of a list with entries of ours (camp index per slot), None for
     /// Re:CoM's seven where they are.
     pub fn order(l: Layout) -> Option<&'static [i32]> {
         match l {
             Layout::Kh1 => Some(&KH1_ORDER),
-            Layout::Riku | Layout::RikuDecks | Layout::RikuPlain => Some(&RIKU_ORDER),
+            Layout::Riku => Some(&RIKU_KH1_ORDER),
+            Layout::RikuDecks | Layout::RikuPlain => Some(&RIKU_ORDER),
             _ => None,
         }
     }
@@ -166,7 +173,8 @@ pub mod top {
     pub fn extras(l: Layout) -> &'static [i32] {
         match l {
             Layout::Kh1 => &EXTRA,
-            Layout::Riku | Layout::RikuDecks | Layout::RikuPlain => &RIKU_EXTRA,
+            Layout::Riku => &RIKU_KH1_EXTRA,
+            Layout::RikuDecks | Layout::RikuPlain => &RIKU_EXTRA,
             _ => &[],
         }
     }
@@ -249,7 +257,8 @@ pub mod top {
             (Layout::Kh1, DECKS) => Some(Entry::Items),
             (Layout::Kh1, ABILITIES) => Some(Entry::Abilities),
             (Layout::Kh1, CUSTOMIZE) => Some(Entry::Customize),
-            (Layout::Riku, DECKS) => Some(Entry::Customize),
+            (Layout::Riku, DECKS) => Some(Entry::Items),
+            (Layout::Riku, CUSTOMIZE) => Some(Entry::Customize),
             (Layout::Riku | Layout::RikuDecks | Layout::RikuPlain, COSTUMES) => Some(Entry::Costumes),
             (_, i) if (0..RECOM_ENTRIES).contains(&i) => Some(Entry::Recom(i)),
             _ => None,
@@ -990,22 +999,25 @@ mod tests {
             assert_eq!((top::count(l), top::slot(l, top::COSTUMES), top::slot(l, top::SETTINGS)), (8, Some(6), Some(7)));
             assert_eq!(top::list_fix(l, top::DECKS, top::Pad { confirm: true, ..Default::default() }), top::Fix::None, "Re:CoM's own confirm");
         }
-        // Riku's list: Review Decks' place is Customize; the rest Re:CoM's, where they are.
-        assert_eq!(top::entry(Layout::Riku, top::DECKS), Some(Entry::Customize));
+        // Riku's list at Combat = KH1 (0.163.0): Items in Review Decks' place, Customize, Re:CoM's
+        // World Map .. D Report, Costumes, Settings, at the KH1 list's spacing.
+        assert_eq!(top::entry(Layout::Riku, top::DECKS), Some(Entry::Items));
         assert_eq!(top::entry(Layout::Riku, 3), Some(Entry::Recom(3)));
-        assert_eq!(top::entry(Layout::Riku, top::CUSTOMIZE), None);
-        // Riku's eight (fork, 0.154.1): Costumes before Settings, at the KH1 list's spacing.
+        assert_eq!(top::entry(Layout::Riku, top::CUSTOMIZE), Some(Entry::Customize));
         assert_eq!(top::entry(Layout::Riku, top::COSTUMES), Some(Entry::Costumes));
-        assert_eq!((top::count(Layout::Riku), top::slot(Layout::Riku, 0), top::entry_pos(Layout::Riku, 2)), (8, Some(0), top::entry_pos(Layout::Kh1, 2)));
-        assert_eq!((top::slot(Layout::Riku, top::COSTUMES), top::slot(Layout::Riku, top::SETTINGS)), (Some(6), Some(7)));
+        assert_eq!((top::count(Layout::Riku), top::slot(Layout::Riku, 0), top::slot(Layout::Riku, top::CUSTOMIZE), top::entry_pos(Layout::Riku, 2)), (9, Some(0), Some(1), top::entry_pos(Layout::Kh1, 2)));
+        assert_eq!((top::slot(Layout::Riku, top::COSTUMES), top::slot(Layout::Riku, top::SETTINGS)), (Some(7), Some(8)));
         let down = top::Pad { down: true, down_fresh: true, ..Default::default() };
+        assert_eq!(top::list_step(Layout::Riku, top::DECKS, down), Some(top::CUSTOMIZE));
+        assert_eq!(top::list_step(Layout::Riku, top::CUSTOMIZE, down), Some(1));
         assert_eq!(top::list_step(Layout::Riku, 5, down), Some(top::COSTUMES));
         assert_eq!(top::list_step(Layout::Riku, top::COSTUMES, down), Some(top::SETTINGS));
         assert_eq!(top::list_step(Layout::Riku, top::SETTINGS, down), Some(top::DECKS));
         assert_eq!(top::riku_fix(top::COSTUMES, top::Pad { confirm: true, ..Default::default() }), top::Fix::Confirm(Entry::Costumes));
         assert_eq!(Entry::Costumes.page(), Some(sub::Row::Costumes));
         let confirm = top::Pad { confirm: true, ..Default::default() };
-        assert_eq!(top::riku_fix(0, confirm), top::Fix::Confirm(Entry::Customize));
+        assert_eq!(top::riku_fix(0, confirm), top::Fix::Confirm(Entry::Items));
+        assert_eq!(top::riku_fix(top::CUSTOMIZE, confirm), top::Fix::Confirm(Entry::Customize));
         assert_eq!(top::riku_fix(1, confirm), top::Fix::None);
         assert_eq!(top::riku_fix(0, top::Pad::default()), top::Fix::None);
         assert_eq!((top::count(Layout::Kh1), top::count(Layout::Settings), top::count(Layout::Recom)), (9, 7, 7));
