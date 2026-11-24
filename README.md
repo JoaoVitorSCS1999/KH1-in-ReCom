@@ -124,6 +124,7 @@ Everything is in `kh1-recom.ini` (each key is explained in the file) and in the 
 | `target_lock` | `auto` | KH1's Target Lock: `auto` (R1 again unlocks) or `manual` (unlocks when R1 is let go) |
 | `riku_kh1_movement` | `off` | KH1-style movement for Riku in Reverse/Rebirth (being tested) |
 | `riku_costume`, `riku_keyblade`, `sora_costume` | `default`, `soul_eater`, `default` | the cosmetic costumes and Keyblade, once unlocked |
+| `riku_hair` | `recom` | Riku's hair: `recom` or `ddd` (Dream Drop Distance's, default attire only; needs the 2.8 collection next to the game) |
 | `all_unlock` | `off` | **for debug only**: unlocks every costume and cosmetic Keyblade |
 
 ## Build

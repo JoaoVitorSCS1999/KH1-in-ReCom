@@ -1389,8 +1389,8 @@ impl Page {
     unsafe fn open(camp: *mut u8, row: sub::Row) -> Page {
         let (content, list) = match row {
             sub::Row::Customize if story(camp) == kb::Story::Riku => {
-                // Riku's (0.149.0): no spells; his sleights; his slots (the same save bytes).
-                let levels = [0u8; 7];
+                // Riku's (0.149.0): his sleights; his slots (the same save bytes). 0.187.0: and his unlocked spells.
+                let levels = super::command_menu::riku_spell_levels();
                 let slots = super::mp::riku_shortcuts().unwrap_or([0; 3]);
                 // His six and (0.152.0) Dark Riku's, each once (a slot starts what the one in play takes).
                 let mut sleights: Vec<u16> = crate::riku::SLEIGHTS.iter().chain(crate::riku::DARK_SLEIGHTS.iter()).map(|s| s.id).collect();

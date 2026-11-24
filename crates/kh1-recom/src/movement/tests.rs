@@ -2631,3 +2631,77 @@ fn rikus_guard_against_the_neoshadows_windows() {
         assert_eq!(stops, priority < 98);
     }
 }
+
+/// 0.184.3 (fork owner, 2026-11-23: "e teste com o Neo SHadow todas as variações para ver se falta algo"): every spell,
+/// level, on the ground and in the air, cast by Riku's KH1 frame (his abilities): it starts, every motion it asks
+/// has one of Riku's cast rows (`crate::riku::cast_row`: no Sora-only clip left), it releases once at KH1's frame
+/// (Fire 28 after the command; the others their script's wait), Re:CoM's magic action ends once, and Riku's row
+/// table has the row (`crate::magic::riku_look`). Printed as a table with `--nocapture`. The Neoshadow's numbers for
+/// each are `magic::tests::every_spell_and_level_on_kh1s_neoshadow`.
+#[test]
+fn riku_every_spell_level_and_air_casts_fully() {
+    use crate::magic::{self as mg, CastEvent, MagicCommand};
+    let rows = mg::riku_look(&mg::kh1_magic_table(&mg::recom_rows()));
+    let names = ["Fire", "Blizzard", "Thunder", "Cure", "Gravity", "Stop", "Aero"];
+    for spell in 0..7u8 {
+        for level in 1..=3u8 {
+            assert!(mg::table_index(spell, level).is_some_and(|i| rows[i][0] != 0), "{} {level}: Riku's row", names[spell as usize]);
+            for air in [false, true] {
+                let mut p = Pair::new(crate::riku::abilities(0), Floor::flat());
+                for _ in 0..5 {
+                    step_cast(&mut p, Pad::default(), None);
+                }
+                if air {
+                    step_cast(&mut p, Pad { jump: true, ..Default::default() }, None);
+                    for _ in 0..8 {
+                        step_cast(&mut p, Pad { jump: true, ..Default::default() }, None);
+                    }
+                }
+                let out = step_cast(&mut p, Pad { jump: air, ..Default::default() }, Some(MagicCommand { spell, level }));
+                let started = out.cast.iter().find_map(|e| match e {
+                    CastEvent::Started { air, .. } => Some(*air),
+                    _ => None,
+                });
+                let Some(in_air) = started else { panic!("{} {level} air {air}: no start ({:?})", names[spell as usize], out.cast) };
+                let mut release = None;
+                for k in 1..200 {
+                    let out = step_cast(&mut p, Pad { jump: air, ..Default::default() }, None);
+                    if let Some(f) = out.cast.iter().find_map(|e| match e {
+                        CastEvent::Released { frame, .. } => Some(*frame),
+                        _ => None,
+                    }) {
+                        assert!(release.is_none(), "{} {level}: released twice", names[spell as usize]);
+                        release = Some((k, f));
+                    }
+                    if p.ours.cast.is_none() && release.is_some() {
+                        break;
+                    }
+                }
+                let unmapped: Vec<u16> = p.recom.plays.iter().map(|x| x.0).filter(|&r| mg::is_cast_request(r) && crate::riku::cast_row(r).is_none()).collect();
+                eprintln!("{} {level} {}: released {:?}, motions {:x?}", names[spell as usize], if in_air { "air" } else { "ground" }, release, p.recom.plays.iter().map(|x| x.0).filter(|&r| mg::is_cast_request(r)).collect::<Vec<_>>());
+                assert!(unmapped.is_empty(), "{} {level}: cast motions without a Riku row {unmapped:x?}", names[spell as usize]);
+                // Sora, the same cast on the same frame (the shared port): Riku must do what he does.
+                let mut q = Pair::new(all(), Floor::flat());
+                for _ in 0..5 {
+                    step_cast(&mut q, Pad::default(), None);
+                }
+                if air {
+                    for _ in 0..9 {
+                        step_cast(&mut q, Pad { jump: true, ..Default::default() }, None);
+                    }
+                }
+                step_cast(&mut q, Pad { jump: air, ..Default::default() }, Some(MagicCommand { spell, level }));
+                for _ in 1..200 {
+                    step_cast(&mut q, Pad { jump: air, ..Default::default() }, None);
+                }
+                assert_eq!(p.recom.releases.len(), q.recom.releases.len(), "{} {level} air {in_air}: Riku and Sora differ", names[spell as usize]);
+                if !in_air {
+                    assert!(release.is_some(), "{} {level}: never released", names[spell as usize]);
+                    assert_eq!(p.recom.releases.len(), 1, "{} {level}", names[spell as usize]);
+                } else if release.is_none() {
+                    eprintln!("  (air: landed before the release frame; Sora too: KH1's air cast ends at the landing)");
+                }
+            }
+        }
+    }
+}

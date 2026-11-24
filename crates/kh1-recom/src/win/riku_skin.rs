@@ -22,6 +22,10 @@ static GUARD_FILES: AtomicBool = AtomicBool::new(false);
 /// 0.183.2: Dark Riku's own packs (`PL0201` / `PL0211.ANN`) carry the guard too, and his action table names it.
 static DARK_GUARD: AtomicBool = AtomicBool::new(false);
 static DARK_GUARD_FILES: AtomicBool = AtomicBool::new(false);
+/// 0.184.1: the packs carry the cast clips, and the tables name them (Riku's / Dark Riku's).
+static CAST_FILES: AtomicBool = AtomicBool::new(false);
+static CAST: AtomicBool = AtomicBool::new(false);
+static DARK_CAST: AtomicBool = AtomicBool::new(false);
 /// The PLAYER table copy holds the skin groups' rows.
 static ROWS: AtomicBool = AtomicBool::new(false);
 /// The look the tables point at now (`Look::bits`; 0 Riku's own).
@@ -44,6 +48,7 @@ pub unsafe fn chosen(s: &crate::settings::Settings) -> Look {
         dark: s.riku_costume == 1 && unlocked(),
         blade: (s.riku_heart_blade && blade_unlocked()) as u8,
         halloween: s.riku_costume == 2 && halloween_unlocked(),
+        hair: s.riku_hair.min(1),
     }
 }
 
@@ -111,6 +116,11 @@ pub fn preload(manifest: Option<&Path>) {
     // 0.183.2: the asset step writes Dark Riku's own packs with the guard (`kh1_recom_assets::riku_skin::dark_guard_pack`).
     let dark_files = guard_files && ["PLAYER/0201/PL0201.ANN", "PLAYER/0211/PL0211.ANN"].iter().all(|f| f.split('/').fold(dir.clone(), |p, x| p.join(x)).is_file());
     DARK_GUARD_FILES.store(dark_files, Ordering::Relaxed);
+    let all_packs = ["PLAYER/0101/PL0101.ANN", "PLAYER/0111/PL0111.ANN", "PLAYER/0201/PL0201.ANN", "PLAYER/0211/PL0211.ANN"].iter().all(|f| f.split('/').fold(dir.clone(), |p, x| p.join(x)).is_file());
+    CAST_FILES.store(rs::riku_cast(&text) && all_packs, Ordering::Relaxed);
+    if !CAST_FILES.load(Ordering::Relaxed) {
+        log("riku cast: no cast clips from the asset step (older than 0.184.1?): Riku's spells keep his current motion; run the game once for the asset step");
+    }
     if guard_files && !dark_files {
         log("riku guard: no PL0201 / PL0211.ANN of the asset step (older than 0.183.2?): Dark Riku's Guard keeps his clash recoil; run Build again");
     }
@@ -151,6 +161,18 @@ pub unsafe fn guard_rows(b: usize) {
         if name_rows(b, &[3, 4], b"p002_000\0", &names, "Riku") {
             GUARD.store(true, Ordering::Relaxed);
             log("riku guard: Riku's Guard plays KH1 Riku's own guard (row 0x39, p002_225) and his KH1 guard recoil (row 0x3A, p002_226)");
+        }
+    }
+    if CAST_FILES.load(Ordering::Relaxed) && !CAST.load(Ordering::Relaxed) {
+        let names: Vec<(u32, &'static [u8])> = crate::riku::CAST_ROWS.iter().copied().zip(crate::riku::CAST_CLIPS).collect();
+        if name_rows(b, &[3, 4], b"p002_000\0", &names, "Riku") {
+            CAST.store(true, Ordering::Relaxed);
+            log("riku cast: Riku's spells play the Dark Firaga cast clips (rows 0x3B..0x40, p002_227..232)");
+        }
+        let names: Vec<(u32, &'static [u8])> = crate::riku::CAST_ROWS.iter().copied().zip(crate::riku::DARK_CAST_CLIPS).collect();
+        if name_rows(b, &[5, 6], b"p003_000\0", &names, "Dark Riku") {
+            DARK_CAST.store(true, Ordering::Relaxed);
+            log("riku cast: Dark Riku's spells play his Dark Firaga cast clips (rows 0x3B..0x40, p003_227..232)");
         }
     }
     if DARK_GUARD_FILES.load(Ordering::Relaxed) && !DARK_GUARD.load(Ordering::Relaxed) {
@@ -195,6 +217,11 @@ unsafe fn name_rows(b: usize, chars: &[usize], empty: &[u8; 9], names: &[(u32, &
         log(&format!("riku guard: {who}'s rows: {done} of {} renamed (a patch failed); {who}'s Guard keeps the clash recoil", names.len() * want));
     }
     done == names.len() * want && want > 0
+}
+
+/// 0.184.1: Riku's / Dark Riku's row for a KH1 cast request once the tables name the cast clips, else None.
+pub fn cast_row(dark: bool, request: u16) -> Option<u32> {
+    (if dark { &DARK_CAST } else { &CAST }).load(Ordering::Relaxed).then(|| crate::riku::cast_row(request)).flatten()
 }
 
 /// Riku's row for KH1's guard recoils (0x6E / 0x6F): his KH1 recoil (0x3A) once named, else None

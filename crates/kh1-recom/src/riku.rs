@@ -133,6 +133,61 @@ pub const DARK_GUARD_CLIP: &[u8] = b"p003_225\0";
 /// Dark Riku's guard recoil clip (see [`DARK_GUARD_CLIP`]).
 pub const DARK_RECOIL_CLIP: &[u8] = b"p003_226\0";
 
+/// 0.184.1: Riku's / Dark Riku's cast rows (the next clipless rows of both tables, `p002_000` / `p003_000` up to 0x46;
+/// Checked (exe)), named after the asset step's cast clips (`kh1_recom_assets::riku_skin::CAST_CLIPS`). 0.185.0 (DDD's
+/// casts, ground and air apart): on the ground Fire's wind-up, Fire's release, Blizzard, Thunder / Aero, Cure, Gravity /
+/// Stop; then the same six in the air.
+pub const CAST_ROWS: [u32; 12] = [0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46];
+/// Their clip names for Riku and for Dark Riku.
+pub const CAST_CLIPS: [&[u8]; 12] = [b"p002_227\0", b"p002_228\0", b"p002_229\0", b"p002_230\0", b"p002_231\0", b"p002_232\0", b"p002_233\0", b"p002_234\0", b"p002_235\0", b"p002_236\0", b"p002_237\0", b"p002_238\0"];
+pub const DARK_CAST_CLIPS: [&[u8]; 12] = [b"p003_227\0", b"p003_228\0", b"p003_229\0", b"p003_230\0", b"p003_231\0", b"p003_232\0", b"p003_233\0", b"p003_234\0", b"p003_235\0", b"p003_236\0", b"p003_237\0", b"p003_238\0"];
+
+/// 0.184.6 (fork owner, 2026-11-23: the cast motions "flicando"; "ajusta tbm a animação de guard pra ficar mais suave
+/// quando terminar"): the blends (KH1 frames) Re:CoM's motion request gets for Riku's own KH1 rows, which start and
+/// end in poses of his sleights or KH1 Riku's, not his idle: a cast's first motion blends in over [`CAST_IN`] frames,
+/// and leaving any of them (a cast clip, the Guard, its recoil) for another row blends out over [`OUT`]. A visual
+/// blend only: KH1's frame keeps its own timing. Assumption: the numbers (Re:CoM's own swing ends blend 8).
+pub const CAST_IN: f32 = 6.0;
+pub const OUT: f32 = 10.0;
+
+/// One of Riku's KH1-only rows (the cast clips, the Guard, its recoil).
+pub fn kh1_only_row(row: u32) -> bool {
+    CAST_ROWS.contains(&row) || row == KH1_GUARD_ROW || row == KH1_RECOIL_ROW
+}
+
+/// The blend for Riku's motion request from Re:CoM's current row `cur` to `new` (`first_cast`: the request is a cast's
+/// first motion, `crate::magic::cast_req::first`).
+pub fn blend_for(cur: u32, new: u32, first_cast: bool, blend: f32) -> f32 {
+    if first_cast && CAST_ROWS.contains(&new) && !kh1_only_row(cur) {
+        blend.max(CAST_IN)
+    } else if kh1_only_row(cur) && !kh1_only_row(new) {
+        blend.max(OUT)
+    } else {
+        blend
+    }
+}
+
+/// The cast row for a KH1 cast request (ground and air share a row; `crate::magic::cast_req`), None for anything
+/// else.
+pub fn cast_row(request: u16) -> Option<u32> {
+    let i = match request {
+        0x36 => 0,
+        0x3D => 1,
+        0x37 => 2,
+        0x38 | 0x3C => 3,
+        0x39 => 4,
+        0x3A | 0x3B => 5,
+        0x83 => 6,
+        0x8A => 7,
+        0x84 => 8,
+        0x85 | 0x89 => 9,
+        0x86 => 10,
+        0x87 | 0x88 => 11,
+        _ => return None,
+    };
+    Some(CAST_ROWS[i])
+}
+
 /// Re:CoM's attack row id for Riku's own swing that plays the same clip as Sora's row `sora_id`.
 /// Sora's rows 1..7 (`0x1407C6C70`, action rows 0x30..0x36) have Riku's twins at 0x97..0x9D: the same
 /// action rows and card columns, but their hit effect (row `+2`, by id: `CPlayerWeapon::onAttack`
@@ -283,6 +338,40 @@ mod tests {
         assert_eq!(crate::sleights::name(0x69), "Dark Impulse");
         assert_eq!(crate::sleights::list(&[0x67, 0x66]), vec![0x66, 0x67]);
         assert_eq!(crate::command_menu::shortcut::slot_sleight(0x66), Some(0x66));
+    }
+
+    #[test]
+    fn rikus_kh1_rows_blend_in_and_out() {
+        // From the stance into a cast: blended in; Fire's wind-up into its release: as KH1 asks (0).
+        assert_eq!(blend_for(0x2A, 0x3B, true, 0.0), CAST_IN);
+        assert_eq!(blend_for(0x3B, 0x3C, false, 0.0), 0.0);
+        // Out of a cast clip, the Guard or its recoil into the idle: blended out.
+        assert_eq!(blend_for(0x3D, 0x2A, false, 0.0), OUT);
+        assert_eq!(blend_for(KH1_GUARD_ROW, 0x2A, false, 0.0), OUT);
+        assert_eq!(blend_for(KH1_RECOIL_ROW, 0x01, false, 4.0), OUT);
+        // The Guard into its recoil (a block): at once, as KH1.
+        assert_eq!(blend_for(KH1_GUARD_ROW, KH1_RECOIL_ROW, false, 0.0), 0.0);
+        // Anything else as asked.
+        assert_eq!(blend_for(0x01, 0x30, false, 8.0), 8.0);
+    }
+
+    #[test]
+    fn every_kh1_cast_request_has_a_cast_row() {
+        use crate::magic::cast_req as c;
+        for spell in 0..7u8 {
+            for air in [false, true] {
+                assert!(cast_row(c::first(spell, air)).is_some() && cast_row(c::release(spell, air)).is_some(), "{spell} {air}");
+            }
+        }
+        assert_eq!(cast_row(c::FIRE_WINDUP), Some(0x3B));
+        assert_eq!(cast_row(c::CURE), Some(0x3F));
+        assert_eq!(cast_row(c::AERO_AIR), Some(0x44));
+        assert_eq!(cast_row(c::FIRE_AIR_RELEASE), Some(0x42));
+        // Ground and air apart: no air request plays a ground row.
+        for s in 0..7u8 {
+            assert_ne!(cast_row(c::first(s, false)), cast_row(c::first(s, true)), "{s}");
+        }
+        assert_eq!(cast_row(0x2A), None);
     }
 
     #[test]

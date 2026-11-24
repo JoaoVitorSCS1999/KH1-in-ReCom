@@ -150,7 +150,7 @@ pub(crate) fn set_item(item: crate::menu::Item, v: usize) {
         // Fork (0.170.0): Sora's costume, from the next room or battle.
         // SAFETY: checked writes of Re:CoM's static tables (the camp: no player is being built).
         Item::SoraCostume => unsafe { sora_costume::apply(base(), s.sora_halloween && sora_costume::unlocked()) },
-        Item::Costume | Item::Blade => unsafe {
+        Item::Costume | Item::Blade | Item::Hair => unsafe {
             riku_skin::apply(base(), riku_skin::chosen(&s));
             riku_skin::costume_chosen(base());
         },
@@ -522,6 +522,9 @@ fn install_magic(base: usize) {
     if unsafe { hook::install_all(base, &hooks) } {
         magic::mark_installed();
         log(&magic::start_line());
+        // 0.184.0: Riku's / Dark Riku's empty exeMagic slots run the KH1 cast too.
+        // SAFETY: data patches of the mapped image with checked old values.
+        unsafe { magic::riku_slots(base) };
         // A Gravity-flattened enemy stays hittable in KH1 battles (`crate::magic::flatten`).
         let fl = crate::sites::FLATTEN_HOOKS;
         let flatten = [
@@ -552,6 +555,9 @@ fn install_magic(base: usize) {
         if unsafe { magic_fx::install(base) } {
             log("magic fx: Re:CoM's battle set (spell effects) in the field at combat = kh1 in Sora's story: field state 1 0x1401AF933 -> 0x140211AA0 then 0x140211960; camp unloads 0x1401A95BD / 0x1401A99F9 keep it");
         }
+        // 0.184.2: Riku's battles load Sora's spell effects too (his KH1 spells).
+        // SAFETY: a branch patch with checked old bytes.
+        unsafe { magic_fx::install_riku(base) };
     } else {
         log("magic: exeMagic not hooked; no KH1 cast (the Field case stays patched but is not reached: Re:CoM never casts in the field)");
     }
