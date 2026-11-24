@@ -554,7 +554,23 @@ fn run_inner(opt: &Options) -> Result<(), String> {
         let mut done = Vec::new();
         // 0.158.0: KH1 Riku's own guard (the Destiny Islands duel set) for Riku's own pack.
         let guard_files = install::kh1(&game, keys.clone()).ok().and_then(|i| Some((i.read("xa_ex_1010.mset").ok()?, i.read("xa_ex_1010.mdls").ok()?)));
-        let sora_guard = guard_files.as_ref().map(|(m, d)| kh1_recom_assets::riku_skin::GuardSource { mset: m, mdls: d });
+        // 0.184.7: KH1 Riku-Ansem's set for Riku's Stop motion.
+        let ansem_files = install::kh1(&game, keys.clone()).ok().and_then(|i| Some((i.read("xa_ex_1580.mset").ok()?, i.read("xa_ex_1580.mdls").ok()?)));
+        // 0.185.0: DDD Riku (the 2.8 collection next to the game, the same keys).
+        let ddd_files = kh1_recom_assets::ddd::install_next_to(&game).and_then(|d| {
+            let r = |n: &str| kh1_recom_assets::ddd::read(&d, &keys, n);
+            match (r(kh1_recom_assets::ddd::RIKU_PAM), r(kh1_recom_assets::ddd::RIKU_PMO)) {
+                (Ok(a), Ok(b)) => Some((a, b)),
+                (a, b) => {
+                    println!("note: DDD Riku not read ({:?} / {:?}): Riku's casts and Guard keep their Re:CoM / KH1 motions", a.err(), b.err());
+                    None
+                }
+            }
+        });
+        if ddd_files.is_none() {
+            println!("note: KH Dream Drop Distance (the 2.8 collection) not next to the game: Riku's casts and Guard keep their Re:CoM / KH1 motions");
+        }
+        let sora_guard = guard_files.as_ref().map(|(m, d)| kh1_recom_assets::riku_skin::GuardSource { mset: m, mdls: d, ansem: ansem_files.as_ref().map(|(a, b)| (a.as_slice(), b.as_slice())), ddd: ddd_files.as_ref().map(|(a, b)| (a.as_slice(), b.as_slice())) });
         if sora_guard.is_none() {
             println!("note: KH1's xa_ex_1010.mset / .mdls not read: Riku's Guard keeps his clash recoil");
         }
@@ -568,7 +584,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                         have.insert(rel.clone(), bytes.clone());
                     }
                     println!("Riku's Dark Form skin: group {skin} = PL{dark:04}'s model with PL{riku:04}'s {} clips", b.clips);
-                    done.push(Made { riku, skin, dark: true, blade: 0 });
+                    done.push(Made { riku, skin, dark: true, blade: 0, hair: 0 });
                 }
                 Err(e) => println!("note: Riku's Dark Form skin (group {skin}) not built: {e}"),
             }
@@ -588,7 +604,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                                 write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
                             }
                             println!("Riku's Keyblade: group {target} = group {base} with the Keyblade of People's Hearts ({} clips)", b.clips);
-                            done.push(Made { riku, skin: target, dark, blade: 1 });
+                            done.push(Made { riku, skin: target, dark, blade: 1, hair: 0 });
                         }
                         Err(e) => println!("note: Riku's Keyblade (group {target}) not built: {e}"),
                     }
@@ -596,6 +612,30 @@ fn run_inner(opt: &Options) -> Result<(), String> {
             }
             Some(Err(e)) => println!("note: Riku's Keyblade not built: {e}"),
             None => println!("note: KH1's {} not read: Riku's Keyblade not built", rsk::BLADE_MODEL),
+        }
+        // 0.186.0: Riku's default attire with DDD Riku's hair (the 2.8 collection next to the game).
+        match kh1_recom_assets::ddd::install_next_to(&game).map(|d| kh1_recom_assets::ddd_hair::DddHairSource::read(&d, &keys)) {
+            Some(Ok(hair)) => {
+                let heart = install::kh1(&game, keys.clone()).ok().and_then(|i| i.read_full(rsk::BLADE_MODEL).ok()).and_then(|(_, a, _)| rsk::BladeSource::from_assets(&a).ok());
+                for &(target, with_heart) in &rsk::HAIR_GROUPS {
+                    if with_heart && heart.is_none() {
+                        println!("note: Riku's DDD hair with the Keyblade of Heart (group {target}) not built: no Keyblade");
+                        continue;
+                    }
+                    match rsk::build_hair(&arc, &keys, &have, target, if with_heart { heart.as_ref() } else { None }, &hair) {
+                        Ok(b) => {
+                            for (rel, bytes) in &b.files {
+                                write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
+                            }
+                            println!("Riku's DDD hair: group {target} = group 101 with DDD Riku's hair{}", if with_heart { " and the Keyblade of People's Hearts" } else { "" });
+                            done.push(Made { riku: 101, skin: target, dark: false, blade: with_heart as u8, hair: 1 });
+                        }
+                        Err(e) => println!("note: Riku's DDD hair (group {target}) not built: {e}"),
+                    }
+                }
+            }
+            Some(Err(e)) => println!("note: DDD Riku's model not read: Riku's DDD hair not built: {e}"),
+            None => println!("note: KH Dream Drop Distance (the 2.8 collection) not next to the game: Riku's DDD hair not built"),
         }
         if done.is_empty() {
             if manifest.is_file() {

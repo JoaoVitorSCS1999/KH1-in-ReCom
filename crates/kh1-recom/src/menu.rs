@@ -98,6 +98,8 @@ pub enum Item {
     Blade,
     /// `sora_costume` (fork, 0.170.0): Default Attire / Halloween Town.
     SoraCostume,
+    /// `riku_hair` (fork, 0.186.0): Re:CoM / DDD.
+    Hair,
 }
 
 /// When a change takes effect (from what reads the setting; `docs/recom-config-menu.md`).
@@ -122,7 +124,7 @@ impl Page {
             Page::EffectsSound => &[Item::Effects, Item::Sounds],
             Page::Camera => &[Item::Camera, Item::AutoCamera, Item::AutoLock, Item::TargetLock],
             // 0.163.0: the Keyblade is chosen on the Items page's Keyblade slot, as Sora's.
-            Page::Costumes => &[Item::Costume],
+            Page::Costumes => &[Item::Costume, Item::Hair],
             Page::SoraCostumes => &[Item::SoraCostume],
         }
     }
@@ -147,7 +149,7 @@ impl Page {
             Page::Movement => b"Run speed, jump height, air speed and Dodge roll.\0",
             Page::EffectsSound => b"KH1's or Re:CoM's effects and sounds on Sora's KH1 moves.\0",
             Page::Camera => b"Camera, Auto camera, and KH1's Auto Lock and Target Lock.\0",
-            Page::Costumes => b"Change Riku's attire.\0",
+            Page::Costumes => b"Change Riku's attire and hair.\0",
             Page::SoraCostumes => b"Change Sora's attire.\0",
         }
     }
@@ -163,6 +165,7 @@ const COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Dark Mode\0", b"Halloween To
 pub const COSTUME_LOCKED: &[u8] = b"Riku must reach Dark Mode once to wear this attire.\0";
 pub const RIKU_HALLOWEEN_LOCKED: &[u8] = b"Riku must reach Halloween Town once to wear this attire.\0";
 const BLADES: &[&[u8]] = &[b"Soul Eater\0", b"Keyblade of Heart\0"];
+const HAIRS: &[&[u8]] = &[b"Re:CoM\0", b"DDD\0"];
 const SORA_COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Halloween Town\0"];
 pub const SORA_COSTUME_LOCKED: &[u8] = b"Sora must reach Halloween Town once to wear this attire.\0";
 pub const BLADE_LOCKED: &[u8] = b"Riku must reach Dark Mode once to hold this Keyblade.\0";
@@ -204,6 +207,7 @@ impl Item {
             Item::Costume => b"Costume\0",
             Item::Blade => b"Keyblade\0",
             Item::SoraCostume => b"Costume\0",
+            Item::Hair => b"Hair\0",
         }
     }
 
@@ -217,6 +221,7 @@ impl Item {
             Item::Costume => COSTUMES,
             Item::Blade => BLADES,
             Item::SoraCostume => SORA_COSTUMES,
+            Item::Hair => HAIRS,
             _ => RECOM_KH1,
         }
     }
@@ -252,6 +257,7 @@ impl Item {
             Item::Costume => b"Dark Mode: his first Dark Mode. Halloween Town: visiting it.\0",
             Item::Blade => b"Keyblade of Heart: Riku-Ansem's. Unlocked by Riku's first Dark Mode.\0",
             Item::SoraCostume => b"Halloween Town: Sora's costume there. Unlocked by visiting it.\0",
+            Item::Hair => b"DDD: Dream Drop Distance's hair. Default attire only.\0",
         }
     }
 
@@ -259,7 +265,7 @@ impl Item {
     pub fn effect(self) -> Effect {
         match self {
             Item::EnemyPace | Item::EnemyAi => Effect::NextBattle,
-            Item::Costume | Item::Blade | Item::SoraCostume => Effect::NextRoom,
+            Item::Costume | Item::Blade | Item::SoraCostume | Item::Hair => Effect::NextRoom,
             _ => Effect::Now,
         }
     }
@@ -285,6 +291,7 @@ impl Item {
             Item::Costume => "riku_costume",
             Item::Blade => "riku_keyblade",
             Item::SoraCostume => "sora_costume",
+            Item::Hair => "riku_hair",
         }
     }
 
@@ -317,6 +324,7 @@ impl Item {
             Item::Costume => s.riku_costume.min(2) as usize,
             Item::Blade => s.riku_heart_blade as usize,
             Item::SoraCostume => s.sora_halloween as usize,
+            Item::Hair => s.riku_hair.min(1) as usize,
         }
     }
 
@@ -355,6 +363,7 @@ impl Item {
             Item::Costume => s.riku_costume = v.min(2) as u8,
             Item::Blade => s.riku_heart_blade = v == 1,
             Item::SoraCostume => s.sora_halloween = v == 1,
+            Item::Hair => s.riku_hair = v.min(1) as u8,
         }
     }
 }

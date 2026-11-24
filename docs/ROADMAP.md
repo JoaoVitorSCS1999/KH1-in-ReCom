@@ -168,6 +168,12 @@ wherever Re:CoM has the motion; only the KH1 motions it lacks are converted; no 
 Persistent party (Donald and Goofy with AI); KH1 stat growth, AP and abilities as progression;
 Cloud; enemy cards; sleights with no KH1 equivalent; Riku's story at KH1 setting.
 
+- **Riku's spells with his own behaviour** (fork branch; fork owner, 2026-11-23, verbatim: "por enquanto só a
+  aparência mas guarde como oportunidade futura esses achados"). The first version gives Riku Sora's KH1 spells with
+  Sora's rules and numbers, only their look made Riku's (effects, colours, sounds, cast motions from his own games).
+  Later, a spell may also act as his version does (e.g. a Fire that is a Dark Firaga spread), from the research
+  kept in the workspace's `knowledge/` (the searcher's Riku spell notes).
+
 ## Open questions to settle on the way
 
 - How abilities are equipped while progression is Re:CoM's (M9).

@@ -200,10 +200,16 @@ pub struct Settings {
     /// and cosmetic Keyblade unlocked from the start, without its story requirement (Riku's Dark Mode
     /// and Halloween Town costumes, his Keyblade of Heart, Sora's Halloween Town costume).
     pub all_unlock: bool,
+    /// Debug only (fork, 0.184.0; fork owner, 2026-11-23: "implemente inicialmente com custo zero de mana só para
+    /// testar e depois volta o custo de MP"): Riku's KH1 spells cost no MP. On by default until the owner's
+    /// test, then off (KH1's costs).
+    pub riku_free_magic: bool,
     /// Fork (0.160.0): Riku's Keyblade (camp menu > Costumes): false the Soul Eater, true the
     /// Keyblade of People's Hearts ("Keyblade of Heart"); only once Riku has reached Dark Mode in the
     /// save. Cosmetic.
     pub riku_heart_blade: bool,
+    /// `riku_hair` (0.186.0): 0 Re:CoM's, 1 DDD Riku's hair (default attire only).
+    pub riku_hair: u8,
     /// Fork (0.170.0): Sora's costume (camp menu > Costumes): false Default Attire, true Halloween
     /// Town (Re:CoM's Halloween model in every world); only once Sora has reached Halloween Town.
     pub sora_halloween: bool,
@@ -351,7 +357,7 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, auto_lock: true, target_lock_manual: false, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_costume: 0, all_unlock: false, riku_heart_blade: false, sora_halloween: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, auto_lock: true, target_lock_manual: false, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_costume: 0, all_unlock: false, riku_free_magic: false, riku_heart_blade: false, riku_hair: 0, sora_halloween: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
     }
 }
 
@@ -506,6 +512,11 @@ riku_costume = default
 ;   files (kh1-riku-skin.json).
 riku_keyblade = soul_eater
 ;
+; riku_hair = recom | ddd: Riku's hair (camp menu > Costumes), cosmetic: Re:CoM's or Dream Drop
+;   Distance's. Default attire only (Dark Mode and Halloween Town keep Re:CoM's). Needs the asset
+;   step's files (kh1-riku-skin.json) and KH Dream Drop Distance (the 2.8 collection) next to the game.
+riku_hair = recom
+;
 ; sora_costume = default | halloween: Sora's costume (camp menu > Costumes): Re:CoM's Halloween
 ;   Town model in every world. Only once Sora has reached Halloween Town in the save.
 sora_costume = default
@@ -517,6 +528,10 @@ sora_costume = default
 ;   to play. (Replaces the old riku_halloween_unlocked, riku_dark_skin_unlocked,
 ;   riku_keyblade_unlocked and sora_costume_unlocked keys, which are now ignored.)
 all_unlock = off
+;
+; riku_free_magic = on | off: FOR TESTS (fork). On, Riku's and Dark Riku's KH1 spells cost no MP
+;   (the menu doesn't grey them for MP, the release pays nothing). Off: Sora's KH1 costs.
+riku_free_magic = off
 ;
 ; kh1_all_spells = on | off (debug, until spells are earned in the game): Sora has all 7 KH1
 ;   spells at level 3 in the command menu's Magic list.
@@ -693,6 +708,10 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 Some(b) => s.all_unlock = b,
                 None => warnings.push(bad("all_unlock must be on or off")),
             },
+            "riku_free_magic" => match parse_switch(v) {
+                Some(b) => s.riku_free_magic = b,
+                None => warnings.push(bad("riku_free_magic must be on or off")),
+            },
             // 0.178.5: the four debug unlock keys became `all_unlock`; an old line is ignored
             // without a warning.
             "riku_halloween_unlocked" | "riku_dark_skin_unlocked" | "riku_keyblade_unlocked" | "sora_costume_unlocked" => {}
@@ -700,6 +719,11 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
                 "soul_eater" => s.riku_heart_blade = false,
                 "heart" => s.riku_heart_blade = true,
                 _ => warnings.push(bad("riku_keyblade must be soul_eater or heart")),
+            },
+            "riku_hair" => match v.trim().to_ascii_lowercase().as_str() {
+                "recom" => s.riku_hair = 0,
+                "ddd" => s.riku_hair = 1,
+                _ => warnings.push(bad("riku_hair must be recom or ddd")),
             },
             "sora_costume" => match v.trim().to_ascii_lowercase().as_str() {
                 "default" => s.sora_halloween = false,
@@ -856,7 +880,9 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "debug_attack", switch_str(s.debug_attack));
     let t = set_key(&t, "riku_costume", ["default", "dark", "halloween"][s.riku_costume.min(2) as usize]);
     let t = set_key(&t, "all_unlock", switch_str(s.all_unlock));
+    let t = set_key(&t, "riku_free_magic", switch_str(s.riku_free_magic));
     let t = set_key(&t, "riku_keyblade", if s.riku_heart_blade { "heart" } else { "soul_eater" });
+    let t = set_key(&t, "riku_hair", if s.riku_hair == 1 { "ddd" } else { "recom" });
     let t = set_key(&t, "sora_costume", if s.sora_halloween { "halloween" } else { "default" });
     let t = set_key(&t, "kh1_all_spells", switch_str(s.kh1_all_spells));
     let t = set_key(&t, "kh1_all_abilities", switch_str(s.kh1_all_abilities));
@@ -1003,7 +1029,7 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, auto_lock: false, target_lock_manual: true, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: false, riku_costume: 2, all_unlock: true, riku_heart_blade: true, sora_halloween: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, auto_lock: false, target_lock_manual: true, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: false, riku_costume: 2, all_unlock: true, riku_free_magic: false, riku_heart_blade: true, riku_hair: 1, sora_halloween: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);

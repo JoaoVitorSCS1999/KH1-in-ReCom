@@ -2843,6 +2843,10 @@ pub const MAGIC_FX_BRANCHES: &[Site] = &[
     Site { name: "camp open (menu button): battle set unload (0x1401A99F9)", rva: 0x001A_99F9, expect: &[0xE8, 0x62, 0x7B, 0x06, 0x00] },
 ];
 
+/// 0.184.2 (Riku's spells' effects): `CGameSubBattle` state 1's tail `jmp 0x140211960` (the battle set's load; its
+/// context in [`MAGIC_FX_CHECKED`]'s "battle state 1"), retargeted through a jump placed near it.
+pub const RIKU_FX_BRANCH: &[Site] = &[Site { name: "battle state 1: battle set jump (0x1401AEA33)", rva: 0x001A_EA33, expect: &[0xE9, 0x28, 0x2F, 0x06, 0x00] }];
+
 /// What the field's battle set calls (Re:CoM's battle-set loader and unloader), and the code
 /// around the retargeted branches, checked only.
 pub const MAGIC_FX_CHECKED: &[Site] = &[
@@ -4442,6 +4446,7 @@ pub fn all_sites() -> impl Iterator<Item = &'static Site> {
         SHOP_CHECKED,
         MAGIC_FX_BRANCHES,
         MAGIC_FX_CHECKED,
+        RIKU_FX_BRANCH,
         CUSTOMIZE_GLYPHS_CHECKED,
         ABILITY_CALLEES,
         ENEMY_SKILL_HOOKS,

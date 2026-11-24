@@ -261,6 +261,12 @@ pub trait Host {
     fn guard_blocked(&mut self) -> bool {
         false
     }
+    /// 0.183.1: the guard side's KH1 clash record of that block (kind 6 / 7, the guard's priority − the
+    /// attack's: `0x1402B4BC0`), when the attack was a KH1 enemy's; None: kind 6 with no push (Re:CoM's
+    /// attacks have no priority, decision 20).
+    fn guard_clash(&mut self) -> Option<(u8, i32)> {
+        None
+    }
     /// M11, the shared enemy-guard step: Sora's KH1 swing met a KH1 enemy's guard row since the last
     /// frame (Re:CoM's apply guarded it on the enemy's body): KH1's clash kind for Sora (6 / 7) and
     /// his swing's priority − the row's.
@@ -1220,15 +1226,25 @@ impl Kh1Sora {
         out.specials = self.take_special_log();
     }
 
-    /// KH1's kind-6 guard success (`0x14029D720`): request 0x6E at once (the guard motion and its
-    /// object end), the idle queued, flag 0x80 for 8 frames (frozen while the recoil holds the
-    /// lock), CB+0x41 − 1, CB+0x50 |= 0x10. Re:CoM attacks have no priority: no pushback
-    /// (decision 20). Checked (decomp).
+    /// KH1's guard success, the guard object's clash record read on the ground (`0x14029BBD0`). Kind 6
+    /// (`0x14029D720`): request 0x6E at once (the guard motion and its object end), the idle queued, flag
+    /// 0x80 for 8 frames (frozen while the recoil holds the lock), CB+0x41 − 1, CB+0x50 |= 0x10, and a
+    /// push back of `−diff × 2.5` when `diff` < 0. Kind 7 (`0x14029D5F0`, 0.183.1): request 0x6F, the idle
+    /// queued, flag 0x80 for 8 frames, CB+0x41 − 1 (no Counterattack: it is offered only during 0x6E).
+    /// The kind and `diff` come from [`Host::guard_clash`] (a KH1 enemy's attack); Re:CoM's attacks have
+    /// no priority: kind 6, no push (decision 20). Checked (decomp), as [`Self::swing_clash`]'s ground case.
     pub(crate) fn guard_success(&mut self, h: &mut dyn Host, ev: &mut Vec<Event>) {
-        self.play(crate::rows::RECOIL as u32 | req::ACTION, 0.0);
+        let (kind, diff) = h.guard_clash().unwrap_or((6, 0));
+        let r = if kind == 7 { crate::rows::STRONG_RECOIL } else { crate::rows::RECOIL };
+        self.play(r as u32 | req::ACTION, 0.0);
         self.append(req::RELEASE | request::IDLE as u32, 0.0);
         self.lock = true;
         self.combo_counter = self.combo_counter.saturating_sub(1);
+        if kind != 7 && diff < 0 {
+            // `0x1402C7300(actor, dir, p)`: a slide totalling p, speed p × −ln 0.8 (as `swing_clash`).
+            let p = -diff as f32 * CLASH_PUSH;
+            self.push = Some((-Vec3::from_yaw(self.facing), p * 0.223_143_55));
+        }
         self.clashed = true;
         self.untouchable = true;
         self.untouchable_counting = false;
@@ -1316,7 +1332,8 @@ impl Kh1Sora {
     fn untouchable_step(&mut self, h: &mut dyn Host, step: f32) {
         if self.untouchable {
             if !self.untouchable_counting {
-                if !self.lock || self.rec.head() != crate::rows::RECOIL {
+                // 0.183.1: the strong recoil 0x6F (kind 7) holds the lock as 0x6E does (`0x14029D5F0`).
+                if !self.lock || !matches!(self.rec.head(), crate::rows::RECOIL | crate::rows::STRONG_RECOIL) {
                     self.untouchable_counting = true;
                 }
             } else {
@@ -1464,9 +1481,13 @@ impl Kh1Sora {
         }
         if input.square.pressed && self.state == state::GROUND {
             if self.abilities.guard && (!self.abilities.dodge_roll || *w < self.params.run_speed) {
-                // `0x1402A3B00`: face the lock-on target, or keep facing.
-                let d = match input.lock_target {
-                    Some(t) => (t - pos).flat().normalized(),
+                // `0x1402A3B00`: face the lock pair `0x142DB3518` (the target's lock point, flat), or keep
+                // facing. 0.183.0: the pair holds the soft target too (lock states 1–4, so Auto Lock's
+                // orange ring without R1: the workspace's `knowledge/KH1/kh1-lock-on.md`, Checked
+                // (decomp)): `lock_target` is R1's lock, else on a Square press the soft target
+                // (`win::movement::read_pad`).
+                let d = match input.lock_target.map(|t| (t - pos).flat()).filter(|d| !d.is_zero_xz()) {
+                    Some(d) => d.normalized(),
                     None => Vec3::from_yaw(self.facing),
                 };
                 *dir = d;
@@ -1477,6 +1498,9 @@ impl Kh1Sora {
                 h.draw_weapon();
                 self.play(crate::rows::GUARD as u32 | req::ACTION, 0.0);
                 self.append(req::RELEASE | request::IDLE as u32, 0.0);
+                // 0.183.0: `0x1402A3B00` sets the combo counter (`CB + 0x41`) to 1, as `kh1-core`'s
+                // controller does (Checked (decomp)): a combo doesn't go on through a Guard.
+                self.combo_counter = 1;
                 ev.push(Event::Guarded);
                 return;
             }

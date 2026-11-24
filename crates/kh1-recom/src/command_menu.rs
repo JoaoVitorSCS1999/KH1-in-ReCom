@@ -308,6 +308,8 @@ pub struct World {
     pub counter: bool,
     /// Spell levels, 0 = not learned.
     pub spells: [u8; spell::COUNT],
+    /// 0.184.0: the spells cost no MP here (Riku with the `riku_free_magic` test setting).
+    pub free_spells: bool,
     /// KH1's MP (MP, max, charge), None when MP isn't live.
     pub mp: Option<(i32, i32, u16)>,
     /// 0.179.0: Dark Riku's DP (now, Dark Mode's max) while he is out, for his DP sleights.
@@ -766,7 +768,7 @@ impl Menu {
         let mut usable_spell = [false; spell::COUNT];
         if flags & 0x20 != 0 {
             for (i, &(s, lv)) in learned.iter().enumerate() {
-                let pays = w.mp.is_some_and(|(mp, max, c)| crate::mp::Mp::new(mp, max, c).can_pay(spell::COSTS[s as usize]));
+                let pays = w.free_spells || w.mp.is_some_and(|(mp, max, c)| crate::mp::Mp::new(mp, max, c).can_pay(spell::COSTS[s as usize]));
                 let in_range = !spell::RANGED[s as usize] || w.target_dist.is_none_or(|d| d <= spell::range(s, lv));
                 if pays && in_range {
                     usable &= !(1 << i);
@@ -2096,6 +2098,19 @@ mod tests {
         m.root.cursor = 1;
         let o = m.step(&world(), press(|p| p.confirm = true));
         assert!(!m.open && o.sounds == vec![Sound::Error] && !o.attack);
+    }
+
+    /// 0.184.0: Riku's test setting `riku_free_magic`: every spell is usable with no MP; range still greys.
+    #[test]
+    fn free_spells_never_grey_for_mp() {
+        let mut w = World { spells: all_spells(), mp: Some((0, 3, 0)), free_spells: true, ..world() };
+        let mut m = Menu::new();
+        m.build(&w);
+        assert_eq!(m.magic.grey & 0x7F, 0, "no MP, all usable");
+        assert!(m.root.grey & 2 == 0);
+        w.target_dist = Some(1150.0);
+        m.build(&w);
+        assert_eq!(m.magic.grey & 0x7F, 0b0110100, "range still applies");
     }
 
     #[test]

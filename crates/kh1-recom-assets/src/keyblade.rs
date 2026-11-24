@@ -690,7 +690,7 @@ pub fn new_resource_names() -> Vec<String> {
         }
     }
     // Riku's Dark Form skin groups (fork, `riku_skin`).
-    for g in crate::riku_skin::SKIN_GROUPS.iter().map(|x| x.2).chain(crate::riku_skin::BLADE_GROUPS.iter().map(|x| x.2)) {
+    for g in crate::riku_skin::SKIN_GROUPS.iter().map(|x| x.2).chain(crate::riku_skin::BLADE_GROUPS.iter().map(|x| x.2)).chain(crate::riku_skin::HAIR_GROUPS.iter().map(|x| x.0)) {
         for ext in ["MDL", "ANN", "EET", "SES"] {
             out.push(resource_path(g, ext));
         }
@@ -757,8 +757,8 @@ mod tests {
     fn new_names_are_not_in_recom_hed() {
         let names = new_resource_names();
         // 16 KH1 groups (21..=36) with four files, 6 KH2 groups (38..=43) with two, Riku's two
-        // skin groups (121, 131) and four Keyblade groups (141..=171) with six.
-        assert_eq!(names.len(), 16 * 4 + 6 * 2 + 6 * 6);
+        // skin groups (121, 131), four Keyblade groups (141..=171) and (0.186.0) two hair groups (181, 191) with six.
+        assert_eq!(names.len(), 16 * 4 + 6 * 2 + 8 * 6);
         assert!(names.contains(&"PLAYER/0171/PL0171.MDL".to_string()) && names.contains(&"raw/PLAYER/0141/PL0141.RTM".to_string()));
         assert!(names.contains(&"PLAYER/0021/PL0021.MDL".to_string()) && names.contains(&"raw/PLAYER/0036/PL0036.EFF".to_string()));
         assert!(names.contains(&"raw/PLAYER/0043/PL0043.RTM".to_string()) && !names.contains(&"PLAYER/0043/PL0043.EET".to_string()));

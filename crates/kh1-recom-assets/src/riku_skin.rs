@@ -255,6 +255,12 @@ impl Grip {
 }
 
 /// The clip from per-frame locals, keeping the source clip's header fields (no scale channels).
+/// [`encode`] for another module (`crate::ddd`): rows of local (translation, rotation radians, scale) per frame, the
+/// clip's header fields from `template`.
+pub(crate) fn encode_rows(template: &Clip, rows: &[Vec<[f64; 9]>]) -> Clip {
+    encode(template, rows)
+}
+
 fn encode(src: &Clip, rows: &[Vec<[f64; 9]>]) -> Clip {
     const EPS: [f64; 3] = [1e-7, 1e-5, 1e-6];
     let nb = rows[0].len();
@@ -468,6 +474,11 @@ pub struct GuardSource<'a> {
     pub mset: &'a [u8],
     /// `xa_ex_1010.mdls`.
     pub mdls: &'a [u8],
+    /// 0.184.7: KH1 Riku-Ansem's `xa_ex_1580.mset` / `.mdls` (his Stop motion), when read.
+    pub ansem: Option<(&'a [u8], &'a [u8])>,
+    /// 0.185.0: DDD Riku's animation pack and model (`crate::ddd::{RIKU_PAM, RIKU_PMO}`), when the 2.8 collection is
+    /// installed next to the game: his cast motions and his Guard.
+    pub ddd: Option<(&'a [u8], &'a [u8])>,
 }
 
 /// Sora's KH1 Guard on Riku (0.157.0; replaced by [`riku_kh1_guard`] in 0.158.0, kept for tests).
@@ -489,6 +500,859 @@ pub fn riku_guard(sora_guard: &Clip, sora: &RecomSkeleton, riku: &RecomSkeleton,
     let mut c = retarget_with(sora_guard, sora, riku, &map, stance)?;
     c.name = crate::ann::name16(RIKU_GUARD);
     Ok(c)
+}
+
+/// 0.183.2: Dark Riku's (the real Dark Mode's) guard and guard recoil: [`RIKU_GUARD`] / [`RIKU_RECOIL`]
+/// retargeted from Riku's skeleton onto his (as the Dark Form skin does, [`retarget`]), named for his own
+/// pack's prefix.
+pub const DARK_GUARD: &str = "p003_225";
+/// Dark Riku's guard recoil (see [`DARK_GUARD`]).
+pub const DARK_RECOIL: &str = "p003_226";
+
+/// Dark Riku's own pack (`dark_ann`, `PLAYER/02x1/PL02x1.ANN`) with KH1 Riku's guard and its recoil on his
+/// skeleton ([`DARK_GUARD`], [`DARK_RECOIL`]). The DLL names two of his action table's clipless rows
+/// (`0x1407C67F0`, 0x39 / 0x3A: `p003_000`, Checked (exe)) after them.
+pub fn dark_guard_pack(dark_ann: Ann, guard: &Clip, recoil: &Clip, riku: &RecomSkeleton, dark: &RecomSkeleton) -> Result<Ann> {
+    let map = bone_map(riku, dark);
+    let mut g = retarget(guard, riku, dark, &map)?;
+    g.name = crate::ann::name16(DARK_GUARD);
+    let mut r = retarget(recoil, riku, dark, &map)?;
+    r.name = crate::ann::name16(DARK_RECOIL);
+    Ok(with_clip(with_clip(dark_ann, g), r))
+}
+
+/// 0.184.1: Riku's cast motions for Sora's KH1 spells. 0.184.4 (fork owner, 2026-11-23: "as animações precisam variar";
+/// the table they approved, "aprovo, implemente"): one motion per spell, Riku's own sleight clips where he has one
+/// (his skeleton, no retarget), Dark Riku's otherwise (retargeted onto Riku); Dark Riku plays his own versions. Each is
+/// retimed so its key moment (the thrust, the raise, the spin) falls on the frame KH1's spell releases, and lasts KH1's
+/// motion (Sora's `xa_ex_0010.mset`, Checked (files)); the clips' travel is taken out (Root and the hips keep their rest
+/// x / z). The key moments were read from each clip's hands and hips (the owner's files, Checked (files)); that they
+/// read as a cast in game: Assumption.
+pub const DARK_FIRAGA: &str = "p003_043";
+/// The Dark Firaga clip's charge end and thrust end (its events are placed by them).
+const DF_CHARGE_END: f64 = 32.0;
+const DF_THRUST_END: f64 = 36.0;
+
+/// The skeleton a source clip is on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Skel {
+    /// Riku's (`PL0101.MDL`, `ex_1010_sk`).
+    Riku,
+    /// Dark Riku's (`PL0201.MDL`, `ex_1580_sk`; KH1's Riku-Ansem's too).
+    Dark,
+    /// Sora's (`PL0001.MDL`, `ex_0010_sk`).
+    Sora,
+    /// 0.185.0: DDD Riku's (`p_ex020.pmo`, 44 bones; `crate::ddd`).
+    Ddd,
+}
+
+/// Where a source motion comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Src {
+    /// A clip of a Re:CoM PLAYER group's pack (group, clip name) on a skeleton.
+    Pack(u16, &'static str, Skel),
+    /// 0.184.7: a request of KH1 Riku-Ansem's motion set (`xa_ex_1580.mset`), converted onto Dark Riku's skeleton.
+    Kh1Ansem(u16),
+    /// 0.185.0: a clip of DDD Riku's main pack (`p_ex02_000.pam`) by name, on his DDD skeleton.
+    Ddd(&'static str),
+}
+
+/// One source motion: Riku's and Dark Riku's, their rate, and in the source's own frames the key moment's start and
+/// end and the last frame used; the motion used when a KH1 one can't be read.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CastSource {
+    /// Riku's motion.
+    pub riku: Src,
+    /// Dark Riku's motion.
+    pub dark: Src,
+    /// The source's frames per second (Re:CoM's sleight clips 30, KH1's motions 60).
+    pub fps: f64,
+    /// 0.184.9: the first source frame used (a leap or a turn before it is left out).
+    pub start: f64,
+    /// The key moment's first frame (the charge ends there).
+    pub charge_end: f64,
+    /// The key moment's last frame.
+    pub key_end: f64,
+    /// The clip's last frame used.
+    pub last: f64,
+    /// The source used instead when this one's files aren't there ([`CAST_SOURCES`] index).
+    pub fallback: Option<usize>,
+}
+
+/// The motions (Checked (files): the clips' frames, hands and hips on the owner's install):
+/// 0 Dark Firaga (`PL1088` `p003_043`, 52 f: crouched charge, the left hand's thrust 32..36);
+/// 1 Impulse (Riku `PL1301` `p002_061`, 34 f: a leap back to 8, then a crouched charge, the left hand's thrust 21..24;
+///   Dark Impulse `PL1311` `p003_071`); 0.184.9: from frame 9, after the leap's landing (the owner: Blizzaga "estranho");
+/// 2 Dark Aura's start (`PL1089` `p003_044`, 48 f: he rises with both arms spread, 24..32);
+/// 3 0.184.9 (fork owner: "a animação do Sora de Curaga pro RIku ficou muito estranho tenta pensar fora da caixa"):
+///   Riku's own item use (`PL0101` `p002_034`, his heal in Re:CoM, 56 f at 30, on the ground: a crouch 8..16, the left
+///   hand raised over his head 18..22, held to 32, lowered), Dark Riku's from it retargeted;
+/// 4 Barrage's high strike (Riku `PL1303` `p002_072`, 15 f: the right hand up, then down, 3..7; Dark Barrage `PL1313`
+///   `p003_082`);
+/// 5 0.184.7: KH1 Riku-Ansem's request 225 (`xa_ex_1580.mset`, 49 frames at 60 fps, on the ground: the left hand
+///   reaches out at the shoulder 8..12 and holds there); without KH1's files, [7];
+/// 6 0.184.9 (fork owner: "Aeroga tbm ta flicando um pouco"; Maelstrom's spin was in the air): KH1 Riku-Ansem's
+///   request 223 (73 frames at 60, on the ground: both hands sweep, the left from behind to the front 40..48, the right
+///   the other way); without KH1's files, [8];
+/// 7 Barrage's crossing (Riku `p002_070`, 12 f: the arms cross, 3..6; Dark `p003_080`): Stop's fallback;
+/// 8 Maelstrom's spin (Riku `PL1302` `p002_065`, 37 f: the spin, 10..16; Dark Maelstrom `PL1312` `p003_075`): Aero's
+///   fallback.
+pub const CAST_SOURCES: [CastSource; 19] = [
+    CastSource { riku: Src::Pack(1088, DARK_FIRAGA, Skel::Dark), dark: Src::Pack(1088, DARK_FIRAGA, Skel::Dark), fps: 30.0, start: 0.0, charge_end: DF_CHARGE_END, key_end: DF_THRUST_END, last: 51.0, fallback: None },
+    CastSource { riku: Src::Pack(1301, "p002_061", Skel::Riku), dark: Src::Pack(1311, "p003_071", Skel::Dark), fps: 30.0, start: 9.0, charge_end: 21.0, key_end: 24.0, last: 33.0, fallback: None },
+    CastSource { riku: Src::Pack(1089, "p003_044", Skel::Dark), dark: Src::Pack(1089, "p003_044", Skel::Dark), fps: 30.0, start: 0.0, charge_end: 24.0, key_end: 32.0, last: 47.0, fallback: None },
+    CastSource { riku: Src::Pack(101, ITEM_USE, Skel::Riku), dark: Src::Pack(101, ITEM_USE, Skel::Riku), fps: 30.0, start: 0.0, charge_end: 18.0, key_end: 22.0, last: 55.0, fallback: None },
+    CastSource { riku: Src::Pack(1303, "p002_072", Skel::Riku), dark: Src::Pack(1313, "p003_082", Skel::Dark), fps: 30.0, start: 0.0, charge_end: 3.0, key_end: 7.0, last: 12.0, fallback: None },
+    CastSource { riku: Src::Kh1Ansem(225), dark: Src::Kh1Ansem(225), fps: 60.0, start: 0.0, charge_end: 8.0, key_end: 12.0, last: 48.0, fallback: Some(7) },
+    CastSource { riku: Src::Kh1Ansem(223), dark: Src::Kh1Ansem(223), fps: 60.0, start: 0.0, charge_end: 40.0, key_end: 48.0, last: 72.0, fallback: Some(8) },
+    CastSource { riku: Src::Pack(1303, "p002_070", Skel::Riku), dark: Src::Pack(1313, "p003_080", Skel::Dark), fps: 30.0, start: 0.0, charge_end: 3.0, key_end: 6.0, last: 11.0, fallback: None },
+    CastSource { riku: Src::Pack(1302, "p002_065", Skel::Riku), dark: Src::Pack(1312, "p003_075", Skel::Dark), fps: 30.0, start: 0.0, charge_end: 10.0, key_end: 16.0, last: 36.0, fallback: None },
+    // 0.185.0: DDD Riku's own casts (the DDD note § 5, Checked (files): the clips' effect lists and their poses): 315
+    // ground / 316 air, the forward thrust (Fire, Blizzard, Poison; both hands and the weapon 1 m ahead on 9..12 /
+    // 8..12), 317 ground / 318 air, the weapon hand raised over the head (Cure, Stop, Zero Gravity…; 12..20). Each with
+    // the 0.184.x motion of its spell as the fallback without DDD.
+    DDD_THRUST_G[0], DDD_THRUST_G[1], DDD_RAISE_G[0], DDD_RAISE_G[1], DDD_RAISE_G[2],
+    DDD_THRUST_A[0], DDD_THRUST_A[1], DDD_RAISE_A[0], DDD_RAISE_A[1], DDD_RAISE_A[2],
+];
+
+const fn ddd(name: &'static str, charge_end: f64, key_end: f64, last: f64, fallback: usize) -> CastSource {
+    CastSource { riku: Src::Ddd(name), dark: Src::Ddd(name), fps: 30.0, start: 0.0, charge_end, key_end, last, fallback: Some(fallback) }
+}
+/// DDD's thrust on the ground (Fire's, Blizzard's fallbacks) and in the air; the raise (Thunder / Aero's, Cure's,
+/// Gravity / Stop's fallbacks).
+const DDD_THRUST_G: [CastSource; 2] = [ddd("315", 9.0, 12.0, 35.0, 0), ddd("315", 9.0, 12.0, 35.0, 1)];
+const DDD_RAISE_G: [CastSource; 3] = [ddd("317", 9.0, 12.0, 34.0, 2), ddd("317", 9.0, 12.0, 34.0, 3), ddd("317", 9.0, 12.0, 34.0, 5)];
+/// 0.185.2 (fork owner, 2026-11-23: "tem que usar as animações executadas no chão mesmo", "para a defesa e as magias"):
+/// the air rows played DDD's ground clips too. 0.185.6 (fork owner, 2026-11-23, asked whether the air casts can come
+/// back without replacing the ground ones: "1 sobre a guarda no ar não precisa implementar"): the air rows play DDD's
+/// air clips again (`316` the thrust, key 8..12; `318` the raise; the workspace's DDD note § 5), with the blade in
+/// Riku's grip (0.185.4) and the body from its rest height ([`from_start`]); the ground rows are unchanged.
+const DDD_THRUST_A: [CastSource; 2] = [ddd("316", 8.0, 12.0, 34.0, 0), ddd("316", 8.0, 12.0, 34.0, 1)];
+const DDD_RAISE_A: [CastSource; 3] = [ddd("318", 9.0, 12.0, 34.0, 2), ddd("318", 9.0, 12.0, 34.0, 3), ddd("318", 9.0, 12.0, 34.0, 5)];
+
+/// One cast clip: its name suffix (`p002_` / `p003_` + it), its source motion, KH1's release frame, length and free
+/// frame (the recovery ends there; held after).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CastClip {
+    /// The clip name's number (`p002_` / `p003_` + it).
+    pub suffix: &'static str,
+    /// Its motion ([`CAST_SOURCES`]).
+    pub src: usize,
+    /// KH1's release frame (the key moment starts on it).
+    pub release: f64,
+    /// KH1's motion length in frames.
+    pub len: usize,
+    /// KH1's free frame (the recovery ends there).
+    pub free: usize,
+}
+
+/// Cure's clip suffixes, ground and air (their effects are the DLL's heal sparkle, [`cast_events`]).
+pub const CURE_CLIPS: [&str; 2] = ["231", "237"];
+
+/// The twelve clips (0.185.0), in the order of the action rows the DLL names (`crate::riku::CAST_ROWS` 0x3B..0x46): on
+/// the ground Fire's wind-up (`0x36`, 28 frames: the charge only) and release (`0x3D`, 60, free 46, the ball at its frame
+/// 0), Blizzard (`0x37`, 86, free 68, release 28), Thunder / Aero (`0x38` / `0x3C`, 68, release 30), Cure (`0x39`, 68,
+/// release 36), Gravity / Stop (`0x3A` / `0x3B`, 86 / 68, release 28); in the air the same six (`0x83`, `0x8A` 52 frames,
+/// `0x84` 78, `0x85` / `0x89`, `0x86`, `0x87` / `0x88` 78; Sora's air motions, Checked (files)) on DDD's air casts.
+pub const CAST_CLIPS: [CastClip; 12] = [
+    CastClip { suffix: "227", src: 9, release: 28.0, len: 28, free: 28 },
+    CastClip { suffix: "228", src: 9, release: 0.0, len: 60, free: 46 },
+    CastClip { suffix: "229", src: 10, release: 28.0, len: 86, free: 68 },
+    CastClip { suffix: "230", src: 11, release: 30.0, len: 68, free: 68 },
+    CastClip { suffix: "231", src: 12, release: 36.0, len: 68, free: 68 },
+    CastClip { suffix: "232", src: 13, release: 28.0, len: 86, free: 68 },
+    CastClip { suffix: "233", src: 14, release: 28.0, len: 28, free: 28 },
+    CastClip { suffix: "234", src: 14, release: 0.0, len: 52, free: 46 },
+    CastClip { suffix: "235", src: 15, release: 28.0, len: 78, free: 68 },
+    CastClip { suffix: "236", src: 16, release: 30.0, len: 68, free: 68 },
+    CastClip { suffix: "237", src: 17, release: 36.0, len: 68, free: 68 },
+    CastClip { suffix: "238", src: 18, release: 28.0, len: 78, free: 68 },
+];
+
+/// The Dark Firaga clip's frames per KH1 frame (30 fps, Checked (files)), for its events; every source plays at its own
+/// speed (0.184.6), [`CastSource::fps`].
+const SRC_STEP: f64 = 0.5;
+
+impl CastClip {
+    /// This clip's source motion.
+    pub fn source(&self) -> &'static CastSource {
+        &CAST_SOURCES[self.src]
+    }
+
+    /// The source clip's time for each of this clip's frames. 0.184.6 (fork owner, 2026-11-23: "as animação ficaram
+    /// estranhas meio que flicando"; 0.184.4 squeezed the key moment into 4 frames and stretched the charge: bones turned
+    /// up to 350° a frame): the charge and the key moment at the clip's own speed, the key moment starting on KH1's
+    /// release frame (the charge's start held before it when it is shorter, cut when it is longer); the recovery spread
+    /// up to KH1's free frame; the last frame held after.
+    pub fn times(&self) -> Vec<f64> {
+        self.times_for(self.source())
+    }
+
+    /// [`Self::times`] on source `s` (the fallback's when the source couldn't be read).
+    pub fn times_for(&self, s: &CastSource) -> Vec<f64> {
+        let step = s.fps / 60.0;
+        let key_out = (s.key_end - s.charge_end) / step;
+        (0..self.len)
+            .map(|k| {
+                let k = k as f64;
+                if k < self.release {
+                    (s.charge_end - (self.release - k) * step).max(s.start)
+                } else if k < self.release + key_out {
+                    s.charge_end + (k - self.release) * step
+                } else {
+                    // Never faster than the clip's own speed: a recovery that doesn't fit stops where KH1's motion ends.
+                    let span = (self.free as f64 - (self.release + key_out)).max((s.last - s.key_end) / step);
+                    (s.key_end + (s.last - s.key_end) * (k - self.release - key_out) / span).min(s.last)
+                }
+            })
+            .collect()
+    }
+}
+
+/// `clip` sampled at `times` (its own skeleton `skel`), Root's and bone 1's x / z kept at their rest (no travel).
+pub fn retime_in_place(clip: &Clip, skel: &RecomSkeleton, times: &[f64], name: &str) -> Clip {
+    retime(clip, skel, times, name, false)
+}
+
+/// [`retime_in_place`], or with bone 1's x / z kept as the clip has them (`keep_sway`: a clip whose travel is already
+/// out, [`plant_feet`], and whose body sways over its planted feet; Root stays put either way).
+pub fn retime(clip: &Clip, skel: &RecomSkeleton, times: &[f64], name: &str, keep_sway: bool) -> Clip {
+    let nb = clip.bones as usize;
+    let end = (clip.frames.max(1) - 1) as f64;
+    let rows: Vec<Vec<[f64; 9]>> = times
+        .iter()
+        .map(|&t| {
+            (0..nb)
+                .map(|b| {
+                    let s = clip.sample(b, t.min(end));
+                    let mut tt = s.t;
+                    if b == 0 || (b == 1 && !keep_sway) {
+                        let rest = skel.bones.get(b).map_or([0.0; 3], |x| x.local.t);
+                        tt[0] = if b == 0 { 0.0 } else { rest[0] };
+                        tt[2] = if b == 0 { 0.0 } else { rest[2] };
+                    }
+                    [tt[0], tt[1], tt[2], s.r[0], s.r[1], s.r[2], s.s[0], s.s[1], s.s[2]]
+                })
+                .collect()
+        })
+        .collect();
+    let mut c = encode(clip, &rows);
+    c.name = crate::ann::name16(name);
+    // One frame per 60 Hz frame (`flags` bits 2..4 = 0: 60 fps): `times` are KH1's frames; the source clip's own rate
+    // (the sleight clips are 30 fps, Checked (files)) is only in its sample times.
+    c.flags &= !0x1C;
+    c
+}
+
+/// A source clip's event frame (60 Hz, as `.EET` / `.SES` count them) in the clip's own frames.
+fn event_time(clip: &Clip, frame: i32) -> f64 {
+    frame as f64 * clip.fps() as f64 / 60.0
+}
+
+/// A Dark Firaga event (at its clip time `t`) on cast clip `c`, by phase: before the thrust, at the same share of the
+/// charge (none on a clip with no charge); from the thrust on, the same number of frames after the release as after
+/// the thrust's start, at the clip's speed. None past the clip's end.
+fn out_frame(c: &CastClip, t: f64) -> Option<i32> {
+    let at = if t < DF_CHARGE_END {
+        if c.release <= 0.0 {
+            return None;
+        }
+        // At the Dark Firaga clip's speed before the release; one before the clip's start goes on its first frame.
+        (c.release - (DF_CHARGE_END - t) / SRC_STEP).ceil().max(0.0)
+    } else {
+        c.release + ((t - DF_CHARGE_END) / SRC_STEP).round()
+    };
+    ((at as usize) < c.len).then_some(at as i32)
+}
+/// The bones the cast effects sit on, in the skeleton their clip plays on.
+#[derive(Clone, Copy, Debug)]
+pub struct FxBones {
+    /// `Root`.
+    pub root: i32,
+    /// `l_hand`.
+    pub l_hand: i32,
+    /// `chest1`.
+    pub chest1: i32,
+    /// `wep0`.
+    pub wep0: i32,
+}
+
+impl FxBones {
+    /// From a Riku or Dark Riku skeleton.
+    pub fn of(sk: &RecomSkeleton) -> FxBones {
+        let f = |n: &str| sk.find(n).map_or(0, |i| i as i32);
+        FxBones { root: 0, l_hand: f("l_hand"), chest1: f("chest1"), wep0: f("wep0") }
+    }
+}
+
+/// One cast effect: `dpx` program `id` on `bone`, from `from` to `to` frames after the release (`to` None: a one-shot),
+/// at `scale`, turned `rot_y` degrees, offset `off` (metres).
+struct Fx {
+    dpx: &'static str,
+    id: i32,
+    bone: fn(&FxBones) -> i32,
+    from: i32,
+    to: Option<i32>,
+    scale: f32,
+    rot: [f32; 3],
+    off: [f32; 3],
+}
+
+const fn fx(dpx: &'static str, id: i32, bone: fn(&FxBones) -> i32, from: i32, to: Option<i32>, scale: f32) -> Fx {
+    Fx { dpx, id, bone, from, to, scale, rot: [0.0; 3], off: [0.0; 3] }
+}
+fn b_root(b: &FxBones) -> i32 { b.root }
+fn b_hand(b: &FxBones) -> i32 { b.l_hand }
+fn b_chest(b: &FxBones) -> i32 { b.chest1 }
+fn b_blade(b: &FxBones) -> i32 { b.wep0 }
+
+/// 0.185.8 (fork owner, 2026-11-23, on the cast effects: "o audio que toca sobre os efeitos é A", Riku's own effects, one
+/// look per spell): the effects of Blizzard (`spell` 2), Thunder / Aero (3: variants 1..3 Thunder, 4..6 Aero) and Gravity /
+/// Stop (5: 1..3 Gravity, 4..6 Stop) at each level, the programs of Riku's own `EF1500` that suit them (the workspace's
+/// `recom-m13-recom-fx.md` § 8.4: ids, bones, sounds, loops Checked (files); how each looks and the fit: Assumption, not seen
+/// in game; the bones and offsets of `ex_1580` 3 / 7 are Re:CoM's own events'). Fire keeps Dark Firaga's, Cure the heal
+/// sparkle. `t`: an event to copy the unlisted fields from.
+fn spell_events(spell: usize, c: &CastClip, t: &[u8; crate::eet::EVENT], bones: &FxBones) -> Vec<[u8; crate::eet::EVENT]> {
+    let mut y180 = fx("ex_1580.dpx", 7, b_root, 0, None, 0.5);
+    y180.rot = [0.0, 180.0, 0.0];
+    y180.off = [0.1, 0.4, 0.1];
+    let g7 = |scale: f32| Fx { scale, ..y180 };
+    let mut g3 = fx("ex_1580.dpx", 3, b_root, 0, None, 1.0);
+    g3.rot = [0.0, 180.0, 0.0];
+    g3.off = [0.0, 0.0, 0.1];
+    let mut th3 = fx("ex_1580.dpx", 42, b_chest, -6, Some(40), 1.0);
+    th3.rot = [90.0, 0.0, 0.0];
+    let mut out = Vec::new();
+    for variant in 1..=6i32 {
+        let level = (variant - 1) % 3 + 1;
+        let second = variant > 3;
+        let list: Vec<Fx> = match (spell, second, level) {
+            (2, false, 1) => vec![fx("ex_1580.dpx", 38, b_root, 0, None, 1.0)],
+            (2, false, 2) => vec![fx("ex_1580.dpx", 38, b_root, 0, None, 1.0), fx("ex_1580.dpx", 39, b_chest, 0, None, 1.0)],
+            (2, false, _) => vec![fx("ex_1580.dpx", 38, b_root, 0, None, 1.5), fx("ex_1580.dpx", 39, b_chest, 0, None, 1.0), fx("ex_1580.dpx", 10, b_hand, 0, None, 0.7)],
+            (3, false, 1) => vec![fx("ex_1580.dpx", 19, b_chest, -10, None, 1.0)],
+            (3, false, 2) => vec![fx("ex_1580.dpx", 19, b_chest, -10, None, 1.0), fx("ex_1580.dpx", 11, b_hand, 0, None, 0.8)],
+            (3, false, _) => vec![fx("ex_1580.dpx", 19, b_chest, -10, None, 1.0), fx("ex_1580.dpx", 11, b_hand, 0, None, 0.8), Fx { ..th3 }],
+            (3, true, 1) => vec![fx("speed_break.dpx", 0, b_root, -6, None, 1.0)],
+            (3, true, 2) => vec![fx("speed_break.dpx", 0, b_root, -6, None, 1.0), fx("speed_break.dpx", 5, b_root, -6, None, 1.0)],
+            (3, true, _) => vec![fx("speed_break.dpx", 0, b_root, -6, None, 1.0), fx("speed_break.dpx", 5, b_root, -6, None, 1.0), fx("ex_1580.dpx", 8, b_blade, -24, Some(30), 0.5), fx("ex_1580.dpx", 11, b_root, 0, None, 0.8)],
+            (5, false, 1) => vec![fx("ex_1580.dpx", 36, b_root, -30, None, 1.0), g7(0.5)],
+            (5, false, 2) => vec![fx("ex_1580.dpx", 36, b_root, -30, None, 1.0), g7(0.7)],
+            (5, false, _) => vec![fx("ex_1580.dpx", 36, b_root, -30, None, 1.0), g7(0.9), Fx { ..g3 }],
+            (5, true, 1) => vec![fx("ex_1580.dpx", 39, b_root, 0, None, 1.0)],
+            (5, true, 2) => vec![fx("ex_1580.dpx", 39, b_root, 0, None, 1.0), fx("ex_1580.dpx", 18, b_root, 0, None, 0.6)],
+            (5, true, _) => vec![fx("ex_1580.dpx", 38, b_root, 0, None, 1.5), fx("ex_1580.dpx", 39, b_root, 0, None, 1.0), fx("ex_1580.dpx", 18, b_root, 0, None, 0.6)],
+            _ => Vec::new(),
+        };
+        for f in list {
+            let start = c.release as i32 + f.from;
+            if start < 0 || start >= c.len as i32 {
+                continue;
+            }
+            let mut e = *t;
+            e[..0x20].fill(0);
+            e[..f.dpx.len()].copy_from_slice(f.dpx.as_bytes());
+            let put = |e: &mut [u8; crate::eet::EVENT], o: usize, v: [u8; 4]| e[o..o + 4].copy_from_slice(&v);
+            put(&mut e, 0x20, f.id.to_le_bytes());
+            put(&mut e, 0x24, (f.bone)(bones).to_le_bytes());
+            for k in 0..3 {
+                put(&mut e, 0x28 + 4 * k, f.off[k].to_le_bytes());
+                put(&mut e, 0x3C + 4 * k, f.rot[k].to_le_bytes());
+                put(&mut e, 0x48 + 4 * k, f.scale.to_le_bytes());
+            }
+            put(&mut e, 0x34, start.to_le_bytes());
+            let end = f.to.map_or(-1, |to| (c.release as i32 + to).min(c.len as i32 - 1));
+            put(&mut e, 0x38, end.to_le_bytes());
+            // A one-shot is flag 8 (set on almost every event); a looping program is cut at its end frame (0x10) with a fade.
+            put(&mut e, 0x54, (if f.to.is_some() { 0x18u32 } else { 0x8 }).to_le_bytes());
+            put(&mut e, 0x58, (if f.to.is_some() { 10.0f32 } else { 0.0 }).to_le_bytes());
+            put(&mut e, 0x5C, variant.to_le_bytes());
+            out.push(e);
+        }
+    }
+    let _ = spell;
+    out
+}
+
+/// 0.185.7 (fork owner, 2026-11-23, on 0.185.5's random pick from four lines: "os audios ficaram muito aleatórios precisa
+/// fazer mais sentido com a magia"): one fixed voice per spell, by the sleight that casts the same kind of thing, in
+/// [`CAST_CLIPS`]' order of spells (Fire's wind-up and release, Blizzard, Thunder / Aero, Cure, Gravity / Stop; the air
+/// six the same). Group 3 numbers (Riku's and Dark Riku's shared bank), Checked (files: the workspace's
+/// `recom-m13-recom-fx.md` § 8.3, which sleight plays which): Fire 3035 (Dark Firaga's own shout), Blizzard 3036 (Dark
+/// Aura's second line), Thunder / Aero 3033 (a Dark sleight's), Cure 3021 (Holy Burst's, the light one), Gravity / Stop
+/// 3034 (a Dark sleight's). What each line says: Assumption (no audio was played here).
+pub const CAST_VOICES: [u32; 6] = [35, 35, 36, 33, 21, 34];
+
+/// 0.184.2: the Dark Firaga clip's events on the cast clips (`PLAYER/1088/PL1088.EET` / `.SES`, `p003_043`; Checked
+/// (files)): `dark_faiga` 0 on the left hand from 20 (the charge's dark glow), `dark_faiga` 1 on Root at 72 (the thrust's
+/// flash), the voice 3035 at 11 and the thrust's sound 605/2 at 72; 605/1 at 16 is the leap's landing (the leap is out:
+/// dropped). Each by its phase on every clip (60 Hz → the Dark Firaga clip's frames → [`out_frame`]), on bones by name
+/// (`bone_of`: the source skeleton's index → the target's); variant 0 (Re:CoM's own, as Riku's rows play).
+///
+/// 0.184.5 (fork owner, 2026-11-23: "os spells precisam ter diferença dependendo do level dele e os efeitos também"):
+/// each clip's effects come in three EET variants, one per spell level (`+0x5C`; Re:CoM's motion start keeps the events
+/// of the variant its request passes, `0x14017A240`, Checked (decomp); the DLL passes the cast's level): 1 the glow and
+/// the flash; 2 also the darkness cloak (`cloak`: the `ex_1580` body programs Riku's / Dark Riku's own Impulse puts on
+/// him, Checked (files)); 3 also the flash at 1.5 × its size (0.184.8: the blade's aura `weapon_ora` 0, `blade`, no longer:
+/// it read as a shaking blade).
+/// Every one of these programs is in Riku's own `EF1500.EFF`, loaded with him (Checked (files)).
+pub fn cast_events(df: &Clip, eet: &[crate::eet::Record], ses: &[crate::ses::Entry], prefix: &str, bone_of: &dyn Fn(i32) -> Option<i32>, cloak: &[[u8; crate::eet::EVENT]], blade: Option<[u8; crate::eet::EVENT]>, bones: &FxBones) -> Result<(Vec<crate::eet::Record>, Vec<crate::ses::Entry>)> {
+    let i32_at = |e: &[u8], o: usize| i32::from_le_bytes(e[o..o + 4].try_into().unwrap());
+    let src_e = eet.iter().find(|r| r.name == DARK_FIRAGA).ok_or_else(|| crate::Error::Format(format!("PL1088.EET: no {DARK_FIRAGA}")))?;
+    let src_s = ses.iter().find(|e| e.name() == DARK_FIRAGA).ok_or_else(|| crate::Error::Format(format!("PL1088.SES: no {DARK_FIRAGA}")))?;
+    let mut records = Vec::new();
+    let mut entries = Vec::new();
+    for (ci, c) in CAST_CLIPS.iter().enumerate() {
+        let name = format!("{prefix}{}", c.suffix);
+        // 0.184.8 (fork owner: Curaga's effect "muito estranho"): Cure keeps only the voice: no dark glow, flash, cloak
+        // or blade aura on a heal (the DLL plays Riku's own heal sparkle at the release).
+        let cure = CURE_CLIPS.contains(&c.suffix);
+        let mut base = Vec::new();
+        for e in src_e.a.iter().filter(|_| !cure) {
+            let Some(at) = out_frame(c, event_time(df, i32_at(e, 0x34))) else { continue };
+            let Some(bone) = bone_of(i32_at(e, 0x24)) else { continue };
+            let mut e = *e;
+            e[0x24..0x28].copy_from_slice(&bone.to_le_bytes());
+            e[0x34..0x38].copy_from_slice(&at.to_le_bytes());
+            base.push(e);
+        }
+        let mut a = Vec::new();
+        for level in 1..=3i32 {
+            let tag = |mut e: [u8; crate::eet::EVENT]| {
+                e[0x5C..0x60].copy_from_slice(&level.to_le_bytes());
+                e
+            };
+            for e in &base {
+                let mut e = *e;
+                // The thrust's flash (`dark_faiga` 1) at 1.5 × on level 3.
+                if level == 3 && i32_at(&e, 0x20) == 1 {
+                    for j in 0..3 {
+                        let at = 0x48 + 4 * j;
+                        let v = f32::from_le_bytes(e[at..at + 4].try_into().unwrap()) * 1.5;
+                        e[at..at + 4].copy_from_slice(&v.to_le_bytes());
+                    }
+                }
+                a.push(tag(e));
+            }
+            if level >= 2 && !cure {
+                a.extend(cloak.iter().map(|e| tag(*e)));
+            }
+            // 0.184.8 (fork owner, 2026-11-23: "stopga a espada do RIku ta vibrando toda", "blizzaga tbm ficou um treme treme
+            // da espada"): the blade's aura (`weapon_ora` 0) read as a shaking blade: not played (`blade` kept for later).
+            let _ = &blade;
+        }
+        // 0.185.8: Blizzard, Thunder / Aero and Gravity / Stop each get their own effects from Riku's own `EF1500`.
+        if matches!(ci % 6, 2 | 3 | 5) {
+            if let Some(t) = src_e.a.first() {
+                a = spell_events(ci % 6, c, t, bones);
+            }
+        }
+        let mut evs = Vec::new();
+        for e in &src_s.events {
+            if (i32_at(e, 0), i32_at(e, 4)) == (605, 1) || (cure && i32_at(e, 0) != 3) {
+                continue;
+            }
+            let Some(at) = out_frame(c, event_time(df, i32_at(e, 0x18))) else { continue };
+            let mut e = *e;
+            e[0x18..0x1C].copy_from_slice(&at.to_le_bytes());
+            // 0.185.7: the cast's voice is the spell's own ([`CAST_VOICES`]), not Dark Firaga's 3035 on all of them.
+            if i32_at(&e, 0) == 3 {
+                e[4..8].copy_from_slice(&CAST_VOICES[ci % 6].to_le_bytes());
+                // No random table: the number above plays as it is.
+                let f = u32::from_le_bytes(e[0x28..0x2C].try_into().unwrap()) & !4;
+                e[0x28..0x2C].copy_from_slice(&f.to_le_bytes());
+            }
+            evs.push(e);
+        }
+        if !a.is_empty() {
+            records.push(crate::eet::Record { name: name.clone(), a, b: Vec::new(), raw_name: None });
+        }
+        if !evs.is_empty() {
+            let mut head = src_s.head;
+            head[..0x20].fill(0);
+            head[..name.len()].copy_from_slice(name.as_bytes());
+            entries.push(crate::ses::Entry { head, events: evs });
+        }
+    }
+    Ok((records, entries))
+}
+
+/// 0.184.5: the darkness cloak and the blade's aura a sleight clip puts on its user (`rec`, its EET record; Checked
+/// (files)): list-A `ex_1580` 20, 21 and 23..34 and `weapon_ora` 0, all from frame 0 to the motion's end; returned with
+/// their own bones (the record's skeleton) and start 0.
+pub fn cloak_of(rec: &crate::eet::Record) -> (Vec<[u8; crate::eet::EVENT]>, Option<[u8; crate::eet::EVENT]>) {
+    let name = |e: &[u8]| String::from_utf8_lossy(&e[..e[..0x20].iter().position(|&c| c == 0).unwrap_or(0x20)]).into_owned();
+    let id = |e: &[u8]| i32::from_le_bytes(e[0x20..0x24].try_into().unwrap());
+    let cloak = rec.a.iter().filter(|e| name(&e[..]) == "ex_1580.dpx" && matches!(id(&e[..]), 20 | 21 | 23..=34)).copied().collect();
+    let blade = rec.a.iter().find(|e| name(&e[..]) == "weapon_ora.dpx" && id(&e[..]) == 0).copied();
+    (cloak, blade)
+}
+
+/// Riku's bone → Dark Riku's of the same role, for the Dark → Riku retarget: by name, Riku's skeleton root as Dark's;
+/// Riku's `k10` / `k11` (the hand-to-blade chain, which is not Dark's `wep1` / `wep2`: [`Grip`]) and his own bones
+/// keep his battle stance's pose under their parent; `wep0` follows Dark's `wep0` by its world rotation.
+pub fn dark_to_riku_map(dark: &RecomSkeleton, riku: &RecomSkeleton) -> Vec<Option<usize>> {
+    riku.bones
+        .iter()
+        .map(|b| match b.name.as_str() {
+            "ex_1010_sk" => dark.find("ex_1580_sk"),
+            "k10" | "k11" => None,
+            n => dark.find(n),
+        })
+        .collect()
+}
+
+/// A clip of a PLAYER group's pack, by name.
+pub type ClipFetch<'a> = dyn Fn(u16, &str) -> Result<Clip> + 'a;
+
+/// What turns a [`Src`] into a clip on Riku's or Dark Riku's skeleton.
+pub struct CastCtx<'a> {
+    /// A pack's clip.
+    pub get: &'a ClipFetch<'a>,
+    /// Riku's, Dark Riku's and Sora's skeletons.
+    pub riku: &'a RecomSkeleton,
+    /// Dark Riku's.
+    pub dark: &'a RecomSkeleton,
+    /// Sora's.
+    pub sora: &'a RecomSkeleton,
+    /// Riku's battle stance ([`RIKU_STANCE`]): his bones no source matches.
+    pub stance: Option<&'a Clip>,
+    /// KH1 Riku-Ansem's motion set and model.
+    pub ansem: Option<(&'a [u8], &'a [u8])>,
+    /// 0.185.0: DDD Riku's skeleton and clips.
+    pub ddd: Option<(&'a RecomSkeleton, &'a [crate::ddd::PamClip])>,
+}
+
+impl CastCtx<'_> {
+    /// `src` on `to`'s skeleton (Riku or Dark), None when it is a KH1 motion and KH1's files weren't read.
+    pub fn clip_on(&self, src: &Src, to: Skel) -> Result<Option<Clip>> {
+        let (raw, from) = match *src {
+            // 0.184.9: Riku's item use hides and turns his Soul Eater (its scale 0): kept in his hand as at its first frame.
+            Src::Pack(g, name, Skel::Riku) if name == ITEM_USE => (freeze_blade(&(self.get)(g, name)?, self.riku), Skel::Riku),
+            Src::Pack(g, name, sk) => ((self.get)(g, name)?, sk),
+            Src::Kh1Ansem(req) => {
+                let Some((mset, mdls)) = self.ansem else { return Ok(None) };
+                let ms = kh1_formats::mset::MotionSet::parse(mset)?;
+                let (_, m) = ms.motion_for(req).ok_or_else(|| crate::Error::Format(format!("xa_ex_1580.mset: no request {req}")))?;
+                let conv = crate::convert::Converter::new(mdls, self.dark.clone())?;
+                let c = conv.convert(m, &crate::convert::ClipSpec { name: format!("kh1_1580_{req}"), looped: false, root_motion: false, blend: 8 })?;
+                // 0.184.8 (fork owner, 2026-11-23: "stopga a espada do RIku ta vibrando toda"): the converted motion's
+                // blade bones shake; they keep their first frame under the hand.
+                (freeze_blade(&c, self.dark), Skel::Dark)
+            }
+            Src::Ddd(name) => {
+                let Some((_, clips)) = self.ddd else { return Ok(None) };
+                let c = clips.iter().find(|c| c.name == name).ok_or_else(|| crate::Error::Format(format!("DDD Riku: no clip {name}")))?;
+                (crate::ddd::to_clip(c, &format!("ddd_{name}")), Skel::Ddd)
+            }
+        };
+        // 0.185.0: DDD's onto Riku by the bone map (`crate::ddd::RIKU_FROM_DDD`), onto Dark Riku through Riku.
+        if from == Skel::Ddd {
+            let Some((dsk, _)) = self.ddd else { return Ok(None) };
+            // 0.185.4 (fork owner, 2026-11-23, on 0.185.3 in game: "ele está invertendo a lamina"): the blade keeps Riku's
+            // own grip, `wep0` (and the blade under it) posed under his hand as in his battle stance on every frame, not
+            // from DDD's `R_buki`: DDD holds its blade the other way round in the hand (0.185.2 / 0.185.3, either map).
+            let mut map = crate::ddd::riku_map(self.riku, dsk);
+            if let Some(w) = self.riku.find("wep0") {
+                map[w] = None;
+            }
+            let on_riku = retarget_with(&raw, dsk, self.riku, &map, self.stance)?;
+            let on_riku = flip_blade_roll(&on_riku, self.riku);
+            let on_riku = carry_translation(&on_riku, self.riku, &raw, dsk, crate::ddd::CARRIED_TRANSLATION);
+            let on_riku = if crate::ddd::GROUND_CLIPS.contains(&name_of(src)) { plant_feet(&on_riku, self.riku) } else { from_start(&on_riku, self.riku, "ex_1010_sk") };
+            return Ok(Some(if to == Skel::Riku { on_riku } else { retarget(&on_riku, self.riku, self.dark, &bone_map(self.riku, self.dark))? }));
+        }
+        let skel = |k: Skel| match k {
+            Skel::Riku => self.riku,
+            Skel::Dark => self.dark,
+            Skel::Sora => self.sora,
+            Skel::Ddd => self.riku,
+        };
+        if from == to {
+            return Ok(Some(raw));
+        }
+        let (a, b) = (skel(from), skel(to));
+        let root = |k: Skel| match k {
+            Skel::Riku | Skel::Ddd => "ex_1010_sk",
+            Skel::Dark => "ex_1580_sk",
+            Skel::Sora => "ex_0010_sk",
+        };
+        let clip = match (from, to) {
+            (Skel::Dark, Skel::Riku) => retarget_with(&raw, a, b, &dark_to_riku_map(a, b), self.stance)?,
+            (Skel::Riku, Skel::Dark) => retarget(&raw, a, b, &bone_map(a, b))?,
+            _ => {
+                // Sora's onto either: bones by name, the skeleton roots as each other; Riku's own bones from his stance.
+                let map: Vec<Option<usize>> = b.bones.iter().map(|x| if x.name == root(to) { a.find(root(from)) } else { a.find(&x.name) }).collect();
+                retarget_with(&raw, a, b, &map, if to == Skel::Riku { self.stance } else { None })?
+            }
+        };
+        Ok(Some(clip))
+    }
+
+    /// Cast clip `c` on `to`'s skeleton, named `prefix` + its suffix: its source, else its fallback's.
+    pub fn cast_clip(&self, c: &CastClip, to: Skel, prefix: &str) -> Result<Clip> {
+        let mut s = c.source();
+        loop {
+            let src = if to == Skel::Riku { &s.riku } else { &s.dark };
+            if let Some(clip) = self.clip_on(src, to)? {
+                let planted = crate::ddd::GROUND_CLIPS.contains(&name_of(src));
+                return Ok(retime(&clip, if to == Skel::Riku { self.riku } else { self.dark }, &c.times_for(s), &format!("{prefix}{}", c.suffix), planted));
+            }
+            s = &CAST_SOURCES[s.fallback.ok_or_else(|| crate::Error::Format(format!("cast clip {}: no source", c.suffix)))?];
+        }
+    }
+}
+
+/// Riku's item use (`p002_034`, Cure's motion since 0.184.9).
+pub const ITEM_USE: &str = "p002_034";
+
+/// `clip` with the blade (Dark Riku's `wep0`, `wep1`, `wep2`, Riku's `wep0`, `k10`, `k11`, and every bone under `wep0`) held at
+/// its first frame's local pose.
+pub fn freeze_blade(clip: &Clip, skel: &RecomSkeleton) -> Clip {
+    let mut frozen = vec![false; skel.bones.len()];
+    for (j, b) in skel.bones.iter().enumerate() {
+        let parent_frozen = b.parent >= 0 && !matches!(skel.bones[b.parent as usize].name.as_str(), "wep1" | "wep2" | "k10" | "k11") && frozen[b.parent as usize];
+        frozen[j] = matches!(b.name.as_str(), "wep0" | "wep1" | "wep2" | "k10" | "k11") || parent_frozen;
+    }
+    let rows: Vec<Vec<[f64; 9]>> = (0..clip.frames.max(1) as usize)
+        .map(|f| {
+            (0..clip.bones as usize)
+                .map(|b| {
+                    let s = clip.sample(b, if frozen.get(b).copied().unwrap_or(false) { 0.0 } else { f as f64 });
+                    [s.t[0], s.t[1], s.t[2], s.r[0], s.r[1], s.r[2], s.s[0], s.s[1], s.s[2]]
+                })
+                .collect()
+        })
+        .collect();
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    c
+}
+
+/// 0.185.1 (fork owner, 2026-11-23: on the DDD casts, "os pé do riku ficam suspensos"): `clip` (on `skel`) with each
+/// listed target bone's local translation at its rest plus the sum of its source bones' moves off rest in `src` (on
+/// `src_skel`). DDD moves the whole body by translating `koshi` and `hara` together (the legs' and the spine's parents,
+/// both under `center`; 0.88 → 0.65 m in its crouches), and the rotation-only retarget left Riku's body at its rest
+/// height, so his feet rose up to 0.5 m. 0.185.2 (fork owner: "as anims de magia ainda muito desalinhadas", screenshots
+/// of Riku crouched above his shadow): 0.185.1 put that on Riku's `hip`, which no Re:CoM clip ever moves (Checked
+/// (files): in all of `PL0101.ANN`'s clips only bones 0 / 1 and the blade's `k11` move their translation; the body's
+/// height is on `ex_1010_sk`, the parent of `hip` and `waist`) and the game showed him floating: it goes on
+/// `ex_1010_sk` now (Assumption: the game ignores `hip`'s translation; the screenshots).
+pub fn carry_translation(clip: &Clip, skel: &RecomSkeleton, src: &Clip, src_skel: &RecomSkeleton, pairs: &[(&str, &str)]) -> Clip {
+    let pairs: Vec<(usize, usize)> = pairs.iter().filter_map(|(t, f)| Some((skel.find(t)?, src_skel.find(f)?))).collect();
+    let rows: Vec<Vec<[f64; 9]>> = (0..clip.frames.max(1) as usize)
+        .map(|f| {
+            (0..clip.bones as usize)
+                .map(|b| {
+                    let s = clip.sample(b, f as f64);
+                    let mut t = s.t;
+                    if pairs.iter().any(|(i, _)| *i == b) {
+                        t = skel.bones[b].local.t;
+                        for &(_, j) in pairs.iter().filter(|(i, _)| *i == b) {
+                            let st = src.sample(j, f as f64).t;
+                            let rest = src_skel.bones[j].local.t;
+                            for k in 0..3 {
+                                t[k] += st[k] - rest[k];
+                            }
+                        }
+                    }
+                    [t[0], t[1], t[2], s.r[0], s.r[1], s.r[2], s.s[0], s.s[1], s.s[2]]
+                })
+                .collect()
+        })
+        .collect();
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    c
+}
+
+/// 0.185.6: `clip` with `bone`'s local translation moved by its offset from rest at frame 0, so the clip starts with
+/// the body at its rest height and keeps only its move from there. For DDD's air casts (`316` / `318`), whose body
+/// starts 0.18 m above DDD's rest and bobs −0.32..+0.20 m from there (Checked (files): `center` + `koshi`); in the air
+/// Re:CoM's root is where the jump has him, so the clip starts where his air pose is (Assumption: Re:CoM's air rows keep
+/// the body at its rest height, as its ground ones do).
+pub fn from_start(clip: &Clip, skel: &RecomSkeleton, bone: &str) -> Clip {
+    let Some(k) = skel.find(bone) else { return clip.clone() };
+    let t0 = clip.sample(k, 0.0).t;
+    let rest = skel.bones[k].local.t;
+    let rows: Vec<Vec<[f64; 9]>> = (0..clip.frames.max(1) as usize)
+        .map(|f| {
+            (0..clip.bones as usize)
+                .map(|b| {
+                    let s = clip.sample(b, f as f64);
+                    let mut t = s.t;
+                    if b == k {
+                        for i in 0..3 {
+                            t[i] -= t0[i] - rest[i];
+                        }
+                    }
+                    [t[0], t[1], t[2], s.r[0], s.r[1], s.r[2], s.s[0], s.s[1], s.s[2]]
+                })
+                .collect()
+        })
+        .collect();
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    c
+}
+
+/// 0.185.7: `clip` with `wep0` turned half a turn about its own x, the blade's axis ([`BLADE_FLIP`]), the chain under it
+/// (`k1`..`k11`, in `wep0`'s frame) with it. The blade's tip stays where it was; only the side of the blade that faces
+/// out turns over. Riku's mesh runs along `wep0`'s −x (its far 5 % of vertices at (−0.74, −0.05, 0.0) m; Checked
+/// (files)), and in DDD's clips its tip follows DDD's blade tip within 20..30° (Checked (files)); 0.185.3 and 0.185.4
+/// both still showed it "do lado errado" in game (fork owner), which leaves the roll about that axis.
+pub fn flip_blade_roll(clip: &Clip, skel: &RecomSkeleton) -> Clip {
+    let Some(k) = skel.find("wep0") else { return clip.clone() };
+    let mut prev = clip.sample(k, 0.0).r;
+    let rows: Vec<Vec<[f64; 9]>> = (0..clip.frames.max(1) as usize)
+        .map(|f| {
+            (0..clip.bones as usize)
+                .map(|b| {
+                    let s = clip.sample(b, f as f64);
+                    let mut r = s.r;
+                    if b == k {
+                        r = crate::math::euler_xyz(&m3(&BLADE_FLIP, &rot_xyz(r[0], r[1], r[2])), Some(prev));
+                        prev = r;
+                    }
+                    [s.t[0], s.t[1], s.t[2], r[0], r[1], r[2], s.s[0], s.s[1], s.s[2]]
+                })
+                .collect()
+        })
+        .collect();
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    c
+}
+
+/// A DDD source's clip name ("" for any other source).
+fn name_of(src: &Src) -> &str {
+    match src {
+        Src::Ddd(n) => n,
+        _ => "",
+    }
+}
+
+/// 0.185.1 (fork owner, 2026-11-23: "os pé do riku ficam suspensos"): `clip` (on Riku's skeleton) with its body
+/// (`ex_1010_sk`, where Re:CoM's clips move it; 0.185.1 moved `hip`, which the game ignores) moved so
+/// the feet stay on the floor where the clip starts: the hip is lowered as much as the lower foot rises above the
+/// first frame's floor, and a foot then standing on it (within 3 cm) on two frames in a row does not slide (the hip
+/// takes its move; of two, the one that moves less). What is left of the slide
+/// at the last frame is spread back over the clip, so it ends where it started (the stance). Checked (files): DDD's
+/// ground thrust `315` hops 0.6 m forward on frames 1..7 and its hip drops the distance back at frame 14 (the DDD note
+/// § 6 measures; the travel is the game's, not the clip's: Assumption), which in place lifted the feet up to 0.38 m.
+pub fn plant_feet(clip: &Clip, skel: &RecomSkeleton) -> Clip {
+    let (Some(hip), Some(lf), Some(rf)) = (skel.find("ex_1010_sk"), skel.find("l_foot"), skel.find("r_foot")) else { return clip.clone() };
+    let n = clip.frames.max(1) as usize;
+    let parent = skel.bones[hip].parent;
+    // World positions of the feet, and the hip's parent's world rotation, per frame.
+    let fk = |f: usize| -> ([f64; 3], [f64; 3], M3) {
+        let mut u: Vec<M3> = Vec::with_capacity(skel.bones.len());
+        let mut p: Vec<[f64; 3]> = Vec::with_capacity(skel.bones.len());
+        for (i, b) in skel.bones.iter().enumerate() {
+            let s = clip.sample(i, f as f64);
+            let r = rot_xyz(s.r[0], s.r[1], s.r[2]);
+            if b.parent < 0 {
+                u.push(r);
+                p.push(s.t);
+            } else {
+                let q = b.parent as usize;
+                let w = crate::math::vm(s.t, &u[q]);
+                p.push([w[0] + p[q][0], w[1] + p[q][1], w[2] + p[q][2]]);
+                u.push(m3(&r, &u[q]));
+            }
+        }
+        (p[lf], p[rf], if parent < 0 { crate::math::I3 } else { u[parent as usize] })
+    };
+    let poses: Vec<([f64; 3], [f64; 3], M3)> = (0..n).map(fk).collect();
+    let floor = poses[0].0[1].min(poses[0].1[1]);
+    // How far the hip is lowered at a frame (the lower foot's rise), and whether a foot then stands on the floor.
+    let lift = |f: usize| (poses[f].0[1].min(poses[f].1[1]) - floor).max(0.0);
+    let on = |p: [f64; 3], f: usize| p[1] - lift(f) < floor + 0.03;
+    // The hip's horizontal offset (world x, z) per frame.
+    let mut off = vec![[0.0f64; 2]; n];
+    for f in 1..n {
+        let (a, b) = (&poses[f - 1], &poses[f]);
+        let mv = |p0: [f64; 3], p1: [f64; 3]| [p1[0] - p0[0], p1[2] - p0[2]];
+        let (ml, mr) = (mv(a.0, b.0), mv(a.1, b.1));
+        let len = |m: [f64; 2]| m[0].hypot(m[1]);
+        let d = match (on(a.0, f - 1) && on(b.0, f), on(a.1, f - 1) && on(b.1, f)) {
+            (true, true) => if len(ml) <= len(mr) { ml } else { mr },
+            (true, false) => ml,
+            (false, true) => mr,
+            (false, false) => [(ml[0] + mr[0]) / 2.0, (ml[1] + mr[1]) / 2.0],
+        };
+        off[f] = [off[f - 1][0] - d[0], off[f - 1][1] - d[1]];
+    }
+    let end = off[n - 1];
+    let last = (n - 1).max(1) as f64;
+    let rows: Vec<Vec<[f64; 9]>> = (0..n)
+        .map(|f| {
+            let pu = &poses[f].2;
+            let k = f as f64 / last;
+            let dy = -lift(f);
+            let world = [off[f][0] - end[0] * k, dy, off[f][1] - end[1] * k];
+            // World delta into the hip's parent's frame (row vectors: world = local · U).
+            let local = crate::math::vm(world, &tr(pu));
+            (0..clip.bones as usize)
+                .map(|b| {
+                    let s = clip.sample(b, f as f64);
+                    let mut t = s.t;
+                    if b == hip {
+                        for i in 0..3 {
+                            t[i] += local[i];
+                        }
+                    }
+                    [t[0], t[1], t[2], s.r[0], s.r[1], s.r[2], s.s[0], s.s[1], s.s[2]]
+                })
+                .collect()
+        })
+        .collect();
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    c
+}
+
+/// 0.185.0: DDD Riku's Block. 0.185.1 (fork owner, 2026-11-23: "a animação de defesa nada a ver"): 0.185.0 played `221`,
+/// which is in the air the whole clip (hips 1.0..1.19 m, feet 0.4..0.8 m up; its last frame is the air thrust `316`'s
+/// first), and its rebound `224` is a back flip (feet up to 2 m), as is `223`; `222` is a 2.4 m dash. `220` (36 frames
+/// at 30, no effect) is the one on the ground: the hips still, the feet planted, the weapon hand up in front from frame
+/// 3 to about 24, the free hand back. Checked (files: every clip posed on DDD's skeleton). That `220` is DDD's ground
+/// Block: Assumption (its pose; `221`'s guard effect `P_AC_GUD_GUR1` reads as the air block). The guard keeps KH1's
+/// Guard timing ([`RIKU_GUARD_FRAMES`] = 54: up by [`RIKU_GUARD_UP`], held through KH1's live window 10..36, lowered
+/// after); the recoil is KH1 Riku's again (DDD has no ground one).
+pub const DDD_GUARD: &str = "220";
+/// The guard clip's raise end and hold end, and its last frame (DDD frames).
+const DDD_GUARD_KEYS: (f64, f64, f64) = (6.0, 24.0, 35.0);
+
+/// DDD Riku's guard on Riku's skeleton (named [`RIKU_GUARD`]), None without DDD.
+pub fn ddd_guard(ctx: &CastCtx) -> Result<Option<Clip>> {
+    let Some(g) = ctx.clip_on(&Src::Ddd(DDD_GUARD), Skel::Riku)? else { return Ok(None) };
+    let (up, hold, last) = DDD_GUARD_KEYS;
+    let held = 37.0;
+    let times: Vec<f64> = (0..RIKU_GUARD_FRAMES)
+        .map(|k| {
+            let k = k as f64;
+            let rise = RIKU_GUARD_UP as f64;
+            if k < rise {
+                up * k / rise
+            } else if k < held {
+                up + (hold - up) * (k - rise) / (held - rise)
+            } else {
+                (hold + (last - hold) * (k - held) / (RIKU_GUARD_FRAMES as f64 - 1.0 - held)).min(last)
+            }
+        })
+        .collect();
+    Ok(Some(retime(&g, ctx.riku, &times, RIKU_GUARD, true)))
+}
+
+/// The eight cast clips on Riku's skeleton (`p002_227..234`).
+pub fn riku_cast_clips(ctx: &CastCtx) -> Result<Vec<Clip>> {
+    CAST_CLIPS.iter().map(|c| ctx.cast_clip(c, Skel::Riku, "p002_")).collect()
+}
+
+/// The eight cast clips on Dark Riku's own skeleton (`p003_227..234`).
+pub fn dark_cast_clips(ctx: &CastCtx) -> Result<Vec<Clip>> {
+    CAST_CLIPS.iter().map(|c| ctx.cast_clip(c, Skel::Dark, "p003_")).collect()
 }
 
 /// `ann` with `clip` added as its last slot (named as the clip), unless a slot already has it.
@@ -561,13 +1425,105 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     let ds = RecomSkeleton::parse(&dmdl)?;
     let mut ann = Ann::parse(&rd(riku, "ANN")?)?;
     let mut riku_pack = None;
+    let mut dark_pack = None;
+    // 0.184.1: the cast clips from Dark Riku's Dark Firaga (Re:CoM's own files: always there).
+    let df_ann = Ann::parse(&rd(1088, "ANN")?)?;
+    let df = df_ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == DARK_FIRAGA)).ok_or_else(|| crate::Error::Format(format!("{}: no {DARK_FIRAGA}", path(1088, "ANN"))))?;
+    // 0.184.4: the source clips from the sleight packs (Re:CoM's own files), each pack read once.
+    let packs: std::cell::RefCell<std::collections::HashMap<u16, Ann>> = Default::default();
+    let get = |g: u16, name: &str| -> Result<Clip> {
+        if !packs.borrow().contains_key(&g) {
+            let a = Ann::parse(&rd(g, "ANN")?)?;
+            packs.borrow_mut().insert(g, a);
+        }
+        let p = packs.borrow();
+        p[&g].slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == name)).cloned().ok_or_else(|| crate::Error::Format(format!("{}: no {name}", path(g, "ANN"))))
+    };
+    let ss = RecomSkeleton::parse(&rd(1, "MDL")?)?;
+    let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
+    // 0.185.0: DDD Riku (the 2.8 collection next to the game), read when the step found it.
+    let ddd_data = match guard.and_then(|g| g.ddd) {
+        Some((pam, pmo)) => Some((crate::ddd::parse_skeleton(pmo)?, crate::ddd::parse_pam(pam)?)),
+        None => None,
+    };
+    let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: guard.and_then(|g| g.ansem), ddd: ddd_data.as_ref().map(|(k, c)| (k, c.as_slice())) };
+    let riku_casts = riku_cast_clips(&ctx)?;
+    let dark_casts = dark_cast_clips(&ctx)?;
+    let mut dann_own = Ann::parse(&rd(dark, "ANN")?)?;
     if let Some(src) = guard {
-        let guard = riku_kh1_guard(src.mset, src.mdls, &rs)?;
+        // 0.185.0 (fork owner, 2026-11-23: "a animação de guarda do Riku também está presente no DDD, implementa ela!"):
+        // DDD Riku's Block when DDD is there, else KH1 Riku's (0.158.0). 0.185.1: the recoil is KH1 Riku's either way.
+        let guard = match ddd_guard(&ctx)? {
+            Some(g) => g,
+            None => riku_kh1_guard(src.mset, src.mdls, &rs)?,
+        };
+        let recoil = riku_kh1_recoil(src.mset, src.mdls, &rs)?;
+        // 0.183.2: the real Dark Mode's Dark Riku guards with the same clips on his own skeleton, in his
+        // own pack ([`dark_guard_pack`]).
+        dann_own = dark_guard_pack(dann_own, &guard, &recoil, &rs, &ds)?;
         ann = with_clip(ann, guard);
-        ann = with_clip(ann, riku_kh1_recoil(src.mset, src.mdls, &rs)?);
-        riku_pack = Some((path(riku, "ANN"), ann.to_bytes()));
+        ann = with_clip(ann, recoil);
     }
+    for c in &riku_casts {
+        ann = with_clip(ann, c.clone());
+    }
+    for c in &dark_casts {
+        dann_own = with_clip(dann_own, c.clone());
+    }
+    riku_pack = riku_pack.or(Some((path(riku, "ANN"), ann.to_bytes())));
+    dark_pack = dark_pack.or(Some((path(dark, "ANN"), dann_own.to_bytes())));
+    // 0.184.2: the Dark Firaga clip's effects and sounds on the cast clips (Riku's bones by name; Dark Riku's own).
+    let df_eet = crate::eet::parse(&rd(1088, "EET")?)?;
+    let df_ses = crate::ses::parse(&rd(1088, "SES")?)?;
+    let to_riku = |b: i32| ds.bones.get(b as usize).and_then(|x| rs.find(if x.name == "ex_1580_sk" { "ex_1010_sk" } else { &x.name })).map(|i| i as i32);
+    // 0.184.5: the cloak from Riku's own Impulse (`PL1301` `p002_062`, his bones) and Dark Riku's Dark Impulse (`PL1311`
+    // `p003_072`, his).
+    let cloak_rec = |g: u16, clip: &str| -> Result<crate::eet::Record> {
+        crate::eet::parse(&rd(g, "EET")?)?.into_iter().find(|r| r.name == clip).ok_or_else(|| crate::Error::Format(format!("{}: no {clip}", path(g, "EET"))))
+    };
+    let (r_cloak, r_blade) = cloak_of(&cloak_rec(1301, "p002_062")?);
+    let (d_cloak, d_blade) = cloak_of(&cloak_rec(1311, "p003_072")?);
+    let (r_eet, r_ses) = cast_events(df, &df_eet, &df_ses, "p002_", &to_riku, &r_cloak, r_blade, &FxBones::of(&rs))?;
+    let (d_eet, d_ses) = cast_events(df, &df_eet, &df_ses, "p003_", &|b| Some(b), &d_cloak, d_blade, &FxBones::of(&ds))?;
+    let (k_eet, k_ses) = cast_events(df, &df_eet, &df_ses, "p002_", &|b| Some(b), &d_cloak, d_blade, &FxBones::of(&ds))?;
+    let mut riku_eet = crate::eet::parse(&rd(riku, "EET")?)?;
+    riku_eet.extend(r_eet);
+    let riku_ses0 = crate::ses::parse(&rd(riku, "SES")?)?;
+    let dark_ses0 = crate::ses::parse(&rd(dark, "SES")?)?;
+    // 0.185.5 (fork owner, 2026-11-23: "falta audio quando o riku defende"): the Guard's whoosh and grunt at its start,
+    // as Sora's has (`crate::ses::add_kh1`), from each one's own swing sounds; before, his Guard clips had no SES entry.
+    let guard_ses = |own: &[crate::ses::Entry], name: &str, whoosh: &str, voice: &str| -> Result<Vec<crate::ses::Entry>> {
+        Ok(if guard.is_some() { vec![crate::ses::guard_entry(own, name, whoosh, voice)?] } else { Vec::new() })
+    };
+    let r_guard = guard_ses(&riku_ses0, RIKU_GUARD, "p002_044", "p002_044")?;
+    let d_guard = guard_ses(&dark_ses0, DARK_GUARD, "p003_056", "p003_053")?;
+    let mut riku_ses = riku_ses0.clone();
+    riku_ses.retain(|e| e.name() != RIKU_GUARD);
+    riku_ses.extend(r_ses);
+    riku_ses.extend(r_guard.iter().cloned());
+    let mut dark_eet = crate::eet::parse(&rd(dark, "EET")?)?;
+    dark_eet.extend(d_eet);
+    let mut dark_ses = dark_ses0;
+    dark_ses.retain(|e| e.name() != DARK_GUARD);
+    dark_ses.extend(d_ses);
+    dark_ses.extend(d_guard);
+    let own_fx = vec![
+        (path(riku, "EET"), crate::eet::write(&riku_eet)?),
+        (path(riku, "SES"), crate::ses::write(&riku_ses)),
+        (path(dark, "EET"), crate::eet::write(&dark_eet)?),
+        (path(dark, "SES"), crate::ses::write(&dark_ses)),
+    ];
     let mut out_ann = retarget_ann(&ann, &rs, &ds)?;
+    // The skin (Dark Riku's model playing Riku's rows): his cast rows play the Dark Firaga clip on its own skeleton
+    // (not Riku's version retargeted back), under Riku's names.
+    for (c, d) in CAST_CLIPS.iter().zip(&dark_casts) {
+        let name = format!("p002_{}", c.suffix);
+        if let Some(i) = out_ann.find(&name) {
+            let mut d = d.clone();
+            d.name = crate::ann::name16(&name);
+            out_ann.slots[i].clip = Some(d);
+        }
+    }
     let em = event_map(&rs, &ds);
     let mut eet = crate::eet::parse(&remap_eet(&rd(riku, "EET")?, &em)?)?;
     let mut ses = crate::ses::parse(&remap_ses(&rd(riku, "SES")?, &em)?)?;
@@ -582,6 +1538,12 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     }
     eet.extend(crate::eet::parse(&rd(dark, "EET")?)?.into_iter().filter(|r| r.name == DARK_FLIP));
     ses.extend(crate::ses::parse(&rd(dark, "SES")?)?.into_iter().filter(|e| e.name() == DARK_FLIP));
+    // The skin's cast clips are Dark Riku's own (above): their events on his bones, under Riku's names.
+    eet.extend(k_eet);
+    ses.extend(k_ses);
+    // 0.185.5: the skin's Guard (Riku's row on Dark Riku's model) with Dark Riku's own guard sounds, under Riku's name.
+    ses.retain(|e| e.name() != RIKU_GUARD);
+    ses.extend(guard_ses(&crate::ses::parse(&rd(dark, "SES")?)?, RIKU_GUARD, "p003_056", "p003_053")?);
     let clips = out_ann.slots.iter().filter(|s| s.clip.is_some()).count();
     let mut files = vec![
         (path(skin, "MDL"), rename_root(&dmdl)?),
@@ -590,6 +1552,8 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
         (path(skin, "SES"), crate::ses::write(&ses)),
     ];
     files.extend(riku_pack);
+    files.extend(dark_pack);
+    files.extend(own_fx);
     for ext in ["RTM", "TXA"] {
         let (d, a, date) = raw(dark, ext)?;
         files.push((format!("raw/{}", path(skin, ext)), kh1_formats::egs::build_plain_entry(&d, &a, date)?));
@@ -600,8 +1564,9 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
 /// The manifest: which Riku group each skin group stands for, with its look (Dark Mode attire,
 /// blade 0 Soul Eater / 1 the Keyblade of People's Hearts).
 pub fn manifest_json(skins: &[Made], riku_guard: bool) -> String {
-    let rows: Vec<String> = skins.iter().map(|m| format!("{{\"riku\": {}, \"skin\": {}, \"dark\": {}, \"blade\": {}}}", m.riku, m.skin, m.dark, m.blade)).collect();
-    format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}}}\n", rows.join(", "))
+    let rows: Vec<String> = skins.iter().map(|m| format!("{{\"riku\": {}, \"skin\": {}, \"dark\": {}, \"blade\": {}, \"hair\": {}}}", m.riku, m.skin, m.dark, m.blade, m.hair)).collect();
+    // 0.184.1: `riku_cast`: Riku's and Dark Riku's own packs carry the six cast clips ([`CAST_CLIPS`]).
+    format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}, \"riku_cast\": true}}\n", rows.join(", "))
 }
 
 /// One group made: the Riku group it stands for, and its look.
@@ -615,6 +1580,8 @@ pub struct Made {
     pub dark: bool,
     /// 0 the Soul Eater, 1 the Keyblade of People's Hearts.
     pub blade: u8,
+    /// 0.186.0: 1 DDD Riku's hair.
+    pub hair: u8,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -657,6 +1624,47 @@ pub const BLADE_SHIFT: [f32; 3] = [4.54, -0.52, -0.02];
 
 /// (base group, the group whose raw `.RTM` / `.TXA` it uses, new group, Dark Mode attire).
 pub const BLADE_GROUPS: [(u16, u16, u16, bool); 4] = [(101, 101, 141, false), (111, 111, 151, false), (121, 201, 161, true), (131, 211, 171, true)];
+
+/// 0.186.0 (fork owner, 2026-11-24: "é possível implementar uma customização de personagem onde trocaria só o cabelo? e teria
+/// uma variação para o cabelo do DDD?"; "sim"): Riku's default attire with DDD Riku's hair, with the Soul Eater (181) and
+/// with the Keyblade of Heart (191): (new group, with the Keyblade). Built from group 101's files.
+pub const HAIR_GROUPS: [(u16, bool); 2] = [(181, false), (191, true)];
+
+/// One hair group: Riku's group 101 (`have`: what the step wrote this run, else Re:CoM's) under `target`'s names, with DDD
+/// Riku's hair on its model and atlas ([`crate::ddd_hair::with_ddd_hair`]) and, when `blade` is given, the Keyblade of Heart.
+pub fn build_hair(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, target: u16, blade: Option<&BladeSource>, hair: &crate::ddd_hair::DddHairSource) -> Result<Built> {
+    let base = 101u16;
+    let get = |ext: &str| -> Result<Vec<u8>> {
+        let n = path(base, ext);
+        match have.get(&n) {
+            Some(b) => Ok(b.clone()),
+            None => crate::install::read_recom(arc, keys, &n),
+        }
+    };
+    let raw = |ext: &str| -> Result<(Vec<u8>, Vec<kh1_formats::egs::HdAsset>, i32)> {
+        let n = path(base, ext);
+        let e = arc.find(&n).ok_or_else(|| crate::Error::Format(format!("{n} not in Recom.hed")))?;
+        let raw = arc.read_raw_entry(e)?;
+        let date = raw.get(12..16).map_or(0, |b| i32::from_le_bytes(b.try_into().unwrap()));
+        let (d, a) = kh1_formats::egs::decode_entry_full(keys, &raw)?;
+        Ok((d, a, date))
+    };
+    let (d, a, date) = raw("RTM")?;
+    let swap = crate::ddd_hair::with_ddd_hair(&get("MDL")?, &d, &a, &crate::ddd_hair::RIKU_0101, hair)?;
+    let (mdl, rtm) = match blade {
+        Some(src) => (with_blade(&swap.mdl, src, false)?, rtm_with_blade(&swap.rtm, &swap.hd, date, src)?),
+        None => (swap.mdl.clone(), kh1_formats::egs::build_plain_entry(&swap.rtm, &swap.hd, date)?),
+    };
+    let mut files = vec![(path(target, "MDL"), mdl)];
+    for ext in ["ANN", "EET", "SES"] {
+        files.push((path(target, ext), get(ext)?));
+    }
+    files.push((format!("raw/{}", path(target, "RTM")), rtm));
+    let (d, a, date) = raw("TXA")?;
+    files.push((format!("raw/{}", path(target, "TXA")), kh1_formats::egs::build_plain_entry(&d, &a, date)?));
+    let clips = Ann::parse(&files[1].1)?.slots.iter().filter(|s| s.clip.is_some()).count();
+    Ok(Built { files, clips })
+}
 
 /// The Keyblade's sources: KH1's HD mesh and texture.
 pub struct BladeSource {
@@ -806,6 +1814,509 @@ mod tests {
 
     fn game() -> Option<std::path::PathBuf> {
         std::env::var_os("RECOM_GAME").map(Into::into)
+    }
+
+    /// 0.186.0 (owner's install, `RECOM_GAME`, the 2.8 collection next to it): the two hair groups are built from group 101: the
+    /// model's weapon parts as the plain / Keyblade groups', the textures renamed, the packs as Riku's.
+    #[test]
+    fn the_hair_groups_are_built_from_rikus_101() {
+        let Some(g) = game() else { return };
+        let Some(dd) = crate::ddd::install_next_to(&g) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let hair = crate::ddd_hair::DddHairSource::read(&dd, &keys).unwrap();
+        let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { return };
+        let src = BladeSource::from_assets(&assets).unwrap();
+        let have = std::collections::HashMap::new();
+        let plain_mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
+        for &(target, heart) in &HAIR_GROUPS {
+            let b = build_hair(&arc, &keys, &have, target, if heart { Some(&src) } else { None }, &hair).unwrap();
+            let names: Vec<&str> = b.files.iter().map(|f| f.0.as_str()).collect();
+            for ext in ["MDL", "ANN", "EET", "SES"] {
+                assert!(names.contains(&path(target, ext).as_str()), "{target}: {ext}");
+            }
+            for ext in ["RTM", "TXA"] {
+                assert!(names.contains(&format!("raw/{}", path(target, ext)).as_str()), "{target}: {ext}");
+            }
+            let mdl = &b.files.iter().find(|f| f.0 == path(target, "MDL")).unwrap().1;
+            let (old, new) = (crate::mdl::split_parts(&plain_mdl).unwrap(), crate::mdl::split_parts(mdl).unwrap());
+            assert_eq!(old.len(), new.len());
+            assert_ne!(old[3], new[3], "{target}: the body's hair changed");
+            assert_eq!(old[0] == new[0], !heart, "{target}: the weapon parts are the Soul Eater's / the Keyblade's");
+            let p = crate::mdl::MdlPart::parse_bytes(&new[3]).unwrap();
+            assert!(p.texture_names().contains(&"rk_hair_0101".to_string()) || p.texture_names().iter().any(|t| t.as_str() == "rk_hair_0101"), "{target}: the new atlas");
+        }
+    }
+
+    /// 0.184.2 (owner's install, `RECOM_GAME`): the Dark Firaga clip's glow, flash, voice and thrust sound on Riku's
+    /// cast clips, at their retimed frames, on his bones.
+    #[test]
+    fn rikus_cast_clips_carry_dark_firagas_events() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
+        let df_ann = Ann::parse(&rd("PLAYER/1088/PL1088.ANN")).unwrap();
+        let df = df_ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == DARK_FIRAGA)).unwrap();
+        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
+        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
+        let eet = crate::eet::parse(&rd("PLAYER/1088/PL1088.EET")).unwrap();
+        let ses = crate::ses::parse(&rd("PLAYER/1088/PL1088.SES")).unwrap();
+        let to_riku = |b: i32| ds.bones.get(b as usize).and_then(|x| rs.find(if x.name == "ex_1580_sk" { "ex_1010_sk" } else { &x.name })).map(|i| i as i32);
+        let rk = crate::eet::parse(&rd("PLAYER/1301/PL1301.EET")).unwrap().into_iter().find(|r| r.name == "p002_062").unwrap();
+        let (cloak, blade) = cloak_of(&rk);
+        assert!(cloak.len() >= 10 && blade.is_some(), "Riku's Impulse dresses him: {} cloak programs", cloak.len());
+        let (r, e) = cast_events(df, &eet, &ses, "p002_", &to_riku, &cloak, blade, &FxBones::of(&rs)).unwrap();
+        let v = |e: &[u8]| i32::from_le_bytes(e[0x5C..0x60].try_into().unwrap());
+        let cu = r.iter().find(|x| x.name == "p002_230").unwrap();
+        let count = |lv: i32| cu.a.iter().filter(|e| v(&e[..]) == lv).count();
+        // 0.185.8: Thunder / Aero have their own effects, Thunder's on variants 1..3 (more with the level), Aero's on 4..6.
+        assert!(count(1) >= 1 && count(1) < count(2) && count(2) < count(3), "more effects per level: {} / {} / {}", count(1), count(2), count(3));
+        assert!(count(4) >= 1 && count(4) < count(5) && count(5) < count(6), "Aero's own variants: {} / {} / {}", count(4), count(5), count(6));
+        assert!(cu.a.iter().all(|e| i32::from_le_bytes(e[0x20..0x24].try_into().unwrap()) != 1 || &e[..13] != b"dark_faiga.dp"), "no Dark Firaga flash on Thunder");
+        let r: Vec<crate::eet::Record> = r.into_iter().map(|mut x| { x.a.retain(|e| v(&e[..]) == 1); x }).collect();
+        let i = |e: &[u8], o: usize| i32::from_le_bytes(e[o..o + 4].try_into().unwrap());
+        let hand = rs.find("l_hand").unwrap() as i32;
+        // Fire's wind-up (0.184.6: the Dark Firaga clip at its speed, from its frame 18): the glow on his left hand and the
+        // voice, both before the clip's start, on its first frame.
+        let w = r.iter().find(|x| x.name == "p002_227").unwrap();
+        assert_eq!(w.a.iter().map(|e| (i(e, 0x20), i(e, 0x24), i(e, 0x34))).collect::<Vec<_>>(), vec![(0, hand, 0)]);
+        let wv = e.iter().find(|x| x.name() == "p002_227").unwrap();
+        assert_eq!(wv.events.iter().map(|e| (i(e, 0), i(e, 4), i(e, 0x18))).collect::<Vec<_>>(), vec![(3, 35, 0)]);
+        // Fire's release: the flash and the thrust's sound 8 frames in (72 → 36, the thrust's end, at the clip's speed).
+        let rl = r.iter().find(|x| x.name == "p002_228").unwrap();
+        assert_eq!(rl.a.iter().map(|e| (i(e, 0x20), i(e, 0x24), i(e, 0x34))).collect::<Vec<_>>(), vec![(1, 0, 8)]);
+        let rs_ = e.iter().find(|x| x.name() == "p002_228").unwrap();
+        assert_eq!(rs_.events.iter().map(|e| (i(e, 0), i(e, 4), i(e, 0x18))).collect::<Vec<_>>(), vec![(605, 2, 8)]);
+        // Cure (0.184.8): no effects of the Dark Firaga clip, only the voice; Thunder (release 30; 0.185.8: its own ex_1580 19 on the chest 10 frames before it) has it at 20.
+        assert!(r.iter().all(|x| x.name != "p002_231" || x.a.is_empty()));
+        let cv = e.iter().find(|x| x.name() == "p002_231").unwrap();
+        assert!(cv.events.iter().all(|ev| i(ev, 0) == 3), "Cure: the voice only");
+        let th = r.iter().find(|x| x.name == "p002_230").unwrap();
+        assert!(th.a.iter().any(|e| (i(e, 0x20), i(e, 0x34)) == (19, 20)), "{:?}", th.a.iter().map(|e| (i(e, 0x20), i(e, 0x34))).collect::<Vec<_>>());
+        assert!(e.iter().all(|x| x.events.iter().all(|ev| (i(ev, 0), i(ev, 4)) != (605, 1))));
+    }
+
+    /// 0.184.1 / 0.184.4: each cast clip has KH1's length, its source's key moment on KH1's release frame, the charge
+    /// before it, the recovery to the free frame and its last frame held.
+    #[test]
+    fn cast_clips_put_the_key_moment_on_kh1s_release() {
+        for c in CAST_CLIPS {
+            let s = c.source();
+            let t = c.times();
+            assert_eq!(t.len(), c.len, "{}", c.suffix);
+            let r = c.release as usize;
+            if r < c.len {
+                assert_eq!(t[r], s.charge_end, "{}: the key moment starts on the release", c.suffix);
+            }
+            // 0.184.6: never faster than the clip's own speed (no flicker).
+            let step = s.fps / 60.0;
+            assert!(t.windows(2).all(|w| w[1] >= w[0]), "{}: never backwards", c.suffix);
+            assert!(t.iter().all(|&x| (0.0..=s.last).contains(&x)));
+            assert!(t.windows(2).all(|w| w[1] - w[0] <= step + 1e-9), "{}: never faster than the clip", c.suffix);
+        }
+        for (w, r) in [(0, 1), (6, 7)] {
+            let s = CAST_CLIPS[w].source();
+            assert!(CAST_CLIPS[w].times().iter().all(|&x| x < s.charge_end), "Fire's wind-up is the charge only");
+            assert_eq!(CAST_CLIPS[r].times()[0], CAST_CLIPS[r].source().charge_end, "Fire's release starts on the thrust");
+        }
+        // 0.185.0: every clip's source has a fallback chain ending on a Re:CoM / KH1 motion (no DDD needed).
+        for c in CAST_CLIPS {
+            let mut s = c.source();
+            let mut hops = 0;
+            while matches!(s.riku, Src::Ddd(_)) {
+                s = &CAST_SOURCES[s.fallback.expect("a DDD source has a fallback")];
+                hops += 1;
+                assert!(hops < 4);
+            }
+        }
+    }
+
+    /// 0.185.1 (owner's install; "os pé do riku ficam suspensos"): DDD's ground casts and guard keep Riku's feet on
+    /// the floor where they start (DDD crouches by lowering its hip, carried over; its thrust's hop planted).
+    #[test]
+    fn ddd_ground_motions_keep_rikus_feet_down() {
+        let Some(g) = game() else { return };
+        let Some(dd) = crate::ddd::install_next_to(&g) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
+        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
+        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
+        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
+        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
+        let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
+        let dsk = crate::ddd::parse_skeleton(&crate::ddd::read(&dd, &keys, crate::ddd::RIKU_PMO).unwrap()).unwrap();
+        let clips = crate::ddd::parse_pam(&crate::ddd::read(&dd, &keys, crate::ddd::RIKU_PAM).unwrap()).unwrap();
+        let get = |_: u16, _: &str| -> Result<Clip> { bad("none") };
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: None, ddd: Some((&dsk, &clips)) };
+        // A bone's height on a skeleton at a frame (forward kinematics, rotations and translations).
+        let height = |sk: &RecomSkeleton, c: &Clip, f: f64, bone: &str| -> f64 {
+            let k = sk.find(bone).unwrap();
+            let mut chain = vec![k];
+            while sk.bones[*chain.last().unwrap()].parent >= 0 {
+                chain.push(sk.bones[*chain.last().unwrap()].parent as usize);
+            }
+            let mut u = crate::math::I3;
+            let mut p = [0.0; 3];
+            for &b in chain.iter().rev() {
+                let s = c.sample(b, f);
+                let w = crate::math::vm(s.t, &u);
+                p = [p[0] + w[0], p[1] + w[1], p[2] + w[2]];
+                u = m3(&rot_xyz(s.r[0], s.r[1], s.r[2]), &u);
+            }
+            p[1]
+        };
+        let riku_low = |c: &Clip, f: f64| height(&rs, c, f, "l_foot").min(height(&rs, c, f, "r_foot"));
+        let ddd_low = |c: &Clip, f: f64| height(&dsk, c, f, "L_ashi1").min(height(&dsk, c, f, "R_ashi1"));
+        // DDD's ground clips: the lower foot on the floor every frame (0.21 m, DDD's own stance; 1 cm of slack), and
+        // the feet end no farther from where they started than DDD's own do (no travel left; 315's hop is now a step in
+        // and back; 220's right foot steps back 0.12 m in DDD too).
+        for &n in crate::ddd::GROUND_CLIPS {
+            let raw = crate::ddd::to_clip(clips.iter().find(|c| c.name == n).unwrap(), n);
+            let c = ctx.clip_on(&Src::Ddd(n), Skel::Riku).unwrap().unwrap();
+            let low = (0..c.frames as usize).map(|f| riku_low(&c, f as f64)).fold(f64::MIN, f64::max);
+            let ddd = (0..c.frames as usize).map(|f| ddd_low(&raw, f as f64)).fold(f64::MIN, f64::max);
+            let back = |sk: &RecomSkeleton, c: &Clip, bone: &str| {
+                let at = |f: f64| {
+                    let k = sk.find(bone).unwrap();
+                    let mut chain = vec![k];
+                    while sk.bones[*chain.last().unwrap()].parent >= 0 {
+                        chain.push(sk.bones[*chain.last().unwrap()].parent as usize);
+                    }
+                    let mut u = crate::math::I3;
+                    let mut p = [0.0; 3];
+                    for &b in chain.iter().rev() {
+                        let s = c.sample(b, f);
+                        let w = crate::math::vm(s.t, &u);
+                        p = [p[0] + w[0], p[1] + w[1], p[2] + w[2]];
+                        u = m3(&rot_xyz(s.r[0], s.r[1], s.r[2]), &u);
+                    }
+                    p
+                };
+                let (p0, p1) = (at(0.0), at((c.frames - 1) as f64));
+                (p1[0] - p0[0]).hypot(p1[2] - p0[2])
+            };
+            for (rb, db) in [("l_foot", "L_ashi1"), ("r_foot", "R_ashi1")] {
+                let (r, d) = (back(&rs, &c, rb), back(&dsk, &raw, db));
+                eprintln!("{n}: {rb} ends {r:.2} m from its start (DDD's {d:.2})");
+                assert!(r < d + 0.03, "{n}: {rb} ends {r:.2} m from its start, DDD's {d:.2}");
+            }
+            eprintln!("{n}: the lower foot at most {low:.2} m (DDD's {ddd:.2})");
+            assert!(low < 0.22, "{n}: the lower foot at most {low:.2} m");
+        }
+        // 0.185.2: Riku's `hip` keeps its rest translation (no Re:CoM clip moves it; the body moves on `ex_1010_sk`).
+        let hip = rs.find("hip").unwrap();
+        let mut built = riku_cast_clips(&ctx).unwrap();
+        built.push(ddd_guard(&ctx).unwrap().unwrap());
+        for cl in &built {
+            for f in 0..cl.frames as usize {
+                let t = cl.sample(hip, f as f64).t;
+                assert!((0..3).all(|k| (t[k] - rs.bones[hip].local.t[k]).abs() < 1e-3), "{}: hip moved at {f}", cl.name_str());
+            }
+        }
+        // 0.185.4: Riku's grip in DDD's clips is his battle stance's (fork owner, in game, on 0.185.3: the blade
+        // "invertida" against his stance's): `wep0`'s rotation relative to `r_hand` is the stance's, every frame of
+        // 315 / 317 / 220.
+        let stance_c = stance.as_ref().unwrap();
+        let (w0, hand) = (rs.find("wep0").unwrap(), rs.find("r_hand").unwrap());
+        let world_u = |c: &Clip, f: f64| -> Vec<crate::math::M3> {
+            let mut u: Vec<crate::math::M3> = vec![];
+            for (i, b) in rs.bones.iter().enumerate() {
+                let sm = c.sample(i, f);
+                let r = rot_xyz(sm.r[0], sm.r[1], sm.r[2]);
+                u.push(if b.parent < 0 { r } else { m3(&r, &u[b.parent as usize]) });
+            }
+            u
+        };
+        let rel = |u: &[crate::math::M3]| m3(&u[w0], &tr(&u[hand]));
+        // 0.185.7: the stance's grip turned half a turn about the blade's axis ([`flip_blade_roll`]).
+        let want = m3(&BLADE_FLIP, &rel(&world_u(stance_c, 0.0)));
+        for &n in crate::ddd::GROUND_CLIPS {
+            let c = ctx.clip_on(&Src::Ddd(n), Skel::Riku).unwrap().unwrap();
+            let mut worst = 0.0f64;
+            for f in 0..c.frames as usize {
+                let got = rel(&world_u(&c, f as f64));
+                for (a, e) in got.iter().flatten().zip(want.iter().flatten()) {
+                    worst = worst.max((a - e).abs());
+                }
+            }
+            eprintln!("{n}: the grip off the stance's by at most {worst:.4}");
+            assert!(worst < 1e-3, "{n}: the grip off the stance's by {worst:.4}");
+        }
+        // Pose dump for a look (DDD_POSE_DUMP=<file>): every bone's world position per frame.
+        if let Some(out) = std::env::var_os("DDD_POSE_DUMP") {
+            let mut txt = String::new();
+            for cl in &built {
+                for f in 0..cl.frames as usize {
+                    let (mut u, mut p): (Vec<crate::math::M3>, Vec<[f64; 3]>) = (vec![], vec![]);
+                    for (i, b) in rs.bones.iter().enumerate() {
+                        let sm = cl.sample(i, f as f64);
+                        let r = rot_xyz(sm.r[0], sm.r[1], sm.r[2]);
+                        if b.parent < 0 { u.push(r); p.push(sm.t); } else {
+                            let q = b.parent as usize;
+                            let w = crate::math::vm(sm.t, &u[q]);
+                            p.push([w[0] + p[q][0], w[1] + p[q][1], w[2] + p[q][2]]);
+                            u.push(m3(&r, &u[q]));
+                        }
+                    }
+                    for (i, b) in rs.bones.iter().enumerate() {
+                        txt += &format!("{} {f} {} {} {:.4} {:.4} {:.4}\n", cl.name_str(), b.name, b.parent, p[i][0], p[i][1], p[i][2]);
+                        let _ = i;
+                    }
+                }
+            }
+            std::fs::write(out, txt).unwrap();
+        }
+        // The ground cast clips built from them (sampled between DDD's frames: 2 cm of slack).
+        for (k, cl) in riku_cast_clips(&ctx).unwrap().iter().enumerate().take(6) {
+            let low = (0..cl.frames as usize).map(|f| riku_low(cl, f as f64)).fold(f64::MIN, f64::max);
+            eprintln!("{}: the lower foot at most {low:.2} m", CAST_CLIPS[k].suffix);
+            assert!(low < 0.23, "{}: the lower foot at most {low:.2} m", CAST_CLIPS[k].suffix);
+        }
+        // 0.185.6: the air cast clips play DDD's air casts (`316` / `318`), start with the body at its rest height and keep
+        // the stance's grip on every frame.
+        let body = rs.find("ex_1010_sk").unwrap();
+        for &n in &["316", "318"] {
+            let c = ctx.clip_on(&Src::Ddd(n), Skel::Riku).unwrap().unwrap();
+            let y0 = c.sample(body, 0.0).t[1];
+            eprintln!("{n}: the body starts at {y0:.3} (rest {:.3})", rs.bones[body].local.t[1]);
+            assert!((y0 - rs.bones[body].local.t[1]).abs() < 1e-3, "{n}: the body starts off its rest height");
+            for f in 0..c.frames as usize {
+                let got = rel(&world_u(&c, f as f64));
+                assert!(got.iter().flatten().zip(want.iter().flatten()).all(|(a, e)| (a - e).abs() < 1e-3), "{n} frame {f}: the grip off the stance's");
+            }
+        }
+        assert!(CAST_SOURCES.iter().filter(|s| matches!(s.riku, Src::Ddd("316") | Src::Ddd("318"))).count() == 5, "the air rows on DDD's air clips");
+    }
+
+
+    /// 0.185.0 (owner's install, `RECOM_GAME`, with the 2.8 collection next to it): DDD Riku's Block and rebound on
+    /// Riku's skeleton, KH1's Guard length, his blade from his stance under the hand (no turn faster than DDD's own).
+    #[test]
+    fn ddd_guard_on_riku() {
+        let Some(g) = game() else { return };
+        let Some(dd) = crate::ddd::install_next_to(&g) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
+        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
+        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
+        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
+        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
+        let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
+        let dsk = crate::ddd::parse_skeleton(&crate::ddd::read(&dd, &keys, crate::ddd::RIKU_PMO).unwrap()).unwrap();
+        let clips = crate::ddd::parse_pam(&crate::ddd::read(&dd, &keys, crate::ddd::RIKU_PAM).unwrap()).unwrap();
+        let get = |_: u16, _: &str| -> Result<Clip> { bad("no pack in this test") };
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: None, ddd: Some((&dsk, &clips)) };
+        let guard = ddd_guard(&ctx).unwrap().unwrap();
+        assert_eq!((guard.frames as usize, guard.fps(), guard.name_str()), (RIKU_GUARD_FRAMES, 60, RIKU_GUARD.to_string()));
+        let step = |c: &Clip, b: usize, t0: f64, t1: f64| -> f64 {
+            let (x, y) = (c.sample(b, t0).r, c.sample(b, t1).r);
+            (0..3).map(|i| { let d = (y[i] - x[i]).to_degrees().rem_euclid(360.0); d.min(360.0 - d) }).fold(0.0, f64::max)
+        };
+        let mut worst = 0.0f64;
+        for f in 0..guard.frames as usize - 1 {
+            for n in ["chest1", "l_hand", "r_hand", "wep0", "l_uparm", "r_uparm"] {
+                worst = worst.max(step(&guard, rs.find(n).unwrap(), f as f64, f as f64 + 1.0));
+            }
+        }
+        eprintln!("DDD guard on Riku: worst turn {worst:.1} deg a frame");
+        assert!(worst < 45.0, "{worst}");
+    }
+
+    /// 0.184.6 (owner's install, `RECOM_GAME`; "as animação ficaram estranhas meio que flicando"): no bone of the body,
+    /// hands or blade turns (its local Euler channels) more in one KH1 frame than its source clip does in one (half a 30
+    /// fps frame), except Dark Riku's clips retargeted onto Riku. 0.184.4 squeezed the key moments and failed this.
+    #[test]
+    fn cast_clips_turn_no_faster_than_their_sources() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
+        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
+        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
+        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
+        let packs: std::cell::RefCell<std::collections::HashMap<u16, Ann>> = Default::default();
+        let get = |g: u16, name: &str| -> Result<Clip> {
+            let mut p = packs.borrow_mut();
+            let a = p.entry(g).or_insert_with(|| Ann::parse(&rd(&path(g, "ANN"))).unwrap());
+            Ok(a.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == name)).cloned().unwrap())
+        };
+        let step = |c: &Clip, b: usize, t0: f64, t1: f64| -> f64 {
+            let (x, y) = (c.sample(b, t0).r, c.sample(b, t1).r);
+            (0..3).map(|i| { let d = (y[i] - x[i]).to_degrees().rem_euclid(360.0); d.min(360.0 - d) }).fold(0.0, f64::max)
+        };
+        let bones = ["chest1", "head", "l_hand", "r_hand", "wep0", "l_uparm", "r_uparm", "l_arm", "r_arm"];
+        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
+        let k1 = install::kh1(&g, keys.clone()).unwrap();
+        let (am, ad) = (k1.read("xa_ex_1580.mset").unwrap(), k1.read("xa_ex_1580.mdls").unwrap());
+        let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
+        let ddd_data = crate::ddd::install_next_to(&g).map(|d| {
+            (crate::ddd::parse_skeleton(&crate::ddd::read(&d, &keys, crate::ddd::RIKU_PMO).unwrap()).unwrap(), crate::ddd::parse_pam(&crate::ddd::read(&d, &keys, crate::ddd::RIKU_PAM).unwrap()).unwrap())
+        });
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: Some((&am, &ad)), ddd: ddd_data.as_ref().map(|(k, c)| (k, c.as_slice())) };
+        let clips = riku_cast_clips(&ctx).unwrap();
+        let darks = dark_cast_clips(&ctx).unwrap();
+        for (k, c) in CAST_CLIPS.iter().enumerate() {
+            let src = ctx.clip_on(&c.source().dark, Skel::Dark).unwrap().unwrap();
+            let sstep = c.source().fps / 60.0;
+            let idx: Vec<usize> = bones.iter().filter_map(|n| ds.find(n)).collect();
+            let mut src_worst = 0.0f64;
+            let mut t = 0.0;
+            while t + sstep <= c.source().last {
+                for &i in &idx {
+                    src_worst = src_worst.max(step(&src, i, t, t + sstep));
+                }
+                t += sstep;
+            }
+            let mut worst = 0.0f64;
+            for f in 0..darks[k].frames as usize - 1 {
+                for &i in &idx {
+                    worst = worst.max(step(&darks[k], i, f as f64, f as f64 + 1.0));
+                }
+            }
+            // Riku's own (on his skeleton) the same when his source is his.
+            let r_worst = if let Src::Pack(g0, n0, Skel::Riku) = c.source().riku {
+                let src = get(g0, n0).unwrap();
+                let idx: Vec<usize> = bones.iter().filter_map(|n| rs.find(n)).collect();
+                let mut sw = 0.0f64;
+                let mut t = 0.0;
+                while t + SRC_STEP <= c.source().last {
+                    for &i in &idx {
+                        sw = sw.max(step(&src, i, t, t + SRC_STEP));
+                    }
+                    t += SRC_STEP;
+                }
+                let mut w = 0.0f64;
+                for f in 0..clips[k].frames as usize - 1 {
+                    for &i in &idx {
+                        w = w.max(step(&clips[k], i, f as f64, f as f64 + 1.0));
+                    }
+                }
+                assert!(w <= sw + 1.0, "{}: Riku's {w:.1} deg a frame, his source {sw:.1}", c.suffix);
+                Some((w, sw))
+            } else {
+                None
+            };
+            eprintln!("{}: Dark Riku's worst {worst:.1} deg a frame (source {src_worst:.1}); Riku's {r_worst:?}", c.suffix);
+            assert!(worst <= src_worst + 1.0, "{}: {worst:.1} deg a frame, the source {src_worst:.1}", c.suffix);
+        }
+    }
+
+    /// 0.184.1 (owner's install, `RECOM_GAME`): Riku's cast clips from the Dark Firaga clip: his Soul Eater points
+    /// where Dark Riku's does (the blade root `wep0`'s world x axis), and nobody travels.
+    #[test]
+    fn rikus_cast_clips_follow_dark_firaga() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
+        let df_ann = Ann::parse(&rd("PLAYER/1088/PL1088.ANN")).unwrap();
+        let df = df_ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == DARK_FIRAGA)).unwrap();
+        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
+        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
+        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
+        let packs: std::cell::RefCell<std::collections::HashMap<u16, Ann>> = Default::default();
+        let get = |g: u16, name: &str| -> Result<Clip> {
+            let mut p = packs.borrow_mut();
+            let a = p.entry(g).or_insert_with(|| Ann::parse(&rd(&path(g, "ANN"))).unwrap());
+            Ok(a.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == name)).cloned().unwrap())
+        };
+        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
+        let k1 = install::kh1(&g, keys.clone()).unwrap();
+        let (am, ad) = (k1.read("xa_ex_1580.mset").unwrap(), k1.read("xa_ex_1580.mdls").unwrap());
+        let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
+        let ddd_data = crate::ddd::install_next_to(&g).map(|d| {
+            (crate::ddd::parse_skeleton(&crate::ddd::read(&d, &keys, crate::ddd::RIKU_PMO).unwrap()).unwrap(), crate::ddd::parse_pam(&crate::ddd::read(&d, &keys, crate::ddd::RIKU_PAM).unwrap()).unwrap())
+        });
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: Some((&am, &ad)), ddd: ddd_data.as_ref().map(|(k, c)| (k, c.as_slice())) };
+        let clips = riku_cast_clips(&ctx).unwrap();
+        let darks = dark_cast_clips(&ctx).unwrap();
+        assert_eq!(darks.len(), CAST_CLIPS.len());
+        let world = |c: &Clip, sk: &RecomSkeleton, f: f64, bone: &str| -> (M3, [f64; 3]) {
+            let k = sk.find(bone).unwrap();
+            let mut chain = vec![k];
+            while sk.bones[*chain.last().unwrap()].parent >= 0 {
+                chain.push(sk.bones[*chain.last().unwrap()].parent as usize);
+            }
+            let mut u = crate::math::I3;
+            let mut p = [0.0; 3];
+            for &b in chain.iter().rev() {
+                let s = c.sample(b, f);
+                let w = crate::math::vm(s.t, &u);
+                p = [p[0] + w[0], p[1] + w[1], p[2] + w[2]];
+                u = m3(&rot_xyz(s.r[0], s.r[1], s.r[2]), &u);
+            }
+            (u, p)
+        };
+        assert_eq!(df.fps(), 30, "the Dark Firaga clip is 30 fps");
+        for (k, c) in CAST_CLIPS.iter().enumerate() {
+            assert_eq!(clips[k].frames as usize, c.len);
+            assert_eq!(clips[k].fps(), 60, "{}: one frame per KH1 frame", c.suffix);
+            assert_eq!((darks[k].frames as usize, darks[k].fps()), (c.len, 60), "{}: Dark Riku's", c.suffix);
+            if c.src != 0 {
+                continue;
+            }
+            assert_eq!(clips[k].name_str(), format!("p002_{}", c.suffix));
+            // Each clip's first frame is the reference (the Dark Firaga clip's time there for Dark's).
+            let rest_dark = world(df, &ds, c.times()[0], "wep0").0;
+            let rest_riku = world(&clips[k], &rs, 0.0, "wep0").0;
+            for (f, &t) in c.times().iter().enumerate().step_by(7) {
+                let (ud, _) = world(df, &ds, t, "wep0");
+                let (ur, _) = world(&clips[k], &rs, f as f64, "wep0");
+                // The blade turns as Dark's does from the clip's first frame.
+                let dd = m3(&ud, &tr(&rest_dark))[0];
+                let dr = m3(&ur, &tr(&rest_riku))[0];
+                let cos = dd[0] * dr[0] + dd[1] * dr[1] + dd[2] * dr[2];
+                if k == 1 && f % 14 == 0 {
+                    eprintln!("{} frame {f} (Dark Firaga {t:.1}): blade turn cos {cos:.3}", c.suffix);
+                }
+                assert!(cos > 0.9, "{} frame {f}: blade turn differs (cos {cos:.2})", c.suffix);
+                let (_, hips) = world(&clips[k], &rs, f as f64, &rs.bones[1].name.clone());
+                assert!(hips[0].abs() < 0.05 && hips[2].abs() < 0.05, "{} frame {f}: no travel {hips:?}", c.suffix);
+            }
+        }
+    }
+
+    /// 0.183.2: with KH1 Riku's guard, Dark Riku's own packs (201 / 211) get it and its recoil on his skeleton.
+    #[test]
+    fn dark_rikus_own_pack_gets_the_guard() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let k1 = install::kh1(&g, keys.clone()).unwrap();
+        let (mset, mdls) = (k1.read("xa_ex_1010.mset").unwrap(), k1.read("xa_ex_1010.mdls").unwrap());
+        let arc = install::recom_archive(&g).unwrap();
+        let src = GuardSource { mset: &mset, mdls: &mdls, ansem: None, ddd: None };
+        for &(riku, dark, skin) in &SKIN_GROUPS {
+            let b = build_with(&arc, &keys, riku, dark, skin, Some(&src)).unwrap();
+            let (_, bytes) = b.files.iter().find(|(p, _)| *p == path(dark, "ANN")).expect("Dark Riku's own pack");
+            let ann = Ann::parse(bytes).unwrap();
+            let own = Ann::parse(&install::read_recom(&arc, &keys, &path(dark, "ANN")).unwrap()).unwrap();
+            assert_eq!(ann.slots.len(), own.slots.len() + 2 + CAST_CLIPS.len(), "group {dark}: his own slots, then the guard's two and the six cast clips (0.184.1)");
+            for name in [DARK_GUARD, DARK_RECOIL] {
+                let c = ann.find(name).and_then(|i| ann.slots[i].clip.as_ref()).unwrap_or_else(|| panic!("group {dark}: {name}"));
+                assert!(c.frames > 30, "{name}: {} frames", c.frames);
+            }
+            // 0.185.5: the Guard's whoosh and random grunt at frame 0 in Riku's, Dark Riku's and the skin's SES, and every
+            // cast voice picks from `CAST_VOICES`.
+            for (g, guard) in [(riku, RIKU_GUARD), (dark, DARK_GUARD), (skin, RIKU_GUARD)] {
+                let (_, bytes) = b.files.iter().find(|(p, _)| *p == path(g, "SES")).unwrap_or_else(|| panic!("group {g}: SES"));
+                let ses = crate::ses::parse(bytes).unwrap();
+                let at = |e: &[u8; 0x50], o: usize| u32::from_le_bytes(e[o..o + 4].try_into().unwrap());
+                let e = ses.iter().find(|e| e.name() == guard).unwrap_or_else(|| panic!("group {g}: no {guard}"));
+                assert!(e.events.iter().any(|x| at(x, 0) == 1 && at(x, 0x18) == 0), "group {g}: {guard}'s whoosh");
+                assert!(e.events.iter().any(|x| at(x, 0) == 3 && at(x, 0x28) & 4 != 0 && at(x, 0x18) == 0), "group {g}: {guard}'s grunt");
+                let prefix = if g == dark { "p003_" } else { "p002_" };
+                for (ci, c) in CAST_CLIPS.iter().enumerate() {
+                    let n = format!("{prefix}{}", c.suffix);
+                    let Some(e) = ses.iter().find(|e| e.name() == n) else { continue };
+                    for x in e.events.iter().filter(|x| at(x, 0) == 3) {
+                        assert_eq!((at(x, 4), at(x, 0x28) & 4), (CAST_VOICES[ci % 6], 0), "group {g}: {n}'s voice is its spell's, fixed");
+                    }
+                }
+            }
+        }
     }
 
     /// With the owner's install (`RECOM_GAME`): Riku's guard clip lowers the guard as the defence
@@ -987,3 +2498,11 @@ mod tests {
         }
     }
 }
+
+
+
+
+
+
+
+

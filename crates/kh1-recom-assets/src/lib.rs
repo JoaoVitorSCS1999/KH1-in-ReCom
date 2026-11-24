@@ -48,6 +48,8 @@ pub mod camp_rows;
 pub mod shop_tabs;
 pub mod command_menu;
 pub mod convert;
+pub mod ddd;
+pub mod ddd_hair;
 pub mod eet;
 pub mod effects;
 pub mod sounds;

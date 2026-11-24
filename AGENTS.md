@@ -11,6 +11,372 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 356 (fork branch Re-Re-Reverse/Rebirth): Riku's spells cost MP again (`riku_free_magic` defaults to off), version 0.187.1 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim: "pode colocar de volta tbm o custo de mana pra executar as magias, precisa comitar e dar push com as regras para td mundo poder jogar".
+
+- **Change** (`settings`): `riku_free_magic` defaults to off (was on for the 0.184.0 test); the template line reads `off`. Riku's and Dark Riku's spells pay Sora's KH1 MP costs and the menu greys them for MP, as for Sora. The key stays as a test switch.
+- The fork owner's own `kh1-recom.ini`: `riku_free_magic = off` (backup `kh1-recom.ini.bak-0.187.1`).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+## Stage 355 (fork branch Re-Re-Reverse/Rebirth): Riku's unlocked spells in his Customize picker, version 0.187.0 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim: "ficou perfeito! o cabelo, precisa poder em customize também adicionar o comando das mangias quando ela são desbloqueadas". Answers to two questions: the seven of Sora's ("As 7 do Sora"); unlocked "Pela história do Riku" (see Assumption).
+
+- **Change** (`win::command_menu::riku_spell_levels`, `win::keyblades::Page::open`): Riku's Customize page no longer passes `levels = [0; 7]` to `customize::picks`; it reads `riku_spell_levels()`, the same answer his command menu uses (Sora's seven at level 3 while the magic is in). The picker lists his unlocked spells in KH1's order, then his sleights, then None; a slot holds a spell as for Sora (`sc::Slot::Spell`).
+- **Assumption**: no story rule for Riku's spells exists in the mod yet (0.184.0 unlocked all seven on the owner's ask), so every spell is unlocked. When a rule is written, only `riku_spell_levels` changes and both the menu and the picker follow.
+- **Checked**: build, tests. **Not checked**: in game (the picker's rows, an L1 slot casting the spell).
+
+## Stage 354 (fork branch Re-Re-Reverse/Rebirth): DDD hair drawn from both sides (no see-through bands from behind and above), version 0.186.1 (2026-11-24)
+
+Coordinator's report of the 0.186.0 test in game, verbatim in meaning (relayed, not the owner's words): the hair "loads and draws in game", looks almost right from the front, but from behind and above there are "empty bands, like missing strips, across the back and top of the head", the scalp and nape skin shows through and "some zig-zag bands look see-through"; gaps at other angles too.
+
+- **Measured** (Checked (files), a debug render in `ddd_hair`'s test, out in the workspace's `local/assets/recom/riku-hair/out/hair_{front,side,back,top,bottom_back}[_cull].png`): drawn two-sided (every triangle, no culling) the output hair is closed from behind and above (one small hole over the left side, see below). Drawn with culling by the facing flag (a triangle passes when its strip-order cross points to the viewer for flag 0x20, away for flag 0) it shows dark bands down both sides of the back and the crown, i.e. the reported symptom. DDD's hair is layered shells and thin shards: of its 343 triangles about a third have their winding front pointing into the head (corrected-order cross vs the outward direction: 59 + 51 of 343 inward), and the flag rule used in 0.186.0 (0x20 when the strip-order cross points away from the head centre; 96.6 % on Re:CoM's own face triangles) cannot give both sides of a shard.
+- **Cause** (Checked (files) for the geometry, Assumption that the game culls by the flag): the one-sided copy of every DDD triangle. Not the 164 DDD skin triangles (all lie within 3.4 cm of a kept Re:CoM face triangle; the Re:CoM face island still covers the whole skull), not the 306 degenerate joins (strip joins, no area), not `segments` / `pack` (the output holds exactly the kept and the DDD triangles; the test counts them), not the UV islands (all 22 unanimous), not part 2 (the proxy).
+- **Change** (`ddd_hair::with_ddd_hair`): each DDD hair triangle is written twice in part 3, the second copy with the other facing flag (`^ 0x20` on its drawing vertices, same vertices), so exactly one copy passes a facing cull from any side; with no cull the two copies are identical and draw the same pixels. Part 2 keeps one copy. 686 DDD triangles in part 3 instead of 343 (packets grow by about 8; the cap is unchanged). The test renders now also give back, top and bottom views, with and without the culling simulation.
+- **Checked**: `cargo test -p kh1-recom-assets` (the swap's test now expects 2 x 343 DDD triangles, 366 removed, the kept ones byte for byte), the culled back and top renders close the bands. **Not checked**: in game (that the engine culls by this flag, and that the second copy shows the other side: both are the Stage 353 Assumption on the flag). Known left: a small hole seen only from straight above over the left side of the head (x about -0.13 m, z -0.14 .. -0.07 m): there Re:CoM's long `r_hair6` strand covered it and DDD's hair has nothing; not changed.
+
+---
+
+## Stage 353 (fork branch Re-Re-Reverse/Rebirth): Riku's hair from DDD, a Hair row on the Costumes page, version 0.186.0 (2026-11-24)
+
+Fork owner, 2026-11-23 / 24, verbatim: "é possível implementar uma customização de personagem onde trocaria só o cabelo? e teria uma variação para o cabelo do DDD?"; "sobre o cabelo tente implementar e use um agente para escolher o melhor lugar para implementar no menu"; on the plan (scope: his default attire first): "sim".
+
+- **Research** (the workspace's `knowledge/DDD/ddd-riku-hair.md`, Checked (files) unless marked): Re:CoM Riku's hair is not on its own packets (part 3: 99 greedy strip packets, hair and head triangles share them), so it is removed per triangle; `PL0101`'s atlas `n_zz110_01` (1024²) holds face, hair, skin and trousers. DDD's `p_ex020.pmo` (PMO v4; OpenKH's vertex code is wrong, the layout is in the note) has 343 hair triangles on its atlas `p_ex020_00`; its `atama` / `L_kamiB` sit where Re:CoM's `head` / `l_hair4` do.
+- **Change** (asset step: `ddd::{parse_pmo, read_full}`, new `ddd_hair::{with_ddd_hair, DddHairSource, RIKU_0101}`, `riku_skin::{HAIR_GROUPS, build_hair, Made.hair}`, `step.rs`, `keyblade::new_resource_names`): groups 181 (Soul Eater) and 191 (Keyblade of Heart) are group 101's files with Re:CoM's hair triangles (366 of part 3; the island-based classifier) replaced by DDD's 343, each corner on its dominant DDD bone mapped to a Re:CoM hair bone (one bone per vertex: DDD's two-bone blends round to the heavier), on a rebuilt atlas `rk_hair_0101` (Re:CoM's hair islands cleared, DDD's packed in). Part 2 (the untextured twin: a low-poly proxy, 1074 triangles) gets the same swap. Manifest rows carry `"hair": 1`.
+- **DLL** (`riku_skin::{Skin.hair, Look.hair (bits 4..5), group_for}`, `win::riku_skin::chosen`, settings `riku_hair = recom | ddd`, `menu::Item::Hair`): the Costumes page's second row "Hair" (Re:CoM / DDD), applied at the next room or battle like the costume (and live from the camp as the Keyblade change is, no transformation). A look with no hair group (Dark Mode, Halloween Town) shows Re:CoM's hair. The ui-ux agent's placement (menu.rs, 5-row limit not reached).
+- **Checked**: tests (`the_hair_groups_are_built_from_rikus_101`, the swap's own six in `ddd_hair`, the DLL's manifest / group tests), the agent's renders (front and side: hair on the head, no gap at the scalp, hairline or ears; two or three small notches in the bangs), `tools/test-affected.sh`, the Windows build. **Not checked**: in game; whether Re:CoM's loader and draw path accept the rebuilt packets, how the hair moves with Re:CoM's hair bones (rigid), the 256-colour TIM2's quality (the PC shows the HD DDS), Halloween Town (`PL0111`) and Dark Riku's hair (not built). The asset step's code changed: the first start builds again (needs the 2.8 collection next to the game, else logged and skipped).
+
+---
+
+## Stage 352 (fork branch Re-Re-Reverse/Rebirth): Riku's own effect per spell (Blizzard, Thunder, Aero, Gravity, Stop), version 0.185.8 (2026-11-24)
+
+Fork owner, 2026-11-23, verbatim: asked "os efeitos das magias teria variações melhores?"; offered (a) Riku's own effects that fit each spell or (b) KH1's cast effects: "o audio que toca sobre os efeitos é A" (reads as: the effects, option A).
+
+- **Source** (the searcher's note, the workspace's `knowledge/ReCoM/recom-m13-recom-fx.md` § 8.4, Checked (files + exe): ids, bones, sounds, loops, what is loaded with Riku (`EF1500`, `EF1600`; not the sleight packs); how each program looks and the fit to the spell: Assumption, not seen in game).
+- **Change** (asset step, `riku_skin::{spell_events, Fx, FxBones, cast_events}`; DLL `win::movement` request): Fire keeps Dark Firaga's effects and Cure the heal sparkle (the owner liked it). Blizzard: `ex_1580` 38 on Root (+ 39 on the chest, + 10 on the hand at level 3, 38 at 1.5). Thunder: 19 on the chest 10 frames before the release (+ 11 on the hand, + 42 on the chest as a loop). Aero: `speed_break` 0 (+ 5, + the blade's 8 as a loop and 11). Gravity: 36 on Root 30 frames before, 7 on Root (0.5 / 0.7 / 0.9) (+ 3 at level 3). Stop: 39 (+ 18 at 0.6, + 38 at 1.5). The darkness cloak and the blade's aura are gone from these spells. Thunder / Aero and Gravity / Stop share a clip: Aero and Stop play EET variants 4..6 (the DLL passes `level + 3` for requests `0x3C` / `0x89` / `0x3B` / `0x88`), Thunder and Gravity 1..3. Effect sounds come with each program's ESE row.
+- **Checked**: tests (`rikus_cast_clips_carry_dark_firagas_events` now checks Thunder's `ex_1580` 19 at its frame 20, more events per level on variants 1..3 and 4..6, no Dark Firaga flash), `tools/test-affected.sh`, the Windows build. **Not checked**: in game. Assumption: 4..7 programs on one cast do not cost frames (Barrage already puts about 17 on one clip). The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 351 (fork branch Re-Re-Reverse/Rebirth): the blade's roll in DDD's clips, one fixed voice per spell, version 0.185.7 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim (on the DLL after 0.185.4): "nessas animações a lamina ainda está sendo segurada do lado errado!, e os audios ficaram muito aleatórios precisa fazer mais sentido com a magia"; on the effects: "o audio que toca sobre os efeitos é A" (effects: Riku's own, one per spell); also asked for a hair-only customisation (see the next stages).
+
+- **Measured** (Checked (files): a probe on the owner's install, removed after): Riku's Soul Eater mesh (part 1, 508 vertices, all on `wep0`) points along `wep0`'s −x (far 5 % of vertices at (−0.74, −0.05, 0.0) m). In DDD's clips (`315` / `317` / `220`, built on Riku) that tip stays within 20..30° of DDD's blade tip (`R_buki` +x) and within 7..70° of the forearm, the range Re:CoM's own sleights have (Impulse 21..77°, Maelstrom 11..67°, Barrage 14..78°). So the tip's direction is not what is wrong; the side that faces out is (Assumption: the roll about the blade's axis; 0.185.3 and 0.185.4 both read "do lado errado").
+- **Change** (asset step, `riku_skin::flip_blade_roll`, `CastCtx::clip_on`): in every DDD clip `wep0` (and the chain under it) is turned half a turn about its own x ([`BLADE_FLIP`]) on top of the stance's grip. If it is still wrong in game, the roll was not it: say which way the tip points.
+- **Voices** (`riku_skin::CAST_VOICES`, `cast_events`): 0.185.5's random pick from four lines is replaced by one fixed line per spell, from the sleight that casts the same kind of thing: Fire 3035 (Dark Firaga's own), Blizzard 3036, Thunder / Aero 3033, Cure 3021 (Holy Burst's), Gravity / Stop 3034 (Checked (files) which sleight plays which number, § 8.3 of the workspace's `recom-m13-recom-fx.md`; what each line says: Assumption, not listened to). `ses::randomize` removed.
+- **Checked**: tests (grip = the stance's turned by `BLADE_FLIP` on `315` / `317` / `220` / `316` / `318`; the voices fixed per spell in Riku's, Dark Riku's and the skin's SES), the Windows build. **Not checked**: in game. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 350 (fork branch Re-Re-Reverse/Rebirth): DDD's air casts back on the air rows, version 0.185.6 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: asked "da para implementar as animação de quando ele está no ar castando magia e defendendo ou se implementar vai substituir as animações de quando está no chão?"; told the air rows have their own clips (0.185.2 put the ground ones on them) and that KH1's Guard is ground-only: "1 sobre a guarda no ar não precisa implementar", "implementa os pontos anteriores pra eu testar".
+
+- **Measured** (Checked (files): DDD's `center` + `koshi` off rest): `316` / `318` start with the body 0.18 m above DDD's rest and move −0.32..+0.20 m from there (`316` also 0.54 m forward and 0.35 m back, which `retime` drops: no travel on unplanted clips).
+- **Change** (asset step, `kh1_recom_assets::riku_skin::{DDD_THRUST_A, DDD_RAISE_A, from_start, CastCtx::clip_on}`): the six air cast clips (`p002_233..238`, Dark Riku's `p003_`) play DDD's air thrust `316` (key 8..12) and raise `318` (as `317`'s keys) again, with Riku's grip (0.185.4) and the body's move from its rest height (`from_start`: frame 0's offset taken off `ex_1010_sk`). The ground clips are unchanged. No air Guard (KH1's Guard needs the ground: the workspace's `kh1-sora.md` § Guard).
+- **Checked**: tests (`ddd_ground_motions_keep_rikus_feet_down`: `316` / `318` start at the rest height 0.974, the grip the stance's every frame, the five air sources on `316` / `318`; the ground checks as before), `tools/test-affected.sh`, the Windows build. **Not checked**: in game; Assumption: Re:CoM's air rows keep the body at its rest height. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 349 (fork branch Re-Re-Reverse/Rebirth): a sound on Riku's Guard, his cast shouts varied, version 0.185.5 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim (on 0.185.3 in game): "falta audio quando o riku defende"; "os sons na magia ele está usando o mesmo grito, tem como dar uma variada".
+
+- **Cause (Guard)** (Checked (files): the built `PL0101.SES` / `PL0201.SES`): Riku's and Dark Riku's Guard clips (`p002_225`, `p003_225`) had no SES entry, so they played no sound; Sora's (`p001_225`) has a whoosh and a grunt at frame 0 (`ses::add_kh1`).
+- **Cause (casts)** (Checked (files)): every cast clip copies Dark Firaga's single voice 3035 (`cast_events`).
+- **Change** (asset step, `kh1_recom_assets::ses::{guard_entry, randomize}`, `riku_skin::{CAST_VOICES, cast_events, build_with}`): the Guard gets a whoosh and a random grunt at frame 0 from each one's own swing sounds (Riku: `p002_044`'s 1333 and its grunts 3011 / 3014 / 3013; Dark Riku and the skin: `p003_056`'s 1332, `p003_053`'s 3005 / 3006). The cast voice is random (SES flag 4, Re:CoM's picker never plays the same line twice in a row) from 3035, 3036, 3021, 3027 at 25 % each: the shouts of Riku's and Dark Riku's own attack sleights (the workspace's `recom-m13-recom-fx.md` § 8.3). Which lines suit a cast: Assumption (not listened to). The guard recoil `p002_226` still has none.
+- **Checked**: tests (`dark_rikus_own_pack_gets_the_guard` on the owner's install now checks the Guard's whoosh and grunt in Riku's, Dark Riku's and the skin's SES and the cast voices' table), `tools/test-affected.sh`, the Windows build. **Not checked**: in game. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 348 (fork branch Re-Re-Reverse/Rebirth): Riku's own grip on the Soul Eater in DDD's clips, version 0.185.4 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim (on 0.185.3 in game, two screenshots: the battle stance, the blade down behind the hand; a DDD clip, the blade up in front of it): "ficou quase perfeita as animações do Riku guarda e magias, só que ele está invertendo a lamina", "posição correta, invertida".
+
+- **Cause**: both 0.185.2 (`wep0` on `R_buki`'s world axes) and 0.185.3 (the rest-relative map from `R_buki`) took the blade's turn from DDD's weapon bone, and DDD holds its blade the other way round in the hand from Riku's battle stance (Stage 346: in the hand's frame (0.37, −0.93, 0.05) against Re:CoM's (−0.35, 0.93, −0.05)), so the blade turned over in his hand when a DDD clip began. Checked (in game, the owner, on 0.185.3).
+- **Change** (asset step, `kh1_recom_assets::riku_skin::CastCtx::clip_on`): in DDD's clips `wep0` is no longer mapped to `R_buki`; it (and `k10`, `k11` and the blade bones, as before) takes the battle stance's local pose under its parent, so the grip is the stance's on every frame and the blade follows DDD's hand. Dark Riku's from Riku's, as before. `crate::ddd::RIKU_FROM_DDD` keeps the pair (the bone map's record).
+- **Checked**: tests (on the owner's install: `ddd_ground_motions_keep_rikus_feet_down` now checks `wep0`'s rotation relative to `r_hand` is the stance's on every frame of `315` / `317` / `220`, off by 0.0000, the feet checks as before), the Windows build. **Not checked**: in game; whether the Guard `220` reads well with the blade held Riku's way (DDD's own pose holds it across the chest). The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 347 (fork branch Re-Re-Reverse/Rebirth): the Soul Eater back on the rest-relative map, version 0.185.3 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim (on 0.185.2 in game): "ficou perfeita a animação mas a espada está invertida e chega a atravessar o Riku".
+
+- **Cause**: 0.185.2's `ddd::weapon_aligned` gave `wep0` `R_buki`'s world axes, turning the blade 180° from the rest-relative map of 0.185.0 / 0.185.1. Its reasoning (Riku's blade bones `k9..k1` along `wep0`'s +X against DDD's tip `Z_00` along `R_buki`'s +X) does not hold for the meshes: Checked (in game, the owner). Which of the two bone readings is wrong: Assumption (not checked). The Guard's outward blade in the earlier screenshot was 0.185.0's air clip `221`, not an axis error.
+- **Change** (asset step, `kh1_recom_assets::riku_skin::CastCtx::clip_on`; `ddd::weapon_aligned` removed): the blade by the rest-relative map again. The animations (0.185.2's body on `ex_1010_sk`, planted feet, ground clips only, Guard `220`) are unchanged.
+- **Checked**: tests (on the owner's install: `ddd_ground_motions_keep_rikus_feet_down` now checks the blade bones stay opposite to DDD's `R_buki` +X, cosine 1.000, with the feet and `hip` checks as before), the Windows build. **Not checked**: in game. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 346 (fork branch Re-Re-Reverse/Rebirth): DDD's body height where Re:CoM moves it, the Soul Eater along DDD's blade, ground clips only, version 0.185.2 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim (in game, three screenshots; the DLL installed in OpenKH was still 0.185.0, as 0.185.1 had not been copied there: the Guard with the blade held out to Riku's right and a foot up; Fire and a raise cast crouched above his shadow): "ficou horrível, é para ser a animação de defesa!", "as anims de magia ainda muito desalinhadas"; "acho que na ultima sessão a ia entendeu de usar as animações do RIku do DDD que são executadas no ar, mas não deu muito certo, tem que usar as animações executadas no chão mesmo"; "para a defesa e as magias".
+
+- **Cause (floating)** (Checked (files)): DDD moves the whole body by translating `koshi` and `hara` together (both under `center`); 0.185.0 left the body at its rest height (rotations only) and 0.185.1 carried the move onto Riku's `hip`, but no Re:CoM clip moves `hip` (in all of `PL0101.ANN` only bones 0 / 1 and the blade's `k11` move their translation; the body's height is on `ex_1010_sk`, the parent of `hip` and `waist`). 0.185.1's tests posed every bone and passed (Assumption: the game ignores `hip`'s translation; not seen in game, the screenshots are 0.185.0's).
+- **Cause (Guard's blade)** (Checked (files)): DDD's blade runs along `R_buki`'s +X (`w_ri010.pmo`: the tip `Z_00` at x +0.78, the keychain at −X), Riku's along `wep0`'s +X (`k9..k1`); at rest they point opposite ways (`wep0` = diag(−1, 1, −1) · `R_buki`) and the rest-relative retarget kept that turn on every frame: the converted blade was DDD's negated in the hand's frame (Guard frame 18: (−0.04, 1.0) for DDD's (0.04, −1.0)), so the Guard's blade, which DDD holds across the chest, stuck out to Riku's right. The body and arms matched DDD to the millimetre.
+- **Change** (asset step, `kh1_recom_assets::riku_skin::{carry_translation, plant_feet, retime, DDD_THRUST_A, DDD_RAISE_A}`, `ddd::{CARRIED_TRANSLATION, weapon_aligned}`): the body's translation (DDD's `center` + `koshi` off rest) goes on `ex_1010_sk`, and the feet planting moves `ex_1010_sk`; the planted clips keep its x / z sway when retimed (`retime(.., keep_sway)`; Root stays put); `wep0` takes `R_buki`'s world axes as they are (DDD's skeleton for the retarget with `R_buki`'s rest turned to `wep0`'s; wrong in game, reverted in 0.185.3); the air casts play the ground clips `315` / `317` too (no more `316` / `318`). The Guard stays `220` (on the ground; its blade now across the chest in front, as DDD's).
+- **Checked**: tests (on the owner's install: `ddd_ground_motions_keep_rikus_feet_down`: the lower foot at most 0.21 m on `315` / `317` / `220` and 0.22 m on the cast clips, `hip`'s translation at rest on every built clip and the Guard, Riku's blade within cosine 0.99 of DDD's on every frame (1.000)), the Windows build. **Not checked**: in game. Assumption: the blade turns over in the hand during the blend into and out of a DDD clip (Re:CoM's stance holds it the other way round: in the hand's frame (−0.35, 0.93, −0.05) against DDD's (0.37, −0.93, 0.05)). The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 345 (fork branch Re-Re-Reverse/Rebirth): Riku's feet on the floor in DDD's casts, his Guard on DDD's ground block, version 0.185.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim (on 0.185.0 in game, with two screenshots): "a animação de defesa nada a ver, e precisa ajustar as animações de magia, pq os pé do riku ficam suspensos usando as animações e precisa ajustar".
+
+- **Cause (feet)** (Checked (files): the clips posed on DDD's skeleton and on Riku's, frame by frame): DDD crouches by moving its hip bone `koshi` (0.88 → 0.65 m in `315` / `317`), and the rotation-only retarget kept Riku's `hip` at its rest height, so his feet rose up to 0.5 m whenever DDD crouched. And DDD's ground thrust `315` hops: both feet leave the floor on frames 1..7 (up to 0.45 m) as the hips go 0.6 m forward, then the hips drop the distance back in one frame at 14 (the forward travel is DDD's code's, not the clip's: Assumption). The workspace's DDD note § 6 ("ankles at 0.21 all clip long") measured without `koshi`'s translation; corrected there.
+- **Cause (guard)** (Checked (files)): 0.185.0's Guard `221` is in the air the whole clip (hips 1.0..1.19 m, feet 0.4..0.8 m up; its last frame is the air thrust `316`'s first), and its rebound `224` is a back flip (feet up to 2 m), as is `223`; `222` is a 2.4 m dash. `220` (36 frames, no effect) is the only ground one: the hips still, the feet planted, the weapon hand up in front from frame 3 to about 24, the free hand back. Assumption: `220` is DDD's ground Block (its pose; `221`'s guard effect `P_AC_GUD_GUR1` reads as the air block).
+- **Change** (asset step, `kh1_recom_assets::riku_skin::{carry_translation, plant_feet, ddd_guard, DDD_GUARD}`, `ddd::{CARRIED_TRANSLATION, GROUND_CLIPS}`): Riku's `hip` takes `koshi`'s translation off rest (the two rests coincide there); on DDD's ground clips (`315`, `317`, `220`) the hip is lowered as much as the lower foot rises above the first frame's floor, a foot standing on the floor does not slide (the hip takes its move), and the slide left at the end is spread back so the clip ends where it began: `315`'s hop becomes a step in and back. The air casts (`316`, `318`) are unchanged. The Guard is `220` on KH1's Guard timing (as 0.185.0 did with `221`); the recoil is KH1 Riku's again (0.158.0's), DDD having no ground one. Dark Riku's from them, as before.
+- **Checked**: tests (on the owner's install: `ddd_ground_motions_keep_rikus_feet_down`: on `315` / `317` / `220` the lower foot never above 0.21 m (DDD's own reach 0.38 / 0.26 / 0.21), each foot ends as far from its start as DDD's; the six ground cast clips at most 0.22 m; `ddd_guard_on_riku`), the Windows build. **Not checked**: in game; whether a step in the thrust reads well. The asset step's code changed: the first start builds again. Never installed: 0.185.2 (Stage 346) replaces it.
+
+---
+
+## Stage 344 (fork branch Re-Re-Reverse/Rebirth): Riku's cast motions and Guard from KH Dream Drop Distance, version 0.185.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "tive uma ideia... as animações faltante do RIku vc vai pegar do KH DDD"; "a pega todas as magias b pode"; on the choice (DDD has two cast gestures): "a" (faithful to DDD, ground and air apart); "melhor ainda, a animação de guarda do Riku também está presente no DDD, implementa ela!".
+
+- **DDD** (the workspace's `knowledge/DDD/ddd-riku-animations.md`, Checked (files) on the owner's 2.8 install by the asset-analyst and the main session): `Image/dt/kh3d_*.hed / .pkg` are the 1.5+2.5 archive format and cipher with the same key table; DDD Riku's main pack `chara/pc/p_ex02/anm/rt/bin/p_ex02_000.pam` (PAM v2: 178 clips at 30 fps, names in a string table) and his skeleton in `p_ex020.pmo` (PMO v4, 44 bones); a bone's local S · Rx · Ry · Rz + T, row vectors, radians (Re:CoM's clips' own convention); his rest skeleton is Re:CoM Riku's for the legs, hips, arms and head (same positions and frames). His casts by their effect lists: `315` / `316` (ground / air) the forward thrust (Fire, Blizzard), `317` / `318` the weapon hand raised overhead (Cure, Stop, Zero Gravity, the thunder codes); `221` his Block (`P_AC_GUD_GUR1`), `224` its rebound (`P_AC_COM_REB0`; Assumption: from the effect names).
+- **Asset step** (`kh1_recom_assets::ddd`: the reader of the PAM / PMO formats and the bone map `RIKU_FROM_DDD`; `riku_skin::{Src::Ddd, Skel::Ddd, CastCtx::ddd, ddd_guard, CAST_SOURCES 9..18, CAST_CLIPS (12), CURE_CLIPS}`; `step.rs` reads DDD next to the game): twelve cast clips: Fire's wind-up and release, Blizzard (thrust), Thunder / Aero, Cure, Gravity / Stop (raise), on the ground (315 / 317) and in the air (316 / 318), on Riku by the bone map (his fingers, belts, the Soul Eater chain and the bones DDD lacks from his stance; the weapon by DDD's `R_buki`), on Dark Riku through Riku; KH1's timing as before (each key moment on KH1's release frame, its own speed, no travel); Riku's Guard (`p002_225`) is DDD's 221 on KH1's Guard length (up by 10, held to 37, lowered), its recoil (`p002_226`) DDD's 224 at its own speed; Dark Riku's from them. Without the 2.8 collection next to the game: the 0.184.x motions and KH1 Riku's guard, as before (logged).
+- **DLL** (`crate::riku::{CAST_ROWS, CAST_CLIPS, DARK_CAST_CLIPS, cast_row}`): rows 0x3B..0x46 (both tables `p002_000` / `p003_000` up to 0x46, Checked (exe)); the air requests play the air rows.
+- **Checked**: tests (on the owner's install: `ddd::tests::reads_ddd_rikus_pack_and_skeleton`: 178 clips, 44 bones, clip 000 rebuilds the PMO rest; `ddd_guard_on_riku`: 12° a frame at most; the turn and key-moment tests on the twelve; `riku_every_spell_level_and_air_casts_fully`), the Windows build. **Not checked**: in game. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 343 (fork branch Re-Re-Reverse/Rebirth): Riku's Cure on his own heal motion, Aero on KH1 Riku-Ansem's sweep, Blizzard after Impulse's leap, version 0.184.9 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "blizzaga ainda ficou estranho mas stopga ficou perfeito, engraçado pq em teoria o blizzaga ta usando a mesma anim de firaga"; "a animação do Sora de Curaga pro RIku ficou muito estranho tenta pensar fora da caixa"; "Aeroga tbm ta flicando um pouco"; "quando disse que a anim do sora pro riku ficou estranho quis dizer que não combinou mesmo".
+
+- **Blizzard** (Checked (files)): its motion is Riku's Impulse (`p002_061`), not Dark Firaga; Impulse's Soul Eater bones are still under the hand the whole clip; its first 8 frames are a leap back (the travel is out, the legs' jump and landing were not). Now from frame 9, after the landing (`CastSource::start`).
+- **Cure** (Checked (files)): Riku's own heal motion in Re:CoM, his item use `p002_034` (56 f at 30, on the ground: a crouch 8..16, the left hand raised over his head 18..22, held to 32), whose heal sparkle 0.184.8 already plays; it hides and turns the Soul Eater (scale 0): the blade is kept in his hand as at its first frame (`freeze_blade`, now Riku's `wep0` / `k10` / `k11` too; the worst turn a frame fell from 161° to 27°). Dark Riku: the same motion retargeted. Sora's Re:CoM Cure is out ("não combinou").
+- **Aero** (Checked (files)): Maelstrom's spin rose into the air; now KH1 Riku-Ansem's request 223 (`xa_ex_1580.mset`, 73 frames at 60, on the ground: both hands sweep, the left from behind to the front 40..48), its blade held; Maelstrom without KH1's files. Its worst turn: 6° a frame.
+- **Asset step**: `kh1_recom_assets::riku_skin::{CAST_SOURCES (9), CastSource::start, ITEM_USE, freeze_blade}`.
+- **Checked**: tests (the turn test on the owner's install: every clip within its source's speed), the Windows build. **Not checked**: in game. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 342 (fork branch Re-Re-Reverse/Rebirth): no shaking blade on level 3; Riku's Cure with his own heal sparkle, version 0.184.8 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "stopga a espada do RIku ta vibrando toda, e o  efeito de curaga ficou muito estranho e o efeito de cura com aqueles sininhos ficaram muito comicos era bom achar outro efeito melhor"; "blizzaga tbm ficou um treme treme da espada muito estranho".
+
+- **Cause (blade)**: both are level 3 on different motions (Stop: KH1 Riku-Ansem's, Blizzard: Riku's Impulse): 0.184.5's level-3 blade aura (`weapon_ora` 0 on `wep0`, the darkness Riku's sleights put on the Soul Eater) reads as a shaking blade (Assumption: from the owner's two reports, not seen).
+- **Change** (asset step, `kh1_recom_assets::riku_skin::{cast_events, freeze_blade, CURE_CLIP}`): level 3 keeps the cloak and the 1.5 × flash, without the blade's aura. A KH1 motion converted onto Dark Riku's skeleton keeps its blade bones (`wep0`, `wep1`, `wep2` and under `wep0`) at their first frame under the hand (the conversion's weapon curves are not trusted). Cure's clip keeps only the voice (no dark glow, flash, cloak or aura on a heal).
+- **Change** (`win::magic::{release_cure, start_cast}`): Riku's Cure plays his own heal sparkle, `always` 1 (the one his item use `p002_034` plays at frame 37; Checked (files)), on his bone 0 at Re:CoM's Cure offset, once per level (Cura twice, Curaga three times), instead of Re:CoM's `cure_all` (its bells) and its charge on the blade. Sora's Cure is unchanged.
+- **Checked**: tests, the Windows build. **Not checked**: in game. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 341 (fork branch Re-Re-Reverse/Rebirth): Cure and Stop on new motions (Sora's Re:CoM Cure, KH1 Riku-Ansem's outstretched hand), version 0.184.7 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "curaga e stopga ainda ficaram muito estranhos" (earlier: "se precisar pode usar animações do KH1").
+
+- **Cause** (Checked (files): the clips' hips and hands): Cure's Holy Burst start (`p002_075`) and Stop's Barrage crossing (`p002_070`) are sleight phases in the air: the hips rise from 0.7 to 1.4 m, so Riku floated and kicked while casting.
+- **Search** (Checked (files), the owner's install): KH1 Riku-Ansem's `xa_ex_1580.mset` (on Dark Riku's skeleton, `ex_1580_sk`) and KH1 Riku's `xa_ex_1010`, every request converted and measured; Sora's Re:CoM cast clips `p001_061..067`. Ground motions with a cast's hand: Riku-Ansem's request 225 (49 frames at 60 fps: the hips still, the left hand reaching out at the shoulder 8..12 and held); Sora's Cure `p001_064` (34 f at 30: a crouch, both hands raised over the head 12..15, held to 24, lowered).
+- **Change** (asset step, `kh1_recom_assets::riku_skin::{Src, Skel, CastSource { fps, fallback, .. }, CastCtx, CastClip::times_for}`): sources are a Re:CoM pack's clip on Riku's, Dark Riku's or Sora's skeleton, or a KH1 Riku-Ansem request converted onto Dark Riku's (the 0.158.0 converter); each is brought onto Riku's / Dark Riku's skeleton (Dark ↔ Riku as before; Sora's by bone name, the roots as each other, Riku's own bones from his stance) and played at its own rate (KH1's 60 fps). Cure: Sora's Re:CoM Cure for both; Stop: Riku-Ansem's request 225 for both, Barrage's crossing when KH1's `xa_ex_1580` can't be read. `GuardSource::ansem` carries the KH1 files (`step.rs` reads them).
+- **Checked**: tests (on the owner's install: the turn test, Stop's at most 5° a frame; the key moments; Stop's fallback), the Windows build. **Not checked**: in game. Assumption: Sora's raise reads well on Riku (his Soul Eater by bone name). The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 340 (fork branch Re-Re-Reverse/Rebirth): Riku's cast motions at their own speed (no flicker); his KH1 rows blend in and out (the Guard's end too), version 0.184.6 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "as animação ficaram estranhas meio que flicando , lembrando que se precisar pode usar animações do KH1 como disse"; "ajusta tbm a animação de guard pra ficar mais suave quando terminar essas".
+
+- **Cause** (Checked (files): the clips' local rotations per frame on the owner's install): 0.184.4 squeezed each key moment into 4 frames and stretched the charge to fill KH1's release frame: the key moments ran up to 3 × their own speed (Maelstrom's spin, Impulse's thrust), the short Barrage charges at a ninth, then sped up. And every cast clip started and ended in a sleight's pose, entered and left with no blend (KH1's casts ask none): a jump from the stance.
+- **Change 1** (asset step, `CastClip::times`, `SRC_STEP`, `out_frame`): the source clips (30 fps) play at their own speed (half a source frame a KH1 frame) through the charge and the key moment, the key moment still starting on KH1's release frame (a longer charge starts later in it, a shorter one holds its first pose); the recovery spreads to KH1's free frame but never faster than the clip (one that doesn't fit stops where KH1's motion ends). The Dark Firaga events follow (a charge event before the clip's start goes on its first frame).
+- **Change 2** (`crate::riku::{blend_for, kh1_only_row, CAST_IN, OUT}`, `win::movement::RecomHost::play`): a cast's first motion blends in over 6 frames; leaving any of Riku's KH1-only rows (the cast clips, the Guard, its recoil) for another row blends out over 10 (the Guard's end into the stance included); the Guard into its recoil stays at once (KH1). Visual blends only: KH1's frame keeps its timing. Assumption: the numbers.
+- **KH1's motions**: not needed yet (every clip now plays at its own speed); kept as the fallback the owner offered.
+- **Checked**: tests (`cast_clips_turn_no_faster_than_their_sources` on the owner's install: no bone turns faster a frame than in its source; `cast_clips_put_the_key_moment_on_kh1s_release`; `rikus_kh1_rows_blend_in_and_out`), the Windows build. **Not checked**: in game. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 339 (fork branch Re-Re-Reverse/Rebirth): Riku's spell effects grow with the level, version 0.184.5 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "os spells precisam ter diferença dependendo do level dele e os efeitos também"; on the plan (level 1 the hand's glow and the flash, 2 also the darkness cloak, 3 also the blade's aura and a bigger flash): "aprovo, implemente".
+
+- **Re:CoM** (Checked (decomp `0x14017A240`)): a motion's start keeps the EET events whose `+0x5C` is the variant its request passes.
+- **Asset step** (`kh1_recom_assets::riku_skin::{cast_events, cloak_of}`): each cast clip's list A holds three variants: 1 the Dark Firaga glow and flash; 2 also the darkness cloak (the `ex_1580` 20, 21, 23..34 programs on the body, from Riku's own Impulse `PL1301` `p002_062` / Dark Riku's Dark Impulse `PL1311` `p003_072`, their own bones; Checked (files)); 3 also `weapon_ora` 0 on the blade and the flash at 1.5 × (its scale fields). All in Riku's `EF1500.EFF`, loaded with him (Checked (files)). Sounds unchanged (variant 0).
+- **DLL** (`win::magic::{CAST_LEVEL, cast_level}`, `win::movement::RecomHost::play`): a cast row's request passes the cast's level as its EET variant.
+- **Checked**: tests (`rikus_cast_clips_carry_dark_firagas_events`: more effects each level, the blade's aura on 3), the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 338 (fork branch Re-Re-Reverse/Rebirth): one cast motion per spell for Riku and Dark Riku, version 0.184.4 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "além disso as animações precisam variar..."; on the table (Fire Dark Firaga, Blizzard Impulse, Thunder Dark Aura, Cure Holy Burst / Inverse Burst, Gravity / Stop Barrage, Aero Maelstrom): "aprovo, implemente"; "lembrando que vc pode usar alguma animação disponível no KH1 também... caso nenhuma der Match" (every spell found a Re:CoM match).
+
+- **The motions** (Checked (files): frames, hands and hips of each clip; `kh1_recom_assets::riku_skin::CAST_SOURCES`): Dark Firaga `PL1088 p003_043` (thrust 32..36); Impulse `PL1301 p002_061` / Dark Impulse `PL1311 p003_071` (thrust 21..24); Dark Aura's start `PL1089 p003_044` (he rises, arms spread, 24..32); Holy Burst `PL1092 p002_075` / Inverse Burst `PL1093 p003_085` (the blade raised, 18..24); Barrage `PL1303 p002_072` / `PL1313 p003_082` (the hand up and down, 3..7) and `p002_070` / `p003_080` (the arms cross, 3..6); Maelstrom `PL1302 p002_065` / `PL1312 p003_075` (the spin, 10..16). Riku's own clips play on his skeleton as they are; Dark Riku's Dark Firaga and Dark Aura are retargeted onto him (0.184.1's retarget); Dark Riku plays his own.
+- **Asset step** (`CastClip { src, .. }`, `CastClip::times`, `riku_cast_clips`, `dark_cast_clips`, `retime_in_place`): eight clips (`p002_227..234`, `p003_227..234`): Fire's wind-up and release (Dark Firaga), Blizzard (Impulse), Thunder (Dark Aura), Cure (Holy / Inverse Burst), Gravity (Barrage's strike), Stop (Barrage's crossing), Aero (Maelstrom); each with its key moment on the four frames after KH1's release frame and KH1's length (0.184.1's numbers); no travel. The Dark Firaga events go on each by their phase (`out_frame`).
+- **DLL** (`crate::riku::{CAST_ROWS, CAST_CLIPS, DARK_CAST_CLIPS, cast_row}`): rows 0x3B..0x42 of both tables (`p002_000` / `p003_000` up to 0x46, Checked (exe)), one per clip; each spell's requests (ground and air) its own row.
+- **Assumption**: each key moment reads as the cast in game (chosen from the clips' numbers, not seen).
+- **Checked**: tests (`cast_clips_put_the_key_moment_on_kh1s_release`: six motions for the six spells; `rikus_cast_clips_follow_dark_firaga` with Dark Riku's eight; `every_kh1_cast_request_has_a_cast_row`: seven rows), the Windows build. **Not checked**: in game. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 337 (fork branch Re-Re-Reverse/Rebirth): Riku's spells show their effects in the field; every spell and level checked on KH1's Neoshadow, version 0.184.3 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "as magias funcionaram! mas fora do combate só a firaga solta projetil, mas agoras você precisa fazer o fine tuning, teste cada uma com o Neo shadow em cada nível e implemente o que faltar".
+
+- **Cause (field)**: in Riku's story nothing loads the spell effects in the field (Sora's story gets Sora's battle set there since castfix, `win::magic_fx::field_load`); Dark Firaga's `dark_faiga` is Riku's own `EF1500.EFF`, so only Fire showed.
+- **Change** (`win::magic_fx::{riku_wanted, riku_sora_set, battle_load, field_load, setting_changed}`): Sora's battle set 1001 is queued for Riku's KH1 spells also at each field room load (the field state's tail call) and when Combat is switched to KH1 in the camp, as in his battles; once loaded it stays (0.184.2).
+- **Simulation** (`magic::tests::every_spell_and_level_on_kh1s_neoshadow`): each spell at each level on KH1's Neoshadow (the owner's `kh1-stats.json`, Checked (files): 150 HP, Defence 30, floor 10 / cap 40, level 55, resist % fire 49, blizzard / thunder 50, gravity 0, stop 20) with Riku's max MP 3 (the owner's log), KH1's formulas: Fire 4, Blizzard 5, Thunder 5 a hit at every level (the floor 10 times the resistance: KH1's Defence 30 against power + 3), Gravity 10 (the floor; its % times 0), Aero's wind 5 every 30 frames, Stop 60 frames (1 s), Cure 50 / 150 / 300 HP (Re:CoM's heal). At Damage = Re:CoM (the default) the owner's log shows Re:CoM's sleight AP: Firaga 150, Blizzaga 110, Thundaga 90, Graviga 70, Aeroga 90.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 336 (fork branch Re-Re-Reverse/Rebirth): Riku's spells show their effects and sounds; Fire is Dark Firaga; his cast motions at KH1's length, version 0.184.2 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim (on 0.184.1): "pois é mas não tem efeito, som projetil cadê o resto?". The plan's item 0.184.2 (Riku's looks: Fire → Dark Firaga, the dark charge on the hand, his voice; the owner: "gostei das sugestões").
+
+- **Cause** (Checked (decomp + exe), `docs/recom-m7-magic.md` § Spell effects in the field): Re:CoM's spell effects (`fire_all` … `airo_all`) and the sounds riding them load with Sora's battle set, PLAYER 1001, whose LINK rows alone load EFFECT 2000..2063. `0x140211960` picks the set by the world's character (`0x1407C7AE4`: 1001 Sora, 1101 Riku, 1201; Checked (decomp)); Riku's 1101 doesn't link them, so his KH1 spells (shots, shards, charges) drew nothing and made no sound.
+- **Change 1** (`win::magic_fx::{battle_load, install_riku}`, `sites::RIKU_FX_BRANCH`): `CGameSubBattle` state 1's tail `jmp 0x140211960` (`0x1401AEA33`, `E9 28 2F 06 00`, Checked (exe)) goes to `battle_load`: Re:CoM's load, then, when it chose Riku's set and his KH1 spells are on, Sora's 1001 too (`0x14023CCE0(1001)` unless `0x1402A53E0(1, 1001)`; Re:CoM's loader's own pair, Checked (decomp)). Not unloaded: Re:CoM's unloader `0x140211560` (key `10000 + group`, `0x1402A5B00`) takes the world's set; 1001 stays resident, as Re:CoM keeps it under its system byte 0x60 (Assumption: no memory trouble). Field casts in Riku's story: not covered yet.
+- **Change 2** (`crate::magic::{riku_look, DARK_FIRAGA_SET}`, `win::magic::{RIKU_TABLE, row, kh1_cast}`): Riku's spells read a copy of the KH1 rows, every number Sora's, Fire's effect set (`+2`) Dark Firaga's 48 (`dark_faiga`, Riku's own `EF1500.EFF`). Assumption: Re:CoM's Fire ball reads set 48's slots as it reads `fire_all`'s.
+- **Change 3** (asset step, `kh1_recom_assets::riku_skin::{cast_events, event_time, out_frame}`): the Dark Firaga clip's events (`PL1088.EET` / `.SES`, `p003_043`; Checked (files)) on the six cast clips at their retimed frames: `dark_faiga` 0 on the left hand from 20 (the charge's dark glow: every spell), `dark_faiga` 1 on Root at 72 (the thrust's flash), the voice 3035 at 11, the thrust's sound 605/2 at 72; 605/1 at 16 (the leap's landing) dropped. In Riku's `PL0101` / `PL0111` and Dark Riku's `PL0201` / `PL0211.EET` / `.SES` (Re:CoM's own events kept), the skin's packs too.
+- **Fixed** (0.184.1): the Dark Firaga clip is 30 fps (`flags` bits 2..4; Checked (files)) and the cast clips kept that rate, so each played twice KH1's length; they are 60 fps now (one frame per KH1 frame). Event frames (60 Hz) are taken to the source clip's frames before retiming.
+- **Checked**: tests (`rikus_rows_change_only_fires_effect_set`; on the owner's install `rikus_cast_clips_carry_dark_firagas_events`, `rikus_cast_clips_follow_dark_firaga` with 60 fps), the Windows build. **Not checked**: in game. The asset step's code changed: the first start builds again.
+
+---
+
+## Stage 335 (fork branch Re-Re-Reverse/Rebirth): Riku casts with Dark Riku's Dark Firaga motion, on KH1's cast timing, version 0.184.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim (on 0.184.0): "a animação do firaga está completamente errada... as iutras magias  simlesmente sem animação, nice". The plan's item 0.184.1 (the cast motion: Dark Riku's Dark Firaga, the owner's "pode ser").
+
+- **Cause** (Checked (the owner's 0.184.0 log + exe)): every spell cast and released (Fire, Blizzard, Thunder, Cure, Gravity, Aero; free). KH1's cast requests asked Sora's rows: on Riku's table 0x36 / 0x37 / 0x38 are `p002_050` / `p002_057` / `p002_058` (other moves: Fire's "wrong" motion), and 0x39.. `p002_000` (no clip: the current motion kept).
+- **The clip** (Checked (files)): Dark Riku's Dark Firaga `p003_043` (`PLAYER/1088/PL1088.ANN`, 52 frames): 0..8 a 2.4 m leap back, 8..31 a crouched charge (left hand drawn back), 32..36 the left hand's thrust, 36..51 the recovery.
+- **Asset step** (`kh1_recom_assets::riku_skin::{CAST_CLIPS, CastClip::times, retime_in_place, dark_to_riku_map, riku_cast_clips, dark_cast_clips}`): six clips with KH1's lengths and the thrust on KH1's release frame (Sora's `xa_ex_0010.mset`, Checked (files)): Fire's wind-up (28, the charge), Fire's release (60, free 46, the thrust at 0), Blizzard / Gravity (86, free 68, release 28), Thunder / Aero (68, release 30), Cure (68, release 36), Stop (68, release 28). The leap is taken out (Root and the hips keep their rest x / z; the crouch stays). Riku's (`p002_227..232`): the clip retargeted Dark → Riku (bones by name; his `k10` / `k11` and his own bones from his battle stance; `wep0` by its world rotation), in `PL0101` / `PL0111.ANN`; Dark Riku's (`p003_227..232`) the clip itself, in `PL0201` / `PL0211.ANN`; the Dark Form skin's packs get Dark's under Riku's names. Manifest `"riku_cast": true`.
+- **DLL** (`win::riku_skin::{guard_rows, cast_row}`, `crate::riku::{CAST_ROWS, cast_row}`, `win::movement::RecomHost::play`): rows 0x3B..0x40 of both tables (`p002_000` / `p003_000`, Checked (exe)) named after the clips (checked first); every KH1 cast request (ground and air) plays its row.
+- **Checked**: tests (`cast_clips_put_the_thrust_on_kh1s_release`; `rikus_cast_clips_follow_dark_firaga` on the owner's install: Riku's blade turns as Dark Riku's, cos 1.000, no travel; `every_kh1_cast_request_has_a_cast_row`), the Windows build. **Not checked**: in game. **Assumption**: Re:CoM's rebind by name binds the new rows for both (as the guard rows). The asset step's code changed: the first start builds again.
+- **Left for 0.184.2**: the spells' look (Riku's effects and voice).
+
+---
+
+## Stage 334 (fork branch Re-Re-Reverse/Rebirth): Riku casts Sora's KH1 spells (MP free for the test), version 0.184.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "implementar as mesmas magias que o Sora Usa, só que uma verão que seja mais coerente com o Riku e os efeitos que o personagem dele usa nas iterações do Kingdom Hearts"; "por enquanto só a aparência mas guarde como oportunidade futura esses achados"; "gostei das sugestões implemente inicialmente com custo zero de mana só para testar e depois volta o custo de MP e deixa desbloqueado no menu tbm"; "pode ser" (the plan: 0.184.0 the cast, 0.184.1 a cast motion, 0.184.2 Riku's looks), "SIM e continue!".
+
+- **Re:CoM** (Checked (exe)): Re:CoM's Battle exe runs action 0x13 through vtable `+0x150` (`0x1401F9B4D`). Sora's `initMagic` / `exeMagic` are `0x1402203D0` / `0x140217EE0`; Riku's and Dark Riku's slots `+0x148` / `+0x150` hold the base class's empty `ret`s `0x1401F2F20` / `0x1401EEAA0`: Re:CoM's Riku has no magic action. The Field exe's case 0x13 (our stub, shared with Riku: his Field exe is Sora's `0x1401FA0F0`) calls Sora's exeMagic directly.
+- **Change**:
+  - `win::magic::riku_slots`: Riku's and Dark Riku's `+0x150` point at `win::magic::exe_magic` (checked old value, not fatal). `exe_magic` runs Sora's own exe only on Sora's object; on anyone else it runs the KH1 frame of a KH1 cast, or nothing (the stub's behaviour), so the Field case no longer reaches Sora's exe with Riku.
+  - `win::movement::run_frame`: Riku's KH1 frame takes the Magic command and its target as Sora's, and reports the cast events.
+  - `win::command_menu::riku_world`: his Magic list holds Sora's seven spells at level 3 (unlocked), with the target distance for the ranged ones.
+  - `riku_free_magic = on` (new ini key, a test setting, on by default for now): `World::free_spells` (the menu never greys a spell for MP), `win::magic::{can_cast, pay_spell}` (no MP test, nothing paid at the release). Off: Sora's KH1 costs.
+- **Left for 0.184.1 / 0.184.2**: Riku has no cast clip (his rows 0x37..0x3C are `p002_057` / `p002_058` / `p002_000`): the cast plays on KH1's frame with his current motion kept (logged per row). The spells' look is Re:CoM's Sora effects; their packs come with Sora's battle set (PLAYER 1001, `crate::magic::field_case`), so in Riku's battles they may not be loaded (no effect drawn: Re:CoM's lookup finds no group). Not checked.
+- **Checked**: tests (new `free_spells_never_grey_for_mp`; the ini round trip), the Windows build. **Not checked**: in game (the first Re:CoM magic action on Riku's object).
+
+---
+
+## Stage 333 (fork branch Re-Re-Reverse/Rebirth): the Guard's start measured (simulation against the Neoshadow) and every Square press logged, version 0.183.4 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "o timing da defesa segue horrível preciso de uma correção se possível faça o teste do neoshadow com o RIku tbm"; asked what feels wrong they chose "Demora para começar", and for the Neoshadow test "Simulação nos testes".
+
+- **The owner's 0.183.3 log** (Checked (trace)): every guard window lasted 433 ms (26 frames, KH1's); no melee hit was blocked by the blade (the Wyvern's bite, priority 100 in every row, got through "not on the blade" twice and once "on the blade" by its priority); two Wizard shots were blocked. The press itself was not logged, so the delay from the button could not be read.
+- **Simulation** (`movement::tests::rikus_guard_against_the_neoshadows_windows`, Riku's abilities on the shared port): the guard object is live on frames 11..=36 after the press. KH1's motion 212 has it on frames 10..36 (Checked (files)): the port is one frame (16 ms) later, because a frame's motion update runs at the next handler call (the oracle's order), the same 26 frames. Against the Neoshadow's windows (Checked (files), the asset step's test): its claw (202, hits 40..=67, priority 40) is blocked when Square is pressed on its frames 4..=29; its rising slash (207) and dive (205) have priority 100, which KH1's Guard never stops (`kh1_core::enemy::guard::meeting`: the attack is not marked).
+- **Log** (`win::movement::square_log`, `win::attack::guard_line`): each Square press a KH1 frame sees, in Sora's / Riku's guard timeline: "Guard started", "a roll", or "dropped" with KH1's state, action lock and request (KH1 drops a Square while the lock holds or off the ground: `0x140297870`, `0x1402A7B30`, Checked (decomp)).
+- **Not changed**: KH1's start (10 frames) and window. Seen, not changed: after a hit gets through, the guard object stays live while Re:CoM's damage reaction plays (the KH1 frame doesn't run in it): about 680 ms in the log.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 332 (fork branch Re-Re-Reverse/Rebirth): Sora's Guard by the blade too: one KH1 Guard for Sora and Riku, version 0.183.3 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "a mecânica do RIKU precisa ficar igual a do Sora...,  isso é para agora!"; asked which of the two becomes the rule they first chose "Os dois pelo corpo", then: "n~ao mas o do Sora no KH 1 também é pelo corpo não?"; told KH1's guard is the Keyblade's volume (the workspace's `knowledge/KH1/kh1-sora.md` § Guard in detail, Checked (decomp + files)): "então mudança de rota, alternativa a" (both by the blade, as KH1).
+
+- **Before**: Sora's Guard was Re:CoM's body guard (any hit from within ±100°, `set_guard`; the 2026-11-03 Assumption of `docs/recom-m11-enemies.md`), Riku's the blade test (0.182.0 / 0.182.1). KH1 blocks only what touches the Keyblade.
+- **Change** (`win::attack::{blade_guard_pair, guard_blade_of, guard_faces_of}`, was `riku_guard_pair` / `riku_blade` / `riku_faces`; `crate::riku::{guard_faces, guard_blade, BLADE_END}` shared): Sora's Guard runs the same path as Riku's: his blade (Re:CoM's weapon line on his weapon bone, the Guard record's radius on the equipped weapon), the facing ±100°, then KH1's types and priorities (0.183.1). A hit off the blade, or from outside the front, gets through (his body guard off for the test). `sora_guard_pair` (0.183.1's body-guard version for Sora) is gone.
+- **Kept**: the Yellow Opera's Thunder is never blocked by Sora (KH1: no clash pass), still blocked by Riku (the owner's 0.153.0 rule).
+- **Log**: Sora's lines are `sora guard: <ms> ms: …` (300 lines) with the same timeline as Riku's (guard object on / off, blocked by the blade, hit got through, guard success, post-block protection).
+- **Assumption**: Re:CoM's weapon line (−0.8 m on the weapon bone) stands for the Keyblade's length, as for his Re:CoM swing volume, whatever KH1 Keyblade model is shown.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 331 (fork branch Re-Re-Reverse/Rebirth): Dark Riku guards in KH1 Riku's guard pose, version 0.183.2 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "certo novamente quero que revalide a mecanica de guard do Riku explorando se ficou alguma coisa fora"; on the findings and the plan (0.183.0 / 0.183.1 / 0.183.2), "vou pela tua recomendação mas quero testar todos de uma vez", then "sim". Item (c) of the plan: Dark Riku's pose.
+
+- **Cause**: the real Dark Mode's Dark Riku guarded with his clash recoil (row 0x24, `p003_033`). Since 0.182.0 the block is decided by where the blade is, so his Guard was judged on a pose that is not KH1's.
+- **Asset step** (`kh1_recom_assets::riku_skin::{dark_guard_pack, DARK_GUARD, DARK_RECOIL}`): with KH1 Riku's guard (`xa_ex_1010`), his own packs `PLAYER/0201/PL0201.ANN` and `PLAYER/0211/PL0211.ANN` get the guard (`p002_225`) and its recoil (`p002_226`) retargeted onto his skeleton (`ex_1580_sk`, the Dark Form skin's retarget), named `p003_225` / `p003_226`. Checked (tests: `dark_rikus_own_pack_gets_the_guard` on the owner's install).
+- **DLL** (`win::riku_skin::{guard_rows, name_rows, guard_row, recoil_row}`): rows 0x39 / 0x3A of his action table (`0x1407C6300[5]` / `[6]` = `0x1407C67F0`, both `"p003_000"`: Checked (exe)) are named after them, checked first; then his Guard and its recoils play them, as Riku's. Assumption: his player build rebinds rows by name as Riku's does (`0x1401F4240`). Without the files (an asset step before 0.183.2): his clash recoil as before, logged once.
+- **Assumption**: Re:CoM's loader takes his pack with two more slots at the end (Sora's `PL0001.ANN` with 161+ slots is the precedent), and nothing but the player loads `PLAYER/0201` / `0211`. Every row is checked before any is renamed (`name_rows`).
+- **On the owner's side**: the step's code changed, so the DLL's first-launch build runs again at the next start (its console window; `docs/openkh-github-install.md`) and writes the two packs.
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 330 (fork branch Re-Re-Reverse/Rebirth): the Guard against KH1 enemies by KH1's attack types and priorities (Sora and Riku), version 0.183.1 (2026-11-23)
+
+Fork owner, 2026-11-23: the asks of Stage 331 (item (a) of the plan they approved: block only what KH1 blocks).
+
+- **KH1** (Checked (exe + decomp), the workspace's `knowledge/KH1/kh1-sora.md` § Guard in detail): the guard object (Guard row: clash type 2, priority 0 + the weapon's) is tested against an enemy attack only when the types meet (`0x1402B3BE0`, `0x140528CB8`: type 2 meets types 0 and 3). Then `0x1402B4A20` / `0x1402B4BC0` give each side its outcome by priority (`kh1_core::enemy::guard::meeting`): the guard side's record kind 6, or 7 when more than 40 under (request 0x6F, no Counterattack), nothing against priority 0; kind 6 pushes back by `−diff × 2.5` when `diff` < 0 (`0x14029D720`); the enemy side a clash record, nothing at 98–100, a repel for a stronger type 1 / 3 / 4; an attack meets no body only when it is stopped.
+- **Change** (`win::attack::{kh1_guard, kh1_block, sora_guard_pair, pair_unguarded}`, `win::kh1_enemy::attack_row`, `Host::guard_clash`, `movement::guard_success`): for a KH1 enemy's attack (the asset step's clash records) while the KH1 guard is live:
+  - types that don't meet, or not stopped: the hit gets through (Sora: his body guard off for the test; Riku: also when it is on the blade);
+  - stopped, the guard side with a record: the block, and the guard success takes its kind and push (0x6F for kind 7);
+  - stopped with no record (priority 0): the attack stops, no recoil, the guard goes on (Riku: no test, no hit recorded);
+  - the enemy's reaction (`super::guard::on_result`: its KH1 clash recoil, a shot turned back) only when it gets a clash record.
+  - Re:CoM's own attacks have no KH1 type or priority: as before (kind 6, no push).
+  - a priority-0 attack lying on Riku's blade for several frames is stopped every frame, its reaction and log line once per attack (collision + serial) per guard; a block with no record leaves an earlier block's guarded bit of the same frame in place.
+- **Protection after kind 7**: KH1's flag 0x80 now holds while the strong recoil 0x6F holds the lock, as during 0x6E (`movement::untouchable_step`; it ran out ~8 frames into 0x6F, `swing_clash`'s kind 7 too).
+- **Left** (the mechanic review, 2026-11-23):
+  - a type 0 attack of priority 98, 99 or 100 (the Neoshadow's dive, the Wyvern's bite) gives the guard side kind 7 in KH1 *and* still hits (not stopped); here it only gets through. A KH1 projectile turned to the other side (`+0x30 & 0x400`) is not modelled (`kh1_core`).
+  - KH1 enemies' thrown objects, rings and held attacks that are Re:CoM bullets or records with no clash row (the Bandit's scimitar, priority 0) keep Re:CoM's block: a recoil and the Counterattack, where KH1 gives the guard no record.
+  - KH1 meets a pair once while both live (the `+0x9C` mask); not modelled beyond the once-per-attack memo below.
+  - Riku's kind 7 plays his one KH1 recoil clip (row 0x3A) for 0x6F. (Sora's guard volume: the blade since 0.183.3.)
+  - Riku: when Re:CoM's answer was a hit turned into the block, whether the pending hit still costs HP is not shown; logged (`pending hit … value …`).
+- **Log**: `sora guard: …` (60 lines) and `riku guard: … KH1 clash kind …` / `… stopped … with no recoil …` / `hit got through (on the blade, but KH1's Guard doesn't stop it: its type or priority)`.
+- **Checked**: tests (new `guard_success_takes_kh1s_clash_kind_and_push`), the Windows build. **Not checked**: in game; the enemies' real types and priorities (their manifests weren't on this machine).
+
+---
+
+## Stage 329 (fork branch Re-Re-Reverse/Rebirth): the Guard turns to Auto Lock's target and restarts the combo (Sora and Riku), version 0.183.0 (2026-11-23)
+
+Fork owner, 2026-11-23: the asks of Stage 331 (item (b) of the plan they approved: turn to the right enemy and restart the combo).
+
+- **KH1** (Checked (decomp), the workspace's `knowledge/KH1/kh1-sora.md` § Guard in detail and `kh1-lock-on.md`): `0x1402A3B00` turns the Guard to the lock pair `0x142DB3518`, which holds the soft target in lock states 1–4 (Auto Lock's orange ring, no R1), and sets the combo counter `CB + 0x41` to 1.
+- **Change** (`movement::pad_handler`, `win::movement::read_pad`, `win::attack::soft_target_centre`): on a Square press the frame's `lock_target` is R1's lock, else Auto Lock's soft target (nothing held: the Guard is no command), and the Guard faces it; it sets `combo_counter` to 1. Before, it faced R1's lock only (the soft target was read on Attack presses only) and kept the counter, so a combo went on through a Guard.
+- **Checked**: tests (new `guard_faces_the_soft_target_and_restarts_the_combo`), the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 328 (fork branch Re-Re-Reverse/Rebirth): Riku's guard timeline in the log, version 0.182.2 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "TUDO ela não bloqueou, mas eu acho que está ligado ao tempo da defesa que está zoado ainda, além disso até onde eu sei quando vc da um block com o sora, e vem um logo em seguida o block pega o proximo ataque tbm confere ai no KH1".
+
+- **The owner's log** was still 0.182.0's (the OpenKH build's DLL dated before 0.182.1 was copied), so 0.182.1 is not yet tried.
+- **KH1** (Checked (files + decomp), `kh1-core` data and `crate::movement::guard_success`, the shared port): after a block, the recoil `0x6E` (60 frames) is free from frame 28 (Guard again from there), and flag 0x80 (no damage, no reaction) holds while the recoil holds the lock, then 8 more frames. So a hit that comes right after a block, in about the first 36 frames, does nothing. Riku has the same rule through the port (Re:CoM's `+0x418 & 1`, which his damage check skips too).
+- **Change** (log only, `win::attack::{riku_ms, riku_untouchable_log}`): Riku's lines get a millisecond time, and the guard object on / off, the guard success and the post-block protection on / off are logged (300 lines).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 327 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard: a hit off the blade gets through (Re:CoM's body guard no longer blocks it), version 0.182.1 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "está um pouco melhor mas está longe de perfeito, se a defesa é no CORPO ainda está pegando a espada, como disse precisa estar igual no KH1".
+
+- **Cause** (Checked (the owner's 0.182.0 log)): no `riku guard: blocked by the blade` line; every block was Re:CoM's own result 2 (`guard reactions: block …`, Wizard shots, a Shadow). Re:CoM's body guard, which `set_guard` turns on (±100°) while his KH1 guard is live as for Sora, does block for Riku, against 0.159.0's note. So a hit off the blade was still blocked by his body, and 0.182.0's blade test only decided the hits Re:CoM had not blocked.
+- **Change** (`win::attack::riku_guard_pair`): an attack that doesn't touch his blade, or whose owner is not in front, is tested by Re:CoM with his body's guard bit (`+0x9C & 1`) off for that test, so it hits him, as in KH1. On the blade and in front: Re:CoM's block (2) is kept, a hit (1) becomes the block, as in 0.182.0.
+- **Log**: `riku guard: blocked by the blade` (also "(Re:CoM's block)") and `riku guard: hit got through (not on the blade[, not in front])`, 40 lines.
+- **Left**: an attack shape that is neither a sphere nor a line, or no weapon bone, keeps Re:CoM's body guard (logged once).
+- **Checked**: tests, the Windows build. **Not checked**: in game.
+
+---
+
+## Stage 326 (fork branch Re-Re-Reverse/Rebirth): Riku's Guard blocks by KH1's rule: an attack that touches his blade from in front, version 0.182.0 (2026-11-23)
+
+Fork owner, 2026-11-23, verbatim: "a defesa ainda está meio esquisita, mas é mais o uso geral dela mesmo tem como verificar como ela é implementada tanto no Sora quanto no jogo original e ajustar no Riku?"; on what feels odd they chose all four (when it can be used, what it blocks, direction / target, length / rhythm); then "o ponto é usar o KH1 como referência … a adaptação deve ser precisa se não vai ficar nesse vale da estranhesa"; on the plan (1 the blade, 2 the made-up rules), verbatim: "1 e 2 fica IGUAL KH1".
+
+- **KH1** (Checked (decomp + files); the workspace's `knowledge/KH1/kh1-sora.md` § Guard in detail): the guard object is the Guard record `0x4DA8` on the weapon (`bone 0x30`, the blade line, radius 0 + the weapon's: Kingdom Key 40), live on motion 212's hit frames 10–36. It blocks an enemy attack that touches that blade (`0x1402B4A20`) from an owner within ±100° of the facing (`0x1402B4640`, record `+0x64` = cos 100°). The blocked attack meets no body (`+4 & 0x30`). A hit on the body that misses the blade is not blocked.
+- **Compared**: when the Guard starts, its turn to the target, its length and its recoil / Counterattack are the shared KH1 port (`crate::movement`), as Sora's (checked against `0x1402A7B30`, `0x1402A3B00`, `0x14029D720`, `0x140294220`): no change. What was not KH1: Riku blocked any hit on his body from in front (0.159.0), a shot within 1 m was judged by its caster, and a melee attacker past 4 m was blocked without a reaction (0.158.2).
+- **Change** (`win::attack::{riku_guard_pair, riku_blade, attack_contact}`, `crate::riku::{guard_blade, BLADE_END}`): before Re:CoM's pair test of an enemy attack against the player list, while his KH1 guard is live:
+  - his blade is Re:CoM's own weapon line (`0x140225840`, Checked (decomp)): the owner's bone `weapon + 0x238` (weapon `+0x2CC & 4`) or the weapon's bone 2, from its origin (Assumption: the hilt) to (−0.8, 0, 0) in its frame (`0x1407C7E50`, Checked (exe)), as spheres of the Guard record's radius on the equipped weapon (Assumption, as his swing's clash since 0.169.0);
+  - the attack's shape (sphere or line) against them, by Re:CoM's overlap tests; its owner within ±100° (a shot by its own place, Assumption);
+  - on a block: Re:CoM's test, else its apply on his body with the blade's contact, then the result is Sora's block (2, the guarded bit, the attacker), so the shot turns back, the attacker reacts and the KH1 guard success follows. Not touching the blade: the hit gets through.
+  - `riku_pair_block`, the 1 m caster rule and `RIKU_MELEE_REACH` are gone.
+- **Left as before**: the Yellow Opera's Thunder is still blocked by Riku (0.153.0, the owner's rule; KH1 doesn't).
+- **Not settled**: which enemy attacks KH1 can't guard (priority rule, the knowledge note's open question).
+- **Checked**: tests (new `rikus_guard_blade_is_recoms_weapon_line`), the Windows build. **Not checked**: in game.
+
+---
+
 ## Stage 325 (fork branch Re-Re-Reverse/Rebirth): one ring: Re:CoM's target marker hidden while KH1's Auto Lock runs unlocked; the crate's version, version 0.181.1 (2026-11-23)
 
 Fork owner, 2026-11-23, verbatim: "funcionou perfeitamente,mas ficou duplicado o anel". Answering what the two rings look like, they chose "Um laranja e outro diferente".
