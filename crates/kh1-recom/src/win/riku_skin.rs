@@ -48,7 +48,7 @@ pub unsafe fn chosen(s: &crate::settings::Settings) -> Look {
         dark: s.riku_costume == 1 && unlocked(),
         blade: (s.riku_heart_blade && blade_unlocked()) as u8,
         halloween: s.riku_costume == 2 && halloween_unlocked(),
-        hair: s.riku_hair.min(1),
+        hair: s.riku_hair.min(2),
     }
 }
 

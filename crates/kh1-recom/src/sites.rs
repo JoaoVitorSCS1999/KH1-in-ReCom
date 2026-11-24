@@ -2989,6 +2989,11 @@ pub const STORY_SKIP_CALLEES: &[Site] = &[
     // mov r11d,r8d; mov r9d,edx; cmp ecx,2; jae: a system flag set (table, index, value), as
     // script op 0x6E calls it.
     Site { name: "system flag set (0x1401B1650)", rva: 0x001B_1650, expect: &[0x45, 0x8B, 0xD8, 0x44, 0x8B, 0xCA, 0x83, 0xF9, 0x02, 0x73, 0x57] },
+    // cmp ecx,2; jae: a system byte set (table, index, value), as script op 0x62 calls it (fork, 0.196.0, Riku's tutorial).
+    // Checked (exe, the workspace's `knowledge/ReCoM/recom-riku-ansem-tutorial.md`).
+    Site { name: "system byte set (0x1401B15D0)", rva: 0x001B_15D0, expect: &[0x83, 0xF9, 0x02, 0x73, 0x2A] },
+    // push rbx; sub rsp,0x20; movzx ebx,cx; call: the card give syscall 0xAD sub 7 calls (fork, 0.196.0). Checked (exe).
+    Site { name: "card give (0x14023AA60)", rva: 0x0023_AA60, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x0F, 0xB7, 0xD9, 0xE8, 0x92, 0x00, 0xF7, 0xFF] },
 ];
 
 /// M10, KH1's Shadow (`crate::shadow`, `win::shadow`, `docs/recom-m10-shadow.md`): the wrapper on

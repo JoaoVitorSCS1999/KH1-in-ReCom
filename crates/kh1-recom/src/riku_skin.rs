@@ -61,7 +61,7 @@ pub struct Skin {
     pub skin: u16,
     pub dark: bool,
     pub blade: u8,
-    /// 0.186.0: 0 Re:CoM's hair, 1 DDD Riku's (only the default attire has it).
+    /// 0: Re:CoM's hair, 1: KH2 Riku's, 2: BBS kid Riku's (only the default attire has them; 0.186.0's 1 was DDD's, removed by Stage 363).
     pub hair: u8,
 }
 
@@ -73,7 +73,7 @@ pub struct Look {
     /// 0.178.0: Riku's Halloween Town look in every world (char 3 on his Halloween group 111 and
     /// its skins, as char 4 is there).
     pub halloween: bool,
-    /// 0.186.0: 0 Re:CoM's hair, 1 DDD Riku's.
+    /// 0 Re:CoM's hair, 1 KH2 Riku's, 2 BBS kid Riku's.
     pub hair: u8,
 }
 
@@ -106,7 +106,7 @@ pub fn parse(text: &str) -> Result<Vec<Skin>, String> {
             return Err(format!("kh1-riku-skin.json: skin {skin}: blade {blade}"));
         }
         let blade = blade as u8;
-        let hair = s.get("hair").and_then(|b| b.as_u32()).unwrap_or(0).min(1) as u8;
+        let hair = s.get("hair").and_then(|b| b.as_u32()).unwrap_or(0).min(2) as u8;
         if !RIKU_GROUPS.contains(&riku) || (!dark && blade == 0 && hair == 0) || out.iter().any(|o: &Skin| (o.riku == riku && o.dark == dark && o.blade == blade && o.hair == hair) || o.skin == skin) {
             return Err(format!("kh1-riku-skin.json: skin {skin} for group {riku}"));
         }
@@ -180,7 +180,7 @@ pub fn group_for_char(skins: &[Skin], riku: u16, look: Look) -> u16 {
 
 /// Riku's group `riku` in a look.
 pub fn group_for(skins: &[Skin], riku: u16, look: Look) -> u16 {
-    // 0.186.0: a look with DDD's hair that has no hair group (Dark Mode, Halloween Town…) shows Re:CoM's.
+    // 0.186.0: a look with a hair that has no hair group (Dark Mode, Halloween Town…) shows Re:CoM's.
     let find = |hair: u8| skins.iter().find(|s| s.riku == riku && s.dark == look.dark && s.blade == look.blade && s.hair == hair);
     find(look.hair).or_else(|| find(0)).map_or(riku, |s| s.skin)
 }
@@ -239,17 +239,26 @@ mod tests {
         assert_eq!(Look::from_bits(hw(true, 1).bits()), hw(true, 1));
         assert_eq!(Look::from_bits(Look { dark: true, blade: 1, halloween: false, hair: 0 }.bits()), Look { dark: true, blade: 1, halloween: false, hair: 0 });
         assert!(parse(r#"{"format": 1, "skins": [{"riku": 101, "skin": 141, "dark": false, "blade": 0}]}"#).is_err(), "Riku's own look");
-        // 0.186.0: DDD's hair groups (default attire, Soul Eater 181 / Keyblade of Heart 191); a look without one shows Re:CoM's.
-        let hair = parse(r#"{"format": 1, "skins": [{"riku": 101, "skin": 121, "dark": true, "blade": 0}, {"riku": 101, "skin": 141, "dark": false, "blade": 1}, {"riku": 101, "skin": 181, "dark": false, "blade": 0, "hair": 1}, {"riku": 101, "skin": 191, "dark": false, "blade": 1, "hair": 1}]}"#).unwrap();
+        // KH2 hair groups (default attire, Soul Eater 182 / Keyblade of Heart 192); a look without one shows Re:CoM's.
+        let hair = parse(r#"{"format": 1, "skins": [{"riku": 101, "skin": 121, "dark": true, "blade": 0}, {"riku": 101, "skin": 141, "dark": false, "blade": 1}, {"riku": 101, "skin": 182, "dark": false, "blade": 0, "hair": 1}, {"riku": 101, "skin": 192, "dark": false, "blade": 1, "hair": 1}]}"#).unwrap();
         let lk = |dark, blade, hair| Look { dark, blade, halloween: false, hair };
-        assert_eq!(entries(&hair, lk(false, 0, 1)), [181, 111]);
-        assert_eq!(entries(&hair, lk(false, 1, 1)), [191, 111]);
+        assert_eq!(entries(&hair, lk(false, 0, 1)), [182, 111]);
+        assert_eq!(entries(&hair, lk(false, 1, 1)), [192, 111]);
         assert_eq!(entries(&hair, lk(false, 0, 0)), [101, 111], "Re:CoM's hair: Riku's own group");
         assert_eq!(entries(&hair, lk(false, 1, 0)), [141, 111]);
-        assert_eq!(entries(&hair, lk(true, 0, 1)), [121, 111], "Dark Mode has no DDD hair: Re:CoM's");
-        assert_eq!(look_of(&hair, 191), lk(false, 1, 1));
+        assert_eq!(entries(&hair, lk(true, 0, 1)), [121, 111], "Dark Mode has no KH2 hair: Re:CoM's");
+        assert_eq!(look_of(&hair, 192), lk(false, 1, 1));
         assert_eq!(Look::from_bits(lk(false, 1, 1).bits()), lk(false, 1, 1));
-        assert!(parse(r#"{"format": 1, "skins": [{"riku": 101, "skin": 181, "dark": false, "blade": 0, "hair": 1}, {"riku": 101, "skin": 182, "dark": false, "blade": 0, "hair": 1}]}"#).is_err(), "one group per look");
+        assert!(parse(r#"{"format": 1, "skins": [{"riku": 101, "skin": 182, "dark": false, "blade": 0, "hair": 1}, {"riku": 101, "skin": 183, "dark": false, "blade": 0, "hair": 1}]}"#).is_err(), "one group per look");
+        // 0.194.0: BBS kid hair groups (183 / 193), hair value 2; KH2's (1) and Re:CoM's (0) keep their groups.
+        let bbs = parse(r#"{"format": 1, "skins": [{"riku": 101, "skin": 182, "dark": false, "blade": 0, "hair": 1}, {"riku": 101, "skin": 183, "dark": false, "blade": 0, "hair": 2}, {"riku": 101, "skin": 193, "dark": false, "blade": 1, "hair": 2}]}"#).unwrap();
+        assert_eq!(entries(&bbs, lk(false, 0, 2)), [183, 111]);
+        assert_eq!(entries(&bbs, lk(false, 1, 2)), [193, 111]);
+        assert_eq!(entries(&bbs, lk(false, 0, 1)), [182, 111]);
+        assert_eq!(entries(&bbs, lk(false, 1, 1)), [101, 111], "no KH2 Keyblade group in this manifest: Riku's own");
+        assert_eq!(entries(&bbs, lk(true, 0, 2)), [101, 111], "Dark Mode has no BBS hair: Riku's own group");
+        assert_eq!(look_of(&bbs, 193), lk(false, 1, 2));
+        assert_eq!(Look::from_bits(lk(false, 1, 2).bits()), lk(false, 1, 2));
         assert_eq!(ann_name(121), "PL0121");
         assert!(files(121).contains(&"raw/PLAYER/0121/PL0121.RTM".to_string()));
         assert!(parse(r#"{"format": 1, "skins": [{"riku": 3, "skin": 121}]}"#).is_err());

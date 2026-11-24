@@ -98,7 +98,7 @@ pub enum Item {
     Blade,
     /// `sora_costume` (fork, 0.170.0): Default Attire / Halloween Town.
     SoraCostume,
-    /// `riku_hair` (fork, 0.186.0): Re:CoM / DDD.
+    /// `riku_hair` (fork, 0.186.0): Re:CoM / KH2 / BBS (0.194.0).
     Hair,
 }
 
@@ -165,7 +165,7 @@ const COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Dark Mode\0", b"Halloween To
 pub const COSTUME_LOCKED: &[u8] = b"Riku must reach Dark Mode once to wear this attire.\0";
 pub const RIKU_HALLOWEEN_LOCKED: &[u8] = b"Riku must reach Halloween Town once to wear this attire.\0";
 const BLADES: &[&[u8]] = &[b"Soul Eater\0", b"Keyblade of Heart\0"];
-const HAIRS: &[&[u8]] = &[b"Re:CoM\0", b"DDD\0"];
+const HAIRS: &[&[u8]] = &[b"Re:CoM\0", b"KH2\0", b"BBS\0"];
 const SORA_COSTUMES: &[&[u8]] = &[b"Default Attire\0", b"Halloween Town\0"];
 pub const SORA_COSTUME_LOCKED: &[u8] = b"Sora must reach Halloween Town once to wear this attire.\0";
 pub const BLADE_LOCKED: &[u8] = b"Riku must reach Dark Mode once to hold this Keyblade.\0";
@@ -257,7 +257,7 @@ impl Item {
             Item::Costume => b"Dark Mode: his first Dark Mode. Halloween Town: visiting it.\0",
             Item::Blade => b"Keyblade of Heart: Riku-Ansem's. Unlocked by Riku's first Dark Mode.\0",
             Item::SoraCostume => b"Halloween Town: Sora's costume there. Unlocked by visiting it.\0",
-            Item::Hair => b"DDD: Dream Drop Distance's hair. Default attire only.\0",
+            Item::Hair => b"KH2: his KH2 hair. BBS: kid Riku's (needs the 1.5+2.5 collection).\0",
         }
     }
 
@@ -324,7 +324,7 @@ impl Item {
             Item::Costume => s.riku_costume.min(2) as usize,
             Item::Blade => s.riku_heart_blade as usize,
             Item::SoraCostume => s.sora_halloween as usize,
-            Item::Hair => s.riku_hair.min(1) as usize,
+            Item::Hair => s.riku_hair.min(2) as usize,
         }
     }
 
@@ -363,7 +363,7 @@ impl Item {
             Item::Costume => s.riku_costume = v.min(2) as u8,
             Item::Blade => s.riku_heart_blade = v == 1,
             Item::SoraCostume => s.sora_halloween = v == 1,
-            Item::Hair => s.riku_hair = v.min(1) as u8,
+            Item::Hair => s.riku_hair = v.min(2) as u8,
         }
     }
 }
