@@ -131,6 +131,6 @@ jobs:
             echo
             echo "Download **KH1-in-ReCom.zip** below. In the Mods Manager (Re:CoM selected): Mods → **Install a new mod** → **Select and install Mod Archive** → the zip. Tick it and press **Build**. To update, install the newer zip the same way (the mod keeps its folder; check for updates only works for the GitHub install)."
             echo
-            echo "Requirements as the original: KH 1.5+2.5 on Steam with KH1 FM and Re:CoM, OpenKH Mods Manager with Panacea."
+            echo "Requirements: KH 1.5+2.5 on Steam (Re:CoM and KH1 FM; KH2 FM and Birth by Sleep FM add Riku's hair and his spell and Block motions), OpenKH Mods Manager with Panacea. The default settings are ready to play (Riku's KH1 combat is on); no ini edit is needed."
           } > notes.md
           gh release create "$tag" --target "$(git rev-parse HEAD)" --title "$version (patched, ${{ steps.commit.outputs.sha }})" --notes-file notes.md --latest KH1-in-ReCom.zip

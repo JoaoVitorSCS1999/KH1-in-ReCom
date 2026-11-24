@@ -9,6 +9,8 @@
 //!   the story never stalls.
 //! - Runs once per battle request (a script syscall or a field encounter), nothing per frame. Each
 //!   skip is logged.
+//! - Fork (0.196.0): Riku's Ansem tutorial (`WORLD00` 2102 → battle 1100) can't be skipped without loading it (its exit must
+//!   return to 2102 through Re:CoM's battle exit); the request arms it and [`riku_frame`] does the lesson for it in the room.
 
 use super::movement::{self as mv, func, orig, rd};
 use super::{base, log, va};
@@ -26,6 +28,8 @@ const SAVED_DOOR: u32 = 0x0023_3AE0;
 const FLAG_SET: u32 = 0x001B_1650;
 const VAR_GET: u32 = 0x001B_08C0;
 const VAR_SET: u32 = 0x001B_16C0;
+const BYTE_SET: u32 = 0x001B_15D0;
+const CARD_GIVE: u32 = 0x0023_AA60;
 
 /// The save block's map world code and room (`0x1402336C0`, `0x1402339B0`). Checked (decomp).
 const SAVE_WORLD: usize = 0x1878;
@@ -37,6 +41,13 @@ type DoorFn = unsafe extern "win64" fn() -> u32;
 type FlagSetFn = unsafe extern "win64" fn(u32, u32, u32);
 type VarGetFn = unsafe extern "win64" fn(u32, u32) -> i32;
 type VarSetFn = unsafe extern "win64" fn(u32, u32, i32);
+type ByteSetFn = unsafe extern "win64" fn(u32, u32, u32);
+type CardGiveFn = unsafe extern "win64" fn(u32) -> u64;
+
+/// Riku's tutorial skip (fork, 0.196.0): 0 idle, 1 armed (2102 asked for 1100), 2 the saved writes done (in the battle room).
+static RIKU_STATE: AtomicU32 = AtomicU32::new(0);
+/// Frames seen in the battle room while armed.
+static RIKU_FRAMES: AtomicU32 = AtomicU32::new(0);
 
 fn note(line: impl FnOnce() -> String) {
     if LOG_LEFT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_ok() {
@@ -78,10 +89,68 @@ unsafe fn apply(w: Write) {
     }
 }
 
+/// Once per frame of Riku's at Combat = KH1 (the request-bits wrapper): while the tutorial skip is armed, in battle room 1100
+/// the lesson's won-path writes and its "done" bit (`crate::story_skip::RIKU_TUTORIAL_*`); back in 2102, the duel block cleared
+/// once more and the skip disarmed. One atomic load otherwise.
+pub unsafe fn riku_frame() {
+    let st = RIKU_STATE.load(Ordering::Relaxed);
+    if st == 0 {
+        return;
+    }
+    let save: usize = rd(va(base(), SAVE_PTR));
+    if save == 0 {
+        return;
+    }
+    let (world, room): (i16, i16) = (rd(save + SAVE_WORLD), rd(save + SAVE_ROOM));
+    if world == ss::WORLD_RIKU_TUTORIAL && room == ss::RIKU_TUTORIAL_BATTLE {
+        let n = RIKU_FRAMES.fetch_add(1, Ordering::Relaxed);
+        if st == 1 {
+            for w in ss::RIKU_TUTORIAL_SAVED {
+                apply(*w);
+            }
+            let (id, v) = ss::RIKU_TUTORIAL_BYTE;
+            func::<ByteSetFn>(BYTE_SET)(1, id, v as u32);
+            let mut given = vec![];
+            for c in ss::RIKU_TUTORIAL_CARDS {
+                given.push(format!("{c}:{}", func::<CardGiveFn>(CARD_GIVE)(c as u32) & 0xFF));
+            }
+            let bits = func::<VarGetFn>(VAR_GET)(0, 0x24);
+            RIKU_STATE.store(2, Ordering::Relaxed);
+            note(|| format!("Riku's Ansem tutorial (battle room 1100) at Combat = KH1: the lesson's saved writes done ((0, 0x24) = {bits:#x}, byte (1, 4) = 1), world cards given (card:result) {}; its \"done\" bit (1, 2) set each frame so its script leaves through its own exit", given.join(" ")));
+        }
+        if n < ss::RIKU_TUTORIAL_GIVE_UP {
+            for w in ss::RIKU_TUTORIAL_SESSION {
+                apply(*w);
+            }
+        } else if n == ss::RIKU_TUTORIAL_GIVE_UP {
+            note(|| format!("Riku's Ansem tutorial: still in battle room 1100 after {n} frames; the writes stop (the lesson would need Re:CoM's combat)"));
+        }
+        return;
+    }
+    if st == 2 {
+        // left the battle room: the duel block stays cleared (only scripts write it), the skip is done
+        apply(ss::Write::Bit1(0x2A, false));
+        let n = RIKU_FRAMES.load(Ordering::Relaxed);
+        RIKU_STATE.store(0, Ordering::Relaxed);
+        note(|| format!("Riku's Ansem tutorial left after {n} frame(s) in battle room 1100: now world {world} room {room}"));
+    }
+}
+
 /// Re:CoM's `0x140236690(room)` (the room in `cx`; `bool` in `al`).
 pub unsafe extern "win64" fn battle_entry(arg: u64) -> u64 {
     let o: EntryFn = orig(&ORIG_BATTLE_ENTRY);
     let battle_room = arg as u16 as i16;
+    // Fork (0.196.0): Riku's Ansem tutorial is armed here and done on his frames in the battle room (`riku_frame`).
+    if battle_room == ss::RIKU_TUTORIAL_BATTLE {
+        if let Some(a) = ask(battle_room) {
+            if ss::riku_tutorial(a, mv::riku_on()) {
+                RIKU_STATE.store(1, Ordering::Relaxed);
+                RIKU_FRAMES.store(0, Ordering::Relaxed);
+                note(|| format!("Riku's Ansem tutorial: battle room 1100 asked from room {} (world {}) at Combat = KH1 with Riku's KH1 combat: armed (the battle room loads, its lesson is done for it)", a.room, a.world));
+                return o(arg);
+            }
+        }
+    }
     // Only the two tutorial rooms are looked at further (other callers pass 0 or 1030).
     if !ss::SKIPS.iter().any(|s| s.battle_room == battle_room) {
         return o(arg);

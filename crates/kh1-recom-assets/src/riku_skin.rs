@@ -255,7 +255,7 @@ impl Grip {
 }
 
 /// The clip from per-frame locals, keeping the source clip's header fields (no scale channels).
-/// [`encode`] for another module (`crate::ddd`): rows of local (translation, rotation radians, scale) per frame, the
+/// [`encode`] for another module (`crate::pam`): rows of local (translation, rotation radians, scale) per frame, the
 /// clip's header fields from `template`.
 pub(crate) fn encode_rows(template: &Clip, rows: &[Vec<[f64; 9]>]) -> Clip {
     encode(template, rows)
@@ -476,9 +476,10 @@ pub struct GuardSource<'a> {
     pub mdls: &'a [u8],
     /// 0.184.7: KH1 Riku-Ansem's `xa_ex_1580.mset` / `.mdls` (his Stop motion), when read.
     pub ansem: Option<(&'a [u8], &'a [u8])>,
-    /// 0.185.0: DDD Riku's animation pack and model (`crate::ddd::{RIKU_PAM, RIKU_PMO}`), when the 2.8 collection is
-    /// installed next to the game: his cast motions and his Guard.
-    pub ddd: Option<(&'a [u8], &'a [u8])>,
+    /// 0.189.0: BBS FM Terra's skeleton and clips (`crate::terra::read_terra`), the source of Riku's cast and Block
+    /// motions; None when the game's BBS files weren't read (then the casts keep their Re:CoM / KH1 motions and the Guard
+    /// is KH1 Riku's).
+    pub terra: Option<(&'a RecomSkeleton, &'a [crate::pam::PamClip])>,
 }
 
 /// Sora's KH1 Guard on Riku (0.157.0; replaced by [`riku_kh1_guard`] in 0.158.0, kept for tests).
@@ -542,8 +543,8 @@ pub enum Skel {
     Dark,
     /// Sora's (`PL0001.MDL`, `ex_0010_sk`).
     Sora,
-    /// 0.185.0: DDD Riku's (`p_ex020.pmo`, 44 bones; `crate::ddd`).
-    Ddd,
+    /// 0.189.0: BBS FM Terra's (`p03ex00.pmo`, 51 bones; `crate::terra`).
+    Terra,
 }
 
 /// Where a source motion comes from.
@@ -553,8 +554,8 @@ pub enum Src {
     Pack(u16, &'static str, Skel),
     /// 0.184.7: a request of KH1 Riku-Ansem's motion set (`xa_ex_1580.mset`), converted onto Dark Riku's skeleton.
     Kh1Ansem(u16),
-    /// 0.185.0: a clip of DDD Riku's main pack (`p_ex02_000.pam`) by name, on his DDD skeleton.
-    Ddd(&'static str),
+    /// 0.189.0: a clip of Terra's packs (`crate::terra::PACKS`) by name, on his skeleton.
+    Terra(&'static str),
 }
 
 /// One source motion: Riku's and Dark Riku's, their rate, and in the source's own frames the key moment's start and
@@ -607,28 +608,25 @@ pub const CAST_SOURCES: [CastSource; 19] = [
     CastSource { riku: Src::Kh1Ansem(223), dark: Src::Kh1Ansem(223), fps: 60.0, start: 0.0, charge_end: 40.0, key_end: 48.0, last: 72.0, fallback: Some(8) },
     CastSource { riku: Src::Pack(1303, "p002_070", Skel::Riku), dark: Src::Pack(1313, "p003_080", Skel::Dark), fps: 30.0, start: 0.0, charge_end: 3.0, key_end: 6.0, last: 11.0, fallback: None },
     CastSource { riku: Src::Pack(1302, "p002_065", Skel::Riku), dark: Src::Pack(1312, "p003_075", Skel::Dark), fps: 30.0, start: 0.0, charge_end: 10.0, key_end: 16.0, last: 36.0, fallback: None },
-    // 0.185.0: DDD Riku's own casts (the DDD note § 5, Checked (files): the clips' effect lists and their poses): 315
-    // ground / 316 air, the forward thrust (Fire, Blizzard, Poison; both hands and the weapon 1 m ahead on 9..12 /
-    // 8..12), 317 ground / 318 air, the weapon hand raised over the head (Cure, Stop, Zero Gravity…; 12..20). Each with
-    // the 0.184.x motion of its spell as the fallback without DDD.
-    DDD_THRUST_G[0], DDD_THRUST_G[1], DDD_RAISE_G[0], DDD_RAISE_G[1], DDD_RAISE_G[2],
-    DDD_THRUST_A[0], DDD_THRUST_A[1], DDD_RAISE_A[0], DDD_RAISE_A[1], DDD_RAISE_A[2],
+    // 0.189.0: BBS FM Terra's casts (`315` thrust ground / `316` air: Fire, Blizzard; `317` raise ground / `318` air: the rest;
+    // the workspace's `knowledge/BBS/bbs-terra-casts-guard-for-riku.md` section 7.2, Checked (decomp, files); the air pair
+    // is an Assumption). Each with the 0.184.x motion of its spell as the fallback without BBS's files.
+        TERRA_THRUST_G[0], TERRA_THRUST_G[1], TERRA_RAISE_G[0], TERRA_RAISE_G[1], TERRA_RAISE_G[2],
+    TERRA_THRUST_A[0], TERRA_THRUST_A[1], TERRA_RAISE_A[0], TERRA_RAISE_A[1], TERRA_RAISE_A[2],
 ];
 
-const fn ddd(name: &'static str, charge_end: f64, key_end: f64, last: f64, fallback: usize) -> CastSource {
-    CastSource { riku: Src::Ddd(name), dark: Src::Ddd(name), fps: 30.0, start: 0.0, charge_end, key_end, last, fallback: Some(fallback) }
+const fn terra(name: &'static str, charge_end: f64, key_end: f64, last: f64, fallback: usize) -> CastSource {
+    CastSource { riku: Src::Terra(name), dark: Src::Terra(name), fps: 30.0, start: 0.0, charge_end, key_end, last, fallback: Some(fallback) }
 }
-/// DDD's thrust on the ground (Fire's, Blizzard's fallbacks) and in the air; the raise (Thunder / Aero's, Cure's,
+/// Terra's thrust on the ground (Fire's, Blizzard's fallbacks) and in the air; the raise (Thunder / Aero's, Cure's,
 /// Gravity / Stop's fallbacks).
-const DDD_THRUST_G: [CastSource; 2] = [ddd("315", 9.0, 12.0, 35.0, 0), ddd("315", 9.0, 12.0, 35.0, 1)];
-const DDD_RAISE_G: [CastSource; 3] = [ddd("317", 9.0, 12.0, 34.0, 2), ddd("317", 9.0, 12.0, 34.0, 3), ddd("317", 9.0, 12.0, 34.0, 5)];
-/// 0.185.2 (fork owner, 2026-11-23: "tem que usar as animações executadas no chão mesmo", "para a defesa e as magias"):
-/// the air rows played DDD's ground clips too. 0.185.6 (fork owner, 2026-11-23, asked whether the air casts can come
-/// back without replacing the ground ones: "1 sobre a guarda no ar não precisa implementar"): the air rows play DDD's
-/// air clips again (`316` the thrust, key 8..12; `318` the raise; the workspace's DDD note § 5), with the blade in
-/// Riku's grip (0.185.4) and the body from its rest height ([`from_start`]); the ground rows are unchanged.
-const DDD_THRUST_A: [CastSource; 2] = [ddd("316", 8.0, 12.0, 34.0, 0), ddd("316", 8.0, 12.0, 34.0, 1)];
-const DDD_RAISE_A: [CastSource; 3] = [ddd("318", 9.0, 12.0, 34.0, 2), ddd("318", 9.0, 12.0, 34.0, 3), ddd("318", 9.0, 12.0, 34.0, 5)];
+const TERRA_THRUST_G: [CastSource; 2] = [terra("315", 9.0, 13.0, 35.0, 0), terra("315", 9.0, 13.0, 35.0, 1)];
+const TERRA_RAISE_G: [CastSource; 3] = [terra("317", 10.0, 14.0, 36.0, 2), terra("317", 10.0, 14.0, 36.0, 3), terra("317", 10.0, 14.0, 36.0, 5)];
+/// The air rows play Terra's air clips (`316` the thrust, `318` the raise), with the blade in Riku's grip and the body at its
+/// stance height. The key moments (in Terra's 30 fps frames) were read from the retargeted hands: 315 and 316 thrust at
+/// 9..13 / 8..13, the raise at 10..14 (Checked (files)); that they read as a cast in game: Assumption.
+const TERRA_THRUST_A: [CastSource; 2] = [terra("316", 8.0, 13.0, 35.0, 0), terra("316", 8.0, 13.0, 35.0, 1)];
+const TERRA_RAISE_A: [CastSource; 3] = [terra("318", 10.0, 14.0, 36.0, 2), terra("318", 10.0, 14.0, 36.0, 3), terra("318", 10.0, 14.0, 36.0, 5)];
 
 /// One cast clip: its name suffix (`p002_` / `p003_` + it), its source motion, KH1's release frame, length and free
 /// frame (the recovery ends there; held after).
@@ -653,7 +651,7 @@ pub const CURE_CLIPS: [&str; 2] = ["231", "237"];
 /// the ground Fire's wind-up (`0x36`, 28 frames: the charge only) and release (`0x3D`, 60, free 46, the ball at its frame
 /// 0), Blizzard (`0x37`, 86, free 68, release 28), Thunder / Aero (`0x38` / `0x3C`, 68, release 30), Cure (`0x39`, 68,
 /// release 36), Gravity / Stop (`0x3A` / `0x3B`, 86 / 68, release 28); in the air the same six (`0x83`, `0x8A` 52 frames,
-/// `0x84` 78, `0x85` / `0x89`, `0x86`, `0x87` / `0x88` 78; Sora's air motions, Checked (files)) on DDD's air casts.
+/// `0x84` 78, `0x85` / `0x89`, `0x86`, `0x87` / `0x88` 78; Sora's air motions, Checked (files)) on Terra's air casts.
 pub const CAST_CLIPS: [CastClip; 12] = [
     CastClip { suffix: "227", src: 9, release: 28.0, len: 28, free: 28 },
     CastClip { suffix: "228", src: 9, release: 0.0, len: 60, free: 46 },
@@ -1019,8 +1017,8 @@ pub struct CastCtx<'a> {
     pub stance: Option<&'a Clip>,
     /// KH1 Riku-Ansem's motion set and model.
     pub ansem: Option<(&'a [u8], &'a [u8])>,
-    /// 0.185.0: DDD Riku's skeleton and clips.
-    pub ddd: Option<(&'a RecomSkeleton, &'a [crate::ddd::PamClip])>,
+    /// 0.189.0: BBS FM Terra's skeleton and clips ([`GuardSource::terra`]); [`Src::Terra`] names a clip of it.
+    pub terra: Option<(&'a RecomSkeleton, &'a [crate::pam::PamClip])>,
 }
 
 impl CastCtx<'_> {
@@ -1040,40 +1038,68 @@ impl CastCtx<'_> {
                 // blade bones shake; they keep their first frame under the hand.
                 (freeze_blade(&c, self.dark), Skel::Dark)
             }
-            Src::Ddd(name) => {
-                let Some((_, clips)) = self.ddd else { return Ok(None) };
-                let c = clips.iter().find(|c| c.name == name).ok_or_else(|| crate::Error::Format(format!("DDD Riku: no clip {name}")))?;
-                (crate::ddd::to_clip(c, &format!("ddd_{name}")), Skel::Ddd)
+            Src::Terra(name) => {
+                let Some((_, clips)) = self.terra else { return Ok(None) };
+                let c = clips.iter().find(|c| c.name == name).ok_or_else(|| crate::Error::Format(format!("BBS Terra: no clip {name}")))?;
+                (crate::pam::to_clip(c, &format!("terra_{name}")), Skel::Terra)
             }
         };
-        // 0.185.0: DDD's onto Riku by the bone map (`crate::ddd::RIKU_FROM_DDD`), onto Dark Riku through Riku.
-        if from == Skel::Ddd {
-            let Some((dsk, _)) = self.ddd else { return Ok(None) };
+        // Terra's onto Riku by the bone map (`crate::pam::RIKU_FROM_TERRA`), onto Dark Riku through Riku.
+        if from == Skel::Terra {
+            let Some((dsk, _)) = self.terra else { return Ok(None) };
             // 0.185.4 (fork owner, 2026-11-23, on 0.185.3 in game: "ele está invertendo a lamina"): the blade keeps Riku's
             // own grip, `wep0` (and the blade under it) posed under his hand as in his battle stance on every frame, not
-            // from DDD's `R_buki`: DDD holds its blade the other way round in the hand (0.185.2 / 0.185.3, either map).
-            let mut map = crate::ddd::riku_map(self.riku, dsk);
+            // from Terra's `R_buki`: the source holds its blade the other way round in the hand (0.185.2 / 0.185.3, either map).
+            let mut map = crate::pam::riku_map(self.riku, dsk);
             if let Some(w) = self.riku.find("wep0") {
                 map[w] = None;
             }
+            // 0.190.0 (fork owner, in game on 0.189.0: Block "perfeita", but "todas as de magia estão estranhas, o jeito que ele
+            // se move está esquisito"): Terra's body travel and crouch on Riku's shorter legs made the body surge 0.4 m back and
+            // forth over planted feet (a 0.25 m step in one frame at 315's hop) and kicked the legs in the air. The casts now
+            // take Terra's torso, head, arms and blade only: on the ground Riku's legs and body stay in his stance; in the air
+            // his legs follow Terra's tuck with the body at its height. The Guard (accepted) keeps the whole body.
+            let name = name_of(src);
+            let ground_cast = matches!(name, "315" | "317");
+            let air_cast = matches!(name, "316" | "318");
             let on_riku = retarget_with(&raw, dsk, self.riku, &map, self.stance)?;
             let on_riku = flip_blade_roll(&on_riku, self.riku);
-            let on_riku = carry_translation(&on_riku, self.riku, &raw, dsk, crate::ddd::CARRIED_TRANSLATION);
-            let on_riku = if crate::ddd::GROUND_CLIPS.contains(&name_of(src)) { plant_feet(&on_riku, self.riku) } else { from_start(&on_riku, self.riku, "ex_1010_sk") };
+            if ground_cast {
+                let on_riku = match self.stance {
+                    Some(st) => tame_cast(&on_riku, self.riku, st, TAME_LEGS),
+                    None => on_riku,
+                };
+                return Ok(Some(if to == Skel::Riku { on_riku } else { retarget(&on_riku, self.riku, self.dark, &bone_map(self.riku, self.dark))? }));
+            }
+            if air_cast {
+                let on_riku = match self.stance {
+                    Some(st) => hold_body(&on_riku, self.riku, st.sample(self.riku.find("ex_1010_sk").unwrap_or(1), 0.0).t),
+                    None => on_riku,
+                };
+                return Ok(Some(if to == Skel::Riku { on_riku } else { retarget(&on_riku, self.riku, self.dark, &bone_map(self.riku, self.dark))? }));
+            }
+            let on_riku = carry_translation(&on_riku, self.riku, &raw, dsk, crate::pam::CARRIED_TRANSLATION, crate::terra::TRAVEL_SCALE);
+            let on_riku = if is_ground(name_of(src)) { plant_feet(&on_riku, self.riku) } else { from_start(&on_riku, self.riku, "ex_1010_sk") };
+            // 0.189.0: Terra's legs are longer (his rotations on Riku's shorter ones sank the lower foot 4 cm under the floor of
+            // Riku's stance at frame 0, Checked (files)): a ground clip's floor is Riku's stance's.
+            let on_riku = match (is_ground(name_of(src)), self.stance) {
+                (true, Some(st)) => put_on_floor(&on_riku, st, self.riku),
+                _ => on_riku,
+            };
             return Ok(Some(if to == Skel::Riku { on_riku } else { retarget(&on_riku, self.riku, self.dark, &bone_map(self.riku, self.dark))? }));
         }
         let skel = |k: Skel| match k {
             Skel::Riku => self.riku,
             Skel::Dark => self.dark,
             Skel::Sora => self.sora,
-            Skel::Ddd => self.riku,
+            Skel::Terra => self.riku,
         };
         if from == to {
             return Ok(Some(raw));
         }
         let (a, b) = (skel(from), skel(to));
         let root = |k: Skel| match k {
-            Skel::Riku | Skel::Ddd => "ex_1010_sk",
+            Skel::Riku | Skel::Terra => "ex_1010_sk",
             Skel::Dark => "ex_1580_sk",
             Skel::Sora => "ex_0010_sk",
         };
@@ -1095,7 +1121,7 @@ impl CastCtx<'_> {
         loop {
             let src = if to == Skel::Riku { &s.riku } else { &s.dark };
             if let Some(clip) = self.clip_on(src, to)? {
-                let planted = crate::ddd::GROUND_CLIPS.contains(&name_of(src));
+                let planted = is_ground(name_of(src));
                 return Ok(retime(&clip, if to == Skel::Riku { self.riku } else { self.dark }, &c.times_for(s), &format!("{prefix}{}", c.suffix), planted));
             }
             s = &CAST_SOURCES[s.fallback.ok_or_else(|| crate::Error::Format(format!("cast clip {}: no source", c.suffix)))?];
@@ -1138,7 +1164,7 @@ pub fn freeze_blade(clip: &Clip, skel: &RecomSkeleton) -> Clip {
 /// (files): in all of `PL0101.ANN`'s clips only bones 0 / 1 and the blade's `k11` move their translation; the body's
 /// height is on `ex_1010_sk`, the parent of `hip` and `waist`) and the game showed him floating: it goes on
 /// `ex_1010_sk` now (Assumption: the game ignores `hip`'s translation; the screenshots).
-pub fn carry_translation(clip: &Clip, skel: &RecomSkeleton, src: &Clip, src_skel: &RecomSkeleton, pairs: &[(&str, &str)]) -> Clip {
+pub fn carry_translation(clip: &Clip, skel: &RecomSkeleton, src: &Clip, src_skel: &RecomSkeleton, pairs: &[(&str, &str)], scale: f64) -> Clip {
     let pairs: Vec<(usize, usize)> = pairs.iter().filter_map(|(t, f)| Some((skel.find(t)?, src_skel.find(f)?))).collect();
     let rows: Vec<Vec<[f64; 9]>> = (0..clip.frames.max(1) as usize)
         .map(|f| {
@@ -1152,7 +1178,7 @@ pub fn carry_translation(clip: &Clip, skel: &RecomSkeleton, src: &Clip, src_skel
                             let st = src.sample(j, f as f64).t;
                             let rest = src_skel.bones[j].local.t;
                             for k in 0..3 {
-                                t[k] += st[k] - rest[k];
+                                t[k] += (st[k] - rest[k]) * scale;
                             }
                         }
                     }
@@ -1224,10 +1250,212 @@ pub fn flip_blade_roll(clip: &Clip, skel: &RecomSkeleton) -> Clip {
     c
 }
 
-/// A DDD source's clip name ("" for any other source).
+/// The lower foot's height (`l_foot` / `r_foot` origins) of `clip` at frame `f` on `skel`, by forward kinematics.
+fn feet_low(clip: &Clip, skel: &RecomSkeleton, f: f64) -> f64 {
+    let (mut u, mut p): (Vec<M3>, Vec<[f64; 3]>) = (Vec::new(), Vec::new());
+    for (i, b) in skel.bones.iter().enumerate() {
+        let s = clip.sample(i, f);
+        let r = rot_xyz(s.r[0], s.r[1], s.r[2]);
+        if b.parent < 0 {
+            u.push(r);
+            p.push(s.t);
+        } else {
+            let q = b.parent as usize;
+            let w = crate::math::vm(s.t, &u[q]);
+            p.push([w[0] + p[q][0], w[1] + p[q][1], w[2] + p[q][2]]);
+            u.push(m3(&r, &u[q]));
+        }
+    }
+    ["l_foot", "r_foot"].iter().filter_map(|n| skel.find(n)).map(|k| p[k][1]).fold(f64::MAX, f64::min)
+}
+
+/// `clip` with its body (`ex_1010_sk`) moved straight up or down so its lower foot at frame 0 stands where `stance`'s does
+/// (0.189.0, Terra's longer legs).
+pub fn put_on_floor(clip: &Clip, stance: &Clip, skel: &RecomSkeleton) -> Clip {
+    let Some(body) = skel.find("ex_1010_sk") else { return clip.clone() };
+    let dy = feet_low(stance, skel, 0.0) - feet_low(clip, skel, 0.0);
+    let parent = skel.bones[body].parent;
+    let rows: Vec<Vec<[f64; 9]>> = (0..clip.frames.max(1) as usize)
+        .map(|f| {
+            (0..clip.bones as usize)
+                .map(|b| {
+                    let s = clip.sample(b, f as f64);
+                    let mut t = s.t;
+                    if b == body {
+                        let up = if parent >= 0 {
+                            let p = clip.sample(parent as usize, f as f64);
+                            crate::math::vm([0.0, dy, 0.0], &tr(&rot_xyz(p.r[0], p.r[1], p.r[2])))
+                        } else {
+                            [0.0, dy, 0.0]
+                        };
+                        for i in 0..3 {
+                            t[i] += up[i];
+                        }
+                    }
+                    [t[0], t[1], t[2], s.r[0], s.r[1], s.r[2], s.s[0], s.s[1], s.s[2]]
+                })
+                .collect()
+        })
+        .collect();
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    c
+}
+
+/// `clip` with the body's (`ex_1010_sk`) local translation held at `at` on every frame.
+fn hold_body(clip: &Clip, skel: &RecomSkeleton, at: [f64; 3]) -> Clip {
+    let Some(body) = skel.find("ex_1010_sk") else { return clip.clone() };
+    let rows: Vec<Vec<[f64; 9]>> = (0..clip.frames.max(1) as usize)
+        .map(|f| {
+            (0..clip.bones as usize)
+                .map(|b| {
+                    let s = clip.sample(b, f as f64);
+                    let mut t = s.t;
+                    if b == body {
+                        t = at;
+                    }
+                    [t[0], t[1], t[2], s.r[0], s.r[1], s.r[2], s.s[0], s.s[1], s.s[2]]
+                })
+                .collect()
+        })
+        .collect();
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    c
+}
+
+/// Rotation `a` turned toward `b` by the share `w` (0 = a, 1 = b), about the axis of the rotation between them.
+fn rot_blend(a: &M3, b: &M3, w: f64) -> M3 {
+    let r = m3(&tr(a), b);
+    let c = ((r[0][0] + r[1][1] + r[2][2] - 1.0) / 2.0).clamp(-1.0, 1.0);
+    let ang = c.acos();
+    if ang < 1e-9 {
+        return *a;
+    }
+    // Axis from the skew part (row vectors: the transpose of the column-vector one).
+    let k = [r[1][2] - r[2][1], r[2][0] - r[0][2], r[0][1] - r[1][0]];
+    let n = (k[0] * k[0] + k[1] * k[1] + k[2] * k[2]).sqrt();
+    if n < 1e-9 {
+        return *a; // a half turn: no unique axis; keep a
+    }
+    let u = [k[0] / n, k[1] / n, k[2] / n];
+    let t = ang * w;
+    let (s, co) = t.sin_cos();
+    let v = 1.0 - co;
+    // Rodrigues for row vectors (the transpose of the usual matrix).
+    let rw: M3 = [
+        [co + u[0] * u[0] * v, u[0] * u[1] * v + u[2] * s, u[0] * u[2] * v - u[1] * s],
+        [u[0] * u[1] * v - u[2] * s, co + u[1] * u[1] * v, u[1] * u[2] * v + u[0] * s],
+        [u[0] * u[2] * v + u[1] * s, u[1] * u[2] * v - u[0] * s, co + u[2] * u[2] * v],
+    ];
+    m3(a, &rw)
+}
+
+/// 0.193.0 (fork owner, in game on 0.190.0: "as animações da cintura para baixo o riku ficou travadasso"): a ground cast
+/// between 0.189.0's whole-body retarget (the body slid and hopped) and 0.190.0's frozen legs. `clip` is the retargeted cast
+/// (Terra's whole body on Riku's skeleton, body travel not carried): the pelvis and legs (`hip`, `*_femur`, `*_tibia`,
+/// `*_foot`, `*_toes`) are turned only the share `w` from Riku's stance toward Terra's, eased in and out over the first
+/// and last [`TAME_EASE`] frames; `waist` keeps its world rotation (the torso and arms are Terra's untouched); the body
+/// stays over its stance position and its height follows the lower foot (it is lowered or raised so that foot stands on the
+/// stance's floor, within [`TAME_DROP`] / [`TAME_RISE`], smoothed over three frames).
+pub fn tame_cast(clip: &Clip, skel: &RecomSkeleton, stance: &Clip, w: f64) -> Clip {
+    let n = clip.frames.max(1) as usize;
+    let nb = clip.bones as usize;
+    let Some(body) = skel.find("ex_1010_sk") else { return clip.clone() };
+    let st_r = |i: usize| {
+        let s = stance.sample(i, 0.0);
+        rot_xyz(s.r[0], s.r[1], s.r[2])
+    };
+    let blended: Vec<bool> = skel.bones.iter().map(|b| b.name == "hip" || ["femur", "tibia", "foot", "toes"].iter().any(|k| b.name.ends_with(k) && (b.name.starts_with("l_") || b.name.starts_with("r_")))).collect();
+    let (hip, waist) = (skel.find("hip"), skel.find("waist"));
+    let st_t = stance.sample(body, 0.0).t;
+    let mut ws: Vec<M3> = Vec::with_capacity(nb);
+    for (i, b) in skel.bones.iter().enumerate().take(nb) {
+        ws.push(if b.parent < 0 { st_r(i) } else { m3(&st_r(i), &ws[b.parent as usize]) });
+    }
+    let mut prev: Vec<Option<[f64; 3]>> = vec![None; nb];
+    let mut rows: Vec<Vec<[f64; 9]>> = Vec::with_capacity(n);
+    for f in 0..n {
+        let e = (f as f64 / TAME_EASE).min((n - 1 - f) as f64 / TAME_EASE).clamp(0.0, 1.0);
+        let wf = w * e * e * (3.0 - 2.0 * e);
+        let mut row: Vec<[f64; 9]> = Vec::with_capacity(nb);
+        let lr: Vec<M3> = (0..nb).map(|i| { let s = clip.sample(i, f as f64); rot_xyz(s.r[0], s.r[1], s.r[2]) }).collect();
+        // New local rotations, bone by bone (parents first): the pelvis and legs turned the share `wf` toward the clip's; the
+        // feet keep the stance's world rotation (flat on the floor, the ankle takes up the leg's change) and the toes the
+        // stance's local; `waist` keeps the world rotation the clip gave it; every other bone keeps its local.
+        let mut wr0: Vec<M3> = Vec::with_capacity(nb);
+        let mut wn: Vec<M3> = Vec::with_capacity(nb);
+        let mut ours: Vec<Option<M3>> = vec![None; nb];
+        for (i, b) in skel.bones.iter().enumerate().take(nb) {
+            let par = b.parent;
+            wr0.push(if par < 0 { lr[i] } else { m3(&lr[i], &wr0[par as usize]) });
+            let name = b.name.as_str();
+            let is_foot = name == "l_foot" || name == "r_foot";
+            let is_toes = name == "l_toes" || name == "r_toes";
+            let l = if is_foot && par >= 0 {
+                m3(&ws[i], &tr(&wn[par as usize]))
+            } else if is_toes {
+                st_r(i)
+            } else if blended[i] {
+                rot_blend(&st_r(i), &lr[i], wf)
+            } else if Some(i) == waist && par >= 0 && Some(par as usize) == hip {
+                m3(&wr0[i], &tr(&wn[par as usize]))
+            } else {
+                lr[i]
+            };
+            if blended[i] || is_foot || is_toes || Some(i) == waist {
+                ours[i] = Some(l);
+            }
+            wn.push(if par < 0 { l } else { m3(&l, &wn[par as usize]) });
+        }
+        for i in 0..nb {
+            let s = clip.sample(i, f as f64);
+            let mut r = s.r;
+            if let Some(m) = &ours[i] {
+                r = crate::math::euler_xyz(m, prev[i].or(Some(s.r)));
+                prev[i] = Some(r);
+            }
+            let mut t = s.t;
+            if i == body {
+                t = st_t;
+            }
+            row.push([t[0], t[1], t[2], r[0], r[1], r[2], s.s[0], s.s[1], s.s[2]]);
+        }
+        rows.push(row);
+    }
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    // Height: the lower foot on the stance's floor.
+    let floor = feet_low(stance, skel, 0.0);
+    let dy: Vec<f64> = (0..n).map(|f| (floor - feet_low(&c, skel, f as f64)).clamp(-TAME_DROP, TAME_RISE)).collect();
+    let sm: Vec<f64> = (0..n).map(|f| (dy[f.saturating_sub(1)] + dy[f] + dy[(f + 1).min(n - 1)]) / 3.0).collect();
+    for (f, row) in rows.iter_mut().enumerate() {
+        row[body][1] += sm[f];
+    }
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    c
+}
+
+/// The share of Terra's pelvis and leg turns that the ground casts keep (0 = Riku's stance, 0.190.0; 1 = all of Terra's, 0.189.0;
+/// 0.7 chosen from posed renders of the real model at 0, 0.7 and 1: 0.7 flexes the knees and shifts the weight with the arms,
+/// 1 crouches deep with a foot coming off the floor, 0 is the rigid stance the owner rejected).
+pub const TAME_LEGS: f64 = 0.7;
+/// [`tame_cast`]'s ease in and out, in source frames.
+const TAME_EASE: f64 = 4.0;
+/// How far [`tame_cast`] lowers the body to keep the lower foot on the floor, and how far it raises it.
+const TAME_DROP: f64 = 0.15;
+const TAME_RISE: f64 = 0.05;
+
+/// A ground clip of the motion source ([`crate::pam::GROUND_CLIPS`]): its feet are kept on the floor.
+fn is_ground(name: &str) -> bool {
+    crate::pam::GROUND_CLIPS.contains(&name)
+}
+
+/// A Terra source's clip name ("" for any other source).
 fn name_of(src: &Src) -> &str {
     match src {
-        Src::Ddd(n) => n,
+        Src::Terra(n) => n,
         _ => "",
     }
 }
@@ -1312,22 +1540,17 @@ pub fn plant_feet(clip: &Clip, skel: &RecomSkeleton) -> Clip {
     c
 }
 
-/// 0.185.0: DDD Riku's Block. 0.185.1 (fork owner, 2026-11-23: "a animação de defesa nada a ver"): 0.185.0 played `221`,
-/// which is in the air the whole clip (hips 1.0..1.19 m, feet 0.4..0.8 m up; its last frame is the air thrust `316`'s
-/// first), and its rebound `224` is a back flip (feet up to 2 m), as is `223`; `222` is a 2.4 m dash. `220` (36 frames
-/// at 30, no effect) is the one on the ground: the hips still, the feet planted, the weapon hand up in front from frame
-/// 3 to about 24, the free hand back. Checked (files: every clip posed on DDD's skeleton). That `220` is DDD's ground
-/// Block: Assumption (its pose; `221`'s guard effect `P_AC_GUD_GUR1` reads as the air block). The guard keeps KH1's
-/// Guard timing ([`RIKU_GUARD_FRAMES`] = 54: up by [`RIKU_GUARD_UP`], held through KH1's live window 10..36, lowered
-/// after); the recoil is KH1 Riku's again (DDD has no ground one).
-pub const DDD_GUARD: &str = "220";
-/// The guard clip's raise end and hold end, and its last frame (DDD frames).
-const DDD_GUARD_KEYS: (f64, f64, f64) = (6.0, 24.0, 35.0);
-
-/// DDD Riku's guard on Riku's skeleton (named [`RIKU_GUARD`]), None without DDD.
-pub fn ddd_guard(ctx: &CastCtx) -> Result<Option<Clip>> {
-    let Some(g) = ctx.clip_on(&Src::Ddd(DDD_GUARD), Skel::Riku)? else { return Ok(None) };
-    let (up, hold, last) = DDD_GUARD_KEYS;
+/// Terra's Guard (BBS FM, command kind 265, PAT_TERR slot 63, clip [`crate::terra::GUARD`], 36 frames at 30): the game
+/// plays it once, with no separate hold, release or hit clip found (Checked (decomp, files)). Posed on Riku (Checked
+/// (files)): the weapon arm is across the front by frame 3 and stays there to about frame 24, then comes back down to the
+/// stance by 35. On Riku's 54 KH1 frames: up over the first [`RIKU_GUARD_UP`] frames, the pose through KH1's live window
+/// (10..36), the lowering after it. That the game holds the pose after frame 35 is not shown (the clip itself lowers the
+/// arm): Assumption.
+pub const TERRA_GUARD_KEYS: (f64, f64, f64) = (4.0, 24.0, 35.0);
+/// Terra's Guard on Riku's skeleton (named [`RIKU_GUARD`]), None when Terra's files weren't read.
+pub fn terra_guard(ctx: &CastCtx) -> Result<Option<Clip>> {
+    let Some(g) = ctx.clip_on(&Src::Terra(crate::terra::GUARD), Skel::Riku)? else { return Ok(None) };
+    let (up, hold, last) = TERRA_GUARD_KEYS;
     let held = 37.0;
     let times: Vec<f64> = (0..RIKU_GUARD_FRAMES)
         .map(|k| {
@@ -1441,19 +1664,15 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     };
     let ss = RecomSkeleton::parse(&rd(1, "MDL")?)?;
     let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
-    // 0.185.0: DDD Riku (the 2.8 collection next to the game), read when the step found it.
-    let ddd_data = match guard.and_then(|g| g.ddd) {
-        Some((pam, pmo)) => Some((crate::ddd::parse_skeleton(pmo)?, crate::ddd::parse_pam(pam)?)),
-        None => None,
-    };
-    let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: guard.and_then(|g| g.ansem), ddd: ddd_data.as_ref().map(|(k, c)| (k, c.as_slice())) };
+    // 0.189.0: BBS FM Terra's motions (the casts and the Block), read by the step when the game has them.
+    let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: guard.and_then(|g| g.ansem), terra: guard.and_then(|g| g.terra) };
     let riku_casts = riku_cast_clips(&ctx)?;
     let dark_casts = dark_cast_clips(&ctx)?;
     let mut dann_own = Ann::parse(&rd(dark, "ANN")?)?;
     if let Some(src) = guard {
-        // 0.185.0 (fork owner, 2026-11-23: "a animação de guarda do Riku também está presente no DDD, implementa ela!"):
-        // DDD Riku's Block when DDD is there, else KH1 Riku's (0.158.0). 0.185.1: the recoil is KH1 Riku's either way.
-        let guard = match ddd_guard(&ctx)? {
+        // 0.189.0: Terra's Block when BBS FM is read (0.185.0 to 0.188.x: DDD Riku's, removed in 0.193.0), else KH1 Riku's
+        // (0.158.0). The recoil is KH1 Riku's either way.
+        let guard = match terra_guard(&ctx)? {
             Some(g) => g,
             None => riku_kh1_guard(src.mset, src.mdls, &rs)?,
         };
@@ -1580,7 +1799,7 @@ pub struct Made {
     pub dark: bool,
     /// 0 the Soul Eater, 1 the Keyblade of People's Hearts.
     pub blade: u8,
-    /// 0.186.0: 1 DDD Riku's hair.
+    /// 0: Re:CoM's hair, 1: KH2 Riku's (0.186.0's 1 was DDD's hair, removed by Stage 363).
     pub hair: u8,
 }
 
@@ -1625,14 +1844,18 @@ pub const BLADE_SHIFT: [f32; 3] = [4.54, -0.52, -0.02];
 /// (base group, the group whose raw `.RTM` / `.TXA` it uses, new group, Dark Mode attire).
 pub const BLADE_GROUPS: [(u16, u16, u16, bool); 4] = [(101, 101, 141, false), (111, 111, 151, false), (121, 201, 161, true), (131, 211, 171, true)];
 
-/// 0.186.0 (fork owner, 2026-11-24: "é possível implementar uma customização de personagem onde trocaria só o cabelo? e teria
-/// uma variação para o cabelo do DDD?"; "sim"): Riku's default attire with DDD Riku's hair, with the Soul Eater (181) and
-/// with the Keyblade of Heart (191): (new group, with the Keyblade). Built from group 101's files.
-pub const HAIR_GROUPS: [(u16, bool); 2] = [(181, false), (191, true)];
+/// 0.188.0 (fork owner, 2026-11-24: "o cabelo começa sim pelo do Riku do KH2"): Riku's default attire with KH2 Riku's hair, with the Soul Eater (182) and
+/// with the Keyblade of Heart (192); the DDD hair groups 181 / 191 of 0.186.0 were removed (Stage 363). The two looks, built from group 101's files
+/// ([`crate::kh2_hair`]; the 1.5+2.5 collection alone is enough): (new group, with the Keyblade).
+pub const KH2_HAIR_GROUPS: [(u16, bool); 2] = [(182, false), (192, true)];
 
-/// One hair group: Riku's group 101 (`have`: what the step wrote this run, else Re:CoM's) under `target`'s names, with DDD
-/// Riku's hair on its model and atlas ([`crate::ddd_hair::with_ddd_hair`]) and, when `blade` is given, the Keyblade of Heart.
-pub fn build_hair(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, target: u16, blade: Option<&BladeSource>, hair: &crate::ddd_hair::DddHairSource) -> Result<Built> {
+/// 0.194.0 (fork owner, 2026-11-24: "agora quero implementar o cabelo do kid Riku do BBS"): the same two looks with BBS kid Riku's
+/// hair ([`crate::bbs_hair`]; the 1.5+2.5 collection alone is enough): (new group, with the Keyblade).
+pub const BBS_HAIR_GROUPS: [(u16, bool); 2] = [(183, false), (193, true)];
+
+/// One hair group: Riku's group 101 (`have`: what the step wrote this run, else Re:CoM's) under `target`'s names, with
+/// `hair` (KH2 Riku's) on its model and atlas `atlas` ([`crate::ddd_hair::with_hair`]) and, when `blade` is given, the Keyblade of Heart.
+pub fn build_hair(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, target: u16, blade: Option<&BladeSource>, hair: &dyn crate::ddd_hair::HairSource, atlas: &crate::ddd_hair::HairTarget) -> Result<Built> {
     let base = 101u16;
     let get = |ext: &str| -> Result<Vec<u8>> {
         let n = path(base, ext);
@@ -1650,13 +1873,19 @@ pub fn build_hair(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
         Ok((d, a, date))
     };
     let (d, a, date) = raw("RTM")?;
-    let swap = crate::ddd_hair::with_ddd_hair(&get("MDL")?, &d, &a, &crate::ddd_hair::RIKU_0101, hair)?;
+    let mdl0 = get("MDL")?;
+    let swap = crate::ddd_hair::with_hair(&hair.prepare_mdl(&mdl0)?, &d, &a, atlas, hair)?;
+    let ann = hair.bake_ann(&get("ANN")?, &mdl0)?;
     let (mdl, rtm) = match blade {
         Some(src) => (with_blade(&swap.mdl, src, false)?, rtm_with_blade(&swap.rtm, &swap.hd, date, src)?),
         None => (swap.mdl.clone(), kh1_formats::egs::build_plain_entry(&swap.rtm, &swap.hd, date)?),
     };
     let mut files = vec![(path(target, "MDL"), mdl)];
-    for ext in ["ANN", "EET", "SES"] {
+    files.push((path(target, "ANN"), match ann {
+        Some(a) => a,
+        None => get("ANN")?,
+    }));
+    for ext in ["EET", "SES"] {
         files.push((path(target, ext), get(ext)?));
     }
     files.push((format!("raw/{}", path(target, "RTM")), rtm));
@@ -1816,21 +2045,20 @@ mod tests {
         std::env::var_os("RECOM_GAME").map(Into::into)
     }
 
-    /// 0.186.0 (owner's install, `RECOM_GAME`, the 2.8 collection next to it): the two hair groups are built from group 101: the
-    /// model's weapon parts as the plain / Keyblade groups', the textures renamed, the packs as Riku's.
+    /// 0.188.0 (owner's install, `RECOM_GAME`, the 1.5+2.5 collection only): the KH2 hair groups are built from group 101 with
+    /// their own atlas name (both hairs can be in the game).
     #[test]
-    fn the_hair_groups_are_built_from_rikus_101() {
+    fn the_kh2_hair_groups_are_built_from_rikus_101() {
         let Some(g) = game() else { return };
-        let Some(dd) = crate::ddd::install_next_to(&g) else { return };
         let keys = install::keys(&g).unwrap();
         let arc = install::recom_archive(&g).unwrap();
-        let hair = crate::ddd_hair::DddHairSource::read(&dd, &keys).unwrap();
+        let hair = crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
         let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { return };
         let src = BladeSource::from_assets(&assets).unwrap();
         let have = std::collections::HashMap::new();
         let plain_mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
-        for &(target, heart) in &HAIR_GROUPS {
-            let b = build_hair(&arc, &keys, &have, target, if heart { Some(&src) } else { None }, &hair).unwrap();
+        for &(target, heart) in &KH2_HAIR_GROUPS {
+            let b = build_hair(&arc, &keys, &have, target, if heart { Some(&src) } else { None }, &hair, &crate::ddd_hair::RIKU_0101_KH2).unwrap();
             let names: Vec<&str> = b.files.iter().map(|f| f.0.as_str()).collect();
             for ext in ["MDL", "ANN", "EET", "SES"] {
                 assert!(names.contains(&path(target, ext).as_str()), "{target}: {ext}");
@@ -1840,11 +2068,38 @@ mod tests {
             }
             let mdl = &b.files.iter().find(|f| f.0 == path(target, "MDL")).unwrap().1;
             let (old, new) = (crate::mdl::split_parts(&plain_mdl).unwrap(), crate::mdl::split_parts(mdl).unwrap());
-            assert_eq!(old.len(), new.len());
             assert_ne!(old[3], new[3], "{target}: the body's hair changed");
-            assert_eq!(old[0] == new[0], !heart, "{target}: the weapon parts are the Soul Eater's / the Keyblade's");
             let p = crate::mdl::MdlPart::parse_bytes(&new[3]).unwrap();
-            assert!(p.texture_names().contains(&"rk_hair_0101".to_string()) || p.texture_names().iter().any(|t| t.as_str() == "rk_hair_0101"), "{target}: the new atlas");
+            assert!(p.texture_names().iter().any(|t| t.as_str() == "rk_hair_kh2"), "{target}: the KH2 atlas");
+        }
+    }
+
+    /// 0.194.0 (owner's install, `RECOM_GAME`, the 1.5+2.5 collection only): the BBS kid hair groups are built from group 101 with
+    /// their own atlas name (both hairs can be in the game).
+    #[test]
+    fn the_bbs_hair_groups_are_built_from_rikus_101() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let hair = crate::bbs_hair::BbsHairSource::read(&g, &keys).unwrap();
+        let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { return };
+        let src = BladeSource::from_assets(&assets).unwrap();
+        let have = std::collections::HashMap::new();
+        let plain_mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
+        for &(target, heart) in &BBS_HAIR_GROUPS {
+            let b = build_hair(&arc, &keys, &have, target, if heart { Some(&src) } else { None }, &hair, &crate::ddd_hair::RIKU_0101_BBS).unwrap();
+            let names: Vec<&str> = b.files.iter().map(|f| f.0.as_str()).collect();
+            for ext in ["MDL", "ANN", "EET", "SES"] {
+                assert!(names.contains(&path(target, ext).as_str()), "{target}: {ext}");
+            }
+            for ext in ["RTM", "TXA"] {
+                assert!(names.contains(&format!("raw/{}", path(target, ext)).as_str()), "{target}: {ext}");
+            }
+            let mdl = &b.files.iter().find(|f| f.0 == path(target, "MDL")).unwrap().1;
+            let (old, new) = (crate::mdl::split_parts(&plain_mdl).unwrap(), crate::mdl::split_parts(mdl).unwrap());
+            assert_ne!(old[3], new[3], "{target}: the body's hair changed");
+            let p = crate::mdl::MdlPart::parse_bytes(&new[3]).unwrap();
+            assert!(p.texture_names().iter().any(|t| t.as_str() == "rk_hair_bbs"), "{target}: the BBS atlas");
         }
     }
 
@@ -1920,210 +2175,18 @@ mod tests {
             assert!(CAST_CLIPS[w].times().iter().all(|&x| x < s.charge_end), "Fire's wind-up is the charge only");
             assert_eq!(CAST_CLIPS[r].times()[0], CAST_CLIPS[r].source().charge_end, "Fire's release starts on the thrust");
         }
-        // 0.185.0: every clip's source has a fallback chain ending on a Re:CoM / KH1 motion (no DDD needed).
+        // 0.185.0: every clip's source has a fallback chain ending on a Re:CoM / KH1 motion (no BBS needed).
         for c in CAST_CLIPS {
             let mut s = c.source();
             let mut hops = 0;
-            while matches!(s.riku, Src::Ddd(_)) {
-                s = &CAST_SOURCES[s.fallback.expect("a DDD source has a fallback")];
+            while matches!(s.riku, Src::Terra(_)) {
+                s = &CAST_SOURCES[s.fallback.expect("a Terra source has a fallback")];
                 hops += 1;
                 assert!(hops < 4);
             }
         }
     }
 
-    /// 0.185.1 (owner's install; "os pé do riku ficam suspensos"): DDD's ground casts and guard keep Riku's feet on
-    /// the floor where they start (DDD crouches by lowering its hip, carried over; its thrust's hop planted).
-    #[test]
-    fn ddd_ground_motions_keep_rikus_feet_down() {
-        let Some(g) = game() else { return };
-        let Some(dd) = crate::ddd::install_next_to(&g) else { return };
-        let keys = install::keys(&g).unwrap();
-        let arc = install::recom_archive(&g).unwrap();
-        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
-        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
-        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
-        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
-        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
-        let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
-        let dsk = crate::ddd::parse_skeleton(&crate::ddd::read(&dd, &keys, crate::ddd::RIKU_PMO).unwrap()).unwrap();
-        let clips = crate::ddd::parse_pam(&crate::ddd::read(&dd, &keys, crate::ddd::RIKU_PAM).unwrap()).unwrap();
-        let get = |_: u16, _: &str| -> Result<Clip> { bad("none") };
-        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: None, ddd: Some((&dsk, &clips)) };
-        // A bone's height on a skeleton at a frame (forward kinematics, rotations and translations).
-        let height = |sk: &RecomSkeleton, c: &Clip, f: f64, bone: &str| -> f64 {
-            let k = sk.find(bone).unwrap();
-            let mut chain = vec![k];
-            while sk.bones[*chain.last().unwrap()].parent >= 0 {
-                chain.push(sk.bones[*chain.last().unwrap()].parent as usize);
-            }
-            let mut u = crate::math::I3;
-            let mut p = [0.0; 3];
-            for &b in chain.iter().rev() {
-                let s = c.sample(b, f);
-                let w = crate::math::vm(s.t, &u);
-                p = [p[0] + w[0], p[1] + w[1], p[2] + w[2]];
-                u = m3(&rot_xyz(s.r[0], s.r[1], s.r[2]), &u);
-            }
-            p[1]
-        };
-        let riku_low = |c: &Clip, f: f64| height(&rs, c, f, "l_foot").min(height(&rs, c, f, "r_foot"));
-        let ddd_low = |c: &Clip, f: f64| height(&dsk, c, f, "L_ashi1").min(height(&dsk, c, f, "R_ashi1"));
-        // DDD's ground clips: the lower foot on the floor every frame (0.21 m, DDD's own stance; 1 cm of slack), and
-        // the feet end no farther from where they started than DDD's own do (no travel left; 315's hop is now a step in
-        // and back; 220's right foot steps back 0.12 m in DDD too).
-        for &n in crate::ddd::GROUND_CLIPS {
-            let raw = crate::ddd::to_clip(clips.iter().find(|c| c.name == n).unwrap(), n);
-            let c = ctx.clip_on(&Src::Ddd(n), Skel::Riku).unwrap().unwrap();
-            let low = (0..c.frames as usize).map(|f| riku_low(&c, f as f64)).fold(f64::MIN, f64::max);
-            let ddd = (0..c.frames as usize).map(|f| ddd_low(&raw, f as f64)).fold(f64::MIN, f64::max);
-            let back = |sk: &RecomSkeleton, c: &Clip, bone: &str| {
-                let at = |f: f64| {
-                    let k = sk.find(bone).unwrap();
-                    let mut chain = vec![k];
-                    while sk.bones[*chain.last().unwrap()].parent >= 0 {
-                        chain.push(sk.bones[*chain.last().unwrap()].parent as usize);
-                    }
-                    let mut u = crate::math::I3;
-                    let mut p = [0.0; 3];
-                    for &b in chain.iter().rev() {
-                        let s = c.sample(b, f);
-                        let w = crate::math::vm(s.t, &u);
-                        p = [p[0] + w[0], p[1] + w[1], p[2] + w[2]];
-                        u = m3(&rot_xyz(s.r[0], s.r[1], s.r[2]), &u);
-                    }
-                    p
-                };
-                let (p0, p1) = (at(0.0), at((c.frames - 1) as f64));
-                (p1[0] - p0[0]).hypot(p1[2] - p0[2])
-            };
-            for (rb, db) in [("l_foot", "L_ashi1"), ("r_foot", "R_ashi1")] {
-                let (r, d) = (back(&rs, &c, rb), back(&dsk, &raw, db));
-                eprintln!("{n}: {rb} ends {r:.2} m from its start (DDD's {d:.2})");
-                assert!(r < d + 0.03, "{n}: {rb} ends {r:.2} m from its start, DDD's {d:.2}");
-            }
-            eprintln!("{n}: the lower foot at most {low:.2} m (DDD's {ddd:.2})");
-            assert!(low < 0.22, "{n}: the lower foot at most {low:.2} m");
-        }
-        // 0.185.2: Riku's `hip` keeps its rest translation (no Re:CoM clip moves it; the body moves on `ex_1010_sk`).
-        let hip = rs.find("hip").unwrap();
-        let mut built = riku_cast_clips(&ctx).unwrap();
-        built.push(ddd_guard(&ctx).unwrap().unwrap());
-        for cl in &built {
-            for f in 0..cl.frames as usize {
-                let t = cl.sample(hip, f as f64).t;
-                assert!((0..3).all(|k| (t[k] - rs.bones[hip].local.t[k]).abs() < 1e-3), "{}: hip moved at {f}", cl.name_str());
-            }
-        }
-        // 0.185.4: Riku's grip in DDD's clips is his battle stance's (fork owner, in game, on 0.185.3: the blade
-        // "invertida" against his stance's): `wep0`'s rotation relative to `r_hand` is the stance's, every frame of
-        // 315 / 317 / 220.
-        let stance_c = stance.as_ref().unwrap();
-        let (w0, hand) = (rs.find("wep0").unwrap(), rs.find("r_hand").unwrap());
-        let world_u = |c: &Clip, f: f64| -> Vec<crate::math::M3> {
-            let mut u: Vec<crate::math::M3> = vec![];
-            for (i, b) in rs.bones.iter().enumerate() {
-                let sm = c.sample(i, f);
-                let r = rot_xyz(sm.r[0], sm.r[1], sm.r[2]);
-                u.push(if b.parent < 0 { r } else { m3(&r, &u[b.parent as usize]) });
-            }
-            u
-        };
-        let rel = |u: &[crate::math::M3]| m3(&u[w0], &tr(&u[hand]));
-        // 0.185.7: the stance's grip turned half a turn about the blade's axis ([`flip_blade_roll`]).
-        let want = m3(&BLADE_FLIP, &rel(&world_u(stance_c, 0.0)));
-        for &n in crate::ddd::GROUND_CLIPS {
-            let c = ctx.clip_on(&Src::Ddd(n), Skel::Riku).unwrap().unwrap();
-            let mut worst = 0.0f64;
-            for f in 0..c.frames as usize {
-                let got = rel(&world_u(&c, f as f64));
-                for (a, e) in got.iter().flatten().zip(want.iter().flatten()) {
-                    worst = worst.max((a - e).abs());
-                }
-            }
-            eprintln!("{n}: the grip off the stance's by at most {worst:.4}");
-            assert!(worst < 1e-3, "{n}: the grip off the stance's by {worst:.4}");
-        }
-        // Pose dump for a look (DDD_POSE_DUMP=<file>): every bone's world position per frame.
-        if let Some(out) = std::env::var_os("DDD_POSE_DUMP") {
-            let mut txt = String::new();
-            for cl in &built {
-                for f in 0..cl.frames as usize {
-                    let (mut u, mut p): (Vec<crate::math::M3>, Vec<[f64; 3]>) = (vec![], vec![]);
-                    for (i, b) in rs.bones.iter().enumerate() {
-                        let sm = cl.sample(i, f as f64);
-                        let r = rot_xyz(sm.r[0], sm.r[1], sm.r[2]);
-                        if b.parent < 0 { u.push(r); p.push(sm.t); } else {
-                            let q = b.parent as usize;
-                            let w = crate::math::vm(sm.t, &u[q]);
-                            p.push([w[0] + p[q][0], w[1] + p[q][1], w[2] + p[q][2]]);
-                            u.push(m3(&r, &u[q]));
-                        }
-                    }
-                    for (i, b) in rs.bones.iter().enumerate() {
-                        txt += &format!("{} {f} {} {} {:.4} {:.4} {:.4}\n", cl.name_str(), b.name, b.parent, p[i][0], p[i][1], p[i][2]);
-                        let _ = i;
-                    }
-                }
-            }
-            std::fs::write(out, txt).unwrap();
-        }
-        // The ground cast clips built from them (sampled between DDD's frames: 2 cm of slack).
-        for (k, cl) in riku_cast_clips(&ctx).unwrap().iter().enumerate().take(6) {
-            let low = (0..cl.frames as usize).map(|f| riku_low(cl, f as f64)).fold(f64::MIN, f64::max);
-            eprintln!("{}: the lower foot at most {low:.2} m", CAST_CLIPS[k].suffix);
-            assert!(low < 0.23, "{}: the lower foot at most {low:.2} m", CAST_CLIPS[k].suffix);
-        }
-        // 0.185.6: the air cast clips play DDD's air casts (`316` / `318`), start with the body at its rest height and keep
-        // the stance's grip on every frame.
-        let body = rs.find("ex_1010_sk").unwrap();
-        for &n in &["316", "318"] {
-            let c = ctx.clip_on(&Src::Ddd(n), Skel::Riku).unwrap().unwrap();
-            let y0 = c.sample(body, 0.0).t[1];
-            eprintln!("{n}: the body starts at {y0:.3} (rest {:.3})", rs.bones[body].local.t[1]);
-            assert!((y0 - rs.bones[body].local.t[1]).abs() < 1e-3, "{n}: the body starts off its rest height");
-            for f in 0..c.frames as usize {
-                let got = rel(&world_u(&c, f as f64));
-                assert!(got.iter().flatten().zip(want.iter().flatten()).all(|(a, e)| (a - e).abs() < 1e-3), "{n} frame {f}: the grip off the stance's");
-            }
-        }
-        assert!(CAST_SOURCES.iter().filter(|s| matches!(s.riku, Src::Ddd("316") | Src::Ddd("318"))).count() == 5, "the air rows on DDD's air clips");
-    }
-
-
-    /// 0.185.0 (owner's install, `RECOM_GAME`, with the 2.8 collection next to it): DDD Riku's Block and rebound on
-    /// Riku's skeleton, KH1's Guard length, his blade from his stance under the hand (no turn faster than DDD's own).
-    #[test]
-    fn ddd_guard_on_riku() {
-        let Some(g) = game() else { return };
-        let Some(dd) = crate::ddd::install_next_to(&g) else { return };
-        let keys = install::keys(&g).unwrap();
-        let arc = install::recom_archive(&g).unwrap();
-        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
-        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
-        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
-        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
-        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
-        let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
-        let dsk = crate::ddd::parse_skeleton(&crate::ddd::read(&dd, &keys, crate::ddd::RIKU_PMO).unwrap()).unwrap();
-        let clips = crate::ddd::parse_pam(&crate::ddd::read(&dd, &keys, crate::ddd::RIKU_PAM).unwrap()).unwrap();
-        let get = |_: u16, _: &str| -> Result<Clip> { bad("no pack in this test") };
-        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: None, ddd: Some((&dsk, &clips)) };
-        let guard = ddd_guard(&ctx).unwrap().unwrap();
-        assert_eq!((guard.frames as usize, guard.fps(), guard.name_str()), (RIKU_GUARD_FRAMES, 60, RIKU_GUARD.to_string()));
-        let step = |c: &Clip, b: usize, t0: f64, t1: f64| -> f64 {
-            let (x, y) = (c.sample(b, t0).r, c.sample(b, t1).r);
-            (0..3).map(|i| { let d = (y[i] - x[i]).to_degrees().rem_euclid(360.0); d.min(360.0 - d) }).fold(0.0, f64::max)
-        };
-        let mut worst = 0.0f64;
-        for f in 0..guard.frames as usize - 1 {
-            for n in ["chest1", "l_hand", "r_hand", "wep0", "l_uparm", "r_uparm"] {
-                worst = worst.max(step(&guard, rs.find(n).unwrap(), f as f64, f as f64 + 1.0));
-            }
-        }
-        eprintln!("DDD guard on Riku: worst turn {worst:.1} deg a frame");
-        assert!(worst < 45.0, "{worst}");
-    }
 
     /// 0.184.6 (owner's install, `RECOM_GAME`; "as animação ficaram estranhas meio que flicando"): no bone of the body,
     /// hands or blade turns (its local Euler channels) more in one KH1 frame than its source clip does in one (half a 30
@@ -2152,10 +2215,8 @@ mod tests {
         let k1 = install::kh1(&g, keys.clone()).unwrap();
         let (am, ad) = (k1.read("xa_ex_1580.mset").unwrap(), k1.read("xa_ex_1580.mdls").unwrap());
         let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
-        let ddd_data = crate::ddd::install_next_to(&g).map(|d| {
-            (crate::ddd::parse_skeleton(&crate::ddd::read(&d, &keys, crate::ddd::RIKU_PMO).unwrap()).unwrap(), crate::ddd::parse_pam(&crate::ddd::read(&d, &keys, crate::ddd::RIKU_PAM).unwrap()).unwrap())
-        });
-        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: Some((&am, &ad)), ddd: ddd_data.as_ref().map(|(k, c)| (k, c.as_slice())) };
+        let terra_data: Option<(RecomSkeleton, Vec<crate::pam::PamClip>)> = crate::terra::read_terra(&g, &keys).ok();
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: Some((&am, &ad)), terra: terra_data.as_ref().map(|(k, c)| (k, c.as_slice())) };
         let clips = riku_cast_clips(&ctx).unwrap();
         let darks = dark_cast_clips(&ctx).unwrap();
         for (k, c) in CAST_CLIPS.iter().enumerate() {
@@ -2227,10 +2288,8 @@ mod tests {
         let k1 = install::kh1(&g, keys.clone()).unwrap();
         let (am, ad) = (k1.read("xa_ex_1580.mset").unwrap(), k1.read("xa_ex_1580.mdls").unwrap());
         let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
-        let ddd_data = crate::ddd::install_next_to(&g).map(|d| {
-            (crate::ddd::parse_skeleton(&crate::ddd::read(&d, &keys, crate::ddd::RIKU_PMO).unwrap()).unwrap(), crate::ddd::parse_pam(&crate::ddd::read(&d, &keys, crate::ddd::RIKU_PAM).unwrap()).unwrap())
-        });
-        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: Some((&am, &ad)), ddd: ddd_data.as_ref().map(|(k, c)| (k, c.as_slice())) };
+        let terra_data: Option<(RecomSkeleton, Vec<crate::pam::PamClip>)> = crate::terra::read_terra(&g, &keys).ok();
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: Some((&am, &ad)), terra: terra_data.as_ref().map(|(k, c)| (k, c.as_slice())) };
         let clips = riku_cast_clips(&ctx).unwrap();
         let darks = dark_cast_clips(&ctx).unwrap();
         assert_eq!(darks.len(), CAST_CLIPS.len());
@@ -2287,7 +2346,7 @@ mod tests {
         let k1 = install::kh1(&g, keys.clone()).unwrap();
         let (mset, mdls) = (k1.read("xa_ex_1010.mset").unwrap(), k1.read("xa_ex_1010.mdls").unwrap());
         let arc = install::recom_archive(&g).unwrap();
-        let src = GuardSource { mset: &mset, mdls: &mdls, ansem: None, ddd: None };
+        let src = GuardSource { mset: &mset, mdls: &mdls, ansem: None, terra: None };
         for &(riku, dark, skin) in &SKIN_GROUPS {
             let b = build_with(&arc, &keys, riku, dark, skin, Some(&src)).unwrap();
             let (_, bytes) = b.files.iter().find(|(p, _)| *p == path(dark, "ANN")).expect("Dark Riku's own pack");
@@ -2486,6 +2545,227 @@ mod tests {
             assert!(crate::eet::parse(get(".EET")).unwrap().iter().any(|r| r.name == DARK_FLIP));
             assert!(crate::ses::parse(get(".SES")).unwrap().iter().any(|e| e.name() == DARK_FLIP));
             eprintln!("group {k}: {} clips, files {:?}", b.clips, b.files.iter().map(|f| (f.0.clone(), f.1.len())).collect::<Vec<_>>());
+        }
+    }
+
+    /// 0.189.0 (owner's install, `RECOM_GAME`; BBS FM only, no 2.8 collection): Terra's casts (`315`..`318`) and Guard
+    /// (`354`) on Riku's skeleton keep his feet on the floor where they start, his `hip` at rest, the blade in his stance's
+    /// grip, and the air clips start at his rest height. `TERRA_POSE_DUMP=<file>` writes every bone's world position per
+    /// frame of the built cast clips and the Guard (for the renders).
+    #[test]
+    fn terra_motions_on_riku() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
+        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
+        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
+        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
+        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
+        let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
+        let (tsk, tclips) = crate::terra::read_terra(&g, &keys).unwrap();
+        let get = |_: u16, _: &str| -> Result<Clip> { bad("none") };
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: None, terra: Some((&tsk, &tclips)) };
+        let world = |sk: &RecomSkeleton, c: &Clip, f: f64| -> Vec<[f64; 3]> {
+            let (mut u, mut p): (Vec<crate::math::M3>, Vec<[f64; 3]>) = (vec![], vec![]);
+            for (i, b) in sk.bones.iter().enumerate() {
+                let sm = c.sample(i, f);
+                let r = rot_xyz(sm.r[0], sm.r[1], sm.r[2]);
+                if b.parent < 0 {
+                    u.push(r);
+                    p.push(sm.t);
+                } else {
+                    let q = b.parent as usize;
+                    let w = crate::math::vm(sm.t, &u[q]);
+                    p.push([w[0] + p[q][0], w[1] + p[q][1], w[2] + p[q][2]]);
+                    u.push(m3(&r, &u[q]));
+                }
+            }
+            p
+        };
+        let (lf, rf) = (rs.find("l_foot").unwrap(), rs.find("r_foot").unwrap());
+        let low = |c: &Clip, f: f64| {
+            let w = world(&rs, c, f);
+            w[lf][1].min(w[rf][1])
+        };
+        let hip = rs.find("hip").unwrap();
+        let body = rs.find("ex_1010_sk").unwrap();
+        let (w0, hand) = (rs.find("wep0").unwrap(), rs.find("r_hand").unwrap());
+        let world_u = |c: &Clip, f: f64| -> Vec<crate::math::M3> {
+            let mut u: Vec<crate::math::M3> = vec![];
+            for (i, b) in rs.bones.iter().enumerate() {
+                let sm = c.sample(i, f);
+                let r = rot_xyz(sm.r[0], sm.r[1], sm.r[2]);
+                u.push(if b.parent < 0 { r } else { m3(&r, &u[b.parent as usize]) });
+            }
+            u
+        };
+        let want = {
+            let u = world_u(stance.as_ref().unwrap(), 0.0);
+            m3(&BLADE_FLIP, &m3(&u[w0], &tr(&u[hand])))
+        };
+        let mut built = riku_cast_clips(&ctx).unwrap();
+        let guard = terra_guard(&ctx).unwrap().unwrap();
+        assert_eq!((guard.name_str().as_str(), guard.frames as usize), (RIKU_GUARD, RIKU_GUARD_FRAMES));
+        built.push(guard);
+        if let Some(out) = std::env::var_os("TERRA_POSE_DUMP") {
+            let mut txt = String::new();
+            let mut all: Vec<(String, Clip)> = built.iter().map(|c| (c.name_str().to_string(), c.clone())).collect();
+            // The raw retargeted clips (their own frames), for the key moments.
+            for n in ["315", "316", "317", "318", crate::terra::GUARD] {
+                all.push((format!("raw{n}"), ctx.clip_on(&Src::Terra(n), Skel::Riku).unwrap().unwrap()));
+            }
+            for (name, cl) in &all {
+                for f in 0..cl.frames as usize {
+                    for (i, p) in world(&rs, cl, f as f64).iter().enumerate() {
+                        txt += &format!("{name} {f} {} {} {:.4} {:.4} {:.4}\n", rs.bones[i].name, rs.bones[i].parent, p[0], p[1], p[2]);
+                    }
+                }
+            }
+            std::fs::write(out, txt).unwrap();
+        }
+        for cl in &built {
+            for f in 0..cl.frames as usize {
+                let t = cl.sample(hip, f as f64).t;
+                assert!((0..3).all(|k| (t[k] - rs.bones[hip].local.t[k]).abs() < 1e-3), "{}: hip moved at {f}", cl.name_str());
+                let got = m3(&world_u(cl, f as f64)[w0], &tr(&world_u(cl, f as f64)[hand]));
+                assert!(got.iter().flatten().zip(want.iter().flatten()).all(|(a, e)| (a - e).abs() < 1e-3), "{} frame {f}: the grip off the stance's", cl.name_str());
+            }
+        }
+        // The ground clips (Terra's 315 / 317 and the Guard): the lower foot stays on the floor (the stance's own: frame 0).
+        let floor = low(stance.as_ref().unwrap(), 0.0);
+        for (n, cl) in [("315", &built[0]), ("317", &built[2]), (RIKU_GUARD, built.last().unwrap())] {
+            let worst = (0..cl.frames as usize).map(|f| low(cl, f as f64) - floor).fold(f64::MIN, f64::max);
+            eprintln!("{n}: the lower foot at most {worst:.3} m over the stance's floor ({floor:.3})");
+            assert!(worst < 0.04 && worst > -0.01, "{n}: the lower foot {worst:.3} m up");
+        }
+        // 0.193.0: the ground casts keep the body over its stance position (no travel), its height within the drop / rise
+        // limits and moving a little each frame (no hop).
+        for n in ["315", "317"] {
+            let c = ctx.clip_on(&Src::Terra(n), Skel::Riku).unwrap().unwrap();
+            let st0 = stance.as_ref().unwrap().sample(body, 0.0).t;
+            let mut last = st0[1];
+            for f in 0..c.frames as usize {
+                let t = c.sample(body, f as f64).t;
+                assert!((t[0] - st0[0]).abs() < 1e-3 && (t[2] - st0[2]).abs() < 1e-3, "{n} frame {f}: the body travelled");
+                assert!(t[1] - st0[1] > -TAME_DROP - 0.01 && t[1] - st0[1] < 0.06, "{n} frame {f}: the body height {:.3} off the stance's", t[1] - st0[1]);
+                assert!((t[1] - last).abs() < 0.03, "{n} frame {f}: the body moved {:.3} m in one frame", t[1] - last);
+                last = t[1];
+            }
+        }
+        // The air clips keep the body at its stance height.
+        for n in ["316", "318"] {
+            let c = ctx.clip_on(&Src::Terra(n), Skel::Riku).unwrap().unwrap();
+            let st0 = stance.as_ref().unwrap().sample(body, 0.0).t;
+            for f in 0..c.frames as usize {
+                let t = c.sample(body, f as f64).t;
+                assert!((0..3).all(|k| (t[k] - st0[k]).abs() < 1e-3), "{n} frame {f}: the body left its stance position");
+            }
+        }
+    }
+
+    /// Debug (`TERRA_MESH_OUT=<dir>`, `TERRA_MESH_TAG`, `TERRA_MESH_STEP` game frames, default 4): Riku's whole body mesh (flat
+    /// shaded, depth buffered, coloured by bone group) posed by the built Terra casts and the Guard, side and front, one sheet
+    /// per clip. For the legs to be judged on the real model.
+    #[test]
+    fn terra_mesh_sheets() {
+        let (Some(g), Some(out)) = (game(), std::env::var_os("TERRA_MESH_OUT")) else { return };
+        let out = std::path::PathBuf::from(out);
+        let tag = std::env::var("TERRA_MESH_TAG").unwrap_or_else(|_| "now".into());
+        let step: usize = std::env::var("TERRA_MESH_STEP").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
+        let mdl = rd("PLAYER/0101/PL0101.MDL");
+        let rs = RecomSkeleton::parse(&mdl).unwrap();
+        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
+        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
+        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
+        let stance = ann.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == RIKU_STANCE)).cloned();
+        let (tsk, tclips) = crate::terra::read_terra(&g, &keys).unwrap();
+        let get = |_: u16, _: &str| -> Result<Clip> { bad("none") };
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: None, terra: Some((&tsk, &tclips)) };
+        let mut built: Vec<(String, Clip)> = riku_cast_clips(&ctx).unwrap().into_iter().map(|c| (c.name_str().to_string(), c)).collect();
+        let gd = terra_guard(&ctx).unwrap().unwrap();
+        built.push((gd.name_str().to_string(), gd));
+        built.push(("stance".into(), stance.clone().unwrap()));
+        // The mesh: every part's triangles with the bone, position and a colour by bone group.
+        let mut tris: Vec<([usize; 3], [[f64; 3]; 3], [u8; 3])> = Vec::new();
+        for part in crate::mdl::split_parts(&mdl).unwrap() {
+            let p = crate::mdl::MdlPart::parse_bytes(&part).unwrap();
+            for t in crate::ddd_hair::tests::collect(&p) {
+                let nm = |v: &crate::mdl::MeshVertex| rs.bones[v.bone()].name.clone();
+                let n = nm(&t.v[0]);
+                let col = if n.contains("hair") || n == "head" || n.starts_with("neck") { [200, 200, 215] }
+                    else if n.contains("foot") || n.contains("toes") || n.contains("cuffs") { [160, 160, 120] }
+                    else if n.contains("femur") || n.contains("tibia") || n.contains("pants") || n.contains("belt") { [40, 60, 150] }
+                    else if n.contains("hand") || n.contains("fing") { [230, 190, 160] }
+                    else if n.contains("wep") || n.starts_with('k') { [90, 40, 60] }
+                    else if n.contains("arm") || n.contains("collar") { [235, 200, 170] }
+                    else { [220, 200, 80] };
+                tris.push(([t.v[0].bone(), t.v[1].bone(), t.v[2].bone()], t.v.map(|v| v.pos().map(|x| x as f64)), col));
+            }
+        }
+        let world = |c: &Clip, f: f64| -> Vec<crate::math::Aff> {
+            let mut w: Vec<crate::math::Aff> = Vec::with_capacity(rs.bones.len());
+            for (i, b) in rs.bones.iter().enumerate() {
+                let local = if i < c.bones as usize {
+                    let s = c.sample(i, f);
+                    let mut r = rot_xyz(s.r[0], s.r[1], s.r[2]);
+                    for (row, sc) in r.iter_mut().zip(s.s) { for v in row.iter_mut() { *v *= sc; } }
+                    crate::math::Aff { r, t: s.t }
+                } else { b.local };
+                w.push(if b.parent < 0 { local } else { local.mul(&w[b.parent as usize]) });
+            }
+            w
+        };
+        const PW: usize = 200;
+        const PH: usize = 280;
+        for (name, clip) in &built {
+            if !matches!(name.as_str(), "p002_228" | "p002_230" | "p002_234" | "p002_236" | "p002_225" | "stance") { continue; }
+            let frames: Vec<usize> = (0..clip.frames.max(1) as usize).step_by(step).collect();
+            let (w, h) = (PW * frames.len(), PH * 2);
+            let mut rgb = vec![30u8; w * h * 3];
+            for (ci, &f) in frames.iter().enumerate() {
+                let wd = world(clip, f as f64);
+                for (vi, side) in [true, false].into_iter().enumerate() {
+                    let mut zb = vec![f64::MIN; PW * PH];
+                    for (bi, pos, col) in &tris {
+                        let p: Vec<[f64; 3]> = (0..3).map(|k| wd[bi[k]].point(pos[k])).collect();
+                        // side: horizontal = z (front to the right), depth = -x; front: horizontal = x, depth = z.
+                        let pr = |q: &[f64; 3]| -> [f64; 3] {
+                            let (hz, d) = if side { (q[2], -q[0]) } else { (q[0], q[2]) };
+                            [PW as f64 / 2.0 + hz * 120.0, PH as f64 - 12.0 - q[1] * 120.0, d]
+                        };
+                        let sc: Vec<[f64; 3]> = p.iter().map(pr).collect();
+                        let n = { let a = [p[1][0]-p[0][0], p[1][1]-p[0][1], p[1][2]-p[0][2]]; let b = [p[2][0]-p[0][0], p[2][1]-p[0][1], p[2][2]-p[0][2]]; [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]] };
+                        let nl = (n[0]*n[0]+n[1]*n[1]+n[2]*n[2]).sqrt().max(1e-12);
+                        let lit = 0.45 + 0.55 * ((n[0] * 0.3 + n[1] * 0.5 + n[2] * 0.8) / nl).abs();
+                        let (x0, x1) = (sc.iter().map(|q| q[0]).fold(f64::MAX, f64::min).floor().max(0.0) as usize, (sc.iter().map(|q| q[0]).fold(f64::MIN, f64::max).ceil() as usize).min(PW - 1));
+                        let (y0, y1) = (sc.iter().map(|q| q[1]).fold(f64::MAX, f64::min).floor().max(0.0) as usize, (sc.iter().map(|q| q[1]).fold(f64::MIN, f64::max).ceil() as usize).min(PH - 1));
+                        let det = (sc[1][1] - sc[2][1]) * (sc[0][0] - sc[2][0]) + (sc[2][0] - sc[1][0]) * (sc[0][1] - sc[2][1]);
+                        if det.abs() < 1e-9 { continue; }
+                        for y in y0..=y1 {
+                            for x in x0..=x1 {
+                                let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
+                                let l0 = ((sc[1][1] - sc[2][1]) * (px - sc[2][0]) + (sc[2][0] - sc[1][0]) * (py - sc[2][1])) / det;
+                                let l1 = ((sc[2][1] - sc[0][1]) * (px - sc[2][0]) + (sc[0][0] - sc[2][0]) * (py - sc[2][1])) / det;
+                                let l2 = 1.0 - l0 - l1;
+                                if l0 < 0.0 || l1 < 0.0 || l2 < 0.0 { continue; }
+                                let d = l0 * sc[0][2] + l1 * sc[1][2] + l2 * sc[2][2];
+                                if d <= zb[y * PW + x] { continue; }
+                                zb[y * PW + x] = d;
+                                let o = 3 * ((vi * PH + y) * w + ci * PW + x);
+                                for k in 0..3 { rgb[o + k] = (col[k] as f64 * lit) as u8; }
+                            }
+                        }
+                    }
+                    // the floor line
+                    for x in 0..PW { let o = 3 * ((vi * PH + PH - 12) * w + ci * PW + x); rgb[o..o + 3].copy_from_slice(&[90, 90, 90]); }
+                }
+            }
+            std::fs::create_dir_all(&out).unwrap();
+            std::fs::write(out.join(format!("{tag}_{name}.png")), crate::ddd_hair::tests::png(w, h, &rgb)).unwrap();
         }
     }
 

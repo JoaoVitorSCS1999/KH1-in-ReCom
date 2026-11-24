@@ -208,7 +208,8 @@ pub struct Settings {
     /// Keyblade of People's Hearts ("Keyblade of Heart"); only once Riku has reached Dark Mode in the
     /// save. Cosmetic.
     pub riku_heart_blade: bool,
-    /// `riku_hair` (0.186.0): 0 Re:CoM's, 1 DDD Riku's hair (default attire only).
+    /// `riku_hair` (0.186.0): 0 Re:CoM's, 1 KH2 Riku's hair, 2 (0.194.0) BBS kid Riku's (default attire only). Stage 363 removed DDD's,
+    /// which was 1 in 0.186.0 and 2 for KH2 in 0.188.0: an old `riku_hair = ddd` in the ini is a warning and keeps the default.
     pub riku_hair: u8,
     /// Fork (0.170.0): Sora's costume (camp menu > Costumes): false Default Attire, true Halloween
     /// Town (Re:CoM's Halloween model in every world); only once Sora has reached Halloween Town.
@@ -357,14 +358,14 @@ impl Kh1Abilities {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, auto_lock: true, target_lock_manual: false, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: false, riku_costume: 0, all_unlock: false, riku_free_magic: false, riku_heart_blade: false, riku_hair: 0, sora_halloween: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
+        Settings { combat: Mode::Kh1, guard_reactions: true, enemy_pace: Mode::Recom, enemy_ai: Mode::Kh1, damage: Mode::Recom, boss_revenge: true, effects: Mode::Kh1, sounds: Mode::Kh1, camera: Camera::Recom, auto_camera: true, auto_lock: true, target_lock_manual: false, config_menu: true, asset_build: true, abilities: Kh1Abilities::default(), dodge_roll: RollMode::Recom, run_speed: Mode::Recom, jump_height: Mode::Kh1, air_speed: Mode::Kh1, debug_attack: false, riku_kh1_movement: true, riku_costume: 0, all_unlock: false, riku_free_magic: false, riku_heart_blade: false, riku_hair: 0, sora_halloween: false, kh1_all_spells: false, kh1_all_abilities: false, kh1_test_items: false, menu_language: "us".into(), hud: Mode::Kh1, hud_parts: HudParts::default() }
     }
 }
 
 pub const DEFAULT_FILE: &str = "\
 ; KH1 combat in Re:Chain of Memories -- settings
 ; ini_version: the file's layout (the mod updates older files once; leave it as it is).
-ini_version = 2
+ini_version = 3
 ; The camp menu's KH1 entry changes these and rewrites this file: its Combat page (combat,
 ; guard_reactions, enemy_pace, enemy_ai, boss_revenge) and its Movement page (run_speed,
 ; jump_height, air_speed, dodge_roll). The rest are set here only.
@@ -495,10 +496,11 @@ combo_master = off
 ; debug_attack = on | off: log the Attack's decisions (first 200 lines) in kh1-recom.log
 debug_attack = off
 ;
-; riku_kh1_movement = on | off (testing; only at combat = kh1): Riku in Reverse/Rebirth moves
-;   with KH1's movement (run, jump, air control, landing) on his own Re:CoM animations. His
-;   cards, Dark Mode and roll stay Re:CoM's. Off: Riku's story is Re:CoM's.
-riku_kh1_movement = off
+; riku_kh1_movement = on | off (only at combat = kh1): Riku in Reverse/Rebirth fights and moves
+;   with KH1's combat and movement (run, jump, air control, landing, Guard, spells) on his own
+;   Re:CoM animations. His cards, Dark Mode and roll stay Re:CoM's. On by default (0.193.0); off:
+;   Riku's story is Re:CoM's.
+riku_kh1_movement = on
 ;
 ; riku_costume = default | dark | halloween: Riku's costume (camp menu > Costumes), his own moves:
 ;   Default Attire, Dark Mode (Dark Riku's look; once Riku has reached Dark Mode in the save) or
@@ -512,9 +514,10 @@ riku_costume = default
 ;   files (kh1-riku-skin.json).
 riku_keyblade = soul_eater
 ;
-; riku_hair = recom | ddd: Riku's hair (camp menu > Costumes), cosmetic: Re:CoM's or Dream Drop
-;   Distance's. Default attire only (Dark Mode and Halloween Town keep Re:CoM's). Needs the asset
-;   step's files (kh1-riku-skin.json) and KH Dream Drop Distance (the 2.8 collection) next to the game.
+; riku_hair = recom | kh2 | bbs: Riku's hair (camp menu > Costumes), cosmetic: Re:CoM's, KH2 Riku's or BBS's
+;   kid Riku's. Default attire only (Dark Mode and Halloween Town keep Re:CoM's). Needs the asset step's files
+;   (kh1-riku-skin.json) and the 1.5+2.5 collection (KH2 FM for kh2, BBS FM for bbs). (Dream Drop's hair, `ddd`,
+;   was removed.)
 riku_hair = recom
 ;
 ; sora_costume = default | halloween: Sora's costume (camp menu > Costumes): Re:CoM's Halloween
@@ -722,8 +725,9 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
             },
             "riku_hair" => match v.trim().to_ascii_lowercase().as_str() {
                 "recom" => s.riku_hair = 0,
-                "ddd" => s.riku_hair = 1,
-                _ => warnings.push(bad("riku_hair must be recom or ddd")),
+                "kh2" => s.riku_hair = 1,
+                "bbs" => s.riku_hair = 2,
+                _ => warnings.push(bad("riku_hair must be recom, kh2 or bbs (ddd was removed)")),
             },
             "sora_costume" => match v.trim().to_ascii_lowercase().as_str() {
                 "default" => s.sora_halloween = false,
@@ -785,12 +789,14 @@ pub fn parse(text: &str) -> (Settings, Vec<String>) {
 }
 
 /// The ini layout this DLL writes (`ini_version`).
-pub const INI_VERSION: u32 = 2;
+pub const INI_VERSION: u32 = 3;
 
 /// Brings an older settings file up to [`INI_VERSION`], once: the new text and what changed, or
 /// `None` when it is current. Version 2 (0.143.1, owner 2026-11-05: testers saw Re:CoM's HUD at
 /// combat = kh1): `hud` defaulted to `recom` before and no menu shows it, so an older file's
-/// `hud = recom` (or a missing `hud`) becomes `kh1`, the HUD the mod is meant to show.
+/// `hud = recom` (or a missing `hud`) becomes `kh1`, the HUD the mod is meant to show. Version 3 (0.193.0, fork owner,
+/// 2026-11-24: a user had to edit the ini to get Riku's KH1 combat): `riku_kh1_movement` defaults to `on`, so an older
+/// file's `off` (what every older template wrote) becomes `on`, once; a later `off` stays.
 pub fn migrate(text: &str) -> Option<(String, Vec<String>)> {
     let version = text
         .lines()
@@ -806,6 +812,10 @@ pub fn migrate(text: &str) -> Option<(String, Vec<String>)> {
     if parse(text).0.hud != Mode::Kh1 {
         t = set_key(&t, "hud", "kh1");
         notes.push("hud = recom -> kh1 (the KH1 HUD at combat = kh1)".to_string());
+    }
+    if version < 3 && !parse(text).0.riku_kh1_movement {
+        t = set_key(&t, "riku_kh1_movement", "on");
+        notes.push("riku_kh1_movement = off -> on (Riku's KH1 combat by default)".to_string());
     }
     t = set_key(&t, "ini_version", &INI_VERSION.to_string());
     notes.push(format!("ini_version {version} -> {INI_VERSION}"));
@@ -882,7 +892,7 @@ pub fn store(text: &str, s: &Settings) -> String {
     let t = set_key(&t, "all_unlock", switch_str(s.all_unlock));
     let t = set_key(&t, "riku_free_magic", switch_str(s.riku_free_magic));
     let t = set_key(&t, "riku_keyblade", if s.riku_heart_blade { "heart" } else { "soul_eater" });
-    let t = set_key(&t, "riku_hair", if s.riku_hair == 1 { "ddd" } else { "recom" });
+    let t = set_key(&t, "riku_hair", ["recom", "kh2", "bbs"][s.riku_hair.min(2) as usize]);
     let t = set_key(&t, "sora_costume", if s.sora_halloween { "halloween" } else { "default" });
     let t = set_key(&t, "kh1_all_spells", switch_str(s.kh1_all_spells));
     let t = set_key(&t, "kh1_all_abilities", switch_str(s.kh1_all_abilities));
@@ -991,6 +1001,23 @@ mod tests {
         assert!(DEFAULT_FILE.contains("\ndodge_roll = recom\n"));
     }
 
+    /// 0.193.0 (fork owner: a user had to edit the ini): Riku's KH1 combat is on in a fresh file and in a code default, a
+    /// version 2 file with the old `off` is switched on once, a later `off` is kept, and a file without the key gets it.
+    #[test]
+    fn riku_kh1_combat_is_on_by_default_and_old_files_get_it_once() {
+        assert!(Settings::default().riku_kh1_movement);
+        assert!(DEFAULT_FILE.contains("\nriku_kh1_movement = on\n") && DEFAULT_FILE.contains("\nini_version = 3\n"));
+        assert!(parse(DEFAULT_FILE).0.riku_kh1_movement);
+        let (t, notes) = migrate("ini_version = 2\ncombat = kh1\nriku_kh1_movement = off\n").expect("a version 2 file is updated");
+        assert!(parse(&t).0.riku_kh1_movement && notes.iter().any(|n| n.contains("riku_kh1_movement")), "{t}");
+        assert!(migrate(&t).is_none(), "only once");
+        let off = t.replace("riku_kh1_movement = on", "riku_kh1_movement = off");
+        assert!(migrate(&off).is_none() && !parse(&off).0.riku_kh1_movement, "a later off is kept");
+        assert!(migrate("ini_version = 3\nriku_kh1_movement = off\n").is_none());
+        let (t, _) = migrate("combat = kh1\n").expect("an old file with no key");
+        assert!(parse(&t).0.riku_kh1_movement);
+    }
+
     #[test]
     fn an_old_file_gets_the_kh1_hud_once() {
         let old = "combat = kh1\nhud = recom\n";
@@ -999,7 +1026,7 @@ mod tests {
         assert!(notes.iter().any(|n| n.contains("hud")));
         assert!(migrate(&t).is_none(), "only once");
         // A current file that chose recom keeps it.
-        assert!(migrate("ini_version = 2\nhud = recom\n").is_none());
+        assert!(migrate("ini_version = 3\nhud = recom\n").is_none());
         // The default file is current and shows the KH1 HUD.
         assert!(migrate(DEFAULT_FILE).is_none());
         assert_eq!(parse(DEFAULT_FILE).0.hud, Mode::Kh1);
@@ -1029,12 +1056,16 @@ mod tests {
 
     #[test]
     fn store_round_trips() {
-        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, auto_lock: false, target_lock_manual: true, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: false, riku_costume: 2, all_unlock: true, riku_free_magic: false, riku_heart_blade: true, riku_hair: 1, sora_halloween: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
+        let s = Settings { combat: Mode::Recom, guard_reactions: false, enemy_pace: Mode::Kh1, enemy_ai: Mode::Recom, damage: Mode::Kh1, boss_revenge: false, effects: Mode::Recom, sounds: Mode::Recom, camera: Camera::Kh1, auto_camera: false, auto_lock: false, target_lock_manual: true, config_menu: false, asset_build: false, abilities: Kh1Abilities { high_jump: true, glide: true, ..Default::default() }, dodge_roll: RollMode::Kh1, run_speed: Mode::Kh1, jump_height: Mode::Recom, air_speed: Mode::Recom, debug_attack: true, riku_kh1_movement: true, riku_costume: 2, all_unlock: true, riku_free_magic: false, riku_heart_blade: true, riku_hair: 2, sora_halloween: true, kh1_all_spells: true, kh1_all_abilities: true, kh1_test_items: true, menu_language: "fr".into(), hud: Mode::Kh1, hud_parts: HudParts { gauge: false, recom_hp_place: false, mp_ring: true, menu: true, party: false, hide_hp: false, hide_minimap: true, hide_friends: false, hide_prizes: true, room_plate_top: false } };
         let t = store(DEFAULT_FILE, &s);
         let (back, w) = parse(&t);
         assert_eq!(back, s);
         assert!(w.is_empty(), "{w:?}");
         assert!(t.contains("; combat = kh1 | recom"), "comments survive");
+        assert!(t.contains("riku_hair = bbs"), "0.194.0: BBS kid Riku's hair is written back");
+        for (v, n) in [("recom", 0), ("kh2", 1), ("bbs", 2), ("ddd", 0)] {
+            assert_eq!(parse(&format!("riku_hair = {v}\n")).0.riku_hair, n);
+        }
         // An empty file gets every key.
         assert_eq!(parse(&store("", &s)).0, s);
     }

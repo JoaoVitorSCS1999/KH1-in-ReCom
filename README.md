@@ -104,6 +104,10 @@ or when the game itself is updated.
 If KH1 Final Mix is not installed, the title says "KH1 FM not found: playing without KH1 files" and the game
 goes on without them.
 
+The games used are all in the KH 1.5+2.5 collection: Re:CoM and KH1 FM (required), KH2 FM (Riku's KH2 hair and the
+Keyblade models) and Birth by Sleep FM (Riku's spell and Block motions). A missing optional game only leaves that part
+with Re:CoM's or KH1's own motions and models; no other collection is needed.
+
 **Updating:** in the Mods Manager, check for updates and update the mod, then Build.
 
 Details for developers: `docs/openkh-github-install.md`.
@@ -122,9 +126,9 @@ Everything is in `kh1-recom.ini` (each key is explained in the file) and in the 
 | `camera` | `recom` | Re:CoM's, KH1's or KH2's camera |
 | `auto_lock` | `on` | KH1's Auto Lock: with no lock, attacks aim at the nearest enemy (the orange ring with the KH1 HUD) |
 | `target_lock` | `auto` | KH1's Target Lock: `auto` (R1 again unlocks) or `manual` (unlocks when R1 is let go) |
-| `riku_kh1_movement` | `off` | KH1-style movement for Riku in Reverse/Rebirth (being tested) |
+| `riku_kh1_movement` | `on` | KH1's combat and movement for Riku in Reverse/Rebirth (on out of the box) |
 | `riku_costume`, `riku_keyblade`, `sora_costume` | `default`, `soul_eater`, `default` | the cosmetic costumes and Keyblade, once unlocked |
-| `riku_hair` | `recom` | Riku's hair: `recom` or `ddd` (Dream Drop Distance's, default attire only; needs the 2.8 collection next to the game) |
+| `riku_hair` | `recom` | Riku's hair: `recom`, `kh2` (KH2 Riku's) or `bbs` (BBS kid Riku's); default attire only; needs the 1.5+2.5 collection |
 | `all_unlock` | `off` | **for debug only**: unlocks every costume and cosmetic Keyblade |
 
 ## Build

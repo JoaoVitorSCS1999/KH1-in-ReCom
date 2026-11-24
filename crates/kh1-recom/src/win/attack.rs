@@ -606,6 +606,8 @@ pub unsafe extern "win64" fn request_bits(pl: usize) {
 /// (confirm = Attack, no card input), and a jump on the same frame wins (KH1's order). None of
 /// Sora's per-frame extras (MP, menus, notices, Enemy Skills, items, magic).
 unsafe fn riku_request_bits(pl: usize, o: PlFn) {
+    // Fork (0.196.0): Riku's Ansem tutorial skip (one atomic load unless armed).
+    super::story_skip::riku_frame();
     // KH1's MP refill step (one atomic load unless a point waits), as Sora's.
     super::mp::frame();
     // 0.163.0: KH1's items, as Sora's (a command no KH1 frame took is gone; the use tasks).

@@ -1,76 +1,40 @@
-//! DDD Riku's hair on Re:CoM Riku's head, and nothing else of DDD's model (the asset side of the hair swap; fork owner,
-//! 2026-11-24: "sim" to the plan in the workspace's `knowledge/DDD/ddd-riku-hair.md` § 5).
+//! A new hair on Re:CoM Riku's head, and nothing else of the source model (the asset side of the hair swap; fork owner, 2026-11-24:
+//! "o cabelo começa sim pelo do Riku do KH2"; the DDD hair this was first written for was removed by Stage 363). The source is a
+//! [`HairSource`] (today KH2 Riku's, [`crate::kh2_hair`]).
 //!
-//! What it does, for Riku's default attire `PLAYER/0101/PL0101.MDL` (its second costume and Dark Riku are other jobs):
+//! What it does, for Riku's default attire `PLAYER/0101/PL0101.MDL`:
 //!
 //! 1. **Re:CoM's hair triangles** are found per triangle in part 3 (the textured body) on texture id 1 (`n_zz110_01`, a
 //!    1024 x 1024 atlas of face, hair, skin and trousers). The atlas is cut into UV islands (triangles that share a
 //!    corner's UV); an island is hair when one of its triangles touches a hair bone (`*hair*`), and the triangles of a hair
 //!    island that touch the head bone or a hair bone are removed. This is exact on the atlas; no colour heuristic.
 //!    Checked (files: `PL0101.MDL`): 716 triangles touch the head or hair bones, 366 of them are on hair islands, the
-//!    other 350 are the face island (310), the ear / neck pieces; no triangle in a hair island touches another bone. (The
-//!    note's 376 came from a colour test at the centroid; the island rule gives 366. Ten more hair-coloured triangles of
-//!    the neck collar stay, which is the safe side for the face and neck.)
+//!    other 350 are the face island (310), the ear / neck pieces; no triangle in a hair island touches another bone.
 //! 2. Part 2 (untextured, positions only) is **not** part 3's twin: it holds 1074 triangles at other positions (a low-poly
-//!    head and hair proxy; what the game draws it for was not traced). It has no UVs, so its hair is the triangles that
-//!    touch a hair bone (136 of 50 head-bone and 14 neck ones); the head-bone skull stays. DDD's hair is added to it
-//!    too, so the proxy keeps a hair-shaped silhouette (Assumption: nothing was traced about its use).
-//! 3. **DDD's hair triangles** come from the PMO v4's head sections 12..=16 (texture id 3, `p_ex020_00.dds`, 1024 x 1024).
-//!    Its atlas is cut into UV islands the same way; an island is hair when most of its triangles' centroid texels are
-//!    hair-coloured (grey-lavender, [`is_hair_texel`]), the face island is skin. Checked (files): all 22 islands (18 hair,
-//!    4 skin) are unanimous: 343 hair triangles and 164 skin triangles (306 degenerate strip joins are dropped).
-//! 4. Each DDD corner takes its dominant DDD bone, mapped to a Re:CoM bone by [`DDD_TO_RIKU`] (anything else: the head),
-//!    and its bind-pose position is put in that bone's space with the inverse of the Re:CoM bone's rest world (the two
-//!    skeletons share their frame: the note, § 1). Re:CoM has one bone per vertex, so a two-bone blend is rounded to the
-//!    heavier bone (Assumption: the hair then follows that bone rigidly).
-//! 5. The atlas is rebuilt: Re:CoM's pixels are kept only under the kept triangles (dilated), the rest is the gutter
-//!    colour, and DDD's hair islands are copied into the free space with a per-island translation (the islands inside a
-//!    bigger island's rectangle share its copy) and, when the rectangles do not fit at full size, one common scale below 1
-//!    (a list of scales is tried from 1.0). The new atlas has its own texture name ([`HairTarget::new_texture`]): the game
-//!    looks texture names up globally, so the original `n_zz110_01` must not be shadowed. Written as the HD DDS (same
-//!    A8R8G8B8 header as the original) and as the 256-colour TIM2 ([`crate::keyblade::texture_entry`]).
-//! 6. The remaining triangles are written again as strips in packets (as `keyblade::packets` does), no packet over the
-//!    vertex count Square's own packets reach in that part, and the per-bone bounds are recomputed.
+//!    head and hair proxy). It has no UVs, so its hair is the triangles that touch a hair bone; the head-bone skull stays.
+//! 3. The source's triangles come with a Re:CoM bone each and a position in Re:CoM's frame; a corner's bind-pose position is
+//!    put in that bone's space with the inverse of the Re:CoM bone's rest world. Re:CoM has one bone per vertex.
+//! 4. The atlas is rebuilt: Re:CoM's pixels are kept only under the kept triangles (dilated), the rest is the gutter
+//!    colour, and the source's hair islands are copied into the free space with a per-island translation and, when the
+//!    rectangles do not fit at full size, one common scale below 1. The new atlas has its own texture name
+//!    ([`HairTarget::new_texture`]): the game looks texture names up globally, so the original `n_zz110_01` must not be
+//!    shadowed. Written as the HD DDS and as the 256-colour TIM2 ([`crate::keyblade::texture_entry`]).
+//! 5. The remaining triangles are written again as strips in packets (as `keyblade::packets` does), no packet over the
+//!    vertex count Square's own packets reach in that part, and the per-bone bounds are recomputed. Each source triangle is
+//!    written twice, with the two facing flags, so that one copy passes a facing cull from any side (0.186.1).
 //!
 //! The facing flag of a drawing vertex (0 or 0x20) is `0x20` when `cross(b - a, c - a)` of the strip-order corners points
-//! away from the head's centre. Checked (files: 96.6% of PL0101's head-bone-only textured triangles, 394 of 408); for DDD's
-//! triangles the same rule is applied (Assumption: how the PC build uses the flag was not traced).
-//!
-//! Not checked: that the game's loader and draw path accept the new packets (the file was never run in the game), and the
-//! hair's behaviour under Re:CoM's hair-bone clips.
+//! away from the head's centre. Checked (files: 96.6% of PL0101's head-bone-only textured triangles, 394 of 408).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use kh1_formats::egs::HdAsset;
 
 use crate::ann::{cstr, name16};
-use crate::ddd::{Pmo, PmoSection};
 use crate::math::Aff;
 use crate::mdl::{join_parts, split_parts, MdlPart, MeshPacket, MeshVertex, RecomSkeleton, FMT_PLAIN, FMT_TEXTURED, MAX_PACKET_QW};
 use crate::texture::{decode_dds, Image};
 use crate::{bad, Error, Result};
-
-/// DDD Riku's head and hair sections of `p_ex020.pmo` (texture id 3). Checked (files).
-pub const HEAD_SECTIONS: std::ops::RangeInclusive<usize> = 12..=16;
-/// Their texture id (`p_ex020_00`). Checked (files).
-pub const HEAD_TEXTURE: u8 = 3;
-/// The HD asset of the PMO's entry that holds that texture. Checked (files: `ddd-riku-hair.md` § 2).
-pub const DDD_ATLAS_ASSET: &str = "p_ex020_00.dds";
-
-/// DDD bone → Re:CoM bone for the hair's corners (`knowledge/DDD/ddd-riku-hair.md` § 5 step 2; the bind positions agree:
-/// § 1). A bone not listed takes the head.
-pub const DDD_TO_RIKU: &[(&str, &str)] = &[
-    ("atama", "head"),
-    ("F_kami", "f_hair"),
-    ("L_kamiB", "l_hair4"),
-    ("R_kamiB", "r_hair4"),
-    ("L_kamiA", "l_hair3"),
-    ("R_kamiA", "r_hair3"),
-    ("B_kamiA", "b_hair2"),
-    ("B_kamiC", "b_hair3"),
-    ("B_kamiB", "b_hair2"),
-    ("kubi", "neck3"),
-];
 
 /// Re:CoM's head bone.
 pub const HEAD_BONE: &str = "head";
@@ -88,23 +52,74 @@ pub struct HairTarget {
     pub new_texture: &'static str,
 }
 
-/// Riku's default attire (`PL0101`).
-pub const RIKU_0101: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_0101" };
+/// Riku's default attire (`PL0101`) with KH2 Riku's hair ([`crate::kh2_hair`]): the new atlas's name.
+pub const RIKU_0101_KH2: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_kh2" };
 
-/// What the swap needs from DDD: the PMO and the head atlas as a DDS.
-pub struct DddHairSource {
-    /// `p_ex020.pmo`.
-    pub pmo: Vec<u8>,
-    /// `p_ex020_00.dds` (1024 x 1024 A8R8G8B8).
-    pub dds: Vec<u8>,
+/// The same attire with BBS kid Riku's hair ([`crate::bbs_hair`]).
+pub const RIKU_0101_BBS: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_bbs" };
+
+/// One corner of a source hair triangle, already in Re:CoM's frame.
+#[derive(Clone, Debug)]
+pub struct SrcVert {
+    /// Bind-pose position in the Re:CoM skeleton's frame (metres).
+    pub pos: [f64; 3],
+    /// Texture coordinates in the source atlas (unwrapped, may lie outside 0..1: the atlas repeats).
+    pub uv: [f64; 2],
+    /// The Re:CoM bone the corner follows.
+    pub bone: String,
 }
 
-impl DddHairSource {
-    /// Reads both from the player's DDD install (`ddd::install_next_to`).
-    pub fn read(ddd: &std::path::Path, keys: &kh1_formats::egs::KeyTable) -> Result<DddHairSource> {
-        let (pmo, assets) = crate::ddd::read_full(ddd, keys, crate::ddd::RIKU_PMO)?;
-        let dds = assets.into_iter().find(|a| a.name == DDD_ATLAS_ASSET).ok_or_else(|| Error::Format(format!("DDD: {DDD_ATLAS_ASSET} not in the PMO's entry")))?.data;
-        Ok(DddHairSource { pmo, dds })
+/// One source hair triangle.
+#[derive(Clone, Debug)]
+pub struct SrcTri {
+    /// The corners, in strip order.
+    pub v: [SrcVert; 3],
+    /// UV island id in the source atlas.
+    pub island: usize,
+    /// True when this triangle continues the previous one's strip (only its third corner is new).
+    pub cont: bool,
+}
+
+/// A hair ready for the swap, whatever its game.
+pub struct SrcHair {
+    /// The hair triangles.
+    pub tris: Vec<SrcTri>,
+    /// Number of UV islands (ids `0..islands`).
+    pub islands: usize,
+    /// Skin triangles left out (report only).
+    pub skin: usize,
+    /// The source atlas (same size as Re:CoM's).
+    pub atlas: Image,
+    /// One-sided (0.194.3, BBS): each triangle is written once, in the source's own winding, all with the facing flag that
+    /// [`facing`] gives the majority of them (the source's outside); otherwise two-sided (DDD, KH2).
+    pub one_sided: bool,
+}
+
+/// Where a hair comes from: it builds its triangles in Re:CoM's frame given Re:CoM's bone names and rest world matrices.
+pub trait HairSource {
+    /// The hair for a model with these bones (`names[i]`, `world[i]` = its rest world matrix).
+    fn hair(&self, names: &[String], world: &[Aff]) -> Result<SrcHair>;
+    /// The model before the swap: a source that moves Re:CoM's hair bones its own way re-poses them here (0.195.0, KH2).
+    fn prepare_mdl(&self, mdl: &[u8]) -> Result<Vec<u8>> {
+        Ok(mdl.to_vec())
+    }
+    /// Re:CoM's face as it stays after the swap (world rest triangles), given before [`HairSource::hair`] (0.195.4: the KH2 hair
+    /// fits itself to it).
+    fn set_face(&self, _face: &[[[f64; 3]; 3]]) {}
+    /// Moves a vertex of Re:CoM's face that stays (world rest position; the head bone's at rest is `head`) (0.196.1: the KH2 hair
+    /// flattens the ear its own model has no ear for).
+    fn adjust_face(&self, p: [f64; 3], _head: [f64; 3]) -> [f64; 3] {
+        p
+    }
+    /// Whether a kept head-bone triangle (centroid `p`, world rest; the head bone's at rest is `head`) is written twice, with
+    /// both facing flags, like the source's hair triangles (0.196.3: the KH2 hair opens the ear's window, so the temple's
+    /// single-copy triangles must pass the game's facing cull from either side).
+    fn two_sided_face(&self, _p: [f64; 3], _head: [f64; 3]) -> bool {
+        false
+    }
+    /// The look's own motion pack, made from Re:CoM's (`ann`) for the original model `mdl` (none: Re:CoM's pack as it is).
+    fn bake_ann(&self, _ann: &[u8], _mdl: &[u8]) -> Result<Option<Vec<u8>>> {
+        Ok(None)
     }
 }
 
@@ -121,16 +136,18 @@ pub struct HairReport {
     pub other_texture: usize,
     /// Triangles in a hair island that touch neither the head nor a hair bone (kept).
     pub stray_in_hair_islands: usize,
-    /// DDD's hair triangles added.
+    /// The source's hair triangles added (DDD's, or KH2's).
     pub ddd_hair: usize,
-    /// DDD's skin triangles left out.
+    /// The source's skin triangles left out (DDD only).
     pub ddd_skin: usize,
-    /// DDD's hair UV islands.
+    /// The source's hair UV islands.
     pub ddd_islands: usize,
     /// Rectangles copied into the atlas (islands inside another's rectangle share it).
     pub atlas_rects: usize,
     /// The common scale of the copied islands.
     pub atlas_scale: f64,
+    /// Kept head-bone triangles written a second time with the other facing ([`HairSource::two_sided_face`]).
+    pub face_two_sided: usize,
     /// Packets in part 3 / part 2 before and after.
     pub packets: ([usize; 2], [usize; 2]),
 }
@@ -161,7 +178,7 @@ const KEEP_DILATE: usize = 6;
 /// Pixels around a DDD island's UV box that are copied with it.
 const PAD: i32 = 6;
 /// The common scales tried for DDD's hair islands, largest first.
-const SCALES: [f64; 9] = [1.0, 0.98, 0.96, 0.94, 0.92, 0.9, 0.85, 0.8, 0.7];
+const SCALES: [f64; 16] = [1.0, 0.98, 0.96, 0.94, 0.92, 0.9, 0.85, 0.8, 0.7, 0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3];
 
 struct Dsu(Vec<usize>);
 
@@ -190,7 +207,7 @@ impl Dsu {
 
 /// UV islands: `corners[t]` are triangle `t`'s corner keys; returns each triangle's dense island id (in order of first
 /// appearance) and the island count.
-fn islands<K: std::hash::Hash + Eq + Copy>(corners: &[[K; 3]]) -> (Vec<usize>, usize) {
+pub fn islands<K: std::hash::Hash + Eq + Copy>(corners: &[[K; 3]]) -> (Vec<usize>, usize) {
     let mut ids: HashMap<K, usize> = HashMap::new();
     let mut d = Dsu::new();
     let mut idx = |k: K, d: &mut Dsu| *ids.entry(k).or_insert_with(|| d.make());
@@ -260,99 +277,16 @@ pub fn facing(p: [[f64; 3]; 3], centre: [f64; 3]) -> u32 {
 }
 
 // ---------------------------------------------------------------------------------------------
-// DDD's side.
-// ---------------------------------------------------------------------------------------------
-
-/// True for a texel of DDD Riku's hair art (grey-lavender, mid-dark, not neutral grey; skin, eyes and clothes fail it).
-/// The test the note's 343 came from. Checked (files: `p_ex020_00.dds`: every island is unanimous under it).
-pub fn is_hair_texel(px: [u8; 4]) -> bool {
-    let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
-    b >= r - 5 && b as f64 > r as f64 * 0.9 && (g - r).abs() < 35 && r.max(g).max(b) < 230 && r.min(g).min(b) > 20 && !((r - g).abs() < 8 && (g - b).abs() < 8)
-}
-
-/// One DDD hair triangle: where it is and which UV island it is in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DddHairTri {
-    /// The PMO section.
-    pub section: usize,
-    /// Its position in [`PmoSection::triangles`].
-    pub index: usize,
-    /// The section's vertex indices, in strip order.
-    pub verts: [usize; 3],
-    /// Dense UV island id (shared with the skin islands' numbering).
-    pub island: usize,
-}
-
-/// DDD's head triangles, split into hair and skin.
-#[derive(Clone, Debug, PartialEq)]
-pub struct DddHair {
-    /// The hair triangles, in section and strip order.
-    pub hair: Vec<DddHairTri>,
-    /// The skin (face) triangles left out.
-    pub skin: usize,
-    /// Per island: its triangle count and whether it is hair.
-    pub islands: Vec<(usize, bool)>,
-    /// True when every island's triangles all agree under [`is_hair_texel`].
-    pub unanimous: bool,
-}
-
-/// Splits DDD's head sections into hair and skin triangles by UV island and the atlas's colour at each triangle's UV
-/// centroid (the centroid of the unwrapped coordinates, then wrapped: the atlas repeats).
-pub fn classify_ddd(pmo: &Pmo, atlas: &Image) -> Result<DddHair> {
-    let mut tris = Vec::new();
-    for si in HEAD_SECTIONS {
-        let s = pmo.sections.get(si).ok_or_else(|| Error::Format(format!("PMO: no section {si}")))?;
-        if s.texture != HEAD_TEXTURE {
-            return bad(format!("PMO: section {si} is texture {}, not {HEAD_TEXTURE}", s.texture));
-        }
-        for (k, t) in s.triangles().into_iter().enumerate() {
-            if !s.is_degenerate(t) {
-                tris.push((si, k, t));
-            }
-        }
-    }
-    let corners: Vec<[(i16, i16); 3]> = tris.iter().map(|&(si, _, t)| t.map(|i| {
-        let r = pmo.sections[si].verts[i].raw_uv;
-        (r[0], r[1])
-    })).collect();
-    let (isl, n) = islands(&corners);
-    let (w, h) = (atlas.w as f64, atlas.h as f64);
-    let mut votes = vec![(0usize, 0usize); n];
-    let mut is_hair = Vec::with_capacity(tris.len());
-    for (&(si, _, t), &i) in tris.iter().zip(&isl) {
-        let uv = t.map(|v| pmo.sections[si].verts[v].uv());
-        let (cu, cv) = ((uv[0][0] + uv[1][0] + uv[2][0]) / 3.0, (uv[0][1] + uv[1][1] + uv[2][1]) / 3.0);
-        let (x, y) = (((cu.rem_euclid(1.0)) * w) as usize, ((cv.rem_euclid(1.0)) * h) as usize);
-        let hair = is_hair_texel(atlas.px[y.min(atlas.h - 1) * atlas.w + x.min(atlas.w - 1)]);
-        votes[i].0 += 1;
-        votes[i].1 += hair as usize;
-        is_hair.push(hair);
-    }
-    let islands_out: Vec<(usize, bool)> = votes.iter().map(|&(n, h)| (n, 2 * h > n)).collect();
-    let unanimous = votes.iter().all(|&(n, h)| h == 0 || h == n);
-    let mut hair = Vec::new();
-    let mut skin = 0;
-    for (&(si, k, t), &i) in tris.iter().zip(&isl) {
-        if islands_out[i].1 {
-            hair.push(DddHairTri { section: si, index: k, verts: t, island: i });
-        } else {
-            skin += 1;
-        }
-    }
-    Ok(DddHair { hair, skin, islands: islands_out, unanimous })
-}
-
-// ---------------------------------------------------------------------------------------------
 // Re:CoM's side.
 // ---------------------------------------------------------------------------------------------
 
 /// One triangle of a Re:CoM part: its three vertices in strip order, and where it came from.
 #[derive(Clone, Copy, Debug)]
-struct RTri {
-    v: [MeshVertex; 3],
+pub(crate) struct RTri {
+    pub(crate) v: [MeshVertex; 3],
     strip: usize,
     pos: usize,
-    tex: u32,
+    pub(crate) tex: u32,
 }
 
 fn same_vertex(a: &MeshVertex, b: &MeshVertex) -> bool {
@@ -607,20 +541,21 @@ struct Rect {
 
 /// Source rectangles of the hair islands (box of the unwrapped UVs times the size, padded), and which rectangle serves
 /// which island (an island inside another's rectangle shares its copy).
-fn island_rects(pmo: &Pmo, hair: &DddHair, size: (usize, usize)) -> (Vec<[i32; 4]>, Vec<usize>) {
-    let n = hair.islands.len();
+fn island_rects(hair: &SrcHair, size: (usize, usize)) -> (Vec<[i32; 4]>, Vec<usize>) {
+    let n = hair.islands;
     let mut bb = vec![[f64::MAX, f64::MAX, f64::MIN, f64::MIN]; n];
-    for t in &hair.hair {
-        for &v in &t.verts {
-            let uv = pmo.sections[t.section].verts[v].uv();
+    let mut used = vec![false; n];
+    for t in &hair.tris {
+        used[t.island] = true;
+        for v in &t.v {
             let b = &mut bb[t.island];
-            b[0] = b[0].min(uv[0] * size.0 as f64);
-            b[1] = b[1].min(uv[1] * size.1 as f64);
-            b[2] = b[2].max(uv[0] * size.0 as f64);
-            b[3] = b[3].max(uv[1] * size.1 as f64);
+            b[0] = b[0].min(v.uv[0] * size.0 as f64);
+            b[1] = b[1].min(v.uv[1] * size.1 as f64);
+            b[2] = b[2].max(v.uv[0] * size.0 as f64);
+            b[3] = b[3].max(v.uv[1] * size.1 as f64);
         }
     }
-    let mut order: Vec<usize> = (0..n).filter(|&i| hair.islands[i].1).collect();
+    let mut order: Vec<usize> = (0..n).filter(|&i| used[i]).collect();
     let rect = |i: usize| [bb[i][0].floor() as i32 - PAD, bb[i][1].floor() as i32 - PAD, bb[i][2].ceil() as i32 + PAD, bb[i][3].ceil() as i32 + PAD];
     let area = |r: [i32; 4]| (r[2] - r[0]) as i64 * (r[3] - r[1]) as i64;
     order.sort_by(|&a, &b| area(rect(b)).cmp(&area(rect(a))).then(a.cmp(&b)));
@@ -704,7 +639,7 @@ struct Atlas {
     scale: f64,
 }
 
-fn build_atlas(old: &Image, ddd_img: &Image, pmo: &Pmo, hair: &DddHair, keep_uv: &[[[f64; 2]; 3]], all_uv: &[[[f64; 2]; 3]]) -> Result<Atlas> {
+fn build_atlas(old: &Image, ddd_img: &Image, hair: &SrcHair, keep_uv: &[[[f64; 2]; 3]], all_uv: &[[[f64; 2]; 3]]) -> Result<Atlas> {
     let (w, h) = (old.w, old.h);
     if (ddd_img.w, ddd_img.h) != (w, h) {
         return bad(format!("hair: DDD's atlas is {}x{}, Re:CoM's {w}x{h}", ddd_img.w, ddd_img.h));
@@ -724,7 +659,7 @@ fn build_atlas(old: &Image, ddd_img: &Image, pmo: &Pmo, hair: &DddHair, keep_uv:
     let keep = dilate(&foot(keep_uv, 0.75), w, h, KEEP_DILATE);
     let covered = dilate(&foot(all_uv, 0.75), w, h, 10);
     let bg = gutter(old, &covered);
-    let (src_rects, of_island) = island_rects(pmo, hair, (w, h));
+    let (src_rects, of_island) = island_rects(hair, (w, h));
     let mut chosen = None;
     for s in SCALES {
         if let Some(p) = place(&src_rects, s, &keep, w, h) {
@@ -740,9 +675,21 @@ fn build_atlas(old: &Image, ddd_img: &Image, pmo: &Pmo, hair: &DddHair, keep_uv:
         let (rw, rh) = (((rect.sw as f64 * scale).ceil()) as i32, ((rect.sh as f64 * scale).ceil()) as i32);
         for y in 0..rh {
             for x in 0..rw {
-                let (sx, sy) = (rect.sx as f64 + (x as f64 + 0.5) / scale, rect.sy as f64 + (y as f64 + 0.5) / scale);
-                let mut p = sample(ddd_img, sx, sy);
-                p[3] = 255;
+                // Below 0.5 a destination pixel covers 2 x 2 or more source pixels: average a k x k grid of samples across it
+                // (k = 1 above 0.5, so the DDD atlas, which fits at about 1, is sampled as it always was).
+                let k = ((1.0 / scale).floor() as usize).max(1);
+                let mut acc = [0.0f64; 3];
+                for j in 0..k {
+                    for i in 0..k {
+                        let (sx, sy) = (rect.sx as f64 + (x as f64 + (i as f64 + 0.5) / k as f64) / scale, rect.sy as f64 + (y as f64 + (j as f64 + 0.5) / k as f64) / scale);
+                        let q = sample(ddd_img, sx, sy);
+                        for c in 0..3 {
+                            acc[c] += q[c] as f64;
+                        }
+                    }
+                }
+                let n = (k * k) as f64;
+                let p = [(acc[0] / n).round() as u8, (acc[1] / n).round() as u8, (acc[2] / n).round() as u8, 255];
                 img.px[(dy + y) as usize * w + (dx + x) as usize] = p;
             }
         }
@@ -773,10 +720,10 @@ fn part_bones(p: &MdlPart) -> Vec<String> {
     p.bones.iter().map(|b| cstr(&b.name)).collect()
 }
 
-/// Riku's `.MDL` with DDD's hair (see the module docs): `mdl` is `PLAYER/0101/PL0101.MDL`, `rtm` its raw `.RTM` (the
-/// data part of the archive entry) and `hd` that entry's HD assets. The caller writes the result as `build_blade`
-/// does (`egs::build_plain_entry(&swap.rtm, &swap.hd, date)`).
-pub fn with_ddd_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, src: &DddHairSource) -> Result<HairSwap> {
+/// Riku's `.MDL` with a new hair (see the module docs): `mdl` is `PLAYER/0101/PL0101.MDL`, `rtm` its raw `.RTM` (the data part of
+/// the archive entry) and `hd` that entry's HD assets. The caller writes the result as `build_blade` does
+/// (`egs::build_plain_entry(&swap.rtm, &swap.hd, date)`).
+pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, src: &dyn HairSource) -> Result<HairSwap> {
     let mut parts = split_parts(mdl)?;
     if parts.len() != 4 {
         return bad(format!("hair: the model has {} parts, not 4", parts.len()));
@@ -808,11 +755,16 @@ pub fn with_ddd_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget
     let remove2: Vec<bool> = tris2.iter().map(|t| t.v.iter().any(|v| hair_bones.contains(&v.bone()))).collect();
     let removed2 = remove2.iter().filter(|&&r| r).count();
 
-    // DDD's hair.
-    let pmo = crate::ddd::parse_pmo(&src.pmo)?;
-    let ddd_sk = crate::ddd::parse_skeleton(&src.pmo)?;
-    let ddd_img = decode_dds(&src.dds)?;
-    let hair = classify_ddd(&pmo, &ddd_img)?;
+    // The face that stays (head-bone triangles not removed), for sources that fit to it.
+    let face: Vec<[[f64; 3]; 3]> = tris3
+        .iter()
+        .zip(&remove3)
+        .filter(|(t, &r)| !r && t.v.iter().all(|v| v.bone() == head))
+        .map(|(t, _)| t.v.map(|v| src.adjust_face(world[v.bone()].point(v.pos().map(|x| x as f64)), world[head].t)))
+        .collect();
+    src.set_face(&face);
+    // The source's hair, in Re:CoM's frame.
+    let hair = src.hair(&names, &world)?;
 
     // The atlas.
     let old_asset = hd.iter().find(|a| a.name == crate::keyblade::hd_name(target.texture)).ok_or_else(|| Error::Format(format!("hair: no HD asset for {}", target.texture)))?;
@@ -820,31 +772,27 @@ pub fn with_ddd_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget
     let uv_of = |t: &RTri| t.v.map(|v| v.uv().map_or([0.0; 2], |u| [u[0] as f64, u[1] as f64]));
     let keep_uv: Vec<_> = tris3.iter().zip(&remove3).filter(|(t, &r)| !r && t.tex == atlas_tex).map(|(t, _)| uv_of(t)).collect();
     let all_uv: Vec<_> = tris3.iter().filter(|t| t.tex == atlas_tex).map(uv_of).collect();
-    let atlas = build_atlas(&old_img, &ddd_img, &pmo, &hair, &keep_uv, &all_uv)?;
+    let atlas = build_atlas(&old_img, &hair.atlas, &hair, &keep_uv, &all_uv)?;
 
-    // DDD's triangles as Re:CoM vertices.
+    // The source's triangles as Re:CoM vertices.
     let inv: Vec<[[f64; 3]; 3]> = world.iter().map(|w| inv3(&w.r)).collect::<Result<_>>()?;
-    let bone_of = |dddb: u8| -> Result<usize> {
-        let dn = ddd_sk.bones.get(dddb as usize).map(|b| b.name.as_str()).ok_or_else(|| Error::Format(format!("hair: DDD bone {dddb} out of range")))?;
-        let rn = DDD_TO_RIKU.iter().find(|(d, _)| *d == dn).map_or(HEAD_BONE, |(_, r)| r);
-        names.iter().position(|n| n == rn).ok_or_else(|| Error::Format(format!("hair: Re:CoM has no bone {rn}")))
-    };
     let centre = {
         let h = world[head].t;
         [h[0] + HEAD_CENTRE[0], h[1] + HEAD_CENTRE[1], h[2] + HEAD_CENTRE[2]]
     };
     let (iw, ih) = (atlas.img.w as f64, atlas.img.h as f64);
+    // One-sided sources: the winding most triangles have away from the head's centre is the source's front.
+    let one_sided_flag = hair.one_sided.then(|| {
+        let out = hair.tris.iter().filter(|t| facing(t.v.clone().map(|v| v.pos), centre) == 0x20).count();
+        if out * 2 >= hair.tris.len() { 0x20 } else { 0 }
+    });
     let mut ddd_segs: Vec<Seg> = Vec::new();
-    let mut prev: Option<&DddHairTri> = None;
-    for t in &hair.hair {
-        let sec: &PmoSection = &pmo.sections[t.section];
+    for t in &hair.tris {
         let rect = atlas.rects[atlas.of_island[t.island]];
-        let mk = |vi: usize, draw_facing: Option<u32>| -> Result<MeshVertex> {
-            let v = &sec.verts[vi];
-            let b = bone_of(sec.dominant_bone(vi).ok_or_else(|| Error::Format("hair: a DDD vertex without a bone".into()))?)?;
-            let p = to_local(&world[b], &inv[b], v.pos.map(|x| x as f64));
-            let uv = v.uv();
-            let (px, py) = (rect.dx as f64 + (uv[0] * iw - rect.sx as f64) * atlas.scale, rect.dy as f64 + (uv[1] * ih - rect.sy as f64) * atlas.scale);
+        let mk = |v: &SrcVert, draw_facing: Option<u32>| -> Result<MeshVertex> {
+            let b = names.iter().position(|n| *n == v.bone).ok_or_else(|| Error::Format(format!("hair: Re:CoM has no bone {}", v.bone)))?;
+            let p = to_local(&world[b], &inv[b], v.pos);
+            let (px, py) = (rect.dx as f64 + (v.uv[0] * iw - rect.sx as f64) * atlas.scale, rect.dy as f64 + (v.uv[1] * ih - rect.sy as f64) * atlas.scale);
             let q0 = match draw_facing {
                 None => START_Q0,
                 Some(f) => [f, F32_ONE, 0, 0x2000],
@@ -852,24 +800,61 @@ pub fn with_ddd_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget
             let bits = |x: f64| (x as f32).to_bits();
             Ok(MeshVertex { q0, q1: [bits(p[0]), bits(p[1]), bits(p[2]), ((b as u32) << 16) | (b as u32 * 4)], q2: Some([((px / iw) as f32).to_bits(), ((py / ih) as f32).to_bits(), F32_ONE, atlas_tex]) })
         };
-        let wp = t.verts.map(|vi| sec.verts[vi].pos.map(|x| x as f64));
-        let f = facing(wp, centre);
-        let cont = prev.is_some_and(|p| p.section == t.section && p.index + 1 == t.index && p.verts[1] == t.verts[0] && p.verts[2] == t.verts[1]) && sec.flags >> 28 == 4;
-        if cont {
-            ddd_segs.last_mut().unwrap().verts.push(mk(t.verts[2], Some(f))?);
+        let f = match one_sided_flag {
+            Some(f) => f,
+            None => facing(t.v.clone().map(|v| v.pos), centre),
+        };
+        if t.cont && !ddd_segs.is_empty() {
+            ddd_segs.last_mut().unwrap().verts.push(mk(&t.v[2], Some(f))?);
         } else {
-            ddd_segs.push(Seg { tex: atlas_tex, verts: vec![mk(t.verts[0], None)?, mk(t.verts[1], None)?, mk(t.verts[2], Some(f))?] });
+            ddd_segs.push(Seg { tex: atlas_tex, verts: vec![mk(&t.v[0], None)?, mk(&t.v[1], None)?, mk(&t.v[2], Some(f))?] });
         }
-        prev = Some(t);
     }
 
     // The lists.
-    let kept3: Vec<&RTri> = tris3.iter().zip(&remove3).filter(|(_, &r)| !r).map(|(t, _)| t).collect();
+    // The face that stays, as the source wants it (head-bone vertices moved in world space, back to their bone's frame).
+    let adjusted3: Vec<RTri> = tris3
+        .iter()
+        .zip(&remove3)
+        .filter(|(_, &r)| !r)
+        .map(|(t, _)| {
+            let mut t = t.clone();
+            for v in t.v.iter_mut() {
+                let b = v.bone();
+                if b != head {
+                    continue;
+                }
+                let w0 = world[b].point(v.pos().map(|x| x as f64));
+                let w1 = src.adjust_face(w0, world[head].t);
+                if w1 != w0 {
+                    let l = to_local(&world[b], &inv3(&world[b].r).unwrap_or(crate::math::I3), w1);
+                    v.q1 = [(l[0] as f32).to_bits(), (l[1] as f32).to_bits(), (l[2] as f32).to_bits(), v.q1[3]];
+                }
+            }
+            t
+        })
+        .collect();
+    let kept3: Vec<&RTri> = adjusted3.iter().collect();
     let kept2: Vec<&RTri> = tris2.iter().zip(&remove2).filter(|(_, &r)| !r).map(|(t, _)| t).collect();
     let nb = p3.bones.len();
     let (g3, r3) = p3.list_a.first().map_or((0, 0), |p| (p.gif, p.regs));
     let (g2, r2) = p2.list_a.first().map_or((0, 0), |p| (p.gif, p.regs));
     let mut segs3 = segments(&kept3);
+    // The kept face's triangles the source asks to be two-sided: the same vertices again with the other facing flag (the flag
+    // is the third corner's, as for the hair's `back` copies below).
+    let face_back: Vec<Seg> = kept3
+        .iter()
+        .filter(|t| {
+            t.v.iter().all(|v| v.bone() == head) && {
+                let w = t.v.map(|v| world[head].point(v.pos().map(|x| x as f64)));
+                let c = [0, 1, 2].map(|k| (w[0][k] + w[1][k] + w[2][k]) / 3.0);
+                src.two_sided_face(c, world[head].t)
+            }
+        })
+        .map(|t| Seg { tex: t.tex, verts: vec![start_of(t.v[0]), start_of(t.v[1]), MeshVertex { q0: [t.v[2].q0[0] ^ 0x20, t.v[2].q0[1], t.v[2].q0[2], t.v[2].q0[3]], ..t.v[2] }] })
+        .collect();
+    let face_two_sided = face_back.len();
+    segs3.extend(face_back);
     let segs2 = segments(&kept2);
     let mut plain_segs = segs2;
     plain_segs.extend(ddd_segs.iter().map(|s| Seg { tex: 0, verts: s.verts.clone() }));
@@ -882,7 +867,9 @@ pub fn with_ddd_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget
         .map(|s| Seg { tex: s.tex, verts: s.verts.iter().enumerate().map(|(i, v)| if i < 2 { *v } else { MeshVertex { q0: [v.q0[0] ^ 0x20, v.q0[1], v.q0[2], v.q0[3]], ..*v } }).collect() })
         .collect();
     segs3.extend(ddd_segs);
-    segs3.extend(back);
+    if !hair.one_sided {
+        segs3.extend(back);
+    }
     let list3 = pack(&segs3, FMT_TEXTURED, g3, r3, max_vertices(&p3.list_a, 3));
     let list2 = pack(&plain_segs, FMT_PLAIN, g2, r2, max_vertices(&p2.list_a, 2));
     let mut textures = p3.textures.clone();
@@ -909,9 +896,10 @@ pub fn with_ddd_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget
         removed_plain: removed2,
         other_texture: split.other_texture,
         stray_in_hair_islands: split.stray,
-        ddd_hair: hair.hair.len(),
+        face_two_sided,
+        ddd_hair: hair.tris.len(),
         ddd_skin: hair.skin,
-        ddd_islands: hair.islands.iter().filter(|i| i.1).count(),
+        ddd_islands: hair.tris.iter().map(|t| t.island).collect::<HashSet<_>>().len(),
         atlas_rects: atlas.rects.len(),
         atlas_scale: atlas.scale,
         packets: ([np3[0], np3[1]], np2),
@@ -920,7 +908,7 @@ pub fn with_ddd_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::install;
     use std::path::{Path, PathBuf};
@@ -931,25 +919,18 @@ mod tests {
 
     struct Files {
         mdl: Vec<u8>,
-        rtm: Vec<u8>,
-        hd: Vec<HdAsset>,
-        src: DddHairSource,
     }
 
     fn files() -> Option<Files> {
         let g = game()?;
-        let ddd = crate::ddd::install_next_to(&g)?;
         let keys = install::keys(&g).unwrap();
         let arc = install::recom_archive(&g).unwrap();
         let mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
-        let e = arc.find("PLAYER/0101/PL0101.RTM").unwrap();
-        let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
-        let src = DddHairSource::read(&ddd, &keys).unwrap();
-        Some(Files { mdl, rtm, hd, src })
+        Some(Files { mdl })
     }
 
-    fn out_dir() -> PathBuf {
-        let p = PathBuf::from("/home/johnmoore/Projects/.own/KH-Modding-Workspace/local/assets/recom/riku-hair/out");
+    pub(crate) fn out_dir() -> PathBuf {
+        let p = PathBuf::from(format!("{}/local/assets/recom/riku-hair/out", crate::kh2_motion::tests::workspace()));
         let _ = std::fs::create_dir_all(&p);
         p
     }
@@ -979,34 +960,6 @@ mod tests {
         assert!(m[3 * 16 + 3] && !m[12 * 16 + 12]);
         let d = dilate(&m, 16, 16, 2);
         assert!(d.iter().filter(|&&x| x).count() > m.iter().filter(|&&x| x).count());
-    }
-
-    /// DDD's head: 343 hair triangles on unanimous islands, the rest skin; the dominant bones are the note's.
-    #[test]
-    fn classifies_ddd_hair() {
-        let Some(f) = files() else { return };
-        let pmo = crate::ddd::parse_pmo(&f.src.pmo).unwrap();
-        assert_eq!((pmo.sections.len(), pmo.textures[HEAD_TEXTURE as usize].as_str()), (28, "p_ex020_00"));
-        assert_eq!(pmo.sections.iter().map(|s| s.verts.len()).sum::<usize>(), 4603 + 67);
-        let img = decode_dds(&f.src.dds).unwrap();
-        let h = classify_ddd(&pmo, &img).unwrap();
-        eprintln!("DDD: {} hair, {} skin, {} islands", h.hair.len(), h.skin, h.islands.len());
-        assert!(h.unanimous);
-        assert_eq!((h.hair.len(), h.skin), (343, 164));
-        let again = classify_ddd(&pmo, &img).unwrap();
-        assert_eq!(h, again);
-        // dominant bones of the hair corners (the note: 774 of 1029 on atama)
-        let sk = crate::ddd::parse_skeleton(&f.src.pmo).unwrap();
-        let mut by: BTreeMap<String, usize> = BTreeMap::new();
-        for t in &h.hair {
-            let s = &pmo.sections[t.section];
-            for &v in &t.verts {
-                *by.entry(sk.bones[s.dominant_bone(v).unwrap() as usize].name.clone()).or_default() += 1;
-            }
-        }
-        eprintln!("corner bones: {by:?}");
-        assert_eq!(by["atama"], 774);
-        assert!(by.keys().all(|k| DDD_TO_RIKU.iter().any(|(d, _)| d == k) || k == "kubi"), "{by:?}");
     }
 
     /// Re:CoM's PL0101: the classifier removes the hair islands' head / hair-bone triangles and nothing else, parts 2 and 3
@@ -1047,100 +1000,35 @@ mod tests {
         assert_eq!(join_parts(&parts), f.mdl);
     }
 
-    fn collect(part: &MdlPart) -> Vec<RTri> {
-        extract(&part.list_a).unwrap()
+    /// Bounds (world, metres) of PL0101's kept head-bone-only skin triangles at z > 0 (debug).
+    pub(crate) fn head_front_bounds(mdl: &[u8]) -> ([f64; 3], [f64; 3]) {
+        let parts = split_parts(mdl).unwrap();
+        let p3 = MdlPart::parse_bytes(&parts[3]).unwrap();
+        let w = RecomSkeleton::parse(mdl).unwrap().rest_world();
+        let hb = part_bones(&p3).iter().position(|n| n == HEAD_BONE).unwrap();
+        let (mut lo, mut hi) = ([9.0f64; 3], [-9.0f64; 3]);
+        for t in collect(&p3) {
+            if t.tex == 1 && t.v.iter().all(|v| v.bone() == hb) {
+                for c in t.v.map(|v| w[hb].point(v.pos().map(|x| x as f64))) {
+                    if c[2] > 0.0 {
+                        for k in 0..3 {
+                            lo[k] = lo[k].min(c[k]);
+                            hi[k] = hi[k].max(c[k]);
+                        }
+                    }
+                }
+            }
+        }
+        (lo, hi)
     }
 
-    #[test]
-    fn swaps_rikus_hair() {
-        let Some(f) = files() else { return };
-        let t0 = std::time::Instant::now();
-        let swap = with_ddd_hair(&f.mdl, &f.rtm, &f.hd, &RIKU_0101, &f.src).unwrap();
-        eprintln!("{:?} in {:?}", swap.report, t0.elapsed());
-        let r = &swap.report;
-        assert_eq!((r.removed, r.removed_plain, r.ddd_hair, r.ddd_skin), (366, 136, 343, 164));
-        assert_eq!(r.stray_in_hair_islands, 0);
-        // deterministic
-        let again = with_ddd_hair(&f.mdl, &f.rtm, &f.hd, &RIKU_0101, &f.src).unwrap();
-        assert!(swap.mdl == again.mdl && swap.rtm == again.rtm && swap.dds == again.dds);
-        assert_eq!(swap.hd.iter().map(|a| (a.name.clone(), a.data.len())).collect::<Vec<_>>(), again.hd.iter().map(|a| (a.name.clone(), a.data.len())).collect::<Vec<_>>());
-        // the file parses, parts 0 and 1 are as they were
-        let (a, b) = (split_parts(&f.mdl).unwrap(), split_parts(&swap.mdl).unwrap());
-        assert_eq!(a.len(), b.len());
-        assert_eq!(a[..2], b[..2]);
-        let (o3, n3) = (MdlPart::parse_bytes(&a[3]).unwrap(), MdlPart::parse_bytes(&b[3]).unwrap());
-        let (o2, n2) = (MdlPart::parse_bytes(&a[2]).unwrap(), MdlPart::parse_bytes(&b[2]).unwrap());
-        assert_eq!(n3.texture_names(), ["n_zz110_02", "rk_hair_0101"]);
-        assert_eq!((n3.bones.len(), n2.bones.len()), (102, 102));
-        crate::mdl::Mdl::parse(&swap.mdl).unwrap();
-        for p in [&n3, &n2] {
-            let stride = if p.list_a[0].fmt == FMT_TEXTURED { 3 } else { 2 };
-            for pk in &p.list_a {
-                assert!(2 + stride * pk.verts.len() <= MAX_PACKET_QW);
-                assert!(pk.verts.iter().all(|v| v.bone() < 102));
-            }
-        }
-        assert!(max_vertices(&n3.list_a, 3) <= max_vertices(&o3.list_a, 3) && max_vertices(&n2.list_a, 2) <= max_vertices(&o2.list_a, 2));
-        // bounds as part_bounds computes them
-        assert_eq!(n3.bounds, crate::keyblade::part_bounds(102, &[&n3.list_a]));
-        // untouched triangles: every original triangle not removed is still there, unchanged (face and neck included)
-        let (ot, nt) = (collect(&o3), collect(&n3));
-        let key = |t: &RTri| (t.v.map(|v| (v.q1, v.q2)), t.tex);
-        let new_set: HashMap<_, usize> = nt.iter().map(key).fold(HashMap::new(), |mut m, k| {
-            *m.entry(k).or_default() += 1;
-            m
-        });
-        let mut old_set: HashMap<_, usize> = HashMap::new();
-        let removed_total = ot.len() + 2 * 343 - nt.len();
-        assert_eq!(removed_total, 366);
-        let _ = removed_total;
-        let (hair_b, head) = (names_hair(&o3), o3.bones.iter().position(|b| cstr(&b.name) == HEAD_BONE).unwrap());
-        let (remove, _) = classify_riku(&ot, 1, head, &hair_b);
-        for (t, &r) in ot.iter().zip(&remove) {
-            if !r {
-                *old_set.entry(key(t)).or_default() += 1;
-            }
-        }
-        // triangles can be re-strip-ordered as (a,b,c) but the strip order is kept, so keys match as they are
-        for (k, n) in &old_set {
-            assert_eq!(new_set.get(k).copied().unwrap_or(0), *n, "a kept triangle changed");
-        }
-        assert_eq!(nt.len(), old_set.values().sum::<usize>() + 2 * 343);
-        // the rest of the new triangles (DDD's) all sit on the new atlas with UVs in 0..1, on valid bones
-        let ddd: Vec<&RTri> = nt.iter().filter(|t| !old_set.contains_key(&key(t))).collect();
-        assert_eq!(ddd.len(), 2 * 343, "every DDD triangle twice, once per facing");
-        for t in &ddd {
-            assert_eq!(t.tex, 1);
-            for v in &t.v {
-                let uv = v.uv().unwrap();
-                assert!((0.0..=1.0).contains(&uv[0]) && (0.0..=1.0).contains(&uv[1]), "{uv:?}");
-            }
-        }
-        // part 2 holds the same triangles' positions
-        let (pt, pn) = (collect(&o2), collect(&n2));
-        assert_eq!(pt.len() + 343 - pn.len(), 136);
-
-        // texture
-        let img = decode_dds(&swap.dds).unwrap();
-        assert_eq!((img.w, img.h), (1024, 1024));
-        assert!(img.px.iter().all(|p| p[3] == 255));
-        let rtm = crate::rtm::Rtm::parse(&swap.rtm).unwrap();
-        assert!(rtm.entries.iter().any(|e| e.name_str() == "rk_hair_0101.tm2") && !rtm.entries.iter().any(|e| e.name_str() == "n_zz110_01.tm2"));
-        assert!(swap.hd.iter().any(|a| a.name == "rk_hair_0101_tm2.dds") && !swap.hd.iter().any(|a| a.name == "n_zz110_01_tm2.dds"));
-        assert_eq!(swap.hd.len(), f.hd.len());
-        // renders
-        let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
-        let h = top_holes(&n3, &sk.rest_world());
-        eprintln!("top-down holes: {} cells {:?}", h.len(), h.iter().take(12).collect::<Vec<_>>());
-        render(&n3, &sk.rest_world(), &img, &out_dir());
-        std::fs::write(out_dir().join("rk_hair_0101_atlas.png"), png(img.w, img.h, &img.px.iter().flat_map(|p| [p[0], p[1], p[2]]).collect::<Vec<_>>())).unwrap();
-        std::fs::write(out_dir().join("PL0101_hair.MDL"), &swap.mdl).unwrap();
-        std::fs::write(out_dir().join("rk_hair_0101_tm2.dds"), &swap.dds).unwrap();
+    pub(crate) fn collect(part: &MdlPart) -> Vec<RTri> {
+        extract(&part.list_a).unwrap()
     }
 
     /// Top-down rays (x, z) through the head: the cells inside the outline that no head / hair / neck triangle covers
     /// (two-sided), as `(x, z)` in metres. Diagnostic for the crown hole.
-    fn top_holes(p3: &MdlPart, world: &[Aff]) -> Vec<(f64, f64)> {
+    pub(crate) fn top_holes(p3: &MdlPart, world: &[Aff]) -> Vec<(f64, f64)> {
         let names = part_bones(p3);
         let want = |b: usize| names[b] == "head" || names[b].contains("hair") || names[b].starts_with("neck");
         let tris: Vec<[[f64; 2]; 3]> = collect(p3).into_iter().filter(|t| t.tex == 1 && t.v.iter().all(|v| want(v.bone()))).map(|t| t.v.map(|v| {
@@ -1196,7 +1084,7 @@ mod tests {
         !c
     }
 
-    fn png(w: usize, h: usize, rgb: &[u8]) -> Vec<u8> {
+    pub(crate) fn png(w: usize, h: usize, rgb: &[u8]) -> Vec<u8> {
         let mut raw = Vec::with_capacity((3 * w + 1) * h);
         for y in 0..h {
             raw.push(0);
@@ -1221,7 +1109,7 @@ mod tests {
     }
 
     /// Textured painter's-algorithm render of the head, hair and neck of part 3 (front: x / y, side: z / y).
-    fn render(p3: &MdlPart, world: &[Aff], atlas: &Image, dir: &Path) {
+    pub(crate) fn render(p3: &MdlPart, world: &[Aff], atlas: &Image, dir: &Path) {
         let names = part_bones(p3);
         let want = |b: usize| names[b] == "head" || names[b].contains("hair") || names[b].starts_with("neck");
         let mut tris: Vec<([[f64; 3]; 3], [[f64; 2]; 3], f64)> = Vec::new();
