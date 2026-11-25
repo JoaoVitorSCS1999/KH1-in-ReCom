@@ -111,6 +111,22 @@ pub trait HairSource {
     fn adjust_face(&self, p: [f64; 3], _head: [f64; 3]) -> [f64; 3] {
         p
     }
+    /// Whether the plain copy of one of the source's hair triangles (part 2) is left out, given the triangle and the head bone's rest
+    /// position (0.196.4: the flat copy of a head-bound KH2 triangle at the ear showed as a flat polygon).
+    fn drop_plain_hair_copy(&self, _t: &SrcTri, _head: [f64; 3]) -> bool {
+        false
+    }
+    /// Whether the open head edge with midpoint `p` (world rest; the head bone's at rest is `head`) gets a skirt to the source's hair
+    /// (0.196.15).
+    fn skirt_edge(&self, _p: [f64; 3], _head: [f64; 3]) -> bool {
+        false
+    }
+    /// Whether a head-bone triangle of the plain proxy (part 2: low-poly, flat, drawn without a facing cull, made to hide under Re:CoM's
+    /// own bulky hair), centroid `p` (world rest; the head bone's at rest is `head`), is dropped (0.196.4: under the KH2 hair it shows
+    /// through the gaps as a flat lilac polygon).
+    fn drop_proxy_triangle(&self, _p: [f64; 3], _head: [f64; 3]) -> bool {
+        false
+    }
     /// Whether a kept head-bone triangle (centroid `p`, world rest; the head bone's at rest is `head`) is written twice, with
     /// both facing flags, like the source's hair triangles (0.196.3: the KH2 hair opens the ear's window, so the temple's
     /// single-copy triangles must pass the game's facing cull from either side).
@@ -146,10 +162,20 @@ pub struct HairReport {
     pub atlas_rects: usize,
     /// The common scale of the copied islands.
     pub atlas_scale: f64,
+    /// Plain copies of the source's hair triangles left out ([`HairSource::drop_plain_hair_copy`]).
+    pub plain_hair_dropped: usize,
+    /// Skirt triangles added between the head's open edges and the source's hair ([`HairSource::skirt_edge`]).
+    pub skirt: usize,
+    /// Head-bone triangles of the plain proxy dropped ([`HairSource::drop_proxy_triangle`]).
+    pub proxy_dropped: usize,
     /// Kept head-bone triangles written a second time with the other facing ([`HairSource::two_sided_face`]).
     pub face_two_sided: usize,
     /// Packets in part 3 / part 2 before and after.
     pub packets: ([usize; 2], [usize; 2]),
+}
+
+fn skirt_segs_push(segs: &mut Vec<Seg>, tex: u32, a: MeshVertex, b: MeshVertex, c: MeshVertex) {
+    segs.push(Seg { tex, verts: vec![a, b, c] });
 }
 
 /// The swap's result.
@@ -752,7 +778,21 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
     let (remove3, split) = classify_riku(&tris3, atlas_tex, head, &hair_bones);
     // Part 2 is not part 3's twin (1074 triangles, other positions): a low-poly head / hair proxy. Its hair is the
     // triangles that touch a hair bone; its head-bone triangles (the skull) stay.
-    let remove2: Vec<bool> = tris2.iter().map(|t| t.v.iter().any(|v| hair_bones.contains(&v.bone()))).collect();
+    let remove2: Vec<bool> = tris2
+        .iter()
+        .map(|t| {
+            if t.v.iter().any(|v| hair_bones.contains(&v.bone())) {
+                return true;
+            }
+            // The skull stays, except the head-bone triangles the source asks to drop (0.196.4).
+            t.v.iter().all(|v| v.bone() == head) && {
+                let w = t.v.map(|v| world[v.bone()].point(v.pos().map(|x| x as f64)));
+                let c = [0, 1, 2].map(|k| (w[0][k] + w[1][k] + w[2][k]) / 3.0);
+                src.drop_proxy_triangle(c, world[head].t)
+            }
+        })
+        .collect();
+    let proxy_dropped = tris2.iter().zip(&remove2).filter(|(t, &r)| r && t.v.iter().all(|v| v.bone() == head)).count();
     let removed2 = remove2.iter().filter(|&&r| r).count();
 
     // The face that stays (head-bone triangles not removed), for sources that fit to it.
@@ -855,9 +895,85 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         .collect();
     let face_two_sided = face_back.len();
     segs3.extend(face_back);
+    // The skirt (0.196.15; fork owner: "eu acho que é pq a cabeça base acaba antes da cabeça original e dai vem o cabelo e fica o vão"):
+    // the head's open edges (an edge of one kept triangle only) that the source selects are joined to the source's nearest hair vertices by
+    // two-sided triangles that wear the hair vertex's texel and follow its bone, so no space is left between where the head's skin ends and
+    // where the hair starts. Checked (files): 19 of the 24 side edges of the 0.196.3 head were over 5 mm from any hair triangle, 14 over 10 mm.
+    let mut skirt = 0usize;
+    {
+        let key3 = |p: [f64; 3]| [(p[0] * 1e4).round() as i64, (p[1] * 1e4).round() as i64, (p[2] * 1e4).round() as i64];
+        let mut edges: HashMap<[i64; 6], (usize, [f64; 3], [f64; 3], MeshVertex, MeshVertex)> = HashMap::new();
+        for t in &kept3 {
+            let w = t.v.map(|v| world[v.bone()].point(v.pos().map(|x| x as f64)));
+            for (x, y) in [(0usize, 1usize), (1, 2), (2, 0)] {
+                let (ka, kb) = (key3(w[x]), key3(w[y]));
+                let (lo, hi) = if ka <= kb { (ka, kb) } else { (kb, ka) };
+                let e = edges.entry([lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]]).or_insert((0, w[x], w[y], t.v[x], t.v[y]));
+                e.0 += 1;
+            }
+        }
+        // the source's hair vertices: world position and the vertex as written
+        let hv: Vec<([f64; 3], MeshVertex)> = hair
+            .tris
+            .iter()
+            .zip(&ddd_segs)
+            .filter(|(t, s)| !t.cont && s.verts.len() == 3)
+            .flat_map(|(t, s)| (0..3).map(move |j| (t.v[j].pos, s.verts[j])))
+            .collect();
+        let nearest = |p: [f64; 3]| -> Option<(f64, usize)> {
+            hv.iter().enumerate().map(|(i, h)| ((0..3).map(|k| (h.0[k] - p[k]).powi(2)).sum::<f64>().sqrt(), i)).min_by(|a, b| a.0.total_cmp(&b.0))
+        };
+        // a skirt vertex: the head's vertex `v` wearing the texel of hair vertex `h`
+        let on_hair = |v: MeshVertex, h: &MeshVertex| MeshVertex { q0: START_Q0, q2: match (v.q2, h.q2) { (Some(a), Some(b)) => Some([b[0], b[1], a[2], a[3]]), (a, _) => a }, ..v };
+        let mut keys: Vec<_> = edges.keys().copied().collect();
+        keys.sort();
+        for k in keys {
+            let (n, pa, pb, va, vb) = edges[&k];
+            let mid = [0, 1, 2].map(|i| (pa[i] + pb[i]) / 2.0);
+            if n != 1 || va.bone() != head || vb.bone() != head || !src.skirt_edge(mid, world[head].t) {
+                continue;
+            }
+            let (Some((da, ia)), Some((db, ib))) = (nearest(pa), nearest(pb)) else { continue };
+            if !(0.003..=0.030).contains(&da.max(db)) && !(0.003..=0.030).contains(&da.min(db)) {
+                continue;
+            }
+            if da > 0.030 || db > 0.030 {
+                continue;
+            }
+            let area = |p: [[f64; 3]; 3]| -> f64 {
+                let (u, v) = ([p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]], [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]]);
+                let c = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+                (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt() / 2.0
+            };
+            let mut tris: Vec<(MeshVertex, MeshVertex, MeshVertex, [[f64; 3]; 3])> = vec![];
+            let (ha, hb) = (hv[ia].clone(), hv[ib].clone());
+            tris.push((on_hair(va, &hb.1), on_hair(vb, &hb.1), hb.1, [pa, pb, hb.0]));
+            if ia != ib {
+                tris.push((on_hair(va, &ha.1), hb.1, ha.1, [pa, hb.0, ha.0]));
+            }
+            for (a, b, c, p) in tris {
+                if area(p) < 1e-7 {
+                    continue;
+                }
+                for f in [0u32, 0x20] {
+                    skirt_segs_push(&mut segs3, atlas_tex, start_of(a), start_of(b), MeshVertex { q0: [f, F32_ONE, 0, 0x2000], ..c });
+                }
+                skirt += 1;
+            }
+        }
+    }
     let segs2 = segments(&kept2);
     let mut plain_segs = segs2;
-    plain_segs.extend(ddd_segs.iter().map(|s| Seg { tex: 0, verts: s.verts.clone() }));
+    // The source's hair is written into the plain proxy too (one copy, flat, drawn without a facing cull), except the triangles the source
+    // asks to leave out (0.196.4). `ddd_segs[i]` is `hair.tris[i]`'s strip while no triangle continues another's strip.
+    let mut plain_hair_dropped = 0;
+    for (i, s) in ddd_segs.iter().enumerate() {
+        if hair.tris.get(i).is_some_and(|t| !t.cont && src.drop_plain_hair_copy(t, world[head].t)) {
+            plain_hair_dropped += 1;
+            continue;
+        }
+        plain_segs.push(Seg { tex: 0, verts: s.verts.clone() });
+    }
     // Two-sided: DDD's hair is layered shells and thin shards, some of them seen from the side its winding calls the back
     // (the game culls by the facing flag: a one-sided copy left see-through bands from behind and above, Checked (game,
     // 0.186.0)). Each triangle is written again with the other facing, same vertices, so exactly one copy passes the cull
@@ -897,6 +1013,9 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         other_texture: split.other_texture,
         stray_in_hair_islands: split.stray,
         face_two_sided,
+        proxy_dropped,
+        skirt,
+        plain_hair_dropped,
         ddd_hair: hair.tris.len(),
         ddd_skin: hair.skin,
         ddd_islands: hair.tris.iter().map(|t| t.island).collect::<HashSet<_>>().len(),
