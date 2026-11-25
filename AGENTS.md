@@ -11,6 +11,119 @@ Work only on branch `testing`. Stages are newest first.
 
 ---
 
+## Stage 390 (fork branch Re-Re-Reverse/Rebirth): KH2 hair: the locks behind and below the ear without sway (experiment), version 0.196.16 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.15 in game, with a screenshot boxing the locks above / behind the ear and the short locks below it: "quero fazer um experimento, deixe a animação dessas mechas mais retas"; "pq parece que a animação que está revelando o gap"; "esse é o cabelo do riku do kh2"; to the plan (the screenshot's side only, factor 0.0, render before / after): "sim".
+
+- **Addresses**: none (assets only).
+- **Found** (Checked (files: `P_EH000` bind-pose vertices per bone, head-relative)): on KH2's +x side the short locks below and behind the ear hang on bone 131 (x 6..9, y -6..1, z -3..2 KH2 units from the head), the lock above and behind it on 133 (x 11..12, y 2..8, z -8..0), the side of the back on 106 (x 10..14, y -12..1, z -25..-15). Checked (render): damping them changes only `body_side2` (the view of the owner's screenshot, face to the left), so the screenshot's side is KH2's +x. Assumption: these three bones are the boxed locks (bone positions, not a per-lock render).
+- **Change** (`kh2_hair_rig::{DAMP [(131, 0.0), (133, 0.0), (106, 0.0)], rot_toward, damp_hair}`, called in `bake` after the tilt): each frame of every clip, a damped bone's head-relative rotation is turned the factor's share of the way from KH2's bind pose to KH2's motion, and its origin moved the same share (0.0: the lock moves with the head only; 1.0: KH2's motion). Goes against Stage 380's "the same as KH2" for these three bones only, as an experiment: set a factor to 1.0 to undo.
+- **Checked**: `rot_toward_ends_and_middle`; `kh2_hair_moves_as_kh2` (damped bones left out of its 2 cm check against KH2's motion; the others still 7-12 mm); renders before / after (idle 25 / 75, walk 8, run 6, fall 8): the lock below the ear hangs straight down and covers more of the neck behind the ear.
+- **Not checked**: in game. Whether the gap is gone, and whether the still locks look stiff next to the swaying ones. The user must press Build.
+
+## Stage 389 (fork branch Re-Re-Reverse/Rebirth): KH2 hair: a skirt from the head's open edges to the hair, version 0.196.15 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.14 in game: "eu acho que é pq a cabeça base acaba antes da cabeça original e dai vem o cabelo e fica o vão"; to the plan: "sim".
+
+- **Addresses**: none (assets only).
+- **Found** (Checked (files: the 0.196.3 swap at rest, 32 open edges of the kept head, each against the nearest hair triangle)): the head's skin ends before the hair starts. Of the 24 open edges on the sides of the head 19 are more than 5 mm from any hair triangle and 14 more than 10 mm; at the +x ear top (92, 62, -27 mm from the head bone) 11 mm; the other open edges are the neck and chin (28 mm, outside the ear's height). No shift of the hair fixes it: the space moves with it (the owner's trials, Stages 381-388).
+- **Change** (`HairSource::skirt_edge`, `kh2_hair::{SKIRT_X 0.05, SKIRT_Y [0.04, 0.17], SKIRT_Z [-0.08, 0.06], in_skirt_window}`, `ddd_hair::with_hair`, `HairReport::skirt`): each open head edge (an edge of one kept triangle only, both ends on the head bone) whose midpoint is in the window, |x| past 5 cm, 4-17 cm up, within 8 cm behind to 6 cm in front, is joined to the nearest hair vertices (at most 30 mm away) by one or two triangles, both facings, that wear the hair vertex's texel (UV) and follow its bone (so they sway with the hair). 14 triangles at rest. DDD and BBS hair are unchanged (the default selects none).
+- **Not run**: the crate's tests (position trials without them, as asked); `kh2_hair_sits_on_the_face` was run alone: it passes (2 hair vertices more than 3 mm inside the face, the deepest 5.7 mm, with the shift at 0). Not checked in game. The user must press Build.
+- **Risks**: the skirt may cover the top of the ear or look stretched where the nearest hair vertex is far; the neck and chin edges are outside the window.
+
+## Stage 388 (fork branch Re-Re-Reverse/Rebirth): KH2 hair shift zeroed, version 0.196.14 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.13 in game: "pelo visto deslocar não é a estratégia,  os vãos ainda aparecem... pode zerar preciso de uma sugestão". The shifts tried (0.196.7-0.196.13: +6, 0, -24 ("ficou escrota"), +26, y -10, y -5, y -2 mm, in the owner's words relative to 0.196.6's z +12 mm) did not close the gaps.
+
+- **Addresses**: none (assets only). **Change** (`kh2_hair::SHIFT`): [0, -0.002, 0] -> [0, 0, 0]. Position trial: installed with `--no-test`; not checked in game. The user must press Build.
+
+## Stage 387 (fork branch Re-Re-Reverse/Rebirth): KH2 hair shift 3 mm up, version 0.196.13 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.12 in game: "sobe 3".
+
+- **Addresses**: none (assets only). **Change** (`kh2_hair::SHIFT`): [0, -0.005, 0] -> [0, -0.002, 0]. Position trial: installed with `--no-test`; not checked in game. The user must press Build.
+
+## Stage 386 (fork branch Re-Re-Reverse/Rebirth): KH2 hair shift 5 mm up, version 0.196.12 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.11 in game: "desloca 5 pra cima".
+
+- **Addresses**: none (assets only). **Change** (`kh2_hair::SHIFT`): [0, -0.010, 0] -> [0, -0.005, 0]. Position trial: installed with `--no-test`; not checked in game. The user must press Build.
+
+## Stage 385 (fork branch Re-Re-Reverse/Rebirth): KH2 hair shift: none to the front, 10 mm down, version 0.196.11 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.10 in game: "tira o deslocamento deixa em 0 e desloca para baixo uns 10"; before that: "faz a instalação sem testes nenhum até eu ver que ta bom" (position trials are installed with `tools/dev-install.sh --no-test` until he says the look is right).
+
+- **Addresses**: none (assets only). **Change** (`kh2_hair::SHIFT`): [0, 0, 0.026] -> [0, -0.010, 0] (Re:CoM metres, +y up, +z front): no shift to the front, the hair 10 mm down.
+- **Not run**: the crate's tests (position trial, as asked); not checked in game. The user must press Build.
+
+## Stage 384 (fork branch Re-Re-Reverse/Rebirth): KH2 hair 50 mm forward again, version 0.196.10 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.9 in game: "teste ficou escrota move 50 pra frente".
+
+- **Addresses**: none (assets only). **Change** (`kh2_hair::SHIFT`): z -0.024 -> 0.026 (50 mm forward; 14 mm in front of 0.196.6's 0.012, which the owner's "mais para trás" of 0.196.7 - 0.196.9 had moved back by 6, 12 and 36 mm). Nothing else.
+- **Found by the walk**: 6 mm back (0.196.7) and 12 mm (0.196.8) were seen by the owner before this; his word on 0.196.9 (36 mm back) is the one above. What he saw at 0.196.7 and 0.196.8 was not reported in these words.
+- **Checked / not checked**: see the test run below; not in game. The user must press Build.
+
+## Stage 383 (fork branch Re-Re-Reverse/Rebirth): KH2 hair 24 mm further back, version 0.196.9 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.8 in game: "vai mais uns 24 pra tras".
+
+- **Addresses**: none (assets only). **Change** (`kh2_hair::SHIFT`): z 0.0 -> -0.024 (24 mm more; 36 mm further back than 0.196.6's). Nothing else.
+- **Checked**: the crate's 186 tests, among them `kh2_hair_sits_on_the_face` and `kh2_hair_does_not_cross_the_skin`. **Not checked**: in game: the forehead and the fringe (the hair is 36 mm back of where KH2's alignment puts it), the nape and the neck, the ear gap (about 36 mm behind Re:CoM's ear: Stage 381's `KH2_EAR` / `EAR_SHIFT` were measured at the old shift).
+- The user must press Build.
+
+## Stage 382 (fork branch Re-Re-Reverse/Rebirth): KH2 hair another 6 mm back, version 0.196.8 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.7 in game: "da pra ir mais para trás".
+
+- **Addresses**: none (assets only). **Change** (`kh2_hair::SHIFT`): z 0.006 -> 0.0 (the hair 12 mm further back than 0.196.6's). Nothing else.
+- **Checked**: the crate's tests, among them `kh2_hair_sits_on_the_face` and `kh2_hair_does_not_cross_the_skin`. **Not checked**: in game (does the gap close; the forehead and the nape); the ear gap lands about 12 mm behind Re:CoM's ear now (Stage 381: `KH2_EAR` / `EAR_SHIFT` were measured at the old shift).
+- The user must press Build.
+
+## Stage 381 (fork branch Re-Re-Reverse/Rebirth): KH2 hair 6 mm further back, the ear-apex triangle drop removed, version 0.196.7 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.6 in game: "eu acho que o encaixe do cabelo deveria ser um pouco mais pra trás pq ainda to vendo o gap e nada doq nos fizemos resolveu".
+
+- **Addresses**: none (assets only).
+- **Change** (`kh2_hair::SHIFT`): z 0.012 -> 0.006 (Re:CoM metres, +z is the front): the hair, its fit to the face and the rig's carry (`Carry::shift`) all move 6 mm back together. `drop_ear_apex_fragment` / `EAR_APEX_FRAGMENT` (0.196.4) is gone: it matched the triangle `hair#330` by its position, which this shift changes, and a render without that triangle shows the scenery through its place from low side cameras (a hole of its own); the point stayed in the owner's screenshots with it.
+- **Checked**: the crate's 186 tests, among them `kh2_hair_sits_on_the_face` (at most 5 hair vertices more than 3 mm inside the face) and `kh2_hair_does_not_cross_the_skin` (0 crossing triangles).
+- **Assumption, not shown**: that the gap above the ear closes or moves with the hair further back. The constants that put KH2's ear gap on Re:CoM's ear (`KH2_EAR`, `EAR_SHIFT`, Stage 375) were measured at z shift 0.012 and are unchanged: with the hair 6 mm back the gap lands about 6 mm behind Re:CoM's ear (they would be KH2_EAR z 0.009, EAR_SHIFT z -0.010 to keep it on the ear). The 0.196.4 plain-copy and proxy drops, the lift out of the skin and the 25 hair bones stay.
+- **Not checked**: in game. The user must press Build.
+
+## Stage 380 (fork branch Re-Re-Reverse/Rebirth): KH2 hair: no clip holds the hair still, version 0.196.6 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim, on 0.196.5 in game (the game took the 109-bone Riku, nothing odd seen): "aparentemente aceitou nn achei nada estranho mas a animação DESSE CABELO precisa ser a MESMA do KH2"; before: "é só a do cabelo!" (only the hair's animation has to be KH2's, not the head's or the body's).
+
+- **Addresses**: none (assets only).
+- **Found** (Checked (files: `kh2_hair_moves_as_kh2`, a probe of every mapped clip)): 37 of Re:CoM's clips of 8 frames or more (attacks, guard, magic, cards, ...: slots 4-8, 11, 14-17, 22, 27, 34-41, 43-54, 56-58, 78, 81) had the hair held still at KH2's first idle frame (`CLIP_MAP` maps 14 slots). The mapped looped clips play KH2's loop stretched to close on Re:CoM's clip length, so the hair's speed against KH2's is: idle 1 x1.20, 31 x1.50, 79 x3.00; walk 2 / 28 x1.19, 32 x1.27, 80 x1.90; run 3 x0.82, 21 / 33 x0.90; fall 12 / 13 x1.25 (jump 10 / 26 one-shots: x1.00).
+- **Change** (`kh2_hair_rig::bake`): a clip with no KH2 counterpart plays KH2's idle sway (stretched to the clip's length when it loops, at KH2's own speed when it is a one-shot) instead of the first frame.
+- **Checked**: `kh2_hair_moves_as_kh2` asserts that no clip of 8 frames or more holds the hair still (37 without the change, 0 with it), and the 0.196.5 checks (the baked clips within 2 cm of KH2's motion for all 25 bones, every part and clip at the model's bone count); the crate's 187 tests.
+- **Not done, the speed**: the hair repeats with its clip, so its speed follows the clip's length. Exact speed would need either clips unrolled to a common multiple of Re:CoM's length and KH2's loop (idle 100 vs 120 frames: 600; footstep and effect timing keyed to the clip is not shown to survive: Assumption) or the DLL driving the hair bones from KH2's motion at KH2's time, outside the clips. Not started: the owner's choice.
+- **Not checked**: in game. The user must press Build.
+
+## Stage 379 (fork branch Re-Re-Reverse/Rebirth): KH2 hair: all 25 KH2 hair bones move their own vertices, KH2's walk and run as KH2 has them, version 0.196.5 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim (words left out are marked [..]), after a day of single spots (the ear-top point, the lock through the ear, the lock below it "por conta da animação está errada"): "mudança de plano cansei de andar em círculos usa a mesma animação do cabelo do KH2 e [..]"; "e encaixa certo na cabeça do riku do kh recom"; to the plan (7 bones appended, every clip 109 channels): "pode fazer aí".
+
+- **Addresses**: none (assets only). Read first: `knowledge/ReCoM/recom-skeleton-limits.md` (Checked (decomp): a model may take more bones when every clip played on it has exactly the model's count; per-bone buffers are allocated at the skeleton's count; the DLL already clears and re-allocates the transform node on a model with another count: `win::riku_skin::clear_node`, Dark Riku's 128 vs Riku's 102).
+- **Found** (Checked (files: `kh2_hair_moves_as_kh2`)): KH2's hair hangs on 25 bones, Re:CoM Riku has 18 hair bones; 0.195.0-0.196.4 handed the vertices of the 7 others to the nearest kept bone, so the worst hair vertex was 3.8 cm off KH2's exact motion in idle, 3.5 walk, 4.3 run, 7.9 jump (that number compared the model with itself: the baked clip's own error was not measured). Triangles with corners on a merged bone and a kept bone stretched with the sway (the lock under the ear, the fringe roots).
+- **Change** (`kh2_hair_rig::{EXTRA [118, 121, 122, 124, 133, 144, 148], extra_name, extend_skeleton, append_bones, extend_ann}`, `Rig::new` (25 pairs), `Kh2HairSource::{rig, prepare_mdl, bake_ann}`): the 7 KH2 hair bones that [`SELECTED`] leaves out become Re:CoM bones 102..108 (`k2_hair_<kh2 bone>`, parent `head`, rest = KH2's bind pose carried, bounds as a bone without vertices) in all 4 parts of the group's `.MDL`; every clip of its `.ANN` has 109 bones; `hosts` keeps every KH2 bone on itself, so every vertex follows its own KH2 bone's motion. `EXTRA_TILT` (the extra turn of the back hair in walk and run, 0.195.3-0.195.4: "traseira do cabelo ainda ta levantando muito quando anda") is now 0: KH2's walk and run as KH2 has them (the old value is in the git history; the constant still takes a list).
+- **Checked**: `kh2_hair_moves_as_kh2` now measures the BAKED clip posed on the model against KH2's exact motion for all 25 bones and asserts under 2 cm: idle 8 mm, walk 8, run 10, jump 12, clip 12 10, clip 33 9 (with the old tilt the walk and run were 9 cm off, by design); every part of the model and every clip have the same bone count (109); `RecomSkeleton`, `Ann` round trips, `selection_is_the_greedy_one`, the hair-group build test (`the_kh2_hair_groups_are_built_from_rikus_101`: groups 182 and 192) pass; all 187 tests of the crate.
+- **Not checked**: in game: that the game takes a Riku with 109 bones (the node is allocated at the skeleton's count: Checked (decomp) in the note, not run), the walk / run / jump look, effects and the weapon on the extra-bone model (their bone indices are unchanged: bones are appended). The fit on Re:CoM's head is the same as 0.196.4 (face fit, lift out of the skin, the ear-top triangle and plain copies dropped); the ear-top point and the lock below the ear are to be looked at again with the exact motion.
+- `tools/test-affected.sh`, the game-data hair tests, the Windows build. The user must press Build.
+
+## Stage 378 (fork branch Re-Re-Reverse/Rebirth): KH2 hair hung out of the ear and the cheek; two tries at the point reverted, version 0.196.4 (2026-11-24)
+
+Fork owner, 2026-11-24, verbatim (words left out are marked [..]), on 0.196.3 in game, with screenshots: "talvez estejamos com esses problemas pq a cabeça base do Riku de KH2 seja muito diferente da cabeça do KH1"; "uma mecha ta passando por dentro da orelha"; "e tem essa [..] aqui entrando na bochecha dele como eu já te mostrei"; "essa [..] mecha da franja que no meio da animação parece que torce, ela normal está assim"; then on 0.196.4's first build: "o ponto vazio ainda está lá! e vc tirou da pele do rosto base, não precisava tirar, só precisa cobrir o ponto que aparece o fundo!".
+
+- **Addresses**: none (assets only).
+- **Found** (Checked (files: 0.196.3's triangles against the kept face, rest and idle frames 0, 25, 50, 75; renders under `local/work/holefind/out/`, `local/assets/recom/riku-hair/out/ear_pen/`)): `FaceFit` moves a vertex along its direction from the head centre and never asks whether it lies behind a local flap; `b_hair2` (2649 / 2650) is rooted 15-17 mm inside the head under the +x ear with its tip 55-78 mm out, so it cuts the ear; `l_hair4` runs 1-3 mm into the cheek; `kh2_hair_sits_on_the_face` skips directions with `d[2] < -0.2`, where the ear is.
+- **Change** (`kh2_hair::{SKIN_REACH 30 mm, SKIN_MARGIN 3 mm, SKIN_INSIDE 2 mm, SKIN_TIP 5 mm, SKIN_PASSES 4, skin_depth, lift_out_of_skin}`, called at the end of `Kh2HairSource::hair`): a hair triangle with a corner more than 5 mm outside (or no skin under it) and a corner more than 2 mm behind a kept face triangle has its inside corners lifted along that triangle's outward normal to 3 mm in front of it; decided per vertex position (shared vertices stay shared); repeats up to 4 times. Triangles wholly inside the head stay. DDD and BBS hair unchanged.
+- **Checked**: new `kh2_hair_does_not_cross_the_skin` (all directions, no `d[2]` skip): 0 crossing triangles and the deepest vertex 2.3 mm behind skin; with the lift off it is 16 and 17.5 mm (the test fails without the change). Renders (`rig_before_0196_4` / `rig`, idle 0 and 50, +x side): no new patch, the lock lies over the ear.
+- **Tried and reverted, in this stage, with the owner's words**: (1) recolouring the hair-coloured texels of the head skin's hair-line strip (atlas x 440-495, y 95-250) to skin: the owner did not want Re:CoM's base skin texture touched ("não precisava tirar"), the strip is Re:CoM's disguise under its hair; (2) keeping 8 of Re:CoM's removed scalp triangles above the +x ear (head-relative x > 0.04, y 0.08-0.15, z -0.06..0.06) with their corners on a flat hair-coloured texel: the render shows them as flat grey polygons standing out over the KH2 hair, so they are not the cover. The point above the ear was then found with a diagnostic build (the owner's screenshot from the game's diagonal camera, the triangles around the ear painted in 16 colours, `local/work/diag_map.txt`): an unpainted flat grey-lilac polygon at the ear top, bounded by the painted temple triangle 1412, the ear triangle 1928 and the hair triangle 2708, none of which it is. No part-3 triangle is there (no render of part 3 showed a hole, with the game's cull rule applied: a one-sided triangle with flag 0 is drawn iff clockwise on the monitor, flag 0x20 iff counter-clockwise, a doubled one always: `knowledge/ReCoM/recom-model-culling.md`). Part 2, the plain low-poly proxy that is drawn without a facing cull, keeps 211 head-bone triangles after the swap and 9 of them lie within 25 mm of that corner, on or outside the ear's skin. **Change** (`HairSource::drop_proxy_triangle`, `kh2_hair::{PROXY_DROP_X 0.06, PROXY_DROP_Y [0.03, 0.17], PROXY_DROP_Z [-0.10, 0.10], in_proxy_drop_window}`, `HairReport::proxy_dropped`): the proxy's head-bone triangles whose centroid is more than 6 cm to the side, 3-17 cm up and within 10 cm of the head's middle in depth are dropped, both sides (10 at the 0.196.3 swap); the proxy hid under Re:CoM's bulky hair and shows through gaps under KH2's. Test: `kh2_hair::tests::proxy_drop_window_is_the_ears`, and `kh2_hair_sits_on_the_face` asserts 4..120 dropped. That alone did not remove the point (the owner's next screenshot, marked in red). A second diagnostic build (every part-3 triangle painted in 16 colours, part 2 emptied: `local/work/diag_map2.txt`) showed no flat polygon any more and, at the ear top, a 23-pixel fragment of the hair triangle `hair#330` (dump 2711: head-bound, 481 mm2, one corner 1.2 mm from the ear skin, the others 8 and 16 mm out), textured in ordinary hair colour. So the flat polygon was the PLAIN copy of that triangle: the swap writes one flat copy of every KH2 hair triangle into part 2 as well (`plain_segs.extend(ddd_segs..)`), drawn without a facing cull. **Change 2** (`HairSource::drop_plain_hair_copy`, `kh2_hair::in_proxy_drop_window`, `HairReport::plain_hair_dropped`): the plain copies of head-bound KH2 hair triangles whose centroid is in the ear windows are not written to part 2 (76 at the 0.196.3 swap); the textured triangles in part 3 stay. `kh2_hair_sits_on_the_face` asserts 1..120 left out. The owner's next screenshot (ringed in red, "ainda está ali, praticamente contornei com o circulo") still showed it, so the textured `hair#330` itself is the light polygon (lighter than the dark locks around it). **Change 3** (`kh2_hair::{EAR_APEX_FRAGMENT [0.1110, 0.0713, -0.0236], EAR_APEX_RADIUS 3 mm, drop_ear_apex_fragment}`, at the end of `Kh2HairSource::hair`): the one head-bound hair triangle with its centroid there is not written (part 3 and the plain copy both); the ear skin lies behind it. `kh2_hair_does_not_cross_the_skin` asserts 0 hair triangles at that apex (1 with the step off). Assumption, not shown in game: the skin shows there and nothing odd opens. The 0.196.3 two-sided copy of the +x temple's head triangles (Stage 377) stays, unproven.
+- **Not checked**: in game; the lift on idle frames other than 0 and 50 (a rest-pose change, the bones sway); whether the lifted `b_hair2` lock looks right on top of the ear. **Not done**: the fringe lock that twists (analysis: it is `l_hair2`, its baked rotation steps up to 22 deg per frame in the run, not an Euler error; see the owner's choice on a limit).
+- `tools/test-affected.sh`, the game-data hair tests, the Windows build. The user must press Build.
+
 ## Stage 377 (fork branch Re-Re-Reverse/Rebirth): KH2 hair: the +x temple's head triangles written twice, version 0.196.3 (2026-11-24)
 
 Fork owner, 2026-11-24, verbatim, on 0.196.2 in game (screenshot, then a second one with the spot ringed): "tirei um print bem perto para vc ver que o gap ainda está presente no cabelo do riku KH2"; "o gap que eu estou falando é um pequeno ponto que fica transparente mostrando o fundo do cenário, o lance da pele com  a base aparecendo é outra parte do problema"; "é do lado esquerdo da cabeça"; "e ele está parado"; after the investigation: "pode aplicar a correção".

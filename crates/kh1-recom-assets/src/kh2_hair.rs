@@ -39,8 +39,16 @@ pub const CAP_BONES: [usize; 3] = [98, 101, 104];
 pub const SCALE: f64 = 0.0092;
 /// Extra width factor (x only): Re:CoM's head is wider than KH2's at the temples.
 pub const WIDTH: f64 = 1.1;
-/// Offset added after the head alignment, in Re:CoM metres (x, y, z), fitted on the renders (see [`SHIFT`]).
-pub const SHIFT: [f64; 3] = [0.0, 0.0, 0.012];
+/// Offset added after the head alignment, in Re:CoM metres (x, y, z), fitted on the renders (see [`SHIFT`]). z was 0.012 until 0.196.6;
+/// 0.196.7 (fork owner: "eu acho que o encaixe do cabelo deveria ser um pouco mais pra trás pq ainda to vendo o gap") 0.006: the hair 6 mm further back;
+/// 0.196.8 ("da pra ir mais para trás") 0.0: 6 mm more, 12 mm back from 0.196.6's;
+/// 0.196.9 ("vai mais uns 24 pra tras") -0.024: 24 mm more, 36 mm back from 0.196.6's;
+/// 0.196.10 ("teste ficou escrota move 50 pra frente") 0.026: 50 mm forward again, 14 mm in front of 0.196.6's;
+/// 0.196.11 ("tira o deslocamento deixa em 0 e desloca para baixo uns 10") [0, -0.010, 0]: no shift to the front, 10 mm down;
+/// 0.196.12 ("desloca 5 pra cima") [0, -0.005, 0]: 5 mm up again;
+/// 0.196.13 ("sobe 3") [0, -0.002, 0]: 3 mm up again;
+/// 0.196.14 ("pelo visto deslocar não é a estratégia, os vãos ainda aparecem... pode zerar") [0, 0, 0]: no shift.
+pub const SHIFT: [f64; 3] = [0.0, 0.0, 0.0];
 
 /// The face fit (0.195.4; fork owner on 0.195.3: "umas das mechas que marquei estão entrando na bochecha, e ainda aparece ta estranho
 /// a marcação que fiz", with a picture of KH2's PS2 Riku: the ear shows, the front locks before it, the long hair behind). For each
@@ -172,6 +180,151 @@ pub const EAR_SHIFT: [f64; 2] = [-0.011, -0.016];
 /// The shift's reach (Gaussian sigma over y, z, metres).
 pub const EAR_SHIFT_REACH: f64 = 0.035;
 
+/// Hair that crosses Re:CoM's skin (0.196.4; fork owner on 0.196.3, two screenshots: "uma mecha ta passando por dentro da orelha";
+/// "essa [mecha] aqui entrando na bochecha"). Checked (files: the 0.196.3 swap, hair triangles against the kept face triangles,
+/// rest and idle frames 0, 25, 50, 75): `FaceFit` pushes a vertex along its direction from the head's centre and never asks whether
+/// it lies behind a local flap; the lock `b_hair2` (2649 / 2650) is rooted 15-17 mm inside the head under the +x ear and its tip
+/// stands 55-78 mm outside, so it cuts the ear, and the front lock `l_hair4` runs 1-3 mm into the cheek; 54-63 hair triangles per
+/// frame have a corner more than 2 mm inside a skin triangle and another more than 5 mm outside. A vertex of such a triangle that
+/// lies behind a kept face triangle (its projection inside it) by at most [`SKIN_REACH`] is lifted along that triangle's outward
+/// normal to [`SKIN_MARGIN`] in front of it. Triangles wholly inside the head (hidden scalp hair) stay.
+pub const SKIN_REACH: f64 = 0.030;
+/// See [`SKIN_REACH`]: where a lifted vertex ends up, in front of the skin (metres).
+pub const SKIN_MARGIN: f64 = 0.003;
+/// A corner this far behind the skin counts as inside (metres).
+pub const SKIN_INSIDE: f64 = 0.002;
+/// A corner this far in front of the skin (or with no skin under it) counts as a tip outside (metres).
+pub const SKIN_TIP: f64 = 0.005;
+/// The most passes of [`lift_out_of_skin`].
+pub const SKIN_PASSES: usize = 4;
+
+fn v_sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn v_dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn v_cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+}
+
+/// The signed distance (outward positive, metres) of `p` from the nearest face triangle whose plane is within [`SKIN_REACH`] and
+/// whose projection contains `p`, with that triangle's outward unit normal. `centre` is the head's centre (outward = away from it).
+pub fn skin_depth(p: [f64; 3], face: &[[[f64; 3]; 3]], centre: [f64; 3]) -> Option<(f64, [f64; 3])> {
+    let mut best: Option<(f64, [f64; 3])> = None;
+    for t in face {
+        let e1 = v_sub(t[1], t[0]);
+        let e2 = v_sub(t[2], t[0]);
+        let mut n = v_cross(e1, e2);
+        let len = v_dot(n, n).sqrt();
+        if len < 1e-12 {
+            continue;
+        }
+        n = [n[0] / len, n[1] / len, n[2] / len];
+        let g = [(t[0][0] + t[1][0] + t[2][0]) / 3.0, (t[0][1] + t[1][1] + t[2][1]) / 3.0, (t[0][2] + t[1][2] + t[2][2]) / 3.0];
+        if v_dot(n, v_sub(g, centre)) < 0.0 {
+            n = [-n[0], -n[1], -n[2]];
+        }
+        let d = v_dot(n, v_sub(p, t[0]));
+        if d.abs() > SKIN_REACH || best.is_some_and(|(b, _)| b.abs() <= d.abs()) {
+            continue;
+        }
+        // barycentric test of the projection
+        let w = v_sub(p, t[0]);
+        let (d11, d12, d22) = (v_dot(e1, e1), v_dot(e1, e2), v_dot(e2, e2));
+        let (dw1, dw2) = (v_dot(w, e1), v_dot(w, e2));
+        let den = d11 * d22 - d12 * d12;
+        if den.abs() < 1e-18 {
+            continue;
+        }
+        let (u, v) = ((d22 * dw1 - d12 * dw2) / den, (d11 * dw2 - d12 * dw1) / den);
+        if u >= 0.0 && v >= 0.0 && u + v <= 1.0 {
+            best = Some((d, n));
+        }
+    }
+    best
+}
+
+/// Lifts the vertices of hair triangles that cross the skin out of it (see [`SKIN_REACH`]); returns the vertices moved. Decided per
+/// vertex position, so triangles that share a vertex keep sharing it. A lifted vertex can end behind the next skin triangle at a fold,
+/// so it repeats (at most [`SKIN_PASSES`] times) until no triangle crosses.
+pub fn lift_out_of_skin(tris: &mut [crate::ddd_hair::SrcTri], face: &[[[f64; 3]; 3]], centre: [f64; 3]) -> usize {
+    use std::collections::HashMap;
+    if face.is_empty() {
+        return 0;
+    }
+    let key = |p: [f64; 3]| [p[0].to_bits(), p[1].to_bits(), p[2].to_bits()];
+    let mut moved = 0;
+    for _ in 0..SKIN_PASSES {
+        let mut depth: HashMap<[u64; 3], Option<(f64, [f64; 3])>> = HashMap::new();
+        let mut lift: HashMap<[u64; 3], (f64, [f64; 3])> = HashMap::new();
+        for t in tris.iter() {
+            let ds = t.v.each_ref().map(|v| *depth.entry(key(v.pos)).or_insert_with(|| skin_depth(v.pos, face, centre)));
+            let tip = ds.iter().any(|d| d.is_none_or(|(d, _)| d > SKIN_TIP));
+            let inside = ds.iter().any(|d| d.is_some_and(|(d, _)| d < -SKIN_INSIDE));
+            if tip && inside {
+                for (v, d) in t.v.iter().zip(&ds) {
+                    if let Some((d, n)) = *d {
+                        if d < -SKIN_INSIDE {
+                            lift.insert(key(v.pos), (d, n));
+                        }
+                    }
+                }
+            }
+        }
+        if lift.is_empty() {
+            break;
+        }
+        moved += lift.len();
+        for t in tris.iter_mut() {
+            for v in t.v.iter_mut() {
+                if let Some(&(d, n)) = lift.get(&key(v.pos)) {
+                    let k = SKIN_MARGIN - d;
+                    v.pos = [v.pos[0] + n[0] * k, v.pos[1] + n[1] * k, v.pos[2] + n[2] * k];
+                }
+            }
+        }
+    }
+    moved
+}
+
+/// The skirt's edges: the head's open edges at the ear's height and above, on either side (0.196.15). Head-relative metres: |x| past
+/// [`SKIRT_X`], y and z in the ranges. Checked (files): at the +x ear top the head's skin ends 11 mm from the nearest hair triangle.
+pub const SKIRT_X: f64 = 0.05;
+/// See [`SKIRT_X`].
+pub const SKIRT_Y: [f64; 2] = [0.04, 0.17];
+/// See [`SKIRT_X`].
+pub const SKIRT_Z: [f64; 2] = [-0.08, 0.06];
+
+/// Whether an open head edge with midpoint `p` (world rest; `head` = the head bone's at rest) is in the skirt's window.
+pub fn in_skirt_window(p: [f64; 3], head: [f64; 3]) -> bool {
+    let r = [p[0] - head[0], p[1] - head[1], p[2] - head[2]];
+    r[0].abs() > SKIRT_X && (SKIRT_Y[0]..=SKIRT_Y[1]).contains(&r[1]) && (SKIRT_Z[0]..=SKIRT_Z[1]).contains(&r[2])
+}
+
+/// The plain proxy's head triangles around the ears that are dropped (0.196.4; fork owner on 0.196.3, ring, then a diagnostic build that
+/// painted the neighbours: "o ponto vazio ainda está lá! [..] só precisa cobrir o ponto que aparece o fundo!"; "logo acima da orelha antes
+/// do cabelo começar tem um espaço vazio que da pra ver o interior da parte de traz do cabelo"). Checked (decomp:
+/// knowledge/ReCoM/recom-model-culling.md: part 2 is drawn without a facing cull; files: the 0.196.3 swap keeps 211 head-bone-only proxy
+/// triangles, 9 within 25 mm of the ear-top corner (centroids 95-112 mm from the head bone along x, on or outside the ear's skin, which
+/// is 86-112 mm); the owner's diagnostic screenshot shows an unpainted flat grey-lilac polygon at the ear top, bounded by the painted
+/// temple triangle 1412, the ear triangle 1928 and the hair triangle 2708, which none of part 3's triangles is). The proxy hid under
+/// Re:CoM's bulky hair; under KH2's thinner hair it shows as a flat polygon. Assumption: that polygon is a proxy triangle (not shown in
+/// game). Head-relative metres: |x| past [`PROXY_DROP_X`] (both sides), y and z in the ranges.
+pub const PROXY_DROP_X: f64 = 0.06;
+/// See [`PROXY_DROP_X`].
+pub const PROXY_DROP_Y: [f64; 2] = [0.03, 0.17];
+/// See [`PROXY_DROP_X`].
+pub const PROXY_DROP_Z: [f64; 2] = [-0.10, 0.10];
+
+/// Whether a proxy head triangle centred at `p` (world rest; `head` = the head bone's at rest) is in the ear window of either side.
+pub fn in_proxy_drop_window(p: [f64; 3], head: [f64; 3]) -> bool {
+    let r = [p[0] - head[0], p[1] - head[1], p[2] - head[2]];
+    r[0].abs() > PROXY_DROP_X && (PROXY_DROP_Y[0]..=PROXY_DROP_Y[1]).contains(&r[1]) && (PROXY_DROP_Z[0]..=PROXY_DROP_Z[1]).contains(&r[2])
+}
+
 /// The +x temple / ear window whose kept head triangles are written twice, with both facing flags (0.196.3; fork owner on
 /// 0.196.2: "um pequeno ponto que fica transparente mostrando o fundo do cenário" at the top of the ear's gap). Checked (render
 /// `local/work/holefind/out/cull_one_sign_ear_f0.png`, the pinhole finder with one facing sign kept): behind that point there
@@ -258,14 +411,16 @@ impl Kh2HairSource {
             return Ok(None);
         }
         let model = mdlx::parse(&self.mdlx).map_err(|e| Error::Format(format!("KH2 {RIKU_MDLX}: {e}")))?;
-        let sk = crate::mdl::RecomSkeleton::parse(mdl)?;
+        let sk0 = crate::mdl::RecomSkeleton::parse(mdl)?;
+        let head = sk0.find(HEAD_BONE).ok_or_else(|| Error::Format("hair: no head bone".into()))?;
+        let pose = skeleton::bind_pose(&model.bones);
+        let carry = r::Carry { k: r::aff(&pose[HEAD_BONE_KH2]).r, h: crate::math::unscale(&sk0.rest_world()[head].r).0, c: [WIDTH * SCALE, SCALE, SCALE], shift: SHIFT };
+        // 0.196.5: the skeleton with the 7 extra KH2 hair bones, so that every KH2 hair bone moves its own vertices
+        let sk = r::extend_skeleton(&sk0, head, &model, &carry);
         let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
         let world = sk.rest_world();
-        let head = sk.find(HEAD_BONE).ok_or_else(|| Error::Format("hair: no head bone".into()))?;
-        let pose = skeleton::bind_pose(&model.bones);
-        let carry = r::Carry { k: r::aff(&pose[HEAD_BONE_KH2]).r, h: crate::math::unscale(&world[head].r).0, c: [WIDTH * SCALE, SCALE, SCALE], shift: SHIFT };
         let on: Vec<&crate::kh2_motion::Kh2Motion> = r::CHOOSE_ON.iter().filter_map(|s| motions.get(s)).collect();
-        let host = r::hosts(&model, HAIR_GROUP, &on, &r::SELECTED);
+        let host = r::hosts(&model, HAIR_GROUP, &on, &r::HAIR_BONES);
         let rig = r::Rig::new(&names, &world, &model, carry, host)?;
         Ok(Some(self.rig.get_or_init(|| rig)))
     }
@@ -288,6 +443,19 @@ impl HairSource for Kh2HairSource {
         p
     }
 
+    fn drop_plain_hair_copy(&self, t: &crate::ddd_hair::SrcTri, head: [f64; 3]) -> bool {
+        let c = [0, 1, 2].map(|k| (t.v[0].pos[k] + t.v[1].pos[k] + t.v[2].pos[k]) / 3.0);
+        t.v.iter().all(|v| v.bone == HEAD_BONE) && in_proxy_drop_window(c, head)
+    }
+
+    fn skirt_edge(&self, p: [f64; 3], head: [f64; 3]) -> bool {
+        in_skirt_window(p, head)
+    }
+
+    fn drop_proxy_triangle(&self, p: [f64; 3], head: [f64; 3]) -> bool {
+        in_proxy_drop_window(p, head)
+    }
+
     fn two_sided_face(&self, p: [f64; 3], head: [f64; 3]) -> bool {
         in_ear_two_sided_window(p, head)
     }
@@ -296,21 +464,30 @@ impl HairSource for Kh2HairSource {
         use crate::kh2_hair_rig as r;
         let Some(rig) = self.rig(mdl)? else { return Ok(mdl.to_vec()) };
         let model = mdlx::parse(&self.mdlx).map_err(|e| Error::Format(format!("KH2 {RIKU_MDLX}: {e}")))?;
-        let sk = crate::mdl::RecomSkeleton::parse(mdl)?;
+        let sk0 = crate::mdl::RecomSkeleton::parse(mdl)?;
+        let head = sk0.find(HEAD_BONE).ok_or_else(|| Error::Format("hair: no head bone".into()))?;
+        let sk = r::extend_skeleton(&sk0, head, &model, &rig.carry);
         let parents: Vec<i16> = sk.bones.iter().map(|b| b.parent).collect();
-        let head = sk.find(HEAD_BONE).ok_or_else(|| Error::Format("hair: no head bone".into()))?;
         let rest = rig.locals(&parents, head, &rig.head_rel(&r::rel(&skeleton::bind_pose(&model.bones))));
+        let n0 = sk0.bones.len();
         let mut out = mdl.to_vec();
-        r::patch_rest(&mut out, &rest)?;
+        r::patch_rest(&mut out, &rest.iter().filter(|(b, _)| *b < n0).cloned().collect::<Vec<_>>())?;
+        // the 7 extra bones go after Re:CoM's last bone, in every part
+        if sk.bones.len() > n0 {
+            out = r::append_bones(&out, &sk.bones[n0..])?;
+        }
         Ok(out)
     }
 
     fn bake_ann(&self, ann: &[u8], mdl: &[u8]) -> Result<Option<Vec<u8>>> {
         let Some(rig) = self.rig(mdl)? else { return Ok(None) };
         let model = mdlx::parse(&self.mdlx).map_err(|e| Error::Format(format!("KH2 {RIKU_MDLX}: {e}")))?;
-        let sk = crate::mdl::RecomSkeleton::parse(mdl)?;
-        let head = sk.find(HEAD_BONE).ok_or_else(|| Error::Format("hair: no head bone".into()))?;
+        let sk0 = crate::mdl::RecomSkeleton::parse(mdl)?;
+        let head = sk0.find(HEAD_BONE).ok_or_else(|| Error::Format("hair: no head bone".into()))?;
+        let sk = crate::kh2_hair_rig::extend_skeleton(&sk0, head, &model, &rig.carry);
         let mut a = crate::ann::Ann::parse(ann)?;
+        // every clip has as many bones as the model: the 7 extra ones, then the hair's channels
+        crate::kh2_hair_rig::extend_ann(&mut a, sk.bones.len() - sk0.bones.len());
         crate::kh2_hair_rig::bake(&mut a, rig, &sk, head, &model, &self.motions()?)?;
         Ok(Some(a.to_bytes()))
     }
@@ -381,6 +558,8 @@ impl HairSource for Kh2HairSource {
             };
             tris.push(SrcTri { v: [mk(&t[0], &mut name_of), mk(&t[1], &mut name_of), mk(&t[2], &mut name_of)], island, cont: false });
         }
+        let centre = [h[0] + crate::ddd_hair::HEAD_CENTRE[0], h[1] + crate::ddd_hair::HEAD_CENTRE[1], h[2] + crate::ddd_hair::HEAD_CENTRE[2]];
+        lift_out_of_skin(&mut tris, &self.face.borrow(), centre);
         Ok(SrcHair { tris, islands: n, skin: 0, atlas: img, one_sided: false })
     }
 }
@@ -391,6 +570,19 @@ pub(crate) mod tests {
     use crate::ddd_hair::{tests as dt, with_hair, RIKU_0101_KH2};
     use crate::install;
     use crate::mdl::{split_parts, MdlPart, RecomSkeleton};
+
+    /// 0.196.4: the proxy drop window is the ears' (both sides), not the face's middle, the neck or the top of the head.
+    #[test]
+    fn proxy_drop_window_is_the_ears() {
+        let head = [0.0, 1.38, -0.04];
+        let at = |x: f64, y: f64, z: f64| [head[0] + x, head[1] + y, head[2] + z];
+        assert!(in_proxy_drop_window(at(0.11, 0.08, -0.005), head), "the +x ear top");
+        assert!(in_proxy_drop_window(at(-0.11, 0.08, -0.005), head), "the -x ear top");
+        assert!(!in_proxy_drop_window(at(0.02, 0.08, 0.0), head), "the middle of the head");
+        assert!(!in_proxy_drop_window(at(0.11, 0.25, 0.0), head), "the top of the head");
+        assert!(!in_proxy_drop_window(at(0.11, 0.08, 0.15), head), "the face");
+        assert!(!in_proxy_drop_window(at(0.11, -0.05, 0.0), head), "the neck");
+    }
 
     /// 0.196.3: the two-sided window is the +x ear's (head-relative), not the -x side, the front hairline or the neck.
     #[test]
