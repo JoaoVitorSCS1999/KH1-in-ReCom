@@ -50,20 +50,37 @@ pub struct HairTarget {
     /// The new atlas's name (at most 15 bytes; the RTM entry is `<name>.tm2`). Unique in the game: Re:CoM looks names up
     /// globally.
     pub new_texture: &'static str,
+    /// 0.198.7: a second texture of the model with hair on it (Dark Riku's `PL0201`: `n_zz120_02`, 91 hair-bone triangles beside
+    /// the 187 on `n_zz120_01`, Checked (files)); its hair triangles are removed the same way, nothing is kept from it for the fit.
+    pub also: Option<&'static str>,
 }
 
 /// Riku's default attire (`PL0101`) with KH2 Riku's hair ([`crate::kh2_hair`]): the new atlas's name.
-pub const RIKU_0101_KH2: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_kh2" };
+pub const RIKU_0101_KH2: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_kh2", also: None };
 
 /// 0.197.2: Riku's Halloween Town attire (`PL0111`, the same skeleton as `PL0101`, Checked (files)) with KH2 Riku's hair. The hair's
 /// texture keeps one name for every group (Re:CoM looks names up globally; the picture is the same).
-pub const RIKU_0111_KH2: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_kh2" };
+pub const RIKU_0111_KH2: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_kh2", also: None };
 
 /// 0.197.2: the Halloween Town attire with BBS kid Riku's hair.
-pub const RIKU_0111_BBS: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_bbs" };
+pub const RIKU_0111_BBS: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_bbs", also: None };
 
 /// The same attire with BBS kid Riku's hair ([`crate::bbs_hair`]).
-pub const RIKU_0101_BBS: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_bbs" };
+pub const RIKU_0101_BBS: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_bbs", also: None };
+
+/// 0.198.7 (fork owner, 2026-11-26: "agora implementa todos os cabelos para o a Skin do riku Darkmode tbm"): Dark Riku's model (`PL0201`,
+/// the Dark Form skin's) with KH2 Riku's hair: his hair is on `n_zz120_01` (with the face) and `n_zz120_02` (with the coat). Checked (files).
+pub const RIKU_0201_KH2: HairTarget = HairTarget { texture: "n_zz120_01", new_texture: "rk_hair_kh2", also: Some("n_zz120_02") };
+/// The same on his Halloween Town model (`PL0211`).
+pub const RIKU_0211_KH2: HairTarget = HairTarget { texture: "n_zz120_11", new_texture: "rk_hair_kh2", also: Some("n_zz120_12") };
+/// Dark Riku's model with BBS kid Riku's hair.
+pub const RIKU_0201_BBS: HairTarget = HairTarget { texture: "n_zz120_01", new_texture: "rk_hair_bbs", also: Some("n_zz120_02") };
+/// The same on his Halloween Town model.
+pub const RIKU_0211_BBS: HairTarget = HairTarget { texture: "n_zz120_11", new_texture: "rk_hair_bbs", also: Some("n_zz120_12") };
+
+/// 0.198.7: the window (head-relative, metres: half-width, lowest and highest height, the most forward depth) in which whole head / neck
+/// triangles of the second hair texture ([`HairTarget::also`]) go with the old hair: the base of Dark Riku's hair over his nape.
+pub const ALSO_NAPE: [f64; 4] = [0.04, -0.06, 0.0, -0.05];
 
 /// One corner of a source hair triangle, already in Re:CoM's frame.
 #[derive(Clone, Debug)]
@@ -184,6 +201,8 @@ pub struct HairReport {
     pub stray_in_hair_islands: usize,
     /// Open head edges given the nape curtain (0.198.2).
     pub nape: usize,
+    /// Triangles removed from the second hair texture ([`HairTarget::also`], 0.198.7).
+    pub also_removed: usize,
     /// The source's hair triangles added (DDD's, or KH2's).
     pub ddd_hair: usize,
     /// The source's skin triangles left out (DDD only).
@@ -430,7 +449,7 @@ fn pack(segs: &[Seg], fmt: u16, gif: u32, regs: u32, max_v: usize) -> Vec<MeshPa
                 Some(p) => tex != cur_tex || p.verts.len() + 3 > max_v,
             };
             if need_new {
-                out.push(MeshPacket { fmt, gif, regs, verts: Vec::new() });
+                out.push(MeshPacket { fmt, gif, regs, verts: Vec::new(), count: None });
                 cur_tex = tex;
             }
             let p = out.last_mut().unwrap();
@@ -823,8 +842,11 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
     if names != part_bones(&p2) || names != skel.bones.iter().map(|b| b.name.clone()).collect::<Vec<_>>() {
         return bad("hair: the parts do not share one skeleton");
     }
-    if p3.list_b.as_ref().is_some_and(|l| !l.is_empty()) || p2.list_b.is_some() {
-        return bad("hair: the body has a list B (Checked: PL0101's has none)");
+    // 0.198.7: part 3's list B is kept as it is when it has no hair (Dark Riku's `PL0201`: the coat tails, `*_skt*` / `hip` / `waist`
+    // on `n_zz120_02`, Checked (files)); part 2's must be empty
+    let names_b: Vec<String> = skel.bones.iter().map(|b| b.name.clone()).collect();
+    if p3.list_b.as_ref().is_some_and(|l| l.iter().any(|pk| pk.verts.iter().any(|v| names_b.get(v.bone()).is_some_and(|n| n.contains("hair") || n == HEAD_BONE)))) || p2.list_b.is_some() {
+        return bad("hair: the body's list B has hair or head triangles, or the proxy has a list B");
     }
     if !p3.list_a.iter().all(|p| p.fmt == FMT_TEXTURED) || !p2.list_a.iter().all(|p| p.fmt == FMT_PLAIN) {
         return bad("hair: part 3 is not textured or part 2 is not plain");
@@ -837,7 +859,32 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
     // Re:CoM's triangles, part 3 then its plain twin.
     let tris3 = extract(&p3.list_a)?;
     let tris2 = extract(&p2.list_a)?;
-    let (remove3, split) = classify_riku(&tris3, atlas_tex, head, &hair_bones);
+    let (mut remove3, split) = classify_riku(&tris3, atlas_tex, head, &hair_bones);
+    let mut also_removed = 0usize;
+    // 0.198.7: the second hair texture ([`HairTarget::also`]): its triangles in hair islands that touch the head or a hair bone go too
+    // (as on the atlas; Dark Riku's has hair pieces on `head` there: left, they showed as dark spikes above the ears, render `kh2_cam`)
+    if let Some(also) = target.also {
+        let t2 = p3.texture_names().iter().position(|n| n == also).ok_or_else(|| Error::Format(format!("hair: part 3 has no texture {also}")))? as u32;
+        let (mut r2, s2) = classify_riku(&tris3, t2, head, &hair_bones);
+        also_removed = s2.removed;
+        // the base of the old hair over the nape: whole triangles on `head` / `neck*` within [`ALSO_NAPE`] of the head bone (Dark Riku's
+        // 8, Checked (files, test `dark_probe`): |x| ≤ 2.8 cm, 0.8-4.5 cm under the head bone, 6-9 cm behind it; model-reviewer of
+        // 0.198.7: a flat grey dome between the new hair and the collar)
+        for (t, r) in tris3.iter().zip(r2.iter_mut()) {
+            if *r || t.tex != t2 || !t.v.iter().all(|v| v.bone() == head || names[v.bone()].starts_with("neck")) {
+                continue;
+            }
+            let w = t.v.map(|v| world[v.bone()].point(v.pos().map(|x| x as f64)));
+            let c = [0, 1, 2].map(|k| (w[0][k] + w[1][k] + w[2][k]) / 3.0 - world[head].t[k]);
+            if c[0].abs() <= ALSO_NAPE[0] && (ALSO_NAPE[1]..=ALSO_NAPE[2]).contains(&c[1]) && c[2] <= ALSO_NAPE[3] {
+                *r = true;
+                also_removed += 1;
+            }
+        }
+        for (r, x) in remove3.iter_mut().zip(r2) {
+            *r |= x;
+        }
+    }
     // Part 2 is not part 3's twin (1074 triangles, other positions): a low-poly head / hair proxy. Its hair is the
     // triangles that touch a hair bone; its head-bone triangles (the skull) stay.
     let remove2: Vec<bool> = tris2
@@ -1141,7 +1188,13 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         textures.push(n);
     }
     let (np3, np2) = ([p3.list_a.len(), p2.list_a.len()], [list3.len(), list2.len()]);
-    let new3 = MdlPart { bounds: crate::keyblade::part_bounds(nb, &[&list3]), textures, list_a: list3, ..p3.clone() };
+    let new3 = {
+        let mut lists: Vec<&[MeshPacket]> = vec![&list3];
+        if let Some(lb) = p3.list_b.as_ref() {
+            lists.push(lb);
+        }
+        MdlPart { bounds: crate::keyblade::part_bounds(nb, &lists), textures, list_a: list3.clone(), ..p3.clone() }
+    };
     let new2 = MdlPart { bounds: crate::keyblade::part_bounds(nb, &[&list2]), list_a: list2, ..p2.clone() };
     parts[2] = new2.write_bytes()?;
     parts[3] = new3.write_bytes()?;
@@ -1182,6 +1235,7 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         proxy_dropped,
         skirt,
         nape,
+        also_removed,
         plain_hair_dropped,
         ddd_hair: hair.tris.len(),
         ddd_skin: hair.skin,

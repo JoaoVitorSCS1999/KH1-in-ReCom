@@ -148,6 +148,9 @@ pub struct MeshPacket {
     pub regs: u32,
     /// The vertices.
     pub verts: Vec<MeshVertex>,
+    /// 0.198.7: the count in header words 2 and 4 when Square wrote one other than the vertex count (Dark Riku's `PL0201` part 0,
+    /// Checked (files): a packet of 49 vertices with 45 there); written back as read. `None`: the vertex count, as everywhere else.
+    pub count: Option<u32>,
 }
 
 /// One vertex (quadwords as words).
@@ -227,10 +230,11 @@ fn parse_list(r: &Rd, mut p: usize, bones: usize) -> Result<(Vec<MeshPacket>, us
         let ok = tag & 0xFFFF == num as u32 + 1
             && h[0] as usize == num
             && h[1] == 0x1_0000 | nv as u32
-            && h[2] == ((0xF3 - bones as u32) << 16) | nv as u32
+            && h[2] >> 16 == 0xF3 - bones as u32
+            && (h[2] & 0xFFFF) as usize <= nv
             && h[3] >> 16 == 0x9C00
             && num == 2 + s * nv
-            && h[4] == 0x8000 | nv as u32
+            && h[4] == 0x8000 | (h[2] & 0xFFFF)
             && h[7] == 0;
         if !ok {
             return bad(format!("mdl: packet header at {p:#x} not as Square writes it"));
@@ -247,7 +251,8 @@ fn parse_list(r: &Rd, mut p: usize, bones: usize) -> Result<(Vec<MeshPacket>, us
         if words::<4>(r, o)? != [VIF_MSCNT, 0, 0, 0] {
             return bad(format!("mdl: no MSCNT at {o:#x}"));
         }
-        out.push(MeshPacket { fmt, gif: h[5], regs: h[6], verts });
+        let count = Some(h[2] & 0xFFFF).filter(|&c| c as usize != nv);
+        out.push(MeshPacket { fmt, gif: h[5], regs: h[6], verts, count });
         p = o + 16;
     }
 }
@@ -266,7 +271,8 @@ fn write_list(out: &mut Vec<u8>, list: &[MeshPacket], bones: usize) -> Result<()
         }
         let (num, nv) = (num as u32, nv as u32);
         w(out, &[DMA_CNT | (num + 1), 0, VIF_STCYCL_4_4, VIF_UNPACK_V4_32 | (num << 16)]);
-        w(out, &[num, 0x1_0000 | nv, ((0xF3 - bones as u32) << 16) | nv, 0x9C00_0000 | pk.fmt as u32, 0x8000 | nv, pk.gif, pk.regs, 0]);
+        let c = pk.count.unwrap_or(nv as u32);
+        w(out, &[num, 0x1_0000 | nv, ((0xF3 - bones as u32) << 16) | c, 0x9C00_0000 | pk.fmt as u32, 0x8000 | c, pk.gif, pk.regs, 0]);
         for v in &pk.verts {
             w(out, &v.q0);
             w(out, &v.q1);
@@ -496,7 +502,7 @@ mod tests {
             bones: (0..3).map(|i| MdlBone { name: crate::ann::name16(&format!("b{i}")), parent: i as i16 - 1, index: i as i16 }).collect(),
             rest: vec![[0; 16]; 3],
             textures: if tex { vec![[0x41; 32]] } else { vec![] },
-            list_a: vec![MeshPacket { fmt: if tex { FMT_TEXTURED } else { FMT_PLAIN }, gif: 0x303E_4000, regs: 0x412, verts: vec![vtx(2, false, tex), vtx(2, false, tex), vtx(2, true, tex)] }],
+            list_a: vec![MeshPacket { fmt: if tex { FMT_TEXTURED } else { FMT_PLAIN }, gif: 0x303E_4000, regs: 0x412, verts: vec![vtx(2, false, tex), vtx(2, false, tex), vtx(2, true, tex)], count: None }],
             list_b: tex.then(Vec::new),
             bounds: vec![[0; 6]; 3],
         };
@@ -513,7 +519,7 @@ mod tests {
     #[test]
     fn refuses_oversized_packets() {
         let v = vtx(2, false, true);
-        let pk = MeshPacket { fmt: FMT_TEXTURED, gif: 0, regs: 0, verts: vec![v; 85] };
+        let pk = MeshPacket { fmt: FMT_TEXTURED, gif: 0, regs: 0, verts: vec![v; 85], count: None };
         assert!(write_list(&mut Vec::new(), &[pk], 12).is_err());
     }
 }

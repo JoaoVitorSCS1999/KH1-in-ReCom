@@ -312,7 +312,7 @@ fn packets(segs: &[Vec<Tri>], fmt: u16, gif: u32, regs: u32) -> Vec<MeshPacket> 
                 Some(p) => tex != cur_tex || p.verts.len() + 3 > max_v,
             };
             if need_new {
-                out.push(MeshPacket { fmt, gif, regs, verts: Vec::new() });
+                out.push(MeshPacket { fmt, gif, regs, verts: Vec::new(), count: None });
                 cur_tex = tex;
             }
             let p = out.last_mut().unwrap();
@@ -690,7 +690,7 @@ pub fn new_resource_names() -> Vec<String> {
         }
     }
     // Riku's Dark Form skin groups (fork, `riku_skin`).
-    for g in crate::riku_skin::SKIN_GROUPS.iter().map(|x| x.2).chain(crate::riku_skin::BLADE_GROUPS.iter().map(|x| x.2)).chain(crate::riku_skin::KH2_HAIR_GROUPS.iter().map(|x| x.0)).chain(crate::riku_skin::BBS_HAIR_GROUPS.iter().map(|x| x.0)) {
+    for g in crate::riku_skin::SKIN_GROUPS.iter().map(|x| x.2).chain(crate::riku_skin::BLADE_GROUPS.iter().map(|x| x.2)).chain(crate::riku_skin::KH2_HAIR_GROUPS.iter().map(|x| x.0)).chain(crate::riku_skin::BBS_HAIR_GROUPS.iter().map(|x| x.0)).chain(crate::riku_skin::DARK_KH2_HAIR_GROUPS.iter().map(|x| x.0)).chain(crate::riku_skin::DARK_BBS_HAIR_GROUPS.iter().map(|x| x.0)) {
         for ext in ["MDL", "ANN", "EET", "SES"] {
             out.push(resource_path(g, ext));
         }
@@ -761,8 +761,8 @@ mod tests {
     fn new_names_are_not_in_recom_hed() {
         let names = new_resource_names();
         // 16 KH1 groups (21..=36) with four files, 6 KH2 groups (38..=43) with two, Riku's two
-        // skin groups (121, 131), four Keyblade groups (141..=171) and (0.188.0, 0.194.0) four hair groups (182, 192, 183, 193), (0.197.2) four Halloween Town ones (186, 196, 187, 197), each with six.
-        assert_eq!(names.len(), 16 * 4 + 6 * 2 + 14 * 6 + 8, "(0.197.4) and eight event pack copies");
+        // skin groups (121, 131), four Keyblade groups (141..=171) and (0.188.0, 0.194.0) four hair groups (182, 192, 183, 193), (0.197.2) four Halloween Town ones (186, 196, 187, 197), (0.198.7) eight Dark Form skin ones (184..199), each with six.
+        assert_eq!(names.len(), 16 * 4 + 6 * 2 + 22 * 6 + 8, "(0.197.4) and eight event pack copies");
         assert!(names.contains(&"PLAYER/0171/PL0171.MDL".to_string()) && names.contains(&"raw/PLAYER/0141/PL0141.RTM".to_string()));
         assert!(names.contains(&"PLAYER/0021/PL0021.MDL".to_string()) && names.contains(&"raw/PLAYER/0036/PL0036.EFF".to_string()));
         assert!(names.contains(&"raw/PLAYER/0043/PL0043.RTM".to_string()) && !names.contains(&"PLAYER/0043/PL0043.EET".to_string()));

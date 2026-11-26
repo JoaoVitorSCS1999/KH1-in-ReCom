@@ -437,7 +437,12 @@ pub struct Kh2HairSource {
     /// `P_EH000.mset` (none: the hair follows Re:CoM's own hair bones as in 0.188.0).
     pub mset: Option<Vec<u8>>,
     /// The rig, made from Re:CoM's original skeleton by [`HairSource::prepare_mdl`].
-    rig: std::cell::OnceCell<crate::kh2_hair_rig::Rig>,
+    /// 0.198.7: one rig per Re:CoM skeleton (key: its bone names), and the one last asked for. Until 0.198.7 a single rig was kept
+    /// from the first model the source saw: the asset step builds Riku's groups first, so the Dark Form skin (another skeleton, 128
+    /// bones) got Riku's rig, his bone indices and fit (in game: KH2's hair on the Dark Form in long straight sticks; the tests, with a
+    /// fresh source, did not show it).
+    rig: std::cell::RefCell<Vec<(Vec<String>, &'static crate::kh2_hair_rig::Rig)>>,
+    current: std::cell::Cell<Option<&'static crate::kh2_hair_rig::Rig>>,
     /// Re:CoM's face that stays, from [`HairSource::set_face`].
     face: std::cell::RefCell<Vec<[[f64; 3]; 3]>>,
 }
@@ -448,12 +453,12 @@ impl Kh2HairSource {
         let (mdlx, assets, _) = inst.read_full(RIKU_MDLX)?;
         let dds = assets.into_iter().find(|a| a.name == ATLAS_ASSET).ok_or_else(|| Error::Format(format!("KH2: {RIKU_MDLX} has no {ATLAS_ASSET}")))?.data;
         let mset = inst.read_full(RIKU_MSET).ok().map(|x| x.0);
-        Ok(Kh2HairSource { mdlx, dds, mset, rig: Default::default(), face: Default::default() })
+        Ok(Kh2HairSource { mdlx, dds, mset, rig: Default::default(), current: Default::default(), face: Default::default() })
     }
 
     /// From the files themselves.
     pub fn new(mdlx: Vec<u8>, dds: Vec<u8>, mset: Option<Vec<u8>>) -> Kh2HairSource {
-        Kh2HairSource { mdlx, dds, mset, rig: Default::default(), face: Default::default() }
+        Kh2HairSource { mdlx, dds, mset, rig: Default::default(), current: Default::default(), face: Default::default() }
     }
 
     /// The face [`HairSource::set_face`] was given (tests).
@@ -482,7 +487,9 @@ impl Kh2HairSource {
     /// The rig for Re:CoM's original model `mdl` (made once).
     pub fn rig(&self, mdl: &[u8]) -> Result<Option<&crate::kh2_hair_rig::Rig>> {
         use crate::kh2_hair_rig as r;
-        if let Some(x) = self.rig.get() {
+        let key: Vec<String> = crate::mdl::RecomSkeleton::parse(mdl)?.bones.iter().map(|b| b.name.clone()).collect();
+        if let Some(&(_, x)) = self.rig.borrow().iter().find(|(k, _)| *k == key) {
+            self.current.set(Some(x));
             return Ok(Some(x));
         }
         let motions = self.motions()?;
@@ -501,7 +508,11 @@ impl Kh2HairSource {
         let on: Vec<&crate::kh2_motion::Kh2Motion> = r::CHOOSE_ON.iter().filter_map(|s| motions.get(s)).collect();
         let host = r::hosts(&model, HAIR_GROUP, &on, &r::HAIR_BONES);
         let rig = r::Rig::new(&names, &world, &model, carry, host)?;
-        Ok(Some(self.rig.get_or_init(|| rig)))
+        // leaked: a few rigs per asset build (one per skeleton), alive as long as the source
+        let rig: &'static crate::kh2_hair_rig::Rig = Box::leak(Box::new(rig));
+        self.rig.borrow_mut().push((key, rig));
+        self.current.set(Some(rig));
+        Ok(Some(rig))
     }
 }
 
@@ -610,7 +621,8 @@ impl Kh2HairSource {
         // Re:CoM's candidate bones: the head and every hair bone, at rest.
         let cands: Vec<usize> = names.iter().enumerate().filter(|(i, n)| *i == head || n.contains("hair")).map(|(i, _)| i).collect();
         let mut bone_name: HashMap<u16, String> = HashMap::new();
-        let rig = self.rig.get();
+        // the rig of this skeleton (`names` is the extended one: the base skeleton's names come first)
+        let rig = self.rig.borrow().iter().find(|(k, _)| names.len() >= k.len() && names[..k.len()] == k[..]).map(|x| x.1).or(self.current.get());
         // the face fit: KH2's head skin (non-hair groups, vertices on the head bone) carried by the same fit
         let fit = {
             let rf = self.face.borrow();
@@ -913,21 +925,6 @@ pub(crate) mod tests {
         let dir = dt::out_dir().join("kh2").join(std::env::var("CAM_TAG").unwrap_or_else(|_| "cam".into()));
         let body = body_textures(&swap);
         camera_checks(&p3, &sk, &ann, &img, &body, &dir);
-        // close-ups of the nape in the run, a little from below
-        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
-        let c = ann.slots[3].clip.as_ref().unwrap();
-        // 0.198.3: the run from its sides (the hair turned down in the run must not go into the back): hair fragments hidden by the body
-        for f in [0.0, 6.0, 11.0, 17.0] {
-            for yaw in [90.0, 270.0] {
-                let h = render_cam(&p3, &posed_world(&sk, c, f), &names, &img, &body, yaw, 0.0, true, &dir.join(format!("run_side_f{f}_y{yaw}.png")));
-                eprintln!("run f{f} yaw {yaw}: {h} hair fragments behind the body");
-            }
-        }
-        for f in [6.0, 17.0] {
-            for pitch in [-15.0, -25.0] {
-                render_cam(&p3, &posed_world(&sk, c, f), &names, &img, &body, 180.0, pitch, true, &dir.join(format!("nape_f{f}_p{pitch}.png")));
-            }
-        }
     }
 
     /// 0.198.4 (fork owner on 0.198.3, a box at the nape over the collar: "c", both the grey piece and the bare nape): Re:CoM's own
@@ -1100,7 +1097,20 @@ pub(crate) mod tests {
             tri_bones.push(t.v.clone().map(|v| names[v.bone()].clone()));
         }
         let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
-        for (p, _, _, _) in &tris { for q in p { for k in 0..2 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } } }
+        // 0.198.7: framed by the body (no head or hair corner) with fixed margins, so a change of hair does not move the picture
+        // (it framed everything: a hair edit shifted the body and `render-diff` boxed whole views)
+        for ((p, _, _, _), b) in tris.iter().zip(&tri_bones) {
+            if b.iter().any(|n| n == "head" || n.contains("hair")) { continue; }
+            for q in p { for k in 0..2 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } }
+        }
+        if lo[0] > hi[0] {
+            for (p, _, _, _) in &tris { for q in p { for k in 0..2 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } } }
+        } else {
+            let m = 0.12;
+            lo[0] -= m;
+            hi[0] += m;
+            hi[1] += 0.32;
+        }
         if let Some((c, half)) = focus {
             let c = tx(c);
             lo = [c[0] - half, c[1] - half];
@@ -1179,6 +1189,89 @@ pub(crate) mod tests {
         [f(r), f(g), f(bl)]
     }
 
+    /// 0.198.7: [`dt::test_view`] + [`body_textures`] for a model whose atlas (the face's texture, `atlas`) is not texture 1 (Dark Riku's
+    /// `n_zz120_01` is 2): the atlas and the hair are drawn as texture 1 (atlas left, hair right, as `test_view`), the old texture 1 as
+    /// the atlas's index; `body` follows the same swap.
+    pub(crate) fn view_at(swap: &crate::ddd_hair::HairSwap, atlas: &str) -> (MdlPart, crate::texture::Image, Vec<crate::texture::Image>) {
+        let mut p3 = MdlPart::parse_bytes(&split_parts(&swap.mdl).unwrap()[3]).unwrap();
+        let a = p3.texture_names().iter().position(|n| n == atlas).unwrap() as u32;
+        let mut body = body_textures(swap);
+        if a != 1 {
+            for k in p3.list_a.iter_mut().chain(p3.list_b.iter_mut().flatten()) {
+                for v in k.verts.iter_mut() {
+                    if let Some(q) = v.q2.as_mut() {
+                        if q[3] == a { q[3] = 1; } else if q[3] == 1 { q[3] = a; }
+                    }
+                }
+            }
+            body.swap(1, a as usize);
+        }
+        let hair = crate::texture::decode_dds(&swap.dds).unwrap();
+        let old = crate::texture::decode_dds(&swap.atlas_dds).unwrap();
+        let hw = hair.w * old.h / hair.h;
+        let (w, h) = (old.w + hw, old.h);
+        let px: Vec<[u8; 4]> = (0..w * h).map(|i| { let (x, y) = (i % w, i / w); if x < old.w { old.px[y * old.w + x] } else { hair.px[(y * hair.h / h) * hair.w + (x - old.w) * hair.w / hw] } }).collect();
+        let (fa, fh) = (old.w as f32 / w as f32, hw as f32 / w as f32);
+        for k in p3.list_a.iter_mut() {
+            for v in k.verts.iter_mut() {
+                if let Some(q) = v.q2.as_mut() {
+                    let u = f32::from_bits(q[0]);
+                    if q[3] == swap.hair_tex { q[0] = (fa + u * fh).to_bits(); q[3] = 1; } else if q[3] == 1 { q[0] = (u * fa).to_bits(); }
+                }
+            }
+        }
+        (p3, crate::texture::Image { w, h, px }, body)
+    }
+
+    /// 0.198.7 (fork owner: "agora implementa todos os cabelos para o a Skin do riku Darkmode tbm"): the camera checks on the Dark Form
+    /// skin (Dark Riku's model with Riku's motions, group 121) with KH2's and BBS's hair, `out/dark/<kh2|bbs>_<tag>/`; and the skin
+    /// without a new hair (`out/dark/recom_<tag>/`) as the reference.
+    #[test]
+    fn dark_camera_checks() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let skin = crate::riku_skin::build_with(&arc, &keys, 101, 201, 121, None).unwrap();
+        let get = |ext: &str| skin.files.iter().find(|f| f.0 == crate::riku_skin::path(121, ext)).unwrap().1.clone();
+        let (mdl0, ann0) = (get("MDL"), get("ANN"));
+        let e = arc.find("PLAYER/0201/PL0201.RTM").unwrap();
+        let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+        let tag = std::env::var("CAM_TAG").unwrap_or_else(|_| "cam".into());
+        let base = dt::out_dir().join("dark");
+        let kh2 = Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+        let bbs = crate::bbs_hair::BbsHairSource::read(&g, &keys).unwrap();
+        let which = std::env::var("DARK_HAIR").unwrap_or_else(|_| "kh2,bbs,recom".into());
+        for (name, src, target) in [("kh2", &kh2 as &dyn HairSource, crate::ddd_hair::RIKU_0201_KH2), ("bbs", &bbs as &dyn HairSource, crate::ddd_hair::RIKU_0201_BBS)] {
+            if !which.contains(name) { continue; }
+            let swap = with_hair(&src.prepare_mdl(&mdl0).unwrap(), &rtm, &hd, &target, src).unwrap();
+            let ann = crate::ann::Ann::parse(&src.bake_ann(&ann0, &mdl0).unwrap().unwrap_or(ann0.clone())).unwrap();
+            let (p3, img, body) = view_at(&swap, target.texture);
+            let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
+            camera_checks(&p3, &sk, &ann, &img, &body, &base.join(format!("{name}_{tag}")));
+        }
+        if which.contains("recom") {
+            // the skin as it is: no new hair; drawn with the same tool (its hair on its own textures)
+            let sk = RecomSkeleton::parse(&mdl0).unwrap();
+            let ann = crate::ann::Ann::parse(&ann0).unwrap();
+            let mut p3 = MdlPart::parse_bytes(&split_parts(&mdl0).unwrap()[3]).unwrap();
+            let rtm_p = crate::rtm::Rtm::parse(&rtm).unwrap();
+            let mut body: Vec<crate::texture::Image> = p3.textures.iter().map(|n| {
+                let n = String::from_utf8_lossy(n.split(|&b| b == 0).next().unwrap_or(&[])).to_string();
+                let e = rtm_p.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == n.trim_end_matches(".tm2")).unwrap();
+                let (w, h, px) = crate::rtm::tim2_decode8(&e.data).unwrap();
+                crate::texture::Image { w, h, px }
+            }).collect();
+            let a = p3.texture_names().iter().position(|n| n == "n_zz120_01").unwrap() as u32;
+            for k in p3.list_a.iter_mut().chain(p3.list_b.iter_mut().flatten()) { for v in k.verts.iter_mut() { if let Some(q) = v.q2.as_mut() { if q[3] == a { q[3] = 1; } else if q[3] == 1 { q[3] = a; } } } }
+            body.swap(1, a as usize);
+            // the face's texture from its HD asset, as `view_at` draws it (model-reviewer of 0.198.7: the SD picture here made every
+            // face close-up differ)
+            let img = hd.iter().find(|x| x.name == crate::keyblade::hd_name("n_zz120_01")).and_then(|x| crate::texture::decode_dds(&x.data).ok()).unwrap_or_else(|| body[1].clone());
+            camera_checks(&p3, &sk, &ann, &img, &body, &base.join(format!("recom_{tag}")));
+        }
+    }
+
     /// The owner's three in-game checks as renders (see [`render_body_cam`]), into `dir`: the run (slot 3) at four frames from behind
     /// with the camera low (`run_low_*`) and high (`run_high_*`), and the idle (slot 1, frame 25) circled every 45 deg a little from
     /// below (`orbit_*`); and `sheet.png`, all of them side by side (12 + 8 cells).
@@ -1201,6 +1294,20 @@ pub(crate) mod tests {
                 let pth = dir.join(format!("orbit_{:03}.png", k * 45));
                 render_cam(p3, &w, &names, atlas, body, k as f64 * 45.0, -15.0, true, &pth);
                 cells.push(pth);
+            }
+        }
+        // 0.198.3 (in every camera check since 0.198.7): the run from its sides, and the nape from below
+        if let Some(c) = ann.slots.get(3).and_then(|s| s.clip.as_ref()) {
+            for f in [0.0, 6.0, 11.0, 17.0] {
+                let w = posed_world(sk, c, f);
+                for yaw in [90.0, 270.0] {
+                    render_cam(p3, &w, &names, atlas, body, yaw, 0.0, true, &dir.join(format!("run_side_f{f}_y{yaw}.png")));
+                }
+                if f == 6.0 || f == 17.0 {
+                    for pitch in [-15.0, -25.0] {
+                        render_cam(p3, &w, &names, atlas, body, 180.0, pitch, true, &dir.join(format!("nape_f{f}_p{pitch}.png")));
+                    }
+                }
             }
         }
         // 0.198.6: the walk (slot 2; the owner tested walking and running with the camera low): from behind low / high and both sides
@@ -1268,4 +1375,171 @@ pub(crate) mod tests {
 
 
 
+
+
+#[cfg(test)]
+mod dark_probe {
+    use super::*;
+    use crate::ddd_hair::{with_hair, HairSource, HairTarget};
+    use crate::install;
+
+    /// 0.198.7 probe (fork owner: "implementa todos os cabelos para a Skin do riku Darkmode tbm"): where the KH2 and BBS hair swaps
+    /// stop on Dark Riku's model (`PL0201`, `PL0211`).
+    #[test]
+    fn dark_probe() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        for grp in ["0201", "0211"] {
+            let mdl = install::read_recom(&arc, &keys, &format!("PLAYER/{grp}/PL{grp}.MDL")).unwrap();
+            let e = arc.find(&format!("PLAYER/{grp}/PL{grp}.RTM")).unwrap();
+            let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+            let r = crate::rtm::Rtm::parse(&rtm).unwrap();
+            eprintln!("{grp}: RTM {:?}; HD {:?}", r.entries.iter().map(|e| e.name_str()).collect::<Vec<_>>(), hd.iter().map(|a| a.name.clone()).collect::<Vec<_>>());
+            let parts = crate::mdl::split_parts(&mdl).unwrap();
+            for (i, p) in parts.iter().enumerate() {
+                match crate::mdl::MdlPart::parse_bytes(p) {
+                    Ok(pp) => eprintln!("  part {i}: {} bones, textures {:?}, list A {} packets, list B {:?}", pp.bones.len(), pp.texture_names(), pp.list_a.len(), pp.list_b.as_ref().map(|l| l.len())),
+                    Err(e) => eprintln!("  part {i}: parse error {e}"),
+                }
+            }
+            for (i, p) in parts.iter().enumerate() {
+                let pp = crate::mdl::MdlPart::parse_bytes(p).unwrap();
+                let back = pp.write_bytes().unwrap();
+                eprintln!("  part {i}: write(parse) == original: {}", back == *p);
+            }
+            {
+                let sk = crate::mdl::RecomSkeleton::parse(&mdl).unwrap();
+                let p3 = crate::mdl::MdlPart::parse_bytes(&parts[3]).unwrap();
+                let tn = p3.texture_names();
+                let mut by: std::collections::BTreeMap<(String, String), usize> = Default::default();
+                for pk in p3.list_b.as_ref().unwrap() { for v in &pk.verts { *by.entry((sk.bones[v.bone()].name.clone(), v.q2.map_or("-".to_string(), |q| tn.get(q[3] as usize).cloned().unwrap_or_default()))).or_default() += 1; } }
+                eprintln!("  list B vertices by (bone, texture): {by:?}");
+                let mut ha: std::collections::BTreeMap<String, usize> = Default::default();
+                for pk in &p3.list_a { for v in &pk.verts { if sk.bones[v.bone()].name.contains("hair") { *ha.entry(v.q2.map_or("-".to_string(), |q| tn.get(q[3] as usize).cloned().unwrap_or_default())).or_default() += 1; } } }
+                eprintln!("  list A hair-bone vertices by texture: {ha:?}");
+            }
+            {
+                // 0.198.7 review: `_02` triangles with a head / neck corner, by place (head-relative centroid) and mean texel
+                let sk = crate::mdl::RecomSkeleton::parse(&mdl).unwrap();
+                let w = sk.rest_world();
+                let hd = sk.find("head").unwrap();
+                let p3 = crate::mdl::MdlPart::parse_bytes(&parts[3]).unwrap();
+                let t2 = p3.texture_names().iter().position(|n| n.ends_with("_02") || n.ends_with("_12")).unwrap() as u32;
+                let rt = crate::rtm::Rtm::parse(&rtm).unwrap();
+                let name = &p3.texture_names()[t2 as usize];
+                let e = rt.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == name).unwrap();
+                let (tw, th, px) = crate::rtm::tim2_decode8(&e.data).unwrap();
+                let mut rows = vec![];
+                for t in crate::ddd_hair::tests::collect(&p3) {
+                    if t.tex != t2 { continue; }
+                    let bn: Vec<String> = t.v.iter().map(|v| sk.bones[v.bone()].name.clone()).collect();
+                    if !bn.iter().any(|n| n == "head" || n.starts_with("neck")) { continue; }
+                    let q: Vec<[f64; 3]> = t.v.iter().map(|v| w[v.bone()].point(v.pos().map(|x| x as f64))).collect();
+                    let c = [0, 1, 2].map(|k| (q[0][k] + q[1][k] + q[2][k]) / 3.0 - w[hd].t[k]);
+                    let uv = t.v.iter().map(|v| v.uv().unwrap()).fold([0.0f32; 2], |a, u| [a[0] + u[0] / 3.0, a[1] + u[1] / 3.0]);
+                    let tx = px[((uv[1].rem_euclid(1.0) * th as f32) as usize).min(th - 1) * tw + ((uv[0].rem_euclid(1.0) * tw as f32) as usize).min(tw - 1)];
+                    rows.push(format!("  _02 tri bones {bn:?} c ({:.3},{:.3},{:.3}) uv ({:.3},{:.3}) texel {:?}", c[0], c[1], c[2], uv[0], uv[1], &tx[..3]));
+                }
+                eprintln!("  _02 head/neck triangles: {}", rows.len());
+                for r in rows { eprintln!("{r}"); }
+            }
+            let src = Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+            let (t1, t2): (&'static str, &'static str) = if grp == "0201" { ("n_zz120_01", "n_zz120_02") } else { ("n_zz120_11", "n_zz120_12") };
+            let tg = HairTarget { texture: t1, new_texture: "rk_hair_kh2", also: Some(t2) };
+            match src.prepare_mdl(&mdl).and_then(|m| with_hair(&m, &rtm, &hd, &tg, &src)) {
+                Ok(s) => {
+                    eprintln!("  KH2: ok, removed {} (of {} on the atlas), skirt {}, nape {}", s.report.removed, s.report.riku_on_atlas, s.report.skirt, s.report.nape);
+                    let sk = crate::mdl::RecomSkeleton::parse(&s.mdl).unwrap();
+                    let w = sk.rest_world();
+                    let hd = sk.find("head").unwrap();
+                    let p3 = crate::mdl::MdlPart::parse_bytes(&crate::mdl::split_parts(&s.mdl).unwrap()[3]).unwrap();
+                    let t2i = p3.texture_names().iter().position(|n| n == t2).unwrap() as u32;
+                    for t in crate::ddd_hair::tests::collect(&p3) {
+                        if t.tex != t2i { continue; }
+                        let bn: Vec<String> = t.v.iter().map(|v| sk.bones[v.bone()].name.clone()).collect();
+                        if !bn.iter().any(|n| n == "head" || n.starts_with("neck")) { continue; }
+                        let q: Vec<[f64; 3]> = t.v.iter().map(|v| w[v.bone()].point(v.pos().map(|x| x as f64))).collect();
+                        let c = [0, 1, 2].map(|k| (q[0][k] + q[1][k] + q[2][k]) / 3.0 - w[hd].t[k]);
+                        eprintln!("  LEFT _02 {bn:?} c ({:.3},{:.3},{:.3})", c[0], c[1], c[2]);
+                    }
+                }
+                Err(e) => eprintln!("  KH2: {e}"),
+            }
+        }
+    }
+}
+
+
+#[cfg(test)]
+mod game_files_probe {
+    /// 0.198.7 (fork owner, in game: KH2's hair on the Dark Form with long straight sticks, "só aconteceu com o cabelo do KH2 no darkmode"):
+    /// the group the game loaded (`GAME_GROUP_DIR` = the folder of `PL<g>.MDL` / `.ANN`): bones, clips' bone counts, and per hair bone
+    /// the farthest its origin goes from the head in each clip's frames.
+    #[test]
+    fn game_group_probe() {
+        let Ok(dir) = std::env::var("GAME_GROUP_DIR") else { return };
+        let dir = std::path::PathBuf::from(dir);
+        let g = dir.file_name().unwrap().to_string_lossy().to_string();
+        let mdl = std::fs::read(dir.join(format!("PL{g}.MDL"))).unwrap();
+        let ann = crate::ann::Ann::parse(&std::fs::read(dir.join(format!("PL{g}.ANN"))).unwrap()).unwrap();
+        let sk = crate::mdl::RecomSkeleton::parse(&mdl).unwrap();
+        let head = sk.find("head").unwrap();
+        eprintln!("model {} bones; clips {}", sk.bones.len(), ann.slots.iter().filter(|s| s.clip.is_some()).count());
+        let mut counts: std::collections::BTreeMap<i16, usize> = Default::default();
+        for s in &ann.slots { if let Some(c) = &s.clip { *counts.entry(c.bones).or_default() += 1; } }
+        eprintln!("clip bone counts {counts:?}");
+        for (i, pb) in crate::mdl::split_parts(&mdl).unwrap().iter().enumerate() {
+            let p = crate::mdl::MdlPart::parse_bytes(pb).unwrap();
+            let qw = |l: &[crate::mdl::MeshPacket]| l.iter().map(|k| 2 + if k.fmt == crate::mdl::FMT_TEXTURED { 3 } else { 2 } * k.verts.len()).collect::<Vec<_>>();
+            let a = qw(&p.list_a);
+            let b = p.list_b.as_ref().map(|l| qw(l)).unwrap_or_default();
+            let budget = 2 * (0xF3 - p.bones.len());
+            let distinct = |l: &[crate::mdl::MeshPacket]| l.iter().map(|k| k.verts.iter().map(|v| v.bone()).collect::<std::collections::BTreeSet<_>>().len()).collect::<Vec<_>>();
+            let da = distinct(&p.list_a);
+            eprintln!("part {i}: distinct bones per packet: largest {}, over 48: {}; packets with a bone >= 128: {}", da.iter().max().unwrap_or(&0), da.iter().filter(|&&x| x > 48).count(), p.list_a.iter().filter(|k| k.verts.iter().any(|v| v.bone() >= 128)).count());
+            eprintln!("part {i}: {} bones, budget {budget} qw; list A largest {} ({} over); list B largest {} ({} over)", p.bones.len(), a.iter().max().unwrap_or(&0), a.iter().filter(|&&x| x > budget).count(), b.iter().max().unwrap_or(&0), b.iter().filter(|&&x| x > budget).count());
+        }
+        let mut worst: Vec<(f64, String, usize, usize)> = vec![];
+        for (slot, s) in ann.slots.iter().enumerate() {
+            let Some(c) = &s.clip else { continue };
+            if c.bones as usize != sk.bones.len() { continue; }
+            for f in (0..c.frames.max(1) as usize).step_by(5) {
+                let w = super::tests::posed_world(&sk, c, f as f64);
+                for (b, bone) in sk.bones.iter().enumerate() {
+                    if !bone.name.contains("hair") { continue; }
+                    let d = crate::math::dist(w[b].t, w[head].t);
+                    if !d.is_finite() || d > 0.4 { worst.push((d, bone.name.clone(), slot, f)); }
+                }
+            }
+        }
+        worst.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let mut seen = std::collections::BTreeSet::new();
+        for (d, n, slot, f) in worst { if seen.insert((n.clone(), slot)) && seen.len() < 40 { eprintln!("  {n} slot {slot} frame {f}: {d:.2} m from the head"); } }
+    }
+}
+
+#[cfg(test)]
+mod high_bone_probe {
+    use crate::install;
+    /// 0.198.7: do Re:CoM's own models skin vertices to bones 128 and up? (the KH2 hair on the Dark Form is the mod's first that does)
+    #[test]
+    fn game_models_with_vertices_on_high_bones() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        for f in ["PLAYER/0001/PL0001.MDL", "PLAYER/0405/PL0405.MDL", "PLAYER/0407/PL0407.MDL", "ENEMY/0117/EN0117.MDL", "ENEMY/0114/EN0114.MDL", "NPC/0051/NP0051.MDL"] {
+            let Ok(mdl) = install::read_recom(&arc, &keys, f) else { eprintln!("{f}: not read"); continue };
+            let Ok(parts) = crate::mdl::split_parts(&mdl) else { continue };
+            for (i, pb) in parts.iter().enumerate() {
+                let Ok(p) = crate::mdl::MdlPart::parse_bytes(pb) else { eprintln!("{f} part {i}: not parsed"); continue };
+                let hi = p.list_a.iter().chain(p.list_b.iter().flatten()).flat_map(|k| k.verts.iter().map(|v| v.bone())).max().unwrap_or(0);
+                let n = p.list_a.iter().chain(p.list_b.iter().flatten()).flat_map(|k| k.verts.iter()).filter(|v| v.bone() >= 128).count();
+                eprintln!("{f} part {i}: {} bones, highest skinned bone {hi}, vertices on bones >= 128: {n}", p.bones.len());
+            }
+        }
+    }
+}
 
