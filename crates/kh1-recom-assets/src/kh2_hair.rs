@@ -350,6 +350,81 @@ pub fn ear_shift(p: [f64; 3], head: [f64; 3]) -> [f64; 3] {
     [p[0], p[1] + EAR_SHIFT[0] * w, p[2] + EAR_SHIFT[1] * w]
 }
 
+/// The lining (0.197.1, the BBS hair's of 0.194.2, which closed its gap in game: fork owner on 0.194.3, "sumiu o gap"): the hair's
+/// triangles over the back and sides of the skull ([`in_lining_window`]) are written again on `head`, pulled [`LINING`] of the way
+/// toward the head's centre, same texels. Re:CoM's scalp is gone with his hair and his head ends before the KH2 hair starts (Stage
+/// 389); the lining is a skull of hair under it, so a lock that swings away shows hair, not the background.
+pub const LINING: f64 = 0.08;
+/// Whether a lining corner follows its hair corner's bone instead of `head` (0.197.7; fork owner on 0.197.6 in game, four screenshots
+/// with arrows at straight edges across the locks: "algumas mexas ficaram esquisitas com a animação"): the lining rigid on `head`
+/// showed over the locks that swing inward (reproduced on the idle's back render). Following its lock it stays 8 % inside it in
+/// every frame; the corners at the roots are on `head` already (KH2's cap bones), so the scalp seam stays covered. Tried and not
+/// kept: rigid at 20 % (also clean on the renders, but a lock that swings far can still uncover it).
+pub const LINING_FOLLOWS: bool = true;
+/// The lining's window, head-relative (metres): centroids at or above this height…
+pub const LINING_Y: f64 = -0.03;
+/// …and behind this depth (the face and fringe in front of it are left alone).
+pub const LINING_Z: f64 = 0.06;
+
+/// Whether a hair triangle with centroid `p` (world, rest) is lined; `head` is the head bone's rest origin.
+pub fn in_lining_window(p: [f64; 3], head: [f64; 3]) -> bool {
+    p[1] - head[1] >= LINING_Y && p[2] - head[2] <= LINING_Z
+}
+
+/// The lining's triangles for `tris` (see [`LINING`]), on bone `bone`; a copy with a corner behind Re:CoM's skin (`face`, kept
+/// triangles) or within [`SKIN_MARGIN`] of it is left out (it would cut the face or the ears).
+pub fn lining(tris: &[SrcTri], head: [f64; 3], centre: [f64; 3], bone: &str, face: &[[[f64; 3]; 3]]) -> Vec<SrcTri> {
+    tris.iter()
+        .filter(|t| in_lining_window([0, 1, 2].map(|k| (t.v[0].pos[k] + t.v[1].pos[k] + t.v[2].pos[k]) / 3.0), head))
+        .map(|t| SrcTri {
+            v: t.v.clone().map(|v| SrcVert { pos: [0, 1, 2].map(|k| centre[k] + (1.0 - LINING) * (v.pos[k] - centre[k])), uv: v.uv, bone: if LINING_FOLLOWS { v.bone.clone() } else { bone.to_string() } }),
+            island: t.island,
+            cont: false,
+            lining: true,
+        })
+        .filter(|t| t.v.iter().all(|v| skin_depth(v.pos, face, centre).is_none_or(|(d, _)| d > SKIN_MARGIN)))
+        .collect()
+}
+
+/// The nape (0.198.2; fork owner on 0.198.1's hair copy: "tampo mas ta um pouco estranho e ta estático tbm", a screenshot from a
+/// low camera). Checked (files: the swapped model's open edges): Re:CoM's head ends at the back of the skull base (open `head` /
+/// `neck1` edges 0-4 cm under the head bone, 3-7 cm behind it) and the next surface is the collar (`chest1`, about 8 cm lower):
+/// Re:CoM's own hair covered the nape, and the KH2 hair lifts off it in the run. Each open head edge in [`in_nape_window`] gets a
+/// curtain of skin down to [`NAPE_BOTTOM`] (the swap's [`crate::ddd_hair::HairSource::nape_curtain`]): its top corners are the edge's
+/// own (their bones, their texel), its bottom corners straight under them on `neck3` (the neck's base, at the collar), so it
+/// stretches with the neck as skin does. 0.198.1's copy of the hair over the nape (rigid on `neck3`) is gone.
+/// 0.198.3: not used (the KH2 source gives no curtain): in game it showed as a dark strip over the collar (fork owner: "vazou pelo
+/// pescoço"), reproduced in the textured camera checks.
+pub const NAPE_BOTTOM: f64 = -0.095;
+/// See [`NAPE_BOTTOM`]: the open edges with their midpoint within this height range (head-relative, metres) …
+pub const NAPE_Y: [f64; 2] = [-0.03, 0.06];
+/// … behind this depth …
+pub const NAPE_Z: f64 = -0.02;
+/// … and within this half-width.
+pub const NAPE_X: f64 = 0.09;
+/// The neck's base bone.
+pub const NAPE_BONE: &str = "neck3";
+
+/// 0.198.6 (fork owner on 0.198.5: "eu testei andando e corrento com a camera baixa", the walk's nape: neck skin and the hair's
+/// lining seen from below; then "ele dando no-go tem que prosseguir para o que o agente apontou"): the curtain again, on the hair's
+/// texels (the nearest hair vertex's) and ending inside the collar, not over it (0.198.2's skin curtain crossed it: "vazou pelo
+/// pescoço"). Checked (files, rest): the vest's top behind the neck is 4.5 cm under the head bone, on `chest1`. Its bottom corners
+/// are 1 cm under that, pulled [`NAPE_HAIR_TUCK`] toward `chest1`'s origin, on `chest1`, so the vest covers them and the strip
+/// stretches as the neck bends. Assumption: the 1 cm and the tuck, from the renders.
+pub const NAPE_HAIR_BOTTOM: f64 = -0.055;
+/// See [`NAPE_HAIR_BOTTOM`].
+pub const NAPE_HAIR_BONE: &str = "chest1";
+/// See [`NAPE_HAIR_BOTTOM`] (metres).
+pub const NAPE_HAIR_TUCK: f64 = 0.015;
+/// The curtain's half-width (metres; 9 cm (0.198.2's [`NAPE_X`]) and 5 cm showed it beside the neck from the front).
+pub const NAPE_HAIR_X: f64 = 0.03;
+
+/// Whether an open head edge with midpoint `p` (world, rest) gets the nape curtain; `head` is the head bone's rest origin.
+pub fn in_nape_window(p: [f64; 3], head: [f64; 3]) -> bool {
+    let r = [p[0] - head[0], p[1] - head[1], p[2] - head[2]];
+    (NAPE_Y[0]..NAPE_Y[1]).contains(&r[1]) && r[2] < NAPE_Z && r[0].abs() < NAPE_X
+}
+
 /// KH2 Riku's motion set (0.195.0: the hair's own motion). Checked (files: kh2_sixth).
 pub const RIKU_MSET: &str = "obj/P_EH000.mset";
 
@@ -391,7 +466,11 @@ impl Kh2HairSource {
         use crate::kh2_hair_rig as r;
         let mut out = HashMap::new();
         if let Some(m) = &self.mset {
-            for s in [r::KH2_IDLE, r::KH2_WALK, r::KH2_RUN, r::KH2_JUMP, r::KH2_FALL] {
+            // 0.197.5: every KH2 slot `CLIP_MAP` names
+            let mut slots: Vec<usize> = std::iter::once(r::KH2_IDLE).chain(r::CLIP_MAP.iter().map(|x| x.1)).collect();
+            slots.sort_unstable();
+            slots.dedup();
+            for s in slots {
                 if let Some(x) = crate::kh2_motion::read_slot(m, s)? {
                     out.insert(s, x);
                 }
@@ -460,6 +539,18 @@ impl HairSource for Kh2HairSource {
         in_ear_two_sided_window(p, head)
     }
 
+    fn lining_in_plain(&self) -> bool {
+        false
+    }
+
+    fn nape_curtain(&self, p: [f64; 3], head: [f64; 3]) -> Option<(f64, &'static str)> {
+        (in_nape_window(p, head) && (p[0] - head[0]).abs() < NAPE_HAIR_X).then_some((NAPE_HAIR_BOTTOM, NAPE_HAIR_BONE))
+    }
+
+    fn nape_curtain_hair(&self) -> Option<f64> {
+        Some(NAPE_HAIR_TUCK)
+    }
+
     fn prepare_mdl(&self, mdl: &[u8]) -> Result<Vec<u8>> {
         use crate::kh2_hair_rig as r;
         let Some(rig) = self.rig(mdl)? else { return Ok(mdl.to_vec()) };
@@ -480,6 +571,18 @@ impl HairSource for Kh2HairSource {
     }
 
     fn bake_ann(&self, ann: &[u8], mdl: &[u8]) -> Result<Option<Vec<u8>>> {
+        self.bake_pack(ann, mdl, true)
+    }
+
+    fn hair(&self, names: &[String], world: &[Aff]) -> Result<SrcHair> {
+        self.hair_tris(names, world)
+    }
+}
+
+impl Kh2HairSource {
+    /// A pack made for the KH2-hair skeleton (the 7 extra bones, the hair's channels), `by_slot` as [`crate::kh2_hair_rig::bake`].
+    /// 0.197.4: also Riku's event packs (`PLAYER/40x2`), so they play on a 109-bone Riku ([`crate::riku_skin::EVENT_PACKS`]).
+    pub fn bake_pack(&self, ann: &[u8], mdl: &[u8], by_slot: bool) -> Result<Option<Vec<u8>>> {
         let Some(rig) = self.rig(mdl)? else { return Ok(None) };
         let model = mdlx::parse(&self.mdlx).map_err(|e| Error::Format(format!("KH2 {RIKU_MDLX}: {e}")))?;
         let sk0 = crate::mdl::RecomSkeleton::parse(mdl)?;
@@ -488,11 +591,11 @@ impl HairSource for Kh2HairSource {
         let mut a = crate::ann::Ann::parse(ann)?;
         // every clip has as many bones as the model: the 7 extra ones, then the hair's channels
         crate::kh2_hair_rig::extend_ann(&mut a, sk.bones.len() - sk0.bones.len());
-        crate::kh2_hair_rig::bake(&mut a, rig, &sk, head, &model, &self.motions()?)?;
+        crate::kh2_hair_rig::bake(&mut a, rig, &sk, head, &model, &self.motions()?, by_slot)?;
         Ok(Some(a.to_bytes()))
     }
 
-    fn hair(&self, names: &[String], world: &[Aff]) -> Result<SrcHair> {
+    fn hair_tris(&self, names: &[String], world: &[Aff]) -> Result<SrcHair> {
         let model = mdlx::parse(&self.mdlx).map_err(|e| Error::Format(format!("KH2 {RIKU_MDLX}: {e}")))?;
         let pose = skeleton::bind_pose(&model.bones);
         let group = model.groups.get(HAIR_GROUP).ok_or_else(|| Error::Format(format!("KH2 {RIKU_MDLX}: no group {HAIR_GROUP}")))?;
@@ -551,15 +654,35 @@ impl HairSource for Kh2HairSource {
         let (isl, n) = crate::ddd_hair::islands(&corners);
         let mut tris = Vec::with_capacity(group.triangles.len());
         for (t, &island) in group.triangles.iter().zip(&isl) {
-            let mk = |v: &mdlx::Vertex, bn: &mut dyn FnMut(u16) -> String| SrcVert {
-                pos: fit.apply(ear_shift(frame(skeleton::point(&pose[v.bone as usize], v.position.map(|x| x as f64))), h)),
-                uv: [v.uv[0] as f64, v.uv[1] as f64],
-                bone: bn(v.bone),
+            let mk = |v: &mdlx::Vertex, bn: &mut dyn FnMut(u16) -> String| {
+                let pos = fit.apply(ear_shift(frame(skeleton::point(&pose[v.bone as usize], v.position.map(|x| x as f64))), h));
+                let mut bone = bn(v.bone);
+                // 0.198.6: the long back locks off the cap ([`crate::kh2_hair_rig::SPLIT`]): a vertex that follows the Re:CoM bone of
+                // KH2 bone 101 or 104 (their own vertices and those of the KH2 bones they host), far enough from the head's centre
+                if let Some(rig) = rig {
+                    let c = [h[0] + crate::ddd_hair::HEAD_CENTRE[0], h[1] + crate::ddd_hair::HEAD_CENTRE[1], h[2] + crate::ddd_hair::HEAD_CENTRE[2]];
+                    let r = ((pos[0] - c[0]).powi(2) + (pos[1] - c[1]).powi(2) + (pos[2] - c[2]).powi(2)).sqrt();
+                    let behind = pos[2] - h[2] < crate::kh2_hair_rig::SPLIT_Z;
+                    for &(k, n, f) in &crate::kh2_hair_rig::SPLIT {
+                        let Some(src) = rig.recom_of(k) else { continue };
+                        if bone != names[src] || !names.iter().any(|x| x == n) || !behind {
+                            continue;
+                        }
+                        let band = if k == 104 || r >= crate::kh2_hair_rig::SPLIT_R[1] { 1.0 } else if r >= crate::kh2_hair_rig::SPLIT_R[0] { 2.0 / 3.0 } else { 1.0 / 3.0 };
+                        if (band - f).abs() < 1e-9 {
+                            bone = n.to_string();
+                            break;
+                        }
+                    }
+                }
+                SrcVert { pos, uv: [v.uv[0] as f64, v.uv[1] as f64], bone }
             };
-            tris.push(SrcTri { v: [mk(&t[0], &mut name_of), mk(&t[1], &mut name_of), mk(&t[2], &mut name_of)], island, cont: false });
+            tris.push(SrcTri { v: [mk(&t[0], &mut name_of), mk(&t[1], &mut name_of), mk(&t[2], &mut name_of)], island, cont: false, lining: false });
         }
         let centre = [h[0] + crate::ddd_hair::HEAD_CENTRE[0], h[1] + crate::ddd_hair::HEAD_CENTRE[1], h[2] + crate::ddd_hair::HEAD_CENTRE[2]];
         lift_out_of_skin(&mut tris, &self.face.borrow(), centre);
+        let lined = lining(&tris, h, centre, HEAD_BONE, &self.face.borrow());
+        tris.extend(lined);
         Ok(SrcHair { tris, islands: n, skin: 0, atlas: img, one_sided: false })
     }
 }
@@ -645,16 +768,18 @@ pub(crate) mod tests {
         }
         let swap = with_hair(&mdl, &rtm, &hd, &RIKU_0101_KH2, &src).unwrap();
         eprintln!("{:?}", swap.report);
-        assert_eq!(swap.report.ddd_hair, 613);
+        // 0.197.1: KH2's 613 hair triangles and the lining's copies over the back and sides of the skull
+        let lined = src.hair(&RecomSkeleton::parse(&mdl).unwrap().bones.iter().map(|b| b.name.clone()).collect::<Vec<_>>(), &RecomSkeleton::parse(&mdl).unwrap().rest_world()).unwrap().tris.iter().filter(|t| t.lining).count();
+        eprintln!("lining triangles: {lined}");
+        assert_eq!(swap.report.ddd_hair, 613 + lined);
+        assert!((50..400).contains(&lined), "{lined} lining triangles");
         let again = with_hair(&mdl, &rtm, &hd, &RIKU_0101_KH2, &src).unwrap();
         assert!(swap.mdl == again.mdl && swap.dds == again.dds, "deterministic");
         crate::mdl::Mdl::parse(&swap.mdl).unwrap();
-        let parts = split_parts(&swap.mdl).unwrap();
-        let p3 = MdlPart::parse_bytes(&parts[3]).unwrap();
+        let (p3, img) = dt::test_view(&swap);
         assert!(p3.texture_names().contains(&RIKU_0101_KH2.new_texture.to_string()));
         let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
         let world = sk.rest_world();
-        let img = crate::texture::decode_dds(&swap.dds).unwrap();
         let out = dt::out_dir().join("kh2");
         std::fs::create_dir_all(&out).unwrap();
         dt::render(&p3, &world, &img, &out);
@@ -743,6 +868,117 @@ pub(crate) mod tests {
         w
     }
 
+    /// 0.198.2 (owner's install, `RECOM_GAME`): the owner's in-game checks as renders (`camera_checks`) on the KH2 hair as built
+    /// (its own `.ANN`), in `out/kh2/cam/` (`sheet.png`); and the nape curtain is there.
+    #[test]
+    fn kh2_camera_checks() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
+        let ann0 = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.ANN").unwrap();
+        let e = arc.find("PLAYER/0101/PL0101.RTM").unwrap();
+        let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+        let src = Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+        let swap = with_hair(&src.prepare_mdl(&mdl).unwrap(), &rtm, &hd, &RIKU_0101_KH2, &src).unwrap();
+        // 0.198.6: the nape curtain on the hair's texels, inside the collar
+        eprintln!("nape curtain edges: {}", swap.report.nape);
+        assert!(swap.report.nape > 0, "the nape is closed");
+        {
+            let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
+            let w = sk.rest_world();
+            let hd = sk.find("head").unwrap();
+            for n in ["head", "neck1", "neck2", "neck3", "chest1"] { let i = sk.find(n).unwrap(); eprintln!("REST {n}: y {:.3} z {:.3}", w[i].t[1] - w[hd].t[1], w[i].t[2] - w[hd].t[2]); }
+            // the collar's top behind the neck: the highest vertex of part 3 on chest1 (texture 0, the vest) within 6 cm of the middle, behind
+            let p3 = MdlPart::parse_bytes(&split_parts(&swap.mdl).unwrap()[3]).unwrap();
+            let mut top = f64::MIN;
+            for t in dt::collect(&p3) { if t.tex != 0 { continue; } for v in &t.v { let q = w[v.bone()].point(v.pos().map(|x| x as f64)); if (q[0] - w[hd].t[0]).abs() < 0.06 && q[2] < w[hd].t[2] { top = top.max(q[1] - w[hd].t[1]); } } }
+            eprintln!("REST collar top behind: y {top:.3}");
+            let mut bones: std::collections::BTreeMap<String, usize> = Default::default();
+            for t in dt::collect(&p3) { if t.tex != 0 { continue; } for v in &t.v { let q = w[v.bone()].point(v.pos().map(|x| x as f64)); if (q[0] - w[hd].t[0]).abs() < 0.06 && q[2] < w[hd].t[2] && q[1] - w[hd].t[1] > top - 0.02 { *bones.entry(names_of(&sk, v.bone())).or_default() += 1; } } }
+            eprintln!("REST collar top bones: {bones:?}");
+        }
+        {
+            let names: Vec<String> = RecomSkeleton::parse(&swap.mdl).unwrap().bones.iter().map(|b| b.name.clone()).collect();
+            let p3 = MdlPart::parse_bytes(&split_parts(&swap.mdl).unwrap()[3]).unwrap();
+            let mut by: std::collections::BTreeMap<String, usize> = Default::default();
+            for t in dt::collect(&p3) { for v in &t.v { if names[v.bone()].starts_with("k2_hair_10") || names[v.bone()].starts_with("b_hair") { *by.entry(names[v.bone()].clone()).or_default() += 1; } } }
+            eprintln!("split: {by:?}");
+            if std::env::var("BONE_COLOURS").is_ok() { for (n, _) in &by { let i = names.iter().position(|x| x == n).unwrap(); eprintln!("colour {i} % 16 = {} : {n}", i % 16); } }
+        }
+        let ann = crate::ann::Ann::parse(&src.bake_ann(&ann0, &mdl).unwrap().unwrap()).unwrap();
+        let (p3, img) = dt::test_view(&swap);
+        let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
+        let dir = dt::out_dir().join("kh2").join(std::env::var("CAM_TAG").unwrap_or_else(|_| "cam".into()));
+        let body = body_textures(&swap);
+        camera_checks(&p3, &sk, &ann, &img, &body, &dir);
+        // close-ups of the nape in the run, a little from below
+        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+        let c = ann.slots[3].clip.as_ref().unwrap();
+        // 0.198.3: the run from its sides (the hair turned down in the run must not go into the back): hair fragments hidden by the body
+        for f in [0.0, 6.0, 11.0, 17.0] {
+            for yaw in [90.0, 270.0] {
+                let h = render_cam(&p3, &posed_world(&sk, c, f), &names, &img, &body, yaw, 0.0, true, &dir.join(format!("run_side_f{f}_y{yaw}.png")));
+                eprintln!("run f{f} yaw {yaw}: {h} hair fragments behind the body");
+            }
+        }
+        for f in [6.0, 17.0] {
+            for pitch in [-15.0, -25.0] {
+                render_cam(&p3, &posed_world(&sk, c, f), &names, &img, &body, 180.0, pitch, true, &dir.join(format!("nape_f{f}_p{pitch}.png")));
+            }
+        }
+    }
+
+    /// 0.198.4 (fork owner on 0.198.3, a box at the nape over the collar: "c", both the grey piece and the bare nape): Re:CoM's own
+    /// Riku (no hair swap), textured, in the same cameras, `out/kh2/cam_recom/`; and the head / neck triangles whose centroid sits over
+    /// the nape (behind the head bone, between it and the collar) by bone and texture.
+    #[test]
+    fn recom_own_nape() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
+        let ann = crate::ann::Ann::parse(&install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.ANN").unwrap()).unwrap();
+        let e = arc.find("PLAYER/0101/PL0101.RTM").unwrap();
+        let (rtm, _hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+        let rtm = crate::rtm::Rtm::parse(&rtm).unwrap();
+        let p3 = MdlPart::parse_bytes(&crate::mdl::split_parts(&mdl).unwrap()[3]).unwrap();
+        let body: Vec<crate::texture::Image> = p3.textures.iter().map(|n| {
+            let n = String::from_utf8_lossy(n.split(|&b| b == 0).next().unwrap_or(&[])).to_string();
+            let e = rtm.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == n.trim_end_matches(".tm2")).unwrap();
+            let (w, h, px) = crate::rtm::tim2_decode8(&e.data).unwrap();
+            crate::texture::Image { w, h, px }
+        }).collect();
+        let sk = RecomSkeleton::parse(&mdl).unwrap();
+        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+        let dir = dt::out_dir().join("kh2").join("cam_recom");
+        std::fs::create_dir_all(&dir).unwrap();
+        let c = ann.slots[3].clip.as_ref().unwrap();
+        for f in [6.0, 17.0] {
+            for pitch in [-15.0, 0.0] {
+                render_cam(&p3, &posed_world(&sk, c, f), &names, &body[1], &body, 180.0, pitch, true, &dir.join(format!("nape_f{f}_p{pitch}.png")));
+            }
+        }
+        let c1 = ann.slots[1].clip.as_ref().unwrap();
+        render_cam(&p3, &posed_world(&sk, c1, 25.0), &names, &body[1], &body, 180.0, 0.0, true, &dir.join("idle_back.png"));
+        let w = sk.rest_world();
+        let head = sk.find("head").unwrap();
+        let h0 = w[head].t;
+        let mut by: std::collections::BTreeMap<(String, u32), usize> = Default::default();
+        for t in dt::collect(&p3) {
+            let q: Vec<[f64; 3]> = t.v.iter().map(|v| w[v.bone()].point(v.pos().map(|x| x as f64))).collect();
+            let m = [0, 1, 2].map(|k| (q[0][k] + q[1][k] + q[2][k]) / 3.0 - h0[k]);
+            if m[1] < 0.0 && m[1] > -0.11 && m[2] < -0.02 && m[0].abs() < 0.06 {
+                *by.entry((t.v.iter().map(|v| names[v.bone()].clone()).collect::<Vec<_>>().join("/"), t.tex)).or_default() += 1;
+            }
+        }
+        for ((b, tx), n) in by { eprintln!("NAPE tris {b} tex {tx}: {n}"); }
+    }
+
+    fn names_of(sk: &RecomSkeleton, b: usize) -> String { sk.bones[b].name.clone() }
+
     /// Debug (0.188.1): the swapped head and hair posed by Re:CoM's own clips, renders in `out/kh2/pose_<tag>/<clip>_<frame>/`
     /// (`tag` = env `HAIR_TAG`, default `now`).
     #[test]
@@ -758,10 +994,8 @@ pub(crate) mod tests {
         
         let src = Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
         let swap = with_hair(&mdl, &rtm, &hd, &RIKU_0101_KH2, &src).unwrap();
-        let parts = split_parts(&swap.mdl).unwrap();
-        let p3 = MdlPart::parse_bytes(&parts[3]).unwrap();
+        let (p3, img) = dt::test_view(&swap);
         let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
-        let img = crate::texture::decode_dds(&swap.dds).unwrap();
         let tag = std::env::var("HAIR_TAG").unwrap_or_else(|_| "now".into());
         let base = dt::out_dir().join("kh2").join(format!("pose_{tag}"));
         let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
@@ -790,27 +1024,102 @@ pub(crate) mod tests {
     /// Debug (0.188.3): z-buffered render of the upper body (head, hair, neck, chest, collars, upper arms) of part 3 posed by
     /// `world`; hair texels from `atlas`, the rest flat grey-blue shaded by its normal. `view`: 0 = side (looking along -x), 1 = back, 2 = front, 3 = the other side.
     pub(crate) fn render_body(p3: &MdlPart, world: &[Aff], names: &[String], atlas: &crate::texture::Image, view: usize, path: &std::path::Path) -> usize {
+        let yaw = match view { 0 => 90.0, 2 => 0.0, 3 => -90.0, _ => 180.0 };
+        render_body_cam(p3, world, names, atlas, yaw, 0.0, false, path)
+    }
+
+    /// [`render_body`] from any camera (0.198.2; fork owner: "sempre que fizer essas alterações tenta fazer um teste no jogo correndo
+    /// com a camera pra cima e outra para baixo e outra circulando o boneco em idle"): `yaw` degrees around the body (0 front, 90 its
+    /// +x side, 180 back), `pitch` degrees (+ from above, − from below); `light`: a light background, as Re:CoM's halls, so a hole shows.
+    pub(crate) fn render_body_cam(p3: &MdlPart, world: &[Aff], names: &[String], atlas: &crate::texture::Image, yaw: f64, pitch: f64, light: bool, path: &std::path::Path) -> usize {
+        render_cam(p3, world, names, atlas, &[], yaw, pitch, light, path)
+    }
+
+    /// Part 3's textures by index (0.198.3: the body textured in the camera checks, so skin over the vest shows; 0.198.2's flat body
+    /// hid the nape curtain's leak): texture `i` is the `.RTM` entry named as part 3's texture table entry `i` (Checked (files):
+    /// part 3's index 0 is `n_zz110_02`, the vest, and 1 is `n_zz110_01`, the face / skin atlas, the reverse of the `.RTM` order).
+    /// Index 1 is drawn from [`dt::test_view`]'s picture instead.
+    pub(crate) fn body_textures(swap: &crate::ddd_hair::HairSwap) -> Vec<crate::texture::Image> {
+        let rtm = crate::rtm::Rtm::parse(&swap.rtm).unwrap();
+        let p3 = MdlPart::parse_bytes(&crate::mdl::split_parts(&swap.mdl).unwrap()[3]).unwrap();
+        p3.textures.iter().map(|n| {
+            let n = String::from_utf8_lossy(n.split(|&b| b == 0).next().unwrap_or(&[])).to_string();
+            let e = rtm.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == n.trim_end_matches(".tm2"));
+            let (w, h, px) = e.and_then(|e| crate::rtm::tim2_decode8(&e.data).ok()).unwrap_or((1, 1, vec![[90, 120, 200, 255]]));
+            eprintln!("part 3 texture {n}: {}", if e.is_some() { "found" } else { "missing" });
+            crate::texture::Image { w, h, px }
+        }).collect()
+    }
+
+    /// [`render_body_cam`] with the body's own textures (`body[i]` for texture `i`, see [`body_textures`]); texture 1 is `atlas`
+    /// (hair and skin); an index `body` lacks is drawn flat grey-blue.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_cam(p3: &MdlPart, world: &[Aff], names: &[String], atlas: &crate::texture::Image, body: &[crate::texture::Image], yaw: f64, pitch: f64, light: bool, path: &std::path::Path) -> usize {
+        render_view(p3, world, names, atlas, body, yaw, pitch, light, None, path)
+    }
+
+    /// [`render_cam`] as a close-up (0.198.5; fork owner on 0.198.4: "você não viu isso???", hair lines through the cheek and Re:CoM's
+    /// kept hair tips over the vest, both too small for the 350 px cells): `focus` = (a world point, the half-width in metres shown
+    /// around it), 700 px.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_focus(p3: &MdlPart, world: &[Aff], names: &[String], atlas: &crate::texture::Image, body: &[crate::texture::Image], yaw: f64, pitch: f64, focus: ([f64; 3], f64), path: &std::path::Path) -> usize {
+        render_view(p3, world, names, atlas, body, yaw, pitch, true, Some(focus), path)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_view(p3: &MdlPart, world: &[Aff], names: &[String], atlas: &crate::texture::Image, body: &[crate::texture::Image], yaw: f64, pitch: f64, light: bool, focus: Option<([f64; 3], f64)>, path: &std::path::Path) -> usize {
+        // `VIEWS=a,b`: only the views whose file name contains one of these (fast tuning; the validation renders all)
+        if let Ok(v) = std::env::var("VIEWS") {
+            let f = path.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+            if !v.split(',').any(|x| f.contains(x)) {
+                return 0;
+            }
+        }
         let ok = |n: &str| n == "head" || n.contains("hair") || n.starts_with("neck") || n.starts_with("chest") || n == "waist" || n.ends_with("collar") || n.ends_with("uparm");
         let size = 700usize;
-        let tx = |q: [f64; 3]| -> [f64; 3] { match view { 0 => [q[2], q[1], -q[0]], 2 => [q[0], q[1], q[2]], 3 => [-q[2], q[1], q[0]], _ => [-q[0], q[1], -q[2]] } };
-        let mut tris: Vec<([[f64; 3]; 3], [[f64; 2]; 3], bool)> = vec![];
+        let (sy, cy, sp, cp) = (yaw.to_radians().sin(), yaw.to_radians().cos(), pitch.to_radians().sin(), pitch.to_radians().cos());
+        let tx = |q: [f64; 3]| -> [f64; 3] {
+            let (x, y, z) = (q[0] * cy + q[2] * sy, q[1], -q[0] * sy + q[2] * cy);
+            [x, y * cp - z * sp, y * sp + z * cp]
+        };
+        let mut tris: Vec<([[f64; 3]; 3], [[f64; 2]; 3], bool, u32)> = vec![];
+        let mut tri_bones: Vec<[String; 3]> = vec![];
         for t in dt::collect(p3) {
             if !t.v.iter().all(|v| ok(&names[v.bone()])) { continue; }
             let p = t.v.clone().map(|v| tx(world[v.bone()].point(v.pos().map(|x| x as f64))));
             let hair = t.tex == 1;
             let uv = t.v.clone().map(|v| v.uv().map_or([0.0; 2], |u| [u[0] as f64, u[1] as f64]));
-            tris.push((p, uv, hair && t.tex == 1));
+            // debug (0.198.6): `BONE_COLOURS` set: hair drawn flat in one colour per bone of its first corner (texture index 1000 + bone)
+            // `BONE_COLOURS=<bone name>`: only that bone red, the rest of the hair grey
+            let ti = match std::env::var("BONE_COLOURS") {
+                Ok(n) if hair && n.len() > 1 => if n.split(',').any(|x| names[t.v[0].bone()] == x) { 1000 } else { 1015 },
+                Ok(_) if hair => 1000 + t.v[0].bone() as u32,
+                _ => t.tex,
+            };
+            tris.push((p, uv, hair, ti));
+            tri_bones.push(t.v.clone().map(|v| names[v.bone()].clone()));
         }
         let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
-        for (p, _, _) in &tris { for q in p { for k in 0..2 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } } }
+        for (p, _, _, _) in &tris { for q in p { for k in 0..2 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } } }
+        if let Some((c, half)) = focus {
+            let c = tx(c);
+            lo = [c[0] - half, c[1] - half];
+            hi = [c[0] + half, c[1] + half];
+        }
         let sc = 640.0 / (hi[0] - lo[0]).max(hi[1] - lo[1]);
-        let mut rgb = vec![30u8; size * size * 3];
+        let mut rgb: Vec<u8> = if light { [214u8, 212, 230].repeat(size * size) } else { vec![30u8; size * size * 3] };
         let mut zb = vec![f64::MIN; size * size];
         // body first, then hair: a hair fragment farther than the body surface is hidden by it (inside the torso or arm)
         let mut hidden = 0usize;
         let mut sd_body = vec![false; size * size];
-        tris.sort_by_key(|t| t.2);
-        for (p, uv, hair) in &tris {
+        let mut order: Vec<usize> = (0..tris.len()).collect();
+        order.sort_by_key(|&i| tris[i].2);
+        let tris: Vec<_> = order.iter().map(|&i| tris[i].clone()).collect();
+        let tri_bones: Vec<_> = order.iter().map(|&i| tri_bones[i].clone()).collect();
+        // debug (0.198.6): `PICK=x,y` prints the triangle drawn at that pixel (its corners' bones and texture)
+        let pick: Option<(usize, usize)> = std::env::var("PICK").ok().and_then(|v| { let mut it = v.split(',').filter_map(|x| x.parse().ok()); Some((it.next()?, it.next()?)) });
+        let mut picked: Option<usize> = None;
+        for (k, (p, uv, hair, ti)) in tris.iter().enumerate() {
             let s: Vec<[f64; 2]> = p.iter().map(|q| [30.0 + (q[0] - lo[0]) * sc, 670.0 - (q[1] - lo[1]) * sc]).collect();
             let n = { let a = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]]; let b = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]]; let c = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; let l = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt().max(1e-12); c[2].abs() / l };
             let det = (s[1][1] - s[2][1]) * (s[0][0] - s[2][0]) + (s[2][0] - s[1][0]) * (s[0][1] - s[2][1]);
@@ -826,20 +1135,137 @@ pub(crate) mod tests {
                 let z = l0 * p[0][2] + l1 * p[1][2] + l2 * p[2][2];
                 if z <= zb[y * size + x] { if *hair && z < zb[y * size + x] - 0.004 && sd_body[y * size + x] { hidden += 1; } continue; }
                 zb[y * size + x] = z;
+                if pick == Some((x, y)) { picked = Some(k); }
                 sd_body[y * size + x] = !*hair;
-                let c = if *hair {
+                let c = if *hair && *ti >= 1000 {
+                    let k = 0.5 + 0.5 * n;
+                    let c = bone_colour((*ti - 1000) as usize);
+                    [(c[0] as f64 * k) as u8, (c[1] as f64 * k) as u8, (c[2] as f64 * k) as u8]
+                } else if *hair {
                     let u = l0 * uv[0][0] + l1 * uv[1][0] + l2 * uv[2][0]; let v = l0 * uv[0][1] + l1 * uv[1][1] + l2 * uv[2][1];
                     let c = atlas.px[((v * atlas.h as f64) as usize).min(atlas.h - 1) * atlas.w + ((u * atlas.w as f64) as usize).min(atlas.w - 1)];
                     [c[0], c[1], c[2]]
+                } else if let Some(b) = body.get(*ti as usize).filter(|_| *ti != 1) {
+                    let u = l0 * uv[0][0] + l1 * uv[1][0] + l2 * uv[2][0]; let v = l0 * uv[0][1] + l1 * uv[1][1] + l2 * uv[2][1];
+                    let c = b.px[((v.rem_euclid(1.0) * b.h as f64) as usize).min(b.h - 1) * b.w + ((u.rem_euclid(1.0) * b.w as f64) as usize).min(b.w - 1)];
+                    let k = 0.55 + 0.45 * n;
+                    [(c[0] as f64 * k) as u8, (c[1] as f64 * k) as u8, (c[2] as f64 * k) as u8]
                 } else { let k = 60.0 + 140.0 * n; [(k * 0.5) as u8, (k * 0.7) as u8, k as u8] };
                 rgb[3 * (y * size + x)..3 * (y * size + x) + 3].copy_from_slice(&c);
             } }
         }
+        if let Some(k) = picked { eprintln!("PICK {}: bones {:?} texture {}", path.display(), tri_bones[k], tris[k].3); }
+        // the colour legend beside the image (`BONE_COLOURS=1`): bone, RGB, the triangles drawn in it
+        if std::env::var("BONE_COLOURS").is_ok_and(|v| v == "1") {
+            let mut seen: std::collections::BTreeMap<usize, (String, usize)> = Default::default();
+            for (t, b) in tris.iter().zip(&tri_bones) { if t.3 >= 1000 { let e = seen.entry((t.3 - 1000) as usize).or_insert((b[0].clone(), 0)); e.1 += 1; } }
+            let txt: String = seen.iter().map(|(i, (n, c))| format!("{n} (bone {i}): rgb {:?}, {c} triangles\n", bone_colour(*i))).collect();
+            let _ = std::fs::write(path.with_extension("legend.txt"), txt);
+        }
         std::fs::write(path, dt::png(size, size, &rgb)).unwrap();
         hidden
+    }
+
+    /// A colour of its own for bone `b` (`BONE_COLOURS=1`; 0.198.6: the 16-colour palette by `b % 16` gave several bones one colour):
+    /// hues spread by the golden ratio, alternating light and dark; index 15 of the old palette (grey-white) is `BONE_COLOURS=a,b`'s rest.
+    pub(crate) fn bone_colour(b: usize) -> [u8; 3] {
+        if b == 15 && std::env::var("BONE_COLOURS").is_ok_and(|v| v != "1") { return [235, 235, 235]; }
+        if b == 0 && std::env::var("BONE_COLOURS").is_ok_and(|v| v != "1") { return [230, 25, 75]; }
+        let h = (b as f64 * 0.618_033_988_75).fract() * 6.0;
+        let (v, s) = if b % 2 == 0 { (1.0, 0.85) } else { (0.75, 1.0) };
+        let x = 1.0 - (h % 2.0 - 1.0).abs();
+        let (r, g, bl) = match h as usize { 0 => (1.0, x, 0.0), 1 => (x, 1.0, 0.0), 2 => (0.0, 1.0, x), 3 => (0.0, x, 1.0), 4 => (x, 0.0, 1.0), _ => (1.0, 0.0, x) };
+        let f = |c: f64| ((1.0 - s + s * c) * v * 255.0) as u8;
+        [f(r), f(g), f(bl)]
+    }
+
+    /// The owner's three in-game checks as renders (see [`render_body_cam`]), into `dir`: the run (slot 3) at four frames from behind
+    /// with the camera low (`run_low_*`) and high (`run_high_*`), and the idle (slot 1, frame 25) circled every 45 deg a little from
+    /// below (`orbit_*`); and `sheet.png`, all of them side by side (12 + 8 cells).
+    pub(crate) fn camera_checks(p3: &MdlPart, sk: &RecomSkeleton, ann: &crate::ann::Ann, atlas: &crate::texture::Image, body: &[crate::texture::Image], dir: &std::path::Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+        let mut cells: Vec<std::path::PathBuf> = vec![];
+        if let Some(c) = ann.slots.get(3).and_then(|s| s.clip.as_ref()) {
+            for (tag, pitch) in [("low", -35.0), ("high", 35.0)] {
+                for f in [0.0, 6.0, 11.0, 17.0] {
+                    let pth = dir.join(format!("run_{tag}_f{f}.png"));
+                    render_cam(p3, &posed_world(sk, c, f), &names, atlas, body, 180.0, pitch, true, &pth);
+                    cells.push(pth);
+                }
+            }
+        }
+        if let Some(c) = ann.slots.get(1).and_then(|s| s.clip.as_ref()) {
+            let w = posed_world(sk, c, 25.0);
+            for k in 0..8 {
+                let pth = dir.join(format!("orbit_{:03}.png", k * 45));
+                render_cam(p3, &w, &names, atlas, body, k as f64 * 45.0, -15.0, true, &pth);
+                cells.push(pth);
+            }
+        }
+        // 0.198.6: the walk (slot 2; the owner tested walking and running with the camera low): from behind low / high and both sides
+        if let Some(c) = ann.slots.get(2).and_then(|s| s.clip.as_ref()) {
+            for f in [0.0, (c.frames / 4) as f64, (c.frames / 2) as f64, (3 * c.frames / 4) as f64] {
+                let w = posed_world(sk, c, f);
+                for (tag, yaw, pitch) in [("low", 180.0, -35.0), ("high", 180.0, 35.0), ("side90", 90.0, 0.0), ("side270", 270.0, 0.0)] {
+                    render_cam(p3, &w, &names, atlas, body, yaw, pitch, true, &dir.join(format!("walk_{tag}_f{f}.png")));
+                }
+                // the owner's near-level camera behind (model-reviewer, 0.198.6: no walk nape view)
+                let neck = names.iter().position(|n| n == "neck3").unwrap_or(0);
+                for pitch in [-15.0, -25.0, 0.0] {
+                    render_focus(p3, &w, &names, atlas, body, 180.0, pitch, (w[neck].t, 0.16), &dir.join(format!("closeup_back_walk_f{f}_p{pitch}.png")));
+                }
+            }
+        }
+        // 0.198.5: close-ups (the owner's two misses on 0.198.4): the face from the front and a little to each side, the nape and the
+        // back from behind (idle and run), at 1.5 px per mm; `closeup_*.png`, not in the sheet
+        let head = names.iter().position(|n| n == "head").unwrap();
+        let neck = names.iter().position(|n| n == "neck3").unwrap_or(head);
+        if let Some(c) = ann.slots.get(1).and_then(|s| s.clip.as_ref()) {
+            for f in [0.0, 25.0, 50.0, 75.0] {
+                let w = posed_world(sk, c, f);
+                let face = w[head].point([0.0, 0.05, 0.09]);
+                for yaw in [0.0, 25.0, -25.0] {
+                    render_focus(p3, &w, &names, atlas, body, yaw, 0.0, (face, 0.11), &dir.join(format!("closeup_face_idle_f{f}_y{yaw}.png")));
+                }
+                render_focus(p3, &w, &names, atlas, body, 180.0, 5.0, (w[neck].t, 0.16), &dir.join(format!("closeup_back_idle_f{f}.png")));
+            }
+        }
+        if let Some(c) = ann.slots.get(3).and_then(|s| s.clip.as_ref()) {
+            for f in [0.0, 6.0, 11.0, 17.0] {
+                let w = posed_world(sk, c, f);
+                let face = w[head].point([0.0, 0.05, 0.09]);
+                render_focus(p3, &w, &names, atlas, body, 0.0, 0.0, (face, 0.11), &dir.join(format!("closeup_face_run_f{f}.png")));
+                render_focus(p3, &w, &names, atlas, body, 180.0, 5.0, (w[neck].t, 0.16), &dir.join(format!("closeup_back_run_f{f}.png")));
+            }
+        }
+        if std::env::var("VIEWS").is_ok() {
+            return;
+        }
+        // the sheet: 4 per row, 350 px cells
+        let cell = 350usize;
+        let rows = cells.len().div_ceil(4);
+        let mut sheet = vec![0u8; 4 * cell * rows * cell * 3];
+        for (i, pth) in cells.iter().enumerate() {
+            let img = crate::texture::decode_png(&std::fs::read(pth).unwrap()).unwrap();
+            let (ox, oy) = ((i % 4) * cell, (i / 4) * cell);
+            for y in 0..cell {
+                for x in 0..cell {
+                    let p = img.px[(y * img.h / cell) * img.w + x * img.w / cell];
+                    let o = 3 * ((oy + y) * 4 * cell + ox + x);
+                    sheet[o..o + 3].copy_from_slice(&p[..3]);
+                }
+            }
+        }
+        std::fs::write(dir.join("sheet.png"), dt::png(4 * cell, rows * cell, &sheet)).unwrap();
     }
 
 
 
 
 }
+
+
+
+
+

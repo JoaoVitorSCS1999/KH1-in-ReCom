@@ -125,6 +125,47 @@ pub fn riku_cast(text: &str) -> bool {
     crate::json::parse(text).ok().and_then(|v| v.get("riku_cast").map(|g| matches!(g, crate::json::Value::Bool(true)))).unwrap_or(false)
 }
 
+/// 0.197.4 (fork, item 1 of Stage 391): the manifest's `event_packs`, (Re:CoM's event pack group, its 109-bone copy written by the
+/// asset step for the KH2 hair). Only groups 4000..4999 → a different group of the same range; anything else is left out.
+pub fn event_packs(text: &str) -> Vec<(u16, u16)> {
+    let Ok(v) = crate::json::parse(text) else { return vec![] };
+    let Some(list) = v.get("event_packs").and_then(|l| l.as_array()) else { return vec![] };
+    let mut out: Vec<(u16, u16)> = vec![];
+    for p in list {
+        let Some(pair) = p.as_array() else { continue };
+        let g = |i: usize| pair.get(i).and_then(|x| x.as_u32()).filter(|x| (4000..5000).contains(x)).map(|x| x as u16);
+        if let (Some(a), Some(b)) = (g(0), g(1)) {
+            if a != b && !out.iter().any(|o| o.0 == a || o.1 == b) {
+                out.push((a, b));
+            }
+        }
+    }
+    out
+}
+
+/// The table rows of the event pack copies: one `.ANN` row each, its own file (no file shared with Re:CoM's group, so no id of
+/// Re:CoM's is taken by ours), before the end row.
+pub fn add_event_rows(mut planned: Vec<PlannedRow>, pairs: &[(u16, u16)]) -> Result<Vec<PlannedRow>, String> {
+    let end = planned.iter().position(|r| r.group == END).ok_or("no end row")?;
+    if end + 1 != planned.len() {
+        return Err("rows after the end row".into());
+    }
+    let mut add = Vec::new();
+    for &(_, alt) in pairs {
+        if planned.iter().any(|r| r.group == alt) {
+            return Err(format!("group {alt} is already in the table"));
+        }
+        add.push(PlannedRow { group: alt, kind: kind::ANN, name: RowName::Own(resource_path(alt, "ANN")) });
+    }
+    planned.splice(end..end, add);
+    Ok(planned)
+}
+
+/// The global resource id (`10000 + group`, PLAYER) of the copy for Re:CoM's pack id `id`, if `pairs` has one.
+pub fn event_alt_id(pairs: &[(u16, u16)], id: u32) -> Option<u32> {
+    pairs.iter().find(|p| 10000 + p.0 as u32 == id).map(|p| 10000 + p.1 as u32)
+}
+
 /// The files of a skin group the DLL checks are on disk (relative to the manifest's folder).
 pub fn files(skin: u16) -> Vec<String> {
     OWN_KINDS
@@ -260,6 +301,18 @@ mod tests {
         assert_eq!(look_of(&bbs, 193), lk(false, 1, 2));
         assert_eq!(Look::from_bits(lk(false, 1, 2).bits()), lk(false, 1, 2));
         assert_eq!(ann_name(121), "PL0121");
+        // 0.197.4: event pack copies
+        let ev = event_packs(r#"{"format": 1, "skins": [], "event_packs": [[4002, 4102], [4012, 4112], [4002, 4199], [101, 4100], [4072, 4072]]}"#);
+        assert_eq!(ev, [(4002, 4102), (4012, 4112)], "PLAYER event groups only, each once, not onto themselves");
+        assert!(event_packs(r#"{"format": 1, "skins": []}"#).is_empty(), "older manifests: none");
+        assert_eq!(event_alt_id(&ev, 14002), Some(14102));
+        assert_eq!(event_alt_id(&ev, 14003), None, "Dark Riku's pack has no copy");
+        assert_eq!(event_alt_id(&ev, 4002), None, "a group number is not an id");
+        let rows = vec![PlannedRow { group: 4002, kind: kind::ANN, name: RowName::Own("x".into()) }, PlannedRow { group: END, kind: 0, name: RowName::Own(String::new()) }];
+        let t = add_event_rows(rows.clone(), &ev).unwrap();
+        assert_eq!(t.iter().map(|r| r.group).collect::<Vec<_>>(), [4002, 4102, 4112, END]);
+        assert!(matches!(&t[1].name, RowName::Own(n) if n == "PLAYER/4102/PL4102.ANN") && t[1].kind == kind::ANN);
+        assert!(add_event_rows(t, &ev).is_err(), "a group twice");
         assert!(files(121).contains(&"raw/PLAYER/0121/PL0121.RTM".to_string()));
         assert!(parse(r#"{"format": 1, "skins": [{"riku": 3, "skin": 121}]}"#).is_err());
         assert!(riku_guard(r#"{"format": 1, "skins": [], "riku_guard": true}"#));

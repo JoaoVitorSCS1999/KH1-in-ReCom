@@ -698,6 +698,10 @@ pub fn new_resource_names() -> Vec<String> {
             out.push(format!("raw/{}", resource_path(g, ext)));
         }
     }
+    // 0.197.4: the 109-bone copies of Riku's event packs.
+    for g in crate::riku_skin::EVENT_PACKS {
+        out.push(resource_path(g + crate::riku_skin::EVENT_ALT, "ANN"));
+    }
     out
 }
 
@@ -757,8 +761,8 @@ mod tests {
     fn new_names_are_not_in_recom_hed() {
         let names = new_resource_names();
         // 16 KH1 groups (21..=36) with four files, 6 KH2 groups (38..=43) with two, Riku's two
-        // skin groups (121, 131), four Keyblade groups (141..=171) and (0.188.0, 0.194.0) four hair groups (182, 192, 183, 193), each with six.
-        assert_eq!(names.len(), 16 * 4 + 6 * 2 + 10 * 6);
+        // skin groups (121, 131), four Keyblade groups (141..=171) and (0.188.0, 0.194.0) four hair groups (182, 192, 183, 193), (0.197.2) four Halloween Town ones (186, 196, 187, 197), each with six.
+        assert_eq!(names.len(), 16 * 4 + 6 * 2 + 14 * 6 + 8, "(0.197.4) and eight event pack copies");
         assert!(names.contains(&"PLAYER/0171/PL0171.MDL".to_string()) && names.contains(&"raw/PLAYER/0141/PL0141.RTM".to_string()));
         assert!(names.contains(&"PLAYER/0021/PL0021.MDL".to_string()) && names.contains(&"raw/PLAYER/0036/PL0036.EFF".to_string()));
         assert!(names.contains(&"raw/PLAYER/0043/PL0043.RTM".to_string()) && !names.contains(&"PLAYER/0043/PL0043.EET".to_string()));

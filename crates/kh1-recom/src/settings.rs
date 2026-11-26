@@ -208,7 +208,7 @@ pub struct Settings {
     /// Keyblade of People's Hearts ("Keyblade of Heart"); only once Riku has reached Dark Mode in the
     /// save. Cosmetic.
     pub riku_heart_blade: bool,
-    /// `riku_hair` (0.186.0): 0 Re:CoM's, 1 KH2 Riku's hair, 2 (0.194.0) BBS kid Riku's (default attire only). Stage 363 removed DDD's,
+    /// `riku_hair` (0.186.0): 0 Re:CoM's, 1 KH2 Riku's hair, 2 (0.194.0) BBS kid Riku's (default attire and, 0.197.2, Halloween Town). Stage 363 removed DDD's,
     /// which was 1 in 0.186.0 and 2 for KH2 in 0.188.0: an old `riku_hair = ddd` in the ini is a warning and keeps the default.
     pub riku_hair: u8,
     /// Fork (0.170.0): Sora's costume (camp menu > Costumes): false Default Attire, true Halloween
@@ -515,7 +515,7 @@ riku_costume = default
 riku_keyblade = soul_eater
 ;
 ; riku_hair = recom | kh2 | bbs: Riku's hair (camp menu > Costumes), cosmetic: Re:CoM's, KH2 Riku's or BBS's
-;   kid Riku's. Default attire only (Dark Mode and Halloween Town keep Re:CoM's). Needs the asset step's files
+;   kid Riku's. Default attire and Halloween Town (Dark Mode keeps Re:CoM's). Needs the asset step's files
 ;   (kh1-riku-skin.json) and the 1.5+2.5 collection (KH2 FM for kh2, BBS FM for bbs). (Dream Drop's hair, `ddd`,
 ;   was removed.)
 riku_hair = recom

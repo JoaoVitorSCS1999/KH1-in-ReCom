@@ -55,6 +55,37 @@ pub struct BbsHairSource {
     pub pmo: Vec<u8>,
     /// `-0.dds`.
     pub dds: Vec<u8>,
+    /// The kid's idle, walk and run clips ([`SWAY_CLIPS`]), when all three were read (none: the hair rigid on `head`, 0.194.1).
+    pub sway: Option<[crate::pam::PamClip; 3]>,
+    /// The sway's rig, made by [`HairSource::prepare_mdl`] from Re:CoM's model: per kid hair bone, the Re:CoM bone that carries it.
+    rig: std::cell::RefCell<Option<SwayRig>>,
+}
+
+/// The hair's sway (0.197.3, item 6 of Stage 391; the workspace's `knowledge/BBS/bbs-kid-riku-hair-motion.md`, Checked (files)): in
+/// BBS the kid's hair hangs on five bones under `atama`, keyed in every clip (idle ±1-2 deg, walk ±4-7, run ±13-20). Each takes one
+/// Re:CoM hair bone whose parent is `head` (no bone is added: Riku keeps 102, `PL4002`), moved to the kid bone's pivot; its
+/// clips turn it as the kid's clip turns the kid bone against `atama`, relative to the kid's idle at frame 0 (the fit's pose).
+pub const SWAY_BONES: [&str; 5] = ["B_kami", "L_kamiA", "L_kamiB", "R_kamiA", "R_kamiB"];
+/// The kid's clips (loose PAMs in `bbs_fourth`, one clip each, 30 fps): idle (60 frames), walk (30), run (20). Checked (files).
+pub const SWAY_CLIPS: [&str; 3] = ["chara/npc/n02di/event_di/n02di00001e.pam", "chara/npc/n02di/event_di/n02di00002e.pam", "chara/npc/n02di/event_di/n02di00003e.pam"];
+
+/// See [`SWAY_BONES`]: per kid hair bone (its index in the PMO), the Re:CoM bone, the conjugation into Re:CoM's head frame, and the
+/// Re:CoM bone's rest local (rotation kept, origin moved to the pivot).
+#[derive(Clone, Debug)]
+pub struct SwayRig {
+    /// (kid bone, Re:CoM bone, Re:CoM rest local).
+    pub pairs: Vec<(usize, usize, Aff)>,
+    /// `atama`'s rest world rotation times the inverse of Re:CoM `head`'s (row vectors: kid head frame → Re:CoM head frame).
+    pub c: crate::math::M3,
+}
+
+fn inv3(m: &crate::math::M3) -> crate::math::M3 {
+    let d = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    [
+        [(m[1][1] * m[2][2] - m[1][2] * m[2][1]) / d, (m[0][2] * m[2][1] - m[0][1] * m[2][2]) / d, (m[0][1] * m[1][2] - m[0][2] * m[1][1]) / d],
+        [(m[1][2] * m[2][0] - m[1][0] * m[2][2]) / d, (m[0][0] * m[2][2] - m[0][2] * m[2][0]) / d, (m[0][2] * m[1][0] - m[0][0] * m[1][2]) / d],
+        [(m[1][0] * m[2][1] - m[1][1] * m[2][0]) / d, (m[0][1] * m[2][0] - m[0][0] * m[2][1]) / d, (m[0][0] * m[1][1] - m[0][1] * m[1][0]) / d],
+    ]
 }
 
 impl BbsHairSource {
@@ -70,7 +101,17 @@ impl BbsHairSource {
                 let raw = arc.read_raw_entry(e)?;
                 let (pmo, assets) = kh1_formats::egs::decode_entry_full(keys, &raw)?;
                 let dds = assets.into_iter().find(|x| x.name == ATLAS_ASSET).ok_or_else(|| Error::Format(format!("BBS: {MODEL} has no {ATLAS_ASSET}")))?.data;
-                return Ok(BbsHairSource { pmo, dds });
+                // 0.197.3: the kid's three clips for the sway (all three or none)
+                let clip = |name: &str| -> Option<crate::pam::PamClip> {
+                    let e = arc.find(name)?;
+                    let (d, _) = kh1_formats::egs::decode_entry_full(keys, &arc.read_raw_entry(e).ok()?).ok()?;
+                    crate::pam::parse_pam(&d).ok()?.into_iter().next()
+                };
+                let sway = match (clip(SWAY_CLIPS[0]), clip(SWAY_CLIPS[1]), clip(SWAY_CLIPS[2])) {
+                    (Some(a), Some(b), Some(c)) => Some([a, b, c]),
+                    _ => None,
+                };
+                return Ok(BbsHairSource { pmo, dds, sway, rig: Default::default() });
             }
         }
         bad(format!("BBS: {MODEL} in none of the bbs archives"))
@@ -342,7 +383,118 @@ pub fn classify(pmo: &Pmo, skel_atama_y: f64, atlas: &Image) -> (Vec<(usize, usi
     (out, by_colour.iter().filter(|&&x| x).count())
 }
 
+impl BbsHairSource {
+    /// The sway's rig for Re:CoM's model `mdl` (none without the kid's clips).
+    pub fn sway_rig(&self, mdl: &[u8]) -> Result<Option<SwayRig>> {
+        if self.sway.is_none() {
+            return Ok(None);
+        }
+        let sk = crate::mdl::RecomSkeleton::parse(mdl)?;
+        let world = sk.rest_world();
+        let head = sk.find(HEAD_BONE).ok_or_else(|| Error::Format("hair: no head bone".into()))?;
+        let skel = crate::pam::parse_skeleton(&self.pmo)?;
+        let kw = skel.rest_world();
+        let atama = skel.find(HEAD_BONE_BBS).ok_or_else(|| Error::Format("BBS: no atama bone".into()))?;
+        let (a, h) = (kw[atama].t, world[head].t);
+        let frame = |p: [f64; 3]| [0, 1, 2].map(|k| h[k] + SCALE[k] * (p[k] - a[k]) + SHIFT[k]);
+        let hinv = inv3(&world[head].r);
+        // Re:CoM's free hair bones: children of `head` with "hair" in the name and no child (`f_hair` carries the front locks).
+        let mut free: Vec<usize> = (0..sk.bones.len()).filter(|&i| sk.bones[i].parent as usize == head && sk.bones[i].name.contains("hair") && !sk.bones.iter().any(|b| b.parent as usize == i)).collect();
+        let mut pairs = vec![];
+        for name in SWAY_BONES {
+            let kb = skel.find(name).ok_or_else(|| Error::Format(format!("BBS: no bone {name}")))?;
+            let pivot = frame(kw[kb].t);
+            let (k, &rb) = free.iter().enumerate().min_by(|x, y| crate::math::dist(world[*x.1].t, pivot).total_cmp(&crate::math::dist(world[*y.1].t, pivot))).ok_or_else(|| Error::Format("hair: too few free Re:CoM hair bones".into()))?;
+            free.remove(k);
+            let t = crate::math::vm([pivot[0] - h[0], pivot[1] - h[1], pivot[2] - h[2]], &hinv);
+            pairs.push((kb, rb, Aff { r: sk.bones[rb].local.r, t }));
+        }
+        let c = crate::math::m3(&crate::math::unscale(&kw[atama].r).0, &crate::math::tr(&crate::math::unscale(&world[head].r).0));
+        Ok(Some(SwayRig { pairs, c }))
+    }
+
+    /// The Re:CoM local rotation of `rig`'s pair `k` at kid frame `t` of `clip` (see [`SWAY_BONES`]).
+    pub fn sway_local(&self, rig: &SwayRig, k: usize, clip: &crate::pam::PamClip, t: f64) -> Option<crate::math::M3> {
+        use crate::math::{m3, rot_xyz, tr};
+        let idle = &self.sway.as_ref()?[0];
+        let (kb, _, rest) = rig.pairs[k];
+        // 0.197.7: between two whole frames the kid's angles are interpolated the short way (`R_kamiB`'s z crosses ±180 deg
+        // between frames 58 and 59 of the idle: the raw interpolation turned the lock 72 deg at frame 58.8, seen in game as a jerk).
+        let rot = |c: &crate::pam::PamClip, t: f64| {
+            let last = (c.frames.max(1) - 1) as f64;
+            let t = t.clamp(0.0, last);
+            let (f0, f1) = (t.floor(), t.ceil().min(last));
+            let (_, a, _) = c.local(kb, f0);
+            let (_, b, _) = c.local(kb, f1);
+            let w = t - f0;
+            let tau = std::f64::consts::TAU;
+            let e = [0, 1, 2].map(|k| {
+                let d = (b[k] - a[k] + std::f64::consts::PI).rem_euclid(tau) - std::f64::consts::PI;
+                a[k] + w * d
+            });
+            rot_xyz(e[0], e[1], e[2])
+        };
+        // the turn in the kid's head frame about the bone's pivot, from the idle's first frame; then in Re:CoM's head frame
+        let q = m3(&tr(&rot(idle, 0.0)), &rot(clip, t));
+        let qr = m3(&m3(&tr(&rig.c), &q), &rig.c);
+        Some(m3(&rest.r, &qr))
+    }
+}
+
 impl HairSource for BbsHairSource {
+    fn prepare_mdl(&self, mdl: &[u8]) -> Result<Vec<u8>> {
+        let rig = self.sway_rig(mdl)?;
+        let mut out = mdl.to_vec();
+        if let Some(rig) = &rig {
+            crate::kh2_hair_rig::patch_rest(&mut out, &rig.pairs.iter().map(|x| (x.1, x.2)).collect::<Vec<_>>())?;
+        }
+        *self.rig.borrow_mut() = rig;
+        Ok(out)
+    }
+
+    fn bake_ann(&self, ann: &[u8], _mdl: &[u8]) -> Result<Option<Vec<u8>>> {
+        use crate::kh2_hair_rig::{CLIP_MAP, KH2_RUN, KH2_WALK};
+        let rig = self.rig.borrow();
+        let (Some(rig), Some(clips)) = (rig.as_ref(), self.sway.as_ref()) else { return Ok(None) };
+        let mut a = crate::ann::Ann::parse(ann)?;
+        for (slot, s) in a.slots.iter_mut().enumerate() {
+            let Some(c) = s.clip.as_mut() else { continue };
+            // the clip's role as the KH2 hair reads it (Assumption there): walk, run, else the kid's idle
+            let src = match CLIP_MAP.iter().find(|x| x.0 == slot).map(|x| x.1) {
+                Some(KH2_WALK) => &clips[1],
+                Some(KH2_RUN) => &clips[2],
+                _ => &clips[0],
+            };
+            let (chans, frames, fps) = (c.chans(), c.frames.max(1) as usize, c.fps().max(1) as f64);
+            let n = src.frames.max(1) as f64;
+            // a looped clip runs a whole number of the kid's loops stretched to its length; a one-shot the kid's own time, looped
+            let loops = (frames as f64 / fps * 30.0 / n).round().max(1.0);
+            let looped = c.looped();
+            let time = |f: usize| if looped { (f as f64 / frames as f64 * loops * n) % n } else { (f as f64 / fps * 30.0) % n };
+            for (k, &(_, rb, rest)) in rig.pairs.iter().enumerate() {
+                if rb >= c.bones as usize {
+                    return bad(format!("hair: bone {rb} past clip {slot}'s {}", c.bones));
+                }
+                let mut vals = vec![vec![1.0f64; frames]; chans];
+                let mut prev = Some(crate::math::euler_xyz(&rest.r, None));
+                for f in 0..frames {
+                    let r = self.sway_local(rig, k, src, time(f)).unwrap_or(rest.r);
+                    let e = crate::math::euler_xyz(&r, prev);
+                    prev = Some(e);
+                    for i in 0..3 {
+                        vals[i][f] = rest.t[i];
+                        vals[3 + i][f] = e[i].to_degrees();
+                    }
+                }
+                for (ci, v) in vals.iter().enumerate() {
+                    let eps = [1e-7, 1e-5, 1e-6][ci / 3];
+                    c.channels[rb * chans + ci] = crate::convert::encode_channel(v, eps);
+                }
+            }
+        }
+        Ok(Some(a.to_bytes()))
+    }
+
     fn hair(&self, names: &[String], world: &[Aff]) -> Result<SrcHair> {
         let pmo = parse_pmo(&self.pmo)?;
         let skel = crate::pam::parse_skeleton(&self.pmo)?;
@@ -356,7 +508,13 @@ impl HairSource for BbsHairSource {
         // 0.194.1: every corner on `head` (rigid). Re:CoM's hair bones are keyed for its long hair (idle: `l_hair4` / `r_hair4` 18 to
         // 19 deg off rest against the head; run: `b_hair2` 69 deg); on the kid's short closed shell they split the layers (side tufts
         // off the face, the nape's under-layer spread sideways, seen in game on 0.194.0).
-        let to_recom: Vec<usize> = vec![head; skel.bones.len()];
+        // 0.197.3: with the sway, the vertices whose dominant bone is a kid hair bone follow its Re:CoM bone.
+        let mut to_recom: Vec<usize> = vec![head; skel.bones.len()];
+        if let Some(rig) = self.rig.borrow().as_ref() {
+            for &(kb, rb, _) in &rig.pairs {
+                to_recom[kb] = rb;
+            }
+        }
         let q = |x: f64| (x * 4096.0).round() as i32;
         let corners: Vec<[(i32, i32); 3]> = hair.iter().map(|&(mi, ti)| pmo.meshes[mi].tris[ti].map(|i| (q(pmo.meshes[mi].verts[i].uv[0]), q(pmo.meshes[mi].verts[i].uv[1])))).collect();
         let (isl, n) = crate::ddd_hair::islands(&corners);
@@ -369,7 +527,7 @@ impl HairSource for BbsHairSource {
                 Ok(SrcVert { pos: frame(v.pos), uv: v.uv, bone: names[bone].clone() })
             };
             let t = m.tris[ti];
-            tris.push(SrcTri { v: [mk(t[0])?, mk(t[1])?, mk(t[2])?], island: isl[k], cont: false });
+            tris.push(SrcTri { v: [mk(t[0])?, mk(t[1])?, mk(t[2])?], island: isl[k], cont: false, lining: false });
         }
         // 0.194.2: a lining under the back of the hair. Re:CoM's face is a one-sided mask (its back and top were his hair, now
         // removed), so from behind nothing is drawn under the kid's thin shards and a crack between them showed the background
@@ -386,7 +544,7 @@ impl HairSource for BbsHairSource {
                 let p = m.verts[i].pos;
                 SrcVert { pos: frame([0, 1, 2].map(|j| c[j] + (1.0 - LINING) * (p[j] - c[j]))), uv: m.verts[i].uv, bone: names[head].clone() }
             };
-            tris.push(SrcTri { v: [mk(t[0]), mk(t[1]), mk(t[2])], island: isl[k], cont: false });
+            tris.push(SrcTri { v: [mk(t[0]), mk(t[1]), mk(t[2])], island: isl[k], cont: false, lining: true });
         }
         // 0.194.3: one-sided, as BBS draws it (two-sided, the shell's inner layer, painted dark and facing in, showed from outside as
         // flat dark triangles, fork owner's screenshots); the black fill between the atlas's shards is filled with the shards'
@@ -447,10 +605,91 @@ mod tests {
     use super::*;
     use crate::ddd_hair::{tests as dt, with_hair, HairTarget};
     use crate::install;
-    use crate::mdl::{split_parts, MdlPart, RecomSkeleton};
+    use crate::mdl::RecomSkeleton;
 
     /// The new atlas's name.
     pub const TARGET: HairTarget = crate::ddd_hair::RIKU_0101_BBS;
+
+    #[test]
+    fn inv3_inverts() {
+        let m = [[2.0, 0.3, -0.1], [0.2, 1.5, 0.4], [-0.3, 0.1, 0.9]];
+        let p = crate::math::m3(&m, &inv3(&m));
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((p[i][j] - if i == j { 1.0 } else { 0.0 }).abs() < 1e-12);
+            }
+        }
+    }
+
+    /// 0.197.3 (owner's install, `RECOM_GAME`): the sway. The baked clips turn each of the five Re:CoM bones as the kid's clip turns
+    /// its kid bone (decoded from the written channels, within 0.5 deg), no bone is added, the rest pose does not move the hair, and
+    /// posed renders go to `out/bbs/pose/`.
+    #[test]
+    fn bbs_hair_sways_as_the_kid() {
+        use crate::kh2_hair::tests::{posed_world, render_body};
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
+        let ann = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.ANN").unwrap();
+        let e = arc.find("PLAYER/0101/PL0101.RTM").unwrap();
+        let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+        let src = BbsHairSource::read(&g, &keys).unwrap();
+        assert!(src.sway.is_some(), "the kid's three clips are read");
+        let m1 = src.prepare_mdl(&mdl).unwrap();
+        let rig = src.rig.borrow().clone().unwrap();
+        let sk = RecomSkeleton::parse(&m1).unwrap();
+        eprintln!("sway pairs (kid bone, Re:CoM bone): {:?}", rig.pairs.iter().map(|x| (x.0, sk.bones[x.1].name.clone())).collect::<Vec<_>>());
+        assert_eq!(sk.bones.len(), RecomSkeleton::parse(&mdl).unwrap().bones.len(), "Re:CoM's bone count");
+        let swap = with_hair(&m1, &rtm, &hd, &TARGET, &src).unwrap();
+        let baked = crate::ann::Ann::parse(&src.bake_ann(&ann, &mdl).unwrap().unwrap()).unwrap();
+        // the written channels against the kid: run (slot 3) and idle (slot 1)
+        let clips = src.sway.as_ref().unwrap();
+        let mut worst = 0.0f64;
+        for (slot, kid) in [(1usize, &clips[0]), (3, &clips[2])] {
+            let c = baked.slots[slot].clip.as_ref().unwrap();
+            let (frames, fps, n) = (c.frames.max(1) as usize, c.fps() as f64, kid.frames as f64);
+            let loops = (frames as f64 / fps * 30.0 / n).round().max(1.0);
+            for f in 0..frames {
+                let t = (f as f64 / frames as f64 * loops * n) % n;
+                for (k, &(_, rb, _)) in rig.pairs.iter().enumerate() {
+                    let want = src.sway_local(&rig, k, kid, t).unwrap();
+                    let sm = c.sample(rb, f as f64);
+                    let got = crate::math::rot_xyz(sm.r[0], sm.r[1], sm.r[2]);
+                    worst = worst.max(crate::math::angle_deg(&crate::math::m3(&got, &crate::math::tr(&want))));
+                }
+            }
+        }
+        eprintln!("worst written vs kid: {worst:.3} deg");
+        // 0.197.7: no jump between frames (the kid turns at most 0.3 deg a frame in idle, a few in run)
+        for (slot, most) in [(1usize, 1.0), (31, 1.0), (79, 1.0), (2, 4.0), (3, 12.0)] {
+            let c = baked.slots[slot].clip.as_ref().unwrap();
+            for &(_, rb, _) in &rig.pairs {
+                let r = |f: usize| { let s = c.sample(rb, f as f64); crate::math::rot_xyz(s.r[0], s.r[1], s.r[2]) };
+                for f in 0..c.frames as usize - 1 {
+                    let a = crate::math::angle_deg(&crate::math::m3(&r(f + 1), &crate::math::tr(&r(f))));
+                    assert!(a < most, "clip {slot} bone {rb} frame {f}: {a:.1} deg step");
+                }
+            }
+        }
+        assert!(worst < 0.5, "{worst} deg");
+        // renders
+        let (p3, img) = dt::test_view(&swap);
+        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+        let base = dt::out_dir().join("bbs").join("pose");
+        for (clip, frames) in [(1usize, vec![0.0, 30.0]), (2, vec![0.0, 8.0, 16.0]), (3, vec![0.0, 5.0, 10.0, 15.0])] {
+            let c = baked.slots[clip].clip.as_ref().unwrap();
+            for f in frames {
+                let w = posed_world(&sk, c, f);
+                let d = base.join(format!("c{clip}_f{f}"));
+                std::fs::create_dir_all(&d).unwrap();
+                for v in 0..4 {
+                    render_body(&p3, &w, &names, &img, v, &d.join(format!("body_{v}.png")));
+                }
+            }
+        }
+    }
 
     /// 0.194.0 (owner's install, `RECOM_GAME`; the 1.5+2.5 collection only): the kid's hair classified (the note: 392 triangles by
     /// colour), swapped in, the debug renders written to the workspace's `local/assets/recom/riku-hair/out/bbs/`.
@@ -480,11 +719,9 @@ mod tests {
         let again = with_hair(&mdl, &rtm, &hd, &TARGET, &src).unwrap();
         assert!(swap.mdl == again.mdl && swap.dds == again.dds, "deterministic");
         crate::mdl::Mdl::parse(&swap.mdl).unwrap();
-        let parts = split_parts(&swap.mdl).unwrap();
-        let p3 = MdlPart::parse_bytes(&parts[3]).unwrap();
+        let (p3, img) = dt::test_view(&swap);
         assert!(p3.texture_names().contains(&TARGET.new_texture.to_string()));
         let rsk = RecomSkeleton::parse(&swap.mdl).unwrap();
-        let img = decode_dds(&swap.dds).unwrap();
         let out = dt::out_dir().join("bbs");
         std::fs::create_dir_all(&out).unwrap();
         dt::render(&p3, &rsk.rest_world(), &img, &out);
@@ -582,3 +819,4 @@ mod tests {
         }
     }
 }
+

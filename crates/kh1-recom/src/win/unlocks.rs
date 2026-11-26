@@ -67,6 +67,10 @@ pub unsafe extern "win64" fn first_obtained(id: u64) {
     if u::tracked(id) {
         sync(&format!("card {id:#x} ({}) obtained for the first time", card_name(id)));
     }
+    // 0.198.0: Riku's story: a boss card of his unlocks
+    if crate::riku_unlocks::tracked(id) && super::stats::riku_story() {
+        riku_sync(&format!("card {id:#x} obtained for the first time"));
+    }
     // M8b: a summon card's first pickup learns its summon (KH1's list, learn order).
     if let Some(i) = crate::summons::of_card(id) {
         if !super::stats::riku_story() {
@@ -97,6 +101,61 @@ fn card_name(id: u16) -> String {
 pub fn sync_first() -> bool {
     // SAFETY: reads and writes inside Re:CoM's save block, behind the checks in `sync`.
     unsafe { sync("the first read of this save's spells at the KH1 setting (Re:CoM's discovery state)") }
+}
+
+/// Re:CoM's int variable getter (`0x1401B08C0(set, id)`, as `super::abilities`).
+const VAR_GET: u32 = 0x001B_08C0;
+type VarGetFn = unsafe extern "win64" fn(u32, u32) -> u64;
+
+/// Riku's spell levels in his story (0.198.0, `crate::riku_unlocks`): derived from Re:CoM's save (the floor label (0, 0x35), his
+/// boss cards' discovery state, the hall scripts' bits (0, 0x2A)), merged into his save's spell bytes of our block (free in Riku's
+/// save; never lowered), each rise logged. Run at a boss card's first pickup and at each room / battle build
+/// (`super::models::group_load`), not per frame. Nothing outside Riku's story or without a save.
+pub unsafe fn riku_sync(why: &str) {
+    if !INSTALLED.load(Ordering::Acquire) || !super::stats::riku_story() {
+        return;
+    }
+    let save: usize = rd(va(base(), crate::keyblades::SAVE_PTR));
+    let coll: usize = rd(va(base(), COLLECTION));
+    if save == 0 || coll != save + COLLECTION_IN_SAVE {
+        return;
+    }
+    let get = super::movement::func::<VarGetFn>(VAR_GET);
+    let label = get(0, 0x35) as u32 as i32;
+    let bits = get(0, 0x2A) as u32;
+    let (derived, wins) = crate::riku_unlocks::derive(label, |c| super::keyblades::ever_obtained(c), bits);
+    let at = save + BLOCK_FIRST;
+    let old: [u8; BLOCK_LEN] = rd(at);
+    let mut stored = [0u8; u::SPELLS];
+    stored.copy_from_slice(&old[off::SPELLS..off::SPELLS + off::SPELL_COUNT]);
+    let before = stored.map(|l| if l <= 3 { l } else { 0 });
+    let merged = u::merged(before, derived);
+    for (s, from, to) in u::learns(before, merged) {
+        let what = if from == 0 { format!("learned {}", u::level_name(s, to)) } else { format!("{} -> {}", u::level_name(s, from), u::level_name(s, to)) };
+        note(|| format!("Riku {what} (spell {s} level {from} -> {to}): floor label {label}, {wins} of 14 counted bosses beaten; {why}"));
+    }
+    if merged != stored {
+        let mut block = old;
+        block[off::SPELLS..off::SPELLS + off::SPELL_COUNT].copy_from_slice(&merged);
+        wr(at, block);
+    }
+}
+
+/// Riku's stored spell levels (his save's spell bytes of our block; 0 outside his story or without a save).
+pub unsafe fn riku_levels() -> [u8; u::SPELLS] {
+    if !super::stats::riku_story() {
+        return [0; u::SPELLS];
+    }
+    let save: usize = rd(va(base(), crate::keyblades::SAVE_PTR));
+    if save == 0 {
+        return [0; u::SPELLS];
+    }
+    let old: [u8; BLOCK_LEN] = rd(save + BLOCK_FIRST);
+    let mut out = [0u8; u::SPELLS];
+    for (o, &l) in out.iter_mut().zip(&old[off::SPELLS..off::SPELLS + off::SPELL_COUNT]) {
+        *o = if l <= 3 { l } else { 0 };
+    }
+    out
 }
 
 /// Sora's spell levels from Re:CoM's discovery state (`crate::unlocks::levels`, Re:CoM's

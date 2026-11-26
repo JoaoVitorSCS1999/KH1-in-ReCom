@@ -1782,10 +1782,12 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
 
 /// The manifest: which Riku group each skin group stands for, with its look (Dark Mode attire,
 /// blade 0 Soul Eater / 1 the Keyblade of People's Hearts).
-pub fn manifest_json(skins: &[Made], riku_guard: bool) -> String {
+pub fn manifest_json(skins: &[Made], riku_guard: bool, event_packs: &[(u16, u16)]) -> String {
     let rows: Vec<String> = skins.iter().map(|m| format!("{{\"riku\": {}, \"skin\": {}, \"dark\": {}, \"blade\": {}, \"hair\": {}}}", m.riku, m.skin, m.dark, m.blade, m.hair)).collect();
     // 0.184.1: `riku_cast`: Riku's and Dark Riku's own packs carry the six cast clips ([`CAST_CLIPS`]).
-    format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}, \"riku_cast\": true}}\n", rows.join(", "))
+    // 0.197.4: `event_packs`: (Re:CoM's event pack group, its 109-bone copy) ([`EVENT_PACKS`]).
+    let ev: Vec<String> = event_packs.iter().map(|(a, b)| format!("[{a}, {b}]")).collect();
+    format!("{{\"format\": 1, \"skins\": [{}], \"riku_guard\": {riku_guard}, \"riku_cast\": true, \"event_packs\": [{}]}}\n", rows.join(", "), ev.join(", "))
 }
 
 /// One group made: the Riku group it stands for, and its look.
@@ -1847,16 +1849,55 @@ pub const BLADE_GROUPS: [(u16, u16, u16, bool); 4] = [(101, 101, 141, false), (1
 /// 0.188.0 (fork owner, 2026-11-24: "o cabelo começa sim pelo do Riku do KH2"): Riku's default attire with KH2 Riku's hair, with the Soul Eater (182) and
 /// with the Keyblade of Heart (192); the DDD hair groups 181 / 191 of 0.186.0 were removed (Stage 363). The two looks, built from group 101's files
 /// ([`crate::kh2_hair`]; the 1.5+2.5 collection alone is enough): (new group, with the Keyblade).
-pub const KH2_HAIR_GROUPS: [(u16, bool); 2] = [(182, false), (192, true)];
+/// 0.197.2 (item 7 of Stage 391): the same on the Halloween Town attire (111), groups 186 / 196. (new group, base group, with the
+/// Keyblade, the atlas).
+pub const KH2_HAIR_GROUPS: [(u16, u16, bool, crate::ddd_hair::HairTarget); 4] = [
+    (182, 101, false, crate::ddd_hair::RIKU_0101_KH2),
+    (192, 101, true, crate::ddd_hair::RIKU_0101_KH2),
+    (186, 111, false, crate::ddd_hair::RIKU_0111_KH2),
+    (196, 111, true, crate::ddd_hair::RIKU_0111_KH2),
+];
 
 /// 0.194.0 (fork owner, 2026-11-24: "agora quero implementar o cabelo do kid Riku do BBS"): the same two looks with BBS kid Riku's
 /// hair ([`crate::bbs_hair`]; the 1.5+2.5 collection alone is enough): (new group, with the Keyblade).
-pub const BBS_HAIR_GROUPS: [(u16, bool); 2] = [(183, false), (193, true)];
+/// 0.197.2: the Halloween Town attire, groups 187 / 197. (new group, base group, with the Keyblade, the atlas).
+pub const BBS_HAIR_GROUPS: [(u16, u16, bool, crate::ddd_hair::HairTarget); 4] = [
+    (183, 101, false, crate::ddd_hair::RIKU_0101_BBS),
+    (193, 101, true, crate::ddd_hair::RIKU_0101_BBS),
+    (187, 111, false, crate::ddd_hair::RIKU_0111_BBS),
+    (197, 111, true, crate::ddd_hair::RIKU_0111_BBS),
+];
+
+/// 0.197.4 (item 1 of Stage 391; the workspace's `knowledge/ReCoM/recom-skeleton-limits.md` § event packs, Checked (decomp, files)):
+/// Riku's event motion packs, 102 bones each (the boss end's card get 4002, and 4012 … 4082 of other event states). Re:CoM plays no
+/// clip whose bone count differs from the model's, so a 109-bone Riku (the KH2 hair) never ends those motions and the event waits
+/// forever. Each gets a 109-bone copy in group `+ EVENT_ALT`, which the DLL picks where Re:CoM fetches the pack.
+pub const EVENT_PACKS: [u16; 8] = [4002, 4012, 4032, 4042, 4052, 4062, 4072, 4082];
+/// See [`EVENT_PACKS`].
+pub const EVENT_ALT: u16 = 100;
+
+/// The 109-bone copies of [`EVENT_PACKS`] for the KH2 hair (`hair`'s rig on `PL0101`): (source group, copy group, the copy's
+/// `.ANN`). A pack that is missing or not 102 bones is left out.
+pub fn build_event_packs(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, hair: &crate::kh2_hair::Kh2HairSource) -> Result<Vec<(u16, u16, Vec<u8>)>> {
+    let mdl = crate::install::read_recom(arc, keys, &path(101, "MDL"))?;
+    let bones = crate::mdl::RecomSkeleton::parse(&mdl)?.bones.len();
+    let mut out = vec![];
+    for src in EVENT_PACKS {
+        let Ok(ann) = crate::install::read_recom(arc, keys, &path(src, "ANN")) else { continue };
+        let a = Ann::parse(&ann)?;
+        if a.slots.iter().filter_map(|s| s.clip.as_ref()).any(|c| c.bones as usize != bones) {
+            continue;
+        }
+        if let Some(b) = hair.bake_pack(&ann, &mdl, false)? {
+            out.push((src, src + EVENT_ALT, b));
+        }
+    }
+    Ok(out)
+}
 
 /// One hair group: Riku's group 101 (`have`: what the step wrote this run, else Re:CoM's) under `target`'s names, with
 /// `hair` (KH2 Riku's) on its model and atlas `atlas` ([`crate::ddd_hair::with_hair`]) and, when `blade` is given, the Keyblade of Heart.
-pub fn build_hair(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, target: u16, blade: Option<&BladeSource>, hair: &dyn crate::ddd_hair::HairSource, atlas: &crate::ddd_hair::HairTarget) -> Result<Built> {
-    let base = 101u16;
+pub fn build_hair(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, base: u16, target: u16, blade: Option<&BladeSource>, hair: &dyn crate::ddd_hair::HairSource, atlas: &crate::ddd_hair::HairTarget) -> Result<Built> {
     let get = |ext: &str| -> Result<Vec<u8>> {
         let n = path(base, ext);
         match have.get(&n) {
@@ -2056,9 +2097,9 @@ mod tests {
         let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { return };
         let src = BladeSource::from_assets(&assets).unwrap();
         let have = std::collections::HashMap::new();
-        let plain_mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
-        for &(target, heart) in &KH2_HAIR_GROUPS {
-            let b = build_hair(&arc, &keys, &have, target, if heart { Some(&src) } else { None }, &hair, &crate::ddd_hair::RIKU_0101_KH2).unwrap();
+        for &(target, base, heart, atlas) in &KH2_HAIR_GROUPS {
+            let plain_mdl = install::read_recom(&arc, &keys, &path(base, "MDL")).unwrap();
+            let b = build_hair(&arc, &keys, &have, base, target, if heart { Some(&src) } else { None }, &hair, &atlas).unwrap();
             let names: Vec<&str> = b.files.iter().map(|f| f.0.as_str()).collect();
             for ext in ["MDL", "ANN", "EET", "SES"] {
                 assert!(names.contains(&path(target, ext).as_str()), "{target}: {ext}");
@@ -2085,9 +2126,9 @@ mod tests {
         let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { return };
         let src = BladeSource::from_assets(&assets).unwrap();
         let have = std::collections::HashMap::new();
-        let plain_mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
-        for &(target, heart) in &BBS_HAIR_GROUPS {
-            let b = build_hair(&arc, &keys, &have, target, if heart { Some(&src) } else { None }, &hair, &crate::ddd_hair::RIKU_0101_BBS).unwrap();
+        for &(target, base, heart, atlas) in &BBS_HAIR_GROUPS {
+            let plain_mdl = install::read_recom(&arc, &keys, &path(base, "MDL")).unwrap();
+            let b = build_hair(&arc, &keys, &have, base, target, if heart { Some(&src) } else { None }, &hair, &atlas).unwrap();
             let names: Vec<&str> = b.files.iter().map(|f| f.0.as_str()).collect();
             for ext in ["MDL", "ANN", "EET", "SES"] {
                 assert!(names.contains(&path(target, ext).as_str()), "{target}: {ext}");
@@ -2101,6 +2142,39 @@ mod tests {
             let p = crate::mdl::MdlPart::parse_bytes(&new[3]).unwrap();
             assert!(p.texture_names().iter().any(|t| t.as_str() == "rk_hair_bbs"), "{target}: the BBS atlas");
         }
+    }
+
+    /// 0.197.4 (owner's install, `RECOM_GAME`): the 109-bone copies of Riku's event packs: every pack of [`EVENT_PACKS`] is copied,
+    /// every clip has the KH2-hair model's bone count, the same slots, frames and loop, and Re:CoM's channels of the 102 bones
+    /// except the hair's unchanged.
+    #[test]
+    fn the_event_packs_have_kh2_hair_copies() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let hair = crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+        let mdl = install::read_recom(&arc, &keys, &path(101, "MDL")).unwrap();
+        let model_bones = crate::mdl::RecomSkeleton::parse(&crate::ddd_hair::HairSource::prepare_mdl(&hair, &mdl).unwrap()).unwrap().bones.len();
+        let sk = crate::mdl::RecomSkeleton::parse(&mdl).unwrap();
+        let packs = build_event_packs(&arc, &keys, &hair).unwrap();
+        assert_eq!(packs.iter().map(|p| (p.0, p.1)).collect::<Vec<_>>(), EVENT_PACKS.map(|g| (g, g + EVENT_ALT)), "all eight");
+        for (src, alt, bytes) in &packs {
+            let (a0, a1) = (Ann::parse(&install::read_recom(&arc, &keys, &path(*src, "ANN")).unwrap()).unwrap(), Ann::parse(bytes).unwrap());
+            assert_eq!(a0.slots.len(), a1.slots.len(), "{alt}");
+            for (s0, s1) in a0.slots.iter().zip(&a1.slots) {
+                let (Some(c0), Some(c1)) = (s0.clip.as_ref(), s1.clip.as_ref()) else { assert!(s0.clip.is_none() && s1.clip.is_none()); continue };
+                assert_eq!(c1.bones as usize, model_bones, "{alt}: {model_bones} bones");
+                assert_eq!((c0.frames, c0.loop_start, c0.flags), (c1.frames, c1.loop_start, c1.flags), "{alt}");
+                let ch = c0.chans();
+                for b in 0..c0.bones as usize {
+                    if sk.bones[b].name.contains("hair") {
+                        continue;
+                    }
+                    assert!(c0.channels[b * ch..(b + 1) * ch] == c1.channels[b * ch..(b + 1) * ch], "{alt}: bone {b} {} changed", sk.bones[b].name);
+                }
+            }
+        }
+        eprintln!("event pack copies: {} ({} bones)", packs.len(), model_bones);
     }
 
     /// 0.184.2 (owner's install, `RECOM_GAME`): the Dark Firaga clip's glow, flash, voice and thrust sound on Riku's

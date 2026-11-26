@@ -32,6 +32,7 @@ use std::sync::{Mutex, OnceLock};
 
 pub static ORIG_GROUP_LOAD: AtomicUsize = AtomicUsize::new(0);
 pub static ORIG_CAMP_FIELD: AtomicUsize = AtomicUsize::new(0);
+pub static ORIG_PACK_PICK: AtomicUsize = AtomicUsize::new(0);
 
 static INSTALLED: AtomicBool = AtomicBool::new(false);
 static MODELS: OnceLock<Models> = OnceLock::new();
@@ -90,6 +91,7 @@ type ModelInitFn = unsafe extern "win64" fn(usize, i32, i32, u32) -> u64;
 type QueueFn = unsafe extern "win64" fn(u32);
 type QueuedFn = unsafe extern "win64" fn(i32, i32) -> u64;
 type FindFn = unsafe extern "win64" fn(u32, u32, i32) -> usize;
+type PackPickFn = unsafe extern "win64" fn(usize, u32, i32, i32, i32) -> u64;
 type UnloadFn = unsafe extern "win64" fn(u32);
 type NewFn = unsafe extern "win64" fn(usize) -> usize;
 type CtorFn = unsafe extern "win64" fn(usize, usize, i32, u32) -> usize;
@@ -198,6 +200,15 @@ pub fn install(b: usize) {
                 planned
             }
         };
+        // 0.197.4: Riku's event pack copies for the KH2 hair (one `.ANN` row each)
+        let packs = super::riku_skin::event_packs();
+        let planned = match crate::riku_skin::add_event_rows(planned.clone(), packs) {
+            Ok(t) => t,
+            Err(e) => {
+                log(&format!("riku skin: event pack rows: {e}; the KH2 hair's event motions stay Re:CoM's (they may not play)"));
+                planned
+            }
+        };
         let skin_rows = planned.iter().any(|r| skins.iter().any(|s| s.skin == r.group));
         let Some(table) = build_rows(&planned) else {
             log("keyblades: PLAYER table copy failed; no model swap");
@@ -207,6 +218,7 @@ pub fn install(b: usize) {
         let hooks = [
             super::hook::Hook { site: site("player group load (0x140211AA0)"), ours: group_load as *const () as usize, original: &ORIG_GROUP_LOAD },
             super::hook::Hook { site: site("field camp open/close (0x1401A9590)"), ours: camp_field as *const () as usize, original: &ORIG_CAMP_FIELD },
+            super::hook::Hook { site: site("motion pack pick (0x14024D860)"), ours: pack_pick as *const () as usize, original: &ORIG_PACK_PICK },
         ];
         if !super::hook::install_all(b, &hooks) {
             log("keyblades: model wrappers not hooked; no model swap");
@@ -347,6 +359,16 @@ pub unsafe extern "win64" fn group_load(ch: u32) {
     orig::<GroupLoadFn>(&ORIG_GROUP_LOAD)(ch);
     // Riku's costume: the menu's model now follows the group just queued.
     super::riku_skin::sync_menu(base());
+    // 0.198.0: Riku's spell unlocks follow his story (floor reached, bosses beaten) at each room / battle build
+    super::unlocks::riku_sync("room / battle build");
+    // 0.197.4: with the KH2 hair (109 bones), the copies of Riku's event packs, so his event motions play (`pack_pick`)
+    if INSTALLED.load(Ordering::Acquire) && super::stats::riku_story() && super::riku_skin::kh2_hair_look() {
+        for &(_, alt) in super::riku_skin::event_packs() {
+            if queue_if_missing(alt) {
+                once(&format!("evq{alt}"), &format!("riku skin: event pack copy {alt} queued (KH2 hair)"));
+            }
+        }
+    }
     if !INSTALLED.load(Ordering::Acquire) {
         return;
     }
@@ -355,6 +377,37 @@ pub unsafe extern "win64" fn group_load(ch: u32) {
     if let Some(w) = wanted(r).filter(|w| *w != r) {
         request(w);
     }
+}
+
+/// The bone count of clip `slot` of the motion pack with global id `id`, if loaded (`0x14024C760`'s reads: clips
+/// `*(*(pack+8)+8)[slot]`, count `pack+0x68` (i32), bones `clip+0x10` (i16)). Checked (decomp).
+unsafe fn clip_bones(id: u32, slot: i32) -> Option<i16> {
+    let pack = func::<FindFn>(FIND)(kind::ANN as u32, id, 1);
+    if pack == 0 || slot < 0 || slot >= rd::<i32>(pack + 0x68) {
+        return None;
+    }
+    let a: usize = rd(pack + 8);
+    let arr: usize = if a == 0 { 0 } else { rd(a + 8) };
+    let clip: usize = if arr == 0 { 0 } else { rd(arr + 8 * slot as usize) };
+    (clip != 0).then(|| rd::<i16>(clip + 0x10))
+}
+
+/// Re:CoM's "play clip `slot` of pack `id`" (`0x14024D860(ctrl, id, slot, start, p5)`), 0.197.4: when `id` is one of Riku's event
+/// packs with a copy (`riku_skin::event_packs`), its clip's bone count differs from the controller's (`ctrl+0x40`, i16) and the
+/// copy's clip matches, the copy is played. Re:CoM plays nothing in that case (`0x14024E9F0` skips a clip whose count differs), so
+/// every case Re:CoM plays itself is unchanged; ids without a copy cost one compare.
+pub unsafe extern "win64" fn pack_pick(ctrl: usize, id: u32, slot: i32, start: i32, p5: i32) -> u64 {
+    let f = orig::<PackPickFn>(&ORIG_PACK_PICK);
+    if let Some(alt) = crate::riku_skin::event_alt_id(super::riku_skin::event_packs(), id) {
+        if ctrl != 0 {
+            let want: i16 = rd(ctrl + 0x40);
+            if clip_bones(id, slot).is_some_and(|b| b != want) && clip_bones(alt, slot) == Some(want) {
+                once(&format!("evp{id}"), &format!("riku skin: event pack {id} played from its copy {alt} ({want} bones)"));
+                return f(ctrl, alt, slot, start, p5);
+            }
+        }
+    }
+    f(ctrl, id, slot, start, p5)
 }
 
 /// CPlayerWeapon's model init (vtable `+0x30`, Re:CoM's `0x1401A4E70(weapon, category, group,

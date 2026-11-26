@@ -612,24 +612,38 @@ fn run_inner(opt: &Options) -> Result<(), String> {
             Some(Err(e)) => println!("note: Riku's Keyblade not built: {e}"),
             None => println!("note: KH1's {} not read: Riku's Keyblade not built", rsk::BLADE_MODEL),
         }
+        let mut event_packs: Vec<(u16, u16)> = vec![];
         // 0.188.0: Riku's default attire with KH2 Riku's hair (KH2 FM, the 1.5+2.5 collection). Stage 363: the DDD hair of 0.186.0 is gone.
         match install::kh2(&game, keys.clone()).map_err(|e| e.to_string()).and_then(|i| kh1_recom_assets::kh2_hair::Kh2HairSource::read(&i).map_err(|e| e.to_string())) {
             Ok(hair) => {
                 let heart = install::kh1(&game, keys.clone()).ok().and_then(|i| i.read_full(rsk::BLADE_MODEL).ok()).and_then(|(_, a, _)| rsk::BladeSource::from_assets(&a).ok());
-                for &(target, with_heart) in &rsk::KH2_HAIR_GROUPS {
+                for &(target, base, with_heart, atlas) in &rsk::KH2_HAIR_GROUPS {
                     if with_heart && heart.is_none() {
                         println!("note: Riku's KH2 hair with the Keyblade of Heart (group {target}) not built: no Keyblade");
                         continue;
                     }
-                    match rsk::build_hair(&arc, &keys, &have, target, if with_heart { heart.as_ref() } else { None }, &hair, &kh1_recom_assets::ddd_hair::RIKU_0101_KH2) {
+                    match rsk::build_hair(&arc, &keys, &have, base, target, if with_heart { heart.as_ref() } else { None }, &hair, &atlas) {
                         Ok(b) => {
                             for (rel, bytes) in &b.files {
                                 write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
                             }
-                            println!("Riku's KH2 hair: group {target} = group 101 with KH2 Riku's hair{}", if with_heart { " and the Keyblade of People's Hearts" } else { "" });
-                            done.push(Made { riku: 101, skin: target, dark: false, blade: with_heart as u8, hair: 1 });
+                            println!("Riku's KH2 hair: group {target} = group {base} with KH2 Riku's hair{}", if with_heart { " and the Keyblade of People's Hearts" } else { "" });
+                            done.push(Made { riku: base, skin: target, dark: false, blade: with_heart as u8, hair: 1 });
                         }
                         Err(e) => println!("note: Riku's KH2 hair (group {target}) not built: {e}"),
+                    }
+                }
+                // 0.197.4: Riku's event packs for the 109-bone KH2-hair skeleton (the boss end's card get and the other event motions)
+                if done.iter().any(|m| m.hair == 1) {
+                    match rsk::build_event_packs(&arc, &keys, &hair) {
+                        Ok(packs) => {
+                            for (src, alt, bytes) in packs {
+                                write(&rsk::path(alt, "ANN").split('/').fold(root.clone(), |p, s| p.join(s)), &bytes)?;
+                                event_packs.push((src, alt));
+                            }
+                            println!("Riku's event packs for the KH2 hair: {event_packs:?}");
+                        }
+                        Err(e) => println!("note: Riku's event packs for the KH2 hair not built: {e}"),
                     }
                 }
             }
@@ -639,18 +653,18 @@ fn run_inner(opt: &Options) -> Result<(), String> {
         match kh1_recom_assets::bbs_hair::BbsHairSource::read(&game, &keys) {
             Ok(hair) => {
                 let heart = install::kh1(&game, keys.clone()).ok().and_then(|i| i.read_full(rsk::BLADE_MODEL).ok()).and_then(|(_, a, _)| rsk::BladeSource::from_assets(&a).ok());
-                for &(target, with_heart) in &rsk::BBS_HAIR_GROUPS {
+                for &(target, base, with_heart, atlas) in &rsk::BBS_HAIR_GROUPS {
                     if with_heart && heart.is_none() {
                         println!("note: Riku's BBS kid hair with the Keyblade of Heart (group {target}) not built: no Keyblade");
                         continue;
                     }
-                    match rsk::build_hair(&arc, &keys, &have, target, if with_heart { heart.as_ref() } else { None }, &hair, &kh1_recom_assets::ddd_hair::RIKU_0101_BBS) {
+                    match rsk::build_hair(&arc, &keys, &have, base, target, if with_heart { heart.as_ref() } else { None }, &hair, &atlas) {
                         Ok(b) => {
                             for (rel, bytes) in &b.files {
                                 write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
                             }
-                            println!("Riku's BBS kid hair: group {target} = group 101 with BBS kid Riku's hair{}", if with_heart { " and the Keyblade of People's Hearts" } else { "" });
-                            done.push(Made { riku: 101, skin: target, dark: false, blade: with_heart as u8, hair: 2 });
+                            println!("Riku's BBS kid hair: group {target} = group {base} with BBS kid Riku's hair{}", if with_heart { " and the Keyblade of People's Hearts" } else { "" });
+                            done.push(Made { riku: base, skin: target, dark: false, blade: with_heart as u8, hair: 2 });
                         }
                         Err(e) => println!("note: Riku's BBS kid hair (group {target}) not built: {e}"),
                     }
@@ -663,7 +677,7 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                 std::fs::remove_file(&manifest).map_err(|e| format!("{}: {e}", manifest.display()))?;
             }
         } else {
-            write(&manifest, kh1_recom_assets::riku_skin::manifest_json(&done, sora_guard.is_some()).as_bytes())?;
+            write(&manifest, kh1_recom_assets::riku_skin::manifest_json(&done, sora_guard.is_some(), &event_packs).as_bytes())?;
         }
     }
     // M13 stage 3: KH1's trails and finisher effects as Re:CoM's EET events at the KH1 variant
