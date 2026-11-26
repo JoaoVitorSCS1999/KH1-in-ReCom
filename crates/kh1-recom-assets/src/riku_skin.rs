@@ -1689,6 +1689,16 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     for c in &dark_casts {
         dann_own = with_clip(dann_own, c.clone());
     }
+    // 0.198.9 (third review: the skin was built from Riku's already-gripped pack, so its grip's limits measured an already-changed
+    // clip): the skin retargets Riku's pack as it is before the grip, and takes only Dark Riku's grip
+    let ann_plain = ann.clone();
+    // 0.198.9: Riku's right hand closed on the handle where his clips leave it open (`crate::grip`, the grip of his own `p002_053`)
+    {
+        let own = Ann::parse(&rd(riku, "ANN")?)?;
+        if !crate::grip::OFF.with(|x| x.get()) {
+            crate::grip::close(&mut ann, &rmdl, &own)?;
+        }
+    }
     riku_pack = riku_pack.or(Some((path(riku, "ANN"), ann.to_bytes())));
     dark_pack = dark_pack.or(Some((path(dark, "ANN"), dann_own.to_bytes())));
     // 0.184.2: the Dark Firaga clip's effects and sounds on the cast clips (Riku's bones by name; Dark Riku's own).
@@ -1732,7 +1742,7 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
         (path(dark, "EET"), crate::eet::write(&dark_eet)?),
         (path(dark, "SES"), crate::ses::write(&dark_ses)),
     ];
-    let mut out_ann = retarget_ann(&ann, &rs, &ds)?;
+    let mut out_ann = retarget_ann(&ann_plain, &rs, &ds)?;
     // The skin (Dark Riku's model playing Riku's rows): his cast rows play the Dark Firaga clip on its own skeleton
     // (not Riku's version retargeted back), under Riku's names.
     for (c, d) in CAST_CLIPS.iter().zip(&dark_casts) {
@@ -1757,6 +1767,10 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     }
     // 0.198.8: the coat tails move (Dark Riku's own tail motion by role, else a follow-through; `crate::tails`)
     crate::tails::animate(&mut out_ann, &dann, &ds)?;
+    // 0.198.9: the skin's right hand closed on the handle with Dark Riku's own grip
+    if !crate::grip::OFF.with(|x| x.get()) {
+        crate::grip::close(&mut out_ann, &dmdl, &dann)?;
+    }
     eet.extend(crate::eet::parse(&rd(dark, "EET")?)?.into_iter().filter(|r| r.name == DARK_FLIP));
     ses.extend(crate::ses::parse(&rd(dark, "SES")?)?.into_iter().filter(|e| e.name() == DARK_FLIP));
     // The skin's cast clips are Dark Riku's own (above): their events on his bones, under Riku's names.
@@ -3040,6 +3054,206 @@ mod skirt_probe {
             }
             eprintln!("== {name}: {} clips", rows.len());
             for r in rows.iter() { eprintln!("  {r}"); }
+        }
+    }
+}
+
+#[cfg(test)]
+mod grip_probe {
+    use super::*;
+    use crate::install;
+    /// 0.198.9 probe (fork owner: "melhorar o encaixe da espada na mão do Riku tanto darkmode quanto skin default, acho que tem muita
+    /// folga na mão"): where the Soul Eater's grip (`wep0`) sits against the right hand, per clip, in Re:CoM's own pack and in the
+    /// mod's (the installed group's), for Riku (`PL0101`) and the Dark Form skin (121).
+    /// 0.198.9: [`crate::grip::close`] on Riku's (`PL0101`) and Dark Riku's (`PL0201`) own packs: the turns found and the finger radii.
+    /// 0.198.9: the handle's real thickness where the hand holds it: the weapon's radius around `wep0`'s x axis in 5 mm slices, the
+    /// median (not the largest: the guard and the chain parts are there too), and where along x the palm is.
+    /// 0.198.9: which of Riku's own clips (Re:CoM's `PL0101.ANN`, and his other packs `PL1xxx` that play on his skeleton) hold the
+    /// handle with the hand closed: per clip, the thumb tip's distance to the index's middle / tip segments (cm, the "C" opening) at the
+    /// clip's smallest frame, and the fingers' mean tip distance to the handle's axis.
+    #[test]
+    fn closed_grip_search() {
+        let Ok(g) = std::env::var("RECOM_GAME").map(std::path::PathBuf::from) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let mdl = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
+        let sk = RecomSkeleton::parse(&mdl).unwrap();
+        let p3 = crate::mdl::MdlPart::parse_bytes(&crate::mdl::split_parts(&mdl).unwrap()[3]).unwrap();
+        let verts: Vec<(usize, [f64; 3])> = p3.list_a.iter().flat_map(|k| k.verts.iter()).filter(|v| sk.bones[v.bone()].name.starts_with("r_fing")).map(|v| (v.bone(), v.pos().map(|x| x as f64))).collect();
+        let bn = |n: &str| sk.find(n).unwrap();
+        let (t1a, i2b, i2a) = (bn("r_fing1a"), bn("r_fing2b"), bn("r_fing2a"));
+        let mut found: Vec<(f64, String, usize, f64)> = vec![];
+        let mut packs: Vec<(String, Vec<u8>)> = vec![("PL0101".into(), install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.ANN").unwrap())];
+        for g2 in 1000..1400u16 {
+            let n = format!("PLAYER/{g2:04}/PL{g2:04}.ANN");
+            if arc.find(&n).is_some() { if let Ok(b) = install::read_recom(&arc, &keys, &n) { packs.push((format!("PL{g2:04}"), b)); } }
+        }
+        for (pn, b) in &packs {
+            let Ok(ann) = Ann::parse(b) else { continue };
+            for (slot, s) in ann.slots.iter().enumerate() {
+                let Some(c) = &s.clip else { continue };
+                if c.bones as usize != sk.bones.len() { continue; }
+                let mut best = (f64::MAX, 0.0);
+                for f in 0..c.frames.max(1) as usize {
+                    let w = crate::kh2_hair::tests::posed_world(&sk, c, f as f64);
+                    let tip: Vec<[f64; 3]> = verts.iter().filter(|(b, _)| *b == t1a).map(|(b, p)| w[*b].point(*p)).collect();
+                    let idx: Vec<[f64; 3]> = verts.iter().filter(|(b, _)| *b == i2b || *b == i2a).map(|(b, p)| w[*b].point(*p)).collect();
+                    let d = tip.iter().map(|a| idx.iter().map(|b| crate::math::dist(*a, *b)).fold(f64::MAX, f64::min)).fold(f64::MAX, f64::min);
+                    if d < best.0 { best = (d, f as f64); }
+                }
+                found.push((best.0, format!("{pn} {}", c.name_str()), slot, best.1));
+            }
+        }
+        found.sort_by(|a, b| a.0.total_cmp(&b.0));
+        eprintln!("{} clips on Riku's skeleton", found.len());
+        for (d, n, slot, f) in found.iter().take(15) { eprintln!("  {n} (slot {slot}) frame {f}: thumb tip to index {:.1} cm", d * 100.0); }
+        if let Some(x) = found.iter().find(|x| x.1.ends_with("p002_031")) { eprintln!("  the battle stance p002_031: {:.1} cm", x.0 * 100.0); }
+    }
+
+    #[test]
+    fn handle_profile() {
+        let Ok(g) = std::env::var("RECOM_GAME").map(std::path::PathBuf::from) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        for grp in ["0101", "0201"] {
+            let mdl = install::read_recom(&arc, &keys, &format!("PLAYER/{grp}/PL{grp}.MDL")).unwrap();
+            let sk = RecomSkeleton::parse(&mdl).unwrap();
+            let w0 = sk.find("wep0").unwrap();
+            let parts = crate::mdl::split_parts(&mdl).unwrap();
+            let p1 = crate::mdl::MdlPart::parse_bytes(&parts[1]).unwrap();
+            let wv: Vec<[f64; 3]> = p1.list_a.iter().flat_map(|k| k.verts.iter()).filter(|v| v.bone() == w0).map(|v| v.pos().map(|x| x as f64)).collect();
+            let mut bins: std::collections::BTreeMap<i64, Vec<f64>> = Default::default();
+            for p in &wv { if p[0].abs() < 0.12 { bins.entry((p[0] * 200.0).floor() as i64).or_default().push((p[1] * p[1] + p[2] * p[2]).sqrt()); } }
+            // the palm: r_hand's origin and the finger bases in wep0's frame, idle frame 0
+            let ann = Ann::parse(&install::read_recom(&arc, &keys, &format!("PLAYER/{grp}/PL{grp}.ANN")).unwrap()).unwrap();
+            let c = ann.slots[1].clip.as_ref().unwrap();
+            let w = crate::kh2_hair::tests::posed_world(&sk, c, 0.0);
+            let inv = crate::kh2_hair_rig::rigid_inv(&crate::math::Aff { r: crate::math::unscale(&w[w0].r).0, t: w[w0].t });
+            let at = |n: &str| sk.find(n).map(|b| inv.point(w[b].t).map(|x| (x * 1000.0).round() / 10.0));
+            eprintln!("{grp}: r_hand {:?}, fing2c {:?}, fing3c {:?}, fing5c {:?}, fing3a {:?}", at("r_hand"), at("r_fing2c"), at("r_fing3c"), at("r_fing5c"), at("r_fing3a"));
+            for (b, mut v) in bins { v.sort_by(|a, b| a.total_cmp(b)); eprintln!("  x {:+.1} cm: n {:3}, radius median {:.2} cm, max {:.2}", b as f64 / 2.0, v.len(), v[v.len() / 2] * 100.0, v[v.len() - 1] * 100.0); }
+        }
+    }
+
+    /// 0.198.9 (third review): the Dark Form skin's pack as `build_with` makes it, against the same without the grip (`NO_GRIP`): no
+    /// frame wider than its own by more than `MAX_WIDER`, the fingers no faster than their own + 2 deg/frame.
+    #[test]
+    fn skin_grip_bounds() {
+        let Ok(g) = std::env::var("RECOM_GAME").map(std::path::PathBuf::from) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let pack = |no: bool| { crate::grip::OFF.with(|x| x.set(no)); let b = build_with(&arc, &keys, 101, 201, 121, None).unwrap(); crate::grip::OFF.with(|x| x.set(false)); Ann::parse(&b.files.iter().find(|f| f.0 == path(121, "ANN")).unwrap().1).unwrap() };
+        let (before, after) = (pack(true), pack(false));
+        let mdl = install::read_recom(&arc, &keys, "PLAYER/0201/PL0201.MDL").unwrap();
+        let sk = RecomSkeleton::parse(&mdl).unwrap();
+        let fb: Vec<usize> = (1..=5).flat_map(|n| ["c", "b", "a"].map(|x| sk.find(&format!("r_fing{n}{x}")))).flatten().collect();
+        let rot = |c: &crate::ann::Clip, b: usize, f: usize| { let r = c.sample(b, f as f64).r; rot_xyz(r[0], r[1], r[2]) };
+        let ang = |a: &M3, b: &M3| { let d = m3(&tr(a), b); ((d[0][0] + d[1][1] + d[2][2] - 1.0) / 2.0).clamp(-1.0, 1.0).acos().to_degrees() };
+        for (slot, (sa, sb)) in after.slots.iter().zip(&before.slots).enumerate() {
+            let (Some(a), Some(b)) = (sa.clip.as_ref(), sb.clip.as_ref()) else { continue };
+            if a.bones as usize != sk.bones.len() { continue; }
+            let n = a.frames.max(1) as usize;
+            let speed = |c: &crate::ann::Clip| (1..n).map(|f| fb.iter().map(|&k| ang(&rot(c, k, f - 1), &rot(c, k, f))).fold(0.0, f64::max)).fold(0.0, f64::max);
+            let (va, vb) = (speed(a), speed(b));
+            if std::env::var("GRIP_DEBUG").is_ok() { eprintln!("SKIN {slot} {}: {va:.1} vs {vb:.1}", a.name_str()); }
+            assert!(va <= vb + 2.0, "skin slot {slot} {}: fingers {va:.1} deg/frame against their own {vb:.1}", a.name_str());
+        }
+    }
+
+    #[test]
+    fn grip_close_report() {
+        let Ok(g) = std::env::var("RECOM_GAME").map(std::path::PathBuf::from) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        for grp in ["0101", "0201"] {
+            let mdl = install::read_recom(&arc, &keys, &format!("PLAYER/{grp}/PL{grp}.MDL")).unwrap();
+            {
+                let sk = RecomSkeleton::parse(&mdl).unwrap();
+                let w = sk.rest_world();
+                let h = sk.find("r_hand").unwrap();
+                for (i, b) in sk.bones.iter().enumerate() {
+                    if b.name.starts_with("r_fing") || b.name == "r_hand" || b.name == "wep0" || b.name == "k11" || b.name == "k10" || b.name == "wep1" || b.name == "wep2" {
+                        let lt = b.local.t;
+                        eprintln!("BONE {grp} {i} {} parent {} ({}), local t ({:.3},{:.3},{:.3}), world from hand ({:.3},{:.3},{:.3})", b.name, b.parent, sk.bones[b.parent.max(0) as usize].name, lt[0], lt[1], lt[2], w[i].t[0] - w[h].t[0], w[i].t[1] - w[h].t[1], w[i].t[2] - w[h].t[2]);
+                    }
+                }
+            }
+            let mut ann = Ann::parse(&install::read_recom(&arc, &keys, &format!("PLAYER/{grp}/PL{grp}.ANN")).unwrap()).unwrap();
+            let t = std::time::Instant::now();
+            let own = ann.clone();
+            let rep = crate::grip::close(&mut ann, &mdl, &own).unwrap();
+            eprintln!("{grp}: grip from {:?}, {} clips changed, max weight {:.2}, {:?}", rep.source, rep.clips, rep.max_weight, t.elapsed());
+            assert!(rep.worst_wider <= crate::grip::MAX_WIDER + 1e-4, "{grp}: a frame opens {:.1} mm wider than the clip's own", rep.worst_wider * 1000.0);
+            // one weight per clip: the fingers' turn off the clip's own changes little from frame to frame
+            for (slot, s) in ann.slots.iter().enumerate() {
+                let (Some(a), Some(b)) = (s.clip.as_ref(), own.slots.get(slot).and_then(|x| x.clip.as_ref())) else { continue };
+                let sk = RecomSkeleton::parse(&mdl).unwrap();
+                let fb: Vec<usize> = (1..=5).flat_map(|n| ["c", "b", "a"].map(|x| sk.find(&format!("r_fing{n}{x}")))).flatten().collect();
+                let turn = |f: usize| fb.iter().map(|&k| { let (x, y) = (a.sample(k, f as f64).r, b.sample(k, f as f64).r); let d = m3(&tr(&rot_xyz(y[0], y[1], y[2])), &rot_xyz(x[0], x[1], x[2])); ((d[0][0] + d[1][1] + d[2][2] - 1.0) / 2.0).clamp(-1.0, 1.0).acos().to_degrees() }).fold(0.0, f64::max);
+                let ts: Vec<f64> = (0..a.frames.max(1) as usize).map(turn).collect();
+                let pump = ts.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f64::max);
+                if pump > 12.0 { eprintln!("  {} slot {slot}: the grip's turn changes {pump:.1} deg in a frame ({:?})", a.name_str(), ts.iter().map(|x| x.round() as i64).collect::<Vec<_>>()); }
+            }
+        }
+    }
+
+    #[test]
+    fn grip_probe() {
+        let Ok(g) = std::env::var("RECOM_GAME").map(std::path::PathBuf::from) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let home = std::env::var("HOME").unwrap();
+        for (label, mdl_path, own_ann, mod_ann) in [
+            ("Riku 101", "PLAYER/0101/PL0101.MDL", "PLAYER/0101/PL0101.ANN", format!("{home}/OpenKH/openkh/mod/Recom/PLAYER/0101/PL0101.ANN")),
+            ("Dark Riku 201", "PLAYER/0201/PL0201.MDL", "PLAYER/0201/PL0201.ANN", format!("{home}/OpenKH/openkh/mod/Recom/PLAYER/0121/PL0121.ANN")),
+        ] {
+            let mdl = install::read_recom(&arc, &keys, mdl_path).unwrap();
+            let sk = RecomSkeleton::parse(&mdl).unwrap();
+            let w0 = sk.find("wep0").unwrap();
+            let hand = sk.find("r_hand").unwrap();
+            let chain: Vec<String> = { let mut v = vec![]; let mut b = w0 as i16; while b >= 0 { v.push(sk.bones[b as usize].name.clone()); b = sk.bones[b as usize].parent; } v };
+            eprintln!("{label}: wep0 = {w0}, chain {chain:?}; r_hand = {hand}");
+            // the hand's mesh: part 3 vertices on r_hand / r_fing*
+            let p3 = crate::mdl::MdlPart::parse_bytes(&crate::mdl::split_parts(&mdl).unwrap()[3]).unwrap();
+            let hv: Vec<(usize, [f32; 3])> = p3.list_a.iter().flat_map(|k| k.verts.iter()).filter(|v| { let n = &sk.bones[v.bone()].name; n == "r_hand" || n.starts_with("r_fing") }).map(|v| (v.bone(), v.pos())).collect();
+            let pw = crate::mdl::MdlPart::parse_bytes(&crate::mdl::split_parts(&mdl).unwrap()[1]).unwrap();
+            let wv: Vec<[f32; 3]> = pw.list_a.iter().flat_map(|k| k.verts.iter()).filter(|v| v.bone() == w0).map(|v| v.pos()).collect();
+            let xs: Vec<f32> = wv.iter().map(|p| p[0]).collect();
+            eprintln!("  weapon: {} vertices on wep0, local x {:.3}..{:.3}", wv.len(), xs.iter().cloned().fold(f32::MAX, f32::min), xs.iter().cloned().fold(f32::MIN, f32::max));
+            for (which, ann_bytes) in [("Re:CoM's", install::read_recom(&arc, &keys, own_ann).ok()), ("mod's", std::fs::read(&mod_ann).ok())] {
+                let Some(b) = ann_bytes else { eprintln!("  {which}: not read"); continue };
+                let ann = Ann::parse(&b).unwrap();
+                for slot in [1usize, 2, 3, 31, 44, 45, 46, 47] {
+                    let Some(c) = ann.slots.get(slot).and_then(|s| s.clip.as_ref()) else { continue };
+                    if c.bones as usize != sk.bones.len() { continue; }
+                    let mut gaps = vec![];
+                    for f in [0.0, (c.frames / 2) as f64] {
+                        let w = crate::kh2_hair::tests::posed_world(&sk, c, f);
+                        // the grip: the handle's vertices nearest wep0's origin (|x| < 6 cm); their mean point and the hand's nearest vertex to it
+                        let grip: Vec<[f64; 3]> = wv.iter().filter(|p| p[0].abs() < 0.06).map(|p| w[w0].point(p.map(|x| x as f64))).collect();
+                        let gc = [0, 1, 2].map(|i| grip.iter().map(|p| p[i]).sum::<f64>() / grip.len().max(1) as f64);
+                        let hand_pts: Vec<[f64; 3]> = hv.iter().map(|(b, p)| w[*b].point(p.map(|x| x as f64))).collect();
+                        let near = hand_pts.iter().map(|p| crate::math::dist(*p, gc)).fold(f64::MAX, f64::min);
+                        let hand_c = [0, 1, 2].map(|i| hand_pts.iter().map(|p| p[i]).sum::<f64>() / hand_pts.len().max(1) as f64);
+                        // the handle's radius and the hand's vertices around it, in wep0's frame (the blade along x)
+                        let inv = crate::kh2_hair_rig::rigid_inv(&crate::math::Aff { r: crate::math::unscale(&w[w0].r).0, t: w[w0].t });
+                        let rh = { let v: Vec<f64> = wv.iter().filter(|p| p[0].abs() < 0.06).map(|p| ((p[1] * p[1] + p[2] * p[2]) as f64).sqrt()).collect(); v.iter().sum::<f64>() / v.len().max(1) as f64 };
+                        let mut by: std::collections::BTreeMap<String, (f64, usize)> = Default::default();
+                        for (b, p) in &hv {
+                            let q = inv.point(w[*b].point(p.map(|x| x as f64)));
+                            if q[0].abs() < 0.06 {
+                                let r = (q[1] * q[1] + q[2] * q[2]).sqrt();
+                                let e = by.entry(sk.bones[*b].name.clone()).or_insert((f64::MAX, 0));
+                                e.0 = e.0.min(r);
+                                e.1 += 1;
+                            }
+                        }
+                        if f == 0.0 && slot == 1 { eprintln!("    handle radius {:.1} cm; nearest radius of each hand bone's vertices around it: {}", rh * 100.0, by.iter().map(|(n, (r, k))| format!("{n} {:.1} cm ({k})", r * 100.0)).collect::<Vec<_>>().join(", ")); }
+                        gaps.push(format!("f{f}: grip→nearest hand vertex {:.1} cm, grip→hand centre {:.1} cm, wep0 local t {:?}", near * 100.0, crate::math::dist(gc, hand_c) * 100.0, c.sample(w0, f).t.map(|x| (x * 1000.0).round() / 10.0)));
+                    }
+                    eprintln!("  {which} slot {slot} {}: {}", c.name_str(), gaps.join(" | "));
+                }
+            }
         }
     }
 }
