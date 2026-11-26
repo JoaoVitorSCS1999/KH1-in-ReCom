@@ -1397,6 +1397,11 @@ pub(crate) mod tests {
         (lo, hi)
     }
 
+    /// A list's triangles (0.198.8: part 3's list B too).
+    pub(crate) fn extract_list(list: &[MeshPacket]) -> Vec<RTri> {
+        extract(list).unwrap()
+    }
+
     pub(crate) fn collect(part: &MdlPart) -> Vec<RTri> {
         extract(&part.list_a).unwrap()
     }

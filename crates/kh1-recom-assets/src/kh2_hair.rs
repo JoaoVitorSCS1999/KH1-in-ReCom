@@ -1072,7 +1072,9 @@ pub(crate) mod tests {
                 return 0;
             }
         }
-        let ok = |n: &str| n == "head" || n.contains("hair") || n.starts_with("neck") || n.starts_with("chest") || n == "waist" || n.ends_with("collar") || n.ends_with("uparm");
+        // 0.198.8: `FULL_BODY` set: every bone, and part 3's list B (Dark Riku's coat tails), for the coat's checks
+        let full = std::env::var("FULL_BODY").is_ok();
+        let ok = |n: &str| full || n == "head" || n.contains("hair") || n.starts_with("neck") || n.starts_with("chest") || n == "waist" || n.ends_with("collar") || n.ends_with("uparm");
         let size = 700usize;
         let (sy, cy, sp, cp) = (yaw.to_radians().sin(), yaw.to_radians().cos(), pitch.to_radians().sin(), pitch.to_radians().cos());
         let tx = |q: [f64; 3]| -> [f64; 3] {
@@ -1081,7 +1083,13 @@ pub(crate) mod tests {
         };
         let mut tris: Vec<([[f64; 3]; 3], [[f64; 2]; 3], bool, u32)> = vec![];
         let mut tri_bones: Vec<[String; 3]> = vec![];
-        for t in dt::collect(p3) {
+        let mut all_tris = dt::collect(p3);
+        if full {
+            if let Some(lb) = p3.list_b.as_ref() {
+                all_tris.extend(dt::extract_list(lb));
+            }
+        }
+        for t in all_tris {
             if !t.v.iter().all(|v| ok(&names[v.bone()])) { continue; }
             let p = t.v.clone().map(|v| tx(world[v.bone()].point(v.pos().map(|x| x as f64))));
             let hair = t.tex == 1;
@@ -1221,6 +1229,64 @@ pub(crate) mod tests {
             }
         }
         (p3, crate::texture::Image { w, h, px }, body)
+    }
+
+    /// 0.198.8 (fork owner: "no darkmode queria ver se é possível animar a saia do riku"): the Dark Form skin's whole body (coat tails
+    /// included), `out/dark/skirt_<tag>/`: idle, walk, run, jump and the first ground swing, from the front, both sides and behind, at
+    /// four frames each; `SKIRT_BEFORE=1` renders the skin without [`crate::tails::animate`] (the reference).
+    #[test]
+    fn dark_skirt_checks() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        std::env::set_var("FULL_BODY", "1");
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let skin = crate::riku_skin::build_with(&arc, &keys, 101, 201, 121, None).unwrap();
+        let get = |ext: &str| skin.files.iter().find(|f| f.0 == crate::riku_skin::path(121, ext)).unwrap().1.clone();
+        let mdl0 = get("MDL");
+        let mut ann = crate::ann::Ann::parse(&get("ANN")).unwrap();
+        let e = arc.find("PLAYER/0201/PL0201.RTM").unwrap();
+        let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+        let sk = RecomSkeleton::parse(&mdl0).unwrap();
+        if std::env::var("SKIRT_BEFORE").is_ok() {
+            // the tails at rest, as before 0.198.8: every tail channel from the rest pose
+            let tails: Vec<usize> = sk.bones.iter().enumerate().filter(|(_, b)| b.name.contains("_skt")).map(|(i, _)| i).collect();
+            for s in ann.slots.iter_mut() {
+                let Some(c) = s.clip.as_mut() else { continue };
+                if c.bones as usize != sk.bones.len() { continue; }
+                let rows: Vec<Vec<[f64; 9]>> = (0..c.frames.max(1) as usize).map(|f| (0..c.bones as usize).map(|b| {
+                    let x = c.sample(b, f as f64);
+                    if tails.contains(&b) { let r = crate::math::euler_xyz(&crate::math::unscale(&sk.bones[b].local.r).0, None); [x.t[0], x.t[1], x.t[2], r[0], r[1], r[2], x.s[0], x.s[1], x.s[2]] } else { [x.t[0], x.t[1], x.t[2], x.r[0], x.r[1], x.r[2], x.s[0], x.s[1], x.s[2]] }
+                }).collect()).collect();
+                *c = crate::riku_skin::encode_rows(c, &rows);
+            }
+        }
+        let mut p3 = MdlPart::parse_bytes(&split_parts(&mdl0).unwrap()[3]).unwrap();
+        let rtm_p = crate::rtm::Rtm::parse(&rtm).unwrap();
+        let mut body: Vec<crate::texture::Image> = p3.textures.iter().map(|n| {
+            let n = String::from_utf8_lossy(n.split(|&b| b == 0).next().unwrap_or(&[])).to_string();
+            let e = rtm_p.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == n.trim_end_matches(".tm2")).unwrap();
+            let (w, h, px) = crate::rtm::tim2_decode8(&e.data).unwrap();
+            crate::texture::Image { w, h, px }
+        }).collect();
+        let a = p3.texture_names().iter().position(|n| n == "n_zz120_01").unwrap() as u32;
+        for k in p3.list_a.iter_mut().chain(p3.list_b.iter_mut().flatten()) { for v in k.verts.iter_mut() { if let Some(q) = v.q2.as_mut() { if q[3] == a { q[3] = 1; } else if q[3] == 1 { q[3] = a; } } } }
+        body.swap(1, a as usize);
+        let img = hd.iter().find(|x| x.name == crate::keyblade::hd_name("n_zz120_01")).and_then(|x| crate::texture::decode_dds(&x.data).ok()).unwrap_or_else(|| body[1].clone());
+        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+        let tag = std::env::var("CAM_TAG").unwrap_or_else(|_| "cam".into());
+        let dir = dt::out_dir().join("dark").join(format!("skirt_{tag}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (label, slot) in [("idle", 1usize), ("walk", 2), ("run", 3), ("jump", 4), ("apex", 5), ("fall", 6), ("land", 7), ("swing", 44)] {
+            let Some(c) = ann.slots.get(slot).and_then(|s| s.clip.as_ref()) else { continue };
+            let n = c.frames.max(1) as usize;
+            for f in [0, n / 4, n / 2, 3 * n / 4] {
+                let w = posed_world(&sk, c, f as f64);
+                for yaw in [0.0, 90.0, 180.0, 270.0] {
+                    render_cam(&p3, &w, &names, &img, &body, yaw, 0.0, true, &dir.join(format!("{label}_f{f}_y{yaw}.png")));
+                }
+            }
+        }
     }
 
     /// 0.198.7 (fork owner: "agora implementa todos os cabelos para o a Skin do riku Darkmode tbm"): the camera checks on the Dark Form

@@ -1755,6 +1755,8 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
         out_ann.tail = tail;
         out_ann.pad_tail_like_recom();
     }
+    // 0.198.8: the coat tails move (Dark Riku's own tail motion by role, else a follow-through; `crate::tails`)
+    crate::tails::animate(&mut out_ann, &dann, &ds)?;
     eet.extend(crate::eet::parse(&rd(dark, "EET")?)?.into_iter().filter(|r| r.name == DARK_FLIP));
     ses.extend(crate::ses::parse(&rd(dark, "SES")?)?.into_iter().filter(|e| e.name() == DARK_FLIP));
     // The skin's cast clips are Dark Riku's own (above): their events on his bones, under Riku's names.
@@ -2956,3 +2958,88 @@ mod tests {
 
 
 
+
+#[cfg(test)]
+mod skirt_probe {
+    use super::*;
+    use crate::install;
+    /// 0.198.8 probe (fork owner: "no darkmode queria ver se é possível animar a saia do riku fica muito estática", "tem como melhorar
+    /// ainda mais a animação da saia?"): how far the coat-tail bones (`*_skt*`) turn off their rest pose, in Dark Riku's own clips
+    /// (`PL0201.ANN`) and in the Dark Form skin's (Riku's motions retargeted, group 121), per clip (degrees, the largest over the bones).
+    #[test]
+    fn skirt_motion_probe() {
+        let Ok(g) = std::env::var("RECOM_GAME").map(std::path::PathBuf::from) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let dmdl = install::read_recom(&arc, &keys, "PLAYER/0201/PL0201.MDL").unwrap();
+        let ds = RecomSkeleton::parse(&dmdl).unwrap();
+        let own = Ann::parse(&install::read_recom(&arc, &keys, "PLAYER/0201/PL0201.ANN").unwrap()).unwrap();
+        let skin = build_with(&arc, &keys, 101, 201, 121, None).unwrap();
+        let sann = Ann::parse(&skin.files.iter().find(|f| f.0 == path(121, "ANN")).unwrap().1).unwrap();
+        let riku_ann = Ann::parse(&install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.ANN").unwrap()).unwrap();
+        let nm = |a: &Ann, i: usize| a.slots.get(i).map(|s| format!("{}{}", String::from_utf8_lossy(&s.name).trim_end_matches('\0'), s.clip.as_ref().map_or(String::new(), |c| format!(" {}f{}", c.frames, if c.looped() { " loop" } else { "" })))).unwrap_or_default();
+        for i in 0..sann.slots.len().max(own.slots.len()) {
+            eprintln!("SLOT {i}: riku [{}] skin [{}] dark [{}]", nm(&riku_ann, i), nm(&sann, i), nm(&own, i));
+        }
+        let skt: Vec<usize> = ds.bones.iter().enumerate().filter(|(_, b)| b.name.contains("_skt")).map(|(i, _)| i).collect();
+        eprintln!("{} coat-tail bones", skt.len());
+        let rest = ds.rest_world();
+        let turn = |a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]| { let d = crate::math::m3(&crate::math::tr(a), b); ((d[0][0] + d[1][1] + d[2][2] - 1.0) / 2.0).clamp(-1.0, 1.0).acos().to_degrees() };
+        // 0.198.8: the held jump's seams (jump → apex → fall → land): the tails' largest turn between one clip's last frame and the
+        // next's first, ours (Riku's slots 4 / 5 / 6 / 7) against Dark Riku's own (his 4 / 6 / 7 / 8)
+        let seam = |a: &Ann, x: usize, y: usize| -> f64 {
+            let (Some(ca), Some(cb)) = (a.slots.get(x).and_then(|s| s.clip.as_ref()), a.slots.get(y).and_then(|s| s.clip.as_ref())) else { return f64::NAN };
+            let (wa, wb) = (crate::kh2_hair::tests::posed_world(&ds, ca, (ca.frames - 1) as f64), crate::kh2_hair::tests::posed_world(&ds, cb, 0.0));
+            skt.iter().map(|&b| {
+                let p = ds.bones[b].parent as usize;
+                let ra = crate::math::m3(&crate::math::unscale(&wa[b].r).0, &crate::math::tr(&crate::math::unscale(&wa[p].r).0));
+                let rb = crate::math::m3(&crate::math::unscale(&wb[b].r).0, &crate::math::tr(&crate::math::unscale(&wb[p].r).0));
+                turn(&ra, &rb)
+            }).fold(0.0, f64::max)
+        };
+        for ((x, y), (dx, dy)) in [((4, 5), (4, 6)), ((5, 6), (6, 7)), ((6, 7), (7, 8)), ((4, 6), (4, 7))] {
+            eprintln!("SEAM ours {x}->{y}: {:.1} deg; Dark Riku's {dx}->{dy}: {:.1} deg", seam(&sann, x, y), seam(&own, dx, dy));
+        }
+        for (name, ann) in [("Dark Riku's own", &own), ("Dark Form skin", &sann)] {
+            let mut rows = vec![];
+            for (slot, s) in ann.slots.iter().enumerate() {
+                let Some(c) = &s.clip else { continue };
+                if c.bones as usize != ds.bones.len() { continue; }
+                let mut worst: f64 = 0.0;
+                let mut spread: f64 = 0.0;
+                let mut prev: Option<Vec<[[f64; 3]; 3]>> = None;
+                for f in 0..c.frames.max(1) as usize {
+                    let w = crate::kh2_hair::tests::posed_world(&ds, c, f as f64);
+                    // each tail bone relative to its parent, against the same at rest
+                    let rel: Vec<[[f64; 3]; 3]> = skt.iter().map(|&b| { let p = ds.bones[b].parent as usize; crate::math::m3(&crate::math::unscale(&w[b].r).0, &crate::math::tr(&crate::math::unscale(&w[p].r).0)) }).collect();
+                    let rrel: Vec<[[f64; 3]; 3]> = skt.iter().map(|&b| { let p = ds.bones[b].parent as usize; crate::math::m3(&crate::math::unscale(&rest[b].r).0, &crate::math::tr(&crate::math::unscale(&rest[p].r).0)) }).collect();
+                    for (a, r) in rel.iter().zip(&rrel) { worst = worst.max(turn(r, a)); }
+                    if let Some(p) = &prev { for (a, b) in rel.iter().zip(p) { spread = spread.max(turn(b, a)); } }
+                    prev = Some(rel);
+                }
+                // 0.198.8 review: the tails' jump where a looped clip goes back (last frame → frame loop_start − 1)
+                let mut wrap: f64 = 0.0;
+                if c.looped() {
+                    let l = (c.loop_start_clamped() as usize).saturating_sub(1) as f64;
+                    let (wa, wb) = (crate::kh2_hair::tests::posed_world(&ds, c, (c.frames - 1) as f64), crate::kh2_hair::tests::posed_world(&ds, c, l));
+                    for &b in &skt {
+                        let p = ds.bones[b].parent as usize;
+                        let ra = crate::math::m3(&crate::math::unscale(&wa[b].r).0, &crate::math::tr(&crate::math::unscale(&wa[p].r).0));
+                        let rb = crate::math::m3(&crate::math::unscale(&wb[b].r).0, &crate::math::tr(&crate::math::unscale(&wb[p].r).0));
+                        wrap = wrap.max(turn(&ra, &rb));
+                    }
+                    if name == "Dark Form skin" {
+                        assert!(wrap <= (1.5 * spread).max(5.0), "the skin's slot {slot}: the tails jump {wrap:.1} deg at the loop (largest step {spread:.1})");
+                    }
+                }
+                rows.push(format!("slot {slot} ({} f, loop {}): off rest {worst:.1}, largest frame step {spread:.2}, wrap {wrap:.1}", c.frames, c.loop_start));
+                // 0.198.8: the skin's tails move (Dark Riku's run copied; the first swing simulated)
+                if name == "Dark Form skin" && (slot == 3 || slot == 44) {
+                    assert!(worst > 10.0, "the skin's slot {slot}: the coat tails turn only {worst:.1} deg off rest");
+                }
+            }
+            eprintln!("== {name}: {} clips", rows.len());
+            for r in rows.iter() { eprintln!("  {r}"); }
+        }
+    }
+}
