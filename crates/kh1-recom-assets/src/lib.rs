@@ -97,6 +97,7 @@ pub mod bluerhapsody;
 pub mod yellowopera;
 pub mod stats;
 pub mod stamp;
+pub mod tails;
 pub mod step;
 pub mod texture;
 pub mod uibin;
