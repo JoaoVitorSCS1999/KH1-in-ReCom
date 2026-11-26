@@ -128,7 +128,7 @@ Everything is in `kh1-recom.ini` (each key is explained in the file) and in the 
 | `target_lock` | `auto` | KH1's Target Lock: `auto` (R1 again unlocks) or `manual` (unlocks when R1 is let go) |
 | `riku_kh1_movement` | `on` | KH1's combat and movement for Riku in Reverse/Rebirth (on out of the box) |
 | `riku_costume`, `riku_keyblade`, `sora_costume` | `default`, `soul_eater`, `default` | the cosmetic costumes and Keyblade, once unlocked |
-| `riku_hair` | `recom` | Riku's hair: `recom`, `kh2` (KH2 Riku's) or `bbs` (BBS kid Riku's); default attire and Halloween Town (Dark Mode keeps Re:CoM's); needs the 1.5+2.5 collection |
+| `riku_hair` | `recom` | Riku's hair: `recom`, `kh2` (KH2 Riku's) or `bbs` (BBS kid Riku's); default attire, Halloween Town and the Dark Form skin (the battle's Dark Mode keeps Re:CoM's); needs the 1.5+2.5 collection |
 | `all_unlock` | `off` | **for debug only**: unlocks every costume and cosmetic Keyblade |
 
 ## Build

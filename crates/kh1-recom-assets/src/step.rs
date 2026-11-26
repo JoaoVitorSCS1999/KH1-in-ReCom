@@ -633,6 +633,27 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                         Err(e) => println!("note: Riku's KH2 hair (group {target}) not built: {e}"),
                     }
                 }
+                // 0.198.7: the Dark Form skin (121 / 131, built above) with KH2 Riku's hair
+                for &(target, base, raw_src, with_heart, atlas) in &rsk::DARK_KH2_HAIR_GROUPS {
+                    let Some(riku) = done.iter().find(|m| m.skin == base).map(|m| m.riku) else {
+                        println!("note: Riku's KH2 hair on the Dark Form skin (group {target}) not built: no group {base}");
+                        continue;
+                    };
+                    if with_heart && heart.is_none() {
+                        println!("note: Riku's KH2 hair on the Dark Form skin with the Keyblade of Heart (group {target}) not built: no Keyblade");
+                        continue;
+                    }
+                    match rsk::build_hair_from(&arc, &keys, &have, base, raw_src, true, target, if with_heart { heart.as_ref() } else { None }, &hair, &atlas) {
+                        Ok(b) => {
+                            for (rel, bytes) in &b.files {
+                                write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
+                            }
+                            println!("Riku's KH2 hair: group {target} = the Dark Form skin (group {base}) with KH2 Riku's hair{}", if with_heart { " and the Keyblade of People's Hearts" } else { "" });
+                            done.push(Made { riku, skin: target, dark: true, blade: with_heart as u8, hair: 1 });
+                        }
+                        Err(e) => println!("note: Riku's KH2 hair on the Dark Form skin (group {target}) not built: {e}"),
+                    }
+                }
                 // 0.197.4: Riku's event packs for the 109-bone KH2-hair skeleton (the boss end's card get and the other event motions)
                 if done.iter().any(|m| m.hair == 1) {
                     match rsk::build_event_packs(&arc, &keys, &hair) {
@@ -667,6 +688,27 @@ fn run_inner(opt: &Options) -> Result<(), String> {
                             done.push(Made { riku: base, skin: target, dark: false, blade: with_heart as u8, hair: 2 });
                         }
                         Err(e) => println!("note: Riku's BBS kid hair (group {target}) not built: {e}"),
+                    }
+                }
+                // 0.198.7: the Dark Form skin (121 / 131, built above) with BBS kid Riku's hair
+                for &(target, base, raw_src, with_heart, atlas) in &rsk::DARK_BBS_HAIR_GROUPS {
+                    let Some(riku) = done.iter().find(|m| m.skin == base).map(|m| m.riku) else {
+                        println!("note: Riku's BBS kid hair on the Dark Form skin (group {target}) not built: no group {base}");
+                        continue;
+                    };
+                    if with_heart && heart.is_none() {
+                        println!("note: Riku's BBS kid hair on the Dark Form skin with the Keyblade of Heart (group {target}) not built: no Keyblade");
+                        continue;
+                    }
+                    match rsk::build_hair_from(&arc, &keys, &have, base, raw_src, true, target, if with_heart { heart.as_ref() } else { None }, &hair, &atlas) {
+                        Ok(b) => {
+                            for (rel, bytes) in &b.files {
+                                write(&rel.split('/').fold(root.clone(), |p, s| p.join(s)), bytes)?;
+                            }
+                            println!("Riku's BBS kid hair: group {target} = the Dark Form skin (group {base}) with BBS kid Riku's hair{}", if with_heart { " and the Keyblade of People's Hearts" } else { "" });
+                            done.push(Made { riku, skin: target, dark: true, blade: with_heart as u8, hair: 2 });
+                        }
+                        Err(e) => println!("note: Riku's BBS kid hair on the Dark Form skin (group {target}) not built: {e}"),
                     }
                 }
             }

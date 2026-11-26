@@ -1868,6 +1868,23 @@ pub const BBS_HAIR_GROUPS: [(u16, u16, bool, crate::ddd_hair::HairTarget); 4] = 
     (197, 111, true, crate::ddd_hair::RIKU_0111_BBS),
 ];
 
+/// 0.198.7 (fork owner, 2026-11-26: "agora implementa todos os cabelos para o a Skin do riku Darkmode tbm"): the Dark Form skin (groups 121 /
+/// 131, Dark Riku's model with Riku's motions) with KH2 Riku's hair, with the Soul Eater and with the Keyblade of Heart: (new group, base
+/// group (the skin's, built first), the group of its RTM / TXA (Dark Riku's), with the Keyblade, the atlas). Groups 184 / 188 / 194 / 198.
+pub const DARK_KH2_HAIR_GROUPS: [(u16, u16, u16, bool, crate::ddd_hair::HairTarget); 4] = [
+    (184, 121, 201, false, crate::ddd_hair::RIKU_0201_KH2),
+    (194, 121, 201, true, crate::ddd_hair::RIKU_0201_KH2),
+    (188, 131, 211, false, crate::ddd_hair::RIKU_0211_KH2),
+    (198, 131, 211, true, crate::ddd_hair::RIKU_0211_KH2),
+];
+/// The same with BBS kid Riku's hair: groups 185 / 189 / 195 / 199.
+pub const DARK_BBS_HAIR_GROUPS: [(u16, u16, u16, bool, crate::ddd_hair::HairTarget); 4] = [
+    (185, 121, 201, false, crate::ddd_hair::RIKU_0201_BBS),
+    (195, 121, 201, true, crate::ddd_hair::RIKU_0201_BBS),
+    (189, 131, 211, false, crate::ddd_hair::RIKU_0211_BBS),
+    (199, 131, 211, true, crate::ddd_hair::RIKU_0211_BBS),
+];
+
 /// 0.197.4 (item 1 of Stage 391; the workspace's `knowledge/ReCoM/recom-skeleton-limits.md` § event packs, Checked (decomp, files)):
 /// Riku's event motion packs, 102 bones each (the boss end's card get 4002, and 4012 … 4082 of other event states). Re:CoM plays no
 /// clip whose bone count differs from the model's, so a 109-bone Riku (the KH2 hair) never ends those motions and the event waits
@@ -1898,6 +1915,13 @@ pub fn build_event_packs(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::eg
 /// One hair group: Riku's group 101 (`have`: what the step wrote this run, else Re:CoM's) under `target`'s names, with
 /// `hair` (KH2 Riku's) on its model and atlas `atlas` ([`crate::ddd_hair::with_hair`]) and, when `blade` is given, the Keyblade of Heart.
 pub fn build_hair(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, base: u16, target: u16, blade: Option<&BladeSource>, hair: &dyn crate::ddd_hair::HairSource, atlas: &crate::ddd_hair::HairTarget) -> Result<Built> {
+    build_hair_from(arc, keys, have, base, base, false, target, blade, hair, atlas)
+}
+
+/// [`build_hair`] on any base (0.198.7): `raw_src` is the group whose RTM / TXA the base uses (Dark Riku's 201 / 211 for the Dark Form
+/// skin's 121 / 131, whose own groups are not in Recom.hed), `dark` that the model is Dark Riku's (the Keyblade's bones, [`with_blade`]).
+#[allow(clippy::too_many_arguments)]
+pub fn build_hair_from(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyTable, have: &std::collections::HashMap<String, Vec<u8>>, base: u16, raw_src: u16, dark: bool, target: u16, blade: Option<&BladeSource>, hair: &dyn crate::ddd_hair::HairSource, atlas: &crate::ddd_hair::HairTarget) -> Result<Built> {
     let get = |ext: &str| -> Result<Vec<u8>> {
         let n = path(base, ext);
         match have.get(&n) {
@@ -1906,7 +1930,7 @@ pub fn build_hair(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
         }
     };
     let raw = |ext: &str| -> Result<(Vec<u8>, Vec<kh1_formats::egs::HdAsset>, i32)> {
-        let n = path(base, ext);
+        let n = path(raw_src, ext);
         let e = arc.find(&n).ok_or_else(|| crate::Error::Format(format!("{n} not in Recom.hed")))?;
         let raw = arc.read_raw_entry(e)?;
         let date = raw.get(12..16).map_or(0, |b| i32::from_le_bytes(b.try_into().unwrap()));
@@ -1918,7 +1942,7 @@ pub fn build_hair(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     let swap = crate::ddd_hair::with_hair(&hair.prepare_mdl(&mdl0)?, &d, &a, atlas, hair)?;
     let ann = hair.bake_ann(&get("ANN")?, &mdl0)?;
     let (mdl, rtm) = match blade {
-        Some(src) => (with_blade(&swap.mdl, src, false)?, rtm_with_blade(&swap.rtm, &swap.hd, date, src)?),
+        Some(src) => (with_blade(&swap.mdl, src, dark)?, rtm_with_blade(&swap.rtm, &swap.hd, date, src)?),
         None => (swap.mdl.clone(), kh1_formats::egs::build_plain_entry(&swap.rtm, &swap.hd, date)?),
     };
     let mut files = vec![(path(target, "MDL"), mdl)];
@@ -2088,6 +2112,78 @@ mod tests {
 
     /// 0.188.0 (owner's install, `RECOM_GAME`, the 1.5+2.5 collection only): the KH2 hair groups are built from group 101 with
     /// their own atlas name (both hairs can be in the game).
+    /// 0.198.7: the Dark Form skin's hair groups (KH2's and BBS's, with the Soul Eater and the Keyblade of Heart, default and Halloween
+    /// Town): built on the skin's own files, not in Recom.hed, every clip with the model's bone count, the hair changed, the coat's list
+    /// B kept. The swapped models go to the workspace's `local/assets/recom/riku-hair/out/dark/` for the renders.
+    #[test]
+    fn the_dark_hair_groups_are_built_from_the_dark_skin() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let kh2 = crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+        let bbs = crate::bbs_hair::BbsHairSource::read(&g, &keys).unwrap();
+        let Ok((_, assets, _)) = install::kh1(&g, keys.clone()).unwrap().read_full(BLADE_MODEL) else { return };
+        let src = BladeSource::from_assets(&assets).unwrap();
+        let mut have = std::collections::HashMap::new();
+        for &(riku, dark, skin) in &SKIN_GROUPS {
+            for (rel, bytes) in build_with(&arc, &keys, riku, dark, skin, None).unwrap().files {
+                have.insert(rel, bytes);
+            }
+        }
+        let out = std::path::PathBuf::from(format!("{}/local/assets/recom/riku-hair/out/dark", crate::kh2_motion::tests::workspace()));
+        let _ = std::fs::create_dir_all(&out);
+        let hairs: [(&dyn crate::ddd_hair::HairSource, &[(u16, u16, u16, bool, crate::ddd_hair::HairTarget); 4]); 2] = [(&kh2, &DARK_KH2_HAIR_GROUPS), (&bbs, &DARK_BBS_HAIR_GROUPS)];
+        for (hair, groups) in hairs {
+            for &(target, base, raw_src, heart, atlas) in groups {
+                assert!(arc.find(&path(target, "MDL")).is_none(), "group {target} is free in Recom.hed");
+                let b = build_hair_from(&arc, &keys, &have, base, raw_src, true, target, if heart { Some(&src) } else { None }, hair, &atlas).unwrap();
+                let names: Vec<&str> = b.files.iter().map(|f| f.0.as_str()).collect();
+                for ext in ["MDL", "ANN", "EET", "SES"] {
+                    assert!(names.contains(&path(target, ext).as_str()), "{target}: {ext}");
+                }
+                let mdl = &b.files.iter().find(|f| f.0 == path(target, "MDL")).unwrap().1;
+                let ann = Ann::parse(&b.files.iter().find(|f| f.0 == path(target, "ANN")).unwrap().1).unwrap();
+                let sk = RecomSkeleton::parse(mdl).unwrap();
+                let bad: Vec<usize> = ann.slots.iter().enumerate().filter_map(|(i, s)| s.clip.as_ref().filter(|c| c.bones as usize != sk.bones.len()).map(|_| i)).collect();
+                assert!(bad.is_empty(), "{target}: clips {bad:?} have another bone count than the model's {}", sk.bones.len());
+                let base_mdl = &have[&path(base, "MDL")];
+                let (old, new) = (crate::mdl::split_parts(base_mdl).unwrap(), crate::mdl::split_parts(mdl).unwrap());
+                assert_ne!(old[3], new[3], "{target}: the body's hair changed");
+                let p3 = crate::mdl::MdlPart::parse_bytes(&new[3]).unwrap();
+                assert_eq!(p3.list_b.as_ref().map(|l| l.len()), crate::mdl::MdlPart::parse_bytes(&old[3]).unwrap().list_b.as_ref().map(|l| l.len()), "{target}: the coat's list B kept");
+                eprintln!("group {target}: {} bones, {} clips", sk.bones.len(), b.clips);
+                if !heart {
+                    let _ = std::fs::write(out.join(format!("PL{target:04}.MDL")), mdl);
+                    let _ = std::fs::write(out.join(format!("PL{target:04}.ANN")), &b.files.iter().find(|f| f.0 == path(target, "ANN")).unwrap().1);
+                    if let Some(r) = b.files.iter().find(|f| f.0 == format!("raw/{}", path(target, "RTM"))) { let _ = std::fs::write(out.join(format!("PL{target:04}.RTM.raw")), &r.1); }
+                }
+            }
+        }
+    }
+
+    /// 0.198.7 (in game: KH2's hair on the Dark Form in long straight sticks): as in the asset step, one KH2 source builds Riku's group
+    /// first and the Dark Form's after; the Dark Form's must be byte for byte what a fresh source builds (the source kept the first
+    /// skeleton's rig).
+    #[test]
+    fn one_kh2_source_builds_riku_then_the_dark_form_as_a_fresh_one() {
+        let Some(g) = game() else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let mut have = std::collections::HashMap::new();
+        for (rel, bytes) in build_with(&arc, &keys, 101, 201, 121, None).unwrap().files {
+            have.insert(rel, bytes);
+        }
+        let read = || crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+        let (shared, fresh) = (read(), read());
+        build_hair(&arc, &keys, &have, 101, 182, None, &shared, &crate::ddd_hair::RIKU_0101_KH2).unwrap();
+        let a = build_hair_from(&arc, &keys, &have, 121, 201, true, 184, None, &shared, &crate::ddd_hair::RIKU_0201_KH2).unwrap();
+        let b = build_hair_from(&arc, &keys, &have, 121, 201, true, 184, None, &fresh, &crate::ddd_hair::RIKU_0201_KH2).unwrap();
+        for ((na, da), (nb, db)) in a.files.iter().zip(&b.files) {
+            assert_eq!(na, nb);
+            assert!(da == db, "{na}: the shared source built it differently");
+        }
+    }
+
     #[test]
     fn the_kh2_hair_groups_are_built_from_rikus_101() {
         let Some(g) = game() else { return };
