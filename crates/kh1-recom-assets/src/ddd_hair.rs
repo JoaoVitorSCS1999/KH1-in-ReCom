@@ -55,6 +55,13 @@ pub struct HairTarget {
 /// Riku's default attire (`PL0101`) with KH2 Riku's hair ([`crate::kh2_hair`]): the new atlas's name.
 pub const RIKU_0101_KH2: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_kh2" };
 
+/// 0.197.2: Riku's Halloween Town attire (`PL0111`, the same skeleton as `PL0101`, Checked (files)) with KH2 Riku's hair. The hair's
+/// texture keeps one name for every group (Re:CoM looks names up globally; the picture is the same).
+pub const RIKU_0111_KH2: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_kh2" };
+
+/// 0.197.2: the Halloween Town attire with BBS kid Riku's hair.
+pub const RIKU_0111_BBS: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_bbs" };
+
 /// The same attire with BBS kid Riku's hair ([`crate::bbs_hair`]).
 pub const RIKU_0101_BBS: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_bbs" };
 
@@ -78,6 +85,8 @@ pub struct SrcTri {
     pub island: usize,
     /// True when this triangle continues the previous one's strip (only its third corner is new).
     pub cont: bool,
+    /// A lining triangle (a copy of a hair triangle pulled toward the head's centre, BBS 0.194.2, KH2 0.197.1).
+    pub lining: bool,
 }
 
 /// A hair ready for the swap, whatever its game.
@@ -133,6 +142,27 @@ pub trait HairSource {
     fn two_sided_face(&self, _p: [f64; 3], _head: [f64; 3]) -> bool {
         false
     }
+    /// Whether the hair is packed into Re:CoM's atlas (renamed to the target's name) as until 0.196.x, instead of its own
+    /// texture at the source's size (0.197.0, the default: the KH2 hair's islands were packed at 0.4 of their size).
+    fn packed_atlas(&self) -> bool {
+        false
+    }
+    /// Whether the lining's triangles also get their flat copy in the plain proxy (part 2), as every hair triangle does (BBS, as
+    /// 0.194.2 was seen in game); KH2's do not (0.197.1: the proxy's flat copies show as flat polygons, 0.196.4).
+    fn lining_in_plain(&self) -> bool {
+        true
+    }
+    /// Whether the open head edge with midpoint `p` (world rest; the head bone's at rest is `head`) gets a curtain of its own skin down
+    /// to the returned height under `head` (metres, negative), its bottom corners on the returned bone (0.198.2: KH2's nape).
+    fn nape_curtain(&self, _p: [f64; 3], _head: [f64; 3]) -> Option<(f64, &'static str)> {
+        None
+    }
+    /// 0.198.6: the nape curtain wears the nearest hair vertex's texel (and the hair's texture) instead of the skin's, and its bottom
+    /// corners are pulled this far (metres) toward the bottom bone's origin, level, so they sit inside what covers that bone (the
+    /// collar). `None`: skin, straight down (0.198.2).
+    fn nape_curtain_hair(&self) -> Option<f64> {
+        None
+    }
     /// The look's own motion pack, made from Re:CoM's (`ann`) for the original model `mdl` (none: Re:CoM's pack as it is).
     fn bake_ann(&self, _ann: &[u8], _mdl: &[u8]) -> Result<Option<Vec<u8>>> {
         Ok(None)
@@ -152,6 +182,8 @@ pub struct HairReport {
     pub other_texture: usize,
     /// Triangles in a hair island that touch neither the head nor a hair bone (kept).
     pub stray_in_hair_islands: usize,
+    /// Open head edges given the nape curtain (0.198.2).
+    pub nape: usize,
     /// The source's hair triangles added (DDD's, or KH2's).
     pub ddd_hair: usize,
     /// The source's skin triangles left out (DDD only).
@@ -182,12 +214,16 @@ fn skirt_segs_push(segs: &mut Vec<Seg>, tex: u32, a: MeshVertex, b: MeshVertex, 
 pub struct HairSwap {
     /// The new `.MDL`: parts 0 and 1 (the weapon) as they were, parts 2 and 3 rebuilt.
     pub mdl: Vec<u8>,
-    /// The new `.RTM`: the atlas entry replaced by `<new_texture>.tm2`.
+    /// The new `.RTM`: `<new_texture>.tm2` added (0.197.0; with [`HairSource::packed_atlas`]: the atlas entry replaced by it).
     pub rtm: Vec<u8>,
-    /// The RTM's HD assets: the old atlas's DDS replaced by `<new_texture>_tm2.dds`.
+    /// The RTM's HD assets: `<new_texture>_tm2.dds` added (packed: the old atlas's DDS replaced by it).
     pub hd: Vec<HdAsset>,
-    /// The new atlas's DDS (the one in `hd`).
+    /// The new texture's DDS (the one in `hd`): the hair's own picture (packed: the new atlas).
     pub dds: Vec<u8>,
+    /// Part 3's texture index of the hair's triangles (packed: the atlas's, 1).
+    pub hair_tex: u32,
+    /// Riku's atlas's DDS as it was (debug renders of the face).
+    pub atlas_dds: Vec<u8>,
     /// Counts.
     pub report: HairReport,
 }
@@ -738,6 +774,32 @@ fn encode_dds(like: &[u8], img: &Image) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// A DDS of `img`: A8R8G8B8, no mipmaps (as Re:CoM's own 32-bit HD textures, e.g. `n_zz110_01`).
+pub fn dds_argb(img: &Image) -> Vec<u8> {
+    let mut h = vec![0u8; 128];
+    let mut put = |o: usize, v: u32| h[o..o + 4].copy_from_slice(&v.to_le_bytes());
+    put(0, u32::from_le_bytes(*b"DDS "));
+    put(4, 124);
+    put(8, 0x100F); // caps, height, width, pitch, pixel format
+    put(12, img.h as u32);
+    put(16, img.w as u32);
+    put(20, 4 * img.w as u32);
+    put(76, 32);
+    put(80, 0x41); // RGB, alpha pixels
+    put(88, 32);
+    put(92, 0xFF_0000);
+    put(96, 0xFF00);
+    put(100, 0xFF);
+    put(104, 0xFF00_0000);
+    put(108, 0x1000); // texture
+    let mut out = h;
+    out.reserve(4 * img.px.len());
+    for p in &img.px {
+        out.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
+    }
+    out
+}
+
 // ---------------------------------------------------------------------------------------------
 // The swap.
 // ---------------------------------------------------------------------------------------------
@@ -812,7 +874,11 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
     let uv_of = |t: &RTri| t.v.map(|v| v.uv().map_or([0.0; 2], |u| [u[0] as f64, u[1] as f64]));
     let keep_uv: Vec<_> = tris3.iter().zip(&remove3).filter(|(t, &r)| !r && t.tex == atlas_tex).map(|(t, _)| uv_of(t)).collect();
     let all_uv: Vec<_> = tris3.iter().filter(|t| t.tex == atlas_tex).map(uv_of).collect();
-    let atlas = build_atlas(&old_img, &hair.atlas, &hair, &keep_uv, &all_uv)?;
+    // 0.197.0: the hair on its own texture (`target.new_texture`, the source's picture at its own size), Riku's atlas left as it is
+    // (its name too: his `.TXA` animates the eyes and lips on `n_zz110_01.tm2` by name, Checked (files)); a source may still ask
+    // for the old packing into Re:CoM's atlas ([`HairSource::packed_atlas`]).
+    let atlas = if src.packed_atlas() { Some(build_atlas(&old_img, &hair.atlas, &hair, &keep_uv, &all_uv)?) } else { None };
+    let hair_tex = if atlas.is_some() { atlas_tex } else { p3.textures.len() as u32 };
 
     // The source's triangles as Re:CoM vertices.
     let inv: Vec<[[f64; 3]; 3]> = world.iter().map(|w| inv3(&w.r)).collect::<Result<_>>()?;
@@ -820,7 +886,6 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         let h = world[head].t;
         [h[0] + HEAD_CENTRE[0], h[1] + HEAD_CENTRE[1], h[2] + HEAD_CENTRE[2]]
     };
-    let (iw, ih) = (atlas.img.w as f64, atlas.img.h as f64);
     // One-sided sources: the winding most triangles have away from the head's centre is the source's front.
     let one_sided_flag = hair.one_sided.then(|| {
         let out = hair.tris.iter().filter(|t| facing(t.v.clone().map(|v| v.pos), centre) == 0x20).count();
@@ -828,17 +893,23 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
     });
     let mut ddd_segs: Vec<Seg> = Vec::new();
     for t in &hair.tris {
-        let rect = atlas.rects[atlas.of_island[t.island]];
         let mk = |v: &SrcVert, draw_facing: Option<u32>| -> Result<MeshVertex> {
             let b = names.iter().position(|n| *n == v.bone).ok_or_else(|| Error::Format(format!("hair: Re:CoM has no bone {}", v.bone)))?;
             let p = to_local(&world[b], &inv[b], v.pos);
-            let (px, py) = (rect.dx as f64 + (v.uv[0] * iw - rect.sx as f64) * atlas.scale, rect.dy as f64 + (v.uv[1] * ih - rect.sy as f64) * atlas.scale);
+            let (u, w) = match &atlas {
+                Some(atlas) => {
+                    let rect = atlas.rects[atlas.of_island[t.island]];
+                    let (iw, ih) = (atlas.img.w as f64, atlas.img.h as f64);
+                    ((rect.dx as f64 + (v.uv[0] * iw - rect.sx as f64) * atlas.scale) / iw, (rect.dy as f64 + (v.uv[1] * ih - rect.sy as f64) * atlas.scale) / ih)
+                }
+                None => (v.uv[0], v.uv[1]),
+            };
             let q0 = match draw_facing {
                 None => START_Q0,
                 Some(f) => [f, F32_ONE, 0, 0x2000],
             };
             let bits = |x: f64| (x as f32).to_bits();
-            Ok(MeshVertex { q0, q1: [bits(p[0]), bits(p[1]), bits(p[2]), ((b as u32) << 16) | (b as u32 * 4)], q2: Some([((px / iw) as f32).to_bits(), ((py / ih) as f32).to_bits(), F32_ONE, atlas_tex]) })
+            Ok(MeshVertex { q0, q1: [bits(p[0]), bits(p[1]), bits(p[2]), ((b as u32) << 16) | (b as u32 * 4)], q2: Some([(u as f32).to_bits(), (w as f32).to_bits(), F32_ONE, hair_tex]) })
         };
         let f = match one_sided_flag {
             Some(f) => f,
@@ -847,7 +918,7 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         if t.cont && !ddd_segs.is_empty() {
             ddd_segs.last_mut().unwrap().verts.push(mk(&t.v[2], Some(f))?);
         } else {
-            ddd_segs.push(Seg { tex: atlas_tex, verts: vec![mk(&t.v[0], None)?, mk(&t.v[1], None)?, mk(&t.v[2], Some(f))?] });
+            ddd_segs.push(Seg { tex: hair_tex, verts: vec![mk(&t.v[0], None)?, mk(&t.v[1], None)?, mk(&t.v[2], Some(f))?] });
         }
     }
 
@@ -923,8 +994,8 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         let nearest = |p: [f64; 3]| -> Option<(f64, usize)> {
             hv.iter().enumerate().map(|(i, h)| ((0..3).map(|k| (h.0[k] - p[k]).powi(2)).sum::<f64>().sqrt(), i)).min_by(|a, b| a.0.total_cmp(&b.0))
         };
-        // a skirt vertex: the head's vertex `v` wearing the texel of hair vertex `h`
-        let on_hair = |v: MeshVertex, h: &MeshVertex| MeshVertex { q0: START_Q0, q2: match (v.q2, h.q2) { (Some(a), Some(b)) => Some([b[0], b[1], a[2], a[3]]), (a, _) => a }, ..v };
+        // a skirt vertex: the head's vertex `v` wearing the texel (and texture) of hair vertex `h`
+        let on_hair = |v: MeshVertex, h: &MeshVertex| MeshVertex { q0: START_Q0, q2: match (v.q2, h.q2) { (Some(a), Some(b)) => Some([b[0], b[1], a[2], b[3]]), (a, _) => a }, ..v };
         let mut keys: Vec<_> = edges.keys().copied().collect();
         keys.sort();
         for k in keys {
@@ -956,10 +1027,80 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
                     continue;
                 }
                 for f in [0u32, 0x20] {
-                    skirt_segs_push(&mut segs3, atlas_tex, start_of(a), start_of(b), MeshVertex { q0: [f, F32_ONE, 0, 0x2000], ..c });
+                    skirt_segs_push(&mut segs3, hair_tex, start_of(a), start_of(b), MeshVertex { q0: [f, F32_ONE, 0, 0x2000], ..c });
                 }
                 skirt += 1;
             }
+        }
+    }
+    // The nape curtain (0.198.2): open head / neck edges the source selects get a two-sided strip of their own skin straight down to
+    // the neck's base, its bottom corners on the source's bone, so the skull's open back is closed when the hair lifts off it.
+    let mut nape = 0usize;
+    // the hair's vertices (world rest, as written), for a curtain on the hair's texels
+    let hv: Vec<([f64; 3], MeshVertex)> = hair
+        .tris
+        .iter()
+        .zip(&ddd_segs)
+        .filter(|(t, s)| !t.cont && !t.lining && s.verts.len() == 3)
+        .flat_map(|(t, s)| (0..3).map(move |j| (t.v[j].pos, s.verts[j])))
+        .collect();
+    {
+        let key3 = |p: [f64; 3]| [(p[0] * 1e4).round() as i64, (p[1] * 1e4).round() as i64, (p[2] * 1e4).round() as i64];
+        let mut edges: HashMap<[i64; 6], (usize, [f64; 3], [f64; 3], MeshVertex, MeshVertex)> = HashMap::new();
+        for t in &kept3 {
+            if t.tex != atlas_tex || !t.v.iter().all(|v| v.bone() == head || names[v.bone()].starts_with("neck")) {
+                continue;
+            }
+            let w = t.v.map(|v| world[v.bone()].point(v.pos().map(|x| x as f64)));
+            for (x, y) in [(0usize, 1usize), (1, 2), (2, 0)] {
+                let (ka, kb) = (key3(w[x]), key3(w[y]));
+                let (lo, hi) = if ka <= kb { (ka, kb) } else { (kb, ka) };
+                let e = edges.entry([lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]]).or_insert((0, w[x], w[y], t.v[x], t.v[y]));
+                e.0 += 1;
+            }
+        }
+        let mut keys: Vec<_> = edges.keys().copied().collect();
+        keys.sort();
+        for k in keys {
+            let (n, pa, pb, va, vb) = edges[&k];
+            let mid = [0, 1, 2].map(|i| (pa[i] + pb[i]) / 2.0);
+            let Some((bottom, bone)) = (if n == 1 { src.nape_curtain(mid, world[head].t) } else { None }) else { continue };
+            let Some(nb) = names.iter().position(|x| x == bone) else { continue };
+            let tuck = src.nape_curtain_hair();
+            let low = |p: [f64; 3], v: MeshVertex| -> MeshVertex {
+                let mut p = [p[0], world[head].t[1] + bottom, p[2]];
+                if let Some(d) = tuck {
+                    let o = world[nb].t;
+                    let (dx, dz) = (o[0] - p[0], o[2] - p[2]);
+                    let l = (dx * dx + dz * dz).sqrt().max(1e-9);
+                    let k = d.min(l) / l;
+                    p = [p[0] + dx * k, p[1], p[2] + dz * k];
+                }
+                let q = to_local(&world[nb], &inv[nb], p);
+                let bits = |x: f64| (x as f32).to_bits();
+                MeshVertex { q0: START_Q0, q1: [bits(q[0]), bits(q[1]), bits(q[2]), ((nb as u32) << 16) | (nb as u32 * 4)], ..v }
+            };
+            let (la, lb) = (low(pa, va), low(pb, vb));
+            // 0.198.6: on the hair's texel (the nearest hair vertex's), not the skin's
+            let (mut va, mut vb, mut la, mut lb, mut tex) = (va, vb, la, lb, atlas_tex);
+            if tuck.is_some() {
+                let near = |p: [f64; 3]| hv.iter().min_by(|a, b| crate::math::dist(a.0, p).total_cmp(&crate::math::dist(b.0, p))).map(|h| h.1);
+                let wear = |v: MeshVertex, h: Option<MeshVertex>| match (v.q2, h.and_then(|h| h.q2)) { (Some(a), Some(b)) => MeshVertex { q2: Some([b[0], b[1], a[2], b[3]]), ..v }, _ => v };
+                // one texel for the whole strip (the hair vertex nearest its middle): two texels from different islands stretched
+                // the picture between them (model-reviewer of 0.198.6e: a light stripe beside the neck from the front)
+                let h = near(mid);
+                va = wear(va, h);
+                vb = wear(vb, h);
+                la = wear(la, h);
+                lb = wear(lb, h);
+                tex = hair_tex;
+            }
+            for (a, b, c) in [(va, vb, lb), (va, lb, la)] {
+                for f in [0u32, 0x20] {
+                    skirt_segs_push(&mut segs3, tex, start_of(a), start_of(b), MeshVertex { q0: [f, F32_ONE, 0, 0x2000], ..c });
+                }
+            }
+            nape += 1;
         }
     }
     let segs2 = segments(&kept2);
@@ -968,6 +1109,9 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
     // asks to leave out (0.196.4). `ddd_segs[i]` is `hair.tris[i]`'s strip while no triangle continues another's strip.
     let mut plain_hair_dropped = 0;
     for (i, s) in ddd_segs.iter().enumerate() {
+        if hair.tris.get(i).is_some_and(|t| t.lining && !src.lining_in_plain()) {
+            continue;
+        }
         if hair.tris.get(i).is_some_and(|t| !t.cont && src.drop_plain_hair_copy(t, world[head].t)) {
             plain_hair_dropped += 1;
             continue;
@@ -989,7 +1133,13 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
     let list3 = pack(&segs3, FMT_TEXTURED, g3, r3, max_vertices(&p3.list_a, 3));
     let list2 = pack(&plain_segs, FMT_PLAIN, g2, r2, max_vertices(&p2.list_a, 2));
     let mut textures = p3.textures.clone();
-    textures[atlas_tex as usize][..16].copy_from_slice(&name16(target.new_texture));
+    if atlas.is_some() {
+        textures[atlas_tex as usize][..16].copy_from_slice(&name16(target.new_texture));
+    } else {
+        let mut n = [0u8; 32];
+        n[..16].copy_from_slice(&name16(target.new_texture));
+        textures.push(n);
+    }
     let (np3, np2) = ([p3.list_a.len(), p2.list_a.len()], [list3.len(), list2.len()]);
     let new3 = MdlPart { bounds: crate::keyblade::part_bounds(nb, &[&list3]), textures, list_a: list3, ..p3.clone() };
     let new2 = MdlPart { bounds: crate::keyblade::part_bounds(nb, &[&list2]), list_a: list2, ..p2.clone() };
@@ -997,14 +1147,30 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
     parts[3] = new3.write_bytes()?;
 
     // The texture.
-    let dds = encode_dds(&old_asset.data, &atlas.img)?;
     let mut pack_rtm = crate::rtm::Rtm::parse(rtm)?;
-    let (entry, new_hd, _) = crate::keyblade::texture_entry(target.new_texture, &dds)?;
-    let old_entry = format!("{}.tm2", target.texture);
-    let at = pack_rtm.entries.iter().position(|e| e.name_str() == old_entry).ok_or_else(|| Error::Format(format!("hair: the RTM has no {old_entry}")))?;
-    pack_rtm.entries[at] = entry;
-    let mut hd_out: Vec<HdAsset> = hd.iter().filter(|a| a.name != old_asset.name && a.name != new_hd.name).cloned().collect();
-    hd_out.push(new_hd);
+    let (dds, hd_out) = match &atlas {
+        Some(atlas) => {
+            let dds = encode_dds(&old_asset.data, &atlas.img)?;
+            let (entry, new_hd, _) = crate::keyblade::texture_entry(target.new_texture, &dds)?;
+            let old_entry = format!("{}.tm2", target.texture);
+            let at = pack_rtm.entries.iter().position(|e| e.name_str() == old_entry).ok_or_else(|| Error::Format(format!("hair: the RTM has no {old_entry}")))?;
+            pack_rtm.entries[at] = entry;
+            let mut hd_out: Vec<HdAsset> = hd.iter().filter(|a| a.name != old_asset.name && a.name != new_hd.name).cloned().collect();
+            hd_out.push(new_hd);
+            (dds, hd_out)
+        }
+        None => {
+            // opaque, as the packed atlas was written
+            let dds = dds_argb(&Image { w: hair.atlas.w, h: hair.atlas.h, px: hair.atlas.px.iter().map(|p| [p[0], p[1], p[2], 255]).collect() });
+            let (entry, new_hd, _) = crate::keyblade::texture_entry(target.new_texture, &dds)?;
+            let new_entry = format!("{}.tm2", target.new_texture);
+            pack_rtm.entries.retain(|e| e.name_str() != new_entry);
+            pack_rtm.entries.push(entry);
+            let mut hd_out: Vec<HdAsset> = hd.iter().filter(|a| a.name != new_hd.name).cloned().collect();
+            hd_out.push(new_hd);
+            (dds, hd_out)
+        }
+    };
 
     let report = HairReport {
         riku_on_atlas: split.on_atlas,
@@ -1015,15 +1181,16 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         face_two_sided,
         proxy_dropped,
         skirt,
+        nape,
         plain_hair_dropped,
         ddd_hair: hair.tris.len(),
         ddd_skin: hair.skin,
         ddd_islands: hair.tris.iter().map(|t| t.island).collect::<HashSet<_>>().len(),
-        atlas_rects: atlas.rects.len(),
-        atlas_scale: atlas.scale,
+        atlas_rects: atlas.as_ref().map_or(0, |a| a.rects.len()),
+        atlas_scale: atlas.as_ref().map_or(1.0, |a| a.scale),
         packets: ([np3[0], np3[1]], np2),
     };
-    Ok(HairSwap { mdl: join_parts(&parts), rtm: pack_rtm.write(), hd: hd_out, dds, report })
+    Ok(HairSwap { mdl: join_parts(&parts), rtm: pack_rtm.write(), hd: hd_out, dds, hair_tex, atlas_dds: old_asset.data.clone(), report })
 }
 
 #[cfg(test)]
@@ -1117,6 +1284,41 @@ pub(crate) mod tests {
         // the bounds of the original part are what part_bounds computes (so the rebuilt ones can be trusted)
         assert_eq!(p3.bounds, crate::keyblade::part_bounds(p3.bones.len(), &[&p3.list_a]));
         assert_eq!(join_parts(&parts), f.mdl);
+    }
+
+    /// Part 3 of a swap and one picture for the debug renders (0.197.0): with the hair on its own texture, Riku's atlas (left) and
+    /// the hair's texture (right, scaled to the atlas's height) side by side, every UV moved onto it and the hair's texture index
+    /// made the atlas's (1), so the renders that read texture 1 with one picture still show both. A packed swap is returned as it is.
+    pub(crate) fn test_view(swap: &HairSwap) -> (MdlPart, Image) {
+        let mut p3 = MdlPart::parse_bytes(&split_parts(&swap.mdl).unwrap()[3]).unwrap();
+        let hair = decode_dds(&swap.dds).unwrap();
+        if swap.hair_tex == 1 {
+            return (p3, hair);
+        }
+        let atlas = decode_dds(&swap.atlas_dds).unwrap();
+        let hw = hair.w * atlas.h / hair.h;
+        let (w, h) = (atlas.w + hw, atlas.h);
+        let mut px = vec![[0u8, 0, 0, 255]; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                px[y * w + x] = if x < atlas.w { atlas.px[y * atlas.w + x] } else { hair.px[(y * hair.h / h) * hair.w + (x - atlas.w) * hair.w / hw] };
+            }
+        }
+        let (fa, fh) = (atlas.w as f32 / w as f32, hw as f32 / w as f32);
+        for k in p3.list_a.iter_mut() {
+            for v in k.verts.iter_mut() {
+                if let Some(q) = v.q2.as_mut() {
+                    let u = f32::from_bits(q[0]);
+                    if q[3] == swap.hair_tex {
+                        q[0] = (fa + u * fh).to_bits();
+                        q[3] = 1;
+                    } else if q[3] == 1 {
+                        q[0] = (u * fa).to_bits();
+                    }
+                }
+            }
+        }
+        (p3, Image { w, h, px })
     }
 
     /// Bounds (world, metres) of PL0101's kept head-bone-only skin triangles at z > 0 (debug).

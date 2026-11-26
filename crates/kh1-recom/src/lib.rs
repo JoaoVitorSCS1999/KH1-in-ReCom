@@ -130,6 +130,7 @@ pub mod text_fit;
 pub mod trace;
 pub mod units;
 pub mod unlocks;
+pub mod riku_unlocks;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

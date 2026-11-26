@@ -1151,8 +1151,18 @@ pub fn confirm_is_circle() -> bool {
 /// are empty and never set up; his Customize page (0.149.0, his Settings list) sets them after.
 /// Riku's spell levels (0.187.0): Sora's seven at level 3 while the magic is in (the owner's "deixa desbloqueado no
 /// menu"); the command menu and his Customize picker read this one answer, so a spell unlocks in both together.
+/// 0.198.0 (fork owner, 2026-11-26): learned through his story (`crate::riku_unlocks`, `super::unlocks::riku_sync`), not all at 3.
 pub fn riku_spell_levels() -> [u8; crate::command_menu::spell::COUNT] {
-    if super::magic::installed() { [3; crate::command_menu::spell::COUNT] } else { [0; crate::command_menu::spell::COUNT] }
+    if !super::magic::installed() {
+        return [0; crate::command_menu::spell::COUNT];
+    }
+    // SAFETY: a read inside Re:CoM's save block.
+    let l = unsafe { super::unlocks::riku_levels() };
+    let mut out = [0u8; crate::command_menu::spell::COUNT];
+    for (o, v) in out.iter_mut().zip(l) {
+        *o = v;
+    }
+    out
 }
 
 unsafe fn riku_world(pl: usize) -> World {

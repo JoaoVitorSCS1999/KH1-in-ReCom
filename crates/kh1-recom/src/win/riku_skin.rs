@@ -16,6 +16,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
 static SKINS: OnceLock<Vec<Skin>> = OnceLock::new();
+/// 0.197.4: (Re:CoM's event pack group, its 109-bone copy) whose copy file the asset step wrote (`rs::event_packs`).
+static EVENT_PACKS: OnceLock<Vec<(u16, u16)>> = OnceLock::new();
 /// Riku's packs carry Sora's KH1 Guard (manifest + files), and his action tables name it.
 static GUARD: AtomicBool = AtomicBool::new(false);
 static GUARD_FILES: AtomicBool = AtomicBool::new(false);
@@ -124,6 +126,12 @@ pub fn preload(manifest: Option<&Path>) {
     if guard_files && !dark_files {
         log("riku guard: no PL0201 / PL0211.ANN of the asset step (older than 0.183.2?): Dark Riku's Guard keeps his clash recoil; run Build again");
     }
+    // 0.197.4: the event pack copies the step wrote
+    let packs: Vec<(u16, u16)> = rs::event_packs(&text).into_iter().filter(|p| crate::keyblade_models::resource_path(p.1, "ANN").split('/').fold(dir.clone(), |d, x| d.join(x)).is_file()).collect();
+    if !packs.is_empty() {
+        log(&format!("riku skin: event pack copies for the KH2 hair {packs:?}"));
+    }
+    let _ = EVENT_PACKS.set(packs);
     let mut ok = Vec::new();
     for s in skins {
         let missing: Vec<String> = rs::files(s.skin).into_iter().filter(|f| !f.split('/').fold(dir.clone(), |p, x| p.join(x)).is_file()).collect();
@@ -231,6 +239,17 @@ pub fn recoil_row(dark: bool) -> Option<u32> {
 }
 
 /// The skins whose rows go in the PLAYER table.
+/// The event pack copies (none before the manifest is read or without them).
+pub fn event_packs() -> &'static [(u16, u16)] {
+    EVENT_PACKS.get().map_or(&[], |v| v.as_slice())
+}
+
+/// The look asks for the KH2 hair (109 bones, so Re:CoM's 102-bone event packs need their copies).
+pub unsafe fn kh2_hair_look() -> bool {
+    let l = chosen(&super::settings());
+    l.hair == 1 && !l.dark
+}
+
 pub fn skins() -> Vec<Skin> {
     SKINS.get().cloned().unwrap_or_default()
 }

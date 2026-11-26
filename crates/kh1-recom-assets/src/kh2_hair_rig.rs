@@ -43,10 +43,27 @@ pub const KH2_RUN: usize = 8;
 pub const KH2_JUMP: usize = 14;
 /// See [`KH2_IDLE`].
 pub const KH2_FALL: usize = 18;
+/// 0.197.5: KH2 slots of the motions item 4 of Stage 391 maps (the workspace's `knowledge/KH2/kh2-riku-motion-roles.md`): LAND
+/// (A005), HANG (A100), DAMAGE_S_FRONT_HIGH (A200), A202 (pushed forward from behind), A301 (a right-to-left sweep). Checked (files:
+/// the slots' names); the roles are OpenKH's names and measured profiles.
+pub const KH2_LAND: usize = 22;
+/// See [`KH2_LAND`].
+pub const KH2_HANG: usize = 30;
+/// See [`KH2_LAND`].
+pub const KH2_DAMAGE_FRONT: usize = 42;
+/// See [`KH2_LAND`].
+pub const KH2_DAMAGE_BACK: usize = 50;
+/// See [`KH2_LAND`].
+pub const KH2_SWING: usize = 608;
 /// Riku's `PL0101.ANN` slot → KH2 slot. Assumption (files: Re:CoM's clips are named by number only; picked by the feet: idle =
 /// looped, feet still on the floor; walk / run = looped, feet apart 0.47-0.61 / 0.81-0.82 m, the lower foot rising 0.06 / 0.18-0.31 m;
 /// jump = the lower foot leaving the floor; fall = looped clips in the air).
-pub const CLIP_MAP: [(usize, usize); 14] = [
+/// 0.197.5 (asset-analyst, `kh2-riku-motion-roles.md`; Riku's action table `0x1407C6370` rows 4-7 and KH1 Riku's bakes, Checked
+/// (exe, files)): his jump / apex / fall / land are slots 4 / 5 / 6 / 7; 10 / 12 / 13 (0.195.0's jump and fall) are rows 9 / 0xB /
+/// 0xC, the ladder set (hands above the head), now on the idle sway. Added the pairs the note rates high or medium: 16 ledge grab →
+/// HANG, 37 flinch from the front → A200, 38 from behind → A202, 44 the first ground swing → A301 (low-medium). Every other clip
+/// keeps KH2's idle sway (KH2 Riku has no guard, cast, card or dodge motion).
+pub const CLIP_MAP: [(usize, usize); 19] = [
     (1, KH2_IDLE),
     (31, KH2_IDLE),
     (79, KH2_IDLE),
@@ -57,17 +74,34 @@ pub const CLIP_MAP: [(usize, usize); 14] = [
     (3, KH2_RUN),
     (21, KH2_RUN),
     (33, KH2_RUN),
-    (10, KH2_JUMP),
+    (4, KH2_JUMP),
     (26, KH2_JUMP),
-    (12, KH2_FALL),
-    (13, KH2_FALL),
+    (5, KH2_FALL),
+    (6, KH2_FALL),
+    (7, KH2_LAND),
+    (16, KH2_HANG),
+    (37, KH2_DAMAGE_FRONT),
+    (38, KH2_DAMAGE_BACK),
+    (44, KH2_SWING),
 ];
 /// Extra forward turn (degrees; negative = the hanging strands drop) per KH2 motion, the owner's ask on 0.195.0 in game: "a animação
 /// quando corre ficou quase perfeito da parte de trás do cabelo mas ele sobe Muito". Not KH2's (in KH2's own poses the back of the
 /// hair sits higher still: KH2's head is bent 28-46 deg forward of its rest pose, Re:CoM's 1-31, measured on the emulator and the clips,
 /// test `head_tilts`).
 /// Assumption: the amount, chosen from the renders.
-pub const EXTRA_TILT: [(usize, f64); 2] = [(KH2_RUN, 0.0), (KH2_WALK, 0.0)];
+pub const EXTRA_TILT: [(usize, f64); 2] = [(KH2_RUN, -36.0), (KH2_WALK, -24.0)];
+#[cfg(test)]
+thread_local! {
+    /// Test only (0.198.6, `back_lock_angle`): (KH2 motion, degrees) replacing [`EXTRA_TILT`]'s amount for that motion.
+    pub static TILT_OVERRIDE: std::cell::Cell<Option<(usize, f64)>> = const { std::cell::Cell::new(None) };
+    /// Test only: (KH2 motion, fraction) replacing [`MOVE_KEEP`]'s.
+    pub static KEEP_OVERRIDE: std::cell::Cell<Option<(usize, f64)>> = const { std::cell::Cell::new(None) };
+}
+
+/// 0.198.6: the fraction of KH2's walk / run the back-rooted locks keep in those clips (the rest is KH2's idle at the same time);
+/// 1.0 = KH2's motion. Assumption: the amounts, from the renders and `back_lock_angle`.
+pub const MOVE_KEEP: [(usize, f64); 2] = [(KH2_RUN, 0.5), (KH2_WALK, 0.5)];
+
 /// Hair bones rooted this far or more in front of the head bone (metres, the head's forward axis at rest) are left out of the extra
 /// turn.
 pub const TILT_BEHIND: f64 = -0.02;
@@ -127,6 +161,20 @@ pub const SELECTED: [usize; 18] = [101, 104, 106, 108, 110, 112, 114, 116, 119, 
 /// worst vertex was 3.8 cm off KH2's idle, 3.5 walk, 4.3 run, 7.9 jump, Checked (test `kh2_hair_moves_as_kh2`)). Checked (decomp:
 /// `knowledge/ReCoM/recom-skeleton-limits.md`): a model may take more bones when every clip played on it has the same count.
 pub const EXTRA: [usize; 7] = [118, 121, 122, 124, 133, 144, 148];
+/// 0.198.6 (fork owner: "sim" to separating the long back locks from the cap, "continue com a correção da nuca"; on 0.198.5, a side
+/// view of the run: "Cabelo levanta DEMAIS!"). Checked (vertex counts per bone, run frame 6, Stage 402): the long back hair rides on
+/// KH2 bones 101 and 104 with the skull cap, which [`NO_TILT`] leaves alone. Their vertices behind and below the skull base go to
+/// these bones (appended after [`EXTRA`], parent `head`, the same rest and the same KH2 motion as their source), which take the
+/// fraction of [`EXTRA_TILT`] given here: half in the band just off the skull, all of it farther ([`SPLIT_R`], [`SPLIT_Z`]).
+/// 0.198.6 review (model-reviewer: a straight seam across the run's back where 101's half band, 68 corners, met the full one): three
+/// steps for 101 (1/3, 2/3, all); 104's vertices are all far from the skull (28.7-41.9 cm), so it takes all of it.
+pub const SPLIT: [(usize, &str, f64); 4] = [(101, "k2_hair_101a", 1.0 / 3.0), (101, "k2_hair_101b", 2.0 / 3.0), (101, "k2_hair_101c", 1.0), (104, "k2_hair_104c", 1.0)];
+/// See [`SPLIT`]: a vertex (fitted, world rest) that follows the Re:CoM bone of KH2 bone 101 / 104, behind [`SPLIT_Z`] (relative
+/// to the head bone), takes the 1/3 band under `SPLIT_R[0]` from the head's centre (`ddd_hair::HEAD_CENTRE`), the 2/3 band under
+/// `SPLIT_R[1]` and the full one beyond (metres; 101's vertices are 15.7-22.9 cm out, quartiles 18.8 / 19.9 / 20.1). Assumption: the radii.
+pub const SPLIT_R: [f64; 2] = [0.175, 0.195];
+/// See [`SPLIT_R`].
+pub const SPLIT_Z: f64 = -0.03;
 
 /// The Re:CoM bone name of an [`EXTRA`] KH2 bone (at most 15 characters).
 pub fn extra_name(kh2: usize) -> String {
@@ -143,6 +191,9 @@ pub fn extend_skeleton(sk: &crate::mdl::RecomSkeleton, head: usize, model: &Mode
     let mut out = sk.clone();
     for &k in &EXTRA {
         out.bones.push(crate::mdl::RBone { name: extra_name(k), parent: head as i16, local: carry.aff(&bind[k]) });
+    }
+    for &(k, n, _) in &SPLIT {
+        out.bones.push(crate::mdl::RBone { name: n.to_string(), parent: head as i16, local: carry.aff(&bind[k]) });
     }
     out
 }
@@ -363,6 +414,8 @@ pub struct Rig {
     pub host: HashMap<usize, Option<usize>>,
     /// The carry.
     pub carry: Carry,
+    /// [`SPLIT`]'s Re:CoM bones and their fraction of the extra turn (0.198.6).
+    pub split: Vec<(usize, f64)>,
 }
 
 impl Rig {
@@ -398,8 +451,14 @@ impl Rig {
             let r = names.iter().position(|x| *x == extra_name(k)).ok_or_else(|| Error::Format(format!("hair: no {}", extra_name(k))))?;
             pairs.push((r, k));
         }
+        let mut split = vec![];
+        for &(k, n, f) in &SPLIT {
+            let r = names.iter().position(|x| x == n).ok_or_else(|| Error::Format(format!("hair: no {n}")))?;
+            pairs.push((r, k));
+            split.push((r, f));
+        }
         pairs.sort();
-        Ok(Rig { pairs, host, carry })
+        Ok(Rig { pairs, host, carry, split })
     }
 
     /// The KH2 bone a Re:CoM bone carries.
@@ -451,6 +510,43 @@ pub fn patch_rest(mdl: &mut [u8], locals: &[(usize, Aff)]) -> Result<()> {
     Ok(())
 }
 
+/// 0.197.6 (item 5 of Stage 391: the hair at KH2's own speed): Re:CoM's looped idle clips with no events (no `PL0101.EET` record,
+/// no `PL0101.SES` cue under their names: `p002_001`, `p002_031`, `p002_079`, Checked (files)). Their KH2 idle loop was stretched to
+/// close on the clip (x1.20, x1.50, x3.00, Stage 380); each is repeated whole until it and KH2's loop close together ([`unroll_times`]),
+/// so the hair plays at KH2's speed. Walk and run carry footstep cues in the `.SES` and keep their length.
+pub const UNROLL: [usize; 3] = [1, 31, 79];
+/// The most times a clip is repeated.
+pub const UNROLL_MAX: usize = 6;
+
+/// The fewest repeats (2..=[`UNROLL_MAX`]) of a clip of `frames` frames after which a whole number of KH2 loops of `l` frames fits
+/// within 1 %, if any (none when one clip already closes on whole loops).
+pub fn unroll_times(frames: usize, l: f32) -> Option<usize> {
+    let one = frames as f32 / l;
+    if one >= 1.0 && (one - one.round()).abs() < 0.01 {
+        return None;
+    }
+    (2..=UNROLL_MAX).find(|&k| {
+        let n = k as f32 * one;
+        n >= 1.0 && (n - n.round()).abs() < 0.01
+    })
+}
+
+/// The clip repeated `times` times: every channel sampled at its whole frames and written again over `times × frames` (the loop
+/// start and everything else as they were).
+pub fn unroll(c: &mut crate::ann::Clip, times: usize) {
+    let (frames, chans) = (c.frames.max(1) as usize, c.chans());
+    let total = frames * times;
+    let mut out = Vec::with_capacity(c.channels.len());
+    for b in 0..c.bones as usize {
+        for ci in 0..chans {
+            let v: Vec<f64> = (0..total).map(|f| c.value(b, ci, (f % frames) as f64)).collect();
+            out.push(crate::convert::encode_channel(&v, [1e-7, 1e-5, 1e-6][ci / 3]));
+        }
+    }
+    c.channels = out;
+    c.frames = total as i16;
+}
+
 /// KH2 time (motion frames) for frame `f` of a Re:CoM clip of `frames` frames (30 fps both): a looped clip runs a whole number of
 /// the KH2 motion's loops, stretched to close on the clip's length; otherwise KH2's own time, held at its end.
 pub fn kh2_time(m: &Kh2Motion, looped: bool, frames: usize, f: usize) -> f32 {
@@ -471,24 +567,40 @@ pub fn tilt(rest: &[[f64; 3]; 3], posed: &[[f64; 3]; 3]) -> f64 {
     up[2].atan2(up[1]).to_degrees()
 }
 
-/// Turns every hair bone but [`NO_TILT`]'s about its own origin by `deg` forward (about the model's x axis seen from Re:CoM's head
-/// at rest, `head_rest`; a positive turn lifts strands that hang backwards): [`EXTRA_TILT`] (0.195.1).
-pub fn tilt_hair(rig: &Rig, hr: &mut [(usize, Aff)], head_rest: &[[f64; 3]; 3], deg: f64, front: &[usize]) {
+/// Turns every hair bone but [`NO_TILT`]'s and `front`'s by `deg` forward (about the model's x axis seen from Re:CoM's head at rest,
+/// `head_rest`; a positive turn lifts strands that hang backwards): [`EXTRA_TILT`] (0.195.1); [`SPLIT`]'s bones by their fraction.
+/// 0.198.6 (model-reviewer: "make this a number"; test `back_lock_angle`): each turns about its lock's root (`roots`: a point in the
+/// bone's own frame, the lock's vertex nearest the head bone at rest), so the root stays on the head and the whole lock drops by the
+/// angle; 0.195.1-0.198.6 turned it about the bone's own origin, mid-lock, and -60 deg dropped the back hair 10-14 deg.
+pub fn tilt_hair(rig: &Rig, hr: &mut [(usize, Aff)], head_rest: &[[f64; 3]; 3], deg: f64, front: &[usize], roots: &HashMap<usize, [f64; 3]>) {
     if deg == 0.0 {
         return;
     }
-    let rw = rot_xyz(deg.to_radians(), 0.0, 0.0);
-    let rl = m3(&m3(head_rest, &rw), &tr(head_rest));
+    // 0.198.6: the head-relative frame's turn about the model's x axis is `head_restᵀ · Rx · head_rest` (a negative `deg` drops the
+    // strands). Checked (renders `t60orig` / `t60swap` / `fx60`, run 6 from the side, bones coloured): 0.195.1-0.198.6 used
+    // `head_rest · Rx · head_restᵀ`, a turn about another axis (the locks twisted about their length; -60 deg dropped them 10-14 deg,
+    // -90 knotted them); the swapped product keeps the turn in the side plane, and -Rx lifts them.
+    let rl_of = |f: f64| { let rw = rot_xyz((deg * f).to_radians(), 0.0, 0.0); m3(&m3(head_rest, &rw), &tr(head_rest)) };
     for (rb, a) in hr.iter_mut() {
-        if rig.kh2_of(*rb).is_some_and(|k| NO_TILT.contains(&k)) || front.contains(rb) {
+        let f = if let Some(&(_, f)) = rig.split.iter().find(|x| x.0 == *rb) {
+            f
+        } else if rig.kh2_of(*rb).is_some_and(|k| NO_TILT.contains(&k)) || front.contains(rb) {
             continue;
-        }
+        } else {
+            1.0
+        };
+        let rl = rl_of(f);
+        let pivot = roots.get(rb).map_or(a.t, |l| a.point(*l));
+        let d = vm([a.t[0] - pivot[0], a.t[1] - pivot[1], a.t[2] - pivot[2]], &rl);
+        a.t = [pivot[0] + d[0], pivot[1] + d[1], pivot[2] + d[2]];
         a.r = m3(&a.r, &rl);
     }
 }
 
 /// Rewrites the 18 hair bones' channels of every clip of Riku's pack. `sk`: Riku's original skeleton (for the head's tilt).
-pub fn bake(ann: &mut Ann, rig: &Rig, sk: &crate::mdl::RecomSkeleton, head: usize, model: &Model, motions: &HashMap<usize, Kh2Motion>) -> Result<()> {
+/// `by_slot`: the clips are `PL0101.ANN`'s, so [`CLIP_MAP`] picks KH2's motion by slot; false for other packs (0.197.4: Riku's event
+/// packs, whose slots mean other clips): every clip takes KH2's idle sway.
+pub fn bake(ann: &mut Ann, rig: &Rig, sk: &crate::mdl::RecomSkeleton, head: usize, model: &Model, motions: &HashMap<usize, Kh2Motion>, by_slot: bool) -> Result<()> {
     let parents: Vec<i16> = sk.bones.iter().map(|b| b.parent).collect();
     let parents = &parents[..];
     let head_rest = unscale(&sk.rest_world()[head].r).0;
@@ -501,6 +613,19 @@ pub fn bake(ann: &mut Ann, rig: &Rig, sk: &crate::mdl::RecomSkeleton, head: usiz
     // fork owner on 0.195.3, walk: "traseira do cabelo ainda ta levantando muito quando anda")
     let rest_hr = rig.head_rel(&rel(&skeleton::bind_pose(&model.bones)));
     let front: Vec<usize> = rest_hr.iter().filter(|(_, a)| vm(a.t, &head_rest)[2] > TILT_BEHIND).map(|x| x.0).collect();
+    // 0.198.6: each lock's root, in its Re:CoM bone's frame: the KH2 bone's vertex nearest the head bone at rest
+    let roots: HashMap<usize, [f64; 3]> = {
+        let verts = vertices_by_bone(model, crate::kh2_hair::HAIR_GROUP);
+        let bind = rel(&skeleton::bind_pose(&model.bones));
+        rest_hr
+            .iter()
+            .filter_map(|(rb, a)| {
+                let kb = rig.kh2_of(*rb)?;
+                let inv = rigid_inv(a);
+                verts.get(&kb)?.iter().map(|v| inv.point(rig.carry.point(bind[kb].point(*v)))).map(|l| (a.point(l), l)).min_by(|x, y| crate::math::dist(x.0, [0.0; 3]).total_cmp(&crate::math::dist(y.0, [0.0; 3]))).map(|(_, l)| (*rb, l))
+            })
+            .collect()
+    };
     let rest_e: HashMap<usize, [f64; 3]> = rig
         .locals(parents, head, &rig.head_rel(&rel(&skeleton::bind_pose(&model.bones))))
         .into_iter()
@@ -509,20 +634,47 @@ pub fn bake(ann: &mut Ann, rig: &Rig, sk: &crate::mdl::RecomSkeleton, head: usiz
     for (slot, s) in ann.slots.iter_mut().enumerate() {
         let Some(c) = s.clip.as_mut() else { continue };
         let chans = c.chans();
+        let kh2 = CLIP_MAP.iter().find(|x| by_slot && x.0 == slot).map(|x| x.1);
+        // 0.197.6: KH2's idle at its own speed on the event-free idle clips
+        if by_slot && UNROLL.contains(&slot) && kh2 == Some(KH2_IDLE) && c.looped() && c.loop_start == 1 {
+            if let Some(k) = unroll_times(c.frames.max(1) as usize, (idle.frame_end - idle.frame_return.min(idle.frame_end)).max(1.0)) {
+                unroll(c, k);
+            }
+        }
         let frames = c.frames.max(1) as usize;
-        let kh2 = CLIP_MAP.iter().find(|x| x.0 == slot).map(|x| x.1);
         // 0.196.6 (fork owner: "a animação DESSE CABELO precisa ser a MESMA do KH2"): a clip with no KH2 counterpart (attacks, guard, magic,
         // cards: 0.195.0-0.196.5 held the hair still at KH2's first idle frame) plays KH2's idle sway; a one-shot clip at KH2's own speed
         let src = kh2.and_then(|k| motions.get(&k)).or(Some(idle));
         let looped = c.looped() && c.loop_start == 1;
         let corr = EXTRA_TILT.iter().find(|x| Some(x.0) == kh2).map_or(0.0, |x| x.1);
+        #[cfg(test)]
+        let corr = TILT_OVERRIDE.with(|o| o.get()).filter(|o| Some(o.0) == kh2).map_or(corr, |o| o.1);
+        #[cfg(test)]
+        let corr = match (kh2, std::env::var("RUN_TILT").ok().and_then(|x| x.parse::<f64>().ok())) { (Some(KH2_RUN), Some(t)) => t, _ => corr };
         let rows: Vec<Vec<(usize, Aff)>> = (0..frames)
             .map(|f| {
                 let mut hr = match src {
                     Some(m) => rig.head_rel(&rel(&m.world(&model.bones, kh2_time(m, looped, frames, f)))),
                     None => still_hr.clone(),
                 };
-                tilt_hair(rig, &mut hr, &head_rest, corr, &front);
+                // 0.198.6 (fork owner: "Cabelo levanta DEMAIS!"; test `back_lock_angle`: against the back, KH2's run locks are already
+                // matched, the lift comes from KH2's body leaning where Riku's is upright): in the walk and run, the back-rooted locks
+                // take [`MOVE_KEEP`] of KH2's walk / run and the rest of KH2's idle at the same time (where the hair hangs)
+                let keep = MOVE_KEEP.iter().find(|x| Some(x.0) == kh2).map(|x| x.1);
+                #[cfg(test)]
+                let keep = KEEP_OVERRIDE.with(|o| o.get()).filter(|o| Some(o.0) == kh2).map(|o| o.1).or(match (kh2, std::env::var("RUN_KEEP").ok().and_then(|x| x.parse::<f64>().ok())) { (Some(KH2_RUN), Some(k)) => Some(k), _ => keep });
+                if let Some(k) = keep.filter(|k| *k < 1.0) {
+                    let ih = rig.head_rel(&rel(&idle.world(&model.bones, kh2_time(idle, true, frames, f))));
+                    for (rb, a) in hr.iter_mut() {
+                        if front.contains(rb) && !rig.split.iter().any(|x| x.0 == *rb) {
+                            continue;
+                        }
+                        let Some(b) = ih.iter().find(|x| x.0 == *rb).map(|x| x.1) else { continue };
+                        a.r = rot_toward(&b.r, &a.r, k);
+                        a.t = core::array::from_fn(|i| b.t[i] + k * (a.t[i] - b.t[i]));
+                    }
+                }
+                tilt_hair(rig, &mut hr, &head_rest, corr, &front, &roots);
                 damp_hair(rig, &mut hr, &rest_hr);
                 rig.locals(parents, head, &hr)
             })
@@ -604,6 +756,20 @@ mod tests {
 }
 
 #[cfg(test)]
+mod unroll_tests {
+    use super::*;
+
+    #[test]
+    fn unroll_times_closes_the_loops() {
+        assert_eq!(unroll_times(100, 120.0), Some(6), "idle 1: 6 x 100 = 5 x 120");
+        assert_eq!(unroll_times(80, 120.0), Some(3), "idle 31: 3 x 80 = 2 x 120");
+        assert_eq!(unroll_times(40, 120.0), Some(3), "idle 79: 3 x 40 = 120");
+        assert_eq!(unroll_times(120, 120.0), None, "already closes");
+        assert_eq!(unroll_times(97, 120.0), None, "no fit within 6");
+    }
+}
+
+#[cfg(test)]
 mod damp_tests {
     use super::*;
 
@@ -651,15 +817,29 @@ mod render_tests {
         let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
         let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
         let hairs: Vec<usize> = RECOM_HAIR.iter().map(|n| sk.find(n).unwrap()).collect();
-        for (a, b) in ann.slots.iter().zip(&orig.slots) {
+        for (slot, (a, b)) in ann.slots.iter().zip(&orig.slots).enumerate() {
             let (Some(a), Some(b)) = (&a.clip, &b.clip) else { continue };
             // 0.196.5: the clip has the model's extra hair bones (7) and nothing else changed in shape
-            assert_eq!((a.frames, a.bones as usize, a.loop_start, a.flags), (b.frames, b.bones as usize + EXTRA.len(), b.loop_start, b.flags));
+            // 0.197.6: the event-free idle clips are repeated whole (`UNROLL`): their body repeats Re:CoM's frame for frame
+            let k = (a.frames / b.frames) as usize;
+            assert!(a.frames % b.frames == 0 && (k == 1 || UNROLL.contains(&slot)), "clip {slot}: {} frames for {}", a.frames, b.frames);
+            assert_eq!((a.bones as usize, a.loop_start, a.flags), (b.bones as usize + EXTRA.len() + SPLIT.len(), b.loop_start, b.flags));
             let ch = a.chans();
             for (i, (x, y)) in a.channels.iter().zip(&b.channels).enumerate() {
-                if !hairs.contains(&(i / ch)) {
-                    assert!(x == y, "non-hair channel {i} changed");
+                if hairs.contains(&(i / ch)) {
+                    continue;
                 }
+                if k == 1 {
+                    assert!(x == y, "non-hair channel {i} changed");
+                } else {
+                    for f in 0..a.frames as usize {
+                        let (va, vb) = (a.value(i / ch, i % ch, f as f64), b.value(i / ch, i % ch, (f % b.frames as usize) as f64));
+                        assert!((va - vb).abs() < 1e-3, "clip {slot} channel {i} frame {f}: {va} vs {vb}");
+                    }
+                }
+            }
+            if k > 1 {
+                eprintln!("clip {slot}: repeated {k} times ({} frames)", a.frames);
             }
         }
         // 0.196.5: every part of the model and every clip of its pack have the same bone count (the game poses a clip only then)
@@ -667,7 +847,7 @@ mod render_tests {
         for (pi, pb) in parts.iter().enumerate() {
             assert_eq!(MdlPart::parse_bytes(pb).unwrap().bones.len(), sk.bones.len(), "part {pi}'s bones");
         }
-        assert_eq!(sk.bones.len(), RecomSkeleton::parse(&mdl0).unwrap().bones.len() + EXTRA.len());
+        assert_eq!(sk.bones.len(), RecomSkeleton::parse(&mdl0).unwrap().bones.len() + EXTRA.len() + SPLIT.len());
         for (slot, s) in ann.slots.iter().enumerate() {
             if let Some(c) = &s.clip {
                 assert_eq!(c.bones as usize, sk.bones.len(), "clip {slot}'s bones");
@@ -687,8 +867,7 @@ mod render_tests {
             .collect();
         eprintln!("clips of 8+ frames with the hair held still: {still:?}");
         assert!(still.is_empty(), "clips {still:?} hold the hair still");
-        let p3 = MdlPart::parse_bytes(&parts[3]).unwrap();
-        let img = crate::texture::decode_dds(&swap.dds).unwrap();
+        let (p3, img) = dt::test_view(&swap);
         let out = dt::out_dir().join("kh2").join("rig");
         std::fs::create_dir_all(&out).unwrap();
         // exact reference: every hair vertex carried by its own KH2 bone
@@ -713,7 +892,7 @@ mod render_tests {
             }
             std::fs::write(d.join("rest_tris.txt"), txt).unwrap();
         }
-        for (clip, frames) in [(1usize, vec![0.0, 25.0, 50.0, 75.0]), (2, vec![0.0, 8.0, 16.0, 24.0]), (3, vec![0.0, 6.0, 11.0, 17.0]), (10, vec![5.0]), (12, vec![8.0]), (33, vec![5.0]), (37, vec![10.0]), (41, vec![16.0])] {
+        for (clip, frames) in [(1usize, vec![0.0, 25.0, 50.0, 75.0]), (2, vec![0.0, 8.0, 16.0, 24.0]), (3, vec![0.0, 6.0, 11.0, 17.0]), (4, vec![8.0]), (6, vec![8.0]), (33, vec![5.0]), (37, vec![3.0, 10.0]), (44, vec![6.0, 12.0]), (41, vec![16.0])] {
             let Some(c) = ann.slots[clip].clip.as_ref() else { continue };
             let src_m = CLIP_MAP.iter().find(|x| x.0 == clip).and_then(|x| motions.get(&x.1));
             let mut worst = 0.0f64;
@@ -759,7 +938,9 @@ mod render_tests {
             }
             eprintln!("clip {clip}: worst vertex off KH2's exact motion {:.3} m", worst);
             // 0.196.5: the baked clip plays KH2's motion for all 25 hair bones (0.196.3: 3.5-7.9 cm off, 7 bones merged into others)
-            if src_m.is_some() {
+            // 0.198.6: clips on a KH2 motion with an extra turn ([`EXTRA_TILT`], walk and run) leave KH2's motion on purpose
+            let tilted = CLIP_MAP.iter().find(|x| x.0 == clip).is_some_and(|x| EXTRA_TILT.iter().any(|t| t.0 == x.1 && t.1 != 0.0));
+            if src_m.is_some() && !tilted {
                 assert!(worst < 0.02, "clip {clip}: the baked hair is {worst:.3} m off KH2's motion");
             }
         }
@@ -825,6 +1006,110 @@ mod kh2_self_render {
     }
 }
 
+/// 0.198.3 (fork owner on 0.198.2: "não tem como melhorasr a parte de trás do cabelo como um todo?"): KH2 Riku as KH2 itself draws
+/// him (his model, textures and the emulator's matrices of his own motions), from the cameras of `kh2_hair::tests::camera_checks`:
+/// the run from behind, low and high, and the idle circled; `local/assets/recom/riku-hair/out/kh2/kh2_self_cam/`.
+#[cfg(test)]
+mod kh2_self_cam {
+    use super::*;
+    use crate::kh2_motion::read_slot;
+
+    fn render(model: &kh2_formats_lite::mdlx::Model, pose0: &[kh2_formats_lite::skeleton::Mat], world: &[kh2_formats_lite::skeleton::Mat], yaw: f64, pitch: f64, path: &std::path::Path) {
+        let (sy, cy, sp, cp) = (yaw.to_radians().sin(), yaw.to_radians().cos(), pitch.to_radians().sin(), pitch.to_radians().cos());
+        let tx = |q: [f64; 3]| -> [f64; 3] {
+            let (x, y, z) = (q[0] * cy + q[2] * sy, q[1], -q[0] * sy + q[2] * cy);
+            [x, y * cp - z * sp, y * sp + z * cp]
+        };
+        let mut tris = vec![];
+        for (gi, g) in model.groups.iter().enumerate() {
+            for t in &g.triangles {
+                let p: Vec<[f64; 3]> = t.iter().map(|v| {
+                    let wb = kh2_formats_lite::skeleton::point(&pose0[v.bone as usize], v.position.map(|x| x as f64));
+                    tx(aff(&world[v.bone as usize]).point(rigid_inv(&aff(&pose0[v.bone as usize])).point(wb)))
+                }).collect();
+                tris.push((p, t.iter().map(|v| v.uv).collect::<Vec<_>>(), g.texture, gi == crate::kh2_hair::HAIR_GROUP));
+            }
+        }
+        // the view: the hair's box (KH2's hair group) grown 2.2 times about its centre: head, hair, neck, shoulders
+        let (mut lo, mut hi) = ([f64::MAX; 2], [f64::MIN; 2]);
+        for (gi, t) in tris.iter().enumerate() { let _ = gi; if t.3 { for q in &t.0 { for k in 0..2 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } } } }
+        let (c, r) = ([(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0], 1.1 * (hi[0] - lo[0]).max(hi[1] - lo[1]));
+        let (lo, hi) = ([c[0] - r, c[1] - 1.3 * r], [c[0] + r, c[1] + 0.7 * r]);
+        let size = 700usize;
+        let sc = 640.0 / (hi[0] - lo[0]).max(hi[1] - lo[1]);
+        let mut rgb = [214u8, 212, 230].repeat(size * size);
+        let mut zb = vec![f64::MIN; size * size];
+        for (p, uv, ti, _) in &tris {
+            let s: Vec<[f64; 2]> = p.iter().map(|q| [30.0 + (q[0] - lo[0]) * sc, 670.0 - (q[1] - lo[1]) * sc]).collect();
+            let n = { let a = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]]; let b = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]]; let c = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; let l = (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt().max(1e-12); c[2].abs() / l };
+            let det = (s[1][1] - s[2][1]) * (s[0][0] - s[2][0]) + (s[2][0] - s[1][0]) * (s[0][1] - s[2][1]);
+            if det.abs() < 1e-9 { continue; }
+            if s.iter().all(|q| q[0] < -50.0 || q[0] > size as f64 + 50.0 || q[1] < -50.0 || q[1] > size as f64 + 50.0) { continue; }
+            let (x0, x1) = (s.iter().map(|q| q[0]).fold(f64::MAX, f64::min).floor().max(0.0) as usize, (s.iter().map(|q| q[0]).fold(f64::MIN, f64::max).ceil().max(0.0) as usize).min(size - 1));
+            let (y0, y1) = (s.iter().map(|q| q[1]).fold(f64::MAX, f64::min).floor().max(0.0) as usize, (s.iter().map(|q| q[1]).fold(f64::MIN, f64::max).ceil().max(0.0) as usize).min(size - 1));
+            let tex = model.textures.get(*ti);
+            for y in y0..=y1 { for x in x0..=x1 {
+                let (px, py) = (x as f64 + 0.5, y as f64 + 0.5);
+                let l0 = ((s[1][1] - s[2][1]) * (px - s[2][0]) + (s[2][0] - s[1][0]) * (py - s[2][1])) / det;
+                let l1 = ((s[2][1] - s[0][1]) * (px - s[2][0]) + (s[0][0] - s[2][0]) * (py - s[2][1])) / det;
+                let l2 = 1.0 - l0 - l1;
+                if l0 < 0.0 || l1 < 0.0 || l2 < 0.0 { continue; }
+                let z = l0 * p[0][2] + l1 * p[1][2] + l2 * p[2][2];
+                if z <= zb[y * size + x] { continue; }
+                let c = match tex {
+                    Some(t) if t.width > 0 => {
+                        let u = (l0 * uv[0][0] as f64 + l1 * uv[1][0] as f64 + l2 * uv[2][0] as f64).rem_euclid(1.0);
+                        let v = (l0 * uv[0][1] as f64 + l1 * uv[1][1] as f64 + l2 * uv[2][1] as f64).rem_euclid(1.0);
+                        let (w, h) = (t.width as usize, t.height as usize);
+                        let o = 4 * (((v * h as f64) as usize).min(h - 1) * w + ((u * w as f64) as usize).min(w - 1));
+                        if t.rgba[o + 3] < 16 { continue; }
+                        let k = 0.55 + 0.45 * n;
+                        [(t.rgba[o] as f64 * k) as u8, (t.rgba[o + 1] as f64 * k) as u8, (t.rgba[o + 2] as f64 * k) as u8]
+                    }
+                    _ => { let k = 60.0 + 140.0 * n; [(k * 0.5) as u8, (k * 0.7) as u8, k as u8] }
+                };
+                zb[y * size + x] = z;
+                rgb[3 * (y * size + x)..3 * (y * size + x) + 3].copy_from_slice(&c);
+            } }
+        }
+        std::fs::write(path, crate::ddd_hair::tests::png(size, size, &rgb)).unwrap();
+    }
+
+    #[test]
+    fn kh2_self_camera_checks() {
+        let Ok(mset) = std::fs::read(format!("{}/obj__P_EH000.mset", crate::kh2_motion::tests::raw())) else { return };
+        let model = kh2_formats_lite::mdlx::parse(&std::fs::read(format!("{}/obj__P_EH000.mdlx", crate::kh2_motion::tests::raw())).unwrap()).unwrap();
+        let pose0 = kh2_formats_lite::skeleton::bind_pose(&model.bones);
+        let dir = crate::ddd_hair::tests::out_dir().join("kh2").join("kh2_self_cam");
+        std::fs::create_dir_all(&dir).unwrap();
+        let frames = |slot: usize| -> (Vec<f32>, usize, usize) {
+            let m = read_slot(&mset, slot).unwrap().unwrap();
+            let raw = std::fs::read(format!("{}/slot{slot}.f32", crate::kh2_motion::tests::emu_full())).unwrap();
+            let fl: Vec<f32> = raw.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+            // the dump has `frame_end × keys_per_frame + 1` samples (two per frame at 30 fps), as `kh2_and_recom_side_by_side` reads it
+            let n = (m.frame_end * m.keys_per_frame()).round() as usize + 1;
+            let per = (fl.len() / 16) / n;
+            (fl, per, n)
+        };
+        let world_at = |fl: &[f32], per: usize, fi: usize| -> Vec<kh2_formats_lite::skeleton::Mat> {
+            (0..model.bones.len()).map(|b| { let o = (fi * per + b) * 16; core::array::from_fn(|i| core::array::from_fn(|j| fl[o + i * 4 + j] as f64)) }).collect()
+        };
+        let (fl, per, n) = frames(KH2_RUN);
+        eprintln!("KH2 run: {n} samples, {per} matrices each, {} groups, {} textures", model.groups.len(), model.textures.len());
+        for (tag, pitch) in [("low", -35.0), ("level", 0.0), ("high", 35.0)] {
+            for f in [0usize, 4, 9, 13] {
+                for yaw in (0..8).map(|k| k * 45) {
+                    render(&model, &pose0, &world_at(&fl, per, (2 * f).min(n - 1)), yaw as f64, pitch, &dir.join(format!("run_{tag}_f{f}_y{yaw:03}.png")));
+                }
+            }
+        }
+        let (fl, per, n) = frames(KH2_IDLE);
+        for k in 0..8 {
+            render(&model, &pose0, &world_at(&fl, per, 50.min(n - 1)), k as f64 * 45.0, -15.0, &dir.join(format!("orbit_{:03}.png", k * 45)));
+        }
+    }
+}
+
 #[cfg(test)]
 mod amp_tests {
     use super::*;
@@ -853,6 +1138,60 @@ mod amp_tests {
         }
     }
 }
+
+    /// 0.198.3 (fork owner, "a" to 3(a): the run's hair tilted by the lean difference): the forward tilt (deg, each bone against its
+    /// own rest) of the head and its ancestors in KH2's run (emulator) and in Re:CoM's run clips, and the head against the bone
+    /// three up (the upper chest): what the hair, head-relative, sits at against the back.
+    #[test]
+    fn run_lean() {
+        let Ok(mset) = std::fs::read(format!("{}/obj__P_EH000.mset", crate::kh2_motion::tests::raw())) else { return };
+        let model = kh2_formats_lite::mdlx::parse(&std::fs::read(format!("{}/obj__P_EH000.mdlx", crate::kh2_motion::tests::raw())).unwrap()).unwrap();
+        let bind = kh2_formats_lite::skeleton::bind_pose(&model.bones);
+        let mut chain = vec![HEAD];
+        while chain.len() < 6 { let p = model.bones[*chain.last().unwrap()].parent; if p < 0 { break; } chain.push(p as usize); }
+        let ks = std::env::var("LEAN_SLOT").ok().and_then(|x| x.parse().ok()).unwrap_or(KH2_RUN);
+        let m = crate::kh2_motion::read_slot(&mset, ks).unwrap().unwrap();
+        let raw = std::fs::read(format!("{}/slot{ks}.f32", crate::kh2_motion::tests::emu_full())).unwrap();
+        let fl: Vec<f32> = raw.chunks_exact(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+        let n = (m.frame_end * m.keys_per_frame()).round() as usize + 1;
+        let per = (fl.len() / 16) / n;
+        let at = |f: usize, b: usize| -> [[f64; 3]; 3] { let o = (f * per + b) * 16; let mm: kh2_formats_lite::skeleton::Mat = core::array::from_fn(|i| core::array::from_fn(|j| fl[o + i * 4 + j] as f64)); aff(&mm).r };
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        for &b in &chain {
+            let v: Vec<f64> = (0..n).map(|f| tilt(&aff(&bind[b]).r, &at(f, b))).collect();
+            eprintln!("KH2 run bone {b}: mean {:.1} range {:.1}..{:.1}", mean(&v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(f64::MIN, f64::max));
+        }
+        let up = |r: &[[f64; 3]; 3]| vm([0.0, 1.0, 0.0], r);
+        let ang = |a: [f64; 3], b: [f64; 3]| { let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; let la = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt(); let lb = (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]).sqrt(); (d / la / lb).clamp(-1.0, 1.0).acos().to_degrees() };
+        // the head's up against the chest's up, at rest and in the run (the bend of the neck)
+        let c3 = chain[3.min(chain.len() - 1)];
+        let r0 = ang(up(&aff(&bind[HEAD]).r), up(&aff(&bind[c3]).r));
+        let v: Vec<f64> = (0..n).map(|f| ang(up(&at(f, HEAD)), up(&at(f, c3))) - r0).collect();
+        eprintln!("KH2 run: head vs bone {c3}: bend {:.1} (range {:.1}..{:.1}) beyond rest", mean(&v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(f64::MIN, f64::max));
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        let g = std::path::PathBuf::from(g);
+        let keys = crate::install::keys(&g).unwrap();
+        let arc = crate::install::recom_archive(&g).unwrap();
+        let sk = crate::mdl::RecomSkeleton::parse(&crate::install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap()).unwrap();
+        let ann = crate::ann::Ann::parse(&crate::install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.ANN").unwrap()).unwrap();
+        let head = sk.find("head").unwrap();
+        let mut rc = vec![head];
+        while rc.len() < 6 { let p = sk.bones[*rc.last().unwrap()].parent; if p < 0 { break; } rc.push(p as usize); }
+        let rw = sk.rest_world();
+        for slot in std::env::var("LEAN_CLIPS").ok().map(|x| x.split(',').filter_map(|y| y.parse().ok()).collect::<Vec<usize>>()).unwrap_or(vec![3, 21, 33]) {
+            let c = ann.slots[slot].clip.as_ref().unwrap();
+            let ws: Vec<Vec<Aff>> = (0..c.frames as usize).map(|f| crate::kh2_hair::tests::posed_world(&sk, c, f as f64)).collect();
+            for &b in &rc {
+                let v: Vec<f64> = ws.iter().map(|w| tilt(&unscale(&rw[b].r).0, &unscale(&w[b].r).0)).collect();
+                eprintln!("Re:CoM {slot} bone {} ({}): mean {:.1} range {:.1}..{:.1}", b, sk.bones[b].name, mean(&v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(f64::MIN, f64::max));
+            }
+            let c3 = rc[3.min(rc.len() - 1)];
+            let r0 = ang(up(&unscale(&rw[head].r).0), up(&unscale(&rw[c3].r).0));
+            let v: Vec<f64> = ws.iter().map(|w| ang(up(&unscale(&w[head].r).0), up(&unscale(&w[c3].r).0)) - r0).collect();
+            eprintln!("Re:CoM {slot}: head vs {}: bend {:.1} (range {:.1}..{:.1}) beyond rest", sk.bones[c3].name, mean(&v), v.iter().cloned().fold(f64::MAX, f64::min), v.iter().cloned().fold(f64::MIN, f64::max));
+        }
+    }
+
 
 #[cfg(test)]
 mod tilt_tests {
@@ -979,7 +1318,7 @@ mod side_by_side {
     use super::*;
     use crate::ddd_hair::{tests as dt, with_hair, HairSource, RIKU_0101_KH2};
     use crate::install;
-    use crate::mdl::{split_parts, MdlPart, RecomSkeleton};
+    use crate::mdl::RecomSkeleton;
     use crate::texture::Image;
 
     const S: usize = 320;
@@ -1050,8 +1389,7 @@ mod side_by_side {
         let src = crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
         let mdl1 = src.prepare_mdl(&mdl0).unwrap();
         let swap = with_hair(&mdl1, &rtm, &hd, &RIKU_0101_KH2, &src).unwrap();
-        let p3 = MdlPart::parse_bytes(&split_parts(&swap.mdl).unwrap()[3]).unwrap();
-        let ratlas = crate::texture::decode_dds(&swap.dds).unwrap();
+        let (p3, ratlas) = dt::test_view(&swap);
         let katlas = crate::texture::decode_dds(&src.dds).unwrap();
         let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
         let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
@@ -1104,6 +1442,178 @@ mod side_by_side {
         std::fs::write(out.join("head_rest.png"), dt::png(4 * S, S, &img)).unwrap();
     }
 
+    /// 0.198.6 (model-reviewer, second no-go: the owner's "Cabelo levanta DEMAIS!" reduced, not gone; "make this a number"): the mean
+    /// angle (deg) between the long back hair (vertices 5 cm or more behind the head bone at rest) and the back's downward line
+    /// (neck base → chest), seen from the head bone, in KH2's own walk / run (emulator) and in ours for several extra turns.
+    /// 0.198.6: the convention of `head_rest` (bake's): for a bone whose parent is `head`, world.t = local.t · H + head.t?
+    #[test]
+    fn head_rest_convention() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let sk = RecomSkeleton::parse(&install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap()).unwrap();
+        let w = sk.rest_world();
+        let h = sk.find("head").unwrap();
+        let (hr, sc) = unscale(&w[h].r);
+        eprintln!("head scale {sc:?}");
+        for (i, b) in sk.bones.iter().enumerate() {
+            if b.parent as usize != h { continue; }
+            let a = vm(b.local.t, &w[h].r);
+            let c = vm(b.local.t, &tr(&w[h].r));
+            eprintln!("{}: world {:?} | l·H+t {:?} | l·Hᵀ+t {:?}", b.name, w[i].t.map(|x| (x * 1000.0).round() / 1000.0), [a[0] + w[h].t[0], a[1] + w[h].t[1], a[2] + w[h].t[2]].map(|x| (x * 1000.0).round() / 1000.0), [c[0] + w[h].t[0], c[1] + w[h].t[1], c[2] + w[h].t[2]].map(|x| (x * 1000.0).round() / 1000.0));
+            break;
+        }
+        eprintln!("H (unscaled) rows: {:?}", hr.map(|r| r.map(|x| (x * 1000.0).round() / 1000.0)));
+    }
+
+    thread_local! { static REL0: std::cell::RefCell<HashMap<String, [[f64; 3]; 3]>> = std::cell::RefCell::new(HashMap::new()); }
+
+    /// Ours' tips: hair vertices this far or more from the head bone (metres; KH2's side uses 60 % of its farthest).
+    const TIP_DIST: f64 = 0.18;
+
+    #[test]
+    fn back_lock_angle() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        if !std::path::Path::new(&format!("{}/slot8.f32", crate::kh2_motion::tests::emu_full())).exists() { return; }
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let mdl0 = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.MDL").unwrap();
+        let ann0 = install::read_recom(&arc, &keys, "PLAYER/0101/PL0101.ANN").unwrap();
+        let e = arc.find("PLAYER/0101/PL0101.RTM").unwrap();
+        let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+        let src = crate::kh2_hair::Kh2HairSource::read(&install::kh2(&g, keys.clone()).unwrap()).unwrap();
+        let mdl1 = src.prepare_mdl(&mdl0).unwrap();
+        let swap = with_hair(&mdl1, &rtm, &hd, &RIKU_0101_KH2, &src).unwrap();
+        let (p3, _) = dt::test_view(&swap);
+        let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
+        let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+        let rhead = sk.find("head").unwrap();
+        let (rn, rc) = (sk.find("neck3").unwrap(), sk.find("chest1").unwrap());
+        let rest = sk.rest_world();
+        let hz = rest[rhead].t[2];
+        let model = kh2_formats_lite::mdlx::parse(&src.mdlx).unwrap();
+        let pose0 = kh2_formats_lite::skeleton::bind_pose(&model.bones);
+        let bind = rel(&pose0);
+        let rig = src.rig(&mdl0).unwrap().unwrap();
+        let hrest = Aff { r: unscale(&rest[rhead].r).0, t: rest[rhead].t };
+        // KH2's chain under the head: 98 head, 97, 96, 95, 94 (run_lean); the back's line is 95 → 94
+        let kc = 36usize; // KH2's chest (run_lean's chain: 98 head, 97, 96, 95, 94, 36; 95 and 94 share an origin)
+        let ang = |a: [f64; 3], b: [f64; 3]| { let d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; let la = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt(); let lb = (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]).sqrt(); (d / la / lb).clamp(-1.0, 1.0).acos().to_degrees() };
+        let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        // KH2 hair vertices behind the head (rest, carried into Re:CoM's frame), in their bone's bind frame
+        let mut kv: Vec<(usize, [f64; 3])> = vec![];
+        if let Some(gr) = model.groups.get(crate::kh2_hair::HAIR_GROUP) {
+            for t in &gr.triangles { for v in t {
+                let b = v.bone as usize;
+                let l = rigid_inv(&aff(&pose0[b])).point(kh2_formats_lite::skeleton::point(&pose0[b], v.position.map(|x| x as f64)));
+                let wr = hrest.point(rig.carry.point(bind[b].point(l)));
+                if wr[2] < hz - 0.05 { kv.push((b, l)); }
+            } }
+        }
+        let motions = src.motions().unwrap();
+        // 0.198.6: per lock (each back-rooted hair bone): root (its vertex nearest the head bone at rest) → tip (its vertex farthest from
+        // the root), in the bone's own frame; the same KH2 vertices on both sides
+        let verts = vertices_by_bone(&model, crate::kh2_hair::HAIR_GROUP);
+        let rest_hr = rig.head_rel(&rel(&pose0));
+        let head_rest = unscale(&rest[rhead].r).0;
+        let locks: Vec<(usize, usize, [f64; 3], [f64; 3], [f64; 3], [f64; 3])> = rest_hr
+            .iter()
+            .filter(|(rb, a)| vm(a.t, &head_rest)[2] <= TILT_BEHIND || rig.split.iter().any(|x| x.0 == *rb))
+            .filter_map(|(rb, a)| {
+                let kb = rig.kh2_of(*rb)?;
+                let vs = verts.get(&kb)?;
+                let inv = rigid_inv(a);
+                let ls: Vec<([f64; 3], [f64; 3])> = vs.iter().map(|v| (*v, inv.point(rig.carry.point(bind[kb].point(*v))))).collect();
+                let root = ls.iter().min_by(|x, y| crate::math::dist(a.point(x.1), [0.0; 3]).total_cmp(&crate::math::dist(a.point(y.1), [0.0; 3])))?;
+                let tip = ls.iter().max_by(|x, y| crate::math::dist(x.1, root.1).total_cmp(&crate::math::dist(y.1, root.1)))?;
+                Some((*rb, kb, root.1, tip.1, root.0, tip.0))
+            })
+            .collect();
+        eprintln!("locks: {}", locks.len());
+        for (clip, kslot) in [(2usize, KH2_WALK), (3, KH2_RUN)] {
+            let m = &motions[&kslot];
+            let raw = std::fs::read(format!("{}/slot{kslot}.f32", crate::kh2_motion::tests::emu_full())).unwrap();
+            let fl: Vec<f32> = raw.chunks_exact(4).map(|x| f32::from_le_bytes(x.try_into().unwrap())).collect();
+            let samples = (m.frame_end * m.keys_per_frame()).round() as usize + 1;
+            let per = (fl.len() / 16) / samples;
+            let mut ka = vec![];
+            for ki in 0..samples {
+                let km = |b: usize| -> Aff { let o = (ki * per + b) * 16; aff(&core::array::from_fn(|r| core::array::from_fn(|q| fl[o + r * 4 + q] as f64))) };
+                let (h, down) = (km(HEAD).t, sub(km(kc).t, km(HEAD).t));
+                // the tips: vertices at least 60 % as far from the head as the farthest
+                let d: Vec<([f64; 3], f64)> = kv.iter().map(|(b, l)| { let q = sub(km(*b).point(*l), h); (q, (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt()) }).collect();
+                let far = d.iter().map(|x| x.1).fold(0.0, f64::max);
+                for (q, l) in &d { if *l >= 0.6 * far { ka.push(ang(*q, down)); } }
+            }
+            ka.retain(|x| x.is_finite());
+            let kmean = ka.iter().sum::<f64>() / ka.len() as f64;
+            let mut kl = vec![];
+            for ki in 0..samples {
+                let km = |b: usize| -> Aff { let o = (ki * per + b) * 16; aff(&core::array::from_fn(|r| core::array::from_fn(|q| fl[o + r * 4 + q] as f64))) };
+                let down = sub(km(kc).t, km(HEAD).t);
+                for l in &locks { kl.push(ang(sub(km(l.1).point(l.5), km(l.1).point(l.4)), down)); }
+            }
+            kl.retain(|x| x.is_finite());
+            eprintln!("KH2 slot {kslot}: locks (root → tip) vs the back's line, mean {:.1} deg", kl.iter().sum::<f64>() / kl.len() as f64);
+            eprintln!("KH2 slot {kslot}: back hair vs the back's line, mean {kmean:.1} deg ({} vertices)", kv.len());
+            for tilt in [0.0, -24.0, -36.0, -50.0, -60.0, -70.0, -80.0, -90.0] {
+                TILT_OVERRIDE.with(|o| o.set(Some((kslot, tilt))));
+                let ann = crate::ann::Ann::parse(&src.bake_ann(&ann0, &mdl0).unwrap().unwrap()).unwrap();
+                TILT_OVERRIDE.with(|o| o.set(None));
+                let c = ann.slots[clip].clip.as_ref().unwrap();
+                let mut ra = vec![];
+                let mut per_bone: std::collections::BTreeMap<String, (usize, f64)> = Default::default();
+                for f in 0..c.frames as usize {
+                    let w = crate::kh2_hair::tests::posed_world(&sk, c, f as f64);
+                    let (h, down) = (w[rhead].t, sub(w[rc].t, w[rhead].t));
+                    let _ = rn;
+                    for t in dt::collect(&p3) {
+                        if t.tex != 1 { continue; }
+                        for v in &t.v {
+                            if !names[v.bone()].contains("hair") { continue; }
+                            let pr = rest[v.bone()].point(v.pos().map(|x| x as f64));
+                            if pr[2] >= hz - 0.05 { continue; }
+                            let q = sub(w[v.bone()].point(v.pos().map(|x| x as f64)), h);
+                            if (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt() < TIP_DIST { continue; }
+                            let x = ang(q, down);
+                            ra.push(x);
+                            let e = per_bone.entry(names[v.bone()].clone()).or_insert((0, 0.0)); e.0 += 1; e.1 += x;
+                        }
+                    }
+                }
+                let mut rl = vec![];
+                for f in 0..c.frames as usize {
+                    let w = crate::kh2_hair::tests::posed_world(&sk, c, f as f64);
+                    let down = sub(w[rc].t, w[rhead].t);
+                    for l in &locks { rl.push(ang(sub(w[l.0].point(l.3), w[l.0].point(l.2)), down)); }
+                }
+                eprintln!("  ours clip {clip}, extra turn {tilt}: tips {:.1} deg, locks {:.1} deg", ra.iter().sum::<f64>() / ra.len() as f64, rl.iter().sum::<f64>() / rl.len() as f64);
+                {
+                    let w0 = crate::kh2_hair::tests::posed_world(&sk, c, 0.0);
+                    let hh = unscale(&w0[rhead].r).0;
+                    let rel_of = |n: &str| { let b = sk.find(n).unwrap(); m3(&unscale(&w0[b].r).0, &tr(&hh)) };
+                    REL0.with(|r0| {
+                        let mut r0 = r0.borrow_mut();
+                        for n in ["k2_hair_104c", "k2_hair_101c", "l_hair3", "b_hair3"] {
+                            let r = rel_of(n);
+                            if tilt == 0.0 { r0.insert(n.to_string(), r); continue; }
+                            let Some(a) = r0.get(n) else { continue };
+                            // the turn from tilt 0 in the head's frame: d = a^T · r (row vectors: x·a^T·r)
+                            let d = m3(&tr(a), &r);
+                            let tr_ = d[0][0] + d[1][1] + d[2][2];
+                            let angle = ((tr_ - 1.0) / 2.0).clamp(-1.0, 1.0).acos().to_degrees();
+                            let axis = [d[1][2] - d[2][1], d[2][0] - d[0][2], d[0][1] - d[1][0]];
+                            eprintln!("    {n}: turned {angle:.1} deg about head-frame axis {:?}", axis.map(|v| (v * 100.0).round() / 100.0));
+                        }
+                    });
+                }
+                if std::env::var("PER_BONE").is_ok() && (tilt == 0.0 || tilt == -60.0) { for (n, (k, sum)) in &per_bone { eprintln!("    {n}: {k} corners, mean {:.1}", sum / *k as f64); } }
+            }
+        }
+    }
+
     #[test]
     fn kh2_and_recom_side_by_side() {
         let Ok(g) = std::env::var("RECOM_GAME") else { return };
@@ -1119,8 +1629,7 @@ mod side_by_side {
         let mdl1 = src.prepare_mdl(&mdl0).unwrap();
         let swap = with_hair(&mdl1, &rtm, &hd, &RIKU_0101_KH2, &src).unwrap();
         let ann = crate::ann::Ann::parse(&src.bake_ann(&ann0, &mdl0).unwrap().unwrap()).unwrap();
-        let p3 = MdlPart::parse_bytes(&split_parts(&swap.mdl).unwrap()[3]).unwrap();
-        let ratlas = crate::texture::decode_dds(&swap.dds).unwrap();
+        let (p3, ratlas) = dt::test_view(&swap);
         let katlas = crate::texture::decode_dds(&src.dds).unwrap();
         let sk = RecomSkeleton::parse(&swap.mdl).unwrap();
         let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();

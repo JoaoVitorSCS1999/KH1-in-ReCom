@@ -330,6 +330,10 @@ pub const MODEL_HOOKS: &[Site] = &[
     // push rbx; sub rsp,0x30; mov qword [rsp+0x20],-2: the field's camp open / close
     // (`0x1401A9590(field, open)`); with open = 0 the field resumes after the camp is gone.
     Site { name: "field camp open/close (0x1401A9590)", rva: 0x001A_9590, expect: &[0x40, 0x53, 0x48, 0x83, 0xEC, 0x30, 0x48, 0xC7, 0x44, 0x24, 0x20, 0xFE, 0xFF, 0xFF, 0xFF] },
+    // mov [rsp+8],rbx; mov [rsp+0x10],rsi; push rdi; sub rsp,0x30: Re:CoM's "play clip `slot` of motion pack `id`"
+    // (`0x14024D860(ctrl, id, slot, start, …)`: `0x1402A4820(id)` at ctrl +0x28, then `0x14024C760`); 0.197.4: Riku's event
+    // pack copies (`win::models::pack_pick`). Checked (exe; the workspace's `knowledge/ReCoM/recom-skeleton-limits.md`).
+    Site { name: "motion pack pick (0x14024D860)", rva: 0x0024_D860, expect: &[0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x30] },
 ];
 
 /// Re:CoM functions the model code calls (or reaches through a vtable it checks).
