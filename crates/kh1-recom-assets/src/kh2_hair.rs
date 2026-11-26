@@ -1231,6 +1231,72 @@ pub(crate) mod tests {
         (p3, crate::texture::Image { w, h, px }, body)
     }
 
+    /// 0.198.9 (fork owner: "melhorar o encaixe da espada na mão do Riku ... precisa ficar natural ... anatomicamente correto"): the right
+    /// hand with the weapon (part 1 drawn with part 3), close-ups around `r_hand` from six sides, idle 0 / run 6 / first swing 8 and 16,
+    /// before (`hand_<group>_before`) and after [`crate::grip::close`] (`hand_<group>_<tag>`), for Riku (`0101`) and Dark Riku (`0201`).
+    #[test]
+    fn hand_grip_checks() {
+        let Ok(g) = std::env::var("RECOM_GAME") else { return };
+        std::env::set_var("FULL_BODY", "1");
+        let g = std::path::PathBuf::from(g);
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let tag = std::env::var("CAM_TAG").unwrap_or_else(|_| "cam".into());
+        for (grp, atlas_name, weapon_name) in [("0101", "n_zz110_01", "weapon_01"), ("0201", "n_zz120_01", "weapon_01")] {
+            let mdl = install::read_recom(&arc, &keys, &format!("PLAYER/{grp}/PL{grp}.MDL")).unwrap();
+            // the pack the game plays: Riku's own; for Dark Riku's model, the Dark Form skin's (Riku's motions on it)
+            let ann0 = if grp == "0201" {
+                // before: the skin without the grip (`NO_GRIP`); the grip is applied below as the build does
+                crate::grip::OFF.with(|x| x.set(true));
+                let skin = crate::riku_skin::build_with(&arc, &keys, 101, 201, 121, None).unwrap();
+                crate::grip::OFF.with(|x| x.set(false));
+                crate::ann::Ann::parse(&skin.files.iter().find(|f| f.0 == crate::riku_skin::path(121, "ANN")).unwrap().1).unwrap()
+            } else {
+                crate::ann::Ann::parse(&install::read_recom(&arc, &keys, &format!("PLAYER/{grp}/PL{grp}.ANN")).unwrap()).unwrap()
+            };
+            let e = arc.find(&format!("PLAYER/{grp}/PL{grp}.RTM")).unwrap();
+            let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+            let rtm_p = crate::rtm::Rtm::parse(&rtm).unwrap();
+            let parts = split_parts(&mdl).unwrap();
+            let mut p3 = MdlPart::parse_bytes(&parts[3]).unwrap();
+            let p1 = MdlPart::parse_bytes(&parts[1]).unwrap();
+            let dec = |n: &str| { let e = rtm_p.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == n.trim_end_matches(".tm2")).unwrap(); let (w, h, px) = crate::rtm::tim2_decode8(&e.data).unwrap(); crate::texture::Image { w, h, px } };
+            let mut body: Vec<crate::texture::Image> = p3.texture_names().iter().map(|n| dec(n)).collect();
+            let a = p3.texture_names().iter().position(|n| n == atlas_name).unwrap() as u32;
+            for k in p3.list_a.iter_mut().chain(p3.list_b.iter_mut().flatten()) { for v in k.verts.iter_mut() { if let Some(q) = v.q2.as_mut() { if q[3] == a { q[3] = 1; } else if q[3] == 1 { q[3] = a; } } } }
+            body.swap(1, a as usize);
+            // the weapon's packets, on a texture index of their own
+            let wi = body.len() as u32;
+            body.push(dec(weapon_name));
+            let mut wl = p1.list_a.clone();
+            for k in wl.iter_mut() { for v in k.verts.iter_mut() { if let Some(q) = v.q2.as_mut() { q[3] = wi; } } }
+            p3.list_a.extend(wl);
+            let img = hd.iter().find(|x| x.name == crate::keyblade::hd_name(atlas_name)).and_then(|x| crate::texture::decode_dds(&x.data).ok()).unwrap_or_else(|| body[1].clone());
+            let sk = RecomSkeleton::parse(&mdl).unwrap();
+            let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+            let hand = sk.find("r_hand").unwrap();
+            let mut ann1 = ann0.clone();
+            let own = crate::ann::Ann::parse(&install::read_recom(&arc, &keys, &format!("PLAYER/{grp}/PL{grp}.ANN")).unwrap()).unwrap();
+            let rep = crate::grip::close(&mut ann1, &mdl, &own).unwrap();
+            eprintln!("{grp}: grip from {:?}, {} clips, max weight {:.2}", rep.source, rep.clips, rep.max_weight);
+            for (which, ann) in [("before", &ann0), (tag.as_str(), &ann1)] {
+                let dir = dt::out_dir().join("hand").join(format!("hand_{grp}_{which}"));
+                std::fs::create_dir_all(&dir).unwrap();
+                for (label, slot, f) in [("idle", 1usize, 0.0), ("idle79", 79, 8.0), ("s10f2", 10, 2.0), ("s10f7", 10, 7.0), ("s81", 81, 5.0), ("item34", 34, 20.0), ("s39", 39, 8.0), ("jump16", 4, 16.0), ("stance", 31, 0.0), ("stance40", 31, 40.0), ("run", 3, 6.0), ("swing8", 44, 8.0), ("swing16", 44, 16.0)] {
+                    let Some(c) = ann.slots.get(slot).and_then(|s| s.clip.as_ref()) else { continue };
+                    let w = posed_world(&sk, c, f);
+                    // 0.198.9: the owner's view: along the handle (wep0's x axis), from either end
+                    let ax = { let r = crate::math::unscale(&w[sk.find("wep0").unwrap()].r).0; r[0] };
+                    let yaw_h = ax[0].atan2(ax[2]).to_degrees();
+                    let pitch_h = (-ax[1]).asin().to_degrees();
+                    for (yn, yaw, pitch) in [("front", 0.0, 0.0), ("side", 90.0, 0.0), ("back", 180.0, 0.0), ("other", 270.0, 0.0), ("top", 0.0, 60.0), ("under", 0.0, -60.0), ("axis", yaw_h, pitch_h), ("axis2", yaw_h + 180.0, -pitch_h)] {
+                        render_focus(&p3, &w, &names, &img, &body, yaw, pitch, (w[hand].t, std::env::var("HAND_HALF").ok().and_then(|x| x.parse().ok()).unwrap_or(0.07)), &dir.join(format!("{label}_{yn}.png")));
+                    }
+                }
+            }
+        }
+    }
+
     /// 0.198.8 (fork owner: "no darkmode queria ver se é possível animar a saia do riku"): the Dark Form skin's whole body (coat tails
     /// included), `out/dark/skirt_<tag>/`: idle, walk, run, jump and the first ground swing, from the front, both sides and behind, at
     /// four frames each; `SKIRT_BEFORE=1` renders the skin without [`crate::tails::animate`] (the reference).
