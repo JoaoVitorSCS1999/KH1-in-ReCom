@@ -679,6 +679,8 @@ impl Host for RecomHost {
             // 0.184.1: KH1's cast motions play his cast clips (rows 0x3B..0x40, from Dark Riku's Dark Firaga).
             let cast = if is_main_riku(pl) { super::riku_skin::cast_row(is_main_dark_riku(pl), request & 0x3FF) } else { None };
             let row = cast.unwrap_or(row);
+            // 0.198.13: after a cast row, the idle is the battle stance (`crate::riku::idle_after_cast`).
+            let row = if is_main_riku(pl) && cast.is_none() { crate::riku::idle_after_cast(stance.row, stance.prev_row, row) } else { row };
             if is_main_riku(pl) {
                 // Only rows Riku's own action table plays (`crate::riku::row_ok`); Re:CoM's own
                 // effects and sounds of his clips (variant 0).

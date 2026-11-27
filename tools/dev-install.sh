@@ -30,14 +30,17 @@ if [ $run_tests = 1 ]; then
 fi
 
 export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
-if cargo build --release --target x86_64-pc-windows-gnu -p kh1-recom >"$logs/build.log" 2>&1; then
+# KH1_DLL_PROFILE (machine-local, e.g. "testing" defined in ~/.cargo/config.toml): a faster build for in-game tests;
+# unset = the release profile, as the GitHub release builds it.
+profile="${KH1_DLL_PROFILE:-release}"
+if cargo build --profile "$profile" --target x86_64-pc-windows-gnu -p kh1-recom >"$logs/build.log" 2>&1; then
   warns=$(grep -c '^warning' "$logs/build.log" || true)
-  echo "build: ok ($warns warning lines)"
+  echo "build: ok ($profile, $warns warning lines)"
 else
   echo "build: FAILED (see $logs/build.log)"; grep -E '^error' -A5 "$logs/build.log" | head -20; exit 1
 fi
 
-cp target/x86_64-pc-windows-gnu/release/kh1_recom.dll "$dest"
+cp "target/x86_64-pc-windows-gnu/$profile/kh1_recom.dll" "$dest"
 got="$(grep -a -o 'mod v0\.[0-9]*\.[0-9]*' "$dest" | head -1 | sed 's/mod v//')"
 if [ "$got" = "$want" ]; then
   echo "install: $dest = $got (press Build in the Mods Manager if assets changed)"

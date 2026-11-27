@@ -1166,7 +1166,8 @@ pub fn riku_spell_levels() -> [u8; crate::command_menu::spell::COUNT] {
 }
 
 unsafe fn riku_world(pl: usize) -> World {
-    let ids: Vec<u16> = crate::riku::list(mv::is_main_dark_riku(pl)).iter().map(|s| s.id).collect();
+    // 0.198.15: only what Re:CoM has taught him (none before the Ansem tutorial's end), as Re:CoM's Sleights List.
+    let ids = riku_learned_sleights(mv::is_main_dark_riku(pl));
     let mut shortcuts = super::mp::riku_shortcuts().unwrap_or([0; 3]);
     if let Some(f) = crate::riku::fill_shortcuts(shortcuts, &ids).filter(|_| !super::mp::riku_shortcuts_set()) {
         if super::mp::set_riku_shortcuts(f) {
@@ -1222,8 +1223,15 @@ unsafe fn riku_world(pl: usize) -> World {
     w
 }
 
-/// Re:CoM's own "learned" answer for each of Riku's sleights (`0x14023AB00`), logged once: the list
-/// shows all six (Re:CoM's Riku forms them from cards, Assumption), this says what Re:CoM records.
+/// 0.198.15: Riku's (or Dark Riku's) sleights that Re:CoM's own test (`0x14023AB00`) answers as learned
+/// (`crate::riku::learned_ids`). His command menu, shortcuts and Customize page list only these.
+pub(super) unsafe fn riku_learned_sleights(dark: bool) -> Vec<u16> {
+    let f = super::abilities::sleight_learned_fn();
+    crate::riku::learned_ids(dark, |id| unsafe { f(id) } & 0xFF != 0)
+}
+
+/// Re:CoM's own "learned" answer for each of Riku's sleights (`0x14023AB00`), logged once (0.198.15: the lists
+/// follow it).
 unsafe fn riku_learned_note() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {

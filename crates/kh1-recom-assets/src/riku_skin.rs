@@ -485,6 +485,13 @@ pub struct GuardSource<'a> {
 /// Sora's KH1 Guard on Riku (0.157.0; replaced by [`riku_kh1_guard`] in 0.158.0, kept for tests).
 /// Riku's battle stance (his action row 0x2A). Checked (exe: `0x1407C6370`).
 pub const RIKU_STANCE: &str = "p002_031";
+/// 0.198.13: Riku's fall (row 6), what plays after his air casts; Dark Riku's battle stance (his row 0x2A) and fall (row 6).
+/// Checked (exe: the action tables `0x1407C6370` / `0x1407C67F0`).
+pub const RIKU_FALL: &str = "p002_006";
+/// Dark Riku's battle stance (his row 0x2A), what plays after his ground casts.
+pub const DARK_STANCE: &str = "p003_021";
+/// Dark Riku's fall (his row 6), what plays after his air casts.
+pub const DARK_FALL: &str = "p003_007";
 
 /// Sora's bone of the same role as Riku's.
 fn sora_alias(riku: &str) -> &str {
@@ -1578,6 +1585,83 @@ pub fn dark_cast_clips(ctx: &CastCtx) -> Result<Vec<Clip>> {
     CAST_CLIPS.iter().map(|c| ctx.cast_clip(c, Skel::Dark, "p003_")).collect()
 }
 
+impl CastClip {
+    /// The clip frame the key moment ends on (the latest over its source and fallbacks, so the ease never starts inside it).
+    pub fn key_out(&self) -> f64 {
+        let mut s = Some(self.src);
+        let mut at = self.release;
+        while let Some(i) = s {
+            let src = &CAST_SOURCES[i];
+            at = at.max(self.release + (src.key_end - src.charge_end) / (src.fps / 60.0));
+            s = src.fallback;
+        }
+        at
+    }
+
+    /// A wind-up (Fire's `227` / `233`): its release clip follows it (blend 0) and starts where it ends.
+    pub fn is_windup(&self) -> bool {
+        self.release as usize >= self.len
+    }
+}
+
+/// 0.198.13 (fork owner, 2026-11-26: "quero testar também as animações de magia, tem mudanças muito bruscas entre a animação e
+/// voltar para o estado idle"; "todas as magias...."; "magia é o riku normal e o dark mode"): the cast clips (Terra's casts)
+/// ended in Terra's recovery, 0.5..0.95 m (hands, blade) from the pose the game plays next. Each clip but the wind-ups is turned,
+/// bone by bone in its local rotation, translation and scale, from its own pose toward `next` frame 0 after its key moment
+/// ([`CastClip::key_out`]: the release gesture is untouched), with a smoothstep weight that reaches 1 on KH1's free frame (or the
+/// last frame) and holds after: the last frame is the next pose. `ground` follows the ground six (the battle stance, row 0x2A:
+/// KH1 queues the idle after a ground cast, `crate::magic` in the DLL, and in battle Re:CoM's idle row is 0x2A, Checked (code,
+/// exe: the action tables `0x1407C6370` / `0x1407C67F0`)); `air` the air six (the fall, row 6: KH1 queues the fall).
+pub fn ease_cast_ends(clips: &[Clip], ground: &Clip, air: &Clip) -> Vec<Clip> {
+    #[cfg(test)]
+    if EASE_OFF.with(|x| x.get()) {
+        return clips.to_vec();
+    }
+    CAST_CLIPS
+        .iter()
+        .zip(clips)
+        .enumerate()
+        .map(|(k, (c, clip))| if c.is_windup() { clip.clone() } else { ease_to_next(clip, if k >= 6 { air } else { ground }, c.key_out(), c.free.min(c.len - 1) as f64) })
+        .collect()
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: build the casts as before 0.198.13 (no [`ease_cast_ends`]), the "before" of the renders.
+    pub static EASE_OFF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// `clip` turned toward `next`'s frame 0 between frames `from` (weight 0) and `to` (weight 1, held after), smoothstep.
+pub fn ease_to_next(clip: &Clip, next: &Clip, from: f64, to: f64) -> Clip {
+    let n = clip.frames.max(1) as usize;
+    let nb = clip.bones as usize;
+    let mut prev: Vec<Option<[f64; 3]>> = vec![None; nb];
+    let rows: Vec<Vec<[f64; 9]>> = (0..n)
+        .map(|f| {
+            let x = ((f as f64 - from) / (to - from).max(1.0)).clamp(0.0, 1.0);
+            let w = x * x * (3.0 - 2.0 * x);
+            (0..nb)
+                .map(|b| {
+                    let s = clip.sample(b, f as f64);
+                    if w <= 0.0 || b >= next.bones as usize {
+                        prev[b] = Some(s.r);
+                        return [s.t[0], s.t[1], s.t[2], s.r[0], s.r[1], s.r[2], s.s[0], s.s[1], s.s[2]];
+                    }
+                    let e = next.sample(b, 0.0);
+                    let m = rot_blend(&rot_xyz(s.r[0], s.r[1], s.r[2]), &rot_xyz(e.r[0], e.r[1], e.r[2]), w);
+                    let r = crate::math::euler_xyz(&m, prev[b].or(Some(s.r)));
+                    prev[b] = Some(r);
+                    let l = |a: f64, z: f64| a + (z - a) * w;
+                    [l(s.t[0], e.t[0]), l(s.t[1], e.t[1]), l(s.t[2], e.t[2]), r[0], r[1], r[2], l(s.s[0], e.s[0]), l(s.s[1], e.s[1]), l(s.s[2], e.s[2])]
+                })
+                .collect()
+        })
+        .collect();
+    let mut c = encode(clip, &rows);
+    c.flags = (c.flags & !0x1C) | (clip.flags & 0x1C);
+    c
+}
+
 /// `ann` with `clip` added as its last slot (named as the clip), unless a slot already has it.
 pub fn with_clip(mut ann: Ann, clip: Clip) -> Ann {
     if ann.find(&clip.name_str()).is_none() {
@@ -1667,8 +1751,18 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     // 0.189.0: BBS FM Terra's motions (the casts and the Block), read by the step when the game has them.
     let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: stance.as_ref(), ansem: guard.and_then(|g| g.ansem), terra: guard.and_then(|g| g.terra) };
     let riku_casts = riku_cast_clips(&ctx)?;
-    let dark_casts = dark_cast_clips(&ctx)?;
+    let dark_casts_raw = dark_cast_clips(&ctx)?;
     let mut dann_own = Ann::parse(&rd(dark, "ANN")?)?;
+    // 0.198.13: each cast ends in the pose the game plays next ([`ease_cast_ends`]): Riku's battle stance / fall, Dark Riku's.
+    let clip_in = |a: &Ann, n: &str| a.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == n)).cloned();
+    let riku_casts = match (&stance, clip_in(&ann, RIKU_FALL)) {
+        (Some(st), Some(fall)) => ease_cast_ends(&riku_casts, st, &fall),
+        _ => riku_casts,
+    };
+    let dark_casts = match (clip_in(&dann_own, DARK_STANCE), clip_in(&dann_own, DARK_FALL)) {
+        (Some(st), Some(fall)) => ease_cast_ends(&dark_casts_raw, &st, &fall),
+        _ => dark_casts_raw.clone(),
+    };
     if let Some(src) = guard {
         // 0.189.0: Terra's Block when BBS FM is read (0.185.0 to 0.188.x: DDD Riku's, removed in 0.193.0), else KH1 Riku's
         // (0.158.0). The recoil is KH1 Riku's either way.
@@ -1748,8 +1842,13 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     ];
     let mut out_ann = retarget_ann(&ann_plain, &rs, &ds)?;
     // The skin (Dark Riku's model playing Riku's rows): his cast rows play the Dark Firaga clip on its own skeleton
-    // (not Riku's version retargeted back), under Riku's names.
-    for (c, d) in CAST_CLIPS.iter().zip(&dark_casts) {
+    // (not Riku's version retargeted back), under Riku's names. 0.198.13: eased into the skin's own next poses (Riku's stance
+    // and fall on Dark Riku's skeleton: the skin plays Riku's rows; its fall is 0.45 m from Dark Riku's own).
+    let skin_casts = match (clip_in(&out_ann, RIKU_STANCE), clip_in(&out_ann, RIKU_FALL)) {
+        (Some(st), Some(fall)) => ease_cast_ends(&dark_casts_raw, &st, &fall),
+        _ => dark_casts_raw.clone(),
+    };
+    for (c, d) in CAST_CLIPS.iter().zip(&skin_casts) {
         let name = format!("p002_{}", c.suffix);
         if let Some(i) = out_ann.find(&name) {
             let mut d = d.clone();
@@ -1777,6 +1876,8 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     }
     // 0.198.10: and relaxed in the field walk and run (`crate::hands`)
     if !crate::grip::OFF.with(|x| x.get()) {
+        // 0.198.13: the skin's left hand loose as Dark Riku's own in idle / walk / run, before the right mirrors it
+        crate::hands::loosen(&mut out_ann, &dmdl, &dann)?;
         crate::hands::relax(&mut out_ann, &dmdl)?;
     }
     eet.extend(crate::eet::parse(&rd(dark, "EET")?)?.into_iter().filter(|r| r.name == DARK_FLIP));
@@ -2260,7 +2361,8 @@ mod tests {
             let (old, new) = (crate::mdl::split_parts(&plain_mdl).unwrap(), crate::mdl::split_parts(mdl).unwrap());
             assert_ne!(old[3], new[3], "{target}: the body's hair changed");
             let p = crate::mdl::MdlPart::parse_bytes(&new[3]).unwrap();
-            assert!(p.texture_names().iter().any(|t| t.as_str() == "rk_hair_bbs"), "{target}: the BBS atlas");
+            // 0.198.13: one name per model's picture (`ddd_hair::RIKU_0111_BBS`)
+            assert!(p.texture_names().iter().any(|t| t.as_str() == atlas.new_texture), "{target}: the BBS atlas");
         }
     }
 
@@ -3261,6 +3363,264 @@ mod grip_probe {
                         gaps.push(format!("f{f}: grip→nearest hand vertex {:.1} cm, grip→hand centre {:.1} cm, wep0 local t {:?}", near * 100.0, crate::math::dist(gc, hand_c) * 100.0, c.sample(w0, f).t.map(|x| (x * 1000.0).round() / 10.0)));
                     }
                     eprintln!("  {which} slot {slot} {}: {}", c.name_str(), gaps.join(" | "));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod cast_ends {
+    use super::*;
+    use crate::install;
+    fn clip_of(a: &Ann, n: &str) -> Clip {
+        a.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == n)).cloned().unwrap_or_else(|| panic!("no {n}"))
+    }
+    /// The largest offset (m) of head, chest, hands, feet and blade root (each relative to the body bone `body`) between `a` at
+    /// frame `fa` and `b` at `fb`, and its bone.
+    fn gap(sk: &RecomSkeleton, a: &Clip, fa: f64, b: &Clip, fb: f64, body: &str) -> (f64, &'static str) {
+        let (wa, wb) = (crate::kh2_hair::tests::posed_world(sk, a, fa), crate::kh2_hair::tests::posed_world(sk, b, fb));
+        let k = sk.find(body).unwrap();
+        let mut best = (0.0, "");
+        for n in ["head", "chest1", "l_hand", "r_hand", "l_foot", "r_foot", "wep0"] {
+            let Some(i) = sk.find(n) else { continue };
+            let d = (0..3).map(|j| ((wa[i].t[j] - wa[k].t[j]) - (wb[i].t[j] - wb[k].t[j])).powi(2)).sum::<f64>().sqrt();
+            if d > best.0 {
+                best = (d, n);
+            }
+        }
+        best
+    }
+    /// The fastest move (m a frame) of head, chest, hands, blade root and arms from frame `from` on.
+    fn fastest(sk: &RecomSkeleton, c: &Clip, from: usize) -> f64 {
+        let idx: Vec<usize> = ["chest1", "head", "l_hand", "r_hand", "wep0", "l_uparm", "r_uparm", "l_arm", "r_arm"].iter().filter_map(|n| sk.find(n)).collect();
+        let mut w = 0.0f64;
+        for f in from..(c.frames as usize).saturating_sub(1) {
+            let (wa, wb) = (crate::kh2_hair::tests::posed_world(sk, c, f as f64), crate::kh2_hair::tests::posed_world(sk, c, f as f64 + 1.0));
+            for &i in &idx {
+                w = w.max(crate::math::dist(wa[i].t, wb[i].t));
+            }
+        }
+        w
+    }
+
+    /// A bone's local rotation at frame `f`.
+    fn local(c: &Clip, b: usize, f: f64) -> M3 {
+        let s = c.sample(b, f);
+        rot_xyz(s.r[0], s.r[1], s.r[2])
+    }
+    /// The angle (deg) between two rotations.
+    fn turn(a: &M3, b: &M3) -> f64 {
+        let r = m3(&tr(a), b);
+        ((r[0][0] + r[1][1] + r[2][2] - 1.0) / 2.0).clamp(-1.0, 1.0).acos().to_degrees()
+    }
+    /// The frame checks of a cast `c` into `next`: the largest one-frame turn of any bone (deg, its bone and where) over the cast's
+    /// last 12 frames and the step from its last frame into `next` frame 0; `next`'s own over its first 12 frames; the cast's last
+    /// frame into `next`'s first 12 through the DLL's blend (`riku::OUT`, 10 frames: Re:CoM's controller blends the held last pose into `next` by the remaining share,
+    /// Assumption: per bone in its local rotation); and the largest scale difference between the last frame and `next` frame 0.
+    fn junction(sk: &RecomSkeleton, c: &Clip, next: &Clip, skip: &dyn Fn(&str) -> bool) -> ((f64, String), (f64, String), (f64, String), f64) {
+        let nb = (c.bones.min(next.bones)) as usize;
+        let last = (c.frames - 1) as f64;
+        let mut seq: Vec<(String, Box<dyn Fn(usize) -> M3 + '_>)> = Vec::new();
+        for f in (c.frames as usize).saturating_sub(12)..c.frames as usize {
+            seq.push((format!("cast {f}"), Box::new(move |b| local(c, b, f as f64))));
+        }
+        seq.push(("next 0".into(), Box::new(move |b| local(next, b, 0.0))));
+        let mut own: Vec<(String, Box<dyn Fn(usize) -> M3 + '_>)> = Vec::new();
+        for f in 0..12 {
+            own.push((format!("next {f}"), Box::new(move |b| local(next, b, f as f64))));
+        }
+        let mut blended: Vec<(String, Box<dyn Fn(usize) -> M3 + '_>)> = vec![(format!("cast {last}"), Box::new(move |b| local(c, b, last)))];
+        for f in 0..12usize {
+            let w = (f as f64 / 10.0).min(1.0);
+            blended.push((format!("blend {f}"), Box::new(move |b| rot_blend(&local(c, b, last), &local(next, b, f as f64), w))));
+        }
+        let worst = |s: &[(String, Box<dyn Fn(usize) -> M3 + '_>)]| {
+            let mut best = (0.0, String::new());
+            for k in 1..s.len() {
+                for b in (0..nb).filter(|&b| !skip(&sk.bones[b].name)) {
+                    let d = turn(&(s[k - 1].1)(b), &(s[k].1)(b));
+                    if d > best.0 {
+                        best = (d, format!("{} {} -> {}", sk.bones[b].name, s[k - 1].0, s[k].0));
+                    }
+                }
+            }
+            best
+        };
+        let sc = (0..nb).map(|b| (0..3).map(|i| (c.sample(b, last).s[i] - next.sample(b, 0.0).s[i]).abs()).fold(0.0, f64::max)).fold(0.0, f64::max);
+        (worst(&seq), worst(&blended), worst(&own), sc)
+    }
+
+    /// 0.198.13 (owner's install, `RECOM_GAME`; fork owner: "tem mudanças muito bruscas entre a animação e voltar para o estado
+    /// idle"): every cast clip but the wind-ups, for Riku (`PL0101`), Dark Riku (`PL0201`) and the Dark Form skin (121), as built
+    /// (grip, hands and tails included), ends within 2 cm of the clip the game plays next (the battle stance on the ground, the
+    /// fall in the air; Riku's rows for Riku and the skin, Dark Riku's for him); the ease leaves the frames up to the key moment's
+    /// end as they were and moves no bone faster than 0.2 m a frame more than the clip did.
+    #[test]
+    fn casts_end_in_the_next_pose() {
+        let Ok(g) = std::env::var("RECOM_GAME").map(std::path::PathBuf::from) else { return };
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let rd = |p: &str| install::read_recom(&arc, &keys, p).unwrap();
+        let ds = RecomSkeleton::parse(&rd("PLAYER/0201/PL0201.MDL")).unwrap();
+        let rs = RecomSkeleton::parse(&rd("PLAYER/0101/PL0101.MDL")).unwrap();
+        let ss = RecomSkeleton::parse(&rd("PLAYER/0001/PL0001.MDL")).unwrap();
+        let ann = Ann::parse(&rd("PLAYER/0101/PL0101.ANN")).unwrap();
+        let dann = Ann::parse(&rd("PLAYER/0201/PL0201.ANN")).unwrap();
+        let packs: std::cell::RefCell<std::collections::HashMap<u16, Ann>> = Default::default();
+        let get = |g: u16, name: &str| -> Result<Clip> {
+            let mut p = packs.borrow_mut();
+            let a = p.entry(g).or_insert_with(|| Ann::parse(&rd(&path(g, "ANN"))).unwrap());
+            Ok(a.slots.iter().find_map(|s| s.clip.as_ref().filter(|c| c.name_str() == name)).cloned().unwrap())
+        };
+        let k1 = install::kh1(&g, keys.clone()).unwrap();
+        let (am, ad) = (k1.read("xa_ex_1580.mset").unwrap(), k1.read("xa_ex_1580.mdls").unwrap());
+        let (rm, rdl) = (k1.read("xa_ex_1010.mset").unwrap(), k1.read("xa_ex_1010.mdls").unwrap());
+        let stance = clip_of(&ann, RIKU_STANCE);
+        let terra_data = crate::terra::read_terra(&g, &keys).ok();
+        let terra = terra_data.as_ref().map(|(k, c)| (k, c.as_slice()));
+        let ctx = CastCtx { get: &get, riku: &rs, dark: &ds, sora: &ss, stance: Some(&stance), ansem: Some((&am, &ad)), terra };
+        // The ease alone: untouched up to the key moment's end, the next pose at the end.
+        let raw = dark_cast_clips(&ctx).unwrap();
+        let eased = ease_cast_ends(&raw, &clip_of(&dann, DARK_STANCE), &clip_of(&dann, DARK_FALL));
+        for (k, c) in CAST_CLIPS.iter().enumerate() {
+            let same = (0..(c.key_out().floor() as usize).min(c.len)).map(|f| gap(&ds, &raw[k], f as f64, &eased[k], f as f64, "ex_1580_sk").0).fold(0.0, f64::max);
+            assert!(same < 1e-3, "{}: the ease moved the key moment {:.1} cm", c.suffix, same * 100.0);
+            let (a, b) = (fastest(&ds, &raw[k], 0), fastest(&ds, &eased[k], 0));
+            assert!(b <= a + 0.2, "{}: {b:.3} m a frame (was {a:.3})", c.suffix);
+        }
+        // Clearance: the blade (points along `wep0`'s -x, 10..70 cm, where Riku's mesh runs) and the hands come no nearer the head
+        // and chest (bone origins) in the ease than in the clip before it or in the next pose (Riku's own casts, his stance and fall).
+        let rraw = riku_cast_clips(&ctx).unwrap();
+        let reased = ease_cast_ends(&rraw, &stance, &clip_of(&ann, RIKU_FALL));
+        let near = |c: &Clip, f: f64| -> f64 {
+            let w = crate::kh2_hair::tests::posed_world(&rs, c, f);
+            let (h, ch, wp) = (rs.find("head").unwrap(), rs.find("chest1").unwrap(), rs.find("wep0").unwrap());
+            let mut m = f64::MAX;
+            for k in 1..=7 {
+                let pt = w[wp].point([-0.1 * k as f64, 0.0, 0.0]);
+                m = m.min(crate::math::dist(pt, w[h].t)).min(crate::math::dist(pt, w[ch].t));
+            }
+            for n in ["l_hand", "r_hand"] {
+                let i = rs.find(n).unwrap();
+                m = m.min(crate::math::dist(w[i].t, w[h].t)).min(crate::math::dist(w[i].t, w[ch].t));
+            }
+            m
+        };
+        for (k, c) in CAST_CLIPS.iter().enumerate() {
+            let next = if k >= 6 { clip_of(&ann, RIKU_FALL) } else { stance.clone() };
+            let ko = c.key_out().floor() as usize;
+            let before = (0..c.len).map(|f| near(&rraw[k], f as f64)).fold(f64::MAX, f64::min).min(near(&next, 0.0));
+            let after = (ko..c.len).map(|f| near(&reased[k], f as f64)).fold(f64::MAX, f64::min);
+            eprintln!("{}: nearest blade / hand to head / chest: in the ease {:.1} cm; the clip and next pose {:.1} cm", c.suffix, after * 100.0, before * 100.0);
+            assert!(after >= before - 0.01, "{}: the ease brings the blade or a hand {:.1} cm to the head or chest ({:.1} before)", c.suffix, after * 100.0, before * 100.0);
+        }
+        // As built.
+        let src = GuardSource { mset: &rm, mdls: &rdl, ansem: Some((&am, &ad)), terra };
+        let b = build_with(&arc, &keys, 101, 201, 121, Some(&src)).unwrap();
+        let pack = |grp: u16| Ann::parse(&b.files.iter().find(|f| f.0 == path(grp, "ANN")).unwrap().1).unwrap();
+        for (grp, sk, pre, body, ground, air) in [(101u16, &rs, "p002_", "ex_1010_sk", RIKU_STANCE, RIKU_FALL), (201, &ds, "p003_", "ex_1580_sk", DARK_STANCE, DARK_FALL), (121, &ds, "p002_", "ex_1580_sk", RIKU_STANCE, RIKU_FALL)] {
+            let a = pack(grp);
+            let (st, fall) = (clip_of(&a, ground), clip_of(&a, air));
+            for (k, c) in CAST_CLIPS.iter().enumerate() {
+                let clip = clip_of(&a, &format!("{pre}{}", c.suffix));
+                let next = if k >= 6 { &fall } else { &st };
+                let last = gap(sk, &clip, (c.len - 1) as f64, next, 0.0, body);
+                let free = gap(sk, &clip, c.free.min(c.len - 1) as f64, next, 0.0, body);
+                eprintln!("{grp} {pre}{}: last frame {:.1} cm ({}), free frame {:.1} cm; fastest after the key moment {:.3} m a frame", c.suffix, last.0 * 100.0, last.1, free.0 * 100.0, fastest(sk, &clip, c.key_out().ceil() as usize));
+                let rel = if c.is_windup() { clip_of(&a, &format!("{pre}{}", CAST_CLIPS[k + 1].suffix)) } else { next.clone() };
+                // The skin's coat tails (`*_skt*`) are simulated after this (`crate::tails`, its own piece): checked apart.
+                let (pop, pop_blend, pop_own, sc) = junction(sk, &clip, &rel, &|n| n.contains("_skt"));
+                if grp == 121 {
+                    let (t, tb, to, _) = junction(sk, &clip, &rel, &|n| !n.contains("_skt"));
+                    eprintln!("    coat tails: {:.1} deg ({}); through the blend {:.1} deg ({}); the next clip's own {:.1} deg ({})", t.0, t.1, tb.0, tb.1, to.0, to.1);
+                }
+                eprintln!("    frame checks: worst one-frame turn {:.1} deg ({}); through the blend {:.1} deg ({}); the next clip's own {:.1} deg ({}); scale diff {sc:.4}", pop.0, pop.1, pop_blend.0, pop_blend.1, pop_own.0, pop_own.1);
+                // No bone turns over 30 deg in a frame, or faster than the next clip's own frames do (Fire's thrust: the wind-up runs
+                // into its release with no blend, at the motion's own speed); the blend's frames the same.
+                let cap = 30.0f64.max(pop_own.0 + 1.0);
+                assert!(pop.0 <= if c.is_windup() { cap } else { 30.0 } && (c.is_windup() || pop_blend.0 <= cap), "{grp} {pre}{}: a pop: {pop:?} / {pop_blend:?}", c.suffix);
+                if c.is_windup() {
+                    // Its release (blend 0) goes on from where it ends: one step at the thrust's own speed (not eased).
+                    let r = clip_of(&a, &format!("{pre}{}", CAST_CLIPS[k + 1].suffix));
+                    let rel = gap(sk, &clip, (c.len - 1) as f64, &r, 0.0, body);
+                    let speed = fastest(sk, &r, 0);
+                    eprintln!("    into its release: {:.1} cm ({}), the release's fastest step {:.1} cm", rel.0 * 100.0, rel.1, speed * 100.0);
+                    assert!(rel.0 <= speed + 0.01, "{grp} {pre}{}: {:.1} cm ({}) from its release", c.suffix, rel.0 * 100.0, rel.1);
+                } else {
+                    assert!(last.0 < 0.02 && free.0 < 0.02, "{grp} {pre}{}: {:.1} cm ({}) from the next pose", c.suffix, last.0 * 100.0, last.1);
+                }
+            }
+        }
+    }
+
+    /// 0.198.13 renders (`RECOM_GAME`), `out/cast_ends/<group>_<before|after>/`: the built casts of Riku (`PL0101`, his model and
+    /// Soul Eater), Dark Riku (`PL0201`) and the Dark Form skin (121, Dark Riku's model), at the key moment's end, the middle of the
+    /// ease, the free frame and the last, and the next clip's frame 0, front and side. `CASTS=231,229`: only those clips.
+    #[test]
+    fn cast_end_renders() {
+        let Ok(g) = std::env::var("RECOM_GAME").map(std::path::PathBuf::from) else { return };
+        std::env::set_var("FULL_BODY", "1");
+        let keys = install::keys(&g).unwrap();
+        let arc = install::recom_archive(&g).unwrap();
+        let k1 = install::kh1(&g, keys.clone()).unwrap();
+        let (am, ad) = (k1.read("xa_ex_1580.mset").unwrap(), k1.read("xa_ex_1580.mdls").unwrap());
+        let (rm, rdl) = (k1.read("xa_ex_1010.mset").unwrap(), k1.read("xa_ex_1010.mdls").unwrap());
+        let terra_data = crate::terra::read_terra(&g, &keys).ok();
+        let src = GuardSource { mset: &rm, mdls: &rdl, ansem: Some((&am, &ad)), terra: terra_data.as_ref().map(|(k, c)| (k, c.as_slice())) };
+        let only: Option<Vec<String>> = std::env::var("CASTS").ok().map(|v| v.split(',').map(String::from).collect());
+        for which in ["before", "after"] {
+            EASE_OFF.with(|x| x.set(which == "before"));
+            let b = build_with(&arc, &keys, 101, 201, 121, Some(&src)).unwrap();
+            EASE_OFF.with(|x| x.set(false));
+            for (grp, model, pre, ground, air, atlas_name) in [(101u16, "0101", "p002_", RIKU_STANCE, RIKU_FALL, "n_zz110_01"), (201, "0201", "p003_", DARK_STANCE, DARK_FALL, "n_zz120_01"), (121, "0201", "p002_", RIKU_STANCE, RIKU_FALL, "n_zz120_01")] {
+                let ann = Ann::parse(&b.files.iter().find(|f| f.0 == path(grp, "ANN")).unwrap().1).unwrap();
+                let mdl = install::read_recom(&arc, &keys, &format!("PLAYER/{model}/PL{model}.MDL")).unwrap();
+                let e = arc.find(&format!("PLAYER/{model}/PL{model}.RTM")).unwrap();
+                let (rtm, hd) = kh1_formats::egs::decode_entry_full(&keys, &arc.read_raw_entry(e).unwrap()).unwrap();
+                let rtm_p = crate::rtm::Rtm::parse(&rtm).unwrap();
+                let parts = crate::mdl::split_parts(&mdl).unwrap();
+                let mut p3 = crate::mdl::MdlPart::parse_bytes(&parts[3]).unwrap();
+                let p1 = crate::mdl::MdlPart::parse_bytes(&parts[1]).unwrap();
+                let dec = |n: &str| {
+                    let e = rtm_p.entries.iter().find(|e| e.name_str().trim_end_matches(".tm2") == n.trim_end_matches(".tm2")).unwrap();
+                    let (w, h, px) = crate::rtm::tim2_decode8(&e.data).unwrap();
+                    crate::texture::Image { w, h, px }
+                };
+                let mut body: Vec<crate::texture::Image> = p3.texture_names().iter().map(|n| dec(n)).collect();
+                let a = p3.texture_names().iter().position(|n| n == atlas_name).unwrap() as u32;
+                for k in p3.list_a.iter_mut().chain(p3.list_b.iter_mut().flatten()) {
+                    for v in k.verts.iter_mut() {
+                        if let Some(q) = v.q2.as_mut() {
+                            if q[3] == a { q[3] = 1; } else if q[3] == 1 { q[3] = a; }
+                        }
+                    }
+                }
+                body.swap(1, a as usize);
+                let wi = body.len() as u32;
+                body.push(dec("weapon_01"));
+                let mut wl = p1.list_a.clone();
+                for k in wl.iter_mut() { for v in k.verts.iter_mut() { if let Some(q) = v.q2.as_mut() { q[3] = wi; } } }
+                p3.list_a.extend(wl);
+                let img = hd.iter().find(|x| x.name == crate::keyblade::hd_name(atlas_name)).and_then(|x| crate::texture::decode_dds(&x.data).ok()).unwrap_or_else(|| body[1].clone());
+                let sk = RecomSkeleton::parse(&mdl).unwrap();
+                let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
+                let dir = crate::ddd_hair::tests::out_dir().join("cast_ends").join(format!("{grp}_{which}"));
+                std::fs::create_dir_all(&dir).unwrap();
+                for (k, c) in CAST_CLIPS.iter().enumerate() {
+                    if c.is_windup() || only.as_ref().is_some_and(|o| !o.iter().any(|x| x == c.suffix)) { continue; }
+                    let clip = clip_of(&ann, &format!("{pre}{}", c.suffix));
+                    let next = clip_of(&ann, if k >= 6 { air } else { ground });
+                    let ko = c.key_out().ceil();
+                    let fr = c.free.min(c.len - 1) as f64;
+                    let frames = [("a_key", ko), ("b_mid", ((ko + fr) / 2.0).round()), ("c_free", fr), ("d_last", (c.len - 1) as f64)];
+                    for (label, f) in frames.iter().map(|&(l, f)| (l, Some(f))).chain([("e_next", None)]) {
+                        let w = match f { Some(f) => crate::kh2_hair::tests::posed_world(&sk, &clip, f), None => crate::kh2_hair::tests::posed_world(&sk, &next, 0.0) };
+                        for (yn, yaw) in [("front", 0.0), ("side", 90.0)] {
+                            let name = format!("{}_{label}{}_{yn}.png", c.suffix, f.map_or(String::new(), |f| format!("{f:.0}")));
+                            crate::kh2_hair::tests::render_cam(&p3, &w, &names, &img, &body, yaw, 0.0, true, &dir.join(name));
+                        }
+                    }
                 }
             }
         }

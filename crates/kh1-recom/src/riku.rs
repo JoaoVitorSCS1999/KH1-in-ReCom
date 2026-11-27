@@ -167,6 +167,19 @@ pub fn blend_for(cur: u32, new: u32, first_cast: bool, blend: f32) -> f32 {
     }
 }
 
+/// 0.198.13 (fork owner, on the cast clips: "tem mudanças muito bruscas entre a animação e voltar para o estado idle"; "magia é o
+/// riku normal e o dark mode"): the idle row after one of his cast rows (`cur` or `prev`) is the battle stance 0x2A, field or
+/// battle, as after a swing (`crate::rows::Stance::idle_battle`): the asset step eases each cast clip's end into the stance
+/// (`kh1_recom_assets::riku_skin::ease_cast_ends`), and the field idle (row 1) is 86 cm from it. Other rows: `row` as given.
+pub fn idle_after_cast(cur: i32, prev: i32, row: u32) -> u32 {
+    let cast = |r: i32| r >= 0 && CAST_ROWS.contains(&(r as u32));
+    if row == crate::rows::row::IDLE && (cast(cur) || cast(prev)) {
+        crate::rows::row::STANCE_IDLE
+    } else {
+        row
+    }
+}
+
 /// The cast row for a KH1 cast request (ground and air share a row; `crate::magic::cast_req`), None for anything
 /// else.
 pub fn cast_row(request: u16) -> Option<u32> {
@@ -272,6 +285,14 @@ pub fn list(dark: bool) -> &'static [Sleight] {
     }
 }
 
+/// 0.198.15: the ids of one list that Re:CoM has taught (`learned`: Re:CoM's own test `0x14023AB00`, the card state
+/// in the save). Re:CoM teaches Riku 0x5F..0x61 and 0x66..0x6B at the end of the Ansem tutorial (battle 1100, also
+/// at Combat = KH1 through the story skip) and 0x65 with the King's three in B11's hall (`WORLD00/2103`); none at a
+/// new game. Checked (files + decomp: the workspace's `knowledge/ReCoM/recom-riku-sleights.md`).
+pub fn learned_ids(dark: bool, learned: impl Fn(u16) -> bool) -> Vec<u16> {
+    list(dark).iter().map(|s| s.id).filter(|&id| learned(id)).collect()
+}
+
 /// Their words in the command menu (`crate::sleights::WORD_BASE + id`), each id once.
 pub fn words() -> impl Iterator<Item = (u16, &'static str)> {
     SLEIGHTS.iter().chain(DARK_SLEIGHTS.iter().filter(|d| !SLEIGHTS.iter().any(|s| s.id == d.id))).map(|s| (crate::sleights::WORD_BASE + s.id, s.name))
@@ -314,6 +335,22 @@ mod tests {
     }
 
     #[test]
+    fn only_the_sleights_recom_taught_are_listed() {
+        // A new game: none (the owner's screenshot of Re:CoM's Sleights List, all `?????`).
+        assert!(learned_ids(false, |_| false).is_empty());
+        assert!(learned_ids(true, |_| false).is_empty());
+        // After the Ansem tutorial (cards 0x5F..0x61, 0x66..0x6B): all of Riku's, Dark Riku's but Inverse Burst.
+        let tutorial = |id: u16| (0x5F..=0x61).contains(&id) || (0x66..=0x6B).contains(&id);
+        assert_eq!(learned_ids(false, tutorial), vec![0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B]);
+        assert_eq!(learned_ids(true, tutorial), vec![0x5F, 0x60, 0x61, 0x69, 0x6A, 0x6B]);
+        // B11's hall adds 0x65.
+        assert_eq!(learned_ids(true, |id| tutorial(id) || id == 0x65), vec![0x5F, 0x60, 0x61, 0x65, 0x69, 0x6A, 0x6B]);
+        // The shortcuts fill from what is learned.
+        assert_eq!(fill_shortcuts([0; 3], &learned_ids(false, tutorial)), Some([0x66, 0x67, 0x68]));
+        assert_eq!(fill_shortcuts([0; 3], &learned_ids(false, |_| false)), None);
+    }
+
+    #[test]
     fn rikus_sleights() {
         assert!(SLEIGHTS.iter().all(|s| (0x66..=0x6B).contains(&s.id)));
         assert!(DARK_SLEIGHTS.iter().all(|s| (0x5F..=0x63).contains(&s.id) || (0x65..=0x6B).contains(&s.id)));
@@ -353,6 +390,17 @@ mod tests {
         assert_eq!(blend_for(KH1_GUARD_ROW, KH1_RECOIL_ROW, false, 0.0), 0.0);
         // Anything else as asked.
         assert_eq!(blend_for(0x01, 0x30, false, 8.0), 8.0);
+    }
+
+    #[test]
+    fn the_idle_after_a_cast_is_the_stance() {
+        use crate::rows::row::{IDLE, STANCE_IDLE, WALK};
+        for &c in &CAST_ROWS {
+            assert_eq!(idle_after_cast(c as i32, 1, IDLE), STANCE_IDLE);
+            assert_eq!(idle_after_cast(1, c as i32, IDLE), STANCE_IDLE);
+        }
+        assert_eq!(idle_after_cast(1, 2, IDLE), IDLE, "a plain field idle stays Re:CoM's");
+        assert_eq!(idle_after_cast(CAST_ROWS[0] as i32, 1, WALK), WALK, "only the idle request changes");
     }
 
     #[test]
