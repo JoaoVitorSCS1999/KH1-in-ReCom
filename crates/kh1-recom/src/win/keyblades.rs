@@ -105,6 +105,12 @@ mod camp {
     /// `0x1401AAAE0()` at ctor: Riku's story (Re:CoM's index for its per-story tables).
     pub const RIKU: usize = 0x21BC;
     pub const COUNT: usize = 0x21C4;
+    /// Non-zero: the camp's pad helpers (`0x140111A70` / `AE0` / `B90` / `C30`) answer 0.
+    pub const INPUT_LOCK: usize = 0x8C;
+    /// The Sleights List's sub-state (`0x1400EBE30`): 0 open .. 4 closing, −1 idle (the ctor's).
+    pub const SLEIGHTS_LIST: usize = 0xAC;
+    /// The prompt bar of slot 0 (`C2DSeqCtrl`, `0x1400DEC60`; slot 1 at +8).
+    pub const PROMPT_BAR: usize = 0x4E0;
 }
 
 // Re:CoM functions (RVAs; first bytes checked in `sites`).
@@ -147,6 +153,14 @@ const BAR_UPDATE: u32 = 0x0011_2CB0;
 const TEXT_COPY: u32 = 0x0025_8DE0;
 const EVER_OBTAINED: u32 = 0x0015_B3F0;
 const CARD_NAME: u32 = 0x0016_4CA0;
+/// Re:CoM's Sleights List update (`0x1400EBE30`, the workspace's `knowledge/ReCoM/recom-riku-sleights.md` § 3).
+const SLEIGHTS_LIST: u32 = 0x000E_BE30;
+/// The camp's prompt bars (`0x1400DEC60`: (camp, mode 1 show / 4 close, slot, variant)).
+const PROMPT_BAR: u32 = 0x000D_EC60;
+/// The camp's fresh press (`0x140111AE0`: (camp, pad bits, 0), 0 while `camp+0x8C` is set).
+const CAMP_PRESS: u32 = 0x0011_1AE0;
+/// Square, as the deck page's state 0x30 reads it (`0x1400DBCE6`).
+const SQUARE: u32 = 0x80;
 
 // Re:CoM data (Steam addresses).
 /// The message tables (`CCtdList` owner) passed to `0x140240160`.
@@ -211,6 +225,8 @@ type BarUpdateFn = unsafe extern "win64" fn(*mut u8, f32, f32);
 type TextFn = unsafe extern "win64" fn(*mut u8, *const u8);
 type EverFn = unsafe extern "win64" fn(u32) -> u32;
 type NameFn = unsafe extern "win64" fn(*const u8) -> *const u8;
+type ListFn = unsafe extern "win64" fn(*mut u8) -> u64;
+type PromptFn = unsafe extern "win64" fn(*mut u8, u32, i32, i32) -> u64;
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Default)]
@@ -1296,6 +1312,18 @@ struct Page {
     /// The Items screen (and its list as shown) while its Keyblade list is shown; cancel there
     /// brings it back.
     under: Option<(Content, list::List)>,
+    /// Riku's Customize (0.198.17): Re:CoM's Sleights List on Square; its run (`SleightsList`).
+    riku_list: bool,
+    sleights: SleightsList,
+}
+
+/// Re:CoM's Sleights List over our page: idle, running (`0x1400EBE30` each frame until it answers 1),
+/// draining (one more call, which lowers the camp's input lock, as Re:CoM's page keeps calling it).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SleightsList {
+    Idle,
+    Running,
+    Draining,
 }
 
 /// An item's name: KH1's word as the command menu's Items list shows it (`kh1-command-menu.json`),
@@ -1393,11 +1421,12 @@ impl Page {
                 let levels = super::command_menu::riku_spell_levels();
                 let slots = super::mp::riku_shortcuts().unwrap_or([0; 3]);
                 // His six and (0.152.0) Dark Riku's, each once (a slot starts what the one in play takes).
-                let mut sleights: Vec<u16> = crate::riku::SLEIGHTS.iter().chain(crate::riku::DARK_SLEIGHTS.iter()).map(|s| s.id).collect();
-                sleights.dedup();
+                // 0.198.15: only those Re:CoM has taught (`riku_learned_sleights`).
+                let mut sleights: Vec<u16> = super::command_menu::riku_learned_sleights(false);
+                sleights.extend(super::command_menu::riku_learned_sleights(true));
                 sleights.sort_unstable();
                 sleights.dedup();
-                // 0.150.0: the King's Party sleights too (taught in his story).
+                // 0.150.0: the King's Party sleights too (0.198.16: once Re:CoM has taught them, B11).
                 sleights.extend(super::party::learned_ids().into_iter().filter(|&id| crate::party::index(id).is_some_and(|i| crate::party::ALL[i].cards.contains(&crate::party::card::KING))));
                 let picks = customize::picks(levels, &sleights);
                 (Content::Customize { levels, slots, sleights, picks, picking: None }, list::open_on(customize::SLOTS as i32, 0))
@@ -1420,7 +1449,13 @@ impl Page {
                 (content, list::open_on(2, 0))
             }
         };
-        let mut p = Page { camp: camp as usize, sub: 1, stats_panel: 0, list_panel: 0, cursor: 0, bar: 0, rows: [0; 8], stat_rows: [0; 3], list, scroll: list::Scroll::default(), content, under: None };
+        let mut p = Page { camp: camp as usize, sub: 1, stats_panel: 0, list_panel: 0, cursor: 0, bar: 0, rows: [0; 8], stat_rows: [0; 3], list, scroll: list::Scroll::default(), content, under: None, riku_list: false, sleights: SleightsList::Idle };
+        // 0.198.17: Riku's Customize shows Re:CoM's "Sleights" prompt bar (slot 0, his variant 9, as
+        // the deck page's state 0x22 makes it) and opens Re:CoM's Sleights List on Square.
+        if matches!(row, sub::Row::Customize) && story(camp) == kb::Story::Riku {
+            p.riku_list = true;
+            func::<PromptFn>(PROMPT_BAR)(camp, 1, 0, 9);
+        }
         p.items_read();
         p.abilities_read();
         p.stats_panel = p.panel(0x10, 3, 0x125);
@@ -1847,9 +1882,49 @@ impl Page {
         done
     }
 
+    /// Square on Riku's Customize: Re:CoM's Sleights List opens over the page, as the deck page's
+    /// state 0x30 opens it (`0x1400DBCF7`: `camp+0xAC = 0`, `camp+0x8C = 1`).
+    unsafe fn sleights_list_open(&mut self) -> bool {
+        let camp = self.p();
+        if !self.riku_list || self.sleights != SleightsList::Idle || at::<i32>(camp, camp::SLEIGHTS_LIST) != -1 {
+            return false;
+        }
+        if func::<CampDirFn>(CAMP_PRESS)(camp, SQUARE, 0) == 0 {
+            return false;
+        }
+        // Its open plays slot 0's close without a null check (`0x1400EBE30` state 0).
+        if at::<usize>(camp, camp::PROMPT_BAR) == 0 {
+            func::<PromptFn>(PROMPT_BAR)(camp, 1, 0, 9);
+        }
+        put::<i32>(camp, camp::SLEIGHTS_LIST, 0);
+        put::<i32>(camp, camp::INPUT_LOCK, 1);
+        self.sleights = SleightsList::Running;
+        log("customize: Riku: Re:CoM's Sleights List opened (Square)");
+        true
+    }
+
+    /// One frame of Re:CoM's Sleights List; our page's input waits (the list reads the pad itself).
+    unsafe fn sleights_list_step(&mut self) {
+        let camp = self.p();
+        let done = func::<ListFn>(SLEIGHTS_LIST)(camp) as u32 == 1;
+        match self.sleights {
+            SleightsList::Running if done => self.sleights = SleightsList::Draining,
+            SleightsList::Draining => {
+                self.sleights = SleightsList::Idle;
+                log(&format!("customize: Riku: Re:CoM's Sleights List closed (input lock {})", at::<i32>(camp, camp::INPUT_LOCK)));
+                self.help();
+            }
+            _ => {}
+        }
+    }
+
     /// Draw mode 4, sound 4, sub-state 3: the page closes.
     unsafe fn close(&mut self) {
         let camp = self.p();
+        if self.riku_list && at::<usize>(camp, camp::PROMPT_BAR) != 0 {
+            // As the deck page's close (`0x1400DBD30`); the camp update's trailer deletes it.
+            func::<PromptFn>(PROMPT_BAR)(camp, 4, 0, 0);
+        }
         let set = set_of(camp);
         anim(self.stats_panel as *mut u8, set, 0x127);
         anim(self.list_panel as *mut u8, set, 0x14E);
@@ -2146,7 +2221,16 @@ impl Page {
                 }
                 0
             }
-            2 => self.input().min(0),
+            2 if self.sleights != SleightsList::Idle => {
+                self.sleights_list_step();
+                0
+            }
+            2 => {
+                if self.sleights_list_open() {
+                    return 0;
+                }
+                self.input().min(0)
+            }
             _ => {
                 if ended(self.stats_panel as *mut u8) {
                     self.delete_all();

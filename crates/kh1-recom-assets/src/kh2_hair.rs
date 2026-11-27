@@ -1324,7 +1324,13 @@ pub(crate) mod tests {
         let g = std::path::PathBuf::from(g);
         let keys = install::keys(&g).unwrap();
         let arc = install::recom_archive(&g).unwrap();
-        let skin = crate::riku_skin::build_with(&arc, &keys, 101, 201, 121, None).unwrap();
+        // 0.198.13: built as the asset step builds it (KH1 Riku's guard, BBS Terra's Block), so the Guard clip `p002_225` is there
+        let k1 = install::kh1(&g, keys.clone()).unwrap();
+        let (gm, gd) = (k1.read("xa_ex_1010.mset").unwrap(), k1.read("xa_ex_1010.mdls").unwrap());
+        let (am, ad) = (k1.read("xa_ex_1580.mset").unwrap(), k1.read("xa_ex_1580.mdls").unwrap());
+        let terra = crate::terra::read_terra(&g, &keys).ok();
+        let gsrc = crate::riku_skin::GuardSource { mset: &gm, mdls: &gd, ansem: Some((&am, &ad)), terra: terra.as_ref().map(|(k, c)| (k, c.as_slice())) };
+        let skin = crate::riku_skin::build_with(&arc, &keys, 101, 201, 121, Some(&gsrc)).unwrap();
         let get = |ext: &str| skin.files.iter().find(|f| f.0 == crate::riku_skin::path(121, ext)).unwrap().1.clone();
         let mdl0 = get("MDL");
         let mut ann = crate::ann::Ann::parse(&get("ANN")).unwrap();
@@ -1360,10 +1366,16 @@ pub(crate) mod tests {
         let tag = std::env::var("CAM_TAG").unwrap_or_else(|_| "cam".into());
         let dir = dt::out_dir().join("dark").join(format!("skirt_{tag}"));
         std::fs::create_dir_all(&dir).unwrap();
-        for (label, slot) in [("idle", 1usize), ("walk", 2), ("run", 3), ("jump", 4), ("apex", 5), ("fall", 6), ("land", 7), ("swing", 44)] {
+        // 0.198.13 (fork owner: the skirt through the legs in idle, walk, guard, a stance and the jump's start): the battle stance
+        // (31), the battle idle (79) and the Guard too; `SKIRT_AT=<slot>:<frame>,...` adds frames
+        let guard = ann.find(crate::riku_skin::RIKU_GUARD).unwrap_or(usize::MAX);
+        let at: Vec<(usize, usize)> = std::env::var("SKIRT_AT").ok().map(|v| v.split(',').filter_map(|x| { let (a, b) = x.split_once(':')?; Some((a.parse().ok()?, b.parse().ok()?)) }).collect()).unwrap_or_default();
+        for (label, slot) in [("idle", 1usize), ("walk", 2), ("run", 3), ("jump", 4), ("apex", 5), ("fall", 6), ("land", 7), ("swing", 44), ("stance", 31), ("bidle", 79), ("guard", guard)] {
             let Some(c) = ann.slots.get(slot).and_then(|s| s.clip.as_ref()) else { continue };
             let n = c.frames.max(1) as usize;
-            for f in [0, n / 4, n / 2, 3 * n / 4] {
+            let mut frames = vec![0, n / 4, n / 2, 3 * n / 4];
+            frames.extend(at.iter().filter(|x| x.0 == slot).map(|x| x.1));
+            for f in frames {
                 let w = posed_world(&sk, c, f as f64);
                 for yaw in [0.0, 90.0, 180.0, 270.0] {
                     render_cam(&p3, &w, &names, &img, &body, yaw, 0.0, true, &dir.join(format!("{label}_f{f}_y{yaw}.png")));
@@ -1484,6 +1496,11 @@ pub(crate) mod tests {
                 for yaw in [0.0, 25.0, -25.0] {
                     render_focus(p3, &w, &names, atlas, body, yaw, 0.0, (face, 0.11), &dir.join(format!("closeup_face_idle_f{f}_y{yaw}.png")));
                 }
+                // 0.198.13 (fork owner: two sideburns side by side in front of the ear): the face from each side
+                let side = w[head].point([0.0, 0.03, 0.03]);
+                for yaw in [90.0, 270.0] {
+                    render_focus(p3, &w, &names, atlas, body, yaw, 0.0, (side, 0.09), &dir.join(format!("closeup_face_side_idle_f{f}_y{yaw}.png")));
+                }
                 render_focus(p3, &w, &names, atlas, body, 180.0, 5.0, (w[neck].t, 0.16), &dir.join(format!("closeup_back_idle_f{f}.png")));
             }
         }
@@ -1492,6 +1509,10 @@ pub(crate) mod tests {
                 let w = posed_world(sk, c, f);
                 let face = w[head].point([0.0, 0.05, 0.09]);
                 render_focus(p3, &w, &names, atlas, body, 0.0, 0.0, (face, 0.11), &dir.join(format!("closeup_face_run_f{f}.png")));
+                let side = w[head].point([0.0, 0.03, 0.03]);
+                for yaw in [90.0, 270.0] {
+                    render_focus(p3, &w, &names, atlas, body, yaw, 0.0, (side, 0.09), &dir.join(format!("closeup_face_side_run_f{f}_y{yaw}.png")));
+                }
                 render_focus(p3, &w, &names, atlas, body, 180.0, 5.0, (w[neck].t, 0.16), &dir.join(format!("closeup_back_run_f{f}.png")));
             }
         }

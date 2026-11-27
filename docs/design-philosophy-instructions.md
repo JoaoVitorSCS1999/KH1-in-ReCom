@@ -27,6 +27,45 @@ On this branch that intent leads, ahead of § 1:1 target below:
 - Systems already built 1:1 stay as they are unless the fork owner asks for a change.
 - The author's rules for `testing` (`PM2CRAZY/KH1-in-ReCom`) are unchanged: this section is the fork's.
 
+### Every KH1 feature follows Re:CoM's own game rules, or adapts them (2026-11-27)
+
+Fork owner, 2026-11-27, verbatim: "coloca no mod já, regras que reforçam todas as novas features e implementações
+precisarem seguir ou adaptar as regras normais do Jogo quando implementar a jogabilidade do KH1!". Asked after the King's
+sleights (0.150.0) and Riku's own (0.147.0) were found listed from a new game, against Re:CoM's rule.
+
+This binds every new feature and every change that brings KH1 gameplay in (spells, sleights, abilities, items, menus,
+HUD, party, unlocks, shops, story events), in both stories:
+
+1. **Find the rule first.** Before building, find how Re:CoM itself governs the nearest thing: when it is learned or
+   unlocked (story script, battle, level, card, room), where it can be used (battle / field, worlds, floors), what it
+   costs, how it is shown (hidden, `?????`, greyed), what ends it. Cite it (an address, a script, a `knowledge/` note)
+   in the Stage. No rule found: say so and tag the choice `Assumption`.
+2. **Follow it, or adapt it.** The KH1 feature runs under that rule (Re:CoM's own tests and flags, read from the game,
+   never a copy). When KH1 has its own rule for the same thing, keep Re:CoM's progression and timing and fit KH1's
+   piece into it (as KH1 spells unlock through Riku's floors and bosses, Stage 399). An adaptation is written in the Stage and shown to
+   the owner.
+3. **No shortcuts past the game.** Never "counts as learned / unlocked / available" by default, never a flag forced on
+   to make a feature reachable, never a free unlock for testing left in a build. Testing aids go behind a setting that
+   is off by default and named as such (`all_unlock`).
+4. **New saves and old saves.** Check what a new game shows (0:00) and what a mid-story save shows; both must match
+   what Re:CoM would show at that point.
+5. **When unsure, ask** the owner before building (§ Known open design questions); do not guess the rule.
+
+### Riku's sleights: learned as in Re:CoM, and Re:CoM's Sleights List in his Customize (2026-11-27)
+
+Fork owner, 2026-11-27, verbatim, with three screenshots (Re:CoM's camp Sleights List at 0:02, every row `?????`;
+Re:CoM's Shortcuts page with its "Sleights" button; our KH1 Customize page for Riku): "mas eu te passei um print dele
+no modo recom, e na listagem de sleight que fica quando vc acessa o menu de shortcuts inclusive falei pra vc
+implementar esse sleight lists no modo kh1 nessa tela e vc nn fez.. mas minha duvida é no jogo normal os sleights vem
+daquele jeito ali parece... ou estou enganado?"; to the four-part proposal (research, learned-only lists, the Sleights
+List in Customize, record the ask): "ss".
+
+- Riku's command menu, shortcuts and Customize list only the sleights Re:CoM has taught (its learned test), as Re:CoM:
+  none at a new game, nine at the Ansem tutorial's end, Inverse Burst with the King's at B11 (the workspace's
+  `knowledge/ReCoM/recom-riku-sleights.md`). Built 0.198.15.
+- His KH1 Customize page gets Re:CoM's own Sleights List (the Shortcuts page's "Sleights" button), `?????` on what is
+  not learned. Built 0.198.17 (Square, as on Re:CoM's page; Re:CoM's own list code, `knowledge/ReCoM/recom-riku-sleights.md` § 3).
+
 ## Native always
 
 Re:CoM's own systems own Sora. Native means giving Re:CoM's engine more abilities so it can do

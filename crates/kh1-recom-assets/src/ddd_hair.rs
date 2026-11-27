@@ -63,7 +63,10 @@ pub const RIKU_0101_KH2: HairTarget = HairTarget { texture: "n_zz110_01", new_te
 pub const RIKU_0111_KH2: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_kh2", also: None };
 
 /// 0.197.2: the Halloween Town attire with BBS kid Riku's hair.
-pub const RIKU_0111_BBS: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_bbs", also: None };
+/// 0.198.13: its own texture name. The BBS hair's picture holds each model's temple patches ([`HairSource::painted_temple_window`]),
+/// so it differs per model, and Re:CoM looks names up over every loaded model: with one name, the Dark Form's temples read Riku's
+/// default picture in game (a yellow-orange triangle, the kid's vest; fork owner: "costeleta ficou até pior...").
+pub const RIKU_0111_BBS: HairTarget = HairTarget { texture: "n_zz110_11", new_texture: "rk_hair_bbs_ht", also: None };
 
 /// The same attire with BBS kid Riku's hair ([`crate::bbs_hair`]).
 pub const RIKU_0101_BBS: HairTarget = HairTarget { texture: "n_zz110_01", new_texture: "rk_hair_bbs", also: None };
@@ -74,9 +77,10 @@ pub const RIKU_0201_KH2: HairTarget = HairTarget { texture: "n_zz120_01", new_te
 /// The same on his Halloween Town model (`PL0211`).
 pub const RIKU_0211_KH2: HairTarget = HairTarget { texture: "n_zz120_11", new_texture: "rk_hair_kh2", also: Some("n_zz120_12") };
 /// Dark Riku's model with BBS kid Riku's hair.
-pub const RIKU_0201_BBS: HairTarget = HairTarget { texture: "n_zz120_01", new_texture: "rk_hair_bbs", also: Some("n_zz120_02") };
+/// (0.198.13: its own texture name, see [`RIKU_0111_BBS`].)
+pub const RIKU_0201_BBS: HairTarget = HairTarget { texture: "n_zz120_01", new_texture: "rk_hair_bbs_df", also: Some("n_zz120_02") };
 /// The same on his Halloween Town model.
-pub const RIKU_0211_BBS: HairTarget = HairTarget { texture: "n_zz120_11", new_texture: "rk_hair_bbs", also: Some("n_zz120_12") };
+pub const RIKU_0211_BBS: HairTarget = HairTarget { texture: "n_zz120_11", new_texture: "rk_hair_bbs_dh", also: Some("n_zz120_12") };
 
 /// 0.198.7: the window (head-relative, metres: half-width, lowest and highest height, the most forward depth) in which whole head / neck
 /// triangles of the second hair texture ([`HairTarget::also`]) go with the old hair: the base of Dark Riku's hair over his nape.
@@ -180,6 +184,13 @@ pub trait HairSource {
     fn nape_curtain_hair(&self) -> Option<f64> {
         None
     }
+    /// 0.198.13 (fork owner on the BBS hair: "tem a do cabelo mesmo e tem a da cabeça base ao lado, ficou estranho"): Re:CoM's face
+    /// atlas has a lock of hair painted on the skin of each temple, in front of the ear (hidden under Re:CoM's own hair until the
+    /// swap). The window (head-relative, metres: least and most |x|, lowest and highest y, least and most z) of the kept head
+    /// triangles that [`unpaint_temples`] moves onto clean skin of the same atlas. `None`: the face's texture as it is.
+    fn painted_temple_window(&self) -> Option<[f64; 6]> {
+        None
+    }
     /// The look's own motion pack, made from Re:CoM's (`ann`) for the original model `mdl` (none: Re:CoM's pack as it is).
     fn bake_ann(&self, _ann: &[u8], _mdl: &[u8]) -> Result<Option<Vec<u8>>> {
         Ok(None)
@@ -221,6 +232,9 @@ pub struct HairReport {
     pub proxy_dropped: usize,
     /// Kept head-bone triangles written a second time with the other facing ([`HairSource::two_sided_face`]).
     pub face_two_sided: usize,
+    /// Kept head triangles moved off the temples' painted lock ([`HairSource::painted_temple_window`], 0.198.13), and the lock's
+    /// texels filled with skin in their copy.
+    pub temple_unpainted: (usize, usize),
     /// Packets in part 3 / part 2 before and after.
     pub packets: ([usize; 2], [usize; 2]),
 }
@@ -827,6 +841,194 @@ fn part_bones(p: &MdlPart) -> Vec<String> {
     p.bones.iter().map(|b| cstr(&b.name)).collect()
 }
 
+/// A texel of Re:CoM's painted hair (grey-lavender, as [`crate::bbs_hair::is_hair_texel`]'s rule would see it, or the atlas's dark
+/// gutter): not skin. Skin is orange-brown: red over green over blue, blue well under red.
+fn not_skin(p: [u8; 4]) -> bool {
+    let (r, g, b) = (p[0] as f64, p[1] as f64, p[2] as f64);
+    !(r >= g && g >= b && r > 40.0 && (r - b) > 0.3 * r)
+}
+
+/// The atlas's texel at `uv` (wrapped, nearest).
+fn texel_at(img: &Image, uv: [f64; 2]) -> [u8; 4] {
+    let x = ((uv[0].rem_euclid(1.0) * img.w as f64) as usize).min(img.w - 1);
+    let y = ((uv[1].rem_euclid(1.0) * img.h as f64) as usize).min(img.h - 1);
+    img.px[y * img.w + x]
+}
+
+/// Samples of a UV triangle (barycentric grid, edges included) and the texels one pixel around each.
+fn uv_samples(uv: [[f64; 2]; 3], img: &Image) -> Vec<[f64; 2]> {
+    let (px, py) = (1.0 / img.w as f64, 1.0 / img.h as f64);
+    let mut out = vec![];
+    const N: usize = 10;
+    for i in 0..=N {
+        for j in 0..=(N - i) {
+            let (a, b) = (i as f64 / N as f64, j as f64 / N as f64);
+            let c = 1.0 - a - b;
+            let p = [a * uv[0][0] + b * uv[1][0] + c * uv[2][0], a * uv[0][1] + b * uv[1][1] + c * uv[2][1]];
+            for (dx, dy) in [(0.0, 0.0), (-1.0, 0.0), (1.0, 0.0), (0.0, -1.0), (0.0, 1.0)] {
+                out.push([p[0] + dx * px, p[1] + dy * py]);
+            }
+        }
+    }
+    out
+}
+
+/// A texel of the painted lock: grey-lavender (saturation under 0.3) and not dark (the ear's outline and the atlas's gutter are).
+fn painted_hair(p: [u8; 4]) -> bool {
+    let (mx, mn) = (p[0].max(p[1]).max(p[2]) as f64, p[0].min(p[1]).min(p[2]) as f64);
+    mx >= 60.0 && (mx - mn) / mx < 0.3
+}
+
+/// Texels around the painted lock (its soft edge and the shadow painted along it) filled with it (0.198.13).
+const LOCK_EDGE: usize = 8;
+/// A skin texel is a source of the lock's fill when its red channel is this part of the patch's median skin red or more (0.198.13; on
+/// `PL0201` the cheek beside the lock is 150-185 and the shadow painted at the jaw over the collar under 90; the Halloween attires'
+/// skin is darker as a whole, Checked (files: the patches' dumps)).
+const FILL_FROM: f64 = 0.65;
+
+/// 0.198.13 ([`HairSource::painted_temple_window`]): the kept head triangles in the window (both sides) that show the painted lock are
+/// given a clean copy of their own skin. Re:CoM's atlas cannot change (its name must stay, and the game looks names up globally), so
+/// each group of them that shares UV corners gets its rectangle of the atlas copied into a free place of the hair's own picture `pic`
+/// (no hair triangle's texels there), the lock's texels (and [`LOCK_EDGE`] around them) in the copy filled from the skin texels around them (repeated means of the
+/// skin neighbours: the skin's own gradient goes on through), and its triangles point there (texture `pic_tex`). Every texel outside
+/// the lock is Re:CoM's own, so the edges with the cheek and the ear do not change. Returns the triangles moved and the lock texels
+/// filled.
+fn unpaint_temples(tris: &mut [RTri], img: &Image, atlas: u32, head: usize, world: &[Aff], win: [f64; 6], pic: &mut Image, pic_tex: u32, hair_uv: &[[[f64; 2]; 3]]) -> (usize, usize) {
+    let uv_of = |t: &RTri| t.v.map(|v| v.uv().map_or([0.0; 2], |u| [u[0] as f64, u[1] as f64]));
+    let picked: Vec<usize> = (0..tris.len())
+        .filter(|&i| {
+            let t = &tris[i];
+            if t.tex != atlas || !t.v.iter().all(|v| v.bone() == head) {
+                return false;
+            }
+            let w = t.v.map(|v| world[head].point(v.pos().map(|x| x as f64)));
+            let c = [0, 1, 2].map(|k| (w[0][k] + w[1][k] + w[2][k]) / 3.0 - world[head].t[k]);
+            (win[0]..=win[1]).contains(&c[0].abs()) && (win[2]..=win[3]).contains(&c[1]) && (win[4]..=win[5]).contains(&c[2])
+                && uv_samples(uv_of(t), img).into_iter().any(|p| painted_hair(texel_at(img, p)))
+        })
+        .collect();
+    if picked.is_empty() {
+        return (0, 0);
+    }
+    // where the hair's triangles read `pic` (wrapped as the hair's UVs are), grown by a margin: not free
+    let (pw, ph) = (pic.w, pic.h);
+    let mut used = vec![false; pw * ph];
+    for t in hair_uv {
+        let (fu, fv) = (((t[0][0] + t[1][0] + t[2][0]) / 3.0).floor(), ((t[0][1] + t[1][1] + t[2][1]) / 3.0).floor());
+        raster(&mut used, pw, ph, t.map(|p| [(p[0] - fu) * pw as f64, (p[1] - fv) * ph as f64]), 1.0);
+    }
+    let used = dilate(&used, pw, ph, 8);
+    let free = Sat::new(&used, pw, ph);
+    let corners: Vec<[(i64, i64); 3]> = picked.iter().map(|&i| tris[i].v.each_ref().map(uv_key)).collect();
+    let (group, n) = islands(&corners);
+    let (mut moved, mut filled) = (0, 0);
+    for g in 0..n {
+        let members: Vec<usize> = picked.iter().zip(&group).filter(|(_, &k)| k == g).map(|(&i, _)| i).collect();
+        // the group's rectangle in the atlas's pixels, with a margin for the filtering
+        let pad = 4i64;
+        let (mut x0, mut y0, mut x1, mut y1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+        for &i in &members {
+            for p in uv_of(&tris[i]) {
+                let (x, y) = ((p[0] * img.w as f64).floor() as i64, (p[1] * img.h as f64).floor() as i64);
+                (x0, y0, x1, y1) = (x0.min(x - pad), y0.min(y - pad), x1.max(x + pad + 1), y1.max(y + pad + 1));
+            }
+        }
+        let (rw, rh) = ((x1 - x0) as usize, (y1 - y0) as usize);
+        // the first free place of `pic`, scanning rows from the bottom (the kid's body and clothes, which the hair does not use)
+        let mut at = None;
+        'scan: for y in (0..ph.saturating_sub(rh)).rev().step_by(4) {
+            for x in (0..pw.saturating_sub(rw)).step_by(4) {
+                if free.free(x, y, rw, rh) {
+                    at = Some((x, y));
+                    break 'scan;
+                }
+            }
+        }
+        let Some((ox, oy)) = at else { continue };
+        let src_px = |x: i64, y: i64| img.px[(y.rem_euclid(img.h as i64) as usize) * img.w + x.rem_euclid(img.w as i64) as usize];
+        let mut patch: Vec<[u8; 4]> = (0..rw * rh).map(|i| src_px(x0 + (i % rw) as i64, y0 + (i / rw) as i64)).collect();
+        // fill the lock: its texels take the mean of their skin (or already filled) neighbours, pass after pass
+        // (with its soft edge and the shadow painted beside it: the texels within [`LOCK_EDGE`] of it go too)
+        // (the dark texels stay, but those in the lock's own shading, within 2 of it: Re:CoM paints the collar's shadow on the face's lower triangles, model-reviewer-style check of the
+        // first try: filled, it showed as a skin sliver over the collar)
+        // (black: Dark Riku's collar is painted 0-25 on the jaw's triangles; the gutter, 32-56, and the Halloween lock's dark shading are
+        // filled, Checked (files: the patches' dumps))
+        let dark = |p: [u8; 4]| p[0].max(p[1]).max(p[2]) < 28;
+        let grey = |p: [u8; 4]| { let (mx, mn) = (p[0].max(p[1]).max(p[2]) as f64, p[0].min(p[1]).min(p[2]) as f64); mx >= 28.0 && (mx - mn) / mx < 0.3 };
+        let lock: Vec<bool> = patch.iter().map(|&p| grey(p)).collect();
+        let near = dilate(&lock, rw, rh, 2);
+        let mut todo: Vec<bool> = dilate(&lock, rw, rh, LOCK_EDGE).into_iter().zip(&patch).zip(&near).map(|((t, &p), &n)| t && (n || !dark(p))).collect();
+        // sources: lit skin only (the collar's shadow painted on the jaw, filled from, grew a dark brown blob at the lock's tip)
+        let lit = {
+            let mut r: Vec<u8> = patch.iter().zip(&todo).filter(|(&p, &t)| !t && !not_skin(p)).map(|(p, _)| p[0]).collect();
+            r.sort_unstable();
+            r.get(r.len() / 2).map_or(0.0, |&m| m as f64 * FILL_FROM)
+        };
+        let mut good: Vec<bool> = patch.iter().zip(&todo).map(|(&p, &t)| !t && !not_skin(p) && p[0] as f64 >= lit).collect();
+        filled += todo.iter().filter(|&&t| t).count();
+        for _ in 0..rw.max(rh) {
+            if !todo.iter().any(|&t| t) {
+                break;
+            }
+            let mut next = patch.clone();
+            let mut done = vec![];
+            for i in (0..rw * rh).filter(|&i| todo[i]) {
+                let (x, y) = ((i % rw) as i64, (i / rw) as i64);
+                let (mut sum, mut k) = ([0.0f64; 3], 0.0);
+                for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                    let (nx, ny) = (x + dx, y + dy);
+                    if nx < 0 || ny < 0 || nx >= rw as i64 || ny >= rh as i64 {
+                        continue;
+                    }
+                    let j = ny as usize * rw + nx as usize;
+                    if good[j] {
+                        for c in 0..3 {
+                            sum[c] += patch[j][c] as f64;
+                        }
+                        k += 1.0;
+                    }
+                }
+                if k > 0.0 {
+                    next[i] = [(sum[0] / k).round() as u8, (sum[1] / k).round() as u8, (sum[2] / k).round() as u8, 255];
+                    done.push(i);
+                }
+            }
+            for i in done {
+                todo[i] = false;
+                good[i] = true;
+            }
+            patch = next;
+        }
+        // debug (tests only): `SB_PATCH_DEBUG=<dir>` writes each patch before / after the fill as raw RGB
+        if let Some(d) = std::env::var("SB_PATCH_DEBUG").ok().filter(|_| cfg!(test)) {
+            let orig: Vec<u8> = (0..rw * rh).flat_map(|i| { let p = src_px(x0 + (i % rw) as i64, y0 + (i / rw) as i64); [p[0], p[1], p[2]] }).collect();
+            let now: Vec<u8> = patch.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
+            let _ = std::fs::write(format!("{d}/patch_{}x{}_{g}_orig.rgb", rw, rh), orig);
+            let _ = std::fs::write(format!("{d}/patch_{}x{}_{g}_now.rgb", rw, rh), now);
+        }
+        for y in 0..rh {
+            for x in 0..rw {
+                pic.px[(oy + y) * pw + ox + x] = patch[y * rw + x];
+            }
+        }
+        // the triangles read the copy: the same texel, now in `pic`
+        for &i in &members {
+            for v in tris[i].v.iter_mut() {
+                if let Some(q) = v.q2.as_mut() {
+                    let (u, w) = (f32::from_bits(q[0]) as f64, f32::from_bits(q[1]) as f64);
+                    let (x, y) = (u * img.w as f64 - x0 as f64 + ox as f64, w * img.h as f64 - y0 as f64 + oy as f64);
+                    q[0] = ((x / pw as f64) as f32).to_bits();
+                    q[1] = ((y / ph as f64) as f32).to_bits();
+                    q[3] = pic_tex;
+                }
+            }
+            tris[i].tex = pic_tex;
+        }
+        moved += members.len();
+    }
+    (moved, filled)
+}
+
 /// Riku's `.MDL` with a new hair (see the module docs): `mdl` is `PLAYER/0101/PL0101.MDL`, `rtm` its raw `.RTM` (the data part of
 /// the archive entry) and `hd` that entry's HD assets. The caller writes the result as `build_blade` does
 /// (`egs::build_plain_entry(&swap.rtm, &swap.hd, date)`).
@@ -971,7 +1173,7 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
 
     // The lists.
     // The face that stays, as the source wants it (head-bone vertices moved in world space, back to their bone's frame).
-    let adjusted3: Vec<RTri> = tris3
+    let mut adjusted3: Vec<RTri> = tris3
         .iter()
         .zip(&remove3)
         .filter(|(_, &r)| !r)
@@ -992,6 +1194,15 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
             t
         })
         .collect();
+    // 0.198.13: the temples' painted lock, on the hair's own picture (not with a packed atlas: the hair is on Re:CoM's there)
+    let mut pic = hair.atlas.clone();
+    let temple_unpainted = match src.painted_temple_window() {
+        Some(win) if atlas.is_none() => {
+            let hair_uv: Vec<[[f64; 2]; 3]> = hair.tris.iter().map(|t| t.v.clone().map(|v| v.uv)).collect();
+            unpaint_temples(&mut adjusted3, &old_img, atlas_tex, head, &world, win, &mut pic, hair_tex, &hair_uv)
+        }
+        _ => (0, 0),
+    };
     let kept3: Vec<&RTri> = adjusted3.iter().collect();
     let kept2: Vec<&RTri> = tris2.iter().zip(&remove2).filter(|(_, &r)| !r).map(|(t, _)| t).collect();
     let nb = p3.bones.len();
@@ -1214,7 +1425,7 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         }
         None => {
             // opaque, as the packed atlas was written
-            let dds = dds_argb(&Image { w: hair.atlas.w, h: hair.atlas.h, px: hair.atlas.px.iter().map(|p| [p[0], p[1], p[2], 255]).collect() });
+            let dds = dds_argb(&Image { w: pic.w, h: pic.h, px: pic.px.iter().map(|p| [p[0], p[1], p[2], 255]).collect() });
             let (entry, new_hd, _) = crate::keyblade::texture_entry(target.new_texture, &dds)?;
             let new_entry = format!("{}.tm2", target.new_texture);
             pack_rtm.entries.retain(|e| e.name_str() != new_entry);
@@ -1232,6 +1443,7 @@ pub fn with_hair(mdl: &[u8], rtm: &[u8], hd: &[HdAsset], target: &HairTarget, sr
         other_texture: split.other_texture,
         stray_in_hair_islands: split.stray,
         face_two_sided,
+        temple_unpainted,
         proxy_dropped,
         skirt,
         nape,

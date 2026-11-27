@@ -52,9 +52,15 @@ if [ -z "$crates" ]; then
 fi
 echo "test-affected: $crates"
 [ "$list" = 1 ] && exit 0
+# cargo-nextest when installed (each test in its own process, run in parallel; KH1_TEST_RUNNER=cargo forces `cargo test`).
+# It does not run doc tests; `cargo test --doc` does.
+run=(cargo test)
+if [ "${KH1_TEST_RUNNER:-}" != cargo ] && cargo nextest --version >/dev/null 2>&1; then
+  run=(cargo nextest run --no-fail-fast --status-level fail --final-status-level fail)
+fi
 if [ "$crates" = "--workspace" ]; then
-  exec cargo test --workspace "${extra[@]}"
+  exec "${run[@]}" --workspace "${extra[@]}"
 fi
 args=()
 for c in $crates; do args+=(-p "$c"); done
-exec cargo test "${args[@]}" "${extra[@]}"
+exec "${run[@]}" "${args[@]}" "${extra[@]}"
