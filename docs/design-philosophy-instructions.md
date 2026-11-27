@@ -65,6 +65,8 @@ List in Customize, record the ask): "ss".
   `knowledge/ReCoM/recom-riku-sleights.md`). Built 0.198.15.
 - His KH1 Customize page gets Re:CoM's own Sleights List (the Shortcuts page's "Sleights" button), `?????` on what is
   not learned. Built 0.198.17 (Square, as on Re:CoM's page; Re:CoM's own list code, `knowledge/ReCoM/recom-riku-sleights.md` § 3).
+- Dark Mode has its own three shortcuts (a tester's suggestion, the owner's choice, 2026-11-27): rows "Dark" + the button
+  on his Customize once he has reached Dark Mode, filled the first time from his own set with the Dark twins. Built 0.198.18.
 
 ## Native always
 

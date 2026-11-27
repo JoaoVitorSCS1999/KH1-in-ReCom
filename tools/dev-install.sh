@@ -33,9 +33,10 @@ export CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=x86_64-w64-mingw32-gcc
 # KH1_DLL_PROFILE (machine-local, e.g. "testing" defined in ~/.cargo/config.toml): a faster build for in-game tests;
 # unset = the release profile, as the GitHub release builds it.
 profile="${KH1_DLL_PROFILE:-release}"
-if cargo build --profile "$profile" --target x86_64-pc-windows-gnu -p kh1-recom >"$logs/build.log" 2>&1; then
+# `--features dev`: development-only debug aids (`crates/kh1-recom/Cargo.toml`); release builds (`tools/build-win.sh`) never have them.
+if cargo build --profile "$profile" --target x86_64-pc-windows-gnu -p kh1-recom --features dev >"$logs/build.log" 2>&1; then
   warns=$(grep -c '^warning' "$logs/build.log" || true)
-  echo "build: ok ($profile, $warns warning lines)"
+  echo "build: ok ($profile, dev features, $warns warning lines)"
 else
   echo "build: FAILED (see $logs/build.log)"; grep -E '^error' -A5 "$logs/build.log" | head -20; exit 1
 fi

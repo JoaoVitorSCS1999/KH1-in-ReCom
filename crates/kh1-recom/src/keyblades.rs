@@ -65,13 +65,15 @@ pub fn save_byte_for(card: u16) -> u8 {
 /// `crate::abilities::BLOCK_FIRST ..= BLOCK_LAST`, M8b's summon block
 /// `crate::summons::BLOCK_FIRST ..= BLOCK_LAST`, M12's ability words' extension
 /// `crate::abilities::EXT_FIRST ..= EXT_LAST`, the Enemy Skills' extension
-/// `crate::abilities::SKILL_EXT_FIRST ..= SKILL_EXT_LAST`). `range` is `save[SPARE_FIRST..=SPARE_LAST]`.
+/// `crate::abilities::SKILL_EXT_FIRST ..= SKILL_EXT_LAST`, Riku's Dark Mode shortcuts
+/// `crate::riku::dark_block`). `range` is `save[SPARE_FIRST..=SPARE_LAST]`.
 pub fn spare_range_nonzero(range: &[u8]) -> Vec<usize> {
     let ours = |o: usize| o == EQUIP_OFFSET || (crate::mp::BLOCK_FIRST..=crate::mp::BLOCK_LAST).contains(&o) || (crate::items::EXT_FIRST..=crate::items::EXT_LAST).contains(&o)
         || (crate::abilities::BLOCK_FIRST..=crate::abilities::BLOCK_LAST).contains(&o)
         || (crate::summons::BLOCK_FIRST..=crate::summons::BLOCK_LAST).contains(&o)
         || (crate::abilities::EXT_FIRST..=crate::abilities::EXT_LAST).contains(&o)
-        || (crate::abilities::SKILL_EXT_FIRST..=crate::abilities::SKILL_EXT_LAST).contains(&o);
+        || (crate::abilities::SKILL_EXT_FIRST..=crate::abilities::SKILL_EXT_LAST).contains(&o)
+        || (crate::riku::dark_block::FIRST..=crate::riku::dark_block::LAST).contains(&o);
     range
         .iter()
         .enumerate()
@@ -732,6 +734,13 @@ pub mod row_look {
     /// files)); Re:CoM has no row with it, the asset step adds one ([`ITEM`]):
     /// `docs/recom-m8-items.md` § Row looks.
     pub const GREEN: i32 = 2;
+    /// 0.198.18: sequence 0x12F (entry 4 of Re:CoM's table): the red plate (0x8000003C) and Dark
+    /// Riku's wing, sprite group 89 tinted 0x800000A0. That wing is the mark Re:CoM's own
+    /// Sleights List gives Dark Riku's sleights (their sequences 0xE3 / 0xDC, table `0x1407C1150`
+    /// flags 0x08 / 0x09, the same wing on the same red plate tinted 0x80000080); no other row of
+    /// `camp.lad` draws it (Checked (files: the owner's `FO0100.SPR` and `UK_camp.lad`; exe)).
+    /// Riku's Dark Mode shortcut set takes it (`crate::customize::slot_look`).
+    pub const DARK: i32 = 4;
     /// The asset step's group (`crate::camp_rows`): Re:CoM's green row 0x131 with the item symbol
     /// (sprite 166). Only in the DLL's own 8-entry copy of the list table, never in Re:CoM's.
     pub const ITEM: i32 = crate::camp_rows::ITEM_VARIANT;
@@ -974,9 +983,13 @@ mod tests {
         r[crate::abilities::SKILL_EXT_FIRST - SPARE_FIRST] = 1;
         r[crate::abilities::SKILL_EXT_LAST - SPARE_FIRST] = 1;
         assert!(spare_range_nonzero(&r).is_empty());
-        r[crate::abilities::SKILL_EXT_LAST + 1 - SPARE_FIRST] = 3;
-        assert_eq!(spare_range_nonzero(&r), vec![crate::abilities::SKILL_EXT_LAST + 1]);
-        r[crate::abilities::SKILL_EXT_LAST + 1 - SPARE_FIRST] = 0;
+        // 0.198.18: Riku's Dark Mode shortcuts right after it are ours; the byte after them is not.
+        r[crate::riku::dark_block::FIRST - SPARE_FIRST] = 0x69;
+        r[crate::riku::dark_block::LAST - SPARE_FIRST] = 1;
+        assert!(spare_range_nonzero(&r).is_empty());
+        r[crate::riku::dark_block::LAST + 1 - SPARE_FIRST] = 3;
+        assert_eq!(spare_range_nonzero(&r), vec![crate::riku::dark_block::LAST + 1]);
+        r[crate::riku::dark_block::LAST + 1 - SPARE_FIRST] = 0;
         r[0] = 1;
         r[SPARE_LAST - SPARE_FIRST] = 2;
         assert_eq!(spare_range_nonzero(&r), vec![SPARE_FIRST, SPARE_LAST]);

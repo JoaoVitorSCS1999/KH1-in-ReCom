@@ -612,6 +612,18 @@ fn run_inner(opt: &Options) -> Result<(), String> {
             Some(Err(e)) => println!("note: Riku's Keyblade not built: {e}"),
             None => println!("note: KH1's {} not read: Riku's Keyblade not built", rsk::BLADE_MODEL),
         }
+        // 0.198.21: Riku's level-up motion with his pant panels in his model's bone order (Re:CoM's `PL4042.ANN` has four children of
+        // each femur shuffled; `pants_order`). Replaces Re:CoM's file.
+        for g in kh1_recom_assets::pants_order::FIXED_PACKS {
+            match kh1_recom_assets::pants_order::fixed_pack(&arc, &keys, g) {
+                Ok(Some(bytes)) => {
+                    write(&rsk::path(g, "ANN").split('/').fold(root.clone(), |p, s| p.join(s)), &bytes)?;
+                    println!("Riku's level-up motion: PL{g:04}.ANN with the pant panels on their own bones");
+                }
+                Ok(None) => println!("note: PL{g:04}.ANN already in the model's order: left as Re:CoM's"),
+                Err(e) => println!("note: PL{g:04}.ANN not fixed: {e}"),
+            }
+        }
         let mut event_packs: Vec<(u16, u16)> = vec![];
         // 0.188.0: Riku's default attire with KH2 Riku's hair (KH2 FM, the 1.5+2.5 collection). Stage 363: the DDD hair of 0.186.0 is gone.
         match install::kh2(&game, keys.clone()).map_err(|e| e.to_string()).and_then(|i| kh1_recom_assets::kh2_hair::Kh2HairSource::read(&i).map_err(|e| e.to_string())) {

@@ -66,6 +66,20 @@ jobs:
       - name: Build DLL (Windows)
         run: ./tools/build-win.sh
 
+      # 0.198.18 (fork owner, 2026-11-27): debug aids never reach a player. The release DLL is built without the
+      # cargo feature `dev` (only tools/dev-install.sh turns it on); this step stops the release if the DLL has the
+      # development build's marker anyway, or if build-win.sh ever asks for that feature.
+      - name: No development build in a release
+        run: |
+          set -euo pipefail
+          if grep -nE -- '--(all-)?features|-F ' tools/build-win.sh; then
+            echo "::error::tools/build-win.sh must build the user version (no cargo features)"; exit 1
+          fi
+          if grep -a -q 'DEV BUILD (feature dev)' "$DLL"; then
+            echo "::error::$DLL is a development build (feature dev): not released"; exit 1
+          fi
+          echo "release DLL: user version (no debug keys)"
+
       - name: Commit the DLL to main
         id: commit
         run: |

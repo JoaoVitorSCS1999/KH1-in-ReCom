@@ -312,10 +312,73 @@ pub fn fill_shortcuts(slots: [u8; 3], learned: &[u16]) -> Option<[u8; 3]> {
     Some(out)
 }
 
+/// 0.198.18: Dark Mode's own three shortcut slots (tester, relayed by the fork owner 2026-11-27: "a separate shortcut
+/// menu for Riku's dark mode"; the owner's option 3: a separate set, filled with the twins the first time). In the
+/// save's spare tail right after the mod's last block (`crate::abilities::SKILL_EXT_LAST`), which no Re:CoM code reads
+/// or writes (`crate::keyblades::SPARE_FIRST ..= SPARE_LAST`, Checked (exe), `docs/recom-keyblade-equip.md`). Each
+/// story keeps its own save, so only Riku's story uses it.
+pub mod dark_block {
+    pub const FIRST: usize = crate::abilities::SKILL_EXT_LAST + 1;
+    pub const LEN: usize = 4;
+    pub const LAST: usize = FIRST + LEN - 1;
+    /// The three slot bytes, as Riku's own (`crate::mp::off::SHORTCUTS`: 0 none, 1..=7 spell + 1, else a sleight id).
+    pub const SLOTS: usize = 0;
+    /// Bit [`SET`]: the set was filled (from his own set's twins) or set on his Customize page; the rest reserved (zero).
+    pub const FLAGS: usize = 3;
+    pub const SET: u8 = 1;
+    const _: () = assert!(LAST <= crate::keyblades::SPARE_LAST && FLAGS + 1 == LEN);
+}
+
+/// Riku's own sleights and their Dark twins (`DARK_SLEIGHTS`), Re:CoM's own rule (Checked (exe + decomp), the workspace's
+/// `recom-riku-sleights.md` § 4): in Dark Mode the duel end `0x140162DD0` gives 0x69 / 0x6A / 0x6B where Riku gets
+/// 0x66 / 0x67 / 0x68 (main player `+0x420 & 0x400000`), the stack check `0x1401669F0` forms 0x65 Inverse Burst where Riku
+/// forms 0x64 Holy Burst (stock flag `+0x98 & 0x100`), and Dark Riku's sleight init `0x1402042F0` has no case for 0x66..0x68.
+pub const TWINS: [(u16, u16); 4] = [(0x66, 0x69), (0x67, 0x6A), (0x68, 0x6B), (0x64, 0x65)];
+
+/// The King's sleights Dark Riku's own start and init take (`0x140206830`, `0x1402042F0`: 0x62, 0x63 (it plays LV3, the
+/// same use counter as 0x62); 0x64 Holy Burst refused: his is 0x65, [`TWINS`]). Checked (exe + decomp).
+pub const DARK_KING: [u16; 2] = [0x62, 0x63];
+
+/// One slot byte of Riku's set as it goes into Dark Mode's set the first time: a spell stays; one of Dark Riku's
+/// learned sleights (`dark_learned`) stays; Impulse / Maelstrom / Barrage / Holy Burst become their Dark twin ([`TWINS`],
+/// Re:CoM's rule) when Re:CoM has taught it; the King's two Dark Riku can start stay; anything else is emptied.
+pub fn dark_twin(b: u8, dark_learned: &[u16]) -> u8 {
+    let id = b as u16;
+    if (1..=7).contains(&b) || DARK_KING.contains(&id) || dark_learned.contains(&id) {
+        return b;
+    }
+    TWINS.iter().find(|t| t.0 == id).map(|t| t.1).filter(|d| dark_learned.contains(d)).map_or(0, |d| d as u8)
+}
+
+/// Dark Mode's set the first time it is needed: Riku's set, slot by slot through [`dark_twin`].
+pub fn dark_fill(riku: [u8; 3], dark_learned: &[u16]) -> [u8; 3] {
+    riku.map(|b| dark_twin(b, dark_learned))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::rows::row;
+
+    /// 0.198.18: Dark Mode's set starts as Riku's with the Dark twins: no shortcut goes dead on the change.
+    #[test]
+    fn dark_modes_set_starts_with_the_twins() {
+        let dark: Vec<u16> = DARK_SLEIGHTS.iter().map(|s| s.id).collect();
+        // Impulse, Fire (spell byte 1), Barrage → Dark Impulse, Fire, Dark Barrage.
+        assert_eq!(dark_fill([0x66, 1, 0x68], &dark), [0x69, 1, 0x6B]);
+        // Dark ones and the King's two Dark Riku can start stay; Holy Burst (0x64) becomes Inverse Burst (0x65, Re:CoM's
+        // own swap in Dark Mode); an empty slot stays empty.
+        assert_eq!(dark_fill([0x6A, 0x63, 0x64], &dark), [0x6A, 0x63, 0x65]);
+        assert_eq!(dark_fill([0; 3], &dark), [0; 3]);
+        // A twin Re:CoM hasn't taught yet: empty, not a sleight he can't use.
+        assert_eq!(dark_fill([0x67, 0x66, 0], &[0x69]), [0, 0x69, 0]);
+        // Every twin is one of Dark Riku's sleights, every source one of Riku's (or the King's Holy Burst, his friend card).
+        for (r, d) in TWINS {
+            assert!(SLEIGHTS.iter().any(|s| s.id == r) || r == 0x64);
+            assert!(DARK_SLEIGHTS.iter().any(|s| s.id == d));
+        }
+        assert_eq!(dark_block::FIRST, 0x26D0);
+    }
 
     #[test]
     fn rikus_rows_cover_kh1_movement() {

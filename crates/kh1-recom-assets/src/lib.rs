@@ -100,6 +100,7 @@ pub mod stamp;
 pub mod tails;
 pub mod grip;
 pub mod hands;
+pub mod pants_order;
 pub mod step;
 pub mod texture;
 pub mod uibin;

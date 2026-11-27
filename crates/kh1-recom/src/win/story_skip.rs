@@ -89,10 +89,36 @@ unsafe fn apply(w: Write) {
     }
 }
 
+/// Development builds only: the saved story bit (0, 0x24) 0x08 that `WORLD00/2102` sets after Riku's first battle and his
+/// player build (`0x1401F0C50`) turns into Dark Mode (`+0x41C & 0x4000000`, Re:CoM then makes Dark Riku); set whenever
+/// missing (any Riku save loaded), logged. Takes effect from the next battle's player. One story-int read a frame (dev only).
+#[cfg(feature = "dev")]
+unsafe fn dev_dark_mode() {
+    if rd::<usize>(va(base(), SAVE_PTR)) == 0 || !super::stats::riku_story() {
+        return;
+    }
+    let before = func::<VarGetFn>(VAR_GET)(0, 0x24);
+    // The D Mode card too, as `WORLD00/2102` and Re:CoM's own debug helpers (`0x1400D1A00` / `0x1400D1FC0`) give both (the
+    // workspace's `recom-riku-sleights.md` § 4): the Customize page's Dark Mode set reads the card.
+    let has_card = super::abilities::sleight_learned_fn()(0x6D) & 0xFF != 0;
+    if before & 0x08 == 0 || !has_card {
+        apply(ss::Write::Int0Or(0x24, 0x08));
+        let card = if has_card { 1 } else { func::<CardGiveFn>(CARD_GIVE)(0x6D) & 0xFF };
+        let after = func::<VarGetFn>(VAR_GET)(0, 0x24);
+        log(&format!("DEV riku_dark_mode: story bit (0, 0x24) 0x08 ({before:#x} -> {after:#x}), D Mode card 0x6D ({}): Riku has Dark Mode from the next battle", if has_card { "already learned".to_string() } else { format!("given: {card}") }));
+    }
+}
+
 /// Once per frame of Riku's at Combat = KH1 (the request-bits wrapper): while the tutorial skip is armed, in battle room 1100
 /// the lesson's won-path writes and its "done" bit (`crate::story_skip::RIKU_TUTORIAL_*`); back in 2102, the duel block cleared
 /// once more and the skip disarmed. One atomic load otherwise.
 pub unsafe fn riku_frame() {
+    // 0.198.18, development builds only (`settings::DEV_KEYS`): `riku_dark_mode = on` sets the story bit that gives Riku
+    // Dark Mode; compiled out of a released DLL.
+    #[cfg(feature = "dev")]
+    if super::settings().riku_dark_mode {
+        dev_dark_mode();
+    }
     let st = RIKU_STATE.load(Ordering::Relaxed);
     if st == 0 {
         return;
