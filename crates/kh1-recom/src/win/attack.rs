@@ -272,14 +272,16 @@ unsafe fn kh1_guard(coll: usize) -> Option<Kh1Guard> {
         return Some(Kh1Guard::Through);
     }
     let m = kg::meeting((gt, live.priority, false), (t, prio, false));
-    if !m.b_stops {
+    // 0.198.11: a priority 98-100 attack is not stopped, but the guard's clash record (kind 7) comes first in the player's
+    // record loop and its flag 0x80 makes the attack's hit 0 HP with no reaction (`Meeting::a_unharmed`, Checked (decomp)).
+    if !m.a_unharmed() {
         return Some(Kh1Guard::Through);
     }
     let guard = match m.a {
         kg::Met::Clash { kind, diff } => Some((kind, diff)),
         _ => None,
     };
-    Some(Kh1Guard::Stopped { guard, enemy_recoils: matches!(m.b, kg::Met::Clash { .. }) })
+    Some(Kh1Guard::Stopped { guard, enemy_recoils: m.b_stops && matches!(m.b, kg::Met::Clash { .. }) })
 }
 
 /// KH1's guard object is live on this player (Re:CoM's body guard switched on by `set_guard`).
@@ -2012,10 +2014,24 @@ pub unsafe extern "win64" fn damage_check(pl: usize) -> u64 {
     // Moogle point scatter in this check (`win::kh1_peel::slip_scatter`).
     super::kh1_peel::before_damage(pl);
     // M11 (the Neoshadow's grab): the held kind's case (`win::held`); every other hit as ever.
+    let (action_before, value) = (rd::<u32>(pl + p::ACTION), rd::<i16>(pl + HIT_VALUE));
     let r = match super::held::on_damage(pl, &run) {
         Some(r) => r,
         None => run(pl),
     };
+    // 0.198.11 (mechanic-reviewer: the owner's 0.198.9 log kept the guard object live 684 / 887 ms after a hit got through,
+    // while Re:CoM's damage reaction played with no guard pose): in KH1 a hit reaction replaces the Guard motion and so ends
+    // its hit track (`0x1402B8E10` → `0x14029F980`; Checked (decomp)). Here: when this check starts Re:CoM's hit reaction on
+    // the guarding player, the guard object goes off; not when a KH1 clash record is pending this frame (its flag 0x80 makes
+    // the hit harmless in KH1, `0x14029BBD0`), nor for a hit Re:CoM takes with no reaction (protection, no-flinch).
+    if GUARD_ON.load(Ordering::Relaxed) == pl
+        && action_before != HIT_REACTION
+        && rd::<u32>(pl + p::ACTION) == HIT_REACTION
+        && GUARD_CLASH.lock().map_or(true, |g| g.is_none())
+    {
+        set_guard(pl, false);
+        kh1_guard_log(pl, || format!("guard object off: a hit reaction replaced the Guard (value {value})"));
+    }
     super::kh1_peel::after_damage();
     super::dark_points::after_damage(pl, dp_before);
     if arrived {
