@@ -2620,15 +2620,18 @@ fn rikus_guard_against_the_neoshadows_windows() {
     // frames (counted from the attack's start) that have the guard live on its first hit frame.
     for (name, from, to, priority) in [("claw (202)", 40, 67, 40), ("rising slash (207)", 26, 49, 100), ("dive (205)", 0, 39, 100)] {
         let presses: Vec<i32> = (-60..from as i32).filter(|&q| (first as i32..=last as i32).contains(&(from as i32 - q))).collect();
-        let stops = kh1_core::enemy::guard::meeting((2, 30, false), (0, priority, false)).b_stops;
+        // 0.198.11: KH1's Guard holds against every one of them (kind 6 under 98, kind 7 with no harm at 100)
+        let m = kh1_core::enemy::guard::meeting((2, 30, false), (0, priority, false));
+        let stops = m.a_unharmed();
         eprintln!(
             "Neoshadow {name}: hits frames {from}..={to}; a press on attack frames {}..={} has the guard up on its first hit; KH1's Guard {}",
             presses.first().unwrap(),
             presses.last().unwrap(),
-            if stops { "stops it" } else { "does not stop it (priority 100: it hits through)" }
+            if m.b_stops { "stops it" } else if stops { "holds (kind 7, the attack goes on but does no harm)" } else { "does not stop it" }
         );
         assert_eq!(presses.len(), last - first + 1);
-        assert_eq!(stops, priority < 98);
+        assert!(stops);
+        assert_eq!(m.b_stops, priority < 98);
     }
 }
 

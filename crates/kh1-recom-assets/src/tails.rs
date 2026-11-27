@@ -42,8 +42,11 @@ fn loop_from(c: &Clip) -> Option<usize> {
 /// What [`animate`] did: clips given Dark Riku's tail motion, clips given the follow-through, clips left (tails already moving).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TailReport {
+    /// Clips given Dark Riku's own tail motion.
     pub copied: usize,
+    /// Clips given the follow-through.
     pub simulated: usize,
+    /// Clips left as they were (their tails already move).
     pub kept: usize,
 }
 

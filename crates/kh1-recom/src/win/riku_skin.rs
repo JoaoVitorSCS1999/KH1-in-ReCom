@@ -168,7 +168,7 @@ pub unsafe fn guard_rows(b: usize) {
         let names: [(u32, &'static [u8]); 2] = [(crate::riku::KH1_GUARD_ROW, crate::riku::KH1_GUARD_CLIP), (crate::riku::KH1_RECOIL_ROW, crate::riku::KH1_RECOIL_CLIP)];
         if name_rows(b, &[3, 4], b"p002_000\0", &names, "Riku") {
             GUARD.store(true, Ordering::Relaxed);
-            log("riku guard: Riku's Guard plays KH1 Riku's own guard (row 0x39, p002_225) and his KH1 guard recoil (row 0x3A, p002_226)");
+            log("riku guard: Riku's Guard plays his guard clip (row 0x39, p002_225: Terra's Block when the asset step read BBS FM, else KH1 Riku's own guard) and his guard recoil (row 0x3A, p002_226)");
         }
     }
     if CAST_FILES.load(Ordering::Relaxed) && !CAST.load(Ordering::Relaxed) {

@@ -1698,6 +1698,10 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
         if !crate::grip::OFF.with(|x| x.get()) {
             crate::grip::close(&mut ann, &rmdl, &own)?;
         }
+        // 0.198.10: the right hand relaxed in the clips played with the weapon put away (`crate::hands`)
+        if !crate::grip::OFF.with(|x| x.get()) {
+            crate::hands::relax(&mut ann, &rmdl)?;
+        }
     }
     riku_pack = riku_pack.or(Some((path(riku, "ANN"), ann.to_bytes())));
     dark_pack = dark_pack.or(Some((path(dark, "ANN"), dann_own.to_bytes())));
@@ -1770,6 +1774,10 @@ pub fn build_with(arc: &kh1_formats::egs::Archive, keys: &kh1_formats::egs::KeyT
     // 0.198.9: the skin's right hand closed on the handle with Dark Riku's own grip
     if !crate::grip::OFF.with(|x| x.get()) {
         crate::grip::close(&mut out_ann, &dmdl, &dann)?;
+    }
+    // 0.198.10: and relaxed in the field walk and run (`crate::hands`)
+    if !crate::grip::OFF.with(|x| x.get()) {
+        crate::hands::relax(&mut out_ann, &dmdl)?;
     }
     eet.extend(crate::eet::parse(&rd(dark, "EET")?)?.into_iter().filter(|r| r.name == DARK_FLIP));
     ses.extend(crate::ses::parse(&rd(dark, "SES")?)?.into_iter().filter(|e| e.name() == DARK_FLIP));
@@ -3142,7 +3150,8 @@ mod grip_probe {
         let Ok(g) = std::env::var("RECOM_GAME").map(std::path::PathBuf::from) else { return };
         let keys = install::keys(&g).unwrap();
         let arc = install::recom_archive(&g).unwrap();
-        let pack = |no: bool| { crate::grip::OFF.with(|x| x.set(no)); let b = build_with(&arc, &keys, 101, 201, 121, None).unwrap(); crate::grip::OFF.with(|x| x.set(false)); Ann::parse(&b.files.iter().find(|f| f.0 == path(121, "ANN")).unwrap().1).unwrap() };
+        // 0.198.10: the grip alone (`crate::hands::OFF` in both: the relax's own speeds are `hands::tests`')
+        let pack = |no: bool| { crate::grip::OFF.with(|x| x.set(no)); crate::hands::OFF.with(|x| x.set(true)); let b = build_with(&arc, &keys, 101, 201, 121, None).unwrap(); crate::grip::OFF.with(|x| x.set(false)); crate::hands::OFF.with(|x| x.set(false)); Ann::parse(&b.files.iter().find(|f| f.0 == path(121, "ANN")).unwrap().1).unwrap() };
         let (before, after) = (pack(true), pack(false));
         let mdl = install::read_recom(&arc, &keys, "PLAYER/0201/PL0201.MDL").unwrap();
         let sk = RecomSkeleton::parse(&mdl).unwrap();

@@ -1270,19 +1270,36 @@ pub(crate) mod tests {
             body.push(dec(weapon_name));
             let mut wl = p1.list_a.clone();
             for k in wl.iter_mut() { for v in k.verts.iter_mut() { if let Some(q) = v.q2.as_mut() { q[3] = wi; } } }
-            p3.list_a.extend(wl);
+            // `NO_WEAPON`: the hand as the field shows it (no weapon drawn)
+            if std::env::var("NO_WEAPON").is_err() { p3.list_a.extend(wl); }
             let img = hd.iter().find(|x| x.name == crate::keyblade::hd_name(atlas_name)).and_then(|x| crate::texture::decode_dds(&x.data).ok()).unwrap_or_else(|| body[1].clone());
             let sk = RecomSkeleton::parse(&mdl).unwrap();
             let names: Vec<String> = sk.bones.iter().map(|b| b.name.clone()).collect();
-            let hand = sk.find("r_hand").unwrap();
+            let hand = sk.find(&std::env::var("HAND_BONE").unwrap_or_else(|_| "r_hand".into())).unwrap();
             let mut ann1 = ann0.clone();
             let own = crate::ann::Ann::parse(&install::read_recom(&arc, &keys, &format!("PLAYER/{grp}/PL{grp}.ANN")).unwrap()).unwrap();
             let rep = crate::grip::close(&mut ann1, &mdl, &own).unwrap();
             eprintln!("{grp}: grip from {:?}, {} clips, max weight {:.2}", rep.source, rep.clips, rep.max_weight);
+            let rel = if std::env::var("NO_RELAX").is_ok() { Default::default() } else { crate::hands::relax(&mut ann1, &mdl).unwrap() };
+            eprintln!("{grp}: relaxed {:?}, rest asymmetry {:.4} m", rel.clips, rel.asymmetry);
+            // 0.198.10: the Dark Form skin's "after" is the pack the build writes (grip and relax on the skin's own clips)
+            if grp == "0201" {
+                // `NO_RELAX`: the 0.198.9 pack (grip, no relax), the reference for the relax's reviews
+                let nr = std::env::var("NO_RELAX").is_ok();
+                crate::hands::OFF.with(|x| x.set(nr));
+                let skin = crate::riku_skin::build_with(&arc, &keys, 101, 201, 121, None).unwrap();
+                crate::hands::OFF.with(|x| x.set(false));
+                ann1 = crate::ann::Ann::parse(&skin.files.iter().find(|f| f.0 == crate::riku_skin::path(121, "ANN")).unwrap().1).unwrap();
+            }
             for (which, ann) in [("before", &ann0), (tag.as_str(), &ann1)] {
                 let dir = dt::out_dir().join("hand").join(format!("hand_{grp}_{which}"));
                 std::fs::create_dir_all(&dir).unwrap();
-                for (label, slot, f) in [("idle", 1usize, 0.0), ("idle79", 79, 8.0), ("s10f2", 10, 2.0), ("s10f7", 10, 7.0), ("s81", 81, 5.0), ("item34", 34, 20.0), ("s39", 39, 8.0), ("jump16", 4, 16.0), ("stance", 31, 0.0), ("stance40", 31, 40.0), ("run", 3, 6.0), ("swing8", 44, 8.0), ("swing16", 44, 16.0)] {
+                // `HAND_POSES=label:slot:frame,...`: only these poses
+                let extra: Vec<(String, usize, f32)> = std::env::var("HAND_POSES").ok().map(|v| v.split(',').map(|p| { let q: Vec<&str> = p.split(':').collect(); (q[0].to_string(), q[1].parse().unwrap(), q[2].parse().unwrap()) }).collect()).unwrap_or_default();
+                let fixed: Vec<(String, usize, f32)> = [("idle", 1usize, 0.0), ("idle79", 79, 8.0), ("s10f2", 10, 2.0), ("s10f7", 10, 7.0), ("s81", 81, 5.0), ("item34", 34, 20.0), ("s39", 39, 8.0), ("jump16", 4, 16.0), ("stance", 31, 0.0), ("stance40", 31, 40.0), ("run", 3, 6.0), ("swing8", 44, 8.0), ("swing16", 44, 16.0)].iter().map(|(a, b, c)| (a.to_string(), *b, *c as f32)).collect();
+                for (label, slot, f) in if extra.is_empty() { fixed } else { extra } {
+                    let f = f as f64;
+                    let label = label.as_str();
                     let Some(c) = ann.slots.get(slot).and_then(|s| s.clip.as_ref()) else { continue };
                     let w = posed_world(&sk, c, f);
                     // 0.198.9: the owner's view: along the handle (wep0's x axis), from either end

@@ -376,7 +376,7 @@ fn same_vertex(a: &MeshVertex, b: &MeshVertex) -> bool {
 
 /// The triangles of a draw list: two starting vertices, then one triangle per drawing vertex. Square's packets are
 /// exactly that; anything else is refused.
-fn extract(list: &[MeshPacket]) -> Result<Vec<RTri>> {
+pub(crate) fn extract(list: &[MeshPacket]) -> Result<Vec<RTri>> {
     let mut out = Vec::new();
     let mut strip = 0usize;
     for pk in list {
